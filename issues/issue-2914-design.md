@@ -30,31 +30,41 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| 開発の工程（`ndf-workflow`） | 仕上げのプラン・ステップ・最終工程・ループの 1 回・振り返り |
-| 棚卸し（`ndf-issue-upkeep`） | 棚卸しの深さ・深さの記録・起動の判定 |
+| 開発の工程（`ndf-workflow`） | 仕上げのプラン・ステップ・最終工程・ループの 1 回・振り返り・走らなかったステップ |
+| 棚卸し（`ndf-issue-upkeep`） | 棚卸しの深さ・深さの記録・起動の判定・振り返りの範囲 |
 
-開発の工程と棚卸しは、公開された言語でやり取りする。仕上げのプランが読むのは、`upkeep.py depth due` の終了コード（0 = 起動する / 3 = 起動しない）と統一 JSON の結果だけである。仕上げのプランは深さの記録の行を直接書かない。
+### コンテキストの関係
+
+棚卸しが上流、開発の工程が下流である。棚卸しは `upkeep.py depth` の副命令を公開ホストサービスとして出し、その引数・終了コード・統一 JSON の結果・深さの記録の行の形を公表された言語とする。開発の工程はその言語に従い（順応者）、深さの記録の行を直接書かない。
+
+| 向き | 使う口 | 渡すもの | 組む側 |
+| --- | --- | --- | --- |
+| 開発の工程 → 棚卸し | `upkeep.py depth due diff --loop <名前> --lap <回数> --sprint <名前> --issues <番号の列>`（ループの外は `--loop` と `--lap` を渡さない） | 今の回の値（ループの名前と回数・スプリントの名前・課題の番号） | 仕上げのプランの `deep-due` のステップ。値は `supervise.py new close` の引数から組む |
+| 棚卸し → 開発の工程 | 同じ呼び出しの終了コード（0 = 起動する / 3 = 起動しない）と統一 JSON の結果 | 起動するか・要約（「次は N 回後」） | `upkeep.py depth due`。判定の行の `values.scope` に振り返りの範囲を組んで書くのは棚卸しだけである |
+| 棚卸し → 振り返りと棚卸しの worker | `upkeep.py depth scope --sprint <名前>` の統一 JSON の結果 | 振り返りの範囲（ループの 1 回の並び・課題の番号・範囲の始まりの時刻） | `upkeep.py depth scope`。worker は深さの記録のファイルを直接読まない |
+| 棚卸し → ループの記録 | 深さの記録の行（今どおり `lap_depths` が読む `depth`・`event`・`trigger`・`cost`・`seconds`） | そのループの 1 回で差分の棚卸しを走らせたか（`diff` の `due` か `not_due` か） | `sprint_loop_gate`。読むだけで書かない |
 
 ### 集約
 
-| 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
-| --- | --- | --- | --- | --- |
-| 仕上げのプラン | プランのテンプレート（`sprint.close_plan` と `sprint_close_steps`） | プラン | ステップ | ステップの遷移・最終工程 |
-| 深さの記録 | `upkeep_depth`（`upkeep.py depth`） | 記録の行の列 | 判定の行・実行の行 | 振り返りの範囲・起動した条件 |
-| ループの記録 | `sprint_loop_gate` | ループの記録 | ループの 1 回 | 持ち越し |
-| フェーズレポート | `RunState.write_report` | 報告 | — | 走らなかったステップの行 |
+| 集約 | コンテキスト | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
+| --- | --- | --- | --- | --- | --- |
+| 仕上げのプラン | 開発の工程 | プランのテンプレート（`sprint.close_plan` と `sprint_close_steps`） | プラン | ステップ | ステップの遷移・最終工程 |
+| 深さの記録 | 棚卸し | `upkeep_depth`（`upkeep.py depth`） | 記録の行の列 | 判定の行・実行の行 | 振り返りの範囲・起動した条件 |
+| ループの記録 | 開発の工程 | `sprint_loop_gate` | ループの記録 | ループの 1 回 | 持ち越し |
+| フェーズレポート | 開発の工程 | `RunState.write_report` | 報告 | — | 走らなかったステップの行 |
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 深さの記録 | 開発ループのどのループの 1 回の課題も、いずれ 1 回の振り返りと差分の棚卸しの範囲に入る。見送った回は次に走る回の範囲に入る | 範囲に漏れが出る。テストで落とす |
+| I1 | 深さの記録 | 開発ループのどのループの 1 回の課題も、いずれ 1 回の振り返りと差分の棚卸しの範囲に入る。見送った回（`not_due` の行）は、開発ループで次に走らせる回の範囲に入るまで消費されない。ループの外のスプリントで走らせても消費されない | 範囲に漏れが出る。テストで落とす |
 | I2 | 仕上げのプラン | リリース記録があれば、間隔によらずリリース後テストを毎回走らせる | 前提 5 に反する。テストで落とす |
-| I3 | 仕上げのプラン | 確定仕様化の Pull Request のマージ（`merge`）がプランの最後のステップで、その後に作業のステップが無い | CI の待ちが後ろの作業と重ならない。テストで落とす |
+| I3 | 仕上げのプラン | 確定仕様化の Pull Request のマージ（`merge`）の後に置くステップは、課題を閉じる `close` だけである。LLM を使うステップと CI を待つステップは `merge` の前に置く | CI の待ちが後ろの作業と重ならない。テストで落とす |
 | I4 | 深さの記録 | 開発ループの外（`--loop` が無い）では、振り返りと差分の棚卸しを毎回起動する | ループの外で振り返りが消える。テストで落とす |
-| I5 | 仕上げのプラン | 振り返りを走らせた回は最終工程を振り返り、走らせない回はリリース後テストとして課題を閉じる | 課題が閉じない、または振り返りの記録が無いまま閉じる。テストで落とす |
+| I5 | 仕上げのプラン | `close` は、同じプランで振り返り（`retro`）が通っていれば最終工程を振り返り、通っていなければリリース後テストとして課題を閉じる | 課題が閉じない、または振り返りの記録が無いまま閉じる。テストで落とす |
 | I6 | ループの記録 | 持ち越しは、最後に差分の棚卸しを走らせたループの 1 回の値を次の回へ渡す。走らせない回の古い値を写さない | 持ち越しが消えるか、古い値が記録に残る。テストで落とす |
 | I7 | フェーズレポート | 起動の判定で走らせなかった回は、報告に「いつ次に走るか」が載る | 受け入れ条件 6 に反する。テストで落とす |
+| I8 | 仕上げのプラン | 課題を閉じる `close` は `merge` の後にだけ走る。確定仕様化の Pull Request がマージされなかった回（CI の失敗・リリース承認ゲートで止まった回）は課題を開いたまま残す | 確定仕様化が本流に入らないまま課題が閉じる。テストで落とす |
 
 ### ドメインイベント
 
@@ -73,10 +83,11 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 振り返りの範囲 | 1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。前に差分の棚卸しを走らせた後に見送ったループの 1 回と、今のループの 1 回からなる。ループの外では今のスプリントだけ | 追加 |
+| 振り返りの範囲 | 1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は開発ループで次に走らせる回まで残る。棚卸しのコンテキストが組み、深さの記録に置く | 追加 |
 | 差分の棚卸し | 開発ループでは数回のループの 1 回に 1 回（既定 3 回）、ループの外では毎スプリントのまとめで行う棚卸しの深さ | 意味の変更 |
-
-この文書の「仕上げのプラン」は `supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）を指す。
+| 仕上げのプラン | `supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」） | 追加 |
+| 起動の判定 | 棚卸しの深さごとに、その回で走らせるかを決める判定（`upkeep.py depth due`。終了コード 0 = 起動する / 3 = 起動しない） | 追加 |
+| 走らなかったステップ | 起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートに 1 行で載る | 追加 |
 
 ## 外部の調査
 
@@ -215,10 +226,11 @@ python3 plugins/ndf/scripts/usage-report.py --ledger claude --by plan --since 20
 
 | 要素 | 責務 |
 | --- | --- |
-| `supervise_lib/sprint.py` の `close_plan` | 仕上げのプランの並びを組む。マージを最後へ回し、起動の判定を振り返りの前に置く |
-| `supervise_lib/sprint_close_steps.py` | 起動の判定のステップ（`deep-due`）、走らせない回の後片付け（`close-verified`）、振り返りと棚卸しのプロンプト（振り返りの範囲を読む）を持つ |
+| `supervise_lib/sprint.py` の `close_plan` | 仕上げのプランの並びを組む。マージと課題を閉じるステップを最後へ回し、起動の判定を振り返りの前に置く |
+| `supervise_lib/sprint_close_steps.py` | 起動の判定のステップ（`deep-due`。今の回の値を引数で渡す）、`merge` の後の `close`、振り返りと棚卸しのプロンプト（`upkeep.py depth scope` で振り返りの範囲を読む）を持つ |
+| `sprint-close.py`（`sprint_close_lib/final_stage.py`） | `--final-stage-from <進捗記録>` を受け、同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする |
 | `supervise_lib/release_templates.py` の `release_verify_steps` | リリース後テストの後の行き先を引数で受ける（今は `retro` に固定） |
-| `upkeep_depth.py`（`upkeep.py depth due`） | `diff` の起動の判定を持つ。回数・ループの外・手動で判定し、振り返りの範囲を判定の行に残す |
+| `upkeep_depth.py`（`upkeep.py depth due`・`depth scope`） | `diff` の起動の判定を持つ。回数・ループの外・手動で判定し、振り返りの範囲を組んで判定の行に残す。`depth scope` はスプリントの名前から、その回の範囲を返す |
 | `supervise_lib/state.py` の `write_report` | 起動の判定で飛ばしたステップと、その要約を報告に 1 行で載せる |
 | `lib/sprint_loop_gate.py` | 持ち越しと棚卸しの要約を、差分の棚卸しを走らせた回からだけ取る |
 | Skill の本文（`backlog-refinement`・`retrospective`・`development-workflow` の `pace.md`） | 差分の棚卸しと振り返りの頻度・範囲の記述を、間隔と振り返りの範囲に合わせる |
@@ -231,18 +243,18 @@ graph TD
     report["フェーズレポート<br/>state.py"]
   end
   subgraph upkeep["upkeep.py（棚卸し）"]
-    due["起動の判定<br/>upkeep_depth.py"]
+    due["起動の判定と振り返りの範囲<br/>upkeep_depth.py"]
     rec[("深さの記録<br/>.ndf/backlog/depths.jsonl")]
   end
   loop["ループの記録<br/>sprint_loop_gate.py"]
   worker["振り返りと棚卸しの worker<br/>Skill の本文"]
-  plan -->|"deep-due のステップ"| due
+  plan -->|"deep-due（今の回の値を引数で渡す）"| due
   due --> rec
   plan --> worker
-  worker -->|"振り返りの範囲を読む"| rec
+  worker -->|"depth scope で範囲を読む"| due
   plan --> report
   loop -->|"持ち越し"| plan
-  loop -->|"棚卸しの要約"| rec
+  loop -->|"走らせたかを読む"| rec
 ```
 
 用語集は設計の変更で直す文書で、実行時の関係を持たないため図に含めない。
@@ -255,28 +267,36 @@ graph TD
   ready --> rv["config-save → release-verify → config-check"]
   rv --> due{"deep-due<br/>depth due diff"}
   due -->|"0 起動する"| retro["retro 振り返り"]
-  retro --> close["close（最終工程: 振り返り）"]
-  close --> refine["refine → refine-record"]
+  retro --> refine["refine → refine-record"]
   refine --> depth["overhaul-due … review-due …"]
   depth --> mg["merge-gate → merge"]
-  due -->|"3 起動しない"| cv["close-verified（最終工程: リリース後テスト）"]
-  cv --> mg
-  mg --> fin["end"]
+  due -->|"3 起動しない"| mg
+  mg --> close["close（retro が通っていれば最終工程: 振り返り、<br/>通っていなければ最終工程: リリース後テスト）"]
+  close --> fin["end"]
 ```
 
 リリース記録が無いとき（`release-verify` を持たない並び）は、`ready` の次が `deep-due` になる。
+
+`close` は `merge` の後にだけ走る（I8）。`merge` が CI の失敗で止まった回と、`merge-gate` がリリース承認ゲートに当たってプランを終えた回は、課題を開いたまま残す。続きから流し直すか承認の後に `merge-approved` から入ると、マージの後に `close` が走る。
 
 `deep-due` の判定:
 
 | 条件 | 終了コード | 判定の行 |
 | --- | --- | --- |
 | `--loop` が無い（ループの外） | 0 | `due`（条件 `no_loop`） |
-| 前に `diff` を走らせた後の `not_due` の行の数 + 1 が `every` 以上 | 0 | `due`（条件 `count`） |
+| まだどの範囲にも入っていない `not_due` の行の数 + 1 が `every` 以上 | 0 | `due`（条件 `count`） |
 | `--manual` | 0 | `due`（条件 `manual`） |
 | どれにも当たらない | 3 | `not_due`。要約に「次は N 回後」を載せる |
 | 記録を読めない | 3 | `not_due`（理由 `unreadable`） |
 
-`due` の行の `values.scope` に振り返りの範囲を置く。範囲は、ループの名前と回数・スプリントの名前・課題の番号の列と、前に `diff` を走らせた時刻からなる。`not_due` の行にも今の回の同じ値を置き、次の `due` がそれを集める。
+`due` の行の `values.scope` に振り返りの範囲を置く。`not_due` の行には今の回の値（ループの名前と回数・スプリントの名前・課題の番号）を置く。範囲の組み方と消費の条件は次のとおりである（I1）。
+
+| 判定 | 範囲に入るもの | 消費する `not_due` の行 |
+| --- | --- | --- |
+| 開発ループの `due`（条件 `count`・`manual`） | まだどの範囲にも入っていない `not_due` の行の値と、今の回の値 | 範囲に入れた行のすべて |
+| ループの外の `due`（条件 `no_loop`） | 今のスプリントの値だけ | 無し。見送ったループの 1 回は、開発ループで次に走らせる回の範囲に入るまで残る |
+
+`not_due` の行が範囲に入ったかは、後の `due` の行の `values.scope` にそのループの名前と回数が載っているかで決める。範囲の始まりの時刻は、範囲に入る最も古い行より前にある最後の `diff` の `due` の行の時刻とし、差分の棚卸しはその時刻より後に作られた課題に見積の段階を付ける。ループの外のスプリントで走らせても、見送ったループの 1 回の始まりの時刻は後ろへずれない。
 
 ## 決定の記録
 
@@ -323,12 +343,14 @@ graph TD
 
 ### 決定 4: 振り返りを走らせない回も課題を閉じるため、その回は最終工程をリリース後テストとして閉じる
 
-課題を閉じる判定（`sprint-close.py`）は、`--final-stage リリース後テスト` をすでに受ける。回ごとの閉じ方は次のとおりである（I5）。
+課題を閉じる判定（`sprint-close.py`）は、`--final-stage リリース後テスト` をすでに受ける。課題を閉じるステップは `merge` の後の `close` 1 つにまとめ（I8）、最終工程は同じプランの進捗記録から選ぶ（I5）。`close` は `--final-stage-from {state_dir}/progress.jsonl --with-verification` を渡す。
 
-| 回 | 閉じるステップ | 渡す値 |
+| 回 | 進捗記録 | 選ぶ最終工程 |
 | --- | --- | --- |
-| 振り返りを走らせない回 | `close-verified` | `--final-stage リリース後テスト --with-verification` |
-| 振り返りを走らせる回 | `close`（今どおり） | `--final-stage 振り返り` |
+| 振り返りを走らせる回 | `retro` が通った | 振り返り |
+| 振り返りを走らせない回 | `retro` が通っていない | リリース後テスト |
+
+閉じるステップを `merge` の後へ置くのは、確定仕様化の Pull Request がマージされないまま課題が閉じるのを防ぐためである。判定の分かれ道ごとに閉じるステップを置くと、`merge` を 2 本の経路に重ねて持つ必要が出るため、1 つの `close` が進捗記録を読む形にする。差分の棚卸しは課題を閉じる前に走る。対象の課題は範囲として番号で渡すため、閉じたかどうかに依らない。
 
 見送った回の課題の振り返りの記録は、次に走る回の振り返りが閉じた課題へ書き足す。
 
@@ -354,19 +376,20 @@ graph TD
 | 受け入れ条件 3・4 | リリース後テストで、直した後の仕上げのプラン 3 本以上の中央値を表 1 と同じ集計で出す | — |
 | 受け入れ条件 5 | 起動する回の仕上げのプランが、`spec`・`release-verify`・`retro`・`refine` のステップを持ち、各ステップが結果ファイルを受ける | `retro` を起動する回の並びから外すと落ちる |
 | 受け入れ条件 6・I7 | `skip_to` で飛んだ run のステップがある実行の報告に、そのステップの id と要約が載る | 報告の行を消すと落ちる |
-| I1 | `not_due` の行が 2 つ続いた後の `due` の判定で、範囲に 3 回分のループの 1 回と課題が並ぶ | 範囲を今の回だけにすると落ちる |
+| I1 | `not_due` の行が 2 つ続いた後の `due` の判定で、範囲に 3 回分のループの 1 回と課題が並ぶ。`not_due` の行が 2 つ → ループの外の `due` → 開発ループの `due` の順でも、最後の範囲に見送った 2 回が並び、範囲の始まりの時刻がループの外の `due` より前になる | 範囲を今の回だけにすると落ちる。ループの外の `due` で `not_due` の行を消費すると落ちる |
 | I2 | リリース記録がある仕上げのプランは、起動しない回の経路でも `release-verify` を通る | `release-verify` を `deep-due` の後ろへ移すと落ちる |
-| I3 | 仕上げのプランの `merge` の次が `end` で、`merge` から辿れる作業のステップが無い | `merge` を `release-verify` の前へ戻すと落ちる |
+| I3 | 仕上げのプランの `merge` の次が `close`、`close` の次が `end` で、`merge` から辿れるステップは `close` だけである | `merge` を `release-verify` の前へ戻すと落ちる |
 | I4 | `--loop` を渡さない `depth due diff` が 0 を返す | ループの外でも回数で判定すると落ちる |
-| I5 | 起動する回の `close` は `--final-stage 振り返り`、起動しない回の `close-verified` は `--final-stage リリース後テスト` を持つ | 2 つの値を入れ替えると落ちる |
+| I5 | `--final-stage-from` に渡した進捗記録に `retro` の通った行があれば振り返り、無ければリリース後テストを最終工程にする | 2 つの値を入れ替えると落ちる |
 | I6 | 差分の棚卸しを走らせなかった回の次の回の持ち越しが、最後に走らせた回の値になる | 直前の回の値を写すと落ちる |
+| I8 | 仕上げのプランで `close` へ入る遷移は `merge`（と `merge-approved`）の次だけで、`merge-gate` がプランを終える経路と `merge` が失敗した経路では `close` を通らない | `close` を `merge-gate` の前へ置くと落ちる |
 | 間隔の判定 | `every` が 3 のとき、前に走らせた後の `not_due` が 0・1 回なら 3、2 回なら 0 を返す。`.ndf/backlog.json` の `depths.diff.every` が値を変える | 数え方を 1 つずらすと落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2914 | 実装する | — | `plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_close_steps.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`、`plugins/ndf/skills/backlog-refinement/SKILL.md`、`plugins/ndf/skills/backlog-refinement/references/depths.md`、`plugins/ndf/skills/retrospective/SKILL.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/scripts/tests/test_supervise.py`、`plugins/ndf/scripts/tests/test_supervise_pace.py`、`plugins/ndf/scripts/tests/test_sprint_loop.py`、`plugins/ndf/skills/backlog-refinement/tests/test_upkeep_depths.py` |
+| #2914 | 実装する | — | `plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_close_steps.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/sprint_close_lib/final_stage.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`、`plugins/ndf/skills/backlog-refinement/SKILL.md`、`plugins/ndf/skills/backlog-refinement/references/depths.md`、`plugins/ndf/skills/retrospective/SKILL.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/scripts/tests/test_supervise.py`、`plugins/ndf/scripts/tests/test_supervise_pace.py`、`plugins/ndf/scripts/tests/test_sprint_loop.py`、`plugins/ndf/scripts/tests/test_sprint_close_final_stage.py`、`plugins/ndf/skills/backlog-refinement/tests/test_upkeep_depths.py` |
 
 ## 未確認のまま残ること
 
@@ -377,4 +400,5 @@ graph TD
 | 帳簿とのずれ | lcore 2 回目（−27.2%）と lproc 11 回目（−21.0%）が帳簿とずれる原因（起こし直しの記録の扱いか）を確かめていない |
 | リリース後テストの最大値 | lcore 2 回目の 24.6 分の原因（G3） |
 | 開いたままの時間の伸び | 確定仕様化の Pull Request が開いている時間が、起動する回は振り返りと棚卸しの分だけ伸びる。ほかの Pull Request との衝突が増えるかは測っていない |
+| 課題が開いている時間の伸び | 課題を閉じるのが `merge` の後になり、起動する回は振り返りと棚卸しの分だけ遅れる。差分の棚卸しは対象の課題を番号で受けるため結果は変わらないと見ているが、開いた課題を数える検査が影響を受けるかは確かめていない |
 | 見直しの間隔 | ループの 1 回で数えた見直しの間隔が 3 倍（既定で 9 回）になる。持ち越しと open の増加による起動の条件は今どおり働く。棚卸しが遅れるかは、決定 2 の後の見直しの記録で確かめる |
