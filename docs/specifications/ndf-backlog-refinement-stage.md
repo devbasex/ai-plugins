@@ -101,7 +101,7 @@ conductor が打ち切った。今の形では次のように動く。
 ### スプリントの終わりのプランの `refine` ステップ
 
 `supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、振り返りと差分の棚卸しの起動の判定（`deep-due`）が 0 を返した回に、
-`retro` の後に `refine` を置く。`retro` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。課題を閉じる `close` は、確定仕様化の Pull Request の `merge` の後にだけ置く（#2914）。
+`retro` の後に `refine` を置く。`retro` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。課題を閉じる `close` は、確定仕様化の Pull Request の `merge` の後にだけ置く。
 
 | キー | 値 |
 | --- | --- |
@@ -117,7 +117,7 @@ conductor が打ち切った。今の形では次のように動く。
 ステップが続く。判定が起動しない（3）ときはその深さを飛ばし、見直しの後に `merge-gate` へ着く。大整理を見直しより先に置く
 （`supervise_lib/sprint_close_steps.py` の `refine_steps`。#2315）。
 
-`refine` へは、`retro` が通ったときだけ届く。`refine`・見直し・大整理のプロンプトは、今の回の課題を閉じない課題として渡す（課題を閉じるのは `merge` の後の `close` だけ。#2914）。`timeout` は止まった
+`refine` へは、`retro` が通ったときだけ届く。`refine`・見直し・大整理のプロンプトは、今の回の課題を閉じない課題として渡す（課題を閉じるのは `merge` の後の `close` だけ）。`timeout` は止まった
 worker の歯止めで、費用の上限は件数が持つ。プランの `上限`（実行するステップの数の歯止め）は、書き出しがプランの
 遷移から求める（`supervise_lib/limits.py`。ループを通らない最長の経路に、修正のループのそれぞれを 3 回ずつ足した長さ）。
 

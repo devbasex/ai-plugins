@@ -1,7 +1,7 @@
 # 棚卸しを 3 つの深さで回し、ニーズとシーズの調査から課題を足す
 
 課題の棚卸し（`backlog-refinement`）には 3 つの深さがある。差分の棚卸し（`diff`。ループの外では毎スプリント、開発ループでは既定で 3 回のループの 1 回に 1 回。
-`.ndf/backlog.json` の `depths.diff.every`。#2914）、差分の棚卸しの数回に 1 回の見直し（`review`）、十数回に 1 回の大整理（`overhaul`）である。見直しは、プロジェクトが宣言した材料をもとに
+`.ndf/backlog.json` の `depths.diff.every`）、差分の棚卸しの数回に 1 回の見直し（`review`）、十数回に 1 回の大整理（`overhaul`）である。見直しは、プロジェクトが宣言した材料をもとに
 ニーズとシーズを調べて起票する。大整理は、未完了の課題を原因の型で分けて根本原因を探し、課題を組み直す。
 見直しと大整理を起動するかは、まとめのプランの中でスクリプトが判定する。見直し・大整理・待ち時間の調査は、1 つのセッション
 （見直しの持ち主）だけが行う。この文書は、`upkeep.py` の副命令の契約と受け渡しのファイル、それぞれをそう決めた理由を残す。
@@ -175,7 +175,7 @@
 | `<深さ>-release` | run | `owner release --what <深さ> --pid "$PPID"` | 0 でも 10 でも後へ |
 | `<深さ>-skipped` | run | `depth record --depth <深さ> --event skipped` | 後へ |
 
-深さは `overhaul` → `review` の順で、`overhaul` の「後」は `review-due`、`review` の「後」は `merge-gate` である（#2914）。
+深さは `overhaul` → `review` の順で、`overhaul` の「後」は `review-due`、`review` の「後」は `merge-gate` である。
 
 ### 開発ループ
 

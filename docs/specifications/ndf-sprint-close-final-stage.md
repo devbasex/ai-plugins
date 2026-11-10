@@ -37,7 +37,7 @@ Pull Request の本文には GitHub がマージで課題を閉じる closing ke
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/sprint-close.py` | 引数 `--final-stage` か `--final-stage-from <まとめのプランの進捗記録>` を受け、課題ごとに閉じる条件 1〜3 を判定して閉じる。`--final-stage-from` は同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする（#2914） |
+| `plugins/ndf/scripts/sprint-close.py` | 引数 `--final-stage` か `--final-stage-from <まとめのプランの進捗記録>` を受け、課題ごとに閉じる条件 1〜3 を判定して閉じる。`--final-stage-from` は同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする |
 | `plugins/ndf/scripts/sprint_close_lib/final_stage.py` | 閉じる条件 3 の判定 `final_stage_gap(stage, body, since)` と、満たさない課題の項目 `gap_item`。進捗記録から最終工程を選ぶ `stage_from_progress` |
 | `plugins/ndf/scripts/lib/dist_record.py` | `parse_record(text, parts)` が、最後のリリース記録のコメントの識別子 `dist_comment_id` を返す |
 | `plugins/ndf/scripts/sprint_close_lib/collect.py` | `read_record` が記録の PR を 1 回読み、本文とコメントを連結した文字列と部分ごとの（先頭の行の番号, コメントの識別子）を返す |
@@ -45,7 +45,7 @@ Pull Request の本文には GitHub がマージで課題を閉じる closing ke
 | `plugins/ndf/scripts/lib/closing-issues.sh` | シェルの読み手。閉じる予定の参照も取り出す。出力の形（`<リポジトリ>\t<番号>`）は変わらない |
 | `plugins/ndf/scripts/lib/repo.py` | `merge_closes_issues(root, base)`（宛先のマージで GitHub が閉じるか）と `defer_for_base(root, base, text)`（当たるときだけ `defer_closing` に通す） |
 | `plugins/ndf/scripts/pr-steps.py`・`plugins/ndf/scripts/supervise_lib/pr.py` | 本文を送る前に `defer_for_base` を通す |
-| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `ready →（config-save → release-verify → config-check）→ deep-due →（起動する回だけ retro → refine → 深さのステップ）→ merge-gate → merge → close` の順に組む（`config-save` と `config-check` は利用者の設定ディレクトリの控えを取って比べる。#2401。`refine` の後ろに深さの記録と、起動するときだけの大整理・見直しが続く。#2315。振り返りと差分の棚卸しの起動の判定 `deep-due` が 3 を返した回は `merge-gate` へ飛ぶ。#2914） |
+| `plugins/ndf/scripts/supervise_lib/sprint.py`・`sprint_close_steps.py`・`release_templates.py` | まとめのプランを `ready →（config-save → release-verify → config-check）→ deep-due →（起動する回だけ retro → refine → 深さのステップ）→ merge-gate → merge → close` の順に組む（`config-save` と `config-check` は利用者の設定ディレクトリの控えを取って比べる。#2401。`refine` の後ろに深さの記録と、起動するときだけの大整理・見直しが続く。#2315。振り返りと差分の棚卸しの起動の判定 `deep-due` が 3 を返した回は `merge-gate` へ飛ぶ） |
 
 ```mermaid
 graph LR
