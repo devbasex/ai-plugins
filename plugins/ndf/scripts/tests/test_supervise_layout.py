@@ -68,6 +68,7 @@ MODULES = [
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",
+    "design_steps",  # 設計のプランの工程の定義（sprint_waves から分けた）
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
