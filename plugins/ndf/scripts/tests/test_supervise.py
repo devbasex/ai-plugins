@@ -956,6 +956,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 提示物: 無し
 - 理由: 無し
 - 通ったステップ: {empty}
+- 走らなかったステップ: 無し
 - 件数: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
@@ -984,6 +985,7 @@ REPORT_RICH = """## フェーズの報告
 - 提示物: /w/gate.md, /w/shown.md
 - 理由: 承認を待つ
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
+- 走らなかったステップ: 無し
 - 件数: impl: passed 3 / skipped 0; judge: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
@@ -1007,6 +1009,20 @@ def test_write_report_text_of_a_state(tmp_path, fill, expected):
     text = st.write_report(plan, result, reason)
     assert text.replace(str(st.dir), "{dir}") == expected.replace("{empty}", "")
     assert (st.dir / "report.md").read_text() == text
+
+
+def test_write_report_lists_steps_a_due_check_skipped(tmp_path):
+    """起動の判定で飛んだ run のステップは、id と結果の要約が「走らなかったステップ」の行に載る（#2914 の I7・受け入れ条件 6）。"""
+    from supervise_lib.state import RunState
+
+    st = RunState(tmp_path / "state", {})
+    said = {"tool": "backlog-refinement", "status": "stopped", "summary": "振り返りと差分の棚卸しは起動しない（次は 2 回後）"}
+    st.cur = {"id": "deep-due", "type": "run", "exit": 3, "skipped": True, "text": "x\n" + json.dumps(said, ensure_ascii=False)}
+    st.record(1, "deep-due", "merge-gate", "run", lambda code: False)
+    st.cur = {"id": "merge", "type": "run", "exit": 0, "text": "merged"}
+    st.record(2, "merge", "close", "run", lambda code: False)
+    line = next(l for l in st.write_report({}, "完了", "x").splitlines() if l.startswith("- 走らなかったステップ: "))
+    assert line == "- 走らなかったステップ: deep-due（振り返りと差分の棚卸しは起動しない（次は 2 回後））"
 
 
 @pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])

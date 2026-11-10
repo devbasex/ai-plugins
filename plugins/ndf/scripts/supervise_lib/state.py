@@ -224,6 +224,8 @@ class RunState:
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
         llm = c.get("llm") or {}
+        if c.get("skipped"):  # 起動の判定などで飛んだステップの要約（報告の「走らなかったステップ」。#2914 の決定 5）
+            c["skip_summary"] = str((step_read.last_json(text) or {}).get("summary") or summary.strip())[:200]
         self.progress_write(
             {
                 "kind": "step",
@@ -458,15 +460,12 @@ class RunState:
             if "counts" in e:
                 counts[e["id"]] = e["counts"]
         counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
-        gaps = [
-            f"{e['id']}（" + ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"]) + "）"
-            for e in self.log
-            if e.get("gaps")
-        ]
-        if self.gates:
-            gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
-        else:
-            gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
+        gap = lambda e: ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"])  # noqa: E731
+        gaps = [f"{e['id']}（{gap(e)}）" for e in self.log if e.get("gaps")]
+        skipped = "; ".join(f"{e['id']}（{e.get('skip_summary') or '要約なし'}）" for e in self.log if e.get("skipped")) or "無し"
+        gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates) or (
+            "本番の系へ届く操作" if result == "関門" else "無し"
+        )
         shown = [g["presentation"] for g in self.gates if g.get("presentation")]
         shown += [e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")]
         presented = ", ".join(shown) or "無し"
@@ -484,6 +483,7 @@ class RunState:
 - 提示物: {presented}
 - 理由: {reason}
 - 通ったステップ: {steps}
+- 走らなかったステップ: {skipped}
 - 件数: {counts_line}
 - 欠けを残して進んだステップ: {"; ".join(gaps) or "無し"}
 - LLM の使用量: 入力 {l["input"]} / cache read {l["cache_read"]} / cache write {l["cache_write"]} / 出力 {l["output"]} / ${l["cost"]:.3f}

@@ -216,7 +216,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... [--dev V --prod V] --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `loop sprint` の `--dev` を省くと `--dev`・`--prod` を渡さない。`--dev` だけを渡せば、本番の版は開発版の接尾辞を外した版 |
 | `supervise.py new sprint --pace auto --issue <選んだ課題> --design <承認済みでない課題> [--designed <approved の課題>] ... [<-- の後の引数>]` | `loop answer --approved` で答えた課題は設計のプランを作らず、設計の結果のステージが設計 PR の設計の結果を読む。`loop sprint` の `--dev` を省くと `--version` を渡さず、キューが流す直前に次に空いている開発版を決める（[ndf-release-version-at-run-time.md](ndf-release-version-at-run-time.md) ） |
-| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <ループの前の 1 回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
+| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <差分の棚卸しを最後に走らせたループの 1 回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request →（起動する回だけ）振り返り → 棚卸し → マージ → 課題を閉じる。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
 
 `pipeline` は、最初のステージの queue の最後に `--then <まとめのプラン>` をつなぎ、`supervise.py wait <D>` →
 `loop lap <名> --done <D>` を続けた 1 行である。手で行うステージか別の queue のステージが残るときは、それを終えてから
@@ -227,7 +227,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 引数 | 意味 | 無いとき |
 | --- | --- | --- |
 | `--pace auto` | まとめのステージだけを組む（上の表） | 今の形（`fast` のスプリントの終わり）。出力は変わらない |
-| `--carry N...` | 棚卸しのステップの指示へループの前の 1 回の持ち越しを `--add` で渡す | 指示は今のまま |
+| `--carry N...` | 棚卸しのステップの指示へ、差分の棚卸しを最後に走らせたループの 1 回の持ち越しを `--add` で渡す（走らせなかった回は棚卸しの要約を空にして `skipped` の印を付けるため、その値を写さない） | 指示は今のまま |
 | `--loop <名>`・`--lap <n>` | 棚卸しの深さの記録のステップ（`depth record --depth diff`）へ開発ループの名前とループの回の番号を渡す。開発ループのまとめの組み立て（`build_close`）は常に渡す | 深さの記録の行の `loop`・`lap` は空 |
 | `--record-pr N` | 課題を閉じるステップ（`sprint-close.py --record-pr`）へ本番の記録の Pull Request を渡す | 経路がすべて届けない経路なら `0`、それ以外は経路にかかわらず `{queue_record}` を残し、queue がまとめを流し始める時点に GitHub の参照からリリース記録の PR を探して埋める（#2230） |
 

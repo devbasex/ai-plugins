@@ -1,7 +1,9 @@
-"""new close のまとめのステップ（確定仕様化 → Pull Request・振り返り → 課題を閉じる → 棚卸し）。`sprint.close_plan` が組む。
+"""new close のまとめのステップ（確定仕様化 → Pull Request・起動の判定 → 振り返り → 棚卸し・マージ → 課題を閉じる）。
+`sprint.close_plan` が組む。
 
 閉じる時点の決まりの正本は `skills/progress-tracking/SKILL.md` の「スプリントを閉じる」。閉じてよいかは sprint-close.py が
-判定し、プランは並び（振り返りの後に close）と `--final-stage` の値だけを持つ（#2228 の I6）。"""
+判定し、プランは並び（確定仕様化の Pull Request のマージの後に close）と、最終工程を選ぶ進捗記録だけを渡す（#2914 の決定 4）。
+振り返りと差分の棚卸しは起動の判定（`deep-due`）が 0 を返した回にだけ走る（#2914 の決定 2・3）。"""
 
 from __future__ import annotations
 
@@ -11,8 +13,8 @@ import limits
 from supervise_lib.paths import HERE
 
 
-def _spec_pr_steps(a, refs: str) -> list[dict]:
-    """確定仕様化のコミットと、その Pull Request を出して ready にするまで。"""
+def _spec_pr_steps(a, refs: str, after: str) -> list[dict]:
+    """確定仕様化のコミットと、その Pull Request を出して ready にするまで。CI は ready から進み、後ろの作業と重なる（決定 1）。"""
     return [
         {
             "id": "spec",
@@ -35,12 +37,13 @@ def _spec_pr_steps(a, refs: str) -> list[dict]:
             "changes": "無し（文書の置き場所だけ）",
             "next": "ready",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge-gate"},
+        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": after},
     ]
 
 
 def _close_step(a, repo: str, record_pr: str, issues: str) -> dict:
-    """課題を閉じる（sprint-close.py）。プランはどのモードでも retro を通すため、最終工程は振り返りを明示して渡す。"""
+    """課題を閉じる（sprint-close.py）。`merge` の後にだけ走る（I8）。同じプランで retro が通っていれば振り返り、
+    通っていなければリリース後テストを最終工程にする（I5。sprint-close.py の `--final-stage-from`）。"""
     return {
         "id": "close",
         "type": "run",
@@ -48,8 +51,9 @@ def _close_step(a, repo: str, record_pr: str, issues: str) -> dict:
         "cwd": repo,
         "timeout": 900,
         "cmd": f"python3 {HERE / 'sprint-close.py'} --record-pr {record_pr} --issues {issues} "
-        f"--final-stage 振り返り --with-verification --label {shlex.quote(f'スプリント {a.name}の後片付け')}",
-        "next": "refine",
+        "--final-stage-from {state_dir}/progress.jsonl --with-verification "
+        f"--label {shlex.quote(f'スプリント {a.name}の後片付け')}",
+        "next": "end",
     }
 
 
@@ -62,8 +66,24 @@ def carry_text(a) -> str:
     return f"ループの前の 1 回の持ち越し {nums} を `upkeep.py` の `--add` で候補へ渡す（{' '.join(map(str, carry))}）。"
 
 
-def _retro_step(a, refs: str, stats: str) -> dict:
-    """振り返り。課題は閉じない（次の close が閉じる）。"""
+def scope_text(a, repo: str) -> str:
+    """振り返りと差分の棚卸しの指示へ足す、振り返りの範囲の読み方の 1 文。"""
+    return (
+        f"扱うループの 1 回と課題は振り返りの範囲（`{_upkeep(repo, 'depth', 'scope', '--sprint', a.name)}` の "
+        "`items` と `metrics.issues`。見送った回の課題を含む）である。"
+    )
+
+
+def keep_open_text(issues: str) -> str:
+    """棚卸しの指示へ足す、閉じない課題の 1 文（I8）。課題を閉じるのは merge の後の close だけである。"""
+    return (
+        f"今の回の課題 {issues} は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、"
+        "重複の組に入るときは閉じない課題を正本にする。"
+    )
+
+
+def _retro_step(a, refs: str, stats: str, repo: str) -> dict:
+    """振り返り。課題は閉じない（merge の後の close が閉じる）。"""
     return {
         "id": "retro",
         "type": "work",
@@ -71,10 +91,10 @@ def _retro_step(a, refs: str, stats: str) -> dict:
         "kind": "振り返り",
         "stage": "振り返り",
         "timeout": 3600,
-        "prompt": f"/ndf:retrospective スプリント {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
+        "prompt": f"/ndf:retrospective スプリント {a.name}（{refs}）。{scope_text(a, repo)}材料に検査の記録の集計（`{stats}` の出力: "
         "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
-        "見直しが要るかを書く。課題は閉じない（次の close が閉じる）。",
-        "next": "close",
+        "見直しが要るかを書く。課題は閉じない（後の close が閉じる）。",
+        "next": "refine",
     }
 
 
@@ -85,7 +105,7 @@ def _upkeep(repo: str, *args: str) -> str:
     return shlex.join(["python3", str(UPKEEP), *args, "--root", repo])
 
 
-def _refine_step(a, refs: str) -> dict:
+def _refine_step(a, refs: str, repo: str, issues: str) -> dict:
     """差分の棚卸し（#2315 の決定 2）。順位付け・マイルストーンの再編・枝刈りは見直しの回にだけ行う。"""
     return {
         "id": "refine",
@@ -94,7 +114,8 @@ def _refine_step(a, refs: str) -> dict:
         "kind": "棚卸し",
         "stage": "棚卸し",
         "timeout": 3600,
-        "prompt": f"/ndf:backlog-refinement --depth diff スプリント {a.name}（{refs}）。差分の棚卸しの工程として無人で通す。{carry_text(a)}"
+        "prompt": f"/ndf:backlog-refinement --depth diff スプリント {a.name}（{refs}）。差分の棚卸しの工程として無人で通す。"
+        f"{scope_text(a, repo)}{keep_open_text(issues)}{carry_text(a)}"
         "候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を"
         "報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス"
         "（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ"
@@ -107,7 +128,7 @@ def _refine_step(a, refs: str) -> dict:
 DEPTH_WORK_TIMEOUT = limits.seconds("supervise.depth-work")
 
 
-def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
+def _depth_steps(a, refs: str, repo: str, depth: str, after: str, issues: str) -> list[dict]:
     """大整理か見直しの起動の判定・持ち主の宣言・本体・持ち主になれなかった記録（#2315 の決定 5）。
 
     判定（`depth due`）が 3 を返したら `after` へ飛ぶ。持ち主になれない（10）ときは `skipped` の行を残して `after` へ進む。
@@ -144,7 +165,7 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
             "timeout": DEPTH_WORK_TIMEOUT,
             "prompt": f"/ndf:backlog-refinement --depth {depth} スプリント {a.name}（{refs}）の後の{name}を無人で通す。"
             f"持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `{depth}` の判定にある。"
-            "人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。"
+            f"{keep_open_text(issues)}人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。"
             "最後に `depth record` と `owner release` を打つ。",
             # 成否によらず次の release を通す。打ち切り・打ち忘れで宣言が残ると、見張りが打ち切りの秒数まで touch し続け、
             # 続く見直しの claim と他のループの調査が not_owner で締め出される
@@ -172,12 +193,30 @@ def _depth_steps(a, refs: str, repo: str, depth: str, after: str) -> list[dict]:
     ]
 
 
-def refine_steps(a, refs: str, repo: str) -> list[dict]:
-    """棚卸し: 差分の棚卸し → 深さの記録 → 大整理（起動するときだけ）→ 見直し（起動するときだけ）。
+def _loop_args(a) -> list[str]:
+    """開発ループとループの 1 回の引数（ループの外では空）。"""
+    return [x for k in ("loop", "lap") if getattr(a, k, None) is not None for x in (f"--{k}", str(getattr(a, k)))]
+
+
+def deep_due_step(a, repo: str, issues: str, after: str) -> dict:
+    """振り返りと差分の棚卸しの起動の判定（`depth due diff`）。3 を返したら `after` へ飛ぶ（#2914 の決定 2・3）。"""
+    return {
+        "id": "deep-due",
+        "type": "run",
+        "cwd": repo,
+        "timeout": 300,
+        "cmd": _upkeep(repo, "depth", "due", "diff", *_loop_args(a), "--sprint", a.name, "--issues", issues),
+        "skip_to": after,
+        "next": "retro",
+    }
+
+
+def refine_steps(a, refs: str, repo: str, issues: str, after: str) -> list[dict]:
+    """棚卸し: 差分の棚卸し → 深さの記録 → 大整理（起動するときだけ）→ 見直し（起動するときだけ）→ `after`。
 
     大整理を見直しより先に置く。両方が起動するループの 1 回では、組み直した後の課題で順位を付けるため。"""
     # 秒・ドル・言語モデルは同じプランの進行の記録の refine の行から写す（#2315 の決定 2）。開発ループとループの 1 回は引数で受ける（決定 3）
-    scope = [x for k in ("loop", "lap") if getattr(a, k, None) is not None for x in (f"--{k}", str(getattr(a, k)))]
+    scope = _loop_args(a)
     record = {
         "id": "refine-record",
         "type": "run",
@@ -187,8 +226,8 @@ def refine_steps(a, refs: str, repo: str) -> list[dict]:
         "next": "overhaul-due",
     }
     return [
-        _refine_step(a, refs),
+        _refine_step(a, refs, repo, issues),
         record,
-        *_depth_steps(a, refs, repo, "overhaul", "review-due"),
-        *_depth_steps(a, refs, repo, "review", "end"),
+        *_depth_steps(a, refs, repo, "overhaul", "review-due", issues),
+        *_depth_steps(a, refs, repo, "review", after, issues),
     ]

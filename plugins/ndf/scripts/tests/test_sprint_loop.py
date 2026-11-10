@@ -1043,6 +1043,30 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     assert "#41 #42" in (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
 
 
+def test_carry_comes_from_the_last_lap_that_ran_the_diff_refinement(env):
+    """差分の棚卸しを見送った回は棚卸しの要約を空にして skipped を付け、次の回は最後に走らせた回の持ち越しを受ける（#2914 の I6）。"""
+    (env.root / "upkeep").mkdir()
+    (env.root / "upkeep" / "candidates.json").write_text(json.dumps({"metrics": {"deferred": [31, 32]}}))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
+    sl.cmd_lap(env, "l1", False, None, [])
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    b = env.root / ".ndf" / "backlog"
+    b.mkdir(parents=True, exist_ok=True)
+    (b / "depths.jsonl").write_text(json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "diff", "event": "not_due", "trigger": []}) + "\n")
+    (env.root / "upkeep" / "candidates.json").write_text(json.dumps({"metrics": {"deferred": [99]}}))  # 前の回の古い結果
+    set_state(env, sl.current_lap(rec(env)), cost=1.0, seconds=10)
+    sl.cmd_lap(env, "l1", False, None, [])
+    second = rec(env)["laps"][1]
+    assert second["refine"] == {"report": "", "rank_changes": [], "deferred": [], "skipped": True}
+    sl_select.cmd_select(env, "l1")
+    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.3", None, [])
+    assert "--carry 31 32" in out["metrics"]["close_command"] and "--lap 3" in out["metrics"]["close_command"]
+
+
 def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
     start(env)
     sl_select.cmd_select(env, "l1")
