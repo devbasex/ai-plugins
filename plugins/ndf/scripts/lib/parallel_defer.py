@@ -112,13 +112,14 @@ def due_batch(main: Path, name: str, hours: dict) -> tuple[list[dict], dict] | N
 def route(main: Path, name: str, items: list[dict], hours: dict) -> tuple[list[dict], dict]:
     """`wait` が受けた依頼の一覧 `items` から、今オーガナイザーへ返す依頼と `metrics` を決める。宣言が無ければそのまま返す。
 
-    業務時間内は全件を返し、`gate1`・`ask` の id を `shown` へ足す。業務時間外は、`gate1`・`ask` 以外と、まだ返していない
+    業務時間内は全件を返し、`gate1`・`ask` の id を `shown` へ足して、`due_batch` と同じく控えの `ids`・`offered` を空にする
+    （全件を示したので、次の `wait` が同じ依頼をまとめて返し直さない）。業務時間外は、`gate1`・`ask` 以外と、まだ返していない
     MVV 判定を試せる設計の承認だけを返し（後者は `offered` と `ids` へ入れる）、ほかの `gate1`・`ask` は `shown` に無ければ溜める。"""
     if not hours["declared"]:
         return items, {}
     d = read_control(main, name)
     if hours["inside"]:
-        write_control(main, name, {**d, "shown": _shown_with(d, items)}, items)
+        write_control(main, name, {**d, "ids": [], "offered": [], "shown": _shown_with(d, items)}, items)
         return items, {}
     ids, offered, shown, now_ask = set(d["ids"]), set(d["offered"]), set(d["shown"]), []
     for q in items:

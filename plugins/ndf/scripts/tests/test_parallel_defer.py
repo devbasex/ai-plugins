@@ -197,3 +197,6 @@ def test_an_answer_at_night_leaves_the_kept_requests_out_of_after(plan, monkeypa
         cli.main(["answer", "p1", "b1", "--choice", "A"])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert [q["id"] for q in out["metrics"]["after"]] == ["g1", "a1"] and "deferred" not in out["metrics"]
+    assert control(main)["ids"] == [] and control(main)["shown"] == ["a1", "g1"]
+    code, out = call("--after", "1")  # 朝の answer の after で示した依頼を、次の wait がまとめて返し直さない
+    assert "batch" not in out["metrics"]
