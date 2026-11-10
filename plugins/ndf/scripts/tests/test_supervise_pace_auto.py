@@ -332,3 +332,45 @@ def test_an_auto_plan_records_the_pace_before_the_first_stage(tmp_path):
     plan["steps"] = [{"id": "a", "type": "run", "cmd": "true", "stage": "実装", "next": "end"}]
     engine.Engine(plan, tmp_path / "state").run()
     assert log.read_text().splitlines() == ["5 pace auto", "5 stage 実装"]
+
+
+def test_a_plan_records_the_mode_once_before_the_first_stage(tmp_path):
+    """課題の進行の見出し行へモードを書く（`モード: —` のまま残らない。#2921）。"""
+    from supervise_lib import engine
+
+    log, rec = tmp_path / "rec.log", tmp_path / "rec.sh"
+    rec.write_text(f'echo "$@" >> {log}\n')
+    plan = {"フェーズ": "試験", "課題": [5], "作業場所": str(tmp_path), "記録": str(rec), "モード": "standard", "進め方": "auto"}
+    plan["steps"] = [
+        {"id": "a", "type": "run", "cmd": "true", "stage": "実装", "next": "b"},
+        {"id": "b", "type": "run", "cmd": "true", "stage": "完了判定", "next": "end"},
+    ]
+    engine.Engine(plan, tmp_path / "state").run()
+    assert log.read_text().splitlines() == ["5 mode standard", "5 pace auto", "5 stage 実装", "5 stage 完了判定"]
+
+
+def test_sprint_plans_record_design_stages_and_leave_the_completion_check_to_the_check_plan(tmp_path):
+    """設計のプランは工程を課題の進行へ記録し、実装のプランは完了判定を記録しない（検査のプランが構造改善と
+    実装レビューの後に記録する。#2921）。"""
+    repo = make_repo(tmp_path, {"auto": AUTO})
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"))
+    assert p.returncode == 0, p.stdout + p.stderr
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    design, impl, check = (load(waves[n]["plans"][0]) for n in ("設計", "実装", "検査"))
+    assert design.get("記録") and impl.get("記録") and check.get("記録")
+    assert impl["記録しない工程"] == ["完了判定"] and "記録しない工程" not in check
+
+
+def test_a_plan_skips_the_stages_it_does_not_record(tmp_path):
+    from supervise_lib import engine
+
+    log, rec = tmp_path / "rec.log", tmp_path / "rec.sh"
+    rec.write_text(f'echo "$@" >> {log}\n')
+    plan = {"フェーズ": "試験", "課題": [5], "作業場所": str(tmp_path), "記録": str(rec), "記録しない工程": ["完了判定"]}
+    plan["steps"] = [
+        {"id": "a", "type": "run", "cmd": "true", "stage": "実装", "next": "b"},
+        {"id": "b", "type": "run", "cmd": "true", "stage": "完了判定", "next": "c"},
+        {"id": "c", "type": "run", "cmd": "true", "stage": "Pull Request", "next": "end"},
+    ]
+    engine.Engine(plan, tmp_path / "state").run()
+    assert log.read_text().splitlines() == ["5 stage 実装", "5 stage Pull Request"]

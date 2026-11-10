@@ -228,7 +228,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             },
         ],
     }
-    return with_revise_note(plan, a, n, doc)
+    return with_record(with_revise_note(plan, a, n, doc))
 
 
 def plan_sprint_branch(a, repo: str) -> dict:
@@ -301,7 +301,7 @@ def plan_sprint_impl(a, n: int, repo: str) -> dict:
         }
     )
     plan = plan_impl(ns)
-    plan.update({"起点": f"origin/{mb}", "リポジトリ": repo})
+    plan.update({"起点": f"origin/{mb}", "リポジトリ": repo, "記録しない工程": ["完了判定"]})  # 検査のプランが記録する（#2921）
     return plan
 
 
