@@ -700,3 +700,36 @@ def test_hook_marks_make_both_parts_known(tmp_path, state, ctx, relay_dir):  # n
     assert out["unknown_parts"] == {"restore": 0, "handoff": 0}
     assert out["restores"] == [{"context": 30_000, "calls": 1}]
     assert out["parts"]["restore"]["calls"] == 1
+
+
+def _tool_use(ts: str, name: str, tid: str, **inp) -> dict:
+    return {"type": "assistant", "timestamp": ts, "message": {"id": f"u-{tid}", "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]}}
+
+
+def _tool_result(ts: str, tid: str) -> dict:
+    return {"type": "user", "timestamp": ts, "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": "ok"}]}}
+
+
+def test_trial_row_has_no_session_id(tmp_path):
+    # F5・I10: スプリントの記録と会話の記録の組から作った 1 行に、会話の ID が現れない。区切りは起動から答えの後の最初の呼び出しまで
+    spec = importlib.util.spec_from_file_location("context_trial", SCRIPTS / "experimental" / "context-trial.py")
+    trial = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trial)
+    sid = "sess-0123456789abcdef"
+    tp = write_transcript(
+        tmp_path / f"{sid}.jsonl",
+        [
+            call("2026-11-01T00:00:00Z", "m0", read=300_000),
+            _tool_use("2026-11-01T00:01:00Z", "Bash", "b1", command="python3 supervise.py queue plan.json"),
+            call("2026-11-01T00:02:00Z", "m2", read=301_000),
+            _tool_use("2026-11-01T00:10:00Z", "AskUserQuestion", "q1", questions=[]),
+            _tool_result("2026-11-01T01:20:00Z", "q1"),
+            call("2026-11-01T01:21:00Z", "m3", read=302_000),
+            call("2026-11-01T01:40:00Z", "m4", read=303_000),
+        ],
+    )
+    recs = [hook_row(sid, tp, "2026-11-01T00:01:00Z", context=300_100, decide_from=950_000, margin=50_000)]
+    row = trial.trial_row("#7", "続ける", tp, recs, [], None, None, 4.0)
+    assert sid not in json.dumps(row, ensure_ascii=False) and sid not in trial.table_line(row)
+    assert (row["waits"], row["seconds"], row["excluded"], row["cuts"]) == ([4200], 4800 - 4200, None, 0)
+    assert row["tokens"]["read"] == 301_000 + 302_000  # m2・m3（m0 は区切りの前、m4 は後。tool_use の行は usage を持たない）
