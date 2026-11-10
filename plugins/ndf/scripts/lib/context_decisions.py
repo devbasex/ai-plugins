@@ -315,7 +315,7 @@ def _user_text(e: dict) -> str | None:
     return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
 
 
-def _json_lines(path) -> Iterator[dict] | None:
+def json_lines(path) -> Iterator[dict] | None:
     """JSONL の辞書の行を 1 行ずつ返す（全行を辞書のまま保持しない）。読めなければ None。壊れた行と辞書でない行は飛ばす。"""
     try:
         lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
@@ -337,7 +337,7 @@ def read_calls(path, seen: set | None = None) -> tuple[list[dict], int | None, b
     時刻は最初に現れた行のもの。`seen` に前のファイルで数えた id があれば、このファイルでは数えない。
     呼び出しは {ts, model, inp, out, read, w5, w1h, context}。読めなければ ([], None, False)。"""
     seen = set() if seen is None else seen
-    entries = _json_lines(path)
+    entries = json_lines(path)
     if entries is None:
         return [], None, False
     calls, here = [], {}  # here はこのファイルで数えた message.id → calls の位置
