@@ -252,6 +252,7 @@
     "approved-txt",
     "breakdown-md",
     "checkpoint-json",
+    "deferred-json",
     "plan-json",
     "plan-md",
     "present-json",
