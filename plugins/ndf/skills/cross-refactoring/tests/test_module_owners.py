@@ -1,6 +1,6 @@
 """#1142 の C4: cross-refactoring の定義が、設計の決めたモジュールに 1 つずつある。
 
-- `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（6 本）の名前を再エクスポートする
+- `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（7 本）の名前を再エクスポートする
 - `drive.py` の `call`・`parse_vars` は `lib/loop_drive.py` のもの（最終ステータスは決めない）
 - `refactor_lib/clock.py` の時刻の関数は `lib/clock.py` のもの
 - worktree の置き場の slug は `lib/repo.py` のもの
@@ -59,14 +59,13 @@ OWNERS = {
         "_CREDENTIAL_LIB",
     ),
     "results": ("read_result", "note_stopped", "STOPPED_REASONS", "record_observed_model"),
+    "trailers": ("commit_trailers", "_parse_trailer_paragraph"),
 }
 
 GITFACTS_OWN = (
     "safe_int",
     "reported_shas",
     "commits_in_range",
-    "commit_trailers",
-    "_parse_trailer_paragraph",
     "commit_diff_lines",
     "commit_files",
     "commit_test_changes",
