@@ -190,7 +190,7 @@ def cmd_status(a) -> None:
     except (OSError, ValueError) as exc:
         reply("stopped", f"並列の計画 {a.name} を読めない: {exc}", code=2)
     rows = pst.lane_rows(main, a.name, plan)
-    reply("ok", pst.summary(rows), rows)
+    reply("ok", pst.status_summary(rows), rows)
 
 
 def cmd_present(a) -> None:

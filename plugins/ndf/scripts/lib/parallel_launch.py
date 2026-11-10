@@ -35,11 +35,11 @@ def launch_seconds() -> float:
         return LAUNCH_SECONDS
 
 
-def _stamp(t: float) -> str:
+def _launch_stamp(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
-def _row(main: Path, lane: str) -> Optional[dict]:
+def _ls_row(main: Path, lane: str) -> Optional[dict]:
     """一覧のそのレーンの行（無ければ空の dict）。一覧が失敗したら None。"""
     got, res = relay_proc(main, "ls", "--json")
     if got.returncode != 0:
@@ -47,8 +47,8 @@ def _row(main: Path, lane: str) -> Optional[dict]:
     return next((it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name") == lane), {})
 
 
-def _later(row: dict, since: float) -> bool:
-    """行の最後に動いた時刻（`at`）が `since`（打った時刻）より後か。`at` はミリ秒まで、打った時刻は秒の端数を持つため 0.5 秒の幅を置く。"""
+def _moved_since(row: dict, since: float) -> bool:
+    """行の最後に動いた時刻（`at`。ミリ秒まで）が `since`（打った時刻）より後か。時計の端数の差に 0.5 秒の幅を置く。"""
     import clock
 
     at = clock.parse(row.get("at"), naive="utc") if row.get("at") else None
@@ -58,36 +58,37 @@ def _later(row: dict, since: float) -> bool:
 def came_up(row: dict, since: float, fresh: bool) -> bool:
     """立ち上がったと読むか。`fresh`（動いて観えるまま止まったレーンの再起動）は `at` が打った後へ進んだときだけ。"""
     if fresh:
-        return _later(row, since)
-    return row.get("state") in UP or (row.get("state") == "stopped" and _later(row, since))
+        return _moved_since(row, since)
+    return row.get("state") in UP or (row.get("state") == "stopped" and _moved_since(row, since))
+
+
+def _hit_once(main: Path, where: Path, argv: list[str], lane: str, fresh: bool) -> tuple[bool, float, str]:
+    """1 回打って立ち上がりを確かめる。(立ち上がったか, 打った時刻, 立ち上がらなかった理由)。"""
+    import waits
+
+    t0 = time.time()
+    code, res = relay(where, *argv)
+    why = ((res.get("items") or [{}])[0] or {}).get("result")
+    if code != 0 and why != "name-taken":  # 名前の重なりは動いている同じ名前があるため、確かめに進む
+        return False, t0, f"断られた（{why or res.get('summary') or f'exit {code}'}）"
+    limit = launch_seconds()
+    policy = limits.policy("parallel-launch.up")._replace(seconds=limit, interval=min(INTERVAL, max(limit / 10, 0.05)))
+    got = waits.wait_until(lambda: _ls_row(main, lane), lambda row: row is not None and came_up(row, t0, fresh), policy=policy)
+    return got.done, t0, "" if got.done else f"{limit:g} 秒のうちに一覧で動いて観えない"
 
 
 @durable.step(name="parallel.launch")
 def step_launch(main: str, argv: list[str], lane: str, cwd: Optional[str] = None, fresh: bool = False) -> dict:
     """`relay.py <argv>` を打って立ち上がりを確かめる。最大 2 回打つ。`cwd` は打つ場所（別のリポジトリの一時レーン）。
     返す値: `result`（up / failed）・`attempts`（打った回数。打つ前に動いていれば 0）・`at`（最後に打った時刻）・`reason`。"""
-    where = Path(cwd) if cwd else Path(main)
-    if not fresh and (row := _row(Path(main), lane)) and row.get("state") in UP:
-        return {"result": "up", "attempts": 0, "at": _stamp(time.time()), "reason": "打つ前から動いていた"}
-    limit, reason, t0 = launch_seconds(), "", time.time()
-    gap = min(INTERVAL, max(limit / 10, 0.05))
+    if not fresh and (row := _ls_row(Path(main), lane)) and row.get("state") in UP:
+        return {"result": "up", "attempts": 0, "at": _launch_stamp(time.time()), "reason": "打つ前から動いていた"}
+    t0, reason = time.time(), ""
     for attempt in (1, 2):
-        t0 = time.time()
-        code, res = relay(where, *argv)
-        why = ((res.get("items") or [{}])[0] or {}).get("result")
-        if code != 0 and why != "name-taken":  # 名前の重なりは動いている同じ名前があるため、確かめに進む
-            reason = f"断られた（{why or res.get('summary') or f'exit {code}'}）"
-            continue
-        end = t0 + limit
-        while True:
-            row = _row(Path(main), lane)
-            if row is not None and came_up(row, t0, fresh):
-                return {"result": "up", "attempts": attempt, "at": _stamp(t0), "reason": None}
-            if time.time() >= end:
-                break
-            time.sleep(gap)
-        reason = f"{limit:g} 秒のうちに一覧で動いて観えない"
-    return {"result": "failed", "attempts": 2, "at": _stamp(t0), "reason": reason}
+        up, t0, reason = _hit_once(Path(main), Path(cwd) if cwd else Path(main), list(argv), lane, fresh)
+        if up:
+            return {"result": "up", "attempts": attempt, "at": _launch_stamp(t0), "reason": None}
+    return {"result": "failed", "attempts": 2, "at": _launch_stamp(t0), "reason": reason}
 
 
 class LaunchRouting:

@@ -57,7 +57,7 @@ def _lap_fields(rec: Optional[dict]) -> dict:
     return out
 
 
-def _ledger(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
+def _ledger_view(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
     """(レーン → 台帳でそのレーンが送った最後の行の時刻, 答えていない依頼を送ったレーン)。読めなければ空。"""
     try:
         import parallel_ledger as plg
@@ -80,7 +80,7 @@ def _ledger(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
 
 def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
     """計画のレーンごとの 1 行と、一覧にある計画の一時レーン（`<計画名>-rel…`・役割 helper）の 1 行。"""
-    rows, (last, waiting) = _ls(main), _ledger(main, name)
+    rows, (last, waiting) = _ls(main), _ledger_view(main, name)
     out = []
     lanes = [(ln.name, ln) for ln in plan.lanes]
     helpers = sorted(n for n, r in rows.items() if n.startswith(f"{name}-rel") and r.get("role") == "helper")
@@ -97,6 +97,6 @@ def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
     return out
 
 
-def summary(rows: list[dict]) -> str:
+def status_summary(rows: list[dict]) -> str:
     count = lambda s: sum(1 for r in rows if r["state"] == s)  # noqa: E731
     return f"レーン {len(rows)} 本（動いている {count('running')}・承認待ち {count('awaiting_approval')}・止まった {count('stopped')}）"
