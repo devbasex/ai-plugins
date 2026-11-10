@@ -261,6 +261,17 @@ def _rework(rows: list[dict]) -> int | str:
     return sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN
 
 
+def work_scope(work: str, rows: list[dict], span: tuple[float, float] | None) -> tuple[list[dict], dict]:
+    """作業の対象の行と、セッションごとの区間（span があれば切り取り、区間の無いセッションを span で補う）。"""
+    filled = cd.fill_work(rows)
+    windows = work_windows(filled, work)
+    if span is not None:
+        windows = {sid: clip_windows(w, span) for sid, w in windows.items()}
+        sids = {r.get("session_id") for r in filled if (r.get("work") or "") == work}
+        windows |= {sid: clip_windows(ALL_TIME, span) for sid in sids if sid and sid not in windows}
+    return [r for r in filled if (r.get("work") or "") == work and _in_span(cd.parse_ts(r.get("at")), span)], windows
+
+
 def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None, span: tuple[float, float] | None = None) -> dict:
     """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。
 
@@ -269,13 +280,7 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
     （「復元完了」の直前の文脈の量）と復元の区間の呼び出し数で、セッションの識別子を持たない。"""
     ledger_rows = ledger_rows or []
     excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
-    filled = cd.fill_work(rows)
-    windows = work_windows(filled, work)
-    if span is not None:
-        windows = {sid: clip_windows(w, span) for sid, w in windows.items()}
-        sids = {r.get("session_id") for r in filled if (r.get("work") or "") == work}
-        windows |= {sid: clip_windows(ALL_TIME, span) for sid in sids if sid and sid not in windows}
-    rows = [r for r in filled if (r.get("work") or "") == work and _in_span(cd.parse_ts(r.get("at")), span)]
+    rows, windows = work_scope(work, rows, span)
     sessions = cd.sessions_of(rows)
     by_session = cd.attach_marks([r for r in rows if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
     summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows)
