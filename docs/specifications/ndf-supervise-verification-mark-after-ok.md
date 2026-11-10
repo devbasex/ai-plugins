@@ -19,7 +19,7 @@
 
 | プラン | 何をするか | 「リリース後テスト」の印 |
 | --- | --- | --- |
-| まとめのプラン（`supervise.py new close`） | スプリントの仕上げで `merge →（リリース記録があれば）release-verify → retro → close → refine` を流す。`release-verify` のステップ（stage「リリース後テスト」）で worker が `/ndf:release-verification` を通す | ステップが ok で終わった後に付く |
+| まとめのプラン（`supervise.py new close`） | スプリントの仕上げで `ready →（リリース記録があれば）release-verify → deep-due →（起動する回だけ retro → refine）→ merge → close` を流す。`release-verify` のステップ（stage「リリース後テスト」）で worker が `/ndf:release-verification` を通す | ステップが ok で終わった後に付く |
 | 本番のリリースプラン（`release-prod`） | 本番へリリースし、`verify` のステップで版の導入だけを確かめる | 付かない（`verify` の stage は「デプロイ」） |
 
 印を付けるのは実行の核の 1 か所（`RunState.record_stage`）である。そこで工程の名前から印の時点を決めるため、
