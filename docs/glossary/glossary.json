@@ -2019,8 +2019,7 @@
       "term": "消したテスト",
       "context": "ndf-workflow",
       "meaning": "着手前に走っていて、着手後の結果（走った・skip・deselect）のどれにも無く、テストの台帳に載るテストの nodeid。計測のスクリプトの diff が、着手後の木にその定義が残っていないことを照合する対象",
-      "source": "",
-      "pending_source": "issues/issue-2309-design.md"
+      "source": "docs/specifications/ndf-whole-test-duration.md"
     },
     {
       "term": "現状固定テスト",
@@ -6152,7 +6151,7 @@
       "term": "無関係な失敗",
       "context": "ndf-cross-refactoring",
       "meaning": "着手前の木（取り込んだベースブランチを含む）でも落ちるテストの失敗。改善項目の合否に数えない",
-      "pending_source": "issues/issue-2457-requirements.md"
+      "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
       "term": "停滞",
@@ -6212,31 +6211,31 @@
       "term": "文書のファイル",
       "context": "ndf-workflow",
       "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
-      "pending_source": "issues/issue-2925-design.md"
+      "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "コードのファイル",
       "context": "ndf-workflow",
       "meaning": "差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む",
-      "pending_source": "issues/issue-2925-requirements.md"
+      "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "テストが読む文書",
       "context": "ndf-workflow",
       "meaning": "文書のファイルのうち、プロジェクトの設定でテストとの対応を宣言したもの（用語集・Skill の本文など）",
-      "pending_source": "issues/issue-2925-design.md"
+      "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "振る舞いの確認",
       "context": "ndf-workflow",
       "meaning": "Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること",
-      "pending_source": "issues/issue-2925-requirements.md"
+      "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "振る舞いを決める文書",
       "context": "ndf-workflow",
       "meaning": "文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown",
-      "pending_source": "issues/issue-2925-design.md"
+      "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
       "term": "機械的なターン",
