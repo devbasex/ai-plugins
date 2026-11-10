@@ -9,6 +9,11 @@
 ```bash
 while :; do
   rf_eval verify "$ID"             # VERIFY=done|fix|judge|halt
+  if [ "$(jq -r '.flaky_request.tests // [] | length' "$STATE")" != 0 ]; then   # フレーキーの直し（決定 9）
+    rf_eval start-phase "$ID" flaky-fix
+    "$SCRIPTS/launch-cli.sh" "$IMPL" flaky-fix "$ID"   # 監視と coding-time は fix と同じ
+    rf_eval merge-flaky-fix "$ID"                      # FLAKY_FIX=kept|none|sendback|reverted。sendback なら 1 回だけ起動し直す
+  fi
   case "$VERIFY" in
     judge) "$SCRIPTS/launch-cli.sh" "$JUDGE_IMPL" judge "$ID"; rf_eval judge "$ID"; continue ;;  # 成立の判定
     halt) break ;;                                                                                # 止めて人へ渡す
