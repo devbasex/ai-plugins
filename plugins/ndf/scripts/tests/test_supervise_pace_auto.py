@@ -346,7 +346,10 @@ def test_a_plan_records_the_mode_once_before_the_first_stage(tmp_path):
         {"id": "b", "type": "run", "cmd": "true", "stage": "完了判定", "next": "end"},
     ]
     engine.Engine(plan, tmp_path / "state").run()
-    assert log.read_text().splitlines() == ["5 stage 実装 --mode standard --pace auto", "5 stage 完了判定"]  # 本文の取得と更新は工程ごとに 1 回
+    assert log.read_text().splitlines() == [
+        "5 stage 実装 --mode standard --pace auto",
+        "5 stage 完了判定",
+    ]  # 本文の取得と更新は工程ごとに 1 回
 
 
 def test_sprint_plans_record_design_stages_and_leave_the_completion_check_to_the_check_plan(tmp_path):
