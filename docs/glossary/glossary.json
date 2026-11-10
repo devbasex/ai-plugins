@@ -5124,8 +5124,9 @@
     {
       "term": "オーガナイザー",
       "context": "ndf-workflow",
-      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンを起動・監視し、レーンの承認待ちを依頼として受けて問うか自分で決め（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）、リリースの依頼をまとめてリリースを 1 本にする。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+      "meaning": "--parallel <計画名> で起動した conductor の役割。レーンの承認待ちを依頼として受けて問うか自分で決め、答えを送る（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）。レーンの起動・再起動・監視とリリースのまとめは耐久ワークフローが行う。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
+      "pending_source": "issues/issue-2936-design.md"
     },
     {
       "term": "リリースの組み方",
@@ -5145,8 +5146,9 @@
     {
       "term": "一時レーン",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のオーガナイザーが、持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のためだけに起こすラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+      "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
+      "pending_source": "issues/issue-2936-design.md"
     },
     {
       "term": "別のリポジトリのレーン",
@@ -6093,9 +6095,9 @@
     {
       "term": "今の起動",
       "context": "ndf-workflow",
-      "meaning": "一時レーンでは、耐久ワークフローが最後に指示した起動。通常のレーンでは、ラッパーが最後に起動した回",
+      "meaning": "一時レーンでは、耐久ワークフローが最後に打った起動。通常のレーンでは、ラッパーが最後に起動した回",
       "source": "",
-      "pending_source": "issues/issue-2649-requirements.md"
+      "pending_source": "issues/issue-2936-design.md"
     },
     {
       "term": "レーンの再起動",
@@ -6436,6 +6438,27 @@
       "context": "ndf-relay",
       "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
       "pending_source": "issues/issue-2930-design.md"
+    },
+    {
+      "term": "立ち上がりの確認",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒",
+      "source": "",
+      "pending_source": "issues/issue-2936-design.md"
+    },
+    {
+      "term": "起動の再試行",
+      "context": "ndf-workflow",
+      "meaning": "立ち上がりの確認で立ち上がらなかった起動かレーンの再起動を、耐久ワークフローがもう 1 回だけ打つこと。2 回目も立ち上がらなければ区分 spawn の問いを立てる",
+      "source": "",
+      "pending_source": "issues/issue-2936-design.md"
+    },
+    {
+      "term": "手順どおりの停止",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンが、リリース承認ゲートの依頼か settle を送った後に自分のラッパーを止めること。区分 helper の問いの対象にしない",
+      "source": "",
+      "pending_source": "issues/issue-2936-design.md"
     }
   ]
 }
