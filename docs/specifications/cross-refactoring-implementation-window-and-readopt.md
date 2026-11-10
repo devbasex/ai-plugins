@@ -14,7 +14,7 @@
 
 この文書は、その規則の組を**なぜこの形にしたか**（背景・決定と理由・常に成り立つ条件・既知の限界・テスト観点）を残す。
 **手順と状態ファイルの鍵の正は Skill にある。** 式と上限の表・提案の前に止まる条件は
-[`docs/02-plan-and-implement.md` の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)、
+[`docs/02-plan-and-implement.md` の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)、
 採り直しの手順と `readopt` の終了コードは
 [同じ文書の「採り直し」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#採り直し)、
 再開と止まっていた時間の測り方・`pause` の鍵は

@@ -41,7 +41,7 @@
 
 **手順・引数の表・式と係数は
 [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) と
-[`docs/02-plan-and-implement.md` の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)
+[`docs/02-plan-and-implement.md` の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)
 が正である。** ここに式をコピーしない。この文書が扱うのは、そこに書かない決定の理由と、
 リファクタリング計画と時間の内部の契約である。検証・取り消し・最終ゲートは
 [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md) が持つ。
@@ -248,7 +248,7 @@
 理由は [実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) の決定 9）。
 
 **時間の上限の表の要点**（係数は `refactor_lib/timeline.py` にだけ置く。式の正本は
-[docs/02 の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)）。
+[docs/02 の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)）。
 
 | 値 | 要点 | 係数・関数 |
 | --- | --- | --- |
