@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""glossary.py: プロジェクトの用語集を扱う 7 つの副命令。
+"""glossary.py: プロジェクトの用語集を扱う 8 つの副命令（`check`・`diff`・`lookup` は `--field <JSON Pointer>` も受ける）。
 
     python3 glossary.py gate --mode M [--root DIR]
     python3 glossary.py init [--source P] [--document P] [--root DIR]
@@ -7,6 +7,7 @@
     python3 glossary.py render [--check] [--root DIR]
     python3 glossary.py check [--diff BASE | --file P...] [--rules all|structure] [--root DIR]
     python3 glossary.py diff --base REF [--head REF] [--root DIR]
+    python3 glossary.py lookup [--term 語]... [--context ID] [--contexts] [--root DIR]   # 読むだけ（lib/glossary_lookup.py。#2909）
     python3 glossary.py merge [--root DIR]   # git merge の途中で用語集の衝突を語の単位で解く
 
 宣言は `<root>/.ndf/glossary.json`。宣言と用語集の形は
@@ -43,6 +44,7 @@ import glossary_banned  # noqa: E402
 import glossary_merge  # noqa: E402
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 import ndf_tracking  # noqa: E402
+import glossary_lookup  # noqa: E402  lookup と --field（#2909）
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -855,6 +857,7 @@ def build_parser():
     p.add_argument("--base", required=True)
     p.add_argument("--head")
     add("merge", cmd_merge)
+    glossary_lookup.add_glossary_parsers(sub, add, load_declaration, load_glossary)
     return ap
 
 

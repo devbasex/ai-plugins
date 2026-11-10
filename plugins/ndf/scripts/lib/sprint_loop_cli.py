@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import clock
+import state_get
 import step_result
 from sprint_loop_stop import STOP_BY
 
@@ -115,6 +116,7 @@ def _dispatch(a, update) -> dict | None:
             "stop": lambda: sl.cmd_stop(env, a.loop_name, a.by, a.reason),
             "status": lambda: sl.cmd_status(env, a.loop_name),
             "list": lambda: sl.cmd_list(env, a.loop_name),
+            "get": lambda: state_get.loop_get(env, a.loop_name, a.field),
         }
         if a.loop_cmd == "answer" and a.revise and not a.note:
             return step_result.result(sl.TOOL, "stopped", "--revise には --note <指摘ファイル> が要る", [], {"status": "refused"})
@@ -212,6 +214,8 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--reason", default="", help="止める理由（止める指示のファイルに書く）")
     for k in ("status", "list"):
         name(ls.add_parser(k)).add_argument("--json", action="store_true")
+    s = name(ls.add_parser("get", help="読むだけ。次の操作を next に、--field の値を metrics に返す（#2909）"))
+    s.add_argument("--field", action="append", help="JSON Pointer（ループの記録を根にする。繰り返し）")
     s = ls.add_parser("environment", help="実行環境を調べ、同時の数の候補を出す（宣言は書かない）")
     s.add_argument("--root", help="リポジトリの根（既定はカレント）")
     s.add_argument("--json", action="store_true")
