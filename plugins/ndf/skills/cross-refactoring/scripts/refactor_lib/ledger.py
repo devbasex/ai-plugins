@@ -38,6 +38,20 @@ STRAY = "stray"
 FINAL_PHASES = ("final", "done")
 # 取り消さずに残す（コミットを打ち消さない）項目の状態。持ち越し・見送りの項目が持つテストのコミットは公開する
 KEPT_UNDROPPED = (CARRIED, DEFERRED)
+# テストの追加の差し戻しのうち、検証を受けずに公開へ流せない種類（今のコードで落ちる・テスト以外のファイルを変える）
+UNVERIFIED_TEST_SENDBACKS = ("test_failed", "non_test_files")
+
+
+def unverified_tests(item: dict[str, Any]) -> list[str]:
+    """差し戻しに `test_failed` か `non_test_files` を持つ項目のテストのコミット（古い順）。無ければ空。
+
+    実装が採られずに見送りへ変わると、落ちるテストや検証を受けていない本番のファイルの変更が公開へ流れるため、
+    見送りの項目のこれらのコミットは公開できるコミットに数えず、見送りへ変える時点で打ち消す（`readopt`）。"""
+    if not any(row.get("kind") in UNVERIFIED_TEST_SENDBACKS for row in item.get("sendbacks") or []):
+        return []
+    commits = item.get("commits") or {}
+    shas = [commits.get("test"), *(commits.get("test_extra") or [])]
+    return [s for s in shas if isinstance(s, str) and s]
 
 
 @dataclass
@@ -270,10 +284,13 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
         kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
         # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
-        # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）
+        # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）。
+        # 見送りの項目の検証を受けていないテストのコミットは残さない（`unverified_tests`）
         if is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED:
+            skip = set(unverified_tests(item)) if item.get("status") == DEFERRED and not item.get("reverted_by_commit") else set()
             for sha in item_shas(item):
-                kept[full_commit(work, sha)] = ITEM
+                if sha not in skip:
+                    kept[full_commit(work, sha)] = ITEM
     return kept
 
 

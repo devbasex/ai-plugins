@@ -4,7 +4,8 @@
 #2457 の I1・I3）に入る候補を、計画と同じ順位（`budget.rank_key`）と選び方（`budget.select`。入らない候補は飛ばして
 次を見る）で採り直す。実装時間の実績は使わない。候補は `budget` で見送った候補と、コミットが無かった持ち越しの項目
 だけである（I15）。1 度採り直した後もコミットが無く持ち越しに戻った項目は採らずに `not_done` で見送る（持ち越しは
-見積りの消費に数えないため、採り直しを重ねても残りが減らず、前進しない実装の CLI を繰り返す）。見積り・範囲テスト・等級・`risk` は
+見積りの消費に数えないため、採り直しを重ねても残りが減らず、前進しない実装の CLI を繰り返す）。見送りへ変える項目のテストのコミットのうち、差し戻しに `test_failed` か
+`non_test_files` を持つものは打ち消す（落ちるテストや検証を受けていない本番の変更を最終ゲートと公開へ流さない）。見積り・範囲テスト・等級・`risk` は
 `merge-plan` が計画の時点で書いた値を使い、**LLM を呼ばない**（I14）。D5（`public_io`）は実装担当の `risk` を使う。
 
 | 終了コード | 意味 |
@@ -23,9 +24,9 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, info
+from .. import budget, clock, info, ledger, undo
 from ..items import CARRIED, DEFERRED, PLANNED, TESTED, defer, new_items
-from ..paths import load_state
+from ..paths import full_commit, git_out, load_state, work_dir
 from ..vocabulary import DEFER_BUDGET, DEFER_NOT_DONE
 
 SELECTED = "selected"
@@ -107,12 +108,39 @@ def _adopt(state: dict[str, Any], selected: list[dict[str, Any]], carried: list[
     return ids
 
 
-def _give_up_repeats(state: dict[str, Any], carried: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _revert_unverified_tests(path: Any, state: dict[str, Any], deferred: list[dict[str, Any]]) -> None:
+    """見送りへ変えた項目のうち、差し戻しに `test_failed` か `non_test_files` を持つテストのコミットを打ち消す。
+
+    実装が採られないまま見送ると、今のコードで落ちるテストが HEAD に残って最終ゲートの全体テストを落とすか、
+    検証を受けていない本番のファイルの変更が公開へ流れる。打ち消した元のコミットと revert は
+    `undo.revert_unattributed` が残すコミットとして台帳へ記録し、項目のテストのコミットからは外す
+    （`unverified_reverted` に残す）。衝突すれば HEAD を戻して終了コード 4 で止まる。"""
+    targets = {item["id"]: ledger.unverified_tests(item) for item in deferred}
+    targets = {k: v for k, v in targets.items() if v}
+    if not targets:
+        return
+    work = work_dir(state)
+    wanted = {full_commit(work, sha): sha for shas in targets.values() for sha in shas}
+    order = (git_out(work, ["rev-list", "--reverse", "HEAD"]) or "").split()
+    shas = [wanted[sha] for sha in order if sha in wanted]
+    for item in deferred:
+        if item["id"] in targets:
+            commits = item.setdefault("commits", {})
+            item["unverified_reverted"] = targets[item["id"]]
+            commits["test"] = None
+            commits.pop("test_extra", None)
+    undo.revert_unattributed(path, state, shas, "見送りの項目の検証を受けていないテスト")
+    info(
+        f"↩ 見送りへ変えた {', '.join(targets)} のテストのコミット {len(shas)} 件を打ち消しました（今のコードで落ちる・テスト以外を変える）"
+    )
+
+
+def _give_up_repeats(path: Any, state: dict[str, Any], carried: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """採り直した後も持ち越しに戻った項目を `not_done` で見送り、まだ採り直していない持ち越しの項目を返す。
 
     持ち越しは見積りの消費に数えないため、同じ項目を採り直し続けても予算の残りが減らず、実装できない項目が毎巡
     同じ条件で選ばれる。1 度採り直して前進しなかった項目は、報告の見送りに理由を残して人へ渡す。"""
-    retry = []
+    retry, given_up = [], []
     for item in carried:
         if not item.get("readopted"):
             retry.append(item)
@@ -120,18 +148,23 @@ def _give_up_repeats(state: dict[str, Any], carried: list[dict[str, Any]]) -> li
         defer(state, item, DEFER_NOT_DONE, NO_PROGRESS_REASON)
         item["status"] = DEFERRED
         item["failure_reason"] = NO_PROGRESS_REASON
+        given_up.append(item)
         info(f"⚠ {item['id']} は採り直した後もコミットが無く持ち越しに戻りました。もう採り直さず、見送りとして人へ渡します")
+    _revert_unverified_tests(path, state, given_up)
     return retry
 
 
 def _close(path: Any, state: dict[str, Any], record: dict[str, Any], available: float, shortest: Optional[float]) -> None:
     """入る候補が無い。持ち越しの項目を `not_done` で見送り、最終ゲートへ移す。"""
+    closed = []
     for item in state.get("items") or []:
         if item.get("status") == CARRIED:
             # 状態を見送りにする前に見送りへ足す（#1658 の I7）
             defer(state, item, DEFER_NOT_DONE, NOT_DONE_REASON)
             item["status"] = DEFERRED
             item["failure_reason"] = NOT_DONE_REASON
+            closed.append(item)
+    _revert_unverified_tests(path, state, closed)
     record.update({"reason": NO_FIT, "selected": []})
     state["readopt"]["events"].append(record)
     state["phase"] = "final"
@@ -170,7 +203,7 @@ def cmd_readopt(args: argparse.Namespace) -> None:
         return
     round_no = int(readopt.get("round") or 1)
     now = clock.now()
-    carried = _give_up_repeats(state, [i for i in state.get("items") or [] if i.get("status") == CARRIED])
+    carried = _give_up_repeats(path, state, [i for i in state.get("items") or [] if i.get("status") == CARRIED])
     plan_budget = state.get("budget") or {"minutes": int(state.get("budget_minutes") or 0)}
     # 持ち越しの項目は採り直す候補なので、採っている見積りの和に数えない
     available = budget.readopt_left(plan_budget, [i for i in state.get("items") or [] if i.get("status") != CARRIED])

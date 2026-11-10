@@ -210,6 +210,43 @@ def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_se
     assert len(read_state(flow["path"])["readopt"]["events"]) == 1
 
 
+@pytest.mark.parametrize("kind", ["test_failed", "non_test_files"])
+def test_deferring_reverts_a_test_commit_that_was_sent_back(flow, readopt, kind):
+    """見送りへ変える項目のテストのコミットが今のコードで落ちる・テスト以外を変えるなら、打ち消して公開へ流さない。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert False\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    item["sendbacks"] = [{"kind": kind, "reason": "x", "at": "2026-11-10T00:00:00"}]
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    got = state["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] is None and got["unverified_reverted"] == [test_sha]
+    assert not (work / "tests" / "test_total.py").exists()
+    ledger = __import__("refactor_lib.ledger", fromlist=["unpublishable"])
+    assert ledger.unpublishable(state, str(work), state["plan"]["base_sha"]) == []
+
+
+def test_deferring_keeps_a_test_commit_without_a_sendback(flow, readopt):
+    """差し戻しの無いテストのコミットは、見送りへ変えても打ち消さずに公開できるコミットとして残す。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert True\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    got = read_state(flow["path"])["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] == test_sha
+    assert (work / "tests" / "test_total.py").exists()
+
+
 def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, readopt, cmd_plan, monkeypatch):
     """I14: 残り 3.5 分に 1.9・1.8・0.9 分の候補（順位の順）なら 1.9 と 0.9 を採り、1.8 を飛ばす。ほかの理由の見送りは採らない。"""
     done = _entry("I-001", 1, "total", status="verified")
