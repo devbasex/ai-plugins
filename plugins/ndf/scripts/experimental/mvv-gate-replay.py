@@ -43,15 +43,15 @@ UNTIL = "2026-11-10T00:00:00+00:00"
 GATE_PATH = "plugins/ndf/scripts/mvv-gate.py"
 
 
-def _load(name: str, path: Path):
+def _load_script(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-gate = _load("mvv_gate_for_replay", SCRIPTS / "mvv-gate.py")
-survey = _load("design_survey_for_replay", SCRIPTS / "design-survey.py")
+gate = _load_script("mvv_gate_for_replay", SCRIPTS / "mvv-gate.py")
+survey = _load_script("design_survey_for_replay", SCRIPTS / "design-survey.py")
 
 
 def _at(s: str) -> dt.datetime | None:
@@ -62,7 +62,7 @@ def _at(s: str) -> dt.datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
-def read_log(path: Path) -> list[dict]:
+def read_gate_log(path: Path) -> list[dict]:
     """記録の行。読めない行は飛ばす（記録の 1 行の誤りで測りを止めない）。"""
     rows = []
     for ln in path.read_text(encoding="utf-8").splitlines():
@@ -75,7 +75,7 @@ def read_log(path: Path) -> list[dict]:
     return rows
 
 
-def select(rows: list[dict], until: dt.datetime) -> tuple[list[dict], list[dict]]:
+def select_replay(rows: list[dict], until: dt.datetime) -> tuple[list[dict], list[dict]]:
     """（対象, 対照）。どちらも PR ごとに最後の行（期間の中の設計承認ゲートの行）。"""
     last: dict[tuple, dict] = {}
     for r in rows:
@@ -106,7 +106,7 @@ def system_at(rev: str, root: Path) -> str:
     raise ValueError(f"{rev} の mvv-gate.py に SYSTEM が無い")
 
 
-def materials(prs: list[int], repo: str | None, cwd: Path) -> list[str]:
+def pr_materials(prs: list[int], repo: str | None, cwd: Path) -> list[str]:
     """mvv-gate.py と同じ材料（PR ごとの事実と設計文書）。取れなければ gate.Back。"""
     out = []
     for n in prs:
@@ -116,7 +116,7 @@ def materials(prs: list[int], repo: str | None, cwd: Path) -> list[str]:
     return out
 
 
-def judge(system: str, prompt: str) -> tuple[dict, float]:
+def judge_once(system: str, prompt: str) -> tuple[dict, float]:
     """指示文 `system` で 1 回判定する。MVV 判定の記録へは書かない。"""
     gate.SYSTEM = system
     verdict, raw, usage = gate.ask(prompt)
@@ -127,7 +127,7 @@ def judge(system: str, prompt: str) -> tuple[dict, float]:
     return {"verdict": verdict["verdict"], "passed": passed, "boundary": verdict["boundary"]}, cost
 
 
-def tally(judged: list[dict], prs: int) -> dict:
+def tally_verdicts(judged: list[dict], prs: int) -> dict:
     passed = sum(1 for j in judged if j.get("passed"))
     return {
         "passed": passed,
@@ -141,7 +141,7 @@ def write_out(path: str, obj: dict) -> None:
     Path(path).write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _row(kind: str, r: dict) -> dict:
+def _replay_item(kind: str, r: dict) -> dict:
     return {"kind": kind, "pr": list(r.get("pr") or []), "recorded": r.get("verdict"), "at": r.get("at")}
 
 
@@ -152,14 +152,14 @@ def cmd_run(a):
         emit(result(TOOL, "stopped", f"--until を時刻として読めない: {a.until}"), EXIT_UNREADABLE)
     log = Path(a.log or gate.pm.gate_log_path())
     try:
-        rows = read_log(log)
+        rows = read_gate_log(log)
         before = system_at(a.before, root)
     except (OSError, ValueError) as e:
         emit(result(TOOL, "stopped", f"記録か変更の前の指示文を読めない: {e}"), EXIT_UNREADABLE)
-    target, control = select(rows, until)
+    target, control = select_replay(rows, until)
     if not target and not control:
         emit(result(TOOL, "stopped", f"{log} に対象も対照も無い（{a.until} より前の設計承認ゲート）"), EXIT_PRECONDITION)
-    items = [_row("target", r) for r in target] + [_row("control", r) for r in control]
+    items = [_replay_item("target", r) for r in target] + [_replay_item("control", r) for r in control]
     metrics: dict = {"target": {"prs": len(target)}, "control": {"prs": len(control)}, "cost_usd": 0.0}
     if a.select_only:
         res = result(TOOL, "ok", f"対象 {len(target)} 件・対照 {len(control)} 件を選んだ（判定しない）", items, metrics)
@@ -170,7 +170,7 @@ def cmd_run(a):
     cost = 0.0
     for it in items:
         try:
-            prompt = gate.build_prompt(project, None, "design", materials(it["pr"], a.repo, root))
+            prompt = gate.build_prompt(project, None, "design", pr_materials(it["pr"], a.repo, root))
         except gate.Back as e:
             it["error"] = str(e)[:200]
             it["after"] = {"verdict": None, "error": it["error"]}
@@ -178,19 +178,19 @@ def cmd_run(a):
                 it["before"] = dict(it["after"])
             continue
         if it["kind"] == "target":
-            it["before"], c = judge(before, prompt)
+            it["before"], c = judge_once(before, prompt)
             cost += c
-        it["after"], c = judge(after, prompt)
+        it["after"], c = judge_once(after, prompt)
         cost += c
     gate.SYSTEM = after
     t_items = [it for it in items if it["kind"] == "target"]
     c_items = [it for it in items if it["kind"] == "control"]
     metrics["target"].update(
-        before=tally([it["before"] for it in t_items], len(t_items)),
-        after=tally([it["after"] for it in t_items], len(t_items)),
+        before=tally_verdicts([it["before"] for it in t_items], len(t_items)),
+        after=tally_verdicts([it["after"] for it in t_items], len(t_items)),
         recorded_mismatch=sum(1 for it in t_items if it["before"].get("verdict") not in (None, it["recorded"])),
     )
-    metrics["control"]["after"] = tally([it["after"] for it in c_items], len(c_items))
+    metrics["control"]["after"] = tally_verdicts([it["after"] for it in c_items], len(c_items))
     metrics["cost_usd"] = round(cost, 4)
     tb, ta = metrics["target"]["before"], metrics["target"]["after"]
     summary = (

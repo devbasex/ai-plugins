@@ -5,32 +5,25 @@
                               [--material <ファイル>...] [--pr N...] [--mode M]
                               [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
-`pace: fast` と `pace: auto` の設計承認ゲートとリリース承認ゲートを、利用者が承認した MVV への事前の
-承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに承認ゲートへ戻す。
+`pace: fast` と `pace: auto` の設計承認ゲートとリリース承認ゲートを、利用者が承認した MVV への事前の承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに承認ゲートへ戻す。
 
 1. プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`。#1366）が 未承認・承認と一致しない・壊れている のどれでもない
-2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（承認ゲート `MVV` の `sha256`）があり、今の MVV のファイルの
-   ハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と
-   状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
+2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（承認ゲート `MVV` の `sha256`）があり、今の MVV のファイルのハッシュ・状態の
+   `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
 3. `--mode` が `operation` でも `documentation` でもない
 4. `--pr` の変更したファイルが、進め方の宣言（`.ndf/pace.json`）の `boundary_paths` に当たらない
 5. `--pr` がプロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）を変えない（共通原則の C7。宣言では外せない固定の検査）
 
-通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → スプリント MVV → 判断の決まり。`lib/project_mvv.block`）と
-材料（提示物のファイル・PR の題名と本文と変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の
-PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、
-「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
+通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → スプリント MVV → 判断の決まり。`lib/project_mvv.block`）と材料（提示物のファイル・PR の題名と本文と
+変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
 
-- 従う（越えない線なし）: `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・理由・ログ）を書き、
-  status ok（終了コード 0）。記録を書けなければ承認ゲートへ戻す。`--gate release` では判定に読んだ承認資料（`--material`）へ
-  承認の記録（`by: mvv`）も書く（`lib/approved_commit.py` の record_all。#815）。`--advise` では書かない
-- それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
-  利用者の承認を求める
+- 従う（越えない線なし）: `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・理由・ログ）を書き、status ok（終了コード 0）。記録を書けなければ承認ゲートへ戻す。
+  `--gate release` では判定に読んだ承認資料（`--material`）へ承認の記録（`by: mvv`）も書く（`lib/approved_commit.py` の record_all。#815）。`--advise` では書かない
+- それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。利用者の承認を求める
 
 判定は毎回 --log（既定 <状態の根>/mvv-gate.jsonl。根は lib/state_home.py）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
 スプリントの状態の進め方 `pace`・判定に渡したスプリント MVV の `sprint_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
-結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
-コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
+結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request のコメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
 
 `--advise`（助言の MVV 判定。`pace: normal` の設計承認ゲート・リリース承認ゲートの前。#1400）: 判定の規則と機械のチェックは同じだが、
 承認ゲートの記録（`by: mvv`）を書かず、どの判定でも status ok（終了コード 0）で返す。承認するのは利用者である。
