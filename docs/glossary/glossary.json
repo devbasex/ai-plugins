@@ -2015,6 +2015,13 @@
       ]
     },
     {
+      "term": "消したテスト",
+      "context": "ndf-workflow",
+      "meaning": "着手前に走っていて、着手後の結果（走った・skip・deselect）のどれにも無く、テストの台帳に載るテストの nodeid。計測のスクリプトの diff が、着手後の木にその定義が残っていないことを照合する対象",
+      "source": "",
+      "pending_source": "issues/issue-2309-design.md"
+    },
+    {
       "term": "現状固定テスト",
       "context": "ndf-workflow",
       "meaning": "構造を変える前の出力をそのまま期待値にしたテスト。構造を変える前後で同じ出力が出ることを縛る（英語の characterization test）",
