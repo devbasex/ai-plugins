@@ -148,6 +148,29 @@ def test_stopping_a_held_loop_helper_that_did_not_come_up_stops_the_plan(run):
     assert run.stop
 
 
+def test_restarting_a_held_loop_helper_after_its_question_keeps_the_stop_of_the_plan(run, monkeypatch):
+    """保留したループの残りを流す一時レーンを答えの後に起こせなければ、起動の問いの「止める」で計画を止められる（目的が held- で始まる）。"""
+
+    def down(_main, argv, lane, cwd, fresh):
+        return {"result": "failed", "attempts": 2, "at": "2026-11-10T00:00:00Z", "reason": "x"}
+
+    run.launches["held-lb"] = {"lane": "p1-rel3", "result": "up"}
+    monkeypatch.setattr(plc, "step_launch", down)
+    run.wake_owners({"kind": "gate1", "id": "g1", "lane": "p1-rel3"})
+    [q] = [q for q in run.questions if q["kind"] == "spawn"]
+    assert q["purpose"] == "held-lb-ans-g1"
+    run.apply_own(q, ["止める"])
+    assert run.stop
+
+
+def test_answering_a_restart_question_does_not_add_the_lane_to_the_wake_list(run, monkeypatch):
+    """耐久ワークフローが立てた起動の問いへの答えは、持ち主を再起動の対象へ入れない（起こし直しは relaunch だけが打つ）。"""
+    run.lanes["la"].update(state="stopped")
+    monkeypatch.setattr(run, "stopped", lambda: {"la"})
+    run.wake_owners({"kind": "spawn", "id": "q4", "lane": "la", "purpose": "wake-la-2"})
+    assert run.wake == [] and run.revive == []
+
+
 def test_an_old_record_hands_the_launch_lines_to_the_organizer(run):
     """起動の印の無い古い記録では、知らせに起動の 1 行（spawn）と起こす 1 行（wake）を載せ、wait がそれを返す。"""
     run.launching = False

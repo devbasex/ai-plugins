@@ -150,15 +150,21 @@ class AnswerRouting:
 
     def wake_owners(self, q: dict) -> None:
         """問いの止まった持ち主を再起動の対象へ入れる: 1 スプリントのレーンと、記録が `waiting_only` か `answer_hold` で答えのまだの行を持つループのレーン
-        （#2510 の決定 9）。問いを送った一時レーンは、この場で再起動する（打つ前の一覧で動いていれば打たない）。"""
+        （#2510 の決定 9）。問いを送った一時レーンは、この場で再起動する（打つ前の一覧で動いていれば打たない）。
+        耐久ワークフローが立てた問いは、持ち主を再起動の対象へ入れない（答えは apply_own が当て、起こし直しは relaunch が打つ。
+        入れると relaunch が失敗して新しい問いを立てた後も、答え待ちのまま launch_wakes が別の目的で再起動を打つ）。"""
+        if q.get("kind") in OWN_KINDS:
+            return
         senders = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))}
-        own = q.get("kind") in OWN_KINDS  # 耐久ワークフローが立てた問いの答えは apply_own が当てる
-        for h in sorted(x for x in senders if x and not own and x not in self.lanes and x.startswith(f"{self.name}-rel")):
+        for h in sorted(x for x in senders if x and x not in self.lanes and x.startswith(f"{self.name}-rel")):
             # 問いを保留して止まった一時レーン（計画全体の停止の間も起こす）。流れているリリースの一時レーンなら、起動の問いの
-            # 「止める」でそのリリースを締められるよう連番を添える
+            # 「止める」でそのリリースを締められるよう連番を添える。保留したループの残りを流す一時レーンなら、「止める」で計画を
+            # 止められるよう目的を `held-` で始める
             rel = self.current
             extra = {"n": rel["n"]} if rel is not None and h == pr.helper_name(self.name, rel["n"]) else {}
-            self.launch_once(f"ans-{h}-{q.get('id')}", h, ["restart", h], **extra)
+            held = None if extra else next((p for p, r in self.launches.items() if p.startswith("held-") and r.get("lane") == h), None)
+            purpose = f"{held}-ans-{q.get('id')}" if held else f"ans-{h}-{q.get('id')}"
+            self.launch_once(purpose, h, ["restart", h], **extra)
         owners = senders & self.stopped()
         waits = set(step_waiting_lanes(self.main, self.name)) if self.routed and owners - self.sprint else set()
         owners &= self.sprint | waits
