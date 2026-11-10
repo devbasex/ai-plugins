@@ -447,11 +447,23 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
     ), EXIT_OK
 
 
+def _code_files(root: Path, files: list[str]) -> list[str]:
+    """文書のファイル（`lib/diff_kinds.py`。#2925）を除く。分け方の宣言が読めなければ全部を返す。"""
+    import deps
+
+    deps.require("pathmatch")
+    import diff_kinds
+
+    kinds = diff_kinds.classify_at(root, files)
+    return files if kinds.unknown else kinds.code
+
+
 def scope_dirs(root: Path, data: dict) -> list[str]:
+    """検査の範囲のディレクトリ。差分の文書のファイルのディレクトリは入れない。"""
     decl = load_decl(root)
     escaped = set(data.get("escape_areas") or {})
     groups: list[list[str]] = [[], [], []]
-    for f in data.get("files") or []:
+    for f in _code_files(root, list(data.get("files") or [])):
         d = str(Path(f).parent)
         if d == ".":
             continue
