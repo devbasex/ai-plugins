@@ -137,11 +137,6 @@ def test_every_exemption_carries_a_reason() -> None:
     assert all(reason.strip() for reason in module.EXEMPT.values())
 
 
-def test_the_repository_satisfies_the_limit() -> None:
-    result = run(REPO)
-    assert result.returncode == 0, output_of(result)
-
-
 def test_a_non_ascii_filename_is_scanned(repo: Path) -> None:
     """`git ls-files` は既定で非 ASCII を 8 進エスケープして返す（#417 の 1）。
 

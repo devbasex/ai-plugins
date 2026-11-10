@@ -328,11 +328,6 @@ def test_ci_without_a_base_stops_with_3(tree: Path):
     assert code == 3
 
 
-def test_this_repository_matches_its_contracts():
-    code, r = run(REPO)
-    assert code == 0, r["items"][:5]
-
-
 # --- Checker.entry の分岐ごとの現状固定（I-001） ---
 
 

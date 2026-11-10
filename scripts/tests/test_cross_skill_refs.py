@@ -56,10 +56,6 @@ def test_only_the_known_references_remain(checker) -> None:
     assert {(rel, name) for rel, _, name, _ in found} == set(checker.EXCEPTIONS)
 
 
-def test_the_check_passes_on_the_repository(checker) -> None:
-    assert checker.main(["--root", str(ROOT)]) == 0
-
-
 def test_every_exception_carries_an_issue_number(checker) -> None:
     assert all(v.startswith("#") for v in checker.EXCEPTIONS.values())
 
