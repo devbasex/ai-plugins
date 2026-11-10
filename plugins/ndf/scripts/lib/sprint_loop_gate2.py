@@ -11,12 +11,14 @@ from pathlib import Path
 import clock
 import gate_rejections as gr
 import jsonio
+import step_result
 
 from sprint_loop_record import (
     RELEASE_GATE,
     canonical,
     SPRINT_STATE,
     SUPERVISE,
+    TOOL,
     DONE,
     FAILED,
     RETURNED,
@@ -25,6 +27,7 @@ from sprint_loop_record import (
     Env,
     pending_laps,
     selected_issues,
+    open_record,
     write_record,
 )
 from sprint_loop_gate import (
@@ -286,3 +289,15 @@ def reclose_released(env: Env, rec: dict) -> list[int]:
         lap["reclosed_at"] = env.now()
         done.append(lap["n"])
     return done
+
+
+def cmd_reclose(env: Env, name: str) -> dict:
+    """`loop reclose`: リリースまで届いたのに「失敗」で締めたループの 1 回を、記録のリリースの答えから完了で締め直す（#2911）。
+    締め直すループの 1 回の行だけを I1 の検査から外し、ほかの終わったループの 1 回の行は書き換えない。"""
+    with open_record(env, name) as (rec, before):
+        done = reclose_released(env, rec)
+        if done:
+            write_record(env, rec, {**before, "laps": [lap for lap in before.get("laps", []) if lap["n"] not in done]})
+        laps = [{"lap": n, "outcome": DONE} for n in done]
+        summary = f"ループの {done} 回目 を完了で締め直した" if done else "締め直すループの 1 回は無い"
+        return step_result.result(TOOL, "ok", summary, laps, {"reclosed": done})
