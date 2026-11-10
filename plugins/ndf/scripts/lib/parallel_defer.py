@@ -36,18 +36,27 @@ def control_path(main: Path, name: str) -> Path:
 
 def read_control(main: Path, name: str) -> dict:
     """控えを読む。無い・読めなければ空の控え（I5 の読めないとき）。"""
-    got = jsonio.read(pp.plan_dir(main, name) / FILE, missing={}, broken={}, want=dict)
+    got = jsonio.read(control_path(main, name), missing={}, broken={}, want=dict)
     out = {k: [str(x) for x in got.get(k) or [] if isinstance(x, str)] if isinstance(got.get(k), list) else [] for k in KEYS}
     return {"version": 1, **out, "since": got.get("since"), "until": got.get("until")}
 
 
+def _live_ids(items: list[dict]) -> set[str]:
+    """答えていない依頼の id（まとめた `also` も含む。空の id は外す）。"""
+    return {i for q in items for i in (q.get("id"), *(q.get("also") or [])) if i}
+
+
+def _shown_with(d: dict, items: list[dict]) -> list[str]:
+    """控えの `shown` に、一覧の `gate1`・`ask` の id を足したもの。"""
+    return sorted(set(d["shown"]) | {q["id"] for q in items if q.get("kind") in DEFER_KINDS})
+
+
 def write_control(main: Path, name: str, d: dict, items: list[dict]) -> None:
     """控えを書く。答えた依頼（今の一覧に無い id）を `ids`・`offered`・`shown` から外す。"""
-    live = {i for q in items for i in (q.get("id"), *(q.get("also") or [])) if i}
-    out = {**d, **{k: sorted(set(d.get(k) or []) & live) for k in KEYS}}
+    out = {**d, **{k: sorted(set(d.get(k) or []) & _live_ids(items)) for k in KEYS}}
     if not out["ids"]:
         out.update(since=None, until=None)
-    jsonio.write_atomic(pp.plan_dir(main, name) / FILE, out)
+    jsonio.write_atomic(control_path(main, name), out)
 
 
 def hours_of(main: Path, now: _dt.datetime | None = None) -> dict:
@@ -92,13 +101,11 @@ def due_batch(main: Path, name: str, hours: dict) -> tuple[list[dict], dict] | N
     if not d["ids"]:
         return None
     items = pa.with_repo(main, name, pa.questions(main, name)[1])
-    live = {i for q in items for i in (q.get("id"), *(q.get("also") or []))}
-    if not set(d["ids"]) & live:
+    if not set(d["ids"]) & _live_ids(items):
         write_control(main, name, d, items)
         return None
     out, errors = annotate(main, name, items)
-    shown = set(d["shown"]) | {q["id"] for q in items if q.get("kind") in DEFER_KINDS}
-    write_control(main, name, {**d, "ids": [], "offered": [], "shown": sorted(shown)}, items)
+    write_control(main, name, {**d, "ids": [], "offered": [], "shown": _shown_with(d, items)}, items)
     return out, {"batch": True, **({"annotate_errors": errors} if errors else {})}
 
 
@@ -111,8 +118,7 @@ def route(main: Path, name: str, items: list[dict], hours: dict) -> tuple[list[d
         return items, {}
     d = read_control(main, name)
     if hours["inside"]:
-        shown = set(d["shown"]) | {q["id"] for q in items if q.get("kind") in DEFER_KINDS}
-        write_control(main, name, {**d, "shown": sorted(shown)}, items)
+        write_control(main, name, {**d, "shown": _shown_with(d, items)}, items)
         return items, {}
     ids, offered, shown, now_ask = set(d["ids"]), set(d["offered"]), set(d["shown"]), []
     for q in items:
