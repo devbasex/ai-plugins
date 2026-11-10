@@ -723,12 +723,8 @@ def glossary_at(root: Path, decl: Declaration, ref: str | None) -> dict:
         raise unreadable(f"{ref} の用語集を読めない: {e}")
 
 
-def cmd_diff(a):
-    root = Path(a.root)
-    decl = load_declaration(root)
-    if decl is None:
-        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語集の変化は無い"))
-    before, after = glossary_at(root, decl, a.base), glossary_at(root, decl, a.head)
+def diff_items(before: dict, after: dict) -> list[dict]:
+    """2 つの用語集の変化（追加・意味の変更・廃止語の追加・削除）。after の順に見てから before の順で削除を見る。"""
 
     def index(g):
         return {(t["context"], t["term"]): t for t in terms_of(g) if isinstance(t.get("context"), str) and isinstance(t.get("term"), str)}
@@ -751,6 +747,15 @@ def cmd_diff(a):
     for key, t in b.items():
         if key not in h:
             items.append({"change": "removed", "context": key[0], "term": key[1], "before": t.get("meaning"), "after": None})
+    return items
+
+
+def cmd_diff(a):
+    root = Path(a.root)
+    decl = load_declaration(root)
+    if decl is None:
+        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語集の変化は無い"))
+    items = diff_items(glossary_at(root, decl, a.base), glossary_at(root, decl, a.head))
     counts = {c: sum(1 for it in items if it["change"] == c) for c in ("added", "meaning_changed", "deprecated", "removed")}
     summary = (
         "用語集の変化は無い"
