@@ -752,3 +752,104 @@ def test_trial_row_has_no_session_id(tmp_path):
     assert sid not in json.dumps(row, ensure_ascii=False) and sid not in trial.table_line(row)
     assert (row["waits"], row["seconds"], row["excluded"], row["cuts"]) == ([4200], 4800 - 4200, None, 0)
     assert row["tokens"]["read"] == 301_000 + 302_000  # m2・m3（m0 は区切りの前、m4 は後。tool_use の行は usage を持たない）
+
+
+# ---------------------------------------------------------------- context-trial.py の trial_row（現状固定。I-006）
+
+
+def _load_trial():
+    spec = importlib.util.spec_from_file_location("context_trial", SCRIPTS / "experimental" / "context-trial.py")
+    trial = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trial)
+    return trial
+
+
+def _trial_lines() -> list[dict]:
+    return [
+        call("2026-11-01T00:00:00Z", "m0", read=300_000),
+        _tool_use("2026-11-01T00:01:00Z", "Bash", "b1", command="python3 supervise.py queue plan.json"),
+        call("2026-11-01T00:02:00Z", "m2", read=301_000),
+        _tool_use("2026-11-01T00:10:00Z", "AskUserQuestion", "q1", questions=[]),
+        _tool_result("2026-11-01T01:20:00Z", "q1"),
+        call("2026-11-01T01:21:00Z", "m3", read=302_000),
+        call("2026-11-01T01:40:00Z", "m4", read=303_000),
+    ]
+
+
+def test_trial_row_without_queue_launch_raises(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m0")])
+    with pytest.raises(ValueError, match="supervise.py queue"):
+        trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+
+
+def test_trial_row_without_answered_question_raises(tmp_path):
+    trial = _load_trial()
+    lines = [x for i, x in enumerate(_trial_lines()) if i != 4]  # 答え（tool_result）を除く
+    tp = write_transcript(tmp_path / "s1.jsonl", lines)
+    with pytest.raises(ValueError, match="--until"):
+        trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+
+
+def test_trial_row_question_before_launch_is_ignored(tmp_path):
+    # 起動より前の問いは区切りに使わない。--until を渡さなければ止まる
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    lo = cd.parse_ts("2026-11-01T00:30:00Z")
+    with pytest.raises(ValueError, match="--until"):
+        trial.trial_row("#7", "続ける", tp, [], [], lo, None, 4.0)
+
+
+def test_trial_row_full_shape_with_explicit_span(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    recs = [
+        hook_row("s1", tp, "2026-11-01T00:01:00Z", context=150_000, decide_from=950_000, margin=50_000),
+        mark(cd.MARK_HANDOFF, "2026-11-01T00:05:00Z", "s1"),
+        mark(cd.MARK_HANDOFF, "2026-11-01T03:00:00Z", "s1"),
+    ]
+    lo, hi = cd.parse_ts("2026-11-01T00:01:00Z"), cd.parse_ts("2026-11-01T01:30:00Z")
+    row = trial.trial_row("#7", "閾値で切る", tp, recs, [], lo, hi, 4.0)
+    assert set(row) == {
+        "condition", "policy", "start_context", "excluded", "conversation_usd", "conversation_parts_usd",
+        "tokens", "ndf_usd", "seconds", "waits", "cuts", "restores", "unknown_parts",
+    }  # fmt: skip
+    assert row["condition"] == "閾値で切る"
+    assert row["policy"] == "current（判断開始の値 950000 / 運用上限 200000 / 余白 50000）"
+    assert row["start_context"] == 150_000
+    assert row["excluded"] == "起動の時点の文脈が 200000 以下か不明"
+    assert set(row["conversation_parts_usd"]) == {"conductor", "handoff", "restore"}
+    assert row["conversation_usd"] == round(sum(row["conversation_parts_usd"].values()), 2)
+    assert set(row["tokens"]) == {"inp", "out", "read", "w5", "w1h"}
+    assert row["tokens"]["read"] == 301_000 + 302_000
+    assert row["ndf_usd"] == 0.0
+    assert (row["waits"], row["seconds"], row["cuts"]) == ([4200], 5340 - 4200, 1)
+    line = trial.table_line(row)
+    assert line.startswith("| 閾値で切る | current（") and line.endswith("| 起動の時点の文脈が 200000 以下か不明 |")
+
+
+def test_trial_row_without_decision_rows_marks_unknown(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    row = trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+    assert row["policy"] == "不明（判断開始の値 None / 運用上限 None / 余白 None）"
+    assert row["start_context"] is None and row["excluded"] == "起動の時点の文脈が 200000 以下か不明"
+    assert (row["waits"], row["seconds"], row["cuts"], row["restores"]) == ([4200], 4800 - 4200, 0, [])
+    assert trial.table_line(row).endswith(f"| 0 | {cd.UNKNOWN} | 起動の時点の文脈が 200000 以下か不明 |")
+
+
+def test_trial_row_reads_other_transcripts_of_the_work(tmp_path):
+    # 同じ作業の判定の行が指す別の会話の記録の問いと答えも区切りに使う
+    trial = _load_trial()
+    main_tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines()[:3])
+    other = write_transcript(
+        tmp_path / "s2.jsonl",
+        [
+            _tool_use("2026-11-01T00:20:00Z", "AskUserQuestion", "q9", questions=[]),
+            _tool_result("2026-11-01T00:30:00Z", "q9"),
+            call("2026-11-01T00:31:00Z", "m9", read=310_000),
+        ],
+    )
+    recs = [hook_row("s1", main_tp, "2026-11-01T00:01:00Z", context=300_100), hook_row("s2", other, "2026-11-01T00:20:00Z")]
+    row = trial.trial_row("#7", "続ける", main_tp, recs, [], None, None, 4.0)
+    assert (row["waits"], row["seconds"], row["excluded"]) == ([600], 1800 - 600, None)
