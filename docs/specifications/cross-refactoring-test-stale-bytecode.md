@@ -1,5 +1,7 @@
 # cross-refactoring: 同じ秒の書き換えと古いバイトコード（テストの土台と worktree の書き換えの待ち）
 
+> **#2457 で置き換えた決まり:** この文書のうち、`stop_revert._plan_b`（起点の木へ戻す `read-tree`）と締め切りの取り消し `converge._revert_shared` に関わる記述（どちらも消した）は今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+
 ## 概要
 
 **git を使うテストの子の Python はバイトコードを書かない。製品が worktree を書き換えるときは、直前の
