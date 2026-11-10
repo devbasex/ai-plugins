@@ -229,6 +229,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
+        self.wake_tries: dict[str, int] = {}  # レーン → 最後に動いて観えた後に設計の答えのために再起動した回数
         self.init_answer_hold()
         self.init_run_state(False)
 
@@ -599,7 +600,7 @@ def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
     gave_up = {n for n, st in run.lanes.items() if st.get("given_up")}  # 再起動の失敗の問いへ「止める」と答えたレーンは起こさない
     designs = sorted({*step_design_held(main, name, sorted(run.answered)), *(set(run.revive) & run.stopped())} - run.left_stopped - gave_up)
     if designs:  # 持ち主が答え（設計の承認・1 スプリントのレーンの問い）を当てるまで終えない。動いて観えるまで 1 回ずつ再起動する（6f）
-        run.wake = sorted({*run.wake, *(set(designs) - run.woken)})
+        run.wake = sorted({*run.wake, *run.wake_or_ask(set(designs) - run.woken)})
         return None
     held = step_held_loops(main, name, sorted(run.answered))
     if not held:
@@ -668,8 +669,7 @@ def _observe_run(run: _Run, main: str) -> dict:
     _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
     apply_observed_states(run, rows)
-    run.woken = {n for n in run.woken if run.lanes[n].get("state") in (None, "stopped")}  # 動いて観えたら設計の答えの再起動を解く
-    run.release_woken(rows)  # 動いて観える前に今の再起動より後で止まったら、もう一度起こすか問う
+    run.release_woken(rows)  # 動いて観えたら、または動いて観える前に今の再起動より後で止まったら、設計の答えの再起動を解く
     return seen
 
 

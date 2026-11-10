@@ -94,7 +94,7 @@ def step_launch(main: str, argv: list[str], lane: str, cwd: Optional[str] = None
 
 
 class LaunchRouting:
-    """`_Run` が継ぐ。`_Run` は `main`・`name`・`launch`・`current`・`launches`・`helper_seen`・`launching`・`wake`・`woken`・`lanes`・`sprint`・
+    """`_Run` が継ぐ。`_Run` は `main`・`name`・`launch`・`current`・`launches`・`helper_seen`・`launching`・`wake`・`woken`・`wake_tries`・`lanes`・`sprint`・
     `left_stopped`・`hold`・`ask`・`stopped` を持つ。"""
 
     def launch_once(self, purpose: str, lane: str, argv: list[str], cwd: Optional[str] = None, fresh: bool = False, **extra) -> dict:
@@ -135,6 +135,7 @@ class LaunchRouting:
         if kind in ("spawn", "helper") and q.get("purpose") and spec.get("argv"):
             extra = {"n": q["n"]} if q.get("n") is not None else {}
             purpose = f"{q['purpose']}-a{qid}"
+            self.wake_tries.pop(lane, None)  # 人が起こし直すと答えた: 再起動の回数を数え直す
             if self.launch and self.launch.get("purpose") == q["purpose"]:
                 # 流れているリリースの一時レーンを起こし直した: 止まりの見張り（`_ask_helper`）を新しい起動へ向け、もう一度問えるようにする
                 self.launch = {**self.launch, "purpose": purpose, "retry": int(self.launch.get("retry") or 0) + 1}
@@ -160,16 +161,37 @@ class LaunchRouting:
             if rec.get("result") == "up":
                 self.lanes[n]["state"] = None  # 次の観測で読み直す。古い観測の stopped で打ち直さない
                 self.woken.add(n)
+                self.wake_tries[n] = self.wake_tries.get(n, 0) + 1
+
+    def wake_or_ask(self, designs: set[str]) -> list[str]:
+        """答えを当てていない持ち主（`designs`）のうち、再起動の対象へ戻すレーンを返す。動いて観えないまま 2 回再起動したレーンは
+        戻さずに区分 `spawn` の問いを立てる（答えが来るまで再起動を打ち続けない。「止める」なら `given_up` で外れる）。"""
+        again = []
+        for n in sorted(designs):
+            if self.wake_tries.get(n, 0) < 2:
+                again.append(n)
+                continue
+            pattern = rf"wake-{re.escape(n)}-\d+"
+            last = f"wake-{n}-{sum(1 for p in self.launches if re.fullmatch(pattern, p))}"
+            text = f"レーン {n} を設計の答えを当てるために {self.wake_tries[n]} 回再起動したが、答えを当てずに止まった"
+            spec = {"argv": ["restart", n], "cwd": None, "fresh": False}
+            self.ask("spawn", f"{self.name}-launch-{last}", n, text, list(RESTART[:1]) + ["止める"], purpose=last, launch=spec)
+        return again
 
     def release_woken(self, rows: dict) -> None:
         """設計の答えを当てるために再起動したレーン（`woken`）が、今の再起動より後に止まって観えたら `woken` から外す。
-        動いて観える前に止まったレーンを、答えが未適用のまま待ち続けないためである。外したレーンは次の周回で
-        `_finish_or_hold` が再起動の対象へ戻す。2 回目の再起動の後にも止まったら、もう打たずに区分 `spawn` の問いを立てる。"""
+        動いて観える前に止まったレーンを、答えが未適用のまま待ち続けないためである。外したレーンは次の周回で、答えがまだ当たって
+        いなければ `_finish_or_hold` が `wake_or_ask` で再起動の対象へ戻すか問う。動いて観えたレーンは再起動の回数を数え直す
+        （別の答えのための再起動を通算しない）。"""
         import clock
 
+        for n, row in rows.items():
+            if row.get("state") in UP:
+                self.wake_tries.pop(n, None)
         for n in sorted(self.woken):
             row = rows.get(n)
             if row is not None and row.get("state") != "stopped":
+                self.woken.discard(n)  # 動いて観えたら設計の答えの再起動を解く
                 continue
             done = [p for p in self.launches if re.fullmatch(rf"wake-{re.escape(n)}-\d+", p)]
             last = max(done, key=lambda p: int(p.rsplit("-", 1)[1]), default=None)
@@ -178,10 +200,6 @@ class LaunchRouting:
             if row is not None and (since is None or at is None or at.timestamp() < since.timestamp() - 0.5):
                 continue  # 今の再起動より前の行: まだ動いて観えていない
             self.woken.discard(n)
-            if len(done) >= 2:  # 答えていない問いが計画の終わりを止めるため、答えが来るまで再起動の候補へ戻らない
-                text = f"レーン {n} を設計の答えを当てるために {len(done)} 回再起動したが、答えを当てずに止まった"
-                spec = {"argv": ["restart", n], "cwd": None, "fresh": False}
-                self.ask("spawn", f"{self.name}-launch-{last}", n, text, list(RESTART[:1]) + ["止める"], purpose=last, launch=spec)
 
     # -- 起動の印（`parallel-launch`）の無い古い記録の道: 起動と再起動はオーガナイザーが 1 行で打つ（#2936 の前の道） --
 

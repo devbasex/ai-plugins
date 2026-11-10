@@ -79,12 +79,54 @@ def test_a_woken_lane_that_stops_before_it_is_seen_running_is_woken_again_then_a
     assert run.woken == {"la"}
     run.release_woken({"la": {"state": "stopped", "at": "2026-11-10T00:01:00Z"}})
     assert run.woken == set() and run.questions == []
+    assert run.wake_or_ask({"la"}) == ["la"]
     run.wake = ["la"]
     run.launch_wakes()
     assert "wake-la-2" in run.launches and run.woken == {"la"}
     run.release_woken({"la": {"state": "stopped", "at": "2026-11-10T00:02:00Z"}})
-    assert run.woken == set()
+    assert run.woken == set() and run.questions == []  # 問うのは答えがまだ当たっていないと確かめてから（_finish_or_hold）
+    assert run.wake_or_ask({"la"}) == []
     assert [(q["kind"], q["lane"], q["purpose"]) for q in run.questions] == [("spawn", "la", "wake-la-2")]
+
+
+def test_a_lane_asked_after_two_restarts_is_not_restarted_until_answered(run, monkeypatch):
+    """2 回再起動しても止まるレーンは、問いを立てた後の周回でも再起動の対象へ戻らない（wake-la-3 を打たない）。"""
+    run.lanes["la"].update(state="stopped")
+    run.lanes["lb"].update(state="stopped")
+    run.wake_tries["la"] = 2
+    run.launches.update({"wake-la-1": {"lane": "la"}, "wake-la-2": {"lane": "la"}})
+    monkeypatch.setattr(prun, "step_design_held", lambda *_a: ["la"])
+    for _ in range(2):
+        assert prun._finish_or_hold(run, "/m", "p1") is None
+        run.launch_wakes()
+    assert run.launched == [] and "wake-la-3" not in run.launches and len(run.questions) == 1
+    q = run.questions[0]
+    assert run.relaunch(q, ["起こし直す"]) and "la" not in run.wake_tries  # 人が起こし直すと答えたら数え直す
+
+
+def test_restarts_for_an_earlier_answer_are_not_counted_once_the_lane_was_seen_running(run, monkeypatch):
+    """動いて観えたレーンは再起動の回数を数え直す。別の答えのための再起動を通算して問わない。"""
+    monkeypatch.setattr(run, "stopped", lambda: {"la"})
+    for at in ("2026-11-10T00:01:00Z", "2026-11-10T00:02:00Z"):
+        run.wake = ["la"]
+        run.launch_wakes()
+        run.release_woken({"la": {"state": "running", "at": at}})
+    assert run.woken == set() and "la" not in run.wake_tries
+    assert run.wake_or_ask({"la"}) == ["la"] and run.questions == []
+
+
+def test_restarting_a_release_helper_after_its_question_carries_the_release_number(run, monkeypatch):
+    """問いに答えた一時レーンの再起動が立ち上がらなければ、起動の問いへリリースの連番を添え、「止める」でリリースを締められる。"""
+
+    def down(_main, argv, lane, cwd, fresh):
+        return {"result": "failed", "attempts": 2, "at": "2026-11-10T00:00:00Z", "reason": "x"}
+
+    monkeypatch.setattr(plc, "step_launch", down)
+    run.current = {"n": 2}
+    run.wake_owners({"kind": "gate1", "id": "g1", "lane": "p1-rel2"})
+    run.wake_owners({"kind": "gate1", "id": "g2", "lane": "p1-rel1"})
+    asked = {q["lane"]: q.get("n") for q in run.questions if q["kind"] == "spawn"}
+    assert asked == {"p1-rel2": 2, "p1-rel1": None}
 
 
 def test_stopping_a_held_loop_helper_that_did_not_come_up_stops_the_plan(run):

@@ -11,6 +11,7 @@ from typing import Optional
 import durable
 import gate1_requests as g1
 import parallel_plan as pp
+import parallel_release as pr
 import parallel_route as prt
 
 
@@ -153,7 +154,11 @@ class AnswerRouting:
         senders = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))}
         own = q.get("kind") in OWN_KINDS  # 耐久ワークフローが立てた問いの答えは apply_own が当てる
         for h in sorted(x for x in senders if x and not own and x not in self.lanes and x.startswith(f"{self.name}-rel")):
-            self.launch_once(f"ans-{h}-{q.get('id')}", h, ["restart", h])  # 問いを保留して止まった一時レーン（計画全体の停止の間も起こす）
+            # 問いを保留して止まった一時レーン（計画全体の停止の間も起こす）。流れているリリースの一時レーンなら、起動の問いの
+            # 「止める」でそのリリースを締められるよう連番を添える
+            rel = self.current
+            extra = {"n": rel["n"]} if rel is not None and h == pr.helper_name(self.name, rel["n"]) else {}
+            self.launch_once(f"ans-{h}-{q.get('id')}", h, ["restart", h], **extra)
         owners = senders & self.stopped()
         waits = set(step_waiting_lanes(self.main, self.name)) if self.routed and owners - self.sprint else set()
         owners &= self.sprint | waits
