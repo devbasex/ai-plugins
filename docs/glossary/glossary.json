@@ -6169,6 +6169,18 @@
       "context": "ndf-workflow",
       "meaning": "1 つのスプリントに掛けるモード。スプリントの課題ごとの判定のうち、判定表で最も上の行のモード",
       "pending_source": "issues/issue-2923-requirements.md"
+    },
+    {
+      "term": "判定の根拠のファイル",
+      "context": "ndf-workflow",
+      "meaning": "conductor が課題ごとの判定の根拠を書き、開発ループの loop sprint に --judgments で渡す JSON のファイル",
+      "pending_source": "issues/issue-2923-design.md"
+    },
+    {
+      "term": "モードの決め直し",
+      "context": "ndf-workflow",
+      "meaning": "ループの 1 回から課題を外したとき、残った課題の判定の根拠からスプリントのモードを決め直すこと",
+      "pending_source": "issues/issue-2923-design.md"
     }
   ]
 }
