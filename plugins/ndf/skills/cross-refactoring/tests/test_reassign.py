@@ -212,6 +212,21 @@ def test_a_fix_relaunched_on_the_next_attempt_moves_after_a_second_no_result(cmd
     assert read_state(path)["implementer"] == "codex"
 
 
+def test_a_switched_fixer_without_a_result_is_the_one_moved(cmd_reassign, tmp_path, env_tmp_dir, undo_spy):
+    """交代した修正担当（`fix.impl`）の結果を見る。実装担当の結果で判定せず、交代した担当の項目だけを振り替える。"""
+    items = [{"id": "R2", "status": "failing", "fixer": "codex", "commits": {"implement": ["I"], "fix": []}}]
+    path = _implement_state(tmp_path, phase="verify", items=items, fix={"items": ["R2"], "base_sha": "BASE", "attempt": 3, "impl": "codex"})
+    env_tmp_dir(path)
+    _monitor(path, f"codex-fix-rf{ID}", "usage_limit")
+
+    assert _run(cmd_reassign, "fix") == 2
+
+    st = read_state(path)
+    assert st["no_results"][-1]["seat"] == "codex"
+    assert st["implementer"] == "claude"
+    assert st["items"][0]["fixer"] not in ("codex", "")
+
+
 # ---------------- 提案（AC14） ----------------
 
 

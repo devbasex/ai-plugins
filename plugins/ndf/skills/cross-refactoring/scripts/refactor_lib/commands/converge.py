@@ -310,13 +310,27 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
     rerun, whole = _rerun_plan(state, record)
+    triage.clear_junit(state)  # 前の実行の JUnit を今回の失敗として読まない
     if targets.run_or_stop(path, state, rerun, log, whole=whole, phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
         info("✅ 変更起因で落ちたテストが、直した後に通りました")
         return False
+    _refresh_caused(state, record)
     return _fix_or_narrow(path, state, record, log)
+
+
+def _refresh_caused(state: dict[str, Any], record: dict[str, Any]) -> None:
+    """走らせ直しで今回落ちた ID を `caused` へ読み直す（修正担当へ渡す `failed_check.tests` と前進の判定に使う）。
+
+    初回の `caused` のままだと、失敗が減っても同じ集合の停滞と判定される。JUnit を読めない・既存失敗とフレーキーを
+    除くと空になるときは、初回の値を残す。"""
+    ids, _ = triage.failed_ids_of(state)
+    known = {*(record.get("preexisting") or []), *(record.get("flaky") or [])}
+    current = sorted({str(t) for t in ids or [] if t not in known})
+    if current:
+        record["caused"] = current
 
 
 # ---------- verify ----------

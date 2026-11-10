@@ -2,6 +2,7 @@
 
 監視の上限は予算から導かない。提案・計画・判定の手順は `limits.json` の `monitor.phase.<手順>` の秒（空を返して
 監視に任せる）、コーディングの手順は安全網の残りで切る。残りが 0 以下なら起動させずに `HALT=1` を返す。
+どちらの手順も、CLI の上限の分だけ親のステップの締め切りを延ばしてから起動させる。
 """
 
 from __future__ import annotations
@@ -44,10 +45,26 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
         record["cli_timeout"] = left + int(limit_decl.cli_margin())
         timeout = str(left)
         step_extend.ahead(record["cli_timeout"], f"{phase} の CLI の上限（安全網の残り）{left} 秒")
+    else:
+        _extend_for_declared(state, phase)
     if phase not in ("final-fix", "judge", "flaky-fix"):
         state["phase"] = phase
     statefile.save(path, state)
     statefile.emit(PHASE_TIMEOUT=timeout)
+
+
+def _extend_for_declared(state: dict, phase: str) -> None:
+    """提案・計画・成立判定の CLI は宣言の上限で切られる。その分だけ親のステップの締め切りを延ばす（#2457 決定 8）。
+
+    上限は担当ごとの環境変数で変わるため、参加者のうち最も長い CLI の上限を使う。"""
+    import limits as limit_decl
+
+    agents = [str(r) for r in state.get("runtimes") or [] if r] or [str(state.get("implementer") or "")]
+    try:
+        seconds = max(limit_decl.cli_timeout(phase, agent) for agent in agents)
+    except KeyError:  # 上限の表に無い手順は延ばさない（起動側が同じ表で拒む）
+        return
+    step_extend.ahead(seconds, f"{phase} の CLI の上限（宣言）{seconds} 秒")
 
 
 def cmd_coding_time(args: argparse.Namespace) -> None:

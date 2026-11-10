@@ -25,7 +25,7 @@ from typing import Any, Optional
 import statefile
 
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
-from .items import DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
+from .items import CARRIED, DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
 from .vocabulary import DEFER_BUDGET
 
@@ -36,6 +36,8 @@ STRAY = "stray"
 
 # 最終ゲートへ入った後の `state["phase"]`。公開はこの間だけ行う（設計の決定 7）。
 FINAL_PHASES = ("final", "done")
+# 取り消さずに残す（コミットを打ち消さない）項目の状態。持ち越し・見送りの項目が持つテストのコミットは公開する
+KEPT_UNDROPPED = (CARRIED, DEFERRED)
 
 
 @dataclass
@@ -267,8 +269,9 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     for sha in (state.get("final_gate") or {}).get("fix_commits") or []:
         kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
-        # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）
-        if is_live(item) or item.get("reverted_by_commit"):
+        # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
+        # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）
+        if is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED:
             for sha in item_shas(item):
                 kept[full_commit(work, sha)] = ITEM
     return kept

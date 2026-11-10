@@ -232,7 +232,9 @@ def merge(state_id: Any) -> None:
     if not fix:
         info("↻ 取り込む修正はありません")
         return
-    record_observed_model(state, ran := intake.ran_seat(state, "fix", int(fix.get("attempt") or 1), str(state["implementer"])), "fix")
+    record_observed_model(
+        state, ran := intake.ran_seat(state, "fix", int(fix.get("attempt") or 1), str(fix.get("impl") or state["implementer"])), "fix"
+    )
     note_stopped(state, ran, "fix")
     left_result = read_result(state, ran, "fix").payload is not None
     fix_items = [find_item(state, i, required=False) for i in fix.get("items") or []]

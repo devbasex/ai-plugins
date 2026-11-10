@@ -361,3 +361,16 @@ def test_a_drop_without_commits_to_remove_does_not_touch_git(undo, tmp_path, rep
     assert record["reverted"] == 0
     assert _run("rev-parse", "HEAD", cwd=work) == base
     assert read_state(path)["items"][0]["status"] == "reverted"
+
+
+@pytest.mark.parametrize("status", ["carried", "deferred"])
+def test_a_test_commit_kept_by_an_undropped_item_is_publishable(ledger, tmp_path, repo, status):
+    """持ち越し・見送りの項目はコミットを打ち消さない。HEAD に残したテストのコミットは公開できる（stray にしない）。"""
+    work = repo["work"]
+    base = _base(work, ["src/a.py"])
+    _change(work, "src/a.py", 2, "test-I-001")
+    test_sha = commit_with_trailers(work, "test I-001", item_trailers("I-001"))
+    item = {"id": "I-001", "rank": 1, "path": "src/a.py", "status": status, "commits": {"test": test_sha, "implement": [], "fix": []}}
+    path = _state(tmp_path, work, base, [item], phase="final")
+
+    assert ledger.unpublishable(read_state(path), str(work), base) == []
