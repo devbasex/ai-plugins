@@ -6145,6 +6145,30 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "判定表",
+      "context": "ndf-workflow",
+      "meaning": "development-workflow の「上から順に条件を判定する」の表。順・モード・該当条件の 3 列を持ち、最初に当たった行のモードを採る",
+      "pending_source": "issues/issue-2923-requirements.md"
+    },
+    {
+      "term": "判定の根拠",
+      "context": "ndf-workflow",
+      "meaning": "1 つの課題について、判定表の当たった行（順とモード）・当たった条件の文・触るファイルの一覧の組",
+      "pending_source": "issues/issue-2923-requirements.md"
+    },
+    {
+      "term": "判定の材料",
+      "context": "ndf-workflow",
+      "meaning": "判定の根拠を選ぶためにスクリプトが集める事実。触るファイルの候補・公開インタフェースの変更の有無・対象のテストの有無",
+      "pending_source": "issues/issue-2923-requirements.md"
+    },
+    {
+      "term": "スプリントのモード",
+      "context": "ndf-workflow",
+      "meaning": "1 つのスプリントに掛けるモード。スプリントの課題ごとの判定のうち、判定表で最も上の行のモード",
+      "pending_source": "issues/issue-2923-requirements.md"
     }
   ]
 }
