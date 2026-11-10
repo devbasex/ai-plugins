@@ -63,7 +63,7 @@ class Fake:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.server.server_port}/backend-api/settings/user"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def of(self, method):
         return [r for r in self.requests if r["method"] == method]

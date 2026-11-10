@@ -240,19 +240,7 @@ def test_tests_directory_is_not_scanned(tmp_path: Path) -> None:
     assert "tests/fixture.md" not in output_of(result)
 
 
-# --- T6: 実リポジトリで通る ---
-
-
-def test_real_repository_passes() -> None:
-    """実物の Skill でも通る。チェックを入れた時点で落ちる状態を作らない。"""
-    result = run_check(REPO_ROOT / "plugins/ndf/skills")
-    assert result.returncode == 0, output_of(result)
-
-
-def test_default_scan_covers_the_real_repository() -> None:
-    """`--skills-dir` を省いても、実物の Skill を走査して通る。"""
-    result = subprocess.run([sys.executable, str(CHECKER)], capture_output=True, text=True, cwd=REPO_ROOT)
-    assert result.returncode == 0, output_of(result)
+# --- T6: 走査の量の報告（実リポジトリの検査は suite skill-repo-assumptions-check が流す） ---
 
 
 def test_report_shows_scan_size() -> None:

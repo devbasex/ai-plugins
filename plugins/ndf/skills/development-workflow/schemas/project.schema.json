@@ -366,6 +366,54 @@
       "title": "DeliveryResult",
       "type": "object"
     },
+    "Docs": {
+      "additionalProperties": false,
+      "description": "差分の文書のファイルの分け方（#2925）。項目を省くと既定（`lib/diff_kinds.py`）で補う。利用者が手で書き、解析は書かない。",
+      "properties": {
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Files"
+        },
+        "behavior": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behavior"
+        },
+        "tested": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TestedDocs"
+          },
+          "title": "Tested",
+          "type": "array"
+        }
+      },
+      "title": "Docs",
+      "type": "object"
+    },
     "Duration": {
       "additionalProperties": false,
       "properties": {
@@ -1005,6 +1053,34 @@
       "title": "TestDuration",
       "type": "object"
     },
+    "TestedDocs": {
+      "additionalProperties": false,
+      "description": "テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。",
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        },
+        "tests": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tests",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "tests"
+      ],
+      "title": "TestedDocs",
+      "type": "object"
+    },
     "Tool": {
       "additionalProperties": false,
       "properties": {
@@ -1321,6 +1397,21 @@
       ],
       "default": null,
       "title": "Materials"
+    },
+    "docs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Docs"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Docs"
     },
     "analysis": {
       "anyOf": [

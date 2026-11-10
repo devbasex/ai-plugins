@@ -5,9 +5,10 @@
 
 範囲は次の順に足し、重複と、他の項目のディレクトリの中に入る項目を除いて空白区切りで 1 行に出す。
 
-1. PR の差分のファイルそのもの（消したファイルは除く。ディレクトリへ広げない）。実装で新設したファイルも入る
+1. PR の差分のコードのファイルそのもの（消したファイルは除く。ディレクトリへ広げない）。実装で新設したファイルも入る。
+   文書のファイル（`lib/diff_kinds.py`。#2925）は入れない。文書の分け方の宣言が読めなければ全部を入れる
 2. 宣言のテストの置き場所（`--tests`。`.` は数えない）
-3. 2 が無いとき、変更したファイルの近くのテストの置き場所（ファイルのディレクトリから根へ向かって最初に見つかる
+3. 2 が無いとき、変更したコードのファイルの近くのテストの置き場所（ファイルのディレクトリから根へ向かって最初に見つかる
    `tests` か `test` のディレクトリ。テストの置き場所の中のファイルは探さない）
 4. 明示した範囲（`--scope`）。置き換えずに足す
 
@@ -23,6 +24,10 @@ import sys
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("pathmatch")
+import diff_kinds  # noqa: E402
 import gh_rest  # noqa: E402
 
 TEST_DIRS = ("tests", "test")
@@ -61,8 +66,14 @@ def _covered(item: str, others: list[str]) -> bool:
     return any(o != item and PurePosixPath(o) in p.parents for o in others)
 
 
+def code_files(files: list[str], root: Path) -> list[str]:
+    """文書のファイルを除いた差分。分け方の宣言が読めなければ全部を返す（文書だけと決めない）。"""
+    return diff_kinds.classify_root(root, files).code
+
+
 def build_scope(files: list[str], tests: list[str], scope: list[str], root: Path) -> list[str]:
-    """`--scope` に渡す範囲（順序を保ち、重複と他の項目のディレクトリの中の項目を除く）。"""
+    """`--scope` に渡す範囲（順序を保ち、重複と他の項目のディレクトリの中の項目を除く）。差分の文書のファイルは入れない。"""
+    files = code_files(files, root)
     declared = [t.rstrip("/") for t in tests if t.strip() not in (".", "", "./")]
     items = [*files, *(declared or near_tests(files, root)), *scope]
     uniq = list(dict.fromkeys(i.rstrip("/") or i for i in items if i))

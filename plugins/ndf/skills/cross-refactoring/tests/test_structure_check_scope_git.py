@@ -15,7 +15,16 @@ import shutil
 
 import pytest
 
-from crossref_helpers import build_git_flow, commit_with_trailers, git, item_trailers, read_state, strategy_state, write_state
+from crossref_helpers import (
+    verify_judged,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    strategy_state,
+    write_state,
+)
 
 REPO = pathlib.Path(__file__).resolve().parents[5]
 CHECK = REPO / "scripts" / "check-script-structure.py"
@@ -138,7 +147,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
 
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
 
     assert _emitted(capsys, "VERIFY") == "fix"
     # I-003 も plugins/ndf/ を変えて構造チェックを走らせるが、木に残る I-001・I-002 の違反は I-003 に関わらないので通る

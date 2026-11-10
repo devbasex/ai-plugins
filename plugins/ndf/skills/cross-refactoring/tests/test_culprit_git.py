@@ -20,6 +20,7 @@ import sys
 import pytest
 
 from crossref_helpers import (
+    verify_judged,
     past_fix_end,
     CALC,
     TEST_TOTAL,
@@ -138,9 +139,10 @@ def _calc(text):
 
 
 def _verify(flow, cmd_converge, capsys):
+    """検証を打つ。成立の判定を求められたら成立と答える（#2457 決定 3）。"""
+    verdict = verify_judged(cmd_converge, flow["path"], capsys)
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
-    return _emitted(capsys, "VERIFY"), read_state(flow["path"])["whole_test"]
+    return verdict, read_state(flow["path"])["whole_test"]
 
 
 def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
@@ -160,8 +162,8 @@ def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(
     assert items["I-002"]["status"] == "failing" and items["I-001"]["status"] == "verified"
 
 
-def test_after_the_deadline_only_the_culprit_is_reverted(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC2 — 締め切りを過ぎたら原因の項目だけを取り消し、落ちたテストが通った時点で止める。危険フラグの項目は残る。"""
+def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 5・7 — 締め切りを過ぎても取り消さず、原因の項目だけを修正へ回す。危険フラグの項目は残る。"""
     work = flow["work"]
     _existing(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
@@ -174,12 +176,12 @@ def test_after_the_deadline_only_the_culprit_is_reverted(flow, cmd_setup, cmd_im
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
-    assert verify == "done"
+    assert verify == "fix"
     items = _items(flow)
-    assert items["I-001"]["status"] == "reverted"
+    assert items["I-001"]["status"] == "failing"
     assert items["I-002"]["status"] == "verified" and items["I-003"]["status"] == "verified"
-    assert record["culprit"]["basis"] == "path" and record["resolution"] == "narrowed"
-    assert (work / "src" / "other.py").exists() and "calc broke" not in (work / "src" / "calc.py").read_text()
+    assert record["culprit"]["basis"] == "path" and record["resolution"] == "fixing"
+    assert (work / "src" / "other.py").exists()
 
 
 def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
@@ -278,7 +280,7 @@ def test_no_duplicate_function_names():
 def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_implement, cmd_converge, cmd_report, capsys):
     """AC8・AC7 — 危険フラグの項目は落ちたテストに関わらず、危険フラグの無い項目が行数の上限と同名の関数の検査を落とす。
 
-    締め切りを過ぎていても、取り消されるのは原因の 2 項目だけで、危険フラグの項目は 1 件も取り消されない。
+    締め切りを過ぎていても取り消さず、原因の 2 項目だけが修正へ回り、危険フラグの項目は残る（#2457）。
     """
     _existing(flow, {"tests/test_layout.py": LAYOUT_TEST})
     long_calc = CALC + "\n\ndef extra():\n    return 0\n"  # 13 行を超える
@@ -300,23 +302,21 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_im
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
-    assert verify == "done"
+    assert verify == "fix"
     assert _items(flow)["I-001"]["danger"] and _items(flow)["I-003"]["danger"]
     assert not _items(flow)["I-002"]["danger"] and not _items(flow)["I-004"]["danger"]
     assert sorted(record["culprit"]["culprits"]) == ["I-002", "I-004"] and record["culprit"]["basis"] == "path"
     items = _items(flow)
     assert items["I-001"]["status"] == "verified" and items["I-003"]["status"] == "verified"
-    assert items["I-002"]["status"] == "reverted" and items["I-004"]["status"] == "reverted"
+    assert items["I-002"]["status"] == "failing" and items["I-004"]["status"] == "failing"
 
     _call(cmd_report, "cmd_report", metrics=False)
     out = capsys.readouterr().out
     assert "I-002" in out and "I-004" in out and "path" in out
 
 
-def test_without_time_and_without_a_path_every_item_is_reverted_newest_first_until_it_passes(
-    flow, cmd_setup, cmd_implement, cmd_converge, capsys
-):
-    """AC5 — どちらでも決まらなければ、すべての項目を新しい順に取り消し、通った時点で止める。「決まらず」と残る。"""
+def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 — 締め切りが無いため、パスで決まらなくても項目を外した走らせ直しで原因を決め、取り消さずに修正へ回す。"""
     _existing(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
@@ -328,7 +328,8 @@ def test_without_time_and_without_a_path_every_item_is_reverted_newest_first_unt
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
-    assert verify == "done"
-    assert record["culprit"]["basis"] == "undetermined" and record["culprit"]["order"] == ["I-003", "I-002", "I-001"]
+    assert verify == "fix"
+    assert record["culprit"]["culprits"] == ["I-002"]
     items = _items(flow)
-    assert [items[i]["status"] for i in ("I-003", "I-002", "I-001")] == ["reverted", "reverted", "verified"]
+    assert items["I-002"]["status"] == "failing"
+    assert items["I-001"]["status"] == "verified" and items["I-003"]["status"] == "verified"

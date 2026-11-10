@@ -13,8 +13,6 @@
 
 from __future__ import annotations
 
-import copy
-import json
 
 import pytest
 
@@ -76,7 +74,8 @@ def test_a_distant_or_separate_change_is_dropped_alone(tmp_path, undo, line, fil
 
     record = undo.drop(path, state, ["I-001"], "テスト")
 
-    assert record["mode"] == "item"
+    # #2457 決定 6: 打ち消しは I-001 のコミットの git revert だけで、I-002 のコミットは書き換えない
+    assert record["mode"] == "revert" and record["reverted"] == 1
     foo = (work / "src" / "foo.py").read_text(encoding="utf-8")
     assert "line3-by-I-001" not in foo
     changed = (work / "src" / file).read_text(encoding="utf-8")
@@ -84,30 +83,9 @@ def test_a_distant_or_separate_change_is_dropped_alone(tmp_path, undo, line, fil
     items = {i["id"]: i for i in read_state(path)["items"]}
     assert items["I-001"]["status"] == "reverted"
     assert items["I-002"]["status"] == "implemented"
-    # 積み直した SHA を記録へ書き戻す。
-    [new_sha] = items["I-002"]["commits"]["implement"]
-    assert new_sha != c2
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == new_sha
+    assert items["I-002"]["commits"]["implement"] == c2
+    assert git("rev-parse", "HEAD~1", cwd=work).stdout.strip() == c2
     assert read_state(path)["pending_drop"] is None
-
-
-def test_an_adjacent_change_ejects_the_item_whose_commit_conflicted(tmp_path, undo):
-    """I2: 衝突したコミットの項目を外し、理由に取り消した項目と衝突したコミットの 12 桁を残す。"""
-    work, base, c1, c2 = _repo(tmp_path, 3)
-    path = _state(tmp_path, work, base, c1, c2)
-    state = read_state(path)
-    state["items"][1]["failure_reason"] = "自分の範囲テストで落ちた"
-
-    record = undo.drop(path, state, ["I-001"], "テスト")
-
-    assert record["mode"] == "ejected"
-    assert record["ejected"] == [{"item": "I-002", "commit": c2, "by": ["I-001"]}]
-    assert (work / "src" / "foo.py").read_text(encoding="utf-8") == "".join(LINES)
-    saved = read_state(path)
-    items = {i["id"]: i for i in saved["items"]}
-    assert items["I-002"]["status"] == "reverted"
-    assert items["I-002"]["failure_reason"] == f"I-001 の取り消しで {c2[:12]} の積み直しが衝突したため外した"
-    assert [d["mode"] for d in saved["drops"]] == ["ejected"]
 
 
 def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
@@ -119,7 +97,7 @@ def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
 
     record = undo.drop(path, state, ["I-003"], "テスト")
 
-    assert record["mode"] == "skip"
+    assert record["reverted"] == 0
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
 
 
@@ -166,67 +144,6 @@ def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
 
     assert "line3-by-I-001" not in (work / "src" / "foo.py").read_text(encoding="utf-8")
     assert read_state(path)["pending_drop"] is None
-
-
-def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_path, undo):
-    """積み直しの後・状態の保存の前に落ちても、再開で残す項目を失わない（I7）。
-
-    再開は記録した取り消しの前の HEAD（`pending_drop.before`）へ戻してから計画を作り直す。
-    """
-    work, base, c1, c2 = _repo(tmp_path, 30)
-    path = _state(tmp_path, work, base, c1, c2)
-    before = copy.deepcopy(read_state(path))
-    undo.drop(path, read_state(path), ["I-001"], "中断")
-    finished = read_state(path)
-    # git は積み直しまで進み、状態は着手直後（フラグだけ立った旧 SHA のまま）で残った
-    before["pending_drop"] = {"items": ["I-001"], "reason": "中断", "before": c2}
-    path.write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
-
-    undo.resume_pending_drop(path, read_state(path))
-
-    assert "line3-by-I-001" not in (work / "src" / "foo.py").read_text(encoding="utf-8")
-    assert "changed-by-I-002" in (work / "src" / "foo.py").read_text(encoding="utf-8")
-    resumed = read_state(path)
-    items = {i["id"]: i for i in resumed["items"]}
-    assert items["I-001"]["status"] == "reverted"
-    assert items["I-002"]["status"] == "implemented"
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"][-1]
-    assert (
-        git("rev-parse", "HEAD^{tree}", cwd=work).stdout.strip()
-        == git("rev-parse", f"{finished['items'][1]['commits']['implement'][-1]}^{{tree}}", cwd=work).stdout.strip()
-    )
-    assert len(resumed["drops"]) == 1
-    assert resumed["pending_drop"] is None
-
-
-def test_items_depending_on_an_ejected_item_are_ejected_in_turn(tmp_path, undo):
-    """依存の連なり: I-002 は I-001 の隣の行、I-003 は I-002 の bar.py の隣の行を触る。I-001 を取り消すと
-    I-002 が外れ、続けて I-003 も外れる。終了コード 4 で止まらない。"""
-    work, base, c1, _ = _repo(tmp_path, 30)
-    git("reset", "-q", "--hard", c1, cwd=work)
-    foo = (work / "src" / "foo.py").read_text(encoding="utf-8").splitlines(keepends=True)
-    foo[3] = "changed-by-I-002\n"
-    (work / "src" / "foo.py").write_text("".join(foo), encoding="utf-8")
-    bar = list(LINES)
-    bar[2] = "line3-by-I-002\n"
-    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
-    c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
-    bar[3] = "line4-by-I-003\n"
-    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
-    c3 = commit_with_trailers(work, "I-003", item_trailers("I-003"))
-    path = _state(tmp_path, work, base, c1, c2)
-    state = read_state(path)
-    state["items"].append(
-        {"id": "I-003", "rank": 3, "path": "src/bar.py", "status": "implemented", "commits": {"test": None, "implement": c3, "fix": []}}
-    )
-
-    record = undo.drop(path, state, ["I-001"], "テスト")
-
-    assert record["ejected"] == [{"item": "I-002", "commit": c2, "by": ["I-001"]}, {"item": "I-003", "commit": c3, "by": ["I-001"]}]
-    assert record["dropped"] == ["I-001", "I-002", "I-003"]
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == base
-    items = {i["id"]: i for i in read_state(path)["items"]}
-    assert [items[i]["status"] for i in ("I-001", "I-002", "I-003")] == ["reverted"] * 3
 
 
 def test_remap_rewrites_item_commits_and_saved_points_through_full_shas(tmp_path, undo):

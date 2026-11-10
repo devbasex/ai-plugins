@@ -309,13 +309,9 @@ def _dead(pid: int) -> bool:
 
 
 def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path):
-    """AC14 I9: 締め切りで子プロセスまで止め `timeout` にする。残りが無ければ次を起動しない。"""
+    """AC14 I9: 上限で子プロセスまで止め `timeout` にする。残りが無ければ次を起動しない。"""
     monkeypatch.setenv("FAKE_LIZARD", "slow")
-    now = time.time()
-    import datetime as _dt
-
-    end = _dt.datetime.fromtimestamp(now + 4).astimezone().isoformat(timespec="seconds")
-    r = run(files={"src/b.ts": FILES["src/b.ts"]}, scope=("src",), limits={"measure_timeout": 90, "propose_end_at": end})
+    r = run(files={"src/b.ts": FILES["src/b.ts"]}, scope=("src",), limits={"measure_timeout": 2})
     state = r.state
     started = time.monotonic()
     cmd_measure.Measurement(state, state["code_metrics"], kill_grace=0.5).run()
@@ -335,11 +331,8 @@ def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path
 
 
 def test_no_time_left_skips_reading_and_launching(run, cmd_measure):
-    """締め切りが 0 なら、ソースを読まず・ツールを起動せず、全部を `timeout` にして書く。"""
-    import datetime as _dt
-
-    end = _dt.datetime.fromtimestamp(time.time() - 60).astimezone().isoformat(timespec="seconds")
-    r = run(limits={"measure_timeout": 90, "propose_end_at": end})
+    """上限が 0 なら、ソースを読まず・ツールを起動せず、全部を `timeout` にして書く。"""
+    r = run(limits={"measure_timeout": 0})
     state = r.state
     m = cmd_measure.Measurement(state, state["code_metrics"])
     m.run()
@@ -360,7 +353,7 @@ def test_init_writes_measure_timeout_and_a_pending_record(codemetrics_record, tm
     assert record["status"] == "pending" and record["config"]["source"] == "default"
     timeline = sys.modules["refactor_lib.timeline"]
     state = {"started_at": "2026-09-26T10:00:00+09:00", "budget_minutes": 30}
-    assert timeline.of_state(state)["measure_timeout"] == 90
+    assert timeline.of_state(state)["measure_timeout"] == 600
 
 
 def test_resume_of_an_old_state_measures_only_before_the_proposal(codemetrics_record, tmp_path):

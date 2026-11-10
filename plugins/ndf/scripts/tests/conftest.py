@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import shutil
@@ -103,6 +104,30 @@ def _isolated_mvv_state(tmp_path_factory, monkeypatch):
 def _isolated_estimate_records(tmp_path_factory, monkeypatch):
     """supervise の実行が書く見積もりの実績の記録（#1856）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
     monkeypatch.setenv("NDF_ESTIMATE_DIR", str(tmp_path_factory.mktemp("estimate")))
+
+
+SHORT_POLL = 0.02  # 宣言の durable.poll（0.2 秒）の 1/10
+SHORT_WAIT_FROM_POLL = 0.1  # 宣言の durable.wait-from-poll（1 秒）の 1/10
+
+
+def _set_default(monkeypatch, fn, name: str, value) -> None:
+    params = [p for p in inspect.signature(fn).parameters.values() if p.default is not inspect.Parameter.empty]
+    defaults = tuple(value if p.name == name else p.default for p in params)
+    monkeypatch.setattr(fn, "__defaults__", defaults)
+
+
+@pytest.fixture(autouse=True)
+def _short_durable_polls(monkeypatch):
+    """プロセスの中で動く耐久ワークフローの問い合わせの間隔を縮める（#2309 の決定 3）。
+
+    間隔は結果と順序を変えない。上限の宣言（`contracts/limits.json`）は書き換えず、読み込み済みの `durable` の値だけを
+    差し替える。子プロセスで起こした supervise には効かない。"""
+    d = sys.modules.get("durable")
+    if d is None or not hasattr(d, "wait_from"):
+        return
+    monkeypatch.setattr(d, "POLL_SECONDS", SHORT_POLL)
+    _set_default(monkeypatch, d.wait, "poll", SHORT_POLL)
+    _set_default(monkeypatch, d.wait_from, "poll", SHORT_WAIT_FROM_POLL)
 
 
 @pytest.fixture(autouse=True)

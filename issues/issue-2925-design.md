@@ -351,7 +351,7 @@ worker の手順（プロンプトに載せる）:
 2. 次のコマンドを、Pull Request の worktree の一時コピーで 1 回起動する
 
    ```text
-   claude -p --plugin-dir <対象のプラグインの根> --output-format stream-json --no-session-persistence --max-budget-usd 1
+   claude -p --plugin-dir <対象のプラグインの根> --output-format stream-json --verbose --no-session-persistence --max-budget-usd 1
    ```
 3. 出力のツールの呼び出しと応答から、変わった指示どおりに動いたかを判定する。動かなければ「落ちた」とし、理由を `observed` に書く
 4. 対象は 6 件まで。超えた分は「確かめていない」として `post` に載せ、`verify` が落とす（人が判断する）

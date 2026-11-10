@@ -10,7 +10,8 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import refactor_step_seconds
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
     base_sync_steps,
@@ -229,7 +230,7 @@ NO_REFACTOR_MODES = ("light", "operation", "documentation")
 def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
     """検査の assess・refactor・review のステップ。pr_ref は PR の番号か、駆動が埋める `{pr}`。
 
-    refactor の `timeout` は想定最大時間（無ければ cross-refactoring の既定の予算）に `with_margin` の余裕を足す（#1916）。"""
+    refactor の `timeout` は実装の予算（無ければ cross-refactoring の既定の予算）×（1 + 安全網の倍率）に `with_margin` の余裕を足す（#1916・#2457 決定 8）。"""
     budget = getattr(a, "refactor_budget_minutes", None)
     budget_arg = f" --budget-minutes {budget}" if budget else ""
     return [
@@ -242,22 +243,22 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "on_fail": "refactor",
             "next": "refactor",
         },
-        # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
-        # 範囲を変数へ受けて終了コードを見る。`--scope $(...)` のままだと範囲を組めないときの停止（終了コード 2）が
-        # 捨てられ、空の --scope で argparse が落ちる
+        # 駆動で回す（最終ゲートは全体テスト。#1334）。範囲は変数へ受けて終了コードを見る（`--scope $(...)` のままだと
+        # 範囲を組めないときの停止（終了コード 2）が捨てられ、空の --scope で argparse が落ちる）
         {
             "id": "refactor",
             "type": "drive",
             "drive": "cross-refactoring",
             "kind": "構造改善",
             "stage": "構造改善",
-            "timeout": with_margin((budget or default_refactor_budget_minutes()) * 60),
+            "timeout": with_margin(refactor_step_seconds(budget or default_refactor_budget_minutes())),
             "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope"
             f"{budget_arg}{refactor_template_arg(a)}",
-            # 時間の枠に収まらずリファクタリングを飛ばした終わり（終了コード 6 と gaps）はコードレビューへ進む（#2047 の I6）。
-            # 想定最大時間を省いて下限まで上げたときの締め切りは、駆動が書くステップの延長で実行の時点に延ばす
+            # 着手前のテストのハングで飛ばした終わり（終了コード 6 と gaps）はコードレビューへ（#2047 の I6）。安全網で止めた
+            # 終了コード 10 は承認ゲートで、未解決の変更へレビューと検査を打たずにプランを終える（#2457 決定 8）
             "on_exit": {"6": "review"},
             "on_fail": "abort",
+            "gate_next": "end",
             "next": "review",
         },
         {
@@ -270,8 +271,9 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "args": f"{pr_ref} --max-rounds 4",
             # 収束しなかった終わり（終了コード 6 と gaps）も落ちたとして止まり、後続の検査へ進めない（#2143）
             "on_fail": "abort",
-            "next": "base-sync",  # 全体テストの前にベースブランチを取り込む（#1917）
+            "next": "behavior-targets",
         },
+        *(dict(step) for step in BEHAVIOR_STEPS),
     ]
 
 

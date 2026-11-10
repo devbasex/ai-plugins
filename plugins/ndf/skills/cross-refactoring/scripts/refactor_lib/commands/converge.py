@@ -1,15 +1,18 @@
-"""検証（`verify`、#933 の F6・#1793 の R3）。修正の取り込み（`merge-fix`）は `fix_intake.py` にある。
+"""検証（`verify`、#933 の F6・#2457 決定 3・4）。修正の取り込み（`merge-fix`）は `fix_intake.py` にある。
 
-**検証は HEAD で項目ごとの範囲テストを走らせる**（決定 14）。同じ語の並びの項目は
-1 回だけ走らせて結果を共有する。全体のテストは、危険フラグが立ったときに検証の中で
-1 度だけ走らせる。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗・変更が
-原因を見分け、変更が原因なら修正へ回す。修正の締め切りまでに通らなければ、
-危険フラグの項目を新しい順に 1 件ずつ取り消し、通った時点で止める（決定 22。決定 15 を改めた）。
-修正担当が直さなかった項目は、締め切りを待たずに検証の最初に取り消す（#1793 の R3）。
+**検証は HEAD で項目ごとの範囲テストを走らせる**（決定 14）。同じ語の並びの項目は 1 回だけ走らせて結果を共有する。
+全体のテストは、危険フラグが立ったときに走らせ、直した後は落ちたテストを確かめ直す。落ちたら落ちたテストを
+走らせ直してフレーキー・既存失敗・変更起因を見分け、変更起因なら原因の項目を修正へ回す。
+
+**時計と回数で取り消さない**（#2457 の原則 1・2）。落ちた項目ごとに落ちたテストの集合の履歴を見て（`fixloop`）、
+前進する限り修正を続ける。初めて落ちた項目と、停滞か振動した項目は、実装担当と別のランタイムが成立を判定する。
+成立しない項目と、修正担当を替えた後も停滞か振動した項目だけを、そのコミットの `git revert` で打ち消す。
 
 | 返す値 | 意味 | 駆動がすること |
 | --- | --- | --- |
-| `VERIFY=fix` | 直す項目が残った | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
+| `VERIFY=fix` | 直す項目が残った（`FIX_IMPL` が修正担当） | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
+| `VERIFY=judge` | 成立の判定が要る（`JUDGE_IMPL` が判定の担い手） | 判定の CLI を起動し、`judge` の後に `verify` へ戻る |
+| `VERIFY=halt` | 打ち消しの衝突か、判定の担い手が居ないまま停滞した（`HALT_REASON`） | 止めて人へ渡す（`gate`） |
 | `VERIFY=done` | 残った項目の範囲テストがすべて通った | 採り直しの判定（`readopt`）へ。push は最終ゲートの入口の 1 度だけ |
 """
 
@@ -18,67 +21,36 @@ from __future__ import annotations
 import argparse
 import pathlib
 import time
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, scope_verdict, targets, timeline, triage, wholetest
+from .. import culprit, danger, fixloop, info, progress, scope_verdict, targets, timeline, triage, wholetest
+from . import flaky
 from ..gitfacts import commit_files, discard_impl_leftovers
-from ..items import FAILING, IMPLEMENTED, VERIFIED, in_current_round, item_shas, live_items, newest_first
+from ..items import FAILING, VERIFIED, in_current_round, item_shas, live_items, newest_first
 from ..outbound import item_lines, plan_line
 from ..paths import head_sha, load_state, work_dir
 from ..phases import add_phase_seconds, finish_phase
-from ..undo import drop, resume_pending_drop
-from ..fix_intake import UNFIXED_REASON, merge as merge_fix
+from ..undo import UndoConflict, resume_pending_drop, revert_items
+from ..fix_intake import merge as merge_fix
 
 
 # ---------- 範囲テスト ----------
 
 
-def _revert_shared(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    group: list[dict[str, Any]],
-    reason: Any,
-) -> bool:
-    """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
-
-    `reason` は理由の文か、項目から理由を作る関数（落ちた検査を理由に入れる。#1688 I6）。
-    取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
-    項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
-    範囲テストで、全体のテストではない。
-    通った時点で止めたら真、全件を取り消したら偽を返す。
-    """
-    remaining = newest_first(group)
-    while remaining:
-        target = remaining.pop(0)
-        why = reason(target) if callable(reason) else reason
-        target["failure_reason"] = why
-        drop(path, state, [target["id"]], why)
-        remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
-        if not remaining:
-            return False
-        words = [r.command for r in targets.verify_runs(state, remaining[0])]
-        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"])):
-            for item in remaining:
-                item["status"] = VERIFIED
-            return True
-    return False
-
-
-def _fix_stop(state: dict[str, Any]) -> bool:
-    """修正の試行を打ち切るか。**回数ではなく時計で決める**（決定 23）。
-
-    修正に使える残り（上限の表の `fix_end_at` までの `budget.fix_time_left`。再開でずれた値）が予備時間の `fix`
-    （修正 1 回の見積り）に足りなければ打ち切る。範囲テストの修正と全体のテストの直しが同じ判定を使う
-    （決定 22）。1 回の修正 = 実装担当の 1 起動で、次の試行の前にここで時計を見る。
-    """
-    reserve = (state.get("plan") or {}).get("reserve") or {}
-    left = budget.fix_time_left(culprit.fix_deadline(state), clock.now())
-    return bool(state.get("fix_no_relaunch")) or left < float(reserve.get("fix") or 0.0)  # 旗は振り替え先の無い修正（#919）
-
-
 STOP_REASON = scope_verdict.STOP_REASON
+
+
+class Halt(Exception):
+    """止めて人へ渡す（打ち消しの衝突・判定の担い手が居ないまま停滞。#2457 決定 3・6）。"""
+
+
+def _converge_halt(path: pathlib.Path, state: dict[str, Any], reason: str, detail: str, item_id: Any) -> NoReturn:
+    """止めた理由を `state["halt"]` へ書いて保存し、`Halt` を送る。"""
+    state["halt"] = {"reason": reason, "detail": detail, "item": item_id, "at": statefile.now()}
+    statefile.save(path, state)
+    raise Halt(detail) from None
 
 
 def _items_in(state: dict[str, Any], status: str) -> list[dict[str, Any]]:
@@ -86,54 +58,79 @@ def _items_in(state: dict[str, Any], status: str) -> list[dict[str, Any]]:
     return [i for i in live_items(state) if i.get("status") == status]
 
 
-def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
-    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。取り消したら真。
-
-    理由には落ちた検査（suite・ファイル）を入れる（`scope_verdict.reason`。#1688 I6）。
-    """
-    if not _fix_stop(state):
-        return False
-    groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-    for item in _items_in(state, FAILING):
-        groups.setdefault(targets.command_key(item), []).append(item)
-    for group in groups.values():
-        _revert_shared(path, state, group, scope_verdict.reason)
-    if groups:
-        # 時間で直しの試行を打ち切ったこと（報告の「省いたもの」。#1743）
-        state.setdefault("fix_stats", {})["cut_off"] = True
-    return bool(groups)
-
-
-def _drop_unfixed(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """直さなかった項目（`merge-fix` が `unfixed` を付けた生きている項目）を 1 回の取り消しでまとめて取り消す（#1793 の R3）。
-
-    締め切りを待たない。同じ項目を同じ状態で修正へ渡し直しても結果は変わらないためである。"""
-    unfixed = [i for i in live_items(state) if i.get("unfixed")]
-    if not unfixed:
-        return
-    for item in unfixed:
-        item["failure_reason"] = UNFIXED_REASON
-    info(f"↩ 修正担当が直さなかった項目 {len(unfixed)} 件（{', '.join(i['id'] for i in unfixed)}）を取り消します")
-    drop(path, state, [i["id"] for i in unfixed], UNFIXED_REASON)
-
-
 def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """直さなかった項目を取り消し、判定を待つ項目を範囲テストで判定し、締め切りなら取り消して判定し直す
-    （#1688 の順序 1〜4・#1793 の R3 と確かめ直し）。
-
-    取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
-    """
-    _drop_unfixed(path, state)
+    """判定を待つ項目を範囲テストで判定する（#1688 の順序）。直さなかった項目も取り消さない（停滞として数える）。"""
     scope_verdict.judge_items(path, state, scope_verdict.pending(state))
     statefile.save(path, state)
-    for _ in range(len(state.get("items") or []) + 1):
-        if not _give_up(path, state):
-            return
-        pending = scope_verdict.pending(state)
-        if not pending:
-            return
-        scope_verdict.judge_items(path, state, pending)
-        statefile.save(path, state)
+
+
+def _judged_at(item: dict[str, Any], seq: int, rejudge: bool) -> Optional[dict[str, Any]]:
+    """この修正の回（`seq`）の判定（判定し直しか初回か）。無ければ `None`。"""
+    for entry in reversed(item.get("feasibility") or []):
+        if int(entry.get("seq", -1)) == seq and bool(entry.get("rejudge")) == rejudge:
+            return entry
+    return None
+
+
+def _needs_judge(item: dict[str, Any], verdict: str) -> Optional[bool]:
+    """判定が要るなら判定し直しか（真）初回か（偽）を返す。要らなければ `None`。"""
+    seq = int(item.get("fix_count") or 0)
+    if verdict in progress.STOPPING:
+        return None if _judged_at(item, seq, True) else True
+    if not item.get("feasibility"):
+        return None if _judged_at(item, seq, False) else False
+    return None
+
+
+def _revert(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]], why: str) -> None:
+    """成立しない項目のコミットだけを打ち消す（I4・I5）。衝突したら止めて人へ渡す（I9）。"""
+    for item in items:
+        item["revert_reason"] = why
+    try:
+        revert_items(path, state, [i["id"] for i in items], fixloop.REASON_TEXT[why])
+    except UndoConflict as exc:
+        _converge_halt(path, state, "revert_conflict", str(exc), exc.item_id)
+
+
+def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[str, Any]]) -> Optional[str]:
+    """落ちた項目ごとに次の手を決める。判定が要れば判定の担い手を返す（`VERIFY=judge`）。打ち消しは済ませる。"""
+    wanted: dict[str, bool] = {}
+    for item in failing:
+        verdict = fixloop.note_round(state, item)
+        rejudge = _needs_judge(item, verdict)
+        if rejudge is not None:
+            wanted[item["id"]] = rejudge
+    if wanted:
+        judge_by = fixloop.other_runtime(state, [])
+        if judge_by is not None:
+            state["feasibility_request"] = {"items": sorted(wanted), "rejudge": wanted, "by": judge_by, "at": statefile.now()}
+            statefile.save(path, state)
+            return judge_by
+        for item in failing:
+            if item["id"] in wanted:
+                fixloop.note_feasibility(item, None, None, "判定の担い手が居ない（参加者が実装担当だけ）", "", wanted[item["id"]])
+    revert_now: dict[str, list[dict[str, Any]]] = {}
+    for item in failing:
+        seq = int(item.get("fix_count") or 0)
+        answer = _judged_at(item, seq, True) or _judged_at(item, seq, False)
+        if answer is not None and answer.get("feasible") is False:
+            revert_now.setdefault(fixloop.INFEASIBLE, []).append(item)
+            continue
+        verdict = str((item.get("fix_history") or [{}])[-1].get("progress") or progress.FIRST)
+        move = fixloop.next_move(state, item, verdict)
+        if move == fixloop.REVERT:
+            revert_now.setdefault(fixloop.STALLED_AFTER_SWITCH, []).append(item)
+        elif move == fixloop.SWITCH:
+            if answer is not None and answer.get("feasible") is None and answer.get("rejudge"):
+                _converge_halt(path, state, "no_judge", f"{item['id']} の修正が停滞し、成立を判定し直す担い手が居ない", item["id"])
+            new = fixloop.switch_fixer(state, item, answer.get("by") if answer else None)
+            if new is None:
+                _converge_halt(path, state, "no_fixer", f"{item['id']} の修正が停滞し、替える修正担当が居ない", item["id"])
+            info(f"🔁 {item['id']} の修正が{('停滞' if verdict == progress.STALLED else '振動')}したため、修正担当を {new} へ替えます")
+    for why, items in revert_now.items():
+        _revert(path, state, items, why)
+    statefile.save(path, state)
+    return None
 
 
 # ---------- 危険フラグ ----------
@@ -192,7 +189,8 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
 
 
 def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> bool:
-    """危険フラグが立ったら全体テストを巡ごとに 1 度だけ走らせる（AC13 AC14。前の巡の記録は `whole_test_history` にある）。
+    """危険フラグが立ったら全体テストを巡ごとに走らせる（AC13 AC14。前の巡の記録は `whole_test_history` にある）。
+    直した後は落ちたテストを確かめ直す（#2457 の棚卸し #33）。
 
     落ちたら落ちたテストを見分け（決定 22）、変更起因のものがあれば修正へ回す。
     修正へ回したら真を返す。直しの途中（`resolution: fixing`）なら、全体テストは
@@ -248,6 +246,7 @@ def _triage_whole(
     flagged = [i for i in newest_first(live_items(state)) if i.get("danger") and in_current_round(state, i)]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
+    flaky.queue_flaky(state, record.get("flaky"), str(log))
     statefile.save(path, state)
     if record.get("fallback_reason"):
         return wholetest.fallback(path, state, record, flags, flagged, log, _fix_or_narrow)
@@ -259,7 +258,7 @@ def _triage_whole(
         record["resolution"] = "kept"
         info("✅ 変更起因の失敗はありません。危険フラグの項目は取り消しません（最終ゲートが全体テストを走らせます）")
         return False
-    culprit.judge(state, record, record, culprit.fix_deadline(state))  # 修正と取り消しの対象は原因の項目（#1649）
+    culprit.judge(state, record, record)  # 修正の対象は原因の項目（#1649）
     record["resolution"] = "fixing"
     return _fix_or_narrow(path, state, record, log)
 
@@ -281,23 +280,25 @@ def _fix_or_narrow(
     record: dict[str, Any],
     log: pathlib.Path,
 ) -> bool:
-    """締め切りの内で原因が決まっていれば原因の項目を修正へ回し（真）、でなければ原因の項目から絞って取り消す（偽）。
-
-    **1 回の修正 = 実装担当の 1 起動である。** 次の試行の前にここで時計を見るため、締め切りを担当の申告に頼らない。
-    走らせ直すコマンドは `_rerun_plan` が決め、すべて通ったときだけ通ったとする。
-    """
+    """原因の項目を修正へ回す（真）。原因が決まらなければ取り消さず、最終ゲートへ寄せる（偽。#2457 決定 4）。"""
     items = _whole_items(state, record)
     rerun, whole = _rerun_plan(state, record)
-    if items and culprit.fixable(record) and not _fix_stop(state):
+    if items and culprit.fixable(record):
         for item in items:
             item["status"] = FAILING
             item["last_log"] = str(log)
             item["whole_test_command"] = [culprit.one_command(rerun)]
+            item["failed_check"] = {
+                "kind": "test",
+                "suite": "whole",
+                "command": culprit.one_command(rerun),
+                "files": [],
+                "tests": list(record.get("caused") or []),
+            }
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
-    narrow_log = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log"
-    passed = culprit.narrow(path, state, record, STOP_REASON, lambda: targets.run_or_stop(path, state, rerun, narrow_log, whole=whole))
-    info(f"↩ 原因の項目から順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
+    record["resolution"] = "deferred"
+    info("ℹ 全体テストの変更起因の失敗の原因の項目を決められません。取り消さず、最終ゲート修正へ寄せます")
     return False
 
 
@@ -309,13 +310,27 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
     rerun, whole = _rerun_plan(state, record)
+    triage.clear_junit(state)  # 前の実行の JUnit を今回の失敗として読まない
     if targets.run_or_stop(path, state, rerun, log, whole=whole, phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
         info("✅ 変更起因で落ちたテストが、直した後に通りました")
         return False
+    _refresh_caused(state, record)
     return _fix_or_narrow(path, state, record, log)
+
+
+def _refresh_caused(state: dict[str, Any], record: dict[str, Any]) -> None:
+    """走らせ直しで今回落ちた ID を `caused` へ読み直す（修正担当へ渡す `failed_check.tests` と前進の判定に使う）。
+
+    初回の `caused` のままだと、失敗が減っても同じ集合の停滞と判定される。JUnit を読めない・既存失敗とフレーキーを
+    除くと空になるときは、初回の値を残す。"""
+    ids, _ = triage.failed_ids_of(state)
+    known = {*(record.get("preexisting") or []), *(record.get("flaky") or [])}
+    current = sorted({str(t) for t in ids or [] if t not in known})
+    if current:
+        record["caused"] = current
 
 
 # ---------- verify ----------
@@ -327,9 +342,9 @@ def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
-    """項目を範囲テストで検証する。出力は `VERIFY=done|fix`。
+    """項目を範囲テストで検証する。出力は `VERIFY=done|fix|judge|halt`。
 
-    終了コード: 0（`VERIFY` で分岐する）/ 4 = 中断（取り消しの失敗など）。
+    終了コード: 0（`VERIFY` で分岐する）/ 4 = 中断（起動の失敗など）。
     """
     path, state = load_state(args.id)
     if state.get("fix"):
@@ -342,18 +357,32 @@ def cmd_verify(args: argparse.Namespace) -> None:
     state["phase"] = "verify"
     started = time.monotonic()
     state.pop("launch_failure", None)
-    for _ in range(len(state.get("items") or []) + 1):
-        _settle_scope(path, state)
-        failing = _items_in(state, FAILING)
-        if failing:
-            _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
-            return
-        if _whole_test(path, state, _flag_items(state)):
-            _to_fix(path, state, _items_in(state, FAILING), started, "全体のテストを落とした原因の項目")
-            return
-        # 全体テストの取り消しで確かめ直す項目が残ったら、範囲テストの判定へ戻る（全体テストは走らせ直さない）
-        if not scope_verdict.pending(state):
-            break
+    try:
+        for _ in range(len(state.get("items") or []) + 1):
+            _settle_scope(path, state)
+            failing = _items_in(state, FAILING)
+            if not failing and _whole_test(path, state, _flag_items(state)):
+                failing = _items_in(state, FAILING)
+            if failing:
+                judge_by = _plan_failing(path, state, failing)
+                if judge_by is not None:
+                    _account(state, started)
+                    statefile.save(path, state)
+                    info(f"⚖ 成立の判定を {judge_by} に依頼します（{', '.join(state['feasibility_request']['items'])}）")
+                    statefile.emit(VERIFY="judge", JUDGE_IMPL=judge_by)
+                    return
+                failing = _items_in(state, FAILING)
+                if failing:
+                    _to_fix(path, state, failing, started, "落ちた項目")
+                    return
+            if not scope_verdict.pending(state):
+                break
+    except Halt as exc:
+        _account(state, started)
+        statefile.save(path, state)
+        info(f"⏸ 止めて人へ渡します: {exc}")
+        statefile.emit(VERIFY="halt", HALT_REASON=str(exc).replace("\n", " "))
+        return
     _account(state, started)
     finish_phase(state, "verify")
     # 次は採り直しの判定。公開は最終ゲートの入口の 1 度だけで、巡ごとに push しない（#1399・#1743 決定 10）
@@ -373,18 +402,21 @@ def _to_fix(
     started: float,
     what: str,
 ) -> None:
-    """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
+    """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。修正担当は先頭の項目の担当で、同じ担当の項目をまとめる。"""
+    impl = fixloop.fixer_of(state, failing[0])
+    group = [i for i in failing if fixloop.fixer_of(state, i) == impl]
     state["fix"] = {
-        "items": [i["id"] for i in failing],
+        "items": [i["id"] for i in group],
         "base_sha": head_sha(work_dir(state)),
         "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
+        "impl": impl,
     }
     _account(state, started)
     statefile.save(path, state)
-    info(f"❌ {what} {len(failing)} 件を修正へ回します")
-    for line in item_lines(state, [i["id"] for i in failing]):
+    info(f"❌ {what} {len(group)} 件を修正へ回します（修正担当 {impl}）")
+    for line in item_lines(state, [i["id"] for i in group]):
         info(f"   {line}")
-    statefile.emit(VERIFY="fix")
+    statefile.emit(VERIFY="fix", FIX_IMPL=impl)
 
 
 def _account(state: dict[str, Any], started: float) -> None:

@@ -3,7 +3,7 @@
 | 条件 | 確かめること |
 | --- | --- |
 | I13 | 項目は期限を持たず、コミットの無い項目は持ち越す（`not_done` にしない） |
-| I14 | 残った時間に入る候補だけを順位の順に採り、入らない候補は飛ばす。LLM を呼ばない |
+| I14 | 実装の予算の残り（実効の予算 − 採っている項目の見積りの和）に入る候補だけを順位の順に採り、入らない候補は飛ばす。LLM を呼ばない |
 | I15 | 採るのは `budget` の見送りと持ち越しだけ。入らなければ持ち越しを `not_done` にして最終ゲートへ |
 | 巡 | 2 巡目の取り込みは新しい起点から働き、前の巡の検証済みに触れない。取り消し済みの判定は巡ごと |
 """
@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 
 import pytest
 
@@ -63,16 +62,24 @@ def _plan(flow, items, candidates=(), deferred=(), left_minutes=None, phase="imp
     state["deferred_items"] = list(deferred)
     state["plan"] = {"base_sha": git("rev-parse", "HEAD", cwd=flow["work"]).stdout.strip(), "reserve": RESERVE, "table_source": "defaults"}
     state["readopt"] = {"round": 1, "events": []}
-    state["pause"] = {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []}
     state["phase"] = phase
     write_state(flow["path"], state)
     timeline = __import__("refactor_lib.timeline", fromlist=["of_state"])
     state["limits"] = timeline.of_state(state)
     if left_minutes is not None:
-        # 残った時間 = 打ち切り − 今 − バッファ（0.3 分）
-        now = dt.datetime.now().astimezone()
-        state["limits"]["final_end_at"] = (now + dt.timedelta(minutes=left_minutes + 0.3)).isoformat(timespec="seconds")
+        _left(state, left_minutes)
     write_state(flow["path"], state)
+
+
+def _left(state, minutes):
+    """実装の予算を、着手済みの項目の見積りの和 + `minutes` にする（採り直しの残り = `minutes`。#2457 の I1）。"""
+    budget = __import__("refactor_lib.budget", fromlist=["estimate_total"])
+    used = sum(
+        budget.estimate_total(i["estimate"])
+        for i in state["items"]
+        if i.get("status") not in ("planned", "carried", "reverted", "deferred")
+    )
+    state["budget"] = {"minutes": round(used + minutes, 6), "extension": None}
 
 
 def _call(module, name, **kwargs):
@@ -122,6 +129,45 @@ def test_all_items_carried_reach_the_readopt(flow, cmd_setup, cmd_implement, rea
     assert [e["name"] for e in state["phases_history"]] == ["implement"]
 
 
+def test_a_carried_item_keeps_its_test_commit_when_readopted(flow, readopt):
+    """持ち越しは項目のコミットを取り消さない（#2457）。採り直しでテストのコミットを外すと、公開の直前に未所属で止まる。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert True\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    item["seconds"] = {"test": 12.0}
+    _plan(flow, [item], phase="readopt")
+
+    _call(readopt, "cmd_readopt")
+
+    state = read_state(flow["path"])
+    got = state["items"][0]
+    assert got["status"] == "tested" and got["round"] == 2
+    assert state["phase"] == "implement", "テストを持つ項目だけを採り直したら、テストの追加を起動しない"
+    assert got["commits"] == {"test": test_sha, "implement": [], "fix": []} and got["seconds"] == {"test": 12.0}
+
+
+def test_an_item_carried_again_after_the_readopt_is_not_readopted(flow, cmd_setup, cmd_implement, readopt):
+    """採り直した後もコミットが無く持ち越しに戻った項目は、もう採り直さずに `not_done` で人へ渡す。
+
+    持ち越しは見積りの消費に数えないため、採り直しを重ねても予算の残りが減らず、前進しない実装の CLI を繰り返す。"""
+    _plan(flow, [_entry("I-001", 1, "total")])
+    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
+    _call(readopt, "cmd_readopt")
+    assert read_state(flow["path"])["items"][0]["readopted"] == 1
+
+    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    assert state["phase"] == "final" and state["items"][0]["status"] == "deferred"
+    assert _deferred(flow) == {"I-001": "not_done"}
+    assert "採り直した後も" in state["items"][0]["failure_reason"]
+
+
 def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implement, readopt):
     """巡: 1 巡目の取り込みの後に採り直した項目は、2 巡目の新しい起点からのコミットで取り込まれる。"""
     work = flow["work"]
@@ -148,7 +194,7 @@ def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implemen
 
 
 def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_setup, cmd_implement, readopt):
-    """I15: 残った時間に入らなければ持ち越しを `not_done` で見送り、`phase` を `final` にして終了コード 2。"""
+    """I15: 実装の予算の残りに入らなければ持ち越しを `not_done` で見送り、`phase` を `final` にして終了コード 2。"""
     _plan(flow, [_entry("I-001", 1, "total")], left_minutes=0.5)
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
@@ -164,15 +210,78 @@ def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_se
     assert len(read_state(flow["path"])["readopt"]["events"]) == 1
 
 
+@pytest.mark.parametrize("kind", ["test_failed", "non_test_files"])
+def test_deferring_reverts_a_test_commit_that_was_sent_back(flow, readopt, kind):
+    """見送りへ変える項目のテストのコミットが今のコードで落ちる・テスト以外を変えるなら、打ち消して公開へ流さない。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert False\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    item["sendbacks"] = [{"kind": kind, "reason": "x", "at": "2026-11-10T00:00:00"}]
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    got = state["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] is None and got["unverified_reverted"] == [test_sha]
+    assert not (work / "tests" / "test_total.py").exists()
+    ledger = __import__("refactor_lib.ledger", fromlist=["unpublishable"])
+    assert ledger.unpublishable(state, str(work), state["plan"]["base_sha"]) == []
+
+
+def test_deferring_keeps_an_unverified_test_commit_when_its_revert_conflicts(flow, readopt):
+    """打ち消しが衝突しても実行全体を止めず、HEAD を戻してコミットを残し、最終ゲートに判定を任せる。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert False\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    # 後のコミットが同じ行を書き換えると、テストのコミットだけの revert は衝突する
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert 1 == 2\n", encoding="utf-8")
+    git("commit", "-qam", "later change", cwd=work)
+    later = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    item["sendbacks"] = [{"kind": "test_failed", "reason": "x", "at": "2026-11-10T00:00:00"}]
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+    _set(flow, ledger={"orchestrator_commits": [later]})
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    got = state["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] == test_sha and got["unverified_kept"] == [test_sha]
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == later
+    assert state["phase"] == "final"
+    ledger = __import__("refactor_lib.ledger", fromlist=["unpublishable"])
+    assert ledger.unpublishable(state, str(work), state["plan"]["base_sha"]) == []
+
+
+def test_deferring_keeps_a_test_commit_without_a_sendback(flow, readopt):
+    """差し戻しの無いテストのコミットは、見送りへ変えても打ち消さずに公開できるコミットとして残す。"""
+    work = flow["work"]
+    (work / "tests" / "test_total.py").write_text("def test_total():\n    assert True\n", encoding="utf-8")
+    test_sha = commit_with_trailers(work, "Add tests for total", item_trailers("I-001"))
+    item = _entry("I-001", 1, "total", status="carried", tests=("tests/test_total.py::test_total",))
+    item["commits"]["test"] = test_sha
+    _plan(flow, [item], left_minutes=0.5, phase="readopt")
+
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    got = read_state(flow["path"])["items"][0]
+    assert got["status"] == "deferred" and got["commits"]["test"] == test_sha
+    assert (work / "tests" / "test_total.py").exists()
+
+
 def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, readopt, cmd_plan, monkeypatch):
-    """I14: 残った時間 3.8 分に 2.1・2.0・1.1 分の候補（順位の順）なら 2.1 と 1.1 を採り、2.0 を飛ばす。ほかの理由の見送りは採らない。"""
+    """I14: 残り 3.5 分に 1.9・1.8・0.9 分の候補（順位の順）なら 1.9 と 0.9 を採り、1.8 を飛ばす。ほかの理由の見送りは採らない。"""
     done = _entry("I-001", 1, "total", status="verified")
     big, mid, small = (
         _entry(f"C-{n}", 0, s, minutes=m, tier=t) for n, s, m, t in ((1, "a", 2.1, "high"), (2, "b", 2.0, "medium"), (3, "c", 1.1, "low"))
     )
     ranked_out = _entry("C-4", 0, "d", minutes=0.5, tier="high")
     deferred = [_budget(c) for c in (big, mid, small)] + [{"item_id": "C-4", "defer_reason": "rank"}]
-    _plan(flow, [done], [big, mid, small, ranked_out], deferred, left_minutes=3.8, phase="readopt")
+    _plan(flow, [done], [big, mid, small, ranked_out], deferred, left_minutes=3.5, phase="readopt")
     monkeypatch.setattr(cmd_plan, "_jev_boolean", lambda *a, **k: pytest.fail("採り直しは LLM を呼ばない"))
 
     _call(readopt, "cmd_readopt")
@@ -182,7 +291,6 @@ def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, 
     assert [(i["id"], i["candidate_id"]) for i in added] == [("I-002", "C-1"), ("I-003", "C-3")]
     assert all(i["public_io_source"] == "runtime" and i["status"] == "planned" for i in added)
     assert _deferred(flow) == {"C-2": "budget", "C-4": "rank"}
-    assert state["limits"]["implement_end_at"] < state["limits"]["final_end_at"]
 
     # 叩き直しは採り直しを重ねない
     _call(readopt, "cmd_readopt")
@@ -191,7 +299,7 @@ def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, 
     # その巡の検証が終われば次を採る
     _set(flow, phase="readopt", items=[{**i, "status": "verified"} for i in read_state(flow["path"])["items"]])
     state = read_state(flow["path"])
-    state["limits"]["final_end_at"] = (dt.datetime.now().astimezone() + dt.timedelta(minutes=2.5)).isoformat(timespec="seconds")
+    _left(state, 2.5)
     write_state(flow["path"], state)
     _call(readopt, "cmd_readopt")
     state = read_state(flow["path"])
@@ -199,30 +307,30 @@ def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, 
     assert [i["candidate_id"] for i in state["items"] if i["round"] == 3] == ["C-2"]
 
 
-def test_drops_are_judged_per_round(flow, cmd_setup, cmd_implement, readopt):
-    """巡: 1 巡目に取り消しがあっても、2 巡目の手順違反は取り消され、`drops[]` に巡 2 の記録が増える。"""
+def test_outside_changes_are_kept_per_round(flow, cmd_setup, cmd_implement, readopt):
+    """巡・#2457 受け入れ条件 8: どの巡でも範囲の外の変更で取り消さず、その巡の項目の `outside_scope` に残す。"""
     work = flow["work"]
     _plan(flow, [_entry("I-001", 1, "total"), _entry("I-002", 2, "add")])
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     # 範囲の外の既存のファイルを項目と関係なく変える（新しいファイルは範囲の中として扱う。#1814）
     ignore = work / ".gitignore"
-    original = ignore.read_text()
-    ignore.write_text(original + "build/\n")
+    ignore.write_text(ignore.read_text() + "build/\n")
     commit_with_trailers(work, "Out of scope", item_trailers("I-001"))
-    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2  # 残る項目 0 件（I-002 は持ち越し）
-    assert [d.get("round") for d in read_state(flow["path"])["drops"]] == [1]
+    _call(cmd_implement, "cmd_merge_implement")
     _set(flow, phase="readopt")
 
     _call(readopt, "cmd_readopt")
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     ignore.write_text(ignore.read_text() + "dist/\n")
     commit_with_trailers(work, "Out of scope again", item_trailers("I-002"))
-    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
+    _call(cmd_implement, "cmd_merge_implement")
 
     state = read_state(flow["path"])
-    assert [d.get("round") for d in state["drops"]] == [1, 2]
-    assert ignore.read_text() == original
-    assert {i["id"]: i["status"] for i in state["items"]}["I-002"] == "reverted"
+    assert not state.get("drops")
+    assert "build/" in ignore.read_text() and "dist/" in ignore.read_text()
+    items = {i["id"]: i for i in state["items"]}
+    assert items["I-001"]["status"] == items["I-002"]["status"] == "implemented"
+    assert [r["path"] for r in items["I-002"]["outside_scope"]] == [".gitignore"]
 
 
 def test_round_two_tests_leave_verified_items_alone(flow, cmd_setup, cmd_implement, readopt):

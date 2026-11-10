@@ -1,5 +1,7 @@
 # cross-refactoring: 実装の時間の配分・採り直し・中断の後の締め切りのずらし
 
+> **今は働かない記述:** この文書のうち、実装の時間を締め切りから配る決まり、採り直しの残りを実装時間の実績で数える決まり、中断の後に締め切りをずらす決まりは今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+
 ## 概要
 
 **想定最大時間は、走る見込みの手順にだけ配る。** バッファは最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回で、
@@ -12,7 +14,7 @@
 
 この文書は、その規則の組を**なぜこの形にしたか**（背景・決定と理由・常に成り立つ条件・既知の限界・テスト観点）を残す。
 **手順と状態ファイルの鍵の正は Skill にある。** 式と上限の表・提案の前に止まる条件は
-[`docs/02-plan-and-implement.md` の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)、
+[`docs/02-plan-and-implement.md` の「時間の上限」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#時間の上限)、
 採り直しの手順と `readopt` の終了コードは
 [同じ文書の「採り直し」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#採り直し)、
 再開と止まっていた時間の測り方・`pause` の鍵は
