@@ -1820,6 +1820,7 @@ FAKE_GH_PR_EDIT = """#!{py}
 import os, sys
 a = sys.argv[1:]
 path = os.environ["FAKE_GH_BODY"]
+open(path + ".calls", "a").write(" ".join(a[:2]) + "\\n")
 if a[:2] == ["pr", "list"]:
     sys.exit(0)
 if a[:2] in (["pr", "create"], ["pr", "edit"]):
@@ -1857,6 +1858,26 @@ def test_pr_body_stages_include_steps_after_pr(tmp_path, monkeypatch):
     lines = [l for l in body.read_text().splitlines() if l.strip()]
     assert lines[-2] == "モード: standard / 通した工程: 実装 → Pull Request → 構造改善 → 実装レビュー → 完了判定"
     assert lines[-1].startswith("🤖 Generated with")
+
+
+def test_pr_body_stages_skip_gh_when_nothing_new(tmp_path, monkeypatch):
+    """PR を出した後に新しい工程が無ければ、プランの終わりに PR の本文を読みに行かない（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "pr view" not in Path(str(body) + ".calls").read_text().splitlines()
+    assert [l for l in body.read_text().splitlines() if l.startswith("モード: ")] == ["モード: standard / 通した工程: 実装 → Pull Request"]
 
 
 def advance_develop(root):
