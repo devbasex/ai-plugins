@@ -1767,6 +1767,62 @@ def test_released_answer_after_gate_1_runs_the_close_of_the_kept_issue_only(env)
     assert built[built.index("--issue") + 1 : built.index("--state")] == ["12"]
 
 
+def released_and_finished(env, close_items, version="10.28.0"):
+    """リリース待ちで締めたループの 1 回へ released が届き、まとめを流した done で締め直す（#2911）。"""
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": version}, "defer": None}
+    assert sl_select.cmd_select(env, "l1")["metrics"]["status"] == "finish"
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": close_items}))
+    return sl.cmd_finish(env, "l1", 1, d)
+
+
+def test_released_lap_whose_close_stopped_is_closed_as_released(env):
+    """#2911 の受け入れ条件 1: リリースまで届いたループの 1 回は、まとめが止まっても完了で締め直し、まとめの失敗は別に残す。"""
+    fin = released_and_finished(env, [{"plan": "x", "result": "止まった"}])
+    lap = rec(env)["laps"][0]
+    assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["versions"]["prod"] == "10.28.0"
+    assert lap["failure"] is None and lap["close_failure"]["step"]
+
+
+def test_released_lap_with_an_empty_close_done_is_closed_as_released(env):
+    fin = released_and_finished(env, [])
+    lap = rec(env)["laps"][0]
+    assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["close_failure"]
+
+
+def test_released_lap_whose_close_stopped_does_not_count_as_a_failure(env):
+    """#2911 の受け入れ条件 2: 同じ失敗の判定は締め直した結果（完了）で数え直す。"""
+    released_and_finished(env, [{"plan": "x", "result": "止まった"}])
+    assert sl_record.failure_streak(rec(env)) == (None, 0)
+
+
+def test_reclose_turns_a_released_lap_recorded_as_failed_into_done(env):
+    """#2911 の受け入れ条件 3: 前の版がまとめの失敗で「失敗」と書いたリリース済みのループの 1 回を、記録のリリースの答えから締め直す。"""
+    released_and_finished(env, [{"plan": "x", "result": "完了"}])
+    r = rec(env)
+    lap = r["laps"][0]
+    lap["outcome"], lap["failure"] = "失敗", {"issues": [11, 12], "kind": "まとめ", "step": "止まった"}
+    lap.pop("close_failure", None)
+    lap["versions"].pop("prod", None)
+    sl_record.write_record(env, r)
+    assert sl_record.failure_streak(rec(env))[1] == 1
+    out = sl.cmd_reclose(env, "l1")
+    lap = rec(env)["laps"][0]
+    assert out["status"] == "ok" and out["metrics"]["reclosed"] == [1]
+    assert lap["outcome"] == "完了" and lap["failure"] is None and lap["versions"]["prod"] == "10.28.0"
+    assert lap["close_failure"] == {"issues": [11, 12], "kind": "まとめ", "step": "止まった"} and lap["reclosed_at"]
+    assert sl_record.failure_streak(rec(env)) == (None, 0)
+    assert "| 1 |" in (env.root / ".ndf/loop/l1/laps.md").read_text() and "完了" in (env.root / ".ndf/loop/l1/laps.md").read_text()
+    assert sl.cmd_reclose(env, "l1")["metrics"]["reclosed"] == []  # 2 度目は何もしない
+
+
+def test_reclose_leaves_failed_laps_without_a_released_answer(env):
+    start(env, laps=10)
+    run_lap(env, result="止まった")
+    assert sl.cmd_reclose(env, "l1")["metrics"]["reclosed"] == [] and rec(env)["laps"][0]["outcome"] == "失敗"
+
+
 def test_two_answered_pending_laps_are_finished_oldest_first(env):
     request_lap(env, rid="lroot-r000000000001")
     env.rank_box["out"] = rank_out(ms("01 近い", [13, 14]))

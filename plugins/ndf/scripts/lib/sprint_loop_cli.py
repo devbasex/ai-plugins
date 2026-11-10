@@ -109,6 +109,7 @@ def _dispatch(a, update) -> dict | None:
             "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=update),
             "finish": lambda: sl.cmd_finish(env, a.loop_name, a.lap, a.done, update=update),
             "pending": lambda: sl.cmd_pending(env, a.loop_name),
+            "reclose": lambda: sl.cmd_reclose(env, a.loop_name),
             "hold-question": lambda: sl.cmd_hold_question(env, a.loop_name, a.ref, a.plan, a.step, a.parallel),
             "stop": lambda: sl.cmd_stop(env, a.loop_name),
             "status": lambda: sl.cmd_status(env, a.loop_name),
@@ -194,6 +195,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("lap", type=int, help="締め直す保留したループの 1 回（リリース待ち・質問待ち）")
     s.add_argument("--done", required=True, help="残りの工程（まとめ）の queue の done")
     name(ls.add_parser("pending"))
+    name(ls.add_parser("reclose", help="リリースまで届いたのに失敗で締めたループの 1 回を完了で締め直す（#2911）"))
     s = name(ls.add_parser("hold-question"))
     s.add_argument("--ref", required=True, help="オーガナイザーへ送った問いの依頼の id")
     s.add_argument("--plan", required=True, help="問いで止まったプラン")

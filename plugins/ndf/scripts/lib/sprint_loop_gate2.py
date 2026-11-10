@@ -17,6 +17,7 @@ from sprint_loop_record import (
     canonical,
     SPRINT_STATE,
     SUPERVISE,
+    DONE,
     FAILED,
     RETURNED,
     QUESTION_PENDING,
@@ -238,7 +239,7 @@ def pending_pipeline(env: Env, rec: dict, before: dict) -> dict:
 def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict], state: dict) -> dict:
     """`loop finish`: 保留したループの 1 回の残りの done を読み、ループの 1 回を 1 回だけ締め直してループの 1 回の境へ戻る。
     質問待ちの続きがリリースの依頼で止まったら、リリース待ちへ移して答えを待つ。"""
-    from sprint_loop_gate import DONE_RESULTS, RELEASE_REQUEST_PHASE, handle_release_pending
+    from sprint_loop_gate import DONE_RESULTS, RELEASE_REQUEST_PHASE, failure_key, handle_release_pending
 
     part = lap["release"] if lap["outcome"] == RELEASE_PENDING else lap["question"]
     (part.setdefault("finish", {}))["ended_at"] = env.now()
@@ -251,7 +252,33 @@ def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict],
         return handle_release_pending(env, rec, before, lap, request)
     bad = [i for i in items if i.get("unfilled") or i.get("result") not in DONE_RESULTS]
     version = (lap.get("versions") or {}).get("prod")
-    finish_lap(env, rec, lap, FAILED if bad or not items else "完了", state)
-    if version and lap["outcome"] == "完了":
+    released = lap["outcome"] == RELEASE_PENDING and released_answer(lap)
+    finish_lap(env, rec, lap, DONE if released or not (bad or not items) else FAILED, state)
+    if released and (bad or not items):
+        # リリースまで届いたループの 1 回は完了で締め、後のまとめの失敗は失敗の鍵とは別に残す（#2911。同じ失敗の判定に数えない）
+        lap["close_failure"] = failure_key(state) or {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "まとめ", "step": "止まった"}
+    if version and lap["outcome"] == DONE:
         lap.setdefault("versions", {})["prod"] = version
     return after_close(env, rec, before, f"ループの {lap['n']} 回目 の残りを流し、{lap['outcome']} で締め直した")
+
+
+def released_answer(lap: dict) -> dict | None:
+    """ループの 1 回の記録に残ったリリースの答えが released ならその答え。"""
+    a = (lap.get("release") or {}).get("answer") or {}
+    return a if a.get("result") == "released" else None
+
+
+def reclose_released(env: Env, rec: dict) -> list[int]:
+    """前の版がリリースの後のまとめの失敗で「失敗」と書いたループの 1 回を、記録に残ったリリースの答え（released）から完了で締め直す（#2911）。
+    失敗の鍵はまとめの失敗（close_failure）へ移し、版を戻す。締め直したループの 1 回の番号を返す（2 度目は何もしない）。"""
+    done = []
+    for lap in rec.get("laps", []):
+        a = released_answer(lap)
+        if lap.get("outcome") != FAILED or not a:
+            continue
+        lap["outcome"], lap["close_failure"], lap["failure"] = DONE, lap.get("failure"), None
+        if a.get("version"):
+            lap.setdefault("versions", {})["prod"] = a["version"]
+        lap["reclosed_at"] = env.now()
+        done.append(lap["n"])
+    return done

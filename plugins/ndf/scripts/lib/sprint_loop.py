@@ -85,7 +85,7 @@ from sprint_loop_gate import (
     owner_line,
 )
 
-from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
+from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, reclose_released
 from sprint_loop_select import resume_answer_hold
 
 
@@ -519,6 +519,18 @@ def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None =
         refresh_state(lap, update)
         state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
         return finish_held(env, rec, before, lap, read_done_items(done), state)
+
+
+def cmd_reclose(env: Env, name: str) -> dict:
+    """`loop reclose`: リリースまで届いたのに「失敗」で締めたループの 1 回を、記録のリリースの答えから完了で締め直す（#2911）。
+    締め直すループの 1 回の行だけを I1 の検査から外し、ほかの終わったループの 1 回の行は書き換えない。"""
+    with open_record(env, name) as (rec, before):
+        done = reclose_released(env, rec)
+        if done:
+            write_record(env, rec, {**before, "laps": [lap for lap in before.get("laps", []) if lap["n"] not in done]})
+        laps = [{"lap": n, "outcome": DONE} for n in done]
+        summary = f"ループの {done} 回目 を完了で締め直した" if done else "締め直すループの 1 回は無い"
+        return step_result.result(TOOL, "ok", summary, laps, {"reclosed": done})
 
 
 def cmd_pending(env: Env, name: str) -> dict:
