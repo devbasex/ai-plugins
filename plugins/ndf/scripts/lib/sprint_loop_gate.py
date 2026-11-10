@@ -564,7 +564,8 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
     if judgments is not None:
         lap["mode"] = mode
         lap.setdefault("mode_decisions", []).append(mode_decision(env, DESIGN_GATE, kept, current, mode))
-        (notes if notes is not None else []).extend(sync_mode(env, kept, mode))
+        if mode != current:  # 同じモードは loop sprint が本文とボードへ書き済み。変わったときだけ書き直す
+            (notes if notes is not None else []).extend(sync_mode(env, kept, mode))
     done = Path(lap["dir"]) / f"done-{k}.json"
     lap.setdefault("dones", []).append(str(done))
     return queue_command(stages, done), done

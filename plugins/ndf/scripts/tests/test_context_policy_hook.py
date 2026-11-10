@@ -701,6 +701,9 @@ def test_report_span_cuts_every_source(tmp_path):
     assert (cut["parts"]["conductor"]["calls"], cut["parts"]["ndf"]["calls"], cut["restart_count"]) == (1, 2, 1)
     early = m.report_work("#7", recs, ledger, (cd.parse_ts("2026-11-01T00:00:00Z"), cd.parse_ts("2026-11-01T00:30:00Z")))
     assert (early["parts"]["conductor"]["calls"], early["parts"]["ndf"]["calls"], early["restart_count"]) == (1, 2, 0)
+    # 期間の中に新しい判定の行が無くても、期間の中の呼び出しは数える（セッションは期間で絞る前の行から取る）
+    quiet = m.report_work("#7", recs[:1], ledger, span)
+    assert (quiet["sessions"], quiet["parts"]["conductor"]["calls"], quiet["parts"]["ndf"]["calls"], quiet["restart_count"]) == (1, 1, 2, 0)
 
 
 def test_hook_marks_make_both_parts_known(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture

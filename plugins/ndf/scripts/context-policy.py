@@ -220,8 +220,8 @@ def _session_spans(sessions: dict, excluded: set, windows: dict) -> dict[str, tu
     return spans
 
 
-def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], excluded: set, windows: dict) -> dict:
-    """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
+def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], excluded: set, windows: dict, restarted: set) -> dict:
+    """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。`restarted` は期間の中で再起動したセッション。"""
     totals = {b: _empty_totals() for b in BUCKETS}
     compacts: int | None = 0
     no_restore_mark = no_handoff_mark = 0
@@ -235,8 +235,7 @@ def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], exc
                 totals[b][k] += v
         compacts = None if compacts is None or summary["compacts"] is None else compacts + summary["compacts"]
         no_restore_mark += 0 if summary["restore_known"] else 1
-        restarted = any(r.get("verdict") == cp.RESTART for r in s["rows"])
-        no_handoff_mark += 1 if restarted and not summary["handoff_known"] else 0
+        no_handoff_mark += 1 if sid in restarted and not summary["handoff_known"] else 0
     for b in BUCKETS:
         totals[b]["cost"] = round(totals[b]["cost"])
         totals[b]["seconds"] = round(totals[b]["seconds"])
@@ -261,15 +260,18 @@ def _rework(rows: list[dict]) -> int | str:
     return sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN
 
 
-def work_scope(work: str, rows: list[dict], span: tuple[float, float] | None) -> tuple[list[dict], dict]:
-    """作業の対象の行と、セッションごとの区間（span があれば切り取り、区間の無いセッションを span で補う）。"""
+def work_scope(work: str, rows: list[dict], span: tuple[float, float] | None) -> tuple[list[dict], list[dict], dict]:
+    """作業の対象の行（期間で絞る前）・そのうち span に入る行・セッションごとの区間（span があれば切り取り、区間の無い
+    セッションを span で補う）。セッションと印は絞る前の行から取る。期間の中に新しい判定の行が無くても、期間の中の
+    呼び出しを数えるためである。"""
     filled = cd.fill_work(rows)
     windows = work_windows(filled, work)
+    mine = cd.of_work(filled, work)
     if span is not None:
         windows = {sid: clip_windows(w, span) for sid, w in windows.items()}
-        sids = {r.get("session_id") for r in cd.of_work(filled, work)}
+        sids = {r.get("session_id") for r in mine}
         windows |= {sid: clip_windows(ALL_TIME, span) for sid in sids if sid and sid not in windows}
-    return [r for r in cd.of_work(filled, work) if _in_span(cd.parse_ts(r.get("at")), span)], windows
+    return mine, [r for r in mine if _in_span(cd.parse_ts(r.get("at")), span)], windows
 
 
 def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None, span: tuple[float, float] | None = None) -> dict:
@@ -280,10 +282,11 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
     （「復元完了」の直前の文脈の量）と復元の区間の呼び出し数で、セッションの識別子を持たない。"""
     ledger_rows = ledger_rows or []
     excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
-    rows, windows = work_scope(work, rows, span)
-    sessions = cd.sessions_of(rows)
-    by_session = cd.attach_marks([r for r in rows if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
-    summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows)
+    every, rows, windows = work_scope(work, rows, span)  # 期間は呼び出し（windows）と判定の行（rows）の集計にだけ効かせる
+    sessions = cd.sessions_of(every)
+    by_session = cd.attach_marks([r for r in every if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
+    restarted = {r.get("session_id") for r in rows if r.get("verdict") == cp.RESTART}
+    summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows, restarted)
     restarts = _restarts_by_reason(rows)
     compacts = summed["compacts"]
     return {

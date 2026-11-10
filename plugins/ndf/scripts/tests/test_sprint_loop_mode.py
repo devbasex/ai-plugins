@@ -151,6 +151,7 @@ def test_dropping_one_of_two_standard_issues_keeps_the_mode_and_still_records(en
     assert lap["mode"] == "standard" and not new_sprints(env)
     d = lap["mode_decisions"][-1]
     assert (d["trigger"], d["issues"], d["from_mode"], d["mode"]) == ("設計承認ゲート", [12], "standard", "standard")
+    assert syncs(env) == []  # モードが変わらなければ本文とボードへ書き直さない
 
 
 def test_a_failed_rebuild_keeps_the_mode_manifest_and_decisions_and_stops_refused(env):

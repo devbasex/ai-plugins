@@ -68,6 +68,25 @@ def test_a_lane_given_up_after_a_failed_restart_is_not_woken_again(run, monkeypa
     assert run.launched == []
 
 
+def test_a_woken_lane_that_stops_before_it_is_seen_running_is_woken_again_then_asked(run, monkeypatch):
+    """設計の答えを当てるために再起動したレーンが、動いて観える前に今の再起動より後で止まったら、もう一度起こし、2 回目の後は問う。"""
+    run.lanes["la"].update(state="stopped")
+    monkeypatch.setattr(run, "stopped", lambda: {"la"})
+    run.wake = ["la"]
+    run.launch_wakes()
+    assert run.woken == {"la"} and run.launched == [("la", ["restart", "la"])]
+    run.release_woken({"la": {"state": "stopped", "at": "2026-11-09T23:00:00Z"}})  # 前の起動の行
+    assert run.woken == {"la"}
+    run.release_woken({"la": {"state": "stopped", "at": "2026-11-10T00:01:00Z"}})
+    assert run.woken == set() and run.questions == []
+    run.wake = ["la"]
+    run.launch_wakes()
+    assert "wake-la-2" in run.launches and run.woken == {"la"}
+    run.release_woken({"la": {"state": "stopped", "at": "2026-11-10T00:02:00Z"}})
+    assert run.woken == set()
+    assert [(q["kind"], q["lane"], q["purpose"]) for q in run.questions] == [("spawn", "la", "wake-la-2")]
+
+
 def test_stopping_a_held_loop_helper_that_did_not_come_up_stops_the_plan(run):
     """保留したループの残りを流す一時レーンを起こせない問いの「止める」は、計画を止める（問いだけ消えて終わらない状態にしない）。"""
     run.apply_own({"kind": "spawn", "id": "q3", "lane": "p1-rel2", "purpose": "held-lb"}, ["止める"])

@@ -669,6 +669,7 @@ def _observe_run(run: _Run, main: str) -> dict:
     _ask_helper(run, rows)
     apply_observed_states(run, rows)
     run.woken = {n for n in run.woken if run.lanes[n].get("state") in (None, "stopped")}  # 動いて観えたら設計の答えの再起動を解く
+    run.release_woken(rows)  # 動いて観える前に今の再起動より後で止まったら、もう一度起こすか問う
     return seen
 
 
