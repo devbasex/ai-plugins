@@ -24,7 +24,7 @@ TOOL = "sprint-state"
 NOT_DONE = "まだ"  # 計画の行の状態で「まだ終わっていない」を表す語（`sprint-state.py` も同じ値を使う）
 
 
-def _out(status: str, summary: str, items=None, metrics=None, next_: str | None = None, code: int | None = None) -> dict:
+def _get_result(status: str, summary: str, items=None, metrics=None, next_: str | None = None, code: int | None = None) -> dict:
     out = step_result.result(TOOL, status, summary, items, metrics, next=next_)
     if code is not None:
         out["exit"] = code  # `sprint-state.py` の main が終了コードに読む
@@ -32,26 +32,26 @@ def _out(status: str, summary: str, items=None, metrics=None, next_: str | None 
 
 
 def _fields(doc, pointers, what: str) -> dict:
-    values, missing = json_pick.pick(doc, pointers)
+    values, missing = json_pick.pick_fields(doc, pointers)
     summary = f"{what}から {len(pointers) - len(missing)}/{len(pointers)} 件の値を取り出した"
-    return _out("ok", summary, json_pick.missing_items(missing), values)
+    return _get_result("ok", summary, json_pick.missing_field_items(missing), values)
 
 
-def _read(path: Path, what: str):
+def _read_get_source(path: Path, what: str):
     """読めれば (文書, None)。無い・読めなければ (None, 失敗の結果)。"""
     if not path.is_file():
-        return None, _out("stopped", f"{what}が無い: {path}", code=step_result.EXIT_PRECONDITION)
+        return None, _get_result("stopped", f"{what}が無い: {path}", code=step_result.EXIT_PRECONDITION)
     try:
         return jsonio.read(path, want=dict), None
     except jsonio.JsonReadError as e:
-        return None, _out("stopped", f"{what}を読めない: {path}（{e.detail or e}）", code=step_result.EXIT_UNREADABLE)
+        return None, _get_result("stopped", f"{what}を読めない: {path}（{e.detail or e}）", code=step_result.EXIT_UNREADABLE)
 
 
 def _bad_pointer(pointers) -> dict | None:
     try:
-        json_pick.validate(pointers or [])
+        json_pick.validate_pointers(pointers or [])
     except json_pick.PointerError as e:
-        return _out("stopped", str(e), code=step_result.EXIT_UNREADABLE)
+        return _get_result("stopped", str(e), code=step_result.EXIT_UNREADABLE)
     return None
 
 
@@ -75,7 +75,7 @@ def sprint_get(path: str, fields=None) -> dict:
     """`sprint-state.py get`。"""
     if (bad := _bad_pointer(fields)) is not None:
         return bad
-    m, err = _read(Path(path), "スプリントの状態")
+    m, err = _read_get_source(Path(path), "スプリントの状態")
     if err is not None:
         return err
     if fields:
@@ -85,10 +85,10 @@ def sprint_get(path: str, fields=None) -> dict:
     first = open_rows[0] if open_rows else None
     next_ = f"{first['name']}: {first['next'] or '—'}" if first else None
     summary = f"計画 {len(rows)} 本: 終わった {len(rows) - len(open_rows)} / 終わっていない {len(open_rows)}"
-    return _out("ok", summary, rows, {"plans": len(rows), "done": len(rows) - len(open_rows), "open": len(open_rows)}, next_)
+    return _get_result("ok", summary, rows, {"plans": len(rows), "done": len(rows) - len(open_rows), "open": len(open_rows)}, next_)
 
 
-def add_parser(sub) -> None:
+def add_get_parser(sub) -> None:
     """`sprint-state.py get` の引数を足す。"""
     s = sub.add_parser("get", help="読むだけ。計画の状態と次の操作、--field の値を返す（#2909）")
     s.add_argument("sprint")
@@ -124,8 +124,8 @@ def loop_get(env, name: str, fields=None) -> dict:
     try:
         path = slr.loop_record_path(env, name)
     except sl.LoopError as e:
-        return _out("stopped", str(e), code=step_result.EXIT_UNREADABLE)
-    rec, err = _read(path, "開発ループの記録")
+        return _get_result("stopped", str(e), code=step_result.EXIT_UNREADABLE)
+    rec, err = _read_get_source(path, "開発ループの記録")
     if err is not None:
         return err
     if fields:
@@ -133,6 +133,6 @@ def loop_get(env, name: str, fields=None) -> dict:
     try:
         status = sl.cmd_status(env, name)
     except sl.LoopError as e:
-        return _out("stopped", str(e), code=step_result.EXIT_UNREADABLE)
+        return _get_result("stopped", str(e), code=step_result.EXIT_UNREADABLE)
     rec = slr.read_loop_record(env, name)
-    return _out("ok", status["summary"], [], status["metrics"], loop_next(rec, status["metrics"]))
+    return _get_result("ok", status["summary"], [], status["metrics"], loop_next(rec, status["metrics"]))

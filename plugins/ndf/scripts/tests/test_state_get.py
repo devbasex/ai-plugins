@@ -121,13 +121,13 @@ def test_loop_get_field_and_missing_record(tmp_path):
 
 def test_json_pointer_escapes_and_indexes():
     doc = {"a/b": {"m~n": [1, 2]}, "": 0}
-    assert json_pick.resolve(doc, "/a~1b/m~0n/1") == (2, True)
-    assert json_pick.resolve(doc, "/a~1b/m~0n/01") == (None, False)
-    assert json_pick.resolve(doc, "/") == (0, True)
-    assert json_pick.resolve(doc, "") == (doc, True)
+    assert json_pick.resolve_pointer(doc, "/a~1b/m~0n/1") == (2, True)
+    assert json_pick.resolve_pointer(doc, "/a~1b/m~0n/01") == (None, False)
+    assert json_pick.resolve_pointer(doc, "/") == (0, True)
+    assert json_pick.resolve_pointer(doc, "") == (doc, True)
     for bad in ("a", "/x~2"):
         with pytest.raises(json_pick.PointerError):
-            json_pick.parse(bad)
+            json_pick.parse_pointer(bad)
 
 
 def emitted(**kw) -> str:

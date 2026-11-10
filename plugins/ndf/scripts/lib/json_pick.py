@@ -28,7 +28,7 @@ class PointerError(ValueError):
     """指し先の書き方の誤り（`/` で始まらない・`~` の後が 0 か 1 でない）。"""
 
 
-def parse(pointer: str) -> list[str]:
+def parse_pointer(pointer: str) -> list[str]:
     """指し先を参照の並びに割る。書き方が誤っていれば PointerError。"""
     if pointer == "":
         return []
@@ -50,35 +50,35 @@ def _step(cur, token: str):
     return _MISSING
 
 
-def resolve(doc, pointer: str):
+def resolve_pointer(doc, pointer: str):
     """指し先の値を返す。無ければ `(None, False)`、あれば `(値, True)`。"""
     cur = doc
-    for token in parse(pointer):
+    for token in parse_pointer(pointer):
         cur = _step(cur, token)
         if cur is _MISSING:
             return None, False
     return cur, True
 
 
-def validate(pointers) -> None:
+def validate_pointers(pointers) -> None:
     """指し先の並びの書き方を先に確かめる（読む前に 2 で止めるため）。"""
     for p in pointers:
-        parse(p)
+        parse_pointer(p)
 
 
-def pick(doc, pointers) -> tuple[dict, list[str]]:
+def pick_fields(doc, pointers) -> tuple[dict, list[str]]:
     """指し先ごとの値の辞書と、値の無かった指し先の並びを返す。"""
     values: dict = {}
     missing: list[str] = []
     for p in pointers:
-        v, found = resolve(doc, p)
+        v, found = resolve_pointer(doc, p)
         values[p] = v
         if not found:
             missing.append(p)
     return values, missing
 
 
-def missing_items(missing) -> list[dict]:
+def missing_field_items(missing) -> list[dict]:
     """値の無かった指し先を結果 JSON の `items` の形にする。"""
     return [{"kind": "field", "name": p, "result": "missing"} for p in missing]
 
@@ -92,7 +92,7 @@ def picked(func, tool: str):
         if not fields:
             return func(a)
         try:
-            validate(fields)
+            validate_pointers(fields)
         except PointerError as e:
             step_result.emit(step_result.result(tool, "stopped", str(e)), step_result.EXIT_UNREADABLE)
         buf = io.StringIO()
@@ -106,7 +106,7 @@ def picked(func, tool: str):
         if not lines:
             raise SystemExit(code)
         obj = json.loads(lines[-1])
-        values, _ = pick(obj, fields)
+        values, _ = pick_fields(obj, fields)
         step_result.emit({**obj, "items": [], "metrics": values}, code)
 
     return run
@@ -136,7 +136,7 @@ def _raw_line(v) -> str:
 def cli_pick(a, stdin=None) -> "NoReturn":  # noqa: F821
     """`pick`: 結果 JSON から値を取り出す。`status` と `next` は入力を写す（#2909 の F1〜F3）。"""
     try:
-        validate(a.field)
+        validate_pointers(a.field)
     except PointerError as e:
         step_result.emit(step_result.result("pick", "stopped", str(e)), step_result.EXIT_UNREADABLE)
     if a.raw and len(a.field) != 1:
@@ -144,10 +144,10 @@ def cli_pick(a, stdin=None) -> "NoReturn":  # noqa: F821
     src = _last_result((stdin or sys.stdin).read())
     if src is None:
         step_result.emit(step_result.result("pick", "stopped", "標準入力の最後の行が結果 JSON でない"), step_result.EXIT_UNREADABLE)
-    values, missing = pick(src, a.field)
+    values, missing = pick_fields(src, a.field)
     if a.raw:
         print(_raw_line(values[a.field[0]]))
         raise SystemExit(step_result.EXIT_PRECONDITION if missing else step_result.EXIT_OK)
     summary = f"{len(a.field) - len(missing)}/{len(a.field)} 件の値を取り出した（元: {src['tool']} {src['status']}）"
     keep = {"presentation_path": src.get("presentation_path"), "next": src.get("next"), "gaps": src.get("gaps")}
-    step_result.emit(step_result.result("pick", src["status"], summary, missing_items(missing), values, **keep))
+    step_result.emit(step_result.result("pick", src["status"], summary, missing_field_items(missing), values, **keep))

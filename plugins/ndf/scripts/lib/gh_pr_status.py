@@ -53,12 +53,12 @@ def _issue_state(slug: str, number: int) -> str | None:
     return str(resp.body.get("state") or "").lower() or None
 
 
-def _failed(check: dict) -> bool:
+def _check_failed(check: dict) -> bool:
     """成功・飛ばした・中立・実行中のどれでもない結果（failure・cancelled・timed_out など）を失敗と読む。"""
     return check["result"] not in (*OK_RESULTS, "pending")
 
 
-def decide(state: str, merge_state: str | None, checks: list[dict] | None, threads: int | None, pr: int) -> tuple[str, str, int]:
+def decide_action(state: str, merge_state: str | None, checks: list[dict] | None, threads: int | None, pr: int) -> tuple[str, str, int]:
     """判定の表を上から当て、`(action, next, 終了コード)` を返す。"""
     if state != "open":
         return "escalate", f"PR は {state}。後片付け（merged）へ進むかを人が決める", EXIT_ESCALATE
@@ -67,7 +67,7 @@ def decide(state: str, merge_state: str | None, checks: list[dict] | None, threa
     if checks is None or threads is None:
         what = "・".join(w for w, v in (("チェック", checks), ("未解決のスレッド", threads)) if v is None)
         return "escalate", f"{what}を照会できない。gh_parts.py pr-status {pr} を打ち直す", EXIT_ESCALATE
-    failed = [c["name"] for c in checks if _failed(c)]
+    failed = [c["name"] for c in checks if _check_failed(c)]
     if failed or threads:
         parts = [f"失敗: {', '.join(failed)}" if failed else "", f"未解決のスレッド {threads} 件" if threads else ""]
         return "fix", "。".join(p for p in parts if p) + "。直してから打ち直す", EXIT_FIX
@@ -95,14 +95,14 @@ def pr_status(pr: int, repo: str | None = None, extra_issues=()) -> tuple[dict[s
     for n in extra_issues or ():
         if n not in issues:
             issues[n] = _issue_state(slug, n)
-    action, next_, code = decide(meta["state"], parts["merge_state"], checks, parts["unresolved_threads"], pr)
+    action, next_, code = decide_action(meta["state"], parts["merge_state"], checks, parts["unresolved_threads"], pr)
     items = [*(checks or []), *({"kind": "issue", "name": f"#{n}", "result": s or "unknown"} for n, s in issues.items())]
     metrics = {
         "action": action,
         "state": meta["state"],
         "draft": meta["draft"],
         "merge_state": parts["merge_state"],
-        "failed_checks": None if checks is None else sum(1 for c in checks if _failed(c)),
+        "failed_checks": None if checks is None else sum(1 for c in checks if _check_failed(c)),
         "pending_checks": None if checks is None else sum(1 for c in checks if c["result"] == "pending"),
         "unresolved_threads": parts["unresolved_threads"],
         "issues_open": sum(1 for s in issues.values() if s == "open"),

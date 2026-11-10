@@ -568,7 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("sprint")
     s.add_argument("--json", action="store_true")
 
-    state_get.add_parser(sub)
+    state_get.add_get_parser(sub)
     s = sub.add_parser("next")
     s.add_argument("sprint")
     s.add_argument("--doc")

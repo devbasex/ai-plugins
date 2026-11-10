@@ -40,7 +40,7 @@ class StepRefused(ValueError):
     """打てない手順（NDF のスクリプトの外・中継の副命令・語に割れない）。"""
 
 
-def _plugin_root(path: Path) -> Path | None:
+def _ndf_plugin_root(path: Path) -> Path | None:
     """パスを含む NDF のプラグインの根（`.claude-plugin/plugin.json` の name が ndf）。無ければ None。"""
     for d in path.parents:
         manifest = d / ".claude-plugin" / "plugin.json"
@@ -54,7 +54,7 @@ def _plugin_root(path: Path) -> Path | None:
 
 def _script_rel(path: Path) -> str | None:
     """NDF のスクリプトなら、プラグインの `scripts/` か `skills/<名>/scripts/` からの相対パス。外なら None。"""
-    root = _plugin_root(path)
+    root = _ndf_plugin_root(path)
     if root is None:
         return None
     parts = path.relative_to(root).parts
@@ -100,7 +100,7 @@ def _continue_cmd(steps: list[str], start: int) -> str:
     return f"supervise.py advance {args} --from {start}"
 
 
-def _stop(summary: str, code: int, gaps: list[dict], process: list[dict], metrics: dict, next_: str | None) -> tuple[dict, int]:
+def _advance_stopped(summary: str, code: int, gaps: list[dict], process: list[dict], metrics: dict, next_: str | None) -> tuple[dict, int]:
     return step_result.result(TOOL, "stopped", summary, [], metrics, next=next_, gaps=gaps, process=process), code
 
 
@@ -110,7 +110,9 @@ def cmd_advance(steps: list[str], start: int = 1, cwd: str | None = None) -> tup
     metrics = {"steps": len(steps), "ran": 0, "stopped_at": None}
     if not steps or not 1 <= start <= len(steps):
         why = "--step を 1 つ以上渡す" if not steps else f"--from は 1〜{len(steps)}: {start}"
-        return _stop(why, step_result.EXIT_UNREADABLE, [{"kind": "argument", "name": "--from", "reason": why}], [], metrics, None)
+        return _advance_stopped(
+            why, step_result.EXIT_UNREADABLE, [{"kind": "argument", "name": "--from", "reason": why}], [], metrics, None
+        )
     argvs, refused = [], []
     for i, s in enumerate(steps, 1):  # 打つ前にすべて確かめる（I4）
         try:
@@ -120,7 +122,7 @@ def cmd_advance(steps: list[str], start: int = 1, cwd: str | None = None) -> tup
     if refused:
         why = f"打てない手順が {len(refused)} 件。何も打たなかった"
         next_ = "NDF のスクリプトの外のコマンドと中継の副命令を --step から外し、それらは別に打つ"
-        return _stop(why, step_result.EXIT_UNREADABLE, refused, [], metrics, next_)
+        return _advance_stopped(why, step_result.EXIT_UNREADABLE, refused, [], metrics, next_)
     process = [{"run": s, "result": SKIPPED} for s in steps[: start - 1]]
     for i in range(start, len(steps) + 1):
         p = subprocess.run(argvs[i - 1], cwd=here, stdout=subprocess.PIPE, text=True)
@@ -137,7 +139,7 @@ def cmd_advance(steps: list[str], start: int = 1, cwd: str | None = None) -> tup
             next_ = f"{why}。続き: {_continue_cmd(steps, i + 1)}" if i < len(steps) else why
             return step_result.result(TOOL, "gate", f"手順 {i} が判断を返した", [], metrics, next=next_, process=process), p.returncode
         gaps = child.get("gaps") or [{"kind": "step", "name": f"{i}: {steps[i - 1]}", "reason": why}]
-        return _stop(
+        return _advance_stopped(
             f"手順 {i} が止まった", step_result.EXIT_VIOLATION, gaps, process, metrics, f"{why}。打ち直し: {_continue_cmd(steps, i)}"
         )
     return step_result.result(TOOL, "ok", f"手順 {len(steps)} 件を打った（打った {metrics['ran']}）", [], metrics, process=process), 0
