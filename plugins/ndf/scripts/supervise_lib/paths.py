@@ -42,8 +42,18 @@ def _refactor_vocabulary():
 
 
 def default_refactor_budget_minutes() -> int:
-    """cross-refactoring の既定の想定最大時間（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
+    """cross-refactoring の既定の実装の予算（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
     return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
+
+
+def refactor_step_seconds(budget_minutes: int) -> int:
+    """cross-refactoring のステップの見込みの秒 = 実装の予算 ×（1 + 安全網の倍率）（#2457 決定 8）。
+
+    テストの実行・CI の待ちはこの外にあり、駆動が子プロセスの上限ごとにステップの延長を書いて締め切りを延ばす。"""
+    import limits
+
+    factor = float(limits.value("cross-refactoring.safety-net", "factor"))
+    return int(round(float(budget_minutes) * 60 * (1 + factor)))
 
 
 HERE = SELF.parent  # デプロイしたスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
