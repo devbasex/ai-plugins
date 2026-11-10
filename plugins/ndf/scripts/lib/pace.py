@@ -10,6 +10,8 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24},
      "loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
 
+`business_hours`（`{"timezone": "Asia/Tokyo", "days": ["mon", ...], "start": "09:00", "end": "18:00"}`。#2913）は
+`read_hours` だけが読み、不正なら警告を返して宣言なしとして扱う。
 `loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。`loop.budget` の各単位は、書かない・`null` なら無制限である。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
@@ -17,8 +19,11 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` 
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
+import zoneinfo
+from dataclasses import dataclass
 from pathlib import Path
 
 DECL_NAME = "pace.json"
@@ -148,6 +153,89 @@ def read_parallel(root) -> dict:
         else:
             out[key] = v
     return {**out, "warnings": warnings}
+
+
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")  # datetime.weekday() の順
+HOURS_RULE = "business-hours"
+
+
+@dataclass(frozen=True)
+class HoursDecl:
+    """検査を通った業務時間の宣言（`business_hours`。#2913）。"""
+
+    timezone: str
+    days: frozenset
+    start: _dt.time
+    end: _dt.time
+
+
+def _hhmm(v) -> _dt.time | None:
+    m = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", v) if isinstance(v, str) else None
+    return _dt.time(int(m.group(1)), int(m.group(2))) if m else None
+
+
+def parse_hours(sec) -> tuple[HoursDecl | None, str | None]:
+    """`business_hours` の値を検査する。(宣言, 誤りの理由)。一部の項目だけを既定へ戻さず、誤りがあれば宣言全体を無いものとする。"""
+    if not isinstance(sec, dict):
+        return None, "business_hours はオブジェクトで書く"
+    tz = sec.get("timezone")
+    if not isinstance(tz, str) or not tz:
+        return None, "business_hours.timezone が無い。IANA の名前（例: Asia/Tokyo）で書く"
+    try:
+        zoneinfo.ZoneInfo(tz)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        return None, f"business_hours.timezone を読めない（{tz!r}）。IANA の名前（例: Asia/Tokyo）で書く"
+    days = sec.get("days")
+    if not isinstance(days, list) or not days or any(d not in DAYS for d in days) or len(set(days)) != len(days):
+        return None, f"business_hours.days は mon〜sun の重ならない 1 個以上の配列で書く（{days!r}）"
+    start, end = _hhmm(sec.get("start")), _hhmm(sec.get("end"))
+    if start is None or end is None:
+        return None, f"business_hours.start / end は HH:MM（00:00〜23:59）で書く（{sec.get('start')!r} / {sec.get('end')!r}）"
+    if start >= end:
+        return None, "business_hours.start は end より前にする（日をまたぐ宣言は受けない）"
+    return HoursDecl(tz, frozenset(DAYS.index(d) for d in days), start, end), None
+
+
+def read_hours(root) -> tuple[HoursDecl | None, list[str]]:
+    """業務時間の宣言を読む。(宣言, 警告)。宣言が無い・読めない・不正なら宣言は None（I3）。例外を上げない。"""
+    try:
+        path, d = _read_pace_decl(root)
+    except PaceError:
+        return None, []  # 宣言のファイルの誤りは read_pace / read_parallel が知らせる
+    sec = d.get("business_hours") if isinstance(d, dict) else None
+    if sec is None:
+        return None, []
+    decl, why = parse_hours(sec)
+    return decl, ([f"進め方の宣言の {why}: {path}。業務時間の宣言なしとして扱う"] if why else [])
+
+
+def hours_items(root) -> list[dict]:
+    """`loop start`・`parallel.py check`・`start` の警告の行。宣言が不正なときだけ 1 件。"""
+    return [{"level": "warning", "rule": HOURS_RULE, "at": "business_hours", "message": w} for w in read_hours(root)[1]]
+
+
+def hours_state(decl: HoursDecl | None, now: _dt.datetime) -> dict:
+    """`now`（時刻帯つき）が業務時間内か。宣言の時刻帯だけで決め、地方時を読まない（I4）。宣言が無ければ業務時間内（I3）。
+    `next_start` は業務時間外のときの次の業務時間の始まり（UTC の ISO 8601）。"""
+    if decl is None:
+        return {"declared": False, "inside": True, "timezone": None, "next_start": None}
+    zone = zoneinfo.ZoneInfo(decl.timezone)
+    local = now.astimezone(zone)
+    inside = local.weekday() in decl.days and decl.start <= local.time().replace(tzinfo=None) < decl.end
+    nxt = None
+    if not inside:
+        for d in range(8):
+            day = local.date() + _dt.timedelta(days=d)
+            at = _dt.datetime.combine(day, decl.start, tzinfo=zone)
+            if day.weekday() in decl.days and at > local:
+                nxt = at.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                break
+    return {"declared": True, "inside": inside, "timezone": decl.timezone, "next_start": nxt}
+
+
+def hours_now(root, now: _dt.datetime) -> dict:
+    """宣言を読んで `now` を判定する（ループの 1 回の境と `parallel.py wait` が呼ぶ）。"""
+    return hours_state(read_hours(root)[0], now)
 
 
 def over_budget(used: float, limit: float | None) -> bool:

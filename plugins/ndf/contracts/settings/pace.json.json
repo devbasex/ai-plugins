@@ -5,7 +5,8 @@
   "scope": "team",
   "readers": [
     "plugins/ndf/scripts/lib/pace.py:_read_pace_decl",
-    "plugins/ndf/scripts/lib/pace.py:read_pace"
+    "plugins/ndf/scripts/lib/pace.py:read_pace",
+    "plugins/ndf/scripts/lib/pace.py:read_hours"
   ],
   "keys": {
     "version": {
@@ -37,6 +38,9 @@
     },
     "parallel": {
       "summary": "並列の計画の答え待ちの閾値（answer_limit の plan と lane。無ければ既定の 8 と 3。正の整数でない値は既定へ戻して警告を出す）"
+    },
+    "business_hours": {
+      "summary": "業務時間（timezone は IANA の名前・days は mon〜sun の配列・start と end は HH:MM。任意。無ければ宣言なし。不正なら警告を出して宣言なしとして扱う。時間外は開発ループの選定の順と parallel.py wait の依頼の返し方が変わる）"
     }
   }
 }

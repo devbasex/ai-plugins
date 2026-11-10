@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import parallel_answer as pa
+import parallel_defer as pdf
 import parallel_external_cli as px
 import parallel_hold as ph
 import parallel_homes
@@ -34,7 +35,7 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     import parallel_run as pr_run
 
     env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *ph.limit_items(main)]
+    notes = [*notes, *prt.start_warnings(main)]
     parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
@@ -85,6 +86,14 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     )
 
 
+def batch_reply(reply, main: Path, name: str, extra: dict) -> None:
+    """業務時間内で溜めた依頼があれば、答えていない依頼の全件を 1 回で返して終える。無ければ何もしない。"""
+    got = pdf.due_batch(main, name, pdf.hours_of(main))
+    if got is not None:
+        items, m = got
+        reply("ok", f"並列の計画 {name}: questions（業務時間外に溜めた依頼をまとめて示す）", items, action="questions", **{**extra, **m})
+
+
 def wait_plan(a, reply, main: Path, self_path: Path) -> None:
     """状態の変化か終わりまで待つ。"""
     import durable
@@ -99,11 +108,19 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
             )
         reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
     extra = plg.ledger_report(main, a.name, prt.waiting_requests(main, a.name))
-    keys = ["pause", "questions", "answer-hold"]
+    batch_reply(reply, main, a.name, extra)  # 業務時間に入った後の最初の wait は溜めた依頼をまとめて返す（#2913 の E7）
+    keys, hours = ["pause", "questions", "answer-hold"], pdf.hours_of(main)
     got = durable.wait_from(
-        pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout, start=pl.record_start(main)
+        pl.KIND,
+        pl.record_identity(main, a.name),
+        pl.workflow_id(a.name),
+        keys,
+        a.after,
+        pdf.clip_timeout(a.timeout, hours),  # 業務時間外は次の業務時間の始まりで切る
+        start=pl.record_start(main),
     )
     if got.kind == "timeout":
+        batch_reply(reply, main, a.name, extra)
         reply(
             "stopped",
             f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
@@ -119,6 +136,19 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
         if action == "running":
             reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"), **extra)
         items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
+        if action == "questions":  # 業務時間外は gate1・ask を溜め、今問う依頼だけを返す（#2913 の E6）
+            items, kept = pdf.route(main, a.name, items, pdf.hours_of(main))
+            if kept and not items:
+                d = kept["deferred"]
+                nxt = wait_line(self_path, a.name) + f" --after {ev.get('seq')}"
+                reply(
+                    "stopped",
+                    f"業務時間外の依頼を {d['count']} 件溜めた（業務時間の始まり {d['until']}）",
+                    code=3,
+                    next=nxt,
+                    **{**extra, **ev, **kept},
+                )
+            ev.update(kept)
         if action == ph.CONDITION:
             ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
         reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **{**extra, **ev})

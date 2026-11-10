@@ -648,8 +648,8 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
 
 
 def after_close(env: Env, rec: dict, before: dict, summary: str) -> dict:
-    """ループの 1 回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。"""
-    stop = held_stop(rec, boundary_stop(env, rec))
+    """ループの 1 回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。答え待ちの停止は次の選定が読む（#2913 の決定 5）。"""
+    stop = held_stop(rec, boundary_stop(env, rec, hold=False))
     if stop:
         return stop_and_report(env, rec, before, stop, f"{summary}。止まる条件に当たった（{stop['condition']}）")
     write_record(env, rec, before)

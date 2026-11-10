@@ -121,14 +121,15 @@ def owner_next(
     main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None
 ) -> tuple[str | None, list[str]]:
     """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、
-    ほかは止まった持ち主の restart を `; ` でつなぐ。停止の範囲にある計画のレーンは起こさず、再開の印を置く（#2707 の I11）。
+    ほかは止まった持ち主の restart を `; ` でつなぐ。停止の範囲にある 1 スプリントのレーンは起こさず、再開の印を置く（#2707 の I11）。
+    ループのレーンは停止の範囲でも起こす。境で承認の要らない候補（承認した設計の実装など）を選び、無ければ同じ条件で止まり直す（#2913 の決定 6）。
     リリースの一時レーンは計画全体の停止の間も restart の 1 行で起こす（再開の印を突き合わせるのは計画のレーンだけのため）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
     if q.get("kind") in ("stall", "helper", "spawn", "observe") or not q.get("lane"):
         return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None), []
     lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
-    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane)]
+    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
     for lane in held:
         ph.place_mark(main, name, lane, "answered")
     return _restart_lines([lane for lane in lanes if lane not in held]), held

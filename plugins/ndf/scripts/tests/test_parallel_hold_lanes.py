@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import parallel_hold as ph  # noqa: E402
 import test_sprint_loop as tsl  # noqa: E402
-from test_sprint_loop import rec, sl, sl_record, sl_select, start  # noqa: E402
+from test_sprint_loop import rec, sl_select, start  # noqa: E402
 from test_supervise_queue import PY, SUPERVISE, Queue, run_step  # noqa: E402
 
 env, mvv = tsl.env, tsl.mvv
@@ -47,13 +47,6 @@ def test_a_loop_lane_stops_at_the_boundary_with_a_mark_and_the_stop_line(lane):
     assert ph.read_marks(lane.root, "p1")["la"]["why"] == "boundary"
 
 
-def test_the_hold_stops_before_the_pending_laps_are_handled():
-    """保留したループの 1 回があっても waiting_only へ置き換えず、保留したループの 1 回の処理より先に止まる。"""
-    rec_ = {"laps": [{"n": 1, "outcome": sl_record.RELEASE_PENDING}]}
-    stop = {"condition": "answer_hold", "values": {}}
-    assert sl_select.held_stop(rec_, stop) is stop and stop["condition"] in sl_select.IMMEDIATE_STOPS
-
-
 def test_a_loop_lane_does_not_stop_when_the_hold_cleared_before_the_boundary(lane):
     lane.hold.write_text(json.dumps(HOLD))
     lane.hold.unlink()
@@ -64,15 +57,6 @@ def test_a_loop_lane_does_not_stop_when_the_hold_cleared_before_the_boundary(lan
 def test_a_broken_hold_file_does_not_stop_a_loop_lane(lane):
     lane.hold.write_text("{壊れた")
     assert sl_select.cmd_select(lane, "l1").get("exit") != 3
-
-
-def test_a_resumed_loop_stops_again_while_covered_and_resumes_when_cleared(lane):
-    lane.hold.write_text(json.dumps(HOLD))
-    first = sl_select.cmd_select(lane, "l1")["metrics"]["stop"]["at"]
-    again = sl.cmd_start(lane, "l1", [], {})
-    assert again["exit"] == 3 and again["metrics"]["stop"]["condition"] == "answer_hold" and first
-    lane.hold.unlink()
-    assert sl.cmd_start(lane, "l1", [], {})["metrics"]["status"] == "resumed"
 
 
 def test_a_process_that_is_not_the_lane_does_not_read_the_hold(lane, monkeypatch):
