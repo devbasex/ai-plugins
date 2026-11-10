@@ -28,7 +28,7 @@ import test_strategy as ts
 import tool_paths
 import worktree_deps
 
-from .. import ABORT, die, forecast, info, init_test, pause
+from .. import ABORT, die, info, init_test
 from .. import baseline as baseline_lib
 from .. import ci_coverage, pr_gate, runtime_decl, template_check, timeline
 from ..paths import (
@@ -82,6 +82,8 @@ NEW_RUN_DEFAULTS: dict[str, Any] = {
 # 予備時間は `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
 RESUME_BUDGET_REPLACE = (statefile.ResumeField("budget_minutes", "budget_minutes", "replace"),)
 RESUME_BUDGET_NOTIFY = (statefile.ResumeField("budget_minutes", "budget_minutes", "notify"),)
+# 安全網の上限はいつでも置き換える（止まった実行を大きい上限で打ち直す。#2457 決定 5）。
+RESUME_SAFETY_NET = (statefile.ResumeField("safety_net_minutes", "safety_net_minutes", "replace"),)
 RESUME_NOTIFY_FIELDS = (
     statefile.ResumeField("implementer", "implementer_named", "notify"),
     statefile.ResumeField("host", "host", "notify"),
@@ -317,9 +319,13 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "schema": SCHEMA,
         "id": args.pr,
         "started_at": ctx.started_at,
+        # 実装の予算（#2457）。選定にだけ使う。`budget` は `merge-plan` が延長と実効の予算を足す
         "budget_minutes": args.budget_minutes,
-        # 想定最大時間の出所（#2047）。`explicit` / `default` / `floor`（`init_test.settle_window` が下限まで上げた）
         "budget_source": getattr(args, "budget_source", None) or "explicit",
+        "budget": {"minutes": args.budget_minutes, "source": getattr(args, "budget_source", None) or "explicit", "effective_minutes": args.budget_minutes, "extension": None},
+        # 安全網（#2457 決定 5）。`safety_net_minutes` は引数の上書き（無ければ実効の予算 × 倍率）
+        "safety_net_minutes": getattr(args, "safety_net_minutes", None),
+        "safety_net": {"limit_minutes": None, "used_seconds": 0.0, "halted_at": None},
         "repo": ctx.repo,
         "current_pr": args.pr,
         "base_branch": ctx.base_branch,
@@ -374,7 +380,6 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "phases": {},
         "candidates": [],
         "plan": None,
-        "pause": pause.empty(),  # 止まっていた時間の記録（#1491）。計画の前の中断も測る（#1944）
         "items": [],
         "deferred_items": [],
         "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False},
@@ -397,7 +402,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     残っていれば再開し、渡した引数を反映の表に従って扱う。旧い形（ラウンド制）で
     終わっていない状態ファイルは読み替えずに止める（決定 18）。
     """
-    # **開始は着手前のテストより前に取る。** テストの所要も想定最大時間に入れる（#968）。
+    # **開始は着手前のテストより前に取る。**（#968）
     started_at = statefile.now()
     _normalize_args(args)
     inputs = _resolve_init_inputs(args)
@@ -410,7 +415,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         _emit_run(prep)
         return
 
-    # 想定最大時間の出所（#2047）。既定を埋める前に決める。省いた実行だけ、手順の枠が収まらなければ下限まで上げる
+    # 実装の予算の出所（#2047）。既定を埋める前に決める
     args.budget_source = "explicit" if getattr(args, "budget_minutes", None) is not None else "default"
     for key, value in NEW_RUN_DEFAULTS.items():
         if getattr(args, key, None) is None:
@@ -418,9 +423,6 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
-    # **手順の枠と計画の後の見込みが想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・#1743 I8）。
-    # 想定最大時間を省いた実行は止めずに下限まで上げる（#2047 の I3）。
-    init_test.settle_window(prep.state_file, state)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
     _emit_run(prep)
@@ -609,21 +611,19 @@ def _verify_init(
     )
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
-    # 着手前のテストの上限は予算と、着手前のテストの所要の見込み s（履歴 → 手元の全体テストの直近の実測 m → 宣言の w）から導く
-    # （決定 8・#1555・#2047 の I1）。
+    # 着手前のテストの上限は予算から導かない（#2457 決定 11）。共通ライブラリの予算なしの式（`3·max(w, m)`、所要が無ければ既定の秒）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w, init_test.recent_whole_seconds(prep))
-    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
-    timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
-    if s is not None:
-        info(f"   着手前のテストの上限: {timeout} 秒（着手前のテストの所要の見込み {s} 秒 / {s_source}）")
-    init_test.extend_for_init_test(int(args.budget_minutes), timeout)  # 親のステップの締め切りで先に切られない（#2047 の決定 4）
+    m = init_test.recent_whole_seconds(prep)
+    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "recent_seconds": m, "recent_source": "recent" if m is not None else None}
+    timeout = ts.limits(prep.strategy, None, **kw)["init_test_timeout"]
+    info(f"   着手前のテストの上限: {timeout} 秒（ハングの検知）")
+    init_test.extend_for_init_test(timeout)  # 親のステップの締め切りで先に切られない（#2457 決定 8）
     baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
-    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source})
+    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "recent_seconds": m})
     init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
     if baseline.get("timed_out"):
-        init_test.abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
+        init_test.abort_timed_out(baseline, timeout)
     prep.template_checks = template_check.enforce(args, prep, baseline, timeout)  # 不備なら止める（#1630）
     return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
@@ -691,7 +691,7 @@ def _save_initial_state(
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
-    state["limits"] = timeline.of_state(state, forecast.after_plan(state))
+    state["limits"] = timeline.of_state(state)
     state["ci_coverage"] = prep.ci_coverage
     state["template_checks"] = list(prep.template_checks)  # 範囲テストのテンプレートの試走の記録（#1630 の決定 7）
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
@@ -701,7 +701,7 @@ def _save_initial_state(
     statefile.save(prep.state_file, state)
     info(f"✅ 状態を初期化しました: {prep.state_file}")
     info(f"   ホスト: {inputs.host}（{inputs.detection}）")
-    info(f"   参加者（提案）: {' / '.join(state['runtimes'])} / 想定最大時間: {state['budget_minutes']} 分")
+    info(f"   参加者（提案）: {' / '.join(state['runtimes'])} / 実装の予算: {state['budget_minutes']} 分")
     return state
 
 
@@ -760,9 +760,13 @@ def _resume(
     ensure_record(state, getattr(args, "code_metrics", None))
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     if getattr(args, "budget_minutes", None) is not None and _before_plan(state):
-        state["budget_source"] = "explicit"  # 渡した想定最大時間は利用者の上限として守る（#2047 の I2）
+        state["budget_source"] = "explicit"
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
+    if _before_plan(state):
+        state["budget"] = {"minutes": state["budget_minutes"], "source": state.get("budget_source") or "explicit", "effective_minutes": state["budget_minutes"], "extension": None}
+    for line in statefile.apply_resume_args(state, args, RESUME_SAFETY_NET):
+        info(line)  # 安全網で止まった実行は、より大きい上限で打ち直すと続く（#2457 決定 5）
     view, given = _notify_view(state, args, inputs.model_spec)
     for line in statefile.apply_resume_args(view, given, RESUME_NOTIFY_FIELDS):
         info(line)
@@ -773,14 +777,8 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    pause.resume_after_pause(state_file, state)  # 止まっていた時間の分だけ締め切りをずらす（#1491・#1944）。**状態を書く前に測る**
     # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。起点にずらした止まっていた時間を足す）。
-    if not state.get("plan"):
-        # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
-        if state.get("window_stopped_at"):
-            state["resumed_at"] = statefile.now()
-        state["limits"] = timeline.of_state(state, forecast.after_plan(state))
-        init_test.settle_window(state_file, state)
+    state["limits"] = timeline.of_state(state)
     statefile.save(state_file, state)
     _emit_init(state)
 
@@ -861,7 +859,7 @@ def _emit_init(state: dict[str, Any]) -> None:
         # 再開の地点。駆動は終わった手順を飛ばす（AC24）。
         PHASE=state.get("phase") or "propose",
         BUDGET_MINUTES=state["budget_minutes"],
-        BUDGET_SOURCE=init_test.budget_source(state),  # 想定最大時間の出所（#2047）。駆動は floor ならステップの延長を書く
+        BUDGET_SOURCE=init_test.budget_source(state),
         WORKTREE_ROOT=state["worktree_root"],
         WORK=state["worktrees"]["work"],
         TMP_DIR=state["tmp_dir"],

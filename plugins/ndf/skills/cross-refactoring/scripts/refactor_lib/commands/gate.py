@@ -10,8 +10,11 @@
 
 全体テストの置き場は戦略で決まる（#1334）。`local-full` / `round-only` は手元で走らせ、`local-scoped-ci-whole`（か
 `--ci-check`）は push 済みの HEAD のチェックを上限まで待つ。落ちたら JUnit から落ちたテストを取り、フレーキー・既存失敗・
-変更起因に分け、変更起因が無ければ通す（I5）。修正を打ち切ったら、原因の項目から順に取り消す（単独は寄せた危険フラグの
-全体テストのときだけ。工程の 1 つとして起動したときは打ち切りの後の取り消し。#1649 #1669）。
+変更起因に分け、変更起因が無ければ通す（I5）。
+
+**時間で打ち切らず、確かめを省かない**（#2457 の原則 1・I11）。落ちたら落ちたテストの材料（ID・ログの置き場・走らせ直す
+コマンド。決定 12）を最終ゲート修正へ渡し、落ちたテストの集合の履歴で前進を見る（決定 4）。停滞か振動したら修正担当を
+1 度だけ替え、替えた後も停滞か振動したら、打ち消す項目を決められないため止めて人へ渡す（`FINAL_GATE=halt`）。
 
 **テストで見つからない誤りを拾う工程は消えない。** 工程として起動したときに省いた
 分は、工程表の「実装レビュー」（`pr` → `cross-review`）が持つ。ここへ軽量なレビューを
@@ -21,7 +24,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import pathlib
 import sys
 import time
@@ -31,23 +33,17 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from .. import clock, gate_lint, info, launch, prepush_lint, publish, stop_revert, timeline, triage
-from ..gitfacts import push_with_retry_marker, run_with_timeout, safe_int
-from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
-from ..paths import git_out, head_sha, load_state, work_dir
+from .. import failure_material, fixloop, gate_lint, info, launch, prepush_lint, progress, publish, timeline, triage
+from ..gitfacts import run_with_timeout, safe_int
+from ..gate_ci import ci_checks, ci_gate, ci_mode
+from ..paths import head_sha, load_state, work_dir
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
-    """最終ゲートを通す（#933 の AC16b・決定 15・決定 16、#1334 F4〜F6）。
+    """最終ゲートを通す（#933 の AC16b・決定 15・決定 16、#1334 F4〜F6、#2457）。
 
-    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた（修正ラウンドへ）・取り消した後の確かめ直し /
-    1 = 単独で起動して修正を打ち切った（**取り消さず**報告へ抜ける）/ 4 = 判断できない（CI が終わらない・案 B の後でも落ちた）。
-    打ち切ったとき、単独の起動は取り消さず判断を Pull Request の読み手へ渡し、工程の 1 つとして起動したときは
-    打ち切りの後の取り消し（`stop_revert`。#1669）で全体テストが通る状態へ戻してから確かめ直す。
-
-    **確かめ・最終ゲート修正は、確かめの開始の締め切り H − v までに入るときだけ始める**（#1932 原則 3）。入らなければ、
-    HEAD の木が起点の木と同じなら確かめを省いて通し、違えば工程の 1 つは案 B を積んで打ち直し、単独の起動は
-    取り消さずに終了コード 1 で終える（原則 4。`final_gate.check_skipped`）。
+    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた（修正ラウンドへ）か止めて人へ渡す（`FINAL_GATE=halt`）/
+    4 = 判断できない（CI が終わらない）。**木が起点と同じでも確かめを走らせる**（I11）。
 
     | 全体テストの置き場 | 見るもの |
     | --- | --- |
@@ -66,18 +62,10 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     publish.enter_final_gate(path, state)
 
     state.pop("launch_failure", None)
-    # 手元でテストの全体テストを走らせたときは、静的解析もテストの実行秒数を差し引いた上限で数える（1 回の全体検証を
-    # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
-    # 使い回し・CI で見るときは手元で走らないので渡さない。
     reused = _reusable_failure(state, gate)
     if reused is not None:
         passed, detail = False, reused
     else:
-        if not _reusable_whole_test(state) and not timeline.fits(clock.now(), 0, timeline.gate_start_end(state)):
-            # 確かめを確かめの開始の締め切り H − v までに始められない（#1932 原則 3・4）
-            _cannot_check(path, state, gate, standalone, NO_CHECK_ROOM)
-            return
-        gate.pop("check_skipped", None)
         passed, detail = _run_gate_checks(path, state, gate)
         _remember_failure(state, gate, passed, detail)
 
@@ -93,65 +81,58 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         _gate_passed(path, state, gate, detail)
         return
 
-    stop = _final_fix_stop(state, gate)
-    if stop is None:
+    halt = _final_fix_stop(state, gate)
+    if halt is None:
         _gate_failing(path, state, gate, detail)
         return
-    if standalone and stop == NO_FIX_ROOM:
-        # 単独の起動は時間で打ち切っても取り消さない（#1932 原則 4）
-        _cannot_check(path, state, gate, standalone, stop, detail)
-        return
-    if revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate):
-        # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
-        _gate_recheck(path, state, gate, detail)
-    _gate_limit_reached(path, state, gate, detail, stop)
+    _gate_halt(path, state, gate, detail, halt)
 
 
-NO_CHECK_ROOM = "確かめの開始の締め切りを過ぎていて、最終ゲートの確かめを始められない"
-NO_FIX_ROOM = "最終ゲート修正が確かめの開始の締め切りまでに入らない"
+def _gate_failing_set(gate: dict[str, Any]) -> list[str]:
+    """最終ゲートの落ちたテストの集合（無関係とフレーキーを除く）。ID が無ければ落ちた検査の鍵か `<whole>`（決定 12）。"""
+    triage_rec = gate.get("triage") or {}
+    ids = [str(i) for i in triage_rec.get("caused") or []] or [str(i) for i in (gate.get("material") or {}).get("ids") or []]
+    lint = [f"lint:{v.get('suite')}" for v in gate.get("lint") or [] if v.get("verdict") == "caused"]
+    found = sorted(set(ids + lint))
+    return found or [progress.WHOLE]
 
 
-def _cannot_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], standalone: bool, why: str, detail: str = "") -> None:
-    """確かめか最終ゲート修正が H − v までに入らないときの 2 通りの扱い（#1932 原則 4・I3）。
+def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
+    """最終ゲート修正を止めて人へ渡す理由。続けられれば `None`（#2457 決定 4）。
 
-    HEAD の木が起点の木と同じなら確かめを省いて通す。違えば、工程の 1 つは起点の木へ戻して（案 B）打ち直し、
-    単独の起動は何も取り消さずに終了コード 1 で終える。省いた理由は `final_gate.check_skipped` に残す。
+    落ちたテストの集合を履歴（`fix_history`）へ積み、前進する限り続ける。停滞か振動したら修正担当を 1 度だけ替え、
+    替えた後も停滞か振動したら止める（最終ゲートの失敗は打ち消す項目を決められないため、打ち切らずに人へ渡す）。
+    起動し直しても解けない結末（利用上限）も止める。
     """
-    now = clock.now()
-    end = timeline.final_end(state)
-    same = _same_as_base(state, gate)
-    gate["check_skipped"] = {
-        "reason": why,
-        "left_seconds": max(0, math.floor((end - now).total_seconds())) if end is not None else None,
-        "gate_seconds": timeline.gate_seconds(timeline.limits_of(state)),
-        "base_identity": same,
-        "at": statefile.now(),
-    }
+    if gate.get("no_relaunch"):
+        return "修正担当を起動し直しても解けない結末だった"
+    history = gate.setdefault("fix_history", [])
+    seq = int(gate.get("fix_rounds") or 0)
+    if not history or int(history[-1].get("round", -1)) != seq:
+        failing = _gate_failing_set(gate)
+        verdict = progress.compare([h.get("failing") or [] for h in history] + [failing])
+        history.append({"round": seq, "by": _final_fix_impl(state, gate), "failing": failing, "progress": verdict})
+    verdict = str(history[-1].get("progress"))
+    if verdict not in progress.STOPPING:
+        return None
+    if gate.get("fixer_switched"):
+        return "修正担当を替えた後も最終ゲート修正が停滞か振動した（打ち消す改善項目を決められない）"
+    new = fixloop.other_runtime(state, [_final_fix_impl(state, gate)])
+    if new is None:
+        return "最終ゲート修正が停滞か振動し、替える修正担当が居ない"
+    gate["impl"], gate["fixer_switched"] = new, True
+    info(f"🔁 最終ゲート修正が{('停滞' if verdict == progress.STALLED else '振動')}したため、修正担当を {new} へ替えます")
+    return None
+
+
+def _gate_halt(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str) -> None:
+    """止めて人へ渡す（変更は残す。#2457 決定 4・5）。"""
+    gate["status"] = "halted"
+    state["halt"] = {"reason": "final_gate", "detail": f"{why} / {detail}", "at": statefile.now()}
     statefile.save(path, state)
-    if same:
-        _gate_passed(path, state, gate, f"確かめを省いた（{why}。HEAD の木が起点の木と同じ）")
-        return
-    if standalone:
-        _gate_limit_reached(path, state, gate, detail or "確かめを始めていない", why)
-        return
-    stop_revert.fall_back(path, state, gate, stop_revert.NO_ROOM)
-    _gate_recheck(path, state, gate, detail or why)
-
-
-def _same_as_base(state: dict[str, Any], gate: dict[str, Any]) -> bool:
-    """HEAD の木（か、案 B のコミットの木）が起点の木（`plan.base_sha`）と同じか。案 B の後に同期が積んだコミットは見ない。"""
-    work = work_dir(state)
-    base = str((state.get("plan") or {}).get("base_sha") or "")
-    if not base:
-        return False
-    base_tree = git_out(work, ["rev-parse", f"{base}^{{tree}}"])
-    if not base_tree:
-        return False
-    revs = ["HEAD"]
-    record = gate.get("stop_revert") or {}
-    if record.get("plan") == "B" and record.get("commit"):
-        revs.append(str(record["commit"]))
-    return any(git_out(work, ["rev-parse", f"{rev}^{{tree}}"]) == base_tree for rev in revs)
+    info(f"⏸ 最終ゲートが通らないまま止めて人へ渡します（{why} / {detail}）。項目は取り消しません")
+    statefile.emit(FINAL_GATE="halt", HALT_REASON=why)
+    sys.exit(2)
 
 
 def _run_gate_checks(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
@@ -202,21 +183,6 @@ def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[s
     return detail
 
 
-def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
-    """最終ゲートの修正を打ち切る理由。続けられれば `None`（決定 23）。
-
-    **回数ではなく時計で決める。** 今 + 最終ゲート修正 1 回の見込み F（`limits.final_fix_seconds`）が確かめの開始の
-    締め切り H − v を越えるなら、1 回目でも起動しない（`NO_FIX_ROOM`。#1932 原則 3。#933 決定 26 は廃止）。
-    起動し直しても解けない結末（利用上限）も打ち切る。
-    """
-    if gate.get("no_relaunch"):
-        return "修正担当を起動し直しても解けない結末だった"
-    seconds = int(timeline.limits_of(state).get("final_fix_seconds") or 0)
-    if not timeline.fits(clock.now(), seconds, timeline.gate_start_end(state)):
-        return NO_FIX_ROOM
-    return None
-
-
 def _reusable_whole_test(state: dict[str, Any]) -> bool:
     """検証の中の全体テストを使い回せるか（決定 16）。
 
@@ -251,6 +217,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
         gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
+        gate["material"] = _material(state, classified, verdict)
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:
@@ -266,6 +233,25 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         gate["whole_test_seconds"] = round(float(gate.get("whole_test_seconds") or 0.0) + seconds, 1)
     statefile.save(path, state)
     return passed, detail, seconds
+
+
+def _material(state: dict[str, Any], classified: dict[str, Any], verdict: dict[str, Any]) -> dict[str, Any]:
+    """落ちたテストの材料（決定 12）。JUnit を読めないときもログか CI の run の置き場と走らせ直すコマンドを渡す（受け入れ条件 13）。"""
+    log = verdict.get("log")
+    text = ""
+    if log:
+        try:
+            text = pathlib.Path(log).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+    junit_ids = classified.get("caused") or classified.get("failed_tests") or []
+    return failure_material.build(
+        junit_ids,
+        text,
+        str(verdict.get("log_place") or log or ""),
+        classified.get("rerun_commands") or [],
+        timeline.strategy_of(state).whole_commands(ts.TEST),
+    )
 
 
 def _gate_command(state: dict[str, Any]) -> str:
@@ -308,30 +294,6 @@ def _gate_passed(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]
     statefile.emit(FINAL_GATE="passed")
 
 
-def _gate_recheck(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str) -> None:
-    # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
-    # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
-    # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
-    gate["status"] = "recheck"
-    gate["fix_base_sha"] = head_sha(work_dir(state))
-    statefile.save(path, state)
-    push_with_retry_marker(path, state, gate)
-    info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
-    statefile.emit(FINAL_GATE="recheck")
-    sys.exit(2)
-
-
-def _gate_limit_reached(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str) -> None:
-    gate["status"] = "failed"
-    statefile.save(path, state)
-    info(
-        f"❌ 最終ゲートが通らないまま修正を打ち切りました（{why} / {detail}）。"
-        "**既に push してあるため取り消しません。** 失敗として報告します"
-    )
-    statefile.emit(FINAL_GATE="failed")
-    sys.exit(1)
-
-
 def _gate_failing(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -348,6 +310,9 @@ def _gate_failing(
     gate["fix_base_sha"] = head_sha(work_dir(state))
     # 修正の依頼に載せる内容（落ちた検査と直前の差し戻し）。`launch-cli.sh` が `RF_FINAL_FIX_REQUEST` で渡す（F2）
     request = prepush_lint.fix_request(gate)
+    if gate.get("material"):
+        # 落ちたテストの材料（ID・ログの置き場・走らせ直すコマンド）。JUnit を読めないときも渡す（受け入れ条件 13）
+        request = (request + "\n\n" if request else "") + "落ちたテストの材料:\n" + failure_material.as_markdown(gate["material"])
     if request:
         gate["fix_request"] = request
     else:
@@ -375,17 +340,18 @@ def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, O
     if not commands:
         return True, "テストの種別の全体テストが無い", None
     work = work_dir(state)
-    timeout = timeline.state_whole_timeout(state, clock.now())  # 確かめの子プロセスは H で切る
+    timeout = timeline.state_whole_timeout(state)
     triage.clear_junit(state)
     started = time.monotonic()
+    log = pathlib.Path(state["tmp_dir"]) / "final-gate-whole-test.log"
     for command in commands:
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
-        code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left))
+        code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left, output=log))
         result = ts.outcome(code, timed_out)
         if result.launch_failed:
             launch.stop(path, state, "gate", command, result)
         if timed_out:
-            return False, f"{command} が {timeout} 秒で終わりませんでした", {"timed_out": True}
+            return False, f"{command} が {timeout} 秒で終わりませんでした", {"timed_out": True, "log": str(log)}
         if code != 0:
-            return False, f"{command} / 終了コード {code}", {"timed_out": False}
+            return False, f"{command} / 終了コード {code}", {"timed_out": False, "log": str(log)}
     return True, f"{' && '.join(commands)} / 終了コード 0", None

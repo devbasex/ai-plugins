@@ -1,8 +1,7 @@
-"""想定最大時間から採る項目と締め切りを決める計算（#933 の「時間の決め方」）。"""
+"""実装の予算から採る項目を決める計算（#933 の「時間の決め方」、#2457 決定 1・2・I1〜I3）。"""
 
 from __future__ import annotations
 
-import datetime as dt
 import importlib
 
 import pytest
@@ -21,7 +20,6 @@ TABLE = {
     "fix": 5.5,
     "kinds": {"structure/extract_method": 2.0},
 }
-START = dt.datetime(2026, 9, 24, 10, 0, 0)
 
 
 def _cand(tier="high", n=1, severity="major", est=None, key="k"):
@@ -30,49 +28,15 @@ def _cand(tier="high", n=1, severity="major", est=None, key="k"):
         "tier": tier,
         "proposed_by": ["x"] * n,
         "severity": severity,
-        "estimate": est or {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "estimate": est or {"test": 0.0, "implement": 1.5},
     }
 
 
-def test_item_estimate_uses_technique_and_falls_back(budget):
-    assert budget.item_estimate(TABLE, "extract_method", True) == {"test": 2.7, "implement": 2.0, "verify": 0.2}
-    # 標本の無い手法は structure/* をまとめた値へ落ちる。テストを足さなければ 0
-    assert budget.item_estimate(TABLE, "rename", False) == {"test": 0.0, "implement": 1.3, "verify": 0.2}
-
-
-def _strategy(name):
-    import sys
-
-    ts = sys.modules["test_strategy"]
-    return ts.Strategy(name, "test.strategy")
-
-
-def test_reserve_matches_the_917_example(budget):
-    r = budget.reserve(_strategy("local-full"), 60, None, False, 5.5)
-    # 最終ゲートの修正 1 回分（final_fix）も改修計画の時点で差し引く（決定 26）。危険フラグの全体テストは最終ゲートと兼ねる（#1743 決定 1）
-    assert r == {"danger_whole_test": 0.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
-    assert budget.reserve_total(r) == pytest.approx(12.0)
-    # 経過 9 分で使える時間は 60 − 9 − 12 = 39 分
-    assert budget.available_minutes(60, 9, r) == pytest.approx(39.0)
-
-
-def test_reserve_with_a_ci_gate_and_a_missing_baseline(budget):
-    """CI で見る最終ゲートは CI の壁時計 c を、測れていなければ 0 を入れる（#1334 決定 8）。"""
-    assert budget.reserve(_strategy("local-full"), 120, 180, True, 5.5)["final_whole_test"] == 3.0
-    assert budget.reserve(_strategy("local-full"), 120, None, True, 5.5)["final_whole_test"] == 0.0
-    assert budget.reserve(_strategy("local-full"), None, None, False, 3.0) == {
-        "danger_whole_test": 0.0,
-        "final_whole_test": 0.0,
-        "fix": 3.0,
-        "final_fix": 3.0,
-    }
-
-
-def test_reserve_does_not_hold_the_whole_test_when_the_ci_runs_it(budget):
-    """AC9 — 全体テストを CI に任せる戦略は、手元で走らせない全体テストの時間を引かない。危険フラグの分は 0、最終ゲートは c。"""
-    r = budget.reserve(_strategy("local-scoped-ci-whole"), 3827, 360, True, 5.5)
-    assert r["danger_whole_test"] == 0.0
-    assert r["final_whole_test"] == pytest.approx(6.0)
+def test_the_estimate_is_the_test_and_the_implementation_only(budget):
+    """決定 1: 見積りに検証を入れない。"""
+    assert budget.item_estimate(TABLE, "extract_method", True) == {"test": 2.7, "implement": 2.0}
+    assert budget.item_estimate(TABLE, "rename", False) == {"test": 0.0, "implement": 1.3}
+    assert budget.estimate_total({"test": 2.7, "implement": 2.0, "verify": 30.0}) == pytest.approx(4.7)
 
 
 def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):
@@ -80,13 +44,14 @@ def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):
     high_1 = _cand(tier="high", n=1, key="high_1")
     high_2 = _cand(tier="high", n=2, severity="minor", key="high_2")
     high_2_major = _cand(tier="high", n=2, severity="major", key="high_2_major")
-    cheap = _cand(tier="high", n=2, severity="major", key="cheap", est={"test": 0, "implement": 0.5, "verify": 0.2})
+    cheap = _cand(tier="high", n=2, severity="major", key="cheap", est={"test": 0, "implement": 0.5})
     ranked = sorted([low, high_1, high_2, high_2_major, cheap], key=budget.rank_key)
     assert [c["key"] for c in ranked] == ["cheap", "high_2_major", "high_2", "high_1", "low"]
 
 
 def test_select_skips_items_that_do_not_fit_and_keeps_filling(budget):
-    big = _cand(key="big", est={"test": 2.7, "implement": 10, "verify": 0.2})
+    """受け入れ条件 3: 順位の順に入る候補を入れ、入らない候補は見送る（飛ばして次を見る）。"""
+    big = _cand(key="big", est={"test": 2.7, "implement": 10})
     small1 = _cand(key="s1")
     small2 = _cand(key="s2")
     selected, skipped = budget.select([small1, big, small2], 4.0)
@@ -100,26 +65,41 @@ def test_select_accepts_exact_fit_despite_float_error(budget):
     assert len(selected) == 29 and skipped == []
 
 
-def test_the_implement_end_and_the_test_end(budget):
-    """I13: 実装の終わり = 打ち切り − R − Σ verify、テストの追加の終わり = 実装の終わり − Σ implement。"""
-    final_end = START + dt.timedelta(minutes=60)
-    a = {"estimate": {"test": 2.0, "implement": 3.0, "verify": 1.0}}
-    b = {"estimate": {"test": 0.0, "implement": 4.0, "verify": 1.0}}
-    end = budget.implement_end(final_end, {"final_whole_test": 1.0, "fix": 5.5, "final_fix": 1.0}, [a, b])
-    m = dt.timedelta(minutes=1)
-    assert end == final_end - (7.5 + 2) * m
-    assert budget.add_tests_end(end, [a, b]) == end - 7 * m
-    assert budget.readopt_available(final_end, {"fix": 1.0}, START + 55 * m) == pytest.approx(4.0)
+@pytest.mark.parametrize(
+    "high, budget_minutes, expected",
+    [
+        ([20, 20], 60, None),  # 和 40 ≤ 予算 60: 延ばさない
+        ([40, 30.5], 60, 71),  # 60 < 和 70.5 ≤ 120: ceil(和) へ延ばす
+        ([60, 60], 60, 120),  # 和がちょうど 2 倍: 延ばす
+        ([70, 60], 60, None),  # 和 130 > 120: 延ばさない
+    ],
+)
+def test_the_budget_is_extended_only_between_the_budget_and_twice_it(budget, high, budget_minutes, expected):
+    """受け入れ条件 4・I2: high の見積りの和が予算と 2 倍の間にあるときだけ ceil(和) へ延ばし、理由と前後の値を残す。"""
+    ranked = [_cand(tier="high", key=f"h{i}", est={"test": 0, "implement": m}) for i, m in enumerate(high)]
+    ranked.append(_cand(tier="medium", key="m", est={"test": 0, "implement": 50}))
+    ext = budget.extension(ranked, budget_minutes, factor=2)
+    if expected is None:
+        assert ext is None
+        return
+    assert ext["from"] == budget_minutes and ext["to"] == expected
+    assert ext["high_minutes"] == pytest.approx(sum(high))
+    assert "high の候補の見積りの和" in ext["reason"]
+    assert budget.effective_minutes({"minutes": budget_minutes, "extension": ext}) == expected
 
 
-def test_fix_time_left_does_not_subtract_fix_reserve(budget):
-    r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
-    now = START + dt.timedelta(minutes=50)
-    assert budget.fix_time_left(budget.fix_end(START, 60, r), now) == pytest.approx(8.0)
+def test_readopt_left_counts_the_adopted_estimates_not_the_actuals(budget):
+    """I1・I3: 採り直しの残りは「実効の予算 − 採っていて取り消していない項目の見積りの和」。実装時間の実績は使わない。"""
+    plan_budget = {"minutes": 60, "extension": None}
+    a = {"status": "verified", "estimate": {"test": 0, "implement": 40}, "seconds": {"implement": 20 * 60}}
+    b = {"status": "verified", "estimate": {"test": 0, "implement": 20}, "seconds": {"implement": 0}}
+    assert budget.readopt_left(plan_budget, [a, b]) == pytest.approx(0.0)
+    b["status"] = "reverted"
+    assert budget.readopt_left(plan_budget, [a, b]) == pytest.approx(20.0)
 
 
-def test_fix_time_left_keeps_the_final_fix_reserve_for_the_final_gate(budget):
-    """決定 26: 検証の直しは、最終ゲートの修正 1 回分の予備時間まで食わない。"""
-    r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
-    now = START + dt.timedelta(minutes=50)
-    assert budget.fix_time_left(budget.fix_end(START, 60, r), now) == pytest.approx(2.5)
+def test_the_safety_net_is_twice_the_effective_budget_unless_given(budget):
+    """決定 5: 安全網の上限は実効の予算 × 倍率（既定 2）。明示すればその値。"""
+    assert budget.safety_net_minutes({"minutes": 60, "extension": None}) == pytest.approx(120.0)
+    assert budget.safety_net_minutes({"minutes": 60, "extension": {"to": 80}}) == pytest.approx(160.0)
+    assert budget.safety_net_minutes({"minutes": 60}, 15) == pytest.approx(15.0)

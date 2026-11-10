@@ -1,21 +1,21 @@
-"""`init` の着手前のテストの周り: 着手前のテストの所要の見込み・配分の履歴への追記・打ち切りと手順の枠での停止か想定最大時間の引き上げ（#1385 #1555 #2047）。
+"""`init` の着手前のテストの周り: 着手前のテストの所要の見込み・配分の履歴への追記・打ち切り（#1385 #1555 #2047・#2457）。
+
+上限は予算から導かない（#2457 決定 11）。共通ライブラリの予算なしの式（`3·max(w, m)`、所要が無ければ既定の秒）を使う。
 
 `commands/setup.py` から呼ぶ。`prep` は `setup._InitPreparation`（`strategy`・`work`・`repo` を持つもの）を受ける。
 """
 
 from __future__ import annotations
 
-import math
 import pathlib
 from typing import Any, Optional
 
-import drive_pause
 import run_metrics
 import statefile
 import test_strategy as ts
 import whole_runs
 
-from . import allocation, die, info, timeline
+from . import allocation, die, info
 from . import baseline as baseline_lib
 
 
@@ -48,14 +48,11 @@ def recent_whole_seconds(prep: Any) -> Optional[float]:
     return float(got[0]) if got else None
 
 
-def extend_for_init_test(budget_minutes: int, timeout: int) -> None:
-    """着手前のテストの上限 T が `0.10·B` を超えるなら、テストを始める前にステップの延長を書く（#2047 の決定 4）。
-    見込みは `B·60 + (T − 0.10·B·60)`。エンジンの外で打ったときは何もしない。"""
-    base = math.ceil(float(budget_minutes) * 60 * ts.INIT_TEST_SHARE)
-    if timeout <= base:
-        return
-    seconds = int(budget_minutes) * 60 + (int(timeout) - base)
-    drive_pause.write_extension(seconds, f"着手前のテストの上限 {timeout} 秒が想定最大時間の 10%（{base} 秒）を超える")
+def extend_for_init_test(timeout: int) -> None:
+    """着手前のテストを始める前に、その上限の分だけ親のステップの締め切りを延ばす（#2457 決定 8）。エンジンの外で打ったときは何もしない。"""
+    from . import step_extend
+
+    step_extend.ahead(timeout, f"着手前のテストの上限 {timeout} 秒")
 
 
 def append_init_test(prep: Any, budget_minutes: int, pr: Any, baseline: dict[str, Any]) -> None:
@@ -76,63 +73,15 @@ def record_whole_run(prep: Any, baseline: dict[str, Any]) -> None:
     whole_runs.record_whole(prep.work, ts.whole_key(prep.strategy), baseline.get("seconds"), "cross-refactoring")
 
 
-def abort_timed_out(strategy: ts.Strategy, budget_minutes: int, baseline: dict[str, Any], timeout: int) -> None:
-    """着手前のテストの打ち切りで止める。時間の枠の不足（`SKIP=init-timeout`）を出し、履歴に残したことと、次の実行の上限の見込みを添える。"""
+def abort_timed_out(baseline: dict[str, Any], timeout: int) -> None:
+    """着手前のテストの打ち切りで止める（ハングの検知。`SKIP=init-timeout`）。履歴に残したことを添える。"""
     statefile.emit(SKIP="init-timeout", SKIP_DETAIL=f"着手前のテストが上限 {timeout} 秒で終わらなかった")
-    lines = [f"着手前のテストが {timeout} 秒で終わりませんでした（{baseline.get('command')}）。打ち切りました"]
-    if baseline.get("mode") == "scope" and strategy.whole_on_ci:
-        following = ts.limits(strategy, budget_minutes, scope_seconds=float(timeout), scope_source="history")["init_test_timeout"]
-        lines.append(f"打ち切りを配分の履歴に残しました。同じ範囲の次の実行の上限は {following} 秒の見込みです")
-    else:
-        lines.append("打ち切りを配分の履歴に残しました")
-    die("\n".join(lines))
+    die(
+        f"着手前のテストが {timeout} 秒で終わりませんでした（{baseline.get('command')}）。打ち切りました\n"
+        "打ち切りを配分の履歴に残しました"
+    )
 
 
 def budget_source(state: dict[str, Any]) -> str:
-    """想定最大時間の出所。持たない状態ファイル（この変更より前の実行）は `explicit`（止まる側）として読む。"""
+    """実装の予算の出所（`explicit` / `default`）。持たない状態ファイルは `explicit` として読む。"""
     return str(state.get("budget_source") or "explicit")
-
-
-def settle_window(state_file: pathlib.Path, state: dict[str, Any]) -> None:
-    """手順の枠が想定最大時間に収まるかを確かめ、出所に応じて上げるか止める（#2047 の I3・I4）。
-
-    収まれば止めた印を消す。出所が `default` / `floor` なら想定最大時間を下限（打ち直しの見込みを足さない）へ上げ、
-    出所を `floor` にして上限の表を組み直す。`explicit` なら `SKIP=window` を出し、止めた印を残して保存し、終了コード 4 で止める。"""
-    problem = timeline.window_problem(state["limits"])
-    if problem is None:
-        if state.pop("window_stopped_at", None) is not None:
-            statefile.save(state_file, state)
-        return
-    offset = timeline.window_offset(state)
-    after = float(state["limits"].get("after_plan_minutes") or 0.0)
-    floor = timeline.required_budget_minutes(offset, after, grace_seconds=0)
-    before = int(state["budget_minutes"])
-    x = (state.get("baseline_test") or {}).get("seconds")
-    spent = f"着手前のテスト {x} 秒" if x is not None else f"枠の起点 {math.ceil(offset)} 秒"
-    if budget_source(state) == "explicit":
-        statefile.emit(SKIP="window", SKIP_DETAIL=f"要る下限 {floor} 分 > 想定最大時間 {before} 分（{spent}）")
-        state["window_stopped_at"] = statefile.now()
-        statefile.save(state_file, state)
-        die(problem)
-        return
-    minutes = max(floor, before)
-    state["budget_minutes"] = minutes
-    state["limits"] = timeline.of_state(state)
-    while timeline.window_problem(state["limits"]) is not None:  # 時刻の丸めで 1 分届かないときだけ回る
-        minutes += 1
-        state["budget_minutes"] = minutes
-        state["limits"] = timeline.of_state(state)
-    state["budget_source"] = "floor"
-    state["budget_floor"] = {
-        "from_minutes": before,
-        "minutes": minutes,
-        "offset_seconds": round(offset, 1),
-        "after_plan_minutes": after,
-        "at": statefile.now(),
-    }
-    state.pop("window_stopped_at", None)
-    statefile.save(state_file, state)
-    info(
-        f"ℹ 想定最大時間を省いたため、下限の {minutes} 分へ上げました（{before} 分では提案とリファクタリング計画の枠と"
-        f"計画の後の見込み {after} 分が収まらない。{spent}）"
-    )

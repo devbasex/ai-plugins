@@ -2,8 +2,8 @@
 
 実装担当の改修計画（等級・足すテスト・範囲テストの対象・同じ変更か・公開の入出力が
 変わりうるか）を読み、Jev が使えるときは等級と「同じ変更か」を Jev に問う。そのうえで
-順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、実装の終わりを
-出す（項目ごとの期限は持たない。#1743 決定 9）。**数え上げと比較はスクリプトが行う**（決定 11）。
+順位を決め、配分テーブルで見積もり（テストの追加と実装の和だけ）、実装の予算に収まる件数を選ぶ。
+予算は選定にだけ使い、締め切りを導かない（#2457 の原則 1）。**数え上げと比較はスクリプトが行う**（決定 11）。
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ import project_mvv
 import statefile
 import test_strategy as ts
 
-from .. import ABORT, budget, forecast, info, pause, targets, timeline
+from .. import budget, forecast, info, safety_net, targets, timeline
 from ..gitfacts import read_result, record_observed_model
 from ..items import defer, group_key, item_label, key_text, new_items
 from ..paths import git_out, load_state, work_dir
-from ..phases import elapsed_minutes, finish_phase
+from ..phases import finish_phase
 from ..vocabulary import (
     DEFER_BUDGET,
     DEFER_DUPLICATE,
@@ -264,23 +264,21 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
 
 
 def cmd_merge_plan(args: argparse.Namespace) -> None:
-    """改修計画を取り込み、時間に収まる項目と締め切りを決める。
+    """改修計画を取り込み、実装の予算に収まる項目を選ぶ。
 
-    終了コード: 0 = 項目あり / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 中断。
-    出力: `TESTS_NEEDED=0|1`（テストを足す項目があるか）。中断の理由は `ABORT_DETAIL=<1 行>`。
+    終了コード: 0 = 項目あり / 2 = 残る項目 0 件（最終ゲートへ）。
+    出力: `TESTS_NEEDED=0|1`（テストを足す項目があるか）。
 
-    使える時間が 0 分以下で候補が 1 件以上あれば、候補を時間で見送り、計画を置かずに保存して終了コード 4 で
-    中断する（#1944 の I7）。打ち直しは止まっていた時間を除いた経過時間で計画を作り直す。
+    選定は「実効の予算 ≥ 採った項目の見積りの和」だけで決める（#2457 決定 1・I1）。グレード high の候補の見積りの和が
+    予算を超え 2 倍以下なら、実効の予算をその和まで延ばす（決定 2・I2）。経過時間・テストの所要・CI の待ちを引かない。
 
-    **叩き直しても改修計画を作り直さない。** 採用の件数・実装の終わり・予備時間はこの時点の予算で
-    固定する（再開で予算を変えても食い違わない）。採る件数を増やすのは検証の後の `readopt` だけである。
+    **叩き直しても改修計画を作り直さない。** 採る件数を増やすのは検証の後の `readopt` だけである。
     """
     path, state = load_state(args.id)
     if state.get("plan"):
         _emit_and_exit(state, replay=True)
         return
 
-    # 前の試行（使える時間が無く中断した計画）の時間の見送りを消してから選ぶ（#1944）。
     state["deferred_items"] = [d for d in state.get("deferred_items") or [] if d.get("defer_reason") != DEFER_BUDGET]
     answers = _read_plan_answers(state)
     _decide_tiers(state, answers)
@@ -288,64 +286,47 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     remaining = _limited_commands(state, remaining)
 
     table = forecast.allocation_table(state)
-    # 項目の検証の見積りは、配分の `verify` と着手前に手元で走らせた範囲テストの実測の大きい方（#1334 決定 8）。
-    measured_verify = budget.measured_verify_minutes(state)
     for item in remaining:
         item["estimate"] = budget.item_estimate(table, str(item.get("technique")), bool(item["tests"]))
-        item["estimate"]["verify"] = max(float(item["estimate"]["verify"]), measured_verify)
     ranked = sorted(remaining, key=budget.rank_key)
 
-    reserve = budget.plan_reserve(state, table)
-    elapsed = elapsed_minutes(state)
-    available = budget.available_minutes(int(state["budget_minutes"]), elapsed, reserve)
-    selected, skipped = budget.select(ranked, available)
+    plan_budget = dict(state.get("budget") or {"minutes": int(state["budget_minutes"]), "source": state.get("budget_source") or "explicit"})
+    plan_budget["extension"] = budget.extension(ranked, int(plan_budget["minutes"]))
+    plan_budget["effective_minutes"] = budget.effective_minutes(plan_budget)
+    state["budget"] = plan_budget
+    selected, skipped = budget.select(ranked, plan_budget["effective_minutes"])
     for item in skipped:
-        defer(state, item, DEFER_BUDGET, f"見積り {budget.estimate_total(item['estimate']):.1f} 分が残りに入らない")
-    if available <= 0 and ranked:
-        _stop_without_time(path, state, available, len(ranked))
+        defer(state, item, DEFER_BUDGET, f"見積り {budget.estimate_total(item['estimate']):.1f} 分が実装の予算に入らない")
 
     state["items"] = new_items(selected)
     _decide_public_io(state, state["items"])
     state["plan"] = {
         "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
-        "elapsed_minutes": round(elapsed, 2),
-        "available_minutes": round(available, 2),
-        "reserve": reserve,
+        "budget_minutes": plan_budget["effective_minutes"],
         "table_source": table.get("source"),
         "table": table,
         "selected": [i["id"] for i in state["items"]],
     }
-    # 止まっていた時間の記録（#1491。計画の前の分は引き継ぐ。#1944）と採り直しの記録（#1743 決定 10）を置く。
-    if not isinstance(state.get("pause"), dict):
-        state["pause"] = pause.empty()
+    safety_net.refresh(state)
     state["readopt"] = {"round": 1, "events": []}
-    # **実行時の値をすべて書き出す**（決定 24）。以後の手順は、この表と時計の比較だけで進む。
     state["limits"] = timeline.of_state(state)
     finish_phase(state, "plan")
     if not state["items"]:
         # 最終ゲートへ移すのは `readopt` の `no_fit` だけにする（#1743 決定 10）。
         state["phase"] = "readopt"
     statefile.save(path, state)
-    _report(state, available, len(skipped))
+    _report(state, len(skipped))
     _emit_and_exit(state)
 
 
-def _stop_without_time(path: Any, state: dict[str, Any], available: float, candidates: int) -> None:
-    """使える時間が無いまま全候補を見送った。計画を置かずに保存し、理由を `ABORT_DETAIL` に出して終了コード 4 で止める。"""
-    statefile.save(path, state)
-    detail = f"使える時間 {available:.1f} 分に候補 {candidates} 件が入らない（すべて時間で見送った）"
-    info(detail)
-    statefile.emit(ABORT_DETAIL=detail)
-    sys.exit(ABORT)
-
-
-def _report(state: dict[str, Any], available: float, skipped: int) -> None:
+def _report(state: dict[str, Any], skipped: int) -> None:
+    plan_budget = state["budget"]
+    ext = plan_budget.get("extension")
+    grown = f"（延長: {ext['from']} → {ext['to']} 分。{ext['reason']}）" if ext else ""
     info(
-        f"使える時間 {available:.1f} 分 → 採用 {len(state['items'])} 件 / 時間で見送り {skipped} 件"
-        f"（配分: {state['plan']['table_source']}）"
+        f"実装の予算 {plan_budget['effective_minutes']} 分{grown} → 採用 {len(state['items'])} 件 / 予算で見送り {skipped} 件"
+        f"（配分: {state['plan']['table_source']}。安全網の上限 {state['safety_net']['limit_minutes']:.0f} 分）"
     )
-    if state["items"]:
-        info(f"  実装の終わり {state['limits'].get('implement_end_at')}（項目ごとの期限は持たない）")
     for item in state["items"]:
         tests = f" + テスト {len(item['tests'])}" if item["tests"] else ""
         info(
