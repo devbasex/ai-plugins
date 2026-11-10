@@ -209,7 +209,7 @@ API キーの使い方の宣言（`off`・`always`・`near-limit`）の値は増
 | 規則 | 置き場 | この変更での扱い |
 | --- | --- | --- |
 | 閾値未満の候補を先に並べる | `claude_accounts._try_order` | 選ぶ順の組へ置き換える |
-| 従量の接続から戻せるか（使用率が閾値未満） | `Choice.recoverable`（`switch.py`・`supervise_lib/claude.py`） | 決定の組が 1 か 2 なら戻す、に置き換える |
+| 従量の接続から戻せるか（使用率が閾値未満） | `Choice.recoverable`（`switch.py`・`supervise_lib/claude.py`） | 決定の起動先がアカウント（候補のアカウントがある。組 1〜4 のどれでも）なら戻す、に置き換える |
 | 今のアカウントが閾値以上なら次の区切りで替える | `UsageWatch.check`・`_pick_for_section`・`no_better` | 区切りの決定と切り替えの余裕へ置き換える |
 | near-limit の条件 2（選んだ候補の使用率が閾値以上） | `claude_api_keys.near_limit` | 規則の表（閾値 T）へ置き換える |
 
@@ -266,7 +266,7 @@ classDiagram
 | 入力 | `current` は今のアカウントの名前。`exclude_accounts` はこの呼び出しで上限・認証の失敗に当たったアカウント。`exclude_keys` はこの呼び出しで残高切れ・認証の失敗・上限を返した API キー。`keep` はトークンを更新しないアカウント（今の `choose` の `keep` と同じ） |
 | 出力 | `Decision`。例外を投げない。登録簿が壊れていれば `use` を `off` として組む（今の扱い） |
 | 失敗の形 | 使用率を取れないアカウントは `weekly` が None の観測になる。帳簿を読めなければ `ledger_ok` が偽になる。どちらも決定の規則が扱い、口は失敗を返さない |
-| 互換性 | `claude_accounts.choose(exclude, keep)` は残し、`decide_now(use="off")` のアカウントの決定を `Choice` に写して返す。`Choice.recoverable(thr)` は `Choice.group in (1, 2)` を返す形に変え、引数を受けて読み捨てる |
+| 互換性 | `claude_accounts.choose(exclude, keep)` は残し、`decide_now(use="off")` のアカウントの決定を `Choice` に写して返す。`Choice.recoverable(thr)` は `bool(Choice.name)`（決定の `route` が `account`）を返す形に変え、引数を受けて読み捨てる。組 3・組 4 のアカウントへも戻す（決定 7） |
 
 ### 規則の名前
 
@@ -278,7 +278,7 @@ classDiagram
 | `near_limit_no_declared_key` | アカウントか待つ | 帳簿を読めたが、外していない API キーのどれも月の額を宣言していない |
 | `near_limit_budget_used_up` | アカウントか待つ | 宣言のある API キーがすべて週の利用枠を使い切った |
 | `account` | アカウント | 上のどれにも当たらず、候補のアカウントがある |
-| `wait_reset` | 待つ | 候補のアカウントが無い |
+| `wait_reset` | 待つ（`wait_until` が None なら止める） | 候補のアカウントが無い |
 
 アカウントへ決まったときの `account_rule` は、組の名前か `keep_current` である。組の名前は `five_hour_first` / `weekly_only` / `over_threshold` / `usage_unknown` である。
 
@@ -322,7 +322,7 @@ classDiagram
 | 4 | `near_limit_no_declared_key` | 前提の条件がそろい、宣言のあるキーが無い |
 | 5 | `near_limit_budget_used_up` | 前提の条件がそろい、宣言のあるキーがすべて使い切った |
 | 6 | `account` | 候補のアカウントがある |
-| 7 | `wait_reset` | 常に（`wait_until` は上限にあるアカウントの解除の時刻の最小。無ければ None） |
+| 7 | `wait_reset` | 常に（`wait_until` は上限にあるアカウントの解除の時刻の最小。上限にあるアカウントが無ければ None で、起動口は待たずに止める） |
 
 前提の条件（near-limit の発動）は 1 つの述語 `near_limit_due(snap)` にまとめる。`use` が `near-limit` で、再登録が要るものを除いた登録済みアカウントが 1 つ以上あり、そのすべての `weekly` が読めて T 以上であること。規則 3〜5 はアカウントの選び方（規則 6・7 と同じ関数）で起動先を決め、規則の名前だけを差し替える。
 
@@ -394,10 +394,11 @@ sequenceDiagram
         起動口->>帳簿: 費用
         Note over 起動口: 上限なら上限の観測を残し、アカウントを除外へ足し、決定へ戻る
     else 待つ
-        Note over 起動口: 従量の接続の宣言があれば移り、無ければ解除まで待って除外を空にし、決定へ戻る
+        Note over 起動口: 従量の接続の宣言があれば移る。無ければ解除の時刻まで待って除外を空にし、決定へ戻る。解除の時刻が無ければ止める
     end
 ```
 
+- 決定が待つで `wait_until` が None のとき（候補のアカウントが無く、上限にあるアカウントも無い。全アカウントが再登録待ち・認証の失敗で除外・起動できない）、従量の接続の宣言が無ければ、起動口は待たずに止める。今の `AuthUnavailable`（起動しないで止める）を投げる。待つ時刻が無いまま決定へ戻ると、同じ認証の失敗を繰り返すためである
 - 除外（`exclude_accounts`・`exclude_keys`）は 1 回の呼び出しの中だけの集合で、呼び出しが終われば捨てる。次の呼び出しは空から決める
 - 「決定へ戻る」は、E6・E7 の E4 の出し直しである。除外を足して `decide_now` を呼び直し、使用率は控えを通して読む。控えの寿命の中では使用率の API を呼び直さず、帳簿と上限の観測は手元のファイルを読み直すだけである。E7 で残した上限の観測は、この読み直しで決定の入力に入る
 - 起動口は起動のたびに決定のエントリポイントを呼ぶ。今のアカウント（`self.account`）を `current` に渡すので、組が同じなら呼び出しの間でアカウントを替えない
@@ -437,7 +438,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 性能・拡張性 | 1 回の起動先の決定で使用率の API を呼ぶのは、登録済みアカウントごとに多くて 1 回。控えを置く場合は控えの寿命の中で呼ばない | 観測の収集はアカウントごとに `usage()` を 1 回だけ呼ぶ。控えの寿命は 300 秒（PRD1 の提供元の側の控えと同じ長さ）。帳簿は行の文字列に `"api_key"` を含む行だけを JSON として読む（全帳簿 5,634 行で 0.12 秒。2026-11-10 に手元で計測） | 偽の取得先で呼び出しの回数を数える単体テスト |
 | 運用・保守性 | 決定ごとに規則の名前と根拠の値が記録と表示に出て、利用者が後から「なぜそこで起動したか」を辿れる | `Decision.evidence` に、選んだ先の組・週の使用率・5 時間の使用率・リセット時刻・API キーの使用額と利用枠・全アカウントの週の使用率の最小を入れる。進捗記録と relay の記録はこの辞書をそのまま書く | 記録の行を読むテスト |
-| 移行性 | 既存の API キーの登録は、登録し直さずに月の額を足せる。足すまでは `near-limit` で選ばれない。状態のファイルは読まなくなり、残っていても決定に影響しない | `api-key-monthly` で `monthly_usd` だけを書く。`api-key-state.json` を読む関数を消す | 状態のファイルを置いたまま決定を出すテスト |
+| 移行性 | 既存の API キーの登録は、登録し直さずに月の額を足せる。足すまでは `near-limit` で選ばれない。状態のファイルは読まなくなり、残っていても決定に影響しない。`NDF_ACCOUNT_SWITCH_AT` を設定している利用者の値は読まず（閾値 T へ読み替えない）、閾値は `api-key-use --weekly-at` の宣言（無ければ既定の 85%）で決まる | `api-key-monthly` で `monthly_usd` だけを書く。`api-key-state.json` を読む関数を消す。`NDF_ACCOUNT_SWITCH_AT` を読む関数を消し、手順書（`relay-accounts.md`）に「読まない。閾値は `--weekly-at` で宣言する」と書く | 状態のファイルを置いたまま決定を出すテスト。`NDF_ACCOUNT_SWITCH_AT` を設定したままでも同じ決定が出るテスト |
 | セキュリティ | API キーの値は帳簿・記録・表示・引数の誤りの表示に出さない | スナップショットと決定はキーの名前だけを持ち、値を持たない（`ApiKey.key` はスナップショットへ写さない）。帳簿へは名前だけを書く | 帳簿・記録・一覧の出力に値の文字列が無いことを見るテスト |
 
 ## 決定の記録
@@ -476,6 +477,8 @@ sequenceDiagram
 | 27 | 帳簿・進捗記録・relay の記録・一覧・引数の誤りの出力に、登録したキーの値が現れない | どこか 1 か所でも値を写すと落ちる |
 | I4 | 上限にあるアカウント・再登録が要るアカウントだけの観測で、決定が `wait_reset` | 起動できないアカウントを候補に入れると落ちる |
 | I7 | 寿命の中でもリセット時刻を過ぎた控えで、取得先が呼ばれる | リセット時刻の条件を外すと落ちる |
+| 従量の接続からの戻り | 従量の接続の間、組 3 だけ・組 4 だけが候補の観測で、そのアカウントへ戻す | 戻す条件を組 1・組 2 に絞ると落ちる |
+| 解除の時刻の無い待つ | 全アカウントが再登録待ちで従量の接続の宣言が無いとき、起動口が `AuthUnavailable` を投げ、決定を呼び直さない | `wait_until` が None のまま決定へ戻ると、呼び出しの回数が増えて落ちる |
 
 受け入れ条件 7 の行は 2 つを置く。1 つ目の例（A $30 / $46.67、B $5 / $23.33）は割合でも額でも B になり、額の小さい順の誤りを落とせないためである。
 
@@ -483,8 +486,10 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2930 | 実装する | — | `plugins/ndf/scripts/lib/launch_rules.py`、`plugins/ndf/scripts/lib/launch_observe.py`、`plugins/ndf/scripts/lib/claude_accounts.py`、`plugins/ndf/scripts/lib/claude_api_keys.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/relay_lib/switch.py`、`plugins/ndf/scripts/relay_lib/run.py`、`plugins/ndf/scripts/relay_lib/handover.py`、`plugins/ndf/scripts/relay_lib/accounts.py`、`plugins/ndf/scripts/relay_lib/api_keys.py`、`plugins/ndf/scripts/tests/`、`docs/specifications/ndf-relay-api-keys.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2930 | 実装する | — | `plugins/ndf/scripts/lib/launch_rules.py`、`plugins/ndf/scripts/lib/launch_observe.py`、`plugins/ndf/scripts/lib/claude_accounts.py`、`plugins/ndf/scripts/lib/claude_api_keys.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/relay_lib/switch.py`、`plugins/ndf/scripts/relay_lib/run.py`、`plugins/ndf/scripts/relay_lib/handover.py`、`plugins/ndf/scripts/relay_lib/accounts.py`、`plugins/ndf/scripts/relay_lib/api_keys.py`、`plugins/ndf/scripts/supervise_lib/plan.py`（説明文）、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/relay-accounts.md`、`docs/specifications/ndf-relay-api-keys.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 | #2931 | 取り込む | #2930 | — |
+
+利用者向けの手順書（`relay-accounts.md`）と `plan.py` の説明文は、切り替えの閾値（`NDF_ACCOUNT_SWITCH_AT`）・near-limit の今の条件・残高切れの 24 時間の保留と状態のファイルを説明している。どちらも新しい規則へ書き換える。閾値 T と `--weekly-at`、`--monthly` と `api-key-monthly`、選ぶ順の組、従量の接続から戻る条件（候補のアカウントがあること）、除外は 1 回の呼び出しの中だけであること、を書く。
 
 ## 未確認のまま残ること
 
