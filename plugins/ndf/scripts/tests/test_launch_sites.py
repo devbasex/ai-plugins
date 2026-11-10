@@ -31,6 +31,7 @@ SHARED = {
 # 規則に当てはまるが、帳簿へ書く起動ではないもの
 EXCLUDED = {
     "scripts/lib/wait_notice.py": "利用者へ示す再開のコマンドの文字列（kiro-cli chat --resume）。起動しない",
+    "scripts/behavior-check.py": "worker へ渡す振る舞いの確認の手順の文字列（claude -p --plugin-dir）。スクリプトは起動しない",
 }
 
 CLIS = {"claude": ("-p", "--print"), "codex": ("exec", "e"), "kiro-cli": ("chat",), "agy": ("-p", "--prompt")}
