@@ -135,7 +135,7 @@ conductor が書き、`loop sprint` が読む形を 1 つに固定し、互い�
 | `lib/sprint_loop_gate.py` の `continuation`（変更） | 残った課題でモードを決め直し、下がったときは続きのステージを新しいモードで作り直す |
 | `lib/sprint_loop_argv.py`（変更） | 続きのステージを作り直す `supervise.py new sprint` のコマンドを組む |
 | `lib/sprint_loop.py` の `_resume_refused`・`lib/sprint_loop_select.py` の `run_selection`（変更） | 案内の文を `--judgments` の形にする |
-| `skills/development-workflow/references/loop.md`（変更） | 具体例と打つ順の表を、材料を集めて根拠を渡す手順にする。`loop sprint` が I8 で断ったときの手順（理由に並んだ番号のうち一方のモードの課題を `loop exclude` で外し、外した課題の根拠を判定の根拠のファイルから除いて `loop sprint` を打ち直す。外した課題は別のループの 1 回へ回す）を足す |
+| `skills/development-workflow/references/loop.md`（変更） | 具体例と打つ順の表を、材料を集めて根拠を渡す手順にする。`loop sprint` が I8 で断ったときの手順（理由に並んだ番号のうち一方のモードの課題を `loop exclude` で外す。`loop exclude` は空いた枠へ順位の後ろの課題を補充して選び直すため、出力の `metrics.selected` で選んだ課題の集合を取り直し、外した課題の根拠を判定の根拠のファイルから除き、新しく加わった課題を判定して根拠を足す。根拠の集合でモードが混ざらないことを確かめてから `loop sprint` を打ち直し、混ざるならこの手順を繰り返す。外した課題は別のループの 1 回へ回す）を足す |
 | `skills/development-workflow/references/workflow-modes.md`（変更） | 「途中でモードが変わったとき」に、開発ループで課題を外したときに下げる行を足す |
 
 ```mermaid
