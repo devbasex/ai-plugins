@@ -552,25 +552,42 @@ def parallel_workflow(main: str, name: str) -> dict:
         run.receive_prior(step_prior_waits(main, name))
     wait = poll_seconds()
     while True:
-        if run.stop and (run.current is None or run.force):  # --force はリリースの settle を待たず、一時レーンも止める
-            return _handle_stop(run, main)
-        # 一時レーンがリリースを流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで
-        # 待ってから終える（設計の失敗の 12 番。作りかけを残さない）。待つ間も inbox を読み、--force と問いを受ける
-        if not run.stop:
-            _spawn_ready(run, main)
-        if not run.stop and run.current is None and run.pending:
-            run.answer_from_ranges()
-            if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
-                run.open_release()
-        if not run.stop and _run_finished(run) and (out := _finish_or_hold(run, main, name)) is not None:
-            return run.save() or out  # 閉じた計画は作り直さないため、最後の答えをチェックポイントに残して終える
-        run.receive(durable.recv("inbox", wait if run.current is None else min(wait, 30)), "inbox")
-        if run.current is not None:
-            run.receive(durable.recv("resume", min(wait, 30)), "resume")
-        if not run.stop:
-            run.govern_hold(_observe_run(run, main))
-            run.launch_wakes()
+        for after_stop, step in _TICK:  # 止める依頼の後は after_stop の手順だけを打つ。手順が値を返したら、それで終える
+            if (after_stop or not run.stop) and (out := step(run, main, name, wait)) is not None:
+                return out
         run.save()
+
+
+def _tick_release(run: _Run, main: str, name: str, wait: float) -> None:
+    if run.current is None and run.pending:
+        run.answer_from_ranges()
+        if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
+            run.open_release()
+
+
+def _tick_finish(run: _Run, main: str, name: str, wait: float) -> Optional[dict]:
+    if _run_finished(run) and (out := _finish_or_hold(run, main, name)) is not None:
+        return run.save() or out  # 閉じた計画は作り直さないため、最後の答えをチェックポイントに残して終える
+    return None
+
+
+def _tick_govern(run: _Run, main: str, name: str, wait: float) -> None:
+    run.govern_hold(_observe_run(run, main))
+    run.launch_wakes()
+
+
+# 周回の 1 回の手順を打つ順に並べる。(止める依頼の後も打つか, 手順)。--force はリリースの settle を待たず、一時レーンも止める。
+# 一時レーンがリリースを流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで待ってから終える
+# （設計の失敗の 12 番。作りかけを残さない）。待つ間も inbox を読み、--force と問いを受ける
+_TICK = (
+    (True, lambda run, main, name, wait: _handle_stop(run, main) if run.stop and (run.current is None or run.force) else None),
+    (False, lambda run, main, name, wait: _spawn_ready(run, main)),
+    (False, _tick_release),
+    (False, _tick_finish),
+    (True, lambda run, main, name, wait: run.receive(durable.recv("inbox", wait if run.current is None else min(wait, 30)), "inbox")),
+    (True, lambda run, main, name, wait: run.receive(durable.recv("resume", min(wait, 30)), "resume") if run.current is not None else None),
+    (False, _tick_govern),
+)
 
 
 def _finish_or_hold(run: _Run, main: str, name: str) -> Optional[dict]:
