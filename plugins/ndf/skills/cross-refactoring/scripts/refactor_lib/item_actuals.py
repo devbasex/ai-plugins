@@ -29,7 +29,7 @@ def coding_seconds(item: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def rows(state: dict[str, Any], end: str, status_of: Any = None) -> list[dict[str, Any]]:
+def item_rows(state: dict[str, Any], end: str, status_of: Any = None) -> list[dict[str, Any]]:
     """採った項目ごとの行。`status_of(item)` は表示の状態（無ければ項目の `status`）。"""
     plan_budget = state.get("budget") or {"minutes": state.get("budget_minutes")}
     out = []
@@ -57,11 +57,11 @@ def rows(state: dict[str, Any], end: str, status_of: Any = None) -> list[dict[st
     return out
 
 
-def write(path: Any, state: dict[str, Any], end: str, status_of: Any = None) -> int:
+def append_item_rows(path: Any, state: dict[str, Any], end: str, status_of: Any = None) -> int:
     """項目の行を追記し、書いた行の数を返す。書けなければ知らせて 0（進行は止めない）。"""
     if state.get("item_actuals") or not state.get("items"):
         return 0
-    found = rows(state, end, status_of)
+    found = item_rows(state, end, status_of)
     try:
         target = allocation.history_path(run_metrics.metrics_dir(), str(state["repo"]))
         for row in found:

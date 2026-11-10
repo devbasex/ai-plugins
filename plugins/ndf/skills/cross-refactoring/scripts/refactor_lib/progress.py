@@ -34,7 +34,7 @@ def as_set(ids: Optional[Iterable[str]]) -> frozenset:
     return frozenset(str(i) for i in (ids or []))
 
 
-def compare(history: list[Iterable[str]], same: Optional[int] = None) -> str:
+def classify_progress(history: list[Iterable[str]], same: Optional[int] = None) -> str:
     """集合の履歴（古い順。最後が F(n)）から判定を返す。履歴が 1 件なら `first`（空なら `passed`）。"""
     sets = [as_set(h) for h in history]
     if not sets:

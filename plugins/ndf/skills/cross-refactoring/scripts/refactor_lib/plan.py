@@ -235,7 +235,7 @@ def _plan_header_lines(state: dict[str, Any], head: Optional[list[str]]) -> list
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}（{baseline.get('mode') or 'whole'}）",
         f"- 着手前のテストの結果: {baseline_line(baseline)}",
         f"- 既存失敗の件数: {existing_failures_line(baseline)}",
-        _budget_line(state),
+        _plan_budget_line(state),
         f"- 実装担当: {state.get('implementer') or '—'}",
     ]
 
@@ -275,7 +275,7 @@ _LIMIT_ROWS = (
 )
 
 
-def _budget_line(state: dict[str, Any]) -> str:
+def _plan_budget_line(state: dict[str, Any]) -> str:
     """実装の予算・延長・安全網の行（#2457）。"""
     from . import safety_net
 

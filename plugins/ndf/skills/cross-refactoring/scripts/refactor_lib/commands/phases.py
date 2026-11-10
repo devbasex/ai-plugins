@@ -31,7 +31,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
     timeout = ""
     record.pop("cli_timeout", None)
     if phase in safety_net.CODING_PHASES:
-        safety_net.refresh(state)
+        safety_net.refresh_limit(state)
         left = safety_net.remaining_seconds(state)
         if left <= 0:
             statefile.save(path, state)

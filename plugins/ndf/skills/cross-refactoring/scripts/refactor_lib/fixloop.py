@@ -1,7 +1,7 @@
 """修正の繰り返しの判定（#2457 決定 3・4、不変条件 I4・I6・I7）。
 
 検証と最終ゲートで変更起因の失敗が出た改善項目ごとに、落ちたテストの集合 F(n) を履歴（`fix_history`）へ積み、
-`progress.compare` の判定で次の手を決める。**時計と回数を見ない。**
+`progress.classify_progress` の判定で次の手を決める。**時計と回数を見ない。**
 
 | 判定 | 次の手 |
 | --- | --- |
@@ -73,12 +73,12 @@ def note_round(state: dict[str, Any], item: dict[str, Any]) -> str:
         return str(history[-1].get("progress") or progress.FIRST)
     failing = failing_set(item)
     sets = [h.get("failing") or [] for h in history] + [failing]
-    verdict = progress.compare(sets)
+    verdict = progress.classify_progress(sets)
     history.append({"round": seq, "by": fixer_of(state, item), "failing": failing, "progress": verdict})
     return verdict
 
 
-def decide(state: dict[str, Any], item: dict[str, Any], verdict: str) -> str:
+def next_move(state: dict[str, Any], item: dict[str, Any], verdict: str) -> str:
     """判定から次の手を返す（判定し直しの答えは `judge_answer` が反映する）。"""
     if verdict not in progress.STOPPING:
         return FIX

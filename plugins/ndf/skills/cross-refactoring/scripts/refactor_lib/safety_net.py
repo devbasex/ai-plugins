@@ -17,7 +17,7 @@ from . import budget
 CODING_PHASES = ("add-tests", "implement", "fix", "final-fix", "flaky-fix")
 
 
-def record(state: dict[str, Any]) -> dict[str, Any]:
+def net_state(state: dict[str, Any]) -> dict[str, Any]:
     net = state.get("safety_net")
     if not isinstance(net, dict):
         net = state["safety_net"] = {"limit_minutes": None, "used_seconds": 0.0, "halted_at": None}
@@ -32,7 +32,7 @@ def limit_minutes(state: dict[str, Any]) -> float:
 
 
 def used_seconds(state: dict[str, Any]) -> float:
-    return float(record(state).get("used_seconds") or 0.0)
+    return float(net_state(state).get("used_seconds") or 0.0)
 
 
 def remaining_seconds(state: dict[str, Any]) -> int:
@@ -40,9 +40,9 @@ def remaining_seconds(state: dict[str, Any]) -> int:
     return math.floor(limit_minutes(state) * 60 - used_seconds(state))
 
 
-def refresh(state: dict[str, Any]) -> None:
+def refresh_limit(state: dict[str, Any]) -> None:
     """上限を書き直す。打ち直しで上限を大きくして残りができたら、止めた印を消す（続ける）。"""
-    net = record(state)
+    net = net_state(state)
     net["limit_minutes"] = limit_minutes(state)
     if net.get("halted_at") and remaining_seconds(state) > 0:
         net["halted_at"] = None
@@ -52,7 +52,7 @@ def add(state: dict[str, Any], phase: str, seconds: float, items: Optional[list[
     """コーディングの CLI の起動 1 回の秒を累計へ足す。修正の秒は対象の項目の数で等分して項目の `coding_seconds.fix` へ足す。"""
     if phase not in CODING_PHASES:
         return
-    net = record(state)
+    net = net_state(state)
     net["used_seconds"] = round(float(net.get("used_seconds") or 0.0) + max(0.0, float(seconds)), 1)
     net["limit_minutes"] = limit_minutes(state)
     if phase in ("fix", "final-fix") and items:

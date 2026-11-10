@@ -63,13 +63,13 @@ def cmd_finalize(args: argparse.Namespace) -> None:
         _append_history(state)
     statefile.save(path, state)
     # 項目の行は終わり方を問わず書く（#2457 決定 10）。ここは最終ゲートを経た終わり
-    item_actuals.write(path, state, "final_gate")
+    item_actuals.append_item_rows(path, state, "final_gate")
 
 
 def cmd_item_actuals(args: argparse.Namespace) -> None:
     """止まった出口（安全網・中断）で、採った項目ごとの実績の行を書く（#2457 決定 10・I12）。失敗しても 0。"""
     path, state = load_state(args.id)
-    written = item_actuals.write(path, state, args.end)
+    written = item_actuals.append_item_rows(path, state, args.end)
     statefile.emit(ITEM_ACTUALS=written)
 
 
@@ -204,7 +204,7 @@ def _reassigned_lines(state: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _budget_line(state: dict[str, Any], elapsed: float) -> str:
+def _report_budget_line(state: dict[str, Any], elapsed: float) -> str:
     """実装の予算・延長・安全網・所要の行（#2457）。"""
     plan_budget = state.get("budget") or {"minutes": state.get("budget_minutes")}
     ext = plan_budget.get("extension")
@@ -248,7 +248,7 @@ def _print_header(state: dict[str, Any]) -> None:
     print()
     print(f"- 件数: {counts_line(state)}")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
-    print(_budget_line(state, elapsed))
+    print(_report_budget_line(state, elapsed))
     print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")

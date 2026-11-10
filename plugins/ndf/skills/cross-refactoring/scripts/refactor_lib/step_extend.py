@@ -30,7 +30,7 @@ def started_at() -> float:
 
 def ahead(seconds: float, reason: str) -> bool:
     """今から `seconds` 秒の子プロセスがステップの締め切りで切られないよう、延長を書く。書かなければ False。"""
-    if not os.environ.get(drive_pause.EXTEND_ENV) or seconds is None or float(seconds) <= 0:
+    if seconds is None or float(seconds) <= 0:  # 延長のファイルが無ければ `write_extension` が False を返す
         return False
     elapsed = max(0.0, time.time() - started_at())
     return drive_pause.write_extension(elapsed + float(seconds), reason)

@@ -306,6 +306,11 @@ def _project_mvv(work: pathlib.Path) -> dict[str, Any]:
     return {"ref": project_mvv.record(mvv), "block": project_mvv.block(mvv)}
 
 
+def _budget_record(minutes: Any, source: Optional[str]) -> dict[str, Any]:
+    """計画の前の実装の予算（#2457）。延長と実効の予算は `merge-plan` が足す。"""
+    return {"minutes": minutes, "source": source or "explicit", "effective_minutes": minutes, "extension": None}
+
+
 def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[str, Any]:
     """確定済みの材料から、初期の状態を組み立てて返す。
 
@@ -319,15 +324,9 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "schema": SCHEMA,
         "id": args.pr,
         "started_at": ctx.started_at,
-        # 実装の予算（#2457）。選定にだけ使う。`budget` は `merge-plan` が延長と実効の予算を足す
         "budget_minutes": args.budget_minutes,
         "budget_source": getattr(args, "budget_source", None) or "explicit",
-        "budget": {
-            "minutes": args.budget_minutes,
-            "source": getattr(args, "budget_source", None) or "explicit",
-            "effective_minutes": args.budget_minutes,
-            "extension": None,
-        },
+        "budget": _budget_record(args.budget_minutes, getattr(args, "budget_source", None)),
         # 安全網（#2457 決定 5）。`safety_net_minutes` は引数の上書き（無ければ実効の予算 × 倍率）
         "safety_net_minutes": getattr(args, "safety_net_minutes", None),
         "safety_net": {"limit_minutes": None, "used_seconds": 0.0, "halted_at": None},
@@ -782,12 +781,7 @@ def _resume(
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
     if _before_plan(state):
-        state["budget"] = {
-            "minutes": state["budget_minutes"],
-            "source": state.get("budget_source") or "explicit",
-            "effective_minutes": state["budget_minutes"],
-            "extension": None,
-        }
+        state["budget"] = _budget_record(state["budget_minutes"], state.get("budget_source"))
     for line in statefile.apply_resume_args(state, args, RESUME_SAFETY_NET):
         info(line)  # 安全網で止まった実行は、より大きい上限で打ち直すと続く（#2457 決定 5）
     view, given = _notify_view(state, args, inputs.model_spec)

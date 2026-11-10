@@ -354,7 +354,7 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
   （単独起動は `cross-review` が `approved` のときだけ）。中断した実行と、最終ゲートが通らなかった実行は追記しない。
   着手前のテストの行（`init_test`）は `init` が着手前のテストの後に、最終ゲートの成否と打ち切りを問わず 1 行足す。
   項目の行（`item`）は改善項目を採った実行が、**終わり方（最終ゲートの通過 `final_gate`・安全網や打ち消しの衝突で止めた
-  `safety_net`・中断 `aborted`）を問わず**、採った項目ごとに 1 行足す（`item_actuals.write`。#2457 決定 10）。項目の
+  `safety_net`・中断 `aborted`）を問わず**、採った項目ごとに 1 行足す（`item_actuals.append_item_rows`。#2457 決定 10）。項目の
   内容（`item_id`・`target`・`technique`・`tier`）・選定に使った見積り（`estimate_minutes` の `test` / `implement`）・
   実装時間の実績（`coding_seconds` の `test` / `implement` / `fix`。修正は起動の秒を対象の項目の数で等分）・表示の状態・
   終わり方・予算（`budget_minutes` / `effective_budget_minutes`）を持つ。配分テーブルの集計は実行の行だけを読み、

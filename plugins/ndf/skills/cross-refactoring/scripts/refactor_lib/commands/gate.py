@@ -118,7 +118,7 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
     seq = int(gate.get("fix_rounds") or 0)
     if not history or int(history[-1].get("round", -1)) != seq:
         failing = _gate_failing_set(gate)
-        verdict = progress.compare([h.get("failing") or [] for h in history] + [failing])
+        verdict = progress.classify_progress([h.get("failing") or [] for h in history] + [failing])
         history.append({"round": seq, "by": _final_fix_impl(state, gate), "failing": failing, "progress": verdict})
     verdict = str(history[-1].get("progress"))
     if verdict not in progress.STOPPING:

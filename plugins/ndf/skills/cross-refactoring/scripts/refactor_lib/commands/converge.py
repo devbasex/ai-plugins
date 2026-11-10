@@ -112,7 +112,7 @@ def _plan_failing(path: pathlib.Path, state: dict[str, Any], failing: list[dict[
             revert_now.setdefault(fixloop.INFEASIBLE, []).append(item)
             continue
         verdict = str((item.get("fix_history") or [{}])[-1].get("progress") or progress.FIRST)
-        move = fixloop.decide(state, item, verdict)
+        move = fixloop.next_move(state, item, verdict)
         if move == fixloop.REVERT:
             revert_now.setdefault(fixloop.STALLED_AFTER_SWITCH, []).append(item)
         elif move == fixloop.SWITCH:

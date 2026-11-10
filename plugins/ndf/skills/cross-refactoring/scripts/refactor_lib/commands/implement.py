@@ -155,7 +155,9 @@ def _settle(
     this_round = current_round(state)
     done = any(d.get("reason") == label and int(d.get("round") or 1) == this_round for d in state.get("drops") or [])
     if intake.extra and not done:
-        _revert_extra(path, state, intake.extra, label, this_round)
+        # 新しい順に `git revert` で打ち消す（棚卸し #22。`reset --hard` は使わない）
+        undo.revert_unattributed(path, state, intake.extra, label)
+        info(f"↩ どの項目にも属さないコミット {len(intake.extra)} 件を git revert で打ち消しました（Item-Id を付け直して出させる差し戻し）")
     # コミットの無い項目は見送らずに持ち越す（`readopt` が採り直すか `not_done` にする。I15）
     for item_id, reason in intake.carried.items():
         item = find_item(state, item_id)
@@ -165,12 +167,6 @@ def _settle(
         for row in rows:
             info(f"↪ {item_id} {item_label(find_item(state, item_id))}: {row['reason']}（差し戻し）")
     statefile.save(path, state)
-
-
-def _revert_extra(path: pathlib.Path, state: dict[str, Any], extra: list[str], label: str, this_round: int) -> None:
-    """どの項目にも属さないコミットを、新しい順に `git revert` で打ち消す（棚卸し #22。`reset --hard` は使わない）。"""
-    undo.revert_unattributed(path, state, extra, label)
-    info(f"↩ どの項目にも属さないコミット {len(extra)} 件を git revert で打ち消しました（Item-Id を付け直して出し直させる差し戻し）")
 
 
 def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Intake) -> None:
@@ -477,22 +473,15 @@ def _apply_implement(_path: pathlib.Path, state: dict[str, Any], intake: Intake)
         if item_id in intake.send_to_fix:
             # 期待値の欠け・文言を固定するテストは修正へ差し戻す（棚卸し #25・#26）
             item["status"] = FAILING
-            item["failed_check"] = {
-                "kind": "sendback",
-                "suite": "sendback",
-                "command": "",
-                "files": [],
-                "tests": [],
-                "note": intake.send_to_fix[item_id],
-            }
+            note = intake.send_to_fix[item_id]
+            item["failed_check"] = {"kind": "sendback", "suite": "sendback", "command": "", "files": [], "tests": [], "note": note}
     _record_seconds(state, "implement", "implement", intake.accepted)
 
 
 def _report_implement(state: dict[str, Any], intake: Intake) -> None:
     carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(
-        f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 差し戻し {sum(len(v) for v in intake.sendbacks.values())} 件"
-    )
+    sent = sum(len(v) for v in intake.sendbacks.values())
+    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 差し戻し {sent} 件")
     if carried:
         info(
             f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"

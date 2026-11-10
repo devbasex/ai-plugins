@@ -307,7 +307,7 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         "table": table,
         "selected": [i["id"] for i in state["items"]],
     }
-    safety_net.refresh(state)
+    safety_net.refresh_limit(state)
     state["readopt"] = {"round": 1, "events": []}
     state["limits"] = timeline.of_state(state)
     finish_phase(state, "plan")

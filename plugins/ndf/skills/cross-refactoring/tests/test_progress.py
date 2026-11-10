@@ -26,15 +26,15 @@ def progress(refactor):
     ],
 )
 def test_compare(progress, history, expected):
-    assert progress.compare(history, same=2) == expected
+    assert progress.classify_progress(history, same=2) == expected
 
 
 def test_the_order_of_the_ids_does_not_matter(progress):
-    assert progress.compare([["a", "b"], ["b", "a"]], same=2) == "stalled"
+    assert progress.classify_progress([["a", "b"], ["b", "a"]], same=2) == "stalled"
 
 
 def test_the_stagnation_count_comes_from_the_declaration(progress):
     """停滞の回数は `limits.json` の `cross-refactoring.fix-progress` から読む（既定 2）。"""
     assert progress.same_sets() == 2
-    assert progress.compare([["a"], ["a"]], same=3) == "progress"
-    assert progress.compare([["a"], ["a"], ["a"]], same=3) == "stalled"
+    assert progress.classify_progress([["a"], ["a"]], same=3) == "progress"
+    assert progress.classify_progress([["a"], ["a"], ["a"]], same=3) == "stalled"
