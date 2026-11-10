@@ -6145,6 +6145,54 @@
       "context": "ndf-workflow",
       "meaning": "supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813）",
       "source": "docs/specifications/ndf-supervisor-docs-guard.md"
+    },
+    {
+      "term": "起動先の決定",
+      "context": "ndf-relay",
+      "meaning": "1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "5 時間の枠の無いアカウント",
+      "context": "ndf-relay",
+      "meaning": "使用率の応答に 5 時間の枠が無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "週の使用率",
+      "context": "ndf-relay",
+      "meaning": "週の枠とモデル別の週の枠の使用率のうち最も大きい値",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "閾値 T",
+      "context": "ndf-relay",
+      "meaning": "API キーへ逃がすかを決める週の使用率の閾値。既定値は調査で決める（受け入れ条件 24）",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "月の額",
+      "context": "ndf-relay",
+      "meaning": "API キーごとに宣言する、月に付与されるクレジットの額（ドル）",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "週の利用枠",
+      "context": "ndf-relay",
+      "meaning": "API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "使用の割合",
+      "context": "ndf-relay",
+      "meaning": "API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠",
+      "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "区切り",
+      "context": "ndf-relay",
+      "meaning": "relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない",
+      "pending_source": "issues/issue-2930-requirements.md"
     }
   ]
 }
