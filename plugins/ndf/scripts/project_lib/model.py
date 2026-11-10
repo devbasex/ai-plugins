@@ -273,6 +273,21 @@ class Materials(schema.Shape):
     failures: list[str] = []
 
 
+class TestedDocs(schema.Shape):
+    """テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。"""
+
+    paths: list[str] = Field(min_length=1)
+    tests: list[str] = Field(min_length=1)
+
+
+class Docs(schema.Shape):
+    """差分の文書のファイルの分け方（#2925）。項目を省くと既定（`lib/diff_kinds.py`）で補う。利用者が手で書き、解析は書かない。"""
+
+    files: Optional[list[str]] = Field(default=None, min_length=1)
+    behavior: Optional[list[str]] = Field(default=None, min_length=1)
+    tested: list[TestedDocs] = []
+
+
 class ProjectDecl(schema.Shape):
     """プロジェクトの宣言（`.ndf/project.json`）。"""
 
@@ -289,6 +304,7 @@ class ProjectDecl(schema.Shape):
     ndf_policies: Optional[Union[NdfPolicies, Unknown]] = None
     instructions: Optional[Union[Instructions, Unknown]] = None
     materials: Optional[Union[Materials, Unknown]] = None
+    docs: Optional[Union[Docs, Unknown]] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}

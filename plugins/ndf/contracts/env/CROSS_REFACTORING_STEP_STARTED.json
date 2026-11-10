@@ -1,0 +1,5 @@
+{
+  "name": "CROSS_REFACTORING_STEP_STARTED",
+  "set_by": "runtime",
+  "summary": "ステップの開始（UNIX 時刻の秒）。駆動（plugins/ndf/skills/cross-refactoring/scripts/drive.py）が子へ渡し、ステップの延長を書く処理（plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/step_extend.py:24）が読む。無いときはそのプロセスの開始を使う（#2457 決定 8）"
+}

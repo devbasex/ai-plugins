@@ -1,5 +1,7 @@
 # cross 系の drive の打ち直しと時間と拒否: 引数を変えた流し直しで前回の結果や時間の無い計画が `ok` で返り、成功で終わった担当が拒否 1 回で止まっていた → 引数か head が違えば新しい実行の回を始め、計画の前の止まっていた時間を除き、時間の無い計画は中断で返し、成功で終わった後の拒否は警告にとどめる
 
+> **今は働かない記述:** この文書のうち、cross-refactoring の再開で止まっていた時間だけ提案・計画と計画の後の締め切りをずらす決まり（`pause.PRE_PLAN_SHIFT_KEYS`・`pause.shifted_seconds`）と、枠が収まらずに止める決まりは今は働かない。cross-refactoring は締め切りを持たず、止まっていた時間は安全網の累計に数えない。引数か head が違えば新しい実行の回を始める決まりと、拒否の扱いはそのまま働く。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+
 ## 概要
 
 **cross-review と cross-refactoring の drive は、完了した実行の回を返す前に、完了の記録の PR の head と結果を変える引数を

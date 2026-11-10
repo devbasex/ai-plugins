@@ -20,7 +20,7 @@ import mdtable
 
 import statefile
 
-from . import die, info, ledger, rounds, timeline
+from . import die, info, ledger, rounds
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label, item_shas
@@ -222,7 +222,6 @@ def strategy_lines(state: dict[str, Any]) -> list[str]:
 def _plan_header_lines(state: dict[str, Any], head: Optional[list[str]]) -> list[str]:
     """改修計画の冒頭（見出し・前書き・メタ情報のリスト）。"""
     baseline = state.get("baseline_test") or {}
-    plan = state.get("plan") or {}
     return [
         f"# 改修計画 — {state['repo']} #{state['current_pr']}",
         "",
@@ -236,7 +235,7 @@ def _plan_header_lines(state: dict[str, Any], head: Optional[list[str]]) -> list
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}（{baseline.get('mode') or 'whole'}）",
         f"- 着手前のテストの結果: {baseline_line(baseline)}",
         f"- 既存失敗の件数: {existing_failures_line(baseline)}",
-        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
+        _plan_budget_line(state),
         f"- 実装担当: {state.get('implementer') or '—'}",
     ]
 
@@ -266,54 +265,44 @@ def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-# 上限の表から読み出す行（時刻の鍵は持たない。#1932 決定 3）。
-GATE_START_END = "gate_start_end"
-
-# 上限の表の行（決定 24）。式は `docs/02-plan-and-implement.md` の「締め切り」の節にある。
+# 上限の表の行（決定 24）。予算から導かない（#2457 決定 11）。
 _LIMIT_ROWS = (
-    ("propose_end_at", "提案の枠の終わり（監視の上限 = 残り + 余裕）"),
-    ("plan_end_at", "改修計画の枠の終わり（同上）"),
-    ("add_tests_end_at", "テストの追加の終わり = 実装の終わり − Σ（採っていて未検証の項目の実装の見積り）"),
-    ("implement_end_at", "実装の終わり = 最終ゲートの修正の打ち切り − バッファ − Σ（採っていて未検証の項目の検証の見積り）"),
-    ("fix_end_at", "直しの試行の打ち切り"),
-    ("final_end_at", "想定最大時間の終わり H（子プロセスはすべてここまでに止まる）"),
-    (GATE_START_END, "確かめの開始の締め切り = H − 確かめの見込み（最終ゲート修正と打ち切りの後の取り消しもここまで）"),
-    ("gate_seconds", "確かめの見込み（秒。最終ゲートの確かめ 1 回。バッファの最終ゲートの全体テスト）"),
-    (
-        "final_fix_seconds",
-        "最終ゲート修正 1 回の見込み（秒。バッファの final_fix。起動は今 + この値が確かめの開始の締め切り以前のときだけ）",
-    ),
-    ("measure_timeout", "指標の測定の上限（秒。提案の枠の中から割く）"),
-    ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
+    ("measure_timeout", "指標の測定の上限（秒）"),
+    ("init_test_timeout", "着手前のテスト 1 回の上限（秒。ハングの検知）"),
     ("test_timeout", "範囲テスト 1 回の上限（秒）"),
     ("whole_timeout", "手元の全体テスト 1 回の上限（秒）"),
     ("ci_wait_timeout", "CI の待ちの上限（秒）"),
-    ("margin_seconds", "余裕（秒。手順の上限と CLI の上限に足す）"),
 )
 
 
-def limits_section(limits: dict[str, Any]) -> list[str]:
-    """実行時の値の表（テストの時間）。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
+def _plan_budget_line(state: dict[str, Any]) -> str:
+    """実装の予算・延長・安全網の行（#2457）。"""
+    from . import safety_net
 
-    無音の打ち切りは手順の監視の上限と同じ値のため、行を分けない。上限を出した入力（`basis`）を並べる。
-    """
+    plan_budget = state.get("budget") or {"minutes": state.get("budget_minutes")}
+    ext = plan_budget.get("extension")
+    grown = f"（延長: {ext['from']} → {ext['to']} 分。{ext['reason']}）" if ext else ""
+    net = f" / 安全網の上限: {safety_net.limit_minutes(state):.0f} 分" if plan_budget.get("minutes") else ""
+    return f"- 実装の予算: {plan_budget.get('minutes')} 分{grown}{net}"
+
+
+def limits_section(limits: dict[str, Any]) -> list[str]:
+    """テストと CI の待ちの上限の表。上限を出した入力（`basis`）を並べる。予算は選定にだけ使い、ここに締め切りは無い。"""
     if not limits:
         return []
-    derived = {GATE_START_END: timeline.iso_or_none(timeline.gate_start_end_of(limits)) if limits.get("gate_seconds") is not None else None}
-    values = {**limits, **derived}
-    rows = [(label, "—" if values.get(key) is None else str(values[key])) for key, label in _LIMIT_ROWS]
+    rows = [(label, "—" if limits.get(key) is None else str(limits[key])) for key, label in _LIMIT_ROWS]
     lines = ["## 時間の上限", "", mdtable.table_markdown(["値", "中身"], rows)]
     basis = limits.get("basis") or {}
     if basis:
         lines.extend(
             [
                 "",
-                f"入力: 予算 {basis.get('budget_minutes')} 分 / 全体テストの所要 w {basis.get('w')}（{basis.get('w_source') or '—'}）"
-                f" / 着手前の実測 x {basis.get('x')} / CI の壁時計 c {basis.get('c')}"
-                f" / 着手前のテストの所要の見込み s {basis.get('scope_seconds')}（{basis.get('scope_source') or '—'}） / 戦略 {basis.get('strategy')}",
+                f"入力: 全体テストの所要 w {basis.get('w')}（{basis.get('w_source') or '—'}）"
+                f" / 着手前の実測 x {basis.get('x')} / 直近の全体テストの実測 m {basis.get('recent')} / CI の壁時計 c {basis.get('c')}"
+                f" / 戦略 {basis.get('strategy')}",
             ]
         )
-    lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの期限は持たない（実装を止めるのは実装の終わりだけ）。", ""])
+    lines.extend(["", "上限はハングの検知にだけ使う。選んだ改善項目を時間で打ち切らない。", ""])
     return lines
 
 

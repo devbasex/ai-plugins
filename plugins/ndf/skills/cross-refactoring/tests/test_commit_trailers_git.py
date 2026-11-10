@@ -148,4 +148,5 @@ def test_a_commit_without_the_item_trailer_is_rejected(gitfacts, cmd_implement, 
         {"worktrees": {"work": str(repo)}},
     )
 
-    assert problem is not None and "Item-Id" in problem
+    # 取り消さず差し戻しに残す（#2457 の棚卸し #23）
+    assert problem is not None and problem[0] == "trailers" and "Item-Id" in problem[1]

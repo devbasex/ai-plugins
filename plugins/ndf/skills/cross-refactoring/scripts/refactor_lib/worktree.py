@@ -100,17 +100,17 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
-def _worktree_changes(work: str) -> dict[str, str]:
+def _worktree_changes(work: str, untracked: bool = True) -> dict[str, str]:
     """作業ツリーの変更を `パス → 状態` で返す。同期の前後を比べるために使う。
 
     無視されているファイルは現れない（`--porcelain` の既定）。改名は移動先の
-    パスだけを見る。
+    パスだけを見る。`untracked` が偽なら追跡しているファイルの変更だけを返す（`-uno`）。
     """
     # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
     # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
     out = git_out(
         work,
-        ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
+        ["-c", "core.quotePath=false", "status", "--porcelain", "-uall" if untracked else "-uno"],
         strip=False,
     )
     changes: dict[str, str] = {}
@@ -141,10 +141,10 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     return f"{relative}/"
 
 
-def _split_dirty(state: dict[str, Any], work: str) -> tool_paths.Split:
+def _split_dirty(state: dict[str, Any], work: str, untracked: bool = True) -> tool_paths.Split:
     """作業ツリーの未コミット変更を、利用者の変更とツールのパスに分ける。制御用ディレクトリは除く。"""
     control = _control_prefix(state, work)
-    paths = sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
+    paths = sorted(path for path in _worktree_changes(work, untracked) if not (control and path.startswith(control)))
     return tool_paths.split_changes(paths, tool_paths.load_or_die(work, ABORT))
 
 
@@ -159,9 +159,10 @@ def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
 def stop_if_dirty(state: dict[str, Any], work: str, what: str) -> None:
     """未コミットの変更があれば、捨てずに終了コード 4 で止める（C4）。`what` は止める前に行おうとした操作。
 
-    取り消し（`undo.drop` の `reset --hard`）と着手前の木へ戻す `read-tree -u --reset` は、未コミットの変更を戻せずに消す。
+    打ち消しの衝突の巻き戻し（`reset --hard`）は、追跡しているファイルの未コミットの変更を戻せずに消す。追跡外のファイルは
+    消さないため数えない（検証のテストが残す成果物・レポートで止まらないように）。
     """
-    dirty = _dirty_paths(state, work)
+    dirty = _split_dirty(state, work, untracked=False).user
     if dirty:
         more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
         die(f"{what}前に、作業ツリーへ未コミットの変更があります（{', '.join(dirty[:5])}{more}）。捨てずに止まります。判断が要ります")

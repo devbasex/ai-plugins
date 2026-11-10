@@ -184,10 +184,6 @@ def test_a_fix_without_a_candidate_raises_only_the_fix_flag(cmd_reassign, cmd_co
     assert "no_relaunch" not in st["final_gate"]
     assert st["no_results"][-1]["attempt"] == 2
     assert undo_spy["reverted"] == []
-    # 時計に余裕があっても修正を求めない
-    assert cmd_converge._fix_stop(st) is True
-    st.pop("fix_no_relaunch")
-    assert cmd_converge._fix_stop(st) is False
 
 
 def test_a_fix_with_a_candidate_switches_the_next_fix(cmd_reassign, tmp_path, env_tmp_dir, undo_spy, capsys):
@@ -214,6 +210,21 @@ def test_a_fix_relaunched_on_the_next_attempt_moves_after_a_second_no_result(cmd
     _monitor(path, f"claude-fix-rf{ID}", "early_error")
     assert _run(cmd_reassign, "fix") == 2
     assert read_state(path)["implementer"] == "codex"
+
+
+def test_a_switched_fixer_without_a_result_is_the_one_moved(cmd_reassign, tmp_path, env_tmp_dir, undo_spy):
+    """交代した修正担当（`fix.impl`）の結果を見る。実装担当の結果で判定せず、交代した担当の項目だけを振り替える。"""
+    items = [{"id": "R2", "status": "failing", "fixer": "codex", "commits": {"implement": ["I"], "fix": []}}]
+    path = _implement_state(tmp_path, phase="verify", items=items, fix={"items": ["R2"], "base_sha": "BASE", "attempt": 3, "impl": "codex"})
+    env_tmp_dir(path)
+    _monitor(path, f"codex-fix-rf{ID}", "usage_limit")
+
+    assert _run(cmd_reassign, "fix") == 2
+
+    st = read_state(path)
+    assert st["no_results"][-1]["seat"] == "codex"
+    assert st["implementer"] == "claude"
+    assert st["items"][0]["fixer"] not in ("codex", "")
 
 
 # ---------------- 提案（AC14） ----------------

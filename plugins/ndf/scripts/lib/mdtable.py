@@ -18,9 +18,8 @@ tabulate が値の文字列化と欠けた値を持ち、この包みがリポ�
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Iterable, Sequence
-
-from tabulate import TableFormat, tabulate
 
 _ALIGNS = {"left", "right", "center"}
 
@@ -34,16 +33,21 @@ def _rule(_widths: list[int], aligns: list[str]) -> str:
     return "| " + " | ".join(marks.get(a, "---") for a in aligns) + " |"
 
 
-_FORMAT = TableFormat(
-    lineabove=None,
-    linebelowheader=_rule,
-    linebetweenrows=None,
-    linebelow=None,
-    headerrow=_row,
-    datarow=_row,
-    padding=0,
-    with_header_hide=None,
-)
+@lru_cache(maxsize=1)
+def _format():
+    """tabulate は表を組むときだけ読む（起動を縮める。#2309）。"""
+    from tabulate import TableFormat
+
+    return TableFormat(
+        lineabove=None,
+        linebelowheader=_rule,
+        linebetweenrows=None,
+        linebelow=None,
+        headerrow=_row,
+        datarow=_row,
+        padding=0,
+        with_header_hide=None,
+    )
 
 
 def cell_text(value: Any) -> str:
@@ -70,7 +74,9 @@ def table_markdown(headers: Sequence[Any], rows: Iterable[Sequence[Any]], align:
         colalign = [_auto_align(body, k) for k in range(len(headers))]
     if not body:  # 行が無いと tabulate は寄せ方を捨てる
         return _row(headers, [], []) + "\n" + _rule([], colalign)
-    return tabulate(body, headers=headers, tablefmt=_FORMAT, colalign=colalign, disable_numparse=True, missingval="")
+    from tabulate import tabulate
+
+    return tabulate(body, headers=headers, tablefmt=_format(), colalign=colalign, disable_numparse=True, missingval="")
 
 
 def _auto_align(body: list[list[Any]], k: int) -> str:

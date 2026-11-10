@@ -23,7 +23,7 @@
 | `RUNTIMES` / `RUNTIMES_CSV` | 提案の参加者（既定は cross-review と同じ claude / codex / kiro とホスト） |
 | `IMPL` / `IMPL_MODEL` | 実装担当（リファクタリング計画・テスト追加・実装・修正・最終ゲート修正）とそのモデル |
 | `PHASE` | 再開の地点。駆動は終わった手順を飛ばす |
-| `BUDGET_MINUTES` | 想定最大時間 |
+| `BUDGET_MINUTES` | 実装の予算 |
 | `WORKTREE_ROOT` / `WORK` / `TMP_DIR` | 作業ディレクトリと一時ディレクトリ |
 | `REPO` / `HEAD_BRANCH` / `BASE_BRANCH` / `SCOPE` | 対象の情報 |
 | `STRATEGY` / `STRATEGY_SOURCE` | 解いたテストの戦略とその根拠（`test.strategy` / `derived:test_duration` / `derived:test.suites` / `args`） |
@@ -44,8 +44,8 @@
    claude のアカウントへ振り替えたときはその名前を `implementer_account` に残す（空はアカウントを選んでいない）
 5. **モデルの確定** — `--model <ランタイム>=<モデル>` を受け取り、実行の間は固定する
 6. **書き込み用の作業ディレクトリ作成** — 作る前に Pull Request の状態を確かめ、閉じている・マージ済み・状態を判定できないときは作らずに止める（終了コード 4。判定は `pr_gate.init_refusal`。Draft かどうかは問わない）。`<root>/work/` に `origin/<head>` を detach で展開する。
-   head ブランチは開発用の worktree で checkout 済みのことが多く、git は同じブランチを 2 つの
-   作業ツリーへ checkout できないためである。push は `HEAD:<head>` で行う。既にある場合は `origin/<head>` へ**早送りで同期**
+   head ブランチは開発 worktree で checkout 済みのことが多く、git は同じブランチを 2 つの
+   worktreeへ checkout できないためである。push は `HEAD:<head>` で行う。既にある場合は `origin/<head>` へ**早送りで同期**
    してから使い、早送りできない・取得に失敗したときは中断する
 7. **認証状態の確認** — 参加者の CLI を 1 つずつ確認し、通らない者を**外して続ける**。
    `--require-all` なら 1 者でも通らなければ中断する。着手前のテストより先に確認する
@@ -63,19 +63,15 @@
 13. **着手前のテスト** — 戦略ごとに走らせる（`local-full` は全体テスト、`local-scoped-ci-whole` は `--scope` のテストの
     置き場所の範囲テスト、`round-only` は全体テストとラウンドテスト）。**落ちても止めない。** 落ちたテストは JUnit から読んで
     `baseline_test.existing_failures`（既存失敗）に書き、最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る。
-    JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める（`SKIP=init-timeout` を出して終了コード 4）。
-    上限は `max(0.10·B, 3·s)`。s は着手前のテストの所要の見込みで、CI に任せる戦略の同じ範囲の配分の履歴 → 手元の全体テストの直近の実測
-    （`whole_runs`）→ 宣言の所要の順に採り（`baseline_test.scope_source` は `history` / `recent` / `whole`）、どれも無ければ `0.10·B` にする。
-    上限が `0.10·B` を超えるときは、走らせる前にステップの延長（環境変数 `NDF_STEP_EXTEND_FILE` の指すファイル）へ `B·60 + (上限 − 0.10·B·60)` 秒を書く。
-    実測の秒は `baseline_test.seconds`、宣言の所要は `whole_seconds`・`ci_seconds` に残し、時間の上限とバッファに使う
+    JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める（ハングの検知。`SKIP=init-timeout` を出して終了コード 4）。
+    上限は予算から導かず、共通ライブラリの予算なしの式で決める（#2457 決定 11。`3·max(w, m)`、m は手元の全体テストの直近の実測（`whole_runs`）、
+    所要が無ければ既定の秒）。走らせる前に、その上限の分だけステップの延長（環境変数 `NDF_STEP_EXTEND_FILE` の指すファイル）を書く。
+    実測の秒は `baseline_test.seconds`、宣言の所要は `whole_seconds`・`ci_seconds`、直近の実測は `recent_seconds` に残し、テストと CI の待ちの上限に使う
 14. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
     既定の対応と重ねて状態の `code_metrics.config` に書く。`status` は `pending` から始まる。
     `limits.measure_timeout` もここで書く（下の「指標の測定」）
-15. **手順の枠の確かめ**（`init_test.settle_window`）— 提案とリファクタリング計画の枠と計画の後の見込みが想定最大時間に収まるかを見る。
-    収まらないとき、想定最大時間の出所（状態の `budget_source`）が `default` / `floor` なら、打ち直しの見込みを足さない下限まで
-    `budget_minutes` を上げ、出所を `floor`・上げる前と後を `budget_floor` に残して上限の表を組み直し、`ℹ` の 1 行を出して続ける。
-    `explicit`（引数か宣言で渡した。`budget_source` を持たない旧い状態ファイルも同じ）なら上げず、`SKIP=window` と要る下限を出して
-    止めた印（`window_stopped_at`）を残し、終了コード 4 で止まる。出力の `BUDGET_SOURCE` に出所を出す
+15. **予算と安全網の記録** — 実装の予算（`budget_minutes`・`budget`。出所 `explicit` / `default`）と、`--safety-net-minutes` の
+    指定（`safety_net_minutes`）と、安全網の累計（`safety_net`）を状態に置く。実効の予算と延長は `merge-plan` が決める
 
 ### 再開
 
@@ -84,36 +80,29 @@
 | 前回の状態 | 扱い |
 | --- | --- |
 | 無い | 新しく始める |
-| 版 2 で `phase` が `done` | 新しく始める |
-| 版 2 で終わっていない | **再開する。** `PHASE` を返し、駆動は終わった手順を飛ばす。各マージ処理はマージ処理済みの目印で冪等 |
+| 版 3 で `phase` が `done` | 新しく始める |
+| 版 3 で終わっていない | **再開する。** `PHASE` を返し、駆動は終わった手順を飛ばす。各マージ処理はマージ処理済みの目印で冪等 |
+| 版 2 で終わっていない | **止める**（終了コード 4）。予算から締め切りを導いた途中の実行を、締め切りの無い経路へ途中から入れない（#2457 決定 13）。状態ファイルを消して始め直す |
+| 版 2 で `phase` が `done` | 新しく始め、版 3 の形で作り直す |
 | 旧い形（`schema` なし・`rounds` あり）で `final` が空 | **止める**（終了コード 4）。旧い版（v10.17.5 以前）で終えるか、状態ファイルを消して始め直す |
-| 旧い形で `final` が入っている | 新しく始め、版 2 の形で作り直す |
+| 旧い形で `final` が入っている | 新しく始め、版 3 の形で作り直す |
 
 | 再開で渡した引数 | 扱い |
 | --- | --- |
-| `--max-fix-rounds` / `--test-timeout` | 廃止を知らせて無視する（決定 24。修正は締め切りまで、テストの上限は予算から導く） |
+| `--max-fix-rounds` / `--test-timeout` | 廃止を知らせて無視する（修正は前進の判定で続け、テストの上限は所要の記録から導く） |
 | `--baseline-test` / `--round-test` | 知らせるだけ（戦略は `init` で解いたまま） |
-| `--budget-minutes` | **リファクタリング計画の前**（`phase` が `propose` か `plan` でリファクタリング計画が無い）だけ置き換え、想定最大時間の出所を `explicit` にして上限の表（`limits`）を組み直す。渡さなければ出所は状態のまま。後は知らせるだけ。採用の件数・実装の終わり・バッファはリファクタリング計画の時点の予算で固定されている |
+| `--budget-minutes` | **リファクタリング計画の前**（`phase` が `propose` か `plan` でリファクタリング計画が無い）だけ置き換え、出所を `explicit` にする。後は知らせるだけ。採用の件数と実効の予算はリファクタリング計画の時点の値で固定されている |
+| `--safety-net-minutes` | いつでも置き換える。安全網の上限で止まった実行は、より大きい値で打ち直すと続く |
 | `--implementer` | 知らせるだけ（置き換えない） |
 | `--exclude` / `--include` / `--require-all` | 参加者を作り直す。**実装担当が外れたら**、リファクタリング計画の前は決め方を当て直し、リファクタリング計画の後は止める |
 | そのほか状態に載る引数 | 状態と違えば「反映しない」と知らせる |
 
-**想定最大時間は cross-refactoring が動いていた時間で数える**。再開では（リファクタリング計画の前も後も。計画の前は #1944）、
-状態を書く前に止まっていた時間を測り、まだ来ていない締め切りをその分だけ後ろへずらす。計画し直さない。ずらした秒の和は
-計画の経過時間と上限の表の起点から引く（計画の前の `init` の再開は、ずらした後に上限の表を組み直す）。`init` の打ち直しと、
-駆動の打ち直し（耐久ワークフローを続ける前に `refactor.py catch-up <ID>` を 1 度打つ）が同じ処理を通る。
+**止まっていた時間で締め切りをずらす処理は無い**（予算から締め切りを導かないため。#2457）。安全網はコーディングの CLI の
+起動の秒だけを数えるので、止まっていた時間は数えない。
 
 | 項目 | 決まり |
 | --- | --- |
-| 止まっていた時間 | 再開の時刻 − 最後の動きの時刻。最後の動きの時刻は作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち最も新しい更新時刻 |
-| 心拍のファイル | `cross-refactoring-rf<ID>-alive`。CLI の監視（`monitor.py --alive-file`。plan・add-tests・implement・fix）とテストの実行が、待つ間 15 秒ごとに更新時刻を今にする。出力の無い CLI やテストの稼働を止まっていた時間に数えないためである |
-| ずらす締め切り | 上限の表のテストの追加の終わり・実装の終わり・直しの試行の打ち切り・想定最大時間の終わり H（計画の前は提案と計画の枠の終わりも）のうち、最後の動きの時刻より後に来るものだけ。中断の前に過ぎていた締め切りは開き直さない |
-| ずらさないとき | 止まっていた時間が余裕（`0.05·B`）以下（`within_margin`）、計画の前で枠が収まらずに止めた後の打ち直し（起点を打ち直した時刻へ移す扱いが止まっていた時間を含む）、最終ゲートに入った後 |
-| 旧い状態ファイル | 止まっていた時間を記録しない版で計画した状態（`pause` が無い）はずらさず、そのことを 1 度だけ記録する（`legacy`）。計画の前で `pause` が無ければ空の記録を作って測る |
-| 記録 | `pause.events[]`（`at` / `last_activity_at` / `seconds` / `shifted` / `reason`）と、和の `pause.seconds` / `pause.shifted_seconds`。報告に「止まっていた時間」の 1 行、実行の行に `paused_seconds` が出る |
-
-2 回中断すれば、止まっていた時間を足した分だけずれる。続けて 2 度打っても、1 度目の保存で最後の動きの時刻が今になるため、
-ずれるのは 1 度だけである。
+| 心拍のファイル | `cross-refactoring-rf<ID>-alive`。CLI の監視（`monitor.py --alive-file`。plan・add-tests・implement・fix）とテストの実行が、待つ間 15 秒ごとに更新時刻を今にする |
 
 ### `--scope` のゲート
 
@@ -127,7 +116,7 @@
 ### テストの戦略
 
 宣言（`.ndf/project.json` の `test`。[project-analysis.md](../../development-workflow/references/project-analysis.md) の P2）と
-引数から、共通層 `scripts/lib/test_strategy.py` の `resolve` が決める。supervise の `new` も同じ関数を使う。
+引数から、共通ライブラリ `scripts/lib/test_strategy.py` の `resolve` が決める。supervise の `new` も同じ関数を使う。
 **コマンドの語・ランナーの名前・前置きは見ない。** コマンドへの加工は `{paths}`（引用の外の、空白で区切った 1 語）を
 シェルの引用で守った対象の並びへ置き換えることだけで、コマンドはどれもシェルで 1 本ずつ走らせる。suite の種別
 （`kind`。`test` か `lint`）は宣言か `--test-kind` だけで決まり、テンプレートの語から推測しない。
@@ -295,9 +284,9 @@ rf merge-proposals "$ID"          # 2 = 改善候補 0 件（最終ゲートへ�
 **提案は参加者の全員が 1 度だけ、並行して行う。** 1 者でも提案を終えれば残りの提案で続ける。全員が結果を残さなかったときだけ
 `refactor.py reassign "$ID" propose --seats <起動した者>` を打ち、返った `PROPOSERS` で提案を集め直す（3 なら止まる。
 規則は [02 の「結果を残さなかった担当の振り替え」](02-plan-and-implement.md#結果を残さなかった担当の振り替え)）。
-claude の別のアカウントで集め直したときは、その名前を `proposer_accounts` に残し、提案の起動は席が実装担当と同じでもここからアカウントを引く。振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直して `IMPL` で返す。 提案とリファクタリング計画は想定最大時間の中の枠で
-行い、枠の終わり（提案 `開始 + 0.20·B`、リファクタリング計画 `開始 + 0.30·B`）を監視の上限にする
-（決定 24。式は [02 の「締め切り」](02-plan-and-implement.md#締め切り)）。
+claude の別のアカウントで集め直したときは、その名前を `proposer_accounts` に残し、提案の起動は席が実装担当と同じでもここからアカウントを引く。振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直して `IMPL` で返す。提案とリファクタリング計画の
+監視の上限は `limits.json` の `monitor.phase.propose` / `monitor.phase.plan` で、予算から導かない
+（[02 の「時間の上限」](02-plan-and-implement.md#時間の上限)）。
 
 ### 指標の測定（`measure`）
 
@@ -338,8 +327,8 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 `pending` 以外なら 2 回目の `measure` は測らない。提案を始めた後（`phases.propose.started_at` がある）も測らない。
 旧い状態ファイル（`code_metrics` が無い）の再開は、提案を始める前なら `init` が記録を作って測る。
 
-**時間は提案の枠から割く。** 使える時間は `min(0.05·B, 0.5·max(0, 提案の枠の終わり − 今))` で、言語ごとの
-測定と重複検出が分け合う。提案の枠の終わりは動かない（[02 の「締め切り」](02-plan-and-implement.md#締め切り)）。
+**上限は `limits.measure_timeout`（提案の工程の監視の上限の半分）で、** 言語ごとの測定と重複検出が分け合う
+（[02 の「時間の上限」](02-plan-and-implement.md#時間の上限)）。
 
 **言語ごとのツールは `.ndf/code-metrics.json` で置き換える。** 書いた言語だけが置き換わり、ほかは既定のまま測る。
 

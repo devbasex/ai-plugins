@@ -69,7 +69,7 @@ class FakeAnthropic:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def set_usage(self, token, five=None, seven=None, spend=False, status=200, extra=None):
         self.usage[token] = self.usage_reply(five, seven, spend, status, extra)

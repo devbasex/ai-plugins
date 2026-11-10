@@ -6,8 +6,10 @@
 | 分類 | 見分け方 | 扱い |
 | --- | --- | --- |
 | フレーキー（`flaky`） | 今の HEAD で走らせ直すと通る | 取り消さない |
-| 既存失敗（`preexisting`） | 着手前の HEAD でも落ちる（`init` の既存失敗に載る ID も同じ） | 取り消さない |
-| 変更起因（`caused`） | 今の HEAD で再び落ち、着手前の HEAD では通る | 直しを試みる |
+| 無関係（`preexisting`） | 比較の木（改善項目の変更だけを外した木。`comparison.py`）でも落ちる（`init` の既存失敗に載る ID も同じ） | 合否に数えない |
+| 変更起因（`caused`） | 今の HEAD で再び落ち、比較の木では通る | 成立を判定して直す |
+
+比較の木を作れないときは着手前の HEAD で比べ、理由を `comparison_fallback` に残す（#2457 決定 7）。
 
 落ちた ID は JUnit からだけ読む（I6）。読めなければ `fallback_reason` を書き、呼ぶ側が全体の走らせ直しへ落とす。
 """
@@ -20,7 +22,7 @@ from typing import Any, Optional
 import test_strategy as ts
 import test_triage
 
-from . import clock, timeline
+from . import comparison, timeline
 from .gitfacts import run_with_timeout
 from .paths import work_dir
 
@@ -65,17 +67,20 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
             "caused": [],
             "fallback_reason": "JUnit に落ちたテストが無かった（走らせ直して見分ける）",
         }
+    compare_sha, compare_reason = (None, None) if ids is None else comparison.build_tree(state)
     result = test_triage.classify(
         work=work_dir(state),
         strategy=timeline.strategy_of(state),
         failed=ids,
         fallback_reason=reason,
-        base_sha=baseline_head(state),
-        timeout=timeline.state_test_timeout(state, clock.now()),
+        base_sha=compare_sha or baseline_head(state),
+        timeout=timeline.state_test_timeout(state),
         log_dir=pathlib.Path(state["tmp_dir"]),
         existing_failures=existing_failures(state),
         run=run_test,
     )
+    result["comparison_tree"] = compare_sha
+    result["comparison_fallback"] = compare_reason
     commands = list(result.get("rerun_commands") or [])
     # 変更起因のファイルだけを走らせ直すコマンド（シェルで走らせる文字列）。修正担当へ渡し、取り消しの判定にも使う。
     result["rerun_commands"] = commands

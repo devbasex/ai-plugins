@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID>
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | plan | add-tests | implement | fix | final-fix
+#   phase    propose | plan | judge | add-tests | implement | fix | final-fix | flaky-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #
 # **手順の名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
@@ -51,13 +51,13 @@ load_common_state
 
 configure_phase() {
 case "$PHASE" in
-  propose|plan)
-    # 提案と改修計画は読むだけ。**読み取り用の作業ディレクトリ**（`prepare-worktrees.sh` が
+  propose|plan|judge)
+    # 提案・改修計画・成立の判定は読むだけ。**読み取り用の作業ディレクトリ**（`prepare-worktrees.sh` が
     # 担当ごとに detach で用意し、HEAD へ同期する）で行う。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$ROOT/$RUNTIME
     ;;
-  add-tests|implement|fix)
+  add-tests|implement|fix|flaky-fix)
     # 書き換える手順は常に work/ の中だけで行う。並列には起動しない。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$WORK
@@ -77,8 +77,8 @@ esac
 
 configure_phase
 
-# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限（監視の上限 + 余裕）を
-# そのまま渡す**（決定 24。`--no-floor`）。記録が無ければ（`start-phase` を通らない起動）
+# CLI 側の実行時間の上限。コーディングの手順は **`start-phase` が安全網の残りから導いた上限（監視の上限 + 余裕）を
+# そのまま渡す**（#2457 決定 5。`--no-floor`）。記録が無ければ（`start-phase` を通らない起動）
 # 上限の表から導く（#598 / #537）。決め方はライブラリの `limits.py cli-timeout` の 1 か所にある。
 CLI_TIMEOUT_OVERRIDE=$(jq -r --arg p "$PHASE" '.phases[$p].cli_timeout // empty' "$STATE")
 PRINT_TIMEOUT=$(python3 "$LIB/limits.py" cli-timeout "$PHASE" "$RUNTIME" \
@@ -126,16 +126,28 @@ case "$PHASE" in
          test_command: (if .scope_commands then (.scope_commands | map(.command) | join(" ; "))
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end)}]' "$STATE")
     ;;
+  judge)
+    # 成立の判定を依頼した項目（#2457 決定 3）。差分はコミットから読ませる
+    ITEMS_JSON=$(jq '(.feasibility_request // {}) as $r | [.items[] | select(.id as $i | ($r.items // []) | index($i))
+      | {item: .id, path, symbol, smell, technique, plan, rejudge: (($r.rejudge // {})[.id] // false),
+         commits: ([.commits.test] + (.commits.test_extra // []) + (.commits.implement // []) + (.commits.fix // []) | map(select(. != null))),
+         fix_history: (.fix_history // []), sendbacks: (.sendbacks // [])}
+      + (if .failed_check then {failed_check} else {} end)]' "$STATE")
+    ;;
   fix)
-    # 落ちた項目だけ。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
+    # 修正の対象の項目（`fix.items`。同じ修正担当の項目をまとめる。#2457）。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
     # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
-    ITEMS_JSON=$(jq '[.items[] | select(.status == "failing")
+    ITEMS_JSON=$(jq '(.fix.items // []) as $f | [.items[] | select(.status == "failing" and (.id as $i | ($f | length) == 0 or ($f | index($i))))
       | {item_id: .id, path, symbol, technique, plan, fix_count,
          test_command: (if .whole_test_command then (.whole_test_command | join(" "))
                         elif .scope_commands then (.scope_commands | map(.command) | join(" ; "))
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
          test_log: .last_log}
       + (if .failed_check then {failed_check} else {} end)]' "$STATE")
+    ;;
+  flaky-fix)
+    # フレーキーと見分けたテストの直しの依頼（#2457 決定 9）。ID・ログの置き場・走らせ直すコマンドと、前回の差し戻し
+    ITEMS_JSON=$(jq '(.flaky_request // {}) | {tests: (.tests // []), log, commands: (.commands // []), sendback}' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'
@@ -201,15 +213,14 @@ MVV_BLOCK=$(jq -r '.project_mvv.block // ""' "$STATE")
 }
 
 export_prompt_env() {
-BUDGET_MINUTES=$(jq -r '.budget_minutes' "$STATE")
-END_AT=$(jq -r '.plan.end_at // ""' "$STATE")
+BUDGET_MINUTES=$(jq -r '(.budget.effective_minutes // .budget_minutes)' "$STATE")
 export RF_REPO=$REPO RF_PR=$PR RF_RUNTIME=$RUNTIME RF_PHASE=$PHASE
 export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
 export RF_BASELINE_TEST=$BASELINE_TEST RF_ROUND_TEST=${ROUND_TEST:-（無し。全体のテストから項目ごとに組み立てる）}
 export RF_SKILL_BLOCK=$SKILL_BLOCK RF_SKILL_BASE=$SKILL_BASE
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
-export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
+export RF_BUDGET_MINUTES=$BUDGET_MINUTES
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
 export RF_METRICS_BLOCK=$METRICS_BLOCK RF_MVV=$MVV_BLOCK

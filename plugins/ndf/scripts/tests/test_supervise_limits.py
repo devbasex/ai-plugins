@@ -301,7 +301,7 @@ def test_1909_2_the_route_of_1702_reaches_merge(plans, tmp_path):
 
 def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
     route = _route(
-        "collect", "pr", "assess", "refactor", "review", "base-sync", ("test-all", 1), ("judge", "fix"), "fix", "test-all",
+        "collect", "pr", "assess", "refactor", "review", ("behavior-targets", 3), "base-sync", ("test-all", 1), ("judge", "fix"), "fix", "test-all",
         "ready", "merge-gate", "merge", "record",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/7-check"], scripted(route))

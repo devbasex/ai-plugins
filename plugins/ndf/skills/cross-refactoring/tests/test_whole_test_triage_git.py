@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from crossref_helpers import (
+    verify_judged,
     past_fix_end,
     CALC,
     SCOPE_COMMAND,
@@ -163,6 +164,9 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_con
     assert record["flaky"] == ["tests/test_flaky.py::tests.test_flaky::test_once"]
     assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
+    # 受け入れ条件 11: 見分けたフレーキーは、その実行の中での直しの依頼に積まれる（項目の合否には数えない）
+    request = read_state(flow["path"])["flaky_request"]
+    assert request["tests"] == record["flaky"] and request["commands"]
 
 
 def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_converge, tmp_path, capsys):
@@ -186,17 +190,49 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
     assert git("status", "--porcelain", cwd=flow["work"]).stdout.strip() == ""
 
 
+def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 10（PR 2452 の形）: 着手の後に取り込んだベースブランチで落ちたテストは、比較の木
+    （項目のコミットを外した木）でも落ちるため無関係と記録され、通っていた項目は取り消されない。"""
+    work = flow["work"]
+    _existing_tests(
+        flow,
+        {
+            "src/threshold.txt": "10\n",
+            "tests/test_threshold.py": (
+                "import pathlib\n\n\ndef test_threshold():\n    assert int(pathlib.Path('src/threshold.txt').read_text()) >= 10\n"
+            ),
+        },
+    )
+    start = _head(work)
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other")})
+    git("checkout", "-q", "-b", "base-update", start, cwd=work)
+    _write(work, "src/threshold.txt", "5\n")
+    commit_with_trailers(work, "ベースブランチでしきい値を下げた", {})
+    git("checkout", "-q", "-", cwd=work)
+    git("merge", "-q", "--no-edit", "base-update", cwd=work)
+    capsys.readouterr()
+
+    _call(cmd_converge, "cmd_verify")
+
+    assert _emitted(capsys, "VERIFY") == "done"
+    record = read_state(flow["path"])["whole_test"]
+    assert record["preexisting"] == ["tests/test_threshold.py::tests.test_threshold::test_threshold"]
+    assert record["caused"] == [] and not record.get("reverted")
+    assert record["comparison_tree"] and record["comparison_tree"] != start
+    assert record["comparison_fallback"] is None
+    assert _items(flow)["I-001"]["status"] == "verified"
+    assert (work / "src" / "other.py").exists()
+    assert len(_worktrees(work)) == 1, "比較の木の一時の worktree を残さない"
+
+
 def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
     flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
 ):
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_implement, {"I-001": _break_total})
-    capsys.readouterr()
 
-    _call(cmd_converge, "cmd_verify")
-
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     state = read_state(flow["path"])
     assert state["whole_test"]["caused"] == ["tests/test_total.py::tests.test_total::test_total"]
     assert state["fix"]["items"] == ["I-001"]
@@ -221,10 +257,10 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
     assert item["status"] == "verified" and "whole_test_command" not in item
 
 
-def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_passes(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_after_the_deadline_the_whole_test_failure_still_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 5 — 始まりが過去でも、全体テストの変更起因で取り消さず、原因の項目を修正へ回す。"""
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    # 始まりを過去へ置き、修正に使える時間を残さない
     _implement(
         flow,
         cmd_setup,
@@ -232,35 +268,14 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
         {"I-001": _break_total, "I-002": _touch_other("other"), "I-003": _touch_other("another")},
         late=True,
     )
-    capsys.readouterr()
 
-    _call(cmd_converge, "cmd_verify")
-
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     items = _items(flow)
-    # 修正の締め切りの後は外す走らせ直しをせず、本文にパスも無いので原因は決まらない（#1649）。
-    # 新しい順に取り消し、I-001（原因）を取り消した時点で通るまで 1 件ずつ
-    assert [items[i]["status"] for i in ("I-003", "I-002", "I-001")] == ["reverted", "reverted", "reverted"]
+    assert items["I-001"]["status"] == "failing"
+    assert items["I-002"]["status"] == "verified" and items["I-003"]["status"] == "verified"
     record = read_state(flow["path"])["whole_test"]
-    assert record["culprit"]["basis"] == "undetermined"
-    assert record["resolution"] == "narrowed" and record["reverted"] is True
-    assert "return result + 1" not in (work / "src" / "calc.py").read_text()
-
-
-def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    work = flow["work"]
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, late=True)
-    capsys.readouterr()
-
-    _call(cmd_converge, "cmd_verify")
-
-    assert _emitted(capsys, "VERIFY") == "done"
-    items = _items(flow)
-    assert items["I-002"]["status"] == "reverted"
-    assert items["I-001"]["status"] == "verified"
+    assert record["resolution"] == "fixing" and not record.get("reverted")
     assert (work / "src" / "other.py").exists()
-    assert read_state(flow["path"])["whole_test"]["resolution"] == "narrowed"
 
 
 def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
@@ -271,11 +286,8 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     raises = lambda w: _write(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
     _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
-    capsys.readouterr()
 
-    _call(cmd_converge, "cmd_verify")
-
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     record = read_state(flow["path"])["whole_test"]
     assert record["fallback_reason"] and record["fallback_rerun"] == "fail"
     assert record["resolution"] == "fixing" and record["failed_tests"] is None
@@ -284,8 +296,10 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
     assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "failing"
 
 
-def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_together(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """JUnit が無く着手前も red なら見分けられないので、危険フラグの項目をまとめて取り消して理由を残す。"""
+def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_is_kept(
+    flow, cmd_setup, cmd_implement, cmd_converge, capsys
+):
+    """#2457 の棚卸し #35: JUnit が無く着手前も red なら、まとめて取り消さず、落ちたテストの材料を残して最終ゲートへ寄せる。"""
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     state = read_state(flow["path"])
     state["baseline_test"]["status"] = "red"
@@ -299,10 +313,12 @@ def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_togethe
 
     assert _emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
-    assert items["I-001"]["status"] == "reverted" and items["I-002"]["status"] == "reverted"
+    assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "verified"
     record = read_state(flow["path"])["whole_test"]
-    assert record["resolution"] == "reverted_all" and record["reverted"] is True
+    assert record["resolution"] == "deferred" and not record.get("reverted")
     assert record["fallback_reason"]
+    material = record["material"]
+    assert material["log"].endswith(".log") and material["commands"]
 
 
 def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_setup, cmd_implement, cmd_converge, capsys, patch_lib):

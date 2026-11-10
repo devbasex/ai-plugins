@@ -65,7 +65,7 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
 
 
 def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_path, cmd_report, env_tmp_dir, capsys):
-    """所要は `init` の開始から最終ゲートの最後のチェックまで。差は想定最大時間からの残り。"""
+    """所要は `init` の開始から最終ゲートの最後のチェックまで。実装の予算と安全網の上限が並ぶ（#2457）。"""
     path = make_state_v2(
         tmp_path,
         tmp_path / "work",
@@ -77,4 +77,4 @@ def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_pa
     cmd_report.cmd_report(argparse.Namespace(id=130, metrics=False))
     out = capsys.readouterr().out
     assert "所要: 45.0 分" in out
-    assert "差 +15.0 分" in out
+    assert "実装の予算: 60 分" in out and "安全網 0.0 / 120 分" in out

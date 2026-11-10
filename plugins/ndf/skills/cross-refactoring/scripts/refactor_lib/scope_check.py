@@ -1,4 +1,8 @@
-"""範囲の判定（#1814 決定 1・2・11）。実装・修正・最終ゲート修正・テストの追加の取り込みが同じ `judge_unit` を呼ぶ。
+"""範囲の判定（#1814 決定 1・2・11、#2457 の棚卸し #24）。実装・修正・最終ゲート修正・テストの追加の取り込みが同じ `judge_unit` を呼ぶ。
+
+**範囲の外の変更で取り消さない。** 範囲（`--scope`）は案出しの対象を決めるのにだけ使う。判定は範囲の外で変えた
+ファイルを分類して返すだけで（`outside`）、取り込みは項目の `outside_scope` へ残して報告とコードレビューへ引き継ぐ
+（`note_outside`）。`problem` は常に空である。
 
 判定の単位（1 回の取り込みで同じ規則に掛けるコミットの組）が触った各ファイルを、上から最初に当たった分類にする。
 
@@ -59,7 +63,11 @@ class FileVerdict:
 class UnitVerdict:
     files: list[FileVerdict] = field(default_factory=list)
     rewrites: list[dict[str, str]] = field(default_factory=list)  # `review_scope_judgements` へ書く `{"path", "sha"}`
-    problem: str = ""
+    problem: str = ""  # 範囲では取り消さない（#2457）。旧い呼び手のために空のまま残す
+
+    @property
+    def outside(self) -> list[FileVerdict]:
+        return [f for f in self.files if f.kind == OUTSIDE]
 
 
 def path_in_scope(path: str, scope: Iterable[str]) -> bool:
@@ -194,47 +202,72 @@ def _base_of(work: str, unit: Unit) -> Optional[str]:
     return git_out(work, ["rev-parse", f"{unit.shas[0]}^"]) if unit.shas else None
 
 
+def _touched_by_path(work: str, shas: list[str]) -> tuple[dict[str, dict[str, str]], dict[str, list[str]]]:
+    """各コミットのファイルの状態と、ファイルごとにそれを触ったコミット（古い順）。"""
+    statuses = {sha: commit_file_status(work, sha) for sha in shas}
+    touched: dict[str, list[str]] = {}
+    for sha in shas:
+        for path in statuses[sha]:
+            touched.setdefault(path, []).append(sha)
+    return statuses, touched
+
+
+def _first_verdict(
+    work: str,
+    base: Optional[str],
+    path: str,
+    shas: list[str],
+    statuses: dict[str, dict[str, str]],
+    scope: list[str],
+) -> Optional[FileVerdict]:
+    """表の順 1〜3 の分類。どれにも当たらなければ None（呼び手の書き換えかの判定へ回す）。"""
+    if path_in_scope(path, scope):
+        return FileVerdict(path, IN_SCOPE)
+    if base is None or not path_in_tree(work, base, path):
+        return FileVerdict(path, NEW)
+    if any(statuses[sha].get(path) == "D" for sha in shas):
+        return FileVerdict(path, OUTSIDE, "範囲の外の既存のファイルを消しています")
+    return None
+
+
+def _judge_rewrites(
+    work: str,
+    unit: Unit,
+    base: str,
+    pending: dict[str, list[str]],
+    statuses: dict[str, dict[str, str]],
+    cache_dir: Optional[str],
+    verdict: UnitVerdict,
+) -> None:
+    """表の順 4・5 の分類。保留したファイルのハンクがすべて呼び手の書き換えなら `rewrite`、それ以外は `outside`。"""
+    common = common_words(work, base, cache_dir)
+    names = changed_names(work, [*unit.context, *unit.shas], unit.scope, base, common, statuses)
+    for path, shas in pending.items():
+        hunks = [(sha, h) for sha in shas for h in commit_hunks(work, sha, path)]
+        if hunks and all(is_caller_rewrite(h, names, common) for _, h in hunks):
+            verdict.files.append(FileVerdict(path, REWRITE))
+            verdict.rewrites.extend({"path": path, "sha": sha} for sha in shas)
+        else:
+            verdict.files.append(FileVerdict(path, OUTSIDE, "変えた名前の読み込み・呼び出しの書き換え以外の変更があります"))
+
+
 def judge_unit(work: str, unit: Unit, cache_dir: Optional[str] = None) -> UnitVerdict:
     """判定の単位の各ファイルを分類し、範囲の外が 1 件でもあれば理由を返す。範囲が空ならチェックしない。"""
     verdict = UnitVerdict()
     if not unit.scope or not unit.shas:
         return verdict
     base = _base_of(work, unit)
-    statuses = {sha: commit_file_status(work, sha) for sha in unit.shas}
-    touched: dict[str, list[str]] = {}
-    for sha in unit.shas:
-        for path in statuses[sha]:
-            touched.setdefault(path, []).append(sha)
+    statuses, touched = _touched_by_path(work, unit.shas)
     pending: dict[str, list[str]] = {}
     for path in sorted(touched):
-        if path_in_scope(path, unit.scope):
-            verdict.files.append(FileVerdict(path, IN_SCOPE))
-        elif base is None or not path_in_tree(work, base, path):
-            verdict.files.append(FileVerdict(path, NEW))
-        elif any(statuses[sha].get(path) == "D" for sha in touched[path]):
-            verdict.files.append(FileVerdict(path, OUTSIDE, "範囲の外の既存のファイルを消しています"))
-        else:
+        first = _first_verdict(work, base, path, touched[path], statuses, unit.scope)
+        if first is None:
             pending[path] = touched[path]
+        else:
+            verdict.files.append(first)
     if pending and base is not None:
-        common = common_words(work, base, cache_dir)
-        names = changed_names(work, [*unit.context, *unit.shas], unit.scope, base, common, statuses)
-        for path, shas in pending.items():
-            hunks = [(sha, h) for sha in shas for h in commit_hunks(work, sha, path)]
-            if hunks and all(is_caller_rewrite(h, names, common) for _, h in hunks):
-                verdict.files.append(FileVerdict(path, REWRITE))
-                verdict.rewrites.extend({"path": path, "sha": sha} for sha in shas)
-            else:
-                verdict.files.append(FileVerdict(path, OUTSIDE, "変えた名前の読み込み・呼び出しの書き換え以外の変更があります"))
+        _judge_rewrites(work, unit, base, pending, statuses, cache_dir, verdict)
     verdict.files.sort(key=lambda f: f.path)
-    outside = [f for f in verdict.files if f.kind == OUTSIDE]
-    if outside:
-        shown = "、".join(f"{f.path}（{f.reason}）" for f in outside[:5])
-        more = f" ほか {len(outside) - 5} 件" if len(outside) > 5 else ""
-        verdict.problem = (
-            f"対象範囲の外の既存のファイルを変更しています: {shown}{more}。"
-            "範囲の外の既存のファイルは、項目が変えた名前の読み込みと呼び出しの書き換えだけ変えられます。"
-            "生成物の同期は進行側が公開の直前に行います"
-        )
     return verdict
 
 
@@ -245,3 +278,19 @@ def judge_commits(state: dict, shas: list[str], context: Iterable[str] = ()) -> 
         return UnitVerdict()
     base = (state.get("plan") or {}).get("base_sha")
     return judge_unit(work_dir(state), Unit(list(shas), scope, base, list(context)), state.get("tmp_dir"))
+
+
+def note_outside(item: Optional[dict], verdict: UnitVerdict, sha: str = "") -> list[dict[str, str]]:
+    """範囲の外で変えたファイルを項目の `outside_scope` へ足す（同じパスは 1 度だけ）。足した行を返す。"""
+    if item is None:
+        return []
+    rows = item.setdefault("outside_scope", [])
+    known = {r.get("path") for r in rows}
+    added = []
+    for f in verdict.outside:
+        if f.path in known:
+            continue
+        row = {"path": f.path, "kind": f.kind, "reason": f.reason, **({"sha": sha} if sha else {})}
+        rows.append(row)
+        added.append(row)
+    return added
