@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import re
 
+import jsonio
 import legacy_values
 
 UNVERIFIED_FINAL = "閉じているが閉じる条件 3 を満たさない: "
@@ -25,6 +26,19 @@ def final_stage_arg(value):
     if stage not in FINAL_STAGES:
         raise argparse.ArgumentTypeError(f"{' / '.join(FINAL_STAGES)} のどれでもない: {value}")
     return stage
+
+
+def stage_from_progress(path, given: str) -> tuple[str, str]:
+    """(最終工程, 根拠)。`path`（まとめのプランの進捗記録 progress.jsonl）が無ければ `given`（--final-stage）を使う。
+
+    同じプランで retro が通っていれば振り返り、通っていなければリリース後テスト（#2914 の I5）。見る範囲は `--from` の無い
+    最後の実行の始まりより後（続きから流した実行を含む）。読めなければリリース後テスト（条件 2 を必ず見る側）。"""
+    if not path:
+        return given, f"--final-stage {given}（省略時は{STAGE_RETRO}）"
+    rows = jsonio.read_jsonl(path, missing=[], broken=[], skip_broken=True)
+    cut = max((i for i, r in enumerate(rows) if r.get("kind") == "run" and r.get("from") is None), default=-1)
+    ran = any(r.get("kind") == "step" and r.get("step") == "retro" and r.get("exit") == 0 for r in rows[cut + 1 :])
+    return (STAGE_RETRO if ran else STAGE_VERIFY), f"--final-stage-from {path}（retro が通っていれば{STAGE_RETRO}、無ければ{STAGE_VERIFY}）"
 
 
 def final_stage_gap(stage, body, since):

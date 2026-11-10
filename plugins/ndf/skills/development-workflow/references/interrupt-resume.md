@@ -113,6 +113,7 @@ ID を持つ。
 | --- | --- |
 | Pull Request | `gh pr list --head <ブランチ>` |
 | コメント | `gh pr view <番号> --json comments` |
+| Pull Request のチェック・未解決のスレッド・衝突 | `lib/gh_parts.py pr-status <番号>`（1 回で読み、`metrics.action` と `next` に次の 1 手が載る） |
 | 進捗記録 | issue の `## 進行` |
 
 **この 1 文を再開の指示に必ず入れる。** 起動し直す worker の指示にも入れる。

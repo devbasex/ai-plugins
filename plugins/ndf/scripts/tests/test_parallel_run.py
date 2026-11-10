@@ -58,6 +58,21 @@ FAKE = textwrap.dedent(
         print(json.dumps({"items": [{"result": "limit"}], "metrics": {}}))
         sys.exit(1)
     else:
+        # 一時レーンの起動と再起動は一覧へ running で現れる。FAKE_DOWN の回数だけは現れない（#2936 の受け入れ条件 3）
+        name = sys.argv[3] if sub == "spawn" else sys.argv[2] if sub == "restart" else None
+        if name and (sub == "restart" or "--role" in sys.argv):
+            down, used = int(os.environ.get("FAKE_DOWN") or 0), os.environ["FAKE_LOG"] + ".down"
+            n = int(open(used).read()) if os.path.exists(used) else 0
+            if n < down:
+                open(used, "w").write(str(n + 1))
+            else:
+                import time
+                st = json.load(open(states)) if os.path.exists(states) else {}
+                now = time.time()
+                at = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"
+                st[name] = {"state": "running", "at": at, "role": "helper" if sub == "spawn" else None}
+                json.dump(st, open(states + ".tmp", "w"))
+                os.replace(states + ".tmp", states)
         print(json.dumps({"items": [{"result": "started"}], "metrics": {}}))
     """
 )
@@ -79,6 +94,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_STATES", str(states))
     monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
+    monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "1")
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
@@ -147,6 +163,29 @@ def spawned(log):
     return [c[2] for c in calls(log, "spawn")]
 
 
+def lanes_spawned(log):
+    """計画のレーンの起動（一時レーンの起動を除く）。"""
+    return [c[2] for c in calls(log, "spawn") if "--role" not in c]
+
+
+def helper_spawns(log):
+    """耐久ワークフローが打った一時レーンの起動（#2936）。"""
+    return [c[2] for c in calls(log, "spawn") if "--role" in c and c[c.index("--role") + 1] == "helper"]
+
+
+def helper_up(states, name):
+    """偽の relay.py が起動したレーンを一覧へ書くまで待つ（書く前に上書きすると、後から running に戻る）。"""
+    until(lambda: states.exists() and name in json.loads(states.read_text() or "{}"))
+
+
+def set_state(states, name, state, at=None):
+    """一覧の 1 行を書き換える（他の行は残す）。`at` を省けば今の時刻。"""
+    st = json.loads(states.read_text()) if states.exists() else {}
+    now = time.time()  # 一覧の at はミリ秒まで持つ（秒で切ると、打った直後の止まりを打つ前の行と読む）
+    st[name] = {"state": state, "at": at or time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"}
+    states.write_text(json.dumps(st))
+
+
 def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_path):
     main, log, states = env["main"], env["log"], env["states"]
     start(main)
@@ -155,12 +194,16 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     # la の依頼 1 件で、他のレーンを待たずに提示 1 を組む（I9）
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
-    assert ev["n"] == 1 and ev["k"] == 1 and "--role helper" in ev["spawn"]
+    assert ev["n"] == 1 and ev["k"] == 1 and "spawn" not in ev
+    until(lambda: helper_spawns(log) == ["p1-rel1"])  # 提示の一時レーンは耐久ワークフローが起動する（#2936）
+    helper_up(states, "p1-rel1")
     d = prl.release_dir(main, "p1", 1, 1)
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10, 11]}))
+    set_state(states, "p1-rel1", "stopped")  # 提示の一時レーンはリリース承認ゲートの依頼を送って自分を止める
     # 先頭が同じなら確定（I14）
     durable.send_to(pl.KIND, pl.record_identity(main, "p1"), pl.workflow_id("p1"), {"n": 1, "phase": "confirm"}, "resume", "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
+    until(lambda: helper_spawns(log) == ["p1-rel1", "p1-rel1"])  # 確定の一時レーンも耐久ワークフローが起動する
     durable.send_to(
         pl.KIND,
         pl.record_identity(main, "p1"),
@@ -177,7 +220,7 @@ def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_pat
     states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
     out = durable.output_of(pl.workflow_id("p1"))
     assert out["status"] == "finished" and out["releases"][0]["state"] == "released"
-    assert spawned(log) == ["la", "lb"]  # 1 本のレーンは 1 回だけ起動する（I7）
+    assert lanes_spawned(log) == ["la", "lb"]  # 1 本のレーンは 1 回だけ起動する（I7）
     assert ["role", "--clear", "--plan-dir", str(pp.plan_dir(main, "p1").resolve())] in calls(log, "role")
 
 
@@ -256,14 +299,15 @@ def test_char_lane_missing_from_ls_counts_as_stopped_and_finishes(env):
     assert ["role", "--clear", "--plan-dir", plan_dir] in calls(log, "role")
 
 
-def test_char_awaiting_approval_pauses_with_notice(env):
+def test_char_awaiting_approval_is_recorded_without_a_notice(env):
+    """承認待ちへ移ったレーンは状態に写すだけで、オーガナイザーへの知らせを立てない（#2936 の I5。入る 1 行は status から引く）。"""
     main, states = env["main"], env["states"]
     states.write_text(json.dumps({"la": "running"}))
     start(main)
-    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "running")
+    first = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "running" and e)
     states.write_text(json.dumps({"la": "awaiting_approval"}))
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
-    assert ev["lanes"] == ["la"] and ev["attach"] == [f"python3 {prun.RELAY} attach la"]
+    time.sleep(0.8)
+    assert event(main, "p1", "pause")["seq"] == first["seq"] and event(main, "p1", "questions") is None
     out = stop(main)
     assert out["status"] == "stopped" and out["not_stopped"] == [] and out["lanes"]["la"]["state"] == "awaiting_approval"
 
@@ -297,7 +341,7 @@ def test_char_rejected_settle_answers_with_reason(env, tmp_path):
     (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e)
-    assert ev["n"] == 1 and ev["k"] == 1 and "--role helper" in ev["spawn"]
+    assert ev["n"] == 1 and ev["k"] == 1 and "spawn" not in ev
     resume(main, {"n": 1, "phase": "settle", "result": "rejected", "reason": "no"}, "s1")
     ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
     assert ans == {"result": "rejected", "version": None, "release": 1, "reason": "no", "at": None}
@@ -344,13 +388,14 @@ def test_wait_returns_smaller_seq_first(env):
     wid = pl.workflow_id("p1")
     durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "ask", "lane": "la", "q": "?"}, "inbox", f"{wid}:inbox:q1")
     q = until(lambda: event(main, "p1", "questions"))
-    states.write_text(json.dumps({"la": "awaiting_approval"}))
-    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice")
+    pl.send_release_request(main, "p1", "la", [10], [1], env["main"].parent / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
     ident = pl.record_identity(main, "p1")
     got = durable.wait_from(pl.KIND, ident, wid, ["pause", "questions"], first["seq"], 5)
     assert got.kind == "event" and got.value["key"] == "questions" and got.value["seq"] == q["seq"]
     got = durable.wait_from(pl.KIND, ident, wid, ["pause", "questions"], q["seq"], 5)
-    assert got.kind == "event" and got.value["key"] == "pause" and got.value["action"] == "notice"
+    assert got.kind == "event" and got.value["key"] == "pause" and got.value["action"] == "release"
+    resume(main, {"n": 1, "phase": "settle", "result": "rejected", "reason": "test"}, "s1")
     stop(main)
 
 
@@ -387,18 +432,6 @@ def test_stop_force_after_a_pending_stop_stops_the_helper(env, tmp_path):
     durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
     out = durable.output_of(wid)
     assert out["status"] == "stopped" and ["stop", "p1-rel1", "--json"] in calls(log, "stop")
-
-
-def test_notice_during_release_carries_launch(env, tmp_path):
-    main, states = env["main"], env["states"]
-    states.write_text(json.dumps({"la": "running"}))
-    start(main)
-    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
-    rel = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
-    states.write_text(json.dumps({"la": "awaiting_approval"}))
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
-    assert ev["release"]["seq"] == rel["seq"] and ev["release"]["spawn"] == rel["spawn"]
-    assert ev["release"]["pipeline"] == rel["pipeline"]
 
 
 # ---- 問いをオーガナイザーへ集める（受け入れ条件 6c・6d・6f）と一時レーン ----
@@ -518,7 +551,9 @@ def test_a_stalled_lane_is_asked_once(env):
     until(lambda: spawned(env["log"]) == ["la"])
     states.write_text(json.dumps({"la": {"state": "running", "at": OLD}}))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "stall"])[0]
-    assert item["lane"] == "la" and item["options"] == ["起こし直す", "止める", "待つ"] and "restart la" in item["commands"]["起こし直す"]
+    assert (
+        item["lane"] == "la" and item["options"] == ["起こし直す", "止める", "待つ"] and "commands" not in item
+    )  # 答えは耐久ワークフローが当てる
     time.sleep(0.8)
     assert len([i for i in questions(main)["items"] if i["kind"] == "stall"]) == 1  # 次の区切りまで立てない
 
@@ -570,7 +605,8 @@ def test_a_stopped_helper_without_settle_is_asked(env, tmp_path):
     start(main)
     pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    helper_up(states, "p1-rel1")
+    set_state(states, "p1-rel1", "stopped")  # 今の起動の後に、依頼も settle も送らずに止まった
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
     assert item["options"] == ["続きから起こし直す", "止める"] and "p1-rel1" in item["question"]
 
@@ -581,7 +617,8 @@ def test_stop_answer_to_a_stopped_helper_fails_the_release(env, tmp_path):
     start(main)
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    states.write_text(json.dumps({"la": "running", "p1-rel1": {"state": "stopped", "role": "helper"}}))
+    helper_up(states, "p1-rel1")
+    set_state(states, "p1-rel1", "stopped")  # 今の起動の後に、依頼も settle も送らずに止まった
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "helper"])[0]
     pl.send_answer(main, "p1", item["id"], "answered", choice=["止める"])
     ans = until(lambda: pl.read_answer(main, "p1", rid)[0])
@@ -603,7 +640,7 @@ def test_stop_answer_to_spawn_refusals_gives_up_the_lane(env, monkeypatch):
 
 
 def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch, tmp_path):
-    """全レーンが止まった後に設計の承認へ答えても、持ち主が答えを当てるまで計画を終えず、起こす 1 行を添える（6f）。"""
+    """全レーンが止まった後に設計の承認へ答えても、持ち主が答えを当てるまで計画を終えず、耐久ワークフローが持ち主を再起動する（6f・#2936）。"""
     main, states = env["main"], env["states"]
     applied = {"v": False}
     monkeypatch.setattr(prun.prt, "design_held", lambda m, n, answered: ["la"] if answered and not applied["v"] else [])
@@ -615,8 +652,7 @@ def test_the_plan_waits_until_the_owner_applies_a_design_answer(env, monkeypatch
     time.sleep(1.0)
     assert "lb" not in spawned(env["log"])  # 保留中の la は依存の判定で止まったと数えない（I8）
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
-    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+    until(lambda: ["restart", "la"] in calls(env["log"], "restart"))
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     applied["v"] = True
     states.write_text(json.dumps({"la": "running", "lb": "stopped"}))  # 起こした la が動き出し、答えを当てて止まる
@@ -647,9 +683,12 @@ def test_answered_pending_laps_of_stopped_loop_lanes_are_closed_by_a_helper_befo
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
     until(lambda: pl.read_answer(main, "p1", rid)[0])
+    time.sleep(1.0)  # 範囲の止まったレーンの再起動（偽の relay.py が一覧へ running を書く）を済ませてから止める
     states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "held" and e)
-    assert ev["loops"] == ["lroot"] and "--parallel-helper p1 pending lroot" in ev["spawn"]
+    assert ev["loops"] == ["lroot"] and "spawn" not in ev
+    got = until(lambda: [c for c in calls(env["log"], "spawn") if "--parallel-helper p1 pending lroot" in c[-1]])
+    assert got[0][2] == "p1-rel2"  # 保留したループの 1 回の一時レーンも耐久ワークフローが起動する（#2936）
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING  # 流し終えるまで finished にしない
 
 
@@ -666,15 +705,10 @@ def test_settle_wakes_a_stopped_lane_of_the_range(env, tmp_path):
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
     until(lambda: pl.read_answer(main, "p1", rid)[0])
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)
-    assert ev["action"] == "notice" and ev["wake"] == [f"python3 {prun.RELAY} restart la"]
-    states.write_text(json.dumps({"la": "stopped", "lb": "awaiting_approval"}))  # 後の知らせが pause を上書きしても
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("lanes") == ["lb"] and e)
-    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]  # レーンが動き出すまで起こす行を添え続ける
-    states.write_text(json.dumps({"la": "running", "lb": "running"}))
-    pl.send_release_request(main, "p1", "lb", [11], [2], tmp_path / "st2")
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
-    assert "wake" not in ev
+    until(lambda: ["restart", "la"] in calls(log, "restart"))  # 範囲の止まったレーンは耐久ワークフローが再起動する（#2936）
+    time.sleep(1.0)
+    assert calls(log, "restart").count(["restart", "la"]) == 1  # 立ち上がったら打ち直さない
+    assert all("wake" not in (event(main, "p1", k) or {}) for k in ("pause", "questions"))
 
 
 def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
@@ -688,8 +722,7 @@ def test_the_plan_does_not_finish_while_a_question_is_unanswered(env, tmp_path):
     assert "lb" not in spawned(env["log"])  # 保留中の la は依存の判定で止まったと数えない（I8）
     assert durable.status(pl.workflow_id("p1")) in pl.RUNNING
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("wake") and e)  # 止まった持ち主が答えを当てるまで終えない
-    assert ev["wake"] == [f"python3 {prun.RELAY} restart la"]
+    until(lambda: ["restart", "la"] in calls(env["log"], "restart"))  # 止まった持ち主を再起動し、答えを当てるまで終えない
     assert "lb" not in spawned(env["log"])
     states.write_text(json.dumps({"la": "running", "lb": "stopped"}))
     time.sleep(1.0)  # 動き出した la を観測させる
@@ -715,16 +748,20 @@ def test_irreversible_questions_with_different_numbers_are_not_merged(env, tmp_p
 
 
 def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_path):
-    """耐久ワークフローが立てた問いの答えの後の 1 行は、選んだ答えの commands で、持ち主を起こす restart ではない。"""
+    """耐久ワークフローが立てた問い（helper・stall・spawn）の答えの後に 1 行を返さない。起こし直しは耐久ワークフローが打つ（#2936 の I1）。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("parallel_cli", Path(prun.__file__).resolve().parents[1] / "parallel.py")
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
-    item = {"id": "h1", "kind": "helper", "lane": "p1-rel1", "commands": {"続きから起こし直す": "SPAWN"}}
-    monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": [item]})
-    assert pa.owner_next(tmp_path, "p1", "h1", ["続きから起こし直す"])[0] == "SPAWN"
-    assert pa.owner_next(tmp_path, "p1", "h1", ["止める"])[0] is None
+    items = [
+        {"id": "h1", "kind": "helper", "lane": "p1-rel1"},
+        {"id": "s1", "kind": "stall", "lane": "la"},
+        {"id": "x1", "kind": "spawn", "lane": "p1-rel1"},
+    ]
+    monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": items})
+    for rid, choice in (("h1", "続きから起こし直す"), ("h1", "止める"), ("s1", "起こし直す"), ("s1", "止める"), ("x1", "起こし直す")):
+        assert pa.owner_next(tmp_path, "p1", rid, [choice]) == (None, [])
 
 
 def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
@@ -755,27 +792,29 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     loop.mkdir(parents=True)
     handoff = tmp_path / ".ndf" / "handoff"
     handoff.mkdir(parents=True)
-    assert pa.owner_next(tmp_path, "p1", "qa")[0] is None and pa.owner_next(tmp_path, "p1", "qb")[0] is None
+    owners = lambda rid: pa.owner_lanes(tmp_path, "p1", rid, next(q for q in items if q["id"] == rid))  # noqa: E731
+    assert owners("qa") == [] and owners("qb") == []
     (loop / "loop.json").write_text(json.dumps({"status": "running"}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 別の作業\n")
-    assert pa.owner_next(tmp_path, "p1", "qa")[0] is None and pa.owner_next(tmp_path, "p1", "qb")[0] is None
+    assert owners("qa") == [] and owners("qb") == []
     (loop / "loop.json").write_text(json.dumps({"status": "stopped", "stop": {"condition": "waiting_only"}}))
     (handoff / "issue-7.md").write_text("## 次にやること\n- 依頼 qb の答えを読んで続ける\n")
-    assert pa.owner_next(tmp_path, "p1", "qa")[0] == f"python3 {prun.RELAY} restart la"
-    assert pa.owner_next(tmp_path, "p1", "qb")[0] == f"python3 {prun.RELAY} restart lb"
+    assert owners("qa") == ["la"] and owners("qb") == ["lb"]
     items.append({"id": "qh", "kind": "ask", "lane": "p1-rel1"})  # 記録を持たない一時レーンはラッパーが止まっているかで決める
-    assert pa.owner_next(tmp_path, "p1", "qh")[0] == f"python3 {prun.RELAY} restart p1-rel1"
-    # 同じ原因としてまとめた問いは、merged の持ち主もそれぞれの依頼の id で調べて起こす（異常系 5）
+    assert owners("qh") == ["p1-rel1"]
+    # 同じ原因としてまとめた問いは、merged の持ち主もそれぞれの依頼の id で調べる（異常系 5）
     items.append({"id": "qm", "kind": "ask", "lane": "la", "merged": [{"id": "qb", "lane": "lb"}]})
-    assert pa.owner_next(tmp_path, "p1", "qm")[0] == f"python3 {prun.RELAY} restart la; python3 {prun.RELAY} restart lb"
+    assert owners("qm") == ["la", "lb"]
+    assert pa.owner_next(tmp_path, "p1", "qm")[0] is None  # 再起動は耐久ワークフローが打つ（#2936 の I1）
 
 
 def test_a_helper_ends_by_stopping_its_own_wrapper():
     """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
     入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留したループの 1 回のどちらの起動も同じ。"""
-    for line in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
-        name = line.split("--name ", 1)[1].split()[0]
-        assert f"{prun.RELAY} stop {name}" in line.split(" -- ", 1)[1]
+    for spec in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
+        argv = spec["argv"]
+        name = argv[argv.index("--name") + 1]
+        assert f"{prun.RELAY} stop {name}" in argv[argv.index("--") + 1]
 
 
 def _bare_run(monkeypatch, lanes):
@@ -890,15 +929,76 @@ def test_a_repeated_answer_stands_once_and_warns_once(monkeypatch, capsys):
 
 def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     """一時レーンが ask を送って自分のラッパーを止めたときは、「リリースの途中で止まった」を問わない（6g）。"""
-    run = _bare_run(monkeypatch, [{"name": "la"}])
-    run.current, run.launch = {"n": 1}, {"seq": 3, "spawn": "SPAWN"}
-    helper = prl.helper_name("p1", 1)
+    run, helper = _helper_run(monkeypatch)
+    rows = {helper: {"state": "stopped", "at": AFTER}}
     run.questions = [{"id": "qa", "kind": "ask", "lane": helper}]
-    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    for _ in range(3):
+        prun._ask_helper(run, rows)
     assert [q["kind"] for q in run.questions] == ["ask"]
     run.questions = []
-    prun._ask_helper(run, {helper: {"state": "stopped"}})
+    prun._ask_helper(run, rows)
+    prun._ask_helper(run, rows)
+    q = run.questions[0]
+    assert (q["kind"], q["purpose"], q["launch"]["argv"], q["n"]) == ("helper", "rel-1-1-present", ["spawn", "x"], 1)
+
+
+LAUNCHED, BEFORE, AFTER = "2026-11-10T00:00:10Z", "2026-11-10T00:00:00.000Z", "2026-11-10T00:01:00.000Z"
+
+
+def _helper_run(monkeypatch, result="up"):
+    """提示の一時レーンを今の起動として持つ _Run（起動の記録は LAUNCHED に `result`）。"""
+    run = _bare_run(monkeypatch, [{"name": "la"}])
+    run.current = {"n": 1}
+    run.launch = {"seq": 3, "action": "release", "n": 1, "k": 1, "purpose": "rel-1-1-present", "argv": ["spawn", "x"], "cwd": None}
+    run.launches = {"rel-1-1-present": {"lane": "p1-rel1", "result": result, "attempts": 1, "at": LAUNCHED, "reason": None}}
+    return run, prl.helper_name("p1", 1)
+
+
+def test_a_helper_stopped_after_the_launch_is_asked_only_on_the_second_sight(monkeypatch):
+    """今の起動の後に止まった一時レーンは、2 回続けて止まって観えたときだけ問う（#2936 の I4）。動いて観えたら数え直す。"""
+    run, helper = _helper_run(monkeypatch)
+    prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert run.questions == []
+    prun._ask_helper(run, {helper: {"state": "running", "at": AFTER}})
+    prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert run.questions == []
+    prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
     assert [q["kind"] for q in run.questions] == ["helper"]
+
+
+def test_a_helper_row_from_before_the_launch_is_not_asked(monkeypatch):
+    """続きの一時レーンを起動した直後に一覧に残る前の起動の止まった行では問わない（#2629）。"""
+    run, helper = _helper_run(monkeypatch)
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": BEFORE}})
+    assert run.questions == []
+
+
+def test_a_helper_row_without_a_time_is_not_asked(monkeypatch):
+    run, helper = _helper_run(monkeypatch)
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped"}})
+    assert run.questions == []
+
+
+def test_a_helper_is_not_asked_before_its_launch_came_up(monkeypatch):
+    """立ち上がりを確かめていない起動（記録が failed・まだ無い）の止まりは問わない。立ち上がらない起動は区分 spawn の問いが受け持つ。"""
+    run, helper = _helper_run(monkeypatch, result="failed")
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    run.launches = {}
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert run.questions == []
+
+
+def test_a_helper_that_sent_the_gate2_request_is_not_asked(monkeypatch):
+    """リリース承認ゲートの依頼を送ってから止まった一時レーンは問わない（台帳を観測より先に読むため、依頼が先に入る）。"""
+    run, helper = _helper_run(monkeypatch)
+    run.questions = [{"id": "g", "kind": "gate2", "n": 1, "lane": helper}]
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert [q["kind"] for q in run.questions] == ["gate2"]
 
 
 def test_settle_answers_with_the_version_of_the_chosen_presentation(env, tmp_path, monkeypatch):
@@ -1359,13 +1459,13 @@ def _route(monkeypatch, lanes=None):
 
 
 def test_an_answer_wakes_a_stopped_loop_lane_that_waits_on_its_record(monkeypatch):
-    """記録が waiting_only で止まったループのレーンも起こす対象に入り、知らせに起こす 1 行が付く（#2474 の原因）。"""
+    """記録が waiting_only で止まったループのレーンも再起動の対象に入る（#2474 の原因）。"""
     run, box = _route(monkeypatch)
     monkeypatch.setattr(parallel_reply, "step_waiting_lanes", lambda *_a: ["la"])
     run.questions = [{"kind": "gate1", "id": "q", "lane": "la", "pr": 1}]
     run.reply({"id": "q", "result": "approved"})
     assert box["answer-q"]["result"] == "approved" and run.revive == ["la"] and run.wake == ["la"]
-    assert "restart la" in box["pause"]["wake"][0]
+    assert "pause" not in box  # 再起動は周の終わりに耐久ワークフローが打つ。知らせは立てない（#2936）
 
 
 def test_a_stopped_loop_lane_that_does_not_wait_is_not_woken(monkeypatch):

@@ -54,11 +54,12 @@
 | サブエージェント | 完了通知を待つ。途中の出力を読まない |
 | バックグラウンドで動かす CLI（`codex exec` など） | CLI そのものを `run_in_background: true` で起動し、完了通知を待つ |
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
-| Pull Request のチェック | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
+| Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
 | `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。キューの終わり（done）か、キューが流すプランの `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初のプランの `<プラン>-state/queue-done.json`） |
-| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。CI を待つだけなら `gh pr checks <PR 番号> --watch` を同じくバックグラウンドで起動する。`gh pr checks --watch` と `gh pr merge` を手でつながない |
+| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
+| 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、`supervise.py advance --step "<コマンド>" --step "<コマンド>"...` を 1 回打つ。結果 JSON が `ok` の間だけ次を打ち、`gate` か `stopped` で止まって、理由と続きのコマンド（`--from <番号>`）を `next` に返す。打てるのは NDF の `scripts/` と `skills/*/scripts/` だけ。長く待つ手順を含むなら `run_in_background: true` で起動する |
 | キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
 ### supervise.py の進捗ログ

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import parallel_answer as pa
+import parallel_defer as pdf
 import parallel_external_cli as px
 import parallel_hold as ph
 import parallel_homes
@@ -34,7 +35,7 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     import parallel_run as pr_run
 
     env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *ph.limit_items(main)]
+    notes = [*notes, *prt.start_warnings(main)]
     parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:
@@ -85,9 +86,55 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     )
 
 
-def wait_plan(a, reply, main: Path, self_path: Path) -> None:
-    """状態の変化か終わりまで待つ。"""
+def batch_reply(reply, main: Path, name: str, extra: dict) -> None:
+    """業務時間内で溜めた依頼があれば、答えていない依頼の全件を 1 回で返して終える。無ければ何もしない。"""
+    got = pdf.due_batch(main, name, pdf.hours_of(main))
+    if got is not None:
+        items, m = got
+        reply("ok", f"並列の計画 {name}: questions（業務時間外に溜めた依頼をまとめて示す）", items, action="questions", **{**extra, **m})
+
+
+# オーガナイザーへ返すイベント。`pause` は古い記録の起動の 1 行を持つものだけ返す（#2936）
+WAIT_KEYS = ("questions", "answer-hold", "pause")
+
+
+def legacy_pause(ev: dict) -> bool:
+    """起動の印の無い古い記録の `pause`（オーガナイザーが打つ起動・再起動の 1 行を持つ）か。新しい記録の `pause` は一時レーンが読む。"""
+    return bool(ev.get("spawn") or ev.get("wake") or (ev.get("release") or {}).get("spawn"))
+
+
+def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
+    """問いの一覧に、オーガナイザーがまだ答えを送っていない依頼があるか（`answers-sent.json` に無い id。まとめた `also` も含む）。"""
+    import jsonio
+
+    sent = jsonio.read(pp.plan_dir(main, name) / pa.SENT, missing=[], broken=[], want=list)
+    done = {s.get("id") for s in sent if isinstance(s, dict)}
+    return any(i not in done for q in items if isinstance(q, dict) for i in (q.get("id"), *(q.get("also") or [])) if i)
+
+
+def wait_event(main: Path, name: str, after: int, timeout: float):
+    """`questions`・`answer-hold` のイベントか終わりまで待つ。答えを送った依頼だけの `questions` は読み飛ばして待ち続ける（決定 5）。
+    `pause` は古い記録の起動の 1 行を持つものだけ返し、ほかは読み飛ばす。
+    (結果, 読み飛ばした最後の seq) を返す。"""
+    import time
+
     import durable
+
+    end, left = time.monotonic() + timeout, timeout
+    while True:
+        got = durable.wait_from(
+            pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), list(WAIT_KEYS), after, left, start=pl.record_start(main)
+        )
+        key = got.value.get("key") if got.kind == "event" else None
+        if got.kind != "event" or (key == "pause" and legacy_pause(got.value)) or key == "answer-hold":
+            return got, after
+        if key == "questions" and has_unanswered(main, name, got.value.get("items") or []):
+            return got, after
+        after, left = int(got.value.get("seq") or after), max(0.0, end - time.monotonic())
+
+
+def wait_plan(a, reply, main: Path, self_path: Path) -> None:
+    """人へ問うもの・答え待ちの停止の変化・終わり・異常まで待つ（#2936 の I5）。"""
 
     restart = f"python3 {self_path} start {a.name}"
     if not pl.record_exists(main, a.name):
@@ -99,26 +146,37 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
             )
         reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
     extra = plg.ledger_report(main, a.name, prt.waiting_requests(main, a.name))
-    keys = ["pause", "questions", "answer-hold"]
-    got = durable.wait_from(
-        pl.KIND, pl.record_identity(main, a.name), pl.workflow_id(a.name), keys, a.after, a.timeout, start=pl.record_start(main)
-    )
+    batch_reply(reply, main, a.name, extra)  # 業務時間に入った後の最初の wait は溜めた依頼をまとめて返す（#2913 の E7）
+    hours = pdf.hours_of(main)
+    got, after = wait_event(main, a.name, a.after, pdf.clip_timeout(a.timeout, hours))  # 業務時間外は次の業務時間の始まりで切る
     if got.kind == "timeout":
+        batch_reply(reply, main, a.name, extra)
         reply(
             "stopped",
             f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
             code=3,
-            seq=a.after,
-            next=wait_line(self_path, a.name) + f" --after {a.after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
+            seq=after,
+            next=wait_line(self_path, a.name) + f" --after {after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
             **extra,
         )
     if got.kind == "event":
         ev = dict(got.value)
         key = ev.pop("key")
         action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
-        if action == "running":
-            reply("stopped", "まだ変化が無い", code=3, seq=ev.get("seq"), **extra)
         items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
+        if action == "questions":  # 業務時間外は gate1・ask を溜め、今問う依頼だけを返す（#2913 の E6）
+            items, kept = pdf.route(main, a.name, items, pdf.hours_of(main))
+            if kept and not items:
+                d = kept["deferred"]
+                nxt = wait_line(self_path, a.name) + f" --after {ev.get('seq')}"
+                reply(
+                    "stopped",
+                    f"業務時間外の依頼を {d['count']} 件溜めた（業務時間の始まり {d['until']}）",
+                    code=3,
+                    next=nxt,
+                    **{**extra, **ev, **kept},
+                )
+            ev.update(kept)
         if action == ph.CONDITION:
             ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
         reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **{**extra, **ev})

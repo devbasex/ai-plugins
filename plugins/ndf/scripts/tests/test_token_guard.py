@@ -829,6 +829,9 @@ QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
         'X=1 nohup python3 "/x/scripts/supervise.py" run plan.json',
         "python3 -u /x/scripts/supervise.py run plan.json",
         "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
+        # 手順の連続実行の --step の中の起動も起動と読む（#2909 の I9）
+        "python3 /x/scripts/supervise.py advance --step 'python3 /x/scripts/supervise.py queue a.json' --step 'x.py'",
+        'python3 /x/scripts/supervise.py advance --step="/x/scripts/supervise.py run plan.json"',
     ],
 )
 def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
@@ -853,6 +856,8 @@ def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
         'git commit -m "docs: (supervise.py run --from)"',
         "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
         "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
+        "python3 /x/scripts/supervise.py advance --step 'python3 /x/scripts/sprint-state.py get s.json'",
+        "python3 /x/scripts/supervise.py advance --step 'python3 /x/scripts/supervise.py wait /x/done'",
     ],
 )
 def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):

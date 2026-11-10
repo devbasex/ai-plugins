@@ -1,0 +1,7 @@
+{
+  "name": "deferred-json",
+  "pattern": "deferred.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}

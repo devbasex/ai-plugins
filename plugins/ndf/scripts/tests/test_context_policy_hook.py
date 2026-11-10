@@ -104,7 +104,7 @@ def test_trial_cost_denial_keeps_denying_under_relay(tmp_path, state, ctx, relay
     payload = agent(tp, cwd=str(tmp_path))  # git の外（_local）で見込みを読む
     first, second = denied(run(payload, state, env)), denied(run(payload, state, env))
     assert first and second and "理由: 費用" in second
-    assert [r["relay"] for r in rows(ctx)] == [True, True]
+    assert [(r["event"], r["relay"]) for r in rows(ctx)] == [("判定", True), ("引継ぎ開始", True), ("判定", True)]
 
 
 def test_unreadable_context_passes_and_records(tmp_path, state, ctx):
@@ -571,4 +571,288 @@ PINNED_REST = {
     "auto_compacts": "不明",
     "quality": {"rework": 1, "review_fixes": "不明", "missed_requirements": "不明"},
     "no_policy_rows": 0,
+    "restores": [{"context": 1170, "calls": 1}],
 }
+
+
+# ---------------------------------------------------------------- 印の自動化・識別子・区切り（#2908 の I1〜I7・受け入れ条件 6）
+
+
+def handoff_transcript(
+    tmp_path,
+    total: int,
+    name: str = "h.jsonl",
+    first: str = "/goal /ndf:development-workflow .ndf/handoff/issue-7.md の続きから",
+    ts: str | None = None,
+) -> Path:
+    """先頭の利用者の発言が `first` で、最後の文脈が `total` の会話の記録。"""
+    usage = {"input_tokens": 10, "cache_read_input_tokens": total - 110, "cache_creation_input_tokens": 100, "output_tokens": 5}
+    lines = [{"type": "user", "message": {"content": first}}, {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}]
+    if ts:
+        lines[1]["timestamp"] = ts
+    path = tmp_path / name
+    path.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n")
+    return path
+
+
+def marks_of(ctx: Path, event: str) -> list[dict]:
+    return [r for r in rows(ctx) if r.get("event") == event]
+
+
+def test_restored_mark_once_after_the_entry_point(tmp_path, state, ctx):
+    # I1: エントリポイントの Skill では書かず、その後の最初の工程の起動で 1 行だけ。文脈の量は起動の直前の量
+    tp = handoff_transcript(tmp_path, 1_000)
+    run(skill(tp, name="ndf:development-workflow", args="#7"), state, env_of(ctx))
+    assert marks_of(ctx, "復元完了") == []
+    run(agent(tp, desc="設計: #7"), state, env_of(ctx))
+    run(skill(tp, args="#7"), state, env_of(ctx))
+    (m,) = marks_of(ctx, "復元完了")
+    assert (m["context"], m["work"], m["session_id"], m["verdict"]) == (1_000, "#7", "s1", None)
+
+
+def test_no_restored_mark_without_a_handoff_start(tmp_path, state, ctx):
+    # I2: 先頭が引継ぎ文書を指さない会話では、何度起動しても書かない
+    tp = handoff_transcript(tmp_path, 1_000, first="#7 を進めて")
+    for _ in range(2):
+        run(skill(tp), state, env_of(ctx))
+    assert marks_of(ctx, "復元完了") == []
+
+
+def test_head_is_read_once_per_session(tmp_path, state, ctx):
+    # 2 回目以降の起動では先頭を読まず、状態のファイルで決める（非機能: 先頭の読みは 1 セッションに 1 回）
+    tp = handoff_transcript(tmp_path, 1_000)
+    run(skill(tp, name="ndf:development-workflow"), state, env_of(ctx))  # 待ち
+    handoff_transcript(tmp_path, 1_000, first="別の依頼")  # 先頭を書き換えても状態で決まる
+    run(skill(tp), state, env_of(ctx))
+    assert len(marks_of(ctx, "復元完了")) == 1
+    other = handoff_transcript(tmp_path, 1_000, name="o.jsonl", first="別の依頼")
+    run(skill(other, session="s2"), state, env_of(ctx))  # 対象外
+    handoff_transcript(tmp_path, 1_000, name="o.jsonl")
+    run(skill(other, session="s2"), state, env_of(ctx))
+    assert [m["session_id"] for m in marks_of(ctx, "復元完了")] == ["s1"]
+
+
+def test_handoff_mark_once_under_the_relay_only(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I3: ラッパーの直接の子を止めると 1 行、続けて止めても増えない。ラッパーの外で止めても書かない
+    tp = transcript(tmp_path, 200_001)
+    run(skill(tp, session="out"), state, env_of(ctx))
+    assert marks_of(ctx, "引継ぎ開始") == []
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    assert denied(run(skill(tp), state, env)) and denied(run(skill(tp), state, env))
+    (m,) = marks_of(ctx, "引継ぎ開始")
+    assert (m["session_id"], m["work"], m["context"], m["relay"]) == ("s1", "#829", 200_001, True)
+
+
+def test_unwritable_marks_keep_the_verdict(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I4: 印と状態を書けなくても、判定と拒否の文面は印の無いときと同じ
+    bad = tmp_path / "file"
+    bad.write_text("")
+    over = transcript(tmp_path, 200_001)
+    good = denied(run(skill(over), state, env_of(ctx, NDF_RELAY_DIR=str(relay_dir))))
+    worse = denied(run(skill(over, session="s2"), state, {"NDF_CONTEXT_DIR": str(bad / "x"), "NDF_RELAY_DIR": str(relay_dir)}))
+    assert good and good == worse
+    tp = handoff_transcript(tmp_path, 1_000)
+    assert denied(run(skill(tp, session="s3"), state, {"NDF_CONTEXT_DIR": str(bad / "x")})) is None
+
+
+def test_subagent_writes_no_marks(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # I5: サブエージェントの中の起動では判定も印も書かない
+    tp = handoff_transcript(tmp_path, 300_000)
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    assert denied(run(skill(tp, agent_id="a1"), state, env)) is None
+    assert rows(ctx) == []
+
+
+def test_record_cli_normalizes_the_work(tmp_path, ctx):
+    # I6: 課題番号を含めば昇順の並び。含まずセッションがあれば空で書き、集計はセッションの前の行で補う
+    cli(
+        "record",
+        "--event",
+        "引継ぎ開始",
+        "--work",
+        ".ndf/handoff/issue-30.md と #7",
+        ctx=ctx,
+        cwd=str(tmp_path),
+        CLAUDE_CODE_SESSION_ID="s9",
+    )
+    cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="s9")
+    cli("record", "--event", "引継ぎ開始", "--work", "loop-lcore", ctx=ctx, cwd=str(tmp_path), CLAUDE_CODE_SESSION_ID="")
+    assert [r["work"] for r in rows(ctx)] == ["#7 #30", "", "loop-lcore"]
+    assert [r["work"] for r in cd.fill_work(rows(ctx))][:2] == ["#7 #30", "#7 #30"]
+
+
+def test_report_span_cuts_every_source(tmp_path):
+    # I7: 区切りの外の呼び出しは会話・サブエージェント・帳簿のどれからも数えない。区切りが無ければ今の値
+    m = load_cli()
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m1"), call("2026-11-01T02:00:00Z", "m2")])
+    write_transcript(
+        tmp_path / "s1" / "subagents" / "agent-x.jsonl", [call("2026-11-01T00:01:00Z", "m3"), call("2026-11-01T02:01:00Z", "m4")]
+    )
+    usage = call("t", "m9")["message"]["usage"]
+    ledger = [
+        {"session_id": "p1", "parent_session_id": "s1", "at": "2026-11-01T00:02:00Z", "usage": usage, "seconds": 1},
+        {"session_id": "p2", "parent_session_id": "s1", "at": "2026-11-01T02:02:00Z", "usage": usage, "seconds": 1},
+    ]
+    recs = [hook_row("s1", tp, "2026-11-01T00:00:00Z"), hook_row("s1", tp, "2026-11-01T02:00:00Z", verdict="再起動", reason="手動")]
+    whole = m.report_work("#7", recs, ledger)
+    span = (cd.parse_ts("2026-11-01T01:00:00Z"), cd.parse_ts("2026-11-01T03:00:00Z"))
+    cut = m.report_work("#7", recs, ledger, span)
+    assert (whole["parts"]["conductor"]["calls"], whole["parts"]["ndf"]["calls"]) == (2, 4)
+    assert (cut["parts"]["conductor"]["calls"], cut["parts"]["ndf"]["calls"], cut["restart_count"]) == (1, 2, 1)
+    early = m.report_work("#7", recs, ledger, (cd.parse_ts("2026-11-01T00:00:00Z"), cd.parse_ts("2026-11-01T00:30:00Z")))
+    assert (early["parts"]["conductor"]["calls"], early["parts"]["ndf"]["calls"], early["restart_count"]) == (1, 2, 0)
+    # 期間の中に新しい判定の行が無くても、期間の中の呼び出しは数える（セッションは期間で絞る前の行から取る）
+    quiet = m.report_work("#7", recs[:1], ledger, span)
+    assert (quiet["sessions"], quiet["parts"]["conductor"]["calls"], quiet["parts"]["ndf"]["calls"], quiet["restart_count"]) == (1, 1, 2, 0)
+
+
+def test_hook_marks_make_both_parts_known(tmp_path, state, ctx, relay_dir):  # noqa: F811  relay_dir は fixture
+    # 受け入れ条件 6: hook が書いた 2 つの印で、引継ぎの区間と復元の区間が「不明」でなく、復元の量がセッションごとに出る
+    env = env_of(ctx, NDF_RELAY_DIR=str(relay_dir))
+    old = transcript(tmp_path, 250_000, name="old.jsonl")
+    assert denied(run(skill(old, args="#7", session="old"), state, env))
+    new = handoff_transcript(tmp_path, 30_000, ts="2026-11-01T00:00:00Z")
+    run(skill(new, name="ndf:development-workflow", args="#7", session="new"), state, env)
+    run(skill(new, args="#7", session="new"), state, env)
+    out = load_cli().report_work("#7", rows(ctx))
+    assert out["unknown_parts"] == {"restore": 0, "handoff": 0}
+    assert out["restores"] == [{"context": 30_000, "calls": 1}]
+    assert out["parts"]["restore"]["calls"] == 1
+
+
+def _tool_use(ts: str, name: str, tid: str, **inp) -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {"id": f"u-{tid}", "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]},
+    }
+
+
+def _tool_result(ts: str, tid: str) -> dict:
+    return {"type": "user", "timestamp": ts, "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": "ok"}]}}
+
+
+def test_trial_row_has_no_session_id(tmp_path):
+    # F5・I10: スプリントの記録と会話の記録の組から作った 1 行に、会話の ID が現れない。区切りは起動から答えの後の最初の呼び出しまで
+    spec = importlib.util.spec_from_file_location("context_trial", SCRIPTS / "experimental" / "context-trial.py")
+    trial = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trial)
+    sid = "sess-0123456789abcdef"
+    tp = write_transcript(
+        tmp_path / f"{sid}.jsonl",
+        [
+            call("2026-11-01T00:00:00Z", "m0", read=300_000),
+            _tool_use("2026-11-01T00:01:00Z", "Bash", "b1", command="python3 supervise.py queue plan.json"),
+            call("2026-11-01T00:02:00Z", "m2", read=301_000),
+            _tool_use("2026-11-01T00:10:00Z", "AskUserQuestion", "q1", questions=[]),
+            _tool_result("2026-11-01T01:20:00Z", "q1"),
+            call("2026-11-01T01:21:00Z", "m3", read=302_000),
+            call("2026-11-01T01:40:00Z", "m4", read=303_000),
+        ],
+    )
+    recs = [hook_row(sid, tp, "2026-11-01T00:01:00Z", context=300_100, decide_from=950_000, margin=50_000)]
+    row = trial.trial_row("#7", "続ける", tp, recs, [], None, None, 4.0)
+    assert sid not in json.dumps(row, ensure_ascii=False) and sid not in trial.table_line(row)
+    assert (row["waits"], row["seconds"], row["excluded"], row["cuts"]) == ([4200], 4800 - 4200, None, 0)
+    assert row["tokens"]["read"] == 301_000 + 302_000  # m2・m3（m0 は区切りの前、m4 は後。tool_use の行は usage を持たない）
+
+
+# ---------------------------------------------------------------- context-trial.py の trial_row（現状固定。I-006）
+
+
+def _load_trial():
+    spec = importlib.util.spec_from_file_location("context_trial", SCRIPTS / "experimental" / "context-trial.py")
+    trial = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trial)
+    return trial
+
+
+def _trial_lines() -> list[dict]:
+    return [
+        call("2026-11-01T00:00:00Z", "m0", read=300_000),
+        _tool_use("2026-11-01T00:01:00Z", "Bash", "b1", command="python3 supervise.py queue plan.json"),
+        call("2026-11-01T00:02:00Z", "m2", read=301_000),
+        _tool_use("2026-11-01T00:10:00Z", "AskUserQuestion", "q1", questions=[]),
+        _tool_result("2026-11-01T01:20:00Z", "q1"),
+        call("2026-11-01T01:21:00Z", "m3", read=302_000),
+        call("2026-11-01T01:40:00Z", "m4", read=303_000),
+    ]
+
+
+def test_trial_row_without_queue_launch_raises(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", [call("2026-11-01T00:00:00Z", "m0")])
+    with pytest.raises(ValueError, match="supervise.py queue"):
+        trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+
+
+def test_trial_row_without_answered_question_raises(tmp_path):
+    trial = _load_trial()
+    lines = [x for i, x in enumerate(_trial_lines()) if i != 4]  # 答え（tool_result）を除く
+    tp = write_transcript(tmp_path / "s1.jsonl", lines)
+    with pytest.raises(ValueError, match="--until"):
+        trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+
+
+def test_trial_row_question_before_launch_is_ignored(tmp_path):
+    # 起動より前の問いは区切りに使わない。--until を渡さなければ止まる
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    lo = cd.parse_ts("2026-11-01T00:30:00Z")
+    with pytest.raises(ValueError, match="--until"):
+        trial.trial_row("#7", "続ける", tp, [], [], lo, None, 4.0)
+
+
+def test_trial_row_full_shape_with_explicit_span(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    recs = [
+        hook_row("s1", tp, "2026-11-01T00:01:00Z", context=150_000, decide_from=950_000, margin=50_000),
+        mark(cd.MARK_HANDOFF, "2026-11-01T00:05:00Z", "s1"),
+        mark(cd.MARK_HANDOFF, "2026-11-01T03:00:00Z", "s1"),
+    ]
+    lo, hi = cd.parse_ts("2026-11-01T00:01:00Z"), cd.parse_ts("2026-11-01T01:30:00Z")
+    row = trial.trial_row("#7", "閾値で切る", tp, recs, [], lo, hi, 4.0)
+    assert set(row) == {
+        "condition", "policy", "start_context", "excluded", "conversation_usd", "conversation_parts_usd",
+        "tokens", "ndf_usd", "seconds", "waits", "cuts", "restores", "unknown_parts",
+    }  # fmt: skip
+    assert row["condition"] == "閾値で切る"
+    assert row["policy"] == "current（判断開始の値 950000 / 運用上限 200000 / 余白 50000）"
+    assert row["start_context"] == 150_000
+    assert row["excluded"] == "起動の時点の文脈が 200000 以下か不明"
+    assert set(row["conversation_parts_usd"]) == {"conductor", "handoff", "restore"}
+    assert row["conversation_usd"] == round(sum(row["conversation_parts_usd"].values()), 2)
+    assert set(row["tokens"]) == {"inp", "out", "read", "w5", "w1h"}
+    assert row["tokens"]["read"] == 301_000 + 302_000
+    assert row["ndf_usd"] == 0.0
+    assert (row["waits"], row["seconds"], row["cuts"]) == ([4200], 5340 - 4200, 1)
+    line = trial.table_line(row)
+    assert line.startswith("| 閾値で切る | current（") and line.endswith("| 起動の時点の文脈が 200000 以下か不明 |")
+
+
+def test_trial_row_without_decision_rows_marks_unknown(tmp_path):
+    trial = _load_trial()
+    tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines())
+    row = trial.trial_row("#7", "続ける", tp, [], [], None, None, 4.0)
+    assert row["policy"] == "不明（判断開始の値 None / 運用上限 None / 余白 None）"
+    assert row["start_context"] is None and row["excluded"] == "起動の時点の文脈が 200000 以下か不明"
+    assert (row["waits"], row["seconds"], row["cuts"], row["restores"]) == ([4200], 4800 - 4200, 0, [])
+    assert trial.table_line(row).endswith(f"| 0 | {cd.UNKNOWN} | 起動の時点の文脈が 200000 以下か不明 |")
+
+
+def test_trial_row_reads_other_transcripts_of_the_work(tmp_path):
+    # 同じ作業の判定の行が指す別の会話の記録の問いと答えも区切りに使う
+    trial = _load_trial()
+    main_tp = write_transcript(tmp_path / "s1.jsonl", _trial_lines()[:3])
+    other = write_transcript(
+        tmp_path / "s2.jsonl",
+        [
+            _tool_use("2026-11-01T00:20:00Z", "AskUserQuestion", "q9", questions=[]),
+            _tool_result("2026-11-01T00:30:00Z", "q9"),
+            call("2026-11-01T00:31:00Z", "m9", read=310_000),
+        ],
+    )
+    recs = [hook_row("s1", main_tp, "2026-11-01T00:01:00Z", context=300_100), hook_row("s2", other, "2026-11-01T00:20:00Z")]
+    row = trial.trial_row("#7", "続ける", main_tp, recs, [], None, None, 4.0)
+    assert (row["waits"], row["seconds"], row["excluded"]) == ([600], 1800 - 600, None)

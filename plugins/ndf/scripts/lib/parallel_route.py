@@ -9,7 +9,8 @@ from pathlib import Path
 
 import delivery
 import durable
-from parallel_hold import limit_items
+import parallel_hold
+from pace import hours_items
 from parallel_repo import dev_version, loop_records
 from sprint_loop_names import PENDING
 
@@ -24,14 +25,19 @@ def way_of(main: Path) -> delivery.ReleaseWay:
     return delivery.release_way(delivery.load_delivery(main), tuple(RELEASE_FORMS))
 
 
+def start_warnings(main: Path) -> list[dict]:
+    """閾値の警告と業務時間の宣言の警告（`check`・`start` が出す。#2913）。"""
+    return [*parallel_hold.limit_items(main), *hours_items(main)]
+
+
 def check_items(main: Path) -> list[dict]:
     """起動の前の検査の警告。リリースを組めないなら 1 件。起動は断らない（レーンがリリースの依頼を送らない計画もある）。"""
     got = way_of(main)
     if got.way == delivery.REFUSE:
-        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}, *limit_items(main)]
+        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}, *start_warnings(main)]
     if got.way == delivery.BUILD and not dev_version(main):
-        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}, *limit_items(main)]
-    return limit_items(main)
+        return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}, *start_warnings(main)]
+    return start_warnings(main)
 
 
 def with_release_warnings(main: Path, checked: tuple) -> tuple:
@@ -76,10 +82,11 @@ def design_held(main: Path, name: str, answered: list[str]) -> list[str]:
 
 
 def waiting_lanes(main: Path, name: str) -> list[str]:
-    """記録が `waiting_only` で止まり、答えをまだ当てていない待ちを持つループのレーンの名前（保留中。依存の判定で止まったと数えない）。"""
+    """記録が `waiting_only` か答え待ちの停止（`answer_hold`）で止まり、答えをまだ当てていない待ちを持つループのレーンの名前
+    （保留中。依存の判定で止まったと数えない。答えを受けたら再起動の対象へ入れる）。"""
 
     def held(rec: dict) -> bool:
-        if rec.get("status") != "stopped" or (rec.get("stop") or {}).get("condition") != "waiting_only":
+        if rec.get("status") != "stopped" or (rec.get("stop") or {}).get("condition") not in parallel_hold.WAIT_STOPS:
             return False
         return any(not w.get("answer") for w in rec.get("waiting") or [])
 

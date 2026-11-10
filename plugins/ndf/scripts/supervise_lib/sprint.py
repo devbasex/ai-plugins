@@ -48,7 +48,7 @@ from supervise_lib.sprint_routes import (
     with_cd_guidance,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -169,14 +169,15 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）控え → リリース後テスト → 比較 → 振り返り → 課題を閉じる → 棚卸し。"""
+    """まとめ: 確定仕様化 → PR →（リリース記録があれば）リリース後テスト → 起動の判定 →（起動する回だけ）振り返り → 棚卸し →
+    マージ → 課題を閉じる。CI は ready から後ろの作業と重なって進み、マージの後は close だけ（#2914 の決定 1〜4・I3・I8）。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
-    plan = with_decls(
-        {
+    verify = has_record(record_pr)
+    plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
             "モード": a.mode,
@@ -187,16 +188,15 @@ def close_plan(a, repo: str) -> dict:
             "規則": "",
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
-                *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="config-save" if has_record(record_pr) else "retro"),
-                *(release_verify_steps(a.name, refs, record_pr) if has_record(record_pr) else []),
-                _retro_step(a, refs, stats),
+                *_spec_pr_steps(a, refs, "config-save" if verify else "deep-due"),
+                *(release_verify_steps(a.name, refs, record_pr, after="deep-due") if verify else []),
+                deep_due_step(a, repo, issues, after="merge-gate"),
+                _retro_step(a, refs, stats, repo),
+                *refine_steps(a, refs, repo, issues, after="merge-gate"),
+                *merge_steps(a, next="close"),
                 _close_step(a, repo, record_pr, issues),
-                *refine_steps(a, refs, repo),
             ],
-        },
-        a,
-    )
+        }, a)  # fmt: skip
     return with_record(plan)
 
 

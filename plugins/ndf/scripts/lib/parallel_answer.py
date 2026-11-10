@@ -101,12 +101,6 @@ def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = 
     return [{**q, "drop": drop(q), "mvv": mvv_mark(q)} for q in rest]
 
 
-def _restart_lines(lanes: list[str]) -> str | None:
-    import parallel_run as pr_run
-
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
-
-
 def owner_lanes(main: Path, name: str, rid: str, q: dict) -> list[str]:
     """答えを待って止まった持ち主のレーン。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた
     問い（`merged`）は、代表だけでなく全持ち主をそれぞれの依頼の id で調べる（異常系 5）。"""
@@ -120,18 +114,40 @@ def owner_lanes(main: Path, name: str, rid: str, q: dict) -> list[str]:
 def owner_next(
     main: Path, name: str, rid: str, choice: list[str] | None = None, items: list[dict] | None = None
 ) -> tuple[str | None, list[str]]:
-    """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。自分で立てた問い（stall・helper・spawn・observe）は選んだ答えの commands、
-    ほかは止まった持ち主の restart を `; ` でつなぐ。停止の範囲にある計画のレーンは起こさず、再開の印を置く（#2707 の I11）。
-    リリースの一時レーンは計画全体の停止の間も restart の 1 行で起こす（再開の印を突き合わせるのは計画のレーンだけのため）。"""
+    """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。1 行は区分 `observe` の選んだ答えの commands（`relay.py status`）だけで、
+    ほかは None。止まった持ち主の再起動と、耐久ワークフローが立てた問い（stall・helper・spawn）の答えは耐久ワークフローが打つ（#2936）。
+    停止の範囲にある 1 スプリントのレーンは起こさず、再開の印を置く（#2707 の I11）。ループのレーンは停止の範囲でも耐久ワークフローが
+    起こす。境で承認の要らない候補（承認した設計の実装など）を選び、無ければ同じ条件で止まり直す（#2913 の決定 6）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
-    if q.get("kind") in ("stall", "helper", "spawn", "observe") or not q.get("lane"):
-        return next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None), []
+    chosen = next((q["commands"][c] for c in choice or [] if (q.get("commands") or {}).get(c)), None)
+    if q.get("kind") in ("stall", "helper", "spawn"):
+        return chosen, []  # commands を持つのは起動の印の無い古い記録の問いだけ（オーガナイザーが打つ）
+    if q.get("kind") == "observe" or not q.get("lane"):
+        return chosen, []
     lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
-    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane)]
+    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
     for lane in held:
         ph.place_mark(main, name, lane, "answered")
-    return _restart_lines([lane for lane in lanes if lane not in held]), held
+    rest = [lane for lane in lanes if lane not in held]
+    return (_restart_lines(rest) if rest and legacy_launch(main, name) else None), held
+
+
+def _restart_lines(lanes: list[str]) -> str | None:
+    import parallel_run as pr_run
+
+    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+
+
+def legacy_launch(main: Path, name: str) -> bool:
+    """起動の印（`parallel-launch`）の無い古い記録か。古い記録は起動と再起動をオーガナイザーが打つ（#2936 の前の道）。"""
+    import durable
+
+    try:
+        got = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main))
+    except durable.DurableError:
+        return False
+    return (got or {}).get("launching") is False
 
 
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:
@@ -176,13 +192,17 @@ def merge_design(main: Path, q: dict, name: str | None = None) -> dict | None:
 def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[dict], **kw) -> tuple[str, dict]:
     """依頼 `q` へ答えを送る。設計の承認なら、承認した設計 PR をマージしてから送る（成否によらず送る。#2507）。
     返すのは (要約へ足す 1 文, 出力へ足す `merge`（`merge_note`）と `after`)。`after` は今の一覧 `items` から、今の答えと、
-    前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）。"""
+    前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）に、`wait` と同じ業務時間外の振り分け
+    （`parallel_defer.route`）を通したもの。業務時間外は溜めた `gate1`・`ask` を `after` へ出さず、`deferred` に件数を載せる（#2913）。"""
+    import parallel_defer as pdf
+
     earlier = sent_answers(main, name, items)
     merge = merge_design(main, q, name) if result == "approved" else None
     pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)
-    return tail, {**extra, "after": after_items(items, q, earlier)}
+    after, kept = pdf.route(main, name, after_items(items, q, earlier), pdf.hours_of(main))
+    return tail, {**extra, **kept, "after": after}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:

@@ -344,9 +344,9 @@ def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
 
 
 def chain(steps) -> list[str]:
-    """merge から `next` をたどった id の並び（end まで）。"""
+    """ready から `next` をたどった id の並び（end まで）。"""
     by = {s["id"]: s for s in steps}
-    out, cur = [], "merge"
+    out, cur = [], "ready"
     while cur in by and cur not in out:
         out.append(cur)
         cur = by[cur].get("next")
@@ -365,34 +365,34 @@ DEPTH_TAIL = [
     "review",
     "review-release",
 ]
+MERGE_TAIL = ["merge-gate", "merge", "close"]  # マージの後は課題を閉じる close だけ（#2914 の I3・I8）
 
 
 @pytest.mark.parametrize(
     "rows, want",
     [
-        ([STG, PRD], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
-        ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
+        ([STG, PRD], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
+        ([], ["ready", "deep-due", "retro"]),
+        ([STG], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
     ],
     ids=["record", "no-delivery", "queue-record"],
 )
-def test_close_comes_after_the_retro_and_before_the_refine(tmp_path, rows, want):
-    """#2228 の受け入れ条件 5・6（I6）: next のつながりで リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。
-    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を振り返りとして渡す。"""
+def test_close_comes_after_the_merge_and_the_refine(tmp_path, rows, want):
+    """#2228 の I6・#2914 の決定 1・4: next のつながりで リリース後テスト → 起動の判定 → 振り返り → 棚卸し → マージ → 課題を閉じる。
+    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を同じプランの進捗記録から選ぶ。"""
     steps = close_steps(tmp_path, rows)
     got = chain(steps)
-    assert got[: got.index("refine") + 1][-len(want) :] == want and got[0] == "merge"
-    assert got[got.index("refine") :] == DEPTH_TAIL  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
+    assert got == [*want, *DEPTH_TAIL, *MERGE_TAIL]  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
     by = {s["id"]: s for s in steps}
-    assert "--final-stage 振り返り" in by["close"]["cmd"]
+    assert "--final-stage-from {state_dir}/progress.jsonl" in by["close"]["cmd"] and by["close"]["next"] == "end"
     for sid in ("retro", "release-verify"):
         if sid in by:
             assert "課題は閉じない" in by[sid]["prompt"]
 
 
 @pytest.mark.parametrize("mode", ["light", "operation", "documentation", "legacy-refactor"])
-def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
-    """#2228 の受け入れ条件 6: どのモードで組んでも close は振り返りの後、棚卸しの前にある。"""
+def test_close_comes_after_the_merge_in_every_mode(tmp_path, mode):
+    """#2228 の受け入れ条件 6・#2914 の I3: どのモードで組んでも close は確定仕様化の Pull Request のマージの後にある。"""
     repo = make_repo(tmp_path, [])
     out = tmp_path / "c"
     args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--mode", mode]
@@ -401,4 +401,4 @@ def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
     assert p.returncode == 0, p.stdout + p.stderr
     close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
     got = chain(close["steps"])
-    assert got[got.index("refine") - 2 :] == ["retro", "close", *DEPTH_TAIL]
+    assert got[got.index("refine") - 2 :] == ["deep-due", "retro", *DEPTH_TAIL, *MERGE_TAIL]

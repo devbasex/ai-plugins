@@ -6,6 +6,7 @@
     "options": [
       "--dry-run",
       "--final-stage",
+      "--final-stage-from",
       "--issues",
       "--label",
       "--prs",

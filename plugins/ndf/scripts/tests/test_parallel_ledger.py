@@ -214,9 +214,9 @@ def test_a_request_written_before_the_opened_row_can_be_sent_again(tmp_path):
     assert plg.ledger_report(tmp_path, "p1", [("la", _req(1)["id"])]).get("orphans") is None
 
 
-@pytest.mark.parametrize("kind", ["timeout", "running"])
+@pytest.mark.parametrize("kind", ["timeout"])
 def test_a_wait_without_change_still_reports_the_orphans(tmp_path, monkeypatch, kind):
-    """変化の無い wait（上限・running）の応答にも orphans を載せ、送り直す id を利用者へ届ける。"""
+    """変化の無い wait（上限）の応答にも orphans を載せ、送り直す id を利用者へ届ける。"""
     import durable
     import parallel_cli as pc
     import parallel_lane as pl
@@ -226,7 +226,7 @@ def test_a_wait_without_change_still_reports_the_orphans(tmp_path, monkeypatch, 
         def __init__(self, k, v):
             self.kind, self.value = k, v
 
-    got = Got("timeout", None) if kind == "timeout" else Got("event", {"key": "pause", "action": "running", "seq": 4})
+    got = Got(kind, None)
     monkeypatch.setattr(pl, "record_exists", lambda *_: True)
     monkeypatch.setattr(prt, "waiting_requests", lambda *_: [("la", "la-r9")])
     monkeypatch.setattr(durable, "wait_from", lambda *a, **k: got)

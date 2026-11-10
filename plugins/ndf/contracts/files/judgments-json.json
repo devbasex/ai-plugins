@@ -1,0 +1,12 @@
+{
+  "name": "judgments-json",
+  "pattern": "judgments.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": [
+    "plugins/ndf/skills/development-workflow/references/loop.md"
+  ],
+  "writers": [
+    "plugins/ndf/scripts/mode-materials.py:write_draft"
+  ]
+}

@@ -12,7 +12,8 @@ LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.
 | `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
 | `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>] [--reason <再起動の理由>]` | ndf-next の囲みを出し、判定「再起動」を記録する（`lib/context_decisions.py`。#2262）。`--replace` なら引継ぎ文書のその節も置き換える |
-| `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`。中身は `lib/sprint_loop_cli.py` と `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
+| `get <sprint.json> [--field <JSON Pointer>]...` | 読むだけ（#2909）。計画ごとの状態・PR・次の欄を `items` に、最初の終わっていない計画の `<名>: <次の欄>` を `next` に返す。`--field` は状態ファイルを根にした値だけを `metrics` に返す（中身は `lib/state_get.py`）。0 = 読めた / 2 = 読めない / 3 = 無い |
+| `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `get` / `list`。`get` は読むだけで、次の操作を `next` に、`--field` の値を `metrics` に返す（#2909）。中身は `lib/sprint_loop_cli.py` と `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
@@ -41,21 +42,19 @@ deps.require("md", "mdtable", "schema", "locks", "durable", "versions", "procs",
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
-import gate_answer, jsonio, legacy_values, limits, locks  # noqa: E402,E401
+import gate_answer, jsonio, legacy_values, limits, locks, mdtable, step_result  # noqa: E402,E401
 from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
-import mdtable  # noqa: E402
-import step_result  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 import gate_rejections as gr  # noqa: E402
 import sprint_mvv  # noqa: E402
-import sprint_loop_cli  # noqa: E402
+import sprint_loop_cli, state_get  # noqa: E402,E401  state_get は get（読むだけの取り出し。#2909）
 import context_decisions  # noqa: E402  ndf-next を出すときに判定「再起動」を記録する（#2262）
 
 TOOL = "sprint-state"
 SECTION_DEFAULT = PROGRESS_SECTION
 NEXT_SECTION_DEFAULT = COMMAND_SECTION
-NOT_DONE = "まだ"
+NOT_DONE = state_get.NOT_DONE
 PACES = ("normal", "fast", "auto")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 
@@ -253,7 +252,7 @@ def cmd_update(a) -> dict:
     jsonio.write_atomic(a.sprint, m, indent=1)
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
-    stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
+    stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, state_get.DONE))
     summary = f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}"
     return outcome("ok", summary, rows, {"plans": len(rows), "finished": finished, "stopped": stopped})
 
@@ -358,7 +357,7 @@ def fmt_cost(v) -> str:
 
 def state_text(r: dict) -> str:
     s = r["result"]
-    if r["result"] not in (NOT_DONE, "完了") and r.get("exit") not in (None, 0):
+    if r["result"] not in (NOT_DONE, state_get.DONE) and r.get("exit") not in (None, 0):
         s += f"（exit={r['exit']}）"
     if r.get("reason"):
         s += f"。理由: {r['reason']}"
@@ -513,9 +512,8 @@ def cmd_next(a) -> dict | None:
     out = text[:body_start] + "\n" + block + tail + text[body_end:]
     if out != text:
         Path(a.doc).write_text(out)
-    return outcome(
-        "ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block], {"heading": heading, "changed": out != text}
-    )
+    summary = f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた"
+    return outcome("ok", summary, [block], {"heading": heading, "changed": out != text})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -570,6 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("sprint")
     s.add_argument("--json", action="store_true")
 
+    state_get.add_get_parser(sub)
     s = sub.add_parser("next")
     s.add_argument("sprint")
     s.add_argument("--doc")
@@ -586,6 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     a = sprint_loop_cli.parse_args(build_parser(), sys.argv[1:] if argv is None else list(argv))
     cmds = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}
+    cmds["get"] = state_get.cmd_get
     fn = cmds.get(a.cmd) or a.loop_run
     try:
         out = fn(a)

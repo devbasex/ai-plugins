@@ -367,7 +367,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 | 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（`hook.py` の token の guard）。試行方式（`context-window.md` の「再起動の方針」）では、カットポイントで `ndf-next` を出さずに次の工程を起動して hook に判定させ、独立性・手動のときだけ自分で切る |
 | 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。情報文字列が `ndf-next` のコードブロック 1 つで出す |
 | 3 層で出す時点 | conductor がフェーズレポート（`## フェーズの報告`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 関門` なら、承認ゲートの承認と取り込みの後 |
-| 出す前に行うこと | 書き始める前に `context-policy.py record --event 引継ぎ開始` を打ち、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
+| 出す前に行うこと | 書き始める前に `context-policy.py record --event 引継ぎ開始` を打ち（ラッパーの下で hook に止められたときは hook が打ったので打たない）、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
 
 出す時点・アナウンス・新しい会話が状態を戻す手順は、`context-window.md` の「新しい会話で戻す」にある。
 

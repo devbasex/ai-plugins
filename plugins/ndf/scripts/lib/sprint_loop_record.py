@@ -43,6 +43,7 @@ import limits
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
+from sprint_loop_stop import STOP_BY, STOP_FILE, read_stop_order  # noqa: F401 -- 正本として再び公開する
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -56,7 +57,6 @@ HANDOFF_DIR = Path(".ndf") / "handoff"
 NEXT_STEP_SECTION = handoff_doc.NEXT_STEP_SECTION  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
-STOP_FILE = "stop"
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]*$")
 VERSION = 1
 
@@ -170,6 +170,18 @@ class Env:
 
 
 # ---------------------------------------------------------------- 記録
+
+
+@dataclass
+class ResumeContext:
+    """止まったループの再開 1 回分の値。rec・before・stop・lap は記録の dict そのものを指す（写さない・保存しない）。"""
+
+    env: Env
+    rec: dict
+    before: dict
+    stop: dict
+    lap: dict | None
+    nxt: str
 
 
 def loop_dir(env: Env, name: str) -> Path:
@@ -328,12 +340,13 @@ def mvv_change_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
-def boundary_stop(env: Env, rec: dict) -> dict | None:
-    """ループの 1 回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
+def boundary_stop(env: Env, rec: dict, hold: bool = True) -> dict | None:
+    """ループの 1 回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。
+    hold が偽なら答え待ちの停止を見ない（選定の前に別に読む。#2913）。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
-        return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
-    if stop := mvv_change_stop(env, rec) or parallel_hold.loop_stop(env.main_dir()):
+        return {"condition": "user_stop", "values": read_stop_order(stop_file)}
+    if stop := mvv_change_stop(env, rec) or (parallel_hold.loop_stop(env.main_dir()) if hold else None):
         return stop
     key, count = failure_streak(rec)
     if key is not None and count >= rec.get("same_failure", 2):
@@ -345,7 +358,8 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     return None
 
 
-IMMEDIATE_STOPS = ("user_stop", "mvv_changed", "answer_hold")  # 保留したループの 1 回があっても待たずに止まる条件（#2436 の境の 1）
+# 保留したループの 1 回があっても待たずに止まる条件（#2436 の境の 1）。答え待ちの停止は入れない: 答えの届いた残りを流してから選定で決める（#2913 の決定 5）
+IMMEDIATE_STOPS = ("user_stop", "mvv_changed")
 
 
 def waiting_only(rec: dict, why: str) -> dict:
