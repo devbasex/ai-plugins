@@ -1,5 +1,7 @@
 # 実装の上限・無進捗の許容時間とリファクタリングの想定最大時間: `supervise.py new` のプランの `impl` と `refactor` の時間の枠を、`.ndf/supervise.json` か引数の 1 か所で決める
 
+> **#2457 で置き換えた決まり:** この文書のうち、`refactor` の `timeout` を `with_margin(M × 60)` とする決まり（決定 3）は今は働かない。今は `with_margin(M × 60 ×（1 + 安全網の倍率）)` で、安全網の倍率は `limits.json` の `cross-refactoring.safety-net` の `factor`（既定 2）である。駆動の終了コード 10（安全網で止めた）はプランの実行が承認ゲートとして扱う。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+
 ## 概要
 
 **`supervise.py new` が書くプランの `impl` の `timeout`（実装の上限・秒）・`stall`（無進捗の許容時間・秒）と、`refactor` の cross-refactoring へ渡す想定最大時間
