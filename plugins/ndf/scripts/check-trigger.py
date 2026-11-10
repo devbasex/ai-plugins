@@ -453,11 +453,11 @@ def scope_dirs(root: Path, data: dict) -> list[str]:
     deps.require("pathmatch")
     import diff_kinds
 
-    kinds = diff_kinds.classify_root(root, files := list(data.get("files") or []))
+    kinds = diff_kinds.classify_root(root, list(data.get("files") or []))
     decl = load_decl(root)
     escaped = set(data.get("escape_areas") or {})
     groups: list[list[str]] = [[], [], []]
-    for f in files if kinds.unknown else kinds.code:
+    for f in kinds.code:
         d = str(Path(f).parent)
         if d == ".":
             continue
