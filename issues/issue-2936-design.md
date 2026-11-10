@@ -219,7 +219,8 @@ classDiagram
 | 1 | `error` | 耐久ワークフローが失われた・ERROR で終わった（今のまま） |
 | 3 | 無し | 上限の秒に達した。`seq` と `next` の `--after` は、読み飛ばした最後のイベントの `seq` |
 
-- 返さなくなるもの: `notice`・`release`・`confirmed`・`held`・`running`、`metrics.spawn`・`metrics.wake`・`metrics.release`・`metrics.attach`・`metrics.lanes`（承認待ちのレーン）
+- 返さなくなる `action`: `notice`・`release`・`confirmed`・`held`・`running`
+- 返さなくなる `metrics` のキー: `spawn`・`wake`・`release`・`attach`・`lanes`（承認待ちのレーン）
 - 承認待ちのレーンへ人が入る 1 行は `parallel.py status` の行の `attach` から引く
 - `versions`・`unknown`・`broken`・`orphans` は今のまま、どの返り値にも載る
 
@@ -245,7 +246,9 @@ classDiagram
 
 ## 処理の流れ
 
-リリース 1 回の流れ（受け入れ条件 5 の合成した計画が通る道）。オーガナイザーが起きるのは問いと終わりの 2 回である。
+### リリース 1 回の流れ
+
+受け入れ条件 5 の合成した計画が通る道である。オーガナイザーが起きるのは問いと終わりの 2 回である。
 
 ```mermaid
 sequenceDiagram
@@ -267,7 +270,9 @@ sequenceDiagram
     WF-->>Org: wait が finished を返す（E12）
 ```
 
-起動の耐久ステップの中の流れ。目的ごとに 1 回呼ばれ、結果を返す。
+### 起動の耐久ステップの中の流れ
+
+起動の耐久ステップは、目的ごとに 1 回呼ばれ、結果を返す。
 
 ```mermaid
 stateDiagram-v2
@@ -284,10 +289,12 @@ stateDiagram-v2
     立ち上がらなかった --> [*]
 ```
 
-- 立ち上がったと読む条件: 一覧の名前の行の `state` が `running` か `awaiting_approval`、または `state` が `stopped` でも `at` が打った時刻より後（短い作業を終えて止まったもの）
+- 立ち上がったと読む条件: 一覧の名前の行の `state` が `running` か `awaiting_approval` である。`state` が `stopped` でも、`at` が打った時刻より後なら立ち上がったと読む（短い作業を終えて止まったもの）
 - 確かめる間隔は 5 秒、上限は `NDF_PARALLEL_LAUNCH_SECONDS`（既定 120 秒）。一覧が失敗した回は数えずに次の間隔へ進む
 - 「立ち上がらなかった」を受けた起動の割り振りは、区分 `spawn` の問い（「起こし直す」「止める」）を立てる。「起こし直す」は同じ目的をもう一度流し、再試行の 1 回も持つ
 - 耐久ワークフローの記録の打ち直しで同じ道を通すため、起動の割り振りを通る分岐は `durable.patched("parallel-launch")` の後ろに置く。印の無い古い記録の打ち直しは今の道（`pause` のイベントだけを立てる）を通る
+
+### 耐久ワークフローの 1 周の順序
 
 耐久ワークフローの 1 周の順序は次のとおりである（今の `parallel_workflow` の順に、5 を足す）。台帳を観測より先に読むため、一時レーンが依頼を送ってから止まったときは、止まった観測より先に依頼が問いの一覧へ入る。
 
@@ -350,7 +357,7 @@ stateDiagram-v2
 
 ### 決定 6: 耐久ワークフローが立てた問いの答え（「起こし直す」「続きから起こし直す」「止める」）を、`commands` の 1 行にせず耐久ワークフローが当てる
 
-区分 `stall`・`helper`・`spawn` の答えの 1 行を残すと、`answer` の `metrics.next` に `relay.py restart` と `relay.py spawn` が残る。「起こし直す」は同じ目的を起動の割り振りへ流し直し、「止める」は今の `step_stop_lanes` で止める。区分 `observe` の「ラッパーの環境を作り直す」（`relay.py status`）はレーンの起動ではないため、今の `commands` の 1 行を残す。
+区分 `stall`・`helper`・`spawn` の答えの 1 行を残すと、`relay.py restart` と `relay.py spawn` が残る。残る先は `answer` の `metrics.next` である。「起こし直す」は同じ目的を起動の割り振りへ流し直し、「止める」は今の `step_stop_lanes` で止める。区分 `observe` の「ラッパーの環境を作り直す」（`relay.py status`）はレーンの起動ではないため、今の `commands` の 1 行を残す。
 
 根拠: Value 5 / Value 7（MVV 版 6）
 
