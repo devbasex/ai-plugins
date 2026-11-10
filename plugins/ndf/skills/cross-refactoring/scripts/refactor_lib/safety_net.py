@@ -1,6 +1,6 @@
 """安全網（#2457 決定 5・不変条件 I8）。
 
-コーディングの CLI（テストの追加・実装・修正・最終ゲート修正・フレーキーの直し）の起動ごとの秒（監視の開始から終わり）を
+コーディングの CLI（テストの追加・実装・修正・最終ゲート修正）の起動ごとの秒（監視の開始から終わり）を
 累計し、上限に届いたら項目を取り消さずに止める。提案・計画・判定・テストの実行・CI の待ちと止まっていた時間は数えない。
 上限は `--safety-net-minutes`（無ければ実効の予算 × `limits.json` の `cross-refactoring.safety-net` の倍率）である。
 """
@@ -14,7 +14,7 @@ import statefile
 
 from . import budget
 
-CODING_PHASES = ("add-tests", "implement", "fix", "final-fix", "flaky-fix")
+CODING_PHASES = ("add-tests", "implement", "fix", "final-fix")
 
 
 def record(state: dict[str, Any]) -> dict[str, Any]:

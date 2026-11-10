@@ -16,7 +16,7 @@ from drive_pause import Stop
 MONITOR_STOPPED = (2, 5)
 FIX_PHASES = ("fix", "final-fix")  # 修正の工程
 LOOP_LIMIT = 100  # 検証と修正・最終ゲートの繰り返しの上限（暴走の止め）。修正を続けるかは verify の前進の判定が決める
-CODING_PHASES = ("add-tests", "implement", "fix", "final-fix", "flaky-fix")  # 安全網に数える手順（#2457 決定 5）
+CODING_PHASES = ("add-tests", "implement", "fix", "final-fix")  # 安全網に数える手順（#2457 決定 5）
 
 
 class Halt(Stop):
