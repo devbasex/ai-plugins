@@ -268,3 +268,86 @@ def test_a_lint_template_without_paths_keeps_no_lint_whole(tmp_path):
     code, out = _run(root, "whole", "--template", "echo {paths}", "--test-kind", "lint")
     assert ts.NO_LINT_WHOLE in _notes(out) and ts.WHOLE_FROM_TEMPLATE not in _notes(out)
     assert not any(i.get("command") == "echo ." for i in out["items"])
+
+
+# ---------- #2925: 差分の中身で全体テストを選ぶ ----------
+
+
+def _branch_then_commit(root, files):
+    """今の HEAD を起点のブランチ `base` にし、`files` を足したコミットを積む。"""
+    import subprocess
+
+    subprocess.run(["git", "-C", str(root), "branch", "-f", "base"], check=True)
+    for rel, body in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A", "--", *files], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"], check=True)
+
+
+def _diff_kinds_item(out):
+    return next(i["diff_kinds"] for i in out["items"] if "diff_kinds" in i)
+
+
+def test_docs_only_diff_skips_the_test_suite_and_says_why(tmp_path):
+    """#2925 AC2 — 文書だけの差分では、テストの種別の全体テストを起動せず、飛ばした理由を出す。"""
+    root = _repo(tmp_path)
+    _branch_then_commit(root, {"docs/a.md": "# a\n", "README.md": "# r\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code == 0, out
+    assert out["summary"].startswith("全体テストを飛ばした（差分が文書のファイルだけ: 2 ファイル）")
+    assert _diff_kinds_item(out)["docs"] == ["README.md", "docs/a.md"]
+
+
+def test_docs_only_diff_still_runs_the_lint_suite(tmp_path):
+    """#2925 AC13 — 文書だけの差分でも、静的解析の全体テストは今と同じに走る。"""
+    decl = {"test": {"suites": [{"name": "lint", "runner": "sh", "kind": "lint", "command": "false"}]}}
+    root = _repo(tmp_path, decl)
+    _branch_then_commit(root, {"docs/a.md": "# a\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert code == 1, out
+
+
+def test_mixed_diff_runs_the_whole_tests(tmp_path):
+    """#2925 AC3 — コードと文書が混ざった差分では全体テストが今と同じに走る。"""
+    root = _repo(tmp_path)
+    _branch_then_commit(root, {"docs/a.md": "# a\n", "src/a.py": "x = 1\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code != 0 and "全体テスト" in out["summary"] and "飛ばした" not in out["summary"]
+
+
+def _tested_decl():
+    return {
+        "test": {"suites": [{"name": "unit", "runner": "sh", "kind": "test", "command": "false", "scope_command": "sh {paths}"}]},
+        "docs": {"tested": [{"paths": ["docs/glossary.md"], "tests": ["t/test_g.sh"]}]},
+    }
+
+
+@pytest.mark.parametrize("body,want", [("exit 0\n", 0), ("exit 1\n", 1)])
+def test_tested_docs_run_only_their_tests_and_failures_block(tmp_path, body, want):
+    """#2925 AC4 — テストが読む文書だけの差分では、宣言の対応のテストだけを範囲の雛形で走らせ、落ちたら 0 で返さない。"""
+    import subprocess
+
+    root = _repo(tmp_path, _tested_decl())
+    (root / "t").mkdir()
+    (root / "t" / "test_g.sh").write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/glossary.md": "# g\n", "docs/other.md": "# o\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert (code == 0) == (want == 0), out
+    assert out["summary"].startswith("文書を読むテスト（全体テストの代わり） 1 本")
+    assert _diff_kinds_item(out)["tests"] == ["t/test_g.sh"]
+
+
+def test_unreadable_docs_decl_runs_the_whole_tests(tmp_path):
+    """#2925 AC5 — 分け方の宣言が読めなければ、文書だけの差分でも全体テストを走らせる。"""
+    import subprocess
+
+    root = _repo(tmp_path)
+    (root / ".ndf" / "project.json").write_text('{"version": 1, "docs": {"files": "x"}}', encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/a.md": "# a\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code != 0 and _diff_kinds_item(out)["unknown"]

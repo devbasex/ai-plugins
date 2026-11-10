@@ -68,7 +68,7 @@ def _covered(item: str, others: list[str]) -> bool:
 
 def code_files(files: list[str], root: Path) -> list[str]:
     """文書のファイルを除いた差分。分け方の宣言が読めなければ全部を返す（文書だけと決めない）。"""
-    kinds = diff_kinds.classify_at(root, files)
+    kinds = diff_kinds.classify_root(root, files)
     return files if kinds.unknown else kinds.code
 
 

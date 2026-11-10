@@ -17,13 +17,14 @@
 - 走らせるテスト（`tests`）は、差分にあるテストが読む文書に対応するテストの和である（I4）
 - 差分の一覧が無い・宣言が読めないときは、全部をコードとして扱い `unknown` に理由を書く（I2）
 
-`load` は宣言を読み、`classify` はファイルも git も読まない純粋な関数である。使う側は
-`deps.require("pathmatch")` を先に呼ぶ。
+`load_docs_decl` は宣言を読み、`classify_files` はファイルも git も読まない純粋な関数である。差分の一覧は呼び出し元が
+REST か `git_changed` で取る。使う側は `deps.require("pathmatch")` を先に呼ぶ。
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -76,7 +77,7 @@ def _patterns(value, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _glossary_files(root: Path) -> tuple[str, ...]:
+def _glossary_decl_files(root: Path) -> tuple[str, ...]:
     """用語集の設定の `source` と `document`。設定が無い・読めない・キーが無ければ空。"""
     try:
         data = json.loads((root / GLOSSARY_DECL).read_text(encoding="utf-8"))
@@ -87,7 +88,7 @@ def _glossary_files(root: Path) -> tuple[str, ...]:
     return tuple(v for v in (data.get("source"), data.get("document")) if isinstance(v, str) and v.strip())
 
 
-def parse(docs, root: Path) -> DocsDecl:
+def parse_decl(docs, root: Path) -> DocsDecl:
     """`docs` の値（無ければ `None`）を既定で補った宣言にする。形が壊れていれば `DeclError`。
 
     `{"unknown": ...}`（解析したが決まらなかった）は宣言が無いのと同じに扱う。
@@ -99,7 +100,7 @@ def parse(docs, root: Path) -> DocsDecl:
     extra = set(docs) - {"files", "behavior", "tested"}
     if extra:
         raise DeclError(f"docs に知らない項目がある: {', '.join(sorted(extra))}")
-    files = _patterns(docs["files"], "docs.files") if docs.get("files") is not None else DEFAULT_FILES + _glossary_files(root)
+    files = _patterns(docs["files"], "docs.files") if docs.get("files") is not None else DEFAULT_FILES + _glossary_decl_files(root)
     behavior = _patterns(docs["behavior"], "docs.behavior") if docs.get("behavior") is not None else DEFAULT_BEHAVIOR
     rows = docs.get("tested", [])
     if not isinstance(rows, list):
@@ -112,22 +113,22 @@ def parse(docs, root: Path) -> DocsDecl:
     return DocsDecl(files, behavior, tuple(tested))
 
 
-def load(root: Path | str) -> DocsDecl:
+def load_docs_decl(root: Path | str) -> DocsDecl:
     """`<root>/.ndf/project.json` の `docs` を読む。ファイルが無ければ既定。読めなければ `DeclError`。"""
     root = Path(root)
     f = root / PROJECT_DECL
     if not f.is_file():
-        return parse(None, root)
+        return parse_decl(None, root)
     try:
         data = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise DeclError(f"{PROJECT_DECL} を読めない: {e}") from e
     if not isinstance(data, dict):
         raise DeclError(f"{PROJECT_DECL} がオブジェクトでない")
-    return parse(data.get("docs"), root)
+    return parse_decl(data.get("docs"), root)
 
 
-def classify(files: Optional[list[str]], decl: Optional[DocsDecl], unknown: str = "") -> DiffKinds:
+def classify_files(files: Optional[list[str]], decl: Optional[DocsDecl], unknown: str = "") -> DiffKinds:
     """差分のファイルを分ける。`files` か `decl` が `None`、または `unknown` を渡したら全部をコードにする（I2）。"""
     if files is None or decl is None or unknown:
         reason = unknown or ("差分のファイルの一覧が無い" if files is None else "文書の分け方の宣言が無い")
@@ -148,10 +149,16 @@ def classify(files: Optional[list[str]], decl: Optional[DocsDecl], unknown: str 
     return out
 
 
-def classify_at(root: Path | str, files: Optional[list[str]]) -> DiffKinds:
+def classify_root(root: Path | str, files: Optional[list[str]]) -> DiffKinds:
     """`root` の宣言を読んで分ける。宣言が読めなければ理由つきで全部をコードにする。"""
     try:
-        decl = load(root)
+        decl = load_docs_decl(root)
     except DeclError as e:
-        return classify(files, None, str(e))
-    return classify(files, decl)
+        return classify_files(files, None, str(e))
+    return classify_files(files, decl)
+
+
+def git_changed(root: Path | str, rev_range: str) -> Optional[list[str]]:
+    """`git diff --name-only --no-renames <rev_range>` のファイル（消したファイルを含む）。取れなければ `None`。"""
+    p = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "-z", "--no-renames", rev_range], capture_output=True, check=False)
+    return None if p.returncode != 0 else [f for f in p.stdout.decode("utf-8", "replace").split("\0") if f]

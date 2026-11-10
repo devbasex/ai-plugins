@@ -13,7 +13,6 @@ import proc
 
 from .. import paths
 from ..gitfacts import production_code_changes
-from ..paths import git_out
 
 DEFAULT_MAX_LINES = 10
 
@@ -40,7 +39,7 @@ def cmd_assess(args: argparse.Namespace) -> None:
     except proc.StepError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(UNDECIDABLE)
-    kinds = diff_kinds.classify_at(root, changed_files(str(root), args.base))
+    kinds = diff_kinds.classify_root(root, diff_kinds.git_changed(root, f"{args.base}...HEAD"))
     if kinds.docs_only():
         print("判定: 飛ばしてよい")
         print(f"理由: 差分が文書のファイルだけ（文書 {len(kinds.docs)} ファイル）")
@@ -64,9 +63,3 @@ def cmd_assess(args: argparse.Namespace) -> None:
     print("理由: " + reason)
     print(counted)
     sys.exit(verdict)
-
-
-def changed_files(work: str, base: str) -> list[str] | None:
-    """`<base>...HEAD` の差分のファイル（消したファイルを含む）。取れなければ `None`。"""
-    out = git_out(work, ["diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD"], strip=False)
-    return None if out is None else [f for f in out.split("\0") if f]

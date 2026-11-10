@@ -68,6 +68,7 @@ from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLAT
 from pace import PaceError, matches, read_pace  # noqa: E402
 from state_home import user_home  # noqa: E402
 import clock  # noqa: E402
+import deps  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 import merged_range  # noqa: E402
@@ -447,23 +448,16 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
     ), EXIT_OK
 
 
-def _code_files(root: Path, files: list[str]) -> list[str]:
-    """文書のファイル（`lib/diff_kinds.py`。#2925）を除く。分け方の宣言が読めなければ全部を返す。"""
-    import deps
-
+def scope_dirs(root: Path, data: dict) -> list[str]:
+    """検査の範囲のディレクトリ。文書のファイル（`lib/diff_kinds.py`。#2925）は入れない。宣言が読めなければ全部を入れる。"""
     deps.require("pathmatch")
     import diff_kinds
 
-    kinds = diff_kinds.classify_at(root, files)
-    return files if kinds.unknown else kinds.code
-
-
-def scope_dirs(root: Path, data: dict) -> list[str]:
-    """検査の範囲のディレクトリ。差分の文書のファイルのディレクトリは入れない。"""
+    kinds = diff_kinds.classify_root(root, files := list(data.get("files") or []))
     decl = load_decl(root)
     escaped = set(data.get("escape_areas") or {})
     groups: list[list[str]] = [[], [], []]
-    for f in _code_files(root, list(data.get("files") or [])):
+    for f in files if kinds.unknown else kinds.code:
         d = str(Path(f).parent)
         if d == ".":
             continue
