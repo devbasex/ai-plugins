@@ -61,11 +61,12 @@ NDF の次の 1 手の語へ訳してから返す。
 | I1 | すべて | 新しい副命令・選択肢を渡さない呼び出しの標準出力と終了コードは、変更の前と同じである | 既存のテストが落ちる。直すまでマージしない |
 | I2 | スプリントの状態・開発ループの記録・用語集 | 取り出しの副命令（`get`・`loop get`・`lookup`）と `--field` は、状態ファイルと用語集を書き換えない | 書き込みが起きたらテストが落ちる |
 | I3 | — | 手順の連続実行は、前の手順の結果 JSON の `status` が `ok` のときだけ次の手順を打ち、1 つの手順を 1 回の実行で 2 度打たない | 止まった手順で終わり、`process` に打った手順だけが載る |
-| I4 | — | 手順の連続実行は、NDF のプラグインの `scripts/` と `skills/*/scripts/` の外のコマンドを打たない。外のコマンドが 1 つでもあれば、何も打たずに止まる | 終了コード 2 の `stopped` で、外のコマンドを `gaps` に載せる |
+| I4 | — | 手順の連続実行は、NDF のプラグインの `scripts/` と `skills/*/scripts/` の外のコマンドを打たない。NDF のスクリプトでも、渡されたコマンドをそのまま走らせる副命令（中継の副命令。`lib/gh_parts.py body-lock`・`lib/post_queue.py retry`・`supervise.py advance` 自身）は打たない。外のコマンドか中継の副命令が 1 つでもあれば、何も打たずに止まる | 終了コード 2 の `stopped` で、該当する手順を `gaps` に載せる |
 | I5 | Issue の進行の節 | 複数の工程を 1 回で渡すと、本文の書き換えは 1 回で、すべての工程の行に印が付く | 本文を書けなければ、どの工程にも印を付けずに `stopped`（6）で返す |
 | I6 | 通過記録 | 複数の工程を 1 回で渡すと、通過記録には工程ごとに 1 件ずつ積まれる | 積めなければ今と同じく標準エラーへ `NOTE:` を残して続ける |
 | I7 | — | PR の照合の次の 1 手は、待つ・直す・マージへ進める・人へ戻すの 4 つのうち 1 つだけで、下の「PR の照合の判定」の順で決まる | テストが落ちる |
 | I8 | — | ターンの型を数える手段は、会話の本文・会話の ID・コマンドの文字列を出力しない | テストが落ちる |
+| I9 | — | 手順の連続実行の `--step` に `supervise.py queue`・`supervise.py run` があれば、文脈が上限を超えた conductor の工程の起動を止める既存の Bash の hook が、`advance` の呼び出しを工程の起動として判定する。判定は手順を 1 つも打つ前に行う | hook が `advance` の呼び出しを拒否し、どの手順も打たれない |
 
 ### ドメインイベント
 
@@ -157,7 +158,8 @@ NDF の次の 1 手の語へ訳してから返す。
 | `lib/gh_pr_status.py`（新設） | `gh_pr_info` のメタとチェックを使い、未解決のスレッド・マージの状態・PR が指す Issue を 1 回の GraphQL で読み、次の 1 手を決める |
 | `lib/gh_graphql.py`（変更） | 未解決のスレッド・`mergeStateStatus`・`closingIssuesReferences`（番号と開閉）を 1 回で読む照会を足す。今の照会は変えない |
 | `supervise.py`（変更） | 副命令 `advance` を足す（F5）。中身は `supervise_lib/advance.py` |
-| `supervise_lib/advance.py`（新設） | 手順の並びを検査し（I4）、1 つずつ打ち、`step_read` で結果を読み、`ok` の間だけ続ける |
+| `supervise_lib/advance.py`（新設） | 手順の並びを検査し（I4）、1 つずつ打ち、`step_read` で結果を読み、`ok` の間だけ続ける。中継の副命令の一覧を定数で持つ |
+| `hook_lib/shell_checks.py`（変更） | 工程の起動の判定（`starts_plan`）で、`supervise.py advance` の `--step` の値を `shlex` で語に割り、`supervise.py queue`・`run` があれば起動と判定する（I9）。`token_guard.py` の判定と記録は変えない |
 | `progress-record.sh`（変更） | 2 つ目以降の位置引数を工程名として受ける（F6）。本文の書き換えは 1 回、通過記録は工程ごと |
 | `projects-sync.sh`（変更） | `stage` に工程名を複数受け、`progress-record.sh` へ 1 回で渡す。ボードの値は最後の工程にする |
 | `experimental/turn-kinds.py`（新設） | transcript を期間で読み、ターンの型と候補ごとの件数と割合を結果 JSON で返す（F7） |
@@ -264,7 +266,7 @@ PR が指す Issue の開閉は判定に使わず、`items` と `metrics` に載
 | 項目 | 書くこと |
 | --- | --- |
 | 名前 | `supervise.py advance --step "<コマンド>"... [--from <番号>]` |
-| 入力 | `--step`（1 つ以上・順に打つ）。文字列を `shlex` で語に割り、シェルを通さずに打つ。先頭は NDF のスクリプトのパスか、`python3`・`bash` の後にそのパス（I4）。`--from` は 1 から数えた番号で、それより前の手順を打たない |
+| 入力 | `--step`（1 つ以上・順に打つ）。文字列を `shlex` で語に割り、シェルを通さずに打つ。先頭は NDF のスクリプトのパスか、`python3`・`bash` の後にそのパス。中継の副命令は受けない（I4）。`--from` は 1 から数えた番号で、それより前の手順を打たない |
 | 出力 | `process`: 打った手順ごとに `{run: <コマンド>, result: <子の summary>, status: <子の status>}`、`--from` で飛ばした手順は `{run, result: "飛ばした（--from）"}`。`metrics`: `{steps, ran, stopped_at}`。`next`: 止まったときは子の `next`（無ければ子の `summary`）と、続きを打つ `supervise.py advance ...` の `--from`。`gate` で止まったときは止まった番号 + 1（その手順は判断を返して終わっている）、`stopped` で止まったときは止まった番号（その手順を打ち直す） |
 | 終了コード | すべて `ok` なら 0。子が `gate` なら子の終了コード（10〜29）で `gate`。子が `stopped` なら 1（子の終了コードは `process` の要素の `code` に残す）で `stopped`、`gaps` に子の理由。子が結果 JSON を返さなければ 1 で `stopped`。外のコマンドがあれば何も打たずに 2 |
 | 互換性 | 新しい副命令のため既存の呼び出しは変わらない |
@@ -352,7 +354,7 @@ graph TD
 | --- | --- | --- |
 | 性能・拡張性 | PR の照合の 1 回の API の回数が、`gh pr view`・`gh pr checks`・未解決のスレッドの取得を別々に打つときの回数以下 | メタは `gh pr view` 1 回（`pr-info` と同じ）、チェックは REST のチェックの実行（100 件ごとに 1 回）、スレッド・マージの状態・PR が閉じる Issue の開閉は GraphQL 1 回にまとめる。別々に打つと 3 回に加えて Issue ごとに 1 回掛かる。`--issue` で足した Issue だけ REST で 1 回ずつ読む。上限のときは `gh_quota` の規則で REST へ退避する |
 | 運用・保守性 | 新しい出力の形は結果 JSON の正本に従い、足した副命令はスクリプトの冒頭と Skill の本文から辿れる | 出力はすべて `step_result.result` と `emit` で組む。各スクリプトの docstring の副命令の表に行を足し、`lib/README.md` の部品の表に `json_pick`・`state_get`・`gh_pr_status` の行を足す。エントリポイントの契約（`plugins/ndf/contracts/entrypoints/`）を `check-ndf-contracts.py --render` で作り直す |
-| セキュリティ | 数える手段は会話の本文・会話の ID をリポジトリへ書き出さない | `turn-kinds.py` は件数と割合だけを標準出力へ出し、ファイルへ書かない。会話の ID・コマンドの文字列を結果に入れない（I8）。手順の連続実行は NDF のスクリプトだけを打ち、シェルを通さない（I4）。任意のコマンドを打てる形にすると、Bash の hook の検査を通らずにコマンドが打たれる |
+| セキュリティ | 数える手段は会話の本文・会話の ID をリポジトリへ書き出さない | `turn-kinds.py` は件数と割合だけを標準出力へ出し、ファイルへ書かない。会話の ID・コマンドの文字列を結果に入れない（I8）。手順の連続実行は NDF のスクリプトだけを打ち、シェルを通さず、中継の副命令を打たない（I4）。任意のコマンドを打てる形にすると、Bash の hook の検査を通らずに削除や強制 push のコマンドが打たれる。工程の起動を含む `advance` は、文脈量の hook が起動として判定する（I9） |
 
 ## 決定の記録
 
@@ -377,11 +379,12 @@ graph TD
 | I1 | 受け入れ条件 7 と同じ | — |
 | I2 | `get`・`loop get`・`lookup` の前後で状態ファイルと用語集の内容と更新時刻が変わらない | 読み取りの中で状態ファイルを書き直すよう壊す |
 | I3 | 受け入れ条件 3 と同じ。加えて `--from 2` で 1 つ目が打たれない | `--from` を無視するよう壊す |
-| I4 | NDF のスクリプトの外のコマンド（`git status`）を 1 つ混ぜると、どの手順も打たれずに 2 で止まる | 検査を打つ直前に移すよう壊す（前の手順が打たれる） |
+| I4 | NDF のスクリプトの外のコマンド（`git status`）か中継の副命令（`gh_parts.py body-lock --issue 1 -- git status`）を 1 つ混ぜると、どの手順も打たれずに 2 で止まる。NDF のスクリプトの `argparse.REMAINDER` を持つ副命令がすべて中継の副命令の一覧に載る | 検査を打つ直前に移すよう壊す（前の手順が打たれる）。一覧から `post_queue.py retry` を外す |
 | I5 | 受け入れ条件 4 と同じ。加えて工程表に無い名を混ぜると本文も通過記録も書かれない | 名前の検査を記録の後に移す |
 | I6 | 受け入れ条件 4 と同じ | — |
 | I7 | 受け入れ条件 2 と同じ | — |
 | I8 | 合成した transcript に入れた会話の ID とコマンドの文字列が、標準出力に現れない | 型ごとに例のコマンドを出すよう壊す |
+| I9 | 文脈が上限を超えた conductor の入力で、`advance --step "supervise.py queue ..."` が拒否され、`advance --step "sprint-state.py get ..."` は拒否されない | `--step` の値を読まないよう壊す |
 
 ### 基準の割合
 
@@ -424,7 +427,7 @@ grep -rlE 'projects-sync\.sh|progress-record\.sh' plugins/ndf/skills plugins/ndf
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2909 | 実装する | — | `plugins/ndf/scripts/lib/json_pick.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/state_get.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/scripts/lib/gh_pr_status.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/advance.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/experimental/turn-kinds.py`、`plugins/ndf/scripts/experimental/turn-kinds.json`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/projects-tracking.md`、`plugins/ndf/skills/development-workflow/references/stage-completeness.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/interrupt-resume.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/scripts/data/handoff-template.md`、`docs/ndf-experiments.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`issues/issue-2909-design.md`、`issues/issue-2909-design-decisions.md` |
+| #2909 | 実装する | — | `plugins/ndf/scripts/lib/json_pick.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/state_get.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/scripts/lib/gh_pr_status.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/advance.py`、`plugins/ndf/scripts/hook_lib/shell_checks.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/experimental/turn-kinds.py`、`plugins/ndf/scripts/experimental/turn-kinds.json`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/`、`plugins/ndf/contracts/`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/projects-tracking.md`、`plugins/ndf/skills/development-workflow/references/stage-completeness.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/interrupt-resume.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/scripts/data/handoff-template.md`、`docs/ndf-experiments.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`issues/issue-2909-design.md`、`issues/issue-2909-design-decisions.md` |
 
 ## 未確認のまま残ること
 
