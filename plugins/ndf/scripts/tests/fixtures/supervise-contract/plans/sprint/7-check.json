@@ -7,7 +7,7 @@
   "モード": "standard",
   "作業場所": "<TMP>/repo/.worktrees/sprint/m9",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、変更に無関係なら ready。2 回直しても同じなら abort。",
-  "上限": 46,
+  "上限": 49,
   "steps": [
     {
       "id": "collect",
@@ -69,6 +69,34 @@
       "timeout": 3600,
       "args": "{pr} --max-rounds 4",
       "on_fail": "abort",
+      "next": "behavior-targets"
+    },
+    {
+      "type": "run",
+      "stage": "完了判定",
+      "on_fail": "abort",
+      "id": "behavior-targets",
+      "cmd": "python3 <NDF>/scripts/behavior-check.py targets --pr {pr}",
+      "skip_to": "base-sync",
+      "next": "behavior"
+    },
+    {
+      "id": "behavior",
+      "type": "work",
+      "kind": "振る舞いの確認",
+      "stage": "完了判定",
+      "inputs": [
+        "behavior-targets"
+      ],
+      "prompt": "入力の behavior-targets の結果の record にある手順（procedure）どおりに振る舞いを確かめ、post のコマンドで PR へ記録する。",
+      "next": "behavior-verify"
+    },
+    {
+      "type": "run",
+      "stage": "完了判定",
+      "on_fail": "abort",
+      "id": "behavior-verify",
+      "cmd": "python3 <NDF>/scripts/behavior-check.py verify --pr {pr}",
       "next": "base-sync"
     },
     {

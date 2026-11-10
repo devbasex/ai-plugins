@@ -151,6 +151,23 @@ MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --a
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
 # 検査のプランが cross-refactoring へ渡す範囲を PR の差分と宣言から組む（#1484）
 REFACTOR_SCOPE_PY = f"python3 {HERE / 'refactor-scope.py'}"
+# 振る舞いを決める文書を変えた PR の、振る舞いの確認の対象・記録・確認（#2925 の決定 6）。検査のプランがコードレビューの後に置く。
+# 振る舞いを決める文書の変更が無ければ（終了コード 3）全体テストの前の取り込みへ進む。手順の本文は targets の結果（record.procedure）が持つ
+BEHAVIOR_PY = f"python3 {HERE / 'behavior-check.py'}"
+_BEHAVIOR_RUN = {"type": "run", "stage": "完了判定", "on_fail": "abort"}
+BEHAVIOR_STEPS = (
+    {**_BEHAVIOR_RUN, "id": "behavior-targets", "cmd": f"{BEHAVIOR_PY} targets --pr {{pr}}", "skip_to": "base-sync", "next": "behavior"},
+    {
+        "id": "behavior",
+        "type": "work",
+        "kind": "振る舞いの確認",
+        "stage": "完了判定",
+        "inputs": ["behavior-targets"],
+        "prompt": "入力の behavior-targets の結果の record にある手順（procedure）どおりに振る舞いを確かめ、post のコマンドで PR へ記録する。",
+        "next": "behavior-verify",
+    },
+    {**_BEHAVIOR_RUN, "id": "behavior-verify", "cmd": f"{BEHAVIOR_PY} verify --pr {{pr}}", "next": "base-sync"},
+)
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"

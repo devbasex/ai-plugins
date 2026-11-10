@@ -29,10 +29,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import decl
+import project_decl
 from pathmatch import path_matches
 
-PROJECT_DECL = Path(".ndf") / "project.json"
-GLOSSARY_DECL = Path(".ndf") / "glossary.json"
+GLOSSARY_DECL = "glossary.json"
 DEFAULT_FILES = ("**/*.md",)
 DEFAULT_BEHAVIOR = ("**/skills/**/*.md", "**/agents/*.md")
 
@@ -79,11 +80,8 @@ def _patterns(value, where: str) -> tuple[str, ...]:
 
 def _glossary_decl_files(root: Path) -> tuple[str, ...]:
     """用語集の設定の `source` と `document`。設定が無い・読めない・キーが無ければ空。"""
-    try:
-        data = json.loads((root / GLOSSARY_DECL).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ()
-    if not isinstance(data, dict):
+    data, why = decl.read_json_setting(root, GLOSSARY_DECL)
+    if why or not isinstance(data, dict):
         return ()
     return tuple(v for v in (data.get("source"), data.get("document")) if isinstance(v, str) and v.strip())
 
@@ -115,17 +113,10 @@ def parse_decl(docs, root: Path) -> DocsDecl:
 
 def load_docs_decl(root: Path | str) -> DocsDecl:
     """`<root>/.ndf/project.json` の `docs` を読む。ファイルが無ければ既定。読めなければ `DeclError`。"""
-    root = Path(root)
-    f = root / PROJECT_DECL
-    if not f.is_file():
-        return parse_decl(None, root)
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise DeclError(f"{PROJECT_DECL} を読めない: {e}") from e
-    if not isinstance(data, dict):
-        raise DeclError(f"{PROJECT_DECL} がオブジェクトでない")
-    return parse_decl(data.get("docs"), root)
+    data, why = project_decl.read_project_decl_checked(Path(root))
+    if why:
+        raise DeclError(f"project.json を読めない: {why}")
+    return parse_decl(data.get("docs") if isinstance(data, dict) else None, Path(root))
 
 
 def classify_files(files: Optional[list[str]], decl: Optional[DocsDecl], unknown: str = "") -> DiffKinds:

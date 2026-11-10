@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
     base_sync_steps,
@@ -270,8 +270,9 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "args": f"{pr_ref} --max-rounds 4",
             # 収束しなかった終わり（終了コード 6 と gaps）も落ちたとして止まり、後続の検査へ進めない（#2143）
             "on_fail": "abort",
-            "next": "base-sync",  # 全体テストの前にベースブランチを取り込む（#1917）
+            "next": "behavior-targets",
         },
+        *(dict(step) for step in BEHAVIOR_STEPS),
     ]
 
 

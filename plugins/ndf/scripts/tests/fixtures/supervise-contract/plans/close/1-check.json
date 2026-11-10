@@ -13,7 +13,7 @@
     "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --final",
     "skip_code": 3
   },
-  "上限": 32,
+  "上限": 35,
   "steps": [
     {
       "id": "prepare",
@@ -68,6 +68,34 @@
       "timeout": 3600,
       "args": "{pr} --max-rounds 4",
       "on_fail": "abort",
+      "next": "behavior-targets"
+    },
+    {
+      "type": "run",
+      "stage": "完了判定",
+      "on_fail": "abort",
+      "id": "behavior-targets",
+      "cmd": "python3 <NDF>/scripts/behavior-check.py targets --pr {pr}",
+      "skip_to": "base-sync",
+      "next": "behavior"
+    },
+    {
+      "id": "behavior",
+      "type": "work",
+      "kind": "振る舞いの確認",
+      "stage": "完了判定",
+      "inputs": [
+        "behavior-targets"
+      ],
+      "prompt": "入力の behavior-targets の結果の record にある手順（procedure）どおりに振る舞いを確かめ、post のコマンドで PR へ記録する。",
+      "next": "behavior-verify"
+    },
+    {
+      "type": "run",
+      "stage": "完了判定",
+      "on_fail": "abort",
+      "id": "behavior-verify",
+      "cmd": "python3 <NDF>/scripts/behavior-check.py verify --pr {pr}",
       "next": "base-sync"
     },
     {

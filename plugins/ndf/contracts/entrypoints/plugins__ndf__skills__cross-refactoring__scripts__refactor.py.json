@@ -57,6 +57,7 @@
     {
       "file": "project.json",
       "keys": [
+        "docs",
         "ndf_policies",
         "test"
       ]
