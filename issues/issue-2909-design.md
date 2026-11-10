@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: AI は状態ファイルと結果 JSON を `python -c` で読み直し、`gh pr view` と `gh pr checks` を続けて打ち、NDF のスクリプトと進捗記録を 1 行ずつ打っている。2026-10-13〜2026-11-09 の Tool の呼び出し約 7 万回のうち、この 4 つの型が合わせて約 2 割を占める（下の「基準の割合」）
+- **今どうなっているか**: AI は状態ファイルと結果 JSON を `python -c` で読み直している。`gh pr view` と `gh pr checks` を続けて打ち、NDF のスクリプトと進捗記録を 1 行ずつ打っている。2026-10-13〜2026-11-09 の Tool の呼び出し約 7 万回のうち、この 4 つの型が合わせて約 2 割を占める（下の「基準の割合」）
 - **誰に効くか**: conductor・supervisor・worker として NDF の工程を進める AI と、その費用を払う利用者
 - **変えると何が成り立つか**: 4 つの操作のそれぞれで、AI がスクリプトの結果 JSON を 1 回読めば次の 1 手を決められる。読み直しと往復の Tool の呼び出しが減る
 
@@ -18,9 +18,9 @@
 | --- | --- | --- |
 | STD1（JSON Pointer） | 外部の一次情報 | JSON の中の 1 つの値を、依存を足さずに文字列 1 つで指す形が標準として定まっている |
 | PRD1（`gh pr checks` の終了コード） | 外部の一次情報 | PR の照合の結果を、成功・失敗・実行中で分けて終了コードに載せる形が広く使われている |
-| PRD2（GitHub の合流の状態） | 外部の一次情報 | PR が合流できるかを、衝突・遅れ・塞がりの値で 1 回の照会から得られる |
+| PRD2（GitHub のマージの状態） | 外部の一次情報 | PR をマージできるかを、衝突・遅れ・塞がりの値で 1 回の照会から得られる |
 | 2026-10-13〜2026-11-09 の transcript の集計（下の「基準の割合」） | 実測 | 状態の読み直し・PR の照合・スクリプトの 1 行打ち・進行の連打が Tool の呼び出しの約 2 割を占める |
-| PR #2905 の分析（`usage/mechanical_turns*.csv`） | 実測 | 候補 1〜3 の型に直近 4 週で約 $680、進行の連打に全期間で $164 が掛かった（課題の本文の目的の表） |
+| PR #2905 の分析（`usage/mechanical_turns*.csv`） | 実測 | 状態の取り出し・PR と CI の照合・スクリプトの往復の型に直近 4 週で約 $680、進行の連打に全期間で $164 が掛かった（課題の本文の目的の表） |
 
 要求と受け入れ条件は #2909 の本文にある（コピーは [issue-2909-requirements.md](issue-2909-requirements.md)）。この文書は「どう作るか」だけを扱う。
 
@@ -32,10 +32,14 @@
 | --- | --- |
 | 開発の工程（`ndf-workflow`） | スプリントの状態・開発ループの記録・工程の進行・結果 JSON・機械的なターン・ターンの型・手順の連続実行 |
 
-1 つのコンテキストの中で閉じる。GitHub とは**腐敗防止層**の関係にする。PR の照合は、GitHub の
-チェックの状態（`queued`・`in_progress`・`completed` と `conclusion`）と合流の状態（`MergeStateStatus`）を、
-NDF の次の 1 手の 4 つの語（待つ・直す・マージへ進める・人へ戻す）へ訳してから返す。訳す層は今の
-`lib/gh_*` の部品が持ち、GitHub の語を工程の側へ持ち込まない。
+1 つのコンテキストの中で閉じる。GitHub とは**腐敗防止層**の関係にする。PR の照合は、GitHub の語を
+NDF の次の 1 手の語へ訳してから返す。
+
+| 訳す前（GitHub の語） | 訳した後（NDF の次の 1 手の 4 つの語） |
+| --- | --- |
+| チェックの状態（`queued`・`in_progress`・`completed` と `conclusion`）と、マージの状態（`MergeStateStatus`） | 待つ・直す・マージへ進める・人へ戻す |
+
+訳す層は今の `lib/gh_*` の部品が持ち、GitHub の語を工程の側へ持ち込まない。
 
 ### 集約
 
@@ -88,7 +92,7 @@ NDF の次の 1 手の 4 つの語（待つ・直す・マージへ進める・�
 | 種類 | 調べるか | 理由 |
 | --- | --- | --- |
 | 標準・仕様 | 調べる | JSON の中の値を指す形には標準がある。独自の書き方を作る前に比べる |
-| 主要な製品 | 調べる | PR の照合の結果の分け方と合流の可否は、GitHub と GitHub CLI がすでに語を定めている。使用量の集計にも既存の製品がある |
+| 主要な製品 | 調べる | PR の照合の結果の分け方とマージの可否は、GitHub と GitHub CLI がすでに語を定めている。使用量の集計にも既存の製品がある |
 | ライブラリとサービス | 調べる | 値の取り出しの式を評価するライブラリを使うか、標準を自前で実装するかを決める |
 
 ### 標準・仕様
@@ -103,7 +107,7 @@ NDF の次の 1 手の 4 つの語（待つ・直す・マージへ進める・�
 | # | 製品 | どう解いているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | PRD1 | GitHub CLI `gh pr checks` | 結果を `pass`・`fail`・`pending`・`skipping`・`cancel` の 5 つに分け、実行中は終了コード 8 で返す | PR の照合でも、実行中・失敗・すべて成功を終了コードで分ける。NDF の結果 JSON の終了コードの範囲（`gate` の 10〜29）に載せ直す | `gh pr checks --help`（gh 2.103.3、2026-11-09） |
-| PRD2 | GitHub GraphQL の `MergeStateStatus` と `closingIssuesReferences` | 合流の状態を `BEHIND`・`BLOCKED`・`CLEAN`・`DIRTY` などで返す。PR が閉じる Issue を PR から辿れる | 衝突（`DIRTY`）を「人へ戻す」の理由に使う。PR が指す Issue と開閉を、未解決のスレッドと同じ 1 回の照会で取る | https://raw.githubusercontent.com/octokit/graphql-schema/master/schema.graphql （2026-11-09）、`gh pr view --help`（gh 2.103.3） |
+| PRD2 | GitHub GraphQL の `MergeStateStatus` と `closingIssuesReferences` | マージの状態を `BEHIND`・`BLOCKED`・`CLEAN`・`DIRTY` などで返す。PR が閉じる Issue を PR から辿れる | 衝突（`DIRTY`）を「人へ戻す」の理由に使う。PR が指す Issue と開閉を、未解決のスレッドと同じ 1 回の照会で取る | https://raw.githubusercontent.com/octokit/graphql-schema/master/schema.graphql （2026-11-09）、`gh pr view --help`（gh 2.103.3） |
 | PRD3 | GitHub REST のチェックの実行 | `status` は `queued`・`in_progress`・`completed`・`waiting`・`requested`・`pending`、`conclusion` は `success`・`failure`・`neutral`・`cancelled`・`skipped`・`timed_out`・`action_required` | 実行中と失敗の判定は、今の `lib/gh_checks.py` の畳み方（名前ごとの最新の実行）をそのまま使う | https://docs.github.com/api/article/body?pathname=/en/rest/checks/runs （2026-11-09） |
 | PRD4 | ccusage | Claude Code などの手元の記録から、token の量と費用を日・セッションごとに集計する | ターンの型（Tool の呼び出しの分類）は数えないため使わない。期間の指定と手元の記録を読む形は倣う | https://registry.npmjs.org/ccusage （20.0.48、2026-11-02 公開、MIT、2026-11-09 取得） |
 
@@ -150,7 +154,7 @@ NDF の次の 1 手の 4 つの語（待つ・直す・マージへ進める・�
 | `lib/state_get.py`（新設） | スプリントの状態と開発ループの記録から、計画の行・次の操作・`--field` の値を組んで結果 JSON にする |
 | `glossary.py`（変更） | 副命令 `lookup` を足す（F3）。`check`・`diff`・`lookup` に `--field` を足す |
 | `lib/gh_parts.py`（変更） | 副命令 `pr-status` を足す（F4）。エントリポイントだけを持つ |
-| `lib/gh_pr_status.py`（新設） | `gh_pr_info` のメタとチェックを使い、未解決のスレッド・合流の状態・PR が指す Issue を 1 回の GraphQL で読み、次の 1 手を決める |
+| `lib/gh_pr_status.py`（新設） | `gh_pr_info` のメタとチェックを使い、未解決のスレッド・マージの状態・PR が指す Issue を 1 回の GraphQL で読み、次の 1 手を決める |
 | `lib/gh_graphql.py`（変更） | 未解決のスレッド・`mergeStateStatus`・`closingIssuesReferences`（番号と開閉）を 1 回で読む照会を足す。今の照会は変えない |
 | `supervise.py`（変更） | 副命令 `advance` を足す（F5）。中身は `supervise_lib/advance.py` |
 | `supervise_lib/advance.py`（新設） | 手順の並びを検査し（I4）、1 つずつ打ち、`step_read` で結果を読み、`ok` の間だけ続ける |
@@ -200,8 +204,13 @@ graph TD
   TK --> TA[transcript_agents.py]
 ```
 
-`lib/README.md`・`docs/ndf-experiments.md`・`plugins/ndf/contracts/`・Skill の本文と雛形・`experimental/turn-kinds.json` は
-文書と設定であり、呼び出しの関係を持たないため図に含めない。
+文書と設定は、呼び出しの関係を持たないため図に含めない。図に含めないのは次の 5 つである。
+
+- `lib/README.md`
+- `docs/ndf-experiments.md`
+- `plugins/ndf/contracts/`
+- Skill の本文と雛形
+- `experimental/turn-kinds.json`
 
 ## 入出力の契約
 
@@ -242,7 +251,7 @@ graph TD
 | 順 | 条件 | 次の 1 手 | `next` の例 |
 | --- | --- | --- | --- |
 | 1 | PR の状態が `open` でない | 人へ戻す | `PR は merged。後片付け（merged）へ進むかを人が決める` |
-| 2 | 合流の状態が `DIRTY`（衝突） | 人へ戻す | `ベースブランチと衝突している。merged-steps.py base-sync を打つかを人が決める` |
+| 2 | マージの状態が `DIRTY`（衝突） | 人へ戻す | `ベースブランチと衝突している。merged-steps.py base-sync を打つかを人が決める` |
 | 3 | チェックかスレッドを照会できなかった（値が `null`。0 件とは分ける） | 人へ戻す | `チェックを照会できない。gh_parts.py pr-status を打ち直す` |
 | 4 | 失敗したチェックがある、または未解決のスレッドが 1 件以上 | 直す | `失敗: pytest。未解決のスレッド 2 件。直してから打ち直す` |
 | 5 | 実行中のチェックがある、またはチェックが 1 件も無い（push の直後） | 待つ | `実行中: pytest。merged-steps.py merge-when-green <番号> で待つ` |
@@ -293,22 +302,6 @@ PR が指す Issue の開閉は判定に使わず、`items` と `metrics` に載
 | 3. スクリプトの往復 | 型「往復: NDF スクリプトを 1 行打つ」 |
 | 4. 進行の連打 | `projects-sync.sh ... stage` か `progress-record.sh` の呼び出しのうち、同じ会話の直前の Tool の呼び出しも同じ 2 つのどちらかであるもの |
 
-### 基準の割合
-
-受け入れ条件 8 の確定値は、実装で `turn-kinds.py --since 2026-10-13 --until 2026-11-09` を打ち、この表の
-「確定値」の列へ書き込む。設計の時点の値は次の 2 つで、どちらも確定値の代わりにしない。
-
-| 候補 | PR #2905 の件数（2026-10-12 から 5 週の行の和） | 設計の時点の概算（件数 / 割合） | 確定値 |
-| --- | --- | --- | --- |
-| 1. 状態の取り出し | 5,039（型全体。コード探索を含む） | 2,442 / 3.47% | 実装で書く |
-| 2. PR・CI の照合 | 2,401 | 5,558 / 7.90% | 実装で書く |
-| 3. スクリプトの往復 | 1,907 | 7,113 / 10.11% | 実装で書く |
-| 4. 進行の連打 | — | 492 / 0.70%（連打に限らない呼び出しの全件） | 実装で書く |
-
-設計の時点の概算は、`~/.claude/ndf/accounts/<アカウント>/projects/` の transcript を
-JST 2026-10-13 00:00〜2026-11-10 00:00 で読み、Tool の呼び出し 70,331 件を分母にした値である。
-分類は上の表を正規表現で近似したもので、`turn-kinds.json` の規則とは一致しない。
-
 ## 処理の流れ
 
 手順の連続実行の流れ（`supervise.py queue` の後に `supervise.py wait` を続ける例）:
@@ -333,7 +326,7 @@ PR の照合の流れ:
 graph TD
   A[gh_parts.py pr-status] --> B[gh_pr_info のメタ: gh pr view 1 回]
   B --> C[gh_checks: チェックの実行を名前ごとに畳む]
-  C --> D[gh_graphql: スレッド・合流の状態・Issue を 1 回で読む]
+  C --> D[gh_graphql: スレッド・マージの状態・Issue を 1 回で読む]
   D --> E{判定の表を上から当てる}
   E --> F[action と next を結果 JSON に載せる]
 ```
@@ -357,7 +350,7 @@ graph TD
 
 | 大項目 | 条件 | 実現方式 |
 | --- | --- | --- |
-| 性能・拡張性 | PR の照合の 1 回の API の回数が、`gh pr view`・`gh pr checks`・未解決のスレッドの取得を別々に打つときの回数以下 | メタは `gh pr view` 1 回（`pr-info` と同じ）、チェックは REST のチェックの実行（100 件ごとに 1 回）、スレッド・合流の状態・PR が閉じる Issue の開閉は GraphQL 1 回にまとめる。別々に打つと 3 回に加えて Issue ごとに 1 回掛かる。`--issue` で足した Issue だけ REST で 1 回ずつ読む。上限のときは `gh_quota` の規則で REST へ退避する |
+| 性能・拡張性 | PR の照合の 1 回の API の回数が、`gh pr view`・`gh pr checks`・未解決のスレッドの取得を別々に打つときの回数以下 | メタは `gh pr view` 1 回（`pr-info` と同じ）、チェックは REST のチェックの実行（100 件ごとに 1 回）、スレッド・マージの状態・PR が閉じる Issue の開閉は GraphQL 1 回にまとめる。別々に打つと 3 回に加えて Issue ごとに 1 回掛かる。`--issue` で足した Issue だけ REST で 1 回ずつ読む。上限のときは `gh_quota` の規則で REST へ退避する |
 | 運用・保守性 | 新しい出力の形は結果 JSON の正本に従い、足した副命令はスクリプトの冒頭と Skill の本文から辿れる | 出力はすべて `step_result.result` と `emit` で組む。各スクリプトの docstring の副命令の表に行を足し、`lib/README.md` の部品の表に `json_pick`・`state_get`・`gh_pr_status` の行を足す。エントリポイントの契約（`plugins/ndf/contracts/entrypoints/`）を `check-ndf-contracts.py --render` で作り直す |
 | セキュリティ | 数える手段は会話の本文・会話の ID をリポジトリへ書き出さない | `turn-kinds.py` は件数と割合だけを標準出力へ出し、ファイルへ書かない。会話の ID・コマンドの文字列を結果に入れない（I8）。手順の連続実行は NDF のスクリプトだけを打ち、シェルを通さない（I4）。任意のコマンドを打てる形にすると、Bash の hook の検査を通らずにコマンドが打たれる |
 
@@ -390,7 +383,25 @@ graph TD
 | I7 | 受け入れ条件 2 と同じ | — |
 | I8 | 合成した transcript に入れた会話の ID とコマンドの文字列が、標準出力に現れない | 型ごとに例のコマンドを出すよう壊す |
 
-**受け入れ条件 6 の検索**（実装の PR で打ち、結果を本文に載せる）:
+### 基準の割合
+
+受け入れ条件 8 の確定値は、実装で `turn-kinds.py --since 2026-10-13 --until 2026-11-09` を打ち、この表の
+「確定値」の列へ書き込む。設計の時点の値は次の 2 つで、どちらも確定値の代わりにしない。
+
+| 候補 | PR #2905 の件数（2026-10-12 から 5 週の行の和） | 設計の時点の概算（件数 / 割合） | 確定値 |
+| --- | --- | --- | --- |
+| 1. 状態の取り出し | 5,039（型全体。コード探索を含む） | 2,442 / 3.47% | 実装で書く |
+| 2. PR・CI の照合 | 2,401 | 5,558 / 7.90% | 実装で書く |
+| 3. スクリプトの往復 | 1,907 | 7,113 / 10.11% | 実装で書く |
+| 4. 進行の連打 | — | 492 / 0.70%（連打に限らない呼び出しの全件） | 実装で書く |
+
+設計の時点の概算は、`~/.claude/ndf/accounts/<アカウント>/projects/` の transcript から求めた値である。
+読んだ期間は JST 2026-10-13 00:00〜2026-11-10 00:00 で、分母は Tool の呼び出し 70,331 件である。
+分類は「候補と数える型の対応」の表を正規表現で近似したもので、`turn-kinds.json` の規則とは一致しない。
+
+### 受け入れ条件 6 の検索
+
+実装の PR で打ち、結果を本文に載せる。
 
 ```bash
 grep -rnE 'python3? -c' plugins/ndf/skills plugins/ndf/agents plugins/ndf/scripts/data --include='*.md' | grep -E 'sprint|loop|glossary|items'
