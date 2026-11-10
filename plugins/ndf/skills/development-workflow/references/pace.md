@@ -227,10 +227,15 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
 **スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
-最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request →（リリース記録があれば `release-verify` リリース後テスト →）`retro` 振り返り → `close` 後片付け → `refine` 棚卸し）
-を `--then` のステージで流す。`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題>
---final-stage 振り返り --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。`refine` は `close` が 0 で終わったときだけ届き（スプリントを閉じてから棚卸しへ進む）、棚卸しを無人で通す（承認の要る反映は
-行わず、承認資料のパスと番号を報告に載せて終える）。まとめのプランは課題すべてへ
+最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
+`deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）
+を `--then` のステージで流す。確定仕様化の Pull Request の CI は ready から進み、リリース後テスト・振り返り・棚卸しと重なる。
+`deep-due` は `upkeep.py depth due diff` で、開発ループでは 3 回のループの 1 回（`.ndf/backlog.json` の `depths.diff.every`）に 1 回、
+ループの外では毎回起動する。起動しない回は `merge` へ飛び、報告の「走らなかったステップ」に次に走る時点が載る。
+`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題> --final-stage-from <進捗記録> --with-verification` で、
+同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする。本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。
+`close` は `merge` の後にだけ走り、確定仕様化の Pull Request がマージされなかった回は課題を開いたまま残す。`refine` は棚卸しを無人で通し（承認の要る反映は
+行わず、承認資料のパスと番号を報告に載せて終える）、今の回の課題を閉じない。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
 リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが入り、
 `close` のステップの `--record-pr` は、リリースの Pull Request で届く経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、
