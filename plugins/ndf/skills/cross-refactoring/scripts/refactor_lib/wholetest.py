@@ -122,7 +122,7 @@ def fallback(
         return fix_or_narrow(path, state, record, rerun_log)
     from . import failure_material
 
-    record["material"] = failure_material.build(
+    record["material"] = failure_material.compose_material(
         None, _log_text(rerun_log), str(rerun_log), [], timeline.strategy_of(state).whole_commands(ts.TEST)
     )
     record["resolution"] = "deferred"

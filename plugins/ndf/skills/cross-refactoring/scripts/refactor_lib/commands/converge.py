@@ -255,7 +255,7 @@ def _triage_whole(
     flagged = [i for i in newest_first(live_items(state)) if i.get("danger") and in_current_round(state, i)]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
-    flaky.request(state, record.get("flaky"), str(log))
+    flaky.queue_flaky(state, record.get("flaky"), str(log))
     statefile.save(path, state)
     if record.get("fallback_reason"):
         return wholetest.fallback(path, state, record, flags, flagged, log, _fix_or_narrow)

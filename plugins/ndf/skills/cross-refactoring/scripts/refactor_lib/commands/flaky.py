@@ -25,7 +25,7 @@ from ..paths import git_out, load_state, work_dir
 TRAILER = "Flaky-Fix"
 
 
-def request(state: dict[str, Any], flaky: Optional[list[str]], log: Optional[str]) -> list[str]:
+def queue_flaky(state: dict[str, Any], flaky: Optional[list[str]], log: Optional[str]) -> list[str]:
     """フレーキーと見分けたテストのうち、この実行でまだ依頼していないものを直しの依頼へ積む。積んだ ID を返す。
 
     依頼には ID・ログの置き場・そのテストのファイルだけを走らせ直すコマンドを載せる。"""
@@ -49,12 +49,12 @@ def _commits(work: str, base: str) -> list[str]:
     return [s for s in out.split() if s]
 
 
-def _files(work: str, sha: str) -> list[str]:
+def _touched_paths(work: str, sha: str) -> list[str]:
     out = git_out(work, ["diff-tree", "--no-commit-id", "--name-only", "-r", sha]) or ""
     return [p for p in out.splitlines() if p]
 
 
-def violations(work: str, shas: list[str], tests: list[str]) -> list[dict[str, Any]]:
+def fix_violations(work: str, shas: list[str], tests: list[str]) -> list[dict[str, Any]]:
     """直しのコミットの手順の違反（`Flaky-Fix` の欠けか依頼に無い ID・テスト以外のファイルの変更）。"""
     wanted = set(tests)
     found = []
@@ -62,7 +62,7 @@ def violations(work: str, shas: list[str], tests: list[str]) -> list[dict[str, A
         named = str(gitfacts.commit_trailers(work, sha).get(TRAILER) or "").strip()
         if named not in wanted:
             found.append({"commit": sha, "kind": "trailer", "detail": f"{TRAILER}: <依頼したテストの ID> が無い（{named or '空'}）"})
-        others = [p for p in _files(work, sha) if not pathkinds.is_test_path(p, work)]
+        others = [p for p in _touched_paths(work, sha) if not pathkinds.is_test_path(p, work)]
         if others:
             found.append({"commit": sha, "kind": "non_test", "detail": "テスト以外のファイルを変えた: " + ", ".join(others[:5])})
     return found
@@ -91,7 +91,7 @@ def cmd_merge_flaky_fix(args: argparse.Namespace) -> None:
         return
     for sha in shas:
         ledger.note_orchestrator_commit(state, sha)
-    found = violations(work, shas, tests)
+    found = fix_violations(work, shas, tests)
     attempts = int(pending.get("attempts") or 0) + 1
     if found and attempts < 2:
         pending.update({"attempts": attempts, "sendback": found})

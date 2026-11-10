@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from drive_pause import Stop
 
@@ -95,3 +96,34 @@ class AssigneeLaunch:
             wanted = vs.get("PROPOSERS", "").split()
             if vs.get("IMPL"):
                 self.v["IMPL"] = vs["IMPL"]  # 実装担当を選び直したら、続く plan から使う
+
+    def judge_phase(self, seat: str) -> None:
+        """成立の判定を、実装担当と別のランタイムに読み取り用の作業ディレクトリで 1 回させ、答えを取り込む（決定 3）。
+        起動できない・結果を残さないときも `judge` が「判定できない」として積む（初回は成立と同じに続け、判定し直しなら止める）。"""
+        i = self.v["ID"]
+        head = self.sh("git rev-parse HEAD", ["git", "-C", self.v["WORK"], "rev-parse", "HEAD"])
+        self.call(["bash", str(Path(__file__).resolve().parent / "prepare-worktrees.sh"), i, "sync", head.strip()])
+        self.start_phase("judge")
+        if seat and self.launch(seat, "judge") == 0:
+            self.monitor(seat, "judge", f"{{agent}}-judge-rf{i}")
+        self.rf("judge", i)
+
+    def flaky_requested(self) -> bool:
+        return bool((self.state().get("flaky_request") or {}).get("tests"))
+
+    def flaky_phase(self) -> None:
+        """フレーキーと見分けたテストの直しを実装担当に依頼して取り込む（決定 9）。差し戻しは 1 回だけ起動し直す。
+
+        振り替えはしない（直せなくても項目の合否に関わらない）。起動の秒は安全網に数える。"""
+        i = self.v["ID"]
+        for _ in range(2):
+            self.start_phase("flaky-fix")
+            impl = self.v["IMPL"]
+            if self.launch(impl, "flaky-fix") == 0:
+                began = time.monotonic()
+                self.monitor(impl, "flaky-fix", f"{{agent}}-flaky-fix-rf{i}")
+                self.coding_time("flaky-fix", time.monotonic() - began)
+            self.v.pop("FLAKY_FIX", None)
+            self.rf("merge-flaky-fix", i)
+            if self.v.get("FLAKY_FIX") != "sendback":
+                return

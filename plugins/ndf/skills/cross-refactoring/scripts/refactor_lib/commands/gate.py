@@ -236,8 +236,8 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
         gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
-        gate["material"] = _material(state, classified, verdict)
-        flaky.request(state, classified.get("flaky"), verdict.get("log"))
+        gate["material"] = _gate_material(state, classified, verdict)
+        flaky.queue_flaky(state, classified.get("flaky"), verdict.get("log"))
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:
@@ -255,7 +255,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     return passed, detail, seconds
 
 
-def _material(state: dict[str, Any], classified: dict[str, Any], verdict: dict[str, Any]) -> dict[str, Any]:
+def _gate_material(state: dict[str, Any], classified: dict[str, Any], verdict: dict[str, Any]) -> dict[str, Any]:
     """落ちたテストの材料（決定 12）。JUnit を読めないときもログか CI の run の置き場と走らせ直すコマンドを渡す（受け入れ条件 13）。"""
     log = verdict.get("log")
     text = ""
@@ -265,7 +265,7 @@ def _material(state: dict[str, Any], classified: dict[str, Any], verdict: dict[s
         except OSError:
             text = ""
     junit_ids = classified.get("caused") or classified.get("failed_tests") or []
-    return failure_material.build(
+    return failure_material.compose_material(
         junit_ids,
         text,
         str(verdict.get("log_place") or log or ""),

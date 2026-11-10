@@ -105,5 +105,5 @@ def test_the_same_test_is_requested_only_once_per_run(tmp_path, monkeypatch, cmd
     state["flaky_request"] = None
     state["strategy"] = state.get("strategy")
 
-    assert cmd_flaky.request(state, [TEST_ID], "x.log") == [], "依頼済みのテストは積まない"
+    assert cmd_flaky.queue_flaky(state, [TEST_ID], "x.log") == [], "依頼済みのテストは積まない"
     assert state["flaky_request"] is None

@@ -67,7 +67,7 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
             "caused": [],
             "fallback_reason": "JUnit に落ちたテストが無かった（走らせ直して見分ける）",
         }
-    compare_sha, compare_reason = (None, None) if ids is None else comparison.build(state)
+    compare_sha, compare_reason = (None, None) if ids is None else comparison.build_tree(state)
     result = test_triage.classify(
         work=work_dir(state),
         strategy=timeline.strategy_of(state),

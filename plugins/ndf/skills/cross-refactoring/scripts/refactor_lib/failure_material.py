@@ -24,7 +24,7 @@ def ids_from_log(text: str) -> list[str]:
     return out
 
 
-def build(
+def compose_material(
     junit_ids: Optional[Iterable[str]],
     log_text: str,
     log_place: str,

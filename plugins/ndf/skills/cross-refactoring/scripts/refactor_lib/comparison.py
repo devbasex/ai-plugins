@@ -41,11 +41,11 @@ def change_commits(state: dict[str, Any], work: str) -> list[str]:
     return [sha for sha in out.split() if sha in wanted]
 
 
-def _git(cwd: str, args: list[str], env: Optional[dict[str, str]] = None) -> subprocess.CompletedProcess[str]:
+def _run_git(cwd: str, args: list[str], env: Optional[dict[str, str]] = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env)
 
 
-def build(state: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+def build_tree(state: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     """比較の木のコミットを作る。`(SHA, 作れなかった理由)` を返す。外すコミットが無ければ HEAD を返す。"""
     work = work_dir(state)
     head = git_out(work, ["rev-parse", "HEAD"])
@@ -58,17 +58,17 @@ def build(state: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     base.mkdir(parents=True, exist_ok=True)
     tree = pathlib.Path(tempfile.mkdtemp(prefix="comparison-", dir=base))
     shutil.rmtree(tree)
-    if _git(work, ["worktree", "add", "--detach", "-q", str(tree), head]).returncode != 0:
+    if _run_git(work, ["worktree", "add", "--detach", "-q", str(tree), head]).returncode != 0:
         return None, "比較の木の一時の worktree を作れなかった"
     try:
         for sha in shas:
-            if _git(str(tree), ["revert", "--no-commit", sha]).returncode != 0:
-                _git(str(tree), ["revert", "--abort"])
+            if _run_git(str(tree), ["revert", "--no-commit", sha]).returncode != 0:
+                _run_git(str(tree), ["revert", "--abort"])
                 return None, f"改善項目のコミット {sha[:12]} を外せなかった（衝突）"
-        written = _git(str(tree), ["write-tree"])
+        written = _run_git(str(tree), ["write-tree"])
         if written.returncode != 0:
             return None, "比較の木を書けなかった"
-        made = _git(
+        made = _run_git(
             str(tree),
             ["commit-tree", written.stdout.strip(), "-p", head, "-m", "cross-refactoring: 比較の木（改善項目の変更を外した木）"],
             env={**os.environ, **_IDENTITY},
@@ -77,5 +77,5 @@ def build(state: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
             return None, "比較の木のコミットを作れなかった"
         return made.stdout.strip(), None
     finally:
-        _git(work, ["worktree", "remove", "--force", str(tree)])
-        _git(work, ["worktree", "prune"])
+        _run_git(work, ["worktree", "remove", "--force", str(tree)])
+        _run_git(work, ["worktree", "prune"])
