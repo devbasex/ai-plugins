@@ -55,6 +55,7 @@ conductor が書き、`loop sprint` が読む形を 1 つに固定し、互い�
 | I5 | ループの記録 | 決め直しの後に流す続きのプランとまとめのプランの `モード` は、ループの 1 回の `mode` と等しい | 続きを組み直せなければ記録を書き換えず、`refused`（続きの queue）で止まる |
 | I6 | ループの記録 | 判定の根拠を持たないループの 1 回（この版より前に組んだもの）は、読み込み・再開・続きの組み立てで失敗しない。決め直しはせず、モードの決定も足さない | — （読み込みで断らない） |
 | I7 | — | 判定の材料は、課題の本文と設計文書から取れた候補だけを出し、取れなかったときは候補 0 件と出す | テストが落ちる |
+| I8 | ループの記録 | ループの 1 回の判定の根拠に、`documentation`（順 2）の根拠と他のモードの根拠が混ざらない（`workflow-modes.md` の「`documentation` と他のモードが混ざるとき」は分けることを求める）。課題を外しても混ざらない集合の部分集合は混ざらないため、決め直しでは起きない | `loop sprint` が終了コード 1 で断り、記録を書き換えない。理由に混ざった課題の番号をモードごとに並べ、conductor は `loop exclude` で一方のモードの課題を外して別のループの 1 回へ回す |
 
 ### ドメインイベント
 
@@ -198,7 +199,7 @@ classDiagram
 | --- | --- | --- | --- |
 | `ROWS` | — | 順 → モードの対応（1 `operation`・2 `documentation`・3 `standard`・4 `legacy-refactor`・5 `light`） | — |
 | `check_judgments(data, selected)` | 判定の根拠のファイルの中身・選んだ課題 | 検査を通った `Judgment` の一覧（課題の番号の順） | `JudgmentError`（理由を 1 件ずつ並べる） |
-| `sprint_mode(judgments)` | `Judgment` の一覧（1 件以上） | 順が最も小さい行のモード | 空なら `JudgmentError` |
+| `sprint_mode(judgments)` | `Judgment` の一覧（1 件以上） | 順が最も小さい行のモード | 空のとき・`documentation` と他のモードが混ざるとき（I8）は `JudgmentError` |
 | `redecide(judgments, kept, current)` | 記録の根拠・残った課題・今のモード | 決め直したモード | 残った課題の根拠が無い・上がる結果なら `JudgmentError` |
 
 ## データ構造
@@ -301,7 +302,7 @@ python3 sprint-state.py loop sprint <ループ名> --judgments <判定の根拠�
 
 | 場合 | 終了コード | 記録 |
 | --- | --- | --- |
-| 根拠のファイルが無い・JSON でない・I1〜I3 に反する | 1（`status: refused`。`items` に理由を 1 件ずつ） | 書き換えない |
+| 根拠のファイルが無い・JSON でない・I1〜I3・I8 に反する | 1（`status: refused`。`items` に理由を 1 件ずつ） | 書き換えない |
 | `--judgments` を渡さない | 2（引数の誤り。argparse） | 書き換えない |
 | 検査を通った | 今と同じ（0 で `pipeline`） | `judgments`・`mode_decisions`・`mode`・`sprint_extra` を書く |
 
@@ -334,7 +335,7 @@ sequenceDiagram
     end
 ```
 
-`loop sprint` の中の順は次のとおり。検査はどの書き込みよりも前に置く（I1〜I3 で記録を変えないため）。
+`loop sprint` の中の順は次のとおり。検査はどの書き込みよりも前に置く（I1〜I3・I8 で記録を変えないため）。
 
 1. 進行中のループの 1 回があることを確かめる（今と同じ）
 2. 判定の根拠のファイルを読み、`check_judgments` と `sprint_mode` を通す。`--mode` があれば一致を確かめる
@@ -471,6 +472,7 @@ I1 により、この版で組んだループの 1 回では根拠の欠けは�
 | I2 | 順が 0 や 6、順とモードが合わない、条件の文が空、触るファイルが空のそれぞれで断られる | どれか 1 つの検査を外すと落ちる |
 | 受け入れ条件 4・I3 | `standard`（順 3）と `light`（順 5）の根拠で組むと、記録の `mode` が `standard` で、`judgments` が 2 件、`mode_decisions` が 1 件（`trigger: loop sprint`）。`new sprint` に `--mode standard` が渡る | 最も大きい順を採る・最後の課題のモードを採ると落ちる |
 | I3 | `--mode light` を渡し、根拠から `standard` になるとき断られる | 照合を外すと落ちる |
+| I8 | `documentation`（順 2）と `standard`（順 3）の根拠で `loop sprint` を打つと、終了コード 1 で、記録のバイト列が変わらず、`new sprint` が呼ばれず、理由に両方の課題の番号が出る。`documentation` だけの 2 件では通る | 混在の検査を外す・順の最も小さい行をそのまま採ると落ちる |
 | 受け入れ条件 2 | 本文に code span のパスと影響の表を持つ課題で、候補・`exists`・`tests`・`public_interface` が出る。設計文書の「設計の結果」の触るファイルが `source: 設計` で足される | 設計文書を読まない・影響の表を読まないと落ちる |
 | 受け入れ条件 3・I7 | 候補の無い本文で `files_found` が 0、`files` が空。コードブロックの中のパス・`--mode` のような語・URL は候補に入らない | コードブロックの中を読む・語を候補にすると落ちる |
 | 受け入れ条件 5・I4・I5 | `standard` と `light` の 2 件で組み、設計承認ゲートで `standard` の課題を外すと、`mode` が `light`、`mode_decisions` の 2 件目が時刻・残った課題・`light` を持ち、作り直しの `new sprint` に `--mode light --designed <残り>` が渡り、まとめのプランの `モード` が `light` | 決め直しを外す・作り直しをせずに `mode` だけ変えると落ちる |
