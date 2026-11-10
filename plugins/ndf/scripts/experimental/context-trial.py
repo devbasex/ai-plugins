@@ -111,7 +111,7 @@ def trial_row(
     report=None,
 ) -> dict:
     """計測の回 1 つの行。区切りを見つけられなければ ValueError。`report` は集計（無ければ context-policy.py の report_work）。"""
-    work_rows = [r for r in cd.fill_work(rows) if (r.get("work") or "") == work]
+    work_rows = cd.of_work(cd.fill_work(rows), work)
     lo, hi, asks = trial_span(work_rows, transcript, lo, hi)
     rep = (report or _cli().report_work)(work, rows, ledger, (lo, hi))
     inside = [r for r in work_rows if lo <= (cd.parse_ts(r.get("at")) or float("-inf")) <= hi]

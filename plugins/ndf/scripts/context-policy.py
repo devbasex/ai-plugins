@@ -267,9 +267,9 @@ def work_scope(work: str, rows: list[dict], span: tuple[float, float] | None) ->
     windows = work_windows(filled, work)
     if span is not None:
         windows = {sid: clip_windows(w, span) for sid, w in windows.items()}
-        sids = {r.get("session_id") for r in filled if (r.get("work") or "") == work}
+        sids = {r.get("session_id") for r in cd.of_work(filled, work)}
         windows |= {sid: clip_windows(ALL_TIME, span) for sid in sids if sid and sid not in windows}
-    return [r for r in filled if (r.get("work") or "") == work and _in_span(cd.parse_ts(r.get("at")), span)], windows
+    return [r for r in cd.of_work(filled, work) if _in_span(cd.parse_ts(r.get("at")), span)], windows
 
 
 def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None, span: tuple[float, float] | None = None) -> dict:

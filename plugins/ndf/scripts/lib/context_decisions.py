@@ -227,6 +227,11 @@ def fill_work(rows: list[dict]) -> list[dict]:
     return out
 
 
+def of_work(rows: list[dict], work: str) -> list[dict]:
+    """作業の識別子が work の行（識別子の無い行は空の識別子として比べる）。"""
+    return [r for r in rows if (r.get("work") or "") == work]
+
+
 def last_denial(rows: list[dict], work: str, within: float = 1800, now: float | None = None) -> dict | None:
     """同じ作業の識別子で、直前 `within` 秒の内にある最後の拒否の行（`sprint-state.py next` が理由を引き継ぐ）。"""
     now = time.time() if now is None else now
