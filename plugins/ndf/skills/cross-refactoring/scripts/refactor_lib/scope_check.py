@@ -202,37 +202,71 @@ def _base_of(work: str, unit: Unit) -> Optional[str]:
     return git_out(work, ["rev-parse", f"{unit.shas[0]}^"]) if unit.shas else None
 
 
+def _touched_by_path(work: str, shas: list[str]) -> tuple[dict[str, dict[str, str]], dict[str, list[str]]]:
+    """各コミットのファイルの状態と、ファイルごとにそれを触ったコミット（古い順）。"""
+    statuses = {sha: commit_file_status(work, sha) for sha in shas}
+    touched: dict[str, list[str]] = {}
+    for sha in shas:
+        for path in statuses[sha]:
+            touched.setdefault(path, []).append(sha)
+    return statuses, touched
+
+
+def _first_verdict(
+    work: str,
+    base: Optional[str],
+    path: str,
+    shas: list[str],
+    statuses: dict[str, dict[str, str]],
+    scope: list[str],
+) -> Optional[FileVerdict]:
+    """表の順 1〜3 の分類。どれにも当たらなければ None（呼び手の書き換えかの判定へ回す）。"""
+    if path_in_scope(path, scope):
+        return FileVerdict(path, IN_SCOPE)
+    if base is None or not path_in_tree(work, base, path):
+        return FileVerdict(path, NEW)
+    if any(statuses[sha].get(path) == "D" for sha in shas):
+        return FileVerdict(path, OUTSIDE, "範囲の外の既存のファイルを消しています")
+    return None
+
+
+def _judge_rewrites(
+    work: str,
+    unit: Unit,
+    base: str,
+    pending: dict[str, list[str]],
+    statuses: dict[str, dict[str, str]],
+    cache_dir: Optional[str],
+    verdict: UnitVerdict,
+) -> None:
+    """表の順 4・5 の分類。保留したファイルのハンクがすべて呼び手の書き換えなら `rewrite`、それ以外は `outside`。"""
+    common = common_words(work, base, cache_dir)
+    names = changed_names(work, [*unit.context, *unit.shas], unit.scope, base, common, statuses)
+    for path, shas in pending.items():
+        hunks = [(sha, h) for sha in shas for h in commit_hunks(work, sha, path)]
+        if hunks and all(is_caller_rewrite(h, names, common) for _, h in hunks):
+            verdict.files.append(FileVerdict(path, REWRITE))
+            verdict.rewrites.extend({"path": path, "sha": sha} for sha in shas)
+        else:
+            verdict.files.append(FileVerdict(path, OUTSIDE, "変えた名前の読み込み・呼び出しの書き換え以外の変更があります"))
+
+
 def judge_unit(work: str, unit: Unit, cache_dir: Optional[str] = None) -> UnitVerdict:
     """判定の単位の各ファイルを分類し、範囲の外が 1 件でもあれば理由を返す。範囲が空ならチェックしない。"""
     verdict = UnitVerdict()
     if not unit.scope or not unit.shas:
         return verdict
     base = _base_of(work, unit)
-    statuses = {sha: commit_file_status(work, sha) for sha in unit.shas}
-    touched: dict[str, list[str]] = {}
-    for sha in unit.shas:
-        for path in statuses[sha]:
-            touched.setdefault(path, []).append(sha)
+    statuses, touched = _touched_by_path(work, unit.shas)
     pending: dict[str, list[str]] = {}
     for path in sorted(touched):
-        if path_in_scope(path, unit.scope):
-            verdict.files.append(FileVerdict(path, IN_SCOPE))
-        elif base is None or not path_in_tree(work, base, path):
-            verdict.files.append(FileVerdict(path, NEW))
-        elif any(statuses[sha].get(path) == "D" for sha in touched[path]):
-            verdict.files.append(FileVerdict(path, OUTSIDE, "範囲の外の既存のファイルを消しています"))
-        else:
+        first = _first_verdict(work, base, path, touched[path], statuses, unit.scope)
+        if first is None:
             pending[path] = touched[path]
+        else:
+            verdict.files.append(first)
     if pending and base is not None:
-        common = common_words(work, base, cache_dir)
-        names = changed_names(work, [*unit.context, *unit.shas], unit.scope, base, common, statuses)
-        for path, shas in pending.items():
-            hunks = [(sha, h) for sha in shas for h in commit_hunks(work, sha, path)]
-            if hunks and all(is_caller_rewrite(h, names, common) for _, h in hunks):
-                verdict.files.append(FileVerdict(path, REWRITE))
-                verdict.rewrites.extend({"path": path, "sha": sha} for sha in shas)
-            else:
-                verdict.files.append(FileVerdict(path, OUTSIDE, "変えた名前の読み込み・呼び出しの書き換え以外の変更があります"))
+        _judge_rewrites(work, unit, base, pending, statuses, cache_dir, verdict)
     verdict.files.sort(key=lambda f: f.path)
     return verdict
 
