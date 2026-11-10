@@ -5983,7 +5983,7 @@
     {
       "term": "残高切れ",
       "context": "ndf-relay",
-      "meaning": "API キーの要求が \"credit balance is too low\" で失敗した状態。そのキーは解除の条件を満たすまで候補から外れる",
+      "meaning": "API キーの要求が \"credit balance is too low\" で失敗した状態。そのキーはその 1 回の起動の中でだけ候補から外れる",
       "source": "docs/specifications/ndf-relay-api-keys.md"
     },
     {
@@ -6167,7 +6167,7 @@
     {
       "term": "閾値 T",
       "context": "ndf-relay",
-      "meaning": "API キーへ逃がすかを決める週の使用率の閾値。既定値は調査で決める（受け入れ条件 24）",
+      "meaning": "API キーへ逃がすかと、5 時間の枠のあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85%",
       "pending_source": "issues/issue-2930-requirements.md"
     },
     {
@@ -6193,6 +6193,24 @@
       "context": "ndf-relay",
       "meaning": "relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない",
       "pending_source": "issues/issue-2930-requirements.md"
+    },
+    {
+      "term": "選ぶ順の組",
+      "context": "ndf-relay",
+      "meaning": "アカウントを 4 つに分けた選ぶ順の単位。5 時間の枠を先に使う組・週だけの枠の組・閾値を超えた組・残量不明の組の順に選ぶ",
+      "pending_source": "issues/issue-2930-design.md"
+    },
+    {
+      "term": "観測のスナップショット",
+      "context": "ndf-relay",
+      "meaning": "1 回の起動先の決定の入力。時刻・宣言・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの",
+      "pending_source": "issues/issue-2930-design.md"
+    },
+    {
+      "term": "切り替えの余裕",
+      "context": "ndf-relay",
+      "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
+      "pending_source": "issues/issue-2930-design.md"
     }
   ]
 }
