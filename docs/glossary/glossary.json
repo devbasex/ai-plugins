@@ -5253,6 +5253,30 @@
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
+      "term": "復元の量",
+      "context": "ndf-workflow",
+      "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q",
+      "pending_source": "issues/issue-2908-requirements.md"
+    },
+    {
+      "term": "計測の条件",
+      "context": "ndf-workflow",
+      "meaning": "続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定",
+      "pending_source": "issues/issue-2908-design.md"
+    },
+    {
+      "term": "計測の回",
+      "context": "ndf-workflow",
+      "meaning": "計測の条件 1 つで、フェーズの起動からその後の承認ゲートの答えを受けた最初の呼び出しまでを 1 回として数えたもの",
+      "pending_source": "issues/issue-2908-design.md"
+    },
+    {
+      "term": "待ちの前に切る規則",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートか人の判断の問いを出す直前に、文脈が決めた量を超えていれば会話を切り、新しいセッションで問いを出し直す規則",
+      "pending_source": "issues/issue-2908-design.md"
+    },
+    {
       "term": "境界の判定",
       "context": "ndf-workflow",
       "meaning": "工程の起動 1 回ごとに出す継続 / 再起動 / 拒否と、その帯・理由・使った値の組。1 件ずつ記録に残る",
