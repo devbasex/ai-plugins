@@ -193,6 +193,16 @@ def test_a_new_record_keeps_the_pause_to_the_helper(run):
     assert "launching" not in run.events[-1][1]
 
 
+@pytest.mark.parametrize("launching, stopped", [(True, [["la"]]), (False, [])])
+def test_stopping_a_stalled_lane_stops_it_only_in_a_new_record(run, monkeypatch, launching, stopped):
+    """動かないレーンの「止める」で止めるのは新しい記録だけ。古い記録の打ち直しへ耐久ステップを足さない（記録の次の呼び出しと食い違う）。"""
+    calls = []
+    monkeypatch.setattr(prun, "step_stop_lanes", lambda _main, names: calls.append(names) or [])
+    run.launching = launching
+    run.apply_own({"kind": "stall", "id": "s2", "lane": "la"}, ["止める"])
+    assert calls == stopped
+
+
 def test_an_old_record_answer_returns_the_chosen_command(monkeypatch):
     """古い記録の問い（commands を持つ）は、選んだ答えの 1 行を answer が返す。新しい記録の問いは何も返さない。"""
     q = {"id": "s1", "kind": "stall", "lane": "la", "commands": {"起こし直す": "python3 relay.py restart la"}}

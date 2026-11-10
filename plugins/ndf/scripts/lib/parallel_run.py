@@ -356,8 +356,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             return
         if self.relaunch(q, choice) or prt.STOP_PLAN not in choice:
             return
-        if q.get("kind") == "stall" and q.get("lane") in self.lanes:
-            step_stop_lanes(self.main, [q["lane"]])
+        if q.get("kind") == "stall" and self.launching and q.get("lane") in self.lanes:
+            step_stop_lanes(self.main, [q["lane"]])  # 古い記録の打ち直しへは足さない（旧版はこの答えで何もしなかった）
         elif q.get("kind") == "spawn" and str(q.get("purpose") or "").startswith("held-"):
             self.stop = True  # 保留したループの残りを流す一時レーンを起こせない: 保留の中身はループの記録に残したまま計画を止める
         elif q.get("kind") == "spawn" and q.get("lane") in self.lanes:
