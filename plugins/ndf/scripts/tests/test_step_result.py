@@ -136,12 +136,16 @@ def test_approval_present_requires_targets_consent_and_rollback(tmp_path, kw):
         sr.approval_present("m", "1", **args)
 
 
-def test_deps_missing_is_stopped_and_owned_by_deps():
-    """依存の欠け（#1654）は stopped で、値は deps.py の定数そのもの（写さない）。"""
+def test_deps_missing_is_stopped_and_owned_by_the_exit_table():
+    """依存の欠け（#1654）は stopped で、結果を出す層と依存の確認の値は終了コードの表の定数そのもの（#2988）。"""
     import sys
 
-    deps = sys.modules["deps"]
-    assert sr.EXIT_DEPS_MISSING == deps.EXIT_DEPS_MISSING
+    import deps
+
+    exit_codes = sys.modules["exit_codes"]
+    assert sr.EXIT_DEPS_MISSING is exit_codes.EXIT_DEPS_MISSING is deps.EXIT_DEPS_MISSING
+    assert exit_codes.EXIT_DEPS_MISSING == 69
+    assert sr.EXIT_LABELS is exit_codes.EXIT_LABELS and sr.label_of is exit_codes.label_of
     assert sr.code_matches("stopped", sr.EXIT_DEPS_MISSING)
     assert not sr.code_matches("ok", sr.EXIT_DEPS_MISSING) and not sr.code_matches("gate", sr.EXIT_DEPS_MISSING)
 
