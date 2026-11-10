@@ -113,7 +113,8 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], tag: str = "c
     記録の PR は渡さない（まとめのプランが {queue_record} を持ち、流す時点に探す。#2230）。
     版も渡さない。ループの 1 回の版はもう出ているため、明示すると最終の検査で変更があったときに既出で止まる。
     まとめのデプロイの版は流す時点に次に空いている版で決める（#2164）。"""
-    prev = rec["laps"][lap["n"] - 2] if lap["n"] >= 2 else None
+    # 持ち越しは差分の棚卸しを最後に走らせたループの 1 回から渡す（走らせなかった回の古い値を写さない。#2914 の I6）
+    prev = next((x for x in reversed(rec["laps"][: max(lap["n"] - 1, 0)]) if not (x.get("refine") or {}).get("skipped")), None)
     carry = ((prev or {}).get("refine") or {}).get("deferred") or []
     out = Path(lap["dir"]) / tag
     cmd = [sys.executable, str(SUPERVISE), "new", "close", "--pace", "auto", "--name", lap["sprint"], "--worktree", str(env.main_dir())]
@@ -576,8 +577,13 @@ def failure_key(state: dict) -> dict | None:
     return None
 
 
-def refine_summary(env: Env, rec: dict) -> dict:
-    """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）をループの 1 回の記録の形にする。"""
+def refine_summary(env: Env, rec: dict, lap: dict) -> dict:
+    """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）をループの 1 回の記録の形にする。
+
+    起動の判定が見送り、差分の棚卸しを走らせなかった回は空にして `skipped` の印を付ける（#2914 の決定 6）。"""
+    diff = {r.get("event") for r in lap.get("depths") or [] if r.get("depth") == "diff"}
+    if "not_due" in diff and "ran" not in diff:
+        return {"report": "", "rank_changes": [], "deferred": [], "skipped": True}
     sd = env.upkeep_dir(rec.get("repo") or "")
     cands = jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict)
     rank = jsonio.read(sd / "rank.json", missing={}, broken={}, want=dict)
@@ -637,8 +643,8 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     close_rep = next((p for p in state.get("plans", []) if p.get("kind") == "まとめ"), None)
     if close_rep:
         lap["retro"] = (close_rep.get("row") or {}).get("report", "")
-    lap["refine"] = refine_summary(env, rec)
     backlog_summary(env, rec, lap)
+    lap["refine"] = refine_summary(env, rec, lap)
     lap["deferred_issues"] = sorted(set(lap.get("deferred_issues") or []) | {int(n) for n in deferred_issues})
     lap["failure"] = failure_key(state) if outcome == FAILED else None
     if outcome == FAILED and lap["failure"] is None:
