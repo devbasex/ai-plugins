@@ -187,6 +187,41 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
     assert git("status", "--porcelain", cwd=flow["work"]).stdout.strip() == ""
 
 
+def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """#2457 受け入れ条件 10（PR 2452 の形）: 着手の後に取り込んだベースブランチで落ちたテストは、比較の木
+    （項目のコミットを外した木）でも落ちるため無関係と記録され、通っていた項目は取り消されない。"""
+    work = flow["work"]
+    _existing_tests(
+        flow,
+        {
+            "src/threshold.txt": "10\n",
+            "tests/test_threshold.py": (
+                "import pathlib\n\n\ndef test_threshold():\n    assert int(pathlib.Path('src/threshold.txt').read_text()) >= 10\n"
+            ),
+        },
+    )
+    start = _head(work)
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other")})
+    git("checkout", "-q", "-b", "base-update", start, cwd=work)
+    _write(work, "src/threshold.txt", "5\n")
+    commit_with_trailers(work, "ベースブランチでしきい値を下げた", {})
+    git("checkout", "-q", "-", cwd=work)
+    git("merge", "-q", "--no-edit", "base-update", cwd=work)
+    capsys.readouterr()
+
+    _call(cmd_converge, "cmd_verify")
+
+    assert _emitted(capsys, "VERIFY") == "done"
+    record = read_state(flow["path"])["whole_test"]
+    assert record["preexisting"] == ["tests/test_threshold.py::tests.test_threshold::test_threshold"]
+    assert record["caused"] == [] and not record.get("reverted")
+    assert record["comparison_tree"] and record["comparison_tree"] != start
+    assert record["comparison_fallback"] is None
+    assert _items(flow)["I-001"]["status"] == "verified"
+    assert (work / "src" / "other.py").exists()
+    assert len(_worktrees(work)) == 1, "比較の木の一時の worktree を残さない"
+
+
 def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
     flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
 ):
