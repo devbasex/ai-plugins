@@ -417,7 +417,7 @@ def install_script(root: Path) -> Path:
     (dest / "lib").mkdir(parents=True, exist_ok=True)
     (dest / "data").mkdir(parents=True, exist_ok=True)
     (dest / "instructions-check.py").write_bytes(SCRIPT.read_bytes())
-    for name in ("refresh.py", "deps.py", "md.py", "pathmatch.py", "limits.py"):
+    for name in ("refresh.py", "deps.py", "exit_codes.py", "md.py", "pathmatch.py", "limits.py"):
         (dest / "lib" / name).write_bytes((SCRIPT.parent / "lib" / name).read_bytes())
     (dest.parent / "contracts").mkdir(exist_ok=True)  # 上限の宣言（lib/limits.py が読む）
     (dest.parent / "contracts" / "limits.json").write_bytes((SCRIPT.parents[1] / "contracts" / "limits.json").read_bytes())
