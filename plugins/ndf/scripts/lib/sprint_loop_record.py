@@ -57,6 +57,27 @@ NEXT_STEP_SECTION = handoff_doc.NEXT_STEP_SECTION  # 引継ぎ文書の節（loo
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
 STOP_FILE = "stop"
+STOP_BY = ("user", "organizer", "unknown")  # 止める指示を置いた主体: 人・オーガナイザー（利用者の指示を受けて）・不明（#2910）
+
+
+def stop_order_text(at: str, by: str, reason: str) -> str:
+    """止める指示のファイルの中身（1 行の JSON。置いた時刻・主体・理由）。"""
+    return json.dumps({"at": at, "by": by, "reason": reason}, ensure_ascii=False) + "\n"
+
+
+def read_stop_order(path: Path) -> dict:
+    """止める指示のファイルを読む。主体の記録が無い（時刻だけ・直接置いた・読めない）ものは主体を unknown とし、人の意思として扱わない。"""
+    text = path.read_text(encoding="utf-8").strip()
+    try:
+        got = json.loads(text)
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        return {"at": text, "by": "unknown", "reason": ""}
+    by = got.get("by") if got.get("by") in STOP_BY else "unknown"
+    return {"at": str(got.get("at") or ""), "by": by, "reason": str(got.get("reason") or "")}
+
+
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]*$")
 VERSION = 1
 
@@ -332,7 +353,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     """ループの 1 回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
-        return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
+        return {"condition": "user_stop", "values": read_stop_order(stop_file)}
     if stop := mvv_change_stop(env, rec) or parallel_hold.loop_stop(env.main_dir()):
         return stop
     key, count = failure_streak(rec)

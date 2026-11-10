@@ -110,7 +110,7 @@ def _dispatch(a, update) -> dict | None:
             "finish": lambda: sl.cmd_finish(env, a.loop_name, a.lap, a.done, update=update),
             "pending": lambda: sl.cmd_pending(env, a.loop_name),
             "hold-question": lambda: sl.cmd_hold_question(env, a.loop_name, a.ref, a.plan, a.step, a.parallel),
-            "stop": lambda: sl.cmd_stop(env, a.loop_name),
+            "stop": lambda: sl.cmd_stop(env, a.loop_name, a.by, a.reason),
             "status": lambda: sl.cmd_status(env, a.loop_name),
             "list": lambda: sl.cmd_list(env, a.loop_name),
         }
@@ -199,7 +199,14 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--plan", required=True, help="問いで止まったプラン")
     s.add_argument("--step", required=True, help="答えの後に続けるステップ")
     s.add_argument("--parallel", help="並列の計画名（省くと NDF_RELAY_NAME のレーンが属する計画）")
-    name(ls.add_parser("stop"))
+    s = name(ls.add_parser("stop"))
+    s.add_argument(
+        "--by",
+        choices=("user", "organizer", "unknown"),
+        default="unknown",
+        help="置いた主体（人・利用者の指示を受けたオーガナイザー・不明。既定 unknown）",
+    )
+    s.add_argument("--reason", default="", help="止める理由（止める指示のファイルに書く）")
     for k in ("status", "list"):
         name(ls.add_parser(k)).add_argument("--json", action="store_true")
     s = ls.add_parser("environment", help="実行環境を調べ、同時の数の候補を出す（宣言は書かない）")

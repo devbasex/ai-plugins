@@ -275,6 +275,22 @@ def test_no_session_stops_a_taking_subcommand_and_lets_a_releasing_one_run(monke
     assert not lease.root().exists()
 
 
+def test_a_shared_subcommand_runs_beside_a_live_holder_without_touching_its_key(monkeypatch, sleeper) -> None:
+    """#2910: shared の副命令は生きた持ち主がいても止まらず本体へ戻る。鍵の記録は変えず、取っていないので返さない。"""
+    write(*sleeper)
+    before = lease.path_of("test:pr=7", REPO).read_text()
+    decls = {"loop stop": {"key": KEY, "unit": "run", "window_seconds": 60, "release": True, "shared": True}}
+    monkeypatch.setattr(run_core, "contract_of", lambda e: {"stdout": "json", "lease": decls})
+    monkeypatch.setattr(lease_stage, "_hook_standalone", lambda e: None)
+    monkeypatch.setattr(lease_stage, "_HELD", [])
+    monkeypatch.setattr(lease, "lease_repo", lambda root: REPO)
+
+    out = lease_stage.hold("x", "loop stop", pr=7)
+    assert out.outcome == "shared" and out.holder_pid == sleeper[0]
+    lease_stage.release_held()
+    assert lease.path_of("test:pr=7", REPO).read_text() == before
+
+
 def test_the_key_repo_comes_from_the_given_root(monkeypatch, tmp_path) -> None:
     """鍵のリポジトリは入口の --root（repo_root）から決め、作業ディレクトリから決めない。"""
     seen: list = []

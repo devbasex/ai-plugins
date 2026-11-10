@@ -29,6 +29,7 @@ from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
     LAPS_MD,
+    STOP_BY,
     STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
@@ -47,6 +48,7 @@ from sprint_loop_record import (
     prod_of,
     loop_dir,
     loop_record_path,
+    stop_order_text,
     read_loop_record,
     write_record,
     locked,
@@ -481,11 +483,15 @@ def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
         return loop_ok(f"マイルストーン {milestone} のスプリント MVV を承認した（{row['sha256'][:12]}）", rec, [row], status="approved")
 
 
-def cmd_stop(env: Env, name: str) -> dict:
+def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict:
+    """止める指示を置く。置いた主体（STOP_BY）と理由を書く。ループの記録は読むだけで、持ち主が周回の途中でも置ける（#2910）。"""
+    if by not in STOP_BY:
+        raise LoopError(f"止める指示の主体は {'/'.join(STOP_BY)} のどれか: {by!r}")
     read_loop_record(env, name)
     p = loop_dir(env, name) / STOP_FILE
-    p.write_text(env.now() + "\n", encoding="utf-8")
-    return step_result.result(TOOL, "ok", f"止める指示を置いた（ループの次の 1 回の境で効く）: {p}", [{"path": str(p)}], {"path": str(p)})
+    p.write_text(stop_order_text(env.now(), by, reason.strip()), encoding="utf-8")
+    order = {"path": str(p), "by": by, "reason": reason.strip()}
+    return step_result.result(TOOL, "ok", f"止める指示を置いた（主体 {by}。ループの次の 1 回の境で効く）: {p}", [order], order)
 
 
 # ---------------------------------------------------------------- lap
