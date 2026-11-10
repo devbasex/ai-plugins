@@ -43,6 +43,7 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -340,38 +341,55 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
 
 
 def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
-    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。`CHECKS` を順に当て、スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
     state = json.loads(Path(a.sprint).read_text(encoding="utf-8"))
-    if project.status in ("unapproved", "mismatch", "unreadable"):
-        raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
-    if why := pm.approval_refusal(state, root, project, advise=a.advise):
-        raise Back(why)
-    sprint = sprint_text(state)
-    if sprint is not None:
-        record["sprint_mvv"] = {"sha256": state["mvv"]["sha256"]}
-    if a.mode in EXCLUDED_MODES:
-        raise Back(f"モード {a.mode} は承認ゲートを省かない")
-    infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
-    if changed := decl_changes(infos):
-        raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
-    if hits := boundary_hits(root, infos, a.advise):
-        raise Back("越えない線のパスに当たる: " + " / ".join(hits))
-    materials = []
-    for m in a.material:
+    c = SimpleNamespace(a=a, root=root, project=project, record=record, state=state, sprint=None, infos={}, materials=[])
+    for check in CHECKS:
+        if why := check(c):
+            raise Back(why)
+    return c.sprint, c.materials
+
+
+def _read_sprint(c: SimpleNamespace) -> None:
+    c.sprint = sprint_text(c.state)
+    if c.sprint is not None:
+        c.record["sprint_mvv"] = {"sha256": c.state["mvv"]["sha256"]}
+
+
+def _collect_materials(c: SimpleNamespace) -> str | None:
+    for m in c.a.material:
         if not Path(m).is_file():
-            raise Back(f"材料のファイルが無い: {m}")
-        materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
-        if a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
-            vars(a).setdefault("approved", {})[m] = sha
-    materials += [pr_material(n, info) for n, info in infos.items()]
-    if a.gate == "design":
-        for n, info in infos.items():
+            return f"材料のファイルが無い: {m}"
+        c.materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
+        if c.a.gate == "release" and (sha := ac.material_sha_or_none(m)):  # 従うときに承認の記録を書く（#815 の I10）
+            vars(c.a).setdefault("approved", {})[m] = sha
+    c.materials += [pr_material(n, info) for n, info in c.infos.items()]
+    if c.a.gate == "design":
+        for n, info in c.infos.items():
             for path in design_docs(info):
-                materials.append(design_material(n, path, info, a.repo, root))
-                record["material"].append(f"#{n} {path}")
-    if not materials:
-        raise Back("材料が無い（--material か --pr を渡す）")
-    return sprint, materials
+                c.materials.append(design_material(n, path, info, c.a.repo, c.root))
+                c.record["material"].append(f"#{n} {path}")
+    return None
+
+
+# 機械のチェックを当てる順。外れたら理由を返す（当たらなければ偽）。読んだ値は c へ置き、後のチェックが使う
+CHECKS = (
+    lambda c: (
+        c.project.status in ("unapproved", "mismatch", "unreadable")
+        and f"プロジェクト MVV が{pm.STATUS_LABEL[c.project.status]}（{c.project.error or ''}）"
+    ),
+    lambda c: pm.approval_refusal(c.state, c.root, c.project, advise=c.a.advise),
+    _read_sprint,
+    lambda c: c.a.mode in EXCLUDED_MODES and f"モード {c.a.mode} は承認ゲートを省かない",
+    lambda c: setattr(c, "infos", {n: pr_facts(n, c.a.repo, c.root) for n in c.a.pr}),
+    lambda c: (
+        (changed := decl_changes(c.infos))
+        and "プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed)
+    ),
+    lambda c: (hits := boundary_hits(c.root, c.infos, c.a.advise)) and "越えない線のパスに当たる: " + " / ".join(hits),
+    _collect_materials,
+    lambda c: not c.materials and "材料が無い（--material か --pr を渡す）",
+)
 
 
 def new_record(a, root: Path, project) -> dict:
