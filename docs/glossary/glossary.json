@@ -6401,6 +6401,20 @@
       "meaning": "一時レーンが、リリース承認ゲートの依頼か settle を送った後に自分のラッパーを止めること。区分 helper の問いの対象にしない",
       "source": "",
       "pending_source": "issues/issue-2936-design.md"
+    },
+    {
+      "term": "import の輪",
+      "context": "repo-dev-checks",
+      "meaning": "NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ",
+      "source": "",
+      "pending_source": "issues/issue-2988-requirements.md"
+    },
+    {
+      "term": "一番下の層",
+      "context": "repo-dev-checks",
+      "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれ、自分は上の層を読まない共通ライブラリ。結果を出す層 step_result がこれに当たる",
+      "source": "",
+      "pending_source": "issues/issue-2988-requirements.md"
     }
   ]
 }
