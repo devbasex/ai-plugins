@@ -15,6 +15,6 @@
 | 検証の情報源 | **git と実際のテスト実行。** 結果ファイルの申告は検証に使わない |
 | 外へ出す文章 | 項目は **`<ファイル>#<シンボル>` を併記**し、取り消しは**件数だけ**述べ、リファクタリング計画は**生の URL**で書く |
 | 最終ゲート | `--ci-check` があれば継続的統合、無ければ全体テスト。単独起動はその後に `cross-review` |
-| 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json`（版 2）。中断・再開可能 |
+| 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json`（版 3）。中断・再開可能 |
 
 **push が credential helper の不全で落ちたときは、オーケストレーターが退避して 1 度だけやり直す**。退避の値は共通ライブラリ（`<プラグインルート>/scripts/lib/git-credential.sh`）が持つ。

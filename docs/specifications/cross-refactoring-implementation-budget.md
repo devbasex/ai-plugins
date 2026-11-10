@@ -75,6 +75,25 @@ PR https://github.com/devbasex/ai-plugins/pull/2452 の完了判定で、cross-r
 全体テストの変更起因の原因の項目が決まらないときは、取り消さずに最終ゲート修正へ寄せる。JUnit を読めず着手前も落ちて
 いたときは、まとめて取り消さずに落ちたテストの材料を残す。
 
+### 落ちたテストの仕分け（`triage`・`comparison`・`flaky`）
+
+| 分類 | 見分け方 | 扱い |
+| --- | --- | --- |
+| フレーキー | 今の HEAD で走らせ直すと通る | 合否に数えない。その実行の中で直す（下） |
+| 無関係な失敗（既存失敗） | 比較の木でも落ちる。`init` の既存失敗に載る ID も同じ | 合否と停滞の判定に数えない |
+| 変更起因 | 今の HEAD で再び落ち、比較の木では通る | 原因の項目の成立を判定して直す |
+
+比較の木は、今の HEAD から取り消していない改善項目と最終ゲート修正のコミットを新しい順に `git revert --no-commit` で外した木を、
+どのブランチにも載せないコミット（`git commit-tree`）にしたものである。着手の後に取り込んだベースブランチの変更を含むため、
+取り込みで落ちたテスト（PR 2452 の形）は無関係な失敗になる。木は状態の置き場の下の一時の worktree で作って消す。
+外すコミットが衝突して作れないときは着手前の HEAD で比べ、理由を `comparison_fallback` に残す。
+
+フレーキーと見分けたテストは、1 回の実行で 1 テストにつき 1 回だけ、実装担当へ `flaky-fix` の工程で直しを依頼する
+（`flaky_request`）。直しは `Flaky-Fix: <テストの ID>` を持つテストのファイルだけのコミットで、オーケストレーターが残す
+コミットとして台帳に載り、`flaky_fixes[]`（`test_id`・`commit`・`by`・`result`）に残る。項目の合否と実装時間には数えず、
+安全網には数える。手順の違反は 1 回だけ差し戻し、直らなければ直しのコミットを `git revert` で打ち消す。項目には触れない。
+最終ゲートで見分けたときは、直してから確かめ直す（`FINAL_GATE=flaky`）。
+
 ### 最終ゲート
 
 | 決まり | 中身 |
@@ -113,10 +132,10 @@ PR https://github.com/devbasex/ai-plugins/pull/2452 の完了判定で、cross-r
 
 | 置き場 | 値 |
 | --- | --- |
-| `plugins/ndf/contracts/limits.json` | `cross-refactoring.default-budget`（3600 秒）・`cross-refactoring.budget-extension`（`factor: 2`）・`cross-refactoring.safety-net`（`factor: 2`）・`cross-refactoring.fix-progress`（`same_cause: 2`）・`monitor.phase.judge`（1200 秒） |
-| 状態ファイル | `budget`（`minutes`・`source`・`effective_minutes`・`extension`）・`safety_net_minutes`・`safety_net`（`limit_minutes`・`used_seconds`・`halted_at`）・`items[].feasibility[]`・`fix_history[]`・`fixer`・`fixer_switched`・`outside_scope[]`・`sendbacks[]`・`coding_seconds`・`revert_reason`・`halt`・`feasibility_request` |
+| `plugins/ndf/contracts/limits.json` | `cross-refactoring.default-budget`（3600 秒）・`cross-refactoring.budget-extension`（`factor: 2`）・`cross-refactoring.safety-net`（`factor: 2`）・`cross-refactoring.fix-progress`（`same_cause: 2`）・`monitor.phase.judge`（1200 秒）・`monitor.phase.flaky-fix`（3600 秒。駆動は安全網の残りを渡す） |
+| 状態ファイル | `budget`（`minutes`・`source`・`effective_minutes`・`extension`）・`safety_net_minutes`・`safety_net`（`limit_minutes`・`used_seconds`・`halted_at`）・`items[].feasibility[]`・`fix_history[]`・`fixer`・`fixer_switched`・`outside_scope[]`・`sendbacks[]`・`coding_seconds`・`revert_reason`・`halt`・`feasibility_request`・`flaky_request`・`flaky_requested`・`flaky_fixes[]`。版は 3（`schema: 3`）で、版 2 の途中の状態ファイルは再開せずに止める |
 
 ## 関連リンク
 
 - 要求: https://github.com/devbasex/ai-plugins/issues/2457
-- コード: `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py`・`progress.py`・`fixloop.py`・`safety_net.py`・`item_actuals.py`・`failure_material.py`・`undo.py`・`commands/converge.py`・`commands/judge.py`・`commands/gate.py`
+- コード: `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py`・`progress.py`・`fixloop.py`・`safety_net.py`・`item_actuals.py`・`failure_material.py`・`undo.py`・`commands/converge.py`・`comparison.py`・`commands/judge.py`・`commands/flaky.py`・`commands/gate.py`

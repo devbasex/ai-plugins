@@ -615,7 +615,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 改善項目 | — | リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、Item-Id の同じコミットを何件でも持てる（テストを足すコミットは 1 件） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 配分テーブル | — | 種類ごとの 1 件あたりの所要（分）。履歴の直近からリファクタリング計画のたびに集計し、保存しない（plan.table） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 変更したファイル | — | 判定の起点から変わったファイルのうち、worktree に残るもの。起点は判定ごとに決まる。項目の範囲テストではその項目のコミット（実装と修正）、最終ゲートでは着手前の HEAD、`test-run.py whole` では merge-base である。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる | — | — | — |
-| フレーキー / 既存失敗 / 変更起因 | — | 全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類（flaky / preexisting / caused。着手前は baseline_test.existing_failures（既存失敗）、危険フラグは whole_test、最終ゲートは final_gate.checks[] の記録に書く）。ID は JUnit から読み、落ちたファイルだけを HEAD と着手前の HEAD で走らせ直して分ける | 元からの失敗 | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| フレーキー / 既存失敗 / 変更起因 | — | 全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類（flaky / preexisting / caused。着手前は baseline_test.existing_failures（既存失敗）、危険フラグは whole_test、最終ゲートは final_gate.checks[] の記録に書く）。ID は JUnit から読み、落ちたファイルだけを HEAD と比較の木で走らせ直して分ける。フレーキーと既存失敗は項目の合否に数えず、フレーキーはその実行の中で直す | 元からの失敗 | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 指標 | — | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数、重複の箇所 | — | — | — |
 | 指標のファイル | — | 提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果 | — | — | — |
 | 測定ツール | — | 言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard・symilar・jscpd など） | — | — | — |
@@ -670,7 +670,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 振動 | — | 修正の後の落ちたテストの集合が、前に見た集合へ戻ること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 安全網の上限 | — | コーディングの CLI（テストの追加・実装・修正・最終ゲート修正）の起動ごとの秒の累計に置く上限。既定は実効の予算 × 2。異常の検知にだけ使い、当たっても取り消さずに止めて人へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 実効の予算 | — | 予算の延長を当てた後の実装の予算。延ばさなければ実装の予算と同じ | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
-| 比較の木 | — | HEAD から、取り消していない改善項目のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。無関係な失敗の見分けに使う | — | — | — |
+| 比較の木 | — | HEAD から、取り消していない改善項目と最終ゲート修正のコミットをすべて外した木。着手の後に取り込んだベースブランチの変更を含む。そこでも落ちるテストを無関係な失敗として見分ける | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
+| フレーキーの直し | — | cross-refactoring がその実行の中でフレーキーと見分けたテストを、実装担当に 1 テストにつき 1 回だけ直させる工程（flaky-fix）。直しは Flaky-Fix のトレーラーを持つテストだけのコミットで、項目の合否と実装時間に数えない | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 差し戻し | — | 改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 落ちたテストの材料 | — | 落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 判定の担い手 | — | 成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
