@@ -254,7 +254,7 @@ python3 scripts/check-skill-repo-assumptions.py [--skills-dir D]... [--allow DIR
 - 当たりが 0 件または宣言より少ない項目で終了コード 2 になり、新しい当たりがあっても 2 が先に判定されること
 - 理由が空・`pending` に `issue` が無い・`not-a-violation` に `issue` がある・同じ組が 2 つ・置き場がファイルのとき終了コード 2 になること
 - リリースのスクリプト 3 本（`release-steps.py`・`lib/step_result.py`・`release-verification-steps.py`）にファイル全体の除外が無いこと
-- 実物のリポジトリで終了コード 0 で終わり、family を 1 つだけ指定した走査でも他の family の項目で落ちないこと
+- family を 1 つだけ指定した走査で、実物のリポジトリの他の family の項目で落ちないこと。実物のリポジトリで終了コード 0 で終わることは、全体テストの suite `skill-repo-assumptions-check`（`python3 scripts/check-skill-repo-assumptions.py`）が確かめる
 - `--report` が規模の行を出し、当たりがあれば終了コード 1 のままであること
 - `production_branch: prod` の宣言で、並列の計画の 2 つの照会が `--base prod` を渡すこと。宣言が無く既定ブランチが `main` なら `--base main` を渡すこと。本番が決まらないとき照会を打たないこと
 - 宣言も既定ブランチも無いリポジトリで、`pr-steps.py` の `plan`・`create` が止まり、Pull Request を作るコマンドを呼ばないこと
