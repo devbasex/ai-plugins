@@ -1,6 +1,6 @@
 # cross-refactoring: 実装の時間の配分・採り直し・中断の後の締め切りのずらし
 
-> **#2457 で置き換えた決まり:** この文書のうち、実装の時間を締め切りから配る決まり、採り直しの残りを実装時間の実績で数える決まり、中断の後に締め切りをずらす決まりは今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+> **今は働かない記述:** この文書のうち、実装の時間を締め切りから配る決まり、採り直しの残りを実装時間の実績で数える決まり、中断の後に締め切りをずらす決まりは今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
 
 ## 概要
 

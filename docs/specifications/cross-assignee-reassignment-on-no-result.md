@@ -1,6 +1,6 @@
 # 結果を残さなかった担当の振り替え: cross-review / cross-refactoring の担当が利用上限か 2 度目の結果なしで止まらず、別の claude のアカウントか残りの参加者へ振り替えて先へ進む
 
-> **#2457 で置き換えた決まり:** この文書のうち、cross-refactoring の工程と項目の締め切り（振り替えの後も延ばさない・締め切りを使い切った項目を `not_done` にする）に触れる記述は今は働かない。cross-refactoring は締め切りを持たず、コーディングの起動の秒を安全網の累計に数える。振り替えの規則そのものはそのまま働く。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+> **今は働かない記述:** この文書のうち、cross-refactoring の工程と項目の締め切り（振り替えの後も延ばさない・締め切りを使い切った項目を `not_done` にする）に触れる記述は今は働かない。cross-refactoring は締め切りを持たず、コーディングの起動の秒を安全網の累計に数える。振り替えの規則そのものはそのまま働く。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
 
 ## 目的
 

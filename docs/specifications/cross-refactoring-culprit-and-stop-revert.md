@@ -1,6 +1,6 @@
 # cross-refactoring: 全体テストが落ちたときの原因の項目の判定・構造チェックの範囲テスト・打ち切りの後の取り消し
 
-> **#2457 で置き換えた決まり:** この文書のうち、打ち切りの後に原因の項目を取り消し、挙げられなければ起点の木へ戻す決まり（`stop_revert.py` は消した）は今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
+> **今は働かない記述:** この文書のうち、打ち切りの後に原因の項目を取り消し、挙げられなければ起点の木へ戻す決まり（`stop_revert.py` は消した）は今は働かない。今の決まり（予算は選ぶ件数にだけ使う・成立しないと判定した項目のコミットだけを `git revert` で打ち消す・無関係な失敗は比較の木で見分ける・安全網の上限で止めて人へ渡す）は [cross-refactoring-implementation-budget.md](cross-refactoring-implementation-budget.md) にある。
 
 [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の検証と最終ゲートのうち、全体テストの失敗を原因の項目へ帰す判定、構造チェックを項目の範囲テストで走らせる宣言、工程として起動したときの打ち切りの後の取り消しを持つ。決定の理由・常に成り立つ条件・状態ファイルのキー・テスト観点はそちらにある。手順は `cross-refactoring` の [docs/04-verify-and-report.md](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md) が正。
 
