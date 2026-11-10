@@ -6163,6 +6163,12 @@
       "context": "ndf-workflow",
       "meaning": "新しい承認を生む作業以外の作業。承認した設計の実装、設計のステップを置かないモードの課題、答えの届いた保留したループの 1 回の残りを含む",
       "pending_source": "issues/issue-2913-requirements.md"
+    },
+    {
+      "term": "溜めた依頼",
+      "context": "ndf-workflow",
+      "meaning": "業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と問いの依頼。業務時間の始めにまとめて示す",
+      "pending_source": "issues/issue-2913-design.md"
     }
   ]
 }
