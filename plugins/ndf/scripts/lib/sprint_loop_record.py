@@ -43,6 +43,7 @@ import limits
 import step_result
 from gate_answer import DESIGN_GATE, RELEASE_GATE, canonical  # noqa: F401 -- 開発ループのモジュールへ再び公開する
 from pace import over_budget
+from sprint_loop_stop import STOP_BY, STOP_FILE, read_stop_order  # noqa: F401 -- 正本として再び公開する
 from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDING  # noqa: F401 -- 正本として再び公開する
 
 
@@ -56,7 +57,6 @@ HANDOFF_DIR = Path(".ndf") / "handoff"
 NEXT_STEP_SECTION = handoff_doc.NEXT_STEP_SECTION  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
-STOP_FILE = "stop"
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]*$")
 VERSION = 1
 
@@ -332,7 +332,7 @@ def boundary_stop(env: Env, rec: dict) -> dict | None:
     """ループの 1 回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
-        return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
+        return {"condition": "user_stop", "values": read_stop_order(stop_file)}
     if stop := mvv_change_stop(env, rec) or parallel_hold.loop_stop(env.main_dir()):
         return stop
     key, count = failure_streak(rec)

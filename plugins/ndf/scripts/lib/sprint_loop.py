@@ -29,7 +29,6 @@ from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
     LAPS_MD,
-    STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
     EXIT_REFUSED,
@@ -87,6 +86,7 @@ from sprint_loop_gate import (
 
 from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
 from sprint_loop_select import resume_answer_hold
+from sprint_loop_stop import STOP_FILE, read_stop_order, stop_order_text
 
 
 # ---------------------------------------------------------------- start
@@ -481,11 +481,11 @@ def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
         return loop_ok(f"マイルストーン {milestone} のスプリント MVV を承認した（{row['sha256'][:12]}）", rec, [row], status="approved")
 
 
-def cmd_stop(env: Env, name: str) -> dict:
+def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict:
     read_loop_record(env, name)
-    p = loop_dir(env, name) / STOP_FILE
-    p.write_text(env.now() + "\n", encoding="utf-8")
-    return step_result.result(TOOL, "ok", f"止める指示を置いた（ループの次の 1 回の境で効く）: {p}", [{"path": str(p)}], {"path": str(p)})
+    (p := loop_dir(env, name) / STOP_FILE).write_text(stop_order_text(env.now(), by, reason), encoding="utf-8")
+    order = {"path": str(p), **read_stop_order(p)}
+    return step_result.result(TOOL, "ok", f"止める指示を置いた（主体 {by}。ループの次の 1 回の境で効く）: {p}", [order], order)
 
 
 # ---------------------------------------------------------------- lap

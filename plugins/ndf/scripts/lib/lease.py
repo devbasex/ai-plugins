@@ -57,10 +57,13 @@ class Decl:
     unit: str
     window_seconds: int
     release: bool = False
+    shared: bool = False  # 生きた持ち主がいても断らず、鍵を取らずに本体を走らせる（止める指示を置くだけの副命令。#2910）
 
     @classmethod
     def of(cls, raw: dict) -> "Decl":
-        return cls(str(raw["key"]), str(raw["unit"]), int(raw["window_seconds"]), bool(raw.get("release", False)))
+        return cls(
+            str(raw["key"]), str(raw["unit"]), int(raw["window_seconds"]), bool(raw.get("release", False)), bool(raw.get("shared", False))
+        )
 
     def key_of(self, inputs: dict[str, Any]) -> str:
         """鍵の形を入力で埋める。足りない入力は KeyError。"""

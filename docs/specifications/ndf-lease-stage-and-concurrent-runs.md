@@ -114,7 +114,7 @@ graph TD
 | cross-review の `drive.py` | — | `cross-review:pr={pr}` | `run` |
 | cross-review の `state.py` | `init` | `cross-review:pr={pr}` | `run` |
 | `supervise.py` | `queue`（`--resume` を含む） | `supervise.queue:done={done}` | `run` |
-| `sprint-state.py` | `loop` の `start`・`select`・`exclude`・`sprint`・`gate`・`lap`・`pending`・`hold-question`・`stop`・`finish` | `supervise.loop:name={name}` | `session`（`stop`・`finish` は `release: true`） |
+| `sprint-state.py` | `loop` の `start`・`select`・`exclude`・`sprint`・`gate`・`lap`・`pending`・`hold-question`・`stop`・`finish` | `supervise.loop:name={name}` | `session`（`stop`・`finish` は `release: true`、`stop` は `shared: true`） |
 
 - `{done}` はリポジトリの根からの相対パスにする（`supervise_lib/paths.queue_done_key`。git の外は絶対パス）。worktree の違いで鍵が割れない
 - `loop` の副命令のうち、利用者が答える `answer`・`approve-mvv` と、読むだけの `status`・`list`・`environment` は宣言せず、持ち主の段を通らない。
@@ -147,6 +147,7 @@ sequenceDiagram
 | `acquired`（無い・終わっていた） / `reclaimed`（死んだ持ち主を引き取った） | 本体へ戻る。単位 `run` なら終わりで返す | 本体の結果のまま |
 | `inherited`（持ち主のプロセスが自分か祖先） | 本体へ戻る。単位 `run` なら終わりで返さない | 本体の結果のまま |
 | `refused`（生きた持ち主がいる） | 止まる | `stopped`・3 |
+| `refused`、`shared: true` の副命令（`loop stop`） | 結果を `shared` にして本体へ戻る。持ち主の鍵の記録は変えず、取っていないので返さない。ループの 1 回の途中のループへ止める指示を置ける | 本体の結果のまま |
 | `no_session`（単位 `session` でランタイムのセッションが無い）、鍵を取る副命令 | 止まる。本体を走らせない | `stopped`・1 |
 | `no_session`、`release: true` の副命令（`loop stop`・`loop finish`） | 記録を読み書きせずに本体へ戻る。利用者が Claude Code・Codex の外の端末からループを止められる | 本体の結果のまま |
 | 鍵を作る入力が無い | 止まる | `stopped`・2 |
@@ -208,7 +209,7 @@ sequenceDiagram
 | 事象 | 扱い |
 | --- | --- |
 | `filelock` か `psutil` が無い | 使う入口は `deps.require("locks", "procs")` を先に呼び、記録を読む前に `stopped`・69 と足りないグループ名を返す |
-| 契約の `lease` の形が違う | 契約の検査（`_check_lease`）が落とす。`key` は `{入力の名前}` を含む文字列、`unit` は `run` / `session`、`window_seconds` は正の整数、`release` は任意 |
+| 契約の `lease` の形が違う | 契約の検査（`_check_lease`）が落とす。`key` は `{入力の名前}` を含む文字列、`unit` は `run` / `session`、`window_seconds` は正の整数、`release` と `shared` は任意の真偽値 |
 
 ## セキュリティ
 
