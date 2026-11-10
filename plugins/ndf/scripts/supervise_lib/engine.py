@@ -179,6 +179,8 @@ class Engine:
 
     def report(self, result: str, reason: str) -> str:
         self.actuals.end(result)
+        if why := self.handlers["pr"].refresh_mode_line(self.ctx):  # PR を出した後に通した工程を本文へ（#2921）
+            self.state.process.append({"run": "PR 本文の通した工程の書き直し", "result": why})
         text = self.state.write_report(self.plan, result, reason)
         write_phase_result(self.state.dir, self.plan, result, reason)
         return text

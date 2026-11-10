@@ -1775,6 +1775,49 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     assert sum(pr_step.PR_FOOTER in l for l in lines) == 1
 
 
+FAKE_GH_PR_EDIT = """#!{py}
+import os, sys
+a = sys.argv[1:]
+path = os.environ["FAKE_GH_BODY"]
+if a[:2] == ["pr", "list"]:
+    sys.exit(0)
+if a[:2] in (["pr", "create"], ["pr", "edit"]):
+    open(path, "w").write(a[a.index("--body") + 1])
+    if a[1] == "create":
+        print("https://github.com/o/r/pull/5")
+    sys.exit(0)
+if a[:2] == ["pr", "view"]:
+    print(open(path).read()); sys.exit(0)
+sys.exit(1)
+"""
+
+
+def test_pr_body_stages_include_steps_after_pr(tmp_path, monkeypatch):
+    """スプリントの検査のプランの形（PR を出した後に構造改善・実装レビュー・完了判定）で、本文の通した工程が
+    プランの通ったステップの工程と一致する（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "refactor"},
+            {"id": "refactor", "type": "run", "cmd": "true", "stage": "構造改善", "next": "review"},
+            {"id": "review", "type": "run", "cmd": "true", "stage": "実装レビュー", "next": "test-all"},
+            {"id": "test-all", "type": "run", "cmd": "true", "stage": "完了判定", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    text = engine.Engine(plan, tmp_path / "state").run()
+    assert "結果: 完了" in text, text
+    lines = [l for l in body.read_text().splitlines() if l.strip()]
+    assert lines[-2] == "モード: standard / 通した工程: 実装 → Pull Request → 構造改善 → 実装レビュー → 完了判定"
+    assert lines[-1].startswith("🤖 Generated with")
+
+
 def advance_develop(root):
     """feat/x を切った後に develop を進める（他の PR が取り込まれた形）。"""
     git(root, "checkout", "-q", "develop")
