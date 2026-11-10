@@ -25,6 +25,7 @@ from supervise_lib import decl, limits, paths, rerun
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
+from supervise_lib import pr as pr_lib
 from supervise_lib.pr import PrStep
 from supervise_lib.queue import NOT_RUN
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
@@ -179,7 +180,7 @@ class Engine:
 
     def report(self, result: str, reason: str) -> str:
         self.actuals.end(result)
-        if why := self.handlers["pr"].refresh_mode_line(self.ctx):  # PR を出した後に通した工程を本文へ（#2921）
+        if why := pr_lib.refresh_mode_line(self.ctx):  # PR を出した後に通した工程を本文へ（#2921）
             self.state.process.append({"run": "PR 本文の通した工程の書き直し", "result": why})
         text = self.state.write_report(self.plan, result, reason)
         write_phase_result(self.state.dir, self.plan, result, reason)

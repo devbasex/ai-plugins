@@ -211,7 +211,7 @@ class PrStep:
             body, placed = with_design_diff(body, diff)
             sections += [] if placed else [diff]
         body = self.with_appended(ctx, body, step, sections)
-        body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
+        body = with_mode_line(body, ctx.plan.get("モード"), passed_stages(ctx, step))
         if step.get("decisions"):
             body = self.with_decisions(ctx, body, base)
         return self._publish(ctx, base, branch, doc_title or title, body, retitle=doc_title is not None)
@@ -366,35 +366,37 @@ class PrStep:
         ctx.state.cur.update(exit=p.returncode, text=(url + "\n" + p.stderr).strip())
         return p.returncode == 0, url
 
-    def refresh_mode_line(self, ctx) -> str | None:
-        """プランの終わりに、PR 本文のモードの 1 行へ、PR を出した後に通した工程を書き足す（#2921）。
 
-        スプリントの検査のプランは PR を出してから構造改善・実装レビュー・完了判定を通す。PR を出す時点の行には
-        それらが載らないため、書いた工程の並びの後ろへ、このプランで通した工程のうち未記載のものを通った順に足す。
-        モードの 1 行が無い本文（リリースの PR など）・計画にモードか PR が無いときは何もしない。
-        書き直せなければ理由を返す（記録の欠けで工程を止めない）。"""
-        mode, pr = ctx.plan.get("モード"), ctx.plan.get("Pull Request")
-        if not mode or not pr:
-            return None
-        got = gh_call.gh(["pr", "view", str(pr), "--json", "body", "--jq", ".body"], cwd=ctx.cwd)
-        if got.returncode != 0:
-            return f"PR {pr} の本文を読めない: {got.stderr.strip()[:200]}"
-        body = got.stdout
-        written = stages_in(body)
-        if written is None:
-            return None
-        stages = written + [s for s in self.passed_stages(ctx) if s not in written]
-        if stages == written:
-            return None
-        p = gh_call.gh(["pr", "edit", str(pr), "--body", with_mode_line(body, mode, stages)], cwd=ctx.cwd)
-        return None if p.returncode == 0 else f"PR {pr} の本文を書き直せない: {p.stderr.strip()[:200]}"
+def passed_stages(ctx, step: dict | None = None) -> list[str]:
+    """通した工程（ステップの stage）を通った順に重ねずに返す。step を渡せばそのステップの工程も含める。"""
+    stages: list[str] = []
+    ids = [e.get("id") for e in ctx.state.log] + ([step["id"]] if step else [])
+    for sid in ids:
+        stage = (ctx.steps.get(sid) or {}).get("stage")
+        if stage and stage not in stages:
+            stages.append(stage)
+    return stages
 
-    def passed_stages(self, ctx, step: dict | None = None) -> list[str]:
-        """通した工程（ステップの stage）を通った順に重ねずに返す。step を渡せばそのステップの工程も含める。"""
-        stages: list[str] = []
-        ids = [e.get("id") for e in ctx.state.log] + ([step["id"]] if step else [])
-        for sid in ids:
-            stage = (ctx.steps.get(sid) or {}).get("stage")
-            if stage and stage not in stages:
-                stages.append(stage)
-        return stages
+
+def refresh_mode_line(ctx) -> str | None:
+    """プランの終わりに、PR 本文のモードの 1 行へ、PR を出した後に通した工程を書き足す（#2921）。
+
+    スプリントの検査のプランは PR を出してから構造改善・実装レビュー・完了判定を通す。PR を出す時点の行には
+    それらが載らないため、書いた工程の並びの後ろへ、このプランで通した工程のうち未記載のものを通った順に足す。
+    モードの 1 行が無い本文（リリースの PR など）・計画にモードか PR が無いときは何もしない。
+    書き直せなければ理由を返す（記録の欠けで工程を止めない）。"""
+    mode, pr = ctx.plan.get("モード"), ctx.plan.get("Pull Request")
+    if not mode or not pr:
+        return None
+    got = gh_call.gh(["pr", "view", str(pr), "--json", "body", "--jq", ".body"], cwd=ctx.cwd)
+    if got.returncode != 0:
+        return f"PR {pr} の本文を読めない: {got.stderr.strip()[:200]}"
+    body = got.stdout
+    written = stages_in(body)
+    if written is None:
+        return None
+    stages = written + [s for s in passed_stages(ctx) if s not in written]
+    if stages == written:
+        return None
+    p = gh_call.gh(["pr", "edit", str(pr), "--body", with_mode_line(body, mode, stages)], cwd=ctx.cwd)
+    return None if p.returncode == 0 else f"PR {pr} の本文を書き直せない: {p.stderr.strip()[:200]}"
