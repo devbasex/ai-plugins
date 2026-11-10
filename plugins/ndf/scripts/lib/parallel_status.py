@@ -63,12 +63,17 @@ def _ledger(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
         import parallel_ledger as plg
 
         last: dict[str, str] = {}
-        for r in plg.read_ledger_rows(main, name, 0).rows:
+        rows = plg.read_ledger_rows(main, name, 0).rows
+        for r in rows:
             by, at = r.get("by"), r.get("at")
             if by and by != "organizer" and at and str(at) > last.get(by, ""):
                 last[by] = str(at)
-        waiting = {q.get("lane") for q in plg.pending_questions(main, name) if isinstance(q, dict) and q.get("lane")}
-        return last, waiting
+        if "opened" in {r["kind"] for r in rows}:  # 耐久ワークフローが外した問いをチェックポイントで除く
+            pending = plg.pending_questions(main, name)
+        else:
+            answered = {r["id"] for r in rows if r["kind"] == "answer"}
+            pending = [{"lane": r.get("by")} for r in rows if r["kind"] in plg.QUESTIONS and r["id"] not in answered]
+        return last, {q.get("lane") for q in pending if isinstance(q, dict) and q.get("lane")}
     except Exception:  # noqa: BLE001
         return {}, set()
 

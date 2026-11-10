@@ -46,6 +46,9 @@ def step_waiting_lanes(main: str, name: str) -> list[str]:
     return prt.waiting_lanes(Path(main), name)
 
 
+OWN_KINDS = ("stall", "helper", "spawn", "observe", "build", "unmatched")  # 耐久ワークフローが自分で立てる問いの区分
+
+
 class AnswerRouting:
     """答えを読んで動く側へ届ける。`_Run` の値（`questions`・`answered`・`revive`・`wake`・`routed` ほか）を使う。"""
 
@@ -148,7 +151,8 @@ class AnswerRouting:
         """問いの止まった持ち主を再起動の対象へ入れる: 1 スプリントのレーンと、記録が `waiting_only` で答えのまだの行を持つループのレーン
         （#2510 の決定 9）。問いを送った一時レーンは、この場で再起動する（打つ前の一覧で動いていれば打たない）。"""
         senders = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))}
-        for h in sorted(x for x in senders if x and x not in self.lanes and x.startswith(f"{self.name}-rel")):
+        own = q.get("kind") in OWN_KINDS  # 耐久ワークフローが立てた問いの答えは apply_own が当てる
+        for h in sorted(x for x in senders if x and not own and x not in self.lanes and x.startswith(f"{self.name}-rel")):
             self.launch_once(f"ans-{h}-{q.get('id')}", h, ["restart", h])  # 問いを保留して止まった一時レーン（計画全体の停止の間も起こす）
         owners = senders & self.stopped()
         waits = set(step_waiting_lanes(self.main, self.name)) if self.routed and owners - self.sprint else set()

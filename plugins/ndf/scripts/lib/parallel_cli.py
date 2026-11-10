@@ -113,15 +113,14 @@ def wait_event(main: Path, name: str, after: int, timeout: float):
 
     import durable
 
-    end = time.monotonic() + timeout
+    end, left = time.monotonic() + timeout, timeout
     while True:
         got = durable.wait_from(
-            pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), list(WAIT_KEYS), after,
-            max(0.0, end - time.monotonic()), start=pl.record_start(main),
-        )  # fmt: skip
+            pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), list(WAIT_KEYS), after, left, start=pl.record_start(main)
+        )
         if got.kind != "event" or got.value.get("key") != "questions" or has_unanswered(main, name, got.value.get("items") or []):
             return got, after
-        after = int(got.value.get("seq") or after)
+        after, left = int(got.value.get("seq") or after), max(0.0, end - time.monotonic())
 
 
 def wait_plan(a, reply, main: Path, self_path: Path) -> None:

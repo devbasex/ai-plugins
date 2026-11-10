@@ -86,7 +86,7 @@ def step_launch(main: str, argv: list[str], lane: str, cwd: Optional[str] = None
             if time.time() >= end:
                 break
             time.sleep(gap)
-        reason = f"{limit:.0f} 秒のうちに一覧で動いて観えない"
+        reason = f"{limit:g} 秒のうちに一覧で動いて観えない"
     return {"result": "failed", "attempts": 2, "at": _stamp(t0), "reason": reason}
 
 
@@ -108,7 +108,9 @@ class LaunchRouting:
         if rec["result"] != "up":
             text = f"レーン {lane} を 2 回起動しても立ち上がらない（{rec.get('reason')}）"
             spec = {"argv": list(argv), "cwd": cwd, "fresh": fresh}
-            self.ask("spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra)
+            self.ask(
+                "spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra
+            )
         return rec
 
     def launch_helper(self) -> None:

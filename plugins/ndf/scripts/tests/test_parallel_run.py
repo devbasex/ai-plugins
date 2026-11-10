@@ -68,7 +68,9 @@ FAKE = textwrap.dedent(
             else:
                 import time
                 st = json.load(open(states)) if os.path.exists(states) else {}
-                st[name] = {"state": "running", "at": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "role": "helper" if sub == "spawn" else None}
+                now = time.time()
+                at = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"
+                st[name] = {"state": "running", "at": at, "role": "helper" if sub == "spawn" else None}
                 json.dump(st, open(states + ".tmp", "w"))
                 os.replace(states + ".tmp", states)
         print(json.dumps({"items": [{"result": "started"}], "metrics": {}}))
@@ -179,7 +181,8 @@ def helper_up(states, name):
 def set_state(states, name, state, at=None):
     """一覧の 1 行を書き換える（他の行は残す）。`at` を省けば今の時刻。"""
     st = json.loads(states.read_text()) if states.exists() else {}
-    st[name] = {"state": state, "at": at or time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}
+    now = time.time()  # 一覧の at はミリ秒まで持つ（秒で切ると、打った直後の止まりを打つ前の行と読む）
+    st[name] = {"state": state, "at": at or time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"}
     states.write_text(json.dumps(st))
 
 
