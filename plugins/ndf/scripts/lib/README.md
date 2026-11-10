@@ -93,6 +93,7 @@
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
+| [diff_kinds.py](diff_kinds.py) | 差分のファイルを文書のファイル（うち振る舞いを決める文書・テストが読む文書）とコードのファイルに分け、テストが読む文書に対応するテストを求める。宣言は `.ndf/project.json` の `docs`（無ければ既定）。分類はファイルも git も読まない。標準ライブラリと `pathmatch` だけ | `refactor.py assess`・`refactor-scope.py`・`check-trigger.py scope`・`test-run.py whole`・`behavior-check.py`・根の `scripts/ci-heavy-skip.py` |
 | [textparse.py](textparse.py) | unified diff の足した行の番号。unidiff を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
 | [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。上限・間隔・回数は方針で受け、同じ原因（[cause_key.py](cause_key.py) の原因の鍵）の失敗が方針の回数に達したら止まり、期限の時刻に最後の照会を打ってから止まる。止まった理由は結果に載る。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
