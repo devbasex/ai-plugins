@@ -113,6 +113,44 @@ def _inspect_fix_commits(
     }
 
 
+def _item_id_of(work: str, sha: str) -> str:
+    """コミットの `Item-Id` トレーラーを読む（無ければ空文字）。"""
+    return str(commit_trailers(work, sha).get("Item-Id") or "").strip()
+
+
+def _revert_bad(state: dict[str, Any], work: str, ordered: list[str], bad: set[str]) -> set[str]:
+    """手順を外れたコミットを打ち消して台帳へ記録し、打ち消せたコミットを返す。衝突したら巻き戻して空を返す。"""
+    before = head_sha(work) or ""
+    conflict = revert_range(work, [s for s in ordered if s in bad])  # `ordered` は新しい順
+    if conflict:
+        reset_hard(work, before)
+        info(f"⚠ 手順を外れた修正のコミット {conflict[:12]} を打ち消せません（衝突）。打ち消さずに差し戻しだけを残します")
+        return set()
+    made = (git_out(work, ["rev-list", f"-{len(bad)}", "HEAD"]) or "").splitlines()
+    for sha in reversed(made):
+        ledger.note_orchestrator_commit(state, sha)
+    return bad
+
+
+def _record_sendbacks(state: dict[str, Any], problems: list[dict[str, Any]]) -> None:
+    """手順を外れたコミットごとに差し戻しの行を項目（無ければ状態の直下）へ足す。"""
+    for p in problems:
+        info(f"↪ {p['problem']}（差し戻し）")
+        item = find_item(state, p.get("item") or "", required=False)
+        row = {"kind": "fix_procedure", "reason": p["problem"], "commit": p["sha"], "at": statefile.now()}
+        (item.setdefault("sendbacks", []) if item is not None else state.setdefault("sendbacks", [])).append(row)
+
+
+def _attach_fix_commits(state: dict[str, Any], work: str, ordered: list[str], bad: set[str]) -> None:
+    """打ち消さなかったコミットを古い順に `Item-Id` の項目の修正のコミットへ足す。"""
+    for sha in reversed(ordered):
+        if sha in bad:
+            continue
+        item = find_item(state, _item_id_of(work, sha), required=False)
+        if item is not None:
+            item["commits"]["fix"].append(sha)
+
+
 def _apply_fix_result(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -128,28 +166,9 @@ def _apply_fix_result(
     problems = result["problems"]
     bad = {p["sha"] for p in problems}
     if bad:
-        before = head_sha(work) or ""
-        conflict = revert_range(work, [s for s in ordered if s in bad])  # `ordered` は新しい順
-        if conflict:
-            reset_hard(work, before)
-            info(f"⚠ 手順を外れた修正のコミット {conflict[:12]} を打ち消せません（衝突）。打ち消さずに差し戻しだけを残します")
-            bad = set()
-        else:
-            made = (git_out(work, ["rev-list", f"-{len(bad)}", "HEAD"]) or "").splitlines()
-            for sha in reversed(made):
-                ledger.note_orchestrator_commit(state, sha)
-        for p in problems:
-            info(f"↪ {p['problem']}（差し戻し）")
-            item = find_item(state, p.get("item") or "", required=False)
-            row = {"kind": "fix_procedure", "reason": p["problem"], "commit": p["sha"], "at": statefile.now()}
-            (item.setdefault("sendbacks", []) if item is not None else state.setdefault("sendbacks", [])).append(row)
-    for sha in reversed(ordered):
-        if sha in bad:
-            continue
-        item_id = str(commit_trailers(work, sha).get("Item-Id") or "").strip()
-        item = find_item(state, item_id, required=False)
-        if item is not None:
-            item["commits"]["fix"].append(sha)
+        bad = _revert_bad(state, work, ordered, bad)
+        _record_sendbacks(state, problems)
+    _attach_fix_commits(state, work, ordered, bad)
     for item_id, found in (result.get("rewrites") or {}).items():
         item = find_item(state, item_id, required=False)
         if item is not None:
@@ -171,7 +190,7 @@ def _mark_unfixed(
     """
     if not left_result or not result.get("known"):
         return []
-    touched = {str(commit_trailers(work, sha).get("Item-Id") or "").strip() for sha in result["ordered"]}
+    touched = {_item_id_of(work, sha) for sha in result["ordered"]}
     attempt = int(fix.get("attempt") or 1)
     unfixed = []
     for item in fix_items:
