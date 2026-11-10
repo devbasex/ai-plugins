@@ -245,5 +245,6 @@
         "stop"
       ]
     }
-  ]
+  ],
+  "記録": "<NDF>/scripts/projects-sync.sh"
 }

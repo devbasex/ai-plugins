@@ -86,7 +86,6 @@ class RunState:
         self.log: list[dict] = []
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0}
         self.last_stage = "無し"
-        self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
         self.process: list[dict] = []  # 進行の記録で書けなかったもの（結果 JSON の process の形）。止めずに報告へ載せる（#2227）
         self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
@@ -290,13 +289,14 @@ class RunState:
             return
         self.last_stage = stage
         rec = plan.get("記録")
-        if not rec or stage in self.recorded_stages:
+        if not rec or stage in self.recorded_stages or stage in plan.get("記録しない工程", ()):
             return
+        once = not self.recorded_stages  # 最初の記録の前にモードと進め方を見出し行へ書く（#2921）
         self.recorded_stages.append(stage)
-        pace_first = (pace := plan.get("進め方")) in MVV_PACES and not self.pace_recorded
-        self.pace_recorded = True
+        heads = [["mode", m]] if once and (m := plan.get("モード")) else []
+        heads += [["pace", pace]] if once and (pace := plan.get("進め方")) in MVV_PACES else []
         for issue in plan.get("課題", []):  # 進め方を先に書く（まとめる工程を記録なしと数えない）。書けなくても止めない（#2227）
-            for args in ([[str(issue), "pace", pace]] if pace_first else []) + [[str(issue), "stage", stage]]:
+            for args in [[str(issue), *h] for h in heads] + [[str(issue), "stage", stage]]:
                 p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
                 self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
 
@@ -365,7 +365,6 @@ class RunState:
             "cause_counts": {k: dict(v) for k, v in self.cause_counts.items()},
             "failed_step": self.failed_step,
             "last_stage": self.last_stage,
-            "pace_recorded": self.pace_recorded,
             "recorded_stages": list(self.recorded_stages),
             "switched": list(self.switched),
             "pcount": dict(self.pcount),
@@ -391,7 +390,6 @@ class RunState:
         self.cause_counts = {k: dict(v) for k, v in acc.get("cause_counts", self.cause_counts).items()}
         self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
-        self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
         self.recorded_stages = list(acc.get("recorded_stages", self.recorded_stages))
         self.switched = list(acc.get("switched", self.switched))
         self.pcount = dict(acc.get("pcount", self.pcount))
