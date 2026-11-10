@@ -5,7 +5,7 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 1104,
+      "files": 1147,
       "version": "3.11"
     },
     {
@@ -16,7 +16,7 @@
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 14
+      "files": 8
     }
   ],
   "test": {
@@ -1061,20 +1061,20 @@
   },
   "analysis": {
     "analyzer": 3,
-    "at": "2026-11-08T20:16:21+00:00",
+    "at": "2026-11-10T15:17:12+00:00",
     "inputs": {
       ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
       ".github/workflows/pr-base-guard.yml": "554f6c557ebe3ec78aec116386637552d1b22ede",
       ".github/workflows/pr-body-decisions.yml": "4c9a78fae1d3766973daa66110ad9c6a212d0fe6",
-      ".github/workflows/pytest.yml": "11944905d019174f568c7959e369cb6ae7675d01",
+      ".github/workflows/pytest.yml": "6db5a49bc78ded5537485da2866700c618e93315",
       ".github/workflows/release-cd.yml": "7652bde34f65dd1d999f178de960992626d8ee47",
       ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
       ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
-      ".github/workflows/runtime-plugin-smoke.yml": "ab0ef5762f0e1467c6a2dcfca2abdda283b94771",
-      ".github/workflows/runtime-plugin-validate.yml": "ff3bfbce63461fca5e024045154bf53487cf16f6",
-      ".github/workflows/script-structure.yml": "e0e60c30036184bb55307d65cef78c00ba2bb6da",
-      "AGENTS.md": "5458e5c1ff83f0986b2a1bac299f961ecf12089d",
+      ".github/workflows/runtime-plugin-smoke.yml": "2900ac0753da0dba35eddbc968d8c08fb6d73263",
+      ".github/workflows/runtime-plugin-validate.yml": "8e26675c804b05caf8049f5e1b0d76650d73a975",
+      ".github/workflows/script-structure.yml": "fdd8071d7027f90e363ba9913bbb119cbc4cae8a",
+      "AGENTS.md": "f61121c953b6d411a48aa7786a3bfa67256efac1",
       "CLAUDE.md": "d7a7fd6963657f69007124abe9d0d69ba6c1ebe7",
       "KIRO.md": "bee3558fe2014460b629926b6d778cd78c783dd7",
       "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
@@ -1088,7 +1088,7 @@
       ]
     },
     "written": {
-      "languages": "e27115491c125f783766af591b93b23f505879521b9b1b7c1f3d7aa1a39f41c1",
+      "languages": "e54a4dbd958ae607e0ec59a349a0620ad20617c3bea9b6ed5837097aa107bdb1",
       "test_duration": "cd482f866f6a3710186622c27a6a5822f95a789d55ae82bec88f634ddc74c9a5",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
