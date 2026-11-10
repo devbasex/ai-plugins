@@ -383,6 +383,17 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
     return status, code, summary, metrics, pres, nxt
 
 
+def repo_mismatch(repo: str, recorded: str | None, plan: dict) -> str | None:
+    """書き込み先と plan の repo を記録のリポジトリと照合し、書かない理由を返す（合えば None）。"""
+    if recorded is None:
+        return f"書き込み先 {repo} の記録（candidates.json）が無い。candidates を打ってから plan を作る"
+    if repo != recorded:
+        return f"書き込み先 {repo} は記録のリポジトリ {recorded} と違う"
+    if plan.get("repo") not in (None, recorded):
+        return f"plan の repo {plan['repo']} は記録のリポジトリ {recorded} と違う"
+    return None
+
+
 def cmd_apply(a):
     root = git_root(a.root)
     plan, wrong = A.precheck_depth(root, _load_plan(a.plan))  # 深さと持ち主（#2315 の I3・I12）
@@ -391,14 +402,7 @@ def cmd_apply(a):
     # 記録のリポジトリ（保存した candidates.json の metrics.repo）の外へ書かない（#842 の決定 7）。
     # 書き込み先と plan の repo の双方を記録と照合する（同じ呼び出しの --repo どうしを比べると、両方を別のリポジトリにすれば通る）
     recorded = ((_read_state(sd / "candidates.json") or {}).get("metrics") or {}).get("repo")
-    why = None
-    if recorded is None:
-        why = f"書き込み先 {repo} の記録（candidates.json）が無い。candidates を打ってから plan を作る"
-    elif repo != recorded:
-        why = f"書き込み先 {repo} は記録のリポジトリ {recorded} と違う"
-    elif plan.get("repo") not in (None, recorded):
-        why = f"plan の repo {plan['repo']} は記録のリポジトリ {recorded} と違う"
-    if why:
+    if why := repo_mismatch(repo, recorded, plan):
         emit(
             result(TOOL, "stopped", f"{why}。1 件も書かない", [{"kind": "plan", "name": a.plan, "result": "stopped", "reason": why}], {}),
             EXIT_PRECONDITION,
