@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gzip
 import json
 import os
 import re
@@ -162,13 +163,14 @@ def cmd_measure(a) -> None:
     load1 = os.getloadavg()[0]
     cpus = os.cpu_count() or 1
     out = Path(a.out).resolve()
-    runs, wall = run_suites(root, suites, out.with_suffix(".logs"))
+    logs = out.parent / (out.name.split(".", 1)[0] + ".logs")
+    runs, wall = run_suites(root, suites, logs)
     tests: dict[str, dict] = {}
     for s in suites:
         if s.get("junit"):
             tests.update(read_junit(root / s["junit"]))
         name = str(s.get("name") or suites.index(s))
-        for nid in read_deselected(out.with_suffix(".logs") / f"{name}.collect"):
+        for nid in read_deselected(logs / f"{name}.collect"):
             tests.setdefault(nid, {"outcome": "deselected", "seconds": 0.0})
     counted, items = summarize_tests(tests)
     metrics = {
@@ -179,13 +181,27 @@ def cmd_measure(a) -> None:
         "suites": runs,
         **counted,
     }
-    out.write_text(json.dumps({"metrics": metrics, "tests": tests}, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_record(out, {"metrics": metrics, "tests": tests})
     failed = [r["name"] for r in runs if r["exit"] != 0]
     status = "stopped" if failed else "ok"
     summary = f"壁時計 {wall} 秒・{counted['tests']} 件・合計 {counted['sum_seconds']} 秒・load average {load1:.2f}"
     if failed:
         summary += f"。落ちた suite: {', '.join(failed)}"
     emit(result(TOOL, status, summary, items, metrics))
+
+
+def write_record(path: Path, data: dict) -> None:
+    """記録を書く。`.gz` で終わるパスは gzip で縮める（nodeid の全件は 2 MB ほどになる）。"""
+    text = json.dumps(data, ensure_ascii=False, indent=1)
+    if path.suffix == ".gz":
+        path.write_bytes(gzip.compress(text.encode("utf-8"), mtime=0))
+    else:
+        path.write_text(text, encoding="utf-8")
+
+
+def read_record(path: Path) -> dict:
+    raw = path.read_bytes()
+    return json.loads(gzip.decompress(raw) if path.suffix == ".gz" else raw)
 
 
 def ledger_nodeids(text: str) -> set[str]:
@@ -199,9 +215,8 @@ def ledger_nodeids(text: str) -> set[str]:
 
 def _read_out(path: str) -> dict:
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return data["tests"]
-    except (OSError, ValueError, KeyError, TypeError) as e:
+        return read_record(Path(path))["tests"]
+    except (OSError, ValueError, KeyError, TypeError, EOFError, gzip.BadGzipFile) as e:
         raise StepError(f"計測の記録を読めない: {path}: {e}", EXIT_UNREADABLE)
 
 
