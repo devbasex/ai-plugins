@@ -46,6 +46,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と、Skill の `skill-stats`・
 | API 呼び出し 1 回の使用量の行（`ts`・`model`・`inp`・`out`・`read`・`w5`・`w1h`・`context`）を組む | `lib/context_decisions.py` の `usage_call` | 同じモジュールの `read_calls`（会話の記録）、`context-policy.py` の `ledger_calls`（使用量の帳簿。秒の `seconds` だけを呼ぶ側が足す） |
 | 時刻の文字列を UNIX 時刻（秒）にする | `lib/clock.py` の `epoch_seconds`（`clock.parse` の上に置く） | `lib/context_decisions.py` の `parse_ts`（`epoch_seconds` の別名）、`backlog-refinement/scripts/upkeep_research.py` |
 | git のリポジトリの根を取る | `lib/context_decisions.py` の `toplevel` | `context-policy.py`、`hook_lib/token_guard.py`（文脈の量の判定と、計画の案内の `plan_hint`） |
+| 起動の引数や `--work` の文から課題番号を `#<番号>` の昇順の並びにする | `lib/context_decisions.py` の `issue_refs`・`work_id`・`recorded_work` | `hook_lib/token_guard.py`（判定の行の作業の識別子と拒否文の `ndf-next` の案内）、`context-policy.py` の `cmd_record`・`cmd_report` |
 | 再起動の行と印の行を組む（セッションの読み取り・境目の行・`cut` と再起動の付与） | `lib/context_decisions.py` の `record_row` | `context-policy.py` の `cmd_record`、同じモジュールの `record_restart`（`sprint-state.py next`） |
 | 正の整数（`bool` を除く）か判定する | `lib/context_policy.py` の `is_positive_int` | 同じモジュールの方針の解決、`lib/context_decisions.py` の `read_window` |
 | 試行方式の拒否の句で使う方針と理由の語 | `lib/context_policy.py` の既存の定数 `TRIAL`・`REASON_CAPACITY`・`REASON_COST` | `hook_lib/token_guard.py` の `_trial_cause` |

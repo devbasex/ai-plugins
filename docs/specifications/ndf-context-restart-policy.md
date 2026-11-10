@@ -29,8 +29,8 @@ conductor が工程境界で会話を切るかを決める規則の組（再起�
 | 文脈 150,000 で設計を終え、カットポイントに着いた | conductor は `ndf-next` を出さずに次の工程（`/ndf:implementation-plan #829`）を起動する。hook は継続帯として通し、判定「継続」・`basis: 判断開始の値以下` を 1 行記録する |
 | 文脈 260,000 で次の工程を起動した | 判断帯。較正した見込みがあれば続ける費用と再起動の費用を比べ、再起動のほうが安ければ理由「費用」で拒否する。見込みが無ければ継続（`basis: 見込みなし`、`missing` に `estimate`） |
 | 文脈 410,000 で次の工程を起動した | 上限超。理由「運用上限」で拒否する。ラッパーの下では判定が変わるまで止め続け、外では同じ起動の 2 度目を 1 度だけ通す |
-| 拒否を受けて切る | conductor は引継ぎ文書を書き始める前に `context-policy.py record --event 引継ぎ開始 --work "#829 #830"` を打ち、`sprint-state.py next` が直前の拒否の理由を引き継いで判定「再起動」を記録し、見込みを較正し直す |
-| 再開した | 新しいセッションの conductor は状態を確かめ終えた直後に `record --event 復元完了` を打つ。`context-policy.py report --work "#829 #830"` で区分ごとの token・秒・費用・再起動の回数が見える |
+| 拒否を受けて切る | ラッパーの直接の子なら hook が拒否と同時に「引継ぎ開始」の印を書く（ラッパーの外では、conductor が引継ぎ文書を書き始める前に `context-policy.py record --event 引継ぎ開始 --work "#829 #830"` を打つ）。`sprint-state.py next` が直前の拒否の理由を引き継いで判定「再起動」を記録し、見込みを較正し直す |
+| 再開した | 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに、hook が「復元完了」の印を書く（Codex では conductor が状態を確かめ終えた直後に `record --event 復元完了` を打つ）。`context-policy.py report --work "#829 #830"` で区分ごとの token・秒・費用・再起動の回数が見える |
 
 設定を置かない利用者は現行方式のままで、200,001 で拒否・200,000 以下で通す判定と拒否の文面は変わらない。
 
@@ -148,7 +148,8 @@ w は `WEIGHTS["w1h"]`（2.0）、H の係数は `WEIGHTS["out"]`（5.0）であ
 2. 会話の記録の末尾から C とモデルを読み、`resolve_policy(git の根)` で適用値を得る。試行方式なら窓のファイルを、判断帯なら見込みのファイルも読む
 3. `decide_boundary` で判定し、1 度だけ通す印（`guards/` の `context-<セッション>.json`）とラッパーの下の止め続けを当てる
 4. 判定の記録へ 1 行を追記し、適用値の受け渡しのファイルを更新する（中身が同じなら書かない）
-5. 通すときは、設定が壊れていればそのセッションで 1 度だけ（`guards/` の `context-config-<セッション>.json` で覚える）`additionalContext` で知らせる
+5. セッションの排他の中で印を書く（`hook_lib/context_marks.py`）。ラッパーの直接の子を止めたら「引継ぎ開始」をそのセッションで 1 回だけ書く（`sessions/<セッション>.handoff.json` で覚える）。会話の記録の先頭から最初の利用者の発言だけを 1 セッションに 1 回読み、`.ndf/handoff/` を指せば復元の状態を「待ち」、指さなければ「対象外」にする。「待ち」のセッションで、エントリポイントの Skill（`development-workflow`・`issue-plan-strategy`）を除く最初の起動のときに状態を「済み」にして「復元完了」を書く。先頭が読めなければ未判定のまま次の起動で読み直す。印や状態を書けなくても判定と拒否の文面は変えない
+6. 通すときは、設定が壊れていればそのセッションで 1 度だけ（`guards/` の `context-config-<セッション>.json` で覚える）`additionalContext` で知らせる
 
 工程の列（`stage`）は起動の鍵から作る: `skill:<名>` / `agent:<description の先頭語>` / `plan`。作業の識別子は起動の引数か
 `description` の課題番号から作る（日付・版数・小数は除く）。
@@ -157,8 +158,8 @@ w は `WEIGHTS["w1h"]`（2.0）、H の係数は `WEIGHTS["out"]`（5.0）であ
 
 | 方針 | カットポイントで conductor がすること | 記録 |
 | --- | --- | --- |
-| 現行方式 | 引継ぎ文書を書き始める前に `record --event 引継ぎ開始` を打ち、`sprint-state.py next` で `ndf-next` を出す | 印の後、`next` が判定「再起動」を書く |
-| 試行方式 | `ndf-next` を出さずに次の工程を起動する。拒否されたときと、独立性・手動で自分で切るとき（`next --reason 独立性\|手動`）だけ、印を打ってから `next` で切る | hook が「継続」か「拒否」を書き、切ったら `next` が「再起動」を書く |
+| 現行方式 | 引継ぎ文書を書き始める前に `record --event 引継ぎ開始` を打ち（ラッパーの下で hook に止められたときは hook が書いたので打たない）、`sprint-state.py next` で `ndf-next` を出す | 印の後、`next` が判定「再起動」を書く |
+| 試行方式 | `ndf-next` を出さずに次の工程を起動する。拒否されたときと、独立性・手動で自分で切るとき（`next --reason 独立性\|手動`）だけ、印を打ってから `next` で切る（ラッパーの下で hook に止められたときは hook が「引継ぎ開始」を書いたので打たない） | hook が「継続」か「拒否」を書き、切ったら `next` が「再起動」を書く |
 
 `sprint-state.py next` の理由は、`--reason` を渡せばその値、渡さなければ直前 1,800 秒以内の同じ作業の識別子の拒否の理由、
 それも無ければ現行方式は「カットポイント」・試行方式は「手動」である。記録の後に較正し直す。記録と較正に失敗しても
@@ -203,11 +204,12 @@ Codex には hook が無く、conductor は文脈の量を読めないため、�
 | `resolve [--root <dir>] [--policy current\|trial]` | 作業ディレクトリ・環境変数 | 統一 JSON（`tool: context-policy`、`status: ok`、`items` に適用値 1 件、`metrics` に `policy`・`limit`）。設定が壊れていても `ok` で、`summary` と `config_error` に理由が載る | 0 / 2 引数の誤り |
 | `publish` | 標準入力の JSON（SessionStart の `session_id`・`cwd`） | `session_id` があれば適用値の受け渡しのファイルを書く。設定が壊れていれば 1 行を標準出力へ出す | 常に 0 |
 | `record --verdict 再起動 --reason <理由> --work <識別子> [--runtime claude\|codex] [--context <n>]` | 理由（6 つ）と作業の識別子 | 1 行（`source: record`・`stage: cut`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 `--verdict` が `再起動` でない・理由が 6 つ以外・`--verdict` と `--event` が両方か両方なし |
-| `record --event 引継ぎ開始\|復元完了 --work <識別子> [--runtime claude\|codex]` | 印と作業の識別子 | 印の 1 行（`event` が印、`verdict`・`stage`・`band` は `null`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 印が 2 つ以外 |
+| `record --event 引継ぎ開始\|復元完了 --work <識別子> [--runtime claude\|codex]` | 印と作業の識別子 | 印の 1 行（`event` が印、`verdict`・`stage`・`band` は `null`）を追記し、統一 JSON で返す。Claude Code では hook が打たない場面（カットポイント・独立性・手動で自分で切るとき）で使い、Codex では両方の印で使う | 0 / 1 書けない / 2 印が 2 つ以外 |
 | `calibrate [--days 30]` | 判定の記録・会話の記録 | 見込みのファイルを書き、`metrics.samples` に標本数を返す | 0 / 1 書けない |
-| `report --work <識別子> \| --all [--since YYYY-MM-DD] [--format json\|table]` | 判定の記録・会話の記録・使用量の帳簿 | 作業ごとに `work`・`sessions`・`parts`（4 区分ごとの `inp`・`out`・`read`・`w5`・`w1h`・`calls`・`seconds`・`cost`）・`unknown_parts`・`restarts`（理由ごと）・`restart_count`・`auto_compacts`・`quality`・`no_policy_rows`。`table` は Markdown の表と作業ごとの 1 行を出す | 0（0 件でも 0）/ 2 `--work` と `--all` が両方か両方なし・`--since` の形の誤り |
+| `report --work <識別子> \| --all [--since YYYY-MM-DD] [--from <ISO 8601>] [--until <ISO 8601>] [--format json\|table]` | 判定の記録・会話の記録・使用量の帳簿 | 作業ごとに `work`・`sessions`・`parts`（4 区分ごとの `inp`・`out`・`read`・`w5`・`w1h`・`calls`・`seconds`・`cost`）・`unknown_parts`・`restores`（セッションごとの復元の量 `context` と復元の区間の呼び出し数 `calls`。セッションの識別子は持たない）・`restarts`（理由ごと）・`restart_count`・`auto_compacts`・`quality`・`no_policy_rows`。`--from`・`--until`（両端を含む）を渡すと、その間の呼び出し（会話・サブエージェント・使用量の帳簿）と判定の記録の行だけを数える。`table` は Markdown の表と作業ごとの 1 行を出す | 0（0 件でも 0）/ 2 `--work` と `--all` が両方か両方なし・`--since`・`--from`・`--until` の形の誤り |
 
 `record` のセッション ID は `--runtime claude` のときだけ `CLAUDE_CODE_SESSION_ID` から取り、無ければ `null` にする。
+`record --work` は課題番号を含めば `#<番号>` の昇順の並びに直して書く。含まずセッション ID があれば空で書き、集計が同じセッションの前の行の作業で補う。どちらでもなければ渡した文字のまま書く（拒むと印が欠けるため拒まない）。`report --work` も同じ形に直してから引く。
 
 ### 状態ディレクトリ
 
@@ -220,6 +222,8 @@ Codex には hook が無く、conductor は文脈の量を読めないため、�
 | `estimates/<owner>__<repo>.cost-estimates.json` | 費用の見込み（`Estimates` の形と `at`） | `calibrate`・`sprint-state.py next` | hook | 上書き |
 | `sessions/<セッション>.window.json` | `{"window": <int>, "model": "<id>", "at": "<UTC>"}` | statusline | hook | 適用値のファイルを書くときに 7 日より古い `sessions/*.json` を消す |
 | `sessions/<セッション>.applied.json` | 適用値（`AppliedPolicy` の JSON） | `publish`・hook | statusline | 同上 |
+| `sessions/<セッション>.restore.json` | 復元の状態 `{"state": "待ち" \| "済み" \| "対象外"}`（無ければ未判定） | hook | hook | 同上 |
+| `sessions/<セッション>.handoff.json` | hook がそのセッションで「引継ぎ開始」を書いた印 `{"at": "<UTC>"}` | hook | hook | 同上 |
 
 ### 判定の記録の 1 行
 
