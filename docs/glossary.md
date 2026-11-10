@@ -501,11 +501,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 読み込まれたプラグイン | — | 起動したセッションに Claude Code が読み込んだ NDF。--plugin-dir で指したディレクトリか、導入したプラグインのキャッシュのディレクトリで、起動時の init の plugins の ndf の path に出る | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
 | 規約の文書 | — | supervisor が worker の起動指示を組むために読む、NDF の Skill の SKILL.md と references/ の下の文書（development-workflow の references/agent-layers.md、design の references/design-template.md など） | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
 | 規約の文書の guard | — | supervisor が Read と Bash で読み込まれたプラグインの外の規約の文書を読もうとしたとき、PreToolUse の hook で止め、読み込まれたプラグインの中の同じ文書の絶対パスを理由で返す判定（#2813） | — | — | `docs/specifications/ndf-supervisor-docs-guard.md` |
-| 文書のファイル | — | 差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる | — | — | — |
-| コードのファイル | — | 差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む | — | — | — |
-| テストが読む文書 | — | 文書のファイルのうち、プロジェクトの設定でテストとの対応を宣言したもの（用語集・Skill の本文など） | — | — | — |
-| 振る舞いの確認 | — | Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること | — | — | — |
-| 振る舞いを決める文書 | — | 文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown | — | — | — |
+| 文書のファイル | — | 差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
+| コードのファイル | — | 差分のうち文書のファイルでないもの。スクリプト・設定・テスト・ワークフローを含む | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
+| テストが読む文書 | — | 文書のファイルのうち、プロジェクトの設定でテストとの対応を宣言したもの（用語集・Skill の本文など） | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
+| 振る舞いの確認 | — | Skill の本文・エージェント定義・手順書を変えたとき、AI がその手順どおりに動くかを実際に起動して確かめること | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
+| 振る舞いを決める文書 | — | 文書のファイルのうち、AI の振る舞いを決めるもの（Skill の本文・手順書・エージェント定義）。既定は skills/ の下の Markdown と agents/ の直下の Markdown | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
 | 機械的なターン | — | AI が判断を伴わずに行う Tool の呼び出し。出力の読み解き・状態の照合・スクリプトを 1 行打つ・手書きの待ち・本文の転記 | — | — | — |
 | ターンの型 | — | 機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類 | — | — | — |
 | 手順の連続実行 | — | 判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance） | — | — | — |
