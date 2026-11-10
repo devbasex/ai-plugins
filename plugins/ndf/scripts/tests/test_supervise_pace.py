@@ -178,7 +178,8 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert "check-trigger.py scope --id m-3" in s["refactor"]["cmd"]
     # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
     base = plan["起点"].removeprefix("origin/")
-    assert s["review"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all" and s["fix"]["next"] == "base-sync"
+    assert s["review"]["next"] == "behavior-targets" and s["behavior-targets"]["skip_to"] == "base-sync"
+    assert s["behavior-verify"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all" and s["fix"]["next"] == "base-sync"
     assert f"base-sync --base {base} --push" in s["base-sync"]["cmd"] and "git merge" not in s["test-all"]["cmd"]
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:

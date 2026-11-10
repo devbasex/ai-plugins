@@ -57,11 +57,10 @@ def _assess(work: pathlib.Path, *extra: str) -> tuple[int, list[str]]:
 @pytest.mark.parametrize(
     "files",
     [
-        {"docs/guide.md": "# guide\n" + _lines(30)},
         {"tests/test_a.py": _lines(30, "t")},
         {"config/settings.json": "{\n" + "".join(f'"k{i}": {i},\n' for i in range(30)) + "}\n"},
     ],
-    ids=["md-only", "tests-only", "json-only"],
+    ids=["tests-only", "json-only"],
 )
 def test_no_production_code_may_be_skipped(repo, files):
     _commit(repo, files)
@@ -72,6 +71,30 @@ def test_no_production_code_may_be_skipped(repo, files):
         "理由: 本番コードの差分がありません",
         "本番コード: 0 ファイル・0 行",
     ]
+
+
+def test_docs_only_diff_may_be_skipped_with_the_docs_reason(repo):
+    # #2925 AC1: 文書のファイルだけの差分は、行数を数えずに文書だけを理由に飛ばす
+    _commit(repo, {"docs/guide.md": "# guide\n" + _lines(30), "README.md": "# changed\n"})
+    rc, out = _assess(repo, "--base", "base")
+    assert rc == 3
+    assert out == ["判定: 飛ばしてよい", "理由: 差分が文書のファイルだけ（文書 2 ファイル）"]
+
+
+def test_mixed_diff_falls_through_to_the_production_code_rule(repo):
+    _commit(repo, {"docs/guide.md": "# guide\n", "src/b.py": _lines(30, "b")})
+    rc, out = _assess(repo, "--base", "base")
+    assert rc == 0
+    assert out[1] == "理由: 本番コードの変更が 30 行です"
+
+
+def test_unreadable_docs_decl_does_not_skip_as_docs_only(repo):
+    # #2925 AC5・I2: 宣言が読めなければ文書だけと判定しない（今の行数の判定へ進む）
+    _commit(repo, {".ndf/project.json": "{"})
+    _git("branch", "-f", "base", cwd=repo)
+    _commit(repo, {"docs/guide.md": "# guide\n"})
+    rc, out = _assess(repo, "--base", "base")
+    assert out[1] == "理由: 本番コードの差分がありません"
 
 
 def test_ten_lines_of_production_code_may_be_skipped(repo):
