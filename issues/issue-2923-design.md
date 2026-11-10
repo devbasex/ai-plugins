@@ -383,8 +383,13 @@ graph TD
    ```text
    supervise.py new sprint --pace auto --state <状態> --name <スプリント> --worktree <根> \
      --issue <残った課題> --mode <新しいモード> --designed <残った課題> \
-     --out <ループの 1 回のディレクトリ>/sprint-<k> [--version <開発版>] <sprint_extra>
+     --out <ループの 1 回のディレクトリ>/sprint-<k> [--version <開発版>] \
+     [--outside-plan <理由>] <sprint_extra>
    ```
+
+   `--outside-plan <理由>` は、ループの記録に `outside_plan`（動いている並列計画の外で例外として始めたループの理由）が
+   あるときだけ付け、`sprint_extra` とは別に渡す。今の `new_sprint_argv` と同じ組み立てである。省くと、計画の外で
+   始めたループが組み直しの時点で `supervise.py` の起動の判定に断られ、続きを作れない
 
 2. 新しいマニフェストのステージを続きのステージにし、`build_close` を新しいモードで打つ
 3. ループの 1 回の `manifest`・`dev_plan`・`prod_plan` を新しいマニフェストへ向け、`mode` を新しいモードにする
