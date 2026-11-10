@@ -211,3 +211,38 @@ def test_a_safety_net_halt_returns_a_gate_with_the_item_states(tmp_path, monkeyp
     item = out["items"][0]["refactor_items"][0]
     assert item["status"] == "failing" and item["failing"] == ["tests/test_a.py::t"] and item["fix_history"]
     assert out["metrics"]["budget_minutes"] == 60 and out["metrics"]["safety_net_minutes"] == 120.0
+
+
+def test_coding_time_at_the_limit_lets_the_merge_run_and_the_next_start_halts():
+    """安全網の上限に届いた CLI の後も取り込みまで進め、止めるのは次のコーディングの CLI の起動の前（I8）。
+
+    CLI の直後に止めると、最後の CLI のコミットが項目に結ばれずに HEAD に残り、打ち直しで同じ手順の CLI をもう 1 度起動する。"""
+    import assignee_launch
+
+    calls: list[str] = []
+
+    class Fake(assignee_launch.AssigneeLaunch):
+        def __init__(self):
+            self.v = {"ID": "7", "IMPL": "claude"}
+
+        def rf(self, *args, ok=(0,)):
+            calls.append(args[0])
+            out = {"coding-time": {"HALT": "1", "HALT_REASON": "安全網の上限 120 分に当たった"}}.get(args[0], {})
+            if args[0] == "start-phase" and "coding-time" in calls:
+                out = {"HALT": "1", "HALT_REASON": "安全網の上限 120 分に当たった"}
+            self.v.update(out)
+            return 0, out
+
+        def launch(self, impl, phase):
+            calls.append(f"launch:{phase}")
+            return 0
+
+        def monitor(self, impl, phase, stem):
+            return 0, []
+
+    d = Fake()
+    d.impl_phase("implement")
+    calls.append("merge-implement")
+    with pytest.raises(assignee_launch.Halt):
+        d.impl_phase("fix")
+    assert calls == ["start-phase", "launch:implement", "coding-time", "merge-implement", "start-phase"]

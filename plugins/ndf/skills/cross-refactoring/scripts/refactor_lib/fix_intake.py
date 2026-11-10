@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import statefile
 
-from . import clock, info, intake
+from . import clock, die, info, intake, undo
 from .gitfacts import (
     collect_commit_facts,
     commit_trailers,
@@ -33,12 +33,10 @@ from .gitfacts import (
 )
 from .items import FAILING, IMPLEMENTED, find_item, implement_shas
 from .outbound import plan_line
-from .paths import git_out, head_sha, load_state, work_dir
+from .paths import head_sha, load_state, work_dir
 from .phases import add_phase_seconds, phase_record
 from .results import read_result
 from .scope_check import judge_commits, note_outside
-from .worktree import reset_hard, revert_range  # 手順を外れた修正のコミットだけを打ち消す
-from . import ledger
 from .verify import collect_test_changes, verify_commit_basics, verify_test_changes
 
 UNFIXED_REASON = "修正担当が直さなかった（修正の範囲にこの項目のコミットが無い）"
@@ -119,17 +117,19 @@ def _item_id_of(work: str, sha: str) -> str:
 
 
 def _revert_bad(state: dict[str, Any], work: str, ordered: list[str], bad: set[str]) -> set[str]:
-    """手順を外れたコミットを打ち消して台帳へ記録し、打ち消せたコミットを返す。衝突したら巻き戻して空を返す。"""
-    before = head_sha(work) or ""
-    conflict = revert_range(work, [s for s in ordered if s in bad])  # `ordered` は新しい順
-    if conflict:
-        reset_hard(work, before)
-        info(f"⚠ 手順を外れた修正のコミット {conflict[:12]} を打ち消せません（衝突）。打ち消さずに差し戻しだけを残します")
-        return set()
-    made = (git_out(work, ["rev-list", f"-{len(bad)}", "HEAD"]) or "").splitlines()
-    for sha in reversed(made):
-        ledger.note_orchestrator_commit(state, sha)
-    return bad
+    """手順を外れたコミットを打ち消して台帳へ記録し、打ち消したコミットを返す。
+
+    違反のコミットだけを戻すと衝突するとき（後のコミットが同じ行を直した）は、修正の範囲全体（`ordered`）を打ち消して
+    この修正を採らない。違反のコミットを項目へ結んだり、`Item-Id` の無いコミットを台帳に無いまま残したりしない。
+    範囲全体も戻せなければ HEAD を戻して終了コード 4 で止まる。"""
+    oldest = list(reversed(ordered))  # `ordered` は新しい順
+    done = undo.revert_or_widen(work, [s for s in oldest if s in bad], oldest)
+    if done is None:
+        die(f"手順を外れた修正のコミットを、修正の範囲（{len(ordered)} 件）ごとでも打ち消せません（衝突）。HEAD を戻しました")
+    if len(done) > len(bad):
+        info(f"⚠ 手順を外れた修正のコミットだけを打ち消せないため、修正の範囲 {len(done)} 件を打ち消しました（修正を採りません）")
+    undo.note_reverted(state, work, done)
+    return set(done)
 
 
 def _record_sendbacks(state: dict[str, Any], problems: list[dict[str, Any]]) -> None:

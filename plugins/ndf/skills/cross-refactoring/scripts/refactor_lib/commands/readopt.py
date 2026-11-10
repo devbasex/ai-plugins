@@ -3,7 +3,8 @@
 検証（直しの試行を含む）が終わった後、実装の予算の残り（実効の予算 − 採っていて取り消していない項目の見積りの和。
 #2457 の I1・I3）に入る候補を、計画と同じ順位（`budget.rank_key`）と選び方（`budget.select`。入らない候補は飛ばして
 次を見る）で採り直す。実装時間の実績は使わない。候補は `budget` で見送った候補と、コミットが無かった持ち越しの項目
-だけである（I15）。見積り・範囲テスト・等級・`risk` は
+だけである（I15）。1 度採り直した後もコミットが無く持ち越しに戻った項目は採らずに `not_done` で見送る（持ち越しは
+見積りの消費に数えないため、採り直しを重ねても残りが減らず、前進しない実装の CLI を繰り返す）。見積り・範囲テスト・等級・`risk` は
 `merge-plan` が計画の時点で書いた値を使い、**LLM を呼ばない**（I14）。D5（`public_io`）は実装担当の `risk` を使う。
 
 | 終了コード | 意味 |
@@ -32,6 +33,8 @@ NO_FIT = "no_fit"
 # 採るときに前の巡の記録を `phases_history` へ移す手順（巡ごとに取り込みと所要を数える）
 ROUND_PHASES = ("add-tests", "implement", "verify", "fix")
 NOT_DONE_REASON = "コミットが無く、実装の予算の残りに入らない"
+# 採り直した後もコミットが無く持ち越しに戻った項目は、もう採り直さない（前進しない実装の CLI を繰り返さない）
+NO_PROGRESS_REASON = "採り直した後もコミットが無く、持ち越しに戻った（自動の採り直しを止めて人へ渡す）"
 
 
 def _budget_candidates(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -72,6 +75,7 @@ def _reopen(item: dict[str, Any], round_no: int) -> None:
             "seconds": seconds,
             "fix_count": 0,
             "danger": [],
+            "readopted": int(item.get("readopted") or 0) + 1,
         }
     )
     dropped = ["failure_reason", "danger_checked", "danger_hits", "diff_lines", "review_scope_judgements"]
@@ -101,6 +105,23 @@ def _adopt(state: dict[str, Any], selected: list[dict[str, Any]], carried: list[
             if not (d.get("item_id") == candidate["id"] and d.get("defer_reason") == DEFER_BUDGET)
         ]
     return ids
+
+
+def _give_up_repeats(state: dict[str, Any], carried: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """採り直した後も持ち越しに戻った項目を `not_done` で見送り、まだ採り直していない持ち越しの項目を返す。
+
+    持ち越しは見積りの消費に数えないため、同じ項目を採り直し続けても予算の残りが減らず、実装できない項目が毎巡
+    同じ条件で選ばれる。1 度採り直して前進しなかった項目は、報告の見送りに理由を残して人へ渡す。"""
+    retry = []
+    for item in carried:
+        if not item.get("readopted"):
+            retry.append(item)
+            continue
+        defer(state, item, DEFER_NOT_DONE, NO_PROGRESS_REASON)
+        item["status"] = DEFERRED
+        item["failure_reason"] = NO_PROGRESS_REASON
+        info(f"⚠ {item['id']} は採り直した後もコミットが無く持ち越しに戻りました。もう採り直さず、見送りとして人へ渡します")
+    return retry
 
 
 def _close(path: Any, state: dict[str, Any], record: dict[str, Any], available: float, shortest: Optional[float]) -> None:
@@ -149,7 +170,7 @@ def cmd_readopt(args: argparse.Namespace) -> None:
         return
     round_no = int(readopt.get("round") or 1)
     now = clock.now()
-    carried = [i for i in state.get("items") or [] if i.get("status") == CARRIED]
+    carried = _give_up_repeats(state, [i for i in state.get("items") or [] if i.get("status") == CARRIED])
     plan_budget = state.get("budget") or {"minutes": int(state.get("budget_minutes") or 0)}
     # 持ち越しの項目は採り直す候補なので、採っている見積りの和に数えない
     available = budget.readopt_left(plan_budget, [i for i in state.get("items") or [] if i.get("status") != CARRIED])

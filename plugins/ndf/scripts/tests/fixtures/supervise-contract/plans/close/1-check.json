@@ -57,7 +57,8 @@
         "6": "review"
       },
       "on_fail": "abort",
-      "next": "review"
+      "next": "review",
+      "gate_next": "end"
     },
     {
       "id": "review",

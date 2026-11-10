@@ -321,27 +321,57 @@ def revert_items(path: pathlib.Path, state: dict[str, Any], item_ids: list[str],
         worktree.mark_rewritten()
 
 
-def revert_unattributed(path: pathlib.Path, state: dict[str, Any], shas: list[str], label: str) -> int:
-    """どの項目にも属さないコミット（`shas` は古い順）を新しい順に `git revert` で打ち消し、作ったコミットの数を返す。
+def revert_or_widen(work: str, shas: list[str], widen: Optional[list[str]] = None) -> Optional[list[str]]:
+    """`shas`（古い順）を新しい順に `git revert` で打ち消し、打ち消した元のコミット（古い順）を返す。
 
-    `reset --hard` で外さない（取り込んだベースブランチの変更を消さない。#2457 決定 6）。衝突したら打ち消しの前の HEAD へ
-    戻して終了コード 4 で止まる。打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
+    衝突したら打ち消しの前の HEAD へ戻し、`widen`（古い順。`shas` を含む範囲）があればその全体を新しい順に打ち消す。
+    違反のコミットの後に同じ行を直したコミットがあると違反のコミットだけは戻せないが、範囲の末尾から全部を戻すと
+    衝突しない。それでも戻せなければ HEAD を戻して `None` を返す（止めるかは呼び出し側が決める）。"""
+    before = git_out(work, ["rev-parse", "HEAD"]) or ""
+    first, wide = list(shas), list(widen or [])
+    if revert_range(work, list(reversed(first))) is None:
+        return first
+    reset_hard(work, before)
+    if not wide or wide == first:
+        return None
+    if revert_range(work, list(reversed(wide))) is None:
+        info(f"↩ 違反のコミットだけを打ち消せないため、範囲のコミット {len(wide)} 件をまとめて打ち消しました")
+        return wide
+    reset_hard(work, before)
+    return None
+
+
+def note_reverted(state: dict[str, Any], work: str, originals: list[str]) -> list[str]:
+    """打ち消した元のコミットと打ち消しのコミットを、残すコミットとして台帳へ記録し、打ち消しのコミット（古い順）を返す。
+
+    `git revert` は元のコミットを履歴に残すため、元のコミットも記録しないと公開の直前の照合（`ledger.unpublishable`）が
+    `stray` として止める（項目の打ち消しの `reverted_by_commit` と同じ扱い）。"""
+    made = _new_commits(work, len(originals))
+    for sha in [*originals, *made]:
+        ledger.note_orchestrator_commit(state, full_commit(work, sha))
+    return made
+
+
+def revert_unattributed(
+    path: pathlib.Path, state: dict[str, Any], shas: list[str], label: str, widen: Optional[list[str]] = None
+) -> list[str]:
+    """どの項目にも属さないコミット（`shas` は古い順）を新しい順に `git revert` で打ち消し、打ち消した元のコミットを返す。
+
+    `reset --hard` で外さない（取り込んだベースブランチの変更を消さない。#2457 決定 6）。衝突したら `widen`（古い順）の
+    全体を打ち消す（`revert_or_widen`）。それでも戻せなければ打ち消しの前の HEAD へ戻して終了コード 4 で止まる。
+    元のコミットと打ち消したコミットはオーケストレーターが残すコミットとして台帳へ記録し、差し戻しに残す。
     """
     work = work_dir(state)
     # 衝突の巻き戻しは `reset --hard` で、未コミットの変更を戻せずに消す（C4）
     worktree.stop_if_dirty(state, work, "打ち消しの")
     before = git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered = list(reversed(shas))
     worktree.wait_past_rewrite()
     try:
-        conflict = revert_range(work, ordered)
-        if conflict:
-            reset_hard(work, before)
-            die(f"どの項目にも属さないコミット {conflict[:12]} を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
-        made = _new_commits(work, len(ordered))
-        for sha in made:
-            ledger.note_orchestrator_commit(state, sha)
-        state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(shas), "phase": label, "at": statefile.now()})
+        done = revert_or_widen(work, shas, widen)
+        if done is None:
+            die(f"どの項目にも属さないコミット {len(shas)} 件を打ち消せません（衝突）。HEAD を {before[:12]} へ戻しました")
+        made = note_reverted(state, work, done)
+        state.setdefault("sendbacks", []).append({"kind": "unattributed", "commits": list(done), "phase": label, "at": statefile.now()})
         state.setdefault("drops", []).append(
             {
                 "at": statefile.now(),
@@ -353,7 +383,7 @@ def revert_unattributed(path: pathlib.Path, state: dict[str, Any], shas: list[st
             }
         )
         statefile.save(path, state)
-        return len(made)
+        return done
     finally:
         worktree.mark_rewritten()
 

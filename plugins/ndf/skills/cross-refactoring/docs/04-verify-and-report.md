@@ -26,7 +26,7 @@ while :; do
       --stem-template "{agent}-fix-rf$ID" --phase fix \
       --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT" \
       --alive-file "$TMP_DIR/cross-refactoring-rf$ID-alive"
-  rf coding-time "$ID" fix --seconds "$SECONDS_OF_THE_LAUNCH"   # 安全網へ足す。HALT=1 なら止める
+  rf coding-time "$ID" fix --seconds "$SECONDS_OF_THE_LAUNCH"   # 安全網へ足す。止めるのは次の start-phase（取り込みを先に打つ）
   rf merge-fix "$ID"
 done
 ```

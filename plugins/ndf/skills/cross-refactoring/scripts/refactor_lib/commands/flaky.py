@@ -84,11 +84,14 @@ def _close_request(path: pathlib.Path, state: dict[str, Any], work: str, base: s
 def _sendback(path: pathlib.Path, state: dict[str, Any], work: str, shas: list[str], found: list[dict[str, Any]]) -> None:
     """違反のコミットを打ち消してから差し戻す。2 回目は打ち消しの後の HEAD から後の新しいコミットだけを判定する。
 
-    違反の無いコミットは残し、`kept` に持って 2 回目の結果へ数える。"""
+    違反の無いコミットは残し、`kept` に持って 2 回目の結果へ数える。違反のコミットだけを戻すと衝突するとき（後の
+    コミットが同じテストの行を直した）は、この起動のコミット全体を打ち消してから差し戻す（`undo.revert_or_widen`）。"""
     pending = state["flaky_request"]
     bad = {f["commit"] for f in found}
-    undo.revert_unattributed(path, state, [s for s in shas if s in bad], "フレーキーの直しの手順の違反（差し戻しの前）")
-    kept = list(pending.get("kept") or []) + [s for s in shas if s not in bad]
+    reverted = set(
+        undo.revert_unattributed(path, state, [s for s in shas if s in bad], "フレーキーの直しの手順の違反（差し戻しの前）", widen=shas)
+    )
+    kept = list(pending.get("kept") or []) + [s for s in shas if s not in reverted]
     head = git_out(work, ["rev-parse", "HEAD"]) or str(pending.get("base_sha") or "")
     pending.update({"attempts": int(pending.get("attempts") or 0) + 1, "sendback": found, "base_sha": head, "kept": kept})
     state["flaky_request"] = pending

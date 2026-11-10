@@ -142,3 +142,22 @@ def test_a_pending_fix_starts_after_the_flaky_fix(tmp_path, monkeypatch, cmd_fla
 
     assert _merge(cmd_flaky, capsys) == "kept"
     assert read_state(path)["fix"]["base_sha"] == fix
+
+
+def test_a_violation_fixed_later_in_the_same_lines_reverts_the_whole_attempt_before_the_sendback(tmp_path, monkeypatch, cmd_flaky, capsys):
+    """違反のコミットの後に同じテストの行を直した手順どおりのコミットがあると、違反のコミットだけは戻せない。
+    そのときは起動のコミット全体を打ち消してから差し戻し、実行全体を止めない。元のコミットも台帳に残す。"""
+    work, path, _ = _setup(tmp_path, monkeypatch)
+    (work / "tests" / "test_clock.py").write_text("def test_now():\n    assert 2 == 2\n", encoding="utf-8")
+    bad = commit_with_trailers(work, "fix flaky without the trailer", {})
+    (work / "tests" / "test_clock.py").write_text("def test_now():\n    assert 3 == 3\n", encoding="utf-8")
+    good = commit_with_trailers(work, "fix flaky", {"Flaky-Fix": TEST_ID})
+
+    assert _merge(cmd_flaky, capsys) == "sendback"
+
+    state = read_state(path)
+    assert (work / "tests" / "test_clock.py").read_text(encoding="utf-8") == "def test_now():\n    assert True\n"
+    assert state["flaky_request"]["kept"] == [], "打ち消したコミットを 2 回目の結果へ数えない"
+    kept = set(state["ledger"]["orchestrator_commits"])
+    assert {bad, good} <= kept and len(kept) >= 4, "元のコミットと打ち消しのコミットを残すコミットとして記録する"
+    assert git("status", "--porcelain", cwd=work).stdout.strip() == ""

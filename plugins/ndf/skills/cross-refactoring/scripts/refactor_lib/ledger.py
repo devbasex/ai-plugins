@@ -10,7 +10,7 @@ git を書き換えるのは `undo`、push するのは `publish` で、どち�
 | --- | --- | --- |
 | `item` | 取り消されていない改善項目に記録されたコミット | 残す |
 | `final_fix` | 最終ゲート修正のマージ処理が受け入れたコミット（`final_gate.fix_commits`） | 残す |
-| `orchestrator` | 台帳の `orchestrator_commits` にあるコミット（同期・計画の記録・公開済みの取り消しの revert） | 残す |
+| `orchestrator` | 台帳の `orchestrator_commits` にあるコミット（同期・計画の記録・公開済みの取り消しの revert・`git revert` で打ち消した手順違反の元のコミットとその revert） | 残す |
 | `stray` | 上のどれでもない | 消す（未公開）／公開を止める |
 
 **残すかは状態ファイルに記録した SHA の一致だけで決める。** トレーラーは実装担当も書けるため、

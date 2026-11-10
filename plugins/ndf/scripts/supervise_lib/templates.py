@@ -243,9 +243,8 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "on_fail": "refactor",
             "next": "refactor",
         },
-        # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
-        # 範囲を変数へ受けて終了コードを見る。`--scope $(...)` のままだと範囲を組めないときの停止（終了コード 2）が
-        # 捨てられ、空の --scope で argparse が落ちる
+        # 駆動で回す（最終ゲートは全体テスト。#1334）。範囲は変数へ受けて終了コードを見る（`--scope $(...)` のままだと
+        # 範囲を組めないときの停止（終了コード 2）が捨てられ、空の --scope で argparse が落ちる）
         {
             "id": "refactor",
             "type": "drive",
@@ -255,10 +254,11 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "timeout": with_margin(refactor_step_seconds(budget or default_refactor_budget_minutes())),
             "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope"
             f"{budget_arg}{refactor_template_arg(a)}",
-            # 着手前のテストのハングでリファクタリングを飛ばした終わり（終了コード 6 と gaps）はコードレビューへ進む（#2047 の I6）。
-            # テストと CI の待ちの分は駆動がステップの延長で延ばし、安全網で止めた終了コード 10 はエンジンが承認ゲートにする（#2457 決定 8）
+            # 着手前のテストのハングで飛ばした終わり（終了コード 6 と gaps）はコードレビューへ（#2047 の I6）。安全網で止めた
+            # 終了コード 10 は承認ゲートで、未解決の変更へレビューと検査を打たずにプランを終える（#2457 決定 8）
             "on_exit": {"6": "review"},
             "on_fail": "abort",
+            "gate_next": "end",
             "next": "review",
         },
         {

@@ -148,6 +148,26 @@ def test_a_carried_item_keeps_its_test_commit_when_readopted(flow, readopt):
     assert got["commits"] == {"test": test_sha, "implement": [], "fix": []} and got["seconds"] == {"test": 12.0}
 
 
+def test_an_item_carried_again_after_the_readopt_is_not_readopted(flow, cmd_setup, cmd_implement, readopt):
+    """採り直した後もコミットが無く持ち越しに戻った項目は、もう採り直さずに `not_done` で人へ渡す。
+
+    持ち越しは見積りの消費に数えないため、採り直しを重ねても予算の残りが減らず、前進しない実装の CLI を繰り返す。"""
+    _plan(flow, [_entry("I-001", 1, "total")])
+    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
+    _call(readopt, "cmd_readopt")
+    assert read_state(flow["path"])["items"][0]["readopted"] == 1
+
+    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
+    assert _exit_code(readopt, "cmd_readopt") == 2
+
+    state = read_state(flow["path"])
+    assert state["phase"] == "final" and state["items"][0]["status"] == "deferred"
+    assert _deferred(flow) == {"I-001": "not_done"}
+    assert "採り直した後も" in state["items"][0]["failure_reason"]
+
+
 def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implement, readopt):
     """巡: 1 巡目の取り込みの後に採り直した項目は、2 巡目の新しい起点からのコミットで取り込まれる。"""
     work = flow["work"]

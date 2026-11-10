@@ -211,6 +211,8 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
     s = steps_of(load(since))
     assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
     assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+    # 安全網で人へ渡した（終了コード 10）後は、未解決の変更へレビューと検査を打たずに終える
+    assert s["refactor"]["gate_next"] == "end"
 
 
 @pytest.mark.parametrize("push", [0, 1])

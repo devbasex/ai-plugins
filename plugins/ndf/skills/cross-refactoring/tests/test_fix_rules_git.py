@@ -342,7 +342,7 @@ def test_apply_fix_result_links_good_commits_oldest_first_and_rewrites(tmp_path,
 
 
 def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp_path, fix_intake, capsys):
-    """手順を外れたコミットだけを新しい順に打ち消し、打ち消しのコミットを台帳へ古い順に載せる。
+    """手順を外れたコミットだけを新しい順に打ち消し、元のコミットと打ち消しのコミットを台帳へ古い順に載せる。
 
     差し戻しは項目があればその項目へ、無ければ状態の `sendbacks` へ残す。残りのコミットは項目へ関連付ける。"""
     work = _repo(tmp_path)
@@ -366,7 +366,7 @@ def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp
     assert (work / "b.txt").read_text(encoding="utf-8") == "b1\n"
     assert not (work / "c.txt").exists()
     made = git("rev-list", "-2", "HEAD", cwd=work).stdout.split()
-    assert state["ledger"]["orchestrator_commits"] == list(reversed(made))
+    assert state["ledger"]["orchestrator_commits"] == [bad_a, bad_x, *reversed(made)], "元のコミットも公開の照合で止めない"
     subjects = git("log", "-2", "--format=%s", cwd=work).stdout.splitlines()
     assert subjects == ['Revert "Fix I-001 bad"', 'Revert "stray"']
     items = {i["id"]: i for i in state["items"]}
@@ -379,8 +379,9 @@ def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp
     assert (row_x["kind"], row_x["reason"], row_x["commit"]) == ("fix_procedure", "外れた X", bad_x)
 
 
-def test_apply_fix_result_keeps_everything_when_the_revert_conflicts(tmp_path, fix_intake, capsys):
-    """打ち消しが衝突したら着手前の HEAD へ戻し、差し戻しだけを残す。外れたコミットも項目へ関連付ける。"""
+def test_apply_fix_result_reverts_the_whole_range_when_the_bad_commit_alone_conflicts(tmp_path, fix_intake, capsys):
+    """違反のコミットだけを戻すと衝突するとき（後のコミットが同じ行を直した）は、修正の範囲全体を打ち消して
+    修正を採らない。違反のコミットを項目へ結ばず、元のコミットと打ち消しのコミットを台帳へ載せる。"""
     work = _repo(tmp_path)
     _write(work, "a.txt", "a1\n")
     bad = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
@@ -396,10 +397,11 @@ def test_apply_fix_result_keeps_everything_when_the_revert_conflicts(tmp_path, f
     fix_intake._apply_fix_result(tmp_path / "s.json", state, str(work), result)
 
     out = _said(capsys)
-    assert f"⚠ 手順を外れた修正のコミット {bad[:12]} を打ち消せません（衝突）" in out
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == good
+    assert "修正の範囲 2 件を打ち消しました（修正を採りません）" in out
+    assert (work / "a.txt").read_text(encoding="utf-8") == "a0\n"
     assert git("status", "--porcelain", cwd=work).stdout == ""
-    assert "ledger" not in state
+    made = git("rev-list", "-2", "HEAD", cwd=work).stdout.split()
+    assert state["ledger"]["orchestrator_commits"] == [bad, good, *reversed(made)]
     item = state["items"][0]
-    assert item["commits"]["fix"] == [bad, good]
+    assert item["commits"]["fix"] == [], "違反のコミットを項目へ結ばない"
     assert [r["commit"] for r in item["sendbacks"]] == [bad]

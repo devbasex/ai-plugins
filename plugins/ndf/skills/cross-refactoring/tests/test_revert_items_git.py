@@ -134,3 +134,29 @@ def test_untracked_files_do_not_stop_the_revert(tmp_path, undo):
 
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() != a
     assert (work / "report.xml").read_text(encoding="utf-8") == "<testsuite/>\n"
+
+
+def test_unattributed_commits_and_their_reverts_are_publishable(tmp_path, undo):
+    """打ち消した元のコミットも台帳へ記録し、公開の直前の照合（`ledger.unpublishable`）で止まらない。"""
+    from refactor_lib import ledger
+
+    work, base = _init(tmp_path)
+    stray = _commit(work, "src/foo.py", 2, "no-item")
+    path = make_state_v2(tmp_path, work, items=[], plan={"base_sha": base}, phase="verify")
+
+    assert undo.revert_unattributed(path, read_state(path), [stray], "手順の違反") == [stray]
+
+    assert ledger.unpublishable(read_state(path), str(work), base) == []
+
+
+def test_a_conflicting_unattributed_revert_widens_to_the_whole_range(tmp_path, undo):
+    """違反のコミットの後に同じ行を直したコミットがあれば、範囲全体を打ち消す（違反のコミットだけを残さない）。"""
+    work, base = _init(tmp_path)
+    bad = _commit(work, "src/foo.py", 2, "bad")
+    later = _commit(work, "src/foo.py", 2, "later")
+    path = make_state_v2(tmp_path, work, items=[], plan={"base_sha": base}, phase="verify")
+
+    assert undo.revert_unattributed(path, read_state(path), [bad], "手順の違反", widen=[bad, later]) == [bad, later]
+
+    assert (work / "src" / "foo.py").read_text(encoding="utf-8") == "".join(LINES)
+    assert git("status", "--porcelain", cwd=work).stdout.strip() == ""

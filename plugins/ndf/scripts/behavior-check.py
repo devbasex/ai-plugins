@@ -48,7 +48,7 @@ MAX_TARGETS = 6  # 1 回の確認で起動する対象の上限。超えた分�
 PROCEDURE = (
     "1. 対象ごとに、差分（`git diff origin/<起点>...HEAD -- <対象>`）で変わった指示を 1 つ選び、その指示が効く依頼文を作る",
     "2. 作業ディレクトリへ worktree の一時コピーを作り、その中で 1 対象 1 回だけ起動する: `claude -p --plugin-dir <対象の plugin_root> "
-    "--output-format stream-json --no-session-persistence --max-budget-usd 1 '<依頼文>'`",
+    "--output-format stream-json --verbose --no-session-persistence --max-budget-usd 1 '<依頼文>'`",
     "3. 出力のツールの呼び出しと応答から、変わった指示どおりに動いたかを判定する。動いたら「通った」、動かなければ「落ちた」とし、"
     "見たことを observed に書く",
     f"4. 確かめるのは {MAX_TARGETS} 件まで。超えた分は「確かめていない」とする",

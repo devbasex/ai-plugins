@@ -40,13 +40,16 @@ class AssigneeLaunch:
             raise Halt(self.v.get("HALT_REASON") or "安全網の上限に当たった")
 
     def coding_time(self, phase: str, seconds: float) -> None:
-        """コーディングの CLI の起動 1 回の秒を安全網へ足し、上限に届いたら止める（新しいコーディングの CLI を起動しない。I8）。"""
+        """コーディングの CLI の起動 1 回の秒を安全網へ足す。
+
+        **上限に届いてもここでは止めない。** 続く取り込み（`merge-*`）でその CLI のコミットを項目へ結んでから、
+        次のコーディングの CLI の起動の前の `start_phase`（`HALT=1`）が止める（I8）。ここで止めると最後の CLI の
+        コミットが項目に結ばれずに HEAD に残り、打ち直しで済んだ手順の CLI をもう 1 度起動する。"""
         if phase not in CODING_PHASES:
             return
-        self.v.pop("HALT", None)
         self.rf("coding-time", self.v["ID"], phase, "--seconds", f"{seconds:.1f}")
-        if self.v.get("HALT") == "1":
-            raise Halt(self.v.get("HALT_REASON") or "安全網の上限に当たった")
+        self.v.pop("HALT", None)
+        self.v.pop("HALT_REASON", None)
 
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
         """担当 1 者の工程。起動の失敗では止める。
