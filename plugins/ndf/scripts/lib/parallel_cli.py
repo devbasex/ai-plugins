@@ -123,62 +123,18 @@ def wait_event(main: Path, name: str, after: int, timeout: float):
         after, left = int(got.value.get("seq") or after), max(0.0, end - time.monotonic())
 
 
-def _reply_missing_record(reply, main: Path, name: str, self_path: Path) -> None:
-    """耐久の記録が無いときの 3 通りの返し（作り直しの途中・失われた計画・記録が無い）。"""
-    if plg.plan_state(main, name, None) == "lost":
-        if pl.live_run_pid(main, name) is not None:  # 作り直しの run が記録を開く前
-            reply("stopped", "run が耐久ワークフローを作り直している。同じ wait を打ち直す", code=3, next=wait_line(self_path, name))
-        reply(
-            "stopped",
-            f"並列の計画 {name} の耐久の記録が無い（失われた計画）。start で作り直す",
-            code=1,
-            action="error",
-            next=f"python3 {self_path} start {name}",
-        )
-    reply("stopped", f"並列の計画 {name} の耐久の記録が無い", code=2)
-
-
-def _rewait_line(self_path: Path, a, after: int) -> str:
-    """上限に達したときに打ち直す wait の行（`--after` と、あれば `--changes-after`）。"""
-    return wait_line(self_path, a.name) + f" --after {after}" + (f" --changes-after {a.changes_after}" if a.changes_after else "")
-
-
-def _reply_event(reply, main: Path, a, ev: dict, extra: dict, self_path: Path) -> None:
-    """event を返す。問いは業務時間外の振り分けを、条件の停止は変化を足す。"""
-    key = ev.pop("key")
-    action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
-    items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
-    if action == "questions":  # 業務時間外は gate1・ask を溜め、今問う依頼だけを返す（#2913 の E6）
-        items, kept = pdf.route(main, a.name, items, pdf.hours_of(main))
-        if kept and not items:
-            d = kept["deferred"]
-            nxt = wait_line(self_path, a.name) + f" --after {ev.get('seq')}"
-            reply(
-                "stopped",
-                f"業務時間外の依頼を {d['count']} 件溜めた（業務時間の始まり {d['until']}）",
-                code=3,
-                next=nxt,
-                **{**extra, **ev, **kept},
-            )
-        ev.update(kept)
-    if action == ph.CONDITION:
-        ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
-    reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **{**extra, **ev})
-
-
-def _reply_done(reply, name: str, value, extra: dict) -> None:
-    """耐久ワークフローの終わり（レーンごとの状態・リリース・過去の待ち）を返す。"""
-    o = value or {}
-    lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
-    rows = {"releases": o.get("releases"), "prior_waits": o.get("prior_waits") or []}
-    reply("ok", f"並列の計画 {name} は {o.get('status')} で終わった", lanes, action=o.get("status"), **rows, **extra)
-
-
 def wait_plan(a, reply, main: Path, self_path: Path) -> None:
     """人へ問うもの・答え待ちの停止の変化・終わり・異常まで待つ（#2936 の I5）。"""
 
+    restart = f"python3 {self_path} start {a.name}"
     if not pl.record_exists(main, a.name):
-        _reply_missing_record(reply, main, a.name, self_path)
+        if plg.plan_state(main, a.name, None) == "lost":
+            if pl.live_run_pid(main, a.name) is not None:  # 作り直しの run が記録を開く前
+                reply("stopped", "run が耐久ワークフローを作り直している。同じ wait を打ち直す", code=3, next=wait_line(self_path, a.name))
+            reply(
+                "stopped", f"並列の計画 {a.name} の耐久の記録が無い（失われた計画）。start で作り直す", code=1, action="error", next=restart
+            )
+        reply("stopped", f"並列の計画 {a.name} の耐久の記録が無い", code=2)
     extra = plg.ledger_report(main, a.name, prt.waiting_requests(main, a.name))
     batch_reply(reply, main, a.name, extra)  # 業務時間に入った後の最初の wait は溜めた依頼をまとめて返す（#2913 の E7）
     hours = pdf.hours_of(main)
@@ -190,18 +146,40 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
             f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
             code=3,
             seq=after,
-            next=_rewait_line(self_path, a, after),
+            next=wait_line(self_path, a.name) + f" --after {after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
             **extra,
         )
     if got.kind == "event":
-        _reply_event(reply, main, a, dict(got.value), extra, self_path)
+        ev = dict(got.value)
+        key = ev.pop("key")
+        action = ev.pop("action", None) if key != "questions" else "questions"  # reply の action と重ねない
+        items = pa.with_repo(main, a.name, ev.pop("items", None) or []) if action == "questions" else ev.pop("items", None) or []
+        if action == "questions":  # 業務時間外は gate1・ask を溜め、今問う依頼だけを返す（#2913 の E6）
+            items, kept = pdf.route(main, a.name, items, pdf.hours_of(main))
+            if kept and not items:
+                d = kept["deferred"]
+                nxt = wait_line(self_path, a.name) + f" --after {ev.get('seq')}"
+                reply(
+                    "stopped",
+                    f"業務時間外の依頼を {d['count']} 件溜めた（業務時間の始まり {d['until']}）",
+                    code=3,
+                    next=nxt,
+                    **{**extra, **ev, **kept},
+                )
+            ev.update(kept)
+        if action == ph.CONDITION:
+            ev.update(ph.wait_changes(main, a.name, a.changes_after, ev))
+        reply("ok", f"並列の計画 {a.name}: {action}", items, action=action, **{**extra, **ev})
     if got.kind == "done":
-        _reply_done(reply, a.name, got.value, extra)
+        o = got.value or {}
+        lanes = [{"lane": n, **st} for n, st in sorted((o.get("lanes") or {}).items())]
+        rows = {"releases": o.get("releases"), "prior_waits": o.get("prior_waits") or []}
+        reply("ok", f"並列の計画 {a.name} は {o.get('status')} で終わった", lanes, action=o.get("status"), **rows, **extra)
     reply(
         "stopped",
         f"耐久ワークフローが {got.kind} で終わった: {got.value}。start で作り直す",
         code=1,
         action=got.kind,
-        next=f"python3 {self_path} start {a.name}",
+        next=restart,
         **extra,
     )
