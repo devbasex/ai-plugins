@@ -333,13 +333,24 @@ def planned_item(item_id: str, rank: int, **over: Any) -> dict[str, Any]:
     }
 
 
+def call_command(module: Any, name: str, **kwargs: Any) -> Any:
+    """`module` のコマンド `name` を、PR 番号 130 と `kwargs` の引数で呼ぶ。"""
+    import argparse as _argparse
+
+    return getattr(module, name)(_argparse.Namespace(id=130, **kwargs))
+
+
 def implement_items(
-    flow: dict[str, Any], cmd_phases: Any, cmd_implement: Any, items: list[dict[str, Any]], changes: dict[str, Any], late: bool = False, **over: Any
+    flow: dict[str, Any],
+    cmd_phases: Any,
+    cmd_implement: Any,
+    items: list[dict[str, Any]],
+    changes: dict[str, Any],
+    late: bool = False,
+    **over: Any,
 ) -> None:
     """計画の項目 `items` を置いて実装の工程を始め、項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。
     `over` は状態の上書き、`late` は直しの試行の打ち切りだけを過ぎた上限の表（上書きの後に当てる）。"""
-    import argparse as _argparse
-
     work = flow["work"]
     state = read_state(flow["path"])
     state["items"] = items
@@ -354,11 +365,11 @@ def implement_items(
     if late:
         past_fix_end(state)
     write_state(flow["path"], state)
-    cmd_phases.cmd_start_phase(_argparse.Namespace(id=130, phase="implement"))
+    call_command(cmd_phases, "cmd_start_phase", phase="implement")
     for item_id, change in changes.items():
         change(work)
         commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
-    cmd_implement.cmd_merge_implement(_argparse.Namespace(id=130))
+    call_command(cmd_implement, "cmd_merge_implement")
 
 
 def answer_judge(state_path: pathlib.Path, feasible: Any = True, reason: str = "直せる見込みがある") -> dict:
