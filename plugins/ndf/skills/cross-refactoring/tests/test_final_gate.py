@@ -5,7 +5,7 @@
 ときは全体のテストの後に `cross-review` を実行する。見分けは**引数で受け取る**。
 
 **`--ci-check` が無ければ、起動のされ方によらず全体のテストを 1 度走らせる**（#933 の
-AC16b）。検証の中で全体のテストが通り、取り消しが無く、HEAD が進んでいなければ使い回す。
+AC16b）。検証の巡の中では全体のテストを走らせないため、使い回す結果は無い（#3048）。
 
 **`--ci-check` の扱いは排他である。** 指定があれば手元のテストを実行せず継続的統合の
 成功だけで判定し、無ければ手元のテストだけで判定する。**採った側が失敗した・結果を
@@ -414,76 +414,20 @@ def test_a_standalone_run_whose_baseline_test_fails_enters_the_fix_round(refacto
     assert read_state(state_path)["final_gate"]["fix_rounds"] == 1
 
 
-# ---------- 検証の中の全体のテストの使い回し（AC16b・決定 16） ----------
-
-PASSED_IN_VERIFY = {"ran": True, "flags": ["D2"], "status": "pass", "seconds": 5.0, "head": "HEADSHA", "reverted": False}
-
-
-@pytest.mark.parametrize("workflow_step", [False, True])
-def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys, workflow_step):
-    """検証の中で通り、取り消しが無く、HEAD が進んでいなければ走らせずに通す。"""
-    state_path = _state(tmp_path, workflow_step=workflow_step, whole_test=PASSED_IN_VERIFY)
-    env_tmp_dir(state_path)
-
-    cmd_gate.cmd_final_gate(_args())
-
-    assert spy["tests"] == []
-    gate = read_state(state_path)["final_gate"]
-    assert gate["whole_test_reused"] is True
-    assert gate["status"] == "passed"
-    assert gate["checks"] == []
-    expected = "FINAL_GATE=passed" if workflow_step else "FINAL_GATE=cross-review"
-    assert expected in capsys.readouterr().out
+# ---------- 最終ゲートの記録 ----------
 
 
 def test_a_new_gate_run_drops_the_previous_triage(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
     """前回の見分けは今回の取り消しの根拠にしない（今回のテストが通れば変更起因は無い）。"""
     stale = {"caused": ["tests/test_a.py::t"], "rerun_command": "pytest -q tests/test_a.py"}
     material = {"ids": ["tests/test_a.py::t"], "source": "junit", "log": "", "commands": []}
-    state_path = _state(
-        tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale, "material": material}
-    )
+    state_path = _state(tmp_path, final_gate={"fix_rounds": 1, "checks": [], "triage": stale, "material": material})
     env_tmp_dir(state_path)
 
     cmd_gate.cmd_final_gate(_args())
 
     gate = read_state(state_path)["final_gate"]
     assert "triage" not in gate and "material" not in gate
-
-
-@pytest.mark.parametrize(
-    "whole_test",
-    [
-        {**PASSED_IN_VERIFY, "reverted": True},  # 落ちて危険フラグの項目を取り消した
-        {**PASSED_IN_VERIFY, "head": "OLDHEAD"},  # その後に HEAD が進んだ（同期のコミットなど）
-        {**PASSED_IN_VERIFY, "status": "fail"},  # 落ちた
-        {**PASSED_IN_VERIFY, "ran": False},  # 走らなかった
-    ],
-)
-def test_the_whole_test_runs_unless_it_is_reusable(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, whole_test):
-    """`whole_test.reverted` が真なら必ず走らせる。HEAD が進んだときも走らせる。"""
-    state_path = _state(tmp_path, workflow_step=True, whole_test=whole_test)
-    env_tmp_dir(state_path)
-
-    cmd_gate.cmd_final_gate(_args())
-
-    assert spy["tests"] == [WHOLE]
-    gate = read_state(state_path)["final_gate"]
-    assert not gate.get("whole_test_reused")
-    assert gate["checks"][-1]["command"] == WHOLE
-
-
-def test_a_ci_check_is_not_replaced_by_the_whole_test_in_verify(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
-    """`--ci-check` があれば継続的統合を読む。検証の中の全体のテストでは代えない。"""
-    state_path = _state(tmp_path, workflow_step=True, ci_check="tests", whole_test=PASSED_IN_VERIFY)
-    env_tmp_dir(state_path)
-    spy["gh_out"] = _check_runs(_run("tests"))
-
-    cmd_gate.cmd_final_gate(_args())
-
-    assert spy["tests"] == []
-    assert len(spy["gh"]) == 1
-    assert not read_state(state_path)["final_gate"].get("whole_test_reused")
 
 
 def test_the_seconds_of_the_final_whole_test_are_kept_for_the_history(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
@@ -710,3 +654,84 @@ def test_without_junit_the_ci_failure_material_reaches_the_final_fix(patch_lib, 
     assert gate["material"]["log"] == "https://github.com/acme/demo/actions/runs/7"
     assert gate["material"]["commands"]
     assert "落ちたテストの材料" in gate["fix_request"] and "actions/runs/7" in gate["fix_request"]
+
+
+# ---------- 最終ゲートへ寄せた危険フラグの項目へ修正を向ける（#3048） ----------
+
+
+def _deferred_state(tmp_path, ci):
+    items = [
+        {
+            "id": "I-001",
+            "rank": 1,
+            "status": "verified",
+            "danger": ["D1"],
+            "path": "src/a.py",
+            "symbol": "a",
+            "technique": "extract",
+            "commits": {"test": None, "implement": ["aaaaaaa1"], "fix": []},
+        },
+        {
+            "id": "I-002",
+            "rank": 2,
+            "status": "verified",
+            "danger": [],
+            "path": "src/calc.py",
+            "symbol": "add",
+            "technique": "rename",
+            "commits": {"test": None, "implement": ["bbbbbbb2"], "fix": []},
+        },
+        {"id": "I-003", "rank": 3, "status": "reverted", "danger": ["D2"], "commits": {"test": None, "implement": ["ccccccc3"], "fix": []}},
+    ]
+    whole = {"deferred": {"flags": ["D1", "D2"], "items": ["I-001", "I-003"]}, "resolution": "deferred"}
+    if ci:
+        return _ci_whole_state(tmp_path, items=items, whole_test=whole)
+    return _state(tmp_path, workflow_step=True, items=items, whole_test=whole)
+
+
+@pytest.mark.parametrize("ci", [False, True])
+def test_a_caused_failure_points_the_final_fix_at_the_deferred_items(patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch, ci):
+    """手元でも CI でも、変更起因の失敗が出たら、寄せた危険フラグの項目と本文にパスが現れた項目を最終ゲート修正の依頼に載せる。
+
+    取り消した項目は載せない。原因の判定は `final_gate.culprit` に残る（項目を外した走らせ直しはしない）。
+    """
+    state_path = _deferred_state(tmp_path, ci)
+    env_tmp_dir(state_path)
+    if ci:
+        _failed_ci(patch_lib, spy, [NEW_FAILURE])
+    else:
+        spy["test_code"] = 1
+    classified = {
+        "failed_tests": [NEW_FAILURE],
+        "flaky": [],
+        "preexisting": [],
+        "caused": [NEW_FAILURE],
+        "caused_output": {NEW_FAILURE: 'File "src/calc.py", line 3, in add'},
+        "rerun_commands": ["pytest -q tests/test_new.py"],
+    }
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(classified))
+    changed = {"I-001": ["src/a.py"], "I-002": ["src/calc.py"]}
+    monkeypatch.setattr(cmd_gate.culprit, "_changed_by", lambda work, item: changed.get(item["id"], []))
+    monkeypatch.setattr(cmd_gate.culprit, "_isolate", lambda *a: pytest.fail("最終ゲートでは項目を外して走らせ直さない"))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 2
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "failing" and gate["mode"] == ("ci" if ci else "test")
+    assert gate["culprit"]["culprits"] == ["I-002"] and gate["culprit"]["basis"] == "path"
+    request = gate["fix_request"]
+    assert "I-002" in request and "I-001" in request and "src/a.py#a" in request and "aaaaaaa" in request
+    assert "I-003" not in request
+
+
+def test_a_passing_final_gate_leaves_no_fix_request(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """寄せた項目があっても、最終ゲートが通れば修正の依頼を作らない。"""
+    state_path = _deferred_state(tmp_path, ci=False)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "passed" and "fix_request" not in gate

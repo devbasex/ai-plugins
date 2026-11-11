@@ -3084,9 +3084,21 @@
     {
       "term": "重なりの組",
       "context": "ndf-workflow",
-      "meaning": "同じステージの 2 本のプランで、触るファイルが包含で重なるか同じ共有の一覧に当たるもの。同時には流さない",
+      "meaning": "同じステージの 2 本のプランで、触るファイルに等しいファイルの宣言を持つか、同じ共有の一覧に当たるもの。ディレクトリの宣言は判定に使わない。同時には流さない",
       "code": "overlap_pair",
-      "pending_source": "issues/issue-1142-design-dbos.md"
+      "pending_source": "issues/issue-1811-design.md"
+    },
+    {
+      "term": "偽の重なり",
+      "context": "ndf-workflow",
+      "meaning": "重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組",
+      "pending_source": "issues/issue-1811-requirements.md"
+    },
+    {
+      "term": "ディレクトリの宣言",
+      "context": "ndf-workflow",
+      "meaning": "触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない",
+      "pending_source": "issues/issue-1811-design.md"
     },
     {
       "term": "共有の一覧",
@@ -5793,7 +5805,7 @@
     {
       "term": "答え待ちの停止",
       "context": "ndf-workflow",
-      "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
+      "meaning": "答え待ちの依頼が閾値を超えたため、レーンに新しい承認を生む作業を始めさせない状態。件数が閾値以下へ戻ると解ける",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
@@ -6252,13 +6264,19 @@
     {
       "term": "新しい承認を生む作業",
       "context": "ndf-workflow",
-      "meaning": "ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない",
+      "meaning": "設計のステップ（設計承認ゲートの依頼を生む）を含む作業。ループのレーンではループの 1 回のプランに設計承認ゲートを含む作業、1 スプリントのレーンでは開始のステップから設計を書くステップへ行けるプラン。答え待ちの停止の範囲に入ったレーンは始めない",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "承認の要らない作業",
       "context": "ndf-workflow",
-      "meaning": "新しい承認を生む作業以外の作業。開発ループの中では、承認した設計の実装と、答えの届いた保留したループの 1 回の残りがこれに当たる（ループは設計を承認していない課題にモードに依らず設計のステップを置く）",
+      "meaning": "新しい承認を生む作業以外の作業。開発ループの中では承認した設計の実装と答えの届いた保留したループの 1 回の残り（ループは設計を承認していない課題にモードに依らず設計のステップを置く）、1 スプリントのレーンでは設計 PR のマージ・実装・検査・リリースのプランがこれに当たる",
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
+    },
+    {
+      "term": "次に始めるプラン",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンのスプリントで、ステージの並びの先頭から見て、結果が完了でも承認ゲートでもないプランを持つ最初のステージの、そのプランの集まり。答え待ちの停止の範囲で答えを受けたレーンを起こすかを決める",
       "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
@@ -6391,22 +6409,19 @@
       "term": "import の輪",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ",
-      "source": "",
-      "pending_source": "issues/issue-2988-requirements.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "一番下の層",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれる共通ライブラリ。結果を出す層 step_result がこれに当たる",
-      "source": "",
-      "pending_source": "issues/issue-2988-requirements.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "終了コードの表",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する",
-      "source": "",
-      "pending_source": "issues/issue-2988-design.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "長い待ち",
@@ -6431,6 +6446,137 @@
       "context": "ndf-workflow",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
       "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "出し直しの提示",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "加わった範囲",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "文書だけの範囲",
+      "context": "ndf-workflow",
+      "meaning": "加わった範囲のファイルを宣言 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "出し直しを省く",
+      "context": "ndf-workflow",
+      "meaning": "加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "確かめ直しの範囲",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 のコミットから提示 2 の承認資料を作った時点のコミットまでに入った変更。判定の後にベースブランチが進めば加わった範囲より広くなる。引き継いだ承認を記録する前にこの範囲が文書だけかを確かめる",
+      "source": "",
+      "pending_source": "issues/issue-3020-design.md"
+    },
+    {
+      "term": "引き継いだ承認",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す",
+      "source": "",
+      "pending_source": "issues/issue-3020-design.md"
+    },
+    {
+      "term": "触る場所の見込み",
+      "context": "ndf-workflow",
+      "meaning": "設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "見込みの出所",
+      "context": "ndf-workflow",
+      "meaning": "触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし）",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "同時に動く本数",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "順位の逆転",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "逆転の幅",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
+      "source": "",
+      "pending_source": "issues/issue-2997-design.md"
+    },
+    {
+      "term": "負荷とメモリの値",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "マシンの上の pytest の数",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "待ちの理由",
+      "context": "ndf-workflow",
+      "meaning": "プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ",
+      "pending_source": "issues/issue-2998-design.md"
+    },
+    {
+      "term": "待ちの秒",
+      "context": "ndf-workflow",
+      "meaning": "queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits）",
+      "pending_source": "issues/issue-2998-design.md"
+    },
+    {
+      "term": "メモリの山",
+      "context": "ndf-workflow",
+      "meaning": "全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "マシンのプランの本数",
+      "context": "ndf-workflow",
+      "meaning": "同じマシンで動いている並列の計画の、動いているレーンの宣言の plans の合計。プランの本数の上限と比べる",
+      "pending_source": "issues/issue-2999-requirements.md"
+    },
+    {
+      "term": "起動の待ち",
+      "context": "ndf-workflow",
+      "meaning": "依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと",
+      "pending_source": "issues/issue-2999-requirements.md"
+    },
+    {
+      "term": "プランの本数の上限",
+      "context": "ndf-workflow",
+      "meaning": "同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む",
+      "pending_source": "issues/issue-2999-design.md"
+    },
+    {
+      "term": "起動の排他",
+      "context": "ndf-workflow",
+      "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
+      "pending_source": "issues/issue-2999-design.md"
     }
   ]
 }
