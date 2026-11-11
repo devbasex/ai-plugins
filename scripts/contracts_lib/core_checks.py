@@ -6,7 +6,7 @@
 - `core-exempt`: `hook` の印は hook の定義か hook のエントリポイントからの呼び出しを根拠に持つ。`runtime` の印は
   ベースブランチより増えない
 - `exit-meaning`: 契約の `exit` の値は終了コードの表の見出しで始まり、エントリポイントとその部品は `EXIT_` で始まる
-  整数の定数を持たない（持ち主の `lib/step_result.py`・`lib/deps.py` を除く）
+  整数の定数を持たない（持ち主の `lib/exit_codes.py` を除く）
 - `result-read`: `lib/step_read.py` の外で、名前に `last_json` を含む関数の定義と `json.loads(<式>.splitlines()[-1])` を書かない
 """
 
