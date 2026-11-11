@@ -28,6 +28,17 @@ EXIT_INFRA_WAIT = 75
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
+# `stopped` の結果が返してよい終了コード（`step_result.code_matches`）
+STOPPED_CODES = (
+    EXIT_VIOLATION,
+    EXIT_UNREADABLE,
+    EXIT_PRECONDITION,
+    EXIT_BASE_CONFLICT,
+    EXIT_CD_FAILED,
+    EXIT_INCOMPLETE,
+    EXIT_DEPS_MISSING,
+    EXIT_INFRA_WAIT,
+)
 
 # 終了コードの見出し。契約の一覧の `exit` の値はこの見出しで始める（#2337 の決定 4・検査 `exit-meaning`）
 EXIT_LABELS = {

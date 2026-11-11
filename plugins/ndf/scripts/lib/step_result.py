@@ -65,6 +65,7 @@ EXIT_DEPS_MISSING = exit_codes.EXIT_DEPS_MISSING
 EXIT_INFRA_WAIT = exit_codes.EXIT_INFRA_WAIT
 GATE_CODES = exit_codes.GATE_CODES
 PAUSE_CODES = exit_codes.PAUSE_CODES
+STOPPED_CODES = exit_codes.STOPPED_CODES
 EXIT_LABELS = exit_codes.EXIT_LABELS
 label_of = exit_codes.label_of
 
@@ -90,16 +91,7 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (
-        EXIT_VIOLATION,
-        EXIT_UNREADABLE,
-        EXIT_PRECONDITION,
-        EXIT_BASE_CONFLICT,
-        EXIT_CD_FAILED,
-        EXIT_INCOMPLETE,
-        EXIT_DEPS_MISSING,
-        EXIT_INFRA_WAIT,
-    )
+    return code in STOPPED_CODES
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:

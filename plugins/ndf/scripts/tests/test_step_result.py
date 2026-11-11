@@ -273,6 +273,13 @@ def test_code_matches_accepts_exactly_the_current_codes(status):
     assert accepted == expected
 
 
+def test_every_labelled_code_belongs_to_exactly_one_status_class():
+    """表（EXIT_LABELS）と分類（OK・GATE_CODES・PAUSE_CODES・STOPPED_CODES）がずれていないか。"""
+    classes = ({sr.EXIT_OK}, set(sr.GATE_CODES), set(sr.PAUSE_CODES), set(sr.STOPPED_CODES))
+    for code in sr.EXIT_LABELS:
+        assert sum(code in c for c in classes) == 1, code
+
+
 def test_default_code_is_fixed_per_status():
     """現状固定: status から決める既定の終了コード。知らない status は KeyError。"""
     assert [sr.default_code(s) for s in ("ok", "gate", "stopped")] == [0, 10, 1]
