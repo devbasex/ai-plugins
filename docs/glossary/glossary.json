@@ -6442,6 +6442,13 @@
       "meaning": "開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと",
       "source": "",
       "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "逆転の幅",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
+      "source": "",
+      "pending_source": "issues/issue-2997-design.md"
     }
   ]
 }
