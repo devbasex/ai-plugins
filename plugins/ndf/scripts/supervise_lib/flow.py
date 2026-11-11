@@ -492,7 +492,9 @@ def queue_workflow(args: dict) -> dict:
         if filled["runnable"]:
             adm = {
                 **admit_step(filled["runnable"], args["shared"], args.get("starts"), args.get("rerun")),
-                "prior": list(items), "queued": queued, "waits_on": waits_on,  # fmt: skip
+                "prior": list(items),
+                "queued": queued,
+                "waits_on": waits_on,  # fmt: skip
             }
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)
