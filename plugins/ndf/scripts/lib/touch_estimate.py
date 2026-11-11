@@ -81,13 +81,17 @@ def _match_file(token: str, files: Sequence[str]) -> list[str]:
 
 
 def _match_place(token: str, files: Sequence[str]) -> list[str]:
-    """課題グループの表の語: ファイルかディレクトリ（追跡しているファイルを含むもの）か glob。当たらない語（Skill の名前など）は捨てる。"""
+    """課題グループの表の語: ファイルかディレクトリ（追跡しているファイルを含むもの）か glob。当たらない語（Skill の名前など）は捨てる。
+
+    ディレクトリは末尾を `/` にして返す。実装のキューと同じく、重なりの判定（`admission.overlap_of`）はディレクトリの宣言を使わない。"""
     t = _path_token(token).rstrip("/")
     if not t or " " in t:
         return []
     if _GLOB.search(t):
         return fnmatch.filter(files, t)
-    return [t] if any(admission.contains(t, f) for f in files) else []
+    if t in files:
+        return [t]
+    return [t + "/"] if any(admission.contains(t, f) for f in files) else []
 
 
 def _uniq(paths: Iterable[str]) -> list[str]:
@@ -306,9 +310,14 @@ def git_tracked(source) -> list[str]:
 
 
 def design_paths(root, n: int) -> list[str]:
-    """マージ済みの設計文書（`issues/issue-<n>-design*.md`）の設計の結果の触るファイル。"""
+    """マージ済みの設計文書の設計の結果の触るファイル。文書は名前の番号の並びに n を含むもの（`issue-7-8-design.md` も。
+    名前の規則は `design_docs.name_numbers`）。"""
+    import design_docs
+
     out: list[str] = []
-    for p in sorted((Path(root) / "issues").glob(f"issue-{n}-design*.md")):
+    for p in sorted((Path(root) / design_docs.DESIGN_DIR).glob("issue-*-design*.md")):
+        if str(n) not in (design_docs.name_numbers(p.name) or set()):
+            continue
         try:
             out += from_design(p.read_text(encoding="utf-8"), n)
         except OSError:
@@ -351,12 +360,13 @@ def annotate_rows(rows: list[dict], numbers: Sequence[int], picked: Iterable[int
     ]
 
 
-def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, list, str | None]:
-    """並列の計画のレーン → 課題 → 見込みのパス（I21）。出し方は開発ループの選定と同じ `issue_estimate`。
+def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, dict, str | None]:
+    """(レーン → 課題 → 見込みのパス, レーン → そのリポジトリの共有の一覧, 理由)（I21）。出し方は開発ループの選定と同じ `issue_estimate`。
     スプリントのレーンは `input.issues`、ループのレーンは `--milestones` のマイルストーンの課題グループの表の課題を見る。
     マイルストーンか課題の本文を読めなければ理由を返して続ける（その課題は見込みなし）。source_of はテストが差し替える（レーンのリポジトリ → 入口）。"""
     repos: dict[str, tuple] = {}
     out: dict[str, dict] = {}
+    shared: dict[str, list] = {}
     errors: list[str] = []
     for ln in lanes:
         root = ln.repo_dir(Path(main))
@@ -367,8 +377,8 @@ def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, list, str | N
             except OSError as exc:
                 errors.append(f"{root}: {exc}")
                 descs = {}
-            repos[str(root)] = (src, descs, git_tracked(src))
-        src, descs, files = repos[str(root)]
+            repos[str(root)] = (src, descs, git_tracked(src), shared_list(root))
+        src, descs, files, shared[ln.name] = repos[str(root)]
         if ln.input.kind == "sprint":
             issues = list(ln.input.issues)
         else:
@@ -376,7 +386,7 @@ def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, list, str | N
         got = {n: issue_estimate(src, n, next((d for d in descs.values() if n in group_issues(d)), ""), files) for n in issues}
         errors += [f"課題 #{n} の{UNREADABLE_NOTE}" for n, e in got.items() if e.note == UNREADABLE_NOTE]
         out[ln.name] = {n: e.paths for n, e in got.items()}
-    return out, shared_list(main), "; ".join(errors) or None
+    return out, shared, "; ".join(errors) or None
 
 
 def _ancestors(lanes) -> dict[str, set[str]]:
@@ -394,17 +404,20 @@ def _ancestors(lanes) -> dict[str, set[str]]:
     return out
 
 
-def lane_overlaps(lanes, estimates: Mapping[str, Mapping[int, list[str]]], shared: Iterable[Mapping], same_repo) -> list[dict]:
+def lane_overlaps(lanes, estimates: Mapping[str, Mapping[int, list[str]]], shared, same_repo) -> list[dict]:
     """同じ時間帯に動く（`after` で順序の付かない）同じリポジトリの 2 レーンの、課題の見込みの重なりの組と直し方の案（I21）。
-    見込みの無い課題は重なりを「不明」として出さない。same_repo(a, b) はレーンが同じリポジトリか。"""
-    shared, anc, out = list(shared), _ancestors(lanes), []
+    見込みの無い課題は重なりを「不明」として出さない。same_repo(a, b) はレーンが同じリポジトリか。
+    `shared` はレーン → そのリポジトリの共有の一覧（`lane_estimates` の答え）か、すべてのレーンに使う 1 つの一覧。"""
+    anc, out = _ancestors(lanes), []
+    shared_of = (lambda ln: list(shared.get(ln.name) or [])) if isinstance(shared, Mapping) else (lambda ln, s=list(shared or []): s)
     for i, a in enumerate(lanes):
         for b in lanes[i + 1 :]:
             if not same_repo(a, b) or a.name in anc[b.name] or b.name in anc[a.name]:
                 continue
+            common = shared_of(a)  # 同じリポジトリの 2 レーンは同じ共有の一覧を持つ
             for ia, pa in (estimates.get(a.name) or {}).items():
                 for ib, pb in (estimates.get(b.name) or {}).items():
-                    paths = admission.overlap_of(pa, pb, shared) if pa and pb and ia != ib else None
+                    paths = admission.overlap_of(pa, pb, common) if pa and pb and ia != ib else None
                     if paths:
                         out.append(_lane_item(a, b, ia, ib, paths))
     return out

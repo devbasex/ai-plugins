@@ -57,7 +57,9 @@ def test_the_group_table_reads_files_and_directories_for_the_issue():
         "説明\n\n### 並列の組（見込み）\n\n| 組 | 課題 | 触る場所の見込み | 依存 |\n| --- | --- | --- | --- |\n"
         "| 1 | #10 #11 | `plugins/ndf/scripts/lib/` / `merged` | なし |\n| 2 | #12 | `docs/a.md` | なし |\n"
     )
-    assert te.from_group_table(desc, 11, FILES) == ["plugins/ndf/scripts/lib"]  # Skill の名前は追跡しているファイルに当たらず捨てる
+    assert te.from_group_table(desc, 11, FILES) == ["plugins/ndf/scripts/lib/"]  # Skill の名前は追跡しているファイルに当たらず捨てる
+    # 同じディレクトリだけを記した 2 件は、実装のキューと同じくファイルの重なりにしない
+    assert te.admission.overlap_of(te.from_group_table(desc, 10, FILES), te.from_group_table(desc, 11, FILES)) is None
     assert te.from_group_table(desc, 12, FILES) == ["docs/a.md"]
     assert te.from_group_table(desc, 13, FILES) == []
     assert te.from_group_table("表なし", 11, FILES) == []
@@ -71,6 +73,17 @@ def test_the_design_result_gives_the_implement_rows_files():
     assert te.from_design(doc, 5) == ["a/x.py", "a/y.py"]
     assert te.from_design(doc, 6) == []
     assert te.from_design("節なし", 5) == []
+
+
+def test_a_design_doc_named_for_several_issues_gives_each_issue_its_files(tmp_path):
+    (tmp_path / "issues").mkdir()
+    (tmp_path / "issues" / "issue-7-8-design.md").write_text(
+        "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n"
+        "| #7 | 実装する | — | `a/x.py` |\n| #8 | 実装する | — | `b/y.py` |\n",
+        encoding="utf-8",
+    )
+    assert te.design_paths(tmp_path, 8) == ["b/y.py"]
+    assert te.design_paths(tmp_path, 78) == []
 
 
 def test_the_first_source_with_paths_wins_and_later_sources_are_not_read():

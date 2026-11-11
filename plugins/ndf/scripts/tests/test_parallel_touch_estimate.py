@@ -70,6 +70,10 @@ def test_the_shared_list_counts_as_an_overlap():
     shared = [{"path": "lib/README.md", "touched_by": ["lib/"]}]
     assert i21(pp.check_data(plan(sprint("la", [1]), sprint("lb", [2])), estimates=est)[1]) == []
     assert len(i21(pp.check_data(plan(sprint("la", [1]), sprint("lb", [2])), estimates=est, shared=shared)[1])) == 1
+    # レーンごとの一覧（lane_estimates の答え）は、そのレーンのリポジトリの一覧を使う
+    by_lane = {"la": shared, "lb": shared}
+    assert len(i21(pp.check_data(plan(sprint("la", [1]), sprint("lb", [2])), estimates=est, shared=by_lane)[1])) == 1
+    assert i21(pp.check_data(plan(sprint("la", [1]), sprint("lb", [2])), estimates=est, shared={"la": [], "lb": []})[1]) == []
 
 
 def test_an_estimate_error_is_one_warning_and_the_check_goes_on():
@@ -104,7 +108,7 @@ def test_lane_estimates_reads_sprint_issues_and_loop_milestone_groups(tmp_path):
     p, _, _ = pp.check_data(plan(loop("lloop", "M1"), sprint("lsp", [8])))
     env = FakeEnv(tmp_path, {"M1": desc}, {8: "## 目的\n\n`b/y.py`\n"})
     est, shared, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: env)
-    assert est == {"lloop": {7: ["a"]}, "lsp": {8: ["b/y.py"]}} and shared == [] and error is None
+    assert est == {"lloop": {7: ["a/"]}, "lsp": {8: ["b/y.py"]}} and shared == {"lloop": [], "lsp": []} and error is None
     est, _, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: FakeEnv(tmp_path, {}, {8: "`b/y.py`"}, fail=True))
     assert est == {"lloop": {}, "lsp": {8: ["b/y.py"]}} and "マイルストーンを読めない" in error
 

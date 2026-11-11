@@ -419,7 +419,8 @@ def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
     boxed = [len(g) > 1 or any(deps.get(p) for p in g) for g in adm["groups"]]
     where = {p: (_group_id(refs[g[0]]["id"]) if boxed[i] else None, k) for i, g in enumerate(adm["groups"]) for k, p in enumerate(g)}
     waits = _submit_groups(adm, args, deps, known, boxed, where, queued)
-    return queue_waits.attach(_collect_items(plans, waits, refs), refs, waits)  # 待ちの秒（#2998）
+    items = _collect_items(plans, waits, refs)
+    return queue_waits.attach(items, refs, waits) if adm.get("waits_on") else items  # 待ちの秒（#2998）。古い記録は足さない
 
 
 def _submit_groups(
@@ -480,6 +481,7 @@ def queue_workflow(args: dict) -> dict:
     """`queue` 1 回。ステージを順に流し、前のステージが 1 本でも完了でなければ後続を流さない。
     `前提のプラン` を持つプランは、前提のプランが完了でなければ流さない（#1674）。"""
     stages, done = args["stages"], args["done"]
+    waits_on = durable.patched("queue-waits")  # 待ちの秒の耐久ステップを足すか。古い記録は今までの道（#2998）
     listing_step(done, [p for stage in stages for p in stage], stages=stages, max=args["max"], starts=args.get("starts") or {})
     items: list[dict] = []
     pairs: list[dict] = []
@@ -490,8 +492,7 @@ def queue_workflow(args: dict) -> dict:
         if filled["runnable"]:
             adm = {
                 **admit_step(filled["runnable"], args["shared"], args.get("starts"), args.get("rerun")),
-                "prior": list(items),
-                "queued": queued,
+                "prior": list(items), "queued": queued, "waits_on": waits_on,  # fmt: skip
             }
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)

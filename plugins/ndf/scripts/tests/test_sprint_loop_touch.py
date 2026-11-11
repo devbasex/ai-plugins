@@ -78,7 +78,7 @@ def test_the_design_result_and_the_group_table_come_before_the_body(env):
     start(env)
     rows = rows_of(sl_select.cmd_select(env, "l1"))
     assert rows[11]["touch"] == {"paths": ["src/x.py"], "source": "設計の結果", "note": ""}
-    assert rows[12]["touch"] == {"paths": ["docs"], "source": "課題グループの表", "note": ""}
+    assert rows[12]["touch"] == {"paths": ["docs/"], "source": "課題グループの表", "note": ""}
 
 
 def test_width_zero_keeps_the_current_choice(env):

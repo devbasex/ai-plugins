@@ -272,7 +272,7 @@ def check_data(
     data: object,
     home: Optional[Path] = None,
     estimates: Optional[Mapping[str, Mapping[int, list[str]]]] = None,
-    shared: Iterable[Mapping] = (),
+    shared: Iterable[Mapping] | Mapping[str, list] = (),  # レーン → 共有の一覧（`touch_estimate.lane_estimates`）か 1 つの一覧
     estimate_error: Optional[str] = None,
 ) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
