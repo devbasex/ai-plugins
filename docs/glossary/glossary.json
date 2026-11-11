@@ -6281,37 +6281,37 @@
       "term": "判定表",
       "context": "ndf-workflow",
       "meaning": "development-workflow の「上から順に条件を判定する」の表。順・モード・該当条件の 3 列を持ち、最初に当たった行のモードを採る",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の根拠",
       "context": "ndf-workflow",
       "meaning": "1 つの課題について、判定表の当たった行（順とモード）・当たった条件の文・触るファイルの一覧の組",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の材料",
       "context": "ndf-workflow",
       "meaning": "判定の根拠を選ぶためにスクリプトが集める事実。触るファイルの候補・公開インタフェースの変更の有無・対象のテストの有無",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "スプリントのモード",
       "context": "ndf-workflow",
       "meaning": "1 つのスプリントに掛けるモード。スプリントの課題ごとの判定のうち、判定表で最も上の行のモード",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の根拠のファイル",
       "context": "ndf-workflow",
       "meaning": "conductor が課題ごとの判定の根拠を書き、開発ループの loop sprint に --judgments で渡す JSON のファイル",
-      "pending_source": "issues/issue-2923-design.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "モードの決め直し",
       "context": "ndf-workflow",
       "meaning": "ループの 1 回から課題を外したとき、残った課題の判定の根拠からスプリントのモードを決め直すこと",
-      "pending_source": "issues/issue-2923-design.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "起動先の決定",
