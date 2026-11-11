@@ -1,6 +1,6 @@
 """#1142 の C4: cross-refactoring の定義が、設計の決めたモジュールに 1 つずつある。
 
-- `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（6 本）の名前を再エクスポートする
+- `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（7 本）の名前を再エクスポートする
 - `drive.py` の `call`・`parse_vars` は `lib/loop_drive.py` のもの（最終ステータスは決めない）
 - `refactor_lib/clock.py` の時刻の関数は `lib/clock.py` のもの
 - worktree の置き場の slug は `lib/repo.py` のもの
@@ -24,49 +24,54 @@ OWNERS = {
         "is_test_path_in_versions",
         "lacks_python_tests",
         "python_text_lacks_tests",
-        "_has_shebang",
-        "_is_code_path",
         "production_code_changes",
         "TEST_PATH_MARKERS",
         "TEST_NAME_MARKERS",
         "CODE_EXTENSIONS",
     ),
-    "process": ("run_with_timeout", "_process_group_alive", "_kill_process_group", "run_test_at"),
-    "github": ("resolved_threads_on_github", "_fetch_review_threads_page", "_REVIEW_THREADS_QUERY", "check_run_result", "_gh_api_get"),
+    "process": ("run_with_timeout", "run_test_at"),
+    "github": ("resolved_threads_on_github", "check_run_result"),
     "worktree": (
         "reset_hard",
         "replay_commits",
         "_order_newest_first",
         "_worktree_changes",
-        "_control_prefix",
         "_dirty_paths",
-        "_discard_worktree_changes",
         "discard_impl_leftovers",
-        "_require_clean_worktree",
     ),
     "publish": (
         "_sync_generated",
-        "_run_sync_command",
         "_write_plan_file",
-        "_publish_commit_message",
-        "_commit_sync_changes",
         "push_head",
         "push_with_retry_marker",
         "flush_pending_push",
-        "_push_with_credential_fallback",
         "credential_fallback_args",
         "gh_available",
-        "_CREDENTIAL_LIB",
     ),
     "results": ("read_result", "note_stopped", "STOPPED_REASONS", "record_observed_model"),
+    "trailers": ("commit_trailers",),
+}
+
+# 分けた先のモジュールだけが定義し、gitfacts から再エクスポートしない非公開の名前（使う側が gitfacts 経由で読まない）
+OWNED_ONLY = {
+    "pathkinds": ("_has_shebang", "_is_code_path"),
+    "process": ("_process_group_alive", "_kill_process_group"),
+    "github": ("_fetch_review_threads_page", "_REVIEW_THREADS_QUERY", "_gh_api_get"),
+    "worktree": ("_control_prefix", "_discard_worktree_changes", "_require_clean_worktree"),
+    "publish": (
+        "_run_sync_command",
+        "_publish_commit_message",
+        "_commit_sync_changes",
+        "_push_with_credential_fallback",
+        "_CREDENTIAL_LIB",
+    ),
+    "trailers": ("_parse_trailer_paragraph",),
 }
 
 GITFACTS_OWN = (
     "safe_int",
     "reported_shas",
     "commits_in_range",
-    "commit_trailers",
-    "_parse_trailer_paragraph",
     "commit_diff_lines",
     "commit_files",
     "commit_test_changes",
@@ -83,6 +88,15 @@ def test_a_moved_name_is_defined_in_its_owner_and_re_exported(refactor, module, 
     gitfacts = sys.modules["refactor_lib.gitfacts"]
     assert name in vars(owner)
     assert getattr(gitfacts, name) is getattr(owner, name)
+    value = getattr(owner, name)
+    if callable(value) and hasattr(value, "__module__"):
+        assert value.__module__ == f"refactor_lib.{module}"
+
+
+@pytest.mark.parametrize("module, name", [(m, n) for m, names in OWNED_ONLY.items() for n in names])
+def test_a_moved_private_name_is_defined_in_its_owner(refactor, module, name):
+    owner = sys.modules[f"refactor_lib.{module}"]
+    assert name in vars(owner)
     value = getattr(owner, name)
     if callable(value) and hasattr(value, "__module__"):
         assert value.__module__ == f"refactor_lib.{module}"

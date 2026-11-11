@@ -291,7 +291,7 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
 
 
 @pytest.fixture
-def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_implement):
+def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_phases, cmd_implement):
     """実装で経路だけを変えた項目（機械で決まらない）と、テストに触れない項目の 2 件を取り込んだ状態。"""
     import argparse
 
@@ -337,7 +337,7 @@ def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, c
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    cmd_phases.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
     test_file = work / "tests" / "test_calc.py"
     test_file.write_text(
         test_file.read_text().replace("from src.calc import add", "from src import calc").replace("add(1, 2)", "calc.add(1, 2)"),

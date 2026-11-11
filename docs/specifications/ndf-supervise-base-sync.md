@@ -74,7 +74,8 @@ develop を取り込み、`docs/glossary/glossary.json` だけが衝突したの
 | `merged-steps.py base-return`（同じモジュールの `back`・`count_returns`） | `merge` の衝突から戻る前に、この実行で戻った回数を `state.json` から数え、上限を超えたら止まる。`state.json` は読むだけ |
 | `merged_lib/checks.py` の `GreenWatch.poll`・`_stop_conflict` | 読みのたびに `mergeStateStatus` を見て、`DIRTY` なら終了コード 4 で抜ける。`UNKNOWN`（計算中）は待ち続ける |
 | `merged_lib/merge.py` の `merge_when_green`・`_conflicted` | `gh pr merge` の拒否が衝突（標準エラーに `cannot be cleanly created`、または読み直した `mergeStateStatus` が `DIRTY`）なら 4 で抜ける。ほかの拒否は 1 のまま |
-| `lib/step_result.py` | `EXIT_BASE_CONFLICT = 4` を定め、`code_matches` の `stopped` に含める |
+| `lib/exit_codes.py` | `EXIT_BASE_CONFLICT = 4` を定める（`lib/step_result.py` が同じ名前で公開する） |
+| `lib/step_result.py` | `code_matches` の `stopped` に 4 を含める |
 | `supervise_lib/procedures.py` の `base_sync_steps`・`BASE_FIX_PROMPT` | 取り込みの 3 ステップ（`base-sync`・`fix-base`・`base-return`）を組む唯一の部品 |
 | `supervise_lib/verify_steps.py` の `merge_steps` | 引数 `on_conflict` を受けたときだけ、`merge` と `merge-approved` の `on_exit` に `"4": <on_conflict>` を足す |
 | `supervise_lib/templates.py` の `plan_to_merge`・`plan_check`・`plan_check_since`・`_inspect_steps` | 部品を置く場所と、マージの衝突の行き先を決める |

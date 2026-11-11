@@ -101,7 +101,7 @@ def _item(item_id, rank, public_io):
     }
 
 
-def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, forbid_llm):
+def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, forbid_llm):
     work = flow["work"]
     state = read_state(flow["path"])
     state["items"] = [_item("I-001", 1, public_io=True)]  # D5 は改修計画で決めてある
@@ -114,7 +114,7 @@ def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cm
     state["phase"] = "implement"
     write_state(flow["path"], state)
 
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     # 期待値の外の差分（経路だけの変更）は機械で決まらない。LLM へ問わずにレビューへ引き継ぐ。
     test_file = work / "tests" / "test_calc.py"
     test_file.write_text(

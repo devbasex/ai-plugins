@@ -85,7 +85,7 @@ def _plan(flow, **total_answer):
 
 
 def test_the_five_phases_run_once_and_append_one_history_row(
-    flow, cmd_propose, cmd_plan, cmd_setup, cmd_implement, cmd_converge, cmd_gate, cmd_report, capsys
+    flow, cmd_propose, cmd_plan, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, cmd_report, capsys
 ):
     work, path = flow["work"], flow["path"]
     _propose(flow)
@@ -108,7 +108,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     assert {d["defer_reason"] for d in state["deferred_items"]} == {"vocabulary", "no_target"}
     assert state["plan"]["table_source"] == "defaults"
 
-    _call(cmd_setup, "cmd_start_phase", phase="add-tests")
+    _call(cmd_phases, "cmd_start_phase", phase="add-tests")
     (work / "tests" / "test_total.py").write_text(TEST_TOTAL, encoding="utf-8")
     test_sha = _commit(work, "Test: total", _trailers("I-001"))
     _call(cmd_implement, "cmd_merge_tests")
@@ -116,7 +116,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     assert state["items"][0]["status"] == "tested"
     assert state["items"][0]["commits"]["test"] == test_sha
 
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text(
         CALC.replace(
             "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n", "    return sum(values)\n"

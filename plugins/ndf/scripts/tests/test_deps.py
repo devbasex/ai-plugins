@@ -399,3 +399,38 @@ def test_a_child_uv_run_of_another_project_leaves_the_shared_venv_alone(tmp_path
     assert (cfg.read_text(), cfg.stat().st_mtime_ns) == before
     assert (other / ".venv").is_dir()  # 別のプロジェクトは自分の環境で動く
     assert subprocess.run([str(shared / "bin" / "python"), "-c", "import psutil"], capture_output=True).returncode == 0
+
+
+def stop_entry(tmp_path: Path, lib: Path) -> subprocess.CompletedProcess:
+    """依存の確認だけを読み込んだ（核と結果を出す層より先の）エントリポイントを、起動し直した後の欠けで止める。"""
+    script = tmp_path / "entry.py"
+    script.write_text(
+        f"import sys\nsys.path.insert(0, {str(lib)!r})\nimport deps\n"
+        "assert 'run_core' not in sys.modules and 'step_result' not in sys.modules\n"
+        "deps.GROUPS['t'] = ['ndf_no_such_module']\ndeps.require('t')\nprint('after')\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"}
+    env.update(NDF_DEPS_REEXEC=str(script.resolve()), NDF_RESULT_FILE=str(tmp_path / "result.json"))
+    return subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, cwd=tmp_path)
+
+
+def test_deps_read_before_the_core_stops_with_the_table_code_and_a_deps_gap(tmp_path):
+    """#2988 の I2〜I4: 依存の確認が核より先に読み込まれても、終了コードの表の 69 と stopped・deps の欠けで止まる。"""
+    import exit_codes
+
+    p = stop_entry(tmp_path, LIB)
+    assert p.returncode == exit_codes.EXIT_DEPS_MISSING == 69, p.stderr
+    assert "Traceback" not in p.stderr and "after" not in p.stdout
+    r = json.loads((tmp_path / "result.json").read_text())
+    assert r["status"] == "stopped" and [g["kind"] for g in r["gaps"]] == ["deps"] and r["gaps"][0]["name"] == "t"
+
+
+def test_deps_without_the_core_stops_with_69_and_no_result(tmp_path):
+    """#2988 の I5: 核を写さない置き場（ラッパーのバージョンディレクトリ）では、結果を出さずに 69 で終える。"""
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    for f in ("deps.py", "exit_codes.py"):
+        shutil.copy(LIB / f, lib / f)
+    p = stop_entry(tmp_path, lib)
+    assert p.returncode == 69 and "Traceback" not in p.stderr, p.stderr
+    assert p.stdout == "" and not (tmp_path / "result.json").exists()

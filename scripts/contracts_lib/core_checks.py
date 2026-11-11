@@ -6,7 +6,7 @@
 - `core-exempt`: `hook` の印は hook の定義か hook のエントリポイントからの呼び出しを根拠に持つ。`runtime` の印は
   ベースブランチより増えない
 - `exit-meaning`: 契約の `exit` の値は終了コードの表の見出しで始まり、エントリポイントとその部品は `EXIT_` で始まる
-  整数の定数を持たない（持ち主の `lib/step_result.py`・`lib/deps.py` を除く）
+  整数の定数を持たない（持ち主の `lib/exit_codes.py` を除く）
 - `result-read`: `lib/step_read.py` の外で、名前に `last_json` を含む関数の定義と `json.loads(<式>.splitlines()[-1])` を書かない
 """
 
@@ -24,9 +24,9 @@ from .model import CONTRACTS, core_exempt
 _LIB = Path(__file__).resolve().parents[2] / "plugins" / "ndf" / "scripts" / "lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
-import step_result  # noqa: E402
+import exit_codes  # noqa: E402
 
-EXIT_OWNERS = ("plugins/ndf/scripts/lib/step_result.py", "plugins/ndf/scripts/lib/deps.py")
+EXIT_OWNERS = ("plugins/ndf/scripts/lib/exit_codes.py",)
 READER = "plugins/ndf/scripts/lib/step_read.py"
 KINDS = ("core-entry", "core-exempt", "exit-meaning", "result-read")
 PLUGIN_HEAD = "plugins/ndf/"
@@ -107,21 +107,27 @@ def hook_texts(root: Path) -> str:
 
 def exempt_violations(root: Path, entries: dict, reached) -> list[tuple[str, str, str]]:
     """(path, name, 理由) の並び。`reached(rel)` は rel が import でたどるファイルの集合。"""
-    out = []
     hooks_text = hook_texts(root)
+    hook_mods = _hook_reachable(entries, reached)
+    return [
+        (rel, "hook", "hook の印の根拠が無い（hook の定義にパスが無く、hook のエントリポイントから呼ばれない）")
+        for rel, e in sorted(entries.items())
+        if core_exempt(e) == "hook" and not _has_hook_basis(rel, e, hooks_text, hook_mods)
+    ]
+
+
+def _hook_reachable(entries: dict, reached) -> set[str]:
+    """hook の印を持つエントリポイントと、それらが import でたどるファイルの集合。"""
     hook_entries = {r for r, e in entries.items() if core_exempt(e) == "hook"}
     hook_mods = set(hook_entries)
     for r in hook_entries:
         hook_mods |= reached(r)
-    for rel, e in sorted(entries.items()):
-        if core_exempt(e) != "hook":
-            continue
-        if Path(rel).name in hooks_text:
-            continue
-        if any(c in hook_mods and c != rel for c in e.get("callers", [])):
-            continue
-        out.append((rel, "hook", "hook の印の根拠が無い（hook の定義にパスが無く、hook のエントリポイントから呼ばれない）"))
-    return out
+    return hook_mods
+
+
+def _has_hook_basis(rel: str, e: dict, hooks_text: str, hook_mods: set[str]) -> bool:
+    """hook の印の根拠: hook の定義にパスの名前があるか、hook から到達できるほかのファイルから呼ばれる。"""
+    return Path(rel).name in hooks_text or any(c in hook_mods and c != rel for c in e.get("callers", []))
 
 
 def base_runtime_count(root: Path, sha: str | None) -> int | None:
@@ -144,7 +150,12 @@ def base_runtime_count(root: Path, sha: str | None) -> int | None:
     )
     if cat.returncode != 0:
         return None
-    n, buf, i = 0, cat.stdout, 0
+    return _count_runtime_marks(cat.stdout)
+
+
+def _count_runtime_marks(buf: bytes) -> int:
+    """`cat-file --batch` の出力から、JSON の本文が runtime の印を持つ blob を数える。"""
+    n, i = 0, 0
     while i < len(buf):
         j = buf.index(b"\n", i)
         head = buf[i:j].split()
@@ -170,7 +181,7 @@ def exit_label_violations(entries: dict) -> list[tuple[str, str, str]]:
         for k, text in sorted(e["exit"].items()):
             if not k.lstrip("-").isdigit():
                 continue
-            label = step_result.label_of(int(k))
+            label = exit_codes.label_of(int(k))
             if not label:
                 out.append((rel, f"exit:{k}", f"終了コード {k} は終了コードの表に無い"))
             elif not text.startswith(label):

@@ -303,7 +303,7 @@ def test_the_report_shows_the_final_gate(refactor, tmp_path, env_tmp_dir, capsys
 
 
 def test_the_verification_never_uses_the_ci(
-    refactor, cmd_setup, cmd_implement, cmd_converge, tmp_path, monkeypatch, patch_lib, env_tmp_dir, capsys
+    refactor, cmd_setup, cmd_phases, cmd_implement, cmd_converge, tmp_path, monkeypatch, patch_lib, env_tmp_dir, capsys
 ):
     """**継続的統合で代替できるのは最終ゲートだけである。**
 
@@ -353,7 +353,7 @@ def test_the_verification_never_uses_the_ci(
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    cmd_phases.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
     (work / "src" / "calc.py").write_text(
         CALC.replace(
             "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n", "    return sum(values)\n"

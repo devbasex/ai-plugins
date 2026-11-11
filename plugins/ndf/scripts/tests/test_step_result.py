@@ -136,12 +136,16 @@ def test_approval_present_requires_targets_consent_and_rollback(tmp_path, kw):
         sr.approval_present("m", "1", **args)
 
 
-def test_deps_missing_is_stopped_and_owned_by_deps():
-    """依存の欠け（#1654）は stopped で、値は deps.py の定数そのもの（写さない）。"""
+def test_deps_missing_is_stopped_and_owned_by_the_exit_table():
+    """依存の欠け（#1654）は stopped で、結果を出す層と依存の確認の値は終了コードの表の定数そのもの（#2988）。"""
     import sys
 
-    deps = sys.modules["deps"]
-    assert sr.EXIT_DEPS_MISSING == deps.EXIT_DEPS_MISSING
+    import deps
+
+    exit_codes = sys.modules["exit_codes"]
+    assert sr.EXIT_DEPS_MISSING is exit_codes.EXIT_DEPS_MISSING is deps.EXIT_DEPS_MISSING
+    assert exit_codes.EXIT_DEPS_MISSING == 69
+    assert sr.EXIT_LABELS is exit_codes.EXIT_LABELS and sr.label_of is exit_codes.label_of
     assert sr.code_matches("stopped", sr.EXIT_DEPS_MISSING)
     assert not sr.code_matches("ok", sr.EXIT_DEPS_MISSING) and not sr.code_matches("gate", sr.EXIT_DEPS_MISSING)
 
@@ -249,3 +253,168 @@ def test_emit_out_writes_the_same_line_to_the_file(tmp_path):
     bad = tmp_path / "bad.json"
     p = subprocess.run([*cmd, "--out", str(bad)], capture_output=True, text=True)  # gate に next が無い
     assert p.returncode == 2 and not bad.exists()
+
+
+# ---------- 現状固定: status ごとに受ける終了コードの集合（I-002） ----------
+
+# 現状の出力を書き写した値。定数の置き場を移しても、受ける集合が変わらないことを固定する
+_ACCEPTED_CODES = {
+    "ok": {0},
+    "gate": set(range(10, 30)),
+    "stopped": {1, 2, 3, 4, 5, 6, 69, 75},
+}
+
+
+@pytest.mark.parametrize("status", ["ok", "gate", "stopped", "unknown", ""])
+def test_code_matches_accepts_exactly_the_current_codes(status):
+    """現状固定: 0〜255 と負の値のうち、status ごとに一致と見る終了コード。知らない status は stopped と同じ扱い。"""
+    expected = _ACCEPTED_CODES.get(status, _ACCEPTED_CODES["stopped"])
+    accepted = {c for c in range(-5, 256) if sr.code_matches(status, c)}
+    assert accepted == expected
+
+
+def test_every_labelled_code_belongs_to_exactly_one_status_class():
+    """表（EXIT_LABELS）と分類（OK・GATE_CODES・PAUSE_CODES・STOPPED_CODES）がずれていないか。"""
+    classes = ({sr.EXIT_OK}, set(sr.GATE_CODES), set(sr.PAUSE_CODES), set(sr.STOPPED_CODES))
+    for code in sr.EXIT_LABELS:
+        assert sum(code in c for c in classes) == 1, code
+
+
+def test_default_code_is_fixed_per_status():
+    """現状固定: status から決める既定の終了コード。知らない status は KeyError。"""
+    assert [sr.default_code(s) for s in ("ok", "gate", "stopped")] == [0, 10, 1]
+    with pytest.raises(KeyError):
+        sr.default_code("unknown")
+
+
+# ---------- 現状固定: emit と --out の終了コードの決め方（I-003） ----------
+
+
+def _emit_code(obj, code=None):
+    with pytest.raises(SystemExit) as e:
+        sr.emit(obj, code)
+    return e.value.code
+
+
+@pytest.mark.parametrize(
+    "obj, code, expected",
+    [
+        ({**sr.result("m", "stopped", "s"), "gaps": []}, None, 1),  # 空の gaps は 6 にしない
+        (sr.result("m", "stopped", "s", gaps=[{"kind": "k", "name": "n", "reason": "r"}]), None, 6),
+        (sr.result("m", "stopped", "s", gaps=[{"kind": "k", "name": "n", "reason": "r"}]), 1, 1),  # 明示した値が勝つ
+        (sr.result("m", "gate", "s", next="n"), None, 10),
+        (sr.result("m", "gate", "s", next="n"), 25, 25),
+        (sr.result("m", "ok", "s"), None, 0),
+        ("not-a-dict", None, 2),
+        ({**sr.result("m", "ok", "s"), "status": "odd"}, None, 2),
+    ],
+)
+def test_emit_exit_code_is_fixed(obj, code, expected, capsys):
+    """現状固定: emit が終える終了コード（status・gaps・明示の値・形の誤りの組み合わせ）。"""
+    assert _emit_code(obj, code) == expected
+    out = capsys.readouterr().out
+    if expected == 2:
+        assert out == ""
+    else:
+        assert json.loads(out) == obj
+
+
+def test_emit_under_capture_raises_emitted_without_printing(monkeypatch, capsys):
+    """現状固定: 核が動いている間は出さずに Emitted を投げる。status が読めなければ 1。stream を渡すと出す。"""
+    monkeypatch.setattr(sr, "CAPTURE", True)
+    monkeypatch.setattr(sr, "ATTACH", {"lease": {"k": "v"}})
+    obj = sr.result("m", "stopped", "s", gaps=[{"kind": "k", "name": "n", "reason": "r"}])
+    with pytest.raises(sr.Emitted) as e:
+        sr.emit(obj)
+    assert (e.value.code, e.value.result) == (6, obj)  # ATTACH はここでは足さない
+    with pytest.raises(sr.Emitted) as e:
+        sr.emit({"status": "odd"})
+    assert e.value.code == 1
+    with pytest.raises(sr.Emitted) as e:
+        sr.emit(obj, 3)
+    assert e.value.code == 3
+    assert capsys.readouterr().out == ""
+
+    import io
+
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as e:
+        sr.emit(sr.result("m", "ok", "s"), stream=buf)
+    assert e.value.code == 0
+    assert json.loads(buf.getvalue()) == {**sr.result("m", "ok", "s"), "lease": {"k": "v"}}
+
+
+def test_emit_attaches_and_validates_the_attached_fields(monkeypatch, capsys):
+    """現状固定: ATTACH は出す前に足し、足した後の形を確かめる。"""
+    monkeypatch.setattr(sr, "ATTACH", {"lease": {"owner": "a"}})
+    assert _emit_code(sr.result("m", "ok", "s")) == 0
+    assert json.loads(capsys.readouterr().out)["lease"] == {"owner": "a"}
+    monkeypatch.setattr(sr, "ATTACH", {"lease": "x"})
+    assert _emit_code(sr.result("m", "ok", "s")) == 2
+    assert "lease はオブジェクト" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "extra, written, code",
+    [
+        (["--status", "stopped", "--gap", "k", "n", "r"], True, 6),  # 省いた code は gaps から 6
+        (["--status", "stopped"], True, 1),
+        (["--status", "stopped", "--gap", "k", "n", "r", "--code", "1"], True, 1),
+        (["--status", "ok"], True, 0),
+        (["--status", "ok", "--code", "1"], False, 2),  # status と code が合わない
+        (["--status", "stopped", "--code", "6"], False, 2),  # 6 に gaps が無い
+        (["--status", "gate"], False, 2),  # gate に next が無い
+    ],
+)
+def test_cli_out_and_exit_code_agree(tmp_path, capsys, extra, written, code):
+    """現状固定: --out の書き込みの有無と、emit の終了コード（--out と emit は同じ規則で code を決める）。"""
+    out = tmp_path / "r.json"
+    with pytest.raises(SystemExit) as e:
+        sr.main(["emit", "--tool", "t", "--summary", "s", "--out", str(out), *extra])
+    assert e.value.code == code
+    assert out.exists() is written
+    if written:
+        assert json.loads(out.read_text()) == json.loads(capsys.readouterr().out)
+
+
+# ---------- 現状固定: 配列の項目の検査が出す誤りの並び（I-009） ----------
+
+
+def test_record_and_item_errors_are_fixed_in_order():
+    """現状固定: items と gaps / process / decisions の誤りの文言と順序（items → gaps → process → decisions）。"""
+    obj = {
+        **sr.result("m", "stopped", "s"),
+        "items": [1, {"x": 1}, "s"],
+        "gaps": [{"kind": "k", "name": " ", "reason": 3}, "g", {}],
+        "process": {"run": "r"},
+        "decisions": [{"decision": "d", "basis": "b"}, None],
+    }
+    assert sr.validate_result(obj) == [
+        "items[0] はオブジェクトで書く",
+        "items[2] はオブジェクトで書く",
+        "gaps[0] の name を空でない文字列で書く",
+        "gaps[0] の reason を空でない文字列で書く",
+        "gaps[1] はオブジェクトで書く",
+        "gaps[2] の kind を空でない文字列で書く",
+        "gaps[2] の name を空でない文字列で書く",
+        "gaps[2] の reason を空でない文字列で書く",
+        "process は配列で書く",
+        "decisions[1] はオブジェクトで書く",
+    ]
+
+
+@pytest.mark.parametrize(
+    "field, value, expected",
+    [
+        ("items", {}, ["items は配列で書く"]),
+        ("items", None, ["items は配列で書く"]),
+        ("items", [], []),
+        ("gaps", None, ["gaps は配列で書く"]),
+        ("gaps", [], []),
+        ("process", [{"run": "r", "result": None}], ["process[0] の result を空でない文字列で書く"]),
+        ("decisions", "x", ["decisions は配列で書く"]),
+    ],
+)
+def test_single_record_errors_are_fixed(field, value, expected):
+    """現状固定: 1 つの項目だけが誤るときの誤りの並び（None は配列でない扱い・空の配列は通す）。"""
+    assert sr.validate_result({**sr.result("m", "stopped", "s"), field: value}) == expected
