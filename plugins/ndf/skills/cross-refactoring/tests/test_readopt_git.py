@@ -111,10 +111,10 @@ def readopt(refactor):
     return __import__("refactor_lib.commands.readopt", fromlist=["cmd_readopt"])
 
 
-def test_all_items_carried_reach_the_readopt(flow, cmd_setup, cmd_implement, readopt):
+def test_all_items_carried_reach_the_readopt(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """I15: 全項目にコミットが無くても見送らずに持ち越し、検証を飛ばして採り直しへ届く。入れば次の巡で採り直す。"""
     _plan(flow, [_entry("I-001", 1, "total"), _entry("I-002", 2, "add")])
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
 
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
     state = read_state(flow["path"])
@@ -148,17 +148,17 @@ def test_a_carried_item_keeps_its_test_commit_when_readopted(flow, readopt):
     assert got["commits"] == {"test": test_sha, "implement": [], "fix": []} and got["seconds"] == {"test": 12.0}
 
 
-def test_an_item_carried_again_after_the_readopt_is_not_readopted(flow, cmd_setup, cmd_implement, readopt):
+def test_an_item_carried_again_after_the_readopt_is_not_readopted(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """採り直した後もコミットが無く持ち越しに戻った項目は、もう採り直さずに `not_done` で人へ渡す。
 
     持ち越しは見積りの消費に数えないため、採り直しを重ねても予算の残りが減らず、前進しない実装の CLI を繰り返す。"""
     _plan(flow, [_entry("I-001", 1, "total")])
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
     _call(readopt, "cmd_readopt")
     assert read_state(flow["path"])["items"][0]["readopted"] == 1
 
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
     assert _exit_code(readopt, "cmd_readopt") == 2
 
@@ -168,11 +168,11 @@ def test_an_item_carried_again_after_the_readopt_is_not_readopted(flow, cmd_setu
     assert "採り直した後も" in state["items"][0]["failure_reason"]
 
 
-def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implement, readopt):
+def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """巡: 1 巡目の取り込みの後に採り直した項目は、2 巡目の新しい起点からのコミットで取り込まれる。"""
     work = flow["work"]
     _plan(flow, [_entry("I-001", 1, "total"), _entry("I-002", 2, "add")])
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text((work / "src" / "calc.py").read_text().replace("result = 0", "result = 0  # total"))
     first = commit_with_trailers(work, "Refactor total", item_trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")
@@ -182,7 +182,7 @@ def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implemen
     write_state(flow["path"], state)
 
     _call(readopt, "cmd_readopt")
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text((work / "src" / "calc.py").read_text().replace("return a + b", "return b + a"))
     second = commit_with_trailers(work, "Refactor add", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
@@ -193,10 +193,10 @@ def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implemen
     assert git("merge-base", "--is-ancestor", first, "HEAD", cwd=work).returncode == 0
 
 
-def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_setup, cmd_implement, readopt):
+def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """I15: 実装の予算の残りに入らなければ持ち越しを `not_done` で見送り、`phase` を `final` にして終了コード 2。"""
     _plan(flow, [_entry("I-001", 1, "total")], left_minutes=0.5)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
 
     assert _exit_code(readopt, "cmd_readopt") == 2
@@ -307,11 +307,11 @@ def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, 
     assert [i["candidate_id"] for i in state["items"] if i["round"] == 3] == ["C-2"]
 
 
-def test_outside_changes_are_kept_per_round(flow, cmd_setup, cmd_implement, readopt):
+def test_outside_changes_are_kept_per_round(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """巡・#2457 受け入れ条件 8: どの巡でも範囲の外の変更で取り消さず、その巡の項目の `outside_scope` に残す。"""
     work = flow["work"]
     _plan(flow, [_entry("I-001", 1, "total"), _entry("I-002", 2, "add")])
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     # 範囲の外の既存のファイルを項目と関係なく変える（新しいファイルは範囲の中として扱う。#1814）
     ignore = work / ".gitignore"
     ignore.write_text(ignore.read_text() + "build/\n")
@@ -320,7 +320,7 @@ def test_outside_changes_are_kept_per_round(flow, cmd_setup, cmd_implement, read
     _set(flow, phase="readopt")
 
     _call(readopt, "cmd_readopt")
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     ignore.write_text(ignore.read_text() + "dist/\n")
     commit_with_trailers(work, "Out of scope again", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
@@ -333,14 +333,14 @@ def test_outside_changes_are_kept_per_round(flow, cmd_setup, cmd_implement, read
     assert [r["path"] for r in items["I-002"]["outside_scope"]] == [".gitignore"]
 
 
-def test_round_two_tests_leave_verified_items_alone(flow, cmd_setup, cmd_implement, readopt):
+def test_round_two_tests_leave_verified_items_alone(flow, cmd_setup, cmd_phases, cmd_implement, readopt):
     """巡: 2 巡目のテストの取り込みは今の巡の `planned` だけを見て、前の巡の検証済みとそのコミットに触れない。"""
     work = flow["work"]
     _plan(flow, [_entry("I-001", 1, "total", tests=["tests/test_calc.py"])], [], [], phase="implement")
     state = read_state(flow["path"])
     state["items"][0]["status"] = "tested"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text((work / "src" / "calc.py").read_text().replace("result = 0", "result = 0  # total"))
     first = commit_with_trailers(work, "Refactor total", item_trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")
@@ -351,7 +351,7 @@ def test_round_two_tests_leave_verified_items_alone(flow, cmd_setup, cmd_impleme
     write_state(flow["path"], state)
 
     _call(readopt, "cmd_readopt")
-    _call(cmd_setup, "cmd_start_phase", phase="add-tests")
+    _call(cmd_phases, "cmd_start_phase", phase="add-tests")
     (work / "tests" / "test_total.py").write_text(TEST_TOTAL)
     commit_with_trailers(work, "Test", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_tests")

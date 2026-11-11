@@ -109,7 +109,7 @@ def _emitted(capsys, key):
     return values[-1] if values else None
 
 
-def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#1668 の受け入れ条件 6 — PR 1663 の 2 つの形（行数の上限を超える・同名の関数を足す）を、ほかの項目と並べて検証する。"""
     work = flow["work"]
     (work / "scripts").mkdir(exist_ok=True)
@@ -140,7 +140,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     state["target_scope"] = ["src", "tests", "plugins/ndf"]
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     for item_id, (_, change) in changes.items():
         change(work)
         commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))

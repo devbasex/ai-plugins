@@ -91,7 +91,7 @@ def _head(work):
     return git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
 
-def _implement(flow, cmd_setup, cmd_implement, text, strategy, **item_over):
+def _implement(flow, cmd_setup, cmd_phases, cmd_implement, text, strategy, **item_over):
     """項目 I-001 が `src/calc.py` を `text` にするコミットを積んで取り込む。"""
     work = flow["work"]
     state = read_state(flow["path"])
@@ -105,34 +105,34 @@ def _implement(flow, cmd_setup, cmd_implement, text, strategy, **item_over):
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text(text, encoding="utf-8")
     commit_with_trailers(work, "Refactor I-001", item_trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC14 — 宣言の静的解析の suite が項目の範囲テストで走り、整形の違反を入れた項目が落ちる。"""
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1 \n", _strategy(_lint()))
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1 \n", _strategy(_lint()))
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["items"][0]["status"] == "failing"
 
 
-def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", _strategy(_lint()))
+def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1\n", _strategy(_lint()))
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "done"
     assert read_state(flow["path"])["items"][0]["status"] == "verified"
 
 
-def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """移行性 — `scope_commands` を持たない旧形の項目（語の並びの `command`）も同じ語で走る。"""
     _implement(
         flow,
-        cmd_setup,
+        cmd_setup, cmd_phases,
         cmd_implement,
         CALC + "\nX = 1\n",
         strategy_state(),
@@ -147,10 +147,10 @@ def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_c
     assert _emitted(capsys, "VERIFY") == "done"
 
 
-def test_a_launch_failure_in_the_item_scope_test_stops_without_reverting(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_launch_failure_in_the_item_scope_test_stops_without_reverting(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC13・I8 — 起動の失敗なら中断で止まり、項目の状態も HEAD も変わらず、報告に起動できなかったコマンドが出る。"""
     runs = [{"suite": "pytest", "kind": "test", "command": "nosuchcmd_1483 tests/test_calc.py"}]
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=runs)
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=runs)
     head = _head(flow["work"])
     with pytest.raises(SystemExit) as e:
         verify_judged(cmd_converge, flow["path"], capsys)
