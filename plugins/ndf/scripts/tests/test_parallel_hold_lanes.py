@@ -1,4 +1,5 @@
-"""レーンの側の答え待ちの停止（#2707 の受け入れ条件 12〜14）: ループはループの 1 回の境、1 スプリントのレーンはキューのプランの開始で止まる。"""
+"""レーンの側の答え待ちの停止（#2707 の受け入れ条件 12〜14）: ループはループの 1 回の境、1 スプリントのレーンはキューのプランの開始で止まる。
+1 スプリントのレーンが止まるのは新しい承認を生むプラン（設計を書くステップへ行けるプラン）だけで、ほかは流す（#3000）。"""
 
 from __future__ import annotations
 
@@ -82,21 +83,49 @@ def hold(q: Queue, kind="sprint") -> Path:
     return path
 
 
-def test_a_plan_of_a_sprint_lane_is_not_run_and_the_queue_returns_the_park_line(queue):
+def design(cmd: str) -> list[dict]:
+    """設計を書くステップ（`kind: 設計`）へ失敗の遷移で行けるプラン。成功すれば run のステップだけが流れる。"""
+    return [
+        {**run_step(cmd), "on_fail": "design", "next": "end"},
+        {"id": "design", "type": "work", "kind": ph.DESIGN_KIND, "prompt": "設計を書く", "next": "end"},
+    ]
+
+
+def test_a_design_plan_of_a_sprint_lane_is_not_run_and_the_queue_returns_the_park_line(queue):
     hold(queue)
-    plan = queue.plan("a", [run_step(f"touch {queue.tmp}/ran")])
+    plan = queue.plan("a", design(f"touch {queue.tmp}/ran"))
     _, res = queue.run(plan)
     item = res["items"][0]
     assert res["status"] == "gate" and item["result"] == "流さなかった" and item["answer_hold"] is True
     assert res["metrics"]["answer_hold"] == {"plan": "p1", "lane": "la"}
     assert "park p1 --lane la --done" in res["next"] and not (queue.tmp / "ran").exists()
+    assert "answer_hold_ran" not in item
 
 
-def test_the_running_plan_finishes_and_the_next_plan_is_not_run_and_resume_flows_after_the_hold(queue):
+def test_a_plan_without_a_design_step_runs_in_the_hold_and_the_item_carries_the_scope(queue):
+    """受け入れ条件 2・I2: 設計を書くステップへ行けないプランは範囲の中でも流れ、結果の行に範囲が載る。"""
+    hold(queue)
+    plan = queue.plan("a", [run_step(f"touch {queue.tmp}/ran")])
+    _, res = queue.run(plan)
+    item = res["items"][0]
+    assert res["status"] == "ok" and item["result"] == "完了" and (queue.tmp / "ran").exists()
+    assert item["answer_hold_ran"] == {"plan": "p1", "scope": "plan", "count": 9, "limit": 8, "lane": "la"}
+    assert "park" not in res["metrics"] and "answer_hold" not in item
+
+
+def test_a_plan_outside_the_hold_does_not_carry_the_scope_left_by_an_earlier_run(queue):
+    """範囲の外で流し直したプランは、前の実行で書いた範囲の値を結果の行へ載せない。"""
+    plan = queue.plan("a", [run_step("true")])
+    ph.note_ran(Path(plan).with_name("a-state"), {"plan": "p1", "lane": "la"})
+    assert "answer_hold_ran" not in queue.run(plan)[1]["items"][0]
+    assert ph.read_ran(Path(plan).with_name("a-state")) is None
+
+
+def test_the_running_plan_finishes_and_the_next_design_plan_is_not_run_and_resume_flows_after_the_hold(queue):
     path = plan_dir(queue.tmp, "sprint") / ph.HOLD_FILE
     (queue.tmp / "hold.json").write_text(json.dumps(HOLD))
     first = queue.plan("a", [run_step(f"cp {queue.tmp}/hold.json {path}")], files=["a/"])
-    second = queue.plan("b", [run_step(f"touch {queue.tmp}/ran")], files=["b/"])
+    second = queue.plan("b", design(f"touch {queue.tmp}/ran"), files=["b/"])
     _, res = queue.run("--max", "1", first, "--then", second)
     assert results(res) == {"a": "完了", "b": "流さなかった"} and res["status"] == "gate"
     path.unlink()
