@@ -132,7 +132,8 @@ def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...
     落ちればマージしない（2026-11-12、利用者の指示）。手元で走らせる戦略ならそのまま返す。
 
     `merge_fail` を渡すと、マージ（merge・merge-approved）が落ちたときにそのステップ（judge）へ戻し、そこと fix の入力へ
-    merge を足す（CI の失敗を直しの輪へ戻す。test-all が持っていた行き先の代わり）。"""
+    merge と merge-approved を足す（CI の失敗を直しの輪へ戻す。test-all が持っていた行き先の代わり）。承認の後は
+    merge-approved だけが流れるため、両方を足す。流れていない方は入力に「まだ流れていない」と載るだけである。"""
     if not whole_on_ci(a):
         return steps
     gone = {"test-all", *drop}
@@ -144,7 +145,7 @@ def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...
         if merge_fail and step["id"] in ("merge", "merge-approved"):
             step["on_fail"] = merge_fail
         if merge_fail and step["id"] in (merge_fail, "fix"):
-            step["inputs"] = [*step.get("inputs", []), "merge"]
+            step["inputs"] = [*step.get("inputs", []), "merge", "merge-approved"]
         out.append(step)
     return out
 

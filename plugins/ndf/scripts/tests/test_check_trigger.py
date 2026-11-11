@@ -576,6 +576,20 @@ def test_a_failed_or_unmerged_sprint_check_does_not_move_check_done(repo, env, t
     assert not row["to"] and row["result"] == ("failed" if failed else "no_change")
 
 
+def test_a_review_only_sprint_check_moves_only_check_done_review(repo, env, tmp_path):
+    """構造改善を外した（停止中の）スプリントの検査は実装レビューだけの回として記録し、check-done/check を進めない
+    （PR 3062 のレビュー）。"""
+    sprint = merge_pr(repo, 40, "sprint/m1", {"core/s.py": 3})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 0, "counts": REVIEW}])
+    gh_set(env, states={"40": "MERGED"}, merges={"40": sprint})
+    args = ["record", "--id", "check", "--target-pr", "40", "--advance-done", "--review", "--state", str(st)]
+    code, out, _ = call(repo, env, *args)
+    assert code == 0, out
+    assert out["metrics"]["pushed"] == ["check-done/review"]
+    assert done_sha(repo, "review") == sprint and done_sha(repo, "check") == ""
+    assert events(env, "check")[-1]["only"] == "review"
+
+
 def test_advance_done_needs_target_pr(repo, env, tmp_path):
     st = state_dir(tmp_path, [])
     assert call(repo, env, "record", "--id", "x", "--pr", "30", "--advance-done", "--state", str(st))[0] == 2

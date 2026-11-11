@@ -339,7 +339,7 @@ def plan_check(a) -> dict:
                 },
                 {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
                 *merge_steps(a, on_fail="abort", next="record", on_conflict="base-return"),
-                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
+                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False), review=CROSS_REFACTORING_SUSPENDED),
                 back,
             ],
         },
@@ -371,8 +371,8 @@ def plan_check_since(a) -> dict:
     `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
     PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
-    no_refactor = (review_only := getattr(a, "review_only", False)) or CROSS_REFACTORING_SUSPENDED
-    flag = " --review" if review_only else ""
+    no_refactor = getattr(a, "review_only", False) or CROSS_REFACTORING_SUSPENDED
+    flag = " --review" if no_refactor else ""
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
@@ -446,7 +446,7 @@ def plan_check_since(a) -> dict:
         },
         {"id": "ready", "type": "run", "cmd": READY, "on_fail": "abort", "next": "merge-gate"},
         *merge_steps(a, on_fail="abort", next="record"),
-        *record_steps(name, review=review_only, pr=True),
+        *record_steps(name, review=no_refactor, pr=True),
     ]
     steps = trim_check_steps(a, steps, "finish", no_refactor)
     issues = list(a.issue or [])
