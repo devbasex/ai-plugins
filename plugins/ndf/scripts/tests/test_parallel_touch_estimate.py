@@ -91,6 +91,8 @@ class FakeEnv:
         return self.descs
 
     def issue_body(self, n):
+        if n not in self.bodies and self.fail:
+            raise OSError(f"課題 #{n} を読めない")
         return self.bodies.get(n, "")
 
     def run(self, cmd, cwd=None, stdin=None):
@@ -105,3 +107,11 @@ def test_lane_estimates_reads_sprint_issues_and_loop_milestone_groups(tmp_path):
     assert est == {"lloop": {7: ["a"]}, "lsp": {8: ["b/y.py"]}} and shared == [] and error is None
     est, _, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: FakeEnv(tmp_path, {}, {8: "`b/y.py`"}, fail=True))
     assert est == {"lloop": {}, "lsp": {8: ["b/y.py"]}} and "マイルストーンを読めない" in error
+
+
+def test_lane_estimates_reports_an_unreadable_issue_body(tmp_path):
+    p, _, _ = pp.check_data(plan(sprint("lsp", [8, 9])))
+    env = FakeEnv(tmp_path, {}, {8: "`b/y.py`"}, fail=True)
+    env.milestones = lambda repo: {}
+    est, _, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: env)
+    assert est == {"lsp": {8: ["b/y.py"], 9: []}} and error == "課題 #9 の本文を読めない"

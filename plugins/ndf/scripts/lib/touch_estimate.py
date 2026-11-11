@@ -354,7 +354,7 @@ def annotate_rows(rows: list[dict], numbers: Sequence[int], picked: Iterable[int
 def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, list, str | None]:
     """並列の計画のレーン → 課題 → 見込みのパス（I21）。出し方は開発ループの選定と同じ `issue_estimate`。
     スプリントのレーンは `input.issues`、ループのレーンは `--milestones` のマイルストーンの課題グループの表の課題を見る。
-    マイルストーンを読めなければ理由を返して本文だけで続ける。source_of はテストが差し替える（レーンのリポジトリ → 入口）。"""
+    マイルストーンか課題の本文を読めなければ理由を返して続ける（その課題は見込みなし）。source_of はテストが差し替える（レーンのリポジトリ → 入口）。"""
     repos: dict[str, tuple] = {}
     out: dict[str, dict] = {}
     errors: list[str] = []
@@ -373,9 +373,9 @@ def lane_estimates(main, lanes, source_of=GhSource) -> tuple[dict, list, str | N
             issues = list(ln.input.issues)
         else:
             issues = [n for t in sorted(ln.milestones() or ()) for n in group_issues(descs.get(t, ""))]
-        out[ln.name] = {
-            n: issue_estimate(src, n, next((d for d in descs.values() if n in group_issues(d)), ""), files).paths for n in issues
-        }
+        got = {n: issue_estimate(src, n, next((d for d in descs.values() if n in group_issues(d)), ""), files) for n in issues}
+        errors += [f"課題 #{n} の{UNREADABLE_NOTE}" for n, e in got.items() if e.note == UNREADABLE_NOTE]
+        out[ln.name] = {n: e.paths for n, e in got.items()}
     return out, shared_list(main), "; ".join(errors) or None
 
 
