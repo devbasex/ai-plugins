@@ -235,8 +235,9 @@ def test_absorbed_issue_skips_in_the_queue(tmp_path):
 
 
 def test_overlapping_touched_files_are_serialized():
-    """AC13: 設計の結果の触るファイルが重なる 2 本は同じ組になり、1 本ずつ流れる（包含で見る）。"""
-    grouped = admission.groups({"a": ["pkg/a/"], "b": ["pkg/a/x.py"], "c": ["docs/"]})
+    """AC13: 設計の結果の触るファイルに等しいファイルを持つ 2 本は同じ組になり、1 本ずつ流れる。
+    ディレクトリの宣言は重なりに使わない（#1811）。"""
+    grouped = admission.groups({"a": ["pkg/a/", "pkg/a/x.py"], "b": ["pkg/a/x.py"], "c": ["pkg/a/", "docs/"]})
     assert sorted(map(sorted, grouped)) == [["a", "b"], ["c"]]
 
 

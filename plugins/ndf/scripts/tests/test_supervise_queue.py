@@ -37,8 +37,26 @@ RES = decl.QUEUE_RESOURCES
 def test_containment_is_judged_by_path_components():
     assert admission.contains("a/b", "a/b/c.py") and admission.contains("a/b/", "a/b") and admission.contains("./a", "a/x")
     assert not admission.contains("a/b", "a/bc") and not admission.contains("a/b/c.py", "a/b")
-    assert admission.overlaps({"p": ["a/b"], "q": ["a/bc", "a/b.py"]}) == []
-    assert admission.overlaps({"p": ["x.py", "a/b/c.py"], "q": ["a/b"]}) == [{"a": "p", "b": "q", "paths": ["a/b/c.py", "a/b"]}]
+
+
+def test_only_equal_file_declarations_overlap_and_directories_are_ignored():
+    """#1811 の I1・I2: ディレクトリの宣言（末尾 `/`）は包含でも一致でも重ならず、等しいファイルの宣言だけが重なる。"""
+    assert admission.overlaps({"p": ["tests/", "a.py"], "q": ["tests/test_b.py", "b.py"]}) == []  # 受け入れ条件 1
+    assert admission.overlaps({"p": ["tests/", "a.py"], "q": ["tests/", "b.py"]}) == []  # 受け入れ条件 2
+    assert admission.overlaps({"p": ["x.py", "lib/admission.py"], "q": ["lib/admission.py"]}) == [
+        {"a": "p", "b": "q", "paths": ["lib/admission.py", "lib/admission.py"]}
+    ]  # 受け入れ条件 3
+    assert admission.overlaps({"p": ["./a/b.py"], "q": ["a/b.py"]}) == [{"a": "p", "b": "q", "paths": ["./a/b.py", "a/b.py"]}]
+    assert admission.overlaps({"p": ["a/b"], "q": ["a/b/c.py", "a/bc"]}) == []  # ファイルの宣言どうしは包含で比べない
+
+
+def test_the_judgement_does_not_read_the_file_system(tmp_path):
+    """#1811 の I4: 実在するディレクトリを末尾 `/` 無しで渡しても、存在しないパスと同じ結果になる。"""
+    (tmp_path / "d").mkdir()
+    real = {"p": [f"{tmp_path}/d", "x.py"], "q": [f"{tmp_path}/d/y.py"]}
+    ghost = {"p": [f"{tmp_path}/none", "x.py"], "q": [f"{tmp_path}/none/y.py"]}
+    assert admission.overlaps(real) == admission.overlaps(ghost) == []
+    assert admission.groups(real) == admission.groups(ghost) == [["p"], ["q"]]
 
 
 def test_plans_touching_the_same_shared_list_overlap():
@@ -46,10 +64,12 @@ def test_plans_touching_the_same_shared_list_overlap():
     plans = {"p": ["lib/a.py"], "q": ["lib/sub/b.py"], "r": ["docs/x.md"], "s": ["index.md"]}
     assert admission.overlaps(plans, shared) == [{"a": "p", "b": "q", "paths": ["lib/README.md", "lib/README.md"]}]
     assert admission.shared_hits(["lib"], shared) == ["lib/README.md"] and admission.shared_hits(["libx/a.py"], shared) == []
+    assert admission.shared_hits(["lib/"], shared) == []  # #1811 の I3: ディレクトリの宣言は共有の一覧に当たらない
+    assert admission.overlaps({"p": ["lib/"], "q": ["lib/b.py"], "r": ["lib/sub/"]}, shared) == []
 
 
 def test_groups_join_chained_overlaps_and_keep_the_order():
-    plans = {"a": ["x/"], "b": ["y.py"], "c": ["x/1.py", "z/"], "d": ["z/2.py"], "e": ["w.py"]}
+    plans = {"a": ["x/1.py"], "b": ["y.py"], "c": ["x/1.py", "z/2.py"], "d": ["z/2.py"], "e": ["w.py", "x/"]}
     grouped = admission.groups(plans)
     assert grouped == [["a", "c", "d"], ["b"], ["e"]]  # a と d は直に重ならないが、c を介して同じ組
 
@@ -62,7 +82,7 @@ def test_groups_wait_for_the_plans_they_need_and_merge_waiting_cycles():
     assert grouped == [["a", "x"], ["b"], ["c"], ["z"]]
     assert admission.needs(plans, grouped, after) == [[], ["a"], ["a"], ["c"]]
     assert admission.needs(plans, grouped, {"a": ["b"]}) == [[], [], [], []]  # 前提が後ろにあると待ちの辺を張らない
-    cyc = {"a": ["p/"], "b": ["q/"], "c": ["q/y.py"], "d": ["p/x.py"]}
+    cyc = {"a": ["p/x.py"], "b": ["q/y.py"], "c": ["q/y.py"], "d": ["p/x.py"]}
     after = {"b": ["a"], "d": ["c"]}  # 組 {a, d} は c を、組 {b, c} は a を待つ
     assert admission.groups(cyc) == [["a", "d"], ["b", "c"]]
     assert admission.groups(cyc, (), after) == [["a", "b", "c", "d"]]
@@ -211,20 +231,34 @@ def run_step(cmd: str, sid: str = "t") -> dict:
 
 
 def test_overlapping_plans_of_a_stage_run_one_by_one_and_are_reported(tmp_path, env):
+    """#1811 の受け入れ条件 3・I7: 同じファイルを宣言した 2 本は直列で、「重なる組」の行はそのファイルを 1 つだけ示す。"""
     q = Queue(tmp_path, env)
-    a = q.plan("a", [run_step(q.span("a", 0.8))], ["pkg/"])
-    b = q.plan("b", [run_step(q.span("b", 0.3))], ["pkg/x.py"])
-    c = q.plan("c", [run_step(q.span("c", 0.8))], ["pkgs/y.py"])  # pkg/ は pkgs/ を含まない
+    a = q.plan("a", [run_step(q.span("a", 0.8))], ["pkg/", "pkg/x.py"])
+    b = q.plan("b", [run_step(q.span("b", 0.3))], ["./pkg/x.py"])
+    c = q.plan("c", [run_step(q.span("c", 0.8))], ["pkg/y.py"])  # 同じディレクトリの別のファイル
     p, res = q.run(a, b, c, "--max", "3")
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
     sa, sb, sc = q.spans("a", "b", "c")
     assert not overlap(sa, sb) and sa[1] <= sb[0]  # 組の中は入れた順に 1 本ずつ
     assert overlap(sa, sc)  # 組の外のプランは同時に流れる
     items = {Path(i["plan"]).stem: i for i in res["items"]}
-    assert items["a"]["overlap"] == [{"with": b, "paths": ["pkg/", "pkg/x.py"]}]
-    assert items["b"]["overlap"] == [{"with": a, "paths": ["pkg/x.py", "pkg/"]}] and "overlap" not in items["c"]
+    assert items["a"]["overlap"] == [{"with": b, "paths": ["pkg/x.py", "./pkg/x.py"]}]
+    assert items["b"]["overlap"] == [{"with": a, "paths": ["./pkg/x.py", "pkg/x.py"]}] and "overlap" not in items["c"]
     assert res["metrics"]["overlaps"] == 1 and res["metrics"]["resource_limits"] == {"graphql": 2}
-    assert p.stderr.count(f"supervise-queue: 重なる組 {a} と {b}（pkg/ ⊃ pkg/x.py）を同時には流さない") == 1
+    assert p.stderr.count(f"supervise-queue: 重なる組 {a} と {b}（pkg/x.py）を同時には流さない") == 1
+    assert "⊃" not in p.stderr
+
+
+@pytest.mark.parametrize("b_files", [["tests/test_b.py", "b.py"], ["tests/", "b.py"]])
+def test_plans_declaring_a_directory_run_together_with_other_files_in_it(tmp_path, env, b_files):
+    """#1811 の受け入れ条件 1・2: ディレクトリの宣言は重なりにならず、2 本は同時に流れる。"""
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(q.span("a", 0.8))], ["tests/", "a.py"])
+    b = q.plan("b", [run_step(q.span("b", 0.8))], b_files)
+    p, res = q.run(a, b, "--max", "2")
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 2, p.stderr
+    assert overlap(*q.spans("a", "b"))
+    assert res["metrics"]["overlaps"] == 0 and "重なる組" not in p.stderr
     assert "- 結果: 完了" in Path(a).with_suffix(".log").read_text()  # <プラン>.log はプランの報告
 
 
@@ -242,12 +276,12 @@ def test_plans_hitting_the_same_shared_list_run_one_by_one(tmp_path, env):
 
 def test_plans_of_another_stage_and_finished_plans_are_not_counted(tmp_path, env):
     q = Queue(tmp_path, env)
-    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["pkg/"])
+    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["pkg/x.py"])
     later = q.plan("later", [run_step(note(tmp_path, "later"))], ["pkg/x.py"])
     p, res = q.run(a, "--then", later)
     assert p.returncode == 0 and res["metrics"]["overlaps"] == 0 and "重なる組" not in p.stderr, p.stderr
     # 終わったプラン（完了の記録がある a）は流し直さず、並行中にも数えない
-    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["pkg/y.py"])
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["pkg/x.py"])
     p, res = q.run(a, b)
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了", "完了"], p.stderr
     assert res["metrics"]["overlaps"] == 0 and all("overlap" not in i for i in res["items"])
@@ -305,7 +339,7 @@ def test_a_plan_needing_one_member_of_a_group_does_not_wait_for_the_rest(tmp_pat
     """A が X と重なりの組にあっても、A だけを前提にする B は X の終わりを待たない（I5）。"""
     q = Queue(tmp_path, env)
     a = q.plan("a", [run_step(q.span("a", 0.3))], ["pkg/a.py"])
-    x = q.plan("x", [run_step(q.span("x", 1.5))], ["pkg/"])
+    x = q.plan("x", [run_step(q.span("x", 1.5))], ["pkg/a.py"])
     b = q.plan("b", [run_step(q.span("b", 0.3))], ["b.py"], after=["a"])
     p, res = q.run(a, x, b, "--max", "3")
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
@@ -315,8 +349,8 @@ def test_a_plan_needing_one_member_of_a_group_does_not_wait_for_the_rest(tmp_pat
 
 def test_groups_waiting_for_each_other_run_as_one_group_in_order(tmp_path, env):
     q = Queue(tmp_path, env)
-    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["p/"])
-    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["q/"], after=["a"])
+    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["p/x.py"])
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["q/y.py"], after=["a"])
     c = q.plan("c", [run_step(note(tmp_path, "c"))], ["q/y.py"])
     d = q.plan("d", [run_step(note(tmp_path, "d"))], ["p/x.py"], after=["c"])
     p, res = q.run(a, b, c, d, "--max", "4")
@@ -438,7 +472,7 @@ def test_killed_queue_continues_from_the_running_step_and_then_runs_the_next_sta
 
 def test_killed_queue_continues_an_overlapping_group_in_order(tmp_path, env):
     t, q = tmp_path, Queue(tmp_path, env)
-    a = q.plan("a", [run_step(note(t, "a1"), "a1"), run_step(once_slow(t, "a2"), "a2")], ["pkg/"])
+    a = q.plan("a", [run_step(note(t, "a1"), "a1"), run_step(once_slow(t, "a2"), "a2")], ["pkg/x.py"])
     b = q.plan("b", [run_step(note(t, "b1"), "b1")], ["pkg/x.py"])
     q.kill_when_sleeping(a, "a2", a, b)
     assert q.visits() == ["a1", "a2"]
