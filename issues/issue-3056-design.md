@@ -155,13 +155,13 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | `lib/ci_watch.py`・`ci-watch.py`（新設） | `peek`: PR の head のテストのチェックを 1 回だけ読み（`merged-steps.py probe` と同じ読み方）、記録に 1 行を足して終了コードで結論を返す。落ちたチェックの名前・リンク・失敗したジョブのログの末尾（`gh run view --log-failed` の最後の 200 行）を出力に載せる |
 | `contracts/limits.json` | `supervise.ci-fix`（`attempts: 3`）を足す。改修の回数の上限の値の正本 |
 | `supervise_lib/verify_steps.py` | `ci_only(a)`・`ci_watch_steps(...)`（`ci-peek`・`ci-peek-merge`・`ci-fix` を組む）・`without_local_tests(...)`（`test-limited`・`test-all` と、それだけを入力に持つ judge・fix を外す）を足す。`ci-watch.py` の起動の形は `supervise_lib/paths.py` の定数に置く |
-| `supervise_lib/templates.py` | `ci_only` のとき、実装のプランへ `pr-draft` と CI の監視のステップを入れ、テストのステップを外す。検査のプラン 2 種へ CI の監視のステップとリファクタリング（`assess`・`refactor`）を入れる。`CROSS_REFACTORING_SUSPENDED = False` にし、構造改善を外す条件を `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つに導く。この条件は今の停止の定数を読む 3 か所すべてで使う: 検査の記録をレビューだけの回にする `record_steps(review=...)`、`trim_check_steps` で `assess`・`refactor` を外す判定、差分の検査の `no_refactor`（`eval`・`prepare`・`record` の `--review`・`--final`・最初のステップ）。宣言の無いリポジトリの検査のプランは今のまま（リファクタリングを入れず、記録はレビューだけの回）。定数のコメント（`templates.py:230`）は「宣言の無いリポジトリでは `refactor_suspended` が真になり構造改善を外す」に直す |
+| `supervise_lib/templates.py` | `ci_only` のとき、実装のプランへ `pr-draft` と CI の監視のステップを入れ、テストのステップを外す。検査のプラン 2 種へ CI の監視のステップとリファクタリング（`assess`・`refactor`）を入れる。`CROSS_REFACTORING_SUSPENDED = False` にし、リファクタリングを外す条件を `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つに導く。この条件は今の停止の定数を読む 3 か所すべてで使う: 検査の記録をレビューだけの回にする `record_steps(review=...)`、`trim_check_steps` で `assess`・`refactor` を外す判定、差分の検査の `no_refactor`（`eval`・`prepare`・`record` の `--review`・`--final`・最初のステップ）。宣言の無いリポジトリの検査のプランは今のまま（リファクタリングを入れず、記録はレビューだけの回）。定数のコメント（`templates.py:230`）は「宣言の無いリポジトリでは `refactor_suspended` が真になりリファクタリングを外す」に直す |
 | `supervise_lib/prompts.py`・`supervise_lib/worker_steps.py` | `ci_only` のプランの worker の指示文で、「全体テストを打たない…テストは範囲だけ」の行を「テストを手元で打たない。合否は PR の CI の結果（`gh pr checks <PR>`）で読む」に置き換える |
 | `merged_lib/merge.py`・`merged_lib/checks.py` | `ci_only` のとき、テストのチェックがすべて現れて通るまでマージしない（I7）。チェックが 1 件も載らない終わり（`no_checks`）を完了として扱わない |
 | `hook_lib/ci_test_guard.py`（新設）・`hook.py` | PreToolUse の Bash を、宣言のあるリポジトリでテストの suite の起動の形と照合し、当たれば拒む（I9）。Claude Code と Codex の両方の hook から呼ばれる |
 | cross-refactoring の `refactor_lib/baseline.py`・`scope_verdict.py`・`commands/implement.py`・`template_check.py`・`gate_ci.py` | `ci_only` のとき、着手前のテスト・項目ごとの点検の範囲テスト・足したテストの試走・テンプレートの試走を走らせない（静的解析は走らせる）。最終ゲートは CI の結果を 1 回だけ読む（`gate_ci.ci_peek_gate` を足す。`checks_outcome` を 1 回呼び、`wait_check` を通さない）。落ちていれば既存の最終ゲート修正へ、通っていれば通過、未完了・取得できないときは「CI 未完了」と記録して通過にし、後続の `ci-peek` とマージ（I7）へ合否を渡す。テストのチェックが空なら head のすべてを読む |
 | cross-review の `scripts/drive.py` | 最終スイープの指示の行（`sweep_verify_lines`）を、`ci_only` なら「テストを手元で打たず、PR の CI の結果を読む」にする |
-| Skill とエージェント定義 | `development-workflow`（SKILL.md と `references/project-analysis.md`）・`quality-gates`・`cross-review`・`cross-refactoring` の SKILL.md、`agents/worker.md`・`agents/supervisor.md` に要求の規則 1〜4 を書く。`development-workflow/SKILL.md` の工程表の「構造改善」の行（緊急の停止中の段落）は「CI テストの宣言があるリポジトリだけ構造改善を通す。宣言の無いリポジトリは手元のテストの負荷のため通さない」へ書き換え、停止の終わりの条件（改修が終わるまで）を外す。宣言のあるリポジトリの「差分にコードのファイルがあれば必ず通す」以降の決まりは残す |
+| Skill とエージェント定義 | `development-workflow`（SKILL.md と `references/project-analysis.md`）・`quality-gates`・`cross-review`・`cross-refactoring` の SKILL.md、`agents/worker.md`・`agents/supervisor.md` に要求の規則 1〜4 を書く。`development-workflow/SKILL.md` の工程表で `cross-refactoring` を通す行（`SKILL.md:180`。緊急の停止中の段落）は「CI テストの宣言があるリポジトリだけリファクタリングを通す。宣言の無いリポジトリは手元のテストの負荷のため通さない」へ書き換え、停止の終わりの条件（改修が終わるまで）を外す。宣言のあるリポジトリの「差分にコードのファイルがあれば必ず通す」以降の決まりは残す |
 | `.ndf/project.json`（このリポジトリ） | `test.ci.only: true` を足す（`pytest` の suite が `.github/workflows/pytest.yml` を `ci_jobs` に持つ） |
 
 ```mermaid
@@ -290,7 +290,7 @@ graph TB
 
 対象は `new check --pr` と `new check --since-last` である。`whole_on_ci` を `ci_only` でも真にするため、今の `trim_check_steps` がこの 2 つから `test-all` を外す。`test-all` だけを入力に持つ judge・fix も外れる。そこへ次を足す。
 
-- リファクタリング（`assess` → `refactor`）を戻す（`CROSS_REFACTORING_SUSPENDED = False`）。戻すのは宣言のあるリポジトリの検査のプランだけで、宣言の無いリポジトリは今のまま入れない（I8）。外す条件は `refactor_suspended(a)` の 1 つで、`assess`・`refactor` を外す判定・検査の記録の `--review`・差分の検査の `no_refactor` のすべてがこれを読む。宣言の無いリポジトリでは記録がレビューだけの回のまま残り、構造改善を通していない差分が次の構造改善の範囲から外れない。`refactor` の中の点検は下の「cross-refactoring」のとおり
+- リファクタリング（`assess` → `refactor`）を戻す（`CROSS_REFACTORING_SUSPENDED = False`）。戻すのは宣言のあるリポジトリの検査のプランだけで、宣言の無いリポジトリは今のまま入れない（I8）。外す条件は `refactor_suspended(a)` の 1 つで、`assess`・`refactor` を外す判定・検査の記録の `--review`・差分の検査の `no_refactor` のすべてがこれを読む。宣言の無いリポジトリでは記録がレビューだけの回のまま残り、リファクタリングを通していない差分が次のリファクタリングの範囲から外れない。`refactor` の中の点検は下の「cross-refactoring」のとおり
 - `review` の後、`ready`（差分の検査では `finish`）の前に `ci-peek` を置く。`ci-fix` は直してコミットし `git push` して `ci-peek` へ戻る
 - `merge` が落ちたら `ci-peek-merge` へ進む（実装のプランと同じ）
 
@@ -402,7 +402,7 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 
 ### 決定 12: 改修が終わったため、宣言のあるリポジトリで cross-refactoring の停止を外す
 
-停止の理由は手元のテストの負荷だった。宣言のあるリポジトリではこの変更で手元のテストが無くなるため、停止の定数を `False` にし、検査のプランへリファクタリングを戻す。宣言の無いリポジトリは手元のテストの負荷が残り、要求の受け入れ条件 12 が今と同じ振る舞いを求めるため、構造改善を外す条件を `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` に導き、今のまま外しておく。停止の定数を読む 3 か所（`assess`・`refactor` を外す判定、検査の記録の `--review`、差分の検査の `no_refactor`）をすべてこの条件で決める。リファクタリングの除外だけに `ci_only` を足すと、宣言の無いリポジトリで構造改善を通していない検査が `--review` 無しで記録され、次の構造改善の範囲から外れるためである。`development-workflow/SKILL.md` の停止の段落も、終わりの条件を外して「宣言のあるリポジトリだけ通す」に書き換える。
+停止の理由は手元のテストの負荷だった。宣言のあるリポジトリではこの変更で手元のテストが無くなるため、停止の定数を `False` にし、検査のプランへリファクタリングを戻す。宣言の無いリポジトリは手元のテストの負荷が残り、要求の受け入れ条件 12 が今と同じ振る舞いを求めるため、リファクタリングを外す条件を `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` に導き、今のまま外しておく。停止の定数を読む 3 か所（`assess`・`refactor` を外す判定、検査の記録の `--review`、差分の検査の `no_refactor`）をすべてこの条件で決める。リファクタリングの除外だけに `ci_only` を足すと、宣言の無いリポジトリでリファクタリングを通していない検査が `--review` 無しで記録され、次のリファクタリングの範囲から外れるためである。`development-workflow/SKILL.md` の停止の段落も、終わりの条件を外して「宣言のあるリポジトリだけ通す」に書き換える。
 
 根拠: Mission / Value 10（MVV 版 7）
 
@@ -423,7 +423,7 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 | 受け入れ条件 9・I9 | 宣言のあるリポジトリで、suite の `command`・`scope_command` にパスを入れたもの・前置きにオプションを足したものを hook が拒み、理由に CI の結果の見方が入る。静的解析の suite のコマンドと `test-run.py` は拒まない | `kind` を見ない・前置きを 1 語にして `uv run ruff` まで止める |
 | 受け入れ条件 10 | 文言の照合テストは書かない（`AGENTS.md` の DON'T）。`instructions-check.py`・`check-ndf-contracts.py` が参照切れを見る | — |
 | 受け入れ条件 11 | `ci_only` の状態で `run_baseline`・`_run_scope`・`_run_added_tests`・`template_check` がテストのコマンドを起動しない。最終ゲートの `gate.mode` が `ci`。`CROSS_REFACTORING_SUSPENDED` が `False` で、宣言のあるリポジトリの検査のプランに `assess`・`refactor` がある | `ci_mode` だけを見て `ci_only` を見ない・停止を残す |
-| 受け入れ条件 12・I8 | 宣言の無い既存のテスト（`test_supervise.py`・hook・cross-refactoring・cross-review）がそのまま通る。宣言の無いリポジトリで hook が何も拒まない。宣言の無いリポジトリの検査のプランに `assess`・`refactor` が無い。宣言の無いリポジトリの `record` のコマンドに `--review` が付き、`new check --since-last` の `eval` に `--review` が付く | 宣言の無いときにも `ci_only` の分岐へ入る・停止の定数だけでリファクタリングを戻す・リファクタリングの除外だけに `ci_only` を足し、記録と差分の検査が停止の定数だけを読む |
+| 受け入れ条件 12・I8 | 宣言の無い既存のテスト（`test_supervise.py`・hook・cross-refactoring・cross-review）がそのまま通る。そのため、全テストに効く自動の fixture（`plugins/ndf/scripts/tests/conftest.py` の `_refactor_route_on`）が差し替える対象を、停止の定数から `refactor_suspended` に変え、常に偽を返させる。停止の定数だけを差し替えると、宣言の無いテストのリポジトリでは `not ci_only(a)` で真のままになり、リファクタリングの道を確かめる既存のテストが落ちる。`suspended_refactor` の印のテストは、この差し替えを受けずに、宣言の無いリポジトリの振る舞いを確かめる側になる: 宣言の無いリポジトリで hook が何も拒まない。検査のプランに `assess`・`refactor` が無い。`record` のコマンドに `--review` が付き、`new check --since-last` の `eval` に `--review` が付く | 宣言の無いときにも `ci_only` の分岐へ入る・停止の定数だけでリファクタリングを戻す・リファクタリングの除外だけに `ci_only` を足し、記録と差分の検査が停止の定数だけを読む・fixture が停止の定数だけを差し替えたまま残る |
 
 ## 設計の結果
 
