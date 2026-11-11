@@ -148,7 +148,7 @@ def switch_report(main: Path, name: str, interval: float) -> dict:
     """切り替えの判定（#3006）。例外を外へ出さない（I5）。"""
     import parallel_switch as psw
 
-    return psw.report(main, name, interval)
+    return psw.wait_metrics(main, name, interval)
 
 
 def wait_plan(a, reply, main: Path, self_path: Path) -> None:

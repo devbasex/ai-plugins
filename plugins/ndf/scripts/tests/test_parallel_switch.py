@@ -1,5 +1,5 @@
 """長い待ちの切り替えの判定（#3006）: `parallel.py wait` が上限で戻るとき、`metrics.switch` に判定と材料を載せ、
-`items` に `status` と同じレーンごとの行を載せる。判定の規則は `parallel_switch.judge` の材料の組み合わせで確かめる。"""
+`items` に `status` と同じレーンごとの行を載せる。判定の規則は `parallel_switch.judge_switch` の材料の組み合わせで確かめる。"""
 
 from __future__ import annotations
 
@@ -39,14 +39,14 @@ def inputs(**over) -> psw.SwitchInputs:
 
 
 def test_a_long_wait_with_a_big_context_switches_and_names_its_materials():
-    v = psw.judge(inputs())
+    v = psw.judge_switch(inputs())
     assert v.verdict == psw.SWITCH and v.wait_s == 6 * HOUR and v.samples == 3
     assert v.cost["reports"] == 12 and v.cost["stay"] > v.cost["switch"]
     assert set(v.defaults) == {"handoff_calls", "handoff_output", "restore_calls", "restore_context"}
 
 
 def test_the_cost_follows_the_formula_with_the_defaults():
-    v = psw.judge(inputs())
+    v = psw.judge_switch(inputs())
     r, n, c, q = 0.05, 12, BIG, BASE
     assert v.cost["stay"] == round(n * r * c)
     assert v.cost["switch"] == round(3 * r * c + 5 * 2_000 + 2 * q + 5 * r * q + n * r * q)
@@ -54,34 +54,34 @@ def test_the_cost_follows_the_formula_with_the_defaults():
 
 def test_the_measured_context_switches_after_four_hours_and_not_before():
     """設計の実測: C = 474,303 では W が 4 時間を超える（n = 9）と切り替え、4 時間以下（n = 8）では報告して待つ。"""
-    assert psw.judge(inputs(gaps_s=[5 * HOUR] * 3, elapsed_s=HOUR)).verdict == psw.STAY  # W = 4 時間・n = 8
-    assert psw.judge(inputs(gaps_s=[5 * HOUR + 60] * 3, elapsed_s=HOUR)).verdict == psw.SWITCH  # n = 9
+    assert psw.judge_switch(inputs(gaps_s=[5 * HOUR] * 3, elapsed_s=HOUR)).verdict == psw.STAY  # W = 4 時間・n = 8
+    assert psw.judge_switch(inputs(gaps_s=[5 * HOUR + 60] * 3, elapsed_s=HOUR)).verdict == psw.SWITCH  # n = 9
 
 
 def test_calibrated_estimates_replace_the_defaults():
     est = cp.Estimates.from_dict({"restore_context": 60_000, "restore_calls": 10, "handoff_calls": 8, "handoff_output": 4_000,
                                   "samples": {"restore": 3, "handoff": 3}})  # fmt: skip
-    v = psw.judge(inputs(estimates=est))
+    v = psw.judge_switch(inputs(estimates=est))
     assert v.defaults == [] and v.base_context == 60_000
 
 
 @pytest.mark.parametrize("unanswered", [1, 2, None])
 def test_an_unanswered_question_never_switches(unanswered):
     """受け入れ条件 3・I1: 他の材料が切り替えに当たっても、答えていない問いがあれば（読めなくても）報告して待つ。"""
-    v = psw.judge(inputs(unanswered=unanswered, gaps_s=[100 * HOUR] * 5))
+    v = psw.judge_switch(inputs(unanswered=unanswered, gaps_s=[100 * HOUR] * 5))
     assert v.verdict == psw.STAY and "答えていない問い" in v.reason
 
 
 @pytest.mark.parametrize("where", ["outside", None])
 def test_outside_the_wrapper_never_switches(where):
     """受け入れ条件 8・I2"""
-    v = psw.judge(inputs(relay=where))
+    v = psw.judge_switch(inputs(relay=where))
     assert v.verdict == psw.STAY and "ラッパー" in v.reason
 
 
 def test_fewer_than_three_gaps_longer_than_the_elapsed_time_do_not_switch():
     """I3: 経過を超える間隔だけを標本にし、3 件未満なら待ちの見込みを出さない。"""
-    v = psw.judge(inputs(gaps_s=[60.0] * 10 + [7 * HOUR] * 2, elapsed_s=HOUR))
+    v = psw.judge_switch(inputs(gaps_s=[60.0] * 10 + [7 * HOUR] * 2, elapsed_s=HOUR))
     assert v.verdict == psw.STAY and v.wait_s is None and v.samples == 2 and "wait_s" in v.missing
     assert psw.remaining_wait([60.0, 3 * HOUR, 4 * HOUR, 5 * HOUR], HOUR) == (3 * HOUR, 3)
     assert psw.remaining_wait([], None) == (None, 0)
@@ -90,13 +90,13 @@ def test_fewer_than_three_gaps_longer_than_the_elapsed_time_do_not_switch():
 @pytest.mark.parametrize("over", [{"context": None}, {"base_context": None}])
 def test_without_a_context_the_wait_alone_decides_at_four_hours(over):
     """要求の前提 4: 文脈 C か Q を読めなければ、W ≥ 4 時間で切り替え、未満で報告して待つ。`cost` は null。"""
-    long_ = psw.judge(inputs(**over, gaps_s=[5 * HOUR] * 3, elapsed_s=HOUR))
-    short = psw.judge(inputs(**over, gaps_s=[5 * HOUR - 1] * 3, elapsed_s=HOUR))
+    long_ = psw.judge_switch(inputs(**over, gaps_s=[5 * HOUR] * 3, elapsed_s=HOUR))
+    short = psw.judge_switch(inputs(**over, gaps_s=[5 * HOUR - 1] * 3, elapsed_s=HOUR))
     assert (long_.verdict, short.verdict) == (psw.SWITCH, psw.STAY) and long_.cost is None and short.cost is None
 
 
 def test_a_small_context_keeps_reporting():
-    assert psw.judge(inputs(context=60_000)).verdict == psw.STAY
+    assert psw.judge_switch(inputs(context=60_000)).verdict == psw.STAY
 
 
 def test_the_judgement_does_not_touch_the_outside(monkeypatch):
@@ -107,7 +107,7 @@ def test_the_judgement_does_not_touch_the_outside(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", boom)
     monkeypatch.setattr(socket, "socket", boom)
     monkeypatch.setattr(Path, "read_text", boom)
-    assert psw.judge(inputs()).verdict == psw.SWITCH
+    assert psw.judge_switch(inputs()).verdict == psw.SWITCH
 
 
 def test_question_gaps_are_read_from_the_question_rows_in_time_order():
@@ -118,7 +118,7 @@ def test_question_gaps_are_read_from_the_question_rows_in_time_order():
         {"kind": "gate2", "at": "2026-11-11T02:00:00Z"},
         {"kind": "unmatched", "at": "壊れた"},
     ]
-    now = psw._at("2026-11-11T04:00:00Z")
+    now = psw._ledger_epoch("2026-11-11T04:00:00Z")
     assert psw.question_gaps(rows, now) == ([HOUR, HOUR], HOUR)
     assert psw.question_gaps([], now) == ([], None)
 
@@ -197,7 +197,7 @@ def test_unreadable_ledger_and_relay_become_missing_materials(env, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     x = psw.read_inputs(env["main"], "p1", 1800)
     assert x.unanswered is None and x.relay is None and {"unanswered", "relay", "context"} <= set(x.missing)
-    assert psw.judge(x).verdict == psw.STAY
+    assert psw.judge_switch(x).verdict == psw.STAY
 
 
 def test_an_unanswered_question_in_the_ledger_is_counted(env, monkeypatch):
@@ -244,5 +244,5 @@ def test_the_judgement_of_ten_lanes_adds_under_a_second(env, monkeypatch):
         plg.append_ledger_row(main, "p1", "ask", f"ask:{i}", {"id": f"q{i}", "kind": "ask"}, by=f"l{i % 10}", rid=f"q{i}")
         plg.append_ledger_row(main, "p1", "answer", f"answer:{i}", {"id": f"q{i}"}, by="organizer", rid=f"q{i}")
     t = time.monotonic()
-    psw.report(main, "p1", 1800)
+    psw.wait_metrics(main, "p1", 1800)
     assert time.monotonic() - t < 1.0

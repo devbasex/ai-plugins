@@ -287,6 +287,8 @@
 | `notify.slack` | seconds 10 | Slack へ送る HTTP の上限 | `plugins/ndf/scripts/lib/notify.py:<module>` |
 | `parallel-launch.up` | seconds 120 / interval 5 | 一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる） | `plugins/ndf/scripts/lib/parallel_launch.py:<module>`<br>`plugins/ndf/scripts/lib/parallel_launch.py:_hit_once` |
 | `parallel-repo.stall` | seconds 3600 | 動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる） | `plugins/ndf/scripts/lib/parallel_repo.py:<module>` |
+| `parallel-switch.long-wait` | seconds 14400 | 文脈を読めないときに長い待ちのオーガナイザーを切り替える待ちの見込みの閾値（実測で最も大きかった文脈が切り替えに変わる時点） | `plugins/ndf/scripts/lib/parallel_switch.py:<module>` |
+| `parallel-switch.relay-check` | seconds 10 | 切り替えの判定でラッパーの直接の子かを確かめる relay.py is-child の上限 | `plugins/ndf/scripts/lib/parallel_switch.py:_relay_position` |
 | `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |
 | `post-queue.transient-reflush` | seconds 300 / interval 30 / same_cause 11 | 一時的な失敗で残った投稿キューの流し直し。上限の再実行の合計を超えない | `plugins/ndf/scripts/lib/post_queue.py:reflush` |

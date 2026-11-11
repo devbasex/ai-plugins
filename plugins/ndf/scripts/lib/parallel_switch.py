@@ -2,8 +2,8 @@
 
 - `read_inputs(main, name, interval)`: 材料（答えていない問い・ラッパーとの位置・問いの間隔・会話の文脈・費用の見込み）を読む。
   読めない材料は None にして `missing` に名前を入れ、例外を外へ出さない（I5）
-- `judge(inputs)`: 材料から「切り替える」「報告して待つ」を出す純粋な関数。ファイル・子プロセス・言語モデルを使わない
-- `report(main, name, interval)`: `wait` の `metrics.switch` に載せる辞書
+- `judge_switch(inputs)`: 材料から「切り替える」「報告して待つ」を出す純粋な関数。ファイル・子プロセス・言語モデルを使わない
+- `wait_metrics(main, name, interval)`: `wait` の `metrics.switch` に載せる辞書
 
 判定の規則（順に見て、最初に当たった行で決める。条件と閾値の説明は `references/parallel.md` の「長い待ちの切り替え」）:
 1. 答えていない問いが 1 件以上（読めなければ 1 件以上として扱う）→ 報告して待つ
@@ -25,10 +25,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import context_policy as cp
+import limits
 from token_rates import read_rate
 
 SWITCH, STAY = "切り替える", "報告して待つ"
-LONG_WAIT_S = 14_400  # 文脈を読めないときに切り替える待ちの見込みの閾値（決定 3。実測で最も大きかった文脈が切り替えに変わる時点）
+LONG_WAIT_S = limits.seconds("parallel-switch.long-wait")  # 文脈を読めないときに切り替える待ちの見込みの閾値（決定 3）
 DEFAULT_HANDOFF_CALLS = 3.0  # 較正した値が無いときの引継ぎの呼び出し回数 h
 DEFAULT_HANDOFF_OUTPUT = 2_000.0  # 較正した値が無いときの引継ぎの出力 token H
 DEFAULT_RESTORE_CALLS = 5.0  # 較正した値が無いときの復元の呼び出し回数 q
@@ -92,7 +93,7 @@ def _restart_terms(est: cp.Estimates, base_context: int | None) -> tuple[float, 
     return h, big_h, big_q, q, used
 
 
-def judge(x: SwitchInputs) -> SwitchVerdict:
+def judge_switch(x: SwitchInputs) -> SwitchVerdict:
     """判定の規則の順に見て、最初に当たった行で決める（I1〜I3・I5）。"""
     missing = list(x.missing)
     w, samples = remaining_wait(x.gaps_s, x.elapsed_s)
@@ -125,7 +126,7 @@ def judge(x: SwitchInputs) -> SwitchVerdict:
 # --- 材料の読み取り ------------------------------------------------------------------------------------
 
 
-def _at(v) -> float | None:
+def _ledger_epoch(v) -> float | None:
     try:
         return datetime.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
     except (TypeError, ValueError):
@@ -136,7 +137,7 @@ def question_gaps(rows: list[dict], now: float) -> tuple[list[float], float | No
     """(計画の台帳の問いの行の時刻の間隔, 最後の問いの行から今までの経過)。問いの行が無ければ ([], None)。"""
     import parallel_ledger as plg
 
-    times = sorted(t for r in rows if r.get("kind") in plg.QUESTIONS and (t := _at(r.get("at"))) is not None)
+    times = sorted(t for r in rows if r.get("kind") in plg.QUESTIONS and (t := _ledger_epoch(r.get("at"))) is not None)
     if not times:
         return [], None
     return [b - a for a, b in zip(times, times[1:])], max(0.0, now - times[-1])
@@ -192,7 +193,7 @@ def _relay_position() -> str:
 
     from parallel_files import RELAY
 
-    got = subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True, text=True, timeout=10)
+    got = subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True, text=True, timeout=limits.seconds("parallel-switch.relay-check"))
     return "relay" if got.returncode == 0 else "outside"
 
 
@@ -266,11 +267,11 @@ def to_metrics(x: SwitchInputs, v: SwitchVerdict, name: str) -> dict:
     }
 
 
-def report(main: Path, name: str, interval: float) -> dict:
+def wait_metrics(main: Path, name: str, interval: float) -> dict:
     """`wait` の `metrics.switch`。読み取りか判定が例外を出しても「報告して待つ」を返す（I5）。"""
     try:
         x = read_inputs(main, name, interval)
-        return to_metrics(x, judge(x), name)
+        return to_metrics(x, judge_switch(x), name)
     except Exception as exc:  # noqa: BLE001
         x = SwitchInputs(interval_s=float(interval), missing=["all"])
         return to_metrics(x, SwitchVerdict(STAY, f"材料を読めない（{type(exc).__name__}）", missing=["all"]), name)
