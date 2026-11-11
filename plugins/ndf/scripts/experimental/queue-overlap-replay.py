@@ -32,6 +32,9 @@ from pathlib import Path, PurePosixPath
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
 sys.path[:0] = [str(SCRIPTS), str(SCRIPTS / "lib")]
+import deps  # noqa: E402
+
+deps.require("durable", "locks", "md", "mdtable", "procs", "schema", "versions", "waits")  # supervise_lib を読むと各グループの包みへ届く
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, result  # noqa: E402
 from supervise_lib import admission, decl  # noqa: E402
 from supervise_lib.paths import is_dir_entry  # noqa: E402
@@ -67,7 +70,7 @@ def countable(d: Path, root: str) -> list[dict]:
     return sorted(out, key=lambda x: (x["stage"], x["issue"]))
 
 
-def pr_files(pr: int, root: str, cache: dict[int, set[str]]) -> set[str]:
+def merged_pr_files(pr: int, root: str, cache: dict[int, set[str]]) -> set[str]:
     if pr not in cache:
         cmd = ["gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{pr}/files", "--jq", ".[].filename"]
         p = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
@@ -99,7 +102,7 @@ def cause(o: dict, plans: dict[str, list[str]]) -> str:
     return "同じファイル" if key(a) in both and key(b) in both else "共有の一覧"
 
 
-def judge(rule, shared: list[dict], plans: list[dict], changed) -> dict:
+def judge_overlaps(rule, shared: list[dict], plans: list[dict], changed) -> dict:
     """ステージごとに組を判定し、`{pairs, overlaps, false: [{a, b, path, cause}]}` を返す。"""
     pairs, found, false = 0, 0, []
     for stage in sorted({p["stage"] for p in plans}):
@@ -113,7 +116,7 @@ def judge(rule, shared: list[dict], plans: list[dict], changed) -> dict:
     return {"pairs": pairs, "overlaps": found, "false": false}
 
 
-def table(rows: list[dict], before: bool) -> str:
+def overlap_table(rows: list[dict], before: bool) -> str:
     head = ["スプリント", "数えたプラン", "比べた組"]
     head += ["今の規則: 重なり", "今の規則: 偽の重なり"] if before else []
     head += ["新しい規則: 重なり", "新しい規則: 偽の重なり"]
@@ -167,10 +170,10 @@ def main(argv: list[str] | None = None) -> int:
             plans = countable(d, root)
             if len(plans) < 2 or (a.sprint and name not in a.sprint):
                 continue
-            changed = lambda pr: pr_files(pr, root, cache)  # noqa: E731
-            row = {"sprint": name, "plans": len(plans), "after": judge(admission, shared, plans, changed)}
+            changed = lambda pr: merged_pr_files(pr, root, cache)  # noqa: E731
+            row = {"sprint": name, "plans": len(plans), "after": judge_overlaps(admission, shared, plans, changed)}
             if before:
-                row["before"] = judge(before[0], before[1], plans, changed)
+                row["before"] = judge_overlaps(before[0], before[1], plans, changed)
             rows.append(row)
     except RuntimeError as e:
         out = result(TOOL, "stopped", f"{e}。数えられなかったスプリント: {name}")
@@ -183,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         out = result(TOOL, "ok" if rows else "stopped", summary if rows else "数えられるスプリントが無い", rows, metrics)
         code = 0 if rows else EXIT_PRECONDITION
         if rows:
-            sys.stdout.write(table(rows, bool(before)))
+            sys.stdout.write(overlap_table(rows, bool(before)))
     if a.out:
         Path(a.out).write_text(json.dumps(out, ensure_ascii=False) + "\n", encoding="utf-8")
     print(out["summary"], file=sys.stderr)
