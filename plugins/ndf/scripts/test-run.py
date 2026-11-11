@@ -57,6 +57,9 @@ LIMIT_KEY = {"scope": "test_timeout", "whole": "whole_timeout"}  # `--limit` が
 LOG_TAIL_BYTES = 2000  # 結果へ写す、落ちたコマンドのログの末尾の量。ログは流し直しで上書きされる
 
 
+CI_ONLY_NOTE = "CI テストの宣言があるため、テストの suite を手元で走らせず CI に任せた（結果は gh pr checks <PR> で読む）"
+
+
 def _emit_step(obj: dict, code: int | None = None):
     """結果を出す。テスト環境を起こそうとした実行は、どの止まり方でも `testenv` の行を載せる。"""
     events = container_reach.wake_events()
@@ -283,6 +286,10 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
 
 def _select_scope_runs(root: pathlib.Path, a, strategy: ts.Strategy, only: str | None) -> tuple[list, bool]:
     """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。"""
+    if strategy.ci_only:  # CI テストの宣言: テストは CI に任せ、静的解析だけを走らせる（#3056）
+        only = ts.LINT if only in (None, ts.LINT) else None
+        if only is None:
+            return [], True
     if strategy.name == ts.ROUND_ONLY:
         runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
         return runs, only is not None and not runs
@@ -308,6 +315,11 @@ def cmd_scope(a) -> int:
     strategy, limits, notes = _resolve(root, a)
     only = getattr(a, "only_kind", None)
     runs, nothing_to_run = _select_scope_runs(root, a, strategy, only)
+    if strategy.ci_only:
+        notes.append(CI_ONLY_NOTE)
+    if nothing_to_run and strategy.ci_only:
+        _emit_step(result(TOOL, "ok", "テストを CI に任せた（CI テストの宣言）。範囲に当てる静的解析が無い", [{"note": n} for n in notes], {"caused": 0}))
+        return 0
     if nothing_to_run:
         _emit_step(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
@@ -415,6 +427,8 @@ def _docs_tests(root: pathlib.Path, a, ctx: OutcomeContext, kinds: diff_kinds.Di
     if not kinds.tests:
         detail = f"全体テストを飛ばした（差分が文書のファイルだけ: {len(kinds.docs)} ファイル）"
         return _emit_outcome(ctx._replace(passed=not ctx.lint, detail=detail))
+    if ctx.strategy.ci_only:  # テストは手元で走らせず、呼び手が CI の結果を読む（#3056）
+        return None
     if unscoped := ts.unscoped_owners(ctx.strategy, list(kinds.tests)):  # 雛形を持つ別の suite へ渡さない
         ctx.notes.append(f"テストを受け持つ suite（{', '.join(unscoped)}）が範囲テストの雛形を持たず、全体テストを走らせる")
         return None

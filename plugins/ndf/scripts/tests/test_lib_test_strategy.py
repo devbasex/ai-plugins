@@ -669,3 +669,48 @@ def test_template_verdict_follows_the_table(result, reference, known, owned, exp
     assert verdict.status == expected
     assert verdict.stops is (expected != ts.PROBE_OK)
     assert verdict.reason
+
+
+# ---------- #3056: CI テストの宣言 ----------
+
+
+def _ci_only(only=True, strategy=None, check=None, required=()):
+    test = {
+        "ci": {"only": only, **({"check": check} if check else {})},
+        "suites": [
+            {"name": "py", "runner": "pytest", "command": "pytest", "scope_command": "pytest {paths}"},
+            {"name": "lint", "runner": "ruff", "kind": "lint", "command": "ruff check .", "scope_command": "ruff check {paths}"},
+        ],
+    }
+    if strategy:
+        test["strategy"] = strategy
+    return {"test": test, "ci": {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}], "required_checks": list(required)}}
+
+
+@pytest.mark.parametrize("strategy", [None, "local-full", "local-scoped-ci-whole", "round-only"])
+def test_ci_only_is_read_regardless_of_the_strategy(strategy):
+    s = ts.resolve(_ci_only(strategy=strategy))
+    assert s.ci_only and s.whole_on_ci
+    assert ts.Strategy.from_state(s.as_state()).ci_only
+
+
+def test_ci_only_checks_come_from_check_then_required_then_all():
+    assert ts.resolve(_ci_only(check="pytest", required=["x"])).ci["checks"] == ["pytest"]
+    assert ts.resolve(_ci_only(required=["x", "y"])).ci["checks"] == ["x", "y"]
+    assert ts.resolve(_ci_only()).ci["checks"] == []
+
+
+def test_ci_only_keeps_tests_off_the_scope_and_the_verify_commands():
+    decl = _ci_only()
+    s = ts.resolve(decl)
+    runs = ts.scope_runs(s, ["tests/a.py"], ["a.py"])
+    assert [r.kind for r in runs] == [ts.LINT]
+    assert ts.verify_commands(decl) == ["ruff check ."]
+
+
+def test_false_or_missing_ci_only_keeps_todays_behavior():
+    for decl in (_ci_only(only=False), {"test": {"suites": _ci_only()["test"]["suites"]}}):
+        s = ts.resolve(decl)
+        assert not s.ci_only and not ts.declares_ci_only(decl)
+        assert "ci_only" not in s.as_state()
+        assert ts.verify_commands(decl) == ["pytest", "ruff check ."]
