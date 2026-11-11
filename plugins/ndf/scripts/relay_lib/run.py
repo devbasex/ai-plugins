@@ -3,8 +3,8 @@
 `Relay` はセッションを切り替える状態機械である。合図の判定の材料（会話の記録）は `claude`、
 入出力と子の起動は `terminal`、記録は `record` が持つ。
 
-区間のアカウント（#1389）の選び方・上限シグナルファイルの判定・定期の確認は `switch` の `AccountSwitch` と
-`UsageWatch` が持つ。
+区間のアカウント（#1389）の選び方と上限シグナルファイルの判定は `switch` の `AccountSwitch` が持つ。区間の間に
+使用率を取りに行かない（区切りの時点の起動先の決定で選び直す。#2930 の決定 7）。
 ラッパーの入れ替え（#1587）は `handover` の `Swapper` が持つ。
 """
 
@@ -39,7 +39,7 @@ from .common import (
 )
 from .mark import asked_after
 from .record import RelayRecord, SpinGuard
-from .switch import REASON_AUTH, AccountSwitch, UsageWatch
+from .switch import REASON_AUTH, AccountSwitch
 from .terminal import StartFailed, Terminal, pty_available, serve_terminal, wait_exit_code
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
@@ -73,7 +73,6 @@ class Relay(AccountSwitch, ho.Swapper):
         self.account: str | None = None  # 今の区間のアカウント（`metered` は従量の接続。None は今と同じ環境）
         self.noted = self.told = None  # 上限の観測を残した・背景の作業の 1 行を出したシグナルファイルの written_at
         self.auth_section = 0  # 認証の失敗を扱った区間（区間ごとに 1 度だけ）
-        self.watch = UsageWatch(self) if self.multi else None
         self.lock = _lock(self.path(LOCK_FILE), None)  # 動いている間は持ち続ける（relay_running が見る）
         with open(self.path(PID_FILE), "w") as f:
             f.write(str(os.getpid()))
@@ -127,10 +126,6 @@ class Relay(AccountSwitch, ho.Swapper):
             self.log(event="metered_invalid", section=self.section, detail=bad)
         if self.multi or to is not None:
             self.tell_account(prev, to, reason, choice)
-        if self.watch is not None:  # 登録が 2 つ以上のときだけある
-            self.watch.reset()
-            if not self.watch.thread.is_alive():
-                self.watch.start()
 
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
         """使えなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
@@ -158,7 +153,6 @@ class Relay(AccountSwitch, ho.Swapper):
         if self.halted:
             return None
         try:
-            self.flush_lines()
             return self._tick_limit() or self._tick()
         except Exception as e:  # 本体の例外で子を巻き込まない
             self.halt("error", f"ラッパーの中で例外が起きた（{type(e).__name__}）")

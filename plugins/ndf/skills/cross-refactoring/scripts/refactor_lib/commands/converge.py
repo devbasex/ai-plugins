@@ -1,8 +1,7 @@
 """検証（`verify`、#933 の F6・#2457 決定 3・4）。修正の取り込み（`merge-fix`）は `fix_intake.py` にある。
 
 **検証は HEAD で項目ごとの範囲テストを走らせる**（決定 14）。同じ語の並びの項目は 1 回だけ走らせて結果を共有する。
-全体のテストは、危険フラグが立ったときに走らせ、直した後は落ちたテストを確かめ直す。落ちたら落ちたテストを
-走らせ直してフレーキー・既存失敗・変更起因を見分け、変更起因なら原因の項目を修正へ回す。
+全体のテストは巡の中で走らせない。危険フラグが立ったら、立ったフラグと項目を最終ゲートの 1 回へ寄せる（#3048）。
 
 **時計と回数で取り消さない**（#2457 の原則 1・2）。落ちた項目ごとに落ちたテストの集合の履歴を見て（`fixloop`）、
 前進する限り修正を続ける。初めて落ちた項目と、停滞か振動した項目は、実装担当と別のランタイムが成立を判定する。
@@ -25,8 +24,7 @@ from typing import Any, NoReturn, Optional
 
 import statefile
 
-from .. import culprit, danger, fixloop, info, progress, scope_verdict, targets, timeline, triage, wholetest
-from . import flaky
+from .. import danger, fixloop, info, progress, scope_verdict, wholetest
 from ..gitfacts import commit_files, discard_impl_leftovers
 from ..items import FAILING, VERIFIED, in_current_round, item_shas, live_items, newest_first
 from ..outbound import item_lines, plan_line
@@ -150,7 +148,7 @@ def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[st
 
     対象から組み立てた項目は対象のパス、ラウンドテストをそのまま走らせる項目は `--scope` のテストの
     置き場所の配下の追跡ファイル。コマンドの語からは読まない。対象の無い不要コードの削除（`deletion`）は
-    ファイルを持たない（`None`）ので D4 が立ち、全体テストが 1 度走る（#1814 決定 7）。
+    ファイルを持たない（`None`）ので D4 が立ち、最終ゲートの全体テストへ寄せる（#1814 決定 7・#3048）。
     """
     if item.get("command_source") == "deletion":
         return None
@@ -171,7 +169,7 @@ def _d5(item: dict[str, Any]) -> bool:
 def _flag_items(state: dict[str, Any]) -> list[str]:
     """検証を通った項目に危険フラグを付け、今の巡で採った項目に立った危険フラグの集合を返す。**付け済みの項目は見直さない。**
 
-    前の巡の項目のフラグは、その巡の全体テストか最終ゲートへ寄せた記録が持つ（#1743 決定 10）。
+    前の巡の項目のフラグは、その巡に最終ゲートへ寄せた記録が持つ（#1743 決定 10）。
     """
     work = work_dir(state)
     scope = list(state.get("target_scope") or [])
@@ -188,149 +186,15 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
     return sorted(flags)
 
 
-def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> bool:
-    """危険フラグが立ったら全体テストを巡ごとに走らせる（AC13 AC14。前の巡の記録は `whole_test_history` にある）。
-    直した後は落ちたテストを確かめ直す（#2457 の棚卸し #33）。
+def _defer_whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> None:
+    """危険フラグが立っても検証の巡の中で全体テストを走らせず、最終ゲートの 1 回へ寄せる（#3048）。
 
-    落ちたら落ちたテストを見分け（決定 22）、変更起因のものがあれば修正へ回す。
-    修正へ回したら真を返す。直しの途中（`resolution: fixing`）なら、全体テストは
-    走らせず、落ちたテストだけを走らせ直す。全体テストを CI に任せる戦略では走らせず、最終ゲートへ寄せる。
+    寄せたフラグと項目は `whole_test.deferred` に残り、最終ゲートが落ちたときの修正の向け先になる（`gate.py`）。
     """
+    if not flags:
+        return
     record = state.setdefault("whole_test", {})
-    if record.get("resolution") == "fixing":
-        return _recheck_whole(path, state, record)
-    if not flags or record.get("ran"):
-        return False
-    if timeline.strategy_of(state).whole_on_ci:
-        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in newest_first(live_items(state)) if i.get("danger")])
-        return False
-    info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
-    passed, timed_out, log = _run_whole_locally(path, state, record, flags)
-    if passed:
-        info("✅ 全体テストが通りました")
-        return False
-    return _triage_whole(path, state, record, flags, timed_out, log)
-
-
-def _run_whole_locally(
-    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str]
-) -> tuple[bool, bool, pathlib.Path]:
-    """全体テストを手元で走らせて記録し、`(通ったか, 打ち切ったか, ログ)` を返す。"""
-    started = time.monotonic()
-    log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
-    passed, timed_out, commands = wholetest.run_locally(state, log, path)
-    record.update(
-        {
-            "ran": True,
-            "flags": flags,
-            "commands": commands,
-            "status": "pass" if passed else "fail",
-            "seconds": round(time.monotonic() - started, 1),
-            "head": head_sha(work_dir(state)),
-            "reverted": False,
-        }
-    )
-    statefile.save(path, state)
-    return passed, timed_out, log
-
-
-def _triage_whole(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    record: dict[str, Any],
-    flags: list[str],
-    timed_out: bool,
-    log: pathlib.Path,
-) -> bool:
-    """落ちた全体テストを見分け、変更起因のものがあれば修正へ回す。修正へ回したら真。"""
-    flagged = [i for i in newest_first(live_items(state)) if i.get("danger") and in_current_round(state, i)]
-    record["items"] = [i["id"] for i in flagged]
-    record.update(triage.classify(state, timed_out))
-    flaky.queue_flaky(state, record.get("flaky"), str(log))
-    statefile.save(path, state)
-    if record.get("fallback_reason"):
-        return wholetest.fallback(path, state, record, flags, flagged, log, _fix_or_narrow)
-    info(
-        f"🔎 落ちたテスト {len(record['failed_tests'])} 件: フレーキー {len(record['flaky'])} / "
-        f"既存失敗 {len(record['preexisting'])} / 変更起因 {len(record['caused'])}"
-    )
-    if not record["caused"]:
-        record["resolution"] = "kept"
-        info("✅ 変更起因の失敗はありません。危険フラグの項目は取り消しません（最終ゲートが全体テストを走らせます）")
-        return False
-    culprit.judge(state, record, record)  # 修正の対象は原因の項目（#1649）
-    record["resolution"] = "fixing"
-    return _fix_or_narrow(path, state, record, log)
-
-
-def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
-    ids = set(record.get("items") or [])
-    return [i for i in live_items(state) if i["id"] in ids]
-
-
-def _rerun_plan(state: dict[str, Any], record: dict[str, Any]) -> tuple[Any, bool]:
-    """走らせ直すコマンドと、全体テストの上限を使うか。変更起因の suite が無ければ全体テストのコマンドで確かめる。"""
-    rerun = culprit.rerun_of(record)
-    return rerun or wholetest.whole_fallback_command(state), not rerun
-
-
-def _fix_or_narrow(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    record: dict[str, Any],
-    log: pathlib.Path,
-) -> bool:
-    """原因の項目を修正へ回す（真）。原因が決まらなければ取り消さず、最終ゲートへ寄せる（偽。#2457 決定 4）。"""
-    items = _whole_items(state, record)
-    rerun, whole = _rerun_plan(state, record)
-    if items and culprit.fixable(record):
-        for item in items:
-            item["status"] = FAILING
-            item["last_log"] = str(log)
-            item["whole_test_command"] = [culprit.one_command(rerun)]
-            item["failed_check"] = {
-                "kind": "test",
-                "suite": "whole",
-                "command": culprit.one_command(rerun),
-                "files": [],
-                "tests": list(record.get("caused") or []),
-            }
-        info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
-        return True
-    record["resolution"] = "deferred"
-    info("ℹ 全体テストの変更起因の失敗の原因の項目を決められません。取り消さず、最終ゲート修正へ寄せます")
-    return False
-
-
-def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any]) -> bool:
-    """直した後に、落ちたテストだけを走らせ直す。通れば残し、通らなければ次の試行か絞り込みへ。"""
-    items = _whole_items(state, record)
-    if not items:
-        record["resolution"] = "narrowed"
-        return False
-    log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    rerun, whole = _rerun_plan(state, record)
-    triage.clear_junit(state)  # 前の実行の JUnit を今回の失敗として読まない
-    if targets.run_or_stop(path, state, rerun, log, whole=whole, phase="whole"):
-        record["resolution"] = "fixed"
-        for item in items:
-            item.pop("whole_test_command", None)
-        info("✅ 変更起因で落ちたテストが、直した後に通りました")
-        return False
-    _refresh_caused(state, record)
-    return _fix_or_narrow(path, state, record, log)
-
-
-def _refresh_caused(state: dict[str, Any], record: dict[str, Any]) -> None:
-    """走らせ直しで今回落ちた ID を `caused` へ読み直す（修正担当へ渡す `failed_check.tests` と前進の判定に使う）。
-
-    初回の `caused` のままだと、失敗が減っても同じ集合の停滞と判定される。JUnit を読めない・既存失敗とフレーキーを
-    除くと空になるときは、初回の値を残す。"""
-    ids, _ = triage.failed_ids_of(state)
-    known = {*(record.get("preexisting") or []), *(record.get("flaky") or [])}
-    current = sorted({str(t) for t in ids or [] if t not in known})
-    if current:
-        record["caused"] = current
+    wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in newest_first(live_items(state)) if i.get("danger")])
 
 
 # ---------- verify ----------
@@ -361,8 +225,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
         for _ in range(len(state.get("items") or []) + 1):
             _settle_scope(path, state)
             failing = _items_in(state, FAILING)
-            if not failing and _whole_test(path, state, _flag_items(state)):
-                failing = _items_in(state, FAILING)
+            if not failing:
+                _defer_whole_test(path, state, _flag_items(state))
             if failing:
                 judge_by = _plan_failing(path, state, failing)
                 if judge_by is not None:

@@ -108,11 +108,6 @@ def check_interval() -> float:
     return _setting("NDF_ACCOUNT_CHECK_INTERVAL", 300)
 
 
-def switch_at() -> float:
-    """切り替えの閾値（%）。100 以上なら閾値による切り替えをしない。"""
-    return _setting("NDF_ACCOUNT_SWITCH_AT", 90)
-
-
 def _home() -> str:
     return os.path.expanduser("~")
 
@@ -539,8 +534,14 @@ def _fetch(name: str, refresh: bool, now: float) -> Usage:
     return u
 
 
+def _held_fresh(saved: Usage, now: float) -> bool:
+    """控えを使えるか: 前の取得から `check_interval()` 秒の中で、控えの中のどの枠のリセット時刻も過ぎていない（#2930 の I7）。"""
+    resets = [epoch(w.get("resets_at")) for w in saved.windows()]
+    return now - saved.fetched_at < check_interval() and not any(t is not None and t <= now for t in resets)
+
+
 def usage(name: str, refresh: bool = True, now: float | None = None) -> Usage | None:
-    """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。
+    """残量。前の取得から `check_interval()` 秒の中で、控えのリセット時刻を過ぎていなければ保存した値を返し、取得先を呼ばない（I6）。
 
     `refresh` が偽か、`name` がこのプロセスの環境の `NDF_CLAUDE_ACCOUNT`（動いている claude のアカウント）なら、
     トークンを更新しない（#1576 の I8）。動いている claude の無いアカウントの取得が成功したら、認証の失敗の観測を解く
@@ -551,7 +552,7 @@ def usage(name: str, refresh: bool = True, now: float | None = None) -> Usage | 
 
     def held() -> Usage | None:
         saved = Usage.from_json(_read(path))
-        if saved is not None and now - saved.fetched_at < check_interval():
+        if saved is not None and _held_fresh(saved, now):
             return saved
         if _read(_path(name, ACCOUNT_FILE)) is None:
             return None
@@ -571,69 +572,35 @@ def usage(name: str, refresh: bool = True, now: float | None = None) -> Usage | 
 class Choice:
     """選んだアカウント（無ければ None）と、すべて上限のときに最も早く戻るアカウントと時刻。
 
-    `score` は選んだアカウントの使用率（切り替えの閾値と比べる値）、`remaining` は残りの量（不明は None）。"""
+    起動先の決定（`launch_rules.Decision`）のアカウントの部分を写した互換の形。`score` は選んだアカウントの使用率、
+    `remaining` は残りの量（不明は None）、`decision` は元の決定。"""
 
     name: str | None
     score: float | None = None
     earliest: tuple[str, float] | None = None
     remaining: float | None = None
+    decision: object = None
 
-    def recoverable(self, thr: float) -> bool:
-        """従量の接続からこの候補へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
-        return bool(self.name) and (self.score is None or self.score < thr)
-
-
-def _try_order(pool: list[Account], readable: bool) -> list[Account]:
-    """試す順（I3）: 使用率が閾値未満（読めないものを含む）の側を先に、各側の中で (1) 残りの量の大きい順 →
-    (2) 残りの量が不明で使用率を読めるものを使用率の小さい順 → (3) 読める候補が無いときだけ残量不明を名前の順。
-    同順は `five_hour` のリセット時刻の早い方、次に名前の順。"""
-    thr = switch_at()
-    below = [a for a in pool if a.score() is None or a.score() < thr]
-    return _order_side(below, readable) + _order_side([a for a in pool if a not in below], readable)
+    def recoverable(self, thr: float | None = None) -> bool:
+        """従量の接続からこの候補へ戻せるか: 決定の起動先がアカウントなら戻す（組を問わない。#2930 の決定 7）。`thr` は読み捨てる。"""
+        return bool(self.name)
 
 
-def _order_side(side: list[Account], readable: bool) -> list[Account]:
-    rem = {a.name: a.remaining() for a in side}
-    reset = {a.name: (a.usage.resets("five_hour") if a.usage else None) or math.inf for a in side}
-    by_rem = [a for a in side if rem[a.name] is not None]
-    by_score = [a for a in side if rem[a.name] is None and a.score() is not None]
-    out = sorted(by_rem, key=lambda a: (-rem[a.name], reset[a.name], a.name))
-    out += sorted(by_score, key=lambda a: (a.score(), reset[a.name], a.name))
-    if not readable:
-        out += sorted((a for a in side if a not in by_rem and a not in by_score), key=lambda a: a.name)
-    return out
+def choose(exclude=(), keep=(), now: float | None = None, current: str | None = None) -> Choice:
+    """起動先の決定（API キーを使わない）でアカウントを選ぶ（#2930。選ぶ順の組は `launch_rules.GROUPS`）。
 
+    `exclude` の名前はこの呼び出しの除外。`keep` の名前はトークンを更新しない（#1576 の I8）。`current` は今のアカウントで、
+    最良の候補と同じ組にあれば保つ。"""
+    import launch_observe  # 観測の収集はこのモジュールを読む（循環を避けて呼ぶときに読む）
 
-def _account_pool(exclude, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
-    """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」と認証の失敗の
-    観測があるものは外す。`keep` の名前はトークンを更新しない（動いている claude のアカウント。#1576 の I8）。"""
-    pool, earliest = [], None
-    for n in [n for n in names() if n not in exclude]:
-        usage(n, n not in keep, now)
-        acc = load_account(n)
-        if acc is None or acc.needs_relogin or acc.auth_held(now):
-            continue
-        until = acc.limited_until(now)
-        if until is None:
-            pool.append(acc)
-        elif earliest is None or until < earliest[1]:
-            earliest = (n, until)
-    return pool, earliest
-
-
-def choose(exclude=(), keep=(), now: float | None = None) -> Choice:
-    """上限に達していないアカウントのうち、残りの量の最も大きいものを選ぶ（#1453 の I3）。
-
-    使用率が切り替えの閾値未満の候補を先に試し、残りの量の分からない候補は分かる候補の後ろへ使用率の順で並べる。
-    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」・認証の失敗の
-    観測があるもの・起動できないもの（`usable`）は外す。`keep` の名前はトークンを更新しない（#1576 の I8）。"""
-    now = _now(now)
-    pool, earliest = _account_pool(exclude, keep, now)
-    readable = any(a.known() for a in pool)
-    for pick in _try_order(pool, readable):
-        if usable(pick.name, now):
-            return Choice(pick.name, pick.score(), earliest, pick.remaining())
-    return Choice(None, None, earliest)
+    snap = launch_observe.observe_launch(current=current, exclude_accounts=exclude, keep=keep, use="off", now=now)
+    d = launch_observe.decide_launch(snap)
+    limited = sorted((a.limited_until, a.name) for a in snap.accounts if not a.relogin and a.limited_until is not None)
+    earliest = (limited[0][1], limited[0][0]) if limited else None
+    if d.route != "account":
+        return Choice(None, None, earliest, None, d)
+    acc = load_account(d.target)
+    return Choice(d.target, acc.score() if acc else None, earliest, acc.remaining() if acc else None, d)
 
 
 def choose_env(exclude=(), keep=(), base=None, note=None) -> tuple[Choice, dict | None]:

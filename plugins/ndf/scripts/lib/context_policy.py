@@ -34,7 +34,8 @@ BAND_KEEP, BAND_JUDGE, BAND_OVER, BAND_CAPACITY = "継続帯", "判断帯", "上
 CONTINUE, DENY, RESTART = "継続", "拒否", "再起動"
 REASON_CAPACITY, REASON_LIMIT, REASON_COST = "容量", "運用上限", "費用"
 REASON_INDEPENDENCE, REASON_MANUAL, REASON_CUTPOINT = "独立性", "手動", "カットポイント"
-REASONS = (REASON_CAPACITY, REASON_LIMIT, REASON_COST, REASON_INDEPENDENCE, REASON_MANUAL, REASON_CUTPOINT)
+REASON_WAIT = "待ち"  # 並列の計画のオーガナイザーが長い待ちの前に切り替えた（#3006 の決定 4）
+REASONS = (REASON_CAPACITY, REASON_LIMIT, REASON_COST, REASON_INDEPENDENCE, REASON_MANUAL, REASON_CUTPOINT, REASON_WAIT)
 BASIS_BELOW, BASIS_COST, BASIS_NO_ESTIMATE, BASIS_NO_VALUE = "判断開始の値以下", "費用", "見込みなし", "値なし"
 
 
@@ -264,6 +265,15 @@ def _stage_value(table: dict, samples: dict, stage: str | None) -> float | None:
     return None
 
 
+def restart_fixed_cost(
+    context: float, model: str | None, handoff_calls: float, handoff_output: float, restore_context: float, restore_calls: float
+) -> float:
+    """再起動の固定の項: 引継ぎ（h·r·C + 5·H）と、新しい会話の書き直しと復元（w·Q + q·r·Q）。
+    `estimate_cost` と、並列の計画の切り替えの判定（`parallel_switch`）が使う。"""
+    r, w = read_rate(model), REWRITE_WEIGHT
+    return handoff_calls * r * context + HANDOFF_OUTPUT_WEIGHT * handoff_output + w * restore_context + restore_calls * r * restore_context
+
+
 def estimate_cost(estimates: Estimates | None, context: int, model: str | None, stage: str | None) -> Estimate | None:
     """次の工程までの費用（決定 5）。標本が 3 未満の値があれば None。
 
@@ -281,5 +291,5 @@ def estimate_cost(estimates: Estimates | None, context: int, model: str | None, 
     big_q, q, h, big_h = values
     r, w, c = read_rate(model), REWRITE_WEIGHT, float(context)
     keep = k * r * c + m * w * c
-    restart = h * r * c + HANDOFF_OUTPUT_WEIGHT * big_h + w * big_q + q * r * big_q + k * r * big_q + m * w * big_q
+    restart = restart_fixed_cost(c, model, h, big_h, big_q, q) + k * r * big_q + m * w * big_q
     return Estimate(keep, restart)

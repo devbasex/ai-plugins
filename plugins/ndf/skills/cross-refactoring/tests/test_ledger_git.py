@@ -313,7 +313,7 @@ def test_the_verify_does_not_push(cmd_converge, cmd_gate, publish, patch_lib, tm
     calls: list[str] = []
     patch_lib("push_head", lambda state: calls.append(state["phase"]))
     patch_lib("_settle_scope", lambda path, state: None)
-    patch_lib("_whole_test", lambda path, state, flags: False)
+    patch_lib("_defer_whole_test", lambda path, state, flags: None)
 
     cmd_converge.cmd_verify(type("A", (), {"id": 130})())
 
