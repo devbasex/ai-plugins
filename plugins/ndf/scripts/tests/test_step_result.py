@@ -368,3 +368,46 @@ def test_cli_out_and_exit_code_agree(tmp_path, capsys, extra, written, code):
     assert out.exists() is written
     if written:
         assert json.loads(out.read_text()) == json.loads(capsys.readouterr().out)
+
+
+# ---------- 現状固定: 配列の項目の検査が出す誤りの並び（I-009） ----------
+
+
+def test_record_and_item_errors_are_fixed_in_order():
+    """現状固定: items と gaps / process / decisions の誤りの文言と順序（items → gaps → process → decisions）。"""
+    obj = {
+        **sr.result("m", "stopped", "s"),
+        "items": [1, {"x": 1}, "s"],
+        "gaps": [{"kind": "k", "name": " ", "reason": 3}, "g", {}],
+        "process": {"run": "r"},
+        "decisions": [{"decision": "d", "basis": "b"}, None],
+    }
+    assert sr.validate_result(obj) == [
+        "items[0] はオブジェクトで書く",
+        "items[2] はオブジェクトで書く",
+        "gaps[0] の name を空でない文字列で書く",
+        "gaps[0] の reason を空でない文字列で書く",
+        "gaps[1] はオブジェクトで書く",
+        "gaps[2] の kind を空でない文字列で書く",
+        "gaps[2] の name を空でない文字列で書く",
+        "gaps[2] の reason を空でない文字列で書く",
+        "process は配列で書く",
+        "decisions[1] はオブジェクトで書く",
+    ]
+
+
+@pytest.mark.parametrize(
+    "field, value, expected",
+    [
+        ("items", {}, ["items は配列で書く"]),
+        ("items", None, ["items は配列で書く"]),
+        ("items", [], []),
+        ("gaps", None, ["gaps は配列で書く"]),
+        ("gaps", [], []),
+        ("process", [{"run": "r", "result": None}], ["process[0] の result を空でない文字列で書く"]),
+        ("decisions", "x", ["decisions は配列で書く"]),
+    ],
+)
+def test_single_record_errors_are_fixed(field, value, expected):
+    """現状固定: 1 つの項目だけが誤るときの誤りの並び（None は配列でない扱い・空の配列は通す）。"""
+    assert sr.validate_result({**sr.result("m", "stopped", "s"), field: value}) == expected
