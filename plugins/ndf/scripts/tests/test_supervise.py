@@ -732,7 +732,8 @@ def test_new_impl_writes_plan(tmp_path):
     assert res["status"] == "ok"
     plan = json.loads(out.read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("test-all") < ids.index("merge")
+    # このリポジトリの宣言は全体テストを CI に任せるため、PR の後に CI を待つ test-all を置かない（CI はマージが待つ）
+    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("merge") and "test-all" not in ids
     steps = {s["id"]: s for s in plan["steps"]}
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
@@ -2422,7 +2423,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
     # standard（既定）では範囲テストと PR の間に設計との突き合わせが入る（#1241）
-    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "doc-lint"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
