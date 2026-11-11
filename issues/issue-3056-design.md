@@ -45,7 +45,7 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| プロジェクトの宣言 | 解析の書き出し（`project-decl.py write`）と人 | `.ndf/project.json` | テストの suite | CI テストの宣言（`test.ci.only`）・テストのチェックの名前 |
+| プロジェクトの宣言 | 解析の書き出し（`project-decl.py write`） | `.ndf/project.json` | テストの suite | CI テストの宣言（`test.ci.only`）・テストのチェックの名前 |
 | CI の監視ログ | CI の監視のステップ（`ci-watch.py peek`） | プランの状態ディレクトリの `work/ci-watch.jsonl` | 見た 1 回（head の SHA ごと） | 結論（`passed` / `failed` / `pending` / `unknown`）・改修の回数 |
 | プラン | プランのテンプレート（`supervise.py new`） | プランのファイル | ステップ | テストの戦略（`ci_only` を含む） |
 
@@ -55,14 +55,14 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | プロジェクトの宣言 | 解析が `test.ci.only: true` を書くのは、`kind` が `test`（未指定を含む）の suite のうち 1 つ以上が `ci_jobs` を持ち、その `ci_jobs` のファイル（`#` より前）がリポジトリにあるときだけである | 条件を満たさなければ書かない。前の解析が書いた値は消す。人が書いた値は残す |
+| I1 | プロジェクトの宣言 | 解析が `test.ci.only: true` を書くのは、`kind` が `test`（未指定を含む）の suite のうち 1 つ以上が `ci_jobs` を持ち、その `ci_jobs` のファイル（`#` より前）がリポジトリにあるときだけである | 条件を満たさなければ書かない。前の解析が書いた値は消す。人が書いた値（指紋が一致しない値）は、書き出しが上書きしない入力として読み、そのまま残す |
 | I2 | プラン | 宣言のあるリポジトリのプランは、テストの suite のコマンドを手元で走らせるステップ（`test-limited`・`test-all`）を持たない | `supervise.py new` のテストが落ちる |
 | I3 | プラン | 宣言のあるリポジトリの実装のプランは、実装のステップの直後に Draft の PR を出すステップ（`pr-draft`）を持つ | 同上 |
-| I4 | プラン | マージのステップより前に、CI の結果を待って止まるステップが無い（監視のステップは 1 回読むだけで、待たない） | 同上 |
+| I4 | プラン | マージのステップより前に、CI の結果を待って止まるステップが無い。監視のステップも、検査のプランの中の cross-refactoring の最終ゲートも、CI の結果を 1 回読むだけで待たない。CI の完了の確認はマージのステップ（I7）に集める | 同上 |
 | I5 | CI の監視ログ | 改修を起こす回数は上限（`supervise.ci-fix` の `attempts`、既定 3）を超えない | 上限に当たったら改修を起こさず、理由を添えてプランを止める |
 | I6 | CI の監視ログ | CI の結果を取得できないとき、監視のステップは失敗を記録して次へ進む（プランを止めない） | — |
 | I7 | プロジェクトの宣言 | 宣言のあるリポジトリのマージは、テストのチェックがすべて現れて通った（成功・中立・飛ばした）ときだけ行う。落ちた・未完了・現れない・取得できないときはマージしない | マージのステップが失敗を返す |
-| I8 | プロジェクトの宣言 | 宣言の無いリポジトリでは、プラン・hook・cross-refactoring・cross-review の振る舞いが今と同じである | 既存のテストが落ちる |
+| I8 | プロジェクトの宣言 | 宣言の無いリポジトリでは、プラン・hook・cross-refactoring・cross-review の振る舞いが今と同じである。検査のプランにリファクタリング（`assess`・`refactor`）を戻すのは、宣言のあるリポジトリだけである | 既存のテストが落ちる |
 | I9 | プロジェクトの宣言 | 宣言のあるリポジトリで、テストの suite の起動の形に当たる Bash のコマンドは hook が拒む。静的解析の suite のコマンドは拒まない | — |
 
 ### ドメインイベント
@@ -79,7 +79,7 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | E8 | CI のテストの失敗を検知した | `ci-peek` / `ci-peek-merge` のステップ | `ci-fix` のステップ |
 | E9 | CI の失敗の改修を push した | `ci-fix` の後の push（`pr` のステップか `git push`） | 次の `ci-peek` |
 | E10 | 手元でテストのコマンドを打とうとして hook が止めた | hook（`ci_test_guard`） | worker・supervisor（拒否の理由を読む） |
-| E11 | cross-refactoring が項目の改修を push し、CI の結果で点検した | cross-refactoring の最終ゲート | 最終ゲート修正（落ちたとき） |
+| E11 | cross-refactoring が項目の改修を push し、CI の結果を 1 回読んだ | cross-refactoring の最終ゲート | 最終ゲート修正（落ちたとき）・後続の `ci-peek`（未完了のとき） |
 | E12 | マージのステップが CI の緑を確かめてマージした | `merge-when-green` | プランの後続（後片付け） |
 
 ### 用語
@@ -119,7 +119,7 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB1 | GitHub CLI の `gh pr checks`（`--json bucket`。`--watch` は待つ形） | 2.103.3 | MIT | 2026-10-26 | 無し | 1 回だけ読むなら満たす。`--watch` は待って止まるため監視には使わない | `gh pr checks --help`・`gh --version`（2026-11-11） |
 | LIB2 | NDF の既存の部品 `merged-steps.py probe`（`statusCheckRollup` を 1 回読み、failed / running / passed などに分ける） | リポジトリの HEAD | リポジトリと同じ | — | 無し | 満たす。マージの待ちと同じ読み方（SKIPPED を通過）で 1 回読める | `plugins/ndf/scripts/merged-steps.py:33`・`plugins/ndf/scripts/merged_lib/reading.py:55`（2026-11-11） |
-| LIB3 | NDF の既存の部品 `gate_ci.ci_gate`・`test-run.py whole` の CI の待ち（`gh_checks.checks_outcome` と `test_triage.wait_check`） | リポジトリの HEAD | リポジトリと同じ | — | 無し | 待つ形のため監視には使わない。cross-refactoring の最終ゲートはこれをそのまま使う | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gate_ci.py:45`（2026-11-11） |
+| LIB3 | NDF の既存の部品 `gate_ci.ci_gate`・`test-run.py whole` の CI の待ち（`gh_checks.checks_outcome` と `test_triage.wait_check`） | リポジトリの HEAD | リポジトリと同じ | — | 無し | 待つ形のため監視には使わない。cross-refactoring の最終ゲートは、宣言のあるリポジトリでは結論の読み方（`checks_outcome`）だけを使い、待ち（`wait_check`）を通さない | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gate_ci.py:45`（2026-11-11） |
 
 ### 確かめられなかったこと
 
@@ -155,11 +155,11 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | `lib/ci_watch.py`・`ci-watch.py`（新設） | `peek`: PR の head のテストのチェックを 1 回だけ読み（`merged-steps.py probe` と同じ読み方）、記録に 1 行を足して終了コードで結論を返す。落ちたチェックの名前・リンク・失敗したジョブのログの末尾（`gh run view --log-failed` の最後の 200 行）を出力に載せる |
 | `contracts/limits.json` | `supervise.ci-fix`（`attempts: 3`）を足す。改修の回数の上限の値の正本 |
 | `supervise_lib/verify_steps.py` | `ci_only(a)`・`ci_watch_steps(...)`（`ci-peek`・`ci-peek-merge`・`ci-fix` を組む）・`without_local_tests(...)`（`test-limited`・`test-all` と、それだけを入力に持つ judge・fix を外す）を足す。`ci-watch.py` の起動の形は `supervise_lib/paths.py` の定数に置く |
-| `supervise_lib/templates.py` | `ci_only` のとき、実装のプランへ `pr-draft` と CI の監視のステップを入れ、テストのステップを外す。検査のプラン 2 種へ CI の監視のステップを入れる。`CROSS_REFACTORING_SUSPENDED = False` にする |
+| `supervise_lib/templates.py` | `ci_only` のとき、実装のプランへ `pr-draft` と CI の監視のステップを入れ、テストのステップを外す。検査のプラン 2 種へ CI の監視のステップとリファクタリング（`assess`・`refactor`）を入れる。`CROSS_REFACTORING_SUSPENDED = False` にし、リファクタリングを入れる条件を「停止が外れていて、かつ `ci_only`」にする。宣言の無いリポジトリの検査のプランは今のまま（リファクタリングを入れない） |
 | `supervise_lib/prompts.py`・`supervise_lib/worker_steps.py` | `ci_only` のプランの worker の指示文で、「全体テストを打たない…テストは範囲だけ」の行を「テストを手元で打たない。合否は PR の CI の結果（`gh pr checks <PR>`）で読む」に置き換える |
 | `merged_lib/merge.py`・`merged_lib/checks.py` | `ci_only` のとき、テストのチェックがすべて現れて通るまでマージしない（I7）。チェックが 1 件も載らない終わり（`no_checks`）を完了として扱わない |
 | `hook_lib/ci_test_guard.py`（新設）・`hook.py` | PreToolUse の Bash を、宣言のあるリポジトリでテストの suite の起動の形と照合し、当たれば拒む（I9）。Claude Code と Codex の両方の hook から呼ばれる |
-| cross-refactoring の `refactor_lib/baseline.py`・`scope_verdict.py`・`commands/implement.py`・`template_check.py`・`gate_ci.py` | `ci_only` のとき、着手前のテスト・項目ごとの点検の範囲テスト・足したテストの試走・テンプレートの試走を走らせない（静的解析は走らせる）。最終ゲートは既存の CI の判定（`ci_gate`）で決める。テストのチェックが空なら head のすべてを読む |
+| cross-refactoring の `refactor_lib/baseline.py`・`scope_verdict.py`・`commands/implement.py`・`template_check.py`・`gate_ci.py` | `ci_only` のとき、着手前のテスト・項目ごとの点検の範囲テスト・足したテストの試走・テンプレートの試走を走らせない（静的解析は走らせる）。最終ゲートは CI の結果を 1 回だけ読む（`gate_ci.ci_peek_gate` を足す。`checks_outcome` を 1 回呼び、`wait_check` を通さない）。落ちていれば既存の最終ゲート修正へ、通っていれば通過、未完了・取得できないときは「CI 未完了」と記録して通過にし、後続の `ci-peek` とマージ（I7）へ合否を渡す。テストのチェックが空なら head のすべてを読む |
 | cross-review の `scripts/drive.py` | 最終スイープの指示の行（`sweep_verify_lines`）を、`ci_only` なら「テストを手元で打たず、PR の CI の結果を読む」にする |
 | Skill とエージェント定義 | `development-workflow`（SKILL.md と `references/project-analysis.md`）・`quality-gates`・`cross-review`・`cross-refactoring` の SKILL.md、`agents/worker.md`・`agents/supervisor.md` に要求の規則 1〜4 を書く |
 | `.ndf/project.json`（このリポジトリ） | `test.ci.only: true` を足す（`pytest` の suite が `.github/workflows/pytest.yml` を `ci_jobs` に持つ） |
@@ -290,7 +290,7 @@ graph TB
 
 対象は `new check --pr` と `new check --since-last` である。`whole_on_ci` を `ci_only` でも真にするため、今の `trim_check_steps` がこの 2 つから `test-all` を外す。`test-all` だけを入力に持つ judge・fix も外れる。そこへ次を足す。
 
-- リファクタリング（`assess` → `refactor`）を戻す（`CROSS_REFACTORING_SUSPENDED = False`）。`refactor` の中の点検は下の「cross-refactoring」のとおり
+- リファクタリング（`assess` → `refactor`）を戻す（`CROSS_REFACTORING_SUSPENDED = False`）。戻すのは宣言のあるリポジトリの検査のプランだけで、宣言の無いリポジトリは今のまま入れない（I8）。`refactor` の中の点検は下の「cross-refactoring」のとおり
 - `review` の後、`ready`（差分の検査では `finish`）の前に `ci-peek` を置く。`ci-fix` は直してコミットし `git push` して `ci-peek` へ戻る
 - `merge` が落ちたら `ci-peek-merge` へ進む（実装のプランと同じ）
 
@@ -303,8 +303,9 @@ graph TB
 | 項目ごとの点検（`cmd_verify` → `_run_scope`） | 範囲テストを手元で走らせる | テストを走らせず、静的解析だけで点検する。テストの合否は最終ゲートへ回す |
 | 足したテストの試走（`_run_added_tests`） | 手元で走らせる | 走らせない |
 | 危険フラグの全体テスト | `whole_on_ci` なら 0 秒 | 同じ（`whole_on_ci` が真） |
-| 最終ゲート | `ci_mode` なら `ci_gate`、無ければ手元 | `ci_gate`（項目のコミットを push した後の head の CI を待つ） |
+| 最終ゲート | `ci_mode` なら `ci_gate`、無ければ手元 | 項目のコミットを push した後の head の CI を 1 回だけ読む。待たない（I4） |
 | 最終ゲートが落ちた | CI の JUnit で見分け、変更起因なら最終ゲート修正へ（原因の項目を手がかりで向け先にする） | 同じ |
+| 最終ゲートの時点で CI が未完了・取得できない | — | 「CI 未完了」と記録して `refactor` を終える。後の失敗は検査のプランの `ci-peek`・`ci-peek-merge` が検知し、`ci-fix` が同じ上限（I5）で直す。マージは I7 のとおり CI の完了を確かめる |
 
 着手前のテストを走らせないため、既存失敗の見分けは着手時の head の CI の JUnit で行う。最終ゲートの時点では着手時の head の CI は終わっているため、待たずに読める。
 
@@ -333,7 +334,7 @@ graph TB
 
 ### 決定 2: 解析と人の書いた値がぶつからないよう、宣言は書き出しが条件から決め、人の値は残す
 
-conductor の答えに任せると、同じリポジトリでも答え手によって宣言の有無が変わる。I1 の条件は宣言とファイルの有無だけで決まるため、書き出しが決める。人が `false` を書いたリポジトリは、既存の指紋の規則で解析が書き換えない。
+conductor の答えに任せると、同じリポジトリでも答え手によって宣言の有無が変わる。I1 の条件は宣言とファイルの有無だけで決まるため、書き出しが決める。集約の持ち主は書き出し 1 つにし、人が書いた値は書き出しが上書きしない入力として扱う。人が `false` を書いたリポジトリは、既存の指紋の規則で解析が書き換えない。
 
 根拠: Value 3 / C7（MVV 版 7）
 
@@ -393,15 +394,15 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 
 根拠: Value 3 / Value 4（MVV 版 7）
 
-### 決定 11: cross-refactoring で CI が落ちた項目は、既存の最終ゲートの失敗の扱いで直す
+### 決定 11: cross-refactoring で CI が落ちた項目は、既存の最終ゲートの失敗の扱いで直し、未完了なら待たずに後続へ渡す
 
-項目ごとの点検でテストを走らせないため、テストの合否は最終ゲートの CI の結果だけで決まる。落ちたときの見分け（CI の JUnit で変更起因・既存失敗・フレーキーを分ける）と、原因の項目を手がかりにした最終ゲート修正は、全体テストを CI に任せる戦略ですでに動いている。項目ごとに CI を往復させる形は、1 往復 15 分（`pytest.yml` の壁時計 922 秒）が項目の数だけ掛かり予算に収まらないため採らない。
+項目ごとの点検でテストを走らせないため、テストの合否は最終ゲートの CI の結果で決まる。最終ゲートは CI を 1 回だけ読み、待たない。要求の受け入れ条件 6 はマージより前に CI を待つステップを持たないことを求めており、`refactor` もこのステップの 1 つである。未完了のときは検査のプランの `ci-peek` と `ci-fix` が後から拾い、CI の完了の確認はマージに集める（I4・I7）。落ちたときの見分け（CI の JUnit で変更起因・既存失敗・フレーキーを分ける）と、原因の項目を手がかりにした最終ゲート修正は、全体テストを CI に任せる戦略ですでに動いている。項目ごとに CI を往復させる形は、1 往復 15 分（`pytest.yml` の壁時計 922 秒）が項目の数だけ掛かり予算に収まらないため採らない。
 
 根拠: Value 2 / Value 11（MVV 版 7）
 
-### 決定 12: 改修が終わったため、cross-refactoring の停止を外す
+### 決定 12: 改修が終わったため、宣言のあるリポジトリで cross-refactoring の停止を外す
 
-停止の理由は手元のテストの負荷だった。宣言のあるリポジトリではこの変更で手元のテストが無くなり、宣言の無いリポジトリは停止の前と同じ振る舞いに戻る。停止は全モードに効く 1 つの定数のため、宣言の有無で分けずに外す。
+停止の理由は手元のテストの負荷だった。宣言のあるリポジトリではこの変更で手元のテストが無くなるため、停止の定数を `False` にし、検査のプランへリファクタリングを戻す。宣言の無いリポジトリは手元のテストの負荷が残り、要求の受け入れ条件 12 が今と同じ振る舞いを求めるため、リファクタリングを入れる条件に `ci_only` を足して今のまま外しておく。
 
 根拠: Mission / Value 10（MVV 版 7）
 
@@ -414,15 +415,15 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 | 受け入れ条件 3・I2 | 宣言のあるリポジトリで `new impl` / `new fix` / `new check` / `new check --since-last` のステップの id に `test-limited`・`test-all` が無い | `without_local_tests` を通さない・judge の入力に `test-limited` が残る |
 | 受け入れ条件 4 | `ci_only` の戦略で `verify_commands` がテストの suite を返さない。`drive.py` の最終スイープの指示に手元のテストのコマンドが載らない | `verify_commands` が `whole_commands()` を返したままになる |
 | 受け入れ条件 5・I3 | 宣言のあるリポジトリの実装のプランで、`impl` の次が `pr-draft`、`pr-draft` の `body` が `template` | `pr-draft` を `pr` の後ろに置く |
-| 受け入れ条件 6・I4 | 宣言のあるリポジトリのプランで、`merge` より前のステップに CI を待つコマンド（`test-run.py whole`・`--watch`）が無い。`ci-peek` は CI が未完了のとき 0 を返す | `ci-peek` が未完了で 1 を返す・待つ |
+| 受け入れ条件 6・I4 | 宣言のあるリポジトリのプランで、`merge` より前のステップに CI を待つコマンド（`test-run.py whole`・`--watch`）が無い。`ci-peek` は CI が未完了のとき 0 を返す。cross-refactoring の最終ゲートは CI が未完了のとき照会 1 回で通過を返し、「CI 未完了」を記録する | `ci-peek` が未完了で 1 を返す・待つ・最終ゲートが `wait_check` を通る |
 | 受け入れ条件 7・I5 | 落ちた head を 1 つ記録した `ci-peek` は 1 を返し、異なる 3 つの head の失敗を記録した後は 2 を返す。同じ head を 2 回覗いても回数は 1 | 行の数で数える・上限を読まずに固定値で比べる |
 | 受け入れ条件 7 | 実装のプランで `ci-peek` の `on_fail` が `ci-fix`、`ci-fix` の後に `pr` を通って `ci-peek` へ戻る | `ci-fix` から `ci-peek` を通らずに `ready` へ進む |
 | 受け入れ条件 8・I7 | 宣言のあるリポジトリの `merge-when-green` は、テストのチェックが現れない・`no_checks`・落ちたときにマージしない。SKIPPED は通過 | `no_checks` を完了として扱う・SKIPPED を失敗にする |
 | I6 | `gh` が失敗したとき `ci-peek` は `unknown` の行を記録して 0 を返す | 取得の失敗で 1 か 2 を返す |
 | 受け入れ条件 9・I9 | 宣言のあるリポジトリで、suite の `command`・`scope_command` にパスを入れたもの・前置きにオプションを足したものを hook が拒み、理由に CI の結果の見方が入る。静的解析の suite のコマンドと `test-run.py` は拒まない | `kind` を見ない・前置きを 1 語にして `uv run ruff` まで止める |
 | 受け入れ条件 10 | 文言の照合テストは書かない（`AGENTS.md` の DON'T）。`instructions-check.py`・`check-ndf-contracts.py` が参照切れを見る | — |
-| 受け入れ条件 11 | `ci_only` の状態で `run_baseline`・`_run_scope`・`_run_added_tests`・`template_check` がテストのコマンドを起動しない。最終ゲートの `gate.mode` が `ci`。`CROSS_REFACTORING_SUSPENDED` が `False` で、検査のプランに `assess`・`refactor` がある | `ci_mode` だけを見て `ci_only` を見ない・停止を残す |
-| 受け入れ条件 12・I8 | 宣言の無い既存のテスト（`test_supervise.py`・hook・cross-refactoring・cross-review）がそのまま通る。宣言の無いリポジトリで hook が何も拒まない | 宣言の無いときにも `ci_only` の分岐へ入る |
+| 受け入れ条件 11 | `ci_only` の状態で `run_baseline`・`_run_scope`・`_run_added_tests`・`template_check` がテストのコマンドを起動しない。最終ゲートの `gate.mode` が `ci`。`CROSS_REFACTORING_SUSPENDED` が `False` で、宣言のあるリポジトリの検査のプランに `assess`・`refactor` がある | `ci_mode` だけを見て `ci_only` を見ない・停止を残す |
+| 受け入れ条件 12・I8 | 宣言の無い既存のテスト（`test_supervise.py`・hook・cross-refactoring・cross-review）がそのまま通る。宣言の無いリポジトリで hook が何も拒まない。宣言の無いリポジトリの検査のプランに `assess`・`refactor` が無い | 宣言の無いときにも `ci_only` の分岐へ入る・停止の定数だけでリファクタリングを戻す |
 
 ## 設計の結果
 
@@ -442,4 +443,4 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 | --- | --- |
 | 手元のテストのプロセスが 0 件になるか | hook の照合が worker の実際の打ち方をすべて拾うかは、リリースの後にこのリポジトリで 1 スプリントを回し、進捗の記録の拒否の行とプロセスの記録で確かめる（要求の手動確認 (b)） |
 | CI の監視が実際の失敗を検知して改修が起きるか | 区切りの `ci-peek` の時点で CI が終わっている頻度は、CI の壁時計（`pytest.yml` で 922 秒）とステップの所要で決まり、実測は無い。リリースの後の 1 スプリントで、`ci-watch.jsonl` の `failed` の行と、マージの後の `ci-peek-merge` の行の数を数えて分かる（要求の手動確認 (c)） |
-| cross-refactoring が CI の結果で予算の中で最後まで進むか | 最終ゲートの CI の待ちと最終ゲート修正の往復が予算に収まるかは、リリースの後の検査のプランで分かる（要求の手動確認 (d)） |
+| cross-refactoring が CI の結果で予算の中で最後まで進むか | 最終ゲートの時点で CI が終わっている頻度と、最終ゲート修正の往復が予算に収まるかは、リリースの後の検査のプランで分かる（要求の手動確認 (d)） |
