@@ -17,6 +17,8 @@ from typing import Callable, Iterable, Optional
 import parallel_plan as pp
 
 MAX_HELPER_SEQ = 9999  # 一時レーンの名前 `<計画名>-rel<連番>` を 32 字に収める（I1）
+# 共通原則 C7（利用者の設定と指示書）のファイル。文書だけの範囲でも承認を引き継がず出し直す（#3020）
+C7_PATHS = ("**/AGENTS.md", "**/CLAUDE.md", ".ndf/**")
 
 
 def moved(presented: str, head: str) -> bool:
@@ -28,19 +30,23 @@ def carry_check(root: Path, first: str, head: str, prs_of: Optional[Callable] = 
     """`first..head` の範囲が文書だけの範囲かを判定する（#3020 の I1・I2）。耐久ステップの戻り値として記録できる辞書を返す。
 
     文書だけの範囲は、宣言 `docs` で分けて（`diff_kinds`）コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが
-    1 件以上の範囲である。差分の一覧・宣言・加わった Pull Request の一覧のどれかが取れなければ省かない側（`carry: False`）へ倒し、
+    1 件以上の範囲である。設定と指示書（`C7_PATHS`）の変更を含む範囲は、人がリリース承認ゲートで見る変更なので省かない。差分の一覧・宣言・加わった Pull Request の一覧のどれかが取れなければ省かない側（`carry: False`）へ倒し、
     理由を `reason` に書く。`added` は範囲の Pull Request の番号（`prs_of(root, first, head)`。省けば `included.release_range`）。"""
     out: dict = {"carry": False, "reason": "", "added": [], "files": []}
     if not first or not head:
         return {**out, "reason": "比べるコミットが無い"}
     try:
         import diff_kinds
+        from pathmatch import path_matches
     except ImportError as exc:
         return {**out, "reason": f"差分の分け方を読めない（{exc}）"}
     files = diff_kinds.git_changed(root, f"{first}..{head}")
     if files is None:
         return {**out, "reason": f"差分の一覧を取れない（{first[:12]}..{head[:12]}）"}
     out["files"] = files
+    held = [f for f in files if path_matches(f, C7_PATHS)]
+    if held:  # 共通原則 C7: 人がリリース承認ゲートで見る変更なので、文書でも承認を引き継がない
+        return {**out, "reason": f"人の承認が要る設定・指示書（C7）の変更が {len(held)} 件ある"}
     kinds = diff_kinds.classify_root(root, files)
     if kinds.unknown:
         return {**out, "reason": kinds.unknown}

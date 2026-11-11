@@ -511,7 +511,9 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         versions = rel.get("versions") or [rel.get("version")]
         rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [], version=versions[min(k, len(versions)) - 1])
         plan, spec = str(Path(rel["dirs"][k - 1]) / "release.json"), helper_spawn(self.name, rel["n"], k)
-        self.pause("confirmed", n=rel["n"], k=k, plan=plan, purpose=f"rel-{rel['n']}-{k}-confirmed", **extra, **spec)
+        # 引き継ぐ確定（提示のプランを流す）と、その後に人が承認した確定（確定の後の 3 手）は別の起動にする
+        purpose = f"rel-{rel['n']}-{k}-" + ("carried" if extra.get("carried") else "confirmed")
+        self.pause("confirmed", n=rel["n"], k=k, plan=plan, purpose=purpose, **extra, **spec)
         self.launch_helper()
 
     def settle(self, rel: dict, msg: dict) -> list[dict]:

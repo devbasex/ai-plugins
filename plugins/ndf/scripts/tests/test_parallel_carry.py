@@ -45,6 +45,7 @@ def repo(tmp_path):
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
     (root / "a.py").write_text("x = 1\n")
+    (root / ".gitignore").write_text(".ndf/parallel/\n")  # 計画の記録は実物のリポジトリと同じくコミットしない
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     return root
@@ -82,6 +83,9 @@ def test_docs_only_range_carries_with_the_added_prs(repo):
         ({"plugins/ndf/skills/s/SKILL.md": "x\n", "docs/a.md": "y\n"}, "振る舞いを決める文書"),
         ({"plugins/ndf/agents/w.md": "x\n"}, "振る舞いを決める文書"),
         ({"docs/a.md": "y\n", "lib/b.py": "z\n"}, "コードのファイル"),
+        ({"AGENTS.md": "x\n", "docs/a.md": "y\n"}, "C7"),
+        ({"sub/CLAUDE.md": "x\n"}, "C7"),
+        ({".ndf/mvv.md": "x\n"}, "C7"),
     ],
 )
 def test_behavior_docs_or_code_do_not_carry(repo, files, said):
@@ -243,12 +247,13 @@ def test_answer_to_the_second_presentation_does_not_check_and_drops_carried(env,
     """受け入れ条件 10・I3・I8: 確かめ直しが文書だけでなく提示 2 の問いへ答えたら、判定せず `take` で確定し、`added` は空。"""
     main = env["main"]
     rid = to_confirm(env, tmp_path)
-    confirmed(main)
+    assert confirmed(main)["purpose"] == "rel-1-2-carried"
     presented(main, 2, "sha3", [10, 12, 14])  # 判定の後にコードの #14 が入り、parallel.py carried が 10 を返した
     env["heads"]["v"] = "sha4"
     resume(main, {"n": 1, "phase": "confirm", "take": "new"}, "c2")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and "carried" not in e and e)
     assert ev["k"] == 2 and carry["checks"] == [("sha1", "sha2")]
+    assert ev["purpose"] == "rel-1-2-confirmed"  # 引き継ぎの起動と別の目的なので、止まった一時レーンを起動し直す
     assert prun.helper_task(main, "p1", 1, 2)["phase"] == "confirmed"  # 確定の後の 3 手
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
     until(lambda: pl.read_answer(main, "p1", rid)[0])
