@@ -6530,6 +6530,36 @@
       "meaning": "開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
       "source": "",
       "pending_source": "issues/issue-2997-design.md"
+    },
+    {
+      "term": "負荷とメモリの値",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "マシンの上の pytest の数",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "待ちの理由",
+      "context": "ndf-workflow",
+      "meaning": "プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ",
+      "pending_source": "issues/issue-2998-design.md"
+    },
+    {
+      "term": "待ちの秒",
+      "context": "ndf-workflow",
+      "meaning": "queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits）",
+      "pending_source": "issues/issue-2998-design.md"
+    },
+    {
+      "term": "メモリの山",
+      "context": "ndf-workflow",
+      "meaning": "全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値",
+      "pending_source": "issues/issue-2998-requirements.md"
     }
   ]
 }
