@@ -18,7 +18,7 @@
 | リリースの雛形で出す経路で、レーンの本番のステージをリリースの依頼のプラン（`parallel-request`）へ置き換える。リリースの Pull Request で届く経路ではレーンも本番チャネルへ入れるリリースプランをそのまま流す | [ndf-production-release-record.md](ndf-production-release-record.md) の「並列の計画のレーンの本番のステージ」 |
 | 本番チャネルへの Pull Request の規則（head が `release/v<版>`・承認したコミットから切る・`release/v<版>-sync` で版数の衝突を解く・`scripts/check-pr-base.sh`） | [docs/versioning-and-distribution.md](../versioning-and-distribution.md) の「正式版を出す」の前後と、`plugins/ndf/skills/release/references/release-steps.md` の `release` の項 |
 | オーガナイザーと一時レーンの数え方（役割 `organizer` / `helper`） | [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) の決定と理由、parallel.md の「数え方」 |
-| 用語（並列の計画・レーン・オーガナイザー・リリースの依頼・一時レーン・保留したループの 1 回・リリース待ち・質問待ち） | [docs/glossary.md](../glossary.md)（正本は `docs/glossary/glossary.json`） |
+| 用語（並列の計画・レーン・オーガナイザー・リリースの依頼・一時レーン・保留したループの 1 回・リリース待ち・質問待ち・出し直しの提示・加わった範囲・文書だけの範囲・出し直しを省く・確かめ直しの範囲・引き継いだ承認） | [docs/glossary.md](../glossary.md)（正本は `docs/glossary/glossary.json`） |
 | リリースの依頼の形 | `plugins/ndf/contracts/forms/parallel-request.json` |
 | 環境変数の宣言 | `plugins/ndf/contracts/env/NDF_PARALLEL_MAX_PLANS.json`・`NDF_PARALLEL_STALL_MINUTES.json`・`NDF_PARALLEL_SPAWN_REFUSALS.json`・`NDF_PARALLEL_POLL.json`・`NDF_PARALLEL_LAUNCH_SECONDS.json`・`NDF_PARALLEL_RELAY.json`・`NDF_RELAY_MAX_NAMED.json` |
 
@@ -131,6 +131,9 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | I20 | 依頼の `id` は送る側が依頼の中身から決め、受け取った数から採番しない | 打ち直しで同じ `id` になり、冪等の鍵（`<ID>:inbox:<依頼>`）が 2 度目を数えない。受け取りの前後で打ち直しても `id` が変わらない |
 | I21 | リリースの組み方は依頼を受けるたびに宣言から読み、決まらないときは「組めない」へ倒す。組まないのは、リリースの経路がマージで届く・リリースの Pull Request で届く・届けない（`merged-by-check`・`promote`・`none`）だけのときである | 手動の経路、宣言が無い・不明・読めない行、テンプレートの無い `release.form` は、`released` と答えず `failed` と理由を答える |
 | I22 | リリースを組めないことでは計画は止まらず、組めなかった依頼は受けている依頼に残らない | 範囲が決まる前なら受けている依頼のすべてへ、提示 2 を組めないなら範囲の依頼へ `failed` を答える。計画を止めるのは問い `kind: build` への「止める」だけである |
+| I28 | 出し直しを省くのは、提示 1 への承認の答えで 1 度だけ判定し、加わった範囲が文書だけの範囲（コードのファイル・振る舞いを決める文書・C7 の設定と指示書が 0 件、文書のファイルが 1 件以上）のときだけである。差分の一覧・宣言 `docs` が取れないときと、差分のファイルが 0 件のときは省かない。提示 2 への答え（`--take`）では判定しない | 1 つでも外れたら出し直しの提示（`represent: true`）を出す。省かない理由は判定の結果の `reason` に残る |
+| I29 | 引き継いだ承認（提示 2 の `answer.json`）を書くのは、確かめ直しの範囲が文書だけのときだけである | `parallel.py carried` が 10 を返し、提示のプランは `record` を打たずにリリース承認ゲートで止まる。一時レーンが提示 2 のリリース承認ゲートの依頼を送る |
+| I30 | `range-<n>` の `added` は、引き継いだ承認で確定したリリースだけが確かめ直しの範囲の Pull Request を持ち、ほかは空の並びである | 判定の後にコードを含む Pull Request が入り、提示 2 への答え（`--take`）で確定したリリースも空の並びにする |
 
 ### 構成要素
 
@@ -247,7 +250,9 @@ stateDiagram-v2
   印 `parallel-docs-carry`（`durable.patched`）の無い古い記録の打ち直しでは判定せずに出し直す。
   提示 2 を組めなければ、範囲の依頼へ `failed` を答えてリリースを締め、問い `kind: build` を立てる。範囲に入らない依頼は次のリリースへ回す
 - **引き継ぐ確定の流し方。** `carried` を持つ `confirmed` では、一時レーンは提示と同じく「提示のプラン → 本番のプラン」を流す。提示のプランは承認資料を作った後に MVV 判定を置かず、
-  `carried`（`parallel.py carried`）→ `record`（`--what` に提示 1 の承認を引き継いだことを書く）→ `approve` を打つ。`carried` が 10 を返せば `record` を打たずに承認ゲートで終わり、一時レーンが提示 2 のリリース承認ゲートの依頼を送る
+  `carried`（`parallel.py carried`）→ `record`（`--what` に提示 1 の承認を引き継いだことを書く）→ `approve` を打つ。`carried` が 10 を返せば `record` を打たずに承認ゲートで終わり、一時レーンが提示 2 のリリース承認ゲートの依頼を送る。
+  確かめ直しが通ると `parallel.py carried` が耐久ワークフローへ知らせ、耐久ワークフローが `pause`（`action: carried`）を立てる。オーガナイザーは `wait` が返す `metrics.carried.prs` を利用者へ 1 行で伝え、問いにしない
+- **MVV 判定がリリース承認ゲートを通したとき。** 提示のプランの MVV 判定が通すと、一時レーンはそのまま本番のプランへ進み、先頭を比べない。本番のプランは提示 1 の承認したコミットから切るため、加わった範囲は入らない
 - **確定の後に一時レーンが打つ 3 手。** 答えを `releases/<n>/<k>/answer.json` へ書く（`sprint-state.py gate … 'リリース承認ゲート' --by user --outcome approved`）。
   次に提示のプランを `approve` から続け、最後に本番のプランを初めて流す。確定しなかった提示の本番のプランは流さない。
   1 つのまとめたリリースで `release/v<版>` を作るのは 1 回だけである
@@ -398,6 +403,8 @@ stateDiagram-v2
 | 検査に誤りがあると `relay.py spawn` を 1 回も打たない（I6）。依存先が止まった後の周で起動し、保留中のレーンは止まったと数えない（I8）。打ち直しで起動に成功したレーンを起動し直さず、断られたレーンは起動し直す（I7） | `plugins/ndf/scripts/tests/test_parallel_run.py` |
 | 依頼が 1 件届けば他のレーンを待たずに提示 1 を組み、範囲は提示したコミットで決まり、依頼の無いレーンの Pull Request も内訳に載る（I9） | 同上 |
 | 答えの時点で先頭が同じなら確定、進んでいれば提示 2 を組む。提示 2 への答えでは比べず、提示 3 を組まない。確定まで本番のプランを流さない（I14） | 同上 |
+| 加わった範囲が文書だけなら出し直さずに提示 2 で確定し、振る舞いを決める文書・コード・C7 の設定と指示書・空の差分・読めない入力では出し直す。先頭が同じなら判定しない。提示 2 への答えでは判定せず `carried` を外す。印の無い古い記録は判定せずに出し直す。省く判定の後に提示 2 を組めなければ `failed` と問い `kind: build`（I28） | `plugins/ndf/scripts/tests/test_parallel_carry.py` |
+| 引き継ぐ形の提示のプランが `present` → `carried` → `record` → `approve` の順で MVV 判定を持たず、`parallel.py carried` は文書だけなら 0、コードがあれば 10 を返し GitHub を読まない。`wait` は確かめ直しが通った `carried` だけを返し、提示 2 への答えの後に届いた確かめ直しは捨てる（I29・I30） | 同上 |
 | 範囲に入ったレーンは後で依頼に来ても送らずに `released` で進み、2 本目の本番のプランが組まれない（I15、Pull Request 2420 の件） | `test_parallel_run.py`・`test_parallel_lane.py` |
 | 答えは `answer-<依頼>` に 1 回だけ立ち、`defer-<依頼>` では `await` が返らない（I10）。全レーンが止まり答えていない依頼が無いときだけ `finished`（前のループの待ちの問いは除く。I11） | `test_parallel_run.py` |
 | 状態の一覧が失敗した回はレーンの状態を変えず `finished` で終えない。失敗が続くと区切りごとに問いが 1 件立ち、成功に戻ると問いが外れる | `test_parallel_run.py` |
@@ -426,6 +433,7 @@ stateDiagram-v2
 - 1 本だけを止めるのは `relay.py stop <名前>`、計画の全レーンを止めるのは `parallel.py stop <計画名>` である
 - 確かめ切れていないことが 4 つある。複数のプロセスが同じ SQLite に書くときのロックの待ちと、長く動く耐久ワークフローの記録の量（観測の周ごとに増える）である。
   加えて、レーン 3 本と一時レーンが同時に動くときのメモリ・CPU と、GitHub API の同時本数の枠もまだ測っていない。いずれもリリース後テストで測る
+- 出し直しを省く振る舞い（承認の後に文書だけが入り、提示 2 の問いが出ずに新しい範囲で出て、加わった Pull Request が 1 行で伝わること）は、実際のまとめたリリースではまだ確かめていない。次の並列の計画のまとめたリリースで確かめる
 
 ## 関連リンク
 
@@ -434,6 +442,7 @@ stateDiagram-v2
 - [PR #2451](https://github.com/devbasex/ai-plugins/pull/2451) / [PR #2454](https://github.com/devbasex/ai-plugins/pull/2454) / [PR #2455](https://github.com/devbasex/ai-plugins/pull/2455) / [PR #2462](https://github.com/devbasex/ai-plugins/pull/2462) / [PR #2452](https://github.com/devbasex/ai-plugins/pull/2452) — 実装（v10.27.15）
 - [issue #2439](https://github.com/devbasex/ai-plugins/issues/2439) — Factory のオーガナイザー（同じ層の別の実装）
 - [issue #2616](https://github.com/devbasex/ai-plugins/issues/2616) — リリースの組み方を宣言から決め、リリースの依頼で計画を止めない
+- [issue #3020](https://github.com/devbasex/ai-plugins/issues/3020) / [PR #3029](https://github.com/devbasex/ai-plugins/pull/3029) / [PR #3034](https://github.com/devbasex/ai-plugins/pull/3034) — 承認の後に加わった範囲が文書だけなら出し直しを省く（要求・設計・実装）
 - [ndf-shared-venv-and-relay-ls-failure.md](ndf-shared-venv-and-relay-ls-failure.md) — 状態の一覧の失敗を止まったと読まない決定と条件（#2509）
 - [ndf-relay-multi-session-supervisor.md](ndf-relay-multi-session-supervisor.md) — リレーハブ
 - [ndf-execution-plan-and-parallel-capacity.md](ndf-execution-plan-and-parallel-capacity.md) — 1 つのスプリントの中の並列の実行計画と本数（この文書のレーンの並列とは別の層）
