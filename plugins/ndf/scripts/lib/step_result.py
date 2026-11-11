@@ -31,7 +31,7 @@ from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-import deps  # noqa: E402
+import exit_codes  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 
@@ -51,43 +51,22 @@ ATTACH: dict = {}
 # 欠け・過程・判断の項目（任意）。各要素はオブジェクトで、この鍵を空でない文字列で持つ（#2227 の I3）
 RECORD_KEYS = {"gaps": ("kind", "name", "reason"), "process": ("run", "result"), "decisions": ("decision", "basis")}
 
-EXIT_OK = 0
-EXIT_VIOLATION = 1  # チェックで違反あり・手順が失敗した
-EXIT_UNREADABLE = 2  # 読めない・呼び出しの誤り（「一致」「0 件」と読ませない）
-EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果
-# （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
-# PR がベースブランチと衝突している（mergeStateStatus が DIRTY か、gh pr merge がマージのコミットを作れずに拒んだ）。
-# merge-when-green が返し、プランの merge はベースブランチの取り込みへ戻る（#1917）
-EXIT_BASE_CONFLICT = 4
-# CD の結果が失敗。本番チャネルへ入ったが反映に失敗し、デプロイの工程は完了でない（`release-steps.py record`。#2623）
-EXIT_CD_FAILED = 5
-# 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた（`stopped` だけ。#2227）
-EXIT_INCOMPLETE = 6
-EXIT_GATE = 10  # 10〜19: 承認ゲート（人の同意が要る）
-EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
-# 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
-EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
-# CI の基盤待ち（Runner が付かずに取り消されたジョブが再実行でも解けない。sysexits.h の EX_TEMPFAIL。
-# 中身の失敗ではなく、後で打ち直せば通りうる。merge-when-green と release が返す。#1645）
-EXIT_INFRA_WAIT = 75
-
-GATE_CODES = range(10, 20)
-PAUSE_CODES = range(20, 30)
-
-# 終了コードの見出し。契約の一覧の `exit` の値はこの見出しで始める（#2337 の決定 4・検査 `exit-meaning`）
-EXIT_LABELS = {
-    EXIT_OK: "成功",
-    EXIT_VIOLATION: "失敗",
-    EXIT_UNREADABLE: "読めない・呼び出しの誤り",
-    EXIT_PRECONDITION: "前提が無い",
-    EXIT_BASE_CONFLICT: "ベースブランチと衝突",
-    EXIT_CD_FAILED: "CD の結果が失敗",
-    EXIT_INCOMPLETE: "欠けが残る",
-    **{c: "承認ゲート" for c in GATE_CODES},
-    **{c: "判断待ち" for c in PAUSE_CODES},
-    EXIT_DEPS_MISSING: "依存の欠け",
-    EXIT_INFRA_WAIT: "基盤待ち",
-}
+# 終了コードの表は `exit_codes` が持つ（#2988）。ここの名前は同じものを指す
+EXIT_OK = exit_codes.EXIT_OK
+EXIT_VIOLATION = exit_codes.EXIT_VIOLATION
+EXIT_UNREADABLE = exit_codes.EXIT_UNREADABLE
+EXIT_PRECONDITION = exit_codes.EXIT_PRECONDITION
+EXIT_BASE_CONFLICT = exit_codes.EXIT_BASE_CONFLICT
+EXIT_CD_FAILED = exit_codes.EXIT_CD_FAILED
+EXIT_INCOMPLETE = exit_codes.EXIT_INCOMPLETE
+EXIT_GATE = exit_codes.EXIT_GATE
+EXIT_PAUSE = exit_codes.EXIT_PAUSE
+EXIT_DEPS_MISSING = exit_codes.EXIT_DEPS_MISSING
+EXIT_INFRA_WAIT = exit_codes.EXIT_INFRA_WAIT
+GATE_CODES = exit_codes.GATE_CODES
+PAUSE_CODES = exit_codes.PAUSE_CODES
+EXIT_LABELS = exit_codes.EXIT_LABELS
+label_of = exit_codes.label_of
 
 # 実行の核（`run_core.py`）が動いている間は真。`emit` は出力せずに `Emitted` を投げ、核が確かめてから出す（決定 3）
 CAPTURE = False
@@ -99,11 +78,6 @@ class Emitted(SystemExit):
     def __init__(self, result, code: int):
         super().__init__(code)
         self.result = result
-
-
-def label_of(code: int) -> str:
-    """終了コードの見出し（表に無ければ空）。"""
-    return EXIT_LABELS.get(code, "")
 
 
 def default_code(status: str) -> int:

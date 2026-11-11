@@ -1,18 +1,16 @@
 """git の出力だけを情報源にして、コミットとテストの事実を取る。
 
-パスの判定・プロセス・GitHub・worktree・公開・結果ファイルは同じディレクトリの 6 本
-（`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`）が持つ。ここはそれらの名前を
+パスの判定・プロセス・GitHub・worktree・公開・結果ファイル・コミットのトレーラーは同じディレクトリの 7 本
+（`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`・`trailers`）が持つ。ここはそれらの名前を
 再エクスポートし、`from .gitfacts import ...` で使う側の import を変えずに済ませる（#1142 の C4）。
 """
 
 from __future__ import annotations
 
 import pathlib
-import re
-import subprocess
 from typing import Any, Optional
 
-from . import github, pathkinds, process, publish, results, worktree
+from . import github, pathkinds, process, publish, results, trailers, worktree
 from .paths import git_out, resolve_commit
 
 # 分けた先の名前を再エクスポートする。`from .gitfacts import ...` で使う側の import を変えない。
@@ -56,6 +54,9 @@ STOPPED_REASONS = results.STOPPED_REASONS
 note_stopped = results.note_stopped
 read_result = results.read_result
 record_observed_model = results.record_observed_model
+
+_parse_trailer_paragraph = trailers._parse_trailer_paragraph
+commit_trailers = trailers.commit_trailers
 
 _control_prefix = worktree._control_prefix
 _dirty_paths = worktree._dirty_paths
@@ -124,57 +125,6 @@ def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list
         return None
     out = git_out(work, ["rev-list", f"{base}..{head}"])
     return None if out is None else out.split()
-
-
-def commit_trailers(work: str, sha: str) -> dict[str, str]:
-    """コミットメッセージのトレーラーを git から読む。
-
-    **結果ファイルの `trailers` は使わない。** JSON 上は仕様どおりでも、実際の
-    `git commit` でトレーラーを書き忘れていれば集計に使えない。
-
-    **末尾の段落から前へ 1 段落ずつ読む**（#553）。実行環境が帰属の段落を後ろへ
-    足すと、git の標準の読み方は最後の段落しか見ないため必須の記名が読めなくなる。
-    トレーラーの段落と判定しなかった段落で止めるので、散文の中にある記名の形の行は
-    拾わない。同じ鍵が 2 つの段落にあれば、末尾に近い段落の値を採る。
-
-    **1 段落目（題名）は掛けない。** 掛けると `Round: 本文の題名` の形の題名を
-    トレーラーとして読む。
-    """
-    body = git_out(work, ["log", "-1", "--format=%B", sha], strip=False)
-    paragraphs = re.split(r"\n[ \t]*\n", (body or "").strip("\n"))
-    trailers: dict[str, str] = {}
-    for paragraph in reversed(paragraphs[1:]):
-        parsed = _parse_trailer_paragraph(paragraph)
-        if not parsed:
-            break
-        for key, value in parsed.items():
-            trailers.setdefault(key, value)
-    return trailers
-
-
-def _parse_trailer_paragraph(paragraph: str) -> dict[str, str]:
-    """1 つの段落を git の判定に掛け、トレーラーの段落なら鍵と値を返す。
-
-    **題名の行を補って渡す。** git はメッセージの 1 行目を題名として読むため、
-    段落だけを渡すと何も返らない（git 2.53.0 で実測）。判定そのものは git に委ね、
-    「何行以上なら記名の段落か」といった規則をこちら側に持たない。
-    """
-    if not paragraph.strip():
-        return {}
-    result = subprocess.run(
-        ["git", "interpret-trailers", "--parse"],
-        input=f"subject\n\n{paragraph}\n",
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return {}
-    parsed: dict[str, str] = {}
-    for line in result.stdout.splitlines():
-        key, sep, value = line.partition(":")
-        if sep:
-            parsed[key.strip()] = value.strip()
-    return parsed
 
 
 def commit_diff_lines(work: str, sha: str) -> int:

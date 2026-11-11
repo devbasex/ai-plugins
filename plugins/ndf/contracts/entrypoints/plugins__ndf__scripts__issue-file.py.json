@@ -49,12 +49,9 @@
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "HOME",
-    "NDF_DEPS_REEXEC",
-    "NDF_DEPS_VENV",
     "NDF_ISSUE_REQUEST_FILE",
     "NDF_PRESENTATION_DIR",
-    "NDF_SKILL_REPO",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_SKILL_REPO"
   ],
   "settings": [],
   "stdin": "none",

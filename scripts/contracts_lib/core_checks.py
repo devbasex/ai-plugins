@@ -26,7 +26,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import step_result  # noqa: E402
 
-EXIT_OWNERS = ("plugins/ndf/scripts/lib/step_result.py", "plugins/ndf/scripts/lib/deps.py")
+EXIT_OWNERS = ("plugins/ndf/scripts/lib/exit_codes.py",)
 READER = "plugins/ndf/scripts/lib/step_read.py"
 KINDS = ("core-entry", "core-exempt", "exit-meaning", "result-read")
 PLUGIN_HEAD = "plugins/ndf/"

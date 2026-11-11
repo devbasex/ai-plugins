@@ -227,7 +227,17 @@ def sh_setup(tmp_path: Path, stdout: str = "step-result") -> Path:
     # 核の契約の置き場を一時ディレクトリへ向けた複製を使う
     lib = tmp_path / "lib"
     lib.mkdir()
-    for f in ("run_core.py", "run-core.sh", "step_result.py", "deps.py", "proc.py", "secret_redact.py", "jsonio.py", "limits.py"):
+    for f in (
+        "run_core.py",
+        "run-core.sh",
+        "step_result.py",
+        "deps.py",
+        "exit_codes.py",
+        "proc.py",
+        "secret_redact.py",
+        "jsonio.py",
+        "limits.py",
+    ):
         (lib / f).write_text((LIB / f).read_text())
     (tmp_path / "contracts").mkdir(exist_ok=True)  # 上限の宣言（lib/limits.py が lib/ と並ぶ contracts/ から読む）
     (tmp_path / "contracts" / "limits.json").write_text((LIB.parents[1] / "contracts" / "limits.json").read_text())

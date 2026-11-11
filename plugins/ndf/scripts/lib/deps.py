@@ -27,7 +27,7 @@
 5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 69
 
 依存の欠け（2・5 と、`pyproject.toml` と `uv.lock` が無いとき）の終了コードは `EXIT_DEPS_MISSING`（69。`sysexits.h` の
-`EX_UNAVAILABLE`）で、値の持ち主はこのファイルだけである（#1654）。止まるときは実行の核の早い出口（`run_core.exit_early`）を
+`EX_UNAVAILABLE`）で、値の持ち主は終了コードの表（`exit_codes.py`）だけである（#1654・#2988）。止まるときは実行の核の早い出口（`run_core.exit_early`）を
 通し、例外の跡を出さずに `stopped` と足りないグループ（`gaps` の `kind` が `deps`）の結果を返す（#2337）。共通の契約の 3（前提が無い・飛ばしてよい）とは
 分け、supervise の `skip_code` に読ませない。`uv run` 自身が環境を作れないときは `os.execve` の後なので uv の終了コード
 （1）で終わる。
@@ -45,6 +45,11 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn, Sequence
+
+# conftest.py などがファイルの位置から単独で読み込んでも、同じディレクトリの終了コードの表を読めるようにする
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from exit_codes import EXIT_DEPS_MISSING  # noqa: E402
 
 UV_VERSION = "0.12.19"
 # pyproject.toml の [project.optional-dependencies] と同じグループ。値はグループが入ったかを見る import の名前
@@ -66,7 +71,6 @@ GROUPS = {
     "terminal": ["ptyprocess"],
     "durable": ["dbos", "filelock"],
 }
-EXIT_DEPS_MISSING = 69  # 依存の欠け（sysexits.h の EX_UNAVAILABLE）。共通の契約の 0〜3・10〜29 と重ねない
 REEXEC_ENV = "NDF_DEPS_REEXEC"
 PROJECT_ENV = "UV_PROJECT_ENVIRONMENT"
 # 起動し直す前の利用者の UV_PROJECT_ENVIRONMENT。無かったときは置かない（#2509 の決定 2）
@@ -78,10 +82,8 @@ INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
 def _stop(msg: str, groups: Sequence[str] = ()) -> NoReturn:
     """依存の欠けで止める。結果は実行の核の早い出口（`run_core.exit_early`）が出す（#2337 の決定 11）。"""
     print(f"❌ [ndf deps] {msg}", file=sys.stderr)
-    if str(Path(__file__).resolve().parent) not in sys.path:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-    # 止まるときだけ読む（run_core → step_result → deps の循環を避ける）。ラッパーのバージョンディレクトリ
-    # （relay_lib/version_dir.py）は核を写さないため、読めなければ結果を出さずに 69 で終える
+    # 核は止まるときだけ読む。ラッパーのバージョンディレクトリ（relay_lib/version_dir.py）は核を写さないため、
+    # 最上位で読むとラッパーが起動できない。読めなければ結果を出さずに 69 で終える
     try:
         run_core = importlib.import_module("run_core")
     except ImportError:

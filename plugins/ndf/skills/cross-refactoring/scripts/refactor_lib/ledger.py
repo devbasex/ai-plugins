@@ -24,9 +24,9 @@ from typing import Any, Optional
 
 import statefile
 
-from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
 from .items import CARRIED, DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
+from .trailers import commit_trailers
 from .vocabulary import DEFER_BUDGET
 
 ITEM = "item"
@@ -309,7 +309,7 @@ def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[
         owner = owners.get(full) or {}
         verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=str(owner.get("id") or ""))
         if verdict.kind == STRAY:
-            verdict.trailer_item_id = str(gitfacts.commit_trailers(work, full).get("Item-Id") or "").strip()
+            verdict.trailer_item_id = str(commit_trailers(work, full).get("Item-Id") or "").strip()
             verdict.subject = git_out(work, ["log", "-1", "--format=%s", full]) or ""
         verdicts.append(verdict)
     return verdicts
