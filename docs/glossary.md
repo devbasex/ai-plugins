@@ -525,10 +525,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 立ち上がりの確認 | — | 耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒 | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 起動の再試行 | — | 立ち上がりの確認で立ち上がらなかった起動かレーンの再起動を、耐久ワークフローがもう 1 回だけ打つこと。2 回目も立ち上がらなければ区分 spawn の問いを立てる | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 手順どおりの停止 | — | 一時レーンが、リリース承認ゲートの依頼か settle を送った後に自分のラッパーを止めること。区分 helper の問いの対象にしない | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
-| 長い待ち | — | オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち | — | — | — |
-| 状況報告 | — | parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告 | — | — | — |
-| 切り替えの判定 | — | parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch） | — | — | — |
-| プロンプトキャッシュの寿命 | — | 会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える | — | — | — |
+| 長い待ち | — | オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち | — | — | `docs/specifications/ndf-parallel-organizer-long-wait.md` |
+| 状況報告 | — | parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告 | — | — | `docs/specifications/ndf-parallel-organizer-long-wait.md` |
+| 切り替えの判定 | — | parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch） | — | — | `docs/specifications/ndf-parallel-organizer-long-wait.md` |
+| プロンプトキャッシュの寿命 | — | 会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える | — | — | `docs/specifications/ndf-parallel-organizer-long-wait.md` |
 | 出し直しの提示 | — | まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true） | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 加わった範囲 | — | まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 文書だけの範囲 | — | 加わった範囲のファイルを宣言 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
@@ -784,17 +784,17 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 残高切れ | — | API キーの要求が "credit balance is too low" で失敗した状態。そのキーはその 1 回の起動の中でだけ候補から外れる | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API キーの使い方の宣言 | — | 登録済み API キーを worker にいつ使うかを決める 1 つの設定。値は「使わない」「常に使う」「上限に近いとき使う」で、既定は「使わない」 | — | — | `docs/specifications/ndf-relay-api-keys.md` |
 | API キーの登録簿 | — | 登録済み API キーと API キーの使い方の宣言を持つ、アカウントの置き場の 1 つのファイル（0600） | — | — | `docs/specifications/ndf-relay-api-keys.md` |
-| 起動先の決定 | — | 1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ | — | — | — |
-| 5 時間の枠の無いアカウント | — | 使用率の応答に 5 時間の枠が無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる | — | — | — |
-| 週の使用率 | — | 週の枠とモデル別の週の枠の使用率のうち最も大きい値 | — | — | — |
-| 閾値 T | — | API キーへ逃がすかと、5 時間の枠のあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85% | — | — | — |
-| 月の額 | — | API キーごとに宣言する、月に付与されるクレジットの額（ドル） | — | — | — |
-| 週の利用枠 | — | API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30 | — | — | — |
-| 使用の割合 | — | API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠 | — | — | — |
-| 区切り | — | relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない | — | — | — |
-| 選ぶ順の組 | — | アカウントを 4 つに分けた選ぶ順の単位。5 時間の枠を先に使う組・週だけの枠の組・閾値を超えた組・残量不明の組の順に選ぶ | — | — | — |
-| 観測のスナップショット | — | 1 回の起動先の決定の入力。時刻・宣言・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの | — | — | — |
-| 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | — |
+| 起動先の決定 | — | 1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 5 時間の枠の無いアカウント | — | 使用率の応答に 5 時間の枠が無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 週の使用率 | — | 週の枠とモデル別の週の枠の使用率のうち最も大きい値 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 閾値 T | — | API キーへ逃がすかと、5 時間の枠のあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85% | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 月の額 | — | API キーごとに宣言する、月に付与されるクレジットの額（ドル） | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 週の利用枠 | — | API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 使用の割合 | — | API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 区切り | — | relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 選ぶ順の組 | — | アカウントを 4 つに分けた選ぶ順の単位。5 時間の枠を先に使う組・週だけの枠の組・閾値を超えた組・残量不明の組の順に選ぶ | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 観測のスナップショット | — | 1 回の起動先の決定の入力。時刻・宣言・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの | — | — | `docs/specifications/ndf-relay-launch-target.md` |
+| 切り替えの余裕 | — | 今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件 | — | — | `docs/specifications/ndf-relay-launch-target.md` |
 
 ## NDF のリリース（`ndf-release`）
 
