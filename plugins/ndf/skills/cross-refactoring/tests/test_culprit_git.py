@@ -21,13 +21,12 @@ import pytest
 
 from crossref_helpers import (
     verify_judged,
-    past_fix_end,
     CALC,
     TEST_TOTAL,
     build_git_flow,
     commit_with_trailers,
     git,
-    item_trailers,
+    implement_items,
     read_state,
     write_state,
 )
@@ -103,25 +102,8 @@ def _existing(flow, files):
 
 
 def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **over):
-    work = flow["work"]
-    state = read_state(flow["path"])
-    state["items"] = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
-    state["plan"] = {
-        "base_sha": _head(work),
-        "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
-        "end_at": FAR,
-        "table_source": "defaults",
-    }
-    state["phase"] = "implement"
-    state.update(over)
-    if late:
-        past_fix_end(state)
-    write_state(flow["path"], state)
-    _call(cmd_phases, "cmd_start_phase", phase="implement")
-    for item_id, change in changes.items():
-        change(work)
-        commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
-    _call(cmd_implement, "cmd_merge_implement")
+    items = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
+    implement_items(flow, cmd_phases, cmd_implement, items, changes, late=late, **over)
 
 
 def _items(flow):

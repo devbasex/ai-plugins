@@ -271,6 +271,37 @@ def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+FAR_END = "2099-01-01T00:00:00+00:00"
+
+
+def implement_items(
+    flow: dict[str, Any], cmd_phases: Any, cmd_implement: Any, items: list[dict[str, Any]], changes: dict[str, Any], late: bool = False, **over: Any
+) -> None:
+    """計画の項目 `items` を置いて実装の工程を始め、項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。
+    `over` は状態の上書き、`late` は直しの試行の打ち切りだけを過ぎた上限の表（上書きの後に当てる）。"""
+    import argparse as _argparse
+
+    work = flow["work"]
+    state = read_state(flow["path"])
+    state["items"] = items
+    state["plan"] = {
+        "base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
+        "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
+        "end_at": FAR_END,
+        "table_source": "defaults",
+    }
+    state["phase"] = "implement"
+    state.update(over)
+    if late:
+        past_fix_end(state)
+    write_state(flow["path"], state)
+    cmd_phases.cmd_start_phase(_argparse.Namespace(id=130, phase="implement"))
+    for item_id, change in changes.items():
+        change(work)
+        commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
+    cmd_implement.cmd_merge_implement(_argparse.Namespace(id=130))
+
+
 def answer_judge(state_path: pathlib.Path, feasible: Any = True, reason: str = "直せる見込みがある") -> dict:
     """成立の判定の依頼（`feasibility_request`）に答える（#2457 決定 3）。担い手の結果ファイルを書き、`judge` を打つ。
 
