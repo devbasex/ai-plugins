@@ -29,9 +29,11 @@ from crossref_helpers import (
     implement_items,
     read_state,
     write_state,
+    planned_item,
+    head_sha,
+    write_file,
 )
 
-FAR = "2099-01-01T00:00:00+00:00"
 
 # `total` が calc.py の中で例外を投げる。JUnit の本文の traceback に `src/calc.py` が現れる。
 CALC_RAISES = CALC.replace("    return result\n", "    raise RuntimeError('calc broke')\n")
@@ -45,51 +47,11 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": "src/calc.py",
-        "symbol": "add",
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "public_io": False,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "command": ["pytest", "-q", "tests/test_calc.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(item_id, rank, public_io=False, command=["pytest", "-q", "tests/test_calc.py"])
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
-
-
-def _emitted(capsys, key):
-    values = [line.split("=", 1)[1] for line in capsys.readouterr().out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
-def _write(work, rel, text):
-    path = work / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _head(work):
-    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
 
 def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **over):
@@ -103,12 +65,12 @@ def _items(flow):
 
 def _flagged(name):
     """項目の `path` の外のファイルだけを触る（D1 が立つ。全体テストには関わらない）。"""
-    return lambda w: _write(w, f"src/{name}.py", "X = 1\n")
+    return lambda w: write_file(w, f"src/{name}.py", "X = 1\n")
 
 
 def _calc(text):
     """`src/calc.py` だけを変える（危険フラグは立たない）。"""
-    return lambda w: _write(w, "src/calc.py", text)
+    return lambda w: write_file(w, "src/calc.py", text)
 
 
 def _verify(flow, cmd_converge, capsys):
@@ -162,7 +124,7 @@ def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culpri
     work = flow["work"]
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")})
-    head = _head(work)
+    head = head_sha(work)
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
@@ -170,7 +132,7 @@ def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culpri
     assert record["culprit"]["culprits"] == ["I-001"] and record["culprit"]["basis"] == "isolate"
     assert record["culprit"]["evidence"]["I-001"]["tests"] == ["tests/test_total.py::tests.test_total::test_total"]
     assert record["items"] == ["I-001"]
-    assert _head(work) == head
+    assert head_sha(work) == head
     assert git("status", "--porcelain", cwd=work).stdout.strip() == ""
     assert "return result + 1" in (work / "src" / "calc.py").read_text()
 
@@ -185,7 +147,7 @@ def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_pha
         flow,
         cmd_setup, cmd_phases,
         cmd_implement,
-        {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: _write(w, "src/shared.py", "X = 2\n")},
+        {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: write_file(w, "src/shared.py", "X = 2\n")},
     )
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -206,7 +168,7 @@ def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_wr
     written: dict = {}
 
     def i003(w):
-        _write(w, "src/shared.py", "X = 2\n")
+        write_file(w, "src/shared.py", "X = 2\n")
         written["ns"] = shared.stat().st_mtime_ns
 
     real_git_ok = culprit.git_ok
@@ -265,7 +227,7 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_ph
             "I-001": _flagged("other"),
             "I-002": _calc(long_calc),
             "I-003": _flagged("another"),
-            "I-004": lambda w: _write(w, "src/participants.py", "def add(a, b):\n    return a + b\n"),
+            "I-004": lambda w: write_file(w, "src/participants.py", "def add(a, b):\n    return a + b\n"),
         },
         late=True,
     )

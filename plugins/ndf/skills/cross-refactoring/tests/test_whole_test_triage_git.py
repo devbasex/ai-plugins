@@ -32,9 +32,12 @@ from crossref_helpers import (
     read_state,
     strategy_state,
     write_state,
+    planned_item,
+    head_sha,
+    emitted,
+    write_file,
 )
 
-FAR = "2099-01-01T00:00:00+00:00"
 
 
 @pytest.fixture
@@ -43,51 +46,11 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank, symbol="add"):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": "src/calc.py",
-        "symbol": symbol,
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "command": ["pytest", "-q", "tests/test_calc.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(item_id, rank, symbol=symbol, command=["pytest", "-q", "tests/test_calc.py"])
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
-
-
-def _emitted(capsys, key):
-    out = capsys.readouterr().out
-    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
-def _write(work, rel, text):
-    path = work / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _head(work):
-    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
 
 def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **state_overrides):
@@ -102,12 +65,12 @@ def _items(flow):
 
 def _touch_other(name):
     """項目の `path` の外のファイルを触る（D1 が立つ）。"""
-    return lambda w: _write(w, f"src/{name}.py", "X = 1\n")
+    return lambda w: write_file(w, f"src/{name}.py", "X = 1\n")
 
 
 def _break_total(w):
-    _write(w, "src/extra.py", "X = 1\n")
-    _write(w, "src/calc.py", CALC.replace("return result", "return result + 1"))
+    write_file(w, "src/extra.py", "X = 1\n")
+    write_file(w, "src/calc.py", CALC.replace("return result", "return result + 1"))
 
 
 def _worktrees(work):
@@ -131,7 +94,7 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_phases, cmd_implem
 
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["status"] == "fail"
     # ID は JUnit（xunit1）の `file::classname::name`（#1334 決定 5）。
@@ -154,7 +117,7 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
 
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["preexisting"] == ["tests/test_env.py::tests.test_env::test_env"]
     assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
@@ -177,10 +140,10 @@ def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(f
             ),
         },
     )
-    start = _head(work)
+    start = head_sha(work)
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other")})
     git("checkout", "-q", "-b", "base-update", start, cwd=work)
-    _write(work, "src/threshold.txt", "5\n")
+    write_file(work, "src/threshold.txt", "5\n")
     commit_with_trailers(work, "ベースブランチでしきい値を下げた", {})
     git("checkout", "-q", "-", cwd=work)
     git("merge", "-q", "--no-edit", "base-update", cwd=work)
@@ -188,7 +151,7 @@ def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(f
 
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["preexisting"] == ["tests/test_threshold.py::tests.test_threshold::test_threshold"]
     assert record["caused"] == [] and not record.get("reverted")
@@ -218,13 +181,13 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
         assert "test_total" in fh.read()
 
     _call(cmd_phases, "cmd_start_phase", phase="fix")
-    _write(work, "src/calc.py", CALC)
+    write_file(work, "src/calc.py", CALC)
     commit_with_trailers(work, "Fix", item_trailers("I-001"))
     _call(cmd_merge_fix, "cmd_merge_fix")
     capsys.readouterr()
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["resolution"] == "fixed" and record["reverted"] is False
     item = _items(flow)["I-001"]
@@ -258,7 +221,7 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
     原因の項目は走らせ直しのログに現れるパスで決め、その項目だけを修正へ回す（#1649）。
     """
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    raises = lambda w: _write(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
+    raises = lambda w: write_file(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
 
     assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
@@ -285,7 +248,7 @@ def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_i
 
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
     assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "verified"
     record = read_state(flow["path"])["whole_test"]
@@ -312,7 +275,7 @@ def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_s
 
     _call(cmd_converge, "cmd_verify")
 
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record.get("ran") is False and record["resolution"] == "deferred"
     assert record["deferred"] == {"flags": ["D1"], "items": ["I-001"]}

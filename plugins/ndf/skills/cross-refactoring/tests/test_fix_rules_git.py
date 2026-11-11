@@ -15,7 +15,19 @@ import argparse
 
 import pytest
 
-from crossref_helpers import verify_judged, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
+from crossref_helpers import (
+    verify_judged,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    write_result,
+    write_state,
+    planned_item,
+    write_file,
+    emitted,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 FIX_STEM = "claude-fix-rf130"
@@ -24,12 +36,6 @@ FIX_STEM = "claude-fix-rf130"
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
     return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
-
-
-def _write(work, rel, text):
-    path = work / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _module(name, value=1):
@@ -41,41 +47,18 @@ def _test(name, value=1):
 
 
 def _item(item_id, rank, name):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": f"src/{name}.py",
-        "symbol": name,
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "tests": [],
-        "test_targets": [f"tests/test_{name}.py::test_{name}"],
-        "command": ["pytest", "-q", f"tests/test_{name}.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(
+        item_id,
+        rank,
+        path=f"src/{name}.py",
+        symbol=name,
+        test_targets=[f"tests/test_{name}.py::test_{name}"],
+        command=["pytest", "-q", f"tests/test_{name}.py"],
+    )
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
-
-
-def _emitted(capsys, key):
-    out = capsys.readouterr().out
-    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
 
 
 def _items(flow):
@@ -86,10 +69,10 @@ def _implement(flow, cmd_setup, cmd_phases, cmd_implement, names, changes, extra
     """`names` のモジュールとテストを起点に置き、`changes`（項目 ID → (モジュール名, 中身)）の順に 1 項目 1 コミットで積む。"""
     work = flow["work"]
     for name in names:
-        _write(work, f"src/{name}.py", _module(name))
-        _write(work, f"tests/test_{name}.py", _test(name))
+        write_file(work, f"src/{name}.py", _module(name))
+        write_file(work, f"tests/test_{name}.py", _test(name))
     for rel, text in (extra or {}).items():
-        _write(work, rel, text)
+        write_file(work, rel, text)
     commit_with_trailers(work, "既存のモジュール", {})
     items = [_item(item_id, n, name) for n, (item_id, (name, _)) in enumerate(changes.items(), start=1)]
     state = read_state(flow["path"])
@@ -104,7 +87,7 @@ def _implement(flow, cmd_setup, cmd_phases, cmd_implement, names, changes, extra
     write_state(flow["path"], state)
     _call(cmd_phases, "cmd_start_phase", phase="implement")
     for item_id, (name, text) in changes.items():
-        _write(work, f"src/{name}.py", text)
+        write_file(work, f"src/{name}.py", text)
         commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
     _call(cmd_implement, "cmd_merge_implement")
 
@@ -113,7 +96,7 @@ def _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, commits, *, result=True):
     """偽の修正担当。`commits`（項目 ID → (モジュール名, 中身)）だけをコミットし、`result` なら結果ファイルを残す。"""
     _call(cmd_phases, "cmd_start_phase", phase="fix")
     for item_id, (name, text) in commits.items():
-        _write(flow["work"], f"src/{name}.py", text)
+        write_file(flow["work"], f"src/{name}.py", text)
         commit_with_trailers(flow["work"], f"Fix {item_id}", item_trailers(item_id))
     if result:
         fix_items = read_state(flow["path"])["fix"]["items"]
@@ -128,7 +111,7 @@ def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001", "I-002"]
 
     _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {"I-001": ("a", _module("a"))})
@@ -137,7 +120,7 @@ def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     assert [items[i]["fix_count"] for i in ("I-001", "I-002")] == [1, 1]
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     items = _items(flow)
     assert items["I-002"]["status"] == "failing" and items["I-002"]["fixer_switched"] is True
     assert items["I-002"]["fix_history"][-1]["progress"] == "stalled"
@@ -160,7 +143,7 @@ def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(flow, cmd_set
 
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001"]
 
 
@@ -171,7 +154,7 @@ def test_a_fix_outside_the_scope_is_kept_and_reported(flow, cmd_setup, cmd_phase
     _call(cmd_phases, "cmd_start_phase", phase="fix")
     # 範囲の外の既存のファイルを、項目が変えた名前と関係なく変える（新しいファイルは範囲の中として扱うため使わない。#1814）
     ignore = flow["work"] / ".gitignore"
-    _write(flow["work"], ".gitignore", ignore.read_text(encoding="utf-8") + "build/\n")
+    write_file(flow["work"], ".gitignore", ignore.read_text(encoding="utf-8") + "build/\n")
     commit_with_trailers(flow["work"], "Fix I-001", item_trailers("I-001"))
     write_result(flow["path"], FIX_STEM, {"items": []})
     _call(cmd_merge_fix, "cmd_merge_fix")
@@ -219,16 +202,16 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
 
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert sorted(read_state(flow["path"])["fix"]["items"]) == sorted(big_ids)
     _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {})
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix", "1 回目の停滞では修正担当を替えて続ける"
+    assert emitted(capsys, "VERIFY") == "fix", "1 回目の停滞では修正担当を替えて続ける"
     _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {})
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
     assert {i for i in big_ids if items[i]["status"] == "reverted"} == set(big_ids)
     assert all(items[i]["revert_reason"] == "stalled_after_switch" for i in big_ids)
@@ -277,8 +260,8 @@ def _repo(tmp_path):
     git("init", "-q", str(work), cwd=tmp_path)
     git("config", "user.email", "t@e.st", cwd=work)
     git("config", "user.name", "test", cwd=work)
-    _write(work, "a.txt", "a0\n")
-    _write(work, "b.txt", "b0\n")
+    write_file(work, "a.txt", "a0\n")
+    write_file(work, "b.txt", "b0\n")
     commit_with_trailers(work, "init", {})
     return work
 
@@ -312,13 +295,13 @@ def test_apply_fix_result_with_an_unknown_range_only_reports(tmp_path, fix_intak
 def test_apply_fix_result_links_good_commits_oldest_first_and_rewrites(tmp_path, fix_intake):
     """問題の無いコミットは古い順に項目の `commits.fix` へ足し、計画に無い項目のコミットは捨て置く。書き換えの判定を項目へ足す。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     first = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
-    _write(work, "b.txt", "b1\n")
+    write_file(work, "b.txt", "b1\n")
     second = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
-    _write(work, "a.txt", "a2\n")
+    write_file(work, "a.txt", "a2\n")
     third = commit_with_trailers(work, "Fix I-001 again", item_trailers("I-001"))
-    _write(work, "b.txt", "b2\n")
+    write_file(work, "b.txt", "b2\n")
     commit_with_trailers(work, "Fix I-009", item_trailers("I-009"))
     unknown = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     head = unknown
@@ -346,11 +329,11 @@ def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp
 
     差し戻しは項目があればその項目へ、無ければ状態の `sendbacks` へ残す。残りのコミットは項目へ関連付ける。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     bad_a = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
-    _write(work, "b.txt", "b1\n")
+    write_file(work, "b.txt", "b1\n")
     good = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
-    _write(work, "c.txt", "c1\n")
+    write_file(work, "c.txt", "c1\n")
     bad_x = commit_with_trailers(work, "stray", {})
     state = {"items": [_bare_item("I-001"), _bare_item("I-002")]}
     problems = [
@@ -383,9 +366,9 @@ def test_apply_fix_result_reverts_the_whole_range_when_the_bad_commit_alone_conf
     """違反のコミットだけを戻すと衝突するとき（後のコミットが同じ行を直した）は、修正の範囲全体を打ち消して
     修正を採らない。違反のコミットを項目へ結ばず、元のコミットと打ち消しのコミットを台帳へ載せる。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     bad = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
-    _write(work, "a.txt", "a2\n")
+    write_file(work, "a.txt", "a2\n")
     good = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
     state = {"items": [_bare_item("I-001")]}
     result = {

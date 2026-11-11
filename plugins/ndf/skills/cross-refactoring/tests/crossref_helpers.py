@@ -287,6 +287,52 @@ def commit_existing_tests(flow: dict[str, Any], files: dict[str, str]) -> None:
 FAR_END = "2099-01-01T00:00:00+00:00"
 
 
+def emitted(capsys: Any, key: str) -> Any:
+    """標準出力に `key=値` で出た最後の値（無ければ None）。読むと capsys の出力を消費する。"""
+    out = capsys.readouterr().out
+    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
+    return values[-1] if values else None
+
+
+def write_file(work: pathlib.Path, rel: str, text: str) -> None:
+    path = work / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def head_sha(work: pathlib.Path) -> str:
+    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
+
+
+def planned_item(item_id: str, rank: int, **over: Any) -> dict[str, Any]:
+    """計画で採った改善項目の辞書。テストごとに違う鍵（path・symbol・command / scope_commands など）は `over` で渡す。"""
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": "src/calc.py",
+        "symbol": "add",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tier": "high",
+        "risk": False,
+        "tests": [],
+        "test_targets": ["tests/test_calc.py"],
+        "command_source": "targets",
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "start_deadline": FAR_END,
+        "test_start_deadline": None,
+        "status": "planned",
+        "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
+        "estimated_diff_lines": 20,
+        **over,
+    }
+
+
 def implement_items(
     flow: dict[str, Any], cmd_phases: Any, cmd_implement: Any, items: list[dict[str, Any]], changes: dict[str, Any], late: bool = False, **over: Any
 ) -> None:
