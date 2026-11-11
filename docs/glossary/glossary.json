@@ -2506,7 +2506,7 @@
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。切り替えの閾値と比べるのはその最大",
+      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。閾値 T と比べるのは週の使用率",
       "source": "",
       "pending_source": "issues/old/issue-1453-design.md"
     },
@@ -2535,13 +2535,6 @@
       "term": "上限シグナルファイル",
       "context": "ndf-relay",
       "meaning": "子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json",
-      "source": "",
-      "pending_source": "issues/old/issue-1389-design.md"
-    },
-    {
-      "term": "切り替えの閾値",
-      "context": "ndf-relay",
-      "meaning": "今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%）",
       "source": "",
       "pending_source": "issues/old/issue-1389-design.md"
     },

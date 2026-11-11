@@ -28,7 +28,6 @@ from . import runtime, version_dir
 from .claude import DROP_ENV, SETTINGS_FILE
 from .common import LOG_FILE, PID_FILE, PKG_ROOT, env_num, read_text, remove
 from .record import RelayRecord, SpinGuard, current_section
-from .switch import UsageWatch
 from .terminal import Terminal
 from .version_dir import VersionDir, plugin_version
 
@@ -349,10 +348,7 @@ class Swapper:
         self.section = state["section"]
         self.account = state["account"]
         self.auth_section = state["auth_section"]
-        multi = bool(state["multi"])
-        if multi != self.multi:
-            self.multi = multi
-            self.watch = UsageWatch(self) if multi else None
+        self.multi = bool(state["multi"])
 
     def resume(self, h: dict) -> int:
         """入れ替えた後: 再起動ループは判定し直さず、申し送りの次のセッションを起動して続ける。"""
