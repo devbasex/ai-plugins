@@ -98,8 +98,8 @@ def judge(x: SwitchInputs) -> SwitchVerdict:
     w, samples = remaining_wait(x.gaps_s, x.elapsed_s)
     base = dict(wait_s=w, samples=samples, missing=missing)
     if x.unanswered is None or x.unanswered > 0:
-        n = "読めない（1 件以上として扱う）" if x.unanswered is None else f"{x.unanswered} 件ある"
-        return SwitchVerdict(STAY, f"答えていない問いが{n}", **base)
+        why = "答えていない問いを読めない（1 件以上として扱う）" if x.unanswered is None else f"答えていない問いが {x.unanswered} 件ある"
+        return SwitchVerdict(STAY, why, **base)
     if x.relay != "relay":
         return SwitchVerdict(STAY, f"ラッパーの直接の子でない（{x.relay or '読めない'}）", **base)
     if w is None:
@@ -254,7 +254,7 @@ def to_metrics(x: SwitchInputs, v: SwitchVerdict, name: str) -> dict:
             "elapsed_s": None if x.elapsed_s is None else round(x.elapsed_s),
             "wait_s": None if v.wait_s is None else round(v.wait_s),
             "context": x.context,
-            "base_context": None if v.base_context is None else round(v.base_context),
+            "base_context": x.base_context if v.base_context is None else round(v.base_context),
             "model": x.model,
             "read_rate": read_rate(x.model),
             "interval_s": x.interval_s,
