@@ -6442,20 +6442,26 @@
     {
       "term": "負荷とメモリの値",
       "context": "ndf-workflow",
-      "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）",
+      "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
       "pending_source": "issues/issue-2998-requirements.md"
     },
     {
       "term": "マシンの上の pytest の数",
       "context": "ndf-workflow",
-      "meaning": "進捗ログの行を書いた時点で同じマシンに動いている pytest のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない",
+      "meaning": "進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える",
       "pending_source": "issues/issue-2998-requirements.md"
     },
     {
       "term": "待ちの理由",
       "context": "ndf-workflow",
-      "meaning": "プランが queue で流れ始めるまでに待った原因。重なり・plans・資源の枠・前提のプラン・計画の上限の 5 つ",
+      "meaning": "プランが queue で流れ始めるまでに待った原因。重なり（overlap）・plans・資源の枠（resource）・前提のプラン（deps）・計画の上限（plan_limit）の 5 つ",
       "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "待ちの秒",
+      "context": "ndf-workflow",
+      "meaning": "queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits）",
+      "pending_source": "issues/issue-2998-design.md"
     },
     {
       "term": "メモリの山",
