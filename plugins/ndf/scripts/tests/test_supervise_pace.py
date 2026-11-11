@@ -357,6 +357,16 @@ def _close_plan(tmp_path, *extra):
     return steps_of(load(load(out / "sprint.json")["ステージ"][-1]["plans"][0]))
 
 
+@pytest.mark.suspended_refactor
+def test_suspended_refactor_final_check_condition_is_accepted_by_eval(tmp_path):
+    # 停止中の最後の検査は eval --review だけにする。--final と --review は eval が同時に受けない（PR 3062 のレビュー）
+    out = tmp_path / "close"
+    args = ["new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "--state"]
+    assert cli(*args, str(sprint_state(tmp_path, "fast")), "--out", str(out)).returncode == 0
+    cmd = load(load(out / "sprint.json")["ステージ"][0]["plans"][0])["実行の条件"]["cmd"]
+    assert "eval " in cmd and "--review" in cmd and "--final" not in cmd
+
+
 def test_close_merges_last_and_closes_issues_only_after_the_merge(tmp_path):
     """マージの後は close だけ（I3）。close へ入るのは merge と merge-approved の次だけ（I8）。"""
     steps = _close_plan(tmp_path, "--record-pr", "40")

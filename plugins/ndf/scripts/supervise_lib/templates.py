@@ -380,8 +380,8 @@ def plan_check_since(a) -> dict:
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
     cond += flag
-    if getattr(a, "final", False):
-        cond += " --final"
+    if getattr(a, "final", False) and not no_refactor:
+        cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
     first = "実装レビュー" if no_refactor else "構造改善"
     steps = [
         {

@@ -579,17 +579,8 @@ def record_target(a, root: Path) -> tuple[dict, int]:
     検査）なら実装レビューだけの回（only: review）として記録し、`check-done/review` だけを進める。"""
     findings, failed_at = findings_of(Path(a.state))
     n = a.target_pr
-    row = {
-        "kind": "check",
-        "id": a.id,
-        "scope": "pr",
-        "target_pr": n,
-        "prs": [n],
-        "from": "",
-        "to": "",
-        "metrics": {},
-        "findings": findings,
-    }
+    row = {"kind": "check", "id": a.id, "scope": "pr", "target_pr": n, "prs": [n], "from": "", "to": ""}
+    row.update(metrics={}, findings=findings)
     if a.review:
         row["only"] = "review"
     if a.failed:
