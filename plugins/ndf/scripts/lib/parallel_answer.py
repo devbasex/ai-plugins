@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import parallel_hold as ph
+import parallel_hold_sprint as phs
 import parallel_lane as pl
 
 
@@ -116,7 +117,8 @@ def owner_next(
 ) -> tuple[str | None, list[str]]:
     """答えの後の (1 行, 答え待ちの停止の範囲にある持ち主)。1 行は区分 `observe` の選んだ答えの commands（`relay.py status`）だけで、
     ほかは None。止まった持ち主の再起動と、耐久ワークフローが立てた問い（stall・helper・spawn）の答えは耐久ワークフローが打つ（#2936）。
-    停止の範囲にある 1 スプリントのレーンは起こさず、再開の印を置く（#2707 の I11）。ループのレーンは停止の範囲でも耐久ワークフローが
+    停止の範囲にある 1 スプリントのレーンは、再開の印を持つか次に始めるプランに承認の要らないプランが無ければ起こさず、再開の印を置く
+    （#2707 の I11）。承認の要らないプランがあれば、範囲の外と同じく起こす（#3000 の決定 3・4）。ループのレーンは停止の範囲でも耐久ワークフローが
     起こす。境で承認の要らない候補（承認した設計の実装など）を選び、無ければ同じ条件で止まり直す（#2913 の決定 6）。"""
     items = questions(main, name)[1] if items is None else items
     q = next((q for q in items if q.get("id") == rid), {})
@@ -126,7 +128,9 @@ def owner_next(
     if q.get("kind") == "observe" or not q.get("lane"):
         return chosen, []
     lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
-    held = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
+    sprint = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
+    marks = ph.read_marks(main, name) if sprint else {}
+    held = [lane for lane in sprint if lane in marks or not phs.sprint_free(main, name, lane)]
     for lane in held:
         ph.place_mark(main, name, lane, "answered")
     rest = [lane for lane in lanes if lane not in held]
