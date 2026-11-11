@@ -96,6 +96,57 @@ def _args(tmp_path, **over):
     return type("A", (), base)()
 
 
+class FakeGhSh:
+    """`sh` の差し替え。`gh` だけを決めた応答で返して呼び出しを記録し、ほかは本物の `sh` へ流す。
+
+    `viewer` は `gh api user` が返すログイン名（None は取得に失敗する環境）。`pr_status` は Pull Request の応答の
+    項目を上書きし、値が `MISSING` ならその項目を外す。
+    """
+
+    def __init__(self, pr, viewer, pr_status, real_sh, lib):
+        self.pr, self.viewer, self.pr_status = pr, viewer, pr_status
+        self.real_sh, self.lib = real_sh, lib
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd, cwd=None, check=True):
+        if cmd[0] != "gh":
+            return self.real_sh(cmd, cwd=cwd, check=check)
+        self.calls.append(list(cmd))
+        if "nameWithOwner" in cmd:
+            return "acme/demo"
+        if cmd[:3] == ["gh", "api", "user"]:
+            # viewer=None は取得に失敗する環境（bot トークンなど）を表す
+            if self.viewer is None:
+                if check:
+                    self.lib.die("コマンドが失敗しました (gh api user): HTTP 403")
+                return ""
+            return self.viewer
+        # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
+        if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
+            if cmd[2] != f"repos/acme/demo/pulls/{self.pr}":
+                return ""
+            return json.dumps(self._pull_request())
+        raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
+
+    def _pull_request(self) -> dict:
+        body = {
+            "number": self.pr,
+            "user": {"login": "me"},
+            "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
+            "base": {"ref": "main"},
+            # 実際の応答は必ずこの 3 項目を持つ（#1658 の決定 5）
+            "state": "open",
+            "draft": True,
+            "merged_at": None,
+        }
+        for key, value in (self.pr_status or {}).items():
+            if value is MISSING:
+                body.pop(key, None)
+            else:
+                body[key] = value
+        return body
+
+
 @pytest.fixture
 def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch):
     """`gh` 呼び出しだけを差し替えて `init` を走らせる。
@@ -103,7 +154,6 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     `viewer` は `gh api user` が返すログイン名。Pull Request の作成者は
     常に `author` なので、両者を一致させると自分の Pull Request になる。
     """
-    refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
     probed_models: list[dict] = []
     # 範囲テストのテンプレートの試走（#1630）はこのファイルの主題ではないため、対象なしとして通す。
@@ -118,44 +168,8 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
 
         `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
         """
-        real_sh = paths.sh
-        _run.gh_calls = []
-
-        def fake_sh(cmd, cwd=None, check=True):
-            if cmd[0] == "gh":
-                _run.gh_calls.append(list(cmd))
-                if "nameWithOwner" in cmd:
-                    return "acme/demo"
-                if cmd[:3] == ["gh", "api", "user"]:
-                    # viewer=None は取得に失敗する環境（bot トークンなど）を表す
-                    if viewer is None:
-                        if check:
-                            refactor_lib.die("コマンドが失敗しました (gh api user): HTTP 403")
-                        return ""
-                    return viewer
-                # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
-                if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
-                    if cmd[2] != f"repos/acme/demo/pulls/{args.pr}":
-                        return ""
-                    body = {
-                        "number": args.pr,
-                        "user": {"login": "me"},
-                        "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
-                        "base": {"ref": "main"},
-                        # 実際の応答は必ずこの 3 項目を持つ（#1658 の決定 5）
-                        "state": "open",
-                        "draft": True,
-                        "merged_at": None,
-                    }
-                    for key, value in (pr_status or {}).items():
-                        if value is MISSING:
-                            body.pop(key, None)
-                        else:
-                            body[key] = value
-                    return json.dumps(body)
-                raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
-            return real_sh(cmd, cwd=cwd, check=check)
-
+        fake_sh = FakeGhSh(args.pr, viewer, pr_status, paths.sh, sys.modules["refactor_lib"])
+        _run.gh_calls = fake_sh.calls
         patch_lib("sh", fake_sh)
         monkeypatch.chdir(origin_repo)
         monkeypatch.delenv("CROSS_REFACTORING_TMP_DIR", raising=False)
