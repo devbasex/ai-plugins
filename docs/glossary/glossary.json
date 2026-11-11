@@ -6257,25 +6257,25 @@
       "term": "業務時間",
       "context": "ndf-workflow",
       "meaning": "利用者が承認ゲートへ答えられる時間帯。進め方の宣言に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認の依頼を溜め、業務時間の始めにまとめて示す",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "新しい承認を生む作業",
       "context": "ndf-workflow",
       "meaning": "ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "承認の要らない作業",
       "context": "ndf-workflow",
       "meaning": "新しい承認を生む作業以外の作業。開発ループの中では、承認した設計の実装と、答えの届いた保留したループの 1 回の残りがこれに当たる（ループは設計を承認していない課題にモードに依らず設計のステップを置く）",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "溜めた依頼",
       "context": "ndf-workflow",
       "meaning": "業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と問いの依頼。業務時間の始めにまとめて示す",
-      "pending_source": "issues/issue-2913-design.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "判定表",

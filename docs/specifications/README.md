@@ -148,5 +148,6 @@
 | [ndf-context-continue-or-cut-measurement.md](ndf-context-continue-or-cut-measurement.md) | conductor の文脈を続けるか切るかの計測（計測の回・計測の条件・復元の量・待ちの前に切る規則） |
 | [ndf-mechanical-turns-to-scripts.md](ndf-mechanical-turns-to-scripts.md) | 機械的なターンをスクリプトへ移す（状態の取り出し・PR と CI の照合・手順の連続実行・進行のまとめ記録） |
 | [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) | 設計の判断を AI が決めて記録し、人へ残す判断をレッドラインに限る（MVV 判定と設計の検査） |
+| [ndf-work-during-approval-wait-and-business-hours.md](ndf-work-during-approval-wait-and-business-hours.md) | 答え待ちの間も承認の要らない作業を進め、業務時間外の承認の依頼を溜めて業務時間にまとめて示す |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
