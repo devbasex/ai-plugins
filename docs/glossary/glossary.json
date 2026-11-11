@@ -6495,6 +6495,41 @@
       "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す",
       "source": "",
       "pending_source": "issues/issue-3020-design.md"
+    },
+    {
+      "term": "触る場所の見込み",
+      "context": "ndf-workflow",
+      "meaning": "設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "見込みの出所",
+      "context": "ndf-workflow",
+      "meaning": "触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし）",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "同時に動く本数",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "順位の逆転",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと",
+      "source": "",
+      "pending_source": "issues/issue-2997-requirements.md"
+    },
+    {
+      "term": "逆転の幅",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
+      "source": "",
+      "pending_source": "issues/issue-2997-design.md"
     }
   ]
 }
