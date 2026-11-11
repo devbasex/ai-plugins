@@ -228,7 +228,7 @@ class FakeHost:
 
 
 def _peak(monkeypatch, tmp_path, host, roots=2, queues=0, extra=()):
-    procs = wtt._procs()
+    procs = wtt._load_procs()
     monkeypatch.setattr(procs, "host_sample", host)
     monkeypatch.setattr(procs, "count_cmdline", lambda *w: queues)
     monkeypatch.setattr(procs, "meminfo_mib", lambda path: {"MemTotal": 1000})
@@ -269,7 +269,7 @@ def test_peak_stops_below_the_floor_and_skips_the_rest(monkeypatch, tmp_path, ca
     """I6b・受け入れ条件 10: 下限を割ったら動いている全体テストを止め、打ち切った本数とその時点の値を残す。"""
     for i in range(2):
         (tmp_path / f"w{i}").mkdir()
-    procs = wtt._procs()
+    procs = wtt._load_procs()
     host = FakeHost([900])
 
     def low_after_start():  # 全体テストが始まった後に下限を割る

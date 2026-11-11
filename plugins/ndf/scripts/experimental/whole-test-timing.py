@@ -327,7 +327,7 @@ def cmd_startup(a) -> None:
 PEAK_FLOOR_MIB = 2048  # 打ち切る MemAvailable の下限（#2998 の決定 10）
 
 
-def _procs():
+def _load_procs():
     """procs（psutil）を読む。measure・diff・startup は psutil なしで動くため、peak のときだけ読む。"""
     import deps
 
@@ -343,10 +343,11 @@ def _suites_script(suites: list[dict]) -> str:
     return f"rc=0\n{body}exit $rc\n"
 
 
-def _ndf_version() -> str | None:
+def _plugin_version() -> str | None:
+    """NDF の版（`plugins/ndf/.claude-plugin/plugin.json`）。読めなければ None。"""
     try:
         return json.loads((Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
@@ -401,7 +402,8 @@ def cmd_peak(a) -> None:
     if not 1 <= len(roots) <= 3 or a.floor_mib < 0 or a.interval <= 0:
         raise StepError("--root は 1〜3 個、--floor-mib は 0 以上、--interval は正の数", EXIT_UNREADABLE)
     scripts = [_suites_script(load_suites(r)) for r in roots]
-    procs = _procs()
+    procs = _load_procs()
+
     host = procs.host_sample()
     queues = procs.count_cmdline("supervise.py", "queue")
     if queues or host.get("pytest"):
@@ -415,7 +417,7 @@ def cmd_peak(a) -> None:
         "date": time.strftime("%Y-%m-%d"),
         "cpus": os.cpu_count() or 1,
         "mem_total_mib": total,
-        "ndf_version": _ndf_version(),
+        "ndf_version": _plugin_version(),
         "before_used_mib": used,
         "before_swap_used_mib": swap,
         "floor_mib": a.floor_mib,

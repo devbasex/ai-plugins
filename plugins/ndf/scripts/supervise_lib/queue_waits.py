@@ -24,12 +24,13 @@ from supervise_lib.queue import NOT_RUN
 REASONS = ("overlap", "plans", "resource", "deps", "plan_limit")
 WAIT_PREFIX, GROUP_PREFIX = "wait-", "group-"  # flow の wait_workflow と group_workflow の ID の頭（`flow._group_id`）
 RESOURCE_PREFIX = "res-"  # 資源の枠の耐久キューの名前の頭（`flow.res_queue`）
-# 耐久キューの見回りで出るまでの遅れ。DBOS は耐久キューを既定 1 秒（揺らぎ ±5%、混み合うと延ばす）ごとに見るため、
-# 枠が空いていても入れてから出るまで 1 秒ほどかかる。耐久キューで待った秒（`plans`・`resource`）がこれ以下なら待たなかったとみなす
+# 耐久キューの見回りで出るまでの遅れ。枠が空いていても、入れてから出るまで 1 秒ほどかかる（2026-11-11 の実測で
+# 0.9〜1.1 秒。見回りの間隔 `durable.POLL_SECONDS` に、DBOS の見回りの揺らぎと混み合ったときの延長が乗る）。
+# 耐久キューで待った秒（`plans`・`resource`）がこれ以下なら待たなかったとみなす
 PICKUP_SECONDS = 2.0
 
 
-def _span(start: float | None, end: float | None) -> float:
+def _seconds_between(start: float | None, end: float | None) -> float:
     """`end - start` の秒（小数 1 桁）。どちらかが無い・負（時計の誤差）なら 0。"""
     if start is None or end is None:
         return 0.0
@@ -38,7 +39,7 @@ def _span(start: float | None, end: float | None) -> float:
 
 def _queued(created: float, dequeued: float | None) -> float:
     """耐久キューへ入れてから出るまでの秒。見回りの遅れ（`PICKUP_SECONDS` 以下）は 0。"""
-    got = _span(created, dequeued)
+    got = _seconds_between(created, dequeued)
     return got if got > PICKUP_SECONDS else 0.0
 
 
@@ -65,9 +66,9 @@ def plan_waits(pid: str, via: str | None) -> dict | None:
     group = _one(GROUP_PREFIX + via[len(WAIT_PREFIX) :] if wait is not None else via)
     if group is not None:
         got["plans"] = _queued(group[0], group[1])
-        got["overlap"] = _span(group[1], me[0])
+        got["overlap"] = _seconds_between(group[1], me[0])
     if wait is not None and group is not None:
-        got["deps"] = _span(wait[0], group[0])
+        got["deps"] = _seconds_between(wait[0], group[0])
     return got
 
 

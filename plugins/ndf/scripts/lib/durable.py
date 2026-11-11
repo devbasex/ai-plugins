@@ -320,26 +320,19 @@ def output_of(wid: str) -> Any:
 
 
 def status(wid: str) -> Optional[str]:
-    st = DBOS.get_workflow_status(wid)
-    return None if st is None else st.status
+    return getattr(DBOS.get_workflow_status(wid), "status", None)
 
 
 def workflow_ids(prefix: str, statuses: Optional[Iterable[str]] = None) -> list[str]:
     """接頭辞の耐久ワークフローの ID（作った順）。`statuses` を渡せばその状態だけ。"""
-    kw: dict[str, Any] = {"workflow_id_prefix": prefix, "load_input": False, "load_output": False}
-    if statuses is not None:
-        kw["status"] = list(statuses)
-    return [w.workflow_id for w in DBOS.list_workflows(**kw)]
+    only = {} if statuses is None else {"status": list(statuses)}
+    return [w.workflow_id for w in DBOS.list_workflows(workflow_id_prefix=prefix, load_input=False, load_output=False, **only)]
 
 
 def times(prefix: str) -> dict[str, tuple[float, Optional[float], Optional[str]]]:
-    """接頭辞の耐久ワークフローの ID → (作った時刻, 最後に耐久キューから出した時刻か None, 耐久キューの名前か None)。時刻は秒。"""
+    """接頭辞の耐久ワークフローの ID → (作った秒, 最後に耐久キューから出した秒か None, 耐久キューの名前か None)（#2998）。"""
     rows = DBOS.list_workflows(workflow_id_prefix=prefix, load_input=False, load_output=False)
-    return {
-        w.workflow_id: (w.created_at / 1000, None if w.dequeued_at is None else w.dequeued_at / 1000, w.queue_name)
-        for w in rows
-        if w.created_at is not None
-    }
+    return {w.workflow_id: (w.created_at / 1000, w.dequeued_at and w.dequeued_at / 1000, w.queue_name) for w in rows if w.created_at}
 
 
 def current_id() -> str:
