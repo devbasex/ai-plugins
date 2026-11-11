@@ -254,6 +254,7 @@
   "writes": [
     "answer-hold-json",
     "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
     "answer-json",
     "answers-sent-json",
     "approved-txt",

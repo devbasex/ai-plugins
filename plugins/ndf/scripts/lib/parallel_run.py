@@ -566,7 +566,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run = _Run(main, name, init["lanes"])
     run.init_run_state(ledgered)
     run.routed = durable.patched("parallel-answers")
-    run.launching = durable.patched("parallel-launch")
+    run.launching, run.sprint_hold_wake = durable.patched("parallel-launch"), durable.patched("parallel-sprint-hold-wake")  # #2936・#3000
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる

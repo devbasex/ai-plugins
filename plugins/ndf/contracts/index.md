@@ -34,6 +34,7 @@
 | `actuals-run-json` | `actuals-run.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `answer-hold-json` | `answer-hold.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `answer-hold-log-jsonl` | `answer-hold-log.jsonl` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `answer-hold-ran-json` | `answer-hold-ran.json` | state | state-dir | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `answer-json` | `answer.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `answers-sent-json` | `answers-sent.json` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `applied-json` | `*.applied.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
@@ -287,7 +288,7 @@
 | `monitor.stall.kiro` | seconds 480 | kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `notify.slack` | seconds 10 | Slack へ送る HTTP の上限 | `plugins/ndf/scripts/lib/notify.py:<module>` |
 | `parallel-launch.up` | seconds 120 / interval 5 | 一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる） | `plugins/ndf/scripts/lib/parallel_launch.py:<module>`<br>`plugins/ndf/scripts/lib/parallel_launch.py:_hit_once` |
-| `parallel-machine.admit-lock` | seconds 10 | レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く | `plugins/ndf/scripts/lib/parallel_machine.py:admit_lanes` |
+| `parallel-machine.admit-lock` | seconds 10 | レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く（#2999 の決定 4） | `plugins/ndf/scripts/lib/parallel_machine.py:admit_lanes` |
 | `parallel-repo.stall` | seconds 3600 | 動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる） | `plugins/ndf/scripts/lib/parallel_repo.py:<module>` |
 | `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |
