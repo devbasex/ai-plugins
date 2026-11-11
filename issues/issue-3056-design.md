@@ -31,7 +31,15 @@
 | --- | --- |
 | NDF の開発の工程（`ndf-workflow`） | CI テストの宣言・手元のテスト・CI の結果の監視・CI の失敗の改修・テストのチェック・プラン・ステップ |
 
-変更は 1 つのコンテキストに収まる。解析（`project-decl.py`）・プランのテンプレート（`supervise_lib`）・hook・cross-refactoring・cross-review は、同じコンテキストの別の構成要素であり、宣言を読む側はすべて `lib/test_strategy.py` の 1 つの関数を通す。
+変更は 1 つのコンテキストに収まる。次の 5 つは、同じコンテキストの別の構成要素である。
+
+- 解析（`project-decl.py`）
+- プランのテンプレート（`supervise_lib`）
+- hook
+- cross-refactoring
+- cross-review
+
+宣言を読む側は、すべて `lib/test_strategy.py` の 1 つの関数を通す。
 
 ### 集約
 
@@ -134,7 +142,7 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | F7 | `test-run.py scope` がテストの suite を走らせず静的解析だけを走らせる | プランのステップ・worker |
 | F8 | cross-refactoring が手元のテストを走らせず CI の結果で点検し、工程へ戻る | 検査のプラン |
 | F9 | cross-review の指摘の検証と完了判定が CI の結果を証跡にする | cross-review の担当・`quality-gates` |
-| F10 | 規則 1〜4 を Skill とエージェント定義と worker の指示文に書く | worker・supervisor・conductor |
+| F10 | 要求の規則 1〜4 を Skill とエージェント定義と worker の指示文に書く | worker・supervisor・conductor |
 
 ## 構成要素
 
@@ -153,7 +161,7 @@ CI の監視ログは追記だけで持ち、改修の回数は記録から数�
 | `hook_lib/ci_test_guard.py`（新設）・`hook.py` | PreToolUse の Bash を、宣言のあるリポジトリでテストの suite の起動の形と照合し、当たれば拒む（I9）。Claude Code と Codex の両方の hook から呼ばれる |
 | cross-refactoring の `refactor_lib/baseline.py`・`scope_verdict.py`・`commands/implement.py`・`template_check.py`・`gate_ci.py` | `ci_only` のとき、着手前のテスト・項目ごとの点検の範囲テスト・足したテストの試走・テンプレートの試走を走らせない（静的解析は走らせる）。最終ゲートは既存の CI の判定（`ci_gate`）で決める。テストのチェックが空なら head のすべてを読む |
 | cross-review の `scripts/drive.py` | 最終スイープの指示の行（`sweep_verify_lines`）を、`ci_only` なら「テストを手元で打たず、PR の CI の結果を読む」にする |
-| Skill とエージェント定義 | `development-workflow`（SKILL.md と `references/project-analysis.md`）・`quality-gates`・`cross-review`・`cross-refactoring` の SKILL.md、`agents/worker.md`・`agents/supervisor.md` に規則 1〜4 を書く |
+| Skill とエージェント定義 | `development-workflow`（SKILL.md と `references/project-analysis.md`）・`quality-gates`・`cross-review`・`cross-refactoring` の SKILL.md、`agents/worker.md`・`agents/supervisor.md` に要求の規則 1〜4 を書く |
 | `.ndf/project.json`（このリポジトリ） | `test.ci.only: true` を足す（`pytest` の suite が `.github/workflows/pytest.yml` を `ci_jobs` に持つ） |
 
 ```mermaid
@@ -178,7 +186,14 @@ graph TB
     MG --> GH
 ```
 
-図には宣言を書く・読むコードの構成要素だけを描く。上限の表（`contracts/limits.json`）・worker の指示文（`prompts.py`・`worker_steps.py`）・スクリプトの置き場の定数（`paths.py`）・`hook.py` の振り分け・Skill とエージェント定義・このリポジトリの宣言は描かない。
+図には宣言を書く・読むコードの構成要素だけを描く。次のものは描かない。
+
+- 上限の表（`contracts/limits.json`）
+- worker の指示文（`prompts.py`・`worker_steps.py`）
+- スクリプトの置き場の定数（`paths.py`）
+- `hook.py` の振り分け
+- Skill とエージェント定義
+- このリポジトリの宣言
 
 ## 入出力の契約
 
@@ -192,7 +207,7 @@ graph TB
 | --- | --- | --- |
 | `test.ci.only` | `true` / `false` / 無し | `true` で CI テストの宣言。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。無しは宣言なし |
 
-互換性: 足すだけで、既存の項目の意味は変えない。`test.strategy` の 3 つの値は残し、`only: true` は戦略の値に関わらず手元のテストを止める（前提 5）。
+互換性: 足すだけで、既存の項目の意味は変えない。`test.strategy` の 3 つの値は残し、`only: true` は戦略の値に関わらず手元のテストを止める（要求の前提 5）。
 
 解析の答えの形（`references/project-analysis.md` の `test` の行）に `suites[].ci_jobs` を足す。conductor はワークフローのファイルからテストのジョブを答え、`only` は答えずに書き出しが I1 で決める。
 
@@ -235,7 +250,13 @@ graph TB
 
 ### 実装のプラン（宣言のあるリポジトリ）
 
-宣言の無いリポジトリの並び（`impl → base-sync → 整形・同期・範囲の静的解析 → test-limited → 設計との突き合わせ → pr → test-all → doc-lint → ready → マージ`）は変えない。宣言のあるリポジトリでは次の並びにする。
+宣言の無いリポジトリの並びは変えない。今の並びは次のとおりである。
+
+```text
+impl → base-sync → 整形・同期・範囲の静的解析 → test-limited → 設計との突き合わせ → pr → test-all → doc-lint → ready → マージ
+```
+
+宣言のあるリポジトリでは次の並びにする。
 
 ```mermaid
 graph TB
@@ -267,7 +288,7 @@ graph TB
 
 ### 検査のプラン（宣言のあるリポジトリ）
 
-`new check --pr` と `new check --since-last` は、今の `trim_check_steps` が `test-all` と、それだけを入力に持つ judge・fix を外す（`whole_on_ci` を `ci_only` でも真にするため）。そこへ次を足す。
+対象は `new check --pr` と `new check --since-last` である。`whole_on_ci` を `ci_only` でも真にするため、今の `trim_check_steps` がこの 2 つから `test-all` を外す。`test-all` だけを入力に持つ judge・fix も外れる。そこへ次を足す。
 
 - リファクタリング（`assess` → `refactor`）を戻す（`CROSS_REFACTORING_SUSPENDED = False`）。`refactor` の中の点検は下の「cross-refactoring」のとおり
 - `review` の後、`ready`（差分の検査では `finish`）の前に `ci-peek` を置く。`ci-fix` は直してコミットし `git push` して `ci-peek` へ戻る
@@ -304,7 +325,7 @@ graph TB
 
 ### 決定 1: 戦略の値と独立に読めるよう、宣言を `test.ci.only` の真偽値にする
 
-前提 5 は既存の戦略の 3 つの値を残し、宣言を別の情報として読むことを求める。`test.strategy` に値を足すと、範囲テストを選べない `round-only` と CI テストの宣言を同時に表せず、戦略を導く関数（`propose`）の分岐も増える。CI の読み方の設定は `test.ci`（`check`・`junit_artifacts`）がすでに持つため、同じ場所に真偽値を置く。
+要求の前提 5 は既存の戦略の 3 つの値を残し、宣言を別の情報として読むことを求める。`test.strategy` に値を足すと、範囲テストを選べない `round-only` と CI テストの宣言を同時に表せず、戦略を導く関数（`propose`）の分岐も増える。CI の読み方の設定は `test.ci`（`check`・`junit_artifacts`）がすでに持つため、同じ場所に真偽値を置く。
 
 `test.strategy` に `ci-only` を足す形は、戦略の値を前提に書かれた分岐（`whole_on_ci`・`scoped_suites` の呼び手）を値ごとに直すことになるため採らない。
 
@@ -338,7 +359,7 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 
 ### 決定 5: 改修を際限なく繰り返さないよう、改修の回数の上限を 3 にし、上限に当たったら止めて人へ戻す
 
-前提 6 は上限を求める。数えるのは落ちた head の数で、同じ head を何度覗いても 1 回とする。3 は、既存の「2 回直しても同じ失敗なら止める」（`RULE_IMPL`）に、別の原因の失敗が 1 回続く余地を足した値である。値の正本は `contracts/limits.json` の `supervise.ci-fix` に置く。
+要求の前提 6 は上限を求める。数えるのは落ちた head の数で、同じ head を何度覗いても 1 回とする。3 は、既存の「2 回直しても同じ失敗なら止める」（`RULE_IMPL`）に、別の原因の失敗が 1 回続く余地を足した値である。値の正本は `contracts/limits.json` の `supervise.ci-fix` に置く。
 
 根拠: Value 2（MVV 版 7）
 
@@ -350,19 +371,19 @@ conductor の答えに任せると、同じリポジトリでも答え手によ�
 
 ### 決定 7: 最初の push で CI を走らせるため、`pr-draft` を実装のステップの直後に置き、本文は機械のテンプレートで作る
 
-規則 4 は最初の push の時点で Draft の PR を求める。`pr-draft` は起点の取り込みより前に置き、CI の 1 回目を最も早く起こす。本文は後の `pr` のステップが書き直すため、`pr-draft` で LLM を呼ばない。PR を早く出すために worker へ push と PR の作成を任せる形は、PR の題と本文の書き手が 2 つになるため採らない。
+要求の規則 4 は最初の push の時点で Draft の PR を求める。`pr-draft` は起点の取り込みより前に置き、CI の 1 回目を最も早く起こす。本文は後の `pr` のステップが書き直すため、`pr-draft` で LLM を呼ばない。PR を早く出すために worker へ push と PR の作成を任せる形は、PR の題と本文の書き手が 2 つになるため採らない。
 
 根拠: Value 2 / Value 5（MVV 版 7）
 
 ### 決定 8: 宣言のあるリポジトリのマージは、テストのチェックがすべて現れて通ったときだけ行う
 
-宣言のあるリポジトリでは手元で一度もテストを走らせないため、CI のテストが走らなかった変更をマージすると、テストを通らない変更がベースブランチへ入る。今の `merge-when-green` はチェックが 1 件も載らないときを完了として扱うため、宣言のあるリポジトリではこれを止めにする。テストのチェックの名前は、cross-refactoring と `test-run.py` と同じ `test.ci.check` → `ci.required_checks` の順で決め、どちらも無ければ head のすべてのチェックにする。照合は名前の完全一致、SKIPPED は通過（STD1）。宣言の無いリポジトリは今のままにする。
+宣言のあるリポジトリでは手元で一度もテストを走らせないため、CI のテストが走らなかった変更をマージすると、テストを通らない変更がベースブランチへ入る。今の `merge-when-green` はチェックが 1 件も載らないときを完了として扱うため、宣言のあるリポジトリではこれを止めにする。テストのチェックの名前は `test.ci.check` → `ci.required_checks` の順で決める。この順は cross-refactoring と `test-run.py` と同じである。どちらも無ければ head のすべてのチェックにする。照合は名前の完全一致、SKIPPED は通過（STD1）。宣言の無いリポジトリは今のままにする。
 
 根拠: Value 13 / Value 7（MVV 版 7）
 
 ### 決定 9: 静的解析は手元に残す
 
-依頼の原文が手元で止めるのはテストである。静的解析は範囲を絞れば数秒で終わり、CI の往復（このリポジトリの静的解析のワークフローで 19〜113 秒、`.ndf/project.json` の `ci.workflows`）より速く、push の前に落とせる。範囲の静的解析（`lint-limited`）・cross-refactoring の公開前の静的解析は今のまま走らせる。CI でも走る静的解析を手元から外す形は、push の前の検査が無くなり CI の往復が増えるため採らない。
+依頼の原文が手元で止めるのはテストである。静的解析は範囲を絞れば数秒で終わる。CI の往復より速く、push の前に落とせる。CI の往復は、このリポジトリの静的解析のワークフローで 19〜113 秒である（`.ndf/project.json` の `ci.workflows`）。範囲の静的解析（`lint-limited`）・cross-refactoring の公開前の静的解析は今のまま走らせる。CI でも走る静的解析を手元から外す形は、push の前の検査が無くなり CI の往復が増えるため採らない。
 
 根拠: Value 2 / Value 5（MVV 版 7）
 
