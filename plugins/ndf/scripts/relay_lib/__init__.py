@@ -156,9 +156,7 @@ def _cap_cmd(rest: list[str]) -> int:
     summary = f"レーン数の上限は {n}（出所: {source}）・プランの本数の上限は {p}（出所: {plans_source}）" + "".join(
         f"。{x}" for x in (note, plans_note) if x
     )
-    return out(
-        "ok", summary, 0, max_named=n, source=source, max_plans=p, plans_source=plans_source, path=str(relay_limit.limits_path())
-    )
+    return out("ok", summary, 0, max_named=n, source=source, max_plans=p, plans_source=plans_source, path=str(relay_limit.limits_path()))
 
 
 def _stop_cmd(rest: list[str]) -> int:

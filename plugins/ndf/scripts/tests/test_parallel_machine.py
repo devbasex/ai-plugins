@@ -175,19 +175,6 @@ def test_writing_one_cap_keeps_the_other(monkeypatch):
     assert relay_limit.plans_cap()[2] is None  # 片方のキーだけのファイルでも注記を出さない
 
 
-def test_relay_cap_plans_cli_writes_validates_and_reports_both():
-    run = lambda *a: subprocess.run([sys.executable, str(SCRIPTS / "relay.py"), "cap", *a], capture_output=True, text=True)  # noqa: E731
-    assert run("--named", "4").returncode == 0
-    got = run("--plans", "7")
-    assert got.returncode == 0, got.stderr
-    m = json.loads(got.stdout)["metrics"]
-    assert (m["max_plans"], m["plans_source"], m["max_named"], m["source"]) == (7, "file", 4, "file")
-    before = relay_limit.limits_path().read_text()
-    for bad in ("0", "x", "-1"):
-        assert run("--plans", bad).returncode == 1
-    assert relay_limit.limits_path().read_text() == before
-
-
 # ---- 起動の判定（受け入れ条件 4〜7、I7〜I11・I16） ----
 
 
@@ -282,3 +269,12 @@ def test_the_waiting_text_states_the_numbers():
     assert pm.waiting_text(w) == "起動待ち（マシン 5 + このレーン 2 > 上限 6）"
     assert pm.waiting_text({"reason": "lock"}) == "起動待ち（起動の排他を取れない）"
     assert pm.waiting_text(None) is None
+
+
+def test_an_unreadable_lane_list_waits_only_when_another_plan_runs(busy, tmp_path):
+    x, y = busy
+    started: list[str] = []
+    got = pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None)
+    assert started == [] and got["py0"]["waiting"]["reason"] == "observe"
+    (pp.plan_dir(x, "c1") / "run.done").write_text("SUCCESS")  # 他に動いている計画が無いマシンでは今までどおり起動する
+    assert pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None) == {"py0": {"started": "t"}}

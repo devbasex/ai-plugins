@@ -200,8 +200,11 @@ def admit(
     try:
         with locks.exclusive(lock_target(), timeout=timeout):
             rows = (ls or (lambda: _ls(main)))()
-            if rows is None:
-                return {n: wait("observe", None, p, []) for n, p in lanes}
+            if rows is None:  # 一覧を読めない: 他に動いている計画が無ければ今までどおり起動する（自分の計画は I2 で上限以下）
+                others = declared(main, name, status)
+                if others["plans"] or others["unreadable"]:
+                    return {n: wait("observe", None, p, others["unreadable"]) for n, p in lanes}
+                return {n: spawn(n) for n, _ in lanes}
             got = running_total(main, rows, name, status)
             total = got["total"]
             for n, p in lanes:

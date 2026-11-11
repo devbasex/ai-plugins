@@ -818,8 +818,10 @@ def test_a_helper_ends_by_stopping_its_own_wrapper():
 
 
 def _bare_run(monkeypatch, lanes):
-    """耐久ワークフローの外で _Run を組む（知らせは捨てる）。"""
+    """耐久ワークフローの外で _Run を組む（知らせは捨てる）。起動の判定はマシンを数えず、テストが差し替えた step_spawn へ渡す。"""
     monkeypatch.setattr(durable, "set_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(prun, "step_admit", lambda m, n, names: prun.step_spawn(m, n, names))
+    monkeypatch.setattr(prun, "step_progress", lambda *_a: None)
     return prun._Run("/m", "p1", lanes)
 
 
@@ -1593,3 +1595,55 @@ def test_other_repo_lane_asks_through_the_plan_home_and_reads_the_answer(env, tm
     pl.send_answer(main, "p1", rid, "answered", choice=["済んだ"])
     ans = until(lambda: pl.answers_of(pl.plan_home(other, "p1", "lf"), "p1", [rid])[rid]["answer"])
     assert ans["choice"] == ["済んだ"]
+
+
+# ---- マシン全体のプランの本数による起動の待ち（#2999 の受け入れ条件 4・5、I12・I14・I15） ----
+
+
+def _busy_machine(tmp_path, plans):
+    """別のリポジトリに動いている計画 c1（レーン ox<i> の本数 `plans`）を置き、計画の所在の一覧へ書く。"""
+    import parallel_homes
+
+    other = tmp_path / "carul"
+    (other / ".ndf").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    d = pp.plan_dir(other, "c1")
+    d.mkdir(parents=True)
+    lanes = [{"name": f"ox{i}", "input": {"kind": "sprint", "issues": [9]}, "plans": n, "touches": ["x/"]} for i, n in enumerate(plans)]
+    (d / "plan.json").write_text(json.dumps({"version": 1, "name": "c1", "rules": [], "lanes": lanes}))
+    (d / "run.done").write_text("PENDING")  # 動いている計画として読ませる（settled_status が読む）
+    parallel_homes.record_home(other)
+    return other
+
+
+def test_a_lane_waits_for_room_on_the_machine_then_starts(env, tmp_path, monkeypatch):
+    import parallel_status as pst
+
+    monkeypatch.delenv("NDF_PARALLEL_MAX_PLANS", raising=False)
+    main, log, states = env["main"], env["log"], env["states"]
+    _busy_machine(tmp_path, [3, 3])
+    states.write_text(json.dumps({"ox0": "running", "ox1": "awaiting_approval"}))  # マシンの合計 6
+    start(main)
+    plan = pp.load_valid_plan(main, "p1")
+    row = until(lambda: [r for r in pst.lane_rows(main, "p1", plan) if r["lane"] == "la" and r["waiting"]])[0]
+    w = row["waiting"]
+    assert (w["reason"], w["machine_plans"], w["plans"], w["max_plans"]) == ("machine-plans", 6, 1, 6) and w["since"]
+    assert "起動待ち（マシン 6 + このレーン 1 > 上限 6）" in (pp.plan_dir(main, "p1") / "plan.md").read_text()
+    assert "起動待ち 1" in pst.status_summary(pst.lane_rows(main, "p1", plan))
+    time.sleep(1.5)  # 見回りが何度も重なっても、待ちは断りに数えず問わない（I12）
+    assert lanes_spawned(log) == [] and not [i for i in questions(main)["items"] if i["kind"] == "spawn"]
+    set_state(states, "ox1", "stopped")  # 別のリポジトリのレーンが止まった（合計 3）
+    until(lambda: lanes_spawned(log) == ["la"])
+    until(lambda: not [r for r in pst.lane_rows(main, "p1", plan) if r["waiting"]])
+    assert "起動待ち" not in (pp.plan_dir(main, "p1") / "plan.md").read_text()
+
+
+def test_an_old_record_starts_lanes_without_counting_the_machine(env, tmp_path, monkeypatch):
+    monkeypatch.delenv("NDF_PARALLEL_MAX_PLANS", raising=False)
+    main, log, states = env["main"], env["log"], env["states"]
+    _busy_machine(tmp_path, [3, 3])
+    states.write_text(json.dumps({"ox0": "running", "ox1": "running"}))
+    orig = durable.patched
+    monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-admit" else orig(n))
+    start(main)
+    until(lambda: lanes_spawned(log) == ["la"])  # 印の無い記録は今までの parallel.spawn を打つ（I15）
