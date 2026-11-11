@@ -6463,6 +6463,13 @@
       "meaning": "加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと",
       "source": "",
       "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "引き継いだ承認",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す",
+      "source": "",
+      "pending_source": "issues/issue-3020-design.md"
     }
   ]
 }
