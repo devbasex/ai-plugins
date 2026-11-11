@@ -363,7 +363,7 @@ graph TD
 
 ### 決定 3: 読み取り元を差し替えて試せるよう、load average とメモリは `/proc` のファイルを `procs.py` で直に読む
 
-要求の前提 1 は `/proc/loadavg` と `/proc/meminfo` を読み元とし、テスト戦略は読み取り元のファイルを差し替えた単体テストを求める。psutil の `getloadavg()` は Linux で `os.getloadavg` を呼び、`psutil.PROCFS_PATH` を差し替えても実際の値を返した（2026-11-11 の実行）。`procs.py` はすでに `/proc/pressure/memory` と `/proc/vmstat` をパスの引数つきで直に読んでおり、同じ形に揃える。
+要求の前提 1 は `/proc/loadavg` と `/proc/meminfo` を読み元とし、テスト戦略は読み取り元のファイルを差し替えた単体テストを求める。psutil の `getloadavg()` は Linux で `os.getloadavg` を呼ぶ。そのため `psutil.PROCFS_PATH` を差し替えても実際の値を返した（2026-11-11 の実行）。`procs.py` はすでに `/proc/pressure/memory` と `/proc/vmstat` をパスの引数つきで直に読んでおり、同じ形に揃える。
 
 psutil の `getloadavg()`・`virtual_memory()`・`swap_memory()` を使う形は採らない。差し替えの手段が `PROCFS_PATH` の書き換え（プロセス全体の状態）になり、load average には効かない。
 
@@ -374,7 +374,7 @@ psutil の `getloadavg()`・`virtual_memory()`・`swap_memory()` を使う形は
 
 ### 決定 4: 親のプロセスとシェルを重ねず、xdist の作業プロセスを落とさないよう、pytest の本体を命令行の形で見分け、作業プロセスは本体の子として数える
 
-命令行に `pytest` を含むかで数えると、`uv run ... pytest` の親と、命令を文字列で持つ Bash のシェルも数え、xdist の作業プロセス（命令行に `pytest` を含まない）を落とす（2026-11-11 の実測）。本体は、実行ファイルの名前が `pytest` か `py.test` のもの、または Python のインタプリタで最初の引数の名前が `pytest` か `-m pytest` のものとする。作業プロセスは本体の直下の子のうち Python のインタプリタのものとし、`pytest_workers` に別に数える（要求の前提 2）。プロセスの一覧は依存済みの psutil で読む。
+命令行に `pytest` を含むかで数えると、`uv run ... pytest` の親と、命令を文字列で持つ Bash のシェルも数える。その数え方では、命令行に `pytest` を含まない xdist の作業プロセスを落とす（2026-11-11 の実測）。本体は、実行ファイルの名前が `pytest` か `py.test` のもの、または Python のインタプリタで最初の引数の名前が `pytest` か `-m pytest` のものとする。作業プロセスは本体の直下の子のうち Python のインタプリタのものとし、`pytest_workers` に別に数える（要求の前提 2）。プロセスの一覧は依存済みの psutil で読む。
 
 数えられる範囲は、supervise と同じ PID の名前空間から見えるプロセスに限る。同じ VM の別のコンテナの pytest は数えない。load average とメモリはコンテナの中からも VM 全体の値が見えるため、この違いは pytest の数だけにある。
 
@@ -429,7 +429,7 @@ psutil の `getloadavg()`・`virtual_memory()`・`swap_memory()` を使う形は
 
 ### 決定 10: OOM Killer の手前で止めるため、打ち切る MemAvailable の下限を 2,048 MiB にする
 
-2026-11-11 のスワップの空きは 313〜383 MiB で、スワップは山を吸収できない。下限は、`parallel-measure.py` の予備（同じ VM のほかのプロセスの揺れ、1,024 MiB）に、測る間隔 1 秒の間に増えうる分として同じ 1,024 MiB を足した値である。下限を割ったら、`procs.stop_tree` で動いている全体テストの木を止める。
+2026-11-11 のスワップの空きは 313〜383 MiB で、スワップは山を吸収できない。下限は 2 つの 1,024 MiB の和である。1 つは `parallel-measure.py` の予備（同じ VM のほかのプロセスの揺れ）で、もう 1 つは測る間隔 1 秒の間に増えうる分である。下限を割ったら、`procs.stop_tree` で動いている全体テストの木を止める。
 
 予備の 1,024 MiB だけを下限にする形は採らない。1 秒の間の増え方を見込まず、測った直後に OOM Killer が動く余地が残る。
 
