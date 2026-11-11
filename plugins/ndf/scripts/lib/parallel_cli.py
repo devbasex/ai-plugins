@@ -104,9 +104,9 @@ def legacy_pause(ev: dict) -> bool:
 
 
 def carried_pause(ev: dict) -> bool:
-    """出し直しを省いた確定の `pause`（`action: confirmed` で `carried` を持つ）か。オーガナイザーが加わった Pull Request を
-    利用者へ 1 行で伝えるために返す（#3020 の決定 5）。"""
-    return ev.get("action") == "confirmed" and bool(ev.get("carried"))
+    """出し直しを省いた確定の確かめ直しが通った知らせの `pause`（`action: carried`）か。オーガナイザーが加わった Pull Request を
+    利用者へ 1 行で伝えるために返す（#3020 の決定 5）。答えの時点の確定（`action: confirmed`）では伝えない。"""
+    return ev.get("action") == "carried" and bool(ev.get("carried"))
 
 
 def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
@@ -212,9 +212,29 @@ def carried_report(main: Path, name: str, n: int, reply) -> None:
         first, second = (json.loads((pr.release_dir(main, name, n, k) / "presented.json").read_text(encoding="utf-8")) for k in (1, 2))
     except (OSError, ValueError) as exc:
         reply("stopped", f"提示の記録（presented.json）を読めない: {exc}", code=2)
-    got = pr.carry_check(main, first.get("sha") or "", second.get("sha") or "")
+    # 加わった Pull Request は提示の記録の差で数えるため、GitHub の一覧を取らない（取れずに承認ゲートへ倒れない）
+    got = pr.carry_check(main, first.get("sha") or "", second.get("sha") or "", prs_of=lambda *_: [])
     if not got["carry"]:
         why = f"リリース {n} の確かめ直しの範囲が文書だけではない: {got['reason']}"
         reply("gate", why, code=10, next_step="提示 2 のリリース承認ゲートの依頼を送る（helper の metrics.gate2）", files=got["files"])
     added = [x for x in second.get("prs") or [] if x not in set(first.get("prs") or [])]
-    reply("ok", f"リリース {n} の確かめ直しの範囲は文書だけ（Pull Request {len(added)} 本）", added=added, files=got["files"])
+    notified = notify_carried(main, name, n, first.get("sha") or "", second.get("sha") or "", added)
+    reply(
+        "ok",
+        f"リリース {n} の確かめ直しの範囲は文書だけ（Pull Request {len(added)} 本）",
+        added=added,
+        files=got["files"],
+        notified=notified,
+    )
+
+
+def notify_carried(main: Path, name: str, n: int, first: str, head: str, added: list) -> bool:
+    """確かめ直しが通ったことを耐久ワークフローへ送る。オーガナイザーへの知らせ（`pause` の `action: carried`）はこれを受けて立つ
+    （答えの時点では立てない。#3020）。知らせは引き継ぎの正しさに効かないため、送れなくても確かめ直しの結果は変えず False を返す。"""
+    msg = {"n": n, "phase": "carried", "carried": {"from": first, "head": head, "prs": added}}
+    try:
+        pl.resume_plan(main, name, msg, f"carried:{n}")
+    except OSError as exc:  # LockTimeout も OSError
+        print(f"parallel: 確かめ直しが通った知らせを送れない: {exc}", file=sys.stderr, flush=True)
+        return False
+    return True

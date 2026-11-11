@@ -4,12 +4,13 @@
 すべて耐久ステップである（打ち直しで同じ道を通るため。#1142 の I18）。外へ見せるのはイベントと出力だけである。
 
 - メッセージ `inbox`: `{kind: request | gate1 | gate2 | ask | unmatched | answer | stop | left_stopped, ...}`（レーン・一時レーン・オーガナイザーの答え・`stop`・`park --clear`）
-- メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}`（`confirm`・`settle`）
+- メッセージ `resume`: `{n, phase: confirm, take}` / `{n, phase: carried, carried}` / `{n, phase: settle, result, version, reason}`
+  （`confirm`・`carried`・`settle`）
 - リリースの組み方は依頼を受けるたびに耐久ステップ `parallel.route` が宣言から読む。組まないなら `released`、組めないなら
   `failed` と理由を依頼へ答え、計画を止めるかは問い（`kind: build`）への人の答えで決まる（#2616）
 - イベント `answer-hold`: `{seq, action: "answer_hold", n, line, hold}`（答え待ちの停止の最新の変化。#2707）
-- イベント `pause`: `{seq, action}`（`running` / `release` / `confirmed` / `held`。一時レーンが流すものを決める
-  （`parallel.py helper` が読む。`parallel.py wait` は出し直しを省いた確定（`carried` 付き）だけを読む。#2936・#3020）、`questions`: `{seq, items}`
+- イベント `pause`: `{seq, action}`（`running` / `release` / `confirmed` / `carried` / `held`。一時レーンが流すものを決める
+  （`parallel.py helper` が読む。`parallel.py wait` は出し直しを省いた確定の確かめ直しが通った知らせ（`carried`）だけを読む。#2936・#3020）、`questions`: `{seq, items}`
 - 一時レーンの起動と止まったレーンの再起動は耐久ワークフローが打つ（`parallel_launch`。#2936）
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
@@ -477,8 +478,19 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             self.publish_questions()
         if msg.get("phase") == "confirm":
             self.confirm(rel, msg.get("take"))
+        elif msg.get("phase") == "carried":
+            self.carried_ok(rel, msg)
         elif msg.get("phase") == "settle":
             self.settle(rel, msg)
+
+    def carried_ok(self, rel: dict, msg: dict) -> None:
+        """一時レーンの確かめ直し（`parallel.py carried`）が通ったら、提示 2 の範囲の Pull Request を添えてオーガナイザーへ知らせる。
+        答えの時点では知らせない（確かめ直しが承認ゲートへ倒れると、伝えた範囲と提示 2 の範囲が食い違うため。#3020）。
+        引き継ぎを外した後（提示 2 への答えの後）に遅れて届いたものは読み飛ばす。"""
+        if not rel.get("carried") or not isinstance(msg.get("carried"), dict):
+            return
+        rel["carried"] = {**rel["carried"], **msg["carried"]}
+        self.pause("carried", n=rel["n"], k=2, carried=rel["carried"])
 
     def confirm(self, rel: dict, take: Optional[str]) -> None:
         """承認の答えを受けたら 1 度だけ比べる。出し直しの提示への答えでは比べない（I14）。進んでいて、加わった範囲が

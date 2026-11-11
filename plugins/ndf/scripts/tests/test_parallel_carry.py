@@ -194,10 +194,15 @@ def test_docs_only_range_confirms_the_new_range_without_representing(env, tmp_pa
     assert carry["checks"] == [("sha1", "sha2")] and (1, 2, True) in carry["built"]
     task = prun.helper_task(main, "p1", 1, 2)  # 一時レーンは提示と同じ流し方（提示のプランが確かめ直して承認を書く）
     assert task["phase"] == "present" and "present.json" in task["pipeline"]
-    got, _ = pcli.wait_event(main, "p1", 0, 10)  # オーガナイザーが利用者へ 1 行で伝える知らせ
-    assert got.kind == "event" and got.value["key"] == "pause" and got.value["carried"]["prs"] == [12]
-    # 判定の後に文書だけの #13 も入った（確かめ直しの範囲）。結果には #13 も載る（I8）
+    got, _ = pcli.wait_event(main, "p1", 0, 0.5)  # 答えの時点では確かめ直しの前なので利用者へ伝えない
+    assert got.kind == "timeout"
+    # 判定の後に文書だけの #13 も入った（確かめ直しの範囲）。確かめ直しが通ったら、提示 2 の範囲で伝える
     presented(main, 2, "sha3", [10, 12, 13])
+    resume(main, {"n": 1, "phase": "carried", "carried": {"from": "sha1", "head": "sha3", "prs": [12, 13]}}, "carried:1")
+    got, _ = pcli.wait_event(main, "p1", 0, 10)  # オーガナイザーが利用者へ 1 行で伝える知らせ
+    assert got.kind == "event" and got.value["action"] == "carried" and got.value["carried"]["prs"] == [12, 13]
+    assert prun.helper_task(main, "p1", 1, 2)["phase"] == "present"  # 知らせの後も一時レーンが流すものは変わらない
+    # 結果には #13 も載る（I8）
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.4"}, "s1")
     ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
     assert ans["result"] == "released"
@@ -282,10 +287,23 @@ def test_an_old_record_without_the_mark_represents_without_checking(env, tmp_pat
     assert carry["checks"] == []
 
 
-def test_wait_skips_a_confirmed_pause_without_carried():
-    """受け入れ条件 7: `carried` の無い確定は返さない。"""
-    assert pcli.carried_pause({"action": "confirmed", "carried": {"prs": [1]}})
-    assert not pcli.carried_pause({"action": "confirmed"}) and not pcli.carried_pause({"action": "release", "carried": {"prs": [1]}})
+def test_wait_returns_only_the_passed_recheck():
+    """受け入れ条件 7: 確かめ直しが通った知らせだけを返し、答えの時点の確定（`carried` 付きでも）は返さない。"""
+    assert pcli.carried_pause({"action": "carried", "carried": {"prs": [1]}})
+    assert not pcli.carried_pause({"action": "confirmed", "carried": {"prs": [1]}}) and not pcli.carried_pause({"action": "confirmed"})
+
+
+def test_a_late_recheck_after_the_second_answer_is_ignored(env, tmp_path, carry):
+    """提示 2 への答えで引き継ぎを外した後に届いた確かめ直しの知らせは、利用者へ伝えない。"""
+    main = env["main"]
+    to_confirm(env, tmp_path)
+    confirmed(main)
+    presented(main, 2, "sha3", [10, 12])
+    resume(main, {"n": 1, "phase": "confirm", "take": "new"}, "c2")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and "carried" not in e)
+    resume(main, {"n": 1, "phase": "carried", "carried": {"from": "sha1", "head": "sha3", "prs": [12]}}, "carried:1")
+    got, _ = pcli.wait_event(main, "p1", 0, 0.5)
+    assert got.kind == "timeout"
 
 
 # ---- parallel.py carried（I4） ----
@@ -313,3 +331,31 @@ def test_parallel_carried_returns_0_for_docs_and_10_for_code(repo, monkeypatch):
     (prl.release_dir(repo, "p1", 1, 2) / "presented.json").unlink()
     code, out = run_carried(repo, "p1", 1)
     assert code == 2 and out["status"] == "stopped"
+
+
+def test_parallel_carried_does_not_read_github_and_notifies(tmp_path, monkeypatch):
+    """`parallel.py carried` は加わった Pull Request を提示の記録の差で数え、GitHub の一覧を取らない。通ったら知らせを送る。"""
+    for k, sha, prs in ((1, "sha1", [10]), (2, "sha2", [10, 12])):
+        d = prl.release_dir(tmp_path, "p1", 1, k)
+        d.mkdir(parents=True)
+        (d / "presented.json").write_text(json.dumps({"sha": sha, "prs": prs}))
+    seen, sent = [], []
+
+    def check(_root, _first, _head, prs_of=None):
+        seen.append(prs_of(_root, _first, _head))
+        return {"carry": True, "reason": "", "added": [], "files": ["docs/a.md"]}
+
+    monkeypatch.setattr(prl, "carry_check", check)
+    monkeypatch.setattr(pl, "resume_plan", lambda m, n, msg, key: sent.append((msg, key)))
+
+    class Done(Exception):
+        pass
+
+    def reply(status, summary, **kw):
+        raise Done((status, kw))
+
+    with pytest.raises(Done) as got:
+        pcli.carried_report(tmp_path, "p1", 1, reply)
+    status, kw = got.value.args[0]
+    assert status == "ok" and kw["added"] == [12] and kw["notified"] and seen == [[]]
+    assert sent == [({"n": 1, "phase": "carried", "carried": {"from": "sha1", "head": "sha2", "prs": [12]}}, "carried:1")]
