@@ -30,6 +30,13 @@
           "name"
         ]
       },
+      "carried": {
+        "options": [],
+        "positionals": [
+          "name",
+          "n"
+        ]
+      },
       "check": {
         "options": [],
         "positionals": [
@@ -237,6 +244,7 @@
     {
       "file": "project.json",
       "keys": [
+        "docs",
         "ndf_policies"
       ]
     },
