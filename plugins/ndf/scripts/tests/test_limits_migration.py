@@ -49,7 +49,6 @@ BEFORE = {
     "claude-accounts.expiry-margin": {"seconds": 60},
     "claude-accounts.refresh": {"seconds": 3},
     "claude-accounts.lock": {"seconds": 30},
-    "claude-api-keys.credit-hold": {"seconds": 86400},
     "claude-api-keys.check": {"seconds": 30},
     "claude-training.call": {"seconds": 3},
     "claude-training.keychain": {"seconds": 2},

@@ -98,8 +98,10 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
-- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
-  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
+- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて起動先の
+  決定（`lib/launch_rules.py`。5 時間の枠のあるアカウント → 5 時間の枠の無いアカウント → 週の使用率が閾値 T 以上 →
+  残量不明の組の順）で選び直し、待たずに同じ呼び出しを起動し直す。起動のたびにも選び直し、今のアカウントが最良の
+  候補と同じ組にあれば替えない（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
   `CLAUDE_CONFIG_DIR`（アカウントの設定ディレクトリ。claude が自分でトークンを更新する）・`NDF_CLAUDE_ACCOUNT`・
   `NDF_SHARED_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
   `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
@@ -110,8 +112,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
   `relay.py account add-bedrock` が保存した宣言（アカウントの置き場の `metered.json`）である。保存先が壊れていれば
   最初の呼び出しの前に標準エラーと途中の報告（`"kind": "metered_invalid"`）へ 1 行出し、宣言なしとして扱う
 - 候補が無く従量の接続の宣言があれば、その変数を足し、`CLAUDE_CONFIG_DIR` を元の値へ戻した環境へ移り、
-  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
-  （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
+  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、起動先の決定が候補の
+  アカウントを返せば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
 - 登録が 1 つ以下なら、従量の接続の宣言（環境変数は `KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
