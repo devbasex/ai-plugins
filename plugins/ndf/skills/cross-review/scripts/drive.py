@@ -58,7 +58,8 @@ def review_paths():
 def sweep_verify_lines(worktree) -> str:
     """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
     宣言が無い・読めない・テストの無い宣言（#1593）なら空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって
-    解けない（不正な `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。"""
+    解けない（不正な `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。
+    CI テストの宣言（`test.ci.only`）があれば、テストを手元で打たず PR の CI の結果を読む行にする（静的解析だけを名指しする。#3056）。"""
     if not worktree:
         return ""
     import project_decl
@@ -72,6 +73,12 @@ def sweep_verify_lines(worktree) -> str:
         commands = ts.verify_commands(decl)
     except ts.StrategyError as e:
         raise Stop(f"最終スイープの指示を組めない: .ndf/project.json の test が不正: {e}", 2) from e
+    if ts.declares_ci_only(decl):
+        lint = "".join(f"  - {c}\n" for c in commands or [])
+        return (
+            "- テストを手元で打たない（.ndf/project.json の CI テストの宣言）。合否は PR の CI の結果を `gh pr checks <PR>` で読む。"
+            "Step 7.5 の探し方は使わない" + (f"。静的解析は次のコマンドを作業ディレクトリで順に走らせる:\n{lint}" if lint else "\n")
+        )
     if not commands:
         return ""
     listed = "\n".join(f"  - {c}" for c in commands)

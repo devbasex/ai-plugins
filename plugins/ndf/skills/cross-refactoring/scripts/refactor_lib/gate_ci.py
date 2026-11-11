@@ -2,7 +2,8 @@
 
 全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か `--ci-check` のとき、push 済みの HEAD のチェックを
 `limits.ci_wait_timeout`（`3·c`。予算に依らない。#2457 決定 11）まで待ち、落ちたら run の成果物の JUnit と run の
-置き場を見分けと落ちたテストの材料にする。
+置き場を見分けと落ちたテストの材料にする。CI テストの宣言（`test.ci.only`）のあるリポジトリは待たずに 1 回だけ読む
+（`ci_peek_gate`。#3056 の決定 11）。
 """
 
 from __future__ import annotations
@@ -42,12 +43,45 @@ def ci_junit(state: dict[str, Any], sha: str, checks: list[str], runs: Optional[
     )
 
 
+def _failed(state: dict[str, Any], sha: str, checks: list[str], runs, label: str, outcome: str) -> tuple[bool, str, dict[str, Any]]:
+    """落ちた結論の判定と、見分けの材料（CI の JUnit と run の置き場）。"""
+    places = [str(r.get("html_url") or r.get("details_url") or "") for r in runs or [] if isinstance(r, dict)]
+    return (
+        False,
+        f"{label} の結論は {outcome} でした",
+        {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks, runs), "log_place": " ".join(p for p in places if p)},
+    )
+
+
+def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """CI テストの宣言のあるリポジトリの最終ゲート。push 済みの HEAD のチェックを待たずに 1 回だけ読む（#3056 の I4）。
+
+    落ちていれば `ci_gate` と同じ材料を返して最終ゲート修正へ回す。通っていれば通過。未完了・照会できないときは
+    「CI 未完了」と書いて通過にし、合否は検査のプランの `ci-peek`・`ci-peek-merge` とマージ（CI の完了を確かめる）へ渡す。
+    テストのチェックの名前が無ければ head のすべてのチェックを読む。
+    """
+    sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
+    repo = str(state.get("repo") or "")
+    runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get, empty_ok=True) if repo and sha else None
+    checks = ci_checks(state) or sorted({str(r.get("name") or "") for r in runs or [] if isinstance(r, dict)} - {""})
+    outcome = gh_checks.checks_outcome(runs, checks) if checks else ("pending" if runs is not None else None)
+    label = f"チェック {', '.join(checks) or '（まだ無い）'}（{sha[:7]} / 照会 1 回・待たない）"
+    if outcome == "success":
+        return True, f"{label} の結論は success でした", None
+    if outcome in (None, "pending"):
+        why = "照会できない" if outcome is None else "終わっていない"
+        return True, f"CI 未完了: {label} が{why}。合否は検査のプランの ci-peek とマージが確かめる", None
+    return _failed(state, sha, checks, runs, label, outcome)
+
+
 def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
     """継続的統合の結果で判定する。`pending` の間は上限（`limits.ci_wait_timeout`）まで待つ（決定 9）。
 
     **結果を得られないときは通過させない**（fail-closed）。上限までに終わらない・照会できないときは、待った秒と
-    理由を出して「判断が要る」（終了コード 4）で終える。
+    理由を出して「判断が要る」（終了コード 4）で終える。CI テストの宣言があれば待たない（`ci_peek_gate`）。
     """
+    if timeline.strategy_of(state).ci_only:
+        return ci_peek_gate(state)
     sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     repo = str(state.get("repo") or "")
     checks = ci_checks(state)
@@ -71,13 +105,4 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
         die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
-    places = [str(r.get("html_url") or r.get("details_url") or "") for r in last.get("runs") or [] if isinstance(r, dict)]
-    return (
-        False,
-        f"{label} の結論は {outcome} でした",
-        {
-            "timed_out": False,
-            "ci_xmls": ci_junit(state, sha, checks, last.get("runs")),
-            "log_place": " ".join(p for p in places if p),
-        },
-    )
+    return _failed(state, sha, checks, last.get("runs"), label, outcome)
