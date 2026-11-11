@@ -188,7 +188,7 @@ def list_rows() -> list[dict]:
         return []
 
 
-def _usd(v: float | None) -> str:
+def _key_usd(v: float | None) -> str:
     return "不明" if v is None else f"{v:,.2f}"
 
 
@@ -205,5 +205,5 @@ def table_row(r: dict, width: int) -> tuple[str, ...]:
     """表の 1 行: 識別の列に結び付いたアカウント、枠の大きさの列に月の額、残りの列に直近 7 日の使用額 / 週の利用枠（割合）。"""
     monthly = "月 未宣言" if r["monthly_usd"] is None else f"月 {r['monthly_usd']:,.2f}"
     ratio = "" if r["ratio"] is None else f"（{r['ratio'] * 100:.0f}%）"
-    used = f"7日 {_usd(r['spent_7d'])} / 週 {_usd(r['weekly_budget']) if r['weekly_budget'] else '-'}{ratio}"
+    used = f"7日 {_key_usd(r['spent_7d'])} / 週 {_key_usd(r['weekly_budget']) if r['weekly_budget'] else '-'}{ratio}"
     return (r["name"], r["account"], *("-",) * (width - 7), monthly, used, "-", "-", key_state(r))

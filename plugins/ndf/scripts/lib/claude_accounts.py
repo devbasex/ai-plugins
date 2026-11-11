@@ -593,8 +593,8 @@ def choose(exclude=(), keep=(), now: float | None = None, current: str | None = 
     最良の候補と同じ組にあれば保つ。"""
     import launch_observe  # 観測の収集はこのモジュールを読む（循環を避けて呼ぶときに読む）
 
-    snap = launch_observe.observe(current=current, exclude_accounts=exclude, keep=keep, use="off", now=now)
-    d = launch_observe.decide(snap)
+    snap = launch_observe.observe_launch(current=current, exclude_accounts=exclude, keep=keep, use="off", now=now)
+    d = launch_observe.decide_launch(snap)
     limited = sorted((a.limited_until, a.name) for a in snap.accounts if not a.relogin and a.limited_until is not None)
     earliest = (limited[0][1], limited[0][0]) if limited else None
     if d.route != "account":

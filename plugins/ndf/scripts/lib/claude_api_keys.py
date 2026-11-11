@@ -305,7 +305,7 @@ def key_rows(now: float | None = None) -> list[dict]:
     obs, ledger_ok = launch_observe.key_obs(ks, "near-limit", time.time() if now is None else now)
     out = []
     for k, o in zip(ks, obs):
-        budget = launch_rules.weekly_budget(o.monthly_usd) if launch_rules.declared(o) else None
+        budget = launch_rules.weekly_budget(o.monthly_usd) if launch_rules.key_declared(o) else None
         spent = o.spent_7d if ledger_ok else None
         ratio = round(spent / budget, 4) if budget and spent is not None else None
         row = {"name": k.name, "kind": "api_key", "account": k.account, "monthly_usd": k.monthly_usd}

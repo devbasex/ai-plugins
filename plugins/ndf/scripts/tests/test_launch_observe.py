@@ -46,11 +46,11 @@ def test_cache_past_its_reset_is_fetched_again(accounts, monkeypatch):  # noqa: 
     """I7・受け入れ条件 9: 控えの寿命の中でも、控えの中のリセット時刻を過ぎていれば取り直す。"""
     ta = accounts.add("a")
     accounts.fake.set_usage(ta, window(10, 2), window(90, 86400))
-    snap = lo.observe()
+    snap = lo.observe_launch()
     assert snap.accounts[0].weekly == 90.0 and len(accounts.fake.usage_calls) == 1
     accounts.fake.set_usage(ta, window(10, 3600), window(0, 7 * 86400))
     time.sleep(2.5)
-    snap = lo.observe()
+    snap = lo.observe_launch()
     assert snap.accounts[0].weekly == 0.0 and len(accounts.fake.usage_calls) == 2
 
 
@@ -67,9 +67,9 @@ def test_ledger_counts_only_the_last_seven_days_per_key(tmp_path, accounts, monk
             {"cost_usd": 100.0, "at": at(1)},
         ],
     )
-    snap = lo.observe(use="near-limit")
+    snap = lo.observe_launch(use="near-limit")
     assert snap.ledger_ok and [(k.name, k.spent_7d) for k in snap.keys] == [("k", 5.0)]
-    d = lo.decide(snap)
+    d = lo.decide_launch(snap)
     assert (d.route, d.target, d.evidence["spent_7d"]) == ("api_key", "k", 5.0)
 
 
@@ -79,9 +79,9 @@ def test_unreadable_ledger_is_reported(tmp_path, accounts, monkeypatch):  # noqa
     (tmp_path / "usage" / "claude" / "broken.jsonl").mkdir(parents=True)  # 読めないファイル
     accounts.add("main", util7=90)
     ak.add_key("k", KEY, "main", monthly_usd=200.0)
-    snap = lo.observe(use="near-limit")
+    snap = lo.observe_launch(use="near-limit")
     assert not snap.ledger_ok
-    assert lo.decide(snap).rule == "near_limit_ledger_unreadable"
+    assert lo.decide_launch(snap).rule == "near_limit_ledger_unreadable"
 
 
 def test_switch_at_setting_is_not_read(accounts, monkeypatch):  # noqa: F811

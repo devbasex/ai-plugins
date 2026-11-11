@@ -14,7 +14,7 @@ FIVE_HOUR_SECONDS = 5 * 3600.0
 WEEK_SECONDS = 7 * 24 * 3600.0
 MIN_ELAPSED = 60.0  # 枠の開始からの経過の下限（秒）。開始の直後に速さが無限へ振れないため
 WEEKLY_AT_DEFAULT = 85.0  # 閾値 T の既定値（%。決定 10）
-BUDGET_DAYS = 7.0  # 週の利用枠の日数（直近 7 日）
+SPEND_WINDOW_DAYS = 7.0  # 週の利用枠の日数（直近 7 日）
 MONTH_DAYS = 30.0  # 月の額を日割りする日数
 
 ROUTE_ACCOUNT, ROUTE_KEY, ROUTE_WAIT = "account", "api_key", "wait"
@@ -82,20 +82,20 @@ class Decision:
 
 def weekly_budget(monthly_usd: float) -> float:
     """週の利用枠 = 月の額 × 7 ÷ 30。"""
-    return monthly_usd * BUDGET_DAYS / MONTH_DAYS
+    return monthly_usd * SPEND_WINDOW_DAYS / MONTH_DAYS
 
 
-def declared(k: KeyObs) -> bool:
+def key_declared(k: KeyObs) -> bool:
     return k.monthly_usd is not None and k.monthly_usd > 0
 
 
 def usage_ratio(k: KeyObs) -> float:
     """使用の割合 = 直近 7 日の使用額 ÷ 週の利用枠（宣言が無ければ無限）。"""
-    return k.spent_7d / weekly_budget(k.monthly_usd) if declared(k) else math.inf
+    return k.spent_7d / weekly_budget(k.monthly_usd) if key_declared(k) else math.inf
 
 
 def budget_left(k: KeyObs) -> bool:
-    return declared(k) and k.spent_7d < weekly_budget(k.monthly_usd)
+    return key_declared(k) and k.spent_7d < weekly_budget(k.monthly_usd)
 
 
 # ---------------------------------------------------------------- 使い切るまでの時間
@@ -130,12 +130,12 @@ def _weekly_key(a: AccountObs, now: float) -> tuple:
 # ---------------------------------------------------------------- 選ぶ順の組
 
 
-def _readable(a: AccountObs) -> bool:
+def _usage_readable(a: AccountObs) -> bool:
     return a.weekly is not None
 
 
 def _below(a: AccountObs, t: float) -> bool:
-    return _readable(a) and a.weekly < t
+    return _usage_readable(a) and a.weekly < t
 
 
 @dataclass(frozen=True)
@@ -148,19 +148,19 @@ class Group:
 GROUPS: tuple[Group, ...] = (
     Group("five_hour_first", lambda a, t: _below(a, t) and a.five_hour is not None, _five_hour_key),
     Group("weekly_only", lambda a, t: _below(a, t) and a.five_hour is None, _weekly_key),
-    Group("over_threshold", lambda a, t: _readable(a), lambda a, now: (a.weekly, a.name)),
+    Group("over_threshold", lambda a, t: _usage_readable(a), lambda a, now: (a.weekly, a.name)),
     Group("usage_unknown", lambda a, t: True, lambda a, now: (a.name,)),
 )
 
 
-def candidate(a: AccountObs) -> bool:
+def is_candidate(a: AccountObs) -> bool:
     """候補に入るか（I4）: 上限になく、起動でき、再登録が要らない。"""
     return a.limited_until is None and a.launchable and not a.relogin
 
 
 def group_of(a: AccountObs, t: float) -> int | None:
     """候補なら入る組の番号（0 始まり）。候補でなければ None。"""
-    if not candidate(a):
+    if not is_candidate(a):
         return None
     return next(i for i, g in enumerate(GROUPS) if g.member(a, t))
 
@@ -226,8 +226,8 @@ def _key_evidence(k: KeyObs, snap: Snapshot) -> dict:
     return {
         "monthly_usd": k.monthly_usd,
         "spent_7d": round(k.spent_7d, 4),
-        "weekly_budget": round(weekly_budget(k.monthly_usd), 4) if declared(k) else None,
-        "ratio": round(usage_ratio(k), 4) if declared(k) else None,
+        "weekly_budget": round(weekly_budget(k.monthly_usd), 4) if key_declared(k) else None,
+        "ratio": round(usage_ratio(k), 4) if key_declared(k) else None,
         "weekly_at": snap.weekly_at,
         "weekly_min": _weekly_min(snap),
     }
@@ -262,12 +262,12 @@ RULES: tuple[tuple[str, object], ...] = (
     ("always_key", _always_key),
     ("near_limit_key", _near_limit_key),
     ("near_limit_ledger_unreadable", _fallback_rule("near_limit_ledger_unreadable", lambda s: not s.ledger_ok)),
-    ("near_limit_no_declared_key", _fallback_rule("near_limit_no_declared_key", lambda s: not any(declared(k) for k in _open_keys(s)))),
+    ("near_limit_no_declared_key", _fallback_rule("near_limit_no_declared_key", lambda s: not any(key_declared(k) for k in _open_keys(s)))),
     ("near_limit_budget_used_up", _fallback_rule("near_limit_budget_used_up", lambda s: not any(budget_left(k) for k in _open_keys(s)))),
     ("account", account_decision),
 )
 
 
-def decide(snap: Snapshot) -> Decision:
+def decide_launch(snap: Snapshot) -> Decision:
     """起動先の決定。規則の表を上から当て、最初に決定を返した規則を採る（最後の規則は必ず決定を返す）。"""
     return next(d for d in (fn(snap) for _, fn in RULES) if d is not None)

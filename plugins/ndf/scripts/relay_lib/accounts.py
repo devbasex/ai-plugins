@@ -118,8 +118,8 @@ def _metered_label(m: dict) -> str:
 
 def _launch_cols() -> dict[str, dict]:
     """アカウントごとの 5 時間の枠の有無と選ぶ順の組（上限・起動できないなら None）、次に選ばれるものの印（#2930）。"""
-    snap = launch_observe.observe(use="off")
-    d = launch_rules.decide(snap)
+    snap = launch_observe.observe_launch(use="off")
+    d = launch_rules.decide_launch(snap)
     out = {}
     for a in snap.accounts:
         g = launch_rules.group_of(a, snap.weekly_at)

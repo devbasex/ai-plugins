@@ -262,7 +262,7 @@ classDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| 名前 | `launch_rules.decide(snap: Snapshot) -> Decision`（純粋）、`launch_observe.decide_now(current=None, exclude_accounts=(), exclude_keys=(), keep=(), use=None) -> Decision`（観測を集めて `decide` を呼ぶ。`use` が None なら登録簿の宣言を読み、relay と `choose` は `off` を渡す） |
+| 名前 | `launch_rules.decide_launch(snap: Snapshot) -> Decision`（純粋）、`launch_observe.decide_now(current=None, exclude_accounts=(), exclude_keys=(), keep=(), use=None) -> Decision`（観測を集めて `decide_launch` を呼ぶ。`use` が None なら登録簿の宣言を読み、relay と `choose` は `off` を渡す） |
 | 入力 | `current` は今のアカウントの名前。`exclude_accounts` はこの呼び出しで上限・認証の失敗に当たったアカウント。`exclude_keys` はこの呼び出しで残高切れ・認証の失敗・上限を返した API キー。`keep` はトークンを更新しないアカウント（今の `choose` の `keep` と同じ） |
 | 出力 | `Decision`。例外を投げない。登録簿が壊れていれば `use` を `off` として組む（今の扱い） |
 | 失敗の形 | 使用率を取れないアカウントは `weekly` が None の観測になる。帳簿を読めなければ `ledger_ok` が偽になる。どちらも決定の規則が扱い、口は失敗を返さない |

@@ -141,16 +141,16 @@ HOT = dict(weekly=90.0)  # 週の使用率が T（85%）以上
     ],
 )
 def test_key_rules(case, s, route, target, rule):
-    d = lr.decide(s)
+    d = lr.decide_launch(s)
     assert (d.route, d.target, d.rule) == (route, target, rule), case
 
 
 def test_threshold_is_declared():
     """受け入れ条件 3: 同じ観測で、宣言した T で決定が変わる。"""
     s = snap(acc("a", weekly=80.0), keys=[KeyObs("k", 200.0)], use="near-limit", weekly_at=70.0)
-    assert lr.decide(s).route == "api_key"
+    assert lr.decide_launch(s).route == "api_key"
     s = snap(acc("a", weekly=80.0), keys=[KeyObs("k", 200.0)], use="near-limit", weekly_at=90.0)
-    assert lr.decide(s).route == "account"
+    assert lr.decide_launch(s).route == "account"
 
 
 def test_weekly_budget():
@@ -169,7 +169,7 @@ def test_weekly_budget():
 def test_keys_are_used_evenly(a_spent, b_spent, want):
     """受け入れ条件 7: 使用の割合（直近 7 日の使用額 ÷ 週の利用枠）の最も小さいキー。"""
     s = snap(acc("a", **HOT), keys=[KeyObs("a", 200.0, a_spent), KeyObs("b", 100.0, b_spent)], use="near-limit")
-    d = lr.decide(s)
+    d = lr.decide_launch(s)
     assert (d.target, d.rule) == (want, "near_limit_key")
     assert d.evidence["weekly_budget"] == pytest.approx(lr.weekly_budget(200.0 if want == "a" else 100.0), abs=1e-3)
 
@@ -177,9 +177,9 @@ def test_keys_are_used_evenly(a_spent, b_spent, want):
 def test_previous_route_does_not_matter_after_a_reset():
     """受け入れ条件 9: 1 つのアカウントの週がリセットされた観測では、前回キーだったかに依らずキーを使わない。"""
     hot = snap(acc("a", **HOT), acc("b", **HOT), keys=[KeyObs("k", 200.0)], use="near-limit")
-    assert lr.decide(hot).route == "api_key"
+    assert lr.decide_launch(hot).route == "api_key"
     reset = snap(acc("a", **HOT), acc("b", weekly=0.0), keys=[KeyObs("k", 200.0)], use="near-limit")
-    d = lr.decide(reset)
+    d = lr.decide_launch(reset)
     assert (d.route, d.target) == ("account", "b")
 
 
@@ -217,7 +217,7 @@ def test_previous_route_does_not_matter_after_a_reset():
     ],
 )
 def test_account_groups(case, accounts, current, target, account_rule):
-    d = lr.decide(snap(*accounts, current=current))
+    d = lr.decide_launch(snap(*accounts, current=current))
     assert (d.route, d.target, d.rule, d.account_rule) == ("account", target, "account", account_rule), case
 
 
@@ -233,9 +233,11 @@ def test_example_values_in_the_design():
 
 def test_wait_until_is_the_earliest_release():
     """I4: 候補が無ければ待つ。解除の時刻は上限にあるアカウントの最も早いもの。上限にあるものが無ければ None。"""
-    d = lr.decide(snap(acc("a", limited_until=NOW + 2 * H), acc("b", limited_until=NOW + H), acc("c", relogin=True, launchable=False)))
+    d = lr.decide_launch(
+        snap(acc("a", limited_until=NOW + 2 * H), acc("b", limited_until=NOW + H), acc("c", relogin=True, launchable=False))
+    )
     assert (d.route, d.rule, d.wait_until) == ("wait", "wait_reset", NOW + H)
-    d = lr.decide(snap(acc("a", relogin=True, launchable=False)))
+    d = lr.decide_launch(snap(acc("a", relogin=True, launchable=False)))
     assert (d.route, d.wait_until) == ("wait", None)
 
 
@@ -245,8 +247,8 @@ def test_wait_until_is_the_earliest_release():
 def test_same_snapshot_gives_the_same_decision():
     """受け入れ条件 20・I1: 同じスナップショットから同じ決定（規則の名前・根拠の値を含む）。"""
     s = snap(acc("a", **HOT), acc("b", weekly=88.0), keys=[KeyObs("k", 200.0, 3.0)], use="near-limit")
-    assert lr.decide(s) == lr.decide(s)
-    assert lr.decide(s).evidence == {
+    assert lr.decide_launch(s) == lr.decide_launch(s)
+    assert lr.decide_launch(s).evidence == {
         "monthly_usd": 200.0,
         "spent_7d": 3.0,
         "weekly_budget": 46.6667,
