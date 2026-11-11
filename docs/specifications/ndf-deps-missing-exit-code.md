@@ -59,7 +59,7 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
   通じる。リリース対象の終了コードで使われておらず、共通の契約（0〜3・10〜29）、エントリポイントが自分で使う値
   （`refactor.py` の 4 など）、supervise の打ち切り（124・125）、シェルの予約（126 以上）のどれとも重ならない。
   小さい空き番号は各スクリプトが 4 から順に足す値と衝突しやすく、意味も運ばない
-- **値の持ち主は終了コードの表（`exit_codes.py`）の 1 つにし、`deps.py` と `step_result.py` はそれを参照する（#2988）。**
+- **値の持ち主は終了コードの表（`exit_codes.py`）の 1 つにし、`deps.py` と `step_result.py` はそれを参照する。**
   `deps.py` が `step_result.py` を import すると、ラッパーにも使われる最下層の `deps.py` に `proc` を引き込む。
   `step_result.py` が `deps.py` を import すると、`deps` が止まるときに読む実行の核（`run_core`）を通して import の輪になる。
   両方に 69 を書くと値が割れうる。`exit_codes.py` は標準ライブラリも NDF のモジュールも読まず、ラッパーのバージョン
