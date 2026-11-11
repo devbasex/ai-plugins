@@ -6435,6 +6435,34 @@
       "context": "ndf-workflow",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
       "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "出し直しの提示",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "加わった範囲",
+      "context": "ndf-workflow",
+      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "文書だけの範囲",
+      "context": "ndf-workflow",
+      "meaning": "加わった範囲のファイルを宣言 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
+    },
+    {
+      "term": "出し直しを省く",
+      "context": "ndf-workflow",
+      "meaning": "加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと",
+      "source": "",
+      "pending_source": "issues/issue-3020-requirements.md"
     }
   ]
 }
