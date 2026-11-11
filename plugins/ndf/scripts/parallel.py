@@ -7,7 +7,7 @@
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
 | `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限なら 3。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限（既定 1800 秒）なら 3 で、`items` に `status` と同じレーンごとの行、`metrics.switch` に切り替えの判定を載せる（#3006）。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
 | `status <計画名>` | レーンごとに 1 行（状態・何回目のループか・今の課題・最後の知らせの時刻・費用・承認待ちのレーンへ入る 1 行）を返す。計画が無ければ 2 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
@@ -408,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
     w.add_argument("--changes-after", type=int, default=0, help="出した答え待ちの停止の変化の最後の番号")
-    w.add_argument("--timeout", type=float, default=3600)
+    w.add_argument("--timeout", type=float, default=1800)  # プロンプトキャッシュの寿命 3600 秒より短く（#3006 の I6）
     stt = sub.add_parser("status")
     stt.add_argument("name")
     p = sub.add_parser("present")

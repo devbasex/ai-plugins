@@ -133,6 +133,24 @@ def wait_event(main: Path, name: str, after: int, timeout: float):
         after, left = int(got.value.get("seq") or after), max(0.0, end - time.monotonic())
 
 
+def lane_report(main: Path, name: str) -> tuple[list[dict], str | None]:
+    """上限で戻るときの状況報告の材料: `parallel.py status` と同じレーンごとの行と要約。計画を読めなければ ([], None)。"""
+    try:
+        import parallel_status as pst
+
+        rows = pst.lane_rows(main, name, pp.load_valid_plan(main, name))
+        return rows, pst.status_summary(rows)
+    except Exception:  # noqa: BLE001  状況報告が読めなくても上限の戻りは変えない
+        return [], None
+
+
+def switch_report(main: Path, name: str, interval: float) -> dict:
+    """切り替えの判定（#3006）。例外を外へ出さない（I5）。"""
+    import parallel_switch as psw
+
+    return psw.report(main, name, interval)
+
+
 def wait_plan(a, reply, main: Path, self_path: Path) -> None:
     """人へ問うもの・答え待ちの停止の変化・終わり・異常まで待つ（#2936 の I5）。"""
 
@@ -151,12 +169,15 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
     got, after = wait_event(main, a.name, a.after, pdf.clip_timeout(a.timeout, hours))  # 業務時間外は次の業務時間の始まりで切る
     if got.kind == "timeout":
         batch_reply(reply, main, a.name, extra)
+        rows, head = lane_report(main, a.name)
         reply(
             "stopped",
-            f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す",
+            f"{a.timeout:.0f} 秒の上限に達した。同じ wait を打ち直す" + (f"。{head}" if head else ""),
+            rows,
             code=3,
             seq=after,
             next=wait_line(self_path, a.name) + f" --after {after}" + (f" --changes-after {a.changes_after}" if a.changes_after else ""),
+            switch=switch_report(main, a.name, a.timeout),
             **extra,
         )
     if got.kind == "event":
