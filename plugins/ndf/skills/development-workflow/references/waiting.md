@@ -71,12 +71,15 @@
 
 | `kind` | 書く時点 | 中身 | conductor の読み方 |
 | --- | --- | --- | --- |
-| `step` | ステップの切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
-| `alive` | 最後の行からプランの `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
+| `step` | ステップの切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary`・`host`（負荷とメモリの値。下の注） | 起きたときに末尾を読む。これだけでは起きない |
+| `alive` | 最後の行からプランの `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告）・`host` | 同上 |
 | `worker` | work のステップの worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
 | `slow` | run・work・drive のステップの経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
 | `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `judge のステップで stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
 
+- `host` は負荷とメモリの値とマシンの上の pytest の数である（`load`（1・5・15 分の load average）・`mem_available_mib`・
+  `swap_total_mib`・`swap_free_mib`・`pytest`（本体の数）・`pytest_workers`（xdist の作業プロセスの数））。並列の上限を決め直す
+  材料で、待ちの判断には使わない。読めない値は鍵ごと省く
 - **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（`止まった`・`関門`・
   `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）

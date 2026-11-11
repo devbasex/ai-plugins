@@ -4,6 +4,7 @@
     python3 whole-test-timing.py measure --root <dir> --out <JSON>
     python3 whole-test-timing.py diff --before <JSON> --after <JSON> --ledger <md> [--root <着手後の木>]
     python3 whole-test-timing.py startup --root <dir> [--runs N] <スクリプト>... [-- <引数>...]
+    python3 whole-test-timing.py peak --root <dir> [--root <dir>]... [--floor-mib N] [--interval S]
 
 measure は `.ndf/project.json` の `test.suites` の `command` を宣言の順に 1 本ずつ流し、最初の起動から最後の
 終了までを壁時計とする。開始時の 1 分の load average が CPU の数を超えたら `reference`（判定に使わない参考の値）を
@@ -15,6 +16,11 @@ measure は `.ndf/project.json` の `test.suites` の `command` を宣言の順�
 diff は着手前にあって着手後に無い nodeid のうち台帳に書かれていないもの（missing）、着手前に走っていて着手後に
 skip・deselect になった nodeid（now_skipped・now_deselected。deselect は台帳に載っていても出す）、台帳に載る消した
 テストの定義が着手後の木に残っているもの（still_defined）を出す。nodeid はパラメータの部分まで含めて文字どおりに照らす。
+
+peak は全体テストを 1・2・…・`--root` の数の本数だけ同時に流し（k 本目は先頭から k 個の worktree で、各 worktree の
+`test.suites` を宣言の順に 1 本ずつ）、`--interval` 秒ごとに使用中のメモリ（MemTotal − MemAvailable）とスワップの使用量を
+読んで、本数ごとの山と所要の秒を出す（#2998）。ほかの `supervise.py queue` か pytest が動いていれば始めない（終了コード 3）。
+MemAvailable が `--floor-mib` を割ったら、動いている全体テストの木を止め、残りの本数を流さない（終了コード 1）。
 
 startup はスクリプトの最小の起動（既定は `--help`）を N 回流し、中央値・最小・最大のミリ秒を出す。
 
@@ -37,7 +43,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
+from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 
 TOOL = "whole-test-timing"
 TOP_TESTS = 30
@@ -318,6 +324,120 @@ def cmd_startup(a) -> None:
     emit(result(TOOL, "stopped" if varied else "ok", summary, items, metrics), 1 if varied else 0)
 
 
+PEAK_FLOOR_MIB = 2048  # 打ち切る MemAvailable の下限（#2998 の決定 10）
+
+
+def _load_procs():
+    """procs（psutil）を読む。measure・diff・startup は psutil なしで動くため、peak のときだけ読む。"""
+    import deps
+
+    deps.require("procs")
+    import procs
+
+    return procs
+
+
+def _suites_script(suites: list[dict]) -> str:
+    """worktree の suite を宣言の順に流し、1 本でも落ちたら 1 で終えるシェルの文。"""
+    body = "".join(f"( {s['command']} ) || rc=1\n" for s in suites)
+    return f"rc=0\n{body}exit $rc\n"
+
+
+def _plugin_version() -> str | None:
+    """NDF の版（`plugins/ndf/.claude-plugin/plugin.json`）。読めなければ None。"""
+    try:
+        return json.loads((Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _used(host: dict, total: int | None) -> tuple[int | None, int | None]:
+    """(使用中のメモリ, スワップの使用量) の MiB。読めない値は None。"""
+    mem = total - host["mem_available_mib"] if total is not None and "mem_available_mib" in host else None
+    swap = host["swap_total_mib"] - host["swap_free_mib"] if {"swap_total_mib", "swap_free_mib"} <= set(host) else None
+    return mem, swap
+
+
+def run_peak(procs, roots: list[Path], scripts: list[str], k: int, floor: int, interval: float, total: int | None) -> dict:
+    """先頭から k 個の worktree で全体テストを同時に流し、終わるか下限を割るまで測る。"""
+    start = time.monotonic()
+    running = [
+        subprocess.Popen(
+            ["bash", "-c", scripts[i]], cwd=roots[i], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+        )
+        for i in range(k)
+    ]
+    item: dict = {
+        "kind": "runs",
+        "name": f"{k} 本",
+        "result": "measured",
+        "runs": k,
+        "peak_used_mib": None,
+        "peak_swap_used_mib": None,
+        "min_mem_available_mib": None,
+    }
+    while True:
+        host = procs.host_sample()
+        mem, swap = _used(host, total)
+        avail = host.get("mem_available_mib")
+        for key, value, pick in (("peak_used_mib", mem, max), ("peak_swap_used_mib", swap, max), ("min_mem_available_mib", avail, min)):
+            if value is not None:
+                item[key] = value if item[key] is None else pick(item[key], value)
+        if avail is not None and avail < floor:
+            for p in running:
+                procs.stop_tree(p.pid, grace=5)
+                p.wait()
+            item.update(result="aborted", aborted=True, mem_available_mib=avail, swap_free_mib=host.get("swap_free_mib"))
+            break
+        if all(p.poll() is not None for p in running):
+            break
+        time.sleep(interval)
+    item["seconds"] = round(time.monotonic() - start, 1)
+    item["exits"] = [p.returncode for p in running]
+    return item
+
+
+def cmd_peak(a) -> None:
+    roots = [Path(r).resolve() for r in a.roots]
+    if not 1 <= len(roots) <= 3 or a.floor_mib < 0 or a.interval <= 0:
+        raise StepError("--root は 1〜3 個、--floor-mib は 0 以上、--interval は正の数", EXIT_UNREADABLE)
+    scripts = [_suites_script(load_suites(r)) for r in roots]
+    procs = _load_procs()
+
+    host = procs.host_sample()
+    queues = procs.count_cmdline("supervise.py", "queue")
+    if queues or host.get("pytest"):
+        raise StepError(
+            f"ほかの作業が動いている（supervise の queue {queues} 本・pytest {host.get('pytest', 0)} 本）。止まってから測る",
+            EXIT_PRECONDITION,
+        )
+    total = procs.meminfo_mib(procs.PROC_MEMINFO).get("MemTotal")
+    used, swap = _used(host, total)
+    metrics = {
+        "date": time.strftime("%Y-%m-%d"),
+        "cpus": os.cpu_count() or 1,
+        "mem_total_mib": total,
+        "ndf_version": _plugin_version(),
+        "before_used_mib": used,
+        "before_swap_used_mib": swap,
+        "floor_mib": a.floor_mib,
+    }
+    items = []
+    for k in range(1, len(roots) + 1):
+        items.append(run_peak(procs, roots, scripts, k, a.floor_mib, a.interval, total))
+        if items[-1].get("aborted"):
+            break
+    aborted = items[-1].get("aborted")
+    summary = "・".join(
+        f"{i['runs']} 本 山 {i['peak_used_mib']} MiB（スワップ {i['peak_swap_used_mib']} MiB）{i['seconds']} 秒" for i in items
+    )
+    if aborted:
+        summary += (
+            f"。{items[-1]['runs']} 本で MemAvailable {items[-1]['mem_available_mib']} MiB が下限 {a.floor_mib} MiB を割り、打ち切った"
+        )
+    emit(result(TOOL, "stopped" if aborted else "ok", summary, items, metrics), 1 if aborted else 0)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     extra = None
@@ -341,6 +461,11 @@ def main(argv=None):
     st.add_argument("--runs", type=int, default=10)
     st.add_argument("scripts", nargs="+")
     st.set_defaults(func=cmd_startup, extra=extra)
+    pk = sub.add_parser("peak")
+    pk.add_argument("--root", dest="roots", action="append", required=True, help="全体テストを流す worktree（1〜3 個）")
+    pk.add_argument("--floor-mib", type=int, default=PEAK_FLOOR_MIB)
+    pk.add_argument("--interval", type=float, default=1.0)
+    pk.set_defaults(func=cmd_peak)
     return main_with(ap, lambda a: TOOL, argv)
 
 
