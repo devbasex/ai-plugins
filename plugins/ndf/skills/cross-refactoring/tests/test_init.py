@@ -103,8 +103,8 @@ class FakeGhSh:
     項目を上書きし、値が `MISSING` ならその項目を外す。
     """
 
-    def __init__(self, pr, viewer, pr_status, real_sh, lib):
-        self.pr, self.viewer, self.pr_status = pr, viewer, pr_status
+    def __init__(self, args, viewer, pr_status, real_sh, lib):
+        self.args, self.viewer, self.pr_status = args, viewer, pr_status
         self.real_sh, self.lib = real_sh, lib
         self.calls: list[list[str]] = []
 
@@ -123,14 +123,15 @@ class FakeGhSh:
             return self.viewer
         # 作成者・head・base は REST の 1 回でまとめて返る（#271）。
         if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
-            if cmd[2] != f"repos/acme/demo/pulls/{self.pr}":
+            args = self.args
+            if cmd[2] != f"repos/acme/demo/pulls/{args.pr}":
                 return ""
             return json.dumps(self._pull_request())
         raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
 
     def _pull_request(self) -> dict:
         body = {
-            "number": self.pr,
+            "number": self.args.pr,
             "user": {"login": "me"},
             "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
             "base": {"ref": "main"},
@@ -168,7 +169,7 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
 
         `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
         """
-        fake_sh = FakeGhSh(args.pr, viewer, pr_status, paths.sh, sys.modules["refactor_lib"])
+        fake_sh = FakeGhSh(args, viewer, pr_status, paths.sh, sys.modules["refactor_lib"])
         _run.gh_calls = fake_sh.calls
         patch_lib("sh", fake_sh)
         monkeypatch.chdir(origin_repo)
