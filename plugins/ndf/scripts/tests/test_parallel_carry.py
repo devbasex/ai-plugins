@@ -85,7 +85,7 @@ def test_docs_only_range_carries_with_the_added_prs(repo):
         ({"docs/a.md": "y\n", "lib/b.py": "z\n"}, "コードのファイル"),
         ({"AGENTS.md": "x\n", "docs/a.md": "y\n"}, "C7"),
         ({"sub/CLAUDE.md": "x\n"}, "C7"),
-        ({".ndf/mvv.md": "x\n"}, "C7"),
+        ({".ndf/note.md": "x\n"}, "C7"),  # 追跡している文書の名前を避ける（test_docs_decl が宣言の漏れに数える）
     ],
 )
 def test_behavior_docs_or_code_do_not_carry(repo, files, said):
