@@ -100,7 +100,8 @@ def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_phases, cmd_impl
     """移行性 — `scope_commands` を持たない旧形の項目（語の並びの `command`）も同じ語で走る。"""
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         CALC + "\nX = 1\n",
         strategy_state(),

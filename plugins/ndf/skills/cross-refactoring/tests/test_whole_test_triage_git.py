@@ -39,7 +39,6 @@ from crossref_helpers import (
 )
 
 
-
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
     return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
@@ -127,7 +126,9 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
     assert git("status", "--porcelain", cwd=flow["work"]).stdout.strip() == ""
 
 
-def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """#2457 受け入れ条件 10（PR 2452 の形）: 着手の後に取り込んだベースブランチで落ちたテストは、比較の木
     （項目のコミットを外した木）でも落ちるため無関係と記録され、通っていた項目は取り消されない。"""
     work = flow["work"]
@@ -200,7 +201,8 @@ def test_after_the_deadline_the_whole_test_failure_still_goes_to_fix(flow, cmd_s
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _break_total, "I-002": _touch_other("other"), "I-003": _touch_other("another")},
         late=True,
@@ -215,14 +217,18 @@ def test_after_the_deadline_the_whole_test_failure_still_goes_to_fix(flow, cmd_s
     assert (work / "src" / "other.py").exists()
 
 
-def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """AC6 — JUnit が無いときは見分けを全体の走らせ直しに落とし、落としたことが結果に出る。着手前が green なら変更起因。
 
     原因の項目は走らせ直しのログに現れるパスで決め、その項目だけを修正へ回す（#1649）。
     """
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     raises = lambda w: write_file(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
-    _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
+    _implement(
+        flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False)
+    )
 
     assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
     record = read_state(flow["path"])["whole_test"]
@@ -242,7 +248,12 @@ def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_i
     state["baseline_test"]["status"] = "red"
     write_state(flow["path"], state)
     _implement(
-        flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False)
+        flow,
+        cmd_setup,
+        cmd_phases,
+        cmd_implement,
+        {"I-001": _touch_other("other"), "I-002": _break_total},
+        strategy=strategy_state(junit=False),
     )
     capsys.readouterr()
 
@@ -258,7 +269,9 @@ def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_i
     assert material["log"].endswith(".log") and material["commands"]
 
 
-def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, patch_lib):
+def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, patch_lib
+):
     """AC3・AC8 — 全体テストを CI に任せる戦略では、危険フラグが立っても検証の中で全体テストを走らせず、最終ゲートへ寄せる。"""
     whole_runs: list = []
     original = sys.modules["refactor_lib.targets"].run_with_timeout
@@ -270,7 +283,9 @@ def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_s
 
     patch_lib("run_with_timeout", spy_run)
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other")}, strategy=strategy_state("local-scoped-ci-whole"))
+    _implement(
+        flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other")}, strategy=strategy_state("local-scoped-ci-whole")
+    )
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")

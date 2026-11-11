@@ -134,7 +134,9 @@ def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     assert "unfixed" not in items["I-002"] and items["I-002"]["status"] == "implemented"
 
 
-def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     """R3 AC4（I6）: 結果を残さずに終わった修正の起動は数えず、締め切りの前なら同じ項目を修正へ回す。"""
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, ["a"], {"I-001": ("a", _module("a", 2))})
     verify_judged(cmd_converge, flow["path"], capsys)
@@ -188,7 +190,8 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
     assert len(big_ids) == 8
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         [f"m{n:02d}" for n in range(1, 11)],
         changes,
@@ -234,7 +237,8 @@ def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setu
     uses = "from src.a import helper\n\n\ndef b():\n    return helper() - 4\n"
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         ["a", "b", "c"],
         {"I-001": ("a", helper.replace("return 1", "return 9")), "I-002": ("b", uses), "I-003": ("c", _module("c") + "\n\nY = 1\n")},

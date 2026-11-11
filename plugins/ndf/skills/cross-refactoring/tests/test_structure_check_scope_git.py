@@ -70,7 +70,14 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank, path):
-    return planned_item(item_id, rank, path=path, symbol="f", scope_commands=[{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}], estimated_diff_lines=200)
+    return planned_item(
+        item_id,
+        rank,
+        path=path,
+        symbol="f",
+        scope_commands=[{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}],
+        estimated_diff_lines=200,
+    )
 
 
 def _call(module, name, **kwargs):
@@ -94,7 +101,10 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     state["strategy"] = strategy_state(suites=[*strategy_state()["suites"], _structure_suite(declared).as_state()])
     changes = {
         "I-001": ("plugins/ndf/scripts/big.py", lambda w: write_file(w, "plugins/ndf/scripts/big.py", "x = 1\n" * 501)),
-        "I-002": ("plugins/ndf/scripts/trash.py", lambda w: write_file(w, "plugins/ndf/scripts/trash.py", "def remove(p):\n    return None\n")),
+        "I-002": (
+            "plugins/ndf/scripts/trash.py",
+            lambda w: write_file(w, "plugins/ndf/scripts/trash.py", "def remove(p):\n    return None\n"),
+        ),
         "I-003": ("plugins/ndf/scripts/clean.py", lambda w: write_file(w, "plugins/ndf/scripts/clean.py", "def clean():\n    return 2\n")),
         "I-004": ("src/calc.py", lambda w: write_file(w, "src/calc.py", (w / "src" / "calc.py").read_text() + "\nX = 1\n")),
     }

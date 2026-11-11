@@ -47,7 +47,7 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank):
-    return planned_item(item_id, rank, public_io=False, command=["pytest", "-q", "tests/test_calc.py"])
+    return planned_item(item_id, rank, **{"public_io": False, "command": ["pytest", "-q", "tests/test_calc.py"]})
 
 
 def _call(module, name, **kwargs):
@@ -80,7 +80,9 @@ def _verify(flow, cmd_converge, capsys):
     return verdict, read_state(flow["path"])["whole_test"]
 
 
-def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """AC1・AC9 の裏 — 危険フラグの項目でなく、本文にパスが現れた危険フラグの無い項目が修正へ回る。"""
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES)})
@@ -103,7 +105,8 @@ def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_ph
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _calc(CALC_RAISES), "I-002": _flagged("other"), "I-003": _flagged("another")},
         late=True,
@@ -119,11 +122,19 @@ def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_ph
     assert (work / "src" / "other.py").exists()
 
 
-def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """AC3・I4 — 本文にパスが無ければ、新しい順に外して走らせ直し、通るようになった項目を原因にする。HEAD は動かない。"""
     work = flow["work"]
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")})
+    _implement(
+        flow,
+        cmd_setup,
+        cmd_phases,
+        cmd_implement,
+        {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")},
+    )
     head = head_sha(work)
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -145,7 +156,8 @@ def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_pha
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: write_file(w, "src/shared.py", "X = 2\n")},
     )
@@ -221,7 +233,8 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_ph
     long_calc = CALC + "\n\ndef extra():\n    return 0\n"  # 13 行を超える
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         {
             "I-001": _flagged("other"),
@@ -250,12 +263,15 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_ph
     assert "I-002" in out and "I-004" in out and "path" in out
 
 
-def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """#2457 — 締め切りが無いため、パスで決まらなくても項目を外した走らせ直しで原因を決め、取り消さずに修正へ回す。"""
     commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _flagged("other"), "I-002": _calc(CALC_OFF_BY_ONE), "I-003": _flagged("another")},
         late=True,
