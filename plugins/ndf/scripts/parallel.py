@@ -12,6 +12,7 @@
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
+| `carried <計画名> <連番>` | 出し直しを省いた提示 2 の確かめ直しの範囲が文書だけなら 0（`metrics.added`）、文書だけではない・判定できないなら 10 |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
 | `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
@@ -41,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -217,6 +218,10 @@ def cmd_present(a) -> None:
         reply("stopped", f"読めない: {exc}", code=2)
     summary = f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）"
     reply("ok", summary, [{"lane": n, **r} for n, r in got["lanes"].items()], sha=got["sha"], orphans=got["orphans"])
+
+
+def cmd_carried(a) -> None:
+    pcli.carried_report(main_of(), a.name, a.n, reply)
 
 
 def cmd_compose(a) -> None:
@@ -422,6 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("name")
     c.add_argument("n", type=int)
     c.add_argument("--take", choices=("new", "first"))
+    ca = sub.add_parser("carried")
+    ca.add_argument("name")
+    ca.add_argument("n", type=int)
     s = sub.add_parser("settle")
     s.add_argument("name", nargs="?")
     s.add_argument("n", type=int)
