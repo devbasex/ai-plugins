@@ -170,7 +170,13 @@ def run_release(
         commit(other, "version.txt", dev_bump, "dev bump (#700)")
         git(other, "push", "-q", "origin", "HEAD:trunk")
     hub = FakeGitHub(
-        mod, w, outside_after=outside_after, move_head=move_head, prod_merged=prod_merged, published=published, delete_on_merge=delete_on_merge
+        mod,
+        w,
+        outside_after=outside_after,
+        move_head=move_head,
+        prod_merged=prod_merged,
+        published=published,
+        delete_on_merge=delete_on_merge,
     )
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
     if prod_merged:
