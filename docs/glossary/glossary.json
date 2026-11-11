@@ -6325,67 +6325,67 @@
       "term": "起動先の決定",
       "context": "ndf-relay",
       "meaning": "1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "5 時間の枠の無いアカウント",
       "context": "ndf-relay",
       "meaning": "使用率の応答に 5 時間の枠が無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "週の使用率",
       "context": "ndf-relay",
       "meaning": "週の枠とモデル別の週の枠の使用率のうち最も大きい値",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "閾値 T",
       "context": "ndf-relay",
       "meaning": "API キーへ逃がすかと、5 時間の枠のあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85%",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "月の額",
       "context": "ndf-relay",
       "meaning": "API キーごとに宣言する、月に付与されるクレジットの額（ドル）",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "週の利用枠",
       "context": "ndf-relay",
       "meaning": "API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "使用の割合",
       "context": "ndf-relay",
       "meaning": "API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "区切り",
       "context": "ndf-relay",
       "meaning": "relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "選ぶ順の組",
       "context": "ndf-relay",
       "meaning": "アカウントを 4 つに分けた選ぶ順の単位。5 時間の枠を先に使う組・週だけの枠の組・閾値を超えた組・残量不明の組の順に選ぶ",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "観測のスナップショット",
       "context": "ndf-relay",
       "meaning": "1 回の起動先の決定の入力。時刻・宣言・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "切り替えの余裕",
       "context": "ndf-relay",
       "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "立ち上がりの確認",
