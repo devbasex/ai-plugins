@@ -135,23 +135,29 @@ def _record_errors(record, keys: tuple[str, ...], where: str) -> list[str]:
     return [f"{where} の {k} を空でない文字列で書く" for k in keys if not isinstance(record.get(k), str) or not record[k].strip()]
 
 
+# 型の検査の表: (鍵, 正しい値か, 誤りの文言)。鍵があるときだけ確かめ、文言の `{v}` は値で埋める。
+# 表の 2 つの間で items と gaps / process / decisions を確かめる（誤りの並びはこの順）
+_LEADING_TYPES = (
+    ("tool", lambda v: isinstance(v, str) and bool(v), "tool は空でない文字列で書く"),
+    ("status", lambda v: v in STATUSES, f"status は {' / '.join(STATUSES)} のどれか: {{v!r}}"),
+    ("summary", lambda v: isinstance(v, str), "summary は文字列で書く"),
+)
+_TRAILING_TYPES = (
+    ("metrics", lambda v: isinstance(v, dict), "metrics はオブジェクトで書く"),
+    *((k, lambda v: v is None or isinstance(v, str), f"{k} は文字列で書く") for k in OPTIONAL),
+    *((k, lambda v: isinstance(v, dict), f"{k} はオブジェクトで書く") for k in OPTIONAL_OBJECTS),
+)
+
+
+def _type_errors(obj: dict, rules) -> list[str]:
+    return [msg.format(v=obj[k]) for k, ok, msg in rules if k in obj and not ok(obj[k])]
+
+
 def _check_field_types(obj: dict, errs: list[str]) -> None:
-    if "tool" in obj and (not isinstance(obj["tool"], str) or not obj["tool"]):
-        errs.append("tool は空でない文字列で書く")
-    if "status" in obj and obj["status"] not in STATUSES:
-        errs.append(f"status は {' / '.join(STATUSES)} のどれか: {obj['status']!r}")
-    if "summary" in obj and not isinstance(obj["summary"], str):
-        errs.append("summary は文字列で書く")
+    errs.extend(_type_errors(obj, _LEADING_TYPES))
     _check_item_types(obj, errs)
     _check_records(obj, errs)
-    if "metrics" in obj and not isinstance(obj["metrics"], dict):
-        errs.append("metrics はオブジェクトで書く")
-    for k in OPTIONAL:
-        if k in obj and obj[k] is not None and not isinstance(obj[k], str):
-            errs.append(f"{k} は文字列で書く")
-    for k in OPTIONAL_OBJECTS:
-        if k in obj and not isinstance(obj[k], dict):
-            errs.append(f"{k} はオブジェクトで書く")
+    errs.extend(_type_errors(obj, _TRAILING_TYPES))
 
 
 def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
