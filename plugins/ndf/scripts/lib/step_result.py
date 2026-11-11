@@ -85,6 +85,19 @@ def default_code(status: str) -> int:
     return {"ok": EXIT_OK, "gate": EXIT_GATE, "stopped": EXIT_VIOLATION}[status]
 
 
+def _has_gaps(obj: dict) -> bool:
+    return isinstance(obj.get("gaps"), list) and bool(obj["gaps"])
+
+
+def code_for(obj) -> int | None:
+    """status と gaps から決める既定の終了コード（`stopped` で gaps があれば 6）。status が無効なら None。"""
+    if not isinstance(obj, dict) or obj.get("status") not in STATUSES:
+        return None
+    if obj["status"] == "stopped" and _has_gaps(obj):
+        return EXIT_INCOMPLETE
+    return default_code(obj["status"])
+
+
 def code_matches(status: str, code: int) -> bool:
     """status と終了コードが食い違わないか。"""
     if status == "ok":
@@ -144,7 +157,7 @@ def _check_field_types(obj: dict, errs: list[str]) -> None:
 def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
     if obj.get("status") == "gate" and not obj.get("presentation_path") and not obj.get("next"):
         errs.append("gate には presentation_path か next を添える")
-    has_gaps = isinstance(obj.get("gaps"), list) and bool(obj["gaps"])
+    has_gaps = _has_gaps(obj)
     if obj.get("status") == "ok" and has_gaps:
         errs.append("ok に gaps を添えない（欠けが残るなら stopped と終了コード 6）")
     if code == EXIT_INCOMPLETE and obj.get("status") == "stopped" and not has_gaps:
@@ -198,10 +211,7 @@ def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa
     誤りを標準エラーへ出して 2 で終える（誤った結果を「通った」と読ませない）。実行の核が動いている間は出さずに
     `Emitted` を投げ、核が形と終了コードを確かめてから出す。
     """
-    if code is None and isinstance(obj, dict) and obj.get("status") in STATUSES:
-        code = default_code(obj["status"])
-        if obj["status"] == "stopped" and isinstance(obj.get("gaps"), list) and obj["gaps"]:
-            code = EXIT_INCOMPLETE
+    code = code_for(obj) if code is None else code
     if CAPTURE and stream is None:
         raise Emitted(obj, EXIT_VIOLATION if code is None else code)
     if ATTACH and isinstance(obj, dict):
@@ -424,8 +434,7 @@ def cli_parser() -> argparse.ArgumentParser:
 
 def _write_out(path: str, obj: dict, code: int | None) -> None:
     """形を確かめてから 1 行をファイルへ書く。誤っていれば書かない（emit が 2 で終える）。"""
-    if code is None and obj.get("status") in STATUSES:
-        code = EXIT_INCOMPLETE if obj["status"] == "stopped" and obj.get("gaps") else default_code(obj["status"])
+    code = code_for(obj) if code is None else code
     if validate_result(obj, code):
         return
     jsonio.write_atomic(path, obj, indent=None)
