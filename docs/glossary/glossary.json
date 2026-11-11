@@ -6454,8 +6454,8 @@
     {
       "term": "待ちの理由",
       "context": "ndf-workflow",
-      "meaning": "プランが queue で流れ始めるまでに待った原因。重なり（overlap）・plans・資源の枠（resource）・前提のプラン（deps）・計画の上限（plan_limit）の 5 つ",
-      "pending_source": "issues/issue-2998-requirements.md"
+      "meaning": "プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ",
+      "pending_source": "issues/issue-2998-design.md"
     },
     {
       "term": "待ちの秒",
