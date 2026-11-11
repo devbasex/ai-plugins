@@ -3715,7 +3715,21 @@ def test_account_add_list_remove(tmp_path, accounts):
     p = account_cmd(tmp_path, accounts, "list", tty=False)
     assert p.returncode == 0, p.stderr
     lines = p.stdout.splitlines()
-    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "5時間枠", "組", "状態"]
+    assert lines[0].split() == [
+        "名前",
+        "識別",
+        "5",
+        "時間",
+        "7",
+        "日",
+        "モデル別の週",
+        "支出上限",
+        "枠の大きさ",
+        "残り",
+        "5時間枠",
+        "組",
+        "状態",
+    ]
     assert any(
         line.startswith("work1") and "a@example.com" in line and "15%" in line and "3%" in line and " no " in line and "使える" in line
         for line in lines

@@ -47,7 +47,9 @@ HOT = dict(weekly=90.0)  # 週の使用率が T（85%）以上
         # 受け入れ条件 1: 5 時間の上限だけに当たり、週が T 未満のアカウントがあれば API キーを使わない（別のアカウントで起動）
         (
             "ac1_five_hour_limit_only",
-            snap(acc("a", util5=100, weekly=40.0, limited_until=NOW + H), acc("b", weekly=50.0), keys=[KeyObs("k", 200.0)], use="near-limit"),
+            snap(
+                acc("a", util5=100, weekly=40.0, limited_until=NOW + H), acc("b", weekly=50.0), keys=[KeyObs("k", 200.0)], use="near-limit"
+            ),
             "account",
             "b",
             "account",
@@ -61,10 +63,28 @@ HOT = dict(weekly=90.0)  # 週の使用率が T（85%）以上
             "wait_reset",
         ),
         # 受け入れ条件 2: すべてのアカウントの週が T 以上ならだけ API キー
-        ("ac2_all_hot", snap(acc("a", **HOT), acc("b", weekly=86.0), keys=[KeyObs("k", 200.0)], use="near-limit"), "api_key", "k", "near_limit_key"),
-        ("ac2_one_below", snap(acc("a", **HOT), acc("b", weekly=84.9), keys=[KeyObs("k", 200.0)], use="near-limit"), "account", "b", "account"),
+        (
+            "ac2_all_hot",
+            snap(acc("a", **HOT), acc("b", weekly=86.0), keys=[KeyObs("k", 200.0)], use="near-limit"),
+            "api_key",
+            "k",
+            "near_limit_key",
+        ),
+        (
+            "ac2_one_below",
+            snap(acc("a", **HOT), acc("b", weekly=84.9), keys=[KeyObs("k", 200.0)], use="near-limit"),
+            "account",
+            "b",
+            "account",
+        ),
         # 不明は T 未満と同じく発動を止める（決定 9）
-        ("i2_unknown_blocks", snap(acc("a", **HOT), acc("b", weekly=None), keys=[KeyObs("k", 200.0)], use="near-limit"), "account", "a", "account"),
+        (
+            "i2_unknown_blocks",
+            snap(acc("a", **HOT), acc("b", weekly=None), keys=[KeyObs("k", 200.0)], use="near-limit"),
+            "account",
+            "a",
+            "account",
+        ),
         # 再登録が要るアカウントは発動の判定から外す（決定 9）
         (
             "i2_relogin_is_ignored",
@@ -90,7 +110,13 @@ HOT = dict(weekly=90.0)  # 週の使用率が T（85%）以上
             "near_limit_budget_used_up",
         ),
         # 受け入れ条件 11: 月の額の宣言が無いキーは選ばない
-        ("ac11_undeclared", snap(acc("a", **HOT), keys=[KeyObs("k", None)], use="near-limit"), "account", "a", "near_limit_no_declared_key"),
+        (
+            "ac11_undeclared",
+            snap(acc("a", **HOT), keys=[KeyObs("k", None)], use="near-limit"),
+            "account",
+            "a",
+            "near_limit_no_declared_key",
+        ),
         # 受け入れ条件 17: 帳簿を読めなければキーを使わない
         (
             "ac17_ledger_unreadable",

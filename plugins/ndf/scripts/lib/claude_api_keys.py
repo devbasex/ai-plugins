@@ -407,7 +407,9 @@ class KeyTry:
         if self.how == "off":
             return None
         cur = self.route.account()
-        return launch_observe.decide_now(current=None if cur == ca.METERED else cur, exclude_keys=self.tried, keep=self.keep(), use=self.how)
+        return launch_observe.decide_now(
+            current=None if cur == ca.METERED else cur, exclude_keys=self.tried, keep=self.keep(), use=self.how
+        )
 
     def registered(self) -> ApiKey | None:
         """起動先の決定が選んだ登録済みのキー（決定が API キーでなければ None）。決定を `decision` に残す。"""
