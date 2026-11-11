@@ -144,7 +144,12 @@ def base_runtime_count(root: Path, sha: str | None) -> int | None:
     )
     if cat.returncode != 0:
         return None
-    n, buf, i = 0, cat.stdout, 0
+    return _count_runtime_marks(cat.stdout)
+
+
+def _count_runtime_marks(buf: bytes) -> int:
+    """`cat-file --batch` の出力から、JSON の本文が runtime の印を持つ blob を数える。"""
+    n, i = 0, 0
     while i < len(buf):
         j = buf.index(b"\n", i)
         head = buf[i:j].split()
