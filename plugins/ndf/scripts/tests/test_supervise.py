@@ -1307,7 +1307,8 @@ def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, mon
     accounts.add("a", util5=100)
     tb = accounts.add("b", util5=None)
     full, low = FakeAnthropic.usage_reply(window(100), window(10)), FakeAnthropic.usage_reply(window(10), window(10))
-    accounts.fake.usage[tb] = [full, full, low]
+    # 起動のたびの選び直し（#2930 の決定 6）と上限の後の選び直しで 1 回ずつ読む。従量の接続の後の起動で上限が外れる
+    accounts.fake.usage[tb] = [full, full, full, low]
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET")
     set_responses(LIMIT, OK, OK)
@@ -1382,7 +1383,7 @@ def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monke
     """#1576 の I8: 動いている区間のアカウントは期限切れでも NDF が更新せず、そのアカウントのまま呼ぶ（claude が更新する）。"""
     set_responses, calls = seq
     accounts.add("a", expires_in=-60)
-    accounts.add("b", util5=30)
+    accounts.add("b", util5=None)  # a（トークンを更新しないので残量不明）と同じ組。今のアカウントを保つ
     accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(OK)

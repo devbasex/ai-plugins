@@ -23,12 +23,13 @@ import claude_usage as cu  # noqa: E402
 from account_fake import accounts, scoped_limit, window  # noqa: E402,F401
 
 
-def test_choose_picks_lowest_of_larger_utilization(accounts):
+def test_choose_in_the_five_hour_group_by_reset_then_name(accounts):
+    """#2930 の受け入れ条件 15: 組 1 の中でリセットまで持つものは、リセットの早い順、同じなら名前の順。"""
     accounts.add("a", util5=15, util7=3)
     accounts.add("b", util5=2, util7=41)
     accounts.add("c", util5=20, util7=20)
     assert ca.choose().name == "a"
-    assert ca.choose(exclude={"a"}).name == "c"
+    assert ca.choose(exclude={"a"}).name == "b"
 
 
 def test_choose_tie_breaks_on_earlier_five_hour_reset(accounts):
@@ -387,7 +388,7 @@ def test_relay_and_supervise_build_the_same_account_env(accounts, monkeypatch):
     """受け入れ条件 2・I1: ラッパーと supervise.py の子の環境は同じで、トークンとスコープの変数を持たず、
     CLAUDE_CONFIG_DIR がアカウントの設定ディレクトリを指す。置き場の場所は変わらない。"""
     tok = accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
-    accounts.add("b")
+    accounts.add("b", util5=None)  # a と同じ残量不明の組（今のアカウントを保つ）
     monkeypatch.setenv(ca.TOKEN_ENV, "old-SECRET")
     monkeypatch.setenv(ca.SCOPES_ENV, "user:inference")
     sc, r = _runner(monkeypatch, "a")
@@ -420,25 +421,6 @@ MAX20, MAX5 = "default_claude_max_20x", "default_claude_max_5x"
 TEAM_SPEND = {"percent": 100, "severity": "critical"}  # 2026-09-28 の nyle-team の応答（spend_limit_reached は偽）
 
 
-def test_choose_by_remaining_prefers_larger_capacity(accounts):
-    """AC1: 5x の 40% と 20x の 50% では、残りの量の大きい 20x を選ぶ（31.5 < 105）。"""
-    accounts.add("small", tier=MAX5, util5=40, util7=0)
-    accounts.add("large", tier=MAX20, util5=50, util7=0)
-    c = ca.choose()
-    assert (c.name, c.score, c.remaining) == ("large", 50.0, 105.0)
-
-
-def test_weekly_capacity_uses_its_own_table(accounts, monkeypatch):
-    """AC2: 週の枠の大きさだけを差し替えると選ぶアカウントが入れ替わる。"""
-    monkeypatch.setitem(ca.CAPACITY, "t1", {"five_hour": 1000.0, "seven_day": 100.0})
-    monkeypatch.setitem(ca.CAPACITY, "t2", {"five_hour": 1000.0, "seven_day": 200.0})
-    accounts.add("a", tier="t1", util5=0, util7=10)  # 90
-    accounts.add("b", tier="t2", util5=0, util7=60)  # 80
-    assert ca.choose().name == "a"
-    monkeypatch.setitem(ca.CAPACITY, "t1", {"five_hour": 1000.0, "seven_day": 50.0})  # 45
-    assert ca.choose().name == "b"
-
-
 def test_scoped_week_sets_remaining_and_score(accounts):
     """AC4・I5: モデル別の週の枠が週の枠より高ければ残りの量と使用率を決め、100 以上なら候補から外す。"""
     accounts.add("a", tier=MAX20, capacity={"five_hour": 1000}, util5=10, util7=38, extra={"limits": [scoped_limit(58)]})
@@ -455,7 +437,7 @@ def test_scoped_week_sets_remaining_and_score(accounts):
 def test_spend_full_without_raw_flag_is_usable(accounts):
     """#2036: spend が 100%・critical でも、生の spend_limit_reached が偽なら支出上限にせず選ぶ。"""
     accounts.add("team", tier=MAX5, util5=0, util7=0, spend=False, extra={"spend": TEAM_SPEND})
-    accounts.add("other", util5=80, util7=80)
+    accounts.add("other", util5=80, util7=90)  # 週が閾値 T 以上（組 3）
     assert ca.choose().name == "team"
     row = next(r for r in ca.rows() if r["name"] == "team")
     assert row["state"] == "使える" and row["spend_limit_reached"] is False and row["spend_full"] is True
@@ -504,27 +486,29 @@ def test_raw_spend_flag_is_spend_limit(accounts):
     assert row["state"] == "支出上限" and row["spend_limit_reached"] is True
 
 
-def test_unknown_capacity_and_unknown_usage_are_ordered_after(accounts):
-    """AC6・I3: 残りの量の分かる群 → 使用率の群 → 残量不明（読める候補が無いときだけ）。同じ入力には同じ名前。"""
-    accounts.add("a", tier=MAX20, util5=90 - 1, util7=0)  # 残りの量 23.1
-    accounts.add("b", util5=1, util7=1)  # tier 無し
+def test_unknown_usage_is_ordered_after(accounts):
+    """#2930 の受け入れ条件 16: 使用率を読めないアカウントは、読める候補がすべて外れたときだけ選ぶ。同じ入力には同じ名前。"""
+    accounts.add("a", tier=MAX20, util5=50, util7=0)
+    accounts.add("b", util5=1, util7=1)
     accounts.add("c", tier="unknown_tier", util5=0, util7=0)
     accounts.add("d", util5=None)  # 残量不明
     assert [ca.choose().name for _ in range(2)] == ["a", "a"]
-    assert ca.choose(exclude={"a"}).name == "c"
-    assert ca.choose(exclude={"a", "c"}).name == "b"
+    assert ca.choose(exclude={"a"}).name == "b"
+    assert ca.choose(exclude={"a", "b"}).name == "c"
     assert ca.choose(exclude={"a", "b", "c"}).name == "d"
+    assert ca.choose(exclude={"a", "b", "c"}).decision.account_rule == "usage_unknown"
 
 
-def test_below_threshold_is_tried_before_larger_remaining(accounts, monkeypatch):
-    """I3（閾値）: 閾値以上の大きい残りの量より閾値未満の候補を先に返し、それを起動できなければ閾値以上を返す。"""
-    accounts.add("big", tier=MAX20, capacity={"five_hour": 10000}, util5=95, util7=0)  # 500
-    accounts.add("small", tier=MAX5, util5=40, util7=0)  # 31.5
+def test_over_threshold_is_tried_after_the_groups_below(accounts, monkeypatch):
+    """#2930 の受け入れ条件 13: 週の使用率が閾値 T 以上の候補（組 3）は、T 未満の候補を起動できないときだけ選ぶ。"""
+    accounts.add("big", tier=MAX20, util5=0, util7=90)
+    accounts.add("small", tier=MAX5, util5=40, util7=0)
     c = ca.choose()
-    assert c.name == "small" and c.score < ca.switch_at()
+    assert (c.name, c.decision.account_rule) == ("small", "five_hour_first")
     real = ca.usable
     monkeypatch.setattr(ca, "usable", lambda n, *a, **k: False if n == "small" else real(n, *a, **k))
-    assert ca.choose().name == "big"
+    c = ca.choose()
+    assert (c.name, c.decision.account_rule) == ("big", "over_threshold")
 
 
 def test_remaining_is_clamped_and_none_without_capacity():

@@ -144,6 +144,7 @@ class UsageRecord:
     parent_session_id: Optional[str] = None
     agent_type: Optional[str] = None
     agent_id: Optional[str] = None
+    api_key: Optional[str] = None  # API キーで起動した claude -p の行だけに、そのキーの名前（値は書かない。#2930）
     at: str = field(default_factory=now_utc)
     ndf_version: str = field(default_factory=ndf_version)
     schema: int = SCHEMA
@@ -169,6 +170,7 @@ class UsageRecord:
         step: str = "",
         seconds: Optional[float] = None,
         status: str = "ok",
+        api_key: Optional[str] = None,
     ) -> "UsageRecord":
         """`claude -p --output-format json` の結果の dict から作る。"""
         data = data if isinstance(data, dict) else {}
@@ -185,12 +187,14 @@ class UsageRecord:
             turns=data.get("num_turns"),
             seconds=seconds,
             session_id=data.get("session_id"),
+            api_key=api_key or None,
         )
 
     def to_json(self) -> str:
         d = asdict(self)
-        if d["pytest"] is None:
-            del d["pytest"]
+        for optional in ("pytest", "api_key"):  # 任意の列は値が無ければ書かない（古い読み手は列を無視する）
+            if d[optional] is None:
+                del d[optional]
         return json.dumps(d, ensure_ascii=False, sort_keys=True)
 
 
@@ -270,6 +274,27 @@ def read_usage_ledger(runtime: str = "claude", directory: Optional[Path] = None,
     if runtime not in RUNTIMES:
         raise ValueError(f"帳簿の無いランタイム: {runtime}")
     return [as_v2(r, runtime) for p in ledger_files(runtime, directory, repo) for r in read_rows(p)]
+
+
+API_KEY_MARK = '"api_key"'  # API キーの列を持つ行だけを JSON として読む（全行を読まない）
+
+
+def api_key_spent(since: str, directory: Optional[Path] = None) -> dict[str, float]:
+    """Claude の帳簿の、`since`（ISO 8601 の UTC）以後の API キーごとの使用額（`cost_usd` の合計）。#2930。
+
+    `api_key` の列を持つ行だけを数える。帳簿のファイルを読めなければ OSError のまま投げる（呼び手が「読めない」と扱う）。"""
+    out: dict[str, float] = {}
+    for path in ledger_files("claude", directory):
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        for line in (ln for ln in text.splitlines() if API_KEY_MARK in ln):
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            name, cost, at = (d.get(k) for k in ("api_key", "cost_usd", "at")) if isinstance(d, dict) else (None, None, None)
+            if isinstance(name, str) and isinstance(cost, (int, float)) and isinstance(at, str) and at >= since:
+                out[name] = out.get(name, 0.0) + float(cost)
+    return out
 
 
 def ledger_snapshot(directory: Path) -> dict[str, int]:
