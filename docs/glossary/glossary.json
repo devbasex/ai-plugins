@@ -6398,22 +6398,19 @@
       "term": "import の輪",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ",
-      "source": "",
-      "pending_source": "issues/issue-2988-requirements.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "一番下の層",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれる共通ライブラリ。結果を出す層 step_result がこれに当たる",
-      "source": "",
-      "pending_source": "issues/issue-2988-requirements.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "終了コードの表",
       "context": "repo-dev-checks",
       "meaning": "NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する",
-      "source": "",
-      "pending_source": "issues/issue-2988-design.md"
+      "source": "docs/specifications/ndf-scripts-import-cycles.md"
     },
     {
       "term": "長い待ち",
