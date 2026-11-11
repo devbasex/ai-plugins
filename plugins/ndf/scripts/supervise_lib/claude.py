@@ -436,10 +436,13 @@ class ClaudeRunner:
             self.switch(c.name, "recovered", decision=c.decision)
         if self.account is None:
             return None
-        c = ca.choose(keep=self.keep(), current=self.account)  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）
-        if c.name and c.name != self.account:
-            self.switch(c.name, "rule", decision=c.decision)
         acc = ca.load_account(self.account)
+        held = bool(acc and acc.auth_held(time.time()))
+        if not held:  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）。認証の失敗は下の振り替えが扱う
+            c = ca.choose(keep=self.keep(), current=self.account)
+            if c.name and c.name != self.account:
+                self.switch(c.name, "rule", decision=c.decision)
+                acc = ca.load_account(self.account)
         if not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
             return env
         c, env = ca.choose_env(exclude={self.account}, keep=self.keep(), base=environ, note=self.note_account_dir)
