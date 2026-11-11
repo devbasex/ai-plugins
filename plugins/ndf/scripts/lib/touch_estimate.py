@@ -100,24 +100,33 @@ def from_design(text: str, issue: int) -> list[str]:
     return _uniq(f for r in rows if r.issue == issue and r.kind == design_results.IMPLEMENT for f in r.files)
 
 
-def from_group_table(description: str, issue: int, files: Sequence[str]) -> list[str]:
-    """マイルストーンの説明の `### 並列の組（見込み）` の表で、課題の行の「触る場所の見込み」のバッククォートの語。"""
+def _group_rows(description: str) -> list[tuple[list[int], str]]:
+    """`### 並列の組（見込み）` の表の行（課題の番号, 「触る場所の見込み」のセル）。表が無ければ空。"""
     text = description or ""
     sec = md.section_named(text, GROUP_HEADING)
     if sec is None:
         return []
-    out: list[str] = []
+    out = []
     for table in md.tables(text):
-        if not sec.start <= table.start < sec.end:
-            continue
         head = [h.strip() for h in table.header]
-        if "課題" not in head or "触る場所の見込み" not in head:
+        if not sec.start <= table.start < sec.end or "課題" not in head or "触る場所の見込み" not in head:
             continue
         ci, pi = head.index("課題"), head.index("触る場所の見込み")
-        for cells in table.rows:
-            if len(cells) <= max(ci, pi) or issue not in {int(n) for n in _ISSUE.findall(cells[ci])}:
-                continue
-            for token in re.findall(r"`([^`]+)`", cells[pi]):
+        out += [([int(n) for n in _ISSUE.findall(c[ci])], c[pi]) for c in table.rows if len(c) > max(ci, pi)]
+    return out
+
+
+def group_issues(description: str) -> list[int]:
+    """課題グループの表に載る課題の番号（載った順）。"""
+    return _uniq(n for nums, _ in _group_rows(description) for n in nums)
+
+
+def from_group_table(description: str, issue: int, files: Sequence[str]) -> list[str]:
+    """マイルストーンの説明の `### 並列の組（見込み）` の表で、課題の行の「触る場所の見込み」のバッククォートの語。"""
+    out: list[str] = []
+    for nums, cell in _group_rows(description):
+        if issue in nums:
+            for token in re.findall(r"`([^`]+)`", cell):
                 out += _match_place(token, files)
     return _uniq(out)
 
