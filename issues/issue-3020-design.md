@@ -117,7 +117,7 @@ I4 を置くのは、承認の答え（判定の時点）から提示のプラ�
 | `parallel.py` の副コマンド `carried <計画名> <連番>` | 提示 1 と提示 2 の `presented.json` のコミットの間を `carry_check` で確かめ、文書だけなら 0、そうでなければ 10（承認ゲート）を返す（I4） | 新設 |
 | `development-workflow/references/parallel.md` | 「まとめたリリース」に省く条件・出し直す条件と理由、「答えの後の整理」に 1 行の伝え方、「一時レーン」に `carried` の流し方を書く | 変更 |
 | `scripts/script-structure-allow/` の `parallel_run.py` の行数 | `parallel_run.py` の行数の例外（今 745 行）を、足した行数へ更新し理由を足す | 変更 |
-| テスト `tests/test_parallel_run.py`・`tests/test_parallel_release.py`（無ければ新設）・`tests/test_parallel_cli.py` 相当 | 受け入れ条件 1〜10 と I1〜I7 | 変更・新設 |
+| テスト `tests/test_parallel_run.py`・`tests/test_parallel_release.py`（無ければ新設）・`tests/test_parallel_cli.py` 相当 | 受け入れ条件 1〜10 と I1〜I8 | 変更・新設 |
 
 ```mermaid
 graph TD
@@ -382,13 +382,14 @@ MVV の文書は承認の版と sha256 で別に守られている（`answer_sta
 | 受け入れ条件 5・I5 | 省いたリリースを `settle released` で締めると、`range-<n>` の `sha`・`prs` が提示 2 の `presented.json` のもの、版が提示 2 の版になる | 提示 1 の値で締めると落ちる |
 | 受け入れ条件 6 | 省く判定の後に `parallel.build` が組めないと、範囲の依頼へ `failed` で答え、問い `kind: build` が立つ | 組めないまま確定へ進むと落ちる |
 | 受け入れ条件 7 | `wait` が `carried` 付きの `confirmed` を返し、`metrics.carried.prs` に加わった番号が並ぶ。`carried` の無い `confirmed` は返さない | `pause` を読み飛ばすままだと落ちる。すべての `confirmed` を返すと落ちる |
-| 受け入れ条件 8 | 省いたリリースの `range-<n>` の `added` に加わった番号が並び、省いていないリリースでは空の並び | `added` を書かないと落ちる |
+| 受け入れ条件 8 | 省いたリリースの `range-<n>` の `added` に確かめ直しの範囲の番号が並び、省いていないリリースでは空の並び | `added` を書かないと落ちる |
 | 受け入れ条件 9・I6 | 先頭が進んでいなければ `k: 1` で確定し、`parallel.carry` を打たない | 進んでいないときも判定すると落ちる |
 | 受け入れ条件 10・I3 | 提示 2 への答え（`--take new` / `--take first`）では先頭を比べず判定もせず、`take` で選んだ提示で確定し、`carried` を外す | 提示 2 への答えでも判定すると落ちる |
 | I4 | `parallel.py carried` は、提示 1 から提示 2 のコミットまでが文書だけなら 0、コードが入っていれば 10 を返す。引き継ぐ形の提示のプランは `carried` の 10 で `record` を打たずに承認ゲートで終わる | 確かめ直さずに記録を書くと落ちる |
 | I4 | 引き継ぐ形の提示のプランに `mvv`・`note` が無く、`present` → `carried` → `record` → `approve` の順につながる | 順を入れ替えて記録を先に書くと落ちる |
 | I4 | `helper_task` は `carried` 付きの `confirmed` に提示と同じ流し方（`phase: present`）を返し、`carried` の無い `confirmed` に確定の後の 3 手を返す | 引き継ぐ確定に `--from approve` を返すと落ちる |
 | I7 | 印 `parallel-docs-carry` の無い記録の打ち直しでは、先頭が進んだら判定せずに出し直す | 印を見ずに判定すると落ちる |
+| I8 | 判定の後、提示 2 の承認資料を作る前に `develop` へ Pull Request が入ったとき、`range-<n>` の `added` に判定後に入った番号も並び、`wait` の `metrics.carried.prs` には並ばない | `added` に `Release.carried.prs`（判定時の一覧）を写すと落ちる |
 | 受け入れ条件 11 | 全体テスト `uv run --frozen --project . --all-extras pytest . -q -n 4` が通る | — |
 | 受け入れ条件 12 | 手順書の文言はテストで照合しない。リンク切れの検査（既存）に任せる | — |
 
