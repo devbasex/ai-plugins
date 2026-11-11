@@ -217,7 +217,7 @@ classDiagram
 | --- | --- | --- |
 | `sha` | 文字列 | 確定した提示のコミット（出し直しを省いたときは提示 2 の `presented.json` から読む） |
 | `version` / `prs` / `lanes` | 今のまま | — |
-| `added` | 番号の並び | 出し直しを省いたときの確かめ直しの範囲の Pull Request（提示 2 の `prs` のうち提示 1 の `prs` に無いもの。I8）。省いていないときは空の並び |
+| `added` | 番号の並び | 出し直しを省いたときの確かめ直しの範囲の Pull Request（提示 2 の `prs` のうち提示 1 の `prs` に無いもの。I8）。省いていないときは空の並び。出し直しを省いたのは、`parallel.py carried` が 0 を返して引き継いだ承認の記録を書いたときだけである。判定の後にコードを含む Pull Request が入り `carried` が 10 を返したときは、提示 2 への答え（`--take`）で確定するため省いていないとみなし、空の並びにする |
 
 ### `parallel.py carried <計画名> <連番>`（新設）
 
@@ -389,7 +389,8 @@ MVV の文書は承認の版と sha256 で別に守られている（`answer_sta
 | I4 | 引き継ぐ形の提示のプランに `mvv`・`note` が無く、`present` → `carried` → `record` → `approve` の順につながる | 順を入れ替えて記録を先に書くと落ちる |
 | I4 | `helper_task` は `carried` 付きの `confirmed` に提示と同じ流し方（`phase: present`）を返し、`carried` の無い `confirmed` に確定の後の 3 手を返す | 引き継ぐ確定に `--from approve` を返すと落ちる |
 | I7 | 印 `parallel-docs-carry` の無い記録の打ち直しでは、先頭が進んだら判定せずに出し直す | 印を見ずに判定すると落ちる |
-| I8 | 判定の後、提示 2 の承認資料を作る前に `develop` へ Pull Request が入ったとき、`range-<n>` の `added` に判定後に入った番号も並び、`wait` の `metrics.carried.prs` には並ばない | `added` に `Release.carried.prs`（判定時の一覧）を写すと落ちる |
+| I8 | 判定の後、提示 2 の承認資料を作る前に `develop` へ文書だけの Pull Request が入り、`carried` が 0 を返すとき、`range-<n>` の `added` に判定後に入った番号も並び、`wait` の `metrics.carried.prs` には並ばない | `added` に `Release.carried.prs`（判定時の一覧）を写すと落ちる |
+| I8 | 判定の後、提示 2 の承認資料を作る前に `develop` へコードを含む Pull Request が入り、`carried` が 10 を返して提示 2 への答え（`--take`）で確定したとき、`range-<n>` の `added` は空の並び | 出し直しを省いたかを見ずに、提示 2 と提示 1 の `prs` の差を `added` に書くと落ちる |
 | 受け入れ条件 11 | 全体テスト `uv run --frozen --project . --all-extras pytest . -q -n 4` が通る | — |
 | 受け入れ条件 12 | 手順書の文言はテストで照合しない。リンク切れの検査（既存）に任せる | — |
 
