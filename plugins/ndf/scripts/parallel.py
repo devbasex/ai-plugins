@@ -82,7 +82,13 @@ def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[di
         reply("stopped", f"並列の計画 {name} が無い（置き場: {pp.plan_dir(main, name)}/plan.json）", code=1)
     except (OSError, ValueError) as exc:
         reply("stopped", f"並列の計画 {name} を読めない: {exc}", code=2)
-    return pp.check_data(data, home=main)
+    plan, items, metrics = pp.check_data(data, home=main)
+    if plan is not None:  # 同じマシンの他の動いている計画と合わせた本数の警告（#2999 の決定 3。終了コードは変えない）
+        import parallel_machine
+
+        extra = parallel_machine.plan_warnings(main, name, sum(ln.plans for ln in plan.lanes))
+        items, metrics = [*items, *extra], {**metrics, "warnings": metrics["warnings"] + len(extra)}
+    return plan, items, metrics
 
 
 def cmd_init(a) -> None:

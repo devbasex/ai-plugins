@@ -56,7 +56,7 @@
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `plan-json` | `plan.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `plan-md` | `plan.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
@@ -143,7 +143,7 @@
 | `NDF_ORGANIZER_DIR` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_ORGANIZER_LANE` | runtime | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_PARALLEL_LAUNCH_SECONDS` | user | `plugins/ndf/scripts/parallel.py` |
-| `NDF_PARALLEL_MAX_PLANS` | user | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
+| `NDF_PARALLEL_MAX_PLANS` | user | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/relay.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` |
 | `NDF_PARALLEL_POLL` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_RELAY` | user | `plugins/ndf/scripts/parallel.py` |
 | `NDF_PARALLEL_SPAWN_REFUSALS` | user | `plugins/ndf/scripts/parallel.py` |
@@ -288,6 +288,7 @@
 | `monitor.stall.kiro` | seconds 480 | kiro の無進捗の許容。ツール実行の待ちで数分沈黙することがある | `plugins/ndf/scripts/lib/limits.py（接頭辞 monitor. で数え上げる）` |
 | `notify.slack` | seconds 10 | Slack へ送る HTTP の上限 | `plugins/ndf/scripts/lib/notify.py:<module>` |
 | `parallel-launch.up` | seconds 120 / interval 5 | 一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる） | `plugins/ndf/scripts/lib/parallel_launch.py:<module>`<br>`plugins/ndf/scripts/lib/parallel_launch.py:_hit_once` |
+| `parallel-machine.admit-lock` | seconds 10 | レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く（#2999 の決定 4） | `plugins/ndf/scripts/lib/parallel_machine.py:admit_lanes` |
 | `parallel-repo.stall` | seconds 3600 | 動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる） | `plugins/ndf/scripts/lib/parallel_repo.py:<module>` |
 | `post-queue.rate-limit` | seconds 900 / interval 30 / same_cause 31 | 上限（rate limit）で落ちた投稿の再実行。間隔と合計の秒 | `plugins/ndf/scripts/lib/post_queue.py:retry`<br>`plugins/ndf/scripts/lib/post_queue.py:cmd_retry` |
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |

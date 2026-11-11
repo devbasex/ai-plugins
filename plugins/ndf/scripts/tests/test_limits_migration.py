@@ -76,6 +76,7 @@ BEFORE = {
     "notify.slack": {"seconds": 10},
     "parallel-launch.up": {"seconds": 120, "interval": 5},
     "parallel-repo.stall": {"seconds": 3600},
+    "parallel-machine.admit-lock": {"seconds": 10},  # #2999 で足したレーンの起動の判定の排他
     "procs.stop-tree": {"seconds": 3, "interval": 0.1},
     "refresh.http": {"seconds": 10},
     "run-core.kill-grace": {"seconds": 5},
