@@ -110,6 +110,7 @@ def _item(item_id, rank, path, test_target):
 def _setup(
     flow,
     cmd_setup,
+    cmd_phases,
     cmd_implement,
     *,
     whole="tests/test_layout.py",
@@ -151,7 +152,7 @@ def _setup(
     if late:
         past_fix_end(state)
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     _write(work, "src/big.py", x_text)
     commit_with_trailers(work, "Refactor I-001", item_trailers("I-001"))
     _write(work, "src/structure.py", y_text)
@@ -175,9 +176,9 @@ WHOLE_TESTS = [
 
 
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
-def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_implement, cmd_converge, capsys, whole, name):
+def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name):
     """AC7・AC10・I4 — Y は取り消されず `implemented` で待ち、修正へ回るのは X だけ。"""
-    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, whole=whole, name=name)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 
@@ -192,9 +193,11 @@ def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_im
 
 
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
-def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(flow, cmd_setup, cmd_implement, cmd_converge, capsys, whole, name):
+def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name
+):
     """#2457 受け入れ条件 9・I5 — 締め切りでは取り消さない。X を成立しないと判定したら X だけを打ち消し、Y は走らせ直されて残る。"""
-    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name, late=True)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, whole=whole, name=name, late=True)
 
     capsys.readouterr()
     verify = verify_judged(cmd_converge, flow["path"], capsys, feasible={"I-001": False})
@@ -208,9 +211,9 @@ def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(flow, c
     assert y["verify_runs"] == 2
 
 
-def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC9 — Y の変えたファイルが全体を見るテストを落とすと、Y が原因に入り `failing` になる。"""
-    _setup(flow, cmd_setup, cmd_implement, x_text=AT_LIMIT.replace("V0 = 0", "V0 = 1"), y_text=OVER)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, x_text=AT_LIMIT.replace("V0 = 0", "V0 = 1"), y_text=OVER)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 
@@ -219,9 +222,9 @@ def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_implem
     assert "I-002" in state["fix"]["items"]
 
 
-def test_without_a_lint_suite_the_verdict_is_unchanged(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_a_lint_suite_the_verdict_is_unchanged(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC12・I7 — 静的解析の suite が無い宣言では原因を判定せず、Y は従来どおり `failing` になる。"""
-    _setup(flow, cmd_setup, cmd_implement, lint=False)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, lint=False)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 

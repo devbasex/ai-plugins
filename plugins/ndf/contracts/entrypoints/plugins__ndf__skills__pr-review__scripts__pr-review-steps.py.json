@@ -8,10 +8,7 @@
   "env": [
     "GH_TOKEN",
     "GITHUB_TOKEN",
-    "NDF_DEPS_REEXEC",
-    "NDF_DEPS_VENV",
-    "NDF_PRESENTATION_DIR",
-    "UV_PROJECT_ENVIRONMENT"
+    "NDF_PRESENTATION_DIR"
   ],
   "settings": [
     {

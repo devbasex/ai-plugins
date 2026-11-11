@@ -21,18 +21,19 @@ import pytest
 
 from crossref_helpers import (
     verify_judged,
-    past_fix_end,
     CALC,
     TEST_TOTAL,
     build_git_flow,
-    commit_with_trailers,
+    commit_existing_tests,
     git,
-    item_trailers,
+    implement_items,
     read_state,
     write_state,
+    planned_item,
+    head_sha,
+    write_file,
 )
 
-FAR = "2099-01-01T00:00:00+00:00"
 
 # `total` が calc.py の中で例外を投げる。JUnit の本文の traceback に `src/calc.py` が現れる。
 CALC_RAISES = CALC.replace("    return result\n", "    raise RuntimeError('calc broke')\n")
@@ -46,82 +47,16 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": "src/calc.py",
-        "symbol": "add",
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "public_io": False,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "command": ["pytest", "-q", "tests/test_calc.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(item_id, rank, **{"public_io": False, "command": ["pytest", "-q", "tests/test_calc.py"]})
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
 
 
-def _emitted(capsys, key):
-    values = [line.split("=", 1)[1] for line in capsys.readouterr().out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
-def _write(work, rel, text):
-    path = work / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _head(work):
-    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
-
-
-def _existing(flow, files):
-    for rel, text in files.items():
-        _write(flow["work"], rel, text)
-    commit_with_trailers(flow["work"], "既存のテスト", {})
-    state = read_state(flow["path"])
-    state["baseline_test"]["head"] = _head(flow["work"])
-    write_state(flow["path"], state)
-
-
-def _implement(flow, cmd_setup, cmd_implement, changes, late=False, **over):
-    work = flow["work"]
-    state = read_state(flow["path"])
-    state["items"] = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
-    state["plan"] = {
-        "base_sha": _head(work),
-        "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
-        "end_at": FAR,
-        "table_source": "defaults",
-    }
-    state["phase"] = "implement"
-    state.update(over)
-    if late:
-        past_fix_end(state)
-    write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
-    for item_id, change in changes.items():
-        change(work)
-        commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
-    _call(cmd_implement, "cmd_merge_implement")
+def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **over):
+    items = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
+    implement_items(flow, cmd_phases, cmd_implement, items, changes, late=late, **over)
 
 
 def _items(flow):
@@ -130,12 +65,12 @@ def _items(flow):
 
 def _flagged(name):
     """項目の `path` の外のファイルだけを触る（D1 が立つ。全体テストには関わらない）。"""
-    return lambda w: _write(w, f"src/{name}.py", "X = 1\n")
+    return lambda w: write_file(w, f"src/{name}.py", "X = 1\n")
 
 
 def _calc(text):
     """`src/calc.py` だけを変える（危険フラグは立たない）。"""
-    return lambda w: _write(w, "src/calc.py", text)
+    return lambda w: write_file(w, "src/calc.py", text)
 
 
 def _verify(flow, cmd_converge, capsys):
@@ -145,10 +80,12 @@ def _verify(flow, cmd_converge, capsys):
     return verdict, read_state(flow["path"])["whole_test"]
 
 
-def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """AC1・AC9 の裏 — 危険フラグの項目でなく、本文にパスが現れた危険フラグの無い項目が修正へ回る。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES)})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES)})
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
@@ -162,13 +99,14 @@ def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(
     assert items["I-002"]["status"] == "failing" and items["I-001"]["status"] == "verified"
 
 
-def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#2457 受け入れ条件 5・7 — 締め切りを過ぎても取り消さず、原因の項目だけを修正へ回す。危険フラグの項目は残る。"""
     work = flow["work"]
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _calc(CALC_RAISES), "I-002": _flagged("other"), "I-003": _flagged("another")},
         late=True,
@@ -184,12 +122,20 @@ def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_im
     assert (work / "src" / "other.py").exists()
 
 
-def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """AC3・I4 — 本文にパスが無ければ、新しい順に外して走らせ直し、通るようになった項目を原因にする。HEAD は動かない。"""
     work = flow["work"]
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")})
-    head = _head(work)
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    _implement(
+        flow,
+        cmd_setup,
+        cmd_phases,
+        cmd_implement,
+        {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")},
+    )
+    head = head_sha(work)
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
@@ -197,7 +143,7 @@ def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culpri
     assert record["culprit"]["culprits"] == ["I-001"] and record["culprit"]["basis"] == "isolate"
     assert record["culprit"]["evidence"]["I-001"]["tests"] == ["tests/test_total.py::tests.test_total::test_total"]
     assert record["items"] == ["I-001"]
-    assert _head(work) == head
+    assert head_sha(work) == head
     assert git("status", "--porcelain", cwd=work).stdout.strip() == ""
     assert "return result + 1" in (work / "src" / "calc.py").read_text()
 
@@ -205,14 +151,15 @@ def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culpri
 OTHER_TEST = "from src import shared\n\n\ndef test_shared():\n    assert shared.X == 1\n"
 
 
-def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC4 — 別々のテストを別々の項目が落とすと、両方が原因になり、危険フラグの項目は修正へ回らない。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
-        {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: _write(w, "src/shared.py", "X = 2\n")},
+        {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: write_file(w, "src/shared.py", "X = 2\n")},
     )
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -225,7 +172,7 @@ def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_imp
 
 
 def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_write(
-    flow, cmd_setup, cmd_implement, cmd_converge, capsys, monkeypatch
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, monkeypatch
 ):
     """AC4・#1806 — 外す走らせ直しが I-003 の書き込みと同じ秒に入っても（古いバイトコードを読まずに）両方が原因になる。"""
     culprit = sys.modules["refactor_lib.culprit"]
@@ -233,7 +180,7 @@ def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_wr
     written: dict = {}
 
     def i003(w):
-        _write(w, "src/shared.py", "X = 2\n")
+        write_file(w, "src/shared.py", "X = 2\n")
         written["ns"] = shared.stat().st_mtime_ns
 
     real_git_ok = culprit.git_ok
@@ -245,8 +192,8 @@ def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_wr
         return ok
 
     monkeypatch.setattr(culprit, "git_ok", git_ok)
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": i003})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": i003})
 
     verify, record = _verify(flow, cmd_converge, capsys)
 
@@ -277,22 +224,23 @@ def test_no_duplicate_function_names():
 """
 
 
-def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_implement, cmd_converge, cmd_report, capsys):
+def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_report, capsys):
     """AC8・AC7 — 危険フラグの項目は落ちたテストに関わらず、危険フラグの無い項目が行数の上限と同名の関数の検査を落とす。
 
     締め切りを過ぎていても取り消さず、原因の 2 項目だけが修正へ回り、危険フラグの項目は残る（#2457）。
     """
-    _existing(flow, {"tests/test_layout.py": LAYOUT_TEST})
+    commit_existing_tests(flow, {"tests/test_layout.py": LAYOUT_TEST})
     long_calc = CALC + "\n\ndef extra():\n    return 0\n"  # 13 行を超える
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         {
             "I-001": _flagged("other"),
             "I-002": _calc(long_calc),
             "I-003": _flagged("another"),
-            "I-004": lambda w: _write(w, "src/participants.py", "def add(a, b):\n    return a + b\n"),
+            "I-004": lambda w: write_file(w, "src/participants.py", "def add(a, b):\n    return a + b\n"),
         },
         late=True,
     )
@@ -315,12 +263,15 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_im
     assert "I-002" in out and "I-004" in out and "path" in out
 
 
-def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
+):
     """#2457 — 締め切りが無いため、パスで決まらなくても項目を外した走らせ直しで原因を決め、取り消さずに修正へ回す。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         {"I-001": _flagged("other"), "I-002": _calc(CALC_OFF_BY_ONE), "I-003": _flagged("another")},
         late=True,

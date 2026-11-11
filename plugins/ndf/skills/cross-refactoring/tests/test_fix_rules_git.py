@@ -15,7 +15,19 @@ import argparse
 
 import pytest
 
-from crossref_helpers import verify_judged, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
+from crossref_helpers import (
+    verify_judged,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    write_result,
+    write_state,
+    planned_item,
+    write_file,
+    emitted,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 FIX_STEM = "claude-fix-rf130"
@@ -24,12 +36,6 @@ FIX_STEM = "claude-fix-rf130"
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
     return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
-
-
-def _write(work, rel, text):
-    path = work / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _module(name, value=1):
@@ -41,55 +47,32 @@ def _test(name, value=1):
 
 
 def _item(item_id, rank, name):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": f"src/{name}.py",
-        "symbol": name,
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "tests": [],
-        "test_targets": [f"tests/test_{name}.py::test_{name}"],
-        "command": ["pytest", "-q", f"tests/test_{name}.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(
+        item_id,
+        rank,
+        path=f"src/{name}.py",
+        symbol=name,
+        test_targets=[f"tests/test_{name}.py::test_{name}"],
+        command=["pytest", "-q", f"tests/test_{name}.py"],
+    )
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
 
 
-def _emitted(capsys, key):
-    out = capsys.readouterr().out
-    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
 def _items(flow):
     return {i["id"]: i for i in read_state(flow["path"])["items"]}
 
 
-def _implement(flow, cmd_setup, cmd_implement, names, changes, extra=None):
+def _implement(flow, cmd_setup, cmd_phases, cmd_implement, names, changes, extra=None):
     """`names` のモジュールとテストを起点に置き、`changes`（項目 ID → (モジュール名, 中身)）の順に 1 項目 1 コミットで積む。"""
     work = flow["work"]
     for name in names:
-        _write(work, f"src/{name}.py", _module(name))
-        _write(work, f"tests/test_{name}.py", _test(name))
+        write_file(work, f"src/{name}.py", _module(name))
+        write_file(work, f"tests/test_{name}.py", _test(name))
     for rel, text in (extra or {}).items():
-        _write(work, rel, text)
+        write_file(work, rel, text)
     commit_with_trailers(work, "既存のモジュール", {})
     items = [_item(item_id, n, name) for n, (item_id, (name, _)) in enumerate(changes.items(), start=1)]
     state = read_state(flow["path"])
@@ -102,18 +85,18 @@ def _implement(flow, cmd_setup, cmd_implement, names, changes, extra=None):
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     for item_id, (name, text) in changes.items():
-        _write(work, f"src/{name}.py", text)
+        write_file(work, f"src/{name}.py", text)
         commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def _fix(flow, cmd_setup, cmd_merge_fix, commits, *, result=True):
+def _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, commits, *, result=True):
     """偽の修正担当。`commits`（項目 ID → (モジュール名, 中身)）だけをコミットし、`result` なら結果ファイルを残す。"""
-    _call(cmd_setup, "cmd_start_phase", phase="fix")
+    _call(cmd_phases, "cmd_start_phase", phase="fix")
     for item_id, (name, text) in commits.items():
-        _write(flow["work"], f"src/{name}.py", text)
+        write_file(flow["work"], f"src/{name}.py", text)
         commit_with_trailers(flow["work"], f"Fix {item_id}", item_trailers(item_id))
     if result:
         fix_items = read_state(flow["path"])["fix"]["items"]
@@ -122,22 +105,22 @@ def _fix(flow, cmd_setup, cmd_merge_fix, commits, *, result=True):
 
 
 def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
 ):
     """#2457 の棚卸し #29: コミットしなかった I-002 は取り消さず停滞として数え、判定し直して修正担当を替える。"""
-    _implement(flow, cmd_setup, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001", "I-002"]
 
-    _fix(flow, cmd_setup, cmd_merge_fix, {"I-001": ("a", _module("a"))})
+    _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {"I-001": ("a", _module("a"))})
     items = _items(flow)
     assert items["I-002"]["unfixed"] == 1 and "unfixed" not in items["I-001"]
     assert [items[i]["fix_count"] for i in ("I-001", "I-002")] == [1, 1]
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     items = _items(flow)
     assert items["I-002"]["status"] == "failing" and items["I-002"]["fixer_switched"] is True
     assert items["I-002"]["fix_history"][-1]["progress"] == "stalled"
@@ -146,32 +129,34 @@ def test_an_item_the_fixer_did_not_commit_stalls_and_gets_another_fixer(
     assert read_state(flow["path"])["fix"]["items"] == ["I-002"]
 
     # 替えた修正担当がコミットしたら、前の起動の `unfixed` を外して再検証へ戻す
-    _fix(flow, cmd_setup, cmd_merge_fix, {"I-002": ("b", _module("b"))})
+    _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {"I-002": ("b", _module("b"))})
     items = _items(flow)
     assert "unfixed" not in items["I-002"] and items["I-002"]["status"] == "implemented"
 
 
-def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+def test_a_fix_launch_without_a_result_does_not_mark_unfixed_items(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     """R3 AC4（I6）: 結果を残さずに終わった修正の起動は数えず、締め切りの前なら同じ項目を修正へ回す。"""
-    _implement(flow, cmd_setup, cmd_implement, ["a"], {"I-001": ("a", _module("a", 2))})
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, ["a"], {"I-001": ("a", _module("a", 2))})
     verify_judged(cmd_converge, flow["path"], capsys)
-    _fix(flow, cmd_setup, cmd_merge_fix, {}, result=False)
+    _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {}, result=False)
     assert "unfixed" not in _items(flow)["I-001"]
 
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["fix"]["items"] == ["I-001"]
 
 
-def test_a_fix_outside_the_scope_is_kept_and_reported(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+def test_a_fix_outside_the_scope_is_kept_and_reported(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
     """#2457 受け入れ条件 8: 範囲の外を変えた修正を捨てず、`outside_scope` に残す。コミットしなかった I-002 は直さなかったと扱う。"""
-    _implement(flow, cmd_setup, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
     verify_judged(cmd_converge, flow["path"], capsys)
-    _call(cmd_setup, "cmd_start_phase", phase="fix")
+    _call(cmd_phases, "cmd_start_phase", phase="fix")
     # 範囲の外の既存のファイルを、項目が変えた名前と関係なく変える（新しいファイルは範囲の中として扱うため使わない。#1814）
     ignore = flow["work"] / ".gitignore"
-    _write(flow["work"], ".gitignore", ignore.read_text(encoding="utf-8") + "build/\n")
+    write_file(flow["work"], ".gitignore", ignore.read_text(encoding="utf-8") + "build/\n")
     commit_with_trailers(flow["work"], "Fix I-001", item_trailers("I-001"))
     write_result(flow["path"], FIX_STEM, {"items": []})
     _call(cmd_merge_fix, "cmd_merge_fix")
@@ -184,7 +169,7 @@ def test_a_fix_outside_the_scope_is_kept_and_reported(flow, cmd_setup, cmd_imple
 
 
 def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
 ):
     """#1733 の形・#2457 受け入れ条件 17: 18 件のうち 8 件が同じ構造検査で落ち、修正担当が 8 件ともコミットしない。
 
@@ -206,6 +191,7 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         [f"m{n:02d}" for n in range(1, 11)],
         changes,
@@ -219,16 +205,16 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
 
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert sorted(read_state(flow["path"])["fix"]["items"]) == sorted(big_ids)
-    _fix(flow, cmd_setup, cmd_merge_fix, {})
+    _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {})
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix", "1 回目の停滞では修正担当を替えて続ける"
-    _fix(flow, cmd_setup, cmd_merge_fix, {})
+    assert emitted(capsys, "VERIFY") == "fix", "1 回目の停滞では修正担当を替えて続ける"
+    _fix(flow, cmd_setup, cmd_phases, cmd_merge_fix, {})
 
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
     assert {i for i in big_ids if items[i]["status"] == "reverted"} == set(big_ids)
     assert all(items[i]["revert_reason"] == "stalled_after_switch" for i in big_ids)
@@ -242,7 +228,7 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
     assert (tally.adopted, tally.reverted) == (10, 8)
 
 
-def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """R2 AC3（I3）: 検証の中の打ち消しの後、残った項目を新しい HEAD の範囲テストで判定し直す。
 
     I-002 は I-001 が足した関数を使う。I-001 を成立しないと判定して打ち消すと、確かめ直しで I-002 が落ちて修正へ回る。
@@ -252,6 +238,7 @@ def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setu
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         ["a", "b", "c"],
         {"I-001": ("a", helper.replace("return 1", "return 9")), "I-002": ("b", uses), "I-003": ("c", _module("c") + "\n\nY = 1\n")},
@@ -277,8 +264,8 @@ def _repo(tmp_path):
     git("init", "-q", str(work), cwd=tmp_path)
     git("config", "user.email", "t@e.st", cwd=work)
     git("config", "user.name", "test", cwd=work)
-    _write(work, "a.txt", "a0\n")
-    _write(work, "b.txt", "b0\n")
+    write_file(work, "a.txt", "a0\n")
+    write_file(work, "b.txt", "b0\n")
     commit_with_trailers(work, "init", {})
     return work
 
@@ -312,13 +299,13 @@ def test_apply_fix_result_with_an_unknown_range_only_reports(tmp_path, fix_intak
 def test_apply_fix_result_links_good_commits_oldest_first_and_rewrites(tmp_path, fix_intake):
     """問題の無いコミットは古い順に項目の `commits.fix` へ足し、計画に無い項目のコミットは捨て置く。書き換えの判定を項目へ足す。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     first = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
-    _write(work, "b.txt", "b1\n")
+    write_file(work, "b.txt", "b1\n")
     second = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
-    _write(work, "a.txt", "a2\n")
+    write_file(work, "a.txt", "a2\n")
     third = commit_with_trailers(work, "Fix I-001 again", item_trailers("I-001"))
-    _write(work, "b.txt", "b2\n")
+    write_file(work, "b.txt", "b2\n")
     commit_with_trailers(work, "Fix I-009", item_trailers("I-009"))
     unknown = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     head = unknown
@@ -346,11 +333,11 @@ def test_apply_fix_result_reverts_only_the_bad_commits_and_records_sendbacks(tmp
 
     差し戻しは項目があればその項目へ、無ければ状態の `sendbacks` へ残す。残りのコミットは項目へ関連付ける。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     bad_a = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
-    _write(work, "b.txt", "b1\n")
+    write_file(work, "b.txt", "b1\n")
     good = commit_with_trailers(work, "Fix I-002", item_trailers("I-002"))
-    _write(work, "c.txt", "c1\n")
+    write_file(work, "c.txt", "c1\n")
     bad_x = commit_with_trailers(work, "stray", {})
     state = {"items": [_bare_item("I-001"), _bare_item("I-002")]}
     problems = [
@@ -383,9 +370,9 @@ def test_apply_fix_result_reverts_the_whole_range_when_the_bad_commit_alone_conf
     """違反のコミットだけを戻すと衝突するとき（後のコミットが同じ行を直した）は、修正の範囲全体を打ち消して
     修正を採らない。違反のコミットを項目へ結ばず、元のコミットと打ち消しのコミットを台帳へ載せる。"""
     work = _repo(tmp_path)
-    _write(work, "a.txt", "a1\n")
+    write_file(work, "a.txt", "a1\n")
     bad = commit_with_trailers(work, "Fix I-001 bad", item_trailers("I-001"))
-    _write(work, "a.txt", "a2\n")
+    write_file(work, "a.txt", "a2\n")
     good = commit_with_trailers(work, "Fix I-001", item_trailers("I-001"))
     state = {"items": [_bare_item("I-001")]}
     result = {

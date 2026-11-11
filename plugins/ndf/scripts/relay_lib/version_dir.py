@@ -59,6 +59,7 @@ LIB_FILES = (
     "lib/claude_usage.py",
     "lib/clock.py",
     "lib/deps.py",
+    "lib/exit_codes.py",
     "lib/jsonio.py",
     "lib/limits.py",
     "lib/locks.py",

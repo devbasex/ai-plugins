@@ -24,9 +24,9 @@ from typing import Any, Optional
 
 import statefile
 
-from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
 from .items import CARRIED, DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
+from .trailers import trailer_value
 from .vocabulary import DEFER_BUDGET
 
 ITEM = "item"
@@ -275,6 +275,11 @@ def _owners(state: dict[str, Any], work: str) -> dict[str, dict[str, Any]]:
     return owners
 
 
+def _owner_id(owners: dict[str, dict[str, Any]], sha: str) -> str:
+    """`sha` の持ち主の項目 ID（持ち主が無ければ空）。"""
+    return str((owners.get(sha) or {}).get("id") or "")
+
+
 def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     """残すコミット（`完全な SHA → kind`）。"""
     kept: dict[str, str] = {}
@@ -283,15 +288,20 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     for sha in (state.get("final_gate") or {}).get("fix_commits") or []:
         kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
-        # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
-        # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）。
-        # 見送りの項目の検証を受けていないテストのコミットは残さない（`unverified_tests`）
-        if is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED:
-            skip = set(unverified_tests(item)) if item.get("status") == DEFERRED and not item.get("reverted_by_commit") else set()
-            for sha in item_shas(item):
-                if sha not in skip:
-                    kept[full_commit(work, sha)] = ITEM
+        for sha in _item_kept_shas(item):
+            kept[full_commit(work, sha)] = ITEM
     return kept
+
+
+def _item_kept_shas(item: dict[str, Any]) -> list[str]:
+    """項目のコミットのうち残すもの（git を呼ばない）。残さない項目なら空。"""
+    # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
+    # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）。
+    # 見送りの項目の検証を受けていないテストのコミットは残さない（`unverified_tests`）
+    if not (is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED):
+        return []
+    skip = set(unverified_tests(item)) if item.get("status") == DEFERRED and not item.get("reverted_by_commit") else set()
+    return [sha for sha in item_shas(item) if sha not in skip]
 
 
 def _ledger_commits(state: dict[str, Any]) -> list[str]:
@@ -306,10 +316,9 @@ def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[
     verdicts: list[CommitVerdict] = []
     for sha in shas:
         full = full_commit(work, sha)
-        owner = owners.get(full) or {}
-        verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=str(owner.get("id") or ""))
+        verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=_owner_id(owners, full))
         if verdict.kind == STRAY:
-            verdict.trailer_item_id = str(gitfacts.commit_trailers(work, full).get("Item-Id") or "").strip()
+            verdict.trailer_item_id = trailer_value(work, full, "Item-Id")
             verdict.subject = git_out(work, ["log", "-1", "--format=%s", full]) or ""
         verdicts.append(verdict)
     return verdicts
@@ -336,13 +345,13 @@ def _split(
     remove: list[str] = []
     stray: list[str] = []
     for sha in unpublished:
-        owner = str((owners.get(sha) or {}).get("id") or "")
+        owner = _owner_id(owners, sha)
         if owner in dropped:
             remove.append(sha)
         elif sha not in kept:
             remove.append(sha)
             stray.append(sha)
-    revert = [s for s in reversed(published) if str((owners.get(s) or {}).get("id") or "") in dropped]
+    revert = [s for s in reversed(published) if _owner_id(owners, s) in dropped]
     return remove, revert, stray
 
 
