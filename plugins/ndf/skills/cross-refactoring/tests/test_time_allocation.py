@@ -144,8 +144,8 @@ def test_old_rows_build_the_same_table(mods):
 # ---------- 採り直しの巡（決定 10） ----------
 
 
-def test_only_this_rounds_items_raise_the_whole_test(refactor, tmp_path):
-    """前の巡の項目のフラグは次の巡の全体テストを走らせない。今の巡の項目のフラグは走らせる。"""
+def test_only_this_rounds_items_raise_the_danger_flags(refactor, tmp_path):
+    """前の巡の項目のフラグは次の巡で数え直さない。今の巡の項目のフラグだけを最終ゲートへ寄せる。"""
     converge = importlib.import_module("refactor_lib.commands.converge")
     old = {"id": "I-001", "round": 1, "status": "verified", "danger": ["D1"], "danger_checked": True}
     new = {"id": "I-002", "round": 2, "status": "verified", "danger": [], "danger_checked": True}

@@ -1,6 +1,6 @@
 """原因の項目の判定（#1649 決定 2〜5）。
 
-全体テストで変更起因の失敗が出たとき、落ちたテストを起こした改善項目（原因の項目）を決める。**危険フラグの有無と
+範囲テストと最終ゲートの全体テストで変更起因の失敗が出たとき、落ちたテストを起こした改善項目（原因の項目）を決める。**危険フラグの有無と
 修正担当の申告は使わない**（I1）。候補は取り消されていないすべての改善項目である。
 
 | 手がかり | 決め方 |
@@ -11,7 +11,8 @@
 
 外す走らせ直しは HEAD を動かさず、1 件ごとに `git reset --hard HEAD` と `git clean -fd` で戻す（I4）。判定は値
 （`Verdict`）を作るだけで項目の状態を書き換えない。**原因の項目を順に取り消す経路は無い**（#2457）。原因の項目は
-修正の繰り返しへ回り、成立しないと判定した項目だけが打ち消される（`commands/converge.py`）。
+修正の繰り返しへ回り、成立しないと判定した項目だけが打ち消される（`scope_verdict.py`・`commands/converge.py`）。
+最終ゲートは手がかり 1 だけで決め、最終ゲート修正の依頼に向け先として載せる（`commands/gate.py`。#3048）。
 """
 
 from __future__ import annotations
@@ -133,33 +134,6 @@ def determine(state: dict[str, Any], caused: list[str], texts: dict[str, str], i
     culprits = [i["id"] for i in candidates if i["id"] in evidence]
     rest = [i["id"] for i in candidates if i["id"] not in evidence] if basis == UNDETERMINED else []
     return Verdict(culprits, basis, evidence, culprits + rest, round(time.monotonic() - started, 1))
-
-
-def judge(state: dict[str, Any], holder: dict[str, Any], verdict_of: dict[str, Any], isolate: bool = True) -> Verdict:
-    """見分けの結果（`verdict_of` の `caused`・`caused_output`）から原因を決め、`holder` の `culprit` と `items` に残す。"""
-    verdict = determine(state, list(verdict_of.get("caused") or []), dict(verdict_of.get("caused_output") or {}), isolate)
-    holder["culprit"] = verdict.as_dict()
-    holder["items"] = list(verdict.order)
-    named = ", ".join(verdict.culprits) or "なし"
-    info(f"🔎 原因の項目: {named}（手がかり {verdict.basis} / {verdict.seconds} 秒）")
-    return verdict
-
-
-def fixable(record: dict[str, Any]) -> bool:
-    """修正へ回せるか。原因が決まらなければ回さない（決定 5）。判定の無い旧い記録は回す（I9）。"""
-    return (record.get("culprit") or {}).get("basis") != UNDETERMINED
-
-
-def rerun_of(verdict: dict[str, Any]) -> list[str]:
-    """見分けの結果から、変更起因の suite ごとの走らせ直すコマンドを返す。複数形の無い旧い記録は単数を使う。"""
-    commands = list(verdict.get("rerun_commands") or [])
-    return commands or ([verdict["rerun_command"]] if verdict.get("rerun_command") else [])
-
-
-def one_command(rerun: Any) -> str:
-    """走らせ直すコマンドの並びを、suite の区切りを残した 1 本にする（launch-cli.sh は並びを空白で連結するため）。"""
-    commands = [rerun] if isinstance(rerun, str) else [str(c) for c in rerun]
-    return commands[0] if len(commands) == 1 else " && ".join(f"( {c} )" for c in commands)
 
 
 _BASIS_TEXT = {PATH: "落ちたテストの出力に現れたパス", ISOLATE: "項目を外した走らせ直し", UNDETERMINED: "決まらず"}

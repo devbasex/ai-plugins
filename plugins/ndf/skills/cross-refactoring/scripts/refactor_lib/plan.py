@@ -181,7 +181,7 @@ def normalize_plan_file(value: Optional[str]) -> str:
 def baseline_line(baseline: dict[str, Any]) -> str:
     """着手前の全体のテストの結果（通過か失敗・秒・HEAD の短い SHA）。報告と改修計画が共有する。
 
-    危険フラグの全体のテストが落ちたとき、変更が原因か元からの失敗かを読む基準になる。
+    最終ゲートの全体のテストが落ちたとき、変更が原因か元からの失敗かを読む基準になる。
     """
     status = {"green": "通過", "red": "失敗"}.get(str(baseline.get("status") or ""), "—")
     seconds = baseline.get("seconds")

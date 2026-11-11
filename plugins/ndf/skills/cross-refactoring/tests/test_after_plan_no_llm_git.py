@@ -130,7 +130,8 @@ def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_phases, cmd_i
     state = read_state(flow["path"])
     item = state["items"][0]
     assert item["status"] == "verified"
-    assert "D5" in item["danger"] and state["whole_test"]["ran"] is True
+    assert "D5" in item["danger"] and not state["whole_test"].get("ran")
+    assert state["whole_test"]["deferred"]["items"] == ["I-001"]
     assert item["review_test_judgements"] == ["tests/test_calc.py"]
     assert state["final_gate"]["status"] == "passed"
     assert state["judge"]["failures"] == 0
