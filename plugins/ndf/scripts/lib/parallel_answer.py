@@ -130,7 +130,8 @@ def owner_next(
     lanes, hold = owner_lanes(main, name, rid, q), ph.read_hold(main, name)
     sprint = [lane for lane in lanes if ph.plan_held(main, name, hold, lane) and ph._lane_kind(main, name, lane) != "loop"]
     marks = ph.read_marks(main, name) if sprint else {}
-    held = [lane for lane in sprint if lane in marks or not phs.sprint_free(main, name, lane)]
+    free = bool(sprint) and wakes_free_sprint(main, name)
+    held = [lane for lane in sprint if lane in marks or not free or not phs.sprint_free(main, name, lane)]
     for lane in held:
         ph.place_mark(main, name, lane, "answered")
     rest = [lane for lane in lanes if lane not in held]
@@ -143,15 +144,29 @@ def _restart_lines(lanes: list[str]) -> str | None:
     return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
 
 
-def legacy_launch(main: Path, name: str) -> bool:
-    """起動の印（`parallel-launch`）の無い古い記録か。古い記録は起動と再起動をオーガナイザーが打つ（#2936 の前の道）。"""
+def _questions_event(main: Path, name: str) -> dict:
+    """耐久ワークフローの問いの一覧の知らせ。読めなければ {}（新しい記録として読む）。"""
     import durable
 
     try:
         got = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "questions", 0, start=pl.record_start(main))
     except durable.DurableError:
-        return False
-    return (got or {}).get("launching") is False
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def legacy_launch(main: Path, name: str) -> bool:
+    """起動の印（`parallel-launch`）の無い古い記録か。古い記録は起動と再起動をオーガナイザーが打つ（#2936 の前の道）。"""
+    return _questions_event(main, name).get("launching") is False
+
+
+def wakes_free_sprint(main: Path, name: str) -> bool:
+    """停止の範囲の中の 1 スプリントのレーンを、承認の要らないプランがあれば再開の印を置かずに起こしてよい記録か（#3000）。
+    起動の印（`parallel-launch`）の後で版の印（`parallel-sprint-hold-wake`）の前の記録の耐久ワークフローは、範囲の中の
+    1 スプリントのレーンを印の有無によらず打たず、停止が解けたら印のあるレーンだけを起こすため、偽を返して印を置かせる。
+    起動の印の無い古い記録は、再起動の 1 行をオーガナイザーが打つため真。"""
+    ev = _questions_event(main, name)
+    return ev.get("launching") is False or ev.get("sprint_hold_wake") is not False
 
 
 def answer_arg_error(revise: bool, note: str | None, approved: bool, by: str) -> str | None:

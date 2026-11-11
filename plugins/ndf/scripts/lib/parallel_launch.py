@@ -229,5 +229,6 @@ class LaunchRouting:
         return {} if self.launching else {"commands": commands}
 
     def legacy_mark(self) -> dict:
-        """古い記録なら、問いの一覧の知らせへ印を添える（answer が持ち主を起こす 1 行を返すかを読む）。"""
-        return {} if self.launching else {"launching": False}
+        """古い記録なら、問いの一覧の知らせへ印を添える。answer は `launching` で持ち主を起こす 1 行を返すかを、`sprint_hold_wake` で
+        範囲の中の 1 スプリントのレーンへ再開の印を置かずに済ませてよいか（版の印 `parallel-sprint-hold-wake` の後の記録か。#3000）を読む。"""
+        return {**({} if self.launching else {"launching": False}), **({} if self.sprint_hold_wake else {"sprint_hold_wake": False})}

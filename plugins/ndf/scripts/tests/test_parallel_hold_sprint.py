@@ -157,6 +157,26 @@ def test_a_held_sprint_lane_without_its_sprint_or_with_a_mark_stays_held(plan):
     assert answer(plan)[1] == ["la"] and ph.read_marks(plan, "p1")["la"]["why"] == "answered"
 
 
+@pytest.mark.parametrize(
+    "event, held", [({}, []), ({"launching": False, "sprint_hold_wake": False}, []), ({"sprint_hold_wake": False}, ["la"])]
+)
+def test_a_record_before_the_hold_wake_patch_marks_the_free_sprint_lane(plan, monkeypatch, event, held):
+    """起動の印の後・版の印 `parallel-sprint-hold-wake` の前の記録では、承認の要らないプランがあっても印を置く（耐久ワークフローが打たないため）。"""
+    make_sprint(plan, "関門")
+    monkeypatch.setattr(pa, "_questions_event", lambda *_a: event)
+    assert answer(plan)[1] == held and (("la" in ph.read_marks(plan, "p1")) is bool(held))
+
+
+def test_the_questions_event_carries_the_hold_wake_mark_only_in_old_records():
+    r = prun._Run("/m", "p1", [{"name": "la", "input": {"kind": "sprint"}}])
+    r.launching, r.sprint_hold_wake = True, False
+    assert r.legacy_mark() == {"sprint_hold_wake": False}
+    r.sprint_hold_wake = True
+    assert r.legacy_mark() == {}
+    r.launching = False
+    assert r.legacy_mark() == {"launching": False}
+
+
 # ---- 耐久ワークフローの再起動（I4、決定 4） ----
 
 
