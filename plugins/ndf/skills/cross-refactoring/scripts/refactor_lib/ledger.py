@@ -275,6 +275,11 @@ def _owners(state: dict[str, Any], work: str) -> dict[str, dict[str, Any]]:
     return owners
 
 
+def _owner_id(owners: dict[str, dict[str, Any]], sha: str) -> str:
+    """`sha` の持ち主の項目 ID（持ち主が無ければ空）。"""
+    return str((owners.get(sha) or {}).get("id") or "")
+
+
 def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     """残すコミット（`完全な SHA → kind`）。"""
     kept: dict[str, str] = {}
@@ -311,8 +316,7 @@ def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[
     verdicts: list[CommitVerdict] = []
     for sha in shas:
         full = full_commit(work, sha)
-        owner = owners.get(full) or {}
-        verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=str(owner.get("id") or ""))
+        verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=_owner_id(owners, full))
         if verdict.kind == STRAY:
             verdict.trailer_item_id = str(commit_trailers(work, full).get("Item-Id") or "").strip()
             verdict.subject = git_out(work, ["log", "-1", "--format=%s", full]) or ""
@@ -341,13 +345,13 @@ def _split(
     remove: list[str] = []
     stray: list[str] = []
     for sha in unpublished:
-        owner = str((owners.get(sha) or {}).get("id") or "")
+        owner = _owner_id(owners, sha)
         if owner in dropped:
             remove.append(sha)
         elif sha not in kept:
             remove.append(sha)
             stray.append(sha)
-    revert = [s for s in reversed(published) if str((owners.get(s) or {}).get("id") or "") in dropped]
+    revert = [s for s in reversed(published) if _owner_id(owners, s) in dropped]
     return remove, revert, stray
 
 
