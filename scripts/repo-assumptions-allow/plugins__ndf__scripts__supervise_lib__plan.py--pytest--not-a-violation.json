@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/supervise_lib/plan.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "進捗ログの host に載る pytest のプロセスの数の鍵を説明している（#2998）。対象リポジトリのテストのコマンドを埋め込んでいない",
+  "count": 2
+}
