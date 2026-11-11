@@ -52,6 +52,22 @@ OWNERS = {
     "trailers": ("commit_trailers",),
 }
 
+# 分けた先のモジュールだけが定義し、gitfacts から再エクスポートしない非公開の名前（使う側が gitfacts 経由で読まない）
+OWNED_ONLY = {
+    "pathkinds": ("_has_shebang", "_is_code_path"),
+    "process": ("_process_group_alive", "_kill_process_group"),
+    "github": ("_fetch_review_threads_page", "_REVIEW_THREADS_QUERY", "_gh_api_get"),
+    "worktree": ("_control_prefix", "_discard_worktree_changes", "_require_clean_worktree"),
+    "publish": (
+        "_run_sync_command",
+        "_publish_commit_message",
+        "_commit_sync_changes",
+        "_push_with_credential_fallback",
+        "_CREDENTIAL_LIB",
+    ),
+    "trailers": ("_parse_trailer_paragraph",),
+}
+
 GITFACTS_OWN = (
     "safe_int",
     "reported_shas",
@@ -72,6 +88,15 @@ def test_a_moved_name_is_defined_in_its_owner_and_re_exported(refactor, module, 
     gitfacts = sys.modules["refactor_lib.gitfacts"]
     assert name in vars(owner)
     assert getattr(gitfacts, name) is getattr(owner, name)
+    value = getattr(owner, name)
+    if callable(value) and hasattr(value, "__module__"):
+        assert value.__module__ == f"refactor_lib.{module}"
+
+
+@pytest.mark.parametrize("module, name", [(m, n) for m, names in OWNED_ONLY.items() for n in names])
+def test_a_moved_private_name_is_defined_in_its_owner(refactor, module, name):
+    owner = sys.modules[f"refactor_lib.{module}"]
+    assert name in vars(owner)
     value = getattr(owner, name)
     if callable(value) and hasattr(value, "__module__"):
         assert value.__module__ == f"refactor_lib.{module}"
