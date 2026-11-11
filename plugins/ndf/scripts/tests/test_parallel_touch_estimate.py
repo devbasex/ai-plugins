@@ -31,7 +31,7 @@ def i21(items):
 
 EST = {
     "lcost": {2913: ["plugins/ndf/scripts/lib/sprint_loop_select.py"]},
-    "lflow": {2997: ["plugins/ndf/scripts/lib/"], 2998: ["docs/x.md"]},
+    "lflow": {2997: ["plugins/ndf/scripts/lib/sprint_loop_select.py"], 2998: ["docs/x.md"]},
 }
 
 
@@ -41,7 +41,7 @@ def test_lanes_running_together_get_the_overlapping_pair_and_proposals():
     assert got is not None and metrics["errors"] == 0
     (it,) = i21(items)
     assert it["level"] == "warning" and it["lanes"] == ["lcost", "lflow"] and it["issues"] == [2913, 2997]
-    assert it["paths"] == ["plugins/ndf/scripts/lib/sprint_loop_select.py", "plugins/ndf/scripts/lib/"]
+    assert it["paths"] == ["plugins/ndf/scripts/lib/sprint_loop_select.py", "plugins/ndf/scripts/lib/sprint_loop_select.py"]
     assert it["proposals"] == [
         {"kind": "after", "lane": "lflow", "after": "lcost"},
         {"kind": "move", "issue": 2997, "from": "lflow", "to": "lcost"},

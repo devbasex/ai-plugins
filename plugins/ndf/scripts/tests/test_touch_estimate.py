@@ -13,7 +13,7 @@ FILES = [
     "plugins/ndf/scripts/lib/sprint_loop_select.py",
     "plugins/ndf/scripts/lib/parallel_plan.py",
     "plugins/ndf/scripts/parallel.py",
-    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/NOTES.md",
     "docs/a.md",
     "docs/b.md",
 ]
@@ -36,9 +36,9 @@ def test_the_body_yields_files_only_from_the_named_sections():
 
 
 def test_the_body_without_the_named_sections_is_read_whole_and_ambiguous_tails_are_dropped():
-    body = "`README.md` と `lib/parallel_plan.py` と `scripts/parallel.py`"
-    assert te.from_body(body, FILES + ["README.md"]) == [
-        "README.md",
+    body = "`NOTES.md` と `lib/parallel_plan.py` と `scripts/parallel.py`"
+    assert te.from_body(body, FILES + ["NOTES.md"]) == [
+        "NOTES.md",
         "plugins/ndf/scripts/lib/parallel_plan.py",
         "plugins/ndf/scripts/parallel.py",
     ]
@@ -139,7 +139,7 @@ def test_unknown_estimates_are_taken_and_marked_unknown():
 
 def test_the_shared_list_counts_as_an_overlap():
     """I10: 共有の一覧に当たる 2 件は実装のキューと同じく あり。"""
-    shared = [{"path": "plugins/ndf/scripts/lib/README.md", "touched_by": ["plugins/ndf/scripts/lib/"]}]
+    shared = [{"path": "plugins/ndf/scripts/lib/NOTES.md", "touched_by": ["plugins/ndf/scripts/lib/"]}]
     e = {1: est("plugins/ndf/scripts/lib/a.py"), 2: est("plugins/ndf/scripts/lib/b.py"), 3: est("docs/b.md")}
     assert te.spread([1, 2, 3], set(), e, slots=2, width=1, shared=shared).take == [1, 3]
     assert te.spread([1, 2, 3], set(), e, slots=2, width=1).take == [1, 2]
