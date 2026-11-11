@@ -407,7 +407,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断開始の値 | — | 試行方式で、これを超えたら工程境界で継続と再起動を比べ始めるコンテキスト量（初期値 200K） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 運用上限 | — | これを超えたら次の工程への進入を止めるコンテキスト量（現行方式 200K・試行方式の初期値 400K）。ツール呼び出しの途中では止めない | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 容量の余白 | — | 実行環境の窓の上限（または自動圧縮が始まる量）から、次の作業・ツール結果・出力と進行の保存のために空けておく量 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| 再起動の理由 | — | 工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動と、現行方式のカットポイントの 6 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
+| 再起動の理由 | — | 工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動・現行方式のカットポイントと、オーガナイザーの長い待ちの 7 つ | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 復元の区間 | — | 再起動した新しいセッションが、引継ぎ文書を読み始めてから最初の工程を起動するまで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 復元の量 | — | 再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
 | 計測の条件 | — | 続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定 | — | — | `docs/specifications/ndf-context-continue-or-cut-measurement.md` |
@@ -522,6 +522,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 立ち上がりの確認 | — | 耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒 | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 起動の再試行 | — | 立ち上がりの確認で立ち上がらなかった起動かレーンの再起動を、耐久ワークフローがもう 1 回だけ打つこと。2 回目も立ち上がらなければ区分 spawn の問いを立てる | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 手順どおりの停止 | — | 一時レーンが、リリース承認ゲートの依頼か settle を送った後に自分のラッパーを止めること。区分 helper の問いの対象にしない | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
+| 長い待ち | — | オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち | — | — | — |
+| 状況報告 | — | parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告 | — | — | — |
+| 切り替えの判定 | — | parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch） | — | — | — |
+| プロンプトキャッシュの寿命 | — | 会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

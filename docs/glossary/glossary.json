@@ -5151,7 +5151,7 @@
     {
       "term": "再起動の理由",
       "context": "ndf-workflow",
-      "meaning": "工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動と、現行方式のカットポイントの 6 つ",
+      "meaning": "工程境界で会話を切った・止めたときの理由。容量・運用上限・費用・独立性・手動・現行方式のカットポイントと、オーガナイザーの長い待ちの 7 つ",
       "source": "docs/specifications/ndf-context-restart-policy.md"
     },
     {
@@ -6414,6 +6414,30 @@
       "meaning": "NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する",
       "source": "",
       "pending_source": "issues/issue-2988-design.md"
+    },
+    {
+      "term": "長い待ち",
+      "context": "ndf-workflow",
+      "meaning": "オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち",
+      "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "状況報告",
+      "context": "ndf-workflow",
+      "meaning": "parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告",
+      "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "切り替えの判定",
+      "context": "ndf-workflow",
+      "meaning": "parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch）",
+      "pending_source": "issues/issue-3006-design.md"
+    },
+    {
+      "term": "プロンプトキャッシュの寿命",
+      "context": "ndf-workflow",
+      "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
+      "pending_source": "issues/issue-3006-requirements.md"
     }
   ]
 }
