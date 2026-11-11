@@ -6575,9 +6575,9 @@
     {
       "term": "CI テストの宣言",
       "context": "ndf-workflow",
-      "meaning": "`.ndf/` に書く、このリポジトリのテストは CI で走らせると表す設定。宣言があれば手元でテストを走らせない",
+      "meaning": "`.ndf/project.json` の `test.ci.only: true`。このリポジトリのテストは CI でだけ走らせると表し、宣言があれば手元でテストを走らせない",
       "source": "",
-      "pending_source": "issues/issue-3056-requirements.md"
+      "pending_source": "issues/issue-3056-design.md"
     },
     {
       "term": "手元のテスト",
@@ -6589,9 +6589,9 @@
     {
       "term": "CI の結果の監視",
       "context": "ndf-workflow",
-      "meaning": "PR の CI のテストの結果を、プランのステップを止めずに読み、失敗を見つけたら CI の失敗の改修を起こす仕組み",
+      "meaning": "PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み",
       "source": "",
-      "pending_source": "issues/issue-3056-requirements.md"
+      "pending_source": "issues/issue-3056-design.md"
     },
     {
       "term": "CI の失敗の改修",
@@ -6599,6 +6599,13 @@
       "meaning": "CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること",
       "source": "",
       "pending_source": "issues/issue-3056-requirements.md"
+    },
+    {
+      "term": "テストのチェック",
+      "context": "ndf-workflow",
+      "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
+      "source": "",
+      "pending_source": "issues/issue-3056-design.md"
     }
   ]
 }
