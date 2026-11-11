@@ -1,4 +1,4 @@
-"""登録済み API キー: 登録簿と状態の記録の読み書き・選定・子の環境（#2855）。
+"""登録済み API キー: 登録簿の読み書き・子の環境・起動口の持ち方（#2855・#2930）。
 
 サブスクリプションにリンクした Console 組織の API キーを名前を付けて預け、`supervise.py` の起動口（`ClaudeRunner`）が
 起こす `claude -p` の worker にだけ使う。ラッパーが起こす対話のセッションの経路はこのモジュールを読まない（I5）。
@@ -6,9 +6,12 @@
 置き場はアカウントの置き場（`claude_accounts.store_dir()`）。
 
 - `api-keys.json`（API キーの登録簿。0600）: `version`・`use`（使い方の宣言 `off`・`always`・`near-limit`）・
-  `keys.<名前>`（`key`・`account`・`added_at`・`generation`）。キーの値はこのファイルの外へ出さない（I4）
-- `api-key-state.json`（API キーの状態。0600）: `<名前>`（`generation`・`state`・`since`・`checked_at`）。
-  世代が登録簿と一致しない行と、行の無いキーは `ok` として扱う（I10）
+  `weekly_at`（閾値 T。%。無ければ既定の 85）・`keys.<名前>`（`key`・`account`・`added_at`・`generation`・任意の
+  `monthly_usd`（月の額。無ければ未宣言））。キーの値はこのファイルの外へ出さない（I4）
+
+どのキーで起動するかは起動先の決定（`launch_rules`）が決める。判定のための状態のファイルを持たない（#2930 の I8）。
+残高切れ・認証の失敗・上限を返したキーは、その呼び出しの除外へ足すだけである。旧版が書いた `api-key-state.json` は
+読まず、書かず、消さない。
 
 書くときはアカウントの置き場の `.locks/.api-keys` の排他を取る。登録簿が壊れていれば `BookError` を投げ、読む側
 （起動口・一覧）は登録 0 本・宣言 `off` として動く（I6）。
@@ -26,16 +29,15 @@ from dataclasses import dataclass, field
 
 import claude_accounts as ca
 import claude_settings
-import limits
-from claude_usage import epoch, iso_utc
+import launch_observe
+import launch_rules
+from claude_usage import iso_utc
 
 BOOK_FILE = "api-keys.json"
-STATE_FILE = "api-key-state.json"
 LOCK_NAME = ".api-keys"  # アカウントの名前（先頭は英小文字か数字）と重ならない
 VERSION = 1
 USES = ("off", "always", "near-limit")
-OK, CREDIT_LOW, AUTH_FAILED = "ok", "credit_low", "auth_failed"
-STATES = (OK, CREDIT_LOW, AUTH_FAILED)
+CREDIT_LOW, AUTH_FAILED, LIMITED = "credit_low", "auth_failed", "limit"  # この呼び出しでキーを外した理由
 KEY_ENV = "ANTHROPIC_API_KEY"
 NAME_ENV = "NDF_CLAUDE_API_KEY_NAME"  # 子へ渡した API キーの名前（入れ子の supervise.py が読む）
 GENERATION_ENV = "NDF_CLAUDE_API_KEY_GENERATION"  # 子へ渡した API キーの世代
@@ -43,7 +45,6 @@ GENERATION_ENV = "NDF_CLAUDE_API_KEY_GENERATION"  # 子へ渡した API キー�
 BACK_ENV = "NDF_CLAUDE_KEY_ACCOUNT"
 BASE_URL_ENV = "ANTHROPIC_BASE_URL"  # claude の送り先。Anthropic の外を指すなら登録済みのキーを使わない
 ANTHROPIC_HOST = "api.anthropic.com"
-CREDIT_HOLD = limits.seconds("claude-api-keys.credit-hold")
 
 
 class BookError(Exception):
@@ -66,22 +67,7 @@ class ApiKey:
     added_at: str
     generation: str
     key: str = field(repr=False)  # 値。表示・記録の組み立てへ渡さない
-
-
-@dataclass
-class KeyState:
-    state: str
-    since: str | None = None
-    checked_at: str | None = None
-
-    def selectable(self, now: float) -> bool:
-        """選定の候補に入るか（I7）。残高切れは保留の時間が過ぎたら入る。認証の失敗は入らない。"""
-        if self.state == AUTH_FAILED:
-            return False
-        if self.state == CREDIT_LOW:
-            since = epoch(self.since)
-            return since is None or now - since >= CREDIT_HOLD
-        return True
+    monthly_usd: float | None = None  # 月の額の宣言（ドル。無ければ未宣言で near-limit で選ばない）
 
 
 # ---------------------------------------------------------------- 置き場
@@ -89,10 +75,6 @@ class KeyState:
 
 def book_path() -> str:
     return os.path.join(ca.store_dir(), BOOK_FILE)
-
-
-def key_state_path() -> str:
-    return os.path.join(ca.store_dir(), STATE_FILE)
 
 
 @contextmanager
@@ -121,13 +103,18 @@ def _raw_book() -> dict:
     return data
 
 
+def positive(v) -> float | None:
+    """正の数なら float、ほかは None（真偽値は数に数えない）。"""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
+
+
 def _api_key_of(name: str, row) -> ApiKey | None:
     if not isinstance(row, dict):
         return None
     vals = [row.get(k) for k in ("account", "added_at", "generation", "key")]
     if not all(isinstance(v, str) and v for v in vals):
         return None
-    return ApiKey(name, *vals)
+    return ApiKey(name, *vals, monthly_usd=positive(row.get("monthly_usd")))
 
 
 def keys() -> list[ApiKey]:
@@ -169,16 +156,43 @@ def use_setting() -> str:
     return v if v in USES else "off"
 
 
-def set_use(value: str) -> None:
+def weekly_at_setting() -> float:
+    """閾値 T（%）。無い・読めない・範囲（1 以上 100 以下）の外なら既定の 85（#2930 の決定 10）。"""
+    try:
+        v = positive(_raw_book().get("weekly_at"))
+    except BookError:
+        v = None
+    return v if v is not None and v <= 100 else launch_rules.WEEKLY_AT_DEFAULT
+
+
+def set_use(value: str, weekly_at: float | None = None) -> None:
+    """使い方の宣言を書く。`weekly_at`（閾値 T）を渡せば一緒に書き、省けば今の値を保つ。"""
     if value not in USES:
         raise ValueError(value)
     with _book_locked():
         book = _raw_book()
         book["use"] = value
+        if weekly_at is not None:
+            book["weekly_at"] = weekly_at
         ca._write(book_path(), book)
 
 
-def add_key(name: str, key: str, account: str, now: float | None = None) -> bool:
+def set_monthly(name: str, monthly_usd: float | None) -> bool:
+    """登録済みのキーの月の額を書く（None で宣言を外す）。世代と値は変えない。登録が無ければ偽。"""
+    with _book_locked():
+        book = _raw_book()
+        row = book["keys"].get(name)
+        if not isinstance(row, dict):
+            return False
+        if monthly_usd is None:
+            row.pop("monthly_usd", None)
+        else:
+            row["monthly_usd"] = monthly_usd
+        ca._write(book_path(), book)
+    return True
+
+
+def add_key(name: str, key: str, account: str, now: float | None = None, monthly_usd: float | None = None) -> bool:
     """確かめの済んだキーを登録する（同じ名前なら置き換える）。置き換えたら真。拒むときは Refused（I1・I2・I9）。"""
     if name == ca.METERED or name in ca.names():
         raise Refused("name_conflict", f"名前が登録済みアカウントか予約の名前と重なる: {name}")
@@ -196,91 +210,26 @@ def add_key(name: str, key: str, account: str, now: float | None = None) -> bool
         gen = str(uuid.uuid4())
         book.setdefault("version", VERSION)
         book.setdefault("use", "off")
-        book["keys"][name] = {"key": key, "account": account, "added_at": iso_utc(now), "generation": gen}
+        row = {"key": key, "account": account, "added_at": iso_utc(now), "generation": gen}
+        if monthly_usd is not None:
+            row["monthly_usd"] = monthly_usd
+        book["keys"][name] = row
         ca._write(book_path(), book)
-        _write_key_state(name, gen, OK, now, checked=True)
     return replaced
 
 
 def remove_key(name: str) -> bool:
-    """登録を外し、状態の行も消す。登録が無ければ偽。"""
+    """登録を外す。登録が無ければ偽。"""
     with _book_locked():
         book = _raw_book()
         if name not in book["keys"]:
             return False
         del book["keys"][name]
         ca._write(book_path(), book)
-        rows = _raw_state()
-        if rows.pop(name, None) is not None:
-            ca._write(key_state_path(), rows)
     return True
 
 
-# ---------------------------------------------------------------- 状態
-
-
-def _raw_state() -> dict:
-    return ca._read(key_state_path()) or {}
-
-
-def _write_key_state(name: str, generation: str, state: str, now: float, checked: bool = False) -> None:
-    """排他の中で呼ぶ。同じ状態なら `since` を変えない。
-
-    残高切れは観測し直すたびに `since` を今へ進める。保留を最後の観測から数え、保留が過ぎた後に試して尽きたままなら
-    また保留の間は選ばないためである（「過ぎたら 1 回だけ試す」。#2855 の決定 7）。"""
-    rows = _raw_state()
-    old = rows.get(name) if isinstance(rows.get(name), dict) else {}
-    same = old.get("generation") == generation and old.get("state") == state and state != CREDIT_LOW
-    row = {"generation": generation, "state": state, "since": old.get("since") if same else iso_utc(now)}
-    row["checked_at"] = iso_utc(now) if checked else (old.get("checked_at") if old.get("generation") == generation else None)
-    rows[name] = row
-    ca._write(key_state_path(), rows)
-
-
-def state_of(k: ApiKey, rows: dict | None = None) -> KeyState:
-    """キーの今の状態。行が無い・世代が違う・形が違うときは `ok`（I10）。"""
-    rows = _raw_state() if rows is None else rows
-    row = rows.get(k.name)
-    if not isinstance(row, dict) or row.get("generation") != k.generation or row.get("state") not in STATES:
-        return KeyState(OK)
-    return KeyState(row["state"], row.get("since"), row.get("checked_at"))
-
-
-def note_state(name: str, generation: str, state: str, now: float | None = None, checked: bool = False) -> bool:
-    """状態を書く。起動の時に選んだ世代が登録簿の今の世代と一致するときだけ書き、書いたら真（I10）。"""
-    now = time.time() if now is None else now
-    try:
-        with _book_locked():
-            k = next((x for x in keys() if x.name == name), None)
-            if k is None or k.generation != generation:
-                return False
-            _write_key_state(name, generation, state, now, checked)
-    except (BookError, OSError, book_lock_timeout()):
-        return False
-    return True
-
-
-def note_success(k: ApiKey, now: float | None = None) -> None:
-    """成功した起動の後、記録が `ok` でなければ `ok` へ戻す（保留が過ぎた残高切れのキーが通ったとき）。"""
-    try:
-        if state_of(k).state != OK:
-            note_state(k.name, k.generation, OK, now)
-    except OSError:
-        pass
-
-
-# ---------------------------------------------------------------- 選定と子の環境
-
-
-def pick_key(exclude=(), now: float | None = None) -> ApiKey | None:
-    """使えるキーのうち名前の順の先頭（I7・I8）。`exclude` の名前は除く。登録簿が壊れていれば None。"""
-    now = time.time() if now is None else now
-    try:
-        cands = [k for k in keys() if k.name not in exclude]
-    except BookError:
-        return None
-    rows = _raw_state()
-    return next((k for k in cands if state_of(k, rows).selectable(now)), None)
+# ---------------------------------------------------------------- 子の環境
 
 
 def _key_free_env(base: dict) -> dict:
@@ -348,25 +297,23 @@ def inherited(environ=None) -> tuple[str, str] | None:
     return (name, gen) if name and gen and environ.get(KEY_ENV) else None
 
 
-def key_rows() -> list[dict]:
-    """`account list` の行（値を除く）。登録簿が壊れていれば BookError。"""
-    states = _raw_state()
+def key_rows(now: float | None = None) -> list[dict]:
+    """`account list` の行（値を除く）: 月の額・直近 7 日の使用額・週の利用枠・使用の割合。登録簿が壊れていれば BookError。
+
+    帳簿を読めなければ使用額・割合は None（表示は「不明」）。"""
+    ks = keys()
+    obs, ledger_ok = launch_observe.key_obs(ks, "near-limit", time.time() if now is None else now)
     out = []
-    for k in keys():
-        s = state_of(k, states)
-        out.append({"name": k.name, "kind": "api_key", "account": k.account, "state": s.state, "since": s.since})
+    for k, o in zip(ks, obs):
+        budget = launch_rules.weekly_budget(o.monthly_usd) if launch_rules.declared(o) else None
+        spent = o.spent_7d if ledger_ok else None
+        ratio = round(spent / budget, 4) if budget and spent is not None else None
+        row = {"name": k.name, "kind": "api_key", "account": k.account, "monthly_usd": k.monthly_usd}
+        out.append({**row, "spent_7d": spent, "weekly_budget": round(budget, 2) if budget else None, "ratio": ratio})
     return out
 
 
 # ---------------------------------------------------------------- 起動口の持ち方
-
-
-def near_limit(keep=()) -> bool:
-    """登録済みアカウントの選定が候補を返さないか、選んだ候補の使用率が切り替えの閾値以上か（near-limit の条件 1・2。決定 9）。"""
-    if ca.registered() == 0:
-        return False
-    c = ca.choose(keep=keep)
-    return c.name is None or (c.score is not None and c.score >= ca.switch_at())
 
 
 class KeyRoute:
@@ -374,11 +321,13 @@ class KeyRoute:
 
     `state` はプランの状態（`cur`・`switched`・`progress_write`）。`key` は直前の起動の API キーの名前（無ければ None）。
     `inherited` は起動したときの環境が持つキー（入れ子の起動）で、使えなくなったら `dropped` にして以後の子から外す。
-    `back` はそのとき戻る登録済みアカウント。`account()` は呼び手の今のアカウント（キーの子の戻り先に残す）。"""
+    `back` はそのとき戻る登録済みアカウント。`account()` は呼び手の今のアカウント（キーの子の戻り先に残す）。
+    `rule` は直前に記録した起動先の決定の規則の名前（決定が変わったときだけ記録する。#2930 の受け入れ条件 23）。"""
 
     def __init__(self, state, environ=None, account=None):
         self.state = state
         self.key: str | None = None
+        self.rule: str | None = None
         self.account = account or (lambda: None)
         environ = os.environ if environ is None else environ
         got = inherited(environ)
@@ -398,12 +347,24 @@ class KeyRoute:
         return use_setting()
 
     def attempt(self, keep, cwd: str | None = None) -> KeyTry:
-        """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（near-limit の判定へ渡す）。
+        """1 回の呼び出しの API キーの試し方。`keep()` はトークンを更新しないアカウントの名前（観測の収集へ渡す）。
         `cwd` は子の claude を起動する場所（子が読むプロジェクトの設定の送り先を確かめる）。"""
         return KeyTry(self, self.use(), keep, cwd)
 
-    def note_switch(self, k: ApiKey | None) -> None:
-        """使うキーが替わったら、プランの状態（`auth`・`switched`）と進捗ログの `account` の行に残す（E3・E7）。"""
+    def note_decision(self, d: launch_rules.Decision | None) -> None:
+        """near-limit の規則 3〜5（帳簿を読めない・宣言が無い・利用枠を使い切った）に当たった・外れたときに 1 行残す。"""
+        rule = d.rule if d is not None and d.rule.startswith("near_limit_") and d.route != launch_rules.ROUTE_KEY else None
+        if rule == self.rule:
+            return
+        self.rule = rule
+        if rule is not None:
+            st = self.state
+            st.progress_write({"kind": "account", "step": st.cur.get("id"), "reason": "launch_rule", **d.row()})
+
+    def note_switch(self, k: ApiKey | None, d: launch_rules.Decision | None = None) -> None:
+        """使うキーが替わったら、プランの状態（`auth`・`switched`）と進捗ログの `account` の行に残す（E3・E7）。
+
+        行には起動先の決定の規則の名前と根拠の値を足す（キーへ移った・アカウントへ戻った。受け入れ条件 23）。"""
         name = k.name if k is not None else None
         if name == self.key:
             return
@@ -412,37 +373,47 @@ class KeyRoute:
             st.cur["auth"] = f"API キー {name}"
             if st.cur["auth"] not in st.switched:
                 st.switched.append(st.cur["auth"])
-        st.progress_write({"kind": "account", "step": st.cur.get("id"), "reason": "api_key", "from_key": before, "to_key": name})
+        row = {"kind": "account", "step": st.cur.get("id"), "reason": "api_key", "from_key": before, "to_key": name}
+        if d is not None:
+            row.update(rule=d.rule, evidence=d.evidence)
+        st.progress_write(row)
 
     def result(self, k: ApiKey, res: dict, exclude: set) -> bool:
-        """キーで起動した結果を読む。残高切れ・認証の失敗・上限ならキーを外して真（同じ呼び出しを起動し直す）。
-
-        残高切れと認証の失敗は状態に記録する（起動の時の世代が今の登録と一致するときだけ。I10）。上限と 429 は
-        この呼び出しでだけ外す（決定 6）。受け継いだキーは使えなくなったら以後の子から外す。"""
-        if res.get("ok"):
-            if k is not self.inherited:
-                note_success(k)
-            return False
-        failure = CREDIT_LOW if res.get("credit") else AUTH_FAILED if res.get("auth") else None
-        if failure is None and not res.get("limit"):
+        """キーで起動した結果を読む。残高切れ・認証の失敗・上限ならキーをこの呼び出しの除外へ足して真（同じ呼び出しを
+        起動し直す）。除外は呼び出しの外へ持ち越さず、ファイルへ書かない（#2930 の決定 2）。受け継いだキーは使えなく
+        なったら以後の子から外す。"""
+        failure = CREDIT_LOW if res.get("credit") else AUTH_FAILED if res.get("auth") else LIMITED if res.get("limit") else None
+        if res.get("ok") or failure is None:
             return False
         exclude.add(k.name)
         if self.inherited is not None and k.name == self.inherited.name:
             # 登録簿から選んだ同じ名前のキー（宣言が always の入れ子）も、受け継いだキーと同じものとして以後の子から外す
             self.dropped = True
-        if failure is not None:
-            reason = failure if note_state(k.name, k.generation, failure) else "stale_generation"
-            self.state.progress_write({"kind": "api_key", "step": self.state.cur.get("id"), "name": k.name, "reason": reason})
+        if failure != LIMITED:
+            self.state.progress_write({"kind": "api_key", "step": self.state.cur.get("id"), "name": k.name, "reason": failure})
         return True
 
 
 class KeyTry:
-    """1 回の呼び出しの中の API キーの試し方（外したキーと、上限に当たって替えるアカウントが無かったか）。"""
+    """1 回の呼び出しの中の API キーの試し方（この呼び出しで外したキー）。どのキーで起動するかは起動先の決定が決める。"""
 
     def __init__(self, route: KeyRoute, how: str, keep, cwd: str | None = None):
         self.route, self.how, self.keep, self.cwd = route, how, keep, cwd
         self.tried: set[str] = set()
-        self.limit_hit = False  # near-limit の条件 3
+        self.decision: launch_rules.Decision | None = None
+
+    def decide(self) -> launch_rules.Decision | None:
+        """起動先の決定（宣言が `off` なら決めない）。今のアカウントと、この呼び出しで外したキーを渡す。"""
+        if self.how == "off":
+            return None
+        cur = self.route.account()
+        return launch_observe.decide_now(current=None if cur == ca.METERED else cur, exclude_keys=self.tried, keep=self.keep(), use=self.how)
+
+    def registered(self) -> ApiKey | None:
+        """起動先の決定が選んだ登録済みのキー（決定が API キーでなければ None）。決定を `decision` に残す。"""
+        self.decision = d = self.decide()
+        self.route.note_decision(d)
+        return get(d.target) if d is not None and d.route == launch_rules.ROUTE_KEY else None
 
     def pick(self) -> ApiKey | None:
         """この起動に使うキー。登録済みのキーが選ばれなければ、受け継いだキーを外していない限りそれを使う。
@@ -450,26 +421,24 @@ class KeyTry:
         送り先が Anthropic でなければ、登録済みのキーも受け継いだキーも使わない。受け継いだキーは外し（`dropped`）、
         キーの変数を除いたログインの環境で起動させる（`env`）。"""
         r = self.route
-        wanted = not (self.how == "off" or (self.how == "near-limit" and not (self.limit_hit or near_limit(self.keep()))))
+        wanted = self.registered()
         kept = r.inherited if r.inherited and not r.dropped and r.inherited.name not in self.tried else None
-        if not wanted and kept is None:
+        if wanted is None and kept is None:
             return None
         if not sends_to_anthropic(dict(os.environ), self.cwd):
             if kept is not None:
                 r.dropped = True
             return None
-        if wanted and (k := pick_key(exclude=self.tried)) is not None:
-            return k
-        return kept
+        return wanted or kept
 
     def run(self, call):
-        """キーで起動する（`call(環境)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""
+        """キーで起動する（`call(環境, キーの名前)`）。キーで決着したらその結果、使うキーが無くなったら None を返す。"""
         while (k := self.pick()) is not None:
-            self.route.note_switch(k)
-            res = call(env_with_key(k, dict(os.environ), self.route.account()) if k is not self.route.inherited else None)
+            self.route.note_switch(k, self.decision)
+            res = call(env_with_key(k, dict(os.environ), self.route.account()) if k is not self.route.inherited else None, k.name)
             if not self.route.result(k, res, self.tried):
                 return res
-        self.route.note_switch(None)
+        self.route.note_switch(None, self.decision)
         return None
 
     def env(self, child: dict | None) -> dict | None:
@@ -487,13 +456,9 @@ class KeyTry:
         return (ca.account_env(back, base) if back else None) or base
 
     def left(self) -> bool:
-        """上限に当たって替えるアカウントが無いとき、試せるキーが残っていれば真（以後 near-limit でもキーを使う）。"""
-        if self.how == "off" or not sends_to_anthropic(dict(os.environ), self.cwd) or pick_key(exclude=self.tried) is None:
-            return False
-        self.limit_hit = True
-        return True
+        """上限に当たって替えるアカウントが無いとき、起動先の決定が登録済みのキーを選ぶなら真（その時点の観測で決める）。"""
+        return self.how != "off" and sends_to_anthropic(dict(os.environ), self.cwd) and self.registered() is not None
 
     def reset(self) -> None:
-        """解除を待った後は、上限で外したキーを選び直せる。"""
+        """解除を待った後は、この呼び出しで外したキーを選び直せる。"""
         self.tried.clear()
-        self.limit_hit = False

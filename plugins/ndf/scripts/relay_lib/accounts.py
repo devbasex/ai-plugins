@@ -25,10 +25,13 @@ from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 from .login import owner_of  # noqa: F401  公開の名前（テストが使う）
 
 import claude_accounts as ca  # noqa: E402,I001
+import launch_observe  # noqa: E402
+import launch_rules  # noqa: E402
 
 USAGE = (
     "usage: relay.py account add [<名前>] [--code <コード>|-] | add-bedrock [--profile <名前>] [--region <地域>] [--model <ID>]"
-    " | add-api-key <名前> --account <アカウント> [--key-file <パス>]（値は標準入力） | api-key-use [off|always|near-limit]"
+    " | add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]（値は標準入力）"
+    " | api-key-monthly <名前> <ドル> | api-key-use [off|always|near-limit] [--weekly-at <百分率>]"
     " | check metered|<API キー> | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered|<API キー>"
     " | use <名前>|--clear"
     "  （共通: [--yes] [--json]）"
@@ -113,10 +116,23 @@ def _metered_label(m: dict) -> str:
     return m["provider"] or "-"
 
 
+def _launch_cols() -> dict[str, dict]:
+    """アカウントごとの 5 時間の枠の有無と選ぶ順の組（上限・起動できないなら None）、次に選ばれるものの印（#2930）。"""
+    snap = launch_observe.observe(use="off")
+    d = launch_rules.decide(snap)
+    out = {}
+    for a in snap.accounts:
+        g = launch_rules.group_of(a, snap.weekly_at)
+        has5 = None if a.weekly is None else a.five_hour is not None
+        out[a.name] = {"has_five_hour": has5, "group": None if g is None else launch_rules.GROUPS[g].name, "next": a.name == d.target}
+    return out
+
+
 def _list_rows() -> dict:
     try:
         pinned = pin.pinned()
-        rows = [{**r, "kind": "oauth", "pinned": r["name"] == pinned} for r in ca.rows()]
+        cols = _launch_cols()
+        rows = [{**r, "kind": "oauth", "pinned": r["name"] == pinned, **cols.get(r["name"], {})} for r in ca.rows()]
     except OSError as e:
         raise Fail("write_failed", f"置き場を読めない（{e}）") from e
     m = _metered_row()
@@ -127,7 +143,8 @@ def _list_rows() -> dict:
     return {"rows": rows, "text": "\n".join(_table_lines(rows))}
 
 
-HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")
+HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "5時間枠", "組", "状態")
+HAS_FIVE = {True: "有", False: "無"}
 
 
 def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
@@ -150,6 +167,8 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
         spend,
         _capacity(r),
         _usd(r["remaining"]),
+        HAS_FIVE.get(r.get("has_five_hour"), "-"),
+        (r.get("group") or "-") + ("（次）" if r.get("next") else ""),
         r["state"],
     )
 
@@ -324,7 +343,13 @@ def _account_parser() -> argparse.ArgumentParser:
     k.add_argument("name", nargs="?")
     k.add_argument("--account")
     k.add_argument("--key-file")
-    sub.add_parser("api-key-use", parents=[common], add_help=False).add_argument("value", nargs="?")
+    k.add_argument("--monthly")
+    m = sub.add_parser("api-key-monthly", parents=[common], add_help=False)
+    m.add_argument("name", nargs="?")
+    m.add_argument("value", nargs="?")
+    uk = sub.add_parser("api-key-use", parents=[common], add_help=False)
+    uk.add_argument("value", nargs="?")
+    uk.add_argument("--weekly-at")
     sub.add_parser("check", parents=[common], add_help=False).add_argument("name", nargs="?")
     sub.add_parser("list", parents=[common], add_help=False)
     sub.add_parser("remove", parents=[common], add_help=False).add_argument("name", nargs="?")
@@ -387,8 +412,9 @@ def cmd_account(args: list[str]) -> int:
     handlers = {
         "add": lambda: _add(asker, a.name, a.code, a.json, swept),
         "add-bedrock": lambda: _add_bedrock(asker, a.profile, a.region, a.model),
-        "add-api-key": lambda: keys.key_add(asker, a.name, a.account, a.key_file),
-        "api-key-use": lambda: keys.key_use(a.value),
+        "add-api-key": lambda: keys.key_add(asker, a.name, a.account, a.key_file, a.monthly),
+        "api-key-monthly": lambda: keys.key_monthly(a.name, a.value),
+        "api-key-use": lambda: keys.key_use(a.value, a.weekly_at),
         "check": lambda: _check(a.name),
         "list": _list_rows,
         "remove": lambda: _remove(asker, a.name),

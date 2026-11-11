@@ -146,6 +146,7 @@ def call_claude(
     base: str | None = None,
     session: dict | None = None,
     watch=None,
+    api_key: str | None = None,
 ) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。Claude の使用量の帳簿へ 1 行を書く（#1953）。
 
@@ -154,10 +155,11 @@ def call_claude(
     `caller` は帳簿の呼び出し元（`source`・`kind`・`plan`・`step`）。`kind` の既定は `claude_kind`、ほかは環境変数（C2）。
     `session` を渡すと、会話を残す起動（full で resume でない）の id を `--session-id` で決め、id と設定の置き場を入れる（#1623）。
     `watch`（進みの観測）を渡すと、最小構成でも会話を残し、締め切りを `watch.deadline` で動かす。打ち切りは結果の `timed_out` に残す（#2505）。
+    `api_key` は API キーで起動したときのキーの名前で、帳簿の行に載せる（値は載せない。#2930）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
     kind = claude_kind(system, full)
-    who = {"kind": kind, **(caller or {})}
+    who = {"kind": kind, **(caller or {}), **({"api_key": api_key} if api_key else {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
     run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
     # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
@@ -272,8 +274,8 @@ class ClaudeRunner:
         keys = self.keys.attempt(self.keep, cwd)
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
-        direct = lambda env: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw)  # noqa: E731
-        once = lambda env: self._call_running(lambda: direct(env))  # noqa: E731
+        direct = lambda env, key=None: call_claude(system, prompt, tools, cwd, timeout, child_env=env, api_key=key, **kw)  # noqa: E731
+        once = lambda env, key=None: self._call_running(lambda: direct(env, key))  # noqa: E731
         while True:
             if (res := keys.run(once)) is not None:  # API キーで決着した
                 return res
@@ -355,7 +357,7 @@ class ClaudeRunner:
             tried.add(self.account)
         nxt = ca.choose(exclude=tried, keep=self.keep())
         if nxt.name:
-            self.switch(nxt.name, kind)
+            self.switch(nxt.name, kind, decision=nxt.decision)
             return True
         if key_left is not None and key_left():
             return True
@@ -427,17 +429,20 @@ class ClaudeRunner:
         environ = dict(os.environ)
         if self.account == ca.METERED:
             c = ca.choose(keep=self.keep())
-            if not c.recoverable(ca.switch_at()):
+            if not c.recoverable():
                 return ca.account_env(ca.METERED, environ)
-            self.switch(c.name, "recovered")
+            self.switch(c.name, "recovered", decision=c.decision)
         if self.account is None:
             return None
+        c = ca.choose(keep=self.keep(), current=self.account)  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）
+        if c.name and c.name != self.account:
+            self.switch(c.name, "rule", decision=c.decision)
         acc = ca.load_account(self.account)
         if not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
             return env
         c, env = ca.choose_env(exclude={self.account}, keep=self.keep(), base=environ, note=self.note_account_dir)
         if env is not None:
-            self.switch(c.name, "auth")
+            self.switch(c.name, "auth", decision=c.decision)
             return env
         if fallback:
             self.switch(ca.METERED, "auth", keys=list(fallback))
@@ -449,8 +454,10 @@ class ClaudeRunner:
             )
         raise AuthUnavailable(f"アカウント {self.account} を使えず、替えるアカウントも従量の接続の宣言も無い")
 
-    def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
-        """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""
+    def switch(self, to: str, reason: str, keys: list[str] | None = None, decision=None) -> None:
+        """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。
+
+        `decision`（起動先の決定）があれば、規則の名前・組・根拠の値を行に足す（#2930 の受け入れ条件 23）。"""
         st = self.ctx.state
         before, self.account = self.account, to
         if to == ca.METERED:
@@ -465,6 +472,8 @@ class ClaudeRunner:
         row = {"kind": "account", "step": st.cur.get("id"), "reason": reason, "from": before, "to": to}
         if keys:
             row["keys"] = keys
+        if decision is not None:
+            row.update(rule=decision.rule, account_rule=decision.account_rule, evidence=decision.evidence)
         st.progress_write(row)
 
     def note_limit(self, res: dict) -> None:
