@@ -35,7 +35,8 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
     import parallel_run as pr_run
 
     env, notes = pr_run.environment_report(main, plan)
-    notes = [*notes, *prt.start_warnings(main)]
+    machine = [it for it in items if it.get("rule") == "machine-plans"]  # マシン全体の本数の警告は開始の結果にも載せる（#2999）
+    notes = [*machine, *notes, *prt.start_warnings(main)]
     parallel_homes.record_home(main)  # 別のリポジトリのレーンと計画の外の判定が読む計画の所在の一覧（#2733）
     pid = pl.live_run_pid(main, a.name)
     if pid is not None:

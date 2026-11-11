@@ -275,6 +275,7 @@ def test_the_plan_hold_blocks_spawning_and_a_marked_lane_blocks_its_dependents(m
     monkeypatch.setattr(prun, "step_spawn", lambda m, n, names: made.extend(names) or {x: {"started": "t"} for x in names})
     monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: [])
     monkeypatch.setattr(durable, "set_event", lambda *_a: None)
+    r.admitting = False  # マシンの本数の判定は test_parallel_machine 側で見る。ここは保留と印だけを見る
     r.lanes["la"].update(started=True, state="stopped")
     r.marks = {"la": {"at": "t"}}
     prun._spawn_ready(r, "/m")

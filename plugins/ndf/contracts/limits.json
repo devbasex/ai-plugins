@@ -63,6 +63,7 @@
     "monitor-types.thread-join": {"summary": "監視の読み取りのスレッドの終わりを待つ上限", "seconds": 1},
     "notify.slack": {"summary": "Slack へ送る HTTP の上限", "seconds": 10},
     "parallel-launch.up": {"summary": "一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる）", "seconds": 120, "interval": 5},
+    "parallel-machine.admit-lock": {"summary": "レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く（#2999 の決定 4）", "seconds": 10},
     "parallel-repo.stall": {"summary": "動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる）", "seconds": 3600},
     "procs.stop-tree": {"summary": "プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔", "seconds": 3, "interval": 0.1},
     "refresh.http": {"summary": "トークンの更新の宛先への HTTP の上限", "seconds": 10},

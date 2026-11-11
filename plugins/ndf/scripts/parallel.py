@@ -75,14 +75,26 @@ def require_name(a) -> None:
         reply("stopped", "計画名か --external が要る", code=1)
 
 
-def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[dict], dict]:
+def checked_plan(main: Path, name: str, touch: bool = False) -> tuple[pp.ParallelPlan | None, list[dict], dict]:
+    """計画を読んで検査する。touch（`check` だけ）はレーンの課題の見込みを集め、見込みの重なり（I21）も見る。"""
     try:
         data = pp.load_plan(main, name)
     except FileNotFoundError:
         reply("stopped", f"並列の計画 {name} が無い（置き場: {pp.plan_dir(main, name)}/plan.json）", code=1)
     except (OSError, ValueError) as exc:
         reply("stopped", f"並列の計画 {name} を読めない: {exc}", code=2)
-    return pp.check_data(data, home=main)
+    plan, items, metrics = pp.check_data(data, home=main)
+    if touch and plan is not None:
+        import touch_estimate as te
+
+        estimates, shared, error = te.lane_estimates(main, plan.lanes)
+        plan, items, metrics = pp.check_data(data, home=main, estimates=estimates, shared=shared, estimate_error=error)
+    if plan is not None:  # 同じマシンの他の動いている計画と合わせた本数の警告（#2999 の決定 3。終了コードは変えない）
+        import parallel_machine
+
+        extra = parallel_machine.plan_warnings(main, name, sum(ln.plans for ln in plan.lanes))
+        items, metrics = [*items, *extra], {**metrics, "warnings": metrics["warnings"] + len(extra)}
+    return plan, items, metrics
 
 
 def cmd_init(a) -> None:
@@ -112,7 +124,7 @@ def cmd_init(a) -> None:
 
 
 def cmd_check(a) -> None:
-    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name))
+    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name, touch=True))
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）", items, 1, **metrics)
     reply("ok", f"並列の計画 {a.name} の検査を通った（警告 {metrics['warnings']} 件）", items, **metrics)
