@@ -6438,6 +6438,30 @@
       "context": "ndf-workflow",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
       "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "負荷とメモリの値",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "マシンの上の pytest の数",
+      "context": "ndf-workflow",
+      "meaning": "進捗ログの行を書いた時点で同じマシンに動いている pytest のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "待ちの理由",
+      "context": "ndf-workflow",
+      "meaning": "プランが queue で流れ始めるまでに待った原因。重なり・plans・資源の枠・前提のプラン・計画の上限の 5 つ",
+      "pending_source": "issues/issue-2998-requirements.md"
+    },
+    {
+      "term": "メモリの山",
+      "context": "ndf-workflow",
+      "meaning": "全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値",
+      "pending_source": "issues/issue-2998-requirements.md"
     }
   ]
 }
