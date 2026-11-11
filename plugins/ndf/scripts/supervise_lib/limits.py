@@ -113,6 +113,23 @@ def _graph(steps: list[dict]) -> dict[str, list[tuple[str, bool]]]:
     return {s["id"]: [(d, ok) for _, d, ok in _targets(steps, s) if d in ids] for s in steps}
 
 
+def reachable(plan: dict, start: str | None = None) -> list[dict]:
+    """開始のステップ（無ければ最初のステップ）から遷移で行けるステップ（開始を含み、プランの並びの順。`parts` を展開した後の形）。
+    開始が知らないステップなら空。"""
+    steps = _steps(plan)
+    by = {s["id"]: s for s in steps}
+    first = start or (steps[0]["id"] if steps else None)
+    if first not in by:
+        return []
+    graph, seen, todo = _graph(steps), {first}, [first]
+    while todo:
+        for d, _ in graph[todo.pop()]:
+            if d not in seen:
+                seen.add(d)
+                todo.append(d)
+    return [s for s in steps if s["id"] in seen]
+
+
 def _return_edges(steps: list[dict], through_exit: bool) -> dict[str, list[str]]:
     """輪の戻りの道に通せる遷移（成功の遷移。through_exit なら `on_exit` の遷移も）。"""
     ids = {s["id"] for s in steps}

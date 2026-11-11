@@ -316,9 +316,7 @@ def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None,
     grouped = admission.groups(files, shared, after)
     pairs = admission.overlaps(files, shared)
     for o in pairs:
-        a, b = o["paths"]
-        how = a if a == b else f"{a} ⊃ {b}" if admission.contains(a, b) else f"{b} ⊃ {a}"
-        print(f"supervise-queue: 重なる組 {o['a']} と {o['b']}（{how}）を同時には流さない", file=sys.stderr, flush=True)
+        print(f"supervise-queue: 重なる組 {o['a']} と {o['b']}（{o['paths'][0]}）を同時には流さない", file=sys.stderr, flush=True)
     return {"groups": grouped, "needs": admission.needs(files, grouped, after), "deps": deps, "overlaps": pairs, "refs": refs}
 
 

@@ -1,0 +1,7 @@
+{
+  "name": "answer-hold-ran-json",
+  "pattern": "answer-hold-ran.json",
+  "kind": "state",
+  "place": "state-dir",
+  "skill_readers": []
+}

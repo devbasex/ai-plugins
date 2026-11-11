@@ -15,11 +15,6 @@
   "format": [
     {"name": "lint-fix", "command": "bash scripts/check-lint.sh --fix"}
   ],
-  "queue": {
-    "shared": [
-      {"path": "plugins/ndf/scripts/lib/README.md", "touched_by": ["plugins/ndf/scripts/lib/"]}
-    ]
-  },
   "release": {
     "form": "package-plugin",
     "plugin": "ndf",
