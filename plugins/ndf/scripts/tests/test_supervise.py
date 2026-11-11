@@ -767,6 +767,22 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
     assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
 
 
+@pytest.mark.suspended_refactor
+def test_suspended_refactor_drops_assess_and_refactor_for_every_mode(tmp_path):
+    # 緊急の停止（2026-11-11）の間は standard でも構造改善を外し、PR の次を review にする
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", "standard", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
+    assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+    m = tmp_path / "m"
+    p = cli(*new_sprint_args(tmp_path, m))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((m / "sprint.json").read_text())["ステージ"]}
+    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
+    assert steps["pr"]["next"] == "review" and "refactor" not in steps
+
+
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
     out = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, out, "--mode", "light"))

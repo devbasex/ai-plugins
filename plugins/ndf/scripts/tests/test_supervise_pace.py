@@ -26,6 +26,7 @@ from supervise_lib import engine, flow, paths, queue  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
 from sprint_args import new_sprint_args  # noqa: E402
+import inproc  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
+    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
 
 
 def load(path) -> dict:
