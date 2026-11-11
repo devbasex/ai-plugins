@@ -476,7 +476,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 答え待ちの依頼 | — | オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 計画の閾値 | — | 計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | レーンの閾値 | — | 1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
-| 答え待ちの停止 | — | 答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける | — | — | `docs/specifications/ndf-parallel-organizer.md` |
+| 答え待ちの停止 | — | 答え待ちの依頼が閾値を超えたため、レーンに新しい承認を生む作業を始めさせない状態。件数が閾値以下へ戻ると解ける | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 止める指示のファイル | — | 耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 再開の印 | — | 答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 分割した文書 | — | 1 つの課題の設計を複数ファイルに分けたときの、先頭以外の設計文書（`issue-<番号>-design-<名前>.md`） | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
@@ -510,8 +510,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ターンの型 | — | 機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類 | — | — | `docs/specifications/ndf-mechanical-turns-to-scripts.md` |
 | 手順の連続実行 | — | 判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance） | — | — | `docs/specifications/ndf-mechanical-turns-to-scripts.md` |
 | 業務時間 | — | 利用者が承認ゲートへ答えられる時間帯。進め方の宣言に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認の依頼を溜め、業務時間の始めにまとめて示す | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
-| 新しい承認を生む作業 | — | ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
-| 承認の要らない作業 | — | 新しい承認を生む作業以外の作業。開発ループの中では、承認した設計の実装と、答えの届いた保留したループの 1 回の残りがこれに当たる（ループは設計を承認していない課題にモードに依らず設計のステップを置く） | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 新しい承認を生む作業 | — | 設計のステップ（設計承認ゲートの依頼を生む）を含む作業。ループのレーンではループの 1 回のプランに設計承認ゲートを含む作業、1 スプリントのレーンでは開始のステップから設計を書くステップへ行けるプラン。答え待ちの停止の範囲に入ったレーンは始めない | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 承認の要らない作業 | — | 新しい承認を生む作業以外の作業。開発ループの中では承認した設計の実装と答えの届いた保留したループの 1 回の残り（ループは設計を承認していない課題にモードに依らず設計のステップを置く）、1 スプリントのレーンでは設計 PR のマージ・実装・検査・リリースのプランがこれに当たる | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 次に始めるプラン | — | 1 スプリントのレーンのスプリントで、ステージの並びの先頭から見て、結果が完了でも承認ゲートでもないプランを持つ最初のステージの、そのプランの集まり。答え待ちの停止の範囲で答えを受けたレーンを起こすかを決める | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
 | 溜めた依頼 | — | 業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と問いの依頼。業務時間の始めにまとめて示す | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
 | 判定表 | — | development-workflow の「上から順に条件を判定する」の表。順・モード・該当条件の 3 列を持ち、最初に当たった行のモードを採る | — | — | `docs/specifications/ndf-sprint-mode-from-judgment-basis.md` |
 | 判定の根拠 | — | 1 つの課題について、判定表の当たった行（順とモード）・当たった条件の文・触るファイルの一覧の組 | — | — | `docs/specifications/ndf-sprint-mode-from-judgment-basis.md` |
@@ -526,6 +527,12 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 状況報告 | — | parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告 | — | — | — |
 | 切り替えの判定 | — | parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch） | — | — | — |
 | プロンプトキャッシュの寿命 | — | 会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える | — | — | — |
+| 出し直しの提示 | — | まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true） | — | — | — |
+| 加わった範囲 | — | まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更 | — | — | — |
+| 文書だけの範囲 | — | 加わった範囲のファイルを宣言 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件 | — | — | — |
+| 出し直しを省く | — | 加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと | — | — | — |
+| 確かめ直しの範囲 | — | まとめたリリースで出し直しを省いたとき、提示 1 のコミットから提示 2 の承認資料を作った時点のコミットまでに入った変更。判定の後にベースブランチが進めば加わった範囲より広くなる。引き継いだ承認を記録する前にこの範囲が文書だけかを確かめる | — | — | — |
+| 引き継いだ承認 | — | まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す | — | — | — |
 | 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | — |
 | マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | — |
 | 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | — |
@@ -1000,9 +1007,9 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 | 前提のコマンドの一覧 | `required_commands` | 根の conftest.py が持つ、テストの置き場所（パス、またはパスに :: でつないだファイルの中のクラス）ごとに要る外部コマンドの表。収集した項目に当たるコマンドが PATH に無ければ、読み飛ばしの指定が無い限り収集を失敗させる | — | — | — |
 | リポジトリ前提の検査 | — | リリース対象の Skill とスクリプトに ai-plugins にしか無い語が無いかを見る CI のジョブ `skill-repo-assumptions-check` | — | — | `docs/specifications/ndf-repo-assumptions-check.md` |
 | 既知の当たり | — | リポジトリ前提の検査に当たるが、NDF 自身の置き場を読むなど違反でない箇所か、行き先の課題が直すまで残す箇所。語とファイルの組ごとに当たりの数を例外リストへ宣言する | — | — | `docs/specifications/ndf-repo-assumptions-check.md` |
-| import の輪 | — | NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ | — | — | — |
-| 一番下の層 | — | NDF のスクリプトのうち、他のモジュールから最も多く読まれる共通ライブラリ。結果を出す層 step_result がこれに当たる | — | — | — |
-| 終了コードの表 | — | NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する | — | — | — |
+| import の輪 | — | NDF のスクリプトのモジュールの import を有向グラフにしたときの強連結成分。最上位の import だけで輪になるものを実行時の輪、関数の中の import などを含めて初めて輪になるものを遅延の輪と呼ぶ | — | — | `docs/specifications/ndf-scripts-import-cycles.md` |
+| 一番下の層 | — | NDF のスクリプトのうち、他のモジュールから最も多く読まれる共通ライブラリ。結果を出す層 step_result がこれに当たる | — | — | `docs/specifications/ndf-scripts-import-cycles.md` |
+| 終了コードの表 | — | NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する | — | — | `docs/specifications/ndf-scripts-import-cycles.md` |
 
 ## NDF の学習の設定（`ndf-training-optout`）
 
