@@ -151,5 +151,6 @@
 | [ndf-work-during-approval-wait-and-business-hours.md](ndf-work-during-approval-wait-and-business-hours.md) | 答え待ちの間も承認の要らない作業を進め、業務時間外の承認の依頼を溜めて業務時間にまとめて示す |
 | [ndf-sprint-close-plan-cost.md](ndf-sprint-close-plan-cost.md) | 仕上げのプランの費用と所要時間（振り返りと差分の棚卸しの間隔・CI の待ちを重ねる並び） |
 | [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |
+| [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) | 一時レーンの起動とレーンの再起動を耐久ワークフローが打ち、オーガナイザーは問いと終わりだけで起きる |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
