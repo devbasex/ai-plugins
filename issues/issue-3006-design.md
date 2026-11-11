@@ -136,6 +136,7 @@
 | `lib/parallel_switch.py`（新設） | 材料を読む関数と、材料から判定を出す純粋な関数。材料の読み取りの失敗を欠けた材料にして返し、例外を外へ出さない |
 | `lib/parallel_status.py`（変える） | 答えていない問いの一覧を返す関数を切り出し、`status` と判定の両方が使う |
 | `lib/context_policy.py`（変える） | 理由「待ち」を足す。再起動の固定の費用の式を関数に切り出し、`estimate_cost` と判定の両方が使う |
+| `contracts/limits.json`（変える） | 文脈を読めないときの切り替えの閾値（`parallel-switch.long-wait`、14,400 秒）と、ラッパーとの位置を確かめる上限（`parallel-switch.relay-check`、10 秒）を持つ |
 | `lib/token_rates.py`（変える） | 読み込みの倍率の表へ Sonnet 5.5（0.05）と Fable 5.2（0.025）を足す |
 | `references/parallel.md`（変える） | 状況報告の手順、判定の条件と閾値、「切り替える」のときの手順 |
 | `references/context-window.md`・`context-policy.py` の説明・確定仕様（変える） | 再起動の理由を 7 つと書く |
@@ -181,6 +182,7 @@ classDiagram
         base_context: int|None
         estimates: Estimates
         interval_s: float
+        missing: list~str~
     }
     class SwitchVerdict {
         verdict: str
@@ -189,13 +191,15 @@ classDiagram
         samples: int
         cost: dict|None
         missing: list~str~
+        defaults: list~str~
+        base_context: float|None
     }
     class Estimates
     SwitchInputs --> Estimates
-    SwitchInputs ..> SwitchVerdict : judge()
+    SwitchInputs ..> SwitchVerdict : judge_switch()
 ```
 
-`judge(inputs) -> SwitchVerdict` は純粋な関数で、ファイル・子プロセス・言語モデルを使わない。`read_inputs(main, name, interval)` が材料を読み、読めない材料を `None` にして欠けた材料の名前を返す。
+`judge_switch(inputs) -> SwitchVerdict` は純粋な関数で、ファイル・子プロセス・言語モデルを使わない。`read_inputs(main, name, interval)` が材料を読み、読めない材料を `None` にして欠けた材料の名前を `missing` に入れる。`wait_metrics(main, name, interval)` が両方を呼び、`metrics.switch` の辞書を返す。
 
 ## 入出力の契約
 
@@ -252,16 +256,16 @@ sequenceDiagram
     end
 ```
 
-`parallel.py wait` の中で `parallel_switch` を呼ぶ順は、`read_inputs` → `judge` の 1 回だけである。判定は待ちの後に行い、待ちの長さを変えない。
+`parallel.py wait` の中で `parallel_switch` を呼ぶ順は、`read_inputs` → `judge_switch` の 1 回だけである。判定は待ちの後に行い、待ちの長さを変えない。
 
 ### 判定の規則
 
-`judge` は次の順に見て、最初に当たった行で決める。
+`judge_switch` は次の順に見て、最初に当たった行で決める。
 
 | 順 | 条件 | 判定 | 理由に書くこと |
 | --- | --- | --- | --- |
 | 1 | 答えていない問いが 1 件以上（読めなければ 1 件以上として扱う） | 報告して待つ | 答えていない問いの数 |
-| 2 | ラッパーとの位置が `relay`（直接の子）でない | 報告して待つ | 位置（`no-dir`・`not-running`・`not-child`） |
+| 2 | ラッパーとの位置が `relay`（直接の子）でない | 報告して待つ | 位置（`outside`。読めなければ「読めない」） |
 | 3 | 待ちの見込み W が出せない | 報告して待つ | 標本の数 |
 | 4 | 文脈 C か、新しいセッションの文脈 Q が出せない | W ≥ 14,400 秒（4 時間）なら切り替える、ほかは報告して待つ | W と閾値 |
 | 5 | 上のどれでもない | 報告を続ける費用 > 切り替える費用 なら切り替える、ほかは報告して待つ | 2 つの費用 |
@@ -295,8 +299,8 @@ h（引継ぎの呼び出し回数）・H（引継ぎの出力 token）・q（�
 | 材料 | 読み方 |
 | --- | --- |
 | 答えていない問いの数 | `parallel_status` から切り出した関数（計画の台帳の答えていない問い。業務時間外に溜めた依頼も含む） |
-| ラッパーとの位置 | `relay_lib.proc.relay_position()`（親のプロセスをたどってラッパーの子の claude に当たるか） |
-| 会話の記録 | 環境変数 `CLAUDE_CODE_SESSION_ID` から `transcript_agents.session_paths` で探す。C とモデルは `token_guard.last_context`、Q の代わりは `token_guard.first_context_tokens` |
+| ラッパーとの位置 | `relay.py is-child` を子プロセスで打ち、0 なら `relay`、ほかは `outside`（親のプロセスをたどる判定を `relay.py` の 1 か所に置く。上限は `limits.json` の `parallel-switch.relay-check`） |
+| 会話の記録 | 環境変数 `CLAUDE_CODE_SESSION_ID` から `transcript_agents.session_paths` で探す。C とモデルは末尾 200 行の最後の応答、Q の代わりは最初の応答の入力 token（入力・キャッシュの読み・書きの和）。`token_guard.last_context`・`first_context_tokens` と同じ量を `parallel_switch.session_context` で読む（`token_guard` を読み込むと `parallel.py` が hook の設定の読みまで依存するため） |
 | 費用の見込み | `context_decisions.read_cost_estimates` を `context_policy.Estimates` にする |
 
 ## 非機能の実現方式
@@ -385,7 +389,7 @@ h（引継ぎの呼び出し回数）・H（引継ぎの出力 token）・q（�
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1・I4 | 上限で戻った `wait` の `metrics.switch` に、判定・理由・材料の値・欠けた材料が載る | `metrics.switch` を載せない、材料の値を落とすと落ちる |
-| 2 | 答えていない問いが 0 件・ラッパーの子・標本が 3 件以上・報告を続ける費用が大きい材料で `judge` が「切り替える」を返し、`wait` の出力の `metrics.next` が `--after <seq>` を持ち、`metrics.switch.record` が理由「待ち」の 1 行を持つ | 費用の比較の向きを逆にする、`record` を出さないと落ちる |
+| 2 | 答えていない問いが 0 件・ラッパーの子・標本が 3 件以上・報告を続ける費用が大きい材料で `judge_switch` が「切り替える」を返し、`wait` の出力の `metrics.next` が `--after <seq>` を持ち、`metrics.switch.record` が理由「待ち」の 1 行を持つ | 費用の比較の向きを逆にする、`record` を出さないと落ちる |
 | 3・I1 | 答えていない問いが 1 件以上なら、他の材料が「切り替える」に当たる値でも「報告して待つ」 | 順 1 の検査を外すと落ちる |
 | 8・I2 | ラッパーとの位置が `relay` 以外なら「報告して待つ」 | 順 2 の検査を外すと落ちる |
 | I3 | 標本が 3 件未満なら「報告して待つ」。経過を超える間隔だけを標本にする | 経過で絞らない、下限を外すと落ちる |
@@ -406,7 +410,7 @@ h（引継ぎの呼び出し回数）・H（引継ぎの出力 token）・q（�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3006 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_switch.py`（新設）、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/scripts/lib/context_policy.py`、`plugins/ndf/scripts/lib/token_rates.py`、`plugins/ndf/scripts/context-policy.py`、`plugins/ndf/scripts/tests/test_parallel_switch.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_defer.py`、`plugins/ndf/scripts/tests/test_context_policy.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`docs/specifications/ndf-context-restart-policy.md` |
+| #3006 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_switch.py`（新設）、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/scripts/lib/context_policy.py`、`plugins/ndf/scripts/lib/token_rates.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/scripts/context-policy.py`、`plugins/ndf/scripts/tests/test_parallel_switch.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_defer.py`、`plugins/ndf/scripts/tests/test_context_policy.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`docs/specifications/ndf-context-restart-policy.md` |
 
 ## 人へ残す判断
 
