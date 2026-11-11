@@ -5094,6 +5094,12 @@
       "pending_source": "issues/issue-3074-requirements.md"
     },
     {
+      "term": "相手のレーン",
+      "context": "ndf-workflow",
+      "meaning": "依頼した側が並列の計画へ足す、相手のリポジトリのクローンを repo にした別のリポジトリのレーン。相手の課題を最初の入力に持つ",
+      "pending_source": "issues/issue-3074-design.md"
+    },
+    {
       "term": "計画の外のセッション",
       "context": "ndf-workflow",
       "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
