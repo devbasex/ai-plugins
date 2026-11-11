@@ -3097,6 +3097,20 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
 
 
+def test_ci_whole_sends_a_failed_merge_of_the_impl_plan_back_to_judge(tmp_path):
+    """全体テストを CI に任せる戦略では CI を待つのはマージだけなので、実装のプランのマージが落ちたら judge から直しの輪へ戻る
+    （PR 3062 のレビュー）。宛先の判定（merge-gate）の失敗は今のまま止まる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert steps["merge"]["on_fail"] == steps["merge-approved"]["on_fail"] == "judge" and "fix" in steps["judge"]["choices"]
+    assert "merge" in steps["judge"]["inputs"] and "merge" in steps["fix"]["inputs"] and "on_fail" not in steps["merge-gate"]
+
+
 def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):
     """#1334 AC7 — 範囲テストのステップの打ち切りは `limits.test_timeout` に余裕を足した値で、900 秒の固定でない。"""
     root = _carmo_repo(tmp_path)

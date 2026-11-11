@@ -126,10 +126,13 @@ def whole_timeout(a) -> int:
     return with_margin(limits["ci_wait_timeout"] if whole_on_ci(a) else limits["whole_timeout"])
 
 
-def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = ()) -> list[dict]:
+def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = (), merge_fail: str | None = None) -> list[dict]:
     """全体テストを CI に任せる戦略なら、全体テストのステップ（test-all。PR の CI を待つ）と `drop` を外し、test-all へ
     向かう遷移を `after_whole` へ、入力から test-all を外す。CI の結果を待つのはマージのステップ（merge-when-green）だけで、
-    落ちればマージしない（2026-11-12、利用者の指示）。手元で走らせる戦略ならそのまま返す。"""
+    落ちればマージしない（2026-11-12、利用者の指示）。手元で走らせる戦略ならそのまま返す。
+
+    `merge_fail` を渡すと、マージ（merge・merge-approved）が落ちたときにそのステップ（judge）へ戻し、そこと fix の入力へ
+    merge を足す（CI の失敗を直しの輪へ戻す。test-all が持っていた行き先の代わり）。"""
     if not whole_on_ci(a):
         return steps
     gone = {"test-all", *drop}
@@ -138,6 +141,10 @@ def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...
         step = {k: (after_whole if k in ("next", "on_fail", "skip_to") and val == "test-all" else val) for k, val in step.items()}
         if "inputs" in step:
             step["inputs"] = [i for i in step["inputs"] if i not in gone]
+        if merge_fail and step["id"] in ("merge", "merge-approved"):
+            step["on_fail"] = merge_fail
+        if merge_fail and step["id"] in (merge_fail, "fix"):
+            step["inputs"] = [*step.get("inputs", []), "merge"]
         out.append(step)
     return out
 
