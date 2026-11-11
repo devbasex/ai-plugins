@@ -135,12 +135,12 @@ I4 の「今の起動より後」は、続きの一時レーンを起動した�
 | 0 | `questions` | イベント `questions` の依頼に、計画のディレクトリの `answers-sent.json`（オーガナイザーが答えを送った依頼の控え）に無い id がある |
 | 0 | `answer_hold` | イベント `answer-hold` が `--after` より新しい |
 | 0 | `finished` / `stopped` | 耐久ワークフローが終わった |
-| 0 | `confirmed` | 出し直しを省いた確定の `pause`（`carried` を持つ）。`metrics.carried.prs` が加わった Pull Request |
+| 0 | `carried` | 出し直しを省いた確定の確かめ直し（一時レーンの `parallel.py carried`）が通った知らせを受けて耐久ワークフローが立てる `pause`（`carried` を持つ）。`metrics.carried.prs` が提示 2 の範囲で加わった Pull Request。答えの時点の `confirmed` は返さない |
 | 1 | `error` ほか | 耐久ワークフローが失われた・失敗で終わった |
 | 3 | 無し | 上限の秒に達した。`next` の `--after` は読み飛ばした最後のイベントの `seq` |
 
 `metrics` に起動・再起動の 1 行（`spawn`・`wake`）と承認待ちのレーン（`attach`・`lanes`）は載らない。
-印 `parallel-launch` の無い古い記録の `pause`（起動の 1 行を持つもの）と、出し直しを省いた確定の `pause`（`action: confirmed` で `carried` を持つもの）だけを返す。
+印 `parallel-launch` の無い古い記録の `pause`（起動の 1 行を持つもの）と、出し直しを省いた確定の確かめ直しが通った知らせの `pause`（`action: carried`）だけを返す。答えの時点の `confirmed` は `carried` を持っていても読み飛ばす。
 
 ### `parallel.py status <計画名>`
 

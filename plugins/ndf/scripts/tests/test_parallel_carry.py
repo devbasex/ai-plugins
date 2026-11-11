@@ -151,6 +151,7 @@ def carry(env, monkeypatch):
 
     def check(_root, first, head, prs_of=None):
         seen["checks"].append((first, head))
+        seen["prs_of"] = prs_of
         return seen["result"]
 
     monkeypatch.setattr(prl, "carry_check", check)
@@ -192,6 +193,7 @@ def test_docs_only_range_confirms_the_new_range_without_representing(env, tmp_pa
     ev = confirmed(main)
     assert ev["k"] == 2 and not ev.get("represent") and ev["carried"] == {"from": "sha1", "head": "sha2", "prs": [12]}
     assert carry["checks"] == [("sha1", "sha2")] and (1, 2, True) in carry["built"]
+    assert carry["prs_of"](main, "sha1", "sha2") == []  # 答えの時点では GitHub の一覧を取らない
     task = prun.helper_task(main, "p1", 1, 2)  # 一時レーンは提示と同じ流し方（提示のプランが確かめ直して承認を書く）
     assert task["phase"] == "present" and "present.json" in task["pipeline"]
     got, _ = pcli.wait_event(main, "p1", 0, 0.5)  # 答えの時点では確かめ直しの前なので利用者へ伝えない

@@ -312,7 +312,7 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- |
 | メッセージ | 話題 `inbox` | `request`・`request-ask`・`request-gate2`・ループのレーン（`gate1`）・`answer`・`stop`・`park --clear` | 耐久ワークフロー | `{kind: request \| gate1 \| gate2 \| ask \| unmatched \| answer \| stop \| left_stopped, …}`。冪等の鍵は `<ID>:inbox:<依頼>` など |
 | メッセージ | 話題 `resume` | `confirm`・`settle` | リリースの途中の耐久ワークフロー | `{n, phase: confirm, take}` / `{n, phase: settle, result, version, reason}` |
-| イベント | `pause` | 耐久ワークフロー | `parallel.py helper` | `{seq, action, …}`。`action` は `running` / `release` / `confirmed` / `held`。一時レーンが流すものを決める。`wait` は、古い記録の起動の 1 行を持つものと `carried` を持つ `confirmed`（オーガナイザーが加わった Pull Request を利用者へ 1 行で伝える）だけを返す |
+| イベント | `pause` | 耐久ワークフロー | `parallel.py helper` | `{seq, action, …}`。`action` は `running` / `release` / `confirmed` / `held` / `carried`。一時レーンが流すものを決める。`wait` は、古い記録の起動の 1 行を持つものと `carried`（一時レーンの `parallel.py carried` の確かめ直しが通った知らせを受けて立てるもの。オーガナイザーが加わった Pull Request を利用者へ 1 行で伝える）だけを返し、答えの時点の `confirmed` は `carried` を持っていても返さない |
 | イベント | `answer-hold` | 耐久ワークフロー | `wait` | `{seq, action: "answer_hold", n, line, hold}`。`n` と `line` は最新の変化。`wait` は履歴の `n` が `--changes-after` より大きい全行を `metrics.changes` で返す。履歴を読めなければ最新の 1 件と `metrics.changes_unread: true` を返す |
 | イベント | `questions` | 耐久ワークフロー | `wait` | `{seq, items}`。答えていない問いの依頼の全件。`wait` は、オーガナイザーが答えを送った依頼の控え（`answers-sent.json`）に無い id を含まないイベントを読み飛ばす |
 | イベント | `answer-<依頼>` | 耐久ワークフロー | `await`・ループの 1 回の境（`answers_of`） | リリース: `{result, version, release, reason, at}`（リリースを組まないときと失敗では `version` が `null`）。問い: `{result, note, choice, stamp, merge, by, at}`（`merge` は設計の承認で試みたマージの結果、`by` は `user` か `mvv`） |

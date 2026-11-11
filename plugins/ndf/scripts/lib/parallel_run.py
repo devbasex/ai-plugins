@@ -105,8 +105,9 @@ def step_route(main: str) -> dict:
 
 @durable.step(name="parallel.carry")
 def step_carry(main: str, first: str, head: str) -> dict:
-    """承認の後に加わった範囲が文書だけの範囲かを判定する（#3020）。分岐を記録した値だけで決めるため耐久ステップにする。"""
-    return pr.carry_check(Path(main), first, head)
+    """承認の後に加わった範囲が文書だけの範囲かを判定する（#3020）。分岐を記録した値だけで決めるため耐久ステップにする。
+    Pull Request の一覧は取らない（伝える一覧は確かめ直しの知らせが提示 2 の記録から作り、gh の失敗で出し直しへ倒さないため）。"""
+    return pr.carry_check(Path(main), first, head, prs_of=lambda *_: [])
 
 
 @durable.step(name="parallel.build")
