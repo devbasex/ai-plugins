@@ -253,3 +253,28 @@ def test_emit_out_writes_the_same_line_to_the_file(tmp_path):
     bad = tmp_path / "bad.json"
     p = subprocess.run([*cmd, "--out", str(bad)], capture_output=True, text=True)  # gate に next が無い
     assert p.returncode == 2 and not bad.exists()
+
+
+# ---------- 現状固定: status ごとに受ける終了コードの集合（I-002） ----------
+
+# 現状の出力を書き写した値。定数の置き場を移しても、受ける集合が変わらないことを固定する
+_ACCEPTED_CODES = {
+    "ok": {0},
+    "gate": set(range(10, 30)),
+    "stopped": {1, 2, 3, 4, 5, 6, 69, 75},
+}
+
+
+@pytest.mark.parametrize("status", ["ok", "gate", "stopped", "unknown", ""])
+def test_code_matches_accepts_exactly_the_current_codes(status):
+    """現状固定: 0〜255 と負の値のうち、status ごとに一致と見る終了コード。知らない status は stopped と同じ扱い。"""
+    expected = _ACCEPTED_CODES.get(status, _ACCEPTED_CODES["stopped"])
+    accepted = {c for c in range(-5, 256) if sr.code_matches(status, c)}
+    assert accepted == expected
+
+
+def test_default_code_is_fixed_per_status():
+    """現状固定: status から決める既定の終了コード。知らない status は KeyError。"""
+    assert [sr.default_code(s) for s in ("ok", "gate", "stopped")] == [0, 10, 1]
+    with pytest.raises(KeyError):
+        sr.default_code("unknown")
