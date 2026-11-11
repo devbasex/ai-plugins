@@ -87,6 +87,7 @@ _MODULES = (
     "scope",
     "scope_check",
     "targets",
+    "trailers",
     "triage",
     "undo",
     "verify",

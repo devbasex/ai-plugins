@@ -121,6 +121,14 @@ def test_a_subject_shaped_like_a_trailer_is_not_read(gitfacts, repo, commit):
     assert trailers == {"Item-Id": "I-002"}
 
 
+def test_trailer_value_reads_one_key_or_returns_empty(trailers, repo, commit):
+    """trailer_value: ある鍵は値を、無い鍵は空を返す。"""
+    sha = commit(_SIGNED)
+
+    assert trailers.trailer_value(str(repo), sha, "Item-Id") == "I-001"
+    assert trailers.trailer_value(str(repo), sha, "Round") == ""
+
+
 def test_a_commit_with_an_attribution_paragraph_passes_the_implement_check(gitfacts, cmd_implement, repo, commit):
     """AC37: 帰属の段落が付いたコミットは、記名の欠落で取り消されない。"""
     sha = commit(_SIGNED)

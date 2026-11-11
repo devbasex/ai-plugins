@@ -61,3 +61,8 @@ def _parse_trailer_paragraph(paragraph: str) -> dict[str, str]:
         if sep:
             parsed[key.strip()] = value.strip()
     return parsed
+
+
+def trailer_value(work: str, sha: str, key: str) -> str:
+    """トレーラー 1 つの値（前後の空白を除く）。無ければ空。"""
+    return str(commit_trailers(work, sha).get(key) or "").strip()

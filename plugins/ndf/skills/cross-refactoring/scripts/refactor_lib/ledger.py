@@ -26,7 +26,7 @@ import statefile
 
 from .items import CARRIED, DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
-from .trailers import commit_trailers
+from .trailers import trailer_value
 from .vocabulary import DEFER_BUDGET
 
 ITEM = "item"
@@ -318,7 +318,7 @@ def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[
         full = full_commit(work, sha)
         verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=_owner_id(owners, full))
         if verdict.kind == STRAY:
-            verdict.trailer_item_id = str(commit_trailers(work, full).get("Item-Id") or "").strip()
+            verdict.trailer_item_id = trailer_value(work, full, "Item-Id")
             verdict.subject = git_out(work, ["log", "-1", "--format=%s", full]) or ""
         verdicts.append(verdict)
     return verdicts
