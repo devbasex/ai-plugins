@@ -188,7 +188,14 @@ def admit_lanes(
     limit = cap()[0]
 
     def wait(reason: str, total: Optional[int], n: int, unreadable: list[str]) -> dict:
-        w = {"reason": reason, "machine_plans": total, "plans": n, "max_plans": limit, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "unreadable": unreadable}
+        w = {
+            "reason": reason,
+            "machine_plans": total,
+            "plans": n,
+            "max_plans": limit,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "unreadable": unreadable,
+        }
         return {"waiting": w}
 
     timeout = limits.seconds(LOCK_POLICY) if timeout is None else timeout

@@ -253,7 +253,9 @@ def test_two_concurrent_judgements_do_not_exceed_the_cap(tmp_path):
 
     out: dict[str, dict] = {}
     ts = [
-        threading.Thread(target=lambda h=h, p=p, ln=ln: out.update(pm.admit_lanes(h, p, [(ln, 4)], spawn, ls=lambda: dict(rows), timeout=5)))
+        threading.Thread(
+            target=lambda h=h, p=p, ln=ln: out.update(pm.admit_lanes(h, p, [(ln, 4)], spawn, ls=lambda: dict(rows), timeout=5))
+        )
         for h, p, ln in ((x, "c1", "cx0"), (y, "p1", "py0"))
     ]
     for t in ts:
