@@ -126,7 +126,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 ### 設定（`.ndf/pace.json` の `loop` 節）
 
 ```json
-{"loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
+{"loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3, "reorder_width": 0}}
 ```
 
 | 項目 | 形 | 無いとき | 誤っているとき |
@@ -134,6 +134,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `loop.enabled` | `true` だけが真 | 偽（ループを断る） | — |
 | `loop.budget` | オブジェクト。`laps`・`usd`・`hours` の正の数か `null`（bool は不可）。書かない単位と `null` は無制限で、数を書いた単位だけが効く。ほかのキーは不可 | すべて無制限 | `PaceError` |
 | `loop.same_failure` / `loop.max_issues` | 1 以上の整数（bool は不可） | 2 / 3 | `PaceError` |
+| `loop.reorder_width` | 逆転の幅。残りの枠の数を超えて並べ替えの対象にする候補の件数。0 以上の整数（bool は不可） | 0（並べ替えをしない） | `PaceError` |
 
 `loop.release_pending_max` は読まない。書いてあっても断らない。`PaceError` は `loop start` だけを断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は節の誤りの
 影響を受けない。
@@ -198,7 +199,11 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 4. 外れなかった候補に `max_issues` 件の枠を、先頭に選ぶ課題（直して出し直す課題・デプロイの直し・承認とマージが済み、その後のループの 1 回でまだ
    選ばれていない設計の課題）、品質の枠の課題、順位の順に割り当てる。業務時間（進め方の宣言の `business_hours`）の外は、承認した設計 →
    設計を要る課題 → 設計の要らない課題の順に割り当てる。選んだ行の理由は「承認した設計」「直しの先頭」「品質の枠」「順位」の
-   どれか、枠からあふれた行は「容量」で外す。ループの 1 回は判定の結果を `hours` に残す
+   どれか、枠からあふれた行は「容量」で外す。ループの 1 回は判定の結果を `hours` に残す。
+   逆転の幅（記録の `reorder_width`）が 1 以上なら、先頭に選ぶ課題と品質の枠の課題（業務時間外は先頭に選ぶ課題だけ）を重なりを見ずに取った後、
+   残りの枠を「残りの枠の数＋逆転の幅」件の窓の中で、触る場所の見込みが既に取った課題と重ならない課題から埋め、枠が残れば取らなかった候補を
+   枠の順に戻して埋める。境界が無いときの候補は `max_issues` に逆転の幅を足した件数まで取る。見込みの出し方は `lib/touch_estimate.py` にあり、
+   設計の結果の表 → マイルストーンの説明の `### 並列の組（見込み）` の表 → 課題の本文の順に、見込みが出た最初の出所だけを使う（#2997）
 5. 選べたら、そのマイルストーンの候補でない行を「順位（切り出しの境界の外）」で外した行として足す。外した行も
    `selection` に載せ、`rank` の `metrics.digest` を `rank_digest` に書く。スプリント MVV があればループの 1 回のディレクトリの
    `mvv.md` に写し、`loop sprint` が `sprint-state.py init --mvv` へ渡して承認ゲート `MVV` の記録を状態へ写す
@@ -337,7 +342,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `name` / `repo` / `started_at` / `goal` | 名前・`OWNER/REPO`・開始の時刻（再開で変えない）・`/goal` で始めたか |
 | `project_mvv` | 開始時の承認済みプロジェクト MVV（`{version, sha256}`） |
 | `budget` / `budget_history` | 効いている予算と上書きの履歴 |
-| `same_failure` / `max_issues` / `milestones` | 開始時に設定と引数から写した値 |
+| `same_failure` / `max_issues` / `reorder_width` / `milestones` | 開始時に設定と引数から写した値。`reorder_width` の無い記録は進め方の宣言の値（読めなければ既定の 0）で読む |
 | `environments[]` | 実行環境の報告（`loop start` のたびに通し、候補と今の値が違うか読めない項目があるときだけ足す。追記だけ） |
 | `status` / `stop` / `stops` | `running` / `stopped`・今の止まった理由・過去の止まった理由（追記だけ） |
 | `laps[]` | ループの 1 回（追記だけ。I1） |
@@ -354,7 +359,8 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 項目 | 意味 |
 | --- | --- |
 | `n` / `sprint` / `dir` / `state_path` / `out` / `manifest` | 番号・スプリントの名前（`<ループ名>-<n>`）・ループの 1 回のディレクトリ・状態ファイル・プランの出力・マニフェスト |
-| `milestone` / `rank_digest` / `selection[]` | 選んだマイルストーン・選定に使った `rank` の digest・`{number, milestone, rank, decision: 選んだ\|外した, reason}` |
+| `milestone` / `rank_digest` / `selection[]` | 選んだマイルストーン・選定に使った `rank` の digest・`{number, milestone, rank, decision: 選んだ\|外した, reason, touch}`。`touch` は触る場所の見込み `{paths, source, note}`（`source` は `設計の結果` / `課題グループの表` / `課題の本文` / `見込みなし`）。選んだ行は、先に選んだ課題との重なり `overlap`（`あり` / `なし` / `不明`）と相手の番号 `overlap_with` も持つ |
+| `reorders[]` | 逆転の組 `{later, earlier, with}`（`later` は後ろへ回した課題、`earlier` は先に選んだ課題、`with` は `later` と重なった選んだ課題）。逆転が起きたループの 1 回だけが持つ |
 | `mode` / `versions` | 判定の根拠から決めたスプリントのモード（設計承認ゲートで決め直して下がったら新しいモード）と `{dev, prod}`。`--dev` を省いたループの 1 回は、組むときは空で、締めるときに版の記録からコピーする |
 | `judgments[]` | 課題ごとの判定の根拠 `{number, row, mode, condition, files}`（`loop sprint` が書く。判定の根拠を導入する前に組んだループの 1 回には無い） |
 | `mode_decisions[]` | モードの決定 `{at, trigger, issues, from_mode, mode}`。`trigger` は `loop sprint` か `設計承認ゲート`、`from_mode` は `loop sprint` の行で `null`。決め直しのたびに足す |
