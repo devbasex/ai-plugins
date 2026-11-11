@@ -553,3 +553,21 @@ def test_characterize_the_unreadable_parts_of_a_cell(cell, part):
 def test_characterize_the_files_of_a_cell(cell, files):
     """現状固定: 入れ子の括弧は深さで読み飛ばし、空のコードスパンは捨て、中身は前後の空白を落とす。"""
     assert dr.parse_results(table_of(f"| #1 | 実装する | — | {cell} |"), D1)[0].files == files
+
+
+# ---------- ディレクトリの宣言を揃えて知らせる（#1811） ----------
+
+
+def test_directories_in_the_touched_files_end_with_a_slash_and_are_reported(tmp_path, capsys):
+    """#1811 の受け入れ条件 4・I5: 末尾 `/` の行と `--root` の下の既存のディレクトリは末尾 `/` の形でプランへ書かれ、
+    課題の番号とパスを標準エラーへ出して ok で進む。ファイルの行と存在しないパスはそのまま。"""
+    (tmp_path / "pkg" / "tests").mkdir(parents=True)
+    a, paths = sprint(tmp_path)
+    text = TABLE.replace("`pkg/a.py`、`pkg/b.py`", "`x/`、`pkg/tests`、`pkg/a.py`、`pkg/none`")
+    res, code = design_stage.cmd_design_results(a, read=lambda *_: results(text))
+    assert code == 0 and res["status"] == "ok", res
+    assert written(paths)[11]["触るファイル"] == ["x/", "pkg/tests/", "pkg/a.py", "pkg/none"]
+    assert res["metrics"]["dirs"] == {11: ["x/", "pkg/tests/"]}
+    assert "#11" in (err := capsys.readouterr().err) and "x/ pkg/tests/" in err
+    saved = json.loads((tmp_path / "design-results.json").read_text())
+    assert next(r for r in saved["rows"] if r["issue"] == 11)["files"] == ["x/", "pkg/tests/", "pkg/a.py", "pkg/none"]
