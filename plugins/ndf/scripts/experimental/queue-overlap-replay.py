@@ -124,7 +124,12 @@ def table(rows: list[dict], before: bool) -> str:
         cells += [r["before"]["overlaps"], len(r["before"]["false"])] if before else []
         cells += [r["after"]["overlaps"], len(r["after"]["false"])]
         lines.append("| " + " | ".join(map(str, cells)) + " |")
-        for k, v in (("plans", r["plans"]), ("pairs", r["after"]["pairs"]), ("no", r["after"]["overlaps"]), ("nf", len(r["after"]["false"]))):
+        for k, v in (
+            ("plans", r["plans"]),
+            ("pairs", r["after"]["pairs"]),
+            ("no", r["after"]["overlaps"]),
+            ("nf", len(r["after"]["false"])),
+        ):
             total[k] += v
         if before:
             total["bo"] += r["before"]["overlaps"]
