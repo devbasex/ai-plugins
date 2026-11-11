@@ -6414,6 +6414,24 @@
       "meaning": "NDF のスクリプトが使う終了コードの値と見出しの一覧。lib/exit_codes.py が持ち、結果を出す層 step_result が同じ名前で公開する",
       "source": "",
       "pending_source": "issues/issue-2988-design.md"
+    },
+    {
+      "term": "長い待ち",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のオーガナイザーが次の知らせまで待つ見込みの時間が、切り替えの閾値を超える待ち。parallel.py wait が判定する",
+      "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "状況報告",
+      "context": "ndf-workflow",
+      "meaning": "parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告",
+      "pending_source": "issues/issue-3006-requirements.md"
+    },
+    {
+      "term": "プロンプトキャッシュの寿命",
+      "context": "ndf-workflow",
+      "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
+      "pending_source": "issues/issue-3006-requirements.md"
     }
   ]
 }
