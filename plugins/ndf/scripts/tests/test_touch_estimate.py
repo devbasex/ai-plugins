@@ -139,3 +139,27 @@ def test_the_shared_list_counts_as_an_overlap():
     e = {1: est("plugins/ndf/scripts/lib/a.py"), 2: est("plugins/ndf/scripts/lib/b.py"), 3: est("docs/b.md")}
     assert te.spread([1, 2, 3], set(), e, slots=2, width=1, shared=shared).take == [1, 3]
     assert te.spread([1, 2, 3], set(), e, slots=2, width=1).take == [1, 2]
+
+
+# ---------------------------------------------------------------- 模擬（実験版の selection-replay.py）
+
+
+def _replay():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("selection_replay", Path(__file__).resolve().parents[1] / "experimental" / "selection-replay.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_replay_average_is_busy_time_over_elapsed_time():
+    """受け入れ条件 8: 重なる組は直列、離れた組は並列に数え、平均は 所要の和 ÷ 経過。"""
+    rp = _replay()
+    seconds = {1: 10.0, 2: 10.0, 3: 10.0}
+    files = {1: ["a.py"], 2: ["a.py"], 3: ["b.py"]}
+    est = {n: te.Estimate(files[n], te.DESIGN) for n in files}
+    assert rp.elapsed([1, 2, 3], seconds, files, [], 3) == 20.0
+    got = rp.replay([1, 2, 3], seconds, files, est, [], issues=2, slots=3, width=1)
+    assert (got["current"]["sprints"], got["current"]["average"]) == ([[1, 2], [3]], 1.0)
+    assert (got["new"]["sprints"], got["new"]["average"]) == ([[1, 3], [2]], 1.5)

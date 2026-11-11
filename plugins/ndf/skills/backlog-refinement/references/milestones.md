@@ -122,9 +122,9 @@
 
 | 組 | 課題 | 触る場所の見込み | 依存 |
 | --- | --- | --- | --- |
-| 1 | #561 #623 | `merged` / `release` | なし |
-| 2 | #540 #541 #621 | `development-workflow/references/parallel-work.md` / `issue-plan-strategy` | なし |
-| 3 | #550 #657 | `development-workflow`（工程の窓） / `skill-stats` | 1（#561 の後） |
+| 1 | #561 #623 | `plugins/ndf/scripts/merged-steps.py` / `plugins/ndf/skills/release/` | なし |
+| 2 | #540 #541 #621 | `plugins/ndf/skills/development-workflow/references/parallel-work.md` / `plugins/ndf/skills/issue-plan-strategy/` | なし |
+| 3 | #550 #657 | `plugins/ndf/skills/development-workflow/`（工程の窓） / `plugins/ndf/skills/skill-stats/` | 1（#561 の後） |
 ```
 
 ### 列の値
@@ -135,7 +135,7 @@
 | --- | --- | --- |
 | 組 | 課題グループの番号。1 から始まる連番で、説明の中で一意 | — |
 | 課題 | 同じ修正レイヤーを持つ課題の番号 | 手順 2A の「修正レイヤー」 |
-| 触る場所の見込み | 修正レイヤーの名前。Skill の名前・スクリプトのパス・文書のパスのいずれか | 同上 |
+| 触る場所の見込み | 修正レイヤーの場所。リポジトリの根からのパス（ファイルかディレクトリ）をバッククォートで囲み、`/` で区切って並べる。開発ループの選定と `parallel.py check` が見込みとして読み、追跡しているファイルに当たらない語（Skill の名前など）は読まずに捨てる | 同上 |
 | 依存 | `なし`、または課題グループの番号（括弧で課題の番号） | 手順 2A の「依存する課題の番号」 |
 
 **同じ修正レイヤーの課題は同じ課題グループ、違えば別の課題グループにする。**
