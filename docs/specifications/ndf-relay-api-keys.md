@@ -2,7 +2,8 @@
 
 Max・Ultra・Team のサブスクリプションにリンクした Console 組織の API キーを `relay.py account` で名前を付けて登録し、
 `supervise.py` が起動する `claude -p` を月の API クレジットで動かす。API クレジットは利用上限（5 時間・週）と別枠で、
-使った分だけ利用上限の消費を逃がせる。残高切れか認証の失敗を受けても、ステップは止まらず次のキーか今のアカウントの
+使った分だけ利用上限の消費を逃がせる。どこで起動するかは起動先の決定（`lib/launch_rules.py`）が、その時点の観測と
+使用量の帳簿だけから決める（#2930）。残高切れか認証の失敗を受けても、ステップは止まらず次のキーか今のアカウントの
 選び方で同じ呼び出しを起動し直す。Claude Code だけが対象である。
 
 例: 登録済みアカウント `main` と `gmail` に、それぞれのサブスクリプションにリンクした組織のキーがある利用者のとき。
@@ -10,10 +11,11 @@ Max・Ultra・Team のサブスクリプションにリンクした Console 組�
 | 順 | 起きること |
 | --- | --- |
 | 1 | `printf '%s\n' "$KEY" \| relay.py account add-api-key key-main --account main` が Messages API へ 1 回要求を打って確かめ、置き場の登録簿（0600）に保存する。`key-gmail` も同じく登録する |
-| 2 | `relay.py account api-key-use always` で使い方の宣言を「常に使う」にする |
-| 3 | `supervise.py` の worker は、名前の順の先頭の `key-gmail` を `ANTHROPIC_API_KEY` に入れた環境で起動する。進捗ログに `account` の行（`reason: api_key`・`to_key: key-gmail`）が残る |
-| 4 | `key-gmail` の組織の残高が尽き、worker が "credit balance is too low" で終わる。状態を残高切れにし、進捗ログに `api_key` の行（`name: key-gmail`・`reason: credit_low`）を残して、`key-main` で同じ呼び出しを起動し直す |
-| 5 | `relay.py account list` に、`key-gmail` が `残高切れ`、`key-main` が `使える` と出る。24 時間後の起動で `key-gmail` を 1 回だけ試す |
+| 2 | `relay.py account api-key-monthly key-main 200` と `key-gmail 100` で月の額を宣言し、`relay.py account api-key-use near-limit` で使い方の宣言を「全アカウントの週の上限が近いときだけ使う」にする（閾値 T は既定の 85%） |
+| 3 | `main` の週の使用率が 90%、`gmail` が 40% の間は、キーを使わない。`main` は週が T 以上（組 3）なので、worker は週が T 未満の `gmail` で起動する |
+| 4 | `gmail` も 86% になると、2 本のうち使用の割合（直近 7 日の使用額 ÷ 週の利用枠）の小さいキーを `ANTHROPIC_API_KEY` に入れて起動する。進捗ログに `account` の行（`reason: api_key`・`to_key`・`rule: near_limit_key`・`evidence`）が残り、帳簿の行に `api_key` の列（キーの名前）が載る |
+| 5 | キーの組織の残高が尽き、worker が "credit balance is too low" で終わる。その呼び出しでだけそのキーを外し、もう 1 本で同じ呼び出しを起動し直す。次の呼び出しではまた候補に入る |
+| 6 | 週の枠がリセットされて `gmail` の週が 0% に戻ると、次の起動ではキーを使わず `gmail` で起動する |
 
 この文書は、その形に**なぜしたか**（背景・常に成り立つ条件・データの形・入出力の契約・決定と理由・既知の限界・
 テスト観点）を残す。**利用者向けの使い方と画面の文の正は Skill とスクリプトにある。**
@@ -21,17 +23,19 @@ Max・Ultra・Team のサブスクリプションにリンクした Console 組�
 | 何を読むか | 正本 |
 | --- | --- |
 | 副命令の打ち方・使い方の宣言の 3 つの値・起動の結果ごとの扱い | [`development-workflow` の `references/relay-accounts.md`](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) の「worker の claude -p を API キーで動かす」 |
-| 登録簿と状態の記録の読み書き・選定・子の環境 | [`lib/claude_api_keys.py`](../../plugins/ndf/scripts/lib/claude_api_keys.py) |
+| 起動先の決定（規則の表・選ぶ順の組） | [`lib/launch_rules.py`](../../plugins/ndf/scripts/lib/launch_rules.py) |
+| 観測の収集（使用率・帳簿の直近 7 日の使用額） | [`lib/launch_observe.py`](../../plugins/ndf/scripts/lib/launch_observe.py) |
+| 登録簿の読み書き・子の環境・起動口での試し方 | [`lib/claude_api_keys.py`](../../plugins/ndf/scripts/lib/claude_api_keys.py) |
 | 副命令の中身と画面の文 | [`relay_lib/api_keys.py`](../../plugins/ndf/scripts/relay_lib/api_keys.py)・[`relay_lib/accounts.py`](../../plugins/ndf/scripts/relay_lib/accounts.py) |
 | 確かめの要求と残高切れの文言の判定 | [`lib/claude_usage.py`](../../plugins/ndf/scripts/lib/claude_usage.py) の `check_api_key`・`is_credit_low` |
 | 起動口での試し方 | [`supervise_lib/claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py) の `ClaudeRunner.call` |
-| 残高切れの保留の秒・確かめの待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `claude-api-keys.credit-hold`・`claude-api-keys.check` |
+| 確かめの待ちの上限 | [`contracts/limits.json`](../../plugins/ndf/contracts/limits.json) の `claude-api-keys.check` |
 | 登録済みアカウントと従量の接続の切り替え | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) |
 
 ## 用語
 
-「サブスクリプション」「API クレジット」「登録済み API キー」「残高切れ」「API キーの使い方の宣言」「API キーの登録簿」の
-定義は用語集（[docs/glossary.md](../glossary.md)）が正である。
+「サブスクリプション」「API クレジット」「登録済み API キー」「残高切れ」「API キーの使い方の宣言」「API キーの登録簿」
+「閾値 T」「週の利用枠」「選ぶ順の組」「切り替えの余裕」「観測のスナップショット」の定義は用語集（[docs/glossary.md](../glossary.md)）が正である。
 
 ## 背景
 
@@ -55,10 +59,10 @@ Max・Ultra・Team のサブスクリプションにリンクした Console 組�
 
 | 含む | 含まない |
 | --- | --- |
-| `relay.py account` の `add-api-key`・`api-key-use` と、`list`・`remove`・`check` の API キーの分岐 | ラッパーが起こす対話のセッション（API クレジットで払えない） |
+| `relay.py account` の `add-api-key`・`api-key-monthly`・`api-key-use` と、`list`・`remove`・`check` の API キーの分岐 | ラッパーが起こす対話のセッション（API クレジットで払えない） |
 | `supervise.py` の起動口（`ClaudeRunner`）が起動する `claude -p`（work・worker・判定・遅れの判定・Pull Request） | cross-review の担当の CLI（`lib/assignee_env.py` の経路） |
-| 残高切れ・認証の失敗の記録と起動し直し | 残高を API で読むこと（Admin API が要る） |
-| `account list` への状態の表示 | Console 組織の作成・リンク・キーの発行、`relay.py ls` への表示、claude 以外の CLI |
+| 残高切れ・認証の失敗の起動し直し（その呼び出しの中だけ） | 残高・期限を API で読むこと（Admin API が要る。利用者が使わないと決めた） |
+| `account list` への月の額・直近 7 日の使用額・週の利用枠の表示 | Console 組織の作成・リンク・キーの発行、`relay.py ls` への表示、claude 以外の CLI |
 
 ## 仕様
 
@@ -66,12 +70,14 @@ Max・Ultra・Team のサブスクリプションにリンクした Console 組�
 
 | 要素 | 責務 |
 | --- | --- |
-| API キーの部品（`lib/claude_api_keys.py`） | 登録簿と状態の記録の読み書き（0600）・名前の検査・選定・子の環境の組み立て・状態の遷移。起動口での試し方（`KeyRoute`・`KeyTry`） |
+| 起動先の決定（`lib/launch_rules.py`） | 観測のスナップショットから起動先の決定（アカウント・API キー・待つ と規則の名前・根拠の値）を返す。I/O を持たない |
+| 観測の収集（`lib/launch_observe.py`） | アカウントの使用率（控えを通す）・上限の観測・起動できるか・登録簿の宣言・帳簿の直近 7 日の使用額を集め、決定を呼ぶ（`decide_now`） |
+| API キーの部品（`lib/claude_api_keys.py`） | 登録簿の読み書き（0600）・名前の検査・子の環境の組み立て。起動口での試し方（`KeyRoute`・`KeyTry`） |
 | 確かめの要求（`lib/claude_usage.py`） | Messages API へ `max_tokens` 1 の要求を 1 回打ち、結果を読み分ける。`http_json` は失敗の応答の本文も返す |
 | API キーの副命令（`relay_lib/api_keys.py`） | キーの値の受け取り・確かめ・結果の文の組み立て |
 | 副命令のエントリポイント（`relay_lib/accounts.py`） | 副命令の登録と分岐 |
 | アカウントの部品（`lib/claude_accounts.py`） | OAuth の `add` も API キーの名前を拒む。置き場の場所（`store_dir()`）を持つ |
-| 起動口（`supervise_lib/claude.py` の `ClaudeRunner`） | 呼び出しごとに宣言を読み、キーを試し、尽きたら既存のアカウントの選び方へ進む |
+| 起動口（`supervise_lib/claude.py` の `ClaudeRunner`） | 呼び出しごとに起動先の決定を求め、キーを試し、外したら同じ決定でアカウントの選び方へ進む。キーで起動した行の帳簿にキーの名前を書く |
 
 ```mermaid
 classDiagram
@@ -82,36 +88,39 @@ classDiagram
     }
     class KeyRoute {
         +key
+        +rule
         +inherited
         +dropped
         +result()
     }
     class KeyTry {
         +tried
-        +limit_hit
+        +decision
         +pick()
         +run()
         +left()
+    }
+    class Decision {
+        +route
+        +target
+        +rule
+        +evidence
     }
     class ApiKey {
         +name
         +account
         +generation
-    }
-    class KeyState {
-        +state
-        +since
-        +selectable(now)
+        +monthly_usd
     }
     ClaudeRunner --> KeyRoute
     KeyRoute ..> KeyTry : 呼び出しごと
-    KeyTry ..> ApiKey : 選ぶ
-    ApiKey --> KeyState : 名前と世代
+    KeyTry ..> Decision : decide_now
+    KeyTry ..> ApiKey : 決定の名前で引く
 ```
 
 `ClaudeRunner` は今の呼び出しのアカウント（`account`）と別にキーの持ち方（`KeyRoute`）を持つ。キーを外したときに元の
-アカウントの選び方へそのまま戻るためである。`call_claude` の結果は残高切れ（`credit`）を持ち、利用上限（`limit`）と
-認証の失敗（`auth`）より先に判定する。
+アカウントの選び方へそのまま戻るためである。`KeyTry.tried` はこの呼び出しで外したキーの名前で、呼び出しが終われば捨てる。
+`call_claude` の結果は残高切れ（`credit`）を持ち、利用上限（`limit`）と認証の失敗（`auth`）より先に判定する。
 
 ### 常に成り立つ条件
 
@@ -120,24 +129,40 @@ classDiagram
 | I1 | キーの名前は登録済みアカウントの名前とも予約の名前 `metered` とも重ならない（OAuth の `add` の側でも拒む） | `name_conflict`（終了コード 1） |
 | I2 | 結び付いたアカウントは、登録の時点で登録済みアカウントである | `not_registered`（1） |
 | I3 | 保存するのは確かめが成功したキーだけで、書きかけを残さない | 保存せず 1 |
-| I4 | 登録簿は 0600 で、キーの値は登録簿の外（画面・進捗ログ・判断の記録・状態の記録・`account list`）に出ない | 出力は値を持たない型（名前・アカウント・状態）から組む。引数を読めないときは引数を写さない |
+| I4 | 登録簿は 0600 で、キーの値は登録簿の外（画面・進捗ログ・判断の記録・使用量の帳簿・`account list`）に出ない | 出力は値を持たない型（名前・アカウント・月の額）から組む。引数を読めないときは引数を写さない |
 | I5 | キーの値が入るのは起動口が作る `claude -p` の環境だけで、ラッパーの対話のセッションの環境には入らない | ラッパーの起動の経路は登録簿を読まない |
 | I6 | 宣言が無い・読めないときは `off` として動く | 登録簿が壊れていれば 1 行表示し、キーを使わない |
-| I7 | 認証の失敗のキーと、保留の中の残高切れのキーは選ばない | 選定の候補から外す |
-| I8 | 同じ状態からは同じキー（名前の順の先頭）を選ぶ | — |
+| I7 | 判定のための状態のファイルを読まず、書かない。残高切れ・認証の失敗・上限を返したキーは、その呼び出しの除外へ足すだけである | 旧版の `api-key-state.json` が残っていても決定は変わらない |
+| I8 | 同じ観測のスナップショットからは同じ決定（起動先・規則の名前・根拠の値）が出る | 決定の関数は時刻・ファイル・API を読まない |
 | I9 | 1 つの登録済みアカウントに結び付くキーは 0 本か 1 本である。同じ名前の置き換えは数えない | `account_taken`（1） |
-| I10 | 状態は、起動の時に選んだ世代が登録簿の今の世代と一致するときだけ書く。一致しない行は無いものとして扱う | 書かず、進捗ログの `api_key` の行の理由を `stale_generation` にする |
+| I10 | near-limit では、再登録が要るものを除いた登録済みアカウントの週の使用率がすべて読めて閾値 T 以上のときだけキーを使い、月の額を宣言して直近 7 日の使用額が週の利用枠未満のキーだけを選ぶ | 規則の表の順序の誤り。表のテストが落とす |
 
 ### 使う条件と選定
 
 | 宣言 | API キーで起動する条件 |
 | --- | --- |
 | `off`（既定） | 起動しない。起動口の振る舞いは登録が無いときと同じ |
-| `always` | 使えるキーがあれば、すべての呼び出しで |
-| `near-limit` | (1) アカウントの選び方（`choose`）が候補を返さない、(2) 選んだ候補の使用率が `NDF_ACCOUNT_SWITCH_AT`（既定 90）以上、(3) この呼び出しで利用上限に当たり替えるアカウントが無い（従量の接続へ移る前と、解除を待つ前に試す）のどれか |
+| `always` | 外していないキーがあれば、すべての呼び出しで。名前の順の先頭 |
+| `near-limit` | 再登録が要るものを除いた登録済みアカウントの週の使用率（週の枠とモデル別の週の枠の最大）がすべて閾値 T（既定 85%）以上。5 時間の枠の使用率は見ない |
 
-登録済みアカウントが 2 つ以上あるときの上限の後の替え先は、アカウント → API キー → 従量の接続の順である。1 つ以下なら
-API キー → 従量の接続の宣言（1 度だけ）→ 解除の待ちの順である。
+起動先の決定の規則の表（上から当て、最初に決定を返したものを採る）:
+
+| 規則の名前 | 起動先 | 当たる条件 |
+| --- | --- | --- |
+| `always_key` | API キー（名前の順の先頭） | `always` で、外していないキーがある |
+| `near_limit_key` | API キー（使用の割合の最も小さいもの） | near-limit の条件がそろい、帳簿を読め、月の額を宣言し週の利用枠の残るキーがある |
+| `near_limit_ledger_unreadable` | アカウントか待つ | 上の条件のうち帳簿を読めない |
+| `near_limit_no_declared_key` | アカウントか待つ | 外していないキーのどれも月の額を宣言していない |
+| `near_limit_budget_used_up` | アカウントか待つ | 宣言のあるキーがすべて週の利用枠を使い切った |
+| `account` | アカウント | 上のどれにも当たらず、候補のアカウントがある |
+| `wait_reset` | 待つ | 候補のアカウントが無い（解除の時刻は上限にあるアカウントの最も早いもの） |
+
+**週の利用枠**は月の額 × 7 ÷ 30、使用の割合は直近 7 日の使用額 ÷ 週の利用枠である。直近 7 日の使用額は、使用量の帳簿の
+`api_key` の列がそのキーの名前の行の `cost_usd` の合計で、判定のたびに読み直す。アカウントの選ぶ順の組（5 時間の枠を
+先に使う）は [relay-accounts.md](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) にある。
+
+登録済みアカウントが 2 つ以上あるときの上限の後の替え先は、アカウント → API キー（その時点の決定が選べば）→ 従量の接続の順
+である。1 つ以下なら API キー（同じ）→ 従量の接続の宣言（1 度だけ）→ 解除の待ちの順である。
 
 **子の環境**: 起動したときの環境から、OAuth のトークンとスコープ・`ANTHROPIC_AUTH_TOKEN`・Bedrock と Vertex の変数・
 既存の `ANTHROPIC_API_KEY`・従量の接続の宣言のキーを外し、親のアカウントの環境を元へ戻す。その上で `ANTHROPIC_API_KEY` に
@@ -148,8 +173,8 @@ API キー → 従量の接続の宣言（1 度だけ）→ 解除の待ちの�
 `env` の `ANTHROPIC_BASE_URL` のどれかが `https://api.anthropic.com` の外を指すときは、キーを使わずに今の認証で起動する。
 登録のときに Anthropic へだけ送って確かめたキーを、ゲートウェイなど別のサービスへ送らないためである。
 
-**入れ子の起動**: worker の中で起動した `supervise.py` は、起動したときの環境の名前と世代を受け継いだキーとして扱い、
-残高切れなら同じく状態を記録する（I10）。受け継いだキーが使えなくなったら以後の子から外し、`NDF_CLAUDE_KEY_ACCOUNT` の
+**入れ子の起動**: worker の中で起動した `supervise.py` は、起動したときの環境の名前と世代を受け継いだキーとして扱う。
+受け継いだキーは決定の外にあり、使えなくなったら進捗ログに 1 行残して以後の子から外し、`NDF_CLAUDE_KEY_ACCOUNT` の
 アカウントの環境へ戻す。
 
 ### 起動の流れ
@@ -157,46 +182,29 @@ API キー → 従量の接続の宣言（1 度だけ）→ 解除の待ちの�
 ```mermaid
 sequenceDiagram
     participant R as 起動口
-    participant K as API キーの部品
+    participant O as 観測の収集
+    participant D as 決定の関数
     participant C as claude -p
-    participant A as アカウントの部品
-    R->>K: 宣言と使えるキー（試した名前を除く）
-    alt 宣言が off か使えるキーが無い
-        R->>A: 今の選定
-    else 使う条件を満たす
-        K-->>R: キーと子の環境
+    participant L as 帳簿
+    R->>O: 今のアカウント・この呼び出しで外したキー
+    O->>D: 観測のスナップショット
+    D-->>R: 決定（規則の名前・根拠の値）
+    alt 決定が API キー
         R->>C: 起動（ANTHROPIC_API_KEY）
-        alt 成功
-            C-->>R: 結果
-        else 残高切れか認証の失敗
-            C-->>R: credit か auth
-            R->>K: 状態を記録（世代が一致するときだけ）
-            R->>R: 次のキーで起動し直す
-        else 利用上限か 429
-            C-->>R: limit
-            R->>A: この呼び出しでは外し、アカウントの選定へ
+        C-->>R: 結果
+        R->>L: 費用とキーの名前
+        alt 残高切れ・認証の失敗・利用上限・429
+            R->>R: キーをこの呼び出しの除外へ足し、決定へ戻る
         end
+    else 決定がアカウントか待つ
+        R->>R: アカウントの選び方へ（上限なら待つ）
     end
 ```
 
-### 状態の遷移
-
-| 今の状態 | 引き金 | 次の状態 |
-| --- | --- | --- |
-| — | 登録（確かめが成功） | 使える |
-| 使える | 起動か確かめで残高切れ | 残高切れ |
-| 使える | 起動か確かめで 401 | 認証の失敗 |
-| 残高切れ・認証の失敗 | `account check` が成功 | 使える |
-| 残高切れ | 保留（最後の観測から `claude-api-keys.credit-hold`）が過ぎた後の起動が成功 | 使える |
-| どれでも | `account remove` | （行を消す） |
-
-残高切れは観測し直すたびに `since` を今へ進める。保留が過ぎて試し、尽きたままならまた保留の間は選ばない。認証の失敗は
-時間で戻らない。失効・削除したキーは時間で戻らないためである。
-
 ## データ・設定
 
-置き場はアカウントの置き場（`${NDF_ACCOUNTS_DIR:-<共有の設定ディレクトリ>/ndf/accounts}/`）。2 つのファイルを持ち、
-既存のファイルの形は変えない。どちらも無ければ登録 0 本・宣言 `off` として動く。
+置き場はアカウントの置き場（`${NDF_ACCOUNTS_DIR:-<共有の設定ディレクトリ>/ndf/accounts}/`）。登録簿だけを持ち、
+無ければ登録 0 本・宣言 `off` として動く。
 
 **`api-keys.json`（API キーの登録簿。0600）**
 
@@ -204,23 +212,17 @@ sequenceDiagram
 | --- | --- | --- |
 | `version` | 整数 | 形の版。`1` |
 | `use` | 文字列 | 使い方の宣言。`off`・`always`・`near-limit`。無いときは `off` |
+| `weekly_at` | 数（%） | 閾値 T。1 以上 100 以下。無い・範囲の外のときは 85 |
 | `keys.<名前>.key` | 文字列 | キーの値。このファイルの外へ出さない |
 | `keys.<名前>.account` | 文字列 | 結び付いた登録済みアカウントの名前。アカウントを外しても残る（一覧に出すだけ） |
 | `keys.<名前>.added_at` | ISO 8601 | 登録した時刻（UTC） |
-| `keys.<名前>.generation` | 文字列 | 世代。登録と置き換えのたびに新しく作る UUID（版 4） |
+| `keys.<名前>.generation` | 文字列 | 世代。登録と置き換えのたびに新しく作る UUID（版 4）。入れ子の起動で受け継いだキーを見分ける |
+| `keys.<名前>.monthly_usd` | 正の数 | 月の額（ドル）。無ければ未宣言で、near-limit で選ばない。宣言し直しても世代は変えない |
 
-**`api-key-state.json`（API キーの状態。0600）**
+旧版が書いた `api-key-state.json` は読まず、書かず、消さない（利用者のファイルを黙って消さない）。
 
-| 列 | 型 | 意味 |
-| --- | --- | --- |
-| `<名前>.generation` | 文字列 | この状態を観測したキーの世代 |
-| `<名前>.state` | 文字列 | `ok`・`credit_low`・`auth_failed` |
-| `<名前>.since` | ISO 8601 | 今の状態になった時刻（残高切れは最後に観測した時刻） |
-| `<名前>.checked_at` | ISO 8601 か null | 最後に確かめた時刻 |
-
-行が無いキー・世代が登録簿と一致しないキー・形が違う行は `ok` として扱う。状態は上書きし、過去の遷移は進捗ログの
-`api_key` の行が持つ。登録簿と状態を別のファイルに分けるのは、起動のたびに書く状態の更新でキーの値を持つファイルを
-書き直さないためである。
+**使用量の帳簿の `api_key` の列**: API キーで起動した `claude -p` の行だけに、そのキーの名前を書く。値は書かない。
+アカウントで起動した行と古い行には列が無い。帳簿の版（`schema`）は上げない。
 
 書くときは一時ファイルへ 0600 で書いて置き換え、アカウントの置き場の `.locks/.api-keys` の排他を取る。
 
@@ -228,11 +230,12 @@ sequenceDiagram
 
 | 副命令 | 入力 | 成功の出力 | 失敗の `reason`（終了コード） |
 | --- | --- | --- | --- |
-| `account add-api-key <名前> --account <アカウント> [--key-file <パス>]` | キーの値は標準入力の 1 行目（端末なら表示しない入力）か `--key-file`。引数では受けない | `登録した: <名前>（アカウント <アカウント>）` と、買ったクレジットの注意の 1 行（標準エラー）。JSON は `name`・`account`・`replaced` | `name_conflict`・`not_registered`・`account_taken`・`auth_failed`・`credit_low`・`network`・`unclassified`・`write_failed`（1）、`missing_args`・`invalid_name`（2） |
-| `account api-key-use [off\|always\|near-limit]` | 省くと今の宣言を出す | `API キーの使い方: <値>` | `invalid_name`（2）・`write_failed`（1） |
-| `account check <API キーの名前>` | — | `使える: <名前>`。状態を `ok` に戻す | 確かめの失敗は状態を変えずに返す（1） |
+| `account add-api-key <名前> --account <アカウント> [--key-file <パス>] [--monthly <ドル>]` | キーの値は標準入力の 1 行目（端末なら表示しない入力）か `--key-file`。引数では受けない。`--monthly` は正の数 | `登録した: <名前>（アカウント <アカウント>）` と、買ったクレジットの注意の 1 行（標準エラー）。JSON は `name`・`account`・`replaced` | `name_conflict`・`not_registered`・`account_taken`・`auth_failed`・`credit_low`・`network`・`unclassified`・`write_failed`（1）、`missing_args`・`invalid_name`（2。月の額の誤りも値を写さない） |
+| `account api-key-monthly <名前> <ドル>` | 正の数。`0` は宣言を外す | `月の額: <名前> <ドル> ドル（週の利用枠 <ドル> ドル）` | `not_registered`・`write_failed`（1）、`invalid_name`・`missing_args`（2） |
+| `account api-key-use [off\|always\|near-limit] [--weekly-at <百分率>]` | 省くと今の宣言と T を出す。`--weekly-at` は 1 以上 100 以下 | `API キーの使い方: <値>（閾値 T <百分率>%）`。JSON は `use`・`weekly_at` | `invalid_name`（2）・`write_failed`（1） |
+| `account check <API キーの名前>` | — | `使える: <名前>`。状態は記録しない | 確かめの失敗の理由を返す（1） |
 | `account remove <API キーの名前>` | — | `外した: <名前>（API キー）` | `write_failed`（1） |
-| `account list` | — | 既存の行の後に、キーごとに `name`・`kind: api_key`・`account`・`state`・`since`。表では「識別」の列に結び付いたアカウント、「状態」の列に `使える`・`残高切れ`・`認証の失敗` | 登録簿が壊れていれば 1 行出して行を足さない |
+| `account list` | — | アカウントの行に `has_five_hour`・`group`・`next`（表は「5時間枠」「組」の列）。キーごとに `name`・`kind: api_key`・`account`・`monthly_usd`・`spent_7d`・`weekly_budget`・`ratio`。表では「識別」の列に結び付いたアカウント、「枠の大きさ」の列に月の額（`月 未宣言`）、「残り」の列に直近 7 日の使用額 / 週の利用枠（割合） | 登録簿が壊れていれば 1 行出して行を足さない |
 
 `check` と `remove` は、名前が登録済み API キーのときだけ API キーの分岐へ入る。`metered`・OAuth のアカウントの名前の
 ときの出力と終了コードは変えない。
@@ -257,18 +260,24 @@ sequenceDiagram
 - **子の環境の `ANTHROPIC_API_KEY` に値を入れる。** `-p` では公式にログインより先に使われ、401 が速く返る。
   `apiKeyHelper` は環境に値を置かずに済むが、偽の値で 401 の後に 60 秒で終わらなかった（`claude` 2.1.319 で実測）。失敗が
   速く返らないと、起動し直す経路が待ちで詰まる
-- **使えるキーの中から名前の順の先頭を選ぶ。** 残高は API キーでは読めず、量で比べられない。名前の順なら利用者が名前の
-  付け方で順を決められる。結び付いたアカウントの使用率は API クレジットの残高と関係しない
+- **`always` は名前の順の先頭、`near-limit` は使用の割合の最も小さいキーを選ぶ。** 残高は API キーでは読めないが、
+  直近 7 日の使用額は帳簿から数えられる。月の額で割った割合で比べると、額の違うキーを均等に使える（#2930）
+- **起動先を「観測のスナップショット → 決定」の純粋な関数と、規則の関数の並びで決める。** 規則と組を名前の並びにすると、
+  並びがそのまま設計の表になり、決定に当たった規則の名前を載せられる（#2930 の決定 1）
+- **判定のための状態を持たない。** 残高切れ・認証の失敗はその呼び出しの除外へ足すだけで、次の呼び出しではまた候補に入る。
+  費用は尽きたキーで起動した 1 回の失敗だけである。状態を持つと、プロセスの終了と再起動のたびの扱いが要る（#2930 の決定 2）
+- **週の利用枠を月の額 × 7 ÷ 30、使用額を帳簿の直近 7 日の合計で数える。** 月のクレジットは請求の周期ごとに付与され
+  繰り越さないので、どの 7 日を取っても利用枠に収まる。付与日と残高を持たずに済む（#2930 の決定 4）
 - **確かめの要求を既存の `urllib` の部品で打つ。** ラッパーは標準ライブラリだけで動く。`anthropic` の SDK は 1 回の要求の
   ために依存を足すことになり、`claude -p` で打つと設定とツールの定義を送るため費用が大きい
 - **残高切れを文言で読み、利用上限より先に判定する。** 公式の文言が 2 つの形（"Your credit balance is too low ..." と
-  "Credit balance too low ..."）を持つため、共通部分で読む。利用上限と 429 は多くが一時的なので、この呼び出しでだけ外して記録しない
-- **残高切れの保留を時間（既定 24 時間）で解く。** 請求の周期の日付は読めない。尽きた組織への要求は数秒で止まり課金されない
-  ため、過ぎたら 1 回試す。失敗した鍵を一定の時間だけ外す形は LiteLLM の `cooldown_time` と同じである
+  "Credit balance too low ..."）を持つため、共通部分で読む
 - **買ったクレジットへの課金を NDF の側で抑えない。** 何回で月のクレジットが尽きるかは読めず、回数の上限に根拠が無い。
   費用の上限は Console の workspace の spend limit で利用者が決め、登録のときにそのことを 1 行出す
-- **`near-limit` の閾値に既存の切り替えの閾値（`NDF_ACCOUNT_SWITCH_AT`）を使う。** アカウントを替える判断と API キーへ
-  移る判断はどちらも「このアカウントの利用上限をこれ以上使わない」判断で、閾値を 2 つ持つと大小の組み合わせで振る舞いが変わる
+- **`near-limit` を全アカウントの週の使用率で発動し、5 時間の上限では使わない。** 月のクレジットは対話の Claude Code に
+  使えないので、週の枠が尽きかけたときだけ `claude -p` を逃がして対話のセッションの週の枠を残す。5 時間の枠は数時間で戻る
+- **閾値 T（既定 85%）を、アカウントの選ぶ順の組と API キーへ逃がす条件の両方に使う。** 閾値を 2 つ持つと大小の組み合わせで
+  振る舞いが変わる。85% の根拠は #2930 の設計の決定 10（発動の時点でアカウントの残りと API キーの利用枠で `claude -p` の約 1.6 日分）
 
 ## セキュリティ
 
@@ -280,7 +289,9 @@ sequenceDiagram
 
 ## 運用
 
-- 状態の確認は `account list`、残高切れと認証の失敗の解除は `account check <名前>` で、利用者のコマンドで完結する
+- 月の額・直近 7 日の使用額・週の利用枠の確認は `account list`、キーの確かめ直しは `account check <名前>` で、利用者のコマンドで完結する
+- 起動先が変わったとき（キーへ移った・アカウントへ戻った・規則 3〜5 に当たった・アカウントを替えた）に、進捗ログの `account` の行へ
+  規則の名前と根拠の値を残す。決定が変わらない呼び出しでは書かない
 - 登録簿が壊れていれば、起動口は最初の呼び出しの前に標準エラーと進捗ログ（`api_keys_invalid`）へ 1 行出し、キーを使わずに動く
 
 **未確認のまま残ること**:
@@ -293,26 +304,27 @@ sequenceDiagram
 
 ## テスト観点
 
-テストは [`tests/test_claude_api_keys.py`](../../plugins/ndf/scripts/tests/test_claude_api_keys.py)（部品と副命令）と
+テストは [`tests/test_launch_rules.py`](../../plugins/ndf/scripts/tests/test_launch_rules.py)（決定の表）・
+[`tests/test_launch_observe.py`](../../plugins/ndf/scripts/tests/test_launch_observe.py)（観測の収集と帳簿）・
+[`tests/test_claude_api_keys.py`](../../plugins/ndf/scripts/tests/test_claude_api_keys.py)（部品と副命令）と
 [`tests/test_supervise_api_keys.py`](../../plugins/ndf/scripts/tests/test_supervise_api_keys.py)（偽の `claude` を使う起動口）にある。
 
 | 観点 | 満たすこと |
 | --- | --- |
 | 値の受け取り | 端末でない標準入力とファイルから登録できる。引数の位置にキーを渡すと引数の誤り（2）で、値を写さない |
 | 確かめ（I3） | 偽の宛先が 401・残高切れ・通信の失敗を返すと、理由を出して 1 で終わり、登録簿が作られない |
-| 値を出さない（I4） | 偽のキーの値の文字列が、すべての副命令の標準出力・標準エラー・`--json`・進捗ログ・状態の記録に 0 回。登録簿は 0600 |
+| 値を出さない（I4） | 偽のキーの値の文字列が、すべての副命令の標準出力・標準エラー・`--json`・進捗ログ・使用量の帳簿に 0 回。登録簿は 0600 |
 | 登録の規則（I1・I2・I9） | 2 本を別のアカウントへ登録して 1 本ずつ外せる。同じ名前で置き換わる。名前の衝突・無いアカウント・別のキーが結び付いたアカウントを拒む。OAuth の `add` は API キーの名前を拒む |
-| 世代（I10） | 置き換える前の世代で起動した worker が 401 を返しても、置き換えた後のキーは `ok` のまま候補に残る |
 | 使う範囲（I5） | `always` で子の環境に `ANTHROPIC_API_KEY` が 1 本入り、OAuth のトークンと `ANTHROPIC_AUTH_TOKEN` が無い。ラッパーの区間の起動の環境に値が無い。送り先が Anthropic の外ならキーを使わない |
 | 宣言（I6） | 宣言が無い・壊れているときは `off` として動き、3 つの値を設定し読み返せる |
 | 退行しない | `off` と登録 0 本で、子の環境・アカウントの選び方・上限の後の切り替え・OAuth と `metered` の副命令の出力と終了コードが変わらない |
-| 選定（I7・I8） | 同じ状態から名前の順の先頭を選ぶ。保留の中の残高切れと認証の失敗は選ばず、保留が過ぎた残高切れは選ぶ |
-| 起動し直し | 残高切れ・401 を返すと状態が `credit_low`・`auth_failed` になり、次のキー、無ければサブスクリプションのログインの環境で同じ呼び出しが起動し直され、ステップが成功で終わる。進捗ログにキーの名前と理由の行が 1 行 |
-| 一覧と確かめ直し | `account list` に名前・結び付いたアカウント・状態が出る。`account check` が成功すると `ok` に戻り、失敗なら変えない |
-| `near-limit` | 使用率が閾値未満なら使わず、閾値以上・候補なし・上限に当たった後なら使う |
+| 決定（I7・I8・I10） | 観測と期待する決定（規則の名前）の表。同じ観測から同じ決定。状態のファイルを置いても決定が変わらない |
+| 起動し直し | 残高切れ・401 を返すと、次のキー、無ければサブスクリプションのログインの環境で同じ呼び出しが起動し直され、ステップが成功で終わる。次の呼び出しではまた同じキーが候補に入る。進捗ログにキーの名前と理由の行が 1 行 |
+| 一覧と確かめ直し | `account list` に名前・結び付いたアカウント・月の額・直近 7 日の使用額・週の利用枠が出る。`account check` は状態を書かない |
+| `near-limit` | 週の使用率が T 未満のアカウントがあれば使わず（5 時間の上限では解除を待つ）、すべて T 以上なら使う。8 日前の帳簿の行は使用額に入らない |
 
 ## 関連リンク
 
 - [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md)（登録済みアカウントの認証の失敗の扱い）
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)（ラッパーの本体の契約）
-- #2855（要求と受け入れ条件）・#1468（Bedrock の登録）・#1576（アカウントの置き場）・#1586（上限に達した後の切り替え）
+- #2855（要求と受け入れ条件）・#2930（起動先の決定・near-limit の条件・週の利用枠）・#1468（Bedrock の登録）・#1576（アカウントの置き場）・#1586（上限に達した後の切り替え）

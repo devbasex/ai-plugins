@@ -254,13 +254,14 @@ class ClaudeRunner:
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
 
-        登録済みのアカウントが 2 つ以上あれば、上限に当たったアカウントを除いて最も上限から遠いものへ替え、待たずに
+        登録済みのアカウントが 2 つ以上あれば、上限に当たったアカウントを除いて起動先の決定で選び直し、待たずに
         同じ呼び出しをやり直す。候補が無ければ NDF_SUPERVISE_CLAUDE_FALLBACK（従量の接続）へ移り、以後の呼び出しも
         それで起動する（起動のたびに戻れるかを確かめる）。登録が 1 つ以下なら今までどおり、FALLBACK があれば
         その変数を足して 1 度だけ起動し直す。それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）
         まで待って同じ呼び出しを起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
-        API キーは宣言に従って先に試し、上限で替えるアカウントが無ければ従量の接続と待ちの前に試す（#2855。`KeyRoute`）。
+        API キーは起動先の決定に従って先に試し（#2855・#2930。`KeyRoute`）、上限で替えるアカウントが無いときも、その時点の
+        決定が API キーを選べば従量の接続と待ちの前に試す。
         """
         ctx, st = self.ctx, self.ctx.state
         retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
@@ -423,7 +424,8 @@ class ClaudeRunner:
     def child_env(self, fallback: dict | None = None) -> dict | None:
         """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
 
-        従量の接続の間は、起動のたびに閾値未満のアカウントへ戻れるかを確かめる。今のアカウントを使えなければ（再登録が要る・
+        従量の接続の間は、起動のたびに起動先の決定が候補のアカウントを返すかを確かめ、返せば戻す。アカウントの間は起動のたびに
+        選び直し、今のアカウントが最良の候補と同じ組になければ替える（#2930 の決定 6）。今のアカウントを使えなければ（再登録が要る・
         認証の失敗の観測がある・設定ディレクトリを用意できない）別のアカウント、従量の接続（`fallback`）の順に替える。どれも無く、
         他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。"""
         environ = dict(os.environ)
