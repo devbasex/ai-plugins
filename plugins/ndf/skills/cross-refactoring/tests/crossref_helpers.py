@@ -272,7 +272,7 @@ def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def commit_existing_tests(flow: dict[str, Any], files: dict[str, str]) -> None:
-    """着手前からあるテストを足してコミットし、その HEAD を `init` の基準の SHA として記録する。"""
+    """着手前からあるテストを足し、その HEAD を `init` の基準の SHA として記録する。"""
     work = flow["work"]
     for rel, text in files.items():
         path = work / rel
