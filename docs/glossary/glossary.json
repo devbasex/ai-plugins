@@ -5070,6 +5070,30 @@
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
+      "term": "依頼した側",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中で、別のリポジトリの改修が先に要ると分かったレーンと、そのレーンが進めている課題",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "相手のリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "依頼した側が改修を必要とする、依頼した側と違うリポジトリ。改修はそのリポジトリの規約（課題・承認ゲート・漏れの検査）で進む",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "完全な形の参照",
+      "context": "ndf-workflow",
+      "meaning": "<所有者>/<リポジトリ>#<番号> の形で課題を指す書き方。リポジトリをまたいで課題を対に結ぶときに使い、番号だけの #<番号> は使わない",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "代わりの手順",
+      "context": "ndf-workflow",
+      "meaning": "別のリポジトリの改修が要るときの既定の手順（別のリポジトリのレーンの起動）を使えないときに取る、out-of-scope の別のリポジトリへの起票",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
       "term": "計画の外のセッション",
       "context": "ndf-workflow",
       "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
