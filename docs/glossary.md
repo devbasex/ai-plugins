@@ -476,7 +476,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 答え待ちの依頼 | — | オーガナイザーに届いて、まだ答えていない依頼。設計の承認・リリース承認ゲート・承認ゲートの外の問い・耐久ワークフローが自分で立てた問いの 4 種類 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 計画の閾値 | — | 計画全体の答え待ちの依頼の件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | レーンの閾値 | — | 1 つのレーンが送った答え待ちの依頼の件数の閾値。既定は 3 で、これを超えるとそのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
-| 答え待ちの停止 | — | 答え待ちの依頼が閾値を超えたため、レーンに新しい作業を始めさせない状態。件数が閾値以下へ戻ると解ける | — | — | `docs/specifications/ndf-parallel-organizer.md` |
+| 答え待ちの停止 | — | 答え待ちの依頼が閾値を超えたため、レーンに新しい承認を生む作業を始めさせない状態。件数が閾値以下へ戻ると解ける | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 止める指示のファイル | — | 耐久ワークフローが今の答え待ちの停止の範囲を書き、レーンが区切りで読むファイル（answer-hold.json）。停止が無ければファイルも無い | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 再開の印 | — | 答え待ちの停止が解けたら起こすレーンを示すファイル（resume/<レーン>.mark.json）。レーンが止まるとき、または停止の間に答えを受けた持ち主へ置く | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 分割した文書 | — | 1 つの課題の設計を複数ファイルに分けたときの、先頭以外の設計文書（`issue-<番号>-design-<名前>.md`） | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
@@ -510,8 +510,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ターンの型 | — | 機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類 | — | — | `docs/specifications/ndf-mechanical-turns-to-scripts.md` |
 | 手順の連続実行 | — | 判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance） | — | — | `docs/specifications/ndf-mechanical-turns-to-scripts.md` |
 | 業務時間 | — | 利用者が承認ゲートへ答えられる時間帯。進め方の宣言に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認の依頼を溜め、業務時間の始めにまとめて示す | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
-| 新しい承認を生む作業 | — | ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
-| 承認の要らない作業 | — | 新しい承認を生む作業以外の作業。開発ループの中では、承認した設計の実装と、答えの届いた保留したループの 1 回の残りがこれに当たる（ループは設計を承認していない課題にモードに依らず設計のステップを置く） | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 新しい承認を生む作業 | — | 設計のステップ（設計承認ゲートの依頼を生む）を含む作業。ループのレーンではループの 1 回のプランに設計承認ゲートを含む作業、1 スプリントのレーンでは開始のステップから設計を書くステップへ行けるプラン。答え待ちの停止の範囲に入ったレーンは始めない | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 承認の要らない作業 | — | 新しい承認を生む作業以外の作業。開発ループの中では承認した設計の実装と答えの届いた保留したループの 1 回の残り（ループは設計を承認していない課題にモードに依らず設計のステップを置く）、1 スプリントのレーンでは設計 PR のマージ・実装・検査・リリースのプランがこれに当たる | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
+| 次に始めるプラン | — | 1 スプリントのレーンのスプリントで、ステージの並びの先頭から見て、結果が完了でも承認ゲートでもないプランを持つ最初のステージの、そのプランの集まり。答え待ちの停止の範囲で答えを受けたレーンを起こすかを決める | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
 | 溜めた依頼 | — | 業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と問いの依頼。業務時間の始めにまとめて示す | — | — | `docs/specifications/ndf-work-during-approval-wait-and-business-hours.md` |
 | 判定表 | — | development-workflow の「上から順に条件を判定する」の表。順・モード・該当条件の 3 列を持ち、最初に当たった行のモードを採る | — | — | `docs/specifications/ndf-sprint-mode-from-judgment-basis.md` |
 | 判定の根拠 | — | 1 つの課題について、判定表の当たった行（順とモード）・当たった条件の文・触るファイルの一覧の組 | — | — | `docs/specifications/ndf-sprint-mode-from-judgment-basis.md` |
