@@ -1638,6 +1638,20 @@ def test_new_release_requires_version():
 # --- スプリント（#1005） ------------------------------------------------------------
 
 
+def assert_plan_transitions_valid(manifest):
+    """マニフェストの全プランで、next / on_fail / skip_to と choices の行き先が同じプランの工程か終端を指す。"""
+    for w in manifest["ステージ"]:
+        for path in w.get("plans", []):
+            plan = json.loads(Path(path).read_text())
+            steps = {s["id"]: s for s in plan["steps"]}
+            for s in plan["steps"]:
+                for k in ("next", "on_fail", "skip_to"):
+                    if k in s:
+                        assert s[k] in steps or s[k] == "end", (path, s)
+                for c in s.get("choices", []):
+                    assert c in steps or c in ("stop", "gate"), (path, c)
+
+
 def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
@@ -1661,16 +1675,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
-    for w in manifest["ステージ"]:
-        for path in w.get("plans", []):
-            plan = json.loads(Path(path).read_text())
-            steps = {s["id"]: s for s in plan["steps"]}
-            for s in plan["steps"]:
-                for k in ("next", "on_fail", "skip_to"):
-                    if k in s:
-                        assert s[k] in steps or s[k] == "end", (path, s)
-                for c in s.get("choices", []):
-                    assert c in steps or c in ("stop", "gate"), (path, c)
+    assert_plan_transitions_valid(manifest)
 
     design = json.loads(Path(waves["設計"]["plans"][0]).read_text())
     review = next(s for s in design["steps"] if s["id"] == "review")
