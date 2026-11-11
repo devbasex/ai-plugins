@@ -575,20 +575,14 @@ def record_target(a, root: Path) -> tuple[dict, int]:
     範囲に影響しない。`check-base` を消さず、`check-done/*` を進めず、PR を閉じない（検査した PR は実装の PR である）。
 
     `--advance-done`（スプリントの検査。#1485 の決定 8）なら、検査が成功してマージした PR のマージのコミットを
-    `to` にして `check-done/*` を進める。落ちた検査とマージしなかった検査は進めない。"""
+    `to` にして `check-done/*` を進める。落ちた検査とマージしなかった検査は進めない。`--review`（構造改善を外した
+    検査）なら実装レビューだけの回（only: review）として記録し、`check-done/review` だけを進める。"""
     findings, failed_at = findings_of(Path(a.state))
     n = a.target_pr
-    row = {
-        "kind": "check",
-        "id": a.id,
-        "scope": "pr",
-        "target_pr": n,
-        "prs": [n],
-        "from": "",
-        "to": "",
-        "metrics": {},
-        "findings": findings,
-    }
+    row = {"kind": "check", "id": a.id, "scope": "pr", "target_pr": n, "prs": [n], "from": "", "to": ""}
+    row.update(metrics={}, findings=findings)
+    if a.review:
+        row["only"] = "review"
     if a.failed:
         row.update(result="failed", failed_at=failed_at or "不明")
         written = _append_failed(root, row)
@@ -599,15 +593,15 @@ def record_target(a, root: Path) -> tuple[dict, int]:
     _append_or_stop(root, row)
     if not a.advance_done:
         return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
-    return _pushed_result(root, a.id, res, n, row, row["to"], False), EXIT_OK
+    return _pushed_result(root, a.id, res, n, row, row["to"], a.review), EXIT_OK
 
 
 def cmd_record(a, root: Path) -> tuple[dict, int]:
     if a.advance_done and a.target_pr is None:
         raise Stop("--advance-done は --target-pr と一緒に渡す")
     if a.target_pr is not None:
-        if a.pr is not None or a.review:
-            raise Stop("--target-pr は --pr / --review と同時に渡せない")
+        if a.pr is not None:
+            raise Stop("--target-pr は --pr と同時に渡せない")
         return record_target(a, root)
     p = check_json(a.state)
     data = json.loads(p.read_text()) if p.is_file() else {}

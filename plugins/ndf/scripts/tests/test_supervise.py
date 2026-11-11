@@ -732,7 +732,8 @@ def test_new_impl_writes_plan(tmp_path):
     assert res["status"] == "ok"
     plan = json.loads(out.read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("test-all") < ids.index("merge")
+    # このリポジトリの宣言は全体テストを CI に任せるため、PR の後に CI を待つ test-all を置かない（CI はマージが待つ）
+    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("merge") and "test-all" not in ids
     steps = {s["id"]: s for s in plan["steps"]}
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
@@ -765,6 +766,25 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
     assert p.returncode == 0, p.stderr
     ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
     assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+
+
+@pytest.mark.suspended_refactor
+def test_suspended_refactor_drops_assess_and_refactor_for_every_mode(tmp_path):
+    # 緊急の停止（2026-11-11）の間は standard でも構造改善を外し、PR の次を review にする
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", "standard", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert next(iter(steps)) == "review" and "assess" not in steps and "refactor" not in steps
+    # 構造改善を通していない回は実装レビューだけの回として記録し、check-done/check を進めない（PR 3062 のレビュー）
+    assert "--review" in steps["record"]["cmd"]
+    m = tmp_path / "m"
+    p = cli(*new_sprint_args(tmp_path, m))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((m / "sprint.json").read_text())["ステージ"]}
+    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
+    assert steps["pr"]["next"] == "review" and "refactor" not in steps
+    assert all("--review" in steps[i]["cmd"] for i in ("prepare", "record") if i in steps)
 
 
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
@@ -2408,7 +2428,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
     # standard（既定）では範囲テストと PR の間に設計との突き合わせが入る（#1241）
-    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "doc-lint"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
@@ -3073,9 +3093,25 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert limits["basis"]["unknown_duration"] is False
     ci_wait = limits["ci_wait_timeout"]
     assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
-    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    assert steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    # レビューの後の全体テストは CI に任せ、取り込みからマージの準備へ進む（CI はマージのステップが待つ）
+    assert "test-all" not in steps and "judge" not in steps and steps["base-sync"]["next"] == "ready"
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_ci_whole_sends_a_failed_merge_of_the_impl_plan_back_to_judge(tmp_path):
+    """全体テストを CI に任せる戦略では CI を待つのはマージだけなので、実装のプランのマージが落ちたら judge から直しの輪へ戻る
+    （PR 3062 のレビュー）。宛先の判定（merge-gate）の失敗は今のまま止まる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert steps["merge"]["on_fail"] == steps["merge-approved"]["on_fail"] == "judge" and "fix" in steps["judge"]["choices"]
+    assert all({"merge", "merge-approved"} <= set(steps[s]["inputs"]) for s in ("judge", "fix")) and "on_fail" not in steps["merge-gate"]
 
 
 def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):
