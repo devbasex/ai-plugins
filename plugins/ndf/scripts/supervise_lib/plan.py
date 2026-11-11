@@ -175,6 +175,9 @@ GitHub から読み、段階が本番かデプロイなしで `スプリント:`
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
   worker の最後の報告。run のステップなら stderr の最後の行を last_output に）。長いステップ（work・run・drive）の
   待ちは区切って見るので、ステップの途中でも書く
+- `step` と `alive` の行には、負荷とメモリの値とマシンの上の pytest の数を `host` に載せる（load・mem_available_mib・
+  swap_total_mib・swap_free_mib・pytest・pytest_workers。#2998）。`/proc/loadavg`・`/proc/meminfo` やプロセスの一覧を
+  読めない値は鍵ごと省き、すべて読めなければ `host` ごと省く
 - `"kind": "worker"`: work のステップの worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
 - `"kind": "slow"`: ステップの経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
 - `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、
