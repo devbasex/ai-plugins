@@ -260,6 +260,7 @@
     "breakdown-md",
     "checkpoint-json",
     "deferred-json",
+    "outside-plan-jsonl",
     "plan-json",
     "plan-md",
     "present-json",

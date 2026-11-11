@@ -77,7 +77,7 @@ def step_admit(main: str, name: str, lanes: list[str]) -> dict:
 
     plan = pp.load_valid_plan(Path(main), name)
     want = [(n, plan.lane(n).plans) for n in lanes]
-    return parallel_machine.admit(Path(main), name, want, lambda n: _spawn_lane(main, plan, n))
+    return parallel_machine.admit_lanes(Path(main), name, want, lambda n: _spawn_lane(main, plan, n))
 
 
 @durable.step(name="parallel.progress")
@@ -665,25 +665,14 @@ def _spawn_ready(run: _Run, main: str) -> None:
         ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
     if not ready:
         return
-    names = [ln.name for ln in ready]
-    before = _waiting_view(run)
-    for n, got in (step_admit if run.admitting else step_spawn)(main, run.name, names).items():
-        if "waiting" in got:  # 起動の待ちは断りに数えない（#2999 の I12）。同じ待ちが続く間は最初の時刻を残す
-            w = dict(got["waiting"])
-            at = w.pop("at", None)
-            run.lanes[n]["waiting"] = {**w, "since": (run.lanes[n].get("waiting") or {}).get("since") or at}
-            continue
-        run.lanes[n].pop("waiting", None)
-        run.lanes[n].update(got)
-        if got.get("refused"):
-            run.count_refusal(n, got["refused"])
-    if run.admitting and _waiting_view(run) != before:
+    import parallel_machine
+
+    before = parallel_machine.waiting_view(run.lanes)
+    got = (step_admit if run.admitting else step_spawn)(main, run.name, [ln.name for ln in ready])
+    for n, why in parallel_machine.apply_launches(run.lanes, got):
+        run.count_refusal(n, why)
+    if run.admitting and parallel_machine.waiting_view(run.lanes) != before:
         step_progress(main, run.name, run.progress())
-
-
-def _waiting_view(run: _Run) -> dict:
-    """起動の待ちの組（レーン → 理由と数）。最初の時刻は比べない。"""
-    return {n: {k: v for k, v in st["waiting"].items() if k != "since"} for n, st in run.lanes.items() if st.get("waiting")}
 
 
 def _run_finished(run: _Run) -> bool:

@@ -355,6 +355,17 @@ def load_valid_plan(main: Path, name: str) -> ParallelPlan:
     return ParallelPlan.model_validate(load_plan(main, name), context=_NO_LIMIT)
 
 
+def waiting_text(w: Optional[dict]) -> Optional[str]:
+    """起動の待ち（`parallel_machine.admit_lanes` が返す）の 1 句（`plan.md` の進行の表の「起動」の欄）。待っていなければ None。"""
+    if not isinstance(w, dict):
+        return None
+    if w.get("reason") == "lock":
+        return "起動待ち（起動の排他を取れない）"
+    if w.get("reason") == "observe":
+        return "起動待ち（レーンの状態の一覧を読めない）"
+    return f"起動待ち（マシン {w.get('machine_plans')} + このレーン {w.get('plans')} > 上限 {w.get('max_plans')}）"
+
+
 def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態とリリースの内訳。"""
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]
@@ -385,8 +396,6 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
         )
     lines += [f"- {r}" for r in plan.rules]
     if progress:
-        from parallel_machine import waiting_text
-
         lines += ["", "## 進行", "", "| レーン | 状態 | 起動 |", "| --- | --- | --- |"]
         for n, st in sorted((progress.get("lanes") or {}).items()):
             launch = st.get("started") or waiting_text(st.get("waiting")) or st.get("refused") or "-"

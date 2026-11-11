@@ -4,8 +4,8 @@
   動いていると返す計画である。状態を読めない計画は動いている計画として数える。宣言（`plan.json`）は JSON として読み、
   `lanes[].name` と `lanes[].plans` だけを取る（版の違う NDF の計画も数える。決定 8）。宣言を読めない計画は 0 本とし、
   `<置き場>:<計画名>` を出力の `unreadable` に載せる（I13）
-- 計画の検査と開始（`declared`・`plan_warnings`）は宣言の合計を数え、超えても警告で通す（決定 3）
-- 耐久ワークフローの起動の判定（`admit`）は、動いているレーン（レーンの状態の一覧で `running`・`awaiting_approval` のもの）と、
+- 計画の検査と開始（`declared_plans`・`plan_warnings`）は宣言の合計を数え、超えても警告で通す（決定 3）
+- 耐久ワークフローの起動の判定（`admit_lanes`）は、動いているレーン（レーンの状態の一覧で `running`・`awaiting_approval` のもの）と、
   承認の答えを待って止まった宣言のレーン（`stopped` で、計画の台帳に答えていない問いを持つもの。決定 9）の合計を数える。
   数えてから起動するまでを起動の排他（`<状態の根>/parallel/admit.lock`）の中で行う（決定 4）。合計 0 のときは上限を見ずに起動する（I8）
 
@@ -44,7 +44,7 @@ def _key(home: Path, name: str) -> str:
     return f"{resolved_path(home)}:{name}"
 
 
-def _split(key: str) -> tuple[Path, str]:
+def _split_key(key: str) -> tuple[Path, str]:
     home, _, name = key.rpartition(":")
     return Path(home), name
 
@@ -65,7 +65,7 @@ def lanes_of(home: Path, name: str) -> list[tuple[str, int]]:
     return out
 
 
-def live(main: Path, own: Optional[str] = None, status=None) -> tuple[list[str], list[str]]:
+def live_keys(main: Path, own: Optional[str] = None, status=None) -> tuple[list[str], list[str]]:
     """(動いている計画, 状態を読めない計画)。`own`（自分の計画名）は状態を読まずに動いているものとして返す。"""
     import parallel_guard
 
@@ -77,16 +77,16 @@ def live(main: Path, own: Optional[str] = None, status=None) -> tuple[list[str],
     return parallel_guard.live_plans(Path(main), lambda h, n: "PENDING" if _key(h, n) == me else status(h, n))
 
 
-def declared(main: Path, own: Optional[str], status=None) -> dict:
+def declared_plans(main: Path, own: Optional[str], status=None) -> dict:
     """自分を除く動いている計画の宣言の合計。`plans` は `{"plan", "plans", "state"}` の一覧、`unreadable` は宣言を読めない計画。"""
-    running, unknown = live(main, own, status)
+    running, unknown = live_keys(main, own, status)
     me = _key(Path(main), own) if own else None
     plans, unreadable = [], []
     for key, state in [*((k, "running") for k in running), *((k, "unreadable") for k in unknown)]:
         if key == me:
             continue
         try:
-            n = sum(p for _, p in lanes_of(*_split(key)))
+            n = sum(p for _, p in lanes_of(*_split_key(key)))
         except (OSError, ValueError):
             unreadable.append(key)
             continue
@@ -108,10 +108,10 @@ def running_total(main: Path, rows: dict, own: Optional[str] = None, status=None
     """動いている計画（自分を含む）の、動いているレーンと承認の答えを待って止まった宣言のレーンの `plans` の合計。
 
     `rows` はレーンの状態の一覧（名前 → `{"state": ...}`）。同じ名前のレーンは 1 回だけ数える（ラッパーの名前はマシンで 1 つ）。"""
-    running, unknown = live(main, own, status)
+    running, unknown = live_keys(main, own, status)
     total, lanes, unreadable, seen = 0, [], [], set()
     for key in [*running, *unknown]:
-        home, name = _split(key)
+        home, name = _split_key(key)
         try:
             declared_lanes = lanes_of(home, name)
         except (OSError, ValueError):
@@ -137,7 +137,7 @@ def running_total(main: Path, rows: dict, own: Optional[str] = None, status=None
 def plan_warnings(main: Path, name: str, own_plans: int, status=None) -> list[dict]:
     """検査と開始の警告（0 か 1 件）。他の動いている計画の宣言の合計とこの計画の宣言の合計の和が上限を超えるとき 1 件（I5・I6）。"""
     limit = cap()[0]
-    got = declared(main, name, status)
+    got = declared_plans(main, name, status)
     others = sum(p["plans"] for p in got["plans"])
     if not got["plans"] and not got["unreadable"] or own_plans + others <= limit:
         return []
@@ -158,7 +158,7 @@ def plan_warnings(main: Path, name: str, own_plans: int, status=None) -> list[di
     }]  # fmt: skip
 
 
-def _ls(main: Path) -> Optional[dict]:
+def _relay_rows(main: Path) -> Optional[dict]:
     """レーンの状態の一覧（名前 → 行）。読めなければ None。"""
     from parallel_repo import relay_proc
 
@@ -168,11 +168,7 @@ def _ls(main: Path) -> Optional[dict]:
     return {it["name"]: it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name")}
 
 
-def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def admit(
+def admit_lanes(
     main: Path,
     name: str,
     lanes: list[tuple[str, int]],
@@ -192,16 +188,16 @@ def admit(
     limit = cap()[0]
 
     def wait(reason: str, total: Optional[int], n: int, unreadable: list[str]) -> dict:
-        w = {"reason": reason, "machine_plans": total, "plans": n, "max_plans": limit, "at": _now(), "unreadable": unreadable}
+        w = {"reason": reason, "machine_plans": total, "plans": n, "max_plans": limit, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "unreadable": unreadable}
         return {"waiting": w}
 
     timeout = limits.seconds(LOCK_POLICY) if timeout is None else timeout
     out: dict[str, dict] = {}
     try:
         with locks.exclusive(lock_target(), timeout=timeout):
-            rows = (ls or (lambda: _ls(main)))()
+            rows = (ls or (lambda: _relay_rows(main)))()
             if rows is None:  # 一覧を読めない: 他に動いている計画が無ければ今までどおり起動する（自分の計画は I2 で上限以下）
-                others = declared(main, name, status)
+                others = declared_plans(main, name, status)
                 if others["plans"] or others["unreadable"]:
                     return {n: wait("observe", None, p, others["unreadable"]) for n, p in lanes}
                 return {n: spawn(n) for n, _ in lanes}
@@ -219,12 +215,24 @@ def admit(
     return out
 
 
-def waiting_text(w: Optional[dict]) -> Optional[str]:
-    """起動の待ちの 1 句（`plan.md` の進行の表の「起動」の欄）。待っていなければ None。"""
-    if not isinstance(w, dict):
-        return None
-    if w.get("reason") == "lock":
-        return "起動待ち（起動の排他を取れない）"
-    if w.get("reason") == "observe":
-        return "起動待ち（レーンの状態の一覧を読めない）"
-    return f"起動待ち（マシン {w.get('machine_plans')} + このレーン {w.get('plans')} > 上限 {w.get('max_plans')}）"
+def apply_launches(lanes: dict, got: dict) -> list[tuple[str, str]]:
+    """起動の結果をレーンの進行（名前 → 進行）へ当て、断られたレーン（名前, 理由）を返す。
+
+    起動の待ちは断りに数えない（I12）。同じ待ちが続く間は最初の時刻（`since`）を残す。起動か断りが来たら待ちを消す。"""
+    refused = []
+    for n, res in got.items():
+        if "waiting" in res:
+            w = dict(res["waiting"])
+            at = w.pop("at", None)
+            lanes[n]["waiting"] = {**w, "since": (lanes[n].get("waiting") or {}).get("since") or at}
+            continue
+        lanes[n].pop("waiting", None)
+        lanes[n].update(res)
+        if res.get("refused"):
+            refused.append((n, res["refused"]))
+    return refused
+
+
+def waiting_view(lanes: dict) -> dict:
+    """起動の待ちの組（レーン → 理由と数）。最初の時刻は比べない。"""
+    return {n: {k: v for k, v in st["waiting"].items() if k != "since"} for n, st in lanes.items() if st.get("waiting")}

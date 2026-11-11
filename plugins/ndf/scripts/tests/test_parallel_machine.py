@@ -145,7 +145,7 @@ def test_unreadable_plans_are_counted_or_listed(tmp_path):
             raise RuntimeError("記録を開けない")
         return "PENDING"
 
-    got = pm.declared(y, "p1", status)
+    got = pm.declared_plans(y, "p1", status)
     assert got["plans"] == [{"plan": f"{x}:c1", "plans": 3, "state": "unreadable"}]  # 状態を読めない計画は動いているものとして数える
     assert got["unreadable"] == [f"{x}:c2"]  # 宣言を読めない計画は 0 本として置き場を載せる
     w = pm.plan_warnings(y, "p1", 4, status)[0]
@@ -195,24 +195,24 @@ def test_a_lane_waits_while_the_machine_is_full_and_starts_after(busy):
     _, y = busy
     rows = {"cx0": {"state": "running"}, "cx1": {"state": "awaiting_approval"}}
     started: list[str] = []
-    got = pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: rows)
+    got = pm.admit_lanes(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: rows)
     w = got["py0"]["waiting"]
     assert started == [] and (w["reason"], w["machine_plans"], w["plans"], w["max_plans"]) == ("machine-plans", 5, 2, 6)
     rows["cx1"] = {"state": "stopped"}  # 別のリポジトリのレーンが止まった（合計 3）
-    assert pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: rows) == {"py0": {"started": "t"}}
+    assert pm.admit_lanes(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: rows) == {"py0": {"started": "t"}}
     assert started == ["py0"]
 
 
 def test_an_empty_machine_starts_a_lane_over_the_cap(busy):
     _, y = busy
     started: list[str] = []
-    assert pm.admit(y, "p1", [("py0", 9)], _spawner(started), ls=lambda: {}) == {"py0": {"started": "t"}}
+    assert pm.admit_lanes(y, "p1", [("py0", 9)], _spawner(started), ls=lambda: {}) == {"py0": {"started": "t"}}
 
 
 def test_lanes_started_in_the_same_judgement_are_counted(busy):
     _, y = busy
     started: list[str] = []
-    got = pm.admit(y, "p1", [("a", 4), ("b", 3)], _spawner(started), ls=lambda: {})
+    got = pm.admit_lanes(y, "p1", [("a", 4), ("b", 3)], _spawner(started), ls=lambda: {})
     assert started == ["a"] and got["b"]["waiting"]["machine_plans"] == 4
 
 
@@ -223,17 +223,17 @@ def test_a_held_lane_stopped_for_an_answer_is_still_counted(busy, monkeypatch):
     rows = {"cx0": {"state": "running"}, "cx1": {"state": "stopped"}}
     asking = {"v": [{"id": "q1", "lane": "cx1"}]}
     monkeypatch.setattr(plg, "pending_questions", lambda h, n: asking["v"] if n == "c1" else [])
-    got = pm.admit(y, "p1", [("py0", 2)], _spawner([]), ls=lambda: rows)
+    got = pm.admit_lanes(y, "p1", [("py0", 2)], _spawner([]), ls=lambda: rows)
     assert got["py0"]["waiting"]["machine_plans"] == 5  # 保留で止まったレーンは数える
     asking["v"] = []  # 問いに答えた
-    assert pm.admit(y, "p1", [("py0", 2)], _spawner([]), ls=lambda: rows) == {"py0": {"started": "t"}}
+    assert pm.admit_lanes(y, "p1", [("py0", 2)], _spawner([]), ls=lambda: rows) == {"py0": {"started": "t"}}
 
 
 def test_a_held_admit_lock_makes_the_lanes_wait(busy):
     _, y = busy
     started: list[str] = []
     with locks.exclusive(pm.lock_target(), timeout=1):
-        got = pm.admit(y, "p1", [("py0", 1)], _spawner(started), ls=lambda: {}, timeout=0.1)
+        got = pm.admit_lanes(y, "p1", [("py0", 1)], _spawner(started), ls=lambda: {}, timeout=0.1)
     assert started == [] and got["py0"]["waiting"]["reason"] == "lock"
 
 
@@ -253,7 +253,7 @@ def test_two_concurrent_judgements_do_not_exceed_the_cap(tmp_path):
 
     out: dict[str, dict] = {}
     ts = [
-        threading.Thread(target=lambda h=h, p=p, ln=ln: out.update(pm.admit(h, p, [(ln, 4)], spawn, ls=lambda: dict(rows), timeout=5)))
+        threading.Thread(target=lambda h=h, p=p, ln=ln: out.update(pm.admit_lanes(h, p, [(ln, 4)], spawn, ls=lambda: dict(rows), timeout=5)))
         for h, p, ln in ((x, "c1", "cx0"), (y, "p1", "py0"))
     ]
     for t in ts:
@@ -266,15 +266,15 @@ def test_two_concurrent_judgements_do_not_exceed_the_cap(tmp_path):
 
 def test_the_waiting_text_states_the_numbers():
     w = {"reason": "machine-plans", "machine_plans": 5, "plans": 2, "max_plans": 6}
-    assert pm.waiting_text(w) == "起動待ち（マシン 5 + このレーン 2 > 上限 6）"
-    assert pm.waiting_text({"reason": "lock"}) == "起動待ち（起動の排他を取れない）"
-    assert pm.waiting_text(None) is None
+    assert pp.waiting_text(w) == "起動待ち（マシン 5 + このレーン 2 > 上限 6）"
+    assert pp.waiting_text({"reason": "lock"}) == "起動待ち（起動の排他を取れない）"
+    assert pp.waiting_text(None) is None
 
 
 def test_an_unreadable_lane_list_waits_only_when_another_plan_runs(busy, tmp_path):
     x, y = busy
     started: list[str] = []
-    got = pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None)
+    got = pm.admit_lanes(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None)
     assert started == [] and got["py0"]["waiting"]["reason"] == "observe"
     (pp.plan_dir(x, "c1") / "run.done").write_text("SUCCESS")  # 他に動いている計画が無いマシンでは今までどおり起動する
-    assert pm.admit(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None) == {"py0": {"started": "t"}}
+    assert pm.admit_lanes(y, "p1", [("py0", 2)], _spawner(started), ls=lambda: None) == {"py0": {"started": "t"}}
