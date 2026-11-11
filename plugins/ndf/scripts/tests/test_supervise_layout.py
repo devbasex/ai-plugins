@@ -62,6 +62,7 @@ MODULES = [
     "admission",
     "running",  # queue のプロセスの中の、走っているプランの登録簿（#1674）
     "flow",
+    "queue_waits",  # queue の待ちの秒を理由ごとに数える（#2998）
     "templates",
     "verify_steps",
     "release_templates",
@@ -114,6 +115,7 @@ NO_ENGINE = [
     "admission",
     "running",
     "actuals",
+    "queue_waits",
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。

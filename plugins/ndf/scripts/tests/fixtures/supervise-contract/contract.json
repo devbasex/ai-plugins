@@ -97,7 +97,8 @@
         "plan",
         "report",
         "result",
-        "seconds"
+        "seconds",
+        "waits"
       ],
       "metric_keys": [
         "done",
@@ -149,7 +150,8 @@
         "plan",
         "report",
         "result",
-        "seconds"
+        "seconds",
+        "waits"
       ],
       "metric_keys": [
         "done",
@@ -182,7 +184,8 @@
         "reason",
         "report",
         "result",
-        "seconds"
+        "seconds",
+        "waits"
       ],
       "metric_keys": [
         "done",

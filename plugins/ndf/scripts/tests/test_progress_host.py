@@ -157,7 +157,11 @@ def test_host_sample_is_fast_with_many_processes(monkeypatch):
 
     class P:
         def __init__(self, i):
-            self.info = {"pid": 10_000 + i, "ppid": 10_000 if i else 1, "cmdline": ["python3", "-m", "pytest"] if i == 0 else ["python3", "-c", "x"]}
+            self.info = {
+                "pid": 10_000 + i,
+                "ppid": 10_000 if i else 1,
+                "cmdline": ["python3", "-m", "pytest"] if i == 0 else ["python3", "-c", "x"],
+            }
 
     calls = []
 

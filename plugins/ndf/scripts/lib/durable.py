@@ -332,6 +332,16 @@ def workflow_ids(prefix: str, statuses: Optional[Iterable[str]] = None) -> list[
     return [w.workflow_id for w in DBOS.list_workflows(**kw)]
 
 
+def times(prefix: str) -> dict[str, tuple[float, Optional[float], Optional[str]]]:
+    """接頭辞の耐久ワークフローの ID → (作った時刻, 最後に耐久キューから出した時刻か None, 耐久キューの名前か None)。時刻は秒。"""
+    rows = DBOS.list_workflows(workflow_id_prefix=prefix, load_input=False, load_output=False)
+    return {
+        w.workflow_id: (w.created_at / 1000, None if w.dequeued_at is None else w.dequeued_at / 1000, w.queue_name)
+        for w in rows
+        if w.created_at is not None
+    }
+
+
 def current_id() -> str:
     """耐久ワークフローの中で、自分の ID。"""
     wid = DBOS.workflow_id

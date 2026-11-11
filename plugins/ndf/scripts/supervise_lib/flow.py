@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import actuals, admission, limits, paths, running
+from supervise_lib import actuals, admission, limits, paths, queue_waits, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 import limits as limit_decl  # 上限の宣言（#2343）。supervise_lib.limits と分ける
@@ -421,7 +421,7 @@ def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
     boxed = [len(g) > 1 or any(deps.get(p) for p in g) for g in adm["groups"]]
     where = {p: (_group_id(refs[g[0]]["id"]) if boxed[i] else None, k) for i, g in enumerate(adm["groups"]) for k, p in enumerate(g)}
     waits = _submit_groups(adm, args, deps, known, boxed, where, queued)
-    return _collect_items(plans, waits, refs)
+    return queue_waits.attach(_collect_items(plans, waits, refs), refs, waits)  # 待ちの秒（#2998）
 
 
 def _submit_groups(
