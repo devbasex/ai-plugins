@@ -210,3 +210,87 @@ def test_startup_fails_when_the_exit_code_varies_or_the_script_is_absent(tmp_pat
     assert _startup(tmp_path, "--runs", "2", "flip.py") == 1
     assert json.loads(capsys.readouterr().out)["items"][0]["result"] == "varied"
     assert _startup(tmp_path, "absent.py") == 2
+
+
+# ---- peak: 全体テストを同時に流したメモリの山（#2998） ----
+
+
+class FakeHost:
+    """procs.host_sample の代わり。呼ぶたびに `avail` の次の値を返す（尽きたら最後の値）。"""
+
+    def __init__(self, avail: list[int], pytest_count: int = 0):
+        self.avail, self.pytest_count, self.calls = list(avail), pytest_count, 0
+
+    def __call__(self):
+        v = self.avail[min(self.calls, len(self.avail) - 1)]
+        self.calls += 1
+        return {"mem_available_mib": v, "swap_total_mib": 100, "swap_free_mib": 40, "pytest": self.pytest_count if self.calls == 1 else 1}
+
+
+def _peak(monkeypatch, tmp_path, host, roots=2, queues=0, extra=()):
+    procs = wtt._procs()
+    monkeypatch.setattr(procs, "host_sample", host)
+    monkeypatch.setattr(procs, "count_cmdline", lambda *w: queues)
+    monkeypatch.setattr(procs, "meminfo_mib", lambda path: {"MemTotal": 1000})
+    dirs = []
+    for i in range(roots):
+        d = tmp_path / f"w{i}"
+        d.mkdir()
+        dirs.append(_repo(d, [{"name": "t", "command": f"echo {i} >> {tmp_path}/started; sleep 0.3"}]))
+    argv = ["peak", *[x for d in dirs for x in ("--root", str(d))], "--interval", "0.05", *extra]
+    with pytest.raises(SystemExit) as e:
+        wtt.main(argv)
+    return e.value.code
+
+
+def test_peak_measures_each_count_of_runs(monkeypatch, tmp_path, capsys):
+    """F4: 1 本・2 本の順に流し、本数ごとに山と秒と終了コードを出す。始める前の値と版を載せる。"""
+    code = _peak(monkeypatch, tmp_path, FakeHost([900, 700, 600, 800]), extra=("--floor-mib", "500"))
+    out = json.loads(capsys.readouterr().out)
+    assert code == 0 and out["status"] == "ok"
+    assert [i["runs"] for i in out["items"]] == [1, 2]
+    assert out["items"][0]["peak_used_mib"] >= 300 and out["items"][0]["peak_swap_used_mib"] == 60
+    assert all(i["exits"] == [0] * i["runs"] and i["seconds"] >= 0.3 for i in out["items"])
+    assert (tmp_path / "started").read_text().split() == ["0", "0", "1"]
+    m = out["metrics"]
+    assert m["mem_total_mib"] == 1000 and m["before_used_mib"] == 100 and m["before_swap_used_mib"] == 60
+    assert m["ndf_version"] and m["cpus"] >= 1 and m["floor_mib"] == 500
+
+
+def test_peak_refuses_to_start_while_other_work_runs(monkeypatch, tmp_path, capsys):
+    """I6a: ほかの queue か pytest が動いていれば、全体テストを 1 本も流さず 3 で返す。"""
+    assert _peak(monkeypatch, tmp_path, FakeHost([900], pytest_count=1)) == 3
+    (tmp_path / "q").mkdir()
+    assert _peak(monkeypatch, tmp_path / "q", FakeHost([900]), queues=1) == 3
+    assert not (tmp_path / "started").exists() and not (tmp_path / "q" / "started").exists()
+
+
+def test_peak_stops_below_the_floor_and_skips_the_rest(monkeypatch, tmp_path, capsys):
+    """I6b・受け入れ条件 10: 下限を割ったら動いている全体テストを止め、打ち切った本数とその時点の値を残す。"""
+    for i in range(2):
+        (tmp_path / f"w{i}").mkdir()
+    procs = wtt._procs()
+    host = FakeHost([900])
+
+    def low_after_start():  # 全体テストが始まった後に下限を割る
+        got = host()
+        return {**got, "mem_available_mib": 100} if (tmp_path / "started").exists() else got
+
+    monkeypatch.setattr(procs, "host_sample", low_after_start)
+    monkeypatch.setattr(procs, "count_cmdline", lambda *w: 0)
+    monkeypatch.setattr(procs, "meminfo_mib", lambda path: {"MemTotal": 1000})
+    roots = [_repo(tmp_path / f"w{i}", [{"name": "t", "command": f"echo {i} >> {tmp_path}/started; sleep 30"}]) for i in range(2)]
+    with pytest.raises(SystemExit) as e:
+        wtt.main(["peak", "--root", str(roots[0]), "--root", str(roots[1]), "--interval", "0.05", "--floor-mib", "500"])
+    out = json.loads(capsys.readouterr().out)
+    assert e.value.code == 1 and out["status"] == "stopped"
+    assert len(out["items"]) == 1 and out["items"][0]["aborted"] is True and out["items"][0]["runs"] == 1
+    assert out["items"][0]["mem_available_mib"] == 100 and out["items"][0]["swap_free_mib"] == 40
+    assert out["items"][0]["seconds"] < 20  # 眠り 30 秒を待たずに止めた
+    assert (tmp_path / "started").read_text().split() == ["0"]
+
+
+def test_peak_rejects_more_than_three_roots(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        wtt.main(["peak", *[x for i in range(4) for x in ("--root", str(tmp_path))]])
+    assert e.value.code == 2
