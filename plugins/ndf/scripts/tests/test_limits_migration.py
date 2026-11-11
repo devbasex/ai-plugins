@@ -75,6 +75,8 @@ BEFORE = {
     "notify.slack": {"seconds": 10},
     "parallel-launch.up": {"seconds": 120, "interval": 5},
     "parallel-repo.stall": {"seconds": 3600},
+    "parallel-switch.long-wait": {"seconds": 14400},
+    "parallel-switch.relay-check": {"seconds": 10},
     "procs.stop-tree": {"seconds": 3, "interval": 0.1},
     "refresh.http": {"seconds": 10},
     "run-core.kill-grace": {"seconds": 5},
