@@ -6427,25 +6427,25 @@
       "term": "長い待ち",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "状況報告",
       "context": "ndf-workflow",
       "meaning": "parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "切り替えの判定",
       "context": "ndf-workflow",
       "meaning": "parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch）",
-      "pending_source": "issues/issue-3006-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "プロンプトキャッシュの寿命",
       "context": "ndf-workflow",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "出し直しの提示",
