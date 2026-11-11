@@ -774,14 +774,17 @@ def test_suspended_refactor_drops_assess_and_refactor_for_every_mode(tmp_path):
     out = tmp_path / "c.json"
     p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", "standard", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
-    assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert next(iter(steps)) == "review" and "assess" not in steps and "refactor" not in steps
+    # 構造改善を通していない回は実装レビューだけの回として記録し、check-done/check を進めない（PR 3062 のレビュー）
+    assert "--review" in steps["record"]["cmd"]
     m = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, m))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((m / "sprint.json").read_text())["ステージ"]}
     steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
     assert steps["pr"]["next"] == "review" and "refactor" not in steps
+    assert all("--review" in steps[i]["cmd"] for i in ("prepare", "record") if i in steps)
 
 
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
@@ -3095,6 +3098,20 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert "test-all" not in steps and "judge" not in steps and steps["base-sync"]["next"] == "ready"
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_ci_whole_sends_a_failed_merge_of_the_impl_plan_back_to_judge(tmp_path):
+    """全体テストを CI に任せる戦略では CI を待つのはマージだけなので、実装のプランのマージが落ちたら judge から直しの輪へ戻る
+    （PR 3062 のレビュー）。宛先の判定（merge-gate）の失敗は今のまま止まる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert steps["merge"]["on_fail"] == steps["merge-approved"]["on_fail"] == "judge" and "fix" in steps["judge"]["choices"]
+    assert all({"merge", "merge-approved"} <= set(steps[s]["inputs"]) for s in ("judge", "fix")) and "on_fail" not in steps["merge-gate"]
 
 
 def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):

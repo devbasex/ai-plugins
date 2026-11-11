@@ -33,6 +33,7 @@ from supervise_lib.verify_steps import (
     scope_timeout,
     test_meta,
     trim_check_steps,
+    whole_on_ci,
     without_ci_wait,
     whole_cmd,
     whole_timeout,
@@ -155,7 +156,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "on_fail": "judge",
             "next": after_tests,
         },
-        judge_step(after_tests, bool(match)),
+        judge_step(after_tests, bool(match), whole_on_ci(a)),
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": first},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
@@ -197,7 +198,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "モード": a.mode,
         "作業場所": a.worktree,
         "規則": RULE_IMPL.format(after_tests=after_tests),
-        "steps": without_ci_wait(a, steps, "doc-lint"),
+        "steps": without_ci_wait(a, steps, "doc-lint", merge_fail="judge"),
     }
     with_decls(plan, a)
     test_meta(plan, a)
@@ -210,9 +211,9 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     return plan
 
 
-def judge_step(after_tests: str, match: bool) -> dict:
-    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、
-    無ければ pr）へ進む。突き合わせがあれば、PR の本文の節が欠けて pr が止まったときもここへ戻る。"""
+def judge_step(after_tests: str, match: bool, ci_merge: bool = False) -> dict:
+    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、無ければ pr）へ
+    進む。突き合わせがあれば PR の本文の節が欠けて pr が止まったとき、`ci_merge` ならマージが落ちたときもここへ戻る。"""
     to_next = "設計との突き合わせへ（design-tests）" if match else "PR へ（pr）"
     pr_missing = "、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）" if match else ""
     return {
@@ -220,7 +221,7 @@ def judge_step(after_tests: str, match: bool) -> dict:
         "type": "judge",
         "inputs": ["test-limited", "test-all", *(["pr"] if match else [])],
         "question": f"テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら{to_next}{pr_missing}、"
-        "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
+        f"全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）{'、マージ（merge）が CI で落ちたなら直すか（fix）' if ci_merge else ''}、止めるか（stop）",
         "choices": ["fix", after_tests, "doc-lint", "stop"],
     }
 
@@ -338,7 +339,7 @@ def plan_check(a) -> dict:
                 },
                 {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
                 *merge_steps(a, on_fail="abort", next="record", on_conflict="base-return"),
-                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
+                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False), review=CROSS_REFACTORING_SUSPENDED),
                 back,
             ],
         },
@@ -370,8 +371,8 @@ def plan_check_since(a) -> dict:
     `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
     PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
-    no_refactor = (review_only := getattr(a, "review_only", False)) or CROSS_REFACTORING_SUSPENDED
-    flag = " --review" if review_only else ""
+    no_refactor = getattr(a, "review_only", False) or CROSS_REFACTORING_SUSPENDED
+    flag = " --review" if no_refactor else ""
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
@@ -379,8 +380,8 @@ def plan_check_since(a) -> dict:
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
     cond += flag
-    if getattr(a, "final", False):
-        cond += " --final"
+    if getattr(a, "final", False) and not no_refactor:
+        cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
     first = "実装レビュー" if no_refactor else "構造改善"
     steps = [
         {
@@ -445,7 +446,7 @@ def plan_check_since(a) -> dict:
         },
         {"id": "ready", "type": "run", "cmd": READY, "on_fail": "abort", "next": "merge-gate"},
         *merge_steps(a, on_fail="abort", next="record"),
-        *record_steps(name, review=review_only, pr=True),
+        *record_steps(name, review=no_refactor, pr=True),
     ]
     steps = trim_check_steps(a, steps, "finish", no_refactor)
     issues = list(a.issue or [])
