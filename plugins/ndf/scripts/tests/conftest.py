@@ -135,10 +135,14 @@ def _refactor_route_on(request, monkeypatch):
     """構造改善の緊急の停止（`templates.CROSS_REFACTORING_SUSPENDED`）を外し、既存のテストに構造改善を持つ道を確かめ続けさせる。
 
     停止そのものは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
-    t = sys.modules.get("supervise_lib.templates")
-    if t is None or request.node.get_closest_marker("suspended_refactor"):
+    if request.node.get_closest_marker("suspended_refactor"):
         return
-    monkeypatch.setattr(t, "CROSS_REFACTORING_SUSPENDED", False)
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        monkeypatch.syspath_prepend(scripts)
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "CROSS_REFACTORING_SUSPENDED", False)
 
 
 @pytest.fixture(autouse=True)

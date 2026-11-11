@@ -151,7 +151,7 @@ def guard_sleep(raw: dict) -> dict | None:
     except (ValueError, RecursionError):  # 読めないコマンド・読めない上限は通す
         return None
     return deny(
-        f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI を待つだけなら gh pr checks <PR 番号> --watch を同じく背景で起動する。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
+        f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI の結果はマージ（merge-when-green）のときだけ待ち、ほかの時点で待たない。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
     )
 
 

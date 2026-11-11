@@ -32,6 +32,8 @@ from supervise_lib.verify_steps import (
     scope_cmd,
     scope_timeout,
     test_meta,
+    trim_check_steps,
+    without_ci_wait,
     whole_cmd,
     whole_timeout,
     with_margin,
@@ -195,7 +197,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "モード": a.mode,
         "作業場所": a.worktree,
         "規則": RULE_IMPL.format(after_tests=after_tests),
-        "steps": steps,
+        "steps": without_ci_wait(a, steps, "doc-lint"),
     }
     with_decls(plan, a)
     test_meta(plan, a)
@@ -342,9 +344,7 @@ def plan_check(a) -> dict:
         },
         a,
     )
-    # 工程表で「構造改善」を通らないモードは、実装レビューから始める
-    if CROSS_REFACTORING_SUSPENDED or a.mode in NO_REFACTOR_MODES:
-        plan["steps"] = [s for s in plan["steps"] if s["id"] not in ("assess", "refactor")]
+    plan["steps"] = trim_check_steps(a, plan["steps"], "ready", CROSS_REFACTORING_SUSPENDED or a.mode in NO_REFACTOR_MODES)
     return with_record(plan)
 
 
@@ -447,8 +447,7 @@ def plan_check_since(a) -> dict:
         *merge_steps(a, on_fail="abort", next="record"),
         *record_steps(name, review=review_only, pr=True),
     ]
-    if no_refactor:
-        steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
+    steps = trim_check_steps(a, steps, "finish", no_refactor)
     issues = list(a.issue or [])
     if not issues and getattr(a, "sprint", None):
         try:

@@ -3087,7 +3087,9 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert limits["basis"]["unknown_duration"] is False
     ci_wait = limits["ci_wait_timeout"]
     assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
-    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    assert steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    # レビューの後の全体テストは CI に任せ、取り込みからマージの準備へ進む（CI はマージのステップが待つ）
+    assert "test-all" not in steps and "judge" not in steps and steps["base-sync"]["next"] == "ready"
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
 
