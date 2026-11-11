@@ -269,7 +269,7 @@ class ClaudeRunner:
         fallback = ca.fallback_env()
         self._tell_metered_problem()
         multi = ca.registered() >= 2
-        tried_fallback, waited = False, 0.0
+        tried_fallback, waited, after_wait = False, 0.0, False  # after_wait: 上限の待ちの直後か（今のアカウントで起動し直す）
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
         keys = self.keys.attempt(self.keep, cwd)
@@ -282,12 +282,14 @@ class ClaudeRunner:
                 return res
             self._return_from_key(multi)
             try:
-                child = keys.env(self.child_env(fallback) if multi else None)
+                child = keys.env(self.child_env(fallback, tried, after_wait) if multi else None)
             except AccountsLimited as e:
                 if not keys.left():
                     waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                    tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+                    after_wait = True
                 continue
-            res = once(child)
+            after_wait, res = False, once(child)
             if self._retry_on_auth(res, multi, auth_failed):
                 continue
             if res.get("limit"):
@@ -300,6 +302,7 @@ class ClaudeRunner:
                 continue
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+            after_wait = True
             keys.reset()
 
     def _return_from_key(self, multi: bool) -> None:
@@ -421,36 +424,40 @@ class ClaudeRunner:
         st = self.ctx.state
         st.progress_write({"kind": "account_dir", "step": st.cur.get("id"), **row})
 
-    def child_env(self, fallback: dict | None = None) -> dict | None:
+    def child_env(self, fallback: dict | None = None, exclude=(), after_wait: bool = False) -> dict | None:
         """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
 
         従量の接続の間は、起動のたびに起動先の決定が候補のアカウントを返すかを確かめ、返せば戻す。アカウントの間は起動のたびに
         選び直し、今のアカウントが最良の候補と同じ組になければ替える（#2930 の決定 6）。今のアカウントを使えなければ（再登録が要る・
         認証の失敗の観測がある・設定ディレクトリを用意できない）別のアカウント、従量の接続（`fallback`）の順に替える。どれも無く、
-        他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。"""
+        他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。
+        選び直しが候補を返さなければ今のアカウントでも起動しない（上限の待ちの直後 `after_wait` を除く）。`exclude`（`call` の
+        `tried`。この呼び出しで上限に当たったもの）は選び直しでも選ばない。"""
         environ = dict(os.environ)
         if self.account == ca.METERED:
-            c = ca.choose(keep=self.keep())
+            c = ca.choose(exclude=exclude, keep=self.keep())
             if not c.recoverable():
                 return ca.account_env(ca.METERED, environ)
             self.switch(c.name, "recovered", decision=c.decision)
         if self.account is None:
             return None
         acc = ca.load_account(self.account)
-        held = bool(acc and acc.auth_held(time.time()))
-        if not held:  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）。認証の失敗は下の振り替えが扱う
-            c = ca.choose(keep=self.keep(), current=self.account)
+        stay = not (held := bool(acc and acc.auth_held(time.time())))
+        if stay:  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）。認証の失敗は下の振り替えが扱う
+            c = ca.choose(exclude=exclude, keep=self.keep(), current=self.account)
             if c.name and c.name != self.account:
                 self.switch(c.name, "rule", decision=c.decision)
                 acc = ca.load_account(self.account)
-        if not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
+            stay = bool(c.name) or after_wait  # 候補が無い（すべて上限など）なら、上限にある今のアカウントで起動しない（I4）
+        if stay and not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
             return env
-        c, env = ca.choose_env(exclude={self.account}, keep=self.keep(), base=environ, note=self.note_account_dir)
+        why = "auth" if held or stay else "limit"  # 替える理由: 認証の失敗か、今のアカウントも上限にあるか
+        c, env = ca.choose_env(exclude={self.account, *exclude}, keep=self.keep(), base=environ, note=self.note_account_dir)
         if env is not None:
-            self.switch(c.name, "auth", decision=c.decision)
+            self.switch(c.name, why, decision=c.decision)
             return env
         if fallback:
-            self.switch(ca.METERED, "auth", keys=list(fallback))
+            self.switch(ca.METERED, why, keys=list(fallback))
             return ca.account_env(ca.METERED, environ)
         if c.earliest:
             name, until = c.earliest

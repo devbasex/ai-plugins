@@ -73,6 +73,18 @@ def test_ledger_counts_only_the_last_seven_days_per_key(tmp_path, accounts, monk
     assert (d.route, d.target, d.evidence["spent_7d"]) == ("api_key", "k", 5.0)
 
 
+def test_ledger_files_last_written_before_the_window_are_not_read(tmp_path):
+    """直近 7 日より前に最後に書いた帳簿のファイルは読まない（帳簿は追記だけ）。"""
+    import os
+
+    ledger_rows(tmp_path, [{"api_key": "k", "cost_usd": 3.0, "at": at(1)}])
+    old = tmp_path / "claude" / "old.jsonl"
+    old.write_text(json.dumps({"api_key": "k", "cost_usd": 40.0, "at": at(1)}) + "\n", encoding="utf-8")
+    t = time.time() - 9 * 86400
+    os.utime(old, (t, t))
+    assert usage_ledger.api_key_spent(at(7), tmp_path) == {"k": 3.0}
+
+
 def test_unreadable_ledger_is_reported(tmp_path, accounts, monkeypatch):  # noqa: F811
     """受け入れ条件 17: 帳簿を読めなければ `ledger_ok` が偽で、キーを使わない。"""
     monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))

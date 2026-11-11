@@ -1301,25 +1301,26 @@ def test_all_accounts_limited_without_declaration_waits(tmp_path, seq, accounts,
 
 
 def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, monkeypatch):
-    """受け入れ条件 12・13: すべて上限なら宣言の接続へ移り、上限が外れたアカウントへ次の起動で戻る。"""
+    """受け入れ条件 12・13: すべて上限なら上限にある今のアカウントで起動せずに宣言の接続へ移り、上限が外れたアカウントへ
+    次の起動で戻る。"""
     set_responses, calls = seq
     monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
     accounts.add("a", util5=100)
     tb = accounts.add("b", util5=None)
     full, low = FakeAnthropic.usage_reply(window(100), window(10)), FakeAnthropic.usage_reply(window(10), window(10))
-    # 起動のたびの選び直し（#2930 の決定 6）と上限の後の選び直しで 1 回ずつ読む。従量の接続の後の起動で上限が外れる
-    accounts.fake.usage[tb] = [full, full, full, low]
+    # 起動のたびの選び直し（#2930 の決定 6）と替え先の選び直しで 1 回ずつ読む。従量の接続の後の起動で上限が外れる
+    accounts.fake.usage[tb] = [full, full, low]
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET")
-    set_responses(LIMIT, OK, OK)
+    set_responses(OK, OK)
     s, text = run_plan(tmp_path, WORK_TWICE)
     got = [(c["token"], c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
-    a, b, shared = str(accounts.root / "a"), str(accounts.root / "b"), str(accounts.shared)
-    assert got == [(None, a, None, "a"), (None, shared, "1", "metered"), (None, b, None, "b")]
+    b, shared = str(accounts.root / "b"), str(accounts.shared)
+    assert got == [(None, shared, "1", "metered"), (None, b, None, "b")]
     assert s.state.results["w1"]["auth"] == "従量の接続（CLAUDE_CODE_USE_BEDROCK, ANTHROPIC_API_KEY）"
     assert s.state.results["w2"]["auth"] == "アカウント b（recovered）"
     rows = progress_rows(tmp_path, "account")
-    assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("five_hour", "a", "metered"), ("recovered", "metered", "b")]
+    assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("limit", "a", "metered"), ("recovered", "metered", "b")]
     assert rows[0]["keys"] == ["CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_API_KEY"]
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
 
@@ -1335,10 +1336,10 @@ def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, 
     if env_decl is not None:
         monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", env_decl)
     ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
-    set_responses(LIMIT, OK)
+    set_responses(OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
     got = [(c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
-    assert got == [(str(accounts.root / "a"), None, "a"), (str(accounts.shared), None if env_decl else "1", "metered")]
+    assert got == [(str(accounts.shared), None if env_decl else "1", "metered")]  # 上限にある a では起動しない
     keys = "ANTHROPIC_API_KEY" if env_decl else "CLAUDE_CODE_USE_BEDROCK, AWS_PROFILE"
     assert s.state.results["w"]["auth"] == f"従量の接続（{keys}）"
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text

@@ -371,6 +371,32 @@ def test_supervise_waits_when_others_are_only_limited(accounts, monkeypatch):
     assert e.value.resets_at is not None and e.value.resets_at > time.time()
 
 
+def test_supervise_does_not_launch_on_a_limited_current_account(accounts, monkeypatch):
+    """選び直しが候補を返さない（すべて上限）なら、今のアカウントで起動せず、待つか従量の接続へ移る（I4）。"""
+    accounts.add("a", util5=None)
+    accounts.add("b", util5=None)
+    now = time.time()
+    ca.note_limit("a", "five_hour", now + 3600, now)
+    ca.note_limit("b", "five_hour", now + 1800, now)
+    sc, r = _runner(monkeypatch, "a")
+    with pytest.raises(sc.AccountsLimited):
+        r.child_env({})
+    assert r.account == "a"
+    r.child_env({"ANTHROPIC_API_KEY": "x"})
+    assert r.account == ca.METERED
+
+
+def test_supervise_reselection_keeps_the_accounts_tried_in_the_call(accounts, monkeypatch):
+    """起動のたびの選び直しも、この呼び出しで上限に当たったアカウント（`tried`）を選ばない。"""
+    accounts.add("a")
+    accounts.add("b", util7=95.0)
+    sc, r = _runner(monkeypatch, "b")
+    r.child_env({}, exclude={"a"})
+    assert r.account == "b"
+    r.child_env({})
+    assert r.account == "a"  # 除外が無ければ良い組の a へ替える
+
+
 def test_supervise_stops_when_no_candidate(accounts, monkeypatch):
     """替えるアカウントが 1 つも無ければ（再登録が要る）認証で止まる。"""
     accounts.add("a")

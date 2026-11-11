@@ -276,6 +276,15 @@ def read_usage_ledger(runtime: str = "claude", directory: Optional[Path] = None,
     return [as_v2(r, runtime) for p in ledger_files(runtime, directory, repo) for r in read_rows(p)]
 
 
+def _since_seconds(at: str) -> Optional[float]:
+    """ISO 8601 の時刻を秒へ。読めなければ None（呼び手はファイルを読み飛ばさない）。"""
+    try:
+        t = datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
+
+
 API_KEY_MARK = '"api_key"'  # API キーの列を持つ行だけを JSON として読む（全行を読まない）
 
 
@@ -284,9 +293,13 @@ def api_key_spent(since: str, directory: Optional[Path] = None) -> dict[str, flo
 
     `api_key` の列を持つ行だけを数える。帳簿のファイルを読めなければ OSError のまま投げる（呼び手が「読めない」と扱う）。"""
     out: dict[str, float] = {}
+    floor = _since_seconds(since)
     for path in ledger_files("claude", directory):
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-        for line in (ln for ln in text.splitlines() if API_KEY_MARK in ln):
+        if floor is not None and Path(path).stat().st_mtime < floor:
+            continue  # 帳簿は追記だけなので、since より前に最後に書いたファイルに since 以後の行は無い
+        with open(path, encoding="utf-8", errors="replace") as fh:  # 1 行ずつ読む（ファイルを丸ごと読まない）
+            lines = [ln for ln in fh if API_KEY_MARK in ln]
+        for line in lines:
             try:
                 d = json.loads(line)
             except json.JSONDecodeError:
