@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import fnmatch
 import graphlib
-import os
 import re
 import shlex
 from pathlib import Path
@@ -27,29 +26,16 @@ VERSION = 1
 PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # リレーハブの名前の形（relay_lib/common.py の NAME_RE と同じ）
 HELPER_RE = re.compile(r"-rel\d+$")  # 一時レーンの名前の形（`<計画名>-rel<連番>`）
-DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（2026-09-25 の実測。8 コア・30 GB）
+DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（正本は relay_limit.DEFAULT_PLANS）
 DEFAULT_MAX_NAMED = 3  # relay_lib/hub.py の max_named の既定
 
 
-MAX_PLANS_ENV = "NDF_PARALLEL_MAX_PLANS"
-MAX_NAMED_ENV = "NDF_RELAY_MAX_NAMED"
-
-
-def _positive_count(name: str, raw: Optional[str], default: int) -> tuple[int, Optional[str]]:
-    """環境変数の値の正の整数。正の整数でなければ既定と、そのことを書いた 1 文を返す（I2）。"""
-    if raw is None or raw == "":
-        return default, None
-    try:
-        v = int(raw)
-    except ValueError:
-        v = 0
-    if v < 1:
-        return default, f"{name}={raw!r} は正の整数でないため既定の {default} を使った"
-    return v, None
-
-
 def max_plans() -> tuple[int, Optional[str]]:
-    return _positive_count(MAX_PLANS_ENV, os.environ.get(MAX_PLANS_ENV), DEFAULT_MAX_PLANS)
+    """プランの本数の上限と、読めなかった出所の 1 文。マシンの数え方と同じ関数で読む（`relay_limit`。#2999 の I1）。"""
+    import relay_limit
+
+    n, _source, note = relay_limit.plans_cap()
+    return n, note
 
 
 def named_limit() -> tuple[int, Optional[str]]:
@@ -399,9 +385,12 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
         )
     lines += [f"- {r}" for r in plan.rules]
     if progress:
+        from parallel_machine import waiting_text
+
         lines += ["", "## 進行", "", "| レーン | 状態 | 起動 |", "| --- | --- | --- |"]
         for n, st in sorted((progress.get("lanes") or {}).items()):
-            lines.append(f"| {n} | {st.get('state') or '-'} | {st.get('started') or st.get('refused') or '-'} |")
+            launch = st.get("started") or waiting_text(st.get("waiting")) or st.get("refused") or "-"
+            lines.append(f"| {n} | {st.get('state') or '-'} | {launch} |")
         rels = progress.get("releases") or []
         if rels:
             lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]

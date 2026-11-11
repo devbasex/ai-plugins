@@ -53,20 +53,37 @@ def step_init(main: str, name: str) -> dict:
     return {"ok": True, "lanes": [ln.model_dump(mode="json") for ln in plan.lanes]}
 
 
+def _spawn_lane(main: str, plan: pp.ParallelPlan, n: str) -> dict:
+    """レーン `n` を起動する。成功（同じ名前の 2 本目の断りも成功とする）は `started`、断りは `refused`（I7）。"""
+    ln = plan.lane(n)
+    code, res = relay(ln.repo_dir(Path(main)), "spawn", "--name", n, "--json", "--", pp.first_input(ln))  # cwd はレーンのリポジトリ
+    why = ((res.get("items") or [{}])[0] or {}).get("result")
+    if code == 0 or why == "name-taken":
+        return {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    return {"refused": why or res.get("summary") or f"exit {code}"}
+
+
 @durable.step(name="parallel.spawn")
 def step_spawn(main: str, name: str, lanes: list[str]) -> dict:
-    """`lanes` を起動する。成功（同じ名前の 2 本目の断りも成功とする）は `started`、断りは `refused`（I7）。"""
+    """`lanes` を起動する（印 `parallel-admit` の無い記録の道。マシンの本数を見ない）。"""
     plan = pp.load_valid_plan(Path(main), name)
-    out = {}
-    for n in lanes:
-        ln = plan.lane(n)
-        code, res = relay(ln.repo_dir(Path(main)), "spawn", "--name", n, "--json", "--", pp.first_input(ln))  # cwd はレーンのリポジトリ
-        why = ((res.get("items") or [{}])[0] or {}).get("result")
-        if code == 0 or why == "name-taken":
-            out[n] = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        else:
-            out[n] = {"refused": why or res.get("summary") or f"exit {code}"}
-    return out
+    return {n: _spawn_lane(main, plan, n) for n in lanes}
+
+
+@durable.step(name="parallel.admit")
+def step_admit(main: str, name: str, lanes: list[str]) -> dict:
+    """`lanes` を、マシンのプランの本数を起動の排他の中で数えてから起動する。上限を超えるレーンは `waiting`（#2999 の I7〜I11）。"""
+    import parallel_machine
+
+    plan = pp.load_valid_plan(Path(main), name)
+    want = [(n, plan.lane(n).plans) for n in lanes]
+    return parallel_machine.admit(Path(main), name, want, lambda n: _spawn_lane(main, plan, n))
+
+
+@durable.step(name="parallel.progress")
+def step_progress(main: str, name: str, progress: dict) -> None:
+    """`plan.md` を描き直す（起動の待ちの組が変わったとき。#2999 の I14）。"""
+    render_progress(main, name, progress)
 
 
 @durable.step(name="parallel.observe")
@@ -226,6 +243,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
         self.routed = True  # 答えの届け先の耐久ステップを打ってよいか。古い記録の打ち直しでは False（#2510）
         self.launching = True  # 起動と再起動を耐久ワークフローが打つか。古い記録の打ち直しでは False（#2936）
+        self.admitting = True  # 依存のそろったレーンの起動をマシンのプランの本数に掛けるか。古い記録の打ち直しでは False（#2999）
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
@@ -549,6 +567,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.init_run_state(ledgered)
     run.routed = durable.patched("parallel-answers")
     run.launching = durable.patched("parallel-launch")
+    run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す
@@ -644,11 +663,27 @@ def _spawn_ready(run: _Run, main: str) -> None:
     ready = pp.ready_lanes(view, started, stopped)
     if ready and any(a in stopped for ln in ready for a in ln.after):  # 依存で起こすときだけループの記録を読む
         ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
-    if ready:
-        for n, got in step_spawn(main, run.name, [ln.name for ln in ready]).items():
-            run.lanes[n].update(got)
-            if got.get("refused"):
-                run.count_refusal(n, got["refused"])
+    if not ready:
+        return
+    names = [ln.name for ln in ready]
+    before = _waiting_view(run)
+    for n, got in (step_admit if run.admitting else step_spawn)(main, run.name, names).items():
+        if "waiting" in got:  # 起動の待ちは断りに数えない（#2999 の I12）。同じ待ちが続く間は最初の時刻を残す
+            w = dict(got["waiting"])
+            at = w.pop("at", None)
+            run.lanes[n]["waiting"] = {**w, "since": (run.lanes[n].get("waiting") or {}).get("since") or at}
+            continue
+        run.lanes[n].pop("waiting", None)
+        run.lanes[n].update(got)
+        if got.get("refused"):
+            run.count_refusal(n, got["refused"])
+    if run.admitting and _waiting_view(run) != before:
+        step_progress(main, run.name, run.progress())
+
+
+def _waiting_view(run: _Run) -> dict:
+    """起動の待ちの組（レーン → 理由と数）。最初の時刻は比べない。"""
+    return {n: {k: v for k, v in st["waiting"].items() if k != "since"} for n, st in run.lanes.items() if st.get("waiting")}
 
 
 def _run_finished(run: _Run) -> bool:
