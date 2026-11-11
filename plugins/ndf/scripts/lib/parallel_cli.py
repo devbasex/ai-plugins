@@ -94,13 +94,19 @@ def batch_reply(reply, main: Path, name: str, extra: dict) -> None:
         reply("ok", f"並列の計画 {name}: questions（業務時間外に溜めた依頼をまとめて示す）", items, action="questions", **{**extra, **m})
 
 
-# オーガナイザーへ返すイベント。`pause` は古い記録の起動の 1 行を持つものだけ返す（#2936）
+# オーガナイザーへ返すイベント。`pause` は古い記録の起動の 1 行を持つもの（#2936）と出し直しを省いた確定（#3020）だけ返す
 WAIT_KEYS = ("questions", "answer-hold", "pause")
 
 
 def legacy_pause(ev: dict) -> bool:
     """起動の印の無い古い記録の `pause`（オーガナイザーが打つ起動・再起動の 1 行を持つ）か。新しい記録の `pause` は一時レーンが読む。"""
     return bool(ev.get("spawn") or ev.get("wake") or (ev.get("release") or {}).get("spawn"))
+
+
+def carried_pause(ev: dict) -> bool:
+    """出し直しを省いた確定の `pause`（`action: confirmed` で `carried` を持つ）か。オーガナイザーが加わった Pull Request を
+    利用者へ 1 行で伝えるために返す（#3020 の決定 5）。"""
+    return ev.get("action") == "confirmed" and bool(ev.get("carried"))
 
 
 def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
@@ -114,7 +120,7 @@ def has_unanswered(main: Path, name: str, items: list[dict]) -> bool:
 
 def wait_event(main: Path, name: str, after: int, timeout: float):
     """`questions`・`answer-hold` のイベントか終わりまで待つ。答えを送った依頼だけの `questions` は読み飛ばして待ち続ける（決定 5）。
-    `pause` は古い記録の起動の 1 行を持つものだけ返し、ほかは読み飛ばす。
+    `pause` は古い記録の起動の 1 行を持つものと、出し直しを省いた確定（`carried_pause`）だけ返し、ほかは読み飛ばす。
     (結果, 読み飛ばした最後の seq) を返す。"""
     import time
 
@@ -126,7 +132,7 @@ def wait_event(main: Path, name: str, after: int, timeout: float):
             pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), list(WAIT_KEYS), after, left, start=pl.record_start(main)
         )
         key = got.value.get("key") if got.kind == "event" else None
-        if got.kind != "event" or (key == "pause" and legacy_pause(got.value)) or key == "answer-hold":
+        if got.kind != "event" or (key == "pause" and (legacy_pause(got.value) or carried_pause(got.value))) or key == "answer-hold":
             return got, after
         if key == "questions" and has_unanswered(main, name, got.value.get("items") or []):
             return got, after
@@ -193,3 +199,22 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
         next=restart,
         **extra,
     )
+
+
+def carried_report(main: Path, name: str, n: int, reply) -> None:
+    """`parallel.py carried`: 出し直しを省いた提示 2 の確かめ直しの範囲（提示 1 のコミットから提示 2 のコミットまで）が
+    文書だけなら 0、文書だけではない・判定できないなら 10、提示の記録が読めなければ 2（#3020 の I4）。"""
+    import json
+
+    import parallel_release as pr
+
+    try:
+        first, second = (json.loads((pr.release_dir(main, name, n, k) / "presented.json").read_text(encoding="utf-8")) for k in (1, 2))
+    except (OSError, ValueError) as exc:
+        reply("stopped", f"提示の記録（presented.json）を読めない: {exc}", code=2)
+    got = pr.carry_check(main, first.get("sha") or "", second.get("sha") or "")
+    if not got["carry"]:
+        why = f"リリース {n} の確かめ直しの範囲が文書だけではない: {got['reason']}"
+        reply("gate", why, code=10, next_step="提示 2 のリリース承認ゲートの依頼を送る（helper の metrics.gate2）", files=got["files"])
+    added = [x for x in second.get("prs") or [] if x not in set(first.get("prs") or [])]
+    reply("ok", f"リリース {n} の確かめ直しの範囲は文書だけ（Pull Request {len(added)} 本）", added=added, files=got["files"])

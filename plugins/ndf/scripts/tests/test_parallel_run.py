@@ -99,10 +99,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
 
-    def builder(_main, _name, d, _v):
+    def builder(_main, _name, d, _v, **_kw):
         return {"steps": []}, {"steps": []}
 
-    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None: _build(m, n, s, k, v, builder))
+    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: _build(m, n, s, k, v, builder, **kw))
     yield {"main": main, "log": log, "states": states, "heads": heads}
     _stop_running(main)
     durable.close()
@@ -129,8 +129,8 @@ def _stop_running(main):
         pass
 
 
-def _build(m, n, s, k, v, builder):
-    return prl.__dict__["_orig_build"](m, n, s, k, v, builder)
+def _build(m, n, s, k, v, builder, **kw):
+    return prl.__dict__["_orig_build"](m, n, s, k, v, builder, **kw)
 
 
 prl._orig_build = prl.build_plans
@@ -365,7 +365,7 @@ def test_char_request_outside_range_is_deferred_to_next_release(env, tmp_path):
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.4"}, "s1")
     ans, _ = until(lambda: pl.read_answer(main, "p1", r1)[0] and pl.read_answer(main, "p1", r1))
     assert (ans["result"], ans["version"], ans["release"]) == ("released", "1.2.4", 1)
-    assert event(main, "p1", "range-1") == {"sha": "sha1", "version": "1.2.4", "prs": [10], "lanes": ["la"]}
+    assert event(main, "p1", "range-1") == {"sha": "sha1", "version": "1.2.4", "prs": [10], "added": [], "lanes": ["la"]}
     dfr = until(lambda: event(main, "p1", f"defer-{r2}"))
     assert dfr == {"seq": 1, "reason": "範囲に入らないため次のリリースへ回した", "at": None}
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e.get("n") == 2 and e)
