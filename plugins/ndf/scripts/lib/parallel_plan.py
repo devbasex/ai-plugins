@@ -1,4 +1,4 @@
-"""並列の計画（#2436）: `plan.json` の pydantic のモデル・検査（I1〜I4・I19）・`plan.md` の描画・引継ぎ文書の作成（I5）。
+"""並列の計画（#2436）: `plan.json` の pydantic のモデル・検査（I1〜I4・I19・I21）・`plan.md` の描画・引継ぎ文書の作成（I5）。
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。検査の誤りは pydantic の検証の誤りとして
 集め、誤りの種類（`PydanticCustomError` の type）の `I1`〜`I3`・`I19` を `items[].rule` に写す。上限の値は検証の
@@ -14,7 +14,7 @@ import graphlib
 import re
 import shlex
 from pathlib import Path
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Iterable, Literal, Mapping, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -268,9 +268,17 @@ def repo_errors(lane: Lane) -> Optional[str]:
     return None
 
 
-def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[ParallelPlan], list[dict], dict]:
+def check_data(
+    data: object,
+    home: Optional[Path] = None,
+    estimates: Optional[Mapping[str, Mapping[int, list[str]]]] = None,
+    shared: Iterable[Mapping] = (),
+    estimate_error: Optional[str] = None,
+) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
-    `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。"""
+    `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。
+    `estimates`（レーン → 課題 → 触る場所の見込み）を渡すと、同じ時間帯に動くレーンの課題の見込みの重なりを I21 の警告にする。
+    見込みを集められなかったときは `estimate_error` に理由を渡し、I21 の警告を 1 つ出す（#2997 の決定 4）。"""
     plans_cap, plans_note = max_plans()
     named_cap, named_note = named_limit()
     caps = {"max_plans": plans_cap, "max_named": named_cap}
@@ -285,6 +293,14 @@ def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[Para
     if items:
         return None, items, _metrics_of(items, caps, notes)  # I20 の誤りがある計画は書かない・起動しない
     items = _overlap_items(plan, home)
+    if estimate_error:
+        items.append({"level": "warning", "rule": "I21", "at": "lanes", "message": f"課題の見込みを集められない: {estimate_error}"})
+    if estimates:
+        import touch_estimate as te
+
+        key = str(home) if home else None
+        same = lambda a, b: lane_repo_key(a, key) == lane_repo_key(b, key)  # noqa: E731
+        items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(plan.lanes, estimates, shared, same)]
     return plan, items, _metrics_of(items, caps, notes)
 
 

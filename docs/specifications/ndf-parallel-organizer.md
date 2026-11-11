@@ -10,7 +10,7 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 並列の計画の作り方・`plan.json` の項目・検査の種類（I1〜I4・I19）・`init` が書くもの | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| 並列の計画の作り方・`plan.json` の項目・検査の種類（I1〜I4・I19・I21）・`init` が書くもの | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | オーガナイザーの手順・`wait` の `action` ごとの 1 手・問い方・`answer` / `confirm` / `settle` の打ち分け・セッションの切り替え・一時レーンの手順・レーンの側・止める・異常のときの問い・数え方 | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | `--parallel` / `--parallel-helper` の振り分け | `plugins/ndf/skills/development-workflow/SKILL.md` の「並列開発（`--parallel`）」 |
 | レーンの問いを問いの hook がオーガナイザーへ送る判定と、送られたときの保留の手順 | `plugins/ndf/skills/development-workflow/references/asking.md` の「並列の計画のレーン」と [ndf-ask-guard.md](ndf-ask-guard.md) の「並列の計画のレーンの問い」 |
@@ -103,7 +103,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 
 ### 常に成り立つ条件
 
-検査の条件（I1〜I4・I19）は `parallel-plan.md` の「検査」が正本である。ここでは進行の条件を挙げる。
+検査の条件（I1〜I4・I19・I21）は `parallel-plan.md` の「検査」が正本である。ここでは進行の条件を挙げる。
 
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
