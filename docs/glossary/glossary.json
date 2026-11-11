@@ -6412,7 +6412,7 @@
     {
       "term": "一番下の層",
       "context": "repo-dev-checks",
-      "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれ、自分は上の層を読まない共通ライブラリ。結果を出す層 step_result がこれに当たる",
+      "meaning": "NDF のスクリプトのうち、他のモジュールから最も多く読まれる共通ライブラリ。結果を出す層 step_result がこれに当たる",
       "source": "",
       "pending_source": "issues/issue-2988-requirements.md"
     },
