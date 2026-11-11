@@ -103,7 +103,6 @@ def _state():
         "verify_stats": {"items": 2, "seconds": 20},
         "fix_stats": {"launches": 1, "seconds": 300},
         "baseline_test": {"command": "pytest", "seconds": 59},
-        "whole_test": {"ran": False, "seconds": 70},
         "final_gate": {"whole_test_seconds": 61},
     }
 
@@ -118,8 +117,7 @@ def test_build_row_and_append_round_trip(allocation, tmp_path):
     assert row["kinds"] == {"test": {"count": 1, "seconds": 150}, "structure/extract_method": {"count": 2, "seconds": 120}}
     assert row["verify"] == {"items": 2, "seconds": 20}
     assert row["fix"] == {"launches": 1, "seconds": 300}
-    # 走らなかった危険フラグの全体のテストは null
-    assert row["whole_test"] == {"init": 59, "danger": None, "final": 61}
+    assert row["whole_test"] == {"init": 59, "final": 61}
 
     path = allocation.history_path(tmp_path, "devbasex/ai-plugins")
     allocation.append_row(path, row)

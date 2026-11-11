@@ -333,7 +333,7 @@ Codex と Kiro は USD を持たないため和に足さず、内訳の `unprice
 | 上限 | 値 | 定義の場所 |
 | --- | --- | --- |
 | `supervise.py wait` | 10800 秒 | `supervise.py` |
-| `parallel.py wait` | 3600 秒 | `parallel.py` |
+| `parallel.py wait` | 1800 秒 | `parallel.py` |
 | 耐久の記録を消すまでの日数 | 30 日 | `lib/durable.py` |
 | 実装以外の worker の 1 回の上限 | 1800 秒 | `supervise_lib/worker_steps.py` |
 | Skill のステップの上限 | 3600 秒 | `supervise_lib/templates.py`・`supervise_lib/sprint_waves.py` ほか |

@@ -45,14 +45,14 @@ def _budget_candidates(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _archive_round(state: dict[str, Any], round_no: int) -> None:
-    """前の巡の手順の記録と全体テストの記録を履歴へ移す。直しの途中の全体テストは移さない。"""
+    """前の巡の手順の記録と、最終ゲートへ寄せた危険フラグの記録を履歴へ移す。"""
     phases = state.get("phases") or {}
     history = state.setdefault("phases_history", [])
     for name in ROUND_PHASES:
         if name in phases:
             history.append({"round": round_no, "name": name, "record": phases.pop(name)})
     whole = state.get("whole_test")
-    if whole and whole.get("resolution") != "fixing":
+    if whole:
         state.setdefault("whole_test_history", []).append({"round": round_no, "record": state.pop("whole_test")})
 
 

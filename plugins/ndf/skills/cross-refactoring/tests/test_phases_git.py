@@ -5,9 +5,9 @@
 | AC10 | 足したテストが今のコードで落ちた項目は `test_failed`、項目に紐づかないコミットは取り消す |
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
 | AC12 | コミットの無い項目は持ち越し（`carried`。#1743 I15）。テストのコミットも取り消す。コミットの時刻では見送らない |
-| AC13 AC14 | 検証は範囲テストだけ。全体のテストは危険フラグが立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
+| AC13 AC14 | 検証は範囲テストだけ。危険フラグが立っても全体のテストは最終ゲートへ寄せる（#3048） |
 | AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
-| AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
+| AC16b | 最終ゲートが落ちたら、寄せた危険フラグの項目を修正の依頼に載せる（#3048） |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
 """
 
@@ -439,10 +439,8 @@ def test_items_sharing_a_failing_command_both_go_to_fix(flow, cmd_setup, cmd_pha
     assert sorted(read_state(flow["path"])["fix"]["items"]) == ["I-001", "I-002"]
 
 
-def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reuses_it(
-    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, capsys
-):
-    """AC13 AC14 AC16b: ファイルを消した項目（D2）で全体のテストを 1 度。最終ゲートは使い回す。"""
+def test_a_danger_flag_defers_the_whole_test_to_the_final_gate(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, capsys):
+    """#3048: ファイルを消した項目（D2）でも検証の中では全体のテストを走らせず、最終ゲートで 1 度だけ走らせる。"""
 
     def delete(w):
         git("rm", "-q", "src/__init__.py", cwd=w)
@@ -450,19 +448,19 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
     _verify_phase(flow, cmd_setup, cmd_phases, cmd_implement, _item("I-001", 1), change=delete)
     _call(cmd_converge, "cmd_verify")
     state = read_state(flow["path"])
-    assert state["whole_test"]["ran"] is True
-    assert "D2" in state["whole_test"]["flags"]
-    assert state["whole_test"]["status"] == "pass"
+    assert not state["whole_test"].get("ran")
+    assert state["whole_test"]["deferred"]["items"] == ["I-001"] and "D2" in state["whole_test"]["deferred"]["flags"]
 
     _call(cmd_gate, "cmd_final_gate")
     gate = read_state(flow["path"])["final_gate"]
     assert gate["status"] == "passed"
-    assert gate.get("whole_test_reused") is True
-    assert gate["checks"] == []
+    assert [c["mode"] for c in gate["checks"] if c["mode"] == "test"] == ["test"]
 
 
-def test_a_whole_test_failure_goes_to_fix_without_reverting(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
-    """#2457 の棚卸し #34: 危険フラグの全体テストの変更起因は、締め切りで取り消さず原因の項目の修正へ回す。"""
+def test_a_final_gate_failure_points_the_fix_at_the_deferred_item(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, capsys
+):
+    """#3048: 範囲テストを通った危険フラグの項目が全体のテストを落とすと、最終ゲートが落ち、修正の依頼がその項目を指す。項目は取り消さない。"""
     work = flow["work"]
 
     def rename_and_break_outside(w):
@@ -474,10 +472,17 @@ def test_a_whole_test_failure_goes_to_fix_without_reverting(flow, cmd_setup, cmd
     _write(work, "tests/test_total.py", TEST_TOTAL)
     commit_with_trailers(work, "既存のテスト", {})
     _verify_phase(flow, cmd_setup, cmd_phases, cmd_implement, item, change=rename_and_break_outside)
-    assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
-    state = read_state(flow["path"])
-    assert state["whole_test"]["status"] == "fail" and not state["whole_test"].get("reverted")
-    assert _items(flow)["I-001"]["status"] == "failing"
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "done"
+    assert _items(flow)["I-001"]["status"] == "verified"
+
+    with pytest.raises(SystemExit) as e:
+        _call(cmd_gate, "cmd_final_gate")
+
+    assert e.value.code == 2
+    gate = read_state(flow["path"])["final_gate"]
+    assert gate["status"] == "failing"
+    assert "I-001" in gate["fix_request"] and "src/calc.py#add" in gate["fix_request"]
+    assert _items(flow)["I-001"]["status"] == "verified"
 
 
 # ---------- 最終ゲートと履歴（final-gate / finalize） ----------

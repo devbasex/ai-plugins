@@ -153,25 +153,13 @@ def _implementer_model_text(state: dict[str, Any]) -> str:
 
 
 def _whole_test_lines(state: dict[str, Any]) -> list[str]:
-    """検証の中の全体のテストと、その原因の項目の行。採り直しの巡があれば、最後に走らせた巡の記録を出す。"""
-    lines: list[str] = []
-    ran = [r for r in rounds.whole_records(state) if r.get("ran")]
-    whole = ran[-1] if ran else (state.get("whole_test") or {})
+    """検証の中の全体のテストの行。巡の中では走らせず、危険フラグが立てば最終ゲートへ寄せる（#3048）。"""
     deferred = rounds.deferred_union(state)
-    if whole.get("ran"):
-        lines.append(
-            f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
-            f"{whole.get('status')}{_whole_detail(whole)}）"
-        )
-    elif deferred:
-        lines.append(
+    if deferred.get("items") or deferred.get("flags"):
+        return [
             f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
-        )
-    else:
-        lines.append("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
-    if whole.get("culprit"):
-        lines.append(f"- 検証の中の全体のテストの原因の項目: {culprit.verdict_line(whole['culprit'])}")
-    return lines
+        ]
+    return ["- 検証の中の全体のテスト: 寄せなかった（危険フラグが立たなかった）"]
 
 
 def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
@@ -182,11 +170,7 @@ def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
         lines.append(f"- 最終ゲートの見分け: {_triage_line(triage)}")
     if gate.get("culprit"):
         lines.append(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
-    lines.append(
-        f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
-        f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
-        f" / 修正 {gate.get('fix_rounds', 0)} 回）"
-    )
+    lines.append(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'} / 修正 {gate.get('fix_rounds', 0)} 回）")
     for lint in gate.get("lint") or []:
         lines.append(f"- 最終ゲートの静的解析 {lint.get('suite')}: {lint.get('verdict')}（{lint.get('reason')}）")
     return lines
@@ -285,32 +269,11 @@ def _print_fixed_values() -> None:
         print(f"- {name}: {value}（{why}）")
 
 
-# 全体のテストが落ちたときの結末（決定 22）。
-_RESOLUTIONS = {
-    "kept": "変更が原因の失敗は無く、取り消さなかった",
-    "fixing": "直しの途中",
-    "fixed": "直して通った",
-    "narrowed": "直らず、原因の項目から順に取り消した（旧い記録）",
-    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した（旧い記録）",
-    "deferred": "取り消さず、最終ゲートへ寄せた",
-}
-
-
 def _triage_line(triage: dict[str, Any]) -> str:
     """見分けの結果の 1 行。JUnit で見分けられなかったときは落とした理由。"""
     if triage.get("fallback_reason"):
         return f"全体の走らせ直しに落とした（{triage['fallback_reason']}）"
     return f"フレーキー {len(triage.get('flaky') or [])}・既存失敗 {len(triage.get('preexisting') or [])}・変更起因 {len(triage.get('caused') or [])}"
-
-
-def _whole_detail(whole: dict[str, Any]) -> str:
-    """落ちたときの見分けと結末。取り出せなかったときは理由を添える。"""
-    if whole.get("status") != "fail":
-        return ""
-    if not whole.get("resolution"):
-        return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
-    counts = f" / {_triage_line(whole)}" if whole.get("failed_tests") is not None or whole.get("fallback_reason") else ""
-    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}"
 
 
 def _phase_table(state: dict[str, Any]) -> str:
