@@ -107,21 +107,27 @@ def hook_texts(root: Path) -> str:
 
 def exempt_violations(root: Path, entries: dict, reached) -> list[tuple[str, str, str]]:
     """(path, name, 理由) の並び。`reached(rel)` は rel が import でたどるファイルの集合。"""
-    out = []
     hooks_text = hook_texts(root)
+    hook_mods = _hook_reachable(entries, reached)
+    return [
+        (rel, "hook", "hook の印の根拠が無い（hook の定義にパスが無く、hook のエントリポイントから呼ばれない）")
+        for rel, e in sorted(entries.items())
+        if core_exempt(e) == "hook" and not _has_hook_basis(rel, e, hooks_text, hook_mods)
+    ]
+
+
+def _hook_reachable(entries: dict, reached) -> set[str]:
+    """hook の印を持つエントリポイントと、それらが import でたどるファイルの集合。"""
     hook_entries = {r for r, e in entries.items() if core_exempt(e) == "hook"}
     hook_mods = set(hook_entries)
     for r in hook_entries:
         hook_mods |= reached(r)
-    for rel, e in sorted(entries.items()):
-        if core_exempt(e) != "hook":
-            continue
-        if Path(rel).name in hooks_text:
-            continue
-        if any(c in hook_mods and c != rel for c in e.get("callers", [])):
-            continue
-        out.append((rel, "hook", "hook の印の根拠が無い（hook の定義にパスが無く、hook のエントリポイントから呼ばれない）"))
-    return out
+    return hook_mods
+
+
+def _has_hook_basis(rel: str, e: dict, hooks_text: str, hook_mods: set[str]) -> bool:
+    """hook の印の根拠: hook の定義にパスの名前があるか、hook から到達できるほかのファイルから呼ばれる。"""
+    return Path(rel).name in hooks_text or any(c in hook_mods and c != rel for c in e.get("callers", []))
 
 
 def base_runtime_count(root: Path, sha: str | None) -> int | None:
