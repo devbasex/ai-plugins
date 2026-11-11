@@ -125,12 +125,14 @@ def _check_list_of_objects(obj: dict, field: str, keys: tuple[str, ...], errs: l
         errs.append(f"{field} は配列で書く")
         return
     for i, it in enumerate(obj[field]):
-        if not isinstance(it, dict):
-            errs.append(f"{field}[{i}] はオブジェクトで書く")
-            continue
-        for k in keys:
-            if not isinstance(it.get(k), str) or not it[k].strip():
-                errs.append(f"{field}[{i}] の {k} を空でない文字列で書く")
+        errs.extend(_record_errors(it, keys, f"{field}[{i}]"))
+
+
+def _record_errors(record, keys: tuple[str, ...], where: str) -> list[str]:
+    """1 つの要素がオブジェクトで、`keys` を空でない文字列で持つか。ほかの鍵は問わない。"""
+    if not isinstance(record, dict):
+        return [f"{where} はオブジェクトで書く"]
+    return [f"{where} の {k} を空でない文字列で書く" for k in keys if not isinstance(record.get(k), str) or not record[k].strip()]
 
 
 def _check_field_types(obj: dict, errs: list[str]) -> None:
