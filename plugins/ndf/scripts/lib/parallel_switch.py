@@ -193,7 +193,9 @@ def _relay_position() -> str:
 
     from parallel_files import RELAY
 
-    got = subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True, text=True, timeout=limits.seconds("parallel-switch.relay-check"))
+    got = subprocess.run(
+        [sys.executable, str(RELAY), "is-child"], capture_output=True, text=True, timeout=limits.seconds("parallel-switch.relay-check")
+    )
     return "relay" if got.returncode == 0 else "outside"
 
 
