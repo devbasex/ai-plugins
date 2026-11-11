@@ -322,8 +322,7 @@
       "term": "人へ残す判断",
       "context": "ndf-workflow",
       "meaning": "設計文書のうち、レッドラインに当たるため設計者（AI）が決めずに承認ゲートで人が決める判断。判断ごとに当たるレッドラインの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さず、設計者が決める",
-      "source": "plugins/ndf/skills/design/references/decisions.md",
-      "pending_source": "issues/issue-2912-design.md"
+      "source": "docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md"
     },
     {
       "term": "実行条件",
@@ -3993,8 +3992,7 @@
       "term": "起票者の推定",
       "context": "ndf-workflow",
       "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで確かめるまで利用者の決定として扱わない。扱い（受け入れ条件・前提・含まない・採らない）を書いた推定は設計者が決めた判断として読み、MVV 判定が承認ゲートを省いたときはその判定が確かめた記録になる",
-      "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md",
-      "pending_source": "issues/issue-2912-design.md"
+      "source": "docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md"
     },
     {
       "term": "承認ゲートの差し戻し",
@@ -4867,25 +4865,25 @@
       "term": "振り返りの範囲",
       "context": "ndf-issue-upkeep",
       "meaning": "1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回（深さの記録の `diff` の `not_due` の行）と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は次に開発ループで走らせる回まで残る。深さの記録の `diff` の `due` の行の `values.scope` に残る（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "仕上げのプラン",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "起動の判定",
       "context": "ndf-issue-upkeep",
       "meaning": "棚卸しの深さごとに、その回で走らせるかを決める判定。`upkeep.py depth due <深さ>` が終了コード 0（起動する）か 3（起動しない）を返し、深さの記録へ判定の行を残す（#2315・#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "走らなかったステップ",
       "context": "ndf-workflow",
       "meaning": "起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートの「通ったステップ」の後に、ステップの id と飛ばした判定の要約を 1 行で並べる（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "見直し",
@@ -5037,8 +5035,7 @@
       "term": "オーガナイザー",
       "context": "ndf-workflow",
       "meaning": "--parallel <計画名> で起動した conductor の役割。レーンの承認待ちを依頼として受けて問うか自分で決め、答えを送る（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）。レーンの起動・再起動・監視とリリースのまとめは耐久ワークフローが行う。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "リリースの組み方",
@@ -5059,8 +5056,7 @@
       "term": "一時レーン",
       "context": "ndf-workflow",
       "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
-      "source": "plugins/ndf/skills/development-workflow/references/parallel.md",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "別のリポジトリのレーン",
@@ -5168,25 +5164,25 @@
       "term": "復元の量",
       "context": "ndf-workflow",
       "meaning": "再起動した新しいセッションが「復元完了」を記録した時点の文脈の量。引継ぎ文書と、状態を戻すために読んだ文書の分を含む。試行方式の費用の見込みの式の Q",
-      "pending_source": "issues/issue-2908-requirements.md"
+      "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "計測の条件",
       "context": "ndf-workflow",
       "meaning": "続けるか切るかを比べるときの 2 つの設定。「続ける」は試行方式で運用上限を窓 − 容量の余白まで上げた設定、「閾値で切る」は試行方式で判断開始の値と運用上限を候補の閾値にした設定",
-      "pending_source": "issues/issue-2908-design.md"
+      "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "計測の回",
       "context": "ndf-workflow",
       "meaning": "計測の条件 1 つで、フェーズの起動からその後の承認ゲートの答えを受けた最初の呼び出しまでを 1 回として数えたもの",
-      "pending_source": "issues/issue-2908-design.md"
+      "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "待ちの前に切る規則",
       "context": "ndf-workflow",
       "meaning": "承認ゲートか人の判断の問いを出す直前に、文脈が決めた量を超えていれば会話を切り、新しいセッションで問いを出し直す規則",
-      "pending_source": "issues/issue-2908-design.md"
+      "source": "docs/specifications/ndf-context-continue-or-cut-measurement.md"
     },
     {
       "term": "境界の判定",
@@ -6032,8 +6028,7 @@
       "term": "今の起動",
       "context": "ndf-workflow",
       "meaning": "一時レーンでは、耐久ワークフローが最後に打った起動。通常のレーンでは、ラッパーが最後に起動した回",
-      "source": "",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "レーンの再起動",
@@ -6241,79 +6236,79 @@
       "term": "機械的なターン",
       "context": "ndf-workflow",
       "meaning": "AI が判断を伴わずに行う Tool の呼び出し。出力の読み解き・状態の照合・スクリプトを 1 行打つ・手書きの待ち・本文の転記",
-      "pending_source": "issues/issue-2909-requirements.md"
+      "source": "docs/specifications/ndf-mechanical-turns-to-scripts.md"
     },
     {
       "term": "ターンの型",
       "context": "ndf-workflow",
       "meaning": "機械的なターンを、何をしたか（変換・照合・往復・待ち・転記）と打ったコマンドで分けた分類",
-      "pending_source": "issues/issue-2909-requirements.md"
+      "source": "docs/specifications/ndf-mechanical-turns-to-scripts.md"
     },
     {
       "term": "手順の連続実行",
       "context": "ndf-workflow",
       "meaning": "判断の要らない NDF の手順のスクリプトを、結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって理由を返すこと（supervise.py advance）",
-      "pending_source": "issues/issue-2909-design.md"
+      "source": "docs/specifications/ndf-mechanical-turns-to-scripts.md"
     },
     {
       "term": "業務時間",
       "context": "ndf-workflow",
       "meaning": "利用者が承認ゲートへ答えられる時間帯。進め方の宣言に、時刻帯・曜日・始まりと終わりの時刻で書く。時間外は承認の依頼を溜め、業務時間の始めにまとめて示す",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "新しい承認を生む作業",
       "context": "ndf-workflow",
       "meaning": "ループの 1 回のプランに設計承認ゲートを含む作業。答え待ちの停止の範囲に入ったレーンは始めない",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "承認の要らない作業",
       "context": "ndf-workflow",
       "meaning": "新しい承認を生む作業以外の作業。開発ループの中では、承認した設計の実装と、答えの届いた保留したループの 1 回の残りがこれに当たる（ループは設計を承認していない課題にモードに依らず設計のステップを置く）",
-      "pending_source": "issues/issue-2913-requirements.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "溜めた依頼",
       "context": "ndf-workflow",
       "meaning": "業務時間外にオーガナイザーが利用者へ問わずに持っておく、設計の承認と問いの依頼。業務時間の始めにまとめて示す",
-      "pending_source": "issues/issue-2913-design.md"
+      "source": "docs/specifications/ndf-work-during-approval-wait-and-business-hours.md"
     },
     {
       "term": "判定表",
       "context": "ndf-workflow",
       "meaning": "development-workflow の「上から順に条件を判定する」の表。順・モード・該当条件の 3 列を持ち、最初に当たった行のモードを採る",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の根拠",
       "context": "ndf-workflow",
       "meaning": "1 つの課題について、判定表の当たった行（順とモード）・当たった条件の文・触るファイルの一覧の組",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の材料",
       "context": "ndf-workflow",
       "meaning": "判定の根拠を選ぶためにスクリプトが集める事実。触るファイルの候補・公開インタフェースの変更の有無・対象のテストの有無",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "スプリントのモード",
       "context": "ndf-workflow",
       "meaning": "1 つのスプリントに掛けるモード。スプリントの課題ごとの判定のうち、判定表で最も上の行のモード",
-      "pending_source": "issues/issue-2923-requirements.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "判定の根拠のファイル",
       "context": "ndf-workflow",
       "meaning": "conductor が課題ごとの判定の根拠を書き、開発ループの loop sprint に --judgments で渡す JSON のファイル",
-      "pending_source": "issues/issue-2923-design.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "モードの決め直し",
       "context": "ndf-workflow",
       "meaning": "ループの 1 回から課題を外したとき、残った課題の判定の根拠からスプリントのモードを決め直すこと",
-      "pending_source": "issues/issue-2923-design.md"
+      "source": "docs/specifications/ndf-sprint-mode-from-judgment-basis.md"
     },
     {
       "term": "起動先の決定",
@@ -6385,22 +6380,19 @@
       "term": "立ち上がりの確認",
       "context": "ndf-workflow",
       "meaning": "耐久ワークフローが起動かレーンの再起動を打った後に、レーンの状態の一覧でそのレーンが動いている（または打った時刻より後に動いた）と読めるまで、決まった間隔で一覧を読むこと。上限は既定 120 秒",
-      "source": "",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "起動の再試行",
       "context": "ndf-workflow",
       "meaning": "立ち上がりの確認で立ち上がらなかった起動かレーンの再起動を、耐久ワークフローがもう 1 回だけ打つこと。2 回目も立ち上がらなければ区分 spawn の問いを立てる",
-      "source": "",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "手順どおりの停止",
       "context": "ndf-workflow",
       "meaning": "一時レーンが、リリース承認ゲートの依頼か settle を送った後に自分のラッパーを止めること。区分 helper の問いの対象にしない",
-      "source": "",
-      "pending_source": "issues/issue-2936-design.md"
+      "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
       "term": "import の輪",
