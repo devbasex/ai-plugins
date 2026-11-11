@@ -6450,6 +6450,18 @@
       "context": "ndf-workflow",
       "meaning": "依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと",
       "pending_source": "issues/issue-2999-requirements.md"
+    },
+    {
+      "term": "プランの本数の上限",
+      "context": "ndf-workflow",
+      "meaning": "同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む",
+      "pending_source": "issues/issue-2999-design.md"
+    },
+    {
+      "term": "起動の排他",
+      "context": "ndf-workflow",
+      "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
+      "pending_source": "issues/issue-2999-design.md"
     }
   ]
 }
