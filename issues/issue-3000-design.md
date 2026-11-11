@@ -37,7 +37,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 答え待ちの停止 | 耐久ワークフロー（`AnswerHold._update_hold`）。この変更では書き換えない | 止める指示のファイル（`answer-hold.json`） | — | 停止の範囲（計画全体・レーンの並び）・閾値 |
-| 再開の印 | 置く: 答えの受け付け（`owner_next`）・レーンの停止（`parallel.py park`・ループの境）。消す: 耐久ワークフロー（`_reconcile`） | レーンごとの印（`resume/<レーン>.mark.json`） | — | 置いた理由（`boundary` / `answered`）・時刻 |
+| 再開の印 | 書き込みの窓口は `parallel_hold.place_mark`（置く）と `parallel_hold.drop_mark`（消す）の 2 関数だけで、呼び出し元はこの窓口を呼ぶ。置く呼び出し元: 答えの受け付け（`owner_next`。理由 `answered`）・レーンの停止（`parallel.py park`・ループの境。理由 `boundary`）。消す呼び出し元: 耐久ワークフロー（`_reconcile` から `resume_marks`）・`parallel.py park --clear`。同じレーンの印は後から置いた方が上書きする。どちらの理由も「停止が解けたら起こす」の意味で、上書きで振る舞いは変わらない | レーンごとの印（`resume/<レーン>.mark.json`） | — | 置いた理由（`boundary` / `answered`）・時刻 |
 | プランの実行 | キュー（`Engine.prepare`） | プランの状態（`<プラン>-state/state.json`） | ステップの記録 | 結果・範囲の中で流した事実（新設） |
 
 ### 不変条件
@@ -63,7 +63,7 @@
 | E4 | 設計のステップを含まないプランが流れた | `Engine.prepare` | キューの結果（`answer_hold_ran`） |
 | E5 | 設計のステップを含むプランを流さず、再開の印を置いた | `Engine.prepare` と `parallel.py park` | 耐久ワークフロー（`_reconcile`） |
 | E6 | 利用者がレーンの依頼に答えた | `parallel.py answer` | `owner_next`・耐久ワークフロー（`wake_answered`） |
-| E7 | 耐久ワークフローがレーンを起こした | 耐久ワークフロー（`launch_wakes`） | レーン |
+| E7 | オーガナイザーがレーンを起こした（要求の E7） | 起動の印（`parallel-launch`）のある記録: 耐久ワークフロー（`launch_wakes`）。起動の印の無い古い記録: オーガナイザー（`parallel.py answer` の `metrics.next` が返す `relay.py restart <レーン>` を打つ） | レーン |
 | E8 | 答え待ちの停止の範囲が解け、レーンを起こした | 耐久ワークフロー（`_reconcile`） | レーン |
 
 ### 用語
