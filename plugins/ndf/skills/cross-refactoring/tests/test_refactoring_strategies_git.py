@@ -134,11 +134,14 @@ SHOP = "def order_total(prices):\n    total = 0\n    for price in prices:\n     
 TEST_SHOP = "from src.shop import order_total\n\n\ndef test_total():\n    assert order_total([2, 3]) == 5\n"
 
 
-def test_extracting_a_common_model_into_a_new_directory_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_extracting_a_common_model_into_a_new_directory_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1・AC3・AC6（クラスの抽出・共通モデルの抽出）: 範囲の外の別ディレクトリの新しいファイルへ移しても取り消さない。"""
     _start(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         {"src/shop.py": SHOP, "tests/test_shop.py": TEST_SHOP},
         [_item("I-001", "extract_class", "src/shop.py", "tests/test_shop.py")],
     )
@@ -174,7 +177,8 @@ def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
     分けた先のファイルは、同じ実行の後の修正が直しても範囲の中として扱う（AC1a）。"""
     _start(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         {"src/big.py": BIG, "tests/test_big.py": TEST_BIG},
         [_item("I-001", "extract_method", "src/big.py", "tests/test_big.py")],
     )
@@ -235,7 +239,9 @@ def test_moving_a_function_and_rewriting_the_outside_caller_is_adopted(
     assert {j["path"] for j in _items(flow)["I-001"]["review_scope_judgements"]} == {"tools/report.py"}
 
 
-def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c（移動の `R`）: 範囲の中のファイルを範囲の外のまだ無いパスへ移しても取り消さない。"""
     files = {
         "src/fmt_money.py": "def yen(value):\n    return f'{value} yen'\n",
@@ -250,7 +256,9 @@ def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(flow, cmd_setu
     assert not (flow["work"] / "src" / "fmt_money.py").exists()
 
 
-def test_renaming_a_function_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_renaming_a_function_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（改名）: 範囲の外の呼び手の名前の書き換えを通す。"""
     item = _item("I-001", "rename", "src/ledger.py", "tests/test_ledger.py", smell="inconsistent_naming")
     item["test_targets"] = ["tests/test_ledger.py", "tests/test_report.py"]
@@ -273,7 +281,9 @@ SCALE = "def scale(value, factor=3):\n    return value * factor\n"
 TEST_SCALE = "from src.scaler import scale\n\n\ndef test_scale():\n    assert scale(2) == 6\n"
 
 
-def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_changing_a_signature_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（シグネチャの変更）: 範囲の外の呼び手の引数を減らす書き換えを通す。"""
     files = {
         "src/scaler.py": SCALE,
@@ -281,7 +291,11 @@ def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup,
         "tools/scale_use.py": "from src.scaler import scale\n\n\ndef run():\n    return scale(5, 3)\n",
     }
     _start(
-        flow, cmd_setup, cmd_phases, files, [_item("I-001", "change_signature", "src/scaler.py", "tests/test_scaler.py", smell="long_parameter_list")]
+        flow,
+        cmd_setup,
+        cmd_phases,
+        files,
+        [_item("I-001", "change_signature", "src/scaler.py", "tests/test_scaler.py", smell="long_parameter_list")],
     )
     _commit(
         flow,
@@ -295,7 +309,9 @@ def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup,
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
 
 
-def test_inlining_a_function_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_inlining_a_function_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（インライン化）: 範囲の外の呼び手で、消した関数の import と呼び出しを置き換える書き換えを通す。"""
     inl = "def double(x):\n    return twice(x)\n\n\ndef twice(x):\n    return x * 2\n"
     files = {
@@ -354,11 +370,14 @@ VALS = "def base_rate():\n    return 7\n"
 TEST_VALS = "from src.vals import base_rate\n\n\ndef test_rate():\n    assert base_rate() == 7\n"
 
 
-def test_moving_test_values_into_a_new_helper_file_is_adopted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_moving_test_values_into_a_new_helper_file_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC6（テストの共通化）・AC8: 値を新しい補助のファイルへ移しただけなら、期待値の変更として取り消さない。"""
     _start(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         {"src/vals.py": VALS, "tests/test_vals.py": TEST_VALS},
         [_item("I-001", "extract_test_helper", "tests/test_vals.py", "tests/test_vals.py")],
     )
@@ -378,7 +397,8 @@ def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_
     """AC8・AC10・#2457 の棚卸し #25: 値が項目の変えたテストのファイルのどこにも無くなった変更は、取り消さず修正へ差し戻す。"""
     _start(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         {"src/vals.py": VALS, "tests/test_vals.py": TEST_VALS},
         [_item("I-001", "extract_test_helper", "tests/test_vals.py", "tests/test_vals.py")],
     )
@@ -438,7 +458,8 @@ def test_a_two_commit_item_outside_the_scope_keeps_both_commits(flow, cmd_setup,
     work = flow["work"]
     _start(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         {"src/shop.py": SHOP, "tests/test_shop.py": TEST_SHOP},
         [_item("I-001", "rename", "src/shop.py", "tests/test_shop.py")],
     )

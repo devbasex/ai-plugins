@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 import pytest
 
@@ -126,6 +127,13 @@ def _deferred(flow):
 
 
 # ---------- テストの追加（merge-tests） ----------
+
+
+def test_the_phase_start_is_called_from_its_defining_module(refactor):
+    """工程の開始は commands.phases が定義し、テストもそこから呼ぶ。commands.setup へ足して呼ばない。"""
+    phases = sys.modules["refactor_lib.commands.phases"]
+    assert phases.cmd_start_phase.__module__ == "refactor_lib.commands.phases"
+    assert "cmd_start_phase" not in vars(sys.modules["refactor_lib.commands.setup"])
 
 
 def test_a_test_failing_on_the_current_code_is_sent_back_not_deferred(flow, cmd_setup, cmd_phases, cmd_implement):
@@ -304,11 +312,14 @@ def _verify_phase(flow, cmd_setup, cmd_phases, cmd_implement, *items, change=_re
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     work = flow["work"]
     _verify_phase(
         flow,
-        cmd_setup, cmd_phases,
+        cmd_setup,
+        cmd_phases,
         cmd_implement,
         _item("I-001", 1, targets=["tests/test_total.py"], tests=["tests/test_total.py"]),
         change=lambda w: (_write(w, "tests/test_total.py", TEST_TOTAL), _break_total(w)),
@@ -377,7 +388,9 @@ def test_time_does_not_revert_a_failing_item(flow, cmd_setup, cmd_phases, cmd_im
     assert items["I-002"]["status"] == "failing" and items["I-001"]["status"] == "verified"
 
 
-def test_a_stalled_fix_switches_the_fixer_once_then_reverts(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
+def test_a_stalled_fix_switches_the_fixer_once_then_reverts(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     """#2457 受け入れ条件 16・17: 落ちたテストが変わらない修正は停滞。判定し直して修正担当を 1 回替え、替えた後も停滞なら打ち消す。"""
     _two_items_one_broken(flow, cmd_setup, cmd_phases, cmd_implement)
     assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
@@ -529,7 +542,9 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(flow, cm
 # ---------- 監視が手順の上限で CLI を止めたとき（決定 23 / I15） ----------
 
 
-def test_a_phase_stopped_by_the_monitor_takes_in_every_commit_and_reports_it(flow, cmd_setup, cmd_phases, cmd_implement, cmd_report, capsys):
+def test_a_phase_stopped_by_the_monitor_takes_in_every_commit_and_reports_it(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_report, capsys
+):
     """止めたときは未コミットの変更を捨て、コミット済みの項目は時刻に依らず取り込み、報告に出す（#1743 I13）。"""
     work = flow["work"]
     done = _item("I-001", 1, symbol="add")

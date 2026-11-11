@@ -109,7 +109,8 @@ def _item(item_id, rank, path, test_target):
 
 def _setup(
     flow,
-    cmd_setup, cmd_phases,
+    cmd_setup,
+    cmd_phases,
     cmd_implement,
     *,
     whole="tests/test_layout.py",
@@ -192,7 +193,9 @@ def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_ph
 
 
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
-def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name):
+def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name
+):
     """#2457 受け入れ条件 9・I5 — 締め切りでは取り消さない。X を成立しないと判定したら X だけを打ち消し、Y は走らせ直されて残る。"""
     _setup(flow, cmd_setup, cmd_phases, cmd_implement, whole=whole, name=name, late=True)
 
