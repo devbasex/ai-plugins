@@ -4865,25 +4865,25 @@
       "term": "振り返りの範囲",
       "context": "ndf-issue-upkeep",
       "meaning": "1 回の振り返りと差分の棚卸しが扱うループの 1 回の並び。まだどの範囲にも入っていない見送ったループの 1 回（深さの記録の `diff` の `not_due` の行）と、今のループの 1 回からなる。ループの外では今のスプリントだけで、見送ったループの 1 回は次に開発ループで走らせる回まで残る。深さの記録の `diff` の `due` の行の `values.scope` に残る（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "仕上げのプラン",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "起動の判定",
       "context": "ndf-issue-upkeep",
       "meaning": "棚卸しの深さごとに、その回で走らせるかを決める判定。`upkeep.py depth due <深さ>` が終了コード 0（起動する）か 3（起動しない）を返し、深さの記録へ判定の行を残す（#2315・#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "走らなかったステップ",
       "context": "ndf-workflow",
       "meaning": "起動の判定などの終了コードで飛ばされ、プランの実行で通らなかったステップ。フェーズレポートの「通ったステップ」の後に、ステップの id と飛ばした判定の要約を 1 行で並べる（#2914）",
-      "pending_source": "issues/issue-2914-design.md"
+      "source": "docs/specifications/ndf-sprint-close-plan-cost.md"
     },
     {
       "term": "見直し",

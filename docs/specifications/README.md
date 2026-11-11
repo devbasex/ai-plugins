@@ -149,5 +149,6 @@
 | [ndf-mechanical-turns-to-scripts.md](ndf-mechanical-turns-to-scripts.md) | 機械的なターンをスクリプトへ移す（状態の取り出し・PR と CI の照合・手順の連続実行・進行のまとめ記録） |
 | [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) | 設計の判断を AI が決めて記録し、人へ残す判断をレッドラインに限る（MVV 判定と設計の検査） |
 | [ndf-work-during-approval-wait-and-business-hours.md](ndf-work-during-approval-wait-and-business-hours.md) | 答え待ちの間も承認の要らない作業を進め、業務時間外の承認の依頼を溜めて業務時間にまとめて示す |
+| [ndf-sprint-close-plan-cost.md](ndf-sprint-close-plan-cost.md) | 仕上げのプランの費用と所要時間（振り返りと差分の棚卸しの間隔・CI の待ちを重ねる並び） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
