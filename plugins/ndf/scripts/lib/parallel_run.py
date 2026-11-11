@@ -9,7 +9,7 @@
   `failed` と理由を依頼へ答え、計画を止めるかは問い（`kind: build`）への人の答えで決まる（#2616）
 - イベント `answer-hold`: `{seq, action: "answer_hold", n, line, hold}`（答え待ちの停止の最新の変化。#2707）
 - イベント `pause`: `{seq, action}`（`running` / `release` / `confirmed` / `held`。一時レーンが流すものを決める
-  （`parallel.py helper` が読む）。`parallel.py wait` は読まない。#2936）、`questions`: `{seq, items}`
+  （`parallel.py helper` が読む。`parallel.py wait` は出し直しを省いた確定（`carried` 付き）だけを読む。#2936・#3020）、`questions`: `{seq, items}`
 - 一時レーンの起動と止まったレーンの再起動は耐久ワークフローが打つ（`parallel_launch`。#2936）
 - イベント `answer-<依頼>`（最終の答え。1 回だけ）・`defer-<依頼>`（次のリリースへ回した知らせ）・`range-<連番>`・`lane-<名>`
 
@@ -102,8 +102,14 @@ def step_route(main: str) -> dict:
     return {"way": got.way, "reason": got.reason}
 
 
+@durable.step(name="parallel.carry")
+def step_carry(main: str, first: str, head: str) -> dict:
+    """承認の後に加わった範囲が文書だけの範囲かを判定する（#3020）。分岐を記録した値だけで決めるため耐久ステップにする。"""
+    return pr.carry_check(Path(main), first, head)
+
+
 @durable.step(name="parallel.build")
-def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None) -> dict:
+def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[dict]] = None, carried: bool = False) -> dict:
     """まとめたリリースの提示のプランと本番のプランを書き、受けている依頼を `releases/requests.json` へ書く
     （`parallel.py present` が耐久ワークフローの外からレーンの内訳に読む）。組めない理由は `error` で返し、例外を上げない（#2616 の決定 3）。問いは理由の一致でまとめるため、理由に連番と提示の番号を入れない。"""
     try:
@@ -113,7 +119,7 @@ def step_build(main: str, name: str, seq: int, k: int, requests: Optional[list[d
         version = dev_version(Path(main))
         if not version:
             return {"error": prt.NO_VERSION}
-        d = pr.build_plans(Path(main), name, seq, k, version)
+        d = pr.build_plans(Path(main), name, seq, k, version, **({"carried": True} if carried else {}))
     except Exception as exc:  # noqa: BLE001  理由を依頼への答えとリリースの記録へ渡す
         return {"error": f"リリースを組み立てられない（{type(exc).__name__}: {exc}）"}
     return {"dir": str(d), "version": version}
@@ -226,6 +232,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.held: dict[str, dict] = {}  # 一覧に無い依頼への答え。その依頼の問いが届いたら当てる（#2617）
         self.routed = True  # 答えの届け先の耐久ステップを打ってよいか。古い記録の打ち直しでは False（#2510）
         self.launching = True  # 起動と再起動を耐久ワークフローが打つか。古い記録の打ち直しでは False（#2936）
+        self.carrying = True  # 承認の後に加わった範囲を判定してよいか。古い記録の打ち直しでは False（#3020）
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
@@ -474,28 +481,37 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             self.settle(rel, msg)
 
     def confirm(self, rel: dict, take: Optional[str]) -> None:
-        """承認の答えを受けたら 1 度だけ比べる。出し直しの提示への答えでは比べない（I14）。"""
+        """承認の答えを受けたら 1 度だけ比べる。出し直しの提示への答えでは比べない（I14）。進んでいて、加わった範囲が
+        文書だけなら出し直しを省き、引き継ぐ形の提示 2 で確定する（#3020 の I1・I3）。提示 2 への答えでは引き継ぎを外す。"""
         if len(rel["dirs"]) == 1:
             first = step_presented(rel["dirs"][0])
             head = step_head(self.main)
             if pr.moved(first.get("sha") or "", head):
-                built = step_build(self.main, self.name, rel["n"], 2, self.pending)
+                check = step_carry(self.main, first.get("sha") or "", head) if self.carrying else {"carry": False}
+                built = step_build(self.main, self.name, rel["n"], 2, self.pending, carried=bool(check.get("carry")))
                 if built.get("error"):  # 範囲は決まっているので、範囲の依頼だけへ答えて締める（I4）
                     answered = self.settle(rel, {"result": "failed", "reason": built["error"]})
                     self.ask_rebuild(rel["n"], built["error"], answered)
                     return
                 rel["dirs"].append(built["dir"])
                 rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版をリリースの答えへ渡す
-                self.emit_release(rel, 2, represent=True)
+                if not check.get("carry"):
+                    self.emit_release(rel, 2, represent=True)
+                    return
+                rel["carried"] = {"from": first.get("sha"), "head": head, "prs": check.get("added") or []}
+                self.confirm_k(rel, 2, {}, carried=rel["carried"])  # 提示 2 の範囲は一時レーンの提示のプランが作る
                 return
             k = 1
         else:
             k = 2 if take == "new" else 1
-        got = step_presented(rel["dirs"][k - 1])
+            rel.pop("carried", None)
+        self.confirm_k(rel, k, step_presented(rel["dirs"][k - 1]))
+
+    def confirm_k(self, rel: dict, k: int, got: dict, **extra) -> None:
         versions = rel.get("versions") or [rel.get("version")]
         rel.update(state="confirmed", k=k, sha=got.get("sha"), prs=got.get("prs") or [], version=versions[min(k, len(versions)) - 1])
         plan, spec = str(Path(rel["dirs"][k - 1]) / "release.json"), helper_spawn(self.name, rel["n"], k)
-        self.pause("confirmed", n=rel["n"], k=k, plan=plan, purpose=f"rel-{rel['n']}-{k}-confirmed", **spec)
+        self.pause("confirmed", n=rel["n"], k=k, plan=plan, purpose=f"rel-{rel['n']}-{k}-confirmed", **extra, **spec)
         self.launch_helper()
 
     def settle(self, rel: dict, msg: dict) -> list[dict]:
@@ -503,7 +519,11 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         result = msg.get("result")
         if not rel.get("prs"):
             got = step_presented(rel["dirs"][-1])
-            rel["prs"] = got.get("prs") or []
+            rel["prs"], rel["sha"] = got.get("prs") or [], rel.get("sha") or got.get("sha")
+        added = []  # 出し直しを省いたときの確かめ直しの範囲の Pull Request（#3020 の I8）
+        if rel.get("carried") and len(rel["dirs"]) > 1:
+            before = set(step_presented(rel["dirs"][0]).get("prs") or [])
+            added = [n for n in rel["prs"] if n not in before]
         done = {n for r in self.releases if r is not rel and r.get("state") == "released" for n in r.get("prs") or []}
         hit = set(pr.answerable(self.pending, rel["prs"], done))  # 前のリリースで出た PR と合わせて全部が入る依頼に答える
         answered = [r for r in self.pending if r["id"] in hit]
@@ -515,6 +535,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
                     "sha": rel.get("sha"),
                     "version": rel["version"],
                     "prs": rel["prs"],
+                    "added": added,
                     "lanes": sorted({r["lane"] for r in answered}),
                 },
             )
@@ -549,6 +570,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.init_run_state(ledgered)
     run.routed = durable.patched("parallel-answers")
     run.launching = durable.patched("parallel-launch")
+    run.carrying = durable.patched("parallel-docs-carry")  # 印の無い古い記録は判定せずに出し直す（#3020 の I7）
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す

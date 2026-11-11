@@ -55,7 +55,8 @@ def present_approval(d: Path) -> str:
 
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
-    リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed` なら確定の後の 3 手、そうでなければ提示。
+    リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed`（`carried` を持たない）なら確定の後の 3 手、
+    そうでなければ提示。
 
     - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランがリリース承認ゲート で
       止まったかを見て、止まっていれば `gate2`（リリース承認ゲート の依頼を送る）、流れ切れば `settle` を打つ
@@ -66,7 +67,8 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     d = pr.release_dir(main, name, n, k)
     py = f"python3 {HERE / 'parallel.py'}"
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
-    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k:
+    # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
+    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried"):
         done = d / "release-done.json"
         gate = pr.record_answer_cmd(d, n, k)
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
