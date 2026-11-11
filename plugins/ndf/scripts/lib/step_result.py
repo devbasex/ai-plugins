@@ -108,31 +108,29 @@ def code_matches(status: str, code: int) -> bool:
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:
-    if "items" not in obj:
-        return
-    if not isinstance(obj["items"], list):
-        errs.append("items は配列で書く")
-        return
-    for i, it in enumerate(obj["items"]):
-        if not isinstance(it, dict):
-            errs.append(f"items[{i}] はオブジェクトで書く")
+    _check_list_of_objects(obj, "items", (), errs)
 
 
 def _check_records(obj: dict, errs: list[str]) -> None:
     """gaps / process / decisions の各要素が決めた鍵を空でない文字列で持つか（I3）。"""
     for field, keys in RECORD_KEYS.items():
-        if field not in obj:
+        _check_list_of_objects(obj, field, keys, errs)
+
+
+def _check_list_of_objects(obj: dict, field: str, keys: tuple[str, ...], errs: list[str]) -> None:
+    """`field` があれば、配列で、各要素がオブジェクトで `keys` を空でない文字列で持つか。"""
+    if field not in obj:
+        return
+    if not isinstance(obj[field], list):
+        errs.append(f"{field} は配列で書く")
+        return
+    for i, it in enumerate(obj[field]):
+        if not isinstance(it, dict):
+            errs.append(f"{field}[{i}] はオブジェクトで書く")
             continue
-        if not isinstance(obj[field], list):
-            errs.append(f"{field} は配列で書く")
-            continue
-        for i, it in enumerate(obj[field]):
-            if not isinstance(it, dict):
-                errs.append(f"{field}[{i}] はオブジェクトで書く")
-                continue
-            for k in keys:
-                if not isinstance(it.get(k), str) or not it[k].strip():
-                    errs.append(f"{field}[{i}] の {k} を空でない文字列で書く")
+        for k in keys:
+            if not isinstance(it.get(k), str) or not it[k].strip():
+                errs.append(f"{field}[{i}] の {k} を空でない文字列で書く")
 
 
 def _check_field_types(obj: dict, errs: list[str]) -> None:
