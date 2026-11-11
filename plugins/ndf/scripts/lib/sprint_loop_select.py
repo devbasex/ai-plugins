@@ -6,8 +6,6 @@ import os
 import re
 import shlex
 import sys
-from dataclasses import dataclass, field
-from pathlib import Path
 
 import clock
 import design_pr_merge
@@ -215,81 +213,6 @@ def _settle_conflict(env: Env, rec: dict, w: dict, m: dict, lap_n: int) -> str |
     return _giveback(env, rec, w, f"宛先と衝突し、ベースブランチを取り込めない（{code}）: {(se or so).strip()[:160]}", lap_n)
 
 
-@dataclass
-class TouchPick:
-    """選定 1 回の触る場所の見込み（#2997）。estimates は 課題 → 見込み、reorders は逆転の組を書き足す先。"""
-
-    estimates: dict = field(default_factory=dict)
-    width: int = 0
-    shared: list = field(default_factory=list)
-    reorders: list = field(default_factory=list)
-
-
-OUTSIDE_NOTE = "切り出しの境界の外"
-UNREADABLE_NOTE = "本文を読めない"
-
-
-def reorder_width(env: Env, rec: dict) -> int:
-    """記録の逆転の幅。無い古い記録は進め方の宣言の値（読めなければ既定の値）で読む（I7）。"""
-    if isinstance(rec.get("reorder_width"), int):
-        return rec["reorder_width"]
-    try:
-        return pace.read_loop(env.main_dir())["reorder_width"]
-    except pace.PaceError:
-        return pace.LOOP_DEFAULTS["reorder_width"]
-
-
-def shared_list(root) -> list:
-    """実装のキューと同じ共有の一覧（`.ndf/supervise.json` の `queue.shared`）。読めなければ空（I10）。"""
-    from supervise_lib import decl
-
-    try:
-        return decl.queue_decl(decl.read_decl([root], decl.SUPERVISE_DECL))["shared"]
-    except decl.DeclError:
-        return []
-
-
-def tracked_files(env: Env) -> list[str]:
-    """追跡しているファイル（`git ls-files`。選定 1 回に 1 回）。読めなければ空。"""
-    code, out, _ = env.run(["git", "ls-files"], cwd=str(env.main_dir()))
-    return [line for line in (out or "").splitlines() if line.strip()] if code == 0 else []
-
-
-def design_paths(root, n: int) -> list[str]:
-    """マージ済みの設計文書（`issues/issue-<n>-design*.md`）の設計の結果の触るファイル。"""
-    out: list[str] = []
-    for p in sorted((Path(root) / "issues").glob(f"issue-{n}-design*.md")):
-        try:
-            out += te.from_design(p.read_text(encoding="utf-8"), n)
-        except OSError:
-            continue
-    return out
-
-
-def touch_of(env: Env, n: int, description: str, files: list[str], outside: bool = False) -> te.Estimate:
-    """課題 n の触る場所の見込み。設計の結果 → 課題グループの表 → 課題の本文（切り出しの境界の外は読まない）の順に見る。"""
-    notes: list[str] = []
-
-    def body() -> list[str]:
-        if outside:
-            notes.append(OUTSIDE_NOTE)
-            return []
-        try:
-            return te.from_body(env.issue_body(n), files)
-        except OSError:
-            notes.append(UNREADABLE_NOTE)
-            return []
-
-    got = te.estimate(
-        [
-            (te.DESIGN, lambda: design_paths(env.main_dir(), n)),
-            (te.GROUP, lambda: te.from_group_table(description, n, files)),
-            (te.BODY, body),
-        ]
-    )
-    return te.Estimate([], te.NONE, notes[0]) if got.source == te.NONE and notes else got
-
-
 def selected_reason(row: dict, first: set[int], approved: set[int]) -> str:
     """選んだ課題の理由。承認した設計 → 直しの先頭 → 品質の枠 → 順位 の順に当てる。"""
     return (
@@ -319,39 +242,31 @@ def _select_candidate_rows(
     first: set[int] = frozenset(),
     approved: set[int] = frozenset(),
     needs: set[int] | None = None,
-    touch: TouchPick | None = None,
+    touch: te.TouchPick | None = None,
 ) -> tuple[list[int], list[dict]]:
     """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
     max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・デプロイの直し）→ 品質の枠の課題 → 順位の順に割り当てる
     （品質の枠の最低件数を容量で削らない）。業務時間外（needs を渡す）は承認した設計 → 設計を要る課題 → 設計の要らない課題の順。
-
-    touch（触る場所の見込み）を渡すと、先頭に選ぶ課題と品質の枠の後の枠を、逆転の幅の窓の内で見込みが重ならない課題から
-    埋め（#2997 の spread）、選定の行に見込み・重なりを、touch.reorders に逆転の組を書く。"""
+    touch（触る場所の見込み）を渡すと残りの枠を逆転の幅の窓の内で重ならない課題から埋め、行に見込みと重なりを書く（#2997）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]
     take_order, head = _take_order(cands, open_, approved if needs is not None else first, needs)
     fixed = set(head) if needs is not None else set(head) | {i for i in open_ if cands[i].get("quality_slot")}
-    t = touch or TouchPick()
-    est = {i: t.estimates.get(cands[i]["number"], te.Estimate()) for i in range(len(cands))}
-    got = te.spread(take_order, fixed, est, max_issues, t.width, t.shared)
+    est = {i: (touch.estimates if touch else {}).get(r["number"], te.Estimate()) for i, r in enumerate(cands)}
+    got = te.spread(take_order, fixed, est, max_issues, touch.width if touch else 0, touch.shared if touch else ())
     take = got.take
     picked, here = [], []
     for i in sorted(range(len(cands)), key=lambda i: (i not in head, i)):  # 先頭に選ぶ課題だけを前へ。ほかは順位の順
         r = cands[i]
         why = whys[i] if whys[i] is not None or i in take else "容量"
-        extra = {"touch": est[i].to_dict()} if touch is not None else {}
         if why is None:
             picked.append(r["number"])
             reason = selected_reason(r, first, approved)
-            if touch is not None:
-                o = got.overlap[i]
-                extra.update(overlap=o["overlap"], overlap_with=[cands[j]["number"] for j in o["overlap_with"]])
-            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason, **extra})
+            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
         else:
-            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why, **extra})
+            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
     if touch is not None:
-        num = lambda i: cands[i]["number"]  # noqa: E731
-        touch.reorders += [{"later": num(x["later"]), "earlier": num(x["earlier"]), "with": [num(j) for j in x["with"]]} for x in got.reorders]
+        te.annotate_rows(here, [r["number"] for r in cands], picked, got, est, touch)
     return picked, here
 
 
@@ -372,19 +287,11 @@ def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int, prior: dic
     return cands + [r for r in _rows_by_rank(ms) if r["number"] in first and r["number"] not in have]
 
 
-def outside_boundary_rows(ms: dict, cands: list[dict], title: str, touch=None) -> list[dict]:
-    """選ばれたマイルストーンで候補に入らなかった行（切り出しの境界の外）の落選行。
-    touch（課題 → 見込み）を渡すと行に見込みを載せる（本文は読まない。#2997）。"""
+def outside_boundary_rows(ms: dict, cands: list[dict], title: str) -> list[dict]:
+    """選ばれたマイルストーンで候補に入らなかった行（切り出しの境界の外）の落選行。"""
     cand_nums = {r["number"] for r in cands}
     return [
-        {
-            "number": r["number"],
-            "milestone": title,
-            "rank": r["rank"],
-            "decision": DROPPED,
-            "reason": "順位（切り出しの境界の外）",
-            **({"touch": touch(r["number"]).to_dict()} if touch else {}),
-        }
+        {"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": "順位（切り出しの境界の外）"}
         for r in _rows_by_rank(ms)
         if r["number"] not in cand_nums
     ]
@@ -412,7 +319,7 @@ def choose_issues(
     order = [t for t in m.get("order", []) if t in by_title and (not rec.get("milestones") or t in rec["milestones"])]
     approvals = {(a["milestone"], a["sha256"]) for a in rec.get("sprint_mvv_approvals", [])}
     rows_out, total = [], 0
-    files, width, shared = tracked_files(env), reorder_width(env, rec), shared_list(env.main_dir())
+    files, width, shared = te.git_tracked(env), te.reorder_width(rec, env.main_dir()), te.shared_list(env.main_dir())
     first = first_issues(rec, lap_n)
     approved = approved_designs(rec, lap_n)
     for title in order:
@@ -425,11 +332,14 @@ def choose_issues(
         needs = set(design_issues(rec, [r["number"] for r in cands]))  # 分類はスプリントを組む規則と同じ関数（I2）
         reason_for = (lambda r, b=base: b(r) or (HOLD_REASON if r["number"] in needs else None)) if hold_only else base
         desc = descriptions.get(title) or ""
-        touch = TouchPick({r["number"]: touch_of(env, r["number"], desc, files) for r in cands}, width, shared)
-        picked, here = _select_candidate_rows(cands, title, rec["max_issues"], reason_for, first, approved, needs if outside else None, touch)
+        touch = te.TouchPick({r["number"]: te.issue_estimate(env, r["number"], desc, files) for r in cands}, width, shared)
+        picked, here = _select_candidate_rows(
+            cands, title, rec["max_issues"], reason_for, first, approved, needs if outside else None, touch
+        )
         rows_out += here
         if picked:
-            rows_out += outside_boundary_rows(ms, cands, title, lambda n, d=desc: touch_of(env, n, d, files, outside=True))
+            outside_rows = outside_boundary_rows(ms, cands, title)
+            rows_out += [{**r, "touch": te.issue_estimate(env, r["number"], desc, files, outside=True).to_dict()} for r in outside_rows]
             got = {"milestone": title, "selection": rows_out, "candidates": total, "sprint_mvv": text}
             return {**got, "reorders": touch.reorders} if touch.reorders else got
     return {"milestone": None, "selection": rows_out, "candidates": total, "sprint_mvv": None}

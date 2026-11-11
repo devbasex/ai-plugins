@@ -72,7 +72,9 @@ def test_the_design_result_and_the_group_table_come_before_the_body(env):
     (env.root / "issues" / "issue-11-design.md").write_text(
         "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n| #11 | 実装する | — | `src/x.py` |\n"
     )
-    env.descs = {"01 近い": "### 並列の組（見込み）\n\n| 組 | 課題 | 触る場所の見込み | 依存 |\n| --- | --- | --- | --- |\n| 1 | #12 | `docs/` | なし |\n"}
+    env.descs = {
+        "01 近い": "### 並列の組（見込み）\n\n| 組 | 課題 | 触る場所の見込み | 依存 |\n| --- | --- | --- | --- |\n| 1 | #12 | `docs/` | なし |\n"
+    }
     start(env)
     rows = rows_of(sl_select.cmd_select(env, "l1"))
     assert rows[11]["touch"] == {"paths": ["src/x.py"], "source": "設計の結果", "note": ""}
@@ -105,7 +107,7 @@ def test_fixed_and_quality_slot_issues_are_chosen_despite_overlaps():
     cands = [{"rank": i, "number": n} for i, n in enumerate((10, 11, 12), 1)]
     cands[1]["quality_slot"] = True
     same = te.Estimate(["docs/a.md"], te.BODY)
-    touch = sl_select.TouchPick({10: same, 11: same, 12: te.Estimate(["docs/b.md"], te.BODY)}, width=3)
+    touch = te.TouchPick({10: same, 11: same, 12: te.Estimate(["docs/b.md"], te.BODY)}, width=3)
     picked, here = sl_select._select_candidate_rows(cands, "M", 2, lambda r: None, first={10}, touch=touch)
     assert picked == [10, 11]
     assert [r["reason"] for r in here if r["decision"] == "選んだ"] == ["直しの先頭", "品質の枠"]

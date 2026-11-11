@@ -310,60 +310,12 @@ def check_data(
     if estimate_error:
         items.append({"level": "warning", "rule": "I21", "at": "lanes", "message": f"課題の見込みを集められない: {estimate_error}"})
     if estimates:
-        items += estimate_overlaps(plan, estimates, shared, str(home) if home else None)
+        import touch_estimate as te
+
+        key = str(home) if home else None
+        same = lambda a, b: lane_repo_key(a, key) == lane_repo_key(b, key)  # noqa: E731
+        items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(plan.lanes, estimates, shared, same)]
     return plan, items, _metrics_of(items, caps, notes)
-
-
-def _ancestors(plan: ParallelPlan) -> dict[str, set[str]]:
-    """レーン → `after` を推移的にたどって届くレーン。"""
-    after = {ln.name: set(ln.after) for ln in plan.lanes}
-    out: dict[str, set[str]] = {}
-    for name in after:
-        seen, todo = set(), list(after[name])
-        while todo:
-            n = todo.pop()
-            if n not in seen:
-                seen.add(n)
-                todo += after.get(n, ())
-        out[name] = seen
-    return out
-
-
-def estimate_overlaps(
-    plan: ParallelPlan, estimates: Mapping[str, Mapping[int, list[str]]], shared: Iterable[Mapping] = (), home: Optional[str] = None
-) -> list[dict]:
-    """同じ時間帯に動く（`after` で順序の付かない）同じリポジトリの 2 レーンの、課題の見込みの重なり（I21。警告）と直し方の案。
-    重なりは実装のキューと同じ `admission.overlap_of` で見る。見込みの無い課題は重なりを「不明」として案を出さない。"""
-    from supervise_lib import admission
-
-    shared, anc, out = list(shared), _ancestors(plan), []
-    for i, a in enumerate(plan.lanes):
-        for b in plan.lanes[i + 1 :]:
-            if lane_repo_key(a, home) != lane_repo_key(b, home) or a.name in anc[b.name] or b.name in anc[a.name]:
-                continue
-            for ia, pa in (estimates.get(a.name) or {}).items():
-                for ib, pb in (estimates.get(b.name) or {}).items():
-                    paths = admission.overlap_of(pa, pb, shared) if pa and pb and ia != ib else None
-                    if paths:
-                        out.append(_estimate_item(a, b, ia, ib, paths))
-    return out
-
-
-def _estimate_item(a: Lane, b: Lane, ia: int, ib: int, paths: list[str]) -> dict:
-    proposals: list[dict] = [{"kind": "after", "lane": b.name, "after": a.name}]
-    if isinstance(a.input, SprintInput) and isinstance(b.input, SprintInput):  # ループのレーンの課題はループが選ぶため移さない
-        proposals.append({"kind": "move", "issue": ib, "from": b.name, "to": a.name})
-    shown = "・".join(dict.fromkeys(paths))
-    return {
-        "level": "warning",
-        "rule": "I21",
-        "at": "lanes",
-        "message": f"同じ時間帯に動くレーンの課題の見込みが重なる: {a.name} #{ia}・{b.name} #{ib}（{shown}）",
-        "lanes": [a.name, b.name],
-        "issues": [ia, ib],
-        "paths": paths,
-        "proposals": proposals,
-    }
 
 
 def _validation_items(exc: ValidationError) -> list[dict]:

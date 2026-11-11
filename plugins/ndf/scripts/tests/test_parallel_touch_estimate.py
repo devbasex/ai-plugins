@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
@@ -10,6 +9,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import parallel_plan as pp  # noqa: E402
+import touch_estimate as te_mod  # noqa: E402
 
 
 def plan(*lanes):
@@ -29,7 +29,10 @@ def i21(items):
     return [i for i in items if i["rule"] == "I21"]
 
 
-EST = {"lcost": {2913: ["plugins/ndf/scripts/lib/sprint_loop_select.py"]}, "lflow": {2997: ["plugins/ndf/scripts/lib/"], 2998: ["docs/x.md"]}}
+EST = {
+    "lcost": {2913: ["plugins/ndf/scripts/lib/sprint_loop_select.py"]},
+    "lflow": {2997: ["plugins/ndf/scripts/lib/"], 2998: ["docs/x.md"]},
+}
 
 
 def test_lanes_running_together_get_the_overlapping_pair_and_proposals():
@@ -39,13 +42,18 @@ def test_lanes_running_together_get_the_overlapping_pair_and_proposals():
     (it,) = i21(items)
     assert it["level"] == "warning" and it["lanes"] == ["lcost", "lflow"] and it["issues"] == [2913, 2997]
     assert it["paths"] == ["plugins/ndf/scripts/lib/sprint_loop_select.py", "plugins/ndf/scripts/lib/"]
-    assert it["proposals"] == [{"kind": "after", "lane": "lflow", "after": "lcost"}, {"kind": "move", "issue": 2997, "from": "lflow", "to": "lcost"}]
+    assert it["proposals"] == [
+        {"kind": "after", "lane": "lflow", "after": "lcost"},
+        {"kind": "move", "issue": 2997, "from": "lflow", "to": "lcost"},
+    ]
 
 
 def test_lanes_ordered_by_after_even_transitively_get_no_item():
     """受け入れ条件 7・I9: after で（推移的にも）順序の付いたレーンの間では出さない。"""
     est = {**EST, "lmid": {}}
-    _, items, _ = pp.check_data(plan(sprint("lcost", [2913]), sprint("lmid", [1], ["lcost"]), sprint("lflow", [2997], ["lmid"])), estimates=est)
+    _, items, _ = pp.check_data(
+        plan(sprint("lcost", [2913]), sprint("lmid", [1], ["lcost"]), sprint("lflow", [2997], ["lmid"])), estimates=est
+    )
     assert i21(items) == []
 
 
@@ -89,19 +97,11 @@ class FakeEnv:
         return 0, "a/x.py\nb/y.py\n", ""
 
 
-def _parallel():
-    spec = importlib.util.spec_from_file_location("parallel_cli_main", SCRIPTS / "parallel.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def test_lane_estimates_reads_sprint_issues_and_loop_milestone_groups(tmp_path):
-    par = _parallel()
     desc = "### 並列の組（見込み）\n\n| 組 | 課題 | 触る場所の見込み | 依存 |\n| --- | --- | --- | --- |\n| 1 | #7 | `a/` | なし |\n"
     p, _, _ = pp.check_data(plan(loop("lloop", "M1"), sprint("lsp", [8])))
     env = FakeEnv(tmp_path, {"M1": desc}, {8: "## 目的\n\n`b/y.py`\n"})
-    est, shared, error = par.lane_estimates(tmp_path, p, env_of=lambda root: env)
+    est, shared, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: env)
     assert est == {"lloop": {7: ["a"]}, "lsp": {8: ["b/y.py"]}} and shared == [] and error is None
-    est, _, error = par.lane_estimates(tmp_path, p, env_of=lambda root: FakeEnv(tmp_path, {}, {8: "`b/y.py`"}, fail=True))
+    est, _, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: FakeEnv(tmp_path, {}, {8: "`b/y.py`"}, fail=True))
     assert est == {"lloop": {}, "lsp": {8: ["b/y.py"]}} and "マイルストーンを読めない" in error

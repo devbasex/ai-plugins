@@ -239,7 +239,8 @@
     {
       "file": "supervise.json",
       "keys": [
-        "release"
+        "release",
+        "shared"
       ]
     },
     {

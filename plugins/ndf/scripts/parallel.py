@@ -86,41 +86,10 @@ def checked_plan(main: Path, name: str, touch: bool = False) -> tuple[pp.Paralle
     got = pp.check_data(data, home=main)
     if not touch or got[0] is None:
         return got
-    estimates, shared, error = lane_estimates(main, got[0])
-    return pp.check_data(data, home=main, estimates=estimates, shared=shared, estimate_error=error)
-
-
-def lane_estimates(main: Path, plan: pp.ParallelPlan, env_of=None) -> tuple[dict, list, str | None]:
-    """レーン → 課題 → 触る場所の見込み（#2997）。出し方は開発ループの選定と同じ（`sprint_loop_select.touch_of`）。
-    スプリントのレーンは `input.issues`、ループのレーンは `--milestones` のマイルストーンの課題グループの表の課題を見る。
-    マイルストーンを読めなければ、その理由を返して本文だけで続ける。env_of はテストが差し替える（レーンのリポジトリ → Env）。"""
-    import sprint_loop_record as slr
-    import sprint_loop_select as sls
     import touch_estimate as te
 
-    env_of = env_of or (lambda root: slr.Env(root, main=root))
-    repos: dict[str, tuple] = {}
-    out: dict[str, dict] = {}
-    errors: list[str] = []
-    for ln in plan.lanes:
-        root = ln.repo_dir(main)
-        if str(root) not in repos:
-            env = env_of(root)
-            try:
-                descs = env.milestones("")
-            except OSError as exc:
-                errors.append(f"{root}: {exc}")
-                descs = {}
-            repos[str(root)] = (env, descs, sls.tracked_files(env))
-        env, descs, files = repos[str(root)]
-        if isinstance(ln.input, pp.SprintInput):
-            issues = list(ln.input.issues)
-        else:
-            issues = [n for t in sorted(ln.milestones() or ()) for n in te.group_issues(descs.get(t, ""))]
-        out[ln.name] = {
-            n: sls.touch_of(env, n, next((d for d in descs.values() if n in te.group_issues(d)), ""), files).paths for n in issues
-        }
-    return out, sls.shared_list(main), "; ".join(errors) or None
+    estimates, shared, error = te.lane_estimates(main, got[0].lanes)
+    return pp.check_data(data, home=main, estimates=estimates, shared=shared, estimate_error=error)
 
 
 def cmd_init(a) -> None:

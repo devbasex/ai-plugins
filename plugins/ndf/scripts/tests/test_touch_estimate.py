@@ -37,7 +37,11 @@ def test_the_body_yields_files_only_from_the_named_sections():
 
 def test_the_body_without_the_named_sections_is_read_whole_and_ambiguous_tails_are_dropped():
     body = "`README.md` と `lib/parallel_plan.py` と `scripts/parallel.py`"
-    assert te.from_body(body, FILES + ["README.md"]) == ["README.md", "plugins/ndf/scripts/lib/parallel_plan.py", "plugins/ndf/scripts/parallel.py"]
+    assert te.from_body(body, FILES + ["README.md"]) == [
+        "README.md",
+        "plugins/ndf/scripts/lib/parallel_plan.py",
+        "plugins/ndf/scripts/parallel.py",
+    ]
     assert te.from_body("`a.md`", ["x/a.md", "y/a.md"]) == []  # 末尾が 2 つのファイルに当たる語は取らない
 
 
@@ -147,7 +151,9 @@ def test_the_shared_list_counts_as_an_overlap():
 def _replay():
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("selection_replay", Path(__file__).resolve().parents[1] / "experimental" / "selection-replay.py")
+    spec = importlib.util.spec_from_file_location(
+        "selection_replay", Path(__file__).resolve().parents[1] / "experimental" / "selection-replay.py"
+    )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -159,7 +165,7 @@ def test_the_replay_average_is_busy_time_over_elapsed_time():
     seconds = {1: 10.0, 2: 10.0, 3: 10.0}
     files = {1: ["a.py"], 2: ["a.py"], 3: ["b.py"]}
     est = {n: te.Estimate(files[n], te.DESIGN) for n in files}
-    assert rp.elapsed([1, 2, 3], seconds, files, [], 3) == 20.0
+    assert rp.sprint_elapsed([1, 2, 3], seconds, files, [], 3) == 20.0
     got = rp.replay([1, 2, 3], seconds, files, est, [], issues=2, slots=3, width=1)
     assert (got["current"]["sprints"], got["current"]["average"]) == ([[1, 2], [3]], 1.0)
     assert (got["new"]["sprints"], got["new"]["average"]) == ([[1, 3], [2]], 1.5)

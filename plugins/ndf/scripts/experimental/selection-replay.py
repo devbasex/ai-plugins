@@ -35,6 +35,10 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
+import deps  # noqa: E402
+
+deps.require("md", "schema")
+
 import touch_estimate as te  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, emit, result  # noqa: E402
 from supervise_lib import admission  # noqa: E402
@@ -43,7 +47,7 @@ TOOL = "selection-replay"
 PR_URL = re.compile(r"/pull/(\d+)")
 
 
-def _gh(args: list[str], cwd: Path) -> str | None:
+def _gh_stdout(args: list[str], cwd: Path) -> str | None:
     got = subprocess.run(["gh", *args], cwd=str(cwd), capture_output=True, text=True)
     return got.stdout if got.returncode == 0 else None
 
@@ -67,7 +71,7 @@ def durations(sprint: Path, issue: int) -> tuple[float | None, int | None]:
     return total, pr
 
 
-def design_files(sprint: Path) -> dict[int, list[str]]:
+def design_result_files(sprint: Path) -> dict[int, list[str]]:
     p = sprint / "design-results.json"
     if not p.is_file():
         return {}
@@ -75,26 +79,17 @@ def design_files(sprint: Path) -> dict[int, list[str]]:
     return {r["issue"]: list(r.get("files") or []) for r in rows if r.get("kind") == "実装する"}
 
 
-def changed_files(pr: int | None, root: Path) -> list[str]:
-    out = _gh(["pr", "view", str(pr), "--json", "files", "--jq", "[.files[].path]"], root) if pr else None
+def pr_changed_paths(pr: int | None, root: Path) -> list[str]:
+    out = _gh_stdout(["pr", "view", str(pr), "--json", "files", "--jq", "[.files[].path]"], root) if pr else None
     return json.loads(out) if out else []
 
 
 def body_files(issue: int, root: Path, files: list[str]) -> list[str]:
-    body = _gh(["issue", "view", str(issue), "--json", "body", "--jq", ".body"], root)
+    body = _gh_stdout(["issue", "view", str(issue), "--json", "body", "--jq", ".body"], root)
     return te.from_body(body or "", files)
 
 
-def shared_of(root: Path) -> list:
-    from supervise_lib import decl
-
-    try:
-        return decl.queue_decl(decl.read_decl([root], decl.SUPERVISE_DECL))["shared"]
-    except decl.DeclError:
-        return []
-
-
-def elapsed(batch: list[int], seconds: dict[int, float], files: dict[int, list[str]], shared: list, slots: int) -> float:
+def sprint_elapsed(batch: list[int], seconds: dict[int, float], files: dict[int, list[str]], shared: list, slots: int) -> float:
     """1 スプリントの経過: 重なりの組を組の中で直列にし、`slots` 本の枠へ長い組から割り当てた終わりの時刻。"""
     groups = admission.groups({str(n): files[n] for n in batch}, shared)
     lengths = sorted((sum(seconds[int(n)] for n in g) for g in groups), reverse=True)
@@ -112,10 +107,15 @@ def replay(order, seconds, files, estimates, shared, issues: int, slots: int, wi
         while left:
             batch = te.spread(left, set(), estimates, issues, w, shared).take
             sprints.append(batch)
-            total += elapsed(batch, seconds, files, shared, slots)
+            total += sprint_elapsed(batch, seconds, files, shared, slots)
             left = [n for n in left if n not in batch]
         busy = sum(seconds[n] for n in order)
-        out[name] = {"average": round(busy / total, 3) if total else 0.0, "elapsed": round(total, 1), "busy": round(busy, 1), "sprints": sprints}
+        out[name] = {
+            "average": round(busy / total, 3) if total else 0.0,
+            "elapsed": round(total, 1),
+            "busy": round(busy, 1),
+            "sprints": sprints,
+        }
     return out
 
 
@@ -123,14 +123,14 @@ def cmd_run(a) -> int:
     sprint, root = Path(a.sprint), Path(a.root)
     order = [int(x) for x in re.split(r"[\s,]+", a.order) if x.isdigit()]
     try:
-        design = design_files(sprint)
+        design = design_result_files(sprint)
     except (OSError, ValueError) as e:
         emit(result(TOOL, "stopped", f"記録を読めない: {e}"), EXIT_UNREADABLE)
     tracked = subprocess.run(["git", "ls-files"], cwd=str(root), capture_output=True, text=True).stdout.splitlines()
     seconds, files, est, skipped = {}, {}, {}, []
     for n in order:
         sec, pr = durations(sprint, n)
-        queue = design.get(n, []) if a.queue_files == "design" else changed_files(pr, root)
+        queue = design.get(n, []) if a.queue_files == "design" else pr_changed_paths(pr, root)
         if sec is None or not queue:
             skipped.append({"issue": n, "reason": "所要の記録が無い" if sec is None else "触るファイルの記録が無い"})
             continue
@@ -140,12 +140,12 @@ def cmd_run(a) -> int:
         elif a.estimate == a.queue_files:
             paths = queue
         else:
-            paths = design.get(n, []) if a.estimate == "design" else changed_files(pr, root)
+            paths = design.get(n, []) if a.estimate == "design" else pr_changed_paths(pr, root)
         est[n] = te.Estimate(paths, te.BODY if a.estimate == "body" else te.DESIGN)
     kept = [n for n in order if n in seconds]
     if not kept:
         emit(result(TOOL, "stopped", "模擬できる課題が無い", skipped), EXIT_PRECONDITION)
-    got = replay(kept, seconds, files, est, shared_of(root), a.issues, a.max, a.width)
+    got = replay(kept, seconds, files, est, te.shared_list(root), a.issues, a.max, a.width)
     metrics = {**got, "skipped": skipped, "width": a.width, "estimate": a.estimate, "queue_files": a.queue_files}
     summary = f"同時に動く本数の平均: 今の選び方 {got['current']['average']} 本・新しい選び方 {got['new']['average']} 本（課題 {len(kept)} 件・外した {len(skipped)} 件）"
     line = json.dumps(result(TOOL, "ok", summary, skipped, metrics), ensure_ascii=False)
