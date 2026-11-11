@@ -15,7 +15,8 @@ import test_strategy as ts
 import limits
 from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
-from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, STEPS_PY, TEST_RUN_PY
+from supervise_lib.paths import CHECK_PY, CI_PEEK_CMD, MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, READY, SPRINT_STATE_PY, STEPS_PY, TEST_RUN_PY
+from supervise_lib.procedures import DESIGN_MATCH_MODES, base_sync_steps, design_diff_on_pr, design_match_steps, pr_step, push_fix_steps
 
 # merge-when-green と release が CI の基盤待ち（75。lib/step_result.py の EXIT_INFRA_WAIT）で止まったら、judge を通らず
 # プランを止める（修正へ回さない。#1645 の決定 6）
@@ -114,10 +115,16 @@ def scope_timeout(a) -> int:
     return with_margin(plan_limits(a)["test_timeout"])
 
 
-def whole_on_ci(a) -> bool:
-    """全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か。"""
+def ci_only(a) -> bool:
+    """CI テストの宣言（`test.ci.only: true`）のあるリポジトリか（#3056）。手元でテストを走らせず、PR の CI の結果で合否を決める。"""
     strategy = plan_strategy(a)
-    return bool(strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE)
+    return bool(strategy and strategy.get("ci_only"))
+
+
+def whole_on_ci(a) -> bool:
+    """全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か、CI テストの宣言があるか。"""
+    strategy = plan_strategy(a)
+    return bool(strategy and (strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE or strategy.get("ci_only")))
 
 
 def whole_timeout(a) -> int:
@@ -155,6 +162,62 @@ def trim_check_steps(a, steps: list[dict], after_whole: str, refactor_off: bool)
     レビューの後の全体テスト（test-all と、それだけを入力に持つ judge・fix）を外す（`without_ci_wait`）。"""
     kept = [s for s in steps if not (refactor_off and s["id"] in ("assess", "refactor"))]
     return without_ci_wait(a, kept, after_whole, drop=("judge", "fix"))
+
+
+CI_FIX_PROMPT = (
+    "入力は CI の結果の監視（ci-peek）の出力で、落ちた CI のテストのチェックと失敗したジョブのログの末尾がある。"
+    "落ちたテストを直してコミットする（テストを手元で打たない。合否は push の後の CI で読む）。変更に起因しない失敗は直さない。"
+)
+CI_FIX_PUSH = "直した後に git push する。"
+CI_PEEK_IDS = ("ci-peek", "ci-peek-2", "ci-peek-merge")
+
+
+def ci_watch_steps(peeks: list[tuple[str, str]], fix_next: str, stop: str = "stop", push: bool = False) -> list[dict]:
+    """CI の結果の監視のステップ（#3056 の決定 4〜6）。`peeks` は (ステップの id, 成功の行き先) の並び（`ci-peek`・`ci-peek-2`）。
+
+    - `ci-peek*`: PR の CI のテストのチェックを待たずに 1 回だけ読む。0 なら次へ、1（落ちた）なら `ci-fix`、2（改修の回数が
+      上限に当たった）なら `stop`
+    - `ci-peek-merge`: マージが落ちた後に読み直す（`--after-merge`）。CI の失敗なら `ci-fix`、上限（2）か CI 以外の理由（3）なら `stop`
+    - `ci-fix`: 修正の worker。直してコミットし `fix_next` へ戻る。`push` なら自分で push する（検査のプランは pr のステップを持たない）"""
+    stop_codes = {"2": stop}
+    steps = [
+        {"id": sid, "type": "run", "stage": "完了判定", "timeout": 300, "cmd": CI_PEEK_CMD, "on_fail": "ci-fix", "on_exit": stop_codes, "next": nxt}
+        for sid, nxt in peeks
+    ]
+    steps.append(
+        {
+            "id": "ci-peek-merge",
+            "type": "run",
+            "stage": "完了判定",
+            "timeout": 300,
+            "cmd": CI_PEEK_CMD + " --after-merge",
+            "on_fail": "ci-fix",
+            "on_exit": {**stop_codes, "3": stop},
+            "next": "end",
+        }
+    )
+    prompt = CI_FIX_PROMPT + (CI_FIX_PUSH if push else "push しない。")
+    steps.append({"id": "ci-fix", "type": "work", "kind": "修正", "stage": "完了判定", "inputs": list(CI_PEEK_IDS), "prompt": prompt, "next": fix_next})
+    return steps
+
+
+def merge_to_ci_peek(steps: list[dict]) -> list[dict]:
+    """マージ（merge・merge-approved）が落ちたら `ci-peek-merge` で読み直す（改修の回数を監視の記録で数える。決定 6）。"""
+    return [{**s, "on_fail": "ci-peek-merge"} if s["id"] in ("merge", "merge-approved") else s for s in steps]
+
+
+def without_local_tests(steps: list[dict], after_tests: str) -> list[dict]:
+    """手元のテストのステップ（test-limited・test-all）と、それだけを入力に持つ judge・fix を外し、そこへ向かう遷移を
+    `after_tests` へ向ける（#3056 の I2）。"""
+    gone = {"test-limited", "test-all"}
+    gone |= {s["id"] for s in steps if s.get("inputs") and set(s["inputs"]) <= gone}
+    out = []
+    for step in (s for s in steps if s["id"] not in gone):
+        step = {k: (after_tests if k in ("next", "on_fail", "skip_to") and v in gone else v) for k, v in step.items()}
+        if "inputs" in step:
+            step["inputs"] = [i for i in step["inputs"] if i not in gone]
+        out.append(step)
+    return out
 
 
 def refactor_template_arg(a) -> str:
@@ -231,14 +294,17 @@ def test_meta(plan: dict, a) -> dict:
     strategy = plan_strategy(a)
     if strategy:
         plan["テストの戦略"] = {"name": strategy["name"], "source": strategy["source"], "note": getattr(a, "test_note", None)}
+        if strategy.get("ci_only"):
+            plan["テストの戦略"]["ci_only"] = True  # worker の起動指示がテストを手元で打たない行を持つ（#3056）
     plan["テストの時間"] = dict(plan_limits(a))
     return plan
 
 
-def pre_test_steps(a, fix_prompt: str) -> list[dict]:
+def pre_test_steps(a, fix_prompt: str, after: str = "test-limited") -> list[dict]:
     """範囲テストの前のステップ: 整形（format）→ 同期とチェック（sync）→ 範囲の静的解析（lint-limited）。宣言の無いものは
     置かない（format は supervise.json の format、sync は sync_checks、lint-limited は範囲の雛形を持つ kind: lint の suite が
-    あり戦略が round-only でないとき。#1651 の決定 5・6）。fix-format・fix-sync・fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る
+    あり戦略が round-only でないとき。#1651 の決定 5・6）。最後のステップの次は `after`（既定は範囲テスト）。
+    fix-format・fix-sync・fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る
     （sync は静的解析も打つため、fix-sync の直しも整形を通し直す）。
     実装のプランの雛形（`templates.plan_to_merge`）が起点の取り込みの後に置く。"""
     st = plan_strategy(a) or {}
@@ -263,9 +329,107 @@ def pre_test_steps(a, fix_prompt: str) -> list[dict]:
     out: list[dict] = []
     for i, step in enumerate(found):
         fix = "fix-" + step["id"].split("-")[0]
-        nxt = found[i + 1]["id"] if i + 1 < len(found) else "test-limited"
+        nxt = found[i + 1]["id"] if i + 1 < len(found) else after
         out += [
             {**step, "on_fail": fix, "next": nxt},
             {"id": fix, "type": "work", "kind": "修正", "inputs": [step["id"]], "prompt": fix_prompt, "next": found[0]["id"]},
         ]
     return out
+
+
+def check_ci_watch(a, steps: list[dict], before: str, stop: str, *, fix_push: bool) -> list[dict]:
+    """CI テストの宣言のある検査のプランへ、`before`（ready か finish）の前の `ci-peek` と、マージが落ちた後の `ci-peek-merge`・
+    `ci-fix` を足す（#3056）。手元のテストのステップは外す。宣言の無いリポジトリはそのまま返す。"""
+    if not ci_only(a):
+        return steps
+    steps = merge_to_ci_peek(without_local_tests(steps, "ci-peek"))
+    peek, *rest = ci_watch_steps([("ci-peek", before)], "ci-peek", stop=stop, push=fix_push)
+    at = next(i for i, s in enumerate(steps) if s["id"] == before)
+    end = next(i for i, s in enumerate(steps) if s["id"] == "merge-approved") + 1
+    return [*steps[:at], peek, *steps[at:end], *rest, *steps[end:]]
+
+
+def with_escape(a, steps: list[dict]) -> list[dict]:
+    """`--escape-of` なら、マージの後に「逃げた不具合」を記録するステップを足す（検査のトリガーの材料。#1078）。"""
+    if getattr(a, "escape_of", None) is None:
+        return steps
+    steps = [{**s, "next": "escape"} if s["id"] in ("merge", "merge-approved") else s for s in steps]
+    return [*steps, {"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"}]
+
+
+def ci_only_to_merge(a, head: list[dict], fix_prompt: str) -> tuple[list[dict], str]:
+    """CI テストの宣言のあるリポジトリの実装のプランのステップ（#3056 の決定 4・6・7）。戻りは（ステップ, 規則）。
+
+    head の直後に Draft の PR を出し（`pr-draft`。本文は機械のテンプレートで LLM を呼ばない）、取り込み → 整形・同期・範囲の
+    静的解析 →（standard なら）設計との突き合わせ → pr と進む。手元でテストを走らせず、pr の後と doc-lint の後に CI の結果を
+    待たずに 1 回だけ読み（`ci-peek`・`ci-peek-2`）、落ちていれば `ci-fix` が直して整形から流れ直す。マージが落ちたら
+    `ci-peek-merge` が読み直す。"""
+    match = design_match_steps(a.issue, a.base, "pr") if a.mode in DESIGN_MATCH_MODES and a.issue else []
+    after_pre = match[0]["id"] if match else "pr"
+    pre = pre_test_steps(a, fix_prompt, after=after_pre)
+    first = pre[0]["id"] if pre else after_pre
+    if head:
+        head[-1]["next"] = "pr-draft"
+    *base, back = base_sync_steps(f"--base {shlex.quote(a.base or '')}", first, push=False, on_error=None, returns=True, stage="実装")
+    texts = (a.base, a.title, a.summary or "", getattr(a, "changes", None) or "")
+    draft = {
+        **pr_step(*texts, "base-sync", stage="実装", body="template"),
+        "id": "pr-draft",
+        # push 前の検査で拒まれたら、整形と静的解析を通した後の pr のステップが push する
+        "on_fail": "base-sync",
+        "on_fail_only": "push-check",
+    }
+    pr = pr_step(*texts, "ci-peek", {"manual": bool(getattr(a, "manual", True)), "migration": True})
+    judge = []
+    if match:
+        design_diff_on_pr(pr, "judge")
+        question = "PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）、止めるか（stop）"
+        judge = [{"id": "judge", "type": "judge", "inputs": ["pr"], "question": question, "choices": ["design-tests", "stop"]}]
+    peek, peek2, *after_merge = ci_watch_steps([("ci-peek", "doc-lint"), ("ci-peek-2", "ready")], first)
+    steps = [
+        *head,
+        draft,
+        *base,
+        *pre,
+        *judge,
+        *match,
+        pr,
+        *push_fix_steps(pr),
+        peek,
+        {"id": "doc-lint", "type": "run", "preset": "doc-lint", "stage": "完了判定", "on_fail": "fix-doc", "next": "ci-peek-2"},
+        {
+            "id": "fix-doc",
+            "type": "work",
+            "kind": "修正",
+            "stage": "完了判定",
+            "inputs": ["doc-lint"],
+            "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
+            "next": "doc-lint",
+        },
+        peek2,
+        {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
+        *merge_to_ci_peek(merge_steps(a, next="end", on_conflict="base-return")),
+        *after_merge,
+    ]
+    return [*with_escape(a, steps), back], RULE_CI_ONLY
+
+
+RULE_CI_ONLY = (
+    "テストは手元で走らせず、PR の CI の結果で合否を決める（CI テストの宣言）。CI の結果の監視（ci-peek）が落ちたテストを見つけたら"
+    " ci-fix が直す。改修の回数が上限に当たったら止める。"
+)
+
+
+def judge_step(after_tests: str, match: bool, ci_merge: bool = False) -> dict:
+    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、無ければ pr）へ
+    進む。突き合わせがあれば PR の本文の節が欠けて pr が止まったとき、`ci_merge` ならマージが落ちたときもここへ戻る。"""
+    to_next = "設計との突き合わせへ（design-tests）" if match else "PR へ（pr）"
+    pr_missing = "、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）" if match else ""
+    return {
+        "id": "judge",
+        "type": "judge",
+        "inputs": ["test-limited", "test-all", *(["pr"] if match else [])],
+        "question": f"テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら{to_next}{pr_missing}、"
+        f"全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）{'、マージ（merge）が CI で落ちたなら直すか（fix）' if ci_merge else ''}、止めるか（stop）",
+        "choices": ["fix", after_tests, "doc-lint", "stop"],
+    }

@@ -35,12 +35,20 @@ WORK_SYSTEM = (
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
 )
+# テストの打ち方の行。CI テストの宣言のあるプランでは CI_TESTS_LINE に置き換える（`system_for`。#3056）
+LOCAL_TESTS_LINE = "- PR の CI の結果を待たない（CI を待つのはマージのステップだけ）。全体テストを打たない（プランの test-all か CI が持つ。テストは範囲だけ）"
+CI_TESTS_LINE = (
+    "- PR の CI の結果を待たない（CI を待つのはマージのステップだけ）。テストを手元で打たない（CI テストの宣言。"
+    "合否は PR の CI の結果を `gh pr checks <PR>` で読む）"
+)
 FULL_SYSTEM = (
     """あなたは NDF のフェーズの 1 ステップを CLI（claude -p）として回している。人は見ていない。
 - 応答を終えるとこのプロセスは終わり、背景の処理と完了通知は捨てられる。待ちは前景のコマンドで行い
   （run_in_background・Monitor を使わない。待ちのスクリプトを前景で実行する）、
   作業が終わるまで応答を終えない
-- PR の CI の結果を待たない（CI を待つのはマージのステップだけ）。全体テストを打たない（プランの test-all か CI が持つ。テストは範囲だけ）
+"""
+    + LOCAL_TESTS_LINE
+    + """
 - 人間へ問わない（AskUserQuestion を使わない）。Skill の確認は提示して進める
 - 承認ゲートに当たる操作（設計 PR のマージ・main へのリリース・タグ）をしない
 - 課題を閉じる語（Fix #番号・Closes など）をコミットと PR 本文に書かない
@@ -114,3 +122,12 @@ design-match.py の tests（確認 (a)。設計に名前の出るテストの判
 6. 節を作業ディレクトリ（下の「作業ディレクトリ」）の design-diff.md へ書く（前の内容は上書きする）。
    1 行目は `## 設計と違う点`。違いは「| 設計の箇所 | 違い | 理由 |」の表の行で並べ、同じ PR で直した箇所は並べない。
    違いが無ければ `- 無し` の 1 行にする"""
+
+
+def system_for(system: str, ci_only: bool) -> str:
+    """CI テストの宣言のあるプランの起動指示。full ならテストの打ち方の行を置き換え、worker なら行を足す（#3056）。"""
+    if not ci_only:
+        return system
+    if LOCAL_TESTS_LINE in system:
+        return system.replace(LOCAL_TESTS_LINE, CI_TESTS_LINE)
+    return system.replace("\n- 人間へ問わない。", "\n" + CI_TESTS_LINE + "\n- 人間へ問わない。", 1)

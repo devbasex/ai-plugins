@@ -132,9 +132,10 @@ def _short_durable_polls(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _refactor_route_on(request, monkeypatch):
-    """構造改善の緊急の停止（`templates.CROSS_REFACTORING_SUSPENDED`）を外し、既存のテストに構造改善を持つ道を確かめ続けさせる。
+    """構造改善を外す条件（`templates.refactor_suspended`。CI テストの宣言の無いリポジトリで真）を常に偽にし、既存のテストに
+    構造改善を持つ道を確かめ続けさせる（#3056）。
 
-    停止そのものは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    宣言の無いリポジトリで外す振る舞いは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
     if request.node.get_closest_marker("suspended_refactor"):
         return
     scripts = str(Path(__file__).resolve().parents[1])
@@ -142,7 +143,7 @@ def _refactor_route_on(request, monkeypatch):
         monkeypatch.syspath_prepend(scripts)
     import importlib
 
-    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "CROSS_REFACTORING_SUSPENDED", False)
+    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "refactor_suspended", lambda a: False)
 
 
 @pytest.fixture(autouse=True)

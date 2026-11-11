@@ -36,6 +36,7 @@ BEFORE = {
     "supervise.design-stage-read": {"seconds": 120, "per_call": 30, "interval": 15, "same_cause": 3},
     "supervise.worktree-lock": {"seconds": 5, "attempts": 6, "interval": 1, "same_cause": 6},
     "supervise.step-rerun": {"same_cause": 2},
+    "supervise.ci-fix": {"attempts": 3},
     "test-triage.check-wait": {"interval": 10, "factor": 1.5, "max_interval": 120},
     "merged.green-wait": {"factor": 1.5},
     "hook.ask-forward": {"seconds": 8},

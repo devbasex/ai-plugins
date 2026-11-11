@@ -68,6 +68,9 @@ PRESETS = {
 
 # テストの実行の入口（#1334）。範囲テスト（scope）と全体テスト（whole）を、宣言の戦略に沿って走らせる
 TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
+# CI の結果の監視（#3056）。PR の CI のテストのチェックを待たずに 1 回だけ読み、記録を状態ディレクトリへ足す
+CI_WATCH_PY = f"python3 {HERE / 'ci-watch.py'}"
+CI_PEEK_CMD = f"{CI_WATCH_PY} peek --pr {{pr}} --state {{state_dir}}"
 
 
 def is_config_lock(stderr: str) -> bool:
