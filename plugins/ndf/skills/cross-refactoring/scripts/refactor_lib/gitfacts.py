@@ -15,33 +15,21 @@ from .paths import git_out, resolve_commit
 
 # 分けた先の名前を再エクスポートする。`from .gitfacts import ...` で使う側の import を変えない。
 
-_REVIEW_THREADS_QUERY = github._REVIEW_THREADS_QUERY
-_fetch_review_threads_page = github._fetch_review_threads_page
-_gh_api_get = github._gh_api_get
 check_run_result = github.check_run_result
 resolved_threads_on_github = github.resolved_threads_on_github
 
 CODE_EXTENSIONS = pathkinds.CODE_EXTENSIONS
 TEST_NAME_MARKERS = pathkinds.TEST_NAME_MARKERS
 TEST_PATH_MARKERS = pathkinds.TEST_PATH_MARKERS
-_has_shebang = pathkinds._has_shebang
-_is_code_path = pathkinds._is_code_path
 is_test_path = pathkinds.is_test_path
 is_test_path_in_versions = pathkinds.is_test_path_in_versions
 lacks_python_tests = pathkinds.lacks_python_tests
 python_text_lacks_tests = pathkinds.python_text_lacks_tests
 production_code_changes = pathkinds.production_code_changes
 
-_kill_process_group = process._kill_process_group
-_process_group_alive = process._process_group_alive
 run_test_at = process.run_test_at
 run_with_timeout = process.run_with_timeout
 
-_CREDENTIAL_LIB = publish._CREDENTIAL_LIB
-_commit_sync_changes = publish._commit_sync_changes
-_publish_commit_message = publish._publish_commit_message
-_push_with_credential_fallback = publish._push_with_credential_fallback
-_run_sync_command = publish._run_sync_command
 _sync_generated = publish._sync_generated
 _write_plan_file = publish._write_plan_file
 credential_fallback_args = publish.credential_fallback_args
@@ -55,14 +43,10 @@ note_stopped = results.note_stopped
 read_result = results.read_result
 record_observed_model = results.record_observed_model
 
-_parse_trailer_paragraph = trailers._parse_trailer_paragraph
 commit_trailers = trailers.commit_trailers
 
-_control_prefix = worktree._control_prefix
 _dirty_paths = worktree._dirty_paths
-_discard_worktree_changes = worktree._discard_worktree_changes
 _order_newest_first = worktree._order_newest_first
-_require_clean_worktree = worktree._require_clean_worktree
 _worktree_changes = worktree._worktree_changes
 discard_impl_leftovers = worktree.discard_impl_leftovers
 replay_commits = worktree.replay_commits
