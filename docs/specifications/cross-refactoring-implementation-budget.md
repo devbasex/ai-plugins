@@ -137,8 +137,9 @@ stateDiagram-v2
    衝突したときは、止めて人へ渡す（`VERIFY=halt`）
 6. 前進の間は回数の上限なく修正を続ける
 
-全体テストの変更起因の原因の項目が決まらないときは、取り消さずに最終ゲート修正へ寄せる。JUnit を読めず着手前も落ちて
-いたときは、まとめて取り消さずに落ちたテストの材料を残す。
+**危険フラグが立っても、検証の巡の中では全体テストを走らせない**（#3048）。どの戦略でも、立ったフラグと項目を
+`whole_test.deferred` に書いて最終ゲートの 1 回へ寄せる。全体テスト 1 回が最大約 51 分かかる ai-plugins で、巡ごとの全体テストが
+リファクタリングの工程を 4 時間超へ延ばしていたためである。範囲テストで覆えない変更の誤りは最終ゲートの全体テストが拾う。
 
 ### 落ちたテストの仕分け（`triage`・`comparison`・`flaky`）
 
@@ -165,6 +166,7 @@ stateDiagram-v2
 | --- | --- |
 | 確かめ | 木が起点と同じでも確かめを省かない |
 | 材料 | 落ちたら落ちたテストの材料（ID は JUnit → ログの要約の行、置き場は手元のログか CI の run の URL、コマンドは見分けのものか全体テスト）を最終ゲート修正の依頼に載せる |
+| 修正の向け先 | 変更起因の失敗が出たら、本文に項目の変えたファイルのパスが現れた項目（`final_gate.culprit`。項目を外した走らせ直しはしない）と、最終ゲートへ寄せた危険フラグの項目（取り消した項目を除く）を最終ゲート修正の依頼に載せる。手元でも CI でも同じ（#3048） |
 | 修正 | 前進する限り続ける。停滞か振動で修正担当を 1 度替え、替えた後も停滞か振動したら取り消さずに止めて人へ渡す（`FINAL_GATE=halt`） |
 
 ### 安全網と人へ渡す出口（`drive.py`）
@@ -218,8 +220,11 @@ stateDiagram-v2
 - 安全網の上限で `gate`・終了コード 10 で止まり、検査のプランでは `drive` のステップが承認ゲートで止まること
 - 打ち消しが衝突したら、打ち消しの前の HEAD のまま `gate` で止まること
 - 木が起点と同じ再開でも、最終ゲートが確かめを走らせること
+- どの戦略でも、危険フラグが立った項目の検証で全体テストのコマンドが起動されず、`whole_test.deferred` にフラグと項目が残ること
+- 手元でも CI でも、最終ゲートが変更起因で落ちたとき、寄せた項目と原因の候補が最終ゲート修正の依頼に載ること
 
 ## 関連リンク
 
 - 要求: https://github.com/devbasex/ai-plugins/issues/2457
+- 危険フラグの全体テストを最終ゲートへ寄せる: https://github.com/devbasex/ai-plugins/issues/3048
 - コード: `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py`・`progress.py`・`fixloop.py`・`safety_net.py`・`item_actuals.py`・`failure_material.py`・`undo.py`・`commands/converge.py`・`comparison.py`・`commands/judge.py`・`commands/flaky.py`・`commands/gate.py`

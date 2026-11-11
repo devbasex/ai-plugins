@@ -145,8 +145,6 @@ def _mark_culprits(
 
 def _settle_item(state: dict[str, Any], item: dict[str, Any], run: _Run, marks: dict[str, dict[str, Any]]) -> None:
     item["last_log"] = str(run.log)
-    # 全体のテストの直しで渡したコマンドは、範囲テストの結果で置き換わる。
-    item.pop("whole_test_command", None)
     item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
     if run.passed:
         item["status"] = VERIFIED
