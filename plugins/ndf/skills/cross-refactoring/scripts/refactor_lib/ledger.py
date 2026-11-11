@@ -283,15 +283,20 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     for sha in (state.get("final_gate") or {}).get("fix_commits") or []:
         kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
-        # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
-        # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）。
-        # 見送りの項目の検証を受けていないテストのコミットは残さない（`unverified_tests`）
-        if is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED:
-            skip = set(unverified_tests(item)) if item.get("status") == DEFERRED and not item.get("reverted_by_commit") else set()
-            for sha in item_shas(item):
-                if sha not in skip:
-                    kept[full_commit(work, sha)] = ITEM
+        for sha in _item_kept_shas(item):
+            kept[full_commit(work, sha)] = ITEM
     return kept
+
+
+def _item_kept_shas(item: dict[str, Any]) -> list[str]:
+    """項目のコミットのうち残すもの（git を呼ばない）。残さない項目なら空。"""
+    # git revert で打ち消した項目のコミットは、打ち消しのコミットと一緒に履歴に残す（#2457 決定 6）。
+    # 持ち越し・見送りの項目は取り消さないため、残したテストのコミットが HEAD にある（#2457 / `readopt`）。
+    # 見送りの項目の検証を受けていないテストのコミットは残さない（`unverified_tests`）
+    if not (is_live(item) or item.get("reverted_by_commit") or item.get("status") in KEPT_UNDROPPED):
+        return []
+    skip = set(unverified_tests(item)) if item.get("status") == DEFERRED and not item.get("reverted_by_commit") else set()
+    return [sha for sha in item_shas(item) if sha not in skip]
 
 
 def _ledger_commits(state: dict[str, Any]) -> list[str]:
