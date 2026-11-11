@@ -24,6 +24,7 @@ from crossref_helpers import (
     SCOPE_COMMAND,
     TEST_TOTAL,
     build_git_flow,
+    commit_existing_tests,
     commit_with_trailers,
     git,
     implement_items,
@@ -89,16 +90,6 @@ def _head(work):
     return git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
 
-def _existing_tests(flow, files):
-    """着手前からあるテストを足し、その HEAD を `init` の基準の SHA として記録する。"""
-    for rel, text in files.items():
-        _write(flow["work"], rel, text)
-    commit_with_trailers(flow["work"], "既存のテスト", {})
-    state = read_state(flow["path"])
-    state["baseline_test"]["head"] = _head(flow["work"])
-    write_state(flow["path"], state)
-
-
 def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **state_overrides):
     """項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。"""
     items = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
@@ -125,7 +116,7 @@ def _worktrees(work):
 
 def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, tmp_path, capsys):
     mark = tmp_path / "flaky-mark"
-    _existing_tests(
+    commit_existing_tests(
         flow,
         {
             "tests/test_flaky.py": (
@@ -154,7 +145,7 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_phases, cmd_implem
 
 def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, tmp_path, capsys):
     mark = tmp_path / "env-mark"
-    _existing_tests(
+    commit_existing_tests(
         flow, {"tests/test_env.py": (f"import pathlib\n\n\ndef test_env():\n    assert not pathlib.Path({str(mark)!r}).exists()\n")}
     )
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other")})
@@ -177,7 +168,7 @@ def test_a_failure_from_the_merged_base_branch_is_unrelated_and_keeps_the_item(f
     """#2457 受け入れ条件 10（PR 2452 の形）: 着手の後に取り込んだベースブランチで落ちたテストは、比較の木
     （項目のコミットを外した木）でも落ちるため無関係と記録され、通っていた項目は取り消されない。"""
     work = flow["work"]
-    _existing_tests(
+    commit_existing_tests(
         flow,
         {
             "src/threshold.txt": "10\n",
@@ -212,7 +203,7 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
     flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, capsys
 ):
     work = flow["work"]
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _break_total})
 
     assert verify_judged(cmd_converge, flow["path"], capsys) == "fix"
@@ -243,7 +234,7 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
 def test_after_the_deadline_the_whole_test_failure_still_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#2457 受け入れ条件 5 — 始まりが過去でも、全体テストの変更起因で取り消さず、原因の項目を修正へ回す。"""
     work = flow["work"]
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
         cmd_setup, cmd_phases,
@@ -266,7 +257,7 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
 
     原因の項目は走らせ直しのログに現れるパスで決め、その項目だけを修正へ回す（#1649）。
     """
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     raises = lambda w: _write(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
 
@@ -283,7 +274,7 @@ def test_without_junit_and_a_red_baseline_nothing_is_reverted_and_the_material_i
     flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys
 ):
     """#2457 の棚卸し #35: JUnit が無く着手前も red なら、まとめて取り消さず、落ちたテストの材料を残して最終ゲートへ寄せる。"""
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     state = read_state(flow["path"])
     state["baseline_test"]["status"] = "red"
     write_state(flow["path"], state)
@@ -315,7 +306,7 @@ def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_s
         return original(command, cwd, timeout, grace, output)
 
     patch_lib("run_with_timeout", spy_run)
-    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _touch_other("other")}, strategy=strategy_state("local-scoped-ci-whole"))
     capsys.readouterr()
 

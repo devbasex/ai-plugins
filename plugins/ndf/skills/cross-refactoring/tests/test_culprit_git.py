@@ -24,7 +24,7 @@ from crossref_helpers import (
     CALC,
     TEST_TOTAL,
     build_git_flow,
-    commit_with_trailers,
+    commit_existing_tests,
     git,
     implement_items,
     read_state,
@@ -92,15 +92,6 @@ def _head(work):
     return git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
 
-def _existing(flow, files):
-    for rel, text in files.items():
-        _write(flow["work"], rel, text)
-    commit_with_trailers(flow["work"], "既存のテスト", {})
-    state = read_state(flow["path"])
-    state["baseline_test"]["head"] = _head(flow["work"])
-    write_state(flow["path"], state)
-
-
 def _implement(flow, cmd_setup, cmd_phases, cmd_implement, changes, late=False, **over):
     items = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
     implement_items(flow, cmd_phases, cmd_implement, items, changes, late=late, **over)
@@ -129,7 +120,7 @@ def _verify(flow, cmd_converge, capsys):
 
 def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC1・AC9 の裏 — 危険フラグの項目でなく、本文にパスが現れた危険フラグの無い項目が修正へ回る。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES)})
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -147,7 +138,7 @@ def test_a_path_in_the_failure_names_the_unflagged_item_and_only_it_goes_to_fix(
 def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#2457 受け入れ条件 5・7 — 締め切りを過ぎても取り消さず、原因の項目だけを修正へ回す。危険フラグの項目は残る。"""
     work = flow["work"]
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
         cmd_setup, cmd_phases,
@@ -169,7 +160,7 @@ def test_after_the_deadline_only_the_culprit_goes_to_fix(flow, cmd_setup, cmd_ph
 def test_without_a_path_the_item_whose_removal_makes_the_test_pass_is_the_culprit(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC3・I4 — 本文にパスが無ければ、新しい順に外して走らせ直し、通るようになった項目を原因にする。HEAD は動かない。"""
     work = flow["work"]
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _calc(CALC_OFF_BY_ONE), "I-002": _flagged("other"), "I-003": _flagged("another")})
     head = _head(work)
 
@@ -189,7 +180,7 @@ OTHER_TEST = "from src import shared\n\n\ndef test_shared():\n    assert shared.
 
 def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC4 — 別々のテストを別々の項目が落とすと、両方が原因になり、危険フラグの項目は修正へ回らない。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
     _implement(
         flow,
         cmd_setup, cmd_phases,
@@ -227,7 +218,7 @@ def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_wr
         return ok
 
     monkeypatch.setattr(culprit, "git_ok", git_ok)
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
     _implement(flow, cmd_setup, cmd_phases, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": i003})
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -264,7 +255,7 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_ph
 
     締め切りを過ぎていても取り消さず、原因の 2 項目だけが修正へ回り、危険フラグの項目は残る（#2457）。
     """
-    _existing(flow, {"tests/test_layout.py": LAYOUT_TEST})
+    commit_existing_tests(flow, {"tests/test_layout.py": LAYOUT_TEST})
     long_calc = CALC + "\n\ndef extra():\n    return 0\n"  # 13 行を超える
     _implement(
         flow,
@@ -299,7 +290,7 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_ph
 
 def test_without_a_path_the_isolation_finds_the_culprit_without_a_deadline(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#2457 — 締め切りが無いため、パスで決まらなくても項目を外した走らせ直しで原因を決め、取り消さずに修正へ回す。"""
-    _existing(flow, {"tests/test_total.py": TEST_TOTAL})
+    commit_existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(
         flow,
         cmd_setup, cmd_phases,

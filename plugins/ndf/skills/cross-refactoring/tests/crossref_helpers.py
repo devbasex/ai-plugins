@@ -271,6 +271,19 @@ def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def commit_existing_tests(flow: dict[str, Any], files: dict[str, str]) -> None:
+    """着手前からあるテストを足してコミットし、その HEAD を `init` の基準の SHA として記録する。"""
+    work = flow["work"]
+    for rel, text in files.items():
+        path = work / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    commit_with_trailers(work, "既存のテスト", {})
+    state = read_state(flow["path"])
+    state["baseline_test"]["head"] = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    write_state(flow["path"], state)
+
+
 FAR_END = "2099-01-01T00:00:00+00:00"
 
 
