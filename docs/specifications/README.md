@@ -146,5 +146,6 @@
 | [ndf-diff-kinds-and-docs-only-checks.md](ndf-diff-kinds-and-docs-only-checks.md) | 差分を文書のファイルとコードのファイルに分け、文書だけの Pull Request で cross-refactoring・全体テスト・CI の全体の pytest を省くこと（テストが読む文書は対応するテストだけ）、振る舞いを決める文書の振る舞いの確認、宣言 `docs` の形と既定。工程表は `development-workflow` の SKILL.md が正 |
 | [ndf-whole-test-duration.md](ndf-whole-test-duration.md) | 全体テストの所要を確かめる振る舞いを弱めずに縮める手段の当て方（テストヘルパーの待ち・永続ワークフローの待ちの間隔・起動の遅延 import）、起動を縮めないスクリプトとその理由、基準 6 で消したテスト、消したテストの照合、届いた値。削る基準と手段は `docs/plugin-development-guide.md` が正 |
 | [ndf-context-continue-or-cut-measurement.md](ndf-context-continue-or-cut-measurement.md) | conductor の文脈を続けるか切るかの計測（計測の回・計測の条件・復元の量・待ちの前に切る規則） |
+| [ndf-mechanical-turns-to-scripts.md](ndf-mechanical-turns-to-scripts.md) | 機械的なターンをスクリプトへ移す（状態の取り出し・PR と CI の照合・手順の連続実行・進行のまとめ記録） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
