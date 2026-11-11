@@ -24,7 +24,7 @@ from .model import CONTRACTS, core_exempt
 _LIB = Path(__file__).resolve().parents[2] / "plugins" / "ndf" / "scripts" / "lib"
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
-import step_result  # noqa: E402
+import exit_codes  # noqa: E402
 
 EXIT_OWNERS = ("plugins/ndf/scripts/lib/exit_codes.py",)
 READER = "plugins/ndf/scripts/lib/step_read.py"
@@ -170,7 +170,7 @@ def exit_label_violations(entries: dict) -> list[tuple[str, str, str]]:
         for k, text in sorted(e["exit"].items()):
             if not k.lstrip("-").isdigit():
                 continue
-            label = step_result.label_of(int(k))
+            label = exit_codes.label_of(int(k))
             if not label:
                 out.append((rel, f"exit:{k}", f"終了コード {k} は終了コードの表に無い"))
             elif not text.startswith(label):
