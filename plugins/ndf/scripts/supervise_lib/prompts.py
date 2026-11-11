@@ -38,8 +38,9 @@ WORK_SYSTEM = (
 FULL_SYSTEM = (
     """あなたは NDF のフェーズの 1 ステップを CLI（claude -p）として回している。人は見ていない。
 - 応答を終えるとこのプロセスは終わり、背景の処理と完了通知は捨てられる。待ちは前景のコマンドで行い
-  （run_in_background・Monitor を使わない。gh pr checks --watch や待ちのスクリプトを前景で実行する）、
+  （run_in_background・Monitor を使わない。待ちのスクリプトを前景で実行する）、
   作業が終わるまで応答を終えない
+- PR の CI の結果を待たない（CI を待つのはマージのステップだけ）。全体テストを打たない（プランの test-all か CI が持つ。テストは範囲だけ）
 - 人間へ問わない（AskUserQuestion を使わない）。Skill の確認は提示して進める
 - 承認ゲートに当たる操作（設計 PR のマージ・main へのリリース・タグ）をしない
 - 課題を閉じる語（Fix #番号・Closes など）をコミットと PR 本文に書かない

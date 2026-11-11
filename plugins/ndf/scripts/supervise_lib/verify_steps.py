@@ -114,11 +114,39 @@ def scope_timeout(a) -> int:
     return with_margin(plan_limits(a)["test_timeout"])
 
 
+def whole_on_ci(a) -> bool:
+    """全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か。"""
+    strategy = plan_strategy(a)
+    return bool(strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE)
+
+
 def whole_timeout(a) -> int:
     """全体テストのステップの `timeout`。手元なら `whole_timeout`、CI なら `ci_wait_timeout` に余裕を足す。"""
-    limits, strategy = plan_limits(a), plan_strategy(a)
-    on_ci = bool(strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE)
-    return with_margin(limits["ci_wait_timeout"] if on_ci else limits["whole_timeout"])
+    limits = plan_limits(a)
+    return with_margin(limits["ci_wait_timeout"] if whole_on_ci(a) else limits["whole_timeout"])
+
+
+def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = ()) -> list[dict]:
+    """全体テストを CI に任せる戦略なら、全体テストのステップ（test-all。PR の CI を待つ）と `drop` を外し、test-all へ
+    向かう遷移を `after_whole` へ、入力から test-all を外す。CI の結果を待つのはマージのステップ（merge-when-green）だけで、
+    落ちればマージしない（2026-11-12、利用者の指示）。手元で走らせる戦略ならそのまま返す。"""
+    if not whole_on_ci(a):
+        return steps
+    gone = {"test-all", *drop}
+    out = []
+    for step in (s for s in steps if s["id"] not in gone):
+        step = {k: (after_whole if k in ("next", "on_fail", "skip_to") and val == "test-all" else val) for k, val in step.items()}
+        if "inputs" in step:
+            step["inputs"] = [i for i in step["inputs"] if i not in gone]
+        out.append(step)
+    return out
+
+
+def trim_check_steps(a, steps: list[dict], after_whole: str, refactor_off: bool) -> list[dict]:
+    """検査のプランのステップを外す。`refactor_off` なら構造改善（assess・refactor）を外す。全体テストを CI に任せる戦略なら、
+    レビューの後の全体テスト（test-all と、それだけを入力に持つ judge・fix）を外す（`without_ci_wait`）。"""
+    kept = [s for s in steps if not (refactor_off and s["id"] in ("assess", "refactor"))]
+    return without_ci_wait(a, kept, after_whole, drop=("judge", "fix"))
 
 
 def refactor_template_arg(a) -> str:

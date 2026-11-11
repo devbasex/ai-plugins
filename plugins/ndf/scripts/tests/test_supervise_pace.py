@@ -26,6 +26,7 @@ from supervise_lib import engine, flow, paths, queue  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
 from sprint_args import new_sprint_args  # noqa: E402
+import inproc  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
+    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
 
 
 def load(path) -> dict:
@@ -179,8 +180,9 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
     base = plan["起点"].removeprefix("origin/")
     assert s["review"]["next"] == "behavior-targets" and s["behavior-targets"]["skip_to"] == "base-sync"
-    assert s["behavior-verify"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all" and s["fix"]["next"] == "base-sync"
-    assert f"base-sync --base {base} --push" in s["base-sync"]["cmd"] and "git merge" not in s["test-all"]["cmd"]
+    # このリポジトリの宣言は全体テストを CI に任せるため、取り込みの次は finish（CI はマージが待つ）
+    assert s["behavior-verify"]["next"] == "base-sync" and s["base-sync"]["next"] == "finish" and "test-all" not in s
+    assert f"base-sync --base {base} --push" in s["base-sync"]["cmd"]
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:
         if step["type"] == "run" and not step["id"].startswith("abort"):
@@ -204,12 +206,12 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
     for step in plan["steps"]:
         if step["type"] in ("run", "drive") and step["id"] not in ("abort", "assess", "test-all"):
             assert step.get("on_fail") == "abort", step
-    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert "judge" not in s and s["base-sync"]["next"] == "ready"  # 全体テストは CI に任せる（宣言）
     assert_transitions_exist(plan)
     since = tmp_path / "since.json"
     assert cli("new", "check", "--since-last", "--id", "m-4", "--worktree", str(tmp_path), "--out", str(since)).returncode == 0
     s = steps_of(load(since))
-    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert "judge" not in s
     assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
     # 安全網で人へ渡した（終了コード 10）後は、未解決の変更へレビューと検査を打たずに終える
     assert s["refactor"]["gate_next"] == "end"

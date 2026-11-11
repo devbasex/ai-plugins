@@ -32,6 +32,8 @@ from supervise_lib.verify_steps import (
     scope_cmd,
     scope_timeout,
     test_meta,
+    trim_check_steps,
+    without_ci_wait,
     whole_cmd,
     whole_timeout,
     with_margin,
@@ -195,7 +197,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "モード": a.mode,
         "作業場所": a.worktree,
         "規則": RULE_IMPL.format(after_tests=after_tests),
-        "steps": steps,
+        "steps": without_ci_wait(a, steps, "doc-lint"),
     }
     with_decls(plan, a)
     test_meta(plan, a)
@@ -223,8 +225,8 @@ def judge_step(after_tests: str, match: bool) -> dict:
     }
 
 
-# development-workflow の工程表で「構造改善」が「—」のモード
-NO_REFACTOR_MODES = ("light", "operation", "documentation")
+NO_REFACTOR_MODES = ("light", "operation", "documentation")  # 工程表で「構造改善」が「—」のモード
+CROSS_REFACTORING_SUSPENDED = True  # 緊急の停止（2026-11-11）: 改修が終わるまで全モードで構造改善を外す。戻すときは False
 
 
 def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
@@ -342,9 +344,7 @@ def plan_check(a) -> dict:
         },
         a,
     )
-    # 工程表で「構造改善」を通らないモードは、実装レビューから始める
-    if a.mode in NO_REFACTOR_MODES:
-        plan["steps"] = [s for s in plan["steps"] if s["id"] not in ("assess", "refactor")]
+    plan["steps"] = trim_check_steps(a, plan["steps"], "ready", CROSS_REFACTORING_SUSPENDED or a.mode in NO_REFACTOR_MODES)
     return with_record(plan)
 
 
@@ -370,7 +370,7 @@ def plan_check_since(a) -> dict:
     `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
     PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
-    review_only = getattr(a, "review_only", False)
+    no_refactor = (review_only := getattr(a, "review_only", False)) or CROSS_REFACTORING_SUSPENDED
     flag = " --review" if review_only else ""
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
@@ -381,7 +381,7 @@ def plan_check_since(a) -> dict:
     cond += flag
     if getattr(a, "final", False):
         cond += " --final"
-    first = "実装レビュー" if review_only else "構造改善"
+    first = "実装レビュー" if no_refactor else "構造改善"
     steps = [
         {
             "id": "prepare",
@@ -396,13 +396,13 @@ def plan_check_since(a) -> dict:
             f"check-base/{name}",
             f"検査: {name}",
             (
-                f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
+                f"前回の検査からの差分に{'実装レビュー' if no_refactor else '構造改善と実装レビュー'}を"
                 f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
                 f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
                 "検査の後に宛先を起点のブランチへ付け替える"
             ),
             "無し（検査の修正だけ）",
-            "review" if review_only else "assess",
+            "review" if no_refactor else "assess",
             stage=first,
             body="template",
             on_fail="abort-before-pr",
@@ -447,8 +447,7 @@ def plan_check_since(a) -> dict:
         *merge_steps(a, on_fail="abort", next="record"),
         *record_steps(name, review=review_only, pr=True),
     ]
-    if review_only:
-        steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
+    steps = trim_check_steps(a, steps, "finish", no_refactor)
     issues = list(a.issue or [])
     if not issues and getattr(a, "sprint", None):
         try:
