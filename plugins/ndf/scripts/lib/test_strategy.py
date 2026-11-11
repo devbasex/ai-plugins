@@ -559,6 +559,12 @@ def declares_ci_only(decl: dict[str, Any]) -> bool:
     return isinstance(ci, dict) and ci.get("only") is True
 
 
+def ci_checks(decl: dict[str, Any]) -> list[str]:
+    """テストのチェックの名前（`test.ci.check` → `ci.required_checks`）。空なら head のすべてのチェックを読む（#3056 の決定 8）。"""
+    test, _ = _test_of(decl)
+    return list(_ci_target(test or {}, decl, None)["checks"])
+
+
 def _with_ci_only(strategy: Strategy, decl: dict[str, Any], test: Optional[dict[str, Any]], ci_check: Optional[str]) -> Strategy:
     """CI テストの宣言があれば `ci_only` を立て、CI で見るチェックを載せる（戦略の値に関わらない。#3056 の決定 1）。"""
     if declares_ci_only(decl):

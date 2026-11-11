@@ -285,3 +285,47 @@ def test_content_failure_wins_over_infra_wait(checks, gh, clock, monkeypatch, ca
     code, out = stopped(capsys, watch.poll)
     assert code == 1 and out["metrics"]["infra"] == 1
     assert gh.called("run", "rerun") == [] and gh.called("run", "view") == []
+
+
+# --- CI テストの宣言のあるリポジトリのマージ（#3056 の I7） -------------------------------------
+
+
+def test_ci_only_does_not_treat_no_checks_as_done(checks, gh, clock, monkeypatch, capsys):
+    watch = watch_of(checks, monkeypatch, [[]])
+    watch.test_checks = []
+    code, out = stopped(capsys, watch.wait)
+    assert code == 1 and "1 件も載らない" in out["summary"]
+
+
+def test_without_ci_only_no_checks_is_still_done(checks, gh, clock, monkeypatch):
+    watch = watch_of(checks, monkeypatch, [[]])
+    watch.wait()
+    assert {"kind": "check", "name": "(none)", "result": "no_checks"} in watch.items
+
+
+def test_ci_only_waits_for_an_absent_test_check_and_stops_at_the_deadline(checks, gh, clock, monkeypatch, capsys):
+    watch = watch_of(checks, monkeypatch, [[ok("Lint", "1", "11", name="lint")]], timeout=600.0)
+    watch.test_checks = ["pytest"]
+    code, out = stopped(capsys, watch.wait)
+    assert code == 1 and "pytest（現れない）" in out["summary"]
+
+
+def test_ci_only_merges_when_the_test_check_passes_or_is_skipped(checks, gh, clock, monkeypatch):
+    for conclusion in ("SUCCESS", "SKIPPED"):
+        test = cr("Pytest", "pytest", conclusion, "3", "33", "2026-10-05T04:40:00Z", "2026-10-05T04:41:00Z")
+        watch = watch_of(checks, monkeypatch, [[ok("Lint", "1", "11", name="lint"), test]])
+        watch.test_checks = ["pytest"]
+        watch.wait()
+        assert {"kind": "check", "name": "Pytest / pytest", "result": "passed"} in watch.items
+
+
+def test_merge_reads_the_test_checks_only_when_declared(checks, tmp_path):
+    from merged_lib import merge
+
+    (tmp_path / ".ndf").mkdir()
+    decl = tmp_path / ".ndf" / "project.json"
+    suites = [{"name": "t", "runner": "pytest", "command": "pytest"}]
+    decl.write_text(json.dumps({"test": {"suites": suites}}), encoding="utf-8")
+    assert merge.test_checks_of(tmp_path) is None
+    decl.write_text(json.dumps({"test": {"ci": {"only": True, "check": "pytest"}, "suites": suites}}), encoding="utf-8")
+    assert merge.test_checks_of(tmp_path) == ["pytest"]
