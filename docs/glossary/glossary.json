@@ -3096,6 +3096,12 @@
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
+      "term": "偽の重なり",
+      "context": "ndf-workflow",
+      "meaning": "重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組",
+      "pending_source": "issues/issue-1811-requirements.md"
+    },
+    {
       "term": "共有の一覧",
       "context": "ndf-workflow",
       "meaning": "複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く",
