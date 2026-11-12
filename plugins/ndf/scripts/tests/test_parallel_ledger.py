@@ -320,3 +320,60 @@ def test_events_of_reads_the_checkpoint_once_for_all_missing_keys(tmp_path, monk
     monkeypatch.setattr(plg, "load_checkpoint", lambda *a: reads.append(a) or real(*a))
     got = pl.events_of(tmp_path, "p1", ["answer-a", "answer-b", "answer-c"])
     assert got == [{"result": "ok"}, {"result": "ng"}, None] and len(reads) == 1
+
+
+def _gate2(main, rid: str, n: int, lane: str = "la"):
+    _add(main, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": 1})
+
+
+def _resume(main, n: int, phase: str):
+    _add(main, {"n": n, "phase": phase, "result": "released"}, topic="resume")
+
+
+def _unanswered(main) -> list[str]:
+    import parallel_status as pst
+
+    return [q["id"] for q in pst.unanswered(main, "p1", plg.read_ledger_rows(main, "p1", 0).rows)]
+
+
+@pytest.mark.parametrize("phase", ["confirm", "settle"])
+def test_a_settled_release_gate_is_not_unanswered(tmp_path, phase):
+    """#3080 の受け入れ条件 9・10 / I8・I9: 確定か締めの後のリリース承認ゲートは数えず、提示中のものは数える。"""
+    _gate2(tmp_path, "rel-6", 6)
+    _gate2(tmp_path, "rel-7", 7)
+    _resume(tmp_path, 6, phase)
+    assert _unanswered(tmp_path) == ["rel-7"]
+
+
+def test_a_second_presentation_after_the_confirm_is_still_unanswered(tmp_path):
+    """#3080 の I9: 確定の後に届いた出し直しの提示の 2 回目は、後に確定か締めが届くまで数える。"""
+    _gate2(tmp_path, "rel-6-1", 6)
+    _resume(tmp_path, 6, "confirm")
+    _gate2(tmp_path, "rel-6-2", 6)
+    assert _unanswered(tmp_path) == ["rel-6-2"]
+    _resume(tmp_path, 6, "settle")
+    assert _unanswered(tmp_path) == []
+
+
+def test_other_questions_are_counted_as_before(tmp_path):
+    """#3080 の受け入れ条件 11 / I10: gate1・ask・unmatched の数え方は変わらない（同じ連番の締めがあっても）。"""
+    for kind in ("gate1", "ask", "unmatched"):
+        _add(tmp_path, {"kind": kind, "id": f"la-{kind}", "lane": "la", "n": 6})
+    _resume(tmp_path, 6, "settle")
+    assert _unanswered(tmp_path) == ["la-gate1", "la-ask", "la-unmatched"]
+
+
+def test_pending_questions_of_an_opened_plan_skip_settled_release_gates(tmp_path):
+    """#3080 の受け入れ条件 11 / I8: 台帳を開いた計画でも、チェックポイントの後の行とチェックポイントの問いの両方で処理済みを除く。"""
+    _ledger(tmp_path, "opened")
+    held = {"kind": "gate2", "id": "rel-5", "lane": "la", "n": 5, "k": 1}
+    _add(tmp_path, held)
+    plg.save_checkpoint(
+        tmp_path, "p1", {"offset": plg.read_ledger_rows(tmp_path, "p1").next, "unread": [], "published": {}, "questions": [held]}
+    )
+    _gate2(tmp_path, "rel-6", 6)
+    _gate2(tmp_path, "rel-7", 7)
+    assert [q["id"] for q in plg.pending_questions(tmp_path, "p1")] == ["rel-5", "rel-6", "rel-7"]
+    _resume(tmp_path, 5, "settle")
+    _resume(tmp_path, 6, "confirm")
+    assert [q["id"] for q in plg.pending_questions(tmp_path, "p1")] == ["rel-7"]
