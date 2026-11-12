@@ -6645,6 +6645,21 @@
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
+    },
+    {
+      "term": "衝突の状態",
+      "context": "ndf-workflow",
+      "meaning": "Pull Request をベースブランチへ取り込めるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない",
+      "source": "",
+      "pending_source": "issues/issue-3076-requirements.md",
+      "code": "mergeable"
+    },
+    {
+      "term": "CI の待ち",
+      "context": "ndf-workflow",
+      "meaning": "CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout",
+      "source": "",
+      "pending_source": "issues/issue-3076-requirements.md"
     }
   ]
 }
