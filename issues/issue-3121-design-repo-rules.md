@@ -49,7 +49,7 @@
 
 ### 決定 12: 宛先の検査を Pull Request の変更で緩められないため、`check-pr-base.sh` は宛先のブランチの宣言を読む
 
-CI は Pull Request のマージの結果を checkout するため、worktreeの `.ndf/worktree.json` を読むと、Pull Request が
+CI は Pull Request のマージの結果を checkout する。そのため worktree の `.ndf/worktree.json` を読むと、Pull Request が
 自分の宣言を `whole` へ書き換えて検査を緩められる。`git show origin/<宛先>:.ndf/worktree.json` の値で判定する。
 `branch_flow` を NDF がメインディレクトリから読む（本体の非機能の実現方式）のと同じ考え方である。
 
@@ -102,9 +102,9 @@ Pull Request で全体テストを省く。選んで集めたリリースブラ�
 
 ### 決定 17: 本番チャネルを `develop` へ戻す手順を 1 つにするため、今の `release/v<版>-sync` の取り込みを両方の取り込み方で使う
 
-本番のリリースの後、`release/v<版>-sync` に `origin/develop` を取り込み、版数の箇所の衝突は本番の版を取り、
+本番のリリースの後、`release/v<版>-sync` に `origin/develop` を取り込む。版数の箇所の衝突は本番の版を取り、
 `release/v<版>-sync` → `develop` の Pull Request で戻す。今の手順（`docs/versioning-and-distribution.md` の「正式版を出す」）
-と同じ操作で、`selected` ではリリースブランチが `main` と選んだスプリントを含むので、戻すマージが本番チャネルを
+と同じ操作である。`selected` ではリリースブランチが `main` と選んだスプリントを含むので、戻すマージが本番チャネルを
 `develop` へ戻すこと（E13）になる。`develop` の作り直しは本体の決定 6 のとおり行わない。
 
 根拠: Value 3 / Value 11（MVV 版 7）

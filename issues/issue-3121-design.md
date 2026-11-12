@@ -21,15 +21,11 @@
 | 利用者の指示（2026-11-12） | 利用者の指示の原文 | 「ブランチルールはリポジトリの事情によって決まり、ndfはどんなルールでも対応できるように設計されるべき」 |
 | 変更前のプランの値（下の「変更前の値」） | 実測 | 宣言の無いリポジトリで保つ値が、起点 `origin/<ベースブランチ>`・宛先 `<ベースブランチ>` であること |
 
-要求と受け入れ条件は #3121 の本文にある（コピーは [issue-3121-requirements.md](issue-3121-requirements.md)）。
-#3119 の受け入れ内容（受け入れ条件 14〜19）は分冊 [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) にある。
-この文書は「どう作るか」だけを扱う。
-
 ### 変更前の値
 
-受け入れ条件 2 の前提の確認として、変更前の版（10.27.59）で ai-plugins の宣言（`base_branch: develop`・
-`production_branch: main`・`branch_flow` なし）から `supervise.py new sprint --issue 3121 --design 3121 --name baseline3121`
-を組み、次の値を得た（2026-11-12）。実装後に同じ入力で組み、すべて一致することを確かめる。
+受け入れ条件 2 の前提として、変更前の版（10.27.59）のプランの値を 2026-11-12 に確かめた。宣言は ai-plugins の値
+（`base_branch: develop`・`production_branch: main`・`branch_flow` なし）である。組んだコマンドは `supervise.py new sprint --issue 3121 --design 3121 --name baseline3121` である。
+得た値は次のとおりである。実装後に同じ入力で組み、すべて一致することを確かめる。
 
 | プラン | 値 | 変更前の値 |
 | --- | --- | --- |
@@ -39,6 +35,10 @@
 | スプリントブランチ（`5-sprint-branch.json`） | 作る起点 | `worktree-setup.sh create sprint/baseline3121`（`--from` なし = `base_branch`） |
 | 検査（`7-check.json`） | `pr` のステップの `base` | `develop` |
 | 開発版のデプロイ（`8-release.json`） | `起点`・`--base`・`--ref`（範囲の比べる元） | `origin/develop`・`develop`・`develop` |
+
+要求と受け入れ条件は #3121 の本文にある（コピーは [issue-3121-requirements.md](issue-3121-requirements.md) ）。
+#3119 の受け入れ内容（受け入れ条件 14〜19）は分冊 [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) にある。
+この文書は「どう作るか」だけを扱う。
 
 ## ドメインモデル
 
@@ -363,8 +363,8 @@ graph TD
 
 ### 決定 1: 既存の読み手と置き場を共有するため、宣言を `.ndf/worktree.json` の `branch_flow` に置く
 
-起点・本番チャネルを読む関数（`lib/repo.py`・`supervise_lib/decl.py`・`worktree-branch.sh`）と `project-decl.py` の書き出しが
-既に `worktree.json` を読み書きしている。同じファイルに置けば読み手を増やさない。`.ndf/project.json` は解析が書く宣言で、
+起点・本番チャネルを読む関数（`lib/repo.py`・`supervise_lib/decl.py`・`worktree-branch.sh`）は既に `worktree.json` を読む。
+`project-decl.py` の書き出しも同じファイルへ書く。同じファイルに置けば読み手を増やさない。`.ndf/project.json` は解析が書く宣言で、
 ブランチの項目は既に `worktree.json` へ書き出す形になっている（P6）。
 
 - 作り方: 自前で作る・標準に倣う
@@ -399,7 +399,7 @@ graph TD
 ### 決定 5: 選んで集める取り込み方の範囲を正しく保つため、スプリントブランチへはベースブランチを取り込まず、起点から取り込む
 
 ベースブランチの取り込み（`base_sync_steps`）がベースブランチを取り込むと、本番へ出していない別のスプリントがスプリント
-ブランチに入り、リリースブランチへ混ざる（2026-11-12 のリリース 9 と同じ形）。取り込みの元をスナップショットの `start_branch` にする。
+ブランチに入る。それがリリースブランチへ混ざる（2026-11-12 のリリース 9 と同じ形）。取り込みの元をスナップショットの `start_branch` にする。
 宣言の無いリポジトリでは `start_branch` がベースブランチなので、今の振る舞いと同じである。ベースブランチとの衝突は検査の
 Pull Request のマージで現れ、止めて人へ戻す（E8）。
 
@@ -418,9 +418,9 @@ Pull Request のマージで現れ、止めて人へ戻す（E8）。
 要る。後片付けは `git merge-base --is-ancestor <スプリントブランチ> origin/<本番チャネル>` が真のときだけ消す。確定仕様化の
 PR はスプリントブランチへ入り、本番チャネルに含まれていないコミットを持つため、次のリリースの単位になる。
 
-GitHub の設定「マージした head のブランチを自動で消す」（`delete_branch_on_merge`）が有効なリポジトリでは、検査の
-Pull Request のマージで origin のスプリントブランチが消える（ai-plugins は有効。`gh api repos/devbasex/ai-plugins` で
-2026-11-12 に確かめた）。リポジトリの設定は NDF が変えないので、マージのステップの後に、消えていればローカルの先端を
+GitHub の設定「マージした head のブランチを自動で消す」（`delete_branch_on_merge`）が有効なリポジトリがある。
+そこでは、検査の Pull Request のマージで origin のスプリントブランチが消える。ai-plugins は有効である
+（`gh api repos/devbasex/ai-plugins` で 2026-11-12 に確かめた）。リポジトリの設定は NDF が変えないので、マージのステップの後に、消えていればローカルの先端を
 push し直す。開発版の PR で `release/v<版>` を戻す `release-steps.py` の `_restore_branch` が同じ処理なので、
 `lib/repo.py` へ移して両方から呼ぶ。強制 push はしない。
 
@@ -465,7 +465,7 @@ push し直す。開発版の PR で `release/v<版>` を戻す `release-steps.p
 | 8 | `worktree` の手順書の `branch_flow` の例を読み出してスキーマに通すと通る | 例の値を表に無い値にすると落ちる |
 | 9 | 合成した履歴で、4 項目に値・確からしさ・根拠が出る。標本の足りない項目は `unknown` と理由 | 標本の足りない項目に値を出すと落ちる |
 | 10・I3 | スナップショットが `whole` のスプリントは、宣言を `selected` に変えた後も、組み直したリリースのプランと後片付けが `whole` で動く | 後の工程が宣言を読み直すと落ちる |
-| 11 | ai-plugins の履歴をスナップショットた合成の入力で、`start=base`・`doc_prs=base`・`promotion=whole` の案が出る | 測定が本番チャネル宛ての head を読み違えると落ちる |
+| 11 | ai-plugins の履歴をスナップショットした合成の入力で、`start=base`・`doc_prs=base`・`promotion=whole` の案が出る | 測定が本番チャネル宛ての head を読み違えると落ちる |
 | 12 | ずれた宣言で `drift` が項目・根拠・案を出し、合った宣言では `items` が空 | ずれが無いのに行を出すと落ちる |
 | I4 | 選んで集めるスプリントの検査のプランで、ベースブランチの取り込みの元が `origin/<本番チャネル>` | 元をベースブランチに戻すと落ちる |
 | I6 | スナップショットの取り込み方が違う 2 レーンの提示が止まり、レーンの名前を出す | 混ぜたまま提示すると落ちる |
@@ -489,7 +489,7 @@ Skill の本文の行は、2026-11-12 に `grep -rlw develop` と `main`・`mast
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
 | ai-plugins の `.ndf/worktree.json` に `branch_flow` を書き、`AGENTS.md` の「Git運用ルール」「版とリリースの方針」を #3119 の運用へ書き換える | C7 | 利用者の設定と指示書の運用の節を書き換える。設計承認ゲートとリリース承認ゲートで人が見る |
-| `main` 宛の Pull Request を通す条件（必須のチェック `guard` が走らせる `scripts/check-pr-base.sh`）を、`selected` の宣言で決定 14 の判定に変える | C2 | 本番チャネルへ何を入れてよいかの判定を変える。設計承認ゲートで人が見る |
+| `main` 宛の Pull Request を通す条件（必須のチェック `guard` が走らせる `scripts/check-pr-base.sh`）を、`selected` の宣言で分冊の決定 14 の判定に変える | C2 | 本番チャネルへ何を入れてよいかの判定を変える。設計承認ゲートで人が見る |
 
 ## 未確認のまま残ること
 
