@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 
+import branch_flow
 import decl
 import proc
 from closing import defer_closing
@@ -68,11 +69,11 @@ def declared_base(root, remote: bool = False) -> str | None:
 
 
 def default_branch(root) -> str | None:
-    """既定ブランチ。origin の HEAD の指す先 → ローカルの `main` → `master` の順。どれも無ければ `None`。"""
+    """既定ブランチ。origin の HEAD の指す先 → ローカルの候補（`branch_flow.DEFAULT_BRANCH_CANDIDATES`）の順。どれも無ければ `None`。"""
     head = proc.git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if head:
         return head.split("/", 1)[-1]
-    for b in ("main", "master"):
+    for b in branch_flow.DEFAULT_BRANCH_CANDIDATES:
         if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None:
             return b
     return None
@@ -164,6 +165,26 @@ def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
     if _branch_value(wt.get("production_branch")) or root is None:
         return production_of(wt, None)
     return production_of(wt, default_branch(root))
+
+
+def resolved_flow(root, base: str | None = None, production: str | None = None) -> branch_flow.ResolvedFlow:
+    """ブランチ運用の宣言をブランチ名まで解く（`base`・`production` を渡せばそれを使う）。宣言が壊れていれば `branch_flow.FlowError`。"""
+    wt = read_worktree_decl(root)[0] if root else {}
+    flow = branch_flow.of_decl(wt)
+    base = base or declared_base(root) or default_branch(root)
+    production = production or production_branch(root, wt)[0]
+    return flow.resolve(base, production)
+
+
+def restore_branch(root, branch: str, ref: str = "HEAD") -> bool:
+    """Pull Request のマージで origin の `branch` が消えていれば（`delete_branch_on_merge`）、`ref` の先端を push し直す。
+
+    在れば何もしない（強制 push はしない）。push し直したら真。`release-steps.py` の開発版の `release/v<版>` と、
+    選んで集める取り込み方の検査の後のスプリントブランチ（#3121 の決定 7）が使う。"""
+    if proc.git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode == 0:
+        return False
+    proc.git(root, "push", "-q", "origin", f"{ref}:refs/heads/{branch}")
+    return True
 
 
 def first_git_tree(roots) -> Path | None:

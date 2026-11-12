@@ -9,7 +9,7 @@ from pathlib import Path
 
 from step_result import result
 from supervise_lib import limits, release_templates
-from supervise_lib.decl import with_decls
+from supervise_lib.decl import resolved_flow, with_decls
 from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.paths import refactor_step_seconds
 from supervise_lib.procedures import (
@@ -398,8 +398,9 @@ def plan_check_since(a) -> dict:
             on_fail="abort-before-pr",
         ),
         *_inspect_steps(a, "{pr}", scope),
-        # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
-        *base_sync_steps(f"--base {shlex.quote(a.base)}", "test-all", push=True, on_error="abort", returns=False, stage="完了判定"),
+        # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る。
+        # 取り込みの元はスプリントの起点（選んで集める取り込み方でベースブランチの別のスプリントを入れない。#3121 の I4）
+        *base_sync_steps(f"--base {shlex.quote(resolved_flow(a).start_branch or a.base)}", "test-all", push=True, on_error="abort", returns=False, stage="完了判定"),
         {
             "id": "test-all",
             "type": "run",

@@ -11,24 +11,12 @@ from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
-from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, resolved_flow, with_decls
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
-from supervise_lib.sprint_waves import (
-    sprint_branch,
-    plan_fast_check,
-    plan_fast_impl,
-    plan_sprint_branch,
-    plan_sprint_check,
-    plan_sprint_design,
-    sprint_impl_plans,
-    plan_sprint_release,
-    plan_advise_design,
-    design_read,
-    plan_design_results,
-    plan_mvv_design,
-    plan_mvv_release,
-)
+from supervise_lib.sprint_waves import design_read, flow_head, plan_advise_design, plan_design_results, plan_fast_check
+from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
+from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans, with_base
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
@@ -174,18 +162,19 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     verify = has_record(record_pr)
+    target = resolved_flow(a).doc_target(sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
     plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
             "モード": a.mode,
             "作業場所": f"{repo}/.worktrees/{branch}",
             "branch": branch,
-            "起点": f"origin/{a.base}",
+            "起点": f"origin/{target}",
             "リポジトリ": repo,
             "規則": "",
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
-                *_spec_pr_steps(a, refs, "config-save" if verify else "deep-due"),
+                *with_base(_spec_pr_steps(a, refs, "config-save" if verify else "deep-due"), target),
                 *(release_verify_steps(a.name, refs, record_pr, after="deep-due") if verify else []),
                 deep_due_step(a, repo, issues, after="merge-gate"),
                 _retro_step(a, refs, stats, repo),
@@ -373,7 +362,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         return stop
     if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
         return stop
-    waves = waves if waves is not None else sprint_plans(a)
+    waves = waves if waves is not None else sprint_branch_first(a, sprint_plans(a))
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
         apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）
@@ -387,7 +376,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     index = write_stage_index(waves, out)
     add_resume(index)
     manifest = out / "sprint.json"
-    head, guidance = with_cd_guidance(a, manifest_head(a, pace, closing))
+    head, guidance = with_cd_guidance(a, {**manifest_head(a, pace, closing), **flow_head(a)})
     manifest.write_text(json.dumps({**head, "リリースの経路": route_rows(a), "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(

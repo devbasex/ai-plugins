@@ -649,13 +649,6 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     return main_pr, merge, verdict
 
 
-def _restore_branch(root, branch):
-    """開発版の PR のマージで origin の release/v<版> が消えていれば（delete_branch_on_merge）、ローカルの先端を push し直す。
-    本番の照合（check_approved の fetch）と本番の PR の head はこの枝を読む。在れば何もしない（強制 push はしない）。"""
-    if git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode != 0:
-        git(root, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
-
-
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -709,7 +702,8 @@ def cmd_release(a):
         # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
         # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
         allowed = approval.release_pr_allowed(root, release_pr, pr_view)
-        _restore_branch(root, branch)
+        # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
+        repo_lib.restore_branch(root, branch)
         verdict = approval.check_approved(root, approved, branch, allowed)
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)

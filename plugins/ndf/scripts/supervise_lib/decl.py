@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import branch_flow
 import decl as setting_decl
 import delivery
 import formatting
@@ -251,6 +252,9 @@ def apply_decls(a) -> None:
       引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
+    - ブランチ運用（a.flow）: worktree.json の branch_flow をブランチ名まで解いたスナップショット（`flow_snapshot`）。
+      宣言が壊れていれば既定値へ倒さずに DeclError（#3121 の I1）
+
     リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
@@ -260,11 +264,49 @@ def apply_decls(a) -> None:
     if not a.production_branch and roots and a.kind in USES_PRODUCTION:
         # 既定ブランチは、まだ作っていない worktree ではなく存在する木から解く（#2097 の決定 1）
         a.production_branch = repo.production_branch(repo.first_git_tree(roots), wt)[0]
+    a.flow = flow_snapshot(a, wt)
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:
         a.glossary_ready = glossary_ready(roots)
     _require_declared(a)
+
+
+FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
+
+
+def flow_snapshot(a, wt: dict) -> dict:
+    """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあれば（目録から読んだ
+    開始時の値）それを使い、宣言を読み直さない（#3121 の I3）。宣言が壊れていれば DeclError。"""
+    if isinstance(getattr(a, "flow", None), dict) and a.flow:
+        return a.flow
+    if (pinned := pinned_flow(a)) is not None:
+        return pinned
+    try:
+        flow = branch_flow.of_decl(wt)
+    except branch_flow.FlowError as e:
+        raise DeclError(str(e)) from e
+    source = FLOW_SOURCE if flow.declared else f"既定値（{FLOW_SOURCE} が無い）"
+    return flow.resolve(a.base, getattr(a, "production_branch", None)).as_snapshot(source)
+
+
+def pinned_flow(a) -> dict | None:
+    """スプリントの目録（`sprint.json`）に開始時に書いたスナップショット。`new sprint` を同じスプリントで打ち直したときと
+    `new close` は、宣言ではなくこれを読む（決定 4）。目録が無い・スナップショットが無ければ None。"""
+    if getattr(a, "kind", None) not in ("sprint", "close") or not getattr(a, "name", None):
+        return None
+    from supervise_lib.procedures import sprint_out
+
+    try:
+        got = json.loads((sprint_out(a) / "sprint.json").read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return got if isinstance(got, dict) and got else None
+
+
+def resolved_flow(a) -> branch_flow.ResolvedFlow:
+    """引数のスナップショットを読む。無ければ（スナップショットを持たない呼び手）宣言の無いリポジトリの値（I3）。"""
+    return branch_flow.from_snapshot(getattr(a, "flow", None), getattr(a, "base", None), getattr(a, "production_branch", None))
 
 
 def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
@@ -381,6 +423,7 @@ def decl_fields(a) -> dict:
         "test_limits",
         "test_note",
         "routes",
+        "flow",
         *STEP_BUDGETS,
     )
     return {k: getattr(a, k, None) for k in keys}

@@ -33,6 +33,44 @@
       "type": "string",
       "description": "リリースした版が常用する利用者へ届く本番のチャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
     },
+    "branch_flow": {
+      "type": "object",
+      "description": "ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "enum": [
+            "base",
+            "production"
+          ],
+          "default": "base"
+        },
+        "integrate": {
+          "type": "string",
+          "enum": [
+            "check"
+          ],
+          "default": "check"
+        },
+        "doc_prs": {
+          "type": "string",
+          "enum": [
+            "base",
+            "sprint"
+          ],
+          "default": "base"
+        },
+        "promotion": {
+          "type": "string",
+          "enum": [
+            "whole",
+            "selected"
+          ],
+          "default": "whole"
+        }
+      }
+    },
     "guard": {
       "type": "object",
       "additionalProperties": true,
