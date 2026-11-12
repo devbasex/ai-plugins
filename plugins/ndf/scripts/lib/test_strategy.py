@@ -158,6 +158,7 @@ class Strategy:
     `round_command` は引数（`--round-test` など）のラウンドテストか、旧形の状態ファイルの ` && ` でつないだもの。
     宣言から導いた `round-only` では `None` で、ラウンドテストは suite ごとの `command` から組む（I6）。
     `round_kind` は `round_command` の種別。
+    `ci_only` は CI テストの宣言（`test.ci.only: true`。#3056）。真なら手元でテストの suite を走らせず、全体を CI に任せる。
     """
 
     name: str
@@ -167,10 +168,11 @@ class Strategy:
     ci: Optional[dict[str, Any]] = None
     notes: list[str] = field(default_factory=list)
     round_kind: str = TEST
+    ci_only: bool = False
 
     @property
     def whole_on_ci(self) -> bool:
-        return self.name == LOCAL_SCOPED_CI_WHOLE
+        return self.ci_only or self.name == LOCAL_SCOPED_CI_WHOLE
 
     def scoped_suites(self, kind: Optional[str] = None) -> list[Suite]:
         return [s for s in self.suites if s.scope_command and (kind is None or s.kind == kind)]
@@ -200,8 +202,10 @@ class Strategy:
     def round_runs(self) -> list[ScopeRun]:
         """ラウンドテストを種別つきで並べる。引数由来の `round_command` は `round_kind`、宣言からなら suite ごとの `kind`。"""
         if self.round_command:
-            return [ScopeRun("round", self.round_kind, self.round_command)]
-        return [ScopeRun(s.name, s.kind, s.command) for s in self.suites if s.command]
+            runs = [ScopeRun("round", self.round_kind, self.round_command)]
+        else:
+            runs = [ScopeRun(s.name, s.kind, s.command) for s in self.suites if s.command]
+        return [r for r in runs if not (self.ci_only and r.kind == TEST)]  # CI テストの宣言ならテストを外す（#3056）
 
     def as_state(self) -> dict[str, Any]:
         """状態ファイルとプランへ写す形。以後は変えない（集約の不変条件）。"""
@@ -215,6 +219,8 @@ class Strategy:
         }
         if self.round_command:
             out["round_kind"] = self.round_kind
+        if self.ci_only:
+            out["ci_only"] = True
         return out
 
     @classmethod
@@ -237,6 +243,7 @@ class Strategy:
             data.get("ci"),
             list(data.get("notes") or []),
             str(data.get("round_kind") or TEST),
+            bool(data.get("ci_only")),
         )
 
 
@@ -335,8 +342,10 @@ def target_path(target: object) -> str:
 
 def scope_runs(strategy: Strategy, targets: list[str], changed: list[str]) -> list[ScopeRun]:
     """範囲テストの並び。テストの suite には対象（`targets`）を、静的解析の suite には変更したファイル（`changed`）の
-    うち `covers` に当たるものを入れる（I10）。入れるものが無い suite は組まない。"""
-    runs = [ScopeRun(s.name, TEST, fill(str(s.scope_command), paths)) for s, paths in suite_groups(strategy, list(targets))]
+    うち `covers` に当たるものを入れる（I10）。入れるものが無い suite は組まない。CI テストの宣言があればテストの suite を
+    組まない（#3056）。"""
+    groups = [] if strategy.ci_only else suite_groups(strategy, list(targets))
+    runs = [ScopeRun(s.name, TEST, fill(str(s.scope_command), paths)) for s, paths in groups]
     for suite in strategy.scoped_suites(LINT):
         mine = [str(f) for f in changed if suite.covers(str(f))]
         if mine:
@@ -545,6 +554,34 @@ def _ci_target(test: dict[str, Any], decl: dict[str, Any], ci_check: Optional[st
     return {"check": check, "checks": [check] if check else required, "junit_artifacts": ci.get("junit_artifacts") or None}
 
 
+CI_ONLY_NOTE = "CI テストの宣言があるため、テストの suite を手元で走らせず CI に任せた（結果は gh pr checks <PR> で読む）"
+
+
+CI_ONLY_SWEEP = "- テストを手元で打たない（.ndf/project.json の CI テストの宣言）。合否は PR の CI の結果を `gh pr checks <PR>` で読む\n"
+
+
+def declares_ci_only(decl: dict[str, Any]) -> bool:
+    """CI テストの宣言（`test.ci.only: true`）があるか（#3056）。宣言を読む側はすべてここを通す。"""
+    test, _ = _test_of(decl)
+    ci = (test or {}).get("ci")
+    return isinstance(ci, dict) and ci.get("only") is True
+
+
+def ci_checks(decl: dict[str, Any]) -> list[str]:
+    """テストのチェックの名前（`test.ci.check` → `ci.required_checks`）。空なら head のすべてのチェックを読む（#3056 の決定 8）。"""
+    test, _ = _test_of(decl)
+    return list(_ci_target(test or {}, decl, None)["checks"])
+
+
+def _with_ci_only(strategy: Strategy, decl: dict[str, Any], test: Optional[dict[str, Any]], ci_check: Optional[str]) -> Strategy:
+    """CI テストの宣言があれば `ci_only` を立て、CI で見るチェックを載せる（戦略の値に関わらない。#3056 の決定 1）。"""
+    if declares_ci_only(decl):
+        strategy.ci_only = True
+        strategy.ci = strategy.ci or _ci_target(test or {}, decl, ci_check)
+        strategy.notes.append(CI_ONLY_NOTE)
+    return strategy
+
+
 def propose(decl: dict[str, Any]) -> tuple[Optional[str], str]:
     """宣言だけから戦略を導く（解析の答えの既定と、`test.strategy` が無い宣言の経路）。戻りは（戦略, 根拠）。
 
@@ -704,7 +741,7 @@ def resolve(
     _check_kind(str(template_kind), "--test-kind")
     from_args = _from_args(decl, baseline_test, round_test, ci_check, str(template_kind), scope_paths)
     if from_args is not None:
-        return from_args
+        return _with_ci_only(from_args, decl, _test_of(decl)[0], ci_check)
     test, reason = _test_of(decl)
     if test is None:
         raise StrategyError(MISSING_TEST.format(reason=reason if reason is not None else "test のキーが無い"))
@@ -714,11 +751,11 @@ def resolve(
     if name == ROUND_ONLY:
         if not any(s.command for s in suites):
             raise StrategyError("test.suites に command を持つ suite が無い")
-        return Strategy(ROUND_ONLY, source, suites)
+        return _with_ci_only(Strategy(ROUND_ONLY, source, suites), decl, test, ci_check)
     if name == LOCAL_SCOPED_CI_WHOLE and not any(s.scope_command for s in suites):
         raise StrategyError("local-scoped-ci-whole には scope_command を持つ suite が要る")
     ci = _ci_target(test, decl, ci_check) if name == LOCAL_SCOPED_CI_WHOLE else None
-    return Strategy(str(name), source, suites, ci=ci)
+    return _with_ci_only(Strategy(str(name), source, suites, ci=ci), decl, test, ci_check)
 
 
 def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
@@ -728,6 +765,7 @@ def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
     分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。種別・雛形の誤りを先に当て、誤りが無く
     `strategy` を書かず、どの suite も `command` と `scope_command` を持たない宣言（テストの無い宣言。
     `{"suites": []}` を含む）は名指しするコマンドが無いとして `None` を返す（#1593）。
+    CI テストの宣言があれば静的解析の suite だけを返す（テストは手元で打たず、PR の CI の結果を読む。#3056）。
     """
     test, _ = _test_of(decl)
     if test is None:
@@ -736,7 +774,8 @@ def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
     _check_templates(suites)
     if not test.get("strategy") and not any(s.command or s.scope_command for s in suites):
         return None
-    return resolve(decl).whole_commands() or None
+    strategy = resolve(decl)
+    return strategy.whole_commands(LINT if strategy.ci_only else None) or None
 
 
 def decl_of(root, supervise_decl: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], Optional[str]]:

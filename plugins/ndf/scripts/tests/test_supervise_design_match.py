@@ -17,6 +17,9 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, pr as pr_step  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 HEADING = "## 設計と違う点"
 
 
@@ -26,10 +29,23 @@ def git(cwd, *args):
 
 def new_impl(tmp_path, *extra) -> dict:
     out = tmp_path / "plan.json"
-    p = subprocess.run(
-        [PY, str(SUPERVISE), "new", "impl", "--issue", "1", "--worktree", "/w", "--tests", "t", "--title", "T", "--out", str(out), *extra],
-        capture_output=True,
-        text=True,
+    # 同じプロセスで起こす（conftest の `_local_tests_route` が、このリポジトリの CI テストの宣言を読まない道にする）
+    p = inproc.run(
+        SUPERVISE,
+        "new",
+        "impl",
+        "--issue",
+        "1",
+        "--worktree",
+        "/w",
+        "--tests",
+        "t",
+        "--title",
+        "T",
+        "--out",
+        str(out),
+        *extra,
+        cwd=SCRIPTS.parents[2],
     )
     assert p.returncode == 0, p.stderr
     return json.loads(out.read_text())

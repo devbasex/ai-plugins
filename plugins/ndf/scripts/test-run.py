@@ -285,11 +285,11 @@ def _select_scope_runs(root: pathlib.Path, a, strategy: ts.Strategy, only: str |
     """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。"""
     if strategy.name == ts.ROUND_ONLY:
         runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
-        return runs, only is not None and not runs
+        return runs, (only is not None or strategy.ci_only) and not runs
     changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
     runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
     # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
-    return runs, not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
+    return runs, not runs and (strategy.ci_only or only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
 
 
 def _split_scope_failures(runs: list, failed: list[str]) -> tuple[list[dict], bool]:
@@ -309,7 +309,7 @@ def cmd_scope(a) -> int:
     only = getattr(a, "only_kind", None)
     runs, nothing_to_run = _select_scope_runs(root, a, strategy, only)
     if nothing_to_run:
-        _emit_step(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
+        _emit_step(result(TOOL, "ok", f"範囲に当てる {only or ts.LINT} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
     if not runs:
         _emit_step(result(TOOL, "stopped", "範囲テストの雛形（scope_command）を持つ suite が無いか、範囲に入るファイルが無い", [], {}))

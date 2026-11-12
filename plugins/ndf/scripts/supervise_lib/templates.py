@@ -26,6 +26,10 @@ from supervise_lib.procedures import (
 )
 from supervise_lib.verify_steps import (
     IMPL_STALL_DEFAULT,
+    check_ci_watch,
+    ci_only,
+    ci_only_to_merge,
+    judge_step,
     merge_steps,
     pre_test_steps,
     refactor_template_arg,
@@ -37,6 +41,7 @@ from supervise_lib.verify_steps import (
     without_ci_wait,
     whole_cmd,
     whole_timeout,
+    with_escape,
     with_margin,
 )
 
@@ -122,7 +127,10 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     """head（impl なら worker の実装）の後に、ベースブランチの取り込み → 整形・同期とチェック・範囲の静的解析
     （`pre_test_steps`）→ 範囲テスト → Pull Request →
     全体テスト → doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。
-    検査は取り込んだ合成の上で走り（#2003）、マージの直前の衝突（4）は取り込みへ戻る（#1917）。"""
+    検査は取り込んだ合成の上で走り（#2003）、マージの直前の衝突（4）は取り込みへ戻る（#1917）。
+    CI テストの宣言のあるリポジトリは `ci_only_to_merge` の並びにする（手元でテストを走らせない。#3056）。"""
+    if ci_only(a):
+        return _impl_plan(a, *ci_only_to_merge(a, head, FIX_PROMPT))
     tests = " ".join(a.tests)
     pre = pre_test_steps(a, FIX_PROMPT)
     if head:
@@ -185,21 +193,13 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
         *merge_steps(a, next="end", on_conflict="base-return"),
     ]
-    if getattr(a, "escape_of", None) is not None:
-        # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
-        for step in steps:
-            if step["id"] in ("merge", "merge-approved"):
-                step["next"] = "escape"
-        steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"})
+    steps = with_escape(a, steps)
     steps.append(back)  # merge の衝突（4）からの戻りは並びの末尾に置く（merge から後ろへ行く遷移にする）
-    plan = {
-        "フェーズ": "実装",
-        "課題": a.issue,
-        "モード": a.mode,
-        "作業場所": a.worktree,
-        "規則": RULE_IMPL.format(after_tests=after_tests),
-        "steps": without_ci_wait(a, steps, "doc-lint", merge_fail="judge"),
-    }
+    return _impl_plan(a, without_ci_wait(a, steps, "doc-lint", merge_fail="judge"), RULE_IMPL.format(after_tests=after_tests))
+
+
+def _impl_plan(a, steps: list[dict], rule: str) -> dict:
+    plan = {"フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree, "規則": rule, "steps": steps}
     with_decls(plan, a)
     test_meta(plan, a)
     with_record(plan)
@@ -211,23 +211,14 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     return plan
 
 
-def judge_step(after_tests: str, match: bool, ci_merge: bool = False) -> dict:
-    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、無ければ pr）へ
-    進む。突き合わせがあれば PR の本文の節が欠けて pr が止まったとき、`ci_merge` ならマージが落ちたときもここへ戻る。"""
-    to_next = "設計との突き合わせへ（design-tests）" if match else "PR へ（pr）"
-    pr_missing = "、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）" if match else ""
-    return {
-        "id": "judge",
-        "type": "judge",
-        "inputs": ["test-limited", "test-all", *(["pr"] if match else [])],
-        "question": f"テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら{to_next}{pr_missing}、"
-        f"全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）{'、マージ（merge）が CI で落ちたなら直すか（fix）' if ci_merge else ''}、止めるか（stop）",
-        "choices": ["fix", after_tests, "doc-lint", "stop"],
-    }
-
-
 NO_REFACTOR_MODES = ("light", "operation", "documentation")  # 工程表で「構造改善」が「—」のモード
-CROSS_REFACTORING_SUSPENDED = True  # 緊急の停止（2026-11-11）: 改修が終わるまで全モードで構造改善を外す。戻すときは False
+CROSS_REFACTORING_SUSPENDED = False  # 緊急の停止の印（2026-11-11）。宣言の無いリポジトリは `refactor_suspended` が外す（#3056）
+
+
+def refactor_suspended(a) -> bool:
+    """構造改善を外すか。CI テストの宣言の無いリポジトリは手元のテストの負荷のため外す（#3056 の決定 12）。外す判定・記録の
+    `--review`・差分の検査の `no_refactor` のすべてがこれを読む。"""
+    return CROSS_REFACTORING_SUSPENDED or not ci_only(a)
 
 
 def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
@@ -339,13 +330,15 @@ def plan_check(a) -> dict:
                 },
                 {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
                 *merge_steps(a, on_fail="abort", next="record", on_conflict="base-return"),
-                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False), review=CROSS_REFACTORING_SUSPENDED),
+                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False), review=refactor_suspended(a)),
                 back,
             ],
         },
         a,
     )
-    plan["steps"] = trim_check_steps(a, plan["steps"], "ready", CROSS_REFACTORING_SUSPENDED or a.mode in NO_REFACTOR_MODES)
+    after_whole = "ci-peek" if ci_only(a) else "ready"
+    plan["steps"] = trim_check_steps(a, plan["steps"], after_whole, refactor_suspended(a) or a.mode in NO_REFACTOR_MODES)
+    plan["steps"] = check_ci_watch(a, plan["steps"], "ready", "abort", fix_push=True)
     return with_record(plan)
 
 
@@ -371,7 +364,7 @@ def plan_check_since(a) -> dict:
     `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
     PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
-    no_refactor = getattr(a, "review_only", False) or CROSS_REFACTORING_SUSPENDED
+    no_refactor = getattr(a, "review_only", False) or refactor_suspended(a)
     flag = " --review" if no_refactor else ""
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
@@ -448,7 +441,8 @@ def plan_check_since(a) -> dict:
         *merge_steps(a, on_fail="abort", next="record"),
         *record_steps(name, review=no_refactor, pr=True),
     ]
-    steps = trim_check_steps(a, steps, "finish", no_refactor)
+    after_whole = "ci-peek" if ci_only(a) else "finish"
+    steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor), "finish", "abort", fix_push=True)
     issues = list(a.issue or [])
     if not issues and getattr(a, "sprint", None):
         try:

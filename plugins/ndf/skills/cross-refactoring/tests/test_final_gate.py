@@ -735,3 +735,51 @@ def test_a_passing_final_gate_leaves_no_fix_request(cmd_gate, tmp_path, env_tmp_
 
     gate = read_state(state_path)["final_gate"]
     assert gate["status"] == "passed" and "fix_request" not in gate
+
+
+# ---------- #3056: CI テストの宣言のあるリポジトリの最終ゲートは待たずに 1 回だけ読む ----------
+
+
+def _ci_only_state(tmp_path, checks=("tests",), **over):
+    ci = {"check": checks[0] if checks else None, "checks": list(checks), "junit_artifacts": None}
+    over.setdefault("strategy", strategy_state("local-full", ci_only=True, ci=ci))
+    over.setdefault("limits", {"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 600})
+    over.setdefault("workflow_step", True)
+    return _state(tmp_path, **over)
+
+
+@pytest.mark.parametrize("payload", ["", '{"total_count": 0, "check_runs": []}', None])
+def test_ci_only_gate_passes_an_unfinished_ci_after_one_read(cmd_gate, tmp_path, env_tmp_dir, spy, capsys, payload):
+    state_path = _ci_only_state(tmp_path)
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests", conclusion=None, status="in_progress")) if payload is None else payload
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert len(spy["gh"]) == 1 and spy["tests"] == []
+    gate = read_state(state_path)["final_gate"]
+    assert gate["mode"] == "ci" and "CI 未完了" in gate["checks"][-1]["detail"]
+
+
+def test_ci_only_gate_without_check_names_reads_every_head_check(cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    state_path = _ci_only_state(tmp_path, checks=())
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("lint"), _run("tests"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert "CI 未完了" not in read_state(state_path)["final_gate"]["checks"][-1]["detail"]
+
+
+def test_ci_only_gate_failure_goes_to_the_fix_round(patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy):
+    state_path = _ci_only_state(tmp_path)
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [NEW_FAILURE])
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 2
+    assert read_state(state_path)["final_gate"]["checks"][-1]["status"] == "fail"
+    assert WHOLE not in spy["tests"]

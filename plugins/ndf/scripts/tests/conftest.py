@@ -132,9 +132,10 @@ def _short_durable_polls(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _refactor_route_on(request, monkeypatch):
-    """構造改善の緊急の停止（`templates.CROSS_REFACTORING_SUSPENDED`）を外し、既存のテストに構造改善を持つ道を確かめ続けさせる。
+    """構造改善を外す条件（`templates.refactor_suspended`。CI テストの宣言の無いリポジトリで真）を常に偽にし、既存のテストに
+    構造改善を持つ道を確かめ続けさせる（#3056）。
 
-    停止そのものは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    宣言の無いリポジトリで外す振る舞いは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
     if request.node.get_closest_marker("suspended_refactor"):
         return
     scripts = str(Path(__file__).resolve().parents[1])
@@ -142,7 +143,26 @@ def _refactor_route_on(request, monkeypatch):
         monkeypatch.syspath_prepend(scripts)
     import importlib
 
-    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "CROSS_REFACTORING_SUSPENDED", False)
+    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "refactor_suspended", lambda a: False)
+
+
+@pytest.fixture(autouse=True)
+def _local_tests_route(request, monkeypatch):
+    """プランの雛形が CI テストの宣言を読む判定（`verify_steps.ci_only`）を常に偽にし、このリポジトリの宣言（`test.ci.only`）を
+    読む既存のテストに、手元のテストを持つ道を確かめ続けさせる（#3056）。
+
+    宣言のあるリポジトリの道は `ci_only_route` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    if request.node.get_closest_marker("ci_only_route"):
+        return
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        monkeypatch.syspath_prepend(scripts)
+    import importlib
+
+    # templates が import の時点で verify_steps の ci_only を写すため、両方を読み込んでから差し替える
+    modules = [importlib.import_module(name) for name in ("supervise_lib.templates", "supervise_lib.verify_steps")]
+    for module in modules:
+        monkeypatch.setattr(module, "ci_only", lambda a: False)
 
 
 @pytest.fixture(autouse=True)
