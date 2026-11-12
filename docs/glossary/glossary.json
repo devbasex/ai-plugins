@@ -609,7 +609,7 @@
     {
       "term": "ベースブランチ",
       "context": "ndf-workflow",
-      "meaning": "worktree の分岐元と Pull Request の宛先",
+      "meaning": "Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。宣言の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める",
       "deprecated": [
         "起点のブランチ"
       ],
@@ -6663,6 +6663,55 @@
       "context": "ndf-workflow",
       "meaning": "計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない",
       "pending_source": "issues/issue-3083-design.md"
+    },
+    {
+      "term": "ブランチ運用の宣言",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "スプリントの起点",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の宣言が決め、無ければベースブランチ",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "結合ブランチ",
+      "context": "ndf-workflow",
+      "meaning": "ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`）",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "本番への取り込み方",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "文書の Pull Request の宛先",
+      "context": "ndf-workflow",
+      "meaning": "設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
+    },
+    {
+      "term": "リリースの単位",
+      "context": "ndf-workflow",
+      "meaning": "選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ",
+      "source": "",
+      "pending_source": "issues/issue-3121-design.md"
     }
   ]
 }
