@@ -1,4 +1,4 @@
-"""一時レーンの組み立て: 起こす入力（`helper_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`）。`parallel_run` が使う。"""
+"""一時レーンの組み立て: 起こす入力（`helper_spawn`・版の要るまとめの `verify_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`・`verify_task`）。`parallel_run` が使う。"""
 
 from __future__ import annotations
 

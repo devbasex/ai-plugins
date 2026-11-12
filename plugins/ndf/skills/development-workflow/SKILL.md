@@ -259,9 +259,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、リリースを 1 本にまとめる。
 並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
 
-**引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
+**引数に `--parallel-helper <計画名> <連番> <提示>`・`--parallel-helper <計画名> pending <ループ名>`・`--parallel-helper <計画名> verify <依頼>` があれば、このセッションは
 オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
-`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）・`loop pending` の pipeline・`parallel.py verified` が返す pipeline（版の要るまとめ）を流し、結果を返して終える。
 
 ## 開発ループ（`--loop`）
 
