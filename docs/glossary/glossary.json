@@ -6645,6 +6645,30 @@
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
+    },
+    {
+      "term": "最後の検査",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。スプリントの検査の後に入ったそのスプリントの差分を拾う",
+      "pending_source": "issues/issue-3126-requirements.md"
+    },
+    {
+      "term": "スプリントの検査",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める",
+      "pending_source": "issues/issue-3126-requirements.md"
+    },
+    {
+      "term": "検査の印",
+      "context": "ndf-workflow",
+      "meaning": "前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある",
+      "pending_source": "issues/issue-3126-requirements.md"
+    },
+    {
+      "term": "最後の検査の範囲",
+      "context": "ndf-workflow",
+      "meaning": "最後の検査が見る差分。起点のコミットから今のベースブランチの先頭までのうち、検査の対象にする Pull Request の差分",
+      "pending_source": "issues/issue-3126-requirements.md"
     }
   ]
 }
