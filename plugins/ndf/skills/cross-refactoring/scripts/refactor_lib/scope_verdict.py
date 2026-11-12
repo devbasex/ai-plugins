@@ -9,6 +9,8 @@
 `failing` にする。原因が決まらない・自分を含む・静的解析の suite が無いときは、従来どおり自分の失敗として扱う。
 
 テストの名前・パスで全体を見るテストを見分けない（AC10）。起動の失敗なら、その項目の状態を変えずに止まる（I8）。
+CI テストの宣言（`test.ci.only`）があればテストの種別を走らせず、静的解析だけで点検する。テストの合否は最終ゲートの
+CI の結果へ回す（#3056）。
 """
 
 from __future__ import annotations
@@ -73,8 +75,13 @@ def _read_failures(state: dict[str, Any], run: _Run) -> None:
 
 
 def _run_scope(path: pathlib.Path, state: dict[str, Any], runs: list[ts.ScopeRun], log: pathlib.Path) -> _Run:
-    """範囲テストを 1 本ずつ走らせる（`targets.run_or_stop` と同じ上限と止め方）。落ちた 1 本を残す。"""
+    """範囲テストを 1 本ずつ走らせる（`targets.run_or_stop` と同じ上限と止め方）。落ちた 1 本を残す。
+    CI テストの宣言があればテストの種別を外す（静的解析が無ければ走らせずに通す）。"""
     strategy = timeline.strategy_of(state)
+    if strategy.ci_only:
+        runs = [r for r in runs if r.kind != ts.TEST]
+        if not runs:
+            return _Run(True, None, log, ts.outcome(0, False))
     test_triage.clear_junit(work_dir(state), strategy)
     outcome, last = targets.run_commands([r.command for r in runs], work_dir(state), timeline.state_test_timeout(state), log)
     if outcome.launch_failed:

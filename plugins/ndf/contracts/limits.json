@@ -24,6 +24,7 @@
     "supervise.design-stage-read": {"summary": "設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち", "seconds": 120, "per_call": 30, "interval": 15, "same_cause": 3},
     "supervise.worktree-lock": {"summary": ".git/config の lock で落ちた worktree の作成の打ち直し", "seconds": 5, "attempts": 6, "interval": 1, "same_cause": 6},
     "supervise.step-rerun": {"summary": "判定役が返すステップの打ち直しの同じ原因の上限", "same_cause": 2},
+    "supervise.ci-fix": {"summary": "CI テストの宣言のあるリポジトリで、CI の結果の監視（ci-watch.py peek）が CI の失敗の改修を起こす回数の上限。数えるのは落ちた head の数", "attempts": 3},
     "test-triage.check-wait": {"summary": "CI のチェックの結論の待ちの間隔。合計の秒は呼ぶ側が予算から渡す", "interval": 10, "factor": 1.5, "max_interval": 120},
     "merged.green-wait": {"summary": "merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout", "factor": 1.5},
     "hook.ask-forward": {"summary": "AskUserQuestion の転送を待つ上限。hook の 10 秒の上限の中に収める", "seconds": 8},

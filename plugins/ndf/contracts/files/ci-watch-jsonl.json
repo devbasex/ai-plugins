@@ -1,0 +1,7 @@
+{
+  "name": "ci-watch-jsonl",
+  "pattern": "ci-watch.jsonl",
+  "kind": "record",
+  "place": "state-dir",
+  "skill_readers": []
+}

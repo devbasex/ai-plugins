@@ -3086,19 +3086,19 @@
       "context": "ndf-workflow",
       "meaning": "同じステージの 2 本のプランで、触るファイルに等しいファイルの宣言を持つか、同じ共有の一覧に当たるもの。ディレクトリの宣言は判定に使わない。同時には流さない",
       "code": "overlap_pair",
-      "pending_source": "issues/issue-1811-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "偽の重なり",
       "context": "ndf-workflow",
       "meaning": "重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組",
-      "pending_source": "issues/issue-1811-requirements.md"
+      "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "ディレクトリの宣言",
       "context": "ndf-workflow",
       "meaning": "触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない",
-      "pending_source": "issues/issue-1811-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-overlap-by-file.md"
     },
     {
       "term": "共有の一覧",
@@ -6517,90 +6517,109 @@
       "term": "触る場所の見込み",
       "context": "ndf-workflow",
       "meaning": "設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ",
-      "source": "",
-      "pending_source": "issues/issue-2997-requirements.md"
+      "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "見込みの出所",
       "context": "ndf-workflow",
       "meaning": "触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし）",
-      "source": "",
-      "pending_source": "issues/issue-2997-requirements.md"
+      "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "同時に動く本数",
       "context": "ndf-workflow",
       "meaning": "スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均",
-      "source": "",
-      "pending_source": "issues/issue-2997-requirements.md"
+      "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "順位の逆転",
       "context": "ndf-workflow",
       "meaning": "開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと",
-      "source": "",
-      "pending_source": "issues/issue-2997-requirements.md"
+      "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
       "term": "逆転の幅",
       "context": "ndf-workflow",
       "meaning": "開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない",
-      "source": "",
-      "pending_source": "issues/issue-2997-design.md"
+      "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
+    },
+    {
+      "term": "課題のまとまり",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
+      "pending_source": "issues/issue-3081-design.md"
+    },
+    {
+      "term": "代表の課題",
+      "context": "ndf-workflow",
+      "meaning": "課題のまとまりの先頭の課題。まとまりの設計文書と実装の Pull Request はこの課題の番号で作り、ほかの課題の受け入れ条件を取り込む",
+      "pending_source": "issues/issue-3081-design.md"
+    },
+    {
+      "term": "疎なまとまり",
+      "context": "ndf-workflow",
+      "meaning": "触る場所の見込みが互いに重ならない、課題のまとまりの組",
+      "pending_source": "issues/issue-3081-requirements.md"
+    },
+    {
+      "term": "まとまりの単位のレビュー",
+      "context": "ndf-workflow",
+      "meaning": "1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review",
+      "pending_source": "issues/issue-3081-requirements.md"
     },
     {
       "term": "負荷とメモリの値",
       "context": "ndf-workflow",
       "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
-      "pending_source": "issues/issue-2998-requirements.md"
+      "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "マシンの上の pytest の数",
       "context": "ndf-workflow",
       "meaning": "進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える",
-      "pending_source": "issues/issue-2998-requirements.md"
+      "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "待ちの理由",
       "context": "ndf-workflow",
       "meaning": "プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ",
-      "pending_source": "issues/issue-2998-design.md"
+      "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "待ちの秒",
       "context": "ndf-workflow",
       "meaning": "queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits）",
-      "pending_source": "issues/issue-2998-design.md"
+      "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "メモリの山",
       "context": "ndf-workflow",
       "meaning": "全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値",
-      "pending_source": "issues/issue-2998-requirements.md"
+      "source": "docs/specifications/ndf-supervise-progress-host-and-queue-waits.md"
     },
     {
       "term": "マシンのプランの本数",
       "context": "ndf-workflow",
       "meaning": "同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる",
-      "pending_source": "issues/issue-2999-requirements.md"
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の待ち",
       "context": "ndf-workflow",
       "meaning": "依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと",
-      "pending_source": "issues/issue-2999-requirements.md"
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "プランの本数の上限",
       "context": "ndf-workflow",
       "meaning": "同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む",
-      "pending_source": "issues/issue-2999-design.md"
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "起動の排他",
       "context": "ndf-workflow",
       "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
-      "pending_source": "issues/issue-2999-design.md"
+      "source": "docs/specifications/ndf-parallel-machine-plan-limit.md"
     },
     {
       "term": "CI テストの宣言",

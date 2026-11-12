@@ -18,7 +18,7 @@
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・構成要素・契約・既知の限界・テスト観点）を残す。
 **`new impl` の引数の正は [`supervise_lib/new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) の `--files`・`--after` の help である。**
-重なりの組の判定（同時に流さない組）はこの文書の範囲の外で、変えていない。
+重なりの組の判定（同時に流さない組）は [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) が持つ。
 
 決定の番号は #1674 の設計の番号である。
 

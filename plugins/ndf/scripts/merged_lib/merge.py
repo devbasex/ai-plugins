@@ -14,6 +14,8 @@ import approved_commit
 import delivery
 import gh_parts
 import manual_checks
+import project_decl
+import test_strategy
 from merged_lib.checks import TOOL, GreenWatch, pr_state
 from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
@@ -246,13 +248,21 @@ def _gate_head(info):
         raise StepError(f"リリースの Pull Request の先端を読めないため承認資料を書かない: {e}", EXIT_UNREADABLE) from e
 
 
-def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None):
+def test_checks_of(root) -> list[str] | None:
+    """CI テストの宣言があればテストのチェックの名前（空なら head のすべて）、無ければ None（今の判定のまま。#3056 の I7）。"""
+    project = project_decl.read_project_decl(root)
+    return test_strategy.ci_checks(project) if test_strategy.declares_ci_only(project) else None
+
+
+def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None, ci_tests=True):
     """gate_head なら、リリース承認ゲートで止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
-    moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。"""
+    moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。`ci_tests` なら、CI テストの宣言の
+    あるリポジトリでテストのチェックがすべて現れて通るまでマージしない（リリースの Pull Request の promote は渡さない）。"""
     root = git_root(a.root)
     n = a.pr
     decl = delivery.load_delivery(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
     watch = GreenWatch(root, a, moved_next=moved_next)
+    watch.test_checks = test_checks_of(root) if ci_tests else None
     judged = {}
 
     def gate(info):
@@ -398,4 +408,5 @@ def promote(a, cleanup):
         plan_step="promote-approved",
         gate_head=True,
         moved_next=moved_next,
+        ci_tests=False,
     )

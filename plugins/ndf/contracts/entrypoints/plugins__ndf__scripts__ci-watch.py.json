@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/ci-watch.py",
+  "summary": "ci-watch.py: CI の結果の監視。PR の CI のテストのチェックを待たずに 1 回だけ読む（#3056）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "peek": {
+        "options": [
+          "--after-merge",
+          "--pr",
+          "--root",
+          "--state"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "HOME",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_STATE_HOME",
+    "NDF_WHOLE_RUNS_DIR",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "ci-watch-jsonl"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功: 進めてよい（通った・未完了・チェックがまだ無い・取得できなかった。status ok）",
+    "1": "失敗: テストのチェックが落ちた。改修の回数は上限の内（status stopped）",
+    "2": "読めない・呼び出しの誤り: 引数の誤り。または落ちたが改修の回数が上限（supervise.ci-fix）に当たった（status stopped）",
+    "3": "前提が無い: --after-merge で、落ちたテストのチェックが無い（マージが CI 以外の理由で落ちた。status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/ci_watch.py",
+    "plugins/ndf/scripts/supervise_lib/paths.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md"
+  ]
+}

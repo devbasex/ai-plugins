@@ -218,7 +218,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     seconds = round(time.monotonic() - started, 1)
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
-        classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
+        classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"), verdict.get("existing_failures"))
         gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
         gate["material"] = _gate_material(state, classified, verdict)
         flaky.queue_flaky(state, classified.get("flaky"), verdict.get("log"))

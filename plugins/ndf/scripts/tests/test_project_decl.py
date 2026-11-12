@@ -836,3 +836,30 @@ def test_compose_services_reads_names_and_images_by_indent_as_is():
     # 同じ名前は最後の image を共有し、字下げの違う 2 つ目の services の行は直前のサービスの image になる
     assert cs(text) == [("app", "late:1"), ("db", "mysql:8.0"), ("cache", ""), ("app", "late:1"), ("again", "again:1")]
     assert cs("") == [] and cs("x:\n  image: a\n") == []
+
+
+# --- CI テストの宣言（#3056 の I1） ----------------------------------------------------
+
+
+def _with_jobs(jobs):
+    ans = json.loads(json.dumps(LARAVEL_ANSWERS))
+    ans["test"]["value"]["suites"][0]["ci_jobs"] = jobs
+    return ans
+
+
+def test_write_declares_ci_tests_when_the_test_suite_job_file_exists(laravel, env, tmp_path):
+    code, _, text, _ = analyze(env, laravel, tmp_path, _with_jobs([".github/workflows/test.yml#test"]))
+    assert code == 0, text
+    d = decl(laravel)
+    assert d["test"]["ci"]["only"] is True
+    assert "CI テストの宣言: 書いた" in text
+    assert d["analysis"]["written"]["test"] == _project_lib("merge").value_digest(d["test"])
+
+
+def test_write_does_not_declare_without_a_job_file_and_removes_its_own_value(laravel, env, tmp_path):
+    analyze(env, laravel, tmp_path, _with_jobs([".github/workflows/test.yml"]))
+    commit(laravel, "decl")
+    code, _, text, _ = analyze(env, laravel, tmp_path, _with_jobs([".github/workflows/gone.yml"]))
+    assert code == 0, text
+    assert "only" not in (decl(laravel)["test"].get("ci") or {})
+    assert "CI テストの宣言: 消した" in text

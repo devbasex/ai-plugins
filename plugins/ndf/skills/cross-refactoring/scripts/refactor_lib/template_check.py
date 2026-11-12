@@ -55,8 +55,9 @@ class _ProbeContext:
 
 
 def targets_of(strategy: ts.Strategy) -> list[ts.Suite]:
-    """試走の対象の suite。`round-only` は改修の範囲テストを使わないため、静的解析は `{paths}` に変更したファイルが入るため対象にしない。"""
-    if strategy.name == ts.ROUND_ONLY:
+    """試走の対象の suite。`round-only` は改修の範囲テストを使わないため、静的解析は `{paths}` に変更したファイルが入るため対象にしない。
+    CI テストの宣言（`test.ci.only`）があれば改修の範囲テストを手元で走らせないため、試走しない（#3056）。"""
+    if strategy.name == ts.ROUND_ONLY or strategy.ci_only:
         return []
     return strategy.scoped_suites(ts.TEST)
 
