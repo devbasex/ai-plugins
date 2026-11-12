@@ -11,6 +11,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import branch_flow
 from project_lib import WORKTREE_FILE
 import limits
 
@@ -45,7 +46,7 @@ INPUT_NAMES = (
     "KIRO.md",
     "GEMINI.md",
 )
-KNOWN_BRANCHES = ("main", "master", "develop")
+KNOWN_BRANCHES = branch_flow.MEASURE_CANDIDATES  # 測る候補の正本は lib/branch_flow.py（#3121）
 
 
 def _git_text(root, *args) -> str | None:
