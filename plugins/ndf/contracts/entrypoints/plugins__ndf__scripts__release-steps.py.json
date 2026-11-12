@@ -52,6 +52,7 @@
         "options": [
           "--approval",
           "--decided",
+          "--head",
           "--plugin",
           "--prs",
           "--set",

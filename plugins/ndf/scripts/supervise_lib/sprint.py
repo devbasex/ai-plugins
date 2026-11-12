@@ -15,16 +15,9 @@ from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with
 from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
-from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check
+from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
-from supervise_lib.sprint_waves import (
-    plan_sprint_design,
-    plan_sprint_release,
-    sprint_branch,
-    sprint_branch_first,
-    sprint_impl_plans,
-    with_base,
-)
+from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
