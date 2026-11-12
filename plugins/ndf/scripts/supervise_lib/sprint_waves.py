@@ -256,6 +256,19 @@ def plan_sprint_impl(a, n: int, repo: str, issues: list[int] | None = None) -> d
     return plan
 
 
+def keep_branch_merge(steps: list[dict], branch: str) -> list[dict]:
+    """選んで集める取り込み方の検査の Pull Request のマージ（#3121 の決定 7）。`merge`・`merge-approved` の前に `branch` 宛ての
+    開いた Pull Request を数え、1 件でもあればマージせずに一覧を出して止める（終了コード 1）。マージの後に、マージで origin から
+    消えた `branch`（`delete_branch_on_merge`）をローカルの先端で push し直す（強制 push はしない）。ほかのステップは変えない。"""
+    b = shlex.quote(branch)
+    guard = (
+        f"n=$(gh pr list --base {b} --state open --json number --jq '[.[].number|tostring]|join(\" \")') && "
+        f'{{ [ -z "$n" ] || {{ echo "{branch} 宛ての開いた Pull Request があるためマージしない: $n" >&2; exit 1; }}; }}'
+    )
+    restore = f"{{ git ls-remote --exit-code --heads origin refs/heads/{b} >/dev/null || git push -q origin refs/heads/{b}:refs/heads/{b}; }}"
+    return [{**s, "cmd": f"{guard} && {s['cmd']} && {restore}"} if s.get("id") in ("merge", "merge-approved") else s for s in steps]
+
+
 def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
     """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本で、スプリントブランチへ入れる前に
     cross-review を通す（#3081 の I8a・I8b）。無ければ課題ごとに 1 本（I9）。`pace` はプランへ書く進め方。"""
@@ -299,6 +312,8 @@ def plan_sprint_check(a, repo: str) -> dict:
             body="template",
         ),
     ] + plan["steps"]
+    if resolved_flow(a).row.keeps_sprint_branch:
+        plan["steps"] = keep_branch_merge(plan["steps"], mb)
     return plan if getattr(a, "bundles", None) is None else without_review(plan)
 
 

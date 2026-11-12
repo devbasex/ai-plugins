@@ -288,7 +288,10 @@ def plan_check(a) -> dict:
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
     scope = refactor_scope(a, pr)
-    *base, back = base_sync_steps(f"--pr {pr}", "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
+    # 選んで集める取り込み方は、宛先（ベースブランチ）ではなくスプリントの起点から取り込む（#3121 の I4）
+    flow = resolved_flow(a)
+    source = f"--base {shlex.quote(flow.start_branch)}" if flow.row.selects_units and flow.start_branch else f"--pr {pr}"
+    *base, back = base_sync_steps(source, "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
     plan = _with_test_meta(
         {
             "フェーズ": "検査",

@@ -73,7 +73,8 @@ def values(out: Path) -> dict:
         "design.glossary": "--diff origin/" + step(design, "glossary-check")["cmd"].split("--diff origin/")[1].split()[0],
         "branch.from": "--from" in step(branch, "sprint-branch")["cmd"],
         "check.pr.base": step(check, "pr")["base"],
-        "check.sync": step(check, "base-sync")["cmd"].split("--base ")[1].split()[0],
+        "check.sync": " ".join(step(check, "base-sync")["cmd"].split(" base-sync ")[1].split()[:2]),
+        "check.merge.guard": "gh pr list --base" in step(check, "merge")["cmd"],
     }
 
 
@@ -83,7 +84,8 @@ BASELINE = {
     "design.glossary": "--diff origin/develop",
     "branch.from": False,
     "check.pr.base": "develop",
-    "check.sync": "develop",
+    "check.sync": "--pr {pr}",
+    "check.merge.guard": False,
 }
 
 
@@ -110,7 +112,8 @@ def test_selected_flow_starts_from_production_and_sends_design_prs_to_the_sprint
         "design.glossary": "--diff origin/sprint/s1",
         "branch.from": True,
         "check.pr.base": "develop",
-        "check.sync": "main",
+        "check.sync": "--base main",
+        "check.merge.guard": True,
     }
     assert "--from main" in step(plans(out)["sprint-branch"], "sprint-branch")["cmd"]
     manifest = json.loads((out / "sprint.json").read_text())

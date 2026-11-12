@@ -176,6 +176,25 @@ def resolved_flow(root, base: str | None = None, production: str | None = None) 
     return flow.resolve(base, production)
 
 
+def kept_sprint_branch(root, branch: str | None) -> str | None:
+    """後片付けでスプリントブランチを残す理由（#3121 の決定 7）。消してよければ None。
+
+    選んで集める取り込み方では、スプリントブランチはリリースの単位として本番チャネルに含まれるまで要る。
+    宣言が読めなければ消さない側（残す）へ倒す。"""
+    if not branch or not branch.startswith(branch_flow.SPRINT_PREFIX):
+        return None
+    try:
+        flow = resolved_flow(root)
+    except branch_flow.FlowError as e:
+        return f"ブランチ運用の宣言を読めないため残す: {e}"
+    if not flow.production_branch or proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
+        return None
+    ref = f"origin/{flow.production_branch}"
+    if branch_flow.sprint_branch_kept(root, f"refs/heads/{branch}", ref, flow.row):
+        return f"取り込み方 {flow.row.name} では {ref} に含まれるまでスプリントブランチを残す"
+    return None
+
+
 def restore_branch(root, branch: str, ref: str = "HEAD") -> bool:
     """Pull Request のマージで origin の `branch` が消えていれば（`delete_branch_on_merge`）、`ref` の先端を push し直す。
 
