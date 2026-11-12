@@ -146,7 +146,7 @@ class ReleaseRouting:
 
     def drop_closed(self) -> bool:
         """リリースを組む直前に 1 回だけ依頼の Pull Request の状態を読み、中身の無い依頼へ `released`・版なし・閉じた番号の理由で
-        答えて外す。一部が閉じた依頼は残りの番号で、出したリリースの範囲の答えを受け直す。組む依頼が残れば True（#3085 の I3〜I6）。"""
+        答えて外す。一部が閉じた依頼は残りの番号で、出したリリースの範囲の答えを受け直す。答えた依頼の止まった宛先は再起動の対象へ入れる。組む依頼が残れば True（#3085 の I3〜I6）。"""
         got = step_closed_prs(self.main, sorted({n for r in self.pending for n in r.get("prs") or []}))
         empty, kept = split_closed(self.pending, got.get("closed") or [])
         if kept == self.pending:
@@ -154,8 +154,7 @@ class ReleaseRouting:
         self.pending = kept
         for r in empty:
             self.answer(r["id"], "released", None, None, closed_reason(r))
-        self.wake_answered(empty)
-        self.answer_from_ranges()
+        self.wake_answered([*empty, *self.answer_from_ranges()])  # 残りの番号で範囲の答えを受けた依頼の宛先も起こす
         return bool(self.pending)
 
     def take_pending(self) -> tuple[list[dict], dict]:

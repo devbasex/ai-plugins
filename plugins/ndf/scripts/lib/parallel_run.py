@@ -425,10 +425,11 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
 
     # -- リリース --
 
-    def answer_from_ranges(self) -> None:
-        """出したリリースの範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
+    def answer_from_ranges(self) -> list[dict]:
+        """出したリリースの範囲で答えられる依頼に答えて外し、答えた依頼を返す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
         和は古いリリースから順に足し、依頼の最後の PR が出たリリースの版と連番で答える（後のリリースの PR を前のリリースの版で答えない）。"""
         done: set[int] = set()
+        answered: list[dict] = []
         for rel in self.releases:
             if rel.get("state") != "released":
                 continue
@@ -436,7 +437,9 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             hit = set(pr.answerable(self.pending, rel.get("prs") or [], done))
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
+                answered.append(r)
             self.pending = [r for r in self.pending if r["id"] not in hit]
+        return answered
 
     def open_release(self) -> None:
         """流れているリリースが無く依頼があれば、リリースの組み方を読む。組むなら他のレーンを待たずに提示 1 を組む（I9）。

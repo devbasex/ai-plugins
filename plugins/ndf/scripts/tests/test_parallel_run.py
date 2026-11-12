@@ -1689,9 +1689,10 @@ def test_a_partly_closed_request_is_judged_by_its_remaining_prs(monkeypatch, rel
     run.pending = [{"id": "r1", "lane": "la", "prs": [10, 11]}]
     assert run.drop_closed() is (not answered)
     if answered:
-        assert run.pending == [] and got["answers"] == [("r1", "released", "1.2.3", 1, None)]
+        assert run.pending == [] and got["answers"] == [("r1", "released", "1.2.3", 1, None)] and run.wake == ["la"]
     else:
         assert run.pending == [{"id": "r1", "lane": "la", "prs": [10], "closed": [11]}] and got["answers"] == []
+        assert run.wake == []
 
 
 @pytest.mark.parametrize("closed", [[], "gh に届かない"], ids=["open-or-merged", "fetch-failed"])
