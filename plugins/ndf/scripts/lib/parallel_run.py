@@ -565,33 +565,48 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
 
     def settle(self, rel: dict, msg: dict) -> list[dict]:
         """リリースを締め、範囲で答えられる依頼へ答える。答えた依頼を返す。"""
-        result = msg.get("result")
+        added = self._settled_range(rel)
+        # 前のリリースで出た PR と合わせて全部が入る依頼に答える
+        hit = set(pr.answerable(self.pending, rel["prs"], self._released_prs(rel)))
+        answered = [r for r in self.pending if r["id"] in hit]
+        self._answer_settled(rel, msg, answered, added)
+        self.pending = [r for r in self.pending if r["id"] not in hit]
+        self._defer_pending(rel)
+        self.current = None
+        self.wake_answered(answered)
+        return answered
+
+    def _settled_range(self, rel: dict) -> list[int]:
+        """範囲の Pull Request を補い、出し直しを省いたときの確かめ直しの範囲の Pull Request を返す（#3020 の I8）。"""
         if not rel.get("prs"):
             got = step_presented(rel["dirs"][-1])
             rel["prs"], rel["sha"] = got.get("prs") or [], rel.get("sha") or got.get("sha")
-        added = []  # 出し直しを省いたときの確かめ直しの範囲の Pull Request（#3020 の I8）
-        if rel.get("carried") and len(rel["dirs"]) > 1:
-            before = set(step_presented(rel["dirs"][0]).get("prs") or [])
-            added = [n for n in rel["prs"] if n not in before]
-        done = {n for r in self.releases if r is not rel and r.get("state") == "released" for n in r.get("prs") or []}
-        hit = set(pr.answerable(self.pending, rel["prs"], done))  # 前のリリースで出た PR と合わせて全部が入る依頼に答える
-        answered = [r for r in self.pending if r["id"] in hit]
-        if result == "released":
+        if not (rel.get("carried") and len(rel["dirs"]) > 1):
+            return []
+        before = set(step_presented(rel["dirs"][0]).get("prs") or [])
+        return [n for n in rel["prs"] if n not in before]
+
+    def _released_prs(self, except_rel: dict) -> set[int]:
+        """`except_rel` のほかの出たリリースの Pull Request の和。"""
+        return {n for r in self.releases if r is not except_rel and r.get("state") == "released" for n in r.get("prs") or []}
+
+    def _answer_settled(self, rel: dict, msg: dict, answered: list[dict], added: list[int]) -> None:
+        """リリースの結果を記録し、範囲で答えられる依頼へ結果を答える。"""
+        if msg.get("result") == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
             got = {"sha": rel.get("sha"), "version": rel["version"], "prs": rel["prs"], "added": added}
             self.publish(f"range-{rel['n']}", {**got, "lanes": sorted({r["lane"] for r in answered})})
             for r in answered:
                 self.answer(r["id"], "released", rel["version"], rel["n"])
-        else:
-            rel.update(state="rejected" if result == "rejected" else "failed", reason=msg.get("reason"))
-            for r in answered:
-                self.answer(r["id"], rel["state"], None, rel["n"], msg.get("reason"))
-        self.pending = [r for r in self.pending if r["id"] not in hit]
+            return
+        rel.update(state="rejected" if msg.get("result") == "rejected" else "failed", reason=msg.get("reason"))
+        for r in answered:
+            self.answer(r["id"], rel["state"], None, rel["n"], msg.get("reason"))
+
+    def _defer_pending(self, rel: dict) -> None:
+        """範囲に入らなかった残りの依頼へ、次のリリースへ回したことを知らせる。"""
         for r in self.pending:
             self.publish(f"defer-{r['id']}", {"seq": rel["n"], "reason": "範囲に入らないため次のリリースへ回した", "at": None})
-        self.current = None
-        self.wake_answered(answered)
-        return answered
 
     def wake_answered(self, answered: list[dict]) -> None:
         """止まった宛先を再起動の対象へ入れる（異常系 6）。全レーンが止まれば異常系 11 に任せる。組み直しの依頼の答えを読むレーンはいない。"""
