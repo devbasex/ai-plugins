@@ -754,8 +754,8 @@
 | ファイル | 行 | 関数 | クラス | 副命令 | 役割 | 利用先 | 利用元 | 名前での参照 | テスト | 循環 |
 | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | ---: | ---: |
 | `scripts/build-runtime-plugins.sh` | 54 | 2 | 0 | — | — | — | — | コード 9 / CI 1 / Skill 2 / 文書 11 | 2 |  |
-| `scripts/check-cross-skill-refs.py` | 175 | 6 | 0 | 入口 | Skill の境界をまたぐ**配布に依存する参照**を数え、例外の一覧に無いものを失敗として返す。 | — | — | コード 1 / 契約 1 / 文書 4 | 1 |  |
-| `scripts/check-doc-line-limit.py` | 169 | 8 | 0 | 入口 | 説明文書と配布物の Markdown が、分割の基準（501 行以上）を超えていないかを見る（#354）。 | — | — | コード 2 / CI 1 / 文書 7 | 4 |  |
+| `scripts/check-cross-skill-refs.py` | 175 | 6 | 0 | 入口 | Skill の境界をまたぐ**リリースの中身に依存する参照**を数え、例外の一覧に無いものを失敗として返す。 | — | — | コード 1 / 契約 1 / 文書 4 | 1 |  |
+| `scripts/check-doc-line-limit.py` | 169 | 8 | 0 | 入口 | 説明文書とリリースに含まれる Markdown が、分割の基準（501 行以上）を超えていないかを見る（#354）。 | — | — | コード 2 / CI 1 / 文書 7 | 4 |  |
 | `scripts/check-doc-staleness.py` | 807 | 38 | 5（2） | 入口 | 説明文書に書かれた Skill 数と版数を、実体・マニフェスト・plugin.json と突き合わせる。 | md.py, scripts/lib/ndf_wrappers.py, scripts/lib/version_pattern.py, versions.py | — | コード 6 / 文書 10 | 7 |  |
 | `scripts/check-lint.sh` | 133 | 4 | 0 | — | 検査のコマンド（#1323）。CI（lint.yml）と .githooks/pre-push も同じものを呼ぶ。 | — | — | コード 3 / CI 1 / 文書 6 | 7 |  |
 | `scripts/check-markdown-links.py` | 229 | 13 | 0 | 入口 | Check repository-relative Markdown links. | md.py, scripts/lib/ndf_wrappers.py | — | コード 2 / CI 1 / Skill 1 / 文書 13 | 3 |  |
@@ -767,7 +767,7 @@
 | `scripts/check-skill-frontmatter.py` | 888 | 23 | 2（2） | 入口 | Skill の frontmatter が執筆規約に適合しているかをチェックする。 | scripts/lib/ndf_wrappers.py, yamlio.py | — | コード 6 / CI 1 / Skill 2 / 文書 12 | 5 |  |
 | `scripts/check-skill-repo-assumptions.py` | 440 | 18 | 1（2） | 入口 | 公開する Skill とスクリプトに「対象リポジトリ = ai-plugins 自身」の前提が無いかをチェックする。 | scripts/lib/allowlist.py | — | コード 1 / CI 1 / Skill 1 / 文書 4 | 1 |  |
 | `scripts/check-skill-shell-vars.py` | 297 | 8 | 1（3） | 入口 | 手順書の bash が参照する変数の出所をチェックする（#518-1）。 | md.py, scripts/lib/ndf_wrappers.py, shparse.py | — | コード 2 / CI 1 / 文書 2 | 1 |  |
-| `scripts/ci-heavy-skip.py` | 176 | 8 | 1（0） | 入口 | 配布の PR と文書だけの PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055・#2925）。 | diff_kinds.py, scripts/lib/ndf_wrappers.py | — | CI 2 / Skill 1 / 文書 3 | 1 |  |
+| `scripts/ci-heavy-skip.py` | 176 | 8 | 1（0） | 入口 | リリースの PR と文書だけの PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055・#2925）。 | diff_kinds.py, scripts/lib/ndf_wrappers.py | — | CI 2 / Skill 1 / 文書 3 | 1 |  |
 | `scripts/contracts_lib/core_checks.py` | 267 | 14 | 1（3） | 入口 | 実行の核に関わる契約の検査（#2337 の決定 5・6・12、不変条件 I4・I5・I7・I13）。標準ライブラリだけで書く。 | scripts/contracts_lib/model.py, step_result.py | scripts/check-ndf-contracts.py | — | 1 |  |
 | `scripts/contracts_lib/draft.py` | 95 | 2 | 1（3） | — | 拾った事実からエントリポイントの項目の下書きを作り、呼び手を探す。 | scripts/contracts_lib/model.py | scripts/check-ndf-contracts.py | — | 0 |  |
 | `scripts/contracts_lib/extract_py.py` | 444 | 7 | 3（26） | 入口 | Python のエントリポイントから、引数・環境変数・設定のキー・ファイルの書き・終了コードを静的に拾う。 | scripts/lib/py_imports.py | scripts/check-ndf-contracts.py, scripts/contracts_lib/extract_sh.py | 文書 2 | 1 |  |
