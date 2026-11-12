@@ -1,7 +1,7 @@
 {
   "version": 1,
   "path": "plugins/ndf/scripts/parallel.py",
-  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめたリリースの提示と確定・レーンのリリースの依頼と答え（#2436）。外のオーガナイザーのレーンとリリースの実行は `--external` で置き場のファイルとやり取りする（#2439）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
+  "summary": "並列の計画（`.ndf/parallel/<計画名>/`）の下書き・検査・起動・進行の待ち・まとめたリリースの提示と確定・レーンのリリースの依頼と答え（#2436）・レーンの終わりの記録と版の要るまとめの結果（#3058）。外のオーガナイザーのレーンとリリースの実行は `--external` で置き場のファイルとやり取りする（#2439）。結果は統一 JSON レポートを 1 行で標準出力へ出す。",
   "args": {
     "options": [],
     "positionals": [],
@@ -58,6 +58,15 @@
           "n"
         ]
       },
+      "end": {
+        "options": [
+          "--lane",
+          "--request"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
       "helper": {
         "options": [],
         "positionals": [
@@ -110,7 +119,8 @@
           "--issues",
           "--lane",
           "--prs",
-          "--state"
+          "--state",
+          "--verify-plan"
         ],
         "positionals": [
           "name"
@@ -170,6 +180,15 @@
         ],
         "positionals": [
           "name"
+        ]
+      },
+      "verified": {
+        "options": [
+          "--done"
+        ],
+        "positionals": [
+          "name",
+          "id"
         ]
       },
       "wait": {

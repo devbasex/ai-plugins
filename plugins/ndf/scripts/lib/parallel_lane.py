@@ -285,8 +285,11 @@ def lane_request_id(state: Path, lane: str) -> str:
     return rid
 
 
-def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
-    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。"""
+def send_release_request(
+    main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path, verify_plan: Optional[str] = None
+) -> str:
+    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。`verify_plan` は版の要るまとめの
+    プラン（1 スプリントのレーンの依頼の経路。`released` の後に一時レーンが流す。#3058 の決定 4）。"""
     rid = lane_request_id(state, lane)
     msg = {
         "kind": "request",
@@ -296,6 +299,7 @@ def send_release_request(main: Path, name: str, lane: str, prs: list[int], issue
         "issues": list(issues),
         "sprint_state": str(state),
         "at": pe.utc_stamp(),
+        **({"verify_plan": str(verify_plan)} if verify_plan else {}),
     }
     deliver_message(main, name, msg, "inbox", rid)
     return rid

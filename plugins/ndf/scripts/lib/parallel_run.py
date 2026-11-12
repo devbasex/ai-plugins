@@ -33,6 +33,7 @@ import parallel_plan as pp
 import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
+from parallel_end import LaneEnding
 from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
 from parallel_launch import LaunchRouting
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
@@ -215,8 +216,8 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting):
-    """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。"""
+class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting):
+    """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。レーンの終わりと版の要るまとめは `LaneEnding`（#3058）。"""
 
     write_hold, resume_lanes = staticmethod(step_answer_hold), staticmethod(step_resume_lanes)
     read_ledger, write_checkpoint = staticmethod(step_ledger_read), staticmethod(step_checkpoint)
@@ -258,6 +259,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
         self.wake_tries: dict[str, int] = {}  # レーン → 設計の答えが当たるまでに再起動した回数
         self.init_answer_hold()
+        self.init_lane_end()
         self.init_run_state(False)
 
     def bump(self) -> int:
@@ -311,6 +313,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         elif kind == "request":
             if all(r["id"] != msg.get("id") for r in self.pending):
                 self.pending.append(msg)
+                self.note_request(msg)
                 self.received[msg.get("lane", "")] = self.received.get(msg.get("lane", ""), 0) + 1
                 durable.set_event(f"lane-{msg.get('lane')}", {"received": self.received[msg.get("lane", "")]})
         elif kind in ("gate1", "gate2", "ask", "unmatched"):
@@ -321,6 +324,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
             self.keep_stopped(msg.get("lane"))
         elif kind == "lanes_changed":  # parallel.py lane add / set の後（#2733 の決定 9）
             self.take_lanes_changed()
+        elif kind in plg.ENDS:  # レーンの終わりと版の要るまとめ（#3058）
+            self.take_end(msg)
 
     def receive_question(self, msg: dict) -> None:
         """レーンからの問い（gate1 / gate2 / ask）を一覧へ受け付ける。打ち直しは数えず、同じ原因の問いは 1 つにまとめる。"""
@@ -378,6 +383,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         止まったものと数え、リリースの途中で止まった一時レーンならリリースを失敗として締める（依頼へ failed を答える）。
         リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。保留したループの残りを流す
         一時レーンを起こせない問いの「止める」も計画を止める（保留の中身はループの記録に残る）。"""
+        if self.apply_end(q, choice):  # レーンの終わりの問いと版の要るまとめの一時レーンの問い（#3058）
+            return
         if q.get("kind") == "build":
             self.apply_build(q, choice)
             return
@@ -422,6 +429,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
     def answer(self, rid: str, result: str, version: Optional[str], n: Optional[int], reason: Optional[str] = None) -> None:
         self.answered.add(rid)
         self.publish(f"answer-{rid}", {"result": result, "version": version, "release": n, "reason": reason, "at": None})
+        self.after_answer(rid, result, version, n, reason)
 
     # -- リリース --
 
@@ -469,14 +477,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         self.begin_release(n, built)
 
     def begin_release(self, n: int, built: dict) -> None:
-        rel = {
-            "n": n,
-            "state": "presented",
-            "version": built["version"],
-            "dirs": [built["dir"]],
-            "presented": [],
-            "requests": [r["id"] for r in self.pending],
-        }
+        rel = {"n": n, "state": "presented", "version": built["version"], "dirs": [built["dir"]], "presented": [],
+               "requests": [r["id"] for r in self.pending]}  # fmt: skip
         self.releases.append(rel)
         self.current = rel
         self.emit_release(rel, 1, represent=False)
@@ -514,7 +516,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
     def confirm(self, rel: dict, take: Optional[str]) -> None:
         """承認の答えを受けたら 1 度だけ比べる。出し直しの提示への答えでは比べない（I14）。進んでいて、加わった範囲が
         文書だけなら出し直しを省き、引き継ぐ形の提示 2 で確定する（#3020 の I1・I3）。提示 2 への答えでは引き継ぎを外す。"""
-        if len(rel["dirs"]) == 1:
+        if len(rel["dirs"]) == 1 and not self.approved_only:  # 新しい記録は提示 1 で確定し、先頭と比べない（#3070 の I5）
             first = step_presented(rel["dirs"][0])
             head = step_head(self.main)
             if pr.moved(first.get("sha") or "", head):
@@ -562,16 +564,8 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
         answered = [r for r in self.pending if r["id"] in hit]
         if result == "released":
             rel.update(state="released", version=msg.get("version") or rel.get("version"))
-            self.publish(
-                f"range-{rel['n']}",
-                {
-                    "sha": rel.get("sha"),
-                    "version": rel["version"],
-                    "prs": rel["prs"],
-                    "added": added,
-                    "lanes": sorted({r["lane"] for r in answered}),
-                },
-            )
+            got = {"sha": rel.get("sha"), "version": rel["version"], "prs": rel["prs"], "added": added}
+            self.publish(f"range-{rel['n']}", {**got, "lanes": sorted({r["lane"] for r in answered})})
             for r in answered:
                 self.answer(r["id"], "released", rel["version"], rel["n"])
         else:
@@ -588,6 +582,7 @@ class _Run(plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, Launc
     def wake_answered(self, answered: list[dict]) -> None:
         """止まった宛先を再起動の対象へ入れる（異常系 6）。全レーンが止まれば異常系 11 に任せる。組み直しの依頼の答えを読むレーンはいない。"""
         stopped = self.stopped()
+        stopped -= {n for n, st in self.lanes.items() if st.get("ended")}  # 終わったレーンは起こさない（#3058）
         wake = sorted({r["lane"] for r in answered if r.get("lane") in stopped and not r.get("again")})
         if wake and len(stopped) < len(self.order):
             self.wake = sorted({*self.wake, *wake})
@@ -605,6 +600,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.launching, run.sprint_hold_wake = durable.patched("parallel-launch"), durable.patched("parallel-sprint-hold-wake")  # #2936・#3000
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
     run.carrying = durable.patched("parallel-docs-carry")  # 印の無い古い記録は判定せずに出し直す（#3020 の I7）
+    run.ending, run.approved_only = durable.patched("parallel-lane-end"), durable.patched("parallel-approved-sha")  # #3058・#3070
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す
@@ -620,7 +616,8 @@ def parallel_workflow(main: str, name: str) -> dict:
 
 
 def _tick_release(run: _Run, main: str, name: str, wait: float) -> None:
-    if run.current is None and run.pending:
+    run.launch_verify()  # 版の要るまとめを先に流す。流している間は次のリリースを組まない（#3058 の決定 5・I7）
+    if run.current is None and run.pending and run.verifying is None:
         run.answer_from_ranges()
         if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
             run.open_release()
@@ -696,7 +693,7 @@ def _spawn_ready(run: _Run, main: str) -> None:
     if run.hold.plan:
         return
     view, started = _plan_view(run), set(_started(run))
-    stopped = run.stopped() - _asking_lanes(run) - set(run.revive) - set(run.marks)
+    stopped = run.counted(run.stopped()) - _asking_lanes(run) - set(run.revive) - set(run.marks)  # 終わりの記録で数える（#3058 の I2）
     ready = pp.ready_lanes(view, started, stopped)
     if ready and any(a in stopped for ln in ready for a in ln.after):  # 依存で起こすときだけループの記録を読む
         ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
@@ -714,8 +711,8 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 def _run_finished(run: _Run) -> bool:
     """リリースの途中でも残りでもなく、答えていない問いも再開の印も無く、全レーンが止まっている（I11）。前のループの待ちの問いは終わりを止めない（#2510 の I12）。"""
-    idle = run.current is None and not run.pending and not run.blocking() and not run.marks
-    return run.ls_ok and idle and len(run.stopped()) == len(run.order)
+    idle = run.current is None and not run.pending and not run.blocking() and not run.marks and not run.verifies
+    return run.ls_ok and idle and len(run.counted(run.stopped())) == len(run.order)
 
 
 def _observe_run(run: _Run, main: str) -> dict:
@@ -731,6 +728,7 @@ def _observe_run(run: _Run, main: str) -> dict:
     _ask_stalls(run, rows, run.seen_at)
     _ask_helper(run, rows)
     apply_observed_states(run, rows)
+    run.observe_ends(rows)  # 終わったレーンを止め、終わりの記録の無い停止と版の要るまとめを見張る（#3058）
     run.release_woken(rows)  # 動いて観えたら、または動いて観える前に今の再起動より後で止まったら、設計の答えの再起動を解く
     return seen
 
