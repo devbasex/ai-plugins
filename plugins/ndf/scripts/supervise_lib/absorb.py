@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import re
 
+from supervise_lib.design_stage import rebuild_impl_prompts
 from supervise_lib.procedures import absorbed_condition
+from supervise_lib.templates import GLOSSARY_RULE
 
 PAIR = re.compile(r"^(\d+):(\d+)$")
 
@@ -89,13 +91,25 @@ def apply_absorb(a, waves: list[dict]) -> None:
             include_in_design(design, to, m, note)
         host = plans.get(f"impl-{to}")
         if host is not None:
-            host["課題"] = _with(host.get("課題") or [to], m)
+            old = host.get("課題") or [to]
+            _move_issues(host, old, _with(old, m))
         mine = plans.get(f"impl-{lead.get(m, m)}")
         if mine is None or mine is host:
             continue
-        rest = [i for i in mine.get("課題") or [m] if i != m]
+        old = mine.get("課題") or [m]
+        rest = [i for i in old if i != m]
         if rest:
-            mine["課題"] = rest
+            _move_issues(mine, old, rest)
         else:
             mine["取り込み先"] = h
             mine["実行の条件"] = absorbed_condition(m, h)
+
+
+def _move_issues(plan: dict, old: list, issues: list) -> None:
+    """実装のプランの `課題` を `issues` にし、実装の指示を移した後の課題で組み直す（補正の行は残す）。指示が前の課題の
+    ままだと、取り込んだ課題を取り込み先と重ねて実装し、設計の結果の書き込みでも補正の行として残る。"""
+    before = {"課題": old, **{k: plan.get(k) for k in ("触るファイル", "設計文書")}}
+    plan["課題"] = issues
+    after = {**before, "課題": issues}
+    glossary = any(GLOSSARY_RULE in str(s.get("prompt") or "") for s in plan.get("steps") or [] if s.get("id") == "impl")
+    rebuild_impl_prompts(plan, before, after, glossary)

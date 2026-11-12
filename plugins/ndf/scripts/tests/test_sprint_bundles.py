@@ -144,6 +144,11 @@ def test_absorbing_a_bundle_member_drops_only_that_issue(tmp_path, monkeypatch):
     impl = stages(out)["実装"]
     assert impl["impl-12"]["課題"] == [11] and "実行の条件" not in impl["impl-12"] and "取り込み先" not in impl["impl-12"]
     assert impl["impl-13"]["課題"] == [13, 12]
+    # 実装の指示も移した後の課題で組み直す（#12 を impl-12 と impl-13 で重ねて実装しない）
+    prompt = {k: next(s["prompt"] for s in impl[k]["steps"] if s["id"] == "impl") for k in ("impl-12", "impl-13")}
+    assert "課題 #11 を実装する" in prompt["impl-12"] and "#12" not in prompt["impl-12"]
+    assert "課題 #13・#12 を実装する" in prompt["impl-13"]
+    assert design_stage.kept_lines(prompt["impl-12"], {"課題": [11]}, {"課題": [11]}) == []
 
 
 def test_design_results_keep_an_absorbed_lead_out_of_its_bundle():
@@ -151,6 +156,13 @@ def test_design_results_keep_an_absorbed_lead_out_of_its_bundle():
     plans = {12: {"課題": [11], "steps": []}, 13: {"課題": [13, 12], "steps": []}}
     design_stage.rewrite(plans, rows("| #11 | 実装する | — | `a.py` |\n| #13 | 実装する | — | `b.py` |\n"))
     assert plans[12]["課題"] == [11] and plans[13]["課題"] == [13, 12]
+
+
+def test_design_results_absorb_into_a_moved_lead_goes_to_its_new_plan():
+    """--absorb でまとまりの代表を別のプランへ移した後、その代表への取り込みは今の `課題` の所属（取り込み先のプラン）へ入る。"""
+    plans = {12: {"課題": [11], "steps": []}, 13: {"課題": [13, 12], "steps": []}, 14: {"課題": [14], "steps": []}}
+    design_stage.rewrite(plans, rows("| #14 | 取り込む | #12 | — |\n| #11 | 実装する | — | `a.py` |\n| #13 | 実装する | — | `b.py` |\n"))
+    assert plans[13]["課題"] == [13, 12, 14] and plans[12]["課題"] == [11]
 
 
 @pytest.mark.parametrize(

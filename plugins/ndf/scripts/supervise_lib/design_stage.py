@@ -206,11 +206,14 @@ def kept_lines(prompt: str, before: dict, after: dict) -> list[str]:
 
 def _implementing_plans(plans: dict[int, dict]) -> dict[int, int]:
     """課題 → その課題を実装するプランのキー。課題のまとまりのプラン（#3081）は代表の課題をキーに、まとまりの課題を
-    `課題` に持つ。自分のプランを持つ課題（--absorb で取り込んだ課題も）はそのプランを指す。"""
-    own = {n: n for n in plans}
+    `課題` に持つ。自分のプランを持ち、その `課題` にいる課題（--absorb で取り込んだ課題も）はそのプランを指す。
+    --absorb でまとまりのプランの `課題` から外した代表は、プランのキーより今の `課題` の所属（取り込み先のプラン）を指す。"""
+    own = {n: n for n, plan in plans.items() if n in (plan.get("課題") or [n])}
     for n, plan in plans.items():
         for i in plan.get("課題") or []:
             own.setdefault(i, n)
+    for n in plans:
+        own.setdefault(n, n)
     return own
 
 
@@ -234,7 +237,7 @@ def _checked_absorptions(plans: dict[int, dict], res: dr.DesignResults) -> tuple
     return pre, absorbed
 
 
-def _rebuild_impl_prompts(plan: dict, before: dict, after: dict, glossary: bool) -> None:
+def rebuild_impl_prompts(plan: dict, before: dict, after: dict, glossary: bool) -> None:
     """プランの実装のステップの指示を `after` の状態の雛形で組み直し、補正は順のまま残す（`kept_lines`）。"""
     for step in plan.get("steps", []):
         if step.get("id") == "impl":
@@ -282,7 +285,7 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
         if docs:
             plan["設計文書"] = docs
         after = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
-        _rebuild_impl_prompts(plan, before, after, glossary)
+        rebuild_impl_prompts(plan, before, after, glossary)
         items.append({"issue": n, "issues": issues, "files": plan.get("触るファイル", []), "docs": plan.get("設計文書", [])})
     return items
 
