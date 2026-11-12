@@ -433,3 +433,108 @@ def test_ci_only_whole_lint_runs_only_the_lint_commands(tmp_path):
     assert code == 1, out
     code, out = _run(_repo(tmp_path / "b", _ci_only_decl()), "whole", "--only-kind", "lint")
     assert code == 0 and "lint の suite が無い" in out["summary"]
+
+
+# --- CI の待ち: 衝突した Pull Request では上限まで待たずに止まる（#3076） ---
+
+PENDING = {"total_count": 0, "check_runs": []}  # 衝突した PR ではチェックが一覧に現れない
+
+
+def _run_body(conclusion):
+    return {"total_count": 1, "check_runs": [{"name": "ci", "status": "completed", "conclusion": conclusion}]}
+
+
+def _wait(mod, monkeypatch, tmp_path, capsys, checks, mergeables=(), pr=7, timeout=600):
+    """`_wait_ci` を、チェックの照会の本文の並び `checks`（尽きたら最後を繰り返す）と衝突の状態の並びで動かす。
+
+    戻りは（終了コード, 結果の JSON, チェックの照会の回数, 衝突の状態の照会の回数, JUnit の取得の回数）。
+    """
+    import json
+
+    calls = {"checks": 0, "mergeable": 0, "junit": 0}
+    bodies, states = list(checks), list(mergeables)
+
+    def gh_json(path):
+        calls["checks"] += 1
+        return bodies.pop(0) if len(bodies) > 1 else bodies[0]
+
+    def fetch_mergeable(repo, number):
+        assert (repo, number) == ("o/r", pr)
+        calls["mergeable"] += 1
+        return states.pop(0) if len(states) > 1 else (states[0] if states else "MERGEABLE")
+
+    def junit(*args, **kwargs):
+        calls["junit"] += 1
+        return []
+
+    import gh_pr_info
+
+    monkeypatch.setattr(mod.repo_lib, "owner_repo", lambda root: "o/r")
+    monkeypatch.setattr(mod, "_git_out", lambda root, *args: "abcdef0123")
+    monkeypatch.setattr(mod.test_triage, "gh_json", gh_json)
+    monkeypatch.setattr(mod.test_triage, "SLEEP", lambda s: None)
+    monkeypatch.setattr(mod.test_triage, "ci_junit_xmls", junit)
+    monkeypatch.setattr(mod, "_classify", lambda *a, **k: {"caused": ["t::x"], "fallback_reason": None})
+    monkeypatch.setattr(gh_pr_info, "fetch_mergeable", fetch_mergeable)
+    strategy = types.SimpleNamespace(name="ci-only", source="test", ci={"checks": ["ci"]})
+    ctx = mod.OutcomeContext(strategy, {"ci_wait_timeout": timeout}, [], passed=True, detail="")
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        mod._wait_ci(tmp_path, ctx, None, pr)
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return e.value.code, out, calls["checks"], calls["mergeable"], calls["junit"]
+
+
+def test_a_conflicting_pr_stops_at_the_first_pending_with_the_base_sync_command(mod, monkeypatch, tmp_path, capsys):
+    code, out, checks, merges, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], ["CONFLICTING"])
+    assert (code, out["status"], checks, merges, junit) == (2, "stopped", 1, 1, 0)
+    assert "PR #7" in out["summary"] and "衝突" in out["summary"]
+    assert out["next"] == "python3 plugins/ndf/scripts/merged-steps.py base-sync --pr 7"
+
+
+@pytest.mark.parametrize("unsure", ["UNKNOWN", None])
+def test_unknown_or_unreadable_state_keeps_waiting_until_a_conflict(mod, monkeypatch, tmp_path, capsys, unsure):
+    code, out, checks, merges, _ = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], [unsure, unsure, "CONFLICTING"])
+    assert (code, out["status"], checks, merges) == (2, "stopped", 3, 3)
+    assert "衝突" in out["summary"]
+
+
+def test_a_mergeable_pr_passes_when_the_checks_succeed(mod, monkeypatch, tmp_path, capsys):
+    code, out, checks, merges, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING, PENDING, _run_body("success")])
+    assert (code, out["status"], checks, junit) == (0, "ok", 3, 0)
+    assert merges <= 2  # 未完了を返した照会 1 回につき 1 回まで
+
+
+def test_a_mergeable_pr_with_failed_checks_goes_to_the_junit_triage(mod, monkeypatch, tmp_path, capsys):
+    code, out, _, _, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING, _run_body("failure")])
+    assert (code, junit) == (1, 1)
+    assert "の結論は failure" in out["summary"]
+
+
+def test_a_mergeable_pr_stops_at_the_limit_with_the_old_wording(mod, monkeypatch, tmp_path, capsys):
+    code, out, checks, merges, _ = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], timeout=60)
+    assert (code, out["status"]) == (1, "stopped")  # 上限の止まり方は今と同じ（status から決まる終了コード）
+    assert out["summary"].endswith("の結論を得られなかった（上限か照会の失敗）") and "衝突" not in out["summary"]
+    assert checks > 1 and merges == checks
+
+
+def test_without_pr_the_state_is_never_read(mod, monkeypatch, tmp_path, capsys):
+    code, out, checks, merges, _ = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], ["CONFLICTING"], pr=None, timeout=60)
+    assert (code, merges) == (1, 0) and checks > 1
+    assert "衝突" not in out["summary"]
+
+
+@pytest.mark.parametrize("conclusion, want", [("success", 0), ("failure", 1)])
+def test_a_settled_first_answer_never_reads_the_state(mod, monkeypatch, tmp_path, capsys, conclusion, want):
+    code, _, checks, merges, _ = _wait(mod, monkeypatch, tmp_path, capsys, [_run_body(conclusion)], ["CONFLICTING"])
+    assert (code, checks, merges) == (want, 1, 0)
+
+
+def test_whole_passes_the_pr_to_the_ci_wait(mod, monkeypatch, tmp_path):
+    seen = []
+    strategy = types.SimpleNamespace(name="ci-only", source="test", whole_on_ci=True, suites=[], whole_commands=lambda kind=None: [])
+    monkeypatch.setattr(mod, "_resolve", lambda root, a: (strategy, {"whole_timeout": 100}, []))
+    monkeypatch.setattr(mod, "_base_sha", lambda root, base: None)
+    monkeypatch.setattr(mod, "_wait_ci", lambda root, ctx, base, pr=None: seen.append(pr) or 0)
+    assert mod.cmd_whole(types.SimpleNamespace(root=str(tmp_path), template=None, base=None, pr=3069)) == 0
+    assert seen == [3069]
