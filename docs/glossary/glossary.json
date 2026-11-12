@@ -6681,6 +6681,24 @@
       "context": "ndf-workflow",
       "meaning": "`supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く",
       "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "最終の検査",
+      "context": "ndf-workflow",
+      "meaning": "スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ",
+      "pending_source": "issues/issue-3083-requirements.md"
+    },
+    {
+      "term": "中身の無い依頼",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼のうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、版なしのリリース済みと理由（閉じた Pull Request の番号）で答えて外す",
+      "pending_source": "issues/issue-3083-design.md"
+    },
+    {
+      "term": "処理済みのリリース承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない",
+      "pending_source": "issues/issue-3083-design.md"
     }
   ]
 }
