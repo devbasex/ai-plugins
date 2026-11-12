@@ -79,3 +79,10 @@ def test_plan_keeps_items_without_local_tests(refactor_lib, tmp_path, name):
     _, strategy = _strategy(refactor_lib, name)
     runs, origin = targets.limited_runs({"strategy": strategy.as_state()}, [], str(tmp_path), (), "extract_function")
     assert (runs, origin) == ([], "ci_only")
+
+
+def test_round_only_plan_passes_no_test_command_to_the_implementer(refactor_lib, tmp_path):
+    targets = importlib.import_module("refactor_lib.targets")
+    ts, strategy = _strategy(refactor_lib, "round-only")
+    runs, origin = targets.limited_runs({"strategy": strategy.as_state()}, [], str(tmp_path), (), "extract_function")
+    assert (origin, [r.kind for r in runs]) == ("round_test", [ts.LINT])

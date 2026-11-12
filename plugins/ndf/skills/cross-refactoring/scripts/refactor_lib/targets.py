@@ -212,13 +212,13 @@ def log_text(log: pathlib.Path) -> str:
 
 
 def round_runs(strategy: Optional[ts.Strategy]) -> Optional[list[ts.ScopeRun]]:
-    """`round-only` のラウンドテスト（suite ごとに 1 本。I6）。ほかの戦略・無ければ `None`。"""
+    """`round-only` のラウンドテスト（suite ごとに 1 本。I6）。ほかの戦略・無ければ `None`。
+
+    並びは `Strategy.round_runs` が組む（CI テストの宣言ならテストの種別を外す。#3056）。
+    """
     if strategy is None or strategy.name != ts.ROUND_ONLY:
         return None
-    if strategy.round_command:
-        return [ts.ScopeRun("round", strategy.round_kind, strategy.round_command)]
-    runs = [ts.ScopeRun(s.name, s.kind, s.command) for s in strategy.suites if s.command]
-    return runs or None
+    return strategy.round_runs() or None
 
 
 def limited_runs(
