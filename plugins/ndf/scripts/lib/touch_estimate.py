@@ -424,14 +424,20 @@ def lane_overlaps(lanes, estimates: Mapping[str, Mapping[int, list[str]]], share
     return out
 
 
-def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
-    import parallel_bundles as pb
+def _bundle_name(lane, issue: int) -> str:
+    """レーンの課題が入るまとまりの名前。まとまりの欄の無いレーン（ループのレーンを含む）は 1 件のまとまりの名前 `issue-<番号>`
+    （`parallel_bundles.single_name` と同じ形。I4）。`parallel_bundles` を読むとレーンの読み出しの依存まで届くため、
+    レーンの入力が持つ `bundle_list` だけを使う（#3081）。"""
+    got = getattr(lane.input, "bundle_list", lambda: None)()
+    return next((b.name for b in got or [] if issue in b.issues), f"issue-{issue}")
 
+
+def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
     bundled = any(getattr(ln.input, "bundles", None) is not None for ln in (a, b))  # まとまりの欄があれば名前を足す（#3081）
     proposals: list[dict] = [{"kind": "after", "lane": b.name, "after": a.name}]
     if a.input.kind == "sprint" and b.input.kind == "sprint":  # ループのレーンの課題はループが選ぶため移さない
         move = {"kind": "move", "issue": ib, "from": b.name, "to": a.name}
-        proposals.append({**move, "bundle": pb.bundle_name_of(b, ib)} if bundled else move)
+        proposals.append({**move, "bundle": _bundle_name(b, ib)} if bundled else move)
     shown = "・".join(dict.fromkeys(paths))
     return {
         "message": f"同じ時間帯に動くレーンの課題の見込みが重なる: {a.name} #{ia}・{b.name} #{ib}（{shown}）",
@@ -439,7 +445,7 @@ def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
         "issues": [ia, ib],
         "paths": paths,
         "proposals": proposals,
-        **({"bundles": [pb.bundle_name_of(a, ia), pb.bundle_name_of(b, ib)]} if bundled else {}),
+        **({"bundles": [_bundle_name(a, ia), _bundle_name(b, ib)]} if bundled else {}),
     }
 
 

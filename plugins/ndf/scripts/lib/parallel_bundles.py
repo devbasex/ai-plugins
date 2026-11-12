@@ -91,12 +91,6 @@ def bundle_list(issues: list[int], bundles: Optional[list[Bundle]]) -> Optional[
     return out
 
 
-def bundle_name_of(lane, issue: int) -> str:
-    """レーンの課題が入るまとまりの名前。まとまりの欄の無いレーン（ループのレーンを含む）は `issue-<番号>`。"""
-    got = getattr(lane.input, "bundle_list", lambda: None)()
-    return next((b.name for b in got or [] if issue in b.issues), single_name(issue))
-
-
 def _issue_refs(issues: list[int]) -> str:
     return " ".join(f"#{n}" for n in issues)
 
