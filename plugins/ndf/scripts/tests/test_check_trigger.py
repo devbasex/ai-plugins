@@ -880,6 +880,7 @@ def test_moving_a_behavior_doc_to_docs_is_not_docs_only(repo, env):
     git(repo, "commit", "-q", "-m", "move")
     git(repo, "checkout", "-q", "develop")
     git(repo, "merge", "-q", "--no-ff", "feat/issue-100-s1", "-m", "Merge pull request #44 from o/feat/issue-100-s1")
+    git(repo, "push", "-q", "origin", "develop")  # 範囲の先頭は origin のベースブランチ（merge_pr と同じく送る）
     code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
     assert (code, out["metrics"]["docs_only"]) == (0, False), out
 

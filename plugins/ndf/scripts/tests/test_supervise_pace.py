@@ -297,7 +297,8 @@ def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
     assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "開発版", "本番"]
     assert all(waves[n]["then_of"] == "まとめ" for n in ("最終の検査", "開発版", "本番"))
     final = load(waves["最終の検査"]["plans"][0])
-    assert "--final --sprint m26 --issue 11 12" in final["実行の条件"]["cmd"]
+    cond = final["実行の条件"]["cmd"]
+    assert "--final" in cond and "--sprint m26 --issue 11 12" in cond
     assert "--sprint m26 --issue 11 12" in steps_of(final)["prepare"]["cmd"]
     for name in ("開発版", "本番"):
         cond = load(waves[name]["plans"][0])["実行の条件"]
