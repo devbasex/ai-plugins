@@ -6547,25 +6547,25 @@
       "term": "課題のまとまり",
       "context": "ndf-workflow",
       "meaning": "並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
-      "pending_source": "issues/issue-3081-design.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "代表の課題",
       "context": "ndf-workflow",
       "meaning": "課題のまとまりの先頭の課題。まとまりの設計文書と実装の Pull Request はこの課題の番号で作り、ほかの課題の受け入れ条件を取り込む",
-      "pending_source": "issues/issue-3081-design.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "疎なまとまり",
       "context": "ndf-workflow",
       "meaning": "触る場所の見込みが互いに重ならない、課題のまとまりの組",
-      "pending_source": "issues/issue-3081-requirements.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "まとまりの単位のレビュー",
       "context": "ndf-workflow",
       "meaning": "1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review",
-      "pending_source": "issues/issue-3081-requirements.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "負荷とメモリの値",
