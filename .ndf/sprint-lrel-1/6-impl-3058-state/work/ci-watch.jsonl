@@ -1,0 +1,1 @@
+{"at": "2026-11-12T13:20:09+00:00", "head": "9b5e5b829991fd0cf7d22806bc6b71b94aee74a3", "verdict": "failed", "failed": ["Python tests / pytest"], "after_merge": true}
