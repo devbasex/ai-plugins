@@ -103,8 +103,60 @@ def waiting_requests(main: Path, name: str) -> list[tuple[str, str]]:
     ]
 
 
+def closed_prs(main: Path, prs: list[int]) -> dict:
+    """`prs` のうちマージされずに閉じた Pull Request の番号（`closed`）。GitHub の GraphQL で 100 件ごとにまとめて読む。
+    読めなければ `closed` を空にして理由を `error` に残す（取得に失敗した Pull Request は閉じたと見なさない。#3085 の I5）。"""
+    if not prs:
+        return {"closed": [], "error": ""}
+    from release_lib.included import pr_fields
+
+    got, why = pr_fields(prs, cwd=str(main))
+    if got is None:
+        return {"closed": [], "error": why}
+    return {"closed": sorted(n for n, d in got.items() if d and d.get("state") == "CLOSED"), "error": ""}
+
+
+@durable.step(name="parallel.closed-prs")
+def step_closed_prs(main: str, prs: list[int]) -> dict:
+    return closed_prs(Path(main), prs)
+
+
+def split_closed(pending: list[dict], closed) -> tuple[list[dict], list[dict]]:
+    """(中身の無い依頼, 残す依頼)（#3085 の I3・I4）。載せた Pull Request がすべて `closed`（マージされずに閉じた）の依頼は中身が無い。
+    一部が閉じた依頼は `prs` を残りへ置き換え、除いた番号を `closed` に残す（範囲の判定 `answerable` をそのまま通す）。"""
+    shut, empty, kept = set(closed), [], []
+    for r in pending:
+        gone = [n for n in r.get("prs") or [] if n in shut]
+        if not gone:
+            kept.append(r)
+            continue
+        got = {**r, "prs": [n for n in r["prs"] if n not in shut], "closed": sorted({*(r.get("closed") or []), *gone})}
+        (kept if got["prs"] else empty).append(got)
+    return empty, kept
+
+
+def closed_reason(r: dict) -> str:
+    return f"Pull Request {', '.join(f'#{n}' for n in r['closed'])} はマージされずに閉じた（出すものが無い）"
+
+
 class ReleaseRouting:
     """組まない・組めないリリースの締めと、組めないときの問い。`parallel_run._Run` が継ぐ（#2616）。"""
+
+    closing = True  # リリースを組む前に中身の無い依頼を外すか。印の無い古い記録の打ち直しでは False（#3085 の I7）
+
+    def drop_closed(self) -> bool:
+        """リリースを組む直前に 1 回だけ依頼の Pull Request の状態を読み、中身の無い依頼へ `released`・版なし・閉じた番号の理由で
+        答えて外す。一部が閉じた依頼は残りの番号で、出したリリースの範囲の答えを受け直す。組む依頼が残れば True（#3085 の I3〜I6）。"""
+        got = step_closed_prs(self.main, sorted({n for r in self.pending for n in r.get("prs") or []}))
+        empty, kept = split_closed(self.pending, got.get("closed") or [])
+        if kept == self.pending:
+            return True
+        self.pending = kept
+        for r in empty:
+            self.answer(r["id"], "released", None, None, closed_reason(r))
+        self.wake_answered(empty)
+        self.answer_from_ranges()
+        return bool(self.pending)
 
     def take_pending(self) -> tuple[list[dict], dict]:
         """受けている依頼をすべて外し、(依頼, リリースの記録の共通のキー) を返す（#2616 の I4）。"""

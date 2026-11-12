@@ -604,7 +604,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.routed = durable.patched("parallel-answers")
     run.launching, run.sprint_hold_wake = durable.patched("parallel-launch"), durable.patched("parallel-sprint-hold-wake")  # #2936・#3000
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
-    run.carrying = durable.patched("parallel-docs-carry")  # 印の無い古い記録は判定せずに出し直す（#3020 の I7）
+    run.carrying, run.closing = durable.patched("parallel-docs-carry"), durable.patched("parallel-closed-requests")  # 古い記録は今までの道
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す
@@ -622,7 +622,7 @@ def parallel_workflow(main: str, name: str) -> dict:
 def _tick_release(run: _Run, main: str, name: str, wait: float) -> None:
     if run.current is None and run.pending:
         run.answer_from_ranges()
-        if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
+        if run.pending and not run.hold.plan and (not run.closing or run.drop_closed()):  # 停止の間は組まない（I4）。#3085
             run.open_release()
 
 
