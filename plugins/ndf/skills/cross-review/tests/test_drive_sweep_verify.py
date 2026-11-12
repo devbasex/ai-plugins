@@ -92,3 +92,10 @@ def test_counts_keep_the_existing_keys(monkeypatch):
     assert counts["review_status"] == cr.review_status(state) == "unverified"
     assert (counts["final"], counts["fixed"], counts["rounds"], counts["ci"]) == ("approved", 1, 1, "unverified")
     assert counts["ci_reason"] == UNVERIFIED["reason"]
+
+
+def test_ci_only_declaration_names_no_local_test_command(tmp_path):
+    """#3056 — CI テストの宣言があれば手元のテストのコマンドを載せず、PR の CI の結果を読む行にする。静的解析は載せる。"""
+    suites = [{"name": "py", "command": "pytest ."}, {"name": "lint", "kind": "lint", "command": "ruff check ."}]
+    lines = cr.sweep_verify_lines(_decl(tmp_path, {"test": {"ci": {"only": True}, "suites": suites}}))
+    assert "pytest ." not in lines and "gh pr checks" in lines and "  - ruff check ." in lines

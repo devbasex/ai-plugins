@@ -386,7 +386,7 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "plan": None,
         "items": [],
         "deferred_items": [],
-        "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False},
+        "whole_test": {},
         "verify_stats": {"items": 0, "seconds": 0.0},
         "fix_stats": {"launches": 0, "seconds": 0.0},
         "final_gate": {"fix_rounds": 0, "checks": []},

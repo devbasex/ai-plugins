@@ -25,6 +25,8 @@
 次の利用者が同じ場所で止まる。逆に、開発対象の設定の誤りを上流リポジトリへ起票しても、上流リポジトリには
 直す対象が無い。
 
+起票先が別のリポジトリで、並列の計画のレーンなら、[parallel-cross-repo.md](../../development-workflow/references/parallel-cross-repo.md) の「別のリポジトリの改修が要るとき」へ進む。
+
 ## 上流リポジトリの名前
 
 解決は `issue-file.py resolve-target` が行う。見る場所とその理由はスクリプトの冒頭の説明にある。

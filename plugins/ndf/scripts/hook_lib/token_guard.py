@@ -15,13 +15,14 @@
 
 工程の起動の判定は、再起動の方針（`lib/context_policy.py`。既定は現行方式で上限 200,000）の帯で決め、起動 1 回ごとに
 判定の記録（`lib/context_decisions.py`）へ 1 行を足す。記録を書けなくても判定は変えない（#2262）。
+ラッパーの直接の子を止めたときの「引継ぎ開始」と、引継ぎ文書で始まったセッションの最初の工程の起動での「復元完了」の
+印も、ここで 1 セッションに 1 回だけ書く（#2908）。
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from collections import deque
 from contextlib import contextmanager
@@ -32,6 +33,7 @@ import jsonio
 
 from state_home import container_home
 
+from . import context_marks
 from . import payload as pl
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -149,7 +151,7 @@ def guard_sleep(raw: dict) -> dict | None:
     except (ValueError, RecursionError):  # 読めないコマンド・読めない上限は通す
         return None
     return deny(
-        f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI を待つだけなら gh pr checks <PR 番号> --watch を同じく背景で起動する。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
+        f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI の結果はマージ（merge-when-green）のときだけ待ち、ほかの時点で待たない。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
     )
 
 
@@ -280,18 +282,6 @@ def relay_notice() -> str | None:
     return text if kind == "relay" else None
 
 
-ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
-NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
-
-
-def issue_refs(text: str) -> str:
-    """課題番号を `#829 #830` の形で並べる。日付・版数・小数は先に取り除く。範囲（#829-830）は両端を残す。"""
-    refs = []
-    for line in text.split("\n"):
-        refs += [f"#{m.group(1)}" for m in ISSUE.finditer(NOISE.sub("", line))]
-    return " ".join(refs)
-
-
 def _launch_key(raw: dict, tool: str) -> tuple[str, str] | None:
     """新しいフェーズの起動なら (1 度だけ通すための鍵, 課題番号を探す文)。対象の起動でなければ None。"""
     if tool == "Bash":
@@ -378,17 +368,30 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         repo = cd.decisions_repo(root)
         estimate = cp.estimate_cost(cp.Estimates.from_dict(cd.read_cost_estimates(repo)), total, model, stage)
     verdict = cp.decide_boundary(applied, total, window, estimate)
-    row = dict(source="hook", session_id=sid, transcript=tp, model=model, work=cd.work_id(issue_refs(words)), stage=stage)
+    row = dict(source="hook", session_id=sid, transcript=tp, model=model, work=cd.work_id(cd.issue_refs(words)), stage=stage)
     row.update(context=total, window=window, applied=applied, verdict_obj=verdict)
     d = guards_dir()
     out = _judge(d, sid, key, words, total, applied, verdict, row) if d is not None and total is not None else None
     if d is None or total is None:
         row["passed_once"] = False
-    cd.append_decision(cd.boundary_row(**row), cd.decisions_repo(root))
+    repo = cd.decisions_repo(root)
+    cd.append_decision(cd.boundary_row(**row), repo)
     cd.write_applied(sid, applied)
+    if d is not None:
+        _session_marks(d, sid, tp, stage, row, repo, handoff=bool(row["relay"]) and out is not None)
     if out is None and d is not None:
         return _config_notice(d, sid, applied)
     return out
+
+
+def _session_marks(d: Path, sid: str, tp: str, stage: str, row: dict, repo: str, handoff: bool) -> None:
+    """引継ぎ開始・復元完了の印をセッションの排他の中で書く（`context_marks`）。失敗は飲み、判定を変えない（I4）。"""
+    try:
+        with session_lock(d, sid) as held:
+            if held:
+                context_marks.record_marks(sid, tp, stage, row, repo, handoff)
+    except Exception:  # noqa: BLE001 — 印の失敗で起動の判定を変えない（I4）
+        return
 
 
 def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict, row: dict) -> dict | None:
@@ -411,7 +414,9 @@ def _judge(d: Path, sid: str, key: str, words: str, total: int, applied, verdict
         if not over:
             return None
         write_json(mark, {"key": key})
-    nxt = f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}"
+    import context_decisions as cd
+
+    nxt = f"/ndf:development-workflow {cd.issue_refs(words) or '<課題番号>'}"
     return _context_deny(total, applied.limit, nxt, notice, _trial_cause(applied, verdict))
 
 

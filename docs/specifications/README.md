@@ -145,5 +145,22 @@
 | [ndf-release-pr-and-merge-route-terms.md](ndf-release-pr-and-merge-route-terms.md) | ベースブランチから本番チャネルへ変更を入れる道筋もリリースと呼ぶ規則、リリースの Pull Request とリリースの承認資料の語、変えない識別子（promote）、フェーズ名の旧い値の読み替え、禁止語の外すパス。語の定義は用語集が正 |
 | [ndf-diff-kinds-and-docs-only-checks.md](ndf-diff-kinds-and-docs-only-checks.md) | 差分を文書のファイルとコードのファイルに分け、文書だけの Pull Request で cross-refactoring・全体テスト・CI の全体の pytest を省くこと（テストが読む文書は対応するテストだけ）、振る舞いを決める文書の振る舞いの確認、宣言 `docs` の形と既定。工程表は `development-workflow` の SKILL.md が正 |
 | [ndf-whole-test-duration.md](ndf-whole-test-duration.md) | 全体テストの所要を確かめる振る舞いを弱めずに縮める手段の当て方（テストヘルパーの待ち・永続ワークフローの待ちの間隔・起動の遅延 import）、起動を縮めないスクリプトとその理由、基準 6 で消したテスト、消したテストの照合、届いた値。削る基準と手段は `docs/plugin-development-guide.md` が正 |
+| [ndf-context-continue-or-cut-measurement.md](ndf-context-continue-or-cut-measurement.md) | conductor の文脈を続けるか切るかの計測（計測の回・計測の条件・復元の量・待ちの前に切る規則） |
+| [ndf-mechanical-turns-to-scripts.md](ndf-mechanical-turns-to-scripts.md) | 機械的なターンをスクリプトへ移す（状態の取り出し・PR と CI の照合・手順の連続実行・進行のまとめ記録） |
+| [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) | 設計の判断を AI が決めて記録し、人へ残す判断をレッドラインに限る（MVV 判定と設計の検査） |
+| [ndf-work-during-approval-wait-and-business-hours.md](ndf-work-during-approval-wait-and-business-hours.md) | 答え待ちの間も承認の要らない作業を進め、業務時間外の承認の依頼を溜めて業務時間にまとめて示す |
+| [ndf-sprint-close-plan-cost.md](ndf-sprint-close-plan-cost.md) | 仕上げのプランの費用と所要時間（振り返りと差分の棚卸しの間隔・CI の待ちを重ねる並び） |
+| [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |
+| [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) | 一時レーンの起動とレーンの再起動を耐久ワークフローが打ち、オーガナイザーは問いと終わりだけで起きる |
+| [ndf-scripts-import-cycles.md](ndf-scripts-import-cycles.md) | スクリプトの import の向き（結果を出す層と cross-refactoring の台帳の輪をほどく） |
+| [ndf-relay-launch-target.md](ndf-relay-launch-target.md) | claude -p とラッパーの起動先の決定（5 時間の枠を先に使う選ぶ順の組・切り替えの余裕・近い上限で API キーへ逃がす条件・閾値 T の根拠）の常に成り立つ条件・決定と理由（#2930・#2931）。使い方は development-workflow の references/relay-accounts.md が正 |
+| [ndf-parallel-organizer-long-wait.md](ndf-parallel-organizer-long-wait.md) | 並列の計画のオーガナイザーの長い待ち（wait の上限 1800 秒の状況報告・metrics.switch の切り替えの判定と費用の式・再起動の理由「待ち」）の常に成り立つ条件・出力の契約・決定と理由（#3006）。手順は development-workflow の references/parallel.md が正 |
+| [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) | supervise の queue の重なりの組（同じファイルを宣言したプランだけを直列にする・ディレクトリの宣言を判定に使わない） |
+| [ndf-loop-selection-touch-estimate.md](ndf-loop-selection-touch-estimate.md) | 開発ループの選定と並列の計画の検査の触る場所の見込み（逆転の幅・見込みの出所・I21 の警告） |
+| [ndf-supervise-progress-host-and-queue-waits.md](ndf-supervise-progress-host-and-queue-waits.md) | supervise の負荷の記録（進捗ログの負荷とメモリ・queue の待ちの秒・全体テストのメモリの山の計測） |
+| [ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md) | 並列の計画のマシン全体のプランの上限（machine-plans の警告・起動の待ち・起動の排他・relay.py cap --plans） |
+| [ndf-parallel-cross-repo-lane.md](ndf-parallel-cross-repo-lane.md) | 別のリポジトリの改修が要るときの既定（相手のクローンを repo にしたレーンを足す）の決定と理由・常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel-cross-repo.md が正 |
+| [ndf-ci-only-tests.md](ndf-ci-only-tests.md) | CI テストの宣言（`test.ci.only`）のあるリポジトリで手元のテストを止め、PR の CI の結果を待たずに読んで直し（`ci-watch.py peek`・改修の上限）、テストのチェックがそろってからマージすること。hook の照合と cross-refactoring の最終ゲートを含む。手順は `development-workflow` の SKILL.md が正 |
+| [ndf-parallel-issue-bundles.md](ndf-parallel-issue-bundles.md) | 並列の計画の課題のまとまり（まとまりごとの実装の Pull Request とレビュー、検査の規則 bundle・bundle-overlap） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

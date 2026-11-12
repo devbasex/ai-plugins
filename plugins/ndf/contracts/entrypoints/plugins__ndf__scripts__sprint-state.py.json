@@ -72,13 +72,15 @@
     {
       "file": "project.json",
       "keys": [
+        "docs",
         "ndf_policies"
       ]
     },
     {
       "file": "supervise.json",
       "keys": [
-        "release"
+        "release",
+        "shared"
       ]
     },
     {
@@ -93,6 +95,7 @@
   "writes": [
     "answer-hold-json",
     "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
     "answer-json",
     "applied-json",
     "approved-txt",
@@ -100,6 +103,7 @@
     "checkpoint-json",
     "cost-estimates-json",
     "decisions-jsonl",
+    "handoff-mark-json",
     "laps-md",
     "lease-json",
     "loop-json",
@@ -112,6 +116,7 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "restore-json",
     "resume-mark-json",
     "revise-json",
     "revise-md"
@@ -181,7 +186,8 @@
       "key": "supervise.loop:name={name}",
       "unit": "session",
       "window_seconds": 86400,
-      "release": true
+      "release": true,
+      "shared": true
     }
   }
 }

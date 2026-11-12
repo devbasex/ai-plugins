@@ -58,7 +58,7 @@ def review_paths():
 def sweep_verify_lines(worktree) -> str:
     """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
     宣言が無い・読めない・テストの無い宣言（#1593）なら空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって
-    解けない（不正な `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。"""
+    解けない（不正な `kind` など）ときは不正なキーを添えて `Stop` で止める。`--verify-command` は読まない。CI テストの宣言なら CI を読む行を足す。"""
     if not worktree:
         return ""
     import project_decl
@@ -72,12 +72,12 @@ def sweep_verify_lines(worktree) -> str:
         commands = ts.verify_commands(decl)
     except ts.StrategyError as e:
         raise Stop(f"最終スイープの指示を組めない: .ndf/project.json の test が不正: {e}", 2) from e
-    if not commands:
+    if not commands and not ts.declares_ci_only(decl):
         return ""
-    listed = "\n".join(f"  - {c}" for c in commands)
+    listed = "".join(f"  - {c}\n" for c in commands or [])
     return (
         "- 修正をコミットしたら、検証は次のコマンドを作業ディレクトリで順に走らせる（.ndf/project.json の test）。"
-        f"Step 7.5 の探し方は使わない:\n{listed}\n"
+        f"Step 7.5 の探し方は使わない:\n{listed}" + (ts.CI_ONLY_SWEEP if ts.declares_ci_only(decl) else "")
     )
 
 

@@ -61,6 +61,10 @@ supervisor の役割を主に担い、このスクリプトがフェーズの手
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
+    supervise.py advance --step "<NDF のスクリプトのコマンド>"... [--from N]
+        # 手順の連続実行（#2909）: 判断の要らない手順を結果 JSON が ok の間だけ続けて打ち、gate か stopped で止まって
+        # 理由と続きのコマンド（--from）を next に返す。打てるのは NDF の scripts/ と skills/*/scripts/ だけで、シェルを通さない。
+        # 中継の副命令（gh_parts.py body-lock・post_queue.py retry）は打たない。中身は supervise_lib/advance.py
     supervise.py note <引継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
     supervise.py format [--root DIR] [--commit]       # 宣言した整形（.ndf/supervise.json の format）。0 = 通った / 1 = 直らない違反 / 2 = 宣言なし・仕組みの失敗
@@ -70,7 +74,7 @@ supervisor の役割を主に担い、このスクリプトがフェーズの手
     supervise.py example            # 計画の例を出す
 
 new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
-new / queue / wait / note / sync-check / format / sync-title / review-settled の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / advance / note / sync-check / format / sync-title / review-settled の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 
 プランの形と実行の決まり（ステップの型ごとの鍵・承認ゲート・遅れの見張り）は supervise_lib/plan.py の docstring にある。
@@ -93,6 +97,7 @@ deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable", "versions", "waits"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
 from supervise_lib import commands, design_merge, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
+from supervise_lib import advance  # noqa: E402
 from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
@@ -175,6 +180,13 @@ def build_parser(sub) -> None:
     w.add_argument("done", help="queue の --done のパス（省いた queue なら <最初の計画>-state/queue-done.json）")
     w.add_argument("--timeout", type=float, default=10800.0, help="待つ上限（秒）")
     w.add_argument("--poll", type=float, default=5.0, help="見る間隔（秒）")
+    av = sub.add_parser(
+        "advance",
+        help="判断の要らない NDF の手順を続けて打ち、gate か stopped で止まる（手順の連続実行。#2909）",
+        epilog="終了コード: すべて ok = 0 / 子が gate = 子の終了コード / 子が stopped = 1 / 打てない手順・--from の誤り = 2",
+    )
+    av.add_argument("--step", action="append", default=[], required=True, help="打つ手順（NDF のスクリプトのコマンド。順に打つ）")
+    av.add_argument("--from", dest="start", type=int, default=1, help="1 から数えた番号。これより前の手順を打たない")
     g = sub.add_parser(
         "design-glossary",
         help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
@@ -300,6 +312,7 @@ COMMANDS = {
     "new": _cmd_new,
     "queue": _cmd_queue,
     "wait": _cmd_wait,
+    "advance": lambda ap, a: emit(*advance.cmd_advance(a.step, a.start)),
     "design-glossary": lambda ap, a: emit(*commands.cmd_design_glossary(a.root, a.mode, a.out)),
     "design-results": lambda ap, a: emit(*design_stage.cmd_design_results(a)),
     "design-approved": lambda ap, a: emit(*design_merge.cmd_design_approved(a.pr, a.state)),

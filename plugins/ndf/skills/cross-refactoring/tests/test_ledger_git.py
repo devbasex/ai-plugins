@@ -313,7 +313,7 @@ def test_the_verify_does_not_push(cmd_converge, cmd_gate, publish, patch_lib, tm
     calls: list[str] = []
     patch_lib("push_head", lambda state: calls.append(state["phase"]))
     patch_lib("_settle_scope", lambda path, state: None)
-    patch_lib("_whole_test", lambda path, state, flags: False)
+    patch_lib("_defer_whole_test", lambda path, state, flags: None)
 
     cmd_converge.cmd_verify(type("A", (), {"id": 130})())
 
@@ -374,3 +374,71 @@ def test_a_test_commit_kept_by_an_undropped_item_is_publishable(ledger, tmp_path
     path = _state(tmp_path, work, base, [item], phase="final")
 
     assert ledger.unpublishable(read_state(path), str(work), base) == []
+
+
+# ---------- 現状固定: keepers の分類（I-001） ----------
+
+
+def _commits(work: pathlib.Path, n: int) -> list[str]:
+    shas = []
+    for i in range(n):
+        _change(work, "src/a.py", i, f"c{i}")
+        shas.append(commit_with_trailers(work, f"c{i}", {}))
+    return shas
+
+
+def test_keepers_classifies_each_source_of_kept_commits(ledger, repo):
+    """現状固定: 記録・最終ゲートの修正・項目の状態ごとに、残すコミットと種類を固定する。"""
+    work = repo["work"]
+    _base(work, ["src/a.py"], push=False)
+    c = _commits(work, 12)
+    sendback = [{"kind": "test_failed"}]
+    state = {
+        "ledger": {"orchestrator_commits": [c[0][:10]]},
+        "final_gate": {"fix_commits": [c[1]]},
+        "items": [
+            # 生きている項目: テスト・追加のテスト・実装・修正のすべて
+            {"id": "I-001", "status": "verified", "commits": {"test": c[2], "test_extra": [c[3]], "implement": c[4], "fix": [c[5]]}},
+            # 取り消し（打ち消しのコミットあり）: 残す
+            {"id": "I-002", "status": "reverted", "reverted_by_commit": "x", "commits": {"test": c[6]}},
+            # 取り消し（打ち消しのコミットなし）: 残さない
+            {"id": "I-003", "status": "reverted", "commits": {"test": c[7]}},
+            # 見送り＋検証を受けていないテスト: テストは残さず、実装は残す
+            {"id": "I-004", "status": "deferred", "sendbacks": sendback, "commits": {"test": c[8], "implement": c[9]}},
+            # 見送り＋打ち消し済み: テストも残す
+            {"id": "I-005", "status": "deferred", "reverted_by_commit": "y", "sendbacks": sendback, "commits": {"test": c[10]}},
+            # 持ち越し: 差し戻しがあってもテストを残す
+            {"id": "I-006", "status": "carried", "sendbacks": sendback, "commits": {"test": c[11]}},
+        ],
+    }
+
+    kept = ledger.keepers(state, str(work))
+
+    assert kept == {
+        c[0]: "orchestrator",
+        c[1]: "final_fix",
+        c[2]: "item",
+        c[3]: "item",
+        c[4]: "item",
+        c[5]: "item",
+        c[6]: "item",
+        c[9]: "item",
+        c[10]: "item",
+        c[11]: "item",
+    }
+
+
+def test_keepers_lets_items_override_and_keeps_unresolvable_shas(ledger, repo):
+    """現状固定: 同じコミットは後の分類（項目）が勝つ。解決できない SHA はそのまま鍵になる。ledger が dict でなければ無視する。"""
+    work = repo["work"]
+    _base(work, ["src/a.py"], push=False)
+    c = _commits(work, 1)
+    state = {
+        "ledger": ["not-a-dict"],
+        "final_gate": {"fix_commits": [c[0]]},
+        "items": [{"id": "I-001", "status": "planned", "commits": {"test": c[0], "implement": "deadbeef", "fix": []}}],
+    }
+
+    assert ledger.keepers(state, str(work)) == {c[0]: "item", "deadbeef": "item"}
+    assert ledger.keepers({}, str(work)) == {}
+    assert ledger.keepers({"final_gate": None, "items": None, "ledger": None}, str(work)) == {}

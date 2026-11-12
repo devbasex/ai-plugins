@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
 import subprocess
 import sys
 import threading
 
 import pytest
 
-from test_parallel_run import SCRIPTS, calls, env, event, questions, read, spawned, start, until  # noqa: F401  env は fixture
+from test_parallel_run import SCRIPTS, calls, env, event, helper_spawns, lanes_spawned, questions, read, spawned, start, until  # noqa: F401,E501  env は fixture
 import durable  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_ledger as plg  # noqa: E402
@@ -133,10 +134,10 @@ def test_release_numbers_continue_and_lanes_are_not_spawned_again(env, tmp_path,
     rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release" and e)
     assert ev["n"] == 4 and rid in [r["id"] for r in pl.requests_for(main, "p1")]
-    assert spawned(log) == ["la"]
+    assert lanes_spawned(log) == ["la"]
     states.write_text(json.dumps({"la": "stopped"}))
     until(lambda: "lb" in spawned(log))
-    assert spawned(log) == ["la", "lb"]
+    assert lanes_spawned(log) == ["la", "lb"]
 
 
 def test_settle_lands_on_the_release_in_flight_after_the_rebuild(env, tmp_path, monkeypatch):  # noqa: F811
@@ -149,10 +150,14 @@ def test_settle_lands_on_the_release_in_flight_after_the_rebuild(env, tmp_path, 
     pl.resume_plan(main, "p1", {"n": 1, "phase": "confirm", "take": None}, "confirm:1:-")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     until(lambda: [r.get("state") for r in checkpoint(main).get("releases") or []] == ["confirmed"])
+    until(lambda: "rel-1-1-confirmed" in (checkpoint(main).get("launches") or {}))
+    before = len(helper_spawns(log))
     break_run(monkeypatch)
     rebuild(main)
-    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "notice" and e)
-    assert ev["release"]["action"] == "confirmed"  # 最後の起動の指示を添える
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "running" and e)
+    assert ev["release"]["action"] == "confirmed"  # 一時レーンが流すものを決める最後の起動を添える
+    time.sleep(0.8)
+    assert len(helper_spawns(log)) == before  # 起動の記録のある目的は、作り直しの後に打ち直さない（#2936 の I3）
     pl.resume_plan(main, "p1", {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3", "reason": None}, "settle:1")
     assert read(main, rid)["version"] == "1.2.3"
 

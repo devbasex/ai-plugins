@@ -30,6 +30,13 @@
           "name"
         ]
       },
+      "carried": {
+        "options": [],
+        "positionals": [
+          "name",
+          "n"
+        ]
+      },
       "check": {
         "options": [],
         "positionals": [
@@ -151,6 +158,12 @@
           "name"
         ]
       },
+      "status": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
       "stop": {
         "options": [
           "--force"
@@ -173,6 +186,7 @@
   },
   "env": [
     "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "GH_TOKEN",
@@ -188,6 +202,9 @@
     "NDF_CLAUDE_API_KEY_GENERATION",
     "NDF_CLAUDE_API_KEY_NAME",
     "NDF_CLAUDE_KEY_ACCOUNT",
+    "NDF_CONTEXT_DIR",
+    "NDF_CONTEXT_LIMIT",
+    "NDF_CONTEXT_POLICY",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_ESTIMATE_DIR",
@@ -195,6 +212,7 @@
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
+    "NDF_PARALLEL_LAUNCH_SECONDS",
     "NDF_PARALLEL_MAX_PLANS",
     "NDF_PARALLEL_POLL",
     "NDF_PARALLEL_RELAY",
@@ -226,13 +244,15 @@
     {
       "file": "project.json",
       "keys": [
+        "docs",
         "ndf_policies"
       ]
     },
     {
       "file": "supervise.json",
       "keys": [
-        "release"
+        "release",
+        "shared"
       ]
     },
     {
@@ -247,11 +267,18 @@
   "writes": [
     "answer-hold-json",
     "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
     "answer-json",
     "answers-sent-json",
+    "applied-json",
     "approved-txt",
     "breakdown-md",
     "checkpoint-json",
+    "cost-estimates-json",
+    "decisions-jsonl",
+    "deferred-json",
+    "handoff-mark-json",
+    "outside-plan-jsonl",
     "plan-json",
     "plan-md",
     "present-json",
@@ -260,6 +287,7 @@
     "request-id-txt",
     "request-txt",
     "requests-json",
+    "restore-json",
     "resume-mark-json",
     "revise-md",
     "run-log",

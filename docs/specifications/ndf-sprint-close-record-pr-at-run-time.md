@@ -186,7 +186,7 @@ sequenceDiagram
   alt 本番かデプロイなしの記録がある
     R-->>F: RecordHit(pr=N)
     F->>P: {queue_record} を N へ置き換えて書き戻す
-    Q->>P: 流す（… → release-verify(N) → retro → close(N) → …）
+    Q->>P: 流す（… → release-verify(N) → deep-due → … → merge → close(N)）
   else 見つからない・GitHub を読めない
     R-->>F: RecordHit(pr=None, 理由)
     F-->>Q: 理由（プランは書き換えない）

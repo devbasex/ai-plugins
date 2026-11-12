@@ -112,3 +112,25 @@ def test_rerun_groups_split_targets_with_a_node_id_by_suite():
     """`::` 付きの対象も、パスの部分で受け持つ suite を決め、`{paths}` へはパスだけを渡す（#1354・#1793 の R5）。"""
     groups = test_triage.rerun_groups(_suites(), ["a/t.py::x", "b/t.py::y"])
     assert [(suite.name, paths) for suite, paths in groups] == [("a", ["a/t.py"]), ("b", ["b/t.py"])]
+
+
+def test_classify_with_the_ci_only_declaration_does_not_rerun(tmp_path):
+    """CI テストの宣言があれば、test-run.py whole の CI の失敗も手元と比較の木で走らせ直さずに分ける（#3056）。"""
+    strategy = _suites()
+    strategy.ci_only = True
+
+    def run(*_a, **_k):
+        raise AssertionError("走らせ直さない")
+
+    out = test_triage.classify(
+        work=str(tmp_path),
+        strategy=strategy,
+        failed=["a/test_x.py::t", "a/test_y.py::t"],
+        fallback_reason=None,
+        base_sha="abc",
+        timeout=10,
+        log_dir=tmp_path / "logs",
+        existing_failures=["a/test_y.py::t"],
+        run=run,
+    )
+    assert out["caused"] == ["a/test_x.py::t"] and out["preexisting"] == ["a/test_y.py::t"] and out["fallback_reason"] is None

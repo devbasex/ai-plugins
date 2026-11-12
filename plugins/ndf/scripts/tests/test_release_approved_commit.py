@@ -86,6 +86,76 @@ DOC_FILE = "docs/design.md"
 SYNC = f"release/v{VER}-sync"
 
 
+class FakeGitHub:
+    """GitHub の PR 操作の疑似実装。マージは別の clone（other）で本物の git を動かし、呼び出しを記録する。
+    PR の番号は 1 = release/v<版> → trunk、2 = release/v<版> → live、3 = release/v<版>-sync → trunk。"""
+
+    def __init__(self, mod, w, *, outside_after, move_head, prod_merged, published, delete_on_merge):
+        self.mod, self.w = mod, w
+        self.work, self.other = w["work"], w["other"]
+        self.outside_after, self.move_head = outside_after, move_head
+        self.prod_merged, self.published, self.delete_on_merge = prod_merged, published, delete_on_merge
+        self.merged, self.ghcalls, self.created, self.state = [], [], [], {}
+
+    def find_pr(self, r, head, base, states):
+        if self.prod_merged and head == f"release/v{VER}":
+            return {"number": 1 if base == "trunk" else 2, "state": "MERGED"}
+        return None
+
+    def create_pr(self, r, base, head, title, body):
+        self.created.append((base, head))
+        return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
+
+    def wait_and_merge(self, r, n, expect=None, ci_wait=3600.0, gate_approved=None):
+        self.merged.append((n, expect))
+        if n in (1, 3):
+            return self._merge_into_base(n)
+        return self._merge_into_production(expect)
+
+    def _merge_into_base(self, n):
+        """開発側（trunk）へのマージ。衝突すれば Conflicted、delete_on_merge なら head のブランチを消す。"""
+        other = self.other
+        git(other, "fetch", "-q", "origin")
+        git(other, "reset", "-q", "--hard", "origin/trunk")
+        src = f"origin/release/v{VER}" if n == 1 else f"origin/{SYNC}"
+        if subprocess.run(["git", "-C", str(other), "merge", "-q", "--no-ff", "-m", f"Merge pull request #{n}", src]).returncode:
+            git(other, "merge", "--abort")
+            raise self.mod.Conflicted(f"PR #{n} がベースブランチと衝突している")
+        self.state["merge"] = git(other, "rev-parse", "HEAD")
+        if self.outside_after:
+            commit(other, self.outside_after, "x\n", "statusline (#806)")
+        git(other, "push", "-q", "origin", "HEAD:trunk")
+        if self.delete_on_merge:  # delete_branch_on_merge: GitHub がマージした head のブランチを消す
+            git(self.w["origin"], "update-ref", "-d", f"refs/heads/{src.removeprefix('origin/')}")
+        return self.state["merge"]
+
+    def _merge_into_production(self, expect):
+        """本番側（live）へのマージ。move_head なら 1 回だけ release/v<版> を進めて HeadMoved。"""
+        other, state = self.other, self.state
+        if self.move_head and not state.get("moved"):
+            state["moved"] = True
+            git(other, "fetch", "-q", "origin")
+            git(other, "checkout", "-q", "-B", "rel", f"origin/release/v{VER}")
+            commit(other, self.move_head, "x\n", "late (#900)")
+            git(other, "push", "-q", "origin", f"HEAD:release/v{VER}")
+            git(other, "checkout", "-q", "trunk")
+            raise self.mod.HeadMoved("moved")
+        assert expect == git(self.w["origin"], "rev-parse", f"release/v{VER}")  # 比べた release/v<版> の先頭だけを出す
+        git(self.w["origin"], "update-ref", "refs/heads/live", expect)
+        state["live"] = expect
+        return expect
+
+    def pr_view(self, r, n, fields):
+        head = git(self.work, "rev-parse", "HEAD")
+        return {"headRefOid": head, "commits": [{"oid": head}], "mergeCommit": {"oid": self.state.get("live" if n == 2 else "merge")}}
+
+    def gh(self, args, cwd=None):
+        self.ghcalls.append(args)
+        if args[:2] == ["release", "view"]:
+            return subprocess.CompletedProcess(args, 0 if "release" in self.published else 1, "", "")
+        return subprocess.CompletedProcess(args, 0, '[{"number": 806}]', "")
+
+
 def run_release(
     monkeypatch, w, *, outside_after=None, move_head=None, dev_bump=None, prod_merged=False, published=(), delete_on_merge=False, **extra
 ):
@@ -99,75 +169,35 @@ def run_release(
     if dev_bump:
         commit(other, "version.txt", dev_bump, "dev bump (#700)")
         git(other, "push", "-q", "origin", "HEAD:trunk")
-    merged, ghcalls, created, state = [], [], [], {}
+    hub = FakeGitHub(
+        mod,
+        w,
+        outside_after=outside_after,
+        move_head=move_head,
+        prod_merged=prod_merged,
+        published=published,
+        delete_on_merge=delete_on_merge,
+    )
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
     if prod_merged:
-        state["live"] = git(work, "rev-parse", "HEAD")
+        hub.state["live"] = git(work, "rev-parse", "HEAD")
         git(work, "push", "-q", "origin", f"HEAD:release/v{VER}", "HEAD:live")
         git(other, "fetch", "-q", "origin")
         git(other, "merge", "-q", "--no-ff", "-m", "Merge pull request #1", f"origin/release/v{VER}")
         git(other, "push", "-q", "origin", "HEAD:trunk")
         for name in published:
             if name == "tag":
-                git(work, "tag", "-a", f"foo--v{VER}", state["live"], "-m", "t")
+                git(work, "tag", "-a", f"foo--v{VER}", hub.state["live"], "-m", "t")
                 git(work, "push", "-q", "origin", f"foo--v{VER}")
                 git(work, "tag", "-d", f"foo--v{VER}")
 
-    def find_pr(r, head, base, states):
-        if prod_merged and head == f"release/v{VER}":
-            return {"number": 1 if base == "trunk" else 2, "state": "MERGED"}
-        return None
-
-    def create_pr(r, base, head, title, body):
-        created.append((base, head))
-        return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
-
-    def wait_and_merge(r, n, expect=None, ci_wait=3600.0, gate_approved=None):
-        merged.append((n, expect))
-        if n in (1, 3):
-            git(other, "fetch", "-q", "origin")
-            git(other, "reset", "-q", "--hard", "origin/trunk")
-            src = f"origin/release/v{VER}" if n == 1 else f"origin/{SYNC}"
-            if subprocess.run(["git", "-C", str(other), "merge", "-q", "--no-ff", "-m", f"Merge pull request #{n}", src]).returncode:
-                git(other, "merge", "--abort")
-                raise mod.Conflicted(f"PR #{n} がベースブランチと衝突している")
-            state["merge"] = git(other, "rev-parse", "HEAD")
-            if outside_after:
-                commit(other, outside_after, "x\n", "statusline (#806)")
-            git(other, "push", "-q", "origin", "HEAD:trunk")
-            if delete_on_merge:  # delete_branch_on_merge: GitHub がマージした head のブランチを消す
-                git(w["origin"], "update-ref", "-d", f"refs/heads/{src.removeprefix('origin/')}")
-            return state["merge"]
-        if move_head and not state.get("moved"):
-            state["moved"] = True
-            git(other, "fetch", "-q", "origin")
-            git(other, "checkout", "-q", "-B", "rel", f"origin/release/v{VER}")
-            commit(other, move_head, "x\n", "late (#900)")
-            git(other, "push", "-q", "origin", f"HEAD:release/v{VER}")
-            git(other, "checkout", "-q", "trunk")
-            raise mod.HeadMoved("moved")
-        assert expect == git(w["origin"], "rev-parse", f"release/v{VER}")  # 比べた release/v<版> の先頭だけを出す
-        git(w["origin"], "update-ref", "refs/heads/live", expect)
-        state["live"] = expect
-        return expect
-
-    def pr_view(r, n, fields):
-        head = git(work, "rev-parse", "HEAD")
-        return {"headRefOid": head, "commits": [{"oid": head}], "mergeCommit": {"oid": state.get("live" if n == 2 else "merge")}}
-
-    def gh(args, cwd=None):
-        ghcalls.append(args)
-        if args[:2] == ["release", "view"]:
-            return subprocess.CompletedProcess(args, 0 if "release" in published else 1, "", "")
-        return subprocess.CompletedProcess(args, 0, '[{"number": 806}]', "")
-
-    monkeypatch.setattr(mod, "find_pr", find_pr)
+    monkeypatch.setattr(mod, "find_pr", hub.find_pr)
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
-    monkeypatch.setattr(mod, "create_pr", create_pr)
-    monkeypatch.setattr(mod, "wait_and_merge", wait_and_merge)
-    monkeypatch.setattr(mod, "pr_view", pr_view)
+    monkeypatch.setattr(mod, "create_pr", hub.create_pr)
+    monkeypatch.setattr(mod, "wait_and_merge", hub.wait_and_merge)
+    monkeypatch.setattr(mod, "pr_view", hub.pr_view)
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
-    monkeypatch.setattr(mod.gh_parts, "gh", gh)
+    monkeypatch.setattr(mod.gh_parts, "gh", hub.gh)
     monkeypatch.setattr(mod.trash, "sweep", lambda r, m: ([], {}))
     ns = {
         "root": str(work),
@@ -182,7 +212,7 @@ def run_release(
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(argparse.Namespace(**ns))
     out, code = e.value.code
-    return out, code, merged, ghcalls, created
+    return out, code, hub.merged, hub.ghcalls, hub.created
 
 
 def tags(origin: Path) -> str:

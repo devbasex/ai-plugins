@@ -23,7 +23,8 @@ NDF の手順のスクリプト（Skill の本文かプランのステップか�
 | 何を | 正本 |
 | --- | --- |
 | 結果 JSON の全項目、状態と終了コードの表、`ok` の条件、過程・判断・結果を書く項目、読む側の規則 | [`lib/README.md` の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md#手順のスクリプトの結果) |
-| 形の検査と終了コードの定数 | [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) の `validate_result`・`EXIT_*` |
+| 形の検査 | [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) の `validate_result` |
+| 終了コードの定数 | [`lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py) の `EXIT_*`（`lib/step_result.py` が同じ名前で公開する） |
 | LLM が記録のスクリプトの結果を読んで次の手を決める手引き | [`progress-tracking` の `references/excerpt.md`](../../plugins/ndf/skills/progress-tracking/references/excerpt.md) の「結果の読み方」と [`development-workflow` の `references/stage-completeness.md`](../../plugins/ndf/skills/development-workflow/references/stage-completeness.md) |
 | スクリプトごとの終了コードの次の手 | 各 Skill の本文の表（状態の列を持たず、終了コードだけで行を引く） |
 | 進捗記録 1 行と通過記録の契約 | [ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md) |
@@ -333,7 +334,7 @@ sequenceDiagram
 
 | 名前 | 置き場所 | 値・形 |
 | --- | --- | --- |
-| `EXIT_INCOMPLETE` | `lib/step_result.py` | `6`。値の持ち主 |
+| `EXIT_INCOMPLETE` | `lib/exit_codes.py` | `6`。値の持ち主。`lib/step_result.py` が同じ名前で公開する |
 | `RECORD_KEYS` | `lib/step_result.py` | `gaps`・`process`・`decisions` の要素の鍵 |
 | `NDF_PROGRESS_LOCKED` | 環境変数（`progress-record.sh` が錠の内側へ渡す） | 内側の印。利用者は設定しない |
 | `NDF_PROGRESS_LOCK_TIMEOUT` | 環境変数 | 本文の錠を待つ秒。既定 `30` |

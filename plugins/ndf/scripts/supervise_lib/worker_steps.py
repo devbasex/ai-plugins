@@ -21,7 +21,7 @@ from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.progress_watch import ProgressWatch
 import limits
-from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
+from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT, system_for
 from supervise_lib.steps import RunStep, deliver_skills, is_gate, last_json
 import project_mvv
 
@@ -41,6 +41,12 @@ def result_file_of(ctx, step: dict) -> Path:
 
 def result_prompt(path: Path) -> str:
     return RESULT_PROMPT.format(path=path, step_result=STEP_RESULT_PY)
+
+
+def ci_only_plan(ctx) -> bool:
+    """CI テストの宣言のあるプランか（計画の `テストの戦略` の `ci_only`。`verify_steps.test_meta` が書く。#3056）。"""
+    meta = (getattr(ctx, "plan", None) or {}).get("テストの戦略")
+    return isinstance(meta, dict) and bool(meta.get("ci_only"))
 
 
 def _timeout(step: dict) -> int:
@@ -96,7 +102,7 @@ class WorkStep:
 
         `block` は `deliver_skills` が返した Skill の本文の節で、種類の文と MVV の節の間へ入れる。"""
         rt = step.get("runtime")
-        system = WORK_SYSTEM + block + self.mvv_system(ctx)
+        system = system_for(WORK_SYSTEM, ci_only_plan(ctx)) + block + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
             return self.call_claude_worker(ctx, step, system, prompt, cwd)
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
@@ -195,7 +201,7 @@ class WorkStep:
             prompt = step["prompt"]
         prompt += "\n\n" + result_prompt(rfile)
         full = bool(step.get("full"))
-        system = FULL_SYSTEM + block + self.mvv_system(ctx)
+        system = system_for(FULL_SYSTEM, ci_only_plan(ctx)) + block + self.mvv_system(ctx)
         if full:
             res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), full=True)
         else:

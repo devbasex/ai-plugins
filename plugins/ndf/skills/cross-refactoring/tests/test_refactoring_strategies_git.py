@@ -9,7 +9,7 @@
 | AC2（PR 1732 の形） | 構造検査で落ちた項目を、修正担当が範囲の外の新しいモジュールへ分けて直すと採用される |
 | AC3 | 新しいファイルを作った項目に D1 が立つ |
 | AC6（テストの共通化）・AC8 | テストの値を新しい補助のファイルへ移した項目が採用される。値が本当に消えた項目は取り消す |
-| AC6b（不要コードの削除） | 範囲テストの対象の無い `remove_dead_code` の項目が D4 の全体テストで検証され採用される |
+| AC6b（不要コードの削除） | 範囲テストの対象の無い `remove_dead_code` の項目は D4 で最終ゲートの全体テストへ寄せ、通れば採用される（#3048） |
 | AC6a・I8 | 2 コミットの項目を取り消すと、2 コミットとも戻る |
 | AC7 | 見積を大きく超える実差分の項目を取り消さない |
 """
@@ -79,7 +79,7 @@ def _item(item_id, technique, path, test, *, smell="long_method", rank=1):
     }
 
 
-def _start(flow, cmd_setup, files, items):
+def _start(flow, cmd_setup, cmd_phases, files, items):
     """`files` を起点に置き、項目と計画の起点（`plan.base_sha`）を書き、実装の手順を始める。
 
     ほかのモジュールを 15 本置く。ありふれた語はコードのファイルの 20% 以上かつ 3 ファイル以上に現れる語で、
@@ -106,7 +106,7 @@ def _start(flow, cmd_setup, files, items):
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
 
 
 def _commit(flow, item_id, files, *, remove=()):
@@ -134,11 +134,14 @@ SHOP = "def order_total(prices):\n    total = 0\n    for price in prices:\n     
 TEST_SHOP = "from src.shop import order_total\n\n\ndef test_total():\n    assert order_total([2, 3]) == 5\n"
 
 
-def test_extracting_a_common_model_into_a_new_directory_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_extracting_a_common_model_into_a_new_directory_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1・AC3・AC6（クラスの抽出・共通モデルの抽出）: 範囲の外の別ディレクトリの新しいファイルへ移しても取り消さない。"""
     _start(
         flow,
         cmd_setup,
+        cmd_phases,
         {"src/shop.py": SHOP, "tests/test_shop.py": TEST_SHOP},
         [_item("I-001", "extract_class", "src/shop.py", "tests/test_shop.py")],
     )
@@ -167,7 +170,7 @@ TEST_BIG = (
 
 
 def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
 ):
     """AC2（PR 1732 の形）: 構造検査で落ちた項目を、修正担当が範囲の外の新しいモジュールへ分けて直すと採用まで進む。
 
@@ -175,6 +178,7 @@ def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
     _start(
         flow,
         cmd_setup,
+        cmd_phases,
         {"src/big.py": BIG, "tests/test_big.py": TEST_BIG},
         [_item("I-001", "extract_method", "src/big.py", "tests/test_big.py")],
     )
@@ -184,7 +188,7 @@ def test_splitting_a_module_that_fails_the_structure_check_is_adopted(
     verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
 
-    _call(cmd_setup, "cmd_start_phase", phase="fix")
+    _call(cmd_phases, "cmd_start_phase", phase="fix")
     _write(flow["work"], "parts/big_parts.py", "def helper_one():\n    return 0\n")
     _write(flow["work"], "src/big.py", "from parts.big_parts import helper_one\n\n\ndef first():\n    return helper_one()\n")
     commit_with_trailers(flow["work"], "Fix I-001: 分ける", item_trailers("I-001"))
@@ -213,13 +217,13 @@ def _ledger_files():
 
 
 def test_moving_a_function_and_rewriting_the_outside_caller_is_adopted(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
 ):
     """AC1c・AC6（移動）: 範囲の外の既存の呼び手は import の書き換えだけ通し、そのファイルをレビューへ引き継ぐ（I5）。"""
     item = _item("I-001", "move_responsibility", "src/ledger.py", "tests/test_ledger.py")
     item["test_targets"] = ["tests/test_ledger.py", "tests/test_report.py"]
     item["command"] = ["pytest", "-q", "tests/test_ledger.py", "tests/test_report.py"]
-    _start(flow, cmd_setup, _ledger_files(), [item])
+    _start(flow, cmd_setup, cmd_phases, _ledger_files(), [item])
     _commit(
         flow,
         "I-001",
@@ -235,13 +239,15 @@ def test_moving_a_function_and_rewriting_the_outside_caller_is_adopted(
     assert {j["path"] for j in _items(flow)["I-001"]["review_scope_judgements"]} == {"tools/report.py"}
 
 
-def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c（移動の `R`）: 範囲の中のファイルを範囲の外のまだ無いパスへ移しても取り消さない。"""
     files = {
         "src/fmt_money.py": "def yen(value):\n    return f'{value} yen'\n",
         "tests/test_fmt.py": "from src.fmt_money import yen\n\n\ndef test_yen():\n    assert yen(3) == '3 yen'\n",
     }
-    _start(flow, cmd_setup, files, [_item("I-001", "move_responsibility", "src/fmt_money.py", "tests/test_fmt.py")])
+    _start(flow, cmd_setup, cmd_phases, files, [_item("I-001", "move_responsibility", "src/fmt_money.py", "tests/test_fmt.py")])
     (flow["work"] / "formatting").mkdir()
     git("mv", "src/fmt_money.py", "formatting/fmt_money.py", cwd=flow["work"])
     _commit(flow, "I-001", {"tests/test_fmt.py": files["tests/test_fmt.py"].replace("src.fmt_money", "formatting.fmt_money")})
@@ -250,12 +256,14 @@ def test_moving_a_file_to_a_new_path_outside_the_scope_is_adopted(flow, cmd_setu
     assert not (flow["work"] / "src" / "fmt_money.py").exists()
 
 
-def test_renaming_a_function_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_renaming_a_function_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（改名）: 範囲の外の呼び手の名前の書き換えを通す。"""
     item = _item("I-001", "rename", "src/ledger.py", "tests/test_ledger.py", smell="inconsistent_naming")
     item["test_targets"] = ["tests/test_ledger.py", "tests/test_report.py"]
     item["command"] = ["pytest", "-q", "tests/test_ledger.py", "tests/test_report.py"]
-    _start(flow, cmd_setup, _ledger_files(), [item])
+    _start(flow, cmd_setup, cmd_phases, _ledger_files(), [item])
     _commit(
         flow,
         "I-001",
@@ -273,7 +281,9 @@ SCALE = "def scale(value, factor=3):\n    return value * factor\n"
 TEST_SCALE = "from src.scaler import scale\n\n\ndef test_scale():\n    assert scale(2) == 6\n"
 
 
-def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_changing_a_signature_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（シグネチャの変更）: 範囲の外の呼び手の引数を減らす書き換えを通す。"""
     files = {
         "src/scaler.py": SCALE,
@@ -281,7 +291,11 @@ def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup,
         "tools/scale_use.py": "from src.scaler import scale\n\n\ndef run():\n    return scale(5, 3)\n",
     }
     _start(
-        flow, cmd_setup, files, [_item("I-001", "change_signature", "src/scaler.py", "tests/test_scaler.py", smell="long_parameter_list")]
+        flow,
+        cmd_setup,
+        cmd_phases,
+        files,
+        [_item("I-001", "change_signature", "src/scaler.py", "tests/test_scaler.py", smell="long_parameter_list")],
     )
     _commit(
         flow,
@@ -295,7 +309,9 @@ def test_changing_a_signature_with_an_outside_caller_is_adopted(flow, cmd_setup,
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
 
 
-def test_inlining_a_function_with_an_outside_caller_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_inlining_a_function_with_an_outside_caller_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC1c・AC6（インライン化）: 範囲の外の呼び手で、消した関数の import と呼び出しを置き換える書き換えを通す。"""
     inl = "def double(x):\n    return twice(x)\n\n\ndef twice(x):\n    return x * 2\n"
     files = {
@@ -303,14 +319,14 @@ def test_inlining_a_function_with_an_outside_caller_is_adopted(flow, cmd_setup, 
         "tests/test_inl.py": "from src.inl import double\n\n\ndef test_double():\n    assert double(4) == 8\n",
         "tools/inl_use.py": "from src.inl import twice\n\n\ndef run():\n    return twice(4)\n",
     }
-    _start(flow, cmd_setup, files, [_item("I-001", "inline", "src/inl.py", "tests/test_inl.py")])
+    _start(flow, cmd_setup, cmd_phases, files, [_item("I-001", "inline", "src/inl.py", "tests/test_inl.py")])
     _commit(flow, "I-001", {"src/inl.py": "def double(x):\n    return x * 2\n", "tools/inl_use.py": "\n\ndef run():\n    return 4 * 2\n"})
 
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
 
 
 def test_a_fix_that_only_rewrites_a_forgotten_outside_caller_is_adopted(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_merge_fix, cmd_gate, ledger, capsys
 ):
     """AC1c・AC2: 実装が移した名前の呼び手を書き換え忘れ、修正がその import だけを直すと採られる。
 
@@ -318,7 +334,7 @@ def test_a_fix_that_only_rewrites_a_forgotten_outside_caller_is_adopted(
     item = _item("I-001", "move_responsibility", "src/ledger.py", "tests/test_ledger.py")
     item["test_targets"] = ["tests/test_ledger.py", "tests/test_report.py"]
     item["command"] = ["pytest", "-q", "tests/test_ledger.py", "tests/test_report.py"]
-    _start(flow, cmd_setup, _ledger_files(), [item])
+    _start(flow, cmd_setup, cmd_phases, _ledger_files(), [item])
     _commit(
         flow,
         "I-001",
@@ -333,7 +349,7 @@ def test_a_fix_that_only_rewrites_a_forgotten_outside_caller_is_adopted(
     verify_judged(cmd_converge, flow["path"], capsys)
     assert _emitted(capsys, "VERIFY") == "fix"
 
-    _call(cmd_setup, "cmd_start_phase", phase="fix")
+    _call(cmd_phases, "cmd_start_phase", phase="fix")
     _write(flow["work"], "tools/report.py", REPORT.replace("src.ledger", "accounting.sums"))
     commit_with_trailers(flow["work"], "Fix I-001", item_trailers("I-001"))
     write_result(flow["path"], FIX_STEM, {"items": [{"id": "I-001", "status": "fixed"}]})
@@ -354,11 +370,14 @@ VALS = "def base_rate():\n    return 7\n"
 TEST_VALS = "from src.vals import base_rate\n\n\ndef test_rate():\n    assert base_rate() == 7\n"
 
 
-def test_moving_test_values_into_a_new_helper_file_is_adopted(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys):
+def test_moving_test_values_into_a_new_helper_file_is_adopted(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+):
     """AC6（テストの共通化）・AC8: 値を新しい補助のファイルへ移しただけなら、期待値の変更として取り消さない。"""
     _start(
         flow,
         cmd_setup,
+        cmd_phases,
         {"src/vals.py": VALS, "tests/test_vals.py": TEST_VALS},
         [_item("I-001", "extract_test_helper", "tests/test_vals.py", "tests/test_vals.py")],
     )
@@ -374,11 +393,12 @@ def test_moving_test_values_into_a_new_helper_file_is_adopted(flow, cmd_setup, c
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
 
 
-def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_setup, cmd_implement):
+def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_setup, cmd_phases, cmd_implement):
     """AC8・AC10・#2457 の棚卸し #25: 値が項目の変えたテストのファイルのどこにも無くなった変更は、取り消さず修正へ差し戻す。"""
     _start(
         flow,
         cmd_setup,
+        cmd_phases,
         {"src/vals.py": VALS, "tests/test_vals.py": TEST_VALS},
         [_item("I-001", "extract_test_helper", "tests/test_vals.py", "tests/test_vals.py")],
     )
@@ -402,43 +422,50 @@ def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_
 
 
 def test_removing_dead_code_without_a_scope_test_is_verified_by_the_whole_test(
-    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
 ):
-    """AC6b: 範囲テストの対象が無い `remove_dead_code` は、D4 の全体テストで検証して採用まで進む。"""
+    """AC6b・#3048: 範囲テストの対象が無い `remove_dead_code` は、D4 で最終ゲートの全体テストへ寄せ、通れば採用まで進む。"""
     dead = "def live():\n    return 1\n\n\ndef unused():\n    return 2\n"
     files = {"src/dead.py": dead, "tests/test_dead.py": "from src.dead import live\n\n\ndef test_live():\n    assert live() == 1\n"}
-    _start(flow, cmd_setup, files, [_item("I-001", "remove_dead_code", "src/dead.py", None, smell="dead_code")])
+    _start(flow, cmd_setup, cmd_phases, files, [_item("I-001", "remove_dead_code", "src/dead.py", None, smell="dead_code")])
     _commit(flow, "I-001", {"src/dead.py": "def live():\n    return 1\n"})
 
     assert _adopted(flow, cmd_implement, cmd_converge, cmd_gate, ledger, capsys) == 1
     assert "D4" in _items(flow)["I-001"]["danger"]
 
 
-def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC6b: 全体テストが落ちれば今と同じく修正へ回る。"""
+def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_the_final_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, capsys
+):
+    """AC6b・#3048: 検証は通して最終ゲートへ寄せ、最終ゲートの全体テストが落ちれば最終ゲート修正の依頼がその項目を指す。"""
     dead = "def live():\n    return 1\n\n\ndef unused():\n    return 2\n"
     files = {
         "src/dead.py": dead,
         "tests/test_dead.py": "from src.dead import live, unused\n\n\ndef test_live():\n    assert live() + unused() == 3\n",
     }
-    _start(flow, cmd_setup, files, [_item("I-001", "remove_dead_code", "src/dead.py", None, smell="dead_code")])
+    _start(flow, cmd_setup, cmd_phases, files, [_item("I-001", "remove_dead_code", "src/dead.py", None, smell="dead_code")])
     _commit(flow, "I-001", {"src/dead.py": "def live():\n    return 1\n"})
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    verify_judged(cmd_converge, flow["path"], capsys)
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "done"
+    assert read_state(flow["path"])["whole_test"]["deferred"] == {"flags": ["D4"], "items": ["I-001"]}
 
-    assert _emitted(capsys, "VERIFY") == "fix"
+    with pytest.raises(SystemExit):
+        _call(cmd_gate, "cmd_final_gate")
+    gate = read_state(flow["path"])["final_gate"]
+    assert gate["status"] == "failing" and "I-001" in gate["fix_request"]
 
 
 # ---------- 複数コミットの項目と取り消し ----------
 
 
-def test_a_two_commit_item_outside_the_scope_keeps_both_commits(flow, cmd_setup, cmd_implement):
+def test_a_two_commit_item_outside_the_scope_keeps_both_commits(flow, cmd_setup, cmd_phases, cmd_implement):
     """AC6a・#2457 受け入れ条件 8: 2 コミット目が範囲の外の既存のファイルを変えても取り消さず、2 コミットとも残して報告する。"""
     work = flow["work"]
     _start(
         flow,
         cmd_setup,
+        cmd_phases,
         {"src/shop.py": SHOP, "tests/test_shop.py": TEST_SHOP},
         [_item("I-001", "rename", "src/shop.py", "tests/test_shop.py")],
     )

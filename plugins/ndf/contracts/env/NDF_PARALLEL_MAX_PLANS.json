@@ -1,5 +1,5 @@
 {
   "name": "NDF_PARALLEL_MAX_PLANS",
   "set_by": "user",
-  "summary": "並列の計画で同時に流すプランの合計の上限（#2436）。正の整数でなければ既定の 6（plugins/ndf/scripts/lib/parallel_plan.py）"
+  "summary": "プランの本数の上限（同じマシンで同時に流すプランの合計の上限。#2436・#2999）。マシンの設定（relay.py cap --plans が書く <状態の根>/relay/hub/limits.json の max_plans）が先に効き、無ければこの値、正の整数でなければ既定 6。計画の検査と耐久ワークフローの起動の判定が同じ関数で読む（plugins/ndf/scripts/lib/relay_limit.py）"
 }

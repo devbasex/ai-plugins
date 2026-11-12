@@ -280,6 +280,10 @@ def test_checks_outcome_waits_for_checks_that_are_not_listed_yet():
     assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "", "", 2, status="in_progress")], ["t", "u"]) == "pending"
     assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "failure", "", 2)], ["t", "u"]) == "failure"
     assert gh_checks.checks_outcome([_run("t", "success", "", 1)], ["t"]) == "success"
+    passing = gh_checks.CI_ONLY_PASSING
+    assert gh_checks.checks_outcome([_run("t", "skipped", "", 1)], ["t"]) == "skipped"
+    assert gh_checks.checks_outcome([_run("t", "skipped", "", 1), _run("u", "neutral", "", 2)], ["t", "u"], passing) == "success"
+    assert gh_checks.checks_outcome([_run("t", "skipped", "", 1), _run("u", "failure", "", 2)], ["t", "u"], passing) == "failure"
 
 
 def test_checks_outcome_edge_cases_are_fixed():

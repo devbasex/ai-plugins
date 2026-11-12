@@ -249,11 +249,11 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
 
     起動の失敗なら項目を落とさずに止まる（#1483 I8）。**走らせるファイルは項目の全コミットの和集合から組む。**
     1 つ目のコミットだけだと、2 つ目以降で足した落ちるテストに印が付かず、見送りへ変えた項目の打ち消し（`readopt`）を
-    通らずに HEAD に残る。
+    通らずに HEAD に残る。CI テストの宣言（`test.ci.only`）があれば走らせない（合否は最終ゲートの CI の結果。#3056）。
     """
     work = work_dir(state)
     results: dict[tuple[str, ...], bool] = {}
-    for item_id, commits in intake.accepted.items():
+    for item_id, commits in ({} if timeline.strategy_of(state).ci_only else intake.accepted).items():
         files = list(dict.fromkeys(f for c in commits for f in c.get("files") or []))
         commands = _added_test_commands(state, find_item(state, item_id), files)
         if not commands:

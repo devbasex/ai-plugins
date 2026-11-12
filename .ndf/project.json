@@ -20,6 +20,9 @@
     }
   ],
   "test": {
+    "ci": {
+      "only": true
+    },
     "suites": [
       {
         "name": "pytest",
@@ -428,6 +431,7 @@
           ".ndf/mvv.md"
         ],
         "tests": [
+          "plugins/ndf/scripts/tests/test_mvv_gate.py",
           "plugins/ndf/scripts/tests/test_sprint_state.py",
           "plugins/ndf/scripts/tests/test_supervise_pace_auto.py"
         ]
@@ -902,6 +906,7 @@
           "plugins/ndf/skills/development-workflow/SKILL.md"
         ],
         "tests": [
+          "plugins/ndf/scripts/tests/test_mode_judgment.py",
           "plugins/ndf/skills/development-workflow/tests/test_declaration_check.py",
           "plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py"
         ]

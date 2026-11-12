@@ -768,6 +768,17 @@ def test_diff_between_two_refs_with_missing_side(bare):
     assert code == 0 and [(it["change"], it["term"]) for it in out["items"]] == [("added", "注文")]
 
 
+def test_diff_items_compares_two_glossaries_without_a_repository():
+    before = shop_glossary()
+    after = shop_glossary()
+    after["terms"][0]["meaning"] = "新しい意味"
+    after["terms"][2]["deprecated"] = ["cart", "パッケージ"]
+    del after["terms"][1]
+    after["terms"].append({"term": "返品", "context": "ordering", "meaning": "戻すこと"})
+    got = [(it["change"], it["term"]) for it in inproc.load(SCRIPT).diff_items(before, after)]
+    assert got == [("meaning_changed", "注文"), ("deprecated", "パッケージ"), ("added", "返品"), ("removed", "カートリッジ")]
+
+
 # --- 候補（candidates） ------------------------------------------------------------
 
 

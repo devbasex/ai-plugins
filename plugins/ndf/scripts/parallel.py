@@ -7,17 +7,19 @@
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
 | `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 状態の変化（notice / release / confirmed / questions / answer_hold）か終わりまで待つ。上限なら 3。失われた計画は 1 で `metrics.next` に `start` の 1 行 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限（既定 1800 秒）なら 3 で、`items` に `status` と同じレーンごとの行、`metrics.switch` に切り替えの判定を載せる（#3006）。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
+| `status <計画名>` | レーンごとに 1 行（状態・何回目のループか・今の課題・最後の知らせの時刻・費用・承認待ちのレーンへ入る 1 行）を返す。計画が無ければ 2 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
+| `carried <計画名> <連番>` | 出し直しを省いた提示 2 の確かめ直しの範囲が文書だけなら 0（`metrics.added`）、文書だけではない・判定できないなら 10 |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
 | `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
-| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（持ち主のレーンが止まっていれば `metrics.next` に起こす 1 行。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
+| `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（止まった持ち主の再起動は耐久ワークフローが打つ。`metrics.next` は一覧の失敗の問いで選んだ 1 行だけ。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
 | `lane <計画名> add --from <JSON>` / `lane <計画名> set --lane <名> --from <JSON>` | 動いている計画へレーンを足す・レーンの入力を書き換える（上限を含む検査を通ったときだけ書き、耐久ワークフローへ知らせる。`lib/parallel_lane_cli.py`。#2733） |
 
@@ -40,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -74,14 +76,26 @@ def require_name(a) -> None:
         reply("stopped", "計画名か --external が要る", code=1)
 
 
-def checked_plan(main: Path, name: str) -> tuple[pp.ParallelPlan | None, list[dict], dict]:
+def checked_plan(main: Path, name: str, touch: bool = False) -> tuple[pp.ParallelPlan | None, list[dict], dict]:
+    """計画を読んで検査する。touch（`check` だけ）はレーンの課題の見込みを集め、見込みの重なり（I21）も見る。"""
     try:
         data = pp.load_plan(main, name)
     except FileNotFoundError:
         reply("stopped", f"並列の計画 {name} が無い（置き場: {pp.plan_dir(main, name)}/plan.json）", code=1)
     except (OSError, ValueError) as exc:
         reply("stopped", f"並列の計画 {name} を読めない: {exc}", code=2)
-    return pp.check_data(data, home=main)
+    plan, items, metrics = pp.check_data(data, home=main)
+    if touch and plan is not None:
+        import touch_estimate as te
+
+        estimates, shared, error = te.lane_estimates(main, plan.lanes)
+        plan, items, metrics = pp.check_data(data, home=main, estimates=estimates, shared=shared, estimate_error=error)
+    if plan is not None:  # 同じマシンの他の動いている計画と合わせた本数の警告（#2999 の決定 3。終了コードは変えない）
+        import parallel_machine
+
+        extra = parallel_machine.plan_warnings(main, name, sum(ln.plans for ln in plan.lanes))
+        items, metrics = [*items, *extra], {**metrics, "warnings": metrics["warnings"] + len(extra)}
+    return plan, items, metrics
 
 
 def cmd_init(a) -> None:
@@ -111,7 +125,7 @@ def cmd_init(a) -> None:
 
 
 def cmd_check(a) -> None:
-    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name))
+    plan, items, metrics = parallel_route.with_release_warnings(main_of(), checked_plan(main_of(), a.name, touch=True))
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）", items, 1, **metrics)
     reply("ok", f"並列の計画 {a.name} の検査を通った（警告 {metrics['warnings']} 件）", items, **metrics)
@@ -178,6 +192,20 @@ def cmd_wait(a) -> None:
     pcli.wait_plan(a, reply, main_of(), SELF)
 
 
+def cmd_status(a) -> None:
+    import parallel_status as pst
+
+    main = main_of()
+    try:
+        plan = pp.load_valid_plan(main, a.name)
+    except FileNotFoundError:
+        reply("stopped", f"並列の計画 {a.name} が無い", code=2)
+    except (OSError, ValueError) as exc:
+        reply("stopped", f"並列の計画 {a.name} を読めない: {exc}", code=2)
+    rows = pst.lane_rows(main, a.name, plan)
+    reply("ok", pst.status_summary(rows), rows)
+
+
 def cmd_present(a) -> None:
     import parallel_release as pr
 
@@ -202,6 +230,10 @@ def cmd_present(a) -> None:
         reply("stopped", f"読めない: {exc}", code=2)
     summary = f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）"
     reply("ok", summary, [{"lane": n, **r} for n, r in got["lanes"].items()], sha=got["sha"], orphans=got["orphans"])
+
+
+def cmd_carried(a) -> None:
+    pcli.carried_report(main_of(), a.name, a.n, reply)
 
 
 def cmd_compose(a) -> None:
@@ -393,7 +425,9 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
     w.add_argument("--changes-after", type=int, default=0, help="出した答え待ちの停止の変化の最後の番号")
-    w.add_argument("--timeout", type=float, default=3600)
+    w.add_argument("--timeout", type=float, default=1800)  # プロンプトキャッシュの寿命 3600 秒より短く（#3006 の I6）
+    stt = sub.add_parser("status")
+    stt.add_argument("name")
     p = sub.add_parser("present")
     p.add_argument("name", nargs="?")
     p.add_argument("n", type=int)
@@ -405,6 +439,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("name")
     c.add_argument("n", type=int)
     c.add_argument("--take", choices=("new", "first"))
+    ca = sub.add_parser("carried")
+    ca.add_argument("name")
+    ca.add_argument("n", type=int)
     s = sub.add_parser("settle")
     s.add_argument("name", nargs="?")
     s.add_argument("n", type=int)

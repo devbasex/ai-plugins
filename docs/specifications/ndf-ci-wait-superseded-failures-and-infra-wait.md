@@ -87,7 +87,8 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 | [`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py) | `GreenWatch`（1 回の読み直し `poll` と止まり方）と `InfraWatch`（再実行と待ち直し） |
 | [`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py) | `add_wait_args` の `--infra-reruns`・`--infra-gap`。マージが拒まれたときの置き換わった失敗の案内（`_rerun_superseded_next`） |
 | [`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) | `probe` の分類（`_classify_checks` が `read_checks` を呼ぶ）。分類 `infra` |
-| [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | `EXIT_INFRA_WAIT = 75`。`code_matches("stopped", 75)` を真にする |
+| [`lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py) | `EXIT_INFRA_WAIT = 75`（`lib/step_result.py` が同じ名前で公開する） |
+| [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | `code_matches("stopped", 75)` を真にする |
 | [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) | `release --ci-wait`。`wait_and_merge` が `merge-when-green` の 75 を 75 で返す |
 | [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) | run のステップの `on_exit` を読む（`_next_on_exit`）。読み込みの検査は `on_exit_error` |
 | [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py) | `release`・`merge`・`merge-approved` のステップに `on_exit: {"75": "stop"}`（定数 `INFRA_WAIT_STOP`） |

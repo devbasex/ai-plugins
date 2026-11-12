@@ -33,10 +33,11 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from .. import failure_material, fixloop, gate_lint, info, launch, prepush_lint, progress, publish, timeline, triage
+from .. import culprit, failure_material, fixloop, gate_lint, info, launch, prepush_lint, progress, publish, rounds, timeline, triage
 from . import flaky
 from ..gitfacts import run_with_timeout, safe_int
 from ..gate_ci import ci_checks, ci_gate, ci_mode
+from ..items import item_shas, live_items
 from ..paths import head_sha, load_state, work_dir
 
 
@@ -50,7 +51,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     | 全体テストの置き場 | 見るもの |
     | --- | --- |
     | CI（`local-scoped-ci-whole` か `--ci-check`） | 継続的統合の結果。`pending` の間は `limits.ci_wait_timeout` まで待つ |
-    | 手元 | HEAD で全体テストを 1 度。検証の中で通り、取り消しが無く、HEAD が進んでいなければ使い回す |
+    | 手元 | HEAD で全体テストを 1 度（検証の巡の中では全体テストを走らせないため、使い回す結果は無い。#3048） |
 
     単独起動は、通れば `cross-review` へ渡す（`FINAL_GATE=cross-review`）。
     """
@@ -150,14 +151,9 @@ def _run_gate_checks(path: pathlib.Path, state: dict[str, Any], gate: dict[str, 
     # 失敗が減った回を停滞とみなすため（`_gate_failing_set`）
     gate.pop("triage", None)
     gate.pop("material", None)
-    if _reusable_whole_test(state):
-        gate["whole_test_reused"] = True
-        passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
-        gate["mode"] = "test"
-    else:
-        passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
-        if gate.get("mode") == "test":
-            whole_started = time.monotonic() - test_seconds
+    passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
+    if gate.get("mode") == "test":
+        whole_started = time.monotonic() - test_seconds
     lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
     if lint_detail:
         detail = f"{detail} / {lint_detail}"
@@ -194,21 +190,6 @@ def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[s
     return detail
 
 
-def _reusable_whole_test(state: dict[str, Any]) -> bool:
-    """検証の中の全体テストを使い回せるか（決定 16）。
-
-    CI で見るなら使い回さない。検証の中で走って通り、取り消しが無く（`whole_test.reverted` が偽）、
-    その後に HEAD が 1 つも進んでいないときだけ真。生成物の同期のコミットが積まれていれば HEAD が進んでいるので走らせる。
-    """
-    if ci_mode(state):
-        return False
-    record = state.get("whole_test") or {}
-    if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
-        return False
-    head = head_sha(work_dir(state))
-    return bool(head) and head == record.get("head")
-
-
 _TRIAGE_KEYS = (
     "failed_tests",
     "flaky",
@@ -237,7 +218,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     seconds = round(time.monotonic() - started, 1)
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
-        classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
+        classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"), verdict.get("existing_failures"))
         gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
         gate["material"] = _gate_material(state, classified, verdict)
         flaky.queue_flaky(state, classified.get("flaky"), verdict.get("log"))
@@ -343,6 +324,10 @@ def _gate_failing(
     if gate.get("material"):
         # 落ちたテストの材料（ID・ログの置き場・走らせ直すコマンド）。JUnit を読めないときも渡す（受け入れ条件 13）
         request = (request + "\n\n" if request else "") + "落ちたテストの材料:\n" + failure_material.as_markdown(gate["material"])
+    targets = _fix_target_lines(state, gate)
+    if targets:
+        # 原因の候補と、最終ゲートへ寄せた危険フラグの項目（#3048）
+        request = (request + "\n\n" if request else "") + "\n".join(targets)
     if request:
         gate["fix_request"] = request
     else:
@@ -352,6 +337,37 @@ def _gate_failing(
     info(f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} — 修正担当は {impl} です")
     statefile.emit(FINAL_GATE="failing", FINAL_FIX_IMPL=impl, FINAL_FIX_ROUND=gate["fix_rounds"])
     sys.exit(2)
+
+
+def _fix_target_lines(state: dict[str, Any], gate: dict[str, Any]) -> list[str]:
+    """最終ゲート修正の向け先の行（#3048）。手元でも CI でも同じ向け先を渡す。
+
+    変更起因の失敗があれば、落ちたテストの本文に現れたパスで原因の項目を決めて `final_gate.culprit` に残す
+    （項目を外した走らせ直しはしない）。あわせて、検証の巡の中で走らせず最終ゲートへ寄せた危険フラグの項目を並べる。
+    取り消した項目は外す。
+    """
+    lines: list[str] = []
+    caused = list((gate.get("triage") or {}).get("caused") or [])
+    if caused:
+        verdict = culprit.determine(state, caused, dict((gate.get("triage") or {}).get("caused_output") or {}), isolate=False)
+        gate["culprit"] = verdict.as_dict()
+        if verdict.culprits:
+            lines.append(f"落ちたテストの出力に変更したファイルが現れた項目（原因の候補）: {', '.join(verdict.culprits)}")
+    deferred = rounds.deferred_union(state)
+    ids = set(deferred.get("items") or [])
+    items = [i for i in live_items(state) if i.get("id") in ids]
+    if items:
+        lines.append(
+            f"最終ゲートへ寄せた危険フラグ（{', '.join(deferred.get('flags') or [])}）の項目。"
+            "範囲テストでは覆えない変更を持つため、変更起因の失敗はこれらの変更も疑うこと:"
+        )
+        for item in items:
+            shas = ", ".join(s[:7] for s in item_shas(item)) or "コミット無し"
+            target = f"{item.get('path') or '—'}#{item.get('symbol') or '—'}"
+            lines.append(
+                f"- {item['id']} `{target}`（{item.get('technique') or '—'} / 危険フラグ {', '.join(item.get('danger') or [])} / {shas}）"
+            )
+    return lines
 
 
 def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:

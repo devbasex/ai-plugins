@@ -1,8 +1,8 @@
 """`new sprint --absorb <課題>:<取り込み先>`（#1426 の決定 3・8。I7・I8）。
 
 取り込みは進め方ごとのステージの組み立ての中で扱わず、組み立てた後のプランへ 1 か所で当てる。プランは名前
-（`design-<N>`・`impl-<N>`）で引く。取り込んだ課題は設計のプランを持たず、実装のプランは `取り込み先` と
-`実行の条件` で飛ぶ。取り込み先のプランのうち存在するもの（`--design` なら設計と実装、`--issue` なら実装）の
+（`design-<N>`・`impl-<N>`。課題のまとまりでは代表の番号）で引く。取り込んだ課題は設計のプランを持たず、実装のプランは
+`取り込み先` と `実行の条件` で飛ぶ（複数件のまとまりにいる課題は、プランを飛ばさずに `課題` から外す）。取り込み先のプランのうち存在するもの（`--design` なら設計と実装、`--issue` なら実装）の
 `課題` に取り込んだ課題を含める。取り込むかは引数を渡す人か conductor が決める（AI は選ばない）。
 """
 
@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import re
 
+from supervise_lib.design_stage import rebuild_impl_prompts
 from supervise_lib.procedures import absorbed_condition
+from supervise_lib.templates import GLOSSARY_RULE
 
 PAIR = re.compile(r"^(\d+):(\d+)$")
 
@@ -61,21 +63,53 @@ def _with(issues: list, m: int) -> list:
     return issues + [m] if m not in issues else issues
 
 
+def include_in_design(design: dict, h: int, m: int, note: str) -> None:
+    """設計のプラン（代表 `h`）の `課題` へ `m` を足し、要求と設計の指示へ `note` を足す（取り込みと課題のまとまり。#3081）。"""
+    if m in (design.get("課題") or [h]):
+        return
+    design["課題"] = _with(design.get("課題") or [h], m)
+    for step in design.get("steps") or []:
+        if step.get("id") in ("requirements", "design"):
+            step["prompt"] = f"{step.get('prompt') or ''}{note}"
+
+
+def bundle_leads(a) -> dict[int, int]:
+    """課題 → その課題を実装するプランの番号（課題のまとまりの代表。#3081）。まとまりの記録が無い課題は載らない。"""
+    return {n: b.lead() for b in getattr(a, "bundles", None) or [] for n in b.issues}
+
+
 def apply_absorb(a, waves: list[dict]) -> None:
-    """組み立てたステージのプランへ取り込みを書く（I7）。"""
+    """組み立てたステージのプランへ取り込みを書く（I7）。プランは課題を実装するプラン（まとまりなら代表の番号）で引く。
+    取り込む課題が複数件のまとまりにいるときは、プランを飛ばさずにその課題だけを `課題` から外す。"""
     plans = {k: p for w in waves for k, p in (w.get("plans") or {}).items()}
+    lead = bundle_leads(a)
     for m, h in pairs_of(a):
+        to = lead.get(h, h)
         note = f"取り込んだ課題 #{m} の受け入れ内容も #{h} に含める（#{m} の本文も読む）。"
-        design = plans.get(f"design-{h}")
+        design = plans.get(f"design-{to}")
         if design is not None:
-            design["課題"] = _with(design.get("課題") or [h], m)
-            for step in design.get("steps") or []:
-                if step.get("id") in ("requirements", "design"):
-                    step["prompt"] = f"{step.get('prompt') or ''}{note}"
-        host = plans.get(f"impl-{h}")
+            include_in_design(design, to, m, note)
+        host = plans.get(f"impl-{to}")
         if host is not None:
-            host["課題"] = _with(host.get("課題") or [h], m)
-        mine = plans.get(f"impl-{m}")
-        if mine is not None:
+            old = host.get("課題") or [to]
+            _move_issues(host, old, _with(old, m))
+        mine = plans.get(f"impl-{lead.get(m, m)}")
+        if mine is None or mine is host:
+            continue
+        old = mine.get("課題") or [m]
+        rest = [i for i in old if i != m]
+        if rest:
+            _move_issues(mine, old, rest)
+        else:
             mine["取り込み先"] = h
             mine["実行の条件"] = absorbed_condition(m, h)
+
+
+def _move_issues(plan: dict, old: list, issues: list) -> None:
+    """実装のプランの `課題` を `issues` にし、実装の指示を移した後の課題で組み直す（補正の行は残す）。指示が前の課題の
+    ままだと、取り込んだ課題を取り込み先と重ねて実装し、設計の結果の書き込みでも補正の行として残る。"""
+    before = {"課題": old, **{k: plan.get(k) for k in ("触るファイル", "設計文書")}}
+    plan["課題"] = issues
+    after = {**before, "課題": issues}
+    glossary = any(GLOSSARY_RULE in str(s.get("prompt") or "") for s in plan.get("steps") or [] if s.get("id") == "impl")
+    rebuild_impl_prompts(plan, before, after, glossary)

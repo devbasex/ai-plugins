@@ -20,11 +20,13 @@ from crossref_helpers import (
     CALC,
     build_git_flow,
     commit_with_trailers,
-    git,
     item_trailers,
     read_state,
     strategy_state,
     write_state,
+    planned_item,
+    head_sha,
+    emitted,
 )
 
 FAR = "2099-01-01T00:00:00+00:00"
@@ -49,90 +51,57 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank, **over):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": "src/calc.py",
-        "symbol": "add",
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "scope_commands": [{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-        **over,
-    }
+    scope_commands = [{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}]
+    return planned_item(item_id, rank, **{"scope_commands": scope_commands, **over})
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
 
 
-def _emitted(capsys, key):
-    out = capsys.readouterr().out
-    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
-def _head(work):
-    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
-
-
-def _implement(flow, cmd_setup, cmd_implement, text, strategy, **item_over):
+def _implement(flow, cmd_setup, cmd_phases, cmd_implement, text, strategy, **item_over):
     """項目 I-001 が `src/calc.py` を `text` にするコミットを積んで取り込む。"""
     work = flow["work"]
     state = read_state(flow["path"])
     state["items"] = [_item("I-001", 1, **item_over)]
     state["strategy"] = strategy
     state["plan"] = {
-        "base_sha": _head(work),
+        "base_sha": head_sha(work),
         "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
         "end_at": FAR,
         "table_source": "defaults",
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text(text, encoding="utf-8")
     commit_with_trailers(work, "Refactor I-001", item_trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_format_violation_fails_the_item_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC14 — 宣言の静的解析の suite が項目の範囲テストで走り、整形の違反を入れた項目が落ちる。"""
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1 \n", _strategy(_lint()))
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1 \n", _strategy(_lint()))
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     assert read_state(flow["path"])["items"][0]["status"] == "failing"
 
 
-def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", _strategy(_lint()))
+def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1\n", _strategy(_lint()))
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
     assert read_state(flow["path"])["items"][0]["status"] == "verified"
 
 
-def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """移行性 — `scope_commands` を持たない旧形の項目（語の並びの `command`）も同じ語で走る。"""
     _implement(
         flow,
         cmd_setup,
+        cmd_phases,
         cmd_implement,
         CALC + "\nX = 1\n",
         strategy_state(),
@@ -144,20 +113,20 @@ def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_c
     write_state(flow["path"], state)
     capsys.readouterr()
     verify_judged(cmd_converge, flow["path"], capsys)
-    assert _emitted(capsys, "VERIFY") == "done"
+    assert emitted(capsys, "VERIFY") == "done"
 
 
-def test_a_launch_failure_in_the_item_scope_test_stops_without_reverting(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_launch_failure_in_the_item_scope_test_stops_without_reverting(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC13・I8 — 起動の失敗なら中断で止まり、項目の状態も HEAD も変わらず、報告に起動できなかったコマンドが出る。"""
     runs = [{"suite": "pytest", "kind": "test", "command": "nosuchcmd_1483 tests/test_calc.py"}]
-    _implement(flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=runs)
-    head = _head(flow["work"])
+    _implement(flow, cmd_setup, cmd_phases, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=runs)
+    head = head_sha(flow["work"])
     with pytest.raises(SystemExit) as e:
         verify_judged(cmd_converge, flow["path"], capsys)
     assert e.value.code == 4
     state = read_state(flow["path"])
     assert state["items"][0]["status"] == "implemented"
-    assert _head(flow["work"]) == head
+    assert head_sha(flow["work"]) == head
     assert state["launch_failure"]["phase"] == "verify" and state["launch_failure"]["code"] == 127
     assert "nosuchcmd_1483 tests/test_calc.py" in capsys.readouterr().err
 
@@ -209,7 +178,7 @@ def _gate_state(flow, *, before, lint, change):
     (work / "src" / "bad.py").write_text("Y = 2 \n", encoding="utf-8")
     commit_with_trailers(work, "既存の違反", {})
     state = read_state(flow["path"])
-    state["baseline_test"]["head"] = _head(work)
+    state["baseline_test"]["head"] = head_sha(work)
     state["baseline_test"]["suites"] = {"pytest": "green", "ws": before}
     state["strategy"] = _strategy(lint)
     (work / "src" / "new.py").write_text(change, encoding="utf-8")

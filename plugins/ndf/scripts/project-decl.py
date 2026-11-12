@@ -38,7 +38,7 @@ import proc  # noqa: E402
 import repo  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 
-from project_lib import ANALYZER, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, fingerprint, merge  # noqa: E402
+from project_lib import ANALYZER, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, ci_tests, fingerprint, merge  # noqa: E402
 from project_lib import measure_ci as mci  # noqa: E402
 from project_lib import measure_repo as mr  # noqa: E402
 from project_lib.measure_materials import measure_materials  # noqa: E402
@@ -328,6 +328,18 @@ def _gitignore_note(main) -> list:
     return ndf_tracking.ignored_notes(main, [DECL_FILE, WORKTREE_FILE])
 
 
+def _declare_ci_tests(doc: dict, existing: dict | None, written_before: dict, root: Path) -> tuple[dict, dict]:
+    """CI テストの宣言（`test.ci.only`）を I1 で決める（#3056）。`test` を解析が持つなら、その指紋を書き足した値で取り直す。"""
+    doc, line, digest = ci_tests.declare(doc, existing, written_before, lambda p: (root / p).is_file())
+    written = doc["analysis"]["written"]
+    written.pop(ci_tests.KEY, None)
+    if digest is not None:
+        written[ci_tests.KEY] = digest
+    if "test" in written:
+        written["test"] = merge.value_digest(doc["test"])
+    return doc, {"kind": "note", "key": ci_tests.KEY, "text": f"CI テストの宣言: {line}"}
+
+
 def cmd_write(a):
     root = proc.git_root(a.root)
     model = _load_model()
@@ -355,7 +367,8 @@ def cmd_write(a):
     }
     doc, item_rows = merge.merge_project(existing, meas, answers, check, analysis, model.SCHEMA_URL)
     doc["analysis"]["written"].update(wt_written)
-    rows = item_rows + rows
+    doc, ci_row = _declare_ci_tests(doc, existing, written_before, root)
+    rows = item_rows + [ci_row] + rows
     try:
         model.validate_decl(doc)
     except model.schema.ShapeError as e:

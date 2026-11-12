@@ -1065,3 +1065,53 @@ def test_a_malformed_declaration_fails(tree: Path):
     _limits(tree, {"part.wait": {"summary": "部品の待ち", "seconds": -1}})
     code, r = run(tree)
     assert code == 1 and ("limits-shape", "") in kinds(r)
+
+
+# ---------- 現状固定: base_runtime_count の分岐（I-006） ----------
+
+
+def _commit_tree(root: Path) -> str:
+    g = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+    if not (root / ".git").exists():
+        subprocess.run([*g[:3], "init", "-q"], check=True)
+    subprocess.run([*g, "add", "-A"], check=True)
+    subprocess.run([*g, "commit", "-qm", "c", "--allow-empty"], check=True)
+    return subprocess.run([*g[:3], "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_base_runtime_count_returns_none_or_zero_when_it_cannot_count(tmp_path: Path):
+    """現状固定: SHA が無い・解決できないと None、一覧が空なら 0。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import core_checks
+
+    assert core_checks.base_runtime_count(tmp_path, None) is None
+    assert core_checks.base_runtime_count(tmp_path, "") is None
+    (tmp_path / "README").write_text("x")
+    sha = _commit_tree(tmp_path)
+    assert core_checks.base_runtime_count(tmp_path, sha) == 0  # entrypoints/ が無い
+    assert core_checks.base_runtime_count(tmp_path, "0" * 40) is None
+    assert core_checks.base_runtime_count(tmp_path / "no-repo", sha) is None
+
+
+def test_base_runtime_count_counts_only_runtime_marks_at_the_given_commit(tmp_path: Path):
+    """現状固定: 下位のディレクトリも数え、配列・壊れた JSON・空のファイル・一覧の外は数えない。数えるのは渡した SHA の木。"""
+    sys.path.insert(0, str(REPO / "scripts"))
+    from contracts_lib import core_checks
+
+    d = tmp_path / "plugins/ndf/contracts/entrypoints"
+    wj(d / "a.json", {"path": "a.py", "core": {"exempt": "runtime"}})
+    wj(d / "sub" / "b.json", {"path": "b.py", "core": {"exempt": "runtime"}, "note": "改行を\n含む 値"})
+    wj(d / "c.json", {"path": "c.py", "core": {"exempt": "hook"}})
+    wj(d / "d.json", {"path": "d.py", "core": {}})
+    (d / "list.json").write_text(json.dumps([{"core": {"exempt": "runtime"}}]))
+    (d / "broken.json").write_text("{")
+    (d / "empty.json").write_text("")
+    (d / "plain.txt").write_text('{"core": {"exempt": "runtime"}}')  # 拡張子を問わない
+    wj(tmp_path / "plugins/ndf/contracts/files/x.json", {"core": {"exempt": "runtime"}})  # 一覧の外
+    first = _commit_tree(tmp_path)
+    assert core_checks.base_runtime_count(tmp_path, first) == 3
+
+    (d / "a.json").unlink()
+    second = _commit_tree(tmp_path)
+    assert core_checks.base_runtime_count(tmp_path, second) == 2
+    assert core_checks.base_runtime_count(tmp_path, first[:12]) == 3  # 短縮形も読む

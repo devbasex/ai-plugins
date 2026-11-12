@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/mvv-gate.py", "name": "", "kind": "lines", "reason": "cross-refactoring（PR #2979 の I-019）で machine_checks の分岐の連鎖（CC 14）を、順に当てる検査の表（CHECKS）と検査ごとの関数へ置き換えて 500 行から 518 行。500 行以下にしたら消す。分けるなら、PR と設計文書の材料の読み出し（pr_facts・pr_material・design_docs・design_material）を別のモジュールへ移す", "lines": 518}

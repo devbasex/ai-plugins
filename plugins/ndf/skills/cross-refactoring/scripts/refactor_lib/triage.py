@@ -48,8 +48,13 @@ def failed_ids_of(state: dict[str, Any], ci_xmls: Optional[list[bytes]] = None) 
     return test_triage.read_junit(work, timeline.strategy_of(state))
 
 
-def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None) -> dict[str, Any]:
-    """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。"""
+def classify(
+    state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None, ci_existing: Optional[list[str]] = None
+) -> dict[str, Any]:
+    """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。
+
+    `ci_existing` は CI テストの宣言のあるリポジトリで、着手時の head の CI の JUnit から読んだ既存失敗（`gate_ci`）。
+    """
     if timed_out:
         return {
             "failed_tests": None,
@@ -59,6 +64,9 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
             "fallback_reason": "全体テストが打ち切られ、落ちたテストを取り出せなかった",
         }
     ids, reason = failed_ids_of(state, ci_xmls)
+    if timeline.strategy_of(state).ci_only:
+        # 比較の木を作らずに分ける（走らせ直さない分岐は test_triage.classify と同じ）
+        return test_triage.ci_only_split(ids, reason, existing_failures(state) + list(ci_existing or []))
     if ids is not None and not ids:
         return {
             "failed_tests": None,

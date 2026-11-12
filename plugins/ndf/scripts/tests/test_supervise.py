@@ -732,7 +732,8 @@ def test_new_impl_writes_plan(tmp_path):
     assert res["status"] == "ok"
     plan = json.loads(out.read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("test-all") < ids.index("merge")
+    # このリポジトリの宣言は全体テストを CI に任せるため、PR の後に CI を待つ test-all を置かない（CI はマージが待つ）
+    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("merge") and "test-all" not in ids
     steps = {s["id"]: s for s in plan["steps"]}
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
@@ -765,6 +766,25 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
     assert p.returncode == 0, p.stderr
     ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
     assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+
+
+@pytest.mark.suspended_refactor
+def test_suspended_refactor_drops_assess_and_refactor_for_every_mode(tmp_path):
+    # 緊急の停止（2026-11-11）の間は standard でも構造改善を外し、PR の次を review にする
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", "standard", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert next(iter(steps)) == "review" and "assess" not in steps and "refactor" not in steps
+    # 構造改善を通していない回は実装レビューだけの回として記録し、check-done/check を進めない（PR 3062 のレビュー）
+    assert "--review" in steps["record"]["cmd"]
+    m = tmp_path / "m"
+    p = cli(*new_sprint_args(tmp_path, m))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((m / "sprint.json").read_text())["ステージ"]}
+    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
+    assert steps["pr"]["next"] == "review" and "refactor" not in steps
+    assert all("--review" in steps[i]["cmd"] for i in ("prepare", "record") if i in steps)
 
 
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
@@ -981,6 +1001,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 提示物: 無し
 - 理由: 無し
 - 通ったステップ: {empty}
+- 走らなかったステップ: 無し
 - 件数: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
@@ -1009,6 +1030,7 @@ REPORT_RICH = """## フェーズの報告
 - 提示物: /w/gate.md, /w/shown.md
 - 理由: 承認を待つ
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
+- 走らなかったステップ: 無し
 - 件数: impl: passed 3 / skipped 0; judge: 無し
 - 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
@@ -1032,6 +1054,20 @@ def test_write_report_text_of_a_state(tmp_path, fill, expected):
     text = st.write_report(plan, result, reason)
     assert text.replace(str(st.dir), "{dir}") == expected.replace("{empty}", "")
     assert (st.dir / "report.md").read_text() == text
+
+
+def test_write_report_lists_steps_a_due_check_skipped(tmp_path):
+    """起動の判定で飛んだ run のステップは、id と結果の要約が「走らなかったステップ」の行に載る（#2914 の I7・受け入れ条件 6）。"""
+    from supervise_lib.state import RunState
+
+    st = RunState(tmp_path / "state", {})
+    said = {"tool": "backlog-refinement", "status": "stopped", "summary": "振り返りと差分の棚卸しは起動しない（次は 2 回後）"}
+    st.cur = {"id": "deep-due", "type": "run", "exit": 3, "skipped": True, "text": "x\n" + json.dumps(said, ensure_ascii=False)}
+    st.record(1, "deep-due", "merge-gate", "run", lambda code: False)
+    st.cur = {"id": "merge", "type": "run", "exit": 0, "text": "merged"}
+    st.record(2, "merge", "close", "run", lambda code: False)
+    line = next(l for l in st.write_report({}, "完了", "x").splitlines() if l.startswith("- 走らなかったステップ: "))
+    assert line == "- 走らなかったステップ: deep-due（振り返りと差分の棚卸しは起動しない（次は 2 回後））"
 
 
 @pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
@@ -1285,24 +1321,26 @@ def test_all_accounts_limited_without_declaration_waits(tmp_path, seq, accounts,
 
 
 def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, monkeypatch):
-    """受け入れ条件 12・13: すべて上限なら宣言の接続へ移り、上限が外れたアカウントへ次の起動で戻る。"""
+    """受け入れ条件 12・13: すべて上限なら上限にある今のアカウントで起動せずに宣言の接続へ移り、上限が外れたアカウントへ
+    次の起動で戻る。"""
     set_responses, calls = seq
     monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
     accounts.add("a", util5=100)
     tb = accounts.add("b", util5=None)
     full, low = FakeAnthropic.usage_reply(window(100), window(10)), FakeAnthropic.usage_reply(window(10), window(10))
+    # 起動のたびの選び直し（#2930 の決定 6）と替え先の選び直しで 1 回ずつ読む。従量の接続の後の起動で上限が外れる
     accounts.fake.usage[tb] = [full, full, low]
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET")
-    set_responses(LIMIT, OK, OK)
+    set_responses(OK, OK)
     s, text = run_plan(tmp_path, WORK_TWICE)
     got = [(c["token"], c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
-    a, b, shared = str(accounts.root / "a"), str(accounts.root / "b"), str(accounts.shared)
-    assert got == [(None, a, None, "a"), (None, shared, "1", "metered"), (None, b, None, "b")]
+    b, shared = str(accounts.root / "b"), str(accounts.shared)
+    assert got == [(None, shared, "1", "metered"), (None, b, None, "b")]
     assert s.state.results["w1"]["auth"] == "従量の接続（CLAUDE_CODE_USE_BEDROCK, ANTHROPIC_API_KEY）"
     assert s.state.results["w2"]["auth"] == "アカウント b（recovered）"
     rows = progress_rows(tmp_path, "account")
-    assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("five_hour", "a", "metered"), ("recovered", "metered", "b")]
+    assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("limit", "a", "metered"), ("recovered", "metered", "b")]
     assert rows[0]["keys"] == ["CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_API_KEY"]
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
 
@@ -1318,10 +1356,10 @@ def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, 
     if env_decl is not None:
         monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", env_decl)
     ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
-    set_responses(LIMIT, OK)
+    set_responses(OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
     got = [(c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
-    assert got == [(str(accounts.root / "a"), None, "a"), (str(accounts.shared), None if env_decl else "1", "metered")]
+    assert got == [(str(accounts.shared), None if env_decl else "1", "metered")]  # 上限にある a では起動しない
     keys = "ANTHROPIC_API_KEY" if env_decl else "CLAUDE_CODE_USE_BEDROCK, AWS_PROFILE"
     assert s.state.results["w"]["auth"] == f"従量の接続（{keys}）"
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
@@ -1366,7 +1404,7 @@ def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monke
     """#1576 の I8: 動いている区間のアカウントは期限切れでも NDF が更新せず、そのアカウントのまま呼ぶ（claude が更新する）。"""
     set_responses, calls = seq
     accounts.add("a", expires_in=-60)
-    accounts.add("b", util5=30)
+    accounts.add("b", util5=None)  # a（トークンを更新しないので残量不明）と同じ組。今のアカウントを保つ
     accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(OK)
@@ -1622,6 +1660,20 @@ def test_new_release_requires_version():
 # --- スプリント（#1005） ------------------------------------------------------------
 
 
+def assert_plan_transitions_valid(manifest):
+    """マニフェストの全プランで、next / on_fail / skip_to と choices の行き先が同じプランの工程か終端を指す。"""
+    for w in manifest["ステージ"]:
+        for path in w.get("plans", []):
+            plan = json.loads(Path(path).read_text())
+            steps = {s["id"]: s for s in plan["steps"]}
+            for s in plan["steps"]:
+                for k in ("next", "on_fail", "skip_to"):
+                    if k in s:
+                        assert s[k] in steps or s[k] == "end", (path, s)
+                for c in s.get("choices", []):
+                    assert c in steps or c in ("stop", "gate"), (path, c)
+
+
 def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
     p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
@@ -1645,16 +1697,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
-    for w in manifest["ステージ"]:
-        for path in w.get("plans", []):
-            plan = json.loads(Path(path).read_text())
-            steps = {s["id"]: s for s in plan["steps"]}
-            for s in plan["steps"]:
-                for k in ("next", "on_fail", "skip_to"):
-                    if k in s:
-                        assert s[k] in steps or s[k] == "end", (path, s)
-                for c in s.get("choices", []):
-                    assert c in steps or c in ("stop", "gate"), (path, c)
+    assert_plan_transitions_valid(manifest)
 
     design = json.loads(Path(waves["設計"]["plans"][0]).read_text())
     review = next(s for s in design["steps"] if s["id"] == "review")
@@ -1798,6 +1841,70 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
     assert sum(pr_step.PR_FOOTER in l for l in lines) == 1
+
+
+FAKE_GH_PR_EDIT = """#!{py}
+import os, sys
+a = sys.argv[1:]
+path = os.environ["FAKE_GH_BODY"]
+open(path + ".calls", "a").write(" ".join(a[:2]) + "\\n")
+if a[:2] == ["pr", "list"]:
+    sys.exit(0)
+if a[:2] in (["pr", "create"], ["pr", "edit"]):
+    open(path, "w").write(a[a.index("--body") + 1])
+    if a[1] == "create":
+        print("https://github.com/o/r/pull/5")
+    sys.exit(0)
+if a[:2] == ["pr", "view"]:
+    print(open(path).read()); sys.exit(0)
+sys.exit(1)
+"""
+
+
+def test_pr_body_stages_include_steps_after_pr(tmp_path, monkeypatch):
+    """スプリントの検査のプランの形（PR を出した後に構造改善・実装レビュー・完了判定）で、本文の通した工程が
+    プランの通ったステップの工程と一致する（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "refactor"},
+            {"id": "refactor", "type": "run", "cmd": "true", "stage": "構造改善", "next": "review"},
+            {"id": "review", "type": "run", "cmd": "true", "stage": "実装レビュー", "next": "test-all"},
+            {"id": "test-all", "type": "run", "cmd": "true", "stage": "完了判定", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    text = engine.Engine(plan, tmp_path / "state").run()
+    assert "結果: 完了" in text, text
+    lines = [l for l in body.read_text().splitlines() if l.strip()]
+    assert lines[-2] == "モード: standard / 通した工程: 実装 → Pull Request → 構造改善 → 実装レビュー → 完了判定"
+    assert lines[-1].startswith("🤖 Generated with")
+
+
+def test_pr_body_stages_skip_gh_when_nothing_new(tmp_path, monkeypatch):
+    """PR を出した後に新しい工程が無ければ、プランの終わりに PR の本文を読みに行かない（#2921）。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_PR_EDIT.format(py=PY))
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1],
+        "モード": "standard",
+        "作業場所": str(root),
+        "steps": [
+            {"id": "collect", "type": "run", "cmd": "true", "stage": "実装", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "true", "next": "end"},
+        ],
+    }
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "pr view" not in Path(str(body) + ".calls").read_text().splitlines()
+    assert [l for l in body.read_text().splitlines() if l.startswith("モード: ")] == ["モード: standard / 通した工程: 実装 → Pull Request"]
 
 
 def advance_develop(root):
@@ -2321,7 +2428,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
     # standard（既定）では範囲テストと PR の間に設計との突き合わせが入る（#1241）
-    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "doc-lint"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
@@ -2986,9 +3093,25 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert limits["basis"]["unknown_duration"] is False
     ci_wait = limits["ci_wait_timeout"]
     assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
-    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    assert steps["merge"]["timeout"] - 330 > ci_wait  # マージの分はテスト環境の回収の上限を足す
+    # レビューの後の全体テストは CI に任せ、取り込みからマージの準備へ進む（CI はマージのステップが待つ）
+    assert "test-all" not in steps and "judge" not in steps and steps["base-sync"]["next"] == "ready"
     for fixed in (900, 1800, 3600):
         assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_ci_whole_sends_a_failed_merge_of_the_impl_plan_back_to_judge(tmp_path):
+    """全体テストを CI に任せる戦略では CI を待つのはマージだけなので、実装のプランのマージが落ちたら judge から直しの輪へ戻る
+    （PR 3062 のレビュー）。宛先の判定（merge-gate）の失敗は今のまま止まる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert steps["merge"]["on_fail"] == steps["merge-approved"]["on_fail"] == "judge" and "fix" in steps["judge"]["choices"]
+    assert all({"merge", "merge-approved"} <= set(steps[s]["inputs"]) for s in ("judge", "fix")) and "on_fail" not in steps["merge-gate"]
 
 
 def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):

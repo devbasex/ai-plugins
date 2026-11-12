@@ -134,9 +134,9 @@
 
 | 戦略 | 範囲テスト | 着手前 | 危険フラグの全体テスト | 最終ゲート |
 | --- | --- | --- | --- | --- |
-| `local-full` | `scope_command` の `{paths}` へ `test_targets` | 全体テストを手元で | 手元で 1 度 | 手元で全体テスト（使い回しあり） |
+| `local-full` | `scope_command` の `{paths}` へ `test_targets` | 全体テストを手元で | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | 手元で全体テスト |
 | `local-scoped-ci-whole` | 同上（コンテナ越しでよい） | `--scope` の置き場所の範囲テストだけ | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | push 済みの HEAD のチェック（`test.ci.check` か必須のチェック）を `limits.ci_wait_timeout` まで待つ |
-| `round-only` | ラウンドテストをそのまま | 全体テストとラウンドテスト | 手元で 1 度 | 手元で全体テスト |
+| `round-only` | ラウンドテストをそのまま | 全体テストとラウンドテスト | 走らせず最終ゲートへ寄せる | 手元で全体テスト |
 
 テンプレートの不備（`{paths}` が無い・`--filter={paths}` や `'{paths}'` のように引用の外の 1 語として立っていない）と、
 `local-scoped-ci-whole` なのに `scope_command` を持つ suite が無いときは、理由を出して止める。
@@ -147,7 +147,7 @@
 
 | 種別 | 範囲テストの範囲 | 着手前・最終ゲート | 危険フラグの全体テスト |
 | --- | --- | --- | --- |
-| テスト（`test`） | 項目の `test_targets` | 上の戦略の表のとおり | 走らせる |
+| テスト（`test`） | 項目の `test_targets` | 上の戦略の表のとおり | 最終ゲートへ寄せる |
 | 静的解析（`lint`） | 項目のコミットが変えたファイルのうち suite の `paths`（接頭辞か glob）に当たるもの。検証のたびに組む | どの戦略でも手元で全体テストを走らせ、suite ごとの成否を `baseline_test.suites` に残す | 走らせない |
 
 テストの種別の suite が無い戦略では、`--scope` のテストの置き場所の検査とテスト整備ラウンドを行わず、そのことを

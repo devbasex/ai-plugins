@@ -24,6 +24,9 @@ from crossref_helpers import (
     read_state,
     strategy_state,
     write_state,
+    planned_item,
+    write_file,
+    emitted,
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[5]
@@ -67,68 +70,43 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
 
 
 def _item(item_id, rank, path):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": path,
-        "symbol": "f",
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "scope_commands": [{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 200,
-    }
-
-
-def _write(work, rel, text):
-    p = work / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    return planned_item(
+        item_id,
+        rank,
+        path=path,
+        symbol="f",
+        scope_commands=[{"suite": "pytest", "kind": "test", "command": "pytest -q tests/test_calc.py"}],
+        estimated_diff_lines=200,
+    )
 
 
 def _call(module, name, **kwargs):
     return getattr(module, name)(argparse.Namespace(id=130, **kwargs))
 
 
-def _emitted(capsys, key):
-    values = [line.split("=", 1)[1] for line in capsys.readouterr().out.splitlines() if line.startswith(key + "=")]
-    return values[-1] if values else None
-
-
-def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """#1668 の受け入れ条件 6 — PR 1663 の 2 つの形（行数の上限を超える・同名の関数を足す）を、ほかの項目と並べて検証する。"""
     work = flow["work"]
     (work / "scripts").mkdir(exist_ok=True)
     shutil.copy(CHECK, work / "scripts" / "check-script-structure.py")
     shutil.copytree(CHECK.parent / "lib", work / "scripts" / "lib", ignore=shutil.ignore_patterns("__pycache__"))  # 共通部品（#2336）
     shutil.copytree(CHECK.parent / "structure_checks", work / "scripts" / "structure_checks", ignore=shutil.ignore_patterns("__pycache__"))
-    _write(work, "plugins/ndf/scripts/lib/accounts.py", "def remove(p):\n    return p\n")
-    _write(work, "plugins/ndf/scripts/big.py", "x = 1\n" * 400)
-    _write(work, "plugins/ndf/scripts/clean.py", "def clean():\n    return 1\n")
+    write_file(work, "plugins/ndf/scripts/lib/accounts.py", "def remove(p):\n    return p\n")
+    write_file(work, "plugins/ndf/scripts/big.py", "x = 1\n" * 400)
+    write_file(work, "plugins/ndf/scripts/clean.py", "def clean():\n    return 1\n")
     commit_with_trailers(work, "構造チェックの木", {})
 
     _, declared = _declared()
     state = read_state(flow["path"])
     state["strategy"] = strategy_state(suites=[*strategy_state()["suites"], _structure_suite(declared).as_state()])
     changes = {
-        "I-001": ("plugins/ndf/scripts/big.py", lambda w: _write(w, "plugins/ndf/scripts/big.py", "x = 1\n" * 501)),
-        "I-002": ("plugins/ndf/scripts/trash.py", lambda w: _write(w, "plugins/ndf/scripts/trash.py", "def remove(p):\n    return None\n")),
-        "I-003": ("plugins/ndf/scripts/clean.py", lambda w: _write(w, "plugins/ndf/scripts/clean.py", "def clean():\n    return 2\n")),
-        "I-004": ("src/calc.py", lambda w: _write(w, "src/calc.py", (w / "src" / "calc.py").read_text() + "\nX = 1\n")),
+        "I-001": ("plugins/ndf/scripts/big.py", lambda w: write_file(w, "plugins/ndf/scripts/big.py", "x = 1\n" * 501)),
+        "I-002": (
+            "plugins/ndf/scripts/trash.py",
+            lambda w: write_file(w, "plugins/ndf/scripts/trash.py", "def remove(p):\n    return None\n"),
+        ),
+        "I-003": ("plugins/ndf/scripts/clean.py", lambda w: write_file(w, "plugins/ndf/scripts/clean.py", "def clean():\n    return 2\n")),
+        "I-004": ("src/calc.py", lambda w: write_file(w, "src/calc.py", (w / "src" / "calc.py").read_text() + "\nX = 1\n")),
     }
     state["items"] = [_item(i, rank, path) for rank, (i, (path, _)) in enumerate(changes.items(), start=1)]
     state["plan"] = {
@@ -140,7 +118,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     state["target_scope"] = ["src", "tests", "plugins/ndf"]
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     for item_id, (_, change) in changes.items():
         change(work)
         commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
@@ -149,7 +127,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
 
     verify_judged(cmd_converge, flow["path"], capsys)
 
-    assert _emitted(capsys, "VERIFY") == "fix"
+    assert emitted(capsys, "VERIFY") == "fix"
     # I-003 も plugins/ndf/ を変えて構造チェックを走らせるが、木に残る I-001・I-002 の違反は I-003 に関わらないので通る
     status = {i["id"]: i["status"] for i in read_state(flow["path"])["items"]}
     assert status == {"I-001": "failing", "I-002": "failing", "I-003": "verified", "I-004": "verified"}
