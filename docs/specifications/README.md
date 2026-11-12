@@ -158,5 +158,6 @@
 | [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) | supervise の queue の重なりの組（同じファイルを宣言したプランだけを直列にする・ディレクトリの宣言を判定に使わない） |
 | [ndf-loop-selection-touch-estimate.md](ndf-loop-selection-touch-estimate.md) | 開発ループの選定と並列の計画の検査の触る場所の見込み（逆転の幅・見込みの出所・I21 の警告） |
 | [ndf-supervise-progress-host-and-queue-waits.md](ndf-supervise-progress-host-and-queue-waits.md) | supervise の負荷の記録（進捗ログの負荷とメモリ・queue の待ちの秒・全体テストのメモリの山の計測） |
+| [ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md) | 並列の計画のマシン全体のプランの上限（machine-plans の警告・起動の待ち・起動の排他・relay.py cap --plans） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
