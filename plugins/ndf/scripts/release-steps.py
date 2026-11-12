@@ -1211,9 +1211,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = p.add_mutually_exclusive_group()
     g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
     g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
-    p.add_argument(
-        "--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（スプリントの開始時の値）"
-    )
+    p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
         "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"
