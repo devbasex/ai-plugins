@@ -18,7 +18,7 @@ allowed-tools:
 ## 引数
 
 `/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・設定の `base_branch` /
-`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定は既定ブランチ宛て・非ドラフト。
+`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定の宛先は設定の `base_branch`、無ければ既定ブランチで、非ドラフト。
 
 ## push / PR 作成前の同意取得（必須）
 
