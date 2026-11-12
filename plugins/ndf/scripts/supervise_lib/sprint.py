@@ -63,17 +63,13 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
 
 
 def prod_plans(a, repo: str, build, prs: list[str] | None = None, condition: dict | None = None) -> dict:
-    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。
-    `condition` はリリースの依頼のプランへ載せる実行条件（まとめでは開発版と同じ最終の検査の条件。#3083 の決定 1）。"""
+    """本番のステージのプラン。レーンならリリースの依頼のプラン（`prs` の既定は `{queue_prs}`、`condition` は実行条件。#3083）、ほかは `build()`。"""
     lane = parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request
 
-        # prs を省いた呼び出しは、前のステージの Pull Request のすべて（{queue_prs}）を依頼に載せる
         plan = plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])
-        if condition:
-            plan["実行の条件"] = condition
-        return {"release-request": plan}
+        return {"release-request": {**plan, "実行の条件": condition} if condition else plan}
     return {"release-prod": build()}
 
 
