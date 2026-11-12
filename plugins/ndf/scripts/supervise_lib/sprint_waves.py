@@ -20,6 +20,7 @@ from supervise_lib.procedures import survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
+from supervise_lib.sprint_bundles import with_review, without_review
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
@@ -202,22 +203,24 @@ def plan_design_results(a, repo: str) -> dict:
     )
 
 
-def plan_sprint_impl(a, n: int, repo: str) -> dict:
-    """実装のフェーズ: 課題の作業ツリーをスプリントブランチから切り、課題の PR をスプリントブランチへ集める。"""
+def plan_sprint_impl(a, n: int, repo: str, issues: list[int] | None = None) -> dict:
+    """実装のフェーズ: 課題の作業ツリーをスプリントブランチから切り、課題の PR をスプリントブランチへ集める。
+    `issues` を渡すと課題のまとまりのプラン（`n` は代表の課題）で、ブランチと Pull Request は代表の番号で作る（#3081）。"""
     mb = sprint_branch(a)
     branch = f"feat/issue-{n}-{a.name}"
+    refs = " ".join(f"#{i}" for i in issues or [n])
     ns = argparse.Namespace(
         **{
             **decl_fields(a),
-            "issue": [n],
+            "issue": list(issues or [n]),
             "prompt": None,
             "prompt_file": None,
             "tests": a.tests or ["."],
             "mode": a.mode,
             "worktree": f"{repo}/.worktrees/{branch}",
             "base": mb,
-            "title": f"#{n} を実装する（スプリント {a.name}）",
-            "summary": f"#{n}（スプリント {a.name} のブランチへ集める）",
+            "title": f"{refs} を実装する（スプリント {a.name}）",
+            "summary": f"{refs}（スプリント {a.name} のブランチへ集める）",
             "branch": branch,
             "manual": False,  # 手動確認の節はスプリント PR に載せる
         }
@@ -225,6 +228,19 @@ def plan_sprint_impl(a, n: int, repo: str) -> dict:
     plan = plan_impl(ns)
     plan.update({"起点": f"origin/{mb}", "リポジトリ": repo, "記録しない工程": ["完了判定"]})  # 検査のプランが記録する（#2921）
     return plan
+
+
+def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
+    """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本で、スプリントブランチへ入れる前に
+    cross-review を通す（#3081 の I8a・I8b）。無ければ課題ごとに 1 本（I9）。`pace` はプランへ書く進め方。"""
+    bundles = getattr(a, "bundles", None)
+    if bundles is None:
+        plans = {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}
+    else:
+        plans = {f"impl-{b.lead()}": with_review(plan_sprint_impl(a, b.lead(), repo, b.issues)) for b in bundles}
+    for plan in plans.values() if pace else ():
+        plan["進め方"] = pace  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
+    return plans
 
 
 def plan_sprint_check(a, repo: str) -> dict:
@@ -256,7 +272,7 @@ def plan_sprint_check(a, repo: str) -> dict:
             body="template",
         ),
     ] + plan["steps"]
-    return plan
+    return plan if getattr(a, "bundles", None) is None else without_review(plan)
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:

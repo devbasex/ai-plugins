@@ -1,7 +1,7 @@
 # 並列の計画のマシン全体の本数と課題の見込みの重なり
 
 [parallel.md](parallel.md) の続き。`parallel.py check` と `start` が出す警告のうち、マシン全体のプランの本数（`rule: machine-plans`）と
-課題の見込みの重なり（`I21`）の決まりを置く。
+課題の見込みの重なり（`I21`・`bundle-overlap`）の決まりを置く。
 
 ## マシン全体のプランの本数
 
@@ -33,8 +33,29 @@
 | --- | --- |
 | 同じ時間帯 | 同じリポジトリの 2 つのレーンのどちらも、`after` を推移的にたどって相手に届かない |
 | レーンの課題 | スプリントのレーンは `input.issues`。ループのレーンは `--milestones` のマイルストーンの課題グループの表の課題（`--milestones` が無ければ見ない） |
-| 項目の欄 | `lanes`（計画の順の 2 レーン）・`issues`・`paths`（重なったパス）・`proposals` |
+| 項目の欄 | `lanes`（計画の順の 2 レーン）・`issues`・`paths`（重なったパス）・`proposals`。どちらかのレーンに課題のまとまりの欄があれば `bundles`（2 課題のまとまりの名前。欄の無いレーンの側は `issue-<番号>`）を足す |
 | 案 `after` | `{"kind": "after", "lane": <後ろのレーン>, "after": <前のレーン>}`。後ろのレーンの `after` に前のレーンを足す |
-| 案 `move` | `{"kind": "move", "issue", "from", "to"}`。2 つともスプリントのレーンのときだけ、後ろのレーンの課題を前のレーンへ移す |
+| 案 `move` | `{"kind": "move", "issue", "from", "to"}`。2 つともスプリントのレーンのときだけ、後ろのレーンの課題を前のレーンへ移す。`bundles` の欄があるときは移すまとまりの名前 `bundle` を足す |
 | 見込みなしの課題 | 重なりを「不明」とし、項目を出さない |
 | 集められない | マイルストーンか課題の本文を読めなければ `I21` の警告を 1 つ出し、`message` に理由を並べて続ける。マイルストーンを読めなければ本文の出所だけで、本文を読めない課題は見込みなしとして見る |
+
+## 課題のまとまりの見込みの重なり（`bundle-overlap`）
+
+`parallel.py check <計画名>` は、スプリントのレーンの課題のまとまり（[parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) の
+「課題のまとまり」）のうち、同じレーンの異なるまとまりに入った 2 課題の見込みが重なれば、規則 `bundle-overlap` の警告を出す。
+見込みの出し方と重なりの判定は `I21` と同じで（実装のキューと同じ `admission.overlap_of` と共有の一覧）、同じ 2 課題を別のレーンに
+置けば `I21` が同じ組を出す。同じまとまりの課題どうしの重なりは出さない。まとまりの欄の無いレーンは見ない。
+
+```json
+{"level": "warning", "rule": "bundle-overlap", "at": "lanes",
+ "message": "同じスプリントの異なるまとまりの課題の見込みが重なる: s1 の review-scope #3004・issue-3010 #3010（plugins/ndf/scripts/lib/parallel_plan.py）",
+ "lanes": ["s1"], "bundles": ["review-scope", "issue-3010"], "issues": [3004, 3010],
+ "paths": ["plugins/ndf/scripts/lib/parallel_plan.py"],
+ "proposals": [{"kind": "move", "bundle": "issue-3010", "from": "s1"},
+               {"kind": "after", "bundle": "issue-3010", "from": "s1"}]}
+```
+
+| 案 | 直し方 |
+| --- | --- |
+| `move` | 後ろのまとまりを、同じ時間帯に動かない別のスプリントのレーンへ移す。移す先は conductor が決める |
+| `after` | 後ろのまとまりを新しいレーンへ移し、そのレーンの `after` に `from` のレーンを足す |

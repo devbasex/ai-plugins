@@ -13,6 +13,7 @@ from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, with_decls
 from supervise_lib.design_merge import plan_design_merge
+from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -20,7 +21,7 @@ from supervise_lib.sprint_waves import (
     plan_sprint_branch,
     plan_sprint_check,
     plan_sprint_design,
-    plan_sprint_impl,
+    sprint_impl_plans,
     plan_sprint_release,
     plan_advise_design,
     design_read,
@@ -144,11 +145,7 @@ def auto_sprint_plans(a) -> list[dict]:
     # 設計の課題が無くても設計を承認済みの課題があれば、設計の結果のステージが queue の先頭になる
     first = "設計" if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
     then = {"then_of": first} if design_read(a) else {}
-    impl = {}
-    for n in a.issue:
-        plan = plan_sprint_impl(a, n, repo)
-        plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
-        impl[f"impl-{n}"] = plan
+    impl = sprint_impl_plans(a, repo, pace="auto")
     waves += design_results_wave(a, repo, **({"then_of": first} if a.design else {}))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
@@ -303,7 +300,7 @@ def sprint_plans(a) -> list[dict]:
     waves += design_results_wave(a, repo, **then(DESIGN_RESULTS_STAGE))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then("スプリントブランチ")},
-        {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}, "then_of": first},
+        {"name": "実装", "plans": sprint_impl_plans(a, repo), "then_of": first},
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
@@ -374,9 +371,12 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         absorb.add_absorbed(a)
     if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
         return stop
+    if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+        return stop
     waves = waves if waves is not None else sprint_plans(a)
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
+        apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）
     plans = [plan for wave in waves for plan in (wave.get("plans") or {}).values()]
     for plan in plans if getattr(a, "state", None) else []:
         plan["スプリント状態"] = sprint_state_path(a)  # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）

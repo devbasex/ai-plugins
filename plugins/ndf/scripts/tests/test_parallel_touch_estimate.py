@@ -119,3 +119,25 @@ def test_lane_estimates_reports_an_unreadable_issue_body(tmp_path):
     env.milestones = lambda repo: {}
     est, _, error = te_mod.lane_estimates(tmp_path, p.lanes, source_of=lambda root: env)
     assert est == {"lsp": {8: ["b/y.py"], 9: []}} and error == "課題 #9 の本文を読めない"
+
+
+def test_bundle_overlap_pairs_match_i21_pairs_for_the_same_estimates():
+    """#3081 の受け入れ条件 6・I6: 同じ見込みと共有の一覧に対し、同じレーンの異なるまとまりの組（bundle-overlap）と、
+    同じ 2 課題を別のレーンに置いた組（I21）が一致する。判定は同じ `admission.overlap_of` を通る。"""
+    est = {
+        1: ["plugins/ndf/scripts/lib/a.py"],
+        2: ["plugins/ndf/scripts/lib/a.py"],
+        3: ["lib/README.md"],
+        4: ["lib/x.py"],
+        5: ["docs/x.md"],
+    }
+    shared = [{"path": "lib/README.md", "touched_by": ["lib/"]}]
+    hits = []
+    for a, b in [(1, 2), (1, 5), (3, 4), (4, 5)]:
+        lane = sprint("s1", [a, b]) | {"input": {"kind": "sprint", "issues": [a, b], "bundles": []}}
+        one = pp.check_data(plan(lane), estimates={"s1": {a: est[a], b: est[b]}}, shared=shared)[1]
+        two = pp.check_data(plan(sprint("s1", [a]), sprint("s2", [b])), estimates={"s1": {a: est[a]}, "s2": {b: est[b]}}, shared=shared)[1]
+        got = [(it["issues"], it["paths"]) for it in one if it["rule"] == "bundle-overlap"]
+        assert got == [(it["issues"], it["paths"]) for it in i21(two)], (a, b)
+        hits.append(bool(got))
+    assert hits == [True, False, True, False]
