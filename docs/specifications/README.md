@@ -162,6 +162,6 @@
 | [ndf-parallel-cross-repo-lane.md](ndf-parallel-cross-repo-lane.md) | 別のリポジトリの改修が要るときの既定（相手のクローンを repo にしたレーンを足す）の決定と理由・常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel-cross-repo.md が正 |
 | [ndf-ci-only-tests.md](ndf-ci-only-tests.md) | CI テストの宣言（`test.ci.only`）のあるリポジトリで手元のテストを止め、PR の CI の結果を待たずに読んで直し（`ci-watch.py peek`・改修の上限）、テストのチェックがそろってからマージすること。hook の照合と cross-refactoring の最終ゲートを含む。手順は `development-workflow` の SKILL.md が正 |
 | [ndf-parallel-issue-bundles.md](ndf-parallel-issue-bundles.md) | 並列の計画の課題のまとまり（まとまりごとの実装の Pull Request とレビュー、検査の規則 bundle・bundle-overlap） |
-| [ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) | 並列の計画の台帳（ledger.jsonl・checkpoint.json）と、失われた計画を start 1 回で作り直す仕組み・オーガナイザーの印の照合・リレーハブの起こす python の常に成り立つ条件・データの形・決定の理由・テスト観点（#2647）。手順は development-workflow の references/parallel.md が正 |
+| [ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) | 並列の計画の台帳（ledger.jsonl・checkpoint.json）と、失われた計画を start 1 回で作り直す仕組み・オーガナイザーの印の照合・リレーハブの起こす python の常に成り立つ条件・データの形・決定の理由・テスト観点。手順は development-workflow の references/parallel.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
