@@ -29,12 +29,13 @@ BUNDLES = [pb.Bundle(name="review-scope", issues=[12, 11, 99]), pb.Bundle(name="
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
-def build(tmp_path, monkeypatch, bundles, pace="normal", design=()):
+def build(tmp_path, monkeypatch, bundles, pace="normal", design=(), absorb=()):
     monkeypatch.setattr(pb, "bundles_of", lambda main, lane=None, status=None: bundles)
     repo = make_repo(tmp_path, [STG, PRD])
     out = tmp_path / "m"
     args = ["new", "sprint", "--name", "m2", "--worktree", str(repo), "--issue", "11", "12", "13", "--out", str(out)]
     args += ["--design", *design] if design else []
+    args += ["--absorb", *absorb] if absorb else []
     if pace != "normal":
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, pace))]
     p = inproc.run(SUPERVISE, *args, cwd=repo)
@@ -118,6 +119,32 @@ def test_bundles_without_sprint_issues_are_dropped(tmp_path, monkeypatch):
     p, out = build(tmp_path, monkeypatch, bundles)
     assert p.returncode == 0, p.stdout + p.stderr
     assert sorted(stages(out)["実装"]) == ["impl-12", "impl-13"]
+
+
+def test_absorbing_into_a_bundle_member_goes_to_the_lead(tmp_path, monkeypatch):
+    """--absorb の取り込み先がまとまりの課題なら、代表の設計と実装のプランへ寄せる。取り込んだ 1 件のまとまりのプランは飛ぶ。"""
+    p, out = build(tmp_path, monkeypatch, [pb.Bundle(name="review-scope", issues=[12, 11])], design=("11",), absorb=("13:11",))
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = stages(out)
+    assert got["設計"]["design-12"]["課題"] == [12, 13, 11]
+    assert got["実装"]["impl-12"]["課題"] == [12, 11, 13] and "実行の条件" not in got["実装"]["impl-12"]
+    assert got["実装"]["impl-13"]["実行の条件"] == procedures.absorbed_condition(13, 11)
+
+
+def test_absorbing_a_bundle_member_drops_only_that_issue(tmp_path, monkeypatch):
+    """取り込む課題が複数件のまとまりにいれば、まとまりのプランを飛ばさずにその課題だけを `課題` から外す。"""
+    p, out = build(tmp_path, monkeypatch, [pb.Bundle(name="review-scope", issues=[12, 11])], absorb=("12:13",))
+    assert p.returncode == 0, p.stdout + p.stderr
+    impl = stages(out)["実装"]
+    assert impl["impl-12"]["課題"] == [11] and "実行の条件" not in impl["impl-12"] and "取り込み先" not in impl["impl-12"]
+    assert impl["impl-13"]["課題"] == [13, 12]
+
+
+def test_design_results_keep_an_absorbed_lead_out_of_its_bundle():
+    """--absorb で `課題` から外したまとまりの代表を、設計の結果の書き込みで戻さない。"""
+    plans = {12: {"課題": [11], "steps": []}, 13: {"課題": [13, 12], "steps": []}}
+    design_stage.rewrite(plans, rows("| #11 | 実装する | — | `a.py` |\n| #13 | 実装する | — | `b.py` |\n"))
+    assert plans[12]["課題"] == [11] and plans[13]["課題"] == [13, 12]
 
 
 def rows(text: str) -> design_results.DesignResults:

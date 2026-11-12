@@ -204,7 +204,7 @@ def kept_lines(prompt: str, before: dict, after: dict) -> list[str]:
     return [line for line in prompt.splitlines() if line.strip() and line not in template]
 
 
-def _owners(plans: dict[int, dict]) -> dict[int, int]:
+def _implementing_plans(plans: dict[int, dict]) -> dict[int, int]:
     """課題 → その課題を実装するプランのキー。課題のまとまりのプラン（#3081）は代表の課題をキーに、まとまりの課題を
     `課題` に持つ。自分のプランを持つ課題（--absorb で取り込んだ課題も）はそのプランを指す。"""
     own = {n: n for n in plans}
@@ -219,7 +219,7 @@ def _checked_absorptions(plans: dict[int, dict], res: dr.DesignResults) -> tuple
     取り込み先の課題を実装するプランごとの取り込んだ課題。取り込み先に流れる実装プランが無ければ DesignResultsError。
     プランは変えない。"""
     absorbed: dict[int, list[int]] = {}
-    own = _owners(plans)
+    own = _implementing_plans(plans)
     # new sprint --absorb で書き出しの時点に取り込んだ課題（プランの `取り込み先`）も表の取り込みと合わせる（#1426 の決定 8）
     pre = {n: p["取り込み先"] for n, p in plans.items() if isinstance(p.get("取り込み先"), int)}
     # --absorb の取り込みも表の取り込みも、取り込み先に実装が流れることを確かめる（取り込み先が閉じる・別へ取り込まれると、
@@ -258,9 +258,10 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     pre, absorbed = _checked_absorptions(plans, res)
     items = []
     for n, plan in plans.items():
-        # 課題のまとまりのプラン（#3081）は、まとまりの課題のどれかが実装されれば流れる。閉じる・取り込むとした課題は外す
-        members = list(dict.fromkeys([n, *(plan.get("課題") or [])]))
-        live = [i for i in members if not _skipped(i, res, pre)]
+        # 課題のまとまりのプラン（#3081）は、まとまりの課題のどれかが実装されれば流れる。閉じる・取り込むとした課題は外す。
+        # --absorb で `課題` から外したまとまりの代表は戻さない（`課題` が無い古いプランは自分の番号だけを持つ）
+        members = list(dict.fromkeys(plan.get("課題") or [n]))
+        live = [i for i in members if not _not_implemented_by_own_plan(i, res, pre)]
         if not live:
             row, host = res.row_of(n), res.host_of(n)
             if row is not None and row.kind == dr.CLOSE:
@@ -284,7 +285,7 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     return items
 
 
-def _skipped(i: int, res: dr.DesignResults, pre: dict[int, int]) -> bool:
+def _not_implemented_by_own_plan(i: int, res: dr.DesignResults, pre: dict[int, int]) -> bool:
     """課題 `i` を自分のプランで実装しない（設計の結果で閉じる・取り込むとした、か --absorb で取り込んだ）。"""
     row = res.row_of(i)
     return (row is not None and row.kind == dr.CLOSE) or res.host_of(i) is not None or i in pre

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from supervise_lib.absorb import include_in_design
+from supervise_lib.absorb import bundle_leads, include_in_design
 from supervise_lib.templates import review_step
 
 
@@ -25,7 +25,7 @@ def bundle_refusal(a):
     # スプリントの課題を 1 つも持たないまとまりは Bundle を作る前に外す（課題の 1 件以上の検証で落ちる）
     kept = [pb.Bundle(name=b.name, issues=m) for b in got or [] if (m := [n for n in b.issues if n in issues])]
     a.bundles = pb.bundle_list(issues, kept) if got is not None else None
-    lead = {n: b.lead() for b in a.bundles or [] for n in b.issues}
+    lead = bundle_leads(a)
     a.design = list(dict.fromkeys(lead.get(n, n) for n in a.design))
     return None
 

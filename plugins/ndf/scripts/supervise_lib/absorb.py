@@ -1,8 +1,8 @@
 """`new sprint --absorb <課題>:<取り込み先>`（#1426 の決定 3・8。I7・I8）。
 
 取り込みは進め方ごとのステージの組み立ての中で扱わず、組み立てた後のプランへ 1 か所で当てる。プランは名前
-（`design-<N>`・`impl-<N>`）で引く。取り込んだ課題は設計のプランを持たず、実装のプランは `取り込み先` と
-`実行の条件` で飛ぶ。取り込み先のプランのうち存在するもの（`--design` なら設計と実装、`--issue` なら実装）の
+（`design-<N>`・`impl-<N>`。課題のまとまりでは代表の番号）で引く。取り込んだ課題は設計のプランを持たず、実装のプランは
+`取り込み先` と `実行の条件` で飛ぶ（複数件のまとまりにいる課題は、プランを飛ばさずに `課題` から外す）。取り込み先のプランのうち存在するもの（`--design` なら設計と実装、`--issue` なら実装）の
 `課題` に取り込んだ課題を含める。取り込むかは引数を渡す人か conductor が決める（AI は選ばない）。
 """
 
@@ -71,18 +71,31 @@ def include_in_design(design: dict, h: int, m: int, note: str) -> None:
             step["prompt"] = f"{step.get('prompt') or ''}{note}"
 
 
+def bundle_leads(a) -> dict[int, int]:
+    """課題 → その課題を実装するプランの番号（課題のまとまりの代表。#3081）。まとまりの記録が無い課題は載らない。"""
+    return {n: b.lead() for b in getattr(a, "bundles", None) or [] for n in b.issues}
+
+
 def apply_absorb(a, waves: list[dict]) -> None:
-    """組み立てたステージのプランへ取り込みを書く（I7）。"""
+    """組み立てたステージのプランへ取り込みを書く（I7）。プランは課題を実装するプラン（まとまりなら代表の番号）で引く。
+    取り込む課題が複数件のまとまりにいるときは、プランを飛ばさずにその課題だけを `課題` から外す。"""
     plans = {k: p for w in waves for k, p in (w.get("plans") or {}).items()}
+    lead = bundle_leads(a)
     for m, h in pairs_of(a):
+        to = lead.get(h, h)
         note = f"取り込んだ課題 #{m} の受け入れ内容も #{h} に含める（#{m} の本文も読む）。"
-        design = plans.get(f"design-{h}")
+        design = plans.get(f"design-{to}")
         if design is not None:
-            include_in_design(design, h, m, note)
-        host = plans.get(f"impl-{h}")
+            include_in_design(design, to, m, note)
+        host = plans.get(f"impl-{to}")
         if host is not None:
-            host["課題"] = _with(host.get("課題") or [h], m)
-        mine = plans.get(f"impl-{m}")
-        if mine is not None:
+            host["課題"] = _with(host.get("課題") or [to], m)
+        mine = plans.get(f"impl-{lead.get(m, m)}")
+        if mine is None or mine is host:
+            continue
+        rest = [i for i in mine.get("課題") or [m] if i != m]
+        if rest:
+            mine["課題"] = rest
+        else:
             mine["取り込み先"] = h
             mine["実行の条件"] = absorbed_condition(m, h)
