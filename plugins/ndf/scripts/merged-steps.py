@@ -189,7 +189,9 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
     if got is None:
         return
     branch, merge_commit = got
-    if _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+    if why := repo.kept_sprint_branch(root, branch):  # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）
+        add("branch", branch, "kept", why)
+    elif _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
         _delete_branch(root, branch, add)
 
     if slug:

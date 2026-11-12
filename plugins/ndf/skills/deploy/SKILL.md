@@ -48,7 +48,7 @@ if [ -n "$dev_base" ]; then
     dev_base_found=1
   else
     # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
     # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
     dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
       "refs/heads/$dev_base" 2>/dev/null)

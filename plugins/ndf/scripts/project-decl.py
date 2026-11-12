@@ -4,6 +4,7 @@
     python3 project-decl.py check   [--force] [--root DIR]
     python3 project-decl.py measure --out FILE [--budget 秒] [--root DIR]
     python3 project-decl.py write   --measure FILE [--answers FILE] [--dry-run] [--root DIR]
+    python3 project-decl.py drift   --measure FILE [--root DIR]
     python3 project-decl.py schema  [--out FILE]
 
 `development-workflow` の手順 0 が `check` を打ち、2 なら measure → 答え（conductor が書く）→ write を通す。
@@ -13,7 +14,9 @@
   LLM も `gh` も呼ばず、ファイルを書かない
 - `measure`: 0 = 測定の結果を書けた（項目が不明でも 0）/ 1 = `--out` を書けない。標準ライブラリと `git`・`gh` だけで動く。
   書くのは `--out` だけで、`gh` へは読む要求だけを渡す
-- `write`: 0 = 書けた・書くものが無い / 1 = 書けない / 3 = 既存の宣言が壊れている（作り直さない）
+- `write`: 0 = 書けた・書くものが無い / 1 = 書けない・ブランチ運用の答えが取り込み方の表に合わない / 3 = 既存の宣言が壊れている（作り直さない）
+- `drift`: ブランチ運用の宣言（無ければ既定値の行）と `measure` の結果のずれを項目ごとに出す（#3121）。0 = 比べた（ずれが無ければ
+  items は空）/ 1 = 測定の結果を読めない / 3 = 宣言が壊れている
 - `schema`: 宣言の JSON Schema（`skills/development-workflow/schemas/project.schema.json` の正本）を出す
 
 結果は lib/step_result.py の形の 1 行の JSON で、その前に人が読む行を出す。宣言はメインディレクトリの `.ndf/` に置く。
@@ -36,9 +39,11 @@ import jsonio  # noqa: E402
 import ndf_tracking  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
+import branch_flow  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 
-from project_lib import ANALYZER, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, ci_tests, fingerprint, merge  # noqa: E402
+from project_lib import ANALYZER, BRANCH_FLOW, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, ci_tests, fingerprint, merge  # noqa: E402
+from project_lib import measure_branch_flow as mbf  # noqa: E402
 from project_lib import measure_ci as mci  # noqa: E402
 from project_lib import measure_repo as mr  # noqa: E402
 from project_lib.measure_materials import measure_materials  # noqa: E402
@@ -53,6 +58,7 @@ P_NUMBER = {
     "ci": "P4",
     "services": "P5",
     BRANCHES: "P6",
+    BRANCH_FLOW: "P6",
     "delivery": "P7",
     "issues": "P8",
     "checks": "P9",
@@ -96,6 +102,14 @@ def _load_decl(main: Path, model):
     return data
 
 
+def _declared_flow(main: Path) -> "branch_flow.BranchFlow":
+    """worktree.json の branch_flow（無ければ既定値の行）。壊れていれば 3（#3121 の I1）。"""
+    try:
+        return branch_flow.of_decl(_read_decl_json(main / WORKTREE_FILE, str(WORKTREE_FILE)) or {})
+    except branch_flow.FlowError as e:
+        raise StepError(f"{WORKTREE_FILE}: {e}", EXIT_PRECONDITION) from None
+
+
 # --- check ------------------------------------------------------------------
 
 
@@ -109,6 +123,7 @@ def cmd_check(a):
     model = _load_model()
     main = _main_dir(root)
     data = _load_decl(main, model)
+    _declared_flow(main)
     reasons = []
     if data is None:
         reasons.append("宣言が無い")
@@ -186,6 +201,8 @@ def _measure_ci_items(tree, step, items: dict, root: Path, deadline: float, repo
             items[BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
     else:
         items.setdefault("test_duration", items.get("ci") or mr.unknown("時間切れ"))
+    if (flow := step(BRANCH_FLOW, lambda: mbf.measure_flow(root, _github_repo(root), deadline))) is not None:
+        items[BRANCH_FLOW] = flow
     if "issues" not in items:
         items["issues"] = mci.measure_issues(repo_issues, ci_part or {})
     return notes
@@ -218,7 +235,7 @@ def measure_project(root: Path, budget: float) -> dict:
     return {
         "analyzer": ANALYZER,
         "elapsed_seconds": round(time.monotonic() - start, 1),
-        "items": {k: items[k] for k in (*ITEM_KEYS, BRANCHES) if k in items},
+        "items": {k: items[k] for k in (*ITEM_KEYS, BRANCHES, BRANCH_FLOW) if k in items},
         "inputs": fingerprint.inputs(root, tree.files),
         "branch_state": fingerprint.branch_state(root, fingerprint.declared_branches(_main_dir(root))),
         "skipped_files": tree.skipped,
@@ -317,6 +334,8 @@ def _merge_worktree_part(main, wt, meas, answers, check, written_before):
         return files, rows, {}, [], branches
     branches, origin = merge.branch_answer(meas, answers, check)
     new_wt, rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
+    new_wt, flow_rows, flow_written = merge.merge_flow(new_wt, *merge.flow_answer(meas, answers, mbf.answer_problem), written_before)
+    rows, wt_written = rows + flow_rows, {**wt_written, **flow_written}
     if new_wt != wt:
         files.append((main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt)))
     declared = fingerprint.branch_names(new_wt)
@@ -352,6 +371,8 @@ def cmd_write(a):
     except jsonio.JsonReadError as e:
         raise StepError(f"測定の結果か答えを読めない: {e}", 1) from None
     check = _checker(model)
+    if bad := mbf.bad_answer(answers.get(BRANCH_FLOW)):
+        raise StepError(f"ブランチ運用の答えが取り込み方の表に合わないため書かない: {bad}", 1)
     questions = {k for k, m in (meas.get("items") or {}).items() if m.get("status") == "question"}
     rows = [{"kind": "ignored", "key": k} for k in answers if k not in questions]
     written_before = ((existing or {}).get("analysis") or {}).get("written") or {}
@@ -418,6 +439,17 @@ def _report_write(files, rows, dry_run):
     emit(result(TOOL, "ok", summary, rows, metrics))
 
 
+def cmd_drift(a):
+    root = proc.git_root(a.root)
+    declared = _declared_flow(_main_dir(root))
+    try:
+        meas = jsonio.read(a.measure, want=dict)
+    except jsonio.JsonReadError as e:
+        raise StepError(f"測定の結果を読めない: {e}", 1) from None
+    rows = mask(mbf.drift(declared, (meas.get("items") or {}).get(BRANCH_FLOW)))
+    emit(result(TOOL, "ok", mbf.print_drift(rows), rows, {"drift": len(rows), "declared": declared.declared}))
+
+
 # --- schema -----------------------------------------------------------------
 
 
@@ -449,6 +481,10 @@ def build_parser():
     w.add_argument("--answers")
     w.add_argument("--dry-run", action="store_true")
     w.set_defaults(func=cmd_write)
+    d = sub.add_parser("drift", help="ブランチ運用の宣言と測った使い方のずれを出す")
+    d.add_argument("--root")
+    d.add_argument("--measure", required=True)
+    d.set_defaults(func=cmd_drift)
     s = sub.add_parser("schema", help="宣言の JSON Schema を出す")
     s.add_argument("--out")
     s.set_defaults(func=cmd_schema)

@@ -93,7 +93,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, publish, record, replaced  # noqa: E402
+from release_lib import others, promotion, publish, record, replaced  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -123,6 +123,7 @@ from step_result import (
 )
 import gh_parts  # noqa: E402
 import repo as repo_lib  # noqa: E402
+import branch_flow  # noqa: E402
 import delivery  # noqa: E402
 from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps, run_steps  # noqa: E402,F401
 
@@ -287,13 +288,13 @@ def next_release(name, old, level="patch"):
 def other_plugins(root, a):
     """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
     since = a.since or release_tag_before(root, a.plugin) or f"{a.plugin}--v*"
-    p = git(root, "diff", "--name-only", f"refs/tags/{since}", "HEAD", check=False)
+    p = git(root, "diff", "--name-only", f"refs/tags/{since}", a.end, check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
     pending, already = {}, []
     for name in sorted({m[1] for f in p.stdout.split() if (m := re.match(r"plugins/(?:mcp/)?([^/]+)/", f))} - {a.plugin}):
         pdir = root / "plugins" / (name if name in ("ndf", "playwright-kit") else f"mcp/{name}")
-        old, head = base_version(root, pdir, since), base_version(root, pdir, "HEAD")
+        old, head = base_version(root, pdir, since), base_version(root, pdir, a.end)
         if old and head == old:  # 差分の中でまだ上げていない
             pending[name] = old
         elif head:
@@ -309,13 +310,14 @@ def cmd_changed_plugins(a):
         raise StepError("引数の組み合わせが違う（--decided は --prs・--approval と並べない。--set は --approval と使う）", 2)
     if a.set:
         return emit(changed.set_levels(TOOL, changed.approval_path(root, a.approval), a.set))
+    a.end = promotion.head_ref(root, getattr(a, "head", None))  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
     since, pending, already = other_plugins(root, a)
     skipped, decided = [], None
     if a.decided and pending:
         decided = changed.approval_path(root, a.decided)
         rows = changed.decided_rows(decided, pending, already)
     elif a.prs is not None:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
-        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", "HEAD"), a.prs)
+        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", a.end), a.prs)
         data = included.pr_fields(prs, cwd=str(root))[0] or {}
         view = lambda n: data[n] if isinstance(data.get(n), dict) else pr_view(root, n, "body,state,mergeCommit")  # noqa: E731  読めない PR は根拠に書く（I4）
         rows = changed.candidate_rows(root, prs, pending, view, skipped)
@@ -596,10 +598,11 @@ def _merged_sync_pr(root, branch, base):
     return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
 
 
-def _merge_sync_pr(root, a, plugin, branch, base, release_pr):
+def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False):
     """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、
     release/v<版>-sync → ベースブランチの PR でマージする。release/v<版> そのものへはベースブランチを取り込まない。
-    待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。"""
+    待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
+    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。"""
     sync = f"{branch}-sync"
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         git(root, "fetch", "-q", "origin", base)
@@ -611,12 +614,12 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr):
         resolved = []
         if git(root, "merge-base", "--is-ancestor", f"origin/{base}", ours, check=False).returncode != 0:
             msg = f"Merge {base} into {sync}（{plugin} v{a.version} の版数の衝突を本番の版で解く）"
-            commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg)
+            commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg, sections=sections)
             git(root, "push", "-q", "origin", f"{commit}:refs/heads/{sync}")
         found = find_pr(root, sync, base, states=("OPEN",))
+        head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
         body = (
-            f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため、"
-            f"本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n"
+            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
@@ -649,13 +652,6 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     return main_pr, merge, verdict
 
 
-def _restore_branch(root, branch):
-    """開発版の PR のマージで origin の release/v<版> が消えていれば（delete_branch_on_merge）、ローカルの先端を push し直す。
-    本番の照合（check_approved の fetch）と本番の PR の head はこの枝を読む。在れば何もしない（強制 push はしない）。"""
-    if git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode != 0:
-        git(root, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
-
-
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -672,6 +668,10 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
+    if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
+        ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
+        main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
+        _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
@@ -709,7 +709,8 @@ def cmd_release(a):
         # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
         # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
         allowed = approval.release_pr_allowed(root, release_pr, pr_view)
-        _restore_branch(root, branch)
+        # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
+        repo_lib.restore_branch(root, branch, run_git=git)
         verdict = approval.check_approved(root, approved, branch, allowed)
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
@@ -720,6 +721,12 @@ def cmd_release(a):
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
+    """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足し、`back`（戻すマージ）を打って結果を出す。"""
+    ver, tag = a.version, release_tag(plugin, a.version)
     by_cd = delivery.publishes_by_cd(delivery.load_delivery(root))
     if not by_cd:
         items += publish.tag_and_release(root, plugin, ver, tag, merge)
@@ -728,7 +735,8 @@ def cmd_release(a):
     items += swept
     metrics.update(sweep_metrics)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
-    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt))
+    status, code, done = back(items, metrics, done) if back else ("ok", None, done)
+    emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
 
 
 def _sweep_candidates(root, merge):
@@ -924,7 +932,10 @@ def cmd_approval_facts(a):
     prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
-    dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
+    src = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は、組んだリリースブランチの先頭を承認に出す（#3121）
+    if head:
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{src}:refs/remotes/origin/{src}")
+    dev = git(root, "rev-parse", f"origin/{src}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, dev)
     prs, extra_out = included.section_range(root, prev, dev, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
@@ -944,8 +955,8 @@ def cmd_approval_facts(a):
         TOOL,
         f"v{a.version}",
         title=f"{plugin} v{a.version} のリリース",
-        targets=[{"url": compare, "title": f"{prev} → {base}（{dev[:8]}）", "base_head": f"{prod} ← {base}"}],
-        change=f"`{prod}...{base}` の差分 {files} ファイル / +{ins} / −{dels}",
+        targets=[{"url": compare, "title": f"{prev} → {src}（{dev[:8]}）", "base_head": f"{prod} ← {src}"}],
+        change=f"`{prod}...{src}` の差分 {files} ファイル / +{ins} / −{dels}",
         judge=[
             ac.material_row(dev),
             ("版数", a.version),
@@ -985,6 +996,18 @@ def cmd_approval_facts(a):
         ),
         EXIT_GATE,
     )
+
+
+def cmd_release_branch(a):
+    """選んで集める取り込み方のリリースブランチを本番チャネルから組んで push する（#3121 の E10。本体は release_lib/promotion.py）。"""
+    root = git_root(a.root)
+    prod = a.production or release_decl(root, a)[1]
+    try:
+        got = promotion.build_branch(root, f"{branch_flow.RELEASE_PREFIX}{a.version}", prod, a.units)
+    except branch_flow.ReleaseBuildError as e:
+        raise StepError(str(e)) from e
+    items = [{"kind": "branch", "name": u, "result": "merged", "head": h} for u, h in got["units"].items()]
+    emit(result(TOOL, "ok", f"{got['branch']} を {prod} から組んだ（先頭 {got['head'][:12]}）", items, got))
 
 
 def cmd_approve(a):
@@ -1169,6 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--approval", help="承認資料。「版を上げる他のプラグイン」の節を書く")
     p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: リリース承認ゲートで決めた上げ幅へ行を書き直す")
     p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
+    p.add_argument("--head", help="差分の終点のブランチ（既定は HEAD。選んで集める取り込み方はリリースブランチ）")
     p.set_defaults(func=cmd_changed_plugins)
 
     p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md の版の節へ PR のタイトルを並べる")
@@ -1189,7 +1213,15 @@ def build_parser() -> argparse.ArgumentParser:
     g = p.add_mutually_exclusive_group()
     g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
     g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
+    p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
     p.set_defaults(func=cmd_release)
+    p = sub.add_parser(
+        "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"
+    )
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--units", nargs="+", required=True, metavar="ブランチ", help="選んだリリースの単位（スプリントブランチ）")
+    p.add_argument("--production", help="本番チャネル（既定は宣言の値）")
+    p.set_defaults(func=cmd_release_branch)
 
     p = sub.add_parser("record", parents=[common], help="リリースの後に、本番のリリースの PR へリリース記録（## リリース記録）を書く")
     g = p.add_mutually_exclusive_group(required=True)
@@ -1243,6 +1275,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prev-tag")
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
     p.add_argument("--approval", help="前の承認資料。作り直しで approval-facts の書かない節（手で足した節など）を残す")
+    p.add_argument("--head", help="承認に出すブランチ（既定はベースブランチ。選んで集める取り込み方はリリースブランチ）")
     p.set_defaults(func=cmd_approval_facts)
 
     p = sub.add_parser(

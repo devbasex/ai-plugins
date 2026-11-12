@@ -11,7 +11,8 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 いるか）は判定しない。語を含まないまま ai-plugins の形を前提にした論理も拾えない。
 
 走査するのは、`manifests/*-skills.txt` の和集合が指す Skill の Markdown と `scripts/`、
-family の `scripts/` の下のスクリプト（`.py` / `.sh` / `.js`）、`hooks/*.json` である。
+family の `scripts/` の下のスクリプト（`.py` / `.sh` / `.js`）、`hooks/*.json`、`agents/*.md`（エージェントの本文。
+Markdown と同じ語を掛ける。#3121）である。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
 DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛ける。プロジェクトごとに違うものは
 `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も持たない
@@ -78,6 +79,12 @@ DOC_WORDS: dict[str, str] = {
     "codex-plugin-dir": r"\.codex-plugin",
     "marketplace-json": r"marketplace\.json",
     "manifests-dir": r"manifests/",
+    # 特定のブランチ名と運用の決め打ち（#3121 の決定 8）。手順はベースブランチ・本番チャネル・スプリントの起点の語で書き、
+    # 名前は .ndf/worktree.json の宣言から読む
+    "develop-branch": r"\bdevelop\b",
+    "origin-main": r"origin/(?:main|master)\b",
+    "base-branch-name": r"--base[ =](?:main|master)\b",
+    "main-branch": r"`(?:main|master)`",
 }
 
 # スクリプトと hook に掛ける語。ai-plugins の置き場・テストや同期のコマンド・ランタイムの組・ブランチ・
@@ -222,6 +229,12 @@ def collect_hooks(skills_dir: pathlib.Path) -> list[str]:
     return [path.name for path in sorted(root.glob("*.json"))] if root.is_dir() else []
 
 
+def collect_agents(skills_dir: pathlib.Path) -> list[str]:
+    """family の `agents/` の下のエージェントの本文を、`agents/` からの相対パスで返す。"""
+    root = skills_dir.parent / "agents"
+    return [path.name for path in sorted(root.glob("*.md"))] if root.is_dir() else []
+
+
 def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
     """走査対象の本文からヒットを集める。語ごとに照合するので、同じ行の 2 語は別のヒットになる。
 
@@ -241,7 +254,7 @@ def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Patte
 def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path | None:
     """項目のパスがどの family に属するかを Skill ディレクトリで返す。属さなければ None。"""
     for d in skills_dirs:
-        if any(key.startswith(canon(root) + "/") for root in (d, d.parent / "scripts", d.parent / "hooks")):
+        if any(key.startswith(canon(root) + "/") for root in (d, d.parent / "scripts", d.parent / "hooks", d.parent / "agents")):
             return d
     return None
 
@@ -324,17 +337,21 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     scripts = collect_scripts(scripts_dir)
     skill_scripts = collect_skill_scripts(skills_dir, names)
     hooks = collect_hooks(skills_dir)
+    agents_dir = skills_dir.parent / "agents"
+    agents = collect_agents(skills_dir)
     scanned = {canon(skills_dir / rel) for rel in docs + skill_scripts}
+    scanned.update(canon(agents_dir / rel) for rel in agents)
     scanned.update(canon(scripts_dir / rel) for rel in scripts)
     scanned.update(canon(hooks_dir / rel) for rel in hooks)
     hits = scan(skills_dir, docs, DOC_MATCHERS)
     hits += scan(scripts_dir, scripts, SCRIPT_MATCHERS)
     hits += scan(skills_dir, skill_scripts, SCRIPT_MATCHERS)
     hits += scan(hooks_dir, hooks, SCRIPT_MATCHERS)
+    hits += scan(agents_dir, agents, DOC_MATCHERS)
     report_line = (
         f"{skills_dir}: 公開する Skill {len(names)} 個 / Markdown {len(docs)} 本 / "
         f"スクリプト {len(scripts) + len(skill_scripts)} 本（family {len(scripts)}・Skill {len(skill_scripts)}） / "
-        f"hook {len(hooks)} 本 / ヒット {len(hits)} 件"
+        f"hook {len(hooks)} 本 / エージェント {len(agents)} 本 / ヒット {len(hits)} 件"
     )
     return scanned, hits, report_line, unscanned
 

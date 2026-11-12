@@ -258,16 +258,17 @@ def test_report_shows_scan_size() -> None:
     assert result.returncode == 0, output_of(result)
     out = output_of(result)
     summary = re.search(
-        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本（family (\d+)・Skill (\d+)） / hook (\d+) 本 / ヒット (\d+) 件$",
+        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本（family (\d+)・Skill (\d+)） / hook (\d+) 本 / エージェント (\d+) 本 / ヒット (\d+) 件$",
         out,
         re.MULTILINE,
     )
     assert summary is not None, f"走査の要約が出ていない: {out}"
-    skills, markdown, scripts, family_scripts, skill_scripts, hooks, _hits = (int(value) for value in summary.groups())
+    skills, markdown, scripts, family_scripts, skill_scripts, hooks, agents, _hits = (int(value) for value in summary.groups())
     assert skills > 0, f"公開する Skill の数が 0 になっている: {out}"
     assert family_scripts > 0 and skill_scripts > 0, f"配布するスクリプトを走査していない: {out}"
     assert scripts == family_scripts + skill_scripts, out
     assert hooks > 0, f"hook の定義を走査していない: {out}"
+    assert agents > 0, f"エージェントの本文を走査していない: {out}"
     assert markdown >= skills, f"Markdown の本数が Skill の数を下回っている: {out}"
 
 

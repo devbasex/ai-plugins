@@ -13,6 +13,13 @@
         ],
         "positionals": []
       },
+      "drift": {
+        "options": [
+          "--measure",
+          "--root"
+        ],
+        "positionals": []
+      },
       "measure": {
         "options": [
           "--budget",

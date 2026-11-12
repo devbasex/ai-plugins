@@ -144,7 +144,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | I13 | 同時に動かせる数から外すオーガナイザーは、人の起動（利用者が端末で打った `claude`）でないオーガナイザーの印を持つ動いているラッパー 1 本だけ。役割 `helper` のラッパーは 1 本だけ、上限を 1 本超えて許す。人の起動で動いているラッパーは役割に依らず数えない（確定仕様 `ndf-relay-multi-session-supervisor.md` の上限の不変条件） | 2 本目以降のオーガナイザーの印は数に入る。2 本目の `helper` はリレーハブが断る |
 | I14 | 出すのは確定したコミットと版上げのコミットだけ。提示は 1 つのまとめたリリースにつき 2 つまで | 出し直しの提示への `confirm` は比べずに確定し、提示 3 を組まない |
 | I15 | 範囲に入ったレーンは、依頼していなくてもリリースの結果を受ける。自分の Pull Request のマージのコミットがすべて `origin/<本番チャネル>` にあれば、依頼を送らずに `released` で進む | 出せたリリースごとに範囲のイベント `range-<連番>` を立てる。`request` は送る前に本番チャネルを照らし、版は `range-<連番>` から読む |
-| I16 | 本番チャネルへ出すコミットは、すべて `develop` に含まれる | `scripts/check-pr-base.sh`（継続的統合の `pr-base-guard`）が落とす |
+| I16 | 本番チャネルへ出すコミットは、すべて `develop` に含まれる。宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion` が `selected`（選んで集める取り込み方）のときは、`release/v<版>` の head のコミットが、組むマージと版上げか origin の `sprint/*` の祖先だけである | `scripts/check-pr-base.sh`（継続的統合の `pr-base-guard`）が落とす |
 | I17 | 並列の計画の下で区分つきの問いを出すのはオーガナイザーだけである | レーンと一時レーンの問いは依頼（`kind: gate1` / `gate2` / `ask`）としてオーガナイザーへ届く。レーンが答えを当てられなかったときの知らせは `kind: unmatched` で届く |
 | I18 | オーガナイザーは、設計の承認で設計 PR をマージするほかは作業を持たない。一時レーンは同時に 1 本まで | `answer --approved` は設計の承認の依頼なら、承認した先端のままで必須の検査が緑の設計 PR を待たずにマージしてから答えのメッセージを送り、ほかの答えはメッセージを送るだけである。ラベル・記録・直し・マージし直し・後片付けは持ち主のレーンがループの 1 回の境で行う |
 | I23 | 計画全体の件数は答えていない問いの一覧の件数である。同じレーンの同じ設計 PR の設計の承認は 1 件にまとめ、リリースの依頼は数えない。レーンの件数はそのレーンが送った `gate1` と `ask` だけを数え、まとめた問いは送った各レーンへ 1 件ずつ数える。答え待ちの停止の範囲は今の一覧と閾値だけから決まる | `parallel_hold.decide_hold` が 1 周ごとに導く |
@@ -444,7 +444,7 @@ stateDiagram-v2
 | 問いの hook がレーン・一時レーンの問いを送って止め、レーンでない・送れないときは通す | `plugins/ndf/scripts/tests/test_ask_guard.py` |
 | オーガナイザーの印 1 本だけを数から外し、`helper` は 1 本だけ上限を超えて通る（I13） | `plugins/ndf/scripts/tests/test_relay_hub.py` |
 | リリースの依頼の形の例が契約の形を通る | `plugins/ndf/scripts/tests/test_parallel_request_form.py` |
-| `check-pr-base.sh` が `develop` と、先頭が `origin/develop` の祖先の `release/v*` だけを通す（I16） | `scripts/tests/test_pr_base_guard.py` |
+| `check-pr-base.sh` が `develop` と、先頭が `origin/develop` の祖先の `release/v*` だけを通す。宛先の宣言が `selected` なら決定 14 の 3 条件で判定する（I16） | `scripts/tests/test_pr_base_guard.py` |
 | 版数を持つ箇所だけの衝突を本番の版で解き、ほかの衝突は止める | `plugins/ndf/scripts/tests/test_release_version_merge.py` |
 | ループのレーンの `リリース待ち`・`質問待ち`・`waiting_only` | `plugins/ndf/scripts/tests/test_sprint_loop.py` |
 | 答え待ちの依頼の数え方・閾値の宣言・置き場（I23・I27） | `plugins/ndf/scripts/tests/test_parallel_hold.py` |

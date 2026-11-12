@@ -2,7 +2,7 @@
 
 - I7 を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
 - I1: 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
-- I2: `worktree.json` は `base_branch`・`production_branch` の無いキー（と前の `write` の値のままのキー）だけを変える
+- I2: `worktree.json` は `base_branch`・`production_branch`・`branch_flow` の無いキー（と前の `write` の値のままのキー）だけを変える
 - I3: 新しい解析で不明でも、前の値があれば残す。`ci` のワークフローの行の壁時計も、新しい行に無ければ同じパスの前の値を残す（#1664 の I6）
 """
 
@@ -13,7 +13,7 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from . import BRANCHES, ITEM_KEYS
+from . import BRANCH_FLOW, BRANCHES, ITEM_KEYS
 from .secret import has_secret, redact
 
 SECRET_REASON = "秘密の形"
@@ -184,6 +184,24 @@ def merge_worktree(existing: dict, branches: dict, origin: str, written_before: 
         else:
             rows.append({"kind": "kept", "key": tag})
     return doc, rows, written
+
+
+def flow_answer(measure: dict, answers: dict, check) -> tuple[Any, str]:
+    """ブランチ運用（`branch_flow`）の値と出所。`check` は表に合わない組を返す（#3121 の I1）。"""
+    return resolve_item(BRANCH_FLOW, (measure.get("items") or {}).get(BRANCH_FLOW), answers, check)
+
+
+def merge_flow(doc: dict, value: Any, origin: str, written_before: dict) -> tuple[dict, list[dict], dict]:
+    """`worktree.json` の `branch_flow` を I1・I2 の規則で書く。不明・前の `write` の値でない手の値は変えない。"""
+    tag = f"worktree.json#{BRANCH_FLOW}"
+    if is_unknown(value) or not isinstance(value, dict):
+        reason = value["unknown"] if is_unknown(value) else "値が無い"
+        return doc, ([] if BRANCH_FLOW in doc else [{"kind": "unknown", "key": tag, "reason": reason}]), {}
+    if BRANCH_FLOW in doc and written_before.get(tag) != value_digest(doc[BRANCH_FLOW]):
+        if value_digest(doc[BRANCH_FLOW]) == value_digest(value):
+            return doc, [{"kind": "kept", "key": tag}], {}
+        return doc, [{"kind": "mismatch", "key": tag, "declared": doc[BRANCH_FLOW], "analyzed": value}], {}
+    return {**doc, BRANCH_FLOW: value}, [{"kind": "written", "key": tag, "origin": origin}], {tag: value_digest(value)}
 
 
 def unified(path: str, old: str | None, new: str) -> str:
