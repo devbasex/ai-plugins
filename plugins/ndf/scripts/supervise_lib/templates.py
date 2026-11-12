@@ -255,20 +255,16 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "gate_next": "end",
             "next": "review",
         },
-        {
-            "id": "review",
-            "type": "drive",
-            "drive": "cross-review",
-            "kind": "実装レビュー",
-            "stage": "実装レビュー",
-            "timeout": 3600,
-            "args": f"{pr_ref} --max-rounds 4",
-            # 収束しなかった終わり（終了コード 6 と gaps）も落ちたとして止まり、後続の検査へ進めない（#2143）
-            "on_fail": "abort",
-            "next": "behavior-targets",
-        },
+        review_step(pr_ref, "behavior-targets", "abort"),
         *(dict(step) for step in BEHAVIOR_STEPS),
     ]
+
+
+def review_step(pr_ref: str, next_id: str, on_fail: str) -> dict:
+    """コードレビューの cross-review のステップ（検査のプランとまとまりの実装のプランが共有する。#3081）。
+    収束しなかった終わり（終了コード 6 と gaps）も落ちたとして `on_fail` へ行き、後続へ進めない（#2143）。"""
+    run = {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー", "stage": "実装レビュー", "timeout": 3600}
+    return {**run, "args": f"{pr_ref} --max-rounds 4", "on_fail": on_fail, "next": next_id}
 
 
 def refactor_scope(a, pr) -> str:

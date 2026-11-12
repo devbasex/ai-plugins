@@ -186,7 +186,7 @@ def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
     monkeypatch.setattr(sprint, "has_prod_branch", lambda a: True)
     monkeypatch.setattr(sprint, "design_read", lambda a: False)
     monkeypatch.setattr(sprint, "advises", lambda a: False)
-    for f in ("plan_sprint_branch", "plan_sprint_impl", "plan_sprint_check", "plan_sprint_release"):
+    for f in ("plan_sprint_branch", "sprint_impl_plans", "plan_sprint_check", "plan_sprint_release"):
         monkeypatch.setattr(sprint, f, lambda *a, **k: {})
     monkeypatch.setattr(sprint, "prod_plans", lambda a, repo, build, prs=None: {"release-request": {}})
     a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal")

@@ -13,7 +13,8 @@
 - 出所は 設計の結果 → 課題グループの表 → 課題の本文 の順に見て、見込みが 1 件以上出た最初の 1 つだけを使う（決定 1）
 - 本文からはファイルだけを取る（追跡しているファイルに一致・glob が当たる・末尾のパスの要素が 1 つのファイルだけに一致）
 - 重なりの判定は実装のキューと同じ `admission.overlap_of` と共有の一覧を使う（I10）
-- 並列の計画の検査の見込みの重なり（I21）の組と直し方の案は `lane_overlaps` が返す
+- 並列の計画の検査の見込みの重なり（I21）の組と直し方の案は `lane_overlaps` が、同じスプリントのレーンの異なる課題のまとまりの
+  重なり（規則 `bundle-overlap`。#3081）は `bundle_overlaps` が返す。どちらも同じ `admission.overlap_of` で判定する
 """
 
 from __future__ import annotations
@@ -423,10 +424,20 @@ def lane_overlaps(lanes, estimates: Mapping[str, Mapping[int, list[str]]], share
     return out
 
 
+def _bundle_name(lane, issue: int) -> str:
+    """レーンの課題が入るまとまりの名前。まとまりの欄の無いレーン（ループのレーンを含む）は 1 件のまとまりの名前 `issue-<番号>`
+    （`parallel_bundles.single_name` と同じ形。I4）。`parallel_bundles` を読むとレーンの読み出しの依存まで届くため、
+    レーンの入力が持つ `bundle_list` だけを使う（#3081）。"""
+    got = getattr(lane.input, "bundle_list", lambda: None)()
+    return next((b.name for b in got or [] if issue in b.issues), f"issue-{issue}")
+
+
 def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
+    bundled = any(getattr(ln.input, "bundles", None) is not None for ln in (a, b))  # まとまりの欄があれば名前を足す（#3081）
     proposals: list[dict] = [{"kind": "after", "lane": b.name, "after": a.name}]
     if a.input.kind == "sprint" and b.input.kind == "sprint":  # ループのレーンの課題はループが選ぶため移さない
-        proposals.append({"kind": "move", "issue": ib, "from": b.name, "to": a.name})
+        move = {"kind": "move", "issue": ib, "from": b.name, "to": a.name}
+        proposals.append({**move, "bundle": _bundle_name(b, ib)} if bundled else move)
     shown = "・".join(dict.fromkeys(paths))
     return {
         "message": f"同じ時間帯に動くレーンの課題の見込みが重なる: {a.name} #{ia}・{b.name} #{ib}（{shown}）",
@@ -434,4 +445,38 @@ def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
         "issues": [ia, ib],
         "paths": paths,
         "proposals": proposals,
+        **({"bundles": [_bundle_name(a, ia), _bundle_name(b, ib)]} if bundled else {}),
+    }
+
+
+def bundle_overlaps(lanes, estimates: Mapping[str, Mapping[int, list[str]]], shared) -> list[dict]:
+    """同じスプリントのレーンの、異なる課題のまとまりに入った 2 課題の見込みの重なり（規則 `bundle-overlap` の項目。#3081 の I5a）。
+    同じまとまりの課題どうしは見ない（I5b）。判定は `lane_overlaps` と同じ `admission.overlap_of` と共有の一覧で行う（I6）。"""
+    out = []
+    for ln in lanes:
+        got = ln.input.bundle_list() if ln.input.kind == "sprint" else None
+        common = list(shared.get(ln.name) or []) if isinstance(shared, Mapping) else list(shared or [])
+        pairs = [(b, n) for b in got or [] for n in b.issues]
+        est = estimates.get(ln.name) or {}
+        for i, (ba, ia) in enumerate(pairs):
+            for bb, ib in pairs[i + 1 :]:
+                pa, pb_ = est.get(ia), est.get(ib)
+                paths = admission.overlap_of(pa, pb_, common) if ba.name != bb.name and pa and pb_ else None
+                if paths:
+                    out.append(_bundle_item(ln.name, ba.name, bb.name, ia, ib, paths))
+    return out
+
+
+def _bundle_item(lane: str, a: str, b: str, ia: int, ib: int, paths: list[str]) -> dict:
+    shown = "・".join(dict.fromkeys(paths))
+    return {
+        "level": "warning",
+        "rule": "bundle-overlap",
+        "at": "lanes",
+        "message": f"同じスプリントの異なるまとまりの課題の見込みが重なる: {lane} の {a} #{ia}・{b} #{ib}（{shown}）",
+        "lanes": [lane],
+        "bundles": [a, b],
+        "issues": [ia, ib],
+        "paths": paths,
+        "proposals": [{"kind": "move", "bundle": b, "from": lane}, {"kind": "after", "bundle": b, "from": lane}],
     }
