@@ -13,7 +13,8 @@ from supervise_lib.paths import STEPS_PY
 
 
 def release_ref(a, dev: bool) -> str:
-    """版を上げる比べ先と、導入を確かめる前に取り込むブランチ。本番で行がリリースブランチを本番チャネルから組むなら本番チャネル。"""
+    """版を上げる比べ先。本番で行がリリースブランチを本番チャネルから組むなら本番チャネル。導入を確かめる前に作業ツリーへ取り込むのは
+    ベースブランチのまま（ベースブランチは本番チャネルから分かれており、本番チャネルは fast-forward で入らない）。"""
     flow = sprint_flow(a)
     return flow.row.release_from(flow) if not dev and flow.row.selects_units else a.base
 

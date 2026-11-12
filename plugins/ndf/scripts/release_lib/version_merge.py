@@ -6,6 +6,10 @@ release/v<版> の先頭と起点のブランチの先頭を親に持つマー�
 release/v<版> が分岐点から変えたパス（版上げが書いたファイル）の、release/v<版> が書いた版数の欄の違いだけで、
 その塊を release/v<版> の側（本番の版）で取る。それ以外のパス・版数の外・依存ライブラリなど他の版数が 1 つでも違えば
 解かずに止める（起点のブランチの更新を本番の側の古い値へ戻さない）。
+
+選んで集める取り込み方の戻すマージ（`sections=True`。#3121 の決定 17）は、CHANGELOG.md の衝突も解く。開発版のデプロイが起点の
+ブランチへ、リリースブランチと同じ見出し（`## [<plugin> <基底の版>]`）の節を別の中身で書くためで、起点のブランチの本文に
+release/v<版> が分岐点から変えた節だけを写す（`resolve_sections`。節の切り分けは `carry.split_h2`）。
 """
 
 from __future__ import annotations
@@ -14,10 +18,12 @@ import os
 import re
 import tempfile
 
+from release_lib.carry import split_h2
 from step_result import StepError, git, run
 
 VERSION_RE = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?")
 _OURS, _SEP, _THEIRS = "<<<<<<< ", "=======", ">>>>>>> "
+CHANGELOG = "CHANGELOG.md"
 
 
 class VersionConflict(StepError):
@@ -69,6 +75,23 @@ def resolve_text(text: str, allowed: set[str]) -> str | None:
     return "".join(out) if ours is None else None
 
 
+def resolve_sections(base: str, ours: str, theirs: str) -> str:
+    """CHANGELOG.md の本文を、theirs（起点のブランチ）に ours（release/v<版>）が分岐点 base から変えた節だけを写して作る。見出しが
+    theirs にあれば置き換え、無ければ theirs の最初の節の前へ ours の並びで足す。ours が消した節と節の外の変更は写さない
+    （起点のブランチの更新を本番の側の古い値へ戻さない）。"""
+    was = dict(split_h2(base.split("\n"))[1])
+    changed = {h: body for h, body in split_h2(ours.split("\n"))[1] if was.get(h) != body}
+    top, kept = split_h2(theirs.split("\n"))
+    have = {h for h, _ in kept}
+    added = [line for h, body in changed.items() if h not in have for line in (h, *body)]
+    return "\n".join(top + added + [line for h, body in kept for line in (h, *changed.get(h, body))])
+
+
+def _blob(root, rev: str, path: str) -> str:
+    p = git(root, "show", f"{rev}:{path}", check=False)
+    return p.stdout if p.returncode == 0 else ""
+
+
 def _merge_tree(root, ours: str, theirs: str) -> tuple[str, dict[str, dict[int, tuple[str, str]]]]:
     """(結果の木, {パス: {段: (mode, oid)}})。衝突が無ければ段の一覧は空。"""
     p = git(root, "-c", "merge.conflictStyle=merge", "merge-tree", "--write-tree", "-z", "--no-messages", ours, theirs, check=False)
@@ -93,10 +116,10 @@ def _release_side(root, ours: str, theirs: str) -> tuple[set[str], set[str]]:
     return paths, {v for line in added for v in VERSION_RE.findall(line)}
 
 
-def sync_commit(root, ours: str, theirs: str, message: str) -> tuple[str, list[str]]:
+def sync_commit(root, ours: str, theirs: str, message: str, sections: bool = False) -> tuple[str, list[str]]:
     """ours（release/v<版> の先頭）に theirs（起点のブランチの先頭）を取り込んだマージのコミットを作り、
-    (コミット, 版数で解いたパス) を返す。作業ツリーと index には触れない。release/v<版> が書いた版数の外が衝突すれば
-    VersionConflict。"""
+    (コミット, 解いたパス) を返す。作業ツリーと index には触れない。release/v<版> が書いた版数の外が衝突すれば
+    VersionConflict。`sections` なら CHANGELOG.md の衝突は節の単位で解く（`resolve_sections`）。"""
     tree, stages = _merge_tree(root, ours, theirs)
     paths, allowed = _release_side(root, ours, theirs) if stages else (set(), set())
     resolved: dict[str, tuple[str, str]] = {}
@@ -105,6 +128,9 @@ def sync_commit(root, ours: str, theirs: str, message: str) -> tuple[str, list[s
         ok = 2 in by and 3 in by and path in paths
         text = git(root, "cat-file", "blob", f"{tree}:{path}", check=False) if ok else None
         fixed = resolve_text(text.stdout, allowed) if text is not None and text.returncode == 0 else None
+        if fixed is None and sections and ok and path == CHANGELOG:
+            fork = git(root, "merge-base", ours, theirs).stdout.strip()
+            fixed = resolve_sections(_blob(root, fork, path), _blob(root, ours, path), _blob(root, theirs, path))
         if fixed is None:
             bad.append(path)
             continue

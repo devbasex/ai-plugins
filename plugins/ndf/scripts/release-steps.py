@@ -598,11 +598,11 @@ def _merged_sync_pr(root, branch, base):
     return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
 
 
-def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None):
+def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False):
     """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、
     release/v<版>-sync → ベースブランチの PR でマージする。release/v<版> そのものへはベースブランチを取り込まない。
     待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
-    `lead` は PR の本文の頭（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。"""
+    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。"""
     sync = f"{branch}-sync"
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         git(root, "fetch", "-q", "origin", base)
@@ -614,7 +614,7 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None):
         resolved = []
         if git(root, "merge-base", "--is-ancestor", f"origin/{base}", ours, check=False).returncode != 0:
             msg = f"Merge {base} into {sync}（{plugin} v{a.version} の版数の衝突を本番の版で解く）"
-            commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg)
+            commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg, sections=sections)
             git(root, "push", "-q", "origin", f"{commit}:refs/heads/{sync}")
         found = find_pr(root, sync, base, states=("OPEN",))
         head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
@@ -669,10 +669,9 @@ def cmd_release(a):
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
     if branch_flow.PROMOTIONS[a.promotion].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
-        main_pr, merge, items, metrics = promotion.release_selected(
-            root, a, plugin, plugins, branch, base, prod, approved, sys.modules[__name__]
-        )
-        _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+        ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
+        main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
+        _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
@@ -725,8 +724,8 @@ def cmd_release(a):
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
 
 
-def _published(root, a, plugin, prod, main_pr, merge, items, metrics):
-    """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足して結果を出す。"""
+def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
+    """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足し、`back`（戻すマージ）を打って結果を出す。"""
     ver, tag = a.version, release_tag(plugin, a.version)
     by_cd = delivery.publishes_by_cd(delivery.load_delivery(root))
     if not by_cd:
@@ -736,7 +735,8 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics):
     items += swept
     metrics.update(sweep_metrics)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
-    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt))
+    status, code, done = back(items, metrics, done) if back else ("ok", 0, done)
+    emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
 
 
 def _sweep_candidates(root, merge):

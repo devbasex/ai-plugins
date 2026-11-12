@@ -113,3 +113,25 @@ def test_sync_without_conflicts_is_a_plain_merge(repo):
     dev = commit(repo, {"src/b.py": "b = 2\n"}, "dev")
     sha, resolved = version_merge.sync_commit(repo, tip, dev, "sync")
     assert resolved == [] and git(repo, "rev-parse", f"{sha}^1", f"{sha}^2").split() == [tip, dev]
+
+
+def test_sections_take_the_release_section_and_keep_the_base_branch_rest():
+    """戻すマージ（#3121 の決定 17）: 同じ見出しの節はリリースブランチの中身、ほかの節と起点のブランチだけの節は起点のブランチのまま。"""
+    base = "# C\n\n## [ndf 1.0.0]\n- old\n"
+    ours = "# C\n\n## [ndf 1.1.0]\n- #11\n\n## [ndf 1.0.0]\n- old\n"
+    theirs = "# C\n\n## [ndf 1.1.0]\n- #12\n- #13\n\n## [ndf 1.0.0]\n- old\n- fixed on develop\n"
+    want = "# C\n\n## [ndf 1.1.0]\n- #11\n\n## [ndf 1.0.0]\n- old\n- fixed on develop\n"
+    assert version_merge.resolve_sections(base, ours, theirs) == want
+    assert version_merge.resolve_sections(base, ours, "# C\n\n## [ndf 1.0.0]\n- old\n") == ours  # 起点に無い節は先頭の節の前へ足す
+
+
+def test_sync_with_sections_resolves_the_changelog_section_written_by_both_sides(repo):
+    """開発版のデプロイが develop に書いた同じ版の節と、リリースブランチの節の衝突は、sections のときだけ解く。"""
+    commit(repo, {"CHANGELOG.md": "# C\n\n## [ndf 10.27.14]\n- a\n"}, "changelog")
+    tip = branch_release(repo, {"CHANGELOG.md": "# C\n\n## [ndf 10.28.0]\n- #11\n\n## [ndf 10.27.14]\n- a\n"})
+    dev = commit(repo, {"CHANGELOG.md": "# C\n\n## [ndf 10.28.0]\n- #12\n\n## [ndf 10.27.14]\n- a\n"}, "dev changelog")
+    with pytest.raises(version_merge.VersionConflict):
+        version_merge.sync_commit(repo, tip, dev, "sync")
+    sha, resolved = version_merge.sync_commit(repo, tip, dev, "sync", sections=True)
+    assert "CHANGELOG.md" in resolved and git(repo, "rev-parse", f"{sha}^1", f"{sha}^2").split() == [tip, dev]
+    assert git(repo, "show", f"{sha}:CHANGELOG.md") == "# C\n\n## [ndf 10.28.0]\n- #11\n\n## [ndf 10.27.14]\n- a"

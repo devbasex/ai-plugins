@@ -326,7 +326,7 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
             "stage": "デプロイ",
             "timeout": 1500,
             "cwd": repo,
-            "cmd": f"sh -c 'git pull -q --ff-only origin {release_ref(a, dev)} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
+            "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
             "on_fail": "judge",
             "next": ("release-branch" if release_units(a) else "facts") if dev else "cleanup",
         },

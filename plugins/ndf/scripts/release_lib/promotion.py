@@ -3,7 +3,8 @@ release から分けた）。
 
 - リリースブランチを本番チャネルから組み、選んだリリースの単位（スプリントブランチ）だけを `--no-ff` でマージする（I5・E10）
 - 本番チャネルへ直接 Pull Request を出し、先頭が承認したコミットに版上げだけを積んだものであるときだけマージする（決定 14）
-- 本番チャネルへ入れた後に、リリースブランチをベースブランチへ戻すマージを開発版と同じ `-sync` のブランチで入れる（E13・決定 17）
+- 本番チャネルへ入れてタグと GitHub Release を作った後に、リリースブランチをベースブランチへ戻すマージを開発版と同じ `-sync` の
+  ブランチで入れる（E13・決定 17）。戻すマージの失敗は本番の完了と分けて報告する
 
 どの取り込み方の行がこの経路を通るかは、呼び手が行の属性（`Promotion.selects_units`）で決める。出す（emit）のは呼び手である。
 """
@@ -72,9 +73,10 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
 
 
 def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base: str, prod: str, approved: str, ops) -> tuple:
-    """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージし、戻すマージを
-    入れる。`ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の回数）。
-    (本番の PR, マージコミット, items, metrics) を返す。承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。"""
+    """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
+    `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
+    回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
+    承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。"""
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
     tag = names.release_tag(plugin, a.version)
@@ -105,9 +107,7 @@ def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-    metrics["sync_pr"], sync_merged = merge_back(root, a, plugin, branch, base, prod, main_pr, ops)
-    items.append({"kind": "pr", "name": f"#{metrics['sync_pr']}", "result": sync_merged, "base": base, "head": f"{branch}-sync"})
-    return main_pr, merge, items, metrics
+    return main_pr, merge, items, metrics, merge_back_after(root, a, plugin, branch, base, prod, main_pr, ops)
 
 
 def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops):
@@ -126,9 +126,28 @@ def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, 
 
 
 def merge_back(root, a, plugin, branch, base, prod, main_pr, ops) -> tuple[int, str]:
-    """本番チャネルへ入れたリリースブランチを、`<リリースブランチ>-sync` でベースブランチへ戻す（E13・決定 17）。版数の衝突は本番の版を
-    取る。前の回が戻し済みなら作り直さない。(PR 番号, 結果) を返す。"""
+    """本番チャネルへ入れたリリースブランチを、`<リリースブランチ>-sync` でベースブランチへ戻す（E13・決定 17）。版数の衝突は本番の版を、
+    CHANGELOG.md の同じ版の節の衝突はリリースブランチの節を取る（開発版のデプロイがベースブランチへ同じ見出しの節を書くため）。
+    前の回が戻し済みなら作り直さない。(PR 番号, 結果) を返す。"""
     if found := ops._merged_sync_pr(root, branch, base):
         return found, "already_merged"
     lead = f"{plugin} v{a.version} を {prod} へ出した（#{main_pr}）ため、リリースブランチを {base} へ戻す"
-    return ops._merge_sync_pr(root, a, plugin, branch, base, main_pr, lead=lead)[0], "merged"
+    return ops._merge_sync_pr(root, a, plugin, branch, base, main_pr, lead=lead, sections=True)[0], "merged"
+
+
+def merge_back_after(root, a, plugin, branch, base, prod, main_pr, ops):
+    """公開（タグ・GitHub Release）の後に打つ戻すマージ（`release-steps.py` の `_published` の `back`）。本番は出ているため、戻すマージで
+    止まっても本番の完了と分けて報告する: 結果の項目を足し、(状態, 終了コード, 要約の後半) を返す。打ち直すと本番のマージと公開は
+    済みとして飛ばし、戻すマージからやり直す。"""
+
+    def back(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
+        sync = {"kind": "pr", "base": base, "head": f"{branch}-sync"}
+        try:
+            metrics["sync_pr"], merged = merge_back(root, a, plugin, branch, base, prod, main_pr, ops)
+        except StepError as e:
+            items.append({**sync, "name": f"{branch}-sync", "result": "failed", "reason": str(e)[:300]})
+            return "stopped", e.code or 1, f"{done}。{base} へ戻すマージで止まった（本番は出ている）: {str(e)[:200]}"
+        items.append({**sync, "name": f"#{metrics['sync_pr']}", "result": merged})
+        return "ok", 0, done
+
+    return back

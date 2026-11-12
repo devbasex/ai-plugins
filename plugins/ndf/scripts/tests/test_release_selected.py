@@ -172,7 +172,7 @@ def test_selected_sprint_builds_the_release_branch_and_releases_it_directly(tmp_
     assert prod["起点のコミット"] == f"origin/{BRANCH}"
     assert "--base main" in step(prod, "bump")["cmd"]
     assert "--promotion selected" in step(prod, "release")["cmd"]
-    assert "origin main" in step(prod, "verify")["cmd"]
+    assert "origin develop" in step(prod, "verify")["cmd"]  # 作業ツリーはベースブランチを追う（本番チャネルは ff で入らない）
 
 
 @pytest.mark.usefixtures("issue_bodies")
@@ -196,3 +196,35 @@ def test_fast_pace_refuses_the_selected_flow(tmp_path):
     got = json.loads(p.stdout.strip().splitlines()[-1])
     assert got["status"] == "stopped" and "branch_flow.promotion" in got["summary"]
     assert not (out / "sprint.json").exists()
+
+
+class _Ops:
+    """戻すマージだけを差し替えた `release-steps.py` の代わり。`fail` があれば -sync のマージがその例外で落ちる。"""
+
+    def __init__(self, fail=None):
+        self.fail = fail
+
+    def _merged_sync_pr(self, root, branch, base):
+        return None
+
+    def _merge_sync_pr(self, root, a, plugin, branch, base, main_pr, lead=None, sections=False):
+        if self.fail:
+            raise self.fail
+        assert sections  # CHANGELOG.md の同じ版の節の衝突も解く
+        return 31, "merge"
+
+
+def test_merge_back_failure_is_reported_apart_from_the_published_release():
+    """戻すマージは公開の後に打ち、落ちても本番の完了（タグ・GitHub Release）を消さずに stopped と失敗の項目だけを足す。"""
+    from step_result import StepError
+
+    a = type("A", (), {"version": "1.1.0"})()
+    items, metrics = [{"kind": "tag", "name": "ndf--v1.1.0", "result": "created"}], {}
+    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops(StepError("衝突")))
+    status, code, summary = back(items, metrics, "タグを作った")
+    assert (status, code) == ("stopped", 1) and summary.startswith("タグを作った。") and "本番は出ている" in summary
+    assert items[0]["result"] == "created" and items[-1]["result"] == "failed" and items[-1]["head"] == f"{BRANCH}-sync"
+    items, metrics = [], {}
+    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops())
+    assert back(items, metrics, "タグを作った") == ("ok", 0, "タグを作った") and metrics["sync_pr"] == 31
+    assert items == [{"kind": "pr", "base": "develop", "head": f"{BRANCH}-sync", "name": "#31", "result": "merged"}]

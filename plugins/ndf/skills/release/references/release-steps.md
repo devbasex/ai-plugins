@@ -122,8 +122,8 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 - 選んで集める取り込み方: `release-branch` は `release/v<版>` を `origin/<本番チャネル>` から切り（origin に既にあればその先頭へ足す。
   強制 push はしない）、`--units` のブランチだけを `--no-ff` でマージして push する。衝突すれば `stopped`（1）。`approval-facts --head`
   は承認に出す先頭をそのブランチにし、「含む PR」はリリースブランチへマージした単位の中の PR になる。`release --promotion selected`
-  はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、続けて
-  `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
+  はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、タグと GitHub Release を
+  作った後に `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
   `references/production-merge.md` の「選んで集める取り込み方のリリース」にある
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
