@@ -124,7 +124,7 @@ plugins/playwright-kit/skills: 公開する Skill 4 個 / Markdown 24 本 / ス�
 `check-skill-frontmatter`・`check-markdown-links`・`check-doc-line-limit`・`runtime-list`・`origin-develop`）である。
 Markdown 用の表は、特定のブランチ名で書いた手順も拾う（`develop-branch` の `\bdevelop\b`・`origin-main` の `origin/(?:main|master)\b`・
 `base-branch-name` の `--base[ =](?:main|master)\b`・`main-branch` の `` `(?:main|master)` ``）。手順はベースブランチ・本番チャネル・
-スプリントの起点の語で書き、名前は `.ndf/worktree.json` の宣言から読む（#3121）。
+スプリントの起点の語で書き、名前は `.ndf/worktree.json` の宣言から読む。
 語の表は網羅ではない。新しい形が見つかったら表へ足し、同じ変更で既知の当たりを宣言する。
 
 ### 宣言を読む 4 か所
