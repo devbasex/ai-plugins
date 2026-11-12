@@ -36,9 +36,9 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 検査の記録 | `check-trigger.py` の `eval`（判定の行）と `record`（検査の行）。追記だけで持つ | 検査の記録のファイル（リポジトリごとの jsonl） | 判定の行・検査の行 | 範囲（起点・先頭）・Pull Request の番号の並び |
+| 検査の記録 | `check-trigger.py` の `append_event`（追記だけで持つ。書くのはこの関数 1 つで、`eval` は判定の行、`record` は検査の行を組んで渡すだけ） | 検査の記録のファイル（リポジトリごとの jsonl） | 判定の行・検査の行 | 範囲（起点・先頭）・Pull Request の番号の並び |
 | 検査の印 | `check-trigger.py` の `record`（fast-forward だけで送る） | origin の `check-done/check`・`check-done/review` | — | 見終えた位置のコミット |
-| 最後の検査の範囲 | `check-trigger.py` の `eval` と `prepare` が、そのつど検査の記録と git の履歴から作る。保存しない（`prepare` が検査の状態ディレクトリへコピーを置く） | — | — | 範囲に入る Pull Request・外した Pull Request とその理由・印を進めてよい位置・文書だけか |
+| 最後の検査の範囲 | `check-trigger.py` の範囲の判定（`final_scope`）。そのつど検査の記録と git の履歴から作り、保存しない。`eval` と `prepare` は呼んで結果を読むだけで、範囲を組み直さない（`prepare` は結果を `check.json` へ書き写す） | — | — | 範囲に入る Pull Request・外した Pull Request とその理由・印を進めてよい位置・文書だけか |
 | まとめのステージの並び | `supervise.py new close`（`supervise_lib/sprint.py` の `close_waves`） | まとめの `sprint.json` | ステージ | ステージの名前と `then_of` |
 
 ### 不変条件
@@ -83,9 +83,12 @@ PR を指す検査の行は、コードレビューだけの回でも検査済�
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 最後の検査 | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う | 意味の変更 |
-| 最後の検査の範囲 | 最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない | 意味の変更 |
+| 最後の検査 | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う | 追加 |
+| 最後の検査の範囲 | 最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない | 追加 |
+| スプリントの検査 | `supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める | 追加 |
+| 検査の印 | 前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある | 追加 |
 | スプリントに属する Pull Request | head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request | 追加 |
+| まとめのステージ | `supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く | 追加 |
 
 ## 外部の調査
 

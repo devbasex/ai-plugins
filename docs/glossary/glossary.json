@@ -6675,6 +6675,12 @@
       "context": "ndf-workflow",
       "meaning": "head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request",
       "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "まとめのステージ",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く",
+      "pending_source": "issues/issue-3126-design.md"
     }
   ]
 }
