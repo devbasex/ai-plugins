@@ -636,10 +636,9 @@ def _tick_govern(run: _Run, main: str, name: str, wait: float) -> None:
 
 # 周回の 1 回の手順を打つ順に並べる。(止める依頼の後も打つか, 手順)。--force はリリースの settle を待たず、一時レーンも止める。
 # 一時レーンがリリースを流している間（提示のまま MVV 判定で本番へ進む場合も含む）の stop は、settle が届くまで待ってから終える
-# （設計の失敗の 12 番。作りかけを残さない）。版の要るまとめを流している間も verified が届くまで待つ（#3058）。
-# 待つ間も inbox を読み、--force と問いを受ける
+# （設計の失敗の 12 番。作りかけを残さない）。版の要るまとめも verified まで待つ（#3058）。待つ間も inbox を読み、--force と問いを受ける
 _TICK = (
-    (True, lambda run, main, name, wait: _handle_stop(run, main) if run.stop and (_idle_helpers(run) or run.force) else None),
+    (True, lambda run, main, name, wait: _handle_stop(run, main) if run.stop and (run.idle_helpers() or run.force) else None),
     (False, lambda run, main, name, wait: _spawn_ready(run, main)),
     (False, _tick_release),
     (False, _tick_finish),
@@ -676,16 +675,10 @@ def _started(run: _Run) -> list[str]:
     return [n for n, st in run.lanes.items() if st.get("started")]
 
 
-def _idle_helpers(run: _Run) -> bool:
-    """流れているリリースも、流している版の要るまとめも無い（止める依頼をすぐ締めてよい）。"""
-    return run.current is None and run.verifying is None
-
-
 def _handle_stop(run: _Run, main: str) -> dict:
     """止める依頼を受けた後: 起動済みのレーンを止め、記録を閉じて要約を返す。"""
     helper = [pr.helper_name(run.name, run.current["n"])] if run.force and run.current is not None else []
-    if run.force and run.verifying is not None:  # 版の要るまとめを流している一時レーンも止める（#3058）
-        helper += [v["helper"] for v in run.verifies if v["id"] == run.verifying and v.get("helper")]
+    helper += run.verify_helpers() if run.force else []  # 版の要るまとめを流している一時レーンも止める（#3058）
     left = step_stop_lanes(main, _started(run) + helper)
     step_finish(main, run.name, run.progress())
     return {**run.summary("stopped"), "not_stopped": left}
@@ -719,7 +712,7 @@ def _spawn_ready(run: _Run, main: str) -> None:
 
 def _run_finished(run: _Run) -> bool:
     """リリースの途中でも残りでもなく、答えていない問いも再開の印も無く、全レーンが止まっている（I11）。前のループの待ちの問いは終わりを止めない（#2510 の I12）。"""
-    idle = run.current is None and not run.pending and not run.blocking() and not run.marks and not run.verifies
+    idle = run.current is None and not run.pending and not run.blocking() and not run.marks and not run.open_verifies()
     return run.ls_ok and idle and len(run.counted(run.stopped())) == len(run.order)
 
 

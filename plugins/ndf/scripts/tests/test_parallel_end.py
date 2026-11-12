@@ -223,6 +223,21 @@ def test_released_answer_queues_the_verify_and_a_helper_runs_it_alone(run, monke
     assert run.verifies == [] and run.verifying is None and run.lanes["la"]["verified"] == "完了"
 
 
+@pytest.mark.parametrize("leave", ["left_stopped", "given_up"])
+def test_the_wait_of_a_lane_left_stopped_without_an_end_record_does_not_hold_the_end(run, leave):
+    request(run)
+    run.answer(RID, "released", "1.2.3", 1)
+    run.pending = []
+    end(run, lane="lb")
+    for n in ("la", "lb"):
+        run.lanes[n].update(started=True, state="stopped")
+    assert not prun._run_finished(run)  # 終わりの記録も止めたままの印も無いレーンは数えない
+    run.take({"kind": "left_stopped", "lane": "la"}) if leave == "left_stopped" else run.lanes["la"].update(given_up=True)
+    assert [v["id"] for v in run.verifies] == [RID] and prun._run_finished(run)  # 流れない待ちは計画の終わりを止めない
+    end(run)
+    assert not prun._run_finished(run)  # 終わりの記録が来れば外していない待ちが流れるまで終えない
+
+
 def test_a_request_without_a_verify_plan_and_a_failed_answer_queue_nothing(run):
     run.take({"kind": "request", "id": RID, "lane": "la", "prs": [10], "issues": [1], "sprint_state": "/s", "at": "x"})
     run.answer(RID, "released", "1.2.3", 1)

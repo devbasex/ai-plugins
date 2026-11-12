@@ -140,6 +140,20 @@ class LaneEnding:
         self.verifies = [v for v in self.verifies if v["id"] != rid]
         self.verifying = None if self.verifying == rid else self.verifying
 
+    def open_verifies(self) -> list[dict]:
+        """計画の終わりを止める待ち。終わりの記録を得られないまま止まったと数えるレーン（人が止めたままにしたか、起動を諦めた）の
+        待ちは流れないので数えない（流している待ちは数える）。レーンが動き出して終わりの記録が来れば、外していない待ちが流れる。"""
+        stalled = {n for n, st in self.lanes.items() if not st.get("ended") and (n in self.left_stopped or st.get("given_up"))}
+        return [v for v in self.verifies if v["id"] == self.verifying or v.get("lane") not in stalled]
+
+    def idle_helpers(self) -> bool:
+        """流れているリリースも、流している版の要るまとめも無い（止める依頼をすぐ締めてよい）。"""
+        return self.current is None and self.verifying is None
+
+    def verify_helpers(self) -> list[str]:
+        """流している版の要るまとめの一時レーン（計画の停止で止める）。"""
+        return [v["helper"] for v in self.verifies if v["id"] == self.verifying and v.get("helper")]
+
     def launch_verify(self) -> None:
         """流れているリリースも流している待ちも無く、計画全体の停止の間でなければ、待ちのうちレーンの終わりの記録（版の要らない
         まとめの完了）があるものの先頭を一時レーンで流す（I7）。まとめより先に課題を閉じない。"""
