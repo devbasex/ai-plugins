@@ -8,6 +8,8 @@ CI テストの宣言（`.ndf/project.json` の `test.ci.only: true`）のある
 同じ（`merged_lib/reading.read_checks`。SKIPPED は通過）で、テストのチェック（`test.ci.check` → `ci.required_checks`。
 どちらも無ければ head のすべて）だけで結論を決める。落ちたチェックの名前・リンクと、失敗したジョブのログの末尾
 （`gh run view --log-failed` の最後の 200 行。認証情報は伏せる）を人が読む行として出し、記録 `<状態>/work/ci-watch.jsonl` へ 1 行を足す。
+GitHub の PR の先端（`headRefOid`）が作業ディレクトリの HEAD と食い違うとき（push の直後に先端の更新が遅れた）は、読んだ
+チェックを前の先端のものとみなし、結論を未完了（pending）にする（落ちた行として記録しない）。
 
 終了コード: 0 = 進めてよい（通った・未完了・チェックがまだ無い・取得できなかった）/ 1 = テストのチェックが落ちた（改修の回数は
 上限の内）/ 2 = 落ちたが改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix` の `attempts`）に当たった、または同じ head のまま前の改修が終わった /
@@ -29,6 +31,7 @@ deps.require("waits", "durable", "locks", "schema")
 import ci_watch  # noqa: E402
 import gh_parts  # noqa: E402
 import limits  # noqa: E402
+import proc  # noqa: E402
 import project_decl  # noqa: E402
 import test_strategy as ts  # noqa: E402
 import run_core  # noqa: E402
@@ -103,9 +106,13 @@ def cmd_peek(a) -> int:
     names = ts.ci_checks(project_decl.read_project_decl(root))
     limit = int(limits.value("supervise.ci-fix", "attempts"))
     head, picked, absent, why = _read_test_checks(root, a.pr, names)
-    failed = picked.get("failed", [])
+    local = proc.git_out(root, "rev-parse", "HEAD")
+    lagging = why is None and bool(head) and bool(local) and local != head
+    failed = [] if lagging else picked.get("failed", [])
     if why is not None:
         verdict = ci_watch.UNKNOWN
+    elif lagging:
+        verdict = ci_watch.PENDING
     else:
         verdict = ci_watch.verdict(len(failed), len(picked["pending"]), len(picked["passed"]), len(absent))
     rows = ci_watch.read_watch_log(a.state)
@@ -116,9 +123,18 @@ def cmd_peek(a) -> int:
     items = [i.item(kind) for kind, group in picked.items() for i in group] + [
         {"kind": "check", "name": n, "result": "absent"} for n in absent
     ]
-    metrics = {"head": head, "verdict": verdict, "fixes": fixes, "limit": limit, "log": str(ci_watch.watch_log_path(a.state))}
+    metrics = {
+        "head": head,
+        "local_head": local,
+        "verdict": verdict,
+        "fixes": fixes,
+        "limit": limit,
+        "log": str(ci_watch.watch_log_path(a.state)),
+    }
     stuck = bool(head) and head in ci_watch.failed_heads(rows)
     summary = _peek_summary(verdict, code, fixes, limit, [i.label for i in failed], absent, why, stuck)
+    if lagging:
+        summary = f"PR の先端（{head[:12]}）が作業ディレクトリの HEAD（{local[:12]}）とまだ揃っていない。前の先端の結果とみなし、{summary}"
     nxt = f"gh pr checks {a.pr} で失敗を読む" if code in (EXIT_UNREADABLE, EXIT_PRECONDITION) else None
     emit(result(TOOL, "ok" if code == EXIT_OK else "stopped", summary, items, metrics, next=nxt), code)
 

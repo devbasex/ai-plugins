@@ -5,7 +5,7 @@
 照らす。
 
 - 起動の形: suite の `command` の語のうち、`runner`（語そのものか、パスの最後の名前）と同じ語まで。`runner` が語に無ければ
-  `scope_command` の `{paths}` の前まで。前置きが 1 語だけになり、`command` の 2 語目がサブコマンド（`go test`・`npm test`・
+  `scope_command` の `{paths}` の前までと、`command` の語の全体（どちらで打っても当てる）。前置きが 1 語だけになり、`command` の 2 語目がサブコマンド（`go test`・`npm test`・
   `make test`）のときは 2 語目まで含める。2 語目が `-` で始まる語か、作業場所のパス（`/` を含む語・`.`・宣言のあるディレクトリから
   見て在るファイルやディレクトリ）なら広げない（`pytest tests -q` の形はランナー 1 語で照らす）
 - 例外: サブコマンドを取るツール（`DISPATCHERS`）の 2 語目は同じ名前のパスがあってもサブコマンドとして読み、2 語目が `run`・`exec` なら
@@ -105,10 +105,21 @@ def test_forms(decl: dict, root: Path | None = None) -> list[tuple[str, list[str
     out = []
     for suite in test.get("suites") or []:
         if isinstance(suite, dict) and (suite.get("kind") or "test") == "test":
-            form = launch_form(suite, root)
-            if form:
-                out.append((str(suite.get("name") or "test"), form, runner_tail(suite, form)))
+            name = str(suite.get("name") or "test")
+            for form in launch_forms(suite, root):
+                out.append((name, form, runner_tail(suite, form)))
     return out
+
+
+def launch_forms(suite: dict, root: Path | None = None) -> list[list[str]]:
+    """suite の起動の形の並び。`runner` が `command` の語に無ければ、`command` の語の全体も起動の形に足す
+    （`runner: vitest`・`command: npm test`・`scope_command: npm test -- {paths}` の `npm test` を止める）。"""
+    form = launch_form(suite, root)
+    words = _words_of(str(suite.get("command") or ""))
+    runner = str(suite.get("runner") or "")
+    if words and not any(runner and _base(w) == runner for w in words) and words != form:
+        return [f for f in (form, words) if f]
+    return [form] if form else []
 
 
 _PYTHON = re.compile(r"python[0-9.]*$")
