@@ -1,0 +1,186 @@
+layer,category,count,total_hours
+conductor,AskUserQuestion,732,380.57
+supervisor,Bash(その他),22820,40.92
+conductor,Bash(その他),24295,38.8
+supervisor,sleep・手書きの待ち,459,31.76
+worker,Bash(その他),32062,31.27
+worker,sleep・手書きの待ち,602,30.69
+conductor,NDF・その他の .py,2844,14.36
+supervisor,pytest(全体),418,12.15
+worker,pytest(全体),798,11.47
+conductor,git,3172,9.17
+supervisor,Agent,560,6.99
+conductor,sleep・手書きの待ち,538,6.42
+conductor,pytest(全体),620,6.34
+相手役(cross-*),Bash(その他),11875,4.76
+worker,NDF・その他の .py,1145,3.8
+相手役(cross-*),pytest(全体),194,3.43
+supervisor,pytest(限定),535,3.14
+相手役(cross-*),pytest(限定),1077,3.12
+worker,pytest(限定),774,2.99
+conductor,gh(その他),3330,2.76
+supervisor,git,2797,2.75
+worker,git,4448,2.48
+conductor,merge-when-green,252,2.32
+supervisor,NDF・その他の .py,1845,2.12
+conductor,pytest(限定),389,1.87
+supervisor,gh の --watch,61,1.6
+supervisor,gh(その他),2364,1.51
+conductor,supervise.py wait,109,1.37
+worker,gh(その他),3213,1.35
+相手役(cross-*),git,2183,1.07
+worker,WebFetch,650,0.76
+worker,gh の --watch,20,0.72
+conductor,gh の --watch,16,0.55
+conductor,Bash(背景起動),2347,0.39
+supervisor,merge-when-green,76,0.39
+supervisor,Read,2229,0.36
+supervisor,Skill,678,0.32
+相手役(cross-*),Read,3240,0.28
+worker,WebSearch,155,0.27
+試験・疎通,Agent,30,0.26
+supervisor,Edit,1093,0.26
+その他(claude -p),Bash(その他),931,0.24
+worker,merge-when-green,34,0.23
+conductor,WebSearch,93,0.19
+conductor,WebFetch,112,0.16
+worker,Read,4073,0.12
+conductor,Skill,873,0.11
+相手役(cross-*),Grep,507,0.11
+conductor,tmux capture-pane,161,0.08
+conductor,Agent,1076,0.08
+相手役(cross-*),Agent,12,0.07
+相手役(cross-*),NDF・その他の .py,110,0.07
+conductor,TaskOutput,2,0.06
+worker,Skill,750,0.05
+試験・疎通,Bash(その他),33,0.05
+conductor,ToolSearch,266,0.04
+worker,Edit,1357,0.04
+supervisor,WebSearch,31,0.04
+supervisor,Write,860,0.04
+supervisor,ToolSearch,121,0.04
+supervisor,Bash(背景起動),402,0.04
+worker,Bash(背景起動),369,0.03
+conductor,SendMessage,200,0.03
+試験・疎通,sleep・手書きの待ち,7,0.03
+conductor,Edit,996,0.03
+supervisor,WebFetch,34,0.03
+相手役(cross-*),gh(その他),37,0.02
+その他(claude -p),pytest(限定),7,0.02
+conductor,Read,450,0.02
+その他(claude -p),Agent,5,0.02
+supervisor,Grep,110,0.02
+worker,Write,696,0.02
+相手役(cross-*),Edit,569,0.02
+conductor,Write,448,0.01
+相手役(cross-*),Write,332,0.01
+supervisor,mcp__serena__find_symbol,55,0.01
+conductor,Artifact,25,0.01
+その他(claude -p),git,146,0.01
+conductor,mcp__claude_ai_Notion__notion-ai-search,5,0.01
+supervisor,SendMessage,21,0.01
+その他(claude -p),Write,207,0.01
+conductor,mcp__claude_ai_Notion__notion-fetch,19,0.01
+supervisor,Glob,5,0.01
+worker,Agent,90,0.01
+conductor,ListAgents,20,0.01
+conductor,mcp__claude_ai_Google_Drive__create_file,7,0.01
+conductor,TaskStop,164,0.01
+その他(claude -p),Read,155,0.0
+conductor,mcp__claude_ai_Notion__notion-update-page,6,0.0
+worker,Grep,124,0.0
+conductor,Monitor,120,0.0
+その他(claude -p),gh(その他),18,0.0
+worker,ToolSearch,202,0.0
+試験・疎通,gh(その他),8,0.0
+supervisor,mcp__serena__initial_instructions,9,0.0
+worker,Monitor,98,0.0
+その他(claude -p),Grep,85,0.0
+conductor,mcp__claude_ai_Google_Drive__search_files,4,0.0
+その他(SDK),Grep,168,0.0
+その他(claude -p),sleep・手書きの待ち,3,0.0
+supervisor,Monitor,68,0.0
+worker,tmux capture-pane,6,0.0
+conductor,ScheduleWakeup,82,0.0
+supervisor,mcp__serena__get_symbols_overview,15,0.0
+相手役(cross-*),sleep・手書きの待ち,8,0.0
+その他(SDK),Read,145,0.0
+conductor,TaskUpdate,47,0.0
+conductor,mcp__claude_ai_Google_Drive__read_file_content,3,0.0
+その他(claude -p),Skill,70,0.0
+worker,SendMessage,44,0.0
+supervisor,supervise.py wait,5,0.0
+conductor,mcp__claude_ai_Google_Sheets__get_values,3,0.0
+worker,TaskStop,40,0.0
+その他(claude -p),NDF・その他の .py,2,0.0
+conductor,mcp__claude_ai_Notion__notion-create-pages,1,0.0
+試験・疎通,mcp__serena__find_referencing_symbols,1,0.0
+その他(claude -p),EnterWorktree,1,0.0
+conductor,TaskCreate,26,0.0
+相手役(cross-*),merge-when-green,14,0.0
+その他(SDK),StructuredOutput,193,0.0
+試験・疎通,Read,14,0.0
+conductor,SendUserFile,2,0.0
+その他(claude -p),ToolSearch,19,0.0
+supervisor,mcp__plugin_mcp-serena_serena__find_symbol,6,0.0
+conductor,ReadNotifications,30,0.0
+supervisor,TaskStop,26,0.0
+supervisor,mcp__serena__replace_symbol_body,8,0.0
+conductor,mcp__claude_ai_Google_Drive__list_recent_files,1,0.0
+conductor,mcp__claude_ai_Slack__slack_search_channels,1,0.0
+試験・疎通,ToolSearch,17,0.0
+worker,supervise.py wait,6,0.0
+supervisor,ListAgents,6,0.0
+conductor,mcp__claude_ai_Google_Sheets__get_spreadsheet,1,0.0
+試験・疎通,Skill,12,0.0
+試験・疎通,Edit,10,0.0
+conductor,mcp__claude_ai_Notion__notion-get-teams,1,0.0
+conductor,mcp__claude_ai_Google_Sheets__update_values,1,0.0
+その他(claude -p),mcp__plugin_mcp-bigquery_bigquery__list_dataset_ids,2,0.0
+その他(claude -p),Edit,11,0.0
+その他(claude -p),mcp__plugin_mcp-bigquery_bigquery__execute_sql_readonly,1,0.0
+supervisor,mcp__serena__replace_content,11,0.0
+試験・疎通,LSP,4,0.0
+conductor,SendFeedback,9,0.0
+試験・疎通,mcp__serena__find_symbol,4,0.0
+supervisor,mcp__serena__insert_after_symbol,4,0.0
+conductor,EnterWorktree,3,0.0
+その他(SDK),Glob,2,0.0
+conductor,mcp__plugin_mcp-serena_serena__find_symbol,1,0.0
+相手役(cross-*),supervise.py wait,2,0.0
+conductor,ExitWorktree,3,0.0
+相手役(cross-*),mcp__plugin_mcp-serena_serena__find_symbol,1,0.0
+worker,mcp__plugin_mcp-serena_serena__initial_instructions,3,0.0
+supervisor,mcp__plugin_mcp-serena_serena__get_symbols_overview,1,0.0
+conductor,ReportFindings,2,0.0
+相手役(cross-*),Bash(背景起動),2,0.0
+worker,mcp__plugin_mcp-serena_serena__activate_project,1,0.0
+worker,mcp__plugin_mcp-serena_serena__get_current_config,1,0.0
+supervisor,mcp__serena__insert_before_symbol,1,0.0
+試験・疎通,mcp__serena__initial_instructions,1,0.0
+試験・疎通,mcp__serena__replace_symbol_body,1,0.0
+その他(claude -p),ExitWorktree,1,0.0
+相手役(cross-*),ToolSearch,2,0.0
+worker,mcp__plugin_mcp-serena_serena__get_symbols_overview,1,0.0
+conductor,CronCreate,3,0.0
+conductor,Workflow,1,0.0
+相手役(cross-*),Skill,1,0.0
+その他(claude -p),LSP,1,0.0
+試験・疎通,git,1,0.0
+その他(claude -p),merge-when-green,1,0.0
+試験・疎通,SendMessage,1,0.0
+worker,ListMcpResourcesTool,1,0.0
+試験・疎通,mcp__plugin_mcp-serena_serena__ping,1,0.0
+相手役(cross-*),Monitor,1,0.0
+試験・疎通,mcp__plugin_zq-long-plugin-name_serena-server-name__ping,1,0.0
+試験・疎通,Bash(背景起動),1,0.0
+相手役(cross-*),mcp__plugin_mcp-serena_serena__replace_symbol_body,1,0.0
+試験・疎通,Monitor,1,0.0
+相手役(cross-*),Glob,1,0.0
+試験・疎通,mcp__plugin_zq_zs__ping,1,0.0
+その他(claude -p),Bash(背景起動),1,0.0
+その他(claude -p),mcp__plugin_mcp-serena_serena__initial_instructions,1,0.0
+supervisor,mcp__claude_ai_Claude_Docs__guide,3,0.0
+supervisor,mcp__claude_ai_Claude_Docs__read,3,0.0
+worker,Glob,1,0.0
+conductor,mcp__claude_ai_Google_Slides__authenticate,1,0.0
