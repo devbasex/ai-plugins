@@ -23,8 +23,7 @@
 2 = 判断できない（起動の失敗・CI が上限までに終わらない・`gh` が使えない・宣言の不足・コンテナで走る suite が worktree を
 見ていない。理由と待った秒を `summary` に出す）。起動の失敗は `items[].launch_failed` にコマンド・終了コード・理由・ログを持つ。
 コンテナで走る suite は手元で走らせる前にテスト環境を用意し（`container_reach.env_for`。時間の上限の外）、起こそうとした実行は
-`items[].testenv` に環境名・結果・秒を持つ。全体テストの落ちたコマンドは `items[].failed_commands` にコマンド・終了コード・ログ・
-ログの末尾を持つ。
+`items[].testenv` に環境名・結果・秒を持つ。全体テストの落ちたコマンドは `items[].failed_commands` にコマンド・終了コード・ログ・ログの末尾を持つ。
 出力は `lib/step_result.py` の形の 1 行の JSON。
 """
 
@@ -33,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shlex
 import subprocess
 import sys
 import time
@@ -357,7 +357,7 @@ def _wait_ci(root: pathlib.Path, ctx: OutcomeContext, base: str | None, pr: int 
     )
     if outcome == gh_pr_info.CONFLICTING:  # 衝突した PR は pull_request のワークフローが起動しない。emit は終了して戻らない
         summary = f"PR #{pr} はベースブランチと衝突していて CI が起動しない（衝突の状態 CONFLICTING）。{detail}"
-        nxt = f"python3 {HERE / 'merged-steps.py'} base-sync --pr {pr}"
+        nxt = shlex.join(["python3", str(HERE / "merged-steps.py"), "base-sync", "--pr", str(pr), "--root", str(root)])
         _emit_step(result(TOOL, "stopped", summary, [{"waited_seconds": waited}], {}, next=nxt), step_result.EXIT_UNREADABLE)
     if outcome is None:
         _emit_step(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))

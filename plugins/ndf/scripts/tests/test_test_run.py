@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import shlex
 import types
 
 import pytest
@@ -444,7 +445,7 @@ def _run_body(conclusion):
     return {"total_count": 1, "check_runs": [{"name": "ci", "status": "completed", "conclusion": conclusion}]}
 
 
-def _wait(mod, monkeypatch, tmp_path, capsys, checks, mergeables=(), pr=7, timeout=600):
+def _wait(mod, monkeypatch, tmp_path, capsys, checks, mergeables=(), pr=7, timeout=600, root=None):
     """`_wait_ci` を、チェックの照会の本文の並び `checks`（尽きたら最後を繰り返す）と衝突の状態の並びで動かす。
 
     戻りは（終了コード, 結果の JSON, チェックの照会の回数, 衝突の状態の照会の回数, JUnit の取得の回数）。
@@ -480,16 +481,17 @@ def _wait(mod, monkeypatch, tmp_path, capsys, checks, mergeables=(), pr=7, timeo
     ctx = mod.OutcomeContext(strategy, {"ci_wait_timeout": timeout}, [], passed=True, detail="")
     capsys.readouterr()
     with pytest.raises(SystemExit) as e:
-        mod._wait_ci(tmp_path, ctx, None, pr)
+        mod._wait_ci(root or tmp_path, ctx, None, pr)
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     return e.value.code, out, calls["checks"], calls["mergeable"], calls["junit"]
 
 
 def test_a_conflicting_pr_stops_at_the_first_pending_with_the_base_sync_command(mod, monkeypatch, tmp_path, capsys):
-    code, out, checks, merges, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], ["CONFLICTING"])
+    root = tmp_path / "対象 の worktree"  # 別の場所から打っても対象へ戻れるよう、空白を含むパスも 1 つの引数で渡る
+    code, out, checks, merges, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], ["CONFLICTING"], root=root)
     assert (code, out["status"], checks, merges, junit) == (2, "stopped", 1, 1, 0)
     assert "PR #7" in out["summary"] and "衝突" in out["summary"]
-    assert out["next"] == f"python3 {mod.HERE / 'merged-steps.py'} base-sync --pr 7"
+    assert shlex.split(out["next"]) == ["python3", str(mod.HERE / "merged-steps.py"), "base-sync", "--pr", "7", "--root", str(root)]
 
 
 @pytest.mark.parametrize("unsure", ["UNKNOWN", None])
