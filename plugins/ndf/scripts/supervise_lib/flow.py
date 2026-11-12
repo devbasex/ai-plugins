@@ -485,7 +485,6 @@ def queue_workflow(args: dict) -> dict:
     listing_step(done, [p for stage in stages for p in stage], stages=stages, max=args["max"], starts=args.get("starts") or {})
     items: list[dict] = []
     pairs: list[dict] = []
-    queued = [p for stage in stages for p in stage]
     for idx, stage in enumerate(stages):
         filled = fill_step(idx == 0, stage, items)
         items += filled["skipped"]
@@ -493,7 +492,7 @@ def queue_workflow(args: dict) -> dict:
             adm = {
                 **admit_step(filled["runnable"], args["shared"], args.get("starts"), args.get("rerun")),
                 "prior": list(items),
-                "queued": queued,
+                "queued": [p for s in stages for p in s],
                 "waits_on": waits_on,  # fmt: skip
             }
             pairs += adm["overlaps"]
