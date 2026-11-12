@@ -1,4 +1,4 @@
-"""並列の計画（#2436）: `plan.json` の pydantic のモデル・検査（I1〜I4・I19）・`plan.md` の描画・引継ぎ文書の作成（I5）。
+"""並列の計画（#2436）: `plan.json` の pydantic のモデル・検査（I1〜I4・I19・I21）・`plan.md` の描画・引継ぎ文書の作成（I5）。
 
 置き場はメインディレクトリの `.ndf/parallel/<計画名>/`（コミットしない）。検査の誤りは pydantic の検証の誤りとして
 集め、誤りの種類（`PydanticCustomError` の type）の `I1`〜`I3`・`I19` を `items[].rule` に写す。上限の値は検証の
@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import fnmatch
 import graphlib
-import os
 import re
 import shlex
 from pathlib import Path
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Iterable, Literal, Mapping, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -27,29 +26,16 @@ VERSION = 1
 PLAN_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")  # 計画名は 24 字まで（一時レーンの名前を 32 字に収める。I1）
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")  # リレーハブの名前の形（relay_lib/common.py の NAME_RE と同じ）
 HELPER_RE = re.compile(r"-rel\d+$")  # 一時レーンの名前の形（`<計画名>-rel<連番>`）
-DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（2026-09-25 の実測。8 コア・30 GB）
+DEFAULT_MAX_PLANS = 6  # 同時に流すプランの合計の既定（正本は relay_limit.DEFAULT_PLANS）
 DEFAULT_MAX_NAMED = 3  # relay_lib/hub.py の max_named の既定
 
 
-MAX_PLANS_ENV = "NDF_PARALLEL_MAX_PLANS"
-MAX_NAMED_ENV = "NDF_RELAY_MAX_NAMED"
-
-
-def _positive_count(name: str, raw: Optional[str], default: int) -> tuple[int, Optional[str]]:
-    """環境変数の値の正の整数。正の整数でなければ既定と、そのことを書いた 1 文を返す（I2）。"""
-    if raw is None or raw == "":
-        return default, None
-    try:
-        v = int(raw)
-    except ValueError:
-        v = 0
-    if v < 1:
-        return default, f"{name}={raw!r} は正の整数でないため既定の {default} を使った"
-    return v, None
-
-
 def max_plans() -> tuple[int, Optional[str]]:
-    return _positive_count(MAX_PLANS_ENV, os.environ.get(MAX_PLANS_ENV), DEFAULT_MAX_PLANS)
+    """プランの本数の上限と、読めなかった出所の 1 文。マシンの数え方と同じ関数で読む（`relay_limit`。#2999 の I1）。"""
+    import relay_limit
+
+    n, _source, note = relay_limit.plans_cap()
+    return n, note
 
 
 def named_limit() -> tuple[int, Optional[str]]:
@@ -282,9 +268,17 @@ def repo_errors(lane: Lane) -> Optional[str]:
     return None
 
 
-def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[ParallelPlan], list[dict], dict]:
+def check_data(
+    data: object,
+    home: Optional[Path] = None,
+    estimates: Optional[Mapping[str, Mapping[int, list[str]]]] = None,
+    shared: Iterable[Mapping] | Mapping[str, list] = (),  # レーン → 共有の一覧（`touch_estimate.lane_estimates`）か 1 つの一覧
+    estimate_error: Optional[str] = None,
+) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
-    `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。"""
+    `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。
+    `estimates`（レーン → 課題 → 触る場所の見込み）を渡すと、同じ時間帯に動くレーンの課題の見込みの重なりを I21 の警告にする。
+    見込みを集められなかったときは `estimate_error` に理由を渡し、I21 の警告を 1 つ出す（#2997 の決定 4）。"""
     plans_cap, plans_note = max_plans()
     named_cap, named_note = named_limit()
     caps = {"max_plans": plans_cap, "max_named": named_cap}
@@ -299,6 +293,14 @@ def check_data(data: object, home: Optional[Path] = None) -> tuple[Optional[Para
     if items:
         return None, items, _metrics_of(items, caps, notes)  # I20 の誤りがある計画は書かない・起動しない
     items = _overlap_items(plan, home)
+    if estimate_error:
+        items.append({"level": "warning", "rule": "I21", "at": "lanes", "message": f"課題の見込みを集められない: {estimate_error}"})
+    if estimates:
+        import touch_estimate as te
+
+        key = str(home) if home else None
+        same = lambda a, b: lane_repo_key(a, key) == lane_repo_key(b, key)  # noqa: E731
+        items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(plan.lanes, estimates, shared, same)]
     return plan, items, _metrics_of(items, caps, notes)
 
 
@@ -369,6 +371,17 @@ def load_valid_plan(main: Path, name: str) -> ParallelPlan:
     return ParallelPlan.model_validate(load_plan(main, name), context=_NO_LIMIT)
 
 
+def waiting_text(w: Optional[dict]) -> Optional[str]:
+    """起動の待ち（`parallel_machine.admit_lanes` が返す）の 1 句（`plan.md` の進行の表の「起動」の欄）。待っていなければ None。"""
+    if not isinstance(w, dict):
+        return None
+    if w.get("reason") == "lock":
+        return "起動待ち（起動の排他を取れない）"
+    if w.get("reason") == "observe":
+        return "起動待ち（レーンの状態の一覧を読めない）"
+    return f"起動待ち（マシン {w.get('machine_plans')} + このレーン {w.get('plans')} > 上限 {w.get('max_plans')}）"
+
+
 def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     """`plan.md`: レーンの表・決まり・（進行があれば）レーンの状態とリリースの内訳。"""
     lines = [f"# 並列の計画 {plan.name}", "", "`plan.json` から描画した。正本は `plan.json` である。", "", "## レーン", ""]
@@ -401,7 +414,8 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
     if progress:
         lines += ["", "## 進行", "", "| レーン | 状態 | 起動 |", "| --- | --- | --- |"]
         for n, st in sorted((progress.get("lanes") or {}).items()):
-            lines.append(f"| {n} | {st.get('state') or '-'} | {st.get('started') or st.get('refused') or '-'} |")
+            launch = st.get("started") or waiting_text(st.get("waiting")) or st.get("refused") or "-"
+            lines.append(f"| {n} | {st.get('state') or '-'} | {launch} |")
         rels = progress.get("releases") or []
         if rels:
             lines += ["", "## まとめたリリース", "", "| 連番 | 状態 | 版 | コミット |", "| --- | --- | --- | --- |"]

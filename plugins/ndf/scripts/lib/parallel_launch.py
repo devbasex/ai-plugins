@@ -95,7 +95,9 @@ def step_launch(main: str, argv: list[str], lane: str, cwd: Optional[str] = None
 
 class LaunchRouting:
     """`_Run` が継ぐ。`_Run` は `main`・`name`・`launch`・`current`・`launches`・`helper_seen`・`launching`・`wake`・`woken`・`wake_tries`・`lanes`・`sprint`・
-    `left_stopped`・`hold`・`ask`・`stopped` を持つ。"""
+    `left_stopped`・`hold`・`marks`・`ask`・`stopped` を持つ。"""
+
+    sprint_hold_wake = False  # 範囲の中の 1 スプリントのレーンを再開の印の有無で打つか。版の印の後の記録だけ True（#3000）
 
     def launch_once(self, purpose: str, lane: str, argv: list[str], cwd: Optional[str] = None, fresh: bool = False, **extra) -> dict:
         """起動の目的 `purpose` を 1 回だけ流す。記録のある目的は打ち直さない（`failed` でも。I3）。2 回とも立ち上がらなければ
@@ -146,14 +148,16 @@ class LaunchRouting:
 
     def launch_wakes(self) -> None:
         """再起動の対象（`wake`）のうち止まっているレーンを再起動する。止まっていないレーンは対象から外す。人が止めたままにした
-        レーンと、再起動の失敗の問いへ「止める」と答えたレーン（`given_up`）と、答え待ちの停止の範囲にある 1 スプリントのレーン
-        （再開の印で起こす）は打たない。"""
+        レーンと、再起動の失敗の問いへ「止める」と答えたレーン（`given_up`）と、答え待ちの停止の範囲にあり再開の印を持つ 1 スプリントの
+        レーン（停止が解けたら印で起こす）は打たない。印を持たない範囲の中の 1 スプリントのレーンは、答えの受け付けが承認の要らない
+        プランがあると決めたレーンで、打つ（#3000 の決定 4）。版の印 `parallel-sprint-hold-wake` の前の記録では、範囲の中の
+        1 スプリントのレーンをすべて打たない。"""
         if not self.launching:
             return
         stopped = self.stopped()
         self.wake = [n for n in self.wake if n in stopped]
         for n in list(self.wake):
-            if n in self.left_stopped or self.lanes[n].get("given_up") or (self.hold.covers(n) and n in self.sprint):
+            if n in self.left_stopped or self.lanes[n].get("given_up") or self.sprint_held(n):
                 continue
             k = 1 + sum(1 for p in self.launches if re.fullmatch(rf"wake-{re.escape(n)}-\d+", p))
             rec = self.launch_once(f"wake-{n}-{k}", n, ["restart", n])
@@ -162,6 +166,10 @@ class LaunchRouting:
                 self.lanes[n]["state"] = None  # 次の観測で読み直す。古い観測の stopped で打ち直さない
                 self.woken.add(n)
                 self.wake_tries[n] = self.wake_tries.get(n, 0) + 1
+
+    def sprint_held(self, n: str) -> bool:
+        """答え待ちの停止の範囲にあり、再起動を打たない 1 スプリントのレーンか。"""
+        return self.hold.covers(n) and n in self.sprint and (not self.sprint_hold_wake or n in self.marks)
 
     def wake_or_ask(self, designs: set[str]) -> list[str]:
         """答えを当てていない持ち主（`designs`）のうち、再起動の対象へ戻すレーンを返す。答えを当てないまま 2 回再起動したレーンは
@@ -221,5 +229,6 @@ class LaunchRouting:
         return {} if self.launching else {"commands": commands}
 
     def legacy_mark(self) -> dict:
-        """古い記録なら、問いの一覧の知らせへ印を添える（answer が持ち主を起こす 1 行を返すかを読む）。"""
-        return {} if self.launching else {"launching": False}
+        """古い記録なら、問いの一覧の知らせへ印を添える。answer は `launching` で持ち主を起こす 1 行を返すかを、`sprint_hold_wake` で
+        範囲の中の 1 スプリントのレーンへ再開の印を置かずに済ませてよいか（版の印 `parallel-sprint-hold-wake` の後の記録か。#3000）を読む。"""
+        return {**({} if self.launching else {"launching": False}), **({} if self.sprint_hold_wake else {"sprint_hold_wake": False})}

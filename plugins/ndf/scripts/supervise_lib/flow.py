@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import actuals, admission, limits, paths, running
+from supervise_lib import actuals, admission, limits, paths, queue_waits, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 import limits as limit_decl  # 上限の宣言（#2343）。supervise_lib.limits と分ける
@@ -316,9 +316,7 @@ def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None,
     grouped = admission.groups(files, shared, after)
     pairs = admission.overlaps(files, shared)
     for o in pairs:
-        a, b = o["paths"]
-        how = a if a == b else f"{a} ⊃ {b}" if admission.contains(a, b) else f"{b} ⊃ {a}"
-        print(f"supervise-queue: 重なる組 {o['a']} と {o['b']}（{how}）を同時には流さない", file=sys.stderr, flush=True)
+        print(f"supervise-queue: 重なる組 {o['a']} と {o['b']}（{o['paths'][0]}）を同時には流さない", file=sys.stderr, flush=True)
     return {"groups": grouped, "needs": admission.needs(files, grouped, after), "deps": deps, "overlaps": pairs, "refs": refs}
 
 
@@ -421,7 +419,8 @@ def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
     boxed = [len(g) > 1 or any(deps.get(p) for p in g) for g in adm["groups"]]
     where = {p: (_group_id(refs[g[0]]["id"]) if boxed[i] else None, k) for i, g in enumerate(adm["groups"]) for k, p in enumerate(g)}
     waits = _submit_groups(adm, args, deps, known, boxed, where, queued)
-    return _collect_items(plans, waits, refs)
+    items = _collect_items(plans, waits, refs)
+    return queue_waits.attach(items, refs, waits) if adm.get("waits_on") else items  # 待ちの秒（#2998）。古い記録は足さない
 
 
 def _submit_groups(
@@ -482,10 +481,10 @@ def queue_workflow(args: dict) -> dict:
     """`queue` 1 回。ステージを順に流し、前のステージが 1 本でも完了でなければ後続を流さない。
     `前提のプラン` を持つプランは、前提のプランが完了でなければ流さない（#1674）。"""
     stages, done = args["stages"], args["done"]
+    waits_on = durable.patched("queue-waits")  # 待ちの秒の耐久ステップを足すか。古い記録は今までの道（#2998）
     listing_step(done, [p for stage in stages for p in stage], stages=stages, max=args["max"], starts=args.get("starts") or {})
     items: list[dict] = []
     pairs: list[dict] = []
-    queued = [p for stage in stages for p in stage]
     for idx, stage in enumerate(stages):
         filled = fill_step(idx == 0, stage, items)
         items += filled["skipped"]
@@ -493,7 +492,8 @@ def queue_workflow(args: dict) -> dict:
             adm = {
                 **admit_step(filled["runnable"], args["shared"], args.get("starts"), args.get("rerun")),
                 "prior": list(items),
-                "queued": queued,
+                "queued": [p for s in stages for p in s],
+                "waits_on": waits_on,  # fmt: skip
             }
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)

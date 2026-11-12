@@ -6581,7 +6581,7 @@
     {
       "term": "マシンのプランの本数",
       "context": "ndf-workflow",
-      "meaning": "同じマシンで動いている並列の計画の、動いているレーンの宣言の plans の合計。プランの本数の上限と比べる",
+      "meaning": "同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる",
       "pending_source": "issues/issue-2999-requirements.md"
     },
     {

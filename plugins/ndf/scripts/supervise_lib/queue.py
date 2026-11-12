@@ -299,7 +299,6 @@ def deps_of(body: str) -> list[str]:
 
 def blocked(plan: str, deps: list[str], items: list[dict], queued: list[str]) -> dict | None:
     """前提のプランのうち完了でないものがあれば、`plan` を流さなかった item（`blocked_by` 付き）を返す。無ければ None。
-
     名前の照合は `{queue_pr:<名>}` と同じ。`items`（それまでの結果）に無く、queue の `queued` にあれば結果が無い
     （後ろにある）。どちらにも無ければ同じディレクトリの計画の報告を読み、それも無ければ見つからない。"""
     by, why = [], []
@@ -336,7 +335,8 @@ def plan_item(plan: str, out: dict) -> dict:
     except OSError:
         pass
     code = 0 if out["result"] in FINISHED else 3
-    return {"plan": plan, "result": out["result"], "exit": code, "report": str(rep), "seconds": out.get("seconds", 0.0)}
+    ran = {"answer_hold_ran": got} if (got := parallel_hold.read_ran(rep.parent)) else {}  # 答え待ちの停止の範囲の中で流した（#3000）
+    return {"plan": plan, "result": out["result"], "exit": code, "report": str(rep), "seconds": out.get("seconds", 0.0), **ran}
 
 
 def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dict], limits: dict) -> dict:

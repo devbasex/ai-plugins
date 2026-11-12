@@ -171,6 +171,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "budget_history": [],
         "same_failure": decl["same_failure"],
         "max_issues": decl["max_issues"],
+        "reorder_width": decl.get("reorder_width", 0),  # 逆転の幅。以後は選定も開始も読むだけ（#2997 の決定 2）
         "milestones": list(milestones or []),
         "goal": goal,
         "status": "running",

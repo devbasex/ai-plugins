@@ -28,6 +28,9 @@
     },
     "slow": {
       "summary": "slow（読む箇所 plugins/ndf/scripts/supervise_lib/slow.py:77）"
+    },
+    "shared": {
+      "summary": "queue.shared: 共有の一覧（path と touched_by）。実装のキューの重なりの判定と、開発ループの選定・並列の計画の検査の触る場所の見込みの重なり（lib/touch_estimate.py:shared_list）が読む"
     }
   }
 }
