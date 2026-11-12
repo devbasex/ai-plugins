@@ -545,6 +545,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 同時に動く本数 | — | スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均 | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
 | 順位の逆転 | — | 開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
 | 逆転の幅 | — | 開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 課題のまとまり | — | 並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。1 件の課題だけのまとまりもある | — | — | — |
+| 疎なまとまり | — | 触る場所の見込みが互いに重ならない、課題のまとまりの組 | — | — | — |
+| まとまりの単位のレビュー | — | 1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review | — | — | — |
 | 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
 | マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
 | 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |

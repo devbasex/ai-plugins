@@ -6544,6 +6544,24 @@
       "source": "docs/specifications/ndf-loop-selection-touch-estimate.md"
     },
     {
+      "term": "課題のまとまり",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。1 件の課題だけのまとまりもある",
+      "pending_source": "issues/issue-3081-requirements.md"
+    },
+    {
+      "term": "疎なまとまり",
+      "context": "ndf-workflow",
+      "meaning": "触る場所の見込みが互いに重ならない、課題のまとまりの組",
+      "pending_source": "issues/issue-3081-requirements.md"
+    },
+    {
+      "term": "まとまりの単位のレビュー",
+      "context": "ndf-workflow",
+      "meaning": "1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review",
+      "pending_source": "issues/issue-3081-requirements.md"
+    },
+    {
       "term": "負荷とメモリの値",
       "context": "ndf-workflow",
       "meaning": "進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く",
