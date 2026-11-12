@@ -56,6 +56,8 @@ def history(tmp_path) -> Path:
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(tmp_path / "o.git")], check=True)
     repo = tmp_path / "r"
     subprocess.run(["git", "clone", "-q", str(tmp_path / "o.git"), str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "t")  # build_branch のマージは利用者の設定の無い CI でもコミットを作る
+    git(repo, "config", "user.email", "t@t")
     git(repo, "checkout", "-q", "-b", "main")
     (repo / "a").write_text("0\n")
     git(repo, "add", "-A")

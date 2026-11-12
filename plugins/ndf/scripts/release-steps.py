@@ -310,7 +310,7 @@ def cmd_changed_plugins(a):
         raise StepError("引数の組み合わせが違う（--decided は --prs・--approval と並べない。--set は --approval と使う）", 2)
     if a.set:
         return emit(changed.set_levels(TOOL, changed.approval_path(root, a.approval), a.set))
-    a.end = promotion.head_ref(root, a.head)  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
+    a.end = promotion.head_ref(root, getattr(a, "head", None))  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
     since, pending, already = other_plugins(root, a)
     skipped, decided = [], None
     if a.decided and pending:
@@ -668,7 +668,7 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
-    if branch_flow.PROMOTIONS[a.promotion].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
+    if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
         main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
         _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
@@ -932,8 +932,8 @@ def cmd_approval_facts(a):
     prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
-    src = a.head or base  # 選んで集める取り込み方は、組んだリリースブランチの先頭を承認に出す（#3121）
-    if a.head:
+    src = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は、組んだリリースブランチの先頭を承認に出す（#3121）
+    if head:
         git(root, "fetch", "-q", "origin", f"+refs/heads/{src}:refs/remotes/origin/{src}")
     dev = git(root, "rev-parse", f"origin/{src}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
