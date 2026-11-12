@@ -346,31 +346,32 @@ def add_resume(index: list[dict]) -> None:
             entry["resume"] = f"python3 {shlex.quote(str(SELF))} queue --resume {shlex.quote(done)}"
 
 
+def _new_refusal(a, pace: str) -> dict | None:
+    """計画を書く前の断り（pace の不可・absorb・受け入れ条件・課題のまとまり）。断るなら結果、断らなければ None。"""
+    if pace in MVV_PACES and (why := pace_refusal(a)):
+        return result(
+            "supervise-new",
+            "stopped",
+            f"pace: {pace} を使えない: {why}。計画を書かない",
+            [],
+            {"pace": pace},
+            next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
+        )
+    if why := absorb.absorb_refusal(a):  # どのファイルも書かない（#1426 の I8）
+        return result(
+            "supervise-new", "stopped", f"{why}。計画を書かない", [], {"absorb": list(a.absorb)}, next="--absorb を直して打ち直す"
+        )
+    absorb.add_absorbed(a)  # absorb を断らなければ、受け入れ条件を見る前に吸収する課題を足す
+    # 受け入れ条件の後に課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+    return sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design)) or bundle_refusal(a)
+
+
 def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     """スプリントの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
     then_of のステージは、そのステージの queue へ --then のステージとして足す（ステージは書いた順に流れる）。"""
     pace = getattr(a, "pace", "normal")
-    if waves is None and pace in MVV_PACES:
-        why = pace_refusal(a)
-        if why:
-            return result(
-                "supervise-new",
-                "stopped",
-                f"pace: {pace} を使えない: {why}。計画を書かない",
-                [],
-                {"pace": pace},
-                next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
-            )
     closing = waves is not None
-    if not closing and (why := absorb.absorb_refusal(a)):  # どのファイルも書かない（#1426 の I8）
-        return result(
-            "supervise-new", "stopped", f"{why}。計画を書かない", [], {"absorb": list(a.absorb)}, next="--absorb を直して打ち直す"
-        )
-    if not closing:
-        absorb.add_absorbed(a)
-    if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
-        return stop
-    if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+    if not closing and (stop := _new_refusal(a, pace)):
         return stop
     waves = waves if waves is not None else with_lane_close(a, sprint_plans(a), close_plan)  # レーンのまとめ（#3058）
     if not closing:
