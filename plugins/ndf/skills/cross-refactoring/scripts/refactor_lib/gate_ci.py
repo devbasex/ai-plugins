@@ -64,10 +64,11 @@ def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, A
     repo = str(state.get("repo") or "")
     runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get, empty_ok=True) if repo and sha else None
     checks = ci_checks(state) or sorted({str(r.get("name") or "") for r in runs or [] if isinstance(r, dict)} - {""})
-    outcome = gh_checks.checks_outcome(runs, checks) if checks else ("pending" if runs is not None else None)
+    # SKIPPED・NEUTRAL は通過（監視とマージと同じ読み方。#3056 の STD1）
+    outcome = gh_checks.checks_outcome(runs, checks, gh_checks.CI_ONLY_PASSING) if checks else ("pending" if runs is not None else None)
     label = f"チェック {', '.join(checks) or '（まだ無い）'}（{sha[:7]} / 照会 1 回・待たない）"
     if outcome == "success":
-        return True, f"{label} の結論は success でした", None
+        return True, f"{label} の結論は success（SKIPPED・NEUTRAL を含む）でした", None
     if outcome in (None, "pending"):
         why = "照会できない" if outcome is None else "終わっていない"
         return True, f"CI 未完了: {label} が{why}。合否は検査のプランの ci-peek とマージが確かめる", None

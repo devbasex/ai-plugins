@@ -22,7 +22,7 @@ UNKNOWN = "unknown"
 
 # 終了コード（プランの行き先は `supervise_lib/verify_steps.ci_watch_steps` が決める）: 0 = 進めてよい（通った・未完了・
 # チェックがまだ無い・取得できなかった）/ 1 = テストのチェックが落ちた（改修の回数は上限の内）/ 2 = 落ちたが改修の回数が
-# 上限に当たった / 3 = --after-merge で、落ちたテストのチェックが無い（マージが CI 以外の理由で落ちた）
+# 上限に当たった、または同じ head のまま改修が終わった / 3 = --after-merge で、落ちたテストのチェックが無い（マージが CI 以外の理由で落ちた）
 
 
 def watch_log_path(state_dir: str | Path) -> Path:
@@ -63,11 +63,15 @@ def decide_exit(result: str, head: Optional[str], rows: list[dict], limit: int, 
     """(終了コード, 改修の回数)。`rows` は今回の行を足す前の記録。改修の回数は今回の head を含む落ちた head の数。
 
     今回より前の落ちた head（今回の head を除く）が上限に達していれば、改修を起こさず 2 を返す（I5）。
+    今回の head が既に落ちたと記録されていても 2 を返す。落ちた監視は必ず改修（`ci-fix`）へ回るため、同じ head の
+    失敗をもう一度読むのは改修がコミットを作らずに終わったときで、改修を起こし直しても同じ結果を繰り返す。
     """
-    before = [h for h in failed_heads(rows) if h != head]
+    heads = failed_heads(rows)
+    before = [h for h in heads if h != head]
     fixes = len(before) + (1 if result == FAILED and head else 0)
     if result == FAILED:
-        return (exit_codes.EXIT_UNREADABLE if len(before) >= limit else exit_codes.EXIT_VIOLATION), fixes
+        stuck = bool(head) and head in heads
+        return (exit_codes.EXIT_UNREADABLE if stuck or len(before) >= limit else exit_codes.EXIT_VIOLATION), fixes
     return (exit_codes.EXIT_PRECONDITION if after_merge else exit_codes.EXIT_OK), fixes
 
 

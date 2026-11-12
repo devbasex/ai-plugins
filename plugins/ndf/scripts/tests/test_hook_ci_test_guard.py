@@ -46,6 +46,9 @@ def bash(root, command, cwd=None):
         "bash -c 'uv run pytest x'",
         "docker compose exec -T app ./vendor/bin/phpunit tests/Unit",
         "./vendor/bin/phpunit",
+        "uv run --no-sync pytest tests -q",
+        "python3 -m pytest x -q",
+        "uv run python -m pytest x",
     ],
 )
 def test_test_suite_launches_are_denied(tmp_path, command):
@@ -63,6 +66,8 @@ def test_test_suite_launches_are_denied(tmp_path, command):
         "python3 plugins/ndf/scripts/test-run.py scope --paths tests",
         "cat <<'EOF'\npytest -q\nEOF",
         "echo 'uv run pytest'",
+        "pip install -U pytest",
+        "python3 -m pip install pytest",
     ],
 )
 def test_lint_and_other_commands_pass(tmp_path, command):

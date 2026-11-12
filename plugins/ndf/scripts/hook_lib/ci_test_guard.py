@@ -7,7 +7,8 @@
 - 起動の形: suite の `command` の語のうち、`runner`（語そのものか、パスの最後の名前）と同じ語まで。`runner` が語に無ければ
   `scope_command` の `{paths}` の前まで。前置きが 1 語だけになるときは `command` の 2 語目まで含める
 - 当たり: コマンドの語（包み `env`・`timeout` などと変数の代入を飛ばした後）が、起動の形の前置きで始まる。または
-  起動の形の最後の語（ランナー）が語にあり、それより前の語がすべて起動の形の語である（ランナーの前のオプションを省いた言い換え）
+  起動の形の最後の語（ランナー）が語にあり、それより前の語がすべて起動の形の語かオプションである（ランナーの前のオプションを
+  省いた・足した言い換え）。`python -m <ランナー>` はランナーの直接の起動と同じに読む
 
 `kind: lint` の suite のコマンド・`test-run.py`（自分で静的解析だけを走らせる）・宣言の無いリポジトリは止めない。
 人が自分の端末で打つコマンドは hook の対象外のため、例外の手段は設けない。
@@ -16,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -83,15 +85,27 @@ def test_forms(decl: dict) -> list[tuple[str, list[str]]]:
     return out
 
 
+_PYTHON = re.compile(r"python[0-9.]*$")
+
+
 def hits(words: list[str], form: list[str]) -> bool:
-    """コマンドの語の並びが起動の形に当たるか。"""
+    """コマンドの語の並びが起動の形に当たるか。
+
+    ランナーより前の語は、起動の形の語かオプション（`-` で始まる語。`uv run --no-sync` など）だけを許す。
+    `python -m <ランナー>`（`python3 -m pytest` など）はランナーの直接の起動と同じに読む。
+    """
     if not words or not form:
         return False
     if words[: len(form)] == form:
         return True
     runner = _base(form[-1])
     at = next((i for i, w in enumerate(words) if _base(w) == runner), None)
-    return at is not None and all(w in form for w in words[:at])
+    if at is None:
+        return False
+    before = words[:at]
+    if len(before) >= 2 and before[-1] == "-m" and _PYTHON.match(_base(before[-2])):
+        before = before[:-2]
+    return all(w in form or w.startswith("-") for w in before)
 
 
 def _launched_commands(cmd: str, depth: int = 0) -> list[list[str]]:

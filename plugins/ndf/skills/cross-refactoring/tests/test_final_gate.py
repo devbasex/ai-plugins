@@ -782,4 +782,16 @@ def test_ci_only_gate_failure_goes_to_the_fix_round(patch_lib, cmd_gate, tmp_pat
         cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2
     assert read_state(state_path)["final_gate"]["checks"][-1]["status"] == "fail"
-    assert WHOLE not in spy["tests"]
+    assert spy["tests"] == []  # 落ちたファイルも比較の木も手元で走らせ直さない
+    assert read_state(state_path)["final_gate"]["triage"]["caused"] == [NEW_FAILURE]
+
+
+@pytest.mark.parametrize("conclusion", ["skipped", "neutral"])
+def test_ci_only_gate_passes_skipped_and_neutral_checks(cmd_gate, tmp_path, env_tmp_dir, spy, capsys, conclusion):
+    state_path = _ci_only_state(tmp_path, checks=("tests", "e2e"))
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"), _run("e2e", conclusion=conclusion))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out

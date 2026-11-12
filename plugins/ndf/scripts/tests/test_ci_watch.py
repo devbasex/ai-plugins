@@ -96,14 +96,28 @@ def test_failure_asks_for_a_fix_with_the_log_tail(tmp_path, repo):
     assert "line 299" in text and "line 99\n" not in text
 
 
-def test_same_head_counts_once_and_the_limit_stops(tmp_path, repo):
+def test_failed_heads_are_counted_and_the_limit_stops(tmp_path, repo):
     fail = check("pytest", conclusion="FAILURE")
-    for head in ("h1", "h1", "h2", "h3"):
+    for head in ("h1", "h2", "h3"):
         code, out, _ = peek(tmp_path, repo, head, fail)
         assert code == 1
     assert out["metrics"]["fixes"] == 3
     code, out, _ = peek(tmp_path, repo, "h4", fail)
     assert code == 2 and out["status"] == "stopped"
+
+
+def test_a_fix_that_left_the_head_unchanged_stops_and_counts_once(tmp_path, repo):
+    fail = check("pytest", conclusion="FAILURE")
+    assert peek(tmp_path, repo, "h1", fail)[0] == 1
+    code, out, _ = peek(tmp_path, repo, "h1", fail)
+    assert code == 2 and out["metrics"]["fixes"] == 1 and "head を変えずに" in out["summary"]
+
+
+def test_the_failed_log_is_read_once_per_run(tmp_path, repo):
+    fails = [check(n, conclusion="FAILURE") for n in ("pytest (3.11)", "pytest (3.12)")]
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}, "suites": []}}), encoding="utf-8")
+    code, _, text = peek(tmp_path, repo, "a1", *fails)
+    assert code == 1 and text.count("line 299") == 1 and "CI / pytest (3.11), CI / pytest (3.12) の失敗した" in text
 
 
 def test_unreadable_is_recorded_and_goes_on(tmp_path, repo):
@@ -121,6 +135,7 @@ def test_after_merge_without_a_test_failure_stops(tmp_path, repo):
 
 def test_decide_counts_failed_heads_before_this_one():
     rows = [{"head": h, "verdict": "failed"} for h in ("a", "b", "c")]
-    assert ci_watch.decide_exit("failed", "c", rows, 3, False) == (1, 3)
+    assert ci_watch.decide_exit("failed", "c", rows[:2], 3, False) == (1, 3)
+    assert ci_watch.decide_exit("failed", "c", rows, 3, False) == (2, 3)
     assert ci_watch.decide_exit("failed", "d", rows, 3, False) == (2, 4)
     assert ci_watch.decide_exit("pending", "d", rows, 3, False) == (0, 3)

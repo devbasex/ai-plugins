@@ -134,11 +134,15 @@ def check_result(runs: list[dict[str, Any]] | None, name: str) -> str | None:
     return None
 
 
-def checks_outcome(runs: list[dict[str, Any]] | None, names: list[str]) -> str | None:
+CI_ONLY_PASSING = ("success", "neutral", "skipped")
+"""CI テストの宣言のあるリポジトリで通過として読む結論。マージの待ちと監視（`merged_lib.reading`）と同じく SKIPPED を通す（#3056 の STD1）。"""
+
+
+def checks_outcome(runs: list[dict[str, Any]] | None, names: list[str], passing: tuple[str, ...] = ("success",)) -> str | None:
     """待つチェック群の今の結論（CI を待つ側が共有する）。照会できない（`runs` が `None`）ときだけ `None`。
 
     一覧に**まだ現れていない**チェックは、照会の失敗ではなく `pending` とみなす（push 直後は登録前のため）。
-    全て成功なら `success`、未完了があれば `pending`、それ以外は最初の成功でない結論。
+    全て `passing` の結論なら `success`、未完了があれば `pending`、それ以外は最初の通過でない結論。
     """
     if runs is None:
         return None
@@ -147,7 +151,7 @@ def checks_outcome(runs: list[dict[str, Any]] | None, names: list[str]) -> str |
     results = [by_name.get(name) if name else None for name in names]
     if any(r is None or r == "pending" for r in results):
         return "pending"
-    return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))
+    return "success" if all(r in passing for r in results) else str(next(r for r in results if r not in passing))
 
 
 _JOB_ID = re.compile(r"/job/(\d+)")

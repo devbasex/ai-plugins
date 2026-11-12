@@ -10,7 +10,7 @@ CI テストの宣言（`.ndf/project.json` の `test.ci.only: true`）のある
 （`gh run view --log-failed` の最後の 200 行）を人が読む行として出し、記録 `<状態>/work/ci-watch.jsonl` へ 1 行を足す。
 
 終了コード: 0 = 進めてよい（通った・未完了・チェックがまだ無い・取得できなかった）/ 1 = テストのチェックが落ちた（改修の回数は
-上限の内）/ 2 = 落ちたが改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix` の `attempts`）に当たった /
+上限の内）/ 2 = 落ちたが改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix` の `attempts`）に当たった、または同じ head のまま前の改修が終わった /
 3 = `--after-merge` で、落ちたテストのチェックが無い。結果は lib/step_result.py の形の 1 行の JSON。
 """
 
@@ -64,9 +64,27 @@ def _failed_log(root, run: str | None) -> str:
     return "\n".join(p.stdout.splitlines()[-LOG_TAIL_LINES:])
 
 
-def _peek_summary(verdict: str, code: int, fixes: int, limit: int, failed: list, absent: list[str], why: str | None) -> str:
+def _print_failures(root, failed: list) -> None:
+    """落ちたチェックの名前と、失敗したジョブのログの末尾を出す。`gh run view <run> --log-failed` は run の失敗した
+    ジョブをすべて含むため、同じ run のチェック（matrix・同じワークフローの複数のジョブ）のログは 1 回だけ取って出す。"""
+    by_run: dict = {}
+    for item in failed:
+        by_run.setdefault(item.run, []).append(item.label)
+    for item in failed:
+        print(f"落ちたチェック: {item.label}" + (f"（run {item.run}）" if item.run else ""))
+    for run, labels in by_run.items():
+        log = _failed_log(root, run)
+        if log:
+            print(f"--- {', '.join(labels)} の失敗したジョブのログの末尾 ---\n{log}\n---")
+
+
+def _peek_summary(
+    verdict: str, code: int, fixes: int, limit: int, failed: list, absent: list[str], why: str | None, stuck: bool = False
+) -> str:
     if why is not None:
         return f"CI の結果を取得できない（記録して進める）: {why[:200]}"
+    if code == EXIT_UNREADABLE and stuck:
+        return f"CI のテストのチェックが落ちた（{', '.join(failed)}）。前の改修が head を変えずに終わったため、改修を起こし直さず止める"
     if code == EXIT_UNREADABLE:
         return f"CI のテストのチェックが落ちた（{', '.join(failed)}）。改修の回数が上限 {limit} に当たった（{fixes} 回目の失敗）"
     if code == EXIT_VIOLATION:
@@ -93,16 +111,13 @@ def cmd_peek(a) -> int:
     code, fixes = ci_watch.decide_exit(verdict, head, rows, limit, a.after_merge)
     ci_watch.append_log(a.state, head, verdict, [i.label for i in failed], a.after_merge)
     if code in (EXIT_VIOLATION, EXIT_UNREADABLE):
-        for item in failed:
-            print(f"落ちたチェック: {item.label}" + (f"（run {item.run}）" if item.run else ""))
-            log = _failed_log(root, item.run)
-            if log:
-                print(f"--- {item.label} の失敗したジョブのログの末尾 ---\n{log}\n---")
+        _print_failures(root, failed)
     items = [i.item(kind) for kind, group in picked.items() for i in group] + [
         {"kind": "check", "name": n, "result": "absent"} for n in absent
     ]
     metrics = {"head": head, "verdict": verdict, "fixes": fixes, "limit": limit, "log": str(ci_watch.watch_log_path(a.state))}
-    summary = _peek_summary(verdict, code, fixes, limit, [i.label for i in failed], absent, why)
+    stuck = bool(head) and head in ci_watch.failed_heads(rows)
+    summary = _peek_summary(verdict, code, fixes, limit, [i.label for i in failed], absent, why, stuck)
     nxt = f"gh pr checks {a.pr} で失敗を読む" if code in (EXIT_UNREADABLE, EXIT_PRECONDITION) else None
     emit(result(TOOL, "ok" if code == EXIT_OK else "stopped", summary, items, metrics, next=nxt), code)
 
