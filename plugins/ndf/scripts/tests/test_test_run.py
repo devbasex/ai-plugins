@@ -489,7 +489,7 @@ def test_a_conflicting_pr_stops_at_the_first_pending_with_the_base_sync_command(
     code, out, checks, merges, junit = _wait(mod, monkeypatch, tmp_path, capsys, [PENDING], ["CONFLICTING"])
     assert (code, out["status"], checks, merges, junit) == (2, "stopped", 1, 1, 0)
     assert "PR #7" in out["summary"] and "衝突" in out["summary"]
-    assert out["next"] == "python3 plugins/ndf/scripts/merged-steps.py base-sync --pr 7"
+    assert out["next"] == f"python3 {mod.HERE / 'merged-steps.py'} base-sync --pr 7"
 
 
 @pytest.mark.parametrize("unsure", ["UNKNOWN", None])
