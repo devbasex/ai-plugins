@@ -534,25 +534,30 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
             first = step_presented(rel["dirs"][0])
             head = step_head(self.main)
             if pr.moved(first.get("sha") or "", head):
-                check = step_carry(self.main, first.get("sha") or "", head) if self.carrying else {"carry": False}
-                built = step_build(self.main, self.name, rel["n"], 2, self.pending, carried=bool(check.get("carry")))
-                if built.get("error"):  # 範囲は決まっているので、範囲の依頼だけへ答えて締める（I4）
-                    answered = self.settle(rel, {"result": "failed", "reason": built["error"]})
-                    self.ask_rebuild(rel["n"], built["error"], answered)
-                    return
-                rel["dirs"].append(built["dir"])
-                rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版をリリースの答えへ渡す
-                if not check.get("carry"):
-                    self.emit_release(rel, 2, represent=True)
-                    return
-                rel["carried"] = {"from": first.get("sha"), "head": head, "prs": check.get("added") or []}
-                self.confirm_k(rel, 2, {}, carried=rel["carried"])  # 提示 2 の範囲は一時レーンの提示のプランが作る
+                self._confirm_moved(rel, first, head)
                 return
             k = 1
         else:
             k = 2 if take == "new" else 1
             rel.pop("carried", None)
         self.confirm_k(rel, k, step_presented(rel["dirs"][k - 1]))
+
+    def _confirm_moved(self, rel: dict, first: dict, head: str) -> None:
+        """提示 1 から先頭が動いたときの組み直し。組めなければ範囲の依頼だけへ答えて締め、組み直しを問う。組めたら、加わった範囲が
+        文書だけなら引き継ぐ形の提示 2 で確定し、そうでなければ提示 2 を出し直す。"""
+        check = step_carry(self.main, first.get("sha") or "", head) if self.carrying else {"carry": False}
+        built = step_build(self.main, self.name, rel["n"], 2, self.pending, carried=bool(check.get("carry")))
+        if built.get("error"):  # 範囲は決まっているので、範囲の依頼だけへ答えて締める（I4）
+            answered = self.settle(rel, {"result": "failed", "reason": built["error"]})
+            self.ask_rebuild(rel["n"], built["error"], answered)
+            return
+        rel["dirs"].append(built["dir"])
+        rel["versions"] = [rel.get("version"), built.get("version")]  # 提示ごとの版。選ばれた提示の版をリリースの答えへ渡す
+        if not check.get("carry"):
+            self.emit_release(rel, 2, represent=True)
+            return
+        rel["carried"] = {"from": first.get("sha"), "head": head, "prs": check.get("added") or []}
+        self.confirm_k(rel, 2, {}, carried=rel["carried"])  # 提示 2 の範囲は一時レーンの提示のプランが作る
 
     def confirm_k(self, rel: dict, k: int, got: dict, **extra) -> None:
         versions = rel.get("versions") or [rel.get("version")]
