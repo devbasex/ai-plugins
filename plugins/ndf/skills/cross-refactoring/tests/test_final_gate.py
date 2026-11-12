@@ -643,7 +643,7 @@ def test_without_junit_the_ci_failure_material_reaches_the_final_fix(patch_lib, 
     spy["gh_out"] = _check_runs({**_run("tests", conclusion="failure"), "html_url": "https://github.com/acme/demo/actions/runs/7"})
     patch_lib("ci_junit", lambda state, sha, checks, runs=None: [])
     fallback = {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "JUnit が無い"}
-    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(fallback))
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None, ci_existing=None: dict(fallback))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
@@ -709,7 +709,7 @@ def test_a_caused_failure_points_the_final_fix_at_the_deferred_items(patch_lib, 
         "caused_output": {NEW_FAILURE: 'File "src/calc.py", line 3, in add'},
         "rerun_commands": ["pytest -q tests/test_new.py"],
     }
-    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(classified))
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None, ci_existing=None: dict(classified))
     changed = {"I-001": ["src/a.py"], "I-002": ["src/calc.py"]}
     monkeypatch.setattr(cmd_gate.culprit, "_changed_by", lambda work, item: changed.get(item["id"], []))
     monkeypatch.setattr(cmd_gate.culprit, "_isolate", lambda *a: pytest.fail("最終ゲートでは項目を外して走らせ直さない"))
@@ -795,3 +795,33 @@ def test_ci_only_gate_passes_skipped_and_neutral_checks(cmd_gate, tmp_path, env_
     cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=passed" in capsys.readouterr().out
+
+
+def test_ci_only_gate_reads_existing_failures_from_the_ci_of_the_start_head(
+    patch_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys, monkeypatch
+):
+    """着手前にテストを走らせないため、既存失敗は着手時の head の CI の JUnit から読む（#3056）。"""
+    import test_triage
+
+    baseline = {
+        "mode": "scope",
+        "command": "x",
+        "status": "green",
+        "checked_at": "t",
+        "seconds": 1.0,
+        "head": "BASESHA",
+        "existing_failures": [],
+    }
+    state_path = _ci_only_state(tmp_path, baseline_test=baseline)
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [OLD_FAILURE])
+    patch_lib("ci_junit", lambda state, sha, checks, runs=None: [sha.encode()])
+    monkeypatch.setattr(test_triage, "merged_failed_ids", lambda xmls, tracked: ([OLD_FAILURE] if xmls == [b"BASESHA"] else [], None))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert any("BASESHA" in call[-1] for call in spy["gh"])
+    assert spy["tests"] == []
+    triage = read_state(state_path)["final_gate"]["triage"]
+    assert triage["preexisting"] == [OLD_FAILURE] and triage["caused"] == []

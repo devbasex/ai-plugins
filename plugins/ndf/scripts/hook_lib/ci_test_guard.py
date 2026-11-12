@@ -7,8 +7,9 @@
 - 起動の形: suite の `command` の語のうち、`runner`（語そのものか、パスの最後の名前）と同じ語まで。`runner` が語に無ければ
   `scope_command` の `{paths}` の前まで。前置きが 1 語だけになるときは `command` の 2 語目まで含める
 - 当たり: コマンドの語（包み `env`・`timeout` などと変数の代入を飛ばした後）が、起動の形の前置きで始まる。または
-  起動の形の最後の語（ランナー）が語にあり、それより前の語がすべて起動の形の語かオプションである（ランナーの前のオプションを
-  省いた・足した言い換え）。`python -m <ランナー>` はランナーの直接の起動と同じに読む
+  起動の形のうちランナー（suite の `runner` の語。起動の形に無ければ起動の形の全体）から後の語の並びが語にあり、それより前の語が
+  すべて起動の形の語かオプションである（ランナーの前のオプションを省いた・足した言い換え）。`python -m <ランナー>` はランナーの
+  直接の起動と同じに読む。`go test` のように起動の形を 2 語目まで広げた suite は `go test` の並びで当て、`test -f` は当てない
 
 `kind: lint` の suite のコマンド・`test-run.py`（自分で静的解析だけを走らせる）・宣言の無いリポジトリは止めない。
 人が自分の端末で打つコマンドは hook の対象外のため、例外の手段は設けない。
@@ -71,8 +72,15 @@ def launch_form(suite: dict) -> list[str]:
     return form
 
 
-def test_forms(decl: dict) -> list[tuple[str, list[str]]]:
-    """(suite の名前, 起動の形) の並び。宣言が無い・`test.ci.only` が真でなければ空。"""
+def runner_tail(suite: dict, form: list[str]) -> list[str]:
+    """起動の形のうち、ランナー（suite の `runner` と同じ語。パスの最後の名前でも当てる）から後の語。無ければ起動の形の全体。"""
+    runner = str(suite.get("runner") or "")
+    at = next((i for i, w in enumerate(form) if runner and _base(w) == runner), 0)
+    return form[at:]
+
+
+def test_forms(decl: dict) -> list[tuple[str, list[str], list[str]]]:
+    """(suite の名前, 起動の形, ランナーから後の語) の並び。宣言が無い・`test.ci.only` が真でなければ空。"""
     test = decl.get("test")
     if not isinstance(test, dict) or not isinstance(test.get("ci"), dict) or test["ci"].get("only") is not True:
         return []
@@ -81,15 +89,15 @@ def test_forms(decl: dict) -> list[tuple[str, list[str]]]:
         if isinstance(suite, dict) and (suite.get("kind") or "test") == "test":
             form = launch_form(suite)
             if form:
-                out.append((str(suite.get("name") or "test"), form))
+                out.append((str(suite.get("name") or "test"), form, runner_tail(suite, form)))
     return out
 
 
 _PYTHON = re.compile(r"python[0-9.]*$")
 
 
-def hits(words: list[str], form: list[str]) -> bool:
-    """コマンドの語の並びが起動の形に当たるか。
+def hits(words: list[str], form: list[str], tail: list[str] | None = None) -> bool:
+    """コマンドの語の並びが起動の形に当たるか。`tail` は起動の形のうちランナーから後の語（省けば起動の形の全体）。
 
     ランナーより前の語は、起動の形の語かオプション（`-` で始まる語。`uv run --no-sync` など）だけを許す。
     `python -m <ランナー>`（`python3 -m pytest` など）はランナーの直接の起動と同じに読む。
@@ -98,8 +106,12 @@ def hits(words: list[str], form: list[str]) -> bool:
         return False
     if words[: len(form)] == form:
         return True
-    runner = _base(form[-1])
-    at = next((i for i, w in enumerate(words) if _base(w) == runner), None)
+    tail = tail or form
+    runner, rest = _base(tail[0]), tail[1:]
+    at = next(
+        (i for i, w in enumerate(words) if _base(w) == runner and words[i + 1 : i + 1 + len(rest)] == rest),
+        None,
+    )
     if at is None:
         return False
     before = words[:at]
@@ -144,7 +156,7 @@ def ci_test_decision(ev: pl.Event) -> dict | None:
     if not forms:
         return None
     for words in _launched_commands(cmd):
-        for name, form in forms:
-            if hits(words, form):
+        for name, form, tail in forms:
+            if hits(words, form, tail):
                 return deny(REASON.format(suite=name, scripts=SCRIPTS))
     return None

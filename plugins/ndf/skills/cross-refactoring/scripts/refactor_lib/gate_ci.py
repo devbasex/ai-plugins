@@ -2,8 +2,8 @@
 
 全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か `--ci-check` のとき、push 済みの HEAD のチェックを
 `limits.ci_wait_timeout`（`3·c`。予算に依らない。#2457 決定 11）まで待ち、落ちたら run の成果物の JUnit と run の
-置き場を見分けと落ちたテストの材料にする。CI テストの宣言（`test.ci.only`）のあるリポジトリは待たずに 1 回だけ読む
-（`ci_peek_gate`。#3056 の決定 11）。
+置き場を見分けと落ちたテストの材料にする。CI テストの宣言（`test.ci.only`）のあるリポジトリは待たずに 1 回だけ読み
+（`ci_peek_gate`。#3056 の決定 11）、落ちていれば既存失敗を着手時の head の CI の JUnit から読む（`baseline_ci_failures`）。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Optional
 import gh_checks
 import test_triage
 
-from . import die, info, timeline
+from . import die, info, timeline, triage
 from .github import gh_api_get
 from .paths import git_out, work_dir
 
@@ -53,6 +53,25 @@ def _failed_verdict(state: dict[str, Any], sha: str, checks: list[str], runs, la
     )
 
 
+def baseline_ci_failures(state: dict[str, Any], checks: list[str]) -> list[str]:
+    """着手時の head（`triage.baseline_head`）の CI の JUnit から読んだ落ちた ID。CI テストの宣言のあるリポジトリの既存失敗（#3056）。
+
+    着手前にテストを走らせないため、既存失敗はここで読む。着手時の head の CI は最終ゲートの時点で終わっているので待たない。
+    照会できない・head と同じ・読めないときは空（落ちた ID はすべて変更起因として扱う）。
+    """
+    base = triage.baseline_head(state)
+    head = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
+    repo = str(state.get("repo") or "")
+    if not (repo and base) or base == head:
+        return []
+    runs = gh_checks.fetch_check_runs(repo, base, rest_get=gh_api_get, empty_ok=True)
+    if not runs:
+        return []
+    names = checks or sorted({str(r.get("name") or "") for r in runs if isinstance(r, dict)} - {""})
+    ids, _ = test_triage.merged_failed_ids(ci_junit(state, base, names, runs), test_triage.tracked_files(str(work_dir(state))))
+    return list(ids or [])
+
+
 def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
     """CI テストの宣言のあるリポジトリの最終ゲート。push 済みの HEAD のチェックを待たずに 1 回だけ読む（#3056 の I4）。
 
@@ -72,7 +91,9 @@ def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, A
     if outcome in (None, "pending"):
         why = "照会できない" if outcome is None else "終わっていない"
         return True, f"CI 未完了: {label} が{why}。合否は検査のプランの ci-peek とマージが確かめる", None
-    return _failed_verdict(state, sha, checks, runs, label, outcome)
+    passed, detail, verdict = _failed_verdict(state, sha, checks, runs, label, outcome)
+    verdict["existing_failures"] = baseline_ci_failures(state, checks)
+    return passed, detail, verdict
 
 
 def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:

@@ -74,8 +74,13 @@ def ci_only_split(ids: Optional[list[str]], reason: Optional[str], existing: lis
     }
 
 
-def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None) -> dict[str, Any]:
-    """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。"""
+def classify(
+    state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None, ci_existing: Optional[list[str]] = None
+) -> dict[str, Any]:
+    """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。
+
+    `ci_existing` は CI テストの宣言のあるリポジトリで、着手時の head の CI の JUnit から読んだ既存失敗（`gate_ci`）。
+    """
     if timed_out:
         return {
             "failed_tests": None,
@@ -86,7 +91,7 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
         }
     ids, reason = failed_ids_of(state, ci_xmls)
     if timeline.strategy_of(state).ci_only:
-        return ci_only_split(ids, reason, existing_failures(state))
+        return ci_only_split(ids, reason, existing_failures(state) + list(ci_existing or []))
     if ids is not None and not ids:
         return {
             "failed_tests": None,

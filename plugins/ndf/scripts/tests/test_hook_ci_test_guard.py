@@ -74,6 +74,28 @@ def test_lint_and_other_commands_pass(tmp_path, command):
     assert deny_reason(bash(repo(tmp_path), command), tmp_path) is None
 
 
+GO = {"name": "go", "runner": "go", "command": "go test ./..."}
+NPM = {"name": "npm", "runner": "npm", "command": "npm test"}
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ("go test ./...", True),
+        ("go test -run TestX ./pkg", True),
+        ("npm test", True),
+        ("test -f go.mod && go build ./...", False),
+        ("test -d .git", False),
+        ("npm run build", False),
+        ("go vet ./...", False),
+    ],
+)
+def test_a_form_widened_to_the_second_word_is_matched_by_the_runner(tmp_path, command, denied):
+    """起動の形を 2 語目まで広げた suite（`go test`・`npm test`）は、2 語目の `test` をランナーとみなさない。"""
+    root = repo(tmp_path, suites=(GO, NPM))
+    assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
+
+
 @pytest.mark.parametrize("only", [None, False])
 def test_without_the_declaration_nothing_is_denied(tmp_path, only):
     root = repo(tmp_path, only=only)
