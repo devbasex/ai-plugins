@@ -246,7 +246,7 @@ class Engine:
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
         self.actuals.start(start, self.state.run_line(start))
-        if self.queued and (held := self.answer_held()):
+        if held := self.answer_held(start):
             return NOT_RUN, held
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
@@ -257,11 +257,14 @@ class Engine:
             return "止まった", err
         return None
 
-    def answer_held(self) -> str | None:
-        """自分が 1 スプリントのレーンで答え待ちの停止の範囲にあれば、流さない理由を返す（#2707）。"""
+    def answer_held(self, start: str | None = None) -> str | None:
+        """キューから流す 1 スプリントのレーンが答え待ちの停止の範囲で新しい承認を生むプランを始めるなら、流さない理由（#2707 #3000）。
+        範囲の中で流すときは範囲の値をプランの状態ディレクトリへ書き、それ以外は消す。単発の `run` は停止を読まない。"""
         import parallel_hold
 
-        return parallel_hold.plan_skip(os.environ.get("NDF_RELAY_NAME"))
+        reason, ran = parallel_hold.plan_hold(os.environ.get("NDF_RELAY_NAME"), self.plan, start) if self.queued else (None, None)
+        parallel_hold.note_ran(self.state.dir, None if reason else ran)
+        return reason
 
     def after_prepare(self) -> None:
         """worktree ができた後の、ファイルを書かない準備（遅れの見張りの履歴の置き場）。"""

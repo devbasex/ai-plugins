@@ -32,6 +32,8 @@ LANE_KINDS = ("gate1", "ask")  # レーンが送った依頼。耐久ワーク�
 CONDITION = "answer_hold"  # 開発ループの止まる条件と `parallel.py wait` の action
 WAIT_STOPS = ("waiting_only", CONDITION)  # 答えを待って止まったループの止まる条件。答えを受けたら起こす
 SKIP_REASON = "答え待ちの停止のため流さなかった"  # プランの開始で流さなかった理由の頭
+DESIGN_KIND = "設計"  # 設計を書くステップの kind（`design_steps.writing_steps` が置く）。このステップへ行けるプランは新しい承認を生む
+RAN_FILE = "answer-hold-ran.json"  # 範囲の中で流したプランの範囲の値（プランの状態ディレクトリに置く）
 REASONS = {
     ("on", "plan"): "答え待ちの依頼が計画の閾値を超えた",
     ("off", "plan"): "答え待ちの依頼が計画の閾値以下へ戻った",
@@ -284,11 +286,17 @@ def resume_marks(main: Path, name: str, lanes: list[str], drop: list[str], relay
 # ---- レーンの側 ----
 
 
-def _lane_kind(main: Path, name: str, lane: str) -> Optional[str]:
-    """計画 `name` のレーン `lane` の入力の種類（loop / sprint）。レーンでなければ None。"""
+def lane_input(main: Path, name: str, lane: str) -> Optional[dict]:
+    """計画 `name` のレーン `lane` の入力（`{kind, issues, ...}`）。レーンでなければ None。"""
     plan = jsonio.read(_plan_root(main, name) / "plan.json", missing={}, broken={}, want=dict)
     found = [ln for ln in plan.get("lanes") or [] if isinstance(ln, dict) and ln.get("name") == lane]
-    return ((found[0].get("input") or {}).get("kind") or "") if found else None
+    return (found[0].get("input") if isinstance(found[0].get("input"), dict) else {}) if found else None
+
+
+def _lane_kind(main: Path, name: str, lane: str) -> Optional[str]:
+    """計画 `name` のレーン `lane` の入力の種類（loop / sprint）。レーンでなければ None。"""
+    got = lane_input(main, name, lane)
+    return (got.get("kind") or "") if got is not None else None
 
 
 def plan_held(main: Path, name: str, hold: Optional[dict], lane: Optional[str]) -> bool:
@@ -326,12 +334,42 @@ def self_stop(main: Path, stop: dict) -> Optional[str]:
     return pf.stop_self(main) if stop["condition"] in WAIT_STOPS else None
 
 
-def plan_skip(lane: Optional[str]) -> Optional[str]:
-    """キューから流す 1 スプリントのレーンのプランを流さない理由。流すなら None。"""
+def needs_approval(plan: dict, start: Optional[str] = None) -> bool:
+    """新しい承認を生むプランか: 開始のステップ（無ければ最初）から設計を書くステップへ行けるか（#3000 の決定 2。`フェーズ` では決めない）。"""
+    from supervise_lib import limits
+
+    return any(s.get("type") == "work" and s.get("kind") == DESIGN_KIND for s in limits.reachable(plan, start))
+
+
+def plan_hold(lane: Optional[str], plan: Optional[dict] = None, start: Optional[str] = None) -> tuple[Optional[str], Optional[dict]]:
+    """キューから流す 1 スプリントのレーンのプランの (流さない理由, 範囲の中で流すときの範囲の値 = `lane_hold` + `lane`)。範囲の外なら
+    (None, None)。範囲の中では新しい承認を生むプラン（プランが無ければそう読む）だけを流さない（#3000）。"""
     import decl
 
     got = lane_hold(decl.main_dir(os.getcwd()) or Path.cwd(), lane, "sprint") if lane else None
-    return f"{SKIP_REASON}: {got['plan']} {lane}" if got else None
+    if not got:
+        return None, None
+    if plan is None or needs_approval(plan, start):
+        return f"{SKIP_REASON}: {got['plan']} {lane}", None
+    return None, {**got, "lane": lane}
+
+
+def plan_skip(lane: Optional[str], plan: Optional[dict] = None, start: Optional[str] = None) -> Optional[str]:
+    """キューから流す 1 スプリントのレーンのプランを流さない理由。流すなら None。"""
+    return plan_hold(lane, plan, start)[0]
+
+
+def note_ran(state_dir: Path, ran: Optional[dict]) -> None:
+    """範囲の中で流したプランの範囲の値をプランの状態ディレクトリへ書き、範囲の外なら消す（落ちた後の続きでも読めるようファイルで持つ）。"""
+    if ran:
+        jsonio.write_atomic(Path(state_dir) / RAN_FILE, ran)
+    else:
+        (Path(state_dir) / RAN_FILE).unlink(missing_ok=True)
+
+
+def read_ran(state_dir: Path) -> Optional[dict]:
+    """`note_ran` の値（キューの結果の `answer_hold_ran`）。無い・読めなければ None。"""
+    return jsonio.read(Path(state_dir) / RAN_FILE, missing=None, broken=None, want=dict)
 
 
 def skip_of(reason: Optional[str]) -> Optional[dict]:

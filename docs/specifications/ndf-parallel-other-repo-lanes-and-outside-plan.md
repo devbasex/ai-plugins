@@ -83,7 +83,7 @@ supervisor の定義を [docs/ndf-parallel-model.md](../ndf-parallel-model.md) �
 | --- | --- | --- |
 | I1 | レーンの `repo` を省くと、計画の置き場のリポジトリのレーンとして扱う。省いた計画は今と同じに検査・起動・リリースされる | テストで落とす |
 | I2 | `repo` は絶対パスで、Git のメインディレクトリそのものを指す | 検査の規則 `I20` で断る（終了コード 1）。`I20` の誤りがある計画は書かない・起動しない |
-| I3 | 課題・マイルストーンの重なり（検査の規則 `I19`）・触る場所の重なり（検査の規則 `I4`）・引継ぎ文書の名前の重なりは、同じリポジトリのレーンの間だけで判定する | テストで落とす |
+| I3 | 課題・マイルストーンの重なり（検査の規則 `I19`）・触る場所の重なり（検査の規則 `I4`）・課題の触る場所の見込みの重なり（検査の規則 `I21` の警告）・引継ぎ文書の名前の重なりは、同じリポジトリのレーンの間だけで判定する | テストで落とす |
 | I4 | 計画の所在の一覧は置き場を指すだけで、指す先に計画の置き場が無い所在と、持ち主が自分でない置き場は読み飛ばす | テストで落とす |
 | I5 | レーンの側が依頼を送る・答えを読む・止める指示を読むときは、計画の置き場を使う。耐久ワークフローの記録のキーは変えない | テストで落とす |
 | I6 | オーガナイザーの側がレーンの記録（ループの記録・引継ぎ文書）を読み書きするとき、レーンを起動するとき、レーンの設計 PR をマージするときは、レーンのリポジトリを使う | テストで落とす |
@@ -106,7 +106,7 @@ supervisor の定義を [docs/ndf-parallel-model.md](../ndf-parallel-model.md) �
 | オーガナイザーの側（`lib/parallel_run.py`・`lib/parallel_reply.py`・`lib/parallel_route.py`・`lib/parallel_answer.py`・`lib/parallel_release.py`） | レーンの起動・ループの記録の読み出し・設計 PR のマージをレーンのリポジトリで行う。`lanes_changed` を受けて計画を読み直す（`take_lanes_changed`）。問いの各行へ `repo` を足す（`with_repo`）。`map_lanes` から別のリポジトリのレーンを外す |
 | 起動の判定（`lib/parallel_guard.py`） | 計画の外のセッションの判定（`judge_entry`・`entry_check`）・例外の起動の記録・止めたときの統一 JSON レポート。呼ぶのは `sprint-state.py loop start`（`lib/sprint_loop_cli.py`）と `supervise.py new sprint` |
 | レーンの追加と書き換え（`lib/parallel_lane_cli.py`、`parallel.py lane`） | 宣言を検査に通して書き、`plan.md` と引継ぎ文書を書き直し、`lanes_changed` を送る。上限を超えたら `relay.py cap` の 1 行を、入力か引継ぎ文書の名を変えたら起こし直しの 1 行を出す |
-| レーン数の上限（`lib/relay_limit.py`、`relay.py cap`） | マシンの設定の読み書き（`named_cap`・`write_max_named`） |
+| マシンの上限（`lib/relay_limit.py`、`relay.py cap`） | マシンの設定の読み書き（レーン数の上限の `named_cap`・プランの本数の上限の `plans_cap`・`write_limit`） |
 | 用語集の検査（`lib/glossary_words.py` の `word_pattern`） | カタカナだけの廃止語は、前後がカタカナ（長音符を含む）のときに一致させない。漢字の廃止語は部分一致のまま拾う |
 
 ```mermaid
@@ -186,7 +186,7 @@ graph TD
 | --- | --- | --- |
 | `parallel.py lane <計画名> add --from <JSON>` | レーン 1 本の宣言（`-` は標準入力） | 検査を通れば 3 つのファイルを書き、置き場を一覧へ書き、`lanes_changed` を送る |
 | `parallel.py lane <計画名> set --lane <名> --from <JSON>` | 書き換えるキー（`input`・`plans`・`touches`・`after`・`handoff`） | 同上。`input` か `handoff` を変えたら、レーンを止めて新しい最初の入力で `relay.py spawn` する 1 行を出す（`relay.py restart` は前の入力を使い直すため使わない） |
-| `relay.py cap [--named <n>]` | 正の整数。省くと読むだけ | `metrics.max_named`・`metrics.source`（`file`・`env`・`default`）・`metrics.path` |
+| `relay.py cap [--named <n> \| --plans <n>]` | 正の整数。省くと読むだけ。書かない方の値は残す | `metrics.max_named`・`metrics.source`（`file`・`env`・`default`）・`metrics.max_plans`・`metrics.plans_source`・`metrics.path` |
 
 耐久ワークフローは `lanes_changed` を受けると耐久ステップ（`parallel.reload-lanes`）で計画を読み直し、足したレーンを起動の候補に
 入れ、書き換えたレーンの依存と入力の種類を反映する。名前を消したレーンは起動済みの状態を残す（止めるのは `relay.py stop`）。
@@ -200,7 +200,7 @@ graph TD
 | --- | --- | --- |
 | 計画の宣言のレーン（`plan.json`）の `repo` | レーンのリポジトリのメインディレクトリの絶対パス。キーが無ければ計画の置き場のリポジトリ。`version` は 1 のまま | `parallel.py init`・`lane add` |
 | `<状態の根>/parallel/homes/<置き場の sha256 の先頭 12 字>.json` | `{"home": <絶対パス>, "at": <時刻>}`。所在 1 つにつき 1 ファイルで、一時ファイルからの置き換えで書く。消さない | `parallel.py init`・`start`・`lane add`・`lane set` |
-| `<状態の根>/relay/hub/limits.json` | `{"max_named": <正の整数>, "at": <時刻>, "by": "relay.py cap"}`。壊れていれば次の出所へ進み、理由を出力に添える | `relay.py cap --named <n>` |
+| `<状態の根>/relay/hub/limits.json` | `{"max_named": <正の整数>, "max_plans": <正の整数>, "at": <時刻>, "by": "relay.py cap"}`。書くときは書くキーと `at`・`by` だけを置き換える。壊れていれば次の出所へ進み、理由を出力に添える | `relay.py cap --named <n>`・`--plans <n>` |
 | `<状態の根>/parallel/outside-plan.jsonl` | 例外の起動 1 回に 1 行（`at`・`repo`・`entry`・`reason`・`plans`）。追記だけ | 起動の判定 |
 | 問いの一覧（`parallel.py wait` の届いている依頼）の各行の `repo` | レーンのリポジトリ。既存のキーは変えない | オーガナイザーの側 |
 | inbox のメッセージ `{"kind": "lanes_changed"}` | 計画の読み直しの合図 | `parallel.py lane add`・`set` |
@@ -213,7 +213,7 @@ graph TD
 | `lane add` で上限を超える | 終了コード 1。何も書かず、`items` に `relay.py cap --named <n>` の 1 行（`rule: limit`）を足す |
 | `lane set` に `name` か `repo` を渡す | 終了コード 1 |
 | 計画が無い・読めない・書けない（`lane`） | 終了コード 2 |
-| `relay.py cap --named` に正の整数でない値 | 終了コード 1 |
+| `relay.py cap --named`・`--plans` に正の整数でない値 | 終了コード 1。何も書かない |
 | 理由が空の `--outside-plan` | 終了コード 1 |
 | 計画の外のセッションの起動 | 終了コード 3（`step_result.EXIT_PRECONDITION`。正常な否定の結果） |
 | `lanes_changed` の後に計画を読み直せない | 前の計画のまま続け、`wait` の知らせに出す |

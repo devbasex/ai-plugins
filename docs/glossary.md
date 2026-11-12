@@ -395,6 +395,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 組み直しの依頼 | — | 組めなかったリリースの依頼を、人が「直してから組み直す」と答えた後に耐久ワークフローが受けている依頼へ入れ直したもの。元の依頼の答えは変えない | — | — | — |
 | 一時レーン | — | 持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 別のリポジトリのレーン | — | 並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。問いと承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 依頼した側 | — | 作業の途中で、別のリポジトリの改修が先に要ると分かったレーンと、そのレーンが進めている課題 | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
+| 相手のリポジトリ | — | 依頼した側が改修を必要とする、依頼した側と違うリポジトリ。改修はそのリポジトリの規約（課題・承認ゲート・漏れの検査）で進む | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
+| 完全な形の参照 | — | <所有者>/<リポジトリ>#<番号> の形で課題を指す書き方。リポジトリをまたいで課題を対に結ぶときに使い、番号だけの #<番号> は使わない | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
+| 代わりの手順 | — | 別のリポジトリの改修が要るときの既定の手順（別のリポジトリのレーンの起動）を使えないときに取る、out-of-scope の別のリポジトリへの起票 | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
+| 相手のレーン | — | 依頼した側が並列の計画へ足す、相手のリポジトリのクローンを repo にした別のリポジトリのレーン。相手の課題を最初の入力に持つ | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
 | 計画の外のセッション | — | 動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | レーン数の上限 | — | 同時に動かせる名前つきのラッパーの数。値はマシンの設定（<状態の根>/relay/hub/limits.json。relay.py cap が書く）→ NDF_RELAY_MAX_NAMED → 既定 3 の順で決まり、リレーハブと計画の検査が同じ値を読む。オーガナイザーは数えず、一時レーンは 1 本だけ超えられる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 計画の置き場 | — | 並列の計画を作ったリポジトリのメインディレクトリ（計画ごとのファイルはその下の .ndf/parallel/<計画名>/ に置く）。計画の所在の一覧は、このメインディレクトリの絶対パスで持つ。依頼・答えの記録のキーは計画の置き場と計画名から求め、その値は <計画の置き場>/.ndf/parallel/<計画名> の絶対パスのまま変えない | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
@@ -545,7 +550,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | — |
 | 待ちの秒 | — | queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits） | — | — | — |
 | メモリの山 | — | 全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値 | — | — | — |
-| マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーンの宣言の plans の合計。プランの本数の上限と比べる | — | — | — |
+| マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる | — | — | — |
 | 起動の待ち | — | 依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと | — | — | — |
 | プランの本数の上限 | — | 同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む | — | — | — |
 | 起動の排他 | — | 同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock） | — | — | — |

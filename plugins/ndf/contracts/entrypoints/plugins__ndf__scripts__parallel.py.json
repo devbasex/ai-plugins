@@ -251,7 +251,8 @@
     {
       "file": "supervise.json",
       "keys": [
-        "release"
+        "release",
+        "shared"
       ]
     },
     {
@@ -266,6 +267,7 @@
   "writes": [
     "answer-hold-json",
     "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
     "answer-json",
     "answers-sent-json",
     "applied-json",
@@ -276,6 +278,7 @@
     "decisions-jsonl",
     "deferred-json",
     "handoff-mark-json",
+    "outside-plan-jsonl",
     "plan-json",
     "plan-md",
     "present-json",

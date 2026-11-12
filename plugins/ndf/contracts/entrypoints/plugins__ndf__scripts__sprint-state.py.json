@@ -79,7 +79,8 @@
     {
       "file": "supervise.json",
       "keys": [
-        "release"
+        "release",
+        "shared"
       ]
     },
     {
@@ -94,6 +95,7 @@
   "writes": [
     "answer-hold-json",
     "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
     "answer-json",
     "applied-json",
     "approved-txt",

@@ -112,7 +112,10 @@ def test_the_loop_section_is_read_with_defaults(tmp_path):
         "budget": {"laps": 5, "usd": None, "hours": None},
         "same_failure": 2,
         "max_issues": 1,
+        "reorder_width": 0,
     }
+    assert pace.LOOP_DEFAULTS["reorder_width"] == 0  # 既定は並べ替えをしない（#2997 の決定 8）
+    assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"reorder_width": 2}}))["reorder_width"] == 2
     assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"budget": {"laps": None}}}))["budget"]["laps"] is None
     assert pace.read_loop(write(tmp_path, {**DECL, "loop": {"enabled": "yes"}}))["enabled"] is False
 
@@ -135,6 +138,9 @@ def test_the_loop_section_ignores_the_rest_of_the_declaration(tmp_path):
         ({"same_failure": 0}, "loop.same_failure"),
         ({"same_failure": True}, "loop.same_failure"),
         ({"max_issues": 1.5}, "loop.max_issues"),
+        ({"reorder_width": -1}, "loop.reorder_width"),
+        ({"reorder_width": True}, "loop.reorder_width"),
+        ({"reorder_width": 1.5}, "loop.reorder_width"),
     ],
 )
 def test_a_malformed_loop_section_fails_closed(tmp_path, loop, message):

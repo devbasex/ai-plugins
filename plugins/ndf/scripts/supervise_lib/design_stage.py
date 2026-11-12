@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,7 @@ import gh_call
 from design_docs import connected_docs, name_numbers
 from step_result import result
 from supervise_lib.decl import glossary_ready
+from supervise_lib.paths import is_dir_entry
 from supervise_lib.procedures import DESIGN_RESULTS, absorbed_condition, closed_condition, with_touched
 from supervise_lib.templates import impl_prompt
 
@@ -266,6 +268,29 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     return items
 
 
+def marked_dirs(res: dr.DesignResults, root: str) -> dict[int, list[str]]:
+    """「実装する」の行の触るファイルのディレクトリ（末尾 `/` か `root` の下の既存のディレクトリ）を末尾 `/` の形に揃える。
+
+    重なりの判定はファイルシステムを読まずに末尾 `/` でディレクトリの宣言を見分ける（#1811 の決定 2）。
+    揃えた行を課題ごとに返し、標準エラーへ 1 行ずつ知らせる。止まらない。"""
+    found: dict[int, list[str]] = {}
+    for row in res.rows:
+        if row.kind != dr.IMPLEMENT:
+            continue
+        dirs = [f if f.endswith("/") else f + "/" for f in row.files if is_dir_entry(f, root)]
+        if not dirs:
+            continue
+        row.files = [f + "/" if not f.endswith("/") and is_dir_entry(f, root) else f for f in row.files]
+        found[row.issue] = dirs
+        print(
+            f"{TOOL}: #{row.issue} の触るファイルにディレクトリ {' '.join(dirs)}"
+            "（重なりの判定に使わない。ファイル単位で書くと同じファイルを触るプランと直列になる）",
+            file=sys.stderr,
+            flush=True,
+        )
+    return found
+
+
 def cmd_design_results(a, read=read_results) -> tuple[dict, int | None]:
     manifest = Path(a.manifest)
     try:
@@ -275,6 +300,7 @@ def cmd_design_results(a, read=read_results) -> tuple[dict, int | None]:
         return result(TOOL, "stopped", f"manifest か実装のプランを読めない: {e}"), 2
     try:
         res = read(a.root, a.base, list(a.design))
+        dirs = marked_dirs(res, a.root)
         items = rewrite(plans, res, glossary_ready([a.root])) if res.rows else []
     except ReadFailed as e:
         # 一時的な失敗が残った: プランも design-results.json も書かずに止まる（#1941 の I4）
@@ -290,4 +316,4 @@ def cmd_design_results(a, read=read_results) -> tuple[dict, int | None]:
     summary = f"設計の結果を {len(res.rows)} 行読み、実装のプランを {len(items)} 本書いた: {out}"
     if res.unread:
         summary += "。設計の結果を読めなかった設計の課題: " + " ".join(f"#{n}" for n in res.unread) + "（今の振る舞いで流す）"
-    return result(TOOL, "ok", summary, items, {"rows": len(res.rows), "unread": res.unread, "design_prs": res.design_prs}), 0
+    return result(TOOL, "ok", summary, items, {"rows": len(res.rows), "unread": res.unread, "design_prs": res.design_prs, "dirs": dirs}), 0
