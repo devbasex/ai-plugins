@@ -92,20 +92,20 @@ Value 6 の棚卸しで、ai-plugins の形を前提にした箇所が 27 件見
 | family の `scripts/` の下の `.py`・`.sh`・`.js` | スクリプト用 |
 | manifest に載る Skill の `scripts/` の下の `.py`・`.sh`・`.js` | スクリプト用 |
 | family の `hooks/*.json` | スクリプト用 |
+| family の `agents/*.md`（エージェントの本文） | Markdown 用 |
 
 パスのどこかに `tests` か `experimental` のディレクトリを含むファイルは対象にしない。manifest に載らない Skill も対象にしない。
-`plugins/ndf/agents/` は走査の範囲の外で、エージェントの本文の前提は検査では止まらない。
 
-`--report` の 1 行目は family ごとの規模である（2026-11-08 の実測）。
+`--report` の 1 行目は family ごとの規模である（2026-11-12 の実測）。
 
 ```text
-plugins/ndf/skills: 公開する Skill 49 個 / Markdown 214 本 / スクリプト 506 本（family 363・Skill 143） / hook 2 本 / ヒット 208 件
-plugins/playwright-kit/skills: 公開する Skill 4 個 / Markdown 24 本 / スクリプト 8 本（family 0・Skill 8） / hook 0 本 / ヒット 14 件
+plugins/ndf/skills: 公開する Skill 49 個 / Markdown 218 本 / スクリプト 572 本（family 420・Skill 152） / hook 2 本 / エージェント 11 本 / ヒット 236 件
+plugins/playwright-kit/skills: 公開する Skill 4 個 / Markdown 24 本 / スクリプト 8 本（family 0・Skill 8） / hook 0 本 / エージェント 0 本 / ヒット 14 件
 ```
 
 ### 検知する語
 
-語の正本は検査の本体の 2 つの表（Markdown 用 14 語・スクリプト用 17 語）である。例外リストの `name` には語の ID を書く。
+語の正本は検査の本体の 2 つの表（Markdown 用 18 語・スクリプト用 17 語）である。例外リストの `name` には語の ID を書く。
 語そのものは `/` や `"` を含み、ファイル名にできないためである。スクリプト用の表のうち、境界に注意が要る語を次に示す。
 
 | ID | 正規表現 | 当たらない例 |
@@ -122,6 +122,9 @@ plugins/playwright-kit/skills: 公開する Skill 4 個 / Markdown 24 本 / ス�
 
 残りのスクリプト用の語は ai-plugins の置き場とチェックのコマンド（`ndf-dir`・`playwright-kit`・`build-runtime-plugins`・
 `check-skill-frontmatter`・`check-markdown-links`・`check-doc-line-limit`・`runtime-list`・`origin-develop`）である。
+Markdown 用の表は、特定のブランチ名で書いた手順も拾う（`develop-branch` の `\bdevelop\b`・`origin-main` の `origin/(?:main|master)\b`・
+`base-branch-name` の `--base[ =](?:main|master)\b`・`main-branch` の `` `(?:main|master)` ``）。手順はベースブランチ・本番チャネル・
+スプリントの起点の語で書き、名前は `.ndf/worktree.json` の宣言から読む（#3121）。
 語の表は網羅ではない。新しい形が見つかったら表へ足し、同じ変更で既知の当たりを宣言する。
 
 ### 宣言を読む 4 か所
