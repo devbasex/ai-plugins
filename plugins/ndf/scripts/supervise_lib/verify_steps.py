@@ -376,17 +376,45 @@ def with_escape(a, steps: list[dict]) -> list[dict]:
     return [*steps, {"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"}]
 
 
+def lint_whole_steps(a, fix_prompt: str, after: str, back_to: str) -> list[dict]:
+    """CI テストの宣言のある実装のプランで、`command` を持つ kind: lint の suite を手元で全体に打つステップ（`lint-all`）と、
+    その修正（`fix-lint-all`。直して `back_to` へ戻る）。テストを CI に任せても静的解析の不合格を見逃さない（全体テストの
+    test-all を外した代わり。round-only の戦略の範囲の静的解析もここで打つ）。該当する suite が無ければ置かない。"""
+    st = plan_strategy(a) or {}
+    if not any(s.get("kind") == ts.LINT and s.get("command") for s in st.get("suites") or []):
+        return []
+    limit = limit_arg("whole_timeout", plan_limits(a)["whole_timeout"])
+    return [
+        {
+            "id": "lint-all",
+            "type": "run",
+            "stage": "完了判定",
+            "timeout": with_margin(plan_limits(a)["whole_timeout"]),
+            "cmd": f"{TEST_RUN_PY} whole --only-kind lint{_template_arg(a)}{limit}",
+            "on_fail": "fix-lint-all",
+            "on_exit": {"2": "stop"},
+            "next": after,
+        },
+        {"id": "fix-lint-all", "type": "work", "kind": "修正", "inputs": ["lint-all"], "prompt": fix_prompt, "next": back_to},
+    ]
+
+
 def ci_only_to_merge(a, head: list[dict], fix_prompt: str) -> tuple[list[dict], str]:
     """CI テストの宣言のあるリポジトリの実装のプランのステップ（#3056 の決定 4・6・7）。戻りは（ステップ, 規則）。
 
     head の直後に Draft の PR を出し（`pr-draft`。本文は機械のテンプレートで LLM を呼ばない）、取り込み → 整形・同期・範囲の
-    静的解析 →（standard なら）設計との突き合わせ → pr と進む。手元でテストを走らせず、pr の後と doc-lint の後に CI の結果を
+    静的解析 → 静的解析の全体（`lint-all`。`command` を持つ kind: lint の suite があるとき）→（standard なら）設計との突き合わせ →
+    pr と進む。手元でテストを走らせず、pr の後と doc-lint の後に CI の結果を
     待たずに 1 回だけ読み（`ci-peek`・`ci-peek-2`）、落ちていれば `ci-fix` が直して整形から流れ直す。マージが落ちたら
     `ci-peek-merge` が読み直す。"""
     match = design_match_steps(a.issue, a.base, "pr") if a.mode in DESIGN_MATCH_MODES and a.issue else []
-    after_pre = match[0]["id"] if match else "pr"
+    after_lint = match[0]["id"] if match else "pr"
+    lint_all = lint_whole_steps(a, fix_prompt, after=after_lint, back_to="")
+    after_pre = lint_all[0]["id"] if lint_all else after_lint
     pre = pre_test_steps(a, fix_prompt, after=after_pre)
     first = pre[0]["id"] if pre else after_pre
+    if lint_all:
+        lint_all[-1]["next"] = first
     if head:
         head[-1]["next"] = "pr-draft"
     *base, back = base_sync_steps(f"--base {shlex.quote(a.base or '')}", first, push=False, on_error=None, returns=True, stage="実装")
@@ -410,6 +438,7 @@ def ci_only_to_merge(a, head: list[dict], fix_prompt: str) -> tuple[list[dict], 
         draft,
         *base,
         *pre,
+        *lint_all,
         *judge,
         *match,
         pr,

@@ -96,6 +96,27 @@ def test_a_form_widened_to_the_second_word_is_matched_by_the_runner(tmp_path, co
     assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
 
 
+PYTEST_DIRECT = {"name": "pytest", "runner": "pytest", "command": "pytest tests -q"}
+PYTEST_OPT = {"name": "pytest", "runner": "pytest", "command": "pytest -q"}
+
+
+@pytest.mark.parametrize("suite", [PYTEST_DIRECT, PYTEST_OPT])
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ("pytest tests/test_a.py -q", True),
+        ("pytest -q", True),
+        ("python3 -m pytest x", True),
+        ("grep -rn pytest tests", False),
+    ],
+)
+def test_a_path_or_option_second_word_does_not_widen_the_form(tmp_path, suite, command, denied):
+    """2 語目がパス（`tests`）かオプション（`-q`）の suite は、起動の形を広げずランナー 1 語で照らす。"""
+    root = repo(tmp_path, suites=(suite,))
+    (root / "tests").mkdir()
+    assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
+
+
 @pytest.mark.parametrize("only", [None, False])
 def test_without_the_declaration_nothing_is_denied(tmp_path, only):
     root = repo(tmp_path, only=only)

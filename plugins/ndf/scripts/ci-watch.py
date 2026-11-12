@@ -7,7 +7,7 @@ CI テストの宣言（`.ndf/project.json` の `test.ci.only: true`）のある
 マージが落ちた後に置く（`supervise_lib/verify_steps.ci_watch_steps`）。チェックの読み方は `merged-steps.py probe` と
 同じ（`merged_lib/reading.read_checks`。SKIPPED は通過）で、テストのチェック（`test.ci.check` → `ci.required_checks`。
 どちらも無ければ head のすべて）だけで結論を決める。落ちたチェックの名前・リンクと、失敗したジョブのログの末尾
-（`gh run view --log-failed` の最後の 200 行）を人が読む行として出し、記録 `<状態>/work/ci-watch.jsonl` へ 1 行を足す。
+（`gh run view --log-failed` の最後の 200 行。認証情報は伏せる）を人が読む行として出し、記録 `<状態>/work/ci-watch.jsonl` へ 1 行を足す。
 
 終了コード: 0 = 進めてよい（通った・未完了・チェックがまだ無い・取得できなかった）/ 1 = テストのチェックが落ちた（改修の回数は
 上限の内）/ 2 = 落ちたが改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix` の `attempts`）に当たった、または同じ head のまま前の改修が終わった /
@@ -32,6 +32,7 @@ import limits  # noqa: E402
 import project_decl  # noqa: E402
 import test_strategy as ts  # noqa: E402
 import run_core  # noqa: E402
+import secret_redact  # noqa: E402
 from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, gh_json, git_root, main_with, result  # noqa: E402
 
 from merged_lib.reading import read_checks  # noqa: E402
@@ -55,13 +56,13 @@ def _read_test_checks(root, pr: int, names: list[str]) -> tuple[str | None, dict
 
 
 def _failed_log(root, run: str | None) -> str:
-    """失敗したジョブのログの末尾。読めなければ空。"""
+    """失敗したジョブのログの末尾（認証情報は `secret_redact` で伏せる）。読めなければ空。"""
     if not run:
         return ""
     p = gh_parts.gh(["run", "view", str(run), "--log-failed"], cwd=root)
     if p.returncode != 0:
         return ""
-    return "\n".join(p.stdout.splitlines()[-LOG_TAIL_LINES:])
+    return secret_redact.redact_text("\n".join(p.stdout.splitlines()[-LOG_TAIL_LINES:]))
 
 
 def _print_failures(root, failed: list) -> None:

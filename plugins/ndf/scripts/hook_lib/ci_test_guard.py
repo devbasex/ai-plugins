@@ -5,7 +5,9 @@
 照らす。
 
 - 起動の形: suite の `command` の語のうち、`runner`（語そのものか、パスの最後の名前）と同じ語まで。`runner` が語に無ければ
-  `scope_command` の `{paths}` の前まで。前置きが 1 語だけになるときは `command` の 2 語目まで含める
+  `scope_command` の `{paths}` の前まで。前置きが 1 語だけになり、`command` の 2 語目がサブコマンド（`go test`・`npm test`・
+  `make test`）のときは 2 語目まで含める。2 語目が `-` で始まる語か、作業場所のパス（`/` を含む語・`.`・宣言のあるディレクトリから
+  見て在るファイルやディレクトリ）なら広げない（`pytest tests -q` の形はランナー 1 語で照らす）
 - 当たり: コマンドの語（包み `env`・`timeout` などと変数の代入を飛ばした後）が、起動の形の前置きで始まる。または
   起動の形のうちランナー（suite の `runner` の語。起動の形に無ければ起動の形の全体）から後の語の並びが語にあり、それより前の語が
   すべて起動の形の語かオプションである（ランナーの前のオプションを省いた・足した言い換え）。`python -m <ランナー>` はランナーの
@@ -37,13 +39,10 @@ REASON = (
 )
 
 
-def find_decl(start: str) -> dict:
-    """`start` から上へ辿って最初の `.ndf/project.json` のあるディレクトリの宣言（`project_decl` が読む）。無ければ空。"""
+def find_root(start: str) -> Path | None:
+    """`start` から上へ辿って最初の `.ndf/project.json` のあるディレクトリ。無ければ None。"""
     here = Path(start or os.getcwd()).resolve()
-    for d in (here, *here.parents):
-        if (d / project_decl.DECL).is_file():
-            return project_decl.read_project_decl(d)
-    return {}
+    return next((d for d in (here, *here.parents) if (d / project_decl.DECL).is_file()), None)
 
 
 def _base(word: str) -> str:
@@ -57,8 +56,15 @@ def _words_of(text: str) -> list[str]:
         return text.split()
 
 
-def launch_form(suite: dict) -> list[str]:
-    """suite の起動の形（前置きの語の並び）。組めなければ空。"""
+def _subcommand(word: str, root: Path | None) -> bool:
+    """`command` の 2 語目がサブコマンドか（オプション・作業場所のパスでない）。"""
+    if not word or word.startswith("-") or "/" in word or word in (".", ".."):
+        return False
+    return not (root is not None and (root / word).exists())
+
+
+def launch_form(suite: dict, root: Path | None = None) -> list[str]:
+    """suite の起動の形（前置きの語の並び）。組めなければ空。`root` は宣言のあるディレクトリ（2 語目がパスかを見る）。"""
     words = _words_of(str(suite.get("command") or ""))
     runner = str(suite.get("runner") or "")
     at = next((i for i, w in enumerate(words) if runner and _base(w) == runner), None)
@@ -67,7 +73,7 @@ def launch_form(suite: dict) -> list[str]:
     else:
         scope = str(suite.get("scope_command") or "")
         form = _words_of(scope.split("{paths}", 1)[0]) if "{paths}" in scope else []
-    if len(form) == 1 and len(words) > 1 and words[0] == form[0]:
+    if len(form) == 1 and len(words) > 1 and words[0] == form[0] and _subcommand(words[1], root):
         form = words[:2]
     return form
 
@@ -79,7 +85,7 @@ def runner_tail(suite: dict, form: list[str]) -> list[str]:
     return form[at:]
 
 
-def test_forms(decl: dict) -> list[tuple[str, list[str], list[str]]]:
+def test_forms(decl: dict, root: Path | None = None) -> list[tuple[str, list[str], list[str]]]:
     """(suite の名前, 起動の形, ランナーから後の語) の並び。宣言が無い・`test.ci.only` が真でなければ空。"""
     test = decl.get("test")
     if not isinstance(test, dict) or not isinstance(test.get("ci"), dict) or test["ci"].get("only") is not True:
@@ -87,7 +93,7 @@ def test_forms(decl: dict) -> list[tuple[str, list[str], list[str]]]:
     out = []
     for suite in test.get("suites") or []:
         if isinstance(suite, dict) and (suite.get("kind") or "test") == "test":
-            form = launch_form(suite)
+            form = launch_form(suite, root)
             if form:
                 out.append((str(suite.get("name") or "test"), form, runner_tail(suite, form)))
     return out
@@ -152,7 +158,8 @@ def ci_test_decision(ev: pl.Event) -> dict | None:
         cmd = ev.command_text()
     if not cmd:
         return None
-    forms = test_forms(find_decl(ev.command_cwd() or ev.cwd))
+    root = find_root(ev.command_cwd() or ev.cwd)
+    forms = test_forms(project_decl.read_project_decl(root), root) if root else []
     if not forms:
         return None
     for words in _launched_commands(cmd):

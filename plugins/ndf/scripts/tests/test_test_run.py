@@ -418,3 +418,18 @@ def test_ci_only_scope_without_lint_files_passes_without_running_tests(tmp_path,
     assert code == 0 and "lint の suite が無い" in out["summary"]
     code, out = _run(root, "scope", "--paths", "tests", "--only-kind", "test")
     assert code == 0 and "test の suite が無い" in out["summary"]
+
+
+def test_ci_only_whole_lint_runs_only_the_lint_commands(tmp_path):
+    """`whole --only-kind lint` は command を持つ静的解析だけを手元で打ち、テストの suite（false）も CI も待たない。"""
+    decl = _ci_only_decl()
+    decl["test"]["suites"][1]["command"] = "sh -n bad.sh"
+    root = _repo(tmp_path, decl)
+    (root / "bad.sh").write_text("echo hi\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 0, out
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 1, out
+    code, out = _run(_repo(tmp_path / "b", _ci_only_decl()), "whole", "--only-kind", "lint")
+    assert code == 0 and "lint の suite が無い" in out["summary"]

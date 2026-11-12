@@ -51,9 +51,8 @@ def test_impl_plan_has_no_local_tests_and_drafts_the_pr_right_after_impl(tmp_pat
     assert steps["impl"]["next"] == "pr-draft"
     draft = steps["pr-draft"]
     assert draft["type"] == "pr" and draft["body"] == "template" and draft["next"] == "base-sync"
-    assert steps["base-sync"]["next"] == "lint-limited" and steps["lint-limited"]["next"] == (
-        "design-tests" if mode == "standard" else "pr"
-    )
+    assert steps["base-sync"]["next"] == "lint-limited" and steps["lint-limited"]["next"] == "lint-all"
+    assert steps["lint-all"]["next"] == ("design-tests" if mode == "standard" else "pr")
     assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole"
 
 
@@ -69,7 +68,15 @@ def test_impl_plan_peeks_without_waiting_and_fixes_through_the_ci_watch(tmp_path
     assert steps["merge"]["on_fail"] == steps["merge-approved"]["on_fail"] == "ci-peek-merge"
     for step in _before_merge(plan):
         cmd = step.get("cmd") or ""
-        assert "test-run.py whole" not in cmd and "--watch" not in cmd
+        assert ("test-run.py whole" not in cmd or "--only-kind lint" in cmd) and "--watch" not in cmd
+
+
+def test_impl_plan_runs_the_whole_lint_locally(tmp_path):
+    """テストを CI に任せても、`command` を持つ静的解析の suite は手元で全体に打つ（scope_command だけでは見逃す）。"""
+    _, steps = _impl(tmp_path, _repo(tmp_path))
+    lint = steps["lint-all"]
+    assert "test-run.py whole --only-kind lint" in lint["cmd"] and lint["on_fail"] == "fix-lint-all"
+    assert steps["fix-lint-all"]["type"] == "work" and steps["fix-lint-all"]["next"] == "lint-limited"
 
 
 def test_fix_plan_drafts_the_pr_first(tmp_path):

@@ -30,7 +30,8 @@ if a[:2] == ["pr", "view"]:
         sys.stderr.write("HTTP 502\n"); sys.exit(1)
     print(json.dumps(pr)); sys.exit(0)
 if a[:2] == ["run", "view"] and "--log-failed" in a:
-    print("\n".join(f"line {{i}}" for i in range(300))); sys.exit(0)
+    print("\n".join(f"line {{i}}" for i in range(299)))
+    print("line 299 https://x-access-token:ghs_SECRETSECRET1234@github.com/o/r Authorization: Bearer abc.def"); sys.exit(0)
 sys.exit(1)
 """
 
@@ -118,6 +119,7 @@ def test_the_failed_log_is_read_once_per_run(tmp_path, repo):
     (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}, "suites": []}}), encoding="utf-8")
     code, _, text = peek(tmp_path, repo, "a1", *fails)
     assert code == 1 and text.count("line 299") == 1 and "CI / pytest (3.11), CI / pytest (3.12) の失敗した" in text
+    assert "ghs_SECRET" not in text and "abc.def" not in text and "x-access-token:***" not in text and "***@github.com" in text
 
 
 def test_unreadable_is_recorded_and_goes_on(tmp_path, repo):
