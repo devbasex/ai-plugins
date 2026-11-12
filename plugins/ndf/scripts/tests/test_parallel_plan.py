@@ -101,6 +101,16 @@ def test_ready_lanes_waits_for_dependency():
     assert [ln.name for ln in pp.ready_lanes(plan, {"lroot", "lflow"}, {"lflow"})] == ["lfac"]
 
 
+def test_a_sprint_lane_ends_on_its_end_record_and_a_loop_lane_keeps_its_end():
+    """1 スプリントのレーンの最初の入力は終わりの記録の行を「終わり」に持ち、開発ループのレーンは今のまま（#3058 の A1・A8）。"""
+    sprint = pp.Lane(name="la", input={"kind": "sprint", "issues": [1, 2]}, plans=1, touches=[])
+    loop = pp.Lane(name="lc", input={"kind": "loop", "loop": "main", "args": ["--milestones=m1"]}, plans=1, touches=[])
+    assert sprint.start_command("p1") == "/goal /ndf:development-workflow #1 #2 -- 終わり: [ndf-parallel] lane-end p1 la の行を出したとき"
+    assert loop.start_command("p1") == (
+        "/goal /ndf:development-workflow --loop main --milestones=m1 -- 終わり: [ndf-loop] stopped main の行を出したとき"
+    )
+
+
 def _git_main(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".ndf").mkdir()  # 引継ぎ文書の置き場（development-workflow の手順 0 が作る）

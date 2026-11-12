@@ -361,3 +361,32 @@ def test_parallel_carried_does_not_read_github_and_notifies(tmp_path, monkeypatc
     status, kw = got.value.args[0]
     assert status == "ok" and kw["added"] == [12] and kw["notified"] and seen == [[]]
     assert sent == [({"n": 1, "phase": "carried", "carried": {"from": "sha1", "head": "sha2", "prs": [12]}}, "carried:1")]
+
+
+# ---- 承認したコミットのまま出す（#3070） ----
+
+REAL_PATCHED = durable.patched  # env が差し替える前の値（印 parallel-approved-sha の後の記録の道を流すテストが戻す）
+
+
+def test_a_new_record_releases_the_approved_commit_and_carries_the_rest_to_the_next_release(env, tmp_path, carry, monkeypatch):
+    """#3070 の C1・C2・C5: 計画 p5 のリリース 6 の形（提示 1 の後にコードを含む Pull Request と開発版の版上げが develop へ入り、
+    その後に承認する）で、提示 2 を作らずに提示 1 のコミットで released になり、加わった範囲の依頼は次のリリースで答えられる。"""
+    monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-lane-end" else REAL_PATCHED(n))
+    main = env["main"]
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    presented(main, 1, "sha1", [10])
+    late = pl.send_release_request(main, "p1", "lb", [62], [2], tmp_path / "s2")  # 提示 1 の後にコードを含む PR が入った
+    env["heads"]["v"] = "sha2"  # 開発版の版上げで develop の先頭が進んだ
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    ev = confirmed(main)
+    assert ev["k"] == 1 and ev["plan"].endswith("/1/1/release.json") and not ev.get("carried")
+    assert carry["checks"] == [] and [b for b in carry["built"] if b[0] == 1] == [(1, 1, False)]
+    assert not prl.release_dir(main, "p1", 1, 2).exists()  # 出し直しの提示を作らない（C1）
+    resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
+    assert read(main, rid)["result"] == "released"
+    rng = until(lambda: event(main, "p1", "range-1"))
+    assert (rng["sha"], rng["prs"]) == ("sha1", [10])
+    assert until(lambda: pl.read_answer(main, "p1", late)[1])["seq"] == 1  # 今のリリースでは答えず次へ回す（C2）
+    until(lambda: prl.release_dir(main, "p1", 2, 1).exists())  # 加わった範囲の依頼で次のリリースを組む

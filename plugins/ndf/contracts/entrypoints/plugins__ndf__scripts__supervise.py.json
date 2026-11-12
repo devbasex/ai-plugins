@@ -92,6 +92,7 @@
     "approved-txt",
     "breakdown-md",
     "checkpoint-json",
+    "lane-verify-json",
     "lease-json",
     "outside-plan-jsonl",
     "phase-result-json",

@@ -53,6 +53,7 @@
 | `estimates-json` | `estimates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `handoff-mark-json` | `*.handoff.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `judgments-json` | `judgments.json` | state | main | `plugins/ndf/scripts/mode-materials.py:write_draft` | `plugins/ndf/skills/development-workflow/references/loop.md` |
+| `lane-verify-json` | `lane-verify.json` | record | main | `plugins/ndf/scripts/supervise.py` | — |
 | `laps-md` | `laps.md` | report | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |

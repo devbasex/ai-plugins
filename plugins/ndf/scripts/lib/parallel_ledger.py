@@ -28,7 +28,8 @@ from usage_ledger import ndf_version, now_utc
 VERSION = 1
 LEDGER = "ledger.jsonl"
 CHECKPOINT = "checkpoint.json"
-TAKE = ("request", "gate1", "gate2", "ask", "unmatched", "answer", "stop", "left_stopped", "lanes_changed")  # `_Run.take` へ渡す
+ENDS = ("lane_end", "lane_halt", "verify", "verified")  # レーンの終わりと版の要るまとめの行（#3058。`_Run.take_end`）
+TAKE = ("request", "gate1", "gate2", "ask", "unmatched", "answer", "stop", "left_stopped", "lanes_changed", *ENDS)  # `_Run.take` へ渡す
 QUESTIONS = ("gate1", "gate2", "ask", "unmatched")
 RECORD = ("opened", "closed", "rebuilt", "role")  # 耐久ワークフローの状態へ反映しない行
 KINDS = (*TAKE, "resume", *RECORD)
@@ -39,7 +40,7 @@ LOST = ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 FIELDS = (
     "lanes", "pending", "questions", "releases", "launch", "held", "answered", "received", "refusals", "stall_until",
     "helper_asked", "held_spawned", "wake", "revive", "revive_at", "stop", "force", "left_stopped", "superseded", "holds",
-    "launches", "helper_seen", "woken", "wake_tries",
+    "launches", "helper_seen", "woken", "wake_tries", "verifies", "verifying", "verify_plans",
 )  # fmt: skip
 SETS = ("answered", "left_stopped", "superseded", "woken")
 
