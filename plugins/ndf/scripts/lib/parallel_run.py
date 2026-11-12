@@ -390,22 +390,33 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
             return
         if self.relaunch(q, choice) or prt.STOP_PLAN not in choice:
             return
+        self._apply_stop(q)
+
+    def _apply_stop(self, q: dict) -> None:
+        """「止める」を問いの種類ごとに当てる。枝は上から順に選ぶ。"""
         if q.get("kind") == "stall" and self.launching and q.get("lane") in self.lanes:
             step_stop_lanes(self.main, [q["lane"]])  # 古い記録の打ち直しへは足さない（旧版はこの答えで何もしなかった）
         elif q.get("kind") == "spawn" and str(q.get("purpose") or "").startswith("held-"):
             self.stop = True  # 保留したループの残りを流す一時レーンを起こせない: 保留の中身はループの記録に残したまま計画を止める
         elif q.get("kind") == "spawn" and q.get("lane") in self.lanes:
-            lane = q["lane"]
-            self.lanes[lane].update(started=True, state="stopped", given_up=True)
-            # reply が持ち主を再開待ちへ加えた後でも、止めたレーンを起こす 1 行と再開待ちから外す（計画を終えられるように）
-            self.wake = [n for n in self.wake if n != lane]
-            self.revive = [n for n in self.revive if n != lane]
-            self.revive_at.pop(lane, None)
+            self._give_up_lane(q["lane"])
         elif q.get("kind") in ("helper", "spawn") and (rel := self.current) is not None and q.get("n") == rel["n"]:
-            if not rel.get("prs"):  # 提示の前に止まったなら、このリリースへ入れた依頼の Pull Request を範囲として締める
-                own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
-                rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
-            self.settle(rel, {"result": "failed", "reason": "リリースの途中で止まった一時レーンを、人が止めると答えた"})
+            self._fail_current_release(rel)
+
+    def _give_up_lane(self, lane: str) -> None:
+        """起動を諦めたレーンを止まったものと数える。"""
+        self.lanes[lane].update(started=True, state="stopped", given_up=True)
+        # reply が持ち主を再開待ちへ加えた後でも、止めたレーンを起こす 1 行と再開待ちから外す（計画を終えられるように）
+        self.wake = [n for n in self.wake if n != lane]
+        self.revive = [n for n in self.revive if n != lane]
+        self.revive_at.pop(lane, None)
+
+    def _fail_current_release(self, rel: dict) -> None:
+        """一時レーンが止まったリリースを失敗として締める。"""
+        if not rel.get("prs"):  # 提示の前に止まったなら、このリリースへ入れた依頼の Pull Request を範囲として締める
+            own = {n for r in self.pending if r["id"] in rel.get("requests", []) for n in r.get("prs") or []}
+            rel["prs"] = step_presented(rel["dirs"][-1]).get("prs") or sorted(own)
+        self.settle(rel, {"result": "failed", "reason": "リリースの途中で止まった一時レーンを、人が止めると答えた"})
 
     def count_refusal(self, n: str, why: str) -> None:
         """起動か再開の断りを数え、既定 3 回続けて断られるたびに理由を添えて問う（異常系 17）。"""
