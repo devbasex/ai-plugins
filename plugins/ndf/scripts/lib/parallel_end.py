@@ -217,18 +217,24 @@ class LaneEnding:
                 self._ask_unended(n, self.lanes[n], rows.get(n) or {})
         self._watch_verify(rows)
 
+    def _try_halt(self, n: str, st: dict) -> bool:
+        """止める記録の無い終わったレーンのラッパーを止めにいく。この観測で問いの判断へ進んでよければ True。"""
+        ended = st["ended"]
+        if ended.get("by") == "organizer":  # 終わったと数えると答えたレーンはラッパーが止まっている。止める 1 行は打たない
+            st["halt"] = {"result": "stopped", "code": None, "state": "stopped", "at": ended.get("at")}
+            return False
+        at = clock.parse(ended.get("at"), naive="utc")
+        if at is not None and self.seen_at - at.timestamp() < HALT_DELAY:
+            return False
+        st["halt"] = step_halt(self.main, self.name, n)
+        if st["halt"].get("result") == "stopped":
+            st["state"] = "stopped"
+        return True
+
     def _halt_or_ask(self, n: str, st: dict) -> None:
-        if not st.get("halt"):
-            ended = st["ended"]
-            if ended.get("by") == "organizer":  # 終わったと数えると答えたレーンはラッパーが止まっている。止める 1 行は打たない
-                st["halt"] = {"result": "stopped", "code": None, "state": "stopped", "at": ended.get("at")}
-                return
-            at = clock.parse(ended.get("at"), naive="utc")
-            if at is not None and self.seen_at - at.timestamp() < HALT_DELAY:
-                return
-            st["halt"] = step_halt(self.main, self.name, n)
-            if st["halt"].get("result") == "stopped":
-                st["state"] = "stopped"
+        """止まったと観えれば止められなかった問いを片付け、止まらなければ問いを立てる。"""
+        if not st.get("halt") and not self._try_halt(n, st):
+            return
         open_q = [q for q in self.questions if q.get("kind") == "halt" and q.get("lane") == n]
         if st.get("state") == "stopped":
             if open_q:  # 止まって観えた: 止められなかった問いは役目を終える
