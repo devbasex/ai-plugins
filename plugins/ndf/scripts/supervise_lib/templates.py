@@ -9,7 +9,7 @@ from pathlib import Path
 
 from step_result import result
 from supervise_lib import limits, release_templates
-from supervise_lib.decl import sync_source, with_decls
+from supervise_lib.decl import check_flags, check_issues, sync_source, with_decls
 from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.paths import refactor_step_seconds
 from supervise_lib.procedures import (
@@ -346,29 +346,6 @@ RULE_CHECK_SINCE = (
     "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、"
     "修正に無関係なら finish。2 回直しても同じなら abort。"
 )
-
-
-def check_flags(a, no_refactor: bool) -> str:
-    """`eval`・`prepare` へ渡す範囲の引数（--review / --since / --sprint / --issue）。"""
-    flag = " --review" if no_refactor else ""
-    if getattr(a, "since_ref", None):
-        flag += f" --since {shlex.quote(a.since_ref)}"
-    if getattr(a, "final_sprint", None):
-        # 最後の検査（#3126）: 範囲をスプリントに属しまだ検査していない PR に絞る
-        flag += f" --sprint {shlex.quote(a.final_sprint)}"
-        if a.issue:
-            flag += " --issue " + " ".join(str(int(i)) for i in a.issue)
-    return flag
-
-
-def check_issues(a) -> list[int]:
-    """検査の課題: `--issue` か、無ければ `--sprint` の JSON の issues（読めなければ空）。"""
-    if a.issue or not getattr(a, "sprint", None):
-        return list(a.issue or [])
-    try:
-        return [int(i) for i in json.loads(Path(a.sprint).read_text()).get("issues", [])]
-    except (OSError, ValueError, TypeError):
-        return []
 
 
 def check_since_steps(a, name: str, flag: str, no_refactor: bool) -> list[dict]:
