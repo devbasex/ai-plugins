@@ -402,17 +402,10 @@ def docs_only_files(root: Path, files: list[str]) -> bool:
     return kinds.docs_only() and not kinds.behavior
 
 
-def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], sprint: str, issues: set[int], review: bool) -> FinalScope:
-    """範囲の起点から先頭までの PR を「範囲に入る」「ほか」「検査済み」に分け、印を進めてよい位置を求める。
-    git と検査の記録を読むだけで書かない。"""
-    skip = {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)}
-    seen, passed = checked_prs(events, review)
-    try:
-        merges = merged_range.merges_in(root, frm, to)
-        heads = {m.number: m.branch for m in merged_range.with_heads(root, [m for m in merges if m.number not in skip])}
-    except StepError as e:
-        raise Stop(str(e), e.code)
-    merges = list(reversed(merges))  # first-parent の古い順
+def _classify_merges(
+    root: Path, merges: list, heads: dict, skip: set[int], seen: set[int], passed: set[int], sprint: str, issues: set[int], decl: dict
+) -> tuple[list[int], list[dict], list[int], list[int], list[bool]]:
+    """古い順の PR を「範囲に入る」（位置と PR）「ほか」「検査済み」に分け、印を進める位置の判定で越えてよい PR かを並べる。"""
     kept_at: list[int] = []
     kept: list[dict] = []
     other: list[int] = []
@@ -433,11 +426,32 @@ def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], s
             removable.append(True)
             continue
         removable.append(m.number in passed)
+    return kept_at, kept, other, checked, removable
+
+
+def _advance_to(merges: list, removable: list[bool]) -> str:
+    """先頭から越えてよい PR が続く最後のコミット（I4）。空なら進めない。"""
     advance_to = ""
     for m, ok in zip(merges, removable):
         if not ok:
             break
         advance_to = m.sha
+    return advance_to
+
+
+def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], sprint: str, issues: set[int], review: bool) -> FinalScope:
+    """範囲の起点から先頭までの PR を「範囲に入る」「ほか」「検査済み」に分け、印を進めてよい位置を求める。
+    git と検査の記録を読むだけで書かない。"""
+    skip = {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)}
+    seen, passed = checked_prs(events, review)
+    try:
+        merges = merged_range.merges_in(root, frm, to)
+        heads = {m.number: m.branch for m in merged_range.with_heads(root, [m for m in merges if m.number not in skip])}
+    except StepError as e:
+        raise Stop(str(e), e.code)
+    merges = list(reversed(merges))  # first-parent の古い順
+    kept_at, kept, other, checked, removable = _classify_merges(root, merges, heads, skip, seen, passed, sprint, issues, decl)
+    advance_to = _advance_to(merges, removable)
     files = list(dict.fromkeys(f for i in kept_at for f in files_of_merge(root, merges[i].sha)))
     lines = sum(changed_lines(root, f"{merges[i].sha}^1", merges[i].sha) for i in kept_at)
     interleaved = (kept_at[-1] - kept_at[0] + 1 - len(kept_at)) if kept_at else 0
