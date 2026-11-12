@@ -22,11 +22,15 @@ def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None, cwd: 
     pending はループ名で、保留したループの 1 回の残りを流す一時レーン（異常系 11）。cwd は別のリポジトリのループのリポジトリで、
     一時レーンをそこで起こす（`loop pending` がそのループの記録を読む。#2733）。"""
     what = f"pending {pending}" if pending else f"{n} {k}"
-    helper = pr.helper_name(name, n)
+    return {**_spawn_input(name, pr.helper_name(name, n), what), "cwd": cwd}
+
+
+def _spawn_input(name: str, helper: str, what: str) -> dict:
+    """計画 `name` の一時レーン `helper` に `--parallel-helper <計画名> <what>` を流させる起動の入力（`cwd` は打たない場所の None）。"""
     # 終わりに自分のラッパーを止める（判断 fca6fe464619 の (a)）。止めないと対話の claude が入力待ちで残り、続きの一時レーンが断られる
     end = f"[ndf-parallel] helper-done {name} の行を出し、python3 {RELAY} stop {helper} で自分のラッパーを止めたとき"
     first = f"/goal /ndf:development-workflow --parallel-helper {name} {what} -- 終わり: {end}"
-    return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": cwd}
+    return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": None}
 
 
 AGAIN_RE = re.compile(r"-again\d+$")  # 組み直しの依頼の id（`<元の依頼>-again<連番>`。parallel_route.apply_build）
@@ -35,9 +39,7 @@ AGAIN_RE = re.compile(r"-again\d+$")  # 組み直しの依頼の id（`<元の�
 def verify_spawn(name: str, rid: str, helper: str) -> dict:
     """版の要るまとめ（リリース後テスト → 課題を閉じる）を流す一時レーンを起こす入力（#3058 の決定 4）。流すものは
     `parallel.py verified <計画名> <依頼>` が返し、終わりに同じ副命令へ `--done` を渡して結果を返す。"""
-    end = f"[ndf-parallel] helper-done {name} の行を出し、python3 {RELAY} stop {helper} で自分のラッパーを止めたとき"
-    first = f"/goal /ndf:development-workflow --parallel-helper {name} verify {rid} -- 終わり: {end}"
-    return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": None}
+    return _spawn_input(name, helper, f"verify {rid}")
 
 
 def verify_task(main: Path, name: str, rid: str) -> Optional[dict]:
