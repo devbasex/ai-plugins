@@ -166,5 +166,6 @@
 | [ndf-parallel-lane-end-and-verify-close.md](ndf-parallel-lane-end-and-verify-close.md) | 並列の計画の 1 スプリントのレーンが、リリースの依頼の後に答えを待たずに版の要らないまとめを流し、終わりの記録（台帳の行 lane_end）で耐久ワークフローに止められること。止められなかったレーンと終わりの記録の無い停止の問い、released の後に一時レーンが流す版の要るまとめ、差し戻しの届け方、承認したコミットのまま出すこと |
 | [ndf-parallel-empty-requests-and-settled-gates.md](ndf-parallel-empty-requests-and-settled-gates.md) | 並列の計画のレーンのまとめで、リリースの依頼のプランが最終の検査の実行条件を持つこと、Pull Request がすべてマージされずに閉じた依頼をリリースを組む直前に答えて外すこと、確定か締めで処理したリリース承認ゲートを答え待ちの依頼に数えないこと（settled_gates） |
 | [ndf-sprint-final-check-scope.md](ndf-sprint-final-check-scope.md) | スプリントのまとめの最後の検査を確定仕様化のマージの後に置き、範囲をスプリントに属しまだ検査していない Pull Request に絞ること（check-trigger.py の --sprint・final_scope）、検査の印を進めてよい位置、検査の Pull Request の起点と先頭の合わせ方 |
+| [ndf-whole-test-ci-wait-conflict-stop.md](ndf-whole-test-ci-wait-conflict-stop.md) | CI に任せる全体テストの待ちが、ベースブランチと衝突した Pull Request を照会のたびに読み（fetch_mergeable）、上限まで待たずに stopped で止まり base-sync を次の 1 手に示すこと |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
