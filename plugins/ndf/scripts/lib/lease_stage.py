@@ -119,6 +119,10 @@ def hold(entry_id: str, sub: str = "", *, repo_root: Path | str | None = None, *
         out = lease.acquire(decl, key, f"{entry_id} {sub}".strip(), _stage_run_id(), lease.lease_repo(repo_root))
     except lease.LeaseError as e:
         _stop_lease(entry_id, str(e), step_result.EXIT_VIOLATION, "record")
+    if out.outcome == "refused" and decl.shared:
+        out.outcome = "shared"  # 持ち主の鍵には触れない。取っていないので返さない
+        step_result.ATTACH["lease"] = out.as_json()
+        return out
     if out.outcome == "refused":
         _stop_lease(entry_id, _refusal_summary(out), LEASE_REFUSED, "refused", REFUSED_NEXT, out.as_json())
     if out.outcome == "no_session" and not decl.release:

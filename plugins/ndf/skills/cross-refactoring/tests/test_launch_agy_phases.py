@@ -130,17 +130,17 @@ def test_a_timeout_of_another_phase_is_not_used(tmp_path) -> None:
     assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT['fix']}s"
 
 
-def test_start_phase_records_the_timeout_that_the_launcher_reads(tmp_path, cmd_setup, env_tmp_dir) -> None:
-    """I1 と I2 の受け渡し: `start-phase` が書いた上限を起動側がそのまま使う。"""
+def test_start_phase_records_the_timeout_that_the_launcher_reads(tmp_path, cmd_setup, cmd_phases, env_tmp_dir) -> None:
+    """I1 と I2 の受け渡し: `start-phase` が書いた上限（安全網の残り + 余裕。#2457 決定 5）を起動側がそのまま使う。"""
     import argparse
 
     state_path = _state(tmp_path, implementer=RUNTIME, limits={"margin_seconds": 90, "implement_end_at": "2099-01-01T00:00:00+00:00"})
     env_tmp_dir(state_path)
     git("init", "-q", cwd=tmp_path / "work")
     git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init", cwd=tmp_path / "work")
-    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    cmd_phases.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
     record = read_state(state_path)["phases"]["implement"]
-    assert record["cli_timeout"] == record["timeout"] + 90
+    assert record["cli_timeout"] > record["timeout"] > 0
 
     result, args_file = _run(state_path, tmp_path, RUNTIME, "implement", "130")
     assert result.returncode == 0, result.stderr
@@ -150,6 +150,27 @@ def test_start_phase_records_the_timeout_that_the_launcher_reads(tmp_path, cmd_s
         time.sleep(0.05)
     args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
     assert args[args.index("--print-timeout") + 1] == f"{record['cli_timeout']}s"
+
+
+@pytest.mark.parametrize("phase", ["propose", "plan", "judge"])
+def test_start_phase_extends_the_step_by_the_declared_cli_timeout(tmp_path, cmd_setup, cmd_phases, env_tmp_dir, monkeypatch, phase) -> None:
+    """提案・計画・成立判定も、宣言の CLI の上限（参加者で最長）の分だけ親のステップを延ばしてから起動させる（#2457 決定 8）。"""
+    import argparse
+    import sys
+
+    import limits as limit_decl
+
+    state_path = _state(tmp_path, implementer=RUNTIME)
+    env_tmp_dir(state_path)
+    git("init", "-q", cwd=tmp_path / "work")
+    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init", cwd=tmp_path / "work")
+    monkeypatch.setenv("MONITOR_TIMEOUT_KIRO", "7000")
+    seen: list = []
+    monkeypatch.setattr(sys.modules["refactor_lib.step_extend"], "ahead", lambda seconds, reason: seen.append(seconds) or True)
+
+    cmd_phases.cmd_start_phase(argparse.Namespace(id=130, phase=phase))
+
+    assert seen == [7000 + limit_decl.cli_margin()]
 
 
 def test_unknown_phase_stops_before_writing_a_prompt(tmp_path) -> None:

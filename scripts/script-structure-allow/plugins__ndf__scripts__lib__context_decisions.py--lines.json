@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/context_decisions.py", "name": "", "kind": "lines", "reason": "498 行だったところへ cross-refactoring（#2979）で作業の識別子で行を絞る of_work を足して 503 行（report_work・context-trial.trial_row の同じ条件をまとめた）。500 行以下にしたら消す", "lines": 503}

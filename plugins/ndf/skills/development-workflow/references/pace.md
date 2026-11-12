@@ -130,12 +130,34 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | `loop.same_failure` | 1 以上の整数 | 2 | 同じ失敗（課題の組・計画の種類・止まったところ）が続いたら止まる回数 |
 | `loop.max_issues` | 1 以上の整数 | 3 | 1 周の課題の上限。候補は `loop start` の実行環境の調査が出し、書くのは人である |
 | `parallel.answer_limit.plan` / `lane` | 正の整数 | 8 / 3（正の整数でない値は既定へ戻して警告を出す） | 並列の計画の答え待ちの閾値。超えるとレーンが区切りで止まる。手順は [parallel.md](parallel.md) の「答え待ちの停止」 |
+| `business_hours` | オブジェクト | 宣言なし（業務時間内として扱う） | 業務時間。下の「業務時間」 |
 
 **`loop` 節は `read_loop` だけが読む。** 節の形が誤っていても、`fast` / `auto` / トリガー / MVV 判定は今どおり動き、
 ループの開始だけが断る。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの領域にも当たらないファイルは、ディレクトリの
 先頭 3 階層（例 `plugins/ndf/skills`）を領域の名前にする。
+
+### 業務時間
+
+業務時間は、利用者が承認ゲートへ答えられる時間帯である。書いたリポジトリでは、業務時間外に開発ループが設計を要る課題を先に選び
+（[loop.md](loop.md) の「業務時間外の選定」）、オーガナイザーが設計の承認と問いを溜めて業務時間の始めにまとめて示す
+（[parallel.md](parallel.md) の「業務時間外の依頼」）。値は利用者が書く。
+
+```json
+{"version": 1, "business_hours": {"timezone": "Asia/Tokyo", "days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "18:00"}}
+```
+
+| 項目 | 規則 |
+| --- | --- |
+| `timezone` | IANA の時刻帯の名前（必須）。判定はこの時刻帯だけで行い、実行するマシンの時刻帯に依らない。`+09:00` のようなオフセットは受けない |
+| `days` | `mon`〜`sun` の重ならない 1 個以上の配列 |
+| `start` / `end` | `HH:MM`（00:00〜23:59）。`start` を含み `end` を含まない。`start` は `end` より前にする（日をまたぐ宣言は受けない） |
+
+- 不正な宣言は、宣言全体を無いものとして扱う（一部の項目だけを既定へ戻さない）。`loop start`・`parallel.py check`・`start` が
+  `rule: business-hours` の警告を出し、ループも計画も止めない
+- 祝日と休暇は扱わない。止めたい日は `days` を書き換える
+- 判定はループの 1 回の境とオーガナイザーの `wait` でだけ行う。動いているプランと流れているリリースは、業務時間の境をまたいでも止めない
 
 ## スプリントを始める
 
@@ -205,10 +227,15 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
 **スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
-最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request →（リリース記録があれば `release-verify` リリース後テスト →）`retro` 振り返り → `close` 後片付け → `refine` 棚卸し）
-を `--then` のステージで流す。`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題>
---final-stage 振り返り --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。`refine` は `close` が 0 で終わったときだけ届き（スプリントを閉じてから棚卸しへ進む）、棚卸しを無人で通す（承認の要る反映は
-行わず、承認資料のパスと番号を報告に載せて終える）。まとめのプランは課題すべてへ
+最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
+`deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）
+を `--then` のステージで流す。確定仕様化の Pull Request の CI は ready から進み、リリース後テスト・振り返り・棚卸しと重なる。
+`deep-due` は `upkeep.py depth due diff` で、開発ループでは 3 回のループの 1 回（`.ndf/backlog.json` の `depths.diff.every`）に 1 回、
+ループの外では毎回起動する。起動しない回は `merge` へ飛び、報告の「走らなかったステップ」に次に走る時点が載る。
+`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題> --final-stage-from <進捗記録> --with-verification` で、
+同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする。本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。
+`close` は `merge` の後にだけ走り、確定仕様化の Pull Request がマージされなかった回は課題を開いたまま残す。`refine` は棚卸しを無人で通し（承認の要る反映は
+行わず、承認資料のパスと番号を報告に載せて終える）、今の回の課題を閉じない。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
 リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが入り、
 `close` のステップの `--record-pr` は、リリースの Pull Request で届く経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、

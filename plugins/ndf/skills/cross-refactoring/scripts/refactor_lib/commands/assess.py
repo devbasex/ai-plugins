@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+import diff_kinds
 import proc
 
 from .. import paths
@@ -27,6 +28,9 @@ def cmd_assess(args: argparse.Namespace) -> None:
     69 = 依存が欠けた（`deps.require` が `refactor.py` の import の時点で止めた。判定していない）。
     **2 を飛ばしてよいと読まない。** 判定できないことは飛ばす理由にならない。
 
+    差分が文書のファイルだけ（`lib/diff_kinds.py`。#2925）なら、行数を数えずに 3 を出す。差分の一覧か
+    文書の分け方の宣言が読めなければ、文書だけと判定せず本番コードの行数の判定へ進む。
+
     退避の 3 条件（テストが無い・CLI が使えない・範囲を絞れない）は見ない。それらは
     `init` が止めて知らせる。
     """
@@ -35,6 +39,11 @@ def cmd_assess(args: argparse.Namespace) -> None:
     except proc.StepError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(UNDECIDABLE)
+    kinds = diff_kinds.classify_root(root, diff_kinds.git_changed(root, f"{args.base}...HEAD"))
+    if kinds.docs_only():
+        print("判定: 飛ばしてよい")
+        print(f"理由: 差分が文書のファイルだけ（文書 {len(kinds.docs)} ファイル）")
+        sys.exit(SKIP)
     changes = production_code_changes(str(root), args.base)
     if changes is None:
         print(f"ERROR: 起点 {args.base} から HEAD までの差分を取れません", file=sys.stderr)

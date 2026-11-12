@@ -21,8 +21,8 @@ from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.progress_watch import ProgressWatch
 import limits
-from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
-from supervise_lib.steps import RunStep, deliver_skills, last_json
+from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, RESULT_PROMPT, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT, system_for
+from supervise_lib.steps import RunStep, deliver_skills, is_gate, last_json
 import project_mvv
 
 # worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
@@ -41,6 +41,12 @@ def result_file_of(ctx, step: dict) -> Path:
 
 def result_prompt(path: Path) -> str:
     return RESULT_PROMPT.format(path=path, step_result=STEP_RESULT_PY)
+
+
+def ci_only_plan(ctx) -> bool:
+    """CI テストの宣言のあるプランか（計画の `テストの戦略` の `ci_only`。`verify_steps.test_meta` が書く。#3056）。"""
+    meta = (getattr(ctx, "plan", None) or {}).get("テストの戦略")
+    return isinstance(meta, dict) and bool(meta.get("ci_only"))
 
 
 def _timeout(step: dict) -> int:
@@ -96,7 +102,7 @@ class WorkStep:
 
         `block` は `deliver_skills` が返した Skill の本文の節で、種類の文と MVV の節の間へ入れる。"""
         rt = step.get("runtime")
-        system = WORK_SYSTEM + block + self.mvv_system(ctx)
+        system = system_for(WORK_SYSTEM, ci_only_plan(ctx)) + block + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
             return self.call_claude_worker(ctx, step, system, prompt, cwd)
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
@@ -195,7 +201,7 @@ class WorkStep:
             prompt = step["prompt"]
         prompt += "\n\n" + result_prompt(rfile)
         full = bool(step.get("full"))
-        system = FULL_SYSTEM + block + self.mvv_system(ctx)
+        system = system_for(FULL_SYSTEM, ci_only_plan(ctx)) + block + self.mvv_system(ctx)
         if full:
             res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), full=True)
         else:
@@ -331,6 +337,9 @@ class DriveStep:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
         # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
         code = 0 if ok else (EXIT_INCOMPLETE if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        if not ok and out and out.get("status") == "gate" and is_gate((out.get("metrics") or {}).get("exit")):
+            # 人へ渡す止まり（cross-refactoring の安全網など。#2457 決定 8）は承認ゲートの終了コードのまま控える
+            code = int(out["metrics"]["exit"])
         if code == EXIT_INCOMPLETE:
             ctx.state.cur["gaps"] = list(out.get("gaps") or [])  # フェーズレポートの「欠けを残して進んだステップ」（#2047 の決定 5）
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))

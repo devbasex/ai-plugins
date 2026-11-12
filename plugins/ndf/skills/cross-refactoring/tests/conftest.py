@@ -50,6 +50,7 @@ def refactor() -> types.ModuleType:
 _MODULES = (
     "commands.converge",
     "commands.final_fix",
+    "commands.flaky",
     "commands.gate",
     "commands.implement",
     "commands.merge_fix",
@@ -86,6 +87,7 @@ _MODULES = (
     "scope",
     "scope_check",
     "targets",
+    "trailers",
     "triage",
     "undo",
     "verify",
@@ -97,10 +99,7 @@ _MODULES = (
 def _module_fixture(name: str, fixture_name: str):
     @pytest.fixture(scope="session", name=fixture_name)
     def _fixture(refactor: types.ModuleType) -> types.ModuleType:
-        module = sys.modules[f"refactor_lib.{name}"]
-        if name == "commands.setup":
-            module.cmd_start_phase = sys.modules["refactor_lib.commands.phases"].cmd_start_phase
-        return module
+        return sys.modules[f"refactor_lib.{name}"]
 
     return _fixture
 

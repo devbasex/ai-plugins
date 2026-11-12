@@ -13,9 +13,20 @@
   },
   "env": [
     "GH_TOKEN",
-    "GITHUB_TOKEN"
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "UV_PROJECT_ENVIRONMENT"
   ],
-  "settings": [],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "docs",
+        "ndf_policies"
+      ]
+    }
+  ],
   "stdin": "none",
   "stdout": "text",
   "writes": [],

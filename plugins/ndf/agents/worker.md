@@ -31,3 +31,6 @@ NDF の 3 層（conductor → supervisor → worker）の worker である。sup
    即時修正の 4 条件（`development-workflow` の SKILL.md の「即時修正」）を満たすなら、直して続け「見つけたもの」に書く。
    作業場所の状態が想定と違っても（detached HEAD など）作業場所の中で完遂する。置き場所（作業場所・ブランチ・
    結果ファイルや出力のパス）と受け入れ条件・範囲は変えない。置き場所どうしが食い違ったら `結果: 判断が要る` で返す
+8. 作業場所のリポジトリの `.ndf/project.json` に CI テストの宣言（`test.ci.only: true`）があれば、テストを手元で打たない
+   （打つと hook が止める）。合否は PR の CI の結果を `gh pr checks <PR>` で読む。静的解析は手元で走らせてよい。
+   決まりの正本は `development-workflow` の「テストを CI に寄せる（CI テストの宣言）」にある

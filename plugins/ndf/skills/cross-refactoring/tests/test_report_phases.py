@@ -44,9 +44,9 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
             {"path": "src/c.py", "symbol": "h", "defer_reason": "budget"},
             {"path": "src/d.py", "symbol": "i", "defer_reason": "no_target"},
         ],
-        whole_test={"ran": True, "flags": ["D3"], "status": "pass", "seconds": 60.0, "head": "abc", "reverted": False},
+        whole_test={"deferred": {"flags": ["D3"], "items": ["I-001"]}, "resolution": "deferred"},
         judge={"kind": "runtime", "reason": "private_repo", "failures": 0},
-        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0, "checks": [], "whole_test_reused": True},
+        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0, "checks": []},
         plan={"table_source": "history"},
     )
     env_tmp_dir(path)
@@ -56,7 +56,7 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
     assert "| propose | 4.5 |" in out and "| implement | 10.0 |" in out
     # 見送りは理由別の件数で出る（内訳は改修計画にある）
     assert "budget 2" in out and "no_target 1" in out and "test_failed 0" in out
-    # 全体のテストを走らせた理由（危険フラグ）と Jev を使わなかった理由
+    # 最終ゲートへ寄せた危険フラグと Jev を使わなかった理由
     assert "D3" in out and "private_repo" in out
     # 想定最大時間（60 分）が報告に出る
     assert "60 分" in out
@@ -65,7 +65,7 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
 
 
 def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_path, cmd_report, env_tmp_dir, capsys):
-    """所要は `init` の開始から最終ゲートの最後のチェックまで。差は想定最大時間からの残り。"""
+    """所要は `init` の開始から最終ゲートの最後のチェックまで。実装の予算と安全網の上限が並ぶ（#2457）。"""
     path = make_state_v2(
         tmp_path,
         tmp_path / "work",
@@ -77,4 +77,4 @@ def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_pa
     cmd_report.cmd_report(argparse.Namespace(id=130, metrics=False))
     out = capsys.readouterr().out
     assert "所要: 45.0 分" in out
-    assert "差 +15.0 分" in out
+    assert "実装の予算: 60 分" in out and "安全網 0.0 / 120 分" in out

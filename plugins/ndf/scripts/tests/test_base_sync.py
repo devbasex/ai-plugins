@@ -327,7 +327,9 @@ def test_1917_1_check_takes_the_base_before_the_whole_tests(tpl):
     for name in ("check", "sprint/7-check"):
         order = [x["id"] for x in tpl[name]["steps"]]
         s = by_id(tpl[name])
-        assert s["review"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all", name
+        # 振る舞いの確認（#2925）は取り込みの前に置き、対象が無ければ取り込みへ飛ぶ
+        assert s["review"]["next"] == "behavior-targets" and s["behavior-targets"]["skip_to"] == "base-sync", name
+        assert s["behavior-verify"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all", name
         assert order.index("base-sync") < order.index("test-all") < order.index("ready"), name
         assert "--pr " in s["base-sync"]["cmd"] and "--push" in s["base-sync"]["cmd"] and s["base-sync"]["on_fail"] == "abort"
 
@@ -374,7 +376,7 @@ def test_impl_route_goes_back_three_times_and_merges(tpl, tmp_path):
 
 def test_check_route_goes_back_and_reaches_record(tpl, tmp_path):
     back = (("merge", 4), "base-return", "base-sync", *CHECK_AFTER_TAKE)
-    head = ("collect", "pr", "assess", "refactor", "review", "base-sync")
+    head = ("collect", "pr", "assess", "refactor", "review", ("behavior-targets", 3), "base-sync")
     route = _route(*head, *CHECK_AFTER_TAKE, *back, *back, *back, "merge", "record")
     ran, text, _ = drive(tmp_path, tpl["sprint/7-check"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text, reason_of(text)
@@ -388,7 +390,11 @@ def test_take_conflict_goes_to_the_worker_and_back(tpl, tmp_path):
 
 def test_check_stops_through_abort_when_returns_run_out(tpl, tmp_path):
     route = _route(
-        *("collect", "pr", "assess", "refactor", "review", "base-sync"), *CHECK_AFTER_TAKE, ("merge", 4), ("base-return", 1), ("abort", 1)
+        *("collect", "pr", "assess", "refactor", "review", ("behavior-targets", 3), "base-sync"),
+        *CHECK_AFTER_TAKE,
+        ("merge", 4),
+        ("base-return", 1),
+        ("abort", 1),
     )
     ran, text, _ = drive(tmp_path, tpl["sprint/7-check"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 止まった" in text

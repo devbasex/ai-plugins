@@ -52,8 +52,13 @@ def step_attempt(state: dict[str, Any], step: str) -> int:
 
 
 def _current(state: dict[str, Any], step: str) -> assignment.Assignee:
+    """結果を残さなかった担当。`fix` は検証が選んだ修正担当（`fix.impl`。交代した担当なら実装担当と違う）。"""
     implementer = str(state.get("implementer") or "")
-    seat = str((state.get("final_gate") or {}).get("impl") or implementer) if step == "final-fix" else implementer
+    seat = implementer
+    if step == "final-fix":
+        seat = str((state.get("final_gate") or {}).get("impl") or implementer)
+    elif step == "fix":
+        seat = str((state.get("fix") or {}).get("impl") or implementer)
     account = (state.get("implementer_account") or None) if seat == implementer else None
     return assignment.Assignee(seat, account)
 
@@ -125,9 +130,20 @@ def _set_implementer(state: dict[str, Any], to: assignment.Assignee, step: str) 
         state.setdefault("final_gate", {})["impl"] = to.seat
 
 
-def _apply(state: dict[str, Any], step: str, d: assignment.NoResultDecision) -> None:
+def _set_fixer(state: dict[str, Any], failed: str, to: str) -> None:
+    """交代した修正担当（実装担当でない）が結果を残さなかった。その担当の修正の項目だけを振り替え先へ替える。"""
+    ids = set((state.get("fix") or {}).get("items") or [])
+    for item in state.get("items") or []:
+        if item.get("id") in ids and item.get("fixer") == failed:
+            item["fixer"] = to
+
+
+def _apply(state: dict[str, Any], step: str, d: assignment.NoResultDecision, failed: assignment.Assignee) -> None:
     if d.action == assignment.REASSIGN and d.to is not None:
-        _set_implementer(state, d.to, step)
+        if step == "fix" and failed.seat != state.get("implementer"):
+            _set_fixer(state, failed.seat, d.to.seat)
+        else:
+            _set_implementer(state, d.to, step)
     elif d.action == assignment.ABORT:
         if step == "fix":
             state["fix_no_relaunch"] = True
@@ -185,7 +201,7 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
             statefile.save(path, state)
             die(f"{step} の範囲を確定できませんでした（起点 {record.get('base_sha')}）。検証できない変更は採りません", code=4)
     d = _decide(state, failed, reason, step, attempt, busy=[])
-    _apply(state, step, d)
+    _apply(state, step, d, failed)
     statefile.save(path, state)
     _emit_decision(step, failed, reason, d)
 

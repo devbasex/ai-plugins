@@ -114,6 +114,8 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 ## 用語チェックの規則
 
 `glossary.py check` の規則。`--rules structure` は上の 3 つだけ、`all`（既定）は 6 つを見る。
+語を引くときは `glossary.py lookup --term <語>`（部分一致。`--context <id>` で絞る・`--contexts` で id の一覧）を使い、用語集の JSON を
+その場の Python の 1 行で読まない。`check`・`diff`・`lookup` の結果の 1 つの値は `--field <JSON Pointer>` で `metrics` に返る（`status` と終了コードは変わらない）。
 
 | 規則 | 見るもの | 当たる条件 |
 | --- | --- | --- |

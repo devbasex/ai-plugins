@@ -5,14 +5,15 @@ r"""再起動の方針の適用値・判定の記録・費用の見込み・作�
 | --- | --- | --- |
 | `resolve [--root <dir>] [--policy current\|trial]` | 適用値と値ごとの出所を返す（壊れた設定は現行方式で返し `config_error` を持つ） | 0 / 2 引数の誤り |
 | `publish` | SessionStart の入力（標準入力の JSON）から適用値の受け渡しのファイルを書く。壊れた設定なら 1 行を出す | 常に 0 |
-| `record --verdict 再起動 --reason <理由> --work <識別子>` | 再起動の 1 行を追記する | 0 / 1 書けない / 2 理由が 6 つ以外 |
+| `record --verdict 再起動 --reason <理由> --work <識別子>` | 再起動の 1 行を追記する | 0 / 1 書けない / 2 理由が 7 つ以外 |
 | `record --event 引継ぎ開始\|復元完了 --work <識別子>` | 印の 1 行を追記する | 0 / 1 書けない / 2 印が 2 つ以外 |
 | `calibrate [--days 30]` | 判定の記録と会話の記録から費用の見込みを較正して書く | 0 / 1 書けない |
-| `report --work <識別子> \| --all [--since <日付>] [--format json\|table]` | 作業ごとの区分の token・秒・費用・再起動・自動圧縮・品質 | 0 / 2 引数の誤り |
+| `report --work <識別子> \| --all [--since <日付>] [--from <時刻>] [--until <時刻>] [--format json\|table]` | 作業ごとの区分の token・秒・費用・再起動・自動圧縮・品質・復元の量。`--from`・`--until`（ISO 8601）はその中の呼び出しと行だけを数える | 0 / 2 引数の誤り |
 
 区分は conductor・NDF が起動した分（サブエージェントと使用量の帳簿）・引継ぎの区間（「引継ぎ開始」の印から）・
 復元の区間（引継ぎ文書で始まったセッションの「復元完了」の印まで）で、時刻で排他に割り当てる。同じ `message.id` は
 1 回だけ数え、帳簿にあるセッションの会話の記録は読まない（決定 13）。取れない値は 0 でなく「不明」と出す。
+`record --work` は課題番号を含めば `#<番号>` の昇順の並びに直し、含まなければセッションの前の行の作業で補う（#2908）。
 規約は skills/development-workflow/references/context-window.md にある。
 
     python3 context-policy.py resolve
@@ -114,6 +115,18 @@ def work_windows(rows: list[dict], work: str) -> dict[str, list[tuple[float, flo
     return out
 
 
+def clip_windows(windows: list[tuple[float, float]], span: tuple[float, float] | None) -> list[tuple[float, float]]:
+    """作業の区間を時間の区切り `span`（両端を含む）で切る（I7）。区切りが無ければそのまま。"""
+    if span is None:
+        return windows
+    lo, hi = span
+    return [(max(a, lo), min(b, hi + 1e-6)) for a, b in windows if max(a, lo) < min(b, hi + 1e-6)]
+
+
+def _in_span(at: float | None, span: tuple[float, float] | None) -> bool:
+    return span is None or (at is not None and span[0] <= at <= span[1])
+
+
 def _within(ts: float | None, windows: list[tuple[float, float]]) -> bool:
     if windows == ALL_TIME:
         return True
@@ -183,8 +196,10 @@ def session_parts(
     _add_ledger(parts["ndf"], sid, span, ledger_rows, seen, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
+    restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]
     return {
         "parts": parts,
+        "restore": {"context": restored[-1]["context"], "calls": len(restored)} if restored else None,
         "compacts": compacts,
         "restore_known": not by_next or restore_end is not None,
         "started_by_next": by_next,
@@ -205,25 +220,27 @@ def _session_spans(sessions: dict, excluded: set, windows: dict) -> dict[str, tu
     return spans
 
 
-def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], excluded: set, windows: dict) -> dict:
-    """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
+def _sum_sessions(sessions: dict, by_session: dict, ledger_rows: list[dict], excluded: set, windows: dict, restarted: set) -> dict:
+    """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。`restarted` は期間の中で再起動したセッション。"""
     totals = {b: _empty_totals() for b in BUCKETS}
     compacts: int | None = 0
     no_restore_mark = no_handoff_mark = 0
+    restores: list[dict] = []
     seen: set = set()
     for sid, s in sessions.items():
         summary = session_parts(sid, s["transcript"], by_session.get(sid, []), ledger_rows, excluded, seen, windows.get(sid))
+        restores += [summary["restore"]] if summary["restore"] else []
         for b in BUCKETS:
             for k, v in summary["parts"][b].items():
                 totals[b][k] += v
         compacts = None if compacts is None or summary["compacts"] is None else compacts + summary["compacts"]
         no_restore_mark += 0 if summary["restore_known"] else 1
-        restarted = any(r.get("verdict") == cp.RESTART for r in s["rows"])
-        no_handoff_mark += 1 if restarted and not summary["handoff_known"] else 0
+        no_handoff_mark += 1 if sid in restarted and not summary["handoff_known"] else 0
     for b in BUCKETS:
         totals[b]["cost"] = round(totals[b]["cost"])
         totals[b]["seconds"] = round(totals[b]["seconds"])
-    return {"parts": totals, "compacts": compacts, "unknown_parts": {"restore": no_restore_mark, "handoff": no_handoff_mark}}
+    unknown = {"restore": no_restore_mark, "handoff": no_handoff_mark}
+    return {"parts": totals, "compacts": compacts, "unknown_parts": unknown, "restores": restores}
 
 
 def _restarts_by_reason(rows: list[dict]) -> dict[str, int]:
@@ -243,16 +260,33 @@ def _rework(rows: list[dict]) -> int | str:
     return sum(1 for n in keep.values() if n >= 2) if keep else cd.UNKNOWN
 
 
-def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None) -> dict:
-    """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。"""
-    ledger_rows = ledger_rows or []
-    excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
+def work_scope(work: str, rows: list[dict], span: tuple[float, float] | None) -> tuple[list[dict], list[dict], dict]:
+    """作業の対象の行（期間で絞る前）・そのうち span に入る行・セッションごとの区間（span があれば切り取り、区間の無い
+    セッションを span で補う）。セッションと印は絞る前の行から取る。期間の中に新しい判定の行が無くても、期間の中の
+    呼び出しを数えるためである。"""
     filled = cd.fill_work(rows)
     windows = work_windows(filled, work)
-    rows = [r for r in filled if (r.get("work") or "") == work]
-    sessions = cd.sessions_of(rows)
-    by_session = cd.attach_marks([r for r in rows if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
-    summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows)
+    mine = cd.of_work(filled, work)
+    if span is not None:
+        windows = {sid: clip_windows(w, span) for sid, w in windows.items()}
+        sids = {r.get("session_id") for r in mine}
+        windows |= {sid: clip_windows(ALL_TIME, span) for sid in sids if sid and sid not in windows}
+    return mine, [r for r in mine if _in_span(cd.parse_ts(r.get("at")), span)], windows
+
+
+def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = None, span: tuple[float, float] | None = None) -> dict:
+    """作業の識別子 1 つの集計（受け入れ条件 12・13、I12〜I14）。
+
+    `span`（UNIX 時刻の (始め, 終わり)、両端を含む）を渡すと、その中の呼び出し（会話・サブエージェント・使用量の帳簿）と
+    判定の記録の行だけを数える（#2908 の I7）。渡さなければ区切らない。`restores` はセッションごとの復元の量
+    （「復元完了」の直前の文脈の量）と復元の区間の呼び出し数で、セッションの識別子を持たない。"""
+    ledger_rows = ledger_rows or []
+    excluded = {r.get("session_id") for r in ledger_rows if r.get("session_id")}
+    every, rows, windows = work_scope(work, rows, span)  # 期間は呼び出し（windows）と判定の行（rows）の集計にだけ効かせる
+    sessions = cd.sessions_of(every)
+    by_session = cd.attach_marks([r for r in every if r.get("event") in cd.MARKS], _session_spans(sessions, excluded, windows))
+    restarted = {r.get("session_id") for r in rows if r.get("verdict") == cp.RESTART}
+    summed = _sum_sessions(sessions, by_session, ledger_rows, excluded, windows, restarted)
     restarts = _restarts_by_reason(rows)
     compacts = summed["compacts"]
     return {
@@ -260,6 +294,7 @@ def report_work(work: str, rows: list[dict], ledger_rows: list[dict] | None = No
         "sessions": len(sessions),
         "parts": summed["parts"],
         "unknown_parts": summed["unknown_parts"],
+        "restores": summed["restores"],
         "restarts": restarts,
         "restart_count": sum(restarts.values()),
         "auto_compacts": cd.UNKNOWN if compacts is None or not sessions else compacts,
@@ -310,10 +345,11 @@ def cmd_record(a) -> None:
     if a.verdict is not None and (a.verdict != cp.RESTART or a.reason not in cp.REASONS):
         sr.emit(sr.result(TOOL, "stopped", f"--verdict 再起動 と、理由（{' / '.join(cp.REASONS)}）を渡す"), sr.EXIT_UNREADABLE)
     root = cd.toplevel(None)
-    row = cd.record_row(a.runtime, "record", a.work, cp.resolve_policy(root), a.context, a.event, a.reason)
+    work = cd.recorded_work(a.work, cd.record_session(a.runtime))
+    row = cd.record_row(a.runtime, "record", work, cp.resolve_policy(root), a.context, a.event, a.reason)
     if not cd.append_decision(row, cd.decisions_repo(root)):
         sr.emit(sr.result(TOOL, "stopped", "判定の記録へ書けない", metrics={"dir": str(cd.context_state_dir())}), sr.EXIT_VIOLATION)
-    sr.emit(sr.result(TOOL, "ok", f"{a.event or a.verdict} を記録した（{a.work}）", [row]))
+    sr.emit(sr.result(TOOL, "ok", f"{a.event or a.verdict} を記録した（{work or 'セッションの前の行の作業'}）", [row]))
 
 
 def cmd_calibrate(a) -> None:
@@ -347,7 +383,8 @@ def _report_table(reports: list[dict]) -> str:
     for r in reports:
         lines.append(
             f"- {r['work']}: セッション {r['sessions']}、再起動 {r['restart_count']}（{r['restarts']}）、自動圧縮 {r['auto_compacts']}、"
-            f"品質 {r['quality']}、印の無い区間 {r['unknown_parts']}、方針の記録が無い行 {r['no_policy_rows']}（現行方式として読んだ）"
+            f"品質 {r['quality']}、印の無い区間 {r['unknown_parts']}、方針の記録が無い行 {r['no_policy_rows']}（現行方式として読んだ）、"
+            f"復元の量 {[x['context'] for x in r['restores']] or cd.UNKNOWN}"
         )
     return "\n".join(lines)
 
@@ -358,11 +395,17 @@ def cmd_report(a) -> None:
     since = cd.parse_ts(f"{a.since}T00:00:00Z") if a.since else None
     if a.since and since is None:
         sr.emit(sr.result(TOOL, "stopped", f"--since は YYYY-MM-DD: {a.since}"), sr.EXIT_UNREADABLE)
+    span = None
+    if a.from_ or a.until:
+        lo, hi = (cd.parse_ts(a.from_) if a.from_ else float("-inf")), (cd.parse_ts(a.until) if a.until else float("inf"))
+        if lo is None or hi is None:
+            sr.emit(sr.result(TOOL, "stopped", f"--from と --until は ISO 8601 の時刻: {a.from_} / {a.until}"), sr.EXIT_UNREADABLE)
+        span = (lo, hi)
     root = cd.toplevel(None)
     rows = [r for r in cd.read_decisions(cd.decisions_repo(root)) if since is None or (cd.parse_ts(r.get("at")) or 0) >= since]
     ledger = _ledger(root)
-    targets = [a.work] if a.work else works(rows)
-    reports = [report_work(w, rows, ledger) for w in targets]
+    targets = [cd.recorded_work(a.work, None)] if a.work else works(rows)
+    reports = [report_work(w, rows, ledger, span) for w in targets]
     if a.format == "table":
         print(_report_table(reports))
         raise SystemExit(0)
@@ -390,6 +433,8 @@ def main(argv=None) -> None:
     p.add_argument("--work")
     p.add_argument("--all", action="store_true")
     p.add_argument("--since")
+    p.add_argument("--from", dest="from_")
+    p.add_argument("--until")
     p.add_argument("--format", choices=("json", "table"), default="json")
     a = ap.parse_args(argv)
     {"resolve": cmd_resolve, "publish": cmd_publish, "record": cmd_record, "calibrate": cmd_calibrate, "report": cmd_report}[a.cmd](a)

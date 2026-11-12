@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/hook_lib/ci_test_guard.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "起動の形の組み方と python -m の読み替えを、テストの Tool の名前を例に説明している。照らす語は .ndf/project.json の suite から読み、テストのコマンドを埋め込んでいない",
+  "count": 2
+}

@@ -12,6 +12,7 @@
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
+      "記録しない工程": ["完了判定"],        # 省略可。記録から外す工程（後のプランが通す工程。スプリントの実装のプラン）
       "設計文書": ["issues/issue-818-design.md"],  # 省略可。design-results が書く設計文書のパス（実装の指示の「設計文書:」の行）
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行するステップの数の上限（ループの歯止め。無ければ 30）。雛形は遷移から求めて書く
@@ -97,8 +98,10 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
-- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
-  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
+- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて起動先の
+  決定（`lib/launch_rules.py`。5 時間の枠のあるアカウント → 5 時間の枠の無いアカウント → 週の使用率が閾値 T 以上 →
+  残量不明の組の順）で選び直し、待たずに同じ呼び出しを起動し直す。起動のたびにも選び直し、今のアカウントが最良の
+  候補と同じ組にあれば替えない（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
   `CLAUDE_CONFIG_DIR`（アカウントの設定ディレクトリ。claude が自分でトークンを更新する）・`NDF_CLAUDE_ACCOUNT`・
   `NDF_SHARED_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
   `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
@@ -109,8 +112,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
   `relay.py account add-bedrock` が保存した宣言（アカウントの置き場の `metered.json`）である。保存先が壊れていれば
   最初の呼び出しの前に標準エラーと途中の報告（`"kind": "metered_invalid"`）へ 1 行出し、宣言なしとして扱う
 - 候補が無く従量の接続の宣言があれば、その変数を足し、`CLAUDE_CONFIG_DIR` を元の値へ戻した環境へ移り、
-  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
-  （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
+  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、起動先の決定が候補の
+  アカウントを返せば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
 - 登録が 1 つ以下なら、従量の接続の宣言（環境変数は `KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
@@ -174,6 +177,9 @@ GitHub から読み、段階が本番かデプロイなしで `スプリント:`
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
   worker の最後の報告。run のステップなら stderr の最後の行を last_output に）。長いステップ（work・run・drive）の
   待ちは区切って見るので、ステップの途中でも書く
+- `step` と `alive` の行には、負荷とメモリの値とマシンの上の pytest の数を `host` に載せる（load・mem_available_mib・
+  swap_total_mib・swap_free_mib・pytest・pytest_workers。#2998）。`/proc/loadavg`・`/proc/meminfo` やプロセスの一覧を
+  読めない値は鍵ごと省き、すべて読めなければ `host` ごと省く
 - `"kind": "worker"`: work のステップの worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
 - `"kind": "slow"`: ステップの経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
 - `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、

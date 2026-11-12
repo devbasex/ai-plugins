@@ -60,13 +60,3 @@ def phase_seconds(state: dict[str, Any]) -> dict[str, Any]:
             continue
         totals[name] = round(float(totals.get(name) or 0.0) + float(seconds), 1)
     return totals
-
-
-def elapsed_minutes(state: dict[str, Any]) -> float:
-    """実行の開始からの経過（分）。締め切りをずらした止まっていた時間（`pause.shifted_seconds`）を引く（#1944 の I5）。"""
-    from . import pause  # allocation → phases → pause → timeline → budget → allocation の循環を避ける
-
-    seconds = clock.seconds_between(state.get("started_at"), clock.now())
-    if seconds is None:
-        return 0.0
-    return max(seconds - pause.shifted_seconds(state), 0.0) / 60.0

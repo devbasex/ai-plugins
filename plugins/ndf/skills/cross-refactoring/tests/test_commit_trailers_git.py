@@ -59,26 +59,26 @@ def commit(repo):
     return _make
 
 
-def test_a_signature_paragraph_after_the_required_ones_is_skipped(gitfacts, repo, commit):
+def test_a_signature_paragraph_after_the_required_ones_is_skipped(trailers, repo, commit):
     """AC32: 必須の記名の後ろに帰属の段落が付いても 3 つとも読める。"""
     sha = commit(_SIGNED)
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert [trailers.get(k) for k in REQUIRED] == ["I-001", "claude", "claude-opus-5"]
+    assert [found.get(k) for k in REQUIRED] == ["I-001", "claude", "claude-opus-5"]
 
 
-def test_two_attribution_lines_in_one_paragraph_are_also_skipped(gitfacts, repo, commit):
+def test_two_attribution_lines_in_one_paragraph_are_also_skipped(trailers, repo, commit):
     """AC33: 帰属の段落が 2 行でも 3 つとも読める。"""
     sha = commit(_SIGNED + "Claude-Session: https://example.test/session_1\n")
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert all(trailers.get(k) for k in REQUIRED)
-    assert trailers["Claude-Session"] == "https://example.test/session_1"
+    assert all(found.get(k) for k in REQUIRED)
+    assert found["Claude-Session"] == "https://example.test/session_1"
 
 
-def test_a_prose_paragraph_stops_the_reading(gitfacts, repo, commit):
+def test_a_prose_paragraph_stops_the_reading(trailers, repo, commit):
     """AC34: 散文の段落より前にある記名の形の行は読まない。"""
     sha = commit(
         "Refactor: 題名\n\n"
@@ -88,37 +88,45 @@ def test_a_prose_paragraph_stops_the_reading(gitfacts, repo, commit):
         "Co-Authored-By: Someone <s@e.st>\n"
     )
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert trailers == {"Co-Authored-By": "Someone <s@e.st>"}
+    assert found == {"Co-Authored-By": "Someone <s@e.st>"}
 
 
-def test_a_mixed_last_paragraph_is_not_read(gitfacts, repo, commit):
+def test_a_mixed_last_paragraph_is_not_read(trailers, repo, commit):
     """AC35: 散文と記名の形が混ざる段落は、git が記名の段落と判定しない。"""
     sha = commit("Refactor: 題名\n\nここは説明です。\nこちらも説明です。\nさらに説明です。\nRound: 3\n")
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert trailers == {}
+    assert found == {}
 
 
-def test_the_paragraph_nearest_the_end_wins(gitfacts, repo, commit):
+def test_the_paragraph_nearest_the_end_wins(trailers, repo, commit):
     """AC36: 同じ鍵が 2 つの段落にあれば、末尾に近い方の値を採る。"""
     sha = commit("Refactor: 題名\n\nItem-Id: I-001\nImpl-Runtime: claude\nImpl-Model: claude-opus-5\n\nImpl-Model: claude-opus-5-later\n")
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert trailers["Impl-Model"] == "claude-opus-5-later"
-    assert trailers["Item-Id"] == "I-001"
+    assert found["Impl-Model"] == "claude-opus-5-later"
+    assert found["Item-Id"] == "I-001"
 
 
-def test_a_subject_shaped_like_a_trailer_is_not_read(gitfacts, repo, commit):
+def test_a_subject_shaped_like_a_trailer_is_not_read(trailers, repo, commit):
     """AC38: 題名が記名の形でも、1 段落目は判定に掛けない。"""
     sha = commit("Round: 本文の題名\n\nItem-Id: I-002\n")
 
-    trailers = gitfacts.commit_trailers(str(repo), sha)
+    found = trailers.commit_trailers(str(repo), sha)
 
-    assert trailers == {"Item-Id": "I-002"}
+    assert found == {"Item-Id": "I-002"}
+
+
+def test_trailer_value_reads_one_key_or_returns_empty(trailers, repo, commit):
+    """trailer_value: ある鍵は値を、無い鍵は空を返す。"""
+    sha = commit(_SIGNED)
+
+    assert trailers.trailer_value(str(repo), sha, "Item-Id") == "I-001"
+    assert trailers.trailer_value(str(repo), sha, "Round") == ""
 
 
 def test_a_commit_with_an_attribution_paragraph_passes_the_implement_check(gitfacts, cmd_implement, repo, commit):
@@ -148,4 +156,5 @@ def test_a_commit_without_the_item_trailer_is_rejected(gitfacts, cmd_implement, 
         {"worktrees": {"work": str(repo)}},
     )
 
-    assert problem is not None and "Item-Id" in problem
+    # 取り消さず差し戻しに残す（#2457 の棚卸し #23）
+    assert problem is not None and problem[0] == "trailers" and "Item-Id" in problem[1]

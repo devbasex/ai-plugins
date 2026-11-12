@@ -17,6 +17,7 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import decl, paths, sprint_waves  # noqa: E402
 from supervise_lib.verify_steps import with_margin  # noqa: E402
+import inproc  # noqa: E402
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -31,7 +32,7 @@ def repo(tmp_path, **sv) -> Path:
 
 
 def cli(root, *args):
-    return subprocess.run([PY, str(SUPERVISE), "new", *args, "--worktree", str(root)], capture_output=True, text=True, cwd=root)
+    return inproc.run(SUPERVISE, "new", *args, "--worktree", str(root), cwd=root)
 
 
 def steps(path) -> dict:
@@ -62,7 +63,8 @@ def close_refactors(root, out, *extra) -> list[dict]:
 
 def assert_budget(refactor: dict, minutes: int) -> None:
     assert f"--budget-minutes {minutes}" in refactor["cmd"]
-    assert refactor["timeout"] == with_margin(minutes * 60)
+    # 実装の予算 ×（1 + 安全網の倍率 2）（#2457 決定 8）
+    assert refactor["timeout"] == with_margin(minutes * 60 * 3)
 
 
 @pytest.mark.parametrize("by", ["arg", "decl", "null"])
@@ -82,7 +84,7 @@ def test_without_values_impl_and_refactor_cmd_stay_and_refactor_timeout_follows_
     assert new_check(root, tmp_path / "c.json").returncode == 0
     refactor = steps(tmp_path / "c.json")["refactor"]
     assert "--budget-minutes" not in refactor["cmd"]
-    assert refactor["timeout"] == with_margin(paths.default_refactor_budget_minutes() * 60)
+    assert refactor["timeout"] == with_margin(paths.default_refactor_budget_minutes() * 60 * 3)
 
 
 def test_refactor_timeout_follows_a_changed_default_budget(tmp_path, monkeypatch):
@@ -92,7 +94,7 @@ def test_refactor_timeout_follows_a_changed_default_budget(tmp_path, monkeypatch
     monkeypatch.setattr(paths._refactor_vocabulary(), "DEFAULT_BUDGET_MINUTES", 7)
     a = argparse.Namespace(refactor_budget_minutes=None)
     refactor = next(s for s in templates._inspect_steps(a, "5", "x") if s["id"] == "refactor")
-    assert refactor["timeout"] == with_margin(7 * 60) and "--budget-minutes" not in refactor["cmd"]
+    assert refactor["timeout"] == with_margin(7 * 60 * 3) and "--budget-minutes" not in refactor["cmd"]
 
 
 def test_the_default_budget_is_cross_refactorings_constant():

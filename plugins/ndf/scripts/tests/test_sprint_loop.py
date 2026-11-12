@@ -93,6 +93,36 @@ def env(tmp_path, mvv, monkeypatch):
 HEAD = "h" * 40
 
 
+def _close_stages(out, issues):
+    """supervise.py new close の差し替え: まとめのプランを 1 つ書き、そのステージを返す。"""
+    p = out / "1-close.json"
+    p.write_text(json.dumps({"フェーズ": "まとめ", "課題": issues}))
+    return [{"name": "まとめ", "plans": [str(p)], "command": f"queue {p}"}]
+
+
+def _sprint_stages(cmd, out, issues):
+    """supervise.py new sprint の差し替え: 課題ごとの設計・実装と検査・リリースのプランを書き、ステージを返す。"""
+    plans = {}
+    for n in issues:
+        for k, phase in (("design", "設計"), ("impl", "実装")):
+            plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
+            plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
+    (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
+    (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
+    (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
+    design = [str(plans[f"design-{n}"]) for n in issues]
+    stages = [
+        {"name": "設計", "plans": design, "command": "queue " + " ".join(design) + " --max 3"},
+        {"name": "設計承認ゲート", "gate": "..."},
+        {"name": "実装", "plans": [str(plans[f"impl-{n}"]) for n in issues], "then_of": "設計"},
+        {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
+        {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
+    ]
+    if "--version" not in cmd:  # 版を渡さないループの 1 回の開発版のプラン（#2354）
+        stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
+    return stages
+
+
 def fake_run(e):
     """sprint-state.py init・supervise.py new sprint / new close の差し替え。--out にマニフェストを書く。"""
 
@@ -110,34 +140,31 @@ def fake_run(e):
             out.mkdir(parents=True, exist_ok=True)
             kind = cmd[cmd.index("new") + 1]
             issues = [int(x) for x in cmd[cmd.index("--issue") + 1 :] if x.isdigit()][:5]
-            if kind == "close":
-                p = out / "1-close.json"
-                p.write_text(json.dumps({"フェーズ": "まとめ", "課題": issues}))
-                stages = [{"name": "まとめ", "plans": [str(p)], "command": f"queue {p}"}]
-            else:
-                plans = {}
-                for n in issues:
-                    for k, phase in (("design", "設計"), ("impl", "実装")):
-                        plans[f"{k}-{n}"] = out / f"{k}-{n}.json"
-                        plans[f"{k}-{n}"].write_text(json.dumps({"フェーズ": phase, "課題": [n]}))
-                (out / "check.json").write_text(json.dumps({"フェーズ": "検査", "課題": issues}))
-                (out / "dev.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
-                (out / "prod.json").write_text(json.dumps({"フェーズ": "リリース", "課題": issues}))
-                design = [str(plans[f"design-{n}"]) for n in issues]
-                stages = [
-                    {"name": "設計", "plans": design, "command": "queue " + " ".join(design) + " --max 3"},
-                    {"name": "設計承認ゲート", "gate": "..."},
-                    {"name": "実装", "plans": [str(plans[f"impl-{n}"]) for n in issues], "then_of": "設計"},
-                    {"name": "検査", "plans": [str(out / "check.json")], "then_of": "設計"},
-                    {"name": "本番", "plans": [str(out / "prod.json")], "then_of": "設計"},
-                ]
-                if "--version" not in cmd:  # 版を渡さないループの 1 回の開発版のプラン（#2354）
-                    stages.insert(-1, {"name": "開発版", "plans": [str(out / "dev.json")], "then_of": "設計"})
+            stages = _close_stages(out, issues) if kind == "close" else _sprint_stages(cmd, out, issues)
             (out / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
             return 0, "{}", ""
         return 0, "{}", ""
 
     return run
+
+
+ROW = {"operation": 1, "documentation": 2, "standard": 3, "legacy-refactor": 4, "light": 5}
+
+
+def judgments_file(env, modes: dict, name="l1") -> str:
+    """判定の根拠のファイル（#2923）。modes は課題の番号 → モード。"""
+    issues = [{"number": n, "row": ROW[m], "mode": m, "condition": "条件", "files": [f"src/{n}.py"]} for n, m in modes.items()]
+    path = env.root / f"judgments-{name}.json"
+    path.write_text(json.dumps({"issues": issues}, ensure_ascii=False))
+    return str(path)
+
+
+def sprint(env, name, mode, dev, prod, extra, modes: dict | None = None):
+    """loop sprint を、選んだ課題すべてに mode の根拠を付けて打つ。modes を渡せば課題ごとのモードにする。"""
+    lap = sl.current_lap(rec(env, name))
+    chosen = sl_record.selected_issues(lap) if lap else []
+    path = judgments_file(env, modes or {n: mode for n in chosen}, name)
+    return sl.cmd_sprint(env, name, None if modes else mode, dev, prod, extra, path)
 
 
 def start(env, name="l1", **budget):
@@ -165,7 +192,7 @@ def run_lap(env, failed=False, result="完了", cost=1.0, kind="実装"):
     got = sl_select.cmd_select(env, "l1")
     if got["status"] != "ok":
         return got
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     set_state(env, lap, cost=cost, result=result, kind=kind)
     return sl.cmd_lap(env, "l1", failed, None, [])
@@ -310,7 +337,7 @@ def test_approved_sprint_mvv_is_selected_and_copied_to_the_state(env):
     start(env)
     assert sl.cmd_approve_mvv(env, "l1", "01 近い")["status"] == "ok"
     assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [11]
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     state = json.loads(Path(sl.current_lap(rec(env))["state_path"]).read_text())
     assert [g["name"] for g in state["gates"]] == ["MVV"]
 
@@ -487,7 +514,7 @@ def test_stop_file_works_at_the_next_boundary_and_resume_removes_it(env):
     sl_select.cmd_select(env, "l1")
     sl.cmd_stop(env, "l1")
     assert sl.current_lap(rec(env))["outcome"] == "進行中"  # 途中では止めない
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     set_state(env, sl.current_lap(rec(env)))
     out = sl.cmd_lap(env, "l1", False, None, [])
     assert out["metrics"]["stop"]["condition"] == "user_stop"
@@ -635,7 +662,7 @@ def close(env, cost):
 def open_lap(env):
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
 
 
 def test_lap_cost_is_the_ledger_sum_without_unpriced_runs(ledger):
@@ -754,7 +781,7 @@ def test_gate_1_moves_the_issue_to_waiting_and_continues_without_the_issue(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     design11 = str(Path(lap["out"]) / "design-11.json")
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": design11, "result": "関門"}]))
@@ -772,7 +799,7 @@ def test_gate_1_with_every_issue_returned_closes_the_lap_and_continues(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11]))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
     assert out["status"] == "ok" and rec(env)["laps"][0]["outcome"] == "人へ戻した" and "ndf_next" in out["metrics"]
@@ -781,7 +808,7 @@ def test_gate_1_with_every_issue_returned_closes_the_lap_and_continues(env):
 def test_gate_2_stops_in_the_middle_of_the_lap(env):
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     out = sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "gate2_returned"
@@ -793,7 +820,7 @@ def built_lap(env, nums=(11, 12)):
     env.rank_box["out"] = rank_out(ms("01 近い", list(nums)))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     return sl.current_lap(rec(env))
 
 
@@ -927,7 +954,7 @@ def test_answers_control_reselection(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
     env.merge_box = {"result": "not_green", "class": "running", "reason": "検査が緑でない（running）"}
@@ -986,7 +1013,7 @@ def test_lap_records_depths_and_research_and_counts_research_in_the_budget(env):
     # ループの 1 回の記録に深さの行と調査の費用・秒が別の行で残り、予算に数える（#2315 の受け入れ条件 7）
     start(env)
     sl_select.cmd_select(env, "l1")
-    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    out = sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     research = out["metrics"]["research"]
     assert "research run" in research and "--until" in research and "--lap 1 --loop l1" in research
     assert "--max 3" in research  # まとめの queue と同じ並列の上限
@@ -1023,7 +1050,7 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     (env.root / "upkeep" / "rank.json").write_text(json.dumps({"metrics": {"changes": [{"number": 11}]}}))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
     sl.cmd_lap(env, "l1", False, None, [41, 42])
     lap = rec(env)["laps"][0]
@@ -1031,7 +1058,7 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     assert lap["refine"]["deferred"] == [31, 32] and lap["refine"]["rank_changes"] == [{"number": 11}]
     assert lap["deferred_issues"] == [41, 42]
     sl_select.cmd_select(env, "l1")
-    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    out = sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     assert "--carry 31 32" in out["metrics"]["close_command"] and "--pace auto" in out["metrics"]["close_command"]
     assert "--loop l1 --lap 2" in out["metrics"]["close_command"]  # 差分の棚卸しの行に開発ループとループの 1 回を残す（#2315 の 17b-2）
     # ループの 1 回の版は出し終えているので、まとめへ明示の版として渡さない（流す時点に次に空いている版で決める。#2164）
@@ -1043,11 +1070,35 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     assert "#41 #42" in (env.root / ".ndf" / "loop" / "l1" / "laps.md").read_text()
 
 
+def test_carry_comes_from_the_last_lap_that_ran_the_diff_refinement(env):
+    """差分の棚卸しを見送った回は棚卸しの要約を空にして skipped を付け、次の回は最後に走らせた回の持ち越しを受ける（#2914 の I6）。"""
+    (env.root / "upkeep").mkdir()
+    (env.root / "upkeep" / "candidates.json").write_text(json.dumps({"metrics": {"deferred": [31, 32]}}))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
+    sl.cmd_lap(env, "l1", False, None, [])
+    sl_select.cmd_select(env, "l1")
+    sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    b = env.root / ".ndf" / "backlog"
+    b.mkdir(parents=True, exist_ok=True)
+    (b / "depths.jsonl").write_text(json.dumps({"at": "2999-01-01T00:00:00Z", "depth": "diff", "event": "not_due", "trigger": []}) + "\n")
+    (env.root / "upkeep" / "candidates.json").write_text(json.dumps({"metrics": {"deferred": [99]}}))  # 前の回の古い結果
+    set_state(env, sl.current_lap(rec(env)), cost=1.0, seconds=10)
+    sl.cmd_lap(env, "l1", False, None, [])
+    second = rec(env)["laps"][1]
+    assert second["refine"] == {"report": "", "rank_changes": [], "deferred": [], "skipped": True}
+    sl_select.cmd_select(env, "l1")
+    out = sprint(env, "l1", "standard", "1.0.0-dev.3", None, [])
+    assert "--carry 31 32" in out["metrics"]["close_command"] and "--lap 3" in out["metrics"]["close_command"]
+
+
 def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
     start(env)
     sl_select.cmd_select(env, "l1")
     env.run = lambda cmd, cwd=None, stdin=None: (1, "", "断った")
-    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    out = sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "refused"
     res = sl.cmd_start(env, "l1", [], {})
     assert res["metrics"]["status"] == "resumed" and "loop sprint l1" in res["metrics"]["next"]
@@ -1066,7 +1117,7 @@ def test_sprint_without_a_version_runs_when_no_template_route_needs_it(env):
         return base(cmd, cwd=cwd, stdin=stdin)
 
     env.run = run
-    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    out = sprint(env, "l1", "standard", None, None, [])
     assert out["status"] == "ok", out
     assert not rec(env)["laps"][-1]["versions"]["dev"]
     assert not [c for c in seen if "--dev" in c or "--version" in c or "--prod" in c]
@@ -1193,12 +1244,19 @@ def test_cli_sprint_reads_options_after_the_loop_name_and_passes_only_what_follo
 
     ap = argparse.ArgumentParser()
     sprint_loop_cli.add_loop_parser(ap.add_subparsers(dest="cmd"), lambda a: None)
-    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--mode", "standard", "--dev", "1.0.0-dev.1"])
+    head, extra = sprint_loop_cli.split_extra(
+        ["loop", "sprint", "l1", "--judgments", "j.json", "--mode", "standard", "--dev", "1.0.0-dev.1"]
+    )
     a = ap.parse_args(head)
-    assert extra is None and (a.loop_name, a.mode, a.dev, a.extra) == ("l1", "standard", "1.0.0-dev.1", [])
-    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--mode", "fast", "--dev", "2.0.0-dev.1", "--", "--design", "11"])
+    assert extra is None and (a.loop_name, a.judgments, a.mode, a.dev, a.extra) == ("l1", "j.json", "standard", "1.0.0-dev.1", [])
+    head, extra = sprint_loop_cli.split_extra(
+        ["loop", "sprint", "l1", "--judgments", "j.json", "--dev", "2.0.0-dev.1", "--", "--design", "11"]
+    )
     a = ap.parse_args(head)
-    assert (a.mode, a.dev, extra) == ("fast", "2.0.0-dev.1", ["--design", "11"])
+    assert (a.mode, a.dev, extra) == (None, "2.0.0-dev.1", ["--design", "11"])
+    with pytest.raises(SystemExit) as e:  # 判定の根拠を渡さない呼び出しは引数の誤り（#2923 の受け入れ条件 1）
+        ap.parse_args(["loop", "sprint", "l1", "--mode", "standard"])
+    assert e.value.code == 2
 
 
 def test_gate_1_drops_the_waiting_issue_from_the_shared_plan_and_its_closes(env):
@@ -1332,8 +1390,8 @@ def test_handoff_keeps_the_concrete_next_step_for_resuming_inside_a_lap(env):
     start(env)
     sl_select.cmd_select(env, "l1")
     doc = sl.handoff_path(env, "l1")
-    assert "loop sprint l1 --mode <モード>" in doc.read_text().split("## 次にやること")[1].split("## ")[0]
-    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    assert "loop sprint l1 --judgments " in doc.read_text().split("## 次にやること")[1].split("## ")[0]
+    out = sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     body = doc.read_text().split("## 次にやること")[1].split("## ")[0]
     assert out["metrics"]["pipeline"] in body
 
@@ -1367,7 +1425,7 @@ def test_manual_release_stage_holds_the_close_until_it_is_done(env):
     env.run = run
     start(env)
     sl_select.cmd_select(env, "l1")
-    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    out = sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     pipe = out["metrics"]["pipeline"]
     first, rest = pipe.split("を終えてから: ")
     assert "/ndf:release" in first and "close" not in first.split(" を流し")[0]
@@ -1401,7 +1459,7 @@ def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, 
     item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}
     out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
     assert out["exit"] == 3 and rec(env)["stop"]["values"]["step"] == sl_gate.CONTINUATION_STEP
-    assert sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])["exit"] == sl.EXIT_REFUSED  # 全課題で組み直さない
+    assert sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])["exit"] == sl.EXIT_REFUSED  # 全課題で組み直さない
     monkeypatch.setattr(sl_gate, "continuation", real)
     got = sl.cmd_start(env, "l1", [], {})
     assert got["status"] == "ok" and "loop lap l1" in got["metrics"]["next"]
@@ -1637,7 +1695,7 @@ def test_resume_stopped_refused_in_a_lap_asks_to_rebuild_the_sprint(env):
     r = stopped_on(env, "refused", values={"step": "new sprint"})
     out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
     nxt = out["metrics"]["next"]
-    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード>（" in nxt and "--dev" not in nxt
+    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --judgments <判定の根拠のファイル>（" in nxt and "--dev" not in nxt
 
 
 def test_resume_stopped_refused_continuation_rebuilds_the_queue_with_kept_issues(env, monkeypatch):
@@ -1687,7 +1745,7 @@ def lane_lap(env, nums=(11, 12), rid=REQ, rank=None, dev="1.0.0-dev.1"):
     if not (env.root / ".ndf/loop/l1/loop.json").exists():
         start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", dev, None, [])
+    sprint(env, "l1", "standard", dev, None, [])
     lap = sl.current_lap(rec(env))
     prod = Path(lap["out"]) / "prod.json"
     prod.write_text(json.dumps({"フェーズ": "リリースの依頼", "課題": list(nums), "並列の計画": "p1"}, ensure_ascii=False))
@@ -1765,6 +1823,62 @@ def test_released_answer_after_gate_1_runs_the_close_of_the_kept_issue_only(env)
     # 偽の new close は --issue の後の数字をすべて拾うため、そのまとめを組んだ呼び出しの --issue を読む
     built = next(c for c in env.calls if "close" in c and str(Path(closes[0]).parent) in c)
     assert built[built.index("--issue") + 1 : built.index("--state")] == ["12"]
+
+
+def released_and_finished(env, close_items, version="10.28.0"):
+    """リリース待ちで締めたループの 1 回へ released が届き、まとめを流した done で締め直す（#2911）。"""
+    request_lap(env)
+    env.answer_box[REQ] = {"answer": {"result": "released", "version": version}, "defer": None}
+    assert sl_select.cmd_select(env, "l1")["metrics"]["status"] == "finish"
+    d = rec(env)["laps"][0]["release"]["finish"]["done"]
+    Path(d).write_text(json.dumps({"items": close_items}))
+    return sl.cmd_finish(env, "l1", 1, d)
+
+
+def test_released_lap_whose_close_stopped_is_closed_as_released(env):
+    """#2911 の受け入れ条件 1: リリースまで届いたループの 1 回は、まとめが止まっても完了で締め直し、まとめの失敗は別に残す。"""
+    fin = released_and_finished(env, [{"plan": "x", "result": "止まった"}])
+    lap = rec(env)["laps"][0]
+    assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["versions"]["prod"] == "10.28.0"
+    assert lap["failure"] is None and lap["close_failure"]["step"]
+
+
+def test_released_lap_with_an_empty_close_done_is_closed_as_released(env):
+    fin = released_and_finished(env, [])
+    lap = rec(env)["laps"][0]
+    assert fin["status"] == "ok" and lap["outcome"] == "完了" and lap["close_failure"]
+
+
+def test_released_lap_whose_close_stopped_does_not_count_as_a_failure(env):
+    """#2911 の受け入れ条件 2: 同じ失敗の判定は締め直した結果（完了）で数え直す。"""
+    released_and_finished(env, [{"plan": "x", "result": "止まった"}])
+    assert sl_record.failure_streak(rec(env)) == (None, 0)
+
+
+def test_reclose_turns_a_released_lap_recorded_as_failed_into_done(env):
+    """#2911 の受け入れ条件 3: 前の版がまとめの失敗で「失敗」と書いたリリース済みのループの 1 回を、記録のリリースの答えから締め直す。"""
+    released_and_finished(env, [{"plan": "x", "result": "完了"}])
+    r = rec(env)
+    lap = r["laps"][0]
+    lap["outcome"], lap["failure"] = "失敗", {"issues": [11, 12], "kind": "まとめ", "step": "止まった"}
+    lap.pop("close_failure", None)
+    lap["versions"].pop("prod", None)
+    sl_record.write_record(env, r)
+    assert sl_record.failure_streak(rec(env))[1] == 1
+    out = sl.cmd_reclose(env, "l1")
+    lap = rec(env)["laps"][0]
+    assert out["status"] == "ok" and out["metrics"]["reclosed"] == [1]
+    assert lap["outcome"] == "完了" and lap["failure"] is None and lap["versions"]["prod"] == "10.28.0"
+    assert lap["close_failure"] == {"issues": [11, 12], "kind": "まとめ", "step": "止まった"} and lap["reclosed_at"]
+    assert sl_record.failure_streak(rec(env)) == (None, 0)
+    assert "| 1 |" in (env.root / ".ndf/loop/l1/laps.md").read_text() and "完了" in (env.root / ".ndf/loop/l1/laps.md").read_text()
+    assert sl.cmd_reclose(env, "l1")["metrics"]["reclosed"] == []  # 2 度目は何もしない
+
+
+def test_reclose_leaves_failed_laps_without_a_released_answer(env):
+    start(env, laps=10)
+    run_lap(env, result="止まった")
+    assert sl.cmd_reclose(env, "l1")["metrics"]["reclosed"] == [] and rec(env)["laps"][0]["outcome"] == "失敗"
 
 
 def test_two_answered_pending_laps_are_finished_oldest_first(env):
@@ -1891,7 +2005,7 @@ def test_hold_question_closes_the_lap_and_the_answer_resumes_the_stopped_plan(en
     r = rec(env)
     assert out["status"] == "ok" and r["laps"][0]["outcome"] == "質問待ち" and r["laps"][0]["question"]["request"] == "lroot-q1"
     assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [13]  # 答えの前は流さない
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     set_state(env, sl.current_lap(rec(env)))
     sl.cmd_lap(env, "l1", False, None, [])
     env.answer_box["lroot-q1"] = {"answer": {"result": "answered", "choice": ["A"]}, "defer": None}
@@ -1904,7 +2018,7 @@ def test_answer_revise_keeps_the_note_and_selects_the_issue_first(env, tmp_path)
     env.rank_box["out"] = rank_out(ms("01 近い", [12, 11]))
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
     sl.cmd_answer(env, "l1", 12, True, 501)
@@ -1927,7 +2041,7 @@ def test_gate1_answers_are_applied_by_the_lane_at_the_boundary(env):
     env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
     r = rec(env)
@@ -1949,7 +2063,7 @@ def test_gate1_approval_for_a_moved_design_pr_is_asked_again(env, monkeypatch):
     env.answers = lambda plan, ids: {i: env.answer_box.get(i, {"answer": None, "defer": None}) for i in ids}
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
     r = rec(env)
@@ -2599,7 +2713,7 @@ def versionless_lap(env):
     """--dev なしで組んだループの 1 回。スプリント状態の版の欄は sprint-state.py init と同じく空文字である。"""
     start(env)
     sl_select.cmd_select(env, "l1")
-    out = sl.cmd_sprint(env, "l1", "standard", None, None, [])
+    out = sprint(env, "l1", "standard", None, None, [])
     assert out["status"] == "ok"
     lap = sl.current_lap(rec(env))
     versionless_state(lap)
@@ -2640,7 +2754,7 @@ def test_sprint_without_dev_passes_no_version_to_init_or_new_sprint(env):
 def test_sprint_treats_an_empty_dev_as_omitted(env):
     start(env)
     sl_select.cmd_select(env, "l1")
-    assert sl.cmd_sprint(env, "l1", "standard", "", None, [])["status"] == "ok"
+    assert sprint(env, "l1", "standard", "", None, [])["status"] == "ok"
     assert "--version" not in sl.current_lap(rec(env))["sprint_command"]
 
 
@@ -2649,7 +2763,7 @@ def test_sprint_with_dev_keeps_the_explicit_version(env, prod, want):
     """受け入れ条件 5・6・I2: --dev を渡す組み立てとループの 1 回の版は変わらない。"""
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", prod, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", prod, [])
     lap = sl.current_lap(rec(env))
     assert lap["versions"] == {"dev": "1.0.0-dev.1", "prod": want}
     init = next(c for c in env.calls if "init" in c)
@@ -2663,19 +2777,19 @@ def test_prod_without_dev_is_refused_before_anything_changes(env):
     sl_select.cmd_select(env, "l1")
     before = rec(env)
     env.calls.clear()
-    out = sl.cmd_sprint(env, "l1", "standard", None, "1.0.0", [])
+    out = sprint(env, "l1", "standard", None, "1.0.0", [])
     assert out["exit"] == 1 and out["metrics"]["status"] == "refused" and "--prod は --dev と一緒に渡す" in out["summary"]
     assert env.calls == [] and rec(env) == before
     assert not Path(sl.current_lap(before)["dir"], "state.json").exists()
 
 
 def test_select_next_and_rebuild_next_do_not_ask_for_a_version(env):
-    """受け入れ条件 11: 案内の 1 行は --dev を求めず、モードを埋めれば組める。"""
+    """受け入れ条件 11: 案内の 1 行は --dev を求めず、判定の根拠を埋めれば組める（#2923 で材料を集めるコマンドを添える）。"""
     start(env)
     nxt = sl_select.cmd_select(env, "l1")["metrics"]["next"]
-    line = re.search(r"python3 \S+ (loop sprint l1 --mode <モード>)", nxt)
+    line = re.search(r"python3 \S+mode-materials\.py --issue 11 12 --out \S+ .*loop sprint l1 --judgments \S+", nxt)
     assert line and "--dev" not in nxt
-    assert sl.cmd_sprint(env, "l1", "standard", None, None, [])["status"] == "ok"
+    assert sprint(env, "l1", "standard", None, None, [])["status"] == "ok"
 
 
 def test_sprint_help_shows_dev_as_optional():
@@ -2730,7 +2844,7 @@ def test_closing_a_lap_without_dev_plan_keeps_its_versions(env):
     """移行性: dev_plan を持たない進行中のループの 1 回は今の値で締まる。"""
     start(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     path = env.root / ".ndf" / "loop" / "l1" / "loop.json"
     r = json.loads(path.read_text())
     del r["laps"][-1]["dev_plan"]
@@ -2802,3 +2916,46 @@ def test_cli_a_second_session_cannot_take_the_same_loop_until_the_first_stops(tm
     finally:
         other.kill()
         other.wait()
+
+
+def test_cli_another_session_places_the_stop_order_while_the_loop_holds_the_key(tmp_path):
+    """#2910 受け入れ条件 1・2: 生きた持ち主が鍵を持つ間も、別のセッションの loop stop は 0 で止める指示を置き、主体と理由を書く。
+    持ち主の鍵は返さない（持ち主のセッションの loop start は続けて取れ、別のセッションの loop start は断られる）。"""
+    import os
+
+    import procs
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()
+    sp = SCRIPTS / "sprint-state.py"
+    other = subprocess.Popen(["sleep", "60"])
+    session_a = {**os.environ, "NDF_RUNTIME_SESSION": f"{other.pid}:{procs.start_time(other.pid)}"}
+
+    def loop(*args, env=None):
+        return subprocess.run([sys.executable, str(sp), "loop", *args, "--root", str(tmp_path)], capture_output=True, text=True, env=env)
+
+    try:
+        assert loop("start", "x1", env=session_a).returncode != 3
+        (tmp_path / ".ndf" / "loop" / "x1").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ndf" / "loop" / "x1" / "loop.json").write_text(json.dumps({"name": "x1", "laps": []}))
+        p = loop("stop", "x1", "--by", "organizer", "--reason", "利用者が今のループの 1 回で止めると指示した")
+        assert p.returncode == 0, p.stdout + p.stderr
+        order = json.loads((tmp_path / ".ndf" / "loop" / "x1" / "stop").read_text())
+        assert order["by"] == "organizer" and order["reason"] == "利用者が今のループの 1 回で止めると指示した" and order["at"]
+        assert loop("start", "x1").returncode == 3
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_stop_order_carries_who_placed_it_and_an_unrecorded_source_is_unknown(env):
+    """#2910 受け入れ条件 2・3: 境の止まりの値に置いた主体と理由を載せる。主体の記録が無いファイルは人の意思として扱わず unknown。"""
+    start(env)
+    sl.cmd_stop(env, "l1", by="user", reason="人が止めると送った")
+    got = sl_record.boundary_stop(env, rec(env))
+    assert got["condition"] == "user_stop" and got["values"]["by"] == "user" and got["values"]["reason"] == "人が止めると送った"
+    (env.root / ".ndf" / "loop" / "l1" / "stop").write_text("2026-11-09T17:30:00Z\n")
+    got = sl_record.boundary_stop(env, rec(env))
+    assert got["values"] == {"at": "2026-11-09T17:30:00Z", "by": "unknown", "reason": ""}
+    sl.cmd_stop(env, "l1")
+    assert sl_record.boundary_stop(env, rec(env))["values"]["by"] == "unknown"

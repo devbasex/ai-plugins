@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/procs.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "マシンの上で動いている pytest のプロセスを名前で数える（#2998 の決定 4）。対象リポジトリのテストのコマンドを埋め込んでいない",
+  "count": 9
+}

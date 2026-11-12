@@ -4,6 +4,13 @@
 #
 #   projects-sync.sh <issue番号> <キー> <値>
 #     キー: stage | mode | pace | status | worktree | plan
+#   projects-sync.sh <issue番号> stage <工程名> [<工程名>...] [--mode M] [--pace P]
+#
+# **`stage` は `--mode` / `--pace` を一緒に受ける。** 本文へは工程と一緒に 1 回で書き（本文の取得と更新を 1 回にする）、
+# ボードへは工程の列とモードの列（宣言があれば）を書く。
+#
+# **`stage` は工程名を並べて渡せる（#2909）。** すべての工程名を何かを書く前に工程表と照らし、`progress-record.sh` へ
+# 1 回で渡す（本文の書き換えは 1 回、通過記録は工程ごと）。ボードの「工程」の列は 1 つの値しか持たないため、最後の工程名を書く。
 #
 # `stage` / `mode` / `pace` / `worktree` / `plan` は、ボードの宣言の有無にかかわらず先に
 # `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`pace`（normal / fast）は
@@ -41,22 +48,46 @@ TOOL=projects-sync
   || sr_emit --tool "$TOOL" --status stopped --summary "development-workflow の workflow-common.sh を読めない" --code 3
 
 usage() {
-  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>\n' >&2
+  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>（stage は <工程名>... [--mode M] [--pace P]）\n' >&2
 }
 
 
 ISSUE="${1:-}"
 KEY="${2:-}"
 VALUE="${3:-}"
+STAGE_VALUES=() HEAD_MODE='' HEAD_PACE=''
+if [ "$KEY" = stage ]; then
+  # `stage` は工程名の後に `--mode M` / `--pace P` を受け、本文へ 1 回で書く（取得と更新を工程ごと・キーごとに分けない）
+  rest=("${@:3}")
+  i=0
+  while [ "$i" -lt "${#rest[@]}" ]; do
+    case "${rest[$i]}" in
+      --mode) HEAD_MODE="${rest[$((i + 1))]:-}"; [ -n "$HEAD_MODE" ] || sr_bad_args "$TOOL" "--mode に値が無い" usage; i=$((i + 2)) ;;
+      --pace) HEAD_PACE="${rest[$((i + 1))]:-}"; [ -n "$HEAD_PACE" ] || sr_bad_args "$TOOL" "--pace に値が無い" usage; i=$((i + 2)) ;;
+      --*) sr_bad_args "$TOOL" "知らない引数です: ${rest[$i]}" usage ;;
+      *) STAGE_VALUES+=("${rest[$i]}"); i=$((i + 1)) ;;
+    esac
+  done
+  VALUE="${STAGE_VALUES[0]:-}"
+fi
 
-if [ "$#" -ne 3 ] || [ -z "$ISSUE" ] || [ -z "$KEY" ] || [ -z "$VALUE" ]; then
+if { [ "$#" -ne 3 ] && [ "$KEY" != stage ]; } || [ -z "$ISSUE" ] || [ -z "$KEY" ] || [ -z "$VALUE" ]; then
   sr_bad_args "$TOOL" "引数が足りません" usage
 fi
+[ -z "$HEAD_MODE" ] || wf_is_mode "$HEAD_MODE" || sr_bad_args "$TOOL" "mode が取らない値です: $HEAD_MODE"
+[ -z "$HEAD_PACE" ] || wf_is_pace "$HEAD_PACE" || sr_bad_args "$TOOL" "pace が取らない値です: $HEAD_PACE"
 case "$ISSUE" in
   ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
 KIND=$(pj_key_kind "$KEY") || sr_bad_args "$TOOL" "知らないキーです: $KEY" usage
-[ "$KEY" != stage ] || VALUE=$(pj_normalize_stage "$VALUE")
+if [ "$KEY" = stage ]; then
+  # 並べた工程名をすべて照らす。ボードへは最後の工程名を書く
+  for i in "${!STAGE_VALUES[@]}"; do
+    STAGE_VALUES[i]=$(pj_normalize_stage "${STAGE_VALUES[$i]}")
+    wf_is_stage "${STAGE_VALUES[$i]}" || sr_bad_args "$TOOL" "$KEY が取らない値です: ${STAGE_VALUES[$i]}"
+  done
+  VALUE=${STAGE_VALUES[${#STAGE_VALUES[@]}-1]}
+fi
 case "$KEY" in
   stage) wf_is_stage "$VALUE" ;;
   mode) wf_is_mode "$VALUE" ;;
@@ -79,7 +110,7 @@ record_body() {
   fi
 }
 case "$KEY" in
-  stage) record_body "$ISSUE" "$VALUE" ;;
+  stage) record_body "$ISSUE" "${STAGE_VALUES[@]}" ${HEAD_MODE:+--mode "$HEAD_MODE"} ${HEAD_PACE:+--pace "$HEAD_PACE"} ;;
   mode|pace|worktree|plan) record_body "$ISSUE" - "--$KEY" "$VALUE" ;;
 esac
 
@@ -109,6 +140,35 @@ board_not_declared() {
   finish
 }
 
+# `stage` と一緒に受けた `--mode` を、ボードの「モード」の列へも書く（列の宣言があるときだけ）。
+# 本文は工程と一緒に 1 回で書いたため、ここはボードだけである。解決した識別子はキャッシュから読み直す。
+DECL_OK=0
+board_head_mode() {
+  [ "$KEY" = stage ] && [ -n "$HEAD_MODE" ] && [ "$DECL_OK" -eq 1 ] || return 0
+  local key=$KEY value=$VALUE kind=$KIND field=$FIELD_NAME reason='' k v
+  KEY=mode VALUE=$HEAD_MODE
+  KIND=$(pj_key_kind mode) || KIND=''
+  if [ -n "$KIND" ] && FIELD_NAME=$(pj_field_name "$DECL" mode); then
+    if [ -n "$CACHE" ] && [ -f "$CACHE" ]; then
+      while IFS='=' read -r k v; do
+        case "$k" in
+          project_id) CACHED_PROJECT_ID=$v ;;
+          item_id) CACHED_ITEM_ID=$v ;;
+        esac
+      done < "$CACHE"
+    fi
+    [ -z "$BOARD_ERR_FILE" ] || : > "$BOARD_ERR_FILE"
+    if update; then
+      sr_item board "#$ISSUE $FIELD_NAME" recorded
+      sr_process "ボードの「${FIELD_NAME}」へ書く" "$VALUE"
+    else
+      [ -z "$BOARD_ERR_FILE" ] || reason=$(cat "$BOARD_ERR_FILE" 2>/dev/null)
+      sr_gap board "#$ISSUE $FIELD_NAME" "${reason:-ボードへ書けない（理由の出力なし）}"
+    fi
+  fi
+  KEY=$key VALUE=$value KIND=$kind FIELD_NAME=$field
+}
+
 # ボードへ書けなかった理由。update の中のコマンド置換（サブシェル）からも届くようにファイルへ残す。
 BOARD_ERR_FILE=$(mktemp 2>/dev/null) || BOARD_ERR_FILE=''
 trap '[ -z "$BOARD_ERR_FILE" ] || rm -f "$BOARD_ERR_FILE"' EXIT
@@ -131,10 +191,13 @@ top_dir=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$top_dir" ] || boa
 DECL=$(pj_declaration "$top_dir") || board_not_declared
 
 command -v jq >/dev/null 2>&1 || { sr_gap board "#$ISSUE $KEY" "jq が無いためボードへ書けない"; finish; }
+DECL_OK=1
 
 OWNER=$(pj_owner "$DECL")
 NUMBER=$(pj_number "$DECL")
-FIELD_NAME=$(pj_field_name "$DECL" "$KEY") || board_not_declared
+# 工程の列が無くても、一緒に受けたモードの列があればそちらは書く
+FIELD_UNDECLARED=0
+FIELD_NAME=$(pj_field_name "$DECL" "$KEY") || { [ "$KEY" = stage ] && [ -n "$HEAD_MODE" ] || board_not_declared; FIELD_UNDECLARED=1; }
 
 # ボードから一度に読むアイテムの上限。長く使うボードほど閉じたアイテムが積み上がるため、
 # 想定される総数より広く取る。上限に達したときは対象が見つからなくても黙って抜けない。
@@ -304,7 +367,10 @@ write_field() {
   fi
 }
 
-if update; then
+if [ "$FIELD_UNDECLARED" -eq 1 ]; then
+  BOARD_RESULT=not_declared
+  sr_item board "#$ISSUE $KEY" not_declared
+elif update; then
   BOARD_RESULT=recorded
   sr_item board "#$ISSUE $FIELD_NAME" recorded
   sr_process "ボードの「${FIELD_NAME}」へ書く" "$VALUE"
@@ -313,4 +379,5 @@ else
   [ -z "$BOARD_ERR_FILE" ] || reason=$(cat "$BOARD_ERR_FILE" 2>/dev/null)
   sr_gap board "#$ISSUE $FIELD_NAME" "${reason:-ボードへ書けない（理由の出力なし）}"
 fi
+board_head_mode
 finish

@@ -288,12 +288,14 @@ def fake_gh_with_design(tmp_path: Path, files: list[str], api_fails: bool = Fals
     return str(bindir)
 
 
-def run_design(m: dict, files: list[str], gate: str = "design", api_fails: bool = False) -> tuple[int, dict, list[dict]]:
+def run_design(
+    m: dict, files: list[str], gate: str = "design", api_fails: bool = False, text: str = FOLLOW
+) -> tuple[int, dict, list[dict]]:
     tmp = m["tmp"]
     env = {
         "PATH": f"{fake_gh_with_design(tmp, files, api_fails)}:/usr/bin:/bin",
         "HOME": str(tmp),
-        "NDF_MVV_CLAUDE": fake_claude(tmp, FOLLOW),
+        "NDF_MVV_CLAUDE": fake_claude(tmp, text),
     }
     p = subprocess.run(
         [
@@ -345,6 +347,36 @@ def test_an_unreadable_design_doc_goes_back_to_the_user(sprint):
     assert (code, llm_calls(sprint)) == (10, 0)
     assert "issues/x-design.md" in out["summary"]
     assert rows[-1]["verdict"] == "machine"
+
+
+def test_design_with_a_named_redline_never_skips_the_gate(sprint):
+    """#2912 の受け入れ条件 6: 判定が follow でも boundary に挙げたレッドラインがあれば承認ゲートへ戻る。"""
+    text = '{"verdict": "follow", "reasons": ["Value 2"], "boundary": ["C7: .ndf/ を書き換える"], "basis": ["C7"]}'
+    code, out, rows = run_design(sprint, ["issues/x-design.md"], text=text)
+    assert (code, out["status"]) == (10, "gate")
+    assert rows[-1]["passed"] is False and rows[-1]["boundary"] == ["C7: .ndf/ を書き換える"]
+    assert "設計承認ゲート" not in gates(sprint)
+
+
+@pytest.mark.parametrize("decl", [".ndf/mvv.md", ".ndf/mvv.json"])
+def test_design_changing_the_ndf_declaration_never_skips_the_gate(sprint, decl):
+    """#2912 の受け入れ条件 6: `.ndf/` の宣言を変える設計は判定者を呼ばずに承認ゲートへ戻る。"""
+    code, out, rows = run_design(sprint, ["issues/x-design.md", decl])
+    assert (code, llm_calls(sprint)) == (10, 0)
+    assert rows[-1]["verdict"] == "machine"
+
+
+RECORD_KEYS = {
+    "at", "gate", "sprint", "material", "pr", "mode", "repo", "project_mvv", "pace", "sprint_mvv",
+    "verdict", "passed", "reasons", "boundary", "basis", "cost_usd", "seconds",
+}  # fmt: skip
+
+
+def test_the_record_keys_do_not_change(sprint):
+    """#2912 の I5: 判定の記録の行の形を変えない。"""
+    code, out, rows = run_design(sprint, ["issues/x-design.md"])
+    assert code == 0, out
+    assert set(rows[-1]) == RECORD_KEYS
 
 
 def test_revise_notes_go_into_the_material_and_the_question(sprint):

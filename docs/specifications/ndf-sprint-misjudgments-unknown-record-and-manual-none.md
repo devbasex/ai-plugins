@@ -117,10 +117,10 @@ flowchart TD
   B -- いいえ --> C{"リリースの Pull Request で届く経路があり、手動反映の本番系でない"}
   C -- はい --> P["{queue_pr:promote}"]
   C -- いいえ --> U
-  T --> V["merge → config-save → release-verify → config-check → retro → close"]
+  T --> V["ready → config-save → release-verify → config-check → deep-due → … → merge → close"]
   P --> V
   U --> V
-  Z --> W["merge → retro → close（config-save・release-verify・config-check なし）"]
+  Z --> W["ready → deep-due → … → merge → close（config-save・release-verify・config-check なし）"]
 ```
 
 `sprint-close.py` の中では、`cmd_close` が `--issues` の有無を確かめ、`_read_sprint_record` が `0` と `unknown` で記録を読まずに

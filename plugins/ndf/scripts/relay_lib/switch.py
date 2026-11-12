@@ -1,9 +1,10 @@
-"""区間のアカウント（#1389）: 区間ごとのアカウントの選び方・上限シグナルファイルの判定・定期の確認。
+"""区間のアカウント（#1389）: 区間ごとのアカウントの選び方・上限シグナルファイルの判定。
 
-`Relay`（`run.py`）が `AccountSwitch` を継いで使う。登録済みのアカウントが 2 つ以上あれば、区間ごとに最も上限から
-遠いアカウントで起動し、子の応答が利用上限で終わった（`limit.json`）ら別のアカウントで次の区間を起動する。
-`UsageWatch` が今のアカウントの使用率を定期的に読み（推論なし）、閾値を超えたら次のカットポイントで替える。
-すべて上限なら宣言された従量の接続へ移り、上限の外れたアカウントへ次のカットポイントで戻す。
+`Relay`（`run.py`）が `AccountSwitch` を継いで使う。登録済みのアカウントが 2 つ以上あれば、区間の起動（区切り）の
+たびに起動先の決定（`launch_rules`。API キーは使わない）で選び直し、今のアカウントが最良の候補と同じ選ぶ順の組に
+なければ替える（#2930 の決定 6）。子の応答が利用上限で終わった（`limit.json`）ら別のアカウントで次の区間を起動する。
+すべて上限なら宣言された従量の接続へ移り、候補のアカウントが出たら次の区切りで戻す。区切りの間に使用率を取りに
+行かない（#2930 の決定 7）。
 置き場と選び方は `lib/claude_accounts.py`、文言の読みは `lib/claude_usage.py` が持つ。
 """
 
@@ -11,8 +12,6 @@ from __future__ import annotations
 
 import math
 import os
-import queue
-import threading
 import time
 
 from . import claude as cl
@@ -27,7 +26,7 @@ import claude_usage as cu  # noqa: E402
 LIMIT_ERRORS = ("rate_limit", "billing_error")
 
 # 切り替えの理由（`pick` が決め、画面の 1 行と記録の `reason` に出る）。上限の種類（`cu.KINDS`）も理由になる
-REASON_THRESHOLD = "threshold"  # 使用率が閾値を超えた
+REASON_RULE = "rule"  # 区切りの選び直しで、今のアカウントが最良の候補と同じ組にない
 REASON_START = "start"  # 既定のログインから最初のアカウントへ
 REASON_UNUSABLE = "unusable"  # 今のアカウントが使えない
 REASON_RECOVERED = "recovered"  # 従量の接続からアカウントへ戻す
@@ -43,9 +42,8 @@ def _msg_recovered(sw, prev, to, reason) -> tuple[str, dict]:
     return f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける", {"reason": REASON_RECOVERED}
 
 
-def _msg_threshold(sw, prev, to, reason) -> tuple[str, dict]:
-    n = sw.watch.due if sw.watch is not None and sw.watch.due is not None else 0
-    return f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える", {"usage": round(n)}
+def _msg_rule(sw, prev, to, reason) -> tuple[str, dict]:
+    return f"選ぶ順の組が変わったため、アカウントを {prev} から {ca.account_label(to)}へ替える", {}
 
 
 def _msg_limit(sw, prev, to, reason) -> tuple[str, dict]:
@@ -67,7 +65,7 @@ def _msg_default(sw, prev, to, reason) -> tuple[str, dict]:
 # 切り替えの理由 → (画面の 1 行, 記録の行へ足す項目) を作る関数（`AccountSwitch._switch_message` が引く）
 _SWITCH_MESSAGES = {
     _RECOVERED: _msg_recovered,
-    REASON_THRESHOLD: _msg_threshold,
+    REASON_RULE: _msg_rule,
     _LIMIT: _msg_limit,
     REASON_AUTH: _msg_auth,
     REASON_PINNED: _msg_pinned,
@@ -78,7 +76,7 @@ _SWITCH_MESSAGES = {
 _RESUME_TEXTS = {
     _LIMIT: "利用上限でアカウントを替えた。中断したところから続ける",
     REASON_AUTH: "認証が通らなかったためアカウントを替えた。中断したところから続ける",
-    REASON_THRESHOLD: "使用率が切り替えの閾値を超えたためアカウントを替えた。中断したところから続ける",
+    REASON_RULE: "選ぶ順の組が変わったためアカウントを替えた。中断したところから続ける",
     REASON_RECOVERED: "上限が外れたためアカウントへ戻した。中断したところから続ける",
 }
 _RESUME_DEFAULT = "アカウントを替えた。中断したところから続ける"
@@ -110,68 +108,17 @@ def resume_text(reason: str | None) -> str:
     return _RESUME_TEXTS.get(_LIMIT if reason in cu.KINDS else reason, _RESUME_DEFAULT)
 
 
-class UsageWatch:
-    """定期の確認（別スレッド）。今のアカウントの使用率を間隔ごとに読み、閾値を超えたら `due` を立てる。
-    従量の接続で動く間は登録済みのアカウントすべてを読み、戻せるものがあれば `recover` を立てる。
-
-    取得先は推論を呼ばず、間隔（`NDF_ACCOUNT_CHECK_INTERVAL`）の中なら保存した残量を使う。取得に失敗しても
-    中継（主のスレッド）を止めない。画面の 1 行は `lines` に積み、主のスレッドが出す。"""
-
-    def __init__(self, relay):
-        self.relay = relay
-        self.due: float | None = None  # 閾値を超えた今のアカウントの使用率
-        self.recover: str | None = None  # 従量の接続から戻せるアカウント
-        self.lines: queue.SimpleQueue[str] = queue.SimpleQueue()
-        self.stopped = threading.Event()
-        self.thread = threading.Thread(target=self.run, name="ndf-usage-watch", daemon=True)
-
-    def start(self) -> None:
-        self.thread.start()
-
-    def stop(self) -> None:
-        self.stopped.set()
-
-    def reset(self) -> None:
-        self.due = self.recover = None
-
-    def run(self) -> None:
-        while not self.stopped.wait(max(ca.check_interval(), 1.0)):
-            try:
-                self.check()
-            except Exception:  # 確認の失敗で中継を止めない
-                continue
-
-    def check(self) -> None:
-        cur, thr = self.relay.account, ca.switch_at()
-        if cur == ca.METERED:
-            c = ca.choose()  # 期限を過ぎたトークンだけを、更新の排他を取れたときに更新する
-            if c.recoverable(thr):
-                if self.recover != c.name:
-                    self.lines.put(f"{c.name} の上限が外れた。次のカットポイントで従量の接続から戻す")
-                self.recover = c.name
-            else:
-                self.recover = None
-            return
-        if not cur or thr >= 100 or self.due is not None or pin.pinned() == cur:
-            return  # 指定したアカウントは閾値で替えない（#2460）
-        u = ca.usage(cur, False)  # 動いているセッションのトークンは claude が更新する（#1576 の I8）
-        score = u.score() if u else None
-        if score is not None and score >= thr:
-            self.due = score
-            self.lines.put(f"{cur} の使用率が {score:.0f}% を超えた。次のカットポイントで替える")
-
-
 class AccountSwitch:
-    """`Relay` が継ぐ、区間のアカウントの扱い。`Relay` の `account`・`multi`・`watch`・`env`・`term`・`limit`・
+    """`Relay` が継ぐ、区間のアカウントの扱い。`Relay` の `account`・`multi`・`env`・`term`・`limit`・
     `section` などを使う。"""
 
     def pick(self, kind: str | None) -> tuple[str | None, str | None, ca.Choice | None]:
         """次の区間のアカウントを決める。(名前か `metered` か None, 理由, 選んだ結果)。
 
         `kind` は上限の種類（上限の後。None が返れば切り替えずに子を残す）か None（区間の起動。None は今と同じ環境）。
-        区間の起動では、`account use` の指定が使えればそれを、無ければ今のアカウントが使えて閾値未満なら替えない
-        （使用率の小さな差で区間ごとに行き来しない）。"""
-        cur, thr = self.account, ca.switch_at()
+        区間の起動では、`account use` の指定が使えればそれを、無ければ起動先の決定で選び直す（今のアカウントが最良の
+        候補と同じ組にあれば替えない。切り替えの余裕）。"""
+        cur = self.account
         declared = bool(ca.fallback_env(self.env))
         if kind is not None:
             return self._pick_after_limit(kind, cur, declared)
@@ -179,8 +126,8 @@ class AccountSwitch:
         if pinned is not None:
             return pinned
         if cur == ca.METERED:
-            return self._pick_from_metered(thr)
-        return self._pick_for_section(cur, thr, declared)
+            return self._pick_from_metered()
+        return self._pick_for_section(cur, declared)
 
     def _pick_pinned(self, cur: str | None) -> tuple[str | None, str | None, ca.Choice | None] | None:
         """区間の起動で、`account use` の指定が使えればそれを選ぶ（閾値と残りの量に依らない）。使えなければ None
@@ -189,29 +136,22 @@ class AccountSwitch:
         if p is None:
             return None
         if p == cur:
-            return (cur, None, None) if self._current_standing(cur)[0] else None
+            return (cur, None, None) if self._current_usable(cur) else None
         ca.usage(p, p not in self.keep())
         acc, now = ca.load_account(p), time.time()
         if acc is None or acc.needs_relogin or acc.auth_held(now) or acc.limited_until(now) is not None or not ca.usable(p, now):
             return None
         return p, REASON_PINNED, ca.Choice(p, acc.score(), None, acc.remaining())
 
-    def _pick_for_section(self, cur: str | None, thr: float, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
-        """区間の起動で、今のアカウント（か既定のログイン）から次を選ぶ。"""
-        due = self.watch.due if self.watch is not None else None
-        usable, score, left, weekly = False, None, None, None
-        if cur is not None:
-            usable, score, left, weekly = self._current_standing(cur)
-            if usable and due is None and (score is None or score < thr):
-                return cur, None, None
-        c = ca.choose(exclude={cur} if cur else set(), keep=self.keep())
-        if c.name:
-            if usable and self.no_better(c, score, left, weekly, thr):
-                return cur, None, c
-            return c.name, REASON_THRESHOLD if usable else (REASON_START if cur is None else REASON_UNUSABLE), c
-        if usable:
+    def _pick_for_section(self, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
+        """区間の起動で、起動先の決定（API キーを使わない）で選び直す。候補が無く、今のアカウントも使えなければ従量の接続へ。"""
+        c = ca.choose(keep=self.keep(), current=cur)
+        if c.name == cur and cur is not None:
             return cur, None, c
-        if declared:
+        if c.name:
+            usable = cur is not None and self._current_usable(cur)
+            return c.name, REASON_RULE if usable else (REASON_START if cur is None else REASON_UNUSABLE), c
+        if declared and not (cur is not None and self._current_usable(cur)):
             return ca.METERED, REASON_LIMITED, c
         return cur, None, c
 
@@ -225,9 +165,7 @@ class AccountSwitch:
         return self._pick_pinned(prev) or (prev, None, None)
 
     def stop_accounts(self) -> None:
-        """ラッパーの終了時: 定期の確認を止め、今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
-        if self.watch is not None:
-            self.watch.stop()
+        """ラッパーの終了時: 今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
         self.settle_account(self.account)
 
     def settle_account(self, name: str | None) -> None:
@@ -259,38 +197,20 @@ class AccountSwitch:
             return ca.METERED, kind, c
         return None, kind, c
 
-    @staticmethod
-    def _pick_from_metered(thr: float) -> tuple[str | None, str | None, ca.Choice]:
-        """従量の接続で動く区間の起動。戻せるアカウントがあれば戻す。"""
-        c = ca.choose()
-        if c.recoverable(thr):
+    def _pick_from_metered(self) -> tuple[str | None, str | None, ca.Choice]:
+        """従量の接続で動く区間の起動。起動先の決定が候補のアカウントを返せば戻す（組を問わない。#2930 の決定 7）。"""
+        c = ca.choose(keep=self.keep())
+        if c.recoverable():
             return c.name, REASON_RECOVERED, c
         return ca.METERED, None, c
 
     @staticmethod
-    def _current_standing(cur: str) -> tuple[bool, float | None, float | None, float | None]:
-        """今のアカウントの (使えるか, 使用率, 残りの量, 週の使用率)。トークンは更新しない（claude が更新する）。"""
-        u = ca.usage(cur, False)
+    def _current_usable(cur: str) -> bool:
+        """今のアカウントが使えるか（再登録が要らず、認証の失敗の観測が無く、上限にない）。トークンは更新しない。"""
+        ca.usage(cur, False)
         acc = ca.load_account(cur)
         now = time.time()
-        usable = acc is not None and not acc.needs_relogin and not acc.auth_held(now) and acc.limited_until(now) is None
-        score = u.score() if u else None
-        left = acc.remaining() if acc is not None else None
-        weekly = u.weekly_score() if u else None
-        return usable, score, left, weekly
-
-    @staticmethod
-    def no_better(c: ca.Choice, score: float | None, left: float | None, weekly: float | None, thr: float) -> bool:
-        """候補 `c` が今のアカウント（使用率 `score`・残りの量 `left`・週の使用率 `weekly`）より良くないか（#1453 の I9）。
-
-        今の週の使用率が閾値 `thr` 以上で候補の使用率が閾値未満なら、残りの量に依らず候補を良いとする（週の枠は数日
-        戻らないため、他のプランを優先する。週の枠の大きなプランの残りが小さなプランの 5 時間の枠を上回っても替える）。
-        それ以外は、両方の残りの量が分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
-        if weekly is not None and weekly >= thr and c.score is not None and c.score < thr:
-            return False
-        if left is not None and c.remaining is not None:
-            return c.remaining <= left
-        return score is not None and c.score is not None and c.score >= score
+        return acc is not None and not acc.needs_relogin and not acc.auth_held(now) and acc.limited_until(now) is None
 
     def tell_account(self, prev: str | None, to: str | None, reason: str | None, choice: ca.Choice | None) -> None:
         """区間を起動したアカウントを画面の 1 行と記録（`account` の行）に残す（I12）。トークンと宣言の値は書かない。"""
@@ -313,6 +233,9 @@ class AccountSwitch:
             self.term.screen(f"ndf-relay: アカウント {ca.account_label(to)}で起動する")
             return
         row = {"event": "account", "section": self.section, "reason": reason, "from": prev, "to": to}
+        decision = getattr(choice, "decision", None)
+        if decision is not None:  # 起動先の決定の規則の名前と根拠の値（#2930 の受け入れ条件 23）
+            row.update(rule=decision.rule, account_rule=decision.account_rule, evidence=decision.evidence)
         line, extra = self._switch_message(prev, to, reason)
         row.update(extra)
         self.term.screen("ndf-relay: " + line)
@@ -350,17 +273,6 @@ class AccountSwitch:
     @staticmethod
     def keys_text(keys: list[str]) -> str:
         return keys[0] + (f" ほか {len(keys) - 1} つ" if len(keys) > 1 else "") if keys else "宣言"
-
-    def flush_lines(self) -> None:
-        """定期の確認が積んだ 1 行を出す（画面へ書くのは主のスレッドだけ）。"""
-        if self.watch is None:
-            return
-        while True:
-            try:
-                line = self.watch.lines.get_nowait()
-            except queue.Empty:
-                return
-            self.term.screen("ndf-relay: " + line)
 
     def read_limit(self) -> dict | None:
         m = load_json(self.path(LIMIT_FILE))

@@ -26,6 +26,7 @@ from supervise_lib import engine, flow, paths, queue  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
 from sprint_args import new_sprint_args  # noqa: E402
+import inproc  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
+    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
 
 
 def load(path) -> dict:
@@ -178,8 +179,10 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert "check-trigger.py scope --id m-3" in s["refactor"]["cmd"]
     # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
     base = plan["起点"].removeprefix("origin/")
-    assert s["review"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all" and s["fix"]["next"] == "base-sync"
-    assert f"base-sync --base {base} --push" in s["base-sync"]["cmd"] and "git merge" not in s["test-all"]["cmd"]
+    assert s["review"]["next"] == "behavior-targets" and s["behavior-targets"]["skip_to"] == "base-sync"
+    # このリポジトリの宣言は全体テストを CI に任せるため、取り込みの次は finish（CI はマージが待つ）
+    assert s["behavior-verify"]["next"] == "base-sync" and s["base-sync"]["next"] == "finish" and "test-all" not in s
+    assert f"base-sync --base {base} --push" in s["base-sync"]["cmd"]
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:
         if step["type"] == "run" and not step["id"].startswith("abort"):
@@ -203,13 +206,15 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
     for step in plan["steps"]:
         if step["type"] in ("run", "drive") and step["id"] not in ("abort", "assess", "test-all"):
             assert step.get("on_fail") == "abort", step
-    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert "judge" not in s and s["base-sync"]["next"] == "ready"  # 全体テストは CI に任せる（宣言）
     assert_transitions_exist(plan)
     since = tmp_path / "since.json"
     assert cli("new", "check", "--since-last", "--id", "m-4", "--worktree", str(tmp_path), "--out", str(since)).returncode == 0
     s = steps_of(load(since))
-    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert "judge" not in s
     assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+    # 安全網で人へ渡した（終了コード 10）後は、未解決の変更へレビューと検査を打たずに終える
+    assert s["refactor"]["gate_next"] == "end"
 
 
 @pytest.mark.parametrize("push", [0, 1])
@@ -296,35 +301,98 @@ def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
         assert "check-trigger.py changed --id m26-final" in cond["cmd"]
     close = load(waves["まとめ"]["plans"][0])
     stages = [s.get("stage") for s in close["steps"]]
-    for stage in ("確定仕様化", "後片付け", "振り返り"):
+    for stage in ("確定仕様化", "後片付け", "振り返り", "リリース後テスト"):
         assert stages.count(stage) == 1
-    assert stages.index("確定仕様化") < stages.index("振り返り") < stages.index("後片付け")  # 振り返りの後に閉じる（#2228）
-    cl = steps_of(close)["close"]["cmd"]
+    steps = steps_of(close)
+    cl = steps["close"]["cmd"]
     assert "--record-pr {queue_pr:release-prod}" in cl and "--issues 11,12" in cl and "--with-verification" in cl
-    assert "--final-stage 振り返り" in cl
+    # 最終工程は同じプランの進捗記録から選ぶ（#2914 の I5）
+    assert "--final-stage-from {state_dir}/progress.jsonl" in cl and "--final-stage " not in cl
     assert close["課題"] == [11, 12] and close.get("記録")
     cmd = waves["最終の検査"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
-    # 棚卸しは振り返りの後の別のステップ（#842）。振り返りのプロンプトは棚卸しを含まない
-    steps = steps_of(close)
-    assert steps["retro"]["next"] == "close" and steps["close"]["next"] == "refine"
-    assert "backlog-refinement" not in steps["retro"]["prompt"]
+    # 起動の判定が 0 なら振り返り → 棚卸し、3 ならマージへ飛ぶ（#2914 の決定 2・3）。ループの外は --loop を渡さない（I4）
+    due = steps["deep-due"]
+    assert due["skip_to"] == "merge-gate" and due["next"] == "retro"
+    assert "depth due diff --sprint m26 --issues 11,12" in due["cmd"] and "--loop" not in due["cmd"]
+    assert "/ndf:backlog-refinement" not in steps["retro"]["prompt"] and "depth scope --sprint m26" in steps["retro"]["prompt"]
+    assert steps["retro"]["next"] == "refine"
     refine = steps["refine"]
     assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
-    assert refine["next"] == "refine-record" and stages.index("後片付け") < stages.index("棚卸し")
-    assert "--depth diff" in refine["prompt"] and steps["review"]["next"] == "review-release"
+    assert refine["next"] == "refine-record" and "--depth diff" in refine["prompt"] and steps["review"]["next"] == "review-release"
     # 本体の成否によらず自分の宣言を手放してから先へ進む（PR 2414 の指摘）
-    for depth, after in (("overhaul", "review-due"), ("review", "end")):
+    for depth, after in (("overhaul", "review-due"), ("review", "merge-gate")):
         assert steps[depth]["on_fail"] == f"{depth}-release"
         rel = steps[f"{depth}-release"]
         assert rel["next"] == after and rel["on_exit"] == {"10": after} and f"release --what {depth}" in rel["cmd"]
     # 大整理と見直しは起動の判定（終了コード 3 で飛ぶ）と持ち主の宣言（10 で skipped の行）を挟む（#2315）
-    assert steps["overhaul-due"]["skip_to"] == "review-due" and steps["review-due"]["skip_to"] == "end"
-    assert steps["review-claim"]["on_exit"] == {"10": "review-skipped"} and steps["review-skipped"]["next"] == "end"
+    assert steps["overhaul-due"]["skip_to"] == "review-due" and steps["review-due"]["skip_to"] == "merge-gate"
+    assert steps["review-claim"]["on_exit"] == {"10": "review-skipped"} and steps["review-skipped"]["next"] == "merge-gate"
     # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
     for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
         assert words in refine["prompt"]
+
+
+def _reach(steps: dict, start: str, until: str | None = None) -> set:
+    """`start` から遷移（next・skip_to・on_fail・on_exit・gate_next）で辿れるステップの id（`until` から先は辿らない）。"""
+    seen, todo = set(), [start]
+    while todo:
+        sid = todo.pop()
+        if sid in seen or sid not in steps:
+            continue
+        seen.add(sid)
+        if sid == until:
+            continue
+        st = steps[sid]
+        todo += [st.get(k) for k in ("next", "skip_to", "on_fail", "gate_next") if st.get(k)] + list((st.get("on_exit") or {}).values())
+    return seen
+
+
+def _close_plan(tmp_path, *extra):
+    out = tmp_path / "close"
+    args = ["new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "12", "--state"]
+    p = cli(*args, str(sprint_state(tmp_path, "fast")), "--out", str(out), *extra)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return steps_of(load(load(out / "sprint.json")["ステージ"][-1]["plans"][0]))
+
+
+@pytest.mark.suspended_refactor
+def test_suspended_refactor_final_check_condition_is_accepted_by_eval(tmp_path):
+    # 停止中の最後の検査は eval --review だけにする。--final と --review は eval が同時に受けない（PR 3062 のレビュー）
+    out = tmp_path / "close"
+    args = ["new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "--state"]
+    assert cli(*args, str(sprint_state(tmp_path, "fast")), "--out", str(out)).returncode == 0
+    cmd = load(load(out / "sprint.json")["ステージ"][0]["plans"][0])["実行の条件"]["cmd"]
+    assert "eval " in cmd and "--review" in cmd and "--final" not in cmd
+
+
+def test_close_merges_last_and_closes_issues_only_after_the_merge(tmp_path):
+    """マージの後は close だけ（I3）。close へ入るのは merge と merge-approved の次だけ（I8）。"""
+    steps = _close_plan(tmp_path, "--record-pr", "40")
+    assert steps["merge"]["next"] == "close" and steps["merge-approved"]["next"] == "close" and steps["close"]["next"] == "end"
+    assert _reach(steps, "merge") <= {"merge", "close", "stop"}
+    into_close = {
+        sid
+        for sid, st in steps.items()
+        if "close" in [st.get("next"), st.get("skip_to"), st.get("on_fail"), *(st.get("on_exit") or {}).values()]
+    }
+    assert into_close == {"merge", "merge-approved"} and steps["merge-gate"]["gate_next"] == "end"
+    # LLM と CI を待つステップは merge より前（ready から辿れ、merge-gate を通らずに着く）
+    before = _reach(steps, "ready", until="merge-gate")
+    assert {"release-verify", "retro", "refine", "overhaul", "review", "merge-gate"} <= before and "merge" not in before
+
+
+def test_close_runs_release_verification_on_both_routes_of_the_due_check(tmp_path):
+    """起動しない回の経路でもリリース後テストを通る（I2）。起動する回は spec・release-verify・retro・refine を持つ（受け入れ条件 5）。"""
+    steps = _close_plan(tmp_path, "--record-pr", "40", "--loop", "L", "--lap", "4")
+    assert steps["ready"]["next"] == "config-save" and steps["config-check"]["next"] == "deep-due"
+    assert steps["deep-due"]["skip_to"] == "merge-gate" and "--loop L --lap 4" in steps["deep-due"]["cmd"]
+    assert {"spec", "release-verify", "retro", "refine"} <= _reach(steps, "spec")
+    assert "release-verify" in _reach(steps, "ready", until="deep-due")
+    # merge の前に走る棚卸しは、今の回の課題を閉じない課題として持つ（I8）
+    for sid in ("refine", "review", "overhaul"):
+        assert "今の回の課題 11,12 は閉じない課題" in steps[sid]["prompt"]
 
 
 # ---------- new release --mvv・new impl --escape-of ----------
@@ -577,10 +645,8 @@ def test_a_fast_plan_records_the_pace_before_the_first_stage(tmp_path):
     )
     s.run()
     assert log.read_text().splitlines() == [
-        "5 pace fast",
-        "5 stage 確定仕様化",
-        "6 pace fast",
-        "6 stage 確定仕様化",
+        "5 stage 確定仕様化 --pace fast",
+        "6 stage 確定仕様化 --pace fast",
         "5 stage 振り返り",
         "6 stage 振り返り",
     ]

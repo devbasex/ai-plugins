@@ -180,3 +180,44 @@ def test_decide_and_cost_do_not_touch_the_outside(monkeypatch):
     monkeypatch.setattr(socket, "socket", boom)
     e = cp.estimate_cost(estimates(), 300_000, "x", "plan")
     assert cp.decide_boundary(TRIAL, 300_000, 1_000_000, e) == cp.decide_boundary(TRIAL, 300_000, 1_000_000, e)
+
+
+# ---------------------------------------------------------------- 再起動の理由「待ち」と読み込みの倍率（#3006）
+
+
+def test_the_restart_fixed_cost_is_shared_with_estimate_cost():
+    """決定 3: 再起動の固定の項は 1 つの関数で、`estimate_cost` の再起動の費用はそれに工程の項を足したもの。"""
+    e = cp.estimate_cost(estimates(), 300_000, "claude-opus-5-5", "skill:cross-review")
+    fixed = cp.restart_fixed_cost(300_000, "claude-opus-5-5", 8, 4_000, 60_000, 10)
+    assert fixed == pytest.approx(8 * 0.05 * 300_000 + 5 * 4_000 + 2 * 60_000 + 10 * 0.05 * 60_000)
+    assert e.restart_cost == pytest.approx(fixed + 40 * 0.05 * 60_000 + 1 * 2.0 * 60_000)
+
+
+def test_read_rates_of_sonnet_and_fable_5_2():
+    """決定 5"""
+    from token_rates import read_rate
+
+    assert read_rate("claude-sonnet-5-5") == 0.05 and read_rate("claude-fable-5-2") == 0.025 and read_rate("other") == 0.1
+
+
+def test_record_accepts_the_wait_reason_and_report_counts_it(tmp_path):
+    """決定 4: `record --reason 待ち` が 0 で 1 行を書き、理由ごとの数え上げが「待ち」で数える。"""
+    import importlib.util
+    import os
+
+    scripts = Path(__file__).resolve().parents[1]
+    ctx = tmp_path / "ctx"
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")} | {"NDF_CONTEXT_DIR": str(ctx)}
+    argv = [sys.executable, str(scripts / "context-policy.py"), "record", "--verdict", "再起動", "--reason", cp.REASON_WAIT]
+    got = subprocess.run(
+        [*argv, "--work", "parallel p1", "--context", "474303"], capture_output=True, text=True, env=e, cwd=tmp_path, timeout=30
+    )
+    assert got.returncode == 0, got.stdout
+    import context_decisions as cd
+
+    rows = cd.read_decisions(None, {"NDF_CONTEXT_DIR": str(ctx)})
+    assert [(r["verdict"], r["reason"]) for r in rows] == [("再起動", "待ち")]
+    spec = importlib.util.spec_from_file_location("context_policy_cli_wait", scripts / "context-policy.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._restarts_by_reason(rows) == {"待ち": 1}

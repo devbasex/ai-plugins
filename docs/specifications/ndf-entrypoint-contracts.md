@@ -372,8 +372,9 @@ done
 テストは `scripts/tests/test_check_ndf_contracts.py`・`plugins/ndf/scripts/tests/test_lib_decl.py`・
 `test_delivery.py`・`test_project_decl.py` にある。
 
-- このリポジトリの木で構造チェックが 0 を返し、`metrics.entrypoints` が規則の本数と一致すること。項目を 1 つ消すか、
-  規則が拾わないファイルの項目を足すと 1 を返すこと
+- 契約どおりの木で構造チェックが 0 を返し、`metrics.entrypoints` が規則の本数と一致すること。項目を 1 つ消すか、
+  規則が拾わないファイルの項目を足すと 1 を返すこと。このリポジトリの木で 0 を返すことは、全体テストの suite
+  `ndf-contracts`（`python3 scripts/check-ndf-contracts.py`）が確かめる
 - 契約に無いエントリポイント・引数・環境変数の読み・設定のキーの読み・ファイルの書きをそれぞれ 1 つ入れた木で 1 を返し、
   `items` にファイルとキーが出ること。契約にだけある引数で `contract-stale` が出ること
 - 違反に当たらない例外の項目を残した木で `unused-allow`、消した木で 0 になること

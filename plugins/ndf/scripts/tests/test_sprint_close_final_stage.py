@@ -143,6 +143,36 @@ def test_the_distribution_stage_closes_without_a_retro_line(repo, gh):
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "closed"
 
 
+def _progress(tmp, *rows):
+    import json
+
+    p = Path(tmp) / "progress.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return str(p)
+
+
+RUN = {"kind": "run", "from": None}
+RETRO_OK = {"kind": "step", "step": "retro", "exit": 0}
+
+
+@pytest.mark.parametrize(
+    "rows, stage",
+    [
+        ((RUN, RETRO_OK, {"kind": "run", "from": "merge-approved"}), "振り返り"),  # 承認の後に続きから流しても同じプランの retro を見る
+        ((RUN, {"kind": "step", "step": "deep-due", "exit": 3}), "リリース後テスト"),
+        ((RETRO_OK, RUN), "リリース後テスト"),  # 前の実行の retro は数えない
+    ],
+    ids=["retro-ran", "retro-skipped", "previous-run"],
+)
+def test_final_stage_from_the_plan_progress(repo, gh, tmp_path, rows, stage):
+    """まとめのプランの進捗記録で retro が通っていれば振り返り、通っていなければリリース後テストを最終工程にする（#2914 の I5）。"""
+    setup(gh, retro(200), comments=[comment(verify_block("1.1.0", [("#1", "合格")]), 101)])
+    args = ["--record-pr", "20", "--repo", "o/r", "--final-stage-from", _progress(tmp_path, *rows), "--dry-run"]
+    code, out, err = call("sprint-close.py", args, gh.env, repo)
+    assert code == 0, err
+    assert out["metrics"]["final_stage"] == stage and out["decisions"][0]["decision"] == f"最終工程を {stage} として判定した"
+
+
 def test_an_unknown_final_stage_is_a_call_error(repo, gh):
     setup(gh, "本文")
     code, _, _ = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--final-stage", "棚卸し"], gh.env, repo)

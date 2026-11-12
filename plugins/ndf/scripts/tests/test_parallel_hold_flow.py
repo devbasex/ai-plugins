@@ -219,16 +219,23 @@ def test_a_request_made_in_the_same_second_is_ordered_by_arrival(run):
     assert run.questions == []
 
 
-def test_wake_lines_skip_the_held_lanes_and_appear_when_the_hold_clears(run):
-    state(run, la="stopped")
-    run.wake = ["la"]
+def test_restarts_skip_the_held_sprint_lanes_and_run_when_the_hold_clears(run, monkeypatch):
+    """答え待ちの停止の範囲にある 1 スプリントのレーンは再起動しない。停止が解けたら耐久ワークフローが再起動する（#2936）。"""
+    import parallel_launch
+
+    hits = []
+    monkeypatch.setattr(parallel_launch, "step_launch", lambda _m, argv, lane, *_a: hits.append(argv) or {"result": "up", "attempts": 1})
+    state(run, la="stopped", lb="stopped")
+    run.wake = ["la", "lb"]
     run.questions = [own(i) for i in range(3)]
     govern(run)
-    run.pause("notice", lanes=[], attach=[])
-    assert "wake" not in next(v for k, v in reversed(run.events) if k == "pause")
+    run.launch_wakes()
+    assert hits == [["restart", "lb"]] and run.wake == ["la"]  # ループのレーンは停止の範囲でも起こす（#2913 の決定 6）
+    hits.clear()
     run.questions = []
     govern(run)
-    assert "restart la" in next(v for k, v in reversed(run.events) if k == "pause")["wake"][0]
+    run.launch_wakes()
+    assert hits == [["restart", "la"]] and run.wake == [] and not any(k == "pause" for k, _ in run.events)
 
 
 def test_keep_stopped_leaves_wake_and_revive(run):
@@ -268,6 +275,7 @@ def test_the_plan_hold_blocks_spawning_and_a_marked_lane_blocks_its_dependents(m
     monkeypatch.setattr(prun, "step_spawn", lambda m, n, names: made.extend(names) or {x: {"started": "t"} for x in names})
     monkeypatch.setattr(prun, "step_waiting_lanes", lambda *_a: [])
     monkeypatch.setattr(durable, "set_event", lambda *_a: None)
+    r.admitting = False  # マシンの本数の判定は test_parallel_machine 側で見る。ここは保留と印だけを見る
     r.lanes["la"].update(started=True, state="stopped")
     r.marks = {"la": {"at": "t"}}
     prun._spawn_ready(r, "/m")
@@ -538,22 +546,34 @@ def test_park_clear_reports_a_failure_to_send(env, monkeypatch):
     assert park(env["main"], clear=True).code == 2
 
 
-def test_an_answer_for_a_held_owner_places_a_mark_instead_of_the_restart_line(env, monkeypatch):
+def test_an_answer_for_a_held_owner_places_a_mark_and_returns_no_line(env, monkeypatch):
     main = env["main"]
     hold_file(main, lanes=["la"])
     monkeypatch.setattr(pa, "owner_lanes", lambda *_a: ["la", "lb"])
     nxt, held = pa.owner_next(main, "p1", "q1", None, [{"id": "q1", "kind": "ask", "lane": "la"}])
-    assert held == ["la"] and "restart lb" in nxt and "restart la" not in nxt
+    assert held == ["la"] and nxt is None  # 停止の範囲の外の持ち主は耐久ワークフローが再起動する（#2936）
     assert ph.read_marks(main, "p1")["la"]["why"] == "answered"
 
 
-def test_a_release_helper_lane_is_restarted_even_while_the_whole_plan_is_held(env, monkeypatch):
+def test_a_release_helper_lane_gets_no_mark_while_the_whole_plan_is_held(env, monkeypatch):
     main = env["main"]
     hold_file(main, plan=True)
     monkeypatch.setattr(pa, "owner_lanes", lambda *_a: ["la", "p1-rel1"])
     nxt, held = pa.owner_next(main, "p1", "q1", None, [{"id": "q1", "kind": "ask", "lane": "p1-rel1"}])
-    assert held == ["la"] and nxt == f"python3 {prun.RELAY} restart p1-rel1"
+    assert held == ["la"] and nxt is None
     assert set(ph.read_marks(main, "p1")) == {"la"}
+
+
+def test_an_answered_helper_is_restarted_by_the_workflow_even_while_the_whole_plan_is_held(run, monkeypatch):
+    """問いを保留して止まった一時レーンは、答えを受けたその場で耐久ワークフローが再起動する（計画全体の停止の間も）。"""
+    import parallel_launch
+
+    hits = []
+    monkeypatch.setattr(parallel_launch, "step_launch", lambda _m, argv, lane, *_a: hits.append(argv) or {"result": "up", "attempts": 1})
+    run.hold = ph.Hold(plan=True)
+    run.questions = [ask(1, lane="p1-rel1")]
+    run.reply({"id": "q1", "result": "answered", "choice": ["済んだ"]})
+    assert hits == [["restart", "p1-rel1"]]
 
 
 def test_without_a_hold_the_answer_returns_the_restart_lines(env, monkeypatch):

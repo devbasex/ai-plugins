@@ -44,6 +44,20 @@ def test_scope_adds_new_files_and_tests_near_the_changes_when_only_dot_is_declar
     ]
 
 
+def test_scope_drops_doc_files_and_looks_for_tests_near_code_only(tmp_path):
+    # #2925 AC3: 混ざった差分で、文書のファイルも、文書の近くのテストの置き場所も範囲に入らない
+    root = _tree(tmp_path, "src", "src/tests", "docs/tests")
+    got = rs.build_scope(["src/a.py", "docs/guide.md", "plugins/x/skills/s/SKILL.md"], ["."], [], root)
+    assert got == ["src/a.py", "src/tests"]
+
+
+def test_scope_keeps_doc_files_when_the_docs_decl_is_unreadable(tmp_path):
+    # #2925 AC5: 分け方の宣言が読めなければ、今と同じに差分のファイルを全部入れる
+    root = _tree(tmp_path, ".ndf")
+    (root / ".ndf" / "project.json").write_text("{", encoding="utf-8")
+    assert rs.build_scope(["src/a.py", "docs/guide.md"], ["t"], [], root) == ["src/a.py", "docs/guide.md", "t"]
+
+
 def test_cli_reads_the_pr_files_from_rest_and_drops_removed_ones(tmp_path):
     fake = tmp_path / "bin" / "gh"
     fake.parent.mkdir()

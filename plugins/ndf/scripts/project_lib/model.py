@@ -74,8 +74,11 @@ class Suite(schema.Shape):
 
 class TestCi(schema.Shape):
     """全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、
-    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。"""
+    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。
+    `only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが
+    `ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。"""
 
+    only: Optional[bool] = None
     check: Optional[str] = None
     junit_artifacts: Optional[str] = None
 
@@ -273,6 +276,21 @@ class Materials(schema.Shape):
     failures: list[str] = []
 
 
+class TestedDocs(schema.Shape):
+    """テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。"""
+
+    paths: list[str] = Field(min_length=1)
+    tests: list[str] = Field(min_length=1)
+
+
+class Docs(schema.Shape):
+    """差分の文書のファイルの分け方（#2925）。項目を省くと既定（`lib/diff_kinds.py`）で補う。利用者が手で書き、解析は書かない。"""
+
+    files: Optional[list[str]] = Field(default=None, min_length=1)
+    behavior: Optional[list[str]] = Field(default=None, min_length=1)
+    tested: list[TestedDocs] = []
+
+
 class ProjectDecl(schema.Shape):
     """プロジェクトの宣言（`.ndf/project.json`）。"""
 
@@ -289,6 +307,7 @@ class ProjectDecl(schema.Shape):
     ndf_policies: Optional[Union[NdfPolicies, Unknown]] = None
     instructions: Optional[Union[Instructions, Unknown]] = None
     materials: Optional[Union[Materials, Unknown]] = None
+    docs: Optional[Union[Docs, Unknown]] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}

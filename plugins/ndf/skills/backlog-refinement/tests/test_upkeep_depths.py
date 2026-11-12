@@ -100,6 +100,52 @@ def test_depth_due_without_declarations_counts_only(root):
     assert plan["items"] == [] and {s["aspect"] for s in plan["skipped_aspects"]} == set(R.ASPECTS)
 
 
+def _due_diff(root, loop, lap, issues, *extra):
+    args = ["--sprint", f"s{lap}", "--issues", ",".join(map(str, issues))]
+    args += ["--loop", loop, "--lap", str(lap)] if loop else []
+    return _upkeep(root, "depth", "due", "diff", *args, *extra)
+
+
+def test_diff_runs_every_third_lap_and_the_scope_holds_the_laps_it_skipped(root):
+    # 間隔 3: 見送った回が 0・1 回なら 3、2 回なら 0（#2914 の決定 2）。範囲は見送った 2 回と今の回（I1）
+    code, out = _due_diff(root, "L", 1, [11])
+    assert code == 3 and out["metrics"]["values"]["next_in"] == 2 and "次は 2 回後" in out["summary"]
+    assert _due_diff(root, "L", 2, [12])[0] == 3
+    code, out = _due_diff(root, "L", 3, [13, 14])
+    scope = out["metrics"]["values"]["scope"]
+    assert code == 0 and out["metrics"]["trigger"] == ["count"]
+    assert [x["lap"] for x in scope["laps"]] == [1, 2, 3] and scope["issues"] == [11, 12, 13, 14]
+    code, got = _upkeep(root, "depth", "scope", "--sprint", "s3")
+    assert code == 0 and got["metrics"] == scope
+    # 範囲に入れた回は消費され、次の回から数え直す。同じ回の打ち直しは前の判定を返す
+    assert _due_diff(root, "L", 4, [15])[0] == 3
+    assert _due_diff(root, "L", 3, [13, 14])[1]["metrics"]["values"]["scope"] == scope
+
+
+def test_diff_outside_a_loop_runs_every_time_and_does_not_consume_skipped_laps(root):
+    # ループの外は毎回起動し（I4）、見送ったループの 1 回は次に開発ループで走らせる回の範囲へ残る（I1）
+    assert _due_diff(root, "L", 1, [11])[0] == 3
+    assert _due_diff(root, "L", 2, [12])[0] == 3
+    first = [json.loads(x) for x in (root / ".ndf" / "backlog" / "depths.jsonl").read_text().splitlines()]
+    _decl(root, "backlog.json", {"depths": {"diff": {"every": 3}}})
+    code, out = _due_diff(root, None, 9, [90])
+    assert code == 0 and out["metrics"]["trigger"] == ["no_loop"]
+    assert [x["sprint"] for x in out["metrics"]["values"]["scope"]["laps"]] == ["s9"]
+    code, out = _due_diff(root, "L", 3, [13])
+    scope = out["metrics"]["values"]["scope"]
+    assert code == 0 and [x["lap"] for x in scope["laps"]] == [1, 2, 3]
+    assert scope["since"] is None or scope["since"] < first[0]["at"]  # ループの外の due より前から数える
+
+
+def test_diff_every_comes_from_the_declaration_and_manual_runs_it(root):
+    _decl(root, "backlog.json", {"depths": {"diff": {"every": 1}}})
+    assert _due_diff(root, "L", 1, [1])[0] == 0
+    _decl(root, "backlog.json", {"depths": {"diff": {"every": 5}}})
+    code, out = _due_diff(root, "L", 2, [2], "--manual")
+    assert code == 0 and out["metrics"]["trigger"] == ["manual"]
+    assert _upkeep(root, "depth", "scope", "--sprint", "nothing")[0] == 3
+
+
 def test_causes_record_rejects_unknown_types(root, tmp_path):
     f = tmp_path / "classes.json"
     f.write_text(json.dumps([{"number": 1, "type": "Z"}]))

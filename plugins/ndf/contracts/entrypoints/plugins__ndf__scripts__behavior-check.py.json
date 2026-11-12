@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/behavior-check.py",
+  "summary": "behavior-check.py: 振る舞いを決める文書を変えた Pull Request の、振る舞いの確認の対象・記録・確認（#2925 の決定 6）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "post": {
+        "options": [
+          "--file",
+          "--pr",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "targets": {
+        "options": [
+          "--pr",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "verify": {
+        "options": [
+          "--pr",
+          "--root"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "docs",
+        "ndf_policies"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "失敗（status stopped。記録が対象を覆わない）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "3": "前提が無い（status stopped。振る舞いを決める文書の変更が無い）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/supervise_lib/paths.py"
+  ]
+}

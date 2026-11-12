@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import unicodedata
 from functools import lru_cache
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import unquote
 
-from markdown_it import MarkdownIt
-from markdown_it.token import Token
+if TYPE_CHECKING:  # markdown_it は解析するときだけ読む（起動を縮める。#2309）
+    from markdown_it import MarkdownIt
+    from markdown_it.token import Token
 
 
 class Heading(NamedTuple):
@@ -51,6 +52,8 @@ class Link(NamedTuple):
 
 @lru_cache(maxsize=1)
 def _md_parser() -> MarkdownIt:
+    from markdown_it import MarkdownIt
+
     return MarkdownIt("commonmark").enable("table")
 
 
@@ -205,3 +208,24 @@ def _link_label(kids: list, start: int) -> str:
         if d.type in ("text", "code_inline"):
             label.append(d.content)
     return "".join(label)
+
+
+class CodeSpan(NamedTuple):
+    content: str
+    line: int
+
+
+def code_spans(text: str) -> list[CodeSpan]:
+    """インラインの code span（CommonMark 6.1）の中身と行。コードの囲みとインデントのコードブロックの中は含めない。
+    表のセルの中の code span も含める。"""
+    out: list[CodeSpan] = []
+    for t in _tokens(text):
+        if t.type != "inline" or not t.map:
+            continue
+        line = t.map[0]
+        for c in t.children or []:
+            if c.type in ("softbreak", "hardbreak"):
+                line += 1
+            elif c.type == "code_inline":
+                out.append(CodeSpan(c.content, line))
+    return out

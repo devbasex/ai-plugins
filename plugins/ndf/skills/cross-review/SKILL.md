@@ -130,6 +130,11 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 `verify-sweep` が GitHub 側の実数で確かめる。担当が書くのは指摘の基準（`references/design-principles.md` の「指摘の基準」）に
 当たる `critical` / `major` だけで、修正と最終スイープがコードを直すのも `major` 以上だけである。`minor` / `nit` は見送りの返信を付けて閉じる。
 
+**CI テストの宣言（`.ndf/project.json` の `test.ci.only`）があるリポジトリでは、テストを手元で打たない。** 指摘の検証
+（Step 2.5 の実行検証）にテストのコマンドを `--verify-command` で渡さず、修正の後と最終スイープもテストを走らせない。
+最終スイープの指示は静的解析のコマンドだけを名指しし、テストの合否は PR の CI の結果（`gh pr checks <PR>`）で読む。
+報告の「検証」には CI のチェックの名前と結論を書く。
+
 ## 実行
 
 **対象のリポジトリの中（メインディレクトリか worktree）で**、次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。

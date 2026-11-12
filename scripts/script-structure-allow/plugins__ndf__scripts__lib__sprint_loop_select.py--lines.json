@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/sprint_loop_select.py", "name": "", "kind": "lines", "reason": "499 行だったところへ #2997（選定の触る場所の見込みと窓の内の並べ替えの呼び出し。見込みの出し方と並べ替えの本体は lib/touch_estimate.py に置いた）で 518 行。選定と記録の責務の組み直し（#2994）で 500 行以下にしたら消す", "lines": 518}

@@ -122,7 +122,7 @@ def implement_shas(item: dict[str, Any]) -> list[str]:
 def item_shas(item: dict[str, Any]) -> list[str]:
     """項目が持つコミット（テスト・実装の全件・修正）を古い順に返す。取り消しはこの全件を戻す（#1814 I8）。"""
     commits = item.get("commits") or {}
-    shas = [commits.get("test"), *implement_shas(item), *(commits.get("fix") or [])]
+    shas = [commits.get("test"), *(commits.get("test_extra") or []), *implement_shas(item), *(commits.get("fix") or [])]
     return [s for s in shas if isinstance(s, str) and s]
 
 

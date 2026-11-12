@@ -42,8 +42,18 @@ def _refactor_vocabulary():
 
 
 def default_refactor_budget_minutes() -> int:
-    """cross-refactoring の既定の想定最大時間（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
+    """cross-refactoring の既定の実装の予算（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
     return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
+
+
+def refactor_step_seconds(budget_minutes: int) -> int:
+    """cross-refactoring のステップの見込みの秒 = 実装の予算 ×（1 + 安全網の倍率）（#2457 決定 8）。
+
+    テストの実行・CI の待ちはこの外にあり、駆動が子プロセスの上限ごとにステップの延長を書いて締め切りを延ばす。"""
+    import limits
+
+    factor = float(limits.value("cross-refactoring.safety-net", "factor"))
+    return int(round(float(budget_minutes) * 60 * (1 + factor)))
 
 
 HERE = SELF.parent  # デプロイしたスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
@@ -58,6 +68,9 @@ PRESETS = {
 
 # テストの実行の入口（#1334）。範囲テスト（scope）と全体テスト（whole）を、宣言の戦略に沿って走らせる
 TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
+# CI の結果の監視（#3056）。PR の CI のテストのチェックを待たずに 1 回だけ読み、記録を状態ディレクトリへ足す
+CI_WATCH_PY = f"python3 {HERE / 'ci-watch.py'}"
+CI_PEEK_CMD = f"{CI_WATCH_PY} peek --pr {{pr}} --state {{state_dir}}"
 
 
 def is_config_lock(stderr: str) -> bool:
@@ -151,6 +164,23 @@ MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --a
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
 # 検査のプランが cross-refactoring へ渡す範囲を PR の差分と宣言から組む（#1484）
 REFACTOR_SCOPE_PY = f"python3 {HERE / 'refactor-scope.py'}"
+# 振る舞いを決める文書を変えた PR の、振る舞いの確認の対象・記録・確認（#2925 の決定 6）。検査のプランがコードレビューの後に置く。
+# 振る舞いを決める文書の変更が無ければ（終了コード 3）全体テストの前の取り込みへ進む。手順の本文は targets の結果（record.procedure）が持つ
+BEHAVIOR_PY = f"python3 {HERE / 'behavior-check.py'}"
+_BEHAVIOR_RUN = {"type": "run", "stage": "完了判定", "on_fail": "abort"}
+BEHAVIOR_STEPS = (
+    {**_BEHAVIOR_RUN, "id": "behavior-targets", "cmd": f"{BEHAVIOR_PY} targets --pr {{pr}}", "skip_to": "base-sync", "next": "behavior"},
+    {
+        "id": "behavior",
+        "type": "work",
+        "kind": "振る舞いの確認",
+        "stage": "完了判定",
+        "inputs": ["behavior-targets"],
+        "prompt": "入力の behavior-targets の結果の record にある手順（procedure）どおりに振る舞いを確かめ、post のコマンドで PR へ記録する。",
+        "next": "behavior-verify",
+    },
+    {**_BEHAVIOR_RUN, "id": "behavior-verify", "cmd": f"{BEHAVIOR_PY} verify --pr {{pr}}", "next": "base-sync"},
+)
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"

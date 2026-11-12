@@ -103,7 +103,7 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
     tmp_dir = tmp_path / ".cross_refactoring"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     state = {
-        "schema": 2,
+        "schema": 3,
         "id": state_id,
         # **開始は今の少し前に置く。** 固定の時刻にすると、その時刻から想定最大時間が
         # 過ぎた後に走らせたテストだけが、修正の締め切りと最終ゲートの打ち切りで落ちる。
@@ -269,3 +269,143 @@ def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
     limits["fix_end_at"] = LATE
     state["limits"] = limits
     return state
+
+
+def commit_existing_tests(flow: dict[str, Any], files: dict[str, str]) -> None:
+    """着手前からあるテストを足し、その HEAD を `init` の基準の SHA として記録する。"""
+    work = flow["work"]
+    for rel, text in files.items():
+        path = work / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    commit_with_trailers(work, "既存のテスト", {})
+    state = read_state(flow["path"])
+    state["baseline_test"]["head"] = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    write_state(flow["path"], state)
+
+
+FAR_END = "2099-01-01T00:00:00+00:00"
+
+
+def emitted(capsys: Any, key: str) -> Any:
+    """標準出力に `key=値` で出た最後の値（無ければ None）。読むと capsys の出力を消費する。"""
+    out = capsys.readouterr().out
+    values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith(key + "=")]
+    return values[-1] if values else None
+
+
+def write_file(work: pathlib.Path, rel: str, text: str) -> None:
+    path = work / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def head_sha(work: pathlib.Path) -> str:
+    return git("rev-parse", "HEAD", cwd=work).stdout.strip()
+
+
+def planned_item(item_id: str, rank: int, **over: Any) -> dict[str, Any]:
+    """計画で採った改善項目の辞書。テストごとに違う鍵（path・symbol・command / scope_commands など）は `over` で渡す。"""
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": "src/calc.py",
+        "symbol": "add",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tier": "high",
+        "risk": False,
+        "tests": [],
+        "test_targets": ["tests/test_calc.py"],
+        "command_source": "targets",
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "start_deadline": FAR_END,
+        "test_start_deadline": None,
+        "status": "planned",
+        "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
+        "estimated_diff_lines": 20,
+        **over,
+    }
+
+
+def call_command(module: Any, name: str, **kwargs: Any) -> Any:
+    """`module` のコマンド `name` を、PR 番号 130 と `kwargs` の引数で呼ぶ。"""
+    import argparse as _argparse
+
+    return getattr(module, name)(_argparse.Namespace(id=130, **kwargs))
+
+
+def implement_items(
+    flow: dict[str, Any],
+    cmd_phases: Any,
+    cmd_implement: Any,
+    items: list[dict[str, Any]],
+    changes: dict[str, Any],
+    late: bool = False,
+    **over: Any,
+) -> None:
+    """計画の項目 `items` を置いて実装の工程を始め、項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。
+    `over` は状態の上書き、`late` は直しの試行の打ち切りだけを過ぎた上限の表（上書きの後に当てる）。"""
+    work = flow["work"]
+    state = read_state(flow["path"])
+    state["items"] = items
+    state["plan"] = {
+        "base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
+        "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
+        "end_at": FAR_END,
+        "table_source": "defaults",
+    }
+    state["phase"] = "implement"
+    state.update(over)
+    if late:
+        past_fix_end(state)
+    write_state(flow["path"], state)
+    call_command(cmd_phases, "cmd_start_phase", phase="implement")
+    for item_id, change in changes.items():
+        change(work)
+        commit_with_trailers(work, f"Refactor {item_id}", item_trailers(item_id))
+    call_command(cmd_implement, "cmd_merge_implement")
+
+
+def answer_judge(state_path: pathlib.Path, feasible: Any = True, reason: str = "直せる見込みがある") -> dict:
+    """成立の判定の依頼（`feasibility_request`）に答える（#2457 決定 3）。担い手の結果ファイルを書き、`judge` を打つ。
+
+    `feasible` は真偽か `{項目: 真偽}`。答えた依頼を返す。依頼が無ければ空。
+    """
+    import argparse as _argparse
+    import importlib
+
+    state = read_state(state_path)
+    request = state.get("feasibility_request") or {}
+    if not request.get("items"):
+        return {}
+    answers = [
+        {"item": i, "feasible": bool(feasible.get(i, True) if isinstance(feasible, dict) else feasible), "reason": reason, "evidence": "e"}
+        for i in request["items"]
+    ]
+    write_result(state_path, f"{request['by']}-judge-rf{state['id']}", {"items": answers})
+    importlib.import_module("refactor_lib.commands.judge").cmd_judge(_argparse.Namespace(id=state["id"]))
+    return request
+
+
+def verify_judged(cmd_converge: Any, state_path: pathlib.Path, capsys: Any, feasible: Any = True) -> str:
+    """`verify` を打ち、成立の判定を求められたら答えてもう一度打つ。最後の `VERIFY` の値を返す。"""
+    import argparse as _argparse
+
+    state_id = read_state(state_path)["id"]
+    for _ in range(4):
+        capsys.readouterr()
+        cmd_converge.cmd_verify(_argparse.Namespace(id=state_id))
+        out = capsys.readouterr().out
+        values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith("VERIFY=")]
+        verdict = values[-1] if values else ""
+        if verdict != "judge":
+            print(out, end="")
+            return verdict
+        answer_judge(state_path, feasible)
+    return verdict

@@ -7,13 +7,16 @@ import re
 import shlex
 import sys
 
+import clock
 import design_pr_merge
 import gate1_requests as gr1
+import pace
+import parallel_hold
 import project_mvv as pm
 import sprint_mvv
+import touch_estimate as te
 
 from sprint_loop_record import (
-    SPRINT_STATE,
     UPKEEP,
     IN_PROGRESS,
     SELECTED,
@@ -21,6 +24,7 @@ from sprint_loop_record import (
     SLOT_FIT,
     PAUSE_RANK,
     Env,
+    ResumeContext,
     loop_dir,
     write_record,
     open_record,
@@ -50,6 +54,7 @@ from sprint_loop_gate import (
     refusal_order,
     select_cmd,
 )
+from sprint_loop_argv import design_issues, sprint_guidance
 from sprint_loop_gate2 import pending_step
 from sprint_loop_exclusion import PENDING_REASON, PRODUCTION_REASON, exclusion_reason, prerequisite_reason  # noqa: F401
 
@@ -218,24 +223,38 @@ def selected_reason(row: dict, first: set[int], approved: set[int]) -> str:
     )  # fmt: skip
 
 
-def _take_order(cands: list[dict], open_: list[int], first: set[int]) -> tuple[list[int], list[int]]:
-    """枠を割り当てる順（先頭に選ぶ課題 → 品質の枠 → 残り）と、先頭に選ぶ課題の添字を返す。"""
+def _take_order(cands: list[dict], open_: list[int], first: set[int], needs: set[int] | None = None) -> tuple[list[int], list[int]]:
+    """枠を割り当てる順（先頭に選ぶ課題 → 品質の枠 → 残り）と、先頭に選ぶ課題の添字を返す。
+    needs（設計を要る課題）を渡すのは業務時間外で、先頭に選ぶ課題 → 設計を要る課題 → 設計の要らない課題の順にする（#2913 の受け入れ条件 6）。"""
     head = [i for i in open_ if cands[i]["number"] in first]
     rest = [i for i in open_ if i not in head]
+    if needs is not None:
+        return head + sorted(rest, key=lambda i: cands[i]["number"] not in needs), head
     take_order = head + [i for i in rest if cands[i].get("quality_slot")] + [i for i in rest if not cands[i].get("quality_slot")]
     return take_order, head
 
 
 def _select_candidate_rows(
-    cands: list[dict], title: str, max_issues: int, reason_for, first: set[int] = frozenset(), approved: set[int] = frozenset()
+    cands: list[dict],
+    title: str,
+    max_issues: int,
+    reason_for,
+    first: set[int] = frozenset(),
+    approved: set[int] = frozenset(),
+    needs: set[int] | None = None,
+    touch: te.TouchPick | None = None,
 ) -> tuple[list[int], list[dict]]:
     """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
     max_issues の枠は、先頭に選ぶ課題（first。直して出し直す・デプロイの直し）→ 品質の枠の課題 → 順位の順に割り当てる
-    （品質の枠の最低件数を容量で削らない）。"""
+    （品質の枠の最低件数を容量で削らない）。業務時間外（needs を渡す）は承認した設計 → 設計を要る課題 → 設計の要らない課題の順。
+    touch（触る場所の見込み）を渡すと残りの枠を逆転の幅の窓の内で重ならない課題から埋め、行に見込みと重なりを書く（#2997）。"""
     whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
     open_ = [i for i, w in enumerate(whys) if w is None]
-    take_order, head = _take_order(cands, open_, first)
-    take = take_order[:max_issues]
+    take_order, head = _take_order(cands, open_, approved if needs is not None else first, needs)
+    fixed = set(head) if needs is not None else set(head) | {i for i in open_ if cands[i].get("quality_slot")}
+    est = {i: (touch.estimates if touch else {}).get(r["number"], te.Estimate()) for i, r in enumerate(cands)}
+    got = te.spread(take_order, fixed, est, max_issues, touch.width if touch else 0, touch.shared if touch else ())
+    take = got.take
     picked, here = [], []
     for i in sorted(range(len(cands)), key=lambda i: (i not in head, i)):  # 先頭に選ぶ課題だけを前へ。ほかは順位の順
         r = cands[i]
@@ -246,6 +265,8 @@ def _select_candidate_rows(
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
         else:
             here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
+    if touch is not None:
+        te.annotate_rows(here, [r["number"] for r in cands], picked, got, est, touch)
     return picked, here
 
 
@@ -253,11 +274,15 @@ def _rows_by_rank(ms: dict) -> list[dict]:
     return sorted(ms.get("rows", []), key=lambda r: r["rank"])
 
 
-def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int, prior: dict | tuple = ()) -> list[dict]:
+def milestone_candidates(ms: dict, rec: dict, first: set, lap_n: int, prior: dict | tuple = (), width: int = 0) -> list[dict]:
     """マイルストーンの候補（切り出しの境界の内）に、境界の外にある先に選ぶ課題を順位の順で足す。
-    保留したループの 1 回の課題・今のループの 1 回で外した課題（loop exclude）・前のループの待ちの課題は、境界が無いときの枠を使わない（#2627）。"""
+    保留したループの 1 回の課題・今のループの 1 回で外した課題（loop exclude）・前のループの待ちの課題は、境界が無いときの枠を使わない（#2627）。
+    境界が無いときの候補は max_issues に逆転の幅（width）を足した件数まで取る（並べ替えの窓を候補の中に収める。#2997）。"""
     lap_excluded = {e["number"] for e in rec.get("excluded", []) if e.get("lap") == lap_n}
-    cands = candidates_of(ms, rec["max_issues"], pending_issues(rec) | lap_excluded | set(prior))
+    asked = {
+        n for n, w in {w["number"]: w for w in rec.get("waiting", [])}.items() if not w.get("answer")
+    }  # 承認待ち（#2913 の受け入れ条件 1）
+    cands = candidates_of(ms, rec["max_issues"] + width, pending_issues(rec) | lap_excluded | set(prior) | asked)
     have = {r["number"] for r in cands}
     return cands + [r for r in _rows_by_rank(ms) if r["number"] in first and r["number"] not in have]
 
@@ -272,36 +297,51 @@ def outside_boundary_rows(ms: dict, cands: list[dict], title: str) -> list[dict]
     ]
 
 
+HOLD_REASON = "答え待ちの停止の範囲（新しい承認を生む作業）"
+
+
 def choose_issues(
-    env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset(), prior: dict | tuple = ()
+    env: Env,
+    rec: dict,
+    rank: dict,
+    lap_n: int,
+    descriptions: dict,
+    lap_created: set = frozenset(),
+    prior: dict | tuple = (),
+    hold_only: bool = False,
+    outside: bool = False,
 ) -> dict:
     """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明と、前のループの待ち（課題 → ループの名前）だけ。戻り値は
-    {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。"""
+    {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。
+    hold_only（答え待ちの停止の範囲）は設計を要る課題（新しい承認を生む作業）を外し、outside（業務時間外）は枠の順を変える（#2913）。"""
     m = rank.get("metrics") or {}
     by_title = {ms["title"]: ms for ms in m.get("milestones", [])}
     order = [t for t in m.get("order", []) if t in by_title and (not rec.get("milestones") or t in rec["milestones"])]
     approvals = {(a["milestone"], a["sha256"]) for a in rec.get("sprint_mvv_approvals", [])}
     rows_out, total = [], 0
+    files, width, shared = te.git_tracked(env), te.reorder_width(rec, env.main_dir()), te.shared_list(env.main_dir())
     first = first_issues(rec, lap_n)
     approved = approved_designs(rec, lap_n)
     for title in order:
         ms = by_title[title]
-        cands = milestone_candidates(ms, rec, first, lap_n, prior)
+        cands = milestone_candidates(ms, rec, first, lap_n, prior, width)
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
+        base = (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created, prior))
+        needs = set(design_issues(rec, [r["number"] for r in cands]))  # 分類はスプリントを組む規則と同じ関数（I2）
+        reason_for = (lambda r, b=base: b(r) or (HOLD_REASON if r["number"] in needs else None)) if hold_only else base
+        desc = descriptions.get(title) or ""
+        touch = te.TouchPick({r["number"]: te.issue_estimate(env, r["number"], desc, files) for r in cands}, width, shared)
         picked, here = _select_candidate_rows(
-            cands,
-            title,
-            rec["max_issues"],
-            (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created, prior)),
-            first,
-            approved,
+            cands, title, rec["max_issues"], reason_for, first, approved, needs if outside else None, touch
         )
         rows_out += here
         if picked:
-            rows_out += outside_boundary_rows(ms, cands, title)
-            return {"milestone": title, "selection": rows_out, "candidates": total, "sprint_mvv": text}
+            outside_rows = outside_boundary_rows(ms, cands, title)
+            rows_out += [{**r, "touch": te.issue_estimate(env, r["number"], desc, files, outside=True).to_dict()} for r in outside_rows]
+            got = {"milestone": title, "selection": rows_out, "candidates": total, "sprint_mvv": text}
+            return {**got, "reorders": touch.reorders} if touch.reorders else got
     return {"milestone": None, "selection": rows_out, "candidates": total, "sprint_mvv": None}
 
 
@@ -317,7 +357,7 @@ def cmd_select(env: Env, name: str) -> dict:
 def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
     """ループの 1 回の境（#2436 の lane-loop の「ループの 1 回の境」の 1〜9）: すぐ止まる条件 → 届いた答えの処理と保留したループの 1 回のまとめ →
     保留の上限・待ちだけ → ほかの止まる条件 → 選定。"""
-    stop = boundary_stop(env, rec)
+    stop = boundary_stop(env, rec, hold=False)
     if stop and stop["condition"] in IMMEDIATE_STOPS:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
     import sprint_loop
@@ -327,17 +367,19 @@ def boundary_then_select(env: Env, rec: dict, before: dict) -> dict:
         return got
     settle_approved_designs(env, rec)  # 選定の前に、承認済みで未マージの設計 PR をマージし直す（#2507）
     notes = gr1.lane_sends(env, rec, lane_gate1)
-    stop = held_stop(rec, boundary_stop(env, rec))
+    stop = held_stop(rec, boundary_stop(env, rec, hold=False))
     if stop:
         return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
-    return run_selection(env, rec, before, len(rec["laps"]) + 1, notes=notes)
+    # 答え待ちの停止は保留したループの 1 回の残りを流した後に読み、範囲なら承認の要らない候補だけで選ぶ（#2913 の決定 5）
+    return run_selection(
+        env, rec, before, len(rec["laps"]) + 1, notes=notes, hold=(parallel_hold.loop_stop(env.main_dir()) or {}).get("values")
+    )
 
 
-def resume_answer_hold(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    """答え待ちの停止で止まったループの再開: 停止の範囲に残っていれば同じ条件で止まり直す（#2707）。"""
-    if (again := boundary_stop(env, rec)) and again["condition"] == "answer_hold":
-        return stop_and_report(env, rec, before, again, "答え待ちの停止が続いている"), nxt
-    return None, nxt
+def resume_answer_hold(ctx: ResumeContext) -> tuple[dict | None, str]:
+    """答え待ちの停止で止まったループの再開: 範囲に残っていても解く。承認の要らない候補があるかは次の境の選定が決め、
+    無ければ同じ条件で止まり直す（#2913 の決定 6）。"""
+    return None, ctx.nxt
 
 
 def has_held_work(rec: dict) -> bool:
@@ -363,10 +405,13 @@ def add_env_exclusions(rec: dict, n: int) -> None:
             rec.setdefault("excluded", []).append({"number": num, "reason": EXCLUDE_REASON, "lap": n})
 
 
-def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict, lap: dict | None) -> dict:
-    """選べる課題が無いときの止まり方（待ちだけ・見直しを先に・no_issue・outside_mvv）。"""
+def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict, lap: dict | None, hold: dict | None = None) -> dict:
+    """選べる課題が無いときの止まり方（答え待ちの停止・待ちだけ・見直しを先に・no_issue・outside_mvv）。"""
     if lap is not None:
         rec["laps"].remove(lap)  # スプリントを組むループの前の 1 回は取り下げ、除外の一覧（excluded の lap）を次の選定に残す
+    if hold is not None:  # 答え待ちの停止の範囲で承認の要らない候補が無い: 今と同じく answer_hold で止まる（#2913 の受け入れ条件 3）
+        stop = {"condition": parallel_hold.CONDITION, "values": hold}
+        return stop_and_report(env, rec, before, stop, "止まる条件に当たった（answer_hold）", {"selection": got["selection"]})
     if has_held_work(rec):  # 選べる課題が無く答えを待つ作業だけが残る: no_issue で止まらず、見直しも挟まない（異常系 6）
         return stop_and_report(
             env, rec, before, waiting_only(rec, "no_selectable"), "手元の作業が待ちだけになった", {"selection": got["selection"]}
@@ -392,10 +437,11 @@ def _stop_without_issue(env: Env, rec: dict, before: dict, got: dict, rank: dict
     )
 
 
-def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, lap: dict | None) -> dict:
+def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, lap: dict | None, marks: dict) -> dict:
     """ループの 1 回 n の行を作って（または取り直したループの 1 回を書き換えて）記録する。選んだ課題の直しを済みにし、スプリントの MVV を置く。"""
     d = loop_dir(env, rec["name"]) / f"lap-{n}"
     new = lap or {"n": n, "outcome": IN_PROGRESS, "started_at": env.now(), "created": [], "gates": [], "deferred_issues": []}
+    new.pop("reorders", None)  # 選び直したループの 1 回に前の逆転の組を残さない
     new.update(
         sprint=f"{rec['name']}-{n}",
         dir=str(d),
@@ -404,6 +450,8 @@ def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, 
         milestone=got["milestone"],
         rank_digest=(rank.get("metrics") or {}).get("digest", ""),
         selection=got["selection"],
+        **marks,
+        **({"reorders": got["reorders"]} if got.get("reorders") else {}),
     )
     if lap is None:
         rec["laps"].append(new)
@@ -417,7 +465,17 @@ def _open_lap(env: Env, rec: dict, before: dict, got: dict, rank: dict, n: int, 
     return new
 
 
-def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = None, notes: list[dict] = ()) -> dict:
+def lap_marks(env: Env, hold: dict | None) -> dict:
+    """ループの 1 回へ残す業務時間の判定と、答え待ちの停止の範囲で始めた印（#2913）。判定はループの 1 回の境だけで行う（I7）。"""
+    now = clock.parse(env.now(), naive="utc")
+    h = pace.hours_now(env.main_dir(), now)
+    hours = {"declared": h["declared"], "inside": h["inside"], "timezone": h["timezone"], "at": clock.iso(now, "utc")}
+    return {"hours": hours, "hold_only": hold is not None, **({"answer_hold": hold} if hold is not None else {})}
+
+
+def run_selection(
+    env: Env, rec: dict, before: dict, n: int, lap: dict | None = None, notes: list[dict] = (), hold: dict | None = None
+) -> dict:
     add_env_exclusions(rec, n)
     code, rank = env.rank(env.main_dir())
     if code not in (0, PAUSE_RANK):
@@ -426,12 +484,14 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         descriptions = env.milestones(rec.get("repo") or "")
     except OSError as e:
         return refusal_order(str(e))
-    got = choose_issues(env, rec, rank, n, descriptions, set((lap or {}).get("created") or []), gr1.prior_issues(env))
+    marks = lap_marks(env, hold)
+    created = set((lap or {}).get("created") or [])
+    got = choose_issues(env, rec, rank, n, descriptions, created, gr1.prior_issues(env), hold is not None, not marks["hours"]["inside"])
     if got["milestone"] is None:
-        return _stop_without_issue(env, rec, before, got, rank, lap)
-    new = _open_lap(env, rec, before, got, rank, n, lap)
+        return _stop_without_issue(env, rec, before, got, rank, lap, hold)
+    new = _open_lap(env, rec, before, got, rank, n, lap, marks)
     chosen = selected_issues(new)
-    nxt = f"モードを決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> を打つ"
+    nxt = sprint_guidance(rec, chosen, new["dir"])
     update_handoff(env, rec, f"ループの {n} 回目 の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"ループの {n} 回目 の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
@@ -443,6 +503,9 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
         excluded=[r for r in got["selection"] if r["decision"] == DROPPED],
         milestone=got["milestone"],
         rank_digest=new["rank_digest"],
+        hours=marks["hours"],
+        **({"answer_hold": hold} if hold is not None else {}),
+        **({"reorders": got["reorders"]} if got.get("reorders") else {}),
     )
 
 
@@ -452,4 +515,4 @@ def cmd_exclude(env: Env, name: str, number: int, reason: str) -> dict:
         if not lap or lap.get("state_path"):
             return refusal_order("スプリントを組む前の進行中のループの 1 回が無い（loop exclude は選定の後・loop sprint の前に打つ）")
         rec["excluded"].append({"number": number, "reason": reason, "lap": lap["n"]})
-        return run_selection(env, rec, before, lap["n"], lap)
+        return run_selection(env, rec, before, lap["n"], lap, hold=lap.get("answer_hold") if lap.get("hold_only") else None)

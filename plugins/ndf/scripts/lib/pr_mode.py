@@ -1,10 +1,12 @@
 """Pull Request の宛て先の区別と、本文の末尾に書くモードの 1 行。
 
 スプリントの課題の Pull Request はスプリントブランチ（`sprint/<名前>`）宛てに出して集め、
-実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。
+実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。並列の計画で課題のまとまりの記録が
+あるスプリントは、まとまりの Pull Request をスプリントブランチ宛てのまま実装レビューに通す（#3081）。
 
 本文の末尾には `モード: <mode> / 通した工程: <工程> → <工程>` の 1 行を書く。デプロイ後の
-不具合の起票数と突き合わせ、スプリント単位にした後の精度を測る材料にする。
+不具合の起票数と突き合わせ、スプリント単位にした後の精度を測る材料にする。PR を出した後に通した工程
+（スプリントの検査のプランの構造改善・実装レビュー・完了判定）は、プランの終わりにこの行へ書き足す（#2921）。
 """
 
 from __future__ import annotations
@@ -27,9 +29,10 @@ def pr_target(base: str) -> str:
     return "sprint" if (base or "").startswith(legacy_names.branch_prefixes(SPRINT_PREFIX)) else "develop"
 
 
-def needs_review(base: str) -> bool:
-    """実装レビューを通す宛て先か。スプリントブランチ宛ては通さない。"""
-    return pr_target(base) != "sprint"
+def needs_review(base: str, bundled: bool = False) -> bool:
+    """実装レビューを通す宛て先か。スプリントブランチ宛ては通さない。ただし課題のまとまりの記録があるスプリント（`bundled`）は、
+    まとまりの Pull Request をスプリントブランチへ入れる前に通す（#3081 の I8b）。"""
+    return pr_target(base) != "sprint" or bundled
 
 
 def split_stages(text: str | None) -> list[str]:
@@ -41,6 +44,15 @@ def split_stages(text: str | None) -> list[str]:
 
 def mode_line(mode: str, stages: list[str]) -> str:
     return f"{MODE_LINE_PREFIX}{mode} / 通した工程: {STAGE_SEP.join(stages) if stages else '無し'}"
+
+
+def stages_in(body: str) -> list[str] | None:
+    """本文のモードの 1 行に書いた工程の並びを返す。行が無ければ None（`無し` は空の並び）。"""
+    for line in (body or "").split("\n"):
+        if line.startswith(MODE_LINE_PREFIX) and " / 通した工程: " in line:
+            text = line.split(" / 通した工程: ", 1)[1].strip()
+            return [] if text == "無し" else split_stages(text)
+    return None
 
 
 def with_mode_line(body: str, mode: str | None, stages: list[str]) -> str:

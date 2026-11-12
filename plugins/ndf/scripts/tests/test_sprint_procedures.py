@@ -121,7 +121,8 @@ def test_single_plans_keep_their_step_order_and_gain_the_record(tmp_path):
         "base-return",
     ]
     check = new_single(tmp_path, "check", "--pr", "30", "--worktree", wt)
-    inspect = ["assess", "refactor", "review", "base-sync", "fix-base", "test-all", "judge", "fix", "ready"]
+    behavior = ["behavior-targets", "behavior", "behavior-verify"]  # 振る舞いの確認（#2925）
+    inspect = ["assess", "refactor", "review", *behavior, "base-sync", "fix-base", "test-all", "judge", "fix", "ready"]
     assert ids(check) == [*inspect, *merge, "record", "abort", "base-return"]
     since = new_single(tmp_path, "check", "--since-last", "--id", "m-1", "--worktree", wt)
     assert ids(since) == ["prepare", "pr", *inspect[:-1], "finish", "ready", *merge, "record", "abort", "abort-before-pr"]
@@ -234,8 +235,9 @@ def test_absorbed_issue_skips_in_the_queue(tmp_path):
 
 
 def test_overlapping_touched_files_are_serialized():
-    """AC13: 設計の結果の触るファイルが重なる 2 本は同じ組になり、1 本ずつ流れる（包含で見る）。"""
-    grouped = admission.groups({"a": ["pkg/a/"], "b": ["pkg/a/x.py"], "c": ["docs/"]})
+    """AC13: 設計の結果の触るファイルに等しいファイルを持つ 2 本は同じ組になり、1 本ずつ流れる。
+    ディレクトリの宣言は重なりに使わない（#1811）。"""
+    grouped = admission.groups({"a": ["pkg/a/", "pkg/a/x.py"], "b": ["pkg/a/x.py"], "c": ["pkg/a/", "docs/"]})
     assert sorted(map(sorted, grouped)) == [["a", "b"], ["c"]]
 
 
@@ -373,7 +375,7 @@ def test_sprint_check_plan_uses_the_shared_pr_and_record(tmp_path):
     assert record["cmd"].endswith("--target-pr {pr} --advance-done")
     assert ids(check)[:2] == ["collect", "pr"]
     llm = [s for s in check["steps"] if s["type"] in ("work", "judge", "drive")]
-    assert [s["id"] for s in llm] == ["refactor", "review", "fix-base", "judge", "fix"]
+    assert [s["id"] for s in llm] == ["refactor", "review", "behavior", "fix-base", "judge", "fix"]
     impl = load(waves["実装"]["plans"][0])
     # 手動確認は載せず、要求の移行性の行は常に材料にする（#1752）
     assert next(s for s in impl["steps"] if s["id"] == "pr")["materials"] == {"manual": False, "migration": True}

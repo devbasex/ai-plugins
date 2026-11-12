@@ -114,8 +114,7 @@ def test_readopt_round_launches_the_implement_cli_for_tested_items():
 @pytest.mark.parametrize(
     "kind, detail",
     [
-        ("window", "要る下限 61 分 > 想定最大時間 30 分（着手前のテスト 495.0 秒）"),
-        ("init-timeout", "着手前のテストが上限 180 秒で終わらなかった"),
+        ("init-timeout", "着手前のテストが上限 1800 秒で終わらなかった"),
     ],
 )
 def test_a_window_shortage_returns_the_skipped_gap(tmp_path, monkeypatch, capsys, kind, detail):
@@ -147,14 +146,8 @@ def _started_drive(tmp_path, monkeypatch, source: str):
     return target
 
 
-def test_a_floor_budget_extends_the_step(tmp_path, monkeypatch):
-    """決定 4: 下限まで上げた想定最大時間（40 分）の秒を延長のファイルへ書く。"""
-    target = _started_drive(tmp_path, monkeypatch, "floor")
-    assert drive_pause.read_extension(target) == (2400.0, "想定最大時間を下限の 40 分へ上げた")
-
-
 @pytest.mark.parametrize("source", ["default", "explicit"])
-def test_other_budget_sources_do_not_extend_the_step(tmp_path, monkeypatch, source):
+def test_the_budget_source_does_not_extend_the_step(tmp_path, monkeypatch, source):
     assert not _started_drive(tmp_path, monkeypatch, source).exists()
 
 
@@ -167,3 +160,89 @@ def test_the_extension_never_moves_back(tmp_path, monkeypatch):
     assert drive_pause.read_extension(target) == (6174.0, "着手前のテスト")
     monkeypatch.delenv(drive_pause.EXTEND_ENV)
     assert not drive_pause.write_extension(9000, "エンジンの外")
+
+
+# ---------- #2457: 安全網で止まったら取り消さずに gate で人へ渡す ----------
+
+
+def test_a_safety_net_halt_returns_a_gate_with_the_item_states(tmp_path, monkeypatch, capsys):
+    """受け入れ条件 18・I8: コーディングの CLI の前に安全網が尽きていたら、起動せずに gate・終了コード 10 で止める。
+    項目は取り消さず、項目ごとの状態・落ちているテスト・修正の履歴が `items[0].refactor_items` に載り、実績の行を書く。"""
+    state = {
+        "items": [
+            {
+                "id": "I-001",
+                "path": "src/a.py",
+                "symbol": "f",
+                "status": "failing",
+                "failed_check": {"tests": ["tests/test_a.py::t"]},
+                "fix_history": [{"round": 0, "failing": ["tests/test_a.py::t"], "progress": "first"}],
+                "estimate": {"test": 0, "implement": 1.3},
+            }
+        ],
+        "budget": {"minutes": 60, "extension": None},
+        "safety_net": {"used_seconds": 7200.0},
+    }
+    (tmp_path / "cross-refactoring-rf7-state.json").write_text(json.dumps(state))
+    seen: list = []
+
+    def fake(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py":
+            sub = cmd[2]
+            seen.append(sub)
+            if sub == "init":
+                return 0, f"ID=7\nTMP_DIR={tmp_path}\nPHASE=verify\nWORK={tmp_path}\n"
+            if sub == "verify":
+                return 0, "VERIFY=fix\nFIX_IMPL=codex\n"
+            if sub == "start-phase":
+                return 0, "PHASE_TIMEOUT=''\nHALT=1\nHALT_REASON='安全網の上限 120 分に当たった'\n"
+        if cmd[0] == "bash" and "launch-cli.sh" in cmd[1]:
+            seen.append("launch")
+        return 0, ""
+
+    monkeypatch.setattr(rf, "call", fake)
+    with pytest.raises(SystemExit) as e:
+        rf.main(["5", "--scope", "src"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert e.value.code == 10
+    assert out["status"] == "gate" and "安全網の上限" in out["next"] and "--safety-net-minutes" in out["next"]
+    assert "launch" not in seen, "止めた後に新しいコーディングの CLI を起動しない"
+    assert "item-actuals" in seen
+    item = out["items"][0]["refactor_items"][0]
+    assert item["status"] == "failing" and item["failing"] == ["tests/test_a.py::t"] and item["fix_history"]
+    assert out["metrics"]["budget_minutes"] == 60 and out["metrics"]["safety_net_minutes"] == 120.0
+
+
+def test_coding_time_at_the_limit_lets_the_merge_run_and_the_next_start_halts():
+    """安全網の上限に届いた CLI の後も取り込みまで進め、止めるのは次のコーディングの CLI の起動の前（I8）。
+
+    CLI の直後に止めると、最後の CLI のコミットが項目に結ばれずに HEAD に残り、打ち直しで同じ手順の CLI をもう 1 度起動する。"""
+    import assignee_launch
+
+    calls: list[str] = []
+
+    class Fake(assignee_launch.AssigneeLaunch):
+        def __init__(self):
+            self.v = {"ID": "7", "IMPL": "claude"}
+
+        def rf(self, *args, ok=(0,)):
+            calls.append(args[0])
+            out = {"coding-time": {"HALT": "1", "HALT_REASON": "安全網の上限 120 分に当たった"}}.get(args[0], {})
+            if args[0] == "start-phase" and "coding-time" in calls:
+                out = {"HALT": "1", "HALT_REASON": "安全網の上限 120 分に当たった"}
+            self.v.update(out)
+            return 0, out
+
+        def launch(self, impl, phase):
+            calls.append(f"launch:{phase}")
+            return 0
+
+        def monitor(self, impl, phase, stem):
+            return 0, []
+
+    d = Fake()
+    d.impl_phase("implement")
+    calls.append("merge-implement")
+    with pytest.raises(assignee_launch.Halt):
+        d.impl_phase("fix")
+    assert calls == ["start-phase", "launch:implement", "coding-time", "merge-implement", "start-phase"]

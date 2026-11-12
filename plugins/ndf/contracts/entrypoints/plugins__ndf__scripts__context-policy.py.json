@@ -27,7 +27,9 @@
         "options": [
           "--all",
           "--format",
+          "--from",
           "--since",
+          "--until",
           "--work"
         ],
         "positionals": []
@@ -47,11 +49,8 @@
     "NDF_CONTEXT_DIR",
     "NDF_CONTEXT_LIMIT",
     "NDF_CONTEXT_POLICY",
-    "NDF_DEPS_REEXEC",
-    "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
     "NDF_STATE_HOME",
-    "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
   "settings": [],
@@ -60,7 +59,9 @@
   "writes": [
     "applied-json",
     "cost-estimates-json",
-    "decisions-jsonl"
+    "decisions-jsonl",
+    "handoff-mark-json",
+    "restore-json"
   ],
   "reads": [],
   "exit": {

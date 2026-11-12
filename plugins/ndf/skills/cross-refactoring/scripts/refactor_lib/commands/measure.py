@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional
 
 import statefile
 
-from .. import clock, codemetrics as cm, codemetrics_read as read, codemetrics_view as view, info, timeline
+from .. import codemetrics as cm, codemetrics_read as read, codemetrics_view as view, info, timeline
 import limits as limit_decl  # 上限の宣言（#2343）
 from ..codemetrics_record import propose_started
 from ..paths import git_out, load_state, work_dir
@@ -141,7 +141,7 @@ class Measurement:
         record["started_at"] = statefile.now()
         record["head"] = git_out(self.work, ["rev-parse", "HEAD"])
         limits = {**timeline.of_state(self.state), **(self.state.get("limits") or {})}
-        self.budget = timeline.measure_deadline(clock.now(), limits)
+        self.budget = timeline.measure_deadline(limits)
         record["deadline_seconds"] = self.budget
         self.end = started + self.budget
         if record.get("config", {}).get("source") == cm.SOURCE_INVALID:

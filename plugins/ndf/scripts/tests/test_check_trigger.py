@@ -349,10 +349,11 @@ def test_prepare_points_check_base_at_from_even_if_left_over(repo, env, tmp_path
     assert check["from"] == base and check["files"] == ["app/a.py"]
 
 
-def test_scope_orders_common_then_escaped_then_others(repo, env, tmp_path):
-    gh_set(env, files={"21": ["docs/x.md"]})
+def test_scope_orders_common_then_escaped_then_others_and_drops_docs(repo, env, tmp_path):
+    # #2925 AC3: 文書のファイルのディレクトリは範囲に入らない
+    gh_set(env, files={"21": ["tools/x.py"]})
     call(repo, env, "escape", "--pr", "21")
-    merge_pr(repo, 11, "feat/a", {"app/a.py": 1, "docs/x.md": 1, "core/lib/c.py": 1})
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1, "tools/x.py": 1, "core/lib/c.py": 1, "docs/x.md": 1})
     st = state_dir(tmp_path, [])
     call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
     p = subprocess.run(
@@ -361,7 +362,7 @@ def test_scope_orders_common_then_escaped_then_others(repo, env, tmp_path):
         text=True,
         env=env,
     )
-    assert p.returncode == 0 and p.stdout.split() == ["core/lib", "docs", "app"]
+    assert p.returncode == 0 and p.stdout.split() == ["core/lib", "tools", "app"]
 
 
 def test_scope_without_check_json_returns_two(repo, env, tmp_path):
@@ -573,6 +574,20 @@ def test_a_failed_or_unmerged_sprint_check_does_not_move_check_done(repo, env, t
     assert done_sha(repo, "check") == "" and done_sha(repo, "review") == ""
     row = events(env, "check")[-1]
     assert not row["to"] and row["result"] == ("failed" if failed else "no_change")
+
+
+def test_a_review_only_sprint_check_moves_only_check_done_review(repo, env, tmp_path):
+    """構造改善を外した（停止中の）スプリントの検査は実装レビューだけの回として記録し、check-done/check を進めない
+    （PR 3062 のレビュー）。"""
+    sprint = merge_pr(repo, 40, "sprint/m1", {"core/s.py": 3})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 0, "counts": REVIEW}])
+    gh_set(env, states={"40": "MERGED"}, merges={"40": sprint})
+    args = ["record", "--id", "check", "--target-pr", "40", "--advance-done", "--review", "--state", str(st)]
+    code, out, _ = call(repo, env, *args)
+    assert code == 0, out
+    assert out["metrics"]["pushed"] == ["check-done/review"]
+    assert done_sha(repo, "review") == sprint and done_sha(repo, "check") == ""
+    assert events(env, "check")[-1]["only"] == "review"
 
 
 def test_advance_done_needs_target_pr(repo, env, tmp_path):

@@ -93,7 +93,7 @@ CI を持たない takemi-ohama/novel のスプリント pipeline（PR takemi-oh
 
 | 要素 | 責務 |
 | --- | --- |
-| [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py) の `verify_commands` | 宣言の `test` から最終スイープに名指しする全体テストのコマンドを返す。テストの無い宣言では `None`、種別・雛形の誤りは `StrategyError` |
+| [`lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py) の `verify_commands` | 宣言の `test` から最終スイープに名指しする全体テストのコマンドを返す（CI テストの宣言があれば静的解析のコマンドだけ）。テストの無い宣言では `None`、種別・雛形の誤りは `StrategyError` |
 | [`drive.py`](../../plugins/ndf/skills/cross-review/scripts/drive.py) の `sweep_verify_lines` | 最終スイープの検証の段落を組む。`verify_commands` が `None` なら既定の探し方の段落、`StrategyError` なら理由文「最終スイープの指示を組めない: .ndf/project.json の test が不正: …」の `Stop`（2） |
 | `drive.py` の `Drive.counts` と [`review_lib/ci.py`](../../plugins/ndf/skills/cross-review/scripts/review_lib/ci.py) の `ci_counts` | 駆動の結果の件数を組む。最後のラウンドの `ci.verdict` を `ci`、理由を `ci_reason` として足す |
 | [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `_result_summary`・`_stop_detail` | 止まった理由へ、ステップの結果の `summary` と、`abort` へ回した直前のステップの `summary` を添える。結果 JSON が `stopped` で `metrics.exit` が整数なら、要約の後ろへ「（元の終了コード N）」を添える |
@@ -150,7 +150,7 @@ graph LR
 | 2 | 種別か雛形に誤りがある | `StrategyError`（I2） |
 | 3 | `strategy` を書かず、どの suite も `command` と `scope_command` のどちらも持たない（suite が 0 個のときを含む。テストの無い宣言） | `None`（I1） |
 | 4 | 戦略を解けない（`local-scoped-ci-whole` を宣言したのに `scope_command` が無い など） | `StrategyError` |
-| 5 | 解ける | 全体テストのコマンドの並び（空なら `None`） |
+| 5 | 解ける | 全体テストのコマンドの並び（空なら `None`）。CI テストの宣言（`test.ci.only: true`）があれば静的解析の suite のコマンドだけで、テストは手元で打たずに PR の CI の結果を読む |
 
 2 は `resolve` が使うのと同じ種別と雛形の検査をそのまま使い、新しい検査を作らない。
 

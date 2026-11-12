@@ -5,8 +5,8 @@
 | 子 | 何を縛るか |
 | --- | --- |
 | #817 | push の直前に、記録に無いコミット（見放した担当の残留コミット）を公開しない |
-| #1399 | 取り消しをくり返してもコミット数が伸びず、最終ゲートより前には push しない |
-| #1237 | 積み直しの衝突で広げるのは同じファイルを触った項目までで、全件を取り消さない |
+| #1399 | 最終ゲートより前には push しない |
+| #2457 | 打ち消しは項目のコミットの git revert で、打ち消した項目のコミットと revert のコミットは公開してよい |
 """
 
 from __future__ import annotations
@@ -204,14 +204,14 @@ def test_adopted_orchestrator_and_revert_commits_are_pushed(refactor, publish, u
 
     # 最終ゲートの後に I-001 を取り消す（寄せた危険フラグの取り消し）。公開済みなので revert する
     record = undo.drop(path, state, ["I-001"], "寄せた危険フラグ")
-    assert (record["removed"], record["reverted"]) == (0, 1)
+    assert record["reverted"] == 1
     assert "by-I-001" not in (repo["work"] / "src" / "a.py").read_text(encoding="utf-8")
     state = read_state(path)
     publish.push_with_retry_marker(path, state, state["final_gate"])
 
     assert _origin_tip(repo) == _run("rev-parse", "HEAD", cwd=repo["work"])
     reverts = _run("log", "--format=%s", "--grep=^Revert", cwd=repo["work"]).splitlines()
-    assert len(reverts) == 1
+    assert sorted(reverts) == ['Revert "I-001"', 'Revert "I-002"'], "打ち消しは公開の前も後も revert を 1 度ずつ積む"
 
 
 def test_publishing_before_the_final_gate_is_refused(publish, patch_lib, tmp_path, repo):
@@ -274,29 +274,6 @@ def _expected_tree(work: pathlib.Path, base: str, shas: list[str]) -> str:
         git("worktree", "remove", "--force", str(scratch), cwd=work)
 
 
-def test_repeated_drops_do_not_grow_the_history(undo, tmp_path, repo):
-    """AC-1399-1〜3: 5 回の取り消し（うち 1 回は衝突した項目を外す）で revert を打たず、コミット数も内容も定義どおり。"""
-    path, base, originals = _thirteen_items(tmp_path, repo)
-    work = repo["work"]
-    for target in ("I-012", "I-005", "I-009", "I-002", "I-013"):
-        state = read_state(path)
-        live_before = sum(1 for i in state["items"] if i["status"] == "implemented")
-        record = undo.drop(path, state, [target], "範囲テストが落ちた")
-
-        assert record["reverted"] == 0, "最終ゲートより前は revert しない"
-        assert record["removed"] + record["replayed"] <= live_before, "前の取り消しの積み直しを 2 重に打たない"
-        assert not _run("log", "--format=%s", "--grep=^Revert", f"{base}..HEAD", cwd=work)
-        count = int(_run("rev-list", "--count", f"{base}..HEAD", cwd=work))
-        assert count <= 13 * 2
-        live = [i["id"] for i in read_state(path)["items"] if i["status"] == "implemented"]
-        assert _run("rev-parse", "HEAD^{tree}", cwd=work) == _expected_tree(work, base, [originals[i] for i in live])
-
-    items = {i["id"]: i for i in read_state(path)["items"]}
-    assert items["I-006"]["status"] == "reverted", "I-005 と同じファイルの隣の行を触った I-006 は衝突して外れる"
-    assert [d["mode"] for d in read_state(path)["drops"]].count("ejected") == 1
-    assert _origin_tip(repo) == base, "取り消しは push を伴わない（AC-1399-5）"
-
-
 def test_a_failed_drop_leaves_origin_untouched(undo, tmp_path, repo):
     """AC-1399-5 / #1793 の I4: 項目に属さないコミット（オーケストレーター）の積み直しが衝突した取り消しは中断し、
     origin の head は開始時のまま。"""
@@ -336,7 +313,7 @@ def test_the_verify_does_not_push(cmd_converge, cmd_gate, publish, patch_lib, tm
     calls: list[str] = []
     patch_lib("push_head", lambda state: calls.append(state["phase"]))
     patch_lib("_settle_scope", lambda path, state: None)
-    patch_lib("_whole_test", lambda path, state, flags: False)
+    patch_lib("_defer_whole_test", lambda path, state, flags: None)
 
     cmd_converge.cmd_verify(type("A", (), {"id": 130})())
 
@@ -368,65 +345,11 @@ def _six_items(tmp_path, repo):
     return _state(tmp_path, work, base, items), base
 
 
-def test_a_conflict_ejects_only_the_item_whose_commit_conflicted(undo, ledger, tmp_path, repo):
-    """AC-1237-1 / AC-1237-2 / AC-1237-5: I-002 を取り消すと I-004 だけが外れ、I-003・I-005・I-006 は残って確かめ直しを待つ。"""
-    path, _ = _six_items(tmp_path, repo)
-    work = repo["work"]
-
-    record = undo.drop(path, read_state(path), ["I-002"], "範囲テストが落ちた")
-
-    assert (record["mode"], record["dropped"]) == ("ejected", ["I-002", "I-004"])
-    assert record["recheck"] == ["I-003", "I-005", "I-006"]
-    state = read_state(path)
-    items = {i["id"]: i for i in state["items"]}
-    assert [items[i]["status"] for i in ("I-002", "I-004")] == ["reverted", "reverted"]
-    for kept in ("I-003", "I-005", "I-006"):
-        assert items[kept]["status"] == "implemented", "最終ゲートより前の取り消しの後は範囲テストで確かめ直す"
-        assert not items[kept].get("failure_reason")
-        assert f"by-{kept}" in (work / FILES_1237[kept]).read_text(encoding="utf-8")
-    assert "I-002 の取り消しで" in items["I-004"]["failure_reason"]
-    state["final_gate"]["status"] = "passed"
-    assert ledger.adoption_confirmed(state) and sum(1 for i in state["items"] if ledger.is_live(i)) == 3
-
-
-def test_drops_after_an_ejecting_drop_keep_the_history_bounded(undo, tmp_path, repo):
-    """AC-1237-3: 項目を外した取り消しの後に 2 件を続けて取り消しても、コミット数が上限を超えない。"""
-    path, base = _six_items(tmp_path, repo)
-    work = repo["work"]
-    for target in ("I-002", "I-005", "I-003"):
-        undo.drop(path, read_state(path), [target], "範囲テストが落ちた")
-        assert int(_run("rev-list", "--count", f"{base}..HEAD", cwd=work)) <= 5 * 2
-    assert _run("rev-list", "--count", f"{base}..HEAD", cwd=work) == "1", "残る I-006 のコミットだけ"
-    assert "by-I-006" in (work / FILES_1237["I-006"]).read_text(encoding="utf-8")
-
-
-def test_resuming_a_drop_gives_the_same_result(undo, tmp_path, repo):
-    """AC-3 / I7: 積み直しの後・記録の前に落ちても、再開すれば落とさずに終えたときと同じになる。"""
-    path, _ = _six_items(tmp_path, repo)
-    work = repo["work"]
-    pristine = read_state(path)
-    undo.drop(path, read_state(path), ["I-002"], "範囲テストが落ちた")
-    finished = read_state(path)
-    finished_tree = _run("rev-parse", "HEAD^{tree}", cwd=work)
-    # git は積み直しまで進み、状態は `pending_drop` を保存した直後のまま残った
-    before = pristine["items"][-1]["commits"]["implement"]
-    pristine["pending_drop"] = {"items": ["I-002"], "reason": "範囲テストが落ちた", "before": before}
-    write_state(path, pristine)
-
-    undo.resume_pending_drop(path, read_state(path))
-
-    resumed = read_state(path)
-    assert _run("rev-parse", "HEAD^{tree}", cwd=work) == finished_tree
-    assert [i["status"] for i in resumed["items"]] == [i["status"] for i in finished["items"]]
-    assert len(resumed["drops"]) == len(finished["drops"]) == 1
-    assert resumed["pending_drop"] is None
-
-
 # ---------- 退行しないこと ----------
 
 
 def test_a_drop_without_commits_to_remove_does_not_touch_git(undo, tmp_path, repo):
-    """AC-R1: 取り消すコミットが無ければ `mode: skip` で git に触れない。"""
+    """AC-R1: 打ち消すコミットが無ければ git に触れない（revert のコミットを積まない）。"""
     work = repo["work"]
     base = _base(work, ["src/a.py"])
     path = _state(
@@ -435,6 +358,87 @@ def test_a_drop_without_commits_to_remove_does_not_touch_git(undo, tmp_path, rep
 
     record = undo.drop(path, read_state(path), ["I-001"], "not_done")
 
-    assert record["mode"] == "skip"
+    assert record["reverted"] == 0
     assert _run("rev-parse", "HEAD", cwd=work) == base
     assert read_state(path)["items"][0]["status"] == "reverted"
+
+
+@pytest.mark.parametrize("status", ["carried", "deferred"])
+def test_a_test_commit_kept_by_an_undropped_item_is_publishable(ledger, tmp_path, repo, status):
+    """持ち越し・見送りの項目はコミットを打ち消さない。HEAD に残したテストのコミットは公開できる（stray にしない）。"""
+    work = repo["work"]
+    base = _base(work, ["src/a.py"])
+    _change(work, "src/a.py", 2, "test-I-001")
+    test_sha = commit_with_trailers(work, "test I-001", item_trailers("I-001"))
+    item = {"id": "I-001", "rank": 1, "path": "src/a.py", "status": status, "commits": {"test": test_sha, "implement": [], "fix": []}}
+    path = _state(tmp_path, work, base, [item], phase="final")
+
+    assert ledger.unpublishable(read_state(path), str(work), base) == []
+
+
+# ---------- 現状固定: keepers の分類（I-001） ----------
+
+
+def _commits(work: pathlib.Path, n: int) -> list[str]:
+    shas = []
+    for i in range(n):
+        _change(work, "src/a.py", i, f"c{i}")
+        shas.append(commit_with_trailers(work, f"c{i}", {}))
+    return shas
+
+
+def test_keepers_classifies_each_source_of_kept_commits(ledger, repo):
+    """現状固定: 記録・最終ゲートの修正・項目の状態ごとに、残すコミットと種類を固定する。"""
+    work = repo["work"]
+    _base(work, ["src/a.py"], push=False)
+    c = _commits(work, 12)
+    sendback = [{"kind": "test_failed"}]
+    state = {
+        "ledger": {"orchestrator_commits": [c[0][:10]]},
+        "final_gate": {"fix_commits": [c[1]]},
+        "items": [
+            # 生きている項目: テスト・追加のテスト・実装・修正のすべて
+            {"id": "I-001", "status": "verified", "commits": {"test": c[2], "test_extra": [c[3]], "implement": c[4], "fix": [c[5]]}},
+            # 取り消し（打ち消しのコミットあり）: 残す
+            {"id": "I-002", "status": "reverted", "reverted_by_commit": "x", "commits": {"test": c[6]}},
+            # 取り消し（打ち消しのコミットなし）: 残さない
+            {"id": "I-003", "status": "reverted", "commits": {"test": c[7]}},
+            # 見送り＋検証を受けていないテスト: テストは残さず、実装は残す
+            {"id": "I-004", "status": "deferred", "sendbacks": sendback, "commits": {"test": c[8], "implement": c[9]}},
+            # 見送り＋打ち消し済み: テストも残す
+            {"id": "I-005", "status": "deferred", "reverted_by_commit": "y", "sendbacks": sendback, "commits": {"test": c[10]}},
+            # 持ち越し: 差し戻しがあってもテストを残す
+            {"id": "I-006", "status": "carried", "sendbacks": sendback, "commits": {"test": c[11]}},
+        ],
+    }
+
+    kept = ledger.keepers(state, str(work))
+
+    assert kept == {
+        c[0]: "orchestrator",
+        c[1]: "final_fix",
+        c[2]: "item",
+        c[3]: "item",
+        c[4]: "item",
+        c[5]: "item",
+        c[6]: "item",
+        c[9]: "item",
+        c[10]: "item",
+        c[11]: "item",
+    }
+
+
+def test_keepers_lets_items_override_and_keeps_unresolvable_shas(ledger, repo):
+    """現状固定: 同じコミットは後の分類（項目）が勝つ。解決できない SHA はそのまま鍵になる。ledger が dict でなければ無視する。"""
+    work = repo["work"]
+    _base(work, ["src/a.py"], push=False)
+    c = _commits(work, 1)
+    state = {
+        "ledger": ["not-a-dict"],
+        "final_gate": {"fix_commits": [c[0]]},
+        "items": [{"id": "I-001", "status": "planned", "commits": {"test": c[0], "implement": "deadbeef", "fix": []}}],
+    }
+
+    assert ledger.keepers(state, str(work)) == {c[0]: "item", "deadbeef": "item"}
+    assert ledger.keepers({}, str(work)) == {}
+    assert ledger.keepers({"final_gate": None, "items": None, "ledger": None}, str(work)) == {}

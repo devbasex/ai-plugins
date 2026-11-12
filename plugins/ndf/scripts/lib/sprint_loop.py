@@ -15,6 +15,7 @@ from typing import Callable
 import design_pr_merge
 import gate1_requests
 import jsonio
+import mode_judgment
 import project_mvv as pm
 import repo as repo_lib
 import revise_note
@@ -22,14 +23,13 @@ import run_environment
 import sprint_loop_gate
 import sprint_mvv
 import step_result
-from pace import PaceError, over_budget, read_loop, read_pace
-from sprint_loop_argv import approved_issues, new_sprint_argv, sprint_state_init_argv, stage_plan
+from pace import PaceError, hours_items, over_budget, read_loop, read_pace
+from sprint_loop_argv import design_issues, new_sprint_argv, sprint_refusal, sprint_state_init_argv, stage_plan
 
 from sprint_loop_record import (
     TOOL,
     SPRINT_STATE,
     LAPS_MD,
-    STOP_FILE,
     VERSION,
     BUDGET_DEFAULT,
     EXIT_REFUSED,
@@ -44,6 +44,7 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
+    ResumeContext,
     prod_of,
     loop_dir,
     loop_record_path,
@@ -83,10 +84,13 @@ from sprint_loop_gate import (
     after_close,
     research_command,
     owner_line,
+    mode_decision,
+    sync_mode,
 )
 
-from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline
+from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
 from sprint_loop_select import resume_answer_hold
+from sprint_loop_stop import STOP_FILE, read_stop_order, stop_order_text
 
 
 # ---------------------------------------------------------------- start
@@ -130,6 +134,12 @@ def apply_budget(env: Env, rec: dict, given: dict, defaults: dict) -> None:
 
 
 def cmd_start(env: Env, name: str, milestones: list[str], budget: dict, goal: bool = True) -> dict:
+    out = start_or_resume(env, name, milestones, budget, goal)
+    out["items"] = [*out["items"], *hours_items(env.main_dir())]  # 業務時間の宣言の誤り（#2913）。警告を出しても始める
+    return out
+
+
+def start_or_resume(env: Env, name: str, milestones: list[str], budget: dict, goal: bool) -> dict:
     with locked(env, name):
         decl, why, project = permission(env)
         p = loop_record_path(env, name)
@@ -161,6 +171,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
         "budget_history": [],
         "same_failure": decl["same_failure"],
         "max_issues": decl["max_issues"],
+        "reorder_width": decl.get("reorder_width", 0),  # 逆転の幅。以後は選定も開始も読むだけ（#2997 の決定 2）
         "milestones": list(milestones or []),
         "goal": goal,
         "status": "running",
@@ -184,27 +195,22 @@ def resume_record(env: Env, rec: dict) -> None:
     rec["stop"], rec["status"] = None, "running"
 
 
-def _resume_mvv_changed(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    return (
-        stopped_result(
-            env,
-            rec,
-            "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）",
-        ),
-        nxt,
-    )
+def _resume_mvv_changed(ctx: ResumeContext) -> tuple[dict | None, str]:
+    why = "プロジェクト MVV が改訂されたため、このループは再開しない。新しい名前でループを始め直す（/ndf:development-workflow --loop <新しい名前>）"
+    return stopped_result(ctx.env, ctx.rec, why), ctx.nxt
 
 
-def _resume_user_stop(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
-    (loop_dir(env, rec["name"]) / STOP_FILE).unlink(missing_ok=True)
-    return None, nxt
+def _resume_user_stop(ctx: ResumeContext) -> tuple[dict | None, str]:
+    (loop_dir(ctx.env, ctx.rec["name"]) / STOP_FILE).unlink(missing_ok=True)
+    return None, ctx.nxt
 
 
-def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_budget(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, nxt = ctx.env, ctx.rec, ctx.stop, ctx.nxt
     unit = stop["condition"].removeprefix("budget_")
     used = consumed(rec)[unit]
     if over_budget(used, rec["budget"].get(unit)):
-        write_record(env, rec, before)
+        write_record(env, rec, ctx.before)
         return (
             stopped_result(
                 env, rec, f"予算（{unit}）を超えたまま（消費 {used} / 予算 {rec['budget'][unit]}）。--budget-{unit} で上書きして再開する"
@@ -214,7 +220,8 @@ def _resume_budget(env: Env, rec: dict, before: dict, stop: dict, lap: dict | No
     return None, nxt
 
 
-def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_gate2(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, lap, nxt = ctx.env, ctx.rec, ctx.stop, ctx.lap, ctx.nxt
     if not lap:
         return None, nxt
     answer = gate2_answer(lap, stop.get("at"))
@@ -226,17 +233,21 @@ def _resume_gate2(env: Env, rec: dict, before: dict, stop: dict, lap: dict | Non
     return None, gate2_pipeline(env, rec, lap, stop)
 
 
-def _resume_refused(env: Env, rec: dict, before: dict, stop: dict, lap: dict | None, nxt: str) -> tuple[dict | None, str]:
+def _resume_refused(ctx: ResumeContext) -> tuple[dict | None, str]:
+    env, rec, stop, lap, nxt = ctx.env, ctx.rec, ctx.stop, ctx.lap, ctx.nxt
     if not lap:
         return None, nxt
     if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return None, f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード>（モードを決め直す）"
+        return (
+            None,
+            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）",
+        )
     # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
     moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
     try:
         queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-        write_record(env, rec, before)
+        write_record(env, rec, ctx.before)
         return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
     return None, f"{queue} && {wait_lap(rec, done)}"
 
@@ -263,7 +274,7 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     cond, nxt = stop["condition"], select_cmd(name)
     handler = _resume_handler(cond)
     if handler:
-        stopped, nxt = handler(env, rec, before, stop, current_lap(rec), nxt)
+        stopped, nxt = handler(ResumeContext(env, rec, before, stop, current_lap(rec), nxt))
         if stopped is not None:
             return stopped
     resume_record(env, rec)
@@ -275,43 +286,94 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
 # ---------------------------------------------------------------- sprint
 
 
-def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None, extra: list[str]) -> dict:
+def read_judgments(path: str | None, selected: list[int]) -> list[dict]:
+    """判定の根拠のファイルを読み、検査を通った根拠を返す（#2923 の I1・I2）。読めなければ JudgmentError。"""
+    if not path:
+        raise mode_judgment.JudgmentError(["判定の根拠のファイル（--judgments）が無い"])
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise mode_judgment.JudgmentError([f"判定の根拠のファイルを読めない（{path}）: {str(e)[:200]}"]) from e
+    return mode_judgment.check_judgments(data, selected)
+
+
+def judgment_refusal(reasons: list[str]) -> dict:
+    """判定の根拠が欠ける・合わないときの断り（終了コード 1。記録は書き換えない）。"""
+    summary = f"判定の根拠が契約に合わない（{len(reasons)} 件）。mode-materials.py で材料を集め、根拠を直して loop sprint を打ち直す"
+    items = [{"reason": r} for r in reasons]
+    return {**step_result.result(TOOL, "stopped", summary, items, {"status": "refused"}), "exit": EXIT_REFUSED}
+
+
+def _sprint_blocked(env: Env, rec: dict, lap: dict | None) -> dict | None:
+    """ループの 1 回を組めないときの断り（1 回が無い・止まっている・設計承認ゲートの後）。組めれば None。"""
+    if not lap:
+        return refusal_order("進行中のループの 1 回が無い（loop select で選んでから組む）")
+    if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
+        return stopped_result(env, rec, "ループは止まっている")
+    if refused := sprint_refusal(rec, lap):  # 設計承認ゲートの後のループの 1 回・答え待ちの停止の範囲の設計（#2913 の I1）
+        return {**refusal_order(refused[1]), "exit": refused[0]}
+    return None
+
+
+def _decide_mode(judgments: str | None, issues: list[int], mode: str | None) -> tuple[list[dict], str]:
+    """判定の根拠からモードを決め、`mode` を渡したときは照合する。合わなければ JudgmentError。"""
+    judged = read_judgments(judgments, issues)
+    decided = mode_judgment.sprint_mode(judged)
+    if mode and mode != decided:
+        raise mode_judgment.JudgmentError([f"--mode {mode} が判定の根拠から決まるモード {decided} と違う"])
+    return judged, decided
+
+
+def _make_plans(env: Env, rec: dict, before: dict, lap: dict, issues: list[int], extra: list[str]) -> tuple[dict | None, list, list]:
+    """スプリント状態の初期化・出し直しの指摘の入力・スプリントとまとめのプランを作る。(止めた結果, 飛ばした課題, まとめ) を返す。"""
+    root, state = str(env.main_dir()), Path(lap["state_path"])
+    mvv = Path(lap["dir"]) / "mvv.md"
+    code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
+    if code != 0:
+        return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip()), [], []
+    if mvv.is_file():
+        copy_mvv_gate(rec, lap, state, mvv)
+    try:
+        notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
+    except OSError as e:
+        return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e)), [], []
+    new = new_sprint_argv(root, rec, lap, [*notes, *extra])
+    code, so, se = env.run(new, cwd=root)
+    lap["sprint_command"] = shlex.join(new)
+    if code != 0:
+        return refused_stop(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip()), [], []
+    try:
+        close = build_close(env, rec, lap, issues)
+    except (LoopError, OSError, ValueError) as e:
+        return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e)), [], []
+    return None, skipped, close
+
+
+def cmd_sprint(
+    env: Env, name: str, mode: str | None, dev: str | None, prod: str | None, extra: list[str], judgments: str | None = None
+) -> dict:
+    """ループの 1 回を組む。モードは判定の根拠のファイルから算出し、`mode` を渡したときは照合だけに使う（#2923 の決定 2）。
+    根拠の検査はどの書き込みよりも前に置く（I1〜I3・I8 で断ったときに記録を変えない）。"""
     dev = dev or ""
     if prod and not dev:
         return refusal_order("--prod は --dev と一緒に渡す（版を流す時点に決めるなら両方を省く）")
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
-        if not lap:
-            return refusal_order("進行中のループの 1 回が無い（loop select で選んでから組む）")
-        if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
-            return stopped_result(env, rec, "ループは止まっている")
-        if lap.get("issues_kept") is not None:
-            return refusal_order("設計承認ゲートの後のループの 1 回は組み直さない（loop start で残した課題の続きを組む）")
+        if blocked := _sprint_blocked(env, rec, lap):
+            return blocked
         issues = selected_issues(lap)
+        try:
+            judged, mode = _decide_mode(judgments, issues, mode)
+        except mode_judgment.JudgmentError as e:
+            return judgment_refusal(e.reasons)
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
         root = str(env.main_dir())
         lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
-        mvv = d / "mvv.md"
-        code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
-        if code != 0:
-            return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip())
-        if mvv.is_file():
-            copy_mvv_gate(rec, lap, state, mvv)
-        try:
-            notes, skipped = revise_note.write_inputs(env.main_dir(), rec, [n for n in issues if n not in approved_issues(rec)], lap["dir"])
-        except OSError as e:
-            return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e))
-        new = new_sprint_argv(root, rec, lap, [*notes, *extra])
-        code, so, se = env.run(new, cwd=root)
-        lap["sprint_command"] = shlex.join(new)
-        if code != 0:
-            return refused_stop(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip())
-        try:
-            close = build_close(env, rec, lap, issues)
-        except (LoopError, OSError, ValueError) as e:
-            return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
+        stopped, skipped, close = _make_plans(env, rec, before, lap, issues, extra)
+        if stopped:
+            return stopped
         lap["close_plans"] = close  # リリース待ち・質問待ちで締めたループの 1 回は、答えの後にこのまとめを流す（#2436）
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
@@ -321,15 +383,24 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str | None, prod: str | None
         done = d / "done-1.json"
         queue, pipeline = sprint_pipeline(index, close, done, rec)
         lap["dones"] = [str(done)]
+        lap.update(judgments=judged, mode_decisions=[mode_decision(env, "loop sprint", issues, None, mode)], sprint_extra=list(extra))
         if rec.get("status") == "stopped":  # refused からのやり直し
             resume_record(env, rec)
         write_record(env, rec, before)
         update_handoff(env, rec, f"ループの {lap['n']} 回目 のスプリントを組んだ。pipeline を流す", resume_command(rec), pipeline)
+        synced = sync_mode(env, issues, mode)
         return loop_ok(
             f"ループの {lap['n']} 回目 のスプリント {lap['sprint']} を pace: auto で組んだ",
             rec,
-            [{"command": lap["sprint_command"]}, {"command": lap["close_command"]}, *({"skipped_loop": x} for x in skipped)],
+            [
+                {"command": lap["sprint_command"]},
+                {"command": lap["close_command"]},
+                *({"skipped_loop": x} for x in skipped),
+                *({"note": x} for x in synced),
+            ],
             status="sprint",
+            mode=mode,
+            judgments={str(j["number"]): j["row"] for j in judged},
             next_=pipeline,
             state_path=str(state),
             out=lap["out"],
@@ -481,11 +552,11 @@ def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
         return loop_ok(f"マイルストーン {milestone} のスプリント MVV を承認した（{row['sha256'][:12]}）", rec, [row], status="approved")
 
 
-def cmd_stop(env: Env, name: str) -> dict:
+def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict:
     read_loop_record(env, name)
-    p = loop_dir(env, name) / STOP_FILE
-    p.write_text(env.now() + "\n", encoding="utf-8")
-    return step_result.result(TOOL, "ok", f"止める指示を置いた（ループの次の 1 回の境で効く）: {p}", [{"path": str(p)}], {"path": str(p)})
+    (p := loop_dir(env, name) / STOP_FILE).write_text(stop_order_text(env.now(), by, reason), encoding="utf-8")
+    order = {"path": str(p), **read_stop_order(p)}
+    return step_result.result(TOOL, "ok", f"止める指示を置いた（主体 {by}。ループの次の 1 回の境で効く）: {p}", [order], order)
 
 
 # ---------------------------------------------------------------- lap

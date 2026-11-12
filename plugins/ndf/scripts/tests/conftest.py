@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import shutil
@@ -103,6 +104,65 @@ def _isolated_mvv_state(tmp_path_factory, monkeypatch):
 def _isolated_estimate_records(tmp_path_factory, monkeypatch):
     """supervise の実行が書く見積もりの実績の記録（#1856）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
     monkeypatch.setenv("NDF_ESTIMATE_DIR", str(tmp_path_factory.mktemp("estimate")))
+
+
+SHORT_POLL = 0.02  # 宣言の durable.poll（0.2 秒）の 1/10
+SHORT_WAIT_FROM_POLL = 0.1  # 宣言の durable.wait-from-poll（1 秒）の 1/10
+
+
+def _set_default(monkeypatch, fn, name: str, value) -> None:
+    params = [p for p in inspect.signature(fn).parameters.values() if p.default is not inspect.Parameter.empty]
+    defaults = tuple(value if p.name == name else p.default for p in params)
+    monkeypatch.setattr(fn, "__defaults__", defaults)
+
+
+@pytest.fixture(autouse=True)
+def _short_durable_polls(monkeypatch):
+    """プロセスの中で動く耐久ワークフローの問い合わせの間隔を縮める（#2309 の決定 3）。
+
+    間隔は結果と順序を変えない。上限の宣言（`contracts/limits.json`）は書き換えず、読み込み済みの `durable` の値だけを
+    差し替える。子プロセスで起こした supervise には効かない。"""
+    d = sys.modules.get("durable")
+    if d is None or not hasattr(d, "wait_from"):
+        return
+    monkeypatch.setattr(d, "POLL_SECONDS", SHORT_POLL)
+    _set_default(monkeypatch, d.wait, "poll", SHORT_POLL)
+    _set_default(monkeypatch, d.wait_from, "poll", SHORT_WAIT_FROM_POLL)
+
+
+@pytest.fixture(autouse=True)
+def _refactor_route_on(request, monkeypatch):
+    """構造改善を外す条件（`templates.refactor_suspended`。CI テストの宣言の無いリポジトリで真）を常に偽にし、既存のテストに
+    構造改善を持つ道を確かめ続けさせる（#3056）。
+
+    宣言の無いリポジトリで外す振る舞いは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    if request.node.get_closest_marker("suspended_refactor"):
+        return
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        monkeypatch.syspath_prepend(scripts)
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "refactor_suspended", lambda a: False)
+
+
+@pytest.fixture(autouse=True)
+def _local_tests_route(request, monkeypatch):
+    """プランの雛形が CI テストの宣言を読む判定（`verify_steps.ci_only`）を常に偽にし、このリポジトリの宣言（`test.ci.only`）を
+    読む既存のテストに、手元のテストを持つ道を確かめ続けさせる（#3056）。
+
+    宣言のあるリポジトリの道は `ci_only_route` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    if request.node.get_closest_marker("ci_only_route"):
+        return
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        monkeypatch.syspath_prepend(scripts)
+    import importlib
+
+    # templates が import の時点で verify_steps の ci_only を写すため、両方を読み込んでから差し替える
+    modules = [importlib.import_module(name) for name in ("supervise_lib.templates", "supervise_lib.verify_steps")]
+    for module in modules:
+        monkeypatch.setattr(module, "ci_only", lambda a: False)
 
 
 @pytest.fixture(autouse=True)

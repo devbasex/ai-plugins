@@ -366,6 +366,54 @@
       "title": "DeliveryResult",
       "type": "object"
     },
+    "Docs": {
+      "additionalProperties": false,
+      "description": "差分の文書のファイルの分け方（#2925）。項目を省くと既定（`lib/diff_kinds.py`）で補う。利用者が手で書き、解析は書かない。",
+      "properties": {
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Files"
+        },
+        "behavior": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behavior"
+        },
+        "tested": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TestedDocs"
+          },
+          "title": "Tested",
+          "type": "array"
+        }
+      },
+      "title": "Docs",
+      "type": "object"
+    },
     "Duration": {
       "additionalProperties": false,
       "properties": {
@@ -957,8 +1005,20 @@
     },
     "TestCi": {
       "additionalProperties": false,
-      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。",
+      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。\n`only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
       "properties": {
+        "only": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Only"
+        },
         "check": {
           "anyOf": [
             {
@@ -1003,6 +1063,34 @@
         "measured"
       ],
       "title": "TestDuration",
+      "type": "object"
+    },
+    "TestedDocs": {
+      "additionalProperties": false,
+      "description": "テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。",
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        },
+        "tests": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tests",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "tests"
+      ],
+      "title": "TestedDocs",
       "type": "object"
     },
     "Tool": {
@@ -1321,6 +1409,21 @@
       ],
       "default": null,
       "title": "Materials"
+    },
+    "docs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Docs"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Docs"
     },
     "analysis": {
       "anyOf": [
