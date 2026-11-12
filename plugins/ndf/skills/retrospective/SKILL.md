@@ -56,6 +56,8 @@ RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
 いるときは、推測せずに名前を利用者に確かめる。
 
+**ブランチ運用の宣言と実際の使い方のずれも見る。** `project-decl.py measure --out <一時ファイル>` の後に `project-decl.py drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を振り返りの「次に変えること」へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
+
 ### 1. 起票の取りこぼしを拾う
 
 **この工程で新しく起票を集めない。** 起票は見つけたその場で `/ndf:out-of-scope` が行う。
@@ -187,7 +189,7 @@ if [ -n "$dev_base" ]; then
     dev_base_found=1
   else
     # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
     # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
     dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
       "refs/heads/$dev_base" 2>/dev/null)

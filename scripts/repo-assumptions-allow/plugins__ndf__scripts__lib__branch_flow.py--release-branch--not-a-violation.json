@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/branch_flow.py",
+  "name": "release-branch",
+  "kind": "not-a-violation",
+  "reason": "リリースブランチの名前の頭。NDF が決める名前の規則の唯一の置き場（#3121）",
+  "count": 1
+}

@@ -1,7 +1,7 @@
 """Pull Request の宛て先の区別と、本文の末尾に書くモードの 1 行。
 
 スプリントの課題の Pull Request はスプリントブランチ（`sprint/<名前>`）宛てに出して集め、
-実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。並列の計画で課題のまとまりの記録が
+実装レビューを通さない。ベースブランチへの Pull Request はスプリントで 1 本で、チェックを通す。並列の計画で課題のまとまりの記録が
 あるスプリントは、まとまりの Pull Request をスプリントブランチ宛てのまま実装レビューに通す（#3081）。
 
 本文の末尾には `モード: <mode> / 通した工程: <工程> → <工程>` の 1 行を書く。デプロイ後の
@@ -24,9 +24,11 @@ TRAILERS = (REVIEW_MARK, "🤖 Generated with")
 
 
 def pr_target(base: str) -> str:
-    """宛て先の区分を返す。`sprint`（課題の PR）か `develop`（スプリントの PR・単独の PR）。"""
+    """宛て先の区分を返す。`sprint`（課題の PR）か `base`（スプリントの PR・単独の PR）。
+
+    区分の名前はブランチ名に依らない（ベースブランチの名前が違うリポジトリで読み手が誤らない。#3121 の決定 10）。"""
     # 改名の前に切った旧名の頭のブランチ宛ても課題の PR として読む（#1407 の I4）
-    return "sprint" if (base or "").startswith(legacy_names.branch_prefixes(SPRINT_PREFIX)) else "develop"
+    return "sprint" if (base or "").startswith(legacy_names.branch_prefixes(SPRINT_PREFIX)) else "base"
 
 
 def needs_review(base: str, bundled: bool = False) -> bool:

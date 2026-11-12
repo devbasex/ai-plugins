@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/development-workflow/references/project-analysis.md",
+  "name": "develop-branch",
+  "kind": "not-a-violation",
+  "reason": "答えの例の値と、ai-plugins の値で埋めないことを示す注意（#3121）",
+  "count": 2
+}

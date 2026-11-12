@@ -143,8 +143,8 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     if not branch:
         return None
     if wt.exists():
-        # 使い回す作業ツリーは、依存の用意が済んでいなければ用意する（#1337）
-        return _prepare_deps(wt, if_unprepared=True)
+        # 使い回す作業ツリーは、組み直した起点のコミットへ進め、依存の用意が済んでいなければ用意する（#1337・#3121）
+        return _follow_start(plan, wt) or _prepare_deps(wt, if_unprepared=True)
     repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
     if not repo:
         return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
@@ -153,8 +153,35 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
         return err
     p = _add_worktree_with_retry(repo, wt, branch, base, sleep)
     if p.returncode == 0:
-        return _prepare_deps(wt, main_dir=repo)
+        # 在るローカルのブランチから作ったときも、起点のコミットより古ければ進める
+        return _follow_start(plan, wt) or _prepare_deps(wt, main_dir=repo)
     return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
+
+
+def _follow_start(plan: dict, wt: Path) -> str | None:
+    """作業ツリーの HEAD が「起点のコミット」の祖先なら、そこまで fast-forward する（本番のプランを作った後に組み直した
+    リリースブランチの先頭へ追いつく。#3121）。HEAD が既に含むなら何もしない。どちらでもない（作業ツリーに組み直しの前の
+    コミットがある）なら、消さずに誤りの文を返す。起点のコミットが無い・解けない計画は何もしない。"""
+    start = plan.get("起点のコミット")
+    if not start:
+        return None
+    if start.startswith("origin/"):
+        subprocess.run(["git", "-C", str(wt), "fetch", "-q", "origin"], capture_output=True, text=True)
+    if (
+        subprocess.run(["git", "-C", str(wt), "rev-parse", "--verify", "--quiet", f"{start}^{{commit}}"], capture_output=True).returncode
+        != 0
+    ):
+        return None
+
+    def ancestor(a: str, b: str) -> bool:
+        return subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", a, b], capture_output=True).returncode == 0
+
+    if ancestor(start, "HEAD"):
+        return None
+    if ancestor("HEAD", start):
+        p = subprocess.run(["git", "-C", str(wt), "merge", "-q", "--ff-only", start], capture_output=True, text=True)
+        return None if p.returncode == 0 else f"作業ツリーを起点のコミット {start} へ進められない: {p.stderr.strip()[:300]}"
+    return f"作業ツリーの HEAD が起点のコミット {start} と分かれている（組み直しの前のコミットがある。作業ツリーを片付けてから打ち直す）"
 
 
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"

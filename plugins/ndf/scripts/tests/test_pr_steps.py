@@ -407,7 +407,7 @@ def test_plan_sprint_base_is_accepted_without_review(repo, env):
 def test_plan_develop_base_needs_review(repo, env):
     code, out, err = call(["plan"], env, repo)
     assert code == 0, err
-    assert out["metrics"]["target"] == "develop" and out["metrics"]["review"] is True
+    assert out["metrics"]["target"] == "base" and out["metrics"]["review"] is True
 
 
 def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
@@ -515,7 +515,7 @@ def test_plan_ok_output_shape_is_fixed(repo, env):
         "base": "develop",
         "base_ref": "origin/develop",
         "draft": False,
-        "target": "develop",
+        "target": "base",
         "review": True,
         "existing_pr": None,
         "uncommitted": 1,
