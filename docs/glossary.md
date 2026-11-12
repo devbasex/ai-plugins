@@ -563,10 +563,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | CI の結果の監視 | — | PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | CI の失敗の改修 | — | CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | テストのチェック | — | 合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック | — | — | `docs/specifications/ndf-ci-only-tests.md` |
-| 最後の検査 | — | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。スプリントの検査の後に入ったそのスプリントの差分を拾う | — | — | — |
+| 最後の検査 | — | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う | — | — | — |
 | スプリントの検査 | — | `supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める | — | — | — |
 | 検査の印 | — | 前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある | — | — | — |
-| 最後の検査の範囲 | — | 最後の検査が見る差分。起点のコミットから今のベースブランチの先頭までのうち、検査の対象にする Pull Request の差分 | — | — | — |
+| 最後の検査の範囲 | — | 最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない | — | — | — |
+| スプリントに属する Pull Request | — | head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
