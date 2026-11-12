@@ -48,32 +48,6 @@ def failed_ids_of(state: dict[str, Any], ci_xmls: Optional[list[bytes]] = None) 
     return test_triage.read_junit(work, timeline.strategy_of(state))
 
 
-def ci_only_split(ids: Optional[list[str]], reason: Optional[str], existing: list[str]) -> dict[str, Any]:
-    """CI テストの宣言（`test.ci.only`）のあるリポジトリの見分け。手元でも比較の木でも走らせ直さない（#3056）。
-
-    CI の JUnit の落ちた ID のうち、既存失敗に載るものだけを `preexisting` に、残りを `caused` にする。
-    ID を読めないときは `fallback_reason` を書き、最終ゲートは通さない（材料は CI の run の置き場）。
-    """
-    base = {"flaky": [], "rerun_commands": [], "rerun_command": None, "comparison_tree": None, "comparison_fallback": None}
-    if not ids:
-        why = reason or "JUnit に落ちたテストが無かった"
-        return {
-            **base,
-            "failed_tests": None,
-            "preexisting": [],
-            "caused": [],
-            "fallback_reason": f"{why}（CI テストの宣言があるため手元で走らせ直さない）",
-        }
-    known = set(existing)
-    return {
-        **base,
-        "failed_tests": list(ids),
-        "preexisting": [i for i in ids if i in known],
-        "caused": [i for i in ids if i not in known],
-        "fallback_reason": None,
-    }
-
-
 def classify(
     state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None, ci_existing: Optional[list[str]] = None
 ) -> dict[str, Any]:
@@ -91,7 +65,8 @@ def classify(
         }
     ids, reason = failed_ids_of(state, ci_xmls)
     if timeline.strategy_of(state).ci_only:
-        return ci_only_split(ids, reason, existing_failures(state) + list(ci_existing or []))
+        # 比較の木を作らずに分ける（走らせ直さない分岐は test_triage.classify と同じ）
+        return test_triage.ci_only_split(ids, reason, existing_failures(state) + list(ci_existing or []))
     if ids is not None and not ids:
         return {
             "failed_tests": None,

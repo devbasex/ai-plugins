@@ -8,6 +8,8 @@
   `scope_command` の `{paths}` の前まで。前置きが 1 語だけになり、`command` の 2 語目がサブコマンド（`go test`・`npm test`・
   `make test`）のときは 2 語目まで含める。2 語目が `-` で始まる語か、作業場所のパス（`/` を含む語・`.`・宣言のあるディレクトリから
   見て在るファイルやディレクトリ）なら広げない（`pytest tests -q` の形はランナー 1 語で照らす）
+- 例外: サブコマンドを取るツール（`DISPATCHERS`）の 2 語目は同じ名前のパスがあってもサブコマンドとして読み、2 語目が `run`・`exec` なら
+  3 語目（スクリプトの名前）まで含める
 - 当たり: コマンドの語（包み `env`・`timeout` などと変数の代入を飛ばした後）が、起動の形の前置きで始まる。または
   起動の形のうちランナー（suite の `runner` の語。起動の形に無ければ起動の形の全体）から後の語の並びが語にあり、それより前の語が
   すべて起動の形の語かオプションである（ランナーの前のオプションを省いた・足した言い換え）。`python -m <ランナー>` はランナーの
@@ -56,10 +58,18 @@ def _words_of(text: str) -> list[str]:
         return text.split()
 
 
-def _subcommand(word: str, root: Path | None) -> bool:
-    """`command` の 2 語目がサブコマンドか（オプション・作業場所のパスでない）。"""
+# サブコマンドを取るツール。2 語目は作業場所に同じ名前のパスがあってもサブコマンドとして読む（`test/` を持つ Go・Node）
+DISPATCHERS = frozenset({"go", "npm", "pnpm", "yarn", "bun", "deno", "make", "cargo", "dotnet", "mvn", "gradle", "gradlew", "mix"})
+# 続く語がスクリプトの名前になるサブコマンド（`npm run test` は `npm run` で止めず `test` まで含める）
+RUN_WORDS = frozenset({"run", "run-script", "exec"})
+
+
+def _subcommand(word: str, root: Path | None, tool: str = "") -> bool:
+    """`command` の 2 語目がサブコマンドか（オプション・作業場所のパスでない）。`tool` がサブコマンドを取るツールならパスかを見ない。"""
     if not word or word.startswith("-") or "/" in word or word in (".", ".."):
         return False
+    if _base(tool) in DISPATCHERS:
+        return True
     return not (root is not None and (root / word).exists())
 
 
@@ -73,8 +83,10 @@ def launch_form(suite: dict, root: Path | None = None) -> list[str]:
     else:
         scope = str(suite.get("scope_command") or "")
         form = _words_of(scope.split("{paths}", 1)[0]) if "{paths}" in scope else []
-    if len(form) == 1 and len(words) > 1 and words[0] == form[0] and _subcommand(words[1], root):
+    if len(form) == 1 and len(words) > 1 and words[0] == form[0] and _subcommand(words[1], root, words[0]):
         form = words[:2]
+        if words[1] in RUN_WORDS and len(words) > 2 and not words[2].startswith("-"):
+            form = words[:3]
     return form
 
 

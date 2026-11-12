@@ -96,6 +96,27 @@ def test_a_form_widened_to_the_second_word_is_matched_by_the_runner(tmp_path, co
     assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
 
 
+NPM_RUN = {"name": "npm", "runner": "npm", "command": "npm run test"}
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ("go test ./...", True),
+        ("npm test", True),
+        ("npm run test", True),
+        ("go build ./...", False),
+        ("npm install", False),
+        ("npm run lint", False),
+    ],
+)
+def test_a_subcommand_tool_widens_the_form_even_when_the_word_is_a_directory(tmp_path, command, denied):
+    """`go`・`npm` のようにサブコマンドを取るツールは、`test/` があっても 2 語目まで広げ、`run` なら 3 語目まで広げる。"""
+    root = repo(tmp_path, suites=(GO, NPM, NPM_RUN))
+    (root / "test").mkdir()
+    assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
+
+
 PYTEST_DIRECT = {"name": "pytest", "runner": "pytest", "command": "pytest tests -q"}
 PYTEST_OPT = {"name": "pytest", "runner": "pytest", "command": "pytest -q"}
 
