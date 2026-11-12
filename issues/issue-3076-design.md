@@ -1,14 +1,14 @@
-# 全体テスト: 衝突した Pull Request では CI の待ちを上限まで続けずに止まり、ベースブランチの取り込みを示す（#3076）
+# 全体テスト: 衝突した Pull Request では上限まで待たずに止まり、ベースブランチの取り込みを示す（#3076）
 
 ## 目的
 
-- **今どうなっているか**: CI に任せる戦略の全体テスト（`test-run.py whole --pr <番号>`）は、ベースブランチと衝突した Pull Request でも CI の結論を上限（`ci_wait_timeout`）まで待つ。衝突した Pull Request では GitHub が `pull_request` のワークフローを起動せず、チェックが一覧に現れないため、待ちは「未完了」を読み続ける。2026-11-12 の PR #3069 では 40 分以上待った
+- **今どうなっているか**: ベースブランチと衝突した Pull Request でも、全体テストは CI の結論を上限（`ci_wait_timeout`）まで待つ。対象は CI に任せる戦略の全体テスト（`test-run.py whole --pr <番号>`）である。衝突した Pull Request では GitHub が `pull_request` のワークフローを起動せず、チェックが一覧に現れない。そのため待ちは「未完了」を読み続ける。2026-11-12 の PR #3069 では 40 分以上待った
 - **誰に効くか**: 開発ループの全体テストのステップと、止まったレーンを読むオーガナイザーと人
 - **変えると何が成り立つか**: 衝突を読んだ時点で `stopped` で戻り、結果の要約に衝突が、次の 1 手にベースブランチの取り込みのコマンドが書かれる。衝突の無い Pull Request の待ちは今と変わらない
 
 ## 適用範囲
 
-- **働く範囲**: NDF の `test-run.py` を使うすべてのリポジトリのうち、全体テストを CI に任せる戦略（`.ndf/project.json` の `test.whole_on_ci`）で、`--pr` を渡した呼び出し
+- **働く範囲**: NDF の `test-run.py` を使うすべてのリポジトリで働く。対象は、全体テストを CI に任せる戦略（`.ndf/project.json` の `test.whole_on_ci`）で `--pr` を渡した呼び出しである
 - **プロジェクトごとに違うもの**: 無し（待つチェックの名前と上限は今と同じく宣言から読む。衝突の読み方はどのリポジトリでも同じ）
 - **当たるモード**: `standard`
 
@@ -31,8 +31,8 @@
 | テストの実行（`ndf-test`） | 全体テスト・CI に任せる戦略・CI の待ち・チェックの結論 |
 | GitHub（外部の系） | 衝突の状態（`mergeable`）・チェックの実行 |
 
-テストの実行が下流、GitHub が上流の **腐敗防止層** の関係にする。GitHub の語（REST の `mergeable` の `true` / `false` / `null`）は
-Pull Request の照会の層（`lib/gh_pr_info.py`）で `MERGEABLE` / `CONFLICTING` / `UNKNOWN` の 3 つの値へ訳し、`test-run.py` はこの 3 つの値だけを読む。
+テストの実行が下流、GitHub が上流の **腐敗防止層** の関係にする。GitHub の語は REST の `mergeable` の `true` / `false` / `null` である。
+Pull Request の照会の層（`lib/gh_pr_info.py`）がこれを 3 つの値（`MERGEABLE` / `CONFLICTING` / `UNKNOWN`）へ訳す。`test-run.py` はこの 3 つの値だけを読む。
 
 ### 集約
 
@@ -86,8 +86,8 @@ Pull Request の照会の層（`lib/gh_pr_info.py`）で `MERGEABLE` / `CONFLICT
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | githubkit（`lib/gh_call.py` の `rest_cached` が使う。ETag の読み直しが上限に数えられない） | 0.16.1（このリポジトリの `uv.lock`）。最新 0.17.1 | MIT | 2026-11-06（0.17.1） | 無し | 満たす。`repos/<owner>/<repo>/pulls/<番号>` を ETag 付きで読める。githubkit が使えない環境では `gh api` へ退避する | https://pypi.org/pypi/githubkit/json （2026-11-12）、`uv.lock` |
-| LIB2 | GitHub CLI の `gh pr view --json mergeable`（`lib/gh_pr_info.py` の `fetch_pr_meta` と同じ経路。GraphQL） | 手元の `gh` | MIT | 未確認 | 無し | 満たすが、照会のたびに GraphQL の上限を使う | `gh pr view 3069 --json mergeable` の実行（2026-11-12） |
+| LIB1 | githubkit（`lib/gh_call.py` の `rest_cached` が使う。ETag の読み直しが GitHub の API のレート制限に数えられない） | 0.16.1（このリポジトリの `uv.lock`）。最新 0.17.1 | MIT | 2026-11-06（0.17.1） | 無し | 満たす。`repos/<owner>/<repo>/pulls/<番号>` を ETag 付きで読める。githubkit が使えない環境では `gh api` へ退避する | https://pypi.org/pypi/githubkit/json （2026-11-12）、`uv.lock` |
+| LIB2 | GitHub CLI の `gh pr view --json mergeable`（`lib/gh_pr_info.py` の `fetch_pr_meta` と同じ経路。GraphQL） | 手元の `gh` | MIT | 未確認 | 無し | 満たすが、照会のたびに GraphQL のレート制限を消費する | `gh pr view 3069 --json mergeable` の実行（2026-11-12） |
 
 ### 確かめられなかったこと
 
@@ -145,8 +145,11 @@ graph TD
 | 照会の結論の値の集合 | `None`・`success`・失敗の結論・`pending` に `conflicting` を足す。`conflicting` は `_wait_ci` の照会だけが作り、`gh_checks.checks_outcome` は作らない |
 | `gh_pr_info.fetch_mergeable(repo, pr) -> str \| None` | 新設。戻りは `"MERGEABLE"` / `"CONFLICTING"` / `"UNKNOWN"` / `None`（照会の失敗） |
 
-値の集合へ `conflicting` を足すため、この集合で分岐する規則を集めて判定した（呼び出し元の検索:
-`grep -rn "wait_check(\|checks_outcome(" plugins/ndf/scripts --include=*.py` で、テスト以外の呼び出しは `test-run.py` の 2 行だけ）。
+値の集合へ `conflicting` を足すため、この集合で分岐する規則を集めて判定した。呼び出し元は次の検索で探し、テスト以外の呼び出しは `test-run.py` の 2 行だけだった。
+
+```bash
+grep -rn "wait_check(\|checks_outcome(" plugins/ndf/scripts --include=*.py
+```
 
 | 規則 | 場所 | 新しい値に当てはまるか | 扱い |
 | --- | --- | --- | --- |
@@ -194,7 +197,7 @@ sequenceDiagram
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 衝突の状態の照会は、未完了を返したチェックの照会 1 回につき 1 回まで。衝突の無い Pull Request の CI の待ちで増える GitHub の照会はこれだけとする | 照会の関数の中で、結論が `pending` のときだけ 1 回読む。ETag 付きで読み、値が変わらなければ 304 で返る（REST の上限に数えられない） | 偽の照会で、`pending` を N 回返したとき Pull Request の照会が N 回以下で、最初から結論が出たとき 0 回であることをテストで数える |
+| 性能・拡張性 | 衝突の状態の照会は、未完了を返したチェックの照会 1 回につき 1 回まで。衝突の無い Pull Request の CI の待ちで増える GitHub の照会はこれだけとする | 照会の関数の中で、結論が `pending` のときだけ 1 回読む。ETag 付きで読み、値が変わらなければ 304 で返る（REST のレート制限に数えられない） | 偽の照会で、`pending` を N 回返したとき Pull Request の照会が N 回以下で、最初から結論が出たとき 0 回であることをテストで数える |
 | 可用性 | 衝突の状態の照会の失敗で、CI の待ちを止めない（前提 3） | `fetch_mergeable` は失敗を `None` で返し、例外を投げない。`None` のときは結論を `pending` のまま返す | 照会の失敗を差し込んで、待ちが続き次のチェックの照会へ進むことをテストで見る |
 
 ## 決定の記録
@@ -203,7 +206,7 @@ sequenceDiagram
 
 衝突の状態は、待ちの最初に `UNKNOWN`（計算中）を返すことがあり（STD1）、待つ間にベースブランチが進んで衝突が生じることもある。
 最初の未完了のときに 1 回だけ読むと、どちらの場合も上限まで待つ。照会のたびに読み、`CONFLICTING` を読んだ時点で待ちを打ち切る。
-照会の回数は要求の上限（照会 1 回につき 1 回まで）に収まり、ETag の読み直しで上限の消費も抑えられる。
+照会の回数は要求が決めた回数（照会 1 回につき 1 回まで）に収まり、ETag の読み直しでレート制限の消費も抑えられる。
 
 待ちの前に 1 回だけ読む形は、計算中の値で衝突を見逃すため採らない。打ち切りは待ちの共通部品へ「止める条件」を足さず、
 照会の結論を `conflicting` にして共通部品の「`pending` 以外で終える」規則に乗せる。共通部品の引数を増やすと、
@@ -214,14 +217,15 @@ sequenceDiagram
 
 根拠: Value 1 / Value 2 / Value 5（MVV 版 7）
 
-### 決定 2: 照会の上限を使わずに繰り返し読むため、衝突の状態は REST の Pull Request を ETag 付きで読み、照会の層で 3 つの値へ訳す
+### 決定 2: レート制限を消費せずに繰り返し読むため、衝突の状態は REST の Pull Request を ETag 付きで読み、照会の層で 3 つの値へ訳す
 
-`gh_call.rest_cached` は githubkit（LIB1）で ETag 付きの読み直しを行い、値が変わらなければ 304 を返す。304 は REST の上限に数えられないため、
-照会のたびに読んでも上限の消費は値が変わったときだけになる。REST の `mergeable` の `true` / `false` / `null` は、
-照会の層の新しい関数 `gh_pr_info.fetch_mergeable` で `MERGEABLE` / `CONFLICTING` / `UNKNOWN` へ訳す（PR #3069 の実測で `false` と
-`CONFLICTING` が一致した）。`test-run.py` は GitHub の語を読まない。
+`gh_call.rest_cached` は githubkit（LIB1）で ETag 付きの読み直しを行い、値が変わらなければ 304 を返す。304 は REST のレート制限に数えられない。
+そのため照会のたびに読んでも、レート制限を消費するのは値が変わったときだけになる。
 
-`gh pr view --json mergeable`（LIB2）は照会のたびに GraphQL の上限を使い、ETag の読み直しを持たないため採らない。
+照会の層に新しい関数 `gh_pr_info.fetch_mergeable` を置く。この関数が REST の `mergeable` の `true` / `false` / `null` を `MERGEABLE` / `CONFLICTING` / `UNKNOWN` へ訳す。
+`false` と `CONFLICTING` の対応は PR #3069 の実測で一致した。`test-run.py` は GitHub の語を読まない。
+
+`gh pr view --json mergeable`（LIB2）は照会のたびに GraphQL のレート制限を消費し、ETag の読み直しを持たないため採らない。
 GraphQL のマージの状態（`mergeStateStatus` の `DIRTY`。`gh_pr_status` が使う）は、スレッドと課題の照会と一緒に読む部品で、
 衝突だけを繰り返し読む用途には照会が大きいため採らない。
 
@@ -232,7 +236,7 @@ GraphQL のマージの状態（`mergeStateStatus` の `DIRTY`。`gh_pr_status` 
 
 ### 決定 3: 公開インタフェースを変えないため、衝突で止まったときは既存の `stopped`・終了コード 2 で返す
 
-要求の受け入れ条件 1 と「影響」の表は、終了コードの意味を変えないことを求めている。終了コードの表には衝突を表す 4（`EXIT_BASE_CONFLICT`）があるが、
+要求の受け入れ条件 1 と「影響」の表は、終了コードの意味を変えないことを求めている。終了コードの表には衝突を表す 4（`EXIT_BASE_CONFLICT`）がある。
 これは `merge-when-green` が返し、プランのマージのステップがベースブランチの取り込みへ戻る契約である。全体テストのステップが 4 を返すと、
 工程の側の読み方を変える必要が出る。衝突であることは要約に、次の 1 手は `next` に書けば、読み手は取り込みへ進める。
 
@@ -249,7 +253,13 @@ GraphQL のマージの状態（`mergeStateStatus` の `DIRTY`。`gh_pr_status` 
 
 ## テスト設計
 
-テストは `plugins/ndf/scripts/tests/test_test_run.py`（`_wait_ci` の振る舞い）と `plugins/ndf/scripts/tests/test_gh_pr_info.py`（訳し方。新設）に置く。
+テストは 2 つのファイルに置く。
+
+| ファイル | 確かめる振る舞い |
+| --- | --- |
+| `plugins/ndf/scripts/tests/test_test_run.py` | `_wait_ci` の振る舞い |
+| `plugins/ndf/scripts/tests/test_gh_pr_info.py`（新設） | 訳し方 |
+
 GitHub の照会と待ちの `sleep` は差し替え、実際の GitHub へ問い合わせない（受け入れ条件 7）。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
