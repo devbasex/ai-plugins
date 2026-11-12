@@ -65,6 +65,7 @@ MODULES = [
     "queue_waits",  # queue の待ちの秒を理由ごとに数える（#2998）
     "templates",
     "verify_steps",
+    "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_templates",
     "delivery_templates",
     "sprint_revise",
@@ -99,6 +100,7 @@ NO_ENGINE = [
     "worker_steps",
     "pr",
     "templates",
+    "release_flow",
     "release_templates",
     "delivery_templates",
     "sprint_revise",

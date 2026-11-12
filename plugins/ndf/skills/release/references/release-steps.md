@@ -102,7 +102,7 @@ python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>..
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --root .
 # 手順 2 の承認資料の欄を埋める（開発版のデプロイの後）
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <承認資料> \
-  --verified claude,codex,kiro --ref develop --root .
+  --verified claude,codex,kiro --ref <ベースブランチ> --root .
 # 版を上げる他のプラグインと上げ幅の候補を承認資料へ書く（変えるなら --set <名前>=MAJOR|MINOR|PATCH で書き直す）
 python3 "$SCRIPTS/release-steps.py" changed-plugins --prs <PR番号>... --approval <承認資料> [--since <タグ>] --root .
 # 本番: 承認資料の表の上げ幅で上げる版を返す（items の name と to を bump --plugin <name> --to <to> へ渡す）
@@ -113,7 +113,18 @@ python3 "$SCRIPTS/release-steps.py" approve --approval <承認資料> --approved
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 開発版のデプロイ
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approved-sha <SHA> --root .  # 本番リリース（承認を得てから）
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
+# 選んで集める取り込み方（branch_flow.promotion: selected）: 本番チャネルから組んだリリースブランチで出す
+python3 "$SCRIPTS/release-steps.py" release-branch --version <版> --units <スプリントブランチ>... [--production <本番チャネル>] --root .
+python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs --head release/v<版> --approval <承認資料> --root .
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --promotion selected --root .
 ```
+
+- 選んで集める取り込み方: `release-branch` は `release/v<版>` を `origin/<本番チャネル>` から切り（origin に既にあればその先頭へ足す。
+  強制 push はしない）、`--units` のブランチだけを `--no-ff` でマージして push する。衝突すれば `stopped`（1）。`approval-facts --head`
+  は承認に出す先頭をそのブランチにし、「含む PR」はリリースブランチへマージした単位の中の PR になる。`release --promotion selected`
+  はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、タグと GitHub Release を
+  作った後に `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
+  `references/production-merge.md` の「選んで集める取り込み方のリリース」にある
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
@@ -165,14 +176,14 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` はリリース承認ゲートで決めた
   上げ幅へ行を書き直す（表に無い名前・知らない上げ幅は 2）。`--decided` は表の上げ幅で `to` を決め、表が無い・
   上げ幅を読めない・版や集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
-- `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージのコミットで取り込む。
-  取り込みが版数を持つ箇所だけで衝突すれば、`release/v<版>-sync` に `origin/develop` を取り込んで本番の版の側を取り、
-  `release/v<版>-sync` → `develop` の Pull Request で取り込む（`release/v<版>` そのものへは `develop` を取り込まない）。
+- `release`: `dev` は `release/v<版>` →ベースブランチの Pull Request を作り、チェックを待ってマージのコミットで取り込む。
+  取り込みが版数を持つ箇所だけで衝突すれば、`release/v<版>-sync` に `origin/<ベースブランチ>` を取り込んで本番の版の側を取り、
+  `release/v<版>-sync` →ベースブランチの Pull Request で取り込む（`release/v<版>` そのものへはベースブランチを取り込まない）。
   版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
   `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
-  `prod` は続けて `release/v<版>` を head にした `main` 宛の Pull Request をマージし、タグと GitHub Release を作る。
+  `prod` は続けて `release/v<版>` を head にした本番チャネル宛の Pull Request をマージし、タグと GitHub Release を作る。
   `delivery` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
-  `main` 宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
+  本番チャネル宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
   （マージした Pull Request と、`release` が作ったときのタグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
@@ -184,7 +195,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
   デプロイの PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
   Pull Request の外のコミットか中身があれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。
-  承認の後に `develop` が進んでいても、`develop` は比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
+  承認の後にベースブランチが進んでいても、ベースブランチは比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
   マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が

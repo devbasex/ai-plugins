@@ -10,6 +10,14 @@
 #
 # **判定は宣言に起点が書かれていて、そのブランチが origin にあるときだけ働く。** 書く前・
 # 作る前は成功で通す。有効にする時期を人の手で合わせずに済ませるためである。
+#
+# 宛先のブランチ（環境変数 PR_BASE_REF。無ければ origin の HEAD）の `.ndf/worktree.json` の
+# `branch_flow.promotion` が `selected`（選んだスプリントブランチを集める取り込み方。#3121）なら、
+# 判定を次に替える（#3121 の決定 14）。宣言は Pull Request の変更で緩められないよう、宛先のブランチから読む。
+#   1. head が `release/v*` である（起点ブランチからの Pull Request は通さない）
+#   2. head の先頭が `origin/<宛先>` の子孫である
+#   3. `origin/<宛先>..<head>` のコミットは、head の first-parent の列（リリースブランチを組むマージと
+#      版上げ）か、origin のいずれかの `sprint/*` の祖先である（起点ブランチにだけあるコミットを入れない）
 set -uo pipefail
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
@@ -19,6 +27,47 @@ fi
 
 head_ref="$1"
 head_sha="${2:-}"
+
+# 宛先のブランチの宣言が選んで集める取り込み方か。読めなければ今の判定のまま。
+target="${PR_BASE_REF:-}"
+if [ -z "$target" ]; then
+  target=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  target="${target#origin/}"
+fi
+promotion=
+if [ -n "$target" ]; then
+  GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$target:refs/remotes/origin/$target" 2>/dev/null || true
+  promotion=$(git show "refs/remotes/origin/$target:.ndf/worktree.json" 2>/dev/null |
+    jq -r 'select(.version == 1) | .branch_flow.promotion? | select(type == "string")' 2>/dev/null)
+fi
+
+if [ "$promotion" = "selected" ]; then
+  case "$head_ref" in
+  release/v*) ;;
+  *)
+    echo "::error::${target} 宛の Pull Request は、${target} から切って承認したスプリントブランチを集めた release/v<版> からだけです（分岐元: ${head_ref}）"
+    exit 1
+    ;;
+  esac
+  if [ -z "$head_sha" ] || ! git merge-base --is-ancestor "refs/remotes/origin/$target" "$head_sha" 2>/dev/null; then
+    echo "::error::${head_ref} の先頭（${head_sha:-SHA の指定なし}）が origin/${target} の子孫ではありません。${target} から切り直してください"
+    exit 1
+  fi
+  GIT_TERMINAL_PROMPT=0 git fetch -q origin 'refs/heads/sprint/*:refs/remotes/origin/sprint/*' 2>/dev/null || true
+  first=$(git rev-list --first-parent "refs/remotes/origin/$target..$head_sha")
+  mapfile -t sprints < <(git for-each-ref --format='^%(refname)' 'refs/remotes/origin/sprint/')
+  stray=
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    grep -qx "$c" <<<"$first" && continue
+    stray="$stray ${c:0:12}"
+  done < <(git rev-list "$head_sha" "^refs/remotes/origin/$target" "${sprints[@]}")
+  if [ -n "$stray" ]; then
+    echo "::error::${head_ref} に、スプリントブランチ（origin の sprint/*）にも組むマージと版上げにも無いコミットがあります:${stray}。承認したスプリントブランチだけを ${target} から集め直してください"
+    exit 1
+  fi
+  exit 0
+fi
 
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
   .ndf/worktree.json 2>/dev/null)

@@ -9,6 +9,7 @@
       "approval-facts": {
         "options": [
           "--approval",
+          "--head",
           "--plugin",
           "--prev-tag",
           "--prs",
@@ -51,6 +52,7 @@
         "options": [
           "--approval",
           "--decided",
+          "--head",
           "--plugin",
           "--prs",
           "--set",
@@ -118,6 +120,15 @@
           "--channel",
           "--ci-wait",
           "--plugins",
+          "--promotion",
+          "--version"
+        ],
+        "positionals": []
+      },
+      "release-branch": {
+        "options": [
+          "--production",
+          "--units",
           "--version"
         ],
         "positionals": []

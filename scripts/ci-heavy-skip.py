@@ -9,7 +9,10 @@
    テストが読む文書があれば `docs_tests` に対応するテストを出し、文書のテストのジョブが走らせる
 3. head の first-parent の祖先 A のうち、A..head の差分が版数と説明だけで、A が develop への
    push でこの workflow を通ったものがある。本番の PR（develop → main）。base が merge-base
-   から中身を足していないこと（マージの結果が head の木と同じになること）も求める
+   から中身を足していないこと（マージの結果が head の木と同じになること）も求める。宛先（base のコミット）の
+   `.ndf/worktree.json` の `branch_flow` が選んで集める取り込み方なら当てない。リリースブランチは develop と違う
+   組み合わせなので、全体テストを省かない（#3121 の決定 15）。比べるブランチ（--branch）の既定は宛先の宣言の
+   `base_branch` で、読めなければ develop
 
 「版数と説明だけ」の判定:
 - 文書のファイルのうちテストが読まないものは中身を問わない。行数の上限・リンク・古さは
@@ -38,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
 
 require("pathmatch")
+import branch_flow  # noqa: E402
 import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
@@ -47,6 +51,7 @@ MANIFEST_RE = re.compile(
 )
 MANIFEST_LINE_RE = re.compile(r'^\s*"(version|description)"\s*:')
 ANCESTOR_LIMIT = 20
+FALLBACK_BRANCH = "develop"  # 宛先の宣言に base_branch が無いときに比べるブランチ
 
 
 def git(root: str, *args: str) -> subprocess.CompletedProcess:
@@ -120,8 +125,26 @@ def passed_on_branch(repo: str, workflow: str, sha: str, branch: str, api: Calla
     )
 
 
+def target_decl(root: str, base: str) -> dict:
+    """宛先（base のコミット）の `.ndf/worktree.json`。Pull Request の変更で判定を緩められないよう、head ではなく宛先から読む。"""
+    p = git(root, "show", f"{base}:.ndf/worktree.json")
+    try:
+        data = json.loads(p.stdout) if p.returncode == 0 else {}
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def selects_units(decl: dict) -> tuple[bool, str]:
+    """宛先の宣言が、選んだ単位を集める取り込み方か。読めない宣言は省かない側（真）へ倒す。"""
+    try:
+        return branch_flow.of_decl(decl).row.selects_units, ""
+    except branch_flow.FlowError as e:
+        return True, f"宛先の branch_flow を読めない（{e}）"
+
+
 def decide(
-    root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "develop", api: Callable[[str], dict] = gh_api
+    root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "", api: Callable[[str], dict] = gh_api
 ) -> Decision:
     if event != "pull_request":
         return Decision(False, f"{event or '不明'} のイベントでは省かない")
@@ -140,6 +163,11 @@ def decide(
     # （main は develop のマージしか受けないので、main のマージのコミットは develop に無くてよい）
     if git(root, "diff", "--quiet", mb.stdout.strip(), base).returncode != 0:
         return Decision(False, f"{why}（base に head の無い変更がある）")
+    decl = target_decl(root, base)
+    selected, broken = selects_units(decl)
+    if selected:
+        return Decision(False, f"{why}（{broken or '宛先の取り込み方が選んだ単位を集めるため、リリースブランチの組み合わせを試す'}）")
+    branch = branch or (decl.get("base_branch") if isinstance(decl.get("base_branch"), str) else "") or FALLBACK_BRANCH
     revs = git(root, "rev-list", "--first-parent", f"--max-count={ANCESTOR_LIMIT}", head)
     for sha in revs.stdout.split():
         if sha != head and not version_only(root, sha, head, as_code)[0]:
@@ -157,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--head", default="")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--workflow", required=True, help="workflow のファイル名（例: pytest.yml）")
-    ap.add_argument("--branch", default="develop")
+    ap.add_argument("--branch", default="", help="比べるブランチ（既定は宛先の宣言の base_branch）")
     a = ap.parse_args(argv)
     if a.event == "pull_request" and not (a.base and a.head):
         d = Decision(False, "--base と --head が無い")

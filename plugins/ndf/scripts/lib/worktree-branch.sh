@@ -190,6 +190,27 @@ wt_production_branch() {
   wt_declaration_branch "${1:-}" production_branch
 }
 
+# スプリントの起点ブランチ名を出力する（#3121）。宣言の branch_flow.start が `production`
+# なら本番のチャネル（wt_production_branch）、それ以外（キーが無いときを含む）は開発の
+# 起点（wt_base_branch）である。値の読み分けの正本は lib/branch_flow.py にあり、ここは
+# worktree の起点を決めるのに要る `start` だけを読む。表に無い値は落とさずに 1 を返す。
+wt_start_branch() {
+  local main_dir="${1:-}" decl start=
+  [ -n "$main_dir" ] || return 1
+  if decl=$(wt_declaration "$main_dir"); then
+    start=$(printf '%s' "$decl" |
+      jq -r 'if (.branch_flow|type) == "object" and (.branch_flow.start|type) == "string" then .branch_flow.start else empty end' 2>/dev/null)
+  fi
+  case "$start" in
+    "" | base) wt_base_branch "$main_dir" ;;
+    production) wt_production_branch "$main_dir" ;;
+    *)
+      printf 'NOTE: .ndf/worktree.json の branch_flow.start = %s は base か production で書いてください\n' "$start" >&2
+      return 1
+      ;;
+  esac
+}
+
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。
 # 追跡されていないファイルは含めない。
 wt_dirty_paths() {

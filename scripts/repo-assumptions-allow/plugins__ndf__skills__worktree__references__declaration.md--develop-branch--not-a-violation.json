@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/worktree/references/declaration.md",
+  "name": "develop-branch",
+  "kind": "not-a-violation",
+  "reason": "宣言の書き方の例の値（#3121）。読み手は宣言から名前を読み、手順は決め打ちしない",
+  "count": 2
+}

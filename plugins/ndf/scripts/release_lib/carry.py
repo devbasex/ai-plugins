@@ -26,7 +26,7 @@ class Kept:
     anchor: str | None
 
 
-def _sections(lines: list[str]) -> tuple[list[str], list[tuple[str, list[str]]]]:
+def split_h2(lines: list[str]) -> tuple[list[str], list[tuple[str, list[str]]]]:
     """(最初の `## ` より前の行, [(見出し, 中身の行)])。"""
     starts = h2_lines(lines)
     head = lines[: starts[0]] if starts else list(lines)
@@ -38,7 +38,7 @@ def kept(old_lines: list[str], own) -> list[Kept]:
     あるときは ValueError（手の節を黙って失わないため、呼び手は書かずに止める）。"""
     if not any(h.level == 1 for h in md.headings("\n".join(old_lines))):
         raise ValueError("承認資料に H1 の見出しが無い")
-    _, sections = _sections(old_lines)
+    _, sections = split_h2(old_lines)
     seen: set[str] = set()
     for heading, _ in sections:
         if heading in seen:
@@ -64,7 +64,7 @@ def insert_kept(new_lines: list[str], keep: list[Kept]) -> list[str]:
     """作り直した承認資料の行へ残す節を差し込む。"""
     if not keep:
         return list(new_lines)
-    head, sections = _sections(new_lines)
+    head, sections = split_h2(new_lines)
     present = {h for h, _ in sections}
     lost = [_block(k) for k in keep if k.anchor is not None and k.anchor not in present]
     out = list(head)

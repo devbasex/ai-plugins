@@ -15,6 +15,8 @@ import time
 import tomllib
 from pathlib import PurePosixPath
 
+import branch_flow
+
 from . import fingerprint
 from .compose import compose_services
 from .secret import is_secret_path, redact
@@ -376,10 +378,10 @@ def measure_branches(tree: Tree) -> dict:
     if state["head"]:
         evidence.insert(0, {"text": f"origin の HEAD: {state['head']}"})
     if not names and not state["head"]:
-        return unknown("origin の HEAD も main・master・develop も無い")
+        return unknown(f"origin の HEAD も {'・'.join(fingerprint.KNOWN_BRANCHES)} も無い")
     base = [state["head"]] if state["head"] else []
     base += [b for b in names if b not in base]
-    production = [b for b in ("main", "master") if b in names] or base[:1]
+    production = [b for b in branch_flow.DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]
     return question({"base": base, "production": production}, evidence)
 
 

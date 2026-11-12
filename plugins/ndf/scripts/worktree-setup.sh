@@ -5,8 +5,8 @@
 #   status           導入の状態を出す
 #   check            宣言の状態を終了コードで返す（読み取り専用）
 #   create <ブランチ> [--from <起点>]
-#                    `.worktrees/<ブランチ>` に作業ツリーを作る。起点の既定は宣言の
-#                    base_branch。課題の作業ツリーはスプリントブランチ（sprint/<名前>）を
+#                    `.worktrees/<ブランチ>` に作業ツリーを作る。起点の既定はスプリント
+#                    の起点（宣言の branch_flow.start。無ければ base_branch）。課題の作業ツリーはスプリントブランチ（sprint/<名前>）を
 #                    --from に渡して切る。スプリントブランチそのものは --from を省いて切る
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
@@ -297,9 +297,10 @@ do_check() {
 
 # 作業ツリーを `.worktrees/<ブランチ>` に作り、そのパスを出力する。
 #
-# 起点は --from があればそれ、無ければ宣言の base_branch（無ければ既定ブランチ）で
-# ある。**宣言の base_branch は書き換えない。** スプリントブランチは develop から
-# 切り、課題の作業ツリーは --from にスプリントブランチを渡して切る。
+# 起点は --from があればそれ、無ければスプリントの起点（宣言の branch_flow.start が
+# 指すチャネル。無ければ base_branch、それも無ければ既定ブランチ）である。**宣言は
+# 書き換えない。** スプリントブランチはスプリントの起点から切り、課題の作業ツリーは
+# --from にスプリントブランチを渡して切る。
 # 起点の名前が origin にもローカルにも無いときは作らずに 1 で終わる。
 do_create() {
   local branch="$CREATE_BRANCH" base target start
@@ -331,7 +332,7 @@ do_create() {
       return 1
     }
   else
-    base=$(wt_base_branch "$MAIN_DIR") || return 1
+    base=$(wt_start_branch "$MAIN_DIR") || return 1
   fi
   start="origin/$base"
   git -C "$MAIN_DIR" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
