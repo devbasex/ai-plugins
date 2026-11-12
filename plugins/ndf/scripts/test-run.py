@@ -36,6 +36,7 @@ import pathlib
 import subprocess
 import sys
 import time
+from types import SimpleNamespace as Resp  # `gh_checks.fetch_check_runs` が読む `.body` の応答
 from typing import NamedTuple
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -326,25 +327,12 @@ def cmd_scope(a) -> int:
     )
 
 
-# CI の待ちの照会だけが作る結論。チェックが未完了で PR が衝突している（#3076）
-CONFLICTING = "conflicting"
-
-
-class _Resp:
-    def __init__(self, body):
-        self.body = body
-
-
 def _wait_ci(root: pathlib.Path, ctx: OutcomeContext, base: str | None, pr: int | None = None) -> int:
-    """Pull Request のチェックを上限まで待ち、落ちたら CI の JUnit で見分ける（F4）。
-
-    `pr` があれば、結論が `pending` の照会ごとに衝突の状態を 1 回読み、`CONFLICTING` なら待ちを打ち切る（#3076）。
-    """
+    """Pull Request のチェックを上限まで待ち、落ちたら CI の JUnit で見分ける（F4）。`pr` が衝突していれば待ちを打ち切る（#3076）。"""
     import gh_checks
     import gh_pr_info
 
     strategy, limits = ctx.strategy, ctx.limits
-
     owner_repo = repo_lib.owner_repo(root)
     sha = _git_out(root, "rev-parse", "HEAD") or ""
     checks = list((strategy.ci or {}).get("checks") or [])
@@ -358,23 +346,19 @@ def _wait_ci(root: pathlib.Path, ctx: OutcomeContext, base: str | None, pr: int 
     last: dict = {}
 
     def fetch():
-        last["runs"] = gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)), empty_ok=True)
-        # 照会の失敗は `None`、チェックの未登録は `pending`（`gh_checks.checks_outcome`）
-        outcome = gh_checks.checks_outcome(last["runs"], checks)
-        # 衝突した PR では pull_request のワークフローが起動せず、待っても結論が出ない（#3076）
-        if outcome == "pending" and pr is not None and gh_pr_info.fetch_mergeable(owner_repo, pr) == gh_pr_info.CONFLICTING:
-            return CONFLICTING
-        return outcome
+        last["runs"] = gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: Resp(body=test_triage.gh_json(p)), empty_ok=True)
+        outcome = gh_checks.checks_outcome(last["runs"], checks)  # 照会の失敗は `None`、チェックの未登録は `pending`
+        stuck = outcome == "pending" and pr is not None and gh_pr_info.fetch_mergeable(owner_repo, pr) == gh_pr_info.CONFLICTING
+        return gh_pr_info.CONFLICTING if stuck else outcome
 
     outcome, waited, attempts = test_triage.wait_check(fetch, float(limits["ci_wait_timeout"]))
     detail = (
         f"CI のチェック {', '.join(checks)}（{sha[:7]} / 待ち {waited:.0f} 秒・照会 {attempts} 回 / 上限 {limits['ci_wait_timeout']} 秒）"
     )
-    if outcome == CONFLICTING:
+    if outcome == gh_pr_info.CONFLICTING:  # 衝突した PR は pull_request のワークフローが起動しない。emit は終了して戻らない
         summary = f"PR #{pr} はベースブランチと衝突していて CI が起動しない（衝突の状態 CONFLICTING）。{detail}"
         nxt = f"python3 plugins/ndf/scripts/merged-steps.py base-sync --pr {pr}"
         _emit_step(result(TOOL, "stopped", summary, [{"waited_seconds": waited}], {}, next=nxt), step_result.EXIT_UNREADABLE)
-        return step_result.EXIT_UNREADABLE
     if outcome is None:
         _emit_step(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
         return 2
