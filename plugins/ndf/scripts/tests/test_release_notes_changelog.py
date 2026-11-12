@@ -102,7 +102,7 @@ def test_pr1863_leaves_the_readme_and_keeps_it_under_the_line_limit(tmp_path):
         root,
         readme,
         show(BEFORE_10_17_68, "CHANGELOG.md"),
-        {"docs/glossary.md": show(BEFORE_10_17_68, "docs/glossary.md")},
+        {"docs/glossary.md": show(BEFORE_10_17_68, "docs/glossary.md"), "docs/scripts-map/inventory.md": "- 行\n"},  # 行数の除外が指す先
     )
     before = path.read_bytes()
     env = fake_gh(tmp_path, PR1863)
