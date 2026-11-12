@@ -67,6 +67,11 @@ def plan_ends(lane: tuple[str, str]) -> bool:
     return got is True
 
 
+def issue_lists(a) -> tuple[str, str]:
+    """課題の番号の並びの 2 形: カンマ区切り（スクリプトの引数）と `#` 付きの空白区切り（本文）。"""
+    return ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
+
+
 def lane_end_step(plan: str, lane: str, request: bool) -> dict:
     """終わりの記録（`parallel.py end`）。依頼の経路では依頼の記録を渡し、答えが差し戻しか失敗なら承認ゲート（10）で止まる（決定 6）。"""
     cmd = f"{PARALLEL_PY} end {shlex.quote(plan)} --lane {shlex.quote(lane)}"
@@ -83,7 +88,7 @@ def _close_head(a, repo: str) -> dict:
 
 def lane_close_plan(a, repo: str, lane: tuple[str, str]) -> dict:
     """版の要らないまとめ: 確定仕様化 → Pull Request → 起動の判定 →（起動する回だけ）振り返り → 棚卸し → マージ → 終わりの記録。"""
-    issues, refs = ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
+    issues, refs = issue_lists(a)
     steps = [
         *_spec_pr_steps(a, refs, "deep-due"),
         deep_due_step(a, repo, issues, after="merge-gate"),
@@ -99,7 +104,7 @@ def verify_plan(a, repo: str) -> dict:
     """版の要るまとめ: リリース後テスト（控えを取る・比べるを含む）→ 課題を閉じる。最終工程はリリース後テストに固定する。
     振り返りは版の要らないまとめでリリースより前に済むため、最後のリリース記録より後の振り返りを求めると課題を閉じられない。
     耐久ワークフローはレーンの終わりの記録（まとめの完了）の後にだけ流す（`parallel_end.launch_verify`）。"""
-    issues, refs = ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
+    issues, refs = issue_lists(a)
     close = _close_step(a, repo, RECORD_FOUND, issues)
     close["cmd"] = close["cmd"].replace("--final-stage-from {state_dir}/progress.jsonl", f"--final-stage {STAGE_VERIFY}")
     steps = [*release_verify_steps(a.name, refs, RECORD_FOUND, after="close"), close]

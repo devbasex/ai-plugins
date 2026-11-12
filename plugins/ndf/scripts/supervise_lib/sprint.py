@@ -50,7 +50,7 @@ from supervise_lib.sprint_routes import (
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
-from supervise_lib.sprint_lane_close import with_lane_close
+from supervise_lib.sprint_lane_close import issue_lists, with_lane_close
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -169,8 +169,7 @@ def auto_sprint_plans(a) -> list[dict]:
 def close_plan(a, repo: str) -> dict:
     """まとめ: 確定仕様化 → PR →（リリース記録があれば）リリース後テスト → 起動の判定 →（起動する回だけ）振り返り → 棚卸し →
     マージ → 課題を閉じる。CI は ready から後ろの作業と重なって進み、マージの後は close だけ（#2914 の決定 1〜4・I3・I8）。"""
-    issues = ",".join(map(str, a.issue))
-    refs = " ".join(f"#{i}" for i in a.issue)
+    issues, refs = issue_lists(a)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
