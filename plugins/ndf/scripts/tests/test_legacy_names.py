@@ -249,7 +249,7 @@ def test_old_remote_branch_is_kept(repo):
 
 def test_pr_target_reads_both_prefixes():
     assert pr_mode.pr_target("sprint/x") == pr_mode.pr_target("mission/x") == "sprint"
-    assert pr_mode.pr_target("develop") == "develop"
+    assert pr_mode.pr_target("develop") == "base"
     assert not pr_mode.needs_review("mission/x")
 
 

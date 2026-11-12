@@ -9,9 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 
-def test_target_separates_sprint_and_develop():
+def test_target_separates_sprint_and_base():
     assert pr_target("sprint/v10-18") == "sprint" and not needs_review("sprint/v10-18")
-    assert pr_target("develop") == "develop" and needs_review("develop")
+    # 区分の名前はブランチ名に依らない（#3121 の決定 10）
+    for base in ("develop", "main", "trunk"):
+        assert pr_target(base) == "base" and needs_review(base)
 
 
 def test_split_stages_accepts_commas_and_arrows():
