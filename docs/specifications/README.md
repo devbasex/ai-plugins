@@ -160,5 +160,6 @@
 | [ndf-supervise-progress-host-and-queue-waits.md](ndf-supervise-progress-host-and-queue-waits.md) | supervise の負荷の記録（進捗ログの負荷とメモリ・queue の待ちの秒・全体テストのメモリの山の計測） |
 | [ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md) | 並列の計画のマシン全体のプランの上限（machine-plans の警告・起動の待ち・起動の排他・relay.py cap --plans） |
 | [ndf-parallel-cross-repo-lane.md](ndf-parallel-cross-repo-lane.md) | 別のリポジトリの改修が要るときの既定（相手のクローンを repo にしたレーンを足す）の決定と理由・常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel-cross-repo.md が正 |
+| [ndf-ci-only-tests.md](ndf-ci-only-tests.md) | CI テストの宣言（`test.ci.only`）のあるリポジトリで手元のテストを止め、PR の CI の結果を待たずに読んで直し（`ci-watch.py peek`・改修の上限）、テストのチェックがそろってからマージすること。hook の照合と cross-refactoring の最終ゲートを含む。手順は `development-workflow` の SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
