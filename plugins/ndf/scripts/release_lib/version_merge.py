@@ -9,7 +9,7 @@ release/v<版> が分岐点から変えたパス（版上げが書いたファ�
 
 選んで集める取り込み方の戻すマージ（`sections=True`。#3121 の決定 17）は、CHANGELOG.md の衝突も解く。開発版のデプロイが起点の
 ブランチへ、リリースブランチと同じ見出し（`## [<plugin> <基底の版>]`）の節を別の中身で書くためで、起点のブランチの本文に
-release/v<版> が分岐点から変えた節だけを写す（`resolve_sections`。節の切り分けは `carry.split_h2`）。
+リリースブランチが分岐点から変えた節だけを写す（`resolve_sections`。節の切り分けは `carry.split_h2`）。
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def resolve_text(text: str, allowed: set[str]) -> str | None:
 
 
 def resolve_sections(base: str, ours: str, theirs: str) -> str:
-    """CHANGELOG.md の本文を、theirs（起点のブランチ）に ours（release/v<版>）が分岐点 base から変えた節だけを写して作る。見出しが
+    """CHANGELOG.md の本文を、theirs（起点のブランチ）に ours（リリースブランチ）が分岐点 base から変えた節だけを写して作る。見出しが
     theirs にあれば置き換え、無ければ theirs の最初の節の前へ ours の並びで足す。ours が消した節と節の外の変更は写さない
     （起点のブランチの更新を本番の側の古い値へ戻さない）。"""
     was = dict(split_h2(base.split("\n"))[1])

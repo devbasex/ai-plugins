@@ -64,6 +64,17 @@ def ancestor_of(root, a: str, b: str) -> bool:
     return git_run(root, "merge-base", "--is-ancestor", a, b).returncode == 0
 
 
+def commit_resolved_merge(root, subject: str) -> bool:
+    """止まったマージが rerere の記録で衝突をすべて解き index へ載せていれば、`subject` でコミットして True。
+    マージの途中でない・未解消のパスが残る・コミットできなければ False（呼び手が取り消す）。"""
+    if not git_succeeds(root, "rev-parse", "-q", "--verify", "MERGE_HEAD"):
+        return False
+    unmerged = git_run(root, "diff", "--name-only", "--diff-filter=U")
+    if unmerged.returncode != 0 or unmerged.stdout.strip():
+        return False
+    return git_succeeds(root, "commit", "-q", "-m", subject)
+
+
 class ReleaseBuildError(RuntimeError):
     """リリースブランチを組めない（衝突・単位が無い）。止めて人へ戻す（E10）。"""
 
@@ -112,12 +123,14 @@ class Promotion:
     def build_release_branch(self, root, branch: str, production_ref: str, units: list[str]) -> str:
         """`production_ref` から `branch` を切り、`units` を `--no-ff` で順にマージして先頭の SHA を返す（I5）。
 
-        丸ごと出す行では使わない（ValueError）。衝突すれば取り消して ReleaseBuildError（E10）。同じ衝突の解き方は rerere で再利用する。"""
+        丸ごと出す行では使わない（ValueError）。衝突すれば取り消して ReleaseBuildError（E10）。同じ衝突の解き方は rerere で再利用し、
+        rerere が衝突をすべて解いたマージはそのままコミットして進む。組むのは detached HEAD で、ローカルの `branch` を作らず
+        動かさない（本番プランの worktree が `branch` を使っていても組み直せる）。送るのは呼び手が HEAD を送る。"""
         if not self.selects_units:
             raise ValueError(f"取り込み方 {self.name} はリリースの単位を選ばない")
         if not units:
             raise ReleaseBuildError("選んだリリースの単位が無い")
-        p = git_run(root, "checkout", "-q", "-B", branch, production_ref)
+        p = git_run(root, "checkout", "-q", "--detach", production_ref)
         if p.returncode != 0:
             raise ReleaseBuildError(f"{production_ref} から {branch} を切れない: {p.stderr.strip()}")
         for u in units:
@@ -136,7 +149,7 @@ class Promotion:
                 unit_merge_subject(u, branch),
                 u,
             )
-            if p.returncode != 0:
+            if p.returncode != 0 and not commit_resolved_merge(root, unit_merge_subject(u, branch)):
                 git_run(root, "merge", "--abort")
                 raise ReleaseBuildError(f"{u} を {branch} へマージできない（衝突は人が解く）: {(p.stdout + p.stderr).strip()[-400:]}")
         return git_run(root, "rev-parse", "HEAD").stdout.strip()

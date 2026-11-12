@@ -154,6 +154,35 @@ def test_release_branch_stops_on_conflicts(history):
     assert git(repo, "status", "--porcelain") == ""
 
 
+def test_release_branch_reuses_rerere_resolution(history):
+    """E10: 人が一度解いた衝突は、rerere の記録で解けたらマージを完了して次の単位へ進む。"""
+    repo, _, _ = history
+    for name in ("c", "d"):
+        git(repo, "checkout", "-q", "-b", f"sprint/{name}", "main")
+        commit(repo, "same.txt", f"{name}\n", f"sprint {name}")
+    # 人が解いた記録を rerere に残す
+    git(repo, "config", "rerere.enabled", "true")
+    git(repo, "checkout", "-q", "--detach", "sprint/c")
+    subprocess.run(["git", "-C", str(repo), "merge", "-q", "--no-edit", "sprint/d"], capture_output=True)
+    (repo / "same.txt").write_text("c\nd\n")
+    git(repo, "add", "same.txt")
+    git(repo, "commit", "-q", "--no-edit")
+    head = bf.PROMOTIONS["selected"].build_release_branch(repo, "release/v2", "main", ["sprint/c", "sprint/d"])
+    assert git(repo, "show", f"{head}:same.txt") == "c\nd"
+    assert git(repo, "log", "-1", "--format=%s", head) == "Merge sprint/d into release/v2"
+
+
+def test_release_branch_builds_while_branch_is_checked_out_elsewhere(history, tmp_path):
+    """本番プランの worktree が同じリリースブランチを使っていても、detached HEAD で組み直せる。"""
+    repo, _, _ = history
+    git(repo, "branch", "release/v3", "main")
+    git(repo, "worktree", "add", "-q", str(tmp_path / "prod"), "release/v3")
+    before = git(repo, "rev-parse", "release/v3")
+    head = bf.PROMOTIONS["selected"].build_release_branch(repo, "release/v3", "main", ["sprint/a"])
+    assert head != before
+    assert git(repo, "rev-parse", "release/v3") == before
+
+
 def test_whole_row_does_not_build_release_branches(history):
     with pytest.raises(ValueError):
         bf.PROMOTIONS["whole"].build_release_branch(history[0], "release/v1", "main", ["sprint/a"])

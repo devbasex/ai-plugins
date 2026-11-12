@@ -51,10 +51,15 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
     return (got[0], got[1].name) if got and not (hasattr(got, "own_release") and got.own_release()) else None
 
 
+def release_lane(a, repo: str) -> tuple[str, str] | None:
+    """まとめたリリースへ依頼を送るレーンなら `parallel_lane` の値。取り込み方の行が単位を選ぶ（`selected`）なら、まとめた
+    リリースは組まないため None（レーンもリリース承認ゲートと自分の本番のプランで出す。#3121）。"""
+    return None if sprint_flow(a).row.selects_units else parallel_lane(repo)
+
+
 def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。
-    取り込み方の行が単位を選ぶ（`selected`）なら、まとめたリリースは組まないため、レーンも自分の本番のプランで出す（#3121）。"""
-    lane = None if sprint_flow(a).row.selects_units else parallel_lane(repo)
+    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+    lane = release_lane(a, repo)
     if lane:
         from parallel_release import plan_release_request
 
@@ -303,9 +308,7 @@ def sprint_plans(a) -> list[dict]:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
-    if parallel_lane(
-        repo
-    ):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（リリース承認ゲートはオーガナイザーが出す。#2436 の I17）
+    if release_lane(a, repo):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（ゲートはオーガナイザーが出す。#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
