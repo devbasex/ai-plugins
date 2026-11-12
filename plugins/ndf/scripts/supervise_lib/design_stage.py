@@ -204,21 +204,33 @@ def kept_lines(prompt: str, before: dict, after: dict) -> list[str]:
     return [line for line in prompt.splitlines() if line.strip() and line not in template]
 
 
+def _owners(plans: dict[int, dict]) -> dict[int, int]:
+    """課題 → その課題を実装するプランのキー。課題のまとまりのプラン（#3081）は代表の課題をキーに、まとまりの課題を
+    `課題` に持つ。自分のプランを持つ課題（--absorb で取り込んだ課題も）はそのプランを指す。"""
+    own = {n: n for n in plans}
+    for n, plan in plans.items():
+        for i in plan.get("課題") or []:
+            own.setdefault(i, n)
+    return own
+
+
 def _checked_absorptions(plans: dict[int, dict], res: dr.DesignResults) -> tuple[dict[int, int], dict[int, list[int]]]:
     """取り込みの対応を作り、すべての取り込み先を確かめる。返すのは書き出しの時点の取り込み（課題 → 取り込み先）と、
-    取り込み先ごとの取り込んだ課題。取り込み先に流れる実装プランが無ければ DesignResultsError。プランは変えない。"""
+    取り込み先の課題を実装するプランごとの取り込んだ課題。取り込み先に流れる実装プランが無ければ DesignResultsError。
+    プランは変えない。"""
     absorbed: dict[int, list[int]] = {}
+    own = _owners(plans)
     # new sprint --absorb で書き出しの時点に取り込んだ課題（プランの `取り込み先`）も表の取り込みと合わせる（#1426 の決定 8）
     pre = {n: p["取り込み先"] for n, p in plans.items() if isinstance(p.get("取り込み先"), int)}
     # --absorb の取り込みも表の取り込みも、取り込み先に実装が流れることを確かめる（取り込み先が閉じる・別へ取り込まれると、
     # 取り込んだ受け入れ内容を実装するプランが無くなる）
     for n, h in [*pre.items(), *((r.issue, r.host) for r in res.rows if r.kind == dr.ABSORB)]:
         host_row = res.row_of(h)
-        if h not in plans or (host_row is not None and host_row.kind != dr.IMPLEMENT):
+        if h not in own or (host_row is not None and host_row.kind != dr.IMPLEMENT):
             raise dr.DesignResultsError(
                 f"#{n} の取り込み先 #{h} に流れる実装プランが無い（スプリントの課題でないか、設計の結果で取り込む・閉じるとした）"
             )
-        absorbed.setdefault(h, []).append(n)
+        absorbed.setdefault(own[h], []).append(n)
     return pre, absorbed
 
 
@@ -246,19 +258,22 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     pre, absorbed = _checked_absorptions(plans, res)
     items = []
     for n, plan in plans.items():
-        row, host = res.row_of(n), res.host_of(n)
-        if row is not None and row.kind == dr.CLOSE:
-            plan["実行の条件"] = closed_condition(n)
-            items.append({"issue": n, "closed": True})
-            continue
-        if host is not None or n in pre:
-            plan["実行の条件"] = absorbed_condition(n, host if host is not None else pre[n])
-            items.append({"issue": n, "absorbed_into": host if host is not None else pre[n]})
+        # 課題のまとまりのプラン（#3081）は、まとまりの課題のどれかが実装されれば流れる。閉じる・取り込むとした課題は外す
+        members = list(dict.fromkeys([n, *(plan.get("課題") or [])]))
+        live = [i for i in members if not _skipped(i, res, pre)]
+        if not live:
+            row, host = res.row_of(n), res.host_of(n)
+            if row is not None and row.kind == dr.CLOSE:
+                plan["実行の条件"] = closed_condition(n)
+                items.append({"issue": n, "closed": True})
+            else:
+                plan["実行の条件"] = absorbed_condition(n, host if host is not None else pre[n])
+                items.append({"issue": n, "absorbed_into": host if host is not None else pre[n]})
             continue
         before = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
-        with_touched(plan, res.files_of(n))
-        # 課題のまとまりのプランは代表の課題 n の後にまとまりの課題を持つ（#3081）。取り込んだ課題をその後へ足す
-        issues = list(dict.fromkeys([n, *(plan.get("課題") or []), *absorbed.get(n, [])]))
+        issues = list(dict.fromkeys([*live, *absorbed.get(n, [])]))
+        # 触るファイルはプランが実装するすべての課題の設計の結果から集める（並列の queue の重なりの判定に使う）
+        with_touched(plan, list(dict.fromkeys(f for i in issues for f in res.files_of(i))))
         plan["課題"] = issues
         docs = res.docs_of(issues)
         if docs:
@@ -267,6 +282,12 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
         _rebuild_impl_prompts(plan, before, after, glossary)
         items.append({"issue": n, "issues": issues, "files": plan.get("触るファイル", []), "docs": plan.get("設計文書", [])})
     return items
+
+
+def _skipped(i: int, res: dr.DesignResults, pre: dict[int, int]) -> bool:
+    """課題 `i` を自分のプランで実装しない（設計の結果で閉じる・取り込むとした、か --absorb で取り込んだ）。"""
+    row = res.row_of(i)
+    return (row is not None and row.kind == dr.CLOSE) or res.host_of(i) is not None or i in pre
 
 
 def marked_dirs(res: dr.DesignResults, root: str) -> dict[int, list[str]]:

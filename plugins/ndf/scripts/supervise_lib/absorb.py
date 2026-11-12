@@ -61,6 +61,16 @@ def _with(issues: list, m: int) -> list:
     return issues + [m] if m not in issues else issues
 
 
+def include_in_design(design: dict, h: int, m: int, note: str) -> None:
+    """設計のプラン（代表 `h`）の `課題` へ `m` を足し、要求と設計の指示へ `note` を足す（取り込みと課題のまとまり。#3081）。"""
+    if m in (design.get("課題") or [h]):
+        return
+    design["課題"] = _with(design.get("課題") or [h], m)
+    for step in design.get("steps") or []:
+        if step.get("id") in ("requirements", "design"):
+            step["prompt"] = f"{step.get('prompt') or ''}{note}"
+
+
 def apply_absorb(a, waves: list[dict]) -> None:
     """組み立てたステージのプランへ取り込みを書く（I7）。"""
     plans = {k: p for w in waves for k, p in (w.get("plans") or {}).items()}
@@ -68,10 +78,7 @@ def apply_absorb(a, waves: list[dict]) -> None:
         note = f"取り込んだ課題 #{m} の受け入れ内容も #{h} に含める（#{m} の本文も読む）。"
         design = plans.get(f"design-{h}")
         if design is not None:
-            design["課題"] = _with(design.get("課題") or [h], m)
-            for step in design.get("steps") or []:
-                if step.get("id") in ("requirements", "design"):
-                    step["prompt"] = f"{step.get('prompt') or ''}{note}"
+            include_in_design(design, h, m, note)
         host = plans.get(f"impl-{h}")
         if host is not None:
             host["課題"] = _with(host.get("課題") or [h], m)

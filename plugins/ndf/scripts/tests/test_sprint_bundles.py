@@ -17,7 +17,9 @@ sys.path.insert(0, str(SCRIPTS))
 import inproc  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import parallel_bundles as pb  # noqa: E402
+import design_results  # noqa: E402
 import pr_mode  # noqa: E402
+from supervise_lib import design_stage, procedures  # noqa: E402
 from pace_state import sprint_state  # noqa: E402
 from test_supervise_pace_verify import PRD, STG, make_repo  # noqa: E402
 
@@ -103,7 +105,58 @@ def test_design_issues_go_to_the_lead(tmp_path, monkeypatch):
     """設計の課題はまとまりの代表の課題へ寄せる。"""
     p, out = build(tmp_path, monkeypatch, BUNDLES, design=("11",))
     assert p.returncode == 0, p.stdout + p.stderr
-    assert sorted(stages(out)["設計"]) == ["design-12"]
+    design = stages(out)["設計"]
+    assert sorted(design) == ["design-12"]
+    # まとまりの課題も設計の入力に渡す（設計が要ると指した #11 を落とさない）
+    assert design["design-12"]["課題"] == [12, 11]
+    assert all("#11 の本文も読む" in s["prompt"] for s in design["design-12"]["steps"] if s["id"] in ("requirements", "design"))
+
+
+def test_bundles_without_sprint_issues_are_dropped(tmp_path, monkeypatch):
+    """このスプリントの課題を 1 つも持たないまとまりは外し、組み立てを止めない。"""
+    bundles = [pb.Bundle(name="review-scope", issues=[12, 11]), pb.Bundle(name="other", issues=[99])]
+    p, out = build(tmp_path, monkeypatch, bundles)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert sorted(stages(out)["実装"]) == ["impl-12", "impl-13"]
+
+
+def rows(text: str) -> design_results.DesignResults:
+    res = design_results.DesignResults(design_prs=[40])
+    head = "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n"
+    res.add(design_results.parse_results(head + text))
+    return res
+
+
+def bundle_plans() -> dict[int, dict]:
+    return {12: {"課題": [12, 11], "steps": []}, 13: {"課題": [13], "steps": []}}
+
+
+def test_design_results_resolve_hosts_inside_a_bundle():
+    """まとまりの課題への取り込みは、その課題を実装するまとまりのプランへ寄せる（止まらない）。"""
+    plans = bundle_plans()
+    design_stage.rewrite(plans, rows("| #12 | 取り込む | #11 | — |\n| #11 | 実装する | — | `a.py` |\n| #13 | 実装する | — | `b.py` |\n"))
+    assert "実行の条件" not in plans[12] and plans[12]["課題"] == [11, 12] and plans[12]["触るファイル"] == ["a.py"]
+
+
+def test_closed_lead_keeps_the_bundle_running():
+    """代表を閉じても、まとまりに実装する課題が残ればプランは流れる。"""
+    plans = bundle_plans()
+    design_stage.rewrite(plans, rows("| #12 | 閉じる | — | — |\n| #11 | 実装する | — | `a.py` |\n"))
+    assert "実行の条件" not in plans[12] and plans[12]["課題"] == [11]
+
+
+def test_bundle_touched_files_come_from_every_issue():
+    """まとまりのプランの触るファイルは、実装するすべての課題の設計の結果から集める。"""
+    plans = bundle_plans()
+    design_stage.rewrite(plans, rows("| #12 | 実装する | — | `x.py` |\n| #11 | 実装する | — | `y.py` |\n"))
+    assert plans[12]["触るファイル"] == ["x.py", "y.py"] and plans[12]["課題"] == [12, 11]
+
+
+def test_bundle_with_every_issue_closed_skips():
+    """まとまりのすべての課題を閉じれば、プランは代表の扱いで飛ぶ。"""
+    plans = bundle_plans()
+    design_stage.rewrite(plans, rows("| #12 | 閉じる | — | — |\n| #11 | 閉じる | — | — |\n"))
+    assert plans[12]["実行の条件"] == procedures.closed_condition(12)
 
 
 def test_sprint_without_bundles_is_unchanged(tmp_path, monkeypatch):

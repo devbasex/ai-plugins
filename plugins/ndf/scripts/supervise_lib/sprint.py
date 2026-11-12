@@ -13,6 +13,7 @@ from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, with_decls
 from supervise_lib.design_merge import plan_design_merge
+from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -20,7 +21,6 @@ from supervise_lib.sprint_waves import (
     plan_sprint_branch,
     plan_sprint_check,
     plan_sprint_design,
-    bundle_refusal,
     sprint_impl_plans,
     plan_sprint_release,
     plan_advise_design,
@@ -376,6 +376,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     waves = waves if waves is not None else sprint_plans(a)
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
+        apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）
     plans = [plan for wave in waves for plan in (wave.get("plans") or {}).values()]
     for plan in plans if getattr(a, "state", None) else []:
         plan["スプリント状態"] = sprint_state_path(a)  # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）

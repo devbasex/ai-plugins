@@ -20,7 +20,8 @@ from supervise_lib.procedures import survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
-from supervise_lib.templates import plan_check, plan_check_since, plan_impl, review_step
+from supervise_lib.sprint_bundles import with_review, without_review
+from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 
@@ -229,26 +230,6 @@ def plan_sprint_impl(a, n: int, repo: str, issues: list[int] | None = None) -> d
     return plan
 
 
-def bundle_refusal(a):
-    """並列の計画のこのレーンの課題のまとまりを `a.bundles` へ読む（#3081）。まとまりの記録が無ければ None を置く。
-    まとまりはこのスプリントの課題（`a.issue`）に絞り、設計の課題（`a.design`）を代表の課題へ寄せる。
-    レーンの計画が検証に通らなければ、プランを書かずに止める結果を返す（まとまりの記録の無いスプリントとして黙って動かない）。"""
-    import decl
-    import parallel_bundles as pb
-    from step_result import result
-
-    try:
-        got = pb.bundles_of(decl.main_dir(a.worktree) or Path(a.worktree))
-    except pb.BrokenPlanError as e:
-        return result("supervise-new", "stopped", f"{e}。計画を書かない", [], {"plan": e.plan}, next="plan.json を直して打ち直す")
-    issues = list(a.issue)
-    kept = [pb.Bundle(name=b.name, issues=[n for n in b.issues if n in issues]) for b in got or []]
-    a.bundles = pb.bundle_list(issues, [b for b in kept if b.issues]) if got is not None else None
-    lead = {n: b.lead() for b in a.bundles or [] for n in b.issues}
-    a.design = list(dict.fromkeys(lead.get(n, n) for n in a.design))
-    return None
-
-
 def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
     """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本で、スプリントブランチへ入れる前に
     cross-review を通す（#3081 の I8a・I8b）。無ければ課題ごとに 1 本（I9）。`pace` はプランへ書く進め方。"""
@@ -256,42 +237,10 @@ def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
     if bundles is None:
         plans = {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}
     else:
-        plans = {f"impl-{b.lead()}": _with_review(plan_sprint_impl(a, b.lead(), repo, b.issues)) for b in bundles}
+        plans = {f"impl-{b.lead()}": with_review(plan_sprint_impl(a, b.lead(), repo, b.issues)) for b in bundles}
     for plan in plans.values() if pace else ():
         plan["進め方"] = pace  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
     return plans
-
-
-_JUMPS = ("next", "on_fail", "skip_to", "gate_next")
-
-
-def _redirect(steps: list[dict], old: str, new: str) -> None:
-    """ステップの行き先 `old` を `new` へ付け替える。"""
-    for st in steps:
-        for k in _JUMPS:
-            if st.get(k) == old:
-                st[k] = new
-        if isinstance(st.get("on_exit"), dict):
-            st["on_exit"] = {c: new if v == old else v for c, v in st["on_exit"].items()}
-
-
-def _with_review(plan: dict) -> dict:
-    """実装のプランの ready（Draft を外す）の前に cross-review を置く。収束しなければ止まり、マージへ進めない。"""
-    steps = plan["steps"]
-    _redirect(steps, "ready", "review")
-    at = next(i for i, st in enumerate(steps) if st["id"] == "ready")
-    steps.insert(at, review_step("{pr}", "ready", "stop"))
-    return plan
-
-
-def _without_review(plan: dict) -> dict:
-    """検査のプランから cross-review を外す（まとまりの Pull Request で済んでいる。#3081 の I8c）。"""
-    steps = plan["steps"]
-    review = next((st for st in steps if st["id"] == "review"), None)
-    if review is not None:
-        steps.remove(review)
-        _redirect(steps, "review", review["next"])
-    return plan
 
 
 def plan_sprint_check(a, repo: str) -> dict:
@@ -323,7 +272,7 @@ def plan_sprint_check(a, repo: str) -> dict:
             body="template",
         ),
     ] + plan["steps"]
-    return plan if getattr(a, "bundles", None) is None else _without_review(plan)
+    return plan if getattr(a, "bundles", None) is None else without_review(plan)
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
