@@ -141,3 +141,15 @@ def test_decide_counts_failed_heads_before_this_one():
     assert ci_watch.decide_exit("failed", "c", rows, 3, False) == (2, 3)
     assert ci_watch.decide_exit("failed", "d", rows, 3, False) == (2, 4)
     assert ci_watch.decide_exit("pending", "d", rows, 3, False) == (0, 3)
+
+
+def test_a_lagging_pr_head_is_pending_not_a_failure(tmp_path, repo):
+    """push の直後に PR の先端（headRefOid）が作業ディレクトリの HEAD に追いつかないうちは、前の先端の失敗を数えない。"""
+    fail = check("pytest", conclusion="FAILURE")
+    assert peek(tmp_path, repo, "h1", fail)[0] == 1
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "--allow-empty", "-m", "x"], check=True
+    )
+    code, out, text = peek(tmp_path, repo, "h1", fail)
+    assert code == 0 and out["metrics"]["verdict"] == "pending" and "揃っていない" in out["summary"]
+    assert "落ちたチェック" not in text and ci_watch.failed_heads(ci_watch.read_watch_log(tmp_path / "st")) == ["h1"]
