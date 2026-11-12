@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -291,6 +292,13 @@ def flow_snapshot(a, wt: dict) -> dict:
 def sprint_flow(a) -> branch_flow.ResolvedFlow:
     """引数のスナップショットを読む。無ければ（スナップショットを持たない呼び手）宣言の無いリポジトリの値（I3）。"""
     return branch_flow.from_snapshot(getattr(a, "flow", None), getattr(a, "base", None), getattr(a, "production_branch", None))
+
+
+def sync_source(a, pr) -> str:
+    """ベースの取り込みの取り込み元の引数。選んで集める取り込み方は、宛先（ベースブランチ）ではなく
+    スプリントの起点から取り込む（#3121 の I4）。それ以外は PR の宛先（`--pr`）。"""
+    flow = sprint_flow(a)
+    return f"--base {shlex.quote(flow.start_branch)}" if flow.row.selects_units and flow.start_branch else f"--pr {pr}"
 
 
 def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
