@@ -601,6 +601,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
     run.carrying = durable.patched("parallel-docs-carry")  # 印の無い古い記録は判定せずに出し直す（#3020 の I7）
     run.ending, run.approved_only = durable.patched("parallel-lane-end"), durable.patched("parallel-approved-sha")  # #3058・#3070
+    run.announce_ending()  # 目録の側が、版の要るまとめを流せる計画かを読む（#3058）
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
     run.restore_hold((restored or {}).get("limits"), (restored or {}).get("hold_file"))  # 最初のレーン起動・リリースの前に戻す

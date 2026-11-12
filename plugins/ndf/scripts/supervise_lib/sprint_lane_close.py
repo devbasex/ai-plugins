@@ -6,6 +6,8 @@
 | レーンの中で本番を流し終える（リリースの Pull Request・マージで届く・別のリポジトリ） | 今のまとめ → 終わりの記録 | 作らない |
 
 依頼の経路では、依頼のプランの承認ゲート（10）を完了へ向け（`on_exit`）、レーンが答えを待たずにまとめへ進む（#3060）。
+依頼の経路でも、計画の耐久ワークフローが版の要るまとめを流せる記録（印 `parallel-lane-end` の後。イベント `lane-end`）で
+なければ、今までのまとめ（答えを待ってから課題を閉じる）に終わりの記録を足す（`plan_ends`）。
 課題を閉じるステップは版の要るまとめにだけ置く（I8）。開発ループのレーンと外のオーガナイザーのレーンと計画の外のスプリントには足さない。
 """
 
@@ -33,8 +35,8 @@ REQUEST_KEY = "release-request"  # 依頼のプランの名（`sprint.prod_plans
 
 
 def sprint_lane(repo: str) -> tuple[str, str] | None:
-    """動いている並列の計画の 1 スプリントのレーンなら (計画名, レーン名)。別のリポジトリのレーンも含む。開発ループのレーンと
-    外のオーガナイザーのレーン（依頼と答えを置き場のファイルで受け渡す）は None。"""
+    """動いている並列の計画の 1 スプリントのレーンなら (計画名, レーン名)（計画の置き場 `home` を持つ `LaneRef`）。別のリポジトリの
+    レーンも含む。開発ループのレーンと外のオーガナイザーのレーン（依頼と答えを置き場のファイルで受け渡す）は None。"""
     import decl
     import parallel_external as pe
     import parallel_lane as pl
@@ -42,7 +44,25 @@ def sprint_lane(repo: str) -> tuple[str, str] | None:
     got = pl.lane_of(decl.main_dir(repo) or Path(repo))
     if not got or got[0] == pe.EXTERNAL or getattr(got[1].input, "kind", None) != "sprint":
         return None
-    return got[0], got[1].name
+    return pl.LaneRef(got[0], got[1].name, pl.home_of(got, Path(repo)))
+
+
+def plan_ends(lane: tuple[str, str]) -> bool:
+    """計画の耐久ワークフローが版の要るまとめを流せる記録か（イベント `lane-end` が立っているか）。印 `parallel-lane-end` の前に
+    始めた計画の打ち直しは立てず、記録を読めないときも偽にする（答えを待つ今までのまとめなら課題を閉じ損ねない）。"""
+    import durable
+    import parallel_lane as pl
+
+    plan, home = lane[0], getattr(lane, "home", None)
+    if home is None:
+        return False
+    try:
+        got = durable.event_from(
+            pl.KIND, pl.record_identity(home, plan), pl.workflow_id(plan), pl.ENDING_EVENT, 0, start=pl.record_start(home)
+        )
+    except durable.DurableError:
+        return False
+    return got is True
 
 
 def lane_end_step(plan: str, lane: str, request: bool) -> dict:
@@ -118,7 +138,7 @@ def with_lane_close(a, waves: list[dict]) -> list[dict]:
         return waves
     repo = str(Path(a.worktree).resolve())
     prod = next((w for w in waves if w.get("name") == "本番"), {})
-    request = (prod.get("plans") or {}).get(REQUEST_KEY)
+    request = (prod.get("plans") or {}).get(REQUEST_KEY) if plan_ends(lane) else None  # 古い記録の計画は答えを待つ道（決定 10）
     if request:
         close = lane_close_plan(a, repo, lane)
         step = request["steps"][0]

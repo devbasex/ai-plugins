@@ -17,6 +17,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
+import durable  # noqa: E402
 import parallel_external as pe  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
@@ -36,6 +37,7 @@ def a(tmp_path):
 @pytest.fixture
 def lane(monkeypatch):
     monkeypatch.setattr(slc, "sprint_lane", lambda _repo: ("p1", "la"))
+    monkeypatch.setattr(slc, "plan_ends", lambda _lane: True)
 
 
 def request_waves(a) -> list[dict]:
@@ -85,6 +87,34 @@ def test_a_lane_that_releases_inside_closes_as_now_and_records_its_end(a, lane, 
     assert not (Path(a.out) / "lane-verify.json").exists()  # 版の要るまとめは作らない
 
 
+def test_a_plan_started_before_the_lane_end_mark_keeps_waiting_for_the_answer(a, lane, monkeypatch):
+    """印 `parallel-lane-end` の前に始めた計画は終わりの記録も版の要るまとめも扱わないため、依頼の答えを待ってから
+    今までのまとめ（課題を閉じる）を流す（決定 10）。"""
+    monkeypatch.setattr(slc, "plan_ends", lambda _lane: False)
+    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: {"steps": [{"id": "close", "next": "end"}]})
+    waves = slc.with_lane_close(a, request_waves(a))
+    close = waves[-1]["plans"]["lane-close"]
+    assert ids(close) == ["close", "lane-end"] and slc.closes_issues(close)
+    step = waves[1]["plans"]["release-request"]["steps"][0]
+    assert "on_exit" not in step and "--verify-plan" not in step["cmd"]
+    assert not (Path(a.out) / "lane-verify.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("event", "want"), [(True, True), (None, False), (durable.DurableError("無い"), False)], ids=["new", "old", "unreadable"]
+)
+def test_the_plan_ends_lanes_only_when_its_workflow_set_the_event(tmp_path, monkeypatch, event, want):
+    def read(kind, ident, wid, key, timeout, start=None):
+        assert (kind, wid, key, start) == (pl.KIND, pl.workflow_id("p1"), pl.ENDING_EVENT, tmp_path)
+        if isinstance(event, Exception):
+            raise event
+        return event
+
+    monkeypatch.setattr(durable, "event_from", read)
+    assert slc.plan_ends(pl.LaneRef("p1", "la", tmp_path)) is want
+    assert slc.plan_ends(("p1", "la")) is False  # 計画の置き場が分からなければ今までの道
+
+
 def test_after_a_gate_stage_the_close_runs_on_its_own_command(a, lane, monkeypatch):
     monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: {"steps": [{"id": "close", "next": "end"}]})
     got = slc.with_lane_close(a, [{"name": "本番", "plans": {"promote": {}}}, {"name": "リリース承認ゲート", "gate": "承認を取る"}])
@@ -107,4 +137,5 @@ def test_only_a_sprint_lane_of_a_plan_gets_the_close(tmp_path, monkeypatch, plan
     inp = {"kind": "sprint", "issues": [1]} if kind == "sprint" else {"kind": "loop", "loop": "main"}
     ln = pp.Lane(name="la", input=inp, plans=1, touches=[])
     monkeypatch.setattr(pl, "lane_of", lambda _main, *_a, **_k: pl.LaneRef(plan, ln, tmp_path, tmp_path / "other"))
-    assert slc.sprint_lane(str(tmp_path)) == want
+    got = slc.sprint_lane(str(tmp_path))
+    assert got == want and (got is None or got.home == tmp_path)

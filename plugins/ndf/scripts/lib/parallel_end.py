@@ -29,6 +29,7 @@ import parallel_ledger as plg
 import parallel_release as pr
 from parallel_files import RELAY
 from parallel_helper import AGAIN_RE, verify_spawn, verify_task
+from parallel_lane import ENDING_EVENT
 from parallel_launch import RESTART
 from parallel_observe import _asking_lanes
 from parallel_repo import relay, relay_proc, stall_seconds
@@ -67,6 +68,12 @@ class LaneEnding:
     `stall_until`・`left_stopped`・`revive`・`marks`・`wake`・`woken`・`hold`・`ask`・`publish_questions`・`launch_once` を持つ。"""
 
     ending = False  # 印 `parallel-lane-end` の後の記録だけ True（決定 10）
+
+    def announce_ending(self) -> None:
+        """印 `parallel-lane-end` の後の記録だけ、イベント `lane-end` を立てる。レーンの目録（`sprint_lane_close.plan_ends`）は
+        これを読み、立っていない古い記録の計画では今までのまとめ（答えを待ってから課題を閉じる）を組む。"""
+        if self.ending:
+            durable.set_event(ENDING_EVENT, True)
 
     def init_lane_end(self) -> None:
         self.verifies: list[dict] = []  # 版の要るまとめの待ち（先に入ったものから流す。流している待ちも外さずに持つ）

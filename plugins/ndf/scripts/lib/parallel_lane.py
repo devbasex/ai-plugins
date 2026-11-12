@@ -31,6 +31,8 @@ from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  �
 from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in, resolved_path  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
+# 印 `parallel-lane-end` の後の記録の耐久ワークフローが立てるイベント（目録の側が版の要るまとめを組めるかを読む。#3058）
+ENDING_EVENT = "lane-end"
 RUNNING = ("PENDING", "ENQUEUED")
 
 
