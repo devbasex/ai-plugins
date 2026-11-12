@@ -293,9 +293,13 @@ def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]
+    # #3126 の決定 1: まとめ（確定仕様化のマージまで）の後に最終の検査・開発版・本番が続く
+    assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "開発版", "本番"]
+    assert all(waves[n]["then_of"] == "まとめ" for n in ("最終の検査", "開発版", "本番"))
     final = load(waves["最終の検査"]["plans"][0])
-    assert "--final" in final["実行の条件"]["cmd"]
+    cond = final["実行の条件"]["cmd"]
+    assert "--final" in cond and "--sprint m26 --issue 11 12" in cond
+    assert "--sprint m26 --issue 11 12" in steps_of(final)["prepare"]["cmd"]
     for name in ("開発版", "本番"):
         cond = load(waves[name]["plans"][0])["実行の条件"]
         assert "check-trigger.py changed --id m26-final" in cond["cmd"]
@@ -305,11 +309,11 @@ def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
         assert stages.count(stage) == 1
     steps = steps_of(close)
     cl = steps["close"]["cmd"]
-    assert "--record-pr {queue_pr:release-prod}" in cl and "--issues 11,12" in cl and "--with-verification" in cl
+    assert "--record-pr {queue_record} " in cl and "--issues 11,12" in cl and "--with-verification" in cl
     # 最終工程は同じプランの進捗記録から選ぶ（#2914 の I5）
     assert "--final-stage-from {state_dir}/progress.jsonl" in cl and "--final-stage " not in cl
     assert close["課題"] == [11, 12] and close.get("記録")
-    cmd = waves["最終の検査"]["command"]
+    cmd = waves["まとめ"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
     # 起動の判定が 0 なら振り返り → 棚卸し、3 ならマージへ飛ぶ（#2914 の決定 2・3）。ループの外は --loop を渡さない（I4）
@@ -354,7 +358,7 @@ def _close_plan(tmp_path, *extra):
     args = ["new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "12", "--state"]
     p = cli(*args, str(sprint_state(tmp_path, "fast")), "--out", str(out), *extra)
     assert p.returncode == 0, p.stdout + p.stderr
-    return steps_of(load(load(out / "sprint.json")["ステージ"][-1]["plans"][0]))
+    return steps_of(load(load(out / "sprint.json")["ステージ"][0]["plans"][0]))
 
 
 @pytest.mark.suspended_refactor
@@ -363,7 +367,7 @@ def test_suspended_refactor_final_check_condition_is_accepted_by_eval(tmp_path):
     out = tmp_path / "close"
     args = ["new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "--state"]
     assert cli(*args, str(sprint_state(tmp_path, "fast")), "--out", str(out)).returncode == 0
-    cmd = load(load(out / "sprint.json")["ステージ"][0]["plans"][0])["実行の条件"]["cmd"]
+    cmd = load(load(out / "sprint.json")["ステージ"][1]["plans"][0])["実行の条件"]["cmd"]
     assert "eval " in cmd and "--review" in cmd and "--final" not in cmd
 
 

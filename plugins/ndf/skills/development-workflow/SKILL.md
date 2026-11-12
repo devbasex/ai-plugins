@@ -28,8 +28,8 @@ hooks:
 
 | 進め方 | モードを判定する単位 | ブランチ |
 | --- | --- | --- |
-| `normal`・`auto` | スプリントの develop 宛て Pull Request | スプリントブランチ（`sprint/<名前>`）を develop から切り、課題ごとの worktree はそこから切る。課題の Pull Request はスプリントブランチへ集め、develop への Pull Request はスプリントで 1 本にする |
-| `fast` | 実装の Pull Request 1 本 | スプリントブランチを作らず、実装の Pull Request が develop へ直接入る（「進め方」の節） |
+| `normal`・`auto` | スプリントのベースブランチ宛て Pull Request | スプリントブランチ（`sprint/<名前>`）をベースブランチから切り、課題ごとの worktree はそこから切る。課題の Pull Request はスプリントブランチへ集め、ベースブランチへの Pull Request はスプリントで 1 本にする |
+| `fast` | 実装の Pull Request 1 本 | スプリントブランチを作らず、実装の Pull Request がベースブランチへ直接入る（「進め方」の節） |
 
 - **モードの違う課題を 1 つのスプリントへ混ぜない。** 混ざるなら高い方のモードで進めるか、スプリントを分ける
 - **スプリントの大きさは、同時に回せる本数（フェーズは 3 本まで）とリリースの間隔（1 版を 1〜2 日）で切る。**
@@ -167,7 +167,7 @@ pace: fast
 | --- | --- |
 | 設計 | 設計 Pull Request を主題ごとに同時に開いて並列で回す（1 本の設計文書は 1,000 行以下）。設計承認ゲートでまとめて 1 回承認する |
 | 実装 | 課題ごとの worktree で並列に進め、スプリントブランチへ集める |
-| リファクタリング・コードレビュー・完了判定 | スプリントの develop 宛て Pull Request で 1 回通す（`auto` も同じ）。`fast` では完了判定は課題ごと、リファクタリングとコードレビューはトリガーの範囲で通す |
+| リファクタリング・コードレビュー・完了判定 | スプリントのベースブランチ宛て Pull Request で 1 回通す（`auto` も同じ）。`fast` では完了判定は課題ごと、リファクタリングとコードレビューはトリガーの範囲で通す |
 
 ### 工程ごとの決まり
 
@@ -242,7 +242,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 | 何のための進め方か | ウォーターフォール。各工程を検証し、人の承認を取って進める | `normal` と同じ工程で、承認だけを MVV で半自動にする | スタートアップ的。実践投入の中で検証しながら MVV で自動に進める |
 | 検証の場所 | 各工程で、デプロイの前（設計レビュー・テスト・リファクタリング・コードレビュー・完了判定） | 同じ | 実践投入の中（開発版のデプロイと利用）。検査はデプロイの後にトリガーでまとめて |
 | 承認 | 人が 2 回（設計・リリース） | MVV 判定が「従う」なら自動、ほかは人 | MVV 判定で自動（ほかは人） |
-| 判定とデプロイの単位 | スプリント（1 つの版として出す課題のまとまり） | スプリント | 課題ごとの Pull Request（develop へ直接入り、開発版も課題ごと） |
+| 判定とデプロイの単位 | スプリント（1 つの版として出す課題のまとまり） | スプリント | 課題ごとの Pull Request（ベースブランチへ直接入り、開発版も課題ごと） |
 | 確定仕様化・振り返り・棚卸し | 各工程の順に | 同じ | スプリントの終わりにまとめて |
 | 向く場面 | 影響が大きい・戻しにくい変更、複数の課題を 1 版にまとめる | `normal` と同じ場面で、人の待ち時間を減らしたい | 小さく出して実践で確かめられる変更、開発版の利用者が近い |
 
@@ -259,9 +259,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、リリースを 1 本にまとめる。
 並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
 
-**引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
+**引数に `--parallel-helper <計画名> <連番> <提示>`・`--parallel-helper <計画名> pending <ループ名>`・`--parallel-helper <計画名> verify <依頼>` があれば、このセッションは
 オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
-`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）・`loop pending` の pipeline・`parallel.py verified` が返す pipeline（版の要るまとめ）を流し、結果を返して終える。
 
 ## 開発ループ（`--loop`）
 
@@ -333,7 +333,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 2. **設定が無ければ既定ブランチ**（`origin` の HEAD が指すもの）
 
 **`base_branch` は流用しない。** そちらはベースブランチで、worktree の分岐元を決める（`follow_branch: true` のときは
-メインディレクトリの追従先にもなる）。このリポジトリの値は `develop` であり、本番チャネルと定める `main` とは別のブランチである。
+メインディレクトリの追従先にもなる）。ベースブランチは本番チャネルと別のブランチにできる。
 流用すると、開発版のチャネルへのマージが本番の扱いになる。
 
 ### 提示するもの
@@ -447,6 +447,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの必須ルール
 - [references/pace.md](references/pace.md) — 進め方（`pace`）のフロー・`fast` と `auto` の条件・設定・プランのステージ・検査のトリガー・MVV 判定
+- [references/pace-records.md](references/pace-records.md) — 自動で通した承認ゲートと検査の記録の読み方・閾値の見直し
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の置き場・節の形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)

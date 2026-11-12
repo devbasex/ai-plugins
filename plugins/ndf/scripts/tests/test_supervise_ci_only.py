@@ -79,6 +79,18 @@ def test_impl_plan_runs_the_whole_lint_locally(tmp_path):
     assert steps["fix-lint-all"]["type"] == "work" and steps["fix-lint-all"]["next"] == "lint-limited"
 
 
+def test_whole_lint_from_the_template_keeps_the_target_paths(tmp_path):
+    """宣言にテストの suite だけがあり静的解析を雛形で渡すとき、`lint-all` は計画と同じ対象を `--paths` で渡す（空なら打たずに通る）。"""
+    root = foreign_repo(tmp_path)
+    decl = json.loads(json.dumps(CARMO_PROJECT))
+    decl["test"]["ci"]["only"] = True
+    (root / ".ndf" / "project.json").write_text(json.dumps(decl))
+    _, steps = _steps(
+        tmp_path, root, "impl", "--issue", "1", "--tests", "src", "--title", "T", "--test-kind", "lint", "--test-cmd", "mypy {paths}"
+    )
+    assert "--only-kind lint" in steps["lint-all"]["cmd"] and "--paths src" in steps["lint-all"]["cmd"]
+
+
 def test_fix_plan_drafts_the_pr_first(tmp_path):
     plan, steps = _steps(tmp_path, _repo(tmp_path), "fix", "--issue", "1", "--tests", "tests/Unit/A.php", "--title", "T")
     assert plan["steps"][0]["id"] == "pr-draft" and not set(LOCAL_TESTS) & set(steps)

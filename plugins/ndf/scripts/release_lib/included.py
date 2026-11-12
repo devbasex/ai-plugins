@@ -47,8 +47,9 @@ def _in_range(m: merged_range.Merge) -> bool:
     return bool(m.branch) and not m.branch.startswith(RELEASE_PREFIX)
 
 
-def release_range(root: Path, prev: str, to: str) -> list[IncludedPr]:
-    """`prev..to` の範囲の PR（スプリント経由の PR を含む。番号の昇順）。git か GitHub を読めなければ StepError。"""
+def release_range(root: Path, prev: str, to: str, deps: bool = False) -> list[IncludedPr]:
+    """`prev..to` の範囲の PR（スプリント経由の PR を含む。番号の昇順）。git か GitHub を読めなければ StepError。
+    deps は単位の中を読むとき: 単位へ通常のマージで取り込んだ依存先のスプリント（分冊の決定 18）の PR もたどる。"""
     top = merged_range.merges_in(root, prev, to)
     nested = {m.number: [x for x in merged_range.nested_merges(root, m) if _in_range(x)] for m in top if m.branch is not None}
     out: dict[int, IncludedPr] = {}
@@ -58,7 +59,28 @@ def release_range(root: Path, prev: str, to: str) -> list[IncludedPr]:
         out[m.number] = IncludedPr(m.number)
         for x in nested.get(m.number, []):
             out.setdefault(x.number, IncludedPr(x.number, m.number))
+    # リリースブランチへマージした単位の中の PR（#3121 の選んで集める取り込み方）と、単位の中では依存先のスプリントの PR
+    for sha in unit_merges(root, prev, to, deps):
+        for x in release_range(root, f"{sha}^1", f"{sha}^2", deps=True):
+            out.setdefault(x.number, x)
     return sorted(out.values(), key=lambda p: p.number)
+
+
+def unit_merges(root: Path, prev: str, to: str, deps: bool = False) -> list[str]:
+    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`branch_flow.UNIT_MERGE`）の SHA。
+    PR のマージではないため `merges_in` は拾わない。ベースブランチの first-parent には現れない（丸ごと出す取り込み方は変わらない）。
+    deps なら、PR のマージでないマージ（単位へ依存先のスプリントブランチを取り込んだマージ。分冊の決定 18）も返す。"""
+    import branch_flow
+
+    p = proc.git(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{prev}..{to}", check=False)
+    if p.returncode != 0:
+        raise StepError(f"git log {prev}..{to}: {p.stderr.strip()[:300]}", 2)
+    lines = (line.partition("\t") for line in p.stdout.splitlines())
+    return [
+        sha
+        for sha, _, subject in lines
+        if branch_flow.UNIT_MERGE.match(subject) or (deps and not merged_range.MERGE_SUBJECT.match(subject))
+    ]
 
 
 def with_extra(found, extra) -> list[IncludedPr]:

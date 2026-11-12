@@ -31,6 +31,8 @@ from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  �
 from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in, resolved_path  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
 KIND = "parallel"
+# 印 `parallel-lane-end` の後の記録の耐久ワークフローが立てるイベント（目録の側が版の要るまとめを組めるかを読む。#3058）
+ENDING_EVENT = "lane-end"
 RUNNING = ("PENDING", "ENQUEUED")
 
 
@@ -147,23 +149,30 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
     lane = lane if lane is not None else os.environ.get("NDF_RELAY_NAME")
     if not lane:
         return None
+    lost = None
+    for ref in _lane_hits(Path(main), lane):
+        st = plg.plan_state(ref.home, ref.plan, status(ref.home, ref.plan))  # 動いている計画を先に、失われた計画は後で当てる（決定 8）
+        if st == "running":
+            return ref
+        if lost is None and st == "lost":
+            lost = ref
+    return lost
+
+
+def _lane_hits(main: Path, lane: str):
+    """計画の所在の一覧の置き場を順に探し、レーン `lane` を持ちそのリポジトリが `main` と一致する計画の `LaneRef` を順に返す。"""
     import parallel_homes
 
-    me, lost = resolved_path(Path(main)), None
-    for home in parallel_homes.search_homes(Path(main)):
+    me = resolved_path(main)
+    for home in parallel_homes.search_homes(main):
         for name in plans_in(home):
             try:
                 plan = pp.load_valid_plan(home, name)
             except (OSError, ValueError):
                 continue
             hit = plan.lane(lane)
-            if hit is None or resolved_path(hit.repo_dir(home)) != me:
-                continue
-            st = plg.plan_state(home, name, status(home, name))  # 動いている計画を先に、失われた計画は後で当てる（決定 8）
-            if st == "running":
-                return LaneRef(name, hit, home, hit.repo_dir(home))
-            lost = lost or (LaneRef(name, hit, home, hit.repo_dir(home)) if st == "lost" else None)
-    return lost
+            if hit is not None and resolved_path(hit.repo_dir(home)) == me:
+                yield LaneRef(name, hit, home, hit.repo_dir(home))
 
 
 def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
@@ -285,8 +294,11 @@ def lane_request_id(state: Path, lane: str) -> str:
     return rid
 
 
-def send_release_request(main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path) -> str:
-    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。"""
+def send_release_request(
+    main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path, verify_plan: Optional[str] = None
+) -> str:
+    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。`verify_plan` は版の要るまとめの
+    プラン（1 スプリントのレーンの依頼の経路。`released` の後に一時レーンが流す。#3058 の決定 4）。"""
     rid = lane_request_id(state, lane)
     msg = {
         "kind": "request",
@@ -296,6 +308,7 @@ def send_release_request(main: Path, name: str, lane: str, prs: list[int], issue
         "issues": list(issues),
         "sprint_state": str(state),
         "at": pe.utc_stamp(),
+        **({"verify_plan": str(verify_plan)} if verify_plan else {}),
     }
     deliver_message(main, name, msg, "inbox", rid)
     return rid

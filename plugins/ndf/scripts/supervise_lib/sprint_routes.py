@@ -83,20 +83,11 @@ def has_record(record_pr: str) -> bool:
 
 
 def record_pr_ref(a) -> str:
-    """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
-    経路にかかわらず RECORD_FOUND（リリース承認ゲートの後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
-    雛形の本番の PR か、リリースの Pull Request（#837。route_waves が本番チャネルへ入れるリリースプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
-    検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
-    rs = routes_of(a)
-    if all(r.stage == delivery.STAGE_NONE for r in rs):
+    """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE、それ以外は RECORD_FOUND
+    （まとめより前の本番の記録。まとめの後ろに置いた最終の検査の開発版・本番はまとめより後に流れ、まとめから参照できない。
+    #2230 の決定 5・#3126 の決定 1）。"""
+    if all(r.stage == delivery.STAGE_NONE for r in routes_of(a)):
         return RECORD_NONE
-    if getattr(a, "pace", None) == "auto":
-        return RECORD_FOUND
-    if has_release_template(a):
-        return "{queue_pr:release-prod}"
-    manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
-    if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in rs):
-        return "{queue_pr:promote}"
     return RECORD_FOUND
 
 
@@ -107,10 +98,15 @@ def manual_release_wave(a) -> dict:
     return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
 
 
+def closing_pace(a) -> str:
+    """読む進め方の節。MVV の進め方でなければ fast と読む（new close は fast のスプリントの終わり）。"""
+    return a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"
+
+
 def pace_verify(a) -> str:
     """選んだ進め方の節の verify（導入の確認のコマンド）。new close は fast のスプリントの終わりとして fast を読む。
     宣言が壊れている・節に verify が無ければ DeclError。"""
-    pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"
+    pace = closing_pace(a)
     try:
         sec = (pace_decl(a) or {}).get(pace) or {}
     except PaceError as e:
@@ -118,6 +114,14 @@ def pace_verify(a) -> str:
     if not sec.get("verify"):
         raise DeclError(f".ndf/pace.json の {pace}.verify（導入の確認のコマンド）が無い")
     return sec["verify"]
+
+
+def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
+    """1 本のプランのステージ。note が真なら note を足す。"""
+    wave = {"name": name, "plans": {key: plan}, "then_of": then_of}
+    if note:
+        wave["note"] = note
+    return wave
 
 
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
@@ -128,6 +132,11 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     normal の merged-by-check と、届けない経路（none）はステージを置かない。"""
     if mvv and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION:
         return manual_production_waves(a, repo, then_of, mvv, condition)
+    return channel_waves(a, repo, then_of, mvv, condition, note)
+
+
+def channel_waves(a, repo: str, then_of: str, mvv: str | None, condition: dict | None, note: str | None) -> list[dict]:
+    """手動反映の本番系の形でない経路のステージ: 本番か導入の確認 → CD の結果 → 手で行うリリース（並びは `route_waves`）。"""
     rs = routes_of(a)
     waves = []
     promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
@@ -136,20 +145,12 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     if promote:
         ci_wait = int(plan_limits(a)["ci_wait_timeout"])
         plan = plan_promote(a, repo, ci_wait, PromoteParams(mvv=mvv, production=promote.branch, verify=verify), condition)
-        wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
+        waves.append(_plan_wave("本番", "promote", plan, then_of, note))
     elif verify:
-        wave = {"name": "導入の確認", "plans": {"verify": plan_verify(a, repo, verify, condition)}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
+        waves.append(_plan_wave("導入の確認", "verify", plan_verify(a, repo, verify, condition), then_of, note))
     if not promote and (production := direct_production(a, rs)):
-        wave = {"name": CD_RESULT_STAGE, "plans": {"cd-result": plan_cd_result(a, repo, production, condition)}, "then_of": then_of}
-        if note and not waves:
-            wave["note"] = note
-        waves.append(wave)
+        cd = plan_cd_result(a, repo, production, condition)
+        waves.append(_plan_wave(CD_RESULT_STAGE, "cd-result", cd, then_of, note if not waves else None))  # 先行のステージが無いときだけ
     if any(r.stage == delivery.STAGE_MANUAL for r in rs):
         waves.append(manual_release_wave(a))
     return waves
@@ -162,7 +163,7 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     rs = [r for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL]
     dev = [r for r in rs if r.production is False]
     prod = [r for r in rs if r.production is not False]
-    pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"  # new close は fast のスプリントの終わり
+    pace = closing_pace(a)
     verify = pace_verify(a)
     # auto は検査のスプリントの PR（単独の queue でも同じディレクトリの検査の報告から埋まる）、fast は前のステージの PR のすべて。
     # fast の単独の queue は前のステージの PR を集められないため、MVV 判定を打たずに利用者の承認ゲートにする（決定 6）

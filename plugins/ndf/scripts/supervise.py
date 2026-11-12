@@ -44,7 +44,7 @@ supervisor の役割を主に担い、このスクリプトがフェーズの手
         # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（設計承認ゲートは MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（リリース承認ゲートは MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
-        # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
+        # スプリントの終わり: 確定仕様化・閉じる・振り返り・棚卸し → 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）
     supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
         # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-approved --pr N [--state <状態>]
@@ -117,6 +117,16 @@ MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き�
 
 
 def build_parser(sub) -> None:
+    """副命令の引数を登録の順に足す。"""
+    add_plan_run_parsers(sub)
+    new_args.add_new_parsers(sub, MAIN_EPILOG)
+    add_queue_parsers(sub)
+    add_design_parsers(sub)
+    add_tool_parsers(sub)
+
+
+def add_plan_run_parsers(sub) -> None:
+    """副命令 run・history・expected・example の引数を足す。"""
     r = sub.add_parser(
         "run",
         help="プランを 1 本流す",
@@ -144,7 +154,10 @@ def build_parser(sub) -> None:
     ex.add_argument("--history")
     ex.add_argument("--slow", action="append", default=[], metavar="K=V")
     sub.add_parser("example")
-    new_args.add_new_parsers(sub, MAIN_EPILOG)
+
+
+def add_queue_parsers(sub) -> None:
+    """副命令 queue・wait・advance の引数を足す。"""
     q = sub.add_parser(
         "queue",
         help="プランを同時に --max 本まで順に流す",
@@ -187,6 +200,10 @@ def build_parser(sub) -> None:
     )
     av.add_argument("--step", action="append", default=[], required=True, help="打つ手順（NDF のスクリプトのコマンド。順に打つ）")
     av.add_argument("--from", dest="start", type=int, default=1, help="1 から数えた番号。これより前の手順を打たない")
+
+
+def add_design_parsers(sub) -> None:
+    """副命令 design-glossary・design-results・design-approved の引数を足す。"""
     g = sub.add_parser(
         "design-glossary",
         help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
@@ -214,6 +231,10 @@ def build_parser(sub) -> None:
     )
     da.add_argument("--pr", type=int, required=True, help="設計 Pull Request")
     da.add_argument("--state", help="スプリントの状態（sprint-state.py のファイル）")
+
+
+def add_tool_parsers(sub) -> None:
+    """副命令 note・sync-check・format・sync-title・review-settled の引数を足す。"""
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)

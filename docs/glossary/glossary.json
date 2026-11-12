@@ -609,7 +609,7 @@
     {
       "term": "ベースブランチ",
       "context": "ndf-workflow",
-      "meaning": "worktree の分岐元と Pull Request の宛先",
+      "meaning": "Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。宣言の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める",
       "deprecated": [
         "起点のブランチ"
       ],
@@ -5060,7 +5060,7 @@
     {
       "term": "一時レーン",
       "context": "ndf-workflow",
-      "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り・released の後の版の要るまとめ）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
@@ -6104,36 +6104,31 @@
       "term": "計画の台帳",
       "context": "ndf-workflow",
       "meaning": "1 つの並列の計画を続けるのに要る状態を、計画の置き場に持つ記録。受けた行を足す ledger.jsonl と、台帳のチェックポイントからなる",
-      "source": "",
-      "pending_source": "issues/issue-2647-design.md"
+      "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "耐久ワークフローの作り直し",
       "context": "ndf-workflow",
       "meaning": "失われた計画で、耐久ワークフローを新しく始めて計画の台帳から状態を戻すこと",
-      "source": "",
-      "pending_source": "issues/issue-2647-design.md"
+      "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "台帳のチェックポイント",
       "context": "ndf-workflow",
       "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
-      "source": "",
-      "pending_source": "issues/issue-2647-design.md"
+      "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "失われた計画",
       "context": "ndf-workflow",
       "meaning": "閉じていないのに、耐久ワークフローが動いていない計画。ERROR か、耐久の記録が無い状態を指す",
-      "source": "",
-      "pending_source": "issues/issue-2647-design.md"
+      "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "耐久の記録の退避",
       "context": "ndf-workflow",
       "meaning": "失われた計画の耐久の記録のファイルを、別の名前へ移すこと。同じ計画の新しい記録を同じ置き場で開くために行う",
-      "source": "",
-      "pending_source": "issues/issue-2647-design.md"
+      "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
       "term": "読み込まれたプラグイン",
@@ -6480,13 +6475,13 @@
     {
       "term": "出し直しの提示",
       "context": "ndf-workflow",
-      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）",
+      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）。承認したコミットのまま出す版より前に始めた計画の記録の打ち直しでだけ現れ、新しく始めた計画では出さない",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "加わった範囲",
       "context": "ndf-workflow",
-      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更",
+      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更。新しく始めた計画では今のリリースに入らず、次のリリースの範囲に入る",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
@@ -6547,25 +6542,25 @@
       "term": "課題のまとまり",
       "context": "ndf-workflow",
       "meaning": "並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
-      "pending_source": "issues/issue-3081-design.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "代表の課題",
       "context": "ndf-workflow",
       "meaning": "課題のまとまりの先頭の課題。まとまりの設計文書と実装の Pull Request はこの課題の番号で作り、ほかの課題の受け入れ条件を取り込む",
-      "pending_source": "issues/issue-3081-design.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "疎なまとまり",
       "context": "ndf-workflow",
       "meaning": "触る場所の見込みが互いに重ならない、課題のまとまりの組",
-      "pending_source": "issues/issue-3081-requirements.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "まとまりの単位のレビュー",
       "context": "ndf-workflow",
       "meaning": "1 つの課題のまとまりの課題が変えた差分だけを範囲にした cross-review",
-      "pending_source": "issues/issue-3081-requirements.md"
+      "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
       "term": "負荷とメモリの値",
@@ -6650,6 +6645,173 @@
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
+    },
+    {
+      "term": "衝突の状態",
+      "context": "ndf-workflow",
+      "meaning": "Pull Request をベースブランチへ取り込めるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない",
+      "source": "",
+      "pending_source": "issues/issue-3076-requirements.md",
+      "code": "mergeable"
+    },
+    {
+      "term": "CI の待ち",
+      "context": "ndf-workflow",
+      "meaning": "CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout",
+      "source": "",
+      "pending_source": "issues/issue-3076-requirements.md"
+    },
+    {
+      "term": "1 スプリントのレーン",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "まとめ",
+      "context": "ndf-workflow",
+      "meaning": "リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "版の要らないまとめ",
+      "context": "ndf-workflow",
+      "meaning": "まとめのうち、出した版が無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの答えを待たずに流す",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "版の要るまとめ",
+      "context": "ndf-workflow",
+      "meaning": "まとめのうち、出した版の上でしか流せない作業（リリース後テストと、その結果で課題を閉じる作業）",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "レーンの終わり",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンが版の要らないまとめを流し切った時点。終わりの記録として耐久ワークフローが読める置き場に残り、耐久ワークフローがそのレーンのラッパーを止める",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "終わりの記録",
+      "context": "ndf-workflow",
+      "meaning": "レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開の印で起こす",
+      "source": "",
+      "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "止められなかったレーンの問い",
+      "context": "ndf-workflow",
+      "meaning": "終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる問い（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない",
+      "source": "",
+      "pending_source": "issues/issue-3058-design.md"
+    },
+    {
+      "term": "終わりの記録の無い停止の問い",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンが終わりの記録も答え待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる問い（kind は unended）。「終わったと数える」で終わりの記録を書く",
+      "source": "",
+      "pending_source": "issues/issue-3058-design.md"
+    },
+    {
+      "term": "最後の検査",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う",
+      "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "スプリントの検査",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める",
+      "pending_source": "issues/issue-3126-requirements.md"
+    },
+    {
+      "term": "検査の印",
+      "context": "ndf-workflow",
+      "meaning": "前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある",
+      "pending_source": "issues/issue-3126-requirements.md"
+    },
+    {
+      "term": "最後の検査の範囲",
+      "context": "ndf-workflow",
+      "meaning": "最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない",
+      "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "スプリントに属する Pull Request",
+      "context": "ndf-workflow",
+      "meaning": "head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request",
+      "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "まとめのステージ",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く",
+      "pending_source": "issues/issue-3126-design.md"
+    },
+    {
+      "term": "最終の検査",
+      "context": "ndf-workflow",
+      "meaning": "スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ",
+      "pending_source": "issues/issue-3083-requirements.md"
+    },
+    {
+      "term": "中身の無い依頼",
+      "context": "ndf-workflow",
+      "meaning": "リリースの依頼のうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、版なしのリリース済みと理由（閉じた Pull Request の番号）で答えて外す",
+      "pending_source": "issues/issue-3083-design.md"
+    },
+    {
+      "term": "処理済みのリリース承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない",
+      "pending_source": "issues/issue-3083-design.md"
+    },
+    {
+      "term": "ブランチ運用の宣言",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "スプリントの起点",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の宣言が決め、無ければベースブランチ",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "結合ブランチ",
+      "context": "ndf-workflow",
+      "meaning": "ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`）",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "本番への取り込み方",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "文書の Pull Request の宛先",
+      "context": "ndf-workflow",
+      "meaning": "設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリースの単位",
+      "context": "ndf-workflow",
+      "meaning": "選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     }
   ]
 }

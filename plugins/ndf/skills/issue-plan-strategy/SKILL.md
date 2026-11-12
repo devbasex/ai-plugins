@@ -117,7 +117,7 @@ plan の構造は `/ndf:implementation-plan` を参照。本 skill では multi-
 | 3 | feature/PLAN42-ui     | UI 実装     | `ui/orders.tsx` | PR1:収束 | なし |
 
 release branch: `release/PLAN42`
-base branch: `main`
+base branch: <ベースブランチ>
 ```
 
 **依存は工程の対で書く。** 「B の設計が A の決定を読む」（`A:収束`）と「B の実装が A の実装を

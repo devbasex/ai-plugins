@@ -396,3 +396,44 @@ def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
     r = ms.read_checks(".", rollup)
     assert r.pending == [] and r.failed == [] and r.infra == []
     assert sorted(i.label for i in r.passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]
+
+
+# --- 3. 宛先の宣言が選んで集める取り込み方なら規則 3 を当てない（#3121 の決定 15） -----------------
+
+
+SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+
+
+def declared_main(repo: Path, flow: dict | None, base_branch: str = "develop") -> tuple[str, str, str]:
+    """main に宣言（`.ndf/worktree.json`）を置いた形の release_history。main の先端を宣言のコミットにする。"""
+    main, p, m = release_history(repo)
+    git(repo, "switch", "-q", "main")
+    wt = {"version": 1, "base_branch": base_branch, "production_branch": "main"}
+    if flow is not None:
+        wt["branch_flow"] = flow
+    write(repo, ".ndf/worktree.json", json.dumps(wt))
+    main = commit(repo, "decl")
+    git(repo, "switch", "-q", "develop")
+    git(repo, "merge", "-q", "--no-ff", "-m", "sync", "main")
+    return main, p, git(repo, "rev-parse", "HEAD")
+
+
+def test_main_pr_runs_when_the_target_selects_units(mod, repo):
+    """受け入れ条件 18: 宛先の宣言が selected なら、develop で通っていても全体テストを省かない。"""
+    main, _, m = declared_main(repo, SELECTED)
+    skip, reason = decide(mod, repo, main, m, api=fake_api({m}))
+    assert not skip and "選んだ単位" in reason
+
+
+def test_main_pr_keeps_rule_3_when_the_target_takes_the_whole_base(mod, repo):
+    """宣言が whole か branch_flow が無ければ今の規則 3 のまま（比べるブランチは宣言の base_branch）。"""
+    main, _, m = declared_main(repo, None)
+    assert decide(mod, repo, main, m, api=fake_api({m}))[0]
+
+
+def test_a_head_that_rewrites_its_own_declaration_does_not_loosen_the_target(mod, repo):
+    """宣言は宛先から読む。head 側で whole へ書き換えても、宛先が selected なら省かない（決定 12 と同じ考え方）。"""
+    main, _, _ = declared_main(repo, SELECTED)
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop"}))
+    m = commit(repo, "loosen")
+    assert not decide(mod, repo, main, m, api=fake_api({m}))[0]

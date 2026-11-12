@@ -65,6 +65,7 @@ MODULES = [
     "queue_waits",  # queue の待ちの秒を理由ごとに数える（#2998）
     "templates",
     "verify_steps",
+    "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_templates",
     "delivery_templates",
     "sprint_revise",
@@ -74,6 +75,7 @@ MODULES = [
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
+    "sprint_lane_close",  # 1 スプリントのレーンの版の要らないまとめのステージ（#3058）
     "sprint",
     "design_merge",  # normal の設計承認ゲートの後の設計 PR のマージ（#1426）
     "absorb",  # new sprint --absorb の取り込んだ課題（#1426）
@@ -98,6 +100,7 @@ NO_ENGINE = [
     "worker_steps",
     "pr",
     "templates",
+    "release_flow",
     "release_templates",
     "delivery_templates",
     "sprint_revise",

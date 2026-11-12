@@ -1,0 +1,33 @@
+{
+ "files": 12118,
+ "main_files": 10373,
+ "sub_files": 1745,
+ "api_calls": 159549,
+ "ledger_only_rows": 1608,
+ "dup_calls_skipped": 606,
+ "usd_from_tokens": 17190.26,
+ "usd_cost_state_sum": 14881.17,
+ "tokens": [
+  1233914,
+  117581827,
+  814738838,
+  25790649024
+ ],
+ "period": [
+  "2026-08-08",
+  "2026-11-10"
+ ],
+ "skill_src": {
+  "none": 49287,
+  "attribution": 58244,
+  "last_skill_call": 49012,
+  "first_prompt": 1398,
+  "ledger": 1608
+ },
+ "usd_by_skill_src": {
+  "attribution": 5464.47,
+  "first_prompt": 167.83,
+  "last_skill_call": 7097.43,
+  "none": 3571.0
+ }
+}

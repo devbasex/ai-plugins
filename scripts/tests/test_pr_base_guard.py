@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -168,3 +169,88 @@ def test_other_branch_inside_the_base_fails(origin_repo: Path) -> None:
     """develop に含まれていても、release/v* でも develop でもない head は落とす。"""
     bumped, _ = release_world(origin_repo)
     assert guard_sha(origin_repo, "feature/x", bumped).returncode == 1
+
+
+# --- 宛先の宣言が選んで集める取り込み方（#3121 の決定 12・14） ---------------------------------
+
+SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+
+
+def run_git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def guard_main(repo: Path, head_ref: str, sha: str = "") -> subprocess.CompletedProcess:
+    env = {**os.environ, "PR_BASE_REF": "main"}
+    return subprocess.run(["bash", str(GUARD), head_ref, *([sha] if sha else [])], cwd=str(repo), capture_output=True, text=True, env=env)
+
+
+def selected_world(repo: Path) -> dict[str, str]:
+    """main に selected の宣言を置き、main から切った sprint/a・sprint/b と、develop にだけある別のスプリントの PR を作る。"""
+    run_git(repo, "checkout", "-q", "main")
+    declare(repo, {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": SELECTED})
+    run_git(repo, "add", ".ndf/worktree.json")
+    run_git(repo, "commit", "-q", "-m", "decl")
+    run_git(repo, "push", "-q", "origin", "main")
+    out = {}
+    for name in ("a", "b"):
+        run_git(repo, "checkout", "-q", "-b", f"sprint/{name}", "main")
+        out[name] = commit_on(repo, f"{name}.txt")
+        run_git(repo, "push", "-q", "origin", f"sprint/{name}")
+    run_git(repo, "checkout", "-q", "-b", "develop", "main")
+    run_git(repo, "merge", "-q", "--no-ff", "--no-edit", "sprint/a")
+    out["stray"] = commit_on(repo, "pr-3078.txt")  # 2026-11-12 のリリース 9 で develop にだけ入った別のスプリントの PR
+    out["dev-bump"] = commit_on(repo, "version-dev.txt")
+    run_git(repo, "push", "-q", "origin", "develop")
+    return out
+
+
+def release(repo: Path, *merge: str) -> str:
+    run_git(repo, "checkout", "-q", "-B", "release/v2.0.0", "origin/main")
+    for ref in merge:
+        run_git(repo, "merge", "-q", "--no-ff", "--no-edit", ref)
+    sha = commit_on(repo, "bump-2.0.0.txt")
+    run_git(repo, "push", "-q", "-f", "origin", "release/v2.0.0")
+    return sha
+
+
+def test_selected_rejects_pull_requests_from_the_base_branch(origin_repo: Path) -> None:
+    """受け入れ条件 15: develop から main への Pull Request は断る。"""
+    selected_world(origin_repo)
+    got = guard_main(origin_repo, "develop", run_git(origin_repo, "rev-parse", "origin/develop"))
+    assert got.returncode == 1 and "release/v" in got.stdout + got.stderr
+
+
+def test_selected_passes_a_release_branch_of_approved_sprints(origin_repo: Path) -> None:
+    """受け入れ条件 15: main の子孫で、スプリントブランチと組むコミットだけの release/v<版> は通す。"""
+    selected_world(origin_repo)
+    assert guard_main(origin_repo, "release/v2.0.0", release(origin_repo, "origin/sprint/a")).returncode == 0
+
+
+def test_selected_rejects_commits_that_only_the_base_branch_has(origin_repo: Path) -> None:
+    """受け入れ条件 16・17: develop にだけある別のスプリントの PR・開発版の版上げを含む head は断る。"""
+    w = selected_world(origin_repo)
+    got = guard_main(origin_repo, "release/v2.0.0", release(origin_repo, "origin/sprint/a", "origin/develop"))
+    assert got.returncode == 1
+    assert w["stray"][:12] in got.stdout and w["dev-bump"][:12] in got.stdout
+
+
+def test_selected_rejects_a_release_branch_not_cut_from_main(origin_repo: Path) -> None:
+    selected_world(origin_repo)
+    run_git(origin_repo, "checkout", "-q", "-B", "release/v2.0.0", "origin/main~1")  # 宣言を置く前の main から切った
+    sha = commit_on(origin_repo, "old.txt")
+    assert guard_main(origin_repo, "release/v2.0.0", sha).returncode == 1
+
+
+def test_selected_cannot_be_loosened_by_the_worktree_declaration(origin_repo: Path) -> None:
+    """決定 12: 宣言は宛先のブランチから読む。作業ツリーの宣言を whole へ書き換えても develop は通らない。"""
+    selected_world(origin_repo)
+    declare(origin_repo, {"version": 1, "base_branch": "develop"})
+    assert guard_main(origin_repo, "develop", run_git(origin_repo, "rev-parse", "origin/develop")).returncode == 1
+
+
+def test_selected_passes_any_sprint_branch_and_leaves_approval_to_the_gate(origin_repo: Path) -> None:
+    """決定 14: どのスプリントを承認したかは CI では分からない。承認していないスプリントブランチを足しても通し、
+    承認したコミットとの照合はマージのステップが持つ。"""
+    selected_world(origin_repo)
+    assert guard_main(origin_repo, "release/v2.0.0", release(origin_repo, "origin/sprint/a", "origin/sprint/b")).returncode == 0

@@ -23,6 +23,7 @@ import dbos  # noqa: E402,F401
 import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+import parallel_helper as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402
@@ -39,6 +40,14 @@ PLAN = {
 }
 
 TEMPLATE_DECL = {"release": {"form": "package-plugin", "plugin": "ndf"}}
+# この印の後の記録の道（終わりの記録で数える・提示 1 で確定する。#3058・#3070）は test_parallel_end.py で確かめる。
+# ここの流れのテストは印の無い記録の道で確かめる（別のプロセスで記録するテストも同じ値にする）
+LEGACY_MARKS = ("parallel-lane-end", "parallel-approved-sha")
+
+
+def legacy_patched(orig):
+    return lambda n: False if n in LEGACY_MARKS else orig(n)
+
 
 FAKE = textwrap.dedent(
     """
@@ -95,6 +104,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
     monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "1")
+    monkeypatch.setattr(durable, "patched", legacy_patched(durable.patched))
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
@@ -504,14 +514,14 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     start(main)
     pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    task = prun.helper_task(main, "p1", 1, 1)
+    task = ph.helper_task(main, "p1", 1, 1)
     d = prl.release_dir(main, "p1", 1, 1)
     assert task["phase"] == "present" and f"queue {d / 'present.json'}" in task["pipeline"]
     assert "request-gate2 p1 1 1" in task["gate2"] and "settle p1 1 --done" in task["settle"]
     (d / "present.json").write_text(
         json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "parallel.py present p1 1 1 --approval issues/a.md && cat x"}]})
     )
-    assert prun.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
+    assert ph.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
@@ -519,7 +529,7 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # リリース承認ゲートの問いは答えで消える
-    task = prun.helper_task(main, "p1", 1, 1)
+    task = ph.helper_task(main, "p1", 1, 1)
     assert task["phase"] == "confirmed"
     assert (
         "'リリース承認ゲート'" in task["pipeline"]
@@ -764,6 +774,83 @@ def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_p
         assert pa.owner_next(tmp_path, "p1", rid, [choice]) == (None, [])
 
 
+@pytest.fixture
+def settle_cli(monkeypatch, tmp_path):
+    """`parallel.py` の `cmd_settle` を本体のまま呼ぶ（受け付けの判定と送り先だけ差し替え、送った知らせを記録する）。"""
+    import argparse
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("parallel_cli", Path(prun.__file__).resolve().parents[1] / "parallel.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    state = {"accept": {}}
+    sent: list[tuple] = []
+    monkeypatch.setattr(cli, "main_of", lambda: tmp_path)
+    monkeypatch.setattr(cli, "accepting", lambda _m, _n: state["accept"])
+    monkeypatch.setattr(cli.pl, "resume_plan", lambda m, name, msg, key: sent.append((m, name, msg, key)))
+
+    def call(capsys, n=1, done=None, rejected=False, reason=None, name="p1"):
+        a = argparse.Namespace(name=name, n=n, external=False, done=done, rejected=rejected, reason=reason)
+        with pytest.raises(SystemExit) as ex:
+            cli.cmd_settle(a)
+        return ex.value.code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    queued = "。耐久ワークフローが動いていないため、台帳に残し作り直しの後に反映する"
+    return {"call": call, "sent": sent, "state": state, "dir": tmp_path, "queued": queued}
+
+
+def _done(d, items, **extra):
+    p = d / "done.json"
+    p.write_text(json.dumps({"items": items, **extra}))
+    return str(p)
+
+
+@pytest.mark.parametrize(
+    ("items", "extra", "want_res", "want_version"),
+    [
+        ([{"result": "完了"}, {"result": "完了"}], {"version": "1.2.3"}, "released", "1.2.3"),
+        ([{"result": "完了"}], {"metrics": {"version": "1.2.4"}}, "released", "1.2.4"),
+        ([{"result": "完了"}], {"version": "1.2.3", "metrics": {"version": "9.9.9"}}, "released", "1.2.3"),
+        ([{"result": "完了"}, {"result": "失敗"}], {"version": "1.2.3"}, "failed", "1.2.3"),
+        ([], {}, "failed", None),
+        (["x", {"result": "完了"}], {}, "released", None),  # dict でない行は数えない
+        ([{}], {}, "failed", None),  # result の無い行は "None" と読む
+    ],
+)
+def test_char_settle_reads_the_done_and_sends_the_result(settle_cli, capsys, items, extra, want_res, want_version):
+    """現状固定: `settle --done` は done の行がすべて「完了」なら released、そうでなければ failed を送る。版は version か metrics.version。"""
+    code, out = settle_cli["call"](capsys, n=2, done=_done(settle_cli["dir"], items, **extra))
+    assert code == 0 and out["status"] == "ok"
+    assert out["summary"] == f"リリース 2 の結果 {want_res} を送った"
+    assert out["metrics"] == {"result": want_res, "version": want_version}
+    msg = {"n": 2, "phase": "settle", "result": want_res, "version": want_version, "reason": None}
+    assert settle_cli["sent"] == [(settle_cli["dir"], "p1", msg, "settle:2")]
+
+
+def test_char_settle_rejected_sends_the_reason_and_a_queued_mark(settle_cli, capsys):
+    """現状固定: `--rejected` は done を読まずに rejected を送り、失われた計画では知らせに残す旨と queued を添える。"""
+    settle_cli["state"]["accept"] = {"queued": True}
+    code, out = settle_cli["call"](capsys, n=3, rejected=True, reason="no")
+    assert code == 0 and out["summary"] == f"リリース 3 の結果 rejected を送った{settle_cli['queued']}"
+    assert out["metrics"] == {"result": "rejected", "version": None, "queued": True}
+    msg = {"n": 3, "phase": "settle", "result": "rejected", "version": None, "reason": "no"}
+    assert settle_cli["sent"] == [(settle_cli["dir"], "p1", msg, "settle:3")]
+
+
+def test_char_settle_stops_at_a_gate_or_an_unreadable_done_without_sending(settle_cli, capsys):
+    """現状固定: done に「関門」の行があれば 4、done を読めなければ 2 で止まり、どちらも送らない。計画名が無ければ 1。"""
+    code, out = settle_cli["call"](capsys, done=_done(settle_cli["dir"], [{"result": "完了"}, {"result": "関門"}]))
+    assert code == 4 and out["status"] == "stopped" and out["summary"] == "本番のプランが承認ゲートで止まっている（送らない）"
+    code, out = settle_cli["call"](capsys, done=str(settle_cli["dir"] / "missing.json"))
+    assert code == 2 and out["status"] == "stopped" and out["summary"].startswith("done を読めない: ")
+    (settle_cli["dir"] / "bad.json").write_text("{")
+    code, out = settle_cli["call"](capsys, done=str(settle_cli["dir"] / "bad.json"))
+    assert code == 2 and out["summary"].startswith("done を読めない: ")
+    code, out = settle_cli["call"](capsys, name=None, rejected=True)
+    assert code == 1 and out["summary"] == "計画名か --external が要る"
+    assert settle_cli["sent"] == []
+
+
 def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     """持ち主を起こす要否はラッパーの状態でなくレーンの側の待ちの記録で決める。ループは記録が waiting_only で止まっている、
     1 スプリントのレーンは引継ぎ文書に依頼の id がある。"""
@@ -811,10 +898,28 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
 def test_a_helper_ends_by_stopping_its_own_wrapper():
     """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
     入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留したループの 1 回のどちらの起動も同じ。"""
-    for spec in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
+    for spec in (ph.helper_spawn("p1", 2, 1), ph.helper_spawn("p1", 3, 0, pending="lroot")):
         argv = spec["argv"]
         name = argv[argv.index("--name") + 1]
         assert f"{prun.RELAY} stop {name}" in argv[argv.index("--") + 1]
+
+
+def test_char_helper_spawn_and_verify_spawn_inputs():
+    """現状固定: 一時レーンを起こす入力（helper_spawn・verify_spawn）の argv と cwd をそのまま記録する。"""
+
+    def expect(helper, what, cwd):
+        end = f"[ndf-parallel] helper-done p1 の行を出し、python3 {ph.RELAY} stop {helper} で自分のラッパーを止めたとき"
+        first = f"/goal /ndf:development-workflow --parallel-helper p1 {what} -- 終わり: {end}"
+        return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", "p1", "--json", "--", first], "cwd": cwd}
+
+    assert ph.helper_spawn("p1", 2, 1) == expect("p1-rel2", "2 1", None)
+    assert ph.helper_spawn("p1", 3, 0, pending="lroot") == expect("p1-rel3", "pending lroot", None)
+    assert ph.helper_spawn("p1", 3, 0, pending="lroot", cwd="/other") == expect("p1-rel3", "pending lroot", "/other")
+    assert ph.helper_spawn("p1", 4, 2, cwd="/other") == expect("p1-rel4", "4 2", "/other")
+    # verify_spawn は一時レーンの名前を引数で受け、cwd は常に None
+    assert ph.verify_spawn("p1", "q1", "p1-ver1") == expect("p1-ver1", "verify q1", None)
+    assert ph.verify_spawn("p1", "q1-again2", "h") == expect("h", "verify q1-again2", None)
+    assert prun.helper_spawn is ph.helper_spawn
 
 
 def _bare_run(monkeypatch, lanes):
@@ -1393,6 +1498,9 @@ CRASH = textwrap.dedent(
     prl.build_plans = lambda m, n, s, k, v: orig(m, n, s, k, v, lambda *_a: ({"steps": []}, {"steps": []}))
     if mode == "old":
         durable.patched = lambda _n: False  # parallel.route の無い版の並びで記録する
+    else:
+        orig_patched = durable.patched  # env と同じ記録の道（LEGACY_MARKS）
+        durable.patched = lambda n: False if n in ("parallel-lane-end", "parallel-approved-sha") else orig_patched(n)
     prun.open_parallel_record(main, "p1")
     wid = pl.workflow_id("p1")
     durable.start(durable.WorkflowRef(wid, 1, "start"), prun.parallel_workflow, str(main), "p1")
@@ -1647,3 +1755,120 @@ def test_an_old_record_starts_lanes_without_counting_the_machine(env, tmp_path, 
     monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-admit" else orig(n))
     start(main)
     until(lambda: lanes_spawned(log) == ["la"])  # 印の無い記録は今までの parallel.spawn を打つ（I15）
+
+
+# ---------------------------------------------------------------- 中身の無い依頼（#3085。#3083 の設計の I3〜I7）
+
+
+def _closing_run(monkeypatch, closed, releases=()):
+    """2 本のレーンの _Run。la だけが止まり、Pull Request の状態の取得は `closed`（番号の並びか、失敗の理由の文字列）を返す。"""
+    import parallel_route as prt
+
+    run = _bare_run(monkeypatch, [{"name": "la"}, {"name": "lb"}])
+    run.lanes["la"].update(started=True, state="stopped")
+    run.releases = list(releases)
+    got = {"answers": [], "fetched": 0}
+    monkeypatch.setattr(
+        run, "answer", lambda rid, result, version, n, reason=None: got["answers"].append((rid, result, version, n, reason))
+    )
+
+    def fetch(_main, prs):
+        got["fetched"] += 1
+        return {"closed": [], "error": closed} if isinstance(closed, str) else {"closed": [n for n in closed if n in prs], "error": ""}
+
+    monkeypatch.setattr(prt, "step_closed_prs", fetch)  # 耐久ワークフローの外では耐久ステップごと差し替える
+    return run, got
+
+
+def test_a_request_whose_prs_all_closed_is_answered_and_dropped(monkeypatch):
+    """受け入れ条件 5 / I3: すべて閉じた依頼へ released・版なし・閉じた番号の理由で答えて外し、組まない。止まった宛先は再起動の対象へ入る。"""
+    run, got = _closing_run(monkeypatch, [3079])
+    run.pending = [{"id": "lgate-r1", "lane": "la", "prs": [3079]}]
+    assert run.drop_closed() is False and run.pending == []
+    [(rid, result, version, n, reason)] = got["answers"]
+    assert (rid, result, version, n) == ("lgate-r1", "released", None, None) and "#3079" in reason
+    assert run.wake == ["la"]
+
+
+@pytest.mark.parametrize("releases, answered", [([{"n": 1, "state": "released", "version": "1.2.3", "prs": [10]}], True), ([], False)])
+def test_a_partly_closed_request_is_judged_by_its_remaining_prs(monkeypatch, releases, answered):
+    """受け入れ条件 6 / I4: 一部が閉じた依頼は残りの番号で範囲の判定を受け、除いた番号は依頼に残す。"""
+    run, got = _closing_run(monkeypatch, [11], releases)
+    run.pending = [{"id": "r1", "lane": "la", "prs": [10, 11]}]
+    assert run.drop_closed() is (not answered)
+    if answered:
+        assert run.pending == [] and got["answers"] == [("r1", "released", "1.2.3", 1, None)] and run.wake == ["la"]
+    else:
+        assert run.pending == [{"id": "r1", "lane": "la", "prs": [10], "closed": [11]}] and got["answers"] == []
+        assert run.wake == []
+
+
+@pytest.mark.parametrize("closed", [[], "gh に届かない"], ids=["open-or-merged", "fetch-failed"])
+def test_requests_without_closed_prs_are_kept(monkeypatch, closed):
+    """受け入れ条件 8 / I5: マージ済みか開いている Pull Request の依頼と、取得に失敗したときの依頼は外さずに組む。"""
+    run, got = _closing_run(monkeypatch, closed)
+    pending = [{"id": "r1", "lane": "la", "prs": [10]}]
+    run.pending = list(pending)
+    assert run.drop_closed() is True and run.pending == pending and got["answers"] == []
+
+
+def test_closed_prs_reads_only_prs_closed_without_a_merge(monkeypatch):
+    """I5: 閉じた番号は state が CLOSED のものだけで、読めない Pull Request と取得の失敗は閉じたと見なさない。"""
+    import parallel_route as prt
+    from release_lib import included
+
+    states = {10: {"state": "CLOSED"}, 11: {"state": "MERGED"}, 12: {"state": "OPEN"}, 13: None}
+    monkeypatch.setattr(included, "pr_fields", lambda prs, cwd=None: ({n: states[n] for n in prs}, ""))
+    assert prt.closed_prs(Path("/m"), [10, 11, 12, 13]) == {"closed": [10], "error": ""}
+    monkeypatch.setattr(included, "pr_fields", lambda prs, cwd=None: (None, "gh が無い"))
+    assert prt.closed_prs(Path("/m"), [10]) == {"closed": [], "error": "gh が無い"}
+
+
+def test_the_pr_states_are_read_only_right_before_building(monkeypatch):
+    """I6: リリースが流れている見回りと計画全体の停止の見回りでは読まず、組もうとする見回りで 1 回だけ読む。"""
+    import parallel_hold as ph
+
+    run, got = _closing_run(monkeypatch, [])
+    built = []
+    monkeypatch.setattr(run, "open_release", lambda: built.append(1))
+    run.pending = [{"id": "r1", "lane": "la", "prs": [10]}]
+    run.current = {"n": 1}
+    prun._tick_release(run, "/m", "p1", 0)
+    run.current, run.hold = None, ph.Hold(plan=True)
+    prun._tick_release(run, "/m", "p1", 0)
+    assert got["fetched"] == 0 and built == []
+    run.hold = ph.Hold()
+    prun._tick_release(run, "/m", "p1", 0)
+    assert got["fetched"] == 1 and built == [1]
+
+
+def test_a_closed_request_lets_the_plan_finish(env, tmp_path, monkeypatch):
+    """受け入れ条件 5・7: すべて閉じた依頼だけを受けた計画は組まずに答え、全レーンが止まれば finished で終わる。"""
+    import parallel_route as prt
+
+    main, log, states = env["main"], env["log"], env["states"]
+    monkeypatch.setattr(prt, "closed_prs", lambda _m, prs: {"closed": list(prs), "error": ""})
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [3079], [1], tmp_path / "st")
+    ans = read(main, rid)
+    assert (ans["result"], ans["version"], ans["release"]) == ("released", None, None) and "#3079" in ans["reason"]
+    states.write_text(json.dumps({"la": "stopped"}))
+    until(lambda: "lb" in spawned(log))
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    out = until(lambda: durable.output_of(pl.workflow_id("p1")))
+    assert out["status"] == "finished" and out["pending"] == [] and out["releases"] == [] and no_build_ran(main)
+
+
+def test_an_old_record_does_not_read_the_pr_states(env, tmp_path, monkeypatch):
+    """I7: 印 parallel-closed-requests の無い記録は Pull Request の状態を読まず、今までどおり依頼から組む。"""
+    import parallel_route as prt
+
+    main, states = env["main"], env["states"]
+    orig = durable.patched
+    monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-closed-requests" else orig(n))
+    monkeypatch.setattr(prt, "closed_prs", lambda *_a: pytest.fail("古い記録で Pull Request の状態を読んだ"))
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    pl.send_release_request(main, "p1", "la", [3079], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")

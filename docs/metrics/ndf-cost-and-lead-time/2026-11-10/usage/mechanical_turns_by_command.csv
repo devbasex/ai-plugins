@@ -1,0 +1,201 @@
+kind,command,turns,sessions,usd
+照合: gh で PR・Issue を読む,gh api,1837,248,267.53
+待ち: sleep・ポーリングの手書き,loop+sleep(手書きの待ち),891,152,215.06
+照合: gh で PR・Issue を読む,gh issue view,1984,650,211.38
+変換: JSON・出力を python -c / jq / cut で読む,python -c,2437,726,182.25
+照合: git の状態を見る,git fetch,1219,376,181.18
+照合: gh で PR・Issue を読む,gh pr view,1189,372,140.48
+照合: git の状態を見る,git status,1154,477,121.67
+照合: git の状態を見る,git log,1147,596,114.51
+変換: JSON・出力を python -c / jq / cut で読む,grep,1374,477,109.74
+照合: 版数・タグ,python(heredoc),433,157,92.28
+照合: git の状態を見る,git diff,1208,521,88.27
+照合: git の状態を見る,git show,1218,525,86.91
+待ち: sleep・ポーリングの手書き,bash,251,34,84.23
+待ち: sleep・ポーリングの手書き,),76,7,63.05
+変換: JSON・出力を python -c / jq / cut で読む,date,268,104,59.14
+変換: JSON・出力を python -c / jq / cut で読む,sed,706,316,54.28
+手作業: gh pr merge を直接,gh pr merge,247,77,51.88
+照合: CI の状態を gh で見る,gh pr checks,433,136,49.67
+変換: JSON・出力を python -c / jq / cut で読む,loop(for),606,254,45.47
+照合: gh で PR・Issue を読む,gh issue list,510,251,44.0
+往復: NDF スクリプトを 1 行打つ,state.py merge-fix,168,38,43.15
+待ち: sleep・ポーリングの手書き,sleep,404,185,40.53
+変換: JSON・出力を python -c / jq / cut で読む,cat,453,208,39.89
+照合: 版数・タグ,grep,461,246,37.25
+変換: JSON・出力を python -c / jq / cut で読む,tail,389,199,36.92
+変換: JSON・出力を python -c / jq / cut で読む,echo,215,130,34.45
+転記: PR・Issue の本文を組み立てて書く,gh pr edit,130,71,34.41
+転記: PR・Issue の本文を組み立てて書く,gh pr create,178,75,31.34
+転記: PR・Issue の本文を組み立てて書く,gh pr comment,311,82,30.38
+往復: NDF スクリプトを 1 行打つ,monitor.py both,113,20,30.29
+変換: JSON・出力を python -c / jq / cut で読む,ls,337,211,28.33
+照合: git の状態を見る,git rev-parse,190,125,28.07
+照合: CI の状態を gh で見る,cat,175,54,26.8
+照合: 版数・タグ,cat,221,134,25.83
+往復: NDF スクリプトを 1 行打つ,state.py check-oscillation,84,31,23.15
+往復: NDF スクリプトを 1 行打つ,monitor.py,86,14,22.81
+往復: NDF スクリプトを 1 行打つ,sprint-state.py loop,313,127,21.41
+往復: NDF スクリプトを 1 行打つ,supervise.py queue,482,216,21.34
+往復: NDF スクリプトを 1 行打つ,state.py read-result,69,27,21.31
+転記: PR 本文のファイル,Write,112,96,20.21
+照合: CI の状態を gh で見る,gh pr view,74,52,20.08
+転記: PR・Issue の本文を組み立てて書く,gh issue create,121,72,19.23
+往復: NDF スクリプトを 1 行打つ,supervise.py new,194,107,17.53
+変換: JSON・出力を python -c / jq / cut で読む,parallel.py confirm,11,4,16.77
+往復: NDF スクリプトを 1 行打つ,state.py verify-sweep,85,26,16.38
+照合: gh で PR・Issue を読む,gh pr list,188,110,15.89
+転記: 引継ぎ文書の更新,Edit,220,82,15.68
+照合: 版数・タグ,git add,98,61,14.57
+変換: JSON・出力を python -c / jq / cut で読む,ps,102,59,13.83
+照合: git の状態を見る,git branch,125,63,13.72
+転記: PR・Issue の本文を組み立てて書く,gh issue edit,157,104,13.53
+待ち: sleep・ポーリングの手書き,gh pr merge,37,9,13.02
+往復: NDF スクリプトを 1 行打つ,state.py init,59,27,12.85
+変換: JSON・出力を python -c / jq / cut で読む,git fetch,89,64,11.89
+往復: NDF スクリプトを 1 行打つ,merged-steps.py merge-when-green,217,115,11.55
+照合: 版数・タグ,git worktree,37,24,10.38
+往復: NDF スクリプトを 1 行打つ,parallel-measure.py capacity,18,2,10.11
+往復: NDF スクリプトを 1 行打つ,ask.py decide,143,61,9.44
+転記: PR・Issue の本文を組み立てて書く,gh issue comment,71,45,9.33
+照合: 版数・タグ,git checkout,45,29,8.95
+変換: JSON・出力を python -c / jq / cut で読む,head,104,65,8.74
+往復: NDF スクリプトを 1 行打つ,state.py unresolved-threads,41,18,8.37
+往復: NDF スクリプトを 1 行打つ,parallel.py wait,103,10,8.31
+往復: NDF スクリプトを 1 行打つ,supervise.py run,170,93,8.23
+照合: CI の状態を gh で見る,gh run view,167,93,7.68
+変換: JSON・出力を python -c / jq / cut で読む,parallel.py answer,13,5,7.65
+往復: NDF スクリプトを 1 行打つ,state.py judge,23,11,6.12
+変換: JSON・出力を python -c / jq / cut で読む,git show,92,65,5.93
+照合: git の状態を見る,git ls-remote,65,40,5.52
+往復: NDF スクリプトを 1 行打つ,supervise.py wait,130,80,5.3
+変換: JSON・出力を python -c / jq / cut で読む,wc,66,58,5.18
+変換: JSON・出力を python -c / jq / cut で読む,release-steps.py approve,7,7,5.13
+往復: NDF スクリプトを 1 行打つ,release-steps.py approve,24,21,4.92
+照合: CI の状態を gh で見る,tail,24,20,4.84
+変換: JSON・出力を python -c / jq / cut で読む,git grep,79,46,4.73
+往復: NDF スクリプトを 1 行打つ,state.py report,41,28,4.71
+変換: JSON・出力を python -c / jq / cut で読む,git pull,43,27,4.59
+待ち: sleep・ポーリングの手書き,echo,24,15,4.58
+往復: NDF スクリプトを 1 行打つ,relay.py account,22,11,4.57
+変換: JSON・出力を python -c / jq / cut で読む,python(heredoc),49,38,4.45
+変換: JSON・出力を python -c / jq / cut で読む,git diff,64,56,4.43
+往復: NDF スクリプトを 1 行打つ,drive.py claude,70,15,4.32
+待ち: sleep・ポーリングの手書き,pkill,31,23,4.2
+変換: JSON・出力を python -c / jq / cut で読む,git status,34,29,4.12
+変換: JSON・出力を python -c / jq / cut で読む,sprint-state.py loop,71,39,4.12
+往復: NDF スクリプトを 1 行打つ,step_result.py emit,99,96,4.08
+変換: JSON・出力を python -c / jq / cut で読む,supervise.py new,27,22,3.82
+変換: JSON・出力を python -c / jq / cut で読む,git log,51,44,3.79
+照合: CI の状態を gh で見る,loop(for),55,44,3.73
+待ち: sleep・ポーリングの手書き,kill,23,15,3.72
+転記: 引継ぎ文書の更新,Write,29,20,3.62
+変換: JSON・出力を python -c / jq / cut で読む,pytest,29,20,3.49
+照合: 版数・タグ,git pull,24,21,3.42
+変換: JSON・出力を python -c / jq / cut で読む,python ?,44,27,3.38
+照合: git の状態を見る,git tag,53,46,3.36
+往復: NDF スクリプトを 1 行打つ,state.py verify-findings,17,6,3.32
+変換: JSON・出力を python -c / jq / cut で読む,bg-wait.sh wait,6,2,3.22
+変換: JSON・出力を python -c / jq / cut で読む,merged-steps.py merge-when-green,65,36,3.06
+照合: CI の状態を gh で見る,echo,25,14,3.06
+待ち: sleep・ポーリングの手書き,python(heredoc),35,15,3.05
+照合: gh で PR・Issue を読む,gh pr diff,53,32,3.05
+待ち: tmux capture-pane の確認,tmux -L,33,8,3.01
+往復: NDF スクリプトを 1 行打つ,upkeep.py rank,50,39,2.93
+照合: CI の状態を gh で見る,grep,49,38,2.89
+往復: NDF スクリプトを 1 行打つ,plan-to-spec-steps.py spec-finalize,59,37,2.86
+変換: JSON・出力を python -c / jq / cut で読む,supervise.py queue,46,31,2.84
+転記: プラン・状態 JSON の手書き,Write,29,29,2.82
+照合: CI の状態を gh で見る,gh run list,43,32,2.73
+変換: JSON・出力を python -c / jq / cut で読む,git worktree,34,32,2.7
+照合: CI の状態を gh で見る,gh api,39,25,2.64
+照合: CI の状態を gh で見る,git fetch,14,13,2.63
+待ち: sleep・ポーリングの手書き,head,1,1,2.6
+変換: JSON・出力を python -c / jq / cut で読む,git ls-files,19,17,2.6
+往復: NDF スクリプトを 1 行打つ,parallel.py answer,12,6,2.59
+照合: CI の状態を gh で見る,date,29,19,2.54
+往復: NDF スクリプトを 1 行打つ,relay.py stop,67,66,2.51
+照合: 版数・タグ,python ?,19,15,2.4
+往復: NDF スクリプトを 1 行打つ,state.py should-rotate,19,11,2.38
+照合: CI の状態を gh で見る,gh issue view,21,10,2.38
+変換: JSON・出力を python -c / jq / cut で読む,context-policy.py record,33,23,2.37
+照合: 版数・タグ,git grep,35,27,2.32
+変換: JSON・出力を python -c / jq / cut で読む,claude,19,13,2.29
+変換: JSON・出力を python -c / jq / cut で読む,awk,31,26,2.15
+転記: PR 本文のファイル,Edit,19,6,2.09
+待ち: sleep・ポーリングの手書き,cat,17,11,2.07
+往復: NDF スクリプトを 1 行打つ,upkeep.py apply,25,24,2.03
+待ち: sleep・ポーリングの手書き,rm,21,16,1.97
+変換: JSON・出力を python -c / jq / cut で読む,mkdir,28,27,1.87
+照合: CI の状態を gh で見る,python(heredoc),8,7,1.87
+待ち: tmux capture-pane の確認,relay.py ls,22,7,1.79
+変換: JSON・出力を python -c / jq / cut で読む,state.py merge-fix,5,1,1.7
+往復: NDF スクリプトを 1 行打つ,upkeep.py candidates,31,25,1.68
+変換: JSON・出力を python -c / jq / cut で読む,jq,29,19,1.64
+変換: JSON・出力を python -c / jq / cut で読む,glossary.py diff,29,26,1.64
+照合: CI の状態を gh で見る,{,4,1,1.63
+照合: CI の状態を gh で見る,sed,28,22,1.61
+変換: JSON・出力を python -c / jq / cut で読む,docker,20,10,1.59
+往復: NDF スクリプトを 1 行打つ,relay.py ls,23,12,1.55
+往復: NDF スクリプトを 1 行打つ,state.py start-round,13,9,1.52
+変換: JSON・出力を python -c / jq / cut で読む,git init,6,4,1.52
+変換: JSON・出力を python -c / jq / cut で読む,rm,14,14,1.5
+変換: JSON・出力を python -c / jq / cut で読む,run(),4,1,1.48
+往復: NDF スクリプトを 1 行打つ,sprint-close.py,32,23,1.48
+変換: JSON・出力を python -c / jq / cut で読む,$SS,25,21,1.47
+変換: JSON・出力を python -c / jq / cut で読む,null,18,17,1.47
+変換: JSON・出力を python -c / jq / cut で読む,cp,17,17,1.45
+変換: JSON・出力を python -c / jq / cut で読む,pgrep,19,15,1.44
+変換: JSON・出力を python -c / jq / cut で読む,parallel.py wait,14,3,1.43
+往復: NDF スクリプトを 1 行打つ,relay.py spawn,17,5,1.43
+往復: NDF スクリプトを 1 行打つ,sprint-state.py gate,31,29,1.41
+待ち: sleep・ポーリングの手書き,ps,5,4,1.41
+変換: JSON・出力を python -c / jq / cut で読む,rg,19,9,1.38
+変換: JSON・出力を python -c / jq / cut で読む,curl,22,16,1.33
+変換: JSON・出力を python -c / jq / cut で読む,cut,25,16,1.33
+変換: JSON・出力を python -c / jq / cut で読む,glossary.py check,23,23,1.31
+照合: CI の状態を gh で見る,state.py report,7,5,1.26
+往復: NDF スクリプトを 1 行打つ,upkeep.py report,25,25,1.26
+照合: CI の状態を gh で見る,state.py verify-sweep,7,2,1.26
+照合: 版数・タグ,git commit,14,11,1.25
+変換: JSON・出力を python -c / jq / cut で読む,check-ndf-contracts.py,20,10,1.21
+往復: NDF スクリプトを 1 行打つ,release-steps.py changed-plugins,3,2,1.18
+変換: JSON・出力を python -c / jq / cut で読む,sprint-close.py,24,16,1.17
+待ち: tmux capture-pane の確認,cat,12,5,1.15
+照合: CI の状態を gh で見る,ls,17,16,1.14
+待ち: sleep・ポーリングの手書き,$T,15,3,1.12
+待ち: sleep・ポーリングの手書き,gh pr ready,4,2,1.09
+往復: NDF スクリプトを 1 行打つ,supervise.py,21,20,1.07
+待ち: sleep・ポーリングの手書き,tmux -L,10,4,1.04
+往復: NDF スクリプトを 1 行打つ,monitor.py gemini,4,3,1.02
+変換: JSON・出力を python -c / jq / cut で読む,project-mvv.py check,3,3,1.01
+変換: JSON・出力を python -c / jq / cut で読む,find,21,18,1.01
+待ち: sleep・ポーリングの手書き,supervise.py queue,22,14,0.97
+待ち: sleep・ポーリングの手書き,ls,3,3,0.96
+照合: CI の状態を gh で見る,bash progress-record.sh,4,2,0.93
+変換: JSON・出力を python -c / jq / cut で読む,supervise.py run,14,8,0.92
+変換: JSON・出力を python -c / jq / cut で読む,git rev-parse,8,6,0.92
+待ち: sleep・ポーリングの手書き,gh api,5,4,0.9
+待ち: tmux capture-pane の確認,loop(for),11,5,0.88
+変換: JSON・出力を python -c / jq / cut で読む,drive.py claude,12,6,0.86
+変換: JSON・出力を python -c / jq / cut で読む,supervise.py wait,17,10,0.85
+待ち: sleep・ポーリングの手書き,docker,13,5,0.84
+変換: JSON・出力を python -c / jq / cut で読む,upkeep.py report,16,16,0.82
+変換: JSON・出力を python -c / jq / cut で読む,check-script-structure.py,13,12,0.82
+照合: 版数・タグ,git ,7,7,0.81
+変換: JSON・出力を python -c / jq / cut で読む,ask.py decide,11,9,0.8
+往復: NDF スクリプトを 1 行打つ,gate-rejections.py count,12,11,0.8
+待ち: sleep・ポーリングの手書き,mkdir,11,7,0.78
+変換: JSON・出力を python -c / jq / cut で読む,git add,13,11,0.76
+往復: NDF スクリプトを 1 行打つ,drive.py,18,14,0.76
+往復: NDF スクリプトを 1 行打つ,relay.py,10,8,0.76
+照合: 版数・タグ,git ls-files,8,7,0.75
+待ち: sleep・ポーリングの手書き,sed,12,11,0.75
+変換: JSON・出力を python -c / jq / cut で読む,git branch,9,9,0.73
+往復: NDF スクリプトを 1 行打つ,release-steps.py approval-facts,10,8,0.72
+往復: NDF スクリプトを 1 行打つ,monitor.py codex,5,2,0.72
+変換: JSON・出力を python -c / jq / cut で読む,git checkout,8,7,0.71
+待ち: sleep・ポーリングの手書き,gh pr view,5,5,0.7
+変換: JSON・出力を python -c / jq / cut で読む,relay.py account,7,5,0.67
+変換: JSON・出力を python -c / jq / cut で読む,spec-copy.py check,10,8,0.66
+変換: JSON・出力を python -c / jq / cut で読む,printf,7,6,0.66

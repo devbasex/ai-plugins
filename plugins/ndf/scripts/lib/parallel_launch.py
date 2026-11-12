@@ -135,7 +135,7 @@ class LaunchRouting:
             return True
         spec = q.get("launch") or {}
         if kind in ("spawn", "helper") and q.get("purpose") and spec.get("argv"):
-            extra = {"n": q["n"]} if q.get("n") is not None else {}
+            extra = {k: q[k] for k in ("n", "verify") if q.get(k) is not None}  # 版の要るまとめの依頼も引き継ぐ（#3058）
             purpose = f"{q['purpose']}-a{qid}"
             self.wake_tries.pop(lane, None)  # 人が起こし直すと答えた: 再起動の回数を数え直す
             if self.launch and self.launch.get("purpose") == q["purpose"]:
@@ -201,8 +201,7 @@ class LaunchRouting:
             done = [p for p in self.launches if re.fullmatch(rf"wake-{re.escape(n)}-\d+", p)]
             last = max(done, key=lambda p: int(p.rsplit("-", 1)[1]), default=None)
             since = clock.parse((self.launches.get(last or "") or {}).get("at"), naive="utc") if last else None
-            at = clock.parse(row.get("at"), naive="utc") if row and row.get("at") else None
-            if row is not None and (since is None or at is None or at.timestamp() < since.timestamp() - 0.5):
+            if row is not None and (since is None or not _moved_since(row, since.timestamp())):
                 continue  # 今の再起動より前の行: まだ動いて観えていない
             self.woken.discard(n)
 

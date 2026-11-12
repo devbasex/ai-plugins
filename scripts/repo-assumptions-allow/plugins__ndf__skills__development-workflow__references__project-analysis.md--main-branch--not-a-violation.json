@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/skills/development-workflow/references/project-analysis.md",
+  "name": "main-branch",
+  "kind": "not-a-violation",
+  "reason": "宣言の値を書いた実例（どのブランチ名でも同じ手順になることを、具体的な値で示す。#3121）。手順そのものはベースブランチ・本番チャネルの語で書く",
+  "count": 2
+}
