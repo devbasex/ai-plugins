@@ -71,3 +71,18 @@ def test_added_tests_are_not_run(refactor_lib, monkeypatch, tmp_path):
     intake = type("I", (), {"accepted": {"I-001": [{"files": ["tests/test_a.py"]}]}, "test_failed": {}, "sendbacks": {}})()
     implement._run_added_tests(pathlib.Path("s"), {"strategy": strategy.as_state(), "worktrees": {"work": str(tmp_path)}}, intake)
     assert intake.test_failed == {}
+
+
+@pytest.mark.parametrize("name", ["local-full", "local-scoped-ci-whole"])
+def test_plan_keeps_items_without_local_tests(refactor_lib, tmp_path, name):
+    targets = importlib.import_module("refactor_lib.targets")
+    _, strategy = _strategy(refactor_lib, name)
+    runs, origin = targets.limited_runs({"strategy": strategy.as_state()}, [], str(tmp_path), (), "extract_function")
+    assert (runs, origin) == ([], "ci_only")
+
+
+def test_round_only_plan_passes_no_test_command_to_the_implementer(refactor_lib, tmp_path):
+    targets = importlib.import_module("refactor_lib.targets")
+    ts, strategy = _strategy(refactor_lib, "round-only")
+    runs, origin = targets.limited_runs({"strategy": strategy.as_state()}, [], str(tmp_path), (), "extract_function")
+    assert (origin, [r.kind for r in runs]) == ("round_test", [ts.LINT])

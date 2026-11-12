@@ -1,0 +1,181 @@
+n,pattern,occurrences,sessions,api_calls,output,cache_create,cache_read,usd,est_saving_usd(推測: (n-1)×1 回の応答の平均費用×回数)
+2,Bash:python -c → Bash:python -c,407,199,714,338452,1905538,98014971,46.76,26.65
+2,Agent → Agent,440,121,262,890558,1949689,47461871,52.24,87.73
+2,Bash:gh api → Bash:gh api,438,98,702,270996,1288809,98475001,58.3,36.38
+2,Bash:gh issue view → Bash:gh issue view,239,152,434,235763,2140304,63766503,39.06,21.51
+2,Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,707,51,455,232105,1479195,75625476,45.17,70.18
+2,WebFetch → WebFetch,532,67,300,222762,2413958,22811228,15.87,28.14
+2,Bash:git show → Bash:git show,238,96,391,153483,951911,50830250,23.48,14.29
+2,Bash:pytest → Bash:git add,169,117,338,141365,282474,55916368,31.05,15.53
+2,Bash:pytest → Bash:pytest,192,90,353,111251,582058,62635765,32.47,17.66
+2,Bash:git diff → Bash:git diff,155,108,275,165164,1280483,29620470,23.06,13.0
+2,ToolSearch → TaskStop,106,98,210,48450,829615,39149038,16.16,8.16
+2,Bash:git log → Bash:git show,99,91,195,71832,638588,20719039,12.2,6.19
+2,Bash:bash progress-record.sh → Bash:bash progress-record.sh,540,16,471,260275,1416247,81777121,55.86,64.04
+2,ToolSearch → Monitor,118,73,235,57294,498456,24651116,10.65,5.35
+2,Bash:gh pr view → Bash:gh pr view,110,73,207,79689,1308756,34117597,24.17,12.84
+2,Bash:git add → Bash:git push,174,44,348,103350,289202,41801212,24.67,12.34
+2,Bash:pytest → Bash:git status,99,68,196,70276,752227,23855851,13.54,6.84
+2,Bash:gh issue view → Bash:bash projects-sync.sh,78,74,154,48816,3079349,8327964,27.22,13.79
+2,Bash:git fetch → Bash:git show,85,63,166,63407,1092446,27186819,16.35,8.37
+2,Bash:bash progress-record.sh → Bash:bash projects-sync.sh,323,16,524,166494,1139421,81312214,49.48,30.5
+2,Bash:sprint-state.py loop → Bash:sprint-state.py loop,83,52,145,52193,342899,18387055,7.45,4.27
+2,Bash:gh issue list → Bash:gh issue view,69,62,136,72476,319664,18100375,9.09,4.61
+2,Bash:git add → Bash:git commit,72,56,144,52774,151341,26161771,12.86,6.43
+2,WebSearch → WebSearch,119,32,79,35246,340776,8814140,5.62,8.47
+2,Bash:gh pr view → Bash:git fetch,69,53,136,53100,472494,19669505,10.85,5.5
+2,Bash:git grep → Bash:git grep,88,39,153,81787,346415,18674592,7.86,4.52
+2,Bash:context-policy.py record → Bash:context-policy.py record,57,55,112,67692,235292,18357952,6.91,3.52
+2,Bash:git status → Bash:git add,63,49,126,46606,597190,17602942,12.61,6.3
+2,ToolSearch → Bash:loop+sleep(手書きの待ち),67,46,134,33359,290577,21191784,11.0,5.5
+2,Bash:git push → Bash:gh api,102,30,203,59215,127368,20650973,12.29,6.18
+2,Bash:loop+sleep(手書きの待ち) → Bash:loop+sleep(手書きの待ち),134,22,202,70490,15731367,26459066,113.43,75.25
+2,Bash:git grep → Bash:git show,87,30,174,72866,333144,20054586,7.46,3.73
+2,Bash:git log → Bash:git log,57,43,104,36736,202699,11411599,5.24,2.87
+2,Bash:python ? → Bash:python ?,63,38,107,70542,385673,16181897,7.81,4.6
+2,Bash:rm → Bash:rm,68,35,122,66669,164865,20840735,11.36,6.33
+2,Bash:gh api → Bash:gh pr comment,91,25,181,81831,117814,16685814,11.11,5.59
+2,Bash:python -c → Bash:supervise.py queue,50,41,100,42473,117734,13824472,4.52,2.26
+2,ToolSearch → SendMessage,53,38,106,75928,727458,20443082,12.74,6.37
+2,WebSearch → WebFetch,89,22,138,73900,623117,14169879,10.43,6.73
+2,Bash:gh pr view → Bash:gh issue view,45,43,85,40878,770373,9582354,9.63,5.1
+2,Bash:supervise.py queue → Bash:supervise.py queue,48,40,86,31781,75758,12948303,3.87,2.16
+2,Bash:git add → Bash:git status,46,41,92,39560,87768,14475582,5.05,2.52
+2,Bash:supervise.py new → Bash:supervise.py queue,46,40,90,41473,577641,13178426,8.0,4.09
+2,Bash:supervise.py queue → Bash:supervise.py wait,54,34,89,33183,73336,11714855,3.62,2.2
+2,Bash:git add → Bash:gh api,60,30,118,59677,1153177,22788765,19.86,10.1
+2,Bash:supervise.py queue → Bash:upkeep.py research,42,42,42,37432,142575,4732420,2.84,2.84
+2,Agent → Bash:state.py merge-fix,72,24,144,187688,279156,50365566,31.69,15.84
+2,Skill:ndf:fix → Bash:git log,75,23,141,26141,3136085,3865310,20.73,11.03
+2,Skill:ndf:fix → Bash:git status,78,22,144,25668,3143724,4030180,22.25,12.05
+2,Bash:git status → Bash:gh api,61,28,82,30489,1293171,4947774,11.07,8.23
+2,AskUserQuestion → Bash:gh pr edit,46,37,92,101775,2478216,21823529,31.95,15.98
+2,Bash:gh pr checks → Bash:gh pr merge,54,31,108,26590,283717,25533778,13.74,6.87
+2,Bash:gh issue view → Bash:python -c,42,39,84,62625,306693,11318294,6.02,3.01
+2,Skill:ndf:out-of-scope → Bash:gh issue list,58,28,116,43240,320027,24067757,13.38,6.69
+2,WebFetch → WebSearch,80,20,105,51993,363998,11277575,7.06,5.38
+2,Bash:git log → Bash:git diff,40,40,80,32444,352172,6539861,4.97,2.48
+2,Bash:git diff → Bash:git add,53,30,106,37634,295124,11593702,7.49,3.75
+2,Bash:bash → Bash:bash,115,13,163,51722,11665036,18292359,81.32,57.37
+2,Bash:git fetch → Bash:gh api,54,27,101,51850,321613,33208560,19.42,10.38
+2,Skill:ndf:worktree → Bash:bash worktree-setup.sh,56,26,112,40357,803111,10124711,10.45,5.23
+3,Agent → Agent → Agent,231,86,162,632068,877190,28422077,31.26,89.14
+3,WebFetch → WebFetch → WebFetch,373,52,228,189670,2217623,14225653,11.03,36.07
+3,Bash:bash projects-sync.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,392,33,188,128059,1048381,34535904,22.85,95.3
+3,Bash:gh api → Bash:gh api → Bash:gh api,145,37,325,117564,568715,42755176,26.14,23.32
+3,Bash:python -c → Bash:python -c → Bash:python -c,94,51,206,86402,444535,32699813,15.75,14.38
+3,Bash:python -c → Bash:python -c → Bash:grep,53,50,159,94092,277612,18948260,8.11,5.4
+3,Bash:git show → Bash:git show → Bash:git show,69,34,156,61974,358782,21485975,9.61,8.5
+3,Edit → Bash:pytest → Bash:git add,53,43,153,88941,189257,12636462,10.2,7.07
+3,Bash:gh api → Bash:gh api → Bash:loop(for),69,30,199,70433,192052,20746561,12.51,8.68
+3,Bash:sed → Bash:python -c → Bash:python -c,47,43,141,64128,293958,17192288,7.57,5.04
+3,Bash:bash progress-record.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,136,14,262,97552,658865,38374428,24.38,25.31
+3,Bash:bash progress-record.sh → Bash:bash progress-record.sh → Bash:bash progress-record.sh,295,6,269,167269,926126,47735998,35.68,78.26
+3,Bash:git push → Bash:gh api → Bash:gh api,67,24,197,57097,126528,16831287,10.64,7.23
+3,Bash:git add → Bash:git push → Bash:gh api,68,23,203,58231,142787,18310757,11.37,7.62
+3,Bash:python(heredoc) → Bash:pytest → Bash:git add,47,33,141,91738,182759,39707561,22.02,14.68
+3,Bash:cat → Bash:python -c → Bash:python -c,43,36,128,66746,386622,12963285,6.8,4.57
+3,Bash:bash progress-record.sh → Bash:bash progress-record.sh → Bash:bash projects-sync.sh,128,12,229,100827,795990,34290249,22.94,25.64
+3,Bash:git diff → Bash:git diff → Bash:grep,36,33,103,65065,574005,9686696,7.89,5.51
+3,ToolSearch → Monitor → Bash:cat,37,28,111,23568,1641107,8471925,10.79,7.19
+3,Bash:bg-wait.sh wait → Bash:loop(for) → Bash:bg-wait.sh wait,73,14,219,77024,5405157,49901343,59.21,39.47
+3,WebSearch → WebFetch → WebFetch,56,17,109,57358,400463,11506174,7.8,8.01
+3,Skill:ndf:development-workflow → Bash:cat → Bash:bash worktree-setup.sh,29,29,87,18100,1639115,4416530,14.64,9.76
+3,Bash:grep → Bash:python -c → Bash:python -c,30,28,89,69641,172240,12436185,5.8,3.91
+3,WebSearch → WebSearch → WebSearch,56,15,39,19168,162603,3414108,2.56,7.35
+3,Bash:pytest → Bash:python(heredoc) → Bash:pytest,40,20,116,56877,166717,33463966,18.88,13.02
+3,Bash:python(heredoc) → Bash:pytest → Bash:pytest,42,19,124,74076,818154,31740904,20.66,14.0
+3,Bash:sed → Bash:gh issue view → Bash:gh issue view,28,28,80,42928,249462,9833852,4.57,3.2
+3,WebFetch → WebFetch → WebSearch,47,16,83,37850,273030,7784150,4.67,5.28
+3,Bash:gh api → Bash:gh api → Bash:gh pr comment,39,19,117,51661,72885,8806614,6.04,4.03
+3,Bash:gh api → Bash:gh pr comment → Bash:mkdir,41,18,122,53582,105525,11370939,7.72,5.19
+3,Bash:cat → Agent → Agent,27,27,55,154423,346238,8550141,9.55,9.37
+3,Bash:pytest → Edit → Bash:pytest,34,21,92,39105,140384,15725364,9.94,7.35
+3,Bash:gh issue view → Write → Bash:glossary.py check,26,26,77,246810,324532,7585973,8.94,6.04
+3,Bash:gh api → Bash:loop(for) → Bash:gh api,37,17,108,40130,189744,11144950,7.69,5.27
+3,WebSearch → WebSearch → WebFetch,39,16,71,36829,357030,6195595,5.13,5.64
+3,Bash:gh issue view → Bash:gh issue view → Bash:gh issue view,28,22,73,41200,204903,12092745,5.95,4.56
+3,Skill:ndf:out-of-scope → Bash:gh issue list → Bash:cat,34,18,102,63656,216926,22716602,12.38,8.25
+3,Bash:echo → Bash:git log → Bash:git show,24,24,72,22312,859483,3284680,7.97,5.31
+3,WebFetch → WebSearch → WebFetch,37,15,66,35472,245310,7125192,4.31,4.83
+3,Skill:ndf:fix → Bash:git log → Bash:gh api,39,14,84,18875,1811096,2662426,12.79,11.88
+3,Bash:pytest → Bash:git add → Write,23,23,69,33501,52524,5870200,3.93,2.62
+3,Bash:gh api → Bash:gh api → Bash:cat,25,21,71,33299,96171,12530946,7.58,5.34
+3,Edit → Bash:pytest → Bash:pytest,26,20,73,34788,165994,10862022,7.07,5.03
+3,Bash:python -c → Bash:python -c → Bash:loop(for),24,21,71,39586,176108,8108471,4.05,2.74
+3,Bash:grep → Bash:git diff → Bash:git diff,22,22,63,37460,232688,6340764,4.07,2.84
+3,Bash:gh issue view → Bash:gh issue view → Bash:grep,23,21,67,32272,151193,9524053,4.63,3.18
+3,Bash:git diff → Bash:grep → Bash:git diff,24,20,65,58873,356124,6749793,5.6,4.14
+3,Bash:loop(for) → Bash:gh issue view → Bash:gh issue view,22,21,65,28658,320856,9430998,5.6,3.79
+3,Bash:git fetch → Bash:git show → Bash:git show,23,20,61,19380,521974,7797915,5.99,4.52
+3,Bash:git add → Bash:python(heredoc) → Bash:git add,30,15,83,59398,104792,8843494,4.15,3.0
+3,Bash:git add → Bash:git push → Bash:cat,28,16,84,53822,69376,10881488,7.25,4.84
+3,Bash:python -c → Bash:python -c → Bash:sed,21,21,63,52765,197169,7080600,3.8,2.53
+3,Agent → Agent → Bash:loop(for),23,19,47,107792,171118,9431757,7.35,7.19
+3,Bash:pytest → Bash:pytest → Bash:pytest,28,15,62,16946,115444,9973933,5.88,5.31
+3,Skill:ndf:fix → Bash:git status → Bash:gh api,32,13,72,16731,1446851,2340912,10.7,9.51
+3,Bash:pytest → Bash:git status → Bash:git add,21,19,63,22671,55342,7791459,3.99,2.66
+3,Bash:git diff → Bash:git diff → Bash:git diff,22,18,54,33897,326582,5743056,5.14,4.19
+3,Bash:git grep → Bash:git show → Bash:git show,24,16,70,37869,139275,8429360,3.26,2.23
+3,Bash:ls → Bash:python -c → Bash:python -c,20,19,60,37127,127493,8477803,4.33,2.89
+3,Bash:python -c → Bash:python -c → Bash:python(heredoc),20,19,60,30629,69505,8283177,3.49,2.33
+4,WebFetch → WebFetch → WebFetch → WebFetch,268,44,176,167498,2031335,8961734,7.81,35.68
+4,Bash:bash projects-sync.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,276,27,144,102262,581445,24171337,14.12,81.2
+4,Agent → Agent → Agent → Agent,101,40,78,308734,291531,13188602,13.38,51.96
+4,Bash:bash progress-record.sh → Bash:bash progress-record.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,109,11,226,89688,691326,32671319,21.5,31.1
+4,Bash:bash progress-record.sh → Bash:bash progress-record.sh → Bash:bash progress-record.sh → Bash:bash progress-record.sh,193,6,181,95901,283464,32666093,21.27,68.04
+4,Bash:git add → Bash:git push → Bash:gh api → Bash:gh api,48,20,188,56846,134253,16126162,10.33,7.91
+4,Bash:gh api → Bash:gh api → Bash:gh api → Bash:gh api,47,19,135,49472,164944,18825123,10.89,11.37
+4,Bash:git push → Bash:gh api → Bash:gh api → Bash:gh api,35,16,134,45731,85541,11112385,7.24,5.67
+4,Bash:gh api → Bash:gh api → Bash:gh api → Bash:loop(for),31,18,118,48240,125473,12384237,7.72,6.08
+4,WebFetch → WebFetch → WebFetch → WebSearch,34,16,69,32180,262033,5797315,3.67,5.42
+4,Skill:ndf:development-workflow → Bash:cat → Bash:ls → Bash:sprint-state.py loop,23,23,92,17025,1358905,5684859,12.35,9.26
+4,WebSearch → WebFetch → WebFetch → WebFetch,37,14,81,39620,311505,6597238,4.68,6.42
+4,Bash:python -c → Bash:python -c → Bash:python -c → Bash:python -c,37,13,74,23131,198913,16434563,8.61,12.91
+4,Bash:cat → Agent → Agent → Agent,21,21,42,122494,91804,5810113,5.18,7.77
+4,Edit → Edit → Bash:pytest → Bash:git add,23,15,81,49987,79415,7435598,5.75,4.9
+4,WebSearch → WebSearch → WebFetch → WebFetch,27,12,52,27400,196330,4146553,3.08,4.8
+4,Bash:python(heredoc) → Bash:git add → Bash:python(heredoc) → Bash:git add,24,13,84,65660,115055,8699530,4.24,3.64
+4,WebFetch → WebFetch → WebSearch → WebFetch,23,13,49,23244,166388,4979164,2.93,4.13
+4,Bash:gh api → Bash:gh api → Bash:gh api → Bash:gh pr comment,21,13,83,34850,44200,6085410,4.05,3.07
+4,Bash:bg-wait.sh wait → Bash:loop(for) → Bash:bg-wait.sh wait → Bash:echo,24,11,96,32998,2140708,21900151,23.91,17.94
+4,Bash:gh api → Bash:gh api → Bash:loop(for) → Bash:gh api,24,11,93,31363,67691,9523198,6.0,4.64
+4,WebFetch → WebSearch → WebFetch → WebFetch,23,11,53,31207,203931,5986674,3.97,5.17
+4,Bash:echo → Bash:bg-wait.sh wait → Bash:loop(for) → Bash:bg-wait.sh wait,28,9,111,40623,1744021,20593462,21.73,16.44
+4,Bash:git show → Bash:git show → Bash:git show → Bash:git show,21,12,61,26716,132881,7289578,2.83,2.92
+4,WebSearch → WebSearch → WebSearch → WebSearch,31,8,22,10701,74261,2136176,1.58,6.69
+4,Agent → Agent → Agent → Bash:cat,16,15,34,70098,138716,4615437,3.73,5.27
+4,Bash:python -c → Bash:python -c → Bash:grep → Bash:sed,15,15,59,31659,94938,7470637,3.17,2.42
+4,Edit → Bash:pytest → Bash:git add → Write,15,15,58,34889,54116,4073698,3.45,2.68
+4,Bash:python(heredoc) → Bash:pytest → Bash:python(heredoc) → Bash:pytest,20,11,76,50383,100524,27101761,15.33,12.11
+4,Bash:bash progress-record.sh → Bash:bash projects-sync.sh → Bash:bash progress-record.sh → Bash:bash projects-sync.sh,44,5,94,20211,40949,17550344,8.99,12.62
+4,Edit → Bash:pytest → Edit → Bash:pytest,17,12,57,24596,122466,8039162,5.46,4.89
+4,Bash:gh api → Bash:gh api → Bash:loop(for) → Bash:gh pr comment,20,10,77,45628,55342,6905741,4.94,3.85
+4,Bash:loop+sleep(手書きの待ち) → Bash:loop+sleep(手書きの待ち) → Bash:loop+sleep(手書きの待ち) → Bash:loop+sleep(手書きの待ち),49,4,79,27572,9461097,4531650,63.09,117.4
+4,Bash:git diff → Bash:git diff → Bash:grep → Bash:sed,14,14,54,32805,240135,5470355,3.66,2.85
+4,Bash:git push → Bash:gh api → Bash:gh api → Bash:loop(for),17,11,67,16225,48143,6797351,4.11,3.13
+4,Edit → Edit → Bash:pytest → Bash:pytest,15,12,56,18067,134213,8736923,5.5,4.42
+4,Bash:bash → Bash:bash → Bash:bash → Bash:bash,45,4,81,25165,8306172,7106743,55.24,92.06
+4,Bash:loop(for) → Bash:gh api → Bash:gh pr comment → Bash:mkdir,20,8,80,27543,68150,8172044,5.2,3.9
+4,Bash:mkdir → Agent → Agent → Agent,13,12,27,96344,84534,5533903,4.85,7.01
+4,Bash:gh api → Bash:gh api → Bash:gh pr comment → Bash:mkdir,14,11,56,23413,44926,4265239,3.0,2.25
+4,Bash:sed → Bash:sed → Bash:python -c → Bash:python -c,12,12,48,17390,92972,5075007,2.23,1.67
+4,Bash:python -c → Bash:python -c → Bash:python -c → Bash:grep,12,12,48,27026,86074,5566876,2.61,1.96
+4,Bash:cat → Bash:ls → Bash:sprint-state.py loop → Bash:sprint-state.py loop,12,12,48,10512,555111,3821374,5.42,4.06
+4,Bash:git add → Read → Bash:python(heredoc) → Bash:git add,16,9,59,43165,87447,5707583,2.9,2.36
+4,Bash:bash progress-record.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,23,6,48,43703,473775,8590660,8.68,12.48
+4,Bash:loop(for) → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh → Bash:bash projects-sync.sh,13,10,28,15860,33573,8038299,3.72,5.18
+4,Bash:docker → Bash:docker → Bash:docker → Bash:docker,32,4,47,23136,49685,6649629,2.18,4.45
+4,Bash:cat → ToolSearch → Monitor → Bash:cat,14,9,56,13304,496588,4031311,3.57,2.68
+4,Skill:ndf:development-workflow → Bash:cat → Bash:cat → Bash:sprint-state.py loop,11,11,43,9941,633708,2558596,5.78,4.44
+4,Bash:git fetch → Bash:git show → Bash:git show → Bash:git show,11,11,40,14365,222130,4015477,2.7,2.23
+4,Bash:python -c → Bash:python -c → Bash:grep → Bash:grep,11,11,44,22684,64214,5460197,1.98,1.48
+4,Skill:ndf:development-workflow → Bash:cat → Bash:bash worktree-setup.sh → Bash:sprint-state.py loop,11,11,44,8789,694393,2685134,6.27,4.7
+4,Bash:git diff → Bash:git diff → Bash:grep → Bash:grep,11,11,43,22665,232850,3841307,2.89,2.22
+4,Agent → Agent → Agent → Bash:loop(for),12,10,25,66241,100807,4952950,4.0,5.76
+4,Bash:bash projects-sync.sh → Bash:bash progress-record.sh → Bash:bash projects-sync.sh → Bash:bash progress-record.sh,30,4,72,10750,16192,13282232,6.65,8.31
+4,WebFetch → WebSearch → WebSearch → WebFetch,14,8,33,18069,107085,3261409,2.34,2.98
+4,WebSearch → WebSearch → WebSearch → WebFetch,16,7,32,16011,150609,1957927,1.68,2.52
+4,WebFetch → WebFetch → WebSearch → WebSearch,14,8,25,12677,98751,1337627,1.15,1.94
+4,Bash:) → Bash:) → Bash:) → Bash:),28,4,52,24120,8447169,7114049,57.01,92.1
+4,Bash:python(heredoc) → Bash:python(heredoc) → Bash:pytest → Bash:pytest,12,9,48,28291,698896,9254448,8.01,6.01

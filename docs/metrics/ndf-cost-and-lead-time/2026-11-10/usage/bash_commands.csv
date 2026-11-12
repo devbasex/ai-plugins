@@ -1,0 +1,301 @@
+command,uses,sessions,usd_of_issuing_calls
+grep,18365,2348,1417.66
+sed,16560,2217,1304.41
+cat,10570,1662,1183.79
+python(heredoc),9573,1260,1197.11
+echo,6831,1775,920.46
+ls,5616,1413,573.95
+loop(for),5593,844,605.32
+mkdir,2691,1536,391.36
+python -c,2570,746,199.47
+gh api,2264,266,319.12
+gh issue view,2244,707,261.86
+git add,2153,916,182.81
+pytest,1892,498,181.35
+bash projects-sync.sh,1831,416,175.06
+tail,1728,433,270.38
+wc,1699,803,191.53
+git log,1479,709,171.28
+gh pr view,1476,405,192.4
+git diff,1467,618,117.63
+git fetch,1460,409,213.71
+git status,1447,531,173.15
+git show,1439,584,104.03
+bash progress-record.sh,1201,27,164.44
+date,999,318,198.37
+loop+sleep(手書きの待ち),940,156,219.54
+rm,833,253,77.92
+supervise.py queue,715,264,35.8
+head,653,365,61.39
+gh issue list,592,281,57.34
+git worktree,549,234,76.29
+gh pr checks,541,142,57.28
+git grep,510,137,32.48
+find,455,217,31.92
+sleep,428,194,42.53
+bash,416,80,106.36
+git push,396,106,37.58
+sprint-state.py loop,396,136,26.42
+cp,379,196,34.26
+merged-steps.py merge-when-green,353,137,19.59
+python ?,346,155,25.31
+awk,343,148,29.13
+gh pr comment,331,86,32.29
+git checkout,328,137,57.76
+gh pr merge,302,83,66.75
+git pull,302,120,34.8
+git rev-parse,293,197,51.51
+check-markdown-links.py,282,106,27.16
+glossary.py check,277,216,18.31
+bash build-runtime-plugins.sh,267,50,32.82
+bg-wait.sh wait,260,19,52.54
+git commit,257,164,21.76
+supervise.py run,245,105,14.12
+supervise.py new,237,119,25.32
+claude,232,85,36.53
+gh pr list,220,130,20.53
+parallel.py wait,215,10,30.08
+(空),214,68,38.23
+bash worktree-setup.sh,201,126,23.78
+supervise.py wait,197,90,8.86
+printf,196,115,19.67
+state.py merge-fix,184,38,47.6
+glossary.py gate,183,181,17.58
+gh pr create,181,76,31.61
+ask.py decide,180,67,13.72
+git ls-files,180,109,15.08
+jq,176,58,17.72
+bash pr-body-decisions.sh,176,49,18.19
+gh issue edit,174,106,15.19
+git branch,171,76,17.06
+gh run view,169,95,7.76
+ps,165,82,25.92
+rg,161,30,14.21
+check-skill-frontmatter.py,160,42,25.79
+),159,44,71.5
+gh pr edit,151,80,39.46
+context-policy.py record,147,85,9.4
+null,134,89,18.01
+codex,134,40,19.27
+{,130,91,13.25
+docker,130,26,11.01
+gh issue create,127,72,20.62
+curl,124,35,8.48
+pwd,123,45,26.06
+check-doc-line-limit.py,123,51,11.5
+env,120,51,13.26
+eval,118,33,20.67
+which,117,86,8.75
+monitor.py both,116,20,31.23
+$SS,105,45,5.56
+uv run,102,70,6.86
+step_result.py emit,100,96,4.13
+state.py verify-sweep,99,26,19.08
+cut,97,46,6.62
+case,97,88,8.32
+git ls-tree,96,37,4.37
+diff,95,71,7.77
+drive.py claude,92,16,5.7
+state.py check-oscillation,90,33,24.31
+measure.py,89,60,7.91
+spec-copy.py check,89,77,4.84
+monitor.py,86,14,22.81
+glossary.py render,85,72,3.74
+pgrep,83,46,15.88
+reply(),83,25,15.27
+git ls-remote,80,49,6.85
+gh issue comment,80,47,10.52
+issue-file.py create,80,52,4.95
+kiro-cli,79,18,23.74
+:,78,26,8.88
+tmux -L,74,12,6.87
+state.py read-result,72,27,21.87
+uvx,72,36,4.86
+doc-lint.py,71,52,3.19
+relay.py stop,70,67,2.74
+bash validate-runtime-plugins.sh,70,27,8.18
+plan-to-spec-steps.py spec-finalize,69,39,3.45
+agy,67,19,6.64
+gh issue close,65,49,8.4
+mv,65,49,6.11
+bash check-lint.sh,65,44,3.25
+relay.py ls,62,15,4.71
+gh pr diff,62,34,3.74
+state.py init,61,28,13.39
+pkill,61,47,8.63
+git tag,60,50,3.99
+git merge,60,39,6.66
+resume.py,60,60,8.27
+upkeep.py research,58,55,3.79
+gws,56,14,3.91
+sprint-close.py,56,32,2.64
+bash fetch-pr-comments.sh,56,13,7.28
+glossary.py diff,55,45,3.01
+glossary.py,55,51,3.46
+upkeep.py rank,52,40,3.0
+state.py report,50,30,6.5
+-v,48,29,5.11
+check-ndf-contracts.py,48,26,2.5
+gh run list,48,35,3.06
+check-script-structure.py,48,38,2.11
+gh label list,46,40,4.91
+git switch,46,11,6.77
+bash round.sh,45,6,7.16
+check-doc-staleness.py,44,29,6.0
+git stash,44,35,2.52
+git check-ignore,44,35,2.68
+estimate.py predict,43,19,2.36
+state.py unresolved-threads,42,18,8.63
+bash cr-round.sh,42,8,4.99
+upkeep.py report,42,41,2.14
+set,41,10,4.67
+gh run rerun,40,32,2.36
+kill,40,27,5.34
+gh pr ready,40,19,7.45
+git init,40,25,6.18
+sprint-state.py gate,40,33,2.08
+git merge-base,40,36,2.12
+npm,39,27,2.32
+issue-file.py dup,38,26,1.79
+[,37,32,4.09
+relay.py spawn,36,7,3.23
+$T,35,6,3.34
+instructions-check.py,35,25,2.04
+skill-stats.py,35,25,1.74
+parallel.py answer,34,8,11.21
+git rm,34,16,5.66
+pipefail,34,8,4.53
+gh repo view,34,32,5.0
+upkeep.py candidates,34,28,1.91
+release-steps.py approve,33,27,10.98
+chmod,33,21,4.25
+project-mvv.py context,33,25,1.71
+git reset,32,23,3.85
+relay.py account,31,16,5.5
+refactor.py init,30,16,3.98
+spec-copy.py write,30,18,1.52
+issue-file.py resolve-target,30,30,1.96
+fix-steps.py context,30,10,0.93
+bash $SC,29,4,8.35
+show.py,29,5,1.41
+bash cm.sh,29,2,1.21
+loop(while),28,8,4.03
+run(){,27,13,1.57
+s(){,27,6,0.82
+ruff,26,13,1.31
+init,26,11,5.18
+upkeep.py apply,26,25,2.09
+issue-file.py by-origin,26,24,1.67
+fetch-pr-comments.sh,25,10,2.35
+node,24,14,1.68
+gh release view,24,21,0.99
+declare,23,16,2.77
+refactor.py report,23,13,9.18
+state.py judge,23,11,6.12
+supervise.py,23,22,1.16
+git archive,23,12,1.18
+check-skill-repo-assumptions.py,22,16,1.77
+run(),22,9,4.83
+refactor.py merge-apply,20,4,4.78
+bash runtime-smoke-test.sh,20,9,4.04
+drive.py,20,15,0.86
+issue-body.py set,20,11,0.87
+read,20,9,1.09
+parallel.py settle,19,18,1.04
+parallel-measure.py capacity,19,3,10.19
+stat,19,15,1.82
+project-mvv.py signals,19,17,0.94
+state.py should-rotate,19,11,2.38
+gh search issues,18,15,0.85
+cr-round.sh,18,5,2.45
+rfcommit.sh extract_method,18,3,0.77
+parallel.py confirm,17,6,21.52
+project-decl.py check,17,11,0.76
+git auth,17,6,2.65
+git mv,17,14,2.95
+state.py verify-findings,17,6,3.32
+mission-state.py gate,17,11,1.0
+design-survey.py check,17,14,0.9
+xargs,17,2,0.65
+bash cmsg.sh,17,1,0.75
+bash stage-check.sh,16,13,2.71
+bash after-review.sh,16,1,4.32
+$SV,16,7,0.96
+du,16,11,1.13
+fix-steps.py,16,8,0.39
+release-steps.py approval-facts,15,9,1.25
+launch-reviewer.sh agy,15,9,3.42
+,15,11,1.76
+npx,15,9,0.95
+reply(){,15,5,2.07
+launch-codex.sh,15,8,2.19
+git config,15,11,1.58
+issue-file.py note,15,12,0.69
+check-trigger.py stats,15,15,1.91
+python -m json.tool,15,13,0.69
+touch,15,12,1.62
+git remote,15,14,1.25
+$R,14,5,0.69
+merged-steps.py base-sync,14,7,0.81
+merged-steps.py,14,14,0.66
+gate-rejections.py count,14,12,0.92
+project-decl.py write,14,11,0.6
+aws,14,4,0.67
+project-mvv.py check,13,12,1.61
+git cat-file,13,12,0.77
+bg-wait.sh run,13,4,1.42
+state.py start-round,13,9,1.52
+bash rfcommit.sh,13,1,0.51
+refactor.py merge-proposals,12,5,2.61
+if,12,9,3.81
+prepare-worktrees.sh sync,12,3,2.68
+git reflog,12,8,1.44
+bash install.sh,12,10,1.24
+rmdir,12,11,1.08
+git clone,12,9,0.96
+unset,12,7,0.67
+readlink,12,9,0.8
+mvv-gate.py check,12,9,0.63
+launch-reviewer.sh kiro,11,7,4.27
+relay.py,11,8,0.86
+relay.py restart,11,3,0.91
+gh project item-list,11,4,0.88
+project-mvv.py vet,11,7,1.38
+measure_doc.py,11,3,1.12
+refactor.py assess,11,8,0.5
+git rev-list,11,10,1.3
+c(){,11,9,0.85
+t(){,11,5,1.07
+bash run.sh,10,3,1.21
+gh pr close,10,10,1.41
+gh run watch,10,10,0.46
+git rebase,10,9,0.68
+show4.py,10,1,0.36
+parallel.py,9,9,0.42
+strings,9,8,0.44
+mission-state.py init,9,9,0.4
+check-trigger.py,9,8,0.57
+sha256sum,9,5,0.62
+$PY,9,3,1.17
+issue-file.py,9,8,0.44
+parallel.py helper,9,9,0.28
+parallel.py request-gate2,9,9,0.41
+deferred:,9,4,0.63
+w(){,9,1,0.91
+uv test_release_pr_fields.py,9,6,0.28
+refactor.py start-round,8,3,2.06
+gemini,8,7,0.79
+file,8,7,0.5
+sprint-state.py init,8,6,0.33
+gh issue reopen,8,6,0.38
+release-steps.py notes,8,7,0.39
+relay.py notice,8,8,0.72
+merged-steps.py cleanup,8,7,0.54
+rf,8,1,3.28
+$E,8,2,0.49
+upkeep.py owner,8,5,0.37
+p(){,8,7,0.44
+rf1506_commit.sh extract_method,8,1,0.35
+relay_e2e.py,8,1,0.36
+release-verification-steps.py verify-install,7,7,0.48
+parallel.py await,7,4,0.29
