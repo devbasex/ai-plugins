@@ -43,7 +43,7 @@ def ci_junit(state: dict[str, Any], sha: str, checks: list[str], runs: Optional[
     )
 
 
-def _failed(state: dict[str, Any], sha: str, checks: list[str], runs, label: str, outcome: str) -> tuple[bool, str, dict[str, Any]]:
+def _failed_verdict(state: dict[str, Any], sha: str, checks: list[str], runs, label: str, outcome: str) -> tuple[bool, str, dict[str, Any]]:
     """落ちた結論の判定と、見分けの材料（CI の JUnit と run の置き場）。"""
     places = [str(r.get("html_url") or r.get("details_url") or "") for r in runs or [] if isinstance(r, dict)]
     return (
@@ -71,7 +71,7 @@ def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, A
     if outcome in (None, "pending"):
         why = "照会できない" if outcome is None else "終わっていない"
         return True, f"CI 未完了: {label} が{why}。合否は検査のプランの ci-peek とマージが確かめる", None
-    return _failed(state, sha, checks, runs, label, outcome)
+    return _failed_verdict(state, sha, checks, runs, label, outcome)
 
 
 def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
@@ -105,4 +105,4 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
         die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
-    return _failed(state, sha, checks, last.get("runs"), label, outcome)
+    return _failed_verdict(state, sha, checks, last.get("runs"), label, outcome)

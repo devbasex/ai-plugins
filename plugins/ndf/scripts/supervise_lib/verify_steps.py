@@ -181,7 +181,16 @@ def ci_watch_steps(peeks: list[tuple[str, str]], fix_next: str, stop: str = "sto
     - `ci-fix`: 修正の worker。直してコミットし `fix_next` へ戻る。`push` なら自分で push する（検査のプランは pr のステップを持たない）"""
     stop_codes = {"2": stop}
     steps = [
-        {"id": sid, "type": "run", "stage": "完了判定", "timeout": 300, "cmd": CI_PEEK_CMD, "on_fail": "ci-fix", "on_exit": stop_codes, "next": nxt}
+        {
+            "id": sid,
+            "type": "run",
+            "stage": "完了判定",
+            "timeout": 300,
+            "cmd": CI_PEEK_CMD,
+            "on_fail": "ci-fix",
+            "on_exit": stop_codes,
+            "next": nxt,
+        }
         for sid, nxt in peeks
     ]
     steps.append(
@@ -197,7 +206,17 @@ def ci_watch_steps(peeks: list[tuple[str, str]], fix_next: str, stop: str = "sto
         }
     )
     prompt = CI_FIX_PROMPT + (CI_FIX_PUSH if push else "push しない。")
-    steps.append({"id": "ci-fix", "type": "work", "kind": "修正", "stage": "完了判定", "inputs": list(CI_PEEK_IDS), "prompt": prompt, "next": fix_next})
+    steps.append(
+        {
+            "id": "ci-fix",
+            "type": "work",
+            "kind": "修正",
+            "stage": "完了判定",
+            "inputs": list(CI_PEEK_IDS),
+            "prompt": prompt,
+            "next": fix_next,
+        }
+    )
     return steps
 
 

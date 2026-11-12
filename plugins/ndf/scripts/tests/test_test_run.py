@@ -415,6 +415,6 @@ def test_ci_only_scope_runs_only_the_lint_suite(tmp_path):
 def test_ci_only_scope_without_lint_files_passes_without_running_tests(tmp_path, strategy):
     root = _repo(tmp_path, _ci_only_decl(strategy))
     code, out = _run(root, "scope", "--paths", "tests", "--changed", "README.md")
-    assert code == 0 and "CI に任せた" in out["summary"]
+    assert code == 0 and "lint の suite が無い" in out["summary"]
     code, out = _run(root, "scope", "--paths", "tests", "--only-kind", "test")
-    assert code == 0 and "CI に任せた" in out["summary"]
+    assert code == 0 and "test の suite が無い" in out["summary"]

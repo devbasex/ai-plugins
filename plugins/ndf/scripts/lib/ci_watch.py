@@ -11,6 +11,7 @@ import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
+import exit_codes
 import jsonio
 
 LOG_NAME = "ci-watch.jsonl"
@@ -19,23 +20,21 @@ FAILED = "failed"
 PENDING = "pending"
 UNKNOWN = "unknown"
 
-# 終了コード（プランの行き先は `supervise_lib/verify_steps.ci_watch_steps` が決める）
-EXIT_GO = 0  # 進めてよい（通った・未完了・チェックがまだ無い・取得できなかった）
-EXIT_FIX = 1  # テストのチェックが落ちた。改修の回数は上限の内
-EXIT_LIMIT = 2  # 落ちたが改修の回数が上限に当たった
-EXIT_NOT_CI = 3  # --after-merge で、落ちたテストのチェックが無い（マージが CI 以外の理由で落ちた）
+# 終了コード（プランの行き先は `supervise_lib/verify_steps.ci_watch_steps` が決める）: 0 = 進めてよい（通った・未完了・
+# チェックがまだ無い・取得できなかった）/ 1 = テストのチェックが落ちた（改修の回数は上限の内）/ 2 = 落ちたが改修の回数が
+# 上限に当たった / 3 = --after-merge で、落ちたテストのチェックが無い（マージが CI 以外の理由で落ちた）
 
 
-def log_path(state_dir: str | Path) -> Path:
+def watch_log_path(state_dir: str | Path) -> Path:
     return Path(state_dir) / "work" / LOG_NAME
 
 
-def matches(names: list[str], label: str, name: str) -> bool:
+def is_test_check(names: list[str], label: str, name: str) -> bool:
     """チェックがテストのチェックか。`names` が空なら head のすべて。照合は名前の完全一致（ラベルか、ジョブの名前）。"""
     return not names or label in names or name in names
 
 
-def missing(names: list[str], seen: Iterable[tuple[str, str]]) -> list[str]:
+def absent_checks(names: list[str], seen: Iterable[tuple[str, str]]) -> list[str]:
     """テストのチェックのうち、head に 1 件も現れないものの名前。"""
     seen = list(seen)
     return [n for n in names if not any(n in (label, name) for label, name in seen)]
@@ -60,7 +59,7 @@ def failed_heads(rows: list[dict]) -> list[str]:
     return heads
 
 
-def decide(result: str, head: Optional[str], rows: list[dict], limit: int, after_merge: bool) -> tuple[int, int]:
+def decide_exit(result: str, head: Optional[str], rows: list[dict], limit: int, after_merge: bool) -> tuple[int, int]:
     """(終了コード, 改修の回数)。`rows` は今回の行を足す前の記録。改修の回数は今回の head を含む落ちた head の数。
 
     今回より前の落ちた head（今回の head を除く）が上限に達していれば、改修を起こさず 2 を返す（I5）。
@@ -68,12 +67,12 @@ def decide(result: str, head: Optional[str], rows: list[dict], limit: int, after
     before = [h for h in failed_heads(rows) if h != head]
     fixes = len(before) + (1 if result == FAILED and head else 0)
     if result == FAILED:
-        return (EXIT_LIMIT if len(before) >= limit else EXIT_FIX), fixes
-    return (EXIT_NOT_CI if after_merge else EXIT_GO), fixes
+        return (exit_codes.EXIT_UNREADABLE if len(before) >= limit else exit_codes.EXIT_VIOLATION), fixes
+    return (exit_codes.EXIT_PRECONDITION if after_merge else exit_codes.EXIT_OK), fixes
 
 
-def read_log(state_dir: str | Path) -> list[dict]:
-    rows = jsonio.read_jsonl(log_path(state_dir), missing=[], skip_broken=True)
+def read_watch_log(state_dir: str | Path) -> list[dict]:
+    rows = jsonio.read_jsonl(watch_log_path(state_dir), missing=[], skip_broken=True)
     return [r for r in rows if isinstance(r, dict)]
 
 
@@ -85,7 +84,6 @@ def append_log(state_dir: str | Path, head: Optional[str], result: str, failed: 
         "failed": list(failed),
         "after_merge": after_merge,
     }
-    path = log_path(state_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    jsonio.append_jsonl(path, row)
+    (Path(state_dir) / "work").mkdir(parents=True, exist_ok=True)
+    jsonio.append_jsonl(Path(state_dir) / "work" / LOG_NAME, row)
     return row

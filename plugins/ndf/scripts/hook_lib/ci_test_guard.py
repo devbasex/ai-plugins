@@ -15,18 +15,17 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 from pathlib import Path
 
+import project_decl
 import shparse as sp
 
 from . import payload as pl
 from .shell_checks import ASSIGN, MAX_DEPTH, SHELLS, _shell_script, _skip_wrappers
 from .token_guard import deny
 
-DECL = Path(".ndf") / "project.json"
 SCRIPTS = Path(__file__).resolve().parents[1]
 REASON = (
     "CI テストの宣言（.ndf/project.json の test.ci.only）があるため、手元でテストを走らせない（{suite} は CI で走る）。"
@@ -36,16 +35,11 @@ REASON = (
 
 
 def find_decl(start: str) -> dict:
-    """`start` から上へ辿って最初の `.ndf/project.json`。読めなければ空。"""
+    """`start` から上へ辿って最初の `.ndf/project.json` のあるディレクトリの宣言（`project_decl` が読む）。無ければ空。"""
     here = Path(start or os.getcwd()).resolve()
     for d in (here, *here.parents):
-        f = d / DECL
-        if f.is_file():
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                return {}
-            return data if isinstance(data, dict) else {}
+        if (d / project_decl.DECL).is_file():
+            return project_decl.read_project_decl(d)
     return {}
 
 
@@ -53,7 +47,7 @@ def _base(word: str) -> str:
     return word.rsplit("/", 1)[-1]
 
 
-def _split(text: str) -> list[str]:
+def _words_of(text: str) -> list[str]:
     try:
         return shlex.split(text)
     except ValueError:
@@ -62,14 +56,14 @@ def _split(text: str) -> list[str]:
 
 def launch_form(suite: dict) -> list[str]:
     """suite の起動の形（前置きの語の並び）。組めなければ空。"""
-    words = _split(str(suite.get("command") or ""))
+    words = _words_of(str(suite.get("command") or ""))
     runner = str(suite.get("runner") or "")
     at = next((i for i, w in enumerate(words) if runner and _base(w) == runner), None)
     if at is not None:
         form = words[: at + 1]
     else:
         scope = str(suite.get("scope_command") or "")
-        form = _split(scope.split("{paths}", 1)[0]) if "{paths}" in scope else []
+        form = _words_of(scope.split("{paths}", 1)[0]) if "{paths}" in scope else []
     if len(form) == 1 and len(words) > 1 and words[0] == form[0]:
         form = words[:2]
     return form
@@ -100,7 +94,7 @@ def hits(words: list[str], form: list[str]) -> bool:
     return at is not None and all(w in form for w in words[:at])
 
 
-def _commands(cmd: str, depth: int = 0) -> list[list[str]]:
+def _launched_commands(cmd: str, depth: int = 0) -> list[list[str]]:
     """コマンドの位置で起動するコマンドの語の並び（包みと変数の代入を飛ばした後）。ヒアドキュメントの本文は見ない。
     `bash -c` / `sh -c` の中も読む。"""
     if depth > MAX_DEPTH:
@@ -118,7 +112,7 @@ def _commands(cmd: str, depth: int = 0) -> list[list[str]]:
             words = words[i:]
             words = words[_skip_wrappers(words) :]
             script = _shell_script(words[1:]) if words and _base(words[0]) in SHELLS else None
-            out.extend(_commands(script, depth + 1) if script else [words])
+            out.extend(_launched_commands(script, depth + 1) if script else [words])
         stack.extend(c for c in n.children if c.child_count)
     return out
 
@@ -135,7 +129,7 @@ def ci_test_decision(ev: pl.Event) -> dict | None:
     forms = test_forms(find_decl(ev.command_cwd() or ev.cwd))
     if not forms:
         return None
-    for words in _commands(cmd):
+    for words in _launched_commands(cmd):
         for name, form in forms:
             if hits(words, form):
                 return deny(REASON.format(suite=name, scripts=SCRIPTS))

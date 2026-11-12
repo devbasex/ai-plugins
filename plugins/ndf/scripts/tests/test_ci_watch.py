@@ -73,7 +73,7 @@ def peek(tmp_path, root, head, *checks, after_merge=False, pr=True):
 def test_pending_goes_on_and_is_recorded(tmp_path, repo):
     code, out, _ = peek(tmp_path, repo, "a1", check("pytest", status="IN_PROGRESS", conclusion=""))
     assert code == 0 and out["metrics"]["verdict"] == "pending"
-    rows = ci_watch.read_log(tmp_path / "st")
+    rows = ci_watch.read_watch_log(tmp_path / "st")
     assert rows[-1]["head"] == "a1" and rows[-1]["verdict"] == "pending"
 
 
@@ -109,7 +109,7 @@ def test_same_head_counts_once_and_the_limit_stops(tmp_path, repo):
 def test_unreadable_is_recorded_and_goes_on(tmp_path, repo):
     code, out, _ = peek(tmp_path, repo, None, pr=False)
     assert code == 0 and out["metrics"]["verdict"] == "unknown"
-    assert ci_watch.read_log(tmp_path / "st")[-1]["verdict"] == "unknown"
+    assert ci_watch.read_watch_log(tmp_path / "st")[-1]["verdict"] == "unknown"
 
 
 def test_after_merge_without_a_test_failure_stops(tmp_path, repo):
@@ -121,6 +121,6 @@ def test_after_merge_without_a_test_failure_stops(tmp_path, repo):
 
 def test_decide_counts_failed_heads_before_this_one():
     rows = [{"head": h, "verdict": "failed"} for h in ("a", "b", "c")]
-    assert ci_watch.decide("failed", "c", rows, 3, False) == (1, 3)
-    assert ci_watch.decide("failed", "d", rows, 3, False) == (2, 4)
-    assert ci_watch.decide("pending", "d", rows, 3, False) == (0, 3)
+    assert ci_watch.decide_exit("failed", "c", rows, 3, False) == (1, 3)
+    assert ci_watch.decide_exit("failed", "d", rows, 3, False) == (2, 4)
+    assert ci_watch.decide_exit("pending", "d", rows, 3, False) == (0, 3)

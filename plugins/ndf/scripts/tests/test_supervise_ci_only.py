@@ -49,7 +49,9 @@ def test_impl_plan_has_no_local_tests_and_drafts_the_pr_right_after_impl(tmp_pat
     assert steps["impl"]["next"] == "pr-draft"
     draft = steps["pr-draft"]
     assert draft["type"] == "pr" and draft["body"] == "template" and draft["next"] == "base-sync"
-    assert steps["base-sync"]["next"] == "lint-limited" and steps["lint-limited"]["next"] == ("design-tests" if mode == "standard" else "pr")
+    assert steps["base-sync"]["next"] == "lint-limited" and steps["lint-limited"]["next"] == (
+        "design-tests" if mode == "standard" else "pr"
+    )
     assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole"
 
 

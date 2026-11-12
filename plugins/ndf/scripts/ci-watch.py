@@ -23,12 +23,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
+import deps  # noqa: E402
+
+deps.require("waits", "durable", "locks", "schema")
 import ci_watch  # noqa: E402
 import gh_parts  # noqa: E402
 import limits  # noqa: E402
 import project_decl  # noqa: E402
 import test_strategy as ts  # noqa: E402
-from step_result import StepError, emit, gh_json, git_root, main_with, result  # noqa: E402
+import run_core  # noqa: E402
+from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, gh_json, git_root, main_with, result  # noqa: E402
 
 from merged_lib.reading import read_checks  # noqa: E402
 
@@ -36,7 +40,7 @@ TOOL = "ci-watch"
 LOG_TAIL_LINES = 200
 
 
-def _read(root, pr: int, names: list[str]) -> tuple[str | None, dict, list[str], str | None]:
+def _read_test_checks(root, pr: int, names: list[str]) -> tuple[str | None, dict, list[str], str | None]:
     """(head, 結論ごとのテストのチェックの CheckItem, 現れないテストのチェック, 取得できなかった理由)。
     Runner が付かなかった取り消し（基盤待ち）は落ちたものに数えず、未完了として扱う。"""
     try:
@@ -45,8 +49,8 @@ def _read(root, pr: int, names: list[str]) -> tuple[str | None, dict, list[str],
     except (StepError, OSError, ValueError) as e:
         return None, {}, [], str(e)
     groups = {"failed": reading.failed, "pending": [*reading.pending, *reading.infra], "passed": reading.passed}
-    picked = {k: [i for i in v if ci_watch.matches(names, i.label, str(i.key[-1]))] for k, v in groups.items()}
-    absent = ci_watch.missing(names, ((i.label, str(i.key[-1])) for v in groups.values() for i in v))
+    picked = {k: [i for i in v if ci_watch.is_test_check(names, i.label, str(i.key[-1]))] for k, v in groups.items()}
+    absent = ci_watch.absent_checks(names, ((i.label, str(i.key[-1])) for v in groups.values() for i in v))
     return (info or {}).get("headRefOid"), picked, absent, None
 
 
@@ -60,14 +64,14 @@ def _failed_log(root, run: str | None) -> str:
     return "\n".join(p.stdout.splitlines()[-LOG_TAIL_LINES:])
 
 
-def _summary(verdict: str, code: int, fixes: int, limit: int, failed: list, absent: list[str], why: str | None) -> str:
+def _peek_summary(verdict: str, code: int, fixes: int, limit: int, failed: list, absent: list[str], why: str | None) -> str:
     if why is not None:
         return f"CI の結果を取得できない（記録して進める）: {why[:200]}"
-    if code == ci_watch.EXIT_LIMIT:
+    if code == EXIT_UNREADABLE:
         return f"CI のテストのチェックが落ちた（{', '.join(failed)}）。改修の回数が上限 {limit} に当たった（{fixes} 回目の失敗）"
-    if code == ci_watch.EXIT_FIX:
+    if code == EXIT_VIOLATION:
         return f"CI のテストのチェックが落ちた（{', '.join(failed)}）。直して push する（{fixes} / {limit} 回目）"
-    if code == ci_watch.EXIT_NOT_CI:
+    if code == EXIT_PRECONDITION:
         return "マージが落ちたが、落ちた CI のテストのチェックが無い（CI 以外の理由）"
     if verdict == ci_watch.PASSED:
         return "CI のテストのチェックが通った"
@@ -79,26 +83,28 @@ def cmd_peek(a) -> int:
     root = git_root(a.root)
     names = ts.ci_checks(project_decl.read_project_decl(root))
     limit = int(limits.value("supervise.ci-fix", "attempts"))
-    head, picked, absent, why = _read(root, a.pr, names)
+    head, picked, absent, why = _read_test_checks(root, a.pr, names)
     failed = picked.get("failed", [])
     if why is not None:
         verdict = ci_watch.UNKNOWN
     else:
         verdict = ci_watch.verdict(len(failed), len(picked["pending"]), len(picked["passed"]), len(absent))
-    rows = ci_watch.read_log(a.state)
-    code, fixes = ci_watch.decide(verdict, head, rows, limit, a.after_merge)
+    rows = ci_watch.read_watch_log(a.state)
+    code, fixes = ci_watch.decide_exit(verdict, head, rows, limit, a.after_merge)
     ci_watch.append_log(a.state, head, verdict, [i.label for i in failed], a.after_merge)
-    if code in (ci_watch.EXIT_FIX, ci_watch.EXIT_LIMIT):
+    if code in (EXIT_VIOLATION, EXIT_UNREADABLE):
         for item in failed:
             print(f"落ちたチェック: {item.label}" + (f"（run {item.run}）" if item.run else ""))
             log = _failed_log(root, item.run)
             if log:
                 print(f"--- {item.label} の失敗したジョブのログの末尾 ---\n{log}\n---")
-    items = [i.item(kind) for kind, group in picked.items() for i in group] + [{"kind": "check", "name": n, "result": "absent"} for n in absent]
-    metrics = {"head": head, "verdict": verdict, "fixes": fixes, "limit": limit, "log": str(ci_watch.log_path(a.state))}
-    summary = _summary(verdict, code, fixes, limit, [i.label for i in failed], absent, why)
-    nxt = f"gh pr checks {a.pr} で失敗を読む" if code in (ci_watch.EXIT_LIMIT, ci_watch.EXIT_NOT_CI) else None
-    emit(result(TOOL, "ok" if code == ci_watch.EXIT_GO else "stopped", summary, items, metrics, next=nxt), code)
+    items = [i.item(kind) for kind, group in picked.items() for i in group] + [
+        {"kind": "check", "name": n, "result": "absent"} for n in absent
+    ]
+    metrics = {"head": head, "verdict": verdict, "fixes": fixes, "limit": limit, "log": str(ci_watch.watch_log_path(a.state))}
+    summary = _peek_summary(verdict, code, fixes, limit, [i.label for i in failed], absent, why)
+    nxt = f"gh pr checks {a.pr} で失敗を読む" if code in (EXIT_UNREADABLE, EXIT_PRECONDITION) else None
+    emit(result(TOOL, "ok" if code == EXIT_OK else "stopped", summary, items, metrics, next=nxt), code)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,4 +124,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_core.main("scripts/ci-watch.py", main)

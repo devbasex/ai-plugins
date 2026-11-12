@@ -83,7 +83,9 @@ def test_codex_shell_list_is_read_and_denied(tmp_path):
         "cwd": str(root),
         "tool_input": {"command": ["bash", "-lc", "uv run pytest x -q"]},
     }
-    p = subprocess.run([sys.executable, str(SCRIPT), "--runtime", "codex"], input=json.dumps(data), capture_output=True, text=True, timeout=20)
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "--runtime", "codex"], input=json.dumps(data), capture_output=True, text=True, timeout=20
+    )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "CI テストの宣言" in out["permissionDecisionReason"]

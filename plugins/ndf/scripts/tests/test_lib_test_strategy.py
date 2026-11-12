@@ -684,7 +684,10 @@ def _ci_only(only=True, strategy=None, check=None, required=()):
     }
     if strategy:
         test["strategy"] = strategy
-    return {"test": test, "ci": {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}], "required_checks": list(required)}}
+    return {
+        "test": test,
+        "ci": {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}], "required_checks": list(required)},
+    }
 
 
 @pytest.mark.parametrize("strategy", [None, "local-full", "local-scoped-ci-whole", "round-only"])

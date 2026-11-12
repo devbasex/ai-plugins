@@ -20,6 +20,9 @@
     }
   ],
   "test": {
+    "ci": {
+      "only": true
+    },
     "suites": [
       {
         "name": "pytest",

@@ -74,6 +74,12 @@ flowchart LR
 のは `release-verification`（リリース後テスト）の担当で、この Skill は扱わない。段階 4 の
 結合・端から端までも、対象は取り込み前の差分である。
 
+**CI テストの宣言（`.ndf/project.json` の `test.ci.only`）があるリポジトリでは、段階 1・2 を手元で走らせない。**
+テストは PR の CI で走り、証跡は PR の CI の結果（`gh pr checks <PR>`・`merged-steps.py probe --pr <PR>`）で示す。
+証跡の表の「コマンド」にチェックの名前、「結果」に結論と head のコミットを書く。CI が終わっていなければ未検証と書き、
+通ったとは書かない。段階 3 の静的解析は手元で走らせる。宣言の決め方とプランの流れは `development-workflow` の
+「テストを CI に寄せる（CI テストの宣言）」にある。
+
 ## モード別の完了の定義
 
 必要な段階は変更の性質によって変わる。判定（モード）の基準は `development-workflow` が

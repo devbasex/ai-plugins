@@ -202,8 +202,10 @@ class Strategy:
     def round_runs(self) -> list[ScopeRun]:
         """ラウンドテストを種別つきで並べる。引数由来の `round_command` は `round_kind`、宣言からなら suite ごとの `kind`。"""
         if self.round_command:
-            return [ScopeRun("round", self.round_kind, self.round_command)]
-        return [ScopeRun(s.name, s.kind, s.command) for s in self.suites if s.command]
+            runs = [ScopeRun("round", self.round_kind, self.round_command)]
+        else:
+            runs = [ScopeRun(s.name, s.kind, s.command) for s in self.suites if s.command]
+        return [r for r in runs if not (self.ci_only and r.kind == TEST)]  # CI テストの宣言ならテストを外す（#3056）
 
     def as_state(self) -> dict[str, Any]:
         """状態ファイルとプランへ写す形。以後は変えない（集約の不変条件）。"""
@@ -552,6 +554,12 @@ def _ci_target(test: dict[str, Any], decl: dict[str, Any], ci_check: Optional[st
     return {"check": check, "checks": [check] if check else required, "junit_artifacts": ci.get("junit_artifacts") or None}
 
 
+CI_ONLY_NOTE = "CI テストの宣言があるため、テストの suite を手元で走らせず CI に任せた（結果は gh pr checks <PR> で読む）"
+
+
+CI_ONLY_SWEEP = "- テストを手元で打たない（.ndf/project.json の CI テストの宣言）。合否は PR の CI の結果を `gh pr checks <PR>` で読む\n"
+
+
 def declares_ci_only(decl: dict[str, Any]) -> bool:
     """CI テストの宣言（`test.ci.only: true`）があるか（#3056）。宣言を読む側はすべてここを通す。"""
     test, _ = _test_of(decl)
@@ -570,6 +578,7 @@ def _with_ci_only(strategy: Strategy, decl: dict[str, Any], test: Optional[dict[
     if declares_ci_only(decl):
         strategy.ci_only = True
         strategy.ci = strategy.ci or _ci_target(test or {}, decl, ci_check)
+        strategy.notes.append(CI_ONLY_NOTE)
     return strategy
 
 

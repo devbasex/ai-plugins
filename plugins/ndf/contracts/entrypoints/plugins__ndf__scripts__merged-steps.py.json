@@ -12,17 +12,25 @@
     "HOME",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
     "NDF_LEASE_DIR",
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_RUNTIME_SESSION",
     "NDF_STATE_HOME",
+    "NDF_WHOLE_RUNS_DIR",
     "NDF_WORKTREE_BASE",
     "UV_PROJECT_ENVIRONMENT",
     "WT_DOCKER_COMMAND",
     "XDG_STATE_HOME"
   ],
   "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
     {
       "file": "project.json",
       "keys": [
