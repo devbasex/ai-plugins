@@ -483,6 +483,19 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
 THRESHOLD_TRIGGERS = (("score", ge, False), ("lines", gt, False), ("escapes", ge, False), ("hours", ge, True))
 
 
+def base_metrics(prs: list[dict], lines: int, since_at: datetime, esc: dict, frm: str, to: str) -> dict:
+    """`eval` の metrics の共通の鍵（PR の数・点数・変更行数・経過時間・すり抜けの最大・範囲の両端）。"""
+    return {
+        "prs": len(prs),
+        "score": sum(p["points"] for p in prs),
+        "lines": lines,
+        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
+        "escapes": max(esc.values(), default=0),
+        "from": frm,
+        "to": to,
+    }
+
+
 def evaluate_sprint(root: Path, a_sprint: str, issues: set[int], since: str | None, to_ref: str | None, review: bool) -> dict:
     """最後の検査の判定（`--sprint`。#3126）。範囲はスプリントに属しまだ検査していない PR だけで、トリガーは
     `final`（`--review` なら `review`）だけを見る（決定 6）。範囲が空か文書のファイルだけなら立たない。"""
@@ -493,13 +506,7 @@ def evaluate_sprint(root: Path, a_sprint: str, issues: set[int], since: str | No
     sc = final_scope(root, start, head, decl, events, a_sprint, issues, review)
     esc = escapes_since(events, since_at)
     metrics = {
-        "prs": len(sc.kept),
-        "score": sum(p["points"] for p in sc.kept),
-        "lines": sc.lines,
-        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
-        "escapes": max(esc.values(), default=0),
-        "from": sc.frm,
-        "to": sc.to,
+        **base_metrics(sc.kept, sc.lines, since_at, esc, sc.frm, sc.to),
         "start": start,
         "sprint": a_sprint,
         "other": sc.other,
@@ -528,15 +535,7 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    metrics = {
-        "prs": len(prs),
-        "score": sum(p["points"] for p in prs),
-        "lines": changed_lines(root, frm, to, excluded),
-        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
-        "escapes": max(esc.values(), default=0),
-        "from": frm,
-        "to": to,
-    }
+    metrics = base_metrics(prs, changed_lines(root, frm, to, excluded), since_at, esc, frm, to)
     fired = [{"trigger": "review", "value": len(prs), "threshold": 1}] if review and prs else []
     for name, reached, needs_prs in THRESHOLD_TRIGGERS:
         if not review and reached(metrics[name], t[name]) and (prs or not needs_prs):
