@@ -357,7 +357,7 @@ def _wait_ci(root: pathlib.Path, ctx: OutcomeContext, base: str | None, pr: int 
     )
     if outcome == gh_pr_info.CONFLICTING:  # 衝突した PR は pull_request のワークフローが起動しない。emit は終了して戻らない
         summary = f"PR #{pr} はベースブランチと衝突していて CI が起動しない（衝突の状態 CONFLICTING）。{detail}"
-        nxt = shlex.join(["python3", str(HERE / "merged-steps.py"), "base-sync", "--pr", str(pr), "--root", str(root)])
+        nxt = shlex.join(["python3", str(HERE / "merged-steps.py"), "base-sync", "--pr", str(pr), "--push", "--root", str(root)])
         _emit_step(result(TOOL, "stopped", summary, [{"waited_seconds": waited}], {}, next=nxt), step_result.EXIT_UNREADABLE)
     if outcome is None:
         _emit_step(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
