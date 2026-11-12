@@ -372,7 +372,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         return stop
     if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
         return stop
-    waves = waves if waves is not None else with_lane_close(a, sprint_plans(a))  # レーンのまとめ（#3058）
+    waves = waves if waves is not None else with_lane_close(a, sprint_plans(a), close_plan)  # レーンのまとめ（#3058）
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
         apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）

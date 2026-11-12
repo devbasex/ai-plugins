@@ -17,6 +17,7 @@ import argparse
 import json
 import shlex
 from pathlib import Path
+from typing import Callable
 
 from sprint_close_lib.final_stage import STAGE_VERIFY
 from supervise_lib import limits
@@ -131,9 +132,10 @@ def _write_verify(a, repo: str) -> Path:
     return out / VERIFY_FILE
 
 
-def with_lane_close(a, waves: list[dict]) -> list[dict]:
+def with_lane_close(a, waves: list[dict], close_plan: Callable[[argparse.Namespace, str], dict]) -> list[dict]:
     """1 スプリントのレーンの目録なら、本番の後にまとめのステージを足す（A7）。まとめは最後のプランのステージの queue へ
-    `--then` でつなぐ。最後のステージが承認ゲートか手で流すステージなら、まとめを自分の command で流す。"""
+    `--then` でつなぐ。最後のステージが承認ゲートか手で流すステージなら、まとめを自分の command で流す。
+    `close_plan` は今のまとめを組む関数（`sprint.close_plan`）で、レーンの中で本番を流し終える経路と古い記録の経路だけが呼ぶ。"""
     lane = sprint_lane(a.worktree)
     if lane is None:
         return waves
@@ -147,8 +149,6 @@ def with_lane_close(a, waves: list[dict]) -> list[dict]:
         step["cmd"] += f" --verify-plan {shlex.quote(str(_write_verify(a, repo)))}"
         step["on_exit"] = {**step.get("on_exit", {}), "10": "end"}  # 依頼を送ったら答えを待たずにまとめへ進む（決定 7）
     else:
-        from supervise_lib.sprint import close_plan
-
         # 依頼の経路の目録に本番のプラン（`{queue_pr:release-prod}`）は無いため、リリース記録は queue が探す（`verify_plan` と同じ）
         found = requested and not getattr(a, "record_pr", None)
         close = close_plan(argparse.Namespace(**{**vars(a), "record_pr": RECORD_FOUND}) if found else a, repo)

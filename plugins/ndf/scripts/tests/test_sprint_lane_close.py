@@ -22,7 +22,6 @@ import parallel_external as pe  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release  # noqa: E402
-from supervise_lib import sprint  # noqa: E402
 from supervise_lib import sprint_lane_close as slc  # noqa: E402
 
 
@@ -48,12 +47,16 @@ def request_waves(a) -> list[dict]:
     ]
 
 
+def not_called(_a, _repo):
+    raise AssertionError("依頼の経路は今のまとめを組まない")
+
+
 def ids(plan: dict) -> list[str]:
     return [s["id"] for s in plan["steps"]]
 
 
 def test_the_request_route_closes_without_waiting_and_without_closing_issues(a, lane):
-    waves = slc.with_lane_close(a, request_waves(a))
+    waves = slc.with_lane_close(a, request_waves(a), not_called)
     last = waves[-1]
     assert (last["name"], last["then_of"], list(last["plans"])) == ("まとめ", "スプリントブランチ", ["lane-close"])
     close = last["plans"]["lane-close"]
@@ -76,11 +79,10 @@ def test_the_request_route_closes_without_waiting_and_without_closing_issues(a, 
     assert "--record-pr {queue_record}" in closing["cmd"]
 
 
-def test_a_lane_that_releases_inside_closes_as_now_and_records_its_end(a, lane, monkeypatch):
+def test_a_lane_that_releases_inside_closes_as_now_and_records_its_end(a, lane):
     stub = {"steps": [{"id": "retro", "next": "close"}, {"id": "close", "type": "run", "next": "end"}]}
-    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: stub)
     waves = [{"name": "デプロイ", "plans": {"release": {}}}, {"name": "本番", "plans": {"release-prod": {}}}]
-    got = slc.with_lane_close(a, waves)
+    got = slc.with_lane_close(a, waves, lambda _a, _repo: stub)
     close = got[-1]["plans"]["lane-close"]
     assert got[-1]["then_of"] == "本番" and ids(close) == ["retro", "close", "lane-end"]
     assert close["steps"][1]["next"] == "lane-end" and "--request" not in close["steps"][2]["cmd"]
@@ -92,8 +94,7 @@ def test_a_plan_started_before_the_lane_end_mark_keeps_waiting_for_the_answer(a,
     今までのまとめ（課題を閉じる）を流す（決定 10）。"""
     monkeypatch.setattr(slc, "plan_ends", lambda _lane: False)
     seen = []
-    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: seen.append(_a) or {"steps": [{"id": "close", "next": "end"}]})
-    waves = slc.with_lane_close(a, request_waves(a))
+    waves = slc.with_lane_close(a, request_waves(a), lambda _a, _repo: seen.append(_a) or {"steps": [{"id": "close", "next": "end"}]})
     close = waves[-1]["plans"]["lane-close"]
     assert ids(close) == ["close", "lane-end"] and slc.closes_issues(close)
     # 目録に本番のプラン（release-prod）は無いため、リリース記録は queue が探す
@@ -118,16 +119,16 @@ def test_the_plan_ends_lanes_only_when_its_workflow_set_the_event(tmp_path, monk
     assert slc.plan_ends(("p1", "la")) is False  # 計画の置き場が分からなければ今までの道
 
 
-def test_after_a_gate_stage_the_close_runs_on_its_own_command(a, lane, monkeypatch):
-    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: {"steps": [{"id": "close", "next": "end"}]})
-    got = slc.with_lane_close(a, [{"name": "本番", "plans": {"promote": {}}}, {"name": "リリース承認ゲート", "gate": "承認を取る"}])
+def test_after_a_gate_stage_the_close_runs_on_its_own_command(a, lane):
+    stages = [{"name": "本番", "plans": {"promote": {}}}, {"name": "リリース承認ゲート", "gate": "承認を取る"}]
+    got = slc.with_lane_close(a, stages, lambda _a, _repo: {"steps": [{"id": "close", "next": "end"}]})
     assert got[-1]["name"] == "まとめ" and "then_of" not in got[-1]
 
 
 def test_a_stage_list_outside_a_sprint_lane_is_kept(a, monkeypatch):
     monkeypatch.setattr(slc, "sprint_lane", lambda _repo: None)
     waves = request_waves(a)
-    assert slc.with_lane_close(a, waves) is waves and "on_exit" not in waves[1]["plans"]["release-request"]["steps"][0]
+    assert slc.with_lane_close(a, waves, not_called) is waves and "on_exit" not in waves[1]["plans"]["release-request"]["steps"][0]
 
 
 @pytest.mark.parametrize(

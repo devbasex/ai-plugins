@@ -122,9 +122,8 @@ NO_ENGINE = [
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
-# flow は Engine と、queue のファイルだけに触る関数を import する。sprint_lane_close は版の要らないまとめで sprint の
-# close_plan を使い、sprint は with_lane_close を import する）
-LAZY = {("engine", "flow"), ("queue", "flow"), ("sprint_lane_close", "sprint")}
+# flow は Engine と、queue のファイルだけに触る関数を import する）
+LAZY = {("engine", "flow"), ("queue", "flow")}
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
