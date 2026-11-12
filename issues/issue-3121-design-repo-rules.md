@@ -1,7 +1,7 @@
 # ai-plugins のブランチ運用（#3119 の受け入れ内容）
 
-[issue-3121-design.md](issue-3121-design.md) の分冊である。#3121 の受け入れ条件 14〜19（#3119 の受け入れ条件 1〜6）を、
-#3121 が用意するブランチ運用の宣言の値と、ai-plugins の側の決まり・検査として設計する。語の意味は本体の
+[issue-3121-design.md](issue-3121-design.md) の分冊である。対象は #3121 の受け入れ条件 14〜19（#3119 の受け入れ条件 1〜6）である。
+これらを、#3121 が用意するブランチ運用の宣言の値と、ai-plugins の側の決まり・検査として設計する。語の意味は本体の
 「用語」の表にある。
 
 **この分冊の作業は 2 つの時期に分かれる。**
@@ -49,8 +49,8 @@
 
 ### 決定 12: 宛先の検査を Pull Request の変更で緩められないため、`check-pr-base.sh` は宛先のブランチの宣言を読む
 
-CI は Pull Request のマージの結果を checkout する。そのため worktree の `.ndf/worktree.json` を読むと、Pull Request が
-自分の宣言を `whole` へ書き換えて検査を緩められる。`git show origin/<宛先>:.ndf/worktree.json` の値で判定する。
+CI は Pull Request のマージの結果を checkout する。そのため worktree の `.ndf/worktree.json` を読むと、検査を緩められる。
+Pull Request が自分の宣言を `whole` へ書き換えれば通る。`git show origin/<宛先>:.ndf/worktree.json` の値で判定する。
 `branch_flow` を NDF がメインディレクトリから読む（本体の非機能の実現方式）のと同じ考え方である。
 
 根拠: Value 7 / C2（MVV 版 7）
@@ -58,7 +58,7 @@ CI は Pull Request のマージの結果を checkout する。そのため work
 ### 決定 13: ルールセットを変えずに済ませるため、`develop` から `main` への Pull Request は必須のチェック `guard` で断る
 
 GitHub のルールセットには、Pull Request の head のブランチを制限する規則が無い（本体の PRD1）。`protect main` は既に
-`guard`（`check-pr-base.sh` を走らせるジョブ）と `pytest` を必須のステータスチェックに持つ（本体の PRD2）。`guard` の判定を
+`guard` と `pytest` を必須のステータスチェックに持つ（本体の PRD2）。`guard` は `check-pr-base.sh` を走らせるジョブである。`guard` の判定を
 変えれば、ルールセットの設定を触らずに `develop` からの Pull Request がマージできなくなる。
 
 - 作り方: 自前で作る・ライブラリやサービスを使う
@@ -77,21 +77,22 @@ GitHub のルールセットには、Pull Request の head のブランチを制
 | 3 | `origin/main..<head>` のコミットは、head の first-parent の列（リリースブランチを組むマージと版上げ）か、origin のいずれかの `sprint/*` の祖先である | `git rev-list` と `git merge-base --is-ancestor` |
 
 `develop` だけにあるコミット（別のスプリントの PR・開発版の版上げ）は 3 に当たらず落ちる。どのスプリントを承認したかは
-CI では分からないため、承認はリリース承認ゲートの承認資料（範囲 = 選んだスプリントブランチの PR の和）が持つ。
+CI では分からない。承認はリリース承認ゲートの承認資料が持ち、その範囲は選んだスプリントブランチの PR の和である。
 
 CI が保証するのは「head の中身が、リリースブランチを組むコミットと、origin にあるいずれかのスプリントブランチのコミットだけ」までである。
 承認していないスプリントブランチをリリースブランチへマージしても、条件 3 は通す。承認したスプリントだけが入ることは、次の 2 つが保証する。
 
 - 承認資料の範囲は、本体の取り込み方の表のとおり「前の本番のタグ..リリースブランチの先頭」から作る。承認する人は、入るスプリントの PR をすべて見る
 - リリースの Pull Request をマージするステップは、head の先頭が承認したコミット（提示の記録のリリースブランチの先頭）と同じときだけマージする。違えば組み直しへ戻す（本体の I7 と同じ経路）
+
 `whole` か `branch_flow` が無いときは今の判定（head が `develop` か、先頭が `origin/develop` の祖先の `release/v<版>`）のまま。
 
 根拠: Value 13 / Value 7（MVV 版 7）
 
 ### 決定 15: リリースブランチの組み合わせを必ず試すため、`selected` では全体テストを省く規則 3 を当てない
 
-`scripts/ci-heavy-skip.py` の規則 3 は「`develop` への push で通ったコミットから版数と説明しか変えていない」本番の
-Pull Request で全体テストを省く。選んで集めたリリースブランチは `develop` と違う組み合わせなので、宛先のブランチの
+`scripts/ci-heavy-skip.py` の規則 3 は、本番の Pull Request で全体テストを省く。
+省く条件は「`develop` への push で通ったコミットから版数と説明しか変えていない」ことである。選んで集めたリリースブランチは `develop` と違う組み合わせなので、宛先のブランチの
 宣言が `selected` のときは規則 3 を当てない。リリースブランチを組むマージは `--no-ff` で行い、スプリントの先頭と
 同じコミットにならないようにする。規則 1（版上げだけの差分）と規則 2（文書だけの差分）は今のまま当てる。比べる
 ブランチ（`--branch`、既定 `develop`）は宣言の `base_branch` から読む。
@@ -110,7 +111,7 @@ Pull Request で全体テストを省く。選んで集めたリリースブラ�
 
 本番のリリースの後、`release/v<版>-sync` に `origin/develop` を取り込む。版数の箇所の衝突は本番の版を取り、
 `release/v<版>-sync` → `develop` の Pull Request で戻す。今の手順（`docs/versioning-and-distribution.md` の「正式版を出す」）
-と同じ操作である。`selected` ではリリースブランチが `main` と選んだスプリントを含むので、戻すマージが本番チャネルを
+と同じ操作である。`selected` ではリリースブランチが `main` と選んだスプリントを含む。そのため、戻すマージがそのまま本番チャネルを
 `develop` へ戻すこと（E13）になる。`develop` の作り直しは本体の決定 6 のとおり行わない。
 
 根拠: Value 3 / Value 11（MVV 版 7）
@@ -136,8 +137,8 @@ Pull Request で全体テストを省く。選んで集めたリリースブラ�
 | 4 | 段 3 を今の運用で本番へ出す。`main` 宛の検査は `main` の宣言（まだ `whole`）で判定される（決定 12） | `whole` |
 | 5 | 段 4 のマージの後に始めるスプリントから、`main` から切り、選んで集める | `selected` |
 
-段 2 を待つのは、`develop` から切ったスプリントブランチを `selected` のリリースブランチへマージすると `develop` の中身が
-`main` へ混ざるためである。段 4 の後、`main` と `develop` の差は開発版の版上げだけになる。
+段 2 を待つ理由は、`develop` から切ったスプリントブランチにある。
+これを `selected` のリリースブランチへマージすると、`develop` の中身が `main` へ混ざる。段 4 の後、`main` と `develop` の差は開発版の版上げだけになる。
 
 根拠: Value 3 / Value 13（MVV 版 7）
 
@@ -160,8 +161,8 @@ Pull Request で全体テストを省く。選んで集めたリリースブラ�
 | 3 | 本番チャネルを `develop` へ戻すマージ（決定 17）を入れる | — |
 | 4 | 段 3 の後に始めるスプリントから、`develop` から切り、丸ごと出す | `whole` |
 
-段 2 を `develop` 経由にしないのは、`main` 宛の検査が `main` の宣言（まだ `selected`）で判定され（決定 12）、`develop` からの Pull Request を
-断るためである。宣言を本番チャネルへ先に届ければ、検査を緩めずに切り替わる。決定 19 の逆の順序で、動いているスプリントと宣言を食い違わせない。
+段 2 を `develop` 経由にしない理由は、`main` 宛の検査にある。検査は `main` の宣言（まだ `selected`）で判定し（決定 12）、
+`develop` からの Pull Request を断る。宣言を本番チャネルへ先に届ければ、検査を緩めずに切り替わる。決定 19 の逆の順序で、動いているスプリントと宣言を食い違わせない。
 
 根拠: Value 3 / Value 13（MVV 版 7）
 

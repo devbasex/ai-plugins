@@ -123,8 +123,8 @@
 
 ## 外部の調査
 
-標準・仕様（STD1〜3）・主要な製品（PRD1〜3）・ライブラリとサービス（LIB1・LIB2）の表と、確かめられなかったことは、
-分冊 [issue-3121-design-research.md](issue-3121-design-research.md) にある。ライブラリとサービスは、既に依存している git と pydantic だけを調べた。
+調べた結果は分冊 [issue-3121-design-research.md](issue-3121-design-research.md) にある。
+分冊は、標準・仕様（STD1〜3）・主要な製品（PRD1〜3）・ライブラリとサービス（LIB1・LIB2）の表と、確かめられなかったことを持つ。ライブラリとサービスは、既に依存している git と pydantic だけを調べた。
 
 ## 機能一覧
 
@@ -224,8 +224,8 @@ classDiagram
 ```
 
 `Promotion` は取り込み方の表の 1 行で、`whole`（ベースブランチを丸ごと出す）と `selected`（選んで集める）の 2 行を持つ。
-取り込み方を足すときは、この表に行を 1 つ足し、行のメソッドを実装する。呼ぶ側（`parallel_release.py`・
-`release_templates.py`・`merged-steps.py`・スキーマの生成）は行のメソッドと属性だけを読み、値の名前で分岐しない。
+取り込み方を足すときは、この表に行を 1 つ足し、行のメソッドを実装する。呼ぶ側は行のメソッドと属性だけを読み、値の名前で分岐しない。
+呼ぶ側は `parallel_release.py`・`release_templates.py`・`merged-steps.py`・スキーマの生成である。
 
 ## データ構造
 
@@ -340,7 +340,7 @@ graph TD
 | --- | --- |
 | 運用・保守性 | `measure` と `drift` は項目ごとに打ったコマンドと結果の要約を `evidence` に持ち、`--out` のファイルに残る |
 | 移行性 | `branch_flow` が無ければ既定値の行（I2）。スナップショットの無い目録は既定値として読む（I3）。ai-plugins の切り替えの順は [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) の決定 19 にある |
-| セキュリティ | `branch_flow` はメインディレクトリから読む（`production_branch` と同じ置き場）。Pull Request の変更だけでリリースの範囲の決め方を変えられない。`gh` の出力は伏せ字を通す |
+| セキュリティ | `branch_flow` はメインディレクトリから読む（`production_branch` と同じ置き場）。マージ前の Pull Request の変更だけでは、リリースの範囲の決め方を変えられない。`gh` の出力は伏せ字を通す |
 
 ## 決定の記録
 
@@ -470,8 +470,9 @@ push し直しても元の宛先へは戻らない。そこで、選んで集め
 | --- | --- | --- | --- |
 | #3121 | 実装する | — | `plugins/ndf/scripts/lib/branch_flow.py`（新設）、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/contracts/settings/worktree.json.json`、`plugins/ndf/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf/skills/worktree/references/declaration.md`、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/worktree-setup.sh`、`plugins/ndf/scripts/lib/worktree-branch.sh`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project_lib/__init__.py`、`plugins/ndf/scripts/project_lib/measure_branch_flow.py`（新設）、`plugins/ndf/scripts/project_lib/measure_repo.py`、`plugins/ndf/scripts/project_lib/fingerprint.py`、`plugins/ndf/scripts/project_lib/merge.py`、`plugins/ndf/scripts/project_lib/model.py`、`scripts/check-skill-repo-assumptions.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/production-merge.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/worktree/SKILL.md`、`plugins/ndf/skills/merged/SKILL.md`、`plugins/ndf/skills/retrospective/SKILL.md`、`plugins/ndf/skills/backlog-refinement/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/debugger.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_branch_flow.py`（新設）、`plugins/ndf/scripts/tests/test_pr_mode.py`、`plugins/ndf/scripts/tests/test_project_decl_branch_flow.py`（新設）、`plugins/ndf/scripts/tests/test_sprint_branch_flow.py`（新設）、`scripts/check-pr-base.sh`、`scripts/ci-heavy-skip.py`、`.github/workflows/pr-base-guard.yml`、`scripts/tests/test_pr_base_guard.py`、`scripts/tests/test_ci_heavy_skip.py` |
 
-#3119 はこの表に載せない。この表は #3121 のスプリントで実装するものだけを持ち、#3119 の切り替え（ai-plugins の宣言・
-`AGENTS.md`・`docs/versioning-and-distribution.md`）は #3121 の版を本番へ出した後のスプリントで行う（前提 5）。
+#3119 はこの表に載せない。この表は #3121 のスプリントで実装するものだけを持つ。
+#3119 の切り替えは、#3121 の版を本番へ出した後のスプリントで行う（前提 5）。
+切り替えで触るのは、ai-plugins の宣言・`AGENTS.md`・`docs/versioning-and-distribution.md` である。
 表の `scripts/` と `.github/` の 5 ファイルは、宣言に `branch_flow` が無い間は今の判定のまま動く形で #3121 と一緒に入れる。
 切り替えの中身と順序は分冊 [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) にある。
 Skill の本文の行は、2026-11-12 に `grep -rlw develop` と `main`・`master` のブランチの形で当たったファイルである。
