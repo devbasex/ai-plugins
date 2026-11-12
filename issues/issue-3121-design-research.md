@@ -1,6 +1,6 @@
 # ブランチ運用の宣言の外部の調査（#3121）
 
-[issue-3121-design.md](issue-3121-design.md) の分冊である。本体の決定と根拠の表が引く STD・PRD・LIB の番号は、この文書の表の行を指す。
+[issue-3121-design.md](../docs/specifications/ndf-branch-flow-declaration.md) と [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) の分冊である。本体の決定と根拠の表が引く STD・PRD・LIB の番号は、この文書の表の行を指す。
 語の意味は本体の「用語」と「この文書が参照する語」の表にある。
 
 ## 外部の調査
