@@ -11,12 +11,19 @@ from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
-from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, resolved_flow, with_decls
+from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with_decls
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
-from supervise_lib.sprint_waves import design_read, flow_head, plan_advise_design, plan_design_results, plan_fast_check
+from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
-from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans, with_base
+from supervise_lib.sprint_waves import (
+    plan_sprint_design,
+    plan_sprint_release,
+    sprint_branch,
+    sprint_branch_first,
+    sprint_impl_plans,
+    with_base,
+)
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
@@ -162,7 +169,7 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     verify = has_record(record_pr)
-    target = resolved_flow(a).doc_target(sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
+    target = sprint_flow(a).doc_target(sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
     plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
@@ -188,6 +195,7 @@ def close_plan(a, repo: str) -> dict:
 
 def close_waves(a) -> list[dict]:
     """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    pin_flow(a)  # 開始時のブランチ運用で組む（#3121 の I3）
     repo = str(Path(a.worktree).resolve())
     if getattr(a, "pace", None) == "auto":
         # 開発ループの 1 回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
@@ -362,6 +370,8 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         return stop
     if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
         return stop
+    if not closing:
+        pin_flow(a)  # 同じスプリントの打ち直しは開始時のブランチ運用で組む（#3121 の I3）
     waves = waves if waves is not None else sprint_branch_first(a, sprint_plans(a))
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）

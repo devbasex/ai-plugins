@@ -6,7 +6,7 @@
   "readers": [
     "plugins/ndf/scripts/lib/repo.py:read_worktree_decl",
     "plugins/ndf/scripts/supervise_lib/decl.py:read_decl",
-    "plugins/ndf/scripts/lib/branch_flow.py:read"
+    "plugins/ndf/scripts/lib/branch_flow.py:read_flow"
   ],
   "keys": {
     "version": {

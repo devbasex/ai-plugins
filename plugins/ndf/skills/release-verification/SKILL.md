@@ -65,7 +65,7 @@ allowed-tools:
 次を打ち、結果 JSON の `status` を見る。
 
 ```bash
-python3 "$SCRIPTS/release-verification-steps.py" verify-install --ref <develop|main> --expect <版> \
+python3 "$SCRIPTS/release-verification-steps.py" verify-install --ref <ベースブランチか本番チャネル> --expect <版> \
   [--plugins ndf,...] [--runtimes claude,codex] --root .
 ```
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
 
 DECL_KEY = "branch_flow"
 SNAPSHOT_KEY = "ブランチ運用"
@@ -44,12 +43,16 @@ class FlowError(ValueError):
         )
 
 
-def _git(root, *args: str) -> subprocess.CompletedProcess:
+def git_run(root, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
 
 
-def _is_ancestor(root, a: str, b: str) -> bool:
-    return _git(root, "merge-base", "--is-ancestor", a, b).returncode == 0
+def git_succeeds(root, *args: str) -> bool:
+    return git_run(root, *args).returncode == 0
+
+
+def ancestor_of(root, a: str, b: str) -> bool:
+    return git_run(root, "merge-base", "--is-ancestor", a, b).returncode == 0
 
 
 class ReleaseBuildError(RuntimeError):
@@ -105,17 +108,29 @@ class Promotion:
             raise ValueError(f"取り込み方 {self.name} はリリースの単位を選ばない")
         if not units:
             raise ReleaseBuildError("選んだリリースの単位が無い")
-        p = _git(root, "checkout", "-q", "-B", branch, production_ref)
+        p = git_run(root, "checkout", "-q", "-B", branch, production_ref)
         if p.returncode != 0:
             raise ReleaseBuildError(f"{production_ref} から {branch} を切れない: {p.stderr.strip()}")
         for u in units:
-            if _is_ancestor(root, u, "HEAD"):
+            if ancestor_of(root, u, "HEAD"):
                 continue
-            p = _git(root, "-c", "rerere.enabled=true", "-c", "rerere.autoupdate=true", "merge", "--no-ff", "--no-edit", "-m", f"Merge {u} into {branch}", u)
+            p = git_run(
+                root,
+                "-c",
+                "rerere.enabled=true",
+                "-c",
+                "rerere.autoupdate=true",
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                "-m",
+                f"Merge {u} into {branch}",
+                u,
+            )
             if p.returncode != 0:
-                _git(root, "merge", "--abort")
+                git_run(root, "merge", "--abort")
                 raise ReleaseBuildError(f"{u} を {branch} へマージできない（衝突は人が解く）: {(p.stdout + p.stderr).strip()[-400:]}")
-        return _git(root, "rev-parse", "HEAD").stdout.strip()
+        return git_run(root, "rev-parse", "HEAD").stdout.strip()
 
 
 PROMOTIONS: dict[str, Promotion] = {
@@ -170,7 +185,7 @@ class BranchFlow:
         return ResolvedFlow(self, start_branch or base, base, production)
 
 
-def parse(value) -> BranchFlow:
+def parse_flow(value) -> BranchFlow:
     """`branch_flow` の値を読む。`None` は既定値の行。形の誤り・表に合わない組は FlowError（既定値へ倒さない。I1）。"""
     if value is None:
         return BranchFlow()
@@ -198,10 +213,10 @@ def parse(value) -> BranchFlow:
 
 def of_decl(wt: dict) -> BranchFlow:
     """`.ndf/worktree.json` の中身から読む。"""
-    return parse((wt or {}).get(DECL_KEY))
+    return parse_flow((wt or {}).get(DECL_KEY))
 
 
-def read(root) -> BranchFlow:
+def read_flow(root) -> BranchFlow:
     """メインディレクトリの `.ndf/worktree.json`（契約の置き場 `main`）の `branch_flow`。読めない宣言は FlowError。"""
     import decl
 
@@ -246,13 +261,15 @@ def from_snapshot(snap: dict | None, base: str | None, production: str | None) -
     """目録のスナップショットから読む。無ければ（変更前の目録）宣言の無いリポジトリとして読む（I3）。"""
     if not snap:
         return BranchFlow().resolve(base, production)
-    flow = parse({k: snap[k] for k in KEYS if k in snap})
-    return ResolvedFlow(flow, snap.get("start_branch") or base, snap.get("base_branch") or base, snap.get("production_branch") or production)
+    flow = parse_flow({k: snap[k] for k in KEYS if k in snap})
+    return ResolvedFlow(
+        flow, snap.get("start_branch") or base, snap.get("base_branch") or base, snap.get("production_branch") or production
+    )
 
 
 def sprint_branch_kept(root, branch_ref: str, production_ref: str, row: Promotion) -> bool:
     """後片付けでスプリントブランチを残すか。残す行では、本番チャネルに含まれるまで残す（決定 7）。"""
-    return row.keeps_sprint_branch and not _is_ancestor(root, branch_ref, production_ref)
+    return row.keeps_sprint_branch and not ancestor_of(root, branch_ref, production_ref)
 
 
 def schema_fragment() -> dict:
@@ -264,4 +281,3 @@ def schema_fragment() -> dict:
         "additionalProperties": False,
         "properties": {k: {"type": "string", "enum": list(v), "default": DEFAULT[k]} for k, v in allowed.items()},
     }
-

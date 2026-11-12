@@ -201,7 +201,7 @@ def _measure_ci_items(tree, step, items: dict, root: Path, deadline: float, repo
             items[BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
     else:
         items.setdefault("test_duration", items.get("ci") or mr.unknown("時間切れ"))
-    if (flow := step(BRANCH_FLOW, lambda: mbf.measure(root, _github_repo(root), deadline))) is not None:
+    if (flow := step(BRANCH_FLOW, lambda: mbf.measure_flow(root, _github_repo(root), deadline))) is not None:
         items[BRANCH_FLOW] = flow
     if "issues" not in items:
         items["issues"] = mci.measure_issues(repo_issues, ci_part or {})

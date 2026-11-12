@@ -276,12 +276,10 @@ FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
 
 
 def flow_snapshot(a, wt: dict) -> dict:
-    """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあれば（目録から読んだ
-    開始時の値）それを使い、宣言を読み直さない（#3121 の I3）。宣言が壊れていれば DeclError。"""
+    """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあればそれを使う。
+    スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。"""
     if isinstance(getattr(a, "flow", None), dict) and a.flow:
         return a.flow
-    if (pinned := pinned_flow(a)) is not None:
-        return pinned
     try:
         flow = branch_flow.of_decl(wt)
     except branch_flow.FlowError as e:
@@ -290,21 +288,7 @@ def flow_snapshot(a, wt: dict) -> dict:
     return flow.resolve(a.base, getattr(a, "production_branch", None)).as_snapshot(source)
 
 
-def pinned_flow(a) -> dict | None:
-    """スプリントの目録（`sprint.json`）に開始時に書いたスナップショット。`new sprint` を同じスプリントで打ち直したときと
-    `new close` は、宣言ではなくこれを読む（決定 4）。目録が無い・スナップショットが無ければ None。"""
-    if getattr(a, "kind", None) not in ("sprint", "close") or not getattr(a, "name", None):
-        return None
-    from supervise_lib.procedures import sprint_out
-
-    try:
-        got = json.loads((sprint_out(a) / "sprint.json").read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
-    except (OSError, ValueError, AttributeError):
-        return None
-    return got if isinstance(got, dict) and got else None
-
-
-def resolved_flow(a) -> branch_flow.ResolvedFlow:
+def sprint_flow(a) -> branch_flow.ResolvedFlow:
     """引数のスナップショットを読む。無ければ（スナップショットを持たない呼び手）宣言の無いリポジトリの値（I3）。"""
     return branch_flow.from_snapshot(getattr(a, "flow", None), getattr(a, "base", None), getattr(a, "production_branch", None))
 

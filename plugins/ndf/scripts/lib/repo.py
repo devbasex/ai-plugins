@@ -198,7 +198,7 @@ def kept_sprint_branch(root, branch: str | None) -> str | None:
 def restore_branch(root, branch: str, ref: str = "HEAD") -> bool:
     """Pull Request のマージで origin の `branch` が消えていれば（`delete_branch_on_merge`）、`ref` の先端を push し直す。
 
-    在れば何もしない（強制 push はしない）。push し直したら真。`release-steps.py` の開発版の `release/v<版>` と、
+    在れば何もしない（強制 push はしない）。push し直したら真。`release-steps.py` の開発版のリリースブランチと、
     選んで集める取り込み方の検査の後のスプリントブランチ（#3121 の決定 7）が使う。"""
     if proc.git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode == 0:
         return False

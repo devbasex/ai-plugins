@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from collections import Counter
 
 import branch_flow
@@ -34,7 +33,7 @@ def confidence(hits: int, total: int) -> str | None:
     return "高" if r >= HIGH else "中" if r >= MID else None
 
 
-def _field(counts: Counter, command: str, what: str) -> dict:
+def infer_field(counts: Counter, command: str, what: str) -> dict:
     """数えた標本から 1 項目を推す。"""
     total = sum(counts.values())
     if not total:
@@ -67,11 +66,15 @@ def infer(prs: list[dict], base: str, production: str, release_kinds: list[str],
         if p["head"].startswith("design/") or p["head"].startswith("spec/")
     )
     out = {
-        "integrate": _field(integrate, PR_COMMAND, f"head が {sprint}* で宛先が {base} の Pull Request"),
-        "doc_prs": _field(docs, PR_COMMAND, "設計 PR・確定仕様化の PR の宛先"),
-        "promotion": _field(Counter(release_kinds), PR_COMMAND + " と git rev-list --first-parent", f"{production} 宛ての Pull Request の head"),
+        "integrate": infer_field(integrate, PR_COMMAND, f"head が {sprint}* で宛先が {base} の Pull Request"),
+        "doc_prs": infer_field(docs, PR_COMMAND, "設計 PR・確定仕様化の PR の宛先"),
+        "promotion": infer_field(
+            Counter(release_kinds), PR_COMMAND + " と git rev-list --first-parent", f"{production} 宛ての Pull Request の head"
+        ),
     }
-    starts = _field(Counter(sprint_starts), "git merge-base <スプリントブランチ> origin/<ベースブランチ>", "本番に入っていないスプリントブランチの起点")
+    starts = infer_field(
+        Counter(sprint_starts), "git merge-base <スプリントブランチ> origin/<ベースブランチ>", "本番に入っていないスプリントブランチの起点"
+    )
     row = branch_flow.PROMOTIONS.get(out["promotion"].get("value") or "")
     if "unknown" in starts and row is not None and len(row.allowed_start) == 1:
         # 動いているスプリントブランチが少なければ、取り込み方の表が許す起点を、取り込み方の確からしさのまま出す
@@ -79,7 +82,10 @@ def infer(prs: list[dict], base: str, production: str, release_kinds: list[str],
         starts = {
             "value": only,
             "confidence": out["promotion"]["confidence"],
-            "evidence": [*starts["evidence"], {"command": "lib/branch_flow.py の取り込み方の表", "text": f"promotion = {row.name} が許す start は {only} だけ"}],
+            "evidence": [
+                *starts["evidence"],
+                {"command": "lib/branch_flow.py の取り込み方の表", "text": f"promotion = {row.name} が許す start は {only} だけ"},
+            ],
         }
     return {"start": starts, **out}
 
@@ -93,14 +99,6 @@ def as_item(fields: dict, extra_evidence: list[dict]) -> dict:
     return item
 
 
-def _git(root, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30)
-
-
-def _ok(root, *args: str) -> bool:
-    return _git(root, *args).returncode == 0
-
-
 def classify_release(root, merge_commit: str, head: str, base: str) -> str | None:
     """本番チャネル宛ての Pull Request 1 件の取り込み方。head がベースブランチそのものなら丸ごと。リリースブランチなら、
     その first-parent の列がマージの前の本番チャネル（マージのコミットの第 1 親）へ届けば選んで集める、届かなければ丸ごと。"""
@@ -109,42 +107,49 @@ def classify_release(root, merge_commit: str, head: str, base: str) -> str | Non
     if not head.startswith(branch_flow.RELEASE_PREFIX):
         return None
     tip, before = f"{merge_commit}^2", f"{merge_commit}^1"
-    if not _ok(root, "rev-parse", "--verify", "--quiet", tip):
+    if not branch_flow.git_succeeds(root, "rev-parse", "--verify", "--quiet", tip):
         return None
-    chain = _git(root, "rev-list", "--first-parent", "--max-count=200", tip).stdout.split()
-    first = _git(root, "rev-parse", before).stdout.strip()
+    chain = branch_flow.git_run(root, "rev-list", "--first-parent", "--max-count=200", tip).stdout.split()
+    first = branch_flow.git_run(root, "rev-parse", before).stdout.strip()
     return "selected" if first and first in chain else "whole"
 
 
 def sprint_start(root, ref: str, base: str, production: str) -> str | None:
     """本番チャネルに含まれていないスプリントブランチの起点のチャネル。ベースブランチにだけあるコミットを持てば `base`。"""
-    if _ok(root, "merge-base", "--is-ancestor", ref, f"origin/{production}"):
+    if branch_flow.ancestor_of(root, ref, f"origin/{production}"):
         return None
-    mb = _git(root, "merge-base", ref, f"origin/{base}").stdout.strip()
+    mb = branch_flow.git_run(root, "merge-base", ref, f"origin/{base}").stdout.strip()
     if not mb:
         return None
-    return "production" if _ok(root, "merge-base", "--is-ancestor", mb, f"origin/{production}") else "base"
+    return "production" if branch_flow.ancestor_of(root, mb, f"origin/{production}") else "base"
 
 
-def collect(root, gh, base: str, production: str) -> dict:
+def collect_flow(root, gh, base: str, production: str) -> dict:
     """git と gh（`measure_ci.Gh`）で標本を集めて推す。gh が使えなければ例外（呼ぶ側が項目を不明にする）。"""
     pulls = gh.get(f"repos/{gh.repo}/pulls?state=closed&per_page={PR_LIMIT}") or []
     merged = [p for p in pulls if isinstance(p, dict) and p.get("merged_at")]
     prs = [{"base": p["base"]["ref"], "head": p["head"]["ref"], "merge": p.get("merge_commit_sha") or ""} for p in merged]
     kinds = [classify_release(root, p["merge"], p["head"], base) for p in prs if p["base"] == production and p["merge"]]
-    refs = _git(root, "for-each-ref", "--format=%(refname:short)", f"refs/remotes/origin/{branch_flow.SPRINT_PREFIX}").stdout.split()
+    refs = branch_flow.git_run(
+        root, "for-each-ref", "--format=%(refname:short)", f"refs/remotes/origin/{branch_flow.SPRINT_PREFIX}"
+    ).stdout.split()
     starts = [sprint_start(root, r, base, production) for r in refs]
     extra = []
     try:
         rules = gh.get(f"repos/{gh.repo}/rulesets") or []
-        extra.append({"command": f"gh api repos/{gh.repo}/rulesets", "text": "ルールセット: " + ("・".join(str(r.get("name")) for r in rules) or "無し")})
+        extra.append(
+            {
+                "command": f"gh api repos/{gh.repo}/rulesets",
+                "text": "ルールセット: " + ("・".join(str(r.get("name")) for r in rules) or "無し"),
+            }
+        )
     except Exception as e:  # noqa: BLE001  守らせている仕組みは根拠の行だけで、測定を止めない
         extra.append({"command": f"gh api repos/{gh.repo}/rulesets", "text": f"読めない: {str(e)[:120]}"})
     fields = infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s])
     return as_item(fields, extra)
 
 
-def measure(root, gh_repo: str | None, deadline: float) -> dict:
+def measure_flow(root, gh_repo: str | None, deadline: float) -> dict:
     """`measure` の 1 項目。gh・ベースブランチ・本番チャネルが無ければ不明。"""
     import repo
 
@@ -156,7 +161,7 @@ def measure(root, gh_repo: str | None, deadline: float) -> dict:
     from .measure_ci import Gh, GhUnavailable
 
     try:
-        return collect(root, Gh(root, gh_repo, deadline), base, production)
+        return collect_flow(root, Gh(root, gh_repo, deadline), base, production)
     except GhUnavailable as e:
         return unknown(f"gh を使えない: {e}")
 
@@ -194,7 +199,7 @@ def print_drift(rows: list[dict]) -> str:
 def answer_problem(key: str, value) -> str | None:
     """`write` の答えの形（取り込み方の表）。合えば None（`merge.resolve_item` の `check` と同じ形）。"""
     try:
-        branch_flow.parse(value)
+        branch_flow.parse_flow(value)
     except branch_flow.FlowError as e:
         return str(e)
     return None

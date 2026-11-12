@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import json
 import shlex
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import branch_flow
 import legacy_names
 from gate_answer import DESIGN_GATE
 
-from supervise_lib.decl import decl_fields, resolved_flow
+from supervise_lib.decl import decl_fields, sprint_flow
 from supervise_lib.design_steps import gate_steps, pr_steps, writing_steps
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
@@ -128,7 +129,7 @@ def _glossary_steps(glossary_check: str, push: str) -> list:
 def plan_sprint_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に設計承認ゲートで止まる。"""
     branch = f"design/issue-{n}"
-    flow = resolved_flow(a)  # 起点と設計 PR の宛先はスプリントの開始時のブランチ運用で決める（#3121）
+    flow = sprint_flow(a)  # 起点と設計 PR の宛先はスプリントの開始時のブランチ運用で決める（#3121）
     target = flow.doc_target(sprint_branch(a))
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(target)} --root ."
     copy = requirements_path(n)
@@ -165,11 +166,22 @@ def with_base(steps: list[dict], target: str) -> list[dict]:
 def sprint_branch_first(a, waves: list[dict]) -> list[dict]:
     """文書の Pull Request の宛先がスプリントブランチなら、設計 PR を出す前にスプリントブランチを切る（#3121）。
     スプリントブランチのステージを先頭へ移し、ほかのステージの連結（then_of）は変えない。設計の課題が無ければそのまま。"""
-    if not a.design or resolved_flow(a).flow.doc_prs != "sprint":
+    if not a.design or sprint_flow(a).flow.doc_prs != "sprint":
         return waves
     head = [w for w in waves if w["name"] == "スプリントブランチ"]
     rest = [w for w in waves if w["name"] != "スプリントブランチ"]
     return [{k: v for k, v in w.items() if k != "then_of"} for w in head] + rest
+
+
+def pin_flow(a) -> None:
+    """スプリントの目録（`sprint.json`）に開始時に書いたブランチ運用があれば、`a.flow` をそれにする。`new sprint` を同じ
+    スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
+    try:
+        got = json.loads((sprint_out(a) / "sprint.json").read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(got, dict) and got:
+        a.flow = got
 
 
 def flow_head(a) -> dict:
@@ -182,11 +194,9 @@ def plan_sprint_branch(a, repo: str) -> dict:
     （宣言を読み直さず、開始時のスナップショットで切る。#3121 の I3）。"""
     mb = sprint_branch(a)
     wt = f"{repo}/.worktrees/{mb}"
-    start = resolved_flow(a).start_branch
+    start = sprint_flow(a).start_branch
     frm = f" --from {shlex.quote(start)}" if start and start != a.base else ""
-    cmd = (
-        f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)}{frm} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
-    )
+    cmd = f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)}{frm} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
     return with_record(
         {
             "フェーズ": "実装",
@@ -215,7 +225,7 @@ def plan_design_results(a, repo: str) -> dict:
     manifest = sprint_out(a).resolve() / "sprint.json"
     cmd = (
         f"python3 {shlex.quote(str(SELF))} design-results --manifest {shlex.quote(str(manifest))} "
-        f"--base {shlex.quote(resolved_flow(a).doc_target(sprint_branch(a)))} --root {shlex.quote(repo)} --design {' '.join(map(str, design_read(a)))}"
+        f"--base {shlex.quote(sprint_flow(a).doc_target(sprint_branch(a)))} --root {shlex.quote(repo)} --design {' '.join(map(str, design_read(a)))}"
     )
     return with_record(
         {
@@ -265,7 +275,9 @@ def keep_branch_merge(steps: list[dict], branch: str) -> list[dict]:
         f"n=$(gh pr list --base {b} --state open --json number --jq '[.[].number|tostring]|join(\" \")') && "
         f'{{ [ -z "$n" ] || {{ echo "{branch} 宛ての開いた Pull Request があるためマージしない: $n" >&2; exit 1; }}; }}'
     )
-    restore = f"{{ git ls-remote --exit-code --heads origin refs/heads/{b} >/dev/null || git push -q origin refs/heads/{b}:refs/heads/{b}; }}"
+    restore = (
+        f"{{ git ls-remote --exit-code --heads origin refs/heads/{b} >/dev/null || git push -q origin refs/heads/{b}:refs/heads/{b}; }}"
+    )
     return [{**s, "cmd": f"{guard} && {s['cmd']} && {restore}"} if s.get("id") in ("merge", "merge-approved") else s for s in steps]
 
 
@@ -285,7 +297,7 @@ def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
 def plan_sprint_check(a, repo: str) -> dict:
     """検査のフェーズ: スプリントブランチから起点のブランチへ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
     mb = sprint_branch(a)
-    target = resolved_flow(a).check_target()
+    target = sprint_flow(a).check_target()
     ns = argparse.Namespace(
         **decl_fields(a), pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}", advance_done=True
     )
@@ -312,7 +324,7 @@ def plan_sprint_check(a, repo: str) -> dict:
             body="template",
         ),
     ] + plan["steps"]
-    if resolved_flow(a).row.keeps_sprint_branch:
+    if sprint_flow(a).row.keeps_sprint_branch:
         plan["steps"] = keep_branch_merge(plan["steps"], mb)
     return plan if getattr(a, "bundles", None) is None else without_review(plan)
 

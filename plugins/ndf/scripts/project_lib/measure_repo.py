@@ -378,7 +378,7 @@ def measure_branches(tree: Tree) -> dict:
     if state["head"]:
         evidence.insert(0, {"text": f"origin の HEAD: {state['head']}"})
     if not names and not state["head"]:
-        return unknown(f"origin の HEAD も {"・".join(fingerprint.KNOWN_BRANCHES)} も無い")
+        return unknown(f"origin の HEAD も {'・'.join(fingerprint.KNOWN_BRANCHES)} も無い")
     base = [state["head"]] if state["head"] else []
     base += [b for b in names if b not in base]
     production = [b for b in branch_flow.DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]

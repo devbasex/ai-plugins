@@ -45,7 +45,7 @@ def test_measure_proposes_the_current_ai_plugins_flow_with_evidence():
     for f in fields.values():
         assert f["confidence"] == "高" and f["evidence"] and all("command" in e and "text" in e for e in f["evidence"])
     item = mbf.as_item(fields, [])
-    assert item["status"] == "measured" and branch_flow.parse(item["value"]).as_dict() == branch_flow.DEFAULT
+    assert item["status"] == "measured" and branch_flow.parse_flow(item["value"]).as_dict() == branch_flow.DEFAULT
 
 
 def test_items_without_enough_samples_say_unknown_with_a_reason():
@@ -135,7 +135,7 @@ def test_drift_lists_only_items_that_differ():
     """受け入れ条件 12: ずれた項目は宣言の値・測った値・根拠・更新の案を持つ。合っていれば空。"""
     item = mbf.as_item(mbf.infer(ai_plugins_history(), "develop", "main", ["whole"] * 5, []), [])
     assert mbf.drift(branch_flow.BranchFlow(), item) == []
-    rows = mbf.drift(branch_flow.parse(SELECTED), item)
+    rows = mbf.drift(branch_flow.parse_flow(SELECTED), item)
     assert {r["name"] for r in rows} == {f"branch_flow.{k}" for k in ("start", "doc_prs", "promotion")}
     for r in rows:
         assert r["declared"] != r["measured"] and r["evidence"] and r["proposal"]

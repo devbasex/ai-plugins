@@ -35,7 +35,7 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
 | worktree | `git worktree remove <path>` が 0 で終わる。拒まれたら未追跡・無視されたファイルを退避して外す（スクリプトが行う） | 追跡ファイルに未コミットの変更が残っている（退避できず `--force` が消すため外さない）・退避か削除が 0 以外で終わる（未完了。同意の対象にしない） | メインディレクトリ |
-| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ |
+| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ・選んで集める取り込み方（`branch_flow.promotion: selected`）で本番チャネルに含まれていないスプリントブランチ（`kept`。リリースの単位として本番へ届くまで要る） |
 | リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | — | 起点・本番チャネル・fork の head、先端が `headRefOid` と違う、対応する Pull Request が見つからない |
 | 課題 | **閉じない**（スプリント課題の OPEN の一覧を報告に載せるだけ） | — | — |
 
@@ -80,7 +80,7 @@ if [ -n "$dev_base" ]; then
     dev_base_found=1
   else
     # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
+    # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
     # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
     dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
       "refs/heads/$dev_base" 2>/dev/null)

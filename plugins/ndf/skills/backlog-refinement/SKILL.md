@@ -116,6 +116,8 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版の�
 | 2C | 順位を算出する | しない | なし（記録だけ） |
 | 3 | 反映する | 依存の無いものだけ割る | あり |
 
+**ブランチ運用の宣言と実際の使い方のずれも見る。** `project-decl.py measure --out <一時ファイル>` の後に `project-decl.py drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を完了報告へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
+
 **手順 1 で対象が 0 件なら、そこで飛ばす。** 飛ばしたことを報告へ残す。
 
 **候補の収集（手順 1）・順位の算出（手順 2C）・反映（手順 3）・報告の値は `upkeep.py` が持ち、区分と見積の段階の
@@ -158,7 +160,7 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 マイルストーンにいることがあり、ほかの 3 経路では拾えない。拾った後は既存の「閉じてよい」が
 再現手順を実行して決める。
 
-**機械の候補だけでは足りない。** 上の 3 原因のうち、`develop` の実在は差分に現れないため
+**機械の候補だけでは足りない。** 上の 3 原因のうち、ベースブランチの実在は差分に現れないため
 取りこぼす（3 件）。担当が足す経路がこれを拾う。**候補は広めに出して落とす**
 （`out-of-scope` が「迷ったら起票する側へ倒す」としたのと同じ考え方である）。
 

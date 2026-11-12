@@ -28,7 +28,7 @@ def test_missing_declaration_reads_as_the_default_row():
 
 
 def test_selected_row_resolves_names_from_the_channels():
-    r = bf.parse(SELECTED).resolve("develop", "main")
+    r = bf.parse_flow(SELECTED).resolve("develop", "main")
     assert (r.start_branch, r.doc_target("sprint/x"), r.check_target()) == ("main", "sprint/x", "develop")
     snap = r.as_snapshot("宣言")
     assert bf.from_snapshot(snap, "x", "y").as_snapshot("宣言") == snap
@@ -47,7 +47,7 @@ def test_selected_row_resolves_names_from_the_channels():
 def test_broken_declarations_name_the_keys_to_fix(value, keys):
     """I1: 形の誤り・表に合わない組は FlowError で、直すキーを持つ（既定値へ倒さない）。"""
     with pytest.raises(bf.FlowError) as e:
-        bf.parse(value)
+        bf.parse_flow(value)
     assert {i["key"] for i in e.value.items} == keys
 
 

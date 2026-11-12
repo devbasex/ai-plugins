@@ -17,8 +17,8 @@ allowed-tools:
 
 ## 引数
 
-`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（`main` / `master` /
-`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定は `main` ベース・非ドラフト。
+`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・設定の `base_branch` /
+`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定は既定ブランチ宛て・非ドラフト。
 
 ## push / PR 作成前の同意取得（必須）
 
@@ -38,7 +38,7 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
 - 作業の流れで暗黙に起動したとき、push 先が fork・他のリポジトリなら、提示したうえで**明示的な同意を得てから push する**
   （`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。同意が無ければ commit までで止める
 - 暗黙に起動して push 先が開発対象と同じリポジトリなら、問わずに AI が決める（`ask.py decide --question` で記録する）
-- 宛て先ブランチが `main`/`master` 以外の場合は、手順 1 の誘導を優先する
+- 宛て先ブランチが既定ブランチ以外の場合は、手順 1 の誘導を優先する
 
 ## この文書が受け取る値
 
@@ -59,7 +59,7 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
 
 - `metrics.redirect` が `worktree`: ベースブランチにいる。`/ndf:worktree` で worktree を用意し、
   そこへ移ってから打ち直す（入れ子の worktree は作らない）
-- `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも設定のブランチでもない。警告を出して
+- `metrics.redirect` が `cherry-pick-pr`: 起点が既定ブランチでも設定のブランチでもない。警告を出して
   `/ndf:cherry-pick-pr <base>` へ誘導し、利用者が明示的に継続を指示したときだけ `--force` で進める
 - `metrics.closing_words_in_message` に語がある: メッセージから外す（「closing keywords は本文だけに書く」）
 - `metrics.existing_pr` が null なら新規作成、あれば更新になる
@@ -141,7 +141,7 @@ python3 "$SCRIPTS/pr-steps.py" report <番号>
 URL は最終行に生のまま置く（Markdown リンクにすると利用者の画面では番号しか表示されない）。
 コミット履歴は報告に含めない。
 
-## スプリントブランチ宛てと develop 宛て
+## スプリントブランチ宛てとベースブランチ宛て
 
 **宛て先で、Pull Request の役割が変わる。** `plan` の `metrics.target` と `metrics.review` が区分を返す。
 
@@ -152,8 +152,8 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | ベースブランチ（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
-スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
-開発の起点（`base_branch`）が既定ブランチと同じリポジトリでは、上の develop の行の Pull Request が既定ブランチ宛になる。
+スプリントブランチの worktree からベースブランチ宛てに出し、本文にスプリントが閉じる課題を番号ごとに書く。
+開発の起点（`base_branch`）が既定ブランチと同じリポジトリでは、上のベースブランチの行の Pull Request が既定ブランチ宛になる。
 そのときの本文の扱いは次の節にある。
 
 ## closing keywords は本文だけに書く

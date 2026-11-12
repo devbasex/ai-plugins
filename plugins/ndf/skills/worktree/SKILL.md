@@ -162,11 +162,11 @@ cd "$main_dir/.worktrees/$branch"
 既存のブランチで作業を続けるなら `-b` を外す。
 
 **スプリントの中では、課題の worktree をスプリントブランチから切る。** スプリント
-ブランチ（`sprint/<名前>`）そのものは起点（`base_branch`）から切り、課題の worktree は
-`--from` にスプリントブランチを渡す。設定の `base_branch` は develop のまま変えない。
+ブランチ（`sprint/<名前>`）そのものはスプリントの起点（設定の `branch_flow.start` が指すチャネル。
+無ければ `base_branch`）から切り、課題の worktree は `--from` にスプリントブランチを渡す。設定は変えない。
 
 ```bash
-# スプリントブランチ。起点は設定の base_branch
+# スプリントブランチ。起点はスプリントの起点
 bash "$SCRIPTS/worktree-setup.sh" create sprint/<名前>
 # 課題の worktree。起点はスプリントブランチ
 bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from sprint/<名前>
@@ -177,7 +177,7 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from spr
 設定に `deps` があれば、作った直後に依存の用意まで行う（[依存の用意](#依存の用意)）。
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
-`develop` などの別のブランチに置くリポジトリでは、既定ブランチから分岐すると開発中の
+別のブランチ（ベースブランチ）に置くリポジトリでは、既定ブランチから分岐すると開発中の
 変更が正式版から枝分かれする。起点は設定（[references/declaration.md](references/declaration.md)
 の `base_branch`）から取り、設定が無ければ `origin` の HEAD が指すブランチへ落ちる。
 
