@@ -6665,57 +6665,49 @@
       "term": "1 スプリントのレーン",
       "context": "ndf-workflow",
       "meaning": "並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "まとめ",
       "context": "ndf-workflow",
       "meaning": "リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "版の要らないまとめ",
       "context": "ndf-workflow",
       "meaning": "まとめのうち、出した版が無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの答えを待たずに流す",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "版の要るまとめ",
       "context": "ndf-workflow",
       "meaning": "まとめのうち、出した版の上でしか流せない作業（リリース後テストと、その結果で課題を閉じる作業）",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "レーンの終わり",
       "context": "ndf-workflow",
       "meaning": "1 スプリントのレーンが版の要らないまとめを流し切った時点。終わりの記録として耐久ワークフローが読める置き場に残り、耐久ワークフローがそのレーンのラッパーを止める",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "終わりの記録",
       "context": "ndf-workflow",
       "meaning": "レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開の印で起こす",
-      "source": "",
-      "pending_source": "issues/issue-3058-requirements.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "止められなかったレーンの問い",
       "context": "ndf-workflow",
       "meaning": "終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる問い（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない",
-      "source": "",
-      "pending_source": "issues/issue-3058-design.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "終わりの記録の無い停止の問い",
       "context": "ndf-workflow",
       "meaning": "1 スプリントのレーンが終わりの記録も答え待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる問い（kind は unended）。「終わったと数える」で終わりの記録を書く",
-      "source": "",
-      "pending_source": "issues/issue-3058-design.md"
+      "source": "docs/specifications/ndf-parallel-lane-end-and-verify-close.md"
     },
     {
       "term": "最後の検査",
