@@ -103,45 +103,28 @@
 | リリースブランチ | 本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`） | 追加（`ndf-workflow`） |
 | リリースの単位 | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | 追加（`ndf-workflow`） |
 
+### この文書が参照する語
+
+この変更で意味を変えない既存の語と番号である。定義は参照先にある。
+
+| 語・番号 | 意味 | 参照先 |
+| --- | --- | --- |
+| conductor | スプリントを持ち、プランを流す役割 | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 並列の計画・レーン | 同時に進める開発の流れの一覧と、その 1 本 | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
+| まとめたリリース・提示 | 複数のレーンの変更を 1 つの版として出すリリースと、その範囲を承認資料として示すプラン（記録は `presented.json`） | `docs/glossary.md` の「まとめたリリース」 |
+| 検査の Pull Request | 検査のフェーズ（`new check`）が出す、スプリントブランチからベースブランチへの Pull Request | `plugins/ndf/skills/development-workflow/references/glossary.md` の「検査」 |
+| リリース 9 | 2026-11-12 の並列の計画 p5 のまとめたリリース。計画の外のスプリント aixrepo-1（#3074）が混ざった | #3119 の「目的」 |
+| 手順 0 | `development-workflow` の最初の手順。宣言（`project-decl.py check`）と MVV を扱う | `plugins/ndf/skills/development-workflow/SKILL.md` |
+| 前提 N・受け入れ条件 N | 要求の「前提」と「受け入れ条件」の番号 | [issue-3121-requirements.md](issue-3121-requirements.md) |
+| P6 | `project-decl.py measure` が測る項目の番号で、ブランチ（`base_branch`・`production_branch`）を指す。MVV の P 番号とは別 | `plugins/ndf/scripts/project_lib/__init__.py` の `BRANCHES` |
+| Value N（MVV 版 7） | ai-plugins のプロジェクト MVV の「Value」の番号つきの項目。版 7 は 2026-11-11 に承認された版 | `.ndf/mvv.md`・`.ndf/mvv.json` |
+| C N | NDF の共通原則の「必ず人の承認が要る操作」の番号（C2 = 認証・認可の変更、C4 = 戻せない操作、C7 = 利用者の設定と指示書の書き換え） | `issues/ndf-common-principles.md` |
+| STD・PRD・LIB の番号 | 外部の調査の表の行 | [issue-3121-design-research.md](issue-3121-design-research.md) |
+
 ## 外部の調査
 
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | トピックブランチと結合ブランチの運用に git 本家の一次資料がある |
-| 主要な製品 | 調べる | 宛先の制限をホスティングの機能（ルールセット）で持てるかが、リポジトリの側の検査の作り方を決める |
-| ライブラリとサービス | 調べる | ブランチ運用を宣言で受ける既存のツールがあれば、自前の読み分けを置き換えられる |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | gitworkflows(7) の Graduation・Throw-away integration | トピックブランチを最も古い取り込み先から切り、結合は使い捨てのブランチで試し、安定したものから上のブランチへ入れる | 選んで集める取り込み方の起点を本番チャネルにし、ベースブランチを本番へ流さない（I1・I4） | https://git-scm.com/docs/gitworkflows （2026-11-12） |
-| STD2 | gitworkflows(7) の「Rewind and rebuild next」 | リリース後に結合を試すブランチ（next）を本番の先頭から作り直してよい。作り直したらアナウンスする | 作り直しは採らず、本番チャネルを戻すマージだけを手順にする（決定 6） | https://git-scm.com/docs/gitworkflows （2026-11-12） |
-| STD3 | git-rerere | 長く生きるトピックブランチで同じ衝突を繰り返し解くとき、記録した解き方を再利用する | リリースブランチを組む処理は、結合で解いた衝突を rerere で再利用する（分冊の手順） | https://git-scm.com/docs/git-rerere （2026-11-12） |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | GitHub のルールセット | 規則は作成・更新・削除の制限、PR の必須、必須のステータスチェックなど。Pull Request の head のブランチを制限する規則は一覧に無い | 宛先の制限は CI のジョブ（必須のステータスチェック）で持つ（分冊の決定） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets （2026-11-12） |
-| PRD2 | ai-plugins のルールセット（`protect main`・`protect develop`） | 両方とも `guard`（宛先の検査）と `pytest` を必須のステータスチェックに持つ | ルールセットは変えずに、`guard` のジョブの判定を変える（分冊） | `gh api repos/devbasex/ai-plugins/rulesets/<id>`（2026-11-12） |
-| PRD3 | ブランチ運用のパターン（リリーストレイン） | 決まった便に、完成した機能のどれを載せるかを選ぶ | 「どのリリースの単位を載せるか」をリリースの提示で選ぶ（E9） | https://martinfowler.com/articles/branching-patterns.html （2026-11-12） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | git（`merge-base --is-ancestor`・`rerere`・`merge --no-ff`） | 手元の版 | GPL-2.0 | 確かめていない | 無し | 満たす。範囲の判定と集める操作の部品として使う | `git --version`・STD1・STD3（2026-11-12） |
-| LIB2 | pydantic（宣言の形の検査。NDF の `schema.Shape` が既に依存） | 確かめていない | MIT | 確かめていない | 無し | 満たす。宣言の検査に使う | `plugins/ndf/scripts/supervise_lib/decl.py`（2026-11-12） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| ブランチ運用を宣言で受け、スプリントの起点とリリースの範囲を切り替える既存のツール | 試していない | 上限の前に、git の部品（LIB1）と既存の宣言の読み手で足りると判断して調べなかった |
-| LIB1・LIB2 の版と最後のリリースの日付 | 試していない | 既に依存している部品で、新しく足さないため |
-
-調べた量: 候補 8 件・取得の試み 8 回。
+標準・仕様（STD1〜3）・主要な製品（PRD1〜3）・ライブラリとサービス（LIB1・LIB2）の表と、確かめられなかったことは、
+分冊 [issue-3121-design-research.md](issue-3121-design-research.md) にある。ライブラリとサービスは、既に依存している git と pydantic だけを調べた。
 
 ## 機能一覧
 
@@ -168,7 +151,7 @@
 | `lib/parallel_release.py`・`release_lib/`・`supervise_lib/release_templates.py` | 取り込み方の行に範囲・組み直しの判定・リリースブランチの組み方を任せる |
 | `lib/pr_mode.py`・`pr-steps.py` | 宛先の区分を `sprint` / `base` にする（ブランチ名を区分の名前にしない） |
 | `merged-steps.py`（後片付け） | 選んで集める取り込み方では、本番チャネルに含まれるまでスプリントブランチを消さない |
-| `supervise_lib/verify_steps.py`・`release-steps.py`（マージのステップ） | 選んで集める取り込み方では、検査の PR のマージで消えたスプリントブランチを push し直す（決定 7） |
+| `supervise_lib/verify_steps.py`・`release-steps.py`（マージのステップ） | 選んで集める取り込み方では、スプリントブランチ宛ての開いた PR があれば検査の PR をマージせず、マージで消えたスプリントブランチを push し直す（決定 7） |
 | `project-decl.py`・`project_lib/measure_branch_flow.py`（新設）・`project_lib/merge.py` | 測定・案・書き出し・ずれの検出（`drift`） |
 | `scripts/check-skill-repo-assumptions.py` と例外リスト | ブランチ名の語を足し、エージェントの本文を走査に入れる |
 | Skill の本文と手順書（下の「設計の結果」の一覧） | ブランチ名で書いた手順を、ベースブランチ・本番チャネル・スプリントの起点の語へ書き換える |
@@ -288,7 +271,7 @@ classDiagram
 | F5 測定 | C（`write`） | — | — |
 | F6 ずれの検出 | R | — | — |
 
-宣言を外す（D）と既定値の行へ戻る（受け入れ条件 13）。宣言は `.ndf/` にコミットされ、履歴は git に残る。
+宣言を外す（D）と既定値の行へ戻る（受け入れ条件 13）。`selected` から外す条件と順序は [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) の決定 20 にある。宣言は `.ndf/` にコミットされ、履歴は git に残る。
 
 ## 入出力の契約
 
@@ -356,7 +339,7 @@ graph TD
 | 大項目 | 実現方式 |
 | --- | --- |
 | 運用・保守性 | `measure` と `drift` は項目ごとに打ったコマンドと結果の要約を `evidence` に持ち、`--out` のファイルに残る |
-| 移行性 | `branch_flow` が無ければ既定値の行（I2）。スナップショットの無い目録は既定値として読む（I3）。ai-plugins の切り替えの順は分冊にある |
+| 移行性 | `branch_flow` が無ければ既定値の行（I2）。スナップショットの無い目録は既定値として読む（I3）。ai-plugins の切り替えの順は [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) の決定 19 にある |
 | セキュリティ | `branch_flow` はメインディレクトリから読む（`production_branch` と同じ置き場）。Pull Request の変更だけでリリースの範囲の決め方を変えられない。`gh` の出力は伏せ字を通す |
 
 ## 決定の記録
@@ -403,6 +386,11 @@ graph TD
 宣言の無いリポジトリでは `start_branch` がベースブランチなので、今の振る舞いと同じである。ベースブランチとの衝突は検査の
 Pull Request のマージで現れ、止めて人へ戻す（E8）。
 
+人は I4 を破らないように、衝突をスプリントブランチの外で解く。ベースブランチから一時の結合用のブランチを切り、
+スプリントブランチをマージして衝突を解き、そのブランチから検査の Pull Request を出し直す（STD1 の使い捨ての結合）。
+スプリントブランチは変えないので、リリースの単位にベースブランチのコミットは入らない。解き方は `git rerere` が記録し、
+リリースブランチを組むときに再利用される（STD3）。手順書（`parallel-work.md`）にこの解き方を書く。
+
 根拠: Value 7 / Value 13（MVV 版 7）
 
 ### 決定 6: 強制 push を要さないため、リリース後は本番チャネルをベースブランチへ戻すマージだけを行い、作り直さない
@@ -423,6 +411,11 @@ GitHub の設定「マージした head のブランチを自動で消す」（`
 （`gh api repos/devbasex/ai-plugins` で 2026-11-12 に確かめた）。リポジトリの設定は NDF が変えないので、マージのステップの後に、消えていればローカルの先端を
 push し直す。開発版の PR で `release/v<版>` を戻す `release-steps.py` の `_restore_branch` が同じ処理なので、
 `lib/repo.py` へ移して両方から呼ぶ。強制 push はしない。
+
+自動で消えたスプリントブランチを宛先にした開いた Pull Request は、GitHub が宛先をベースブランチへ変えるか閉じる。
+push し直しても元の宛先へは戻らない。そこで、選んで集める取り込み方の検査の Pull Request をマージするステップは、
+先に `gh pr list --base <スプリントブランチ> --state open` を打つ。1 件でもあればマージせず、一覧を出して止めて人へ戻す。
+検査は実装の Pull Request をすべて入れた後に走るので、通常の流れでは 0 件である。確定仕様化の PR は push し直した後に作る。
 
 根拠: Value 6 / Value 11 / Value 13（MVV 版 7）
 
@@ -469,7 +462,7 @@ push し直す。開発版の PR で `release/v<版>` を戻す `release-steps.p
 | 12 | ずれた宣言で `drift` が項目・根拠・案を出し、合った宣言では `items` が空 | ずれが無いのに行を出すと落ちる |
 | I4 | 選んで集めるスプリントの検査のプランで、ベースブランチの取り込みの元が `origin/<本番チャネル>` | 元をベースブランチに戻すと落ちる |
 | I6 | スナップショットの取り込み方が違う 2 レーンの提示が止まり、レーンの名前を出す | 混ぜたまま提示すると落ちる |
-| 決定 7 | 本番チャネルに含まれないスプリントブランチを後片付けが消さず、含まれたものは消す。マージで origin から消えたスプリントブランチは push し直される | 検査の PR のマージで消したままにすると落ちる |
+| 決定 7 | 本番チャネルに含まれないスプリントブランチを後片付けが消さず、含まれたものは消す。マージで origin から消えたスプリントブランチは push し直される。スプリントブランチ宛ての開いた PR がある間は検査の PR をマージしない | 検査の PR のマージで消したままにすると落ちる。開いた PR を見ずにマージすると落ちる |
 
 ## 設計の結果
 
@@ -489,7 +482,7 @@ Skill の本文の行は、2026-11-12 に `grep -rlw develop` と `main`・`mast
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
 | ai-plugins の `.ndf/worktree.json` に `branch_flow` を書き、`AGENTS.md` の「Git運用ルール」「版とリリースの方針」を #3119 の運用へ書き換える | C7 | 利用者の設定と指示書の運用の節を書き換える。設計承認ゲートとリリース承認ゲートで人が見る |
-| `main` 宛の Pull Request を通す条件（必須のチェック `guard` が走らせる `scripts/check-pr-base.sh`）を、`selected` の宣言で分冊の決定 14 の判定に変える | C2 | 本番チャネルへ何を入れてよいかの判定を変える。設計承認ゲートで人が見る |
+| `main` 宛の Pull Request を通す条件（必須のチェック `guard` が走らせる `scripts/check-pr-base.sh`）を、`selected` の宣言で [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) の決定 14 の判定に変える | C2 | 本番チャネルへ何を入れてよいかの判定を変える。設計承認ゲートで人が見る |
 
 ## 未確認のまま残ること
 
