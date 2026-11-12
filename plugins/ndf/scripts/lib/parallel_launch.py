@@ -49,7 +49,7 @@ def _ls_row(main: Path, lane: str) -> Optional[dict]:
     return next((it for it in res.get("items") or [] if isinstance(it, dict) and it.get("name") == lane), {})
 
 
-def moved_since(row: dict, since: float) -> bool:
+def _moved_since(row: dict, since: float) -> bool:
     """行の最後に動いた時刻（`at`。ミリ秒まで）が `since`（打った時刻）より後か。時計の端数の差に 0.5 秒の幅を置く。"""
     import clock
 
@@ -60,8 +60,8 @@ def moved_since(row: dict, since: float) -> bool:
 def came_up(row: dict, since: float, fresh: bool) -> bool:
     """立ち上がったと読むか。`fresh`（動いて観えるまま止まったレーンの再起動）は `at` が打った後へ進んだときだけ。"""
     if fresh:
-        return moved_since(row, since)
-    return row.get("state") in UP or (row.get("state") == "stopped" and moved_since(row, since))
+        return _moved_since(row, since)
+    return row.get("state") in UP or (row.get("state") == "stopped" and _moved_since(row, since))
 
 
 def _hit_once(main: Path, where: Path, argv: list[str], lane: str, fresh: bool) -> tuple[bool, float, str]:
@@ -201,7 +201,7 @@ class LaunchRouting:
             done = [p for p in self.launches if re.fullmatch(rf"wake-{re.escape(n)}-\d+", p)]
             last = max(done, key=lambda p: int(p.rsplit("-", 1)[1]), default=None)
             since = clock.parse((self.launches.get(last or "") or {}).get("at"), naive="utc") if last else None
-            if row is not None and (since is None or not moved_since(row, since.timestamp())):
+            if row is not None and (since is None or not _moved_since(row, since.timestamp())):
                 continue  # 今の再起動より前の行: まだ動いて観えていない
             self.woken.discard(n)
 

@@ -30,7 +30,7 @@ import parallel_release as pr
 from parallel_files import RELAY
 from parallel_helper import AGAIN_RE, verify_spawn, verify_task
 from parallel_lane import ENDING_EVENT
-from parallel_launch import RESTART, moved_since
+from parallel_launch import RESTART, _moved_since
 from parallel_observe import _asking_lanes
 from parallel_repo import relay, relay_proc, stall_seconds
 
@@ -184,7 +184,7 @@ class LaneEnding:
         if item is None or rec.get("result") != "up" or row.get("state") != "stopped" or item["helper"] in _asking_lanes(self):
             return
         since = clock.parse(rec.get("at"), naive="utc")
-        if since is None or not moved_since(row, since.timestamp()):
+        if since is None or not _moved_since(row, since.timestamp()):
             return
         item["seen"] = int(item.get("seen") or 0) + 1
         if item["seen"] < 2:

@@ -311,13 +311,13 @@ def test_stopping_a_verify_helper_that_never_came_up_drops_the_wait(run, monkeyp
     ],
 )
 def test_char_moved_since_reads_the_row_time_with_half_a_second_margin(at, want):
-    """現状固定: 起動の確かめ（`parallel_launch.moved_since`）は行の `at` が打った時刻 - 0.5 秒以降なら動いたと読む。"""
+    """現状固定: 起動の確かめ（`parallel_launch._moved_since`）は行の `at` が打った時刻 - 0.5 秒以降なら動いたと読む。"""
     import clock
     import parallel_launch as plaunch
 
     since = clock.parse("2026-11-12T00:00:00Z", naive="utc").timestamp()
-    assert plaunch.moved_since({"at": at}, since) is want
-    assert plaunch.moved_since({}, since) is False
+    assert plaunch._moved_since({"at": at}, since) is want
+    assert plaunch._moved_since({}, since) is False
 
 
 def test_char_came_up_by_state_and_freshness():
