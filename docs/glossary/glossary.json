@@ -6650,6 +6650,41 @@
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
+    },
+    {
+      "term": "ブランチ運用の宣言",
+      "context": "ndf-workflow",
+      "meaning": "リポジトリが、スプリントの起点・結合ブランチ・設計 PR の宛先・本番への取り込み方を書いた `.ndf/` の設定。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる",
+      "source": "",
+      "pending_source": "issues/issue-3121-requirements.md"
+    },
+    {
+      "term": "スプリントの起点",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチを切る元のブランチ。ブランチ運用の宣言が決め、無ければベースブランチ",
+      "source": "",
+      "pending_source": "issues/issue-3121-requirements.md"
+    },
+    {
+      "term": "結合ブランチ",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチを入れて、スプリントどうしの組み合わせを試すブランチ。開発版のチャネルを兼ねることがある",
+      "source": "",
+      "pending_source": "issues/issue-3121-requirements.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ入れる変更を集めるブランチ（`release/v<版>`）",
+      "source": "",
+      "pending_source": "issues/issue-3121-requirements.md"
+    },
+    {
+      "term": "本番への取り込み方",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルへ何をどう入れるか。結合ブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだスプリントブランチを集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸",
+      "source": "",
+      "pending_source": "issues/issue-3121-requirements.md"
     }
   ]
 }
