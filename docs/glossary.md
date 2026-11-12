@@ -72,7 +72,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | worktree | `worktree` | 開発の変更を行う git worktree。課題ごとに 1 つ切る | 作業ツリー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | メインディレクトリ | — | リポジトリを clone したディレクトリ | 主ディレクトリ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 宣言を探す木 | — | supervise.py new が .ndf/ の宣言を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く | — | — | — |
-| ベースブランチ | — | worktree の分岐元と Pull Request の宛先 | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ベースブランチ | — | Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。宣言の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の置き場は `experimental/` | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 棚卸し | — | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある | 手入れ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -563,11 +563,13 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | CI の結果の監視 | — | PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | CI の失敗の改修 | — | CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | テストのチェック | — | 合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック | — | — | `docs/specifications/ndf-ci-only-tests.md` |
-| ブランチ運用の宣言 | — | リポジトリが、スプリントの起点・結合ブランチ・設計 PR の宛先・本番への取り込み方を書いた `.ndf/` の設定。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | — |
-| スプリントの起点 | — | スプリントブランチを切る元のブランチ。ブランチ運用の宣言が決め、無ければベースブランチ | — | — | — |
-| 結合ブランチ | — | スプリントブランチを入れて、スプリントどうしの組み合わせを試すブランチ。開発版のチャネルを兼ねることがある | — | — | — |
-| リリースブランチ | — | 本番チャネルへ入れる変更を集めるブランチ（`release/v<版>`） | — | — | — |
-| 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。結合ブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだスプリントブランチを集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | — |
+| ブランチ運用の宣言 | — | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | — |
+| スプリントの起点 | — | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の宣言が決め、無ければベースブランチ | — | — | — |
+| 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | — |
+| リリースブランチ | — | 本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`） | — | — | — |
+| 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | — |
+| 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める | — | — | — |
+| リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

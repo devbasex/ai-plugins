@@ -1,0 +1,164 @@
+# ai-plugins のブランチ運用（#3119 の受け入れ内容）
+
+[issue-3121-design.md](issue-3121-design.md) の分冊である。#3121 の受け入れ条件 14〜19（#3119 の受け入れ条件 1〜6）を、
+#3121 が用意するブランチ運用の宣言の値と、ai-plugins の側の決まり・検査として設計する。語の意味は本体の
+「用語」の表にある。
+
+**この分冊の作業は 2 つの時期に分かれる。**
+
+| 時期 | 何をするか | 置き場 |
+| --- | --- | --- |
+| #3121 のスプリント | リリースの担い手の側の検査（`scripts/check-pr-base.sh`・`scripts/ci-heavy-skip.py`・`.github/workflows/pr-base-guard.yml`）を、`branch_flow` を読む形にする。宣言に `branch_flow` が無い間は今の判定のまま動く | 本体の「設計の結果」の表 |
+| #3121 の版を本番へ出した後の #3119 のスプリント | ai-plugins の宣言に `branch_flow` を書き、`AGENTS.md` と `docs/versioning-and-distribution.md` を新しい運用へ書き換える | この分冊の「#3119 で触るファイル」 |
+
+## ai-plugins の宣言の値
+
+```json
+{
+  "base_branch": "develop",
+  "production_branch": "main",
+  "branch_flow": {
+    "start": "production",
+    "integrate": "check",
+    "doc_prs": "sprint",
+    "promotion": "selected"
+  }
+}
+```
+
+`base_branch` は `develop` のまま変えない（決定 11）。この値で、各ブランチは次の役割になる。
+
+| ブランチ | 役割 | 切る元 | 入れる先 |
+| --- | --- | --- | --- |
+| `main` | 本番チャネル（正式版） | — | `develop`（リリースの後に戻すマージ） |
+| `sprint/<名前>` | スプリントの変更を集める。設計 PR・実装 PR・確定仕様化の PR もここへ入る | `main` | `develop`（検査の後）とリリースブランチ |
+| `develop` | ベースブランチ。開発版のチャネルとスプリントどうしの結合を試す場。`main` へは入れない | — | どこへも入れない |
+| `release/v<版>` | リリースブランチ。選んだスプリントだけを集め、版を上げる | `main` | `main`（Pull Request）と `develop`（戻すマージ） |
+
+本番の不具合の直しは、課題 1 つのスプリントとして `main` から切り、同じリリースブランチの手順で出す。
+
+## 決定の記録
+
+### 決定 11: 開発版のチャネルと宛先の検査の読み手を変えないため、`base_branch` は `develop` のまま、起点だけを `start` で変える
+
+`base_branch` は、開発版のチャネル・Pull Request の宛先の検査・ベースブランチの追従（`follow_branch`）が読む。起点を
+`main` にするために `base_branch` を `main` へ書き換えると、これらの読み手がすべて本番チャネルを開発版として扱う。
+起点は本体の決定 2 のとおり `start: production` で受ける。#3119 の起票の時点の案（`base_branch` を `main` にする）は採らない。
+
+根拠: Value 4 / Value 11（MVV 版 7）
+
+### 決定 12: 宛先の検査を Pull Request の変更で緩められないため、`check-pr-base.sh` は宛先のブランチの宣言を読む
+
+CI は Pull Request のマージの結果を checkout するため、worktreeの `.ndf/worktree.json` を読むと、Pull Request が
+自分の宣言を `whole` へ書き換えて検査を緩められる。`git show origin/<宛先>:.ndf/worktree.json` の値で判定する。
+`branch_flow` を NDF がメインディレクトリから読む（本体の非機能の実現方式）のと同じ考え方である。
+
+根拠: Value 7 / C2（MVV 版 7）
+
+### 決定 13: ルールセットを変えずに済ませるため、`develop` から `main` への Pull Request は必須のチェック `guard` で断る
+
+GitHub のルールセットには、Pull Request の head のブランチを制限する規則が無い（本体の PRD1）。`protect main` は既に
+`guard`（`check-pr-base.sh` を走らせるジョブ）と `pytest` を必須のステータスチェックに持つ（本体の PRD2）。`guard` の判定を
+変えれば、ルールセットの設定を触らずに `develop` からの Pull Request がマージできなくなる。
+
+- 作り方: 自前で作る・ライブラリやサービスを使う
+- 比べた候補: PRD1 / PRD2 / LIB1
+
+根拠: Value 3 / Value 11（MVV 版 7）
+
+### 決定 14: 承認したスプリントだけが入ったことを CI でも確かめるため、`main` 宛の `release/v<版>` の中身を祖先で判定する
+
+`branch_flow.promotion` が `selected` のとき、`main` 宛の Pull Request は次をすべて満たすときだけ通す。
+
+| # | 条件 | 確かめ方 |
+| --- | --- | --- |
+| 1 | head が `release/v<版>` である | ブランチ名 |
+| 2 | head が `origin/main` の子孫である | `git merge-base --is-ancestor origin/main <head>` |
+| 3 | `origin/main..<head>` のコミットは、head の first-parent の列（リリースブランチを組むマージと版上げ）か、origin のいずれかの `sprint/*` の祖先である | `git rev-list` と `git merge-base --is-ancestor` |
+
+`develop` だけにあるコミット（別のスプリントの PR・開発版の版上げ）は 3 に当たらず落ちる。どのスプリントを承認したかは
+CI では分からないため、承認はリリース承認ゲートの承認資料（範囲 = 選んだスプリントブランチの PR の和）が持つ。
+`whole` か `branch_flow` が無いときは今の判定（head が `develop` か、先頭が `origin/develop` の祖先の `release/v<版>`）のまま。
+
+根拠: Value 13 / Value 7（MVV 版 7）
+
+### 決定 15: リリースブランチの組み合わせを必ず試すため、`selected` では全体テストを省く規則 3 を当てない
+
+`scripts/ci-heavy-skip.py` の規則 3 は「`develop` への push で通ったコミットから版数と説明しか変えていない」本番の
+Pull Request で全体テストを省く。選んで集めたリリースブランチは `develop` と違う組み合わせなので、宛先のブランチの
+宣言が `selected` のときは規則 3 を当てない。リリースブランチを組むマージは `--no-ff` で行い、スプリントの先頭と
+同じコミットにならないようにする。規則 1（版上げだけの差分）と規則 2（文書だけの差分）は今のまま当てる。比べる
+ブランチ（`--branch`、既定 `develop`）は宣言の `base_branch` から読む。
+
+根拠: Value 13（MVV 版 7）
+
+### 決定 16: 開発版の版上げを `main` へ入れないため、`-dev.N` の版上げは `develop` だけで行い、スプリントブランチでは上げない
+
+開発版のデプロイは今のまま `develop` で版を上げる（`release/v<版>-dev` → `develop`）。スプリントブランチは `main` から
+切り、`develop` を取り込まない（本体の I4・決定 5）。リリースブランチは `main` とスプリントブランチだけからなるので、
+`-dev.` の版上げのコミットを含まない。決定 14 の 3 がこれを CI でも確かめる。
+
+根拠: Value 3 / Value 13（MVV 版 7）
+
+### 決定 17: 本番チャネルを `develop` へ戻す手順を 1 つにするため、今の `release/v<版>-sync` の取り込みを両方の取り込み方で使う
+
+本番のリリースの後、`release/v<版>-sync` に `origin/develop` を取り込み、版数の箇所の衝突は本番の版を取り、
+`release/v<版>-sync` → `develop` の Pull Request で戻す。今の手順（`docs/versioning-and-distribution.md` の「正式版を出す」）
+と同じ操作で、`selected` ではリリースブランチが `main` と選んだスプリントを含むので、戻すマージが本番チャネルを
+`develop` へ戻すこと（E13）になる。`develop` の作り直しは本体の決定 6 のとおり行わない。
+
+根拠: Value 3 / Value 11（MVV 版 7）
+
+### 決定 18: 依存するスプリントを安全に出すため、後のスプリントは前のスプリントブランチをマージし、前のスプリントは同じか前のリリースで出す
+
+後のスプリントが前のスプリントの変更を使うときは、前のスプリントブランチを後のスプリントブランチへマージする
+（並列の計画の `after` と同じ関係）。後のスプリントを選ぶと前のスプリントのコミットも範囲に入るため、承認資料の範囲に
+前のスプリントの PR が並ぶ。前のスプリントだけを外して後のスプリントを出す形は作れない（祖先に含まれる）。同じ衝突を
+2 回解く手間は `git rerere`（本体の STD3）を有効にして減らす。
+
+根拠: Value 13 / Value 5（MVV 版 7）
+
+### 決定 19: 動いているスプリントと宣言を食い違わせないため、切り替えは動いているスプリントを出し切った後に 1 回のリリースで行う
+
+順序は次の 5 段とする（#3119 の未決 3）。
+
+| 段 | 何をするか | 取り込み方 |
+| --- | --- | --- |
+| 1 | #3121 の版を今の運用で本番へ出す | `whole` |
+| 2 | 新しいスプリントを始めず、`develop` から切った動いているスプリントを今の運用で本番へ出し切る | `whole`（スナップショットのとおり） |
+| 3 | #3119 のスプリントで、宣言・`AGENTS.md`・`docs/versioning-and-distribution.md` を書き換えて `develop` へ入れる | `whole` |
+| 4 | 段 3 を今の運用で本番へ出す。`main` 宛の検査は `main` の宣言（まだ `whole`）で判定される（決定 12） | `whole` |
+| 5 | 段 4 のマージの後に始めるスプリントから、`main` から切り、選んで集める | `selected` |
+
+段 2 を待つのは、`develop` から切ったスプリントブランチを `selected` のリリースブランチへマージすると `develop` の中身が
+`main` へ混ざるためである。段 4 の後、`main` と `develop` の差は開発版の版上げだけになる。
+
+根拠: Value 3 / Value 13（MVV 版 7）
+
+## #3119 で触るファイル
+
+#3121 の版を本番へ出した後のスプリントで、#3119 の設計の結果として使う。
+
+| ファイル | 変えること |
+| --- | --- |
+| `.ndf/worktree.json` | 上の「ai-plugins の宣言の値」の `branch_flow` を足す |
+| `AGENTS.md` | 「Git運用ルール」の宛先と起点の段落、「版とリリースの方針」のチャネルの表と正式版の出し方を、上の役割の表と決定 11〜19 に合わせる。手順と実測は書かず、正本へリンクする |
+| `docs/versioning-and-distribution.md` | 「チャネルと ref」「正式版を出す」を選んで集める取り込み方へ書き換え、戻すマージ（決定 17）・依存するスプリント（決定 18）・本番の不具合の直しの手順を足す |
+
+## テスト設計
+
+| 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
+| --- | --- | --- |
+| 14 | ai-plugins の宣言の値で組んだ `new sprint` のプランの起点が `origin/main`、設計 PR の宛先が `sprint/<名前>` | 宣言の `start` を読まないと落ちる |
+| 15 | 一時の git リポジトリで、head が `develop` の `main` 宛は `check-pr-base.sh` が 1、決定 14 の 3 条件を満たす `release/v<版>` は 0。宣言は宛先のブランチから読む | worktreeの宣言を読むと、Pull Request で書き換えた `whole` で通って落ちる |
+| 16 | リリース 9 の形（`develop` にだけ入った別のスプリントのマージ）を再現した履歴で、リリースブランチに別のスプリントのコミットが含まれず、混ぜた head は `check-pr-base.sh` が 1 | 決定 14 の 3 を外すと落ちる |
+| 17 | `develop` で `-dev.` の版を上げた履歴で組んだリリースブランチに、版上げのコミットが含まれない。戻すマージの手順が `docs/versioning-and-distribution.md` にある（文言は照合しない。手順は実装で 1 回通す） | スプリントブランチへ `develop` を取り込むと落ちる |
+| 18 | 宛先の宣言が `selected` のとき、`ci-heavy-skip.py` が規則 3 で `skip=true` を返さない | 規則 3 の判定に宣言を見ないと落ちる |
+| 19 | `python3 plugins/ndf/scripts/instructions-check.py --root .` が 0 | 指示書の上限や記法を破ると落ちる |
+
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| 段 2 の待ちの長さ | 切り替えの時点で動いているスプリントの数は分からない。#3121 の版を出した時点の並列の計画の状態で分かる |
+| `rerere` の効き | 結合で解いた衝突がリリースブランチで再利用される割合は実測が無い。切り替え後の最初の 3 回のリリースで分かる |
