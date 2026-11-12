@@ -39,6 +39,14 @@ PLAN = {
 }
 
 TEMPLATE_DECL = {"release": {"form": "package-plugin", "plugin": "ndf"}}
+# この印の後の記録の道（終わりの記録で数える・提示 1 で確定する。#3058・#3070）は test_parallel_end.py で確かめる。
+# ここの流れのテストは印の無い記録の道で確かめる（別のプロセスで記録するテストも同じ値にする）
+LEGACY_MARKS = ("parallel-lane-end", "parallel-approved-sha")
+
+
+def legacy_patched(orig):
+    return lambda n: False if n in LEGACY_MARKS else orig(n)
+
 
 FAKE = textwrap.dedent(
     """
@@ -95,6 +103,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
     monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
     monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "1")
+    monkeypatch.setattr(durable, "patched", legacy_patched(durable.patched))
     heads = {"v": "sha1"}
     monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
     monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
@@ -1393,6 +1402,9 @@ CRASH = textwrap.dedent(
     prl.build_plans = lambda m, n, s, k, v: orig(m, n, s, k, v, lambda *_a: ({"steps": []}, {"steps": []}))
     if mode == "old":
         durable.patched = lambda _n: False  # parallel.route の無い版の並びで記録する
+    else:
+        orig_patched = durable.patched  # env と同じ記録の道（LEGACY_MARKS）
+        durable.patched = lambda n: False if n in ("parallel-lane-end", "parallel-approved-sha") else orig_patched(n)
     prun.open_parallel_record(main, "p1")
     wid = pl.workflow_id("p1")
     durable.start(durable.WorkflowRef(wid, 1, "start"), prun.parallel_workflow, str(main), "p1")
