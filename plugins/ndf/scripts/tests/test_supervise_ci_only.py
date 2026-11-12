@@ -11,6 +11,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_supervise import CARMO_PROJECT, cli, foreign_repo  # noqa: E402
 
+pytestmark = pytest.mark.ci_only_route  # 雛形が宣言を読む道を確かめる（conftest の `_local_tests_route` を外す）
+
 LINT = {"name": "pint", "runner": "pint", "kind": "lint", "command": "pint --test", "scope_command": "pint --test {paths}"}
 LOCAL_TESTS = ("test-limited", "test-all")
 

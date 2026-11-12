@@ -69,5 +69,5 @@ def test_added_tests_are_not_run(refactor_lib, monkeypatch, tmp_path):
     _, strategy = _strategy(refactor_lib)
     monkeypatch.setattr(implement.targets, "run_commands", lambda *a, **k: pytest.fail("手元でテストを走らせた"))
     intake = type("I", (), {"accepted": {"I-001": [{"files": ["tests/test_a.py"]}]}, "test_failed": {}, "sendbacks": {}})()
-    implement._run_added_tests(pathlib.Path("s"), {"strategy": strategy.as_state(), "work_dir": str(tmp_path)}, intake)
+    implement._run_added_tests(pathlib.Path("s"), {"strategy": strategy.as_state(), "worktrees": {"work": str(tmp_path)}}, intake)
     assert intake.test_failed == {}
