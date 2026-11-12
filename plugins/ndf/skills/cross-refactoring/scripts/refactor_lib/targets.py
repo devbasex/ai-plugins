@@ -228,12 +228,13 @@ def limited_runs(
     planned: Iterable[str] = (),
     technique: Optional[str] = None,
 ) -> tuple[Optional[list[ts.ScopeRun]], str]:
-    """項目の検証に使うテストの種別の範囲テストと、その由来（`targets` / `round_test` / `lint` / `deletion` / `none`）。
+    """項目の検証に使うテストの種別の範囲テストと、その由来（`targets` / `round_test` / `lint` / `ci_only` / `deletion` / `none`）。
 
     対象が複数の suite にまたがるときは、suite ごとにその雛形で組んだ範囲テストを全て返す。
 
     `round-only` はラウンドテストをそのまま走らせる。テストの種別の suite が無い戦略は空の並び（`lint`。
-    静的解析の範囲テストは検証のたびに組む）。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
+    静的解析の範囲テストは検証のたびに組む）。CI テストの宣言（`ci_only`）があっても空の並び（`ci_only`。テストは
+    CI に任せる）。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
     入れられなければ `none`（呼ぶ側が `no_target` で見送る）。ただし手法が `remove_dead_code` なら空の並び
     （`deletion`）を返し、静的解析の範囲テストと危険フラグ D4 の全体テスト 1 回で検証する（#1814 決定 7）。
     **全体テストを項目の範囲テストに使うことはない。**
@@ -244,6 +245,8 @@ def limited_runs(
         return runs, "round_test"
     if not strategy.has_kind(ts.TEST):
         return [], "lint"
+    if strategy.ci_only:
+        return [], "ci_only"  # CI テストの宣言なら手元でテストを走らせず、項目は残す（#3056）
     scope = state_like.get("target_scope") or state_like.get("scope") or []
     targets = list(test_targets or [])
     if valid_targets(targets, work, scope, planned, strategy):
