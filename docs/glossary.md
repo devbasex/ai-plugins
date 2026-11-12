@@ -565,6 +565,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | テストのチェック | — | 合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | 衝突の状態 | `mergeable` | Pull Request をベースブランチへ取り込めるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない | — | — | — |
 | CI の待ち | — | CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout | — | — | — |
+| 最終の検査 | — | スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ | — | — | — |
+| 中身の無い依頼 | — | リリースの依頼のうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、版なしのリリース済みと理由（閉じた Pull Request の番号）で答えて外す | — | — | — |
+| 処理済みのリリース承認ゲート | — | 計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
