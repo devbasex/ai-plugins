@@ -298,6 +298,95 @@ def test_stopping_a_verify_helper_that_never_came_up_drops_the_wait(run, monkeyp
     assert run.verifies == [] and run.verifying is None
 
 
+@pytest.mark.parametrize(
+    ("at", "want"),
+    [
+        ("2026-11-12T00:00:01Z", True),
+        ("2026-11-12T00:00:00Z", True),
+        ("2026-11-11T23:59:59.500Z", True),  # 0.5 秒の幅の内（境界を含む）
+        ("2026-11-11T23:59:59.499Z", False),
+        ("2026-11-11T23:00:00Z", False),
+        (None, False),
+        ("", False),
+    ],
+)
+def test_char_moved_since_reads_the_row_time_with_half_a_second_margin(at, want):
+    """現状固定: 起動の確かめ（`parallel_launch._moved_since`）は行の `at` が打った時刻 - 0.5 秒以降なら動いたと読む。"""
+    import clock
+    import parallel_launch as plaunch
+
+    since = clock.parse("2026-11-12T00:00:00Z", naive="utc").timestamp()
+    assert plaunch._moved_since({"at": at}, since) is want
+    assert plaunch._moved_since({}, since) is False
+
+
+def test_char_came_up_by_state_and_freshness():
+    """現状固定: `came_up` は fresh なら時刻だけで、そうでなければ動いて観える状態か、打った後に止まった行で立ち上がったと読む。"""
+    import clock
+    import parallel_launch as plaunch
+
+    since = clock.parse("2026-11-12T00:00:00Z", naive="utc").timestamp()
+    old, new = "2026-11-11T23:00:00Z", "2026-11-12T00:00:00Z"
+    assert plaunch.came_up({"state": "running"}, since, False) is True
+    assert plaunch.came_up({"state": "awaiting_approval"}, since, False) is True
+    assert plaunch.came_up({"state": "stopped", "at": new}, since, False) is True
+    assert plaunch.came_up({"state": "stopped", "at": old}, since, False) is False
+    assert plaunch.came_up({}, since, False) is False
+    assert plaunch.came_up({"state": "running"}, since, True) is False  # fresh は状態を見ない
+    assert plaunch.came_up({"state": "running", "at": new}, since, True) is True
+    assert plaunch.came_up({"state": "stopped", "at": old}, since, True) is False
+
+
+@pytest.mark.parametrize(
+    ("row_at", "asks"),
+    [
+        ("2026-11-12T00:00:00Z", True),
+        ("2026-11-11T23:59:59.500Z", True),  # 起動の記録の時刻 - 0.5 秒（境界を含む）
+        ("2026-11-11T23:59:59.499Z", False),
+        ("2026-11-11T23:00:00Z", False),
+        (None, False),
+    ],
+)
+def test_char_watch_verify_reads_the_stop_after_the_launch_with_half_a_second_margin(run, monkeypatch, row_at, asks):
+    """現状固定: 版の要るまとめの一時レーンが立ち上がりの記録（`at`）- 0.5 秒以降に止まって観えたら、2 回続けて観たときに問う。"""
+    asked = []
+    monkeypatch.setattr(run, "ask", lambda kind, rid, lane, text, options, **kw: asked.append((kind, rid, lane, options, kw)))
+    purpose = f"verify-{RID}"
+    run.verifies = [{"id": RID, "lane": "la", "helper": "p1-rel1v", "purpose": purpose, "launch": {"argv": ["x"]}}]
+    run.verifying = RID
+    run.launches[purpose] = {"result": "up", "at": "2026-11-12T00:00:00Z"}
+    rows = {"p1-rel1v": {"state": "stopped", "at": row_at}}
+    run._watch_verify(rows)
+    assert asked == [] and run.verifies[0].get("seen") == (1 if asks else None)
+    run._watch_verify(rows)
+    if not asks:
+        assert asked == [] and "seen" not in run.verifies[0]
+        return
+    (got,) = asked
+    assert got[:3] == ("helper", "p1-rel1v-verify-1", "p1-rel1v") and got[3] == [pend.RESUME, pend.STOP]
+    assert got[4] == {"purpose": purpose, "launch": {"argv": ["x"]}, "verify": RID}
+    assert run.verifies[0]["seen"] == 0 and run.verifies[0]["asked"] == 1
+
+
+def test_char_watch_verify_ignores_a_launch_that_is_not_up_or_a_running_helper(run, monkeypatch):
+    """現状固定: 起動の記録が up でない・一時レーンが止まって観えない・起動の記録の時刻が読めないときは数えない。"""
+    asked = []
+    monkeypatch.setattr(run, "ask", lambda *a, **kw: asked.append(a))
+    purpose = f"verify-{RID}"
+    run.verifies = [{"id": RID, "lane": "la", "helper": "p1-rel1v", "purpose": purpose, "launch": {}}]
+    run.verifying = RID
+    stopped = {"p1-rel1v": {"state": "stopped", "at": "2026-11-12T00:00:00Z"}}
+    for rec, rows in (
+        ({"result": "failed", "at": "2026-11-12T00:00:00Z"}, stopped),
+        ({"result": "up", "at": "2026-11-12T00:00:00Z"}, {"p1-rel1v": {"state": "running", "at": "2026-11-12T00:00:00Z"}}),
+        ({"result": "up"}, stopped),
+    ):
+        run.launches[purpose] = rec
+        run._watch_verify(rows)
+        run._watch_verify(rows)
+    assert asked == [] and "seen" not in run.verifies[0]
+
+
 def test_stop_waits_for_the_verify_helper_and_force_stops_it(run, monkeypatch):
     stopped: list[list[str]] = []
     monkeypatch.setattr(prun, "step_stop_lanes", lambda _m, names: stopped.append(list(names)) or [])
