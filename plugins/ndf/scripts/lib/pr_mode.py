@@ -1,7 +1,8 @@
 """Pull Request の宛て先の区別と、本文の末尾に書くモードの 1 行。
 
 スプリントの課題の Pull Request はスプリントブランチ（`sprint/<名前>`）宛てに出して集め、
-実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。
+実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。並列の計画で課題のまとまりの記録が
+あるスプリントは、まとまりの Pull Request をスプリントブランチ宛てのまま実装レビューに通す（#3081）。
 
 本文の末尾には `モード: <mode> / 通した工程: <工程> → <工程>` の 1 行を書く。デプロイ後の
 不具合の起票数と突き合わせ、スプリント単位にした後の精度を測る材料にする。PR を出した後に通した工程
@@ -28,9 +29,10 @@ def pr_target(base: str) -> str:
     return "sprint" if (base or "").startswith(legacy_names.branch_prefixes(SPRINT_PREFIX)) else "develop"
 
 
-def needs_review(base: str) -> bool:
-    """実装レビューを通す宛て先か。スプリントブランチ宛ては通さない。"""
-    return pr_target(base) != "sprint"
+def needs_review(base: str, bundled: bool = False) -> bool:
+    """実装レビューを通す宛て先か。スプリントブランチ宛ては通さない。ただし課題のまとまりの記録があるスプリント（`bundled`）は、
+    まとまりの Pull Request をスプリントブランチへ入れる前に通す（#3081 の I8b）。"""
+    return pr_target(base) != "sprint" or bundled
 
 
 def split_stages(text: str | None) -> list[str]:
