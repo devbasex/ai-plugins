@@ -95,6 +95,16 @@ def test_the_approval_range_is_the_prs_inside_the_selected_units(history):
     assert [p.number for p in included.release_range(history, "ndf--v1.0.0", head)] == [11]
 
 
+def test_the_approval_range_lists_the_prs_of_a_sprint_merged_into_the_unit(history):
+    """分冊の決定 18: 依存先の sprint/a を sprint/b へ通常のマージで取り込み b だけを選ぶと、a の PR も範囲に並ぶ。"""
+    git(history, "checkout", "-q", "sprint/b")
+    git(history, "merge", "-q", "--no-ff", "--no-edit", "sprint/a")
+    git(history, "push", "-q", "origin", "sprint/b")
+    git(history, "checkout", "-q", "main")
+    head = promotion.build_branch(history, BRANCH, "main", ["sprint/b"])["head"]
+    assert [p.number for p in included.release_range(history, "ndf--v1.0.0", head)] == [11, 12]
+
+
 def test_rebuilding_adds_onto_the_pushed_branch_without_force(history):
     """決定 6: 組み直しは push 済みのリリースブランチの子孫になる（強制 push をしない）。"""
     first = promotion.build_branch(history, BRANCH, "main", ["sprint/a"])["head"]
@@ -107,6 +117,20 @@ def test_rebuilding_adds_onto_the_pushed_branch_without_force(history):
     again = promotion.build_branch(history, BRANCH, "main", ["sprint/a"])
     assert again["rebuilt"] and ancestor(history, first, again["head"])
     assert ancestor(history, "origin/sprint/a", again["head"])
+
+
+def test_the_production_worktree_follows_the_rebuilt_release_branch(history, monkeypatch):
+    """本番のプランの作業ツリーを作った後に組み直すと、使い回す作業ツリーは組み直した先頭へ進む（古い HEAD で版を上げない）。"""
+    from supervise_lib import paths
+
+    monkeypatch.setattr(paths, "_prepare_deps", lambda *a, **k: None)
+    promotion.build_branch(history, BRANCH, "main", ["sprint/a"])
+    wt = history / ".worktrees" / BRANCH
+    plan = {"作業場所": str(wt), "branch": BRANCH, "起点": "origin/main", "起点のコミット": f"origin/{BRANCH}", "リポジトリ": str(history)}
+    assert paths.ensure_worktree(plan) is None
+    again = promotion.build_branch(history, BRANCH, "main", ["sprint/a", "sprint/b"])["head"]
+    assert paths.ensure_worktree(plan) is None
+    assert git(wt, "rev-parse", "HEAD") == again
 
 
 def test_a_unit_merged_after_approval_is_outside_the_approval(history, tmp_path):

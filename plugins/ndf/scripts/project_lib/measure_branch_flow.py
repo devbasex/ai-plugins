@@ -91,10 +91,14 @@ def infer(prs: list[dict], base: str, production: str, release_kinds: list[str],
 
 
 def as_item(fields: dict, extra_evidence: list[dict]) -> dict:
-    """測定の結果の 1 項目。4 項目すべてが `高` なら測った値、ほかは問い（候補は推した値）。"""
+    """測定の結果の 1 項目。4 項目すべてが `高` で組み合わせが取り込み方の表に合えば測った値、ほかは問い（候補は推した値）。
+    表に合わない組（スプリントの起点の推し違いなど）は `write` の自動の書き出しへ渡さない。"""
     fields = {k: {**v, "evidence": [*v.get("evidence", []), *([] if k != "promotion" else extra_evidence)]} for k, v in fields.items()}
     proposal = {k: v["value"] for k, v in fields.items() if "value" in v}
-    item = question({"branch_flow": proposal}, []) if any(v.get("confidence") != "高" for v in fields.values()) else measured(proposal)
+    unsure = any(v.get("confidence") != "高" for v in fields.values())
+    problem = None if unsure else answer_problem(ITEM, proposal)
+    evidence = [{"command": "lib/branch_flow.py の取り込み方の表", "text": f"測った組み合わせが表に合わない: {problem}"}] if problem else []
+    item = question({"branch_flow": proposal}, evidence) if unsure or problem else measured(proposal)
     item["fields"] = mask(fields)
     return item
 

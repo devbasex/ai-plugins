@@ -58,6 +58,14 @@ def test_items_without_enough_samples_say_unknown_with_a_reason():
     assert item["status"] == "question" and item["candidates"] == {"branch_flow": {}}
 
 
+def test_a_sure_combination_the_table_refuses_goes_back_to_a_question():
+    """4 項目が高くても、取り込み方の表に合わない組（selected で start = base）は測った値にせず問いへ戻す。"""
+    fields = {k: {"value": v, "confidence": "高", "evidence": []} for k, v in {**SELECTED, "start": "base"}.items()}
+    item = mbf.as_item(fields, [])
+    assert item["status"] == "question" and item["candidates"] == {"branch_flow": {**SELECTED, "start": "base"}}
+    assert "表に合わない" in item["evidence"][0]["text"]
+
+
 @pytest.mark.parametrize("hits, total, want", [(9, 10, "高"), (6, 10, "中"), (5, 10, None), (2, 2, None)])
 def test_confidence_thresholds(hits, total, want):
     assert mbf.confidence(hits, total) == want
