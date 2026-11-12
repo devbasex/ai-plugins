@@ -70,7 +70,7 @@ Pull Request（#421、16 ファイル・+973 / -441、4 課題分）の cross-re
 
 | 決定 | 理由 |
 | --- | --- |
-| base の SHA は、head を取る同じ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読む（`PrMetadata.base_sha` → `HeadRef.base_oid`） | 毎ラウンド打っている応答に入っており、GitHub の API の呼び出しは増えない。`init` で 1 度だけ取ると、巻き直し（`rotate-pr`）で Pull Request が替わったときに base がずれる。`origin/<base_branch>` をworktree で解くと、base のブランチが進んだときに Pull Request の base と一致しなくなる |
+| 全差分（`full`）の base の SHA は、PR の base のブランチ（状態ファイルの `base_branch`）を `origin` から取得した今の先頭と head の merge base にする。取得できない・求められないときは、head を取る同じ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha`（`PrMetadata.base_sha` → `HeadRef.base_oid`）を使う | merge base は Pull Request の差分の画面（three-dot）と同じ範囲になり、REST の `base.sha` がいつ更新されるかに依らない。スプリントブランチ宛ての課題のまとまりの Pull Request は base のブランチを何度も取り込むため、取り込む前の base の先頭のままだと、取り込んだ他のまとまりのファイルが範囲に入る（#3081）。`init` で 1 度だけ取ると、巻き直し（`rotate-pr`）で Pull Request が替わったときに base がずれるため、毎ラウンド求める |
 | 範囲は `start-round` が Python（`review_lib/review_scope.py` の `compute_scope`）で求めて状態ファイルへ書き、起動スクリプトは写すだけにする | 範囲の規則（`classifications.diff_scope`）を 1 か所に置き、2 つの席の起動と判定が同じ値を読む。起動スクリプトで数えると、判定が照らす値と担当が見た値を揃えるために 2 度数えることになる。設計 PR の前のラウンドからの差分の節（`PREV_SHA` / `DIFF_SCOPE_BLOCK`）はこの節へ統合して消した |
 | しきい値は「差分のファイル数の半分（切り上げ）」の比（`READ_FILES_MIN_RATIO = 0.5`）。読んだ数が差分の数を上回るのは外さない | 観察された狭め方は差分の 1 割前後（16 に対して 1〜2）で、半分なら余裕をもって拾い、ロックファイルや生成物を読み飛ばす担当は外さない。差の絶対値は、2 ファイルの差分で 0 を申告しても外せず、100 ファイルでは数ファイルの読み飛ばしで外れる。値はプロジェクトの形ではなく担当の振る舞いで決まるため、設定（`.ndf/review.json`）にしない |
 | 照合で外れた担当は起動し直さず、修正を挟まない次のラウンド（`scope_unmatched`）で別の席に見させる | 外れた担当は結果ファイルを残しており「結果なし」に当たらない。結果なしの経路（終了コード 7・振り替え）へ載せると、2 度外れた担当が実行の残りから外れる。範囲の節が載ったプロンプトで狭めた担当へ同じプロンプトを渡し直しても結果が変わる見込みは無く、起動し直しの記録が 2 種類になる。修正するものが無いため、設計 PR のモデルレビューの承認（`model_confirmed`）と同じ形で修正の工程を通さない |
@@ -115,7 +115,7 @@ graph TD
 
 | `range` | いつ | base |
 | --- | --- | --- |
-| `full` | code の Pull Request の全ラウンドと、設計 PR の 1 ラウンド目 | PR の `base.sha` |
+| `full` | code の Pull Request の全ラウンドと、設計 PR の 1 ラウンド目 | PR の base のブランチの今の先頭と head の merge base。求められなければ PR の `base.sha` |
 | `since_previous` | 設計 PR の 2 ラウンド目以降（`classifications.diff_scope`） | 同じ PR の 1 つ前のラウンドの `head_sha`。無いか今の head と同じなら `full` へ落とす |
 
 `since_previous` の前のラウンドは、最後にラウンドを足した時点（`--reopen`）より後のラウンドから探す。
@@ -131,8 +131,8 @@ graph TD
 
 **未確認のまま残っていること:**
 
-- REST の `base.sha` が base のブランチの進みにどの時点で追随するか。base のブランチを head へ取り込んだ Pull Request で、
-  `files` と応答の `changed_files` が一致するかの実測は無い
+- base のブランチを取得できずに REST の `base.sha` へ戻したとき、`base.sha` が base のブランチの進みにどの時点で追随するか。
+  その経路で、base のブランチを head へ取り込んだ Pull Request の `files` と応答の `changed_files` が一致するかの実測は無い
 - フォークの Pull Request で base のコミットを `origin` から取れるか。base は base のリポジトリにあるため取れる見込みだが、実測は無い
 
 ## テスト観点
