@@ -113,8 +113,8 @@ class Lane(BaseModel):
             return f"loop-{self.input.loop}"
         return f"issue-{self.input.issues[0]}"
 
-    def start_command(self) -> str:
-        """レーンの開始のコマンド（設計の「レーンの最初の入力」の表）。"""
+    def start_command(self, plan: str) -> str:
+        """レーンの開始のコマンド（設計の「レーンの最初の入力」の表）。1 スプリントのレーンの終わりは終わりの記録（#3058 の A1）。"""
         if isinstance(self.input, LoopInput):
             args = " ".join(self.input.args)
             mid = f" {args}" if args else ""
@@ -122,9 +122,9 @@ class Lane(BaseModel):
                 f"/goal /ndf:development-workflow --loop {self.input.loop}{mid}"
                 f" -- 終わり: [ndf-loop] stopped {self.input.loop} の行を出したとき"
             )
-        issues = " ".join(f"#{n}" for n in self.input.issues)
-        args = " ".join(self.input.args)
-        return f"/goal /ndf:development-workflow {issues}{(' ' + args) if args else ''}"
+        issues, args = " ".join(f"#{n}" for n in self.input.issues), " ".join(self.input.args)
+        end = f" -- 終わり: [ndf-parallel] lane-end {plan} {self.name} の行を出したとき"
+        return f"/goal /ndf:development-workflow {issues}{(' ' + args) if args else ''}{end}"
 
     def milestones(self) -> Optional[set[str]]:
         """ループの `--milestones` の値（無ければ None。I19 の「ほかと重なる」）。"""
@@ -432,7 +432,7 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
 
 def render_handoff(plan: ParallelPlan, lane: Lane, plan_md: Path) -> str:
     """レーンの引継ぎ文書。決まりは写さず、並列の計画を参照する（受け入れ条件 2）。"""
-    cmd = lane.start_command()
+    cmd = lane.start_command(plan.name)
     return "\n".join(
         [
             f"# 引継ぎ: 並列の計画 {plan.name} のレーン {lane.name}",

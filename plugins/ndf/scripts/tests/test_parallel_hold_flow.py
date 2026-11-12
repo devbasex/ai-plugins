@@ -415,6 +415,8 @@ CRASH = textwrap.dedent(
     prun.git_head = lambda _m: "sha1"
     if mode == "old":
         ph.limit_values = lambda _m: None  # 閾値を載せない版の観測で記録する
+    orig_patched = durable.patched  # test_parallel_run.env と同じ記録の道（LEGACY_MARKS）
+    durable.patched = lambda n: False if n in ("parallel-lane-end", "parallel-approved-sha") else orig_patched(n)
     prun.open_parallel_record(main, "p1")
     wid = pl.workflow_id("p1")
     durable.start(durable.WorkflowRef(wid, 1, "start"), prun.parallel_workflow, str(main), "p1")

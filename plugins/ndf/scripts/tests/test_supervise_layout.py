@@ -74,6 +74,7 @@ MODULES = [
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
+    "sprint_lane_close",  # 1 スプリントのレーンの版の要らないまとめのステージ（#3058）
     "sprint",
     "design_merge",  # normal の設計承認ゲートの後の設計 PR のマージ（#1426）
     "absorb",  # new sprint --absorb の取り込んだ課題（#1426）
@@ -121,8 +122,9 @@ NO_ENGINE = [
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
-# flow は Engine と、queue のファイルだけに触る関数を import する）
-LAZY = {("engine", "flow"), ("queue", "flow")}
+# flow は Engine と、queue のファイルだけに触る関数を import する。sprint_lane_close は版の要らないまとめで sprint の
+# close_plan を使い、sprint は with_lane_close を import する）
+LAZY = {("engine", "flow"), ("queue", "flow"), ("sprint_lane_close", "sprint")}
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える

@@ -231,6 +231,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `request` / `gate1` / `gate2` / `ask` / `unmatched` / `answer` | `<kind>:<id>` | `take` |
 | `left_stopped` / `lanes_changed` | `<kind>:<送り手の冪等の鍵>` | `take` |
+| `lane_end` / `lane_halt` / `verify` / `verified` | `<kind>:<レーン>`（`lane_end`・`lane_halt`）/ `<kind>:<依頼>`（`verify`・`verified`） | `take`（1 スプリントのレーンの終わりの記録・止めた結果・版の要るまとめの待ちと結果。印 `parallel-lane-end` の無い古い記録では反映しない。#3058） |
 | `stop` | `stop` / `stop:force` | `take` |
 | `resume` | `resume:confirm:<連番>:<take>` / `resume:settle:<連番>` | `resume` |
 | `opened` / `closed` | `opened` / `closed` | 反映しない。`opened` は `run` が耐久ワークフローを始める直前、`closed` は計画の終わりと失われた計画の `stop` が書く |

@@ -1,13 +1,15 @@
-"""一時レーンの組み立て: 起こす入力（`helper_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`）。`parallel_run` が使う。"""
+"""一時レーンの組み立て: 起こす入力（`helper_spawn`・版の要るまとめの `verify_spawn`）・承認資料の場所（`present_approval`）・流すもの（`helper_task`・`verify_task`）。`parallel_run` が使う。"""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
 import durable
 import parallel_lane as pl
+import parallel_plan as pp
 import parallel_release as pr
 from parallel_files import RELAY
 
@@ -27,6 +29,33 @@ def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None, cwd: 
     return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": cwd}
 
 
+AGAIN_RE = re.compile(r"-again\d+$")  # 組み直しの依頼の id（`<元の依頼>-again<連番>`。parallel_route.apply_build）
+
+
+def verify_spawn(name: str, rid: str, helper: str) -> dict:
+    """版の要るまとめ（リリース後テスト → 課題を閉じる）を流す一時レーンを起こす入力（#3058 の決定 4）。流すものは
+    `parallel.py verified <計画名> <依頼>` が返し、終わりに同じ副命令へ `--done` を渡して結果を返す。"""
+    end = f"[ndf-parallel] helper-done {name} の行を出し、python3 {RELAY} stop {helper} で自分のラッパーを止めたとき"
+    first = f"/goal /ndf:development-workflow --parallel-helper {name} verify {rid} -- 終わり: {end}"
+    return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": None}
+
+
+def verify_task(main: Path, name: str, rid: str) -> Optional[dict]:
+    """版の要るまとめの一時レーンが流すもの: 依頼（`request` の行）か「既に本番にある」知らせ（`verify` の行）が持つ
+    版の要るまとめのプランを queue で流して待ち、結果を `verified` で返す。プランが無ければ None。"""
+    import parallel_ledger as plg
+
+    ids = (rid, AGAIN_RE.sub("", rid))  # 組み直しの依頼は元の依頼のプランを使う（台帳に組み直しの id の request の行は無い）
+    rows = [r.get("msg") or {} for r in plg.read_ledger_rows(main, name).rows if r["kind"] in ("request", "verify") and r["id"] in ids]
+    plan = next((m.get("verify_plan") or m.get("plan") for m in reversed(rows) if m.get("verify_plan") or m.get("plan")), None)
+    if not plan:
+        return None
+    done = pp.plan_dir(main, name) / "verify" / rid / "done.json"
+    py = f"python3 {HERE / 'parallel.py'}"
+    return {"phase": "verify", "id": rid, "plan": plan, "pipeline": f"{SUPERVISE} queue {plan} --done {done} && {SUPERVISE} wait {done}",
+            "verified": f"{py} verified {name} {rid} --done {done}"}  # fmt: skip
+
+
 def spawn_line(spec: dict) -> str:
     """起動の入力（`helper_spawn` の値）をオーガナイザーが打つ 1 行にする。起動の印の無い古い記録の道（`metrics.spawn`）だけが使う。"""
     import shlex
@@ -38,7 +67,6 @@ def spawn_line(spec: dict) -> str:
 
 def present_approval(d: Path) -> str:
     """提示のプランの承認資料の絶対パス（ステップ `present` の `--approval` と `cwd` から読む）。読めなければ空。"""
-    import re
     import shlex
 
     try:

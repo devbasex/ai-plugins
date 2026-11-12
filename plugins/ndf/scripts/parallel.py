@@ -15,7 +15,8 @@
 | `carried <計画名> <連番>` | 出し直しを省いた提示 2 の確かめ直しの範囲が文書だけなら 0（`metrics.added`）、文書だけではない・判定できないなら 10 |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
 | `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
-| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
+| `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...] [--verify-plan <パス>]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0。版の要るまとめのプランがあれば待ちを知らせる） |
+| `end <計画名> --lane <名> [--request <依頼の記録>]` / `verified <計画名> <依頼> [--done <D>]` | 終わりの記録を書く（依頼の答えが差し戻しか失敗なら書かずに 10）・版の要るまとめの流すものを返すか結果を送る（`lib/parallel_end.py`。#3058） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
 | `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
@@ -53,6 +54,7 @@ import parallel_hold_cli as phc  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_ledger as plg  # noqa: E402
 from parallel_lane_cli import add_lane_parser, cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
+from parallel_end import add_end_parsers, cmd_end, cmd_verified, send_verify  # noqa: E402,F401  副命令 end・verified（#3058）
 import parallel_plan as pp  # noqa: E402
 import parallel_route  # noqa: E402
 from step_result import emit, result  # noqa: E402
@@ -301,8 +303,9 @@ def cmd_request(a) -> None:
     if a.prs and pl.merged_on_production(main, a.prs):
         version = pl.released_version(main, a.name, a.prs)
         pl.write_request(Path(a.state), {"result": "released", "version": version, "prs": a.prs})
+        _ = a.verify_plan and sent(send_verify, main, a.name, a.lane, Path(a.state), a.verify_plan, version)
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
-    rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state))
+    rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state), a.verify_plan)
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
     summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
@@ -327,17 +330,9 @@ def cmd_await(a) -> None:
     res = ans.get("result")
     code = {"released": 0, "rejected": 10}.get(res, 1)
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
-    reply(
-        status,
-        f"リリースの依頼 {record['id']} の答え: {res}",
-        code=code,
-        next_step="今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None,
-        result=res,
-        version=ans.get("version"),
-        release=ans.get("release"),
-        reason=ans.get("reason"),
-        deferred=dfr,
-    )
+    nxt = "今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None
+    reply(status, f"リリースの依頼 {record['id']} の答え: {res}", code=code, next_step=nxt, result=res, version=ans.get("version"),
+          release=ans.get("release"), reason=ans.get("reason"), deferred=dfr)  # fmt: skip
 
 
 # ---- 問いと一時レーン（#2436 の 6c・6d・6f） ----
@@ -457,6 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--prs", type=int, nargs="*", default=[])
     r.add_argument("--issues", type=int, nargs="*", default=[])
     r.add_argument("--state", required=True)
+    r.add_argument("--verify-plan", help="版の要るまとめのプラン（1 スプリントのレーン。released の後に一時レーンが流す。#3058）")
     aw = sub.add_parser("await")
     aw.add_argument("name", nargs="?")
     aw.add_argument("--external", action="store_true")
@@ -491,6 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     hp.add_argument("n", type=int)
     hp.add_argument("k", type=int)
     add_lane_parser(sub)
+    add_end_parsers(sub)
     return ap
 
 

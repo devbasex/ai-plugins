@@ -50,6 +50,7 @@ from supervise_lib.sprint_routes import (
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
+from supervise_lib.sprint_lane_close import with_lane_close
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -311,9 +312,7 @@ def sprint_plans(a) -> list[dict]:
             release["note"] = normal_gate_2(a)
         return waves + [release]
     prod = prod_version(a.version)
-    if parallel_lane(
-        repo
-    ):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（リリース承認ゲートはオーガナイザーが出す。#2436 の I17）
+    if parallel_lane(repo):  # レーンはリリース承認ゲートを置かず、依頼を送る（#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
     return waves + [
@@ -373,7 +372,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         return stop
     if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
         return stop
-    waves = waves if waves is not None else sprint_plans(a)
+    waves = waves if waves is not None else with_lane_close(a, sprint_plans(a))  # レーンのまとめ（#3058）
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
         apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）
