@@ -253,7 +253,8 @@ stateDiagram-v2
 計画名 `release-prod` の本番のリリースプランの代わりに計画名 `release-request` のリリースの依頼のプラン（`parallel_release.plan_release_request`）を置く。
 `pace: normal` の `sprint_plans` は、レーンのとき `リリース承認ゲート` のステージも置かない。リリース承認ゲートはオーガナイザーがまとめたリリースで出す。
 リリースの依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
-自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。手順は `development-workflow` の
+自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。`close_waves` のまとめの本番のステージでは、リリースの依頼のプランも
+開発版のプランと同じ実行条件（最終の検査の `check.py changed`）を持ち、最終の検査が変更なしなら依頼を送らずに飛ぶ。ほかの 3 か所は実行条件を持たない。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 ステップのコマンドは課題の番号を持たず、`--issues {plan_issues}` を持つ。`{plan_issues}` は流す時点に、プランの `課題` の番号の空白区切り
 （空なら空文字）で埋まる（`supervise_lib/steps.py` の `RunStep`）。設計承認ゲートで課題を外したループの 1 回では、`loop gate` の `drop_issues` が

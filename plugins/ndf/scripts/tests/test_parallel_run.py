@@ -1647,3 +1647,120 @@ def test_an_old_record_starts_lanes_without_counting_the_machine(env, tmp_path, 
     monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-admit" else orig(n))
     start(main)
     until(lambda: lanes_spawned(log) == ["la"])  # 印の無い記録は今までの parallel.spawn を打つ（I15）
+
+
+# ---------------------------------------------------------------- 中身の無い依頼（#3085。#3083 の設計の I3〜I7）
+
+
+def _closing_run(monkeypatch, closed, releases=()):
+    """2 本のレーンの _Run。la だけが止まり、Pull Request の状態の取得は `closed`（番号の並びか、失敗の理由の文字列）を返す。"""
+    import parallel_route as prt
+
+    run = _bare_run(monkeypatch, [{"name": "la"}, {"name": "lb"}])
+    run.lanes["la"].update(started=True, state="stopped")
+    run.releases = list(releases)
+    got = {"answers": [], "fetched": 0}
+    monkeypatch.setattr(
+        run, "answer", lambda rid, result, version, n, reason=None: got["answers"].append((rid, result, version, n, reason))
+    )
+
+    def fetch(_main, prs):
+        got["fetched"] += 1
+        return {"closed": [], "error": closed} if isinstance(closed, str) else {"closed": [n for n in closed if n in prs], "error": ""}
+
+    monkeypatch.setattr(prt, "step_closed_prs", fetch)  # 耐久ワークフローの外では耐久ステップごと差し替える
+    return run, got
+
+
+def test_a_request_whose_prs_all_closed_is_answered_and_dropped(monkeypatch):
+    """受け入れ条件 5 / I3: すべて閉じた依頼へ released・版なし・閉じた番号の理由で答えて外し、組まない。止まった宛先は再起動の対象へ入る。"""
+    run, got = _closing_run(monkeypatch, [3079])
+    run.pending = [{"id": "lgate-r1", "lane": "la", "prs": [3079]}]
+    assert run.drop_closed() is False and run.pending == []
+    [(rid, result, version, n, reason)] = got["answers"]
+    assert (rid, result, version, n) == ("lgate-r1", "released", None, None) and "#3079" in reason
+    assert run.wake == ["la"]
+
+
+@pytest.mark.parametrize("releases, answered", [([{"n": 1, "state": "released", "version": "1.2.3", "prs": [10]}], True), ([], False)])
+def test_a_partly_closed_request_is_judged_by_its_remaining_prs(monkeypatch, releases, answered):
+    """受け入れ条件 6 / I4: 一部が閉じた依頼は残りの番号で範囲の判定を受け、除いた番号は依頼に残す。"""
+    run, got = _closing_run(monkeypatch, [11], releases)
+    run.pending = [{"id": "r1", "lane": "la", "prs": [10, 11]}]
+    assert run.drop_closed() is (not answered)
+    if answered:
+        assert run.pending == [] and got["answers"] == [("r1", "released", "1.2.3", 1, None)] and run.wake == ["la"]
+    else:
+        assert run.pending == [{"id": "r1", "lane": "la", "prs": [10], "closed": [11]}] and got["answers"] == []
+        assert run.wake == []
+
+
+@pytest.mark.parametrize("closed", [[], "gh に届かない"], ids=["open-or-merged", "fetch-failed"])
+def test_requests_without_closed_prs_are_kept(monkeypatch, closed):
+    """受け入れ条件 8 / I5: マージ済みか開いている Pull Request の依頼と、取得に失敗したときの依頼は外さずに組む。"""
+    run, got = _closing_run(monkeypatch, closed)
+    pending = [{"id": "r1", "lane": "la", "prs": [10]}]
+    run.pending = list(pending)
+    assert run.drop_closed() is True and run.pending == pending and got["answers"] == []
+
+
+def test_closed_prs_reads_only_prs_closed_without_a_merge(monkeypatch):
+    """I5: 閉じた番号は state が CLOSED のものだけで、読めない Pull Request と取得の失敗は閉じたと見なさない。"""
+    import parallel_route as prt
+    from release_lib import included
+
+    states = {10: {"state": "CLOSED"}, 11: {"state": "MERGED"}, 12: {"state": "OPEN"}, 13: None}
+    monkeypatch.setattr(included, "pr_fields", lambda prs, cwd=None: ({n: states[n] for n in prs}, ""))
+    assert prt.closed_prs(Path("/m"), [10, 11, 12, 13]) == {"closed": [10], "error": ""}
+    monkeypatch.setattr(included, "pr_fields", lambda prs, cwd=None: (None, "gh が無い"))
+    assert prt.closed_prs(Path("/m"), [10]) == {"closed": [], "error": "gh が無い"}
+
+
+def test_the_pr_states_are_read_only_right_before_building(monkeypatch):
+    """I6: リリースが流れている見回りと計画全体の停止の見回りでは読まず、組もうとする見回りで 1 回だけ読む。"""
+    import parallel_hold as ph
+
+    run, got = _closing_run(monkeypatch, [])
+    built = []
+    monkeypatch.setattr(run, "open_release", lambda: built.append(1))
+    run.pending = [{"id": "r1", "lane": "la", "prs": [10]}]
+    run.current = {"n": 1}
+    prun._tick_release(run, "/m", "p1", 0)
+    run.current, run.hold = None, ph.Hold(plan=True)
+    prun._tick_release(run, "/m", "p1", 0)
+    assert got["fetched"] == 0 and built == []
+    run.hold = ph.Hold()
+    prun._tick_release(run, "/m", "p1", 0)
+    assert got["fetched"] == 1 and built == [1]
+
+
+def test_a_closed_request_lets_the_plan_finish(env, tmp_path, monkeypatch):
+    """受け入れ条件 5・7: すべて閉じた依頼だけを受けた計画は組まずに答え、全レーンが止まれば finished で終わる。"""
+    import parallel_route as prt
+
+    main, log, states = env["main"], env["log"], env["states"]
+    monkeypatch.setattr(prt, "closed_prs", lambda _m, prs: {"closed": list(prs), "error": ""})
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [3079], [1], tmp_path / "st")
+    ans = read(main, rid)
+    assert (ans["result"], ans["version"], ans["release"]) == ("released", None, None) and "#3079" in ans["reason"]
+    states.write_text(json.dumps({"la": "stopped"}))
+    until(lambda: "lb" in spawned(log))
+    states.write_text(json.dumps({"la": "stopped", "lb": "stopped"}))
+    out = until(lambda: durable.output_of(pl.workflow_id("p1")))
+    assert out["status"] == "finished" and out["pending"] == [] and out["releases"] == [] and no_build_ran(main)
+
+
+def test_an_old_record_does_not_read_the_pr_states(env, tmp_path, monkeypatch):
+    """I7: 印 parallel-closed-requests の無い記録は Pull Request の状態を読まず、今までどおり依頼から組む。"""
+    import parallel_route as prt
+
+    main, states = env["main"], env["states"]
+    orig = durable.patched
+    monkeypatch.setattr(durable, "patched", lambda n: False if n == "parallel-closed-requests" else orig(n))
+    monkeypatch.setattr(prt, "closed_prs", lambda *_a: pytest.fail("古い記録で Pull Request の状態を読んだ"))
+    states.write_text(json.dumps({"la": "running"}))
+    start(main)
+    pl.send_release_request(main, "p1", "la", [3079], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")

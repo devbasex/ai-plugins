@@ -129,7 +129,7 @@ C = 187,691 なら 9.5 時間を超える（n = 20）と切り替える。
 
 | 材料 | 読み方 |
 | --- | --- |
-| 答えていない問い | `parallel_status.unanswered`（計画の台帳の答えていない問い。業務時間外に溜めた依頼も含む） |
+| 答えていない問い | `parallel_status.unanswered`（計画の台帳の答えていない問い。業務時間外に溜めた依頼も含む。リリース承認ゲートは、同じ連番の確定か締めの行がそれより後にあれば処理済みとして数えない。`parallel_ledger.settled_gates`） |
 | ラッパーとの位置 | `relay.py is-child` を子プロセスで打ち、0 なら `relay`、ほかは `outside`。上限は `parallel-switch.relay-check`（10 秒） |
 | C・Q・モデル | 環境変数 `CLAUDE_CODE_SESSION_ID` から会話の記録を探す。C とモデルは末尾 200 行の最後の応答、Q の代わりは最初の応答の入力 token（入力・キャッシュの読み・書きの和） |
 | 費用の見込み | `context_decisions.read_cost_estimates` を `context_policy.Estimates` にする |

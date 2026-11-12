@@ -246,3 +246,27 @@ def test_the_judgement_of_ten_lanes_adds_under_a_second(env, monkeypatch):
     t = time.monotonic()
     psw.wait_metrics(main, "p1", 1800)
     assert time.monotonic() - t < 1.0
+
+
+def _released_once(main) -> None:
+    """リリースを 1 回出した台帳: リリース承認ゲート・確定・締めの行（#3080）。"""
+    import parallel_ledger as plg
+
+    plg.append_ledger_row(
+        main, "p1", "gate2", "gate2:rel-1", {"kind": "gate2", "id": "rel-1", "lane": "rel", "n": 1}, by="rel", rid="rel-1"
+    )
+    for phase, key in (("confirm", "resume:confirm:1:-"), ("settle", "resume:settle:1")):
+        plg.append_ledger_row(main, "p1", "resume", key, {"n": 1, "phase": phase, "result": "released"}, by="organizer")
+
+
+def test_a_settled_release_gate_is_not_an_unanswered_question(env):
+    """#3080 の受け入れ条件 9: リリースを 1 回出して問いが他に無い計画の答えていない問いは 0 である。"""
+    _released_once(env["main"])
+    assert psw.read_inputs(env["main"], "p1", 1800).unanswered == 0
+
+
+def test_a_lane_with_only_a_settled_release_gate_is_not_waiting(env):
+    """#3080 の受け入れ条件 12: 処理済みのリリース承認ゲートだけを持つ一時レーンは、答えを待つレーンに載らない。"""
+    _released_once(env["main"])
+    _last, waiting = pst._ledger_view(env["main"], "p1")
+    assert "rel" not in waiting
