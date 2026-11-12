@@ -5060,7 +5060,7 @@
     {
       "term": "一時レーン",
       "context": "ndf-workflow",
-      "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
+      "meaning": "持ち主のいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り・released の後の版の要るまとめ）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる",
       "source": "docs/specifications/ndf-parallel-durable-lane-launch.md"
     },
     {
@@ -6480,13 +6480,13 @@
     {
       "term": "出し直しの提示",
       "context": "ndf-workflow",
-      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）",
+      "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）。承認したコミットのまま出す版より前に始めた計画の記録の打ち直しでだけ現れ、新しく始めた計画では出さない",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "加わった範囲",
       "context": "ndf-workflow",
-      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更",
+      "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更。新しく始めた計画では今のリリースに入らず、次のリリースの範囲に入る",
       "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
@@ -6692,6 +6692,20 @@
       "meaning": "レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開の印で起こす",
       "source": "",
       "pending_source": "issues/issue-3058-requirements.md"
+    },
+    {
+      "term": "止められなかったレーンの問い",
+      "context": "ndf-workflow",
+      "meaning": "終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる問い（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない",
+      "source": "",
+      "pending_source": "issues/issue-3058-design.md"
+    },
+    {
+      "term": "終わりの記録の無い停止の問い",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンが終わりの記録も答え待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる問い（kind は unended）。「終わったと数える」で終わりの記録を書く",
+      "source": "",
+      "pending_source": "issues/issue-3058-design.md"
     }
   ]
 }
