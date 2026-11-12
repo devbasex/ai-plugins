@@ -107,6 +107,21 @@ def diff_numbers(root, ref):
     return {"commits": commits, "files": files, "insertions": ins, "deletions": dels, "shortstat": last}
 
 
+def bundled_sprint(root, base: str) -> bool:
+    """スプリントブランチ宛てで、動いている並列の計画のこのレーンに課題のまとまりの記録があるか（#3081 の I8b）。
+    計画を読めない・壊れた計画はまとまりの無い扱いにする（壊れた計画のレーンはスプリントの組み立てが止める）。"""
+    if pr_target(base) != "sprint":
+        return False
+    deps.require("schema")  # 計画の模型（pydantic）を読む
+    import decl
+    import parallel_bundles
+
+    try:
+        return parallel_bundles.bundles_of(Path(decl.main_dir(str(root)) or root)) is not None
+    except (OSError, ValueError):
+        return False
+
+
 # --- plan -------------------------------------------------------------------------
 
 
@@ -168,7 +183,7 @@ def cmd_plan(a):
         "default_branch": default,
         "draft": bool(a.draft),
         "target": pr_target(base),
-        "review": needs_review(base),
+        "review": needs_review(base, bundled_sprint(root, base)),
         "existing_pr": pr,
         "uncommitted": len(status),
         "closing_words_in_message": in_msg,
@@ -187,7 +202,7 @@ def cmd_plan(a):
             )
         )
     action = "既存の PR を更新する" if pr else "新しい PR を作る"
-    if not needs_review(base):
+    if not metrics["review"]:
         action += "（スプリントブランチ宛て。実装レビューはスプリントの PR で通す）"
     emit(
         result(

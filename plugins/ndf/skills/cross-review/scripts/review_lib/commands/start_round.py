@@ -137,6 +137,7 @@ def _review_scope(
             round_in_pr,
             since,
             pr,
+            str(st.get("base_branch") or "") or None,  # 全差分の base を base のブランチの今の先頭との merge base にする（#3081）
         )
     if scope.get("unavailable"):
         review_lib.info(f"⚠ レビュー範囲を求められない（{scope['unavailable']}）。範囲の節なしで担当を起動し、照合しない")

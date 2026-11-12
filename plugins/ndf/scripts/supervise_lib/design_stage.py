@@ -257,7 +257,8 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
             continue
         before = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
         with_touched(plan, res.files_of(n))
-        issues = [n] + list(dict.fromkeys(i for i in absorbed.get(n, []) if i != n))
+        # 課題のまとまりのプランは代表の課題 n の後にまとまりの課題を持つ（#3081）。取り込んだ課題をその後へ足す
+        issues = list(dict.fromkeys([n, *(plan.get("課題") or []), *absorbed.get(n, [])]))
         plan["課題"] = issues
         docs = res.docs_of(issues)
         if docs:

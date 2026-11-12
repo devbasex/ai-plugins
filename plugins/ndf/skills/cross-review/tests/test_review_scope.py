@@ -255,6 +255,40 @@ def test_base_fetched_when_missing_from_worktree(sprint, tmp_path):
     assert scope["files"] == 16
 
 
+def test_full_scope_skips_files_merged_in_from_the_moved_base_branch(tmp_path):
+    """#3081 の受け入れ条件 8・I10: まとまりの PR が進んだスプリントブランチを取り込んでも、全差分の base は base のブランチの
+    今の先頭との merge base で、他のまとまりのファイルは範囲に入らない（REST の古い base.sha のままでも同じ）。"""
+    origin, wt = tmp_path / "origin.git", tmp_path / "wt"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(wt)], check=True)
+    _git(wt, "remote", "add", "origin", str(origin))
+    old_base = _commit(wt, {"README.md": "base\n"}, "base")
+    _git(wt, "push", "-q", "origin", "sprint/s1")
+    _git(wt, "checkout", "-q", "-b", "feat/issue-12-s1")
+    _commit(wt, {"src/mine/a.py": "a\n", "src/mine/b.py": "b\n"}, "bundle")
+    _git(wt, "checkout", "-q", "sprint/s1")
+    _commit(wt, {f"src/other/f{n}.py": f"{n}\n" for n in range(5)}, "other bundle merged")
+    _git(wt, "push", "-q", "origin", "sprint/s1")
+    _git(wt, "checkout", "-q", "feat/issue-12-s1")
+    _git(wt, "merge", "-q", "--no-edit", "sprint/s1")  # 実装のプランの取り込み（base-sync）
+    head = _git(wt, "rev-parse", "HEAD")
+
+    scope = review_lib.review_scope.compute_scope(str(wt), head, old_base, "code", 1, [], PR, "sprint/s1")
+    assert scope["files"] == 2 and scope["base_sha"] == _git(wt, "rev-parse", "sprint/s1")
+    # base のブランチを渡さない・取得できなければ今の値（REST の base.sha）で数える
+    assert review_lib.review_scope.compute_scope(str(wt), head, old_base, "code", 1, [], PR)["files"] == 7
+    assert review_lib.review_scope.compute_scope(str(wt), head, old_base, "code", 1, [], PR, "no-such")["base_sha"] == old_base
+
+
+def test_start_round_passes_the_base_branch(sprint, tmp_dir, github, capsys):
+    """start-round は状態の base_branch を範囲へ渡す。base のブランチの先頭との merge base が base になる。"""
+    _git(sprint.wt, "push", "-q", "origin", f"{sprint.before_refactoring}:refs/heads/develop")
+    _write(tmp_dir, _state(sprint, tmp_dir, base_branch="develop"))
+    _start_round(capsys)
+    scope = _read(tmp_dir)["rounds"][-1]["review_scope"]
+    assert scope["base_sha"] == sprint.before_refactoring and scope["files"] == 1
+
+
 def test_no_head_is_unavailable():
     assert review_lib.review_scope.compute_scope("/nowhere", None, "a" * 40, "code", 1, [], PR) == {"unavailable": "no_head"}
     assert review_lib.review_scope.compute_scope("/nowhere", "b" * 40, "", "code", 1, [], PR) == {"unavailable": "no_base"}

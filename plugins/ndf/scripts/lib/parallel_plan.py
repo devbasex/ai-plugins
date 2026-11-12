@@ -19,6 +19,7 @@ from typing import Annotated, Iterable, Literal, Mapping, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+import parallel_bundles as pb
 import parallel_hold
 from parallel_files import PARALLEL_DIR, resolved_path  # noqa: F401  置き場の正本（問いの hook も読む）
 
@@ -58,6 +59,9 @@ class SprintInput(BaseModel):
     kind: Literal["sprint"]
     issues: list[int] = Field(min_length=1)
     args: list[str] = Field(default_factory=list)
+    bundles: Optional[list[pb.Bundle]] = None  # 課題のまとまり（#3081）。省くと「まとまりの記録なし」。I1〜I3 は検証で見る
+    check_bundles = model_validator(mode="after")(pb.checked_input)
+    bundle_list = pb.input_bundle_list  # まとまりの一覧（I4 の 1 件のまとまりを補う）。欄が無ければ None
 
 
 LaneInput = Annotated[Union[LoopInput, SprintInput], Field(discriminator="kind")]
@@ -301,6 +305,7 @@ def check_data(
         key = str(home) if home else None
         same = lambda a, b: lane_repo_key(a, key) == lane_repo_key(b, key)  # noqa: E731
         items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(plan.lanes, estimates, shared, same)]
+        items += te.bundle_overlaps(plan.lanes, estimates, shared)  # 同じスプリントの異なるまとまりの重なり（#3081 の I5a）
     return plan, items, _metrics_of(items, caps, notes)
 
 
@@ -308,7 +313,7 @@ def _validation_items(exc: ValidationError) -> list[dict]:
     """Pydantic の検証の誤りを公開の items（level=error）へ変える。不変条件の番号でない型は `form` とする。"""
     items = []
     for e in exc.errors():
-        rule = e["type"] if re.fullmatch(r"I\d+", e["type"]) else "form"
+        rule = e["type"] if re.fullmatch(r"I\d+|bundle", e["type"]) else "form"
         loc = ".".join(str(p) for p in e["loc"])
         items.append({"level": "error", "rule": rule, "at": loc or None, "message": e["msg"]})
     return items
@@ -398,7 +403,7 @@ def render_md(plan: ParallelPlan, progress: Optional[dict] = None) -> str:
         lines.append(
             f"| {ln.name} | {f'`{ln.repo}`' if ln.repo else '計画の置き場'} | {first} | {ln.plans} | {', '.join(f'`{t}`' for t in ln.touches) or '-'} | {', '.join(ln.after) or '-'} | `.ndf/handoff/{ln.handoff_name()}.md` |"
         )
-    lines += ["", "## レーンに共通の決まり", ""]
+    lines += [*pb.render_rows(plan.lanes), "", "## レーンに共通の決まり", ""]
     lines += [
         f"- 同時に流すプランの本数はレーンごとに上の表のとおり（合計 {sum(ln.plans for ln in plan.lanes)} 本）",
         "- 触る場所は上の表のとおり。取り込みの衝突は base-sync で解く",
