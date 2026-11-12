@@ -826,6 +826,25 @@ def test_a_helper_ends_by_stopping_its_own_wrapper():
         assert f"{prun.RELAY} stop {name}" in argv[argv.index("--") + 1]
 
 
+def test_char_helper_spawn_and_verify_spawn_inputs():
+    """現状固定: 一時レーンを起こす入力（helper_spawn・verify_spawn）の argv と cwd をそのまま記録する。"""
+    import parallel_helper as ph
+
+    def expect(helper, what, cwd):
+        end = f"[ndf-parallel] helper-done p1 の行を出し、python3 {ph.RELAY} stop {helper} で自分のラッパーを止めたとき"
+        first = f"/goal /ndf:development-workflow --parallel-helper p1 {what} -- 終わり: {end}"
+        return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", "p1", "--json", "--", first], "cwd": cwd}
+
+    assert ph.helper_spawn("p1", 2, 1) == expect("p1-rel2", "2 1", None)
+    assert ph.helper_spawn("p1", 3, 0, pending="lroot") == expect("p1-rel3", "pending lroot", None)
+    assert ph.helper_spawn("p1", 3, 0, pending="lroot", cwd="/other") == expect("p1-rel3", "pending lroot", "/other")
+    assert ph.helper_spawn("p1", 4, 2, cwd="/other") == expect("p1-rel4", "4 2", "/other")
+    # verify_spawn は一時レーンの名前を引数で受け、cwd は常に None
+    assert ph.verify_spawn("p1", "q1", "p1-ver1") == expect("p1-ver1", "verify q1", None)
+    assert ph.verify_spawn("p1", "q1-again2", "h") == expect("h", "verify q1-again2", None)
+    assert prun.helper_spawn is ph.helper_spawn
+
+
 def _bare_run(monkeypatch, lanes):
     """耐久ワークフローの外で _Run を組む（知らせは捨てる）。起動の判定はマシンを数えず、テストが差し替えた step_spawn へ渡す。"""
     monkeypatch.setattr(durable, "set_event", lambda *_a, **_k: None)
