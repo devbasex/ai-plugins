@@ -73,6 +73,18 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
     assert got == {"release-request": {"フェーズ": "リリースの依頼", "plan": "p1", "lane": "la"}}
 
 
+def test_selected_lane_builds_its_own_prod_plan(monkeypatch):
+    """選んで集める取り込み方（#3121）はまとめたリリースを組まないため、レーンでも自分の本番のプランを組む。"""
+    import argparse
+
+    from supervise_lib import sprint
+
+    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
+    flow = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+    a = argparse.Namespace(flow=flow, base="develop", production_branch="main")
+    assert list(sprint.prod_plans(a, "/r", lambda: {"x": 1})) == ["release-prod"]
+
+
 def test_release_request_plan_has_one_gate_step():
     import argparse
 

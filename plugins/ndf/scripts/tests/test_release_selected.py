@@ -168,7 +168,7 @@ def test_selected_sprint_builds_the_release_branch_and_releases_it_directly(tmp_
     build = step(dev, "release-branch")
     assert build and "--units sprint/s1" in build["cmd"] and "--production main" in build["cmd"]
     assert step(dev, "verify")["next"] == "release-branch" and build["next"] == "facts"
-    assert f"--head {BRANCH}" in step(dev, "facts")["cmd"]
+    assert f"--head {BRANCH}" in step(dev, "facts")["cmd"] and f"--head {BRANCH}" in step(dev, "others")["cmd"]
     assert prod["起点のコミット"] == f"origin/{BRANCH}"
     assert "--base main" in step(prod, "bump")["cmd"]
     assert "--promotion selected" in step(prod, "release")["cmd"]
@@ -183,7 +183,7 @@ def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     dev, prod = release_plans(out)
     assert step(dev, "release-branch") is None and step(dev, "verify")["next"] == "facts"
-    assert "--head" not in step(dev, "facts")["cmd"]
+    assert "--head" not in step(dev, "facts")["cmd"] and "--head" not in step(dev, "others")["cmd"]
     assert "起点のコミット" not in prod
     assert "--base develop" in step(prod, "bump")["cmd"] and "--promotion" not in step(prod, "release")["cmd"]
 

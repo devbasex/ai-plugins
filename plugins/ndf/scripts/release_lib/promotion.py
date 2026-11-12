@@ -53,6 +53,15 @@ def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
     }
 
 
+def head_ref(root, branch: str | None) -> str:
+    """`changed-plugins` が差分の終点にする ref。`branch`（承認に出すリリースブランチ）があれば origin から取り直したその先頭、
+    無ければ HEAD。選んで集める取り込み方では、作業ツリーの HEAD に選ばなかったスプリントが入りうる。"""
+    if not branch:
+        return "HEAD"
+    git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    return f"origin/{branch}"
+
+
 def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
     """承認したコミットの後に積んでよいコミット: origin の `branch` の first-parent のうちマージでないもの（版上げ・変更履歴・
     説明文・消費の記録）。承認の後にマージで足した単位のコミットはここに入らず、承認の外として止まる（決定 14）。"""

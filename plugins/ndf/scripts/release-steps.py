@@ -288,13 +288,13 @@ def next_release(name, old, level="patch"):
 def other_plugins(root, a):
     """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
     since = a.since or release_tag_before(root, a.plugin) or f"{a.plugin}--v*"
-    p = git(root, "diff", "--name-only", f"refs/tags/{since}", "HEAD", check=False)
+    p = git(root, "diff", "--name-only", f"refs/tags/{since}", a.end, check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
     pending, already = {}, []
     for name in sorted({m[1] for f in p.stdout.split() if (m := re.match(r"plugins/(?:mcp/)?([^/]+)/", f))} - {a.plugin}):
         pdir = root / "plugins" / (name if name in ("ndf", "playwright-kit") else f"mcp/{name}")
-        old, head = base_version(root, pdir, since), base_version(root, pdir, "HEAD")
+        old, head = base_version(root, pdir, since), base_version(root, pdir, a.end)
         if old and head == old:  # 差分の中でまだ上げていない
             pending[name] = old
         elif head:
@@ -310,13 +310,14 @@ def cmd_changed_plugins(a):
         raise StepError("引数の組み合わせが違う（--decided は --prs・--approval と並べない。--set は --approval と使う）", 2)
     if a.set:
         return emit(changed.set_levels(TOOL, changed.approval_path(root, a.approval), a.set))
+    a.end = promotion.head_ref(root, a.head)  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
     since, pending, already = other_plugins(root, a)
     skipped, decided = [], None
     if a.decided and pending:
         decided = changed.approval_path(root, a.decided)
         rows = changed.decided_rows(decided, pending, already)
     elif a.prs is not None:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
-        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", "HEAD"), a.prs)
+        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", a.end), a.prs)
         data = included.pr_fields(prs, cwd=str(root))[0] or {}
         view = lambda n: data[n] if isinstance(data.get(n), dict) else pr_view(root, n, "body,state,mergeCommit")  # noqa: E731  読めない PR は根拠に書く（I4）
         rows = changed.candidate_rows(root, prs, pending, view, skipped)
@@ -1191,6 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--approval", help="承認資料。「版を上げる他のプラグイン」の節を書く")
     p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: リリース承認ゲートで決めた上げ幅へ行を書き直す")
     p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
+    p.add_argument("--head", help="差分の終点のブランチ（既定は HEAD。選んで集める取り込み方はリリースブランチ）")
     p.set_defaults(func=cmd_changed_plugins)
 
     p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md の版の節へ PR のタイトルを並べる")

@@ -159,7 +159,8 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str, 
             "type": "run",
             "cwd": repo,
             "cmd": f"{STEPS_PY} changed-plugins --plugin {a.release['plugin']}{prev.replace('--prev-tag', '--since')} "
-            f"--prs {listed} --approval {approval}",
+            f"--prs {listed} --approval {approval}"
+            + (f" --head {head}" if head else ""),  # facts と同じリリースブランチの先頭から他のプラグインを拾う（#3121）
             "on_fail": "judge",
             "next": "mvv" if advise else "end",
         },

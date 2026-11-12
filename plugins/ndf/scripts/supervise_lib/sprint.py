@@ -59,8 +59,9 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
 
 
 def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
-    lane = parallel_lane(repo)
+    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。
+    取り込み方の行が単位を選ぶ（`selected`）なら、まとめたリリースは組まないため、レーンも自分の本番のプランで出す（#3121）。"""
+    lane = None if sprint_flow(a).row.selects_units else parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request
 
