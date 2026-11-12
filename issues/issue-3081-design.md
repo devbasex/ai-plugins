@@ -46,7 +46,7 @@
 
 課題のまとまりは、スプリントのレーンの入力（`input`）の中に置く。まとまりがレーンをまたがないことが形で決まり、レーンを書き換えずにまとまりだけを書き換える経路ができない。
 
-起動の前に conductor が `plan.json` を手で直すことは、今の決まりのまま認める。I1〜I3 は計画の模型（`Bundle`・`SprintInput`）の検証が守り、`init`・`check` と、計画を読む経路（`load_valid_plan`。レーンの起動・スプリントの組み立てが通る）が同じ検証を通す。手の直しで I1〜I3 が破れた計画は、どの経路からも読めずに止まり、`bundles` と `input.issues` の対応が崩れたまま動くことは無い。
+起動の前に conductor が `plan.json` を手で直すことは、今の決まりのまま認める。I1〜I3 は計画の模型（`Bundle`・`SprintInput`）の検証が守り、`init`・`check` と、計画を読む経路（`load_valid_plan`。レーンの起動・スプリントの組み立てが通る）が同じ検証を通す。レーンの判定（`parallel_lane.lane_of`）は検証に通らない計画を飛ばして「レーンでない」と返すため、スプリントの組み立てはレーンの判定に頼らず、まとまりの読み出し（`bundles_of`）が検証の失敗を「レーンでない」と区別して止める（「構成要素」の `bundles_of`）。手の直しで I1〜I3 が破れた計画は、`init`・`check`・レーンの起動・スプリントの組み立てのどれからも誤りとして止まり、まとまりの記録の無いスプリントとして黙って動くことは無い。
 
 ### 不変条件
 
@@ -137,7 +137,7 @@
 | まとまりの模型（`parallel_plan.py` の `Bundle`・`SprintInput.bundles`） | まとまりの形と I1〜I3 の検査。I4 の補い（`SprintInput.bundle_list()`） |
 | まとまりの重なりの検査（`parallel_plan.py` の `check_data`・`touch_estimate.py` の `bundle_overlaps`） | 規則 `bundle-overlap` の項目。規則 `I21` の項目へ `bundles` の欄を足す |
 | 計画の描画（`parallel_plan.py` の `render_md`） | `plan.md` にまとまりの表を足す |
-| レーンのまとまりの読み出し（`parallel_lane.py` の `bundles_of`） | 動いている計画のこのレーンのまとまりの一覧を返す。レーンでなければ、まとまりの欄が無ければ None |
+| レーンのまとまりの読み出し（`parallel_lane.py` の `bundles_of`） | 動いている計画のこのレーンのまとまりの一覧を返す。レーンでなければ、まとまりの欄が無ければ None。計画の置き場の中に、検証に通らない（`load_valid_plan` が `ValueError` を投げる）計画があり、その `plan.json` の `lanes[].name` にこのレーンの名前（`NDF_RELAY_NAME`）があれば、None を返さず誤り（`ValueError` の派生、計画の名前と検証の誤りを持つ）を投げる。`lane_of` の振る舞いは変えない |
 | スプリントの組み立て（`supervise_lib/sprint.py`・`sprint_waves.py`） | まとまりの記録があれば、設計の課題を代表の課題へ寄せ、実装のステージをまとまりごとのプランにし、検査のプランから cross-review を外す |
 | レビューのステップ（`supervise_lib/templates.py` の `review_step`） | コードレビューの cross-review のステップを 1 か所で組む。検査のプランとまとまりの実装のプランが共有する |
 | レビュー範囲（cross-review の `review_lib/review_scope.py`・`commands/start_round.py`） | 全差分の base を、base のブランチの今の先頭との merge base にする |
@@ -278,6 +278,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     A[supervise.py sprint] --> B{bundles_of が<br/>None か}
+    B -->|誤り| G[stopped で止まる<br/>プランを書かない]
     B -->|None| C[課題ごとの実装<br/>検査で cross-review]
     B -->|一覧| D[設計の課題を<br/>代表へ寄せる]
     D --> E[まとまりごとの実装<br/>マージ前に review_step]
@@ -370,6 +371,7 @@ graph TD
 | 受け入れ条件 1 | 手順の例の課題の組に決定 1 の表を当てる（設計承認ゲートで読む） | — |
 | 受け入れ条件 2・I1 | 2 つのまとまりに同じ課題を書いた下書きで `check_data` が規則 `bundle` の誤りを返し、`init` が書かない | 重なりの検査を外す |
 | I2 | `input.issues` に無い課題をまとまりに書くと規則 `bundle` の誤り | 所属の検査を外す |
+| I1〜I3（計画を読む経路） | 起動の後に手で I1〜I3 を破った `plan.json` のレーンで、`bundles_of` が誤りを投げ、`supervise.py sprint` が `stopped`（プランを書かない）で止まる。同じ置き場にこのレーンを含まない壊れた計画があっても、このレーンの `bundles_of` は止まらない | 検証の失敗を None として扱う（`lane_of` と同じく飛ばす）・壊れた計画のレーンの名前を照合しない |
 | I3 | 名前の形が違うまとまり・同じレーンの中で名前が重なるまとまり（I4 が補う `issue-<番号>` と重なる名前を含む）で規則 `bundle` の誤り。別のリポジトリの同じ番号の課題を持つ 2 レーンに `bundles: []` を書いた計画は誤りにならない | 形か一意の検査を外す・一意の範囲を計画全体へ広げる |
 | 受け入れ条件 3・I4 | `bundles: []` のレーンで `bundle_list()` が課題ごとの 1 件のまとまりを返し、`bundle-overlap` が 1 件のまとまりの間でも出る | 補いを外す・空の配列を None と同じに扱う |
 | 受け入れ条件 4・I5a | 同じレーンの異なるまとまりの見込みが重なると `bundle-overlap` が `bundles`・`issues`・`paths`・`move` / `after` の案を出す。`after` の付かない 2 レーンの異なるまとまりの重なりは規則 `I21` が `bundles` の欄つきで出す | 同じレーンの組を見ない・案を落とす |
