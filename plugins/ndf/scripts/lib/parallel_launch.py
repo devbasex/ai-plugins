@@ -135,7 +135,7 @@ class LaunchRouting:
             return True
         spec = q.get("launch") or {}
         if kind in ("spawn", "helper") and q.get("purpose") and spec.get("argv"):
-            extra = {"n": q["n"]} if q.get("n") is not None else {}
+            extra = {k: q[k] for k in ("n", "verify") if q.get(k) is not None}  # 版の要るまとめの依頼も引き継ぐ（#3058）
             purpose = f"{q['purpose']}-a{qid}"
             self.wake_tries.pop(lane, None)  # 人が起こし直すと答えた: 再起動の回数を数え直す
             if self.launch and self.launch.get("purpose") == q["purpose"]:

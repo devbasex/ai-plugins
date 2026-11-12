@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +29,9 @@ def helper_spawn(name: str, n: int, k: int, pending: Optional[str] = None, cwd: 
     return {"argv": ["spawn", "--name", helper, "--role", "helper", "--plan", name, "--json", "--", first], "cwd": cwd}
 
 
+AGAIN_RE = re.compile(r"-again\d+$")  # 組み直しの依頼の id（`<元の依頼>-again<連番>`。parallel_route.apply_build）
+
+
 def verify_spawn(name: str, rid: str, helper: str) -> dict:
     """版の要るまとめ（リリース後テスト → 課題を閉じる）を流す一時レーンを起こす入力（#3058 の決定 4）。流すものは
     `parallel.py verified <計画名> <依頼>` が返し、終わりに同じ副命令へ `--done` を渡して結果を返す。"""
@@ -41,7 +45,8 @@ def verify_task(main: Path, name: str, rid: str) -> Optional[dict]:
     版の要るまとめのプランを queue で流して待ち、結果を `verified` で返す。プランが無ければ None。"""
     import parallel_ledger as plg
 
-    rows = [r.get("msg") or {} for r in plg.read_ledger_rows(main, name).rows if r["kind"] in ("request", "verify") and r["id"] == rid]
+    ids = (rid, AGAIN_RE.sub("", rid))  # 組み直しの依頼は元の依頼のプランを使う（台帳に組み直しの id の request の行は無い）
+    rows = [r.get("msg") or {} for r in plg.read_ledger_rows(main, name).rows if r["kind"] in ("request", "verify") and r["id"] in ids]
     plan = next((m.get("verify_plan") or m.get("plan") for m in reversed(rows) if m.get("verify_plan") or m.get("plan")), None)
     if not plan:
         return None
@@ -62,7 +67,6 @@ def spawn_line(spec: dict) -> str:
 
 def present_approval(d: Path) -> str:
     """提示のプランの承認資料の絶対パス（ステップ `present` の `--approval` と `cwd` から読む）。読めなければ空。"""
-    import re
     import shlex
 
     try:

@@ -15,6 +15,7 @@ import json
 import shlex
 from pathlib import Path
 
+from sprint_close_lib.final_stage import STAGE_VERIFY
 from supervise_lib import limits
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, PARALLEL_PY
@@ -26,7 +27,7 @@ from supervise_lib.sprint_routes import RECORD_FOUND
 from supervise_lib.verify_steps import merge_steps
 
 STAGE = "まとめ"
-CLOSE_KEY = "lane-close"  # まとめのステージのプランの名（版の要るまとめの close が進行の記録を `{queue_state:lane-close}` で読む）
+CLOSE_KEY = "lane-close"  # まとめのステージのプランの名
 VERIFY_FILE = "lane-verify.json"  # 版の要るまとめのプラン（目録と同じ置き場。ステージには入れない）
 REQUEST_KEY = "release-request"  # 依頼のプランの名（`sprint.prod_plans`）
 
@@ -73,10 +74,12 @@ def lane_close_plan(a, repo: str, lane: tuple[str, str]) -> dict:
 
 
 def verify_plan(a, repo: str) -> dict:
-    """版の要るまとめ: リリース後テスト（控えを取る・比べるを含む）→ 課題を閉じる。最終工程はまとめのプランの進行の記録で選ぶ。"""
+    """版の要るまとめ: リリース後テスト（控えを取る・比べるを含む）→ 課題を閉じる。最終工程はリリース後テストに固定する。
+    振り返りは版の要らないまとめでリリースより前に済むため、最後のリリース記録より後の振り返りを求めると課題を閉じられない。
+    耐久ワークフローはレーンの終わりの記録（まとめの完了）の後にだけ流す（`parallel_end.launch_verify`）。"""
     issues, refs = ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
     close = _close_step(a, repo, RECORD_FOUND, issues)
-    close["cmd"] = close["cmd"].replace("{state_dir}/progress.jsonl", f"{{queue_state:{CLOSE_KEY}}}/progress.jsonl")
+    close["cmd"] = close["cmd"].replace("--final-stage-from {state_dir}/progress.jsonl", f"--final-stage {STAGE_VERIFY}")
     steps = [*release_verify_steps(a.name, refs, RECORD_FOUND, after="close"), close]
     plan = {
         "フェーズ": "リリース後テスト",

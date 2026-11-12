@@ -203,6 +203,9 @@ def test_released_answer_queues_the_verify_and_a_helper_runs_it_alone(run, monke
     request(run)
     run.answer(RID, "released", "1.2.3", 1)
     assert [v["id"] for v in run.verifies] == [RID] and not prun._run_finished(run)  # 待ちが残る間は終わらない（I6）
+    run.launch_verify()
+    assert launched == []  # レーンの終わりの記録（版の要らないまとめの完了）の前は起動しない
+    end(run)
     run.current = {"n": 2}
     run.launch_verify()
     assert launched == []  # リリースを流す一時レーンと同時に起動しない（I7）
@@ -242,12 +245,47 @@ def test_a_verify_notice_without_a_request_queues_the_verify(run):
 def test_stopping_a_stalled_verify_helper_drops_the_wait(run, monkeypatch):
     monkeypatch.setattr(run, "launch_once", lambda *_a, **_k: {})
     request(run)
+    end(run)
     run.answer(RID, "released", "1.2.3", 1)
     run.launch_verify()
     q = {"kind": "helper", "id": "p1-rel1v-verify-1", "lane": "p1-rel1v", "verify": RID, "purpose": f"verify-{RID}", "options": []}
     run.questions.append(q)
     run.reply({"id": q["id"], "choice": ["止める"]})
     assert run.verifies == [] and run.verifying is None
+
+
+def test_stopping_a_verify_helper_that_never_came_up_drops_the_wait(run, monkeypatch):
+    import parallel_launch as plaunch
+
+    monkeypatch.setattr(plaunch, "step_launch", lambda *_a, **_k: {"result": "failed", "attempts": 2, "at": "x", "reason": "down"})
+    run.launching = True
+    request(run)
+    end(run)
+    run.answer(RID, "released", "1.2.3", 1)
+    run.launch_verify()
+    (q,) = kinds(run, "spawn")
+    assert q["verify"] == RID  # 起動の問いが版の要るまとめの依頼を持つ
+    run.reply({"id": q["id"], "choice": ["起こし直す"]})
+    (again,) = [x for x in kinds(run, "spawn") if x["id"] != q["id"]]
+    assert again["verify"] == RID and run.verifies[0]["purpose"] == again["purpose"]  # 起こし直しの問いへも引き継ぐ
+    run.reply({"id": again["id"], "choice": ["止める"]})
+    assert run.verifies == [] and run.verifying is None
+
+
+def test_stop_waits_for_the_verify_helper_and_force_stops_it(run, monkeypatch):
+    stopped: list[list[str]] = []
+    monkeypatch.setattr(prun, "step_stop_lanes", lambda _m, names: stopped.append(list(names)) or [])
+    monkeypatch.setattr(prun, "step_finish", lambda *_a: None)
+    monkeypatch.setattr(run, "launch_once", lambda *_a, **_k: {})
+    request(run)
+    end(run)
+    run.answer(RID, "released", "1.2.3", 1)
+    run.launch_verify()
+    run.stop = True
+    assert prun._TICK[0][1](run, "/m", "p1", 0) is None and stopped == []  # verified が届くまで待つ
+    run.force = True
+    assert prun._TICK[0][1](run, "/m", "p1", 0)["status"] == "stopped"
+    assert "p1-rel1v" in stopped[-1]  # --force は版の要るまとめの一時レーンも止める
 
 
 # ---- 差し戻しと失敗（B4・I9） ----
@@ -389,6 +427,13 @@ def test_verified_returns_the_task_and_then_sends_the_result(cli, capsys):
     done.write_text(json.dumps({"items": [{"result": "完了"}, {"result": "完了"}]}))
     code, res = _out(capsys, pend.cmd_verified, argparse.Namespace(name="p1", id=RID, done=str(done)))
     assert code == 0 and cli["sent"][-1][1] == {**cli["sent"][-1][1], "kind": "verified", "id": RID, "result": "完了"}
+
+
+def test_verified_of_a_rebuilt_request_uses_the_plan_of_its_origin(cli, capsys):
+    msg = {"kind": "request", "id": RID, "lane": "la", "verify_plan": "/w/sprint-s1/lane-verify.json"}
+    plg.append_ledger_row(cli["main"], "p1", "request", f"request:{RID}", msg, by="la")
+    code, res = _out(capsys, pend.cmd_verified, argparse.Namespace(name="p1", id=f"{RID}-again2", done=None))
+    assert code == 0 and "/w/sprint-s1/lane-verify.json --done" in res["metrics"]["pipeline"]
 
 
 def test_verified_without_a_plan_stops(cli, capsys):

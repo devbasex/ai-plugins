@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 import time
 from pathlib import Path
@@ -29,7 +28,8 @@ import durable
 import parallel_ledger as plg
 import parallel_release as pr
 from parallel_files import RELAY
-from parallel_helper import verify_spawn, verify_task
+from parallel_helper import AGAIN_RE, verify_spawn, verify_task
+from parallel_launch import RESTART
 from parallel_observe import _asking_lanes
 from parallel_repo import relay, relay_proc, stall_seconds
 
@@ -38,7 +38,6 @@ END_KINDS = ("halt", "unended", "after_end")  # 耐久ワークフローがレ�
 HALTED, COUNT_ENDED, REVIVE, WAIT = "止めた", "終わったと数える", "起こし直す", "待つ"
 FIX, SKIP, RESUME, STOP = "レーンを足して直す", "見送る", "続きから起こし直す", "止める"
 LIVE = ("running", "awaiting_approval")
-AGAIN_RE = re.compile(r"-again\d+$")  # 組み直しの依頼の id（`<元の依頼>-again<連番>`。parallel_route.apply_build）
 PARALLEL_PY = Path(__file__).resolve().parents[1] / "parallel.py"
 
 
@@ -142,16 +141,19 @@ class LaneEnding:
         self.verifying = None if self.verifying == rid else self.verifying
 
     def launch_verify(self) -> None:
-        """流れているリリースも流している待ちも無く、計画全体の停止の間でなければ、待ちの先頭を一時レーンで流す（I7）。"""
-        if not self.ending or self.verifying is not None or self.current is not None or not self.verifies or self.hold.plan:
+        """流れているリリースも流している待ちも無く、計画全体の停止の間でなければ、待ちのうちレーンの終わりの記録（版の要らない
+        まとめの完了）があるものの先頭を一時レーンで流す（I7）。まとめより先に課題を閉じない。"""
+        if not self.ending or self.verifying is not None or self.current is not None or self.hold.plan:
             return
-        item = self.verifies[0]
+        item = next((v for v in self.verifies if (self.lanes.get(v.get("lane")) or {}).get("ended")), None)
+        if item is None:
+            return
         k = 1 + sum(1 for p in self.launches if p.startswith("verify-"))
         helper = f"{pr.helper_name(self.name, k)}v"
         spec = verify_spawn(self.name, item["id"], helper)
         item.update(helper=helper, purpose=f"verify-{item['id']}", launch=spec)
         self.verifying = item["id"]
-        self.launch_once(item["purpose"], helper, spec["argv"], spec.get("cwd"))
+        self.launch_once(item["purpose"], helper, spec["argv"], spec.get("cwd"), verify=item["id"])  # 起動の問いの「止める」で待ちを外す
 
     def _watch_verify(self, rows: dict) -> None:
         """版の要るまとめの一時レーンが `verified` を送らずに止まったら、立ち上がりの後に 2 回続けて観たときに問う。"""
@@ -250,7 +252,7 @@ class LaneEnding:
             if STOP in choice:
                 self.take_verified({"id": q["verify"], "result": "止めた"})
                 return True
-            if item is not None and RESUME in choice:  # relaunch が `<目的>-a<問い>` で起こし直す。見張りを新しい起動へ向ける
+            if item is not None and set(RESTART) & set(choice):  # relaunch が `<目的>-a<問い>` で起こし直す。見張りを新しい起動へ向ける
                 item["purpose"] = f"{q.get('purpose')}-a{q.get('id')}"
             return False
         if q.get("kind") not in END_KINDS:

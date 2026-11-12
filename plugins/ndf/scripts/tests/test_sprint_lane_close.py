@@ -69,7 +69,9 @@ def test_the_request_route_closes_without_waiting_and_without_closing_issues(a, 
     assert ids(plan)[:3] == ["config-save", "release-verify", "config-check"] and "close" in ids(plan)
     assert slc.closes_issues(plan)  # 課題を閉じるのは版の要るまとめだけ（B3）
     closing = next(s for s in plan["steps"] if s["id"] == "close")
-    assert "--final-stage-from {queue_state:lane-close}/progress.jsonl" in closing["cmd"] and "--record-pr {queue_record}" in closing["cmd"]
+    # 振り返りはリリースより前のまとめで済むため、最終工程はリリース後テストに固定する
+    assert "--final-stage リリース後テスト" in closing["cmd"] and "--final-stage-from" not in closing["cmd"]
+    assert "--record-pr {queue_record}" in closing["cmd"]
 
 
 def test_a_lane_that_releases_inside_closes_as_now_and_records_its_end(a, lane, monkeypatch):
