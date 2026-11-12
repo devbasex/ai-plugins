@@ -111,6 +111,14 @@ def pace_verify(a) -> str:
     return sec["verify"]
 
 
+def _plan_wave(name: str, key: str, plan: dict, then_of: str, note: str | None) -> dict:
+    """1 本のプランのステージ。note が真なら note を足す。"""
+    wave = {"name": name, "plans": {key: plan}, "then_of": then_of}
+    if note:
+        wave["note"] = note
+    return wave
+
+
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
     """雛形で組まない経路のステージ（#1336）。リリースの Pull Request で届く経路（promote）があれば「本番」（本番チャネルへ入れるリリースプラン）を、手で届ける経路
     （manual）があれば「リリース」（手で行う）をこの順に置く。fast / auto（mvv あり）では、本番チャネルへ入れるリリースプランの先頭で導入の確認を
@@ -127,20 +135,12 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     if promote:
         ci_wait = int(plan_limits(a)["ci_wait_timeout"])
         plan = plan_promote(a, repo, ci_wait, PromoteParams(mvv=mvv, production=promote.branch, verify=verify), condition)
-        wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
+        waves.append(_plan_wave("本番", "promote", plan, then_of, note))
     elif verify:
-        wave = {"name": "導入の確認", "plans": {"verify": plan_verify(a, repo, verify, condition)}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
+        waves.append(_plan_wave("導入の確認", "verify", plan_verify(a, repo, verify, condition), then_of, note))
     if not promote and (production := direct_production(a, rs)):
-        wave = {"name": CD_RESULT_STAGE, "plans": {"cd-result": plan_cd_result(a, repo, production, condition)}, "then_of": then_of}
-        if note and not waves:
-            wave["note"] = note
-        waves.append(wave)
+        cd = plan_cd_result(a, repo, production, condition)
+        waves.append(_plan_wave(CD_RESULT_STAGE, "cd-result", cd, then_of, note if not waves else None))  # 先行のステージが無いときだけ
     if any(r.stage == delivery.STAGE_MANUAL for r in rs):
         waves.append(manual_release_wave(a))
     return waves
