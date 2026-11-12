@@ -18,6 +18,7 @@ import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402
 import parallel_cli as pcli  # noqa: E402
 import parallel_launch as plc  # noqa: E402
+import parallel_helper as ph  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
 LANES = [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb", "input": {"kind": "loop"}}]
@@ -176,7 +177,7 @@ def test_an_old_record_hands_the_launch_lines_to_the_organizer(run):
     run.launching = False
     run.lanes["la"].update(state="stopped")
     run.wake = ["la"]
-    spec = prun.helper_spawn("p1", 1, 1)
+    spec = ph.helper_spawn("p1", 1, 1)
     run.pause("release", n=1, k=1, purpose="rel-1-1-present", **spec)
     key, ev = run.events[-1]
     assert key == "pause" and ev["spawn"].startswith(f"python3 {prun.RELAY} spawn --name p1-rel1 ")
@@ -186,7 +187,7 @@ def test_an_old_record_hands_the_launch_lines_to_the_organizer(run):
 
 
 def test_a_new_record_keeps_the_pause_to_the_helper(run):
-    run.pause("release", n=1, k=1, purpose="rel-1-1-present", **prun.helper_spawn("p1", 1, 1))
+    run.pause("release", n=1, k=1, purpose="rel-1-1-present", **ph.helper_spawn("p1", 1, 1))
     ev = run.events[0][1]
     assert "spawn" not in ev and "wake" not in ev and not pcli.legacy_pause(ev)
     run.publish_questions()

@@ -461,6 +461,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
         mode=a.mode,
         sprint=getattr(a, "state", None),
         final=final,
+        final_sprint=a.name if final else None,  # 最後の検査は範囲をこのスプリントの PR に絞る（#3126）
         review_only=review_only,
     )
     return plan_check_since(ns)

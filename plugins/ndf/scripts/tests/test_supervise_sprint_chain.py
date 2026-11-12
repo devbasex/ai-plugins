@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from sprint_args import DESIGN_SPRINT_STAGES  # noqa: E402
 from test_supervise import cli  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("issue_bodies")  # 課題の本文は偽の gh が返す
@@ -49,18 +50,7 @@ def queue_words(command: str) -> list[list[str]]:
 def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
     stages = sprint(tmp_path, "--design", "11", "12")
     names = [s["name"] for s in stages]
-    assert names == [
-        "設計",
-        "設計承認ゲート",
-        "設計 PR のマージ",
-        "設計の結果",
-        "スプリントブランチ",
-        "実装",
-        "検査",
-        "デプロイ",
-        "リリース承認ゲート",
-        "本番",
-    ]
+    assert names == DESIGN_SPRINT_STAGES
     by = {s["name"]: s for s in stages}
     merge = by["設計 PR のマージ"]
     for n, path in zip((11, 12), merge["plans"]):

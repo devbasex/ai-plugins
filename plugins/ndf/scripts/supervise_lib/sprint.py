@@ -39,6 +39,7 @@ from supervise_lib.sprint_routes import (
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
+from supervise_lib.sprint_lane_close import issue_lists, with_lane_close
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -57,14 +58,15 @@ def release_lane(a, repo: str) -> tuple[str, str] | None:
     return None if sprint_flow(a).row.selects_units else parallel_lane(repo)
 
 
-def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+def prod_plans(a, repo: str, build, prs: list[str] | None = None, condition: dict | None = None) -> dict:
+    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン（`prs` の既定は `{queue_prs}`、
+    `condition` は実行条件。#3083）、そうでなければ `build()` の本番のプラン。"""
     lane = release_lane(a, repo)
     if lane:
         from parallel_release import plan_release_request
 
-        # prs を省いた呼び出しは、前のステージの Pull Request のすべて（{queue_prs}）を依頼に載せる
-        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])}
+        plan = plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])
+        return {"release-request": {**plan, "実行の条件": condition} if condition else plan}
     return {"release-prod": build()}
 
 
@@ -163,8 +165,7 @@ def auto_sprint_plans(a) -> list[dict]:
 def close_plan(a, repo: str) -> dict:
     """まとめ: 確定仕様化 → PR →（リリース記録があれば）リリース後テスト → 起動の判定 →（起動する回だけ）振り返り → 棚卸し →
     マージ → 課題を閉じる。CI は ready から後ろの作業と重なって進み、マージの後は close だけ（#2914 の決定 1〜4・I3・I8）。"""
-    issues = ",".join(map(str, a.issue))
-    refs = " ".join(f"#{i}" for i in a.issue)
+    issues, refs = issue_lists(a)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
@@ -194,27 +195,27 @@ def close_plan(a, repo: str) -> dict:
 
 
 def close_waves(a) -> list[dict]:
-    """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    """スプリントの終わりのステージ。まとめの後に最終の検査、変更があったときだけ開発版と本番が流れる（#3126 の決定 1）。"""
     pin_flow(a)  # 開始時のブランチ運用で組む（#3121 の I3）
     repo = str(Path(a.worktree).resolve())
+    close = {"name": "まとめ", "plans": {"close": close_plan(a, repo)}}
     if getattr(a, "pace", None) == "auto":
         # 開発ループの 1 回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
-        return [{"name": "まとめ", "plans": {"close": close_plan(a, repo)}}]
+        return [close]
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
-    check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}}
-    close = {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"}
+    check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}, **(then := {"then_of": "まとめ"})}
     if not has_release_template(a):
-        return [check, *route_waves(a, repo, "最終の検査", mvv=a.state, condition=changed), close]
+        return [close, check, *route_waves(a, repo, "まとめ", mvv=a.state, condition=changed)]
     return [
+        close,
         check,
-        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, **then},
         {
             "name": "本番",
-            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)),
-            "then_of": "最終の検査",
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed),
+            **then,
         },
-        close,
     ]
 
 
@@ -342,35 +343,37 @@ def add_resume(index: list[dict]) -> None:
             entry["resume"] = f"python3 {shlex.quote(str(SELF))} queue --resume {shlex.quote(done)}"
 
 
+def _new_refusal(a, pace: str) -> dict | None:
+    """計画を書く前の断り（pace の不可・absorb・受け入れ条件・課題のまとまり）。断るなら結果、断らなければ None。"""
+    if pace in MVV_PACES and (why := pace_refusal(a)):
+        return result(
+            "supervise-new",
+            "stopped",
+            f"pace: {pace} を使えない: {why}。計画を書かない",
+            [],
+            {"pace": pace},
+            next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
+        )
+    if why := absorb.absorb_refusal(a):  # どのファイルも書かない（#1426 の I8）
+        return result(
+            "supervise-new", "stopped", f"{why}。計画を書かない", [], {"absorb": list(a.absorb)}, next="--absorb を直して打ち直す"
+        )
+    absorb.add_absorbed(a)  # absorb を断らなければ、受け入れ条件を見る前に吸収する課題を足す
+    # 受け入れ条件の後に課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+    return sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design)) or bundle_refusal(a)
+
+
 def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     """スプリントの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
     then_of のステージは、そのステージの queue へ --then のステージとして足す（ステージは書いた順に流れる）。"""
     pace = getattr(a, "pace", "normal")
-    if waves is None and pace in MVV_PACES:
-        why = pace_refusal(a)
-        if why:
-            return result(
-                "supervise-new",
-                "stopped",
-                f"pace: {pace} を使えない: {why}。計画を書かない",
-                [],
-                {"pace": pace},
-                next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
-            )
     closing = waves is not None
-    if not closing and (why := absorb.absorb_refusal(a)):  # どのファイルも書かない（#1426 の I8）
-        return result(
-            "supervise-new", "stopped", f"{why}。計画を書かない", [], {"absorb": list(a.absorb)}, next="--absorb を直して打ち直す"
-        )
-    if not closing:
-        absorb.add_absorbed(a)
-    if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
-        return stop
-    if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+    if not closing and (stop := _new_refusal(a, pace)):
         return stop
     if not closing:
         pin_flow(a)  # 同じスプリントの打ち直しは開始時のブランチ運用で組む（#3121 の I3）
-    waves = waves if waves is not None else sprint_branch_first(a, sprint_plans(a))
+    # 設計 PR の前にスプリントブランチ（#3121）、レーンのまとめ（#3058）。課題のまとまりは _new_refusal で見る（#3081）
+    waves = waves if waves is not None else with_lane_close(a, sprint_branch_first(a, sprint_plans(a)), close_plan)
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
         apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）

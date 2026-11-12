@@ -28,7 +28,8 @@ from usage_ledger import ndf_version, now_utc
 VERSION = 1
 LEDGER = "ledger.jsonl"
 CHECKPOINT = "checkpoint.json"
-TAKE = ("request", "gate1", "gate2", "ask", "unmatched", "answer", "stop", "left_stopped", "lanes_changed")  # `_Run.take` へ渡す
+ENDS = ("lane_end", "lane_halt", "verify", "verified")  # レーンの終わりと版の要るまとめの行（#3058。`_Run.take_end`）
+TAKE = ("request", "gate1", "gate2", "ask", "unmatched", "answer", "stop", "left_stopped", "lanes_changed", *ENDS)  # `_Run.take` へ渡す
 QUESTIONS = ("gate1", "gate2", "ask", "unmatched")
 RECORD = ("opened", "closed", "rebuilt", "role")  # 耐久ワークフローの状態へ反映しない行
 KINDS = (*TAKE, "resume", *RECORD)
@@ -39,7 +40,7 @@ LOST = ("ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
 FIELDS = (
     "lanes", "pending", "questions", "releases", "launch", "held", "answered", "received", "refusals", "stall_until",
     "helper_asked", "held_spawned", "wake", "revive", "revive_at", "stop", "force", "left_stopped", "superseded", "holds",
-    "launches", "helper_seen", "woken", "wake_tries",
+    "launches", "helper_seen", "woken", "wake_tries", "verifies", "verifying", "verify_plans",
 )  # fmt: skip
 SETS = ("answered", "left_stopped", "superseded", "woken")
 
@@ -250,6 +251,23 @@ def published(main: Path, name: str, key: str):
     return published_events(main, name).get(key)
 
 
+SETTLING = ("confirm", "settle")  # リリース承認ゲートを処理した再開の段階（#3080）
+
+
+def settled_gates(rows: list[dict], earlier: list[dict] = ()) -> set[str]:
+    """処理済みのリリース承認ゲートの ID（#3080 の I8）。`rows` は位置（`_pos`）を持つ台帳の行で、リリース承認ゲート（`gate2`）の
+    行は、同じ連番の確定か締めの `resume` の行がそれより後にあれば処理済みとする。出し直しの提示の 2 回目は確定の後に届くため、
+    連番の一致だけでは除かない（I9）。`earlier` は `rows` より前に届いた問い（チェックポイントの問い）で、`rows` に同じ連番の
+    確定か締めがあれば処理済みとする。"""
+    done: dict[str, int] = {}  # 連番 → 確定か締めの最後の位置
+    for r in rows:
+        msg = r.get("msg") or {}
+        if r["kind"] == "resume" and msg.get("phase") in SETTLING:
+            done[str(msg.get("n"))] = max(done.get(str(msg.get("n")), -1), r["_pos"])
+    out = {r["id"] for r in rows if r["kind"] == "gate2" and done.get(str((r.get("msg") or {}).get("n")), -1) > r["_pos"]}
+    return out | {str(q.get("id")) for q in earlier if q.get("kind") == "gate2" and str(q.get("n")) in done}
+
+
 def pending_questions(main: Path, name: str) -> list[dict]:
     """台帳から読む答えていない問い（チェックポイントの問いと、その後に届いた問い）。失われた計画の問いの一覧に使う。
     台帳を開いていない計画（台帳を読まない途中の記録）は、耐久ワークフローが外した問いを区別できないため空を返す。"""
@@ -258,6 +276,7 @@ def pending_questions(main: Path, name: str) -> list[dict]:
     got = restore(main, name)
     st = got["state"] or {}
     answered = {*(st.get("answered") or []), *(r["id"] for r in got["rows"] if r["kind"] == "answer")}
+    answered |= settled_gates(got["rows"], st.get("questions") or [])
     out = {q.get("id"): q for q in st.get("questions") or []}
     for r in got["rows"]:
         if r["kind"] in QUESTIONS and r["id"] not in out:

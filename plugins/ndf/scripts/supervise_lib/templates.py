@@ -9,7 +9,7 @@ from pathlib import Path
 
 from step_result import result
 from supervise_lib import limits, release_templates
-from supervise_lib.decl import sprint_flow, with_decls
+from supervise_lib.decl import check_flags, check_issues, sync_source, with_decls
 from supervise_lib.paths import BEHAVIOR_STEPS, CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.paths import refactor_step_seconds
 from supervise_lib.procedures import (
@@ -288,10 +288,7 @@ def plan_check(a) -> dict:
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
     scope = refactor_scope(a, pr)
-    # 選んで集める取り込み方は、宛先（ベースブランチ）ではなくスプリントの起点から取り込む（#3121 の I4）
-    flow = sprint_flow(a)
-    source = f"--base {shlex.quote(flow.start_branch)}" if flow.row.selects_units and flow.start_branch else f"--pr {pr}"
-    *base, back = base_sync_steps(source, "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
+    *base, back = base_sync_steps(sync_source(a, pr), "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
@@ -351,31 +348,12 @@ RULE_CHECK_SINCE = (
 )
 
 
-def plan_check_since(a) -> dict:
-    """前回の検査からの差分を範囲にする検査（pace: fast。#1078）。
-
-    範囲は「前回の検査の時点（check-base/<名>）を宛先にした Pull Request」で表す。cross-refactoring と
-    cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
-    起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
-    立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run のステップは abort へ行き、
-    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。
-
-    `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
-    PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
-    repo = str(Path(a.worktree).resolve())
-    no_refactor = getattr(a, "review_only", False) or refactor_suspended(a)
-    flag = " --review" if no_refactor else ""
-    if getattr(a, "since_ref", None):
-        flag += f" --since {shlex.quote(a.since_ref)}"
-    name = a.id
+def check_since_steps(a, name: str, flag: str, no_refactor: bool) -> list[dict]:
+    """前回の検査からの差分を範囲にする検査のステップの並び（縮める・CI を待つ前）。"""
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
-    cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
-    cond += flag
-    if getattr(a, "final", False) and not no_refactor:
-        cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
     first = "実装レビュー" if no_refactor else "構造改善"
-    steps = [
+    return [
         {
             "id": "prepare",
             "type": "run",
@@ -440,14 +418,31 @@ def plan_check_since(a) -> dict:
         *merge_steps(a, on_fail="abort", next="record"),
         *record_steps(name, review=no_refactor, pr=True),
     ]
+
+
+def plan_check_since(a) -> dict:
+    """前回の検査からの差分を範囲にする検査（pace: fast。#1078）。
+
+    範囲は「前回の検査の時点（check-base/<名>）を宛先にした Pull Request」で表す。cross-refactoring と
+    cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
+    起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
+    立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run のステップは abort へ行き、
+    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。
+
+    `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
+    PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
+    repo = str(Path(a.worktree).resolve())
+    no_refactor = getattr(a, "review_only", False) or refactor_suspended(a)
+    flag = check_flags(a, no_refactor)
+    name = a.id
+    cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
+    cond += flag
+    if getattr(a, "final", False) and not no_refactor:
+        cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
+    steps = check_since_steps(a, name, flag, no_refactor)
     after_whole = "ci-peek" if ci_only(a) else "finish"
     steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor), "finish", "abort", fix_push=True)
-    issues = list(a.issue or [])
-    if not issues and getattr(a, "sprint", None):
-        try:
-            issues = [int(i) for i in json.loads(Path(a.sprint).read_text()).get("issues", [])]
-        except (OSError, ValueError, TypeError):
-            issues = []
+    issues = check_issues(a)
     plan = {
         "フェーズ": "検査",
         "課題": issues,

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """check-trigger.py: 検査（構造改善と実装レビュー）のトリガーを判定し、検査の範囲の用意と後始末と記録を持つ（#1078）。
 
-    check-trigger.py eval [--final | --review] [--id <計画名>] [--since <ref>] [--root DIR]
-    check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--review] [--root DIR]
+    check-trigger.py eval [--final | --review] [--id <計画名>] [--since <ref>] [--sprint <名> [--issue N ...]] [--root DIR]
+    check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--review] [--sprint <名> [--issue N ...]] [--root DIR]
     check-trigger.py scope --id <名> --state <DIR>
     check-trigger.py finish --id <名> --pr N [--root DIR]
     check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N] | --target-pr N [--advance-done] [--failed]) [--review] [--root DIR]
@@ -28,6 +28,12 @@
 送らないため、次の回は同じ起点から数え直す。ブランチは origin にあるため、手元の記録が消えても、別のマシンから
 続けても、検査を通らずにデプロイされた変更を範囲から落とさない。初めて使うリポジトリでは、どこまで見たかを
 `--since <ref>` で渡す。
+
+**`--sprint <名>` は最後の検査（スプリントの終わり。#3126）である。** 起点から先頭までの PR のうち、スプリントに
+属し（head のブランチの最後の区切りがスプリントの名前か、`issue-<番号>` が `--issue` の番号）、まだ検査していない
+もの（PR を指す検査の `target_pr` と、同じ種類の差分の検査の `prs` に無い）だけを範囲にし、`final`（`--review` なら
+`review`）のトリガーだけを見る。範囲が空か文書のファイルだけなら立たない。`prepare` は検査の PR の起点と先頭を
+範囲の最初と最後の PR に合わせ、`record` は印を、まだその種類の検査を通していない PR の手前までだけ進める。
 
 **`--review` は実装レビューだけの検査である。** 範囲の起点は、レビューだけの回を含む前回の検査である。記録には
 `only: review` が付き、構造改善を含む検査（`--review` 無し）の範囲の起点にはならない。レビューを開発版ごとに
@@ -56,6 +62,8 @@ import argparse
 import json
 from collections import Counter
 from contextlib import suppress
+from dataclasses import replace
+from typing import NamedTuple
 import os
 import re
 import sys
@@ -319,9 +327,158 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
         if m.branch.startswith(SKIP_BRANCHES):
             excluded.append(m.sha)
             continue
-        common = any(area_of(f, decl)[1] for f in git_or_stop(root, "diff", "--name-only", f"{m.sha}^1", m.sha).splitlines())
-        out.append({"pr": m.number, "branch": m.branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
+        out.append(pr_entry(root, m, decl))
     return out, excluded
+
+
+def files_of_merge(root: Path, sha: str) -> list[str]:
+    """マージ 1 件（1 つ目の親から）で変わったファイル。移動は移動元も数える（`--no-renames`。消した側が振る舞いを
+    決める文書でも文書だけの範囲と読まない）。"""
+    return git_or_stop(root, "diff", "--name-only", "--no-renames", f"{sha}^1", sha).splitlines()
+
+
+def pr_entry(root: Path, m: merged_range.Merge, decl: dict) -> dict:
+    """範囲へ入った PR 1 本の項目（共通層を触ったかと点数）。"""
+    common = any(area_of(f, decl)[1] for f in files_of_merge(root, m.sha))
+    return {"pr": m.number, "branch": m.branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
+
+
+ISSUE_IN_BRANCH = re.compile(r"(?:^|[/_-])issue-(\d+)(?=\D|$)")
+
+
+def in_sprint(branch: str, sprint: str, issues: set[int]) -> bool:
+    """スプリントに属する PR か。head のブランチの最後の区切りがスプリントの名前（`sprint/<名前>`・`spec/<名前>`）か、
+    ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ（#3126 の決定 2）。"""
+    if branch.rsplit("/", 1)[-1] == sprint:
+        return True
+    return any(int(n) in issues for n in ISSUE_IN_BRANCH.findall(branch))
+
+
+def checked_prs(events: list[dict], review: bool) -> tuple[set[int], set[int]]:
+    """(検査済みの PR, その種類の検査を通した PR)。前者は範囲から外す PR（I2）、後者は印を進めてよい PR（I4）。
+
+    PR を指す検査の行（`scope: pr`）の `target_pr` は、コードレビューだけの回でも検査済みに数える（スプリントの検査が
+    見た差分を見直さない。決定 3）。差分の検査の行の `prs` は、リファクタリングを含む最後の検査ではリファクタリングを
+    含む回（`only` が `review` でない）だけを数える。印を進めてよいかは、どちらの行もその種類の検査を通したかで決める。"""
+    seen: set[int] = set()
+    passed: set[int] = set()
+    for e in events:
+        if e["kind"] != "check" or e.get("result") not in ENDED:
+            continue
+        same_kind = review or e.get("only") != "review"
+        target = e.get("target_pr") if e.get("scope") == "pr" and isinstance(e.get("target_pr"), int) else None
+        prs = {n for n in e.get("prs") or [] if isinstance(n, int)}
+        if target is not None:
+            seen.add(target)
+            if same_kind:
+                passed.add(target)
+        if same_kind:
+            seen |= prs
+            passed |= prs
+    return seen, passed
+
+
+class FinalScope(NamedTuple):
+    """最後の検査の範囲（#3126。変えない値）。`eval`・`prepare` が同じ値を読む。保存しない（そのつど記録と git の履歴から作る）。"""
+
+    kept: list[dict]  # 範囲に入る PR（`merged_prs` と同じ形）。ベースブランチに入った順
+    other: list[int]  # スプリントに属さない PR（I1）
+    checked: list[int]  # 検査済みの PR（I2）
+    interleaved: int  # kept の最初と最後の間に入ったほかの PR の数（cross-review の差分に残る）
+    files: list[str]  # kept の PR が変えたファイルの和
+    docs_only: bool  # 文書のファイルだけ（コードのファイルと振る舞いを決める文書が 0 件。I3）
+    frm: str
+    to: str
+    advance_to: str  # 検査の印を進めてよい位置（I4）。空なら進めない
+    lines: int
+
+
+def docs_only_files(root: Path, files: list[str]) -> bool:
+    """範囲のファイルが文書のファイルだけか（`lib/diff_kinds.py`。振る舞いを決める文書は文書だけに数えない）。"""
+    deps.require("pathmatch")
+    import diff_kinds
+
+    kinds = diff_kinds.classify_root(root, files)
+    return kinds.docs_only() and not kinds.behavior
+
+
+class Selection(NamedTuple):
+    """最後の検査の選び方（`--sprint` の名前・`--issue` の番号・`--review`）。"""
+
+    sprint: str
+    issues: set[int]
+    review: bool
+
+
+class Classified(NamedTuple):
+    """古い順の PR の分類（`classify_merges`）。"""
+
+    kept_at: list[int]  # 範囲に入る PR の位置
+    kept: list[dict]  # 範囲に入る PR（`merged_prs` と同じ形）
+    other: list[int]  # スプリントに属さない PR
+    checked: list[int]  # 検査済みの PR
+    removable: list[bool]  # 印を進める位置の判定で、越えてよい PR か
+
+
+def classify_merges(
+    root: Path, merges: list, heads: dict, skip: set[int], seen: set[int], passed: set[int], sel: Selection, decl: dict
+) -> Classified:
+    """古い順の PR を「範囲に入る」（位置と PR）「ほか」「検査済み」に分け、印を進める位置の判定で越えてよい PR かを並べる。"""
+    got = Classified([], [], [], [], [])
+    for i, m in enumerate(merges):
+        branch = heads.get(m.number, "") or ""
+        if m.number in skip or branch.startswith(SKIP_BRANCHES):
+            got.removable.append(True)
+            continue
+        if not in_sprint(branch, sel.sprint, sel.issues):
+            got.other.append(m.number)
+        elif m.number in seen:
+            got.checked.append(m.number)
+        else:
+            got.kept_at.append(i)
+            got.kept.append(pr_entry(root, replace(m, branch=branch), decl))
+            got.removable.append(True)
+            continue
+        got.removable.append(m.number in passed)
+    return got
+
+
+def advance_position(merges: list, removable: list[bool]) -> str:
+    """先頭から越えてよい PR が続く最後のコミット（I4）。空なら進めない。"""
+    advance_to = ""
+    for m, ok in zip(merges, removable):
+        if not ok:
+            break
+        advance_to = m.sha
+    return advance_to
+
+
+def kept_stats(root: Path, merges: list, kept_at: list[int]) -> tuple[list[str], int, int]:
+    """範囲に入る PR が変えたファイルの和・変更行数・最初と最後の間に入ったほかの PR の数。"""
+    files = list(dict.fromkeys(f for i in kept_at for f in files_of_merge(root, merges[i].sha)))
+    lines = sum(changed_lines(root, f"{merges[i].sha}^1", merges[i].sha) for i in kept_at)
+    interleaved = (kept_at[-1] - kept_at[0] + 1 - len(kept_at)) if kept_at else 0
+    return files, lines, interleaved
+
+
+def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], sel: Selection) -> FinalScope:
+    """範囲の起点から先頭までの PR を「範囲に入る」「ほか」「検査済み」に分け、印を進めてよい位置を求める。
+    git と検査の記録を読むだけで書かない。"""
+    skip = {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)}
+    seen, passed = checked_prs(events, sel.review)
+    try:
+        merges = merged_range.merges_in(root, frm, to)
+        heads = {m.number: m.branch for m in merged_range.with_heads(root, [m for m in merges if m.number not in skip])}
+    except StepError as e:
+        raise Stop(str(e), e.code)
+    merges = list(reversed(merges))  # first-parent の古い順
+    got = classify_merges(root, merges, heads, skip, seen, passed, sel, decl)
+    advance_to = advance_position(merges, got.removable)
+    files, lines, interleaved = kept_stats(root, merges, got.kept_at)
+    if got.kept_at:
+        frm, to = git_or_stop(root, "rev-parse", f"{merges[got.kept_at[0]].sha}^1"), merges[got.kept_at[-1]].sha
+    docs_only = bool(files) and docs_only_files(root, files)
+    return FinalScope(got.kept, got.other, got.checked, interleaved, files, docs_only, frm, to, advance_to, lines)
 
 
 def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
@@ -347,6 +504,52 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
 THRESHOLD_TRIGGERS = (("score", ge, False), ("lines", gt, False), ("escapes", ge, False), ("hours", ge, True))
 
 
+def base_metrics(prs: list[dict], lines: int, since_at: datetime, esc: dict, frm: str, to: str) -> dict:
+    """`eval` の metrics の共通の鍵（PR の数・点数・変更行数・経過時間・すり抜けの最大・範囲の両端）。"""
+    return {
+        "prs": len(prs),
+        "score": sum(p["points"] for p in prs),
+        "lines": lines,
+        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
+        "escapes": max(esc.values(), default=0),
+        "from": frm,
+        "to": to,
+    }
+
+
+def evaluate_sprint(root: Path, sel: Selection, since: str | None, to_ref: str | None) -> dict:
+    """最後の検査の判定（`--sprint`。#3126）。範囲はスプリントに属しまだ検査していない PR だけで、トリガーは
+    `final`（`--review` なら `review`）だけを見る（決定 6）。範囲が空か文書のファイルだけなら立たない。"""
+    decl = load_decl(root)
+    events = read_events(root)
+    start, since_at, how = range_start(root, events, since, sel.review)
+    head = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
+    sc = final_scope(root, start, head, decl, events, sel)
+    esc = escapes_since(events, since_at)
+    metrics = {
+        **base_metrics(sc.kept, sc.lines, since_at, esc, sc.frm, sc.to),
+        "start": start,
+        "sprint": sel.sprint,
+        "other": sc.other,
+        "checked": sc.checked,
+        "interleaved": sc.interleaved,
+        "docs_only": sc.docs_only,
+        "advance_to": sc.advance_to,
+    }
+    fired = (
+        [{"trigger": "review" if sel.review else "final", "value": len(sc.kept), "threshold": 1}] if sc.kept and not sc.docs_only else []
+    )
+    return {
+        "decl": decl,
+        "fired": fired,
+        "metrics": metrics,
+        "escape_areas": esc,
+        "how": f"{how}・スプリント {sel.sprint}",
+        "prs": [p["pr"] for p in sc.kept],
+        "scope": sc,
+    }
+
+
 def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
@@ -355,15 +558,7 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    metrics = {
-        "prs": len(prs),
-        "score": sum(p["points"] for p in prs),
-        "lines": changed_lines(root, frm, to, excluded),
-        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
-        "escapes": max(esc.values(), default=0),
-        "from": frm,
-        "to": to,
-    }
+    metrics = base_metrics(prs, changed_lines(root, frm, to, excluded), since_at, esc, frm, to)
     fired = [{"trigger": "review", "value": len(prs), "threshold": 1}] if review and prs else []
     for name, reached, needs_prs in THRESHOLD_TRIGGERS:
         if not review and reached(metrics[name], t[name]) and (prs or not needs_prs):
@@ -376,24 +571,52 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
 # ---------------------------------------------------------------- 副命令
 
 
+def sprint_of(a) -> tuple[str | None, set[int]]:
+    """(`--sprint` の名前, `--issue` の番号)。`--issue` だけを渡したら Stop（終了コード 2）。"""
+    sprint, issues = getattr(a, "sprint", None), set(getattr(a, "issue", None) or [])
+    if issues and not sprint:
+        raise Stop("--issue は --sprint と一緒に渡す")
+    return sprint, issues
+
+
+def evaluate_for(a, root: Path, final: bool, to_ref: str | None = None) -> dict:
+    sprint, issues = sprint_of(a)
+    if sprint:
+        return evaluate_sprint(root, Selection(sprint, issues, a.review), a.since, to_ref)
+    return evaluate(root, final, a.since, to_ref=to_ref, review=a.review)
+
+
+def sprint_stop_text(ev: dict) -> str:
+    """最後の検査が立たない理由（範囲が空か文書だけ）と外した PR の数。"""
+    m = ev["metrics"]
+    why = (
+        f"スプリント {m['sprint']} の範囲は文書のファイルだけ（{len(ev['scope'].files)} 件）"
+        if m["docs_only"]
+        else f"スプリント {m['sprint']} の検査していない Pull Request が無い"
+    )
+    return f"{why}。外した: ほか {len(m['other'])} 本・検査済み {len(m['checked'])} 本"
+
+
 def cmd_eval(a, root: Path) -> tuple[dict, int]:
-    ev = evaluate(root, a.final, a.since, review=a.review)
+    ev = evaluate_for(a, root, a.final)
     m = ev["metrics"]
     names = [f["trigger"] for f in ev["fired"]]
-    append_event(
-        root,
-        {
-            "kind": "eval",
-            "id": a.id or "",
-            "from": m["from"],
-            "to": m["to"],
-            "fired": names,
-            "metrics": {k: m[k] for k in ("prs", "score", "lines", "hours", "escapes")},
-        },
-    )
+    row = {
+        "kind": "eval",
+        "id": a.id or "",
+        "from": m["from"],
+        "to": m["to"],
+        "fired": names,
+        "metrics": {k: m[k] for k in ("prs", "score", "lines", "hours", "escapes")},
+    }
+    if "scope" in ev:
+        row.update(sprint=m["sprint"], how=ev["how"], excluded={"other": len(m["other"]), "checked": len(m["checked"])})
+    append_event(root, row)
     rng = f"{m['from'][:10]}..{m['to'][:10]}（{ev['how']}から）"
     if names:
         return result(TOOL, "ok", f"検査のトリガーが立った（{' / '.join(names)}）: 範囲 {rng}・PR {m['prs']} 本", ev["fired"], m), EXIT_OK
+    if "scope" in ev:
+        return result(TOOL, "stopped", f"検査のトリガーは立たない: {sprint_stop_text(ev)}（範囲 {rng}）", [], m), EXIT_PRECONDITION
     return result(
         TOOL,
         "stopped",
@@ -414,8 +637,14 @@ def delete_base(root: Path, name: str) -> None:
 
 
 def cmd_prepare(a, root: Path) -> tuple[dict, int]:
-    ev = evaluate(root, False, a.since, to_ref="HEAD", review=a.review)
+    ev = evaluate_for(a, root, False, to_ref="HEAD")
     m = ev["metrics"]
+    sc = ev.get("scope")
+    if sc is not None and not sc.kept:
+        raise Stop(f"スプリント {m['sprint']} の範囲の Pull Request が 0 本（判定の後に履歴が変わった）")
+    if sc is not None and git_or_stop(root, "status", "--porcelain", "--untracked-files=no"):
+        # 下の reset --hard が手元の変更を消さないように、変更を残したまま止める
+        raise Stop("作業ツリーかインデックスにコミットしていない変更がある（変更を残したまま止めた）", EXIT_PRECONDITION)
     prev = [e for e in read_events(root) if e["kind"] == "eval" and e.get("id") == a.id]
     fired = prev[-1].get("fired", []) if prev else [f["trigger"] for f in ev["fired"]]
     branch = BASE_PREFIX + a.id
@@ -425,7 +654,12 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
     except Stop as e:
         raise Stop(f"{branch} を送れない: {e}", EXIT_VIOLATION)
     git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", check=False)
-    files = git_or_stop(root, "diff", "--name-only", m["from"], m["to"]).splitlines()
+    if sc is not None:
+        # 検査の PR の差分を範囲の最後の PR までにする（作業ブランチは検査専用で手元の変更を持たない。決定 5）
+        git_or_stop(root, "reset", "-q", "--hard", m["to"])
+        files = sc.files
+    else:
+        files = git_or_stop(root, "diff", "--name-only", m["from"], m["to"]).splitlines()
     data = {
         "id": a.id,
         "from": m["from"],
@@ -437,6 +671,8 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
         "escape_areas": ev["escape_areas"],
         "base": branch,
     }
+    if sc is not None:
+        data.update(sprint=m["sprint"], advance_to=sc.advance_to, other=sc.other, checked=sc.checked)
     check_json(a.state).parent.mkdir(parents=True, exist_ok=True)
     check_json(a.state).write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n")
     return result(
@@ -615,6 +851,9 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         "findings": findings,
         "scope": "since",
     }
+    if data.get("sprint"):
+        # 最後の検査（#3126）: 印を進めてよい位置だけを `to` にし、印も同じ位置へ送る（I4・I5）
+        row.update(scope="sprint", sprint=data["sprint"], to=data.get("advance_to") or "")
     if isinstance(data.get("prs"), list):
         row["prs"] = data["prs"]
     if a.review:
@@ -786,6 +1025,11 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
     ), EXIT_OK
 
 
+def add_sprint_args(s: argparse.ArgumentParser) -> None:
+    s.add_argument("--sprint", help="最後の検査: 範囲をこのスプリントのまだ検査していない PR に絞る")
+    s.add_argument("--issue", type=int, nargs="+", help="スプリントの課題の番号（--sprint と一緒に渡す）")
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="check-trigger.py", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -805,9 +1049,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--review", action="store_true", help="実装レビューだけの検査（前回のレビューから PR が 1 本以上で立つ）")
     s.add_argument("--id", default="")
     s.add_argument("--since")
+    add_sprint_args(s)
     s = add("prepare", True, True)
     s.add_argument("--since")
     s.add_argument("--review", action="store_true", help="範囲の起点をレビューだけの回を含む前回の検査にする")
+    add_sprint_args(s)
     add("scope", True, True)
     s = add("finish", True)
     s.add_argument("--pr", type=int, required=True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -291,6 +292,36 @@ def flow_snapshot(a, wt: dict) -> dict:
 def sprint_flow(a) -> branch_flow.ResolvedFlow:
     """引数のスナップショットを読む。無ければ（スナップショットを持たない呼び手）宣言の無いリポジトリの値（I3）。"""
     return branch_flow.from_snapshot(getattr(a, "flow", None), getattr(a, "base", None), getattr(a, "production_branch", None))
+
+
+def sync_source(a, pr) -> str:
+    """ベースの取り込みの取り込み元の引数。選んで集める取り込み方は、宛先（ベースブランチ）ではなく
+    スプリントの起点から取り込む（#3121 の I4）。それ以外は PR の宛先（`--pr`）。"""
+    flow = sprint_flow(a)
+    return f"--base {shlex.quote(flow.start_branch)}" if flow.row.selects_units and flow.start_branch else f"--pr {pr}"
+
+
+def check_flags(a, no_refactor: bool) -> str:
+    """`eval`・`prepare` へ渡す範囲の引数（--review / --since / --sprint / --issue）。"""
+    flag = " --review" if no_refactor else ""
+    if getattr(a, "since_ref", None):
+        flag += f" --since {shlex.quote(a.since_ref)}"
+    if getattr(a, "final_sprint", None):
+        # 最後の検査（#3126）: 範囲をスプリントに属しまだ検査していない PR に絞る
+        flag += f" --sprint {shlex.quote(a.final_sprint)}"
+        if a.issue:
+            flag += " --issue " + " ".join(str(int(i)) for i in a.issue)
+    return flag
+
+
+def check_issues(a) -> list[int]:
+    """検査の課題: `--issue` か、無ければ `--sprint` の JSON の issues（読めなければ空）。"""
+    if a.issue or not getattr(a, "sprint", None):
+        return list(a.issue or [])
+    try:
+        return [int(i) for i in json.loads(Path(a.sprint).read_text()).get("issues", [])]
+    except (OSError, ValueError, TypeError):
+        return []
 
 
 def _apply_simple_decls(a, wt: dict, sv: dict) -> None:

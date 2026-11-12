@@ -35,7 +35,7 @@ import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
-from sprint_args import new_sprint_args  # noqa: E402
+from sprint_args import DESIGN_SPRINT_STAGES, new_sprint_args  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -1674,32 +1674,8 @@ def assert_plan_transitions_valid(manifest):
                     assert c in steps or c in ("stop", "gate"), (path, c)
 
 
-def test_new_sprint_writes_waves_in_order(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
-    assert p.returncode == 0, p.stderr
-    res = json.loads(p.stdout)
-    assert res["status"] == "ok"
-    manifest = json.loads((out / "sprint.json").read_text())
-    assert manifest["ブランチ"] == "sprint/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == [
-        "設計",
-        "設計承認ゲート",
-        "設計 PR のマージ",
-        "設計の結果",
-        "スプリントブランチ",
-        "実装",
-        "検査",
-        "デプロイ",
-        "リリース承認ゲート",
-        "本番",
-    ]
-    waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
-    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
-    assert_plan_transitions_valid(manifest)
-
-    design = json.loads(Path(waves["設計"]["plans"][0]).read_text())
+def assert_design_plan(design: dict) -> None:
+    """スプリントの設計のプランのステップの並びと遷移（test_new_sprint_writes_waves_in_order が見る）。"""
     review = next(s for s in design["steps"] if s["id"] == "review")
     assert "--max-rounds" not in review["args"]  # 設計の既定（3 ラウンド）に任せる
     assert design["branch"].startswith("design/")
@@ -1753,6 +1729,23 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
     assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートの数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
+
+
+def test_new_sprint_writes_waves_in_order(tmp_path):
+    out = tmp_path / "m"
+    p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
+    assert p.returncode == 0, p.stderr
+    res = json.loads(p.stdout)
+    assert res["status"] == "ok"
+    manifest = json.loads((out / "sprint.json").read_text())
+    assert manifest["ブランチ"] == "sprint/v10-18"
+    assert [w["name"] for w in manifest["ステージ"]] == DESIGN_SPRINT_STAGES
+    waves = {w["name"]: w for w in manifest["ステージ"]}
+    assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
+    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
+    assert_plan_transitions_valid(manifest)
+
+    assert_design_plan(json.loads(Path(waves["設計"]["plans"][0]).read_text()))
 
     impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
     assert impl["起点"] == "origin/sprint/v10-18"

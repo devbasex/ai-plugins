@@ -259,9 +259,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 このセッションはオーガナイザーになり、並列の計画のレーンを起動・監視し、リリースを 1 本にまとめる。
 並列の計画の作り方は [issue-plan-strategy の parallel-plan.md](../issue-plan-strategy/references/parallel-plan.md) にある。
 
-**引数に `--parallel-helper <計画名> <連番> <提示>` か `--parallel-helper <計画名> pending <ループ名>` があれば、このセッションは
+**引数に `--parallel-helper <計画名> <連番> <提示>`・`--parallel-helper <計画名> pending <ループ名>`・`--parallel-helper <計画名> verify <依頼>` があれば、このセッションは
 オーガナイザーが起こした一時レーンである。** 判定の手順へ進まず、[references/parallel.md](references/parallel.md) の「一時レーン」の手順で
-`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）か `loop pending` の pipeline を流し、結果を返して終える。
+`parallel.py helper` が返す pipeline（まとめたリリースの提示か確定の後）・`loop pending` の pipeline・`parallel.py verified` が返す pipeline（版の要るまとめ）を流し、結果を返して終える。
 
 ## 開発ループ（`--loop`）
 
@@ -447,6 +447,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの必須ルール
 - [references/pace.md](references/pace.md) — 進め方（`pace`）のフロー・`fast` と `auto` の条件・設定・プランのステージ・検査のトリガー・MVV 判定
+- [references/pace-records.md](references/pace-records.md) — 自動で通した承認ゲートと検査の記録の読み方・閾値の見直し
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の置き場・節の形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)

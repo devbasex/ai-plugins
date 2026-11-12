@@ -226,21 +226,22 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
 | 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
-**スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
-最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
-`deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）
-を `--then` のステージで流す。確定仕様化の Pull Request の CI は ready から進み、リリース後テスト・振り返り・棚卸しと重なる。
+**スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --state <状態>` が組む。まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
+`deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）→
+最終の検査（実行条件 `eval --final --sprint <M> --issue <課題>...`）→ 開発版と本番（実行条件 `changed --id <M>-final`。最終の検査で変更があったときだけ）
+を `--then` のステージで流す。最終の検査を確定仕様化のマージの後に置くのは、スプリントの検査の後に入った確定仕様化の差分まで拾うためである。
+最終の検査の範囲は、スプリントに属しまだどの検査も見ていない Pull Request だけで、ほかのレーン・ほかのスプリント・リリースの版の
+Pull Request と、スプリントの検査が見た Pull Request は入らない（下の「最終の検査の範囲」）。確定仕様化の Pull Request の CI は ready から進み、リリース後テスト・振り返り・棚卸しと重なる。
 `deep-due` は `upkeep.py depth due diff` で、開発ループでは 3 回のループの 1 回（`.ndf/backlog.json` の `depths.diff.every`）に 1 回、
 ループの外では毎回起動する。起動しない回は `merge` へ飛び、報告の「走らなかったステップ」に次に走る時点が載る。
-`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題> --final-stage-from <進捗記録> --with-verification` で、
-同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする。本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。
+`close` のステップは `sprint-close.py --record-pr {queue_record} --issues <課題> --final-stage-from <進捗記録> --with-verification` で、
+同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする。`{queue_record}` はまとめを流し始める時点に queue が探す、まとめより前の本番のリリース記録である。リリースの経路がすべて届けない経路なら `--record-pr 0`（本番の記録なし）になる。
 `close` は `merge` の後にだけ走り、確定仕様化の Pull Request がマージされなかった回は課題を開いたまま残す。`refine` は棚卸しを無人で通し（承認の要る反映は
 行わず、承認資料のパスと番号を報告に載せて終える）、今の回の課題を閉じない。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
-リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが入り、
-`close` のステップの `--record-pr` は、リリースの Pull Request で届く経路（手動反映の本番系を除く）なら `{queue_pr:promote}`、経路がすべて届けない経路なら `0`、
-それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系）は `{queue_record}` になる。開発ループのまとめ（`new close --pace auto`）は、
-届けない経路だけでなければ経路にかかわらず `{queue_record}` になる。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
+リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが最終の検査の後ろに入る。
+`close` のステップの `--record-pr` は、`pace` とリリースの経路が何であっても、経路がすべて届けない経路なら `0`、それ以外は `{queue_record}` になる
+（最終の検査の開発版・本番はまとめより後に流れ、まとめから参照できない）。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
 課題を閉じる PR とそれを参照する PR から、段階が本番かデプロイなしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
 同じ番号を受ける。見つからない・2 つ以上のスプリントにある・GitHub を読めなければ、まとめを流さずに止まり（queue の結果は `stopped`、
 開発ループの 1 回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
@@ -345,13 +346,23 @@ Pull Request で行う。
 | `lines` | 行数 > `triggers.lines` | `git diff --shortstat <from> <to>` の追加 + 削除 |
 | `escapes` | ある領域の流出不具合 ≥ `triggers.escapes` | 前回の検査の後の記録を領域ごとに数える。1 件の領域は検査の範囲の 2 番目の群へ入れるだけ |
 | `hours` | 経過 ≥ `triggers.hours` かつ PR ≥ 1 | 前回の検査の時刻から今まで |
-| `final` | `--final` を渡し、PR ≥ 1 | 範囲が空なら立たない（最終の検査を飛ばす） |
+| `final` | `--final` を渡し、PR ≥ 1 | 範囲が空なら立たない（最終の検査を飛ばす）。`--sprint` があれば範囲は下の「最終の検査の範囲」で、文書のファイルだけでも立たない |
 | `review` | `--review` を渡し、PR ≥ 1 | 範囲の起点は、レビューだけの回を含む前回の検査。ほかのトリガーは見ない |
 
 **コードレビューは開発版ごとに 1 回通し、リファクタリングはトリガーが立ったときだけ通す。** 実装の Pull Request は
 レビューを通らずにベースブランチへ入るため、トリガーだけに頼るとレビューの無いリリースが続く。レビューだけの回の記録は
 `only: review` を持ち、リファクタリングを含む検査の範囲の起点にならない（レビューを通すたびにリファクタリングのトリガーが
 数え直しにならない）。
+
+**最終の検査の範囲**（`eval` と `prepare` の `--sprint <M> --issue <課題>...`）は、範囲の起点から先頭までの Pull Request のうち、
+スプリントに属し（head のブランチの最後の区切りが `M`（`sprint/<M>`・`spec/<M>`）か、ブランチ名が課題の番号を `issue-<番号>` の形で持つ）、
+まだ検査していないものだけである。PR を指す検査の行（スプリントの検査）の `target_pr` は、コードレビューだけの回でも検査済みに数える。
+差分の検査の行の `prs` は、リファクタリングを含む最終の検査ではリファクタリングを含む回だけを数える。`--sprint` のある判定は `final`
+（`--review` なら `review`）のトリガーだけを見て、範囲が空か、範囲のファイルが文書のファイルだけ（`.ndf/project.json` の `docs`。振る舞いを
+決める文書は数えない）なら立たない。判定の出力の `metrics` は外した Pull Request（`other`・`checked`）・範囲の間に挟まったほかの Pull Request の
+数（`interleaved`）・印を進めてよい位置（`advance_to`）を持つ。`prepare` は `check-base/<名>` を範囲の最初の Pull Request の手前に置き、
+作業ブランチを範囲の最後の Pull Request のマージのコミットへ合わせる。`record` は検査の行を `scope: sprint` で書き、検査の印を
+`advance_to`（まだその種類の検査を通していない最初の Pull Request の手前）までだけ進める。
 
 **重点領域を触ったことは単独のトリガーにしない。** 2026-09-25 のリリース差分では 41 本のうち 31 本（76%）が重点領域を触っており、
 単独で立てると PR ごとの検査と変わらない。点数の重みと、検査の中で先に見る範囲にだけ使う。
@@ -454,41 +465,4 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 
 ## 記録の読み方と閾値の見直し
 
-**自動で通した承認ゲートは 3 か所に残る。** スプリント状態ファイルの `gates[]` に `by: mvv`（`verdict`・`reasons`・`log`）の行、
-`mvv-gate.jsonl` に同じ `gate` の判定の 1 行（`at` で状態の行と対応する）、Pull Request に判定のコメント（設計承認ゲートは設計 PR、
-リリース承認ゲートは出す版の PR。`auto` では検査のスプリントの PR）。`handoff` で自動の通過を取り消すと、`gates[]` の行が消えて
-`withdrawals[]` に承認ゲートの名前と時刻が残る。どの進め方で通ったかは、状態とマニフェストの `進め方` と、課題の本文の
-見出し行の `進め方: <値>`（`normal` 以外で書く）で読む。
-
-以下は検査の記録である。**書き手は `check-trigger.py record` の 1 つで、前回の検査からの差分の検査
-（`new check --since-last`。`scope: since`）も、PR を指す検査（`new check --pr N`。`record --target-pr N`・`scope: pr`）も、
-マージ・変更なし・落ちたのどの終わり方でも 1 行を書く。** PR を指す検査の行は `pr` と `to` を持たないため、トリガーの範囲の
-起点にも、範囲から外す PR にもならない。承認ゲートで止まった間と、計画の外から止められた計画は書かない。
-検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `~/.claude/ndf/state` →
-`${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
-
-| `kind` | いつ足すか | 主な列 |
-| --- | --- | --- |
-| `eval` | 評価のたび（立たなかった回も） | `id`・`from`・`to`・`fired`・`metrics`（`prs`・`score`・`lines`・`hours`・`escapes`） |
-| `check` | 検査の終わり | `result`（`merged` / `no_change` / `failed`）・`failed_at`・`scope`（`since` / `pr`。無い行は `since`）・`pr`（`since` の検査の PR）・`target_pr`（`pr` の検査した PR）・`prs`（範囲の PR）・`findings` |
-| `escape` | 流出不具合を直したマージの後 | `pr`・`of`（0 は不明）・`areas` |
-
-`findings` の件数は計画の `state.json` の `counts`（フェーズレポートと同じ出所）からコピーする。
-
-| キー | 単位 |
-| --- | --- |
-| `applied`・`reverted` | 構造改善の改善項目 |
-| `findings`・`fixed`・`deferred`・`rejected` | 修正担当が扱った指摘（`findings` = 直した + 見送った + 却下した。`findings` ≥ `fixed`） |
-| `comments` | レビュー担当が出したコメント（1 つに複数の指摘が入り、2 者が同じ所を指せば 2 件。指摘の数と比べない） |
-| `unresolved` | 解決されていないスレッド |
-| `rounds` | 実装レビューのラウンド |
-
-`comments` を持たない古い行の `findings` はコメントの数である。`stats` はそれを `comments` として出し、`findings` と
-`fixed` を空にする（行は書き換えない）。
-
-**`check-trigger.py stats` が集計する**（評価の回数と立った回数・トリガーごとの回数・検査ごとの件数・検査の後に
-流出した不具合の件数・流出不具合と検査の結び付き）。流出不具合は、持ち込んだ PR（`of`）を範囲（`prs`）に含めた最新の
-検査へ結び付く（`items[].escapes_linked`）。結び付かないものは `metrics.unlinked` に理由と並ぶ: `of_unknown`（`of: 0`）/
-`no_check`（`of` を範囲に含めた検査が無い）/ `no_range`（それより前に範囲を持たない古い行しか無い）。時刻の窓で数える
-`escapes_after` は `scope: since` の検査だけが持つ。スプリントの終わりの振り返りはこの出力を材料にし、検査を 5 回回した後に閾値を見直す。
-別の端末では記録が無く、最新の正式版のタグから数え直す（範囲が広がる側に倒れ、取りこぼしは起きない）。
+自動で通した承認ゲートの記録と、検査の記録の読み方・閾値の見直しは [pace-records.md](pace-records.md) にある。

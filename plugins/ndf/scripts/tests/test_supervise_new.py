@@ -126,10 +126,10 @@ def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
     p = close_cli(root, out)
     assert p.returncode == 0, p.stderr
     manifest = json.loads((out / "sprint.json").read_text())
-    assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "リリース", "まとめ"]
-    note = manifest["ステージ"][1]["note"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "リリース"]
+    note = manifest["ステージ"][2]["note"]
     assert "delivery" in note and ("不明" in note if delivery else "無い" in note)
-    close = json.loads(Path(manifest["ステージ"][2]["plans"][0]).read_text())
+    close = json.loads(Path(manifest["ステージ"][0]["plans"][0]).read_text())
     assert "--record-pr {queue_record} " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")  # #2230
     assert "unknown" not in json.dumps(close["steps"], ensure_ascii=False)
 
@@ -199,7 +199,7 @@ SAMPLES = {
     "no-delivery": ({"base_branch": "main", "production_branch": "main"}, [], [("none", "none")], []),
 }
 
-# new close（fast のスプリントの終わり）が検査の後に置くステージ。経路 merge だけなら「導入の確認」が加わる（#1457）
+# new close（fast のスプリントの終わり）がまとめと最終の検査の後に置くステージ。経路 merge だけなら「導入の確認」が加わる（#1457）
 CLOSE_STAGES = {"carmo-system-console": ["導入の確認", "CD の結果"], "carmo-contractors-app": ["導入の確認", "CD の結果", "リリース"]}
 
 
@@ -229,7 +229,7 @@ def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     p = close_cli(root, close_out)
     assert p.returncode == 0, p.stderr
     closing = json.loads((close_out / "sprint.json").read_text())
-    assert [w["name"] for w in closing["ステージ"]] == ["最終の検査", *CLOSE_STAGES.get(name, stages), "まとめ"]
+    assert [w["name"] for w in closing["ステージ"]] == ["まとめ", "最終の検査", *CLOSE_STAGES.get(name, stages)]
 
 
 # --- #1193: 設計のプランの入口 --------------------------------------------------------
