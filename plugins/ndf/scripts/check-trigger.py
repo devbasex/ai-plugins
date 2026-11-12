@@ -332,8 +332,9 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
 
 
 def files_of_merge(root: Path, sha: str) -> list[str]:
-    """マージ 1 件（1 つ目の親から）で変わったファイル。"""
-    return git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
+    """マージ 1 件（1 つ目の親から）で変わったファイル。移動は移動元も数える（`--no-renames`。消した側が振る舞いを
+    決める文書でも文書だけの範囲と読まない）。"""
+    return git_or_stop(root, "diff", "--name-only", "--no-renames", f"{sha}^1", sha).splitlines()
 
 
 def pr_entry(root: Path, m: merged_range.Merge, decl: dict) -> dict:
@@ -605,6 +606,9 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
     sc = ev.get("scope")
     if sc is not None and not sc.kept:
         raise Stop(f"スプリント {m['sprint']} の範囲の Pull Request が 0 本（判定の後に履歴が変わった）")
+    if sc is not None and git_or_stop(root, "status", "--porcelain", "--untracked-files=no"):
+        # 下の reset --hard が手元の変更を消さないように、変更を残したまま止める
+        raise Stop("作業ツリーかインデックスにコミットしていない変更がある（変更を残したまま止めた）", EXIT_PRECONDITION)
     prev = [e for e in read_events(root) if e["kind"] == "eval" and e.get("id") == a.id]
     fired = prev[-1].get("fired", []) if prev else [f["trigger"] for f in ev["fired"]]
     branch = BASE_PREFIX + a.id

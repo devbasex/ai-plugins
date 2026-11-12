@@ -867,5 +867,32 @@ def test_a_final_scope_of_docs_only_does_not_fire_but_a_behavior_doc_does(repo, 
     assert (code, out["metrics"]["docs_only"], out["metrics"]["prs"]) == (0, False, 2), out
 
 
+def test_moving_a_behavior_doc_to_docs_is_not_docs_only(repo, env):
+    """振る舞いを決める文書を文書の置き場へ移す PR は、移動元も数えて文書だけに数えない（`--no-renames`）。"""
+    skill = repo / "plugins/p/skills/a/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("".join(f"skill {i}\n" for i in range(20)))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "skill")
+    git(repo, "checkout", "-q", "-b", "feat/issue-100-s1")
+    (repo / "docs").mkdir(exist_ok=True)
+    git(repo, "mv", "plugins/p/skills/a/SKILL.md", "docs/archive.md")
+    git(repo, "commit", "-q", "-m", "move")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "merge", "-q", "--no-ff", "feat/issue-100-s1", "-m", "Merge pull request #44 from o/feat/issue-100-s1")
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    assert (code, out["metrics"]["docs_only"]) == (0, False), out
+
+
+def test_prepare_stops_without_resetting_uncommitted_changes(repo, env, tmp_path):
+    """最後の検査の prepare は、作業ツリーに変更があれば reset --hard せず、変更を残して止まる。"""
+    merge_pr(repo, 44, "feat/issue-100-s1", {"app/x.py": 2})
+    (repo / "app/x.py").write_text("手元の修正\n")
+    st = state_dir(tmp_path, [])
+    code, out, _ = call(repo, env, "prepare", "--id", "s1-final", "--state", str(st), *SPRINT)
+    assert (code, out["status"]) == (3, "stopped"), out
+    assert (repo / "app/x.py").read_text() == "手元の修正\n"
+
+
 def test_issue_without_sprint_returns_two(repo, env):
     assert call(repo, env, "eval", "--final", "--issue", "100")[0] == 2
