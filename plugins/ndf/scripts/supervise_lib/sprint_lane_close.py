@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shlex
 from pathlib import Path
@@ -138,7 +139,8 @@ def with_lane_close(a, waves: list[dict]) -> list[dict]:
         return waves
     repo = str(Path(a.worktree).resolve())
     prod = next((w for w in waves if w.get("name") == "本番"), {})
-    request = (prod.get("plans") or {}).get(REQUEST_KEY) if plan_ends(lane) else None  # 古い記録の計画は答えを待つ道（決定 10）
+    requested = (prod.get("plans") or {}).get(REQUEST_KEY)
+    request = requested if plan_ends(lane) else None  # 古い記録の計画は答えを待つ道（決定 10）
     if request:
         close = lane_close_plan(a, repo, lane)
         step = request["steps"][0]
@@ -147,7 +149,9 @@ def with_lane_close(a, waves: list[dict]) -> list[dict]:
     else:
         from supervise_lib.sprint import close_plan
 
-        close = close_plan(a, repo)
+        # 依頼の経路の目録に本番のプラン（`{queue_pr:release-prod}`）は無いため、リリース記録は queue が探す（`verify_plan` と同じ）
+        found = requested and not getattr(a, "record_pr", None)
+        close = close_plan(argparse.Namespace(**{**vars(a), "record_pr": RECORD_FOUND}) if found else a, repo)
         close["steps"] = [{**s, "next": "lane-end"} if s.get("id") == "close" else s for s in close["steps"]]
         close["steps"].append(lane_end_step(*lane, request=False))
     if request and closes_issues(close):

@@ -91,10 +91,13 @@ def test_a_plan_started_before_the_lane_end_mark_keeps_waiting_for_the_answer(a,
     """印 `parallel-lane-end` の前に始めた計画は終わりの記録も版の要るまとめも扱わないため、依頼の答えを待ってから
     今までのまとめ（課題を閉じる）を流す（決定 10）。"""
     monkeypatch.setattr(slc, "plan_ends", lambda _lane: False)
-    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: {"steps": [{"id": "close", "next": "end"}]})
+    seen = []
+    monkeypatch.setattr(sprint, "close_plan", lambda _a, _repo: seen.append(_a) or {"steps": [{"id": "close", "next": "end"}]})
     waves = slc.with_lane_close(a, request_waves(a))
     close = waves[-1]["plans"]["lane-close"]
     assert ids(close) == ["close", "lane-end"] and slc.closes_issues(close)
+    # 目録に本番のプラン（release-prod）は無いため、リリース記録は queue が探す
+    assert seen[0].record_pr == "{queue_record}" and not hasattr(a, "record_pr")
     step = waves[1]["plans"]["release-request"]["steps"][0]
     assert "on_exit" not in step and "--verify-plan" not in step["cmd"]
     assert not (Path(a.out) / "lane-verify.json").exists()
