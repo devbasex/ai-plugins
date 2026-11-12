@@ -447,6 +447,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの必須ルール
 - [references/pace.md](references/pace.md) — 進め方（`pace`）のフロー・`fast` と `auto` の条件・設定・プランのステージ・検査のトリガー・MVV 判定
+- [references/pace-records.md](references/pace-records.md) — 自動で通した承認ゲートと検査の記録の読み方・閾値の見直し
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の置き場・節の形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)
