@@ -766,3 +766,134 @@ def test_finish_closes_a_pr_without_changes_and_retargets_one_with(repo, env):
     code, out, _ = call(repo, env, "finish", "--id", "m-1", "--pr", "30")
     assert code == 0
     assert gh_calls(env)[-1] == ["pr", "edit", "30", "--base", "develop"]
+
+
+# ---------- 最後の検査の範囲（--sprint。#3126） ----------
+
+SPRINT = ("--sprint", "s1", "--issue", "100")
+
+
+def mark(repo: Path, name: str, sha: str) -> None:
+    git(repo, "push", "-q", "origin", f"{sha}:refs/heads/check-done/{name}")
+    git(repo, "fetch", "-q", "origin")
+
+
+def sprint_check_row(env: dict, repo: Path, pr: int, to: str, review: bool) -> None:
+    """スプリントの検査（PR を指す検査）の行。review ならコードレビューだけの回。"""
+    row = {"kind": "check", "at": iso(1), "id": "s1-check", "scope": "pr", "target_pr": pr, "prs": [pr], "from": "", "to": to}
+    append_event(env, repo, {**row, "result": "merged", **({"only": "review"} if review else {})})
+
+
+def test_final_scope_is_empty_after_a_review_only_sprint_check_like_lci(repo, env):
+    """#3126 AC1・AC8: リファクタリングを含む検査の印が古く、コードレビューの印がスプリント PR にあり、後にほかのレーンの
+    スプリント PR とリリースの版が入っても、範囲は空でトリガーは立たない。印は進めてよい位置を持たない（I4）。"""
+    old = merge_pr(repo, 10, "feat/issue-90-t0", {"app/old.py": 1})
+    mark(repo, "check", old)
+    sprint = merge_pr(repo, 40, "sprint/s1", {"core/s.py": 3})
+    sprint_check_row(env, repo, 40, sprint, review=True)
+    mark(repo, "review", sprint)
+    merge_pr(repo, 41, "sprint/t1", {"app/t.py": 200})
+    merge_pr(repo, 42, "release/v1.2.3", {"plugin.json": 1})
+    merge_pr(repo, 43, "spec/t1", {"docs/t.md": 1})
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    m = out["metrics"]
+    assert (code, m["prs"], m["checked"], sorted(m["other"]), m["advance_to"]) == (3, 0, [40], [41, 43], ""), out
+    assert "検査していない Pull Request が無い" in out["summary"] and "ほか 2 本・検査済み 1 本" in out["summary"]
+    row = events(env, "eval")[-1]
+    assert (row["sprint"], row["excluded"], row["fired"]) == ("s1", {"other": 2, "checked": 1}, [])
+    assert "スプリント s1" in row["how"]
+    assert call(repo, env, "changed", "--id", "s1-final")[0] == 3
+
+
+def test_final_scope_keeps_only_the_sprint_prs_not_yet_checked(repo, env, tmp_path):
+    """#3126 AC2・AC3・決定 5: ほかのレーンのスプリント PR とリリースの版は範囲に入らず、スプリントの課題の PR だけが入る。
+    prepare は check-base を範囲の最初の PR の手前に、作業ブランチを範囲の最後の PR に置く。"""
+    sprint = merge_pr(repo, 40, "sprint/s1", {"core/s.py": 3})
+    sprint_check_row(env, repo, 40, sprint, review=False)
+    merge_pr(repo, 41, "sprint/t1", {"app/t.py": 200})
+    before = merge_pr(repo, 42, "release/v1.2.3", {"plugin.json": 1})
+    fix = merge_pr(repo, 44, "fix/issue-100-s1", {"app/x.py": 2})
+    merge_pr(repo, 45, "feat/issue-101-t1", {"app/y.py": 2})
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    m = out["metrics"]
+    assert (code, [f["trigger"] for f in out["items"]], m["prs"], sorted(m["other"])) == (0, ["final"], 1, [41, 45]), out
+    assert (m["from"], m["to"], m["lines"], m["interleaved"], m["advance_to"]) == (before, fix, 2, 0, "")
+    st = state_dir(tmp_path, [])
+    code, out, _ = call(repo, env, "prepare", "--id", "s1-final", "--state", str(st), *SPRINT)
+    assert code == 0, out
+    check = json.loads((st / "check.json").read_text())
+    assert (check["prs"], check["files"], check["sprint"], check["advance_to"]) == ([44], ["app/x.py"], "s1", "")
+    assert git(repo, "rev-parse", "origin/check-base/s1-final") == before and git(repo, "rev-parse", "HEAD") == fix
+
+
+def test_a_final_check_moves_the_mark_only_up_to_prs_it_or_a_refactor_checked(repo, env, tmp_path):
+    """#3126 I4・I5: 印は、範囲の PR と検査済みの PR が続く所までだけ進み、検査の行の to も同じ位置になる。"""
+    start = git(repo, "rev-parse", "HEAD")
+    mark(repo, "check", start)
+    mark(repo, "review", start)
+    fix = merge_pr(repo, 44, "feat/issue-100-s1", {"app/x.py": 2})
+    merge_pr(repo, 45, "sprint/t1", {"app/t.py": 2})
+    st = state_dir(tmp_path, [])
+    code, out, _ = call(repo, env, "prepare", "--id", "s1-final", "--state", str(st), *SPRINT)
+    assert code == 0 and json.loads((st / "check.json").read_text())["advance_to"] == fix, out
+    gh_set(env, states={"50": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "s1-final", "--pr", "50", "--state", str(st))
+    assert code == 0, out
+    row = events(env, "check")[-1]
+    assert (row["scope"], row["sprint"], row["to"], row["prs"]) == ("sprint", "s1", fix, [44])
+    assert done_sha(repo, "check") == done_sha(repo, "review") == fix
+
+
+def test_a_serial_sprint_pr_that_only_had_a_review_stays_in_the_final_scope(repo, env):
+    """#3126 AC4・決定 3: 差分の検査のコードレビューだけの回が見た PR は、リファクタリングを含む最後の検査の範囲に入る。"""
+    impl = merge_pr(repo, 44, "feat/issue-100-s1", {"app/x.py": 2})
+    append_event(
+        env,
+        repo,
+        {"kind": "check", "at": iso(1), "id": "s1-review", "scope": "since", "only": "review", "prs": [44], "result": "merged", "to": impl},
+    )
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    assert (code, out["metrics"]["prs"], [f["trigger"] for f in out["items"]]) == (0, 1, ["final"]), out
+
+
+def test_a_final_scope_of_docs_only_does_not_fire_but_a_behavior_doc_does(repo, env):
+    """#3126 AC5: 範囲が文書のファイルだけなら立たない。振る舞いを決める文書は文書だけに数えない。"""
+    merge_pr(repo, 44, "spec/s1", {"docs/x.md": 3})
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    assert (code, out["metrics"]["docs_only"]) == (3, True), out
+    assert "文書のファイルだけ（1 件）" in out["summary"]
+    merge_pr(repo, 45, "feat/issue-100-s1", {"plugins/p/skills/a/SKILL.md": 1})
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    assert (code, out["metrics"]["docs_only"], out["metrics"]["prs"]) == (0, False, 2), out
+
+
+def test_moving_a_behavior_doc_to_docs_is_not_docs_only(repo, env):
+    """振る舞いを決める文書を文書の置き場へ移す PR は、移動元も数えて文書だけに数えない（`--no-renames`）。"""
+    skill = repo / "plugins/p/skills/a/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("".join(f"skill {i}\n" for i in range(20)))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "skill")
+    git(repo, "checkout", "-q", "-b", "feat/issue-100-s1")
+    (repo / "docs").mkdir(exist_ok=True)
+    git(repo, "mv", "plugins/p/skills/a/SKILL.md", "docs/archive.md")
+    git(repo, "commit", "-q", "-m", "move")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "merge", "-q", "--no-ff", "feat/issue-100-s1", "-m", "Merge pull request #44 from o/feat/issue-100-s1")
+    git(repo, "push", "-q", "origin", "develop")  # 範囲の先頭は origin のベースブランチ（merge_pr と同じく送る）
+    code, out, _ = call(repo, env, "eval", "--id", "s1-final", "--final", *SPRINT)
+    assert (code, out["metrics"]["docs_only"]) == (0, False), out
+
+
+def test_prepare_stops_without_resetting_uncommitted_changes(repo, env, tmp_path):
+    """最後の検査の prepare は、作業ツリーに変更があれば reset --hard せず、変更を残して止まる。"""
+    merge_pr(repo, 44, "feat/issue-100-s1", {"app/x.py": 2})
+    (repo / "app/x.py").write_text("手元の修正\n")
+    st = state_dir(tmp_path, [])
+    code, out, _ = call(repo, env, "prepare", "--id", "s1-final", "--state", str(st), *SPRINT)
+    assert (code, out["status"]) == (3, "stopped"), out
+    assert (repo / "app/x.py").read_text() == "手元の修正\n"
+
+
+def test_issue_without_sprint_returns_two(repo, env):
+    assert call(repo, env, "eval", "--final", "--issue", "100")[0] == 2

@@ -197,7 +197,7 @@ def test_close_verifies_only_when_changed(tmp_path, rows, stage):
     p, out = new_close(tmp_path, repo)
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
-    assert [w["name"] for w in waves] == ["最終の検査", stage, "まとめ"]
+    assert [w["name"] for w in waves] == ["まとめ", "最終の検査", stage]
     plan = load(wave(waves, stage)["plans"][0])
     assert plan["実行の条件"]["skip_code"] == 3 and len(verify_steps(waves)) == 1
     mark = tmp_path / "ran"
@@ -297,14 +297,15 @@ def close_steps(tmp_path, rows) -> dict:
 
 
 def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
-    """#1870 AC3・AC6: リリースの Pull Request で届く経路のまとめは --record-pr {queue_pr:promote} を打ち、その前にリリース後テストを置く。"""
+    """#1870 AC3・AC6: リリースの Pull Request で届く経路のまとめは、まとめより前の本番の記録（{queue_record}。#3126 の決定 1）を読み、
+    その前にリリース後テストを置く。"""
     steps = close_steps(tmp_path, [STG, PRD])
     ids = [s["id"] for s in steps]
     close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr {queue_pr:promote} " in close["cmd"]
+    assert "--record-pr {queue_record} " in close["cmd"]
     assert ids.index("release-verify") < ids.index("retro") < ids.index("close")
     rv = steps[ids.index("release-verify")]
-    assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_pr:promote}" in rv["prompt"]
+    assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_record}" in rv["prompt"]
     # 「リリース後テスト」と記録するのは、受け入れ条件ごとに確かめて記録を書くこのステップだけ（#2288 の AC1）
     assert [s["id"] for s in steps if s.get("stage") == "リリース後テスト"] == ["release-verify"]
 

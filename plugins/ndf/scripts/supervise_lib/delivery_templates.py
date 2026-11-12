@@ -97,7 +97,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
     """本番チャネルへ入れるリリースプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、リリース承認ゲートの後にマージする。後片付けはしない（head はベースブランチ）。
     マージの後に cd-result が CD の結果を読み、record（`release-steps.py record --promote`）がリリースの Pull Request へリリース記録を書き、
-    その PR を計画の Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進み、
+    その PR を計画の Pull Request にする（まとめの close が `{queue_record}` で探す。#837・#3126）。record が落ちたら judge-record へ進み、
     CD の結果が失敗なら record が書いた後に止まる（#2623）。
 
     - normal（`mvv` 無し）: promote（承認の引数無し。リリースの承認資料 PROMOTE_MATERIAL へ先端を載せてリリース承認ゲートで終える）→

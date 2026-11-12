@@ -83,20 +83,11 @@ def has_record(record_pr: str) -> bool:
 
 
 def record_pr_ref(a) -> str:
-    """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE。開発ループのまとめ（pace: auto）は
-    経路にかかわらず RECORD_FOUND（リリース承認ゲートの後のまとめは本番のプランと別の queue にある。#2230 の決定 5）。それ以外は
-    雛形の本番の PR か、リリースの Pull Request（#837。route_waves が本番チャネルへ入れるリリースプランを置くときだけ）で、残りの届ける経路（merge・手で届ける・
-    検証の環境だけ・手動反映の本番系）は RECORD_FOUND。"""
-    rs = routes_of(a)
-    if all(r.stage == delivery.STAGE_NONE for r in rs):
+    """まとめの close が読むリリース記録の PR。経路がすべて届けない経路なら RECORD_NONE、それ以外は RECORD_FOUND
+    （まとめより前の本番の記録。まとめの後ろに置いた最終の検査の開発版・本番はまとめより後に流れ、まとめから参照できない。
+    #2230 の決定 5・#3126 の決定 1）。"""
+    if all(r.stage == delivery.STAGE_NONE for r in routes_of(a)):
         return RECORD_NONE
-    if getattr(a, "pace", None) == "auto":
-        return RECORD_FOUND
-    if has_release_template(a):
-        return "{queue_pr:release-prod}"
-    manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
-    if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in rs):
-        return "{queue_pr:promote}"
     return RECORD_FOUND
 
 

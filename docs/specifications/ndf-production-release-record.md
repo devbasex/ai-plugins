@@ -5,7 +5,7 @@
 - **スクリプトで組む本番のリリースプラン（`release.form: package-plugin`）は、リリースの後に本番のリリースの
   Pull Request（`release/v<版>` → ベースブランチ）へリリース記録（`## リリース記録`）をコメントで 1 件書く。**
 - **書けた本番のリリースの PR は、プランの報告の `Pull Request` に載る。** まとめの `close` ステップは
-  `{queue_pr:release-prod}` からその PR を `--record-pr` に受け取り、`sprint-close.py` が記録から閉じる条件 1 を判定する
+  `{queue_record}`（まとめを流し始める時点に queue がリリース記録を置いた PR を探して埋める）からその PR を `--record-pr` に受け取り、`sprint-close.py` が記録から閉じる条件 1 を判定する
 - **記録の書き込みが落ちても、リリースはやり直さない。** やり直せるのは記録を書くステップだけである
 - **`pace: normal` のスプリントでも、`new sprint` がリリース承認ゲートと本番のステージ（計画名 `release-prod`）まで目録へ書き出す。**
   リリース承認ゲートの後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command`（`--done` を含む。#1426）を打つだけで
@@ -176,19 +176,16 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 経路 | `close` の `--record-pr` | `release-verify` |
 | --- | --- | --- |
-| 雛形（`release.form`） | `{queue_pr:release-prod}` | 置く |
-| リリースの Pull Request で届く経路（`route_waves` が本番チャネルへ入れるリリースプランを置き、開発版のチャネルが手で届ける本番でないとき） | `{queue_pr:promote}` | 置く |
 | 経路がすべて届けない経路（none） | `0`（本番の記録なし。条件を見ずに閉じる） | 置かない |
-| それ以外（merge・manual・検証の環境だけ・手動反映の本番系へのリリースの Pull Request） | `{queue_record}`（まとめを流し始める時点に queue が GitHub の参照から記録の PR を探して埋める。#2230） | 置く |
-| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | どの経路でも `{queue_record}`（リリース承認ゲートの後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
+| それ以外（雛形・リリースの Pull Request・merge・manual・検証の環境だけ・手動反映の本番系。`pace` によらない） | `{queue_record}`（まとめを流し始める時点に queue が GitHub の参照から記録の PR を探して埋める。#2230。まとめの後ろに置いた最終の検査の開発版・本番はまとめより後に流れ、`{queue_pr:…}` で参照できない。#3126） | 置く |
 
 `{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番かデプロイなしで `スプリント:` が
 その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
 GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの 1 回は失敗で締まる）。まとめのプランは
 `sprint-close.py --record-pr unknown` を組まず、`unknown` を渡すのは手で打つ入口と #2230 より前に組んだプランだけである。
 
-`release-verify` は、記録の PR にリリース後テストの記録をコメントで置き、課題は閉じない。実行時に番号が `0` になったとき
-（最終の検査で変更が無く、まとめの queue の本番が飛ばされたとき）は何もせずに終える。
+`release-verify` は、記録の PR にリリース後テストの記録をコメントで置き、課題は閉じない。実行時に番号が `0` になったときは
+何もせずに終える。
 
 本番チャネルへ入れるリリースプランは normal が `promote` → `promote-approved` → `cd-result` → `record`、`pace: fast` / `auto` が `verify` → `prepare` → `mvv` → `note` →
 `promote` → `cd-result` → `record` の並びで、`record` は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs {queue_prs} --cd-result <ファイル>`・
@@ -254,7 +251,7 @@ stateDiagram-v2
 `pace: normal` の `sprint_plans` は、レーンのとき `リリース承認ゲート` のステージも置かない。リリース承認ゲートはオーガナイザーがまとめたリリースで出す。
 リリースの依頼のプランはステップ `parallel-request`（`parallel.py request`）の 1 つだけを持ち、依頼を送れば承認ゲート（終了コード 10）で終わり、
 自分の Pull Request がすでに `main` にあれば送らずに 0 で終わる。1 スプリントのレーンの目録では、依頼のステップの終了コード 10 の行き先を完了（`on_exit`）にし、
-プランは答えを待たずに本番の後のまとめのステージへ進む（印 `parallel-lane-end` の前に始めた計画を除く。[ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) ）。`close_waves` のまとめの本番のステージでは、リリースの依頼のプランも
+プランは答えを待たずに本番の後のまとめのステージへ進む（印 `parallel-lane-end` の前に始めた計画を除く。[ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) ）。`close_waves` の本番のステージ（まとめと最終の検査の後ろ）では、リリースの依頼のプランも
 開発版のプランと同じ実行条件（最終の検査の `check.py changed`）を持ち、最終の検査が変更なしなら依頼を送らずに飛ぶ。ほかの 3 か所は実行条件を持たない。手順は `development-workflow` の
 [references/parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 ステップのコマンドは課題の番号を持たず、`--issues {plan_issues}` を持つ。`{plan_issues}` は流す時点に、プランの `課題` の番号の空白区切り
@@ -290,8 +287,7 @@ stateDiagram-v2
 
 本番のステージを承認の後に単独で流すと、`queue.fill_queue_pr` は前のステージに名前の一致する計画が無いため、同じディレクトリの
 検査の計画（`check`）の報告から PR を読んで `{queue_pr:check}` を埋める。報告が無い・PR が無いときは `0` に埋まり、開発版のデプロイと
-同じ振る舞いになる。雛形の経路のまとめの `close` は `{queue_pr:release-prod}` を読む（上の表）ため、計画名は `fast` / `auto` と同じ
-`release-prod` にしてある。手順は `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)
+同じ振る舞いになる。計画名は `fast` / `auto` と同じ `release-prod` にしてある。手順は `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)
 の normal の 1 スプリントの手順 8・9 が正である。
 
 ```mermaid
@@ -324,7 +320,6 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | merge・manual・検証の環境だけの経路 | 記録を置く PR をプランが知らず、`close` は `--record-pr unknown` で打って課題を開いたまま残す。記録の PR を知っている呼び手は、`supervise.py new close --record-pr <番号>` で組めば `close` へ渡せる |
-| まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされて記録の PR が `0` になり、`new sprint` の本番で出たリリースのリリース後テストは見ずに閉じる |
 | `release-verify` の所要 | まとめのプランの上限とステップの `timeout`（3600 秒）に収まるかは、流したスプリントで測る |
 | 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。[ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md)）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
 | `pace: normal` の承認の前の本番 | スクリプトはリリース承認ゲートの答えを確かめずに「本番」のステージの `command` を流せる。止めるのは本番のプランの `release --approval` が承認の記録を確かめる時点である（[ndf-release-approved-commit.md](ndf-release-approved-commit.md) の I10） |
@@ -374,7 +369,7 @@ sequenceDiagram
 | 版の食い違い（I8） | PR #432 の形の組で `verify_block` が後のブロックになること。リリース記録より前にだけブロックがある PR・版数の違うブロックだけが後にある PR では None。版の一致するブロックとその後ろの別の版のブロックがある PR では一致する方を選び、`版: 10.17.67 → 10.17.68` の組で結果が直す前と同じであること。先頭の `v` の有無だけが違う組（`版:` と `対象の版:` のどちらに付いても）ではそのブロックを選び、`version` が `v` なしになること。`V10.26.1` と `main c427284` は読み替えないこと |
 | リリースの Pull Request の記録（I7） | `record --promote` がマージ済みの PR があればその PR へ書き、無ければ書かずに 3 で終わること。書いた記録を `parse_record` が `本番` で読むこと。本文に `段階: 検証（… 承認待ちのため未実施）` を置いた PR に記録をコメントで足すと `本番` として読むこと |
 | 本番チャネルへ入れるリリースプラン | normal と fast / auto の両方で、マージの後に `cd-result` と `record`（`pr_from: release_pr_url`・`on_fail: judge-record`）があり、`judge-record` の `choices` が `record` と `stop` だけであること |
-| まとめのプラン（I9） | 雛形とリリースの Pull Request で届く経路で、マージ → `release-verify` → `close`（`--with-verification`）がこの順で並び、リリースの Pull Request で届く経路の `close` が `--record-pr {queue_pr:promote}` であること。none だけの経路は `0`、merge・manual・検証の環境だけの経路は `unknown` で、どちらも `release-verify` が無いこと |
+| まとめのプラン（I9） | 雛形とリリースの Pull Request で届く経路で、マージ → `release-verify` → `close`（`--with-verification`）がこの順で並び、どの経路でも `close` が `--record-pr {queue_record}` であること。none だけの経路は `0` で、`release-verify` が無いこと |
 | normal の本番のステージ（N1〜N3） | 雛形・本番のブランチありの `new sprint` の `ステージ` が「… 検査・リリース・`リリース承認ゲート`・本番」の順で、「本番」が `then_of` を持たず `command` を持ち、プランの名前が `release-prod`、`release` のステップが `--channel prod` と `--version 10.18.0`（`10.18.0-dev.1` を渡す）、`changelog` の `--prs` が `{queue_pr:check}` であること（`test_supervise.py` の `test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release`） |
 | 本番を単独で流す | 一時ディレクトリに検査のプランとその報告（PR 番号つき）と本番のプランだけを置き、前のステージの結果を渡さずに `fill_queue_pr` を当てると、`{queue_pr:check}` がすべてその番号になること（`test_prod_plan_queued_alone_takes_the_check_pr`） |
 | リリース承認ゲートの文（N4・N5） | `--state` ありで「`リリース承認ゲート`」の `gate` が `sprint-state.py` の `gate` のコマンド（`"リリース承認ゲート"`・`--by user`）を含み、「デプロイ」が `note` を持たず、本番のプランが `mvv`・`note`・`handoff` を持たないこと。`--state` なしで `gate` が `sprint-state.py` を含まないこと（`test_project_mvv_normal.py`） |

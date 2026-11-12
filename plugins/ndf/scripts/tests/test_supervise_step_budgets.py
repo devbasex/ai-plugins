@@ -57,8 +57,9 @@ def sprint_plans(root, out, *extra) -> dict:
 def close_refactors(root, out, *extra) -> list[dict]:
     p = cli(root, "close", "--name", "m1", "--issue", "11", "--state", str(root / "s.json"), "--out", str(out), *extra)
     assert p.returncode == 0, p.stderr
-    first = json.loads((out / "sprint.json").read_text())["ステージ"][0]
-    return [steps(f)["refactor"] for f in first["plans"] if "refactor" in steps(f)]
+    # 最終の検査はまとめの後ろのステージ（#3126 の決定 1）。並びに依らず名前で選ぶ
+    final = next(w for w in json.loads((out / "sprint.json").read_text())["ステージ"] if w["name"] == "最終の検査")
+    return [steps(f)["refactor"] for f in final["plans"] if "refactor" in steps(f)]
 
 
 def assert_budget(refactor: dict, minutes: int) -> None:

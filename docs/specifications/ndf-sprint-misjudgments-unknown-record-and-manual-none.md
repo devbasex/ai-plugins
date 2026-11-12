@@ -43,7 +43,7 @@
 | 含む | 含まない |
 | --- | --- |
 | まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`。`versioned` は経路を変えず、`kind: auto` の行はpromote か `merged-by-check` になる）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
-| `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | 雛形（`{queue_pr:release-prod}`）とリリースの Pull Request（`{queue_pr:promote}`）の経路の振る舞い |
+| `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | リリース記録の PR を探す規則（`{queue_record}`。[ndf-sprint-close-record-pr-at-run-time.md](ndf-sprint-close-record-pr-at-run-time.md)） |
 | 要求から手動確認の行を読む規則（`lib/manual_checks.py` の `rows_of`） | merge-gate（`merged_lib/merge.py` の `manual_gate`）と `unchecked_before_merge` の判定、要求の雛形の文 |
 
 ## 仕様
@@ -62,16 +62,15 @@
 
 #### まとめのプランの記録の参照
 
-`record_pr_ref` は上から順に判定し、最初に当たった値を返す。`close_plan` は `has_record(record_pr)` で `release-verify` を置くかを決める。
+`record_pr_ref` は次の値を返す。`close_plan` は `has_record(record_pr)` で `release-verify` を置くかを決める。
 
 | 経路 | 返す値 |
 | --- | --- |
-| 雛形の経路がある | `{queue_pr:release-prod}` |
-| リリースの Pull Request で届く経路があり、開発版のチャネルが手動反映の本番系（`delivery.MANUAL_PRODUCTION`）でない | `{queue_pr:promote}` |
-| それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系へのリリースの Pull Request） | `{queue_record}`（`RECORD_FOUND`。#2230） |
+| すべて `STAGE_NONE`（`delivery` が `[]` を含む） | `0`（`RECORD_NONE`） |
+| それ以外（雛形・リリースの Pull Request・merge・手で届ける・検証の環境だけ・手動反映の本番系。`pace` によらない） | `{queue_record}`（`RECORD_FOUND`。#2230・#3126） |
 
-#2230 から、最初に経路がすべて `STAGE_NONE`（`delivery` が `[]` を含む）かを見て `0`（`RECORD_NONE`）を返し、次に開発ループのまとめ
-（`--pace auto`）なら `{queue_record}` を返し、その後に上の表を上から見る。`unknown`（`RECORD_UNKNOWN`）は `sprint_routes.py` から消えた。
+まとめの後ろに置いた最終の検査の開発版・本番はまとめより後に流れるため、まとめは `{queue_pr:release-prod}` / `{queue_pr:promote}` で
+参照できない。`sprint_routes.py` は `unknown`（`RECORD_UNKNOWN`）を持たない。
 語 `0` と `{queue_record}` と `has_record` は `supervise_lib/sprint_routes.py` に置き、`close_plan` はそれを呼ぶだけにする。
 
 #### `sprint-close.py --record-pr`
@@ -110,16 +109,8 @@
 flowchart TD
   A["record_pr_ref"] --> D{"経路がすべて STAGE_NONE"}
   D -- はい --> Z["0"]
-  D -- いいえ --> L{"開発ループのまとめ（--pace auto）"}
-  L -- はい --> U["{queue_record}"]
-  L -- いいえ --> B{"雛形の経路がある"}
-  B -- はい --> T["{queue_pr:release-prod}"]
-  B -- いいえ --> C{"リリースの Pull Request で届く経路があり、手動反映の本番系でない"}
-  C -- はい --> P["{queue_pr:promote}"]
-  C -- いいえ --> U
-  T --> V["ready → config-save → release-verify → config-check → deep-due → … → merge → close"]
-  P --> V
-  U --> V
+  D -- いいえ --> U["{queue_record}"]
+  U --> V["ready → config-save → release-verify → config-check → deep-due → … → merge → close"]
   Z --> W["ready → deep-due → … → merge → close（config-save・release-verify・config-check なし）"]
 ```
 
