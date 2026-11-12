@@ -402,34 +402,48 @@ def docs_only_files(root: Path, files: list[str]) -> bool:
     return kinds.docs_only() and not kinds.behavior
 
 
-def _classify_merges(
-    root: Path, merges: list, heads: dict, skip: set[int], seen: set[int], passed: set[int], sprint: str, issues: set[int], decl: dict
-) -> tuple[list[int], list[dict], list[int], list[int], list[bool]]:
+class Selection(NamedTuple):
+    """最後の検査の選び方（`--sprint` の名前・`--issue` の番号・`--review`）。"""
+
+    sprint: str
+    issues: set[int]
+    review: bool
+
+
+class Classified(NamedTuple):
+    """古い順の PR の分類（`classify_merges`）。"""
+
+    kept_at: list[int]  # 範囲に入る PR の位置
+    kept: list[dict]  # 範囲に入る PR（`merged_prs` と同じ形）
+    other: list[int]  # スプリントに属さない PR
+    checked: list[int]  # 検査済みの PR
+    removable: list[bool]  # 印を進める位置の判定で、越えてよい PR か
+
+
+def classify_merges(
+    root: Path, merges: list, heads: dict, skip: set[int], seen: set[int], passed: set[int], sel: Selection, decl: dict
+) -> Classified:
     """古い順の PR を「範囲に入る」（位置と PR）「ほか」「検査済み」に分け、印を進める位置の判定で越えてよい PR かを並べる。"""
-    kept_at: list[int] = []
-    kept: list[dict] = []
-    other: list[int] = []
-    checked: list[int] = []
-    removable: list[bool] = []  # 印を進める位置の判定で、越えてよい PR か
+    got = Classified([], [], [], [], [])
     for i, m in enumerate(merges):
         branch = heads.get(m.number, "") or ""
         if m.number in skip or branch.startswith(SKIP_BRANCHES):
-            removable.append(True)
+            got.removable.append(True)
             continue
-        if not in_sprint(branch, sprint, issues):
-            other.append(m.number)
+        if not in_sprint(branch, sel.sprint, sel.issues):
+            got.other.append(m.number)
         elif m.number in seen:
-            checked.append(m.number)
+            got.checked.append(m.number)
         else:
-            kept_at.append(i)
-            kept.append(pr_entry(root, replace(m, branch=branch), decl))
-            removable.append(True)
+            got.kept_at.append(i)
+            got.kept.append(pr_entry(root, replace(m, branch=branch), decl))
+            got.removable.append(True)
             continue
-        removable.append(m.number in passed)
-    return kept_at, kept, other, checked, removable
+        got.removable.append(m.number in passed)
+    return got
 
 
-def _advance_to(merges: list, removable: list[bool]) -> str:
+def advance_position(merges: list, removable: list[bool]) -> str:
     """先頭から越えてよい PR が続く最後のコミット（I4）。空なら進めない。"""
     advance_to = ""
     for m, ok in zip(merges, removable):
@@ -439,25 +453,32 @@ def _advance_to(merges: list, removable: list[bool]) -> str:
     return advance_to
 
 
-def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], sprint: str, issues: set[int], review: bool) -> FinalScope:
+def kept_stats(root: Path, merges: list, kept_at: list[int]) -> tuple[list[str], int, int]:
+    """範囲に入る PR が変えたファイルの和・変更行数・最初と最後の間に入ったほかの PR の数。"""
+    files = list(dict.fromkeys(f for i in kept_at for f in files_of_merge(root, merges[i].sha)))
+    lines = sum(changed_lines(root, f"{merges[i].sha}^1", merges[i].sha) for i in kept_at)
+    interleaved = (kept_at[-1] - kept_at[0] + 1 - len(kept_at)) if kept_at else 0
+    return files, lines, interleaved
+
+
+def final_scope(root: Path, frm: str, to: str, decl: dict, events: list[dict], sel: Selection) -> FinalScope:
     """範囲の起点から先頭までの PR を「範囲に入る」「ほか」「検査済み」に分け、印を進めてよい位置を求める。
     git と検査の記録を読むだけで書かない。"""
     skip = {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)}
-    seen, passed = checked_prs(events, review)
+    seen, passed = checked_prs(events, sel.review)
     try:
         merges = merged_range.merges_in(root, frm, to)
         heads = {m.number: m.branch for m in merged_range.with_heads(root, [m for m in merges if m.number not in skip])}
     except StepError as e:
         raise Stop(str(e), e.code)
     merges = list(reversed(merges))  # first-parent の古い順
-    kept_at, kept, other, checked, removable = _classify_merges(root, merges, heads, skip, seen, passed, sprint, issues, decl)
-    advance_to = _advance_to(merges, removable)
-    files = list(dict.fromkeys(f for i in kept_at for f in files_of_merge(root, merges[i].sha)))
-    lines = sum(changed_lines(root, f"{merges[i].sha}^1", merges[i].sha) for i in kept_at)
-    interleaved = (kept_at[-1] - kept_at[0] + 1 - len(kept_at)) if kept_at else 0
-    if kept_at:
-        frm, to = git_or_stop(root, "rev-parse", f"{merges[kept_at[0]].sha}^1"), merges[kept_at[-1]].sha
-    return FinalScope(kept, other, checked, interleaved, files, bool(files) and docs_only_files(root, files), frm, to, advance_to, lines)
+    got = classify_merges(root, merges, heads, skip, seen, passed, sel, decl)
+    advance_to = advance_position(merges, got.removable)
+    files, lines, interleaved = kept_stats(root, merges, got.kept_at)
+    if got.kept_at:
+        frm, to = git_or_stop(root, "rev-parse", f"{merges[got.kept_at[0]].sha}^1"), merges[got.kept_at[-1]].sha
+    docs_only = bool(files) and docs_only_files(root, files)
+    return FinalScope(got.kept, got.other, got.checked, interleaved, files, docs_only, frm, to, advance_to, lines)
 
 
 def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
@@ -496,32 +517,34 @@ def base_metrics(prs: list[dict], lines: int, since_at: datetime, esc: dict, frm
     }
 
 
-def evaluate_sprint(root: Path, a_sprint: str, issues: set[int], since: str | None, to_ref: str | None, review: bool) -> dict:
+def evaluate_sprint(root: Path, sel: Selection, since: str | None, to_ref: str | None) -> dict:
     """最後の検査の判定（`--sprint`。#3126）。範囲はスプリントに属しまだ検査していない PR だけで、トリガーは
     `final`（`--review` なら `review`）だけを見る（決定 6）。範囲が空か文書のファイルだけなら立たない。"""
     decl = load_decl(root)
     events = read_events(root)
-    start, since_at, how = range_start(root, events, since, review)
+    start, since_at, how = range_start(root, events, since, sel.review)
     head = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
-    sc = final_scope(root, start, head, decl, events, a_sprint, issues, review)
+    sc = final_scope(root, start, head, decl, events, sel)
     esc = escapes_since(events, since_at)
     metrics = {
         **base_metrics(sc.kept, sc.lines, since_at, esc, sc.frm, sc.to),
         "start": start,
-        "sprint": a_sprint,
+        "sprint": sel.sprint,
         "other": sc.other,
         "checked": sc.checked,
         "interleaved": sc.interleaved,
         "docs_only": sc.docs_only,
         "advance_to": sc.advance_to,
     }
-    fired = [{"trigger": "review" if review else "final", "value": len(sc.kept), "threshold": 1}] if sc.kept and not sc.docs_only else []
+    fired = (
+        [{"trigger": "review" if sel.review else "final", "value": len(sc.kept), "threshold": 1}] if sc.kept and not sc.docs_only else []
+    )
     return {
         "decl": decl,
         "fired": fired,
         "metrics": metrics,
         "escape_areas": esc,
-        "how": f"{how}・スプリント {a_sprint}",
+        "how": f"{how}・スプリント {sel.sprint}",
         "prs": [p["pr"] for p in sc.kept],
         "scope": sc,
     }
@@ -559,7 +582,7 @@ def sprint_of(a) -> tuple[str | None, set[int]]:
 def evaluate_for(a, root: Path, final: bool, to_ref: str | None = None) -> dict:
     sprint, issues = sprint_of(a)
     if sprint:
-        return evaluate_sprint(root, sprint, issues, a.since, to_ref, a.review)
+        return evaluate_sprint(root, Selection(sprint, issues, a.review), a.since, to_ref)
     return evaluate(root, final, a.since, to_ref=to_ref, review=a.review)
 
 
