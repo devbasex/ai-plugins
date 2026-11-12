@@ -250,24 +250,26 @@ def cmd_confirm(a) -> None:
     reply("ok", f"リリース {a.n} の承認を送った{QUEUED if q else ''}", n=a.n, take=a.take, **q)
 
 
+def _release_result(path: str) -> tuple[str, str | None]:
+    """本番のプランの done から (結果, 版)。読めなければ終了コード 2、承認ゲートで止まっていれば 4 で終える（送らない）。"""
+    try:
+        done = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        reply("stopped", f"done を読めない: {exc}", code=2)
+    results = [str(i.get("result")) for i in done.get("items") or [] if isinstance(i, dict)]
+    if "関門" in results:
+        reply("stopped", "本番のプランが承認ゲートで止まっている（送らない）", code=4)
+    res = "released" if results and all(r == "完了" for r in results) else "failed"
+    return res, done.get("version") or (done.get("metrics") or {}).get("version")
+
+
 def cmd_settle(a) -> None:
     require_name(a)
     main = main_of()
     if a.external:
         px.settle_external(main, a, reply)
     q = accepting(main, a.name)
-    if a.rejected:
-        res, version = "rejected", None
-    else:
-        try:
-            done = json.loads(Path(a.done).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            reply("stopped", f"done を読めない: {exc}", code=2)
-        results = [str(i.get("result")) for i in done.get("items") or [] if isinstance(i, dict)]
-        if "関門" in results:
-            reply("stopped", "本番のプランが承認ゲートで止まっている（送らない）", code=4)
-        res = "released" if results and all(r == "完了" for r in results) else "failed"
-        version = done.get("version") or (done.get("metrics") or {}).get("version")
+    res, version = ("rejected", None) if a.rejected else _release_result(a.done)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
     sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}")
     reply("ok", f"リリース {a.n} の結果 {res} を送った{QUEUED if q else ''}", result=res, version=version, **q)
