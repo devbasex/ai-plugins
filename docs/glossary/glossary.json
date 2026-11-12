@@ -6713,37 +6713,37 @@
       "term": "最後の検査",
       "context": "ndf-workflow",
       "meaning": "スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う",
-      "pending_source": "issues/issue-3126-design.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "スプリントの検査",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める",
-      "pending_source": "issues/issue-3126-requirements.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "検査の印",
       "context": "ndf-workflow",
       "meaning": "前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある",
-      "pending_source": "issues/issue-3126-requirements.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "最後の検査の範囲",
       "context": "ndf-workflow",
       "meaning": "最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない",
-      "pending_source": "issues/issue-3126-design.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "スプリントに属する Pull Request",
       "context": "ndf-workflow",
       "meaning": "head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request",
-      "pending_source": "issues/issue-3126-design.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "まとめのステージ",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く",
-      "pending_source": "issues/issue-3126-design.md"
+      "source": "docs/specifications/ndf-sprint-final-check-scope.md"
     },
     {
       "term": "最終の検査",
