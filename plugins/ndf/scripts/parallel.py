@@ -391,12 +391,12 @@ def cmd_park(a) -> None:
 
 
 def cmd_helper(a) -> None:
-    import parallel_run as pr_run
+    import parallel_helper
 
     main = main_of()
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
-    task = pr_run.helper_task(main, a.name, a.n, a.k)
+    task = parallel_helper.helper_task(main, a.name, a.n, a.k)
     reply("ok", f"一時レーンの仕事: リリース {a.n} の提示 {a.k}（{task['phase']}）", **task)
 
 

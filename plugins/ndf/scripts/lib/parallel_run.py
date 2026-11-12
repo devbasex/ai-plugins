@@ -34,7 +34,7 @@ import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
 from parallel_end import LaneEnding
-from parallel_helper import SUPERVISE, helper_spawn, helper_task  # noqa: F401  helper_task は parallel.py とテストが読む
+from parallel_helper import SUPERVISE, helper_spawn
 from parallel_launch import LaunchRouting
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
 from parallel_question import cause_of

@@ -21,6 +21,7 @@ import durable  # noqa: E402
 import parallel_cli as pcli  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_release as prl  # noqa: E402
+import parallel_helper as ph  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
 deps.require("pathmatch")
@@ -194,7 +195,7 @@ def test_docs_only_range_confirms_the_new_range_without_representing(env, tmp_pa
     assert ev["k"] == 2 and not ev.get("represent") and ev["carried"] == {"from": "sha1", "head": "sha2", "prs": [12]}
     assert carry["checks"] == [("sha1", "sha2")] and (1, 2, True) in carry["built"]
     assert carry["prs_of"](main, "sha1", "sha2") == []  # 答えの時点では GitHub の一覧を取らない
-    task = prun.helper_task(main, "p1", 1, 2)  # 一時レーンは提示と同じ流し方（提示のプランが確かめ直して承認を書く）
+    task = ph.helper_task(main, "p1", 1, 2)  # 一時レーンは提示と同じ流し方（提示のプランが確かめ直して承認を書く）
     assert task["phase"] == "present" and "present.json" in task["pipeline"]
     got, _ = pcli.wait_event(main, "p1", 0, 0.5)  # 答えの時点では確かめ直しの前なので利用者へ伝えない
     assert got.kind == "timeout"
@@ -203,7 +204,7 @@ def test_docs_only_range_confirms_the_new_range_without_representing(env, tmp_pa
     resume(main, {"n": 1, "phase": "carried", "carried": {"from": "sha1", "head": "sha3", "prs": [12, 13]}}, "carried:1")
     got, _ = pcli.wait_event(main, "p1", 0, 10)  # オーガナイザーが利用者へ 1 行で伝える知らせ
     assert got.kind == "event" and got.value["action"] == "carried" and got.value["carried"]["prs"] == [12, 13]
-    assert prun.helper_task(main, "p1", 1, 2)["phase"] == "present"  # 知らせの後も一時レーンが流すものは変わらない
+    assert ph.helper_task(main, "p1", 1, 2)["phase"] == "present"  # 知らせの後も一時レーンが流すものは変わらない
     # 結果には #13 も載る（I8）
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.4"}, "s1")
     ans, _ = until(lambda: pl.read_answer(main, "p1", rid)[0] and pl.read_answer(main, "p1", rid))
@@ -261,7 +262,7 @@ def test_answer_to_the_second_presentation_does_not_check_and_drops_carried(env,
     ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and "carried" not in e and e)
     assert ev["k"] == 2 and carry["checks"] == [("sha1", "sha2")]
     assert ev["purpose"] == "rel-1-2-confirmed"  # 引き継ぎの起動と別の目的なので、止まった一時レーンを起動し直す
-    assert prun.helper_task(main, "p1", 1, 2)["phase"] == "confirmed"  # 確定の後の 3 手
+    assert ph.helper_task(main, "p1", 1, 2)["phase"] == "confirmed"  # 確定の後の 3 手
     resume(main, {"n": 1, "phase": "settle", "result": "released", "version": "1.2.3"}, "s1")
     until(lambda: pl.read_answer(main, "p1", rid)[0])
     rng = event(main, "p1", "range-1")

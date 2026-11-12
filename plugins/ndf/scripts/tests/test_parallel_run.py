@@ -23,6 +23,7 @@ import dbos  # noqa: E402,F401
 import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+import parallel_helper as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402
@@ -513,14 +514,14 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     start(main)
     pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
-    task = prun.helper_task(main, "p1", 1, 1)
+    task = ph.helper_task(main, "p1", 1, 1)
     d = prl.release_dir(main, "p1", 1, 1)
     assert task["phase"] == "present" and f"queue {d / 'present.json'}" in task["pipeline"]
     assert "request-gate2 p1 1 1" in task["gate2"] and "settle p1 1 --done" in task["settle"]
     (d / "present.json").write_text(
         json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "parallel.py present p1 1 1 --approval issues/a.md && cat x"}]})
     )
-    assert prun.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
+    assert ph.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
@@ -528,7 +529,7 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
     until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed")
     until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])  # リリース承認ゲートの問いは答えで消える
-    task = prun.helper_task(main, "p1", 1, 1)
+    task = ph.helper_task(main, "p1", 1, 1)
     assert task["phase"] == "confirmed"
     assert (
         "'リリース承認ゲート'" in task["pipeline"]
@@ -897,7 +898,7 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
 def test_a_helper_ends_by_stopping_its_own_wrapper():
     """一時レーンは helper-done の後に自分のラッパーを止めて終える（判断 fca6fe464619 の (a)）。止めないと対話の claude が
     入力待ちで残り、続きの一時レーンの起動が同じ名前か上限で断られる。リリースと保留したループの 1 回のどちらの起動も同じ。"""
-    for spec in (prun.helper_spawn("p1", 2, 1), prun.helper_spawn("p1", 3, 0, pending="lroot")):
+    for spec in (ph.helper_spawn("p1", 2, 1), ph.helper_spawn("p1", 3, 0, pending="lroot")):
         argv = spec["argv"]
         name = argv[argv.index("--name") + 1]
         assert f"{prun.RELAY} stop {name}" in argv[argv.index("--") + 1]
@@ -905,7 +906,6 @@ def test_a_helper_ends_by_stopping_its_own_wrapper():
 
 def test_char_helper_spawn_and_verify_spawn_inputs():
     """現状固定: 一時レーンを起こす入力（helper_spawn・verify_spawn）の argv と cwd をそのまま記録する。"""
-    import parallel_helper as ph
 
     def expect(helper, what, cwd):
         end = f"[ndf-parallel] helper-done p1 の行を出し、python3 {ph.RELAY} stop {helper} で自分のラッパーを止めたとき"
