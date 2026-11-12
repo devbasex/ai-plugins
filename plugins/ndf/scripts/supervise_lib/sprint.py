@@ -12,6 +12,7 @@ from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with_decls
+from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check
@@ -237,8 +238,8 @@ def pace_refusal(a) -> str | None:
     if a.mode not in sec["modes"]:
         return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
     channel = dev_channel_of(a)
-    if not channel.ok:
-        return channel.reason
+    if why := (fast_flow_refusal(a, pin_flow) if name == "fast" else None) or (None if channel.ok else channel.reason):
+        return why
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)
 

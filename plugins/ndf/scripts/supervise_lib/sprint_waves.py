@@ -353,6 +353,7 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
         state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
+        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     return plan_release(ns)
 
@@ -485,6 +486,7 @@ def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition:
         issue=a.issue,
         mode=a.mode,
         mvv=a.state,
+        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     plan = plan_release(ns)
     if condition:

@@ -58,7 +58,21 @@ def release_range(root: Path, prev: str, to: str) -> list[IncludedPr]:
         out[m.number] = IncludedPr(m.number)
         for x in nested.get(m.number, []):
             out.setdefault(x.number, IncludedPr(x.number, m.number))
+    for sha in unit_merges(root, prev, to):  # リリースブランチへマージした単位の中の PR（#3121 の選んで集める取り込み方）
+        for x in release_range(root, f"{sha}^1", f"{sha}^2"):
+            out.setdefault(x.number, x)
     return sorted(out.values(), key=lambda p: p.number)
+
+
+def unit_merges(root: Path, prev: str, to: str) -> list[str]:
+    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`branch_flow.UNIT_MERGE`）の SHA。
+    PR のマージではないため `merges_in` は拾わない。ベースブランチの first-parent には現れない（丸ごと出す取り込み方は変わらない）。"""
+    import branch_flow
+
+    p = proc.git(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{prev}..{to}", check=False)
+    if p.returncode != 0:
+        raise StepError(f"git log {prev}..{to}: {p.stderr.strip()[:300]}", 2)
+    return [sha for sha, _, subject in (line.partition("\t") for line in p.stdout.splitlines()) if branch_flow.UNIT_MERGE.match(subject)]
 
 
 def with_extra(found, extra) -> list[IncludedPr]:

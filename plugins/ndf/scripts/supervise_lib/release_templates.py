@@ -8,6 +8,7 @@ from pathlib import Path
 
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
+from supervise_lib.release_flow import bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import (
@@ -118,9 +119,11 @@ def _cleanup_step(v: str, prs: str, repo: str | None) -> dict:
     return {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo, "cmd": cmd, "on_fail": "judge", "next": "end"}
 
 
-def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) -> list[dict]:
-    """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。"""
+def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str, head: str | None = None) -> list[dict]:
+    """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。`head` は承認に出す
+    リリースブランチ（#3121）で、範囲の外の検査の PR を `--prs` に渡さない。"""
     v, base = release_version_of(a)
+    listed = "" if head else prs
     advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
     prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
     m = re.fullmatch(r"\{queue_pr:([A-Za-z0-9._-]+)\}", prs.strip())
@@ -130,7 +133,8 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
         "type": "run",
         "cwd": repo,
         # 前の承認資料を渡し、出し直しでも手で足した節を残す（#1834）
-        "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev} --approval {approval}",
+        "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {listed}{prev} --approval {approval}"
+        + (f" --head {head}" if head else ""),
         "presentation_to": approval,
         "on_fail": "judge",
         "gate_next": "explain",
@@ -145,7 +149,7 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
             "type": "run",
             "cwd": repo,
             # 検査のプランの状態から承認の材料（レビュー・リファクタリング・全体テスト）を読む（#1488）
-            "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} --verified {rts} --ref {a.base}{check_state}",
+            "cmd": f"{STEPS_PY} notes --version {v} --prs {listed} --approval {approval} --verified {rts} --ref {a.base}{check_state}",
             "on_fail": "judge",
             "next": "others",
         },
@@ -155,7 +159,7 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
             "type": "run",
             "cwd": repo,
             "cmd": f"{STEPS_PY} changed-plugins --plugin {a.release['plugin']}{prev.replace('--prev-tag', '--since')} "
-            f"--prs {prs} --approval {approval}",
+            f"--prs {listed} --approval {approval}",
             "on_fail": "judge",
             "next": "mvv" if advise else "end",
         },
@@ -196,7 +200,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
             "id": "bump",
             "type": "run",
             "stage": "デプロイ",
-            "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
+            "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {release_ref(a, dev)}",
             "on_exit": dict(BUMP_STOP),
             "on_fail": "judge",
             "next": "changelog" if dev else "bump-others",
@@ -232,7 +236,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
     if not dev:
-        step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}"
+        step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + promotion_flag(a)
         step["gate_next"] = "handoff" if getattr(a, "mvv", None) else "end"
     return step
 
@@ -321,9 +325,9 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
             "stage": "デプロイ",
             "timeout": 1500,
             "cwd": repo,
-            "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
+            "cmd": f"sh -c 'git pull -q --ff-only origin {release_ref(a, dev)} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
             "on_fail": "judge",
-            "next": "facts" if dev else "cleanup",
+            "next": ("release-branch" if release_units(a) else "facts") if dev else "cleanup",
         },
     ]
 
@@ -370,7 +374,8 @@ def plan_release_package_plugin(a) -> dict:
     sync = bool(getattr(a, "sync_checks", None))
     after_notes = "sync" if sync else "release"
     run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes", *([] if dev else ["snapshot"]), *(["sync"] if sync else [])]
-    run_ids += ["release", "verify", *(["facts", "explain", "others"] if dev else [])]
+    units = release_units(a)
+    run_ids += ["release", "verify", *(["release-branch"] if dev and units else []), *(["facts", "explain", "others"] if dev else [])]
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
@@ -384,8 +389,9 @@ def plan_release_package_plugin(a) -> dict:
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo))
     mvv = getattr(a, "mvv", None)
+    steps += [release_branch_step(a, repo, base, units)] if dev and units else []
     if dev:
-        steps += _dev_approval_steps(a, repo, approval, prs, rts)
+        steps += _dev_approval_steps(a, repo, approval, prs, rts, release_names(base)[1] if units else None)
     steps += _judge_fix_steps(run_ids, after_notes)
     if not dev:
         steps.append(judge_record_step())
@@ -405,6 +411,7 @@ def plan_release_package_plugin(a) -> dict:
         "規則": rule,
         "steps": steps,
     }
+    plan.update({"起点のコミット": f"origin/{release_names(v)[1]}"} if units and not dev else {})  # 開発版のプランが組んだリリースブランチ
     with_decls(plan, a)
     if repo:
         plan["リポジトリ"] = repo
@@ -463,24 +470,6 @@ def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[d
         "next": "end",
     }
     return advise_steps(state, "release", args, note)
-
-
-# changed-plugins の結果 JSON（最後の行）の items を「名前 版」の行にする
-PICK_BUMPS = (
-    'import json,sys; [print(i[\\"name\\"], i[\\"to\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\"items\\"]]'
-)
-
-
-def bump_others_cmd(a, plugin: str, material: str) -> str:
-    """本番のリリースプランの bump-others（不足 c）。前のタグからの差分のある、宣言の release.plugin 以外の
-    プラグインを changed-plugins で列挙し、承認資料（material）の表の上げ幅で 1 つずつ上げる（#1752）。
-    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。"""
-    since = f" --since {shlex.quote(a.prev_tag)}" if getattr(a, "prev_tag", None) else ""
-    return (
-        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} --decided {shlex.quote(material)}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
-        f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
-        f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {a.base} || exit 1; done'
-    )
 
 
 def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:

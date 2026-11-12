@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -25,6 +26,14 @@ MEASURE_CANDIDATES = ("main", "master", "develop")
 # スプリントブランチとリリースブランチの頭（名前の規則は NDF が決める）
 SPRINT_PREFIX = "sprint/"
 RELEASE_PREFIX = "release/v"
+
+# リリースブランチを組むマージの件名（`build_release_branch`）。範囲の PR（`release_lib/included.py`）が単位の中の PR を拾う目印
+UNIT_MERGE = re.compile(rf"^Merge (?:origin/)?{re.escape(SPRINT_PREFIX)}\S+ into {re.escape(RELEASE_PREFIX)}\S+$")
+
+
+def unit_merge_subject(unit: str, branch: str) -> str:
+    return f"Merge {unit} into {branch}"
+
 
 CHANNELS = ("base", "production")
 DOC_TARGETS = ("base", "sprint")
@@ -124,7 +133,7 @@ class Promotion:
                 "--no-ff",
                 "--no-edit",
                 "-m",
-                f"Merge {u} into {branch}",
+                unit_merge_subject(u, branch),
                 u,
             )
             if p.returncode != 0:
