@@ -98,10 +98,15 @@ def manual_release_wave(a) -> dict:
     return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
 
 
+def closing_pace(a) -> str:
+    """読む進め方の節。MVV の進め方でなければ fast と読む（new close は fast のスプリントの終わり）。"""
+    return a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"
+
+
 def pace_verify(a) -> str:
     """選んだ進め方の節の verify（導入の確認のコマンド）。new close は fast のスプリントの終わりとして fast を読む。
     宣言が壊れている・節に verify が無ければ DeclError。"""
-    pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"
+    pace = closing_pace(a)
     try:
         sec = (pace_decl(a) or {}).get(pace) or {}
     except PaceError as e:
@@ -153,7 +158,7 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     rs = [r for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL]
     dev = [r for r in rs if r.production is False]
     prod = [r for r in rs if r.production is not False]
-    pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"  # new close は fast のスプリントの終わり
+    pace = closing_pace(a)
     verify = pace_verify(a)
     # auto は検査のスプリントの PR（単独の queue でも同じディレクトリの検査の報告から埋まる）、fast は前のステージの PR のすべて。
     # fast の単独の queue は前のステージの PR を集められないため、MVV 判定を打たずに利用者の承認ゲートにする（決定 6）
