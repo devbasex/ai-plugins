@@ -710,7 +710,7 @@ def cmd_release(a):
         # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
         allowed = approval.release_pr_allowed(root, release_pr, pr_view)
         # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
-        repo_lib.restore_branch(root, branch)
+        repo_lib.restore_branch(root, branch, run_git=git)
         verdict = approval.check_approved(root, approved, branch, allowed)
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
@@ -735,7 +735,7 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None)
     items += swept
     metrics.update(sweep_metrics)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
-    status, code, done = back(items, metrics, done) if back else ("ok", 0, done)
+    status, code, done = back(items, metrics, done) if back else ("ok", None, done)
     emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
 
 

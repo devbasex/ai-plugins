@@ -117,6 +117,9 @@ def history(tmp_path):
     repo = tmp_path / "r"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
+    # 組む側（lib）は利用者の設定でコミットするため、一時リポジトリに持たせる
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git(repo, "config", k, v)
     commit(repo, "base.txt", "0\n", "init")
     git(repo, "branch", "develop")
     for name in ("a", "b"):

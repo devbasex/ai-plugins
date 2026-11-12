@@ -195,14 +195,16 @@ def kept_sprint_branch(root, branch: str | None) -> str | None:
     return None
 
 
-def restore_branch(root, branch: str, ref: str = "HEAD") -> bool:
+def restore_branch(root, branch: str, ref: str = "HEAD", run_git=None) -> bool:
     """Pull Request のマージで origin の `branch` が消えていれば（`delete_branch_on_merge`）、`ref` の先端を push し直す。
 
     在れば何もしない（強制 push はしない）。push し直したら真。`release-steps.py` の開発版のリリースブランチと、
-    選んで集める取り込み方の検査の後のスプリントブランチ（#3121 の決定 7）が使う。"""
-    if proc.git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode == 0:
+    選んで集める取り込み方の検査の後のスプリントブランチ（#3121 の決定 7）が使う。`run_git` は呼び手の `git`
+    （`proc.git` と同じ形。既定は `proc.git`）で、呼び手のモジュールの `git` を差し替える試験もこの処理を通す。"""
+    g = run_git or proc.git
+    if g(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode == 0:
         return False
-    proc.git(root, "push", "-q", "origin", f"{ref}:refs/heads/{branch}")
+    g(root, "push", "-q", "origin", f"{ref}:refs/heads/{branch}")
     return True
 
 
