@@ -2506,7 +2506,7 @@
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。切り替えの閾値と比べるのはその最大",
+      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。閾値 T と比べるのは週の使用率",
       "source": "",
       "pending_source": "issues/old/issue-1453-design.md"
     },
@@ -2535,13 +2535,6 @@
       "term": "上限シグナルファイル",
       "context": "ndf-relay",
       "meaning": "子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json",
-      "source": "",
-      "pending_source": "issues/old/issue-1389-design.md"
-    },
-    {
-      "term": "切り替えの閾値",
-      "context": "ndf-relay",
-      "meaning": "今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%）",
       "source": "",
       "pending_source": "issues/old/issue-1389-design.md"
     },
@@ -5077,6 +5070,36 @@
       "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     },
     {
+      "term": "依頼した側",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中で、別のリポジトリの改修が先に要ると分かったレーンと、そのレーンが進めている課題",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "相手のリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "依頼した側が改修を必要とする、依頼した側と違うリポジトリ。改修はそのリポジトリの規約（課題・承認ゲート・漏れの検査）で進む",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "完全な形の参照",
+      "context": "ndf-workflow",
+      "meaning": "<所有者>/<リポジトリ>#<番号> の形で課題を指す書き方。リポジトリをまたいで課題を対に結ぶときに使い、番号だけの #<番号> は使わない",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "代わりの手順",
+      "context": "ndf-workflow",
+      "meaning": "別のリポジトリの改修が要るときの既定の手順（別のリポジトリのレーンの起動）を使えないときに取る、out-of-scope の別のリポジトリへの起票",
+      "pending_source": "issues/issue-3074-requirements.md"
+    },
+    {
+      "term": "相手のレーン",
+      "context": "ndf-workflow",
+      "meaning": "依頼した側が並列の計画へ足す、相手のリポジトリのクローンを repo にした別のリポジトリのレーン。相手の課題を最初の入力に持つ",
+      "pending_source": "issues/issue-3074-design.md"
+    },
+    {
       "term": "計画の外のセッション",
       "context": "ndf-workflow",
       "meaning": "動いている計画があるマシンで、計画のレーンでもオーガナイザーでもないのに開発ループかスプリントを始めるセッション。基本不許可で、必要ならレーン数の上限を変えて計画へレーンを足す",
@@ -6332,67 +6355,67 @@
       "term": "起動先の決定",
       "context": "ndf-relay",
       "meaning": "1 回の起動について、どのアカウントか、どの API キーか、待つかを決めた結果。当たった規則の名前と根拠の値を持つ",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "5 時間の枠の無いアカウント",
       "context": "ndf-relay",
       "meaning": "使用率の応答に 5 時間の枠が無い登録済みアカウント。`relay.py account list` の 5 時間の列が「-」になる",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "週の使用率",
       "context": "ndf-relay",
       "meaning": "週の枠とモデル別の週の枠の使用率のうち最も大きい値",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "閾値 T",
       "context": "ndf-relay",
       "meaning": "API キーへ逃がすかと、5 時間の枠のあるアカウントを先に選ぶかを決める週の使用率の閾値。既定値は 85%",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "月の額",
       "context": "ndf-relay",
       "meaning": "API キーごとに宣言する、月に付与されるクレジットの額（ドル）",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "週の利用枠",
       "context": "ndf-relay",
       "meaning": "API キーごとの、直近 7 日に使ってよい額。月の額 × 7 ÷ 30",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "使用の割合",
       "context": "ndf-relay",
       "meaning": "API キーの直近 7 日の使用額 ÷ その API キーの週の利用枠",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "区切り",
       "context": "ndf-relay",
       "meaning": "relay がもともと起動し直す時点（フェーズの境・文脈の量による切り替え）。戻るためだけに作らない",
-      "pending_source": "issues/issue-2930-requirements.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "選ぶ順の組",
       "context": "ndf-relay",
       "meaning": "アカウントを 4 つに分けた選ぶ順の単位。5 時間の枠を先に使う組・週だけの枠の組・閾値を超えた組・残量不明の組の順に選ぶ",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "観測のスナップショット",
       "context": "ndf-relay",
       "meaning": "1 回の起動先の決定の入力。時刻・宣言・各アカウントの観測・各 API キーの使用額・除外する名前を、決定の時点の値で固めたもの",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "切り替えの余裕",
       "context": "ndf-relay",
       "meaning": "今のアカウントが最良の候補と同じ選ぶ順の組にあれば替えない、という切り替えを抑える条件",
-      "pending_source": "issues/issue-2930-design.md"
+      "source": "docs/specifications/ndf-relay-launch-target.md"
     },
     {
       "term": "立ち上がりの確認",
@@ -6434,67 +6457,61 @@
       "term": "長い待ち",
       "context": "ndf-workflow",
       "meaning": "オーガナイザーが次の知らせまで待つ見込みの時間が長く、状況報告を続けるよりセッションを切り替えた方が入力の費用が小さいと parallel.py wait が判定する待ち",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "状況報告",
       "context": "ndf-workflow",
       "meaning": "parallel.py wait が上限で戻ったときに、オーガナイザーがレーンごとの様子を利用者へ 1 行ずつ出す報告",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "切り替えの判定",
       "context": "ndf-workflow",
       "meaning": "parallel.py wait が上限で戻るときに出す「切り替える」「報告して待つ」の判定と、その材料（metrics.switch）",
-      "pending_source": "issues/issue-3006-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "プロンプトキャッシュの寿命",
       "context": "ndf-workflow",
       "meaning": "会話の入力がプロンプトキャッシュに残る時間。最後に使われた時点から数える",
-      "pending_source": "issues/issue-3006-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer-long-wait.md"
     },
     {
       "term": "出し直しの提示",
       "context": "ndf-workflow",
       "meaning": "まとめたリリースで、承認の答えの時点でベースブランチが承認したコミットより進んでいたとき、加わった範囲を添えて同じリリース承認ゲートをもう 1 回出す提示（represent: true）",
-      "source": "",
-      "pending_source": "issues/issue-3020-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "加わった範囲",
       "context": "ndf-workflow",
       "meaning": "まとめたリリースで、提示 1 で承認したコミットから承認の答えの時点のベースブランチの先頭までに入った変更",
-      "source": "",
-      "pending_source": "issues/issue-3020-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "文書だけの範囲",
       "context": "ndf-workflow",
       "meaning": "加わった範囲のファイルを宣言 docs で分けて、コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが 1 件以上の範囲。出し直しの提示を省く条件",
-      "source": "",
-      "pending_source": "issues/issue-3020-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "出し直しを省く",
       "context": "ndf-workflow",
       "meaning": "加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと",
-      "source": "",
-      "pending_source": "issues/issue-3020-requirements.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "確かめ直しの範囲",
       "context": "ndf-workflow",
       "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 のコミットから提示 2 の承認資料を作った時点のコミットまでに入った変更。判定の後にベースブランチが進めば加わった範囲より広くなる。引き継いだ承認を記録する前にこの範囲が文書だけかを確かめる",
-      "source": "",
-      "pending_source": "issues/issue-3020-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "引き継いだ承認",
       "context": "ndf-workflow",
       "meaning": "まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す",
-      "source": "",
-      "pending_source": "issues/issue-3020-design.md"
+      "source": "docs/specifications/ndf-parallel-organizer.md"
     },
     {
       "term": "触る場所の見込み",
@@ -6584,6 +6601,41 @@
       "context": "ndf-workflow",
       "meaning": "同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock）",
       "pending_source": "issues/issue-2999-design.md"
+    },
+    {
+      "term": "CI テストの宣言",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `test.ci.only: true`。このリポジトリのテストは CI でだけ走らせると表し、宣言があれば手元でテストを走らせない",
+      "source": "",
+      "pending_source": "issues/issue-3056-design.md"
+    },
+    {
+      "term": "手元のテスト",
+      "context": "ndf-workflow",
+      "meaning": "worker・supervisor・プランのステップ・cross-refactoring が、作業しているマシンで走らせるテスト（範囲テスト・全体テスト・指摘の検証・打ち直しを含む）",
+      "source": "",
+      "pending_source": "issues/issue-3056-requirements.md"
+    },
+    {
+      "term": "CI の結果の監視",
+      "context": "ndf-workflow",
+      "meaning": "PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み",
+      "source": "",
+      "pending_source": "issues/issue-3056-design.md"
+    },
+    {
+      "term": "CI の失敗の改修",
+      "context": "ndf-workflow",
+      "meaning": "CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること",
+      "source": "",
+      "pending_source": "issues/issue-3056-requirements.md"
+    },
+    {
+      "term": "テストのチェック",
+      "context": "ndf-workflow",
+      "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
+      "source": "",
+      "pending_source": "issues/issue-3056-design.md"
     }
   ]
 }

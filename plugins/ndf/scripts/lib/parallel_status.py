@@ -57,6 +57,17 @@ def _lap_fields(rec: Optional[dict]) -> dict:
     return out
 
 
+def unanswered(main: Path, name: str, rows: list[dict]) -> list[dict]:
+    """計画の台帳の答えていない問い（業務時間外に溜めた依頼も含む）。`rows` は `read_ledger_rows` の行。
+    `status` の答えを待つレーンと、切り替えの判定（`parallel_switch`）の答えていない問いの数が使う。読めなければ例外を出す。"""
+    import parallel_ledger as plg
+
+    if "opened" in {r["kind"] for r in rows}:  # 耐久ワークフローが外した問いをチェックポイントで除く
+        return plg.pending_questions(main, name)
+    answered = {r["id"] for r in rows if r["kind"] == "answer"}
+    return [{"id": r["id"], "lane": r.get("by")} for r in rows if r["kind"] in plg.QUESTIONS and r["id"] not in answered]
+
+
 def _ledger_view(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
     """(レーン → 台帳でそのレーンが送った最後の行の時刻, 答えていない依頼を送ったレーン)。読めなければ空。"""
     try:
@@ -68,11 +79,7 @@ def _ledger_view(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
             by, at = r.get("by"), r.get("at")
             if by and by != "organizer" and at and str(at) > last.get(by, ""):
                 last[by] = str(at)
-        if "opened" in {r["kind"] for r in rows}:  # 耐久ワークフローが外した問いをチェックポイントで除く
-            pending = plg.pending_questions(main, name)
-        else:
-            answered = {r["id"] for r in rows if r["kind"] == "answer"}
-            pending = [{"lane": r.get("by")} for r in rows if r["kind"] in plg.QUESTIONS and r["id"] not in answered]
+        pending = unanswered(main, name, rows)
         return last, {q.get("lane") for q in pending if isinstance(q, dict) and q.get("lane")}
     except Exception:  # noqa: BLE001
         return {}, set()

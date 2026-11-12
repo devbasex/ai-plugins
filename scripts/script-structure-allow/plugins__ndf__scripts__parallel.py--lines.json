@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/parallel.py", "name": "", "kind": "lines", "reason": "#2999 の版の印と develop の #3020（carried の副命令）・#3006（wait の既定の秒）の取り込みが重なって 503 行。副命令の定義はパーサーを静的に読む契約の検査があり、ループや連結で詰められない。500 行以下にしたら消す。分けるなら、cmd_* の薄い包みを parallel_cli へ寄せる", "lines": 503}

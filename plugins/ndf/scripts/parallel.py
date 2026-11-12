@@ -7,11 +7,12 @@
 | `check <計画名>` | 並列の計画を検査する（誤りは 1、警告だけなら 0） |
 | `start <計画名>` | `run` をセッションから切り離して起動する（どの経路でも打ったセッションへオーガナイザーの印を付け直す。`metrics.organizer` が付けられたか。動いていれば今の pid を返す。失われた計画は作り直し、`metrics.rebuilt`・`metrics.restored` を返す。#2647） |
 | `run <計画名>` | 耐久ワークフローを始めるか続け、終わるまで動き続ける。ラッパーの外・tmux が無ければ手で起動する 1 行を返す（3） |
-| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限なら 3。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
+| `wait <計画名> [--after <seq>] [--changes-after <n>] [--timeout 秒]` | 人へ問うもの（questions / answer_hold）か終わり（finished / stopped）まで待つ。上限（既定 1800 秒）なら 3 で、`items` に `status` と同じレーンごとの行、`metrics.switch` に切り替えの判定を載せる（#3006）。失われた計画は 1（error）で `metrics.next` に `start` の 1 行 |
 | `status <計画名>` | レーンごとに 1 行（状態・何回目のループか・今の課題・最後の知らせの時刻・費用・承認待ちのレーンへ入る 1 行）を返す。計画が無ければ 2 |
 | `park <計画名> --lane <名> (--done <D> \\| --clear)` | 答え待ちの停止で流さなかったレーンが止まる手順（`--done`）か、人が止めたままにするレーンの再開の印を消す（`--clear`） |
 | `present <計画名> <連番> <提示> --approval <承認資料>` | 範囲の Pull Request をレーンへ対応づけ、提示の置き場（`releases/<連番>/<提示>/`）へ書く |
 | `confirm <計画名> <連番> [--take new\\|first]` | リリース承認ゲートの承認を送る |
+| `carried <計画名> <連番>` | 出し直しを省いた提示 2 の確かめ直しの範囲が文書だけなら 0（`metrics.added`）、文書だけではない・判定できないなら 10 |
 | `settle <計画名> <連番> (--done <D> \\| --rejected [--reason 文])` | リリースの結果を送る |
 | `stop <計画名> [--force]` | 計画の全レーンを止め、耐久ワークフローを終える（リリースの途中は settle を待つ。`--force` は待たない） |
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0） |
@@ -41,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -229,6 +230,10 @@ def cmd_present(a) -> None:
         reply("stopped", f"読めない: {exc}", code=2)
     summary = f"提示 {a.n}-{a.k}: {got['sha'][:12]} まで（Pull Request {len(got['prs'])} 本）"
     reply("ok", summary, [{"lane": n, **r} for n, r in got["lanes"].items()], sha=got["sha"], orphans=got["orphans"])
+
+
+def cmd_carried(a) -> None:
+    pcli.carried_report(main_of(), a.name, a.n, reply)
 
 
 def cmd_compose(a) -> None:
@@ -420,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("name")
     w.add_argument("--after", type=int, default=0)
     w.add_argument("--changes-after", type=int, default=0, help="出した答え待ちの停止の変化の最後の番号")
-    w.add_argument("--timeout", type=float, default=3600)
+    w.add_argument("--timeout", type=float, default=1800)  # プロンプトキャッシュの寿命 3600 秒より短く（#3006 の I6）
     stt = sub.add_parser("status")
     stt.add_argument("name")
     p = sub.add_parser("present")
@@ -434,6 +439,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("name")
     c.add_argument("n", type=int)
     c.add_argument("--take", choices=("new", "first"))
+    ca = sub.add_parser("carried")
+    ca.add_argument("name")
+    ca.add_argument("n", type=int)
     s = sub.add_parser("settle")
     s.add_argument("name", nargs="?")
     s.add_argument("n", type=int)

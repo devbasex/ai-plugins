@@ -153,5 +153,7 @@
 | [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |
 | [ndf-parallel-durable-lane-launch.md](ndf-parallel-durable-lane-launch.md) | 一時レーンの起動とレーンの再起動を耐久ワークフローが打ち、オーガナイザーは問いと終わりだけで起きる |
 | [ndf-scripts-import-cycles.md](ndf-scripts-import-cycles.md) | スクリプトの import の向き（結果を出す層と cross-refactoring の台帳の輪をほどく） |
+| [ndf-relay-launch-target.md](ndf-relay-launch-target.md) | claude -p とラッパーの起動先の決定（5 時間の枠を先に使う選ぶ順の組・切り替えの余裕・近い上限で API キーへ逃がす条件・閾値 T の根拠）の常に成り立つ条件・決定と理由（#2930・#2931）。使い方は development-workflow の references/relay-accounts.md が正 |
+| [ndf-parallel-organizer-long-wait.md](ndf-parallel-organizer-long-wait.md) | 並列の計画のオーガナイザーの長い待ち（wait の上限 1800 秒の状況報告・metrics.switch の切り替えの判定と費用の式・再起動の理由「待ち」）の常に成り立つ条件・出力の契約・決定と理由（#3006）。手順は development-workflow の references/parallel.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

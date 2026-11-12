@@ -104,6 +104,7 @@ def test_the_section_needs_one_non_blank_line(body, lacks):
 # ---------- 受け入れ条件 5 ----------
 
 
+@pytest.mark.suspended_refactor  # 子プロセスの run と同じく構造改善の停止のまま比べる
 @pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
 def test_the_plans_are_the_same_as_without_the_check(tmp_path, issue_bodies, monkeypatch, pace):
     args, cwd = sprint_args(tmp_path, pace=pace)

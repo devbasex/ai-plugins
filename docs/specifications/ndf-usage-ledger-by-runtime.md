@@ -296,6 +296,7 @@ Claude の行）は報告が別に数えるため除く。報告の「LLM の使
 | `parent_session_id` | str | null を許す | サブエージェントの行だけ。親の会話のセッション ID |
 | `agent_type` / `agent_id` | str | null を許す | サブエージェントの行だけ |
 | `pytest` | str | 無いことを許す | テストの中で書いた行だけ。`PYTEST_CURRENT_TEST` のテストの名前 |
+| `api_key` | str | 無いことを許す | API キーで起動した claude の行だけ。そのキーの登録名（値は書かない）。API キーごとの直近 7 日の使用額はこの列で数える（`usage_ledger.api_key_spent`） |
 | `cost_usd` / `turns` / `seconds` | number | null を許す | claude の `total_cost_usd`・`num_turns`、呼び出しの秒 |
 | `at` / `ndf_version` | str | 許さない | 書いた時刻（UTC）と、書いたプラグインの版（読めなければ `unknown`） |
 

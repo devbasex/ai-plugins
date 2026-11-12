@@ -165,6 +165,10 @@ w は `WEIGHTS["w1h"]`（2.0）、H の係数は `WEIGHTS["out"]`（5.0）であ
 それも無ければ現行方式は「カットポイント」・試行方式は「手動」である。記録の後に較正し直す。記録と較正に失敗しても
 `ndf-next` は出す。
 
+並列の計画のオーガナイザーは、`parallel.py wait` の切り替えの判定が「切り替える」のときに、`metrics.switch.record` の 1 行
+（`record --verdict 再起動 --reason 待ち --work "parallel <計画名>"`）を打ってから `ndf-next` を出す。理由「待ち」は既定の理由にならず、
+この 1 行でだけ書かれる。判定の規則は `plugins/ndf/skills/development-workflow/references/parallel.md` の「長い待ちの状況報告と切り替え」にある。
+
 Codex には hook が無く、conductor は文脈の量を読めないため、試行方式を選んでいても現行方式のカットポイントで切る。
 印と再起動の記録は Bash で打つため、`--runtime codex` で同じ形に残せる。
 
@@ -203,7 +207,7 @@ Codex には hook が無く、conductor は文脈の量を読めないため、�
 | --- | --- | --- | --- |
 | `resolve [--root <dir>] [--policy current\|trial]` | 作業ディレクトリ・環境変数 | 統一 JSON（`tool: context-policy`、`status: ok`、`items` に適用値 1 件、`metrics` に `policy`・`limit`）。設定が壊れていても `ok` で、`summary` と `config_error` に理由が載る | 0 / 2 引数の誤り |
 | `publish` | 標準入力の JSON（SessionStart の `session_id`・`cwd`） | `session_id` があれば適用値の受け渡しのファイルを書く。設定が壊れていれば 1 行を標準出力へ出す | 常に 0 |
-| `record --verdict 再起動 --reason <理由> --work <識別子> [--runtime claude\|codex] [--context <n>]` | 理由（6 つ）と作業の識別子 | 1 行（`source: record`・`stage: cut`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 `--verdict` が `再起動` でない・理由が 6 つ以外・`--verdict` と `--event` が両方か両方なし |
+| `record --verdict 再起動 --reason <理由> --work <識別子> [--runtime claude\|codex] [--context <n>]` | 理由（7 つ）と作業の識別子 | 1 行（`source: record`・`stage: cut`）を追記し、統一 JSON で返す | 0 / 1 書けない / 2 `--verdict` が `再起動` でない・理由が 7 つ以外・`--verdict` と `--event` が両方か両方なし |
 | `record --event 引継ぎ開始\|復元完了 --work <識別子> [--runtime claude\|codex]` | 印と作業の識別子 | 印の 1 行（`event` が印、`verdict`・`stage`・`band` は `null`）を追記し、統一 JSON で返す。Claude Code では hook が打たない場面（カットポイント・独立性・手動で自分で切るとき）で使い、Codex では両方の印で使う | 0 / 1 書けない / 2 印が 2 つ以外 |
 | `calibrate [--days 30]` | 判定の記録・会話の記録 | 見込みのファイルを書き、`metrics.samples` に標本数を返す | 0 / 1 書けない |
 | `report --work <識別子> \| --all [--since YYYY-MM-DD] [--from <ISO 8601>] [--until <ISO 8601>] [--format json\|table]` | 判定の記録・会話の記録・使用量の帳簿 | 作業ごとに `work`・`sessions`・`parts`（4 区分ごとの `inp`・`out`・`read`・`w5`・`w1h`・`calls`・`seconds`・`cost`）・`unknown_parts`・`restores`（セッションごとの復元の量 `context` と復元の区間の呼び出し数 `calls`。セッションの識別子は持たない）・`restarts`（理由ごと）・`restart_count`・`auto_compacts`・`quality`・`no_policy_rows`。`--from`・`--until`（両端を含む）を渡すと、その間の呼び出し（会話・サブエージェント・使用量の帳簿）と判定の記録の行だけを数える。`table` は Markdown の表と作業ごとの 1 行を出す | 0（0 件でも 0）/ 2 `--work` と `--all` が両方か両方なし・`--since`・`--from`・`--until` の形の誤り |
@@ -242,7 +246,7 @@ Codex には hook が無く、conductor は文脈の量を読めないため、�
 | `context` / `window` / `effective_limit` | 整数 | `null`: 取れない・判定しない |
 | `band` | `継続帯` / `判断帯` / `上限超` / `容量超` | `null`: 判定しない（`record`・`sprint-state`）か C が取れない |
 | `verdict` | `継続` / `拒否` / `再起動` | `null`: 印 |
-| `reason` | `容量` / `運用上限` / `費用` / `独立性` / `手動` / `カットポイント` | `null`: 継続 |
+| `reason` | `容量` / `運用上限` / `費用` / `独立性` / `手動` / `カットポイント` / `待ち` | `null`: 継続 |
 | `basis` | `判断開始の値以下` / `費用` / `見込みなし` / `値なし` | `null`: 継続でない |
 | `estimate` | `{"continue": <int>, "restart": <int>}` | `null`: 見込みを使っていない |
 | `missing` | 取れなかった値の名前（`context` / `window` / `estimate`） | `[]` |
@@ -316,7 +320,7 @@ classDiagram
 | `NDF_CONTEXT_DIR` | 状態ディレクトリ |
 | `CLAUDE_CODE_SESSION_ID` | `record` と `sprint-state.py next` が行の `session_id` に使う |
 | `skill-stats --window-limit <n>` | 渡したときだけ全記録の「割る候補」の上限にする |
-| `sprint-state.py next --reason <理由>` | 再起動の理由（6 つ） |
+| `sprint-state.py next --reason <理由>` | 再起動の理由（7 つ） |
 
 ### hook の出力
 

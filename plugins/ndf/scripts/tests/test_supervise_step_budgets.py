@@ -17,6 +17,7 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import decl, paths, sprint_waves  # noqa: E402
 from supervise_lib.verify_steps import with_margin  # noqa: E402
+import inproc  # noqa: E402
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -31,7 +32,7 @@ def repo(tmp_path, **sv) -> Path:
 
 
 def cli(root, *args):
-    return subprocess.run([PY, str(SUPERVISE), "new", *args, "--worktree", str(root)], capture_output=True, text=True, cwd=root)
+    return inproc.run(SUPERVISE, "new", *args, "--worktree", str(root), cwd=root)
 
 
 def steps(path) -> dict:

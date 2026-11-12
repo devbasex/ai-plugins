@@ -221,10 +221,14 @@ def record_claude(
     step: Optional[str] = None,
     seconds: Optional[float] = None,
     status: str = "ok",
+    api_key: Optional[str] = None,
 ) -> bool:
-    """`claude -p --output-format json` の結果 1 回を Claude の帳簿へ書く。`data` が空なら使用量は `"unknown"`。"""
+    """`claude -p --output-format json` の結果 1 回を Claude の帳簿へ書く。`data` が空なら使用量は `"unknown"`。
+
+    `api_key` は API キーで起動したときのキーの名前（値ではない。#2930）。"""
     try:
-        rec = usage_ledger.UsageRecord.from_claude(data, **caller(source, kind, plan, step), seconds=seconds, status=status)
+        who = caller(source, kind, plan, step)
+        rec = usage_ledger.UsageRecord.from_claude(data, **who, seconds=seconds, status=status, api_key=api_key)
     except Exception as e:  # noqa: BLE001  記録の失敗で呼び出しを落とさない（I5）
         print(f"usage_capture: 行を作れない: {e}", file=sys.stderr)
         return False

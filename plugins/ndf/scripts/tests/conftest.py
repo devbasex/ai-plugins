@@ -131,6 +131,21 @@ def _short_durable_polls(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _refactor_route_on(request, monkeypatch):
+    """構造改善の緊急の停止（`templates.CROSS_REFACTORING_SUSPENDED`）を外し、既存のテストに構造改善を持つ道を確かめ続けさせる。
+
+    停止そのものは `suspended_refactor` の印のテストが確かめる。子プロセスで起こした supervise には効かない。"""
+    if request.node.get_closest_marker("suspended_refactor"):
+        return
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        monkeypatch.syspath_prepend(scripts)
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module("supervise_lib.templates"), "CROSS_REFACTORING_SUSPENDED", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_whole_runs(tmp_path_factory, monkeypatch):
     """全体テストの実測の記録（#1631）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
     monkeypatch.setenv("NDF_WHOLE_RUNS_DIR", str(tmp_path_factory.mktemp("whole-runs")))

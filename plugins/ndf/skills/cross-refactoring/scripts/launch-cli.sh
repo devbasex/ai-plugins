@@ -136,11 +136,9 @@ case "$PHASE" in
     ;;
   fix)
     # 修正の対象の項目（`fix.items`。同じ修正担当の項目をまとめる。#2457）。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
-    # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
     ITEMS_JSON=$(jq '(.fix.items // []) as $f | [.items[] | select(.status == "failing" and (.id as $i | ($f | length) == 0 or ($f | index($i))))
       | {item_id: .id, path, symbol, technique, plan, fix_count,
-         test_command: (if .whole_test_command then (.whole_test_command | join(" "))
-                        elif .scope_commands then (.scope_commands | map(.command) | join(" ; "))
+         test_command: (if .scope_commands then (.scope_commands | map(.command) | join(" ; "))
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
          test_log: .last_log}
       + (if .failed_check then {failed_check} else {} end)]' "$STATE")

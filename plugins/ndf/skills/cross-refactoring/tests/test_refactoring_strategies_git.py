@@ -9,7 +9,7 @@
 | AC2（PR 1732 の形） | 構造検査で落ちた項目を、修正担当が範囲の外の新しいモジュールへ分けて直すと採用される |
 | AC3 | 新しいファイルを作った項目に D1 が立つ |
 | AC6（テストの共通化）・AC8 | テストの値を新しい補助のファイルへ移した項目が採用される。値が本当に消えた項目は取り消す |
-| AC6b（不要コードの削除） | 範囲テストの対象の無い `remove_dead_code` の項目が D4 の全体テストで検証され採用される |
+| AC6b（不要コードの削除） | 範囲テストの対象の無い `remove_dead_code` の項目は D4 で最終ゲートの全体テストへ寄せ、通れば採用される（#3048） |
 | AC6a・I8 | 2 コミットの項目を取り消すと、2 コミットとも戻る |
 | AC7 | 見積を大きく超える実差分の項目を取り消さない |
 """
@@ -424,7 +424,7 @@ def test_a_test_value_that_really_disappeared_is_sent_back_to_the_fix(flow, cmd_
 def test_removing_dead_code_without_a_scope_test_is_verified_by_the_whole_test(
     flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, ledger, capsys
 ):
-    """AC6b: 範囲テストの対象が無い `remove_dead_code` は、D4 の全体テストで検証して採用まで進む。"""
+    """AC6b・#3048: 範囲テストの対象が無い `remove_dead_code` は、D4 で最終ゲートの全体テストへ寄せ、通れば採用まで進む。"""
     dead = "def live():\n    return 1\n\n\ndef unused():\n    return 2\n"
     files = {"src/dead.py": dead, "tests/test_dead.py": "from src.dead import live\n\n\ndef test_live():\n    assert live() == 1\n"}
     _start(flow, cmd_setup, cmd_phases, files, [_item("I-001", "remove_dead_code", "src/dead.py", None, smell="dead_code")])
@@ -434,8 +434,10 @@ def test_removing_dead_code_without_a_scope_test_is_verified_by_the_whole_test(
     assert "D4" in _items(flow)["I-001"]["danger"]
 
 
-def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_fix(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
-    """AC6b: 全体テストが落ちれば今と同じく修正へ回る。"""
+def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_the_final_fix(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, capsys
+):
+    """AC6b・#3048: 検証は通して最終ゲートへ寄せ、最終ゲートの全体テストが落ちれば最終ゲート修正の依頼がその項目を指す。"""
     dead = "def live():\n    return 1\n\n\ndef unused():\n    return 2\n"
     files = {
         "src/dead.py": dead,
@@ -445,9 +447,13 @@ def test_a_dead_code_removal_that_breaks_the_whole_test_goes_to_fix(flow, cmd_se
     _commit(flow, "I-001", {"src/dead.py": "def live():\n    return 1\n"})
     _call(cmd_implement, "cmd_merge_implement")
     capsys.readouterr()
-    verify_judged(cmd_converge, flow["path"], capsys)
+    assert verify_judged(cmd_converge, flow["path"], capsys) == "done"
+    assert read_state(flow["path"])["whole_test"]["deferred"] == {"flags": ["D4"], "items": ["I-001"]}
 
-    assert _emitted(capsys, "VERIFY") == "fix"
+    with pytest.raises(SystemExit):
+        _call(cmd_gate, "cmd_final_gate")
+    gate = read_state(flow["path"])["final_gate"]
+    assert gate["status"] == "failing" and "I-001" in gate["fix_request"]
 
 
 # ---------- 複数コミットの項目と取り消し ----------

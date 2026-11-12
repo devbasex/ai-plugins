@@ -148,7 +148,7 @@ def test_without_a_declaration_wait_is_unchanged_and_writes_no_control(plan):
     code, out = call()
     assert code == 0 and [q["id"] for q in out["items"]] == ["g1", "a1"] and "deferred" not in out["metrics"]
     assert not pdf.control_path(main, "p1").exists()
-    assert box["waited"] == [3600]
+    assert box["waited"] == [1800]
 
 
 def test_the_night_wait_is_cut_at_the_start_and_then_returns_the_batch(plan, monkeypatch):
