@@ -79,9 +79,15 @@ def test_bundled_sprint_has_one_reviewed_impl_plan_per_bundle(tmp_path, monkeypa
     assert impl["impl-12"]["課題"] == [12, 11] and impl["impl-12"]["branch"] == "feat/issue-12-m2"
     for plan in impl.values():
         review = next(s for s in plan["steps"] if s["id"] == "review")
-        assert review["drive"] == "cross-review" and review["args"] == "{pr} --max-rounds 4" and review["next"] == "ready"
-        assert ids(plan).index("review") < ids(plan).index("ready") and plan["steps"][ids(plan).index("ready") - 1]["id"] == "review"
-        assert all(s.get("next") != "ready" for s in plan["steps"] if s["id"] != "review")
+        assert review["drive"] == "cross-review" and review["args"] == "{pr} --max-rounds 4" and review["next"] == "review-pull"
+        # レビューの前に手元の未送信のコミットを送り、レビューの後に別の作業場所が送った直しを早送りで受けてから ready が送る
+        at = ids(plan).index("ready")
+        assert ids(plan)[at - 3 : at] == ["review-push", "review", "review-pull"]
+        push, pull = plan["steps"][at - 3], plan["steps"][at - 1]
+        assert push["cmd"] == "git push -q" and push["next"] == "review"
+        assert pull["cmd"] == "git pull -q --ff-only" and pull["next"] == "ready"
+        assert all(s.get("next") != "ready" for s in plan["steps"] if s["id"] != "review-pull")
+        assert "review" not in {s.get("next") for s in plan["steps"] if s["id"] != "review-push"}
         if pace == "auto":
             assert plan["進め方"] == "auto"
     check = got["検査"]["check"]
@@ -99,7 +105,7 @@ def test_bundled_impl_plan_reviews_before_ready_on_the_ci_route(tmp_path, monkey
     assert p.returncode == 0, p.stdout + p.stderr
     plan = stages(out)["実装"]["impl-13"]
     assert "ci-peek-2" in ids(plan) and ids(plan).index("review") < ids(plan).index("ready")
-    assert all(s.get("next") != "ready" for s in plan["steps"] if s["id"] != "review")
+    assert all(s.get("next") != "ready" for s in plan["steps"] if s["id"] != "review-pull")
 
 
 def test_design_issues_go_to_the_lead(tmp_path, monkeypatch):
@@ -145,6 +151,21 @@ def test_design_results_keep_an_absorbed_lead_out_of_its_bundle():
     plans = {12: {"課題": [11], "steps": []}, 13: {"課題": [13, 12], "steps": []}}
     design_stage.rewrite(plans, rows("| #11 | 実装する | — | `a.py` |\n| #13 | 実装する | — | `b.py` |\n"))
     assert plans[12]["課題"] == [11] and plans[13]["課題"] == [13, 12]
+
+
+@pytest.mark.parametrize(
+    ("table", "want"),
+    [
+        ("| #11 | 閉じる | — | — |\n| #12 | 実装する | — | — |\n", procedures.closed_condition(11)),
+        ("| #11 | 取り込む | #13 | — |\n| #13 | 実装する | — | `b.py` |\n", procedures.absorbed_condition(11, 13)),
+    ],
+)
+def test_absorbed_lead_bundle_skips_by_its_remaining_issue(table, want):
+    """--absorb で代表を `課題` から外したまとまりのプランは、残った課題を閉じる・取り込むとしたら、その課題の扱いで飛ぶ
+    （代表の行が「実装する」でも無くても止まらない）。"""
+    plans = {12: {"課題": [11], "steps": []}, 13: {"課題": [13, 12], "steps": []}, 20: {"取り込み先": 13, "課題": [20], "steps": []}}
+    design_stage.rewrite(plans, rows(table))
+    assert plans[12]["実行の条件"] == want
 
 
 def rows(text: str) -> design_results.DesignResults:

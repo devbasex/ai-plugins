@@ -55,11 +55,17 @@ def _redirect(steps: list[dict], old: str, new: str) -> None:
 
 
 def with_review(plan: dict) -> dict:
-    """実装のプランの ready（Draft を外す）の前に cross-review を置く。収束しなければ止まり、マージへ進めない。"""
+    """実装のプランの ready（Draft を外す）の前に cross-review を置く。収束しなければ止まり、マージへ進めない。
+    レビューの前に手元の未送信のコミット（fix-doc の直しなど）を送り、レビューが見る PR の head を手元にそろえる。
+    レビューの直しは別の作業場所から PR のブランチへ送られるため、レビューの後に手元を早送りしてから ready が送る。"""
     steps = plan["steps"]
-    _redirect(steps, "ready", "review")
+    _redirect(steps, "ready", "review-push")
     at = next(i for i, st in enumerate(steps) if st["id"] == "ready")
-    steps.insert(at, review_step("{pr}", "ready", "stop"))
+    steps[at:at] = [
+        {"id": "review-push", "type": "run", "timeout": 600, "cmd": "git push -q", "on_fail": "stop", "next": "review"},
+        review_step("{pr}", "review-pull", "stop"),
+        {"id": "review-pull", "type": "run", "timeout": 600, "cmd": "git pull -q --ff-only", "on_fail": "stop", "next": "ready"},
+    ]
     return plan
 
 

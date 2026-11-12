@@ -263,13 +263,15 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
         members = list(dict.fromkeys(plan.get("課題") or [n]))
         live = [i for i in members if not _not_implemented_by_own_plan(i, res, pre)]
         if not live:
-            row, host = res.row_of(n), res.host_of(n)
+            # 飛ばす理由はプランのキーの課題から取り、--absorb で `課題` から外したまとまりの代表ならまとまりの課題から取る
+            i = next(i for i in dict.fromkeys([n, *members]) if _not_implemented_by_own_plan(i, res, pre))
+            row, host = res.row_of(i), res.host_of(i)
             if row is not None and row.kind == dr.CLOSE:
-                plan["実行の条件"] = closed_condition(n)
-                items.append({"issue": n, "closed": True})
+                plan["実行の条件"] = closed_condition(i)
+                items.append({"issue": i, "closed": True})
             else:
-                plan["実行の条件"] = absorbed_condition(n, host if host is not None else pre[n])
-                items.append({"issue": n, "absorbed_into": host if host is not None else pre[n]})
+                plan["実行の条件"] = absorbed_condition(i, host if host is not None else pre[i])
+                items.append({"issue": i, "absorbed_into": host if host is not None else pre[i]})
             continue
         before = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
         issues = list(dict.fromkeys([*live, *absorbed.get(n, [])]))
