@@ -117,6 +117,24 @@ def test_a_subcommand_tool_widens_the_form_even_when_the_word_is_a_directory(tmp
     assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
 
 
+VITEST = {"name": "vitest", "runner": "vitest", "command": "npm test", "scope_command": "npm test -- {paths}"}
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ("npm test", True),
+        ("npm test -- src/a.test.ts", True),
+        ("npm run build", False),
+        ("npm install", False),
+    ],
+)
+def test_the_declared_command_is_denied_when_the_runner_is_not_in_it(tmp_path, command, denied):
+    """`runner` が `command` の語に無い suite は、`scope_command` の前置きに加えて `command` そのものも止める。"""
+    root = repo(tmp_path, suites=(VITEST,))
+    assert (deny_reason(bash(root, command), tmp_path) is not None) is denied
+
+
 PYTEST_DIRECT = {"name": "pytest", "runner": "pytest", "command": "pytest tests -q"}
 PYTEST_OPT = {"name": "pytest", "runner": "pytest", "command": "pytest -q"}
 

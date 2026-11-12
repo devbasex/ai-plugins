@@ -100,10 +100,15 @@ def scope_cmd(a, tests: str) -> str:
     return f"{TEST_RUN_PY} scope --paths {tests}{_template_arg(a)}{limit}"
 
 
+def _lint_paths_arg(a) -> str:
+    """静的解析の雛形を渡すときの ` --paths`（雛形の `{paths}` へ入る対象。計画時の `plan_strategy` と同じ範囲）。"""
+    paths = (getattr(a, "test_paths", None) or scope_paths(a)) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
+    return " --paths " + " ".join(shlex.quote(p) for p in paths) if paths else ""
+
+
 def whole_cmd(a) -> str:
     """全体テストのステップのコマンド（`test-run.py whole`。CI に任せる戦略は Pull Request のチェックを待つ）。"""
-    paths = (getattr(a, "test_paths", None) or scope_paths(a)) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
-    extra = " --paths " + " ".join(shlex.quote(p) for p in paths) if paths else ""
+    extra = _lint_paths_arg(a)
     strategy = plan_strategy(a)
     # CI に任せる戦略のステップの timeout は CI の待ちの上限で決まるため、手元の上限を渡さない
     if not (strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE):
@@ -390,7 +395,7 @@ def lint_whole_steps(a, fix_prompt: str, after: str, back_to: str) -> list[dict]
             "type": "run",
             "stage": "完了判定",
             "timeout": with_margin(plan_limits(a)["whole_timeout"]),
-            "cmd": f"{TEST_RUN_PY} whole --only-kind lint{_template_arg(a)}{limit}",
+            "cmd": f"{TEST_RUN_PY} whole --only-kind lint{_template_arg(a)}{_lint_paths_arg(a)}{limit}",
             "on_fail": "fix-lint-all",
             "on_exit": {"2": "stop"},
             "next": after,
