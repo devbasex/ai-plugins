@@ -218,9 +218,7 @@ def close_waves(a) -> list[dict]:
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
         {
             "name": "本番",
-            "plans": prod_plans(
-                a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed
-            ),
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed),
             "then_of": "最終の検査",
         },
         close,
