@@ -52,7 +52,7 @@ def lane_end_step(plan: str, lane: str, request: bool) -> dict:
     return {"id": "lane-end", "type": "run", "timeout": 120, "cmd": cmd, "next": "end"}
 
 
-def _head(a, repo: str) -> dict:
+def _close_head(a, repo: str) -> dict:
     branch = f"spec/{a.name}"
     return {"フェーズ": "まとめ", "課題": a.issue, "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}", "branch": branch,
             "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": "", "進め方": "fast"}  # fmt: skip
@@ -69,7 +69,7 @@ def lane_close_plan(a, repo: str, lane: tuple[str, str]) -> dict:
         *merge_steps(a, next="lane-end"),
         lane_end_step(*lane, request=True),
     ]
-    return with_record(with_decls({**_head(a, repo), "steps": steps}, a))
+    return with_record(with_decls({**_close_head(a, repo), "steps": steps}, a))
 
 
 def verify_plan(a, repo: str) -> dict:
