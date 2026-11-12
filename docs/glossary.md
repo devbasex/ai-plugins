@@ -563,25 +563,25 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | CI の結果の監視 | — | PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | CI の失敗の改修 | — | CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | テストのチェック | — | 合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック | — | — | `docs/specifications/ndf-ci-only-tests.md` |
-| 衝突の状態 | `mergeable` | Pull Request をベースブランチへ取り込めるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない | — | — | — |
-| CI の待ち | — | CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout | — | — | — |
-| 1 スプリントのレーン | — | 並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する | — | — | — |
-| まとめ | — | リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ | — | — | — |
-| 版の要らないまとめ | — | まとめのうち、出した版が無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの答えを待たずに流す | — | — | — |
-| 版の要るまとめ | — | まとめのうち、出した版の上でしか流せない作業（リリース後テストと、その結果で課題を閉じる作業） | — | — | — |
-| レーンの終わり | — | 1 スプリントのレーンが版の要らないまとめを流し切った時点。終わりの記録として耐久ワークフローが読める置き場に残り、耐久ワークフローがそのレーンのラッパーを止める | — | — | — |
-| 終わりの記録 | — | レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開の印で起こす | — | — | — |
-| 止められなかったレーンの問い | — | 終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる問い（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない | — | — | — |
-| 終わりの記録の無い停止の問い | — | 1 スプリントのレーンが終わりの記録も答え待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる問い（kind は unended）。「終わったと数える」で終わりの記録を書く | — | — | — |
-| 最後の検査 | — | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う | — | — | — |
-| スプリントの検査 | — | `supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める | — | — | — |
-| 検査の印 | — | 前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある | — | — | — |
-| 最後の検査の範囲 | — | 最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない | — | — | — |
-| スプリントに属する Pull Request | — | head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request | — | — | — |
-| まとめのステージ | — | `supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く | — | — | — |
-| 最終の検査 | — | スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ | — | — | — |
-| 中身の無い依頼 | — | リリースの依頼のうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、版なしのリリース済みと理由（閉じた Pull Request の番号）で答えて外す | — | — | — |
-| 処理済みのリリース承認ゲート | — | 計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない | — | — | — |
+| 衝突の状態 | `mergeable` | Pull Request をベースブランチへ取り込めるかを GitHub が計算した値（`mergeable`。MERGEABLE・CONFLICTING・UNKNOWN）。CONFLICTING の Pull Request では GitHub が pull_request のワークフローを起動しない | — | — | `docs/specifications/ndf-whole-test-ci-wait-conflict-stop.md` |
+| CI の待ち | — | CI に任せる戦略の全体テストで、test-run.py が Pull Request のチェックの結論が出るまで照会を繰り返すこと。上限は ci_wait_timeout | — | — | `docs/specifications/ndf-whole-test-ci-wait-conflict-stop.md` |
+| 1 スプリントのレーン | — | 並列の計画のレーンのうち、最初の入力が課題の番号（`/goal /ndf:development-workflow #<課題>`）のもの。開発ループのレーン・一時レーンと区別する | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| まとめ | — | リリースの後に流す作業のまとまり（`supervise.py new close` のプラン）。確定仕様化・課題を閉じる・リリース後テスト・振り返り・棚卸しを持つ | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 版の要らないまとめ | — | まとめのうち、出した版が無くても流せる作業（確定仕様化・振り返り・棚卸し）。1 スプリントのレーンはリリースの答えを待たずに流す | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 版の要るまとめ | — | まとめのうち、出した版の上でしか流せない作業（リリース後テストと、その結果で課題を閉じる作業） | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| レーンの終わり | — | 1 スプリントのレーンが版の要らないまとめを流し切った時点。終わりの記録として耐久ワークフローが読める置き場に残り、耐久ワークフローがそのレーンのラッパーを止める | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 終わりの記録 | — | レーンの終わりを示す記録。耐久ワークフローはこの記録のある止まったレーンだけを終わったと数え、無いまま止まったレーンは再開の印で起こす | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 止められなかったレーンの問い | — | 終わりの記録のあるレーンを耐久ワークフローが止められなかったときに立てる問い（kind は halt）。止める 1 行を持ち、レーンが止まって観えるまで消えない | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 終わりの記録の無い停止の問い | — | 1 スプリントのレーンが終わりの記録も答え待ちも無いまま停滞の区切りより長く止まって観えたときに、耐久ワークフローが立てる問い（kind は unended）。「終わったと数える」で終わりの記録を書く | — | — | `docs/specifications/ndf-parallel-lane-end-and-verify-close.md` |
+| 最後の検査 | — | スプリントの終わりに `supervise.py new close` が組む検査（計画名 `<スプリント>-final`）。確定仕様化の Pull Request をマージした後に流れ、スプリントに属する Pull Request のうち、どの検査もまだ見ていない差分を拾う | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| スプリントの検査 | — | `supervise.py new sprint` が組む、スプリントの Pull Request を対象にした検査。マージの後に検査の印を進める | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| 検査の印 | — | 前回の検査が見終えた位置を持つ origin のブランチ。リファクタリングを含む検査の印（`check-done/check`）とコードレビューの印（`check-done/review`）の 2 本がある | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| 最後の検査の範囲 | — | 最後の検査が見る差分。スプリントに属する Pull Request のうち、検査済みでないもの。範囲が空か文書のファイルだけなら、最後の検査は流れない | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| スプリントに属する Pull Request | — | head のブランチの最後の区切りがスプリントの名前に等しい（`sprint/<名前>`・`spec/<名前>`）か、ブランチ名がスプリントの課題の番号を `issue-<番号>` の形で持つ Pull Request | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| まとめのステージ | — | `supervise.py new close` が組む `sprint.json` のステージのうち、仕上げのプランを流すステージ（ステージの名前は `まとめ`）。`pace: fast` / `normal` では先頭に置き、最後の検査・開発版・本番はその後ろに `then_of: まとめ` で続く | — | — | `docs/specifications/ndf-sprint-final-check-scope.md` |
+| 最終の検査 | — | スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
+| 中身の無い依頼 | — | リリースの依頼のうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、版なしのリリース済みと理由（閉じた Pull Request の番号）で答えて外す | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
+| 処理済みのリリース承認ゲート | — | 計画の台帳で、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。答え待ちの依頼に数えない | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
 | ブランチ運用の宣言 | — | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリントの起点 | — | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の宣言が決め、無ければベースブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
