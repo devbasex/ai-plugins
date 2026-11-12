@@ -6625,36 +6625,31 @@
       "term": "CI テストの宣言",
       "context": "ndf-workflow",
       "meaning": "`.ndf/project.json` の `test.ci.only: true`。このリポジトリのテストは CI でだけ走らせると表し、宣言があれば手元でテストを走らせない",
-      "source": "",
-      "pending_source": "issues/issue-3056-design.md"
+      "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "手元のテスト",
       "context": "ndf-workflow",
       "meaning": "worker・supervisor・プランのステップ・cross-refactoring が、作業しているマシンで走らせるテスト（範囲テスト・全体テスト・指摘の検証・打ち直しを含む）",
-      "source": "",
-      "pending_source": "issues/issue-3056-requirements.md"
+      "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "CI の結果の監視",
       "context": "ndf-workflow",
       "meaning": "PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み",
-      "source": "",
-      "pending_source": "issues/issue-3056-design.md"
+      "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "CI の失敗の改修",
       "context": "ndf-workflow",
       "meaning": "CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること",
-      "source": "",
-      "pending_source": "issues/issue-3056-requirements.md"
+      "source": "docs/specifications/ndf-ci-only-tests.md"
     },
     {
       "term": "テストのチェック",
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
-      "source": "",
-      "pending_source": "issues/issue-3056-design.md"
+      "source": "docs/specifications/ndf-ci-only-tests.md"
     }
   ]
 }
