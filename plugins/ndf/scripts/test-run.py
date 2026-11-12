@@ -283,17 +283,6 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
     return code
 
 
-def _select_scope_runs(root: pathlib.Path, a, strategy: ts.Strategy, only: str | None) -> tuple[list, bool]:
-    """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。"""
-    if strategy.name == ts.ROUND_ONLY:
-        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
-        return runs, (only is not None or strategy.ci_only) and not runs
-    changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
-    runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
-    # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
-    return runs, not runs and (strategy.ci_only or only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
-
-
 def _split_scope_failures(runs: list, failed: list[str]) -> tuple[list[dict], bool]:
     """落ちたコマンドを種別で分ける。戻りは（落ちた静的解析の判定の並び, テストの種別が落ちたか）。"""
     kinds = {r.command: r.kind for r in runs}
@@ -309,7 +298,8 @@ def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
     only = getattr(a, "only_kind", None)
-    runs, nothing_to_run = _select_scope_runs(root, a, strategy, only)
+    lint_changed = strategy.name != ts.ROUND_ONLY and strategy.scoped_suites(ts.LINT) and only != ts.TEST
+    runs, nothing_to_run = ts.select_scope_runs(strategy, list(a.paths), _changed(root, a) if lint_changed else [], only)
     if nothing_to_run:
         _emit_step(result(TOOL, "ok", f"範囲に当てる {only or ts.LINT} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
@@ -481,10 +471,7 @@ def main(argv=None) -> int:
     whole.add_argument("--pr", type=int, default=None)
     whole.add_argument("--paths", nargs="+", default=None, help="静的解析の雛形の全体テストの {paths} に入れる範囲")
     whole.add_argument(
-        "--only-kind",
-        choices=[ts.LINT],
-        default=None,
-        help="静的解析の全体テストだけを手元で走らせる（テストの種別を走らせず CI も待たない。CI テストの宣言のあるプラン。#3056）",
+        "--only-kind", choices=[ts.LINT], default=None, help="静的解析の全体テストだけを手元で走らせる（CI を待たない。#3056）"
     )
     for p in (scope, whole):
         p.add_argument("--root", default=".")

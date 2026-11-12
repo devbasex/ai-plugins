@@ -64,7 +64,7 @@ DISPATCHERS = frozenset({"go", "npm", "pnpm", "yarn", "bun", "deno", "make", "ca
 RUN_WORDS = frozenset({"run", "run-script", "exec"})
 
 
-def _subcommand(word: str, root: Path | None, tool: str = "") -> bool:
+def _is_subcommand_word(word: str, root: Path | None, tool: str = "") -> bool:
     """`command` の 2 語目がサブコマンドか（オプション・作業場所のパスでない）。`tool` がサブコマンドを取るツールならパスかを見ない。"""
     if not word or word.startswith("-") or "/" in word or word in (".", ".."):
         return False
@@ -83,7 +83,7 @@ def launch_form(suite: dict, root: Path | None = None) -> list[str]:
     else:
         scope = str(suite.get("scope_command") or "")
         form = _words_of(scope.split("{paths}", 1)[0]) if "{paths}" in scope else []
-    if len(form) == 1 and len(words) > 1 and words[0] == form[0] and _subcommand(words[1], root, words[0]):
+    if len(form) == 1 and len(words) > 1 and words[0] == form[0] and _is_subcommand_word(words[1], root, words[0]):
         form = words[:2]
         if words[1] in RUN_WORDS and len(words) > 2 and not words[2].startswith("-"):
             form = words[:3]

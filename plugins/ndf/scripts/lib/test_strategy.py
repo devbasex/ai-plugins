@@ -392,6 +392,19 @@ class ProbeVerdict:
         return self.status in (PROBE_DEFECT, PROBE_UNDECIDED)
 
 
+def select_scope_runs(strategy: Strategy, targets: list[str], changed: list[str], only: Optional[str]) -> tuple[list[ScopeRun], bool]:
+    """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。
+
+    `only` は種別（test / lint）の絞り込み。CI テストの宣言（`ci_only`）があれば、打つものが無くても通す（#3056）。
+    """
+    if strategy.name == ROUND_ONLY:
+        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
+        return runs, (only is not None or strategy.ci_only) and not runs
+    runs = [r for r in scope_runs(strategy, targets, changed) if only is None or r.kind == only]
+    # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
+    return runs, not runs and (strategy.ci_only or only == LINT or (only == TEST and not strategy.scoped_suites(TEST)))
+
+
 def _root_of(p) -> str:
     """suite の `paths` の要素の前後の空白と末尾の `/` を外した形。"""
     return str(p).strip().rstrip("/")
