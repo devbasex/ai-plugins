@@ -7,6 +7,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# 設計の課題を持つ pace: normal のスプリントが書くステージの並び（リリースの形に雛形がある既定の宣言）
+DESIGN_SPRINT_STAGES = [
+    "設計",
+    "設計承認ゲート",
+    "設計 PR のマージ",
+    "設計の結果",
+    "スプリントブランチ",
+    "実装",
+    "検査",
+    "デプロイ",
+    "リリース承認ゲート",
+    "本番",
+]
+
 
 def new_sprint_args(
     worktree: Path | str,
