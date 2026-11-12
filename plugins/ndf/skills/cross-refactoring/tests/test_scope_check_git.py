@@ -94,7 +94,8 @@ def test_an_unrelated_change_to_an_existing_outside_file_is_outside(scope_check,
 
     verdict = _judge(scope_check, repo, [sha], base)
     assert _kinds(verdict)["tools/run.py"] == "outside"
-    assert "tools/run.py" in verdict.problem
+    # 範囲の外の変更は分類して返すだけで、取り消しの理由にしない（#2457 受け入れ条件 8）
+    assert verdict.problem == "" and [f.path for f in verdict.outside] == ["tools/run.py"]
 
 
 def test_deleting_or_moving_away_an_existing_outside_file_is_outside(scope_check, repo):

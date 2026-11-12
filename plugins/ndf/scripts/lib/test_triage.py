@@ -295,6 +295,32 @@ def _failing_at(ctx: RerunContext, work: str, sha: str, ids: list[str]) -> Optio
         _git(work, ["worktree", "prune"])
 
 
+def ci_only_split(ids: Optional[list[str]], reason: Optional[str], existing: list[str]) -> dict[str, Any]:
+    """CI テストの宣言（`test.ci.only`）のあるリポジトリの見分け。手元でも比較の木でも走らせ直さない（#3056）。
+
+    CI の JUnit の落ちた ID のうち、既存失敗に載るものだけを `preexisting` に、残りを `caused` にする。
+    ID を読めないときは `fallback_reason` を書き、最終ゲートは通さない（材料は CI の run の置き場）。
+    """
+    base = {"flaky": [], "rerun_commands": [], "rerun_command": None, "comparison_tree": None, "comparison_fallback": None}
+    if not ids:
+        why = reason or "JUnit に落ちたテストが無かった"
+        return {
+            **base,
+            "failed_tests": None,
+            "preexisting": [],
+            "caused": [],
+            "fallback_reason": f"{why}（CI テストの宣言があるため手元で走らせ直さない）",
+        }
+    known = set(existing)
+    return {
+        **base,
+        "failed_tests": list(ids),
+        "preexisting": [i for i in ids if i in known],
+        "caused": [i for i in ids if i not in known],
+        "fallback_reason": None,
+    }
+
+
 def classify(
     *,
     work: str,
@@ -310,7 +336,10 @@ def classify(
     """落ちた ID を 3 つに分ける。`failed` が `None`（JUnit を読めない）なら `fallback_reason` を持つ結果を返す。
 
     落とした場合の全体の走らせ直しは呼ぶ側が行う（全体テストの置き場が戦略で違うため）。
+    CI テストの宣言（`strategy.ci_only`）があれば走らせ直さず `ci_only_split` で分ける（#3056）。
     """
+    if strategy.ci_only:
+        return {**ci_only_split(failed, fallback_reason, list(existing_failures or [])), "baseline_head": base_sha}
     log_dir = pathlib.Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     if failed is None:

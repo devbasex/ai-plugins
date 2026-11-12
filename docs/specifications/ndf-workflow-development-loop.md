@@ -18,8 +18,8 @@
 | --- | --- |
 | 1 | `sprint-state.py loop start l20261025` が使ってよい条件を確かめ、`.ndf/loop/l20261025/loop.json` を作る（`status: new`） |
 | 2 | `loop select` が `upkeep.py rank` を打ち、#11・#12 を「順位」で選び、#13 を「順位（切り出しの境界の外）」で外してループの 1 回目 を足す |
-| 3 | conductor がモードを決め、`loop sprint --mode standard` が `sprint-state.py init`・`new sprint --pace auto`・`new close --pace auto` を打って `pipeline` を返す |
-| 4 | #12 の設計が設計承認ゲートで「判定できない」。`loop lap --done` が #12 を人の判断待ちへ移し、課題の本文に `## 人の判断待ち（開発ループ l20261025）` を書き、#11 だけの続きの `pipeline` を返す |
+| 3 | conductor が `mode-materials.py` で材料を集めて課題ごとに判定表の行を選び、判定の根拠のファイルを渡した `loop sprint --judgments` が根拠からモード（`standard`）を決めて `sprint-state.py init`・`new sprint --pace auto`・`new close --pace auto` を打ち、`pipeline` を返す |
+| 4 | #12 の設計が設計承認ゲートで「判定できない」。`loop lap --done` が #12 を人の判断待ちへ移し、課題の本文に `## 人の判断待ち（開発ループ l20261025）` を書き、残った #11 の判定の根拠でモードを決め直して、#11 だけの続きの `pipeline` を返す |
 | 5 | 本番とまとめの後、`loop lap` がループの 1 回目 を `完了` で締め、止まる条件に当たらないので `ndf_next` を返す。ラッパーが次のセッションを起動する |
 | 6 | 宣言の `loop.budget.laps` が 3 なら、3 周を終えた境で `budget_laps` に当たり、終了コード 3 と `[ndf-loop] stopped l20261025 budget_laps` の 1 行で止まる |
 
@@ -45,7 +45,7 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| `sprint-state.py loop` の副命令（`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`） | 今の 1 スプリントの進め方（`normal` / `auto` / `fast`）の振る舞い |
+| `sprint-state.py loop` の副命令（`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `get` / `list`） | 今の 1 スプリントの進め方（`normal` / `auto` / `fast`）の振る舞い |
 | `.ndf/pace.json` の `loop` 節と `read_loop` | `mvv-gate.py` の判定の規則・レッドラインの定義・`boundary_paths` の既定（ループのために緩めない） |
 | `supervise.py new close` の `--pace auto`・`--carry`・`--record-pr`、`new sprint` の `--designed` | 持ち越しをマシンをまたいで残す置き場（#1640） |
 | `upkeep.py rank` の品質の枠（`.ndf/backlog.json` の `quality` 節） | Codex・Kiro・agy でのラッパーと同じ自動の切り替え（ラッパーは Claude Code だけ） |
@@ -75,7 +75,9 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) の副命令 `loop` | 入口。引数の解析と振り分けは [`lib/sprint_loop_cli.py`](../../plugins/ndf/scripts/lib/sprint_loop_cli.py)。`loop sprint` の `--` から後は解析せず `new sprint` へそのまま渡す。既存の副命令は変えない |
 | [`lib/sprint_loop.py`](../../plugins/ndf/scripts/lib/sprint_loop.py) | `start`（使ってよい条件・再開）・`sprint`・`answer`・`approve-mvv`・`stop`・`lap`・`status`・`list` |
 | [`lib/sprint_loop_select.py`](../../plugins/ndf/scripts/lib/sprint_loop_select.py) | 選定（`select` / `exclude`）。入力は `rank` の出力・記録・マイルストーンの説明と、環境変数 `NDF_LOOP_EXCLUDE` だけ |
-| [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue・まとめのステージ（`new close --pace auto`）の組み立て・ループの 1 回の締め |
+| [`lib/sprint_loop_gate.py`](../../plugins/ndf/scripts/lib/sprint_loop_gate.py) | 承認ゲートで止まった done の扱い（`gate`。`lap --done` も同じに扱う）・続きの queue（残った課題でのモードの決め直しと、下がったときのステージの作り直しを含む）・まとめのステージ（`new close --pace auto`）の組み立て・ループの 1 回の締め |
+| [`lib/mode_judgment.py`](../../plugins/ndf/scripts/lib/mode_judgment.py) | 判定表の順とモードの対応・判定の根拠のファイルの検査・スプリントのモードの算出・モードの決め直し。ファイルとプロセスに触れない |
+| [`mode-materials.py`](../../plugins/ndf/scripts/mode-materials.py) | 課題の本文と設計文書から判定の材料（種類・公開インタフェースの変化・触るファイルの候補とそのテスト）を集め、`--out` で判定の根拠のファイルの下書きを書く。候補は code span とリンクの宛先からだけ取り、取れなければ 0 件と出す |
 | [`lib/lap_close.py`](../../plugins/ndf/scripts/lib/lap_close.py) | ループの 1 回を締めるときに、スプリント状態と版の記録からループの 1 回へコピーする値（承認ゲート・版）を組む |
 | [`lib/sprint_loop_record.py`](../../plugins/ndf/scripts/lib/sprint_loop_record.py) | 記録の読み書き（排他・原子的な書き込み・終わったループの 1 回の書き換えの拒否）・消費・止まる条件の判定・再開のコマンド・引継ぎ文書・`laps.md` の描画。外の世界（gh・`upkeep.py rank`・`supervise.py`）は `Env` の関数を通して呼び、テストで差し替える |
 | [`lib/lap_cost.py`](../../plugins/ndf/scripts/lib/lap_cost.py) | ループの 1 回の費用と内訳を帳簿と報告から導く。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない |
@@ -86,7 +88,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `backlog-refinement` の [`upkeep_rank.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `quality_slot`・[`upkeep_rank_config.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py) の `_parse_quality` | 品質の枠を取り、切り出しの境界から枠の分を除く |
 | 既存のまま使うもの | `relay.py`（セッションの切り替え）・`mvv-gate.py`（判定とレッドライン）・`supervise.py new sprint --pace auto` / `queue` / `wait` / `run` |
 
-**判断は conductor に残す。** モードの判定はスクリプトにしない。版は既定でキューが流す直前に決め、特定の版で出すときだけ conductor が `--dev` で渡す。`auto` が許さないモード（`operation` /
+**判断は conductor に残す。** 課題ごとに判定表のどの行に当たるかは conductor が選び、判定の根拠のファイルに書く。スプリントのモードは、根拠のうち判定表で最も上の行のモードとして `loop sprint` が算出する（判定表の「上の行が勝つ」の規則で機械的に決まるため）。版は既定でキューが流す直前に決め、特定の版で出すときだけ conductor が `--dev` で渡す。`auto` が許さないモード（`operation` /
 `documentation`）の課題と MVV に反する疑いのある課題は、conductor が `loop exclude` で外して選定をやり直す。
 スクリプトは LLM を呼ばない。
 
@@ -124,7 +126,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 ### 設定（`.ndf/pace.json` の `loop` 節）
 
 ```json
-{"loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
+{"loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3, "reorder_width": 0}}
 ```
 
 | 項目 | 形 | 無いとき | 誤っているとき |
@@ -132,6 +134,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `loop.enabled` | `true` だけが真 | 偽（ループを断る） | — |
 | `loop.budget` | オブジェクト。`laps`・`usd`・`hours` の正の数か `null`（bool は不可）。書かない単位と `null` は無制限で、数を書いた単位だけが効く。ほかのキーは不可 | すべて無制限 | `PaceError` |
 | `loop.same_failure` / `loop.max_issues` | 1 以上の整数（bool は不可） | 2 / 3 | `PaceError` |
+| `loop.reorder_width` | 逆転の幅。残りの枠の数を超えて並べ替えの対象にする候補の件数。0 以上の整数（bool は不可） | 0（並べ替えをしない） | `PaceError` |
 
 `loop.release_pending_max` は読まない。書いてあっても断らない。`PaceError` は `loop start` だけを断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は節の誤りの
 影響を受けない。
@@ -147,7 +150,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `start [<名>] [--milestones] [--budget-*] [--no-goal]` | `loop` 節・`auto` 節・プロジェクト MVV・記録 | `status`（`new` / `resumed` / `in_lap`）・`next`（`in_lap` は引継ぎ文書の「次にやること」を指す。`resumed` は `loop select` か、止まった理由ごとの続き） | 1 = 使ってよい条件に当たらない（`items` に理由、`next` に `/ndf:development-workflow #<課題>`。記録を作らない）/ 3 = 止まった理由が解けていない |
 | `select <名>` | `upkeep.py rank`（その場で打つ）・マイルストーンの説明・記録・並列の計画の依頼の答え（待たずに読む） | `status: selected`・`selected`・`excluded`・`milestone`・`rank_digest`（候補 0 件で見直しを挟むときは `status: review_first`・`next`。答えの届いた保留したループの 1 回があれば `status: finish`・`lap`・`pipeline`） | 1 = 進行中のループの 1 回がある・`rank` が 0 と 20 以外を返した / 3 = 止まったまま・境の判定で止まった・`no_issue` / `outside_mvv` / `waiting_only` |
 | `exclude <名> <課題> --reason <文>` | 選定の後・`sprint` の前の進行中のループの 1 回 | `select` と同じ形（選定をやり直す） | 1 = スプリントを組むループの前の 1 回が無い / 3 = すべて外れた（そのループの 1 回を取り下げ、除外の行は残す） |
-| `sprint <名> --mode M [--dev V [--prod V]] [-- <new sprint に足す引数>]` | 進行中のループの 1 回の選定・ループの前の 1 回の `refine.deferred` | `status: sprint`・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline`（出し直しの指摘を持つ課題は、すべてのループの記録から回を集めて `<ループの 1 回のディレクトリ>/revise-<課題>.json` へ書き、`new sprint --revise-note` で渡す。読めなかったループは `items` に `skipped_loop` で出る） | 1 = 進行中のループの 1 回が無い・設計承認ゲートの後のループの 1 回・`--dev` なしで `--prod` を渡した（何も変えずに断る） / 3 = `init`・`new sprint`・`new close` のどれかが断った（`refused`） |
+| `sprint <名> --judgments F [--mode M] [--dev V [--prod V]] [-- <new sprint に足す引数>]` | 進行中のループの 1 回の選定・判定の根拠のファイル・ループの前の 1 回の `refine.deferred` | `status: sprint`・`mode`（算出したモード）・`judgments`（課題の番号 → 判定表の順）・`state_path`・`out`・`manifest`・`close_command`・`queue`・`pipeline`（出し直しの指摘を持つ課題は、すべてのループの記録から回を集めて `<ループの 1 回のディレクトリ>/revise-<課題>.json` へ書き、`new sprint --revise-note` で渡す。読めなかったループは `items` に `skipped_loop` で出る） | 1 = 進行中のループの 1 回が無い・設計承認ゲートの後のループの 1 回・`--dev` なしで `--prod` を渡した・判定の根拠のファイルが無い・読めない・根拠が契約に合わない・`--mode` が算出したモードと違う（何も変えずに断る。根拠の理由は `items` に 1 件ずつ） / 2 = `--judgments` を渡さない（引数の誤り） / 3 = `init`・`new sprint`・`new close` のどれかが断った（`refused`） |
 | `gate <名> --done <D>` | 承認ゲートで止まった done・`mvv-gate.jsonl`・スプリント状態 | `status: continue`・`gate: 1`・`waiting`・`pipeline`（残りで続く）、またはループの 1 回を締めて `ndf_next` | 1 = 組んだループの 1 回が無い・done に承認ゲートが無い / 3 = `gate2_returned`・`mvv_changed`・続きを組めない（`refused`）・締めた後の境の判定 |
 | `answer <名> <課題> --approved\|--rejected\|--revise --note <F> [--pr N]` | 答えの無い人の判断待ちの行 | `status: answered`（`--revise` は行に `note` と `revise_count` を書き、課題の本文の節 `## 出し直しの指摘の履歴` へ 1 回分を追記する） | 1 = 待っていない課題・指摘ファイルを読めない |
 | `finish <名> <ループの 1 回> --done <D>` | 保留したループの 1 回・残りの工程の done | `lap` と同じ（ループの 1 回を `完了` か `失敗` で締め直す。質問待ちの続きがリリースの依頼で止まれば `リリース待ち` へ移す） | 1 = 保留したループの 1 回でない（締め直しは 1 回だけ） / 3 = 境の判定で止まった |
@@ -158,9 +161,10 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `stop <名>` | — | `path`（`.ndf/loop/<名>/stop` に時刻を書く） | — |
 | `environment [--root] [--json]` | 動く場所・CPU・メモリ・計画の状態 | 実行環境の報告（`place`・`cpus`・`memory_gib`・`lanes`・`plans`・`candidates`・`current`・`reason`・`unreadable`）。宣言を書かない | 読めない項目は `unreadable` に載せ、終了コードは 0 |
 | `status <名> [--json]` / `list <名> [--json]` | 記録 | `status`・`consumed`・`budget`・`waiting`・止まっていれば `stop` と `stop_line` / ループの 1 回の一覧（何周目・選んだ課題・版・費用・秒・結果・止まった理由・後へ回した Issue） | 1 = 記録が無い。`--json` が無ければ文で出す |
+| `get <名> [--field <JSON Pointer>]...` | 記録 | 読むだけで、続けてよいかを判断しない。`status` と同じ `metrics` と、次の操作（止まっていれば止まった理由と再開のコマンド、人の判断待ちがあれば待っている課題と `answer`、答えの無い保留したループの 1 回があればその回）を `next` に返す。`--field` を渡すと、ループの記録を根にした値だけを `metrics` に返す | 0 = 読めた（`ok`）。2 = 読めない・指し先の書き方の誤り。3 = 記録が無い |
 
 **1 つのループ名を進めるのは、1 つのランタイムのセッション（Claude Code・Codex）だけである。** 利用者が答える副命令（`answer`・`approve-mvv`）と
-読むだけの副命令（`status`・`list`・`environment`）を除く副命令は、副命令の本体の前に持ち主の鍵 `supervise.loop:name=<名>` を単位 `session` で取る。
+読むだけの副命令（`status`・`get`・`list`・`environment`）を除く副命令は、副命令の本体の前に持ち主の鍵 `supervise.loop:name=<名>` を単位 `session` で取る。
 同じセッションの副命令は持ち主を継いで通る。別のセッションに生きた持ち主がいれば `stopped`・終了コード 3 で止まり、`lease` に持ち主の実行の識別子・pid・
 最後に動いた時刻を出す。ランタイムのセッションの外では、鍵を取る副命令は `stopped`・終了コード 1 で止まる。`stop` と `finish` は鍵を返し、
 セッションの外でも本体を走らせる（`lease.outcome` は `no_session`）。持ち主の記録の形は
@@ -189,10 +193,17 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
    `MERGED` なら `merged_at` を足して以後打たない。宛先が本番の設計 PR は「設計 PR の宛先が本番（リリース承認ゲートで人がマージする）」）→ このループの 1 回の `excluded` の理由 →
    「前提の課題の実装待ち（#<番号> …）」（`rank` の行の `prerequisites`。見積もりの記録と並列の組が宣言した、閉じていない
    前提の課題の番号を昇順で載せる。サブイシューの関係だけでは前提にならない。前提の課題が同じループの 1 回に選ばれていても外す）→
-   「ループの 1 回の中で起票された」（ループの 1 回の `created`）→「容量（尺度を超える）」
+   「ループの 1 回の中で起票された」（ループの 1 回の `created`）→「容量（尺度を超える）」→（答え待ちの停止の範囲だけ）
+   「答え待ちの停止の範囲（新しい承認を生む作業）」（設計を要る課題。分類は `loop sprint` が設計のステップを置く規則と同じ `design_issues`）。
+   この範囲で始めたループの 1 回は `hold_only: true` を持ち、`loop sprint` は設計を要る課題があれば終了コード 2 で断る
 4. 外れなかった候補に `max_issues` 件の枠を、先頭に選ぶ課題（直して出し直す課題・デプロイの直し・承認とマージが済み、その後のループの 1 回でまだ
-   選ばれていない設計の課題）、品質の枠の課題、順位の順に割り当てる。選んだ行の理由は「承認した設計」「直しの先頭」「品質の枠」「順位」の
-   どれか、枠からあふれた行は「容量」で外す
+   選ばれていない設計の課題）、品質の枠の課題、順位の順に割り当てる。業務時間（進め方の宣言の `business_hours`）の外は、承認した設計 →
+   設計を要る課題 → 設計の要らない課題の順に割り当てる。選んだ行の理由は「承認した設計」「直しの先頭」「品質の枠」「順位」の
+   どれか、枠からあふれた行は「容量」で外す。ループの 1 回は判定の結果を `hours` に残す。
+   逆転の幅（記録の `reorder_width`）が 1 以上なら、先頭に選ぶ課題と品質の枠の課題（業務時間外は先頭に選ぶ課題だけ）を重なりを見ずに取った後、
+   残りの枠を「残りの枠の数＋逆転の幅」件の窓の中で、触る場所の見込みが既に取った課題と重ならない課題から埋め、枠が残れば取らなかった候補を
+   枠の順に戻して埋める。境界が無いときの候補は `max_issues` に逆転の幅を足した件数まで取る。見込みの出し方は `lib/touch_estimate.py` にあり、
+   設計の結果の表 → マイルストーンの説明の `### 並列の組（見込み）` の表 → 課題の本文の順に、見込みが出た最初の出所だけを使う
 5. 選べたら、そのマイルストーンの候補でない行を「順位（切り出しの境界の外）」で外した行として足す。外した行も
    `selection` に載せ、`rank` の `metrics.digest` を `rank_digest` に書く。スプリント MVV があればループの 1 回のディレクトリの
    `mvv.md` に写し、`loop sprint` が `sprint-state.py init --mvv` へ渡して承認ゲート `MVV` の記録を状態へ写す
@@ -206,13 +217,18 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 
 ### ループの 1 回のスプリントとまとめのステージ（`sprint`）
 
-`loop sprint` はループの 1 回のディレクトリ（`.ndf/loop/<名>/lap-<n>/`）に状態ファイル `state.json` を置き、次の 3 つを順に打つ。
+`loop sprint` は、どの書き込みよりも前に判定の根拠のファイルを検査する。根拠は課題ごとに `{number, row, mode, condition, files}` を持つ。
+選んだ課題のすべてに根拠が 1 件ずつあり、選んでいない課題の根拠が無く、順（`row`）が判定表の 1〜5 で `mode` がその行のモードと一致し、
+当たった条件の文（`condition`）と触るファイル（`files`）が空でないことを確かめる。`documentation` の根拠と他のモードの根拠が混ざるときは、
+混ざった課題の番号をモードごとに並べて断る（conductor は `loop exclude` で一方を外す）。どれかに反すれば終了コード 1 で断り、記録を変えない。
+
+通れば、ループの 1 回のディレクトリ（`.ndf/loop/<名>/lap-<n>/`）に状態ファイル `state.json` を置き、算出したモードで次の 3 つを順に打つ。
 
 | 打つもの | 契約 |
 | --- | --- |
 | `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... [--dev V --prod V] --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `loop sprint` の `--dev` を省くと `--dev`・`--prod` を渡さない。`--dev` だけを渡せば、本番の版は開発版の接尾辞を外した版 |
 | `supervise.py new sprint --pace auto --issue <選んだ課題> --design <承認済みでない課題> [--designed <approved の課題>] ... [<-- の後の引数>]` | `loop answer --approved` で答えた課題は設計のプランを作らず、設計の結果のステージが設計 PR の設計の結果を読む。`loop sprint` の `--dev` を省くと `--version` を渡さず、キューが流す直前に次に空いている開発版を決める（[ndf-release-version-at-run-time.md](ndf-release-version-at-run-time.md) ） |
-| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <ループの前の 1 回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
+| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> --loop <名> --lap <n> [--carry <差分の棚卸しを最後に走らせたループの 1 回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request →（起動する回だけ）振り返り → 棚卸し → マージ → 課題を閉じる。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
 
 `pipeline` は、最初のステージの queue の最後に `--then <まとめのプラン>` をつなぎ、`supervise.py wait <D>` →
 `loop lap <名> --done <D>` を続けた 1 行である。手で行うステージか別の queue のステージが残るときは、それを終えてから
@@ -223,11 +239,14 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 引数 | 意味 | 無いとき |
 | --- | --- | --- |
 | `--pace auto` | まとめのステージだけを組む（上の表） | 今の形（`fast` のスプリントの終わり）。出力は変わらない |
-| `--carry N...` | 棚卸しのステップの指示へループの前の 1 回の持ち越しを `--add` で渡す | 指示は今のまま |
+| `--carry N...` | 棚卸しのステップの指示へ、差分の棚卸しを最後に走らせたループの 1 回の持ち越しを `--add` で渡す（走らせなかった回は棚卸しの要約を空にして `skipped` の印を付けるため、その値を写さない） | 指示は今のまま |
 | `--loop <名>`・`--lap <n>` | 棚卸しの深さの記録のステップ（`depth record --depth diff`）へ開発ループの名前とループの回の番号を渡す。開発ループのまとめの組み立て（`build_close`）は常に渡す | 深さの記録の行の `loop`・`lap` は空 |
 | `--record-pr N` | 課題を閉じるステップ（`sprint-close.py --record-pr`）へ本番の記録の Pull Request を渡す | 経路がすべて届けない経路なら `0`、それ以外は経路にかかわらず `{queue_record}` を残し、queue がまとめを流し始める時点に GitHub の参照からリリース記録の PR を探して埋める（#2230） |
 
 ループは `--record-pr` を渡さない。リリース承認ゲートの承認の後にまとめを組み直すときも渡さない（`stop.values.pr` が指すのは検査のスプリント PR で、記録の PR は別にある）。
+
+組んだ後、ループの 1 回に判定の根拠（`judgments`）・モードの決定の 1 件目（`mode_decisions`。`trigger: loop sprint`）・`--` の後の引数（`sprint_extra`）を書く。
+続けて選んだ課題ごとに `projects-sync.sh <課題> mode <モード>` を打ち、課題の本文の「進行」の `モード:` の行に書く。書けなくても止めず、`items` に `note` で載せる。
 
 ### 承認ゲートで止まったとき（`gate`、`lap --done`）
 
@@ -235,6 +254,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | どこでも、プロジェクト MVV が開始時と違う・未承認 | `mvv_changed` で止まる |
 | 設計のプラン（設計承認ゲート）。判定が「従う」以外・`boundary` が空でない・機械のチェック・判定を読めない | 計画の課題を `waiting` へ移し（`{number, reason, verdict, basis, boundary, gate: 1, pr, lap, at, report, state, stamp}`。`pr` は報告の設計 PR、判定は `mvv-gate.jsonl` のその PR の最後の行、`stamp` は問いの時点の設計 PR の先頭のコミット（承認した先端））、課題の本文の節 `## 人の判断待ち（開発ループ <名>）` を書き直す。出し直しの指摘を持つ課題は、移す前に設計文書の節 `## 出し直しの指摘への対応` を設計 PR の本文へ写して項目と突き合わせる。欠けがあれば、行を自動の出し直し（`answer: revise`・`by: auto`・`missing`）にして人へ問わず、依頼も送らない。直前の出し直しが自動のとき（人の出し直し 1 回につき 1 回まで）と表を読めないときは、理由を添えて人へ問う。設計が完了も承認ゲートもしなかった課題は続きから外す。残った課題（`issues_kept`）で、設計承認ゲートの後のステージから外した課題だけの計画を除き、共通の計画の `課題` と `closes` からも外し、まとめを組み直して最後の `--then` につなぐ |
+| 同上で残った課題がある（モードの決め直し） | 判定の根拠を持つループの 1 回は、残った課題の根拠だけからスプリントのモードを決め直す。モードが同じなら上の続きを組む。下がったら `supervise.py new sprint --pace auto --issue <残り> --mode <新しいモード> --designed <残り> --out <ループの 1 回のディレクトリ>/sprint-<k>`（記録の版・`outside_plan`・`sprint_extra` を渡し直す）で設計の結果から本番までのステージを作り直し、まとめも新しいモードで組む。組めてから `mode`・`manifest`・`dev_plan`・`prod_plan`・`sprint_command` を書き換え、`mode_decisions` に `trigger: 設計承認ゲート` の 1 件を足し、残った課題の本文の `モード:` の行を書く。残った課題の根拠が記録に無い・モードが上がる結果になるときは続きを組めない扱いにする。根拠を持たないループの 1 回（判定の根拠を導入する前に組んだもの）は決め直さず、決定も足さない |
 | 同上で残りが無い | ループの 1 回を `人へ戻した`（設計が完了しなかった課題があれば `失敗`）で締め、境の判定へ進む |
 | 同上で続きを組めない | `refused`（`step: 続きの queue`）で止まる |
 | 設計承認ゲート以外（リリース承認ゲート） | 判定の写しをループの 1 回へ足し、止まった計画を `gate2_plan` に控え、`gate2_returned`（`values: {pr, verdict, reasons}`）で止まる。本番は出さない |
@@ -259,11 +279,11 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- | --- |
 | 1 | `user_stop` | `.ndf/loop/<名>/stop` がある | `{at}` |
 | 2 | `mvv_changed` | プロジェクト MVV が未承認か、sha256 が開始時と違う | `{started, now}` |
-| 2 の次 | `answer_hold` | 並列の計画のレーンで、止める指示のファイルが自分を範囲に含む。読めないファイルは止める指示なしと読む | `{plan, scope, count, limit}` |
+| 2 の次 | `answer_hold` | 並列の計画のレーンで、止める指示のファイルが自分を範囲に含み、承認の要らない候補（設計を要らない課題。承認した設計など）が選べない。範囲に入っているかは保留したループの 1 回の残りを流した後に読み、範囲なら選定が設計を要る課題を理由「答え待ちの停止の範囲（新しい承認を生む作業）」で外す。読めないファイルは止める指示なしと読む | `{plan, scope, count, limit}` |
 | 3 | `same_failure` | 終わったループの 1 回を新しい順に見て、`失敗` のループの 1 回が同じ `failure` の鍵で `same_failure` 回以上続く。`完了` のループの 1 回で数え直す。`same_failure` で止まった後の最後の再開（`resumed_at`）より前に始まったループの 1 回は数えない。ほかの理由の再開は区切りにしない | `{key, count}` |
 | 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わったループの回数・`cost` の和・動いていた時間（I8）が、数を書いた予算以上。`null` の単位では立たない（境の判定と再開の判定は同じ `over_budget` を読む） | `{consumed, budget}` |
 
-**保留したループの 1 回（並列の計画のレーン）があるときの境の順。** `user_stop`・`mvv_changed`・`answer_hold` はすぐ止まる。次に依頼の答えを古い順に読む:
+**保留したループの 1 回（並列の計画のレーン）があるときの境の順。** `user_stop`・`mvv_changed` はすぐ止まる（`answer_hold` は待たずに止まる条件に入れず、答えの届いた残りを流した後の選定で決める）。次に依頼の答えを古い順に読む:
 オーガナイザーへ送った設計の承認の答え（承認ならラベル `design-approved` と `loop answer --approved` と同じ記録、直して出し直すなら指摘、
 やらないなら差し戻し。先頭が取り込みのコミットだけで動いていれば当て、ほかの動きなら新しい先端で問い直し、読んだ答えは区分 `unmatched` の知らせで 1 回だけオーガナイザーへ戻す）→ `リリース待ち` の `rejected`（`人へ戻した` で締め、`fixes` に課題と理由を足し、ループの次の 1 回で先頭に選ぶ）・`failed`
 （`失敗` で締め、鍵は `{issues, kind: リリース, step: リリースの失敗}`）→ 最も古い `released` の `リリース待ち` か答えの届いた `質問待ち`
@@ -294,12 +314,12 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `user_stop` | ファイルを消して解ける |
 | 予算 | 再開の引数で上書きした予算で判定し直す。まだ予算以上なら 3 |
 | `same_failure` | 再開の起動そのものを解けた印とし、失敗の数を数え直す |
-| `gate2_returned` | 答えが無ければ 3。差し戻しならループの 1 回を `人へ戻した` で締める。承認なら `next` に、止まった計画を経路に合うステップ（雛形の本番は `--from bump`、昇格は `--from promote-approved`、マージで止まった計画は `--from merge-approved`）から `supervise.py run` で続け → 同じ queue の残りのステージ → `--record-pr` なしで組み直したまとめ（`{queue_record}` を持つ）→ `wait` → `loop lap` の 1 行を載せる。続けるステップが無い計画は、手で行う本番を先に示す |
+| `gate2_returned` | 答えが無ければ 3。差し戻しならループの 1 回を `人へ戻した` で締める。承認なら `next` に、止まった計画を経路に合うステップ（雛形の本番は `--from bump`、経路 merge は `--from promote-approved`、マージで止まった計画は `--from merge-approved`）から `supervise.py run` で続け → 同じ queue の残りのステージ → `--record-pr` なしで組み直したまとめ（`{queue_record}` を持つ）→ `wait` → `loop lap` の 1 行を載せる。続けるステップが無い計画は、手で行う本番を先に示す |
 | `refused`（続きの queue） | 人の判断待ちへ移した課題を戻さず、残した課題で続きを組み直す。組めなければ 3 |
-| `refused`（ほか） | `next` に同じループの 1 回での `loop sprint` のやり直しを載せる（モードは conductor が決め直す。載せる 1 行は `--dev` を求めない） |
+| `refused`（ほか） | `next` に同じループの 1 回での `loop sprint --judgments <判定の根拠のファイル>` のやり直しを載せる（conductor が判定の根拠を確かめて渡し直す。載せる 1 行は `--dev` を求めない） |
 | `mvv_changed` | 解けない。新しい名前でループを始め直すよう示す（開始時の値を今の値へ置き換えない） |
 | `waiting_only` | 再開そのもの（答えを送ったオーガナイザーが `relay.py restart` で起こす）で解け、次の `select` が答えを読み直す |
-| `answer_hold` | 範囲の外へ戻ると耐久ワークフローが `relay.py restart` で起こす。再開で判定し直し、範囲に残っていれば同じ条件で止まり直す |
+| `answer_hold` | 範囲の外へ戻ると耐久ワークフローが、範囲の中でもこのレーンの依頼に答えると答えを受けた耐久ワークフローが、`relay.py restart` で起こす。再開で解け、次の境の選定が承認の要らない候補を探し、無ければ同じ条件で止まり直す |
 
 ### ループの記録（データ）
 
@@ -322,7 +342,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | `name` / `repo` / `started_at` / `goal` | 名前・`OWNER/REPO`・開始の時刻（再開で変えない）・`/goal` で始めたか |
 | `project_mvv` | 開始時の承認済みプロジェクト MVV（`{version, sha256}`） |
 | `budget` / `budget_history` | 効いている予算と上書きの履歴 |
-| `same_failure` / `max_issues` / `milestones` | 開始時に設定と引数から写した値 |
+| `same_failure` / `max_issues` / `reorder_width` / `milestones` | 開始時に設定と引数から写した値。`reorder_width` の無い記録は進め方の宣言の値（読めなければ既定の 0）で読む |
 | `environments[]` | 実行環境の報告（`loop start` のたびに通し、候補と今の値が違うか読めない項目があるときだけ足す。追記だけ） |
 | `status` / `stop` / `stops` | `running` / `stopped`・今の止まった理由・過去の止まった理由（追記だけ） |
 | `laps[]` | ループの 1 回（追記だけ。I1） |
@@ -339,8 +359,12 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 項目 | 意味 |
 | --- | --- |
 | `n` / `sprint` / `dir` / `state_path` / `out` / `manifest` | 番号・スプリントの名前（`<ループ名>-<n>`）・ループの 1 回のディレクトリ・状態ファイル・プランの出力・マニフェスト |
-| `milestone` / `rank_digest` / `selection[]` | 選んだマイルストーン・選定に使った `rank` の digest・`{number, milestone, rank, decision: 選んだ\|外した, reason}` |
-| `mode` / `versions` | conductor が決めたモードと `{dev, prod}`。`--dev` を省いたループの 1 回は、組むときは空で、締めるときに版の記録からコピーする |
+| `milestone` / `rank_digest` / `selection[]` | 選んだマイルストーン・選定に使った `rank` の digest・`{number, milestone, rank, decision: 選んだ\|外した, reason, touch}`。`touch` は触る場所の見込み `{paths, source, note}`（`source` は `設計の結果` / `課題グループの表` / `課題の本文` / `見込みなし`）。選んだ行は、先に選んだ課題との重なり `overlap`（`あり` / `なし` / `不明`）と相手の番号 `overlap_with` も持つ |
+| `reorders[]` | 逆転の組 `{later, earlier, with}`（`later` は後ろへ回した課題、`earlier` は先に選んだ課題、`with` は `later` と重なった選んだ課題）。逆転が起きたループの 1 回だけが持つ |
+| `mode` / `versions` | 判定の根拠から決めたスプリントのモード（設計承認ゲートで決め直して下がったら新しいモード）と `{dev, prod}`。`--dev` を省いたループの 1 回は、組むときは空で、締めるときに版の記録からコピーする |
+| `judgments[]` | 課題ごとの判定の根拠 `{number, row, mode, condition, files}`（`loop sprint` が書く。判定の根拠を導入する前に組んだループの 1 回には無い） |
+| `mode_decisions[]` | モードの決定 `{at, trigger, issues, from_mode, mode}`。`trigger` は `loop sprint` か `設計承認ゲート`、`from_mode` は `loop sprint` の行で `null`。決め直しのたびに足す |
+| `sprint_extra[]` | `loop sprint` の `--` の後の引数（作り直しの `new sprint` へ渡し直す） |
 | `sprint_command` / `close_command` / `dones[]` / `dev_plan` / `prod_plan` / `gate2_plan` / `issues_kept` | 打ったコマンド・done のパス・開発版のプラン・本番のプラン・リリース承認ゲートで止まった計画・設計承認ゲートの後に残した課題 |
 | `gates[]` | 承認ゲートの判定の写し（`{name, by, verdict, basis, pr, at}`） |
 | `retro` / `refine` | 振り返りの置き場（まとめのプランの報告）・棚卸しの結果 `{report, rank_changes, deferred[]}`（upkeep の記録の `candidates.json`・`rank.json` から） |
@@ -395,7 +419,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- | --- |
 | 1 | ループの記録を新しい集約（`loop.json`）にし、入口を `sprint-state.py loop` に足す | スプリント状態ファイルに足すとループの 1 回ごとに別のファイルができ、一覧に全ループの 1 回のファイルを探すことになる。新しいスクリプトにすると引数の読み方と結果の出し方が 2 つに分かれる。新しいキューや常駐の処理は作らない |
 | 2 | 選定を `rank` の出力と記録だけで決め、1 つのマイルストーンから組む | AI が範囲を広げないため。複数のマイルストーンから混ぜるとスプリント MVV が 2 つ以上になり、着手の順序を飛び越える |
-| 3 | モードは conductor が決め、対象外は `loop exclude` で選定へ戻す。版は既定でキューが流す直前に決める | 判断をスクリプトへ移さない。外した理由が記録に残るため、同じ入力から同じ組になる |
+| 3 | 課題ごとの判定表の行は conductor が選び、スプリントのモードは判定の根拠から `loop sprint` が算出する。`--mode` は照合だけに使う。対象外は `loop exclude` で選定へ戻す。版は既定でキューが流す直前に決める | 当たる行の判断はスクリプトへ移さない。行が決まればモードは「上の行が勝つ」の規則で決まり、conductor に計算させると根拠と食い違う値を渡せる。根拠は JSON のファイルで渡し、渡した形を記録の形と 1 対 1 にする。外した理由が記録に残るため、同じ入力から同じ組になる |
 | 4 | 設計承認ゲート で人へ戻した課題は人の判断待ちとして外して続け、リリース承認ゲート で人へ戻したら止まる（設計承認ゲート で利用者が選択） | 「レッドライン以外で承認を一切求めない」と「決められないときは人へ戻す」の両方を満たす。ループを止めて待つ案は「判定できない」1 件で全体が止まり、「判定できない」を「従う」と見なす案は共通原則に反する。リリース承認ゲート で止まるのは、本番を出さずに進むと次の本番に判定を通っていない変更が混ざるため |
 | 5 | 予算をループの回数・費用（USD）・経過時間の 3 つにし、どれも書いたときだけ効く形にする（#2505 の設計承認ゲート で利用者が決めた） | レーンを増やすと固定のループの回数と時間が先に尽きる。無制限を大きな数で代用すると値から意図が読めないので `null` で表す。費用の既定も同じ規則にそろえ、歯止めは同じ失敗の回数と利用プランの上限である。`/goal` の計数は `--continue` / `--resume` でリセットされ、ループの 1 回ごとにセッションが替わるため使えない |
 | 6 | 記録を `.ndf/loop/<名>/` に置き、`laps.md` を描画し、引継ぎ文書は現在地だけを持つ（同上） | 引継ぎ文書と同じく後片付けで消えず、コミットが要らず、引継ぎ文書の 300 行の上限にループの 1 回を載せずに済む。課題のコメントは一覧に GitHub の検索が要り（検索の結果に漏れが出ることを実測で確かめている）、`docs/` はループの 1 回ごとに Pull Request が要る |
@@ -410,6 +434,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | 15 | 止める指示の発生元は conductor の手順で人が送った停止に限り、`loop start`・境の判定・経過時間の計算は変えない | 人が送った入力かを見分ける値が、hook の入力にも公開の仕様にも無く、Codex にも無い。人が送った停止は次の境で効くのが正しく、自動の再起動もループの 1 回の途中で `loop start` を打つため、再開で消すと境の前に消える。セッションを終える依頼はループの 1 回を次の起動で続けるためのもので、止める指示に読み替えると目的と逆になる。誤って置いた止める指示を消してよいのは、置いた経緯を知る conductor だけである |
 | 16 | `--dev` を省いたループの 1 回の版は、ループの 1 回を締めるときにだけ版の記録からコピーする。本番の版は本番のプランが `完了` のループの 1 回でだけ読み、開発版から導かない | 描画と境の判定がループの 1 回の記録だけを読み、進行中のループの 1 回の版が読む時点で変わらない。開発版から導くと、本番へ進まなかったループの 1 回に出していない版が載る。版の記録の読み取りは置き場を持つキューの層（`queue_fill.recorded_version`・`plan_finished`）に置き、置き場の知識を 1 か所に保つ |
 | 17 | `--dev` を渡したループの 1 回かは、締め直しでも変わらないスプリント状態の `versions.dev` で判定する | ループの 1 回の `versions.dev` は 1 回目の締めで版の記録から埋まるため、リリース待ち・質問待ちの締め直しで渡したループの 1 回に見え、空の版で上書きする |
+| 18 | 設計承認ゲートで課題を外したら、記録の判定の根拠から残った課題のモードを決め直し、下がったら設計の結果から本番までを `new sprint --designed` で作り直す。根拠を持たないループの 1 回は決め直さない | 決め直しで conductor の入力を待たない。モードはプランの組み立て（リファクタリングのステップ・設計との突き合わせ・リリース承認ゲートの判定）に効くため、`mode` の値だけを書き換えても工程は変わらない。組み立ての規則を `new sprint` の 1 か所に保つ。根拠を持たない記録で断ると、版を上げた時点で進行中のループが止まる |
 
 ### 外部の動向から取り入れたもの
 
@@ -456,6 +481,8 @@ worker の `claude -p` に `--max-budget-usd` を渡すこと（ステップの�
 | `quality` 節を宣言した `rank` が同じ入力から同じ境界を返し、枠の分を先に取って印を付ける。宣言が無いと出力が今と同じ | 割合の丸めを違える・宣言が無いのに枠を取る |
 | 終わったループの 1 回の行を書き換える書き込みが拒まれ、進行中のループの 1 回があると `select` が 1、止まったループで `select` が 3 | 締めたループの 1 回を上書きする・2 つ目のループの 1 回を足す・`start` を経ずにループの 1 回を始める |
 | ループの 1 回の途中の `gate2_returned`・`mvv_changed`・`refused` はループの 1 回を進行中のまま残し、`mvv_changed` の再開は解けずに新しい名前での始め直しを示す | 途中の停止でループの 1 回を締める・`mvv_changed` の再開で旧ループの 1 回を続ける |
+| 判定の根拠が欠ける・選んでいない課題を含む・順とモードが合わない・`documentation` と他のモードが混ざる・`--mode` が違うとき `loop sprint` が 1 で断り、記録が変わらず `new sprint` を打たない。通ればモードは根拠のうち最も上の行のモードになる | 検査を `new sprint` の後へ動かす・最も下の行を採る・照合を外す |
+| 設計承認ゲートで課題を外すと、残りの根拠でモードを決め直し、下がれば `new sprint --designed` で作り直してまとめも新しいモードになる。同じなら作り直さず決定だけ足す。作り直しが断ると記録を変えずに `refused` で止まる。根拠の無いループの 1 回は今の続きのまま | 決め直しを外す・`mode` だけを書き換える・記録を先に書き換える・根拠の無い記録で断る |
 | `--dev` を省いた `loop sprint` が 0 で返り、プラン・`sprint.json`・`sprint_command` に版数が無い。`--dev` を渡すと組み立て・ループの 1 回の版・既出のときの `taken` が今と同じ。`--prod` だけでは 1 で断り、何も変えない | `--dev` の既定に版を入れる・空の値で `--version` を渡す・断る判定を `init` の後へ動かす |
 | `--dev` を省いたループの 1 回を締めると、開発版は版の記録の版（決め直したループの 1 回は後の版）になる。本番の版は本番のプランの `report.md` が `完了` のループの 1 回だけに載り、版の記録が無い・壊れているときは版の欄を空のまま締める。締め直しでも版を失わず、版の記録のファイルは変わらない | 開発版から本番の版を導く・結果を見ずに本番の版の記録を読む・ループの 1 回の `versions.dev` で渡したかを判定する・読み取りの例外を通す |
 

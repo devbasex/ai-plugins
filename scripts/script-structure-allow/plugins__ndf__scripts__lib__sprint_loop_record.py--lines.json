@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/scripts/lib/sprint_loop_record.py", "name": "", "kind": "lines", "reason": "483 行だったところへ #2436（レーンの配布待ち・質問待ちの記録と引継ぎ文書）で増えて 536 行。500 行以下にしたら消す", "lines": 536}
+{"path": "plugins/ndf/scripts/lib/sprint_loop_record.py", "name": "", "kind": "lines", "reason": "483 行だったところへ #2436（レーンの配布待ち・質問待ちの記録と引継ぎ文書）で増えて 536 行、cross-refactoring（#2979）で再開 1 回分の値 ResumeContext を足して 548 行。500 行以下にしたら消す", "lines": 548}

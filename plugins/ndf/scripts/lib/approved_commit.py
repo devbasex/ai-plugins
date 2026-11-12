@@ -3,7 +3,7 @@
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
 - 承認したコミットから比べた先端までに、許したもの（デプロイの PR）の外のコミットや中身が無いかの比較（`compare_approved`）
 - 導入の確認の承認資料（`release-steps.py verify-facts` が書く）の、確かめたコミットの行の形と読み取り
-  （`verified_line` / `verified_sha`。昇格の経路 `merged-steps.py promote --expect-head-from` が読む。#1529）
+  （`verified_line` / `verified_sha`。リリースの Pull Request で届く経路 `merged-steps.py promote --expect-head-from` が読む。#1529）
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
 ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。

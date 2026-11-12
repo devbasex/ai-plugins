@@ -1,6 +1,6 @@
 """経路 merge / promote の pace: auto / fast（#1457）: リリース承認ゲートの前に導入の確認（<節>.verify）を 1 度走らせる。
 
-起点 develop・本番 main で release.form を持たないリポジトリ（project-trygroup-prd の形）で、昇格のプランの先頭の verify と、
+起点 develop・本番 main で release.form を持たないリポジトリ（project-trygroup-prd の形）で、本番チャネルへ入れるリリースプランの先頭の verify と、
 経路 merge だけのときの「導入の確認」のステージ、verify-facts の承認資料を見る。実機の claude と gh は呼ばない。
 """
 
@@ -82,7 +82,7 @@ def wave(waves, name) -> dict:
 
 @pytest.mark.parametrize("pace, used, other", [("auto", "check-stg", "smoke-stg"), ("fast", "smoke-stg", "check-stg")])
 def test_the_promote_plan_verifies_before_the_mvv_judge(tmp_path, pace, used, other):
-    """AC1・AC2・AC5・AC9・I1・I2・I3: 昇格のプランの先頭が選んだ節の verify で、mvv の材料に確認の資料があり、確認は 1 つだけ。"""
+    """AC1・AC2・AC5・AC9・I1・I2・I3: 本番チャネルへ入れるリリースプランの先頭が選んだ節の verify で、mvv の材料に確認の資料があり、確認は 1 つだけ。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
     plan = load(wave(waves, "本番")["plans"][0])
     ids = [s["id"] for s in plan["steps"]]
@@ -95,7 +95,7 @@ def test_the_promote_plan_verifies_before_the_mvv_judge(tmp_path, pace, used, ot
 
 
 def run_promote(tmp_path, verify):
-    """昇格のプランの verify 以外のステップを、走った id を記録するだけのコマンドに差し替えて流す。"""
+    """本番チャネルへ入れるリリースプランの verify 以外のステップを、走った id を記録するだけのコマンドに差し替えて流す。"""
     repo = make_repo(tmp_path, [STG, PRD], auto=verify)
     plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
     ran = tmp_path / "ran"
@@ -127,7 +127,7 @@ def test_the_promote_merges_only_the_commit_the_mvv_judge_read(tmp_path, pace):
 
 def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
     """#1529 の AC7・AC8・I5: 確かめたコミットの照合は fast / auto の promote にだけ付き、ブランチ名は引数のものだけが現れる。
-    #2104 の AC5・I7: normal の promote は昇格の承認資料を書き、両方の promote-approved が同じ資料で照合する。"""
+    #2104 の AC5・I7: normal の promote はリリースの承認資料を書き、両方の promote-approved が同じ資料で照合する。"""
     from supervise_lib.delivery_templates import PromoteParams, plan_promote
 
     a = type("A", (), {"base": "trunk", "production_branch": "stable", "issue": "11", "mode": "standard"})()
@@ -218,7 +218,7 @@ def test_close_without_verify_writes_no_plan(tmp_path):
 
 
 def test_normal_keeps_the_promote_plan(tmp_path):
-    """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
+    """AC11・I6: --pace 無しの本番チャネルへ入れるリリースプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
     ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
     assert ids == ["promote", "promote-approved", "cd-result", "record", "judge-record"]
@@ -278,7 +278,7 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
 
 @pytest.mark.parametrize("pace", [None, "fast"])
 def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
-    """#1870 AC2: 昇格の PR のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
+    """#1870 AC2: リリースの Pull Request のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
     steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
     assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
@@ -297,7 +297,7 @@ def close_steps(tmp_path, rows) -> dict:
 
 
 def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
-    """#1870 AC3・AC6: 昇格の経路のまとめは --record-pr {queue_pr:promote} を打ち、その前にリリース後テストを置く。"""
+    """#1870 AC3・AC6: リリースの Pull Request で届く経路のまとめは --record-pr {queue_pr:promote} を打ち、その前にリリース後テストを置く。"""
     steps = close_steps(tmp_path, [STG, PRD])
     ids = [s["id"] for s in steps]
     close = next(s for s in steps if s["id"] == "close")
@@ -314,7 +314,7 @@ PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}
 
 @pytest.mark.parametrize("rows", [[STG], [PRD_ON_BASE], [API], [STG, API]], ids=["stg-only", "merged", "manual", "stg-manual"])
 def test_close_without_a_plan_record_resolves_it_when_run(tmp_path, rows):
-    """#2230 の受け入れ条件 1・3・5: 雛形も昇格も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown を
+    """#2230 の受け入れ条件 1・3・5: 雛形もリリースの Pull Request も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown を
     組まず、{queue_record} を close とリリース後テストの両方に持つ。"""
     steps = close_steps(tmp_path, rows)
     by = {s["id"]: s for s in steps}
@@ -344,9 +344,9 @@ def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
 
 
 def chain(steps) -> list[str]:
-    """merge から `next` をたどった id の並び（end まで）。"""
+    """ready から `next` をたどった id の並び（end まで）。"""
     by = {s["id"]: s for s in steps}
-    out, cur = [], "merge"
+    out, cur = [], "ready"
     while cur in by and cur not in out:
         out.append(cur)
         cur = by[cur].get("next")
@@ -365,34 +365,34 @@ DEPTH_TAIL = [
     "review",
     "review-release",
 ]
+MERGE_TAIL = ["merge-gate", "merge", "close"]  # マージの後は課題を閉じる close だけ（#2914 の I3・I8）
 
 
 @pytest.mark.parametrize(
     "rows, want",
     [
-        ([STG, PRD], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
-        ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "config-save", "release-verify", "config-check", "retro", "close", "refine"]),
+        ([STG, PRD], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
+        ([], ["ready", "deep-due", "retro"]),
+        ([STG], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
     ],
     ids=["record", "no-delivery", "queue-record"],
 )
-def test_close_comes_after_the_retro_and_before_the_refine(tmp_path, rows, want):
-    """#2228 の受け入れ条件 5・6（I6）: next のつながりで リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。
-    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を振り返りとして渡す。"""
+def test_close_comes_after_the_merge_and_the_refine(tmp_path, rows, want):
+    """#2228 の I6・#2914 の決定 1・4: next のつながりで リリース後テスト → 起動の判定 → 振り返り → 棚卸し → マージ → 課題を閉じる。
+    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を同じプランの進捗記録から選ぶ。"""
     steps = close_steps(tmp_path, rows)
     got = chain(steps)
-    assert got[: got.index("refine") + 1][-len(want) :] == want and got[0] == "merge"
-    assert got[got.index("refine") :] == DEPTH_TAIL  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
+    assert got == [*want, *DEPTH_TAIL, *MERGE_TAIL]  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
     by = {s["id"]: s for s in steps}
-    assert "--final-stage 振り返り" in by["close"]["cmd"]
+    assert "--final-stage-from {state_dir}/progress.jsonl" in by["close"]["cmd"] and by["close"]["next"] == "end"
     for sid in ("retro", "release-verify"):
         if sid in by:
             assert "課題は閉じない" in by[sid]["prompt"]
 
 
 @pytest.mark.parametrize("mode", ["light", "operation", "documentation", "legacy-refactor"])
-def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
-    """#2228 の受け入れ条件 6: どのモードで組んでも close は振り返りの後、棚卸しの前にある。"""
+def test_close_comes_after_the_merge_in_every_mode(tmp_path, mode):
+    """#2228 の受け入れ条件 6・#2914 の I3: どのモードで組んでも close は確定仕様化の Pull Request のマージの後にある。"""
     repo = make_repo(tmp_path, [])
     out = tmp_path / "c"
     args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--mode", mode]
@@ -401,4 +401,4 @@ def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
     assert p.returncode == 0, p.stdout + p.stderr
     close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
     got = chain(close["steps"])
-    assert got[got.index("refine") - 2 :] == ["retro", "close", *DEPTH_TAIL]
+    assert got[got.index("refine") - 2 :] == ["deep-due", "retro", *DEPTH_TAIL, *MERGE_TAIL]

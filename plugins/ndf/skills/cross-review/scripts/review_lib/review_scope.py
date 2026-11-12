@@ -1,7 +1,9 @@
 """レビュー範囲と範囲の照合（#1702）。
 
 レビュー範囲は、そのラウンドで担当が見る差分（base と head の SHA の組と、その間の変更ファイル）である。
-`compute_scope` は `start-round` が呼び、`rounds[-1].review_scope` に書く値を返す。`check_scope` は `judge` が呼び、
+`compute_scope` は `start-round` が呼び、`rounds[-1].review_scope` に書く値を返す。全差分（`full`）の base は、
+PR の base のブランチを取得した今の先頭と head の merge base にする（Pull Request の three-dot の差分と同じ範囲。#3081 の I10）。
+base のブランチが進んで head へ取り込まれても、取り込んだ他の変更は範囲に入らない。取得できなければ REST の `base.sha` を使う。`check_scope` は `judge` が呼び、
 通した担当の読んだファイル数（`read_files`）を範囲のファイル数と突き合わせた `scope_check` の値を返す。
 
 どちらも例外や終了コードで止めない。範囲を求められないときは `unavailable` に理由を書いて返し、
@@ -33,6 +35,14 @@ def _has_commit(worktree: str, sha: str) -> bool:
     return proc.git(worktree, "cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
 
 
+def _branch_merge_base(worktree: str, branch: str, head_oid: str) -> str:
+    """base のブランチを origin から取得した先頭と head の merge base。取得できない・求められなければ空。"""
+    ref = f"refs/remotes/origin/{branch}"
+    if proc.git(worktree, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:{ref}", check=False).returncode != 0:
+        return ""
+    return (proc.git_out(worktree, "merge-base", ref, head_oid) or "").strip()
+
+
 def compute_scope(
     worktree: str,
     head_oid: str | None,
@@ -41,8 +51,9 @@ def compute_scope(
     round_in_pr: int,
     previous_rounds: list[dict[str, Any]],
     pr: Any,
+    base_branch: str | None = None,
 ) -> dict[str, Any]:
-    """そのラウンドのレビュー範囲を求める。`previous_rounds` は開く前までのラウンドの並び。"""
+    """そのラウンドのレビュー範囲を求める。`previous_rounds` は開く前までのラウンドの並び。`base_branch` は PR の base のブランチ。"""
     if not head_oid:
         return {"unavailable": "no_head"}
     rng = classifications.diff_scope(kind, round_in_pr)
@@ -52,7 +63,7 @@ def compute_scope(
         if not base or base == head_oid:
             rng = "full"
     if rng == "full":
-        base = str(base_oid or "")
+        base = (_branch_merge_base(worktree, base_branch, head_oid) if base_branch else "") or str(base_oid or "")
         if not base:
             return {"unavailable": "no_base"}
     if not _has_commit(worktree, base):

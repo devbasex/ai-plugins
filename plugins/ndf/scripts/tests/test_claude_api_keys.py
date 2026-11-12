@@ -10,7 +10,6 @@ import os
 import stat
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -23,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_accounts as ca  # noqa: E402
 import claude_api_keys as ak  # noqa: E402
 import claude_usage as cu  # noqa: E402
+import launch_observe  # noqa: E402
 from account_fake import accounts  # noqa: E402,F401
 from test_relay_account import aws, run  # noqa: E402,F401
 
@@ -61,7 +61,7 @@ class FakeMessages:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1/messages"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     def ok(self, key):
         self.replies[key] = (200, {"type": "message", "content": []})
@@ -151,35 +151,53 @@ def test_add_refuses(accounts, name, account, reason):  # noqa: F811
     assert e.value.reason == reason
 
 
-def test_state_update_with_old_generation_is_ignored(accounts):  # noqa: F811
+def test_old_state_file_does_not_change_the_decision(accounts):  # noqa: F811
+    """#2930 の I8・受け入れ条件 21: 旧版の `api-key-state.json`（残高切れ・認証の失敗）が残っていても決定は変わらない。"""
     accounts.add("main")
     ak.add_key("k", KEY_A, "main")
-    old = ak.get("k")
-    ak.add_key("k", KEY_B, "main")
-    assert ak.note_state(old.name, old.generation, ak.AUTH_FAILED) is False
-    assert ak.state_of(ak.get("k")).state == ak.OK and ak.pick_key().name == "k"
-    (accounts.root / ak.STATE_FILE).write_text(json.dumps({"k": {"state": "auth_failed"}}))  # 世代の無い行
-    assert ak.state_of(ak.get("k")).state == ak.OK
+    ak.set_use("always")
+    before = launch_observe.decide_now()
+    (accounts.root / "api-key-state.json").write_text(json.dumps({"k": {"generation": ak.get("k").generation, "state": "auth_failed"}}))
+    assert launch_observe.decide_now() == before and before.target == "k"
 
 
-def test_pick_by_name_and_state(accounts):  # noqa: F811
+def test_always_picks_by_name_and_exclusion_is_per_call(accounts):  # noqa: F811
+    """#2930 の受け入れ条件 10・26: always は名前の順の先頭。除外はその呼び出しにだけ効き、次の呼び出しでは候補に戻る。"""
     accounts.add("x")
     accounts.add("y")
     ak.add_key("b", KEY_B, "y")
     ak.add_key("a", KEY_A, "x")
-    assert ak.pick_key().name == "a" and ak.pick_key().name == "a"
-    a = ak.get("a")
-    ak.note_state("a", a.generation, ak.CREDIT_LOW)
-    assert ak.pick_key().name == "b"
-    ak.note_state("a", a.generation, ak.CREDIT_LOW, now=time.time())
-    rows = json.loads((accounts.root / ak.STATE_FILE).read_text())
-    rows["a"]["since"] = cu.iso_utc(time.time() - ak.CREDIT_HOLD - 1)  # 保留が過ぎた
-    (accounts.root / ak.STATE_FILE).write_text(json.dumps(rows))
-    assert ak.pick_key().name == "a"
-    ak.note_state("a", a.generation, ak.CREDIT_LOW)  # 保留が過ぎて 1 回試し、尽きたまま
-    assert ak.pick_key().name == "b"
-    ak.note_state("a", a.generation, ak.AUTH_FAILED)
-    assert ak.pick_key().name == "b" and ak.pick_key(exclude={"b"}) is None
+    ak.set_use("always")
+    assert launch_observe.decide_now().target == "a"
+    assert launch_observe.decide_now(exclude_keys={"a"}).target == "b"
+    d = launch_observe.decide_now(exclude_keys={"a", "b"})
+    assert d.route == "account" and d.rule == "account"
+    assert launch_observe.decide_now().target == "a"
+
+
+def test_monthly_declaration_keeps_value_and_generation(accounts):  # noqa: F811
+    """#2930 の移行性: 登録し直さずに月の額を足せ、値と世代は変わらない。0（None）で宣言を外す。"""
+    accounts.add("main")
+    ak.add_key("k", KEY_A, "main")
+    gen = ak.get("k").generation
+    assert ak.get("k").monthly_usd is None
+    assert ak.set_monthly("k", 200.0) and ak.get("k").monthly_usd == 200.0
+    assert (ak.get("k").generation, ak.get("k").key) == (gen, KEY_A)
+    assert ak.set_monthly("k", None) and ak.get("k").monthly_usd is None
+    assert not ak.set_monthly("ghost", 10.0)
+
+
+def test_weekly_at_default_and_declared(accounts):  # noqa: F811
+    """#2930 の受け入れ条件 3・24: 閾値 T の既定は 85。宣言すれば読み返せ、範囲の外の値は既定へ戻る。"""
+    assert ak.weekly_at_setting() == 85.0
+    ak.set_use("near-limit", 70.0)
+    assert (ak.use_setting(), ak.weekly_at_setting()) == ("near-limit", 70.0)
+    ak.set_use("off")
+    assert ak.weekly_at_setting() == 70.0  # 省けば今の値を保つ
+    raw = json.loads(book(accounts).read_text())
+    raw["weekly_at"] = 150
+    book(accounts).write_text(json.dumps(raw))
+    assert ak.weekly_at_setting() == 85.0
 
 
 def test_use_is_off_without_or_with_broken_book(accounts):  # noqa: F811
@@ -190,7 +208,8 @@ def test_use_is_off_without_or_with_broken_book(accounts):  # noqa: F811
         ak.set_use(v)
         assert ak.use_setting() == v
     book(accounts).write_text("{broken")
-    assert ak.use_setting() == "off" and ak.problem() and ak.pick_key() is None and ak.key_names() == []
+    assert ak.use_setting() == "off" and ak.problem() and ak.key_names() == []
+    assert launch_observe.decide_now().route == "account"
 
 
 def test_key_env_only_for_worker_not_for_wrapper_section(accounts, monkeypatch):  # noqa: F811
@@ -203,14 +222,14 @@ def test_key_env_only_for_worker_not_for_wrapper_section(accounts, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "auth-SECRET")
     monkeypatch.setenv(ca.NAME_ENV, "a")
     monkeypatch.setenv("CLAUDE_CODE_USE_FOUNDRY", "1")
-    env = ak.env_with_key(ak.pick_key(), dict(os.environ))
+    env = ak.env_with_key(ak.get("k"), dict(os.environ))
     assert env[ak.KEY_ENV] == KEY_A and env[ak.NAME_ENV] == "k"
     assert ca.TOKEN_ENV not in env and "ANTHROPIC_AUTH_TOKEN" not in env and ca.NAME_ENV not in env
     assert "CLAUDE_CODE_USE_FOUNDRY" not in env  # 認証の優先順位でキーより上に来る
     # 外した親のアカウントは、キーを外したときの戻り先として名前だけ残る。呼び手の今のアカウントがあればそちら
     assert env[ak.BACK_ENV] == "a"
-    assert ak.env_with_key(ak.pick_key(), dict(os.environ), "b")[ak.BACK_ENV] == "b"
-    assert ak.BACK_ENV not in ak.env_with_key(ak.pick_key(), dict(os.environ), ca.METERED)
+    assert ak.env_with_key(ak.get("k"), dict(os.environ), "b")[ak.BACK_ENV] == "b"
+    assert ak.BACK_ENV not in ak.env_with_key(ak.get("k"), dict(os.environ), ca.METERED)
     from relay_lib import claude as relay_claude
 
     wrapped = relay_claude.section_env(dict(os.environ), "a")
@@ -221,12 +240,13 @@ def test_key_env_only_for_worker_not_for_wrapper_section(accounts, monkeypatch):
 
 
 def test_cli_add_list_check_remove_without_leaking(tmp_path, accounts, aws, messages):  # noqa: F811
-    """受け入れ条件 1・3・4・11・12: 標準入力とファイルから登録し、一覧・確かめ直し・外すまで、値はどこにも出ない。"""
+    """受け入れ条件 1・3・4・11・12（#2930 の 11・22・27）: 標準入力とファイルから登録し、月の額の宣言・一覧・確かめ直し・
+    外すまで、値はどこにも出ない。"""
     accounts.add("gmail")
     accounts.add("main")
     messages.ok(KEY_A)
     messages.ok(KEY_B)
-    a = relay(tmp_path, accounts, aws, messages, "add-api-key", "k-gmail", "--account", "gmail", stdin=KEY_A + "\n")
+    a = relay(tmp_path, accounts, aws, messages, "add-api-key", "k-gmail", "--account", "gmail", "--monthly", "200", stdin=KEY_A + "\n")
     assert a.returncode == 0, a.stderr
     assert "k-gmail" in a.stdout and "spend limit" in a.stderr
     kf = tmp_path / "key.txt"
@@ -236,17 +256,19 @@ def test_cli_add_list_check_remove_without_leaking(tmp_path, accounts, aws, mess
     assert stat.S_IMODE(os.stat(book(accounts)).st_mode) == 0o600
     lj = relay(tmp_path, accounts, aws, messages, "list", "--json")
     rows = [r for r in json.loads(lj.stdout) if r["kind"] == "api_key"]
-    assert [(r["name"], r["account"], r["state"]) for r in rows] == [("k-gmail", "gmail", "ok"), ("k-main", "main", "ok")]
+    got = [(r["name"], r["account"], r["monthly_usd"], r["spent_7d"], r["weekly_budget"]) for r in rows]
+    assert got == [("k-gmail", "gmail", 200.0, 0.0, 46.67), ("k-main", "main", None, 0.0, None)]
     lt = relay(tmp_path, accounts, aws, messages, "list")
-    assert "k-gmail" in lt.stdout and "使える" in lt.stdout
-    k = ak.get("k-main")
-    ak.note_state("k-main", k.generation, ak.CREDIT_LOW)
-    assert "残高切れ" in relay(tmp_path, accounts, aws, messages, "list").stdout
+    assert "k-gmail" in lt.stdout and "使える" in lt.stdout and "月 未宣言" in lt.stdout
+    m = relay(tmp_path, accounts, aws, messages, "api-key-monthly", "k-main", "100")
+    assert m.returncode == 0 and ak.get("k-main").monthly_usd == 100.0 and "23.33" in m.stdout
+    assert relay(tmp_path, accounts, aws, messages, "api-key-monthly", "ghost", "100").returncode == 1
+    assert relay(tmp_path, accounts, aws, messages, "api-key-monthly", "k-main", "-3").returncode == 2
     c = relay(tmp_path, accounts, aws, messages, "check", "k-main")
-    assert c.returncode == 0 and ak.state_of(ak.get("k-main")).state == ak.OK
+    assert c.returncode == 0 and not (accounts.root / "api-key-state.json").exists()
     r = relay(tmp_path, accounts, aws, messages, "remove", "k-gmail")
     assert r.returncode == 0 and ak.key_names() == ["k-main"]
-    no_leak(a, b, lj, lt, c, r)
+    no_leak(a, b, lj, lt, m, c, r)
     for f in accounts.root.iterdir():
         if f.is_file() and f.name != ak.BOOK_FILE:
             assert KEY_A not in f.read_text(errors="replace") and KEY_B not in f.read_text(errors="replace")
@@ -288,6 +310,8 @@ def test_cli_add_check_failure_saves_nothing(tmp_path, accounts, aws, messages, 
         (["k", "--account", "ghost"], KEY_A + "\n", 1, "not_registered"),
         (["k2", "--account", "main"], KEY_A + "\n", 1, "account_taken"),
         (["k", "--account", "gmail"], "", 2, "missing_args"),
+        (["k", "--account", "gmail", "--monthly", KEY_A], KEY_A + "\n", 2, "invalid_name"),  # 月の額の誤りも値を写さない
+        (["k", "--account", "gmail", "--monthly", "0"], KEY_A + "\n", 2, "invalid_name"),
     ],
 )
 def test_cli_add_refusals(tmp_path, accounts, aws, messages, args, stdin, code, reason):  # noqa: F811
@@ -318,19 +342,22 @@ def test_cli_api_key_use(tmp_path, accounts, aws, messages):  # noqa: F811
         assert relay(tmp_path, accounts, aws, messages, "api-key-use", v).returncode == 0
         assert json.loads(relay(tmp_path, accounts, aws, messages, "api-key-use", "--json").stdout)["use"] == v
     assert relay(tmp_path, accounts, aws, messages, "api-key-use", "sometimes").returncode == 2
+    # 閾値 T（#2930 の受け入れ条件 3）: 宣言すれば読み返せ、範囲の外は 2
+    assert relay(tmp_path, accounts, aws, messages, "api-key-use", "near-limit", "--weekly-at", "70").returncode == 0
+    got = json.loads(relay(tmp_path, accounts, aws, messages, "api-key-use", "--json").stdout)
+    assert (got["use"], got["weekly_at"]) == ("near-limit", 70.0)
+    for bad in ("0", "101", "x"):
+        assert relay(tmp_path, accounts, aws, messages, "api-key-use", "--weekly-at", bad).returncode == 2
 
 
-def test_cli_check_failure_keeps_state(tmp_path, accounts, aws, messages):  # noqa: F811
-    """受け入れ条件 12: 確かめ直しが失敗すれば状態を変えず、成功すれば ok へ戻す。"""
+def test_cli_check_reports_without_writing_state(tmp_path, accounts, aws, messages):  # noqa: F811
+    """#2930 の決定 2: 確かめ直しは結果を返すだけで、状態のファイルを書かない。"""
     accounts.add("main")
     ak.add_key("k", KEY_A, "main")
-    k = ak.get("k")
-    ak.note_state("k", k.generation, ak.CREDIT_LOW)
     messages.replies[KEY_A] = (400, CREDIT_BODY)
     p = relay(tmp_path, accounts, aws, messages, "check", "k", "--json")
     assert p.returncode == 1 and json.loads(p.stdout)["reason"] == "credit_low"
-    assert ak.state_of(ak.get("k")).state == ak.CREDIT_LOW
     messages.ok(KEY_A)
     assert relay(tmp_path, accounts, aws, messages, "check", "k").returncode == 0
-    assert ak.state_of(ak.get("k")).state == ak.OK
+    assert not (accounts.root / "api-key-state.json").exists()
     no_leak(p)

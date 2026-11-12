@@ -1,4 +1,5 @@
-"""`relay.py account` の API キーの副命令: `add-api-key`・`api-key-use` と、`list`・`remove`・`check` の API キーの分岐（#2855）。
+"""`relay.py account` の API キーの副命令: `add-api-key`・`api-key-monthly`・`api-key-use` と、`list`・`remove`・`check` の
+API キーの分岐（#2855・#2930）。
 
 置き場を書くのは `lib/claude_api_keys.py`、確かめの要求は `lib/claude_usage.py` の `check_api_key` である。ここは
 キーの値の受け取り（標準入力かファイル。引数では受けない。決定 1）と、結果の文の組み立てを持つ。出力の組み立てには
@@ -17,11 +18,11 @@ import claude_accounts as ca  # noqa: E402,I001
 import claude_api_keys as ak  # noqa: E402
 from claude_usage import KeyCheck, check_api_key  # noqa: E402
 
-STATE_LABEL = {ak.OK: "使える", ak.CREDIT_LOW: "残高切れ", ak.AUTH_FAILED: "認証の失敗"}
 ARG_ERROR = (
     "引数を読めない（引数は表示しない）。usage: relay.py account add-api-key <名前> --account <アカウント> [--key-file <パス>]"
-    "（キーの値は標準入力か --key-file で渡す）"
+    " [--monthly <ドル>]（キーの値は標準入力か --key-file で渡す）"
 )
+MONTHLY_ERROR = "月の額は正の数（ドル）で渡す（入力値は表示しない）"
 PURCHASED_NOTE = (
     "組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる"
     "（NDF は検出しない。Console の spend limit で抑える）"
@@ -61,15 +62,33 @@ def _read_key(asker: Asker, key_file: str | None) -> str:
     return value
 
 
-def key_add(asker: Asker, name: str | None, account: str | None, key_file: str | None) -> dict:
-    """API キーを確かめてから登録する（F1）。確かめの失敗・衝突・書けないときは保存しない（I1〜I3・I9）。"""
+def _amount(v: str | None, allow_zero: bool = False) -> float | None:
+    """月の額の引数（正の数。`allow_zero` なら 0 は宣言を外す None）。読めなければ終了コード 2（値は表示しない）。"""
+    if v is None:
+        return None
+    try:
+        x = float(v)
+    except ValueError:
+        x = -1.0
+    if allow_zero and x == 0:
+        return None
+    if not (x > 0 and x != float("inf")):
+        raise Fail("invalid_name", MONTHLY_ERROR, 2)
+    return x
+
+
+def key_add(asker: Asker, name: str | None, account: str | None, key_file: str | None, monthly: str | None = None) -> dict:
+    """API キーを確かめてから登録する（F1）。確かめの失敗・衝突・書けないときは保存しない（I1〜I3・I9）。
+
+    `monthly` は月の額の宣言（ドル。#2930）。省けば未宣言で、near-limit では選ばれない。"""
+    usd = _amount(monthly)
     name = asker.value("<名前>", "API キーの名前", name)
     account = asker.value("--account", "結び付ける登録済みアカウント", account, ca.names())
     _precheck(name, account)
     key = _read_key(asker, key_file)
     _verify(key)
     try:
-        replaced = ak.add_key(name, key, account)
+        replaced = ak.add_key(name, key, account, monthly_usd=usd)
     except ak.Refused as e:
         raise Fail(e.reason, e.message, 2 if e.reason == "invalid_name" else 1) from e
     except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
@@ -95,18 +114,48 @@ def _precheck(name: str, account: str) -> None:
         raise Fail("account_taken", f"アカウント {account} には API キー {taken[0]} が結び付いている（1 アカウントに 1 本）")
 
 
-def key_use(value: str | None) -> dict:
-    """使い方の宣言を読む・変える（F4）。"""
-    if value is None:
-        now = ak.use_setting()
-        return {"use": now, "text": f"API キーの使い方: {now}"}
+def key_monthly(name: str | None, value: str | None) -> dict:
+    """登録済みのキーへ月の額を宣言し直す（`0` で宣言を外す）。値と世代は変えない（#2930）。"""
+    if not name or value is None:
+        raise MissingArgs([x for x, v in (("<名前>", name), ("<ドル>", value)) if v is None or not v])
+    usd = _amount(value, allow_zero=True)
+    try:
+        found = ak.set_monthly(name, usd)
+    except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
+        raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
+    if not found:
+        raise Fail("not_registered", f"登録されていない: {name}")
+    text = f"月の額を外した: {name}" if usd is None else f"月の額: {name} {usd:g} ドル（週の利用枠 {usd * 7 / 30:.2f} ドル）"
+    return {"name": name, "monthly_usd": usd, "text": text}
+
+
+def _weekly_at(v: str | None) -> float | None:
+    if v is None:
+        return None
+    try:
+        x = float(v)
+    except ValueError:
+        x = 0.0
+    if not 1 <= x <= 100:
+        raise Fail("invalid_name", "--weekly-at は 1 以上 100 以下の百分率", 2)
+    return x
+
+
+def key_use(value: str | None, weekly_at: str | None = None) -> dict:
+    """使い方の宣言と閾値 T（`--weekly-at`）を読む・変える（F4）。T を省けば今の値を保つ。"""
+    t = _weekly_at(weekly_at)
+    if value is None and t is None:
+        now, cur = ak.use_setting(), ak.weekly_at_setting()
+        return {"use": now, "weekly_at": cur, "text": f"API キーの使い方: {now}（閾値 T {cur:g}%）"}
+    value = ak.use_setting() if value is None else value
     if value not in ak.USES:
         raise Fail("invalid_name", f"使い方は {' / '.join(ak.USES)} のどれか: {value}", 2)
     try:
-        ak.set_use(value)
+        ak.set_use(value, t)
     except (ak.BookError, ak.book_lock_timeout(), OSError) as e:
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
-    return {"use": value, "text": f"API キーの使い方: {value}"}
+    cur = ak.weekly_at_setting()
+    return {"use": value, "weekly_at": cur, "text": f"API キーの使い方: {value}（閾値 T {cur:g}%）"}
 
 
 def is_key(name: str | None) -> bool:
@@ -114,12 +163,11 @@ def is_key(name: str | None) -> bool:
 
 
 def key_check(name: str) -> dict:
-    """登録済み API キーに 1 回要求を打ち、成功なら状態を `ok` へ戻す（F3）。失敗なら状態を変えない。"""
+    """登録済み API キーに 1 回要求を打つ（F3）。状態は記録しない（#2930 の決定 2）。"""
     k = ak.get(name)
     if k is None:
         raise Fail("not_registered", f"登録されていない: {name}")
     _verify(k.key)
-    ak.note_state(k.name, k.generation, ak.OK, checked=True)
     return {"name": name, "kind": "api_key", "text": f"使える: {name}"}
 
 
@@ -140,6 +188,22 @@ def list_rows() -> list[dict]:
         return []
 
 
+def _key_usd(v: float | None) -> str:
+    return "不明" if v is None else f"{v:,.2f}"
+
+
+def key_state(r: dict) -> str:
+    """API キーの行の状態の語（near-limit で選ばれうるか）。"""
+    if r["monthly_usd"] is None:
+        return "月の額が未宣言（near-limit で選ばない）"
+    if r["ratio"] is None:
+        return "帳簿を読めない"
+    return "利用枠を使い切った" if r["ratio"] >= 1 else "使える"
+
+
 def table_row(r: dict, width: int) -> tuple[str, ...]:
-    """表の 1 行（識別の列に結び付いたアカウント、状態の列に状態の語）。`width` は表の列の数。"""
-    return (r["name"], r["account"], *("-",) * (width - 3), STATE_LABEL.get(r["state"], r["state"]))
+    """表の 1 行: 識別の列に結び付いたアカウント、枠の大きさの列に月の額、残りの列に直近 7 日の使用額 / 週の利用枠（割合）。"""
+    monthly = "月 未宣言" if r["monthly_usd"] is None else f"月 {r['monthly_usd']:,.2f}"
+    ratio = "" if r["ratio"] is None else f"（{r['ratio'] * 100:.0f}%）"
+    used = f"7日 {_key_usd(r['spent_7d'])} / 週 {_key_usd(r['weekly_budget']) if r['weekly_budget'] else '-'}{ratio}"
+    return (r["name"], r["account"], *("-",) * (width - 7), monthly, used, "-", "-", key_state(r))

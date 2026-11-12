@@ -5,7 +5,7 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 1104,
+      "files": 1147,
       "version": "3.11"
     },
     {
@@ -16,10 +16,13 @@
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 14
+      "files": 8
     }
   ],
   "test": {
+    "ci": {
+      "only": true
+    },
     "suites": [
       {
         "name": "pytest",
@@ -340,22 +343,743 @@
   "materials": {
     "unknown": "答えが無い"
   },
+  "docs": {
+    "files": [
+      "**/*.md",
+      "docs/glossary/glossary.json",
+      "docs/metrics/ndf-token-usage/*.json"
+    ],
+    "tested": [
+      {
+        "paths": [
+          ".github/pull_request_template.md",
+          ".ndf/mvv.md",
+          "AGENTS.md",
+          "CHANGELOG.md",
+          "CLAUDE.md",
+          "CODE_OF_CONDUCT.md",
+          "CONTRIBUTING.md",
+          "GOVERNANCE.md",
+          "KIRO.md",
+          "README.md",
+          "SECURITY.md",
+          "SUPPORT.md",
+          "docs/**",
+          "plugins/mcp/**",
+          "plugins/ndf/**",
+          "plugins/playwright-kit/**",
+          "tests/runtime-smoke/README.md"
+        ],
+        "tests": [
+          "scripts/tests/test_doc_line_limit.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md",
+          "issues/**"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_design_survey.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md",
+          "docs/glossary/glossary.json",
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_legacy_names.py",
+          "plugins/ndf/scripts/tests/test_sprint_inputs.py",
+          "plugins/ndf/scripts/tests/test_supervise_pace.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md",
+          "plugins/ndf/scripts/data/ndf-common-principles.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_ndf_tracking.py",
+          "plugins/ndf/skills/fix/tests/test_fix_steps.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md",
+          "issues/mvv-ai-plugins.md",
+          "plugins/ndf/scripts/data/ndf-common-principles.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_project_mvv.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md",
+          "docs/glossary/glossary.json",
+          "plugins/ndf/scripts/data/ndf-common-principles.md",
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_project_mvv_normal.py"
+        ]
+      },
+      {
+        "paths": [
+          ".ndf/mvv.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_mvv_gate.py",
+          "plugins/ndf/scripts/tests/test_sprint_state.py",
+          "plugins/ndf/scripts/tests/test_supervise_pace_auto.py"
+        ]
+      },
+      {
+        "paths": [
+          "AGENTS.md",
+          "CLAUDE.md",
+          "plugins/ndf/**"
+        ],
+        "tests": [
+          "scripts/tests/test_check_ndf_contracts.py"
+        ]
+      },
+      {
+        "paths": [
+          "README.md",
+          "docs/versioning-and-distribution.md",
+          "issues/old/issue-178-doc-staleness-checks.md",
+          "plugins/mcp/mcp-aws-docs/README.md",
+          "plugins/mcp/mcp-bigquery/README.md",
+          "plugins/mcp/mcp-chrome-devtools/README.md",
+          "plugins/mcp/mcp-dbhub/README.md",
+          "plugins/mcp/mcp-devin/README.md",
+          "plugins/mcp/mcp-markitdown/README.md",
+          "plugins/mcp/mcp-notion/README.md",
+          "plugins/mcp/mcp-playwright/README.md",
+          "plugins/mcp/mcp-redash/README.md",
+          "plugins/mcp/mcp-serena/README.md",
+          "plugins/ndf/README.md",
+          "plugins/playwright-kit/README.md"
+        ],
+        "tests": [
+          "scripts/tests/test_doc_staleness.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "docs/glossary/glossary.json",
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_base_sync.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "docs/glossary/glossary.json",
+          "issues/issue-2335-design.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_design_results_rewrite.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_doc_lint.py",
+          "plugins/ndf/scripts/tests/test_test_run.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "docs/glossary/glossary.json"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_glossary.py",
+          "plugins/ndf/scripts/tests/test_lib_diff_kinds.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "plugins/ndf/scripts/data/handoff-template.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_handoff.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "plugins/ndf/README.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_release_notes_changelog.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "docs/glossary/glossary.json",
+          "docs/specifications/README.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_step_scripts.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          "docs/glossary/glossary.json",
+          "plugins/ndf/README.md",
+          "plugins/ndf/skills/design/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_ci_heavy_skip.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary/glossary.json"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_parallel_lane.py",
+          "plugins/ndf/scripts/tests/test_sprint_procedures.py",
+          "plugins/ndf/scripts/tests/test_supervise_design_match.py",
+          "plugins/ndf/scripts/tests/test_supervise_sprint_chain.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary/glossary.json",
+          "plugins/ndf/scripts/data/ndf-common-principles.md",
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_supervise.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/glossary/glossary.json",
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_supervise_close_auto.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/ndf-experiments.md",
+          "plugins/ndf/**"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_experimental.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/ndf-experiments.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_lib_shparse.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/ndf-plugin-reference.md",
+          "plugins/ndf/skills/pr/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/worktree/tests/test_allow_path.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/presentations/2026-10-17-skill-plugin-development/README.md",
+          "docs/presentations/2026-10-17-skill-plugin-development/notes.md",
+          "docs/presentations/2026-10-17-skill-plugin-development/script.md"
+        ],
+        "tests": [
+          "tests/test_presentation_decks.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/cross-review-evidence-based.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-review/tests/test_measure.py",
+          "plugins/ndf/skills/cross-review/tests/test_verify_findings.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/cross-review-launch-outcome.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/doc-consistency-checks.md"
+        ],
+        "tests": [
+          "scripts/tests/test_check_markdown_links.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/ndf-context-window-metrics.md",
+          "plugins/ndf/skills/development-workflow/references/agent-layers.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_transcript_agents.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/ndf-context-window-metrics.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/skill-stats/tests/test_agents_report.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/specifications/ndf-parallel-organizer.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_parallel_run.py"
+        ]
+      },
+      {
+        "paths": [
+          "docs/versioning-and-distribution.md"
+        ],
+        "tests": [
+          "scripts/tests/test_validate_manifests_version.py"
+        ]
+      },
+      {
+        "paths": [
+          "issues/issue-1142-design-modules.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-review/tests/test_review_lib_boundaries.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/mcp/**",
+          "plugins/ndf/**",
+          "plugins/playwright-kit/**"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_bash32_multibyte_var.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/mcp/mcp-redash/skills/redash/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_redash_skill.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/mcp/mcp-serena/README.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_release_steps.py",
+          "plugins/ndf/scripts/tests/test_supervise_new.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/**",
+          "plugins/playwright-kit/**"
+        ],
+        "tests": [
+          "scripts/tests/test_check_skill_repo_assumptions.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/README.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/worktree/tests/test_guard.py",
+          "plugins/ndf/skills/worktree/tests/test_patch_target.py",
+          "plugins/ndf/skills/worktree/tests/test_setup.py",
+          "plugins/ndf/skills/worktree/tests/test_write_target.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/agents/supervisor-waits.md",
+          "plugins/ndf/agents/supervisor.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_supervisor_agents.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/agents/worker.md",
+          "plugins/ndf/skills/design/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_behavior_check.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/agents/worker.md",
+          "plugins/ndf/scripts/data/ndf-common-principles.md",
+          "plugins/ndf/skills/development-workflow/SKILL.md",
+          "plugins/ndf/skills/development-workflow/references/agent-layers.md",
+          "plugins/ndf/skills/document-style/SKILL.md",
+          "plugins/ndf/skills/logging-guidelines/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_stage_skills.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/agents/worker.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_worker_agent.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/scripts/data/handoff-template.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_legacy_values.py",
+          "plugins/ndf/scripts/tests/test_loop_revise_flow.py",
+          "plugins/ndf/scripts/tests/test_parallel_hold_lanes.py",
+          "plugins/ndf/scripts/tests/test_sprint_loop.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/scripts/data/ndf-common-principles.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_review_criteria.py",
+          "plugins/ndf/scripts/tests/test_run_state.py",
+          "plugins/ndf/scripts/tests/test_supervise_step_rerun.py",
+          "plugins/ndf/scripts/tests/test_usage_ledger.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_flow_git.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_init.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_merge_plan.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_merge_proposals.py",
+          "plugins/ndf/skills/cross-review/tests/test_rejected_findings.py",
+          "plugins/ndf/skills/cross-review/tests/test_review_criteria_flow.py",
+          "plugins/ndf/skills/cross-review/tests/test_runtime_policy_cross_review.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_carried_over.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_offline_fetch.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_queue_judge.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_reopen.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_resume_args.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_review_pool.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_run_metrics.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/scripts/data/ndf-common-principles.md",
+          "plugins/ndf/skills/pr-review/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-review/tests/test_review_kind_defaults.py",
+          "plugins/ndf/skills/cross-review/tests/test_review_profile.py",
+          "plugins/ndf/skills/cross-review/tests/test_state_init_changed_files_fallback.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/scripts/lib/README.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_worktree_lib_split.py",
+          "plugins/ndf/skills/cross-review/tests/test_rotate_pr_queue.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/backlog-refinement/references/grouping.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/backlog-refinement/tests/test_issue_upkeep_layout.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cherry-pick-pr/SKILL.md",
+          "plugins/ndf/skills/deploy/SKILL.md",
+          "plugins/ndf/skills/merged/SKILL.md",
+          "plugins/ndf/skills/retrospective/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_base_branch_consistency.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_skill_shell_vars.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/prompts/add-tests.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/final-fix.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/fix.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/implement.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/plan.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/propose.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-refactoring/tests/test_launch_agy_phases.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/prompts/add-tests.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/fix.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/implement.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/plan.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/propose.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-refactoring/tests/test_propose_prompt.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/prompts/final-fix.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-refactoring/tests/test_final_fix.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/prompts/final-fix.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/fix.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/implement.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/plan.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-refactoring/tests/test_launch_round_test.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/cross-refactoring/prompts/plan.md",
+          "plugins/ndf/skills/cross-refactoring/prompts/propose.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-refactoring/tests/test_code_metrics_proposal.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_project_mvv_wiring.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_mode_judgment.py",
+          "plugins/ndf/skills/development-workflow/tests/test_declaration_check.py",
+          "plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/references/agent-layers.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_worker_skills_guard.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/development-workflow/tests/test_conductor_entrypoints.py",
+          "scripts/tests/test_root_conftest.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/references/scripts-lookup.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_resolve.py",
+          "plugins/ndf/skills/development-workflow/tests/test_projects_scripts_lookup.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/references/scripts-lookup.md",
+          "plugins/ndf/skills/worktree/SKILL.md",
+          "plugins/ndf/skills/worktree/references/declaration.md",
+          "plugins/ndf/skills/worktree/references/local-environment.md",
+          "plugins/ndf/skills/worktree/references/test-execution.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/worktree/tests/test_scripts_reference.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/development-workflow/references/waiting.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_token_guard.py",
+          "plugins/ndf/scripts/tests/test_waiting_templates.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/notion-writing/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_notion_writing_backticks.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/out-of-scope/SKILL.md",
+          "plugins/ndf/skills/requirements-design/references/spec-template.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_issue_items.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/pr-review/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/cross-review/tests/test_review_focus_external_survey.py",
+          "plugins/ndf/skills/pr-review/tests/test_pr_review_steps.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/pr/SKILL.md"
+        ],
+        "tests": [
+          "scripts/tests/test_cross_skill_refs.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/refactoring/references/vocabulary.md"
+        ],
+        "tests": [
+          "plugins/ndf/scripts/tests/test_drive_refactor.py",
+          "plugins/ndf/scripts/tests/test_lane_prod_stage.py",
+          "plugins/ndf/scripts/tests/test_production_default_branch.py",
+          "plugins/ndf/scripts/tests/test_release_version.py",
+          "plugins/ndf/scripts/tests/test_supervise_pace_manual.py",
+          "plugins/ndf/scripts/tests/test_supervise_pace_verify.py",
+          "plugins/ndf/scripts/tests/test_supervise_step_budgets.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_assess.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_refactor_drive_resume.py",
+          "plugins/ndf/skills/cross-refactoring/tests/test_vocabulary_source.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/release/SKILL.md",
+          "plugins/ndf/skills/release/references/completion-check.md",
+          "plugins/ndf/skills/release/references/distribution-forms.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/release/tests/test_completion_check.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/release/assets/slides/script.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/release/tests/test_slide_template.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/release/references/form-package-plugin.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/release/tests/test_package_plugin_examples.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/retrospective/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/backlog-refinement/tests/test_related_skills_characterization.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/ndf/skills/worktree/SKILL.md"
+        ],
+        "tests": [
+          "plugins/ndf/skills/worktree/tests/test_base_branch.py"
+        ]
+      },
+      {
+        "paths": [
+          "plugins/playwright-kit/skills/playwright-planning/docs/03-test-techniques.md",
+          "plugins/playwright-kit/skills/playwright-planning/docs/checklists/checklist-cart-checkout.md",
+          "plugins/playwright-kit/skills/playwright-planning/docs/checklists/checklist-common.md",
+          "plugins/playwright-kit/skills/playwright-planning/docs/checklists/checklist-form.md"
+        ],
+        "tests": [
+          "plugins/playwright-kit/skills/playwright-planning/tests/test_plan_skeleton.py"
+        ]
+      }
+    ]
+  },
   "analysis": {
     "analyzer": 3,
-    "at": "2026-11-08T20:16:21+00:00",
+    "at": "2026-11-10T15:17:12+00:00",
     "inputs": {
       ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
       ".github/workflows/pr-base-guard.yml": "554f6c557ebe3ec78aec116386637552d1b22ede",
       ".github/workflows/pr-body-decisions.yml": "4c9a78fae1d3766973daa66110ad9c6a212d0fe6",
-      ".github/workflows/pytest.yml": "11944905d019174f568c7959e369cb6ae7675d01",
+      ".github/workflows/pytest.yml": "6db5a49bc78ded5537485da2866700c618e93315",
       ".github/workflows/release-cd.yml": "7652bde34f65dd1d999f178de960992626d8ee47",
       ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
       ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
-      ".github/workflows/runtime-plugin-smoke.yml": "ab0ef5762f0e1467c6a2dcfca2abdda283b94771",
-      ".github/workflows/runtime-plugin-validate.yml": "ff3bfbce63461fca5e024045154bf53487cf16f6",
-      ".github/workflows/script-structure.yml": "e0e60c30036184bb55307d65cef78c00ba2bb6da",
-      "AGENTS.md": "5458e5c1ff83f0986b2a1bac299f961ecf12089d",
+      ".github/workflows/runtime-plugin-smoke.yml": "2900ac0753da0dba35eddbc968d8c08fb6d73263",
+      ".github/workflows/runtime-plugin-validate.yml": "8e26675c804b05caf8049f5e1b0d76650d73a975",
+      ".github/workflows/script-structure.yml": "fdd8071d7027f90e363ba9913bbb119cbc4cae8a",
+      "AGENTS.md": "f61121c953b6d411a48aa7786a3bfa67256efac1",
       "CLAUDE.md": "d7a7fd6963657f69007124abe9d0d69ba6c1ebe7",
       "KIRO.md": "bee3558fe2014460b629926b6d778cd78c783dd7",
       "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
@@ -369,7 +1093,7 @@
       ]
     },
     "written": {
-      "languages": "e27115491c125f783766af591b93b23f505879521b9b1b7c1f3d7aa1a39f41c1",
+      "languages": "e54a4dbd958ae607e0ec59a349a0620ad20617c3bea9b6ed5837097aa107bdb1",
       "test_duration": "cd482f866f6a3710186622c27a6a5822f95a789d55ae82bec88f634ddc74c9a5",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",

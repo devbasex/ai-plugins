@@ -1,22 +1,20 @@
 """最終ゲートの CI の側（#1334 F4・決定 7・9）。`commands/gate.py` が呼ぶ。
 
 全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か `--ci-check` のとき、push 済みの HEAD のチェックを
-`limits.ci_wait_timeout` まで待ち、落ちたら run の成果物の JUnit を落として見分けの材料にする。検証で最終ゲートへ
-寄せた危険フラグの全体テストで変更起因が残って締め切りを過ぎたときは、原因の項目から順に取り消す（#1649）。
+`limits.ci_wait_timeout`（`3·c`。予算に依らない。#2457 決定 11）まで待ち、落ちたら run の成果物の JUnit と run の
+置き場を見分けと落ちたテストの材料にする。CI テストの宣言（`test.ci.only`）のあるリポジトリは待たずに 1 回だけ読み
+（`ci_peek_gate`。#3056 の決定 11）、落ちていれば既存失敗を着手時の head の CI の JUnit から読む（`baseline_ci_failures`）。
 """
 
 from __future__ import annotations
 
-import pathlib
 from typing import Any, Optional
 
 import gh_checks
 import test_triage
 
-from . import clock, culprit, die, info, rounds, timeline
+from . import die, info, timeline, triage
 from .github import gh_api_get
-from .items import live_items
-from .outbound import plan_line
 from .paths import git_out, work_dir
 
 
@@ -45,18 +43,73 @@ def ci_junit(state: dict[str, Any], sha: str, checks: list[str], runs: Optional[
     )
 
 
+def _failed_verdict(state: dict[str, Any], sha: str, checks: list[str], runs, label: str, outcome: str) -> tuple[bool, str, dict[str, Any]]:
+    """落ちた結論の判定と、見分けの材料（CI の JUnit と run の置き場）。"""
+    places = [str(r.get("html_url") or r.get("details_url") or "") for r in runs or [] if isinstance(r, dict)]
+    return (
+        False,
+        f"{label} の結論は {outcome} でした",
+        {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks, runs), "log_place": " ".join(p for p in places if p)},
+    )
+
+
+def baseline_ci_failures(state: dict[str, Any], checks: list[str]) -> list[str]:
+    """着手時の head（`triage.baseline_head`）の CI の JUnit から読んだ落ちた ID。CI テストの宣言のあるリポジトリの既存失敗（#3056）。
+
+    着手前にテストを走らせないため、既存失敗はここで読む。着手時の head の CI は最終ゲートの時点で終わっているので待たない。
+    照会できない・head と同じ・読めないときは空（落ちた ID はすべて変更起因として扱う）。
+    """
+    base = triage.baseline_head(state)
+    head = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
+    repo = str(state.get("repo") or "")
+    if not (repo and base) or base == head:
+        return []
+    runs = gh_checks.fetch_check_runs(repo, base, rest_get=gh_api_get, empty_ok=True)
+    if not runs:
+        return []
+    names = checks or sorted({str(r.get("name") or "") for r in runs if isinstance(r, dict)} - {""})
+    ids, _ = test_triage.merged_failed_ids(ci_junit(state, base, names, runs), test_triage.tracked_files(str(work_dir(state))))
+    return list(ids or [])
+
+
+def ci_peek_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """CI テストの宣言のあるリポジトリの最終ゲート。push 済みの HEAD のチェックを待たずに 1 回だけ読む（#3056 の I4）。
+
+    落ちていれば `ci_gate` と同じ材料を返して最終ゲート修正へ回す。通っていれば通過。未完了・照会できないときは
+    「CI 未完了」と書いて通過にし、合否は検査のプランの `ci-peek`・`ci-peek-merge` とマージ（CI の完了を確かめる）へ渡す。
+    テストのチェックの名前が無ければ head のすべてのチェックを読む。
+    """
+    sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
+    repo = str(state.get("repo") or "")
+    runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get, empty_ok=True) if repo and sha else None
+    checks = ci_checks(state) or sorted({str(r.get("name") or "") for r in runs or [] if isinstance(r, dict)} - {""})
+    # SKIPPED・NEUTRAL は通過（監視とマージと同じ読み方。#3056 の STD1）
+    outcome = gh_checks.checks_outcome(runs, checks, gh_checks.CI_ONLY_PASSING) if checks else ("pending" if runs is not None else None)
+    label = f"チェック {', '.join(checks) or '（まだ無い）'}（{sha[:7]} / 照会 1 回・待たない）"
+    if outcome == "success":
+        return True, f"{label} の結論は success（SKIPPED・NEUTRAL を含む）でした", None
+    if outcome in (None, "pending"):
+        why = "照会できない" if outcome is None else "終わっていない"
+        return True, f"CI 未完了: {label} が{why}。合否は検査のプランの ci-peek とマージが確かめる", None
+    passed, detail, verdict = _failed_verdict(state, sha, checks, runs, label, outcome)
+    verdict["existing_failures"] = baseline_ci_failures(state, checks)
+    return passed, detail, verdict
+
+
 def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
     """継続的統合の結果で判定する。`pending` の間は上限（`limits.ci_wait_timeout`）まで待つ（決定 9）。
 
     **結果を得られないときは通過させない**（fail-closed）。上限までに終わらない・照会できないときは、待った秒と
-    理由を出して「判断が要る」（終了コード 4）で終える。
+    理由を出して「判断が要る」（終了コード 4）で終える。CI テストの宣言があれば待たない（`ci_peek_gate`）。
     """
+    if timeline.strategy_of(state).ci_only:
+        return ci_peek_gate(state)
     sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     repo = str(state.get("repo") or "")
     checks = ci_checks(state)
     if not checks:
         die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
-    max_wait = float(timeline.state_ci_wait_timeout(state, clock.now()))
+    max_wait = float(timeline.state_ci_wait_timeout(state))
     last: dict[str, Any] = {}
 
     def fetch() -> Optional[str]:
@@ -74,27 +127,4 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
         die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
-    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks, last.get("runs"))}
-
-
-def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
-    """検証で最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て締め切りを過ぎたとき、原因の項目から取り消す（#1649）。
-
-    取り消す対象は寄せた危険フラグの項目ではなく、原因の判定（`culprit.judge`。締め切りは打ち切りの後の取り消しと同じ
-    確かめの開始の締め切り H − v。#1932 原則 3）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
-    取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
-    """
-    deferred = rounds.deferred_union(state)
-    verdict = gate.get("triage") or {}
-    rerun = culprit.rerun_of(verdict)
-    if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
-        return False
-    end = timeline.gate_start_end(state)
-    found = culprit.judge(state, gate, verdict, end)
-    reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    passes = culprit.rerun_passes(state, rerun, end)
-    reverted = culprit.revert_in_order(path, state, found.order, reason, passes, deadline=end).reverted
-    gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
-    if reverted:
-        info(f"↩ 原因の項目から順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
-    return bool(reverted)
+    return _failed_verdict(state, sha, checks, last.get("runs"), label, outcome)

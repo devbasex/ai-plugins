@@ -148,7 +148,8 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
 | `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
-| develop（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+| `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへ取り込む | `target: sprint` / `review: true` |
+| develop（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: develop` / `review: true` |
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。

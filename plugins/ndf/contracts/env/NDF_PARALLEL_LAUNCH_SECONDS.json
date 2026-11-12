@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PARALLEL_LAUNCH_SECONDS",
+  "set_by": "user",
+  "summary": "並列の計画の run が一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限の秒（既定 120。plugins/ndf/scripts/lib/parallel_launch.py）"
+}

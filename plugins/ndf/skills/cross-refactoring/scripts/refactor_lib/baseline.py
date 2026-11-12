@@ -6,7 +6,8 @@
 `baseline_test.suites` に書き（最終ゲートの静的解析の判定に使う。I12）、落ちたテストは JUnit から読んで既存失敗として書く。
 最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る（I5）。起動の失敗なら止める（#1483 E7）。
 上限を超えたときは止めずに打ち切りの記録（`timed_out` が真、`seconds` は上限）を返し、`init` が履歴へ 1 行足してから
-止める（#1385 E9）。
+止める（#1385 E9）。CI テストの宣言（`test.ci.only`）があればテストを走らせず、静的解析だけを走らせる（#3056）。
+既存失敗の見分けは最終ゲートが着手時の head の CI の JUnit で行う。
 """
 
 from __future__ import annotations
@@ -36,14 +37,17 @@ def _whole_runs(strategy: ts.Strategy, kind: Any = None) -> list[ts.ScopeRun]:
 
 
 def locations_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> list[str]:
-    """CI に任せる戦略で着手前に走らせる範囲テストのテストの置き場所（正規化して並べ替えた集合）。ほかの戦略は空。"""
-    if not strategy.whole_on_ci or strategy.name == ts.ROUND_ONLY:
+    """CI に任せる戦略で着手前に走らせる範囲テストのテストの置き場所（正規化して並べ替えた集合）。ほかの戦略と、
+    CI テストの宣言のあるリポジトリ（テストを走らせない）は空。"""
+    if not strategy.whole_on_ci or strategy.name == ts.ROUND_ONLY or strategy.ci_only:
         return []
     return sorted({os.path.normpath(str(p)) for p in test_locations(scope, str(work))})
 
 
 def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> tuple[str, list[ts.ScopeRun]]:
     """着手前に走らせるもの。`(mode, 範囲テストか全体テストの並び)`。mode は `whole` / `scope` / `round`。"""
+    if strategy.ci_only:
+        return "scope", _whole_runs(strategy, ts.LINT)
     if strategy.name == ts.ROUND_ONLY:
         # 全体テストの後にラウンドテストを 1 回。同じコマンドなら 2 度走らせない（#880）。
         runs = _whole_runs(strategy)

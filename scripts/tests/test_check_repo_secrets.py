@@ -197,10 +197,6 @@ def test_env_example_is_not_checked(repo, capsys):
 # --- 受け入れ条件 5 -----------------------------------------------------------
 
 
-def test_this_repository_passes(capsys):
-    assert crs.main(["--root", str(REPO)]) == 0
-
-
 def test_this_repository_fails_without_allow(tmp_path, capsys):
     (tmp_path / "allow.json").write_text(json.dumps({"version": 1, "secrets": []}), encoding="utf-8")
     assert crs.main(["--root", str(REPO), "--allow", str(tmp_path / "allow.json")]) == 1

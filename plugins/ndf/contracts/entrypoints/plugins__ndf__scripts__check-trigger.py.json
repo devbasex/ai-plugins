@@ -19,6 +19,13 @@
   ],
   "settings": [
     {
+      "file": "project.json",
+      "keys": [
+        "docs",
+        "ndf_policies"
+      ]
+    },
+    {
       "file": "worktree.json",
       "keys": [
         "base_branch"

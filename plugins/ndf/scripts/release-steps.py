@@ -53,7 +53,7 @@ release/v<版>-sync → ベースブランチ）へリリース記録
 （`## リリース記録`。形は lib/dist_record.py）をコメントで 1 件書く。タグと GitHub Release が無ければ書かずに 3 で止まり、
 同じ記録が既にあれば書かずに ok を返す。投稿の失敗は 1、PR を読めなければ 2。metrics.release_pr_url を
 プランの `pr_from` が報告の Pull Request へ移す（#1273）。
-`record --promote` は昇格の経路で、最後にマージした昇格の Pull Request（--head → --base）へ同じ形の記録を書く。
+`record --promote` はリリースの Pull Request で届く経路で、最後にマージしたリリースの Pull Request（--head → --base）へ同じ形の記録を書く。
 `版:` はマージのコミット（`<本番チャネル> <短い SHA>`）である（#837）。
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
@@ -785,14 +785,14 @@ def _emit_record(written, cd):
 
 
 def record_promote(root, a, cd=None):
-    """昇格の経路（--promote）: 最後にマージした昇格の Pull Request（--head → --base）へリリース記録を書く（#837）。
+    """リリースの Pull Request で届く経路（--promote）: 最後にマージしたリリースの Pull Request（--head → --base）へリリース記録を書く（#837）。
     版はマージのコミット（`<本番チャネル> <短い SHA>`）、直前の版はその 1 つ目の親。マージ済みの PR が無ければ 3。"""
     if not (a.head and a.base):
         raise StepError("--promote には --head（ベースブランチ）と --base（本番チャネル）が要る", EXIT_PRECONDITION)
     pr = find_pr(root, a.head, a.base, states=("MERGED",))
     sha = merge_commit_of(root, pr["number"]) if pr else None
     if not sha:
-        raise StepError(f"{a.head} → {a.base} のマージ済みの昇格の PR が無い（リリースが済んでいない）", EXIT_PRECONDITION)
+        raise StepError(f"{a.head} → {a.base} のマージ済みのリリースの Pull Request が無い（リリースが済んでいない）", EXIT_PRECONDITION)
     n, prev, ver = pr["number"], record.parent_of(root, a.base, sha), f"{a.base} {sha[:7]}"
     body = record.promote_body_of(n, a.head, a.base, prev, sha[:7], a.prs, cd)
     _emit_record(record.write(root, n, ver, prev, body, a.prs, ver, cd), cd)
@@ -1194,9 +1194,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("record", parents=[common], help="リリースの後に、本番のリリースの PR へリリース記録（## リリース記録）を書く")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--version", type=version_arg)
-    g.add_argument("--promote", action="store_true", help="昇格の Pull Request（--head → --base）のマージで出たときの記録")
+    g.add_argument("--promote", action="store_true", help="リリースの Pull Request（--head → --base）のマージで出たときの記録")
     g.add_argument("--merged", action="store_true", help="本番チャネルへの直接のマージで CD が届けたときの記録（最後の --prs へ書く）")
-    p.add_argument("--head", help="--promote: 昇格の Pull Request の head（ベースブランチ）")
+    p.add_argument("--head", help="--promote: リリースの Pull Request の head（ベースブランチ）")
     p.add_argument("--base", help="--promote / --merged: 本番チャネル")
     p.add_argument("--cd-result", help="cd-result が書いた結果のファイル。値を `CD の結果:` の行へ書く")
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号", help="スプリントの PR（`スプリント:` の行に並べる）")

@@ -168,9 +168,10 @@ def lane_of(main: Path, lane: Optional[str] = None, status=run_status) -> Option
 
 def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
     """答えの後に持ち主のレーンを起こすかを、レーンの側の待ちの記録で決める（6f）。ラッパーの状態では決めない（止め方の
-    食い違いで running が残っても起こし損ねないため）。ループのレーンは記録が `waiting_only` で止まっている、1 スプリントの
+    食い違いで running が残っても起こし損ねないため）。ループのレーンは記録が `waiting_only` か `answer_hold` で止まっている、1 スプリントの
     レーンは引継ぎ文書に依頼の id がある（保留の手順が書く）。記録を持たない一時レーンは、ラッパーが止まっているか
     （`relay_ls()` の統一 JSON レポートで running / awaiting_approval でない）で決める（保留の手順の最後に自分で止める）。"""
+    from parallel_hold import WAIT_STOPS
     from sprint_loop_names import LOOP_DIR
 
     try:
@@ -185,7 +186,7 @@ def lane_waits(main: Path, name: str, lane: str, rid: str, relay_ls) -> bool:
     try:
         if isinstance(hit.input, pp.LoopInput):
             rec = json.loads((repo / LOOP_DIR / hit.input.loop / "loop.json").read_text(encoding="utf-8"))
-            return rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") == "waiting_only"
+            return rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") in WAIT_STOPS
         return rid in (repo / ".ndf" / "handoff" / f"{hit.handoff_name()}.md").read_text(encoding="utf-8")
     except (OSError, ValueError, AttributeError):
         return False

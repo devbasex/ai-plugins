@@ -166,7 +166,9 @@ def record_steps(name: str, *, target_pr: str | None = None, advance: bool = Fal
 
     - `target_pr`: PR を指す検査（`--target-pr`）。`advance` なら、マージした PR のマージのコミットへ
       `check-done/*` を進める（スプリントの検査。決定 8）
-    - `pr`: 差分の検査（`--pr {pr}`）。落ちたら検査の PR を閉じる"""
+    - `pr`: 差分の検査（`--pr {pr}`）。落ちたら検査の PR を閉じる
+    - `review`: 実装レビューだけの回（only: review）。構造改善を通さなかった回（停止中を含む）に渡し、`check-done/check`
+      を進めない（進めると、通していない差分が構造改善の範囲から外れる）"""
     record = f"{CHECK_PY} record --id {shlex.quote(name)} --state {{state_dir}} --root ."
     if review:
         record += " --review"

@@ -25,9 +25,11 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 unpublished は手元の HEAD が公開した地点より進んでいるか（plan-comment が判定できなければ null）。
 done・stopped・pause の各出口で、結果 JSON を組む前に `refactor.py plan-comment` を 1 度だけ打ち、リファクタリング計画のコメントを書き直す（#1692）。
 最終ゲートを経ずに終わった実行は完了にせず、中断（stopped・metrics.exit に最終ゲートの終了コード）で終える（#1482）。
-`init` が時間の枠の不足（`SKIP=init-timeout` / `SKIP=window`）で止まったときだけ、リファクタリングを飛ばした欠けの残る結果
-（stopped・`gaps` 1 件・`metrics.skipped`・終了コード 6）で返す（#2047）。`init` が想定最大時間を下限まで上げた（`BUDGET_SOURCE=floor`）ら、
-ステップの延長（`drive_pause.write_extension`）へ想定最大時間の秒を書く。
+`init` が着手前のテストのハング（`SKIP=init-timeout`）で止まったときだけ、リファクタリングを飛ばした欠けの残る結果
+（stopped・`gaps` 1 件・`metrics.skipped`・終了コード 6）で返す（#2047）。
+
+**予算を理由に打ち切らない**（#2457）。止めて人へ渡す出口（`gate`・終了コード 10）と結果 JSON の予算の欄は `halt_exit.py` が持つ。
+子プロセスの上限の分は、子が起動の前にステップの延長を書く（`step_extend`。開始は `CROSS_REFACTORING_STEP_STARTED` で渡す）。
 """
 
 from __future__ import annotations
@@ -61,7 +63,9 @@ if str(HERE) not in sys.path:
 from refactor_lib import ledger  # noqa: E402  報告と同じ判定で採用を数える（I8）
 from refactor_lib.paths import alive_path  # noqa: E402
 from refactor_lib.vocabulary import PHASES  # noqa: E402
-from assignee_launch import FIX_PHASES, LOOP_LIMIT, MONITOR_STOPPED, AssigneeLaunch  # noqa: E402,F401
+from assignee_launch import FIX_PHASES, LOOP_LIMIT, MONITOR_STOPPED, AssigneeLaunch, Halt  # noqa: E402,F401
+from halt_exit import HaltExit, budget_metrics, emit_if_halted, refactor_items  # noqa: E402
+import time  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
 KIND = "refactor"  # 耐久の記録の種類
@@ -134,12 +138,12 @@ class Skip(Stop):
         self.kind, self.detail = kind, detail
 
 
-class Drive(AssigneeLaunch):
+class Drive(AssigneeLaunch, HaltExit):
     def __init__(self, pr: int, init_args: list[str], root: str | None = None):
         self.pr = pr
         self.init_args = init_args
         self.root = root  # 対象のリポジトリの根（耐久ワークフローの入力。古い記録では None）
-        self.extra_env: dict = {}  # 子へ足す環境変数
+        self.extra_env: dict = {"CROSS_REFACTORING_STEP_STARTED": f"{time.time():.0f}"}  # 子へ足す環境変数（ステップの開始。#2457 決定 8）
         self.v: dict = {}
         self.final_rc = 1  # 最後に打った final-gate の終了コード
         self.comment_done = False  # done の出口でコメントを書き直したか（stopped へ移っても 2 度目を打たない。I8）
@@ -210,6 +214,7 @@ class Drive(AssigneeLaunch):
         s = self.state()
         items = s.get("items") or []
         t = ledger.tally(s).as_metrics()
+        extra = budget_metrics(s)
         # unconfirmed は結果 JSON の末尾側に置く（キーの並びを変えない）
         rest = {"unconfirmed": t.pop("unconfirmed")} if "unconfirmed" in t else {}
         c = {
@@ -218,6 +223,7 @@ class Drive(AssigneeLaunch):
             "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
             "reassigned": sum(1 for e in s.get("no_results") or [] if e.get("decision") == "reassign"),  # 振り替えの回数（#919）
         }
+        c.update(extra)
         c.update(rest)
         if "PLAN_COMMENT" in self.v:
             # 未公開の改善項目があるか（決定 6）。plan-comment が判定できなければ null
@@ -285,9 +291,6 @@ class Drive(AssigneeLaunch):
         if "TMP_DIR" not in self.v or "ID" not in self.v:
             raise Stop("refactor.py init が TMP_DIR / ID を返さない", 2)
         lease_stage.touch_held()
-        if self.v.get("BUDGET_SOURCE") == "floor":  # 下限まで上げた想定最大時間で、親のステップの締め切りを延ばす（#2047 の決定 4）
-            minutes = int(self.v.get("BUDGET_MINUTES") or 0)
-            dp.write_extension(minutes * 60, f"想定最大時間を下限の {minutes} 分へ上げた")
         self.extra_env["CROSS_REFACTORING_TMP_DIR"] = self.v["TMP_DIR"]
         self.sh("prepare-worktrees.sh", ["bash", str(HERE / "prepare-worktrees.sh"), self.v["ID"]])
 
@@ -338,18 +341,22 @@ class Drive(AssigneeLaunch):
             if not go_final:
                 self.verify_rounds()
 
-    def catch_up(self) -> None:
-        """打ち直しで耐久ワークフローを続ける前に 1 度打ち、止まっていた時間の分だけ締め切りをずらす（#1491。耐久ステップにしない）。"""
-        tmp = self.known_tmp()
-        env = {**os.environ, **({"CROSS_REFACTORING_TMP_DIR": str(tmp)} if tmp else {})}
-        call(_refactor_cmd("catch-up", str(self.pr)), env)
-
     def verify_round(self) -> bool:
-        """検証を 1 回打ち、修正が要れば修正と取り込みまで進める。修正したなら真を返す。"""
+        """検証を 1 回打ち、判定か修正が要ればそこまで進める。もう一度検証するなら真を返す（#2457）。"""
+        for key in ("VERIFY", "FIX_IMPL", "JUDGE_IMPL", "HALT_REASON"):
+            self.v.pop(key, None)
         self.rf("verify", self.v["ID"])
-        if self.v.get("VERIFY") != "fix":
+        verdict = self.v.get("VERIFY")
+        if verdict == "halt":
+            raise Halt(self.v.get("HALT_REASON") or "検証が止めて人へ渡した")
+        if self.flaky_requested():
+            self.flaky_phase()
+        if verdict == "judge":
+            self.judge_phase(self.v.get("JUDGE_IMPL") or "")
+            return True
+        if verdict != "fix":
             return False
-        self.impl_phase("fix")
+        self.impl_phase("fix", self.v.get("FIX_IMPL") or None)
         self.rf("merge-fix", self.v["ID"])
         return True
 
@@ -368,6 +375,11 @@ class Drive(AssigneeLaunch):
         self.v.pop("FINAL_GATE", None)
         rc, _ = self.rf("final-gate", i, ok=(0, 1, 2))
         self.final_rc = rc
+        if self.v.get("FINAL_GATE") == "halt":
+            raise Halt(self.v.get("HALT_REASON") or "最終ゲート修正が停滞した")
+        if self.v.get("FINAL_GATE") == "flaky":
+            self.flaky_phase()
+            return False
         if rc in (0, 1):
             return True
         if self.v.get("FINAL_GATE") == "recheck":
@@ -390,26 +402,15 @@ class Drive(AssigneeLaunch):
         c = {**self.counts(), **(extra or {})}
         if "unconfirmed" in c:
             raise Stop(f"最終ゲートを経ていないため、残った改善項目 {c['unconfirmed']} 件は採用と確定していない", self.final_rc)
-        return dp.done(
+        out = dp.done(
             TOOL,
             f"改修計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・取り消し {c['reverted']}・見送り {c['deferred']}）",
             self.report(),
             c,
         )
-
-    def skipped(self, e: Skip) -> dict:
-        """時間の枠の不足で飛ばした結果（欠けの残る結果・終了コード 6）。状態ファイルが無ければ（打ち切りは保存の前）件数は持たない。"""
-        if not self.comment_done:
-            self.refresh_plan_comment()
-        skipped = {"kind": e.kind, "reason": e.detail}
-        metrics = {**(self.counts() if self.has_state() else {}), "skipped": skipped, "exit": e.code}
-        gap = {"kind": "refactor", "name": e.kind, "reason": f"時間の枠に収まらず飛ばした: {e.detail}"}
-        return dp.incomplete(TOOL, str(e), metrics, gap)
-
-    def stopped(self, e: Stop) -> dict:
-        if not self.comment_done:
-            self.refresh_plan_comment()
-        return dp.stopped(TOOL, str(e), self.counts() if self.has_state() else {}, e.code)
+        if out.get("items"):
+            out["items"][0]["refactor_items"] = refactor_items(self.state())
+        return out
 
     def review_file(self) -> Path:
         return self.tmp / f"drive-rf{self.v['ID']}-cross-review.json"
@@ -454,8 +455,6 @@ class Drive(AssigneeLaunch):
         ref = durable.resolve(durable.launch_key(KIND, identity), finished=self.finished)
         if ref.action == "done":
             return ref.output["result"]
-        if ref.action == "continue":
-            self.catch_up()
         after = durable.resume_paused(ref)
         wid = durable.start(ref, refactor_drive, self.pr, self.init_args, self.root)
         out = durable.wait(wid, "pause", after=after)
@@ -505,9 +504,11 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
             result = d.done()
         result["items"] = [*result.get("items", []), *json.loads(d.v.get("SWEPT") or "[]")]  # 開始の片付けの結果
     except Skip as e:
-        result = d.skipped(e)
+        result = d.skipped(e, TOOL)
+    except Halt as e:
+        result = d.halted(e, TOOL)
     except Stop as e:
-        result = d.stopped(e)
+        result = d.stopped(e, TOOL)
     head = pr_head(d.call, pr) if result.get("status") == "ok" else None
     return dict(result=result, state_file=str(d.state_file()) if d.has_state() else "", head=head, args=result_args(init_args, PLACE_ARGS))
 
@@ -521,7 +522,7 @@ def main(argv: list[str] | None = None) -> None:
         lease_stage.hold(ENTRY, pr=a.pr)  # 同じ PR の改修計画実行を 2 本流さない。終わりで返す（#2342）
     d = Drive(a.pr, rest)
     try:
-        dp.main(TOOL, d.run, dict)
+        dp.main(TOOL, lambda: emit_if_halted(d.run()), dict)
     except SystemExit as e:
         if d.paused:
             # 耐久ワークフローは続きを待ったまま残す（DBOS の後始末で待たない）

@@ -251,7 +251,7 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor
 
 
 def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_path, env_tmp_dir):
-    """修正の対象でない項目のコミットを含む範囲は、範囲ごと取り消す。"""
+    """#2457 の棚卸し #31: 修正の対象でない項目のコミットだけを git revert で打ち消し、差し戻しに残す。"""
     work = _make_work(tmp_path)
     head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state_path = _fix_state(tmp_path, work, head)
@@ -270,5 +270,6 @@ def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_pa
     state = read_state(state_path)
     assert state["items"][0]["commits"]["fix"] == []
     assert state["items"][0]["fix_count"] == 1
-    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == head, "取り消しは revert を積まずに範囲を外す"
+    assert _git("rev-parse", "HEAD~2", cwd=work).stdout.strip() == head, "打ち消しは revert を積む（履歴を書き換えない）"
+    assert state["sendbacks"][0]["kind"] == "fix_procedure"
     assert not pushed, "最終ゲートの前には push しない（#1399）"

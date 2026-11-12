@@ -4,7 +4,8 @@
   `&` で背景へ回したもの・ヒアドキュメントとコメントの中は当てない。置換の中・`bash -c` / `sh -c`・`eval` の中は前景で動く
 - `starts_plan(cmd)`: `supervise.py` の `queue` か `run`（プランを起こす副命令）を起動するか。コマンドの位置で起動して
   いるものだけを見る（`echo` の引数・引用やヒアドキュメントの中の文字列は拾わない）。インタプリタのフラグ（`python3 -u`）と
-  `env`・`nohup`・変数の代入は挟んでよい
+  `env`・`nohup`・変数の代入は挟んでよい。`supervise.py advance` は `--step` の値の中に `queue` か `run` の起動があれば
+  起動と読む（手順の連続実行を通した起動も、文脈の上限の判定から外さない。#2909 の I9）
 """
 
 from __future__ import annotations
@@ -101,24 +102,42 @@ def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
     return False
 
 
-def starts_plan(cmd: str) -> bool:
-    if "supervise.py" not in cmd:
+def starts_plan(cmd: str, depth: int = 0) -> bool:
+    if "supervise.py" not in cmd or depth > MAX_DEPTH:
         return False
-    return _plan_in(sp.parse_bash(cmd))
+    return _plan_in(sp.parse_bash(cmd), depth)
 
 
-def _plan_in(n: sp.Node) -> bool:
+def _plan_in(n: sp.Node, depth: int) -> bool:
     if n.type == "heredoc_body":
         return False
-    if n.type == "command":
-        words = _words(n)
-        i = 0
-        while i < len(words) and (words[i] in ("env", "nohup") or ASSIGN.match(words[i])):
+    if n.type == "command" and _command_starts_plan(_words(n), depth):
+        return True
+    return any(_plan_in(c, depth) for c in n.children if c.child_count)
+
+
+def _command_starts_plan(words: list[sp.Word], depth: int) -> bool:
+    i = 0
+    while i < len(words) and (words[i] in ("env", "nohup") or ASSIGN.match(words[i])):
+        i += 1
+    if i < len(words) and PYTHON.fullmatch(words[i]):
+        i += 1
+        while i < len(words) and words[i].startswith("-"):
             i += 1
-        if i < len(words) and PYTHON.fullmatch(words[i]):
-            i += 1
-            while i < len(words) and words[i].startswith("-"):
-                i += 1
-        if i + 1 < len(words) and words[i].endswith("supervise.py") and words[i + 1] in ("queue", "run"):
-            return True
-    return any(_plan_in(c) for c in n.children if c.child_count)
+    if not (i + 1 < len(words) and words[i].endswith("supervise.py")):
+        return False
+    if words[i + 1] in ("queue", "run"):
+        return True
+    # 手順の連続実行（`advance`）は `--step` の値の中の起動も起動と読む（#2909 の I9）
+    return words[i + 1] == "advance" and any(starts_plan(step, depth + 1) for step in _advance_steps(words[i + 2 :]))
+
+
+def _advance_steps(rest: list[sp.Word]) -> list[str]:
+    """`supervise.py advance` の引数から `--step` の値を並べる（`--step X` と `--step=X` の両方）。"""
+    steps = []
+    for j, w in enumerate(rest):
+        if w == "--step" and j + 1 < len(rest):
+            steps.append(str(rest[j + 1]))
+        elif w.startswith("--step="):
+            steps.append(str(w[len("--step=") :]))
+    return steps

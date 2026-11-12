@@ -19,7 +19,17 @@ import sys
 
 import pytest
 
-from crossref_helpers import SCOPE_COMMAND, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_state, past_fix_end
+from crossref_helpers import (
+    verify_judged,
+    SCOPE_COMMAND,
+    build_git_flow,
+    commit_with_trailers,
+    git,
+    item_trailers,
+    read_state,
+    write_state,
+    past_fix_end,
+)
 
 FAR = "2099-01-01T00:00:00+00:00"
 LIMIT = 12
@@ -100,6 +110,7 @@ def _item(item_id, rank, path, test_target):
 def _setup(
     flow,
     cmd_setup,
+    cmd_phases,
     cmd_implement,
     *,
     whole="tests/test_layout.py",
@@ -141,7 +152,7 @@ def _setup(
     if late:
         past_fix_end(state)
     write_state(flow["path"], state)
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     _write(work, "src/big.py", x_text)
     commit_with_trailers(work, "Refactor I-001", item_trailers("I-001"))
     _write(work, "src/structure.py", y_text)
@@ -151,7 +162,7 @@ def _setup(
 
 def _verify(flow, cmd_converge, capsys):
     capsys.readouterr()
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     out = capsys.readouterr().out
     values = [line.split("=", 1)[1] for line in out.splitlines() if line.startswith("VERIFY=")]
     state = read_state(flow["path"])
@@ -165,9 +176,9 @@ WHOLE_TESTS = [
 
 
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
-def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_implement, cmd_converge, capsys, whole, name):
+def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name):
     """AC7・AC10・I4 — Y は取り消されず `implemented` で待ち、修正へ回るのは X だけ。"""
-    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, whole=whole, name=name)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 
@@ -182,24 +193,27 @@ def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_im
 
 
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
-def test_after_the_deadline_only_the_culprit_is_reverted_with_its_check(flow, cmd_setup, cmd_implement, cmd_converge, capsys, whole, name):
-    """AC7・AC8・I5・I6 — 締め切りで X を取り消す理由に suite とファイルが入り、Y は走らせ直されて残る。"""
-    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name, late=True)
+def test_an_infeasible_culprit_is_reverted_and_the_waiting_item_is_rerun(
+    flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys, whole, name
+):
+    """#2457 受け入れ条件 9・I5 — 締め切りでは取り消さない。X を成立しないと判定したら X だけを打ち消し、Y は走らせ直されて残る。"""
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, whole=whole, name=name, late=True)
 
-    verify, items, _ = _verify(flow, cmd_converge, capsys)
+    capsys.readouterr()
+    verify = verify_judged(cmd_converge, flow["path"], capsys, feasible={"I-001": False})
+    items = {i["id"]: i for i in read_state(flow["path"])["items"]}
 
     assert verify == "done"
     x, y = items["I-001"], items["I-002"]
-    assert x["status"] == "reverted"
-    assert "size" in x["failure_reason"] and "src/big.py" in x["failure_reason"]
-    assert x["failure_reason"] != "範囲テストが修正に使える時間の内に通らなかった"
+    assert x["status"] == "reverted" and x["revert_reason"] == "infeasible"
+    assert x["failed_check"]["suite"] == "size" and x["failed_check"]["files"] == ["src/big.py"]
     assert y["status"] == "verified" and "blocked_by" not in y
     assert y["verify_runs"] == 2
 
 
-def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC9 — Y の変えたファイルが全体を見るテストを落とすと、Y が原因に入り `failing` になる。"""
-    _setup(flow, cmd_setup, cmd_implement, x_text=AT_LIMIT.replace("V0 = 0", "V0 = 1"), y_text=OVER)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, x_text=AT_LIMIT.replace("V0 = 0", "V0 = 1"), y_text=OVER)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 
@@ -208,9 +222,9 @@ def test_an_item_failing_on_its_own_file_still_fails(flow, cmd_setup, cmd_implem
     assert "I-002" in state["fix"]["items"]
 
 
-def test_without_a_lint_suite_the_verdict_is_unchanged(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_a_lint_suite_the_verdict_is_unchanged(flow, cmd_setup, cmd_phases, cmd_implement, cmd_converge, capsys):
     """AC12・I7 — 静的解析の suite が無い宣言では原因を判定せず、Y は従来どおり `failing` になる。"""
-    _setup(flow, cmd_setup, cmd_implement, lint=False)
+    _setup(flow, cmd_setup, cmd_phases, cmd_implement, lint=False)
 
     verify, items, state = _verify(flow, cmd_converge, capsys)
 

@@ -87,7 +87,8 @@ Runner の名前が空のまま `cancelled` で終わった。ほかに失敗は
 | [`merged_lib/checks.py`](../../plugins/ndf/scripts/merged_lib/checks.py) | `GreenWatch`（1 回の読み直し `poll` と止まり方）と `InfraWatch`（再実行と待ち直し） |
 | [`merged_lib/merge.py`](../../plugins/ndf/scripts/merged_lib/merge.py) | `add_wait_args` の `--infra-reruns`・`--infra-gap`。マージが拒まれたときの置き換わった失敗の案内（`_rerun_superseded_next`） |
 | [`merged-steps.py`](../../plugins/ndf/scripts/merged-steps.py) | `probe` の分類（`_classify_checks` が `read_checks` を呼ぶ）。分類 `infra` |
-| [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | `EXIT_INFRA_WAIT = 75`。`code_matches("stopped", 75)` を真にする |
+| [`lib/exit_codes.py`](../../plugins/ndf/scripts/lib/exit_codes.py) | `EXIT_INFRA_WAIT = 75`（`lib/step_result.py` が同じ名前で公開する） |
+| [`lib/step_result.py`](../../plugins/ndf/scripts/lib/step_result.py) | `code_matches("stopped", 75)` を真にする |
 | [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) | `release --ci-wait`。`wait_and_merge` が `merge-when-green` の 75 を 75 で返す |
 | [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py) | run のステップの `on_exit` を読む（`_next_on_exit`）。読み込みの検査は `on_exit_error` |
 | [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py) | `release`・`merge`・`merge-approved` のステップに `on_exit: {"75": "stop"}`（定数 `INFRA_WAIT_STOP`） |
@@ -283,7 +284,7 @@ stateDiagram-v2
 | 順序 | 終了コードを読んだら、`skip_to` の次・承認ゲートの終了コード（10〜19）の前に `on_exit` を見る。当たれば `on_fail` と judge へ行かない |
 | `stop` | `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた: <出力の最後の JSON の summary>` |
 | 検査 | 対応表でない・鍵が整数でない・行き先が `end` / `stop` / 知っているステップの id のどれでもないなら、ステップを流す前に `結果: 止まった` |
-| 雛形 | 本番チャネルへのマージの後の `record`（`supervise.py new release`・昇格のプラン・CD の結果のプラン）が `{"5": "stop"}` を持つ。`release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ。実装と検査のプランの `merge`・`merge-approved` は、ベースブランチとの衝突（4）で `base-return` へ進む `{"4": "base-return"}` も持つ（`merge_steps` の `on_conflict`。#1917） |
+| 雛形 | 本番チャネルへのマージの後の `record`（`supervise.py new release`・本番チャネルへ入れるリリースプラン・CD の結果のプラン）が `{"5": "stop"}` を持つ。`release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ。実装と検査のプランの `merge`・`merge-approved` は、ベースブランチとの衝突（4）で `base-return` へ進む `{"4": "base-return"}` も持つ（`merge_steps` の `on_conflict`。#1917） |
 
 `release` のステップの `cmd` は `release --version <版> --ci-wait <ci_wait_timeout> --channel <チャネル>` で、`timeout` は
 `max(2400（開発版）/ 3000（本番）, with_margin(待つ PR の数 × ci_wait_timeout))`。`ci_wait_timeout` はマージのプランと

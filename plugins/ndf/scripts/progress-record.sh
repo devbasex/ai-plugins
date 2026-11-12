@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # NDF plugin: issue の本文へ工程の進行を記録する。
 #
-#   progress-record.sh <issue番号> <工程名> [--mode M] [--pace normal|fast|auto] [--worktree P] [--plan P]
+#   progress-record.sh <issue番号> <工程名> [<工程名>...] [--mode M] [--pace normal|fast|auto] [--worktree P] [--plan P]
 #                      [--repo <所有者>/<リポジトリ>] [--note TEXT]
 #
-# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）
+# **工程名は並べて渡せる（#2909）。** 並べた工程はすべて、何かを書く前に工程表と照らし（1 つでも無い名があれば何も書かずに 2）、
+# 本文の書き換えは 1 回で、すべての工程の行に印が付く。通過記録へは工程ごとに 1 件ずつ積む（`--mode`・`--pace` は最初の工程と一緒に
+# 1 回だけ）。`--note` はすべての工程の行に付く。続けて打つ代わりに 1 行で渡す。
+#
+# 工程名に `-` を渡すと（`-` は 1 つだけで渡したときだけ受ける）、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）
 # だけを更新する。`projects-sync.sh` の `mode` / `worktree` / `plan` がこの形で呼ぶ（#828）。
 #
 # **ボードの宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
@@ -71,14 +75,19 @@ wf_skipped_stages() {
 }
 
 usage() {
-  printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
+  printf 'usage: progress-record.sh <issue番号> <工程名> [<工程名>...] [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
 
 
 ARGS=("$@")
 ISSUE="${1:-}"
-STAGE="${2:-}"
-shift 2 2>/dev/null || true
+shift 1 2>/dev/null || true
+STAGE_ARGS=()
+while [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; do
+  STAGE_ARGS+=("$1")
+  shift
+done
+STAGE="${STAGE_ARGS[0]:-}"
 
 MODE='' PACE='' WORKTREE='' PLAN='' REPO='' NOTE=''
 while [ "$#" -gt 0 ]; do
@@ -97,8 +106,19 @@ done
 case "$ISSUE" in
   ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
-[ "$STAGE" = "-" ] || STAGE=$(pj_normalize_stage "$STAGE")
-[ "$STAGE" = "-" ] || wf_is_stage "$STAGE" || sr_bad_args "$TOOL" "工程表に無い工程名です: $STAGE"
+# 並べた工程名を、何かを書く前にすべて工程表と照らす（I5）。`-` は 1 つだけで渡したときだけ受ける。
+STAGE_LIST=()
+for s in "${STAGE_ARGS[@]}"; do
+  if [ "$s" = "-" ]; then
+    [ "${#STAGE_ARGS[@]}" -eq 1 ] || sr_bad_args "$TOOL" "工程名の - は 1 つだけで渡す"
+    STAGE_LIST+=("-")
+    continue
+  fi
+  s=$(pj_normalize_stage "$s")
+  wf_is_stage "$s" || sr_bad_args "$TOOL" "工程表に無い工程名です: $s"
+  STAGE_LIST+=("$s")
+done
+STAGE="${STAGE_LIST[0]:-}"
 [ -z "$MODE" ] || wf_is_mode "$MODE" || sr_bad_args "$TOOL" "知らないモードです: $MODE"
 [ -z "$PACE" ] || wf_is_pace "$PACE" || sr_bad_args "$TOOL" "知らない進め方です: $PACE"
 
@@ -130,18 +150,32 @@ if [ -n "$REPO" ]; then
 else
   SLUG=$(wf_repo_slug ".") || SLUG=''
 fi
-RECORD_STAGE=$STAGE
-[ "$RECORD_STAGE" != "-" ] || RECORD_STAGE=''
 PASSED=0
-if [ -z "${NDF_PROGRESS_LOCKED:-}" ] && [ -n "$RECORD_STAGE$MODE$PACE" ]; then
-  STAGE_REPORT=$(wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE")
+# 通過記録へ工程ごとに 1 件ずつ積む（I6）。モードと進め方は最初の工程と一緒に 1 回だけ積む
+record_passage() {
+  local stage=$1 mode=$2 pace=$3 report label
+  [ -n "$stage$mode$pace" ] || return 0
+  report=$(wf_record_progress "$SLUG" "$ISSUE" "$stage" "$mode" "$pace")
+  label="通過記録へ積む（#${ISSUE}${stage:+ $stage}）"
   if [ -n "$SLUG" ] && command -v jq >/dev/null 2>&1; then
     PASSED=1
-    sr_process "通過記録へ積む（#${ISSUE}）" "積んだ"
+    sr_process "$label" "積んだ"
   else
-    sr_process "通過記録へ積む（#${ISSUE}）" "積めない（リポジトリを特定できないか jq が無い）"
+    sr_process "$label" "積めない（リポジトリを特定できないか jq が無い）"
   fi
-  absorb_stage_report "$STAGE_REPORT"
+  absorb_stage_report "$report"
+}
+if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
+  FIRST=1
+  for s in "${STAGE_LIST[@]}"; do
+    [ "$s" != "-" ] || s=''
+    if [ "$FIRST" -eq 1 ]; then
+      record_passage "$s" "$MODE" "$PACE"
+      FIRST=0
+    else
+      record_passage "$s" "" ""
+    fi
+  done
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -196,7 +230,8 @@ STAGES=$(wf_stages)
 # モードは本文から読み直すことがあるため、全モードの分を渡す。分類は上の wf_skipped_stages が持つ。
 SKIP_STAGES=$(wf_skipped_stages)
 export SKIP_STAGES
-export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
+STAGE_NAMES=$(printf '%s\n' "${STAGE_LIST[@]}")
+export STAGES SECTION_HEADING STAGE_NAMES STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || body_gap "本文の節を組めない"
 import os
 import re
@@ -211,7 +246,7 @@ from legacy_values import to_current  # noqa: E402
 body = open(sys.argv[1], encoding="utf-8").read()
 heading = os.environ["SECTION_HEADING"]
 stages = os.environ["STAGES"].split("\n")
-stage = os.environ["STAGE"]
+marked = [s for s in os.environ["STAGE_NAMES"].split("\n") if s]
 stamp = os.environ["STAMP"]
 
 # **目印の無い節（目印を置く前に書いた本文）は、工程の行の並びの後ろで閉じる。** 節が本文の最後に
@@ -251,14 +286,15 @@ if section is not None:
 # 書き換えると、途中で止まった実行を再開したときに最初に入った時刻が失われる。
 # 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
 note = os.environ.get("NOTE", "")
-if stage == "-":
-    # 見出し行だけを更新する。チェックリストには目印を足さない。
-    pass
-elif stage in done and done[stage]:
-    if note and note not in done[stage]:
-        done[stage] = f"{done[stage]} / {note}"
-else:
-    done[stage] = " / ".join([stamp] + ([note] if note else []))
+for stage in marked:
+    if stage == "-":
+        # 見出し行だけを更新する。チェックリストには目印を足さない。
+        continue
+    if stage in done and done[stage]:
+        if note and note not in done[stage]:
+            done[stage] = f"{done[stage]} / {note}"
+    else:
+        done[stage] = " / ".join([stamp] + ([note] if note else []))
 
 meta_parts = [f"モード: {mode or '—'}"]
 if pace in ("fast", "auto"):  # 既定（normal）は書かない
@@ -287,7 +323,9 @@ PY
 if [ "$STAGE" = "-" ]; then
   DONE_TEXT="#$ISSUE 進行の見出し = $(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
 else
-  DONE_TEXT="#$ISSUE 進行 = $STAGE"
+  JOINED=''
+  for s in "${STAGE_LIST[@]}"; do JOINED="${JOINED:+${JOINED}・}${s}"; done
+  DONE_TEXT="#$ISSUE 進行 = $JOINED"
 fi
 if cmp -s "$BODY_FILE" "$NEW_FILE"; then
   # 変える内容が無いときは書き込まない。同じ操作を 2 度行っても結果が変わらない。

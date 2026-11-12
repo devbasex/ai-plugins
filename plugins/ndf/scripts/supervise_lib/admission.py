@@ -2,15 +2,17 @@
 
 副作用を持たない関数だけを置く。宣言の値（共有の一覧・資源の枠）は引数で受け、ファイルを読まない。
 
-    plans = {"a.json": ["lib/"], "b.json": ["lib/x.py"], "c.json": ["docs/"]}
-    overlaps(plans, shared)   # [{"a": "a.json", "b": "b.json", "paths": ["lib/", "lib/x.py"]}]
+    plans = {"a.json": ["tests/", "lib/x.py"], "b.json": ["tests/t.py", "lib/x.py"], "c.json": ["tests/u.py"]}
+    overlaps(plans, shared)   # [{"a": "a.json", "b": "b.json", "paths": ["lib/x.py", "lib/x.py"]}]
     groups(plans, shared)     # [["a.json", "b.json"], ["c.json"]]（組の中は同時に流さない）
     after = {"c.json": ["a.json"]}                   # プラン → 同じステージの前提のプラン
     needs(plans, groups(plans, shared, after), after)  # [[], ["a.json"]]（組ごとの、待つ前提のプラン）
     tags(step, resources)     # ["graphql"]（ステップが使う資源のタグ）
 
-- 重なりの組: 同じステージの 2 本のプランで、`触るファイル` が包含で重なるか、同じ共有の一覧に当たるもの
-- 包含はパスの要素の単位で見る（`a/b` は `a/b/c` を含み、`a/bc` を含まない）
+- 重なりの組: 同じステージの 2 本のプランで、`触るファイル` に等しいファイルの宣言を持つか、同じ共有の一覧に当たるもの
+- ディレクトリの宣言（末尾が `/` の行）は判定のどこにも使わない。衝突はファイルの単位でしか起きない（git の 3-way マージ）
+- 等しさはパスの要素の並びで比べる（`./a.py` と `a.py` は等しい）。ファイルシステムは読まない
+- 共有の一覧への当たりは、`touched_by`（無ければ一覧のパス）とファイルの宣言の包含で見る（`a/b` は `a/b/c` を含み、`a/bc` を含まない）
 - 重なりは推移的でないため、和集合の森で組をまとめる（A と B、B と C が重なれば A と C も同じ組）
 """
 
@@ -35,19 +37,28 @@ def touches(a: str, b: str) -> bool:
     return contains(a, b) or contains(b, a)
 
 
+def is_dir_decl(path: str) -> bool:
+    """ディレクトリの宣言（末尾が `/` の行）か。重なりの判定に使わない。"""
+    return str(path).endswith("/")
+
+
+def _file_decls(files: Iterable[str]) -> list[str]:
+    return [f for f in files if f and not is_dir_decl(f)]
+
+
 def shared_hits(files: Iterable[str], shared: Iterable[Mapping]) -> list[str]:
-    """`触るファイル` が当たる共有の一覧のパス。`touched_by`（無ければ一覧そのもの）のどれかと包含で重なれば当たる。"""
-    files = list(files)
+    """ファイルの宣言が当たる共有の一覧のパス。`touched_by`（無ければ一覧そのもの）のどれかと包含で重なれば当たる。"""
+    files = _file_decls(files)
     return [s["path"] for s in shared if any(touches(f, t) for f in files for t in (s.get("touched_by") or [s["path"]]))]
 
 
 def overlap_of(a_files: Iterable[str], b_files: Iterable[str], shared: Iterable[Mapping] = ()) -> list[str] | None:
-    """2 本のプランの重なり `[a の側のパス, b の側のパス]`。同じ共有の一覧に当たるときは両方がその一覧。無ければ None。"""
+    """2 本のプランの重なり `[a の側のパス, b の側のパス]`（等しいファイルの宣言か、両方が同じ共有の一覧）。無ければ None。"""
     a_files, b_files, shared = list(a_files), list(b_files), list(shared)
-    for fa in a_files:
-        for fb in b_files:
-            if touches(fa, fb):
-                return [fa, fb]
+    b_keys = {_parts(f): f for f in reversed(_file_decls(b_files))}
+    for fa in _file_decls(a_files):
+        if _parts(fa) in b_keys:
+            return [fa, b_keys[_parts(fa)]]
     hits = set(shared_hits(b_files, shared))
     for path in shared_hits(a_files, shared):
         if path in hits:

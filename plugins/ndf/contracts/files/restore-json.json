@@ -1,0 +1,7 @@
+{
+  "name": "restore-json",
+  "pattern": "*.restore.json",
+  "kind": "state",
+  "place": "state-dir",
+  "skill_readers": []
+}

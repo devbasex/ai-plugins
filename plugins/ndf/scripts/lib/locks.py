@@ -19,10 +19,12 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
 import limits
-from filelock import FileLock, Timeout
+
+if TYPE_CHECKING:  # filelock は錠を取るときだけ読む（起動を縮める。#2309）
+    from filelock import FileLock
 
 
 class LockTimeout(TimeoutError):
@@ -35,6 +37,8 @@ def lock_path(target: os.PathLike[str] | str) -> Path:
 
 
 def _file_lock(target: os.PathLike[str] | str) -> FileLock:
+    from filelock import FileLock
+
     path = lock_path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     return FileLock(str(path))
@@ -43,6 +47,8 @@ def _file_lock(target: os.PathLike[str] | str) -> FileLock:
 @contextmanager
 def exclusive(target: os.PathLike[str] | str, timeout: float | None = None) -> Iterator[None]:
     """`target` の排他を取った間だけ中を流す。`timeout` 秒で取れなければ `LockTimeout`。"""
+    from filelock import Timeout
+
     lock = _file_lock(target)
     try:
         lock.acquire(timeout=-1 if timeout is None else timeout)
@@ -56,6 +62,8 @@ def exclusive(target: os.PathLike[str] | str, timeout: float | None = None) -> I
 
 def try_exclusive(target: os.PathLike[str] | str) -> FileLock | None:
     """待たずに排他を取る。取れれば取った錠（`with` で外す）、取れなければ None。"""
+    from filelock import Timeout
+
     lock = _file_lock(target)
     try:
         lock.acquire(timeout=0)

@@ -228,8 +228,9 @@ def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_p
         }
     ]
     problem = cmd_implement._implement_problem(item, facts, [], {"worktrees": {"work": str(tmp_path)}})
-    assert problem is not None
-    assert "期待" in problem
+    # 取り消さずに修正へ差し戻す（#2457 の棚卸し #25）
+    assert problem is not None and problem[0] == "expectations" and problem[2] is True
+    assert "期待" in problem[1]
 
 
 def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
@@ -245,7 +246,32 @@ def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
         }
     ]
     problems = fix_intake._fix_problems({}, facts, {"I-001"})
-    assert len(problems) == 1 and "期待" in problems[0]
+    # 外れたコミットだけを差し戻す（#2457 の棚卸し #31）
+    assert len(problems) == 1 and "期待" in problems[0]["problem"] and problems[0]["sha"] == "b" * 40
+
+
+def _fix_fact(before: str, after: str) -> dict:
+    return {
+        "sha": "b" * 40,
+        "exists": True,
+        "diff_lines": 2,
+        "files": ["tests/test_a.py"],
+        "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "test_changes": {"tests/test_a.py": ([before], [after])},
+    }
+
+
+def test_the_fix_intake_accepts_restoring_an_expectation(fix_intake, monkeypatch) -> None:
+    """実装が誤って変えた期待値を元へ戻す修正は、実装の前からの累積で見て受け取ること。"""
+    impl = {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])}
+    monkeypatch.setattr(fix_intake, "commit_test_changes", lambda _work, sha: impl if sha == "a" * 40 else {})
+    state = {"items": [{"id": "I-001", "commits": {"implement": ["a" * 40]}}]}
+    facts = [_fix_fact("    assert f(1) == 4\n", "    assert f(1) == 3\n")]
+    assert fix_intake._fix_problems(state, facts, {"I-001"}, None, "/work") == []
+    # 累積でも期待値が元と違えば落とす
+    facts = [_fix_fact("    assert f(1) == 4\n", "    assert f(1) == 5\n")]
+    problems = fix_intake._fix_problems(state, facts, {"I-001"}, None, "/work")
+    assert len(problems) == 1 and "期待" in problems[0]["problem"]
 
 
 def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
@@ -265,7 +291,7 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
 
 
 @pytest.fixture
-def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_implement):
+def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_phases, cmd_implement):
     """実装で経路だけを変えた項目（機械で決まらない）と、テストに触れない項目の 2 件を取り込んだ状態。"""
     import argparse
 
@@ -311,7 +337,7 @@ def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, c
     }
     state["phase"] = "implement"
     write_state(flow["path"], state)
-    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    cmd_phases.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
     test_file = work / "tests" / "test_calc.py"
     test_file.write_text(
         test_file.read_text().replace("from src.calc import add", "from src import calc").replace("add(1, 2)", "calc.add(1, 2)"),

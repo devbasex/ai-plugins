@@ -74,7 +74,8 @@ develop を取り込み、`docs/glossary/glossary.json` だけが衝突したの
 | `merged-steps.py base-return`（同じモジュールの `back`・`count_returns`） | `merge` の衝突から戻る前に、この実行で戻った回数を `state.json` から数え、上限を超えたら止まる。`state.json` は読むだけ |
 | `merged_lib/checks.py` の `GreenWatch.poll`・`_stop_conflict` | 読みのたびに `mergeStateStatus` を見て、`DIRTY` なら終了コード 4 で抜ける。`UNKNOWN`（計算中）は待ち続ける |
 | `merged_lib/merge.py` の `merge_when_green`・`_conflicted` | `gh pr merge` の拒否が衝突（標準エラーに `cannot be cleanly created`、または読み直した `mergeStateStatus` が `DIRTY`）なら 4 で抜ける。ほかの拒否は 1 のまま |
-| `lib/step_result.py` | `EXIT_BASE_CONFLICT = 4` を定め、`code_matches` の `stopped` に含める |
+| `lib/exit_codes.py` | `EXIT_BASE_CONFLICT = 4` を定める（`lib/step_result.py` が同じ名前で公開する） |
+| `lib/step_result.py` | `code_matches` の `stopped` に 4 を含める |
 | `supervise_lib/procedures.py` の `base_sync_steps`・`BASE_FIX_PROMPT` | 取り込みの 3 ステップ（`base-sync`・`fix-base`・`base-return`）を組む唯一の部品 |
 | `supervise_lib/verify_steps.py` の `merge_steps` | 引数 `on_conflict` を受けたときだけ、`merge` と `merge-approved` の `on_exit` に `"4": <on_conflict>` を足す |
 | `supervise_lib/templates.py` の `plan_to_merge`・`plan_check`・`plan_check_since`・`_inspect_steps` | 部品を置く場所と、マージの衝突の行き先を決める |
@@ -141,7 +142,10 @@ graph TB
   `pre_test_steps(a)` が返す並びの先頭（`format`・`sync`・`lint-limited` のうち宣言で置いたもの）で、並びが空なら `test-limited`。
   `new fix` は `impl` を持たず、先頭が `base-sync` になる。整形を取り込みの後に置くのは、取り込んだ合成の形を整えてから sync と範囲テストへ
   渡すためである。`fix-base` の後は `base-sync` を打ち直してから並びの先頭へ進む
-- **検査のプランでは `review` の次が `base-sync`、その次が `test-all` で、`ready` より前にある。** スプリントの検査は先頭に `collect` → `pr` が付く。
+- **検査のプランでは `review` の後に振る舞いの確認（`behavior-targets` → `behavior` → `behavior-verify`。振る舞いを決める文書の変更が無ければ
+  `behavior-targets` から飛ぶ）を通って `base-sync`、その次が `test-all` で、`ready` より前にある。** スプリントの検査は先頭に `collect` → `pr` が付く。
+  並列の計画で課題のまとまりの記録があるスプリントの検査は `review` を持たず、構造改善（`assess` → `refactor`）から振る舞いの確認へ進む。
+  コードレビューは、まとまりの実装のプランが `ready` の前に通す
   全体テストの修正（`fix`）の後は `test-all` へ戻る
 - **差分の検査では全体テストの修正の後を `base-sync` へ戻す。** 毎回取り込んでから測るため、`test-all` の `cmd` は `git merge` を持たない
 - **`base-return` はプランの並びの末尾に置く。** `merge` から `base-return` への遷移を並びで後ろへ行くものにし、`limits.py` の「ループを
@@ -175,7 +179,7 @@ graph TD
 
 ```mermaid
 graph TD
-    rev[assess → refactor → review] --> bs[base-sync --pr --push]
+    rev[assess → refactor → review<br/>→ 振る舞いの確認] --> bs[base-sync --pr --push]
     bs -->|0| ta[test-all]
     bs -->|1| fb[fix-base] --> bs
     bs -->|2・3| ab[abort]

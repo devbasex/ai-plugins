@@ -1,7 +1,7 @@
 """全体テストの上限を suite 群で共有する（#1334 の round 2）。
 
 suite ごとに上限を丸ごと渡すと、N 本の suite で上限の N 倍まで走る。test-run.py の whole と同じく、
-最終ゲート・危険フラグの全体テスト・着手前のテストも開始時刻からの残りの秒だけを後の suite へ渡す。
+最終ゲート・着手前のテストも開始時刻からの残りの秒だけを後の suite へ渡す。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _whole_state(monkeypatch, module):
     strategy = types.SimpleNamespace(whole_commands=lambda kind=None: [] if kind == "lint" else ["a", "b", "c"])
     timeline = sys.modules["refactor_lib.timeline"]
     monkeypatch.setattr(timeline, "strategy_of", lambda state: strategy)
-    monkeypatch.setattr(timeline, "state_whole_timeout", lambda state, now: 100)
+    monkeypatch.setattr(timeline, "state_whole_timeout", lambda state: 100)
     monkeypatch.setattr(sys.modules["refactor_lib.triage"], "clear_junit", lambda state: None)
     monkeypatch.setattr(module, "work_dir", lambda state: "/nonexistent")
 
@@ -47,17 +47,6 @@ def test_local_gate_shares_the_limit_across_suites(refactor, monkeypatch, per_su
     passed, _, _ = gate._local_gate(None, {})
     assert given == expected
     assert passed is (per_suite == 30)
-
-
-@pytest.mark.parametrize(("per_suite", "expected"), [(30, [100, 70, 40]), (60, [100, 40])])
-def test_run_locally_shares_the_limit_across_suites(refactor, monkeypatch, tmp_path, per_suite, expected):
-    wholetest = sys.modules["refactor_lib.wholetest"]
-    _whole_state(monkeypatch, wholetest)
-    run, given = _clock(monkeypatch, per_suite)
-    monkeypatch.setattr(wholetest, "run_with_timeout", run)
-    passed, timed_out, _ = wholetest.run_locally({}, tmp_path / "whole.log")
-    assert given == expected
-    assert (passed, timed_out) == ((True, False) if per_suite == 30 else (False, True))
 
 
 def test_run_baseline_shares_the_limit_across_suites(refactor, monkeypatch, tmp_path):
@@ -139,18 +128,3 @@ def test_a_unittest_wrapper_does_not_reject_node_ids_from_the_plan(refactor, mon
     result, _ = targets.run_commands([r.command for r in runs], str(tmp_path), 60, tmp_path / "verify.log")
     assert result.status == "passed"
     assert "cannot select" not in (tmp_path / "verify.log").read_text(encoding="utf-8")
-
-
-def test_whole_fallback_reruns_every_suite(refactor, monkeypatch, tmp_path):
-    """JUnit で見分けられないときの再検証は全 suite を走らせる。2 本目だけが落ちても直ったと誤らない。"""
-    import subprocess
-
-    wholetest = sys.modules["refactor_lib.wholetest"]
-    ts = wholetest.timeline.ts
-    monkeypatch.setattr(wholetest.timeline, "strategy_of", lambda state: ts.Strategy("local-full", "test", [ts.Suite("a", "run a")]))
-    assert wholetest.whole_fallback_command({}) == "run a"
-    two = ts.Strategy("local-full", "test", [ts.Suite("a", "true"), ts.Suite("b", "false")])
-    monkeypatch.setattr(wholetest.timeline, "strategy_of", lambda state: two)
-    command = wholetest.whole_fallback_command({})
-    assert command == "( true ) && ( false )"
-    assert subprocess.run(command, shell=True, cwd=tmp_path).returncode != 0

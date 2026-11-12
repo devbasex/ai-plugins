@@ -25,6 +25,7 @@ from supervise_lib import decl, limits, paths, rerun
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
+from supervise_lib import pr as pr_lib
 from supervise_lib.pr import PrStep
 from supervise_lib.queue import NOT_RUN
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
@@ -179,6 +180,8 @@ class Engine:
 
     def report(self, result: str, reason: str) -> str:
         self.actuals.end(result)
+        if why := pr_lib.refresh_mode_line(self.ctx):  # PR を出した後に通した工程を本文へ（#2921）
+            self.state.process.append({"run": "PR 本文の通した工程の書き直し", "result": why})
         text = self.state.write_report(self.plan, result, reason)
         write_phase_result(self.state.dir, self.plan, result, reason)
         return text
@@ -243,7 +246,7 @@ class Engine:
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
         self.actuals.start(start, self.state.run_line(start))
-        if self.queued and (held := self.answer_held()):
+        if held := self.answer_held(start):
             return NOT_RUN, held
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
@@ -254,11 +257,14 @@ class Engine:
             return "止まった", err
         return None
 
-    def answer_held(self) -> str | None:
-        """自分が 1 スプリントのレーンで答え待ちの停止の範囲にあれば、流さない理由を返す（#2707）。"""
+    def answer_held(self, start: str | None = None) -> str | None:
+        """キューから流す 1 スプリントのレーンが答え待ちの停止の範囲で新しい承認を生むプランを始めるなら、流さない理由（#2707 #3000）。
+        範囲の中で流すときは範囲の値をプランの状態ディレクトリへ書き、それ以外は消す。単発の `run` は停止を読まない。"""
         import parallel_hold
 
-        return parallel_hold.plan_skip(os.environ.get("NDF_RELAY_NAME"))
+        reason, ran = parallel_hold.plan_hold(os.environ.get("NDF_RELAY_NAME"), self.plan, start) if self.queued else (None, None)
+        parallel_hold.note_ran(self.state.dir, None if reason else ran)
+        return reason
 
     def after_prepare(self) -> None:
         """worktree ができた後の、ファイルを書かない準備（遅れの見張りの履歴の置き場）。"""
@@ -375,7 +381,8 @@ class Engine:
             st.cur["presentation"] = self.copy_presentation(step)
             st.cur["gate_as_ok"] = True
             return self.next_of(sid, step), None, None
-        if is_run and is_gate(st.cur.get("exit")):
+        if step["type"] in ("run", "drive") and is_gate(st.cur.get("exit")):
+            # drive の 10〜19 も承認ゲート（共通の契約 `step_result.GATE_CODES`。cross-refactoring の安全網など。#2457 決定 8）
             self.take_gate(step)
             gnext = step.get("gate_next")
             return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
@@ -478,7 +485,7 @@ class Engine:
         return path
 
     def take_gate(self, step: dict) -> None:
-        """run のステップの承認ゲートを残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        """run と drive のステップの承認ゲートを残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
         cur = self.state.cur
         path = self.copy_presentation(step)
         cur["gate"] = True

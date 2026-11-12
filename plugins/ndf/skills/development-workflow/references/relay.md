@@ -236,10 +236,11 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。設計承認ゲート・リリース承認ゲートの記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
-   - `context-policy.py record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの区間の起点になる。[context-window.md](context-window.md) の「判定と再起動を記録する」）
+   - `context-policy.py record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの区間の起点になる。hook に止められて切るときは hook が打ったので打たない。[context-window.md](context-window.md) の「判定と再起動を記録する」）
    - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
+   - `sprint-state.py get <sprint-state.json> [--field <JSON Pointer>]`（読むだけ。計画ごとの状態と、最初の終わっていない計画の次の欄を `next` に返す。状態ファイルをその場の Python の 1 行で読み直さない）
    - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
    - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
@@ -247,7 +248,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 
 ```bash
 O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
-DOC=$(python3 $H path $N | python3 -c 'import json, sys; print(json.load(sys.stdin)["items"][0]["path"])')
+DOC=$(python3 $H path $N | python3 plugins/ndf/scripts/lib/step_result.py pick --field /items/0/path --raw)
 python3 $H init $N --title "<表示名>" >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py queue $O/9-release-prod.json --max 3 --done $O/done-9.json >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py wait $O/done-9.json --timeout 3600 >/dev/null &&
@@ -259,7 +260,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 **次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは 2 つの承認ゲートだけになる。
 
-**再開したセッションの conductor は、引継ぎ文書を読み、課題・Pull Request・通過記録で状態を確かめ終えた直後（最初の工程を起動する前）に `context-policy.py record --event 復元完了 --work "<課題番号の並び>"` を打つ。** 復元の区間の終わりになる。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
+**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の区間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
 
 `sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。

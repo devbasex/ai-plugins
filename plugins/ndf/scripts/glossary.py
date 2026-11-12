@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""glossary.py: プロジェクトの用語集を扱う 7 つの副命令。
+"""glossary.py: プロジェクトの用語集を扱う 8 つの副命令（`check`・`diff`・`lookup` は `--field <JSON Pointer>` も受ける）。
 
     python3 glossary.py gate --mode M [--root DIR]
     python3 glossary.py init [--source P] [--document P] [--root DIR]
@@ -7,6 +7,7 @@
     python3 glossary.py render [--check] [--root DIR]
     python3 glossary.py check [--diff BASE | --file P...] [--rules all|structure] [--root DIR]
     python3 glossary.py diff --base REF [--head REF] [--root DIR]
+    python3 glossary.py lookup [--term 語]... [--context ID] [--contexts] [--root DIR]   # 読むだけ（lib/glossary_lookup.py。#2909）
     python3 glossary.py merge [--root DIR]   # git merge の途中で用語集の衝突を語の単位で解く
 
 宣言は `<root>/.ndf/glossary.json`。宣言と用語集の形は
@@ -31,18 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("md", "mdtable", "textparse", "pathmatch")
-import md  # noqa: E402
-import mdtable  # noqa: E402
-import pathmatch  # noqa: E402
-import textparse  # noqa: E402
+import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
-import jsonio  # noqa: E402
-import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
-import glossary_banned  # noqa: E402
-import glossary_merge  # noqa: E402
+import glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
-import ndf_tracking  # noqa: E402
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -729,12 +723,8 @@ def glossary_at(root: Path, decl: Declaration, ref: str | None) -> dict:
         raise unreadable(f"{ref} の用語集を読めない: {e}")
 
 
-def cmd_diff(a):
-    root = Path(a.root)
-    decl = load_declaration(root)
-    if decl is None:
-        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語集の変化は無い"))
-    before, after = glossary_at(root, decl, a.base), glossary_at(root, decl, a.head)
+def diff_items(before: dict, after: dict) -> list[dict]:
+    """2 つの用語集の変化（追加・意味の変更・廃止語の追加・削除）。after の順に見てから before の順で削除を見る。"""
 
     def index(g):
         return {(t["context"], t["term"]): t for t in terms_of(g) if isinstance(t.get("context"), str) and isinstance(t.get("term"), str)}
@@ -757,6 +747,15 @@ def cmd_diff(a):
     for key, t in b.items():
         if key not in h:
             items.append({"change": "removed", "context": key[0], "term": key[1], "before": t.get("meaning"), "after": None})
+    return items
+
+
+def cmd_diff(a):
+    root = Path(a.root)
+    decl = load_declaration(root)
+    if decl is None:
+        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語集の変化は無い"))
+    items = diff_items(glossary_at(root, decl, a.base), glossary_at(root, decl, a.head))
     counts = {c: sum(1 for it in items if it["change"] == c) for c in ("added", "meaning_changed", "deprecated", "removed")}
     summary = (
         "用語集の変化は無い"
@@ -781,6 +780,26 @@ def _merge_source_stages(root, decl, have):
     return glossary_merge.merge_glossaries(*versions)
 
 
+def prepare_merge_files(root, decl, stages, stop):
+    """衝突した段から書くファイルを決める。items・counts・writes（パスと本文の組）を返す。止めるときは stop を呼ぶ。"""
+    items, counts, writes = [{"name": decl.document, "result": "rendered"}], {}, []
+    if decl.source in stages:
+        have = stages[decl.source]
+        if not {2, 3} <= have:
+            side = "ours" if 2 not in have else "theirs"
+            stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
+        merged = _merge_source_stages(root, decl, have)
+        if fail := merged.duplicates or merged.conflicts:
+            stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
+        g, counts = merged.glossary, merged.counts
+        writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
+        items.insert(0, {"name": decl.source, "result": "merged"})
+    else:
+        g = load_glossary(decl)
+    writes.append((decl.document_path, render_text(g, decl.source)))
+    return items, counts, writes
+
+
 def cmd_merge(a):
     root = Path(a.root)
     decl = require_declaration(root)
@@ -799,21 +818,7 @@ def cmd_merge(a):
     stages = glossary_merge.unmerged_stages(git_checked(root, "ls-files", "-u", "-z", "--", decl.source, decl.document).stdout)
     if not stages:
         stop("用語集は衝突していない", unresolved())
-    items, counts, writes = [{"name": decl.document, "result": "rendered"}], {}, []
-    if decl.source in stages:
-        have = stages[decl.source]
-        if not {2, 3} <= have:
-            side = "ours" if 2 not in have else "theirs"
-            stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
-        merged = _merge_source_stages(root, decl, have)
-        if fail := merged.duplicates or merged.conflicts:
-            stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
-        g, counts = merged.glossary, merged.counts
-        writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
-        items.insert(0, {"name": decl.source, "result": "merged"})
-    else:
-        g = load_glossary(decl)
-    writes.append((decl.document_path, render_text(g, decl.source)))
+    items, counts, writes = prepare_merge_files(root, decl, stages, stop)
     try:
         for path, text in writes:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -855,6 +860,13 @@ def build_parser():
     p.add_argument("--base", required=True)
     p.add_argument("--head")
     add("merge", cmd_merge)
+    p = add("lookup", glossary_lookup.lookup_command(load_declaration, load_glossary))
+    p.add_argument("--term", action="append", help="語（部分一致・繰り返し）")
+    p.add_argument("--context", help="コンテキストの id で絞る")
+    p.add_argument("--contexts", action="store_true", help="コンテキストの id の一覧だけを返す")
+    for name in glossary_lookup.FIELD_COMMANDS:
+        sub.choices[name].add_argument("--field", action="append", help="JSON Pointer（結果 JSON を根にする。繰り返し）")
+    glossary_lookup.wrap_fields(sub)
     return ap
 
 

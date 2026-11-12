@@ -6,7 +6,7 @@
 
 - **記録の置き場が分からない `close` は、課題を閉じない。** `sprint-close.py --record-pr unknown` は
   リリース記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（承認ゲート `gate`・終了コード 10。プランは棚卸しへ進む）。
-  #2230 から、まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でも昇格（promote）でもなく、届ける経路を
+  まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でもリリースの Pull Request（promote）でもなく、届ける経路を
   1 つでも含むとき（と開発ループのまとめ）は `--record-pr {queue_record}` を組み、まとめを流し始める時点に queue が記録の PR を探して埋める
   （[ndf-production-release-record.md](ndf-production-release-record.md) の「まとめのプランの記録の PR と `release-verify`」）。
   `unknown` を渡すのは手で打つ入口と、#2230 より前に組んだまとめのプランだけである
@@ -31,7 +31,7 @@
 
 - **`--record-pr 0` が 2 つの意味を兼ねていた。** `sprint-close.py` の `0` は「本番の記録なし（本番を飛ばした・デプロイなし）」で、
   閉じる条件を見ずに課題を閉じる。一方、まとめのプランの記録の参照（`supervise_lib/sprint_routes.py` の `record_pr_ref`）は、
-  雛形と昇格以外のすべての経路で `0` を返していた。merge（`merged-by-check`）・手で届ける経路で本番まで出たスプリントの課題が、
+  雛形とリリースの Pull Request 以外のすべての経路で `0` を返していた。merge（`merged-by-check`）・手で届ける経路で本番まで出たスプリントの課題が、
   リリース記録とリリース後テストの記録を見ずに閉じ、`close` の結果から「デプロイしなかった」と「記録を読まなかった」を区別できなかった
 - **「無し」と書いた行で承認ゲートが止まっていた。** 要求に `| 手動確認（マージ前） | 無し（AC はテストで確かめられる） |` と
   書いた課題が、PR 本文の `## 手動確認` に未チェックの行（`- [ ] #<番号> マージ前: 無し（…）`）として載り、merge-gate が
@@ -42,8 +42,8 @@
 
 | 含む | 含まない |
 | --- | --- |
-| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`。`versioned` は経路を変えず、`kind: auto` の行は昇格か `merged-by-check` になる）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
-| `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | 雛形（`{queue_pr:release-prod}`）と昇格（`{queue_pr:promote}`）の経路の振る舞い |
+| まとめのプランの記録の参照の決め方（`record_pr_ref`・`has_record`。`versioned` は経路を変えず、`kind: auto` の行はpromote か `merged-by-check` になる）と `close_plan` の分岐 | リリース記録の PR を `close` へ受け渡す手段（手で行うリリース・merge の経路の記録ステップ） |
+| `sprint-close.py --record-pr unknown` の振る舞い・結果 JSON | 雛形（`{queue_pr:release-prod}`）とリリースの Pull Request（`{queue_pr:promote}`）の経路の振る舞い |
 | 要求から手動確認の行を読む規則（`lib/manual_checks.py` の `rows_of`） | merge-gate（`merged_lib/merge.py` の `manual_gate`）と `unchecked_before_merge` の判定、要求の雛形の文 |
 
 ## 仕様
@@ -67,8 +67,8 @@
 | 経路 | 返す値 |
 | --- | --- |
 | 雛形の経路がある | `{queue_pr:release-prod}` |
-| 昇格の経路があり、開発版のチャネルが手動反映の本番系（`delivery.MANUAL_PRODUCTION`）でない | `{queue_pr:promote}` |
-| それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格） | `{queue_record}`（`RECORD_FOUND`。#2230） |
+| リリースの Pull Request で届く経路があり、開発版のチャネルが手動反映の本番系（`delivery.MANUAL_PRODUCTION`）でない | `{queue_pr:promote}` |
+| それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系へのリリースの Pull Request） | `{queue_record}`（`RECORD_FOUND`。#2230） |
 
 #2230 から、最初に経路がすべて `STAGE_NONE`（`delivery` が `[]` を含む）かを見て `0`（`RECORD_NONE`）を返し、次に開発ループのまとめ
 （`--pace auto`）なら `{queue_record}` を返し、その後に上の表を上から見る。`unknown`（`RECORD_UNKNOWN`）は `sprint_routes.py` から消えた。
@@ -89,7 +89,7 @@
 | 欄 | 中身 |
 | --- | --- |
 | `status` | `ok`（後続の振り返りへ進む） |
-| `summary` | 先頭に `記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: ` を付け、その後に件数の要約（`_close_summary`）が続く。`0` で閉じたときの `summary` にこの先頭の文は付かず、2 つはこの文で区別できる |
+| `summary` | 先頭に `記録の置き場が分からないため閉じない（リリースの経路が雛形でもリリースの Pull Request でもない）: ` を付け、その後に件数の要約（`_close_summary`）が続く。`0` で閉じたときの `summary` にこの先頭の文は付かず、2 つはこの文で区別できる |
 | `items` | `--issues` の各課題が `result: kept_open` と `reason`（`UNKNOWN_REASON`: リリース記録の置き場が分からない。リリース記録を確かめて手で閉じる） |
 | `next` | `リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる` |
 
@@ -114,13 +114,13 @@ flowchart TD
   L -- はい --> U["{queue_record}"]
   L -- いいえ --> B{"雛形の経路がある"}
   B -- はい --> T["{queue_pr:release-prod}"]
-  B -- いいえ --> C{"昇格の経路があり、手動反映の本番系でない"}
+  B -- いいえ --> C{"リリースの Pull Request で届く経路があり、手動反映の本番系でない"}
   C -- はい --> P["{queue_pr:promote}"]
   C -- いいえ --> U
-  T --> V["merge → config-save → release-verify → config-check → retro → close"]
+  T --> V["ready → config-save → release-verify → config-check → deep-due → … → merge → close"]
   P --> V
   U --> V
-  Z --> W["merge → retro → close（config-save・release-verify・config-check なし）"]
+  Z --> W["ready → deep-due → … → merge → close（config-save・release-verify・config-check なし）"]
 ```
 
 `sprint-close.py` の中では、`cmd_close` が `--issues` の有無を確かめ、`_read_sprint_record` が `0` と `unknown` で記録を読まずに
@@ -135,7 +135,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 | 決定 | 理由 | 採らなかった案 |
 | --- | --- | --- |
 | `--record-pr` に語 `unknown` を足し、`0` の意味は変えない | 語ならプランの `cmd` と結果を読む人がそのまま意味を取れる。`0` を手で打つ既存の手順の意味が黙って変わらない | 負の数（`-1`）で表す。`0` を「置き場を知らない」に変え、デプロイなしに別の値を足す |
-| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系の昇格は `{queue_record}` を組み、閉じる条件を見ずに閉じない | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路をデプロイなしとして `0` で閉じる |
+| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系へのリリースの Pull Requestは `{queue_record}` を組み、閉じる条件を見ずに閉じない | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路をデプロイなしとして `0` で閉じる |
 | 「無し」の判定を `rows_of` の 1 か所に置き、語の直後を括弧・句読点・空白・文末に限る | PR 本文の節も merge-gate の数え方も `rows_of` の出力から作られる。後続を限れば「無しの場合は〜」のような確認の文を落とさない | merge-gate で「無し」の行を数えない（PR 本文に未チェックの行が残り続ける）。要求の雛形の文を変える（雛形に「無ければ行を消す」が既にある） |
 
 ## データ・設定
@@ -175,7 +175,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 
 | 項目 | 内容 |
 | --- | --- |
-| 手動反映の本番系の昇格はテストで縛っていない | 見本のリポジトリ（`make_repo`）は起点 develop・本番 main で、起点と本番が同じ形を組めない。`record_pr_ref` の分岐（`manual_prod`）は昇格を飛ばして `{queue_record}` へ落ちる形で入っている |
+| 手動反映の本番系へのリリースの Pull Requestはテストで縛っていない | 見本のリポジトリ（`make_repo`）は起点 develop・本番 main で、起点と本番が同じ形を組めない。`record_pr_ref` の分岐（`manual_prod`）はpromote の分岐を飛ばして `{queue_record}` へ落ちる形で入っている |
 | 既に閉じた課題も `kept_open` で載る | `unknown` は課題の状態を読まずに返すため、closing keywords で GitHub が先に閉じた課題も `kept_open` に並ぶ |
 | 流し直さない PR 本文 | 既に作られた PR 本文の「無し」の未チェック行は、pr ステップを流し直さない限り残る |
 

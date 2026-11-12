@@ -226,7 +226,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 | 形 | 置き方 |
 | --- | --- |
 | Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
-| 昇格の Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` が昇格の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| リリースの Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
 | 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 

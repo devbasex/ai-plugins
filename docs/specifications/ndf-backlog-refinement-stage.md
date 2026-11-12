@@ -100,8 +100,8 @@ conductor が打ち切った。今の形では次のように動く。
 
 ### スプリントの終わりのプランの `refine` ステップ
 
-`supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、`retro` の後に課題を閉じる `close` を、
-その後に `refine` を置く。`retro` の `next` は `close`、`close` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。
+`supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、振り返りと差分の棚卸しの起動の判定（`deep-due`）が 0 を返した回に、
+`retro` の後に `refine` を置く。`retro` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。課題を閉じる `close` は、確定仕様化の Pull Request の `merge` の後にだけ置く。
 
 | キー | 値 |
 | --- | --- |
@@ -114,10 +114,10 @@ conductor が打ち切った。今の形では次のように動く。
 
 `refine` の後ろには、深さの記録（`refine-record`。`upkeep.py depth record --depth diff`）と、大整理・見直しの
 起動の判定（`overhaul-due` → `review-due`。`upkeep.py depth due`）・持ち主の宣言・本体・持ち主になれなかった記録の
-ステップが続く。判定が起動しない（3）ときはその深さを飛ばし、見直しの後に `end` へ着く。大整理を見直しより先に置く
+ステップが続く。判定が起動しない（3）ときはその深さを飛ばし、見直しの後に `merge-gate` へ着く。大整理を見直しより先に置く
 （`supervise_lib/sprint_close_steps.py` の `refine_steps`。#2315）。
 
-`refine` へは、`close`（`sprint-close.py`）のステップが 0 か承認ゲートの 10 で終わったときだけ届く（10 は閉じなかった課題があることを示し、フェーズの結果が承認ゲートになる）。`timeout` は止まった
+`refine` へは、`retro` が通ったときだけ届く。`refine`・見直し・大整理のプロンプトは、今の回の課題を閉じない課題として渡す（課題を閉じるのは `merge` の後の `close` だけ）。`timeout` は止まった
 worker の歯止めで、費用の上限は件数が持つ。プランの `上限`（実行するステップの数の歯止め）は、書き出しがプランの
 遷移から求める（`supervise_lib/limits.py`。ループを通らない最長の経路に、修正のループのそれぞれを 3 回ずつ足した長さ）。
 
@@ -136,7 +136,7 @@ worker の歯止めで、費用の上限は件数が持つ。プランの `上�
 | 不正な上限は候補を集めずに終了コード 2 | 同上の `test_candidates_reject_invalid_limit_before_collecting` |
 | 候補が 0 件の棚卸しは上限の導入で持ち越しにならない | 同上の `test_candidates_zero_is_ok_under_limit` |
 | 書き込み先・plan の `repo`・記録のどれかが食い違えば、1 件も書かずに終了コード 3 | 同上の `test_apply_refuses_*` |
-| `new close` のプランで `retro` の次が `close`、その次が `refine`、`refine` の `stage` が `棚卸し` で `timeout` を持ち、プロンプトが無人の扱いを渡す | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_close_and_retro_once_each_in_order`） |
+| `new close` のプランで `retro` の次が `refine`、`close` が `merge` の後にだけあり、`refine` の `stage` が `棚卸し` で `timeout` を持ち、プロンプトが無人の扱いを渡す | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_retro_and_close_once_each_in_order`・`test_close_merges_last_and_closes_issues_only_after_the_merge`） |
 | `STEP_PHASES` がフェーズの表と一致する | `plugins/ndf/scripts/tests/test_transcript_agents.py`（`test_the_step_names_match_the_phase_table`） |
 | `stage 棚卸し` が記録され、5 モードで必須として扱われる | `plugins/ndf/scripts/tests/test_progress_record_stages.py`（`test_the_refinement_stage_is_recorded_and_required_in_every_mode`） |
 | 最終工程を持つ 3 つの Skill（`retrospective` / `release-verification` / `release`）が棚卸しを呼ばない。順序の制約と規則 14 がそれぞれ 1 か所にある | 文書を `grep -n` で読んで確かめる（文言を照合するテストは書かない） |

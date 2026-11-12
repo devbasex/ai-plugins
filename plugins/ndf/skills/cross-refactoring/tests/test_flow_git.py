@@ -15,6 +15,7 @@ import json
 import pytest
 
 from crossref_helpers import (
+    verify_judged,
     CALC,
     build_git_flow,
     TEST_TOTAL,
@@ -84,7 +85,7 @@ def _plan(flow, **total_answer):
 
 
 def test_the_five_phases_run_once_and_append_one_history_row(
-    flow, cmd_propose, cmd_plan, cmd_setup, cmd_implement, cmd_converge, cmd_gate, cmd_report
+    flow, cmd_propose, cmd_plan, cmd_setup, cmd_phases, cmd_implement, cmd_converge, cmd_gate, cmd_report, capsys
 ):
     work, path = flow["work"], flow["path"]
     _propose(flow)
@@ -107,7 +108,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     assert {d["defer_reason"] for d in state["deferred_items"]} == {"vocabulary", "no_target"}
     assert state["plan"]["table_source"] == "defaults"
 
-    _call(cmd_setup, "cmd_start_phase", phase="add-tests")
+    _call(cmd_phases, "cmd_start_phase", phase="add-tests")
     (work / "tests" / "test_total.py").write_text(TEST_TOTAL, encoding="utf-8")
     test_sha = _commit(work, "Test: total", _trailers("I-001"))
     _call(cmd_implement, "cmd_merge_tests")
@@ -115,7 +116,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     assert state["items"][0]["status"] == "tested"
     assert state["items"][0]["commits"]["test"] == test_sha
 
-    _call(cmd_setup, "cmd_start_phase", phase="implement")
+    _call(cmd_phases, "cmd_start_phase", phase="implement")
     (work / "src" / "calc.py").write_text(
         CALC.replace(
             "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n", "    return sum(values)\n"
@@ -128,7 +129,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     assert state["items"][0]["status"] == "implemented"
     assert state["items"][0]["commits"]["implement"] == [impl_sha]
 
-    _call(cmd_converge, "cmd_verify")
+    verify_judged(cmd_converge, flow["path"], capsys)
     state = read_state(path)
     assert state["items"][0]["status"] == "verified"
     assert state["phase"] == "readopt"
@@ -143,11 +144,19 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     state = read_state(path)
     assert state["final_gate"]["status"] == "passed"
     assert state["history_written"] is True
-    rows = (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(rows) == 1
-    row = json.loads(rows[0])
+    rows = [
+        json.loads(r)
+        for r in (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [r["kind"] for r in rows] == ["run", "item"]
+    row = rows[0]
     assert row["kinds"]["test"]["count"] == 1
     assert row["kinds"]["structure/replace_with_bulk_operation"]["count"] == 1
-    # 履歴は 1 実行に 1 行。叩き直しても二重に書かない。
+    # #2457 受け入れ条件 14: 項目ごとの内容・見積り・実装時間の行を残す（配分テーブルは実行の行だけを読む）
+    item_row = rows[1]
+    assert item_row["item_id"] == "I-001" and item_row["end"] == "final_gate" and item_row["status"] == "verified"
+    assert set(item_row["estimate_minutes"]) == {"test", "implement"} and set(item_row["coding_seconds"]) == {"test", "implement", "fix"}
+    assert item_row["budget_minutes"] == 60
+    # 履歴は 1 実行に 1 組。叩き直しても二重に書かない。
     _call(cmd_report, "cmd_finalize", review_status=None)
-    assert len((flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+    assert len((flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()) == 2

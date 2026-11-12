@@ -268,3 +268,168 @@ def test_a_lint_template_without_paths_keeps_no_lint_whole(tmp_path):
     code, out = _run(root, "whole", "--template", "echo {paths}", "--test-kind", "lint")
     assert ts.NO_LINT_WHOLE in _notes(out) and ts.WHOLE_FROM_TEMPLATE not in _notes(out)
     assert not any(i.get("command") == "echo ." for i in out["items"])
+
+
+# ---------- #2925: 差分の中身で全体テストを選ぶ ----------
+
+
+def _branch_then_commit(root, files):
+    """今の HEAD を起点のブランチ `base` にし、`files` を足したコミットを積む。"""
+    import subprocess
+
+    subprocess.run(["git", "-C", str(root), "branch", "-f", "base"], check=True)
+    for rel, body in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A", "--", *files], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"], check=True)
+
+
+def _diff_kinds_item(out):
+    return next(i["diff_kinds"] for i in out["items"] if "diff_kinds" in i)
+
+
+def test_docs_only_diff_skips_the_test_suite_and_says_why(tmp_path):
+    """#2925 AC2 — 文書だけの差分では、テストの種別の全体テストを起動せず、飛ばした理由を出す。"""
+    root = _repo(tmp_path)
+    _branch_then_commit(root, {"docs/a.md": "# a\n", "README.md": "# r\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code == 0, out
+    assert out["summary"].startswith("全体テストを飛ばした（差分が文書のファイルだけ: 2 ファイル）")
+    assert _diff_kinds_item(out)["docs"] == ["README.md", "docs/a.md"]
+
+
+def test_docs_only_diff_still_runs_the_lint_suite(tmp_path):
+    """#2925 AC13 — 文書だけの差分でも、静的解析の全体テストは今と同じに走る。"""
+    decl = {"test": {"suites": [{"name": "lint", "runner": "sh", "kind": "lint", "command": "false"}]}}
+    root = _repo(tmp_path, decl)
+    _branch_then_commit(root, {"docs/a.md": "# a\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert code == 1, out
+
+
+def test_mixed_diff_runs_the_whole_tests(tmp_path):
+    """#2925 AC3 — コードと文書が混ざった差分では全体テストが今と同じに走る。"""
+    root = _repo(tmp_path)
+    _branch_then_commit(root, {"docs/a.md": "# a\n", "src/a.py": "x = 1\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code != 0 and "全体テスト" in out["summary"] and "飛ばした" not in out["summary"]
+
+
+def _tested_decl():
+    return {
+        "test": {"suites": [{"name": "unit", "runner": "sh", "kind": "test", "command": "false", "scope_command": "sh {paths}"}]},
+        "docs": {"tested": [{"paths": ["docs/glossary.md"], "tests": ["t/test_g.sh"]}]},
+    }
+
+
+@pytest.mark.parametrize("body,want", [("exit 0\n", 0), ("exit 1\n", 1)])
+def test_tested_docs_run_only_their_tests_and_failures_block(tmp_path, body, want):
+    """#2925 AC4 — テストが読む文書だけの差分では、宣言の対応のテストだけを範囲の雛形で走らせ、落ちたら 0 で返さない。"""
+    import subprocess
+
+    root = _repo(tmp_path, _tested_decl())
+    (root / "t").mkdir()
+    (root / "t" / "test_g.sh").write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/glossary.md": "# g\n", "docs/other.md": "# o\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert (code == 0) == (want == 0), out
+    assert out["summary"].startswith("文書を読むテスト（全体テストの代わり。1 ファイル） 1 本")
+    assert _diff_kinds_item(out)["tests"] == ["t/test_g.sh"]
+
+
+def test_unreadable_docs_decl_runs_the_whole_tests(tmp_path):
+    """#2925 AC5 — 分け方の宣言が読めなければ、文書だけの差分でも全体テストを走らせる。"""
+    import subprocess
+
+    root = _repo(tmp_path)
+    (root / ".ndf" / "project.json").write_text('{"version": 1, "docs": {"files": "x"}}', encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/a.md": "# a\n"})
+    code, out = _run(root, "whole", "--base", "base", "--template", "false {paths}")
+    assert code != 0 and _diff_kinds_item(out)["unknown"]
+
+
+def test_tested_docs_owned_by_a_suite_without_a_scope_template_run_the_whole_tests(tmp_path):
+    """文書に対応するテストを受け持つ suite が範囲の雛形を持たなければ、雛形を持つ別の suite へ渡さず全体テストへ戻す。"""
+    import subprocess
+
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "py", "runner": "sh", "kind": "test", "paths": ["py"], "command": "true", "scope_command": "sh {paths}"},
+                {"name": "js", "runner": "sh", "kind": "test", "paths": ["js"], "command": "false"},
+            ]
+        },
+        "docs": {"tested": [{"paths": ["docs/glossary.md"], "tests": ["js/test_g.sh"]}]},
+    }
+    root = _repo(tmp_path, decl)
+    (root / "js").mkdir()
+    (root / "js" / "test_g.sh").write_text("exit 0\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"], check=True)
+    _branch_then_commit(root, {"docs/glossary.md": "# g\n"})
+    code, out = _run(root, "whole", "--base", "base")
+    assert code != 0 and not out["summary"].startswith("文書を読むテスト"), out
+    assert any("js" in n and "全体テストを走らせる" in n for n in _notes(out)), out
+
+
+# ---------- #3056: CI テストの宣言があれば、範囲テストはテストの suite を走らせない ----------
+
+
+def _ci_only_decl(strategy=None):
+    test = {
+        "ci": {"only": True},
+        "suites": [
+            {"name": "t", "runner": "false", "command": "false", "scope_command": "false {paths}"},
+            {
+                "name": "sh",
+                "runner": "sh",
+                "kind": "lint",
+                "scope_command": "sh -c 'for f; do sh -n \"$f\" || exit 1; done' x {paths}",
+                "paths": ["*.sh"],
+            },
+        ],
+    }
+    if strategy:
+        test["strategy"] = strategy
+    return {"test": test}
+
+
+def test_ci_only_scope_runs_only_the_lint_suite(tmp_path):
+    root = _repo(tmp_path, _ci_only_decl())
+    (root / "good.sh").write_text("echo hi\n", encoding="utf-8")
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "good.sh")
+    assert code == 0, out
+    assert "false" not in str(out["items"]).replace("false {paths}", "")
+    assert any("CI に任せた" in i.get("note", "") for i in out["items"])
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "bad.sh")
+    assert code == 1 and "x bad.sh" in str(out["items"])
+
+
+@pytest.mark.parametrize("strategy", [None, "round-only"])
+def test_ci_only_scope_without_lint_files_passes_without_running_tests(tmp_path, strategy):
+    root = _repo(tmp_path, _ci_only_decl(strategy))
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "README.md")
+    assert code == 0 and "lint の suite が無い" in out["summary"]
+    code, out = _run(root, "scope", "--paths", "tests", "--only-kind", "test")
+    assert code == 0 and "test の suite が無い" in out["summary"]
+
+
+def test_ci_only_whole_lint_runs_only_the_lint_commands(tmp_path):
+    """`whole --only-kind lint` は command を持つ静的解析だけを手元で打ち、テストの suite（false）も CI も待たない。"""
+    decl = _ci_only_decl()
+    decl["test"]["suites"][1]["command"] = "sh -n bad.sh"
+    root = _repo(tmp_path, decl)
+    (root / "bad.sh").write_text("echo hi\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 0, out
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 1, out
+    code, out = _run(_repo(tmp_path / "b", _ci_only_decl()), "whole", "--only-kind", "lint")
+    assert code == 0 and "lint の suite が無い" in out["summary"]

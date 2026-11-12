@@ -86,7 +86,6 @@ class RunState:
         self.log: list[dict] = []
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0}
         self.last_stage = "無し"
-        self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
         self.process: list[dict] = []  # 進行の記録で書けなかったもの（結果 JSON の process の形）。止めずに報告へ載せる（#2227）
         self.gates: list[dict] = []  # run のステップが返した承認ゲート（終了コード 10〜19）
@@ -151,6 +150,7 @@ class RunState:
     # --- 途中の報告 ---
     def progress_write(self, rec: dict) -> dict:
         rec = {"kind": rec.pop("kind"), "at": clock.now_iso(), **rec}
+        rec |= {"host": h} if rec["kind"] in ("alive", "step") and (h := procs.host_sample()) else {}  # 負荷とメモリ（#2998 の決定 1・2）
         with open(self.progress, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.progress_seen = self.progress.stat().st_size
@@ -225,6 +225,8 @@ class RunState:
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
         llm = c.get("llm") or {}
+        if c.get("skipped"):  # 起動の判定などで飛んだステップの要約（報告の「走らなかったステップ」。#2914 の決定 5）
+            c["skip_summary"] = str((step_read.last_json(text) or {}).get("summary") or summary.strip())[:200]
         self.progress_write(
             {
                 "kind": "step",
@@ -290,15 +292,17 @@ class RunState:
             return
         self.last_stage = stage
         rec = plan.get("記録")
-        if not rec or stage in self.recorded_stages:
+        if not rec or stage in self.recorded_stages or stage in plan.get("記録しない工程", ()):
             return
+        once = not self.recorded_stages  # 最初の記録でモードと進め方を見出し行へ書く（#2921）
         self.recorded_stages.append(stage)
-        pace_first = (pace := plan.get("進め方")) in MVV_PACES and not self.pace_recorded
-        self.pace_recorded = True
-        for issue in plan.get("課題", []):  # 進め方を先に書く（まとめる工程を記録なしと数えない）。書けなくても止めない（#2227）
-            for args in ([[str(issue), "pace", pace]] if pace_first else []) + [[str(issue), "stage", stage]]:
-                p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
-                self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
+        heads = ["--mode", m] if once and (m := plan.get("モード")) else []
+        heads += ["--pace", pace] if once and (pace := plan.get("進め方")) in MVV_PACES else []
+        # 工程・モード・進め方を課題ごとに 1 回の呼び出しで書く（本文の取得と更新は 1 回）。書けなくても止めない（#2227）
+        for issue in plan.get("課題", []):
+            args = [str(issue), "stage", stage, *heads]
+            p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
+            self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
 
     def add_usage(self, kind: str, res: dict) -> None:
         """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
@@ -365,7 +369,6 @@ class RunState:
             "cause_counts": {k: dict(v) for k, v in self.cause_counts.items()},
             "failed_step": self.failed_step,
             "last_stage": self.last_stage,
-            "pace_recorded": self.pace_recorded,
             "recorded_stages": list(self.recorded_stages),
             "switched": list(self.switched),
             "pcount": dict(self.pcount),
@@ -391,7 +394,6 @@ class RunState:
         self.cause_counts = {k: dict(v) for k, v in acc.get("cause_counts", self.cause_counts).items()}
         self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
-        self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
         self.recorded_stages = list(acc.get("recorded_stages", self.recorded_stages))
         self.switched = list(acc.get("switched", self.switched))
         self.pcount = dict(acc.get("pcount", self.pcount))
@@ -460,15 +462,12 @@ class RunState:
             if "counts" in e:
                 counts[e["id"]] = e["counts"]
         counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
-        gaps = [
-            f"{e['id']}（" + ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"]) + "）"
-            for e in self.log
-            if e.get("gaps")
-        ]
-        if self.gates:
-            gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
-        else:
-            gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
+        gap = lambda e: ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"])  # noqa: E731
+        gaps = [f"{e['id']}（{gap(e)}）" for e in self.log if e.get("gaps")]
+        skipped = "; ".join(f"{e['id']}（{e.get('skip_summary') or '要約なし'}）" for e in self.log if e.get("skipped")) or "無し"
+        gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates) or (
+            "本番の系へ届く操作" if result == "関門" else "無し"
+        )
         shown = [g["presentation"] for g in self.gates if g.get("presentation")]
         shown += [e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")]
         presented = ", ".join(shown) or "無し"
@@ -486,6 +485,7 @@ class RunState:
 - 提示物: {presented}
 - 理由: {reason}
 - 通ったステップ: {steps}
+- 走らなかったステップ: {skipped}
 - 件数: {counts_line}
 - 欠けを残して進んだステップ: {"; ".join(gaps) or "無し"}
 - LLM の使用量: 入力 {l["input"]} / cache read {l["cache_read"]} / cache write {l["cache_write"]} / 出力 {l["output"]} / ${l["cost"]:.3f}

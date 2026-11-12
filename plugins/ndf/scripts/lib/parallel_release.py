@@ -17,11 +17,55 @@ from typing import Callable, Iterable, Optional
 import parallel_plan as pp
 
 MAX_HELPER_SEQ = 9999  # 一時レーンの名前 `<計画名>-rel<連番>` を 32 字に収める（I1）
+# 共通原則 C7（利用者の設定と指示書）のファイル。文書だけの範囲でも承認を引き継がず出し直す（#3020）
+C7_PATHS = ("**/AGENTS.md", "**/CLAUDE.md", ".ndf/**")
 
 
 def moved(presented: str, head: str) -> bool:
     """承認の答えの時点のベースブランチの先頭が、提示したコミットから進んでいるか（I14）。"""
     return bool(head) and head.strip() != presented.strip()
+
+
+def carry_check(root: Path, first: str, head: str, prs_of: Optional[Callable] = None) -> dict:
+    """`first..head` の範囲が文書だけの範囲かを判定する（#3020 の I1・I2）。耐久ステップの戻り値として記録できる辞書を返す。
+
+    文書だけの範囲は、宣言 `docs` で分けて（`diff_kinds`）コードのファイルと振る舞いを決める文書が 0 件、文書のファイルが
+    1 件以上の範囲である。設定と指示書（`C7_PATHS`）の変更を含む範囲は、人がリリース承認ゲートで見る変更なので省かない。差分の一覧・宣言・加わった Pull Request の一覧のどれかが取れなければ省かない側（`carry: False`）へ倒し、
+    理由を `reason` に書く。`added` は範囲の Pull Request の番号（`prs_of(root, first, head)`。省けば `included.release_range`）。"""
+    out: dict = {"carry": False, "reason": "", "added": [], "files": []}
+    if not first or not head:
+        return {**out, "reason": "比べるコミットが無い"}
+    try:
+        import diff_kinds
+        from pathmatch import path_matches
+    except ImportError as exc:
+        return {**out, "reason": f"差分の分け方を読めない（{exc}）"}
+    files = diff_kinds.git_changed(root, f"{first}..{head}")
+    if files is None:
+        return {**out, "reason": f"差分の一覧を取れない（{first[:12]}..{head[:12]}）"}
+    out["files"] = files
+    held = [f for f in files if path_matches(f, C7_PATHS)]
+    if held:  # 共通原則 C7: 人がリリース承認ゲートで見る変更なので、文書でも承認を引き継がない
+        return {**out, "reason": f"人の承認が要る設定・指示書（C7）の変更が {len(held)} 件ある"}
+    kinds = diff_kinds.classify_root(root, files)
+    if kinds.unknown:
+        return {**out, "reason": kinds.unknown}
+    if kinds.code:
+        return {**out, "reason": f"コードのファイルが {len(kinds.code)} 件ある"}
+    if kinds.behavior:
+        return {**out, "reason": f"振る舞いを決める文書が {len(kinds.behavior)} 件ある"}
+    if not kinds.docs_only():
+        return {**out, "reason": "文書のファイルが無い"}
+    try:
+        if prs_of is None:
+            from release_lib.included import release_range
+
+            added = [p.number for p in release_range(root, first, head)]
+        else:
+            added = list(prs_of(root, first, head))
+    except Exception as exc:  # noqa: BLE001  取れなければ省かない（I2）
+        return {**out, "reason": f"加わった Pull Request の一覧を取れない（{type(exc).__name__}: {exc}）"}
+    return {**out, "carry": True, "added": sorted(added)}
 
 
 def map_lanes(
@@ -179,23 +223,29 @@ def pipeline_cmd(supervise: str, d: Path) -> str:
     return f"{supervise} queue {d / 'present.json'} --then {d / 'release.json'} --done {d / 'done.json'}"
 
 
-def record_answer_cmd(d: Path, seq: int, k: int) -> str:
-    """確定の後に利用者の承認を答えの記録（`answer.json`）へ書く 1 行。提示のプランの `approve` がこの記録を読む。"""
+CARRIED_WHAT = "（提示 1 の承認を引き継ぐ。加わった範囲は文書だけ）"
+
+
+def record_answer_cmd(d: Path, seq: int, k: int, carried: bool = False) -> str:
+    """確定の後に利用者の承認を答えの記録（`answer.json`）へ書く 1 行。提示のプランの `approve` がこの記録を読む。
+    `carried` は出し直しを省いた提示 2 の引き継いだ承認で、引き継いだことを `--what` に残す（#3020）。"""
     from gate_answer import RELEASE_GATE
 
     script = Path(__file__).resolve().parents[1] / "sprint-state.py"
-    return f"python3 {script} gate {d / 'answer.json'} '{RELEASE_GATE}' --what 'まとめたリリース {seq} の提示 {k}' --by user --outcome approved"
+    what = f"まとめたリリース {seq} の提示 {k}" + (CARRIED_WHAT if carried else "")
+    return f"python3 {script} gate {d / 'answer.json'} '{RELEASE_GATE}' --what '{what}' --by user --outcome approved"
 
 
-def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: Optional[Callable] = None) -> Path:
+def build_plans(main: Path, name: str, seq: int, k: int, version: str, builder: Optional[Callable] = None, carried: bool = False) -> Path:
     """`releases/<連番>/<提示>/` に提示のプランと本番のプランと答えの記録（`answer_state`）を書き、置き場を返す。
 
-    `builder(d, version)` が (提示のプラン, 本番のプラン) を返す。省けば `supervise_lib.parallel_plans` を使う。"""
+    `builder(main, name, d, version)` が (提示のプラン, 本番のプラン) を返す。省けば `plan_parallel_release` を使う。
+    `carried` は出し直しを省いた提示 2 の引き継ぐ形（#3020 の決定 3）。"""
     d = release_dir(main, name, seq, k)
     d.mkdir(parents=True, exist_ok=True)
     if builder is None:
         builder = plan_parallel_release
-    present_plan, release_plan = builder(main, name, d, version)
+    present_plan, release_plan = builder(main, name, d, version, carried=True) if carried else builder(main, name, d, version)
     (d / "present.json").write_text(json.dumps(present_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (d / "release.json").write_text(json.dumps(release_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not (d / "answer.json").exists():
@@ -256,6 +306,50 @@ def present_gate_steps(state: str, repo: str | None, approval: str, prs: str, mo
     return steps
 
 
+def carried_gate_steps(name: str, seq: str, k: str, d: Path, repo: str | None, approval: str, facts_from: str) -> list[dict]:
+    """出し直しを省いた提示 2 の提示のプランのリリース承認ゲート（#3020 の I4・決定 3）: carried → record → approve の順に置き、
+    MVV 判定を置かない（リリース承認ゲートには提示 1 で答えが出ている）。
+
+    `carried` は提示 1 から提示 2 のコミットまで（確かめ直しの範囲）が文書だけなら 0 で `record` が引き継いだ承認を書き、
+    `approve` が通る。文書だけでなければ 10 で承認ゲートとして終わり、一時レーンがリリース承認ゲートの依頼を送る。"""
+    from supervise_lib.paths import PARALLEL_PY, STEPS_PY
+
+    state = str(Path(d) / "answer.json")
+    cwd = {"cwd": repo} if repo else {}
+    return [
+        {
+            "id": "carried",
+            "type": "run",
+            "stage": "デプロイ",
+            "timeout": 600,
+            **cwd,
+            "cmd": f"{PARALLEL_PY} carried {shlex.quote(name)} {seq}",
+            "next": "record",
+            "gate_next": "end",
+        },
+        {
+            "id": "record",
+            "type": "run",
+            "stage": "デプロイ",
+            "timeout": 60,
+            **cwd,
+            "cmd": record_answer_cmd(Path(d), int(seq), int(k), carried=True),
+            "next": "approve",
+        },  # fmt: skip
+        {
+            "id": "approve",
+            "type": "run",
+            "stage": "デプロイ",
+            "timeout": 120,
+            **cwd,
+            "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {shlex.quote(facts_from)}"
+            f" --answer-from {shlex.quote(str(Path(state).resolve()))} --by user",
+            "next": "end",
+            "gate_next": "end",
+        },
+    ]
+
+
 RELEASE_REQUEST_PHASE = "リリースの依頼"
 
 
@@ -288,11 +382,12 @@ def plan_release_request(a, repo: str, plan_name: str, lane: str, prs: list[str]
     )
 
 
-def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]:
+def plan_parallel_release(main, name: str, d, version: str, carried: bool = False) -> tuple[dict, dict]:
     """まとめたリリース（#2436）の 1 つの提示の (提示のプラン, 本番のプラン)。`d` は `releases/<連番>/<提示>/`。
 
     提示のプランは開発版の承認資料のステップ（approval-facts・承認資料の説明の欄・他のプラグインの上げ幅）を版上げ無しで
-    流し、`parallel.py present` でレーンの内訳を足し、最後にリリース承認ゲート（MVV 判定 → approve）を置く。本番のプランは
+    流し、`parallel.py present` でレーンの内訳を足し、最後にリリース承認ゲート（MVV 判定 → approve。`carried` なら
+    `carried_gate_steps`）を置く。本番のプランは
     リリース承認ゲートを持たず、確定した提示のプランの承認したコミット（`{queue_approved:present}`）から `release/v<版>` を切る。
     本番のプランの承認資料はこの提示の承認資料で、先頭の approve は提示のプランの facts と答えの記録を読む。"""
     from supervise_lib.decl import apply_decls, decl_fields
@@ -354,9 +449,12 @@ def plan_parallel_release(main, name: str, d, version: str) -> tuple[dict, dict]
         "cwd": repo,
         "cmd": f"{PARALLEL_PY} present {shlex.quote(name)} {seq} {k} --approval {approval}"
         + f" && cat {shlex.quote(str(d / 'breakdown.md'))} >> {approval}",
-        "next": "mvv",
+        "next": "carried" if carried else "mvv",
     }
-    gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))
+    if carried:
+        gate = carried_gate_steps(name, seq, k, d, repo, approval, str(present_state))
+    else:
+        gate = present_gate_steps(str(state), repo, approval, "$(cat {state_dir}/work/prs.txt)", "standard", str(present_state), str(state))
     present_plan = with_record(
         {
             "フェーズ": "リリース（提示）",

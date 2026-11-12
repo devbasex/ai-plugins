@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/mode-materials.py",
+  "summary": "mode-materials.py: 課題の本文と設計文書から、モードの判定の材料を集める（#2923）。",
+  "args": {
+    "options": [
+      "--issue",
+      "--out",
+      "--root"
+    ],
+    "positionals": []
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR",
+    "UV_PROJECT_ENVIRONMENT"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "失敗: 本文を読めない課題がある（status stopped。gaps に課題と理由）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/sprint_loop.py",
+    "plugins/ndf/scripts/lib/sprint_loop_argv.py",
+    "plugins/ndf/scripts/lib/sprint_loop_cli.py",
+    "plugins/ndf/skills/development-workflow/references/loop.md"
+  ]
+}

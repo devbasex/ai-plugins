@@ -146,6 +146,7 @@ def call_claude(
     base: str | None = None,
     session: dict | None = None,
     watch=None,
+    api_key: str | None = None,
 ) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。Claude の使用量の帳簿へ 1 行を書く（#1953）。
 
@@ -154,10 +155,11 @@ def call_claude(
     `caller` は帳簿の呼び出し元（`source`・`kind`・`plan`・`step`）。`kind` の既定は `claude_kind`、ほかは環境変数（C2）。
     `session` を渡すと、会話を残す起動（full で resume でない）の id を `--session-id` で決め、id と設定の置き場を入れる（#1623）。
     `watch`（進みの観測）を渡すと、最小構成でも会話を残し、締め切りを `watch.deadline` で動かす。打ち切りは結果の `timed_out` に残す（#2505）。
+    `api_key` は API キーで起動したときのキーの名前で、帳簿の行に載せる（値は載せない。#2930）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
     kind = claude_kind(system, full)
-    who = {"kind": kind, **(caller or {})}
+    who = {"kind": kind, **(caller or {}), **({"api_key": api_key} if api_key else {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
     run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
     # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
@@ -252,13 +254,14 @@ class ClaudeRunner:
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
 
-        登録済みのアカウントが 2 つ以上あれば、上限に当たったアカウントを除いて最も上限から遠いものへ替え、待たずに
+        登録済みのアカウントが 2 つ以上あれば、上限に当たったアカウントを除いて起動先の決定で選び直し、待たずに
         同じ呼び出しをやり直す。候補が無ければ NDF_SUPERVISE_CLAUDE_FALLBACK（従量の接続）へ移り、以後の呼び出しも
         それで起動する（起動のたびに戻れるかを確かめる）。登録が 1 つ以下なら今までどおり、FALLBACK があれば
         その変数を足して 1 度だけ起動し直す。それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）
         まで待って同じ呼び出しを起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
-        API キーは宣言に従って先に試し、上限で替えるアカウントが無ければ従量の接続と待ちの前に試す（#2855。`KeyRoute`）。
+        API キーは起動先の決定に従って先に試し（#2855・#2930。`KeyRoute`）、上限で替えるアカウントが無いときも、その時点の
+        決定が API キーを選べば従量の接続と待ちの前に試す。
         """
         ctx, st = self.ctx, self.ctx.state
         retry = ctx.plan.get("limit_retry_seconds", limits.seconds("supervise.limit-retry"))
@@ -266,25 +269,27 @@ class ClaudeRunner:
         fallback = ca.fallback_env()
         self._tell_metered_problem()
         multi = ca.registered() >= 2
-        tried_fallback, waited = False, 0.0
+        tried_fallback, waited, after_wait = False, 0.0, False  # after_wait: 上限の待ちの直後か（今のアカウントで起動し直す）
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
         keys = self.keys.attempt(self.keep, cwd)
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
-        direct = lambda env: call_claude(system, prompt, tools, cwd, timeout, child_env=env, **kw)  # noqa: E731
-        once = lambda env: self._call_running(lambda: direct(env))  # noqa: E731
+        direct = lambda env, key=None: call_claude(system, prompt, tools, cwd, timeout, child_env=env, api_key=key, **kw)  # noqa: E731
+        once = lambda env, key=None: self._call_running(lambda: direct(env, key))  # noqa: E731
         while True:
             if (res := keys.run(once)) is not None:  # API キーで決着した
                 return res
             self._return_from_key(multi)
             try:
-                child = keys.env(self.child_env(fallback) if multi else None)
+                child = keys.env(self.child_env(fallback, tried, after_wait) if multi else None)
             except AccountsLimited as e:
                 if not keys.left():
                     waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                    tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+                    after_wait = True
                 continue
-            res = once(child)
+            after_wait, res = False, once(child)
             if self._retry_on_auth(res, multi, auth_failed):
                 continue
             if res.get("limit"):
@@ -297,6 +302,7 @@ class ClaudeRunner:
                 continue
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+            after_wait = True
             keys.reset()
 
     def _return_from_key(self, multi: bool) -> None:
@@ -355,7 +361,7 @@ class ClaudeRunner:
             tried.add(self.account)
         nxt = ca.choose(exclude=tried, keep=self.keep())
         if nxt.name:
-            self.switch(nxt.name, kind)
+            self.switch(nxt.name, kind, decision=nxt.decision)
             return True
         if key_left is not None and key_left():
             return True
@@ -418,29 +424,40 @@ class ClaudeRunner:
         st = self.ctx.state
         st.progress_write({"kind": "account_dir", "step": st.cur.get("id"), **row})
 
-    def child_env(self, fallback: dict | None = None) -> dict | None:
+    def child_env(self, fallback: dict | None = None, exclude=(), after_wait: bool = False) -> dict | None:
         """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
 
-        従量の接続の間は、起動のたびに閾値未満のアカウントへ戻れるかを確かめる。今のアカウントを使えなければ（再登録が要る・
+        従量の接続の間は、起動のたびに起動先の決定が候補のアカウントを返すかを確かめ、返せば戻す。アカウントの間は起動のたびに
+        選び直し、今のアカウントが最良の候補と同じ組になければ替える（#2930 の決定 6）。今のアカウントを使えなければ（再登録が要る・
         認証の失敗の観測がある・設定ディレクトリを用意できない）別のアカウント、従量の接続（`fallback`）の順に替える。どれも無く、
-        他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。"""
+        他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。
+        選び直しが候補を返さなければ今のアカウントでも起動しない（上限の待ちの直後 `after_wait` を除く）。`exclude`（`call` の
+        `tried`。この呼び出しで上限に当たったもの）は選び直しでも選ばない。"""
         environ = dict(os.environ)
         if self.account == ca.METERED:
-            c = ca.choose(keep=self.keep())
-            if not c.recoverable(ca.switch_at()):
+            c = ca.choose(exclude=exclude, keep=self.keep())
+            if not c.recoverable():
                 return ca.account_env(ca.METERED, environ)
-            self.switch(c.name, "recovered")
+            self.switch(c.name, "recovered", decision=c.decision)
         if self.account is None:
             return None
         acc = ca.load_account(self.account)
-        if not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
+        stay = not (held := bool(acc and acc.auth_held(time.time())))
+        if stay:  # 起動のたびに選び直す。同じ組なら替えない（#2930 の決定 6）。認証の失敗は下の振り替えが扱う
+            c = ca.choose(exclude=exclude, keep=self.keep(), current=self.account)
+            if c.name and c.name != self.account:
+                self.switch(c.name, "rule", decision=c.decision)
+                acc = ca.load_account(self.account)
+            stay = bool(c.name) or after_wait  # 候補が無い（すべて上限など）なら、上限にある今のアカウントで起動しない（I4）
+        if stay and not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
             return env
-        c, env = ca.choose_env(exclude={self.account}, keep=self.keep(), base=environ, note=self.note_account_dir)
+        why = "auth" if held or stay else "limit"  # 替える理由: 認証の失敗か、今のアカウントも上限にあるか
+        c, env = ca.choose_env(exclude={self.account, *exclude}, keep=self.keep(), base=environ, note=self.note_account_dir)
         if env is not None:
-            self.switch(c.name, "auth")
+            self.switch(c.name, why, decision=c.decision)
             return env
         if fallback:
-            self.switch(ca.METERED, "auth", keys=list(fallback))
+            self.switch(ca.METERED, why, keys=list(fallback))
             return ca.account_env(ca.METERED, environ)
         if c.earliest:
             name, until = c.earliest
@@ -449,8 +466,10 @@ class ClaudeRunner:
             )
         raise AuthUnavailable(f"アカウント {self.account} を使えず、替えるアカウントも従量の接続の宣言も無い")
 
-    def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
-        """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""
+    def switch(self, to: str, reason: str, keys: list[str] | None = None, decision=None) -> None:
+        """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。
+
+        `decision`（起動先の決定）があれば、規則の名前・組・根拠の値を行に足す（#2930 の受け入れ条件 23）。"""
         st = self.ctx.state
         before, self.account = self.account, to
         if to == ca.METERED:
@@ -465,6 +484,8 @@ class ClaudeRunner:
         row = {"kind": "account", "step": st.cur.get("id"), "reason": reason, "from": before, "to": to}
         if keys:
             row["keys"] = keys
+        if decision is not None:
+            row.update(rule=decision.rule, account_rule=decision.account_rule, evidence=decision.evidence)
         st.progress_write(row)
 
     def note_limit(self, res: dict) -> None:

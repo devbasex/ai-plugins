@@ -232,7 +232,7 @@ def test_sprint_close_closes_with_the_record_the_step_wrote(repo, gh, tmp_path):
     assert harness.issues_of(out)["o/r#5"]["result"] == "would_close"
 
 
-# --- #1870: 版数を上げないリリース・昇格の経路・本文の 段階: 検証 ------------------------------
+# --- #1870: 版数を上げないリリース・リリースの Pull Request で届く経路・本文の 段階: 検証 ------------------------------
 
 UNVERSIONED = """## リリース記録
 
@@ -326,7 +326,7 @@ def test_a_record_comment_after_a_verification_body_reads_as_production():
 
 
 def promote_state(repo: Path, gh, **kw):
-    """develop → main の昇格の PR #50 がマージ済み（マージのコミットは作業場所の HEAD）。"""
+    """develop → main のリリースの Pull Request #50 がマージ済み（マージのコミットは作業場所の HEAD）。"""
     git(repo, "commit", "-q", "--allow-empty", "-m", "promote")
     sha = git(repo, "rev-parse", "HEAD").strip()
     rec = {"body": "develop → main", "comments": [], "url": "https://github.com/o/r/pull/50", "mergeCommit": {"oid": sha}}
@@ -341,7 +341,7 @@ def record_promote(repo: Path, env: dict) -> tuple[int, dict]:
 
 
 def test_record_promote_writes_a_production_record_to_the_promote_pr(repo, gh):
-    """AC2: record --promote は昇格の PR へ記録を 1 件書き、sprint-close は `段階: 本番` で読む。2 度目は書かない。"""
+    """AC2: record --promote はリリースの Pull Request へ記録を 1 件書き、sprint-close は `段階: 本番` で読む。2 度目は書かない。"""
     sha = promote_state(repo, gh)
     code, out = record_promote(repo, gh.env)
     assert code == 0 and [i["result"] for i in out["items"]] == ["posted"], out
@@ -354,7 +354,7 @@ def test_record_promote_writes_a_production_record_to_the_promote_pr(repo, gh):
 
 
 def test_record_promote_without_a_merged_pr_posts_nothing(repo, gh):
-    """AC2: マージ済みの昇格の PR が無ければ書かずに 3 で止まる（プランは judge-record へ進む）。"""
+    """AC2: マージ済みのリリースの Pull Request が無ければ書かずに 3 で止まる（プランは judge-record へ進む）。"""
     promote_state(repo, gh, prs=[])
     code, out = record_promote(repo, gh.env)
     assert code == 3 and out["status"] == "stopped" and gh.get()["records"]["50"]["comments"] == []

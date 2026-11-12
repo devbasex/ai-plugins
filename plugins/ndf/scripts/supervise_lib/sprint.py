@@ -13,6 +13,7 @@ from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, with_decls
 from supervise_lib.design_merge import plan_design_merge
+from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -20,7 +21,7 @@ from supervise_lib.sprint_waves import (
     plan_sprint_branch,
     plan_sprint_check,
     plan_sprint_design,
-    plan_sprint_impl,
+    sprint_impl_plans,
     plan_sprint_release,
     plan_advise_design,
     design_read,
@@ -48,7 +49,7 @@ from supervise_lib.sprint_routes import (
     with_cd_guidance,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, refine_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -144,11 +145,7 @@ def auto_sprint_plans(a) -> list[dict]:
     # 設計の課題が無くても設計を承認済みの課題があれば、設計の結果のステージが queue の先頭になる
     first = "設計" if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
     then = {"then_of": first} if design_read(a) else {}
-    impl = {}
-    for n in a.issue:
-        plan = plan_sprint_impl(a, n, repo)
-        plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
-        impl[f"impl-{n}"] = plan
+    impl = sprint_impl_plans(a, repo, pace="auto")
     waves += design_results_wave(a, repo, **({"then_of": first} if a.design else {}))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
@@ -169,14 +166,15 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（リリース記録があれば）控え → リリース後テスト → 比較 → 振り返り → 課題を閉じる → 棚卸し。"""
+    """まとめ: 確定仕様化 → PR →（リリース記録があれば）リリース後テスト → 起動の判定 →（起動する回だけ）振り返り → 棚卸し →
+    マージ → 課題を閉じる。CI は ready から後ろの作業と重なって進み、マージの後は close だけ（#2914 の決定 1〜4・I3・I8）。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
-    plan = with_decls(
-        {
+    verify = has_record(record_pr)
+    plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
             "モード": a.mode,
@@ -187,16 +185,15 @@ def close_plan(a, repo: str) -> dict:
             "規則": "",
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
-                *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="config-save" if has_record(record_pr) else "retro"),
-                *(release_verify_steps(a.name, refs, record_pr) if has_record(record_pr) else []),
-                _retro_step(a, refs, stats),
+                *_spec_pr_steps(a, refs, "config-save" if verify else "deep-due"),
+                *(release_verify_steps(a.name, refs, record_pr, after="deep-due") if verify else []),
+                deep_due_step(a, repo, issues, after="merge-gate"),
+                _retro_step(a, refs, stats, repo),
+                *refine_steps(a, refs, repo, issues, after="merge-gate"),
+                *merge_steps(a, next="close"),
                 _close_step(a, repo, record_pr, issues),
-                *refine_steps(a, refs, repo),
             ],
-        },
-        a,
-    )
+        }, a)  # fmt: skip
     return with_record(plan)
 
 
@@ -303,7 +300,7 @@ def sprint_plans(a) -> list[dict]:
     waves += design_results_wave(a, repo, **then(DESIGN_RESULTS_STAGE))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then("スプリントブランチ")},
-        {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}, "then_of": first},
+        {"name": "実装", "plans": sprint_impl_plans(a, repo), "then_of": first},
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
@@ -374,9 +371,12 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         absorb.add_absorbed(a)
     if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
         return stop
+    if not closing and (stop := bundle_refusal(a)):  # 課題のまとまり（#3081）。壊れた計画のレーンはプランを書かない
+        return stop
     waves = waves if waves is not None else sprint_plans(a)
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
+        apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）
     plans = [plan for wave in waves for plan in (wave.get("plans") or {}).values()]
     for plan in plans if getattr(a, "state", None) else []:
         plan["スプリント状態"] = sprint_state_path(a)  # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）

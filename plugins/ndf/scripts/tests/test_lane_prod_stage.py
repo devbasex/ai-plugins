@@ -1,6 +1,6 @@
 """並列の計画のレーンの本番のステージと、設計承認ゲートで外した課題（#2717）。
 
-昇格の経路のレーンは昇格のプランをそのまま流し（I1）、テンプレートの経路のレーンはリリースの依頼を送る（I2）。
+リリースの Pull Request で届く経路のレーンは本番チャネルへ入れるリリースプランをそのまま流し（I1）、テンプレートの経路のレーンはリリースの依頼を送る（I2）。
 リリースの依頼のコマンドは課題の番号を持たず、流す時点のプランの `課題` を `{plan_issues}` で埋める（I3）。
 レーンの判定は外のオーガナイザーの置き場（`NDF_ORGANIZER_DIR`）で真にする。実機の gh と claude は呼ばない。
 """
@@ -63,7 +63,7 @@ def prod_stage(waves) -> list[dict]:
 
 @pytest.mark.parametrize("pace", ["auto", "normal"])
 def test_promote_route_lane_keeps_one_promote_plan(tmp_path, org, pace):
-    """受け入れ条件 1 / I1: 昇格の経路のレーンの本番のステージは昇格のプラン 1 本で、リリースの依頼を組まない。"""
+    """受け入れ条件 1 / I1: リリースの Pull Request で届く経路のレーンの本番のステージは本番チャネルへ入れるリリースプラン 1 本で、リリースの依頼を組まない。"""
     plans = prod_stage(promote_sprint(tmp_path, pace))
     assert len(plans) == 1 and plans[0]["フェーズ"] != parallel_release.RELEASE_REQUEST_PHASE
     ids = [s["id"] for s in plans[0]["steps"]]
@@ -84,7 +84,7 @@ def test_template_route_lane_requests_the_release_with_the_issue_placeholder(org
 
 
 def test_dropped_issues_leave_the_promote_plan(tmp_path, org):
-    """受け入れ条件 3 / I4: 昇格の経路で 3 件中 2 件を外すと、昇格のプランの `課題` は残った 1 件になる。"""
+    """受け入れ条件 3 / I4: リリースの Pull Request で届く経路で 3 件中 2 件を外すと、本番チャネルへ入れるリリースプランの `課題` は残った 1 件になる。"""
     waves = promote_sprint(tmp_path, "auto", ("11", "12", "13"))
     path = next(p for w in waves if w["name"] == "本番" for p in w["plans"])
     assert load(path)["課題"] == [11, 12, 13]

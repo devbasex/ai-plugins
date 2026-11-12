@@ -10,7 +10,7 @@
   "リポジトリ": "<TMP>/repo",
   "規則": "",
   "進め方": "fast",
-  "上限": 20,
+  "上限": 21,
   "steps": [
     {
       "id": "spec",
@@ -36,40 +36,6 @@
       "id": "ready",
       "type": "run",
       "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
-      "next": "merge-gate"
-    },
-    {
-      "id": "merge-gate",
-      "type": "run",
-      "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
-      "gate_next": "end",
-      "next": "merge"
-    },
-    {
-      "id": "merge",
-      "type": "run",
-      "timeout": 4290,
-      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
-      "probe": {
-        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
-      },
-      "on_exit": {
-        "75": "stop"
-      },
-      "next": "config-save"
-    },
-    {
-      "id": "merge-approved",
-      "type": "run",
-      "timeout": 4290,
-      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
-      "probe": {
-        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
-      },
-      "on_exit": {
-        "75": "stop"
-      },
       "next": "config-save"
     },
     {
@@ -95,7 +61,7 @@
       "type": "run",
       "timeout": 120,
       "cmd": "python3 <NDF>/scripts/release-verification-steps.py user-config-check --dir {state_dir}",
-      "next": "retro"
+      "next": "deep-due"
     },
     {
       "id": "config-check-on-fail",
@@ -107,22 +73,22 @@
       }
     },
     {
+      "id": "deep-due",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth due diff --sprint m9 --issues 15 --root <TMP>/repo",
+      "skip_to": "merge-gate",
+      "next": "retro"
+    },
+    {
       "id": "retro",
       "type": "work",
       "full": true,
       "kind": "振り返り",
       "stage": "振り返り",
       "timeout": 3600,
-      "prompt": "/ndf:retrospective スプリント m9（#15）。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。課題は閉じない（次の close が閉じる）。",
-      "next": "close"
-    },
-    {
-      "id": "close",
-      "type": "run",
-      "stage": "後片付け",
-      "cwd": "<TMP>/repo",
-      "timeout": 900,
-      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --final-stage 振り返り --with-verification --label 'スプリント m9の後片付け'",
+      "prompt": "/ndf:retrospective スプリント m9（#15）。扱うループの 1 回と課題は振り返りの範囲（`python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth scope --sprint m9 --root <TMP>/repo` の `items` と `metrics.issues`。見送った回の課題を含む）である。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。課題は閉じない（後の close が閉じる）。",
       "next": "refine"
     },
     {
@@ -132,7 +98,7 @@
       "kind": "棚卸し",
       "stage": "棚卸し",
       "timeout": 3600,
-      "prompt": "/ndf:backlog-refinement --depth diff スプリント m9（#15）。差分の棚卸しの工程として無人で通す。候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の番号）を報告の「人の判断待ち」に載せて終える。",
+      "prompt": "/ndf:backlog-refinement --depth diff スプリント m9（#15）。差分の棚卸しの工程として無人で通す。扱うループの 1 回と課題は振り返りの範囲（`python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth scope --sprint m9 --root <TMP>/repo` の `items` と `metrics.issues`。見送った回の課題を含む）である。今の回の課題 15 は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、重複の組に入るときは閉じない課題を正本にする。候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の番号）を報告の「人の判断待ち」に載せて終える。",
       "next": "refine-record"
     },
     {
@@ -170,7 +136,7 @@
       "kind": "棚卸し",
       "stage": "棚卸し",
       "timeout": 5400,
-      "prompt": "/ndf:backlog-refinement --depth overhaul スプリント m9（#15）の後の大整理を無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `overhaul` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "prompt": "/ndf:backlog-refinement --depth overhaul スプリント m9（#15）の後の大整理を無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `overhaul` の判定にある。今の回の課題 15 は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、重複の組に入るときは閉じない課題を正本にする。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
       "on_fail": "overhaul-release",
       "next": "overhaul-release"
     },
@@ -199,7 +165,7 @@
       "cwd": "<TMP>/repo",
       "timeout": 300,
       "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth due review --root <TMP>/repo",
-      "skip_to": "end",
+      "skip_to": "merge-gate",
       "next": "review-claim"
     },
     {
@@ -220,7 +186,7 @@
       "kind": "棚卸し",
       "stage": "棚卸し",
       "timeout": 5400,
-      "prompt": "/ndf:backlog-refinement --depth review スプリント m9（#15）の後の見直しを無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `review` の判定にある。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
+      "prompt": "/ndf:backlog-refinement --depth review スプリント m9（#15）の後の見直しを無人で通す。持ち主の実行は `upkeep.py owner status` の `owner.run`、起動した条件は `depths.jsonl` の最後の `review` の判定にある。今の回の課題 15 は閉じない課題である。閉じてよい・重複の正本でない側・やらないのどの区分にも入れず、重複の組に入るときは閉じない課題を正本にする。人へ問わず、MVV 判定が従う以外の起票は needs-decision を付けて人の判断待ちに置き、報告に載せて終える。最後に `depth record` と `owner release` を打つ。",
       "on_fail": "review-release",
       "next": "review-release"
     },
@@ -231,9 +197,9 @@
       "timeout": 60,
       "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py owner release --what review --root <TMP>/repo --pid \"$PPID\"",
       "on_exit": {
-        "10": "end"
+        "10": "merge-gate"
       },
-      "next": "end"
+      "next": "merge-gate"
     },
     {
       "id": "review-skipped",
@@ -241,6 +207,49 @@
       "cwd": "<TMP>/repo",
       "timeout": 60,
       "cmd": "python3 <NDF>/skills/backlog-refinement/scripts/upkeep.py depth record --depth review --event skipped --root <TMP>/repo",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 4290,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
+      },
+      "next": "close"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 4290,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
+      },
+      "next": "close"
+    },
+    {
+      "id": "close",
+      "type": "run",
+      "stage": "後片付け",
+      "cwd": "<TMP>/repo",
+      "timeout": 900,
+      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --final-stage-from {state_dir}/progress.jsonl --with-verification --label 'スプリント m9の後片付け'",
       "next": "end"
     }
   ],

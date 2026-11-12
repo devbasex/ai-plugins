@@ -186,6 +186,8 @@ class GreenWatch:
         self.seen_jobs = {}  # 照会できた取り消しのジョブの判定（(root, job ID) ごと）。読み直しのたびに照会し直さない
         self.infra = InfraWatch(a)  # Runner が付かなかった取り消しの再実行と待ち直し（先頭のコミットごと）
         self.on_open = None  # 開いた PR を最初に読んだとき、draft を外す前に 1 度だけ呼ぶ（リリース承認ゲートの判定。#1336）
+        # CI テストの宣言のあるリポジトリのテストのチェック（空なら head のすべて）。None なら今の判定のまま（#3056 の I7）
+        self.test_checks: list[str] | None = None
 
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
@@ -368,6 +370,8 @@ class GreenWatch:
             self.empty_since = self.empty_since if self.empty_since is not None else time.monotonic()
             if time.monotonic() - self.empty_since >= a.no_checks_after:
                 items.append({"kind": "check", "name": "(none)", "result": "no_checks"})
+                if self.test_checks is not None:
+                    self._stop_no_test_checks()
                 return ("done", "no_checks")
         elif not pending and not reading.infra:
             if sha in (self.pending_sha, self.green_sha):
@@ -384,6 +388,27 @@ class GreenWatch:
                 if count is not None:
                     self.queued_runs = count  # 最後に見た待ち行列の件数
         return ("wait", None)
+
+    def _stop_no_test_checks(self):
+        """CI テストの宣言のあるリポジトリで、チェックが 1 件も載らない。テストを通っていない変更をマージしない（#3056 の I7）。"""
+        n = self.n
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} に CI のチェックが 1 件も載らない。CI テストの宣言があるため、テストを確かめずにマージしない",
+                self.items,
+                {"waits": self.waits},
+                next=f"gh pr checks {n} で CI が走ったかを確かめる（衝突・ワークフローの絞り込み）",
+            )
+        )
+
+    def _absent_test_checks(self, reading: CheckReading) -> list[str]:
+        """CI テストの宣言のテストのチェックのうち、head に現れないもの（待ちに数える）。"""
+        if not self.test_checks:
+            return []
+        seen = [(i.label, str(i.key[-1])) for group in (reading.pending, reading.passed, reading.failed, reading.infra) for i in group]
+        return [f"{c}（現れない）" for c in self.test_checks if not any(c in pair for pair in seen)]
 
     def _check_deadline(self, reading: CheckReading, pending, passed):
         """締め切りを過ぎていれば止める（基盤待ちが残れば基盤待ちとして）。止めるときは emit で抜ける。"""
@@ -415,7 +440,7 @@ class GreenWatch:
         reading = read_checks(self.root, info.get("statusCheckRollup"), self.seen_jobs)
         self._note(reading)
         self._handle_failures(reading)
-        pending = [i.label for i in reading.pending]
+        pending = [i.label for i in reading.pending] + self._absent_test_checks(reading)
         passed = [i.label for i in reading.passed]
         verdict = self._classify_progress(sha, reading, pending, passed)
         if verdict[0] == "done":

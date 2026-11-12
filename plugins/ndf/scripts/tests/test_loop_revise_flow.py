@@ -78,7 +78,7 @@ def test_the_next_sprint_passes_the_input_of_every_round(env):
     revise(env, "- 第一の指摘")
     closed(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    base.sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     new = next(c for c in reversed(env.calls) if "new" in c and "sprint" in c)
     at = new.index("--revise-note") + 1
     n, path = new[at].split("=", 1)
@@ -111,7 +111,7 @@ def waiting_again(env, doc, note="- 絞る"):
     closed(env)
     box = serve_doc(env, doc)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
+    base.sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     lap = sl.current_lap(rec(env))
     report = design_report(env, "design-11", "https://github.com/o/r/pull/501")
     item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門", "report": report}
@@ -137,7 +137,7 @@ def test_after_an_auto_revise_a_gap_goes_to_the_human_with_the_missing_items(env
     if closed_lap:
         closed(env)
     sl_select.cmd_select(env, "l1")
-    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.3", None, [])
+    base.sprint(env, "l1", "standard", "1.0.0-dev.3", None, [])
     lap = sl.current_lap(rec(env))
     item = {**item, "plan": str(Path(lap["out"]) / "design-11.json")}
     sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
