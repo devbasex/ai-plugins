@@ -2,7 +2,8 @@
 
 `/proc/` を読むのもこのモジュールだけである（構造チェックの I14）。psutil に無い cgroup のメモリ
 （`memory.max`・`memory.current`・`memory.events`・`memory.stat`）と、メモリの圧（PSI の
-`/proc/pressure/memory`・`/proc/vmstat` のスワップ I/O）の読み取りはここに残す。
+`/proc/pressure/memory`・`/proc/vmstat` のスワップ I/O）と、進捗ログに載せる負荷とメモリの値（`/proc/loadavg`・
+`/proc/meminfo`。#2998 の決定 3）の読み取りはここに残す。
 
 - 生死はゾンビを死んだとみなす（`os.kill(pid, 0)` はゾンビにも成功するため）
 - 停止は SIGTERM の後、猶予を過ぎても残れば SIGKILL を送る。対象がプロセスグループの先頭で、呼んだ側と
@@ -27,6 +28,9 @@ CGROUP_ROOT = Path("/sys/fs/cgroup")
 PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 PROC_PRESSURE_MEMORY = Path("/proc/pressure/memory")
 PROC_VMSTAT = Path("/proc/vmstat")
+PROC_LOADAVG = Path("/proc/loadavg")
+PROC_MEMINFO = Path("/proc/meminfo")
+PYTEST_NAMES = ("pytest", "py.test")
 
 
 class CgroupMemory(NamedTuple):
@@ -349,3 +353,92 @@ def swap_io_pages(path: Path = PROC_VMSTAT) -> int | None:
     if pages_in is None or pages_out is None:
         return None
     return pages_in + pages_out
+
+
+def load_average(path: Path) -> list[float] | None:
+    """`/proc/loadavg` の先頭の 3 つ（1・5・15 分）。読めない・数に直せなければ None。"""
+    try:
+        fields = Path(path).read_text(encoding="utf-8").split()[:3]
+        return [float(f) for f in fields] if len(fields) == 3 else None
+    except (OSError, ValueError):
+        return None
+
+
+def meminfo_mib(path: Path) -> dict[str, int]:
+    """`/proc/meminfo` の `<名前>: <数> kB` の行を MiB（切り捨て）にした辞書。読めなければ空。"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    found: dict[str, int] = {}
+    for line in text.splitlines():
+        name, _, rest = line.partition(":")
+        fields = rest.split()
+        if fields and fields[0].isdigit() and fields[1:] == ["kB"]:
+            found[name.strip()] = int(fields[0]) // 1024
+    return found
+
+
+def _is_python(arg: str) -> bool:
+    name = os.path.basename(arg)
+    return name == "python" or (name.startswith("python") and name[6:].replace(".", "").isdigit())
+
+
+def is_pytest_main(cmdline: list[str]) -> bool:
+    """pytest の本体か（実行ファイルが pytest、または Python で最初の引数が pytest か `-m pytest`。#2998 の決定 4）。
+
+    `uv run ... pytest` の親と、命令を文字列で持つシェルは本体に数えない。
+    """
+    if not cmdline:
+        return False
+    if os.path.basename(cmdline[0]) in PYTEST_NAMES:
+        return True
+    if not _is_python(cmdline[0]):
+        return False
+    args = iter(cmdline[1:])
+    for arg in args:
+        if arg == "-m":
+            return next(args, None) in PYTEST_NAMES
+        if arg == "-c":
+            return False
+        if arg in ("-X", "-W"):
+            next(args, None)  # 値をとる旗
+        elif not arg.startswith("-"):
+            return os.path.basename(arg) in PYTEST_NAMES
+    return False
+
+
+def pytest_counts() -> tuple[int, int] | None:
+    """(pytest の本体の数, 本体の直下の子のうち Python の作業プロセスの数)。一覧を読めなければ None。
+
+    同じ PID の名前空間から見えるプロセスだけを数える。起動の経路（supervise・AI の Bash・人のシェル）は区別しない。
+    """
+    try:
+        listed = [(p.info["pid"], p.info["ppid"], p.info["cmdline"] or []) for p in psutil.process_iter(["pid", "ppid", "cmdline"])]
+    except psutil.Error:
+        return None
+    mains = {pid for pid, _, line in listed if is_pytest_main(line)}
+    workers = sum(1 for pid, ppid, line in listed if ppid in mains and pid not in mains and line and _is_python(line[0]))
+    return len(mains), workers
+
+
+def host_sample(loadavg: Path | None = None, meminfo: Path | None = None) -> dict:
+    """進捗ログの `host` に載せる負荷とメモリの値とマシンの上の pytest の数（#2998）。
+
+    読めた値だけを持つ（読めない値は 0 で埋めず鍵を省く）。例外は上げない。
+    """
+    host: dict = {}
+    load = load_average(loadavg or PROC_LOADAVG)
+    if load is not None:
+        host["load"] = load
+    mem = meminfo_mib(meminfo or PROC_MEMINFO)
+    for key, name in (("mem_available_mib", "MemAvailable"), ("swap_total_mib", "SwapTotal"), ("swap_free_mib", "SwapFree")):
+        if name in mem:
+            host[key] = mem[name]
+    try:
+        counts = pytest_counts()
+    except Exception:  # noqa: BLE001 — 記録の行の書き込みを止めない（#2998 の I1）
+        counts = None
+    if counts is not None:
+        host["pytest"], host["pytest_workers"] = counts
+    return host

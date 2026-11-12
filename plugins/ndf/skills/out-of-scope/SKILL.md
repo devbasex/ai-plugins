@@ -64,6 +64,7 @@ python3 "$SCRIPTS/issue-file.py" resolve-target
 
 0 なら `metrics.upstream` と `metrics.target` から [references/issue-target.md](references/issue-target.md) の判断表で
 起票先を選ぶ。20 なら推測せず `items` の候補を示して利用者に聞く（候補に他のリポジトリが入るため、`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。
+起票先が別のリポジトリで、並列の計画のレーンなら、手順 4 へ進む前に [development-workflow の parallel-cross-repo.md](../development-workflow/references/parallel-cross-repo.md) の「別のリポジトリの改修が要るとき」を読む。
 
 ### 4. 重複を確かめる
 

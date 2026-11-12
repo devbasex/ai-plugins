@@ -8,7 +8,7 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "areas": [{"name": "...", "common": true, "paths": ["<glob>", ...]}, ...],
      "boundary_paths": ["<glob>", ...],
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24},
-     "loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3}}
+     "loop": {"enabled": false, "budget": {"laps": null, "usd": null, "hours": null}, "same_failure": 2, "max_issues": 3, "reorder_width": 0}}
 
 `business_hours`（`{"timezone": "Asia/Tokyo", "days": ["mon", ...], "start": "09:00", "end": "18:00"}`。#2913）は
 `read_hours` だけが読み、不正なら警告を返して宣言なしとして扱う。
@@ -102,6 +102,7 @@ LOOP_DEFAULTS = {
     "budget": {"laps": None, "usd": None, "hours": None},  # None は無制限。書いた単位だけ効く（#2505）
     "same_failure": 2,
     "max_issues": 3,
+    "reorder_width": 0,  # 逆転の幅。模擬の打ち直しで平均が増えたときだけ 2 へ切り替える（#2997 の決定 8）
 }  # #2089 の決定 5・8
 
 
@@ -124,6 +125,10 @@ def read_loop(root) -> dict:
         if isinstance(v, bool) or not isinstance(v, int) or v < 1:
             raise PaceError(f"進め方の宣言の loop.{key} は 1 以上の整数で書く: {path}")
         out[key] = v
+    v = _default(sec, "reorder_width", LOOP_DEFAULTS["reorder_width"])
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        raise PaceError(f"進め方の宣言の loop.reorder_width は 0 以上の整数で書く: {path}")
+    out["reorder_width"] = v
     return out
 
 

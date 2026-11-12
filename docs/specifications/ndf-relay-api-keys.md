@@ -159,7 +159,8 @@ classDiagram
 
 **週の利用枠**は月の額 × 7 ÷ 30、使用の割合は直近 7 日の使用額 ÷ 週の利用枠である。直近 7 日の使用額は、使用量の帳簿の
 `api_key` の列がそのキーの名前の行の `cost_usd` の合計で、判定のたびに読み直す。アカウントの選ぶ順の組（5 時間の枠を
-先に使う）は [relay-accounts.md](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) にある。
+先に使う）は [relay-accounts.md](../../plugins/ndf/skills/development-workflow/references/relay-accounts.md) に、その設計判断は
+[ndf-relay-launch-target.md](ndf-relay-launch-target.md) にある。
 
 登録済みアカウントが 2 つ以上あるときの上限の後の替え先は、アカウント → API キー（その時点の決定が選べば）→ 従量の接続の順
 である。1 つ以下なら API キー（同じ）→ 従量の接続の宣言（1 度だけ）→ 解除の待ちの順である。
@@ -277,7 +278,7 @@ sequenceDiagram
 - **`near-limit` を全アカウントの週の使用率で発動し、5 時間の上限では使わない。** 月のクレジットは対話の Claude Code に
   使えないので、週の枠が尽きかけたときだけ `claude -p` を逃がして対話のセッションの週の枠を残す。5 時間の枠は数時間で戻る
 - **閾値 T（既定 85%）を、アカウントの選ぶ順の組と API キーへ逃がす条件の両方に使う。** 閾値を 2 つ持つと大小の組み合わせで
-  振る舞いが変わる。85% の根拠は #2930 の設計の決定 10（発動の時点でアカウントの残りと API キーの利用枠で `claude -p` の約 1.6 日分）
+  振る舞いが変わる。85% の根拠は [ndf-relay-launch-target.md](ndf-relay-launch-target.md) の「閾値 T の既定値を 85% にした根拠」（発動の時点でアカウントの残りと API キーの利用枠で `claude -p` の約 1.6 日分）
 
 ## セキュリティ
 

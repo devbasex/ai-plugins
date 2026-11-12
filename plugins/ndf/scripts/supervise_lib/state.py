@@ -150,6 +150,7 @@ class RunState:
     # --- 途中の報告 ---
     def progress_write(self, rec: dict) -> dict:
         rec = {"kind": rec.pop("kind"), "at": clock.now_iso(), **rec}
+        rec |= {"host": h} if rec["kind"] in ("alive", "step") and (h := procs.host_sample()) else {}  # 負荷とメモリ（#2998 の決定 1・2）
         with open(self.progress, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.progress_seen = self.progress.stat().st_size

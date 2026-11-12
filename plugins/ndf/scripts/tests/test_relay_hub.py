@@ -1217,3 +1217,21 @@ def test_role_organizer_without_plan_dir_keeps_other_marks(dirs, monkeypatch, ca
     _organizer(old, str(tmp_path / "p1"))
     code, res = _role(monkeypatch, capsys, new.path, "organizer", "--plan", "p1")
     assert code == 0 and res["items"][0]["cleared"] == 0 and _organizers() == ["new", "old"]
+
+
+def test_relay_cap_plans_cli_writes_validates_and_reports_both(monkeypatch):
+    """`relay.py cap --plans` は max_named を残して書き、正の整数でなければ 1 で断って何も書かない（#2999 の I2・I3）。"""
+    import relay_limit
+
+    monkeypatch.delenv("NDF_PARALLEL_MAX_PLANS", raising=False)
+    monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    run = lambda *a: subprocess.run([sys.executable, str(ROOT / "scripts" / "relay.py"), "cap", *a], capture_output=True, text=True)  # noqa: E731
+    assert run("--named", "4").returncode == 0
+    got = run("--plans", "7")
+    assert got.returncode == 0, got.stderr
+    m = json.loads(got.stdout)["metrics"]
+    assert (m["max_plans"], m["plans_source"], m["max_named"], m["source"]) == (7, "file", 4, "file")
+    before = relay_limit.limits_path().read_text()
+    for bad in ("0", "x", "-1"):
+        assert run("--plans", bad).returncode == 1
+    assert relay_limit.limits_path().read_text() == before
