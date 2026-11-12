@@ -70,7 +70,7 @@
 | それ以外（雛形・リリースの Pull Request・merge・手で届ける・検証の環境だけ・手動反映の本番系。`pace` によらない） | `{queue_record}`（`RECORD_FOUND`。#2230・#3126） |
 
 まとめの後ろに置いた最終の検査の開発版・本番はまとめより後に流れるため、まとめは `{queue_pr:release-prod}` / `{queue_pr:promote}` で
-参照できない（#3126）。`unknown`（`RECORD_UNKNOWN`）は `sprint_routes.py` から消えた。
+参照できない。`sprint_routes.py` は `unknown`（`RECORD_UNKNOWN`）を持たない。
 語 `0` と `{queue_record}` と `has_record` は `supervise_lib/sprint_routes.py` に置き、`close_plan` はそれを呼ぶだけにする。
 
 #### `sprint-close.py --record-pr`
