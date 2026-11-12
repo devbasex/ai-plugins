@@ -433,10 +433,11 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
 
     # -- リリース --
 
-    def answer_from_ranges(self) -> None:
-        """出したリリースの範囲で答えられる依頼に答えて外す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
+    def answer_from_ranges(self) -> list[dict]:
+        """出したリリースの範囲で答えられる依頼に答えて外し、答えた依頼を返す（I15）。依頼の全 PR がそれまでに出せた範囲の和に入れば答える。
         和は古いリリースから順に足し、依頼の最後の PR が出たリリースの版と連番で答える（後のリリースの PR を前のリリースの版で答えない）。"""
         done: set[int] = set()
+        answered: list[dict] = []
         for rel in self.releases:
             if rel.get("state") != "released":
                 continue
@@ -444,7 +445,9 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
             hit = set(pr.answerable(self.pending, rel.get("prs") or [], done))
             for r in [r for r in self.pending if r["id"] in hit]:
                 self.answer(r["id"], "released", rel.get("version"), rel["n"])
+                answered.append(r)
             self.pending = [r for r in self.pending if r["id"] not in hit]
+        return answered
 
     def open_release(self) -> None:
         """流れているリリースが無く依頼があれば、リリースの組み方を読む。組むなら他のレーンを待たずに提示 1 を組む（I9）。
@@ -599,7 +602,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.routed = durable.patched("parallel-answers")
     run.launching, run.sprint_hold_wake = durable.patched("parallel-launch"), durable.patched("parallel-sprint-hold-wake")  # #2936・#3000
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
-    run.carrying = durable.patched("parallel-docs-carry")  # 印の無い古い記録は判定せずに出し直す（#3020 の I7）
+    run.carrying, run.closing = durable.patched("parallel-docs-carry"), durable.patched("parallel-closed-requests")  # 古い記録は今までの道
     run.ending, run.approved_only = durable.patched("parallel-lane-end"), durable.patched("parallel-approved-sha")  # #3058・#3070
     run.announce_ending()  # 目録の側が、版の要るまとめを流せる計画かを読む（#3058）
     restored = step_restore(main, name) if ledgered else None
@@ -620,7 +623,7 @@ def _tick_release(run: _Run, main: str, name: str, wait: float) -> None:
     run.launch_verify()  # 版の要るまとめを先に流す。流している間は次のリリースを組まない（#3058 の決定 5・I7）
     if run.current is None and run.pending and run.verifying is None:
         run.answer_from_ranges()
-        if run.pending and not run.hold.plan:  # 計画全体の答え待ちの停止の間は新しいリリースを組まない（I4）
+        if run.pending and not run.hold.plan and (not run.closing or run.drop_closed()):  # 停止の間は組まない（I4）。#3085
             run.open_release()
 
 

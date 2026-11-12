@@ -64,7 +64,7 @@ def unanswered(main: Path, name: str, rows: list[dict]) -> list[dict]:
 
     if "opened" in {r["kind"] for r in rows}:  # 耐久ワークフローが外した問いをチェックポイントで除く
         return plg.pending_questions(main, name)
-    answered = {r["id"] for r in rows if r["kind"] == "answer"}
+    answered = {r["id"] for r in rows if r["kind"] == "answer"} | plg.settled_gates(rows)
     return [{"id": r["id"], "lane": r.get("by")} for r in rows if r["kind"] in plg.QUESTIONS and r["id"] not in answered]
 
 

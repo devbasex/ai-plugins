@@ -109,6 +109,29 @@ def fetch_pr_meta(repo: str, pr: int) -> tuple[dict[str, Any] | None, str, str]:
     return _meta_from_rest(repo, resp.body), "rest", ""
 
 
+MERGEABLE, CONFLICTING, UNKNOWN = "MERGEABLE", "CONFLICTING", "UNKNOWN"
+
+
+def fetch_mergeable(repo: str, pr: int) -> str | None:
+    """PR の衝突の状態を REST から ETag 付きで 1 回読む（#3076）。
+
+    REST の `mergeable` の `true` / `false` / `null`（計算中）を `MERGEABLE` / `CONFLICTING` / `UNKNOWN` へ訳す。
+    照会の失敗は `None`（例外を投げない）。
+    """
+    try:
+        resp = gh_call.rest_cached(f"repos/{repo}/pulls/{int(pr)}")
+    except Exception:  # noqa: BLE001 - 照会の失敗で待ちを止めない（呼び手は「読めなかった」と読む）
+        return None
+    if not resp.ok or resp.error or not isinstance(resp.body, dict) or "mergeable" not in resp.body:
+        return None
+    value = resp.body.get("mergeable")
+    if value is True:
+        return MERGEABLE
+    if value is False:
+        return CONFLICTING
+    return UNKNOWN if value is None else None
+
+
 def default_out_dir(repo: str, pr: int) -> pathlib.Path:
     return pathlib.Path(tempfile.gettempdir()) / "ndf" / f"pr-info-{repo.replace('/', '--')}-{int(pr)}"
 

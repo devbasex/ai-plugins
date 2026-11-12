@@ -63,14 +63,14 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
     return (got[0], got[1].name) if got and not (hasattr(got, "own_release") and got.own_release()) else None
 
 
-def prod_plans(a, repo: str, build, prs: list[str] | None = None) -> dict:
-    """本番のステージのプラン。まとめたリリースに入るレーンならリリースの依頼のプラン、そうでなければ `build()` の本番のプラン。"""
+def prod_plans(a, repo: str, build, prs: list[str] | None = None, condition: dict | None = None) -> dict:
+    """本番のステージのプラン。レーンならリリースの依頼のプラン（`prs` の既定は `{queue_prs}`、`condition` は実行条件。#3083）、ほかは `build()`。"""
     lane = parallel_lane(repo)
     if lane:
         from parallel_release import plan_release_request
 
-        # prs を省いた呼び出しは、前のステージの Pull Request のすべて（{queue_prs}）を依頼に載せる
-        return {"release-request": plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])}
+        plan = plan_release_request(a, repo, lane[0], lane[1], prs or [QUEUE_PRS])
+        return {"release-request": {**plan, "実行の条件": condition} if condition else plan}
     return {"release-prod": build()}
 
 
@@ -215,7 +215,7 @@ def close_waves(a) -> list[dict]:
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
         {
             "name": "本番",
-            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)),
+            "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed),
             "then_of": "最終の検査",
         },
         close,

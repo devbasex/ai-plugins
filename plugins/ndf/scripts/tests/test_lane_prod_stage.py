@@ -122,3 +122,54 @@ def test_request_with_no_issues_is_not_refused(tmp_path, org):
     """差し込みの境界: `課題` が空なら `--issues` は空で、request は断らずに依頼を書く。"""
     body, _ = run_request(tmp_path, org, (), [])
     assert body["issues"] == []
+
+
+def lane_close_waves(monkeypatch) -> dict:
+    """テンプレートの経路のレーンで close_waves を組み、ステージの名前ごとのプランを返す（#3083）。部品のプランは中身を省いて差し替える。"""
+    monkeypatch.setattr(sprint, "has_release_template", lambda a: True)
+    monkeypatch.setattr(sprint, "plan_fast_check", lambda *a, **k: {"steps": []})
+    monkeypatch.setattr(sprint, "close_plan", lambda *a, **k: {"steps": []})
+    monkeypatch.setattr(sprint, "plan_mvv_release", lambda a, repo, v, ch, condition=None, **k: {"実行の条件": condition})
+    a = argparse.Namespace(issue=[11], mode="standard", name="lgate-1", worktree="/r", pace=None, state=None, version=None)
+    return {w["name"]: w.get("plans") for w in sprint.close_waves(a)}
+
+
+def test_lane_close_request_carries_the_dev_condition(org, monkeypatch):
+    """#3083 の受け入れ条件 1 / I1: レーンのまとめのリリースの依頼のプランは、開発版のプランと同じ実行条件を持つ。"""
+    waves = lane_close_waves(monkeypatch)
+    cond = waves["本番"]["release-request"]["実行の条件"]
+    assert cond == waves["開発版"]["release"]["実行の条件"]
+    assert "changed --id lgate-1-final" in cond["cmd"] and cond["skip_code"] == 3
+
+
+def test_prod_plans_without_condition_keeps_the_request_unconditional(org):
+    """#3083 の受け入れ条件 4 / I2: 条件を省いた呼び出し（new sprint・pace: fast の本番）のリリースの依頼は実行条件を持たない。"""
+    a = argparse.Namespace(issue=[11], mode="standard")
+    plan = sprint.prod_plans(a, "/r", lambda: pytest.fail("レーンでは本番のプランを組まない"))["release-request"]
+    assert "実行の条件" not in plan
+
+
+def run_close_request(tmp_path, org, code: int, prs: list[str]) -> dict:
+    """実行条件の終了コードを code にしたまとめのリリースの依頼のプランを、前のステージの Pull Request prs で埋めてから queue で流す。"""
+    a = argparse.Namespace(issue=[11], mode="standard")
+    cond = {"cmd": f"exit {code}", "skip_code": 3}
+    plan = sprint.prod_plans(a, str(tmp_path), lambda: pytest.fail("レーンでは本番のプランを組まない"), condition=cond)
+    path = tmp_path / "prod.json"
+    path.write_text(json.dumps(plan["release-request"], ensure_ascii=False), encoding="utf-8")
+    assert queue.fill_queue_prs(str(path), prs) is None  # Pull Request が無くても実行条件に判断を任せて止めない
+    return queue.cmd_queue([str(path)], 1, poll=0.05)["items"][0]
+
+
+@pytest.mark.parametrize("prs", [["3079"], []], ids=["closed-pr", "no-pr"])
+def test_lane_close_request_is_skipped_when_the_final_check_has_no_change(tmp_path, org, prs):
+    """#3083 の受け入れ条件 2: 最終の検査が変更なし（終了コード 3）なら依頼のプランは完了で飛び、依頼を送らない。"""
+    item = run_close_request(tmp_path, org, 3, prs)
+    assert item["result"] == "完了", item
+    assert not (org / "requests").exists() or not list((org / "requests").glob("*.json"))
+
+
+def test_lane_close_request_is_sent_when_the_final_check_changed(tmp_path, org):
+    """#3083 の受け入れ条件 3: 最終の検査で変更があれば（終了コード 0）今どおり依頼を送って承認ゲートで終わる。"""
+    item = run_close_request(tmp_path, org, 0, ["3079"])
+    assert item["result"] == "関門", item
+    assert list((org / "requests").glob("*.json"))
