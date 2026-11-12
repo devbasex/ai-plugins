@@ -132,6 +132,11 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     normal の merged-by-check と、届けない経路（none）はステージを置かない。"""
     if mvv and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION:
         return manual_production_waves(a, repo, then_of, mvv, condition)
+    return channel_waves(a, repo, then_of, mvv, condition, note)
+
+
+def channel_waves(a, repo: str, then_of: str, mvv: str | None, condition: dict | None, note: str | None) -> list[dict]:
+    """手動反映の本番系の形でない経路のステージ: 本番か導入の確認 → CD の結果 → 手で行うリリース（並びは `route_waves`）。"""
     rs = routes_of(a)
     waves = []
     promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
