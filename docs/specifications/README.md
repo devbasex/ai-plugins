@@ -159,5 +159,6 @@
 | [ndf-loop-selection-touch-estimate.md](ndf-loop-selection-touch-estimate.md) | 開発ループの選定と並列の計画の検査の触る場所の見込み（逆転の幅・見込みの出所・I21 の警告） |
 | [ndf-supervise-progress-host-and-queue-waits.md](ndf-supervise-progress-host-and-queue-waits.md) | supervise の負荷の記録（進捗ログの負荷とメモリ・queue の待ちの秒・全体テストのメモリの山の計測） |
 | [ndf-parallel-machine-plan-limit.md](ndf-parallel-machine-plan-limit.md) | 並列の計画のマシン全体のプランの上限（machine-plans の警告・起動の待ち・起動の排他・relay.py cap --plans） |
+| [ndf-parallel-cross-repo-lane.md](ndf-parallel-cross-repo-lane.md) | 別のリポジトリの改修が要るときの既定（相手のクローンを repo にしたレーンを足す）の決定と理由・常に成り立つ条件・テスト観点。手順は development-workflow の references/parallel-cross-repo.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
