@@ -773,6 +773,83 @@ def test_answer_to_an_own_question_returns_the_chosen_command(monkeypatch, tmp_p
         assert pa.owner_next(tmp_path, "p1", rid, [choice]) == (None, [])
 
 
+@pytest.fixture
+def settle_cli(monkeypatch, tmp_path):
+    """`parallel.py` の `cmd_settle` を本体のまま呼ぶ（受け付けの判定と送り先だけ差し替え、送った知らせを記録する）。"""
+    import argparse
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("parallel_cli", Path(prun.__file__).resolve().parents[1] / "parallel.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    state = {"accept": {}}
+    sent: list[tuple] = []
+    monkeypatch.setattr(cli, "main_of", lambda: tmp_path)
+    monkeypatch.setattr(cli, "accepting", lambda _m, _n: state["accept"])
+    monkeypatch.setattr(cli.pl, "resume_plan", lambda m, name, msg, key: sent.append((m, name, msg, key)))
+
+    def call(capsys, n=1, done=None, rejected=False, reason=None, name="p1"):
+        a = argparse.Namespace(name=name, n=n, external=False, done=done, rejected=rejected, reason=reason)
+        with pytest.raises(SystemExit) as ex:
+            cli.cmd_settle(a)
+        return ex.value.code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    queued = "。耐久ワークフローが動いていないため、台帳に残し作り直しの後に反映する"
+    return {"call": call, "sent": sent, "state": state, "dir": tmp_path, "queued": queued}
+
+
+def _done(d, items, **extra):
+    p = d / "done.json"
+    p.write_text(json.dumps({"items": items, **extra}))
+    return str(p)
+
+
+@pytest.mark.parametrize(
+    ("items", "extra", "want_res", "want_version"),
+    [
+        ([{"result": "完了"}, {"result": "完了"}], {"version": "1.2.3"}, "released", "1.2.3"),
+        ([{"result": "完了"}], {"metrics": {"version": "1.2.4"}}, "released", "1.2.4"),
+        ([{"result": "完了"}], {"version": "1.2.3", "metrics": {"version": "9.9.9"}}, "released", "1.2.3"),
+        ([{"result": "完了"}, {"result": "失敗"}], {"version": "1.2.3"}, "failed", "1.2.3"),
+        ([], {}, "failed", None),
+        (["x", {"result": "完了"}], {}, "released", None),  # dict でない行は数えない
+        ([{}], {}, "failed", None),  # result の無い行は "None" と読む
+    ],
+)
+def test_char_settle_reads_the_done_and_sends_the_result(settle_cli, capsys, items, extra, want_res, want_version):
+    """現状固定: `settle --done` は done の行がすべて「完了」なら released、そうでなければ failed を送る。版は version か metrics.version。"""
+    code, out = settle_cli["call"](capsys, n=2, done=_done(settle_cli["dir"], items, **extra))
+    assert code == 0 and out["status"] == "ok"
+    assert out["summary"] == f"リリース 2 の結果 {want_res} を送った"
+    assert out["metrics"] == {"result": want_res, "version": want_version}
+    msg = {"n": 2, "phase": "settle", "result": want_res, "version": want_version, "reason": None}
+    assert settle_cli["sent"] == [(settle_cli["dir"], "p1", msg, "settle:2")]
+
+
+def test_char_settle_rejected_sends_the_reason_and_a_queued_mark(settle_cli, capsys):
+    """現状固定: `--rejected` は done を読まずに rejected を送り、失われた計画では知らせに残す旨と queued を添える。"""
+    settle_cli["state"]["accept"] = {"queued": True}
+    code, out = settle_cli["call"](capsys, n=3, rejected=True, reason="no")
+    assert code == 0 and out["summary"] == f"リリース 3 の結果 rejected を送った{settle_cli['queued']}"
+    assert out["metrics"] == {"result": "rejected", "version": None, "queued": True}
+    msg = {"n": 3, "phase": "settle", "result": "rejected", "version": None, "reason": "no"}
+    assert settle_cli["sent"] == [(settle_cli["dir"], "p1", msg, "settle:3")]
+
+
+def test_char_settle_stops_at_a_gate_or_an_unreadable_done_without_sending(settle_cli, capsys):
+    """現状固定: done に「関門」の行があれば 4、done を読めなければ 2 で止まり、どちらも送らない。計画名が無ければ 1。"""
+    code, out = settle_cli["call"](capsys, done=_done(settle_cli["dir"], [{"result": "完了"}, {"result": "関門"}]))
+    assert code == 4 and out["status"] == "stopped" and out["summary"] == "本番のプランが承認ゲートで止まっている（送らない）"
+    code, out = settle_cli["call"](capsys, done=str(settle_cli["dir"] / "missing.json"))
+    assert code == 2 and out["status"] == "stopped" and out["summary"].startswith("done を読めない: ")
+    (settle_cli["dir"] / "bad.json").write_text("{")
+    code, out = settle_cli["call"](capsys, done=str(settle_cli["dir"] / "bad.json"))
+    assert code == 2 and out["summary"].startswith("done を読めない: ")
+    code, out = settle_cli["call"](capsys, name=None, rejected=True)
+    assert code == 1 and out["summary"] == "計画名か --external が要る"
+    assert settle_cli["sent"] == []
+
+
 def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     """持ち主を起こす要否はラッパーの状態でなくレーンの側の待ちの記録で決める。ループは記録が waiting_only で止まっている、
     1 スプリントのレーンは引継ぎ文書に依頼の id がある。"""
