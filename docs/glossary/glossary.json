@@ -6650,6 +6650,12 @@
       "context": "ndf-workflow",
       "meaning": "合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック",
       "source": "docs/specifications/ndf-ci-only-tests.md"
+    },
+    {
+      "term": "最終の検査",
+      "context": "ndf-workflow",
+      "meaning": "スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ",
+      "pending_source": "issues/issue-3083-requirements.md"
     }
   ]
 }

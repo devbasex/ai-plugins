@@ -563,6 +563,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | CI の結果の監視 | — | PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | CI の失敗の改修 | — | CI の結果の監視が見つけたテストの失敗を直し、同じ PR へ push すること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | テストのチェック | — | 合否に使う PR のチェックの名前の集まり。`test.ci.check` があればその 1 つ、無ければ `ci.required_checks`、どちらも無ければ head のすべてのチェック | — | — | `docs/specifications/ndf-ci-only-tests.md` |
+| 最終の検査 | — | スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースの依頼のプランは実行条件で飛ぶ | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
