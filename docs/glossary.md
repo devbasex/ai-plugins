@@ -236,9 +236,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 結果を変える引数 | `result_args` | cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる | — | — | `docs/specifications/cross-drive-rerun-pause-and-denials.md` |
 | 資源のタグ | `resource_tag` | ステップが使う、共有する外部の枠の名前（今は graphql だけ） | — | — | — |
 | 資源の枠 | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | — |
-| 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルに等しいファイルの宣言を持つか、同じ共有の一覧に当たるもの。ディレクトリの宣言は判定に使わない。同時には流さない | — | — | — |
-| 偽の重なり | — | 重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組 | — | — | — |
-| ディレクトリの宣言 | — | 触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない | — | — | — |
+| 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルに等しいファイルの宣言を持つか、同じ共有の一覧に当たるもの。ディレクトリの宣言は判定に使わない。同時には流さない | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
+| 偽の重なり | — | 重なりの組と判定された 2 本のプランのうち、両方の実装の PR が実際に変えたファイルに共通するものが 1 つも無い組 | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
+| ディレクトリの宣言 | — | 触るファイルの 1 行で、末尾が / のもの。設計の結果のステージは作業場所の既存のディレクトリをこの形に揃える。重なりの組の判定と除外の行に使わない | — | — | `docs/specifications/ndf-supervise-queue-overlap-by-file.md` |
 | 共有の一覧 | `shared_list` | 複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く | — | — | — |
 | 除外の行 | `concurrent_rule` | queue が実装の担当の指示文の末尾に足す 1 行。担当を起動する時点で走っている他のプランの触るファイルのうち、ディレクトリでないものを変えないよう求める | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
@@ -540,20 +540,20 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 出し直しを省く | — | 加わった範囲が文書だけの範囲のとき、出し直しの提示を出さず、新しい範囲で確定してリリースへ進むこと | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 確かめ直しの範囲 | — | まとめたリリースで出し直しを省いたとき、提示 1 のコミットから提示 2 の承認資料を作った時点のコミットまでに入った変更。判定の後にベースブランチが進めば加わった範囲より広くなる。引き継いだ承認を記録する前にこの範囲が文書だけかを確かめる | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 引き継いだ承認 | — | まとめたリリースで出し直しを省いたとき、提示 1 への承認を提示 2 の承認として答えの記録に書いたもの。何を引き継いだかを記録の what に残す | — | — | `docs/specifications/ndf-parallel-organizer.md` |
-| 触る場所の見込み | — | 設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ | — | — | — |
-| 見込みの出所 | — | 触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし） | — | — | — |
-| 同時に動く本数 | — | スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均 | — | — | — |
-| 順位の逆転 | — | 開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと | — | — | — |
-| 逆転の幅 | — | 開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない | — | — | — |
-| 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | — |
-| マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | — |
-| 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | — |
-| 待ちの秒 | — | queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits） | — | — | — |
-| メモリの山 | — | 全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値 | — | — | — |
-| マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる | — | — | — |
-| 起動の待ち | — | 依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと | — | — | — |
-| プランの本数の上限 | — | 同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む | — | — | — |
-| 起動の排他 | — | 同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock） | — | — | — |
+| 触る場所の見込み | — | 設計の前に、課題の変更が触ると見込んだリポジトリの中のパスの集合。確定した触るファイルは設計の結果が持つ | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 見込みの出所 | — | 触る場所の見込みをどこから出したか（設計の結果・課題グループの表・課題の本文・見込みなし） | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 同時に動く本数 | — | スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均 | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 順位の逆転 | — | 開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 逆転の幅 | — | 開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
+| 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| 待ちの秒 | — | queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits） | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| メモリの山 | — | 全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値 | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 起動の待ち | — | 依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| プランの本数の上限 | — | 同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
+| 起動の排他 | — | 同じマシンの耐久ワークフローが、マシンのプランの本数を数えてからレーンを起動するまでを 1 つずつ行うための排他（<状態の根>/parallel/admit.lock） | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
 | CI テストの宣言 | — | `.ndf/project.json` の `test.ci.only: true`。このリポジトリのテストは CI でだけ走らせると表し、宣言があれば手元でテストを走らせない | — | — | — |
 | 手元のテスト | — | worker・supervisor・プランのステップ・cross-refactoring が、作業しているマシンで走らせるテスト（範囲テスト・全体テスト・指摘の検証・打ち直しを含む） | — | — | — |
 | CI の結果の監視 | — | PR の CI のテストのチェックを、待たずに 1 回だけ読むステップ（`ci-peek`）をプランの区切りに置き、失敗を見つけたら CI の失敗の改修を起こす仕組み | — | — | — |
