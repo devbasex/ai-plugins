@@ -157,5 +157,6 @@
 | [ndf-parallel-organizer-long-wait.md](ndf-parallel-organizer-long-wait.md) | 並列の計画のオーガナイザーの長い待ち（wait の上限 1800 秒の状況報告・metrics.switch の切り替えの判定と費用の式・再起動の理由「待ち」）の常に成り立つ条件・出力の契約・決定と理由（#3006）。手順は development-workflow の references/parallel.md が正 |
 | [ndf-supervise-queue-overlap-by-file.md](ndf-supervise-queue-overlap-by-file.md) | supervise の queue の重なりの組（同じファイルを宣言したプランだけを直列にする・ディレクトリの宣言を判定に使わない） |
 | [ndf-loop-selection-touch-estimate.md](ndf-loop-selection-touch-estimate.md) | 開発ループの選定と並列の計画の検査の触る場所の見込み（逆転の幅・見込みの出所・I21 の警告） |
+| [ndf-supervise-progress-host-and-queue-waits.md](ndf-supervise-progress-host-and-queue-waits.md) | supervise の負荷の記録（進捗ログの負荷とメモリ・queue の待ちの秒・全体テストのメモリの山の計測） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

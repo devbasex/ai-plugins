@@ -545,11 +545,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 同時に動く本数 | — | スプリントの実装のステージの経過のあいだに、同時に動いていた実装のプランの本数の時間平均 | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
 | 順位の逆転 | — | 開発ループの選定で、順位の高い課題を触る場所の見込みの重なりを理由に後ろへ回し、順位の低い課題を先に選ぶこと | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
 | 逆転の幅 | — | 開発ループの選定で、残りの枠の数を超えて並べ替えの対象にする候補の件数。0 なら順位の逆転は起きない | — | — | `docs/specifications/ndf-loop-selection-touch-estimate.md` |
-| 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | — |
-| マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | — |
-| 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | — |
-| 待ちの秒 | — | queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits） | — | — | — |
-| メモリの山 | — | 全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値 | — | — | — |
+| 負荷とメモリの値 | — | 進捗ログの行に載せるマシンの負荷の組。load average（1・5・15 分）、MemAvailable（MiB）、スワップの合計と空き（MiB）。進捗ログの行では host の項目に置く | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| マシンの上の pytest の数 | — | 進捗ログの行を書いた時点で、supervise と同じ PID の名前空間から見える pytest の本体のプロセスの数。起動の経路（supervise・AI の Bash・人のシェル）を区別しない。xdist の作業プロセスは別に数える | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| 待ちの理由 | — | プランが queue の中で待った原因。流れ始める前に解ける待ち（重なり（overlap）・plans・前提のプラン（deps）・計画の上限（plan_limit））と、流れている間にステップごとに起きる資源の枠（resource）の空きの待ちの 5 つ | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| 待ちの秒 | — | queue の結果のプランの項目に置く、待ちの理由ごとに待った秒（waits） | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
+| メモリの山 | — | 全体テストを流している間に、マシンの使用中のメモリ（合計 − MemAvailable）とスワップの使用量が取った最大の値 | — | — | `docs/specifications/ndf-supervise-progress-host-and-queue-waits.md` |
 | マシンのプランの本数 | — | 同じマシンで動いている並列の計画の、動いているレーン（承認の答えを待って保留で止まったレーンを含む）の宣言の plans の合計。プランの本数の上限と比べる | — | — | — |
 | 起動の待ち | — | 依存がそろったレーンを、マシンのプランの本数に空きができるまで耐久ワークフローが起こさないこと | — | — | — |
 | プランの本数の上限 | — | 同じマシンで同時に流すプランの本数の合計の上限。マシンの設定（<状態の根>/relay/hub/limits.json の max_plans。relay.py cap --plans が書く）→ NDF_PARALLEL_MAX_PLANS → 既定 6 の順で決まり、計画の検査と耐久ワークフローの起動の判定が同じ関数で読む | — | — | — |
