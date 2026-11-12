@@ -128,7 +128,8 @@ def test_after_a_gate_stage_the_close_runs_on_its_own_command(a, lane):
 def test_a_stage_list_outside_a_sprint_lane_is_kept(a, monkeypatch):
     monkeypatch.setattr(slc, "sprint_lane", lambda _repo: None)
     waves = request_waves(a)
-    assert slc.with_lane_close(a, waves, not_called) is waves and "on_exit" not in waves[1]["plans"]["release-request"]["steps"][0]
+    got = slc.with_lane_close(a, waves, not_called)
+    assert got is waves and "on_exit" not in waves[1]["plans"]["release-request"]["steps"][0]
 
 
 @pytest.mark.parametrize(
