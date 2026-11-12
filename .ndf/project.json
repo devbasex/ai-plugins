@@ -510,6 +510,7 @@
       {
         "paths": [
           "docs/glossary.md",
+          "docs/scripts-map/inventory.md",
           "plugins/ndf/scripts/data/handoff-template.md"
         ],
         "tests": [
@@ -519,6 +520,7 @@
       {
         "paths": [
           "docs/glossary.md",
+          "docs/scripts-map/inventory.md",
           "plugins/ndf/README.md"
         ],
         "tests": [
