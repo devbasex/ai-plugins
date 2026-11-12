@@ -52,7 +52,7 @@
       "kind": "リリース後テスト",
       "stage": "リリース後テスト",
       "timeout": 3600,
-      "prompt": "/ndf:release-verification スプリント m9（#15）。リリース記録は Pull Request #{queue_pr:release-prod} にある。受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。進捗記録（progress-record.sh・projects-sync.sh）は打たない（このステップが ok で終わった後にプランが打つ）。番号が 0 なら本番へ出ていないため、何もせずに終える。導入の確かめは verify-install だけで行い、利用者の設定ディレクトリ（CLAUDE_CONFIG_DIR か ~/.claude、CODEX_HOME か ~/.codex）で導入の操作（claude plugin install / update / marketplace add / update、codex plugin add / marketplace add）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。利用者の設定ディレクトリへの導入が要る条件は、導入せずに記録の表のその行を「保留（理由: 利用者の設定ディレクトリへの導入が要る）」とし、作業の報告を「判断が要る」で返す（/ndf:release-verification の「利用者の設定ディレクトリで導入しない」）。",
+      "prompt": "/ndf:release-verification スプリント m9（#15）。リリース記録は Pull Request #{queue_record} にある。受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。進捗記録（progress-record.sh・projects-sync.sh）は打たない（このステップが ok で終わった後にプランが打つ）。番号が 0 なら本番へ出ていないため、何もせずに終える。導入の確かめは verify-install だけで行い、利用者の設定ディレクトリ（CLAUDE_CONFIG_DIR か ~/.claude、CODEX_HOME か ~/.codex）で導入の操作（claude plugin install / update / marketplace add / update、codex plugin add / marketplace add）を打たない。隔離のつもりで環境変数を付けて手で打つことも含む。利用者の設定ディレクトリへの導入が要る条件は、導入せずに記録の表のその行を「保留（理由: 利用者の設定ディレクトリへの導入が要る）」とし、作業の報告を「判断が要る」で返す（/ndf:release-verification の「利用者の設定ディレクトリで導入しない」）。",
       "on_fail": "config-check-on-fail",
       "next": "config-check"
     },
@@ -249,7 +249,7 @@
       "stage": "後片付け",
       "cwd": "<TMP>/repo",
       "timeout": 900,
-      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --final-stage-from {state_dir}/progress.jsonl --with-verification --label 'スプリント m9の後片付け'",
+      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_record} --issues 15 --final-stage-from {state_dir}/progress.jsonl --with-verification --label 'スプリント m9の後片付け'",
       "next": "end"
     }
   ],

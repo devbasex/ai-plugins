@@ -364,6 +364,11 @@ def plan_check_since(a) -> dict:
     flag = " --review" if no_refactor else ""
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
+    if getattr(a, "final_sprint", None):
+        # 最後の検査（#3126）: 範囲をスプリントに属しまだ検査していない PR に絞る
+        flag += f" --sprint {shlex.quote(a.final_sprint)}"
+        if a.issue:
+            flag += " --issue " + " ".join(str(int(i)) for i in a.issue)
     name = a.id
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"

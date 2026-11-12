@@ -43,8 +43,8 @@ def test_refine_record_reads_the_plan_progress_and_takes_loop_and_lap(tmp_path):
     assert "--progress" in cmd and "--loop" not in cmd and "--lap" not in cmd
 
 
-def test_without_pace_the_close_is_unchanged(tmp_path):
+def test_without_pace_the_close_runs_first_and_the_final_check_after_it(tmp_path):
     manifest = close(tmp_path)
-    assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]
-    plan = load(manifest["ステージ"][-1]["plans"][0])
+    assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "開発版", "本番"]  # #3126 の決定 1
+    plan = load(manifest["ステージ"][0]["plans"][0])
     assert plan["進め方"] == "fast" and "ループの前の 1 回の持ち越し" not in steps_of(plan)["refine"]["prompt"]

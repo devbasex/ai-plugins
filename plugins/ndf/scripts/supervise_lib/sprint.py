@@ -198,26 +198,26 @@ def close_plan(a, repo: str) -> dict:
 
 
 def close_waves(a) -> list[dict]:
-    """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    """スプリントの終わりのステージ。まとめの後に最終の検査、変更があったときだけ開発版と本番が流れる（#3126 の決定 1）。"""
     repo = str(Path(a.worktree).resolve())
+    close = {"name": "まとめ", "plans": {"close": close_plan(a, repo)}}
     if getattr(a, "pace", None) == "auto":
         # 開発ループの 1 回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
-        return [{"name": "まとめ", "plans": {"close": close_plan(a, repo)}}]
+        return [close]
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
-    check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}}
-    close = {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"}
+    check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}, **(then := {"then_of": "まとめ"})}
     if not has_release_template(a):
-        return [check, *route_waves(a, repo, "最終の検査", mvv=a.state, condition=changed), close]
+        return [close, check, *route_waves(a, repo, "まとめ", mvv=a.state, condition=changed)]
     return [
+        close,
         check,
-        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, **then},
         {
             "name": "本番",
             "plans": prod_plans(a, repo, lambda: plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed), condition=changed),
-            "then_of": "最終の検査",
+            **then,
         },
-        close,
     ]
 
 
