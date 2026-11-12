@@ -163,5 +163,6 @@
 | [ndf-ci-only-tests.md](ndf-ci-only-tests.md) | CI テストの宣言（`test.ci.only`）のあるリポジトリで手元のテストを止め、PR の CI の結果を待たずに読んで直し（`ci-watch.py peek`・改修の上限）、テストのチェックがそろってからマージすること。hook の照合と cross-refactoring の最終ゲートを含む。手順は `development-workflow` の SKILL.md が正 |
 | [ndf-parallel-issue-bundles.md](ndf-parallel-issue-bundles.md) | 並列の計画の課題のまとまり（まとまりごとの実装の Pull Request とレビュー、検査の規則 bundle・bundle-overlap） |
 | [ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) | 並列の計画の台帳（ledger.jsonl・checkpoint.json）と、失われた計画を start 1 回で作り直す仕組み・オーガナイザーの印の照合・リレーハブの起こす python の常に成り立つ条件・データの形・決定の理由・テスト観点。手順は development-workflow の references/parallel.md が正 |
+| [ndf-branch-flow-declaration.md](ndf-branch-flow-declaration.md) | ブランチ運用の宣言（branch_flow）：スプリントの起点・文書の Pull Request の宛先・本番への取り込み方（ベースブランチを丸ごと出す / 選んだスプリントブランチを集める）、開始時のスナップショット、測定とずれの検出、本番チャネル宛の検査 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
