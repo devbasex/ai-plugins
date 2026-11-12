@@ -74,8 +74,11 @@ class Suite(schema.Shape):
 
 class TestCi(schema.Shape):
     """全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、
-    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。"""
+    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。
+    `only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが
+    `ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。"""
 
+    only: Optional[bool] = None
     check: Optional[str] = None
     junit_artifacts: Optional[str] = None
 

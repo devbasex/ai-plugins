@@ -2,7 +2,7 @@
 """テストの実行の入口（#1334 F2・F4・F5）。supervise の run のステップが呼ぶ。
 
     python3 test-run.py scope --paths <パス>... [--changed <パス>...] [--only-kind test|lint] [--root DIR] [--template CMD] [--test-kind test|lint]
-    python3 test-run.py whole [--paths <パス>...] [--pr N] [--base <ブランチ>] [--root DIR] [--template CMD] [--test-kind test|lint]
+    python3 test-run.py whole [--paths <パス>...] [--pr N] [--base <ブランチ>] [--only-kind lint] [--root DIR] [--template CMD] [--test-kind test|lint]
     （どちらも `--limit <秒>` で上限を渡せる。省くと所要の記録と直近の全体テストの実測から決める）
 
 宣言（`.ndf/project.json` の `test`。無ければ `.ndf/supervise.json` の `test.command` を 1 つの suite として読む）から
@@ -13,6 +13,8 @@
 落ちた静的解析は `lib/test_triage.lint_verdict` で分ける。`--template` は引数の雛形で、宣言より先に効き、種別は `--test-kind`。
 `whole --paths` は静的解析の雛形の全体テストの `{paths}` に入れる範囲である。
 `scope --only-kind` は渡した種別の suite だけを打ち（当てる範囲は同じ）、打つものが無ければ通る（0）。
+`whole --only-kind lint` は静的解析の全体テストだけを手元で走らせ、テストの種別は走らせず CI も待たない（CI テストの宣言のある
+実装のプランが、`scope_command` の無い静的解析を打つ。#3056）。打つものが無ければ通る（0）。
 手元の全体検証が上限の中で終わったら（通った・落ちたを問わない）、その秒を全体テストの実測として `lib/whole_runs.py` へ残す。
 `whole` は差分が文書のファイルだけ（`lib/diff_kinds.py`。#2925）ならテストの種別を走らせず、テストが読む文書があれば対応するテストだけを
 範囲テストの雛形で手元で走らせる（静的解析は今と同じ。読めなければ全体。分類は `items[].diff_kinds`）。
@@ -281,17 +283,6 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
     return code
 
 
-def _select_scope_runs(root: pathlib.Path, a, strategy: ts.Strategy, only: str | None) -> tuple[list, bool]:
-    """範囲テストで打つものを絞る。戻りは（打つものの並び, 打つものが無くても通してよいか）。"""
-    if strategy.name == ts.ROUND_ONLY:
-        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
-        return runs, only is not None and not runs
-    changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
-    runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
-    # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
-    return runs, not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
-
-
 def _split_scope_failures(runs: list, failed: list[str]) -> tuple[list[dict], bool]:
     """落ちたコマンドを種別で分ける。戻りは（落ちた静的解析の判定の並び, テストの種別が落ちたか）。"""
     kinds = {r.command: r.kind for r in runs}
@@ -307,9 +298,10 @@ def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
     only = getattr(a, "only_kind", None)
-    runs, nothing_to_run = _select_scope_runs(root, a, strategy, only)
+    lint_changed = strategy.name != ts.ROUND_ONLY and strategy.scoped_suites(ts.LINT) and only != ts.TEST
+    runs, nothing_to_run = ts.select_scope_runs(strategy, list(a.paths), _changed(root, a) if lint_changed else [], only)
     if nothing_to_run:
-        _emit_step(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
+        _emit_step(result(TOOL, "ok", f"範囲に当てる {only or ts.LINT} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
     if not runs:
         _emit_step(result(TOOL, "stopped", "範囲テストの雛形（scope_command）を持つ suite が無いか、範囲に入るファイルが無い", [], {}))
@@ -439,6 +431,11 @@ def cmd_whole(a) -> int:
         return code
     extra = ({"diff_kinds": json.loads(kinds.as_json())},)
     ctx = OutcomeContext(strategy, limits, notes, passed=not lint, detail="静的解析の全体テスト", lint=lint, extra=extra)
+    if getattr(a, "only_kind", None) == ts.LINT:
+        if lint is None:
+            _emit_step(result(TOOL, "ok", f"全体で打つ lint の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
+            return 0
+        return _emit_outcome(ctx)
     if kinds.docs_only() and (code := _docs_tests(root, a, ctx, kinds)) is not None:
         return code
     if strategy.whole_on_ci:
@@ -473,6 +470,9 @@ def main(argv=None) -> int:
     whole = sub.add_parser("whole", help="全体テスト（手元か、CI に任せる戦略なら Pull Request のチェックを待つ）")
     whole.add_argument("--pr", type=int, default=None)
     whole.add_argument("--paths", nargs="+", default=None, help="静的解析の雛形の全体テストの {paths} に入れる範囲")
+    whole.add_argument(
+        "--only-kind", choices=[ts.LINT], default=None, help="静的解析の全体テストだけを手元で走らせる（CI を待たない。#3056）"
+    )
     for p in (scope, whole):
         p.add_argument("--root", default=".")
         p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定は .ndf/worktree.json の base_branch）")

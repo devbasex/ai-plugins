@@ -375,3 +375,61 @@ def test_tested_docs_owned_by_a_suite_without_a_scope_template_run_the_whole_tes
     code, out = _run(root, "whole", "--base", "base")
     assert code != 0 and not out["summary"].startswith("文書を読むテスト"), out
     assert any("js" in n and "全体テストを走らせる" in n for n in _notes(out)), out
+
+
+# ---------- #3056: CI テストの宣言があれば、範囲テストはテストの suite を走らせない ----------
+
+
+def _ci_only_decl(strategy=None):
+    test = {
+        "ci": {"only": True},
+        "suites": [
+            {"name": "t", "runner": "false", "command": "false", "scope_command": "false {paths}"},
+            {
+                "name": "sh",
+                "runner": "sh",
+                "kind": "lint",
+                "scope_command": "sh -c 'for f; do sh -n \"$f\" || exit 1; done' x {paths}",
+                "paths": ["*.sh"],
+            },
+        ],
+    }
+    if strategy:
+        test["strategy"] = strategy
+    return {"test": test}
+
+
+def test_ci_only_scope_runs_only_the_lint_suite(tmp_path):
+    root = _repo(tmp_path, _ci_only_decl())
+    (root / "good.sh").write_text("echo hi\n", encoding="utf-8")
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "good.sh")
+    assert code == 0, out
+    assert "false" not in str(out["items"]).replace("false {paths}", "")
+    assert any("CI に任せた" in i.get("note", "") for i in out["items"])
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "bad.sh")
+    assert code == 1 and "x bad.sh" in str(out["items"])
+
+
+@pytest.mark.parametrize("strategy", [None, "round-only"])
+def test_ci_only_scope_without_lint_files_passes_without_running_tests(tmp_path, strategy):
+    root = _repo(tmp_path, _ci_only_decl(strategy))
+    code, out = _run(root, "scope", "--paths", "tests", "--changed", "README.md")
+    assert code == 0 and "lint の suite が無い" in out["summary"]
+    code, out = _run(root, "scope", "--paths", "tests", "--only-kind", "test")
+    assert code == 0 and "test の suite が無い" in out["summary"]
+
+
+def test_ci_only_whole_lint_runs_only_the_lint_commands(tmp_path):
+    """`whole --only-kind lint` は command を持つ静的解析だけを手元で打ち、テストの suite（false）も CI も待たない。"""
+    decl = _ci_only_decl()
+    decl["test"]["suites"][1]["command"] = "sh -n bad.sh"
+    root = _repo(tmp_path, decl)
+    (root / "bad.sh").write_text("echo hi\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 0, out
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    code, out = _run(root, "whole", "--only-kind", "lint")
+    assert code == 1, out
+    code, out = _run(_repo(tmp_path / "b", _ci_only_decl()), "whole", "--only-kind", "lint")
+    assert code == 0 and "lint の suite が無い" in out["summary"]
