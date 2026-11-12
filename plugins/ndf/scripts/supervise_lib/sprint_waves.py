@@ -249,7 +249,7 @@ def bundle_refusal(a):
     return None
 
 
-def impl_plans(a, repo: str, pace: str | None = None) -> dict:
+def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
     """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本で、スプリントブランチへ入れる前に
     cross-review を通す（#3081 の I8a・I8b）。無ければ課題ごとに 1 本（I9）。`pace` はプランへ書く進め方。"""
     bundles = getattr(a, "bundles", None)

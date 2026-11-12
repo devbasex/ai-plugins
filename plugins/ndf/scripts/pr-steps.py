@@ -112,6 +112,7 @@ def bundled_sprint(root, base: str) -> bool:
     計画を読めない・壊れた計画はまとまりの無い扱いにする（壊れた計画のレーンはスプリントの組み立てが止める）。"""
     if pr_target(base) != "sprint":
         return False
+    deps.require("schema")  # 計画の模型（pydantic）を読む
     import decl
     import parallel_bundles
 

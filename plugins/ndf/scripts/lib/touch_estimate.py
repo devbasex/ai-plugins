@@ -431,7 +431,7 @@ def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
     proposals: list[dict] = [{"kind": "after", "lane": b.name, "after": a.name}]
     if a.input.kind == "sprint" and b.input.kind == "sprint":  # ループのレーンの課題はループが選ぶため移さない
         move = {"kind": "move", "issue": ib, "from": b.name, "to": a.name}
-        proposals.append({**move, "bundle": pb.name_of(b, ib)} if bundled else move)
+        proposals.append({**move, "bundle": pb.bundle_name_of(b, ib)} if bundled else move)
     shown = "・".join(dict.fromkeys(paths))
     return {
         "message": f"同じ時間帯に動くレーンの課題の見込みが重なる: {a.name} #{ia}・{b.name} #{ib}（{shown}）",
@@ -439,7 +439,7 @@ def _lane_item(a, b, ia: int, ib: int, paths: list[str]) -> dict:
         "issues": [ia, ib],
         "paths": paths,
         "proposals": proposals,
-        **({"bundles": [pb.name_of(a, ia), pb.name_of(b, ib)]} if bundled else {}),
+        **({"bundles": [pb.bundle_name_of(a, ia), pb.bundle_name_of(b, ib)]} if bundled else {}),
     }
 
 

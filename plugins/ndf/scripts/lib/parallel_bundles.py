@@ -54,10 +54,12 @@ def check_bundles(bundles: Optional[list[Bundle]], issues: list[int]) -> Optiona
     listed = [n for b in bundles for n in b.issues]
     dup = sorted({n for n in listed if listed.count(n) > 1})
     if dup:
-        raise PydanticCustomError("bundle", "2 つ以上のまとまりに入る課題がある: {issues}", {"issues": _refs(dup)})
+        raise PydanticCustomError("bundle", "2 つ以上のまとまりに入る課題がある: {issues}", {"issues": _issue_refs(dup)})
     missing = [n for n in listed if n not in issues]
     if missing:
-        raise PydanticCustomError("bundle", "レーンの課題（input.issues）に無い課題がまとまりにある: {issues}", {"issues": _refs(missing)})
+        raise PydanticCustomError(
+            "bundle", "レーンの課題（input.issues）に無い課題がまとまりにある: {issues}", {"issues": _issue_refs(missing)}
+        )
     names = [b.name for b in bundles] + [single_name(n) for n in issues if n not in listed]
     same = sorted({v for v in names if names.count(v) > 1})
     if same:
@@ -89,13 +91,13 @@ def bundle_list(issues: list[int], bundles: Optional[list[Bundle]]) -> Optional[
     return out
 
 
-def name_of(lane, issue: int) -> str:
+def bundle_name_of(lane, issue: int) -> str:
     """レーンの課題が入るまとまりの名前。まとまりの欄の無いレーン（ループのレーンを含む）は `issue-<番号>`。"""
     got = getattr(lane.input, "bundle_list", lambda: None)()
     return next((b.name for b in got or [] if issue in b.issues), single_name(issue))
 
 
-def _refs(issues: list[int]) -> str:
+def _issue_refs(issues: list[int]) -> str:
     return " ".join(f"#{n}" for n in issues)
 
 
@@ -105,7 +107,7 @@ def render_rows(lanes) -> list[str]:
     if not rows:
         return []
     lines = ["", "## 課題のまとまり", "", "| レーン | まとまり | 課題（先頭が代表） |", "| --- | --- | --- |"]
-    return lines + [f"| {lane} | {b.name} | {_refs(b.issues)} |" for lane, b in rows]
+    return lines + [f"| {lane} | {b.name} | {_issue_refs(b.issues)} |" for lane, b in rows]
 
 
 # ---- レーンの側の読み出し ----

@@ -21,7 +21,7 @@ from supervise_lib.sprint_waves import (
     plan_sprint_check,
     plan_sprint_design,
     bundle_refusal,
-    impl_plans,
+    sprint_impl_plans,
     plan_sprint_release,
     plan_advise_design,
     design_read,
@@ -145,7 +145,7 @@ def auto_sprint_plans(a) -> list[dict]:
     # 設計の課題が無くても設計を承認済みの課題があれば、設計の結果のステージが queue の先頭になる
     first = "設計" if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
     then = {"then_of": first} if design_read(a) else {}
-    impl = impl_plans(a, repo, pace="auto")
+    impl = sprint_impl_plans(a, repo, pace="auto")
     waves += design_results_wave(a, repo, **({"then_of": first} if a.design else {}))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
@@ -300,7 +300,7 @@ def sprint_plans(a) -> list[dict]:
     waves += design_results_wave(a, repo, **then(DESIGN_RESULTS_STAGE))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then("スプリントブランチ")},
-        {"name": "実装", "plans": impl_plans(a, repo), "then_of": first},
+        {"name": "実装", "plans": sprint_impl_plans(a, repo), "then_of": first},
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
