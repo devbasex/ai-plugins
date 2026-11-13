@@ -239,3 +239,25 @@ def test_a_review_declaration_that_cannot_hold_stops_new_sprint(tmp_path, flow, 
     assert p.returncode == 2
     assert f"branch_flow.{key} " in p.stderr
     assert not (out / "sprint.json").exists()
+
+
+def test_fast_pace_follows_the_sprint_and_impl_rows(tmp_path):
+    """受け入れ条件 2: pace: fast でも、実装 PR とスプリントの PR（未検査の差分の検査）に選んだレビューだけを置き、
+    スプリントの PR に cross-review を選ばなければ実装レビューのステージを置かない。"""
+    from pace_state import sprint_state
+    from test_supervise_pace_manual import commit_all
+    from test_supervise_pace_verify import PRD, STG
+    from test_supervise_pace_verify import make_repo as pace_repo
+
+    repo = pace_repo(tmp_path, [STG, PRD])
+    reviews = {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": ["cross-refactoring"], "diff": "unchecked"}}
+    write_flow(repo, {"reviews": reviews})
+    commit_all(repo)
+    out = tmp_path / "f"
+    args = ["new", "sprint", "--name", "f1", "--worktree", str(repo), "--issue", "11", "--out", str(out)]
+    p = inproc.run(SUPERVISE, *args, "--pace", "fast", "--state", str(sprint_state(tmp_path, "fast")), cwd=repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "実装レビュー" not in [e["name"] for e in json.loads((out / "sprint.json").read_text())["ステージ"]]
+    got = plans(out)
+    assert review_ids(got["impl-11"]) == ["review-push", "review", "review-pull"]
+    assert review_ids(got["check"]) == ["assess", "refactor"]
