@@ -40,6 +40,7 @@ from filelock import FileLock, Timeout
 from ndf import identity
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
+
 # 記録の結果（FINISHED など）は records の名前を slots からも読めるように再び公開する
 from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, Result, _file_lock, _lock, _parse_dict, _replace_text
 
