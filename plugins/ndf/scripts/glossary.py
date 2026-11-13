@@ -395,17 +395,25 @@ def _uncovered(line: str, words: WordPair) -> list[re.Match]:
     return [m for m in words.dep.finditer(line) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
 
 
-def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, words: WordPair) -> list[dict]:
+class Target(NamedTuple):
+    """用語チェックで確かめる 1 ファイル。`wanted` は見る行（None なら全行、空なら見る行なし）。"""
+
+    path: str
+    text: str
+    wanted: set[int] | None
+
+
+def text_findings(target: Target, g: dict, decl: Declaration, words: WordPair) -> list[dict]:
     live = live_words(g)
     items = []
-    for n, body, term in scan(text, decl.term_sections):
-        if wanted is not None and n not in wanted:
+    for n, body, term in scan(target.text, decl.term_sections):
+        if target.wanted is not None and n not in target.wanted:
             continue
         if term and term not in live:
             items.append(
                 {
                     "rule": "unregistered",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": term,
                     "detail": "用語集に無い語。同じ変更で用語集へ足して render する",
@@ -417,7 +425,7 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
             items.append(
                 {
                     "rule": "deprecated",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": m.group(0),
                     "detail": f"廃止した語。{replacement(g, m.group(0))} と書く",
@@ -426,17 +434,17 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
-def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, words: WordPair) -> list[dict]:
+def code_findings(target: Target, g: dict, words: WordPair) -> list[dict]:
     """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
     items = []
-    for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
-        if wanted is not None and n not in wanted:
+    for n, line in enumerate(mask_comments(target.text.splitlines(), Path(target.path).suffix), 1):
+        if target.wanted is not None and n not in target.wanted:
             continue
         for m in _uncovered(line, words):
             items.append(
                 {
                     "rule": "deprecated_code",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": m.group(0),
                     "detail": f"廃止した識別子。{code_replacement(g, m.group(0))} と書く",
@@ -678,9 +686,9 @@ def _build_word_patterns(g) -> tuple[WordPair, WordPair]:
     return WordPair(dep_re, live_re), WordPair(word_pattern(dep_forms), word_pattern(live_forms))
 
 
-def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
-    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。生成した用語の文書（decl.document）は外す。"""
-    targets: list[tuple[str, str, set[int] | None]] = []
+def _collect_targets(a, root: Path, decl) -> list[Target]:
+    """--file か --diff から、確かめるファイルの並び。生成した用語の文書（decl.document）は外す。"""
+    targets: list[Target] = []
     if a.file:
         document = (root / decl.document).resolve()
         for f in a.file:
@@ -691,14 +699,14 @@ def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | Non
                 raise unreadable(f"{f} を読めない: {e}")
             if document == p.resolve():
                 continue
-            targets.append((f, text, None))
+            targets.append(Target(f, text, None))
     else:
         for rel, lines in sorted(added_lines(root, a.diff).items()):
             if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or pathmatch.path_matches(rel, decl.paths)):
                 continue
             p = root / rel
             if p.is_file():
-                targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+                targets.append(Target(rel, p.read_text(encoding="utf-8", errors="replace"), lines))
     return targets
 
 
@@ -712,12 +720,12 @@ def cmd_check(a):
     if a.rules == "all" and (a.diff or a.file):
         text_words, code_words = _build_word_patterns(g)
         targets = _collect_targets(a, root, decl)
-        for rel, text, wanted in targets:
-            if rel.endswith(CODE_SUFFIXES):
+        for t in targets:
+            if t.path.endswith(CODE_SUFFIXES):
                 if code_words.dep is not None:
-                    items += code_findings(rel, text, wanted, g, code_words)
+                    items += code_findings(t, g, code_words)
                 continue
-            items += text_findings(rel, text, wanted, g, decl, text_words)
+            items += text_findings(t, g, decl, text_words)
     items += glossary_banned.banned_findings(a, root, decl.banned, added_lines, lambda w: replacement(g, w))
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)
