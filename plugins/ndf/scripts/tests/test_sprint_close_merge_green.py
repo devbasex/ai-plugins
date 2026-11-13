@@ -1149,3 +1149,101 @@ def test_promote_user_approval_needs_the_material(repo, gh):
     code, out, err = call("merged-steps.py", promote_args("--gate-approved", "user"), gh.env, repo)
     assert code == 2 and out["status"] == "stopped", (out, err)
     assert "--approved-from" in out["next"] and gh.get().get("calls", []) == []
+
+
+# 現状固定テスト（I-003: release_lib/approval.py の approved_on_pr。期待値は今の実装の出力）
+def _approval_on_pr(monkeypatch, comments=(), reviews=(), roles=None, perms=None):
+    """approval_trail の GitHub の読みを決まった値に置き換え、読んだ引数を seen に積む。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval
+
+    seen: dict = {}
+    t = approval.trail
+    monkeypatch.setattr(t, "read_comments", lambda repo, pr: seen.setdefault("comments", (repo, pr)) and list(comments))
+    monkeypatch.setattr(t, "read_reviews", lambda repo, pr: seen.setdefault("reviews", (repo, pr)) and list(reviews))
+    monkeypatch.setattr(t, "read_roles", lambda repo, logins: seen.setdefault("roles", list(logins)) is not None and dict(roles or {}))
+    monkeypatch.setattr(
+        t, "read_permissions", lambda repo, logins: seen.setdefault("perms", list(logins)) is not None and dict(perms or {})
+    )
+    return approval, seen
+
+
+def _trail_comment(sha, login, created, updated=None, cid=1):
+    from release_lib import approval_trail
+
+    body = approval_trail.render_trail(sha, "user")
+    return {"id": cid, "body": body, "user": {"login": login}, "created_at": created, "updated_at": updated or created}
+
+
+def _review(login, state, commit, at="2026-11-13T09:00:00Z"):
+    return {"user": {"login": login}, "state": state, "commit_id": commit, "submitted_at": at}
+
+
+T0, T1 = "2026-11-13T09:00:00Z", "2026-11-13T10:00:00Z"
+NO_REVIEW, REVIEW, NO_CD = (True, 0, ""), (True, 1, ""), (False, None, "")
+
+
+@pytest.mark.parametrize(
+    "case, comments, roles, head, expected, read_roles",
+    [
+        (NO_REVIEW, [], {}, X, ("failure", "証跡が無い", None, None), []),
+        (NO_REVIEW, [(X, "adm", T0)], {"adm": "admin"}, X, ("success", f"承認: adm {T0}", "adm", T0), ["adm"]),
+        (NO_REVIEW, [(Y, "adm", T0)], {"adm": "admin"}, X, ("failure", "証跡 bbbbbbb ≠ 先端 aaaaaaa", "adm", T0), ["adm"]),
+        (NO_REVIEW, [(X, "adm", T0)], {"adm": "admin"}, X.upper(), ("success", f"承認: adm {T0}", "adm", T0), ["adm"]),
+        (NO_CD, [(X, "m", T0)], {"m": "maintain"}, X, ("success", f"承認: m {T0}", "m", T0), ["m"]),
+        (REVIEW, [(X, "adm", T0)], {"adm": "admin"}, X, ("failure", "有効な承認のレビューが無い", None, None), None),
+    ],
+)
+def test_approved_on_pr_reads_trails_except_in_review_case(monkeypatch, case, comments, roles, head, expected, read_roles):
+    """cd-review 以外（no-cd も）は証跡を読む。cd-review はコメントを読まずレビューだけを見る。"""
+    import release_case
+
+    approval, seen = _approval_on_pr(monkeypatch, [_trail_comment(*c) for c in comments], roles=roles)
+    got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*case))
+    assert tuple(got) == expected
+    if read_roles is None:
+        assert "comments" not in seen and "roles" not in seen and seen["reviews"] == ("o/r", 9)
+    else:
+        assert seen["comments"] == ("o/r", 9) and seen["roles"] == read_roles and "reviews" not in seen
+
+
+def test_approved_on_pr_does_not_read_roles_of_edited_trails(monkeypatch):
+    import release_case
+
+    comments = [_trail_comment(X, "adm", T0, T1), _trail_comment(X, "w", "2026-11-13T09:30:00Z", cid=2)]
+    approval, seen = _approval_on_pr(monkeypatch, comments, roles={"w": "write"})
+    got = approval.approved_on_pr("o/r", 9, X, release_case.decide_case(*NO_REVIEW))
+    assert tuple(got) == ("failure", "承認権限の無い w の証跡だけがある", None, None)
+    assert seen["roles"] == ["w"]
+
+
+@pytest.mark.parametrize(
+    "reviews, perms, head, expected, asked",
+    [
+        ([], {}, X, ("failure", "有効な承認のレビューが無い", None, None), []),
+        (
+            [_review("u", "APPROVED", X), _review("v", "COMMENTED", Y), _review("x", "APPROVED", Y, T1)],
+            {"u": "write", "x": "read"},
+            X,
+            ("success", "承認のレビュー aaaaaaa", None, None),
+            ["u", "x"],
+        ),
+        ([_review("u", "APPROVED", X.upper())], {"u": "admin"}, X.upper(), ("success", "承認のレビュー aaaaaaa", None, None), ["u"]),
+        (
+            [_review("u", "APPROVED", X), _review("x", "APPROVED", Y, T1)],
+            {"u": "write", "x": "admin"},
+            X,
+            ("failure", "承認のレビュー bbbbbbb ≠ 先端 aaaaaaa", None, None),
+            ["u", "x"],
+        ),
+        ([_review("u", "APPROVED", X)], {"u": "read"}, X, ("failure", "有効な承認のレビューが無い", None, None), ["u"]),
+    ],
+)
+def test_approved_on_pr_review_case_matches_latest_valid_approval(monkeypatch, reviews, perms, head, expected, asked):
+    """cd-review は APPROVED の人だけの権限を読み、有効な人の最新の承認のコミットと先端を照らす。"""
+    import release_case
+
+    approval, seen = _approval_on_pr(monkeypatch, reviews=reviews, perms=perms)
+    got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*REVIEW))
+    assert tuple(got) == expected
+    assert seen["perms"] == asked
