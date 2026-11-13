@@ -48,6 +48,8 @@ HELD_ENV = "NDF_TEST_SLOT_HELD"
 # 枠の置き場を別の開発コンテナと共有するときの環境変数（決定 8）
 SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
+# 枠のファイルの名前の頭（`slot-<番号>.lock`・`slot-<番号>.json`）
+SLOT_PREFIX = "slot-"
 # 枠とメモリを確かめる間隔
 POLL_SECONDS = 2.0
 # 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
@@ -268,14 +270,14 @@ class Held:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
         assert self._directory is not None
         mine = (self._started_at, self.index or 0)
-        for path in self._directory.glob("slot-*.json"):
+        for path in self._directory.glob(f"{SLOT_PREFIX}*.json"):
             index = _slot_index(path)
             if index is None or index == self.index:
                 continue
             started = (_read_json(path) or {}).get("started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
-            probe = _try_lock(self._directory / f"slot-{index}.lock")
+            probe = _try_lock(_slot_path(self._directory, index, ".lock"))
             if probe is None:
                 return False  # 後に始めた実行が生きている
             probe.release()
@@ -301,8 +303,12 @@ class Held:
             self._thread.join()
 
 
+def _slot_path(directory: Path, index: int | None, suffix: str = "") -> Path:
+    return directory / f"{SLOT_PREFIX}{index}{suffix}"
+
+
 def _slot_index(path: Path) -> int | None:
-    digits = path.stem.removeprefix("slot-")
+    digits = path.stem.removeprefix(SLOT_PREFIX)
     return int(digits) if digits.isdigit() else None
 
 
@@ -414,10 +420,10 @@ def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, poll: float,
 def _take_free_slot(directory: Path, cwd: Path, max_runs: int, held: Held) -> FileLock | None:
     """番号の小さい方から空いた枠を取り、持ち主を仮に書く。空きが無ければ None。"""
     for index in range(max_runs):
-        lock = _try_lock(directory / f"slot-{index}.lock")
+        lock = _try_lock(_slot_path(directory, index, ".lock"))
         if lock is not None:
             held.index = index
-            _write_json(directory / f"slot-{index}.json", _owner(None, cwd))
+            _write_json(_slot_path(directory, index, ".json"), _owner(None, cwd))
             return lock
     return None
 
@@ -433,7 +439,7 @@ def _memory_ready(held: Held, read_memory: ReadMemory, floor_mib: int) -> bool:
 
 def _release(directory: Path, held: Held, lock: FileLock) -> None:
     try:
-        (directory / f"slot-{held.index}.json").unlink(missing_ok=True)
+        _slot_path(directory, held.index, ".json").unlink(missing_ok=True)
     finally:
         lock.release()
 
@@ -446,8 +452,8 @@ def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll
         _record(directory, cwd, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
     held._started_at = time.time()
-    _write_json(directory / f"slot-{held.index}.json", _owner(held._started_at, cwd))
-    held.env = {HELD_ENV: str(directory / f"slot-{held.index}")}
+    _write_json(_slot_path(directory, held.index, ".json"), _owner(held._started_at, cwd))
+    held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
     try:
         yield held
