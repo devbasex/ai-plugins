@@ -441,3 +441,51 @@ def test_cli_runs_as_a_script(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     awaiting = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))["awaiting"]
     assert p.stdout.splitlines()[-1] == f"失敗 0 件・知らせ {len(awaiting)} 件"
+
+
+# 現状固定テスト（I-001: matrix_combos の分岐。期待値は今の実装の出力）
+@pytest.mark.parametrize(
+    "matrix",
+    [
+        "${{ fromJSON(x) }}",
+        [],
+        {},
+        {"k": []},
+        {"k": "x"},
+        {"k": [None]},
+        {"k": [[1]]},
+        {"k": [1], "include": "x"},
+        {"k": [1], "include": ["x"]},
+        {"k": [1], "include": [{"a": [1]}]},
+        {"k": [1], "exclude": {"k": 1}},
+        {"k": [1], "exclude": [{"k": None}]},
+        {"k": [1], "exclude": [{"k": 1}]},
+    ],
+)
+def test_matrix_combos_returns_none_when_not_static(matrix):
+    assert crc.matrix_combos(matrix) is None
+
+
+def test_matrix_combos_scalars_become_strings():
+    matrix = {"b": [True, False], "n": [1.5]}
+    assert crc.matrix_combos(matrix) == [{"b": "true", "n": "1.5"}, {"b": "false", "n": "1.5"}]
+
+
+def test_matrix_combos_include_only_and_null_rows():
+    assert crc.matrix_combos({"include": [{"a": 1}, {"a": 2, "b": False}]}) == [{"a": "1"}, {"a": "2", "b": "false"}]
+    assert crc.matrix_combos({"k": [1], "include": None, "exclude": None}) == [{"k": "1"}]
+
+
+def test_matrix_combos_include_extends_every_match_and_later_rows_overwrite_added_keys():
+    matrix = {"k": [1, 2], "include": [{"x": "a"}, {"x": "b"}, {"k": 1, "x": "c"}]}
+    assert crc.matrix_combos(matrix) == [{"k": "1", "x": "c"}, {"k": "2", "x": "b"}]
+
+
+def test_matrix_combos_include_rows_do_not_match_appended_rows():
+    matrix = {"k": [1], "include": [{"k": 2}, {"k": 2, "y": "z"}]}
+    assert crc.matrix_combos(matrix) == [{"k": "1"}, {"k": "2"}, {"k": "2", "y": "z"}]
+
+
+def test_matrix_combos_exclude_partial_key_and_unknown_key():
+    matrix = {"a": [1, 2], "b": [3, 4], "exclude": [{"a": 1}, {"zz": 9}]}
+    assert crc.matrix_combos(matrix) == [{"a": "2", "b": "3"}, {"a": "2", "b": "4"}]
