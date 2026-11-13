@@ -95,3 +95,158 @@ def test_state_variables_point_at_the_temporary_directory(forbid_real_state):
     for name, sub in isolation.REDIRECTED_ENV.items():
         assert os.environ[name] == str(forbid_real_state / sub)
     assert "CLAUDE_PLUGIN_ROOT" not in os.environ
+
+
+# --- 現状固定テスト: _Guard._hook がどのイベントのどの引数を _check へ渡すか（I-002） ---
+
+
+def _spied_guard(roots: tuple[str, ...] = ("/nonexistent-root",)) -> tuple[isolation._Guard, list[tuple[object, object]]]:
+    """監査フックを入れずに _hook を直接呼ぶ守り。_check へ渡った (path, dir_fd) を記録する。"""
+    guard = isolation._Guard()
+    guard.roots = roots
+    calls: list[tuple[object, object]] = []
+    guard._check = lambda path, dir_fd=None: calls.append((path, dir_fd))  # type: ignore[method-assign]
+    return guard, calls
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (("p", "w", 0), [("p", None)]),
+        (("p", "a", 0), [("p", None)]),
+        (("p", "x", 0), [("p", None)]),
+        (("p", "r+", 0), [("p", None)]),
+        (("p", "rb", 0), []),
+        (("p", "r", 0), []),
+        (("p", None, os.O_WRONLY), [("p", None)]),
+        (("p", None, os.O_RDWR), [("p", None)]),
+        (("p", None, os.O_CREAT), [("p", None)]),
+        (("p", None, os.O_APPEND), [("p", None)]),
+        (("p", None, os.O_TRUNC), [("p", None)]),
+        (("p", None, os.O_RDONLY), []),
+        # mode が読みだけでも、flags に書き込みがあれば見る
+        (("p", "r", os.O_WRONLY), [("p", None)]),
+        # mode が文字列でなく flags が整数でなければ見ない
+        (("p", 1, "w"), []),
+        # 引数が足りなければ None で埋める
+        (("p", "w"), [("p", None)]),
+        (("p",), []),
+        ((), []),
+    ],
+)
+def test_hook_open_checks_only_writing_modes_and_flags(args, expected):
+    guard, calls = _spied_guard()
+    guard._hook("open", args)
+    assert calls == expected
+
+
+@pytest.mark.parametrize(
+    ("event", "args", "expected"),
+    [
+        ("os.mkdir", ("d", 0o777, 5), [("d", 5)]),
+        ("os.mkdir", ("d", 0o777), [("d", None)]),
+        ("os.remove", ("f", 7), [("f", 7)]),
+        ("os.remove", ("f",), [("f", None)]),
+        ("os.rmdir", ("d", None), [("d", None)]),
+        ("os.rename", ("a", "b", 3, 4), [("a", 3), ("b", 4)]),
+        ("os.rename", ("a", "b"), [("a", None), ("b", None)]),
+        ("os.rename", ("a",), [("a", None)]),
+        ("os.link", ("src", "dst", 8, 9), [("src", 8), ("dst", 9)]),
+        ("os.truncate", ("f", 0), [("f", None)]),
+        ("os.chmod", ("f", 0o600, 6), [("f", 6)]),
+        ("shutil.rmtree", ("d", 2), [("d", 2)]),
+        ("os.mkdir", (), []),
+        ("os.replace", ("a", "b", 3, 4), []),
+        ("os.unlink", ("f", 7), []),
+        ("subprocess.Popen", ("ls", ["ls"], None, None), []),
+    ],
+)
+def test_hook_write_events_pass_path_and_dir_fd_positions(event, args, expected):
+    guard, calls = _spied_guard()
+    guard._hook(event, args)
+    assert calls == expected
+
+
+def test_hook_does_nothing_without_roots():
+    guard, calls = _spied_guard(roots=())
+    guard._hook("open", ("p", "w", 0))
+    guard._hook("os.rename", ("a", "b", None, None))
+    assert calls == []
+
+
+def test_hook_does_nothing_while_busy_in_this_thread():
+    guard, calls = _spied_guard()
+    guard.local.busy = True
+    guard._hook("open", ("p", "w", 0))
+    guard._hook("os.remove", ("f", None))
+    assert calls == []
+    guard.local.busy = False
+    guard._hook("os.remove", ("f", None))
+    assert calls == [("f", None)]
+
+
+def test_hook_accepts_list_args():
+    guard, calls = _spied_guard()
+    guard._hook("open", ["p", "w", 0])
+    guard._hook("os.rename", ["a", "b", 1, 2])
+    assert calls == [("p", None), ("a", 1), ("b", 2)]
+
+
+def test_hook_rename_stops_at_the_first_violation(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    guard = isolation._Guard()
+    guard.roots = (os.path.realpath(real),)
+    with pytest.raises(isolation.RealStateWriteError) as raised:
+        guard._hook("os.rename", (str(real / "a"), str(real / "b"), None, None))
+    assert guard.violations == [os.path.realpath(real / "a")]
+    assert str(raised.value) == f"テストが本物の状態の置き場へ書こうとした: {os.path.realpath(real / 'a')}"
+
+
+def test_hook_rename_into_the_root_from_outside_flags_the_destination(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    guard = isolation._Guard()
+    guard.roots = (os.path.realpath(real),)
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._hook("os.rename", (str(tmp_path / "outside"), str(real / "b"), None, None))
+    assert guard.violations == [os.path.realpath(real / "b")]
+
+
+def test_hook_resolves_relative_paths_through_dir_fd(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    guard = isolation._Guard()
+    guard.roots = (os.path.realpath(real),)
+    fd = os.open(real, os.O_RDONLY)
+    try:
+        with pytest.raises(isolation.RealStateWriteError):
+            guard._hook("os.remove", ("kept", fd))
+    finally:
+        os.close(fd)
+    assert guard.violations == [os.path.realpath(real / "kept")]
+
+
+def test_hook_lets_writes_under_allowed_and_outside_roots_through(tmp_path):
+    real = tmp_path / "real"
+    allowed = real / "pytest"
+    allowed.mkdir(parents=True)
+    guard = isolation._Guard()
+    guard.roots = (os.path.realpath(real),)
+    guard.allowed = (os.path.realpath(allowed),)
+    guard._hook("open", (str(allowed / "f"), "w", 0))
+    guard._hook("open", (str(tmp_path / "elsewhere"), "w", 0))
+    guard._hook("open", (str(real / "f"), "r", 0))
+    guard._hook("open", (str(real / "f").encode(), None, os.O_RDONLY))
+    assert guard.violations == []
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._hook("open", (str(real / "f").encode(), "wb", 0))
+    assert guard.violations == [os.path.realpath(real / "f")]
+
+
+def test_hook_ignores_non_path_targets():
+    guard = isolation._Guard()
+    guard.roots = ("/",)
+    guard._hook("open", (3, "w", 0))
+    guard._hook("os.remove", (None, None))
+    assert guard.violations == []
