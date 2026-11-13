@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
@@ -381,13 +382,20 @@ def scan(text: str, term_sections: list[str]):
         yield n, mask_inline_code(line), terms.get(n)
 
 
-def _uncovered(line: str, dep_re, live_re) -> list[re.Match]:
-    """`line` の中の `dep_re` の一致のうち、`live_re` の一致に完全に含まれないものを元の順で返す。"""
-    spans = [m.span() for m in live_re.finditer(line)] if live_re else []
-    return [m for m in dep_re.finditer(line) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
+class WordPair(NamedTuple):
+    """廃止した形（`dep`）と生きた形（`live`）の正規表現の組。どちらも語が無ければ None。"""
+
+    dep: re.Pattern | None
+    live: re.Pattern | None
 
 
-def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, dep_re, live_re) -> list[dict]:
+def _uncovered(line: str, words: WordPair) -> list[re.Match]:
+    """`line` の中の廃止した形の一致のうち、生きた形の一致に完全に含まれないものを元の順で返す。"""
+    spans = [m.span() for m in words.live.finditer(line)] if words.live else []
+    return [m for m in words.dep.finditer(line) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
+
+
+def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, words: WordPair) -> list[dict]:
     live = live_words(g)
     items = []
     for n, body, term in scan(text, decl.term_sections):
@@ -403,9 +411,9 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
                     "detail": "用語集に無い語。同じ変更で用語集へ足して render する",
                 }
             )
-        if dep_re is None:
+        if words.dep is None:
             continue
-        for m in _uncovered(body, dep_re, live_re):
+        for m in _uncovered(body, words):
             items.append(
                 {
                     "rule": "deprecated",
@@ -418,13 +426,13 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
-def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re, live_re) -> list[dict]:
+def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, words: WordPair) -> list[dict]:
     """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
     items = []
     for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
         if wanted is not None and n not in wanted:
             continue
-        for m in _uncovered(line, dep_re, live_re):
+        for m in _uncovered(line, words):
             items.append(
                 {
                     "rule": "deprecated_code",
@@ -649,13 +657,13 @@ def cmd_render(a):
     emit(result(TOOL, "ok", f"{decl.document} を書いた", [{"name": decl.document, "result": "written"}]))
 
 
-def _build_word_patterns(g):
-    """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
+def _build_word_patterns(g) -> tuple[WordPair, WordPair]:
+    """本文の廃止語・生きた語の組と、識別子の廃止形・生きた形の組。"""
     dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
     dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
-    return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
+    return WordPair(dep_re, live_re), WordPair(word_pattern(dep_forms), word_pattern(live_forms))
 
 
 def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
@@ -690,14 +698,14 @@ def cmd_check(a):
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
-        dep_re, live_re, dep_code_re, live_code_re = _build_word_patterns(g)
+        text_words, code_words = _build_word_patterns(g)
         targets = _collect_targets(a, root, decl)
         for rel, text, wanted in targets:
             if rel.endswith(CODE_SUFFIXES):
-                if dep_code_re is not None:
-                    items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
+                if code_words.dep is not None:
+                    items += code_findings(rel, text, wanted, g, code_words)
                 continue
-            items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
+            items += text_findings(rel, text, wanted, g, decl, text_words)
     items += glossary_banned.banned_findings(a, root, decl.banned, added_lines, lambda w: replacement(g, w))
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)
