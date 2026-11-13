@@ -320,17 +320,26 @@ def test_only_an_example_with_the_body_material_has_the_heading():
     assert set(ur.report_items(examples["完了"]).values()) == {"完了", ur.NONE_VALUE}
 
 
+def _value_lines(text: str, form: ur.ReportForm) -> list[str]:
+    """形の説明の文から、結果の値ごとの行（`TEXT_VALUES` の行の直後に値の数だけ並ぶ）を取り出す。"""
+    lines = text.splitlines()
+    start = lines.index(ur.TEXT_VALUES) + 1
+    return lines[start : start + len(form.values)]
+
+
 def test_the_requirement_lines_follow_the_values_and_name_no_items_as_none():
-    lines = ur._requirement_lines(FORM)
+    lines = _value_lines(ur.describe_form(FORM), FORM)
     assert [line.split(":")[0] for line in lines] == [f"- {v}" for v in FORM.values]
     assert ur.TEXT_ALWAYS.format(items=ur.NONE_VALUE) in lines[FORM.values.index("完了")]
 
 
 def test_the_condition_text_follows_prefix_or_equals_and_lists_every_need():
-    prefix = ur.Condition(item="区分", need=("承認ゲート", "Pull Request"), op="prefix", value="ndf-gate:")
-    equals = ur.Condition(item="区分", need=("人に頼むこと",), op="equals", value="ndf-ask:human-action")
-    assert ur._condition_text(prefix) == ur.TEXT_PREFIX.format(item="区分", cond="ndf-gate:", need="承認ゲート・Pull Request")
-    assert ur._condition_text(equals) == ur.TEXT_EQUALS.format(item="区分", cond="ndf-ask:human-action", need="人に頼むこと")
+    prefix = {"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート", "Pull Request"]}
+    equals = {"item": "区分", "equals": "ndf-ask:human-action", "need": ["人に頼むこと"]}
+    form = ur.form_from_dict(_req("完了", {"always": [], "when": [prefix, equals]}))
+    line = _value_lines(ur.describe_form(form), form)[form.values.index("完了")]
+    assert ur.TEXT_PREFIX.format(item="区分", cond="ndf-gate:", need="承認ゲート・Pull Request") in line
+    assert ur.TEXT_EQUALS.format(item="区分", cond="ndf-ask:human-action", need="人に頼むこと") in line
 
 
 def test_the_description_follows_another_shape():
