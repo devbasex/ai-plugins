@@ -87,7 +87,7 @@
       "stage": "詳細設計",
       "issues": true,
       "timeout": 3600,
-      "prompt": "/ndf:design #16 詳細設計。設計文書（直した後のもの）の上に、詳細設計の文書 issues/issue-16-design-detail.md を 1,000 行以下で書く（超える主題は設計を 2 本に分けると報告して止まる）。書いたら `python3 <NDF>/scripts/design-survey.py check --issue 16 --require-detail` を打ち、detail_* の指摘を直す。工程「設計」は記録し直さない。コミットする（push しない）。",
+      "prompt": "/ndf:design #16 詳細設計。設計文書（直した後のもの）の上に、詳細設計の文書 issues/issue-16-design-detail.md を 1,000 行以下で書く（超える主題は設計を 2 本に分けると報告して止まる）。書いたら `python3 <NDF>/scripts/design-survey.py check --file issues/issue-16-design.md issues/issue-16-design-detail.md --require-detail` を打ち、detail_* の指摘を直す。工程「設計」は記録し直さない。コミットする（push しない）。",
       "next": "rebuild"
     },
     {
