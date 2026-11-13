@@ -195,3 +195,23 @@ def test_row_shape_missing_required_column(contracts_copy, fact_table):
     contracts_copy("facts/sample.json", lambda _: fact_table(ROW_COLUMNS, [{"id": "c", "tags": ["x"]}]))
     with pytest.raises(facts.FactsError, match=r"^事実の表 facts/sample.json の行 0（'c'）の形が違う: 'rank' is a required property$"):
         facts.table("sample")
+
+
+# 現状固定テスト（I-008）: 列の ref の先に無い値の文面と順。列の宣言の順に、列の中は行の順に並ぶ。
+
+
+def test_ref_errors_lists_missing_values_in_column_then_row_order(contracts_copy, sample_table):
+    rows = [
+        {"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"},
+        {"id": "b", "flag": True, "size": 1},
+        {"id": "c", "flag": True, "size": 1, "policy": "review", "code": "yy"},
+        {"id": "d", "flag": True, "size": 1, "policy": "gone"},
+    ]
+    contracts_copy("facts/sample.json", lambda _: {**sample_table, "rows": rows})
+    assert facts.ref_errors("sample", {"monitor.phase.review"}) == [
+        "sample:a の policy 'nope' の方針 monitor.phase.nope が上限の宣言に無い",
+        "sample:d の policy 'gone' の方針 monitor.phase.gone が上限の宣言に無い",
+        "sample:a の code 'zz' が表 exit-codes に無い",
+        "sample:c の code 'yy' が表 exit-codes に無い",
+    ]
+    assert facts.ref_errors("sample", None) == ["sample:a の code 'zz' が表 exit-codes に無い", "sample:c の code 'yy' が表 exit-codes に無い"]
