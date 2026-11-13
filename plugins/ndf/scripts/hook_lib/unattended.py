@@ -58,11 +58,16 @@ def is_target(prompt: object) -> bool:
     return bool(TARGET_RE.match(first))
 
 
+def mark_dir() -> Path:
+    """印の置き場（`<状態の根>/unattended`）。"""
+    return container_home() / MARK_DIR_NAME
+
+
 def mark_path(session_id: object) -> Path | None:
     """セッションの識別子から印のファイルのパス。識別子が `SESSION_RE` に合わなければ None。"""
     if not isinstance(session_id, str) or not SESSION_RE.match(session_id):
         return None
-    return container_home() / MARK_DIR_NAME / f"{session_id}.json"
+    return mark_dir() / f"{session_id}.json"
 
 
 def read_mark(path: Path) -> Mark | None:
@@ -126,9 +131,8 @@ def _stderr_warn(command: str, text: str) -> None:
 
 def mark_session(hook_input: dict, now: float) -> str | None:
     """過ぎた印を消し、対象のセッションなら印（回数 0）を作って案内の文を返す。対象でなければ None。"""
-    directory = container_home() / MARK_DIR_NAME
     try:
-        prune_marks(directory, now, limits.seconds(MARK_POLICY))
+        prune_marks(mark_dir(), now, limits.seconds(MARK_POLICY))
     except limits.LimitsError as e:
         _stderr_warn("unattended-start", str(e))
     if not isinstance(hook_input, dict) or not is_target(hook_input.get("prompt")):
