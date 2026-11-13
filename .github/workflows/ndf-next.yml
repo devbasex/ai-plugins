@@ -42,8 +42,14 @@ jobs:
   ndf-next-checks:
     runs-on: ubuntu-latest
     steps:
+      # 検査の I2 が起点との merge-base を求めるため、履歴をすべて取る
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
       # lock が宣言と食い違っていないか
       - run: uv lock --check --project .
       # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
@@ -53,3 +59,11 @@ jobs:
           diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
           sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
       - run: bash -n bin/ndf
+      # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
+      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む
+      - run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            bin/ndf check --base "origin/$GITHUB_BASE_REF"
+          else
+            bin/ndf check
+          fi
