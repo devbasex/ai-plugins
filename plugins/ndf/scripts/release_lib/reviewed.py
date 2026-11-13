@@ -77,14 +77,8 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
         body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         main_pr = ops.create_pr(root, prod, branch, title, body)
     repo = repo_or_stop(root)
-    try:
-        head = approval_trail.read_head(repo, main_pr)[0]
-        judged = approval.approved_on_pr(repo, main_pr, head, case)
-    except approval_trail.TrailError as e:
-        raise StepError(str(e))
-    metrics.update({"main_pr": main_pr, "approved_sha": head, "compared_head": head, "reason": judged.description})
-    if judged.state != "success":
-        wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
+
+    def waiting(head, judged):
         how = (
             f"release-steps.py approval-post --pr {main_pr} --approval <承認資料> で承認資料を置いて承認を求め、承認を得たら "
             f"release-steps.py approve --pr {main_pr} --approved-sha {head} --by user で証跡を書いて"
@@ -92,40 +86,43 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
             else f"PR #{main_pr} の先端 {head[:8]} のレビューの承認を得て"
         )
         nxt = f"{how}、release-steps.py release --version {ver} --channel prod を打ち直す"
-        summary = f"{plugin} v{ver} のリリース承認を待つ（本番の PR #{main_pr}・先端 {head[:8]}）: {judged.description}"
-        emit(
-            result(
-                TOOL,
-                "gate",
-                summary,
-                items + [{"kind": "pr", "name": f"#{main_pr}", "result": "awaiting_approval", "base": prod}],
-                metrics,
-                None,
-                nxt,
-            ),
-            EXIT_GATE,
-        )
-    if case.case == release_case.CD_NO_REVIEW:
-        wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
-    try:
-        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=True)
-    except HeadMoved:
+        return f"{plugin} v{ver} のリリース承認を待つ（本番の PR #{main_pr}・先端 {head[:8]}）: {judged.description}", nxt
+
+    def moved(head):
         nxt = f"承認の後に先端が動いた。新しい先端で承認を取り直し、release-steps.py release --version {ver} --channel prod を打ち直す"
-        emit(
-            result(
-                TOOL,
-                "gate",
-                f"{plugin} v{ver} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた",
-                items,
-                metrics,
-                None,
-                nxt,
-            ),
-            EXIT_GATE,
-        )
+        return f"{plugin} v{ver} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた", nxt
+
+    awaiting = [{"kind": "pr", "name": f"#{main_pr}", "result": "awaiting_approval", "base": prod}]
+    merge = merge_on_pr_approval(
+        root, repo, a, case, main_pr, prod, items, metrics, ops, waiting=waiting, moved=moved, waiting_items=awaiting
+    )
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": False})
     git(root, "fetch", "-q", "origin")
     ops._published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
+
+
+def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
+    """CD のある場合（#2773 の決定 7）の照合とマージ: 本番の PR の先端が PR の上の承認（証跡かレビュー）と完全に一致するときだけ、
+    迂回なしで 1 回だけマージする。承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。
+    `waiting(head, judged)` と `moved(head)` は承認ゲートの (要約, 次の手) を返す。`waiting_items` は承認待ちのときだけ items に足す。
+    マージコミット（読めなければ None）を返す。"""
+    try:
+        head = approval_trail.read_head(repo, main_pr)[0]
+        judged = approval.approved_on_pr(repo, main_pr, head, case)
+    except approval_trail.TrailError as e:
+        raise StepError(str(e)) from e
+    metrics.update({"main_pr": main_pr, "approved_sha": head, "compared_head": head, "reason": judged.description})
+    if judged.state != "success":
+        wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
+        summary, nxt = waiting(head, judged)
+        emit(result(TOOL, "gate", summary, items + list(waiting_items), metrics, None, nxt), EXIT_GATE)
+    if case.case == release_case.CD_NO_REVIEW:
+        wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
+    try:
+        return ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=True)
+    except HeadMoved:
+        summary, nxt = moved(head)
+        emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)
 
 
 def wait_ci_except(root, n, skip, timeout, ops):

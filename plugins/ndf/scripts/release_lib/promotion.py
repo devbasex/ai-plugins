@@ -16,12 +16,10 @@ from pathlib import Path
 
 import approved_commit as ac
 import branch_flow
-import limits
-import release_case
 import repo as repo_lib
-from release_lib import approval, approval_trail, names, reviewed
+from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
-from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git, result
+from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 
 
 def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
@@ -137,25 +135,17 @@ def _merge_exact(root, a, plugin, refs, main_pr, case, items, metrics, ops):
     """CD のある場合（#2773 の決定 7）: 本番の PR の先端が PR の上の承認と完全に一致するときだけ、迂回なしで 1 回だけマージする。
     承認の後のコミットの追加・組み直しで先端が動けば承認ゲート（10）で止め、入れ直さない。`refs` は (リリースブランチ, 本番チャネル)。"""
     branch, prod = refs
-    repo = repo_lib.owner_repo(root)
-    try:
-        head = approval_trail.read_head(repo, main_pr)[0]
-        judged = approval.approved_on_pr(repo, main_pr, head, case)
-    except approval_trail.TrailError as e:
-        raise StepError(str(e)) from e
-    metrics.update({"main_pr": main_pr, "approved_sha": head, "compared_head": head, "reason": judged.description})
     redo = f"release-steps.py release-branch で組み直したら承認資料を作り直し、本番の PR #{main_pr} の新しい先端で承認を取り直して打ち直す"
-    if judged.state != "success":
-        reviewed.wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
-        lead = f"{plugin} v{a.version} のリリース承認を待つ（本番の PR #{main_pr}・{branch} の先端 {head[:8]}）: {judged.description}"
-        emit(result(approval.TOOL, "gate", lead, items, metrics, None, redo), EXIT_GATE)
-    if case.case == release_case.CD_NO_REVIEW:
-        reviewed.wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
-    try:
-        return ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=True)
-    except HeadMoved:
-        lead = f"{plugin} v{a.version} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた"
-        emit(result(approval.TOOL, "gate", lead, items, metrics, None, redo), EXIT_GATE)
+
+    def waiting(head, judged):
+        return f"{plugin} v{a.version} のリリース承認を待つ（本番の PR #{main_pr}・{branch} の先端 {head[:8]}）: {judged.description}", redo
+
+    def moved(head):
+        return f"{plugin} v{a.version} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた", redo
+
+    return reviewed.merge_on_pr_approval(
+        root, repo_lib.owner_repo(root), a, case, main_pr, prod, items, metrics, ops, waiting=waiting, moved=moved
+    )
 
 
 def merge_back(root, a, plugin, branch, base, prod, main_pr, ops) -> tuple[int, str]:
