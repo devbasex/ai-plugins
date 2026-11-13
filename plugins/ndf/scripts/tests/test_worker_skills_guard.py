@@ -158,3 +158,87 @@ def test_unreadable_doc_still_denies_with_path(tmp_path, guard, monkeypatch):
 )
 def test_field_value(guard, prompt, value):
     assert guard.field_value(prompt) == value
+
+
+# --- hook.py の guard の包み（_worker_skills_guard ほか）の現状固定（cross-refactoring I-011） ---
+# 判定の関数を差し替え、包みが返す並びを見る。出力をそのまま 1 つの並びにする・None も 1 要素にする（ci-test だけは落とす）・
+# Exception は飲んで空の並び・BaseException（締め切り）は飲まない、を縛る。
+
+WRAPPERS = [
+    ("_worker_skills_guard", "worker_skills", "skills_decision", True),
+    ("_supervisor_docs_guard", "supervisor_docs", "docs_decision", True),
+    ("_issue_guard", "issue_guard", "issue_decision", True),
+    ("_ci_test_guard", "ci_test_guard", "ci_test_decision", False),
+]
+
+
+@pytest.fixture
+def hook_mod(monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPTS / "lib"))
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    import hook
+
+    return hook
+
+
+def _patch(monkeypatch, module: str, func: str, impl) -> None:
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module(f"hook_lib.{module}"), func, impl)
+
+
+@pytest.mark.parametrize(("wrapper", "module", "func", "keeps_none"), WRAPPERS)
+def test_guard_wrapper_returns_the_decision_as_a_one_item_list(hook_mod, monkeypatch, wrapper, module, func, keeps_none):
+    out = {"hookSpecificOutput": {"permissionDecision": "deny"}}
+    seen = []
+    _patch(monkeypatch, module, func, lambda ev: seen.append(ev) or out)
+    ev = object()
+    got = getattr(hook_mod, wrapper)(ev)
+    assert got == [out] and got[0] is out and seen == [ev]
+
+
+@pytest.mark.parametrize(("wrapper", "module", "func", "keeps_none"), WRAPPERS)
+@pytest.mark.parametrize("value", [None, {}])
+def test_guard_wrapper_keeps_or_drops_an_empty_decision(hook_mod, monkeypatch, wrapper, module, func, keeps_none, value):
+    """worker-skills・supervisor-docs・issue は None も {} も 1 要素として返す。ci-test だけは偽の値を落とす。"""
+    _patch(monkeypatch, module, func, lambda ev: value)
+    assert getattr(hook_mod, wrapper)(object()) == ([value] if keeps_none else [])
+
+
+@pytest.mark.parametrize(("wrapper", "module", "func", "keeps_none"), WRAPPERS)
+@pytest.mark.parametrize("exc", [RuntimeError("x"), OSError("x"), KeyError("x"), ValueError("x")])
+def test_guard_wrapper_swallows_an_exception_into_an_empty_list(hook_mod, monkeypatch, wrapper, module, func, keeps_none, exc):
+    def boom(ev):
+        raise exc
+
+    _patch(monkeypatch, module, func, boom)
+    assert getattr(hook_mod, wrapper)(object()) == []
+
+
+@pytest.mark.parametrize(("wrapper", "module", "func", "keeps_none"), WRAPPERS)
+def test_guard_wrapper_lets_the_deadline_through(hook_mod, monkeypatch, wrapper, module, func, keeps_none):
+    from hook_lib import deadline
+
+    def late(ev):
+        raise deadline.HookDeadlineExceeded(wrapper)
+
+    _patch(monkeypatch, module, func, late)
+    with pytest.raises(deadline.HookDeadlineExceeded):
+        getattr(hook_mod, wrapper)(object())
+
+
+@pytest.mark.parametrize(
+    ("wrapper", "module", "func"), [("_token_guard", "token_guard", None), ("_ask_guard", "ask_guard", "ask_decision")]
+)
+def test_unwrapped_guards_let_exceptions_through(hook_mod, monkeypatch, wrapper, module, func):
+    """包みの無い guard（ask-guard）は例外を飲まない。token-guard は対象の道具でなければ判定を呼ばずに空の並び。"""
+    if func is None:
+        assert getattr(hook_mod, wrapper)(type("Ev", (), {"tool": "NotATool"})()) == []
+        return
+
+    def boom(ev):
+        raise RuntimeError("x")
+
+    _patch(monkeypatch, module, func, boom)
+    with pytest.raises(RuntimeError):
+        getattr(hook_mod, wrapper)(object())

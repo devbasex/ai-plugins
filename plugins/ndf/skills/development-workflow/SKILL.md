@@ -358,6 +358,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 | 設計 Pull Request のマージ（`standard`） | 承認を得るまで実装の工程へ進まない |
 | 本番系へ届く操作 | 承認を得るまで進めない。**開発版のデプロイまでは自動で進めてよい**。`operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない |
 
+**人のいない実行（環境変数 `NDF_FACTORY_RUN` がある Factory の実行ジョブ）では `AskUserQuestion` を使わない。** 区分の無い問いは決めて記録して続け、
+承認ゲート・区分のある問い・終わり・続けられないときは、最後の応答の末尾に区間の報告を置いて区間を終える（[asking.md](references/asking.md) の「人のいない実行」）。
+
 **工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
 テンプレートか要る設定が無いときだけ、`Agent` で supervisor を起動する

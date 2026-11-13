@@ -89,7 +89,8 @@
     "cost-estimates-json",
     "decisions-jsonl",
     "handoff-mark-json",
-    "restore-json"
+    "restore-json",
+    "unattended-mark-json"
   ],
   "reads": [],
   "exit": {

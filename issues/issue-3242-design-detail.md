@@ -248,7 +248,7 @@ docs/ndf-plugin-reference.md
 | `result_value` | `unattended-report.json` の例の組の `result` と一致する | 結果の行が 2 つある文は後ろの値。値の前後の空白を除く。`ndf-next-block.json` の例の組で、値が `判断が要る` のものは `launch` が偽 | 行が無い文・文字列でない値で空の文字列 |
 | `report_items` | 結果の行より後ろの項目を辞書にする | 同じ項目が 2 つあれば後ろ。結果の行より前の `- 課題:` は読まない。値の中の URL の `:` が値に入る | 結果の行が無い文で空の辞書 |
 | `report_errors` | `unattended-report.json` の例の組の `errors` と一致する。3 つの値の正しい形で空 | 形の宣言の `required` を書き換えた `ReportForm` で判定が変わる（要る項目を関数に書き写していない） | 3 つの外の値・要る項目の欠け・承認ゲートで Pull Request が無い・人の操作が要る区分で人に頼むことが無い |
-| `_missing_items` | `判断が要る` で区分・問い・材料が揃えば空 | 区分が `ndf-gate:1` のときだけ承認ゲートと Pull Request が要る | 値が `無し` の項目を欠けとして返す |
+| `_missing_items` | `判断が要る` で区分・問い・材料が揃えば空 | 区分が `ndf-gate:` で始まれば承認ゲート、承認ゲートが `設計 Pull Request のマージ` のときだけ Pull Request が要る（委任の承認は要らない） | 値が `無し` の項目を欠けとして返す |
 | `_material_errors` | 材料が `本文` で見出しが報告より前にある・`https://` の URL が 2 つ | 見出しが報告より後ろにある | 見出しが無い・ファイルのパス・`http://` の URL で誤りを返す |
 | `is_target` | `/ndf:development-workflow #12`・`/goal /ndf:development-workflow #12` で真 | 前後の空白・引数の無い `/ndf:development-workflow` で真 | `/ndf:design #1`・普通の文・2 行目だけに名前がある文・`/ndf:development-workflowx`・文字列でない値で偽 |
 | `mark_path` | 英数字と `-` の識別子で状態の根の下のパス | 128 文字で真、129 文字で None | `/`・`.`・空の文字列・文字列でない値で None |

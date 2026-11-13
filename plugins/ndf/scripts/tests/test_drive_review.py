@@ -118,26 +118,9 @@ class FakeReview:
             if sub == "init":
                 return 0, f"PR=5\nTMP_DIR={self.tmp}\nWORKTREE={self.tmp / 'wt'}\n"
             if sub == "start-round":
-                if not self.judges:
-                    return 1, ""
-                n = len(self.state["rounds"]) + 1
-                self.state["rounds"].append(
-                    {
-                        "round": n,
-                        "reviewers": ["codex", "kiro"],
-                        "codex": {"intent": "REQUEST_CHANGES", "comments": 3, "review_url": "https://x/r1"},
-                        "kiro": {"intent": "APPROVE", "comments": 1},
-                    }
-                )
-                self.save()
-                return 0, f"ROUND={n}\nREVIEWERS='codex kiro'\nREVIEWERS_CSV=codex,kiro\n"
+                return self._start_round()
             if sub == "judge":
-                rc = self.judges.pop(0)
-                rc, out = rc if isinstance(rc, tuple) else (rc, "")
-                if rc == 0:
-                    self.state["final"] = "approved"
-                    self.save()
-                return rc, out
+                return self._judge()
             if sub == "check-oscillation":
                 return 2, ""
             if sub == "merge-fix":
@@ -156,6 +139,31 @@ class FakeReview:
         if name == "rotate-pr.sh" and args[0] == "execute":
             return 0, "NEW_PR=9\nNEW_PR_URL=https://x/9\nNEW_BRANCH=feat/x\n"
         return 0, ""
+
+    def _start_round(self):
+        """判定の残りがあれば次のラウンドを足して保存する。残りが無ければ 1。"""
+        if not self.judges:
+            return 1, ""
+        n = len(self.state["rounds"]) + 1
+        self.state["rounds"].append(
+            {
+                "round": n,
+                "reviewers": ["codex", "kiro"],
+                "codex": {"intent": "REQUEST_CHANGES", "comments": 3, "review_url": "https://x/r1"},
+                "kiro": {"intent": "APPROVE", "comments": 1},
+            }
+        )
+        self.save()
+        return 0, f"ROUND={n}\nREVIEWERS='codex kiro'\nREVIEWERS_CSV=codex,kiro\n"
+
+    def _judge(self):
+        """判定の結果を 1 つ消費する。通れば final を approved にして保存する。"""
+        rc = self.judges.pop(0)
+        rc, out = rc if isinstance(rc, tuple) else (rc, "")
+        if rc == 0:
+            self.state["final"] = "approved"
+            self.save()
+        return rc, out
 
 
 def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypatch, capsys):

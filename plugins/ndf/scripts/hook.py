@@ -3,6 +3,8 @@
 
     <hook の環境の python> hook.py [worktree-guard | token-guard | wait-notify] [--runtime claude|codex|kiro]
     <hook の環境の python> hook.py goal-skill  < UserPromptSubmit の JSON   # `/goal` の条件の Skill の案内（hook_lib/goal_skill.py）
+    python3 hook.py unattended-start|unattended-stop|unattended-end  < hook の JSON
+        # 人のいない実行（NDF_FACTORY_RUN）の印と区間の報告の差し戻し（hook_lib/unattended.py。#3242）
     <hook の環境の python> hook.py words     < コマンドの本文   # 語の分割（workflow-guard.sh の wf_split）
     <hook の環境の python> hook.py merge-target --base <宛先> [--root <dir>]
         # マージの宛先の判定（workflow-merge.sh の wf_check_merge。lib/delivery.py。1 行目が判定、2 行目が理由）
@@ -21,6 +23,7 @@
 | PreToolUse（AskUserQuestion。止めなかったとき）・Stop・Notification・PermissionRequest | 待ちの Slack 通知（`hook_lib/wait_notify.py`） |
 | userPromptSubmit（Kiro CLI） | worktree の guard の、パスを見ない案内 |
 | UserPromptSubmit（Claude Code。副命令 `goal-skill`） | `/goal /<プラグイン>:<Skill>` の条件の Skill を読み込む案内（`hook_lib/goal_skill.py`） |
+| UserPromptSubmit・Stop・SessionEnd（Claude Code。副命令 `unattended-*`。`NDF_FACTORY_RUN` があるときだけ） | 人のいない実行の印と、区間の報告の形に合わない最後の応答の差し戻し（`hook_lib/unattended.py`） |
 
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
@@ -38,7 +41,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "goal-skill", "words", "merge-target")
+UNATTENDED = ("unattended-start", "unattended-stop", "unattended-end")
+COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "goal-skill", "words", "merge-target", *UNATTENDED)
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
@@ -56,7 +60,7 @@ def _args(argv: list[str]) -> tuple[str, str]:
 
 def _merge(outs: list) -> dict | str | None:
     outs = [o for o in outs if o]
-    deny = next((o for o in outs if isinstance(o, dict) and o.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"), None)
+    deny = next((o for o in outs if _is_deny(o)), None)
     if deny is not None:
         return deny
     if len(outs) <= 1:
@@ -83,6 +87,8 @@ def _merge_top_level(outs: list) -> dict:
 
 
 def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
+    if command in UNATTENDED:  # guard と待ち通知を通さず、部品の出力 1 つを返す（標準ライブラリだけの経路。#3242）
+        return _unattended(command, raw)
     from hook_lib import payload as pl
 
     if command == "wait-notify":
@@ -93,8 +99,7 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     if command == "goal-skill":  # _merge を通さず、自分の出力 1 つを返す（hookEventName を UserPromptSubmit に保つ）
         from hook_lib import goal_skill
 
-        text = goal_skill.context(raw)
-        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+        return _prompt_context(goal_skill.context(raw))
     if raw is None:
         return None
     ev = pl.event_of(raw)
@@ -107,8 +112,37 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     return _merge(outs)
 
 
+def _prompt_context(text: str | None) -> dict | None:
+    """UserPromptSubmit の案内の出力（`additionalContext`）。案内が無ければ None。"""
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+
+
+def _unattended(command: str, raw: dict | None) -> dict | None:
+    """人のいない実行の hook（`hook_lib/unattended.py`）。失敗は標準エラーへ 1 行残して通す（#3242 の I9）。"""
+    if raw is None:
+        return None
+    import time
+
+    from hook_lib import unattended
+
+    try:
+        if command == "unattended-start":
+            return _prompt_context(unattended.mark_session(raw, time.time()))
+        if command == "unattended-stop":
+            return unattended.review_stop(raw)
+        unattended.clear_mark(raw)
+    except Exception as e:  # noqa: BLE001 — 印の読み書きの失敗で Stop と UserPromptSubmit を止めない
+        print(f"ndf: {command}: {type(e).__name__}", file=sys.stderr)
+    return None
+
+
+def _is_deny(o) -> bool:
+    """guard の出力 1 つが拒否（hookSpecificOutput.permissionDecision == "deny"）か。"""
+    return isinstance(o, dict) and (o.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+
+
 def _denied(outs: list) -> bool:
-    return any(isinstance(o, dict) and (o.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny" for o in outs)
+    return any(map(_is_deny, outs))
 
 
 def _guards(command: str, runtime: str, ev, outs: list) -> None:
@@ -122,22 +156,10 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
 
     dl = deadline.Deadline()
     dl.start()
-    is_claude_pretool = not command and runtime == "claude" and ev.event == "PreToolUse"
     try:
-        if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
-            _run_guard(dl, "worktree-guard", _worktree_guard, ev, outs)
-        if command == "token-guard" or is_claude_pretool:
-            _run_guard(dl, "token-guard", _token_guard, ev, outs)
-        if is_claude_pretool and ev.tool in ("Agent", "Task"):
-            _run_guard(dl, "worker-skills", _worker_skills_guard, ev, outs)
-        if is_claude_pretool and ev.tool in ("Read", "Bash"):
-            _run_guard(dl, "supervisor-docs", _supervisor_docs_guard, ev, outs)
-        if not command and runtime in ("claude", "codex") and ev.event == "PreToolUse" and ev.tool_kind == "shell":
-            _run_guard(dl, "ci-test-guard", _ci_test_guard, ev, outs)
-        if is_claude_pretool and ev.tool == "Bash":
-            _run_guard(dl, "issue-guard", _issue_guard, ev, outs)
-        if is_claude_pretool and ev.tool == "AskUserQuestion":
-            _run_guard(dl, "ask-guard", _ask_guard, ev, outs)
+        for name, applies, guard in GUARDS:
+            if applies(command, runtime, ev):
+                _run_guard(dl, name, guard, ev, outs)
     except deadline.HookDeadlineExceeded as e:
         print(dl.notice(e.name), file=sys.stderr)
     finally:
@@ -162,22 +184,24 @@ def _token_guard(ev) -> list:
     return [token_guard.decision(ev)] if ev.tool in token_guard.TOOLS else []
 
 
+def _decision_or_pass(decide, ev) -> list:
+    """判定を 1 本打ち、出力を要素 1 個の並びにする。判定の途中の失敗（Exception）は空の並びにして通す。"""
+    try:
+        return [decide(ev)]
+    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
+        return []
+
+
 def _worker_skills_guard(ev) -> list:
     from hook_lib import worker_skills
 
-    try:
-        return [worker_skills.skills_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(worker_skills.skills_decision, ev)
 
 
 def _supervisor_docs_guard(ev) -> list:
     from hook_lib import supervisor_docs
 
-    try:
-        return [supervisor_docs.docs_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(supervisor_docs.docs_decision, ev)
 
 
 def _ci_test_guard(ev) -> list:
@@ -193,16 +217,37 @@ def _ci_test_guard(ev) -> list:
 def _issue_guard(ev) -> list:
     from hook_lib import issue_guard
 
-    try:
-        return [issue_guard.issue_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(issue_guard.issue_decision, ev)
 
 
 def _ask_guard(ev) -> list:
     from hook_lib import ask_guard
 
     return [ask_guard.ask_decision(ev)]
+
+
+def _is_claude_pretool(command: str, runtime: str, ev) -> bool:
+    return not command and runtime == "claude" and ev.event == "PreToolUse"
+
+
+# guard の表（名前・掛かる条件・guard）。並びが打つ順で、締め切りを過ぎたら後ろを飛ばす
+GUARDS = (
+    (
+        "worktree-guard",
+        lambda c, r, ev: c in ("", "worktree-guard") and bool(ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")),
+        _worktree_guard,
+    ),
+    ("token-guard", lambda c, r, ev: c == "token-guard" or _is_claude_pretool(c, r, ev), _token_guard),
+    ("worker-skills", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool in ("Agent", "Task"), _worker_skills_guard),
+    ("supervisor-docs", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool in ("Read", "Bash"), _supervisor_docs_guard),
+    (
+        "ci-test-guard",
+        lambda c, r, ev: not c and r in ("claude", "codex") and ev.event == "PreToolUse" and ev.tool_kind == "shell",
+        _ci_test_guard,
+    ),
+    ("issue-guard", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool == "Bash", _issue_guard),
+    ("ask-guard", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool == "AskUserQuestion", _ask_guard),
+)
 
 
 def _opt(argv: list[str], name: str) -> str | None:
