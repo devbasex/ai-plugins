@@ -234,7 +234,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `identity.load()` | 読み取り | 環境変数 `CLAUDE_PLUGIN_ROOT`（無ければ `__file__` から 3 つ上） | `PluginIdentity` | 無し | `plugin.json` の `name` を読む。`prefix` は `name + ":"` |
 | `identity.prepare_state_dir(ident)` | 書き込み | 識別子 | 状態の置き場のパス | 旧い置き場の名前を変える・新しい置き場を作る | 置き場に `format.json` が無く、ほかのファイルがあれば、`<name>.v10-<日付>` へ名前を変えてから作り直す |
 | `invoke.resolve_inputs(stage, context)` | 純粋な関数 | 工程の定義（`metadata.ndf.inputs` の鍵の列）と文脈 | 引数の辞書 | 無し | 鍵が文脈に無ければ `StageInputMissing(key)` を投げる |
-| `invoke.invoke(stage, context, cwd)` | 外部呼び出し | 工程・文脈・作業ディレクトリ | `StageResult`（統一 JSON レポート＋`outputs`） | 作業（プラン・LLM・子プロセス）を起動する | `kind` ごとに呼び分ける（`plan` はプランの実行、`skill` は LLM の起動、`script` は子プロセス） |
+| `invoke.invoke(stage, context, cwd)` | 外部呼び出し | 工程・文脈・作業ディレクトリ | `StageResult`（結果 JSON＋`outputs`） | 作業（プラン・LLM・子プロセス）を起動する | `kind` ごとに呼び分ける（`plan` はプランの実行、`skill` は LLM の起動、`script` は子プロセス） |
 | `invoke.record_outputs(table, row, result)` | 書き込み | 進行表・行・結果 | 無し | 進行表へ事象を 1 件追記する | 事象 `outputs_recorded` を 1 件追記する。鍵は工程の定義の `outputs` に列挙したものだけ |
 
 ## 異常系の処理
@@ -244,7 +244,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `identity.load()` | `plugin.json` が読めない | 起動を止める（終了コードは止まった理由の表の `config_broken`） |
 | `identity.prepare_state_dir(ident)` | 旧い状態の置き場の退避先が既にある | 日付に時刻を足した名前で退避する。消さない |
 | `invoke.invoke(stage, context, cwd)` | 文脈に入力の鍵が無い | 行を始めない。止まった理由 `input_missing` と、足りない鍵を返す |
-| `invoke.invoke(stage, context, cwd)` | 作業が統一 JSON レポートを返さない | 行を失敗にし、止まった理由 `bad_report` を返す |
+| `invoke.invoke(stage, context, cwd)` | 作業が結果 JSON を返さない | 行を失敗にし、止まった理由 `bad_report` を返す |
 | `invoke.record_outputs(table, row, result)` | 工程の定義に無い鍵を作業が出力した | 書かずに捨て、結果の `warnings` に載せる |
 | 工程の定義の登録（P1） | 同じ範囲を 2 つの工程が受け持つ | 登録で断る（#3092 の順序の決まりに足す） |
 
@@ -274,7 +274,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 | 出力 | 形 |
 | --- | --- |
-| 各副命令の結果 | 統一 JSON レポートを標準出力へ 1 行（今の NDF と同じ規約） |
+| 各副命令の結果 | 結果 JSON を標準出力へ 1 行（今の NDF と同じ規約） |
 | 状態の置き場の退避 | 結果の `items` に退避先のパスを載せる |
 | 工程の出力 | 進行表の事象 `outputs_recorded`（宣言した鍵だけ） |
 
