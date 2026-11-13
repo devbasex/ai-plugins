@@ -236,6 +236,7 @@ def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -
         monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / f"{channel}-{cd}.json"
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel]
+    args += ["--state", str(tmp_path / "state.json")] if cd and channel == "prod" else []  # approve-pr --by user が承認の記録を読む
     p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=SUPERVISE.parents[3])
     assert p.returncode == 0, p.stdout + p.stderr
     return json.loads(out.read_text(encoding="utf-8"))
@@ -298,7 +299,7 @@ def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp
 
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / "plan.json"
-    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    extra = ["--mvv" if mvv else "--state", str(tmp_path / "state.json")]
     args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
     p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
     assert p.returncode == 0, p.stdout + p.stderr
