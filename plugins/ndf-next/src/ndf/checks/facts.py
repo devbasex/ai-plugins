@@ -55,18 +55,20 @@ def lit(node: ast.expr) -> object:
     return lit(node.args[0]) if is_set_call and len(node.args) == 1 else None
 
 
+def _targets(node: ast.stmt) -> list[ast.expr]:
+    """文が値を代入する先。代入（`Assign`）と値のある注釈付きの代入（`AnnAssign`）のほかは空。"""
+    if isinstance(node, ast.Assign):
+        return node.targets
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return [node.target]
+    return []
+
+
 def consts(tree: ast.Module, rel: str) -> list[Const]:
     """モジュールの最上位の大文字の定数のうち、`lit` が読めたもの。"""
     found = []
     for node in tree.body:
-        targets = (
-            node.targets
-            if isinstance(node, ast.Assign)
-            else [node.target]
-            if isinstance(node, ast.AnnAssign) and node.value is not None
-            else []
-        )
-        names = [t.id for t in targets if isinstance(t, ast.Name) and CONST.match(t.id)]
+        names = [t.id for t in _targets(node) if isinstance(t, ast.Name) and CONST.match(t.id)]
         value = lit(node.value) if names else None
         found += [Const(rel, node.lineno, n, value) for n in names if value is not None]
     return found
