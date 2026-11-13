@@ -20,6 +20,7 @@ from jsonschema.exceptions import SchemaError
 
 from ndf.checks.model import CheckError, Finding, Scope
 from ndf.contracts.facts import FACTS_DIR, SCHEMA_FILE, TABLE_DIRS
+from ndf.contracts.facts import row_schema as contract_row_schema
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
@@ -125,16 +126,11 @@ def table_validator(schema_path: Path) -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-def _column_schema(decl: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "array", "items": {"type": "string"}} if decl["type"] == "array" else {"type": decl["type"]}
-
-
 def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """列の宣言から行の形を作る。宣言に無い列を持たず、`optional` でない列を欠かず、列の型に合う。"""
-    props = {name: _column_schema(decl) for name, decl in columns.items()}
-    props["id"] = {"type": "string"}
-    required = ["id", *(name for name, decl in columns.items() if name != "id" and decl.get("optional") is not True)]
-    return {"type": "object", "required": required, "properties": props, "additionalProperties": False}
+    """列の宣言から作る行の形（`ndf.contracts.facts.row_schema`）。`id` は列の宣言によらず文字列だけを求める。"""
+    schema = contract_row_schema(columns)
+    schema["properties"]["id"] = {"type": "string"}
+    return schema
 
 
 def shape_errors(data: object, common: Draft202012Validator) -> list[str]:
