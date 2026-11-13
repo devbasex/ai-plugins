@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from functools import cache
 from typing import Any, NamedTuple
 
@@ -50,19 +49,13 @@ def _row_errors(raw: dict[str, Any], where: str) -> None:
             raise FactsError(f"事実の表 {where} の行 {i}（{row.get('id')!r}）の形が違う: {'; '.join(bad)}")
 
 
-def _duplicate_ids(rows: list[dict[str, Any]]) -> list[str]:
-    """2 回以上現れる `id`（辞書順）。"""
-    counts = Counter(r["id"] for r in rows)
-    return sorted(i for i, n in counts.items() if n > 1)
-
-
 def _validate(raw: Any, name: str) -> Table:
     where = f"{FACTS_DIR}/{name}.json"
     errs = contracts.schema_errors(raw, SCHEMA)
     if errs:
         raise FactsError(f"事実の表 {where} の形が違う: {'; '.join(errs)}")
     _row_errors(raw, where)
-    dup = _duplicate_ids(raw["rows"])
+    dup = contracts.duplicates(r["id"] for r in raw["rows"])
     if dup:
         raise FactsError(f"事実の表 {where} に同じ id が 2 つある: {', '.join(dup)}")
     return Table(name, raw["summary"], raw["owner"], dict(raw["columns"]), tuple(raw["rows"]))

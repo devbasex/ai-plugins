@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
@@ -47,9 +48,13 @@ def on_reset(clear) -> None:
     _clearers.append(clear)
 
 
+def duplicates(values: Iterable[Any]) -> list:
+    """2 回以上現れる値（昇順）。"""
+    return sorted(v for v, n in Counter(values).items() if n > 1)
+
+
 def _refuse_duplicate_keys(pairs: list) -> dict:
-    keys = [k for k, _ in pairs]
-    dup = sorted({k for k in keys if keys.count(k) > 1})
+    dup = duplicates(k for k, _ in pairs)
     if dup:
         raise ContractError(f"同じキーが 2 つある: {', '.join(dup)}")
     return dict(pairs)
