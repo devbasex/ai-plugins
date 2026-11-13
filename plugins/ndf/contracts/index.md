@@ -307,10 +307,10 @@
 | `relay.login-exit` | seconds 60 | ログインの 2 回目が待機中のログインの終了を待つ上限 | `plugins/ndf/scripts/relay_lib/login.py:<module>` |
 | `relay.login-url` | seconds 30 | ログインの 1 回目が認可の URL を待つ上限 | `plugins/ndf/scripts/relay_lib/login.py:<module>` |
 | `relay.runtime-install` | seconds 600 | ラッパーの実行環境を用意するコマンドの上限 | `plugins/ndf/scripts/relay_lib/runtime.py:sync` |
-| `release-steps.ci-wait` | seconds 3600 / interval 15 | CD のある場合の本番の PR で、証跡のチェックを除くチェックを読み直す間隔。上限は --ci-wait で渡す | `plugins/ndf/scripts/release_lib/reviewed.py:wait_ci_except` |
-| `release-steps.dev-workflow` | seconds 3900 / interval 15 | 開発版の workflow の実行の終わりを待つ上限と間隔（CI の待ち 3600 秒に起動の遅れを足す） | `plugins/ndf/scripts/release_lib/reviewed.py:release_dev_by_workflow` |
+| `release-steps.ci-wait` | seconds 3600 / interval 15 | CD のある場合の本番の PR で、証跡のチェックを除くチェックを読み直す間隔。上限は --ci-wait で渡す（#2773） | `plugins/ndf/scripts/release_lib/reviewed.py:wait_ci_except` |
+| `release-steps.dev-workflow` | seconds 3900 / interval 15 | 開発版の workflow の実行の終わりを待つ上限と間隔（CI の待ち 3600 秒に起動の遅れを足す。#2773） | `plugins/ndf/scripts/release_lib/reviewed.py:release_dev_by_workflow` |
 | `release-steps.head-moved` | attempts 4 | 先端が動いたときに比べ直して入れ直す回数（最初の 1 回を含む） | `plugins/ndf/scripts/release-steps.py:<module>` |
-| `release-steps.trail-status` | seconds 600 / interval 10 | 承認の証跡を置いた後に、証跡のチェック（ndf/release-approval）が success になるまで待つ上限と間隔 | `plugins/ndf/scripts/release_lib/promotion.py:_merge_exact`<br>`plugins/ndf/scripts/release_lib/reviewed.py:release_prod`<br>`plugins/ndf/scripts/release_lib/reviewed.py:wait_trail_status` |
+| `release-steps.trail-status` | seconds 600 / interval 10 | 承認の証跡を置いた後に、証跡のチェック（ndf/release-approval）が success になるまで待つ上限と間隔（#2773） | `plugins/ndf/scripts/release_lib/promotion.py:_merge_exact`<br>`plugins/ndf/scripts/release_lib/reviewed.py:release_prod`<br>`plugins/ndf/scripts/release_lib/reviewed.py:wait_trail_status` |
 | `release-verification-steps.env-i` | seconds 600 | リリース後テストの素の環境のコマンドの上限 | `plugins/ndf/scripts/release-verification-steps.py:run_env_i` |
 | `release.cd-poll` | interval 15 | CD の結果の照会の間隔（#2623。GitHub の実行の状態は秒単位で変わらない） | `plugins/ndf/scripts/release_lib/cd_result.py:<module>` |
 | `release.declared-step` | seconds 600 | 宣言したリリースの手順のコマンドの上限の既定 | `plugins/ndf/scripts/release_lib/declared_steps.py:<module>` |
