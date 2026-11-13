@@ -28,7 +28,6 @@ SUBCOMMANDS = [
     "wait",
     "advance",
     "design-glossary",
-    "design-results",
     "design-approved",
     "note",
     "sync-check",

@@ -19,7 +19,7 @@ MODE = "forward"  # "forward"（受け付ける）か "refuse"（やめる）
 
 # 引数と選択肢: 入口ごとに (旧名の語の並び, 新しい名前の語の並び)
 ARGS: dict[str, tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]] = {
-    "supervise.py": ((("new", "mission"), ("new", "sprint")), (("--mission",), ("--sprint",))),
+    "supervise.py": ((("--mission",), ("--sprint",)),),
     "mvv-gate.py": ((("--mission",), ("--sprint",)),),
     "project-mvv.py": ((("--mission",), ("--sprint",)), (("--kind", "mission"), ("--kind", "sprint"))),
 }

@@ -1,6 +1,6 @@
 """旧名の呼び方（#1407 の AC4・AC5・AC7・I1〜I4・I6）。旧名の受け付けをやめる課題は、このファイルを「断る」テストへ書き換える。
 
-- 旧名の入口（`new mission`・`--mission`・`--kind mission`・旧名のスクリプト）は新しい名前と同じ結果を返し、案内を 1 行出す
+- 旧名の入口（`--mission`・`--kind mission`・旧名のスクリプト）は新しい名前と同じ結果を返し、案内を 1 行出す
 - `MODE` が `refuse` なら、新しい名前を示して終了コード 2 で止まり、何も書かない
 - 改名の前のプランのキー・記録のキー・ブランチの頭・記録の行の見出しを読み、旧名のファイルを書き換えない
 - 旧名の文字列は表（`lib/legacy_names.py`）と旧名の入口とこのファイルの外に無い
@@ -72,7 +72,7 @@ def test_new_check_with_mission_is_the_same_as_with_sprint(tmp_path):
         ("project-mvv.py", ["vet", "--body", "b.md", "--kind", "mission"], ["vet", "--body", "b.md", "--kind", "sprint"]),
         ("project-mvv.py", ["vet", "--kind=mission"], ["vet", "--kind=sprint"]),
         ("project-mvv.py", ["context", "--mission", "s.json"], ["context", "--sprint", "s.json"]),
-        ("supervise.py", ["new", "mission", "--name", "mission"], ["new", "sprint", "--name", "mission"]),
+        ("supervise.py", ["new", "check", "--mission", "s.json"], ["new", "check", "--sprint", "s.json"]),
     ],
 )
 def test_rewrite_argv_replaces_old_names_and_tells_once_each(entry, argv, want, capsys):
