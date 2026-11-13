@@ -112,10 +112,16 @@ def cause(kind: str, detail: str, *, instance: Optional[str] = None, retry_after
     return out
 
 
+def kind_of(value: object) -> Optional[str]:
+    """`cause` の値の種類。dict で kind が文字列ならそれ、ほかは None。"""
+    kind = value.get("kind") if isinstance(value, dict) else None
+    return kind if isinstance(kind, str) else None
+
+
 def kind_errors(value: object) -> list[str]:
     """`cause.kind` が文字列なのに止まった理由の表に無いときの 1 行。形の誤りはスキーマが報告する。"""
-    kind = value.get("kind") if isinstance(value, dict) else None
-    if isinstance(kind, str) and kind not in table():
+    kind = kind_of(value)
+    if kind is not None and kind not in table():
         return [f"cause.kind {kind!r} は止まった理由の表に無い"]
     return []
 

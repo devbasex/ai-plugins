@@ -78,9 +78,8 @@ def code_for(obj: Any) -> Optional[int]:
     if status in (OK, GATE):
         return exit_codes.first_code(status)
     if status == STOPPED:
-        c = obj.get("cause")
-        kind = c.get("kind") if isinstance(c, dict) else None
-        if isinstance(kind, str) and kind in causes.table():
+        kind = causes.kind_of(obj.get("cause"))
+        if kind is not None and kind in causes.table():
             return causes.exit_code(kind)
     return None
 
