@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+from types import ModuleType
+
 import pytest
 
 from ndf.core import loop
 from ndf.core.loop import DecideLoopError, Next
 
 
-def count_to_three(state: tuple[int, ...], result: int | None) -> Next[int, tuple[int, ...]]:
-    seen = state if result is None else (*state, result)
-    if len(seen) == 3:
-        return Next.finish(seen)
-    return Next.step(len(seen) + 1, seen)
+def _load_counting() -> ModuleType:
+    """隣の _counting.py を読む（importlib のモードでは隣のモジュールを名前で import できない）。"""
+    spec = importlib.util.spec_from_file_location("_counting", Path(__file__).with_name("_counting.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+decide = _load_counting().decide
 
 
 def test_run_alternates_decide_and_perform_until_finish():
@@ -22,7 +31,7 @@ def test_run_alternates_decide_and_perform_until_finish():
         performed.append(act)
         return act * 10
 
-    assert loop.run(count_to_three, perform, ()) == (10, 20, 30)
+    assert loop.run(decide, perform, []) == [10, 20, 30]
     assert performed == [1, 2, 3]
 
 
@@ -64,4 +73,4 @@ def test_perform_exception_propagates_unwrapped():
         raise Boom(act)
 
     with pytest.raises(Boom):
-        loop.run(count_to_three, perform, ())
+        loop.run(decide, perform, [])

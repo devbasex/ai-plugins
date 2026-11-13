@@ -11,18 +11,12 @@ import os
 import sys
 from pathlib import Path
 
+from _counting import decide
+
 from ndf.core import durable, loop
-from ndf.core.loop import Next
 
 DB_URL, WORKFLOW_ID, LOG, CRASH_AT = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4])
 EXECUTOR = "crash-test"
-
-
-def decide(state: list[int], result: int | None) -> Next[int, list[int]]:
-    seen = state if result is None else [*state, result]
-    if len(seen) == 3:
-        return Next.finish(seen)
-    return Next.step(len(seen) + 1, seen)
 
 
 @durable.step

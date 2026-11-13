@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from ndf.core import durable, loop
-from ndf.core.loop import Next
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 SRC = PLUGIN_ROOT / "src"
@@ -20,11 +21,16 @@ CRASH_SCRIPT = Path(__file__).with_name("_durable_crash.py")
 performed: list[int] = []
 
 
-def decide(state: list[int], result: int | None) -> Next[int, list[int]]:
-    seen = state if result is None else [*state, result]
-    if len(seen) == 3:
-        return Next.finish(seen)
-    return Next.step(len(seen) + 1, seen)
+def _load_counting() -> ModuleType:
+    """隣の _counting.py を読む（importlib のモードでは隣のモジュールを名前で import できない）。"""
+    spec = importlib.util.spec_from_file_location("_counting", Path(__file__).with_name("_counting.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+decide = _load_counting().decide
 
 
 @durable.step
