@@ -1665,14 +1665,18 @@ def assert_plan_transitions_valid(manifest):
     """マニフェストの全プランで、next / on_fail / skip_to と choices の行き先が同じプランの工程か終端を指す。"""
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
-            plan = json.loads(Path(path).read_text())
-            steps = {s["id"]: s for s in plan["steps"]}
-            for s in plan["steps"]:
-                for k in ("next", "on_fail", "skip_to"):
-                    if k in s:
-                        assert s[k] in steps or s[k] == "end", (path, s)
-                for c in s.get("choices", []):
-                    assert c in steps or c in ("stop", "gate"), (path, c)
+            assert_plan_targets_valid(json.loads(Path(path).read_text()), path)
+
+
+def assert_plan_targets_valid(plan: dict, path: str) -> None:
+    """1 プランで、next / on_fail / skip_to は同じプランの工程か end、choices は工程か stop / gate を指す。誤りには `path` を添える。"""
+    steps = {s["id"]: s for s in plan["steps"]}
+    for s in plan["steps"]:
+        for k in ("next", "on_fail", "skip_to"):
+            if k in s:
+                assert s[k] in steps or s[k] == "end", (path, s)
+        for c in s.get("choices", []):
+            assert c in steps or c in ("stop", "gate"), (path, c)
 
 
 def assert_design_plan(design: dict) -> None:
