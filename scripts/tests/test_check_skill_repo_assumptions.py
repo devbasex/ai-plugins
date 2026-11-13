@@ -383,8 +383,13 @@ def test_detects_word_in_hook_definition(tmp_path: Path) -> None:
     [
         ("quoted-main", 'BASE = "main"'),
         ("quoted-main", "BASE = 'main'"),
+        ("quoted-main", 'BASE = "master"'),
+        ("quoted-main", "BASE = 'master'"),
         ("quoted-develop", 'BASE = "develop"'),
+        ("origin-main", 'BASE = "origin/main"'),
+        ("origin-main", "git diff origin/master"),
         ("base-main", "gh pr create --base main"),
+        ("base-main", "gh pr create --base master"),
         ("base-main", "gh pr create --base=main"),
         ("admin-merge", "gh pr merge --admin"),
         ("tag-form", 'TAG = f"{plugin}--v{version}"'),
@@ -420,6 +425,39 @@ def test_each_word_fails_a_new_file(tmp_path: Path, word_id: str, line: str) -> 
 def test_near_words_do_not_hit(tmp_path: Path, line: str) -> None:
     skills = clean_tree(tmp_path)
     write_script(skills, "new_file.py", line + "\n")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 0, output_of(result)
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["for c in main master; do", "git checkout develop", "BASE=main", "git push origin master || true"],
+)
+def test_shell_word_fails_a_new_shell_script(tmp_path: Path, line: str) -> None:
+    """#3309: 引用符の無いシェルの単語として書いたブランチ名を拾う。"""
+    skills = clean_tree(tmp_path)
+    path = write_script(skills, "new_file.sh", line + "\n")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 1, output_of(result)
+    assert "scripts/new_file.sh:1:" in output_of(result)
+    count = len(re.findall(r"\b(?:main|master|develop)\b", line))
+    assert run_check(skills, [allow_row(path.as_posix(), "shell-branch-word", count=count)], tmp_path).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["# main / master の順で探す", "main() { :; }", "wt_main_dir=1", 'echo "$domain"', "./maintain.sh"],
+)
+def test_near_shell_words_do_not_hit(tmp_path: Path, line: str) -> None:
+    skills = clean_tree(tmp_path)
+    write_script(skills, "new_file.sh", line + "\n")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_shell_words_are_not_applied_to_python(tmp_path: Path) -> None:
+    skills = clean_tree(tmp_path)
+    write_script(skills, "new_file.py", "for c in main, master:\n    pass\n")
     result = run_check(skills, [], tmp_path)
     assert result.returncode == 0, output_of(result)
 

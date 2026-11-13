@@ -3,5 +3,5 @@
   "name": "quoted-main",
   "kind": "not-a-violation",
   "reason": "ブランチ名の既定値と測る候補の唯一の置き場（#3121 の受け入れ条件 7）。宣言（.ndf/worktree.json）が無いときの既定ブランチの候補と、project-decl.py measure が測る候補だけをここに置く",
-  "count": 2
+  "count": 4
 }

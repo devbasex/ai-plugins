@@ -14,7 +14,7 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 family の `scripts/` の下のスクリプト（`.py` / `.sh` / `.js`）、`hooks/*.json`、`agents/*.md`（エージェントの本文。
 Markdown と同じ語を掛ける。#3121）である。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
-DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛ける。プロジェクトごとに違うものは
+DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛け、シェルのスクリプトには SHELL_WORDS も掛ける。プロジェクトごとに違うものは
 `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も持たない
 Skill があるときは、チェック自体を失敗させる**。読み飛ばすと、公開する Skill の本文が丸ごと
 未走査のままチェックが成功する。
@@ -98,9 +98,12 @@ SCRIPT_WORDS: dict[str, str] = {
     "check-doc-line-limit": r"check-doc-line-limit",
     "runtime-list": r"claude,codex,kiro",
     "origin-develop": r"origin/develop",
-    "quoted-main": r"[\"']main[\"']",
+    # 特定のブランチ名の決め打ち（#3309）。引用符の有無・`origin/` の付いた形を問わず拾う。名前は宣言か
+    # `lib/branch_flow.py` の定数から読む
+    "origin-main": r"origin/(?:main|master)\b",
+    "quoted-main": r"[\"'](?:main|master)[\"']",
     "quoted-develop": r"[\"']develop[\"']",
-    "base-main": r"--base[ =]main\b",
+    "base-main": r"--base[ =](?:main|master)\b",
     "admin-merge": r"--admin\b",
     "tag-form": r"--v(?![A-Za-z-])",
     "release-branch": r"release/v(?![a-z])",
@@ -108,7 +111,13 @@ SCRIPT_WORDS: dict[str, str] = {
     "spec-dir": r"docs/specifications",
     "pytest": r"\bpytest\b",
 }
-KNOWN_WORDS = frozenset(DOC_WORDS) | frozenset(SCRIPT_WORDS)
+
+# シェルのスクリプト（`.sh`）にだけ掛ける語。引用符の無い単語の並び（`for c in main master` など）で書いた
+# ブランチ名を拾う。Python の `main` は関数名になるので掛けない。行頭が `#` のコメントの行は見ない
+SHELL_WORDS: dict[str, str] = {
+    "shell-branch-word": r"(?<![^\s(=|;&])(?:main|master|develop)(?![^\s);|&])",
+}
+KNOWN_WORDS = frozenset(DOC_WORDS) | frozenset(SCRIPT_WORDS) | frozenset(SHELL_WORDS)
 
 
 def compile_words(words: dict[str, str]) -> list[tuple[str, re.Pattern[str]]]:
@@ -117,6 +126,8 @@ def compile_words(words: dict[str, str]) -> list[tuple[str, re.Pattern[str]]]:
 
 DOC_MATCHERS = compile_words(DOC_WORDS)
 SCRIPT_MATCHERS = compile_words(SCRIPT_WORDS)
+SHELL_MATCHERS = compile_words(SHELL_WORDS)
+SHELL_SUFFIX = ".sh"
 SCRIPT_SUFFIXES = (".py", ".sh", ".js")
 SKIP_DIRS = frozenset({"tests", "experimental"})
 
@@ -235,15 +246,18 @@ def collect_agents(skills_dir: pathlib.Path) -> list[str]:
     return [path.name for path in sorted(root.glob("*.md"))] if root.is_dir() else []
 
 
-def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
+def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]], *, skip_comments: bool = False) -> list[Hit]:
     """走査対象の本文からヒットを集める。語ごとに照合するので、同じ行の 2 語は別のヒットになる。
 
-    語の和で先に行を絞る。ほとんどの行に語が無く、語ごとの照合を全行へ掛けると CI の待ちが延びる。"""
+    語の和で先に行を絞る。ほとんどの行に語が無く、語ごとの照合を全行へ掛けると CI の待ちが延びる。
+    `skip_comments` が真なら、行頭（空白を除く）が `#` の行を見ない。"""
     any_word = re.compile("|".join(regex.pattern for _, regex in matchers))
     hits: list[Hit] = []
     for rel in rels:
         text = (base / rel).read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
+            if skip_comments and line.lstrip().startswith("#"):
+                continue
             if not any_word.search(line):
                 continue
             for word_id, regex in matchers:
@@ -346,6 +360,8 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     hits = scan(skills_dir, docs, DOC_MATCHERS)
     hits += scan(scripts_dir, scripts, SCRIPT_MATCHERS)
     hits += scan(skills_dir, skill_scripts, SCRIPT_MATCHERS)
+    hits += scan(scripts_dir, [r for r in scripts if r.endswith(SHELL_SUFFIX)], SHELL_MATCHERS, skip_comments=True)
+    hits += scan(skills_dir, [r for r in skill_scripts if r.endswith(SHELL_SUFFIX)], SHELL_MATCHERS, skip_comments=True)
     hits += scan(hooks_dir, hooks, SCRIPT_MATCHERS)
     hits += scan(agents_dir, agents, DOC_MATCHERS)
     report_line = (
