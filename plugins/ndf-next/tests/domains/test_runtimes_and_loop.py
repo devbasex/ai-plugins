@@ -45,7 +45,9 @@ def test_loop_phases_follow_the_monitor_policies():
 
 
 def test_loop_phase_columns_nest():
-    ids = {col: set(facts.ids(LOOP, **{col: True})) for col in ("launch", "coding", "fix", "alive", "reassign", "relaunch_in_place", "undo")}
+    ids = {
+        col: set(facts.ids(LOOP, **{col: True})) for col in ("launch", "coding", "fix", "alive", "reassign", "relaunch_in_place", "undo")
+    }
     assert ids["fix"] <= ids["coding"] <= ids["launch"]
     assert ids["undo"] <= ids["relaunch_in_place"] <= ids["reassign"] <= ids["launch"]
     assert ids["alive"] <= ids["launch"]
@@ -63,6 +65,13 @@ def test_severities_rank_in_row_order_and_blocking_is_the_heavy_end():
 
 def test_ci_outcomes_have_one_failed_set():
     # 取り消しは Runner の有無で失敗か基盤待ちに分かれるため、失敗の集合に入れず別の結果にする
-    assert set(facts.ids("ci-outcomes", outcome="failed")) == {"failure", "error", "timed_out", "action_required", "startup_failure", "stale"}
+    assert set(facts.ids("ci-outcomes", outcome="failed")) == {
+        "failure",
+        "error",
+        "timed_out",
+        "action_required",
+        "startup_failure",
+        "stale",
+    }
     assert facts.ids("ci-outcomes", outcome="cancelled") == ("cancelled",)
     assert set(facts.column("ci-outcomes", "outcome").values()) == {"passed", "failed", "pending", "cancelled"}

@@ -137,7 +137,10 @@ def test_same_name_in_both_places_is_refused(contracts_copy, fact_table):
 
 
 def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
-    columns = {"seat": {"type": "string", "summary": "s", "ref": "facts/runtimes"}, "next": {"type": "string", "summary": "n", "ref": "domains/runtimes"}}
+    columns = {
+        "seat": {"type": "string", "summary": "s", "ref": "facts/runtimes"},
+        "next": {"type": "string", "summary": "n", "ref": "domains/runtimes"},
+    }
     contracts_copy("domains/sample.json", lambda _: fact_table(columns, [{"id": "a", "seat": "claude", "next": "nobody"}]))
     errs = facts.ref_errors("sample", set())
     assert len(errs) == 2
