@@ -9,6 +9,10 @@
 行を 1 つ足す。
 
 特定のブランチ名（既定ブランチの候補・測る候補）は、このモジュールの定数だけに置く（受け入れ条件 7）。
+
+レビューの単位（`branch_flow.reviews`。#3163）は、PR の種類ごとに掛けるレビュー（`checks`）と対象の差分（`diff`）を持つ。
+許す値は `REVIEW_ALLOWED`、書いていない種類の値は `REVIEW_DEFAULTS`（課題のまとまりの記録の有無で 2 列）の 1 か所に置き、
+スキーマ・読み分け・測定はそこから作る。
 """
 
 from __future__ import annotations
@@ -42,13 +46,17 @@ INTEGRATE_POINTS = {"check": "base"}
 
 
 class FlowError(ValueError):
-    """宣言の形の誤り・取り込み方の表に合わない組（I1）。`items` は直すキーと許す値の並び。"""
+    """宣言の形の誤り・取り込み方の表に合わない組（I1）。`items` は直すキーと許す値の並び。理由（`because`）があれば添える。"""
 
     def __init__(self, items: list[dict]):
         self.items = items
         super().__init__(
-            "・".join(f"{DECL_KEY}.{i['key']} = {i['value']!r}（許す値: {', '.join(i['allowed'])}）" for i in items)
-            + f" — .ndf/worktree.json の {DECL_KEY} を直す"
+            "\n".join(
+                f"{DECL_KEY}.{i['key']} = {i['value']!r}（許す値: {', '.join(i['allowed'])}）"
+                + (f"（理由: {i['because']}）" if i.get("because") else "")
+                for i in items
+            )
+            + f"\n— .ndf/worktree.json の {DECL_KEY} を直す"
         )
 
 
@@ -181,6 +189,163 @@ PROMOTIONS: dict[str, Promotion] = {
 DEFAULT = {"start": "base", "integrate": "check", "doc_prs": "base", "promotion": "whole"}
 KEYS = tuple(DEFAULT)
 
+# --- レビューの単位（#3163） ---------------------------------------------------------------
+REVIEWS_KEY = "reviews"
+# PR の種類: 実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR
+REVIEW_KINDS = ("impl", "sprint", "release", "design", "spec")
+# 掛けるレビュー。並びがステップを置く順（リファクタリング → cross-review → 振る舞いの確認）の唯一の置き場
+CHECKS = ("cross-refactoring", "cross-review", "behavior")
+# 対象の差分: PR の差分全体・未検査の差分・衝突の解消の差分・掛けない
+DIFFS = ("pr", "unchecked", "resolution", "none")
+# 実装の差分を覆う種類 → その差分（I4。`release` の `resolution` は衝突の解消の差分しか見ないため数えない）
+COVERING = {"impl": "pr", "sprint": "unchecked", "release": "pr"}
+# 衝突の解消のレビューの PR の見せるブランチの頭と、土台のブランチの後ろ
+REVIEW_PREFIX = f"review/{RELEASE_PREFIX}"
+REVIEW_BASE_SUFFIX = "-base"
+
+
+@dataclass(frozen=True)
+class ReviewRow:
+    """レビューの単位の 1 行（PR の種類・掛けるレビューの組・対象の差分）。"""
+
+    kind: str
+    checks: tuple = ()
+    diff: str = "none"
+
+    def runs(self, check: str) -> bool:
+        return check in self.checks
+
+    def covers_impl(self) -> bool:
+        """実装の差分を cross-review で覆うか（I4）。"""
+        return self.runs("cross-review") and COVERING.get(self.kind) == self.diff
+
+    def as_dict(self) -> dict:
+        return {"checks": list(self.checks), "diff": self.diff}
+
+
+def _ordered_row(kind: str, checks: tuple, diff: str) -> ReviewRow:
+    return ReviewRow(kind, tuple(c for c in CHECKS if c in checks), diff)
+
+
+# 種類 → 許す checks・diff と、取り込み方がリリースの単位を選ぶときだけ書けるか（I1・I3）
+REVIEW_ALLOWED: dict[str, dict] = {
+    "impl": {"checks": CHECKS, "diff": ("pr", "none"), "needs_units": False},
+    "sprint": {"checks": CHECKS, "diff": ("unchecked", "none"), "needs_units": False},
+    "release": {"checks": ("cross-review",), "diff": ("pr", "resolution", "none"), "needs_units": True},
+    "design": {"checks": ("cross-review",), "diff": ("pr", "none"), "needs_units": False},
+    "spec": {"checks": ("cross-review",), "diff": ("pr", "none"), "needs_units": False},
+}
+# 書いていない種類の値。キーは課題のまとまりの記録が有るか（I5。ndf v10.27.61 の決め打ちと同じ）
+REVIEW_DEFAULTS: dict[str, dict[bool, ReviewRow]] = {
+    "impl": {True: _ordered_row("impl", ("cross-review",), "pr"), False: _ordered_row("impl", (), "none")},
+    "sprint": {
+        True: _ordered_row("sprint", ("cross-refactoring", "behavior"), "unchecked"),
+        False: _ordered_row("sprint", CHECKS, "unchecked"),
+    },
+    "release": {True: _ordered_row("release", (), "none"), False: _ordered_row("release", (), "none")},
+    "design": {True: _ordered_row("design", ("cross-review",), "pr"), False: _ordered_row("design", ("cross-review",), "pr")},
+    "spec": {True: _ordered_row("spec", (), "none"), False: _ordered_row("spec", (), "none")},
+}
+
+
+def review_allowed() -> dict[str, dict]:
+    """種類 → 許す `checks`・`diff` と書ける条件（呼ぶ側が書き換えても表は変わらない）。"""
+    return {k: dict(v) for k, v in REVIEW_ALLOWED.items()}
+
+
+@dataclass(frozen=True)
+class ReviewUnits:
+    """宣言に書いた種類の行だけを持つ。書いていない種類は `row` が既定値の表から解く（決定 3）。"""
+
+    declared: dict = field(default_factory=dict)
+
+    def row(self, kind: str, bundled: bool) -> ReviewRow:
+        return self.declared.get(kind) or REVIEW_DEFAULTS[kind][bundled]
+
+    def uncovered(self) -> list[dict]:
+        """まとまりの記録の有無の各場合で、実装の差分を cross-review で覆う行が無ければ指摘の行（I4）。"""
+        want = [f"{k} に cross-review / {d}" for k, d in COVERING.items()]
+        return [
+            _flow_item(
+                REVIEWS_KEY,
+                self.as_dict(),
+                want,
+                f"課題のまとまりの記録が{'有る' if b else '無い'}とき、実装の差分がどの PR でも cross-review されない",
+            )
+            for b in (True, False)
+            if not any(self.row(k, b).covers_impl() for k in COVERING)
+        ]
+
+    def overlaps(self) -> list[dict]:
+        """書いた行と書いていない種類の既定値の行が、同じ場合に実装の差分を覆えば指摘の行（I12）。"""
+        written = [k for k, r in self.declared.items() if r.covers_impl()]
+        return [
+            _flow_item(
+                f"{REVIEWS_KEY}.{kind}",
+                None,
+                [f"{kind} の行を書き、cross-review を掛けるかを決める"],
+                f"既定値の {kind} が、書いた {', '.join(written)} と同じ実装の差分を cross-review する",
+            )
+            for kind in COVERING
+            if written and kind not in self.declared and any(REVIEW_DEFAULTS[kind][b].covers_impl() for b in (True, False))
+        ]
+
+    def as_dict(self) -> dict:
+        return {k: self.declared[k].as_dict() for k in REVIEW_KINDS if k in self.declared}
+
+
+def _flow_item(key: str, value, allowed: list, because: str | None = None) -> dict:
+    """直すキー・値・許す値（・理由）の指摘の行（`FlowError.items` の形）。"""
+    return {"key": key, "value": value, "allowed": allowed, **({"because": because} if because else {})}
+
+
+def _review_row_items(kind: str, value) -> tuple[ReviewRow | None, list[dict]]:
+    """種類 1 行の形を読む（I1）。"""
+    key, allowed = f"{REVIEWS_KEY}.{kind}", REVIEW_ALLOWED[kind]
+    if not isinstance(value, dict):
+        return None, [_flow_item(key, value, ["checks と diff のオブジェクト"])]
+    items = [_flow_item(f"{key}.{k}", v, ["(このキーは無い)", "checks", "diff"]) for k, v in value.items() if k not in ("checks", "diff")]
+    checks, diff = value.get("checks"), value.get("diff")
+    if not (
+        isinstance(checks, list) and all(isinstance(c, str) and c in allowed["checks"] for c in checks) and len(set(checks)) == len(checks)
+    ):
+        items.append(_flow_item(f"{key}.checks", checks, list(allowed["checks"])))
+    if not isinstance(diff, str) or diff not in allowed["diff"]:
+        items.append(_flow_item(f"{key}.diff", diff, list(allowed["diff"])))
+    return (None, items) if items else (_ordered_row(kind, tuple(checks), diff), [])
+
+
+def _combination_items(kind: str, row: ReviewRow, promotion: Promotion | None) -> list[dict]:
+    """形を通った行の組み合わせの誤り（I2・I3）。"""
+    key, items = f"{REVIEWS_KEY}.{kind}", []
+    if row.diff == "none" and row.checks:
+        items.append(_flow_item(f"{key}.checks", list(row.checks), ["[]"], "diff = none"))
+    elif row.diff != "none" and not row.checks:
+        items.append(_flow_item(f"{key}.checks", [], list(REVIEW_ALLOWED[kind]["checks"]), f"diff = {row.diff}"))
+    if promotion is not None and REVIEW_ALLOWED[kind]["needs_units"] and not promotion.selects_units:
+        items.append(_flow_item(key, row.as_dict(), ["(書かない)"], f"promotion = {promotion.name}"))
+    return items
+
+
+def parse_reviews(value, promotion: Promotion | None) -> tuple[ReviewUnits, list[dict]]:
+    """`reviews` の値を読み、形と組み合わせ（I1〜I4・I12）の指摘の行と一緒に返す。指摘があれば `ReviewUnits()`。
+
+    `promotion` が None（取り込み方の値が誤り）なら、取り込み方との組み合わせ（I3）を見ない。形の誤りがあれば組み合わせを、
+    組み合わせの誤りがあれば I4・I12 を見ない（誤った行で覆いを数えない）。"""
+    value = {} if value is None else value
+    if not isinstance(value, dict):
+        return ReviewUnits(), [_flow_item(REVIEWS_KEY, value, ["PR の種類をキーにしたオブジェクト"])]
+    items = [_flow_item(f"{REVIEWS_KEY}.{k}", v, ["(この種類は無い)", *REVIEW_KINDS]) for k, v in value.items() if k not in REVIEW_KINDS]
+    rows = {}
+    for kind in (k for k in REVIEW_KINDS if k in value):
+        row, bad = _review_row_items(kind, value[kind])
+        items += bad
+        rows.update({kind: row} if row else {})
+    items = items or [i for kind, row in rows.items() for i in _combination_items(kind, row, promotion)]
+    units = ReviewUnits(rows)
+    items = items or units.uncovered() + units.overlaps()
+    return (ReviewUnits(), items) if items else (units, [])
+
 
 def allowed_values() -> dict[str, tuple]:
     """キー → 許す値（スキーマの enum と測定の候補はこれから作る）。"""
@@ -194,6 +359,7 @@ class BranchFlow:
     doc_prs: str = DEFAULT["doc_prs"]
     promotion: str = DEFAULT["promotion"]
     declared: bool = False  # 宣言に branch_flow があったか
+    reviews: ReviewUnits = field(default_factory=ReviewUnits)  # レビューの単位（#3163）。KEYS とは別に持つ
 
     @property
     def row(self) -> Promotion:
@@ -214,7 +380,11 @@ def parse_flow(value) -> BranchFlow:
     allowed = allowed_values()
     if not isinstance(value, dict):
         raise FlowError([{"key": "(全体)", "value": value, "allowed": ["4 項目のオブジェクト"]}])
-    items = [{"key": k, "value": v, "allowed": ["(このキーは無い)", *KEYS]} for k, v in value.items() if k not in allowed]
+    items = [
+        {"key": k, "value": v, "allowed": ["(このキーは無い)", *KEYS, REVIEWS_KEY]}
+        for k, v in value.items()
+        if k not in allowed and k != REVIEWS_KEY
+    ]
     vals = {**DEFAULT}
     for k, opts in allowed.items():
         if k in value:
@@ -228,9 +398,12 @@ def parse_flow(value) -> BranchFlow:
         for k, ok in (("start", row.allowed_start), ("doc_prs", row.allowed_doc_prs), ("integrate", row.allowed_integrate)):
             if vals[k] not in ok:
                 items.append({"key": k, "value": vals[k], "allowed": sorted(ok), "because": f"promotion = {row.name}"})
+    promotion_ok = not any(i["key"] == "promotion" for i in items)
+    units, bad = parse_reviews(value.get(REVIEWS_KEY), PROMOTIONS[vals["promotion"]] if promotion_ok else None)
+    items += bad
     if items:
         raise FlowError(items)
-    return BranchFlow(**vals, declared=True)
+    return BranchFlow(**vals, declared=True, reviews=units)
 
 
 def of_decl(wt: dict) -> BranchFlow:
@@ -276,14 +449,16 @@ class ResolvedFlow:
             "base_branch": self.base_branch,
             "production_branch": self.production_branch,
             "source": source,
+            REVIEWS_KEY: self.flow.reviews.as_dict(),
         }
 
 
 def from_snapshot(snap: dict | None, base: str | None, production: str | None) -> ResolvedFlow:
-    """目録のスナップショットから読む。無ければ（変更前の目録）宣言の無いリポジトリとして読む（I3）。"""
+    """目録のスナップショットから読む。無ければ（変更前の目録）宣言の無いリポジトリとして読む（I3）。
+    `reviews` の無いスナップショット（#3163 より前に始めたスプリント）は `{}`（すべての種類が既定値）として読む（I6）。"""
     if not snap:
         return BranchFlow().resolve(base, production)
-    flow = parse_flow({k: snap[k] for k in KEYS if k in snap})
+    flow = parse_flow({**{k: snap[k] for k in KEYS if k in snap}, REVIEWS_KEY: snap.get(REVIEWS_KEY) or {}})
     return ResolvedFlow(
         flow, snap.get("start_branch") or base, snap.get("base_branch") or base, snap.get("production_branch") or production
     )
@@ -297,9 +472,29 @@ def sprint_branch_kept(root, branch_ref: str, production_ref: str, row: Promotio
 def schema_fragment() -> dict:
     """`worktree.schema.json` の `branch_flow` の定義（表から作る）。"""
     allowed = allowed_values()
+    reviews = {
+        "type": "object",
+        "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。書いていない種類は既定値",
+        "additionalProperties": False,
+        "properties": {
+            kind: {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["checks", "diff"],
+                "properties": {
+                    "checks": {"type": "array", "uniqueItems": True, "items": {"type": "string", "enum": list(row["checks"])}},
+                    "diff": {"type": "string", "enum": list(row["diff"])},
+                },
+            }
+            for kind, row in REVIEW_ALLOWED.items()
+        },
+    }
     return {
         "type": "object",
         "description": "ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
         "additionalProperties": False,
-        "properties": {k: {"type": "string", "enum": list(v), "default": DEFAULT[k]} for k, v in allowed.items()},
+        "properties": {
+            **{k: {"type": "string", "enum": list(v), "default": DEFAULT[k]} for k, v in allowed.items()},
+            REVIEWS_KEY: reviews,
+        },
     }

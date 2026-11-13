@@ -6897,13 +6897,13 @@
       "term": "レビューの単位",
       "context": "ndf-workflow",
       "meaning": "PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の `reviews` に書く",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "PR の種類",
       "context": "ndf-workflow",
       "meaning": "NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "スプリントの PR",
@@ -6921,7 +6921,7 @@
       "term": "対象の差分",
       "context": "ndf-workflow",
       "meaning": "レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "未検査の差分",
@@ -6933,19 +6933,19 @@
       "term": "衝突の解消の差分",
       "context": "ndf-release",
       "meaning": "スプリントブランチをリリースブランチへ集めるマージのコミットが、親を自動でマージし直した結果（衝突の印を含む）と比べて持つ差分。衝突の解消と、組み合わせのためにマージのコミットで足した変更が入る",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "衝突の解消のレビューの PR",
       "context": "ndf-release",
-      "meaning": "衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューの後に閉じる",
-      "pending_source": "issues/issue-3163-design.md"
+      "meaning": "衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューで入った直しをリリースブランチへ移してから閉じる",
+      "source": "plugins/ndf/skills/release/references/release-steps.md"
     },
     {
       "term": "掛けるレビュー",
       "context": "ndf-workflow",
       "meaning": "レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ",
-      "pending_source": "issues/issue-3163-design.md"
+      "source": "plugins/ndf/skills/worktree/references/declaration.md"
     },
     {
       "term": "リリースの PR",

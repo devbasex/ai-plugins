@@ -115,6 +115,9 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
 # 選んで集める取り込み方（branch_flow.promotion: selected）: 本番チャネルから組んだリリースブランチで出す
 python3 "$SCRIPTS/release-steps.py" release-branch --version <版> --units <スプリントブランチ>... [--production <本番チャネル>] --root .
+# リリースブランチの PR のレビュー（branch_flow.reviews.release が none でないとき。差分が空なら終了コード 3）
+python3 "$SCRIPTS/release-steps.py" review-open --version <版> --diff pr|resolution [--production <本番チャネル>] --root .
+python3 "$SCRIPTS/release-steps.py" review-close --version <版> --root .
 python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs --head release/v<版> --approval <承認資料> --root .
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --promotion selected --root .
 # CD のある場合（release-case の metrics.case が cd-no-review / cd-review）の本番
@@ -131,6 +134,21 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、タグと GitHub Release を
   作った後に `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
   `references/production-merge.md` の「選んで集める取り込み方のリリース」にある
+- リリースブランチの PR のレビュー（`branch_flow.reviews.release`。`worktree` の `references/declaration.md` の
+  「レビューの単位」）: 開発版のデプロイのプランが `release-branch` と `approval-facts` の間で打つ。
+  - `review-open` は、範囲（同じ版の前のレビュー済みの先頭、無ければ本番チャネルから、リリースブランチの先頭まで）の差分を
+    一時の PR（衝突の解消のレビューの PR。head は `review/release/v<版>`、宛先は `review/release/v<版>-base`）にして、
+    `metrics.review_pr` に番号を出す。`--diff resolution` は範囲の first-parent のマージの再マージの差分
+    （`git log --remerge-diff`）だけを見せ、衝突したマージが無ければ PR を作らずに 3 で終える。`--diff pr` は範囲の差分全体を見せる。
+    逆に当てられない・PR を作れないなら 1
+  - 始めに、開いている衝突の解消のレビューの PR を版に依らず調べ、直しをリリースブランチへ移し終えたものを閉じて一時の
+    ブランチを消す。同じ版で範囲の終わりがリリースブランチの先頭と同じ、移していない直しを持つ PR は使い直す。それ以外の
+    移していない直しを持つ PR か、比べるリリースブランチを取得できない PR があれば、何も閉じずに 1 で止める
+  - `review-close` は、cross-review が見せるブランチへ積んだ直しのうち、まだリリースブランチへ移していないものを
+    cherry-pick して送り、レビュー済みの先頭を PR の本文へ書いて閉じ、一時のブランチを消す。移せなければリリースブランチを
+    動かさず、PR とブランチを残して 1 で止める（人が原因を直して `review-close` から打ち直す）。レビューの後にリリースブランチへ
+    マージが足されていれば、閉じた後に 1 で止める（`review-open` から打ち直すと、足したマージだけを範囲に取る）
+  - 本番のリリースのプランの後片付けは、その版の一時のブランチが残っていれば消す
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
