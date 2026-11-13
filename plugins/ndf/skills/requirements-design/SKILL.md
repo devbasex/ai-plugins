@@ -194,7 +194,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
    （本文の `## 進行` より前の全文）
 2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
-3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 6）
+3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 7）
 
 `implementation-plan` が同じ変更の実装計画を作る場合は、コピーの**別の節**にする。コピーにしか無い節は
 `check` が許す。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。

@@ -163,5 +163,10 @@
 | [ndf-ci-only-tests.md](ndf-ci-only-tests.md) | CI テストの宣言（`test.ci.only`）のあるリポジトリで手元のテストを止め、PR の CI の結果を待たずに読んで直し（`ci-watch.py peek`・改修の上限）、テストのチェックがそろってからマージすること。hook の照合と cross-refactoring の最終ゲートを含む。手順は `development-workflow` の SKILL.md が正 |
 | [ndf-parallel-issue-bundles.md](ndf-parallel-issue-bundles.md) | 並列の計画の課題のまとまり（まとまりごとの実装の Pull Request とレビュー、検査の規則 bundle・bundle-overlap） |
 | [ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) | 並列の計画の台帳（ledger.jsonl・checkpoint.json）と、失われた計画を start 1 回で作り直す仕組み・オーガナイザーの印の照合・リレーハブの起こす python の常に成り立つ条件・データの形・決定の理由・テスト観点。手順は development-workflow の references/parallel.md が正 |
+| [ndf-branch-flow-declaration.md](ndf-branch-flow-declaration.md) | ブランチ運用の宣言（branch_flow）：スプリントの起点・文書の Pull Request の宛先・本番への取り込み方（ベースブランチを丸ごと出す / 選んだスプリントブランチを集める）、開始時のスナップショット、測定とずれの検出、本番チャネル宛の検査 |
+| [ndf-parallel-lane-end-and-verify-close.md](ndf-parallel-lane-end-and-verify-close.md) | 並列の計画の 1 スプリントのレーンが、リリースの依頼の後に答えを待たずに版の要らないまとめを流し、終わりの記録（台帳の行 lane_end）で耐久ワークフローに止められること。止められなかったレーンと終わりの記録の無い停止の問い、released の後に一時レーンが流す版の要るまとめ、差し戻しの届け方、承認したコミットのまま出すこと |
+| [ndf-parallel-empty-requests-and-settled-gates.md](ndf-parallel-empty-requests-and-settled-gates.md) | 並列の計画のレーンのまとめで、リリースの依頼のプランが最終の検査の実行条件を持つこと、Pull Request がすべてマージされずに閉じた依頼をリリースを組む直前に答えて外すこと、確定か締めで処理したリリース承認ゲートを答え待ちの依頼に数えないこと（settled_gates） |
+| [ndf-sprint-final-check-scope.md](ndf-sprint-final-check-scope.md) | スプリントのまとめの最後の検査を確定仕様化のマージの後に置き、範囲をスプリントに属しまだ検査していない Pull Request に絞ること（check-trigger.py の --sprint・final_scope）、検査の印を進めてよい位置、検査の Pull Request の起点と先頭の合わせ方 |
+| [ndf-whole-test-ci-wait-conflict-stop.md](ndf-whole-test-ci-wait-conflict-stop.md) | CI に任せる全体テストの待ちが、ベースブランチと衝突した Pull Request を照会のたびに読み（fetch_mergeable）、上限まで待たずに stopped で止まり base-sync を次の 1 手に示すこと |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

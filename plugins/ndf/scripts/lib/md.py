@@ -43,6 +43,10 @@ class Table(NamedTuple):
     start: int
     end: int
 
+    def body_line(self, k: int) -> int:
+        """本文の k 行目の、文書の中の行（0 始まり。見出しと区切りの 2 行の後）。"""
+        return self.start + 2 + k
+
 
 class Link(NamedTuple):
     href: str
@@ -177,6 +181,11 @@ def tables(text: str) -> list[Table]:
             out.append(cur)
             cur = None
     return out
+
+
+def tables_in(text: str, sections: list[Section]) -> list[Table]:
+    """`sections` のどれかの中で始まる表を、文書の並びで返す。"""
+    return [t for t in tables(text) if any(s.start <= t.start < s.end for s in sections)]
 
 
 def links(text: str) -> list[Link]:

@@ -30,6 +30,10 @@ DRIVES = {
     "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
 }
 REFACTOR_VOCABULARY = DRIVES["cross-refactoring"].parent / "refactor_lib" / "vocabulary.py"
+# 設計 PR のレビュー観点の置き場。設計単体のレビューの段はここの観点を読ませ、指示の文へ写さない（#3144 の決定 11）
+REVIEW_FOCUS = DRIVES["cross-review"].parent / "review_lib" / "review_focus.py"
+# 工程の分類（`WF_STAGE_MATRIX`）を持つライブラリ。詳細設計を通るモードはここから引く（#3144 の決定 5）
+WORKFLOW_COMMON = SKILLS / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 
 
