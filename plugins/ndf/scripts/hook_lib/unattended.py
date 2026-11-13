@@ -189,12 +189,10 @@ def review_stop(hook_input: dict) -> dict | None:
     form = _read_report_form("unattended-stop")
     if form is None:
         return None
-    try:
-        limit = int(limits.value(PUSHBACK_POLICY, "attempts"))
-    except limits.LimitsError as e:
-        _stderr_warn("unattended-stop", str(e))
+    limit = _pushback_limit()
+    if limit is None:
         return None
-    busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
+    busy = _is_busy(hook_input)
     text = hook_input.get("last_assistant_message")
     errors = ur.report_errors(text, form) + pending_command_errors(text)
     block, count = next_count(errors, mark.pushbacks, limit, busy)
@@ -214,6 +212,20 @@ def _read_report_form(command: str) -> ur.ReportForm | None:
     except ur.FormError as e:
         _stderr_warn(command, f"区間の報告の契約を読めない: {e}")
         return None
+
+
+def _pushback_limit() -> int | None:
+    """差し戻しの上限の回数を読む。読めなければ警告して None。"""
+    try:
+        return int(limits.value(PUSHBACK_POLICY, "attempts"))
+    except limits.LimitsError as e:
+        _stderr_warn("unattended-stop", str(e))
+        return None
+
+
+def _is_busy(hook_input: dict) -> bool:
+    """背景の作業か予定が残る Stop か。"""
+    return bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
 
 
 def _save_count(path: Path, mark: Mark, count: int) -> None:
