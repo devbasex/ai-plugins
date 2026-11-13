@@ -58,7 +58,7 @@ def _cmd_check(_: argparse.Namespace) -> int:
 
 def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
     """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
-    obj = result.result(TOOL, "stopped", detail, items=items, cause={"kind": "invalid", "detail": detail})
+    obj = result.result(TOOL, "stopped", detail, items=items, cause=causes.build("invalid", detail))
     print(json.dumps(obj, ensure_ascii=False))
     return int(facts.row(causes.EXIT_CODES, "unreadable")["code"])
 
@@ -87,13 +87,7 @@ def _json_arg(text: str) -> Any:
 
 
 def _cmd_emit(a: argparse.Namespace) -> int:
-    cause = None
-    if a.cause:
-        cause = {"kind": a.cause[0], "detail": a.cause[1]}
-        if a.cause_instance is not None:
-            cause["instance"] = a.cause_instance
-        if a.retry_after is not None:
-            cause["retry_after"] = a.retry_after
+    cause = causes.build(a.cause[0], a.cause[1], instance=a.cause_instance, retry_after=a.retry_after) if a.cause else None
     obj = result.result(
         a.tool,
         a.status,

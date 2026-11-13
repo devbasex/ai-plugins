@@ -115,13 +115,19 @@ def row(kind: str) -> CauseRow:
     return found
 
 
-def cause(kind: str, detail: str, *, instance: Optional[str] = None, retry_after: Optional[float] = None) -> dict[str, Any]:
-    """結果 JSON の `cause` を組む。表に無い種類・空の説明は `ValueError`。"""
+def build(kind: str, detail: str, *, instance: Optional[str] = None, retry_after: Optional[float] = None) -> dict[str, Any]:
+    """結果 JSON の `cause` を確かめずに組む。`instance`・`retry_after` は渡したときだけ置く。"""
     out: dict[str, Any] = {"kind": kind, "detail": detail}
     if instance is not None:
         out["instance"] = instance
     if retry_after is not None:
         out["retry_after"] = retry_after
+    return out
+
+
+def cause(kind: str, detail: str, *, instance: Optional[str] = None, retry_after: Optional[float] = None) -> dict[str, Any]:
+    """結果 JSON の `cause` を組む。表に無い種類・空の説明は `ValueError`。"""
+    out = build(kind, detail, instance=instance, retry_after=retry_after)
     bad = errors(out)
     if bad:
         raise ValueError("; ".join(bad))
