@@ -257,7 +257,7 @@ stateDiagram-v2
 | 項目 | 形 |
 | --- | --- |
 | ラウンドの種類を決める関数 | `classifications.review_stage(kind, round_no, has_model)`。`design` かつ 1 ラウンド目かつ `has_model` なら `model`、ほかの `design` は `detail`、`code` は `None` |
-| `has_model` | `init` が決め、状態ファイルの `design_has_model` に持つ。変更した設計文書（`-design.md` / `-design-decisions.md`）のどれかに見出し `## ドメインモデル` があれば真 |
+| `has_model` | `init` が決め、状態ファイルの `design_has_model` に持つ。変更した設計文書（`-design.md` / `-design-decisions.md` / `-design-detail.md`）のどれかに見出し `## ドメインモデル` があれば真 |
 | 状態ファイル | `design_has_model`・`review_instructions_by_stage`（`{"model": 文字列, "detail": 文字列}`）・ラウンドごとの `rounds[].stage` |
 | 担当へ渡す観点 | `launch-reviewer.sh` がそのラウンドの種類の文字列を追加レビュー観点へ差し込む。`review_instructions_by_stage` が無い状態ファイルは `review_instructions` を使う |
 | 抜ける条件 | `model` のラウンドが収束しても抜けない（`verdict: model_confirmed`、`MODEL_CONFIRMED=1` を出して終了コード 2）。修正を挟まずに詳細レビューのラウンドへ進む。`detail` のラウンドは収束の判定で抜ける。ラウンドの上限 3 と承認ゲートの数は変わらない |
@@ -297,7 +297,9 @@ stateDiagram-v2
 | `check.banned` | オブジェクト | 許す | 禁止語の宣言。`words`（禁止語の配列）・`paths`（検査する範囲の glob）・`exclude`（外す範囲の glob。無くてよい）。無ければ規則 `banned` を走らせない |
 
 `init` が書く用語集の設定は、`check.paths` に `issues/*-requirements.md`・`issues/*-design.md`・
-`issues/*-design-decisions.md`、`check.term_sections` に `["用語"]` を持ち、`check.source_paths` を持たない。
+`issues/*-design-decisions.md`・`issues/*-design-detail.md`、`check.term_sections` に `["用語"]` を持ち、
+`check.source_paths` を持たない。`check.paths` の既定は、設計文書の種類の契約
+（`plugins/ndf/contracts/design-docs.json`）で用語チェックの対象とした種類から作る。
 
 ### 用語集（`source`）
 
