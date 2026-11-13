@@ -46,7 +46,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | --- | --- | --- | --- |
 | worker | supervisor（失敗の通知）。supervisor も落ちていれば、起こされた supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。続けられなければ `最後に記録した工程` の頭から新しい supervisor（`subagent_type` は起動の指示の `subagent_type` の欄で選ぶ） |
-| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `supervise.py run <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
+| 工程の進行表 | conductor（`progress.py next` の終わり・`progress.py show`） | conductor | `progress.py next <進行表の ID>` を打ち直す。最後に終了の印が付いた工程の次から流れ、工程の中の途中は耐久の記録が続ける。終わった工程は流し直さない |
 | conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・バックグラウンドの待ちの終わり（「解除を待つ手段」） |
 
 **3 層は同じ割り当てを共有するため、同時に落ちるのが普通である。** そのときは conductor が
@@ -84,8 +84,8 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 `--max-sleep 540` を付け、終了コード 3 で起きるたびに手順 1 と手順 4 だけを行う。
 **解除の前に `SendMessage` を送らない。**
 
-**プランは `interrupted` の一覧に出ない。** 流していたプランは、目録（`<out>/sprint.json`。無ければ改名の前の
-`<out>/mission.json`）の `ステージ` とキューの done で点検し、終わっていないプランを「落ちた層ごとの割り当て」のプランの行で再開する。
+**工程の進行表は `interrupted` の一覧に出ない。** 流していたスプリントは `progress.py show <進行表の ID>` で点検し、
+終わっていなければ「落ちた層ごとの割り当て」の工程の進行表の行で再開する。
 
 **応答を終える前に「フェーズの一覧」を 1 回出す**（「conductor の報告」の 3 つ目の時点）。
 

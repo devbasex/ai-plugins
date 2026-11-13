@@ -116,8 +116,8 @@ pace: fast
   → plan-to-spec（仕様が変わった場合） → merged → release
   → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
   → retrospective
-次のコマンド: python3 "$SCRIPTS/supervise.py" new sprint --name m6 --worktree <リポジトリの根>
-  --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out <作業ディレクトリ>/sprint-m6
+次のコマンド: python3 "$SCRIPTS/progress.py" new m6 --mode standard --pace fast --issues 1052 1053
+  --requirements <要求の文書> --judgment <モード判定の結果>
 ```
 
 - 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形だけを示す

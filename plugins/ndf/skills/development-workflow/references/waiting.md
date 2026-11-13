@@ -135,65 +135,25 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 - キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
   wait はそれを読む。知らせた `attention` の続きは `<done>.wait.json` に残る
 
-### 1 スプリントの流し方
-
-**1 スプリント（実装 → 開発版 → リリース承認ゲート→ 本番 → 後片付け）で conductor が打つのは、キューと `wait` と、承認ゲートで
-利用者の答えを書く 1 行だけである。** プランの組み立て・待ちの監視・次のプランの起動・承認の記録のために起きない。
-
-1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
-   （固定の PR があれば `--prs 1052` を併せて渡す）。キューは `--then` のプランを流す前に、先行のプランの
-   報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
-   先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
-2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する
-3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が答えたら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
-4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
-   `queue <本番のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
-   開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
-   書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
-   `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認の記録を書いておく。
-   本番のプランのステップの最後は後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）と
-   スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
-5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
-   止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
-6. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
-
 ### スプリントを流すコマンド
 
-**`normal` の 1 スプリント（設計 → 設計承認ゲート→ 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
-開発版 → リリース承認ゲート→ 本番）で、設計承認ゲートの後に conductor が打つのはキュー 1 回と `wait` 1 回である（リリース承認ゲートの
-後も同じ）。** 例はスプリント `m6`（課題 1052・1053、設計 Pull Request は 1052）で、
-`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
-キューと `wait` はバックグラウンドで起動し、キューはリポジトリの根から起動する。打つコマンドは `sprint.json` の
-ステージの `command` と `resume` をそのまま写す。
+**スプリントは工程の進行表で流す。conductor が打つのは、進行表を作る 1 回と、止まるたびの `next` 1 回である。** 次に流す工程・
+再開する位置・まとめの工程は進行表が決めるため、プランの名前やステップを組み立てない。例はスプリント `m6`（課題 1052・1053、
+モード `standard`）で、`pg() { python3 "$SCRIPTS/progress.py" "$@"; }` とする。`next` はバックグラウンドで起動し、リポジトリの根から起動する。
 
-1. プランを書き出す。ステージごとのプランと目録（`$O/sprint.json`）ができる:
-   `sv new sprint --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --state $S --out $O`。
-   版数は渡さず、開発版のプランを流す時点に queue が決める（明示するなら `--version`）
-   設計の前に別の課題を取り込むと決めていれば `--absorb <課題>:<取り込み先>` を足す（取り込んだ課題は設計のプランを持たない）
-2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
-3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
-   `sprint-state.py gate $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
-4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json --max 3 --done $O/done-3.json
-   --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
-   --then $O/7-check.json --then $O/8-release.json` と `sv wait $O/done-3.json`。マージのプランは 3 の記録を見て承認ラベルを
-   付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
-   実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
-5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
-   を打つ。差し戻されたら 6 を打たない
-6. 本番: `sv queue $O/10-release-prod.json --max 3 --done $O/done-10.json` と `sv wait $O/done-10.json`。先頭の `approve` が
-   5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
+1. 進行表を作る: `pg new m6 --mode standard --issues 1052 1053 --requirements <要求の文書> --judgment <モード判定の結果>`。
+   結果の `metrics` に進行表の ID が載る。並列の計画のレーンでは `--lane <レーンの進行表の ID> --row <行>` を足す（最初の入力が示す）
+2. 流す: `pg next <ID>`。未着手で有効な最初の工程から流し、工程ごとに出力を入出力規約で検査して終了の印を付ける
+3. 終了コード 10（待ち）: `items` に待っている行と `next_step` が載る。承認ゲートなら承認資料を添えて利用者の答えを取り、
+   `pg answer <ID> <行> --approved|--rejected` を打ってから 2 へ戻る。レーンのリリースの依頼なら `next_step` の
+   `parallel.py await <計画名> --from <依頼の記録>` を打つ（答えを進行表の行へ届ける）。答えがまだ無ければ（3）待ってから打ち直す
+4. 終了コード 1（工程の失敗）: 原因を直して `pg retry <ID> <工程> --reason <理由>` の後に 2 へ戻る。手で済ませた工程は
+   `pg finish <ID> <工程> --output <出力> --reason <理由>`、外す工程は `pg disable <ID> <工程> --reason <理由>` で進行表を変える
+5. 終了コード 0: 有効な最後の工程まで終わった。`metrics.next_row` があれば、同じレーンの次の行を 1 から始める
 
-- どこかで止まったら（CI の古い失敗・衝突・手動確認の印の待ち・承認の証跡の無さ）、原因を片付けてからそのステージの
-  `resume`（`sv queue --resume $O/done-3.json` など）と `sv wait` を打つ。止まったプランは終えたステップから続き、後続の
-  ステージは前のステージがすべて完了のときだけ流れる。承認の後に別の入口から入るステップ（`merge-approved`・`promote-approved`）
-  は `--from <プラン名>=<ステップ>` を足す
-- ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である
-- `--state` を渡さないスプリントでは、設計承認ゲートで `gh pr edit <設計 PR> --add-label design-approved` を、リリース承認ゲートで
-  `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
-- 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
-- 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
+- 状態は `pg show <ID>` で読む。課題の工程表とスプリント PR の「通した工程」は進行表の終了の印から作られるため、手で書かない
+- 確定仕様化・リリース後テスト・振り返り・組み換え・棚卸しも進行表の行で、`next` が続けて流す
+- `pace: fast` と `pace: auto` の並びは [pace.md](pace.md)、本番の後に続けるコマンドは [relay.md](relay.md) にある
 
 **サブエージェントは、バックグラウンドの処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**

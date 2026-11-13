@@ -115,6 +115,9 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 
 ## 呼び方
 
+工程の進行表で流すスプリント（`progress.py next`）では、進行表の記録のアクティビティ（`ndf.record`）が終了の印からボードと
+課題の本文を書くため、手で呼ばない。手で呼ぶのは、進行表の外で工程を流すとき（開発ループのループの 1 回・単独で起動した Skill）である。
+
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> <キー> "<値>"
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>" "<工程名>"...
