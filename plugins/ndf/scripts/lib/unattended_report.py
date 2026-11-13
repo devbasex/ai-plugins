@@ -138,7 +138,7 @@ def form_from_dict(data: dict) -> ReportForm:
         or not values_decl
         or not all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in values_decl.items())
     ):
-        raise FormError("shape.values は値 → 意味（空でない文字列）の空でない辞書")
+        raise FormError("shape.values は値 → 意味の空でない辞書")
     values = tuple(values_decl)
     items = _strs(shape.get("items"), "items")
     _check_material(material, items)
