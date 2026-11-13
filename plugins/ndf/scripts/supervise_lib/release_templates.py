@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shlex
 from pathlib import Path
+from typing import Callable, NamedTuple
 
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
@@ -370,6 +371,74 @@ def _judge_fix_steps(run_ids: list[str], after_notes: str) -> list[dict]:
     ]
 
 
+class _KindArgs(NamedTuple):
+    """リリースの種類ごとの承認の手順が読む値。"""
+
+    a: object
+    repo: str | None
+    approval: str
+    prs: str
+    rts: str
+    v: str
+    base: str
+    units: list
+
+
+def _dev_approvals(c: _KindArgs) -> list[dict]:
+    return _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.base)[1] if c.units else None)
+
+
+def _cd_prod_approvals(c: _KindArgs) -> list[dict]:
+    return cd_prod_steps(
+        c.a, c.v, c.prs, c.repo, c.approval, _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.v)[1])
+    )
+
+
+def _no_approvals(c: _KindArgs) -> list[dict]:
+    return []
+
+
+def _approve_gate(steps: list[dict], c: _KindArgs) -> None:
+    steps.insert(0, approve_step(c.a, c.repo, c.approval))
+
+
+def _mvv_gate(steps: list[dict], c: _KindArgs) -> None:
+    _add_prod_mvv_gate(steps, c.a, c.repo, c.approval, c.prs)
+
+
+def _no_gate(steps: list[dict], c: _KindArgs) -> None:
+    return None
+
+
+class ReleaseKind(NamedTuple):
+    """package-plugin のリリースの種類ごとの違い: 規則の文・承認の手順の id・リリースブランチの後・承認の手順・承認ゲート。"""
+
+    rule: str
+    approval_ids: tuple[str, ...]
+    after_branch: str  # CD のある場合の開発版はリリースブランチ（とそのレビュー）で終える（#2773）
+    approval_steps: Callable[[_KindArgs], list[dict]]
+    add_gate: Callable[[list[dict], _KindArgs], None]
+
+
+FACTS_IDS = ("facts", "explain", "others")
+RELEASE_KINDS = {
+    "dev": ReleaseKind(RULE_RELEASE_DEV, FACTS_IDS, "facts", _dev_approvals, _no_gate),
+    "dev-cd": ReleaseKind(RULE_RELEASE_DEV, (), "end", _no_approvals, _no_gate),
+    "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _no_approvals, _approve_gate),
+    "prod-mvv": ReleaseKind(RULE_RELEASE_PROD_MVV, (), "facts", _no_approvals, _mvv_gate),
+    "prod-cd": ReleaseKind(RULE_RELEASE_PROD_CD, (*FACTS_IDS, "approval-post"), "end", _cd_prod_approvals, _no_gate),
+}
+
+
+def _release_kind(dev: bool, on_pr: bool, mvv) -> str:
+    """チャネル・CD のある場合か・MVV 判定の有無 → RELEASE_KINDS の鍵。MVV 判定は CD の無い本番だけに効く。"""
+    if dev:
+        return "dev-cd" if on_pr else "dev"
+    if on_pr:
+        return "prod-cd"
+    return "prod-mvv" if mvv else "prod"
+
+
 def plan_release_package_plugin(a) -> dict:
     """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
     {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
@@ -391,11 +460,12 @@ def plan_release_package_plugin(a) -> dict:
     after_notes = "sync" if sync else "release"
     run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes", *([] if dev else ["snapshot"]), *(["sync"] if sync else [])]
     units = release_units(a)
-    after_branch = "end" if on_pr else "facts"  # CD のある場合の開発版はリリースブランチ（とそのレビュー）で終える（#2773）
+    mvv = getattr(a, "mvv", None)
+    kind = RELEASE_KINDS[_release_kind(dev, on_pr, mvv)]
+    after_branch = kind.after_branch
     reviews = review_range_steps(a, repo, base, after_branch) if dev and units else []  # リリースブランチの PR のレビュー（#3163）
     run_ids += ["release", "verify", *(["release-branch"] if dev and units else []), *(REVIEW_RANGE_IDS if reviews else ())]
-    run_ids += ["facts", "explain", "others"] if (dev and not on_pr) or (on_pr and not dev) else []
-    run_ids += ["approval-post"] if on_pr and not dev else []
+    run_ids += kind.approval_ids
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval, on_pr)
@@ -408,21 +478,13 @@ def plan_release_package_plugin(a) -> dict:
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo, release_review_row(a).diff != "none"))
-    mvv = getattr(a, "mvv", None)
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
-    if dev and not on_pr:
-        steps += _dev_approval_steps(a, repo, approval, prs, rts, release_names(base)[1] if units else None)
-    if on_pr and not dev:
-        steps += cd_prod_steps(a, v, prs, repo, approval, _dev_approval_steps(a, repo, approval, prs, rts, release_names(v)[1]))
+    ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units)
+    steps += kind.approval_steps(ctx)
     steps += _judge_fix_steps(run_ids, after_notes)
     if not dev:
         steps.append(judge_record_step())
-    # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）
-    if mvv and not dev and not on_pr:
-        _add_prod_mvv_gate(steps, a, repo, approval, prs)
-    elif not dev and not on_pr:
-        steps.insert(0, approve_step(a, repo, approval))
-    rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_CD if on_pr else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
+    kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）
     plan = {
         "フェーズ": "開発版のデプロイ" if dev else "リリース",
         "課題": a.issue,
@@ -431,7 +493,7 @@ def plan_release_package_plugin(a) -> dict:
         "branch": a.branch or f"release/v{v}",
         "起点": f"origin/{a.base}",
         "版": version_field(a, plugin, dev),
-        "規則": rule,
+        "規則": kind.rule,
         "steps": steps,
     }
     plan.update({"起点のコミット": f"origin/{release_names(v)[1]}"} if units and not dev else {})  # 開発版のプランが組んだリリースブランチ
