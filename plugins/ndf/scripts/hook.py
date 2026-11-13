@@ -99,8 +99,7 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     if command == "goal-skill":  # _merge を通さず、自分の出力 1 つを返す（hookEventName を UserPromptSubmit に保つ）
         from hook_lib import goal_skill
 
-        text = goal_skill.context(raw)
-        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+        return _prompt_context(goal_skill.context(raw))
     if raw is None:
         return None
     ev = pl.event_of(raw)
@@ -113,6 +112,11 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     return _merge(outs)
 
 
+def _prompt_context(text: str | None) -> dict | None:
+    """UserPromptSubmit の案内の出力（`additionalContext`）。案内が無ければ None。"""
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+
+
 def _unattended(command: str, raw: dict | None) -> dict | None:
     """人のいない実行の hook（`hook_lib/unattended.py`）。失敗は標準エラーへ 1 行残して通す（#3242 の I9）。"""
     if raw is None:
@@ -123,8 +127,7 @@ def _unattended(command: str, raw: dict | None) -> dict | None:
 
     try:
         if command == "unattended-start":
-            text = unattended.mark_session(raw, time.time())
-            return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+            return _prompt_context(unattended.mark_session(raw, time.time()))
         if command == "unattended-stop":
             return unattended.review_stop(raw)
         unattended.clear_mark(raw)
