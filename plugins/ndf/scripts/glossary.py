@@ -287,39 +287,61 @@ def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], code
             hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
 
 
-def structure_findings(g: dict, decl: Declaration) -> list[dict]:
-    items = []
+def _hit_into(items: list[dict], path: str):
+    """用語集の構造の指摘（行は 0）を `items` へ足す関数を返す。"""
 
     def hit(rule, term, detail):
-        items.append({"rule": rule, "path": decl.source, "line": 0, "term": term, "detail": detail})
+        items.append({"rule": rule, "path": path, "line": 0, "term": term, "detail": detail})
 
+    return hit
+
+
+def _term_shape_problem(i: int, t) -> tuple[str, str] | None:
+    """語の行がオブジェクトでない・term / context / meaning が無いなら (語, 文面)。揃っていれば None。"""
+    if not isinstance(t, dict):
+        return "", f"terms[{i}] はオブジェクトで書く"
+    missing = [k for k in ("term", "context", "meaning") if not isinstance(t.get(k), str) or not t[k]]
+    if missing:
+        return str(t.get("term") or ""), f"terms[{i}] に {' / '.join(missing)} が無い"
+    return None
+
+
+def _term_banned_findings(t: dict, decl: Declaration, hit) -> None:
+    for w in glossary_banned.banned_in_term(t, decl.banned):
+        hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
+
+
+def _duplicate_findings(i: int, t: dict, seen: dict[tuple[str, str], int], code_seen: dict[tuple[str, str], int], hit) -> None:
+    """同じコンテキストで識別子・語が前の行と重なるかを見て、初めての組を控える。"""
+    if code_of(t):
+        ckey = (t["context"], code_of(t))
+        if ckey in code_seen:
+            hit("schema", code_of(t), f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
+        else:
+            code_seen[ckey] = i
+    key = (t["context"], t["term"])
+    if key in seen:
+        hit("duplicate", t["term"], f"コンテキスト {t['context']} で terms[{seen[key]}] と terms[{i}] が同じ語")
+    else:
+        seen[key] = i
+
+
+def structure_findings(g: dict, decl: Declaration) -> list[dict]:
+    items: list[dict] = []
+    hit = _hit_into(items, decl.source)
     live_by_ctx, codes_by_ctx = _live_index(g)
     ids = _context_findings(g, hit)
     seen: dict[tuple[str, str], int] = {}
     code_seen: dict[tuple[str, str], int] = {}
     for i, t in enumerate(g.get("terms", [])):
-        if not isinstance(t, dict):
-            hit("schema", "", f"terms[{i}] はオブジェクトで書く")
-            continue
-        missing = [k for k in ("term", "context", "meaning") if not isinstance(t.get(k), str) or not t[k]]
-        if missing:
-            hit("schema", str(t.get("term") or ""), f"terms[{i}] に {' / '.join(missing)} が無い")
+        problem = _term_shape_problem(i, t)
+        if problem:
+            hit("schema", *problem)
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
-        for w in glossary_banned.banned_in_term(t, decl.banned):
-            hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
-        if code_of(t):
-            ckey = (t["context"], code_of(t))
-            if ckey in code_seen:
-                hit("schema", code_of(t), f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
-            else:
-                code_seen[ckey] = i
-        key = (t["context"], t["term"])
-        if key in seen:
-            hit("duplicate", t["term"], f"コンテキスト {t['context']} で terms[{seen[key]}] と terms[{i}] が同じ語")
-        else:
-            seen[key] = i
+        _term_banned_findings(t, decl, hit)
+        _duplicate_findings(i, t, seen, code_seen, hit)
     return items
 
 
