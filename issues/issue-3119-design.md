@@ -137,7 +137,7 @@ NDF の確定仕様に ai-plugins の値や置き場を書き込まない。確�
 | `.ndf/worktree.json`（宣言） | ブランチの流れの 4 項目とレビューの単位の 5 行を持つ。ai-plugins の運用の値の正本（I1・I2） |
 | `docs/versioning-and-distribution.md`（正本の文書） | 「チャネルと ref」に各ブランチの役割、「正式版を出す」に選んで集める手順・戻すマージ・依存するスプリント・本番の不具合の直し・取り込み方を戻す条件と順序・レビューの単位の表を持つ（I3・I5） |
 | `AGENTS.md` | 「Git運用ルール」に起点と宛先、「版とリリースの方針」にチャネルの役割と取り込み方とレビューの単位の要点を持ち、手順は正本の文書へリンクする。「ベストプラクティス」の DO の宛先の行も合わせる（I4・I5） |
-| `CONTRIBUTING.md` | NDF のスプリントの外の変更の起点と宛先（決定 4）を持つ。「開発の進め方」の宛先と worktree を切る起点、「Pull Request を出す」の宛先の 3 か所（I5） |
+| `CONTRIBUTING.md` | NDF のスプリントの外の変更の起点と宛先（決定 4）を持つ。「開発の進め方」の宛先と worktree を切る起点、「一括の整形の前から続くブランチを取り込む」の取り込む先、「Pull Request を出す」の宛先の 4 か所（I5） |
 | `docs/plugin-development-guide.md` | 「プラグインの削除」の手順の宛先と `gh pr create` の例を決定 4 に合わせる（I5） |
 | `docs/specifications/ndf-branch-flow-declaration.md` | 末尾の「ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている」の 1 文を削除する。代わりの文は書かない（決定 5） |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 用語「戻すマージ」を足し、`glossary.py render` で作り直す |
