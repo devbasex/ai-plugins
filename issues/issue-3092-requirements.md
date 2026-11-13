@@ -77,7 +77,7 @@
   - 工程の定義の書式の検査に、依存として `jsonschema` を 1 つ足す（Serverless Workflow の Python の SDK は仕様 0.8 にしか対応しないため使わない）
   - DBOS は手元の 3.1.0 の系列のまま据え置き、版を上げない
   - リリースの時点で動いているスプリントと計画は、取り込みの副命令（`progress.py adopt`）で進行表へ取り込む
-- 前提 8: 設計の文書（[issues/issue-3092-design.md](issues/issue-3092-design.md) ・[issues/issue-3092-design-runtime.md](issues/issue-3092-design-runtime.md) ）は、設計単体の AI レビューを通した後、詳細設計（[issues/issue-3092-design-detail.md](issues/issue-3092-design-detail.md) ）へ進める。工程は #3144 https://github.com/devbasex/ai-plugins/issues/3144 が定める工程（設計単体の AI レビュー → 詳細設計）で、#3144 のリリースの後に通す。詳細設計は設計 PR に載せる
+- 前提 8: 設計の文書（`issues/issue-3092-design.md` ・`issues/issue-3092-design-runtime.md` ）は、設計単体の AI レビューを通した後、詳細設計（`issues/issue-3092-design-detail.md` ）へ進める。工程は #3144 https://github.com/devbasex/ai-plugins/issues/3144 が定める工程（設計単体の AI レビュー → 詳細設計）で、#3144 のリリースの後に通す。詳細設計は設計 PR に載せる
 - 前提 9: 詳細設計を載せた設計 PR が設計承認ゲートで再び承認されるまで、#3092 と、取り込んだ #3097・#3098 の実装へ進まない
 
 ## 対象範囲
