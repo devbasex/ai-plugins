@@ -152,10 +152,14 @@ def review_stop(hook_input: dict) -> dict | None:
     mark = read_mark(path) if path else None
     if mark is None:
         return None
-    rules = _load_rules()
-    if rules is None:
+    form = _read_report_form()
+    if form is None:
         return None
-    form, limit = rules
+    try:
+        limit = int(limits.value(PUSHBACK_POLICY, "attempts"))
+    except limits.LimitsError as e:
+        _stderr_warn("unattended-stop", str(e))
+        return None
     busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
     errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
     block, count = next_count(errors, mark.pushbacks, limit, busy)
@@ -166,19 +170,13 @@ def review_stop(hook_input: dict) -> dict | None:
     return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
 
 
-def _load_rules() -> tuple[ur.ReportForm, int] | None:
-    """区間の報告の契約と差し戻しの上限を読む。どちらかが読めなければ警告して None。"""
+def _read_report_form() -> ur.ReportForm | None:
+    """区間の報告の契約を読む。読めなければ警告して None。"""
     try:
-        form = ur.load_form()
+        return ur.load_form()
     except ur.FormError as e:
         _stderr_warn("unattended-stop", f"区間の報告の契約を読めない: {e}")
         return None
-    try:
-        limit = int(limits.value(PUSHBACK_POLICY, "attempts"))
-    except limits.LimitsError as e:
-        _stderr_warn("unattended-stop", str(e))
-        return None
-    return form, limit
 
 
 def _save_count(path: Path, mark: Mark, count: int) -> None:
