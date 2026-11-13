@@ -66,3 +66,14 @@ def test_heading_anchor_follows_github():
     assert md.heading_anchor("Sub `code` (x)!") == "sub-code-x"
     assert md.heading_anchor("決定 19: 包み（ラッパー）") == "決定-19-包みラッパー"
     assert md.headings("# A `b` [c](d)\n")[0].title == "A b c"
+
+
+def test_tables_in_picks_tables_of_the_sections_and_body_line_skips_the_head():
+    text = "# 題\n\n## A\n\n| x |\n| --- |\n| a1 |\n| a2 |\n\n## B\n\n| y |\n| --- |\n| b |\n"
+    secs = {s.heading.title: s for s in md.md_sections(text)}
+    got = md.tables_in(text, [secs["B"]])
+    assert [t.rows for t in got] == [[["b"]]]
+    assert [t.rows for t in md.tables_in(text, [secs["A"], secs["B"]])] == [[["a1"], ["a2"]], [["b"]]]
+    assert md.tables_in(text, []) == []
+    a = md.tables_in(text, [secs["A"]])[0]
+    assert [text.splitlines()[a.body_line(k)] for k in range(2)] == ["| a1 |", "| a2 |"]
