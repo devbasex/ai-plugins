@@ -138,6 +138,18 @@ def whole_timeout(a) -> int:
     return with_margin(limits["ci_wait_timeout"] if whole_on_ci(a) else limits["whole_timeout"])
 
 
+TRANSITION_KEYS = ("next", "on_fail", "skip_to")
+
+
+def _rewired(step: dict, removed_inputs, redirected_targets, next_id: str) -> dict:
+    """`step` の写し: 遷移（TRANSITION_KEYS）のうち `redirected_targets` へ向かうものを `next_id` へ付け替え、入力から
+    `removed_inputs` を除く。元の `step` は変えない。"""
+    step = {k: (next_id if k in TRANSITION_KEYS and v in redirected_targets else v) for k, v in step.items()}
+    if "inputs" in step:
+        step["inputs"] = [i for i in step["inputs"] if i not in removed_inputs]
+    return step
+
+
 def without_ci_wait(
     a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = (), merge_fail: str | None = None, force: bool = False
 ) -> list[dict]:
@@ -154,9 +166,7 @@ def without_ci_wait(
     gone = {"test-all", *drop}
     out = []
     for step in (s for s in steps if s["id"] not in gone):
-        step = {k: (after_whole if k in ("next", "on_fail", "skip_to") and val == "test-all" else val) for k, val in step.items()}
-        if "inputs" in step:
-            step["inputs"] = [i for i in step["inputs"] if i not in gone]
+        step = _rewired(step, gone, ("test-all",), after_whole)
         if merge_fail and step["id"] in ("merge", "merge-approved"):
             step["on_fail"] = merge_fail
         if merge_fail and step["id"] in (merge_fail, "fix"):
@@ -240,10 +250,7 @@ def without_local_tests(steps: list[dict], after_tests: str) -> list[dict]:
     gone |= {s["id"] for s in steps if s.get("inputs") and set(s["inputs"]) <= gone}
     out = []
     for step in (s for s in steps if s["id"] not in gone):
-        step = {k: (after_tests if k in ("next", "on_fail", "skip_to") and v in gone else v) for k, v in step.items()}
-        if "inputs" in step:
-            step["inputs"] = [i for i in step["inputs"] if i not in gone]
-        out.append(step)
+        out.append(_rewired(step, gone, gone, after_tests))
     return out
 
 
