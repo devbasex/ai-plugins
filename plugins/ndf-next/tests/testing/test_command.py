@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -10,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from ndf.testing import records, slots
+from ndf.testing import records, slots, waits
+from ndf.testing.limits import Limits
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
@@ -39,6 +41,17 @@ def project(tmp_path):
 def slots_dir(forbid_real_state):
     """枠の置き場。forbid_real_state が `NDF_TEST_SLOTS_DIR` をテストの一時ディレクトリへ向けている。"""
     return Path(os.environ[slots.SLOTS_DIR_ENV])
+
+
+def _at(seconds: float) -> str:
+    """記録の行の時刻（UTC の ISO 8601、秒まで）。実装の整形に頼らず作る。"""
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="seconds")
+
+
+def _slot_held_elsewhere(root: Path, directory: Path):
+    """別の実行が枠を 1 つ埋めている状態（上限 1 本の枠を持ち続ける）。"""
+    holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
+    return slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9)
 
 
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
@@ -97,7 +110,7 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     directory.mkdir(parents=True)
     records.append_event(
         directory,
-        {"at": datetime.fromtimestamp(time.time(), timezone.utc).isoformat(timespec="seconds"), "waited_seconds": 3, "result": "gave_up"},
+        {"at": _at(time.time()), "waited_seconds": 3, "result": "gave_up"},
     )
     proc = _ndf(["report", "--since", "1d"], tmp_path)
     out, _ = proc.communicate()
@@ -116,12 +129,9 @@ def test_report_refuses_a_wrong_period(tmp_path):
 
 
 def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(project, slots_dir):
-    from ndf.testing.limits import Limits
-
     root, bin_dir, log = project
     directory = slots_dir
-    holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
-    with slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9):
+    with _slot_held_elsewhere(root, directory):
         proc = _ndf(["run", "--wait-limit", "1", "--", "fakerun ."], root, bin_dir, log)
         out, err = proc.communicate()
     assert (proc.returncode, out) == (2, "")
@@ -150,10 +160,6 @@ def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):
 
 
 def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
-    import signal
-
-    from ndf.testing import waits
-
     root, bin_dir, log = project
     proc = _ndf(["run", "--", "fakerun . && sleep 60"], root, bin_dir, log)
     try:
@@ -170,14 +176,8 @@ def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
 
 
 def test_signal_while_waiting_for_a_slot_ends_the_wait(project, slots_dir):
-    import signal
-
-    from ndf.testing import waits
-    from ndf.testing.limits import Limits
-
     root, bin_dir, log = project
-    holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
-    with slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=slots_dir, read_memory=lambda: 10**9):
+    with _slot_held_elsewhere(root, slots_dir):
         proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log)
         try:
             # 枠が埋まっているので待ちに入る（起動して待ちに入るまでの時間を空ける）。待ちの間の SIGTERM で、
