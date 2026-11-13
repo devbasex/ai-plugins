@@ -606,9 +606,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 定義の改訂 | — | スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別 | — | — | — |
 | レビューの単位 | — | PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の `reviews` に書く | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | PR の種類 | — | NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
-| スプリントの PR | — | スプリントブランチからベースブランチへ出す、検査のプランの PR | — | — | — |
+| スプリントの PR | — | スプリントブランチからベースブランチへ出す、検査のプランの PR | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 対象の差分 | — | レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
-| 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | — |
+| 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 掛けるレビュー | — | レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 兆候 | — | AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない | — | — | — |
 | 兆候の基準ファイル | — | `scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON | — | — | — |
@@ -940,7 +940,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 結果の読み方 | — | CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 公開物 | — | 正式版ごとのリリースタグと GitHub Release の組 | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 反映失敗 | — | リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態 | — | — | `docs/specifications/ndf-release-via-cd.md` |
-| リリースブランチの PR | — | 選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR | — | — | — |
+| リリースブランチの PR | — | 選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 衝突の解消の差分 | — | スプリントブランチをリリースブランチへ集めるマージのコミットが、親を自動でマージし直した結果（衝突の印を含む）と比べて持つ差分。衝突の解消と、組み合わせのためにマージのコミットで足した変更が入る | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 衝突の解消のレビューの PR | — | 衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューで入った直しをリリースブランチへ移してから閉じる | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | リリースの PR | — | 本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める | — | — | — |

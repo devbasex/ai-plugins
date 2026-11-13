@@ -6909,13 +6909,13 @@
       "term": "スプリントの PR",
       "context": "ndf-workflow",
       "meaning": "スプリントブランチからベースブランチへ出す、検査のプランの PR",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "リリースブランチの PR",
       "context": "ndf-release",
       "meaning": "選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "対象の差分",
@@ -6927,7 +6927,7 @@
       "term": "未検査の差分",
       "context": "ndf-workflow",
       "meaning": "前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "衝突の解消の差分",
