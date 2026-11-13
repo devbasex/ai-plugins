@@ -333,7 +333,8 @@ def plan_sprint_check(a, repo: str) -> dict:
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
     """pace: normal のデプロイ。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
     単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、リリース承認ゲートの後に単独で流す（#1914）。
-    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
+    `advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。置くのは承認資料を組むプランだけで、
+    CD の無い場合は開発版、CD のある場合は本番（#2773 の決定 6。承認資料を本番の PR の先端で組む）である。
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
     version = version or (a.version if channel == "dev" else None)
@@ -352,7 +353,8 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         branch=branch,
         issue=a.issue,
         mode=a.mode,
-        advise=a.state if advise and channel == "dev" else None,
+        # 承認資料を組むプラン（release_templates の _dev_approval_steps を使う種類）だけが読む。CD の無い本番は組まないため読まない
+        advise=a.state if advise else None,
         state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
         units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )

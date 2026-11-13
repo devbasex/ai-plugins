@@ -2759,6 +2759,9 @@ def test_normal_sprint_with_cd_gates_inside_the_prod_plan(tmp_path, monkeypatch)
     steps = {s["id"]: s for s in json.loads(Path(prod["plans"][0]).read_text())["steps"]}
     assert "approve" not in steps and steps["approval-post"]["next"] == "end" and steps["approve-pr"]["next"] == "release"
     assert f"--answer-from {state}" in steps["approve-pr"]["cmd"]
+    # 助言の MVV 判定は承認資料と一緒に本番の release の後へ移り、承認資料を本番の PR へ置く前に判定を末尾へ足す（決定 6）
+    assert (steps["others"]["next"], steps["mvv"]["next"], steps["mvv-note"]["next"]) == ("mvv", "mvv-note", "approval-post")
+    assert "--gate release" in steps["mvv"]["cmd"] and steps["mvv"]["cmd"].endswith("--advise")
 
 
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):

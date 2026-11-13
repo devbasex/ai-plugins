@@ -313,7 +313,7 @@ def sprint_plans(a) -> list[dict]:
     if release_lane(a, repo):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（ゲートはオーガナイザーが出す。#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
-    prod_plan = {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}
+    prod_plan = {"release-prod": plan_sprint_release(a, repo, advise, channel="prod", version=prod)}
     return waves + normal_prod_waves(a, repo, release, prod_plan, first, prod, advise)
 
 
