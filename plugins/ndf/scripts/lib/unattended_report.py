@@ -135,8 +135,12 @@ def report_items(text: object) -> dict[str, str]:
     m = _last_result(text)
     if m is None:
         return {}
-    assert isinstance(text, str)
-    return {k.strip(): v for k, v in ITEM_RE.findall(text, m.start())}
+    return _items_after(m)
+
+
+def _items_after(m: re.Match) -> dict[str, str]:
+    """結果の行 `m` から後ろの `- <項目>: <値>` の行を項目の辞書にする。"""
+    return {k.strip(): v for k, v in ITEM_RE.findall(m.string, m.start())}
 
 
 def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[str]:
@@ -155,15 +159,14 @@ def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[
     return missing
 
 
-def _material_errors(text: str, items: dict[str, str], form: ReportForm) -> list[str]:
-    """材料の値が本文か URL か、本文なら見出しが区間の報告より前にあるかを確かめる。"""
+def _material_errors(text: str, m: re.Match, items: dict[str, str], form: ReportForm) -> list[str]:
+    """材料の値が本文か URL か、本文なら見出しが区間の報告（最後の結果の行 `m`）より前にあるかを確かめる。"""
     mat = form.material
     got = items.get(mat["item"], "")
     if got in ("", NONE_VALUE):
         return []
     if got == mat["body"]:
-        m = _last_result(text)
-        before = text[: m.start()] if m else ""
+        before = text[: m.start()]
         if any(line.strip() == mat["heading"] for line in before.splitlines()):
             return []
         return [ERR_NO_MATERIAL_HEADING.format(**mat)]
@@ -174,12 +177,13 @@ def _material_errors(text: str, items: dict[str, str], form: ReportForm) -> list
 
 def report_errors(text: object, form: ReportForm) -> list[str]:
     """応答の文が区間の報告の形に合わない理由を並べる（結果の値・要る項目・材料の順）。合えば空。"""
-    if _last_result(text) is None:
+    m = _last_result(text)
+    if m is None:
         return [ERR_NO_RESULT]
     assert isinstance(text, str)
-    value = result_value(text)
+    value = m.group(1)
     if value not in form.values:
         return [ERR_BAD_VALUE.format(values=" / ".join(form.values), value=value)]
-    items = report_items(text)
+    items = _items_after(m)
     errors = [ERR_MISSING.format(item=name, value=value) for name in _missing_items(value, items, form)]
-    return errors + _material_errors(text, items, form)
+    return errors + _material_errors(text, m, items, form)
