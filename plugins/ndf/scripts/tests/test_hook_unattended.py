@@ -181,6 +181,45 @@ def test_a_fitting_stop_resets_the_count_and_keeps_the_mark(home: Path):
     assert _stop() is not None and _count(home) == 1
 
 
+STALLED = (
+    "mode: standard\n根拠: 本番の振る舞いを変える\n"
+    '次のコマンド: python3 "$SCRIPTS/supervise.py" new sprint --name m6 --worktree /repo\n'
+    "  --issue 12 --design 12 --out /work/sprint-m6\n\n"
+    "## 区間の報告\n\n- 結果: できなかった\n- 課題: #12\n- 理由: スプリントのプランはまだ書き出していない\n"
+)
+
+
+def test_a_stop_that_leaves_the_next_command_unrun_is_pushed_back(home: Path):
+    _start()
+    got = _stop(STALLED)
+    assert got is not None and got["decision"] == "block" and un.ERR_NEXT_COMMAND in got["reason"]
+    assert _count(home) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        STALLED.replace("できなかった", "完了"),
+        "## 判断の材料\n\n要点。\n\n"
+        + STALLED.replace("- 結果: できなかった", "- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 有料の API を呼ぶか\n- 材料: 本文"),
+        STALLED.replace("次のコマンド: python3", "次のコマンド: 無し（supervisor で回す: 設計）\n# python3"),
+        STALLED.replace("次のコマンド:", "前に打ったコマンド:"),
+    ],
+)
+def test_the_next_command_rule_lets_other_stops_through(home: Path, text):
+    _start()
+    assert _stop(text) is None
+    assert _count(home) == 0
+
+
+def test_pending_command_errors_reads_only_a_line_with_a_command():
+    assert un.pending_command_errors(STALLED) == [un.ERR_NEXT_COMMAND]
+    assert un.pending_command_errors("- 次のコマンド: `/ndf:release`\n- 結果: できなかった\n") == [un.ERR_NEXT_COMMAND]
+    assert un.pending_command_errors("次のコマンド:\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("次のコマンド: /ndf:release\n- 結果: 完了\n") == []
+    assert un.pending_command_errors(None) == []
+
+
 @pytest.mark.parametrize("extra", [{"background_tasks": [{"id": "b1"}]}, {"session_crons": [{"id": "c1"}]}])
 def test_a_busy_stop_is_not_pushed_back_and_keeps_the_count(home: Path, extra):
     _start()

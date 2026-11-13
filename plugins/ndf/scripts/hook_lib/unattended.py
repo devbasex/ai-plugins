@@ -2,7 +2,8 @@
 
     UserPromptSubmit（`hook.py unattended-start`）: プロンプトの 1 行目が `/ndf:development-workflow`（前に `/goal ` を許す）なら
         印を作り、人のいない実行の決まりの案内を返す。worker・レビューの `claude -p` には印を付けない
-    Stop（`hook.py unattended-stop`）: 印のあるセッションで、最後の応答が区間の報告の形に合わなければ差し戻す。
+    Stop（`hook.py unattended-stop`）: 印のあるセッションで、最後の応答が区間の報告の形に合わないか、
+        `次のコマンド:` にコマンドを載せたまま結果が `判断が要る` でも `完了` でもなければ差し戻す。
         背景の作業か予定が残る Stop は差し戻さない。形に合わない Stop が続く間の差し戻しは上限の宣言
         （`hook.unattended-pushback`）の回数までで、形に合った Stop で数え直す
     SessionEnd（`hook.py unattended-end`）: 印を消す。消し残した印は次の `unattended-start` が `hook.unattended-mark` の秒を過ぎたものから消す
@@ -30,6 +31,14 @@ MARK_DIR_NAME = "unattended"
 PUSHBACK_POLICY = "hook.unattended-pushback"
 MARK_POLICY = "hook.unattended-mark"
 FORM_REL = "${CLAUDE_PLUGIN_ROOT}/contracts/forms/unattended-report.json"
+# 判定結果の `次のコマンド:` の行（前に `- ` を許す）。値が空か `無し` で始まればコマンドが無い
+NEXT_COMMAND_RE = re.compile(r"^[ \t]*(?:-[ \t]*)?次のコマンド:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+# `次のコマンド:` を打たずに区間を終えてよい結果の値（承認ゲート・区分の問いと、工程を通し切ったとき）
+STOP_RESULTS = ("判断が要る", "完了")
+ERR_NEXT_COMMAND = (
+    "`次のコマンド:` にコマンドが載ったまま区間を終えようとしている。止まる理由（承認ゲート・区分のある問い・人の操作・"
+    "続けられない理由）に当たらなければ、区間を終えずにそのコマンドを打って続ける"
+)
 RULE_REF = "development-workflow の references/asking.md の「人のいない実行」"
 
 GUIDE = (
@@ -110,6 +119,16 @@ def next_count(errors: list[str], pushbacks: int, limit: int, busy: bool) -> tup
     return False, pushbacks
 
 
+def pending_command_errors(text: object) -> list[str]:
+    """`次のコマンド:` にコマンドが載ったまま、結果が `STOP_RESULTS` のどれでもなければ誤りを 1 つ返す。"""
+    if not isinstance(text, str):
+        return []
+    commands = [v for v in NEXT_COMMAND_RE.findall(text) if v and not v.startswith(ur.NONE_VALUE)]
+    if not commands or ur.result_value(text) in STOP_RESULTS:
+        return []
+    return [ERR_NEXT_COMMAND]
+
+
 def pushback_reason(errors: list[str], remaining: int) -> str:
     """差し戻しの文（誤りの一覧・契約のファイルのパス・残りの差し戻しの回数）。"""
     lines = "\n".join(f"- {e}" for e in errors)
@@ -161,7 +180,8 @@ def review_stop(hook_input: dict) -> dict | None:
         _stderr_warn("unattended-stop", str(e))
         return None
     busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
-    errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
+    text = hook_input.get("last_assistant_message")
+    errors = ur.report_errors(text, form) + pending_command_errors(text)
     block, count = next_count(errors, mark.pushbacks, limit, busy)
     if count != mark.pushbacks:
         _save_count(path, mark, count)

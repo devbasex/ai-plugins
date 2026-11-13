@@ -137,7 +137,7 @@ hook の無いランタイムでは、区分に当たる問いを本文か各ラ
 | 事象 | 起動 | 働き |
 |---|---|---|
 | UserPromptSubmit | `python3 scripts/hook.py unattended-start` | プロンプトの 1 行目が `/ndf:development-workflow` のセッションに人のいない実行の印を付け、決まりの案内を渡す |
-| Stop | `python3 scripts/hook.py unattended-stop` | 印のあるセッションで、最後の応答が区間の報告（`contracts/forms/unattended-report.json`）の形に合わなければ差し戻す（続けて 2 回まで） |
+| Stop | `python3 scripts/hook.py unattended-stop` | 印のあるセッションで、最後の応答が区間の報告（`contracts/forms/unattended-report.json`）の形に合わないか、`次のコマンド:` にコマンドが載ったまま結果が `判断が要る` でも `完了` でもなければ差し戻す（続けて 2 回まで） |
 | SessionEnd | `python3 scripts/hook.py unattended-end` | 印を消す |
 
 ## Slack 通知
