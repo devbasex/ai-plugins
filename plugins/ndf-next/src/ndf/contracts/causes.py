@@ -225,14 +225,15 @@ def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: 
         raise ValueError(f"打ち直しの回数は 0 以上: {state.used}")
     default = row(kind).route
     target = on_cause.get(kind)
-    if target is not None:
-        if target == RETRY:
-            return _retry_or_next(kind, on_fail, state)
-        if target in (END, STOP):
-            return Route(target, None, 0.0, kind)
-        return Route(STEP, target, 0.0, kind)
-    if default == RETRY:
+    # 行き先の語: on_cause の指定があればそれ、無ければ種類の既定（retry・step・human）
+    to = default if target is None else target
+    if to == RETRY:
         return _retry_or_next(kind, on_fail, state)
-    if default == STEP and on_fail:
+    if to in (END, STOP):
+        return Route(to, None, 0.0, kind)
+    if target is not None:
+        # 指定はステップの id
+        return Route(STEP, target, 0.0, kind)
+    if to == STEP and on_fail:
         return Route(STEP, on_fail, 0.0, kind)
     return Route(HUMAN, None, 0.0, kind)
