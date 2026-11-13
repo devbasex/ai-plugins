@@ -1248,24 +1248,25 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     monkeypatch.setattr(
         rv, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "", "")
     )
-    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found)
-    monkeypatch.setattr(mod, "_merge_release_pr", lambda *a: (7, 7, "c"))
-    monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: "m")
     monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
-    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
     monkeypatch.setattr(rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由"))
     monkeypatch.setattr(rv, "wait_ci_except", lambda *a: ci.append(a[2]))
     monkeypatch.setattr(rv, "wait_trail_status", lambda *a: None)
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: merged.append(kw) or "m")
-    monkeypatch.setattr(
-        mod, "_published", lambda r, a, plugin, prod, main_pr, *rest: published.append(main_pr) or (_ for _ in ()).throw(SystemExit({}))
+    ops = rv.ProdOps(
+        find_pr=lambda r, head, base, states: found,
+        create_pr=lambda *a: 9,
+        merge_commit_of=lambda r, n: "m",
+        merge_release_pr=lambda *a: (7, 7, "c"),
+        published=lambda r, a, plugin, prod, main_pr, *rest: published.append(main_pr) or (_ for _ in ()).throw(SystemExit({})),
+        wait_and_merge=lambda r, n, **kw: merged.append(kw) or "m",
+        pr_check_buckets=lambda r, n: [],
     )
     codes = _exits(monkeypatch, rv)
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0)
     with pytest.raises(SystemExit) as e:
-        rv.release_prod(tmp_path, a, _case(mod, case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", mod)
+        rv.release_prod(tmp_path, a, _case(mod, case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", ops)
     return e.value.code, (codes[-1] if codes else None), merged, published, ci
 
 

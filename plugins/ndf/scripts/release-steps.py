@@ -680,7 +680,7 @@ def cmd_release(a):
         got = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops, case if on_pr else None)
         _published(root, a, plugin, prod, *got)
     if on_pr:
-        reviewed.release_prod(root, a, case, plugin, plugins, branch, base, prod, sys.modules[__name__])
+        reviewed.release_prod(root, a, case, plugin, plugins, branch, base, prod, _prod_ops())
     if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)):
         reviewed.release_dev(root, a, plugin, plugins, branch, base, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
@@ -733,6 +733,19 @@ def cmd_release(a):
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _prod_ops() -> reviewed.ProdOps:
+    """CD のある場合の本番が呼ぶ操作（呼ぶ時点のこのモジュールの関数）。"""
+    return reviewed.ProdOps(
+        find_pr=find_pr,
+        create_pr=create_pr,
+        merge_commit_of=merge_commit_of,
+        merge_release_pr=_merge_release_pr,
+        published=_published,
+        wait_and_merge=wait_and_merge,
+        pr_check_buckets=pr_check_buckets,
+    )
 
 
 def _prepare_release_branch(root, a, plugin) -> str:

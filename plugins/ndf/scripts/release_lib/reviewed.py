@@ -5,15 +5,17 @@ approval-check・approval-post・release-case から分けた）。
 - 開発版: 宣言 `release.dev_workflow` の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
-`ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・pr_check_buckets・_merge_release_pr・
-_reusable_release_pr・_release_pr_body・_published）。出す（emit）のはここで、終了コードは `step_result` の値を使う。
+本番の `ops` は `ProdOps`、開発版の `ops` は `release-steps.py`（find_pr・create_pr・merge_commit_of・_reusable_release_pr・
+_release_pr_body）。出す（emit）のはここで、終了コードは `step_result` の値を使う。
 """
 
 from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import ci_workflows
 import delivery
@@ -51,7 +53,20 @@ def repo_or_stop(root):
     return repo
 
 
-def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
+@dataclass(frozen=True)
+class ProdOps:
+    """CD のある場合の本番（`release_prod`）が呼ぶ GitHub とリリースの操作。`release-steps.py` が組んで渡す。"""
+
+    find_pr: Callable  # (root, head, base, states) -> {"number", "state"} | None
+    create_pr: Callable  # (root, base, head, title, body) -> int
+    merge_commit_of: Callable  # (root, n) -> str | None
+    merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
+    published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics) 公開の後。結果を出して終わる
+    wait_and_merge: Callable  # (root, n, *, expect, ci_wait, gate_approved, no_admin) -> マージコミット
+    pr_check_buckets: Callable  # (root, n) -> チェックの並び
+
+
+def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops: ProdOps):
     """場合 1・2 の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → 迂回なしのマージ → 公開の後（#2773）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
     ver = a.version
@@ -64,13 +79,13 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
         git(root, "fetch", "-q", "origin")
         merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
         items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
-        ops._published(root, a, plugin, prod, done["number"], merge, items, metrics)
+        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics)
     if done:
         main_pr = done["number"]
     else:
         if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
             raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
-        release_pr, merged_pr, _ = ops._merge_release_pr(root, a, plugin, plugins, branch, base)
+        release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
         metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
         repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
         title = f"Release: {plugin} v{ver} を {prod} へ"
@@ -98,7 +113,7 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
     )
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": False})
     git(root, "fetch", "-q", "origin")
-    ops._published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
+    ops.published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
 
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
