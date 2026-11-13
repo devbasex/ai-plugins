@@ -89,9 +89,9 @@ wt_follow_enabled() {
   printf '%s' "$decl" | jq -e '.follow_branch == true' >/dev/null 2>&1 || return 1
 }
 
-# 既定ブランチの候補を読む `branch_flow.py` の置き場。source した時点の自分の位置から決める
+# 既定ブランチの候補を出す `default_branch_candidates.py`（`branch_flow.py` の定数を読む）の置き場。source した時点の自分の位置から決める
 # （`worktree-common.sh` と同じく、`cd` で戻らずプラグインルートを外さない）。
-_WT_BRANCH_FLOW_PY="$(dirname "${BASH_SOURCE[0]}")/branch_flow.py"
+_WT_BRANCH_FLOW_PY="$(dirname "${BASH_SOURCE[0]}")/default_branch_candidates.py"
 
 # 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
 # 取れなければ `branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` の順で存在するものを返す。
@@ -104,7 +104,7 @@ wt_default_branch() {
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
-  if ! candidates=$(python3 -I "$_WT_BRANCH_FLOW_PY" default-candidates 2>/dev/null); then
+  if ! candidates=$(python3 -I "$_WT_BRANCH_FLOW_PY" 2>/dev/null); then
     printf 'NOTE: 既定ブランチの候補を %s から読めません\n' "$_WT_BRANCH_FLOW_PY" >&2
     return 1
   fi
