@@ -27,7 +27,7 @@ from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 class ReleaseBranches(NamedTuple):
     """選んで集める取り込み方のリリースが使う 3 つのブランチの役割。"""
 
-    release: str  # リリースブランチ（release/v<版>）
+    release: str  # リリースブランチ
     base: str  # 戻すマージの宛先のベースブランチ（開発版のチャネル）
     production: str  # 本番チャネル
 
