@@ -6804,6 +6804,20 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "詳細設計",
+      "context": "ndf-workflow",
+      "meaning": "設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める",
+      "source": "",
+      "pending_source": "issues/issue-3144-requirements.md"
+    },
+    {
+      "term": "異常系の処理",
+      "context": "ndf-workflow",
+      "meaning": "関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める",
+      "source": "",
+      "pending_source": "issues/issue-3144-requirements.md"
+    },
+    {
       "term": "進行表",
       "context": "ndf-workflow",
       "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える",
