@@ -84,7 +84,7 @@
     "relay.login-exit": {"summary": "ログインの 2 回目が待機中のログインの終了を待つ上限", "seconds": 60},
     "relay.claude-auth": {"summary": "claude auth の副命令の上限", "seconds": 30},
     "relay.runtime-install": {"summary": "ラッパーの実行環境を用意するコマンドの上限", "seconds": 600},
-    "repo.production-fetch": {"summary": "本番チャネルを origin から取り込み直す上限。応答の無い origin でリリースのプランの組み立てを止め続けないため（#3308）", "seconds": 60},
+    "repo.production-fetch": {"summary": "本番チャネルを origin から取り込み直す上限。応答の無い origin でリリースのプランの組み立てを止め続けないため", "seconds": 60},
     "release-steps.head-moved": {"summary": "先端が動いたときに比べ直して入れ直す回数（最初の 1 回を含む）", "attempts": 4},
     "release-steps.trail-status": {"summary": "承認の証跡を置いた後に、証跡のチェック（ndf/release-approval）が success になるまで待つ上限と間隔", "seconds": 600, "interval": 10},
     "release-steps.ci-wait": {"summary": "CD のある場合の本番の PR で、証跡のチェックを除くチェックを読み直す間隔。上限は --ci-wait で渡す", "seconds": 3600, "interval": 15},
