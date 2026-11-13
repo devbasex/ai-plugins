@@ -86,9 +86,10 @@ def _json_arg(text: str) -> Any:
         raise argparse.ArgumentTypeError(f"JSON として読めない: {exc}") from None
 
 
-def _cmd_emit(a: argparse.Namespace) -> int:
+def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
+    """`emit` の引数から結果を組む（確かめない）。"""
     cause = causes.build(a.cause[0], a.cause[1], instance=a.cause_instance, retry_after=a.retry_after) if a.cause else None
-    obj = result.result(
+    return result.result(
         a.tool,
         a.status,
         a.summary,
@@ -100,6 +101,10 @@ def _cmd_emit(a: argparse.Namespace) -> int:
         next=a.next,
         presentation_path=a.presentation_path,
     )
+
+
+def _cmd_emit(a: argparse.Namespace) -> int:
+    obj = _result_from_args(a)
     code = a.code if a.code is not None else result.code_for(obj)
     if a.out is not None and code is not None and not result.errors(obj, code):
         Path(a.out).write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
