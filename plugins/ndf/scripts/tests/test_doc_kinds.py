@@ -188,3 +188,19 @@ def test_the_readers_stop_on_an_unreadable_contract(tmp_path) -> None:
         classifications.oversized_design_docs(tmp_path, ["issues/issue-7-design.md"])
     with pytest.raises(doc_kinds.DocKindsError):
         categories._is_design_doc_path("issues/issue-7-design.md")
+
+
+def test_has_flag_keeps_the_readers_matching(tmp_path) -> None:
+    """現状固定: 置き場の見方は placed で変わり、末尾が重なるときは最長一致の種類の真偽でなく、真の末尾のどれかで終わるかで決まる。"""
+    row = {"line_limit": False, "glossary": False, "review": False}
+    kinds = [{**row, "kind": "a", "suffix": "-x.md", "line_limit": True}, {**row, "kind": "b", "suffix": "-y-x.md", "review": True}]
+    doc_kinds.use_contract(_contract(tmp_path, kinds))
+    assert doc_kinds.doc_kind("issues/issue-1-y-x.md") == "b"
+    assert doc_kinds.has_flag("issues/issue-1-y-x.md", "line_limit") and doc_kinds.has_flag("issues/issue-1-y-x.md", "review")
+    assert not doc_kinds.has_flag("issues/issue-1-x.md", "review")
+    assert not doc_kinds.has_flag("docs/issue-1-x.md", "line_limit")
+    assert doc_kinds.has_flag("docs/issue-1-x.md", "line_limit", placed=False)
+    assert not doc_kinds.has_flag("issues/issue-1-z.md", "line_limit", placed=False)
+    doc_kinds.use_contract(tmp_path / "missing.json")
+    with pytest.raises(doc_kinds.DocKindsError):
+        doc_kinds.has_flag("issues/issue-1-x.md", "line_limit")
