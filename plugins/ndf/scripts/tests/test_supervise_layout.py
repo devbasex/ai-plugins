@@ -344,3 +344,46 @@ def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monke
     assert p.returncode == 0, p.stdout + p.stderr
     ids = {s["id"] for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
     assert ("test-all" in ids) is not cd
+
+
+# --- lib_imports の現状固定（I-020） ---
+
+_LIB_IMPORTS_SRC = """\
+import os
+import supervise_lib
+import supervise_lib.j
+import supervise_lib.k.l, json
+from os import path
+from supervise_lib import a, b
+from supervise_lib.c import x
+from supervise_lib.d.e import y
+from . import f, g
+from .h import z
+from ..i import w
+
+
+def nested():
+    from supervise_lib import m
+    import supervise_lib.n
+"""
+
+
+def test_lib_imports_reads_every_form_of_import(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text(_LIB_IMPORTS_SRC, encoding="utf-8")
+    assert lib_imports("mod") == {"a", "b", "c", "d.e", "f", "g", "h", "i", "j", "k.l", "m", "n"}
+
+
+def test_lib_imports_is_empty_without_supervise_lib_imports(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text("import os\nfrom os import path\nimport supervise_libx\n", encoding="utf-8")
+    assert lib_imports("mod") == set()
+
+
+# NOTE: 現状固定。`supervise_lib` で始まる別名のモジュール（`supervise_libx`）からの
+#       `from ... import` は `.` を持たないため IndexError で落ちる。
+def test_lib_imports_fails_on_a_module_that_only_shares_the_prefix(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text("from supervise_libx import q\n", encoding="utf-8")
+    with pytest.raises(IndexError):
+        lib_imports("mod")
