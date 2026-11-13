@@ -125,3 +125,48 @@ def test_row_schema_accepts_empty_id():
     from jsonschema import Draft202012Validator
 
     assert list(Draft202012Validator(facts.row_schema({})).iter_errors({"id": ""})) == []
+
+
+# 現状固定テスト（I-003）: 最上位の定数の拾い方。代入の形ごとに拾う・拾わないを固定する。
+
+CONST_SOURCE = """\
+import os
+NAME = "release"
+_PRIVATE = 3
+A = B = ("x", "y")
+LIMIT: int = 5
+WIDTH: float
+lower = "skip"
+X, Y = "p", "q"
+OBJ.ATTR = "skip"
+FLAG = True
+CALL = os.getenv("X")
+ONE = ("only",)
+SET = frozenset({"m", "n"})
+KEYS = {"k1": 1, "k2": 2}
+MIXED = ("a", 1)
+AUG = 1
+AUG += 1
+def f():
+    INNER = "skip"
+if True:
+    NESTED = "skip"
+"""
+
+
+def test_consts_picks_top_level_constants_by_assignment_form():
+    import ast
+
+    found = facts.consts(ast.parse(CONST_SOURCE), "src/ndf/a.py")
+    assert [(c.line, c.name, c.value) for c in found] == [
+        (2, "NAME", "release"),
+        (3, "_PRIVATE", 3),
+        (4, "A", frozenset({"x", "y"})),
+        (4, "B", frozenset({"x", "y"})),
+        (5, "LIMIT", 5),
+        (13, "SET", frozenset({"m", "n"})),
+        (14, "KEYS", frozenset({"k1", "k2"})),
+        (16, "AUG", 1),
+    ]
+    assert {c.rel for c in found} == {"src/ndf/a.py"}
+    assert found[0].place == "src/ndf/a.py:2 NAME"
