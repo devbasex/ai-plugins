@@ -1,0 +1,101 @@
+{
+  "name": "unattended-report",
+  "summary": "人のいない実行（NDF_FACTORY_RUN）の conductor が区間を終える最後の応答の末尾に置く区間の報告。Factory のランナーは結果の行の値で区間の結果を決め、ほかの項目は人が読む",
+  "rule": "結果の行は ndf-next-block の規則の後半と同じく、応答の文の最後の「- 結果:」の行の値（前後の空白を除く）。値は shape.values のどれか。結果の行より後ろの「- <項目>: <値>」の行を項目として読み（同じ項目が 2 つあれば後ろ）、shape.required が値ごとに要る項目（無しにしない）を決める。材料の値は shape.material.body（区間の報告より前に shape.material.heading の節が要る）か、shape.material.url_prefix で始まる URL を空白で区切ったもの",
+  "shape": {
+    "values": {
+      "判断が要る": "承認ゲートか、承認を求める区分の問いで止まった。人の答えで次の区間を始める",
+      "完了": "工程を最後まで通した。ndf-next のブロックがあればカットポイントで、次の区間はブロックの中身で始まる",
+      "できなかった": "続けられない理由に当たったか、人の操作が要る"
+    },
+    "items": ["結果", "課題", "区分", "承認ゲート", "問い", "Pull Request", "材料", "人に頼むこと", "理由"],
+    "material": {"item": "材料", "body": "本文", "heading": "## 判断の材料", "url_prefix": "https://"},
+    "required": {
+      "判断が要る": {
+        "always": ["区分", "問い", "材料"],
+        "when": [{"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート", "Pull Request"]}]
+      },
+      "完了": {"always": [], "when": []},
+      "できなかった": {
+        "always": ["理由"],
+        "when": [{"item": "区分", "equals": "ndf-ask:human-action", "need": ["人に頼むこと"]}]
+      }
+    }
+  },
+  "writers": [
+    "plugins/ndf/skills/development-workflow/references/asking.md"
+  ],
+  "readers": [
+    "plugins/ndf/scripts/lib/unattended_report.py"
+  ],
+  "cases": [
+    {
+      "text": "## 判断の材料\n\n設計の要点と未決の 2 件。\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-gate:1\n- 承認ゲート: 設計 Pull Request のマージ\n- 問い: 設計 Pull Request をマージしてよいか\n- Pull Request: https://github.com/example/repo/pull/34\n- 材料: 本文\n- 人に頼むこと: 無し\n- 理由: 無し\n",
+      "result": "判断が要る",
+      "errors": []
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-ask:cost\n- 承認ゲート: 無し\n- 問い: 有料の API を 1 回呼んでよいか\n- Pull Request: 無し\n- 材料: https://github.com/example/repo/issues/12#issuecomment-1\n- 人に頼むこと: 無し\n- 理由: 無し\n",
+      "result": "判断が要る",
+      "errors": []
+    },
+    {
+      "text": "工程を最後まで通した。\n\n## 区間の報告\n\n- 結果: 完了\n- 課題: #1\n- 区分: 無し\n- 承認ゲート: 無し\n- 問い: 無し\n- Pull Request: https://github.com/example/repo/pull/2\n- 材料: 無し\n- 人に頼むこと: 無し\n- 理由: 無し\n",
+      "result": "完了",
+      "errors": []
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: できなかった\n- 課題: #5\n- 区分: ndf-ask:human-action\n- 承認ゲート: 無し\n- 問い: 無し\n- Pull Request: 無し\n- 材料: 無し\n- 人に頼むこと: 試しの系へ対話でログインする\n- 理由: 外部の系の手動確認が要る\n",
+      "result": "できなかった",
+      "errors": []
+    },
+    {
+      "text": "## 確認したいこと\n\n1. .ndf/ をコミットするか。\n\n「進めて」と返してもらえれば続けます。\n",
+      "result": "",
+      "errors": ["結果の行が無い"]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: 保留\n- 課題: #1\n",
+      "result": "保留",
+      "errors": ["結果の値が 判断が要る / 完了 / できなかった のどれでもない: 保留"]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #1\n- 区分: ndf-ask:legal\n- 問い: 無し\n- 材料: 無し\n",
+      "result": "判断が要る",
+      "errors": [
+        "「問い」が無いか無しになっている（結果が 判断が要る のとき要る）",
+        "「材料」が無いか無しになっている（結果が 判断が要る のとき要る）"
+      ]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: できなかった\n- 課題: #1\n- 理由: 無し\n",
+      "result": "できなかった",
+      "errors": ["「理由」が無いか無しになっている（結果が できなかった のとき要る）"]
+    },
+    {
+      "text": "## 判断の材料\n\n設計の要点。\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-gate:1\n- 承認ゲート: 設計 Pull Request のマージ\n- 問い: 設計 Pull Request をマージしてよいか\n- Pull Request: 無し\n- 材料: 本文\n",
+      "result": "判断が要る",
+      "errors": ["「Pull Request」が無いか無しになっている（結果が 判断が要る のとき要る）"]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: できなかった\n- 課題: #5\n- 区分: ndf-ask:human-action\n- 人に頼むこと: 無し\n- 理由: 外部の系の手動確認が要る\n",
+      "result": "できなかった",
+      "errors": ["「人に頼むこと」が無いか無しになっている（結果が できなかった のとき要る）"]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-ask:redline:C4\n- 問い: 履歴を書き換えてよいか\n- 材料: 本文\n",
+      "result": "判断が要る",
+      "errors": ["「材料」が本文なのに、区間の報告より前に「## 判断の材料」の節が無い"]
+    },
+    {
+      "text": "## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-ask:irreversible\n- 問い: データを消してよいか\n- 材料: /work/repo/.ndf/approval-request.md\n",
+      "result": "判断が要る",
+      "errors": ["「材料」が本文でも https:// の URL でもない: /work/repo/.ndf/approval-request.md"]
+    },
+    {
+      "text": "- 結果: 判断が要る\n\n再開した。\n\n## 区間の報告\n\n- 結果: 完了\n- 課題: #7\n",
+      "result": "完了",
+      "errors": []
+    }
+  ]
+}

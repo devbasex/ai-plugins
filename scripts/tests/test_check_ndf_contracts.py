@@ -902,6 +902,63 @@ def test_load_rejects_malformed_items_per_kind(tmp_path: Path, kind, fname, data
     assert message in str(e.value)
 
 
+# --- 形の宣言（shape）と区間の報告の例の組（#3242） ---
+
+REPORT_FORM = json.loads((REPO / _model.CONTRACTS / "forms" / "unattended-report.json").read_text(encoding="utf-8"))
+
+
+def _report_form(**shape) -> dict:
+    return dict(REPORT_FORM, name="f", shape={**REPORT_FORM["shape"], **shape})
+
+
+def test_the_unattended_report_form_and_shapeless_forms_load(tmp_path: Path):
+    """プラグインの区間の報告の契約（shape つき）と、shape の無い既存の形をどちらも通す。"""
+    c = _load_one(tmp_path, "forms", "f.json", _report_form())
+    assert c.forms["f"]["shape"] == REPORT_FORM["shape"]
+    assert _load_one(tmp_path, "forms", "f.json", FORM).forms == {"f": FORM}
+
+
+def test_a_report_case_with_an_empty_when_loads(tmp_path: Path):
+    """when が空の値（完了）と、区間の報告の例の組の形（text・result・errors）を通す。"""
+    req = {**REPORT_FORM["shape"]["required"], "判断が要る": {"always": ["区分"], "when": []}}
+    cases = [{"text": "- 結果: 完了\n", "result": "完了", "errors": []}]
+    data = dict(_report_form(required=req), cases=cases)
+    assert _load_one(tmp_path, "forms", "f.json", data).forms["f"]["cases"] == cases
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        (_report_form(values=["完了"]), "values の型が違う"),
+        (_report_form(values={}), "shape.values は値 → 意味"),
+        (_report_form(items=[]), "shape.items は空でない"),
+        (_report_form(material={"item": "材料", "body": "本文", "url_prefix": "https://"}), "shape.material は"),
+        (_report_form(material={"item": "無い項目", "body": "本文", "heading": "## h", "url_prefix": "https://"}), "material.item は"),
+        (_report_form(required={"完了": {"always": [], "when": []}}), "required のキーは values と同じ集合"),
+        (
+            _report_form(required={**REPORT_FORM["shape"]["required"], "完了": {"when": []}}),
+            "required.完了 は always（並び）と when（並び）を持つ",
+        ),
+        (
+            _report_form(required={**REPORT_FORM["shape"]["required"], "完了": {"always": ["無い項目"], "when": []}}),
+            "required.完了.always は items の項目名",
+        ),
+        (
+            _report_form(
+                required={**REPORT_FORM["shape"]["required"], "完了": {"always": [], "when": [{"item": "区分", "need": ["理由"]}]}}
+            ),
+            "required.完了.when の要素は",
+        ),
+        (dict(_report_form(), shape=[]), "shape の型が違う"),
+        (dict(_report_form(), cases=[{"text": "t", "result": "", "errors": [1]}]), "cases[0].errors は文字列の並び"),
+    ],
+)
+def test_a_malformed_shape_or_report_case_is_refused(tmp_path: Path, data, message):
+    with pytest.raises(_model.ContractError) as e:
+        _load_one(tmp_path, "forms", "f.json", data)
+    assert message in str(e.value)
+
+
 def test_load_accepts_setting_key_extras_and_place(tmp_path: Path):
     keys = {"k": {"summary": "s", "migrate_from": "o", "duplicates": [], "place": "worktree"}}
     c = _load_one(tmp_path, "settings", "s.json.json", dict(SETTING_ITEM, keys=keys))

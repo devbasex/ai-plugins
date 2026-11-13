@@ -330,6 +330,7 @@ conductor が読む量は変わらない。
 ## conductor の報告
 
 conductor は到達したときと止まったときに、利用者への応答の末尾へ次の表を置く。
+人のいない実行（`NDF_FACTORY_RUN`）では、表の後ろに区間の報告を置いて区間を終える（[asking.md](asking.md) の「人のいない実行」）。
 
 ```markdown
 ## フェーズの一覧

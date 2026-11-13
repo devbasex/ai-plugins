@@ -1,5 +1,5 @@
 {
   "name": "NDF_FACTORY_RUN",
   "set_by": "runtime",
-  "summary": "サービスの実行ジョブの中で 1 を立てる（#2439 の I68）。あるとき parallel.py init・start・run は 1 台の中のオーガナイザーを起動せずに断る（plugins/ndf/scripts/parallel.py）。実行環境の調査は動く場所を factory と報告する（plugins/ndf/scripts/lib/run_environment.py）"
+  "summary": "サービスの実行ジョブの中で 1 を立てる（#2439 の I68）。あるとき parallel.py init・start・run は 1 台の中のオーガナイザーを起動せずに断る（plugins/ndf/scripts/parallel.py）。実行環境の調査は動く場所を factory と報告する（plugins/ndf/scripts/lib/run_environment.py）。hook の登録の行（plugins/ndf/hooks/claude.json）は、あるときだけ hook.py unattended-start・unattended-stop・unattended-end を起動し、人のいない実行の conductor のセッションに印を付けて区間の報告の無い最後の応答を差し戻す（#3242。plugins/ndf/scripts/hook_lib/unattended.py）"
 }

@@ -1,0 +1,10 @@
+{
+  "name": "unattended-mark-json",
+  "pattern": "*.json",
+  "kind": "state",
+  "place": "state-dir",
+  "skill_readers": [],
+  "writers": [
+    "plugins/ndf/scripts/hook_lib/unattended.py:write_mark"
+  ]
+}
