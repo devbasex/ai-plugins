@@ -44,6 +44,20 @@ def use_contract(path) -> None:
     _path = DECLARATION if path is None else Path(path)
 
 
+def _validate_row(row, where: str, seen: set[str]) -> None:
+    """種類の行 1 件を確かめ、種類を `seen` へ足す。"""
+    if not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("suffix"), str):
+        raise DocKindsError(f"設計文書の種類の契約 {where} の行に kind と suffix が要る: {row!r}")
+    if row["kind"] in seen:
+        raise DocKindsError(f"設計文書の種類の契約 {where} に同じ種類が 2 つある: {row['kind']}")
+    seen.add(row["kind"])
+    for flag in _FLAGS:
+        if not isinstance(row.get(flag), bool):
+            raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の {flag} は真偽の値: {row.get(flag)!r}")
+    if "template" in row and not isinstance(row["template"], str):
+        raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の template は文字列")
+
+
 def _validate(raw, where: str) -> tuple[str, tuple[dict, ...]]:
     if not isinstance(raw, dict) or raw.get("version") != VERSION:
         raise DocKindsError(f"設計文書の種類の契約 {where} の形が違う（version {VERSION} が要る）")
@@ -52,16 +66,7 @@ def _validate(raw, where: str) -> tuple[str, tuple[dict, ...]]:
         raise DocKindsError(f"設計文書の種類の契約 {where} に dir と空でない kinds が要る")
     seen: set[str] = set()
     for row in kinds:
-        if not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("suffix"), str):
-            raise DocKindsError(f"設計文書の種類の契約 {where} の行に kind と suffix が要る: {row!r}")
-        if row["kind"] in seen:
-            raise DocKindsError(f"設計文書の種類の契約 {where} に同じ種類が 2 つある: {row['kind']}")
-        seen.add(row["kind"])
-        for flag in _FLAGS:
-            if not isinstance(row.get(flag), bool):
-                raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の {flag} は真偽の値: {row.get(flag)!r}")
-        if "template" in row and not isinstance(row["template"], str):
-            raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の template は文字列")
+        _validate_row(row, where, seen)
     return place.strip("/"), tuple(kinds)
 
 
