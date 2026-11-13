@@ -5,6 +5,7 @@
 - **今どうなっているか**: 設計の工程が決めるのは、構成要素・データ構造・入出力の契約・処理の流れまでである。ファイルの置き場・関数の分け方・関数ごとの責務と失敗の扱いは、設計承認ゲートの後に実装計画と実装の中で決まり、設計レビューに現れない
 - **誰に効くか**: `standard`・`legacy-refactor` の変更を設計 Pull Request で承認する利用者と、その設計をレビューする `cross-review` の担当
 - **変えると何が成り立つか**: 設計の直後に詳細設計の工程が入り、ファイル配置・関数の責務・異常系の処理が設計 Pull Request に載る。責務の混在・重複・置き場の誤り・失敗の扱いの抜けを、実装の前に設計レビューで止められる
+- **詳細設計の土台**: 詳細設計に入る前に、設計文書だけを 1 つの AI がレビューし、指摘を直す。詳細設計は直した設計の上に書く
 
 ## 適用範囲
 
@@ -54,21 +55,24 @@
 | I4 | 詳細設計の文書 | 関数の仕様の表で副作用のある関数（副作用の列が `無し` でない行）は、異常系の処理の表に 1 行以上ある | `design-survey.py check` が `detail_failure` で指摘し、終了コード 1 |
 | I5 | 詳細設計の文書 | 関数の仕様の表で種類が `新設` の関数は、既存の部品の再利用の表に行がある | `design-survey.py check` が `detail_reuse` で指摘し、終了コード 1 |
 | I6 | 詳細設計の文書 | ファイル配置の表のパスは、設計文書の「設計の結果」の触るファイルにすべて含まれる | `design-survey.py check` が `detail_file` で指摘し、終了コード 1 |
-| I7 | 設計のプラン | 詳細設計の段は `standard`・`legacy-refactor` の設計のプランだけにあり、設計の段の次・ドキュメント再構成の段の前に立つ | 設計のプランのテストが落ちる |
+| I7 | 設計のプラン | 詳細設計の段は `standard`・`legacy-refactor` の設計のプランだけにあり、設計単体のレビュー（I10）の後・ドキュメント再構成の段の前に立つ | 設計のプランのテストが落ちる |
 | I8 | 設計のプラン | 承認ゲートは 2 つ（設計承認ゲート・リリース承認ゲート）のままで、設計のプランの判定の段は `gate` の 1 つだけである | 設計のプランのテストが落ちる |
 | I9 | 工程の名前の対応 | 工程表の行名・ボードの値の対応表・工程とフェーズの対応・工程ごとに掛かる規則の Skill が、工程の分類の行名と同じ字の「詳細設計」を持つ | 工程の名前を突き合わせるテスト（`STEP_PHASES` と `agent-layers.md` の表の一致・`stage-skills.json` の工程名・工程表と対応表の行名と `WF_STAGE_MATRIX` の行名の一致）が落ちる |
+| I10 | 設計のプラン | 設計単体のレビューの段（`design-review`）は `standard`・`legacy-refactor` の設計のプランだけにあり、`design` の段の次・`detail-design` の段の前に立つ。指摘が 1 件以上あれば直しの段（`design-fix`）を通ってから `detail-design` へ進む | 設計のプランのテストが落ちる |
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 設計文書を書いた | 設計のプランの `design` の段 | 詳細設計の段 |
+| E1 | 設計文書を書いた | 設計のプランの `design` の段 | 設計単体のレビューの段（詳細設計を通るモード）・ドキュメント再構成の段（ほかのモード） |
 | E2 | 詳細設計を書いた | 設計のプランの `detail-design` の段 | ドキュメント再構成の段 |
 | E3 | 進捗記録とボードに詳細設計の工程を記録した | 設計のプランの記録（段の `stage` が変わったとき `projects-sync.sh`） | 課題の本文の `## 進行`・ボード・通過記録 |
 | E4 | 設計 Pull Request に詳細設計を載せて出した | 設計のプランの `pr` の段 | `cross-review` |
 | E5 | 設計レビューが詳細設計の観点で指摘を出した | `cross-review`（詳細レビュー） | 設計のプランの解決のフロー |
 | E6 | 設計承認ゲートで承認された | 人の承認 | 設計の結果のステージ・実装のプラン |
 | E7 | 実装計画が対象ファイルを詳細設計から引き写した | `implementation-plan` | 実装（`tdd-cycle`）と完了判定の設計との突き合わせ |
+| E8 | 設計単体のレビューが設計文書への指摘を出した（0 件を含む） | 設計のプランの `design-review` の段 | `design-review-check` の段（0 件なら詳細設計の段、1 件以上なら直しの段） |
+| E9 | 設計単体のレビューの指摘を直した | 設計のプランの `design-fix` の段 | 詳細設計の段・設計 Pull Request の本文（レビューの結果を設計承認ゲートの材料として載せる） |
 
 ### 用語
 
@@ -119,6 +123,7 @@
 | F5 | 設計 Pull Request のレビューが詳細設計の 6 つの観点で指摘を出す | `cross-review` の担当 |
 | F6 | 実装計画が対象ファイルを詳細設計のファイル配置から引き写す | `implementation-plan` |
 | F7 | 完了判定の設計との突き合わせが、実装が詳細設計から外れた箇所を並べる | 完了判定の worker |
+| F8 | 設計のプランが、詳細設計の段の前に設計文書だけを 1 つの AI にレビューさせ、指摘を直してから詳細設計へ進む | conductor・設計承認ゲートで設計 Pull Request を見る利用者 |
 
 ## 構成要素
 
@@ -131,6 +136,7 @@
 | 詳細設計の参照（`design/references/detailed-design.md`。新設） | 10 の項目の書き方・節の見出し・表の列・省く書き方・既存の参照との分担 | F2 |
 | 設計の Skill（`design/SKILL.md`・`deliverables.md`・`design-template.md`） | 手順「詳細設計を書く」と、成果物の置き場（パッケージ・モジュール構成を詳細設計へ移す） | F2 |
 | 設計のプランの段（`supervise_lib/design_steps.py`・`supervise_lib/procedures.py` の `survey_steps`） | `detail-design` の段と、詳細設計を通るモードの定数。詳細設計を通るモードでは `survey-check` に `--require-detail` を付ける | F3 |
+| 設計単体のレビューの段（`supervise_lib/design_steps.py` の `design-review`・`design-review-check`・`design-fix`、指示の文 `supervise_lib/prompts.py`） | 設計文書だけを 1 つの AI に読ませて指摘を作業ディレクトリへ書かせ、指摘があれば直させる。観点は `cross-review` の設計 Pull Request の観点を読んで使い、写さない | F8 |
 | 詳細設計の検査（`lib/design_detail.py`。新設）とエントリポイント（`design-survey.py`） | I3〜I6 の 4 つの規則 | F4 |
 | 設計 PR のレビューの観点（`review_focus.py` の `DESIGN_REVIEW_TEMPLATE`・`08-review-categories.md`）と設計文書の名前（`classifications.py`・`categories.py`・`glossary.py`） | 詳細設計の 6 つの観点。詳細設計の文書を設計文書として数える | F5 |
 | 実装計画の Skill（`implementation-plan/SKILL.md`） | 対象ファイルを詳細設計から引き写し、足すファイルに理由を書く | F6 |
@@ -147,7 +153,9 @@ graph TD
     end
     subgraph プランと検査
         P[設計のプランの段] --> C[詳細設計の検査]
+        P --> L[設計単体のレビューの段]
     end
+    L -->|観点を読む| V
     P -->|詳細設計の段の指示| S
     C -->|節の見出しと列| D
     V[設計 PR のレビューの観点] -->|文書の形| D
@@ -170,6 +178,7 @@ grep -rn "design-decisions" plugins/ndf --include=*.py
 | 設計文書の行数の上限（1,000 行）を見るファイル名 | `cross-review/scripts/classifications.py` の `DESIGN_DOC_FILE_SUFFIXES` | 当てはまらない。`-design-detail.md` を足す |
 | 設計 PR の文書として分類するファイル名 | `cross-review/scripts/review_lib/categories.py` の `DESIGN_DOC_SUFFIXES` | 当てはまらない。同上 |
 | 用語チェックが読む文書 | `scripts/glossary.py` の `DEFAULT_PATHS` | 当てはまらない。`issues/*-design-detail.md` を足す |
+| 用語チェックが読む文書（宣言のあるリポジトリ） | 各リポジトリの `.ndf/glossary.json` の `check.paths`（このリポジトリにもある） | 当てはまらない。`DEFAULT_PATHS` は宣言を作るときだけ使われ、宣言のあるリポジトリは宣言の値を読む。このリポジトリの宣言へ足し、ほかのリポジトリへはリリースの案内に書く |
 | 課題の番号から設計文書を探す名前 | `scripts/lib/design_docs.py` の `DESIGN_NAME`（`issue-<番号>-design(-<名前>)?.md`） | 当てはまる。変えない |
 | ドキュメント再構成が組み直す文書 | `procedures.py` の `rebuild_step`（`issue-{n}-design-*.md` も含む） | 当てはまる。変えない |
 | 進捗記録の受ける工程名 | `projects-sync.sh` → `wf_is_stage`（`WF_STAGE_MATRIX` から読む） | 当てはまる。行を足せば通る |
@@ -178,14 +187,14 @@ grep -rn "design-decisions" plugins/ndf --include=*.py
 
 ## 構造
 
-詳細設計の検査は、既存のエントリポイント `design-survey.py check` に規則を足す形で作る。読み取りの部品を新しいモジュールへ分け、エントリポイントが肥大しないようにする。
+詳細設計の検査は、既存のエントリポイント `design-survey.py check` に規則を足す形で作る。読み取りの部品を新しいモジュールへ分け、エントリポイントが肥大しないようにする。設計のプランの段は、既存の `design_steps` が組み、指示の文は `prompts` に置く。
 
 ```mermaid
 classDiagram
     class design_detail {
         +SECTIONS
         +is_detail(path) bool
-        +check_detail(path, text, result_files) list
+        +check_detail(path, text, result_files, why) list
     }
     class design_survey {
         +cmd_check(a)
@@ -195,33 +204,28 @@ classDiagram
     design_survey ..> design_detail: 規則を呼ぶ
     design_detail ..> md: 表と節を読む
     design_survey ..> design_docs: 文書を探す
+    design_survey ..> design_results: 設計の結果を読む
+    class design_steps {
+        +DETAIL_DESIGN_MODES
+        +writing_steps(a, n, copy) list
+        +detail_steps(n) list
+    }
+    class prompts {
+        +DESIGN_REVIEW_PROMPT
+        +DESIGN_FIX_PROMPT
+    }
+    class procedures {
+        +survey_steps(n, next_id, require_detail) list
+    }
+    class sprint_waves {
+        +plan_sprint_design(a, n, repo) dict
+    }
+    sprint_waves ..> design_steps: 段を並べる
+    sprint_waves ..> procedures: 検査の段を並べる
+    design_steps ..> prompts: 指示の文を使う
 ```
 
-| 関数 | 置き場 | 種類 | 責務 | 副作用 |
-| --- | --- | --- | --- | --- |
-| `is_detail(path) -> bool` | `lib/design_detail.py` | 新設 | パスが詳細設計の文書（`issue-<番号>-design-detail.md`）かを返す | 無し |
-| `check_detail(path, text, result_files) -> list[dict]` | `lib/design_detail.py` | 新設 | 1 つの詳細設計の文書を I3〜I6 で判定し、指摘の行（`name`・`rule`・`text`）を返す | 無し |
-| `cmd_check(a)` | `design-survey.py` | 変更 | まとまりの中の詳細設計の文書に `check_detail` を当て、`--require-detail` のとき詳細設計の文書の無い課題を指摘する | 標準出力へ 1 行の JSON・終了コード（既存どおり） |
-| `writing_steps(a, n, copy)` | `supervise_lib/design_steps.py` | 変更 | `a.mode` が詳細設計を通るモードなら `design` の段の次に `detail-design` の段を置く | 無し |
-| `survey_steps(n, next_id, require_detail)` | `supervise_lib/procedures.py` | 変更 | `require_detail` が真なら `survey-check` と `survey-recheck` の検査に `--require-detail` を付け、`fix-survey` の指示に詳細設計の規則の直し方を足す | 無し |
-
-`check_detail` の `result_files` は、同じまとまりの頭の設計文書（`issue-<番号>-design.md`）の「設計の結果」の触るファイルである。読み取りは設計の結果のステージが使う既存の読み取り（`lib/design_results.py` の `parse_results`）を呼び、同じ表を 2 通りに読まない。
-
-異常系の処理: `check_detail` は読み取りだけで失敗を持たない。表の形が崩れた節は「行が無い」として `detail_section` で指摘する。ファイルを読めない・git を読めないときの扱いは既存の `cmd_check` の終了コード 2 のままである。
-
-既存の部品の再利用: 新設の 2 関数は、次の既存の部品を使う。
-
-| 読み取るもの | 使う部品 |
-| --- | --- |
-| Markdown の節と表 | `lib/md.py` |
-| 文書の探索 | `lib/design_docs.py` |
-| 設計の結果 | 設計の結果のステージの既存の関数 |
-
-詳細設計の文書を読む既存の関数は無い。次の検索の当たりは、worktree の部品とそのテストのコメントにある過去の設計文書の名前だけだった（2026-11-13 に実行）。
-
-```bash
-grep -rln "design-detail\|詳細設計" plugins/ndf/scripts plugins/ndf/skills
-```
+関数ごとのシグネチャ・責務・副作用・異常系の処理・既存の部品の再利用の確認は、詳細設計の文書 `issues/issue-3144-design-detail.md` が持つ（決定 7）。この節は型とモジュールの関係だけを持つ。
 
 ## 入出力の契約
 
@@ -252,15 +256,31 @@ grep -rln "design-detail\|詳細設計" plugins/ndf/scripts plugins/ndf/skills
 
 | 規則 | 指摘する条件 | 指摘の `name` |
 | --- | --- | --- |
-| `detail_section` | 10 の節のどれかの見出しが無い、または節が表の行も `省く: <理由>`（理由が空でない）も持たない | `<パス> <節の見出し>` |
+| `detail_section` | 10 の節のどれかの見出しが無い、節が表の行も `省く: <理由>`（理由が空でない）も持たない、または関数の仕様の表に「種類」「副作用」の列が無い | `<パス> <節の見出し>` |
 | `detail_failure` | 関数の仕様の表で副作用の列が `無し` でない関数が、異常系の処理の表の 1 列目に無い | `<パス>:<行> <関数>` |
 | `detail_reuse` | 関数の仕様の表で種類が `新設` の関数が、既存の部品の再利用の表の 1 列目に無い | `<パス>:<行> <関数>` |
-| `detail_file` | ファイル配置の表のパスが、頭の設計文書の「設計の結果」の触るファイルに無い | `<パス>:<行> <ファイルのパス>` |
+| `detail_file` | ファイル配置の表のパスが、頭の設計文書の「設計の結果」の触るファイルに無い。頭の設計文書が読んだ文書に無いか、設計の結果の表を読めないときは 1 行 | `<パス>:<行> <ファイルのパス>`（読めないときは `<パス> 設計の結果`） |
 | `detail_missing` | `--require-detail` を渡したのに、まとまりに詳細設計の文書が無い | `#<番号>` |
 
 関数とパスの照合はインラインコードの記号（`` ` ``）を外し、前後の空白を除いた字で行う。節の見出しの照合は `##` の後の字の完全一致である。
 
 `--require-detail` は `--issue` と `--file` のどちらとも組める。渡さないときは、詳細設計の文書があるときだけ 4 規則を当てる（`light` の受け入れ条件のファイルなど、詳細設計を持たない文書を指摘しない）。
+
+### 設計単体のレビューの結果
+
+設計単体のレビューの段（`design-review`）が書き、後の段が読むファイルの形である。置き場はプランの作業ディレクトリ（`{state_dir}/work/design-review.md`）で、コミットしない。
+
+| 読み手 | 読むもの |
+| --- | --- |
+| `design-review-check` の段 | `- 無し` の 1 行があるか（`grep -qx -- '- 無し'`）。終了コード 0 なら指摘なし、1 なら指摘あり、2 ならファイルが無い |
+| `design-fix` の段 | 指摘の表。直した行と直せない行の扱いの列を書き換える |
+| `pr` の段 | ファイルの中身を設計 Pull Request の本文の署名の前へ足す（既存の `append`。ファイルが無いモードでは足さない） |
+
+| 行 | 形 |
+| --- | --- |
+| 1 行目 | `## 設計単体のレビュー` |
+| 指摘があるとき | `\| # \| 箇所 \| 指摘 \| 扱い \|` の表。箇所は設計文書の節の見出し、扱いは `未` で書き、直しの段が `直した` か `直さない: <理由>` に替える |
+| 指摘が無いとき | `- 無し` の 1 行だけ |
 
 ### 工程の値
 
@@ -277,29 +297,41 @@ grep -rln "design-detail\|詳細設計" plugins/ndf/scripts plugins/ndf/skills
 sequenceDiagram
     participant P as 設計のプラン
     participant W as 設計の worker
+    participant A as 設計単体のレビューの worker
     participant K as 詳細設計の検査
     participant R as cross-review
     P->>W: design の段（設計文書を書く）
     W-->>P: issue-N-design.md をコミット
     alt モードが standard か legacy-refactor
-        P->>W: detail-design の段（詳細設計を書く）
+        P->>A: design-review の段（設計文書と要求の写しだけを読む）
+        A-->>P: 作業ディレクトリの design-review.md（指摘の表か「- 無し」）
+        P->>P: design-review-check（「- 無し」なら detail-design へ）
+        opt 指摘が 1 件以上
+            P->>W: design-fix の段（指摘を直してコミットし、扱いの列を書く）
+        end
+        P->>W: detail-design の段（直した設計の上に詳細設計を書く）
         W->>K: design-survey.py check --file 設計文書 詳細設計 --require-detail
         K-->>W: 指摘（あれば直して打ち直す）
         W-->>P: issue-N-design-detail.md をコミット
     end
     P->>W: rebuild の段（両方の文書を組み直す）
-    P->>R: pr の段の後、詳細レビュー（詳細設計の 6 観点を含む）
+    P->>R: pr の段（本文に design-review.md を足す）の後、cross-review（設計と詳細設計をまとめて 1 回）
     R-->>P: 指摘 → 解決のフロー
     P->>K: survey-check の段（--require-detail を付けて HEAD を検査）
     K-->>P: 指摘があれば fix-survey → survey-recheck、残れば止まる
-    P->>P: gate（設計承認ゲート。数は変えない）
+    P->>P: gate（設計承認ゲート。設計と詳細設計をまとめて 1 回。数は変えない）
 ```
+
+設計単体のレビューは 1 回だけ流し、直した後にレビューを打ち直さない。直した設計は、詳細設計と合わせて後の `cross-review` がもう一度見る（決定 11）。
 
 失敗の経路:
 
+- `design-review` の worker が失敗したら、既存の work の段の失敗の扱いでプランが止まる
+- `design-review.md` が無いまま `design-review-check` に来たら（終了コード 2）、既存の run の段の失敗の扱い（judge が直し・やり直し・止めるを選ぶ）に従う
+- `design-fix` が直せない指摘は、扱いの列に `直さない: <理由>` を書いて詳細設計の段へ進む。その行は設計 Pull Request の本文に載り、`cross-review` と設計承認ゲートで人が見る
 - 詳細設計の worker が 1,000 行の上限に当たったら、設計を 2 本に分けると報告して止まる（設計の段と同じ）。プランは既存の work の段の失敗の扱いで止まる
 - `survey-check` の指摘を `fix-survey` が直せなければ、既存どおりプランを止めて人へ戻す
-- `light`・`operation`・`documentation` の設計のプランは `design` の段から `rebuild` へ進み、詳細設計の段も `--require-detail` も持たない
+- `light`・`operation`・`documentation` の設計のプランは `design` の段から `rebuild` へ進み、設計単体のレビューの段・詳細設計の段・`--require-detail` のどれも持たない
 
 ## 非機能の実現方式
 
@@ -334,13 +366,25 @@ sequenceDiagram
 
 根拠: Value 3 / Value 8（MVV 版 7）
 
-### 決定 4: 設計のプランの段を分けて工程の記録を正しくするため、`design` の段の後に `detail-design` の段を足す
+### 決定 4: 工程の記録を正しくし、詳細設計を直した設計の上に書くため、`design` の段の後に設計単体のレビューと `detail-design` の段を足す
 
-段の `stage` が「詳細設計」になり、プランの記録が工程に入った時点で進捗記録とボードへ書く。worker の 1 回の起動が持つ文脈も、設計文書を書いた後に新しく始まる。
+詳細設計を通るモードの段の並びは、次のとおりにする。
 
-設計の段の指示に詳細設計を含める形は、段が 1 つで済むが、進捗記録が「詳細設計」を書く契機を持たず、工程の分類で必須の工程が「記録なし」と出るため採らない。
+| 段 | 種類 | 工程（`stage`） | 次 |
+| --- | --- | --- | --- |
+| `design` | work | 設計 | `design-review` |
+| `design-review` | work（1 つの AI） | 設計 | `design-review-check` |
+| `design-review-check` | run | 設計 | 終了コード 0 なら `detail-design`、1 なら `design-fix` |
+| `design-fix` | work | 設計 | `detail-design` |
+| `detail-design` | work | 詳細設計 | `rebuild` |
 
-根拠: Value 3（MVV 版 7）
+段を分けると、`detail-design` の段の `stage` が「詳細設計」になり、プランの記録が工程に入った時点で進捗記録とボードへ書く。worker の 1 回の起動が持つ文脈も、設計文書を書いた後に新しく始まる。
+
+設計単体のレビューの段は「設計」の工程に含める。工程表の行もボードの値も増やさない。レビューと直しは設計文書を確かめて直す作業で、詳細設計の文書をまだ持たないためである。
+
+設計の段の指示に詳細設計を含める形は、段が 1 つで済む。しかし、進捗記録が「詳細設計」を書く契機を持たず、工程の分類で必須の工程が「記録なし」と出るため採らない。設計単体のレビューを詳細設計の段の後へ置く形（差し戻し前の設計）は、設計の誤りを詳細設計が引き継ぎ、直すときに 2 つの文書を書き直すことになるため採らない。
+
+根拠: Value 3 / Value 9（MVV 版 7）
 
 ### 決定 5: 詳細設計を通るモードをプランが引けるよう、`design_steps.py` に定数を置き、工程の分類との一致をテストで縛る
 
@@ -398,6 +442,34 @@ grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
 
 根拠: Value 5（MVV 版 7）
 
+### 決定 11: 費用と時間を抑えるため、設計単体のレビューは 1 つの AI の軽いレビューにし、`cross-review` にしない
+
+`design-review` の段は、新しい文脈の worker 1 つ（既定の claude -p）に、設計文書と要求の写しだけを読ませる。観点は `cross-review` の設計 Pull Request の観点（`cross-review/scripts/review_lib/review_focus.py` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE`）をそのファイルから読んで使い、指示の文へ写さない。直した後にレビューを打ち直さない。
+
+費用と効果を、次の実績で比べた。出典はメインディレクトリの `.ndf/sprint-*/1-design-*-state/report.md` で、2026-11-09〜11-13 に流した設計のプランの報告のうち `review` の段が動いた 22 件である（手元の実行記録で、コミットしない）。
+
+| 量 | `cross-review`（設計のプランの `review` の段） | 近い work の段（`rebuild`。同じ設計文書を読む） |
+| --- | --- | --- |
+| 所要（中央値） | 518.9 秒（174.5〜1,863.0 秒） | 154.6 秒（21 件） |
+| claude 側の費用（中央値） | $1.33（$0.30〜$2.45） | $1.51（21 件。文書を書き直す分を含む） |
+| 外部の AI の起動 | codex 2〜5 回・kiro 3〜5 回（1 件あたり） | 無し |
+| ラウンド | 2〜3 | 1 |
+| 見つけた指摘 | 中央値 3.5 件（合計 84 件、直した 73 件） | — |
+
+数え方は、各報告の段ごとの表の `review`・`rebuild` の行と、件数の行の `rounds`・`findings`・`fixed`、`CLI（drive・work の中）` の行の `codex N 回`・`kiro N 回` を読んだ。
+
+比べた結果、次の 3 点で軽いレビューを選ぶ。
+
+- **`cross-review` は Pull Request を要る。** 設計単体に当てるには、`pr`・`sync-body`・`review` と解決のフローを詳細設計の段の前へもう 1 組置き、詳細設計を送った後にもう 1 度 `cross-review` を流すことになる。1 件あたり中央値で約 519 秒と外部の AI の起動 5〜10 回が増え、継続的統合も 2 度起動する
+- **設計文書は後の `cross-review` でもう一度見られる。** 設計と詳細設計をまとめた `cross-review` は、1 ラウンド目でドメインモデルの節を、2 ラウンド目以降で残りの節を見る（`08-review-categories.md` の「設計 PR のモデルレビューと詳細レビュー」）。設計単体のレビューの役目は、詳細設計が誤った設計の上に立つ前に大きな誤りを止めることに絞れる
+- **軽いレビューは外部の AI の起動を持たない。** 外部の AI を起動する経路の失敗（起動・待ち・回収）を、すべての `standard` の設計のプランへ増やさない。複数の AI の見方の違いは後の `cross-review` が持つ
+
+`cross-review` を設計単体にも当てる形は、上のとおり時間と外部の AI の起動が倍になるため採らない。軽いレビューの worker を外部の AI（`"runtime": "codex"`）で起動する形は、観点の多様さを足せるが、外部の AI の失敗の経路をすべての設計のプランへ足すため採らない。直した後にレビューを打ち直す形は、後の `cross-review` が直した設計を見るため、同じ確認を 2 度行うことになり採らない。
+
+軽いレビューの所要と費用は、実測していない。上の `rebuild` の値は、同じ文書を読んで書き直す段の値で、読むだけのレビューの上限の目安として使った（「未確認のまま残ること」）。
+
+根拠: Value 2 / Value 5（MVV 版 7）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -412,18 +484,22 @@ grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
 | 受け入れ条件 3（存在） | `--require-detail` を付けて詳細設計の文書の無い課題を検査すると `detail_missing` が出る。付けなければ出ない | 付けなくても出す（`light` の文書が落ちる） |
 | 受け入れ条件 5 | 設計 PR の詳細レビューの観点の文字列に、詳細設計の 6 観点の行が含まれる（`review_focus` が組む観点の出力で確かめる） | 観点の行を消す |
 | 受け入れ条件 6 | 設計レビューで見る（`implementation-plan` の本文。`.md` の文言を照合するテストは書かない） | — |
-| 受け入れ条件 7・I8 | `standard` の設計のプランの `type` が `judge` の段は `gate` の 1 つだけである | 詳細設計の後に判定の段を足す |
-| 受け入れ条件 8・I7 | `standard`・`legacy-refactor` の設計のプランで `design` の `next` が `detail-design`、`detail-design` の `stage` が「詳細設計」で `next` が `rebuild`。`survey-check` の `cmd` に `--require-detail` がある | 段を消す・`next` を `rebuild` のままにする |
-| 受け入れ条件 9 | `light`・`documentation` の設計のプランで `design` の `next` が `rebuild` のままで、`detail-design` の段も `--require-detail` も無い | 全モードに段を足す |
+| 受け入れ条件 7・I8 | `standard` の設計のプランの `type` が `judge` の段は `gate` の 1 つだけである（設計単体のレビューの段を足しても増えない） | 詳細設計の後か設計単体のレビューの後に判定の段を足す |
+| 受け入れ条件 8・I7 | `standard`・`legacy-refactor` の設計のプランで `detail-design` の `stage` が「詳細設計」で `next` が `rebuild`。`survey-check` の `cmd` に `--require-detail` がある | 段を消す・`next` を `rebuild` のままにする |
+| 受け入れ条件 10・I10（並び） | `standard`・`legacy-refactor` の設計のプランで `design` の `next` が `design-review`、`design-review` の `next` が `design-review-check`、`design-review-check` の `on_exit` が `{"1": "design-fix"}` で `next` が `detail-design`、`design-fix` の `next` が `detail-design` である。どの段も `stage` が「設計」 | `design` から `detail-design` へ直に進める・`design-fix` の `next` を `design-review` へ戻す（打ち直しの輪を作る） |
+| 受け入れ条件 10（分岐） | `design-review-check` の `cmd` を、`- 無し` の 1 行だけのファイル・指摘の表のファイル・無いファイルで打つと、終了コードが 0・1・2 になる | 表の中の `- 無し` を含む行でも 0 にする（行全体の一致をやめる） |
+| 受け入れ条件 10（材料） | 設計のプランの `pr` の段の `append` に `{state_dir}/work/design-review.md` がある。ファイルがあれば本文へ足し、無ければ足さない（既存の `with_appended` の振る舞い） | `append` から外す |
+| 出し直しの指摘 | 出し直しの指摘の入力を持つ `standard` の設計のプランで、`detail-design` の指示に指摘の文が入る | `design` の段にだけ入れる |
+| 受け入れ条件 9 | `light`・`documentation` の設計のプランで `design` の `next` が `rebuild` のままで、`design-review`・`design-review-check`・`design-fix`・`detail-design` の段も `--require-detail` も無い | 全モードに段を足す |
 | 決定 5 | `DETAIL_DESIGN_MODES` が `WF_STAGE_MATRIX` の「詳細設計」の行の `R` の列と一致する | 片方だけにモードを足す |
 | 設計文書の名前 | `-design-detail.md` の文書が行数の検査（1,000 行）と設計 PR の分類と用語チェックの対象になる | 名前の一覧に足し忘れる |
-| 契約のフィクスチャ | `fixtures/supervise-contract/plans/sprint/1-design-16.json`（`standard`）を作り直し、`detail-design` の段を含む | — |
+| 契約のフィクスチャ | `fixtures/supervise-contract/plans/sprint/1-design-16.json`（`standard`）を作り直し、`design-review`・`design-review-check`・`design-fix`・`detail-design` の段を含む。`test_supervise_limits.py` の `DESIGN_ROUTE` に同じ段を足す | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3144 | 実装する | — | `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/projects-tracking.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/scripts/lib/stage-skills.json`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/detailed-design.md`（新設）、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/scripts/supervise_lib/design_steps.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/prompts.py`、`plugins/ndf/scripts/design-survey.py`、`plugins/ndf/scripts/lib/design_detail.py`（新設）、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_design_survey.py`、`plugins/ndf/scripts/tests/test_supervise_new.py`、`plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`、`plugins/ndf/skills/development-workflow/tests/test_stage_check.py` |
+| #3144 | 実装する | — | `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/projects-tracking.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/scripts/lib/stage-skills.json`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/detailed-design.md`（新設）、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/scripts/supervise_lib/design_steps.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/prompts.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/sprint_revise.py`、`plugins/ndf/scripts/design-survey.py`、`plugins/ndf/scripts/lib/design_detail.py`（新設）、`plugins/ndf/scripts/glossary.py`、`.ndf/glossary.json`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_design_survey.py`、`plugins/ndf/scripts/tests/test_supervise_new.py`、`plugins/ndf/scripts/tests/test_supervise_limits.py`、`plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`、`plugins/ndf/skills/development-workflow/tests/test_stage_check.py` |
 
 ## 人へ残す判断
 
@@ -435,3 +511,6 @@ grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
 | --- | --- |
 | 詳細設計の段の所要と行数 | `standard` の課題で詳細設計の文書が何行になり、設計のプランの所要が何分延びるかは実測していない。リリース後テスト（要求の検証手段の手動確認）で、`standard` の課題 1 件の設計のプランを流して測る |
 | 進行中の課題の欠落の案内 | リリースの前に設計を通った `standard` の課題は、Pull Request を作る時点のチェックで「詳細設計」が記録なしと案内される（判定は通す側へ倒すため止まらない）。何件に出るかは、リリース時点で進行中の課題の数で決まる |
+| 設計単体のレビューの所要と費用 | 読むだけのレビューの段の所要と費用は実測していない。決定 11 は、同じ文書を読んで書き直す `rebuild` の段の実績（中央値 154.6 秒・$1.51）を上限の目安に使った。リリース後テストの設計のプランで `design-review` と `design-fix` の段の行を測る |
+| 設計単体のレビューの効果 | 1 つの AI のレビューが、`cross-review` の指摘（22 件で中央値 3.5 件）のうち何割を詳細設計の前に拾うかは測っていない。報告は担当の AI ごとの指摘の数を持たず、過去の記録から分けられない。リリース後に、`design-review.md` の指摘と後の `cross-review` の指摘を課題ごとに並べて比べる |
+| 外部の AI の費用 | 決定 11 の費用の比較は claude 側の金額だけである。codex と kiro の起動は回数だけが報告にあり、金額へ換算していない |
