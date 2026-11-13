@@ -334,7 +334,11 @@ def _slot_index(path: Path) -> int | None:
 
 
 def _stop_group(proc: subprocess.Popen) -> None:
-    """自分の起こしたテストだけを止める。テストが自分と同じグループにいれば、グループでなくテストへ送る（I5）。"""
+    """自分の起こしたテストだけを止める。テストが自分と同じグループにいれば、グループでなくテストへ送る（I5）。
+
+    猶予の間に終わったかは、グループ全体で見る（先頭の `bash -c` が先に終わっても、SIGTERM を無視する子孫が
+    残っていれば SIGKILL を送る）。
+    """
     try:
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
@@ -347,11 +351,28 @@ def _stop_group(proc: subprocess.Popen) -> None:
         except ProcessLookupError:
             pass
 
+    def alive() -> bool:
+        leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
+        return leader_alive if own_group else _group_alive(pgid)
+
     send(signal.SIGTERM)
+    deadline = time.monotonic() + KILL_GRACE_SECONDS
+    while alive():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            send(signal.SIGKILL)
+            return
+        time.sleep(min(0.1, remaining))
+
+
+def _group_alive(pgid: int) -> bool:
     try:
-        proc.wait(timeout=KILL_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        send(signal.SIGKILL)
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _owner(started_at: float | None, cwd: Path) -> dict[str, object]:
@@ -427,7 +448,10 @@ def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> N
 
 
 def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
-    """空いた枠を取り、メモリが下限以上になるまで待つ。待ちの上限は枠待ちとメモリ待ちの合計で数える。"""
+    """空いた枠を取り、メモリが下限以上になるまで待つ。待ちの上限は枠待ちとメモリ待ちの合計で数える。
+
+    待ちの途中で例外（シグナルの中断・置き場へ書けない）が出たら、取った枠を返してから送り直す。
+    """
     start = time.monotonic()
     deadline = start + ctx.limits.wait_limit_seconds
     lock: FileLock | None = None
@@ -443,6 +467,10 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
                     _release(ctx.directory, held, lock)
                 return None
             time.sleep(min(ctx.poll, remaining))
+    except BaseException:
+        if lock is not None:
+            _release(ctx.directory, held, lock, quiet=True)
+        raise
     finally:
         end = time.monotonic()
         held.waited_seconds = end - start
@@ -455,7 +483,11 @@ def _take_free_slot(directory: Path, cwd: Path, max_runs: int, held: Held) -> Fi
         lock = _try_lock(_slot_path(directory, index, ".lock"))
         if lock is not None:
             held.index = index
-            _write_json(_slot_path(directory, index, ".json"), _owner(None, cwd))
+            try:
+                _write_json(_slot_path(directory, index, ".json"), _owner(None, cwd))
+            except BaseException:
+                lock.release()
+                raise
             return lock
     return None
 
@@ -469,11 +501,40 @@ def _memory_ready(held: Held, read_memory: ReadMemory, floor_mib: int) -> bool:
     return held.available_mib >= floor_mib
 
 
-def _release(directory: Path, held: Held, lock: FileLock) -> None:
+def _release(directory: Path, held: Held, lock: FileLock, *, quiet: bool = False) -> None:
+    """持ち主の記述を消して枠を返す。`quiet` なら記述を消せなくても送らない（別の例外の後始末のとき）。"""
     try:
         _slot_path(directory, held.index, ".json").unlink(missing_ok=True)
+    except OSError:
+        if not quiet:
+            raise
     finally:
         lock.release()
+
+
+def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
+    """枠を取り、持ち主の記述に始めた時刻を書く。諦めたら None。
+
+    置き場へ書けない（ロックや持ち主の記述を作れない）ときは、取りかけた枠を返し、`held` を枠の無い形にして
+    `note` に理由を書いて None を返す。
+    """
+    try:
+        lock = _acquire(ctx, held)
+        if lock is None:
+            return None
+        assert held._monitor is not None
+        held._monitor.started_at = time.time()
+        try:
+            _write_json(_slot_path(ctx.directory, held.index, ".json"), _owner(held._monitor.started_at, ctx.cwd))
+        except BaseException:
+            _release(ctx.directory, held, lock, quiet=True)
+            raise
+        return lock
+    except OSError as exc:
+        log.warning("枠の置き場へ書けないので枠を取らずに走らせる", extra={"error": str(exc)})
+        held.index, held._monitor = None, None
+        held.note = f"枠の置き場へ書けないので枠を取らずに走らせた: {exc}"
+        return None
 
 
 def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
@@ -481,14 +542,21 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
     held = Held()
     monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
     held._monitor = monitor
-    lock = _acquire(ctx, held)
+    try:
+        lock = _take_slot(ctx, held)
+    except KeyboardInterrupt:
+        # 枠・メモリの待ちの間にシグナルで中断された（取りかけた枠は返してある）
+        held.index = None
+        _record(directory, cwd, kind, held, INTERRUPTED)
+        raise
     if lock is None:
+        if held.note:
+            yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
+            return
         held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
     monitor.index = held.index
-    monitor.started_at = time.time()
-    _write_json(_slot_path(directory, held.index, ".json"), _owner(monitor.started_at, cwd))
     held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
     try:

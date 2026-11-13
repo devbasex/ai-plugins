@@ -284,3 +284,35 @@ def test_report_skips_unreadable_rows_sorts_by_time_and_ignores_non_integer_oom(
         "gave_up": 1,
         "oom_kill_increase": 8,
     }
+
+
+def test_unwritable_slot_files_release_the_slot_and_run_without_it(tmp_path, monkeypatch):
+    real_write = slots._write_json
+
+    def refuse(path, data):
+        raise PermissionError(13, "書けない", str(path))
+
+    monkeypatch.setattr(slots, "_write_json", refuse)
+    with _gate(tmp_path, _limits(1)) as held:
+        assert held.index is None and held.env == {}
+        assert held.note.startswith("枠の置き場へ書けないので枠を取らずに走らせた: ")
+    monkeypatch.setattr(slots, "_write_json", real_write)
+    with waits.returns_before(10):
+        with _gate(tmp_path, _limits(1, wait=10)) as held:
+            assert held.index == 0  # 取りかけた枠は返してある
+
+
+def test_memory_stop_kills_descendants_that_outlive_the_group_leader(monkeypatch):
+    monkeypatch.setattr(slots, "KILL_GRACE_SECONDS", 0.5)
+    # 先頭の bash は SIGTERM で終わるが、SIGTERM を無視する子孫が残る
+    proc = subprocess.Popen(
+        ["bash", "-c", "(trap '' TERM; sleep 600) & echo started; wait"], stdout=subprocess.PIPE, start_new_session=True
+    )
+    try:
+        assert proc.stdout.readline() == b"started\n"
+        slots._stop_group(proc)
+        waits.wait_until(lambda: not slots._group_alive(proc.pid), what="グループ全体の終了")
+    finally:
+        if slots._group_alive(proc.pid):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()

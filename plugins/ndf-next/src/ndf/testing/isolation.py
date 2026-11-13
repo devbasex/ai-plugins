@@ -17,6 +17,11 @@ from __future__ import annotations
 import os
 import sys
 import threading
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -38,18 +43,53 @@ REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", slots.HELD_ENV)
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
-_WRITE_EVENTS = ("os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.truncate", "os.chmod", "shutil.rmtree")
+# 書き込みの監査イベントと、引数のうち（パスの位置, そのパスを解決する dir_fd の位置）の組
+_WRITE_EVENTS: dict[str, tuple[tuple[int, int | None], ...]] = {
+    "os.mkdir": ((0, 2),),
+    "os.remove": ((0, 1),),
+    "os.rmdir": ((0, 1),),
+    "os.rename": ((0, 2), (1, 3)),
+    "os.truncate": ((0, None),),
+    "os.chmod": ((0, 2),),
+    "shutil.rmtree": ((0, 1),),
+}
 
 
 class RealStateWriteError(PermissionError):
     """テストが本物の状態の置き場へ書こうとした。"""
 
 
+def _fd_dir(fd: object) -> str | None:
+    """ディレクトリの記述子が指す場所。読めなければ None。"""
+    if not isinstance(fd, int) or isinstance(fd, bool) or fd < 0:
+        return None
+    try:
+        return os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        pass
+    get_path = getattr(fcntl, "F_GETPATH", None) if fcntl is not None else None
+    if get_path is None:
+        return None
+    try:
+        return os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
+    except OSError:
+        return None
+
+
+def _within(path: str, roots: tuple[str, ...]) -> bool:
+    return any(path == root or path.startswith(root + os.sep) for root in roots)
+
+
 class _Guard:
-    """監査フックは外せないので 1 度だけ入れ、守る根の一覧を差し替えて有効・無効を切り替える。"""
+    """監査フックは外せないので 1 度だけ入れ、守る根の一覧を差し替えて有効・無効を切り替える。
+
+    書き込み先と守る根は、どちらもシンボリックリンクの参照先まで解決して比べる。テストの一時ディレクトリ
+    （pytest の一時領域。`allowed`）の下だけは、守る根の下にあっても書ける。
+    """
 
     def __init__(self) -> None:
         self.roots: tuple[str, ...] = ()
+        self.allowed: tuple[str, ...] = ()
         self.violations: list[str] = []
         self.installed = False
         self.local = threading.local()
@@ -62,36 +102,42 @@ class _Guard:
     def _hook(self, event: str, args: tuple) -> None:
         if not self.roots or getattr(self.local, "busy", False):
             return
-        paths: tuple = ()
+        targets: list[tuple[object, object]] = []
         if event == "open":
             path, mode, flags = (tuple(args) + (None, None, None))[:3]
             writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
-            paths = (path,) if writing else ()
+            if writing:
+                targets.append((path, None))
         elif event in _WRITE_EVENTS:
-            paths = tuple(a for a in args[:2])
-        for path in paths:
-            self._check(path)
+            for at, fd_at in _WRITE_EVENTS[event]:
+                if at < len(args):
+                    targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None))
+        for path, dir_fd in targets:
+            self._check(path, dir_fd)
 
-    def _check(self, path: object) -> None:
+    def _check(self, path: object, dir_fd: object = None) -> None:
         if isinstance(path, bytes):
             path = os.fsdecode(path)
         if not isinstance(path, (str, os.PathLike)):
             return
         self.local.busy = True
         try:
-            text = os.path.abspath(os.fspath(path))
+            text = os.fspath(path)
+            base = _fd_dir(dir_fd) if not os.path.isabs(text) else None
+            resolved = os.path.realpath(os.path.join(base, text) if base else text)
         finally:
             self.local.busy = False
-        if any(text == root or text.startswith(root + os.sep) for root in self.roots):
-            self.violations.append(text)
-            raise RealStateWriteError(f"テストが本物の状態の置き場へ書こうとした: {text}")
+        if _within(resolved, self.allowed) or not _within(resolved, self.roots):
+            return
+        self.violations.append(resolved)
+        raise RealStateWriteError(f"テストが本物の状態の置き場へ書こうとした: {resolved}")
 
 
 _guard = _Guard()
 
 
 def real_roots(home: Path) -> tuple[str, ...]:
-    return tuple(os.path.abspath(home / sub) for sub in REAL_STATE_UNDER_HOME)
+    return tuple(os.path.realpath(home / sub) for sub in REAL_STATE_UNDER_HOME)
 
 
 @pytest.fixture
@@ -103,13 +149,14 @@ def forbid_real_state(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
         monkeypatch.setenv(name, str(base / sub))
     for name in REMOVED_ENV:
         monkeypatch.delenv(name, raising=False)
-    # 一時ディレクトリが本物の置き場の下にあるときは、そこだけ書けるよう守る根から外す
+    # テストの一時領域が本物の置き場の下にあっても、書けるのはその一時領域だけで、守る根は残す
     _guard.install()
-    _guard.roots = tuple(r for r in roots if not str(base).startswith(r + os.sep))
+    _guard.roots = roots
+    _guard.allowed = (os.path.realpath(tmp_path_factory.getbasetemp()),)
     _guard.violations = []
     try:
         yield base
     finally:
-        found, _guard.roots, _guard.violations = list(_guard.violations), (), []
+        found, _guard.roots, _guard.allowed, _guard.violations = list(_guard.violations), (), (), []
     if found:
         pytest.fail("テストが本物の状態の置き場へ書こうとした: " + ", ".join(sorted(set(found))), pytrace=False)

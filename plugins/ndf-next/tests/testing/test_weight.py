@@ -94,6 +94,8 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
         (["pytest", "-n", "2", "b.py"], DECLARED, "scope"),
         (["pytest", "--jobs", "3"], DECLARED, "scope"),
         (["pytest", "-n4"], DECLARED, "scope"),
+        (["make", "-j8", "test"], [{"runner": "make"}], "scope"),  # -j へ数を続けた形も -j 8 と同じ
+        (["make", "-jx", "test"], [{"runner": "make"}], None),
         (["pytest", "--numprocesses=2", "a"], DECLARED, "scope"),
         (["pytest", "--maxWorkers=2"], DECLARED, "scope"),
         (["pytest", "-j"], DECLARED, "scope"),

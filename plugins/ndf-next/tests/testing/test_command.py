@@ -169,6 +169,31 @@ def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
     assert rows[0]["kind"] == slots.DIRECT
 
 
+def test_signal_while_waiting_for_a_slot_ends_the_wait(project, slots_dir):
+    import signal
+
+    from ndf.testing import waits
+    from ndf.testing.limits import Limits
+
+    root, bin_dir, log = project
+    holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
+    with slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=slots_dir, read_memory=lambda: 10**9):
+        proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log)
+        try:
+            # 枠が埋まっているので待ちに入る（起動して待ちに入るまでの時間を空ける）。待ちの間の SIGTERM で、
+            # 上限（120 秒）を待たずに抜ける
+            time.sleep(3)
+            assert proc.poll() is None
+            proc.send_signal(signal.SIGTERM)
+            with waits.returns_before(30):
+                proc.communicate()
+        finally:
+            proc.kill()
+    assert proc.returncode == 128 + signal.SIGTERM
+    assert not log.exists()
+    assert [row["result"] for row in slots.read_events(slots_dir)] == [slots.INTERRUPTED, slots.FINISHED]
+
+
 def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project, slots_dir):
     root, bin_dir, log = project
     proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, GITHUB_ACTIONS="true", FAKE_EXIT="3")

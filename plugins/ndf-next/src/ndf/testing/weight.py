@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 
 # 並列の指定の語（この表を持つのはこのモジュールだけ）
 PARALLEL_FLAGS = ("-n", "--numprocesses", "-j", "--jobs", "--parallel", "--maxWorkers")
+_SHORT_PARALLEL_FLAGS = tuple(flag for flag in PARALLEL_FLAGS if not flag.startswith("--"))
 # 後ろの語へコマンドの位置を渡すラッパーと起動の語
 WRAPPERS = frozenset({"env", "timeout", "nice", "nohup", "time", "exec", "command", "stdbuf", "ionice", "xargs"})
 LAUNCHERS = frozenset({"uv", "uvx", "python", "python3", "npx", "pnpm", "yarn", "npm", "bunx", "poetry", "pipx"})
@@ -83,7 +84,8 @@ def _has_parallel(args: Sequence[str]) -> bool:
     for arg in args:
         if arg in PARALLEL_FLAGS or any(arg.startswith(flag + "=") for flag in PARALLEL_FLAGS if flag.startswith("--")):
             return True
-        if arg.startswith("-n") and arg[2:].isdigit():
+        # 短い指定へ数を続けた形（`-n4`・`-j8`）
+        if any(arg.startswith(flag) and arg[len(flag) :].isdigit() for flag in _SHORT_PARALLEL_FLAGS):
             return True
     return False
 

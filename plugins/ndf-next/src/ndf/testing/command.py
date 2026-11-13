@@ -52,13 +52,19 @@ def _load_limits(cwd: Path, wait_limit: int | None) -> limits_mod.Limits:
 
 @contextmanager
 def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iterator[list[int]]:
-    """受けたシグナルを子のグループへ送り、受けたシグナルの一覧を渡す。出るときに元のハンドラーへ戻す。"""
+    """受けたシグナルを子のグループへ送り、受けたシグナルの一覧を渡す。出るときに元のハンドラーへ戻す。
+
+    子をまだ起こしていない（枠・メモリを待っている）ときは `KeyboardInterrupt` を送って待ちを抜ける。
+    取りかけた枠は `slots.gate` が返す。
+    """
     interrupted: list[int] = []
 
     def forward(signum: int, _frame: FrameType | None) -> None:
         interrupted.append(signum)
         proc = get_proc()
-        if proc is not None and proc.poll() is None:
+        if proc is None:
+            raise KeyboardInterrupt
+        if proc.poll() is None:
             try:
                 os.killpg(proc.pid, signum)
             except ProcessLookupError:
