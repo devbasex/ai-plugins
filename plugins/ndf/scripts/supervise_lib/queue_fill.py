@@ -157,7 +157,7 @@ VERSION_RECORD = "version.json"  # 版の記録
 VERSION_PLAN = "version-plan.json"  # 差し込み前のプランの写し
 SUPERSEDED = "superseded"  # 決め直した前の版のステップの記録の退避先
 KEEP_ON_REDECIDE = {VERSION_RECORD, VERSION_PLAN, SUPERSEDED, "plan.json"}  # 決め直しで退避しないもの（plan.json は状態の実体の写し）
-GATE_2_STEPS = ("approve", "mvv")  # 本番のプランの先頭でリリース承認ゲートを通すステップ
+GATE_2_STEPS = ("approve", "mvv", "approve-pr")  # 本番のプランでリリース承認ゲートを通すステップ（approve-pr は CD のある場合。#2773）
 
 
 def _version_now() -> str:

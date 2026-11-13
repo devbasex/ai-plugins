@@ -16,7 +16,7 @@ items に足し、metrics の swept_removed・swept_kept で数える。#2229）
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
-変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。--expect-head を
+変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin`（`--no-admin` なら管理者の迂回なし）でマージして cleanup まで行う。--expect-head を
 渡すと、PR を読むたびに先端をその SHA と比べ、違えば待ち直さず（マージ済みでも）止まる（items[].result: head_moved。#815）。
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずにリリース承認ゲートで止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
@@ -449,7 +449,11 @@ def build_parser():
     g.add_argument("--base", help="Pull Request の宛先のブランチ（省けば --pr の宛先を読む）")
     g.add_argument("--pr", type=int, help="承認資料に URL と差分の量を載せる Pull Request")
     g.set_defaults(func=cmd_merge_gate)
-    m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
+    m = sub.add_parser(
+        "merge-when-green",
+        parents=[common_parser()],
+        help="CI が通るまで待ち、マージして後片付けまで行う（既定は管理者の迂回付き。--no-admin なら迂回なし）",
+    )
     m.add_argument("pr", type=int, metavar="PR番号")
     merge.add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")

@@ -112,6 +112,22 @@ elif a[:3] == ["api", "-X", "PATCH"]:
         st.setdefault("issue_bodies", {{}})[key] = json.load(sys.stdin)["body"]
         st.setdefault("written", []).append(key)
         out = "HTTP/2.0 200 OK\n\n{{}}"
+elif a[:3] == ["api", "-X", "POST"] and a[4].endswith("/comments"):  # 承認の証跡のコメント（#2773）
+    st.setdefault("comments", []).append(json.load(sys.stdin)["body"])
+    out = 'HTTP/2.0 201 Created\n\n{{"html_url": "https://github.com/o/r/pull/9#c1"}}'
+elif a[:1] == ["api"] and "rules/branches/" in a[-1]:
+    out = json.dumps(st.get("rules", []))
+elif a[:1] == ["api"] and "/protection/" in a[-1]:
+    code = 1
+    sys.stderr.write("gh: Not Found (HTTP 404)\n")
+elif a[:2] == ["api", "user"]:
+    out = st.get("login", "me")
+elif a[:1] == ["api"] and "/comments" in " ".join(a):
+    out = ""
+elif a[:1] == ["api"] and __import__("re").search(r"/pulls/\d+$", a[-1]):
+    seq = st.get("pr_seq", {{}}).get(a[-1].rsplit("/", 1)[1]) or [{{}}]
+    cur = seq[0]
+    out = json.dumps({{"head": {{"sha": cur.get("headRefOid", "")}}, "base": {{"ref": cur.get("baseRefName", "main")}}, "state": "open"}})
 elif a[:2] == ["issue", "close"]:
     key = f"{{opt('--repo')}}#{{a[2]}}"
     st.setdefault("closed", []).append(key)
@@ -876,6 +892,17 @@ def test_merge_when_green_proceeds_with_approval_and_records_it(repo, gh):
     assert merges(gh) == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]
 
 
+def test_merge_when_green_no_admin_merges_without_the_bypass(repo, gh):
+    """#2773 の I7: --no-admin なら gh pr merge に --admin を付けず、マージの記録に admin: false を残す。"""
+    declare(repo, *CONSOLE)
+    gh.set(pr_seq={"5": [to("main", "bbb")] * 3})
+    args = ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--no-cleanup", "--gate-approved", "user", "--no-admin"]
+    code, out, err = call("merged-steps.py", args, gh.env, repo)
+    assert code == 0, (out, err)
+    assert merges(gh) == [["pr", "merge", "5", "--merge", "--match-head-commit", "bbb"]]
+    assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is False
+
+
 @pytest.mark.parametrize("broken", ["worktree", "project"])
 def test_merge_when_green_stops_on_broken_declaration(repo, gh, broken):
     """AC7: 宣言が壊れていれば、本番系へ出るかを決められないとして止まる（止めない側へ倒さない）。"""
@@ -907,7 +934,7 @@ def test_merge_gate_judges_without_gh(repo, gh):
     assert gh.get().get("calls", []) == []
 
 
-def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
+def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh, tmp_path):
     """I7: リリースの Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
     declare(repo, *TRYGROUP)
     gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop")]})
@@ -916,7 +943,8 @@ def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
     gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
     code, out, err = call(
         "merged-steps.py",
-        ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0", "--gate-approved", "mvv"],
+        # CD のある場合（TRYGROUP）は照合する承認したコミットが要る（#2773）
+        [*promote_args("--expect-head-from", str(verified_material(tmp_path)), "--gate-approved", "mvv")],
         gh.env,
         repo,
     )
@@ -987,8 +1015,10 @@ def test_promote_merges_the_verified_commit(repo, gh, tmp_path):
     gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
     code, out, err = promote_mvv(repo, gh, verified_material(tmp_path))
     assert code == 0, (out, err)
-    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+    # CD のある場合（TRYGROUP は main へのマージで届く）は証跡を書いてから迂回なしでマージする（#2773 の決定 14）
+    assert merges(gh) == [["pr", "merge", "9", "--merge", "--match-head-commit", X]]
     assert next(i for i in out["items"] if i.get("result") == "merged")["head"] == X
+    assert X in gh.get()["comments"][0] and "ndf:release-approval" in gh.get()["comments"][0]
 
 
 @pytest.mark.parametrize(
@@ -1079,7 +1109,7 @@ def test_promote_approved_merges_the_approved_commit(repo, gh, tmp_path):
     material = promote_material(tmp_path)
     code, out, err = call("merged-steps.py", promote_args("--approved-from", str(material), "--gate-approved", "user"), gh.env, repo)
     assert code == 0, (out, err)
-    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+    assert merges(gh) == [["pr", "merge", "9", "--merge", "--match-head-commit", X]]  # CD のある場合は迂回なし（#2773）
 
 
 @pytest.mark.parametrize(

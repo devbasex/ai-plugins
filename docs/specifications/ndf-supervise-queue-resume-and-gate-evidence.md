@@ -5,7 +5,9 @@
 **`pace: normal` の `supervise.py new sprint` は、設計承認ゲートの後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 →
 検査 → デプロイ）を最初のステージの `command` 1 本に `--then` でつなぐ。** 設計 PR のマージは設計 PR ごとのプラン `design-merge-<N>`
 が受け持ち、PR の番号を設計のプランの報告から読み、承認の証跡（承認ラベルか、スプリント状態ファイルの設計承認ゲートの利用者の承認の記録）
-が無ければ承認ゲート（終了コード 10）で止まる。リリース承認ゲートの後の本番は別の `command` のままで、先頭の `approve` が承認の記録を書く。
+が無ければ承認ゲート（終了コード 10）で止まる。リリース承認ゲートの後の本番は別の `command` のままで、先頭の `approve` が承認の記録を書く。CD のある場合（リリースの場合の判定が
+`cd-no-review` か `cd-review`）の本番のプランは先頭に `approve` を置かず、承認資料を本番の PR へ置いた後の `approve-pr` が
+同じ照合（`--facts-from`・`--answer-from`）で承認の証跡を本番の PR へ書く（[ndf-release-approved-commit.md](ndf-release-approved-commit.md)）。
 
 **止まったプランは `supervise.py queue --resume <done>` の 1 回で、止まったステップから続き、後続のステージも流れる。** 前の起動が
 done の隣に残した一覧（`<done>.plans.json`）からステージの並びを読むため、conductor が知る必要があるのは done のパスだけである。
@@ -95,7 +97,7 @@ conductor が打つコマンドをキューと `wait` だけにすることを�
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I1 | `design-merge-<N>` は、その PR の承認の証跡（承認ラベル `design-approved` か、設計承認ゲートの `pr` の一致する利用者の承認の記録）が無ければ `merge-gate` へ進まない | `approved` のステップが 10 を返し、`gate_next: end` でプランが `関門` で終わる |
-| I2 | 本番のプランの先頭の `approve` は、利用者の承認の証跡が無ければ承認の記録を書かず `release` へ進まない | 10 で止まる（照合の詳細は [ndf-release-approved-commit.md](ndf-release-approved-commit.md)） |
+| I2 | 本番のプランの先頭の `approve`（CD のある場合は `approve-pr`）は、利用者の承認の証跡が無ければ承認の記録を書かず `release` へ進まない | 10 で止まる（照合の詳細は [ndf-release-approved-commit.md](ndf-release-approved-commit.md)） |
 | I3 | キューの続きは、前の起動で完了したプランを流し直さない | 完了の記録があるプランは耐久の記録から結果を返す |
 | I4 | キューの続きでも、後続のステージは前のステージがすべて `完了` のときだけ流れる | 流さず `流さなかった` と理由を残す |
 | I5 | キューの続きは前の起動のステージの並びをそのまま使い、並びを読めなければ何も流さない | `stopped`（終了コード 1）を返し、`next` に「元の queue のコマンドを打ち直す」と書く |

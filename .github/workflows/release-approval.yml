@@ -1,0 +1,42 @@
+name: Release approval
+
+# 本番チャネル（main）宛てのリリースの PR の承認の証跡を確かめ、PR の先端へ commit status `ndf/release-approval` を付ける（#2773）。
+# pull_request_target と issue_comment は既定ブランチの workflow の定義で動く。判定のスクリプトも既定ブランチから取り出し、
+# PR のコードは取り出さない（PR の中で workflow や判定を書き換えても結果は変わらない）。判定は release-steps.py approval-check が持つ。
+# 宛先で絞らない（必須のチェックの照合 check-required-checks.py がどの宛先の PR でもこのジョブを知るため）。本番チャネル宛てでない
+# PR では approval-check が何も付けずに終える。
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, closed]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  # PR ごとに 1 本。PR をまたぐ実行は排他しない（同じ先端の PR は approval-check が読み直して塞ぐ）
+  group: release-approval-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  approval-check:
+    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Check the release approval trail
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: python3 plugins/ndf/scripts/release-steps.py approval-check --root . --pr "$PR"

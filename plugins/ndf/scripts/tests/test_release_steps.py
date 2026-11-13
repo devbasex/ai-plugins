@@ -332,6 +332,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
     monkeypatch.setattr(mod, "wait_and_merge", lambda root, n, **kw: f"new-{n}")
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: f"old-{n}")
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
+    monkeypatch.setattr(mod.reviewed, "dev_workflow_of", lambda root: None)  # 手元でマージする経路（宣言の無いリポジトリ）
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(argparse.Namespace(root=".", version="1.2.3", plugins="ndf", channel="dev", ci_wait=3600.0))
     out = e.value.code
@@ -768,6 +769,8 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     )
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
+    # CD の無い場合（場合 3）の経路。CD の行の有無は公開の担い手だけに効かせる（#2773 の受け入れ条件 19）
+    monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.release_case.decide_case(False, None, ""))
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(
             argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40, ci_wait=3600.0)
@@ -1208,3 +1211,242 @@ def test_cd_result_reads_the_merge_commit_of_the_last_pr_not_the_branch_tip(monk
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: None)
     assert mod._cd_revision(".", a) == ""
     assert mod._cd_revision(".", argparse.Namespace(base="main", head=None, prs=None)) == "tip"
+
+
+# --- #2773: CD のある場合の本番・開発版・証跡のチェック ---------------------------------------------------
+
+HEAD = "c" * 40
+
+
+def _case(mod, name):
+    rc = mod.release_case
+    return {
+        "no-cd": rc.decide_case(False, None, ""),
+        "cd-no-review": rc.decide_case(True, 0, ""),
+        "cd-review": rc.decide_case(True, 1, ""),
+    }[name]
+
+
+def _exits(monkeypatch, target):
+    seen = []
+
+    def emit(obj, code=None, *a, **k):
+        seen.append(code)
+        raise SystemExit(obj)
+
+    monkeypatch.setattr(target, "emit", emit)
+    return seen
+
+
+def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
+    """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv = mod.reviewed
+    merged, published, ci = [], [], []
+    monkeypatch.setattr(
+        rv, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "", "")
+    )
+    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found)
+    monkeypatch.setattr(mod, "_merge_release_pr", lambda *a: (7, 7, "c"))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: "m")
+    monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
+    monkeypatch.setattr(rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由"))
+    monkeypatch.setattr(rv, "wait_ci_except", lambda *a: ci.append(a[2]))
+    monkeypatch.setattr(rv, "wait_trail_status", lambda *a: None)
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: merged.append(kw) or "m")
+    monkeypatch.setattr(
+        mod, "_published", lambda r, a, plugin, prod, main_pr, *rest: published.append(main_pr) or (_ for _ in ()).throw(SystemExit({}))
+    )
+    codes = _exits(monkeypatch, rv)
+    a = argparse.Namespace(version="1.2.3", ci_wait=60.0)
+    with pytest.raises(SystemExit) as e:
+        rv.release_prod(tmp_path, a, _case(mod, case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", mod)
+    return e.value.code, (codes[-1] if codes else None), merged, published, ci
+
+
+@pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
+def test_reviewed_prod_stops_at_the_gate_until_the_approval_matches(monkeypatch, tmp_path, case):
+    """受け入れ条件 5・6・13・18: 承認が先端と一致しなければ、CI を待ってから本番の PR を開いたまま 10 で止まりマージしない。"""
+    out, code, merged, published, ci = _reviewed_prod(monkeypatch, tmp_path, case, "failure")
+    assert code == 10 and out["status"] == "gate" and merged == [] and published == []
+    assert out["metrics"]["main_pr"] == 9 and out["metrics"]["approved_sha"] == HEAD and ci == [("ndf/release-approval",)]
+    assert ("approve --pr 9" in out["next"]) is (case == "cd-no-review")
+
+
+@pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
+def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, tmp_path, case):
+    """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
+    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found={"number": 9, "state": "OPEN"})
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}] and published == [9]
+
+
+def test_reviewed_prod_resumes_after_the_merge(monkeypatch, tmp_path):
+    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-no-review", "failure", found={"number": 9, "state": "MERGED"})
+    assert merged == [] and published == [9]
+
+
+def test_wait_and_merge_passes_no_admin(monkeypatch):
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    mod.wait_and_merge(".", 5)
+    mod.wait_and_merge(".", 5, no_admin=True)
+    assert "--no-admin" not in calls[0] and calls[1][-1] == "--no-admin"
+
+
+@pytest.mark.parametrize("arg", ["approved_sha", "approval"])
+def test_cd_cases_refuse_the_approved_commit_argument(monkeypatch, arg):
+    """決定 10: CD のある場合の本番は承認したコミットの引数を受けず 3 で止まる。CD の無い場合は今のまま受ける。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    a = argparse.Namespace(channel="prod", version="1.2.3", approved_sha=None, approval=None)
+    setattr(a, arg, "a" * 40)
+    with pytest.raises(mod.StepError) as e:
+        mod.approval.approved_of(".", a, "ndf", _case(mod, "cd-no-review"))
+    assert e.value.code == mod.EXIT_PRECONDITION
+    a.approval, a.approved_sha = None, "a" * 40
+    assert mod.approval.approved_of(".", a, "ndf", _case(mod, "no-cd")) == "a" * 40
+
+
+def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin"):
+    """approval-check を流し、(結果, 付けた状態の並び) を返す。rounds は open_prs_at が順に返す番号。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv, at = mod.reviewed, mod.reviewed.approval_trail
+    posted, left = [], list(rounds)
+    monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(rv.delivery, "load_delivery", lambda r: rv.delivery.DeliveryDecl(base="develop", production="main"))
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(at, "read_head", lambda repo, n: (HEAD, base, state))
+    monkeypatch.setattr(at, "open_prs_at", lambda repo, sha, b: left.pop(0) if len(left) > 1 else left[0])
+    trail = {"id": 1, "body": at.render_trail(HEAD, "user"), "user": {"login": "boss"}, "created_at": "t", "updated_at": "t"}
+    monkeypatch.setattr(at, "read_comments", lambda repo, n: [trail])
+    monkeypatch.setattr(at, "read_roles", lambda repo, logins: {"boss": role})
+    monkeypatch.setattr(at, "post_status", lambda repo, sha, j: posted.append(j.state))
+    _exits(monkeypatch, rv)
+    with pytest.raises(SystemExit) as e:
+        rv.approval_check(argparse.Namespace(root=str(tmp_path), pr=5))
+    return e.value.code, posted
+
+
+def test_approval_check_success_and_reread(monkeypatch, tmp_path):
+    """I10: success を付けた後の読み直しで同じ先端の PR が増えていれば failure に付け直す。"""
+    out, posted = _check(monkeypatch, tmp_path)
+    assert posted == ["success"] and out["metrics"]["state"] == "success" and out["metrics"]["approver"] == "boss"
+    out, posted = _check(monkeypatch, tmp_path, rounds=([5], [5, 6]))
+    assert posted == ["success", "failure"] and "#6" in out["metrics"]["description"]
+
+
+def test_approval_check_fails_for_write_role_and_skips_other_bases(monkeypatch, tmp_path):
+    out, posted = _check(monkeypatch, tmp_path, role="write")
+    assert posted == ["failure"]
+    out, posted = _check(monkeypatch, tmp_path, base="develop")
+    assert posted == [] and out["status"] == "ok"
+
+
+def test_approval_check_rejudges_the_other_pr_when_one_closes(monkeypatch, tmp_path):
+    out, posted = _check(monkeypatch, tmp_path, state="closed", rounds=([8], [8], [8]))
+    assert posted == ["success"] and out["metrics"]["pr"] == 8
+    out, posted = _check(monkeypatch, tmp_path, state="closed", rounds=([],))
+    assert posted == []
+
+
+def test_approval_check_posts_error_when_unreadable(monkeypatch, tmp_path):
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv, at = mod.reviewed, mod.reviewed.approval_trail
+    posted = []
+    monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(rv.delivery, "load_delivery", lambda r: rv.delivery.DeliveryDecl(base="develop", production="main"))
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(at, "read_head", lambda repo, n: (HEAD, "main", "open"))
+    monkeypatch.setattr(at, "open_prs_at", lambda *a: (_ for _ in ()).throw(at.TrailError("unreadable", "読めない")))
+    monkeypatch.setattr(at, "post_status", lambda repo, sha, j: posted.append(j.state))
+    with pytest.raises(mod.StepError):
+        rv.approval_check(argparse.Namespace(root=str(tmp_path), pr=5))
+    assert posted == ["error"]
+
+
+def test_approval_post_writes_once_per_head(monkeypatch, tmp_path):
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv, at = mod.reviewed, mod.reviewed.approval_trail
+    material = tmp_path / "approval.md"
+    material.write_text("# 承認資料\n", encoding="utf-8")
+    comments, written = [], []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/2"}
+
+    monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(at, "read_head", lambda repo, n: (HEAD, "main", "open"))
+    monkeypatch.setattr(at, "read_comments", lambda repo, n: comments)
+    monkeypatch.setattr(rv.gh_rest, "comment", lambda repo, n, body: written.append(body) or comments.append({"body": body}) or Ok())
+    _exits(monkeypatch, rv)
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(material)))
+    assert len(written) == 1 and at.has_request(comments, HEAD) and at.parse_trail(written[0]) is None
+    with pytest.raises(mod.StepError) as e:
+        rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(tmp_path / "missing.md")))
+    assert e.value.code == mod.EXIT_PRECONDITION
+
+
+def test_approve_on_pr_writes_the_trail_and_gates_on_a_moved_head(monkeypatch, tmp_path):
+    """受け入れ条件 3: approve --pr は証跡を書く。先端が承認したコミットと違えば書かずに 10。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    ap = mod.approval
+    monkeypatch.setattr(ap.repo_lib, "owner_repo", lambda r: "o/r")
+    monkeypatch.setattr(ap.trail, "write_trail", lambda repo, pr, sha, by: (True, "https://x/c/3"))
+    a = argparse.Namespace(pr=9, approved_sha=HEAD, by="user", approval=None, facts_from=None)
+    out = ap.approve(tmp_path, a)
+    assert out["status"] == "ok" and out["metrics"]["comment_url"] == "https://x/c/3"
+
+    def moved(*_):
+        raise ap.trail.TrailError("head_moved", "動いた")
+
+    monkeypatch.setattr(ap.trail, "write_trail", moved)
+    with pytest.raises(ap.Gate):
+        ap.approve(tmp_path, a)
+    with pytest.raises(mod.StepError):
+        ap.approve(tmp_path, argparse.Namespace(pr=9, approved_sha=None, by="user", approval=None, facts_from=None))
+
+
+def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch, tmp_path):
+    """受け入れ条件 1・15: 宣言があれば開発版の PR のマージを workflow に任せ、マージ済みなら起動しない。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv = mod.reviewed
+    runs = []
+    monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: "c")
+    monkeypatch.setattr(rv, "release_dev_by_workflow", lambda r, a, wf, n: runs.append((wf, n)) or "https://x/runs/1")
+    _exits(monkeypatch, rv)
+    a = argparse.Namespace(version="1.2.3-dev.1")
+    for state in ("OPEN", "MERGED"):
+        monkeypatch.setattr(mod, "_reusable_release_pr", lambda r, b, base, s=state: {"number": 4, "state": s})
+        with pytest.raises(SystemExit) as e:
+            rv.release_dev(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "release-dev.yml", mod)
+        assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
+    assert runs == [("release-dev.yml", 4)]
+
+
+def test_dev_run_title_comes_from_the_workflow_file():
+    sys.path.insert(0, str(SCRIPT.parent))
+    from release_lib import reviewed
+
+    assert reviewed.dev_run_title(SCRIPT.parents[3], "release-dev.yml", 12) == "release-dev #12"

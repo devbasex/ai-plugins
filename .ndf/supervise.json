@@ -18,6 +18,7 @@
   "release": {
     "form": "package-plugin",
     "plugin": "ndf",
-    "runtimes": ["claude", "codex"]
+    "runtimes": ["claude", "codex"],
+    "dev_workflow": "release-dev.yml"
   }
 }

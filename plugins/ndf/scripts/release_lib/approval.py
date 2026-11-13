@@ -13,7 +13,9 @@ from pathlib import Path
 import approved_commit as ac
 import clock
 import gh_parts
+import release_case
 import repo as repo_lib
+from release_lib import approval_trail as trail
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, git, result
 
 TOOL = "release"
@@ -45,12 +47,26 @@ def approved_by(root, a) -> str:
     return (ac.recorded_by(_material(root, material)) if material else None) or "user"
 
 
-def approved_of(root, a, plugin):
+def approved_of(root, a, plugin, case=None):
     """リリースが受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
 
     --approved-sha の形の誤り・どちらも無い・dev に渡した → 2。--approval の資料・欄が無い・形の誤り → 3。
-    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート。終了コード 10）。"""
+    --approval の資料に承認の記録が無いか SHA が違う → Gate（承認ゲート。終了コード 10）。
+    `case` が CD のある場合（`release_case` の cd-no-review / cd-review）なら、承認の正本は PR の証跡かレビューで、
+    承認したコミットの引数を受けない（渡せば 3。#2773 の決定 10）。"""
     sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
+    if case is not None and case.case != release_case.NO_CD:
+        if sha or material:
+            raise StepError(
+                f"リリースの場合 {case.case} では --approved-sha も --approval も渡さない（承認はリリースの PR の"
+                + (
+                    "証跡のコメント。release-steps.py approve --pr <本番の PR> --approved-sha <先端> --by user で書く）"
+                    if case.case == release_case.CD_NO_REVIEW
+                    else "レビューの承認）"
+                ),
+                EXIT_PRECONDITION,
+            )
+        return None
     if a.channel == "dev":
         if sha or material:
             raise StepError("--channel dev には --approved-sha も --approval も渡さない", EXIT_UNREADABLE)
@@ -264,6 +280,10 @@ def approve(root, a) -> dict:
     metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
     --facts-from なら approve_from_facts（#1426）。"""
     # 空の --facts-from（queue が {queue_state?:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す
+    if getattr(a, "pr", None) is not None:
+        return approve_on_pr(root, a)
+    if not getattr(a, "approval", None):
+        raise StepError("--approval か --pr が要る", EXIT_UNREADABLE)
     if getattr(a, "facts_from", None) is not None:
         return approve_from_facts(root, a)
     if not getattr(a, "approved_sha", None):
@@ -291,3 +311,73 @@ def approve(root, a) -> dict:
         {"approved_sha": sha, "by": a.by, "at": at},
         str(path),
     )
+
+
+def approved_on_pr(repo: str, pr: int, head: str, case) -> "trail.Judgment":
+    """場合 1（cd-no-review）は証跡、場合 2（cd-review）は有効な人の最新の承認のレビューのコミットで先端を照らす（#2773 の決定 7）。
+    許可リストの許容を使わず、完全な一致だけを success にする。読めなければ TrailError。"""
+    if case.case == release_case.CD_REVIEW:
+        reviews = trail.read_reviews(repo, pr)
+        logins = [str((r.get("user") or {}).get("login") or "") for r in reviews if r.get("state") == "APPROVED"]
+        got = trail.approved_review_commit(reviews, trail.read_permissions(repo, logins))
+        if got is None:
+            return trail.Judgment("failure", "有効な承認のレビューが無い")
+        if got != head.lower():
+            return trail.Judgment("failure", f"承認のレビュー {got[:7]} ≠ 先端 {head[:7]}")
+        return trail.Judgment("success", f"承認のレビュー {got[:7]}")
+    trails = trail.trails_of(trail.read_comments(repo, pr))
+    return trail.judge(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited]), head)
+
+
+def _sha_on_pr(root, a) -> tuple[str, dict]:
+    """approve --pr の承認したコミット。--approved-sha か、--facts-from の facts の出力（--by user なら利用者の承認の記録も）。"""
+    import gate_answer
+
+    if getattr(a, "approved_sha", None):
+        try:
+            return ac.parse_sha(a.approved_sha), {}
+        except ValueError as e:
+            raise StepError(str(e), EXIT_UNREADABLE)
+    if getattr(a, "facts_from", None) is None:
+        raise StepError("approve --pr には --approved-sha か --facts-from が要る", EXIT_UNREADABLE)
+    sha, facts_at = _facts_of(a.facts_from)
+    metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by, "pr": a.pr}
+    if not sha:
+        raise StepError(f"facts の出力（{a.facts_from or '空'}）に承認したコミットが無い", EXIT_UNREADABLE)
+    if a.by == "user":  # MVV 判定はプランの mvv のステップが 0 を返したときだけここへ来る
+        answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.RELEASE_GATE, after=facts_at)
+        if answer is None:
+            nxt = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.RELEASE_GATE}" --what <要約> --by user --outcome approved を書いてから続ける'
+            raise Gate(
+                result(
+                    TOOL,
+                    "gate",
+                    "証跡を書かずに止めた: リリース承認ゲートの利用者の承認の記録が facts の出力より後に無い",
+                    [],
+                    metrics,
+                    None,
+                    nxt,
+                )
+            )
+        metrics["answer_at"] = answer.at
+    return sha, metrics
+
+
+def approve_on_pr(root, a) -> dict:
+    """リリース承認ゲートの承認を、リリースの PR へ承認の証跡のコメントとして書く（#2773 の E5）。
+    先端が承認したコミットと違えば書かずに承認ゲート（10）で止まる。"""
+    sha, metrics = _sha_on_pr(root, a)
+    metrics = {"approved_sha": sha, "by": a.by, "pr": a.pr, **{k: v for k, v in metrics.items() if k not in ("approved_sha", "by", "pr")}}
+    repo = repo_lib.owner_repo(root)
+    if not repo:
+        raise StepError("リポジトリ（origin の owner/repo）を決められない", EXIT_UNREADABLE)
+    try:
+        written, url = trail.write_trail(repo, a.pr, sha, a.by)
+    except trail.TrailError as e:
+        if e.kind == "head_moved":
+            nxt = "承認資料を作り直して承認を取り直す（release-steps.py release --version <版> --channel prod を打ち直すと新しい先端で止まる）"
+            raise Gate(result(TOOL, "gate", f"証跡を書かずに止めた: {e}", [], metrics, None, nxt))
+        raise StepError(str(e))
+    metrics["comment_url"] = url
+    item = {"kind": "comment", "name": url or f"#{a.pr}", "result": "written" if written else "kept"}
+    return result(TOOL, "ok", f"PR #{a.pr} に承認の証跡（{sha[:8]}・{a.by}）を{'書いた' if written else '既に書いてある'}", [item], metrics)

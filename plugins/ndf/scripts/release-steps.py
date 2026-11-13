@@ -30,7 +30,7 @@
     python3 release-steps.py review-close   --version <版>
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
-                                            [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+                                            [--approved-sha <SHA> | --approval <承認資料>]   # CD の無い prod はどちらかが要る
     python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
     python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
     python3 release-steps.py record         --merged --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
@@ -39,6 +39,10 @@
     python3 release-steps.py cd-guidance    [--root <dir>]   # CD の案内
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
+    python3 release-steps.py approve        --pr <本番の PR> (--approved-sha <SHA> | --facts-from <状態> [--answer-from <状態>]) --by user|mvv
+    python3 release-steps.py approval-post  --pr <本番の PR> --approval <承認資料>   # 承認資料をリリースの PR へ置く
+    python3 release-steps.py approval-check --pr <PR番号>   # 証跡のチェック（workflow が打つ）
+    python3 release-steps.py release-case   [--root <dir>]   # リリースの場合
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
@@ -49,6 +53,10 @@ release --channel prod は承認したコミットを受け取り、`origin/rele
 本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。承認の後にベースブランチが
 進んでも止まらず、本番チャネルの PR は head を release/v<版> にして比べた先端だけを出す（#2436 の R2）。本番チャネルの
 PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まったデプロイの再開）。
+ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
+承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
+一致すれば管理者の迂回なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
+`.ndf/supervise.json` の release.dev_workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
 
 record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ
 release/v<版>-sync → ベースブランチ）へリリース記録
@@ -95,7 +103,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, promotion, publish, record, replaced, review_range  # noqa: E402
+from release_lib import others, promotion, publish, record, replaced, review_range, reviewed  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -124,6 +132,7 @@ from step_result import (
     version_arg,
 )
 import gh_parts  # noqa: E402
+import release_case  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import branch_flow  # noqa: E402
 import delivery  # noqa: E402
@@ -503,16 +512,17 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None, no_admin=False):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
     PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
-    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。no_admin なら管理者の迂回なしでマージする（#2773 の I7）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     cmd += ["--expect-head", expect] if expect else []
     cmd += ["--gate-approved", gate_approved] if gate_approved else []
+    cmd += ["--no-admin"] if no_admin else []
     p = run(cmd, cwd=root, check=False)
     out = step_read.last_json(p.stdout) or {}
     if p.returncode != 0:
@@ -658,8 +668,9 @@ def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
+    case = reviewed.release_case_or_stop(root) if a.channel == "prod" else None
     try:
-        approved = approval.approved_of(root, a, plugin)
+        approved = approval.approved_of(root, a, plugin, case)
     except approval.Gate as g:
         emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
@@ -670,10 +681,15 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
+    on_pr = case is not None and case.case != release_case.NO_CD  # CD のある場合は承認を PR の上で照らす（#2773）
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
-        main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
-        _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
+        got = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops, case if on_pr else None)
+        _published(root, a, plugin, prod, *got)
+    if on_pr:
+        reviewed.release_prod(root, a, case, plugin, plugins, branch, base, prod, sys.modules[__name__])
+    if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)):
+        reviewed.release_dev(root, a, plugin, plugins, branch, base, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
@@ -739,6 +755,21 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
     status, code, done = back(items, metrics, done) if back else ("ok", None, done)
     emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
+
+
+def cmd_approval_check(a):
+    """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773。本体は release_lib/reviewed.py）。"""
+    reviewed.approval_check(a)
+
+
+def cmd_approval_post(a):
+    """承認資料をリリースの PR へ承認資料のコメントとして置く（#2773。本体は release_lib/reviewed.py）。"""
+    reviewed.approval_post(a)
+
+
+def cmd_release_case(a):
+    """リリースの場合を metrics に出す（#2773。本体は lib/release_case.py）。"""
+    reviewed.release_case_out(a)
 
 
 def _sweep_candidates(root, merge):
@@ -1227,8 +1258,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
     p.add_argument("--ci-wait", type=float, default=3600.0, help="待つ PR ごとの CI の待ちの上限（秒）")
     g = p.add_mutually_exclusive_group()
-    g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
-    g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
+    g.add_argument(
+        "--approved-sha", metavar="SHA", help="prod の CD が無い場合: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）"
+    )
+    g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
@@ -1276,8 +1309,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cd-guidance", parents=[common], help="CD が無いリポジトリへ CD の設定と方式の記録を促す案内を出す")
     p.set_defaults(func=cmd_cd_guidance)
 
-    p = sub.add_parser("approve", parents=[common], help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する")
-    p.add_argument("--approval", required=True, help="承認資料")
+    p = sub.add_parser(
+        "approve",
+        parents=[common],
+        help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する（--pr ならリリースの PR へ証跡を書く）",
+    )
+    p.add_argument("--approval", help="承認資料（--pr の無い経路で要る）")
+    p.add_argument("--pr", type=int, help="CD のある場合: 承認の証跡のコメントを置くリリースの PR（#2773）")
     p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
     p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
     p.add_argument(
@@ -1285,6 +1323,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
+
+    p = sub.add_parser("approval-check", parents=[common], help="リリースの PR の承認の証跡を判定し、先端へ commit status を付ける")
+    p.add_argument("--pr", type=int, required=True)
+    p.set_defaults(func=cmd_approval_check)
+    p = sub.add_parser("approval-post", parents=[common], help="承認資料をリリースの PR へ承認資料のコメントとして置く")
+    p.add_argument("--pr", type=int, required=True)
+    p.add_argument("--approval", required=True, help="承認資料")
+    p.set_defaults(func=cmd_approval_post)
+    p = sub.add_parser("release-case", parents=[common], help="リリースの場合（cd-no-review / cd-review / no-cd）を出す")
+    p.set_defaults(func=cmd_release_case)
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)

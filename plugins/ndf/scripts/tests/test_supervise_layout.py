@@ -66,6 +66,7 @@ MODULES = [
     "templates",
     "verify_steps",
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
+    "release_cd",  # CD のある場合の本番のリリースプランの部品（#2773 で release_templates から分けた）
     "release_templates",
     "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
     "delivery_templates",
@@ -102,6 +103,7 @@ NO_ENGINE = [
     "pr",
     "templates",
     "release_flow",
+    "release_cd",
     "release_templates",
     "review_units",
     "delivery_templates",
@@ -218,3 +220,57 @@ def test_imports_have_no_cycle():
 
     for m in MODULES:
         visit(m, ())
+
+
+# --- #2773: CD のある場合のリリースプランの並び -------------------------------------------------------------
+
+
+def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -> dict:
+    """new release をこのリポジトリの宣言で組む。cd なら場合の判定を「CD があり、レビューなしでマージできる」に固定する。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    if cd:
+        monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    out = tmp_path / f"{channel}-{cd}.json"
+    args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel]
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_cd_prod_plan_stacks_the_bumps_before_the_approval_and_merges_after_it(tmp_path, monkeypatch):
+    """受け入れ条件 14・決定 6: 版上げ〜消費の記録は承認ゲートの前に積み、承認の後は証跡とマージだけが進む。"""
+    plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=True)
+    ids = [s["id"] for s in plan["steps"]]
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert ids[0] == "bump" and "approve" not in steps
+    assert [ids.index(i) for i in ("bump", "bump-others", "changelog", "notes", "snapshot")] == sorted(
+        ids.index(i) for i in ("bump", "bump-others", "changelog", "notes", "snapshot")
+    )
+    assert ids.index("snapshot") < ids.index("release")
+    assert "--decided" not in steps["bump-others"]["cmd"] and "--prs 995" in steps["bump-others"]["cmd"]
+    release = steps["release"]
+    assert release["gate_next"] == "facts" and release["next"] == "cd-result" and "--approval" not in release["cmd"]
+    assert (steps["facts"]["next"], steps["explain"]["next"], steps["others"]["next"]) == ("explain", "others", "approval-post")
+    assert "--head release/v10.17.11" in steps["facts"]["cmd"]
+    assert steps["approval-post"]["next"] == "end" and "approval-post --pr" in steps["approval-post"]["cmd"]
+    assert (
+        steps["approve-pr"]["next"] == "release"
+        and "approve --pr" in steps["approve-pr"]["cmd"]
+        and "--by user" in steps["approve-pr"]["cmd"]
+    )
+
+
+def test_cd_dev_plan_has_no_approval_material_steps(tmp_path, monkeypatch):
+    plan = _release_plan(tmp_path, monkeypatch, "dev", "10.17.11-dev.1", cd=True)
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert not {"facts", "explain", "others", "approval-post"} & set(steps) and steps["verify"]["next"] == "end"
+
+
+def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
+    """受け入れ条件 19・I9: CD の無い場合の本番のプランは今のまま承認の記録が先頭に来る。"""
+    plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=False)
+    assert plan["steps"][0]["id"] == "approve" and "approval-post" not in {s["id"] for s in plan["steps"]}
