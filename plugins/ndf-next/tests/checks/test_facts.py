@@ -67,3 +67,13 @@ def test_table_without_schema_beside_it_stops(plugin, rules):
     plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}], {}))
     with pytest.raises(CheckError, match="表の共通の形を読めない"):
         facts.check(plugin.scope(), rules)
+
+
+def test_domain_tables_are_checked_and_names_do_not_repeat(plugin, rules):
+    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
+    plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}], {}))
+    plugin.write("contracts/domains/stages.json", table([{"id": "verify"}], {}))
+    plugin.write("contracts/domains/seats.json", table([{"id": "a"}, {"id": "a"}], {}))
+    found = facts.check(plugin.scope(), rules)
+    details = sorted((f.path.rsplit("/", 2)[-2], f.detail) for f in found if f.rule == "fact-table")
+    assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の置き場の表と重なる")]

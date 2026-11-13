@@ -1,6 +1,6 @@
 """事実の重複の規則: 同じ事実を 2 つ以上のファイルの最上位の定数に持たない（`const-fact`）。事実の表の形（`fact-table`）。
 
-事実の表（`contracts/facts/*.json`）がある事実は、表から読む。表の形は表と同じ置き場の `fact.schema.json`（I-DT2・DC1）と列の宣言から作る行の形を
+事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の宣言から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
 """
 
@@ -19,7 +19,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ndf.checks.model import CheckError, Finding, Scope
-from ndf.contracts.facts import SCHEMA_FILE
+from ndf.contracts.facts import FACTS_DIR, SCHEMA_FILE, TABLE_DIRS
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
@@ -160,16 +160,31 @@ def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[lis
     return ids, [Finding("fact-table", rel, 1, f"`id` の重なり: {d}") for d in dups]
 
 
-def tables(scope: Scope, tables_dir: str) -> tuple[dict[str, list[str]], list[Finding]]:
-    """事実の表を読み、表の名前 → `id` の並びと、形の違反を返す。表が無ければ空。"""
-    base = scope.plugin_root / tables_dir
-    paths = [p for p in sorted(base.glob("*.json")) if not p.name.endswith(".schema.json")] if base.is_dir() else []
+def _table_paths(scope: Scope, contracts_dir: str) -> list[Path]:
+    """表のファイル（置き場の並び・名前の辞書順。`*.schema.json` を除く）。"""
+    paths = []
+    for d in TABLE_DIRS:
+        base = scope.plugin_root / contracts_dir / d
+        if base.is_dir():
+            paths += [p for p in sorted(base.glob("*.json")) if not p.name.endswith(".schema.json")]
+    return paths
+
+
+def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list[Finding]]:
+    """事実の表（`<contracts_dir>/facts/` と `<contracts_dir>/domains/`）を読み、表の名前 → `id` の並びと、形の違反を返す。
+
+    表が無ければ空。2 つの置き場が同じ名前の表を持てば、後の置き場の表を違反にする（読み手は名前だけで引く）。
+    """
+    paths = _table_paths(scope, contracts_dir)
     found: list[Finding] = []
     ids: dict[str, list[str]] = {}
     if not paths:
         return ids, found
-    common = table_validator(base / SCHEMA_FILE)
+    common = table_validator(scope.plugin_root / contracts_dir / FACTS_DIR / SCHEMA_FILE)
     for path in paths:
+        if path.stem in ids:
+            found.append(Finding("fact-table", scope.rel(path), 1, f"表の名前 {path.stem} が別の置き場の表と重なる"))
+            continue
         ids[path.stem], bad = _table_rows(path, scope.rel(path), common)
         found += bad
     return ids, found
@@ -195,5 +210,5 @@ def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["facts"]
     all_consts = [c for src in scope.code() for c in consts(src.tree, src.rel)]
-    table_ids, found = tables(scope, conf["tables_dir"])
+    table_ids, found = tables(scope, conf["contracts_dir"])
     return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, table_ids, conf["min_str"])
