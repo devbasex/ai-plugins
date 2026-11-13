@@ -94,7 +94,11 @@ def load_as(rel: str, error_cls: type[ContractError]) -> Any:
 
 @cache
 def _schema_validator(rel: str) -> Draft202012Validator:
-    schema = load_json(rel)
+    """`rel` の検証器。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
+    path, _, pointer = rel.partition("#")
+    schema = load_json(path)
+    if pointer:
+        schema = {"$schema": schema.get("$schema"), "$defs": schema.get("$defs", {}), "$ref": f"#{pointer}"}
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:

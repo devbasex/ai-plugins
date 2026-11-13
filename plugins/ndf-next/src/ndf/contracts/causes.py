@@ -16,6 +16,8 @@ from ndf.contracts import facts, limits
 
 TABLE = "causes.json"
 SCHEMA = contracts.schema_path("causes")
+# 結果 JSON の `cause` の形（正本は結果のスキーマの $defs）
+CAUSE_SCHEMA = contracts.schema_path("result") + "#/$defs/cause"
 EXIT_CODES = "exit-codes"
 # 既定の行き先（表の route）と、選んだ行き先（Route.to）の語
 RETRY, STEP, HUMAN, END, STOP = "retry", "step", "human", "end", "stop"
@@ -134,39 +136,17 @@ def cause(kind: str, detail: str, *, instance: Optional[str] = None, retry_after
     return out
 
 
-def _kind_errors(value: dict) -> list[str]:
-    kind = value.get("kind")
-    if not isinstance(kind, str) or kind not in table():
+def kind_errors(value: object) -> list[str]:
+    """`cause.kind` が文字列なのに止まった理由の表に無いときの 1 行。形の誤りはスキーマが報告する。"""
+    kind = value.get("kind") if isinstance(value, dict) else None
+    if isinstance(kind, str) and kind not in table():
         return [f"cause.kind {kind!r} は止まった理由の表に無い"]
     return []
 
 
-def _detail_errors(value: dict) -> list[str]:
-    detail = value.get("detail")
-    if not isinstance(detail, str) or not detail.strip():
-        return ["cause.detail は空でない文字列で書く"]
-    return []
-
-
-def _optional_key_errors(value: dict) -> list[str]:
-    """知らないキーと、任意のキー（instance・retry_after）の型の誤り。"""
-    errs: list[str] = []
-    unknown = sorted(set(value) - {"kind", "detail", "instance", "retry_after"})
-    if unknown:
-        errs.append(f"cause に知らないキーがある: {', '.join(unknown)}")
-    if "instance" in value and (not isinstance(value["instance"], str) or not value["instance"]):
-        errs.append("cause.instance は空でない文字列で書く")
-    ra = value.get("retry_after")
-    if "retry_after" in value and (isinstance(ra, bool) or not isinstance(ra, (int, float)) or ra < 0):
-        errs.append("cause.retry_after は 0 以上の数で書く")
-    return errs
-
-
 def errors(value: object) -> list[str]:
-    """`cause` の値の形の誤りを並べる。空なら、種類が表にあり、説明が空でなく、任意のキーの型が合う。"""
-    if not isinstance(value, dict):
-        return ["cause はオブジェクトで書く"]
-    return _kind_errors(value) + _detail_errors(value) + _optional_key_errors(value)
+    """`cause` の値の誤りを並べる。形は result.schema.json の `$defs/cause`、種類の有無は表と照らす。"""
+    return contracts.schema_errors(value, CAUSE_SCHEMA) + kind_errors(value)
 
 
 def exit_code(kind: str) -> int:

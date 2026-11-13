@@ -95,7 +95,8 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     if not isinstance(obj, dict):
         return errs
     if "cause" in obj:
-        errs += causes.errors(obj["cause"])
+        # cause の形はスキーマ（$defs/cause）が上で確かめた。表と照らす種類の有無だけを足す
+        errs += causes.kind_errors(obj["cause"])
     if code is not None and obj.get("status") in STATUSES:
         if not code_matches(obj["status"], code):
             errs.append(f"status {obj['status']} と終了コード {code} が合わない")
