@@ -206,16 +206,9 @@ def test_every_kind_of_pushback_carries_the_form(home: Path, kind):
     _start()
     got = _stop(WRONG_TEXTS[kind])
     assert got is not None and got["decision"] == "block"
-    form = ur.load_form()
-    assert ur.describe_form(form) in got["reason"]
-    for value in form.values:
-        assert value in got["reason"] and form.meanings[value] in got["reason"]
-        rule = form.required[value]
-        for name in rule.always:
-            assert name in got["reason"]
-        for cond in rule.when:
-            assert cond.item in got["reason"] and cond.value in got["reason"]
-            assert all(n in got["reason"] for n in cond.need)
+    # 説明の文が契約の語を 1 つ残らず載せることは test_unattended_report.py の
+    # test_describe_form_carries_every_declared_word_and_the_examples が確かめる
+    assert ur.describe_form(ur.load_form()) in got["reason"]
 
 
 def test_a_report_copied_from_the_pushback_fits_the_contract(home: Path):
