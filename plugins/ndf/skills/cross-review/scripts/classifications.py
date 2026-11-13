@@ -45,8 +45,7 @@ def _line_limited(path: str, placed: bool) -> bool:
         sys.path.insert(0, lib)
     import doc_kinds
 
-    kind = doc_kinds.doc_kind(path, placed=placed)
-    return kind is not None and any(path.endswith(s) for s in doc_kinds.suffixes("line_limit"))
+    return doc_kinds.has_flag(path, "line_limit", placed=placed)
 
 
 def review_kind(head_branch: str | None, categories: list[str] | tuple[str, ...]) -> str:

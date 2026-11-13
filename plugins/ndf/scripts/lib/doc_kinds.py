@@ -112,6 +112,11 @@ def doc_kind(rel: str, placed: bool = True) -> Optional[str]:
     return max(hits, key=lambda row: len(row["suffix"]))["kind"]
 
 
+def has_flag(path: str, flag: str, placed: bool = True) -> bool:
+    """設計文書の種類に当たり、名前が `flag` の真の種類の末尾のどれかで終わるか。"""
+    return doc_kind(path, placed=placed) is not None and any(path.endswith(s) for s in suffixes(flag))
+
+
 def template_path(kind: str) -> Path:
     """種類の行の雛形のパスを、プラグインの根からの絶対パスで返す（在るかは見ない）。"""
     for row in _contract()[1]:
