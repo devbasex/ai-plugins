@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import jsonio
@@ -28,8 +28,6 @@ ERR_BAD_VALUE = "結果の値が {values} のどれでもない: {value}"
 ERR_MISSING = "「{item}」が無いか無しになっている（結果が {value} のとき要る）"
 ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告より前に「{heading}」の節が無い"
 ERR_BAD_MATERIAL = "「{item}」が{body}でも {url_prefix} の URL でもない: {value}"
-
-MATERIAL_KEYS = ("item", "body", "heading", "url_prefix")
 
 # 形の説明の言い回し。値・項目の名前・条件の値・材料の 4 欄は持たず、契約の `shape` から埋める
 TEXT_HEAD = "区間の報告の形（契約のファイルから作った説明）:"
@@ -85,6 +83,9 @@ class Material:
     body: str
     heading: str
     url_prefix: str
+
+
+MATERIAL_KEYS = tuple(f.name for f in fields(Material))
 
 
 @dataclass(frozen=True)
