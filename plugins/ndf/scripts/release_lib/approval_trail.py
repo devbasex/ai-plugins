@@ -152,7 +152,7 @@ def has_request(comments: list[dict], head: str) -> bool:
 # ---------- GitHub の読み書き ----------
 
 
-def _api(args: list[str], what: str):
+def _gh_api(args: list[str], what: str):
     r = gh_call.gh(["api", *args])
     if r.returncode != 0:
         raise TrailError("unreadable", f"{what}を読めない: {(r.stderr or r.stdout).strip()[:200]}")
@@ -161,7 +161,7 @@ def _api(args: list[str], what: str):
 
 def _pages(path: str, what: str) -> list[dict]:
     """一覧の API を全ページ読む（`--jq '.[]'` で 1 行 1 件）。"""
-    out = _api(["--paginate", path, "--jq", ".[]"], what)
+    out = _gh_api(["--paginate", path, "--jq", ".[]"], what)
     rows = []
     try:
         for line in out.splitlines():
@@ -205,7 +205,7 @@ def read_permissions(repo: str, logins: list[str]) -> dict[str, str | None]:
 def read_head(repo: str, pr: int) -> tuple[str, str, str]:
     """(先端の SHA, 宛先のブランチ, 状態 open / closed)。"""
     try:
-        d = json.loads(_api([f"repos/{repo}/pulls/{int(pr)}"], f"PR #{pr}"))
+        d = json.loads(_gh_api([f"repos/{repo}/pulls/{int(pr)}"], f"PR #{pr}"))
         head, base, state = d["head"]["sha"], d["base"]["ref"], d["state"]
     except (ValueError, KeyError, TypeError) as e:
         raise TrailError("unreadable", f"PR #{pr} の先端を読めない: {e}")
@@ -224,7 +224,7 @@ def post_status(repo: str, sha: str, j: Judgment) -> None:
     """先端へ `ndf/release-approval` の commit status を付ける（同じ名前は最新が効く）。"""
     args = [f"repos/{repo}/statuses/{sha}", "-X", "POST", "-f", f"state={j.state}"]
     args += ["-f", f"context={STATUS_CONTEXT}", "-f", f"description={_cut(j.description)}"]
-    _api(args, "commit status の書き込みの応答")
+    _gh_api(args, "commit status の書き込みの応答")
 
 
 def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:

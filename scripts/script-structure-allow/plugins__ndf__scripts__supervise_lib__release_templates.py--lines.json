@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/supervise_lib/release_templates.py", "name": "", "kind": "lines", "reason": "#2773 で CD のある場合の本番のプラン（承認資料を本番の PR の後に組み、approval-post・approve-pr を置く）を足して 490 行から増えた。雛形は _dev_approval_steps・mvv_gate_steps を同じモジュールで共有するため分けると循環する。触って 500 行以下にしたら消す", "lines": 590}

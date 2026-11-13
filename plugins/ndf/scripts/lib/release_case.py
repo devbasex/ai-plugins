@@ -14,6 +14,7 @@ CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネル
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import NamedTuple
 
 import delivery
@@ -45,7 +46,7 @@ def required_approvals(rules: list[dict]) -> int | None:
     return max(found) if found else None
 
 
-def decide(has_cd: bool, approvals: int | None, why: str) -> Case:
+def decide_case(has_cd: bool, approvals: int | None, why: str) -> Case:
     if not has_cd:
         return Case(NO_CD, "手元の承認資料", "NDF", why or "本番チャネルへのマージで届く CD の行が無い")
     if approvals is not None and approvals >= 1:
@@ -53,7 +54,7 @@ def decide(has_cd: bool, approvals: int | None, why: str) -> Case:
     return Case(CD_NO_REVIEW, "リリースの PR の証跡のコメント", "利用者のアカウント", why or "本番チャネルの承認数が 0")
 
 
-def _api(root, path: str):
+def _gh_read(root, path: str):
     r = gh_call.gh(["api", path], cwd=str(root))
     if r.returncode != 0:
         missing = "404" in (r.stderr + r.stdout) or "Not Found" in (r.stderr + r.stdout)
@@ -66,11 +67,11 @@ def _api(root, path: str):
 
 def read_approvals(root, branch: str) -> tuple[int | None, str]:
     """本番チャネルの承認数。規則が無ければ従来のブランチ保護を読む。読めなければ (None, 理由)。"""
-    rules, why = _api(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
     if isinstance(rules, list) and (n := required_approvals(rules)) is not None:
         return n, ""
     path = f"repos/{{owner}}/{{repo}}/branches/{branch}/protection/required_pull_request_reviews"
-    got, why2 = _api(root, path)
+    got, why2 = _gh_read(root, path)
     if isinstance(got, dict):
         return int(got.get("required_approving_review_count") or 0), ""
     if why2 == "missing" and isinstance(rules, list):
@@ -84,6 +85,19 @@ def case_of(root) -> Case:
     if decl.problems:
         raise CaseUnreadable("; ".join(decl.problems))
     if not delivery.merge_rows(decl):
-        return decide(False, None, "")
+        return decide_case(False, None, "")
     approvals, why = read_approvals(root, decl.production)
-    return decide(True, approvals, why)
+    return decide_case(True, approvals, why)
+
+
+def case_at(root, strict: bool = False) -> Case:
+    """プランを組むときのリリースの場合。リポジトリ（`root`）が無ければ CD の無い場合（今のプランのまま）。
+    宣言を読めなければ、`strict` なら CaseUnreadable、そうでなければ CD の無い場合として返す。"""
+    if not root or not Path(root).is_dir():
+        return decide_case(False, None, "リポジトリが無い")
+    try:
+        return case_of(root)
+    except CaseUnreadable:
+        if strict:
+            raise
+        return decide_case(False, None, "宣言を読めない")

@@ -138,15 +138,18 @@ def whole_timeout(a) -> int:
     return with_margin(limits["ci_wait_timeout"] if whole_on_ci(a) else limits["whole_timeout"])
 
 
-def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = (), merge_fail: str | None = None) -> list[dict]:
+def without_ci_wait(
+    a, steps: list[dict], after_whole: str, drop: tuple[str, ...] = (), merge_fail: str | None = None, force: bool = False
+) -> list[dict]:
     """全体テストを CI に任せる戦略なら、全体テストのステップ（test-all。PR の CI を待つ）と `drop` を外し、test-all へ
     向かう遷移を `after_whole` へ、入力から test-all を外す。CI の結果を待つのはマージのステップ（merge-when-green）だけで、
     落ちればマージしない（2026-11-12、利用者の指示）。手元で走らせる戦略ならそのまま返す。
 
     `merge_fail` を渡すと、マージ（merge・merge-approved）が落ちたときにそのステップ（judge）へ戻し、そこと fix の入力へ
     merge と merge-approved を足す（CI の失敗を直しの輪へ戻す。test-all が持っていた行き先の代わり）。承認の後は
-    merge-approved だけが流れるため、両方を足す。流れていない方は入力に「まだ流れていない」と載るだけである。"""
-    if not whole_on_ci(a):
+    merge-approved だけが流れるため、両方を足す。流れていない方は入力に「まだ流れていない」と載るだけである。
+    `force` なら戦略によらず外す（CD のある場合。マージが CI の結果を待つ。#2773 の決定 11）。"""
+    if not (whole_on_ci(a) or force):
         return steps
     gone = {"test-all", *drop}
     out = []
@@ -162,11 +165,11 @@ def without_ci_wait(a, steps: list[dict], after_whole: str, drop: tuple[str, ...
     return out
 
 
-def trim_check_steps(a, steps: list[dict], after_whole: str, refactor_off: bool) -> list[dict]:
-    """検査のプランのステップを外す。`refactor_off` なら構造改善（assess・refactor）を外す。全体テストを CI に任せる戦略なら、
-    レビューの後の全体テスト（test-all と、それだけを入力に持つ judge・fix）を外す（`without_ci_wait`）。"""
+def trim_check_steps(a, steps: list[dict], after_whole: str, refactor_off: bool, cd_case: bool = False) -> list[dict]:
+    """検査のプランのステップを外す。`refactor_off` なら構造改善（assess・refactor）を外す。全体テストを CI に任せる戦略か
+    CD のある場合（`cd_case`。#2773）なら、レビューの後の全体テスト（test-all と、それだけを入力に持つ judge・fix）を外す（`without_ci_wait`）。"""
     kept = [s for s in steps if not (refactor_off and s["id"] in ("assess", "refactor"))]
-    return without_ci_wait(a, kept, after_whole, drop=("judge", "fix"))
+    return without_ci_wait(a, kept, after_whole, drop=("judge", "fix"), force=cd_case)
 
 
 CI_FIX_PROMPT = (

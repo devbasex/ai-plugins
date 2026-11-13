@@ -6,6 +6,12 @@
     "options": [],
     "positionals": [],
     "subcommands": {
+      "approval-check": {
+        "options": [
+          "--pr"
+        ],
+        "positionals": []
+      },
       "approval-facts": {
         "options": [
           "--approval",
@@ -17,13 +23,21 @@
         ],
         "positionals": []
       },
+      "approval-post": {
+        "options": [
+          "--approval",
+          "--pr"
+        ],
+        "positionals": []
+      },
       "approve": {
         "options": [
           "--answer-from",
           "--approval",
           "--approved-sha",
           "--by",
-          "--facts-from"
+          "--facts-from",
+          "--pr"
         ],
         "positionals": []
       },
@@ -133,6 +147,10 @@
         ],
         "positionals": []
       },
+      "release-case": {
+        "options": [],
+        "positionals": []
+      },
       "run": {
         "options": [
           "--dry-run",
@@ -155,6 +173,7 @@
   "env": [
     "CROSS_REVIEW_TMP_DIR",
     "GH_TOKEN",
+    "GITHUB_REPOSITORY",
     "GITHUB_TOKEN",
     "HOME",
     "NDF_DEPS_REEXEC",

@@ -34,8 +34,8 @@ def test_required_approvals():
     "has_cd, approvals, case",
     [(False, 1, rc.NO_CD), (True, 1, rc.CD_REVIEW), (True, 0, rc.CD_NO_REVIEW), (True, None, rc.CD_NO_REVIEW)],
 )
-def test_decide(has_cd, approvals, case):
-    got = rc.decide(has_cd, approvals, "")
+def test_decide_case(has_cd, approvals, case):
+    got = rc.decide_case(has_cd, approvals, "")
     assert got.case == case and got.reason
 
 
@@ -59,7 +59,12 @@ def test_read_approvals_falls_back_to_branch_protection(monkeypatch):
     run, _ = fake({"rules/branches/main": (0, "[]"), "protection/required_pull_request_reviews": (1, "gh: Not Found (HTTP 404)")})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (0, "")
-    run, _ = fake({"rules/branches/main": (0, "[]"), "protection/required_pull_request_reviews": (0, json.dumps({"required_approving_review_count": 2}))})
+    run, _ = fake(
+        {
+            "rules/branches/main": (0, "[]"),
+            "protection/required_pull_request_reviews": (0, json.dumps({"required_approving_review_count": 2})),
+        }
+    )
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (2, "")
     run, _ = fake({})
