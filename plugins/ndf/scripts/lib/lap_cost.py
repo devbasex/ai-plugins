@@ -38,9 +38,11 @@ def _unpriced(prefix: str, directory: Optional[Path]) -> dict:
 def lap_cost(lap: dict, reports: float, directory: Optional[Path] = None) -> tuple[float, dict]:
     """(ループの 1 回の費用, ループの 1 回の費用の内訳)。`reports` はスプリントの報告の和。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない。"""
     parts: dict = {"source": "reports", "plans": 0.0, "others": 0.0, "unpriced": {}}
-    if not lap.get("out"):
+    # 帳簿の行はプランのパスで引く。工程の進行表で流したループの 1 回（#3092）はプランをループの 1 回のディレクトリの下に置く
+    base = Path(lap["out"]).parent if lap.get("out") else (Path(lap["dir"]) if lap.get("dir") else None)
+    if base is None:
         return reports, parts
-    prefix = f"{Path(lap['out']).parent}/"
+    prefix = f"{base}/"
     try:
         rows = [r for r in _lap_rows(prefix, "claude", directory) if isinstance(r.get("cost_usd"), (int, float))]
         parts["unpriced"] = _unpriced(prefix, directory)
