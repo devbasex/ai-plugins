@@ -246,6 +246,22 @@ def test_hook_lets_writes_under_allowed_and_outside_roots_through(tmp_path):
     assert guard.violations == [os.path.realpath(real / "f")]
 
 
+def test_hook_resolves_links_before_parent_steps(tmp_path):
+    # 一時領域のリンクが守る根の下を指すとき、`link/../f` はリンクの参照先の親（守る根）の f を書く
+    real = tmp_path / "real"
+    (real / "sub").mkdir(parents=True)
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    (allowed / "link").symlink_to(real / "sub")
+    guard = _guard_over(real)
+    guard.allowed = (os.path.realpath(allowed),)
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._hook("open", (str(allowed / "link") + "/../ledger.jsonl", "w", 0))
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._hook("os.remove", (str(allowed / "link") + "/../ledger.jsonl", None))
+    assert guard.violations == [os.path.realpath(real) + "/ledger.jsonl"] * 2
+
+
 def test_hook_ignores_non_path_targets():
     r, w = os.pipe()
     os.close(r)

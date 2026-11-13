@@ -105,7 +105,9 @@ def _resolve(path: object, dir_fd: object, kind: str) -> str | None:
     if isinstance(text, bytes):
         text = os.fsdecode(text)
     base = _fd_path(dir_fd) if not os.path.isabs(text) else None
-    full = os.path.normpath(os.path.join(base, text) if base else os.path.abspath(text))
+    # `..` を字面で畳まない（normpath / abspath を使わない）。`link/..` はリンクの参照先の親を指すので、
+    # realpath に元の成分の順でリンクを解決させてから `..` を当てる
+    full = os.path.join(base or os.getcwd(), text)
     name = os.path.basename(full)
     if kind == CONTENT or name in ("", ".", ".."):
         return os.path.realpath(full)
