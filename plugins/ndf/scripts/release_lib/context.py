@@ -13,6 +13,6 @@ class ReleaseCtx:
     a: object  # release の引数
     plugin: str  # 版を決めるプラグイン
     plugins: list[str]  # 出すプラグインの並び
-    branch: str  # リリースブランチ（release/v<版>）
+    branch: str  # リリースブランチ
     base: str  # ベースブランチ（開発版のチャネル）
     prod: str  # 本番チャネル
