@@ -58,7 +58,5 @@ def test_no_candidate_returns_1(tmp_path: Path) -> None:
 
 
 def test_candidates_come_from_branch_flow() -> None:
-    got = subprocess.run(
-        [sys.executable, "-I", str(LIB / "default_branch_candidates.py")], capture_output=True, text=True, check=True
-    )
+    got = subprocess.run([sys.executable, "-I", str(LIB / "default_branch_candidates.py")], capture_output=True, text=True, check=True)
     assert tuple(got.stdout.split()) == DEFAULT_BRANCH_CANDIDATES
