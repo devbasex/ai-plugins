@@ -107,7 +107,7 @@ graph TD
 
 | ステップ | 種類 | 中身 | 失敗したとき |
 | --- | --- | --- | --- |
-| `survey-check` | run | `design-survey.py check --issue <番号>` | `fix-survey` へ |
+| `survey-check` | run | `design-survey.py check --issue <番号>`。詳細設計を通るモード（`standard`・`legacy-refactor`）では `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる | `fix-survey` へ |
 | `fix-survey` | work（修正） | 指摘の行の作り方・比べた候補を直すか、表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は「判断が要る」と報告する | — |
 | `survey-recheck` | run | `survey-check` と同じ | `on_fail` を持たず、プランが止まる |
 

@@ -237,7 +237,7 @@ stateDiagram-v2
 | `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
 | `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `requirements-recheck` |
 | `requirements-recheck` | run | `spec-copy.py check <課題> <コピー>`（レビューの直しの後も、コピーが課題の本文と一致するか） | `survey-check`。0 以外は `on_fail` を置かずに止まる |
-| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか） | 0 → `glossary-check`。0 以外 → `fix-survey` |
+| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか。詳細設計を通るモードでは `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる） | 0 → `glossary-check`。0 以外 → `fix-survey` |
 | `fix-survey` | work | 指摘の決定の作り方・比べた候補を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は直さずに「判断が要る」と報告する | `survey-recheck` |
 | `survey-recheck` | run | `survey-check` と同じ | 0 → `glossary-check`。0 以外は `on_fail` を置かずに止まる |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
