@@ -659,15 +659,18 @@ def _build_word_patterns(g):
 
 
 def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
-    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。"""
+    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。生成した用語の文書（decl.document）は外す。"""
     targets: list[tuple[str, str, set[int] | None]] = []
     if a.file:
+        document = (root / decl.document).resolve()
         for f in a.file:
             p = Path(f)
             try:
                 text = p.read_text(encoding="utf-8")
             except OSError as e:
                 raise unreadable(f"{f} を読めない: {e}")
+            if document == p.resolve():
+                continue
             targets.append((f, text, None))
     else:
         for rel, lines in sorted(added_lines(root, a.diff).items()):
@@ -690,8 +693,6 @@ def cmd_check(a):
         dep_re, live_re, dep_code_re, live_code_re = _build_word_patterns(g)
         targets = _collect_targets(a, root, decl)
         for rel, text, wanted in targets:
-            if a.file and (root / decl.document).resolve() == Path(rel).resolve():
-                continue
             if rel.endswith(CODE_SUFFIXES):
                 if dep_code_re is not None:
                     items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
