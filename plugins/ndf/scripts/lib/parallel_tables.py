@@ -72,11 +72,13 @@ def _first_row(ln) -> dict:
     }
 
 
-def create_plan_tables(main: Path, plan, max_lanes: Optional[int] = None) -> str:
+def create_plan_tables(main: Path, plan, max_lanes: Optional[int] = None) -> Optional[str]:
     """計画の進行表と、レーンごとの進行表と最初の順番表を 1 つのトランザクションで作る（start の CRUD の C）。
 
     同じ計画の進行表が既にあれば作らずに今の ID を返す（作り直さない。I1）。"""
     with plan_tx(main, create=True) as conn:
+        if conn is None:  # git の外で NDF_PROGRESS_DB も無い置き場では進行表を置かない（台帳だけで動く）
+            return None
         repo, tid = pdb.progress_repo_key(main), plan_table_id(main, plan.name)
         if pdb.progress_table(conn, tid) is not None:
             return tid
