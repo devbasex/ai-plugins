@@ -1218,7 +1218,8 @@ def test_banned_word_in_a_meaning_fails_structure_but_deprecated_column_does_not
     write_json(repo, DEFAULT_SOURCE, g)
     run(repo, "render")
     code, out, _ = run(repo, "check", "--rules", "structure")
-    assert code == 1 and [it["rule"] for it in out["items"]] == ["banned"]
+    # 「禁句」は廃止した語でもあるので、意味の説明の廃止した語の規則（#3190 の決定 8、既定で掛かる）も当たる
+    assert code == 1 and [it["rule"] for it in out["items"]] == ["banned", "deprecated_meaning"]
 
 
 @pytest.mark.parametrize("banned", [{"words": "禁句", "paths": ["a"]}, {"words": ["禁句"]}, {"words": [], "paths": ["a"]}, "禁句"])
