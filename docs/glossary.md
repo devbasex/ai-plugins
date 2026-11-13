@@ -589,6 +589,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 選んで集める取り込み方 | — | `.ndf/worktree.json` の `branch_flow.promotion` が `selected` の運用。本番チャネルから組んだリリースブランチへ、選んだスプリントブランチだけを集めて本番へ出す | — | — | — |
 | 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
 | 異常系の処理 | — | 関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
 | 進行表 | — | 工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える | — | — | — |
@@ -913,6 +914,9 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 結果の読み方 | — | CD の結果を読む手段の宣言。delivery の行の result に書き、GitHub Actions のワークフローの名前かコマンドで指す | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 公開物 | — | 正式版ごとのリリースタグと GitHub Release の組 | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 反映失敗 | — | リリース記録の段階の値の 1 つ。本番チャネルへマージしたが CD の結果が失敗で、スプリントを閉じられない状態 | — | — | `docs/specifications/ndf-release-via-cd.md` |
+| 承認の後のコミット | — | 承認したコミットから、本番へマージする直前の origin のリリースブランチの先頭までの first-parent の列にあるコミット | — | — | — |
+| リリースの工程が書く箇所 | — | 本番のリリースのプランが、承認の後にリリースブランチへ積むコミットで書き換える箇所。版上げが書き換える版数の記載・CHANGELOG.md・`.ndf/release.json` の本番の手順が `writes` に宣言した置き場 | — | — | — |
+| 組んだ時点の先頭 | — | 選んで集める取り込み方でリリースブランチを組んだときに読んだ、各リリースの単位と本番チャネルの origin の先頭の SHA | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

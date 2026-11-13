@@ -6804,6 +6804,30 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "選んで集める取り込み方",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/worktree.json` の `branch_flow.promotion` が `selected` の運用。本番チャネルから組んだリリースブランチへ、選んだスプリントブランチだけを集めて本番へ出す",
+      "pending_source": "issues/issue-3168-requirements.md"
+    },
+    {
+      "term": "承認の後のコミット",
+      "context": "ndf-release",
+      "meaning": "承認したコミットから、本番へマージする直前の origin のリリースブランチの先頭までの first-parent の列にあるコミット",
+      "pending_source": "issues/issue-3168-requirements.md"
+    },
+    {
+      "term": "リリースの工程が書く箇所",
+      "context": "ndf-release",
+      "meaning": "本番のリリースのプランが、承認の後にリリースブランチへ積むコミットで書き換える箇所。版上げが書き換える版数の記載・CHANGELOG.md・`.ndf/release.json` の本番の手順が `writes` に宣言した置き場",
+      "pending_source": "issues/issue-3168-requirements.md"
+    },
+    {
+      "term": "組んだ時点の先頭",
+      "context": "ndf-release",
+      "meaning": "選んで集める取り込み方でリリースブランチを組んだときに読んだ、各リリースの単位と本番チャネルの origin の先頭の SHA",
+      "pending_source": "issues/issue-3168-requirements.md"
+    },
+    {
       "term": "詳細設計",
       "context": "ndf-workflow",
       "meaning": "設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める",
