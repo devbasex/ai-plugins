@@ -1,7 +1,7 @@
 # #3168 の詳細設計: 選んで集める取り込み方の本番のリリースで、承認の後のコミットと組んだ時点の先頭を確かめる
 
 設計文書 [issue-3168-design.md](issue-3168-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。
-語の意味は設計文書の「ドメインモデル」の「用語」の表に従う。不変条件（I1〜I8）とドメインイベント（E1〜E7）の番号も
+語の意味は設計文書の「ドメインモデル」の「用語」の表に従う。不変条件（I1〜I9）とドメインイベント（E1〜E7）の番号も
 設計文書のものを指す。
 
 この文書で使う語の対応:
@@ -43,13 +43,13 @@ docs/specifications/ndf-branch-flow-declaration.md
 
 依存の向きは一方向である。エントリポイントの `release-steps.py` が `release_lib/` を呼ぶ。`release_lib/promotion.py` は、
 同じディレクトリの `release_writes.py`・`approval.py` と、`lib/approved_commit.py`・`lib/branch_flow.py` を呼ぶ。
-`release_writes.py` は `release_lib/bump.py` と `release_lib/declared_steps.py`（既存。変えない）を読むだけである。
-`promotion.py` と `approval.py` は読まない。`bump.py` と `lib/` の 2 つは `release_lib/` の上の層を読まない。
+`release_writes.py` は `release_lib/bump.py`・`release_lib/declared_steps.py`（既存。変えない）と、定数 `UNGATED` のために
+`release_lib/approval.py` を読むだけで、`promotion.py` は読まない。`approval.py` は `release_writes.py` を読まない。`bump.py` と `lib/` の 2 つは `release_lib/` の上の層を読まない。
 `supervise_lib/release_templates.py` はコマンドの文字列を組むだけで、`release_lib/` を import しない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `plugins/ndf/scripts/release_lib/release_writes.py` | 新設 | 承認したコミットの時点の宣言と版から許す箇所を組み、承認の後のコミットを 1 つずつ許すか判定する | `release_lib/bump.py`・`release_lib/declared_steps.py`・`step_result.git` |
+| `plugins/ndf/scripts/release_lib/release_writes.py` | 新設 | 承認したコミットの時点の宣言と版から許す箇所を組み、承認の後のコミットを 1 つずつ許すか判定する | `release_lib/bump.py`・`release_lib/declared_steps.py`・`release_lib/approval.py`（`UNGATED` だけ）・`step_result.git` |
 | `plugins/ndf/scripts/release_lib/bump.py` | 変更 | 版を書く行の組み立てを 1 か所に持ち、版上げと許すコミットの判定の両方へ渡す | `md`・`versions`・`step_result` |
 | `plugins/ndf/scripts/release_lib/promotion.py` | 変更 | 先頭の確かめと許すコミットの判定を比べ直しの回のたびに通し、通ったときだけ本番チャネルへマージする | `release_writes`・`approval`・`approved_commit`・`branch_flow` |
 | `plugins/ndf/scripts/release_lib/approval.py` | 変更 | 承認ゲートの結果に、先頭の確かめの項目・止めた理由・呼び手が渡す `next` と許さないパスを載せる | `approved_commit`・`step_result` |
@@ -76,21 +76,21 @@ docs/specifications/ndf-branch-flow-declaration.md
 | `release_lib/approval.py` | モジュール | `gate`（変更）・`heads_gate`（新設）・`HEADS_LEADS`（新設） |
 | `lib/approved_commit.py` | モジュール | `BUILT`（新設）・`BuiltHeads`（新設）・`built_heads_row`（新設）・`built_heads`（新設）・`_parse_built`（新設） |
 | `lib/branch_flow.py` | `Promotion` | `moved`（変更） |
-| `release-steps.py` | モジュール | `cmd_approval_facts`（変更）・`plan_bump`（変更。組み立ての読み先だけを変える）・`_bump_manifests`・`_bump_marketplace_and_readme`・`_bump_ndf_docs`（削除。中身は `bump.version_sites` へ移す）・`approval-facts` の引数の定義（変更。`--units`） |
+| `release-steps.py` | モジュール | `cmd_approval_facts`（変更）・`plan_bump`（変更。組み立ての読み先を `bump.version_sites` へ変える。ndf のときは `bump.versioning_doc(ed)` を今どおり直接呼び、`version_sites` の外に残す）・`_bump_manifests`・`_bump_marketplace_and_readme`・`_bump_ndf_docs`（削除。`bump.versioning_doc(ed)` の呼び出しを除く中身は `bump.version_sites` へ移す）・`approval-facts` の引数の定義（変更。`--units`） |
 | `supervise_lib/release_templates.py` | モジュール | `_dev_approval_steps`（変更）・その呼び元の開発版のプランの組み立て（変更。`release_units(a)` を渡す） |
 
 ## 関数の仕様
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `load` | `release_lib/release_writes.py` | 新設 | `load(root: Path, approved: str, tip: str) -> ReleaseWrites` | 承認したコミットの時点の宣言と版、先端の時点の版から、許す箇所（`ReleaseWrites`）を組む | `approved` と `tip` がコミットとして読める | 戻り値の `prefixes` は `CHANGELOG.md`・本番の手順の `writes`・`docs/`・`issues/` だけを持ち、`pairs` は版が変わったプラグインだけを持つ | git を読む（`show`・`ls-tree`）。書かない |
+| `load` | `release_lib/release_writes.py` | 新設 | `load(root: Path, approved: str, tip: str) -> ReleaseWrites` | 承認したコミットの時点の宣言と版、先端の時点の版から、許す箇所（`ReleaseWrites`）を組む | `approved` と `tip` がコミットとして読める | 戻り値の `exact` は `ALWAYS`（`CHANGELOG.md`）だけを、`prefixes` は `approval.UNGATED`（`docs/`・`issues/`）と本番の手順の `writes` だけを持ち、`pairs` は版が変わったプラグインだけを持つ | git を読む（`show`・`ls-tree`）。書かない |
 | `judge` | `release_lib/release_writes.py` | 新設 | `judge(root: Path, rw: ReleaseWrites, sha: str) -> list[str] \| None` | 1 つのコミットの変えたパスのうち、許さないパスを返す | `sha` はマージでないコミット | 空のリストはコミットを許すことを、`None` は判定できないことを表す。許すパスは戻り値に入らない | git を読む（`diff`・`show`）。書かない |
 | `judge_after` | `release_lib/release_writes.py` | 新設 | `judge_after(root: Path, approved: str, tip: str) -> Judged` | 承認したコミットから先端までの first-parent のマージでないコミットを判定し、許すものと許さないもの（理由のパスつき）に分ける | `approved` が `tip` の祖先 | `Judged.allowed` と `Judged.rejected` のキーを合わせると対象のコミットのすべてになり、重ならない | git を読む。書かない |
 | `_show` | `release_lib/release_writes.py` | 新設 | `_show(root: Path, rev: str, rel: str) -> str \| None` | コミットの木のファイルの中身を読む | 無し | 読めないとき（ファイルが無い・git の失敗）は `None` | git を読む（`show`） |
 | `_plugin_versions` | `release_lib/release_writes.py` | 新設 | `_plugin_versions(root: Path, rev: str) -> dict[str, tuple[str, str]] \| None` | コミットの木の各プラグインの `.claude-plugin/plugin.json` から、プラグインのディレクトリ → (名前, 版) を読む | 無し | 読めない `plugin.json` が 1 つでもあれば `None` | git を読む（`ls-tree`・`show`） |
 | `_version_lines_of` | `release_lib/release_writes.py` | 新設 | `_version_lines_of(rw: ReleaseWrites, read: Callable[[str], str \| None], rel: str) -> dict[int, tuple[str, str]]` | 親の木の中身に版を書く行の組み立てを当て、ファイル `rel` で版上げが書き換える行の番号 → 版数の置き換えの対を返す | `read` は親のコミットの木を読む | 戻り値の行は、どれかのプラグインの `bump.Site` が選んだ行だけである | 無し（`read` を通して git を読む） |
 | `_only_swaps` | `release_lib/release_writes.py` | 新設 | `_only_swaps(parent: str, child: str, lines: dict[int, tuple[str, str]]) -> bool` | 子の中身が、親の中身の `lines` の行の一部で旧版を新版へ置き換えたものと一致するかを返す | 無し | 真なら、行数が等しく、`lines` の外の行は親と同じで、`lines` の行は親と同じか置き換えた字面である | 無し |
-| `version_sites` | `release_lib/bump.py` | 新設 | `version_sites(read: Callable[[str], str \| None], plugin: str, pdir: str, old: str) -> tuple[list[Site], list[str]]` | プラグインの版上げが書き換える行の組み立てと、組み立てられない箇所の手作業の一覧を返す | `pdir` はリポジトリの根からのプラグインのディレクトリ | 返す組み立ては `plan_bump` が今書き換える箇所（`plugin.json` 群の版と説明・`marketplace.json` の説明・`README.md` の一覧表・ndf の README の版）と同じ集合で、`docs/versioning-and-distribution.md` を含まない | 無し（`read` を通して読む） |
+| `version_sites` | `release_lib/bump.py` | 新設 | `version_sites(read: Callable[[str], str \| None], plugin: str, pdir: str, old: str) -> tuple[list[Site], list[str]]` | プラグインの版上げが書き換える行の組み立てと、組み立てられない箇所の手作業の一覧を返す | `pdir` はリポジトリの根からのプラグインのディレクトリ | 返す組み立ては `plan_bump` が今書き換える箇所（`plugin.json` 群の版と説明・`marketplace.json` の説明・`README.md` の一覧表・ndf の README の版）から `docs/versioning-and-distribution.md` を除いた集合である。この文書は `plan_bump` が ndf のときに `bump.versioning_doc(ed)` で今どおり直接書き換える | 無し（`read` を通して読む） |
 | `matching_lines` | `release_lib/bump.py` | 新設 | `matching_lines(lines: list[str], line_re: str, start: int, stop: int \| None) -> list[int]` | 範囲の中で正規表現に合う行の番号を返す | 無し | 番号は昇順 | 無し |
 | `version_lines` | `release_lib/bump.py` | 新設 | `version_lines(text: str, site: Site, old: str) -> list[int]` | 中身に組み立ての 1 つを当て、旧版を含む行を `site.count` 件まで返す | 無し | 戻り値は `matching_lines` の結果のうち `ver_pat(old)` に合う行の先頭から `count` 件 | 無し |
 | `built_heads_row` | `lib/approved_commit.py` | 新設 | `built_heads_row(heads: BuiltHeads) -> tuple[str, str]` | 承認資料の表へ足す「組んだ時点の先頭」の (項目, 内容) を作る | 各 SHA が 40 桁の小文字の 16 進で、単位が 1 つ以上 | 内容は本番チャネルの行 1 つと単位の行を改行でつないだもの（表に書くときに `<br>` になる） | 無し |
@@ -144,9 +144,8 @@ docs/specifications/ndf-branch-flow-declaration.md
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `judge` | `diff` を読めない | `None`（コミットを許さない） |
-| `judge` | パスが `CHANGELOG.md` と等しい | 許す |
-| `judge` | パスが `docs/`・`issues/` で始まる | 許す |
-| `judge` | パスが本番の手順の `writes` のどれかと等しいか、`<writes>/` で始まる | 許す |
+| `judge` | パスが `exact` のどれか（`CHANGELOG.md`）と等しい | 許す |
+| `judge` | `declared_steps.allowed(path, rw.prefixes)` が真（`prefixes` のどれかと等しいか、`<prefix>/` で始まる。`docs/`・`issues/` と本番の手順の `writes`） | 許す |
 | `judge` | パスが版数の記載のファイル（`_version_lines_of` が行を 1 つ以上返す）で、親と子の両方の中身を読め、`_only_swaps` が真 | 許す |
 | `judge` | パスが版数の記載のファイルで、上の行に当たらない（追加・削除・モードの変更・版を書く行の外の変更・旧版と新版の対の外の字面） | 許さない |
 | `judge` | どれにも当たらない | 許さない |
@@ -231,13 +230,14 @@ docs/specifications/ndf-branch-flow-declaration.md
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `load` | `declared_steps.parse_steps` | `grep -rn "writes" --include=*.py plugins/ndf/scripts` | 使う。承認したコミットの `.ndf/release.json` を `_show` で読み、JSON を `parse_steps` へ渡す（`load_steps` は作業ツリーを読むため使えない） |
+| `load` | `declared_steps.parse_steps` | `grep -rn "writes" --include=*.py plugins/ndf/scripts` | 使う。承認したコミットの `.ndf/release.json` を `_show` で読み、JSON を `parse_steps` へ渡す（`load_steps` は worktree の中身を読むため使えない） |
 | `load` | `approval.UNGATED` | `release_lib/approval.py` を読んだ | 使う。`docs/`・`issues/` を写さない |
+| `judge` | `declared_steps.allowed` | `release_lib/declared_steps.py` を読んだ | 使う。`prefixes` の当て方を `allowed(path, rw.prefixes)` に揃え、単純な前方一致で `CHANGELOG.md.orig` や `writes` に続く別名のパスを通さない |
 | `judge` | `approved_commit._touched`・`_tree_diff_paths` | `lib/approved_commit.py` を読んだ | 使えない。パスしか返さず、追加・削除・モードの変更を見分けられない。`diff --raw -z --no-renames` を読む |
 | `judge_after` | `approved_commit.compare_approved` | 同上 | 使えない。パスの許可リストの接頭辞だけを受け、版数の置き換えの対を見られない。判定の後の比較には今と同じく使う |
 | `_show` | `version_merge._blob` | `grep -rn '"show", f"' plugins/ndf/scripts/lib plugins/ndf/scripts/release_lib` | 使えない。読めないときに空の文字列を返し、空のファイルと見分けられない（I3 に反する） |
 | `_plugin_versions` | `release_version._version_at` | 同上 | 使えない。非公開の関数で、プラグインのディレクトリの一覧と名前を返さない |
-| `version_sites` | `release-steps.py` の `_bump_manifests`・`_bump_marketplace_and_readme`・`_bump_ndf_docs` | `release-steps.py` を読んだ | 移す。中身をこの関数へ移し、元の 3 つを消す（決定 5） |
+| `version_sites` | `release-steps.py` の `_bump_manifests`・`_bump_marketplace_and_readme`・`_bump_ndf_docs` | `release-steps.py` を読んだ | 移す。`bump.versioning_doc(ed)` の呼び出しを除く中身をこの関数へ移し、元の 3 つを消す（決定 5）。`versioning_doc` の呼び出しは `plan_bump` に残す |
 | `matching_lines` | `BumpPlan.sub` の行の選び方 | `release_lib/bump.py` を読んだ | 移す。`sub` の候補の選び方をこの関数へ切り出し、`sub` と `version_lines` の両方が呼ぶ |
 | `version_lines` | `bump.ver_pat`・`bump.marketplace_range` | 同上 | 使う |
 | `_version_lines_of` | `bump.version_sites`・`bump.version_lines` | 同上 | 使う。プラグインごとの組み立てを親の中身へ当てる部分だけをこの関数が持つ |
