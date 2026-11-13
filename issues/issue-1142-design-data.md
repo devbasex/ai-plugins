@@ -99,7 +99,7 @@
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | `jsonschema` | 4.26.0 | MIT | 2026-01-07 | 無し | 満たす。draft 2020-12 で表の形を検査できる。最初に使う DT1 が依存のグループ `workflow` へ足す（`pyproject.toml` の宣言と `uv.lock`）。#3092 の決定 3 が先に足していればそのまま使う | https://pypi.org/pypi/jsonschema/json （2026-11-13） |
+| LIB1 | `jsonschema` | 4.26.0 | MIT | 2026-01-07 | 無し | 満たす。draft 2020-12 で表の形を検査できる。最初に使う DT1 が、手元の検査と配布先の両方で使えるようにする（決定 46）。#3092 の決定 3 が先に足していればそのまま使う | https://pypi.org/pypi/jsonschema/json （2026-11-13） |
 | LIB2 | `check-jsonschema` | 0.39.0 | PyPI の license 欄は空（確かめていない） | 2026-10-26 | 無し | 一部。スキーマに照らす CLI で、表の外部キーと定数との重複は見られない | https://pypi.org/pypi/check-jsonschema/json （2026-11-13） |
 | LIB3 | `pydantic` | 2.14.3 | MIT | 2026-11-05 | 無し | 満たさない。読み手の型は作れるが、hook の経路で外部パッケージを読まない（I-DT6・決定 20） | https://pypi.org/pypi/pydantic/json （2026-11-13） |
 | LIB4 | `pylint` の `duplicate-code`（R0801） | 4.1.3 | GPL-2.0-or-later | 2026-10-11 | 無し | 確かめられなかった（下）。名前からは似た行の検出で、定数の値の集合の一致を見るものではない | https://pypi.org/pypi/pylint/json （2026-11-13） |
@@ -271,7 +271,7 @@ flowchart TD
 
 | 移行ステップ | 中身 | 触るファイル | 後に置く課題 |
 | --- | --- | --- | --- |
-| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | `pyproject.toml`、`uv.lock`（`jsonschema` を足す。#3092 が先に足していれば触らない）、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
+| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | 依存の宣言と固定（根とプラグインの両方。どのファイルとどのグループ名かは実装で決める。#3092 が先に足していれば触らない）、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
 | DT2 | ランタイム | `plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` と、字の集まりを直すテスト | DT1 |
 | DT3 | 収束ループのフェーズ・指摘の重さ・テストの印 | `plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/scripts/lib/body_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-refactoring/scripts/assignee_launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/safety_net.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_findings.py` | DT1 |
 | DT4 | 閾値（`limits.json` へ） | `plugins/ndf/contracts/limits.json`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/relay_lib/version_dir.py`、`plugins/ndf/scripts/lib/run_owner.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/lib/finding_match.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py` | DT2（`hook_lib/wait_notify.py` が重なる） |
@@ -311,7 +311,7 @@ DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 
 
 ### 決定 46: 表の形をそろえて機械で確かめるため、新しい事実は `contracts/facts/<名前>.json` の 1 事実 1 ファイルにし、JSON Schema の draft 2020-12 で形を確かめる
 
-#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` の宣言（`pyproject.toml`）と固定（`uv.lock`）は、最初に使う移行ステップの DT1 が足す。#3092 が先に足していればそのまま使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
+#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` は最初に使う移行ステップの DT1 が、手元の検査と配布先（プラグインの依存の導入の経路。#3092 の決定 3 と同じ置き場）の両方で使えるようにする。片方だけだと、DT1 の後に流す scripted-flow の子 6 が配布先で答えを確かめ直すときに、依存が無くて止まる。どのファイルとどのグループ名に足すかは実装で決める。#3092 が先に足していればそのまま使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
 
 1 つの大きな JSON に全事実をまとめる案は、すべての移行ステップが同じファイルを触って並列に流せないため採らない。YAML は標準ライブラリで読めず hook の経路で使えないため採らない。
 
