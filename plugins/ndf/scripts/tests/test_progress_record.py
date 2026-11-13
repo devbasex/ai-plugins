@@ -315,7 +315,7 @@ def test_unrecorded_mode_keeps_every_stage_row(fake_gh):
     out = run(fake_gh, "123", "設計")
     assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
-    assert "モード: —" in written and len(_rows(written)) == 19
+    assert "モード: —" in written and len(_rows(written)) == 20
 
 
 # --- 結果 JSON（#2227 の I7）---
