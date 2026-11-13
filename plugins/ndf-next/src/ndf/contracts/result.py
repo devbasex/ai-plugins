@@ -20,6 +20,17 @@ OK, GATE, STOPPED = "ok", "gate", "stopped"
 STATUSES = (OK, GATE, STOPPED)
 
 
+# 任意の項目のうち配列のもの（置くときは写しの list にする）
+_LISTS = ("gaps", "process", "decisions", "warnings")
+
+
+def _put_present(out: dict[str, Any], **optional: Any) -> None:
+    """空でない任意の項目だけを渡した順に `out` へ置く。配列の項目は写しの list にする。"""
+    for key, val in optional.items():
+        if val:
+            out[key] = list(val) if key in _LISTS else val
+
+
 def result(
     tool: str,
     status: str,
@@ -38,12 +49,17 @@ def result(
 ) -> dict[str, Any]:
     """結果を組む。任意の項目は渡したときだけ置く（空の配列は置かない）。形は `errors` が確かめる。"""
     out: dict[str, Any] = {"tool": tool, "status": status, "summary": summary, "items": list(items or []), "metrics": dict(metrics or {})}
-    for key, val in (("gaps", gaps), ("process", process), ("decisions", decisions), ("warnings", warnings)):
-        if val:
-            out[key] = list(val)
-    for key, val in (("cause", cause), ("routes", routes), ("presentation_path", presentation_path), ("next", next)):
-        if val:
-            out[key] = val
+    _put_present(
+        out,
+        gaps=gaps,
+        process=process,
+        decisions=decisions,
+        warnings=warnings,
+        cause=cause,
+        routes=routes,
+        presentation_path=presentation_path,
+        next=next,
+    )
     return out
 
 
