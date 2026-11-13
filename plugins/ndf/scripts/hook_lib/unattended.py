@@ -31,6 +31,9 @@ from state_home import container_home
 TARGET_RE = re.compile(r"^(?:/goal\s+)?/ndf:development-workflow(?:\s|$)")
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 MARK_DIR_NAME = "unattended"
+# 警告の行に載せる副命令の名前（hook.py の UNATTENDED と同じ値）
+START_COMMAND = "unattended-start"
+STOP_COMMAND = "unattended-stop"
 PUSHBACK_POLICY = "hook.unattended-pushback"
 MARK_POLICY = "hook.unattended-mark"
 FORM_REL = "${CLAUDE_PLUGIN_ROOT}/contracts/forms/unattended-report.json"
@@ -182,14 +185,14 @@ def mark_session(hook_input: dict, now: float) -> str | None:
     try:
         prune_marks(mark_dir(), now, limits.seconds(MARK_POLICY))
     except limits.LimitsError as e:
-        _stderr_warn("unattended-start", str(e))
+        _stderr_warn(START_COMMAND, str(e))
     if not isinstance(hook_input, dict) or not is_target(hook_input.get("prompt")):
         return None
     path = mark_path(hook_input.get("session_id"))
     if path is None:
         return None
     write_mark(path, Mark(session_id=path.stem, started_at=_utc_now(), pushbacks=0))
-    return start_guide(_read_report_form("unattended-start"))
+    return start_guide(_read_report_form(START_COMMAND))
 
 
 def review_stop(hook_input: dict) -> dict | None:
@@ -200,7 +203,7 @@ def review_stop(hook_input: dict) -> dict | None:
     mark = read_mark(path) if path else None
     if mark is None:
         return None
-    form = _read_report_form("unattended-stop")
+    form = _read_report_form(STOP_COMMAND)
     if form is None:
         return None
     limit = _pushback_limit()
@@ -212,7 +215,7 @@ def review_stop(hook_input: dict) -> dict | None:
     if verdict.count != mark.pushbacks:
         _save_count(path, mark, verdict.count)
     if verdict.over_limit:
-        _stderr_warn("unattended-stop", f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
+        _stderr_warn(STOP_COMMAND, f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
     if not verdict.block:
         return None
     return {"decision": "block", "reason": pushback_reason(errors, limit - verdict.count, form)}
@@ -232,7 +235,7 @@ def _pushback_limit() -> int | None:
     try:
         return int(limits.value(PUSHBACK_POLICY, "attempts"))
     except limits.LimitsError as e:
-        _stderr_warn("unattended-stop", str(e))
+        _stderr_warn(STOP_COMMAND, str(e))
         return None
 
 
@@ -246,7 +249,7 @@ def _save_count(path: Path, mark: Mark, count: int) -> None:
     try:
         write_mark(path, replace(mark, pushbacks=count))
     except OSError as e:
-        _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
+        _stderr_warn(STOP_COMMAND, f"回数を書けない: {e.strerror or type(e).__name__}")
 
 
 def clear_mark(hook_input: dict) -> None:
