@@ -3162,3 +3162,79 @@ def test_step_with_a_leftover_queue_placeholder_stops_without_running(tmp_path):
     assert not (tmp_path / "ran").exists()
     report = (paths.state_dir_of(plan) / "report.md").read_text()
     assert "止まった" in report and "{queue_pr:check}" in report and "{queue_state:check}" in report
+
+
+# 現状固定テスト（I-004: release_templates.plan_release_package_plugin の分岐。期待値は今の実装の出力。
+# このリポジトリの宣言（sync_checks あり・単位を選ばない取り込み方）で組み、CD の有無は release_case.case_at で決める）
+_BASE_DEV = ["bump", "changelog", "notes", "sync", "release", "verify"]
+_BASE_PROD = ["bump", "bump-others", "changelog", "notes", "snapshot", "sync", "release", "cd-result", "record", "verify", "cleanup"]
+_TAIL_PROD = ["judge", "fix", "judge-record"]
+_APPROVAL = ["facts", "explain", "others"]
+
+
+@pytest.mark.parametrize(
+    "channel, cd, mvv, rule, ids",
+    [
+        ("dev", False, False, "RULE_RELEASE_DEV", [*_BASE_DEV, *_APPROVAL, "judge", "fix"]),
+        ("dev", False, True, "RULE_RELEASE_DEV", [*_BASE_DEV, *_APPROVAL, "judge", "fix"]),
+        ("dev", True, False, "RULE_RELEASE_DEV", [*_BASE_DEV, "judge", "fix"]),
+        ("dev", True, True, "RULE_RELEASE_DEV", [*_BASE_DEV, "judge", "fix"]),
+        ("prod", False, False, "RULE_RELEASE_PROD", ["approve", *_BASE_PROD, *_TAIL_PROD]),
+        ("prod", False, True, "RULE_RELEASE_PROD_MVV", ["mvv", "note", *_BASE_PROD, *_TAIL_PROD, "handoff", "reject"]),
+        ("prod", True, False, "RULE_RELEASE_PROD_CD", [*_BASE_PROD, *_APPROVAL, "approval-post", "approve-pr", *_TAIL_PROD]),
+        (
+            "prod",
+            True,
+            True,
+            "RULE_RELEASE_PROD_CD",
+            [*_BASE_PROD, *_APPROVAL, "approval-post", "mvv", "note", "handoff", "reject", "approve-pr", *_TAIL_PROD],
+        ),
+    ],
+)
+def test_release_package_plugin_plan_shape_by_channel_cd_and_mvv(tmp_path, monkeypatch, channel, cd, mvv, rule, ids):
+    import release_case
+    from supervise_lib import release_cd, release_templates
+
+    decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
+    version = "10.17.11-dev.1" if channel == "dev" else "10.17.11"
+    out = tmp_path / "plan.json"
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = json.loads(out.read_text())
+    assert [s["id"] for s in got["steps"]] == ids
+    assert got["規則"] == getattr(release_cd if rule == "RULE_RELEASE_PROD_CD" else release_templates, rule)
+    assert got["フェーズ"] == ("開発版のデプロイ" if channel == "dev" else "リリース")
+    assert got["branch"] == f"release/v{version}" and "起点のコミット" not in got
+    steps = {s["id"]: s for s in got["steps"]}
+    assert {i for i, s in steps.items() if s.get("gate_as_ok")} == ({"facts"} if (channel, cd, mvv) == ("dev", False, True) else set())
+    assert steps["fix"]["next"] == "sync" and steps["judge"].get("next") is None
+    assert steps["notes"]["next"] == ("snapshot" if channel == "prod" else "sync") and steps["sync"]["next"] == "release"
+
+
+@pytest.mark.parametrize(
+    "channel, cd, mvv, nexts",
+    [
+        ("dev", False, False, {"verify": "facts", "others": "end"}),
+        ("dev", True, False, {"verify": "end"}),
+        ("prod", False, False, {"approve": "bump", "release": "cd-result", "cleanup": "end"}),
+        ("prod", False, True, {"mvv": "note", "note": "bump", "handoff": "end", "reject": "mvv", "cleanup": "end"}),
+        ("prod", True, False, {"others": "approval-post", "approval-post": "end", "approve-pr": "release", "cleanup": "end"}),
+        ("prod", True, True, {"approval-post": "mvv", "mvv": "note", "note": "approve-pr", "reject": "mvv", "approve-pr": "release"}),
+    ],
+)
+def test_release_package_plugin_plan_links_by_channel_cd_and_mvv(tmp_path, monkeypatch, channel, cd, mvv, nexts):
+    import release_case
+
+    decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
+    version = "10.17.11-dev.1" if channel == "dev" else "10.17.11"
+    out = tmp_path / "plan.json"
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
+    assert p.returncode == 0, p.stdout + p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+    assert {i: steps[i].get("next") for i in nexts} == nexts
