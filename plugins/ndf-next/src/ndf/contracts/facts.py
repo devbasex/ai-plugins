@@ -158,17 +158,21 @@ def ref_errors(name: str, policy_names: set[str]) -> list[str]:
     return errs
 
 
+def _coerce(value: str) -> Any:
+    """シェルから渡された値を型へ直す（`true`・`false` は真偽、数字だけは整数、ほかは文字列）。"""
+    if value in ("true", "false"):
+        return value == "true"
+    if re.fullmatch(r"-?[0-9]+", value):
+        return int(value)
+    return value
+
+
 def parse_where(args: list[str]) -> dict[str, Any]:
-    """シェルから渡された `列=値` を条件に直す（`true`・`false` は真偽、数字だけは整数、ほかは文字列）。"""
+    """シェルから渡された `列=値` を条件に直す（値の型は `_coerce`）。"""
     out: dict[str, Any] = {}
     for arg in args:
         if "=" not in arg:
             raise FactsError(f"条件は 列=値 で書く: {arg!r}")
         col, value = arg.split("=", 1)
-        if value in ("true", "false"):
-            out[col] = value == "true"
-        elif re.fullmatch(r"-?[0-9]+", value):
-            out[col] = int(value)
-        else:
-            out[col] = value
+        out[col] = _coerce(value)
     return out
