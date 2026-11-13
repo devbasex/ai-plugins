@@ -29,7 +29,7 @@ SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 MARK_DIR_NAME = "unattended"
 PUSHBACK_POLICY = "hook.unattended-pushback"
 MARK_POLICY = "hook.unattended-mark"
-FORM_REL = "plugins/ndf/contracts/forms/unattended-report.json"
+FORM_REL = "${CLAUDE_PLUGIN_ROOT}/contracts/forms/unattended-report.json"
 RULE_REF = "development-workflow の references/asking.md の「人のいない実行」"
 
 GUIDE = (
