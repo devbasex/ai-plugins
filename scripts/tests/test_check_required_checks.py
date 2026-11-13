@@ -118,7 +118,8 @@ def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
     """AC6: 10 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
     allow = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))
     (tmp_path / "allow.json").write_text(
-        json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"]}), encoding="utf-8"
+        json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"], "statuses": allow["statuses"]}),
+        encoding="utf-8",
     )
     (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_10)), encoding="utf-8")
     code = crc.main(
@@ -282,6 +283,34 @@ def test_awaiting_is_a_notice_and_becomes_added(repo, capsys):
     repo.required(["a"])
     code, lines, _ = repo.run(capsys)
     assert code == 0 and lines[0].startswith("追加済み: a（")
+
+
+STATUS = {"name": "ndf/approval", "workflow": "wf/a.yml", "reason": "API で付ける commit status"}
+
+
+def test_declared_status_is_known_and_not_vanished(repo, capsys):
+    """#2773 の決定 13: 宣言した commit status の名前は、ジョブが無くても必須から消えたとしない。"""
+    repo.workflow("a.yml", SIMPLE)
+    repo.allow({"statuses": [STATUS], "awaiting": [{"name": "ndf/approval", "reason": "r"}]})
+    repo.required(["a", "ndf/approval"])
+    code, lines, _ = repo.run(capsys)
+    assert code == 0 and not any(line.startswith("消えた必須") for line in lines)
+    assert any(line.startswith("追加済み: ndf/approval（") for line in lines)
+
+
+def test_declared_status_without_workflow_or_reason_fails(repo, capsys):
+    repo.workflow("a.yml", SIMPLE)
+    repo.required(["a"])
+    repo.allow({"statuses": [{**STATUS, "workflow": "wf/gone.yml", "reason": ""}]})
+    code, lines, _ = repo.run(capsys)
+    assert code == 1
+    assert any(line.startswith("古い宣言: ndf/approval（allow.json の statuses）") for line in lines)
+    assert any(line.startswith("理由の無い宣言: ndf/approval（") for line in lines)
+
+
+def test_status_declaration_with_unknown_key_exits_2(repo, capsys):
+    repo.allow({"statuses": [{**STATUS, "extra": 1}]})
+    assert repo.run(capsys)[0] == 2
 
 
 @pytest.mark.parametrize("decl", ["required", "awaiting"])

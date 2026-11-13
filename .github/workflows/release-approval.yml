@@ -1,11 +1,12 @@
 name: Release approval
 
-# main 宛てのリリースの PR の承認の証跡を確かめ、PR の先端へ commit status `ndf/release-approval` を付ける（#2773）。
+# 本番チャネル（main）宛てのリリースの PR の承認の証跡を確かめ、PR の先端へ commit status `ndf/release-approval` を付ける（#2773）。
 # pull_request_target と issue_comment は既定ブランチの workflow の定義で動く。判定のスクリプトも既定ブランチから取り出し、
 # PR のコードは取り出さない（PR の中で workflow や判定を書き換えても結果は変わらない）。判定は release-steps.py approval-check が持つ。
+# 宛先で絞らない（必須のチェックの照合 check-required-checks.py がどの宛先の PR でもこのジョブを知るため）。本番チャネル宛てでない
+# PR では approval-check が何も付けずに終える。
 on:
   pull_request_target:
-    branches: [main]
     types: [opened, synchronize, reopened, edited, closed]
   issue_comment:
     types: [created, edited, deleted]

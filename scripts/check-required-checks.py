@@ -9,7 +9,8 @@ Pull Request で走るジョブを足したのに ruleset の必須のチェッ�
 - 宛先のブランチの必須のチェック: `gh api --method GET repos/<repo>/rules/branches/<branch>`
   （`--rules-file` を渡せば、その応答の JSON を API の代わりに読む）
 - 必須のチェックの宣言（`--allow`）: 必須にしないジョブ（`not_required`）と、ruleset へ足す承認を待つ
-  チェック（`awaiting`）を、理由と組で持つ
+  チェック（`awaiting`）を、理由と組で持つ。ジョブでなく API で付ける commit status（`statuses`。名前・付ける
+  workflow・理由）は、ジョブの名前と同じく既知の名前として数え、必須にあっても「消えた必須」にしない（#2773）
 
 出力は 1 件 1 行で `<種類>: <チェックの名前>（<ワークフローのパス>#<job id>）→ <直し方>`、最後に件数の行。
 
@@ -43,8 +44,9 @@ import yamlio  # noqa: E402  matrix と name: を構造として読む（#653 �
 CALL_LIMIT = 30  # gh の 1 回の呼び出しの上限（秒）
 PR_EVENTS = ("pull_request", "pull_request_target")
 MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
-DECL_KEYS = {"version", "not_required", "awaiting"}
+DECL_KEYS = {"version", "not_required", "awaiting", "statuses"}
 ENTRY_KEYS = {"name", "reason"}
+STATUS_KEYS = {"name", "workflow", "reason"}
 
 # 種類 → (失敗か, 直し方)。設計の「入出力の契約」の表と同じ並び
 KINDS = {
@@ -88,6 +90,7 @@ class Finding(NamedTuple):
 class Declaration(NamedTuple):
     not_required: list[dict]
     awaiting: list[dict]
+    statuses: list[dict] = []
 
 
 def read_declaration(path: Path) -> Declaration:
@@ -100,12 +103,12 @@ def read_declaration(path: Path) -> Declaration:
     if unknown := set(data) - DECL_KEYS:
         raise Unreadable(f"宣言に未知のキーがある: {path}（{', '.join(sorted(unknown))}）")
     lists = []
-    for key in ("not_required", "awaiting"):
+    for key, keys in (("not_required", ENTRY_KEYS), ("awaiting", ENTRY_KEYS), ("statuses", STATUS_KEYS)):
         rows = data.get(key) or []
         if not isinstance(rows, list) or not all(isinstance(r, dict) and isinstance(r.get("name"), str) and r["name"] for r in rows):
-            raise Unreadable(f"宣言の {key} が {{name, reason}} の並びでない: {path}")
+            raise Unreadable(f"宣言の {key} が {{{', '.join(sorted(keys))}}} の並びでない: {path}")
         for r in rows:
-            if unknown := set(r) - ENTRY_KEYS:
+            if unknown := set(r) - keys:
                 raise Unreadable(f"宣言に未知のキーがある: {path} の {key}（{', '.join(sorted(unknown))}）")
         lists.append(rows)
     return Declaration(*lists)
@@ -322,8 +325,11 @@ def read_required(repo: str, branch: str, rules_file: Path | None) -> list[str] 
 # --- 突き合わせ -------------------------------------------------------------
 
 
-def compare(names: list[CheckName], undetermined: list[Finding], required: list[str], decl: Declaration, allow_rel: str) -> list[Finding]:
-    """差の一覧。名前を決められないジョブは、その name:（無ければ job id）を必須にしないジョブとして宣言すれば数えない。"""
+def compare(
+    names: list[CheckName], undetermined: list[Finding], required: list[str], decl: Declaration, allow_rel: str, root: Path | None = None
+) -> list[Finding]:
+    """差の一覧。名前を決められないジョブは、その name:（無ければ job id）を必須にしないジョブとして宣言すれば数えない。
+    宣言した commit status（`statuses`）の名前は既知の名前として数え、付ける workflow のファイルが `root` の下に無ければ古い宣言とする。"""
     out: list[Finding] = []
     by_name: dict[str, list[CheckName]] = {}
     for c in names:
@@ -335,20 +341,22 @@ def compare(names: list[CheckName], undetermined: list[Finding], required: list[
     not_req = {r["name"] for r in decl.not_required}
     awaiting = {r["name"] for r in decl.awaiting}
     out += [u for u in undetermined if u.name not in not_req]
-    known = set(by_name) | {u.name for u in undetermined}
+    statuses = {r["name"] for r in decl.statuses}
+    known = set(by_name) | {u.name for u in undetermined} | statuses
     for n, cs in by_name.items():
         where = f"{cs[0].workflow}#{cs[0].job_id}"
         if n not in req | not_req | awaiting:
             out.append(Finding("未登録", n, where))
         elif any(c.filtered for c in cs) and n in req | awaiting:
             out.append(Finding("絞り込みのあるジョブ", n, where))
-    out += [Finding("消えた必須", n, "ruleset の必須のチェック") for n in sorted(req - set(by_name))]
-    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting)):
+    out += [Finding("消えた必須", n, "ruleset の必須のチェック") for n in sorted(req - set(by_name) - statuses)]
+    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting), ("statuses", decl.statuses)):
         for r in rows:
             where = f"{allow_rel} の {key}"
             if not str(r.get("reason") or "").strip():
                 out.append(Finding("理由の無い宣言", r["name"], where))
-            if r["name"] not in known:
+            gone = key == "statuses" and root is not None and not (root / str(r.get("workflow") or "")).is_file()
+            if r["name"] not in known or gone:
                 out.append(Finding("古い宣言", r["name"], where))
     out += [Finding("宣言と ruleset の食い違い", n, f"{allow_rel} の not_required") for n in sorted(not_req & req)]
     for r in decl.awaiting:
@@ -380,7 +388,7 @@ def run(args: argparse.Namespace) -> int:
         print("失敗 0 件・知らせ 1 件")
         return 0
     allow_rel = allow.relative_to(root).as_posix() if allow.is_relative_to(root) else str(allow)
-    findings = compare(names, undetermined, required, decl, allow_rel)
+    findings = compare(names, undetermined, required, decl, allow_rel, root)
     findings.sort(key=lambda f: (not KINDS[f.kind][0], list(KINDS).index(f.kind), f.name))
     for f in findings:
         print(f.line())

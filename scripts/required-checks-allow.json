@@ -4,11 +4,16 @@
     {"name": "pytest (0/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (1/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (文書)", "reason": "文書だけの PR でテストが読む文書のテストを回す（#2925）。結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
+    {"name": "approval-check", "reason": "証跡のチェックのジョブ（#2773）。必須にするのはジョブでなく、このジョブが PR の先端へ付ける commit status ndf/release-approval（statuses の宣言）"},
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
   "awaiting": [
     {"name": "repo-secrets-check", "reason": "秘密・.env・インフラの定義の検査（#2169 の境界の検査から #2646 で factory/ に依存しない種類を残したもの）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
-    {"name": "ndf-contracts-check", "reason": "エントリポイントの契約の一覧の構造チェック（#2336）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
+    {"name": "ndf-contracts-check", "reason": "エントリポイントの契約の一覧の構造チェック（#2336）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
+    {"name": "ndf/release-approval", "reason": "リリース承認の証跡のチェック（#2773）。main の ruleset の必須へ出元 GitHub Actions のアプリ（15368）に限って足すのは利用者が行う（共通原則 C2。設計の決定 12 の手順 2）"}
+  ],
+  "statuses": [
+    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-approval.yml", "reason": "ジョブの名前でなく、approval-check が API で PR の先端へ付ける commit status の名前で必須になる（#2773 の決定 13）"}
   ]
 }
