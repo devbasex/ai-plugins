@@ -267,3 +267,13 @@ def test_marks_round_trip():
     body = rr.with_mark("本文", rr.REVIEWED_MARK, "abc1234")
     assert rr.read_mark(rr.with_mark(body, rr.REVIEWED_MARK, "def5678"), rr.REVIEWED_MARK) == "def5678"
     assert rr.review_version_of(SHOW) == VERSION and rr.review_version_of(BASE) is None
+
+
+def test_open_outcome_matches_the_result_contract():
+    """差分が空なら stopped と終了コード 3（プランは on_exit で次へ進む）。PR を組めば ok と 0。"""
+    from step_result import result, validate_result
+
+    for got, want in (({"review_pr": None, "closed": [7]}, ("stopped", 3)), ({"review_pr": 9, "files": 1}, ("ok", 0))):
+        status, summary, items, code = rr.open_outcome(VERSION, dict(got))
+        assert (status, code) == want and summary
+        assert validate_result(result("release-steps", status, summary, items, {}), code) == []

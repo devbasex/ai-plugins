@@ -232,13 +232,13 @@ def open_review(root, version: str, diff: str, production: str, gh: GitHub) -> d
     return {**out, "review_pr": n, "files": len(files)}
 
 
-def open_outcome(version: str, got: dict) -> tuple[str, list[dict], int]:
-    """`open_review` の結果から（要約, items, 終了コード）。差分が空なら 3（打たずに進む）。結果の欄から items を外す。"""
+def open_outcome(version: str, got: dict) -> tuple[str, str, list[dict], int]:
+    """`open_review` の結果から（status, 要約, items, 終了コード）。差分が空なら stopped と 3（打たずに進む）。結果の欄から items を外す。"""
     items = [*got.pop("items", []), *({"kind": "pr", "number": n, "result": "closed"} for n in got.get("closed") or [])]
     if got.get("review_pr") is None:
-        return f"{version} のリリースブランチの PR にレビューする差分が無い（打たずに進む）", items, EXIT_PRECONDITION
+        return "stopped", f"{version} のリリースブランチの PR にレビューする差分が無い（打たずに進む）", items, EXIT_PRECONDITION
     how = "使い直す" if got.get("reused") else f"作った（ファイル {got.get('files')} 件）"
-    return f"レビューの PR #{got['review_pr']} を{how}", items, 0
+    return "ok", f"レビューの PR #{got['review_pr']} を{how}", items, 0
 
 
 def _only_fixes_since(root, range_end: str, tip: str, show_ref: str) -> bool:

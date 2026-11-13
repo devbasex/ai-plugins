@@ -1016,8 +1016,8 @@ def cmd_review_open(a):
     """リリースブランチの PR のレビューの PR を組む（#3163。本体は release_lib/review_range.py）。差分が空なら 3。"""
     root = git_root(a.root)
     got = review_range.open_review(root, a.version, a.diff, a.production or release_decl(root, a)[1], review_range.GitHub(create_pr))
-    summary, items, code = review_range.open_outcome(a.version, got)
-    emit(result(TOOL, "ok", summary, items, got), code)
+    status, summary, items, code = review_range.open_outcome(a.version, got)
+    emit(result(TOOL, status, summary, items, got), code)
 
 
 def cmd_review_close(a):
