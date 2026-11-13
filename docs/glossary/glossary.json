@@ -7150,6 +7150,13 @@
       "context": "ndf-workflow",
       "meaning": "判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる",
       "pending_source": "issues/issue-2963-design.md"
+    },
+    {
+      "term": "取り込み方",
+      "code": "promotion",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる",
+      "pending_source": "issues/issue-3119-requirements.md"
     }
   ]
 }
