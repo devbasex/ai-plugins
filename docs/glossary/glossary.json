@@ -6946,6 +6946,24 @@
       "context": "ndf-workflow",
       "meaning": "レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ",
       "pending_source": "issues/issue-3163-design.md"
+    },
+    {
+      "term": "リリースの PR",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "証跡のチェック",
+      "context": "ndf-workflow",
+      "meaning": "リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "承認権限",
+      "context": "ndf-workflow",
+      "meaning": "リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain",
+      "pending_source": "issues/issue-2773-requirements.md"
     }
   ]
 }
