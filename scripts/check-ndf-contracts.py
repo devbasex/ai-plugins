@@ -6,6 +6,7 @@
 コードから拾った引数・環境変数の読み・`.ndf/` の設定のキーの読み・受け渡しのファイルの書きが契約にあるか、
 契約にあるものがコードから拾えるか、呼び手がいるか、逆引き（`contracts/index.md`）が項目と一致するかを見る。
 上限の宣言（`contracts/limits.json`）の形と、コードが引く方針の名前との対応も見る（`contracts_lib/limits_decl.py`。#2343）。
+工程の定義（`contracts/workflow/`）の検査と工程表との一致も見る（`contracts_lib/workflow_defs.py`。#3092）。
 今の外れは例外リスト（`scripts/contract-allow/`。1 項目 1 ファイル）に載せ、ベースブランチとの merge-base より
 項目が増えた変更を `allow-added` で落とす。形と規則の理由は `docs/specifications/ndf-entrypoint-contracts.md`。
 
@@ -30,7 +31,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 from allowlist import AllowError, allow_file_name, load_allow, rel_target, under  # noqa: E402
-from contracts_lib import core_checks, extract_sh, limits_decl, ratchet  # noqa: E402
+from contracts_lib import core_checks, extract_sh, limits_decl, ratchet, workflow_defs  # noqa: E402
 from contracts_lib.draft import Callers, draft  # noqa: E402
 from contracts_lib.extract_py import PyExtractor, is_runnable  # noqa: E402
 from contracts_lib.model import (  # noqa: E402
@@ -273,6 +274,7 @@ class Checker:
             out.append(v("result-read", path, name, why))
         for kind, path, name, why in limits_decl.violations(self.root, limits_decl.code_files(self.root)):
             out.append(v(kind, path, name, why))
+        out.extend(workflow_defs.check_workflow_defs(self.root))
 
     def run(self) -> tuple[list[dict], dict]:
         out: list[dict] = []
@@ -433,6 +435,14 @@ def _ratchet_and_core(root: Path, allow_dir: Path, allow, base_arg: str | None, 
     return added, base, state
 
 
+def _require_workflow() -> None:
+    """工程の定義の検査（contracts_lib/workflow_defs.py）が使う jsonschema と markdown-it を、根の uv の環境で用意する。"""
+    sys.path.insert(0, str(REPO / "plugins" / "ndf" / "scripts" / "lib"))
+    import deps
+
+    deps.require("workflow", "md", project=REPO)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
@@ -443,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("files", nargs="*", help="合否を決めるファイル（省くと木全体の違反で決める）")
     a = ap.parse_args(argv)
     root = a.root.resolve()
+    _require_workflow()
     allow_dir = a.allow or root / ALLOW
     try:
         c = load(root)

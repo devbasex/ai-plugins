@@ -27,6 +27,8 @@ notify = ["slack-sdk==3.44.1", "python-dotenv==1.2.3", "httpx==0.28.1"]
 terminal = ["ptyprocess==0.7.0"]
 # 耐久の記録（#1142 の決定 34）。DBOS を import するのは lib/durable.py だけ（I16）。実行の鍵の排他に lib/locks.py を使うため filelock も持つ
 durable = ["dbos==3.1.0", "filelock==4.0.3"]
+# 工程の定義の検査（#3092 の決定 3）。Serverless Workflow 1.0.3 の公式スキーマと入出力規約を draft 2020-12 で検査する
+workflow = ["jsonschema==4.26.0"]
 
 [tool.uv]
 package = false

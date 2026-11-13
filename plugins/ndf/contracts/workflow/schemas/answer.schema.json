@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf://schemas/answer.schema.json",
+  "title": "承認ゲートの答えとリリースの結果",
+  "allOf": [
+    {
+      "$ref": "ndf://schemas/report.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "answer"
+      ],
+      "properties": {
+        "answer": {
+          "enum": [
+            "approved",
+            "rejected",
+            "released"
+          ]
+        },
+        "release": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "layout-review",
+    "version": "1.0.0",
+    "title": "体裁レビュー",
+    "metadata": {
+      "ndf": {
+        "stage": "体裁レビュー"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/layout-review-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/layout-review-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "verify": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "layout-review"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "verify",
+            "range": "released"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

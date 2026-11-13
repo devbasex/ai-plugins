@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "design-detail",
+    "version": "1.0.0",
+    "title": "詳細設計",
+    "metadata": {
+      "ndf": {
+        "stage": "詳細設計"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/design-detail-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/design-detail-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "work": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "design"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

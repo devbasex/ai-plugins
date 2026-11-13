@@ -1,0 +1,59 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "review",
+    "version": "1.0.0",
+    "title": "実装レビュー",
+    "metadata": {
+      "ndf": {
+        "stage": "実装レビュー"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/review-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/review-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "review": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "cross-review"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "review",
+            "range": "sprint_diff",
+            "subject": "code"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

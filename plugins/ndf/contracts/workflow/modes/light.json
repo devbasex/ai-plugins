@@ -1,0 +1,127 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "light",
+    "version": "1.0.0"
+  },
+  "do": [
+    {
+      "要求と受け入れ条件": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "requirements",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "作業場所の用意": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "worktree",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "設計": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "design",
+            "version": "1.0.0"
+          }
+        },
+        "metadata": {
+          "ndf": {
+            "when": [
+              "design_pr"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "実装": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "impl",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "実装レビュー": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "review",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "完了判定": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "quality-gates",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "Pull Request": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "pull-request",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "後片付け": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "cleanup",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "デプロイ": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "deploy",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "棚卸し": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "backlog",
+            "version": "1.0.0"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "retro",
+    "version": "1.0.0",
+    "title": "振り返り",
+    "metadata": {
+      "ndf": {
+        "stage": "振り返り"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/retro-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/retro-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "work": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "retrospective"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf://schemas/stage-io.schema.json",
+  "title": "工程とアクティビティの入出力",
+  "$defs": {
+    "activity-in": {
+      "type": "object",
+      "required": [
+        "table",
+        "stage",
+        "issues",
+        "mode"
+      ],
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "pace": {
+          "type": "string"
+        },
+        "issue": {
+          "type": "integer"
+        },
+        "range": {
+          "type": "object"
+        },
+        "previous": {
+          "type": "object"
+        },
+        "with": {
+          "type": "object"
+        }
+      }
+    },
+    "stage-in": {
+      "type": "object",
+      "required": [
+        "issues",
+        "mode"
+      ],
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "pace": {
+          "type": "string"
+        },
+        "range": {
+          "type": "object"
+        },
+        "previous": {
+          "type": "object"
+        }
+      }
+    },
+    "stage-out": {
+      "type": "object",
+      "required": [
+        "activities",
+        "summary"
+      ],
+      "properties": {
+        "activities": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "ndf://schemas/report.schema.json"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "requirements-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "requirements-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "worktree-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "worktree-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "design-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "design-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "design-detail-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "design-detail-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "document-sources-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "document-sources-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "document-rebuild-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "document-rebuild-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "document-review-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "document-review-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "plan-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "plan-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "impl-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "impl-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "refactor-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "refactor-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "review-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "review-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "quality-gates-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "quality-gates-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "pull-request-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "pull-request-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "spec-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "spec-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "cleanup-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "cleanup-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "deploy-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "deploy-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "layout-review-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "layout-review-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "release-verification-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "release-verification-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "retro-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "retro-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "reshuffle-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "reshuffle-out": {
+      "$ref": "#/$defs/stage-out"
+    },
+    "backlog-in": {
+      "$ref": "#/$defs/stage-in"
+    },
+    "backlog-out": {
+      "$ref": "#/$defs/stage-out"
+    }
+  }
+}

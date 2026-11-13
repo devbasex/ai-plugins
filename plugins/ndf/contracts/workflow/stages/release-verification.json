@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "release-verification",
+    "version": "1.0.0",
+    "title": "リリース後テスト",
+    "metadata": {
+      "ndf": {
+        "stage": "リリース後テスト"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/release-verification-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/release-verification-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "verify": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "release-verification"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "verify",
+            "range": "released"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

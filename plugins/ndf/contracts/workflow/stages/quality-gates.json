@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "quality-gates",
+    "version": "1.0.0",
+    "title": "完了判定",
+    "metadata": {
+      "ndf": {
+        "stage": "完了判定"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/quality-gates-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/quality-gates-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "test": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "quality-gates"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "test",
+            "range": "sprint_diff"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

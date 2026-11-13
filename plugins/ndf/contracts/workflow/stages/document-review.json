@@ -1,0 +1,148 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "document-review",
+    "version": "1.0.0",
+    "title": "ドキュメントレビュー",
+    "metadata": {
+      "ndf": {
+        "stage": "ドキュメントレビュー"
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/document-review-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/document-review-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "pr": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "pr"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "review": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "cross-review"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "review",
+            "range": "issue_diff",
+            "subject": "docs"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "approval": {
+        "listen": {
+          "to": {
+            "one": {
+              "with": {
+                "type": "ndf.answer"
+              }
+            }
+          }
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "gate",
+            "range": "none"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/answer.schema.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "merge": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "merged"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "merge",
+            "range": "issue_diff"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

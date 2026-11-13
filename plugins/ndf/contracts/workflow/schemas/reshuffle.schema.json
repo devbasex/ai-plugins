@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf://schemas/reshuffle.schema.json",
+  "title": "組み換えの出力",
+  "allOf": [
+    {
+      "$ref": "ndf://schemas/report.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "decision",
+        "lane_changes",
+        "requests",
+        "refused"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "unchanged",
+            "changed"
+          ]
+        },
+        "lane_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "op",
+              "reason"
+            ],
+            "properties": {
+              "op": {
+                "enum": [
+                  "add",
+                  "move",
+                  "cancel"
+                ]
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "row": {
+                "type": "integer"
+              },
+              "to": {
+                "type": "integer"
+              },
+              "lane": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "op",
+              "reason"
+            ],
+            "properties": {
+              "op": {
+                "enum": [
+                  "add",
+                  "move",
+                  "cancel"
+                ]
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "row": {
+                "type": "integer"
+              },
+              "to": {
+                "type": "integer"
+              },
+              "lane": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "op",
+              "reason"
+            ],
+            "properties": {
+              "op": {
+                "enum": [
+                  "add",
+                  "move",
+                  "cancel"
+                ]
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "row": {
+                "type": "integer"
+              },
+              "to": {
+                "type": "integer"
+              },
+              "lane": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

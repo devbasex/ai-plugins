@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf://schemas/report.schema.json",
+  "title": "統一 JSON レポート（lib/step_result.py の形）",
+  "type": "object",
+  "required": [
+    "tool",
+    "status",
+    "summary"
+  ],
+  "properties": {
+    "tool": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "gate",
+        "stopped"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array"
+    },
+    "metrics": {
+      "type": "object"
+    }
+  }
+}

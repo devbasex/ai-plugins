@@ -1,0 +1,87 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "pull-request",
+    "version": "1.0.0",
+    "title": "Pull Request",
+    "metadata": {
+      "ndf": {
+        "stage": "Pull Request",
+        "per_issue": true
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/pull-request-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/pull-request-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "pr": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "pr"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "sprint_diff"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "merge": {
+        "call": "ndf.plan",
+        "with": {
+          "skill": "merged"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "merge",
+            "range": "sprint_diff"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

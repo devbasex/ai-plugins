@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "reshuffle",
+    "version": "1.0.0",
+    "title": "組み換え",
+    "metadata": {
+      "ndf": {
+        "stage": "組み換え",
+        "when": [
+          "retro_enabled"
+        ]
+      }
+    }
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/reshuffle-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/reshuffle-out"
+      }
+    }
+  },
+  "do": [
+    {
+      "judge": {
+        "call": "ndf.reshuffle",
+        "metadata": {
+          "ndf": {
+            "kind": "record",
+            "range": "lane"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/reshuffle.schema.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -70,6 +70,7 @@ GROUPS = {
     "notify": ["slack_sdk", "dotenv", "httpx"],
     "terminal": ["ptyprocess"],
     "durable": ["dbos", "filelock"],
+    "workflow": ["jsonschema"],
 }
 REEXEC_ENV = "NDF_DEPS_REEXEC"
 PROJECT_ENV = "UV_PROJECT_ENVIRONMENT"

@@ -155,6 +155,7 @@ pace: fast
 | 体裁レビュー | — | — | — | — | `layout-review` |
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
 | 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
+| 組み換え | — | `progress.py`（振り返りを通した場合） | `progress.py` | `progress.py` | `progress.py` |
 | 棚卸し | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` |
 
 **表の行名は進捗記録の `stage` の値で、スクリプトが同じ字で読む。** 範囲外の課題の起票（`out-of-scope`）は
