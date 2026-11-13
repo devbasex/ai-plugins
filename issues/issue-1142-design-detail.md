@@ -1,5 +1,7 @@
 # #1142 の詳細設計: 主題をまたぐ部品・実装計画・開いている bug の割り当て
 
+> **2026-11-14 に実装計画を置き換えた。** 「実装計画」「流す順序」「レーンへの割り当ての案」は [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) の表が持つ。この文書の残りの節は材料として読む。
+
 設計文書 [issue-1142-design.md](issue-1142-design.md) の 3 つの主題と前の企画の残りを、子 Issue と流す順序へ下ろした文書である。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。要求は [issue-1142-requirements.md](issue-1142-requirements.md) にある。
 
 **この文書は主題をまたぐものだけを書く。** 主題の中のファイルと関数は、主題の詳細設計が持つ。
