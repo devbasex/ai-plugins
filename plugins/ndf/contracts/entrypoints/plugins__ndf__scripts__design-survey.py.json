@@ -9,7 +9,8 @@
       "check": {
         "options": [
           "--file",
-          "--issue"
+          "--issue",
+          "--require-detail"
         ],
         "positionals": []
       }
@@ -28,8 +29,8 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "失敗: 自前で作る決定に比べた候補が無い・番号が表に無い・作り方の語が違う（status stopped）",
-    "2": "読めない・呼び出しの誤り（status stopped）",
+    "1": "失敗: 自前で作る決定に比べた候補が無い・番号が表に無い・作り方の語が違う・詳細設計の文書の形が違うか欠ける（status stopped）",
+    "2": "読めない・呼び出しの誤り: 文書・git・設計文書の種類の契約・詳細設計の雛形を読めない（status stopped）",
     "3": "前提が無い: --issue で文書が 1 つも見つからない（status stopped）"
   },
   "callers": [

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """design-survey.py: 設計文書の検査。自前で作る決定に外部の調査で比べた候補があるかと、人へ残す判断がレッドラインを名指すかを確かめる。LLM を呼ばず、読むだけ。
 
-    python3 design-survey.py check (--issue N... | --file PATH...) [--root DIR]
+    python3 design-survey.py check (--issue N... | --file PATH...) [--require-detail] [--root DIR]
 
 - `--issue`: HEAD の `issues/` から、名前の番号の並びにその番号を含む `issue-<番号>-design*.md` と
   `issue-<番号>-requirements.md` を読む。読んだ文書の名前のほかの番号もたどり、新しい番号が出なくなるまで読み足す
@@ -18,7 +18,11 @@
   含まない行。「人へ残す判断」の表で、番号のセルに番号が無い行と「なぜ当たるか」のセルが空の行。
   インラインコードの中の語は数えない
 
-終了コードは 0 = 指摘なし（作り方の行が 0 件の文書を含む）/ 1 = 指摘あり / 2 = 文書か git を読めない /
+詳細設計の文書（`issue-<番号>-design-detail.md`。#3144）があるまとまりには、`lib/design_detail.py` の 4 規則
+（`detail_section`・`detail_failure`・`detail_reuse`・`detail_file`）を当てる。`--require-detail` を渡すと、詳細設計の
+文書の無いまとまりを `detail_missing` で指摘する（詳細設計を通る `standard`・`legacy-refactor` の設計のプランが渡す）。
+
+終了コードは 0 = 指摘なし（作り方の行が 0 件の文書を含む）/ 1 = 指摘あり / 2 = 文書か git・契約・雛形を読めない /
 3 = `--issue` で文書が 1 つも見つからない。結果は lib/step_result.py の形の 1 行の JSON。
 手順は design の references/external-survey.md にある。
 """
@@ -35,11 +39,16 @@ import deps  # noqa: E402
 
 deps.require("md")
 import md  # noqa: E402
+import doc_kinds  # noqa: E402
+from design_detail import DetailTemplateError, check_detail, is_detail  # noqa: E402
 from design_docs import find_closed, name_numbers, read_files, require_repo  # noqa: E402
+from design_results import IMPLEMENT, DesignCellError, parse_results  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_OK,
     EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
     EXIT_VIOLATION,
+    StepError,
     common_parser,
     emit,
     git_root,
@@ -148,6 +157,7 @@ class Doc:
 
     def __init__(self, path: str, text: str):
         self.path = path
+        self.text = text
         self.nums = name_numbers(path, requirements=True) or set()
         lines = text.splitlines()
         fenced = md.fenced_lines(text)
@@ -209,6 +219,53 @@ def judge_group(group: list[Doc]) -> tuple[list[dict], dict]:
     return items, {**counts, "skipped": int(skipped)}
 
 
+RESULTS_TITLE = "設計の結果"
+LEGACY_TITLES = ("現状の構造", "変更後の構造")
+
+
+def _result_files(head: Doc | None) -> tuple[set[str] | None, str]:
+    """頭の設計文書の「設計の結果」から、扱いが「実装する」の行の触るファイルを集める。
+
+    `legacy-refactor` の書式（「設計の結果」が無く「現状の構造」と「変更後の構造」がある）なら `(None, "")`。
+    読めなければ `(None, 理由)`。"""
+    if head is None:
+        return None, "頭の設計文書が読んだ文書に無い"
+    try:
+        rows = parse_results(head.text, head.path)
+    except DesignCellError as exc:
+        return None, f"設計の結果の触るファイルのセルを読めない: {str(exc)[:300]}"
+    if rows is not None:
+        return {f for r in rows if r.kind == IMPLEMENT for f in r.files}, ""
+    has = {t: md.section_named(head.text, t) is not None for t in (RESULTS_TITLE, *LEGACY_TITLES)}
+    if not has[RESULTS_TITLE] and all(has[t] for t in LEGACY_TITLES):
+        return None, ""
+    return None, f"頭の設計文書 {head.path} の設計の結果の表を読めない"
+
+
+def _head_of(detail: Doc, group: list[Doc]) -> Doc | None:
+    """詳細設計の文書と同じ番号を持つ、種類が `design` の設計文書。"""
+    return next((d for d in group if d.nums == detail.nums and doc_kinds.kind_of(d.path, placed=False) == "design"), None)
+
+
+def detail_items(group: list[Doc], require: bool) -> list[dict]:
+    """まとまりの詳細設計の文書ごとに `check_detail` を当て、`require` なら文書の欠けを指摘する。"""
+    try:
+        details = [d for d in group if is_detail(d.path)]
+        if not details:
+            if not require:
+                return []
+            nums = sorted(set().union(*(d.nums for d in group)), key=int)
+            name = " ".join(f"#{n}" for n in nums) or group[0].path
+            return [{"name": name, "rule": "detail_missing", "text": "詳細設計の文書（issue-<番号>-design-detail.md）が無い"}]
+        items: list[dict] = []
+        for d in details:
+            files, why = _result_files(_head_of(d, group))
+            items += check_detail(d.path, d.text, files, why)
+        return items
+    except (doc_kinds.DocKindsError, DetailTemplateError) as exc:
+        raise StepError(str(exc), EXIT_UNREADABLE) from None
+
+
 def cmd_check(a):
     root = git_root(a.root)
     if a.issue:
@@ -230,11 +287,16 @@ def cmd_check(a):
     unnamed = [it for d in docs for it in d.unnamed]
     items += unnamed
     metrics["unnamed_redline"] = len(unnamed)
+    detail = [it for g in survey_groups(docs) for it in detail_items(g, a.require_detail)]
+    items += detail
+    metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
+    for rule in ("detail_section", "detail_failure", "detail_reuse", "detail_file", "detail_missing"):
+        metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドラインに {len(items)} 件の指摘がある"
+        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計に {len(items)} 件の指摘がある"
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
-    summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件と人へ残す判断に指摘なし"
+    summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件・人へ残す判断・詳細設計 {metrics['detail_docs']} 件に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)
 
 
@@ -246,6 +308,7 @@ def build_parser():
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--issue", nargs="+", type=int, help="課題の番号（issues/ の文書を HEAD から読む）")
     g.add_argument("--file", nargs="+", help="読む文書のパス（worktree から読む）")
+    p.add_argument("--require-detail", action="store_true", help="詳細設計の文書の無いまとまりを detail_missing で指摘する")
     p.set_defaults(func=cmd_check)
     return ap
 
