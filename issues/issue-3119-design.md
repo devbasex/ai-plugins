@@ -330,21 +330,21 @@ NDF は書いていない種類を、課題のまとまりの記録の有無で 
 ### 決定 7: I5 を満たすため、要求の対象範囲の外の文書（`CONTRIBUTING.md`・`docs/plugin-development-guide.md`・宣言の確定仕様・用語集）も同じ変更で書き換え、外部の貢献者の手順を決定 4 のとおり決める
 
 要求の「含む」は宣言・`AGENTS.md`・`docs/versioning-and-distribution.md`・レビューの単位の 4 つだが、`CONTRIBUTING.md` などに「`develop` 宛」の手順が残ると、切り替えの後に外部の貢献者と AI が古い宛先へ PR を出す（I5）。
-範囲を広げても新しい振る舞いは足さず、同じ運用の記述を合わせるだけである。別の Issue へ分けると、分けた Issue が出るまで文書どうしが食い違う。conductor が決め、設計承認ゲートで人が確かめる。
+範囲を広げても新しい振る舞いは足さず、同じ運用の記述を合わせるだけである。別の Issue へ分けると、分けた Issue が出るまで文書どうしが食い違う。conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 根拠: Value 3 / Value 13（MVV 版 7）
 
 ### 決定 8: 確定仕様化の PR は、レビュー済みの設計と実装を写す差分のため cross-review を掛けず（`spec`: none）、要求の「どこでもレビューされない差分を生じない」は実装の差分について保証する
 
 確定仕様化の PR の中身は、設計 PR で cross-review を通した設計文書と、実装 PR で cross-review を通した振る舞いを、確定仕様の形へ写したものである。文書の検査（doc-lint・用語チェック）は今のまま掛かる。
-`spec` に cross-review を掛けると、同じ内容を 2 度レビューする（決定 1 の目的に反する）。NDF の既定値（`REVIEW_DEFAULTS` の `spec`）とも同じ値である。conductor が決め、設計承認ゲートで人が確かめる。
+`spec` に cross-review を掛けると、同じ内容を 2 度レビューする（決定 1 の目的に反する）。NDF の既定値（`REVIEW_DEFAULTS` の `spec`）とも同じ値である。conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 根拠: Value 13（MVV 版 7）
 
 ### 決定 9: ai-plugins では `promotion: selected` と組めない `pace: fast` を使わず、スプリントは `pace: auto` か `normal` で回す
 
 `pace: fast` は実装の PR をベースブランチへ直接入れるため、選んだスプリントブランチを集める取り込み方と組めない（「適用範囲」）。p6 のレーンは `auto` で回しており、承認を MVV 判定へ寄せる利点は `auto` で保てる。
-`.ndf/pace.json` の `fast` は残し、`new sprint --pace fast` が組めない組として断る振る舞いに任せる。conductor が決め、設計承認ゲートで人が確かめる。
+`.ndf/pace.json` の `fast` は残し、`new sprint --pace fast` が組めない組として断る振る舞いに任せる。conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 根拠: Value 3 / Value 13（MVV 版 7）
 
