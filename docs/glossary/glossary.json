@@ -370,7 +370,7 @@
     {
       "term": "承認ゲート",
       "context": "ndf-workflow",
-      "meaning": "人手の承認を求める点。設計承認ゲート（設計 Pull Request のマージ）とリリース承認ゲート（本番の系へ届く操作）の 2 つだけ",
+      "meaning": "人手の承認を求める点。設計承認ゲート（設計 Pull Request のマージ）とリリース承認ゲート（本番系へ届く操作）の 2 つだけ",
       "deprecated": [
         "関門"
       ],
@@ -1792,14 +1792,20 @@
       "context": "ndf-workflow",
       "meaning": "プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ",
       "code": "step",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "deprecated_standalone": [
+        "段"
+      ]
     },
     {
       "term": "ステージ",
       "context": "ndf-workflow",
       "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番）",
       "code": "pipeline_stage",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "deprecated_standalone": [
+        "段"
+      ]
     },
     {
       "term": "スイッチポイント",
@@ -2116,7 +2122,7 @@
       "term": "ライブラリ",
       "code": "library",
       "context": "ndf-workflow",
-      "meaning": "2 つ以上のスクリプトが使う関数とクラスの置き場。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「共通層」（点数を重くする領域）とは別",
+      "meaning": "2 つ以上のスクリプトが使う関数とクラスの置き場。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「重点領域」（点数を重くする領域）とは別",
       "pending_source": "issues/issue-1142-requirements.md"
     },
     {
@@ -2124,7 +2130,10 @@
       "code": "entry_point",
       "context": "ndf-workflow",
       "meaning": "Skill・プラン・hook・宣言・利用者が呼ぶスクリプトのパスと副命令と引数と出力の形",
-      "pending_source": "issues/issue-1142-requirements.md"
+      "pending_source": "issues/issue-1142-requirements.md",
+      "deprecated": [
+        "入口"
+      ]
     },
     {
       "term": "移行ステップ",
@@ -3264,7 +3273,7 @@
     {
       "term": "記録の置き場が分からない",
       "context": "ndf-workflow",
-      "meaning": "まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つ入口と前の版で組んだプランだけが渡す",
+      "meaning": "まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つエントリポイントと前の版で組んだプランだけが渡す",
       "source": "docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md"
     },
     {
@@ -3690,7 +3699,7 @@
     {
       "term": "最小の呼び出し",
       "context": "ndf-agent-cli",
-      "meaning": "担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証の確認に続けて行う",
+      "meaning": "担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証確認に続けて行う",
       "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
@@ -3857,7 +3866,7 @@
     {
       "term": "仕様適合",
       "context": "ndf-workflow",
-      "meaning": "レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ",
+      "meaning": "レビューの 1 つ目の観点。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで `stage` の値 `spec` を持つ",
       "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
@@ -4584,7 +4593,7 @@
     {
       "term": "持ち主の記録",
       "context": "ndf-worktree",
-      "meaning": "持ち主の鍵ごとに 1 つ、状態の置き場の leases/<リポジトリ>/ に置く記録。実行の識別子・入口・開始・最後に動いた時刻・終わった時刻・持ち主のプロセス（pid・開始時刻・ホスト名）を持つ。片付けが持ち主の生存を判定するときに読む（#2229・#2342）",
+      "meaning": "持ち主の鍵ごとに 1 つ、状態の置き場の leases/<リポジトリ>/ に置く記録。実行の識別子・エントリポイント・開始・最後に動いた時刻・終わった時刻・持ち主のプロセス（pid・開始時刻・ホスト名）を持つ。片付けが持ち主の生存を判定するときに読む（#2229・#2342）",
       "source": "docs/specifications/ndf-run-state-owner-and-sweep.md"
     },
     {
@@ -4650,7 +4659,7 @@
     {
       "term": "実行の核",
       "context": "ndf-workflow",
-      "meaning": "入口・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335）",
+      "meaning": "エントリポイント・ステップが必ず通る共通の実行の仕組み。入力の解決・記録・lease・型の確認・再試行と上限・結果の変換を引き受け、ステップは仕事の中身だけを書く（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md",
       "code": "run_core"
@@ -4686,7 +4695,7 @@
     {
       "term": "実行の識別子",
       "context": "ndf-workflow",
-      "meaning": "1 回の入口の実行に実行の核が振る識別子。記録・持ち主の記録・耐久の記録をつなぐ（#2335）",
+      "meaning": "1 回のエントリポイントの実行に実行の核が振る識別子。記録・持ち主の記録・耐久の記録をつなぐ（#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-requirements.md",
       "code": "run_id"
@@ -4717,7 +4726,7 @@
     {
       "term": "子の実行",
       "context": "ndf-workflow",
-      "meaning": "実行の核を通る入口が子プロセスとして起こした、核を通る入口の実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338）",
+      "meaning": "実行の核を通るエントリポイントが子プロセスとして起こした、核を通るエントリポイントの実行。親の実行の識別子を持ち、親と同じ実行の記録へ書く（#2338）",
       "source": "",
       "pending_source": "issues/issue-2338-requirements.md"
     },
@@ -4753,7 +4762,7 @@
     {
       "term": "方針の名前",
       "context": "ndf-workflow",
-      "meaning": "上限の宣言の 1 行を指す名前。入口の契約と部品の呼び出しが、値でなくこの名前で上限を引く（#2343）",
+      "meaning": "上限の宣言の 1 行を指す名前。エントリポイントの契約と部品の呼び出しが、値でなくこの名前で上限を引く（#2343）",
       "source": "docs/specifications/ndf-limits-declaration-and-retry-policy.md"
     },
     {
@@ -4797,7 +4806,7 @@
     {
       "term": "持ち主の鍵",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録を取り合う単位。入口の契約が、解決した入力から作る形を宣言する（例 cross-refactoring:pr=2301。#2335）",
+      "meaning": "持ち主の記録を取り合う単位。エントリポイントの契約が、解決した入力から作る形を宣言する（例 cross-refactoring:pr=2301。#2335）",
       "source": "",
       "pending_source": "issues/issue-2335-design.md",
       "code": "lease_key"
@@ -5013,7 +5022,7 @@
       "term": "登録簿",
       "code": "relay_registry",
       "context": "ndf-workflow",
-      "meaning": "リレーハブだけが書く、名前つきのラッパーの名前と cwd（起動元のリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
+      "meaning": "リレーハブだけが書く、名前つきのラッパーの名前と cwd（親エージェントのリポジトリ）・最初の引数・tmux のセッションの表（registry.json。作業ディレクトリのパスは持たない）",
       "source": "docs/specifications/ndf-relay-multi-session-supervisor.md"
     },
     {
@@ -5291,13 +5300,13 @@
     {
       "term": "持ち主の契約",
       "context": "ndf-worktree",
-      "meaning": "入口の契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342）",
+      "meaning": "エントリポイントの契約の行が持つ lease の宣言。副命令ごとに鍵の形・持ち主の単位・寿命の窓・返す副命令かを決める。見直しの持ち主が実行時に取る記録（持ち主の宣言）とは別の物である（#2342）",
       "source": "docs/specifications/ndf-lease-stage-and-concurrent-runs.md"
     },
     {
       "term": "持ち主の単位",
       "context": "ndf-worktree",
-      "meaning": "持ち主の記録を誰が持つか。run は入口の 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返す入口が呼ばれるかセッションが終わるまで持つ（#2342）",
+      "meaning": "持ち主の記録を誰が持つか。run はエントリポイントの 1 回の実行で、実行の終わりで返す。session はランタイムのセッション（Claude Code・Codex のプロセス）で、返すエントリポイントが呼ばれるかセッションが終わるまで持つ（#2342）",
       "source": "docs/specifications/ndf-lease-stage-and-concurrent-runs.md"
     },
     {
@@ -6105,7 +6114,7 @@
     {
       "term": "再起動の試み",
       "context": "ndf-workflow",
-      "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、統括役の記録に時刻と結果を残す",
+      "meaning": "レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、リレーハブの記録に時刻と結果を残す",
       "source": "",
       "pending_source": "issues/issue-2649-design.md"
     },
@@ -6124,7 +6133,7 @@
     {
       "term": "台帳のチェックポイント",
       "context": "ndf-workflow",
-      "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリースの記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
+      "meaning": "耐久ワークフローが自分の状態（答えた依頼・リリース記録・起動したレーン）と読み終えた位置を書く、計画の置き場の 1 ファイル。書くたびに全体を置き換える",
       "source": "docs/specifications/ndf-parallel-plan-ledger.md"
     },
     {
@@ -6244,7 +6253,7 @@
     {
       "term": "文書のファイル",
       "context": "ndf-workflow",
-      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の宣言が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
+      "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
       "source": "docs/specifications/ndf-diff-kinds-and-docs-only-checks.md"
     },
     {
@@ -6827,7 +6836,7 @@
     {
       "term": "進行表",
       "context": "ndf-workflow",
-      "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える",
+      "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 つの階層がある。今の `sprint.json` を置き換える",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {
@@ -7164,13 +7173,19 @@
       "term": "CI",
       "context": "ndf-workflow",
       "meaning": "Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー）",
-      "pending_source": "issues/issue-3190-design.md"
+      "pending_source": "issues/issue-3190-design.md",
+      "deprecated": [
+        "継続的統合"
+      ]
     },
     {
       "term": "文字列",
       "context": "ndf-workflow",
       "meaning": "文字の並びとして持つ値",
-      "pending_source": "issues/issue-3190-design.md"
+      "pending_source": "issues/issue-3190-design.md",
+      "deprecated_standalone": [
+        "字で持"
+      ]
     },
     {
       "term": "取り込み方",
