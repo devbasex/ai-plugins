@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ndf import cli
 from ndf.contracts import cli as contracts_cli
 
@@ -121,3 +123,37 @@ def test_emit_refuses_stopped_without_cause_and_writes_nothing(capsys, tmp_path)
     assert code == 2 and out == ""
     assert "結果の形の誤り" in err
     assert not dest.exists()
+
+
+# 現状固定（I-007）: fact-value の値の取り出しと、断るときの理由の順（行 → 列の宣言 → 行の列）。
+@pytest.mark.parametrize(
+    ("argv", "printed"),
+    [
+        (("exit-codes", "gate", "id"), "gate\n"),
+        (("exit-codes", "ok", "code"), "0\n"),
+        (("exit-codes", "ok", "label"), "成功\n"),
+        (("exit-codes", "gate", "last"), "19\n"),
+    ],
+)
+def test_fact_value_prints_one_value(capsys, argv, printed):
+    assert _run(capsys, "fact-value", *argv) == (0, printed, "")
+
+
+@pytest.mark.parametrize(
+    ("argv", "err"),
+    [
+        (("exit-codes", "ok", "last"), "contracts: 事実の表 exit-codes の行 ok は列 last を持たない\n"),
+        (("exit-codes", "ok", "nope"), "contracts: 事実の表 exit-codes に列 nope が無い\n"),
+        (("exit-codes", "nope", "nope"), "contracts: 事実の表 exit-codes に行 'nope' が無い\n"),
+        (("exit-codes", "nope", "code"), "contracts: 事実の表 exit-codes に行 'nope' が無い\n"),
+        (("Bad", "a", "b"), "contracts: 表の名前が違う形: 'Bad'\n"),
+    ],
+)
+def test_fact_value_refusals(capsys, argv, err):
+    assert _run(capsys, "fact-value", *argv) == (2, "", err)
+
+
+def test_fact_value_missing_table(capsys):
+    code, out, err = _run(capsys, "fact-value", "no-such", "a", "b")
+    assert (code, out) == (2, "")
+    assert err.startswith("contracts: 契約 ") and "facts/no-such.json を読めない" in err
