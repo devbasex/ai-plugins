@@ -150,6 +150,11 @@ def read_ledger_rows(main: Path, name: str, offset: int = 0) -> Read:
     return Read(rows, offset + data.rfind(b"\n") + 1 if b"\n" in data else offset, skipped, broken)
 
 
+def ended_lanes(main: Path, name: str) -> set[str]:
+    """終わりの記録（行 `lane_end`）のあるレーン名。上限の検査（I2）で数から外す（#3021）。"""
+    return {str(r.get("id")) for r in read_ledger_rows(main, name).rows if r.get("kind") == "lane_end" and r.get("id")}
+
+
 def read_at(main: Path, name: str, positions: list[int]) -> tuple[list[dict], list[int]]:
     """位置の行を読み直す。(読める版で分かった行, まだ分からない位置)。"""
     want, got, still = set(positions), [], []
