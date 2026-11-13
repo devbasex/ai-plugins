@@ -943,13 +943,13 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリースブランチの PR | — | 選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 衝突の解消の差分 | — | スプリントブランチをリリースブランチへ集めるマージのコミットが、親を自動でマージし直した結果（衝突の印を含む）と比べて持つ差分。衝突の解消と、組み合わせのためにマージのコミットで足した変更が入る | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 衝突の解消のレビューの PR | — | 衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューで入った直しをリリースブランチへ移してから閉じる | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
-| リリースの PR | — | 本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める | — | — | — |
-| 証跡のチェック | — | リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック | — | — | — |
-| 承認権限 | — | リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain | — | — | — |
-| リリースの場合 | — | CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める | — | — | — |
-| 承認資料のコメント | — | 承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない | — | — | — |
-| 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | — |
-| 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | — |
+| リリースの PR | — | 本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 証跡のチェック | — | リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 承認権限 | — | リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| リリースの場合 | — | CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 承認資料のコメント | — | 承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
