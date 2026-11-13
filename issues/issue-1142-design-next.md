@@ -1,14 +1,17 @@
-# NDF の作り直し: 別のディレクトリで 0 から作り、できたら ndf と入れ替える（#1142・#3092）
+# NDF の作り直し: 別のディレクトリで 0 から作り、できたら ndf と入れ替える（#1142 #3092）
 
 ## 目的
 
 - **今どうなっているか**: #1142 は、今の `plugins/ndf/` を子 Issue 72 本・22 の順番で段階的に直す計画だった（PR #3250 で承認）。#3092（工程の進行表）は実装 PR #3247 を出した。しかし 246 ファイルを書き換えて major の指摘 25 件と CI の失敗 70 件が残り、cross-review を 4 ラウンド回しても直らずに閉じた。今のコードを動かしたまま置き換える形では、旧い経路との互換・移行・旧いテストの書き換えが変更の大半を占める
-- **誰に効くか**: NDF を作り直す Lane（lrebuild と lr-* の 6 本）と、NDF を使う利用者
-- **変えると何が成り立つか**: 新しいディレクトリ `plugins/ndf-next/` に、承認済みの設計（#1142・#3092・#3097・#3098）の最終形を最初から作る。今の `plugins/ndf/` には触らず、開発の道具として使い続けられる。入れ替えは 1 本の PR で行い、revert 1 回で戻せる
+- **誰に効くか**: NDF を作り直すレーン（lrebuild と lr-* の 6 本）と、NDF を使う利用者
+- **変えると何が成り立つか**: 新しいディレクトリ `plugins/ndf-next/` に、承認済みの設計（#1142・#3092・#3097・#3098）の最終形を最初から作る。今の `plugins/ndf/` には触らず、開発に使うツールとして使い続けられる。入れ替えは 1 本の PR で行い、revert 1 回で戻せる
 
 ## 適用範囲
 
-- **働く範囲**: このリポジトリの `plugins/ndf-next/`（新設）、CI のジョブ 1 本（新設）、入れ替えの PR が触る配布の定義（`plugins/ndf/` 全体・`.claude-plugin/marketplace.json`・`.ndf/project.json` の suite・`scripts/*-allow/`）
+- **働く範囲**: このリポジトリの次の 3 つ
+  - `plugins/ndf-next/`（新設）
+  - CI のジョブ 1 本（新設）
+  - 入れ替えの PR が触る配布の定義（`plugins/ndf/` 全体・`.claude-plugin/marketplace.json`・`.ndf/project.json` の suite・`scripts/*-allow/`）
 - **プロジェクトごとに違うもの**: 足さない。利用先のリポジトリには、入れ替えの後の版（11.0.0）として届く
 - **当たるモード**: `standard`（#1142 の「決めたこと」のまま）
 
@@ -23,22 +26,13 @@
 
 要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。**受け入れ条件「ラベル `rebuild-1142` の Issue がすべて閉じる」は変えない。** 入れ替えの時点で閉じる形でよい。
 
-この文書は「どこに・どの順で作り、どう入れ替えるか」だけを扱う。部品の中身は、下の「材料にする設計」の文書が持つ。
+この文書は「どこに・どの順で作り、どう入れ替えるか」だけを扱う。部品の中身は、末尾の「材料にする設計」の文書が持つ。
 
-## 材料にする設計
-
-| 材料 | 文書 | 新しい実装での扱い |
-| --- | --- | --- |
-| #1142 の 3 主題 | [issue-1142-design-smells.md](issue-1142-design-smells.md)・[issue-1142-design-data.md](issue-1142-design-data.md)・[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) と各詳細設計 | 規則・表・関数の仕様を使う。移行ステップ（ラチェット・読み替えの経路・分割の順序）は使わない |
-| 前の企画の設計 | [issue-1142-design-modules.md](issue-1142-design-modules.md)・[issue-1142-design-dbos.md](issue-1142-design-dbos.md)・[issue-1142-design-libraries.md](issue-1142-design-libraries.md)・[issue-1142-design-decisions.md](issue-1142-design-decisions.md) | モジュールの分け方とライブラリの選択を使う。[issue-1142-design-migration.md](issue-1142-design-migration.md) は使わない |
-| リファクタリング計画 | [issue-2963-design.md](issue-2963-design.md)・[issue-2963-design-detail.md](issue-2963-design-detail.md) | 判断の関数と耐久の殻の形（RF1）を核の土台にする |
-| ラベルの残り | [issue-1142-design-fixes.md](issue-1142-design-fixes.md)・[issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) | N 系の振る舞いを新しい部品の仕様として使う |
-| 工程の進行表 | [issue-3092-design.md](issue-3092-design.md)・[issue-3092-design-runtime.md](issue-3092-design-runtime.md)・[issue-3092-design-detail.md](issue-3092-design-detail.md)・[issue-3092-design-dbos-behavior.md](issue-3092-design-dbos-behavior.md) | データの形・工程の定義の書式・DBOS の使い方を使う。互換と `adopt` は使わない（決定 76） |
-| PR #3247 の指摘 | 閉じたときのコメントと指摘のスレッド 35 件 | 「工程から作業を呼ぶ層」（下の節）の要件にする |
-
-**詳細設計は [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) にある。** ファイル配置・子 Issue の表・流す順番・Lane の割り当て・ラベルの付け替えを持つ。
+**詳細設計は [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) にある。** ファイル配置・子 Issue の表・流す順番・レーンの割り当て・ラベルの付け替えを持つ。
 
 ## 人へ残す判断
+
+**承認する人が答えるのは、次の 5 つである。** (a)〜(c) はレッドラインに当たる。
 
 | # | 判断 | 当たるレッドライン | なぜ当たるか | 材料 | 推奨 |
 | --- | --- | --- | --- | --- | --- |
@@ -46,22 +40,20 @@
 | (b) | 入れ替えの後、利用者の手元の旧い状態（`~/.local/state/ndf` の記録・進行中のプラン）を読まないことを受け入れるか | C3 | 利用者の手元の記録の読まれ方が変わる | 新しい実装は旧い形を読み替えない（後方互換を置かない方針）。旧い置き場は消さず、名前を変えて残す（決定 79） | 受け入れる。入れ替えの前に、動いているスプリントを終わらせる |
 | (c) | 開発の間、`ndf-next` をマーケットプレイスへ載せないか | P1 | 載せると取得元の中身が増え、開発版の利用者に届く | 載せない場合、試すのは `claude --plugin-dir plugins/ndf-next` だけになる。載せると hook と状態の置き場が `ndf` と二重に働く（決定 74） | 載せない |
 
-**(d)・(e) はレッドラインに当たらないが、承認済みの要求と今の NDF の扱いを変えるため、ここに並べる。**
+**(d)・(e) はレッドラインに当たらない。** 承認済みの要求と今の NDF の扱いを変えるため、ここに並べる。
 
-- (d) #3092 の前提 7 の `progress.py adopt`（動いているスプリントの取り込み）を外すか
-  - 材料: 入れ替えの前に、動いているスプリントを終わらせれば取り込むものが無い（決定 76）。外すと #3092 の受け入れ条件の 1 項目が消える
-  - 推奨: 外す。承認の後に #3092 の本文を直す
-- (e) #3153（CI の結果の監視の読み違え）を今の `plugins/ndf/` でも直すか
-  - 材料: 今の NDF は開発の道具として使い続ける。新しい実装では AD1 で作る
-  - 推奨: 今の NDF では直さない。Lane の作業が止まったときだけ、即時修正の 4 条件で直す
+| # | 判断 | 材料 | 推奨 |
+| --- | --- | --- | --- |
+| (d) | #3092 の前提 7 の `progress.py adopt`（動いているスプリントの取り込み）を外すか | 入れ替えの前に、動いているスプリントを終わらせれば取り込むものが無い（決定 76）。外すと #3092 の受け入れ条件の 1 項目が消える | 外す。承認の後に #3092 の本文を直す |
+| (e) | #3153（CI の結果の監視の読み違え）を今の `plugins/ndf/` でも直すか | 今の NDF は開発に使うツールとして使い続ける。新しい実装では AD1 で作る | 今の NDF では直さない。レーンの作業が止まったときだけ、即時修正の 4 条件で直す |
 
 ## 設計の結果
 
 **置き場は `plugins/ndf-next/`。** 開発の間のプラグイン名は `ndf-next`、版は `11.0.0-dev.N` とし、入れ替えの PR で名前を `ndf` に、版を `11.0.0` にする。
 
-**子 Issue は 26 本・9 の順番に組み直す。** 72 本の旧い子は、20 本を新しい子へそのまま写し、13 本を形を変えて写し、18 本を他の子へまとめ、21 本を要らなくする（表は詳細設計の「旧い子の行き先」）。#3092・#3097・#3098 は新しい子 P1・P3・P4 としてそのまま使う。
+**子 Issue は 26 本・9 の順番に組み直す。** 72 本の旧い子は、20 本を新しい子へそのまま引き継ぎ、13 本を形を変えて引き継ぎ、18 本を他の子へまとめ、21 本を要らなくする（表は詳細設計の「旧い子の行き先」）。#3092・#3097・#3098 は新しい子 P1・P3・P4 としてそのまま使う。
 
-**Lane は 6 本のまま使う**（lrebuild・lr-flow・lr-data・lr-rf・lr-fix-a・lr-fix-b。各 Plan 2 本）。after から lflow・lbr2・lsw を外す。新しいディレクトリは今の NDF のファイルと重ならないためである。
+**レーンは 6 本のまま使う**（lrebuild・lr-flow・lr-data・lr-rf・lr-fix-a・lr-fix-b。各プラン 2 本）。after から lflow・lbr2・lsw を外す。新しいディレクトリは今の NDF のファイルと重ならないためである。
 
 **ラベル `rebuild-1142` の Issue は、旧い子の行き先の表で新しい子へ付け替える。** 付け替えの規則と件数は詳細設計の「ラベルの付け替え」にある。
 
@@ -72,7 +64,7 @@
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
 | 配布 | プラグイン・取得元・版・入れ替え |
-| 進行 | 工程・進行表・行・承認ゲート・Lane（#3092・#3097 の設計のまま） |
+| 進行 | 工程・進行表・行・承認ゲート・レーン（#3092・#3097 の設計のまま） |
 | プランの実行 | プラン・ステップ・止まった理由・行き先（#1142 の scripted-flow のまま） |
 
 配布は進行の上流にあたる（顧客と供給者）。進行は配布の版を読むが、配布の定義は書かない。
@@ -97,7 +89,7 @@
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 入れ替えた（`plugins/ndf-next/` が `plugins/ndf/` になった） | S2 の PR のマージ | リリース（開発版のデプロイ）・ラベルの Issue の閉じの確かめ |
+| E1 | 入れ替えた（`plugins/ndf-next/` が `plugins/ndf/` になった） | S2 の PR のマージ | リリース（開発版のデプロイ）・ラベルの Issue がすべて閉じたかの確かめ |
 
 ## 外部の調査
 
@@ -107,9 +99,9 @@
 
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
-| F1 | 新しいディレクトリの骨組み（パッケージ・依存の lock・CI のジョブ・テストの置き場） | Lane |
+| F1 | 新しいディレクトリの初期構成（パッケージ・依存の lock・CI のジョブ・テストの置き場） | レーン |
 | F2 | 新しいディレクトリだけを見る検査（兆候 0 件・構造の規則・I1〜I3） | CI |
-| F3 | 部品（契約・アダプター・核・進行表・領域）を、承認済みの設計の最終形で作る | Lane |
+| F3 | 部品（契約・アダプター・核・進行表・領域）を、承認済みの設計の最終形で作る | レーン |
 | F4 | 工程から作業を呼ぶ層（PR #3247 の欠けを埋める） | 進行表 |
 | F5 | 入れ替えの PR と、ラベルの Issue がすべて閉じたかの確かめ | lrebuild |
 
@@ -119,13 +111,13 @@
 | --- | --- |
 | `plugins/ndf-next/`（新設） | 新しいプラグインの全体。配置は詳細設計の「ファイル配置」 |
 | `.github/workflows/ndf-next.yml`（新設） | `plugins/ndf-next/**` の変更で、新しいディレクトリのテストと検査を走らせる。S2 で消し、既存のジョブへ戻す |
-| `plugins/ndf/`（変えない） | 開発の道具。S2 で消える |
+| `plugins/ndf/`（変えない） | 開発に使うツール。S2 で消える |
 | 入れ替えの PR（S2） | `git rm plugins/ndf`・`git mv plugins/ndf-next plugins/ndf`・名前と版・許可ファイルと suite の作り直し |
 
 ```mermaid
 graph LR
     subgraph 開発の間
-        OLD[plugins/ndf<br>開発の道具] -->|Lane の作業を回す| NEXT[plugins/ndf-next<br>作り直す側]
+        OLD[plugins/ndf<br>開発に使うツール] -->|レーンの作業を回す| NEXT[plugins/ndf-next<br>作り直す側]
         CI[ndf-next.yml] -->|テストと検査| NEXT
     end
     NEXT -->|S2 の PR で git mv| NEW[plugins/ndf<br>11.0.0]
@@ -145,7 +137,7 @@ graph LR
 | 配布の経路 | デプロイの工程は `.ndf/project.json` の `delivery` から経路を選ぶ（固定しない） | デプロイの経路が固定 |
 | 範囲の重なり | 同じ範囲を 2 つの工程が受け持つ定義は、登録で断る | 実装の雛形がマージまで行う |
 
-詳しい形（文脈の鍵の一覧・事象の形）は詳細設計の「工程から作業を呼ぶ層」にある。
+詳しい形は詳細設計にある（文脈の鍵の一覧は「内部のデータと定数」、関数と事象の形は「関数の仕様」）。
 
 ## 決定の記録
 
@@ -207,5 +199,16 @@ graph LR
 
 | 項目 | 内容 |
 | --- | --- |
-| 1 つの DB の詰まり | プランの実行と進行表を 1 つの SQLite に置いて、6 本の Lane が同時に書いたときに詰まるかは測っていない。詰まれば #3092 の決定 18 の逃がし方を使う |
+| 1 つの DB の詰まり | プランの実行と進行表を 1 つの SQLite に置いて、6 本のレーンが同時に書いたときに詰まるかは測っていない。詰まれば #3092 の決定 18 の逃がし方を使う |
 | 入れ替えの時点のラベルの Issue | 26 本の子で閉じきれない Issue が出たら、S2 の前に理由を添えてオーガナイザーへ送る |
+
+## 材料にする設計
+
+| 材料 | 文書 | 新しい実装での扱い |
+| --- | --- | --- |
+| #1142 の 3 主題 | [issue-1142-design-smells.md](issue-1142-design-smells.md)・[issue-1142-design-data.md](issue-1142-design-data.md)・[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) と各詳細設計 | 規則・表・関数の仕様を使う。移行ステップ（ラチェット・読み替えの経路・分割の順序）は使わない |
+| 前の企画の設計 | [issue-1142-design-modules.md](issue-1142-design-modules.md)・[issue-1142-design-dbos.md](issue-1142-design-dbos.md)・[issue-1142-design-libraries.md](issue-1142-design-libraries.md)・[issue-1142-design-decisions.md](issue-1142-design-decisions.md) | モジュールの分け方とライブラリの選択を使う。[issue-1142-design-migration.md](issue-1142-design-migration.md) は使わない |
+| リファクタリング計画 | [issue-2963-design.md](issue-2963-design.md)・[issue-2963-design-detail.md](issue-2963-design-detail.md) | 判断の関数と耐久の殻の形（RF1）を核の土台にする |
+| ラベルの残り | [issue-1142-design-fixes.md](issue-1142-design-fixes.md)・[issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) | N 系の振る舞いを新しい部品の仕様として使う |
+| 工程の進行表 | [issue-3092-design.md](issue-3092-design.md)・[issue-3092-design-runtime.md](issue-3092-design-runtime.md)・[issue-3092-design-detail.md](issue-3092-design-detail.md)・[issue-3092-design-dbos-behavior.md](issue-3092-design-dbos-behavior.md) | データの形・工程の定義の書式・DBOS の使い方を使う。互換と `adopt` は使わない（決定 76） |
+| PR #3247 の指摘 | 閉じたときのコメントと指摘のスレッド 35 件 | 「工程から作業を呼ぶ層」（上の節）の要件にする |
