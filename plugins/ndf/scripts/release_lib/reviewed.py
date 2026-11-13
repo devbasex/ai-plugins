@@ -26,7 +26,7 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.names import release_tag
-from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, StepError, emit, gh_json, git, git_root, result
+from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
 
@@ -47,7 +47,7 @@ def dev_workflow_of(root) -> str | None:
 def repo_or_stop(root):
     repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
     if not repo:
-        raise StepError("リポジトリ（origin の owner/repo）を決められない", 2)
+        raise StepError("リポジトリ（origin の owner/repo）を決められない", EXIT_UNREADABLE)
     return repo
 
 
