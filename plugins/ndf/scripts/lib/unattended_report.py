@@ -138,18 +138,24 @@ def form_from_dict(data: dict) -> ReportForm:
     shape = data.get("shape") if isinstance(data, dict) else None
     if not isinstance(shape, dict):
         raise FormError("shape が無い")
-    values_decl, material, required = shape.get("values"), shape.get("material"), shape.get("required")
+    meanings = _values(shape.get("values"))
+    values = tuple(meanings)
+    items = _strs(shape.get("items"), "items")
+    material = shape.get("material")
+    _check_material(material, items)
+    req = _required(shape.get("required"), values, items)
+    return ReportForm(values=values, items=items, material=Material(**material), required=req, meanings=meanings)
+
+
+def _values(values_decl: object) -> dict[str, str]:
+    """結果の値と意味（`shape.values`）は空でない文字列どうしの空でない辞書。値 → 意味の辞書を返す。"""
     if (
         not isinstance(values_decl, dict)
         or not values_decl
         or not all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in values_decl.items())
     ):
         raise FormError("shape.values は値 → 意味の空でない辞書")
-    values = tuple(values_decl)
-    items = _strs(shape.get("items"), "items")
-    _check_material(material, items)
-    req = _required(required, values, items)
-    return ReportForm(values=values, items=items, material=Material(**material), required=req, meanings=dict(values_decl))
+    return dict(values_decl)
 
 
 def _check_material(material: object, items: tuple[str, ...]) -> None:
