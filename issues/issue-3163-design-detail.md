@@ -48,7 +48,7 @@ docs/
 └── glossary/glossary.json
 ```
 
-依存の向きは一方向である。`lib/branch_flow.py` は値の表と読み分けだけを持ち、`supervise_lib`・`release_lib`・`project_lib` のどれも読まない。`supervise_lib/review_units.py` は `lib/branch_flow.py` と既存の `supervise_lib/templates.py`・`supervise_lib/paths.py`・`supervise_lib/decl.py` を読み、プランのテンプレート（`sprint_waves.py`・`sprint.py`・`sprint_close_steps.py`）がそれを呼ぶ。`release_lib/review_range.py` は `lib/branch_flow.py` と `lib/step_result.py` だけを読み、`release-steps.py` がそれを呼ぶ。`sprint_bundles.py` は関数を移した後もまとまりの読み出しだけを持ち、`review_units.py` を読まない。循環は無い。
+依存の向きは一方向である。`lib/branch_flow.py` は値の表と読み分けだけを持ち、`supervise_lib`・`release_lib`・`project_lib` のどれも読まない。`supervise_lib/review_units.py` は `lib/branch_flow.py` と既存の `supervise_lib/templates.py`・`supervise_lib/paths.py`・`supervise_lib/decl.py` を読む。`review_units.py` を呼ぶのはプランのテンプレート（`sprint_waves.py`・`sprint.py`・`sprint_close_steps.py`）である。`release_lib/review_range.py` は `lib/branch_flow.py` と `lib/step_result.py` だけを読み、`release-steps.py` がそれを呼ぶ。`sprint_bundles.py` は関数を移した後もまとまりの読み出しだけを持ち、`review_units.py` を読まない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -235,7 +235,7 @@ docs/
 | `REVIEW_SAMPLES` | 定数 | `plugins/ndf/scripts/project_lib/measure_branch_flow.py` | `10` |
 | 印の目印 | 定数 | `plugins/ndf/scripts/project_lib/measure_branch_flow.py` | `## 🤖 cross-review`・`<!-- cross-refactoring plan`・`<!-- ndf:behavior-check`。書き手の各 Skill の定数を import して使い、文字列を写さない（import できない書き手は実装のときにその定数を 1 か所へ寄せる） |
 
-目録のスナップショットの `reviews` は `ReviewUnits.as_dict()` の出力（書いた種類 → `{"checks": [...], "diff": ...}`）で、永続の形は設計文書の「目録のスナップショット」が持つ。
+目録のスナップショットの `reviews` は `ReviewUnits.as_dict()` の出力（書いた種類 → `{"checks": [...], "diff": ...}`）である。永続の形は設計文書の「目録のスナップショット」が持つ。
 
 ## 並行と排他
 
