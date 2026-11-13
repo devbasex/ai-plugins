@@ -686,7 +686,7 @@ def cmd_release(a):
         _published(root, a, plugin, prod, *got)
     if on_pr:
         reviewed.release_prod(root, a, case, plugin, plugins, branch, base, prod, sys.modules[__name__])
-    if a.channel == "dev" and (wf := (delivery.load_delivery(root).release or {}).get("dev_workflow")):
+    if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)):
         reviewed.release_dev(root, a, plugin, plugins, branch, base, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {

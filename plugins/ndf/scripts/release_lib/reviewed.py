@@ -30,11 +30,18 @@ from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, StepError
 
 TOOL = approval.TOOL
 
+
 def release_case_or_stop(root):
     try:
         return release_case.case_of(root)
     except release_case.CaseUnreadable as e:
         raise StepError(f"リリースの場合を決められない: {e}", EXIT_PRECONDITION)
+
+
+def dev_workflow_of(root) -> str | None:
+    """開発版の workflow のファイル名（`.ndf/supervise.json` の release.dev_workflow）。無ければ None（手元でマージする）。"""
+    got = (delivery.load_delivery(root).release or {}).get("dev_workflow")
+    return got if isinstance(got, str) and got else None
 
 
 def repo_of(root):

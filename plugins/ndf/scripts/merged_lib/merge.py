@@ -436,8 +436,9 @@ def promote(a, cleanup):
 
 def _trail_before_merge(root, a, n, case):
     """promote のマージの前（#2773 の決定 14）: 場合 1 は照合した先端の証跡を置き、場合 2 は有効な人の承認のレビューのコミットと
-    先端を照らす。照合する先端は a.expect_head（承認資料の承認したコミット）。一致しなければ承認ゲート（10）で止める。"""
-    sha, repo = getattr(a, "expect_head", None), repo_lib.owner_repo(root)
+    先端を照らす。照合する先端は a.expect_head（承認資料の承認したコミット）。場合 2 で一致しなければ承認ゲート（10）で止める。
+    場合 1 で先端が既に動いていれば証跡を書かずに戻り、merge-when-green の先端の照合（head_moved で 1）に止めさせる。"""
+    sha, repo = getattr(a, "expect_head", None), _repo_slug(root)
     if not sha or not repo:
         raise StepError(
             "CD のある場合の promote には照合する承認したコミット（--approved-from か --expect-head-from）とリポジトリが要る",
@@ -455,8 +456,16 @@ def _trail_before_merge(root, a, n, case):
     except approval_trail.TrailError as e:
         if e.kind != "head_moved":
             raise StepError(str(e)) from e
-        emit(result(TOOL, "gate", f"#{n} の証跡を書かずに止めた: {e}", [], {"approved_sha": sha}, None, redo), EXIT_GATE)
+        return  # 証跡を書かない。マージは --expect-head の照合が止める
     if got != sha:
         what = "有効な人の承認のレビューが無い" if got is None else f"承認のレビュー {got[:8]} が承認したコミット {sha[:8]} と違う"
         emit(result(TOOL, "gate", f"#{n} をマージしない: {what}", [], {"approved_sha": sha, "review_commit": got}, None, redo), EXIT_GATE)
     a.trail_item = {"kind": "review", "name": f"#{n}", "result": "approved", "approved_sha": got}
+
+
+def _repo_slug(root) -> str | None:
+    """`owner/repo`。origin の URL から読み、読めなければ gh に聞く。"""
+    if got := repo_lib.owner_repo(root):
+        return got
+    p = gh_parts.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root)
+    return p.stdout.strip() or None if p.returncode == 0 else None
