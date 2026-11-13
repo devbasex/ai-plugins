@@ -75,7 +75,7 @@ def make_repo(tmp_path: Path, main_decl=None, develop_decl=None, with_main: bool
     git(seed, "checkout", "-q", "-b", "develop")
     write_decl(seed, decl(SELECTED) if develop_decl is None else develop_decl)
     git(seed, "add", "-A")
-    git(seed, "commit", "-qm", "develop")
+    git(seed, "commit", "-q", "--allow-empty", "-m", "develop")  # 両方の宣言が同じでもブランチを分ける
     if not with_main:
         git(seed, "branch", "-q", "-D", "main")
     origin = tmp_path / "origin.git"
