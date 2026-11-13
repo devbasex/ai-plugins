@@ -90,7 +90,7 @@ plugins/ndf/
 | `plugins/ndf/skills/design/references/design-template.md` | 変更 | 詳細設計の文書の雛形 `detail-template.md` へのリンクを置く（雛形を写さない） | `detail-template.md` |
 | `plugins/ndf/skills/cross-review/scripts/classifications.py` | 変更 | 定数 `DESIGN_DOC_FILE_SUFFIXES` を消し、行数の検査とドメインモデルの有無の対象を `doc_kinds` から引く | `doc_kinds`（関数の中で `scripts/lib` を `sys.path` へ足す） |
 | `plugins/ndf/skills/cross-review/scripts/review_lib/categories.py` | 変更 | 定数 `DESIGN_DOC_SUFFIXES` を消し、設計 Pull Request の文書かを `doc_kinds` から引く | `doc_kinds` |
-| `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | 設計 Pull Request の詳細レビューの観点に詳細設計の 6 観点を足す | 無し |
+| `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | 詳細設計の 6 観点を新しい定数 `DETAIL_REVIEW_TEMPLATE` に置き、設計 Pull Request の分類の観点（`CATEGORY_TEMPLATES` の `design`）で `DESIGN_REVIEW_TEMPLATE` の後に足す。`DESIGN_REVIEW_TEMPLATE` と `MODEL_REVIEW_TEMPLATE` は変えない | 無し |
 | `plugins/ndf/skills/cross-review/docs/08-review-categories.md` | 変更 | `design` の分類の説明に詳細設計の文書と 6 観点を足す | 無し |
 | `plugins/ndf/skills/implementation-plan/SKILL.md` | 変更 | 対象ファイルを詳細設計のファイル配置から引き写す手順を足す | 無し |
 | `plugins/ndf/skills/quality-gates/references/design-match.md` | 変更 | 突き合わせの対象に詳細設計のファイル配置と関数の仕様を足す | 無し |
@@ -122,6 +122,7 @@ plugins/ndf/
 | `plugins/ndf/scripts/glossary.py` | モジュール `glossary` | `DEFAULT_PATHS`（変更。`doc_kinds.patterns("glossary")` から導く） |
 | `plugins/ndf/skills/cross-review/scripts/classifications.py` | モジュール `classifications` | `DESIGN_DOC_FILE_SUFFIXES`（削除）、`oversized_design_docs`・`has_domain_model`（変更） |
 | `plugins/ndf/skills/cross-review/scripts/review_lib/categories.py` | モジュール `categories` | `DESIGN_DOC_SUFFIXES`（削除）、`_is_design_doc_path`（変更） |
+| `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | モジュール `review_focus` | `DETAIL_REVIEW_TEMPLATE`（新設）、`CATEGORY_TEMPLATES`（変更） |
 
 `plan_sprint_design` は、シグネチャ・責務・失敗の扱いを変えない（`survey_steps` を呼ぶ引数を 1 つ足すだけ）。そのため次の「関数の仕様」には書かない。
 
@@ -260,7 +261,7 @@ grep -qx -- '- 無し' {state_dir}/work/design-review.md
 
 ## 内部のデータと定数
 
-**新設の定数は 8 個から 6 個に減った。** 消したのは `SECTIONS`・`DETAIL_SUFFIX`・`DETAIL_DESIGN_MODES` と規則の名前の行である。足したのは、契約と工程の分類のパスを持つ `DECLARATION`・`WORKFLOW_COMMON` で、どちらも事実を持たずに置き場を指す。事実は新設のデータ 2 つ（契約と雛形）が持つ。変更の定数のうち `DESIGN_DOC_FILE_SUFFIXES`・`DESIGN_DOC_SUFFIXES` は消し、`DEFAULT_PATHS` は導出に変えた。最後の列が、その事実の唯一の置き場である。
+**新設の定数は 7 個である。** 消したのは `SECTIONS`・`DETAIL_SUFFIX`・`DETAIL_DESIGN_MODES` と規則の名前の行である。足したのは、契約と工程の分類のパスを持つ `DECLARATION`・`WORKFLOW_COMMON` で、どちらも事実を持たずに置き場を指す。`DETAIL_REVIEW_TEMPLATE` は詳細設計の 6 観点の唯一の置き場で、詳細設計の文書がまだ無い設計単体のレビューへ渡さないために `DESIGN_REVIEW_TEMPLATE` から分ける。事実は新設のデータ 2 つ（契約と雛形）が持つ。変更の定数のうち `DESIGN_DOC_FILE_SUFFIXES`・`DESIGN_DOC_SUFFIXES` は消し、`DEFAULT_PATHS` は導出に変えた。最後の列が、その事実の唯一の置き場である。
 
 | 名前 | 種類 | 置き場 | 既定値 | 何から導くか（唯一の置き場） |
 | --- | --- | --- | --- | --- |
@@ -270,14 +271,15 @@ grep -qx -- '- 無し' {state_dir}/work/design-review.md
 | `DESIGN_REVIEW_NOTE` | 定数（新設） | `supervise_lib/design_steps.py` | `{state_dir}/work/design-review.md` | これ自体。4 段と `pr_steps` の `append` がここから引く |
 | `REVIEW_FOCUS` | 定数（新設） | `supervise_lib/paths.py` | `DRIVES["cross-review"].parent / "review_lib" / "review_focus.py"` | 既存の `DRIVES` |
 | `WORKFLOW_COMMON` | 定数（新設） | `supervise_lib/paths.py` | `SKILLS / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"` | 既存の `SKILLS` |
-| `DESIGN_REVIEW_PROMPT` | 定数（新設。`format` で `focus`・`n` を埋める） | `supervise_lib/prompts.py` | 設計文書と要求のコピーだけを読み、`REVIEW_FOCUS` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の観点で指摘を作業ディレクトリの `design-review.md` へ書く。設計文書を書き換えない・コミットしない | これ自体。観点は写さず `REVIEW_FOCUS` から読ませる。プロンプトを定数で持つ作りは既存に従う（決定 12。#1142） |
+| `DESIGN_REVIEW_PROMPT` | 定数（新設。`format` で `focus`・`n` を埋める） | `supervise_lib/prompts.py` | 設計文書と要求のコピーだけを読み、`REVIEW_FOCUS` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の観点で指摘を作業ディレクトリの `design-review.md` へ書く。`DETAIL_REVIEW_TEMPLATE` は読まない（この段の時点で詳細設計の文書が無い）。設計文書を書き換えない・コミットしない | これ自体。観点は写さず `REVIEW_FOCUS` から読ませる。プロンプトを定数で持つ作りは既存に従う（決定 12。#1142） |
 | `DESIGN_FIX_PROMPT` | 定数（新設） | `supervise_lib/prompts.py` | `design-review.md` の扱いが `未` の行を直してコミットし（push しない）、扱いを `直した` か `直さない: <理由>` に替える | 同上 |
 | `DESIGN_MATCH_PROMPT` | 定数（変更） | `supervise_lib/prompts.py` | 手順に「詳細設計の文書があれば、ファイル配置と関数の仕様の表を実装と照らす」を足す | 同上 |
 | `DEFAULT_PATHS` | 定数（変更。導出に変える） | `glossary.py` | `doc_kinds.patterns("glossary")`（今の 3 つに `issues/*-design-detail.md` が加わる） | 設計文書の種類の契約 |
 | `check.paths` | 設定値（変更） | `.ndf/glossary.json` | `issues/*-design-detail.md` を足す | このリポジトリの宣言（リポジトリごとの設定で、定数ではない） |
 | `DESIGN_DOC_FILE_SUFFIXES` | 定数（削除） | `cross-review/scripts/classifications.py` | — | 設計文書の種類の契約（`line_limit`） |
 | `DESIGN_DOC_SUFFIXES` | 定数（削除） | `cross-review/scripts/review_lib/categories.py` | — | 設計文書の種類の契約（`review`） |
-| `DESIGN_REVIEW_TEMPLATE` | 定数（変更） | `cross-review/scripts/review_lib/review_focus.py` | 要求の「レビューで見る観点」の 6 行を足す | これ自体。`design-review` の段も読む |
+| `DETAIL_REVIEW_TEMPLATE` | 定数（新設） | `cross-review/scripts/review_lib/review_focus.py` | 要求の「レビューで見る観点」の 6 行 | これ自体。`cross-review` の設計 Pull Request の詳細の段だけが読み、`design-review` の段は読まない |
+| `CATEGORY_TEMPLATES` | 定数（変更） | `cross-review/scripts/review_lib/review_focus.py` | `design` の値を `DESIGN_REVIEW_TEMPLATE` と `DETAIL_REVIEW_TEMPLATE` をつないだ文にする | 既存の 2 つの定数（文を写さない） |
 | `STEP_PHASES` | 定数（変更） | `lib/transcript_agents.py` | `"詳細設計": "設計"` を足す | 既存どおり `agent-layers.md` の表とテストで一致を縛る組（決定 12。#1142） |
 | `stages` | 設定値（変更） | `lib/stage-skills.json` | `"詳細設計": ["document-style"]` を足す | これ自体（既存の置き場） |
 | `WF_STAGE_MATRIX` | 定数（変更） | `workflow-common.sh` | `詳細設計\t-\t-\tR\tR\t-` を「設計」の行の直後へ足す | これ自体。詳細設計を通るモードはここから引く |

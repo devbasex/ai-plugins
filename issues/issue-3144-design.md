@@ -89,7 +89,7 @@
 | --- | --- | --- |
 | 標準・仕様 | 調べる | 詳細設計の記述項目に設計記述の標準（IEEE 1016）がある |
 | 主要な製品 | 調べる | 設計文書のテンプレート（arc42・C4 モデル）が、ファイル・コードの粒度をどこまで書くかを定めている |
-| ライブラリとサービス | 調べない | 作るのは工程の定義・Skill の本文・既存の検査スクリプトの規則で、Markdown の読み取りは既存の部品（`lib/md.py`・`lib/design_docs.py`）が持つ。新しい依存を足す対象が無い |
+| ライブラリとサービス | 調べる | Markdown の読み取りは既存の部品（`lib/md.py`・`lib/design_docs.py`）が持つ。新設する設計文書の種類の契約の読み手（決定 12）は JSON の形を確かめるため、このリポジトリが依存に持つ検証のライブラリと比べる |
 
 ### 標準・仕様
 
@@ -106,13 +106,19 @@
 | PRD2 | arc42 の横断的な概念（Crosscutting Concepts） | ログの形式と出力先のような、複数の構成要素にまたがる方針を 1 か所にまとめる。必要なものだけを選ぶ | 項目 8（ログと記録の出力）を関数ごとの適用先として書き、方針の本体は `logging-guidelines` に置いたまま指す | https://docs.arc42.org/section-8/ （2026-11-13） |
 | PRD3 | C4 モデルのコードの図（Level 4） | 任意の詳細度で、重要で複雑な構成要素だけに描く。IDE が生成できるため長く保守する文書には勧めない | クラス図を新しく描かせず、設計文書の「構造」の節を指す。詳細設計は実装後に追随させない | https://c4model.com/diagrams/code （2026-11-13） |
 
+### ライブラリとサービス
+
+| # | ライブラリ | 何を解くか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| LIB1 | pydantic（このリポジトリでは任意の依存のグループ `schema` に `pydantic==2.13.5` で固定し、包みの部品 `lib/schema.py` の `Shape`・`load_shape` から使う） | JSON の形をモデルで宣言して検証し、誤りの箇所を 1 行で返す | 契約の読み手には採らない（決定 12）。読む側の `classifications.py`・`categories.py` は依存のグループを要求しておらず、使うとその全員に `deps.require("schema")` を足すことになる。確かめる形は、種類の行の重複・`version`・真偽の値の型の 3 つで、標準ライブラリの `json` で足りる | `pyproject.toml` の `[project.optional-dependencies]`・`plugins/ndf/scripts/lib/schema.py` の冒頭（2026-11-13） |
+
 ### 確かめられなかったこと
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
 | IEEE 1016 の原文（各視点の定義） | 試していない | 規格の本文は有償で、取得の手段が無い。視点の名前だけを百科事典の記事から引いた |
 
-調べた量: 候補 5 件・取得の試み 4 回。
+調べた量: 候補 6 件・取得の試み 4 回。
 
 ## 機能一覧
 
@@ -141,7 +147,7 @@
 | 設計のプランの段（`supervise_lib/design_steps.py`・`supervise_lib/procedures.py` の `survey_steps`） | `detail-design` の段。詳細設計を通るモードは定数に写さず、工程の分類から引く（決定 5）。詳細設計を通るモードでは `survey-check` に `--require-detail` を付ける | F3 |
 | 設計単体のレビューの段（`supervise_lib/design_steps.py` の `design-review`・`design-review-check`・`design-fix`、指示の文 `supervise_lib/prompts.py`） | 設計文書だけを 1 つの AI に読ませて指摘を作業ディレクトリへ書かせ、指摘があれば直させる。観点は `cross-review` の設計 Pull Request の観点を読んで使い、写さない | F8 |
 | 詳細設計の検査（`lib/design_detail.py`。新設）とエントリポイント（`design-survey.py`） | I3〜I6 の 4 つの規則 | F4 |
-| 設計 PR のレビューの観点（`review_focus.py` の `DESIGN_REVIEW_TEMPLATE`・`08-review-categories.md`）と設計文書の名前を読む側（`classifications.py`・`categories.py`・`glossary.py`） | 詳細設計の 6 つの観点。設計文書の名前は名前の定数を消し、設計文書の種類の契約から引く | F5 |
+| 設計 PR のレビューの観点（`review_focus.py` の `DETAIL_REVIEW_TEMPLATE`・`08-review-categories.md`）と設計文書の名前を読む側（`classifications.py`・`categories.py`・`glossary.py`） | 詳細設計の 6 つの観点。`DESIGN_REVIEW_TEMPLATE` とは別の定数に置き、設計 PR の `cross-review` だけが読む。設計文書の名前は名前の定数を消し、設計文書の種類の契約から引く | F5 |
 | 実装計画の Skill（`implementation-plan/SKILL.md`） | 対象ファイルを詳細設計から引き写し、足すファイルに理由を書く | F6 |
 | 設計との突き合わせ（`supervise_lib/prompts.py` の `DESIGN_MATCH_PROMPT`・`quality-gates/references/design-match.md`） | 詳細設計のファイル配置と関数の一覧を実装と照らす | F7 |
 
@@ -499,7 +505,7 @@ sequenceDiagram
 
 ### 決定 11: 費用と時間を抑えるため、設計単体のレビューは 1 つの AI の軽いレビューにし、`cross-review` にしない
 
-`design-review` の段は、新しい文脈の worker 1 つ（既定の claude -p）に、設計文書と要求のコピーだけを読ませる。観点は `cross-review` の設計 Pull Request の観点をそのファイルから読んで使い、指示の文へ写さない。観点の置き場は `cross-review/scripts/review_lib/review_focus.py` である。使うのは `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の 2 つである。直した後にレビューを打ち直さない。
+`design-review` の段は、新しい文脈の worker 1 つ（既定の claude -p）に、設計文書と要求のコピーだけを読ませる。観点は `cross-review` の設計 Pull Request の観点をそのファイルから読んで使い、指示の文へ写さない。観点の置き場は `cross-review/scripts/review_lib/review_focus.py` である。使うのは `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の 2 つである。詳細設計の 6 観点は別の定数 `DETAIL_REVIEW_TEMPLATE` に置き、`design-review` の段は読まない。この段は詳細設計を書く前に走るため、6 観点を渡すと、無い文書への「抜けている」という指摘が毎回出る。6 観点は、詳細設計を載せた設計 Pull Request の `cross-review` だけが読む。直した後にレビューを打ち直さない。
 
 費用と効果を、次の実績で比べた。出典は、2026-11-09〜11-13 に流した設計のプランの報告のうち、`review` の段が動いた 22 件である。報告の置き場はメインディレクトリの `.ndf/sprint-*/1-design-*-state/report.md` で、手元の実行記録のためコミットしない。
 
@@ -559,7 +565,12 @@ sequenceDiagram
 
 この課題の範囲で既存の作りを組み替える形は、#1142 が全体を作り直すときに 2 度目の組み替えになるため採らない。
 
-根拠: Value 11（MVV 版 7）
+契約の読み手 `lib/doc_kinds.py` は、標準ライブラリの `json` だけで読み、形を確かめる部分も自前で書く。このリポジトリが持つ検証の部品（LIB1。`lib/schema.py` 経由の pydantic）で形を宣言する形は、読む側の `classifications.py`・`categories.py`・`glossary.py` のすべてに依存のグループ `schema` の要求を足し、確かめる 3 つの形（種類の重複・`version`・真偽の値の型）に対して依存が重くなるため採らない。
+
+- 作り方: 自前で作る
+- 比べた候補: LIB1
+
+根拠: Value 11 / Value 12（MVV 版 7）
 
 ## テスト設計
 
@@ -573,7 +584,7 @@ sequenceDiagram
 | I5 | 種類が `新設` の関数が再利用の表に無いと `detail_reuse` が出る。`変更` の関数は出ない | `変更` の関数にも求める |
 | I6 | ファイル配置のパスが設計の結果の触るファイルに無いと `detail_file` が出る。頭の設計文書が `legacy-refactor` の書式（「設計の結果」が無く「現状の構造」「変更後の構造」がある）なら出ない。どちらの書式でもない頭の設計文書では 1 行出る | 括弧の注記の中のパスを触るファイルとして数える・`legacy-refactor` の書式の文書に `detail_file` を出す・「設計の結果」が無いだけで照合をやめる |
 | 受け入れ条件 3（存在） | `--require-detail` を付けて詳細設計の文書の無い課題を検査すると `detail_missing` が出る。付けなければ出ない | 付けなくても出す（`light` の文書が落ちる） |
-| 受け入れ条件 5 | 設計 PR の詳細レビューの観点の文字列に、詳細設計の 6 観点の行が含まれる（`review_focus` が組む観点の出力で確かめる） | 観点の行を消す |
+| 受け入れ条件 5 | 設計 PR の詳細レビューの観点の文字列に、詳細設計の 6 観点の行が含まれる（`review_focus` が組む観点の出力で確かめる）。`design-review` の段の指示が読む 2 つの定数（`MODEL_REVIEW_TEMPLATE`・`DESIGN_REVIEW_TEMPLATE`）には含まれない | 観点の行を消す。6 観点を `DESIGN_REVIEW_TEMPLATE` へ戻す |
 | 受け入れ条件 6 | 設計レビューで見る（`implementation-plan` の本文。`.md` の文言を照合するテストは書かない） | — |
 | 受け入れ条件 7・I8 | `standard` の設計のプランの `type` が `judge` の段は `gate` の 1 つだけである（設計単体のレビューの段を足しても増えない） | 詳細設計の後か設計単体のレビューの後に判定の段を足す |
 | 受け入れ条件 8・I7 | `standard`・`legacy-refactor` の設計のプランで `detail-design` の `stage` が「詳細設計」で `next` が `rebuild`。`survey-check` の `cmd` に `--require-detail` がある | 段を消す・`next` を `rebuild` のままにする |
