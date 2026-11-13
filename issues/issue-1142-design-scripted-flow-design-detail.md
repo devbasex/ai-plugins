@@ -89,7 +89,7 @@ scripts/
 | `plugins/ndf/scripts/merged_lib/merge.py` | 変更 | マージの拒否を `not_ci`・`base_conflict` に分ける（SF4）。承認ゲートの `routes`（SF13） | `lib/step_result.py` |
 | `plugins/ndf/agents/supervisor.md` | 変更 | CI を `gh pr checks` で手で読む手順を外す（SF4） | 無し |
 | `plugins/ndf/scripts/supervise_lib/commands.py` | 変更 | `cmd_design_gate` を足す（SF5）。`routes` を付ける（SF13） | `lib/step_result.py` |
-| `plugins/ndf/scripts/supervise.py` | 変更 | サブコマンド `design-gate` を足す（SF5）。`judge_call` が使う `jsonschema` は、data の DC1 が最初の `deps.require(...)` に足す（SF6 の前の波） | `supervise_lib/commands.py`・`lib/deps.py` |
+| `plugins/ndf/scripts/supervise.py` | 変更 | サブコマンド `design-gate` を足す（SF5）。`judge_call` が使う `jsonschema` は、data の DC1 が最初の `deps.require(...)` に足す（SF6 の前の順番） | `supervise_lib/commands.py`・`lib/deps.py` |
 | `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__supervise.py.json` | 変更 | `design-gate` の引数（SF5） | 無し |
 | `plugins/ndf/scripts/supervise_lib/judge_call.py` | 新設 | 判断の呼び出し: スキーマを組み、claude を呼び、答えを確かめて 1 回だけ打ち直す（SF6） | `supervise_lib/claude.py`・`jsonschema` |
 | `plugins/ndf/scripts/supervise_lib/claude.py` | 変更 | `claude -p --json-schema` を渡せるようにする（SF6） | 無し |
