@@ -6964,6 +6964,24 @@
       "context": "ndf-workflow",
       "meaning": "リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain",
       "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "リリースの場合",
+      "context": "ndf-release",
+      "meaning": "CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "承認資料のコメント",
+      "context": "ndf-release",
+      "meaning": "承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "開発版の workflow",
+      "context": "ndf-release",
+      "meaning": "手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow",
+      "pending_source": "issues/issue-2773-design.md"
     }
   ]
 }
