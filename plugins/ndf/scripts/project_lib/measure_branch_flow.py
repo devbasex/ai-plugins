@@ -232,7 +232,7 @@ def infer_reviews(samples: dict[str, list[frozenset]], release_marks: dict[str, 
     for kind in branch_flow.REVIEW_KINDS:
         allowed = branch_flow.REVIEW_ALLOWED[kind]
         got = samples.get(kind) or []
-        counts = Counter(_checks_key(c for c in m if c in allowed["checks"]) for m in got)
+        counts = Counter(_checks_key(m & frozenset(allowed["checks"])) for m in got)
         est = infer_field(counts, REVIEWS_COMMAND, f"{kind} の PR の印")
         if (unreadable or {}).get(kind):
             est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable[kind]} 件"})
