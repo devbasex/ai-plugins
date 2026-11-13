@@ -75,12 +75,7 @@ def _cmd_fact_ids(a: argparse.Namespace) -> int:
 
 
 def _cmd_fact_value(a: argparse.Namespace) -> int:
-    row = facts.row(a.table, a.id)
-    if a.column != "id" and a.column not in facts.table(a.table).columns:
-        raise facts.FactsError(f"事実の表 {a.table} に列 {a.column} が無い")
-    if a.column not in row:
-        raise facts.FactsError(f"事実の表 {a.table} の行 {a.id} は列 {a.column} を持たない")
-    _print_value(row[a.column])
+    _print_value(facts.value(a.table, a.id, a.column))
     return 0
 
 

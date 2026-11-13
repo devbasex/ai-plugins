@@ -104,6 +104,15 @@ def row(name: str, id: str) -> dict[str, Any]:
     raise FactsError(f"事実の表 {name} に行 {id!r} が無い")
 
 
+def value(name: str, id: str, col: str) -> Any:
+    """`id` の行の列 `col` の値。行が無い・列が宣言に無い・行がその列を持たなければ `FactsError`。"""
+    found = row(name, id)
+    _require_columns(table(name), [col])
+    if col not in found:
+        raise FactsError(f"事実の表 {name} の行 {id} は列 {col} を持たない")
+    return found[col]
+
+
 def column(name: str, col: str) -> dict[str, Any]:
     """列 `col` を持つ行の `id` → 値（表の並び）。列を持たない行（任意の列）は含まない。"""
     t = table(name)
