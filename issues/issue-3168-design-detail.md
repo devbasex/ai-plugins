@@ -41,10 +41,10 @@ plugins/ndf/
 docs/specifications/ndf-branch-flow-declaration.md
 ```
 
-依存の向きは一方向である。エントリポイントの `release-steps.py` が `release_lib/` を呼び、`release_lib/promotion.py` が
-`release_lib/release_writes.py`・`release_lib/approval.py`・`lib/approved_commit.py`・`lib/branch_flow.py` を呼ぶ。
-`release_writes.py` は `release_lib/bump.py` と `release_lib/declared_steps.py`（既存。変えない）を読むだけで、
-`promotion.py` と `approval.py` を読まない。`bump.py` と `lib/` の 2 つは `release_lib/` の上の層を読まない。
+依存の向きは一方向である。エントリポイントの `release-steps.py` が `release_lib/` を呼ぶ。`release_lib/promotion.py` は、
+同じディレクトリの `release_writes.py`・`approval.py` と、`lib/approved_commit.py`・`lib/branch_flow.py` を呼ぶ。
+`release_writes.py` は `release_lib/bump.py` と `release_lib/declared_steps.py`（既存。変えない）を読むだけである。
+`promotion.py` と `approval.py` は読まない。`bump.py` と `lib/` の 2 つは `release_lib/` の上の層を読まない。
 `supervise_lib/release_templates.py` はコマンドの文字列を組むだけで、`release_lib/` を import しない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
