@@ -119,13 +119,26 @@ def classify_release(root, merge_commit: str, head: str, base: str) -> str | Non
 
 
 def sprint_start(root, ref: str, base: str, production: str) -> str | None:
-    """本番チャネルに含まれていないスプリントブランチの起点のチャネル。ベースブランチにだけあるコミットを持てば `base`。"""
-    if branch_flow.ancestor_of(root, ref, f"origin/{production}"):
+    """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`）。
+
+    1. 本番チャネルとの分岐点がベースブランチに無い（本番チャネルにだけあるコミットから切った）なら `production`
+    2. ベースブランチとの分岐点が本番チャネルに無い（ベースブランチにだけあるコミットから切った）なら `base`
+    3. 分岐点が両方にある（丸ごとのリリースで後から本番に入った、または本番の直しをベースブランチへ戻した）なら、
+       分岐点がベースブランチの first-parent の列にあれば `base`、無ければ（戻すマージの第 2 親なら）`production`
+    """
+    prod, origin_base = f"origin/{production}", f"origin/{base}"
+    if branch_flow.ancestor_of(root, ref, prod):
         return None
-    mb = branch_flow.git_run(root, "merge-base", ref, f"origin/{base}").stdout.strip()
+    mb_prod = branch_flow.git_run(root, "merge-base", ref, prod).stdout.strip()
+    if mb_prod and not branch_flow.ancestor_of(root, mb_prod, origin_base):
+        return "production"
+    mb = branch_flow.git_run(root, "merge-base", ref, origin_base).stdout.strip()
     if not mb:
         return None
-    return "production" if branch_flow.ancestor_of(root, mb, f"origin/{production}") else "base"
+    if not branch_flow.ancestor_of(root, mb, prod):
+        return "base"
+    chain = branch_flow.git_run(root, "rev-list", "--first-parent", f"^{mb}^@", origin_base).stdout.split()
+    return "base" if mb in chain else "production"
 
 
 def collect_flow(root, gh, base: str, production: str) -> dict:
