@@ -3273,3 +3273,58 @@ def test_release_package_plugin_plan_links_by_channel_cd_and_mvv(tmp_path, monke
     assert p.returncode == 0, p.stdout + p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert {i: steps[i].get("next") for i in nexts} == nexts
+
+
+# --- assert_plan_transitions_valid の現状固定（I-021） ---
+
+
+def _transition_manifest(tmp_path: Path, *plans: list[dict]) -> dict:
+    paths = []
+    for i, steps in enumerate(plans):
+        p = tmp_path / f"plan-{i}.json"
+        p.write_text(json.dumps({"steps": steps}))
+        paths.append(str(p))
+    return {"ステージ": [{"plans": paths}, {}]}
+
+
+def test_assert_plan_transitions_valid_accepts_steps_and_terminals(tmp_path: Path):
+    steps = [
+        {"id": "a", "next": "b", "on_fail": "end", "skip_to": "a", "choices": ["b", "stop", "gate"]},
+        {"id": "b", "next": "end"},
+        {"id": "c"},
+    ]
+    assert_plan_transitions_valid(_transition_manifest(tmp_path, steps, [{"id": "x", "next": "x"}]))
+
+
+def test_assert_plan_transitions_valid_accepts_a_manifest_without_plans():
+    assert_plan_transitions_valid({"ステージ": [{}, {"plans": []}]})
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"id": "a", "next": "z"},
+        {"id": "a", "on_fail": "z"},
+        {"id": "a", "skip_to": "z"},
+        {"id": "a", "next": "stop"},
+        {"id": "a", "choices": ["z"]},
+        {"id": "a", "choices": ["end"]},
+    ],
+)
+def test_assert_plan_transitions_valid_refuses_a_target_outside_the_plan(tmp_path: Path, step):
+    with pytest.raises(AssertionError):
+        assert_plan_transitions_valid(_transition_manifest(tmp_path, [step]))
+
+
+def test_assert_plan_transitions_valid_refuses_a_step_of_another_plan(tmp_path: Path):
+    manifest = _transition_manifest(tmp_path, [{"id": "a"}], [{"id": "b", "next": "a"}])
+    with pytest.raises(AssertionError) as e:
+        assert_plan_transitions_valid(manifest)
+    assert "plan-1.json" in str(e.value) and "{'id': 'b', 'next': 'a'}" in str(e.value)
+
+
+def test_assert_plan_transitions_valid_names_the_choice_that_fails(tmp_path: Path):
+    manifest = _transition_manifest(tmp_path, [{"id": "a", "choices": ["a", "z"]}])
+    with pytest.raises(AssertionError) as e:
+        assert_plan_transitions_valid(manifest)
+    assert "plan-0.json" in str(e.value) and "'z'" in str(e.value)
