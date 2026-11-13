@@ -204,6 +204,7 @@ def test_a_stop_that_leaves_the_next_command_unrun_is_pushed_back(home: Path):
         + STALLED.replace("- 結果: できなかった", "- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 有料の API を呼ぶか\n- 材料: 本文"),
         STALLED.replace("次のコマンド: python3", "次のコマンド: 無し（supervisor で回す: 設計）\n# python3"),
         STALLED.replace("次のコマンド:", "前に打ったコマンド:"),
+        STALLED.replace("- 理由:", "- 区分: ndf-ask:human-action\n- 人に頼むこと: 試しの系へ対話でログインする\n- 理由:"),
     ],
 )
 def test_the_next_command_rule_lets_other_stops_through(home: Path, text):
