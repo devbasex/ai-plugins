@@ -22,7 +22,7 @@ from types import FrameType
 
 from ndf import identity
 from ndf.testing import limits as limits_mod
-from ndf.testing import machine, slots, weight
+from ndf.testing import machine, records, slots, weight
 
 EXIT_STOPPED = 2
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
@@ -132,7 +132,7 @@ def _report(since: str) -> int:
     except identity.IdentityError as exc:
         return _stopped(str(exc), cause={"kind": "config_broken"})
     # 記録が無ければ 0 件として読む
-    metrics = slots.report(directory, seconds, current_oom=machine.oom_kill_count())
+    metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"
     result = {"status": "ok", "summary": summary, "metrics": metrics}
     print(json.dumps(result, ensure_ascii=False))

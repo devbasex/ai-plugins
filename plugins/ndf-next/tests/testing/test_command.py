@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.testing import slots
+from ndf.testing import records, slots
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,7 +60,7 @@ def test_run_keeps_output_and_exit_code(project, slots_dir):
         proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, FAKE_EXIT=code)
         out, err = proc.communicate()
         assert (proc.returncode, out, err) == (int(code), "out\n", "err\n")
-    assert [row["result"] for row in slots.read_events(slots_dir)] == ["finished", "finished"]
+    assert [row["result"] for row in records.read_events(slots_dir)] == ["finished", "finished"]
 
 
 def test_parallel_runs_wait_for_each_other(project):
@@ -79,7 +79,7 @@ def test_light_command_runs_without_a_slot(project, slots_dir):
     root, bin_dir, log = project
     proc = _ndf(["run", "--", "fakerun one_file.py"], root, bin_dir, log)
     assert proc.wait() == 0
-    assert slots.read_events(slots_dir) == []
+    assert records.read_events(slots_dir) == []
 
 
 def test_wrong_setting_refuses_to_run(project):
@@ -95,7 +95,7 @@ def test_wrong_setting_refuses_to_run(project):
 def test_report_reads_the_records(tmp_path, slots_dir):
     directory = slots_dir
     directory.mkdir(parents=True)
-    slots.append_event(
+    records.append_event(
         directory,
         {"at": datetime.fromtimestamp(time.time(), timezone.utc).isoformat(timespec="seconds"), "waited_seconds": 3, "result": "gave_up"},
     )
@@ -132,7 +132,7 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert result["metrics"]["waited_seconds"] >= 1
     assert "諦めた" in result["summary"]
     assert not log.exists()
-    rows = slots.read_events(directory)
+    rows = records.read_events(directory)
     assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
 
@@ -164,7 +164,7 @@ def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
     finally:
         proc.kill()
     assert proc.returncode == 128 + signal.SIGTERM
-    rows = slots.read_events(slots_dir)
+    rows = records.read_events(slots_dir)
     assert [row["result"] for row in rows] == [slots.INTERRUPTED]
     assert rows[0]["kind"] == slots.DIRECT
 
@@ -191,7 +191,7 @@ def test_signal_while_waiting_for_a_slot_ends_the_wait(project, slots_dir):
             proc.kill()
     assert proc.returncode == 128 + signal.SIGTERM
     assert not log.exists()
-    assert [row["result"] for row in slots.read_events(slots_dir)] == [slots.INTERRUPTED, slots.FINISHED]
+    assert [row["result"] for row in records.read_events(slots_dir)] == [slots.INTERRUPTED, slots.FINISHED]
 
 
 def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project, slots_dir):
@@ -199,7 +199,7 @@ def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project, slots_dir):
     proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, GITHUB_ACTIONS="true", FAKE_EXIT="3")
     out, err = proc.communicate()
     assert (proc.returncode, out, err) == (3, "out\n", "err\n")
-    assert slots.read_events(slots_dir) == []
+    assert records.read_events(slots_dir) == []
 
 
 def test_command_without_double_dash_is_accepted(project):
