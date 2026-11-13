@@ -143,6 +143,11 @@ def _items_after(m: re.Match) -> dict[str, str]:
     return {k.strip(): v for k, v in ITEM_RE.findall(m.string, m.start())}
 
 
+def _absent(value: str) -> bool:
+    """項目の値が無い（空か `無し`）か。"""
+    return value in ("", NONE_VALUE)
+
+
 def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[str]:
     """結果の値ごとに要る項目のうち、無いか `無し` のものを宣言の順に返す。"""
     rule = form.required[value]
@@ -154,7 +159,7 @@ def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[
             need.extend(cond["need"])
     missing: list[str] = []
     for name in need:
-        if items.get(name, NONE_VALUE) in ("", NONE_VALUE) and name not in missing:
+        if _absent(items.get(name, NONE_VALUE)) and name not in missing:
             missing.append(name)
     return missing
 
@@ -163,7 +168,7 @@ def _material_errors(text: str, m: re.Match, items: dict[str, str], form: Report
     """材料の値が本文か URL か、本文なら見出しが区間の報告（最後の結果の行 `m`）より前にあるかを確かめる。"""
     mat = form.material
     got = items.get(mat["item"], "")
-    if got in ("", NONE_VALUE):
+    if _absent(got):
         return []
     if got == mat["body"]:
         before = text[: m.start()]
