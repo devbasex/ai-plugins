@@ -15,9 +15,9 @@ PARALLEL_FLAGS = ("-n", "--numprocesses", "-j", "--jobs", "--parallel", "--maxWo
 # 後ろの語へコマンドの位置を渡すラッパーと起動の語
 WRAPPERS = frozenset({"env", "timeout", "nice", "nohup", "time", "exec", "command", "stdbuf", "ionice", "xargs"})
 LAUNCHERS = frozenset({"uv", "uvx", "python", "python3", "npx", "pnpm", "yarn", "npm", "bunx", "poetry", "pipx"})
-# シェルの区切り（単純コマンドの境）とリダイレクト
-_SEPARATORS = frozenset({";", "&", "&&", "||", "|", "|&", "(", ")", "\n", ";;"})
-_REDIRECTS = frozenset({"<", ">", ">>", "<<", "<<<", ">&", "<&", "&>", ">|"})
+# シェルの区切り（単純コマンドの境）とリダイレクトを作る文字
+_SEPARATOR_CHARS = frozenset(";&|()\n")
+_REDIRECT_CHARS = frozenset("<>&|")
 
 WHOLE = "whole"
 SCOPE = "scope"
@@ -42,7 +42,7 @@ def split_commands(text: str) -> list[list[str]]:
         if token.isdigit() and i + 1 < len(tokens) and _is_redirect(tokens[i + 1]):
             i += 1  # `2>&1` の記述子の番号
             continue
-        if token in _SEPARATORS or set(token) <= set(";&|()\n"):
+        if set(token) <= _SEPARATOR_CHARS:
             commands.append([])
         else:
             commands[-1].append(token)
@@ -51,7 +51,7 @@ def split_commands(text: str) -> list[list[str]]:
 
 
 def _is_redirect(token: str) -> bool:
-    return token in _REDIRECTS or (("<" in token or ">" in token) and set(token) <= set("<>&|"))
+    return ("<" in token or ">" in token) and set(token) <= _REDIRECT_CHARS
 
 
 def _basename(word: str) -> str:
