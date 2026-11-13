@@ -236,7 +236,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 
   承認の外の変更を含めて `approval-facts` で承認資料を作り直し、承認を取り直して `next` のとおり打ち直す
 
-### CD のある場合の本番（#2773）
+### CD のある場合の本番
 
 `release-case` が出す場合（`metrics.case`）が `cd-no-review` か `cd-review` のとき、`release --channel prod` は次の形で進む。
 場合の意味は [SKILL.md](../SKILL.md) の「リリースの場合」にある。

@@ -165,7 +165,7 @@ matrix の組は、一覧の値を持つキーの直積から `exclude` に当�
 ```
 
 - 根のキーは `version`・`not_required`・`awaiting`・`statuses` だけを受ける。`not_required`・`awaiting` の各行のキーは `name`・`reason` だけ、`statuses` の各行のキーは `name`・`workflow`・`reason` だけを受ける
-- `statuses` には、ジョブの名前でなく API で付ける commit status の名前で必須になるチェックを置く（#2773）。その名前はジョブの名前と同じく既知の名前として数え、必須にあっても「消えた必須」にしない。`workflow` のファイルが無い行は「古い宣言」（1）
+- `statuses` には、ジョブの名前でなく API で付ける commit status の名前で必須になるチェックを置く。その名前はジョブの名前と同じく既知の名前として数え、必須にあっても「消えた必須」にしない。`workflow` のファイルが無い行は「古い宣言」（1）
 - `name` は空でない文字列でなければ読めない（2）。`reason` の欠けや空は「理由の無い宣言」（1）
 - `not_required` には、集約される前の分割ジョブ（`pytest (0/2)`・`pytest (1/2)`）と、重いジョブを省くかの判定だけの
   ジョブ（`pytest-scope`・`runtime-smoke-scope`）を置く。`awaiting` には ruleset へ足す承認を待つ名前を置く
