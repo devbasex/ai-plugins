@@ -262,7 +262,7 @@
 | `hook.git-remote` | seconds 5 | 起票の guard と issue-file.py create が今のリポジトリを調べる git remote get-url の上限 | `plugins/ndf/scripts/lib/issue_items.py:origin_repo` |
 | `hook.git-rev-parse` | seconds 5 | hook が worktree を調べる git rev-parse の上限 | `plugins/ndf/scripts/hook_lib/worktree.py:_git_lines` |
 | `hook.unattended-mark` | seconds 604800 | 人のいない実行の印のうち、SessionEnd で消し残したものを次の unattended-start が消すまでの秒（7 日） | `plugins/ndf/scripts/hook_lib/unattended.py:mark_session` |
-| `hook.unattended-pushback` | attempts 2 | 人のいない実行（NDF_FACTORY_RUN）で、区間の報告の形に合わない Stop が続く間に差し戻す回数の上限。形に合った Stop で数え直す（#3242 の決定 4） | `plugins/ndf/scripts/hook_lib/unattended.py:review_stop` |
+| `hook.unattended-pushback` | attempts 2 | 人のいない実行（NDF_FACTORY_RUN）で、区間の報告の形に合わない Stop が続く間に差し戻す回数の上限。形に合った Stop で数え直す | `plugins/ndf/scripts/hook_lib/unattended.py:review_stop` |
 | `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
