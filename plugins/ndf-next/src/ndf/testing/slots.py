@@ -358,6 +358,17 @@ def _owner(started_at: float | None, cwd: Path) -> dict[str, object]:
     return {"started_at": started_at, "worktree": str(cwd), "pid": os.getpid()}
 
 
+@dataclass(frozen=True)
+class SlotContext:
+    """1 本の実行が枠を取るときに使う値の組（置き場・作業場所・上限・確かめる間隔・メモリの読み取り）。"""
+
+    directory: Path
+    cwd: Path
+    limits: limits_mod.Limits
+    poll: float
+    read_memory: ReadMemory
+
+
 @contextmanager
 def gate(
     command: str | Sequence[str],
@@ -394,7 +405,7 @@ def gate(
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
         yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
         return
-    yield from _held(directory, cwd, kind, limits, poll, read_memory)
+    yield from _held(SlotContext(directory, cwd, limits, poll, read_memory), kind)
 
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
@@ -415,23 +426,23 @@ def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> N
         log.warning("枠の記録を書けない", extra={"error": str(exc), "result": result})
 
 
-def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, held: Held, monitor: _MemoryMonitor) -> FileLock | None:
+def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
     """空いた枠を取り、メモリが下限以上になるまで待つ。待ちの上限は枠待ちとメモリ待ちの合計で数える。"""
     start = time.monotonic()
-    deadline = start + limits.wait_limit_seconds
+    deadline = start + ctx.limits.wait_limit_seconds
     lock: FileLock | None = None
     try:
         while True:
             if lock is None:
-                lock = _take_free_slot(directory, cwd, limits.max_runs, held)
-            if lock is not None and _memory_ready(held, monitor.read_memory, limits.memory_floor_mib):
+                lock = _take_free_slot(ctx.directory, ctx.cwd, ctx.limits.max_runs, held)
+            if lock is not None and _memory_ready(held, ctx.read_memory, ctx.limits.memory_floor_mib):
                 return lock
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if lock is not None:
-                    _release(directory, held, lock)
+                    _release(ctx.directory, held, lock)
                 return None
-            time.sleep(min(monitor.poll, remaining))
+            time.sleep(min(ctx.poll, remaining))
     finally:
         end = time.monotonic()
         held.waited_seconds = end - start
@@ -465,11 +476,12 @@ def _release(directory: Path, held: Held, lock: FileLock) -> None:
         lock.release()
 
 
-def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll: float, read_memory: ReadMemory) -> Iterator[Held]:
+def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
+    directory, cwd = ctx.directory, ctx.cwd
     held = Held()
-    monitor = _MemoryMonitor(directory, limits.memory_floor_mib, poll, read_memory, on_stop=held._stopped_by_memory)
+    monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
     held._monitor = monitor
-    lock = _acquire(directory, cwd, limits, held, monitor)
+    lock = _acquire(ctx, held)
     if lock is None:
         held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
@@ -487,7 +499,7 @@ def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll
         if held.memory_stopped:
             result = MEMORY_STOPPED
         else:
-            held.available_mib = monitor.read_memory()
+            held.available_mib = ctx.read_memory()
         _release(directory, held, lock)
         _record(directory, cwd, kind, held, result)
     if result == MEMORY_STOPPED:
