@@ -1,0 +1,9 @@
+{
+  "name": "ndf-next",
+  "version": "11.0.0-dev.1",
+  "description": "Rebuild of the NDF plugin (#1142). Not listed in the marketplace; try it with claude --plugin-dir.",
+  "author": {
+    "name": "takemi-ohama",
+    "url": "https://github.com/takemi-ohama"
+  }
+}

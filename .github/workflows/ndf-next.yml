@@ -1,0 +1,55 @@
+name: ndf-next
+
+# 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
+# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - "plugins/ndf-next/**"
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - "plugins/ndf-next/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: plugins/ndf-next
+
+jobs:
+  # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
+  # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
+  ndf-next-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      - run: uv run --frozen --project . pytest -q -n auto
+
+  ndf-next-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      # lock が宣言と食い違っていないか
+      - run: uv lock --check --project .
+      # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
+      - run: >-
+          python3 -c 'import json, sys;
+          a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
+          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
+          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
+      - run: bash -n bin/ndf
