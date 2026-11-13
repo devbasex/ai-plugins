@@ -6894,6 +6894,78 @@
       "context": "ndf-workflow",
       "meaning": "スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別",
       "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "兆候",
+      "context": "ndf-workflow",
+      "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "兆候の基準ファイル",
+      "context": "ndf-workflow",
+      "meaning": "`scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "境界の印",
+      "context": "ndf-workflow",
+      "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `# noqa: <規則> <境界の種類>: <理由>`",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "事実の表",
+      "context": "ndf-workflow",
+      "meaning": "1 つの事実（例: ランタイムの一覧）を行と列で持つ契約の JSON。`contracts/facts/` の 1 ファイル",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "持ち主のモジュール",
+      "context": "ndf-workflow",
+      "meaning": "1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "重複の組",
+      "context": "ndf-workflow",
+      "meaning": "同じ事実を持つと見える 2 つ以上の最上位の定数の組。種類は `same-set`・`subset`・`affix`・`same-str`・`member`・`same-num`",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "重複の基準",
+      "context": "ndf-workflow",
+      "meaning": "移行の前に拾った重複の組と、組ごとの扱いの一覧。ラチェットの基準になる",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "止まった理由の種類",
+      "context": "ndf-workflow",
+      "meaning": "手順のスクリプトとプランが止まった理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、行き先はこれだけで決まる",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "種類の表",
+      "context": "ndf-workflow",
+      "meaning": "止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "行き先",
+      "context": "ndf-workflow",
+      "meaning": "止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "判断の呼び出し",
+      "context": "ndf-workflow",
+      "meaning": "スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、答えをスキーマで確かめる操作。今の `type: judge` のステップを置き換える",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "答えごとの行き先",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`）",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
     }
   ]
 }
