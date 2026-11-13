@@ -1,10 +1,10 @@
 # 進め方（`pace`）
 
 SKILL.md の「進め方（`pace`）」の続きである。3 つの進め方の定義の表は SKILL.md にあり、この文書は
-進め方ごとのフロー・`fast` の工程の区分・`fast` と `auto` の使ってよい条件・設定の形・プランのステージ・
-承認ゲートで止まった後の続け方・検査のトリガー・MVV 判定・記録の読み方を持つ。
+進め方ごとのフロー・`fast` の工程の区分・`fast` と `auto` の使ってよい条件・設定の形・工程の進行表での流し方・
+リリースのプランの版・承認ゲートで止まった後の続け方・検査のトリガー・MVV 判定・記録の読み方を持つ。
 
-**目次:** [具体例: マイルストーン 26 の 2026-09-25 のリリース差分](#具体例-マイルストーン-26-の-2026-09-25-のリリース差分) / [フロー](#フロー) / [工程の区分（fast）](#工程の区分fast) / [使ってよい条件](#使ってよい条件) / [設定（.ndf/pace.json）](#設定ndfpacejson) / [スプリントを始める](#スプリントを始める) / [プランのステージ](#プランのステージ) / [リリースの経路からステージを組む](#リリースの経路からステージを組む) / [承認ゲートで止まった後の続け方](#承認ゲートで止まった後の続け方) / [検査のトリガー](#検査のトリガー) / [流出不具合の記録](#流出不具合の記録) / [MVV 判定（mvv-gate.py check）](#mvv-判定mvv-gatepy-check) / [記録の読み方と閾値の見直し](#記録の読み方と閾値の見直し)
+**目次:** [具体例: マイルストーン 26 の 2026-09-25 のリリース差分](#具体例-マイルストーン-26-の-2026-09-25-のリリース差分) / [フロー](#フロー) / [工程の区分（fast）](#工程の区分fast) / [使ってよい条件](#使ってよい条件) / [設定（.ndf/pace.json）](#設定ndfpacejson) / [スプリントを始める](#スプリントを始める) / [工程の進行表で流す](#工程の進行表で流す) / [リリースのプランの版](#リリースのプランの版) / [承認ゲートで止まった後の続け方](#承認ゲートで止まった後の続け方) / [検査のトリガー](#検査のトリガー) / [流出不具合の記録](#流出不具合の記録) / [MVV 判定（mvv-gate.py check）](#mvv-判定mvv-gatepy-check) / [記録の読み方と閾値の見直し](#記録の読み方と閾値の見直し)
 
 ## 具体例: マイルストーン 26 の 2026-09-25 のリリース差分
 
@@ -17,7 +17,7 @@ SKILL.md の「進め方（`pace`）」の続きである。3 つの進め方の
 | 承認 | 設計承認ゲート・リリース承認ゲートを利用者が承認する（8 版なら 16 回） | 各回を `mvv-gate.py` が判定し、「従う」なら通す。ほかは利用者が承認する | `auto` と同じ。利用者が承認するのはスプリントの開始時の MVV 1 回だけのこともある |
 | リファクタリングとコードレビュー | スプリントのベースブランチ宛 Pull Request で 1 回ずつ、デプロイの前に | `normal` と同じ | `check-trigger.py eval` が点数 15・変更量 5,000 行・流出不具合の重なり・期限 24 時間を見て、立ったときだけ次の開発版の前に検査のプラン 1 本が入る。このリリース差分なら約 4 回（PR 約 10 本・約 2 時間に 1 回） |
 | 単位 | スプリントブランチへ集めて 1 版 | `normal` と同じ | 課題ごとの Pull Request がベースブランチへ入り、開発版も課題ごと |
-| 確定仕様化・受け入れ条件の確認・振り返り・棚卸し | 課題ごとに本番の後で | `normal` と同じ | 工程の進行表のまとめの行が、スプリントの終わりに 1 回ずつ流す（開発ループでは `supervise.py new close` のプラン） |
+| 確定仕様化・受け入れ条件の確認・振り返り・棚卸し | 課題ごとに本番の後で | `normal` と同じ | 工程の進行表のまとめの行が、スプリントの終わりに 1 回ずつ流す |
 | 工程の飛ばしの案内 | 全工程の記録を求める | `normal` と同じ | `構造改善`・`実装レビュー` を `トリガー:`、確定仕様化・振り返り・棚卸しを `まとめる:` の行に出し、記録を求めない |
 
 ## フロー
@@ -81,8 +81,8 @@ graph LR
 
 ## 使ってよい条件
 
-**`supervise.py new sprint --pace fast|auto --state <スプリント状態ファイル>` が機械で確かめる。** 1 つでも欠ければ
-`stopped`（終了コード 1）でプランを書かず、`next` に `normal` の起動の形（`--pace` と `--state` を外した同じコマンド）を示す。
+**`progress.py new --pace fast|auto --state <スプリント状態ファイル>` が機械で確かめる。** 1 つでも欠ければ
+`stopped`（終了コード 3）で進行表を作らず、`next` に `--pace normal` で打ち直す案内を示す。
 conductor は `normal` で進める。`fast` と `auto` の条件は同じで、読む `.ndf/pace.json` の節（`<節>` は `fast` か `auto`）
 だけが違う。ほかの節の値は使わない（`fast` だけを許した宣言では `auto` を断る）。
 
@@ -115,7 +115,7 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 
 | 項目 | 型 | 空・無いとき | 意味 |
 | --- | --- | --- | --- |
-| `version` | 数 | 許さない（`1` だけ。必須） | 宣言の形の版。無い・`1` 以外なら `check-trigger` / `mvv-gate` / `supervise.py new sprint --pace fast|auto` が止まる |
+| `version` | 数 | 許さない（`1` だけ。必須） | 宣言の形の版。無い・`1` 以外なら `check-trigger` / `mvv-gate` / `progress.py new --pace fast|auto` が止まる |
 | `fast.enabled` | bool | 偽 | `fast` を許すか |
 | `fast.modes` | 文字列の配列 | 既定の 3 つ | `fast` を使ってよいモード |
 | `fast.verify` | 文字列 | `fast` を断る | 導入の確認のコマンド |
@@ -161,7 +161,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 ## スプリントを始める
 
-**承認の記録が無いうちは `new sprint --pace fast|auto` がプランを書かないため、設計は始まらない。** 手順は
+**承認の記録が無いうちは `progress.py new --pace fast|auto` が進行表を作らないため、設計は始まらない。** 手順は
 `fast` と `auto` で同じで、`<値>` に進め方を入れる。
 
 | 順 | 打つもの | 失敗・未承認のとき |
@@ -169,7 +169,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 1 | `sprint-state.py init <状態> --name <名> --pace <値> --milestone <M>` | 終了コード 3（説明に `## Mission` / `## Vision` / `## Value` がそろわない・読めない）: 利用者に説明を直してもらい打ち直す |
 | 2 | conductor が `mvv.md`（スプリント状態ファイルの隣）を利用者へ示し、承認を得る（設計承認ゲートの委任の承認として `AskUserQuestion` に `ndf-gate:1` を付ける） | 承認されない: 説明を直して 1 から。`normal` で進めてもよい |
 | 3 | `sprint-state.py gate <状態> MVV --what <要約>` | — |
-| 4 | `supervise.py new sprint ... --pace <値> --state <状態>` | 終了コード 1（承認の記録が無い・ハッシュ不一致・宣言が許していない）: 2 へ戻るか `normal` で進める |
+| 4 | `progress.py new ... --pace <値> --state <状態>` | 終了コード 3（承認の記録が無い・ハッシュ不一致・宣言が許していない）: 2 へ戻るか `normal` で進める |
 
 `--mvv <ファイル>` を渡すと、マイルストーンからコピーせずにそのファイルを使う。承認済みのプロジェクト MVV がある
 リポジトリ（`--root`）では、`init` がその参照（版・sha256）を状態に書き、スプリント MVV を `project-mvv.py vet --kind sprint` に
@@ -180,82 +180,30 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `--milestone` も `--mvv` も渡さなければ、プロジェクト MVV だけで判定する（承認ゲート `MVV` の記録は要らない）。**承認の後に MVV を書き換えると
 ハッシュが食い違い、判定は利用者の承認へ戻る。**
 
-## プランのステージ
+## 工程の進行表で流す
 
-### `auto`
+**どの進め方でも、スプリントの工程の並びは工程の定義（`plugins/ndf/contracts/workflow/modes/<モード>.json`）が持ち、
+`progress.py new` が進行表を作り、`progress.py next` が次の工程を流す。** 開発ループのループの 1 回も同じ進行表で流す
+（`sprint-state.py loop sprint` が `progress.py new --pace auto` を打つ）。流し方・再開・待ちの答え方は
+[waiting.md](waiting.md) の「スプリントを流すコマンド」にある。
 
-**並びは `normal` と同じで、設計のステージの queue が後ろのステージを `--then` で本番まで流す。** 前のステージの
-プランがすべて `完了` のときだけ後ろが流れ、1 本でも `関門` なら queue は後ろを流さずに `gate` を返す。
-検査のトリガー（`check-trigger.py eval`）は呼ばれない（検査のプランは終わりに検査の記録を書く）。マニフェスト（`<out>/sprint.json`）は `進め方: auto`・`状態`・`ブランチ` を持つ。
+| 進め方 | 待ちの行（`ドキュメントレビュー` の承認・`デプロイ` のリリース）での扱い |
+| --- | --- |
+| `normal` | `progress.py next` が終了コード 10 で待ちに入る。利用者が答える |
+| `auto` / `fast` | 待ちに入る前に `mvv-gate.py check` を打ち、「従う」なら `by: mvv` の答えを書いて止まらずに続ける。ほかは終了コード 10 で利用者の答えを待つ。オーガナイザーへリリースの依頼を送った待ちには当てない |
 
-| ステージ | プラン | 流し方 |
-| --- | --- | --- |
-| 設計 | `design-<N>`（review と用語チェックの後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `command`: `queue <設計>... --max 3 --then <設計の結果> --then <スプリントブランチ> --then <実装>... --then <検査> --then <開発版> --then <本番>` |
-| 設計承認ゲート | 無し。設計のプランの MVV 判定が通せばマージ済みで通過する | — |
-| 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | 1 つ目の `--then` |
-| スプリントブランチ | `sprint-branch` | 2 つ目の `--then` |
-| 実装 | `impl-<N>`（起点と宛先はスプリントブランチ） | 3 つ目の `--then` |
-| 検査 | `check`（スプリントのベースブランチ宛 Pull Request を 1 本出し、構造改善・コードレビュー・完了判定を 1 回通す。マージの後に `check-done/*` を進める） | 4 つ目の `--then` |
-| 開発版 | `release`（`facts` は `gate_as_ok`。出す版の Pull Request は検査のプランの PR） | 5 つ目の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` → `note`（判定のコメントを検査の PR へ）→ `bump`） | 6 つ目の `--then` |
+**`progress.py new --pace fast|auto --state <状態>` は、使ってよい条件を何かを書く前に確かめる。** 宣言・開発版のチャネル・
+MVV の承認の記録に加え、`fast` はスプリントブランチを本番まで使う取り込み方（`.ndf/worktree.json` の `branch_flow.promotion`）と
+組めない。外れれば進行表を作らずに止まる。
 
-`--design` を省くと設計・設計承認ゲート・設計の結果が無く、スプリントブランチのステージが `command` を持つ。設計を承認済みの課題を
-`--designed` で渡すと（開発ループの `loop answer --approved` の後）、設計と設計承認ゲートを置かずに設計の結果のステージがその課題の設計の結果を読み、
-`--design` が無ければ設計の結果のステージが `command` を持つ。リリースの経路がテンプレートで
-組むもの（`release.form` にテンプレートがある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
-この組み方は開発ループ（`sprint-state.py loop sprint`）がループの 1 回ごとに使う。ループの外のスプリントは工程の進行表で流し、
-次の工程と再開の位置は `progress.py next <進行表の ID>` が決める（[waiting.md](waiting.md) の「スプリントを流すコマンド」）。
+**デプロイの工程は、開発版のリリースのプラン（`supervise.py new release --channel dev`）を流してから、リリースの答えを待つ。**
+並列の計画のレーンで作った進行表（`--lane`）では、待ちの前にオーガナイザーへリリースの依頼（`parallel.py request`）を送る。
 
-**MVV 判定の後のステップ（`approve`・`merge`・本番の `note`）が落ちたら、`handoff` のステップが承認ゲートへ落とす。**
-`sprint-state.py gate <状態> "<承認ゲートの名前>" --withdraw` で `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して
-終了コード 10 を返す。プランの結果は `関門` になり、状態は「自動で通していない」に戻る（`fast` の設計と本番も同じ）。
+## リリースのプランの版
 
-### `fast`
-
-`normal` のスプリントとの違いは 4 点である。スプリントブランチを作らない。実装の Pull Request がベースブランチへ
-直接入る（GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）を書かない）。検査に実行条件が付く。承認ゲートのステージが MVV 判定のステップへ入る。
-
-| ステージ | プラン | 流し方 |
-| --- | --- | --- |
-| 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
-| 設計承認ゲート | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認（`ndf-gate:1`）を取ってマージする | conductor |
-| 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | `queue <設計の結果> --then <実装>... --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
-| 実装 | `impl-<N>`（`base` はベースブランチ。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --max 3 --then <検査> ...` の `command`） |
-| 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 次の `--then` |
-| コードレビュー | `review`（`new check --since-last --review-only`。実行条件 `eval --id <スプリント>-review --review`） | 次の `--then`。検査が立った回は範囲が空になり流れない |
-| 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
-
-**スプリントの終わり**は、工程の進行表のまとめの行（確定仕様化・後片付け・リリース後テスト・振り返り・組み換え・棚卸し）を
-`progress.py next` が流す。開発ループのループの 1 回では `sprint-state.py loop` が `supervise.py new close` で組む。まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
-`deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）→
-最終の検査（実行条件 `eval --final --sprint <M> --issue <課題>...`）→ 開発版と本番（実行条件 `changed --id <M>-final`。最終の検査で変更があったときだけ）
-を `--then` のステージで流す。最終の検査を確定仕様化のマージの後に置くのは、スプリントの検査の後に入った確定仕様化の差分まで拾うためである。
-最終の検査の範囲は、スプリントに属しまだどの検査も見ていない Pull Request だけで、ほかのレーン・ほかのスプリント・リリースの版の
-Pull Request と、スプリントの検査が見た Pull Request は入らない（下の「最終の検査の範囲」）。確定仕様化の Pull Request の CI は ready から進み、リリース後テスト・振り返り・棚卸しと重なる。
-`deep-due` は `upkeep.py depth due diff` で、開発ループでは 3 回のループの 1 回（`.ndf/backlog.json` の `depths.diff.every`）に 1 回、
-ループの外では毎回起動する。起動しない回は `merge` へ飛び、報告の「走らなかったステップ」に次に走る時点が載る。
-`close` のステップは `sprint-close.py --record-pr {queue_record} --issues <課題> --final-stage-from <進捗記録> --with-verification` で、
-同じプランで `retro` が通っていれば振り返り、通っていなければリリース後テストを最終工程にする。`{queue_record}` はまとめを流し始める時点に queue が探す、まとめより前の本番のリリース記録である。リリースの経路がすべて届けない経路なら `--record-pr 0`（本番の記録なし）になる。
-`close` は `merge` の後にだけ走り、確定仕様化の Pull Request がマージされなかった回は課題を開いたまま残す。`refine` は棚卸しを無人で通し（承認の要る反映は
-行わず、承認資料のパスと番号を報告に載せて終える）、今の回の課題を閉じない。まとめのプランは課題すべてへ
-工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
-リリースの経路がテンプレートで組むものでなければ、開発版と本番の代わりに下の経路のステージが最終の検査の後ろに入る。
-`close` のステップの `--record-pr` は、`pace` とリリースの経路が何であっても、経路がすべて届けない経路なら `0`、それ以外は `{queue_record}` になる
-（最終の検査の開発版・本番はまとめより後に流れ、まとめから参照できない）。`{queue_record}` は queue がまとめを流し始める時点に、まとめの
-課題を閉じる PR とそれを参照する PR から、段階が本番かデプロイなしのリリース記録を置いた PR を探して埋め、`release-verify` と `close` が
-同じ番号を受ける。見つからない・2 つ以上のスプリントにある・GitHub を読めなければ、まとめを流さずに止まり（queue の結果は `stopped`、
-開発ループの 1 回は失敗で締まる）、理由に探した課題と PR が載る。2 つ以上のスプリントにあるときは `--record-pr <番号>` を明示して組み直す。
-
-## リリースの経路からステージを組む
-
-**`new sprint` / `new close` は、リリースの経路（`lib/delivery.py` の `routes`）から検査の後のステージを組む。**
-`.ndf/supervise.json` に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置く。
-無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決める。選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
-
-**テンプレートの経路の版数は、リリースプランを流す時点に決まる。** `--version`（`close` は `--prod` も）は明示の版で、
+**テンプレートの経路の版数は、リリースのプランを流す時点に決まる。** `--version` は明示の版で、
 省けばプランは具体的な版の代わりに版の差し込み（`{release_version}`・`{release_base}`）を持ち、作業場所・`branch`・承認資料の
-パスも差し込みで書く。queue が開発版のプランを流す直前に origin のベースブランチの版と最新のリリースタグから次に空いている
+パスも差し込みで書く。キュー（`supervise.py queue`）が開発版のプランを流す直前に origin のベースブランチの版と最新のリリースタグから次に空いている
 版を決め（新しい系列を始めるときの上げ幅は `--level`、既定は `patch`）、プランの状態ディレクトリの版の記録（`version.json`）へ
 決めた版・読んだ値・上げ幅を書いてから差し込みを埋める。流し直しは記録の版を使い、自分のデプロイがベースブランチへマージされる
 前に別のスプリントがその版を出していたときだけ、次に空いている版へ決め直す（前の版・理由・前の作業場所と `branch` は
@@ -275,62 +223,12 @@ Pull Request と、スプリントの検査が見た Pull Request は入らな�
 リリースの `bump` も、新しい版がベースブランチの版以下か、既にタグのある正式版なら書き換えずに止まる（終了コード 3。
 読めなければ 2）。どちらも judge を通らずにプランが止まる。版の差し込みを持たない前のプランにも、この止まり方が当たる。
 
-| `delivery` の行 | 経路 | 検査の後に置くステージ |
-| --- | --- | --- |
-| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で本番チャネルへ入れる行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
-| `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 本番チャネルへ入れるリリースプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
-| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
-| `delivery: []` | `none` | 置かない |
-| `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
-
-`versioned` は版を持つかを表し、経路を変えない。`kind: auto`・`versioned: true` の行も上の表のとおりに進む。
-
-「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。本番チャネルへ入れるリリースプランの `promote` の後は `cd-result` → `record` と進み、CD の結果が失敗なら `record` が書いた後に止まる。本番チャネルへ入れるリリースプランは `normal` では `promote`（承認の引数無し。
-リリース承認ゲートで終える）→ 承認の後に `resume` に `--from promote=promote-approved` を足して続ける、`fast` / `auto` では `verify`（導入の確認）→
-`prepare`（Pull Request と承認資料）→ `mvv`（リリース承認ゲートの MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
-`note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `promote` は、`mvv` が読んだのと同じ
-`approval-verify.md` を `--expect-head-from` に受け、そこに書かれた確かめたコミット（導入の確認を走らせたベースブランチの先頭）が
-リリースの Pull Request の先端のときだけマージする。確認の後にベースブランチが進んで先端が違えば（CI を待つ間に進んだときも）
-`gh pr merge` を呼ばずに `head_moved` で 1、資料から確かめたコミットを読めなければマージせずに 2 で止まり、どちらも `handoff` が
-リリース承認ゲートの `by: mvv` の記録を外して承認ゲートへ落とす。`normal` の `promote` はリリース承認ゲートで止まるときにリリースの
-Pull Request の先端を「承認したコミット」としてリリースの承認資料（`approval-promote.md`。`fast` / `auto` では `prepare` が書く）へ載せ、
-`promote-approved` は `pace` のどれでもその資料の承認したコミットが先端のときだけマージする。先端が違えば `head_moved` で 1、
-資料から読めなければ 2 で、マージせずに止まる。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
-（ベースブランチへのマージが検証への反映である）。
-
-**`fast` / `auto` の `merge` の経路では、導入の確認（`<節>.verify`）を 1 つのスプリントの中で 1 度だけ走らせる。** 本番チャネルへ入れるリリースプランが
-あればその先頭の `verify`、無ければ「導入の確認」のステージの `verify` である。`verify` は `release-steps.py verify-facts` が
-メインディレクトリをベースブランチの先頭へ fast-forward してから `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-verify.md`
-に確認したコミット・コマンド・終了コードを書く。確認の出力は資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。
-確認が非 0 なら 1、HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3 で止まり、リリースの Pull Request を作らず `mvv` へも
-進まない。`mvv` はリリースの承認資料と `approval-verify.md` の 2 つを材料に読む。`new close` は `fast` の節を読み、最終の検査で変更が
-無ければ（実行の条件の skip）確認も走らない。節に `verify` が無ければ `new close` もプランを書かずに 2 で終える。
-開発版のチャネルへの反映を待つのは `<節>.verify` のコマンドの側で、NDF は待たない。止まったら直して `resume` に `--from <プラン名>=verify` を足して打ち直す。
-
-**手動反映の本番系の形の `fast` / `auto` は、手で届ける経路を 3 つのステージに分ける。** `normal` は上の「リリース」1 つのまま。
-
-| ステージ | 中身 | 流し方 |
-| --- | --- | --- |
-| 開発版 | 手で行う（`/ndf:release`）。`production: false` の行（検証の環境）へ届ける。承認は要らない。行が無ければ置かない | conductor が検査の後に行い、済んだらリリース承認ゲートの `command` を打つ |
-| リリース承認ゲート | プラン `gate-2`: `facts`（`release-steps.py deploy-facts` が `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-deploy.md` に本番系の行・ベースブランチの先頭のコミット・確認の終了コードを書く。確認の出力は秘密を含みうるため資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。作業ツリーの HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3、確認が非 0 なら 1 で止まる）→ `mvv`（リリース承認ゲートの MVV 判定）→ `note`。`note` が落ちたら `handoff` | 開発版があれば単独の queue（`command`）、無ければ検査に `--then` で続く |
-| 本番 | 手で行う（`/ndf:release`）。`production: true` の行と、`production` を書いていない手動の行 | リリース承認ゲートの通過（リリース承認ゲートの記録）の後に、承認資料のコミットを checkout して `trigger` を打つ。ベースブランチの先頭が違えばリリース承認ゲートからやり直す |
-
-`mvv` の `--pr` は、`auto` では検査のスプリントの Pull Request（`{queue_pr:check}`）、検査に続く `fast` では前のステージの Pull Request の
-すべて（`{queue_prs}`）である。単独の queue の `fast` は Pull Request を集められないため、MVV 判定を打たずに承認ゲート（10）を返し、
-利用者が承認する。
-
 ## 承認ゲートで止まった後の続け方
 
-**queue が `gate` を返したら、conductor は承認資料（`approval-request.md` の形）に判定・理由・根拠の項目（`mvv-gate.py` の結果の
-`items`）を添えて利用者へ示す。** 工程の進行表で流すスプリントでは、`progress.py next` が終了コード 10 で待ちに入り、
-利用者の答えを `progress.py answer <進行表の ID> <待っている行> --approved|--rejected` で書いてから `progress.py next` を打ち直す
-（続きの位置は進行表が決める）。下の表は開発ループのループの 1 回のプランの続け方で、`auto` の続け方は次のとおり、`fast` は上の表の「流し方」に従う。
-
-| 答え | 打つもの |
-| --- | --- |
-| 承認（設計承認ゲート） | `sprint-state.py gate <状態> "設計承認ゲート" --what <要約> --by user --outcome approved` → 設計のステージの `resume` に `--from design-<N>=approve` を足して打つ（後続のステージも続けて流れる） |
-| 承認（リリース承認ゲート） | `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved` → 本番のプランを含むステージの `resume` に `--from release-prod=bump` を足して打つ（本番チャネルへ入れるリリースプランは `--from promote=promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from promote=verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote=promote` から流し直して新しい先端でリリース承認ゲートを取り直し、`fast` / `auto` は `--from promote=verify` から流し直す。マージの `merge-gate` で止まったプランは `--from <プラン名>=merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
-| 差し戻し | 直してから、止まったプランを `supervise.py run <プラン> --from reject` で流す。`reject` のステップが差し戻しを差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書き、再提示のステップ（設計は `mvv`、`gate-2` は `facts`、リリースの Pull Request は `verify`、本番は `mvv`）へ進む。`sprint-state.py gate ... --outcome rejected` は手で打たない。`reject` を持たないプラン（`pace: normal` の本番など）と状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
+**待ちに入ったら、conductor は承認資料（`approval-request.md` の形）に判定・理由・根拠の項目（`mvv-gate.py` の結果の
+`items`）を添えて利用者へ示す。** 利用者の答えを `progress.py answer <進行表の ID> <待っている行> --approved|--rejected` で書いてから
+`progress.py next` を打ち直す（続きの位置は進行表が決める）。工程のプランの中で止まったステップの続き（`merge-gate` の承認の後の
+`merge-approved`、差し戻しの後の `reject` など）は、答えの後に `progress.py next` が同じプランの止まったステップの次から流す。
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
 止まった後の承認は `override_pass` になる（[project-mvv.md](project-mvv.md) の「改訂の兆候」）。`handoff` で止まった後は
@@ -430,25 +328,19 @@ mvv-gate.py check --sprint <状態> --gate design|release [--material F...] [--p
 
 ### 助言の MVV 判定（`normal`）
 
-**`pace: normal` でも、`supervise.py new sprint --state <状態>` で組んだスプリントは設計承認ゲート・リリース承認ゲートの前に `--advise` で判定する。**
-判定の規則・機械のチェック・レッドラインは上と同じで、違いは次の 4 点である。
+**`mvv-gate.py check --advise` は、承認ゲートの記録を書かない助言の判定である。** 判定の規則・機械のチェック・レッドラインは上と同じで、
+違いは次の 4 点である。
 
 | 違い | `--advise` の扱い |
 | --- | --- |
-| 承認ゲートの記録 | 書かない（`by: mvv` は無い）。プランはどの判定でも承認ゲートで止まり、利用者が承認する |
+| 承認ゲートの記録 | 書かない（`by: mvv` は無い）。どの判定でも利用者が承認する |
 | 終了コード | どの判定でも 0。機械のチェックで外れたときも、外れた理由を判定の記録の理由の欄に載せて 0 |
 | プロジェクト MVV が承認済みでない | LLM も `mvv-gate.jsonl` の行も判定の記録も出さず、`verdict: none` を返す。承認資料には「MVV なし」と書く |
-| スプリント MVV・進め方の宣言 | スプリント MVV の承認の記録（承認ゲート `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る。`.ndf/pace.json` が無ければ越えない線のパスを空とする |
-
-| 承認ゲート | プランのステップ | 判定の記録の置き場 |
-| --- | --- | --- |
-| 設計承認ゲート | 設計のプランの用語チェックの後の push → `mvv` → `mvv-note` → 設計承認ゲートの judge | 設計 PR のコメント |
-| リリース承認ゲート | 開発版のプランの `explain` → `mvv` → `mvv-note`（プランの結果は `facts` の承認ゲートのまま） | 承認資料（`issues/approval-<プラグイン>-v<版>.md`）の末尾 |
+| スプリント MVV・進め方の宣言 | スプリント MVV の承認の記録（承認ゲート `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る。`.ndf/pace.json` が無ければレッドラインのパスを空とする |
 
 判定の行は `mvv-gate.jsonl` に `pace: normal` として残り、改訂の兆候は `auto` / `fast` と分けずに数える。`sprint-state.py init` は
 どの進め方でも承認済みのプロジェクト MVV の参照を状態へ書き、`normal` でも `--mvv` か `--milestone` からスプリント MVV をコピーする
 （コピーできなくても止めず、照合もしない）。この参照を持たない `normal` の状態では、判定が「機械のチェックで外れた」になる。
-`--state` を省いた `normal` のスプリントのプランは変わらない。
 
 ### レッドライン
 

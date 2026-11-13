@@ -67,7 +67,7 @@ conductor が足した行（補正）を順のまま残す。実装のプラン�
 | [`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py) | `format_commands`（宣言の形の検査。違えば `FormatError`）・`read_format_commands`（根の `.ndf/supervise.json` を読む。ファイルが無ければ `[]`）・`apply_format`（根で順に打ち、整形で変わったファイルだけを 1 つのコミットにする）・`format_before_push`（送る前の整形。送れない理由か空文字を返す） |
 | [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py) | `IMPL_RULES`・`GLOSSARY_RULE`・`DESIGN_DOCS_LINE` と `impl_prompt`（課題・設計文書・触る範囲・共通の規則・用語集の行・補正の順に組む）。`plan_to_merge` が `pre_test_steps` の並びを起点の取り込みの後に置き、`base-sync` と `fix` の `next` をその先頭（空なら `test-limited`）へ向け、`lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す |
 | [`supervise_lib/verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py) | `pre_test_steps(a, fix_prompt)`: 宣言のあるものだけで `format`・`sync`・`lint-limited` とそれぞれの `fix-*` を組む |
-| [`supervise_lib/design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py) | `_retrying`（`Budget` の残りの内で打ち直す）・`ReadFailed`・`merged_design_pr`・`changed_design_docs`・`read_results`・`kept_lines`・`rewrite`・`cmd_design_results` |
+| `supervise_lib/design_stage.py` | `_retrying`（`Budget` の残りの内で打ち直す）・`ReadFailed`・`merged_design_pr`・`changed_design_docs`・`read_results`・`kept_lines`・`rewrite`・`cmd_design_results` |
 | [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) | `format_of`（`formatting.format_commands` を通し、誤りは `DeclError`）と `glossary_ready` を `apply_decls` で `a` に載せ、`decl_fields` でスプリントの子のプランへ引き継ぐ |
 | [`supervise_lib/commands.py`](../../plugins/ndf/scripts/supervise_lib/commands.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py) | `cmd_format`（`supervise.py format`）と preset `format`（`supervise.py format --commit`） |
 | [`test-run.py`](../../plugins/ndf/scripts/test-run.py) | `scope --only-kind test\|lint` |
@@ -259,7 +259,7 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 
 ## 関連リンク
 
-- [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py)・[`decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py)・[`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py)・[`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py)・[`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py)
+- [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)・`design_stage.py`・[`decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py)・[`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py)・[`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py)・[`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py)
 - [quality-gates-design-match.md](quality-gates-design-match.md) — `standard` の実装プランで `test-limited` と `pr` の間に置く設計との突き合わせ
 - [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md) — `head` の後に置くベースブランチの取り込み（`base-sync`）。その `next` が整形の並びの先頭へ向く
 - [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) — 整形と範囲の静的解析のステップと修正のループを数える上限

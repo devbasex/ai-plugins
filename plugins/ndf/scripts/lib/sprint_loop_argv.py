@@ -67,8 +67,8 @@ def lap_carry(rec: dict, lap: dict) -> list[int]:
 
 
 def lap_context(rec: dict, lap: dict, carry: list[int]) -> Path:
-    """まとめの工程が読む開発ループの文脈（ループの名前・回・マイルストーン・持ち越し・版）。今の `new close --pace auto` の
-    `--loop`・`--lap`・`--milestone`・`--carry` と、`new sprint` の `--version` にあたる。"""
+    """まとめの工程が読む開発ループの文脈（ループの名前・回・マイルストーン・持ち越し・版）。まとめの工程の起動指示と
+    デプロイの工程の版が読む。"""
     doc = {"loop": rec["name"], "lap": lap["n"], "milestone": lap.get("milestone"), "carry": list(carry), "versions": lap["versions"]}
     doc["extra"] = list(lap.get("sprint_extra") or [])
     if lap.get("lane"):  # レーンで動くループ: デプロイの工程がリリースの依頼を送る先

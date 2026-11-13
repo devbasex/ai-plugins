@@ -176,4 +176,4 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 - [ndf-production-release-record.md](ndf-production-release-record.md): 経路ごとの記録の PR と `release-verify`
 - [ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md): 閉じる条件 2 と受け入れ条件の印（`unknown` で本文を読まない条件 I8）
 - [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md): 参照だけの課題（`unknown` ではスプリントの PR を読まない）
-- 実装: [`supervise_lib/sprint_routes.py`](../../plugins/ndf/scripts/supervise_lib/sprint_routes.py)・[`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/manual_checks.py`](../../plugins/ndf/scripts/lib/manual_checks.py)
+- 実装: `supervise_lib/sprint_routes.py`・`supervise_lib/sprint.py`・[`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py)・[`lib/manual_checks.py`](../../plugins/ndf/scripts/lib/manual_checks.py)

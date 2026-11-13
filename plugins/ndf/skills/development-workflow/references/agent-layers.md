@@ -63,38 +63,25 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 **Draft を開く位置は既存の規約のとおりである**（[stage-notes.md](stage-notes.md) のリファクタリングの節）。
 フェーズの表は、その 1 度の呼び出しを実装のフェーズの終わりに置いただけで、工程表の順序を変えない。
 
-**スプリントの中の並列は、設計と実装のフェーズで開く。** `supervise.py new sprint` が `.ndf/` の設定から
-設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し、`supervise.py queue --max 3` が
-同時に 3 本まで流す。検査・取り込み・仕上げはスプリントで 1 つずつ流す。スプリントブランチ（`sprint/<名前>`）は、
-設計承認ゲートの承認とマージの後に、スプリントブランチのステージのプランがベースブランチ（`.ndf/worktree.json` の
-`base_branch`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
+**スプリントの工程は、工程の進行表が 1 つずつ流す。** `progress.py new` がモードの工程の定義
+（`plugins/ndf/contracts/workflow/modes/<モード>.json`）から進行表を作り、`progress.py next` が次の工程を選んでプランにし、
+`supervise.py run` で流す。打つコマンドの並びは [waiting.md](waiting.md) の「スプリントを流すコマンド」にある。
 
-### プランで流すか supervisor で回すか
+### 工程ごとのプラン
 
-**フェーズは、下の表のプランで流すのが既定である。** conductor が `Agent` で supervisor を起動するのは、
-「supervisor で回すとき」の列に当たるときだけである。プランは、supervisor が持つと抜けやすいステップ
-（用語集のエントリポイントの検査、設計 Pull Request の「決めたこと」の同期、上限 3 ラウンドの judge、
-進捗ログの `attention`）をテンプレートとして持つ。打つコマンドの並びは [waiting.md](waiting.md) の
-「スプリントを流すコマンド」にある。
+**工程のプランは、工程の定義の `call`（`ndf.plan`）の `with` から決まる。** `with.kind` があれば `supervise.py new <種別>` の雛形、
+無ければ `with.skill` の Skill を起動する 1 ステップのプランになる。conductor が `Agent` で supervisor を起動するのは、
+`progress.py next` が工程を失敗にして返し、conductor が手で行うと決めたときだけである（手で行った工程は `progress.py finish` で終了の印を付ける）。
 
-| フェーズ | プラン（`supervise.py new` の種別） | ステージ（目録 `<out>/sprint.json`） | supervisor で回すとき |
-| --- | --- | --- | --- |
-| 設計 | `new sprint --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が設計承認ゲートを返す | 設計 → 設計承認ゲート | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文と仕様のコピーが一致すれば飛ばす） |
-| 実装 | `new sprint` の実装のプラン（課題ごと。スプリントブランチ宛て）。スプリントブランチはその前のステージのプランが切る。単発は `new impl` | スプリントブランチ → 実装 | — |
-| 検査 | `new sprint` の検査のプラン（スプリントの Pull Request を出し、構造改善・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
-| 取り込み | スプリントの Pull Request のマージは検査のプランが、開発版のデプロイは開発版のリリースプランが持つ（後片付けは本番のリリースプランの最後のステップ） | デプロイ（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。worker へ委ねるときは全課題を 1 件の worker に委ね、起動指示の「手順」へ `plan-to-spec` の抜粋（`references/excerpt.md`）をコピーする。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
-| 仕上げ | `new sprint` の本番のリリースプラン（本番へのリリース・リリース後テスト・後片付け）。単発は `new release --channel prod` | `リリース承認ゲート` → `本番`（リリース承認ゲートの承認の後に、`本番` のステージの `command` を単独で流す） | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
-| リリース | `new sprint` の開発版と本番のリリースプラン。単発は `new release --channel dev` / `--channel prod` | デプロイ・本番 | —（プランだけが通す） |
-
-**supervisor へ落とすのは、次の 2 つのときだけである。**
-
-| 条件 | 見分け方 | conductor の動き |
+| 工程 | プラン | 単発で打つとき |
 | --- | --- | --- |
-| プランのテンプレートが無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）のテンプレートが無い | その工程だけを supervisor で回し、残りはプランで流す |
-| テンプレートに要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）。`new release` では `release` も）で止まる。`new sprint` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+| 実装 | `new impl` の雛形（worker の実装 → テスト → Pull Request → マージ） | `new impl`・即時修正は `new fix` |
+| デプロイ | `new release --channel dev` の雛形の後、リリースの答えを待つ。レーンではオーガナイザーへリリースの依頼を送る | `new release --channel dev` / `--channel prod` |
+| ほかの工程（設計・詳細設計・ドキュメントレビュー・リファクタリング・コードレビュー・完了判定・確定仕様化・後片付け・振り返り・棚卸しなど） | 工程 Skill を起動する 1 ステップ | 検査は `new check`（`pace: fast` は `new check --since-last`） |
 
-**`supervise.py --help` の説明を読んでプランを外さない。** `new sprint` は設計承認ゲートの前の設計から
-書き出す（`--design` を渡したとき）。
+**雛形に要る設定が無ければ、`supervise.py new` が止まる。** 設定は `.ndf/worktree.json` の `base_branch`、テストの宣言
+（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）、`new release` では `release` である。
+設定を足せるなら足して `progress.py retry` で打ち直す。足せなければその工程を手で行い、`progress.py finish` で終了の印を付ける。
 
 ### モードごとの組み方
 
@@ -297,9 +284,9 @@ supervisor を起動できる。
 **conductor が 1 つのフェーズについて読む報告は 1 件である**。worker を 5 つ使っても、
 conductor が読む量は変わらない。
 
-**プランで流したフェーズの結果は、キューの done の `status` で読む**（[waiting.md](waiting.md) の
-「supervise.py の進捗ログ」）。`gate` なら承認資料を添えて承認を取り（`AskUserQuestion` に `ndf-gate:1` か `ndf-gate:2` を付ける）、承認の後に目録（`<out>/sprint.json`）の
-次のステージの `command` を打つ。下の表は supervisor のフェーズレポートにだけ当たる。
+**進行表で流した工程の結果は、`progress.py next` の結果の `status` で読む**（[waiting.md](waiting.md) の
+「スプリントを流すコマンド」）。`gate` なら承認資料を添えて承認を取り（`AskUserQuestion` に `ndf-gate:1` か `ndf-gate:2` を付ける）、
+答えを `progress.py answer` で書いてから `progress.py next` を打ち直す。下の表は supervisor のフェーズレポートにだけ当たる。
 
 **conductor が見るのは、見出しの有無と `結果` の 2 つである。**
 

@@ -123,8 +123,8 @@ STATE_KEYS = ("plans", "done", "gates", "goal_template")
 def other_shape(path: str) -> str:
     """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
 
-    supervise.py new sprint の目録（`スプリント` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
-    同じ場所へ置くと、上書きでステージの目録が消える（#1082）。
+    今の版より前の supervise.py new sprint が書いた目録（`スプリント` / `ブランチ` / `ステージ`）は同じ名前で残る。
+    同じ場所へ置くと、上書きで目録が消える（#1082。目録は progress.py adopt が読む）。
     """
     p = Path(path)
     if not p.exists():

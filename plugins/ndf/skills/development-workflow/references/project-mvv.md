@@ -89,7 +89,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 `approve` は版を 1 つ上げ、理由と前の版との差分（`changes`。項目の単位で added / changed / removed）を追記する。過去の版は
 書き換えない。`project-mvv.py show --version N` で版 N の本文を、`show --diff M` で版 M から現行への差分を出す。
-改訂で本文の sha256 が変わると、承認済みだったスプリントの `pace: fast` は次の `new sprint --pace fast` と承認ゲートで
+改訂で本文の sha256 が変わると、承認済みだったスプリントの `pace: fast` は次の `progress.py new --pace fast` と承認ゲートで
 参照の食い違いを検出し、利用者の承認へ戻る。
 
 ## 人へ示す文面の雛形（候補の提示・改訂の提案・承認ゲートの資料）
@@ -112,7 +112,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 地点 | MVV の節の渡り方 | 渡した事実と根拠の記録 |
 | --- | --- | --- |
 | 承認ゲートの MVV 判定（`auto` / `fast`） | `mvv-gate.py` の材料の先頭 | `mvv-gate.jsonl` の `project_mvv`・`basis`・`pace`・`sprint_mvv`。「従う」でレッドラインが無ければ状態の承認ゲートの記録（`by: mvv`） |
-| 承認ゲートの助言の MVV 判定（`normal` と `supervise.py new sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
+| 承認ゲートの助言の MVV 判定（`mvv-gate.py check --advise`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
 | supervise の `work` のステップ（要求・設計・実装・修正の worker） | worker のシステムプロンプトの末尾（プロジェクト MVV が承認済みのときだけ。プランの `スプリント状態` があればスプリント MVV も） | 記録しない（worker の判断は下の 3 行の記録に残る） |
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |

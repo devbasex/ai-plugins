@@ -226,7 +226,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
 引継ぎ文書の置き場（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
-`scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`supervise.py new sprint` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
+`scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（前の版の `supervise.py new sprint` が書いた目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 

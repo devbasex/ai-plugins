@@ -384,5 +384,5 @@ sequenceDiagram
 - [後片付けを止めずに通し、スプリント課題を最終工程で閉じる](ndf-cleanup-and-bundle-closing.md)
 - [受け入れ条件の番号ごとの合格で閉じて本文に印を付ける](ndf-sprint-close-acceptance-criteria.md)（閉じる条件 2 と表の読み方）
 - [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) / [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) / [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)
-- `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)（normal の 1 スプリントの手順 8・9）・[`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`supervise_lib/sprint_waves.py`](../../plugins/ndf/scripts/supervise_lib/sprint_waves.py)・[`supervise_lib/sprint_routes.py`](../../plugins/ndf/scripts/supervise_lib/sprint_routes.py)
+- `development-workflow` の [references/waiting.md](../../plugins/ndf/skills/development-workflow/references/waiting.md)（normal の 1 スプリントの手順 8・9）・`supervise_lib/sprint.py`・`supervise_lib/sprint_waves.py`・`supervise_lib/sprint_routes.py`
 - 課題 [#1273](https://github.com/devbasex/ai-plugins/issues/1273)・`pace: normal` の本番のステージは [#1914](https://github.com/devbasex/ai-plugins/issues/1914)（依存 #1915）・リリース後テストの書き手は [#1683](https://github.com/devbasex/ai-plugins/issues/1683)・リリースの Pull Request の記録と版の食い違いの読み方は [#1870](https://github.com/devbasex/ai-plugins/issues/1870)

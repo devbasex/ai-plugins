@@ -51,7 +51,7 @@ https://git-scm.com/docs/git-merge の「HOW CONFLICTS ARE PRESENTED」）。同
 | --- | --- |
 | [`supervise_lib/admission.py`](../../plugins/ndf/scripts/supervise_lib/admission.py) | 重なりの規則の唯一の置き場。`overlap_of` はディレクトリの宣言を外し、残ったファイルの宣言の一致と共有の一覧への当たりで重なりを返す。`shared_hits` もディレクトリの宣言を当たりに使わない。副作用を持たず、ファイルを読まない |
 | `supervise_lib/flow.py` の `admit_step` | 規則を呼び、重なりの組ごとに「重なる組」の行を標準エラーへ出す |
-| [`supervise_lib/design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py) の `marked_dirs` | 設計の結果の「実装する」の行で、`paths.is_dir_entry(パス, --root)` が真のパスを末尾 `/` の形に揃え、課題ごとに「#番号 の触るファイルにディレクトリ …」を標準エラーへ出す。結果の JSON の `metrics.dirs`（課題の番号 → ディレクトリの宣言）に載せる |
+| `supervise_lib/design_stage.py` の `marked_dirs` | 設計の結果の「実装する」の行で、`paths.is_dir_entry(パス, --root)` が真のパスを末尾 `/` の形に揃え、課題ごとに「#番号 の触るファイルにディレクトリ …」を標準エラーへ出す。結果の JSON の `metrics.dirs`（課題の番号 → ディレクトリの宣言）に載せる |
 | `supervise_lib/new_args.py` | `new impl --files` の help に、ディレクトリ（末尾 `/`）は重なりの判定にも除外の行にも使わないことを書く |
 | `design` の `references/design-template.md` の「設計の結果の書き方」 | 触るファイルはファイル単位で書く。テストのように複数の課題が同時に触る置き場はファイルを 1 つずつ書き、索引のように行を書き足すファイルは、書き足すならそのファイルを書く |
 | [`scripts/experimental/queue-overlap-replay.py`](../../plugins/ndf/scripts/experimental/queue-overlap-replay.py)（実験版） | 過去のスプリントのプランの触るファイルで重なりの組を `admission.overlaps` で判定し直し、両方の PR の変更ファイルと突き合わせて偽の重なりを数える。規則を自分では持たない |

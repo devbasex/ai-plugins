@@ -81,7 +81,7 @@ def collect_rounds(main: Path, rec: dict, number: int) -> tuple[dict | None, lis
 
 
 def write_inputs(main: Path, rec: dict, issues: list[int], lap_dir: str | Path) -> tuple[list[str], list[str]]:
-    """出し直しの指摘を持つ課題の入力ファイルをループの 1 回のディレクトリへ書き、`new sprint` の引数と読めずに飛ばしたループの名前を返す（決定 1）。"""
+    """出し直しの指摘を持つ課題の入力ファイルをループの 1 回のディレクトリへ書き、`progress.py new` の引数（`--revise-note`）と読めずに飛ばしたループの名前を返す（決定 1）。"""
     argv, skipped = [], set()
     for n in issues:
         data, others = collect_rounds(main, rec, n)

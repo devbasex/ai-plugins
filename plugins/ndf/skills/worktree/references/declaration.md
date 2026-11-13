@@ -134,12 +134,11 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`supervise.py new sprint` など）が
+- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`supervise.py new`・`progress.py new` など）が
   直すキーと許す値を出して終了コード 2 で止まる。既定値の行へは倒さない
 - `branch_flow` はメインディレクトリの設定から読む（`production_branch` と同じ）。Pull Request の変更だけでは
   リリースの範囲の決め方を変えられない
-- 変えた宣言は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
-  `ブランチ運用` へ書いた値のまま進む
+- 宣言は、工程のプランを組むとき（`supervise.py new`）に読む。動いているスプリントでも、宣言を変えた後に組む工程のプランから効く
 - 既存のリポジトリの使い方から案を作るときは `project-decl.py measure` を打ち、宣言と実際の使い方のずれは
   `project-decl.py drift` で見る（`development-workflow` の `references/project-analysis.md`）
 

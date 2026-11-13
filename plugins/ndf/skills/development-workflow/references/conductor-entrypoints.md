@@ -20,12 +20,10 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `scripts/supervise.py new sprint` | 開発ループのループの 1 回の工程をプランにする（`sprint-state.py loop sprint` が打つ。ループの外のスプリントは `progress.py new`） |
 | `scripts/supervise.py new impl` | worker の実装から始まるプランを作る |
 | `scripts/supervise.py new fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
 | `scripts/supervise.py new check` | 検査のプランを作る |
 | `scripts/supervise.py new release` | デプロイ（開発版・本番）のプランを作る |
-| `scripts/supervise.py new close` | 開発ループのループの 1 回を閉じるプランを作る（`sprint-state.py loop` が打つ。ループの外のスプリントのまとめは進行表の行） |
 | `scripts/supervise.py queue` | プランを同時に `--max` 本まで順に流す |
 | `scripts/supervise.py wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
 | `scripts/supervise.py run` | プランを 1 本だけフォアグラウンドで流す |
@@ -73,7 +71,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/merged-steps.py cleanup` | マージ済みの PR の worktree とブランチを片付ける |
 | `scripts/release-steps.py approval-facts` | 本番の承認資料のうち機械で作れる部分を書き出す |
 | `scripts/release-verification-steps.py verify-install` | 開発版を導入して確かめる |
-| `scripts/sprint-close.py` | スプリントを閉じる（ふつうは `new close` のプランが呼ぶ） |
+| `scripts/sprint-close.py` | スプリントを閉じる（ふつうは工程の進行表のまとめの工程が呼ぶ） |
 
 ## セッションの切り替えと記録
 

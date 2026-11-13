@@ -84,7 +84,7 @@ class Engine:
     """1 本のプランの実行。`state` が記録を、`ctx` がハンドラーへ渡す文脈を持つ。"""
 
     queued = (
-        False  # キューが流す間だけ真。`supervise.py run` の単発の開始は答え待ちの停止を読まない（`park` の続きが `queue --resume` のため）
+        False  # キューが流す間だけ真。`supervise.py run` の単発の開始は答え待ちの停止を読まない（`park` の続きはキューの続きか進行表の `progress.py next`）
     )
 
     def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None, plan_path: str | None = None) -> None:

@@ -80,13 +80,13 @@ conductor が打つコマンドをキューと `wait` だけにすることを�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) | `sprint_plans` が `normal` の設計承認ゲートの後のステージ（`MERGE_STAGE` = 「設計 PR のマージ」からデプロイまで）を最初のステージの `then_of` に並べる。`_stage_entry` が `command` に `--done` を書き、`add_resume` が `command` を持つステージと `then_of` のステージへ `resume` を書く。`--absorb` の拒否（`absorb_refusal`）・`--issue` への追加・プランへの適用を組み立ての前後で呼ぶ |
+| `supervise_lib/sprint.py` | `sprint_plans` が `normal` の設計承認ゲートの後のステージ（`MERGE_STAGE` = 「設計 PR のマージ」からデプロイまで）を最初のステージの `then_of` に並べる。`_stage_entry` が `command` に `--done` を書き、`add_resume` が `command` を持つステージと `then_of` のステージへ `resume` を書く。`--absorb` の拒否（`absorb_refusal`）・`--issue` への追加・プランへの適用を組み立ての前後で呼ぶ |
 | [`supervise_lib/design_merge.py`](../../plugins/ndf/scripts/supervise_lib/design_merge.py) | `plan_design_merge` が `design-merge-<N>` のプラン（`approved` → `merge_steps`）を組む。`cmd_design_approved` が副命令 `design-approved` の本体 |
 | [`supervise_lib/queue_resume.py`](../../plugins/ndf/scripts/supervise_lib/queue_resume.py) | `resume_targets` が前の起動の一覧と done から、ステージの並び・`--max`・続けるプランと開始のステップ（`ResumeTarget`）を決める。`cmd_queue_resume` が `queue.cmd_queue` へ `starts`・`rerun` を渡し、`--from` があれば前の起動の途中を子ごと止める指示（`restart`）も渡す |
 | [`supervise_lib/queue.py`](../../plugins/ndf/scripts/supervise_lib/queue.py) | 一覧 `<done>.plans.json` を書く（`start_listing`）。`plan_pr` が結果 `完了` か `関門` のプランの PR で `{queue_pr:<名>}` を埋める。結果の `items` に `resumed_from` を足す |
 | [`supervise_lib/flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py) | `admit_step` がプランごとの開始のステップで実行の回（`prefix_of` の `start`）を選び、`rerun` のプランは結果 `関門` の記録を終わりと扱わない |
-| [`supervise_lib/absorb.py`](../../plugins/ndf/scripts/supervise_lib/absorb.py) | `--absorb` の形の確認（`absorb_arg`）・拒否の理由（`absorb_refusal`）・プランへの適用（`apply_absorb`） |
-| [`supervise_lib/design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py) | 設計承認ゲートの後の `design-results` が、プランの `取り込み先` を表の取り込みと合わせる |
+| `supervise_lib/absorb.py` | `--absorb` の形の確認（`absorb_arg`）・拒否の理由（`absorb_refusal`）・プランへの適用（`apply_absorb`） |
+| `supervise_lib/design_stage.py` | 設計承認ゲートの後の `design-results` が、プランの `取り込み先` を表の取り込みと合わせる |
 | [`lib/gate_answer.py`](../../plugins/ndf/scripts/lib/gate_answer.py) | スプリント状態ファイルから承認ゲートの利用者の承認の記録（`Answer`）を読む（`approved`）。書き込みの置き換えの規則（`replaces`）を `sprint-state.py` と共有する |
 | [`sprint-state.py`](../../plugins/ndf/scripts/sprint-state.py) | `gate` が利用者の承認の記録に `by` と `--pr` の `pr` を書き、承認ゲートの名と `pr` の組で置き換える |
 

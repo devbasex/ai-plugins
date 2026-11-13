@@ -130,7 +130,7 @@ def _dispatch(a, update) -> dict | None:
 
 
 def split_extra(argv: list[str]) -> tuple[list[str], list[str] | None]:
-    """`loop sprint ... -- <引数>` の `--` から後を切り分ける（解析する引数, new sprint へ渡す引数）。
+    """`loop sprint ... -- <引数>` の `--` から後を切り分ける（解析する引数, 進行表の文脈へ残す引数）。
     argparse の REMAINDER は位置引数の後の必須のオプションまで吸うため、解析の前に分ける。`loop sprint` でなければ (argv, None)。"""
     if argv[:2] != ["loop", "sprint"] or "--" not in argv:
         return argv, None

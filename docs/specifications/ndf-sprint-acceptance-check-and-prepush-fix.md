@@ -64,8 +64,8 @@ worker が `判断が要る` で止まり、conductor が利用者へ問い、�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`supervise_lib/sprint_inputs.py`](../../plugins/ndf/scripts/supervise_lib/sprint_inputs.py) | 確かめる課題（`--issue` から `--design` と `--absorb` で取り込んだ課題を除いたもの。順序を保ち重複を除く。取り込んだ課題は取り込み先の設計と実装が受け入れ内容を持つ。#1426）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) の `cmd_new_sprint` | `waves` を受けない（スプリントを組む）ときだけ、進め方の確かめの後・計画を書く前に `criteria_refusal` を呼ぶ。打ち直すコマンドは `sprint_command`（今の引数をすべて写し、`design` を渡せば `--design` へ足す）で組む |
+| `supervise_lib/sprint_inputs.py` | 確かめる課題（`--issue` から `--design` と `--absorb` で取り込んだ課題を除いたもの。順序を保ち重複を除く。取り込んだ課題は取り込み先の設計と実装が受け入れ内容を持つ。#1426）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
+| `supervise_lib/sprint.py` の `cmd_new_sprint` | `waves` を受けない（スプリントを組む）ときだけ、進め方の確かめの後・計画を書く前に `criteria_refusal` を呼ぶ。打ち直すコマンドは `sprint_command`（今の引数をすべて写し、`design` を渡せば `--design` へ足す）で組む |
 | [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py) の `push_fix_steps` | 渡した `pr` のステップへ `on_fail: fix-push` と `on_fail_only: push-check` を足し、`fix-push` のステップ（指示は `PUSH_FIX_PROMPT`）を返す。修正の経路の組み立てはこの関数だけが持つ |
 | [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py) の `plan_to_merge` | `pr` のステップの直後に `push_fix_steps(pr)` を並べる。`sync_checks` の有無によらない |
 | [`supervise_lib/pr.py`](../../plugins/ndf/scripts/supervise_lib/pr.py) の `PrStep._push` と `is_push_check_failure` | push する前に `head` を結果へ残し、失敗なら標準出力と標準エラーを続けた `text` と、push 前の検査の不合格か（`push_check`）を残す |
@@ -205,7 +205,7 @@ stateDiagram-v2
 
 ## テスト観点
 
-テストは [`tests/test_sprint_inputs.py`](../../plugins/ndf/scripts/tests/test_sprint_inputs.py) と
+テストは `tests/test_sprint_inputs.py` と
 [`tests/test_push_fix.py`](../../plugins/ndf/scripts/tests/test_push_fix.py) にある（`gh` と worker は差し替える）。
 
 - `--issue A B --design A` で B に `## 受け入れ条件` が無いとき、終了コードが 0 でなく `status` が `stopped` で、

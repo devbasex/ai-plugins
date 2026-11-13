@@ -380,9 +380,9 @@ conductor は `parallel.py end` を打たず、自分のラッパーも止めな
 | R4 | 1 行の入力は `tmux send-keys` で行い、画面へ指示の本文を打たない |
 | R5 | `relay.py ls` の `running` を止まっていない根拠にしない |
 | R6 | レーンのリポジトリのメインディレクトリで `relay.py run --name <レーン名>` を打つ |
-| R7 | 下の「レーンを足す」の手順で足す。例外は `sprint-state.py loop start --outside-plan <理由>` か `supervise.py new sprint --outside-plan <理由>` で起動する（理由は `<状態の根>/parallel/outside-plan.jsonl` に残る） |
+| R7 | 下の「レーンを足す」の手順で足す。例外は `sprint-state.py loop start --outside-plan <理由>` か `progress.py new --outside-plan <理由>` で起動する（理由は `<状態の根>/parallel/outside-plan.jsonl` に残る） |
 
-計画の外のセッションの判定は、`sprint-state.py loop start` と `supervise.py new sprint` が何かを書く前に行う。動いている計画が
+計画の外のセッションの判定は、`sprint-state.py loop start` と `progress.py new` が何かを書く前に行う。動いている計画が
 （計画の所在の一覧と自分のメインディレクトリに）あり、レーン・一時レーン・オーガナイザーのどれでもなく、`--outside-plan` も無ければ、
 終了コード 3（`metrics.blocked: true`）で止まり、`items` にレーンの足し方の 2 行が、`next` に例外の起動の 1 行が出る。計画の状態を
 読めないときは動いている計画として扱う。動いている計画が無いマシンと、Factory の実行ジョブ（`NDF_ORGANIZER_DIR` か `NDF_FACTORY_RUN`）

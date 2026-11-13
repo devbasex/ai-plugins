@@ -67,7 +67,7 @@ flowchart TB
 | ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <プラン> --from <ステップの id>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | キュー | プランを空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
-| ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
+| ステージ | キューの中のプランのグループ 1 つ。中は並列に流し、前のステージがすべて完了したときだけ次のステージが流れる | `queue` の `--then` の 1 回分、`then_of` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
@@ -94,7 +94,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
-| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
+| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`progress.py new --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
 | MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` で設計承認ゲート・リリース承認ゲートの事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` でコピーする | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |

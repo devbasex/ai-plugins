@@ -43,7 +43,7 @@ def _notes_of(inp: dict, target: list) -> str:
 
 
 def _context_text(inp: dict) -> str:
-    """まとめの工程（振り返り・棚卸し）の起動指示へ添える、開発ループの文脈（今の `new close --loop --lap --milestone --carry`）。
+    """まとめの工程（振り返り・棚卸し）の起動指示へ添える、開発ループの文脈（ループの名前・回・マイルストーン・持ち越し）。
     文脈の無いスプリントでは空。"""
     ctx = inp.get("context") or {}
     stage = inp.get("stage")

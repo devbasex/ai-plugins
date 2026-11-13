@@ -9,7 +9,7 @@
 
 | 何を読むか | 正本 |
 | --- | --- |
-| まとめのステージの並びと実行条件 | [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) の `close_waves`・`prod_plans` |
+| まとめのステージの並びと実行条件 | `supervise_lib/sprint.py` の `close_waves`・`prod_plans` |
 | 依頼を外す処理 | [`lib/parallel_route.py`](../../plugins/ndf/scripts/lib/parallel_route.py) の `split_closed`・`ReleaseRouting.drop_closed` |
 | 答え待ちの依頼の数え方 | [`lib/parallel_ledger.py`](../../plugins/ndf/scripts/lib/parallel_ledger.py) の `settled_gates`・`pending_questions` |
 | 並列の計画とオーガナイザーの全体 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) |

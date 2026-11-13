@@ -86,8 +86,7 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
   impl_timeout・impl_stall_seconds・refactor_budget_minutes は --impl-timeout・--impl-stall・--refactor-budget-minutes が先に効く
   テストの範囲の選び方（--tests）とデプロイしてよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-デプロイの雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint はリリースプランを
-書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
+デプロイの雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
   `issues/approval-<plugin>-v<正式版>.md` へ写す。prod は bump → changelog → 説明文 → トークン消費の記録 →

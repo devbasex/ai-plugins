@@ -83,7 +83,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | [`lib/lap_cost.py`](../../plugins/ndf/scripts/lib/lap_cost.py) | ループの 1 回の費用と内訳を帳簿と報告から導く。帳簿を読めなければ報告の和を使い、ループの 1 回の締めを止めない |
 | [`lib/run_environment.py`](../../plugins/ndf/scripts/lib/run_environment.py) | 実行環境の調査。読むだけで、読めない項目は `unreadable` に載せる |
 | [`lib/pace.py`](../../plugins/ndf/scripts/lib/pace.py) の `read_loop` | `loop` 節を読み、既定（`LOOP_DEFAULTS`）を埋めて形を確かめる。`read_pace` は `loop` 節を検証しない |
-| [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
+| `supervise_lib/sprint.py`・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) | `new close --pace auto` でまとめのステージだけを組む。`--carry`・`--record-pr`・`--loop`・`--lap`、`new sprint --designed` |
 | [`handoff.py`](../../plugins/ndf/scripts/handoff.py) | 名の形（`NAME_RE`）に `loop-<名>` を持つ |
 | `backlog-refinement` の [`upkeep_rank.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py) の `quality_slot`・[`upkeep_rank_config.py`](../../plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py) の `_parse_quality` | 品質の枠を取り、切り出しの境界から枠の分を除く |
 | 既存のまま使うもの | `relay.py`（セッションの切り替え）・`mvv-gate.py`（判定とレッドライン）・`supervise.py new sprint --pace auto` / `queue` / `wait` / `run` |
@@ -460,7 +460,7 @@ worker の `claude -p` に `--max-budget-usd` を渡すこと（ステップの�
 
 止まる条件・選定・記録は、`rank` の出力・記録・設定を入力にして関数を直接呼ぶ単体テストで縛る。`gh`・`claude`・
 `upkeep.py rank`・`supervise.py` は `Env` で差し替える（[`tests/test_sprint_loop.py`](../../plugins/ndf/scripts/tests/test_sprint_loop.py)、
-`new close --pace auto` は [`tests/test_supervise_close_auto.py`](../../plugins/ndf/scripts/tests/test_supervise_close_auto.py)）。
+`new close --pace auto` は `tests/test_supervise_close_auto.py`）。
 
 | 観点 | 壊したら落ちるべきこと |
 | --- | --- |

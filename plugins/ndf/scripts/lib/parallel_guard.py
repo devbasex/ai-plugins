@@ -1,6 +1,6 @@
 """計画の外のセッションの起動の判定（#2733 の決定 5〜7）。
 
-開発ループかスプリントの起動（`sprint-state.py loop start`・`supervise.py new sprint`）は、何かを書く前にここを呼ぶ。
+開発ループかスプリントの起動（`sprint-state.py loop start`・`progress.py new`）は、何かを書く前にここを呼ぶ。
 動いている計画があるマシンで、レーン・一時レーン・オーガナイザーのどれでもなく、例外の起動の指定（`--outside-plan <理由>`）も
 無ければ、終了コード 3 で止め、レーンの足し方を案内する（I9）。動いている計画が無いマシンと、Factory の実行ジョブ
 （`NDF_ORGANIZER_DIR` か `NDF_FACTORY_RUN`）では今と同じに通す（I10）。計画の状態を読めないときは動いている計画として扱い、
