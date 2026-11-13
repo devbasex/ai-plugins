@@ -35,7 +35,9 @@ def project(tmp_path):
 
 
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
-    env = {**os.environ, "PYTHONPATH": str(PLUGIN_ROOT / "src"), **extra}
+    # CI（GITHUB_ACTIONS）と入れ子の印は枠を飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", slots.HELD_ENV)}
+    env.update({"PYTHONPATH": str(PLUGIN_ROOT / "src"), **extra})
     if bin_dir:
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
     if log:
