@@ -92,11 +92,15 @@ MATERIAL_KEYS = tuple(f.name for f in fields(Material))
 class ReportForm:
     """形の宣言（`shape`）を読み手が使う形にしたもの。"""
 
-    values: tuple[str, ...]
     items: tuple[str, ...]
     material: Material
     required: dict[str, Requirement]
     meanings: dict[str, str]
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        """結果の値（宣言の順。`meanings` の鍵）。"""
+        return tuple(self.meanings)
 
 
 def load_form(path: Path = FORM_PATH) -> ReportForm:
@@ -144,7 +148,7 @@ def form_from_dict(data: dict) -> ReportForm:
     material = shape.get("material")
     _check_material(material, items)
     req = _required(shape.get("required"), values, items)
-    return ReportForm(values=values, items=items, material=Material(**material), required=req, meanings=meanings)
+    return ReportForm(items=items, material=Material(**material), required=req, meanings=meanings)
 
 
 def _meanings(values_decl: object) -> dict[str, str]:

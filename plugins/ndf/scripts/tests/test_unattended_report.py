@@ -152,7 +152,7 @@ def test_form_from_dict_turns_the_plugin_shape_into_the_reader_form():
     assert form.items == tuple(SHAPE["items"])
     assert asdict(form.material) == MAT
     assert list(form.required) == list(REQ)
-    assert form.meanings == SHAPE["values"] and list(form.meanings) == list(form.values)
+    assert form.meanings == SHAPE["values"]
     for value, row in REQ.items():
         assert form.required[value].always == tuple(row["always"])
         assert form.required[value].when == tuple(_cond(w) for w in row["when"])
