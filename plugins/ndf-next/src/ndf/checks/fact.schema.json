@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "事実の表の共通の形（行の形は columns の宣言から作る）",
+  "type": "object",
+  "required": ["version", "summary", "owner", "columns", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "columns": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {"enum": ["boolean", "string", "integer", "array"]},
+          "summary": {"type": "string", "minLength": 1},
+          "optional": {"type": "boolean"},
+          "ref": {"type": "string", "pattern": "^(limits\\.json#[a-z.-]+|facts/[a-z][a-z0-9-]*)$"}
+        }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -58,7 +58,8 @@ def scan(sources: list[Source], rules: dict[str, Any]) -> dict[Path, list[tuple[
         if code in EXCEPT_RULES and path in by_path:
             if path not in headers:
                 headers[path] = handler_rows(by_path[path])
-            row = headers[path].get(row, row)
+            if row in headers[path]:
+                row = headers[path][row]
         hits[path].append((row, code))
     return hits
 

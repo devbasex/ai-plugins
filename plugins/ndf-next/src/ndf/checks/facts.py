@@ -1,6 +1,7 @@
 """事実の重複の規則: 同じ事実を 2 つ以上のファイルの最上位の定数に持たない（`const-fact`）。事実の表の形（`fact-table`）。
 
-事実の表（`contracts/facts/*.json`）がある事実は、表から読む。表の `id` を定数へ写したものも重複に数える。
+事実の表（`contracts/facts/*.json`）がある事実は、表から読む。表の形は `fact.schema.json` と列の宣言から作る行の形を
+`jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
 """
 
 from __future__ import annotations
@@ -10,13 +11,17 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
+
+from jsonschema import Draft202012Validator
 
 from ndf.checks.model import Finding, Scope
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
+SCHEMA_PATH = Path(__file__).with_name("fact.schema.json")
 
 
 @dataclass(frozen=True)
@@ -105,20 +110,45 @@ def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
     return found
 
 
+@cache
+def _table_validator() -> Draft202012Validator:
+    """表の共通の形（`fact.schema.json`）の検証器。1 プロセスで 1 回だけ読む。"""
+    return Draft202012Validator(json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
+
+
+def _column_schema(decl: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "array", "items": {"type": "string"}} if decl["type"] == "array" else {"type": decl["type"]}
+
+
+def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """列の宣言から行の形を作る。宣言に無い列を持たず、`optional` でない列を欠かず、列の型に合う。"""
+    props = {name: _column_schema(decl) for name, decl in columns.items()}
+    props["id"] = {"type": "string"}
+    required = ["id", *(name for name, decl in columns.items() if name != "id" and decl.get("optional") is not True)]
+    return {"type": "object", "required": required, "properties": props, "additionalProperties": False}
+
+
+def shape_errors(data: object) -> list[str]:
+    """表の形の違反。共通の形に合ってから、列の宣言から作った行の形で各行を確かめる。"""
+    errors = sorted(_table_validator().iter_errors(data), key=lambda e: (e.json_path, e.message))
+    if not errors:
+        rows = Draft202012Validator({"properties": {"rows": {"items": row_schema(data["columns"])}}})
+        errors = sorted(rows.iter_errors(data), key=lambda e: (e.json_path, e.message))
+    return [f"{e.json_path}: {e.message}" for e in errors]
+
+
 def _table_rows(path: Path, rel: str) -> tuple[list[str], list[Finding]]:
-    """事実の表 1 本の `id` の並びと、形の違反。"""
+    """事実の表 1 本の `id` の並びと、形の違反。形が違えば `id` を返さない。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [], [Finding("fact-table", rel, 1, f"表を読めない: {exc}")]
-    rows = data["rows"] if isinstance(data, dict) and isinstance(data.get("rows"), list) else None
-    if rows is None:
-        return [], [Finding("fact-table", rel, 1, "表に行の並び `rows` が無い")]
-    ids = [r["id"] for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
-    found = [Finding("fact-table", rel, 1, "行に文字列の `id` が無い")] if len(ids) != len(rows) else []
+    bad = [Finding("fact-table", rel, 1, f"表の形: {m}") for m in shape_errors(data)]
+    if bad:
+        return [], bad
+    ids = [r["id"] for r in data["rows"]]
     dups = sorted({i for i in ids if ids.count(i) > 1})
-    found += [Finding("fact-table", rel, 1, f"`id` の重なり: {d}") for d in dups]
-    return ids, found
+    return ids, [Finding("fact-table", rel, 1, f"`id` の重なり: {d}") for d in dups]
 
 
 def tables(scope: Scope, tables_dir: str) -> tuple[dict[str, list[str]], list[Finding]]:

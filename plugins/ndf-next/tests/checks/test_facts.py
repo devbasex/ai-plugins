@@ -27,11 +27,29 @@ def test_member_of_another_files_set(plugin, rules):
     assert kinds(facts.check(plugin.scope(), rules)) == ["member"]
 
 
+def table(rows, columns) -> str:
+    return json.dumps({"version": 1, "summary": "s", "owner": "o", "columns": columns, "rows": rows})
+
+
 def test_fact_table_shape_and_copied_ids(plugin, rules):
-    plugin.write("contracts/facts/stages.json", json.dumps({"rows": [{"id": "deploy"}, {"id": "verify"}]}))
-    plugin.write("contracts/facts/bad.json", json.dumps({"rows": [{"id": "a"}, {"id": "a"}, {"x": 1}]}))
+    plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}, {"id": "verify"}], {}))
+    plugin.write("contracts/facts/dup.json", table([{"id": "a"}, {"id": "a"}], {}))
     plugin.write("contracts/facts/fact.schema.json", "{}")
     plugin.write("src/ndf/a.py", 'STAGES = ("deploy", "verify")\nONE = "verify"\n')
     found = facts.check(plugin.scope(), rules)
-    assert sorted(f.rule for f in found) == ["const-fact", "const-fact", "fact-table", "fact-table"]
+    assert sorted(f.rule for f in found) == ["const-fact", "const-fact", "fact-table"]
     assert kinds(f for f in found if f.rule == "const-fact") == ["table-set", "table-str"]
+
+
+def test_fact_table_is_validated_by_schema(plugin, rules):
+    columns = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
+    plugin.write("contracts/facts/ok.json", table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], columns))
+    plugin.write("contracts/facts/no_owner.json", json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []}))
+    plugin.write("contracts/facts/bad_rows.json", table([{"id": "a", "rank": "1"}, {"id": "b"}, {"id": "c", "rank": 3, "x": 1}], columns))
+    plugin.write("contracts/facts/bad_column.json", table([], {"Rank": {"type": "float", "summary": "r"}}))
+    found = [(f.path.rsplit("/", 1)[-1], f.detail) for f in facts.check(plugin.scope(), rules)]
+    assert all(name != "ok.json" for name, _ in found)
+    assert any(name == "no_owner.json" and "'owner'" in d for name, d in found)
+    bad_rows = sorted(d for name, d in found if name == "bad_rows.json")
+    assert len(bad_rows) == 3 and all(d.startswith("表の形: $.rows[") for d in bad_rows)
+    assert len([d for name, d in found if name == "bad_column.json"]) == 2
