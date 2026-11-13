@@ -200,7 +200,7 @@ DIFFS = ("pr", "unchecked", "resolution", "none")
 # 実装の差分を覆う種類 → その差分（I4。`release` の `resolution` は衝突の解消の差分しか見ないため数えない）
 COVERING = {"impl": "pr", "sprint": "unchecked", "release": "pr"}
 # 衝突の解消のレビューの PR の見せるブランチの頭と、土台のブランチの後ろ
-REVIEW_PREFIX = "review/release/v"
+REVIEW_PREFIX = f"review/{RELEASE_PREFIX}"
 REVIEW_BASE_SUFFIX = "-base"
 
 
