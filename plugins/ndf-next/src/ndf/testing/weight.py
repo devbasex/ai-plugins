@@ -125,8 +125,7 @@ def classify(command: str | Sequence[str], suites: Iterable[Mapping[str, object]
     """
     suite_list = [s for s in suites if is_test_suite(s)]
     if isinstance(command, str):
-        text = command.strip()
-        if any(text == str(s.get("command", "")).strip() for s in suite_list if s.get("command")):
+        if any(_matches_declared(command, s) for s in suite_list):
             return WHOLE
         commands = split_commands(command)
     else:
@@ -139,10 +138,8 @@ def classify(command: str | Sequence[str], suites: Iterable[Mapping[str, object]
 
 
 def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str | None:
-    for suite in suites:
-        declared = split_commands(str(suite.get("command") or ""))
-        if declared and words == declared[-1]:
-            return WHOLE
+    if any(_matches_declared(words, s) for s in suites):
+        return WHOLE
     for suite in suites:
         runner = suite.get("runner")
         if not isinstance(runner, str) or not runner:
@@ -151,6 +148,20 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
         if kind:
             return kind
     return None
+
+
+def _declared_command(suite: Mapping[str, object]) -> str:
+    """宣言の suite の `command`（無ければ空の文字列）。"""
+    return str(suite.get("command") or "")
+
+
+def _matches_declared(target: str | list[str], suite: Mapping[str, object]) -> bool:
+    """宣言の `command` と一致するか。文字列は前後の空白を除いた全体を、語の並びは宣言の最後の単純コマンドと比べる。"""
+    declared = _declared_command(suite)
+    if isinstance(target, str):
+        return bool(declared) and target.strip() == declared.strip()
+    commands = split_commands(declared)
+    return bool(commands) and target == commands[-1]
 
 
 def _classify_runner(words: list[str], runner: str) -> str | None:
