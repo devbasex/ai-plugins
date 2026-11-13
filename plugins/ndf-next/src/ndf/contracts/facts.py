@@ -111,6 +111,15 @@ def column(name: str, col: str) -> dict[str, Any]:
     return {r["id"]: r[col] for r in t.rows if col in r}
 
 
+def _limits_ref_errors(name: str, col: str, prefix: str, values: list[tuple[str, Any]], policy_names: set[str]) -> list[str]:
+    return [f"{name}:{rid} の {col} {v!r} の方針 {prefix}{v} が上限の宣言に無い" for rid, v in values if f"{prefix}{v}" not in policy_names]
+
+
+def _table_ref_errors(name: str, col: str, other: str, values: list[tuple[str, Any]]) -> list[str]:
+    known = set(ids(other))
+    return [f"{name}:{rid} の {col} {v!r} が表 {other} に無い" for rid, v in values if v not in known]
+
+
 def ref_errors(name: str, policy_names: set[str]) -> list[str]:
     """列の `ref`（`limits.json#<接頭辞>` か `facts/<表>`）の先に値があるかを確かめる。"""
     t = table(name)
@@ -121,16 +130,9 @@ def ref_errors(name: str, policy_names: set[str]) -> list[str]:
             continue
         values = [(r["id"], r[col]) for r in t.rows if col in r]
         if ref.startswith("limits.json#"):
-            prefix = ref.split("#", 1)[1]
-            errs += [
-                f"{name}:{rid} の {col} {v!r} の方針 {prefix}{v} が上限の宣言に無い"
-                for rid, v in values
-                if f"{prefix}{v}" not in policy_names
-            ]
+            errs += _limits_ref_errors(name, col, ref.split("#", 1)[1], values, policy_names)
         else:
-            other = ref.split("/", 1)[1]
-            known = set(ids(other))
-            errs += [f"{name}:{rid} の {col} {v!r} が表 {other} に無い" for rid, v in values if v not in known]
+            errs += _table_ref_errors(name, col, ref.split("/", 1)[1], values)
     return errs
 
 
