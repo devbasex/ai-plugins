@@ -6,10 +6,17 @@ import pytest
 
 from ndf import cli
 from ndf.contracts import cli as contracts_cli
+from ndf.contracts import exit_codes
 
 
 def _run(capsys, *argv):
     code = cli.main(["contracts", *argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def _run_top(capsys, *argv):
+    code = cli.main(list(argv))
     out = capsys.readouterr()
     return code, out.out, out.err
 
@@ -228,3 +235,22 @@ def test_emit_unwritable_out_raises_before_printing(capsys, tmp_path):
     with pytest.raises(IsADirectoryError):
         _emit(capsys, "ok", "--out", str(tmp_path))
     assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("rel", ["causes.json", "facts/exit-codes.json"])
+def test_unreadable_contracts_stop_with_config_broken(contracts_copy, capsys, rel):
+    contracts_copy(rel, text="{")
+    code, out, _ = _run_top(capsys, "no-such-command")
+    report = json.loads(out)
+    assert code == exit_codes.UNREADABLE_FALLBACK
+    assert (report["status"], report["cause"]["kind"]) == ("stopped", "config_broken")
+
+
+def test_unreadable_fallback_matches_the_table():
+    assert exit_codes.UNREADABLE_FALLBACK == exit_codes.code_of("unreadable")
+
+
+def test_emit_out_to_missing_dir_is_invalid(capsys, tmp_path):
+    code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / "no-such" / "r.json"))
+    assert (code, out) == (2, "")
+    assert "contracts:" in err

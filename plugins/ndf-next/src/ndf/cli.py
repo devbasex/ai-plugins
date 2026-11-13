@@ -9,7 +9,7 @@ from __future__ import annotations
 import importlib
 import sys
 
-from ndf import identity
+from ndf import contracts, identity
 from ndf.contracts import causes, result
 
 # 副命令の名前 → モジュールのパス
@@ -26,6 +26,14 @@ def _usage(name: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    try:
+        return _run(args)
+    except contracts.ContractError as exc:
+        # 契約の表（止まった理由・終了コード）そのものが読めないときは、表を使わずに config_broken を出す
+        return result.emit_unchecked("cli", "config_broken", f"契約のファイルが読めない: {exc}")
+
+
+def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
     except identity.IdentityError as exc:

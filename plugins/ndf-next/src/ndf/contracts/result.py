@@ -133,3 +133,9 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
         return causes.exit_code("invalid")
     print(dumps_line(obj), file=stream or sys.stdout)
     return code
+
+
+def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
+    """契約の表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
+    print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
+    return exit_codes.unreadable_code()

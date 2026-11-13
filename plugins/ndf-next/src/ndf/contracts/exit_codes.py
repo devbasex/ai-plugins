@@ -9,12 +9,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ndf import contracts
 from ndf.contracts import facts
 
 TABLE = "exit-codes"
 # 結果の status の語彙（result.schema.json の enum とこの表の status 列と同じ）
 OK, GATE, STOPPED = "ok", "gate", "stopped"
 STATUSES = (OK, GATE, STOPPED)
+# 表そのものが読めないときに使う「読めない・呼び出しの誤り」の終了コード（表の unreadable の行と同じ値。テストが照らす）
+UNREADABLE_FALLBACK = 2
 
 
 def bounds(row: Mapping[str, Any]) -> tuple[int, int]:
@@ -45,3 +48,11 @@ def first_code(status: str) -> int:
 def code_of(id: str) -> int:
     """区分 `id` の終了コード。"""
     return int(facts.row(TABLE, id)["code"])
+
+
+def unreadable_code() -> int:
+    """「読めない・呼び出しの誤り」の終了コード。この表が読めなければ `UNREADABLE_FALLBACK`。"""
+    try:
+        return code_of("unreadable")
+    except contracts.ContractError:
+        return UNREADABLE_FALLBACK

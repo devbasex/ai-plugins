@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ndf import contracts
-from ndf.contracts import causes, exit_codes, facts, limits, result
+from ndf.contracts import causes, facts, limits, result
 
 TOOL = "contracts"
 
@@ -52,16 +52,9 @@ def _cmd_check(_: argparse.Namespace) -> int:
         try:
             causes.table()
         except contracts.ContractError:
-            return _emit_unchecked(detail, items)
+            return result.emit_unchecked(TOOL, "invalid", detail, items)
         return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
     return result.emit(result.result(TOOL, result.OK, "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
-
-
-def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
-    """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
-    obj = result.result(TOOL, result.STOPPED, detail, items=items, cause=causes.build("invalid", detail))
-    print(result.dumps_line(obj))
-    return exit_codes.code_of("unreadable")
 
 
 def _print_value(value: Any) -> None:
@@ -154,6 +147,6 @@ def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     try:
         return a.run(a)
-    except (contracts.ContractError, ValueError) as exc:
+    except (contracts.ContractError, ValueError, OSError) as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return causes.exit_code("invalid")
