@@ -101,7 +101,7 @@ def test_errors(value, count):
 
 def _pick(kind, on_cause=None, on_fail=None, used=0, retry_after=None, cap=None, policy="auto"):
     p = causes.policy_of(kind) if policy == "auto" else policy
-    return causes.pick(kind, on_cause or {}, on_fail, used, p, retry_after, cap)
+    return causes.pick(kind, on_cause or {}, on_fail, causes.RetryState(used, p, retry_after, cap))
 
 
 def test_pick_on_cause_wins():

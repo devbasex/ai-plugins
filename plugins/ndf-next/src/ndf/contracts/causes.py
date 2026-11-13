@@ -179,15 +179,23 @@ def backoff(policy: limits.Policy, used: int, retry_after: Optional[float], cap:
     return wait
 
 
-def _retry_or_next(
-    kind: str, on_fail: Optional[str], used: int, policy: Optional[limits.Policy], retry_after: Optional[float], cap: Optional[float]
-) -> Route:
+class RetryState(NamedTuple):
+    """打ち直しの文脈。`used` はこれまでの回数、`policy` は種類の方針、`cap` は待ちの頭打ち。"""
+
+    used: int
+    policy: Optional[limits.Policy]
+    retry_after: Optional[float]
+    cap: Optional[float]
+
+
+def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Route:
     """打ち直せるなら retry、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
-    can = policy is not None and policy.attempts is not None and used < policy.attempts
-    if can and row(kind).requires_retry_after and retry_after is None:
+    policy = state.policy
+    can = policy is not None and policy.attempts is not None and state.used < policy.attempts
+    if can and row(kind).requires_retry_after and state.retry_after is None:
         can = False
     if can:
-        wait = backoff(policy, used, retry_after, cap)  # type: ignore[arg-type]
+        wait = backoff(policy, state.used, state.retry_after, state.cap)  # type: ignore[arg-type]
         if wait > 0:
             return Route(RETRY, None, wait, kind)
     if on_fail:
@@ -195,31 +203,23 @@ def _retry_or_next(
     return Route(HUMAN, None, 0.0, kind)
 
 
-def pick(
-    kind: str,
-    on_cause: Mapping[str, str],
-    on_fail: Optional[str],
-    used: int,
-    policy: Optional[limits.Policy],
-    retry_after: Optional[float],
-    cap: Optional[float],
-) -> Route:
+def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: RetryState) -> Route:
     """行き先を 1 つ選ぶ: on_cause → 種類の既定の行き先 → on_fail → 人へ。
 
     既定が人への種類（unknown を含む）は on_fail へ渡さない。文（summary・detail）を受けない。
     """
-    if used < 0:
-        raise ValueError(f"打ち直しの回数は 0 以上: {used}")
+    if state.used < 0:
+        raise ValueError(f"打ち直しの回数は 0 以上: {state.used}")
     default = row(kind).route
     target = on_cause.get(kind)
     if target is not None:
         if target == RETRY:
-            return _retry_or_next(kind, on_fail, used, policy, retry_after, cap)
+            return _retry_or_next(kind, on_fail, state)
         if target in (END, STOP):
             return Route(target, None, 0.0, kind)
         return Route(STEP, target, 0.0, kind)
     if default == RETRY:
-        return _retry_or_next(kind, on_fail, used, policy, retry_after, cap)
+        return _retry_or_next(kind, on_fail, state)
     if default == STEP and on_fail:
         return Route(STEP, on_fail, 0.0, kind)
     return Route(HUMAN, None, 0.0, kind)
