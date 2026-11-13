@@ -6802,6 +6802,54 @@
       "context": "ndf-workflow",
       "meaning": "選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "進行表",
+      "context": "ndf-workflow",
+      "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "スプリントの進行表",
+      "context": "ndf-workflow",
+      "meaning": "スプリント 1 つの工程の行と状態を持つ進行表。スプリント 1 つにつき 1 つ",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "レーンの進行表",
+      "context": "ndf-workflow",
+      "meaning": "レーン 1 つの中のスプリントの順番表を持つ進行表。レーンの conductor が持つ",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "計画の進行表",
+      "context": "ndf-workflow",
+      "meaning": "開発計画 1 つのレーンの配列と、レーンをまたぐ決まりを持つ進行表。オーガナイザーが持つ",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "終了の印",
+      "context": "ndf-workflow",
+      "meaning": "工程の出力が入出力規約に合ったときに、進行表の行へ付ける「終了」の記録",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "入出力規約",
+      "context": "ndf-workflow",
+      "meaning": "工程とステップが受け取る入力と、終わったときに返す出力の JSON の形",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "工程の定義",
+      "context": "ndf-workflow",
+      "meaning": "モードごとの工程とステップの並び・入出力規約の参照・順序の決まりを持つ、登録済みのデータ",
+      "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "組み換え",
+      "context": "ndf-workflow",
+      "meaning": "スプリントのまとめの振り返りの後に、次以降のスプリントの順番表を必要なときだけ変える工程",
+      "pending_source": "issues/issue-3092-requirements.md"
     }
   ]
 }
