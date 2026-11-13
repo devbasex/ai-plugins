@@ -138,7 +138,7 @@ def form_from_dict(data: dict) -> ReportForm:
     shape = data.get("shape") if isinstance(data, dict) else None
     if not isinstance(shape, dict):
         raise FormError("shape が無い")
-    meanings = _values(shape.get("values"))
+    meanings = _meanings(shape.get("values"))
     values = tuple(meanings)
     items = _strs(shape.get("items"), "items")
     material = shape.get("material")
@@ -147,7 +147,7 @@ def form_from_dict(data: dict) -> ReportForm:
     return ReportForm(values=values, items=items, material=Material(**material), required=req, meanings=meanings)
 
 
-def _values(values_decl: object) -> dict[str, str]:
+def _meanings(values_decl: object) -> dict[str, str]:
     """結果の値と意味（`shape.values`）は空でない文字列どうしの空でない辞書。値 → 意味の辞書を返す。"""
     if (
         not isinstance(values_decl, dict)
