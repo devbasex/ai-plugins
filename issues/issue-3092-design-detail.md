@@ -1,6 +1,11 @@
 # #3092 の詳細設計: 工程の進行表
 
-設計文書 [issue-3092-design.md](issue-3092-design.md) の「構成要素」と、[issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「構成要素の図と配置」「データ構造」「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 <番号>）・不変条件（I<番号>）・事象の種類は設計文書の番号と名前を指す。語の定義は設計文書の「語と参照先」と「用語」にある。
+設計文書の構成要素とデータ構造・入出力の契約を、ファイルと関数の粒度へ下ろした文書である。元にしたのは次の章である。
+
+- [issue-3092-design.md](issue-3092-design.md) の「構成要素」
+- [issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「構成要素の図と配置」「データ構造」「入出力の契約」
+
+決定の番号（決定 <番号>）・不変条件（I<番号>）・事象の種類は設計文書の番号と名前を指す。語の定義は設計文書の「語と参照先」と「用語」にある。
 
 この文書の関数名とモジュール名は、コードの識別子である。説明の文では設計文書の語（進行表のモデル・進行表の DB など）を使う。
 
@@ -54,7 +59,17 @@ scripts/check-ndf-contracts.py
 scripts/contracts_lib/workflow_defs.py          *
 ```
 
-**依存の向きは一方向で、輪が無い。** 下の層から順に、工程の定義（データ）← 定義の検査（`workflow_def`）← 進行表のモデル（`progress_model`。`workflow_def` の型だけを読む）← 進行表の DB（`progress_db`）← 進捗記録の生成・組み換え・アクティビティの関数 ← 進行表のワークフロー（`progress_run`）← エントリポイント（`progress.py`・`parallel.py`・耐久ワークフロー）。進行表の DB が進行表のモデルを読むのは、追記の関数（`append_events`）が書き込みの直前に書き手の表と不変条件の判定を呼ぶためである。設計の「構成要素の図」の「進行表のモデル → 進行表の DB」の矢印は、この形で満たす（判定はモデルが持ち、呼ぶのは DB の追記の関数だけ）。モデルを純粋な処理に保つため、モデルは DB も DBOS も import しない（決定 20）。DBOS を import するのは `lib/durable.py` だけである。
+**依存の向きは一方向で、輪が無い。** 下の層から順に次のとおりで、各層は上の行の層を読む。
+
+1. 工程の定義（データ）
+2. 定義の検査（`workflow_def`）
+3. 進行表のモデル（`progress_model`。`workflow_def` の型だけを読む）
+4. 進行表の DB（`progress_db`）
+5. 進捗記録の生成・組み換え・アクティビティの関数
+6. 進行表のワークフロー（`progress_run`）
+7. エントリポイント（`progress.py`・`parallel.py`・耐久ワークフロー）
+
+進行表の DB が進行表のモデルを読むのは、追記の関数（`append_events`）が書き込みの直前に書き手の表と不変条件の判定を呼ぶためである。設計の「構成要素の図」の「進行表のモデル → 進行表の DB」の矢印は、この形で満たす（判定はモデルが持ち、呼ぶのは DB の追記の関数だけ）。モデルを純粋な処理に保つため、モデルは DB も DBOS も import しない（決定 20）。DBOS を import するのは `lib/durable.py` だけである。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -159,7 +174,13 @@ scripts/contracts_lib/workflow_defs.py          *
 
 ## 関数の仕様
 
-型の略記: `Rows` は `dict[str, RowState]`（行の鍵 → 状態）、`Report` は統一 JSON レポートの `dict`、`Conn` は SQLAlchemy の `Connection`。
+型の略記は次のとおりである。
+
+| 略記 | 型 |
+| --- | --- |
+| `Rows` | `dict[str, RowState]`（行の鍵 → 状態） |
+| `Report` | 統一 JSON レポートの `dict` |
+| `Conn` | SQLAlchemy の `Connection` |
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -365,7 +386,7 @@ scripts/contracts_lib/workflow_defs.py          *
 | `ACTIVITIES` | 定数（`call` の名前 → 関数） | `plugins/ndf/scripts/lib/progress_activities.py` | `ndf.plan`・`ndf.listen`・`ndf.record`・`ndf.reshuffle` の 4 つ |
 | ステージと工程の対応 | 定数 | `plugins/ndf/scripts/progress.py`（`cmd_adopt` だけが読む） | 設計の runtime 文書の「移行」の表と同じ対応 |
 
-**アプリの版の扱い。** 今の `durable.launch` は `application_version` を `FORMAT` に固定し、`enable_patching` を真にしている。DBOS 3.1.0 は `enable_patching` が真のとき版を `PATCHING_ENABLED` に固定する（手元の `dbos/_dbos.py` の 502〜508 行、2026-11-13 に確かめた）。この 2 つのどちらかが残ると版が NDF の版で変わらず、決定 21 の「版が違う」が起きない。そこで `app_version=None` を渡したときは、`application_version` を設定に入れず `enable_patching` を偽にして、DBOS がワークフローのソースから版を計算する（決定 21 の前提）。進行表のワークフローだけがこの形で呼び、#1142 の呼び手は今の既定のまま（決定 20 の「記録の形を変えない」）。
+**アプリの版の扱い。** 今の `durable.launch` は `application_version` を `FORMAT` に固定し、`enable_patching` を真にしている。DBOS 3.1.0 は `enable_patching` が真のとき版を `PATCHING_ENABLED` に固定する。これは手元の `dbos/_dbos.py` の 502〜508 行で確かめた（2026-11-13）。この 2 つのどちらかが残ると版が NDF の版で変わらず、決定 21 の「版が違う」が起きない。そこで `app_version=None` を渡したときは、`application_version` を設定に入れず `enable_patching` を偽にする。こうすると DBOS がワークフローのソースから版を計算する（決定 21 の前提）。進行表のワークフローだけがこの形で呼び、#1142 の呼び手は今の既定のまま（決定 20 の「記録の形を変えない」）。
 
 ## 並行と排他
 

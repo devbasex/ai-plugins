@@ -199,7 +199,7 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 | `plan_started` / `plan_completed` / `plan_cancelled` | 計画 | オーガナイザー・取り込み / 耐久ワークフロー / オーガナイザー | 実行中 / 完了 / 中止 |
 | `adopted` | 全階層 | 取り込み | 終了か失敗（決定 19） |
 
-取り込み（`progress.py adopt`）が書けるのは、`created`・`adopted`・`row_started`・`lane_added`・`request_opened`・`plan_started` の 6 つである。進行表を作り（`created`）、終わったか一部だけ終わった工程を閉じ（`adopted`）、1 つも終わっていない工程は `created` のまま残す（決定 19）。計画の取り込みでは、レーン（`lane_added`）・計画の開始（`plan_started`）・実行中のスプリントを指すレーンの行（`row_started`）・答えていない依頼（`request_opened`）を書く。工程の実行の事象（`started`・`finished`・`failed`）と終わりの事象（`completed`・`cancelled`・`row_ended`）は書かない。
+取り込み（`progress.py adopt`）が書ける事象は 6 つある。`created`・`adopted`・`row_started`・`lane_added`・`request_opened`・`plan_started` である。進行表を作り（`created`）、終わったか一部だけ終わった工程を閉じ（`adopted`）、1 つも終わっていない工程は `created` のまま残す（決定 19）。計画の取り込みでは、レーン（`lane_added`）と計画の開始（`plan_started`）を書く。あわせて、実行中のスプリントを指すレーンの行（`row_started`）と答えていない依頼（`request_opened`）を書く。工程の実行の事象（`started`・`finished`・`failed`）と終わりの事象（`completed`・`cancelled`・`row_ended`）は書かない。
 
 ### CRUD 図
 
@@ -286,7 +286,7 @@ CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 
 ### 進行表のスクリプト（`progress.py`）
 
-結果はすべて統一 JSON レポートの 1 行で返す。終了コードは 0（`ok`）・2（引数か定義の誤り）・10（`gate`: 待ちに入った。共通の終了コードの契約 `lib/exit_codes.py` の承認ゲートの範囲）・6（`stopped`: 工程の失敗・断られた操作）。
+結果はすべて統一 JSON レポートの 1 行で返す。終了コードは 0（`ok`）・2（引数か定義の誤り）・10（`gate`: 待ちに入った）・6（`stopped`: 工程の失敗・断られた操作）。10 は、共通の終了コードの契約 `lib/exit_codes.py` の承認ゲートの範囲にある。
 
 | 副命令 | 入力 | 出力（成功） | 失敗の形 |
 | --- | --- | --- | --- |
@@ -313,7 +313,7 @@ CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 | `await` | 承認の答えの送り先を `progress.py answer` と同じ経路に替える | 引数を保つ |
 | `request close <計画名> <依頼の ID> --reason <理由>` | 答えていない依頼を、採らずに `request_closed`（理由つき）で閉じる。`lane add`・`set` で応えたときは、その副命令が同じ事象を書く | 新しく足す副命令。既存の副命令と引数は変えない |
 
-**計画の中止。** `stop` が上の 2 つの事象を書いた後、今と同じく停止の指示を受けた耐久ワークフローが起動済みのレーンへ `relay.py stop` を打ってレーンの conductor を止める（[docs/specifications/ndf-parallel-organizer.md](../docs/specifications/ndf-parallel-organizer.md) の停止の手順）。耐久ワークフローはそこで終わらず、実行中の行が残るレーンを次の 1 周から `parallel.launch` で起こし、最初の入力を `progress.py cancel <スプリントの進行表の ID> --reason 計画の中止` にする。起きた conductor が中止を書き、同じトランザクションで行が終わる（決定 17）。承認待ちのスプリントにはプロセスが無いが、`cancel` が待ちの実行を `DBOS.cancel_workflow` で取り消す（決定 6）。止める前に `progress.py next` を打っていた conductor のために、進行表のワークフローは工程を始める前に計画の進行表の状態を読み、中止なら工程を始めずに `stopped`（`metrics.plan_cancelled: true`）で返す。conductor はこれを受けて `progress.py cancel` を打つ。耐久ワークフローは、実行中の行が無くなったら `stopped` で終わる（E15）。
+**計画の中止。** `stop` は上の 2 つの事象を書く。その後、今と同じく停止の指示を受けた耐久ワークフローが、起動済みのレーンへ `relay.py stop` を打ってレーンの conductor を止める。停止の手順は [docs/specifications/ndf-parallel-organizer.md](../docs/specifications/ndf-parallel-organizer.md) にある。耐久ワークフローはそこで終わらず、実行中の行が残るレーンを次の 1 周から `parallel.launch` で起こす。起こすときの最初の入力は `progress.py cancel <スプリントの進行表の ID> --reason 計画の中止` である。起きた conductor が中止を書き、同じトランザクションで行が終わる（決定 17）。承認待ちのスプリントにはプロセスが無いが、`cancel` が待ちの実行を `DBOS.cancel_workflow` で取り消す（決定 6）。止める前に `progress.py next` を打っていた conductor もある。そのために、進行表のワークフローは工程を始める前に計画の進行表の状態を読む。中止なら工程を始めずに `stopped`（`metrics.plan_cancelled: true`）で返す。conductor はこれを受けて `progress.py cancel` を打つ。耐久ワークフローは、実行中の行が無くなったら `stopped` で終わる（E15）。
 
 ### 環境変数と設定
 
