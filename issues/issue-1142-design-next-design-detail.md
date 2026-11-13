@@ -136,7 +136,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | # | 手順 | 確かめ |
 | ---: | --- | --- |
 | 1 | 子の worktree を develop から作る（今の NDF の `worktree` を使う） | — |
-| 2 | `plugins/ndf-next/` の担当のサブパッケージとテストだけを書く | 検査 I2 |
+| 2 | `plugins/ndf-next/` の担当のサブパッケージと、そのテスト（`tests/<パッケージ>/`）だけを書く。足してよいのは `cli.py` の副命令の表への 1 行と、契約（D1）を変えるときの下流の読み手とそのテストだけ（概要設計の「集約」） | 検査 I2 |
 | 3 | `.github/workflows/ndf-next.yml` のテストと検査を通す | CI |
 | 4 | develop へ入れる。開発版の利用者には何も届かない（マーケットプレイスに載せていない。決定 74） | — |
 
@@ -210,7 +210,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `plugins/ndf-next/src/ndf/domains/backlog/` | 棚卸し | M6 |
 | `plugins/ndf-next/src/ndf/domains/records/` | 記録（確定仕様化・引継ぎ・用語集・使用量・MVV） | M7 |
 | `plugins/ndf-next/src/ndf/testing/` | テスト基盤（隔離・揺れない待ち・同時実行の枠） | T1 |
-| `plugins/ndf-next/tests/` | テスト（子ごとに `tests/<パッケージ>/`） | X0 |
+| `plugins/ndf-next/tests/` | テスト（子ごとに `tests/<パッケージ>/`）。置き場は X0 が作り、`tests/<パッケージ>/` の中身はそのパッケージを作る子が書く | X0（置き場）・各子（中身） |
 | `plugins/ndf-next/skills/` | Skill 本文 | S1 |
 | `plugins/ndf-next/agents/` | エージェント定義 | S1 |
 | `plugins/ndf-next/hooks/` | hook のエントリポイント | S1 |
