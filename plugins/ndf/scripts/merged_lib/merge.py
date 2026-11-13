@@ -58,7 +58,7 @@ def add_wait_args(m):
     m.add_argument(
         "--no-admin",
         action="store_true",
-        help="gh pr merge に --admin を付けない（ruleset の迂回を使わない。CD のある場合の本番チャネルと開発版の workflow。#2773）",
+        help="gh pr merge に管理者の迂回を付けない（ruleset の迂回を使わない。CD のある場合の本番チャネルと開発版の workflow。#2773）",
     )
 
 
@@ -229,7 +229,7 @@ def _merge_pr(root, a, n, watch, items, waits):
     sha = watch.last_sha  # --expect-head があれば、GreenWatch が読むたびにこれと比べている
     pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
     no_admin = getattr(a, "no_admin", False)
-    how = "gh pr merge（--admin なし）" if no_admin else "gh pr merge --admin"
+    how = "gh pr merge（管理者の迂回なし）" if no_admin else "gh pr merge --admin"
     p = gh_parts.gh(["pr", "merge", str(n), *([] if no_admin else ["--admin"]), f"--{a.method}", *pin], cwd=root)
     if p.returncode != 0:
         if _conflicted(root, n, p.stderr or ""):

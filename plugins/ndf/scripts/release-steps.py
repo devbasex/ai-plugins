@@ -55,7 +55,7 @@ release --channel prod は承認したコミットを受け取り、`origin/rele
 PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まったデプロイの再開）。
 ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
 承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
-一致すれば `--admin` なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
+一致すれば管理者の迂回なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
 `.ndf/supervise.json` の release.dev_workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
 
 record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ

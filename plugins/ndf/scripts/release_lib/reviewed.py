@@ -72,7 +72,7 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
             raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
         release_pr, merged_pr, _ = ops._merge_release_pr(root, a, plugin, plugins, branch, base)
         metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
-        repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた release/v<版> を戻す
+        repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
         title = f"Release: {plugin} v{ver} を {prod} へ"
         body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         main_pr = ops.create_pr(root, prod, branch, title, body)
