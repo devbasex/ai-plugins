@@ -45,10 +45,25 @@ NDF の確定仕様に ai-plugins の値や置き場を書き込まない。確�
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| ai-plugins のブランチ運用の宣言 | この課題の実装 PR（以後はリポジトリの管理者の手の編集か `project-decl.py write`） | `.ndf/worktree.json` の `branch_flow` | — | ブランチの流れの 4 項目、レビューの単位の 5 行 |
-| ai-plugins の運用の文書 | この課題の実装 PR（以後は宣言を変える PR が、同じ PR で文書を合わせる。文書だけを変える PR も書き換えてよい） | `docs/versioning-and-distribution.md`（正本） | `AGENTS.md` の 2 節、`CONTRIBUTING.md`・`docs/plugin-development-guide.md` の宛先の段落 | レビューの単位の表 |
+| ai-plugins のブランチ運用の宣言 | リポジトリの管理者 | `.ndf/worktree.json` の `branch_flow` | — | ブランチの流れの 4 項目、レビューの単位の 5 行 |
+| ai-plugins の運用の文書 | リポジトリの管理者 | `docs/versioning-and-distribution.md`（正本） | `AGENTS.md` の 2 節、`CONTRIBUTING.md`・`docs/plugin-development-guide.md` の宛先の段落 | レビューの単位の表 |
+
+持ち主はどちらもリポジトリの管理者 1 人に決まる（`.ndf/` と `AGENTS.md` の運用の節の書き換えは、共通原則の C7 で人の承認が要る）。
+書き換えの経路は持ち主の下の操作であり、持ち主を増やさない。
+
+| 集約 | 持ち主の下の操作 |
+| --- | --- |
+| 宣言 | この課題の実装 PR で書き換える。以後は管理者が承認する PR の中の手の編集か `project-decl.py write` で書き換える |
+| 文書 | この課題の実装 PR で書き換える。以後は宣言を変える PR が同じ PR で文書を合わせる。文書だけを変える PR も、管理者の承認で書き換える |
 
 運用の文書は宣言の値を写さず、意味の説明とリンクを持つ。レビューの単位の表だけは、受け入れ条件 8 が求める説明として値を並べる（決定 3）。
+
+構成要素のうち次の 2 つは、どちらの集約にも入れない。この課題では書き換えるだけで、ai-plugins の運用の不変条件を持たないためである。
+
+| 構成要素 | 属する先 |
+| --- | --- |
+| 確定仕様の宣言の文書（`docs/specifications/ndf-branch-flow-declaration.md`） | プロジェクトの宣言のコンテキスト（NDF の側）。ai-plugins の値を書かない（決定 5） |
+| 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`） | 用語集の正本（`glossary.json`）から `glossary.py render` で作る。この課題は用語を 1 つ足すだけである |
 
 ### 不変条件
 
@@ -69,8 +84,9 @@ NDF の確定仕様に ai-plugins の値や置き場を書き込まない。確�
 | E1 | 宣言を新しい運用の値へ書き換えた | この課題の実装 PR | 宣言を読む工程（`supervise.py new sprint`・`project-decl.py check`） |
 | E2 | `AGENTS.md` と正本の文書を新しい運用へ書き換えた | この課題の実装 PR | conductor・レーン・外部の貢献者 |
 | E3 | このスプリントを `develop` へ入れた | スプリントの検査の PR | 開発版のデプロイ、メインディレクトリの追従 |
-| E4 | このスプリントを `whole` のまま `main` へ出した（段 4） | リリース承認ゲートの承認 | `main` 宛の検査（以後 `selected` で判定） |
-| E5 | リリースブランチを `release/v<版>-sync` 経由で `develop` へ戻した | 段 4 の後の戻すマージ（決定 17） | `develop` |
+| E4 | このスプリントを `whole` のまま `main` へ出した（段 4） | リリース承認ゲートの承認 | CD（正式版の配布） |
+| E4a | `main` の宣言が `selected` に切り替わった（E4 のマージに宣言の書き換えが載るため。I6） | E4 のマージ | `main` 宛の検査（以後 `selected` で判定） |
+| E5 | リリースブランチを `release/v<版>-sync` 経由で `develop` へ戻した | 段 4 の後の戻すマージ（決定 17） | メインディレクトリの追従、開発版のデプロイ |
 | E6 | 新しいスプリントを `main` から切った | 段 4 の後に始めるスプリント | スプリントの目録のスナップショット |
 | E7 | 選んだスプリントだけでリリースブランチを組み、`main` へ出した | 段 5 のリリース | `main` 宛の検査・CD |
 | E8 | PR の種類ごとに宣言どおりのレビューを掛けた | 段 5 の各 PR | `project-decl.py drift` |
