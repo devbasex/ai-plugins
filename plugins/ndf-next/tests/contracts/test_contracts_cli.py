@@ -213,3 +213,17 @@ def test_emit_passes_every_field(capsys):
         "presentation_path": "p.md",
         "next": "nx",
     }
+
+
+# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない宛先では標準出力へも出さない。
+def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    dest.write_text("old\n", encoding="utf-8")
+    assert _emit(capsys, "ok", "--code", "3", "--out", str(dest)) == (2, "", "結果の形の誤り: status ok と終了コード 3 が合わない\n")
+    assert dest.read_text(encoding="utf-8") == "old\n"
+
+
+def test_emit_unwritable_out_raises_before_printing(capsys, tmp_path):
+    with pytest.raises(IsADirectoryError):
+        _emit(capsys, "ok", "--out", str(tmp_path))
+    assert capsys.readouterr() == ("", "")
