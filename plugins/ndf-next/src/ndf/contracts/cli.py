@@ -81,6 +81,13 @@ def _json_arg(text: str) -> Any:
         raise argparse.ArgumentTypeError(f"JSON として読めない: {exc}") from None
 
 
+def _json_object_arg(text: str) -> dict[str, Any]:
+    value = _json_arg(text)
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError(f"JSON のオブジェクトでない: {type(value).__name__}")
+    return value
+
+
 def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
     """`emit` の引数から結果を組む（確かめない）。"""
     cause = causes.build(a.cause[0], a.cause[1], instance=a.cause_instance, retry_after=a.retry_after) if a.cause else None
@@ -135,7 +142,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--route", nargs=2, action="append", default=[], metavar=("ANSWER", "CMD"), help="CMD が - なら何も打たない")
     p.add_argument("--gap", nargs=3, action="append", default=[], metavar=("KIND", "NAME", "REASON"))
     p.add_argument("--item", type=_json_arg, action="append", default=[], help="items の 1 要素（JSON のオブジェクト）")
-    p.add_argument("--metrics", type=_json_arg, help="metrics（JSON のオブジェクト）")
+    p.add_argument("--metrics", type=_json_object_arg, help="metrics（JSON のオブジェクト）")
     p.add_argument("--next")
     p.add_argument("--presentation-path")
     p.add_argument("--code", type=int, help="終了コード（省けば status と cause.kind から決める）")

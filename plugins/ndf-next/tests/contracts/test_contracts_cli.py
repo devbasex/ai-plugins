@@ -258,3 +258,12 @@ def test_emit_unwritable_out_is_invalid(capsys, tmp_path, rel):
     code, out, err = _emit(capsys, "ok", "--out", str(tmp_path / rel))
     assert (code, out) == (2, "")
     assert err.startswith("contracts: ") and err.count("\n") == 1
+
+
+@pytest.mark.parametrize("metrics", ["1", "[]", '"s"', "null"])
+def test_emit_non_object_metrics_is_invalid(capsys, metrics):
+    with pytest.raises(SystemExit) as exc:
+        _emit(capsys, "ok", "--metrics", metrics)
+    out = capsys.readouterr()
+    assert (exc.value.code, out.out) == (2, "")
+    assert "JSON のオブジェクトでない" in out.err
