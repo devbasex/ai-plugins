@@ -38,7 +38,7 @@ def check_all() -> list[str]:
     for name in ("result", "causes", "limits", "release-verification"):
         _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
     policies = _collect(errs, limits.table)
-    policy_names = set(policies) if policies is not None else set()
+    policy_names = set(policies) if policies is not None else None
     for name in facts.names():
         refs = _collect(errs, lambda name=name: facts.ref_errors(name, policy_names))
         if refs is not None:

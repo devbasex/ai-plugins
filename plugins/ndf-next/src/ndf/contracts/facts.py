@@ -160,8 +160,12 @@ def _table_ref_errors(name: str, col: str, ref: str, values: list[tuple[str, Any
     return [f"{name}:{rid} の {col} {v!r} が表 {other} に無い" for rid, v in values if v not in known]
 
 
-def ref_errors(name: str, policy_names: set[str]) -> list[str]:
-    """列の `ref`（`limits.json#<接頭辞>` か `<置き場>/<表>`）の先に値があるかを確かめる。"""
+def ref_errors(name: str, policy_names: set[str] | None) -> list[str]:
+    """列の `ref`（`limits.json#<接頭辞>` か `<置き場>/<表>`）の先に値があるかを確かめる。
+
+    `policy_names` が None（上限の宣言を読めない）なら `limits.json#` への参照は確かめない。
+    読めない誤りは呼び出し側が 1 件で出しており、参照ごとに「無い」と重ねて出さないため。
+    """
     t = table(name)
     errs = []
     for col, decl in t.columns.items():
@@ -170,6 +174,8 @@ def ref_errors(name: str, policy_names: set[str]) -> list[str]:
             continue
         values = [(r["id"], r[col]) for r in t.rows if col in r]
         if ref.startswith(LIMITS_REF):
+            if policy_names is None:
+                continue
             errs += _limits_ref_errors(name, col, ref.removeprefix(LIMITS_REF), values, policy_names)
         else:
             errs += _table_ref_errors(name, col, ref, values)

@@ -102,6 +102,13 @@ def test_ref_errors_point_at_missing_targets(contracts_copy, sample_table):
     assert any("exit-codes" in e for e in errs)
 
 
+def test_ref_errors_skip_limits_refs_when_limits_unreadable(contracts_copy, sample_table):
+    bad = {**sample_table, "rows": [{"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"}]}
+    contracts_copy("facts/sample.json", lambda _: bad)
+    errs = facts.ref_errors("sample", None)
+    assert len(errs) == 1 and "exit-codes" in errs[0]
+
+
 def test_ref_errors_pass_when_targets_exist(sample):
     assert facts.ref_errors("sample", {"monitor.phase.review"}) == []
 
