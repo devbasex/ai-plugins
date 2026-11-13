@@ -91,12 +91,11 @@ def _read_survey(text: str, sections: list, prose: list[tuple[int, str]]) -> tup
     surveys = [s for s in sections if s.heading.title.startswith(SURVEY_TITLE)]
     skipped = any(s.start <= i < s.end and SKIP_LINE.match(ln) for s in surveys for i, ln in prose)
     candidates: set[str] = set()
-    for t in md.tables(text):
-        if any(s.start <= t.start < s.end for s in surveys):
-            for row in t.rows:
-                cell = row[0].strip().strip("`*_ ") if row else ""
-                if CANDIDATE_ID.fullmatch(cell):
-                    candidates.add(cell)
+    for t in md.tables_in(text, surveys):
+        for row in t.rows:
+            cell = row[0].strip().strip("`*_ ") if row else ""
+            if CANDIDATE_ID.fullmatch(cell):
+                candidates.add(cell)
     return skipped, candidates
 
 
@@ -117,14 +116,12 @@ def _left_table_rows(text: str, sections: list) -> list[tuple[int, str, str, str
     lefts = [s for s in sections if s.heading.title.startswith(LEFT_TITLE)]
     lines = text.splitlines()
     out = []
-    for t in md.tables(text):
-        if not any(s.start <= t.start < s.end for s in lefts):
-            continue
+    for t in md.tables_in(text, lefts):
         head = [h.strip() for h in t.header]
         num_col = next((k for k, h in enumerate(head) if "レッドライン" in h), 1)
         why_col = next((k for k, h in enumerate(head) if "なぜ" in h), 2)
         for k, row in enumerate(t.rows):
-            line = t.start + 2 + k
+            line = t.body_line(k)
 
             def cell(c: int, row: list = row) -> str:
                 return row[c].strip() if c < len(row) else ""

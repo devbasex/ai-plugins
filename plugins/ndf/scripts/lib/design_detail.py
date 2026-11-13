@@ -67,7 +67,7 @@ def _section_table(text: str, title: str) -> tuple[md.Section | None, md.Table |
     sec = md.section_named(text, title, level=2)
     if sec is None:
         return None, None, None
-    table = next((t for t in md.tables(text) if sec.start <= t.start < sec.end), None)
+    table = next(iter(md.tables_in(text, [sec])), None)
     lines = text.splitlines()
     fenced = md.fenced_lines(text)
     why = None
@@ -79,11 +79,6 @@ def _section_table(text: str, title: str) -> tuple[md.Section | None, md.Table |
     return sec, table, why
 
 
-def _doc_line(table: md.Table, k: int) -> int:
-    """表の本文の k 行目の、文書の中の行（0 始まり。見出しと区切りの 2 行の後）。"""
-    return table.start + 2 + k
-
-
 def _first_column(table: md.Table | None) -> set[str]:
     return {_cell_text(r[0]) for r in table.rows if r} if table else set()
 
@@ -93,7 +88,7 @@ def _finding(name: str, rule: str, text: str) -> dict:
 
 
 def _row_item(path: str, lines: list[str], rule: str, table: md.Table, k: int, name: str) -> dict:
-    at = _doc_line(table, k)
+    at = table.body_line(k)
     src = lines[at].strip() if at < len(lines) else name
     return _finding(f"{path}:{at + 1} {name}", rule, src)
 
