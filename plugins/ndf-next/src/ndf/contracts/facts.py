@@ -17,7 +17,6 @@ from ndf import contracts
 FACTS_DIR = "facts"
 SCHEMA = f"{FACTS_DIR}/fact.schema.json"
 NAME = re.compile(r"^[a-z][a-z0-9-]*$")
-_JSON_TYPES = {"boolean": "boolean", "string": "string", "integer": "integer", "array": "array"}
 
 
 class FactsError(contracts.ContractError):
@@ -35,7 +34,7 @@ class Table(NamedTuple):
 def _row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
     props: dict[str, Any] = {"id": {"type": "string", "minLength": 1}}
     for col, decl in columns.items():
-        kind = _JSON_TYPES[decl["type"]]
+        kind = decl["type"]
         props[col] = {"type": "array", "items": {"type": "string"}} if kind == "array" else {"type": kind}
     required = ["id", *(c for c, d in columns.items() if not d.get("optional"))]
     return {"type": "object", "additionalProperties": False, "required": required, "properties": props}
