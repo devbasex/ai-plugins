@@ -1,3 +1,0 @@
-{"at": "2026-11-13T04:31:27+00:00", "head": "b4292dfde17cb32eab6555ae6670a304df1fea22", "verdict": "pending", "failed": [], "after_merge": false}
-{"at": "2026-11-13T04:31:33+00:00", "head": "b4292dfde17cb32eab6555ae6670a304df1fea22", "verdict": "pending", "failed": [], "after_merge": false}
-{"at": "2026-11-13T04:45:31+00:00", "head": "b4292dfde17cb32eab6555ae6670a304df1fea22", "verdict": "failed", "failed": ["Python tests / pytest"], "after_merge": true}
