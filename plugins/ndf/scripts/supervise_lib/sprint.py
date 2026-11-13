@@ -38,7 +38,7 @@ from supervise_lib.sprint_routes import (
     with_cd_guidance,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, issue_lists, refine_steps
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -159,11 +159,6 @@ def auto_sprint_plans(a) -> list[dict]:
             "then_of": first,
         },
     ]
-
-
-def issue_lists(a) -> tuple[str, str]:
-    """課題の番号の並びの 2 形: カンマ区切り（スクリプトの引数）と `#` 付きの空白区切り（本文）。"""
-    return ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
 
 
 def close_plan(a, repo: str) -> dict:

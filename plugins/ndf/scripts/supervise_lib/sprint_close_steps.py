@@ -13,6 +13,11 @@ import limits
 from supervise_lib.paths import HERE
 
 
+def issue_lists(a) -> tuple[str, str]:
+    """課題の番号の並びの 2 形: カンマ区切り（スクリプトの引数）と `#` 付きの空白区切り（本文）。"""
+    return ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
+
+
 def _spec_pr_steps(a, refs: str, after: str) -> list[dict]:
     """確定仕様化のコミットと、その Pull Request を出して ready にするまで。CI は ready から進み、後ろの作業と重なる（決定 1）。"""
     return [
