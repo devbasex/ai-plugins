@@ -41,7 +41,7 @@ from ndf import identity
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 # 記録の結果（FINISHED など）は records の名前を slots からも読めるように再び公開する
-from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, Result, _file_lock, _lock, _replace_text
+from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, Result, _file_lock, _lock, _parse_dict, _replace_text
 
 log = logging.getLogger(__name__)
 
@@ -125,10 +125,10 @@ def _write_json(path: Path, data: Mapping[str, object]) -> None:
 
 def _read_json(path: Path) -> dict[str, object] | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # 読めない・UTF-8 でない
         return None
-    return data if isinstance(data, dict) else None
+    return _parse_dict(text)
 
 
 @dataclass

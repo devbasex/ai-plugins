@@ -97,12 +97,17 @@ def _prune(lines: list[str], now: float) -> list[str]:
     return [ln for ln in lines if (_parse_iso(_loads(ln).get("at")) or now) >= cutoff]
 
 
-def _loads(line: str) -> dict[str, object]:
+def _parse_dict(text: str) -> dict[str, object] | None:
+    """JSON の本文を読み、辞書ならそれを、読めないか辞書でなければ None を返す。"""
     try:
-        data = json.loads(line)
+        data = json.loads(text)
     except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _loads(line: str) -> dict[str, object]:
+    return _parse_dict(line) or {}
 
 
 def read_events(directory: Path) -> list[dict[str, object]]:
