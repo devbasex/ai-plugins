@@ -121,6 +121,13 @@ def schema_errors(instance: Any, rel: str) -> list[str]:
     return [f"{where}: {message}" for where, message in found]
 
 
+def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:
+    """`instance` が `contracts/<rel>` のスキーマに合わなければ `error_cls`（`<label> の形が違う: <誤り>`）を投げる。"""
+    errs = schema_errors(instance, rel)
+    if errs:
+        raise error_cls(f"{label} の形が違う: {'; '.join(errs)}")
+
+
 def schema_path(name: str) -> str:
     """`contracts/schemas/<name>.schema.json` の `contracts/` からの相対パス。"""
     return f"{SCHEMAS}/{name}.schema.json"

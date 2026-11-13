@@ -55,9 +55,7 @@ def _validate_rows(raw: dict[str, Any], where: str) -> None:
 
 def _validate(raw: Any, name: str) -> Table:
     where = f"{FACTS_DIR}/{name}.json"
-    errs = contracts.schema_errors(raw, SCHEMA)
-    if errs:
-        raise FactsError(f"事実の表 {where} の形が違う: {'; '.join(errs)}")
+    contracts.require_schema(raw, SCHEMA, FactsError, f"事実の表 {where}")
     _validate_rows(raw, where)
     dup = contracts.duplicates(r["id"] for r in raw["rows"])
     if dup:

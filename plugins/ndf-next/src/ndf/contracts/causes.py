@@ -47,9 +47,8 @@ def _policy_errors(row: CauseRow) -> list[str]:
 
 def validate(raw: Any) -> dict[str, CauseRow]:
     """表の形・種類の重なり・終了コードの区分・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
-    errs = contracts.schema_errors(raw, SCHEMA)
-    if errs:
-        raise CausesError(f"止まった理由の表 {TABLE} の形が違う: {'; '.join(errs)}")
+    contracts.require_schema(raw, SCHEMA, CausesError, f"止まった理由の表 {TABLE}")
+    errs: list[str] = []
     out: dict[str, CauseRow] = {}
     codes = exit_codes.codes("stopped")
     for item in raw["causes"]:

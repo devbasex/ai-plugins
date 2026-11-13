@@ -39,9 +39,7 @@ VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
 
 def validate(raw: object) -> dict[str, Policy]:
     """宣言の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
-    errs = contracts.schema_errors(raw, SCHEMA)
-    if errs:
-        raise LimitsError(f"上限の宣言 {DECLARATION} の形が違う: {'; '.join(errs)}")
+    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の宣言 {DECLARATION}")
     return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
 
 
