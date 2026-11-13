@@ -50,7 +50,7 @@ def validate(raw: Any) -> dict[str, CauseRow]:
     contracts.require_schema(raw, SCHEMA, CausesError, f"止まった理由の表 {TABLE}")
     errs: list[str] = []
     out: dict[str, CauseRow] = {}
-    codes = exit_codes.codes("stopped")
+    codes = exit_codes.codes(exit_codes.STOPPED)
     for item in raw["causes"]:
         row = CauseRow(**item)
         if row.kind in out:

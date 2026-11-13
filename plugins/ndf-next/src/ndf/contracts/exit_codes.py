@@ -12,6 +12,9 @@ from typing import Any
 from ndf.contracts import facts
 
 TABLE = "exit-codes"
+# 結果の status の語彙（result.schema.json の enum とこの表の status 列と同じ）
+OK, GATE, STOPPED = "ok", "gate", "stopped"
+STATUSES = (OK, GATE, STOPPED)
 
 
 def bounds(row: Mapping[str, Any]) -> tuple[int, int]:

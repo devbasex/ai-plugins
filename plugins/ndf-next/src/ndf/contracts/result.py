@@ -14,10 +14,10 @@ from typing import Any, Optional, TextIO
 from ndf import contracts
 from ndf.contracts import causes, exit_codes
 
+# 結果の status の語彙は exit_codes が持ち、ここから result.OK などとしても引ける
+from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
+
 SCHEMA = contracts.schema_path("result")
-# 結果の status の語彙（result.schema.json の enum と事実の表 exit-codes の status 列と同じ）
-OK, GATE, STOPPED = "ok", "gate", "stopped"
-STATUSES = (OK, GATE, STOPPED)
 
 
 # 任意の項目のうち配列のもの（置くときは写しの list にする）
