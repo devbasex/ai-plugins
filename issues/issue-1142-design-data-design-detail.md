@@ -77,7 +77,7 @@ plugins/ndf/
 | `scripts/contracts_lib/limits_decl.py` | 変更 | 呼び出しを集める `_Calls` を、import の名前と関数の名前の組を引数で受ける形にし、`facts_decl` と共有する（DC2） | 無し |
 | `scripts/contracts_lib/ratchet.py` | 変更 | 1 ファイルの基準の行の増加を merge-base と比べる関数を足す（DC2） | 無し |
 | `scripts/contracts_lib/render.py` | 変更 | 逆引きに節「事実の表」を足す（DC2） | `scripts/contracts_lib/facts_decl.py` |
-| `scripts/check-ndf-contracts.py` | 変更 | 規則 `const-fact`・`fact-table` を足し、検査と `--render` の前に `jsonschema` を用意する（DC2） | 上の 4 つ・`plugins/ndf/scripts/lib/deps.py` |
+| `scripts/check-ndf-contracts.py` | 変更 | 規則 `const-fact`・`fact-table` を足し、検査と `--render` の前に `jsonschema` を用意する（DC2）。DC6 が 契約の抽出が `env_num` で読む環境変数と relay の受け渡しのファイルを拾う（#2434） | 上の 4 つ・`plugins/ndf/scripts/lib/deps.py` |
 | `scripts/const-fact-baseline.json` | 新設 | 重複の基準（DC2） | 無し |
 | `scripts/measure/const-facts.py` | 変更 | コア `const_facts.measure` を呼ぶだけにする。出力は変えない（DC2） | `scripts/contracts_lib/const_facts.py` |
 | `.github/workflows/script-structure.yml` | 変更 | ジョブ `ndf-contracts-check` に `astral-sh/setup-uv` を足す（`deps.require` が uv で起動し直す）（DC2） | 無し |
@@ -181,8 +181,10 @@ plugins/ndf/
 | `plugins/ndf/scripts/lib/parallel_lane.py` | 変更 | `RUNNING` を `lib/durable.py` から import する（DC8） | `lib/durable.py` |
 | `plugins/ndf/scripts/lib/parallel_ledger.py` | 変更 | `RUNNING`・`LOST` を `lib/durable.py` から導く（DC8） | `lib/durable.py` |
 | `plugins/ndf/scripts/lib/durable.py` | 変更 | `RUNNING`・`FINISHED` を持ち主として公開する（DC8、#2990 の後） | 無し |
-| `plugins/ndf/scripts/supervise_lib/decl.py` | 変更 | `GLOSSARY_DECL` を `facts.setting_path` で引く（DC8、#2993 の後） | `lib/facts.py` |
+| `plugins/ndf/scripts/supervise_lib/decl.py` | 変更 | `GLOSSARY_DECL` を `facts.setting_path` で引く（DC8、#2993 の後）。DC6 が テストのコマンドを `.ndf/project.json` の `test.suites` から読む（#2011） | `lib/facts.py` |
 | `plugins/ndf/scripts/tests/test_owners_after_children.py` | 新設 | DC8 の読み手が持ち主から引く値の単体テスト（DC8） | 上の読み手 |
+| `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/scope.py` | 変更 | 範囲の種類を表から引き、関数単位の範囲を組む（DC4、#2557） | 無し |
+| `plugins/ndf/scripts/project-decl.py` | 変更 | 計測値を追跡しない置き場へ分けて書く（DC6、#2010） | 無し |
 
 ## クラスと関数の構造
 
