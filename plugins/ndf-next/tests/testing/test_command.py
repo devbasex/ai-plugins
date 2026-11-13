@@ -35,6 +35,12 @@ def project(tmp_path):
     return root, bin_dir, tmp_path / "log"
 
 
+@pytest.fixture
+def slots_dir(forbid_real_state):
+    """枠の置き場。forbid_real_state が `NDF_TEST_SLOTS_DIR` をテストの一時ディレクトリへ向けている。"""
+    return Path(os.environ[slots.SLOTS_DIR_ENV])
+
+
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
     # CI（GITHUB_ACTIONS）と入れ子の印は枠を飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", slots.HELD_ENV)}
@@ -48,13 +54,13 @@ def _ndf(args, cwd, bin_dir=None, log=None, **extra):
     )
 
 
-def test_run_keeps_output_and_exit_code(project):
+def test_run_keeps_output_and_exit_code(project, slots_dir):
     root, bin_dir, log = project
     for code in ("0", "1"):
         proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, FAKE_EXIT=code)
         out, err = proc.communicate()
         assert (proc.returncode, out, err) == (int(code), "out\n", "err\n")
-    assert [row["result"] for row in slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV]))] == ["finished", "finished"]
+    assert [row["result"] for row in slots.read_events(slots_dir)] == ["finished", "finished"]
 
 
 def test_parallel_runs_wait_for_each_other(project):
@@ -69,11 +75,11 @@ def test_parallel_runs_wait_for_each_other(project):
     assert peak == 1
 
 
-def test_light_command_runs_without_a_slot(project):
+def test_light_command_runs_without_a_slot(project, slots_dir):
     root, bin_dir, log = project
     proc = _ndf(["run", "--", "fakerun one_file.py"], root, bin_dir, log)
     assert proc.wait() == 0
-    assert slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV])) == []
+    assert slots.read_events(slots_dir) == []
 
 
 def test_wrong_setting_refuses_to_run(project):
@@ -86,8 +92,8 @@ def test_wrong_setting_refuses_to_run(project):
     assert not log.exists()
 
 
-def test_report_reads_the_records(tmp_path):
-    directory = Path(os.environ[slots.SLOTS_DIR_ENV])
+def test_report_reads_the_records(tmp_path, slots_dir):
+    directory = slots_dir
     directory.mkdir(parents=True)
     slots.append_event(
         directory,
@@ -109,11 +115,11 @@ def test_report_refuses_a_wrong_period(tmp_path):
 # --- 現状固定テスト（_run の経路: 待ちの上限の上書き・諦め・置き場を使えない・シグナル・CI・入力の誤り） ---
 
 
-def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(project):
+def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(project, slots_dir):
     from ndf.testing.limits import Limits
 
     root, bin_dir, log = project
-    directory = Path(os.environ[slots.SLOTS_DIR_ENV])
+    directory = slots_dir
     holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
     with slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9):
         proc = _ndf(["run", "--wait-limit", "1", "--", "fakerun ."], root, bin_dir, log)
@@ -143,7 +149,7 @@ def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):
     assert log.exists()
 
 
-def test_signal_is_forwarded_and_recorded_as_interrupted(project):
+def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
     import signal
 
     from ndf.testing import waits
@@ -158,17 +164,17 @@ def test_signal_is_forwarded_and_recorded_as_interrupted(project):
     finally:
         proc.kill()
     assert proc.returncode == 128 + signal.SIGTERM
-    rows = slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV]))
+    rows = slots.read_events(slots_dir)
     assert [row["result"] for row in rows] == [slots.INTERRUPTED]
     assert rows[0]["kind"] == slots.DIRECT
 
 
-def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project):
+def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project, slots_dir):
     root, bin_dir, log = project
     proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, GITHUB_ACTIONS="true", FAKE_EXIT="3")
     out, err = proc.communicate()
     assert (proc.returncode, out, err) == (3, "out\n", "err\n")
-    assert slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV])) == []
+    assert slots.read_events(slots_dir) == []
 
 
 def test_command_without_double_dash_is_accepted(project):
