@@ -7152,6 +7152,19 @@
       "pending_source": "issues/issue-2963-design.md"
     },
     {
+      "term": "取り込み方",
+      "code": "promotion",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる",
+      "pending_source": "issues/issue-3119-requirements.md"
+    },
+    {
+      "term": "戻すマージ",
+      "context": "ndf-release",
+      "meaning": "正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る",
+      "pending_source": "issues/issue-3119-design.md"
+    },
+    {
       "term": "プラグインの入れ替え",
       "context": "ndf-workflow",
       "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別",
