@@ -1,17 +1,152 @@
-# 1142: NDF のスクリプトをモデルとクラスから組み直す
+# NDF のスクリプト: AI が陥りやすい作りを無くし、事実をデータへ移し、分岐の行き先をスクリプトが選ぶ（#1142）
 
-要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。
-この文書は「どう作るか」だけを扱う。エントリポイントの一覧と移行の順序（移行ステップごとに触るファイル）は
-[issue-1142-design-migration.md](issue-1142-design-migration.md) 、モジュールの分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) 、決定の記録は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。
-汎用の処理を外部ライブラリへ置き換える設計（スプリント 2b。決定 19〜25）は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) 、
-プランの実行とキューを DBOS Transact へ置き換える設計（スプリント 2c。決定 26〜35・移行ステップ Q0〜Q7）は
-[issue-1142-design-dbos.md](issue-1142-design-dbos.md) にある。
+## 目的
 
-数は 2026-09-26 03:30 UTC に測った値である（`python3 /tmp/ndf-measure-1142/structure.py plugins/ndf`）。
-ファイル 128 本・48,394 行（本文の表から 531 行増えた）、1000 行を超えるファイル 6 本、2 つ以上のファイルで
-同じ名前を持つ最上位の関数 86 名（199 件）。
+- 今どうなっているか: スプリント 1〜2c で、ファイルの分割・ライブラリ・DBOS への置き換えは済んだ。残る作りは 3 つある。AI が繰り返し持ち込む作り（例外の握りつぶし 450・空のフォールバック 2,780・ループの中の外部呼び出し 52 など）。同じ事実を複数の定数に持ち、一致をテストで縛る作り（417 組）。止まった後の行き先を、AI が出力の文を読んで決める作り（記録上の上位 10 箇所で 7,600 回余り）
+- 誰に効くか: NDF を直す worker と conductor（読む量と読み違い）、NDF を使う利用者（止まりと空回り）
+- 変えると何が成り立つか: 兆候の数は、基準の数を超える変更を落とす CI の検査（ラチェット）で増えなくなる。事実を足すときに直すファイルが 1 つになる。止まった理由を種類で返し、プランが行き先を選ぶ
+
+## 適用範囲
+
+- このリポジトリの `plugins/ndf/` のスクリプトと契約、リポジトリのルートの `scripts/` の検査と計測。利用先のリポジトリでは、結果 JSON の項目（`cause`・`routes`）とプランの行き先として働く。プロジェクトごとに違うものは足さない
+- モード: `standard`（#1142 の「決めたこと」）
+
+## あるべき姿の根拠
+
+- 利用者の指示の原文（2026-11-12・2026-11-13）: 「AI が陥りやすい作りを撲滅する」「定数からデータへ」「すべてのワークフローはスクリプトで動き、AI は補助的に呼ばれるだけ」（要求の「決めたこと」）
+- 実測: 3 つの主題の文書の「基準の数」「測った結果」「洗い出しの一覧」（2026-11-13、develop 01a53e912）
+- 外部の一次情報: 各主題の文書の「外部の調査」（ruff の規則の一覧・JSON Schema・耐久ワークフローの再試行の方針ほか）
+
+## 文書の置き場
+
+要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。この文書は「どう作るか」だけを扱う。
+
+**2026-11-13 の設計は 3 つの主題に分けた。** どれも 1,000 行以下で、決定の番号は主題ごとに分けて振った。この文書は主題を文書名の末尾（smells・data・scripted-flow）で呼ぶ。
+
+| 主題 | 文書 | 決定 | 移行ステップと子 Issue |
+| --- | --- | --- | --- |
+| AI が陥りやすい作りを数え、増やす変更を落としながら減らす | [issue-1142-design-smells.md](issue-1142-design-smells.md) | 36〜44 | A0・A1a・A1b・A2・A3a〜A3g（A3c・A3e・A3f は 2 本に割る）・E9 |
+| 定数からデータへ（同じ事実を 1 か所の表に置く） | [issue-1142-design-data.md](issue-1142-design-data.md) | 45〜53 | 移行ステップ DT1〜DT8、子 Issue DC1〜DC8 |
+| AI の判断からスクリプトへ（止まった理由を種類で返し、行き先をスクリプトが選ぶ） | [issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) | 54〜64 | SF1a・SF1b・SF2〜SF13（SF3 は #3153） |
+
+**ファイルと関数の粒度は詳細設計にある。** 主題をまたぐもの（共有する部品・並行と排他・ログ）と、子 Issue の実装計画・開いている bug の割り当ては、頭の詳細設計が持つ。
+
+| 中身 | 文書 |
+| --- | --- |
+| 頭の詳細設計（主題をまたぐもの・実装計画・開いている bug の割り当て） | [issue-1142-design-detail.md](issue-1142-design-detail.md) |
+| smells の詳細設計 | [issue-1142-design-smells-design-detail.md](issue-1142-design-smells-design-detail.md) |
+| data の詳細設計 | [issue-1142-design-data-design-detail.md](issue-1142-design-data-design-detail.md) |
+| scripted-flow の詳細設計 | [issue-1142-design-scripted-flow-design-detail.md](issue-1142-design-scripted-flow-design-detail.md) |
+| 前の企画の残り（K1〜K3・W1〜W8。旧 K4 は smells の A1a にまとめた）の詳細設計 | [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md) |
+
+スプリント 1〜2c の設計は、この文書の「ドメインモデル」以下の節と、次の文書にある。
+
+| 中身 | 文書 |
+| --- | --- |
+| エントリポイントの一覧と移行の順序 | [issue-1142-design-migration.md](issue-1142-design-migration.md) |
+| モジュールの分け方 | [issue-1142-design-modules.md](issue-1142-design-modules.md) |
+| 決定 1〜25 と、残りの実装に効く決定 65〜68 | [issue-1142-design-decisions.md](issue-1142-design-decisions.md) |
+| 汎用の処理を外部ライブラリへ置き換える設計（スプリント 2b） | [issue-1142-design-libraries.md](issue-1142-design-libraries.md) |
+| プランの実行とキューを DBOS Transact へ置き換える設計（スプリント 2c。決定 26〜35） | [issue-1142-design-dbos.md](issue-1142-design-dbos.md) |
+
+### 3 つの主題の関係
+
+- **検査は 2 つに分け、同じ違反を 2 回数えない。** 兆候の 7 種類のうち、「定数の重複」は data の規則 `const-fact`（`check-ndf-contracts.py`）が見る。「コピーの重複」は既存の構造チェックが見る（smells の決定 44）
+- **基準の置き方は書き換える者の数で分けた。** 兆候の基準は、減らしたどの PR も書き換えるため、元のファイル 1 本ごとに 1 つ置く（smells の決定 37）。重複の基準は、移行ステップの PR だけが書き換えるため、1 ファイルに置く（data の決定 50）
+- **止まった理由の表（`contracts/causes.json`）は、data の決定 46 の事実の表と同じ置き方の規則に従う**（2 つ以上のコンテキストが読む事実を契約の表に置く。data の決定 45）
+- **行き先の粒度は 2 つに分ける。** 工程の間の行き先は #3092 の進行表が、工程の中の行き先はプランのステップの `on_cause` が持つ（scripted-flow の決定 58）
+
+## 人へ残す判断
+
+次の 4 つはレッドラインに当たる。どれも推奨の案で実装計画を組んだ。**2026-11-13 の設計承認ゲートで、利用者が (a)〜(e) のすべてを推奨どおりに承認した。**
+
+| # | 判断 | 当たるレッドライン | なぜ当たるか | 材料 | 推奨 |
+| --- | --- | --- | --- | --- | --- |
+| (a) | 承認ゲートの旧い名前（`関門 1`・`関門 2`）を A1a で消すか | C5 | 消すと、別のリポジトリの Neural Development Factory のランナーが渡す名前が止まり、そろえる Issue をそのリポジトリへ起票する | ランナーがこの名前を渡し続けている（`lib/legacy_names.py` の `GATE_NAMES` の注記。#2619 の決定 5）。A1a の後は知らない名前として止まる | 消す。A1a の着手の前に、Factory の側をそろえる Issue を別のリポジトリ（volareinc/nd-factory）に起票する |
+| (b) | `worktree-guard.sh`・`token-guard.sh` を消すか | C6 | 前の版で利用者の手元に入れた hook の設定がこの 2 本を呼び、消すと手元の hook が失敗する | 前の版の利用者の手元に残る hook の設定から呼ばれるため残すと決めた（確定仕様 `ndf-distribution-runtimes.md` の I4 ほか）。#1142 の残りの実装は後方互換を置かない（決定 65） | 消す。承認されたら A1a（後方互換の経路を消す子 Issue）の触るファイルへ 2 本と I4 の改めを足す |
+| (c) | A1b の後、利用者の手元の古い記録が集計から外れることを受け入れるか | C3 | 利用者の手元の記録（見積もりの実績・開発ループの記録・リリース記録）の読まれ方が変わる | 古い値は A1b の後は読み替えずに読み、今の値と一致しない行として集計から外れる。手元に残る行の数は測っていない | 受け入れる |
+| (e) | cross-review の `participants` を持たない古い状態ファイルを止めることを受け入れるか | C3 | 利用者の手元の状態ファイルが読めなくなる | DC3 が `review_lib/participants.py` の古い分岐を消す（data の決定 52）。古い状態ファイルで続きのラウンドを打つと止まる | 受け入れる |
+
+**(d) リファクタリング計画の 8 件の扱いは、レッドラインに当たらないが、利用者が起こした計画を変えるため、ここに並べる。**
+
+- 材料: 8 件（#2963・#2990・#2991・#2992・#2993・#2994・#2995・#2996）はどれも未着手で設計が無い。各主題の「先に要るもの」と smells の決定 43 がこの 8 件を前提にしている
+- **8 件を外すと、開いている bug 110 件のうち子 Issue で直る見込みのものは 4 件だけになる**（頭の詳細設計の「開いている bug の割り当て」）。bug の多くは supervise・並列の計画・開発ループ・リリースの判断の誤りで、その範囲（兆候のあるファイル 101 本。smells の決定 43 が A3 から外した範囲）を作り直すのは 8 件だからである。外したままでは、要求の受け入れ条件「開いている細かな不具合が作り直しで直る」を満たせない
+- 推奨: **8 件を #1142 の子 Issue に取り込む。** 設計（詳細設計まで）は別の設計 PR で書き、そこで bug をその 8 件へ割り当て直す。この設計 PR の 47 本のうち 8 件に依らない子 Issue は承認の後すぐ着手し、8 件に依る子 Issue（SF1b・SF2・DC2・DC8・K1〜K3 など）は 8 件の後へ置く
+- 別案 1: 8 件もこの設計 PR で設計してから設計承認ゲートを出し直す（承認は 1 回で済むが、着手が設計の分だけ遅れる）
+- 別案 2: 8 件を #1142 の外のまま置く（今の実装計画のとおり。bug の多くは残り、受け入れ条件の該当の項目を外すことになる）
+
+## 3 つの主題の設計で未確認のまま残ること
+
+各主題の文書の「未確認のまま残ること」にある。主題をまたぐものは次の 2 つである。
+
+| 項目 | 内容 |
+| --- | --- |
+| #3191 の実装の名前 | SF8 と DC7 は #3191（#3092 の実装、未マージ）の詳細設計の名前（`progress_model`・`progress_run`・`workflow_def.VOCABULARY`）で書いた。#3191 のマージの後に実装の名前と突き合わせる |
+| bug の割り当て | 開いている bug 110 件のうち、子 Issue の変更で直る見込みのあるものは 4 件である（頭の詳細設計の「開いている bug の割り当て」）。直ったかは各子 Issue の PR で再現の手順を 1 回通して確かめる |
+
+## 3 つの主題をまとめた順序
+
+子 Issue の表・流す順番・レーンへの割り当ての案は、頭の詳細設計（[issue-1142-design-detail.md](issue-1142-design-detail.md) ）の「実装計画」にある。E9（測り直し）は最後に流す。
+
+## 設計の結果
+
+扱いが「実装する」の行は、触るファイルの列の括弧に子 Issue の名前と番号を持つ。子 Issue は 2026-11-13 の設計承認ゲートの後に起票し、#1142 の sub-issue に結んだ。リファクタリング計画の 8 件（#2963・#2990〜#2996）も #1142 の sub-issue に結び、別の設計 PR で設計する。
+
+| 課題 | 扱い | 取り込み先 | 触るファイル |
+| --- | --- | --- | --- |
+| #1142 | 実装する | — | （A0。#3196）`scripts/check-ai-smells.py`、`scripts/structure_checks/smells_rules.py`、`scripts/ai-smells-rules.json`、`scripts/ai-smells-baseline/`、`scripts/contracts_lib/ratchet.py`、`scripts/tests/test_check_ai_smells.py`、`scripts/tests/test_smells_rules.py`、`.github/workflows/script-structure.yml`、`.ndf/project.json` |
+| #1142 | 実装する | — | （A1a。#3199）`plugins/ndf/scripts/lib/legacy_names.py`、`plugins/ndf/scripts/bundle-close.py`、`plugins/ndf/scripts/mission-close.py`、`plugins/ndf/scripts/mission-state.py`、`plugins/ndf/scripts/phase-steps.py`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__bundle-close.py.json`、`plugins/ndf/scripts/wait-notify.py`、`plugins/ndf/scripts/lib/gate_answer.py`、`plugins/ndf/scripts/lib/dist_record.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/gate-rejections.py`、`plugins/ndf/scripts/resolve.sh`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/lib/project_mvv_signals.py`、`plugins/ndf/scripts/lib/parallel_external.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_gate2.py`、`plugins/ndf/scripts/lib/sprint_mvv.py`、`plugins/ndf/scripts/lib/gate_rejections.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__mission-close.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__mission-state.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__phase-steps.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__mvv-gate.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__project-mvv.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__resolve.sh.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__plan-to-spec-steps.py.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__release-verification-steps.py.json`、`plugins/ndf/scripts/lib/post_queue.py`、`scripts/check-script-structure.py`、`scripts/contract-allow/plugins__ndf__scripts__bundle-close.py--core-entry.json`、`scripts/contract-allow/plugins__ndf__scripts__phase-steps.py--args-unparsed.json`、`scripts/contract-allow/plugins__ndf__scripts__phase-steps.py--core-entry.json`、`plugins/ndf/scripts/tests/test_legacy_names.py`、`plugins/ndf/scripts/tests/test_gate_names.py`、`plugins/ndf/scripts/tests/test_step_scripts.py`、`plugins/ndf/scripts/tests/test_post_queue.py`、`plugins/ndf/scripts/tests/test_wait_notify.py`、`plugins/ndf/scripts/tests/test_resolve.py` |
+| #1142 | 実装する | — | （A1b。#3202）`plugins/ndf/scripts/lib/dist_record.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/delivery_templates.py`、`plugins/ndf/scripts/lib/legacy_values.py`、`plugins/ndf/scripts/data/legacy-values.json`、`plugins/ndf/scripts/estimate.py`、`plugins/ndf/scripts/context-policy.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/lib/estimate_records.py`、`plugins/ndf/scripts/lib/slow_step.py`、`plugins/ndf/scripts/lib/stage_skills.py`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/scripts/lib/parallel_repo.py`、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/sprint_close_lib/final_stage.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/test_legacy_values.py` |
+| #1142 | 実装する | — | （A2。#3200）`plugins/ndf/scripts/lib/gh_rest.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/release-verification-steps.py`、`plugins/ndf/scripts/sprint_close_lib/collect.py`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/lib/formatting.py`、`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/project_mvv.py`、`plugins/ndf/scripts/lib/test_triage.py`、`plugins/ndf/scripts/lib/tool_paths.py`、`plugins/ndf/scripts/merged_lib/checks.py`、`plugins/ndf/scripts/merged_lib/pull.py`、`plugins/ndf/scripts/merged_lib/reading.py`、`plugins/ndf/scripts/plan-to-spec-steps.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/relay_lib/runtime.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_overhaul.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_routes.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/worktree.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/verify_findings.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/scripts/tests/test_merged_probe.py` |
+| #1142 | 実装する | — | （A3a。#3228）`plugins/ndf/scripts/lib/acceptance.py`、`plugins/ndf/scripts/lib/approved_commit.py`、`plugins/ndf/scripts/lib/ask_ledger.py`、`plugins/ndf/scripts/lib/ask_policy.py`、`plugins/ndf/scripts/lib/assignee_env.py`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/body_findings.py`、`plugins/ndf/scripts/lib/branch_flow.py`、`plugins/ndf/scripts/lib/cause_key.py`、`plugins/ndf/scripts/lib/ci_workflows.py`、`plugins/ndf/scripts/lib/claude_account_dir.py`、`plugins/ndf/scripts/lib/claude_accounts.py`、`plugins/ndf/scripts/lib/claude_api_keys.py`、`plugins/ndf/scripts/lib/claude_settings.py`、`plugins/ndf/scripts/lib/claude_training.py`、`plugins/ndf/scripts/lib/claude_usage.py`、`plugins/ndf/scripts/lib/clock.py`、`plugins/ndf/scripts/lib/closing.py`、`plugins/ndf/scripts/lib/codex_training.py`、`plugins/ndf/scripts/lib/comment_mask.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/lib/context_calibrate.py`、`plugins/ndf/scripts/lib/context_decisions.py`、`plugins/ndf/scripts/lib/context_policy.py`、`plugins/ndf/scripts/lib/decl.py`、`plugins/ndf/scripts/lib/delivery.py`、`plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/design_body.py`、`plugins/ndf/scripts/lib/design_docs.py`、`plugins/ndf/scripts/lib/design_pr_merge.py`、`plugins/ndf/scripts/lib/design_results.py`、`plugins/ndf/scripts/lib/diff_kinds.py`、`plugins/ndf/scripts/lib/dist_record.py`、`plugins/ndf/scripts/lib/drive_pause.py`、`plugins/ndf/scripts/lib/durable_keys.py`、`plugins/ndf/scripts/lib/estimate_import.py`、`plugins/ndf/scripts/lib/estimate_predict.py`、`plugins/ndf/scripts/lib/estimate_records.py`、`plugins/ndf/scripts/lib/exit_codes.py`、`plugins/ndf/scripts/lib/failure_paths.py`、`plugins/ndf/scripts/lib/formatting.py` |
+| #1142 | 実装する | — | （A3b。#3219）`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/gate_answer.py`、`plugins/ndf/scripts/lib/gate_rejections.py`、`plugins/ndf/scripts/lib/gh_call.py`、`plugins/ndf/scripts/lib/gh_checks.py`、`plugins/ndf/scripts/lib/gh_fields.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/scripts/lib/gh_pr_info.py`、`plugins/ndf/scripts/lib/gh_pr_status.py`、`plugins/ndf/scripts/lib/gh_quota.py`、`plugins/ndf/scripts/lib/gh_rest.py`、`plugins/ndf/scripts/lib/gh_sections.py`、`plugins/ndf/scripts/lib/glossary_banned.py`、`plugins/ndf/scripts/lib/glossary_lookup.py`、`plugins/ndf/scripts/lib/glossary_merge.py`、`plugins/ndf/scripts/lib/hook_python.py`、`plugins/ndf/scripts/lib/issue_items.py`、`plugins/ndf/scripts/lib/jev.py`、`plugins/ndf/scripts/lib/json_pick.py`、`plugins/ndf/scripts/lib/jsonio.py`、`plugins/ndf/scripts/lib/junit.py`、`plugins/ndf/scripts/lib/lap_close.py`、`plugins/ndf/scripts/lib/lap_cost.py`、`plugins/ndf/scripts/lib/launch_observe.py`、`plugins/ndf/scripts/lib/lease.py`、`plugins/ndf/scripts/lib/lease_stage.py`、`plugins/ndf/scripts/lib/legacy_names.py`、`plugins/ndf/scripts/lib/legacy_values.py`、`plugins/ndf/scripts/lib/locks.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/manual_checks.py`、`plugins/ndf/scripts/lib/md.py`、`plugins/ndf/scripts/lib/mdtable.py`、`plugins/ndf/scripts/lib/merged_range.py`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/monitor_outcome.py`、`plugins/ndf/scripts/lib/monitor_proc.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_types.py`、`plugins/ndf/scripts/lib/notify.py` |
+| #1142 | 実装する | — | （A3c-1。#3214）`plugins/ndf/scripts/lib/pace.py`、`plugins/ndf/scripts/lib/post_requests.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/lib/proc.py`、`plugins/ndf/scripts/lib/procs.py`、`plugins/ndf/scripts/lib/project_mvv.py`、`plugins/ndf/scripts/lib/project_mvv_body.py`、`plugins/ndf/scripts/lib/project_mvv_decl.py`、`plugins/ndf/scripts/lib/project_mvv_signals.py`、`plugins/ndf/scripts/lib/refresh.py`、`plugins/ndf/scripts/lib/relay_limit.py`、`plugins/ndf/scripts/lib/release_version.py`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/lib/result_posts.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/review_criteria_decl.py`、`plugins/ndf/scripts/lib/revise_note.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/run_environment.py`、`plugins/ndf/scripts/lib/run_metrics.py`、`plugins/ndf/scripts/lib/run_owner.py`、`plugins/ndf/scripts/lib/run_state.py`、`plugins/ndf/scripts/lib/runner_issue_request.py`、`plugins/ndf/scripts/lib/runtime_policy.py`、`plugins/ndf/scripts/lib/schema.py`、`plugins/ndf/scripts/lib/secret_redact.py` |
+| #1142 | 実装する | — | （A3c-2。#3229）`plugins/ndf/scripts/lib/shparse.py`、`plugins/ndf/scripts/lib/slow_step.py`、`plugins/ndf/scripts/lib/sprint_mvv.py`、`plugins/ndf/scripts/lib/stage_skills.py`、`plugins/ndf/scripts/lib/state_checkout.py`、`plugins/ndf/scripts/lib/state_get.py`、`plugins/ndf/scripts/lib/state_home.py`、`plugins/ndf/scripts/lib/statefile.py`、`plugins/ndf/scripts/lib/step_read.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/test_triage.py`、`plugins/ndf/scripts/lib/token_rates.py`、`plugins/ndf/scripts/lib/tool_paths.py`、`plugins/ndf/scripts/lib/touch_estimate.py`、`plugins/ndf/scripts/lib/training_common.py`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/scripts/lib/usage_aggregate.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/lib/versions.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`plugins/ndf/scripts/lib/waits.py`、`plugins/ndf/scripts/lib/whole_runs.py`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/lib/worktree_deps.py` |
+| #1142 | 実装する | — | （A3d。#3220）`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/hook_lib/ci_test_guard.py`、`plugins/ndf/scripts/hook_lib/goal_skill.py`、`plugins/ndf/scripts/hook_lib/issue_guard.py`、`plugins/ndf/scripts/hook_lib/payload.py`、`plugins/ndf/scripts/hook_lib/supervisor_docs.py`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/hook_lib/worker_skills.py`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/hook_lib/write_target.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/relay_lib/accounts.py`、`plugins/ndf/scripts/relay_lib/api_keys.py`、`plugins/ndf/scripts/relay_lib/ask.py`、`plugins/ndf/scripts/relay_lib/bedrock.py`、`plugins/ndf/scripts/relay_lib/claude.py`、`plugins/ndf/scripts/relay_lib/common.py`、`plugins/ndf/scripts/relay_lib/handover.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/install.py`、`plugins/ndf/scripts/relay_lib/login.py`、`plugins/ndf/scripts/relay_lib/mark.py`、`plugins/ndf/scripts/relay_lib/pin.py`、`plugins/ndf/scripts/relay_lib/proc.py`、`plugins/ndf/scripts/relay_lib/record.py`、`plugins/ndf/scripts/relay_lib/run.py`、`plugins/ndf/scripts/relay_lib/runtime.py`、`plugins/ndf/scripts/relay_lib/shellrc.py`、`plugins/ndf/scripts/relay_lib/switch.py`、`plugins/ndf/scripts/relay_lib/terminal.py`、`plugins/ndf/scripts/relay_lib/tmux.py`、`plugins/ndf/scripts/relay_lib/version_dir.py` |
+| #1142 | 実装する | — | （A3e-1。#3230）`plugins/ndf/scripts/ask.py`、`plugins/ndf/scripts/behavior-check.py`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/context-policy.py`、`plugins/ndf/scripts/design-match.py`、`plugins/ndf/scripts/estimate.py`、`plugins/ndf/scripts/gate-rejections.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/hook-env.py`、`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/instructions-check.py`、`plugins/ndf/scripts/instructions_lib/collect.py`、`plugins/ndf/scripts/instructions_lib/declaration.py`、`plugins/ndf/scripts/instructions_lib/findings.py`、`plugins/ndf/scripts/instructions_lib/model.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/merged_lib/base_sync.py`、`plugins/ndf/scripts/merged_lib/checks.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/merged_lib/pr_info.py`、`plugins/ndf/scripts/merged_lib/pull.py`、`plugins/ndf/scripts/merged_lib/reading.py`、`plugins/ndf/scripts/merged_lib/trash.py`、`plugins/ndf/scripts/mode-materials.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/parallel-measure.py` |
+| #1142 | 実装する | — | （A3e-2。#3231）`plugins/ndf/scripts/plan-to-spec-steps.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/pr_steps_lib/gh_pr.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/project_lib/ci_tests.py`、`plugins/ndf/scripts/project_lib/compose.py`、`plugins/ndf/scripts/project_lib/fingerprint.py`、`plugins/ndf/scripts/project_lib/measure_branch_flow.py`、`plugins/ndf/scripts/project_lib/measure_ci.py`、`plugins/ndf/scripts/project_lib/measure_materials.py`、`plugins/ndf/scripts/project_lib/measure_repo.py`、`plugins/ndf/scripts/project_lib/merge.py`、`plugins/ndf/scripts/project_lib/mvv_candidates.py`、`plugins/ndf/scripts/project_lib/mvv_collect.py`、`plugins/ndf/scripts/project_lib/mvv_llm.py`、`plugins/ndf/scripts/relay.py`、`plugins/ndf/scripts/release-verification-steps.py`、`plugins/ndf/scripts/spec-copy.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/sprint_close_lib/collect.py`、`plugins/ndf/scripts/sprint_close_lib/final_stage.py`、`plugins/ndf/scripts/sprint_close_lib/record_find.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/scripts/usage-report.py`、`plugins/ndf/scripts/wait-notify.py` |
+| #1142 | 実装する | — | （A3f-1。#3211）`plugins/ndf/skills/cross-refactoring/scripts/assignee_launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/halt_exit.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/allocation.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/baseline.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/ci_coverage.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics_read.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics_record.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/codemetrics_view.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/converge.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/final_fix.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/flaky.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/gate.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/implement.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/judge.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/measure.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/phases.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/plan.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/plan_comment.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/propose.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/readopt.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/reassign.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/comparison.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/culprit.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/danger.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/failure_material.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/fix_intake.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/fixloop.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gate_ci.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gate_lint.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/gitfacts.py` |
+| #1142 | 実装する | — | （A3f-2。#3212）`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/github.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/intake.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/item_actuals.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/items.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/ledger.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/measure.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/outbound.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/outside_reverts.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/paths.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/phases.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/plan.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/prepush_lint.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/process.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/progress.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/proposals.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/publish.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/results.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/rounds.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/safety_net.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/scope.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/scope_check.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/scope_verdict.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/targets.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/time_report.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/trailers.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/triage.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/undo.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/verify.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/wholetest.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/worktree.py` |
+| #1142 | 実装する | — | （A3g。#3221）`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_actions.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth_diff.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_overhaul.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_owner.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_cmd.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_config.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_estimate.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_inputs.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_table.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_report.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_routes.py`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/skills/cross-review/scripts/measure.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/collect_critiques.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/init.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/judge.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/loop.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/merge_fix.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/read_result.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/record_fix.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/report.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/start_round.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/verify_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/fix_result.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/github.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/matching.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/posts.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/reopen.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_scope.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/store.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/workspace.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/google-workspace/scripts/gws-check.py`、`plugins/ndf/skills/google-workspace/scripts/gws_common.py`、`plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_context.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_findings.py`、`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` |
+| #1142 | 実装する | — | （DC1。#3197）`pyproject.toml`、`uv.lock`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/doc_kinds.py`、`plugins/ndf/scripts/tests/test_facts.py`、`plugins/ndf/scripts/tests/test_facts_sh.py` |
+| #1142 | 実装する | — | （DC2。#3201）`scripts/contracts_lib/const_facts.py`、`scripts/contracts_lib/const_baseline.py`、`scripts/contracts_lib/facts_decl.py`、`scripts/contracts_lib/limits_decl.py`、`scripts/contracts_lib/ratchet.py`、`scripts/contracts_lib/render.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`plugins/ndf/contracts/index.md`、`scripts/tests/test_const_facts.py`、`scripts/tests/test_const_baseline.py`、`scripts/tests/test_facts_decl.py` |
+| #1142 | 実装する | — | （DC3。#3204）`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/lib/usage_ledger.py`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/procs.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/report.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py`、`plugins/ndf/scripts/tests/test_runtimes_table.py`、`plugins/ndf/skills/cross-review/tests/test_state_review_pool.py`、`plugins/ndf/skills/cross-refactoring/tests/test_init.py`、`plugins/ndf/skills/cross-review/tests/test_state_resume_args.py`、`plugins/ndf/scripts/tests/test_lib_assignment.py` |
+| #1142 | 実装する | — | （DC4。#3205）`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/contracts/facts/test-markers.json`、`plugins/ndf/scripts/lib/body_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-refactoring/scripts/assignee_launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/phases.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/reassign.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/safety_net.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_findings.py`、`plugins/ndf/scripts/mode-materials.py`、`plugins/ndf/scripts/tests/test_loop_tables.py`、`plugins/ndf/skills/cross-review/tests/test_measure.py` |
+| #1142 | 実装する | — | （DC5。#3213）`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/relay_lib/version_dir.py`、`plugins/ndf/scripts/lib/run_owner.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/lib/finding_match.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/tests/test_limits_moved.py`、`plugins/ndf/scripts/tests/test_relay.py`、`plugins/ndf/skills/cross-review/tests/test_queue_idempotency.py`、`plugins/ndf/skills/worktree/tests/test_testenv_reclaim.py` |
+| #1142 | 実装する | — | （DC6。#3206）`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/facts/places.json`、`plugins/ndf/contracts/facts/instruction-files.json`、`plugins/ndf/contracts/forms/pr-body.json`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/lib/worktree-common.sh`、`plugins/ndf/scripts/lib/worktree_deps.py`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/merged_lib/base_sync.py`、`plugins/ndf/scripts/lib/diff_kinds.py`、`plugins/ndf/scripts/lib/assignee_env.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/instructions_lib/declaration.py`、`plugins/ndf/scripts/project_lib/fingerprint.py`、`plugins/ndf/scripts/project_lib/measure_repo.py`、`plugins/ndf/scripts/project_lib/mvv_collect.py`、`plugins/ndf/scripts/tests/test_places_and_forms.py` |
+| #1142 | 実装する | — | （DC7。#3232）`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/facts/branches.json`、`plugins/ndf/contracts/facts/gates.json`、`plugins/ndf/contracts/workflow/stages/`、`plugins/ndf/scripts/lib/workflow_def.py`、`plugins/ndf/contracts/workflow/paces.json`、`plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/lib/pace.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/branch_flow.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/lib/legacy_names.py`、`plugins/ndf/scripts/lib/gate_rejections.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/pr-body-decisions.sh`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/sprint_mvv.py`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/scripts/tests/test_stage_phases.py`、`plugins/ndf/scripts/tests/test_transcript_agents.py`、`plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py`、`plugins/ndf/skills/development-workflow/tests/test_documentation_mode.py`、`plugins/ndf/skills/development-workflow/tests/test_operation_mode.py` |
+| #1142 | 実装する | — | （DC8。#3222）`plugins/ndf/contracts/index.md`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/release_lib/others.py`、`plugins/ndf/scripts/release_lib/carry.py`、`plugins/ndf/scripts/release_lib/materials.py`、`plugins/ndf/scripts/lib/parallel_switch.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/tests/test_owners_after_children.py` |
+| #3153 | 実装する | — | （SF3。既存の Issue）`plugins/ndf/scripts/lib/ci_watch.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__ci-watch.py.json`、`plugins/ndf/scripts/tests/test_ci_watch.py` |
+| #1142 | 実装する | — | （SF1a。#3198）`plugins/ndf/contracts/causes.json`、`plugins/ndf/scripts/lib/causes.py`、`plugins/ndf/contracts/limits.json`、`scripts/contracts_lib/causes_decl.py`、`scripts/check-ndf-contracts.py`、`plugins/ndf/contracts/index.md`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/test_causes.py`、`scripts/tests/test_causes_decl.py` |
+| #1142 | 実装する | — | （SF1b。#3203）`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/lib/proc.py`、`plugins/ndf/scripts/lib/exit_codes.py`、`plugins/ndf/scripts/lib/run_core.py`、`plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__ci-watch.py.json`、`plugins/ndf/scripts/tests/test_step_result.py`、`plugins/ndf/scripts/tests/test_run_core.py`、`plugins/ndf/scripts/acceptance-check.py`、`plugins/ndf/scripts/ask.py`、`plugins/ndf/scripts/behavior-check.py`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/context-policy.py`、`plugins/ndf/scripts/design-match.py`、`plugins/ndf/scripts/design-survey.py`、`plugins/ndf/scripts/doc-lint.py`、`plugins/ndf/scripts/estimate.py`、`plugins/ndf/scripts/gate-rejections.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/mode-materials.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/plan-to-spec-steps.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project-mvv.py`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release-verification-steps.py`、`plugins/ndf/scripts/revise-note.py`、`plugins/ndf/scripts/spec-copy.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/stage-skills.py`、`plugins/ndf/scripts/state-home.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/scripts/lib/design_docs.py`、`plugins/ndf/scripts/lib/design_pr_merge.py`、`plugins/ndf/scripts/lib/drive_pause.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/scripts/lib/gh_pr_info.py`、`plugins/ndf/scripts/lib/gh_pr_status.py`、`plugins/ndf/scripts/lib/glossary_lookup.py`、`plugins/ndf/scripts/lib/json_pick.py`、`plugins/ndf/scripts/lib/lease_stage.py`、`plugins/ndf/scripts/lib/legacy_values.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/merged_range.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_end.py`、`plugins/ndf/scripts/lib/parallel_external_cli.py`、`plugins/ndf/scripts/lib/parallel_guard.py`、`plugins/ndf/scripts/lib/parallel_hold_cli.py`、`plugins/ndf/scripts/lib/parallel_lane_cli.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_machine.py`、`plugins/ndf/scripts/lib/parallel_observe.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/runner_issue_request.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_select.py`、`plugins/ndf/scripts/lib/state_get.py`、`plugins/ndf/scripts/lib/step_read.py`、`plugins/ndf/scripts/lib/tool_paths.py`、`plugins/ndf/scripts/merged_lib/base_sync.py`、`plugins/ndf/scripts/merged_lib/checks.py`、`plugins/ndf/scripts/merged_lib/cleanup_metrics.py`、`plugins/ndf/scripts/merged_lib/main_lock.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/release_lib/bump.py`、`plugins/ndf/scripts/release_lib/changed.py`、`plugins/ndf/scripts/release_lib/deploy.py`、`plugins/ndf/scripts/release_lib/included.py`、`plugins/ndf/scripts/release_lib/instructions.py`、`plugins/ndf/scripts/release_lib/materials.py`、`plugins/ndf/scripts/release_lib/names.py`、`plugins/ndf/scripts/release_lib/promotion.py`、`plugins/ndf/scripts/release_lib/publish.py`、`plugins/ndf/scripts/release_lib/record.py`、`plugins/ndf/scripts/release_lib/version_merge.py`、`plugins/ndf/scripts/supervise_lib/advance.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/supervise_lib/design_stage.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_resume.py`、`plugins/ndf/scripts/supervise_lib/sprint_bundles.py`、`plugins/ndf/scripts/supervise_lib/sprint_inputs.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/worker_steps.py`、`plugins/ndf/scripts/project_lib/mvv_collect.py`、`plugins/ndf/scripts/project_lib/mvv_propose_io.py`、`plugins/ndf/scripts/pr_steps_lib/gh_pr.py`、`plugins/ndf/scripts/relay_lib/hub_client.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/sprint_close_lib/collect.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_actions.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_overhaul.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_owner.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_cmd.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_rank_inputs.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_report.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/results.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py`、`plugins/ndf/skills/cross-review/scripts/drive.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/google-workspace/scripts/gws_common.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py`、`plugins/ndf/scripts/tests/test_step_result_readers.py` |
+| #1142 | 実装する | — | （SF2。#3215）`plugins/ndf/scripts/supervise_lib/routes.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/limits.py`、`plugins/ndf/scripts/supervise_lib/rerun.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/pr.py`、`plugins/ndf/scripts/supervise_lib/worker_steps.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/scripts/tests/test_routes.py`、`plugins/ndf/scripts/tests/test_plan_routes.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/delivery_templates.py`、`plugins/ndf/scripts/supervise_lib/design_steps.py`、`plugins/ndf/scripts/supervise_lib/sprint_close_steps.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/sprint_lane_close.py`、`plugins/ndf/scripts/supervise_lib/sprint_bundles.py`、`plugins/ndf/scripts/tests/test_supervise_step_rerun.py`、`plugins/ndf/scripts/tests/test_push_fix.py`、`plugins/ndf/scripts/tests/test_supervise_limits.py`、`plugins/ndf/scripts/tests/test_supervise.py`、`plugins/ndf/scripts/tests/test_supervise_pace.py`、`plugins/ndf/scripts/tests/test_supervise_design_match.py`、`plugins/ndf/scripts/tests/test_supervise_new.py`、`plugins/ndf/scripts/tests/test_base_sync.py`、`plugins/ndf/scripts/tests/test_supervise_ci_only.py`、`plugins/ndf/scripts/tests/test_sprint_lane_close.py`、`plugins/ndf/scripts/tests/test_design_review_settled.py`、`plugins/ndf/scripts/tests/test_impl_format_steps.py`、`plugins/ndf/scripts/tests/test_sprint_bundles.py`、`plugins/ndf/scripts/tests/test_supervise_prior_inputs.py`、`plugins/ndf/scripts/tests/test_supervise_pace_verify.py`、`plugins/ndf/scripts/tests/test_gate_rejections.py`、`plugins/ndf/scripts/tests/test_project_mvv.py`、`plugins/ndf/scripts/tests/test_review_criteria.py`、`plugins/ndf/scripts/tests/test_usage_ledger.py`、`plugins/ndf/scripts/tests/test_runtime_policy.py`、`plugins/ndf/scripts/tests/test_drive_review.py` |
+| #1142 | 実装する | — | （SF4。#3223）`plugins/ndf/scripts/merged_lib/checks.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/lib/ci_watch.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/agents/supervisor.md`、`plugins/ndf/scripts/tests/test_merge_causes.py`、`plugins/ndf/scripts/tests/test_ci_watch.py`、`plugins/ndf/scripts/tests/test_merged_probe.py` |
+| #1142 | 実装する | — | （SF5。#3224）`plugins/ndf/scripts/supervise_lib/design_steps.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__supervise.py.json`、`plugins/ndf/scripts/tests/test_design_gate.py` |
+| #1142 | 実装する | — | （SF6。#3226）`plugins/ndf/scripts/supervise_lib/judge_call.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/supervise_lib/slow.py`、`plugins/ndf/contracts/forms/judge-answer.json`、`plugins/ndf/contracts/forms/slow-answer.json`、`plugins/ndf/scripts/tests/test_judge_call.py`、`plugins/ndf/scripts/tests/test_slow_step.py`、`plugins/ndf/scripts/tests/test_supervise_slow.py` |
+| #1142 | 実装する | — | （SF7。#3225）`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/scripts/tests/test_queue_waits.py` |
+| #1142 | 実装する | — | （SF8。#3234）`plugins/ndf/scripts/lib/progress_model.py`、`plugins/ndf/scripts/lib/progress_run.py`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/scripts/tests/test_progress_routes.py`、`plugins/ndf/scripts/lib/workflow_def.py` |
+| #1142 | 実装する | — | （SF9。#3207）`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/scripts/lib/parallel_answer.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/scripts/tests/test_parallel_wait_next.py` |
+| #1142 | 実装する | — | （SF10。#3208）`plugins/ndf/scripts/preflight.py`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__preflight.py.json`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/scripts/tests/test_preflight.py` |
+| #1142 | 実装する | — | （SF11。#3209）`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/scripts/tests/test_sprint_loop_next.py`、`plugins/ndf/scripts/tests/test_sprint_loop.py` |
+| #1142 | 実装する | — | （SF12。#3216）`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/skills/development-workflow/references/interrupt-resume.md`、`plugins/ndf/scripts/tests/test_interrupt_next.py`、`plugins/ndf/scripts/tests/test_token_guard.py` |
+| #1142 | 実装する | — | （SF13。#3227）`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/handoff.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/revise-note.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/ask_policy.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/scripts/tests/test_routes_answer.py` |
+| #1142 | 実装する | — | （K1。#3217）`plugins/ndf/scripts/lib/md.py`、`plugins/ndf/scripts/lib/gh_sections.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__gh_sections.py--fence-regex--wrapped.json`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__wait_notice.py--fence-regex--wrapped.json`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/parallel-measure.py`、`plugins/ndf/scripts/wait-notify.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep.py`、`plugins/ndf/skills/cross-review/scripts/drive.py`、`plugins/ndf/skills/cross-review/scripts/state.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py`、`plugins/ndf/scripts/tests/test_gh_parts.py`、`plugins/ndf/scripts/tests/test_wait_notify.py` |
+| #1142 | 実装する | — | （K2。#3235）`plugins/ndf/scripts/lib/pace.py`、`plugins/ndf/scripts/lib/pathmatch.py`、`plugins/ndf/scripts/lib/textparse.py`、`plugins/ndf/scripts/lib/comment_mask.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/skills/cross-review/scripts/state.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/scripts/experimental/queue-overlap-replay.py`、`plugins/ndf/scripts/experimental/selection-replay.py`、`plugins/ndf/scripts/tests/test_pace.py` |
+| #1142 | 実装する | — | （K3。#3210）`plugins/ndf/scripts/lib/notify.py`、`plugins/ndf/scripts/lib/jev.py`、`plugins/ndf/scripts/lib/refresh.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__jev.py--urllib.request--wrapped.json`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__refresh.py--urllib.request--wrapped.json`、`plugins/ndf/scripts/instructions-check.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/scripts/tests/test_refresh.py`、`plugins/ndf/scripts/tests/test_instructions_check.py`、`plugins/ndf/scripts/tests/test_jev.py` |
+| #1142 | 実装する | — | （W1。#3238）`plugins/ndf/scripts/check-trigger.py`、`plugins/ndf/scripts/design-match.py`、`plugins/ndf/scripts/lib/closing-issues.sh`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/parallel_external.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_release.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_switch.py`、`plugins/ndf/scripts/lib/post_requests.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/lib/project_mvv.py`、`plugins/ndf/scripts/lib/report_fields.py`、`plugins/ndf/scripts/lib/revise_note.py`、`plugins/ndf/scripts/lib/run_state.py`、`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_gate2.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/test_triage.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/project_lib/merge.py`、`plugins/ndf/scripts/refactor-scope.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/absorb.py`、`plugins/ndf/scripts/supervise_lib/actuals.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/delivery_templates.py`、`plugins/ndf/scripts/supervise_lib/design_stage.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/pr.py`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/scripts/supervise_lib/prompts.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/queue_resume.py`、`plugins/ndf/scripts/supervise_lib/release_flow.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/slow.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_close_steps.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/test-run.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/agents/supervisor.md`、`plugins/ndf/agents/supervisor-waits.md`、`plugins/ndf/contracts/forms/ndf-next-block.json` |
+| #1142 | 実装する | — | （W2。#3239）`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/lib/result_posts.py`、`plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/skills/cross-review/scripts/_tmpdir.sh`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/skills/cross-review/scripts/critique-round.sh`、`plugins/ndf/skills/cross-review/scripts/critique.sh`、`plugins/ndf/skills/cross-review/scripts/drive.py`、`plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh`、`plugins/ndf/skills/cross-review/scripts/measure.py`、`plugins/ndf/skills/cross-review/scripts/monitor.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/init.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/judge.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/loop.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/merge_fix.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/read_result.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/report.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/start_round.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/verify_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/github.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/posts.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/workspace.py`、`plugins/ndf/skills/cross-review/scripts/rotate-pr.sh`、`plugins/ndf/skills/cross-review/scripts/state.py`、`plugins/ndf/skills/cross-review/scripts/wait-review.sh` |
+| #1142 | 実装する | — | （W3。#3236）`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/bg-wait.sh`、`plugins/ndf/scripts/lib/launch-cli.sh`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/scripts/lib/monitor_loop.py`、`plugins/ndf/scripts/lib/monitor_outcome.py`、`plugins/ndf/scripts/lib/monitor_patterns.py`、`plugins/ndf/scripts/lib/monitor_proc.py`、`plugins/ndf/scripts/lib/monitor_types.py`、`plugins/ndf/scripts/lib/run_metrics.py`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/scripts/lib/usage_aggregate.py`、`plugins/ndf/scripts/parallel-measure.py`、`plugins/ndf/scripts/usage-report.py` |
+| #1142 | 実装する | — | （W4。#3218）`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/launch-cli.sh`、`plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/__init__.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/allocation.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/baseline.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/budget.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/assess.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/converge.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/final_fix.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/gate.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/implement.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/phases.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/plan.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/propose.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/readopt.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/danger.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/forecast.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/github.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/intake.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/items.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/ledger.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/measure.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/outbound.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/paths.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/phases.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/plan.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/process.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/proposals.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/publish.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/results.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/targets.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/timeline.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/trailers.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/triage.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/verify.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/worktree.py` |
+| #1142 | 実装する | — | （W5。#3237）`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/hook_lib/issue_guard.py`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/lib/git-credential.sh`、`plugins/ndf/scripts/lib/hook_python.py`、`plugins/ndf/scripts/lib/projects-common.sh`、`plugins/ndf/scripts/lib/state_checkout.py`、`plugins/ndf/scripts/lib/state_home.py`、`plugins/ndf/scripts/lib/worktree-branch.sh`、`plugins/ndf/scripts/lib/worktree-common.sh`、`plugins/ndf/scripts/lib/worktree-copy.sh`、`plugins/ndf/scripts/lib/worktree-declaration.sh`、`plugins/ndf/scripts/lib/worktree-registry.sh`、`plugins/ndf/scripts/lib/worktree-testenv-sweep.sh`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/lib/worktree_deps.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/state-home.py`、`plugins/ndf/scripts/worktree-deps.sh`、`plugins/ndf/scripts/worktree-guard.sh`、`plugins/ndf/scripts/worktree-localenv.sh`、`plugins/ndf/scripts/worktree-session.sh`、`plugins/ndf/scripts/worktree-setup.sh`、`plugins/ndf/scripts/worktree-testenv.sh`、`plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh` |
+| #1142 | 実装する | — | （W6。#3233）`plugins/ndf/scripts/lib/claude_api_keys.py`、`plugins/ndf/scripts/relay_lib/__init__.py`、`plugins/ndf/scripts/relay_lib/claude.py`、`plugins/ndf/scripts/relay_lib/common.py`、`plugins/ndf/scripts/relay_lib/install.py`、`plugins/ndf/scripts/relay_lib/mark.py`、`plugins/ndf/scripts/relay_lib/record.py`、`plugins/ndf/scripts/relay_lib/run.py`、`plugins/ndf/scripts/relay_lib/runtime.py`、`plugins/ndf/scripts/relay_lib/shellrc.py`、`plugins/ndf/scripts/relay_lib/switch.py` |
+| #1142 | 実装する | — | （W7。#3240）`plugins/ndf/scripts/instructions-check.py`、`plugins/ndf/scripts/instructions_lib/collect.py`、`plugins/ndf/scripts/instructions_lib/declaration.py`、`plugins/ndf/scripts/instructions_lib/findings.py`、`plugins/ndf/scripts/instructions_lib/versions.py`、`plugins/ndf/scripts/lib/assignee_env.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/lib/delivery.py`、`plugins/ndf/scripts/lib/formatting.py`、`plugins/ndf/scripts/lib/glossary_lookup.py`、`plugins/ndf/scripts/lib/glossary_words.py`、`plugins/ndf/scripts/lib/jev.py`、`plugins/ndf/scripts/lib/limits.py`、`plugins/ndf/scripts/lib/loop_drive.py`、`plugins/ndf/scripts/lib/proc.py`、`plugins/ndf/scripts/lib/statefile.py`、`plugins/ndf/scripts/lib/waits.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/merged_lib/checks.py`、`plugins/ndf/scripts/merged_lib/main_lock.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/merged_lib/probe_table.py`、`plugins/ndf/scripts/merged_lib/pull.py`、`plugins/ndf/scripts/merged_lib/trash.py`、`plugins/ndf/scripts/pr-body-decisions.sh`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/pr_steps_lib/gh_pr.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release-verification-steps.py`、`plugins/ndf/scripts/release_lib/deploy.py`、`plugins/ndf/scripts/release_lib/materials.py`、`plugins/ndf/scripts/release_lib/others.py`、`plugins/ndf/scripts/release_lib/promotion.py`、`plugins/ndf/scripts/release_lib/step_run.py`、`plugins/ndf/scripts/release_lib/version_merge.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_depth.py`、`plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py`、`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` |
+| #1142 | 実装する | — | （W8。#3241）`.ndf/glossary.json` |
 
 ## ドメインモデル
+
+**この節から後ろは、スプリント 1〜2c の設計である。** 数は 2026-09-26 03:30 UTC に測った値である（`python3 /tmp/ndf-measure-1142/structure.py plugins/ndf`）。
+ファイル 128 本・48,394 行（Issue の本文の表から 531 行増えた）、1000 行を超えるファイル 6 本、2 つ以上のファイルで
+同じ名前を持つ最上位の関数 86 名（199 件）。
 
 ### コンテキスト
 
@@ -21,14 +156,14 @@
 | コンテキスト | 用語集の `id` | 何の語が 1 つの意味に決まるか |
 | --- | --- | --- |
 | ライブラリ | `ndf-workflow` | 時刻・JSON・git / gh の呼び出し・リポジトリの識別・結果 JSON・使用量の帳簿 |
-| プランの実行 | `ndf-workflow` | プラン・ステップ・フェーズレポート・ミッション状態ファイル・承認ゲート・検査のトリガー |
+| プランの実行 | `ndf-workflow` | プラン・ステップ・フェーズレポート・スプリント状態ファイル・承認ゲート・検査のトリガー |
 | 収束ループ | `ndf-cross-review` / `ndf-cross-refactoring` | ラウンド・指摘・drive の状態・レビューの状態・リファクタリング計画 |
 | リリース | `ndf-release` | 版・リリースプラン・リリース記録・マージの待ち |
 | worktree | `ndf-worktree` | 宣言・書き込み先・テスト環境のレジストリ |
 | ラッパー | `ndf-relay` | セッション・シグナルファイル・ラッパーのバージョンディレクトリ |
 | 記録と測定 | `ndf-workflow` | 実行の要約・会話の記録・キュー・通知 |
 | 外部 CLI の起動 | `ndf-agent-cli` | スロット・起動の上限時間・監視の結果 |
-| 文書の検査 | `ndf-instructions` / `ndf-issue-upkeep` | 用語集・指示書・仕様のコピー・課題の棚卸し |
+| 文書の検査 | `ndf-instructions` / `ndf-issue-upkeep` | 用語集・指示書・仕様のコピー・Issue の棚卸し |
 
 **コンテキストの間は「公表された言語」でやり取りする。** 言語は結果 JSON（`lib/README.md` の契約）と
 状態ファイルの形である。プランの実行は `drive.py` の結果 JSON の `metrics` だけを読み、レビューの状態の
@@ -45,7 +180,7 @@
 | リリース | プランの実行 | 公開ホストサービス / 順応者 | `release-steps.py` などの結果 JSON |
 | worktree | プランの実行・収束ループ | 公開ホストサービス / 順応者 | 宣言と書き込み先の出力 |
 | 文書の検査 | プランの実行 | 公開ホストサービス / 順応者 | 検査のスクリプトの結果 JSON |
-| プランの実行 | 記録と測定 | 公開ホストサービス / 順応者 | 実行の状態・ミッション状態ファイルの形（I11） |
+| プランの実行 | 記録と測定 | 公開ホストサービス / 順応者 | 実行の状態・スプリント状態ファイルの形（I11） |
 | ラッパー | プランの実行 | 公開ホストサービス / 順応者 | `ndf-next` のブロックの形とシグナルファイル（`next.json`）。ブロックを解析して `next.json` へ書くのは `relay.py mark`（Stop hook）で、`mission-state.py next`・`token-guard.sh` はその形に従ってブロックを出す |
 ### 集約
 
@@ -55,7 +190,7 @@
 | --- | --- | --- | --- | --- |
 | プラン | `supervise_lib.templates`（`new` が書く） | `plan.json` | ステップ | ステップの型・条件 |
 | 実行の状態 | `supervise_lib.state.RunState` | `<プラン>-state/` | ステップの記録 | `ClaudeCall`・件数 |
-| ミッション状態ファイル | `mission-state.py` | `mission.json` | プラン・承認ゲートの記録 | 版 |
+| スプリント状態ファイル | `mission-state.py` | `mission.json` | プラン・承認ゲートの記録 | 版 |
 | レビューの状態 | `review_lib.store.ReviewStore` | `cross-review-pr<N>-state.json` | ラウンド・指摘 | `final`・`sweep` |
 | drive の状態 | 各 Skill の `drive.py` の `Drive` | `drive-pr<N>.json` / `drive-rf<ID>.json` | — | `stage`・`init_vars` |
 | リファクタリング計画 | `refactor_lib`（今のまま） | 状態ファイル | 改善項目 | 配分 |
@@ -72,13 +207,13 @@
 | --- | --- | --- | --- |
 | I1 | （ライブラリ） | ライブラリのモジュールは、ライブラリ・標準ライブラリ・依存の宣言（`plugins/ndf/pyproject.toml` の extra）に載る外部パッケージだけを import する。標準ライブラリは `sys.stdlib_module_names` に載るモジュールを指す | 構造チェックが落とす |
 | I2 | ラッパーのバージョンディレクトリ | バージョンディレクトリの中のモジュールは、バージョンディレクトリの中と標準ライブラリだけを import する（外部パッケージを使わない。決定 17） | 構造チェックが落とす |
-| I3 | （全体） | エントリポイントのパス・副命令・引数・出力の形は移行の前後で同じ。例外は移行の文書の「変えるエントリポイント」だけ | 契約テストが落とす |
+| I3 | （全体） | エントリポイントのパス・副命令・引数・出力の形は移行の前後で同じ。例外は移行の文書の「変えるエントリポイント」だけ。スプリント 1〜2c の記録で、残りの実装には当てない（決定 65） | 契約テストが落とす |
 | I4 | （全体） | 本体の同じ関数が 2 つのファイルに無い。同じ名前で本体の違う関数は例外リストに載る | 構造チェックが落とす |
 | I5 | （全体） | テストを除くスクリプトは 500 行以下（区分は `markdown-writing` のルール 9 と同じ。300 行は目安）。例外は例外リストに理由と行数付きで載り、載せた行数を超えない（ラチェット）。新しく作るファイルは例外リストに載せない（決定 18） | 構造チェックが落とす |
-| I6 | （全体） | 既定で動くものは `experimental/` を import しない。向きは試行 → 安定だけ | 既存の `test_experimental.py` が落とす |
+| I6 | （全体） | 既定で動くものは `experimental/` を import しない。向きは実験版 → 安定版だけ | 既存の `test_experimental.py` が落とす |
 | I7 | drive の状態 | `stage` が `sweep` か `done` で `init_vars` があるとき、`drive.py` は `init` を打たずに `init_vars` を使う。これでレビューの状態の `final` を同じ PR の空の状態で上書きさせない | `sweep` から打ち直して `metrics.rounds` が 0 でないテストが落とす |
 | I8 | 使用量の帳簿 | `claude -p` の 1 回の呼び出しにつき 1 行を追記し、既存の行を書き換えない | 追記に失敗しても呼び出しの結果は返し、stderr に 1 行を出す |
-| I9 | ラッパーのバージョンディレクトリ | バージョンディレクトリを書き終えてから `relay.current` を 1 回の原子的な書き込みで替える | 書き終わらないバージョンディレクトリは `relay.current` から指されず、次の起動で消える |
+| I9 | ラッパーのバージョンディレクトリ | バージョンディレクトリを書き終えてから `relay.current` を 1 回のアトミックな書き込みで替える | 書き終わらないバージョンディレクトリは `relay.current` から指されず、次の起動で消える |
 | I10 | （移行） | 移行ステップは 1 本の PR で閉じ、その revert 1 つで 1 つ前に戻る | 戻せない形の PR は分ける |
 | I11 | 状態ファイル | 状態ファイルの形は変えない。変えるのはキーの追加だけ | 読む側のテストが落とす |
 | I12 | （全体） | 1 つの集約のファイルを書くモジュールは 1 つ | 構造チェックの書き手の表で見る（テスト設計） |
@@ -92,13 +227,13 @@
 | --- | --- | --- | --- |
 | E1 | 移行の前の基準を測った | conductor（計測の 2 本） | 設計（この文書の数） |
 | E2 | スクリプトの語を用語集に揃えた | `requirements-design` | 設計（用語の表） |
-| E3 | 設計を承認した（承認ゲート 1） | 利用者 | 移行ステップ S1〜S3 |
+| E3 | 設計を承認した（設計承認ゲート） | 利用者 | 移行ステップ S1〜S3 |
 | E4 | ライブラリを 1 か所へまとめた | 移行ステップ L0 | コンテキストの移行ステップ C1〜C7 |
 | E5 | コンテキストごとのモジュールへ移した | C1〜C7 | 語の移行ステップ W1〜W7 |
 | E6 | エントリポイントの形が変わらないことを確かめた | 各移行ステップの契約テスト | 開発版のリリースプラン |
 | E7 | 開発版を導入して確かめた | `release-verification-steps.py verify-install` | 本番のリリースプラン |
-| E8 | 本番を承認した（承認ゲート 2） | 利用者 | 次のミッション |
-| E9 | 移行の後を同じ物差しで測り直した | conductor（E1 と同じ 2 本） | 振り返り（課題のコメント） |
+| E8 | 本番を承認した（リリース承認ゲート） | 利用者 | 次のスプリント |
+| E9 | 移行の後を同じ物差しで測り直した | conductor（E1 と同じ 2 本） | 振り返り（Issue のコメント） |
 
 ### 用語
 
@@ -108,7 +243,7 @@
 | ラッパーのバージョンディレクトリ | `~/.claude/ndf/` に版ごとに置く、ラッパーの `relay_lib/` と使うライブラリのコピー | 追加（`ndf-relay`） |
 | ランチャー | `~/.claude/ndf/relay.py`（プラグインの `scripts/relay.py` と同じバイト列）。使うバージョンディレクトリを選び、`relay_lib` を読み込んで起動するだけのエントリポイント | 追加（`ndf-relay`） |
 | drive の状態 | 収束ループの `drive.py` が PR ごとに持つ状態ファイル（`drive-pr<N>.json` / `drive-rf<ID>.json`）。`stage` と `init_vars` を持つ | 追加（`ndf-cross-review`） |
-| 構造チェック | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック | 追加（`ndf-workflow`） |
+| 構造チェック | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える CI のチェック | 追加（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -116,7 +251,7 @@
 | --- | --- | --- |
 | F1 | 時刻・JSON・git / gh・リポジトリの識別・drive の部品を 1 つの関数で呼ぶ | スクリプトを直す worker |
 | F2 | 1 つの責務を 500 行以下のモジュールで読む | スクリプトを直す worker |
-| F3 | 行数と重複を継続的統合で落とす | レビューする者 |
+| F3 | 行数と重複を CI で落とす | レビューする者 |
 | F4 | 即時修正を「テスト → PR → `merge-when-green`」のプランで流す（不足 a） | conductor |
 | F5 | conductor が直に使うエントリポイントを 1 か所で引く（不足 b） | conductor |
 | F6 | 本番のリリースプランが、差分のある ndf 以外のプラグインの版も上げる（不足 c） | conductor |
@@ -133,7 +268,7 @@
 | 要素 | 責務 |
 | --- | --- |
 | `lib/clock.py`（新設） | 今の時刻・ISO の書き出しと読み取り・秒の差。書き出しの形は引数で選ぶ |
-| `lib/jsonio.py`（新設） | JSON の読み（無いとき・壊れたときの扱いを引数で選ぶ）と原子的な書き込み |
+| `lib/jsonio.py`（新設） | JSON の読み（無いとき・壊れたときの扱いを引数で選ぶ）とアトミックな書き込み |
 | `lib/proc.py`（新設） | 子プロセス・git の起動。失敗は `StepError(msg, code)` に揃える |
 | `lib/repo.py`（新設） | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ |
 | `lib/loop_drive.py`（新設） | 2 つの `drive.py` が使う `call`・`parse_vars`・`review_status` |
@@ -150,8 +285,8 @@
 | `refactor_lib/gitfacts.py`（分割） | コミットの事実だけを残し、パスの判定・プロセス・GitHub・worktree・公開・結果の 6 本へ分ける |
 | `release-steps.py`（変更） | 差分のあるプラグインを列挙する副命令 `changed-plugins` |
 | `mvv-gate.py`（変更） | 設計の判定で PR の `issues/` の設計文書を材料に足す |
-| `scripts/check-script-structure.py`（新設、リポジトリ根） | 構造チェック。例外リストは `scripts/script-structure-allow/` |
-| `scripts/measure/`（新設、リポジトリ根） | E1 と E9 の計測の 2 本（`structure-baseline.py`・`claude-p-usage.py`） |
+| `scripts/check-script-structure.py`（新設、リポジトリのルート） | 構造チェック。例外リストは `scripts/script-structure-allow/` |
+| `scripts/measure/`（新設、リポジトリのルート） | E1 と E9 の計測の 2 本（`structure-baseline.py`・`claude-p-usage.py`） |
 | `development-workflow/references/conductor-entrypoints.md`（新設） | conductor が直に使うエントリポイントの一覧 |
 
 **構成要素図**（依存は矢印の向きだけ。ライブラリから外へ向かう矢印は無い）
@@ -207,7 +342,7 @@ graph LR
     NDF --> GH[GitHub の API と gh]
     NDF --> CL[claude / codex / kiro / agy の CLI]
     NDF --> ST[利用者の端末の状態の置き場]
-    CI[継続的統合] --> NDF
+    CI[CI] --> NDF
 ```
 
 **配置**（ラッパーだけが、プラグインのキャッシュの外で動く）
@@ -335,7 +470,7 @@ classDiagram
 ### 実行の状態の置き場所
 
 `<プラン>-state/` のパスは変えない（I3）。**プランのファイルが一時ディレクトリの下にあるときだけ、実体を
-`${XDG_STATE_HOME}/ndf/sv/<stem>-<プランの絶対パスの sha256 の先頭 8 字>/` に作り、`<プラン>-state` を
+`${XDG_STATE_HOME}/ndf/sv/<stem>-<プランの絶対パスの sha256 の先頭 8 文字>/` に作り、`<プラン>-state` を
 そこへのシンボリックリンクにする。** 実体にはプランのコピー `plan.json` も置く。`state.json` の `log[]` の
 各ステップの `llm` には、キー `cache_write_5m`・`cache_write_1h`・`models` を足す（I11）。
 
@@ -349,17 +484,17 @@ classDiagram
 ```text
 ~/.claude/ndf/
 ├── relay.py                      # ランチャー（プラグインの scripts/relay.py と同じバイト列）
-├── relay.current                 # 使うバージョンディレクトリの名前 1 行。原子的に書き換える
+├── relay.current                 # 使うバージョンディレクトリの名前 1 行。アトミックに書き換える
 ├── relay.version                 # 今のまま（版の記録）
-└── relay-<版>-<digest 8 字>/
+└── relay-<版>-<digest 8 文字>/
     ├── relay_lib/                # バージョンディレクトリの中身
     ├── lib/clock.py  lib/jsonio.py
     ├── inuse-<pid>               # このバージョンディレクトリを使っている run ごとに 1 つ。run が終わるときに消す
     └── MANIFEST                  # バージョンディレクトリのファイルと sha256。digest はこの内容の sha256
 ```
 
-時系列の扱い: 帳簿と `log.jsonl` は追記だけのイベントログ。バージョンディレクトリは版ごとに新しく作り、古い
-バージョンディレクトリは `startup` が「`relay.current` が指さず、生きている pid の `inuse-<pid>` も無い」ものを 2 つを残して消す。
+時系列の扱い: 帳簿と `log.jsonl` は追記だけのイベントログ。バージョンディレクトリは版ごとに新しく作る。
+古いバージョンディレクトリは、`startup` が「`relay.current` が指さず、生きている pid の `inuse-<pid>` も無い」ものを、2 つを残して消す。
 
 ### CRUD 図
 
@@ -379,8 +514,10 @@ classDiagram
 
 ## 処理の流れ
 
-図に現れない構成要素は、呼び出しの順序を変えずに置き場所だけが変わるもの（ライブラリの変更・`worktree-common.sh`・
-`monitor.py`・`instructions-check.py`）と、1 つのスクリプトの中で閉じるもの（`release-steps.py`・`mvv-gate.py`・構造チェック・計測・一覧）である。
+図に現れない構成要素は、次の 2 種類である。
+
+- 呼び出しの順序を変えずに、置き場所だけが変わるもの: ライブラリの変更・`worktree-common.sh`・`monitor.py`・`instructions-check.py`
+- 1 つのスクリプトの中で閉じるもの: `release-steps.py`・`mvv-gate.py`・構造チェック・計測・一覧
 
 ### claude の呼び出しと帳簿
 
@@ -430,7 +567,7 @@ sequenceDiagram
     H->>B: ensure(版)
     B->>F: relay-版-digest.tmp へコピーする
     B->>F: rename で relay-版-digest へ
-    B->>F: relay.current を原子的に書く（I9）
+    B->>F: relay.current をアトミックに書く（I9）
     Note over R: 起動時に全モジュールを import 済みのため影響しない
     B->>F: 指されない古いバージョンディレクトリを 2 つ残して消す
 ```
@@ -440,22 +577,15 @@ sequenceDiagram
 
 ### 移行ステップの流れ
 
-```mermaid
-graph LR
-    A[触るファイルが他の PR と重ならないか見る] --> B[移すものに現状固定テストが無ければ足す]
-    B --> C[移す・テストの差し替え先を移す]
-    C --> D[範囲テスト・全体テスト・構造チェック・契約テスト]
-    D -- 落ちた --> E[その移行ステップを戻す]
-    D -- 通った --> F[PR と merge-when-green]
-```
+スプリント 1〜2c の流れ（現状固定テストを足してから移す）は、残りの実装には当てない。残りの実装のテストと戻し方は決定 65・66（[issue-1142-design-decisions.md](issue-1142-design-decisions.md) ）にある。
 
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 性能・拡張性 | worker がスクリプトを 1 つ直すときに読むファイルの大きさの中央値が、移行の前より小さい | 500 行を上限に責務ごとのモジュールへ分け、エントリポイントは解析だけにする | E1 と E9 で `measure/structure-baseline.py` の中央値を比べる |
-| 運用・保守性 | 並列のミッションが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない | コンテキストのパッケージに分け、ライブラリの変更を L0 に集める | 移行の前後 10 本の PR の変更ファイルの重なりを `measure/structure-baseline.py --prs` で数える |
-| 移行性 | 途中の版を導入した利用者の手順が変わらない。どの移行ステップでも 1 つ前へ戻せる | エントリポイントを残し中身だけ移す。語は読む側が新旧を受ける。1 移行ステップ 1 PR（I10） | 開発版ごとの `verify-install`。各 PR の revert を手元で当てて全体テスト |
+| 運用・保守性 | 並列のスプリントが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない | コンテキストのパッケージに分け、ライブラリの変更を L0 に集める | 移行の前後 10 本の PR の変更ファイルの重なりを `measure/structure-baseline.py --prs` で数える |
+| 移行性 | 途中の版を導入した利用者の手順が変わらない。どの移行ステップでも 1 つ前へ戻せる | スプリント 1〜2c の記録。残りの実装は後方互換を置かない（決定 65） | 残りの実装は決定 65・66 |
 | システム環境 | Python 3.10 以上・bash 3.2 で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーは用意済みの環境の python を直に起動し、`uv run` を挟まない（決定 20） | `clock.parse` が `Z` を置き換えてから `fromisoformat` を呼ぶ。シェルは既存の移植性テストの対象の `lib/` 直下に置く。外部パッケージは `deps.require()` が uv の環境へ起動し直して使う（決定 17） | Python 3.10 で全体テスト（`uv run --python 3.10`）。`test_portability.py`。`deps.require()` のテスト（uv が無い・起動し直しの後も import できない・入れられない） |
 
 ## テスト設計
@@ -467,20 +597,20 @@ graph LR
 | 移行の後に測り直して比べる | X2 で E1 と同じ 2 本を打ち、表で比べる |
 | 設計文書にモデル・責務・移行の順序がある | 設計 PR のレビュー |
 | エントリポイントの一覧と変えるものがある | 設計 PR のレビュー（移行の文書） |
-| 500 行を超えるファイルが例外リストの外に無く、例外リストの行数が増えない（I5） | `check-script-structure.py` の行数の検査（継続的統合）。例外リストの行数を 1 行超えたファイルと、例外リストに載る新しいファイルで落ちるテスト |
-| 概念ごとに実装が 1 つ・チェックが継続的統合で走る（I4） | 同じ構造チェックの重複の検査。本体の比較は docstring・型注釈・関数名を除く |
+| 500 行を超えるファイルが例外リストの外に無く、例外リストの行数が増えない（I5） | `check-script-structure.py` の行数の検査（CI）。例外リストの行数を 1 行超えたファイルと、例外リストに載る新しいファイルで落ちるテスト |
+| 概念ごとに実装が 1 つ・チェックが CI で走る（I4） | 同じ構造チェックの重複の検査。本体の比較は docstring・型注釈・関数名を除く |
 | 即時修正を 1 つのエントリポイントで流せる（a） | `test_supervise_new.py` に `new fix` のプランの形のテスト |
 | 一覧が 1 か所にある（b） | `check-markdown-links.py` と、一覧に載るスクリプトが実在するかのテスト |
 | 他のプラグインの版を上げる（c） | `changed-plugins` のテスト（mcp-serena だけを変えた一時リポジトリ）と、本番のテンプレートのテスト |
 | 実際のラウンド数と指摘数を返す（d・I7） | `sweep` まで進めた drive の状態から `drive.py` を打ち直し、`metrics.rounds` が 0 でないテスト |
 | 設計文書が材料に渡る（e） | `issues/x-design.md` を変更ファイルに持つ PR を差し替えた `mvv-gate.py` のテスト |
 | 消費が版ごとの集計に入る（f・I8） | `ClaudeRunner` のテスト（帳簿に 1 行・5 分と 1 時間が分かれる）、追記の失敗のテスト、`token-usage.py` が帳簿を読むテスト、一時ディレクトリの下のプランの状態がシンボリックリンクになるテスト |
-| 既存のテストが置き換え先の変更だけで通る | 各移行ステップの差分のうち `tests/` の変更が import と差し替え先だけかを、レビューの観点に入れる |
+| 既存のテストが置き換え先の変更だけで通る | スプリント 1〜2c の記録。残りの実装には当てない（決定 66） |
 | エントリポイントの形が変わらない（I3） | `scripts/tests/test_entrypoints.py`（新設）が一覧の各エントリポイントの `--help` の副命令と、代表の出力の形を固定する |
-| `build-runtime-plugins.sh --check` が通り、配布物に新しいモジュールが入る | `--check` と、開発版の `verify-install` の後に 3 ランタイムの導入先で `supervise_lib` などの有無を見る |
+| `build-runtime-plugins.sh --check` が通り、リリース対象に新しいモジュールが入る | `--check` と、開発版の `verify-install` の後に 3 ランタイムの導入先で `supervise_lib` などの有無を見る |
 | 複製が 1 回の導入で動く（F10・I2・I9） | `test_relay.py` にバージョンディレクトリの作成・切り替え・古いバージョンディレクトリの削除（生きている pid の `inuse-<pid>` があるものは残す）・書きかけのバージョンディレクトリが指されないテスト。手動確認はラッパーの下でセッションを 1 回切り替える |
 | I1・I2・I13 | 構造チェックの import の検査（ライブラリとバージョンディレクトリの中身の import 先を構文木で見る。`hook.py` から import でたどれるモジュールが `deps.require()` を呼ばないこと、`plugins/*/hooks/*.json` の command が `uv run` を挟まないこと（`hook-deps`）） |
-| 外部パッケージを固定して使え、uv が無ければ入れる（h・F13） | `test_deps.py`（uv を置いた・置かない一時の `PATH`、`NDF_DEPS_REEXEC` での打ち切り、入れられないときの終了コード 3）。試行で 4 ランタイムからの起動し直しと 304 が上限に数えられないことを確かめ、結果を課題のコメントに残す |
+| 外部パッケージを固定して使え、uv が無ければ入れる（h・F13） | `test_deps.py`（uv を置いた・置かない一時の `PATH`、`NDF_DEPS_REEXEC` での打ち切り、入れられないときの終了コード 3）。試しに 4 ランタイムからの起動し直しと 304 が上限に数えられないことを確かめ、結果を Issue のコメントに残す |
 | I6 | 既存の `test_experimental.py` |
 | I10 | 各 PR のテスト計画に revert の確認を載せる |
 | I11 | 状態ファイルを読む側の既存テストと、足したキーの読み書きのテスト |
@@ -490,9 +620,9 @@ graph LR
 
 | 項目 | 内容 |
 | --- | --- |
-| 並列のミッションとの重なり | 移行ステップの着手の時点で開いている PR の変更ファイルを見るまで決まらない。重なれば順序を入れ替える（E5） |
-| bash 3.2 の実機 | 継続的統合に bash 3.2 が無い。検査は文字列の照合だけで、実機での読み込みは macOS の利用者の開発版の確認で見る |
+| 並列のスプリントとの重なり | 移行ステップの着手の時点で開いている PR の変更ファイルを見るまで決まらない。重なれば順序を入れ替える（E5） |
+| bash 3.2 の実機 | CI に bash 3.2 が無い。検査は文字列の照合だけで、実機での読み込みは macOS の利用者の開発版の確認で見る |
 | hook の速さ | `worktree-common.sh` を分けても、guard は全部を読むため速くならない。ほかの hook が速くなるかは C5 で測る |
 | `claude -p` の出力の形 | `modelUsage` と `cache_creation` のキーは 2026-09-26 に 1 回確かめただけ。帳簿は受けた形をそのまま残し、読む側で欠けを許す |
-| ラッパーのバージョンディレクトリと macOS | `rename` と原子的な書き込みの振る舞いは Linux でだけ確かめる。macOS の利用者の開発版の確認で見る |
+| ラッパーのバージョンディレクトリと macOS | `rename` とアトミックな書き込みの振る舞いは Linux でだけ確かめる。macOS の利用者の開発版の確認で見る |
 | 計測の 2 本の置き場所 | 本文は「設計 PR で `scripts/` へ移す」と書くが、設計 PR は文書だけを載せる。S1 で移す（決定 12） |
