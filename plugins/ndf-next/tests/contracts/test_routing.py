@@ -63,3 +63,16 @@ def test_backoff_grows_and_is_capped():
     assert routing.backoff(p, 0, 999, 100) == 50
     flat = limits.Policy(name="x.y", summary="s", interval=10)
     assert routing.backoff(flat, 3, None, None) == 10
+
+
+# 現状固定（I-017）: 打ち直しに retry_after が要るかは表の requires_retry_after から決まる。
+def test_pick_reads_requires_retry_after_from_the_table(contracts_copy):
+    state = routing.RetryState(0, limits.policy("cause.infra-wait"), None, None)
+    assert routing.pick("infra_wait", {}, None, state) == routing.Route("retry", None, 600.0, "infra_wait")
+    contracts_copy(
+        "causes.json",
+        lambda d: {**d, "causes": [{**c, "requires_retry_after": True} if c["kind"] == "infra_wait" else c for c in d["causes"]]},
+    )
+    assert routing.pick("infra_wait", {}, None, state) == routing.Route("human", None, 0.0, "infra_wait")
+    assert routing.pick("infra_wait", {}, "f", state) == routing.Route("step", "f", 0.0, "infra_wait")
+    assert routing.pick("infra_wait", {}, None, state._replace(retry_after=7.0)) == routing.Route("retry", None, 7.0, "infra_wait")
