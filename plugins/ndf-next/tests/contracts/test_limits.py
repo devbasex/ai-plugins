@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ndf import contracts
 from ndf.contracts import limits
 
 
@@ -62,3 +63,35 @@ def test_missing_declaration_stops(contracts_copy):
     (contracts_copy.root / "limits.json").unlink()
     with pytest.raises(limits.LimitsError):
         limits.table()
+
+
+# 現状固定（I-006）: 値の鍵は Policy の欄（name・summary を除く）と宣言の形の値の鍵の 3 か所が同じ集合を持つ。
+_SCHEMA_VALUE_KEYS = ("seconds", "interval", "factor", "max_interval", "per_call", "attempts", "same_cause", "count")
+
+
+def test_value_keys_match_policy_fields_and_schema():
+    schema = contracts.load_json(limits.SCHEMA)
+    declared = schema["properties"]["policies"]["additionalProperties"]["properties"]
+    assert set(declared) - {"summary"} == set(_SCHEMA_VALUE_KEYS)
+    assert set(limits.Policy._fields) - {"name", "summary"} == set(_SCHEMA_VALUE_KEYS)
+
+
+@pytest.mark.parametrize("key", _SCHEMA_VALUE_KEYS)
+def test_value_reads_every_value_key(contracts_copy, key):
+    contracts_copy("limits.json", lambda d: {**d, "policies": {"a.b": {"summary": "x", key: 7}}})
+    assert limits.value("a.b", key) == 7
+    assert getattr(limits.policy("a.b"), key) == 7
+    others = [k for k in _SCHEMA_VALUE_KEYS if k != key]
+    assert all(getattr(limits.policy("a.b"), k) is None for k in others)
+
+
+@pytest.mark.parametrize("key", ["name", "summary", "_fields", "count_", ""])
+def test_value_rejects_non_value_keys(key):
+    with pytest.raises(limits.LimitsError, match=f"cause.infra-wait に {key} が無い"):
+        limits.value("cause.infra-wait", key)
+
+
+def test_validate_builds_policies_with_name_and_absent_values_as_none():
+    got = limits.validate({"version": 1, "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}}})
+    assert got == {"a.b": limits.Policy(name="a.b", summary="x", seconds=1.5, attempts=2)}
+    assert got["a.b"].interval is None
