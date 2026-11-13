@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import shlex
 
+import branch_flow
+
 from supervise_lib.decl import DeclError, sprint_flow
 from supervise_lib.paths import STEPS_PY
+from supervise_lib.procedures import review_step
 
 
 def release_ref(a, dev: bool) -> str:
@@ -25,13 +28,15 @@ PICK_BUMPS = (
 )
 
 
-def bump_others_cmd(a, plugin: str, material: str) -> str:
+def bump_others_cmd(a, plugin: str, material: str, prs: str | None = None) -> str:
     """本番のリリースプランの bump-others（不足 c）。前のタグからの差分のある、宣言の release.plugin 以外の
     プラグインを changed-plugins で列挙し、承認資料（material）の表の上げ幅で 1 つずつ上げる（#1752）。
-    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。"""
+    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。`prs` を渡すと（CD のある場合。#2773 の決定 6）、
+    承認資料はリリースの PR を作った後に組むため、表でなく PR の本文の候補（--prs）の上げ幅で上げ、承認資料の表で人が見る。"""
     since = f" --since {shlex.quote(a.prev_tag)}" if getattr(a, "prev_tag", None) else ""
+    source = f"--prs {prs}" if prs is not None else f"--decided {shlex.quote(material)}"
     return (
-        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} --decided {shlex.quote(material)}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
+        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} {source}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
         f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
         f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {release_ref(a, False)} || exit 1; done'
     )
@@ -56,10 +61,14 @@ def promotion_flag(a) -> str:
     return f" --promotion {row.name}" if row.selects_units else ""
 
 
-def release_branch_step(a, repo: str | None, version: str, units: list[str]) -> dict:
+def _production(a) -> str | None:
+    return sprint_flow(a).production_branch or a.production_branch
+
+
+def release_branch_step(a, repo: str | None, version: str, units: list[str], next_id: str = "facts") -> dict:
     """開発版のデプロイの後・承認資料の前に、選んだ単位だけを本番チャネルから組んだリリースブランチを作る（E10・I5）。
-    衝突すれば止まり（judge）、承認資料を出さない。`version` は接尾辞を外した版。"""
-    prod = sprint_flow(a).production_branch or a.production_branch
+    衝突すれば止まり（judge）、承認資料を出さない。`version` は接尾辞を外した版。`next_id` は次のステップ。"""
+    prod = _production(a)
     return {
         "id": "release-branch",
         "type": "run",
@@ -70,8 +79,46 @@ def release_branch_step(a, repo: str | None, version: str, units: list[str]) -> 
         + (f" --production {shlex.quote(prod)}" if prod else "")
         + f" --units {' '.join(map(shlex.quote, units))}",
         "on_fail": "judge",
-        "next": "facts",
+        "next": next_id,
     }
+
+
+def release_review_row(a) -> branch_flow.ReviewRow:
+    """リリースブランチの PR のレビューの単位（目録のスナップショットから。この種類の既定値はまとまりの記録の有無で変わらない）。"""
+    return sprint_flow(a).flow.reviews.row("release", False)
+
+
+def review_branch_drop(v: str) -> str:
+    """後片付けの cmd へ足す、版 `v` の衝突の解消のレビューの一時のブランチが残っていれば消す shell の続き（#3163 の I11）。"""
+    heads = f"{branch_flow.REVIEW_PREFIX}{v} {branch_flow.REVIEW_PREFIX}{v}{branch_flow.REVIEW_BASE_SUFFIX}"
+    return f' && for b in {heads}; do if git ls-remote -q --exit-code --heads origin "$b"; then git push -q origin --delete "$b" || exit 1; fi; done'
+
+
+REVIEW_RANGE_IDS = ("review-open", "review-close")
+
+
+def review_range_steps(a, repo: str | None, version: str, after: str = "facts") -> list[dict]:
+    """リリースブランチの PR のレビュー（#3163 の決定 6）。行が `none` なら空。`pr` か `resolution` なら、
+    review-open（衝突の解消のレビューの PR を組む。差分が空なら終了コード 3 で `after` へ）→ cross-review →
+    review-close（直しをリリースブランチへ移して PR を閉じる）。`version` は接尾辞を外した版。"""
+    row = release_review_row(a)
+    if row.diff == "none":
+        return []
+    prod = _production(a)
+    cwd = {"cwd": repo} if repo else {}
+    run = {"type": "run", "stage": "デプロイ", "timeout": 900, **cwd, "on_fail": "judge"}
+    return [
+        {
+            **run,
+            "id": "review-open",
+            "cmd": f"{STEPS_PY} review-open --version {version} --diff {row.diff}" + (f" --production {shlex.quote(prod)}" if prod else ""),
+            "on_exit": {"3": after},
+            "pr_from": "review_pr",
+            "next": "review",
+        },
+        {**review_step("{pr}", "review-close", "judge"), **cwd},
+        {**run, "id": "review-close", "cmd": f"{STEPS_PY} review-close --version {version}", "next": after},
+    ]
 
 
 def fast_flow_refusal(a, pin) -> str | None:

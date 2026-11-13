@@ -13,38 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, run_lib, write_declaration
-
-
-def resolve(main_repo: Path) -> tuple[str, str, int]:
-    got = run_lib(f'wt_base_branch "{main_repo}"; echo rc=$?', cwd=main_repo)
-    lines = got.stdout.splitlines()
-    rc = int(lines.pop().removeprefix("rc="))
-    return "\n".join(lines), got.stderr, rc
-
-
-def test_without_declaration_uses_default_branch(main_repo: Path) -> None:
-    add_origin(main_repo)
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "main"
-
-
-def test_without_base_branch_uses_default_branch(main_repo: Path) -> None:
-    add_origin(main_repo)
-    write_declaration(main_repo, json.dumps({"version": 1}))
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "main"
-
-
-def test_remote_branch_is_used(main_repo: Path) -> None:
-    add_origin(main_repo)
-    push_branch(main_repo, "develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "develop"
+from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, resolve, run_lib, write_declaration
 
 
 def test_local_only_branch_is_used(main_repo: Path) -> None:
@@ -52,7 +21,7 @@ def test_local_only_branch_is_used(main_repo: Path) -> None:
     add_origin(main_repo)
     git(main_repo, "branch", "develop")
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, _, rc = resolve(main_repo)
+    out, _, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0
     assert out == "develop"
 
@@ -68,7 +37,7 @@ def test_unfetched_remote_branch_is_used(main_repo: Path) -> None:
     push_branch(main_repo, "develop")
     git(main_repo, "update-ref", "-d", "refs/remotes/origin/develop")
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, err, rc = resolve(main_repo)
+    out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0, err
     assert out == "develop"
 
@@ -84,7 +53,7 @@ def test_remote_branch_with_matching_tail_is_not_used(main_repo: Path) -> None:
     push_branch(main_repo, "feature/develop")
     git(main_repo, "update-ref", "-d", "refs/remotes/origin/feature/develop")
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, err, rc = resolve(main_repo)
+    out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 1
     assert out == ""
     assert "develop" in err
@@ -93,7 +62,7 @@ def test_remote_branch_with_matching_tail_is_not_used(main_repo: Path) -> None:
 def test_missing_branch_does_not_fall_back(main_repo: Path) -> None:
     add_origin(main_repo)
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, err, rc = resolve(main_repo)
+    out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 1
     assert out == ""
     assert "develop" in err
@@ -105,7 +74,7 @@ def test_non_string_value_falls_back(main_repo: Path, value: object) -> None:
     add_origin(main_repo)
     push_branch(main_repo, "develop")
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": value}))
-    out, _, rc = resolve(main_repo)
+    out, _, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0
     assert out == "main"
 
@@ -114,14 +83,14 @@ def test_unsupported_version_falls_back(main_repo: Path) -> None:
     add_origin(main_repo)
     push_branch(main_repo, "develop")
     write_declaration(main_repo, json.dumps({"version": 99, "base_branch": "develop"}))
-    out, _, rc = resolve(main_repo)
+    out, _, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0
     assert out == "main"
 
 
 def test_without_origin_head_falls_back_to_local_default(main_repo: Path) -> None:
     """origin を持たないリポジトリでも、既定ブランチの解決はこれまでどおり働く。"""
-    out, _, rc = resolve(main_repo)
+    out, _, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0
     assert out == "main"
 

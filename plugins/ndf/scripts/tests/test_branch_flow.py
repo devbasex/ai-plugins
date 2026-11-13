@@ -72,7 +72,20 @@ def test_declaration_doc_example_passes_the_table_and_the_schema():
     for ex in examples:
         flow = bf.of_decl(ex)
         assert flow.declared
-        assert all(v in props[k]["enum"] for k, v in ex["branch_flow"].items())
+        assert all(v in props[k]["enum"] for k, v in ex["branch_flow"].items() if k != bf.REVIEWS_KEY)
+        _matches_reviews_schema(ex["branch_flow"].get(bf.REVIEWS_KEY, {}), props[bf.REVIEWS_KEY])
+    assert any(bf.REVIEWS_KEY in ex["branch_flow"] for ex in examples)
+
+
+def _matches_reviews_schema(value: dict, schema: dict) -> None:
+    """`reviews` の値がスキーマの断片（種類・キー・enum・重複）に合う。"""
+    assert set(value) <= set(schema["properties"])
+    for kind, row in value.items():
+        sub = schema["properties"][kind]
+        assert set(row) == set(sub["required"])
+        assert all(c in sub["properties"]["checks"]["items"]["enum"] for c in row["checks"])
+        assert len(set(row["checks"])) == len(row["checks"])
+        assert row["diff"] in sub["properties"]["diff"]["enum"]
 
 
 def test_whole_row_rebuilds_only_when_the_base_branch_moved():
@@ -200,3 +213,164 @@ def test_selected_keeps_sprint_branches_until_production_holds_them(history):
     git(repo, "checkout", "-q", "main")
     git(repo, "merge", "-q", "--no-ff", "--no-edit", "sprint/a")
     assert not bf.sprint_branch_kept(repo, "sprint/a", "main", sel)
+
+
+# --- レビューの単位（#3163） ---------------------------------------------------------------
+
+ALL_REVIEWS = {
+    "impl": {"checks": ["cross-review"], "diff": "pr"},
+    "sprint": {"checks": ["behavior", "cross-refactoring"], "diff": "unchecked"},
+    "release": {"checks": ["cross-review"], "diff": "resolution"},
+    "design": {"checks": [], "diff": "none"},
+    "spec": {"checks": ["cross-review"], "diff": "pr"},
+}
+
+
+def _flow(reviews, **kw):
+    return bf.parse_flow({**SELECTED, **kw, "reviews": reviews})
+
+
+def test_written_rows_are_returned_regardless_of_bundles_and_survive_the_snapshot():
+    """受け入れ条件 1: 5 種類に書いた値を読み分けが返し、スナップショットへ出して読み直しても同じ。"""
+    flow = _flow(ALL_REVIEWS)
+    for kind, v in ALL_REVIEWS.items():
+        for bundled in (True, False):
+            row = flow.reviews.row(kind, bundled)
+            assert set(row.checks) == set(v["checks"]) and row.diff == v["diff"]
+    assert flow.reviews.row("sprint", True).checks == ("cross-refactoring", "behavior")  # CHECKS の順
+    snap = flow.resolve("develop", "main").as_snapshot("宣言")
+    assert bf.from_snapshot(snap, "x", "y").flow.reviews == flow.reviews
+
+
+def test_unwritten_kinds_resolve_from_the_default_table():
+    """I5: reviews の無い宣言は既定値の表（ndf v10.27.61 の決め打ち）の 10 セル。"""
+    units = bf.parse_flow({}).reviews
+    got = {(k, b): (units.row(k, b).checks, units.row(k, b).diff) for k in bf.REVIEW_KINDS for b in (True, False)}
+    assert got == {
+        ("impl", True): (("cross-review",), "pr"),
+        ("impl", False): ((), "none"),
+        ("sprint", True): (("cross-refactoring", "behavior"), "unchecked"),
+        ("sprint", False): (bf.CHECKS, "unchecked"),
+        ("release", True): ((), "none"),
+        ("release", False): ((), "none"),
+        ("design", True): (("cross-review",), "pr"),
+        ("design", False): (("cross-review",), "pr"),
+        ("spec", True): ((), "none"),
+        ("spec", False): ((), "none"),
+    }
+
+
+def test_snapshot_always_carries_reviews_and_old_snapshots_read_as_empty():
+    """I6: スナップショットは宣言が無くても reviews: {} を持つ。reviews の無い目録は {} として読む。"""
+    snap = bf.BranchFlow().resolve("develop", "main").as_snapshot("既定値")
+    assert snap[bf.REVIEWS_KEY] == {}
+    old = {k: v for k, v in snap.items() if k != bf.REVIEWS_KEY}
+    assert bf.from_snapshot(old, "develop", "main").flow.reviews == bf.ReviewUnits()
+
+
+def test_covers_impl_counts_only_the_covering_diffs():
+    assert bf.ReviewRow("impl", ("cross-review",), "pr").covers_impl()
+    assert not bf.ReviewRow("release", ("cross-review",), "resolution").covers_impl()
+    assert not bf.ReviewRow("design", ("cross-review",), "pr").covers_impl()
+    assert not bf.ReviewRow("impl", (), "none").runs("cross-review")
+
+
+@pytest.mark.parametrize(
+    "reviews, kw, keys",
+    [
+        ({"x": {"checks": [], "diff": "none"}}, {}, {"reviews.x"}),
+        ({"impl": {"checks": [], "diff": "none", "extra": 1}}, {}, {"reviews.impl.extra"}),
+        ({"impl": {"checks": ["nope"], "diff": "pr"}}, {}, {"reviews.impl.checks"}),
+        ({"impl": {"checks": ["cross-review", "cross-review"], "diff": "pr"}}, {}, {"reviews.impl.checks"}),
+        ({"impl": {"checks": ["cross-review"]}}, {}, {"reviews.impl.diff"}),
+        (["impl"], {}, {"reviews"}),
+        ({"impl": {"checks": ["cross-review"], "diff": "resolution"}}, {}, {"reviews.impl.diff"}),
+        ({"sprint": {"checks": ["cross-review"], "diff": "pr"}}, {}, {"reviews.sprint.diff"}),
+        ({"design": {"checks": ["cross-refactoring"], "diff": "pr"}}, {}, {"reviews.design.checks"}),
+        ({"spec": {"checks": ["cross-review"], "diff": "none"}}, {}, {"reviews.spec.checks"}),
+        ({"spec": {"checks": [], "diff": "pr"}}, {}, {"reviews.spec.checks"}),
+    ],
+)
+def test_broken_reviews_name_the_keys_to_fix(reviews, kw, keys):
+    """受け入れ条件 6・7・I1・I2: 形の誤り・種類に合わない値は直すキーと許す値で止まる（既定値へ倒さない）。"""
+    with pytest.raises(bf.FlowError) as e:
+        _flow(reviews, **kw)
+    assert {i["key"] for i in e.value.items} == keys
+    assert all(i["allowed"] for i in e.value.items)
+
+
+def test_release_row_needs_a_promotion_that_selects_units():
+    """受け入れ条件 6・I3: promotion: whole でリリースブランチの PR の値を書くと止まり、理由に取り込み方を添える。"""
+    with pytest.raises(bf.FlowError) as e:
+        bf.parse_flow({"reviews": {"release": {"checks": [], "diff": "none"}}})
+    assert [(i["key"], i["because"]) for i in e.value.items] == [("reviews.release", "promotion = whole")]
+    assert "理由: promotion = whole" in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "reviews",
+    [
+        # まとまりの記録が無いときだけ外れる（impl の既定値は記録が有るときだけ cross-review を掛ける）
+        {"sprint": {"checks": ["behavior"], "diff": "unchecked"}},
+        # 衝突の解消の差分は実装の差分を覆わない
+        {
+            "impl": {"checks": [], "diff": "none"},
+            "sprint": {"checks": ["cross-refactoring"], "diff": "unchecked"},
+            "release": {"checks": ["cross-review"], "diff": "resolution"},
+        },
+    ],
+)
+def test_declarations_that_leave_impl_diff_unreviewed_stop(reviews):
+    """受け入れ条件 5・I4: どの PR でも cross-review されない実装の差分が出る宣言は止まる。"""
+    with pytest.raises(bf.FlowError) as e:
+        _flow(reviews)
+    assert {i["key"] for i in e.value.items} == {"reviews"}
+    assert all("cross-review されない" in i["because"] for i in e.value.items)
+
+
+def test_design_review_does_not_count_as_covering_impl():
+    with pytest.raises(bf.FlowError):
+        _flow(
+            {
+                **ALL_REVIEWS,
+                "impl": {"checks": [], "diff": "none"},
+                "sprint": {"checks": ["behavior"], "diff": "unchecked"},
+                "release": {"checks": [], "diff": "none"},
+                "design": {"checks": ["cross-review"], "diff": "pr"},
+            }
+        )
+
+
+def test_release_pr_diff_covers_impl():
+    flow = _flow(
+        {
+            "impl": {"checks": [], "diff": "none"},
+            "sprint": {"checks": ["behavior"], "diff": "unchecked"},
+            "release": {"checks": ["cross-review"], "diff": "pr"},
+        }
+    )
+    assert flow.reviews.row("release", True).covers_impl()
+
+
+def test_default_overlapping_a_written_row_stops_but_written_overlaps_pass():
+    """I12: impl だけに cross-review を書くと既定値の sprint と重なり止まる。両方に書けば通る。"""
+    with pytest.raises(bf.FlowError) as e:
+        bf.parse_flow({"reviews": {"impl": {"checks": ["cross-review"], "diff": "pr"}}})
+    assert {i["key"] for i in e.value.items} == {"reviews.sprint"}
+    both = {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": list(bf.CHECKS), "diff": "unchecked"}}
+    assert bf.parse_flow({"reviews": both}).reviews.row("impl", False).covers_impl()
+
+
+def test_four_keys_and_reviews_errors_come_in_one_error():
+    with pytest.raises(bf.FlowError) as e:
+        bf.parse_flow({"start": 1, "reviews": {"x": {}}})
+    assert {i["key"] for i in e.value.items} == {"start", "reviews.x"}
+    assert len(str(e.value).splitlines()) == 3  # 1 件 1 行と、直す場所の行
+
+
+def test_empty_reviews_pass_and_review_allowed_is_a_copy():
+    assert bf.parse_flow({"reviews": {}}).reviews == bf.ReviewUnits()
+    table = bf.review_allowed()
+    assert set(table) == set(bf.REVIEW_KINDS)
+    table["impl"]["diff"] = ("x",)
+    assert bf.review_allowed()["impl"]["diff"] == ("pr", "none")

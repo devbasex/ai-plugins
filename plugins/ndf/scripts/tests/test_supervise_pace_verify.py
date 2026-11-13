@@ -23,7 +23,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import queue, release_templates  # noqa: E402
+from supervise_lib import queue, release_verify  # noqa: E402
 from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
 from test_supervise_pace_manual import commit_all  # noqa: E402
 
@@ -341,7 +341,7 @@ def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
     assert check["cmd"] == on_fail["cmd"] and check["cmd"].endswith("user-config-check --dir {state_dir}")
     assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
     assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
-    assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]
+    assert release_verify.NO_USER_INSTALL in by["release-verify"]["prompt"]
 
 
 def chain(steps) -> list[str]:

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/branch_flow.py", "name": "", "kind": "lines", "reason": "PR #3272 の cross-refactoring（I-017）で、parse_flow の欄ごとの検証を _unknown_key_items・_field_values・_row_items へ、Promotion.moved の単位の比較を _moved_units へ抽出した時点で 500 行を超えた（抽出の前は 500 行）。500 行以下にしたら消す", "lines": 525}

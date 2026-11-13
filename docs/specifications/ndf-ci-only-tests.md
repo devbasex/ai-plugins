@@ -128,14 +128,15 @@ graph TB
 
 対象は `new check --pr` と `new check --since-last` である（`verify_steps.check_ci_watch`）。
 
-- `whole_on_ci` が真のため、`test-all` と、それだけを入力に持つ judge・fix が外れる
+- `whole_on_ci` が真のため、`test-all` と、それだけを入力に持つ judge・fix が外れる。CI テストの宣言が無くても、本番チャネルへのマージで届く CD の宣言があるリポジトリでは同じく外れ、マージが CI の結果を待つ（`trim_check_steps` の `cd_case`。#2773）
 - `review` の後、`ready`（差分の検査では `finish`）の前に `ci-peek` を置く。`ci-fix` は直してコミットし、`git push` して `ci-peek` へ戻る
 - `merge` が落ちたら `ci-peek-merge` へ進む
 - リファクタリング（`assess` → `refactor`）を入れる
 
-リファクタリングを外す条件は `supervise_lib/templates.py` の `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つである。`CROSS_REFACTORING_SUSPENDED` は `False` で、宣言の無いリポジトリでは `refactor_suspended` が真になる。次の 3 か所はすべてこの条件を読む。
+リファクタリングを外す条件は `supervise_lib/templates.py` の `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つである。`CROSS_REFACTORING_SUSPENDED` は `False` で、宣言の無いリポジトリでは `refactor_suspended` が真になる。次の 4 か所はすべてこの条件を読む。
 
 - `assess`・`refactor` を外す判定（`trim_check_steps`）
+- レビューの単位で実装のプランへ cross-refactoring を差し込むかの判定（`review_units.chosen_checks`）
 - 検査の記録をレビューだけの回にする `--review`
 - 差分の検査の `no_refactor`
 

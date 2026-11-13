@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 
 import project_mvv
-from gate_answer import DESIGN_GATE, RELEASE_GATE
+from gate_answer import DESIGN_GATE
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
@@ -15,18 +15,20 @@ from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with
 from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
+from supervise_lib.review_units import fast_review_row
 from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_steps, strip_suffix
+from supervise_lib.release_templates import strip_suffix
+from supervise_lib.release_verify import release_verify_steps
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
     normal_gate_2,
-    normal_gate_2_stage,
+    normal_prod_waves,
     MVV_PACES,
     dev_channel_of,
     has_record,
@@ -109,11 +111,10 @@ def fast_sprint_plans(a) -> list[dict]:
     impl = {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}}
     if design_read(a):
         impl["then_of"] = first
-    waves += [
-        impl,
-        {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": first},
-        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": first},
-    ]
+    waves += [impl, {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": first}]
+    if fast_review_row(a).runs("cross-review"):  # スプリントの PR に cross-review を掛けなければ置かない（#3163）
+        review = plan_fast_check(a, repo, f"{a.name}-review", review_only=True)
+        waves.append({"name": "実装レビュー", "plans": {"review": review}, "then_of": first})
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
@@ -312,11 +313,8 @@ def sprint_plans(a) -> list[dict]:
     if release_lane(a, repo):  # レーンはリリース承認ゲートを置かず、リリースの依頼を送る（ゲートはオーガナイザーが出す。#2436 の I17）
         # 本番はリリースの後へ --then でつなぎ、{queue_prs} を前のステージの Pull Request で埋める
         return waves + [release, {"name": "本番", "plans": prod_plans(a, repo, lambda: {}), "then_of": first}]
-    return waves + [
-        release,
-        {"name": RELEASE_GATE, "gate": normal_gate_2_stage(a, repo, prod, advise)},
-        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
-    ]
+    prod_plan = {"release-prod": plan_sprint_release(a, repo, advise, channel="prod", version=prod)}
+    return waves + normal_prod_waves(a, repo, release, prod_plan, first, prod, advise)
 
 
 def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = None) -> str:

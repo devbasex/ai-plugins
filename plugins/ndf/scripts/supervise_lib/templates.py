@@ -7,6 +7,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import release_case
+
 from step_result import result
 from supervise_lib import limits, release_templates
 from supervise_lib.decl import check_flags, check_issues, sync_source, with_decls
@@ -19,6 +21,7 @@ from supervise_lib.procedures import (
     pr_step,
     push_fix_steps,
     record_steps,
+    review_step,
     design_diff_on_pr,
     with_after,
     with_record,
@@ -260,13 +263,6 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
     ]
 
 
-def review_step(pr_ref: str, next_id: str, on_fail: str) -> dict:
-    """コードレビューの cross-review のステップ（検査のプランとまとまりの実装のプランが共有する。#3081）。
-    収束しなかった終わり（終了コード 6 と gaps）も落ちたとして `on_fail` へ行き、後続へ進めない（#2143）。"""
-    run = {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー", "stage": "実装レビュー", "timeout": 3600}
-    return {**run, "args": f"{pr_ref} --max-rounds 4", "on_fail": on_fail, "next": next_id}
-
-
 def refactor_scope(a, pr) -> str:
     """cross-refactoring へ渡す範囲を組むシェルの式（単発とスプリントの検査が使う 1 か所。#1484）。
 
@@ -333,7 +329,9 @@ def plan_check(a) -> dict:
         a,
     )
     after_whole = "ci-peek" if ci_only(a) else "ready"
-    plan["steps"] = trim_check_steps(a, plan["steps"], after_whole, refactor_suspended(a) or a.mode in NO_REFACTOR_MODES)
+    # CD のある場合は全体テストを流さず、マージが CI の結果を待つ（#2773）。作業場所はまだ無いことがあり、宣言は元のリポジトリで読む
+    cd_case = release_case.case_at(getattr(a, "repo", None) or a.worktree.split("/.worktrees/")[0]).has_cd
+    plan["steps"] = trim_check_steps(a, plan["steps"], after_whole, refactor_suspended(a) or a.mode in NO_REFACTOR_MODES, cd_case)
     plan["steps"] = check_ci_watch(a, plan["steps"], "ready", "abort", fix_push=True)
     return with_record(plan)
 
@@ -441,7 +439,8 @@ def plan_check_since(a) -> dict:
         cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
     steps = check_since_steps(a, name, flag, no_refactor)
     after_whole = "ci-peek" if ci_only(a) else "finish"
-    steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor), "finish", "abort", fix_push=True)
+    cd_case = release_case.case_at(repo).has_cd  # CD のある場合は全体テストを流さない（plan_check と同じ。#2773 の受け入れ条件 16）
+    steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor, cd_case), "finish", "abort", fix_push=True)
     issues = check_issues(a)
     plan = {
         "フェーズ": "検査",

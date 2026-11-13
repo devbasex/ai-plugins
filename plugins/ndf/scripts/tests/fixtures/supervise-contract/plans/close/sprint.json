@@ -10,7 +10,8 @@
     "start_branch": "main",
     "base_branch": "main",
     "production_branch": "main",
-    "source": "既定値（.ndf/worktree.json の branch_flow が無い）"
+    "source": "既定値（.ndf/worktree.json の branch_flow が無い）",
+    "reviews": {}
   },
   "CD の案内": {
     "kind": "cd-guidance",

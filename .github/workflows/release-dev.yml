@@ -1,0 +1,50 @@
+name: Release dev
+
+# 開発版のデプロイ（#2773）。手元で作った開発版の PR（release/v<版> → develop）を、CI の必須チェックが通るのを待って
+# 管理者の迂回なしでマージする。PR は利用者のアカウントで作る（GITHUB_TOKEN で作った PR では CI が起動しない）。
+# 起動は release-steps.py release --channel dev（.ndf/supervise.json の release.dev_workflow）。
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 開発版の PR の番号
+        required: true
+
+run-name: "release-dev #${{ inputs.pr }}"
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: write
+
+concurrency:
+  group: release-dev-${{ inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Check the target and the version suffix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+        run: |
+          base=$(gh pr view "$PR" --json baseRefName --jq .baseRefName)
+          head=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          want=$(python3 -c 'import json; print(json.load(open(".ndf/worktree.json")).get("base_branch") or "develop")')
+          [ "$base" = "$want" ] || { echo "宛先 $base がベースブランチ $want でない"; exit 1; }
+          case "$head" in release/v*-*) ;; *) echo "head $head が開発版（接尾辞のある release/v<版>）でない"; exit 1;; esac
+      - name: Merge when the required checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+        run: python3 plugins/ndf/scripts/merged-steps.py merge-when-green "$PR" --root . --no-cleanup --no-admin

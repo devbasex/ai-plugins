@@ -22,7 +22,7 @@ from supervise_lib.procedures import design_path, survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
-from supervise_lib.sprint_bundles import with_review, without_review
+from supervise_lib.review_units import apply_check, apply_design, apply_impl, drop_unchosen, fast_review_row
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
@@ -156,7 +156,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             *gate_steps(),
         ],
     }
-    return with_record(with_revise_note(plan, a, n, doc))
+    return with_record(with_revise_note(apply_design(a, plan), a, n, doc))  # 設計 PR のレビューの単位で組む（#3163）
 
 
 def with_base(steps: list[dict], target: str) -> list[dict]:
@@ -283,13 +283,13 @@ def keep_branch_merge(steps: list[dict], branch: str) -> list[dict]:
 
 
 def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
-    """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本で、スプリントブランチへ入れる前に
-    cross-review を通す（#3081 の I8a・I8b）。無ければ課題ごとに 1 本（I9）。`pace` はプランへ書く進め方。"""
+    """実装のステージのプラン。まとまりの記録があればまとまり 1 つにつき 1 本（#3081 の I8a）、無ければ課題ごとに 1 本（I9）。
+    レビューはレビューの単位の `impl` の行で置く（#3163）。`pace` はプランへ書く進め方。"""
     bundles = getattr(a, "bundles", None)
     if bundles is None:
-        plans = {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}
+        plans = {f"impl-{n}": apply_impl(a, plan_sprint_impl(a, n, repo)) for n in a.issue}
     else:
-        plans = {f"impl-{b.lead()}": with_review(plan_sprint_impl(a, b.lead(), repo, b.issues)) for b in bundles}
+        plans = {f"impl-{b.lead()}": apply_impl(a, plan_sprint_impl(a, b.lead(), repo, b.issues)) for b in bundles}
     for plan in plans.values() if pace else ():
         plan["進め方"] = pace  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
     return plans
@@ -327,13 +327,13 @@ def plan_sprint_check(a, repo: str) -> dict:
     ] + plan["steps"]
     if sprint_flow(a).row.keeps_sprint_branch:
         plan["steps"] = keep_branch_merge(plan["steps"], mb)
-    return plan if getattr(a, "bundles", None) is None else without_review(plan)
+    return apply_check(a, plan)  # スプリントの PR のレビューの単位で、選ばないレビューのステップを外す（#3163）
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
     """pace: normal のデプロイ。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
     単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、リリース承認ゲートの後に単独で流す（#1914）。
-    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。
+    `advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。CD の無い場合は開発版、ある場合は本番（#2773 の決定 6）。
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
     version = version or (a.version if channel == "dev" else None)
@@ -352,7 +352,7 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         branch=branch,
         issue=a.issue,
         mode=a.mode,
-        advise=a.state if advise and channel == "dev" else None,
+        advise=a.state if advise else None,  # 承認資料を組むプランだけが読む（CD の無い本番は組まない）
         state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
         units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
@@ -450,10 +450,14 @@ def plan_fast_impl(a, n: int, repo: str) -> dict:
     )
     plan = plan_impl(ns)
     plan.update({"起点": f"origin/{a.base}", "リポジトリ": repo, "進め方": "fast"})
-    return plan
+    return apply_impl(a, plan, bundled=False)  # pace: fast は課題のまとまりで実装を組まない（#3163）
 
 
 def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: bool = False) -> dict:
+    """pace: fast の検査。cross-refactoring を選ばなければ実装レビューだけで組み、選ばないレビューのステップを外す（#3163）。"""
+    row = fast_review_row(a)
+    checks = row.checks if row.diff != "none" else ()
+    review_only = review_only or "cross-refactoring" not in checks
     ns = argparse.Namespace(
         **decl_fields(a),
         id=name,
@@ -465,7 +469,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
         final_sprint=a.name if final else None,  # 最後の検査は範囲をこのスプリントの PR に絞る（#3126）
         review_only=review_only,
     )
-    return plan_check_since(ns)
+    return drop_unchosen(plan_check_since(ns), checks)
 
 
 def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
