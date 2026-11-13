@@ -19,7 +19,8 @@ from typing import Any, Callable
 from ndf import contracts
 from ndf.contracts import causes, facts, limits, result
 
-TOOL = "contracts"
+# 道具の名前は副命令の名前（パッケージの名前）と同じ
+TOOL = __package__.rpartition(".")[2]
 
 
 def _collect(errs: list[str], fn: Callable[[], Any]) -> Any:
@@ -36,10 +37,12 @@ def check_all() -> list[str]:
     errs: list[str] = []
     for name in ("result", "causes", "limits", "release-verification"):
         _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
-    policy_names = set(_collect(errs, limits.table) or ())
+    policies = _collect(errs, limits.table)
+    policy_names = set(policies) if policies is not None else set()
     for name in facts.names():
         refs = _collect(errs, lambda name=name: facts.ref_errors(name, policy_names))
-        errs += refs or []
+        if refs is not None:
+            errs += refs
     _collect(errs, causes.table)
     return errs
 
@@ -98,7 +101,7 @@ def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
         items=a.item,
         metrics=a.metrics,
         cause=cause,
-        routes={k: (None if v == "-" else v) for k, v in a.route} or None,
+        routes={k: (None if v == "-" else v) for k, v in a.route},
         gaps=[{"kind": k, "name": n, "reason": r} for k, n, r in a.gap],
         next=a.next,
         presentation_path=a.presentation_path,

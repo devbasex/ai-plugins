@@ -22,7 +22,7 @@ UNREADABLE_FALLBACK = 2
 
 def bounds(row: Mapping[str, Any]) -> tuple[int, int]:
     """区分の 1 行の終了コードの範囲（始点と終点。last が無ければ code だけ）。"""
-    return row["code"], row.get("last", row["code"])
+    return row["code"], (row["last"] if "last" in row else row["code"])
 
 
 def ranges(status: str) -> tuple[tuple[int, int], ...]:

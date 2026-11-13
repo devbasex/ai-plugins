@@ -19,10 +19,10 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ndf.checks.model import CheckError, Finding, Scope
+from ndf.contracts.facts import SCHEMA_FILE
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
-SCHEMA_NAME = "fact.schema.json"
 
 
 @dataclass(frozen=True)
@@ -168,7 +168,7 @@ def tables(scope: Scope, tables_dir: str) -> tuple[dict[str, list[str]], list[Fi
     ids: dict[str, list[str]] = {}
     if not paths:
         return ids, found
-    common = table_validator(base / SCHEMA_NAME)
+    common = table_validator(base / SCHEMA_FILE)
     for path in paths:
         ids[path.stem], bad = _table_rows(path, scope.rel(path), common)
         found += bad

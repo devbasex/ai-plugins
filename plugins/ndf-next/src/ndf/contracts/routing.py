@@ -31,7 +31,9 @@ def backoff(policy: limits.Policy, used: int, retry_after: Optional[float], cap:
     if retry_after is not None:
         wait = float(retry_after)
     else:
-        wait = float(policy.interval or 0) * float(policy.factor or 1) ** used
+        interval = policy.interval if policy.interval is not None else 0.0
+        factor = policy.factor if policy.factor is not None else 1.0
+        wait = float(interval) * float(factor) ** used
     for ceiling in (policy.max_interval, cap):
         if ceiling is not None:
             wait = min(wait, float(ceiling))

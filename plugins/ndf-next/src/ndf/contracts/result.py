@@ -22,6 +22,8 @@ SCHEMA = contracts.schema_path("result")
 
 # 任意の項目のうち配列のもの（置くときは写しの list にする）
 _LISTS = ("gaps", "process", "decisions", "warnings")
+# 任意の項目（渡した順でなく、この順に置く）
+_OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next")
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:
@@ -37,29 +39,21 @@ def result(
     summary: str,
     items: Optional[list] = None,
     metrics: Optional[dict] = None,
-    *,
-    cause: Optional[dict] = None,
-    routes: Optional[dict] = None,
-    gaps: Optional[list] = None,
-    process: Optional[list] = None,
-    decisions: Optional[list] = None,
-    warnings: Optional[list] = None,
-    presentation_path: Optional[str] = None,
-    next: Optional[str] = None,
+    **optional: Any,
 ) -> dict[str, Any]:
-    """結果を組む。任意の項目は渡したときだけ置く（空の配列は置かない）。形は `errors` が確かめる。"""
-    out: dict[str, Any] = {"tool": tool, "status": status, "summary": summary, "items": list(items or []), "metrics": dict(metrics or {})}
-    _put_present(
-        out,
-        gaps=gaps,
-        process=process,
-        decisions=decisions,
-        warnings=warnings,
-        cause=cause,
-        routes=routes,
-        presentation_path=presentation_path,
-        next=next,
-    )
+    """結果を組む。任意の項目（`_OPTIONAL`: cause・routes・gaps・process・decisions・warnings・presentation_path・next）は
+    渡したときだけ置く（空の配列は置かない）。知らない項目は `TypeError`。形は `errors` が確かめる。"""
+    unknown = sorted(set(optional) - set(_OPTIONAL))
+    if unknown:
+        raise TypeError(f"結果の知らない項目: {', '.join(unknown)}")
+    out: dict[str, Any] = {
+        "tool": tool,
+        "status": status,
+        "summary": summary,
+        "items": list(items) if items is not None else [],
+        "metrics": dict(metrics) if metrics is not None else {},
+    }
+    _put_present(out, **{key: optional.get(key) for key in _OPTIONAL})
     return out
 
 

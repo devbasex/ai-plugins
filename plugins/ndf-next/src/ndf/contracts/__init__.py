@@ -106,7 +106,9 @@ def _schema_validator(rel: str) -> Draft202012Validator:
     path, _, pointer = rel.partition("#")
     schema = load_json(path)
     if pointer:
-        schema = {"$schema": schema.get("$schema"), "$defs": schema.get("$defs", {}), "$ref": f"#{pointer}"}
+        if "$defs" not in schema:
+            raise ContractError(f"スキーマ {path} に $defs が無い（{rel} を引けない）")
+        schema = {"$schema": schema.get("$schema"), "$defs": schema["$defs"], "$ref": f"#{pointer}"}
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
