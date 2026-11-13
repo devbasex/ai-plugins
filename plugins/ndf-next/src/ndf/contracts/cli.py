@@ -51,8 +51,19 @@ def _cmd_check(_: argparse.Namespace) -> int:
     if errs:
         detail = f"契約の表に誤りが {len(errs)} 件ある"
         items = [{"kind": "violation", "reason": e} for e in errs]
+        try:
+            causes.table()
+        except contracts.ContractError:
+            return _emit_unchecked(detail, items)
         return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
     return result.emit(result.result(TOOL, "ok", "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
+
+
+def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
+    """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
+    obj = result.result(TOOL, "stopped", detail, items=items, cause={"kind": "invalid", "detail": detail})
+    print(json.dumps(obj, ensure_ascii=False))
+    return int(facts.row("exit-codes", "unreadable")["code"])
 
 
 def _print_value(value: Any) -> None:
