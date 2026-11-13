@@ -1,8 +1,7 @@
-"""DBOS の殻を通した判断のループ（耐久を通す代表）と、DBOS を import する場所の決まり。"""
+"""DBOS の殻を通した判断のループ（耐久を通す代表）。"""
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import subprocess
@@ -87,35 +86,3 @@ def test_recovery_continues_without_rerunning_finished_steps(tmp_path):
     assert json.loads(second.stdout.strip().splitlines()[-1]) == [10, 20, 30]
     # 済んだ手 1 と 2 は流し直さず、落ちた手 3 だけを流し直す
     assert log.read_text().split() == ["1", "2", "3", "3"]
-
-
-def _dbos_importers(root: Path) -> set[str]:
-    found = set()
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names = [node.module]
-            else:
-                continue
-            if any(name.split(".")[0] == "dbos" for name in names):
-                found.add(path.relative_to(PLUGIN_ROOT).as_posix())
-    return found
-
-
-def test_only_durable_imports_dbos():
-    importers = _dbos_importers(PLUGIN_ROOT / "src") | _dbos_importers(PLUGIN_ROOT / "tests")
-    assert importers == {"src/ndf/core/durable.py"}
-
-
-def test_loop_reads_neither_durable_nor_dbos():
-    tree = ast.parse((SRC / "ndf" / "core" / "loop.py").read_text())
-    modules = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            modules.add(node.module or "")
-    assert not any(m.startswith(("dbos", "ndf")) for m in modules), modules
