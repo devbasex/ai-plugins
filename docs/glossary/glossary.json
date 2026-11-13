@@ -2176,7 +2176,7 @@
       "term": "構造チェック",
       "code": "structure_check",
       "context": "ndf-workflow",
-      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
+      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数えるCI のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
@@ -3399,7 +3399,7 @@
     {
       "term": "ジョブの識別子",
       "context": "ndf-workflow",
-      "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
+      "meaning": "CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
@@ -3442,7 +3442,7 @@
     {
       "term": "宣言に無いジョブ",
       "context": "ndf-cross-refactoring",
-      "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
+      "meaning": "CI のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
@@ -5955,7 +5955,7 @@
     {
       "term": "一致の検査",
       "context": "ndf-issue-upkeep",
-      "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く",
+      "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。CI で動く",
       "source": "docs/specifications/ndf-issue-items.md"
     },
     {
@@ -6988,6 +6988,138 @@
       "context": "ndf-release",
       "meaning": "リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない",
       "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "兆候",
+      "context": "ndf-workflow",
+      "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "兆候の基準ファイル",
+      "context": "ndf-workflow",
+      "meaning": "`scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "境界の印",
+      "context": "ndf-workflow",
+      "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "判定データ",
+      "context": "ndf-workflow",
+      "meaning": "分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "ラチェット",
+      "context": "ndf-workflow",
+      "meaning": "基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "アダプター",
+      "context": "ndf-workflow",
+      "meaning": "外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別",
+      "pending_source": "issues/issue-1142-design-decisions.md"
+    },
+    {
+      "term": "事実の表",
+      "context": "ndf-workflow",
+      "meaning": "1 つの事実（例: ランタイムの一覧）を行と列で持つ契約の JSON。`contracts/facts/` の 1 ファイル",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "持ち主のモジュール",
+      "context": "ndf-workflow",
+      "meaning": "1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "重複の組",
+      "context": "ndf-workflow",
+      "meaning": "同じ事実を持つと見える 2 つ以上の最上位の定数の組。種類は `same-set`・`subset`・`affix`・`same-str`・`member`・`same-num`",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "重複の基準",
+      "context": "ndf-workflow",
+      "meaning": "移行の前に拾った重複の組と、組ごとの扱いの一覧。ラチェットの基準になる",
+      "pending_source": "issues/issue-1142-design-data.md"
+    },
+    {
+      "term": "止まった理由の種類",
+      "context": "ndf-workflow",
+      "meaning": "手順のスクリプトとプランが止まった理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、行き先はこれだけで決まる",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "止まった理由の表",
+      "context": "ndf-workflow",
+      "meaning": "止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "行き先",
+      "context": "ndf-workflow",
+      "meaning": "止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "判断の呼び出し",
+      "context": "ndf-workflow",
+      "meaning": "スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、答えをスキーマで確かめる操作。今の `type: judge` のステップを置き換える",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "答えごとの行き先",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`）",
+      "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "人のいない実行",
+      "context": "ndf-factory",
+      "meaning": "環境変数 NDF_FACTORY_RUN が空でない実行ジョブの区間。AskUserQuestion が使えず、応答を人が読まない",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "結果の行",
+      "context": "ndf-factory",
+      "meaning": "最後の応答の文の中の、最後の「- 結果: <値>」の行。値は 判断が要る / 完了 / できなかった の 3 つで、Factory が区間の結果を決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区分の無い問い",
+      "context": "ndf-workflow",
+      "meaning": "問い合わせの区分（承認ゲート・レッドライン・費用など）のどれにも当たらない問い。AI が決めて記録する",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区間の報告",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "人のいない実行の印",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "結果の行の差し戻し",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
     }
   ]
 }

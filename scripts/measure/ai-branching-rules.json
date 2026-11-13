@@ -1,0 +1,102 @@
+[
+  {
+    "name": "queue の再開（queue --resume）",
+    "pattern": "supervise\\.py[^|;&]*\\bqueue\\b[^|;&]*--resume"
+  },
+  {
+    "name": "途中からの実行（run / queue の --from）",
+    "pattern": "supervise\\.py[^|;&]*\\b(run|queue)\\b[^|;&]*--from"
+  },
+  {
+    "name": "プランの待ち（supervise.py wait）",
+    "pattern": "supervise\\.py[^|;&]*\\bwait\\b"
+  },
+  {
+    "name": "計画の待ち（parallel.py wait）",
+    "pattern": "parallel\\.py[^|;&]*\\bwait\\b"
+  },
+  {
+    "name": "CI の結果の監視を手で打つ（ci-watch.py）",
+    "pattern": "ci-watch\\.py"
+  },
+  {
+    "name": "CI のチェックを手で読む（gh pr checks / gh run view）",
+    "pattern": "gh (pr checks|run view|run list)"
+  },
+  {
+    "name": "CI の打ち直し（gh run rerun）",
+    "pattern": "gh run rerun"
+  },
+  {
+    "name": "マージを手で打つ（merge-when-green / gh pr merge）",
+    "pattern": "merge-when-green|gh pr merge"
+  },
+  {
+    "name": "ベースブランチの取り込みを手で打つ（base-sync / git merge origin）",
+    "pattern": "base-sync|git merge origin/"
+  },
+  {
+    "name": "プランの記録を読む（<プラン>-state/ の progress.jsonl / report.md）",
+    "pattern": "-state/[^ ]*(progress\\.jsonl|report\\.md|phase-result\\.json)"
+  },
+  {
+    "name": "プランの出力を読む（NN-<ステップ>.out）",
+    "pattern": "-state/[^ ]*\\d\\d-[a-z0-9-]+\\.out\\b"
+  },
+  {
+    "name": "承認ゲートの答えを書く（sprint-state.py gate）",
+    "pattern": "sprint-state\\.py[^|;&]*\\bgate\\b"
+  },
+  {
+    "name": "計画の依頼に答える（parallel.py answer）",
+    "pattern": "parallel\\.py[^|;&]*\\banswer\\b"
+  },
+  {
+    "name": "MVV 判定を手で打つ（mvv-gate.py check）",
+    "pattern": "mvv-gate\\.py[^|;&]*\\bcheck\\b"
+  },
+  {
+    "name": "プランを手で作り直す（supervise.py new）",
+    "pattern": "supervise\\.py[^|;&]*\\bnew\\b"
+  },
+  {
+    "name": "手順の連続実行（supervise.py advance）",
+    "pattern": "supervise\\.py[^|;&]*\\badvance\\b"
+  },
+  {
+    "name": "結果 JSON の値を読む（step_result.py pick）",
+    "pattern": "step_result\\.py[^|;&]*\\bpick\\b"
+  },
+  {
+    "name": "スプリントの状態を読む（sprint-state.py get / next）",
+    "pattern": "sprint-state\\.py[^|;&]*\\b(get|next)\\b"
+  },
+  {
+    "name": "耐久ワークフローを起こし直す（parallel.py start / resume）",
+    "pattern": "parallel\\.py[^|;&]*\\b(start|resume)\\b"
+  },
+  {
+    "name": "利用上限の中断を点検する（interrupted / wait-reset）",
+    "pattern": "\\b(interrupted|wait-reset)\\b"
+  },
+  {
+    "name": "引継ぎ文書と次の区間（handoff.py / ndf-next）",
+    "pattern": "handoff\\.py"
+  },
+  {
+    "name": "作業場所の設定を確かめる（worktree-setup.sh check）",
+    "pattern": "worktree-setup\\.sh[^|;&]*\\bcheck\\b"
+  },
+  {
+    "name": "リファクタリングの要否を確かめる（refactor.py assess）",
+    "pattern": "refactor\\.py[^|;&]*\\bassess\\b"
+  },
+  {
+    "name": "開発ループを進める（sprint-state.py loop）",
+    "pattern": "sprint-state\\.py[^|;&]*\\bloop\\b"
+  },
+  {
+    "name": "PR の状態を 1 回で読む（gh_parts.py pr-status）",
+    "pattern": "gh_parts\\.py[^|;&]*\\bpr-status\\b"
+  }
+]

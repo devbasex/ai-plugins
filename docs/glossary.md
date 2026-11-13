@@ -196,7 +196,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | エントリポイント | `entry_point` | Skill・プラン・hook・宣言・利用者が呼ぶスクリプトのパスと副命令と引数と出力の形 | — | — | — |
 | 移行ステップ | `migration_step` | 設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別 | — | — | — |
 | 使用量の帳簿 | `usage_ledger` | NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev。jev は帳簿だけのランタイムで、席順の ALL_RUNTIMES には入れない）のディレクトリに、リポジトリごとのファイルを置く（<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl） | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
-| 構造チェック | `structure_check` | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| 構造チェック | `structure_check` | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数えるCI のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | プロジェクトの宣言 | — | リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる | — | — | — |
 | 解析 | — | プロジェクトの宣言を作るために、リポジトリと CI を決定論で測り、測った値から宣言の中身を決めること | — | — | — |
 | 不明 | — | 解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない | — | — | — |
@@ -258,7 +258,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
 | あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
-| ジョブの識別子 | — | 継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
+| ジョブの識別子 | — | CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 除外したジョブ | `ci_exempt` | 手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 必須のチェック | — | ブランチの ruleset の required_status_checks に context の名前で載ったチェック。落ちるか結果が無いとマージを塞ぐ | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | チェックの名前 | — | ジョブの結果が Pull Request に載るときの名前。ジョブの name:（無ければ job id）に matrix の値が付いたもの。必須のチェックはこの名前で照合する | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
@@ -610,6 +610,22 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 対象の差分 | — | レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ | — | — | — |
 | 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | — |
 | 掛けるレビュー | — | レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ | — | — | — |
+| 兆候 | — | AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない | — | — | — |
+| 兆候の基準ファイル | — | `scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON | — | — | — |
+| 境界の印 | — | 握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える | — | — | — |
+| 判定データ | — | 分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別 | — | — | — |
+| ラチェット | — | 基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない | — | — | — |
+| アダプター | — | 外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別 | — | — | — |
+| 事実の表 | — | 1 つの事実（例: ランタイムの一覧）を行と列で持つ契約の JSON。`contracts/facts/` の 1 ファイル | — | — | — |
+| 持ち主のモジュール | — | 1 つのコンテキストの Python だけが読む事実を、定数として 1 か所で持つモジュール。ほかのモジュールは import する | — | — | — |
+| 重複の組 | — | 同じ事実を持つと見える 2 つ以上の最上位の定数の組。種類は `same-set`・`subset`・`affix`・`same-str`・`member`・`same-num` | — | — | — |
+| 重複の基準 | — | 移行の前に拾った重複の組と、組ごとの扱いの一覧。ラチェットの基準になる | — | — | — |
+| 止まった理由の種類 | — | 手順のスクリプトとプランが止まった理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、行き先はこれだけで決まる | — | — | — |
+| 止まった理由の表 | — | 止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`） | — | — | — |
+| 行き先 | — | 止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか | — | — | — |
+| 判断の呼び出し | — | スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、答えをスキーマで確かめる操作。今の `type: judge` のステップを置き換える | — | — | — |
+| 答えごとの行き先 | — | 承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`） | — | — | — |
+| 区分の無い問い | — | 問い合わせの区分（承認ゲート・レッドライン・費用など）のどれにも当たらない問い。AI が決めて記録する | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -748,7 +764,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | プランの外の取り消し | — | cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
 | 公開の結果 | `publication` | 最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
 | 未公開の改善項目 | `unpublished` | 手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
-| 宣言に無いジョブ | — | 継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
+| 宣言に無いジョブ | — | CI のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 単独起動 | — | --workflow-step を付けずに呼んだ cross-refactoring の起動。最終ゲートが cross-review の承認収束になる | — | — | — |
 | 対象のリポジトリ | — | cross-refactoring が Pull Request を取り、作業ディレクトリを作るリポジトリ。打った場所（現在のディレクトリ）が属する git の worktree の根で決まる | — | — | — |
 | 提案担当 | — | cross-refactoring の propose で改善の提案を出す参加者 | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
@@ -1004,7 +1020,7 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 起票の前の検査 | — | AI が Issue を作る前に、本文が記載項目の定義を満たすかを判定する検査 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 起票の後の検査 | — | 作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 課題の置き場 | — | Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す | — | — | `docs/specifications/ndf-issue-items.md` |
-| 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く | — | — | `docs/specifications/ndf-issue-items.md` |
+| 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。CI で動く | — | — | `docs/specifications/ndf-issue-items.md` |
 | 工程が足す節 | — | 起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの答え・閉じた理由・再発など）。起票者は書かない | — | — | `docs/specifications/ndf-issue-items.md` |
 | 置き場ごとの表し方 | — | 記載項目を、課題の置き場ごとにどの欄・節・ラベルで表すかの対応 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 棚卸しの実行 | — | 棚卸しを 1 回流すまとまり。持ち主を持つ実行は owner claim が返した識別子（run）で区別する | — | — | — |
@@ -1178,3 +1194,8 @@ Neural Development Factory（別のリポジトリのサービス）が NDF を�
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 区間 | — | 1 つの実行ジョブの中でランナーのエージェントが起動する claude -p の 1 回分。conductor の ndf-next で次の区間へ移る | — | — | `docs/specifications/ndf-development-loop-limits.md` |
 | リリースの実行 | — | Factory のオーガナイザーが、まとめたリリース 1 つのために起こすスプリントの実行。範囲のどの実行でもなく、承認資料を作り、リリースを流し、結果を返して終わる。同じリポジトリで同時に 1 本まで | 配布の実行 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
+| 人のいない実行 | — | 環境変数 NDF_FACTORY_RUN が空でない実行ジョブの区間。AskUserQuestion が使えず、応答を人が読まない | — | — | — |
+| 結果の行 | — | 最後の応答の文の中の、最後の「- 結果: <値>」の行。値は 判断が要る / 完了 / できなかった の 3 つで、Factory が区間の結果を決める | — | — | — |
+| 区間の報告 | — | 人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json | — | — | — |
+| 人のいない実行の印 | — | 人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める | — | — | — |
+| 結果の行の差し戻し | — | 人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す | — | — | — |
