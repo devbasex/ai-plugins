@@ -398,7 +398,7 @@ def _no_approvals(c: _KindArgs) -> list[dict]:
     return []
 
 
-def _approve_gate(steps: list[dict], c: _KindArgs) -> None:
+def _insert_approve_step(steps: list[dict], c: _KindArgs) -> None:
     steps.insert(0, approve_step(c.a, c.repo, c.approval))
 
 
@@ -424,7 +424,7 @@ FACTS_IDS = ("facts", "explain", "others")
 RELEASE_KINDS = {
     "dev": ReleaseKind(RULE_RELEASE_DEV, FACTS_IDS, "facts", _dev_approvals, _no_gate),
     "dev-cd": ReleaseKind(RULE_RELEASE_DEV, (), "end", _no_approvals, _no_gate),
-    "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _no_approvals, _approve_gate),
+    "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _no_approvals, _insert_approve_step),
     "prod-mvv": ReleaseKind(RULE_RELEASE_PROD_MVV, (), "facts", _no_approvals, _mvv_gate),
     "prod-cd": ReleaseKind(RULE_RELEASE_PROD_CD, (*FACTS_IDS, "approval-post"), "end", _cd_prod_approvals, _no_gate),
 }
