@@ -134,17 +134,23 @@ def cause(kind: str, detail: str, *, instance: Optional[str] = None, retry_after
     return out
 
 
-def errors(value: object) -> list[str]:
-    """`cause` の値の形の誤りを並べる。空なら、種類が表にあり、説明が空でなく、任意のキーの型が合う。"""
-    if not isinstance(value, dict):
-        return ["cause はオブジェクトで書く"]
-    errs: list[str] = []
+def _kind_errors(value: dict) -> list[str]:
     kind = value.get("kind")
     if not isinstance(kind, str) or kind not in table():
-        errs.append(f"cause.kind {kind!r} は止まった理由の表に無い")
+        return [f"cause.kind {kind!r} は止まった理由の表に無い"]
+    return []
+
+
+def _detail_errors(value: dict) -> list[str]:
     detail = value.get("detail")
     if not isinstance(detail, str) or not detail.strip():
-        errs.append("cause.detail は空でない文字列で書く")
+        return ["cause.detail は空でない文字列で書く"]
+    return []
+
+
+def _optional_key_errors(value: dict) -> list[str]:
+    """知らないキーと、任意のキー（instance・retry_after）の型の誤り。"""
+    errs: list[str] = []
     unknown = sorted(set(value) - {"kind", "detail", "instance", "retry_after"})
     if unknown:
         errs.append(f"cause に知らないキーがある: {', '.join(unknown)}")
@@ -154,6 +160,13 @@ def errors(value: object) -> list[str]:
     if "retry_after" in value and (isinstance(ra, bool) or not isinstance(ra, (int, float)) or ra < 0):
         errs.append("cause.retry_after は 0 以上の数で書く")
     return errs
+
+
+def errors(value: object) -> list[str]:
+    """`cause` の値の形の誤りを並べる。空なら、種類が表にあり、説明が空でなく、任意のキーの型が合う。"""
+    if not isinstance(value, dict):
+        return ["cause はオブジェクトで書く"]
+    return _kind_errors(value) + _detail_errors(value) + _optional_key_errors(value)
 
 
 def exit_code(kind: str) -> int:
