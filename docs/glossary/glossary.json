@@ -6842,14 +6842,38 @@
     {
       "term": "工程の定義",
       "context": "ndf-workflow",
-      "meaning": "モードごとの工程とステップの並び・入出力規約の参照・順序の決まりを持つ、登録済みのデータ",
-      "pending_source": "issues/issue-3092-requirements.md"
+      "meaning": "モードの工程の並びと、工程ごとのアクティビティの並び・入出力規約の参照・順序の属性を持つ、Serverless Workflow の書式の JSON 文書",
+      "pending_source": "issues/issue-3092-design.md"
     },
     {
       "term": "組み換え",
       "context": "ndf-workflow",
       "meaning": "スプリントのまとめの振り返りの後に、次以降のスプリントの順番表を必要なときだけ変える工程",
       "pending_source": "issues/issue-3092-requirements.md"
+    },
+    {
+      "term": "アクティビティ",
+      "context": "ndf-workflow",
+      "meaning": "工程の中の実行の単位。DBOS のステップ 1 つで流し、入力の範囲と出力の規約を持つ。プラン 1 本の実行・承認ゲートの答えの待ち・記録の 3 種類がある。プランのステップとは別",
+      "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "進行表のワークフロー",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの進行表 1 つを、登録した工程の定義に沿って流す DBOS のワークフロー。実行のたびに ID が替わり、進行表の ID は変わらない",
+      "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "進行の事象",
+      "context": "ndf-workflow",
+      "meaning": "進行表への変更 1 件の記録。誰が・いつ・何を・理由と変更後の状態を持ち、追記だけで残す。行の今の状態は最新の事象から引く",
+      "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "進行表の DB",
+      "context": "ndf-workflow",
+      "meaning": "進行表と DBOS の記録を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL",
+      "pending_source": "issues/issue-3092-design.md"
     }
   ]
 }
