@@ -60,7 +60,7 @@ def _args(argv: list[str]) -> tuple[str, str]:
 
 def _merge(outs: list) -> dict | str | None:
     outs = [o for o in outs if o]
-    deny = next((o for o in outs if isinstance(o, dict) and o.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"), None)
+    deny = next((o for o in outs if _is_deny(o)), None)
     if deny is not None:
         return deny
     if len(outs) <= 1:
@@ -133,8 +133,13 @@ def _unattended(command: str, raw: dict | None) -> dict | None:
     return None
 
 
+def _is_deny(o) -> bool:
+    """guard の出力 1 つが拒否（hookSpecificOutput.permissionDecision == "deny"）か。"""
+    return isinstance(o, dict) and (o.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+
+
 def _denied(outs: list) -> bool:
-    return any(isinstance(o, dict) and (o.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny" for o in outs)
+    return any(map(_is_deny, outs))
 
 
 def _guards(command: str, runtime: str, ev, outs: list) -> None:
