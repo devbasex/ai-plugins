@@ -148,3 +148,94 @@ def test_a_broken_declaration_stops_new_sprint_with_the_key_to_fix(tmp_path, flo
     assert p.returncode == 2
     assert f"branch_flow.{key}" in p.stderr
     assert not (out / "sprint.json").exists()
+
+
+# --- レビューの単位（#3163） ---------------------------------------------------------------
+
+REVIEW_IDS = ("review-push", "assess", "refactor", "review", "behavior-targets", "behavior", "behavior-verify", "review-pull")
+
+
+def review_ids(plan: dict) -> list[str]:
+    return [s["id"] for s in plan["steps"] if s["id"] in REVIEW_IDS]
+
+
+def drives(plan: dict) -> list[tuple[str, str | None]]:
+    return [(s["id"], s.get("drive")) for s in plan["steps"]]
+
+
+def test_without_reviews_the_review_steps_stay_as_before(tmp_path):
+    """受け入れ条件 3・I5: 宣言の無いリポジトリ（まとまりの記録なし）は、実装 PR にレビューを置かず、スプリントの PR に
+    cross-refactoring・cross-review・振る舞いの確認を 1 回ずつ通し、設計 PR に cross-review を掛ける。"""
+    repo = make_repo(tmp_path, None)
+    p, out = new_sprint(tmp_path, repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = plans(out)
+    assert review_ids(got["impl-11"]) == []
+    assert review_ids(got["check"]) == ["assess", "refactor", "review", "behavior-targets", "behavior", "behavior-verify"]
+    assert {("refactor", "cross-refactoring"), ("review", "cross-review")} <= set(drives(got["check"]))
+    assert ("review", "cross-review") in drives(got["design-11"])
+    snap = json.loads((out / "sprint.json").read_text())[branch_flow.SNAPSHOT_KEY]
+    assert snap[branch_flow.REVIEWS_KEY] == {}  # I6: 宣言が無くても空の形で書く
+
+
+REVIEWS = {
+    "impl": {"checks": ["cross-review", "behavior"], "diff": "pr"},
+    "sprint": {"checks": ["cross-refactoring"], "diff": "unchecked"},
+    "release": {"checks": ["cross-review"], "diff": "resolution"},
+    "design": {"checks": [], "diff": "none"},
+}
+
+
+def test_declared_reviews_place_only_the_chosen_steps(tmp_path):
+    """受け入れ条件 2: PR の種類ごとに、宣言で選んだレビューのステップだけがプランに現れる。"""
+    repo = make_repo(tmp_path, {**SELECTED, "reviews": REVIEWS})
+    p, out = new_sprint(tmp_path, repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = plans(out)
+    impl = got["impl-11"]
+    assert review_ids(impl) == ["review-push", "review", "behavior-targets", "behavior", "behavior-verify", "review-pull"]
+    assert review_ids(impl)[-1] == "review-pull" and step(impl, "review-pull")["next"] == "ready"
+    assert review_ids(got["check"]) == ["assess", "refactor"]
+    design = got["design-11"]
+    assert all(s.get("drive") != "cross-review" for s in design["steps"])
+    assert "review-settled" not in [s["id"] for s in design["steps"]] and step(design, "requirements-recheck")
+    snap = json.loads((out / "sprint.json").read_text())[branch_flow.SNAPSHOT_KEY]
+    assert snap[branch_flow.REVIEWS_KEY] == {k: {"checks": v["checks"], "diff": v["diff"]} for k, v in REVIEWS.items()}
+
+
+def test_a_running_sprint_keeps_its_review_units(tmp_path):
+    """受け入れ条件 9・I6: 開始の後に宣言へ reviews を足しても、同じスプリントの打ち直しは開始時のレビューの単位で組む。"""
+    repo = make_repo(tmp_path, None)
+    p, out = new_sprint(tmp_path, repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    before = {k: drives(v) for k, v in plans(out).items()}
+    both = {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"}}
+    write_flow(repo, {"reviews": both})
+    p, out = new_sprint(tmp_path, repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert {k: drives(v) for k, v in plans(out).items()} == before
+    p, other = new_sprint(tmp_path, repo, name="s2")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "review" in review_ids(plans(other)["impl-11"])
+
+
+@pytest.mark.parametrize(
+    "flow, key",
+    [
+        # 実装の差分がどの PR でも cross-review されない（衝突の解消の差分は覆いに数えない）
+        ({**SELECTED, "reviews": {**REVIEWS, "impl": {"checks": [], "diff": "none"}}}, "reviews"),
+        # 既定値の sprint が書いた impl と同じ実装の差分を cross-review する
+        ({"reviews": {"impl": {"checks": ["cross-review"], "diff": "pr"}}}, "reviews.sprint"),
+        # 種類に合わない対象の差分・取り込み方に合わない種類
+        ({"reviews": {"sprint": {"checks": ["cross-review"], "diff": "resolution"}}}, "reviews.sprint.diff"),
+        ({"reviews": {"release": {"checks": ["cross-review"], "diff": "pr"}}}, "reviews.release"),
+        ({"reviews": {"other": {}}}, "reviews.other"),
+    ],
+)
+def test_a_review_declaration_that_cannot_hold_stops_new_sprint(tmp_path, flow, key):
+    """受け入れ条件 5・6・7: 直すキーを出して終了コード 2 で止まり、プランを作らない。"""
+    repo = make_repo(tmp_path, flow)
+    p, out = new_sprint(tmp_path, repo)
+    assert p.returncode == 2
+    assert f"branch_flow.{key} " in p.stderr
+    assert not (out / "sprint.json").exists()

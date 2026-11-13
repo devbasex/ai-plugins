@@ -202,7 +202,7 @@ class MarksGh:
         self.marks = marks
 
     def get(self, path: str):
-        n = int(path.split("/")[3].split("?")[0])
+        n = int(path.split("/")[4])
         if n not in self.marks:
             raise RuntimeError("404")
         reviews, comments = self.marks[n]

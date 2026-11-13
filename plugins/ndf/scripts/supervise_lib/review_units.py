@@ -10,7 +10,7 @@ from __future__ import annotations
 import branch_flow
 
 from supervise_lib.decl import sprint_flow
-from supervise_lib.templates import NO_REFACTOR_MODES, _inspect_steps, refactor_scope, refactor_suspended
+from supervise_lib import templates
 
 # 掛けるレビュー → 検査のプランのステップの id の並び
 STEP_IDS = {
@@ -44,7 +44,7 @@ def review_row(a, kind: str, bundled: bool | None = None) -> branch_flow.ReviewR
 
 def chosen_checks(a, row: branch_flow.ReviewRow) -> tuple[str, ...]:
     """行の掛けるレビュー。リファクタリングを止める条件に当たれば cross-refactoring を外す（I7）。"""
-    off = refactor_suspended(a) or getattr(a, "mode", None) in NO_REFACTOR_MODES
+    off = templates.refactor_suspended(a) or getattr(a, "mode", None) in templates.NO_REFACTOR_MODES
     return tuple(c for c in branch_flow.CHECKS if row.runs(c) and not (off and c == "cross-refactoring"))
 
 
@@ -71,7 +71,7 @@ def insert_reviews(a, plan: dict, checks: tuple[str, ...]) -> dict:
     at = next((i for i, st in enumerate(steps) if st["id"] == "ready"), None)
     if at is None:
         raise ValueError("実装のプランに ready のステップが無い")
-    chain = [dict(st) for st in _inspect_steps(a, "{pr}", refactor_scope(a, "{pr}"))]
+    chain = [dict(st) for st in templates._inspect_steps(a, "{pr}", templates.refactor_scope(a, "{pr}"))]
     chain.append({"id": "review-pull", "type": "run", "timeout": 600, "cmd": "git pull -q --ff-only", "on_fail": "stop", "next": "ready"})
     _redirect(chain, "base-sync", "review-pull")
     _redirect(chain, "abort", "stop")
@@ -104,6 +104,9 @@ def apply_design(a, plan: dict) -> dict:
     for sid in DESIGN_REVIEW_IDS:
         steps[:] = [st for st in steps if st["id"] != sid]
         _redirect(steps, sid, DESIGN_AFTER_REVIEW)
+    for st in steps:
+        if st.get("inputs"):
+            st["inputs"] = [i for i in st["inputs"] if i not in DESIGN_REVIEW_IDS]
     return plan
 
 
