@@ -387,19 +387,9 @@ def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, poll: float,
     try:
         while True:
             if lock is None:
-                for index in range(limits.max_runs):
-                    lock = _try_lock(directory / f"slot-{index}.lock")
-                    if lock is not None:
-                        held.index = index
-                        _write_json(directory / f"slot-{index}.json", _owner(None, cwd))
-                        break
-            if lock is not None:
-                held.available_mib = read_memory()
-                if held.available_mib is None:
-                    held.measured = False  # 測れなければ待たず、監視もしない（I8）
-                    return lock
-                if held.available_mib >= limits.memory_floor_mib:
-                    return lock
+                lock = _take_free_slot(directory, cwd, limits.max_runs, held)
+            if lock is not None and _memory_ready(held, read_memory, limits.memory_floor_mib):
+                return lock
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if lock is not None:
@@ -410,6 +400,26 @@ def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, poll: float,
         end = time.monotonic()
         held.waited_seconds = end - start
         _note_wait(start, end)
+
+
+def _take_free_slot(directory: Path, cwd: Path, max_runs: int, held: Held) -> FileLock | None:
+    """番号の小さい方から空いた枠を取り、持ち主を仮に書く。空きが無ければ None。"""
+    for index in range(max_runs):
+        lock = _try_lock(directory / f"slot-{index}.lock")
+        if lock is not None:
+            held.index = index
+            _write_json(directory / f"slot-{index}.json", _owner(None, cwd))
+            return lock
+    return None
+
+
+def _memory_ready(held: Held, read_memory: ReadMemory, floor_mib: int) -> bool:
+    """メモリを測って `held` に書き、走らせてよければ真。"""
+    held.available_mib = read_memory()
+    if held.available_mib is None:
+        held.measured = False  # 測れなければ待たず、監視もしない（I8）
+        return True
+    return held.available_mib >= floor_mib
 
 
 def _release(directory: Path, held: Held, lock: FileLock) -> None:
