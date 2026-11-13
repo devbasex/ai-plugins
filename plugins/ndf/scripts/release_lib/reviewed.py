@@ -183,21 +183,28 @@ def wait_ci_except(root, n, skip, timeout, ops):
         raise StepError(f"PR #{n} のチェックが上限 {timeout:g} 秒までに終わらない", EXIT_INFRA_WAIT)
 
 
+def trail_required(root, repo, prod) -> bool:
+    """`ndf/release-approval` が本番チャネルの ruleset の必須チェックにあるか（決定 5 の ruleset の読み取り）。読めなければ
+    必須とみなさない（マージの判定は GitHub が必須チェックで持つ）。"""
+    try:
+        required = ci_workflows.required_contexts(gh_json(root, ["api", f"repos/{repo}/rules/branches/{prod}"], "gh api rules")) or []
+    except (StepError, ValueError):
+        return False
+    return approval_trail.STATUS_CONTEXT in required
+
+
 def wait_trail_status(root, repo, prod, head, timeout=None):
     """`ndf/release-approval` が本番チャネルの必須チェックにあるか、先端に既に付いているとき、先端のその状態が success に
     なるまで待つ（必須でなくても付いた failure は merge-when-green を止める）。`timeout` を省くと `release-steps.trail-status`
     の上限（`merged_lib.merge.promote` の場合 1 が使う）。"""
     timeout = limits.policy("release-steps.trail-status").seconds if timeout is None else timeout
-    try:  # 読めなければ必須とみなさない（マージの判定は GitHub が必須チェックで持つ）
-        required = ci_workflows.required_contexts(gh_json(root, ["api", f"repos/{repo}/rules/branches/{prod}"], "gh api rules")) or []
-    except (StepError, ValueError):
-        required = []
+    required = trail_required(root, repo, prod)
 
     def read():
         d = gh_json(root, ["api", f"repos/{repo}/commits/{head}/status"], "gh api status") or {}
         return next((s for s in d.get("statuses") or [] if s.get("context") == approval_trail.STATUS_CONTEXT), {})
 
-    if approval_trail.STATUS_CONTEXT not in required and not read():
+    if not required and not read():
         return
 
     policy = limits.policy("release-steps.trail-status")._replace(seconds=timeout)
@@ -309,7 +316,9 @@ def judge_pr(repo, pr, head, prod):
 
 def approval_check(a):
     """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。
-    レビューが必須の場合（cd-review）は証跡を書かないため何も付けない（I8。付けると証跡が無い failure でマージが止まる）。"""
+    レビューが必須の場合（cd-review）は証跡を書かないため何も付けない（I8。付けると証跡が無い failure でマージが止まる）。
+    ただし本番チャネルの ruleset が証跡のチェックを必須にしていれば、レビュー必須でも判定して付ける（決定 12 の手順 3。
+    承認数 1 のまま確認用の PR で success が付くことを確かめる移行の途中）。"""
     root = git_root(a.root)
     prod = delivery.load_delivery(root).production
     repo, head = repo_or_stop(root), None
@@ -317,7 +326,7 @@ def approval_check(a):
         head, base, state = approval_trail.read_head(repo, a.pr)
         if base != prod:
             emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
-        if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW:
+        if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
             msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
             emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
         pr = a.pr
