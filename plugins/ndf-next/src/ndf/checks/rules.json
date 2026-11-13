@@ -1,9 +1,9 @@
 {
   "version": 1,
   "smells": {
-    "S110": {"kind": 4, "mark": "boundary", "summary": "except の本体が pass だけ"},
-    "S112": {"kind": 4, "mark": "boundary", "summary": "except の本体が continue だけ"},
-    "BLE001": {"kind": 4, "mark": "boundary", "summary": "Exception・BaseException・素の except を受けて送出し直さない"},
+    "S110": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が pass だけ"},
+    "S112": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が continue だけ"},
+    "BLE001": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "Exception・BaseException・素の except を受けて送出し直さない"},
     "NDF201": {
       "kind": 2,
       "mark": "boundary-or-limit",
@@ -14,8 +14,8 @@
       }
     },
     "NDF301": {"kind": 3, "mark": "none", "summary": "elif の長い連鎖", "params": {"min_elif": 4}},
-    "NDF302": {"kind": 3, "mark": "none", "summary": "分岐の多い関数", "params": {"max_branches": 9}},
-    "NDF303": {"kind": 3, "mark": "none", "summary": "深い入れ子", "params": {"max_nested": 3}},
+    "PLR0912": {"kind": 3, "mark": "none", "by": "ruff", "summary": "分岐の多い関数"},
+    "PLR1702": {"kind": 3, "mark": "none", "by": "ruff", "summary": "深い入れ子"},
     "NDF401": {"kind": 4, "mark": "boundary", "summary": "定数を返して黙る except"},
     "NDF402": {"kind": 4, "mark": "boundary", "summary": "contextlib.suppress"},
     "NDF501": {"kind": 5, "mark": "boundary", "summary": "空の既定への or"},
@@ -26,7 +26,16 @@
       "params": {"boundary_receivers": ["os.environ"]}
     },
     "NDF701": {"kind": 7, "mark": "none", "summary": "長い関数", "params": {"max_lines": 60}},
-    "NDF702": {"kind": 7, "mark": "none", "summary": "引数の多い関数", "params": {"max_args": 6}}
+    "PLR0913": {"kind": 7, "mark": "none", "by": "ruff", "summary": "引数の多い関数"}
+  },
+  "ruff": {
+    "preview": true,
+    "config": {
+      "lint.flake8-bandit.check-typed-exception": true,
+      "lint.pylint.max-branches": 9,
+      "lint.pylint.max-nested-blocks": 3,
+      "lint.pylint.max-args": 6
+    }
   },
   "boundaries": ["外部コマンド", "ネットワーク", "利用者の入力", "ファイル"],
   "limit_label": "上限",

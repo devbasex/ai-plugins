@@ -1,21 +1,19 @@
-"""兆候の規則（AI が陥りやすい作り）を構文木で数える。
+"""兆候の規則（AI が陥りやすい作り）のうち、ruff の規則に無いものを構文木で数える。
 
 規則の定義（何を兆候と数えるか）は `rules.json` の `smells` と、同じディレクトリの `README.md` の表にある。どの規則も 1 つの関数が
-`(行, 規則)` を返し、`scan` がそれらをまとめる。境界の印による許しは `marks` が当てる。
+`(行, 規則)` を返し、`scan` がそれらをまとめる。ruff で数える規則（`by` が `ruff`）は `lint` が数える（決定 36）。
+境界の印による許しは `marks` が当てる。
 """
 
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
 from typing import Any
 
 LOOPS = (ast.For, ast.AsyncFor, ast.While)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
-BLOCKS = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith, ast.Match, ast.TryStar)
-BLIND = frozenset({"Exception", "BaseException"})
 Hit = tuple[int, str]
 
 
@@ -99,27 +97,15 @@ def _quiet(body: list[ast.stmt]) -> bool:
     return any(const_return(s) for s in body) and all(isinstance(s, (ast.Pass, ast.Continue)) or const_return(s) for s in body)
 
 
-def _handler_hits(handler: ast.ExceptHandler) -> Iterator[str]:
-    body = handler.body
-    if len(body) == 1 and isinstance(body[0], ast.Pass):
-        yield "S110"
-    if len(body) == 1 and isinstance(body[0], ast.Continue):
-        yield "S112"
-    reraises = any(isinstance(n, ast.Raise) for s in body for n in ast.walk(s))
-    if BLIND & set(caught_types(handler)) and not reraises:
-        yield "BLE001"
-    if _quiet(body):
-        yield "NDF401"
-
-
 def handlers(tree: ast.Module) -> tuple[list[Hit], dict[int, tuple[str, ...]]]:
-    """`except` の兆候（S110・S112・BLE001・NDF401）と、`except` の行ごとの受ける型を返す。"""
+    """`except` の兆候（NDF401）と、`except` の行ごとの受ける型を返す。"""
     hits: list[Hit] = []
     caught: dict[int, tuple[str, ...]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ExceptHandler):
             caught[node.lineno] = caught_types(node)
-            hits += [(node.lineno, code) for code in _handler_hits(node)]
+            if _quiet(node.body):
+                hits.append((node.lineno, "NDF401"))
     return hits, caught
 
 
@@ -148,64 +134,9 @@ def calls_and_fallbacks(tree: ast.Module, boundary_receivers: frozenset[str]) ->
     return hits
 
 
-def _own_nodes(func: ast.AST) -> Iterator[ast.AST]:
-    """関数の本体のノード。入れ子の関数・クラスの中には入らない（それぞれ別の関数として数える）。"""
-    stack = list(ast.iter_child_nodes(func))
-    while stack:
-        node = stack.pop()
-        yield node
-        if not isinstance(node, SCOPES):
-            stack += ast.iter_child_nodes(node)
-
-
-def branches(func: ast.AST) -> int:
-    """分岐の数: `if`（`elif` を含む）・`else`・ループと `else`・`except`・`try` の `else` と `finally`・`case`。"""
-    count = 0
-    for node in _own_nodes(func):
-        if isinstance(node, ast.If):
-            has_else = node.orelse and not (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If))
-            count += 1 + bool(has_else)
-        elif isinstance(node, LOOPS):
-            count += 1 + bool(node.orelse)
-        elif isinstance(node, (ast.Try, ast.TryStar)):
-            count += len(node.handlers) + bool(node.orelse) + bool(node.finalbody)
-        elif isinstance(node, ast.Match):
-            count += len(node.cases)
-    return count
-
-
-def nesting(node: ast.AST) -> int:
-    """ブロックの入れ子の深さ。`elif` は深さに数えない。入れ子の関数の中には入らない。"""
-    deepest = 0
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, SCOPES):
-            continue
-        is_elif = isinstance(node, ast.If) and isinstance(child, ast.If) and node.orelse == [child]
-        step = isinstance(child, BLOCKS) and not is_elif
-        deepest = max(deepest, step + nesting(child))
-    return deepest
-
-
-def arg_count(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
-    """引数の数。メソッドの先頭の `self`・`cls` は数えない。"""
-    args = [*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs]
-    return len(args) - bool(args and args[0].arg in ("self", "cls"))
-
-
-def functions(tree: ast.Module, params: dict[str, Any]) -> list[Hit]:
-    """関数の長さ（NDF701）・引数（NDF702）・分岐（NDF302）・入れ子（NDF303）を `def` の行で返す。"""
-    hits: list[Hit] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, FUNCTIONS):
-            continue
-        checks = (
-            ("NDF701", node.end_lineno - node.lineno + 1 > params["max_lines"]),
-            ("NDF702", arg_count(node) > params["max_args"]),
-            ("NDF302", branches(node) > params["max_branches"]),
-            ("NDF303", nesting(node) > params["max_nested"]),
-        )
-        hits += [(node.lineno, code) for code, over in checks if over]
-    return hits
+def long_functions(tree: ast.Module, max_lines: int) -> list[int]:
+    """`def` の行から最後の行までが `max_lines` を超える関数（NDF701）の `def` の行。"""
+    return [n.lineno for n in ast.walk(tree) if isinstance(n, FUNCTIONS) and n.end_lineno - n.lineno + 1 > max_lines]
 
 
 def scan(tree: ast.Module, smells: dict[str, Any]) -> tuple[list[Hit], dict[int, tuple[str, ...]]]:
@@ -217,11 +148,5 @@ def scan(tree: ast.Module, smells: dict[str, Any]) -> tuple[list[Hit], dict[int,
     handler_hits, caught = handlers(tree)
     hits += handler_hits
     hits += calls_and_fallbacks(tree, frozenset(smells["NDF502"]["params"]["boundary_receivers"]))
-    params = {
-        "max_lines": smells["NDF701"]["params"]["max_lines"],
-        "max_args": smells["NDF702"]["params"]["max_args"],
-        "max_branches": smells["NDF302"]["params"]["max_branches"],
-        "max_nested": smells["NDF303"]["params"]["max_nested"],
-    }
-    hits += functions(tree, params)
+    hits += [(line, "NDF701") for line in long_functions(tree, smells["NDF701"]["params"]["max_lines"])]
     return sorted(set(hits)), caught

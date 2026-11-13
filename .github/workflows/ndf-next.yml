@@ -21,7 +21,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  # 本文の編集（edited）は検査だけを打ち直すため、push の実行（テストを含む）を取り消さないよう別の組にする
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'edited' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -32,6 +33,8 @@ jobs:
   # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
   # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
   ndf-next-tests:
+    # PR 本文を読まないので、本文の編集では流し直さない
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

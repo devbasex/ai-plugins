@@ -29,19 +29,21 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 | --- | --- | --- | --- |
 | `NDF201` | ループ（`for`・`while`・内包表記）の本体の中の外部呼び出し。外部呼び出しは、名前が `calls` にある関数か、根の名前が `modules` にある属性の呼び出し | 呼び出しを直に含む最も内側のループの行。1 つのループで 1 件 | 境界の種類か `上限` |
 | `NDF301` | `elif` が 4 本以上続く連鎖 | 連鎖の先頭の `if` | 受けない |
-| `NDF302` | 分岐が 9 を超える関数。分岐は `if`・`elif`・`else`・ループとその `else`・`except`・`try` の `else` と `finally`・`case` を 1 つずつ数える | `def` の行 | 受けない |
-| `NDF303` | ブロック（`if`・ループ・`try`・`with`・`match`）の入れ子が 3 を超える関数。`elif` は深さに数えない | `def` の行 | 受けない |
-| `S110` | 本体が `pass` だけの `except` | `except` の行 | 境界の種類 |
-| `S112` | 本体が `continue` だけの `except` | `except` の行 | 境界の種類 |
+| `PLR0912` | 分岐が 9 を超える関数（ruff の数え方） | `def` の行 | 受けない |
+| `PLR1702` | ブロックの入れ子が 3 を超える関数（ruff の数え方） | 入れ子の外側のブロックの行 | 受けない |
+| `S110` | 本体が `pass` だけの `except`（型を指定した `except` も数える） | `except` の行 | 境界の種類 |
+| `S112` | 本体が `continue` だけの `except`（同上） | `except` の行 | 境界の種類 |
 | `BLE001` | `Exception`・`BaseException`・素の `except` を受け、本体で送出し直さない | `except` の行 | 境界の種類 |
 | `NDF401` | 本体が定数の `return` を含み、`pass`・`continue`・定数の `return` だけでできた `except` | `except` の行 | 境界の種類 |
 | `NDF402` | `contextlib.suppress(...)` の呼び出し | 呼び出しの行 | 境界の種類 |
 | `NDF501` | 右端が空の値（`{}`・`[]`・`()`・`""`・`0`・`None`）の `or` | 式の行 | 境界の種類 |
 | `NDF502` | 位置引数がちょうど 2 つの `.get(k, 既定)`。受け手が `boundary_receivers`（`os.environ`）のものは環境変数という境界そのものなので数えない | 呼び出しの行 | 境界の種類 |
 | `NDF701` | `def` の行から最後の行までが 60 行を超える関数 | `def` の行 | 受けない |
-| `NDF702` | 引数が 6 を超える関数（メソッドの先頭の `self`・`cls` は数えない） | `def` の行 | 受けない |
+| `PLR0913` | 引数が 6 を超える関数（ruff の数え方。メソッドの `self`・`cls` は数えない） | `def` の行 | 受けない |
 
 入れ子の関数・クラス・`lambda` は、外の関数の長さ以外では外の関数に数えず、それぞれ 1 つの関数として数える。
+
+**`S110`・`S112`・`BLE001`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の境界の印は NDF の規則として `marks` が当てる。
 
 ### 境界の印
 

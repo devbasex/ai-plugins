@@ -25,6 +25,14 @@ def test_imports_outside_declared_fail(plugin):
     assert [(f.rule, f.line) for f in found] == [("I3", 2), ("I3", 4)]
 
 
+def test_sibling_module_is_own(plugin):
+    plugin.write("tests/x/_helper.py", "X = 1\n")
+    plugin.write("tests/x/test_a.py", "from _helper import X\n")
+    plugin.write("tests/y/test_b.py", "from _helper import X\n")
+    found = invariants.old_imports(plugin.scope(), OLD)
+    assert [(f.path.rsplit("/", 2)[-2], f.line) for f in found] == [("y", 1)]
+
+
 def test_declared_dependency_is_allowed(plugin):
     plugin.write("src/ndf/a.py", "import httpx\nimport pytest\n")
     assert invariants.old_imports(plugin.scope(), OLD) == []

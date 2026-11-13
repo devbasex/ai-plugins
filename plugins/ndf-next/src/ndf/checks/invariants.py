@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections import defaultdict
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -86,14 +87,21 @@ def _normalize(dist: str) -> str:
 
 
 def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
-    """I3: 自分のパッケージ・標準ライブラリ・宣言した依存の外の import と、旧いプラグインのパスの文字。"""
+    """I3: 自分のパッケージ・標準ライブラリ・宣言した依存の外の import と、旧いプラグインのパスの文字。
+
+    同じディレクトリの隣の `.py`（テストの補助のモジュール）は自分のものとして許す。
+    """
     allowed = LOCAL_TOPS | frozenset(sys.stdlib_module_names) | declared_tops(scope.plugin_root)
     path_pattern = re.compile(rf"(?<![\w-]){re.escape(old_plugin)}(?=/|$)")
+    siblings: dict[Path, set[str]] = defaultdict(set)
+    for src in scope.python():
+        siblings[src.path.parent].add(src.path.stem)
     found = []
     for src in scope.python():
+        own = allowed | siblings[src.path.parent]
         for node in ast.walk(src.tree):
             tops = _import_tops(node)
-            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in tops if t not in allowed]
+            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in tops if t not in own]
         found += [
             Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
             for no, text in _strings(src.tree)

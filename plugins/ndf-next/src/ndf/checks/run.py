@@ -19,7 +19,7 @@ from typing import Any
 
 from ndf import identity
 from ndf.cli import EXIT_UNREADABLE
-from ndf.checks import facts, invariants, marks, smells, structure, words
+from ndf.checks import facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
 
 EXIT_OK = 0
@@ -63,11 +63,14 @@ def unparsable(scope: Scope) -> list[Finding]:
 
 
 def smell_findings(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    """兆候を数え、境界の印を当てる。初日から 0 件で、基準のファイルを持たない。"""
+    """兆候を数え（ruff は全ファイルへ 1 回）、境界の印を当てる。初日から 0 件で、基準のファイルを持たない。"""
     codes = frozenset(rules["smells"])
+    sources = scope.code()
+    by_ruff = lint.scan(sources, rules)
     found = []
-    for src in scope.code():
-        hits, caught = smells.scan(src.tree, rules["smells"])
+    for src in sources:
+        own, caught = smells.scan(src.tree, rules["smells"])
+        hits = sorted({*own, *by_ruff[src.path.resolve()]})
         applied = marks.apply(hits, marks.read_marks(src.text, codes), caught, rules)
         found += [
             Finding(code, src.rel, line, rules["smells"][code]["summary"] + (f"。印を受けない: {why}" if why else ""))

@@ -30,6 +30,7 @@ dependencies = [
     "pygments==2.21.0",
     "python-dotenv==1.2.3",
     "ruamel-yaml==0.19.1",
+    "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
     "semver==3.1.0",
     "slack-sdk==3.44.1",
     "tabulate==0.10.0",

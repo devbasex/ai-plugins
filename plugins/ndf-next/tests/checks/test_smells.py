@@ -54,7 +54,7 @@ def test_elif_chain_counts_from_head_only():
     assert smells.elif_chains(tree(src), 5) == []
 
 
-def test_except_rules(rules):
+def test_quiet_handler_is_ndf401_and_types_are_recorded():
     src = """
         try:
             x()
@@ -64,13 +64,9 @@ def test_except_rules(rules):
             x()
         except OSError:
             return None
-        try:
-            x()
-        except BaseException:
-            raise
     """
     hits, caught = smells.handlers(tree(src))
-    assert sorted(hits) == [(4, "BLE001"), (4, "S110"), (8, "NDF401")]
+    assert hits == [(8, "NDF401")]
     assert caught[8] == ("OSError",)
 
 
@@ -93,26 +89,7 @@ def test_fallbacks_and_suppress():
     assert sorted(hits) == [(2, "NDF501"), (4, "NDF502"), (7, "NDF402")]
 
 
-def test_function_size_rules(rules):
+def test_long_function(rules):
     long_body = "\n".join(f"    x{i} = {i}" for i in range(61))
-    many_args = "def g(self, a, b, c, d, e, f):\n    pass\n"
-    too_many = "def h(a, b, c, d, e, f, g):\n    pass\n"
     assert codes(f"def f():\n{long_body}\n", rules) == ["NDF701"]
-    assert codes(many_args, rules) == []
-    assert codes(too_many, rules) == ["NDF702"]
-
-
-def test_branches_and_nesting():
-    flat = tree("def f(x):\n" + "".join(f"    if x == {i}:\n        pass\n" for i in range(10)))
-    assert smells.branches(flat.body[0]) == 10
-    deep = tree("""
-        def f(x):
-            if x:
-                for y in x:
-                    while y:
-                        with y:
-                            pass
-    """)
-    assert smells.nesting(deep.body[0]) == 4
-    chain = tree("def f(x):\n    if x:\n        pass\n    elif x:\n        if x:\n            pass\n")
-    assert smells.nesting(chain.body[0]) == 2
+    assert codes("def f():\n    pass\n", rules) == []
