@@ -10,6 +10,7 @@ ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] ...
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 from pathlib import Path
@@ -105,10 +106,16 @@ def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_emit(a: argparse.Namespace) -> int:
     obj = _result_from_args(a)
-    code = a.code if a.code is not None else result.code_for(obj)
-    if a.out is not None and code is not None and not result.errors(obj, code):
-        Path(a.out).write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
-    return result.emit(obj, code)
+    if a.out is None:
+        return result.emit(obj, a.code)
+    # 確かめと整形は result.emit に 1 回だけ任せ、出せた行をファイルへ書いてから標準出力へ出す
+    buffer = io.StringIO()
+    code = result.emit(obj, a.code, stream=buffer)
+    line = buffer.getvalue()
+    if line:
+        Path(a.out).write_text(line, encoding="utf-8")
+        sys.stdout.write(line)
+    return code
 
 
 def parser() -> argparse.ArgumentParser:
