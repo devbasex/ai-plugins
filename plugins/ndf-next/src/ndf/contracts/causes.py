@@ -188,6 +188,13 @@ def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Rout
     return _fallback(kind, on_fail)
 
 
+def _destination(kind: str, on_cause: Mapping[str, str]) -> tuple[str, Optional[str]]:
+    """行き先の語と on_cause の指定（無ければ None）。語は指定があればそれ、無ければ種類の既定（retry・step・human）。"""
+    default = row(kind).route
+    target = on_cause.get(kind)
+    return (default if target is None else target), target
+
+
 def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: RetryState) -> Route:
     """行き先を 1 つ選ぶ: on_cause → 種類の既定の行き先 → on_fail → 人へ。
 
@@ -195,10 +202,7 @@ def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: 
     """
     if state.used < 0:
         raise ValueError(f"打ち直しの回数は 0 以上: {state.used}")
-    default = row(kind).route
-    target = on_cause.get(kind)
-    # 行き先の語: on_cause の指定があればそれ、無ければ種類の既定（retry・step・human）
-    to = default if target is None else target
+    to, target = _destination(kind, on_cause)
     if to == RETRY:
         return _retry_or_next(kind, on_fail, state)
     if to in (END, STOP):
