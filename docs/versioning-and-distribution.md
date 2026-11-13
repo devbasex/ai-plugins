@@ -7,8 +7,9 @@ NDF プラグインの版数の付け方と、正式版のリリース・開発�
 ## チャネルと ref
 
 **デプロイのチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
-開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の承認したコミットを
-`main` へ送る。**これにより、マージとリリースが別の操作になる。**
+スプリントは `main` から切り、検査を通ったスプリントブランチを `develop` へ入れて開発版として配る。正式版として出すときは、
+承認したスプリントブランチだけをリリースブランチへ集めて `main` へ送る。`develop` は開発版のデプロイとスプリントどうしの
+結合を試す場で、`main` へは流れない。**これにより、マージとリリースが別の操作になり、承認したスプリントだけが正式版に載る。**
 
 分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
 環境で動くかはリリースした後にしか分からない。`release` が定めた「開発版のデプロイ → 本番リリース」の
@@ -17,7 +18,13 @@ NDF プラグインの版数の付け方と、正式版のリリース・開発�
 | チャネル | ref | 何が載るか | 誰が登録するか |
 | --- | --- | --- | --- |
 | 正式版 | `main`（既定ブランチ） | 正式版として承認された版だけが載る | 常用する利用者 |
-| 開発版 | `develop` | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
+| 開発版 | `develop` | スプリントの検査を通ったスプリントがそのまま載る | 開発者と、検証に参加する利用者 |
+
+**チャネルの外に、スプリントブランチとリリースブランチを置く。** スプリントブランチ（`sprint/<名前>`）は `main` から切り、
+そのスプリントの設計 PR・実装 PR・確定仕様化の PR を集める。スプリントの検査の後に `develop` へ入れ、正式版のときはリリースブランチへ集める。
+リリースブランチ（`release/v<版>`）は `main` から切り、選んだスプリントブランチだけを集めて版を上げ、`main` へ入れる。
+`develop` を取り込むスプリントブランチとリリースブランチは無い。この運用の値の正本は `.ndf/worktree.json` の `branch_flow` で、
+各値の意味は確定仕様 [ndf-branch-flow-declaration.md](specifications/ndf-branch-flow-declaration.md) にある。
 
 **正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** 取得元の登録に
 ref は保存されず（Claude Code の `known_marketplaces.json` は URL だけを持つ）、登録した時点の
@@ -133,11 +140,13 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、`develop` から `release/v<版>` を切って
-版上げ・変更履歴・トークン消費の記録のコミットを積み、`release/v<版>` を先に `develop` へ取り込んでから、`release/v<版>` を
-head にした `main` 宛の Pull Request（リリースの PR）を作る。リリース承認はこのリリースの PR の先端に対して**マージの前に**取る。
-`main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は
-`develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
+**`main` へは、承認したスプリントだけを集めたリリースブランチで入れる。** 正式版のたびに、`main` から `release/v<版>` を切って
+選んだスプリントブランチを `--no-ff` のマージのコミットで集め（`release-steps.py release-branch`）、版上げ・変更履歴・トークン消費の
+記録のコミットを積み、`release/v<版>` を head にした `main` 宛の Pull Request（リリースの PR）を作る。リリース承認はこのリリースの PR の
+先端に対して**マージの前に**取る。`main` へ直接コミットせず、`develop` からも入れない。`main` 宛の Pull Request が満たす条件は
+確定仕様 [ndf-branch-flow-declaration.md](specifications/ndf-branch-flow-declaration.md) の「ai-plugins の本番チャネル宛の検査」にあり、
+`scripts/check-pr-base.sh` が `main` の宣言で判定する。リリースのプランの順序は `development-workflow` の
+[references/production-merge.md](../plugins/ndf/skills/development-workflow/references/production-merge.md) の「選んで集める取り込み方のリリース」にある。
 
 **ai-plugins は CD があるため、リリース承認はリリースの PR の上で取る**（`release` の Skill の「リリースの場合」。判定は
 `release-steps.py release-case`）。`main` の ruleset の承認数が 0 なら、承認資料と承認の証跡（承認したコミットの 40 桁）を
@@ -146,17 +155,21 @@ head にした `main` 宛の Pull Request（リリースの PR）を作る。リ
 証跡と先端の違う PR・承認権限（admin か maintain）の無い人の証跡だけの PR は `main` へマージできない。承認数が 1 以上なら、
 リリースの PR のレビューの承認をリリース承認とみなす。
 
-**承認の後に `develop` が進んでも、デプロイは止まらない。** 承認の対象はリリースの PR の先端で、`develop` の先端は比べる相手に
-入れない。承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。承認の後に `develop` へ
-入った変更は、この版の `main` には入らず次のリリースで出る。
+**承認の後にスプリントブランチが進んでも、デプロイは止まらない。** 承認の対象はリリースの PR の先端で、スプリントブランチの先端は
+比べる相手に入れない。承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。承認の後に
+スプリントブランチへ入った変更は、この版の `main` には入らず次のリリースで出る。
 
-**`release/v<版>` を `develop` へ取り込むときに版数を持つ箇所が衝突したら、本番の版を取る。** 承認の後に
-開発版のデプロイが `develop` の版数を上げていると衝突する。`release/v<版>` そのものへは `develop` を取り込まず
-（取り込むと承認の外のコミットが `main` へ出る）、`release/v<版>-sync` に `origin/develop` を取り込んで衝突した塊の
-`release/v<版>` の側を取り、`release/v<版>-sync` → `develop` の Pull Request で取り込む。版数の外の箇所が
-衝突すれば解かずに止まる。取り込んだ後の `develop` の版数は本番の版になり、次の開発版のデプロイは次に空いている版で
-決め直す。取り込みはマージのコミットで行い（squash と rebase では行わない）、`release/v<版>` の先頭を
-`develop` の祖先に残す。
+**戻すマージ: 正式版を出した後、`release/v<版>` を `develop` へ取り込む。版数を持つ箇所が衝突したら、本番の版を取る。**
+`release --promotion selected` が、`main` へのマージとタグ・GitHub Release の作成の後に行う。`develop` は開発版のデプロイで版数を
+上げているため衝突する。`release/v<版>` そのものへは `develop` を取り込まず（取り込むと承認の外のコミットが `main` へ出る）、
+`release/v<版>-sync` に `origin/develop` を取り込んで衝突した塊の `release/v<版>` の側を取り、`release/v<版>-sync` → `develop` の
+Pull Request で取り込む。版数の外の箇所が衝突すれば解かずに止まる。止まっても本番は出ており、失敗は本番の完了と分けて報告する。
+取り込んだ後の `develop` の版数は本番の版になり、次の開発版のデプロイは次に空いている版で決め直す。取り込みはマージのコミットで行い
+（squash と rebase では行わない）、`develop` を作り直さない（強制 push が要る）。
+
+**開発版の版上げ（`-dev.<連番>`）は `develop` でだけ行う。** スプリントブランチとリリースブランチは `main` とスプリントの変更だけから
+なり、`develop` を取り込まないため、`-dev.<連番>` の版上げのコミットは `main` へ入らない。`check-pr-base.sh` が `main` 宛の
+Pull Request でも確かめる（`develop` にだけあるコミットを含む head を断る）。
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
@@ -173,27 +186,29 @@ remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
 
-この例は必須のチェックが 11 個だったときの観測である。必須のチェックの数を N とすると、
-`N-1 of N` になる。
+この例は必須のチェックが 11 個だったときの観測である。必須のチェックの数を N とすると、`N-1 of N` になる。
 
-**この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
-`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端である。
-`main` と `develop` が同じコミットを指すことは求めない。中身が出した `release/v<版>` と一致していることは
-差分で確かめる（承認の後に `develop` が進んでいれば、`develop` とは一致しない）。
+**`main` と `develop` は同じコミットを指さない。** `develop` には開発版の版上げとまだ出していないスプリントがあり、
+`main` にはリリースブランチのマージのコミットがある。**それでよい。** リリースした版を指すのは `main` の先端である。
+中身が出した `release/v<版>` と一致していることは差分で確かめる。
 
 ```bash
-python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # リリースの PR を作り、承認を待って 10
+python3 plugins/ndf/scripts/release-steps.py release-branch --version <版> --units sprint/<名前>... --root .   # main から組む
+python3 plugins/ndf/scripts/release-steps.py review-open --version <版> --diff resolution --root .   # 衝突の解消の差分（無ければ 3）
+python3 plugins/ndf/scripts/release-steps.py review-close --version <版> --root .
+python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --promotion selected --root .   # リリースの PR を作り、承認を待って 10
 python3 plugins/ndf/scripts/release-steps.py approval-post --pr <番号> --approval <承認資料> --root .
 python3 plugins/ndf/scripts/release-steps.py approve --pr <番号> --approved-sha <先端> --by user --root .   # 承認を得てから
-python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 先端と承認が一致すればマージ
+python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --promotion selected --root .   # 先端と承認が一致すればマージし、戻すマージを入れる
 git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空であること
 ```
 
 **リリースの PR のマージは管理者の bypass（`--admin`）を使わない。** マージは利用者のアカウントで、承認した先端に固定して行い、
 `main` への push が CD を起動する。必須のチェックか承認が足りなければ GitHub がマージを拒む。
 
-**Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
-は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+**Pull Request の宛先は PR の種類で決まる。** 設計 PR・実装 PR・確定仕様化の PR は `sprint/<名前>`、スプリントの検査の PR・
+開発版の版上げの PR・戻すマージの PR は `develop`、リリースの PR は `main` である。既定ブランチが `main` であるため、`gh pr create`
+は指定しないと `main` を宛先にする。**`--base` を必ず付ける。**
 
 **リリースの Pull Request では、重いチェック（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
 2 度試さないためである。判定は各 workflow の `ci-scope` のジョブ（チェックの名前は `pytest-scope`・
@@ -203,15 +218,16 @@ git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空で
   `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
   の記録で、`plugin.json` と `marketplace.json` は `version` / `description` の行だけ
 - `develop` への push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
-  変えていない（`main` 宛の本番の Pull Request）。`main` の側に `develop` へ無い変更があれば省かない
+  変えていない（`main` 宛の本番の Pull Request）。`main` の側に `develop` へ無い変更があれば省かない。
+  宛先の宣言が選んで集める取り込み方のとき（ai-plugins の `main` 宛）は当てない。リリースブランチは `develop` と違う組み合わせのため、
+  全体テストを通してから `main` へ入れる（確定仕様の「ai-plugins の本番チャネル宛の検査」の規則 3）
 
 コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
 省いても必須のチェックの名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
-`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合のチェック
-（`runtime-plugin-validate` など）は常に回す。
+`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合のチェック（`runtime-plugin-validate` など）は常に回す。
 
 **`main` を進めるのが `release` の「本番リリース」である。** そちらには承認が要る。`develop`
-へのマージは「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。開発版の PR は手元で作り、マージは
+へのマージ（スプリントの検査の PR と開発版の版上げ）は「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。開発版の PR は手元で作り、マージは
 `.github/workflows/release-dev.yml`（`.ndf/supervise.json` の `release.dev_workflow`）が CI の必須チェックの通過を待って行う。
 
 **正式版のリリースの Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
@@ -231,6 +247,51 @@ git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空で
 ```bash
 python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <main のコミット>
 ```
+
+### PR の種類ごとのレビュー
+
+**PR の種類ごとに掛けるレビューは、`.ndf/worktree.json` の `branch_flow.reviews` が決める。** 次の表は宣言の値の説明で、
+値を変えるときは宣言と表を同じ PR で変える。同じ差分を 2 度レビューせず、実装の差分は実装 PR で 1 回だけ cross-review する。
+
+| PR の種類 | 宛先 | 掛けるレビュー | 対象の差分 | 理由 |
+| --- | --- | --- | --- | --- |
+| 実装 PR（`impl`） | `sprint/<名前>` | cross-review | PR の差分全体（`pr`） | 小さい単位で深く見る。実装の差分を cross-review するのはここだけ |
+| スプリントの検査の PR（`sprint`） | `develop` | cross-refactoring・振る舞いの確認 | 未検査の差分（`unchecked`） | 構造の改善と組み上がった振る舞いの確認をスプリントで 1 回にする |
+| リリースブランチの PR（`release`） | `main` | cross-review | 衝突の解消の差分（`resolution`） | スプリントの差分は見済みで、集めて初めて生じるのはマージのコミットの差分だけ。組み合わせの不具合はこの差分と全体テストで拾う |
+| 設計 PR（`design`） | `sprint/<名前>` | cross-review | PR の差分全体（`pr`） | 実装の前に設計の誤りを止める |
+| 確定仕様化の PR（`spec`） | `sprint/<名前>` | 掛けない | 掛けない（`none`） | レビュー済みの設計と実装を確定仕様へ写した差分で、文書の検査（doc-lint・用語チェック）だけを掛ける |
+
+値を選んだ理由と採らなかった案は [#3119](https://github.com/devbasex/ai-plugins/issues/3119) の設計の決定 1 にあり、宣言と実際に掛けたレビューのずれは `project-decl.py measure` → `project-decl.py drift` で見る。
+
+### 依存するスプリントを出す
+
+**後のスプリントが前のスプリントの変更を使うときは、前のスプリントブランチを後のスプリントブランチへマージする**（並列の計画の
+`after` と同じ関係）。後のスプリントを選ぶと前のスプリントのコミットも範囲に入り、承認資料に前のスプリントの PR が並ぶ。前のスプリント
+だけを外して後のスプリントを出すことはできないため、前のスプリントは同じか前のリリースで出す。同じ衝突を 2 回解く手間は `git rerere` で減らす。
+
+### 本番の不具合を直す
+
+**本番の不具合の直しは、課題 1 つのスプリントとして `main` から切り、同じリリースブランチの手順で出す。** `develop` で直して
+`main` へ送る経路は無い。ほかのスプリントを待たずに、そのスプリントブランチだけを集めたリリースブランチで出せる。
+
+### 取り込み方を戻す
+
+**選んで集める取り込み方から丸ごと入れる取り込み方へ戻すのは、次の 2 つがそろってからにする。** 戻すとは、`branch_flow.promotion` を
+`whole` にするか `branch_flow` を消すことである。
+
+| # | 条件 | 確かめ方 |
+| --- | --- | --- |
+| 1 | 動いているスプリントが無い。どのスプリントブランチも `main` に含まれ、後片付けで消えている | `git branch -r --list 'origin/sprint/*'` が空か、どれも `git merge-base --is-ancestor <ブランチ> origin/main` が真 |
+| 2 | `develop` にだけあるスプリントのコミットが無い | `origin/main..origin/develop` に、開発版の版上げと戻すマージの外のコミットが無い |
+
+条件 2 を満たさないまま戻すと、そのスプリントは最初の丸ごとのリリースで `main` へ入る。そのときは承認資料の範囲にそのスプリントの PR が並び、
+リリース承認ゲートで人が出すかを決める。戻す順序は次の 4 段で、強制 push と宛先の検査の緩和を使わない。
+
+1. 新しいスプリントを始めず、動いているスプリントを今の運用で `main` へ出し切る
+2. `main` から切ったスプリントで、宣言・[AGENTS.md](../AGENTS.md)・この文書を戻し、リリースブランチで `main` へ出す。
+   `main` 宛の検査は `main` の宣言で判定するため、`develop` 経由では断られる
+3. 戻すマージで `main` を `develop` へ戻す
+4. 段 3 の後に始めるスプリントから、`develop` から切り、`develop` を丸ごと出す
 
 ## 版数を持つ箇所
 
