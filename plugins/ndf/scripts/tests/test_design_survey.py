@@ -535,3 +535,41 @@ def test_an_unreadable_template_stops_with_2(tmp_path, template):
     code, out = _run_with(script, root, "--issue", "7")
     assert code == 2
     assert out["status"] == "stopped"
+
+
+def test_findings_of_every_kind_keep_their_order_and_metrics(tmp_path):
+    """現状固定: 複数のまとまりで調査・レッドライン・詳細設計の指摘が共存するときの並びと metrics。"""
+    gap = {"異常系の処理": "| 関数 | 失敗 |\n| --- | --- |\n| `g` | `f` |", "並行と排他": "DROP"}
+    root = repo(
+        tmp_path,
+        {
+            "issues/issue-1-design.md": design(
+                SURVEY, decisions(decision(1, "自前で作る", None), "### 決定 2: x\n\n範囲は利用者が選ぶ。\n")
+            ),
+            "issues/issue-7-design.md": HEAD,
+            "issues/issue-7-design-detail.md": detail_doc(**gap),
+        },
+    )
+    code, out = run(root, "--issue", "1", "7", "--require-detail")
+    assert code == 1
+    assert [(it["rule"], it["name"]) for it in out["items"]] == [
+        ("no_candidates", "issues/issue-1-design.md:21 決定 1"),
+        ("unnamed_redline", "issues/issue-1-design.md:27"),
+        ("detail_missing", "#1"),
+        ("detail_section", "issues/issue-7-design-detail.md 並行と排他"),
+        ("detail_failure", "issues/issue-7-design-detail.md:20 f"),
+    ]
+    assert out["metrics"] == {
+        "docs": 3,
+        "decisions": 2,
+        "with_method": 1,
+        "self_built": 1,
+        "skipped": 0,
+        "unnamed_redline": 1,
+        "detail_docs": 1,
+        "detail_section": 1,
+        "detail_failure": 1,
+        "detail_reuse": 0,
+        "detail_file": 0,
+        "detail_missing": 1,
+    }
