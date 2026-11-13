@@ -209,7 +209,7 @@ def test_pulls_by_head_batches_branches() -> None:
     got = hub.pulls_by_head(["feat/a", 'feat/"b"'])
     assert len(queries) == 1
     assert 'headRefName: "feat/\\"b\\""' in queries[0]
-    assert sorted(got) == ["feat/a", 'feat/"b"'] and all(len(v) == 1 for v in got.values())
+    assert sorted(got) == sorted(["feat/a", 'feat/"b"']) and all(len(v) == 1 for v in got.values())
 
 
 def test_nodes_refuses_unknown_node() -> None:
