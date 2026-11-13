@@ -110,7 +110,7 @@ def _try_lock(path: Path) -> FileLock | None:
     lock = _lock(path)
     try:
         lock.acquire(timeout=0)
-    except Timeout:
+    except Timeout:  # noqa: NDF401 ファイル: ほかの実行がロックを持っていれば枠は空いていない
         return None
     return lock
 
@@ -122,9 +122,15 @@ def _write_json(path: Path, data: Mapping[str, object]) -> None:
 def _read_json(path: Path) -> dict[str, object] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 持ち主の記述が無いか書きかけなら記述が無いとして扱う
         return None
     return data if isinstance(data, dict) else None
+
+
+def _owner_value(path: Path, key: str) -> object:
+    """記述のファイル（JSON のオブジェクト）の `key` の値。ファイルか鍵が無ければ None。"""
+    data = _read_json(path)
+    return None if data is None else data.get(key)
 
 
 @dataclass
@@ -159,12 +165,12 @@ class _MemoryMonitor:
 
     def _is_last_started(self, own_index: int, started_at: float) -> bool:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
-        mine = (started_at, own_index or 0)
+        mine = (started_at, own_index)
         for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
             index = _slot_index(path)
             if index is None or index == own_index:
                 continue
-            started = (_read_json(path) or {}).get("started_at")
+            started = _owner_value(path, "started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
             probe = _try_lock(_slot_path(self.directory, index, ".lock"))
@@ -177,14 +183,14 @@ class _MemoryMonitor:
         """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
         try:
             with _lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
-                last = (_read_json(self.directory / STOP_FILE) or {}).get("at")
+                last = _owner_value(self.directory / STOP_FILE, "at")
                 now = time.time()
                 if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
                     return False
                 _write_json(self.directory / STOP_FILE, {"at": now, "slot": index})
                 return True
-        except (OSError, Timeout):
-            return False  # 停止の時刻を守れないときは止めない
+        except (OSError, Timeout):  # noqa: NDF401 ファイル: 停止の時刻を読み書きできないときは止めない
+            return False
 
     def finish(self) -> None:
         self._stop.set()
@@ -253,7 +259,7 @@ def _stop_group(proc: subprocess.Popen) -> None:
     """
     try:
         pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
+    except ProcessLookupError:  # noqa: NDF401 外部コマンド: テストが既に終わっていれば止める先が無い
         return
     _end_group(proc, pgid, signal.SIGTERM)
 
@@ -273,7 +279,7 @@ def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
     def send(sig: int) -> None:
         try:
             proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
-        except ProcessLookupError:
+        except ProcessLookupError:  # noqa: S110 外部コマンド: グループが既に終わっていれば送る先が無い
             pass
 
     def alive() -> bool:
@@ -294,9 +300,9 @@ def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
 def _group_alive(pgid: int) -> bool:
     try:
         os.killpg(pgid, 0)
-    except ProcessLookupError:
+    except ProcessLookupError:  # noqa: NDF401 外部コマンド: グループのプロセスが残っていない
         return False
-    except PermissionError:
+    except PermissionError:  # noqa: NDF401 外部コマンド: 送る権限の無いプロセスが残っている（生きている）
         return True
     return True
 
@@ -317,6 +323,20 @@ class SlotContext:
     interrupted: Callable[[], bool] = lambda: False
 
 
+@dataclass(frozen=True)
+class GateOptions:
+    """`gate` の周りの値（環境変数・置き場・確かめる間隔・メモリの読み取り・中断の知らせ）。テストが差し替える。
+
+    `environ` と `directory` は None なら今の環境変数とそこから決まる置き場を使う。
+    """
+
+    environ: Mapping[str, str] | None = None
+    directory: Path | None = None
+    poll: float = POLL_SECONDS
+    read_memory: ReadMemory = machine.available_mib
+    interrupted: Callable[[], bool] = lambda: False
+
+
 @contextmanager
 def gate(
     command: str | Sequence[str],
@@ -325,19 +345,16 @@ def gate(
     kind: str | None = None,
     suites: Sequence[Mapping[str, object]] | None = None,
     limits: limits_mod.Limits | None = None,
-    environ: Mapping[str, str] | None = None,
-    directory: Path | None = None,
-    poll: float = POLL_SECONDS,
-    read_memory: ReadMemory = machine.available_mib,
-    interrupted: Callable[[], bool] = lambda: False,
+    options: GateOptions | None = None,
 ) -> Iterator[Held]:
     """重い処理なら枠とメモリを待って取り、出るときに返して記録を足す。
 
     `kind` を渡すと判定を飛ばしてその種類で枠を取る（`None` なら宣言から判定する）。
-    `interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
+    `options.interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
     誤った設定は `limits.SlotConfigError`、待ちの諦めとメモリの停止は `Stopped` を送る。
     """
-    env = os.environ if environ is None else environ
+    options = GateOptions() if options is None else options
+    env = os.environ if options.environ is None else options.environ
     if env.get(HELD_ENV) or env.get("GITHUB_ACTIONS"):
         yield Held()  # 入れ子（I3）と CI（決定 12）
         return
@@ -348,14 +365,14 @@ def gate(
         return
     limits = limits or limits_mod.load_limits(cwd)
     try:
-        directory = directory or slots_dir(env)
+        directory = options.directory or slots_dir(env)
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
         yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
         return
-    yield from _held(SlotContext(directory, cwd, limits, poll, read_memory, interrupted), kind)
+    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind)
 
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
@@ -394,10 +411,11 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
                 return lock
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                if lock is not None:
-                    _release(ctx.directory, held, lock)
-                return None
+                break
             time.sleep(min(ctx.poll, remaining))
+        if lock is not None:
+            _release(ctx.directory, held, lock)
+        return None
     except BaseException:
         if lock is not None:
             _release(ctx.directory, held, lock, quiet=True)

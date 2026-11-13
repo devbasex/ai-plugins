@@ -52,7 +52,13 @@ def _at(seconds: float) -> str:
 def _slot_held_elsewhere(root: Path, directory: Path):
     """別の実行が枠を 1 つ埋めている状態（上限 1 本の枠を持ち続ける）。"""
     holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
-    return slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9)
+    return slots.gate(
+        "fakerun .",
+        root,
+        kind="whole",
+        limits=holding,
+        options=slots.GateOptions(environ={}, directory=directory, read_memory=lambda: 10**9),
+    )
 
 
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):

@@ -20,7 +20,7 @@ TEST_OOM_SCORE_ADJ = 500
 def _read_int(path: Path) -> int | None:
     try:
         text = path.read_text(encoding="ascii").strip()
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない値は測れなかったとして None を返す（I8）
         return None
     return int(text) if text.isdigit() else None
 
@@ -29,7 +29,7 @@ def _cgroup_mount(mountinfo: Path) -> tuple[str, Path] | None:
     """cgroup v2 の（マウントした cgroup の根の名前, マウント先）。無いか読めなければ None。"""
     try:
         lines = mountinfo.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: マウントの表を読めなければ cgroup v2 が無いとして扱う
         return None
     for line in lines:
         head, sep, tail = line.partition(" - ")
@@ -95,7 +95,7 @@ def _cpu_quota(directory: Path) -> int | None:
     """`cpu.max` の割り当ての CPU の数（切り上げ）。上限が無いか読めなければ None。"""
     try:
         quota, period = (directory / "cpu.max").read_text(encoding="ascii").split()[:2]
-    except (OSError, ValueError, UnicodeDecodeError):
+    except (OSError, ValueError, UnicodeDecodeError):  # noqa: NDF401 ファイル: cpu.max を読めなければ上限が無いとして扱う
         return None
     if quota.isdigit() and period.isdigit() and int(period) > 0:
         return -(-int(quota) // int(period))
@@ -106,7 +106,7 @@ def _virtual_memory(field: str) -> int | None:
     """psutil のメモリの値（バイト）。読めなければ None。"""
     try:
         return int(getattr(psutil.virtual_memory(), field))
-    except (OSError, RuntimeError, AttributeError):
+    except (OSError, RuntimeError, AttributeError):  # noqa: NDF401 ファイル: psutil が /proc を読めなければ測れなかったとして扱う（I8）
         return None
 
 
@@ -151,7 +151,7 @@ def oom_kill_count(vmstat: Path = Path("/proc/vmstat")) -> int | None:
             key, _, value = line.partition(" ")
             if key == "oom_kill" and value.strip().isdigit():
                 return int(value)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: /proc/vmstat を読めなければ回数を測れなかったとして扱う
         return None
     return None
 
@@ -164,11 +164,11 @@ def raise_own_oom_score(value: int = TEST_OOM_SCORE_ADJ) -> None:
     """
     try:
         fd = os.open("/proc/self/oom_score_adj", os.O_WRONLY)
-    except OSError:
+    except OSError:  # noqa: NDF401 ファイル: 権限が無いか Linux 以外なら優先度を上げずに走らせる
         return
     try:
         os.write(fd, str(value).encode("ascii"))
-    except OSError:
+    except OSError:  # noqa: S110 ファイル: 優先度を書けなければ上げずに走らせる（exec の前の子なので例外を出さない）
         pass
     finally:
         os.close(fd)

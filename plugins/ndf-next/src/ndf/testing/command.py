@@ -64,10 +64,7 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
         interrupted.append(signum)
         proc = get_proc()
         if proc is not None and proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signum)
-            except ProcessLookupError:
-                pass
+            _signal_group(proc, signum)
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED}
     try:
@@ -93,23 +90,12 @@ def _run(command: str, wait_limit: int | None) -> int:
         return _stopped(str(exc), items=exc.items)
     # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
     kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
-    proc: subprocess.Popen | None = None
-    with _forwarding_signals(lambda: proc) as interrupted:
+    started: list[subprocess.Popen] = []
+    with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
+        options = slots.GateOptions(interrupted=lambda: bool(interrupted))
         try:
-            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted)) as held:
-                if interrupted:
-                    raise KeyboardInterrupt
-                proc = subprocess.Popen(
-                    ["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec
-                )
-                if interrupted:
-                    _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
-                held.watch(proc)
-                code = _wait(proc)
-                if interrupted:
-                    # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
-                    slots.end_group(proc)
-                    raise KeyboardInterrupt  # 記録に interrupted を残す
+            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, options=options) as held:
+                code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
             return _stopped_from(exc)
         except KeyboardInterrupt:
@@ -119,10 +105,27 @@ def _run(command: str, wait_limit: int | None) -> int:
     return code
 
 
+def _run_child(command: str, held: slots.Held, interrupted: list[int], started: list[subprocess.Popen]) -> int:
+    """枠の下で子を起こして終わりを待つ。起こした子は `started` へ足す（シグナルの転送先）。"""
+    if interrupted:
+        raise KeyboardInterrupt
+    proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec)
+    started.append(proc)
+    if interrupted:
+        _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
+    held.watch(proc)
+    code = _wait(proc)
+    if interrupted:
+        # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
+        slots.end_group(proc)
+        raise KeyboardInterrupt  # 記録に interrupted を残す
+    return code
+
+
 def _signal_group(proc: subprocess.Popen, signum: int) -> None:
     try:
         os.killpg(proc.pid, signum)
-    except ProcessLookupError:
+    except ProcessLookupError:  # noqa: S110 外部コマンド: 子のグループが既に終わっていれば送る先が無い
         pass
 
 
@@ -130,7 +133,7 @@ def _wait(proc: subprocess.Popen) -> int:
     while True:
         try:
             return proc.wait()
-        except InterruptedError:
+        except InterruptedError:  # noqa: S112 外部コマンド: 子の終わりを待つ間にシグナルで割り込まれたら待ち直す
             continue
 
 

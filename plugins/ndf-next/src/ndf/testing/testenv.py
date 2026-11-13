@@ -36,7 +36,7 @@ def location_seen(worktree: Path, main_dir: Path) -> bool:
         return False
     try:
         return ancestor.stat().st_dev == main_dir.stat().st_dev
-    except OSError:
+    except OSError:  # noqa: NDF401 ファイル: 置き場の属性を読めなければ確かめられないとして扱う
         return False
 
 

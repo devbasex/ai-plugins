@@ -84,7 +84,9 @@ def load_limits(cwd: Path, *, cpus: int | None = None, total_mib: int | None = N
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SlotConfigError(f"設定を読めない: {path}", [f"{path}: JSON として読めない（{exc}）"]) from exc
-    section = data.get(SECTION, {}) if isinstance(data, dict) else None
+    if isinstance(data, dict) and SECTION not in data:
+        return base
+    section = data[SECTION] if isinstance(data, dict) else None
     if not isinstance(section, dict):
         raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
     errors: list[str] = []
@@ -100,9 +102,11 @@ def load_suites(cwd: Path) -> list[dict[str, object]]:
     if path is None:
         return []
     try:
-        suites = json.loads(path.read_text(encoding="utf-8")).get("test", {}).get("suites", [])
-    except (OSError, ValueError, AttributeError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return []
+    test = data.get("test") if isinstance(data, dict) else None
+    suites = test.get("suites") if isinstance(test, dict) else None
     if not isinstance(suites, list):
         return []
     return [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)]

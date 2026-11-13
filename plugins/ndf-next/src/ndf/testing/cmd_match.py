@@ -14,5 +14,5 @@ def same_cmd(actual: str, expected: Sequence[str]) -> bool:
     """`actual`（シェルのコマンドの文字列）を分けた語の並びが `expected` と同じか。"""
     try:
         return shlex.split(actual) == list(expected)
-    except ValueError:
+    except ValueError:  # noqa: NDF401 利用者の入力: 引用の閉じないコマンドの文字列は期待と一致しないとして扱う
         return False

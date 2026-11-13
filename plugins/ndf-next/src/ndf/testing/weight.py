@@ -128,7 +128,7 @@ def _targets(args: Sequence[str]) -> list[str]:
 
 def is_test_suite(suite: Mapping[str, object]) -> bool:
     """宣言の suite がテストか（`kind` が `lint` でなければテスト。既定は `test`）。"""
-    return suite.get("kind", "test") != "lint"
+    return suite.get("kind") != "lint"
 
 
 def classify(command: str | Sequence[str], suites: Iterable[Mapping[str, object]]) -> str | None:
@@ -166,7 +166,8 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
 
 def _declared_command(suite: Mapping[str, object]) -> str:
     """宣言の suite の `command`（無ければ空の文字列）。"""
-    return str(suite.get("command") or "")
+    command = suite.get("command")
+    return str(command) if command else ""
 
 
 def _matches_declared(target: str | list[str], suite: Mapping[str, object]) -> bool:

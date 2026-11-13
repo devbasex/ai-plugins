@@ -87,7 +87,7 @@ def _fd_path(fd: object) -> str | None:
             return None
         try:
             found = os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
-        except OSError:
+        except OSError:  # noqa: NDF401 ファイル: 記述子の指す場所を読めなければパスを持たないとして扱う
             return None
     return found if os.path.isabs(found) else None
 
@@ -180,7 +180,7 @@ _guard = _Guard()
 def real_roots(home: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
     """守る根。ホームの下の置き場と、差し替える前の環境変数（`REAL_STATE_ENV`）が指す置き場（絶対パスだけ）。"""
     under_home = [os.path.realpath(home / sub) for sub in REAL_STATE_UNDER_HOME]
-    from_env = [os.path.realpath(value) for name in REAL_STATE_ENV if os.path.isabs(value := environ.get(name, ""))]
+    from_env = [os.path.realpath(value) for name in REAL_STATE_ENV if (value := environ.get(name)) is not None and os.path.isabs(value)]
     return tuple(dict.fromkeys(under_home + from_env))
 
 

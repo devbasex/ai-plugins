@@ -52,7 +52,7 @@ def _parse_iso(text: object) -> float | None:
         return None
     try:
         return datetime.fromisoformat(text).timestamp()
-    except ValueError:
+    except ValueError:  # noqa: NDF401 ファイル: 記録の行の時刻を読めなければ時刻の無い行として扱う
         return None
 
 
@@ -101,7 +101,7 @@ def report(directory: Path, since_seconds: float, now: float | None = None, curr
     """期間の中で待った・止めた・諦めた回数と秒、OOM Killer の回数の増分を返す。"""
     now = time.time() if now is None else now
     rows = _rows_since(directory, since_seconds, now)
-    waited = [float(row.get("waited_seconds") or 0) for row in rows]
+    waited = [_waited_seconds(row) for row in rows]
     return {
         "runs": len(rows),
         "waited_runs": sum(1 for w in waited if w > 0),
@@ -110,6 +110,12 @@ def report(directory: Path, since_seconds: float, now: float | None = None, curr
         "gave_up": sum(1 for row in rows if row.get("result") == GAVE_UP),
         "oom_kill_increase": _oom_increase([row.get("oom_kill") for row in rows] + [current_oom]),
     }
+
+
+def _waited_seconds(row: Mapping[str, object]) -> float:
+    """記録の行の待った秒。値が無いか 0 なら 0。"""
+    value = row.get("waited_seconds")
+    return float(value) if value else 0.0
 
 
 def _rows_since(directory: Path, since_seconds: float, now: float) -> list[dict[str, object]]:
