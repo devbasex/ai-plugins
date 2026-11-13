@@ -91,9 +91,14 @@ def read_mark(path: Path) -> Mark | None:
     if data is None:
         return None
     sid, started, count = data.get("session_id"), data.get("started_at"), data.get("pushbacks")
-    if not isinstance(sid, str) or not isinstance(started, str) or isinstance(count, bool) or not isinstance(count, int) or count < 0:
+    if not isinstance(sid, str) or not isinstance(started, str) or not _is_pushbacks(count):
         return None
     return Mark(session_id=sid, started_at=started, pushbacks=count)
+
+
+def _is_pushbacks(value: object) -> bool:
+    """回数として読める値か（JSON の 0 以上の整数。`type(...) is int` で int の派生の bool を拒む）。"""
+    return type(value) is int and value >= 0
 
 
 def write_mark(path: Path, mark: Mark) -> None:
