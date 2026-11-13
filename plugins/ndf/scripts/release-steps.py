@@ -751,7 +751,7 @@ def _prod_ops() -> reviewed.ProdOps:
 
 
 def _prepare_release_branch(root, a, plugin) -> str:
-    """作業ツリーが release/v<版> にあり、コミットしていない変更が無く、版を上げ済みであることを確かめて push する。ブランチ名を返す。"""
+    """作業ツリーがリリースブランチにあり、コミットしていない変更が無く、版を上げ済みであることを確かめて push する。ブランチ名を返す。"""
     ver = a.version
     if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
