@@ -33,7 +33,6 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NoReturn
 
 from filelock import FileLock, Timeout
 
@@ -457,32 +456,21 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
         if held.note:
             yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
             return
-        _give_up(ctx, kind, held)
+        held.index = None
+        _record(directory, cwd, kind, held, GAVE_UP)
+        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
     held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
     try:
         yield held
         result = FINISHED
     finally:
-        result = _finish_run(ctx, kind, held, lock, result)
+        held._finish()
+        if held.memory_stopped:
+            result = MEMORY_STOPPED
+        else:
+            held.available_mib = ctx.read_memory()
+        _release(directory, held, lock)
+        _record(directory, cwd, kind, held, result)
     if result == MEMORY_STOPPED:
         raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib)
-
-
-def _give_up(ctx: SlotContext, kind: str, held: Held) -> NoReturn:
-    """待ちを諦めたことを記録して `Stopped` を送る。"""
-    held.index = None
-    _record(ctx.directory, ctx.cwd, kind, held, GAVE_UP)
-    raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
-
-
-def _finish_run(ctx: SlotContext, kind: str, held: Held, lock: FileLock, result: str) -> str:
-    """監視を止めて結果を決め、枠を返して記録する。決めた結果を返す（メモリで止めていれば MEMORY_STOPPED）。"""
-    held._finish()
-    if held.memory_stopped:
-        result = MEMORY_STOPPED
-    else:
-        held.available_mib = ctx.read_memory()
-    _release(ctx.directory, held, lock)
-    _record(ctx.directory, ctx.cwd, kind, held, result)
-    return result
