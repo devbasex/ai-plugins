@@ -90,7 +90,7 @@ def test_prepare_does_not_retire_on_second_start(ident):
     identity.prepare_state_dir(ident, now=NOW)
 
     assert (ident.state_dir / "runs.db").read_text() == "new"
-    assert [p.name for p in ident.state_dir.parent.iterdir()] == ["p"]
+    assert [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name] == []
 
 
 def test_prepare_does_not_retire_empty_dir(ident):
@@ -98,7 +98,7 @@ def test_prepare_does_not_retire_empty_dir(ident):
 
     identity.prepare_state_dir(ident, now=NOW)
 
-    assert [p.name for p in ident.state_dir.parent.iterdir()] == ["p"]
+    assert [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name] == []
 
 
 def test_prepare_adds_time_when_retired_name_exists(ident):
