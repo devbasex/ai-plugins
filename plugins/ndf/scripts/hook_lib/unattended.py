@@ -119,15 +119,24 @@ def prune_marks(directory: Path, now: float, max_age: float) -> int:
     return removed
 
 
-def next_count(errors: list[str], pushbacks: int, limit: int, busy: bool) -> tuple[bool, int]:
-    """差し戻すかと、次の回数。"""
+@dataclass(frozen=True)
+class Verdict:
+    """Stop の判定。差し戻すか（`block`）・次の回数（`count`）・上限に達したため形に合わないまま通すか（`over_limit`）。"""
+
+    block: bool
+    count: int
+    over_limit: bool = False
+
+
+def next_count(errors: list[str], pushbacks: int, limit: int, busy: bool) -> Verdict:
+    """忙しい → 通す・誤り無し → 数え直す・上限前 → 差し戻す・上限後 → 通す、の判定。"""
     if busy:
-        return False, pushbacks
+        return Verdict(block=False, count=pushbacks)
     if not errors:
-        return False, 0
+        return Verdict(block=False, count=0)
     if pushbacks < limit:
-        return True, pushbacks + 1
-    return False, pushbacks
+        return Verdict(block=True, count=pushbacks + 1)
+    return Verdict(block=False, count=pushbacks, over_limit=True)
 
 
 def pending_command_errors(text: object) -> list[str]:
@@ -197,17 +206,16 @@ def review_stop(hook_input: dict) -> dict | None:
     limit = _pushback_limit()
     if limit is None:
         return None
-    busy = _is_busy(hook_input)
     text = hook_input.get("last_assistant_message")
     errors = ur.report_errors(text, form) + pending_command_errors(text)
-    block, count = next_count(errors, mark.pushbacks, limit, busy)
-    if count != mark.pushbacks:
-        _save_count(path, mark, count)
-    if not block:
-        if errors and not busy:
-            _stderr_warn("unattended-stop", f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
+    verdict = next_count(errors, mark.pushbacks, limit, _is_busy(hook_input))
+    if verdict.count != mark.pushbacks:
+        _save_count(path, mark, verdict.count)
+    if verdict.over_limit:
+        _stderr_warn("unattended-stop", f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
+    if not verdict.block:
         return None
-    return {"decision": "block", "reason": pushback_reason(errors, limit - count, form)}
+    return {"decision": "block", "reason": pushback_reason(errors, limit - verdict.count, form)}
 
 
 def _read_report_form(command: str) -> ur.ReportForm | None:

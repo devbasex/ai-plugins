@@ -172,11 +172,11 @@ def test_prune_marks_removes_only_marks_past_the_age(tmp_path: Path):
 @pytest.mark.parametrize(
     ("errors", "count", "busy", "want"),
     [
-        ([], 2, False, (False, 0)),
-        (["e"], 0, False, (True, 1)),
-        (["e"], 1, False, (True, 2)),
-        (["e"], 2, False, (False, 2)),
-        (["e"], 1, True, (False, 1)),
+        ([], 2, False, un.Verdict(block=False, count=0)),
+        (["e"], 0, False, un.Verdict(block=True, count=1)),
+        (["e"], 1, False, un.Verdict(block=True, count=2)),
+        (["e"], 2, False, un.Verdict(block=False, count=2, over_limit=True)),
+        (["e"], 1, True, un.Verdict(block=False, count=1)),
     ],
 )
 def test_next_count(errors, count, busy, want):
