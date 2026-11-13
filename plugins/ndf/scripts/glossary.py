@@ -37,7 +37,10 @@ import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
 import doc_kinds, glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
-from glossary_words import is_kanji_edged, word_pattern  # noqa: E402  文書の中の語の正規表現（#2733・#3190）
+from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
+from glossary_fields import all_deprecated_of, code_of, deprecated_code_of, deprecated_findings, deprecated_of  # noqa: E402,F401  語の欄（#3190）
+from glossary_fields import deprecated_standalone_of, standalone_findings  # noqa: E402
+
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -51,7 +54,6 @@ STRUCTURE_RULES = ("schema", "duplicate", "stale_document", "deprecated_meaning"
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
-CODE_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 CODE_SUFFIXES = (".py", ".sh", ".js", ".ts")
 MAX_CODE_BYTES = 1_000_000
 
@@ -142,32 +144,6 @@ def contexts_of(g: dict) -> list[dict]:
 
 def terms_of(g: dict) -> list[dict]:
     return [t for t in g.get("terms", []) if isinstance(t, dict)]
-
-
-def deprecated_of(t: dict) -> list[str]:
-    d = t.get("deprecated") or []
-    return [w for w in d if isinstance(w, str)] if isinstance(d, list) else []
-
-
-def deprecated_standalone_of(t: dict) -> list[str]:
-    """単独で照合する廃止した語（前後が漢字の出現には当てない。1 文字でよい）。空でない文字列の要素だけを元の順で返す。"""
-    d = t.get("deprecated_standalone")
-    return [w for w in d if isinstance(w, str) and w] if isinstance(d, list) else []
-
-
-def all_deprecated_of(t: dict) -> list[str]:
-    """語の項目の廃止した語を 2 つの欄を合わせて返す（重なりは先に出た方を残す）。"""
-    return list(dict.fromkeys(deprecated_of(t) + deprecated_standalone_of(t)))
-
-
-def code_of(t: dict) -> str | None:
-    c = t.get("code")
-    return c if isinstance(c, str) and CODE_SHAPE.fullmatch(c) else None
-
-
-def deprecated_code_of(t: dict) -> list[str]:
-    d = t.get("deprecated_code") or []
-    return [w for w in d if isinstance(w, str) and CODE_SHAPE.fullmatch(w)] if isinstance(d, list) else []
 
 
 def spellings(code: str) -> tuple[str, str, str, str]:
@@ -283,39 +259,6 @@ def _term_schema_findings(i: int, t: dict, decl: Declaration, ids: list[str], hi
         hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
 
 
-def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], codes_by_ctx: dict[str, set[str]], hit) -> None:
-    for w in deprecated_of(t):
-        if len(w) < 2:
-            hit("schema", w, f"terms[{i}] の廃止した語が 1 文字で照合できない")
-        elif w in live_by_ctx.get(t["context"], set()):
-            hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
-    if "code" in t and code_of(t) is None:
-        hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
-    if "deprecated_code" in t and (not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])):
-        hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
-    for w in deprecated_code_of(t):
-        if w in codes_by_ctx.get(t["context"], set()):
-            hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
-
-
-def _standalone_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], hit) -> None:
-    """単独で照合する廃止した語の欄の形（空でない文字列の配列・先頭か末尾が漢字・同じコンテキストの生きた語と重ならない）。"""
-    if "deprecated_standalone" not in t:
-        return
-    raw = t["deprecated_standalone"]
-    if not isinstance(raw, list) or len(deprecated_standalone_of(t)) != len(raw):
-        hit("schema", t["term"], f"terms[{i}] の deprecated_standalone は空でない文字列の配列で書く")
-    for w in deprecated_standalone_of(t):
-        if not is_kanji_edged(w):
-            hit(
-                "schema",
-                w,
-                f"terms[{i}] の単独で照合する廃止した語「{w}」は先頭か末尾を漢字にする（漢字で始まりも終わりもしない語は deprecated へ置く）",
-            )
-        if w in live_by_ctx.get(t["context"], set()):
-            hit("schema", w, f"terms[{i}] の単独で照合する廃止した語が同じコンテキストの生きた語と重なる")
-
-
 def _meaning_findings(g: dict, words: WordPair, hit) -> None:
     """語の項目とコンテキストの意味の説明に現れる廃止した語を 1 件ずつ当てる（生きた語の内側・インラインコードの中は除く）。"""
     if words.dep is None:
@@ -385,8 +328,8 @@ def structure_findings(g: dict, decl: Declaration, words: WordPair | None = None
             hit("schema", *problem)
             continue
         _term_schema_findings(i, t, decl, ids, hit)
-        _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
-        _standalone_findings(i, t, live_by_ctx, hit)
+        deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        standalone_findings(i, t, live_by_ctx, hit)
         _term_banned_findings(t, decl, hit)
         _duplicate_findings(i, t, seen, code_seen, hit)
     _meaning_findings(g, words if words is not None else _build_word_patterns(g)[0], hit)
