@@ -170,3 +170,45 @@ def test_consts_picks_top_level_constants_by_assignment_form():
     ]
     assert {c.rel for c in found} == {"src/ndf/a.py"}
     assert found[0].place == "src/ndf/a.py:2 NAME"
+
+
+# 現状固定テスト（I-004）: 組の種類ごとの出力の並び・位置・文言。種類の順（same-str → same-set → same-num → subset → member）も固定する。
+
+GROUP_CONSTS = [
+    facts.Const("b.py", 3, "OTHER", "release"),
+    facts.Const("a.py", 1, "NAME", "release"),
+    facts.Const("a.py", 9, "SHORT", "rel"),
+    facts.Const("b.py", 9, "SHORT2", "rel"),
+    facts.Const("a.py", 2, "KINDS", frozenset({"x", "y"})),
+    facts.Const("b.py", 2, "ALL", frozenset({"x", "y"})),
+    facts.Const("c.py", 1, "SUP", frozenset({"x", "y", "z"})),
+    facts.Const("a.py", 3, "LIMIT", 3),
+    facts.Const("b.py", 4, "LIMIT", 3),
+    facts.Const("c.py", 2, "LIMIT", 3.0),
+    facts.Const("b.py", 5, "OTHERNUM", 3),
+    facts.Const("c.py", 3, "ONE", "zzzz"),
+    facts.Const("a.py", 4, "SAME", frozenset({"zzzz", "w"})),
+    facts.Const("a.py", 5, "LOCAL", "wwww"),
+]
+
+
+def test_groups_reports_each_kind_in_order():
+    found = [(f.rule, f.path, f.line, f.detail) for f in facts.groups(GROUP_CONSTS, 4)]
+    assert found == [
+        ("const-fact", "a.py", 1, "same-str: 'release'（NAME と b.py:3 OTHER）"),
+        ("const-fact", "a.py", 2, "same-set: 同じ集まり（KINDS と b.py:2 ALL）"),
+        ("const-fact", "a.py", 3, "same-num: 同じ名前と数 3（LIMIT と b.py:4 LIMIT・c.py:2 LIMIT）"),
+        ("const-fact", "a.py", 2, "subset: 集まりが別のファイルの集まりに含まれる（KINDS と c.py:1 SUP）"),
+        ("const-fact", "b.py", 2, "subset: 集まりが別のファイルの集まりに含まれる（ALL と c.py:1 SUP）"),
+        ("const-fact", "a.py", 4, "member: 'zzzz' が別のファイルの集まりの要素（SAME と c.py:3 ONE）"),
+    ]
+
+
+def test_groups_min_str_is_inclusive_lower_bound():
+    found = [f.detail for f in facts.groups(GROUP_CONSTS, 3)]
+    assert "same-str: 'rel'（SHORT と b.py:9 SHORT2）" in found
+    assert len(found) == 7
+
+
+def test_groups_without_constants_is_empty():
+    assert facts.groups([], 4) == []
