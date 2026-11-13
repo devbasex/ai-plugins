@@ -151,6 +151,7 @@ def test_form_from_dict_turns_the_plugin_shape_into_the_reader_form():
     assert form.items == tuple(SHAPE["items"])
     assert asdict(form.material) == MAT
     assert list(form.required) == list(REQ)
+    assert form.meanings == SHAPE["values"] and list(form.meanings) == list(form.values)
     for value, row in REQ.items():
         assert form.required[value].always == tuple(row["always"])
         assert form.required[value].when == tuple(_cond(w) for w in row["when"])
@@ -171,6 +172,14 @@ def test_form_from_dict_keeps_the_declared_order_and_accepts_equals_conditions()
     assert form.required["b"].when == (_cond({**WHEN, "need": ("承認ゲート",)}),)
 
 
+def test_form_from_dict_reads_a_shape_with_a_single_value():
+    """値が 1 つだけの形でも、値と意味を持った形として読める（#3329 の詳細設計の境界値）。"""
+    form = ur.form_from_dict(_shape(values={"済んだ": "通し切った"}, required={"済んだ": {"always": [], "when": []}}))
+    assert form.values == ("済んだ",)
+    assert form.meanings == {"済んだ": "通し切った"}
+    assert list(ur.form_examples(form)) == ["済んだ"]
+
+
 def test_form_from_dict_accepts_an_empty_need_as_it_is_now():
     """現状: when.need の空の並びは通る（_strs が空の並びを拒まない。「空でない」の文言と食い違う。不具合の疑い）。"""
     form = ur.form_from_dict(_req("完了", {"always": [], "when": [{**WHEN, "need": []}]}))
@@ -186,6 +195,8 @@ def test_form_from_dict_accepts_an_empty_need_as_it_is_now():
         (_shape(values=["完了"]), "shape.values は値 → 意味の空でない辞書"),
         (_shape(values={}), "shape.values は値 → 意味の空でない辞書"),
         (_shape(values={"": "空"}), "shape.values は値 → 意味の空でない辞書"),
+        (_shape(values={**SHAPE["values"], "完了": ""}), "shape.values は値 → 意味の空でない辞書"),
+        (_shape(values={**SHAPE["values"], "完了": 1}), "shape.values は値 → 意味の空でない辞書"),
         # 現状: 空の並びは _strs を通り、material.item の検査で落ちる（「空でない」の文言と食い違う。不具合の疑い）
         (_shape(items=[]), "shape.material.item が items に無い"),
         (_shape(items="結果"), "shape.items は空でない文字列の並び"),
@@ -266,3 +277,78 @@ def test_form_from_dict_checks_values_before_items_and_material_before_required(
         assert str(e.value).startswith(message)
         data["shape"][key] = fixed
     assert ur.form_from_dict(data) == FORM
+
+
+# --- 形の説明（#3329） ---
+
+
+def _parts(form: ur.ReportForm) -> list[str]:
+    """形の説明に現れるべき、契約の宣言の語（値・意味・要る項目・条件・材料の 4 欄）。"""
+    out = [*form.values, *form.meanings.values(), *asdict(form.material).values()]
+    for rule in form.required.values():
+        out.extend(rule.always)
+        for cond in rule.when:
+            out.extend([cond.item, cond.prefix or cond.equals, *cond.need])
+    return out
+
+
+def test_describe_form_carries_every_declared_word_and_the_examples():
+    text = ur.describe_form(FORM)
+    for word in _parts(FORM):
+        assert word in text
+    for example in ur.form_examples(FORM).values():
+        assert example in text
+    assert ur.describe_form(FORM) == text
+
+
+def test_the_examples_fit_the_contract_they_come_from():
+    """値ごとの例は同じ契約の判定で誤り 0 件で、結果の行の値がその値になる（I3）。"""
+    examples = ur.form_examples(FORM)
+    assert list(examples) == list(FORM.values)
+    for value, example in examples.items():
+        assert ur.report_errors(example, FORM) == []
+        assert ur.result_value(example) == value
+
+
+def test_only_an_example_with_the_body_material_has_the_heading():
+    examples = ur.form_examples(FORM)
+    heading = FORM.material.heading
+    assert examples["判断が要る"].index(heading) < examples["判断が要る"].index("- 結果:")
+    assert ur.report_items(examples["判断が要る"])[FORM.material.item] == FORM.material.body
+    assert heading not in examples["完了"]
+    assert set(ur.report_items(examples["完了"]).values()) == {"完了", ur.NONE_VALUE}
+
+
+def test_the_requirement_lines_follow_the_values_and_name_no_items_as_none():
+    lines = ur._requirement_lines(FORM)
+    assert [line.split(":")[0] for line in lines] == [f"- {v}" for v in FORM.values]
+    assert ur.TEXT_ALWAYS.format(items=ur.NONE_VALUE) in lines[FORM.values.index("完了")]
+
+
+def test_the_condition_text_follows_prefix_or_equals_and_lists_every_need():
+    prefix = ur.Condition(item="区分", need=("承認ゲート", "Pull Request"), prefix="ndf-gate:")
+    equals = ur.Condition(item="区分", need=("人に頼むこと",), equals="ndf-ask:human-action")
+    assert ur._condition_text(prefix) == ur.TEXT_PREFIX.format(item="区分", cond="ndf-gate:", need="承認ゲート・Pull Request")
+    assert ur._condition_text(equals) == ur.TEXT_EQUALS.format(item="区分", cond="ndf-ask:human-action", need="人に頼むこと")
+
+
+def test_the_description_follows_another_shape():
+    """値・要る項目・条件・材料を変えた別の契約では、説明と例がその形に変わり、元の値が現れない（I2・I3）。"""
+    data = _shape(
+        values={"止めた": "人を待つ", "済んだ": "通し切った"},
+        material={**MAT, "body": "下に書いた", "heading": "## 材料の節"},
+        required={
+            "止めた": {"always": ["問い", "材料"], "when": [{"item": "問い", "prefix": "x", "need": ["人に頼むこと"]}]},
+            "済んだ": {"always": ["課題", "理由"], "when": []},
+        },
+    )
+    form = ur.form_from_dict(data)
+    text = ur.describe_form(form)
+    for word in _parts(form):
+        assert word in text
+    for old in FORM.values:
+        assert old not in text
+    assert FORM.material.heading not in text
+    for value, example in ur.form_examples(form).items():
+        assert ur.report_errors(example, form) == []
+        assert ur.result_value(example) == value

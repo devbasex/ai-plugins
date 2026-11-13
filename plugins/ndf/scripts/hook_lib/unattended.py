@@ -1,12 +1,14 @@
 """人のいない実行（`NDF_FACTORY_RUN`）の conductor の hook（#3242）。
 
     UserPromptSubmit（`hook.py unattended-start`）: プロンプトの 1 行目が `/ndf:development-workflow`（前に `/goal ` を許す）なら
-        印を作り、人のいない実行の決まりの案内を返す。worker・レビューの `claude -p` には印を付けない
+        印を作り、人のいない実行の決まりの案内に契約から作った形の説明を添えて返す。worker・レビューの `claude -p` には印を付けない
     Stop（`hook.py unattended-stop`）: 印のあるセッションで、最後の応答が区間の報告の形に合わないか、
         `次のコマンド:` にコマンドを載せたまま結果が `判断が要る` でも `完了` でもなく、区分が `ndf-ask:human-action`
         でもなければ差し戻す。
         背景の作業か予定が残る Stop は差し戻さない。形に合わない Stop が続く間の差し戻しは上限の宣言
-        （`hook.unattended-pushback`）の回数までで、形に合った Stop で数え直す
+        （`hook.unattended-pushback`）の回数までで、形に合った Stop で数え直す。差し戻しの文は誤りの一覧に形の説明を添える
+        （#3329。conductor が契約のファイルを Read できない権限でも書き直せる）。上限の後の形に合わない Stop は通し、
+        誤りの一覧を標準エラーへ 1 行残す
     SessionEnd（`hook.py unattended-end`）: 印を消す。消し残した印は次の `unattended-start` が `hook.unattended-mark` の秒を過ぎたものから消す
 
 `NDF_FACTORY_RUN` が空の実行では、登録の行（`hooks/claude.json`）の sh が Python を起動せずに終える。
@@ -134,15 +136,23 @@ def pending_command_errors(text: object) -> list[str]:
     return [ERR_NEXT_COMMAND]
 
 
-def pushback_reason(errors: list[str], remaining: int) -> str:
-    """差し戻しの文（誤りの一覧・契約のファイルのパス・残りの差し戻しの回数）。"""
+def pushback_reason(errors: list[str], remaining: int, form: ur.ReportForm) -> str:
+    """差し戻しの文（誤りの一覧・契約のファイルのパス・残りの差し戻しの回数・形の説明）。"""
     lines = "\n".join(f"- {e}" for e in errors)
     return (
         "NDF: 人のいない実行では、最後の応答の末尾に区間の報告を置いて区間を終える。今の応答は形に合わない。\n"
         f"{lines}\n"
-        f"形は {FORM_REL}、決まりは {RULE_REF} にある。区間の報告を足して応答を終え直す"
-        f"（この後の差し戻しは残り {remaining} 回）。"
+        f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせて区間の報告を書き、応答を終え直す"
+        f"（この後の差し戻しは残り {remaining} 回）。\n\n"
+        f"{ur.describe_form(form)}"
     )
+
+
+def start_guide(form: ur.ReportForm | None) -> str:
+    """区間の始めの案内の文。契約を読めていれば `GUIDE` の後ろに形の説明を続ける。"""
+    if form is None:
+        return GUIDE
+    return f"{GUIDE}\n\n{ur.describe_form(form)}"
 
 
 def _utc_now() -> str:
@@ -165,7 +175,7 @@ def mark_session(hook_input: dict, now: float) -> str | None:
     if path is None:
         return None
     write_mark(path, Mark(session_id=path.stem, started_at=_utc_now(), pushbacks=0))
-    return GUIDE
+    return start_guide(_read_report_form("unattended-start"))
 
 
 def review_stop(hook_input: dict) -> dict | None:
@@ -176,7 +186,7 @@ def review_stop(hook_input: dict) -> dict | None:
     mark = read_mark(path) if path else None
     if mark is None:
         return None
-    form = _read_report_form()
+    form = _read_report_form("unattended-stop")
     if form is None:
         return None
     try:
@@ -191,16 +201,18 @@ def review_stop(hook_input: dict) -> dict | None:
     if count != mark.pushbacks:
         _save_count(path, mark, count)
     if not block:
+        if errors and not busy:
+            _stderr_warn("unattended-stop", f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
         return None
-    return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
+    return {"decision": "block", "reason": pushback_reason(errors, limit - count, form)}
 
 
-def _read_report_form() -> ur.ReportForm | None:
-    """区間の報告の契約を読む。読めなければ警告して None。"""
+def _read_report_form(command: str) -> ur.ReportForm | None:
+    """区間の報告の契約を読む。読めなければ副命令 `command` の名前で警告して None。"""
     try:
         return ur.load_form()
     except ur.FormError as e:
-        _stderr_warn("unattended-stop", f"区間の報告の契約を読めない: {e}")
+        _stderr_warn(command, f"区間の報告の契約を読めない: {e}")
         return None
 
 
