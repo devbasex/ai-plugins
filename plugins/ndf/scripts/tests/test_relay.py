@@ -20,6 +20,7 @@ import datetime as dt
 import errno
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -828,6 +829,15 @@ def execs(monkeypatch):
 
     monkeypatch.setattr(os, "execve", fake_execve)
     return calls
+
+
+@pytest.fixture()
+def mod(relay_env, execs):
+    """relay.py を読み込み、os.execve を差し替える。環境は一時の HOME にそろえる。"""
+    spec = importlib.util.spec_from_file_location("relay_under_test", RELAY)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
 
 @pytest.mark.parametrize(
@@ -1991,8 +2001,8 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
 
 
 @pytest.fixture()
-def mac(relay_env, tmp_path, monkeypatch):
-    """relay.py を macOS の bash として動かす。HOME は一時ディレクトリ（relay_env が用意する）。"""
+def mac(mod, tmp_path, monkeypatch):
+    """relay.py を macOS の bash として動かす。HOME は一時ディレクトリ（mod が用意する）。"""
     for k in ("DEVBASE_SHELLRC_DIR", "ZDOTDIR"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("SHELL", "/bin/bash")
