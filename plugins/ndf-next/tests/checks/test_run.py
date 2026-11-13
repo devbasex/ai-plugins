@@ -61,3 +61,20 @@ def test_unreadable_event_stops(plugin, monkeypatch, capsys, tmp_path):
     assert run.main(["--event", str(tmp_path / "missing.json")]) == run.EXIT_UNREADABLE
     report, _ = last_json(capsys)
     assert report["cause"] == {"kind": "config_broken"}
+
+
+def test_collect_does_not_descend_into_skipped_dirs(plugin, monkeypatch):
+    plugin.write("src/ndf/a.py", "x = 1\n")
+    plugin.write(".venv/lib/site.py", "x = 1\n")
+    walked = []
+    real_walk = run.os.walk
+
+    def spy(top):
+        for entry in real_walk(top):
+            walked.append(entry[0])
+            yield entry
+
+    monkeypatch.setattr(run.os, "walk", spy)
+    found = [s.rel.rsplit("/", 1)[-1] for s in run.collect(plugin.root, plugin.repo)]
+    assert "a.py" in found and "site.py" not in found
+    assert not any(".venv" in top for top in walked)

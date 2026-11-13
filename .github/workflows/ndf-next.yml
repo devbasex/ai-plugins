@@ -2,8 +2,10 @@ name: ndf-next
 
 # 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
 # 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）
+# edited: 検査の I2 は PR 本文の即時修正の印を読むため、本文を直したときも打ち直す
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     paths:
       - ".github/workflows/ndf-next.yml"
       - "plugins/ndf-next/**"

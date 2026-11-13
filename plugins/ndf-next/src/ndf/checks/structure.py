@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from typing import Any
 
 from ndf.checks import imports
@@ -21,20 +22,37 @@ def _within(module: str, prefixes: list[str]) -> bool:
     return any(module == p or module.startswith(p + ".") for p in prefixes)
 
 
+def _pointed(imp: imports.Import) -> list[str]:
+    """import が指す名前。`from pkg import mod` は `pkg` と `pkg.mod` の両方を指す（`mod` がモジュールでも名前でも規則を当てる）。"""
+    return [imp.module, *(f"{imp.module}.{n}" for n in imp.names if n != "*")]
+
+
+def _first(names: list[str], hit: Callable[[str], bool]) -> str | None:
+    return next((n for n in names if hit(n)), None)
+
+
 def _import_findings(rel: str, module: str, imps: list[imports.Import], rules: dict[str, Any]) -> list[Finding]:
-    """1 つのモジュールの import に、層の向き・耐久の層の境界・判断のモジュールの純粋さを当てる。"""
+    """1 つのモジュールの import に、層の向き・耐久の層の境界・判断のモジュールの純粋さを当てる。1 つの import で規則ごとに 1 件。"""
     found = []
     layers = rules["layers"]
     mine = _layer(module, layers)
     is_decide = module.rsplit(".", 1)[-1].endswith(rules["decide_suffix"])
+
+    def above(name: str) -> bool:
+        theirs = _layer(name, layers)
+        return mine is not None and theirs is not None and theirs > mine
+
     for imp in imps:
-        theirs = _layer(imp.module, layers)
-        if mine is not None and theirs is not None and theirs > mine:
-            found.append(Finding("layer", rel, imp.line, f"下の層 {layers[mine]} が上の層 {layers[theirs]} を読む"))
-        if _within(imp.module, rules["durable_imports"]) and module != rules["durable_module"]:
-            found.append(Finding("durable-boundary", rel, imp.line, f"{imp.module} を読めるのは {rules['durable_module']} だけ"))
-        if is_decide and _within(imp.module, rules["decide_forbidden_imports"]):
-            found.append(Finding("decide-pure", rel, imp.line, f"判断のモジュールが {imp.module} を読む"))
+        names = _pointed(imp)
+        upper = _first(names, above)
+        if upper is not None:
+            found.append(Finding("layer", rel, imp.line, f"下の層 {layers[mine]} が上の層 {layers[_layer(upper, layers)]} を読む"))
+        durable = _first(names, lambda n: _within(n, rules["durable_imports"]))
+        if durable is not None and module != rules["durable_module"]:
+            found.append(Finding("durable-boundary", rel, imp.line, f"{durable} を読めるのは {rules['durable_module']} だけ"))
+        impure = _first(names, lambda n: _within(n, rules["decide_forbidden_imports"]))
+        if is_decide and impure is not None:
+            found.append(Finding("decide-pure", rel, imp.line, f"判断のモジュールが {impure} を読む"))
     return found
 
 

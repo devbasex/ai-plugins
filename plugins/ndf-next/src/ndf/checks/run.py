@@ -29,14 +29,21 @@ TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml
 SCRIPT_DIRS = ("bin", "hooks")
 
 
+def _walk(plugin_root: Path) -> list[Path]:
+    """プラグインの下のファイル。`SKIP_DIRS` のディレクトリへは降りない（依存の環境などを列挙しない）。"""
+    found = []
+    for top, dirs, files in os.walk(plugin_root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        found += [Path(top, name) for name in files]
+    return found
+
+
 def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
     """プラグインの下の文字のファイル（`bin/`・`hooks/` の拡張子の無いスクリプトを含む）を、パスの昇順で返す。"""
     found = []
-    for path in sorted(plugin_root.rglob("*")):
+    for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
-        if not path.is_file() or SKIP_DIRS & set(rel.parts):
-            continue
-        if path.suffix in TEXT_SUFFIXES or rel.parts[0] in SCRIPT_DIRS:
+        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.parts[0] in SCRIPT_DIRS):
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 

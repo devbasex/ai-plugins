@@ -47,3 +47,16 @@ def test_relative_imports_are_resolved(plugin):
     plugin.write("src/ndf/pkg/__init__.py", "from . import x\n")
     plugin.write("src/ndf/pkg/x.py", "from .. import pkg\n")
     assert len(structure.cycles(plugin.scope())) == 1
+
+
+def test_from_import_of_a_module_gets_the_rules(plugin, rules):
+    plugin.write("src/ndf/core/__init__.py", "")
+    plugin.write("src/ndf/core/loop.py", "from ndf import progress\n")
+    plugin.write("src/ndf/core/plan_decide.py", "from ndf.core import durable\n")
+    plugin.write("src/ndf/core/step_decide.py", "from ndf import adapters\n")
+    found = structure.check(plugin.scope(), rules)
+    assert sorted((f.rule, f.path.rsplit("/", 1)[-1]) for f in found) == [
+        ("decide-pure", "plan_decide.py"),
+        ("decide-pure", "step_decide.py"),
+        ("layer", "loop.py"),
+    ]
