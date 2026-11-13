@@ -132,9 +132,17 @@
     {
       "term": "廃止した語",
       "context": "project-glossary",
-      "meaning": "用語集で別の語へ置き換えた語。文書に出たら落とす",
+      "meaning": "用語集で別の語へ置き換えた語。文書の追加した行と、用語集自身の意味の説明に出たら落とす",
       "code": "deprecated",
-      "source": "docs/specifications/ndf-ubiquitous-language.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md",
+      "pending_source": "issues/issue-3190-design.md"
+    },
+    {
+      "term": "単独で照合する廃止した語",
+      "context": "project-glossary",
+      "meaning": "前後が漢字の出現には当てない廃止した語。1 文字の語と、長い語の一部に現れる語を登録するために使う",
+      "code": "deprecated_standalone",
+      "pending_source": "issues/issue-3190-design.md"
     },
     {
       "term": "不変条件",
@@ -177,11 +185,12 @@
     {
       "term": "用語チェック",
       "context": "ndf-workflow",
-      "meaning": "`glossary.py check`。用語集の形と、文書の追加した行の語を見る",
+      "meaning": "`glossary.py check`。用語集の形と意味の説明の廃止した語、文書の追加した行の語を見る",
       "deprecated": [
         "語のチェック"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-3190-design.md"
     },
     {
       "term": "モデルレビュー",
@@ -7150,6 +7159,55 @@
       "context": "ndf-workflow",
       "meaning": "判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる",
       "pending_source": "issues/issue-2963-design.md"
+    },
+    {
+      "term": "CI",
+      "context": "ndf-workflow",
+      "meaning": "Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー）",
+      "pending_source": "issues/issue-3190-design.md"
+    },
+    {
+      "term": "文字列",
+      "context": "ndf-workflow",
+      "meaning": "文字の並びとして持つ値",
+      "pending_source": "issues/issue-3190-design.md"
+    },
+    {
+      "term": "取り込み方",
+      "code": "promotion",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる",
+      "pending_source": "issues/issue-3119-requirements.md"
+    },
+    {
+      "term": "戻すマージ",
+      "context": "ndf-release",
+      "meaning": "正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る",
+      "pending_source": "issues/issue-3119-design.md"
+    },
+    {
+      "term": "プラグインの入れ替え",
+      "context": "ndf-workflow",
+      "meaning": "作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別",
+      "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "新しいプラグイン",
+      "context": "ndf-workflow",
+      "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
+      "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "プラグインの定義",
+      "context": "ndf-workflow",
+      "meaning": "プラグインの `plugin.json` が持つプラグイン名と版",
+      "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "初期構成",
+      "context": "ndf-workflow",
+      "meaning": "新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの置き場（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別",
+      "pending_source": "issues/issue-1142-design-next.md"
     }
   ]
 }
