@@ -37,6 +37,9 @@ CHILD = textwrap.dedent(
         return {{"tool": "ndf.plan", "status": "ok", "summary": "済んだ", "items": [], "metrics": {{}}}}
 
     acts.act_plan = plan
+    if {version!r}:  # 決定 21 の確かめ: NDF の版が上がった後の起動を、アプリの版を替えて作る
+        _launch = pr.durable.launch
+        pr.durable.launch = lambda *a, **kw: _launch(*a, **{{**kw, "app_version": {version!r}}})
     acts.act_record = lambda store, tid, row, phase: {{"tool": "ndf.record", "status": "ok", "summary": "", "items": [], "metrics": {{}}}}
     import progress_model as pm
     store = pdb.connect(sys.argv[1])
@@ -73,9 +76,9 @@ def _new(store, name, mode, lane=None, row=None):
     return tid
 
 
-def _next(tmp, url, tid, fail=""):
-    script = tmp / f"child-{fail or 'ok'}.py"
-    script.write_text(CHILD.format(lib=str(LIB), log=str(tmp / "calls.log"), fail=fail))
+def _next(tmp, url, tid, fail="", version=""):
+    script = tmp / f"child-{fail or 'ok'}-{version or 'src'}.py"
+    script.write_text(CHILD.format(lib=str(LIB), log=str(tmp / "calls.log"), fail=fail, version=version))
     p = subprocess.run([sys.executable, str(script), url, tid], capture_output=True, text=True, timeout=300)
     return json.loads(p.stdout.strip().splitlines()[-1]), p.returncode
 
@@ -200,3 +203,43 @@ def test_second_next_is_refused_while_running(world):
     with pdb.run_lock(store, tid):
         rep, code = _next(tmp, url, tid)
     assert code == 3 and "I14" in rep["summary"]
+
+
+def _executions(store, tid):
+    with pdb.transaction(store) as c:
+        return [e.payload["wid"] for e in pdb.read_progress_events(c, tid) if e.kind == "execution"]
+
+
+def test_next_after_gate_exit_recovers_and_waits_again(world):
+    """待ちでプロセスを抜けた後の next は、途中の実行を回復して同じ待ちへ戻り、終わった工程を流し直さない（決定 7）。"""
+    tmp, url, store = world
+    tid = _new(store, "w", "light")
+    rep, code = _next(tmp, url, tid)
+    assert code == 10
+    before, wids = _calls(tmp), _executions(store, tid)
+    rep, code = _next(tmp, url, tid)
+    assert code == 10 and rep["items"][0]["row"] == "デプロイ/release"
+    assert _calls(tmp) == before  # 回復は記録から再生し、アクティビティを流し直さない
+    assert _executions(store, tid) == wids  # 新しい実行を始めていない
+
+
+def test_stale_version_execution_is_cancelled_and_running_rows_fail(world):
+    """版が違う途中の実行は取り消し、実行中の行を失敗にしてから新しい実行で止まる（決定 21）。"""
+    import durable
+
+    tmp, url, store = world
+    tid = _new(store, "v", "light")
+    rep, code = _next(tmp, url, tid)
+    assert code == 10
+    old = _executions(store, tid)[-1]
+    with pdb.transaction(store) as c:
+        running = sorted(k for k, r in pm.fold(pdb.read_progress_events(c, tid), 1).items() if r.state == pm.RUNNING)
+    assert "デプロイ" in running
+    rep, code = _next(tmp, url, tid, version="ndf-next-version")
+    assert code == 1 and rep["status"] == "stopped", rep
+    assert sorted(it["row"] for it in rep["items"]) == running
+    assert durable.workflow_version_from(url, old)[0] == "CANCELLED"
+    with pdb.transaction(store) as c:
+        rows = pm.fold(pdb.read_progress_events(c, tid), 1)
+    assert all(rows[k].state == pm.FAILED for k in running)
+    assert _executions(store, tid)[-1] != old
