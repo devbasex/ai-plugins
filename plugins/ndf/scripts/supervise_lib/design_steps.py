@@ -82,7 +82,9 @@ def detail_steps(n: int) -> list[dict]:
             "timeout": 3600,
             "prompt": f"/ndf:design #{n} 詳細設計。設計文書（直した後のもの）の上に、詳細設計の文書 {detail} を 1,000 行以下で"
             "書く（超える主題は設計を 2 本に分けると報告して止まる）。書いたら "
-            f"`{DESIGN_SURVEY_PY} check --issue {n} --require-detail` を打ち、detail_* の指摘を直す。工程「設計」は記録し直さない。"
+            # コミットの前に打つため、HEAD を読む --issue ではなく worktree から読む --file で 2 つの文書を渡す
+            f"`{DESIGN_SURVEY_PY} check --file issues/issue-{n}-design.md {detail} --require-detail` を打ち、"
+            "detail_* の指摘を直す。工程「設計」は記録し直さない。"
             "コミットする（push しない）。",
             "next": "rebuild",
         },
