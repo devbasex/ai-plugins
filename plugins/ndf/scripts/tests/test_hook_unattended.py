@@ -34,11 +34,11 @@ def home(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _start(prompt: str = "/ndf:development-workflow #12", sid: object = SID):
-    return un.start({"session_id": sid, "prompt": prompt}, 0.0)
+    return un.mark_session({"session_id": sid, "prompt": prompt}, 0.0)
 
 
 def _stop(text: str = NO_REPORT, **extra) -> dict | None:
-    return un.stop({"session_id": SID, "last_assistant_message": text, **extra})
+    return un.review_stop({"session_id": SID, "last_assistant_message": text, **extra})
 
 
 def _count(home: Path) -> int:
@@ -151,7 +151,7 @@ def test_start_removes_marks_past_the_age_and_keeps_the_new_one(home: Path):
     stale = home / "old-1.json"
     stale.write_text("{}", encoding="utf-8")
     os.utime(stale, (0, 0))
-    assert un.start({"session_id": SID, "prompt": "/ndf:development-workflow #1"}, limits.seconds(un.MARK_POLICY) + 1.0)
+    assert un.mark_session({"session_id": SID, "prompt": "/ndf:development-workflow #1"}, limits.seconds(un.MARK_POLICY) + 1.0)
     assert sorted(p.name for p in home.iterdir()) == [f"{SID}.json"]
 
 
@@ -232,9 +232,9 @@ def test_stop_still_pushes_back_when_the_count_cannot_be_written(home: Path, mon
 
 def test_end_removes_the_mark_and_tolerates_none(home: Path):
     _start()
-    un.end({"session_id": SID})
+    un.clear_mark({"session_id": SID})
     assert not (home / f"{SID}.json").exists()
-    un.end({"session_id": SID})
+    un.clear_mark({"session_id": SID})
 
 
 # --- hook.py の副命令と登録の行 ---

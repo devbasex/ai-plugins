@@ -133,11 +133,11 @@ def _unattended(command: str, raw: dict | None) -> dict | None:
 
     try:
         if command == "unattended-start":
-            text = unattended.start(raw, time.time())
+            text = unattended.mark_session(raw, time.time())
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
         if command == "unattended-stop":
-            return unattended.stop(raw)
-        unattended.end(raw)
+            return unattended.review_stop(raw)
+        unattended.clear_mark(raw)
     except Exception as e:  # noqa: BLE001 — 印の読み書きの失敗で Stop と UserPromptSubmit を止めない
         print(f"ndf: {command}: {type(e).__name__}", file=sys.stderr)
     return None

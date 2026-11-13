@@ -120,17 +120,17 @@ def _utc_now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def _warn(command: str, text: str) -> None:
+def _stderr_warn(command: str, text: str) -> None:
     print(f"ndf: {command}: {text}", file=sys.stderr)
 
 
-def start(hook_input: dict, now: float) -> str | None:
+def mark_session(hook_input: dict, now: float) -> str | None:
     """過ぎた印を消し、対象のセッションなら印（回数 0）を作って案内の文を返す。対象でなければ None。"""
     directory = container_home() / MARK_DIR_NAME
     try:
         prune_marks(directory, now, limits.seconds(MARK_POLICY))
     except limits.LimitsError as e:
-        _warn("unattended-start", str(e))
+        _stderr_warn("unattended-start", str(e))
     if not isinstance(hook_input, dict) or not is_target(hook_input.get("prompt")):
         return None
     path = mark_path(hook_input.get("session_id"))
@@ -140,7 +140,7 @@ def start(hook_input: dict, now: float) -> str | None:
     return GUIDE
 
 
-def stop(hook_input: dict) -> dict | None:
+def review_stop(hook_input: dict) -> dict | None:
     """印のあるセッションの Stop で、差し戻すかを決めて回数を更新する。差し戻すなら `decision: block` の辞書。"""
     if not isinstance(hook_input, dict):
         return None
@@ -151,12 +151,12 @@ def stop(hook_input: dict) -> dict | None:
     try:
         form = ur.load_form()
     except ur.FormError as e:
-        _warn("unattended-stop", f"区間の報告の契約を読めない: {e}")
+        _stderr_warn("unattended-stop", f"区間の報告の契約を読めない: {e}")
         return None
     try:
         limit = int(limits.value(PUSHBACK_POLICY, "attempts"))
     except limits.LimitsError as e:
-        _warn("unattended-stop", str(e))
+        _stderr_warn("unattended-stop", str(e))
         return None
     busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
     errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
@@ -165,13 +165,13 @@ def stop(hook_input: dict) -> dict | None:
         try:
             write_mark(path, Mark(session_id=mark.session_id, started_at=mark.started_at, pushbacks=count))
         except OSError as e:
-            _warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
+            _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
     if not block:
         return None
     return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
 
 
-def end(hook_input: dict) -> None:
+def clear_mark(hook_input: dict) -> None:
     """セッションの印を消す。無ければ何もしない。消せなければ `OSError` を呼び出し元へ返す。"""
     path = mark_path(hook_input.get("session_id")) if isinstance(hook_input, dict) else None
     if path is not None:
