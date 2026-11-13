@@ -149,9 +149,25 @@ def review_stop(hook_input: dict) -> dict | None:
     if not isinstance(hook_input, dict):
         return None
     path = mark_path(hook_input.get("session_id"))
-    mark = read_mark(path) if path is not None else None
-    if path is None or mark is None:
+    mark = read_mark(path) if path else None
+    if mark is None:
         return None
+    rules = _load_rules()
+    if rules is None:
+        return None
+    form, limit = rules
+    busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
+    errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
+    block, count = next_count(errors, mark.pushbacks, limit, busy)
+    if count != mark.pushbacks:
+        _save_count(path, mark, count)
+    if not block:
+        return None
+    return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
+
+
+def _load_rules() -> tuple[ur.ReportForm, int] | None:
+    """区間の報告の契約と差し戻しの上限を読む。どちらかが読めなければ警告して None。"""
     try:
         form = ur.load_form()
     except ur.FormError as e:
@@ -162,17 +178,15 @@ def review_stop(hook_input: dict) -> dict | None:
     except limits.LimitsError as e:
         _stderr_warn("unattended-stop", str(e))
         return None
-    busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
-    errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
-    block, count = next_count(errors, mark.pushbacks, limit, busy)
-    if count != mark.pushbacks:
-        try:
-            write_mark(path, Mark(session_id=mark.session_id, started_at=mark.started_at, pushbacks=count))
-        except OSError as e:
-            _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
-    if not block:
-        return None
-    return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
+    return form, limit
+
+
+def _save_count(path: Path, mark: Mark, count: int) -> None:
+    """差し戻しの回数を印へ書く。書けなければ警告して続ける。"""
+    try:
+        write_mark(path, Mark(session_id=mark.session_id, started_at=mark.started_at, pushbacks=count))
+    except OSError as e:
+        _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
 
 
 def clear_mark(hook_input: dict) -> None:
