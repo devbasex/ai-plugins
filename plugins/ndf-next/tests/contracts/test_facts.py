@@ -121,3 +121,25 @@ def test_parse_where(args, expected):
 def test_parse_where_needs_equals():
     with pytest.raises(facts.FactsError):
         facts.parse_where(["flag"])
+
+
+def test_domain_tables_are_read_by_name(contracts_copy, fact_table):
+    contracts_copy("domains/sample.json", lambda _: fact_table({}, [{"id": "x"}]))
+    assert "sample" in facts.names() and "runtimes" in facts.names()
+    assert facts.place("sample") == "domains/sample.json"
+    assert facts.ids("sample") == ("x",)
+
+
+def test_same_name_in_both_places_is_refused(contracts_copy, fact_table):
+    contracts_copy("domains/exit-codes.json", lambda _: fact_table({}, [{"id": "x"}]))
+    with pytest.raises(facts.FactsError, match="2 つの置き場"):
+        facts.table("exit-codes")
+
+
+def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
+    columns = {"seat": {"type": "string", "summary": "s", "ref": "facts/runtimes"}, "next": {"type": "string", "summary": "n", "ref": "domains/runtimes"}}
+    contracts_copy("domains/sample.json", lambda _: fact_table(columns, [{"id": "a", "seat": "claude", "next": "nobody"}]))
+    errs = facts.ref_errors("sample", set())
+    assert len(errs) == 2
+    assert any("domains/runtimes.json にある" in e for e in errs)
+    assert any("'nobody' が表 runtimes に無い" in e for e in errs)

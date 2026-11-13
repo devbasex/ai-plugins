@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）の置き場・持ち主・消す時点。工程はこの表に無いパスへ書かない。宣言の最上位のキーは表をまたいで 1 つのファイルだけが持つ（テストのコマンドは project.json の test だけが持つ）。実行で変わる計測値は追跡する宣言へ書き戻さず、状態の置き場へ書く",
+  "summary": "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）の置き場・持ち主・消す時点。工程はこの表に無いパスへ書かない。同じ事実は 1 つの宣言だけが持つ（テストのコマンドは project.json の test だけが持ち、supervise.json は持たない）。実行で変わる計測値は追跡する宣言へ書き戻さず、状態の置き場へ書く",
   "owner": "D2（contracts/domains）",
   "columns": {
     "place": {"type": "string", "summary": "置き場", "ref": "domains/places"},
@@ -9,7 +9,7 @@
     "tracked": {"type": "boolean", "summary": "git が追跡するファイル。追跡しない置き場の下では偽"},
     "writer": {"type": "string", "summary": "書き手（人か、書く子 Issue の記号）"},
     "ends": {"type": "string", "summary": "消す時点。kept は残す（人が消す）、replaced は書くたびに置き換える、cleanup は後片付けの工程が消す、run は書いた実行が終わるときに消す、archived は後片付けの工程が issues/old へ移す"},
-    "keys": {"type": "array", "summary": "宣言の最上位のキー（version と $schema を除く）。同じキーを 2 つのファイルが持たない", "optional": true}
+    "keys": {"type": "array", "summary": "宣言の最上位のキー（version と $schema を除く）。宣言の読み手はこの表に無いキーを読まない", "optional": true}
   },
   "rows": [
     {"id": "project", "place": "ndf", "path": "project.json", "kind": "declaration", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["languages", "test", "ci", "services", "delivery", "issues", "checks", "ndf_policies", "instructions", "materials", "docs", "analysis"]},
