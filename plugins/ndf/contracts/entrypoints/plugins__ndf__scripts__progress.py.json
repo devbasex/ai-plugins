@@ -79,6 +79,7 @@
       },
       "new": {
         "options": [
+          "--context",
           "--disable",
           "--fact",
           "--issues",
@@ -88,8 +89,10 @@
           "--outside-plan",
           "--pace",
           "--requirements",
+          "--revise-note",
           "--row",
-          "--state"
+          "--state",
+          "--work"
         ],
         "positionals": [
           "name"

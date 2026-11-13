@@ -33,6 +33,15 @@ def _act_report(tool: str, status: str, summary: str, **metrics) -> dict:
     return {"tool": tool, "status": status, "summary": summary, "items": [], "metrics": metrics}
 
 
+def _notes_of(inp: dict, target: list) -> str:
+    """出し直しの指摘（承認ゲート 1 で送られた指摘の入力ファイル）を、設計の工程の起動指示へ添える（#2089 の決定 1）。"""
+    notes = inp.get("notes") or {}
+    got = [f"#{n}: {notes[str(n)]}" for n in target if str(n) in notes]
+    if inp.get("stage") != "設計" or not got:
+        return ""
+    return f"。出し直しの指摘の入力（全回を読み、指摘への対応の表を設計文書へ書く）: {'、'.join(got)}"
+
+
 def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
     stage, issues = inp["stage"], inp.get("issues") or []
     target = [inp["issue"]] if inp.get("issue") else issues
@@ -58,7 +67,7 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
                 "type": "work",
                 "kind": stage,
                 "stage": stage,
-                "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）",
+                "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）{_notes_of(inp, target)}",
                 "next": "end",
             }
         ],

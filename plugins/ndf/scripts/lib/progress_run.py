@@ -184,6 +184,8 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
             "work": raw.get("work"),
             "previous": outputs,
             "reshuffle": raw.get("reshuffle") or {},
+            "context": raw.get("context") or {},
+            "notes": raw.get("notes") or {},
         }
         if child:
             inp["issue"] = int(child.split("#", 1)[1])

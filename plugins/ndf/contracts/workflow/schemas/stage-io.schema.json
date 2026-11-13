@@ -47,6 +47,15 @@
         },
         "with": {
           "type": "object"
+        },
+        "context": {
+          "type": "object"
+        },
+        "notes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },

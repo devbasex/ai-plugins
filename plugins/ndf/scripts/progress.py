@@ -3,6 +3,7 @@
 
     python3 progress.py new <スプリント名> --mode M --issues N... [--pace P] [--lane <レーンの進行表の ID> --row N]
                             [--disable <工程>=<理由>]... [--fact <条件>=true|false]... [--requirements F] [--judgment F]
+                            [--work D] [--context F] [--revise-note <課題>=F]...
     python3 progress.py next|show <進行表の ID>
     python3 progress.py disable|enable|retry <ID> <工程> --reason R      # finish は --output F も
     python3 progress.py scope <ID> (--add N | --drop N | --mode M) --reason R    # cancel は <ID> --reason R
@@ -128,7 +129,14 @@ def cmd_new(a, store: pdb.Store) -> tuple[dict, int]:
         if not enabled[s.name].enabled:
             drafts.append(pm.EventDraft("disabled", "conductor", s.name, 1, reason=enabled[s.name].reason or "無効"))
     state = getattr(a, "state", None)  # pace: fast / auto の待ちの行で MVV 判定が読むスプリントの状態
-    doc = _snapshot_doc(snap, enabled, a.issues, a.pace, root, {"judgment": judged, "state": str(Path(state).resolve()) if state else None})
+    extra = {
+        "judgment": judged,
+        "state": str(Path(state).resolve()) if state else None,
+        "work": str(Path(a.work).resolve()) if getattr(a, "work", None) else None,
+        "context": _read_input_json(getattr(a, "context", None), "文脈"),  # 開発ループのループの名前・回・持ち越し（まとめの工程が読む）
+        "notes": {k: str(Path(v).resolve()) for k, v in _pairs(getattr(a, "revise_note", []), "--revise-note").items()},
+    }
+    doc = _snapshot_doc(snap, enabled, a.issues, a.pace, root, extra)
     with pdb.transaction(store) as conn:
         tid = pdb.create_table(conn, "sprint", pdb.progress_repo_key(root), a.name, a.lane, doc, drafts)
         if a.lane:
@@ -193,6 +201,7 @@ def cmd_show(a, store: pdb.Store) -> tuple[dict, int]:
                 items,
                 table=a.id,
                 rev=rev,
+                state=pm.table_state(rows),
                 history=history,
             ), 0
         if row.level == "lane":
@@ -406,6 +415,9 @@ def main(argv: list[str] | None = None) -> "NoReturn":  # noqa: F821
     n.add_argument("--fact", action="append", default=[])
     n.add_argument("--requirements")
     n.add_argument("--judgment")
+    n.add_argument("--work", help="工程のプランを書く作業ディレクトリ（既定は今のディレクトリ）")
+    n.add_argument("--context", help="まとめの工程が読む文脈の JSON（開発ループの名前・回・持ち越し・版）")
+    n.add_argument("--revise-note", dest="revise_note", action="append", default=[], help="設計の工程へ渡す出し直しの指摘 <課題>=<ファイル>")
     nx = sub.add_parser("next")
     nx.add_argument("id")
     sh = sub.add_parser("show")

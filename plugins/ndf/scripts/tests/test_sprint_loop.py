@@ -124,7 +124,7 @@ def _sprint_stages(cmd, out, issues):
 
 
 def fake_run(e):
-    """sprint-state.py init・supervise.py new sprint / new close の差し替え。--out にマニフェストを書く。"""
+    """sprint-state.py init・progress.py new・supervise.py new sprint / new close の差し替え。--out にマニフェストを書く。"""
 
     def run(cmd, cwd=None, stdin=None):
         e.calls.append(cmd)
@@ -135,6 +135,8 @@ def fake_run(e):
                 json.dumps({"plans": [], "done": [], "gates": [], "goal_template": "", "versions": {}})
             )
             return 0, "{}", ""
+        if str(sl_record.PROGRESS) in cmd and "new" in cmd:  # progress.py new: 進行表の ID を返す（#3092）
+            return 0, json.dumps({"status": "ok", "metrics": {"table": f"t-{cmd[cmd.index('new') + 1]}"}}), ""
         if "new" in cmd:
             out = Path(cmd[cmd.index("--out") + 1])
             out.mkdir(parents=True, exist_ok=True)

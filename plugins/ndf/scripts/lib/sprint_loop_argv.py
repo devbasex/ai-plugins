@@ -1,12 +1,13 @@
-"""開発ループが打つコマンドの組み立て: スプリントの状態の作成と `supervise.py new sprint`、マニフェストのステージのプラン。"""
+"""開発ループが打つコマンドの組み立て: スプリントの状態の作成と、ループの 1 回の工程の進行表（`progress.py new` と `next`）。"""
 
 from __future__ import annotations
 
+import json
 import shlex
 import sys
 from pathlib import Path
 
-from sprint_loop_record import SPRINT_STATE, SUPERVISE, resume_command, selected_issues
+from sprint_loop_record import PROGRESS, SPRINT_STATE, SUPERVISE, resume_command, selected_issues
 
 
 def approved_issues(rec: dict) -> set[int]:
@@ -46,26 +47,71 @@ def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -
     return init
 
 
-def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
-    """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外して --designed へ入れ、
-    設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。
-    開発版が無ければ --version を渡さず、キューが流す直前に版を決める（#2164）。"""
+DESIGN_STAGES = ("設計", "詳細設計", "ドキュメント再構成", "ドキュメントレビュー")  # 設計承認ゲートまでの工程
+
+
+def lap_requirements(lap: dict, issues: list[int]) -> Path:
+    """要求と受け入れ条件の工程の出力（`stage-io` の `requirements-out`）。開発ループの選定が受け入れ条件を確かめた課題を選ぶため、
+    進行表を作る前に済んだ工程として渡す。"""
+    path = Path(lap["dir"]) / "requirements.json"
+    refs = " ".join(f"#{n}" for n in issues)
+    doc = {"activities": {}, "summary": f"開発ループ の選定（ループの {lap['n']} 回目）で受け入れ条件を確かめた課題: {refs}"}
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+def lap_carry(rec: dict, lap: dict) -> list[int]:
+    """持ち越しの課題: 差分の棚卸しを最後に走らせたループの 1 回から渡す（走らせなかった回の古い値を写さない。#2914 の I6）。"""
+    prev = next((x for x in reversed(rec["laps"][: max(lap["n"] - 1, 0)]) if not (x.get("refine") or {}).get("skipped")), None)
+    return list(((prev or {}).get("refine") or {}).get("deferred") or [])
+
+
+def lap_context(rec: dict, lap: dict, carry: list[int]) -> Path:
+    """まとめの工程が読む開発ループの文脈（ループの名前・回・マイルストーン・持ち越し・版）。今の `new close --pace auto` の
+    `--loop`・`--lap`・`--milestone`・`--carry` と、`new sprint` の `--version` にあたる。"""
+    path = Path(lap["dir"]) / "context.json"
+    doc = {"loop": rec["name"], "lap": lap["n"], "milestone": lap.get("milestone"), "carry": list(carry), "versions": lap["versions"]}
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str], carry: list[int] = ()) -> list[str]:
+    """`progress.py new --pace auto` のコマンド（#3092）。ループの 1 回の進行表を作り、要求と受け入れ条件の工程を済んだ工程として渡す。
+    設計を承認済みの課題は、設計の工程を通さない（`--disable 設計=…`）。版は流す時点に決める（#2164）。"""
     issues = selected_issues(lap)
-    design = design_issues(rec, issues)
-    dev = lap["versions"]["dev"]
-    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
-    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"]]
-    if dev:
-        new += ["--version", dev]
-    new += ["--out", lap["out"]]
-    if design:
-        new += ["--design", *map(str, design)]
-    if designed := [n for n in issues if n not in design]:
-        new += ["--designed", *map(str, designed)]
+    new = [sys.executable, str(PROGRESS), "new", lap["sprint"], "--mode", lap["mode"], "--issues", *map(str, issues), "--pace", "auto"]
+    new += ["--state", lap["state_path"], "--work", str(Path(lap["dir"]) / "work")]
+    new += ["--requirements", str(lap_requirements(lap, issues)), "--context", str(lap_context(rec, lap, list(carry)))]
+    if lap.get("judgments_path"):
+        new += ["--judgment", lap["judgments_path"]]
+    if not design_issues(rec, issues):  # 全課題の設計を承認済み: 設計の工程を流さない（今の --designed）
+        new += [x for st in DESIGN_STAGES for x in ("--disable", f"{st}=設計承認ゲートで承認済み")]
     if rec.get("outside_plan"):  # 例外として始めたループは、内側の起動の判定でも同じ理由で通す（#2733）
         new += ["--outside-plan", rec["outside_plan"]]
     new += list(extra)
     return new
+
+
+def table_of(stdout: str) -> str | None:
+    """`progress.py new` の出力（統一 JSON レポート）から進行表の ID を読む。"""
+    for line in reversed((stdout or "").strip().splitlines()):
+        try:
+            got = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(got, dict):
+            return (got.get("metrics") or {}).get("table")
+    return None
+
+
+def next_pipeline(rec: dict, table: str, done: Path) -> str:
+    """ループの 1 回を流す 1 行: 進行表を次の工程から流し（答え待ちでも抜ける）、出力を done へ置いてから loop lap で締める。"""
+    q = shlex.quote
+    part = done.with_suffix(".part")
+    return (
+        f"python3 {q(str(PROGRESS))} next {q(table)} > {q(str(part))}; mv {q(str(part))} {q(str(done))}; "
+        f"python3 {q(str(SPRINT_STATE))} loop lap {rec['name']} --done {q(str(done))}"
+    )
 
 
 def redo_sprint_argv(root: str, rec: dict, lap: dict, issues: list[int], mode: str, out: str) -> list[str]:
