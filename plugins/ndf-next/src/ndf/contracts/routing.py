@@ -54,29 +54,28 @@ def _fallback(kind: str, on_fail: Optional[str]) -> Route:
     return Route(HUMAN, None, 0.0, kind)
 
 
-def _retry_wait(kind: str, state: RetryState) -> Optional[float]:
+def _retry_wait(state: RetryState, *, requires_retry_after: bool) -> Optional[float]:
     """打ち直せるなら次の待ちの秒。方針が無い・回数の上限に当たった・待つべき retry_after が無ければ None。"""
     policy = state.policy
     if policy is None or policy.attempts is None or state.used >= policy.attempts:
         return None
-    if causes.row(kind).requires_retry_after and state.retry_after is None:
+    if requires_retry_after and state.retry_after is None:
         return None
     return backoff(policy, state.used, state.retry_after, state.cap)
 
 
-def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Route:
+def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState, *, requires_retry_after: bool) -> Route:
     """打ち直せるなら retry、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
-    wait = _retry_wait(kind, state)
+    wait = _retry_wait(state, requires_retry_after=requires_retry_after)
     if wait is not None and wait > 0:
         return Route(RETRY, None, wait, kind)
     return _fallback(kind, on_fail)
 
 
-def _destination(kind: str, on_cause: Mapping[str, str]) -> tuple[str, Optional[str]]:
+def _destination(row: causes.CauseRow, on_cause: Mapping[str, str]) -> tuple[str, Optional[str]]:
     """行き先の語と on_cause の指定（無ければ None）。語は指定があればそれ、無ければ種類の既定（retry・step・human）。"""
-    default = causes.row(kind).route
-    target = on_cause.get(kind)
-    return (default if target is None else target), target
+    target = on_cause.get(row.kind)
+    return (row.route if target is None else target), target
 
 
 def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: RetryState) -> Route:
@@ -86,9 +85,10 @@ def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: 
     """
     if state.used < 0:
         raise ValueError(f"打ち直しの回数は 0 以上: {state.used}")
-    to, target = _destination(kind, on_cause)
+    found = causes.row(kind)
+    to, target = _destination(found, on_cause)
     if to == RETRY:
-        return _retry_or_next(kind, on_fail, state)
+        return _retry_or_next(kind, on_fail, state, requires_retry_after=found.requires_retry_after)
     if to in (END, STOP):
         return Route(to, None, 0.0, kind)
     if target is not None:
