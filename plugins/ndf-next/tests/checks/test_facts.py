@@ -77,3 +77,51 @@ def test_domain_tables_are_checked_and_names_do_not_repeat(plugin, rules):
     found = facts.check(plugin.scope(), rules)
     details = sorted((f.path.rsplit("/", 2)[-2], f.detail) for f in found if f.rule == "fact-table")
     assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の置き場の表と重なる")]
+
+
+# 現状固定テスト（I-002）: 列の宣言から作る行の形。`contracts/facts.py` の `_row_schema` と次の 2 点が違う（今の出力を固定する）。
+# - `id` に `minLength` を付けない
+# - `optional` は `True` のときだけ欠いてよい（真に見えるだけの値では必須のまま）
+
+
+def test_row_schema_without_columns():
+    assert facts.row_schema({}) == {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string"}},
+        "additionalProperties": False,
+    }
+
+
+def test_row_schema_from_column_declarations():
+    columns = {
+        "rank": {"type": "integer", "summary": "r"},
+        "tags": {"type": "array", "summary": "t", "optional": True},
+        "note": {"type": "string", "summary": "n", "optional": False},
+        "flag": {"type": "boolean", "summary": "f", "optional": 1},
+    }
+    assert facts.row_schema(columns) == {
+        "type": "object",
+        "required": ["id", "rank", "note", "flag"],
+        "properties": {
+            "rank": {"type": "integer"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "note": {"type": "string"},
+            "flag": {"type": "boolean"},
+            "id": {"type": "string"},
+        },
+        "additionalProperties": False,
+    }
+
+
+def test_row_schema_declared_id_is_overwritten_and_not_repeated_in_required():
+    schema = facts.row_schema({"id": {"type": "integer", "summary": "i"}, "name": {"type": "string", "summary": "n"}})
+    assert schema["properties"]["id"] == {"type": "string"}
+    assert list(schema["properties"]) == ["id", "name"]
+    assert schema["required"] == ["id", "name"]
+
+
+def test_row_schema_accepts_empty_id():
+    from jsonschema import Draft202012Validator
+
+    assert list(Draft202012Validator(facts.row_schema({})).iter_errors({"id": ""})) == []
