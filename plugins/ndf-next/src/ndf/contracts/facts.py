@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import re
-from functools import cache
 from typing import Any, NamedTuple
 
 from jsonschema import Draft202012Validator
@@ -79,12 +78,9 @@ def table(name: str) -> Table:
     return _read(name)
 
 
-@cache
+@contracts.cached_reader
 def _read(name: str) -> Table:
     return _validate(contracts.load_as(f"{FACTS_DIR}/{name}.json", FactsError), name)
-
-
-contracts.on_reset(_read.cache_clear)
 
 
 def _require_columns(t: Table, cols) -> None:

@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 DEFAULT_DIR = Path(__file__).resolve().parents[3] / "contracts"
 SCHEMAS = "schemas"
+T = TypeVar("T")
 
 _dir = DEFAULT_DIR
 # 置き場を差し替えたときに捨てる、読み手ごとのキャッシュ
@@ -43,9 +44,16 @@ def use_dir(path: str | Path | None) -> None:
         clear()
 
 
-def on_reset(clear) -> None:
+def _on_reset(clear) -> None:
     """`use_dir` のときに呼ぶキャッシュの消し方を登録する。"""
     _clearers.append(clear)
+
+
+def cached_reader(fn: Callable[..., T]) -> Callable[..., T]:
+    """`fn` を 1 プロセスに 1 回だけ読む関数にし、`use_dir` で置き場を差し替えたときに読み直させる。"""
+    cached = cache(fn)
+    _on_reset(cached.cache_clear)
+    return cached
 
 
 def duplicates(values: Iterable[Any]) -> list:

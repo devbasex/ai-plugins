@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import cache
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -80,14 +79,11 @@ def validate(raw: Any) -> dict[str, CauseRow]:
     return out
 
 
-@cache
+@contracts.cached_reader
 def table() -> dict[str, CauseRow]:
     """表を 1 プロセスに 1 回読み、種類ごとの行を返す。"""
     with contracts.raised_as(CausesError):
         return validate(contracts.load_json(TABLE))
-
-
-contracts.on_reset(table.cache_clear)
 
 
 def row(kind: str) -> CauseRow:

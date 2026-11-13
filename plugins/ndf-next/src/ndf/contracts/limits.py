@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from functools import cache
 from typing import NamedTuple, Optional
 
 from ndf import contracts
@@ -46,13 +45,10 @@ def validate(raw: object) -> dict[str, Policy]:
     return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
 
 
-@cache
+@contracts.cached_reader
 def table() -> dict[str, Policy]:
     """宣言を 1 プロセスに 1 回読む。"""
     return validate(contracts.load_as(DECLARATION, LimitsError))
-
-
-contracts.on_reset(table.cache_clear)
 
 
 def policy(name: str) -> Policy:
