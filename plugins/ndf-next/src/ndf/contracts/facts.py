@@ -172,19 +172,19 @@ def ref_errors(name: str, policy_names: set[str] | None) -> list[str]:
     読めない誤りは呼び出し側が 1 件で出しており、参照ごとに「無い」と重ねて出さないため。
     """
     t = table(name)
-    errs = []
-    for col, decl in t.columns.items():
-        ref = decl.get("ref")
-        if not ref:
-            continue
-        values = [(r["id"], r[col]) for r in t.rows if col in r]
-        if ref.startswith(LIMITS_REF):
-            if policy_names is None:
-                continue
-            errs += _limits_ref_errors(name, col, ref.removeprefix(LIMITS_REF), values, policy_names)
-        else:
-            errs += _table_ref_errors(name, col, ref, values)
-    return errs
+    return [e for col, decl in t.columns.items() for e in _column_ref_errors(t, col, decl.get("ref"), policy_names)]
+
+
+def _column_ref_errors(t: Table, col: str, ref: str | None, policy_names: set[str] | None) -> list[str]:
+    """列 1 つの `ref` の先に無い値。`ref` が無い列と、上限の宣言を読めないときの `limits.json#` への参照は空。"""
+    if not ref:
+        return []
+    values = [(r["id"], r[col]) for r in t.rows if col in r]
+    if not ref.startswith(LIMITS_REF):
+        return _table_ref_errors(t.name, col, ref, values)
+    if policy_names is None:
+        return []
+    return _limits_ref_errors(t.name, col, ref.removeprefix(LIMITS_REF), values, policy_names)
 
 
 def _coerce(value: str) -> Any:
