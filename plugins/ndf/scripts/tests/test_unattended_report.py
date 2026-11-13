@@ -121,7 +121,11 @@ def test_a_gate_needs_the_gate_name_and_the_pull_request():
     base = "## 判断の材料\n\nx\n\n- 結果: 判断が要る\n- 問い: マージしてよいか\n- 材料: 本文\n"
     assert ur.report_errors(base + "- 区分: ndf-ask:cost\n", FORM) == []
     got = ur.report_errors(base + "- 区分: ndf-gate:1\n", FORM)
-    assert got == [ur.ERR_MISSING.format(item=i, value="判断が要る") for i in ("承認ゲート", "Pull Request")]
+    assert got == [ur.ERR_MISSING.format(item="承認ゲート", value="判断が要る")]
+    got = ur.report_errors(base + "- 区分: ndf-gate:1\n- 承認ゲート: 設計 Pull Request のマージ\n", FORM)
+    assert got == [ur.ERR_MISSING.format(item="Pull Request", value="判断が要る")]
+    # 設計承認ゲートの委任の承認（スプリントの MVV）はまだ Pull Request が無い
+    assert ur.report_errors(base + "- 区分: ndf-gate:1\n- 承認ゲート: 設計承認ゲートの委任の承認\n", FORM) == []
 
 
 # --- form_from_dict: 形の宣言の検査を分岐ごとに固定する（現状固定） ---
