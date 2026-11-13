@@ -87,6 +87,14 @@ class ReleaseBuildError(RuntimeError):
     """リリースブランチを組めない（衝突・単位が無い）。止めて人へ戻す（E10）。"""
 
 
+def _moved_units(presented: dict, now: dict) -> list[str]:
+    """提示の時点から動いた単位（ブランチ）の名前。答えの時点の値が取れない単位は比べない。"""
+    now_units = now.get("units") or {}
+    return [
+        name for name, sha in (presented.get("units") or {}).items() if (cur := now_units.get(name)) and cur.strip() != str(sha).strip()
+    ]
+
+
 @dataclass(frozen=True)
 class Promotion:
     """取り込み方の表の 1 行。"""
@@ -108,14 +116,11 @@ class Promotion:
         out = []
         for k in self.watched:
             if k == "units":
-                for name, sha in (presented.get("units") or {}).items():
-                    cur = (now.get("units") or {}).get(name)
-                    if cur and cur.strip() != str(sha).strip():
-                        out.append(name)
-            else:
-                cur = now.get(k)
-                if cur and cur.strip() != str(presented.get(k) or "").strip():
-                    out.append(k)
+                out += _moved_units(presented, now)
+                continue
+            cur = now.get(k)
+            if cur and cur.strip() != str(presented.get(k) or "").strip():
+                out.append(k)
         return out
 
     def release_range(self, production_ref: str, prev_tag: str | None, head: str) -> tuple[str, str]:
@@ -373,6 +378,39 @@ class BranchFlow:
         return ResolvedFlow(self, start_branch or base, base, production)
 
 
+def _unknown_key_items(value: dict, allowed: dict) -> list[dict]:
+    """表に無いキーの誤り。"""
+    return [
+        {"key": k, "value": v, "allowed": ["(このキーは無い)", *KEYS, REVIEWS_KEY]}
+        for k, v in value.items()
+        if k not in allowed and k != REVIEWS_KEY
+    ]
+
+
+def _field_values(value: dict, allowed: dict) -> tuple[dict, list[dict]]:
+    """欄ごとの値（書かれていなければ既定値）と、許す値に無い欄の誤り。"""
+    vals, items = {**DEFAULT}, []
+    for k, opts in allowed.items():
+        if k not in value:
+            continue
+        v = value[k]
+        if not isinstance(v, str) or v not in opts:
+            items.append({"key": k, "value": v, "allowed": list(opts)})
+        else:
+            vals[k] = v
+    return vals, items
+
+
+def _row_items(vals: dict) -> list[dict]:
+    """取り込み方（promotion）の行が許さない start・doc_prs・integrate の誤り。"""
+    row = PROMOTIONS[vals["promotion"]]
+    return [
+        {"key": k, "value": vals[k], "allowed": sorted(ok), "because": f"promotion = {row.name}"}
+        for k, ok in (("start", row.allowed_start), ("doc_prs", row.allowed_doc_prs), ("integrate", row.allowed_integrate))
+        if vals[k] not in ok
+    ]
+
+
 def parse_flow(value) -> BranchFlow:
     """`branch_flow` の値を読む。`None` は既定値の行。形の誤り・表に合わない組は FlowError（既定値へ倒さない。I1）。"""
     if value is None:
@@ -380,24 +418,11 @@ def parse_flow(value) -> BranchFlow:
     allowed = allowed_values()
     if not isinstance(value, dict):
         raise FlowError([{"key": "(全体)", "value": value, "allowed": ["4 項目のオブジェクト"]}])
-    items = [
-        {"key": k, "value": v, "allowed": ["(このキーは無い)", *KEYS, REVIEWS_KEY]}
-        for k, v in value.items()
-        if k not in allowed and k != REVIEWS_KEY
-    ]
-    vals = {**DEFAULT}
-    for k, opts in allowed.items():
-        if k in value:
-            v = value[k]
-            if not isinstance(v, str) or v not in opts:
-                items.append({"key": k, "value": v, "allowed": list(opts)})
-            else:
-                vals[k] = v
+    items = _unknown_key_items(value, allowed)
+    vals, bad = _field_values(value, allowed)
+    items += bad
     if not items:
-        row = PROMOTIONS[vals["promotion"]]
-        for k, ok in (("start", row.allowed_start), ("doc_prs", row.allowed_doc_prs), ("integrate", row.allowed_integrate)):
-            if vals[k] not in ok:
-                items.append({"key": k, "value": vals[k], "allowed": sorted(ok), "because": f"promotion = {row.name}"})
+        items += _row_items(vals)
     promotion_ok = not any(i["key"] == "promotion" for i in items)
     units, bad = parse_reviews(value.get(REVIEWS_KEY), PROMOTIONS[vals["promotion"]] if promotion_ok else None)
     items += bad
