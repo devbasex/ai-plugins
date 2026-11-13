@@ -1,70 +1,90 @@
 # #1142 の設計の追加: 汎用の処理を外部ライブラリへ置き換える
 
-> **2026-11-13 に見直した。** スプリント 2b（T2・L1・L1b・D1〜D8）は実装済みで、20 種類のうち 4 種類（3・10・12・15）が包みへ移り切っていない。残りは決定 68 で [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md) の K1〜K3 に移した。テストの扱いは決定 66 で変えた。
-
 **NDF のスクリプトが自作している汎用の処理を、外部ライブラリの上へ置き換える。** 2026-09-26 に利用者が
 「自作の方針は撤回する。汎用的で車輪の再発明になる処理を抽出し、外部ライブラリを使うように設計を調整する」と
-決めた（不足 j）。依存の解決は決定 17（1 つの宣言と lock・uv の環境へ起動し直す）の上に置く。計画の実行と
-キュー（不足 i）は決定 21 で DBOS Transact に決めた。
+決めた（不足 j）。
+
+## 実装の状態と残り（2026-11-13）
+
+**この文書はスプリント 2b の設計で、実装は済んでいる。** 残りの実装に当てる内容は次の 2 つだけである。
+
+| 残り | 正本 |
+| --- | --- |
+| 20 種類のうち 4 種類（3・10・12・15）がアダプターへ移り切っていない | 決定 68。実装は [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md) の K1〜K3 |
+| テストの扱い | 決定 66（置き換えた関数のテストを作り直す） |
+
+**前提にした決定は 2 つある。** 依存の解決は決定 17（1 つの宣言と lock・uv の環境へ起動し直す）の上に置く。
+プランの実行とキュー（不足 i）は、決定 21 で DBOS Transact に決めた。
+
+**アダプター**は、外部ライブラリを呼ぶ `lib/` のモジュールを指す（構造チェックの識別子は `wrapped`）。
+ラッパー（`relay`）とは別の語である。
 
 ## 何を「汎用の処理」とするか
 
-**このリポジトリの業務（NDF の工程・語・計画の形・Claude Code の仕様）に固有でなく、どのプロジェクトでも同じ
-形で要る処理を汎用とする。** 置き換え先のライブラリがすぐ見つからなくても、汎用なら対象に挙げる。
+**このリポジトリの業務に固有でなく、どのプロジェクトでも同じ形で要る処理を汎用とする。** 業務とは、NDF の工程・語・
+プランの形・Claude Code の仕様を指す。置き換え先のライブラリがすぐ見つからなくても、汎用なら対象に挙げる。
 
-置き換えないのは次の 3 つだけである。
+汎用でも置き換えの対象から外すのは、次の 3 つだけである。置き換え先の候補が見つからない 4 つは、対象に入れたまま次の節の末尾に挙げる。
 
 | 置き換えないもの | 理由 | 例 |
 | --- | --- | --- |
-| 標準ライブラリの素直な使用 | 包みが薄く、ライブラリにしても解く問題が無い | `datetime.fromisoformat`・`json` の JSONL・`string.Template`・`statistics` |
-| 業務に固有の判定 | 汎用のライブラリに相当する機能が無い | CLI の出力に引用された誤りの文言の判定・Claude CLI の引数の仕分け・範囲の前方一致（glob を入れない方針 #266） |
+| 標準ライブラリの素直な使用 | アダプターが薄く、ライブラリにしても解く問題が無い | `datetime.fromisoformat`・`json` の JSONL・`string.Template`・`statistics` |
+| 業務に固有の判定 | 汎用のライブラリに相当する機能が無い | CLI の出力に引用されたエラーメッセージの判定・Claude CLI の引数の仕分け・範囲の前方一致（glob を入れない方針 #266） |
 | 定番の外部ツールをすでに使っているもの | 置き換え済み | シェルの `jq`・`flock -w 5`・git の CLI |
 
 ## 何が見つかったか（2026-09-26・`mission/m1142b` の `71963a1c`〜`fb4a4262`）
 
-4 本の worker が `plugins/ndf/scripts/`（`lib/` とパッケージ）・`plugins/ndf/skills/*/scripts/`・hook と根の
-`scripts/`・他のプラグインを分けて読み、関数の行数を構文木で数えた。汎用の処理の自作は 69 項目で、同じ種類を
-まとめると次の 20 種類になる。
+**汎用の処理の自作は 69 項目で、同じ種類をまとめると 20 種類になる。** 4 本の worker が次の範囲を分けて読み、
+関数の行数を構文木で数えた。
+
+- `plugins/ndf/scripts/`（`lib/` とパッケージ）
+- `plugins/ndf/skills/*/scripts/`
+- hook とリポジトリ直下の `scripts/`
+- 他のプラグイン
 
 | # | 種類 | 自作の主な場所 | 行数 | 置き換え先 | 毎回起動される経路 |
 | --- | --- | --- | ---: | --- | --- |
 | 1 | GitHub の呼び出し（決定 16・17） | `review_lib/github.py`・`refactor_lib/github.py`・`upkeep.py` の `Gh`・`merged-steps.py`・`release-steps.py` ほか 20 ファイル・`fetch-pr-comments.sh`・`rotate-pr.sh` | 約 1,100 | githubkit（決定済み） | なし |
-| 2 | 計画の実行とキュー（不足 i） | `supervise_lib` の `engine`・`state`・`queue`・`steps`・`slow`、`lib/post_queue.py:Queue`、2 本の `drive.py` | 約 2,300 | 試行中 | なし |
-| 3 | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー） | `lib/gh_sections.py`・`mission-state.py`・`mission-close.py`・`spec-copy.py`・`pr-steps.py`・`release-steps.py`・`doc-lint.py`・`glossary.py`・`instructions_lib/versions.py`・`relay_lib/mark.py`・`fix-steps.py`・`refactor_lib/vocabulary.py`・`lib/wait_notice.py`・根の `check-markdown-links.py`・`check-doc-staleness.py` ほか。囲みを追う実装が 9 本あり、規則がばらばら | 約 800 | markdown-it-py・mdit-py-plugins | `wait_notice.py`（hook）・`mark.py`（ラッパー） |
-| 4 | Markdown の表の組み立て | `run_metrics.py`・`metrics.py`・`transcript_agents.py`・`skill-stats.py`・`refactor_lib/commands/report.py`・`refactor_lib/plan.py`・`review_lib/commands/report.py`・`glossary.py`・`mission-state.py`・根の `token-usage.py` ほか | 約 490 | tabulate（`tablefmt="github"`）。セルの `\|` のエスケープは包みが持つ | なし |
+| 2 | プランの実行とキュー（不足 i） | `supervise_lib` の `engine`・`state`・`queue`・`steps`・`slow`、`lib/post_queue.py:Queue`、2 本の `drive.py` | 約 2,300 | 実験中（決定 21） | なし |
+| 3 | Markdown の構造の読み取り（コードブロック・見出し・節・表・地の文・リンクとアンカー） | `lib/gh_sections.py`・`mission-state.py`・`mission-close.py`・`spec-copy.py`・`pr-steps.py`・`release-steps.py`・`doc-lint.py`・`glossary.py`・`instructions_lib/versions.py`・`relay_lib/mark.py`・`fix-steps.py`・`refactor_lib/vocabulary.py`・`lib/wait_notice.py`・リポジトリ直下の `check-markdown-links.py`・`check-doc-staleness.py` ほか。コードブロックの境界を追う実装が 9 本あり、規則がばらばら | 約 800 | markdown-it-py・mdit-py-plugins | `wait_notice.py`（hook）・`mark.py`（ラッパー） |
+| 4 | Markdown の表の組み立て | `run_metrics.py`・`metrics.py`・`transcript_agents.py`・`skill-stats.py`・`refactor_lib/commands/report.py`・`refactor_lib/plan.py`・`review_lib/commands/report.py`・`glossary.py`・`mission-state.py`・リポジトリ直下の `token-usage.py` ほか | 約 490 | tabulate（`tablefmt="github"`）。セルの `\|` のエスケープはアダプターが持つ | なし |
 | 5 | JSON と設定の形の検証・型の変換 | `step_result.py`・`slow_step.py`・`limits.py`・`proposals.py`・`merge_fix.py`・`refactor_lib/plan.py`・`instructions_lib/declaration.py`・`supervise_lib/decl.py`・`release-steps.py:parse_steps`・`validate-runtime-plugins.sh`・playwright-kit の `config.py`。`isinstance(` は 132 行・36 ファイル | 約 650 | pydantic（githubkit が引き込むため依存は増えない） | なし |
 | 6 | プロセスの生死・親子・木の停止・メモリ | `lib/monitor_proc.py`・`refactor_lib/process.py`・`relay_lib/proc.py`・`version_dir._alive`・`parallel-measure.read_meminfo` | 約 290 | psutil | `relay_lib/proc.py`（hook とラッパー） |
 | 7 | ファイルロック（Python） | `lib/monitor_outcome.py`・`relay_lib/common.py`・`record.StartLimit`・`wait-notify.py:claim` | 約 75 | filelock | relay・wait-notify（hook） |
-| 8 | シェルの字句・構文の解析 | `lib/worktree-shell-lex.sh`・`worktree-write-target*.sh`（4 本）・`token-guard.sh:split_commands`・`lib/token_guard_sleep.py`・`workflow-common.sh:wf_split`・根の `check-skill-shell-vars.py`。ヒアドキュメントの除去の自作が 3 本 | 約 1,960 | tree-sitter-bash（py-tree-sitter）。bashlex は `[[ -f y ]]` で ParsingError を出すので使えない | すべて（PreToolUse） |
-| 9 | 版数の比較と一括の書き換え | `instructions_lib/versions.py`・`relay_lib/version_dir.version_key`・根の `token-usage.py:version_key`・`check-doc-staleness.py:base_of`・`release-steps.py` の `Editor`・`cmd_bump` ほか | 約 220 | semver（比較）・bump-my-version（15 箇所の書き換え） | `version_dir`（ラッパー） |
+| 8 | シェルの字句・構文の解析 | `lib/worktree-shell-lex.sh`・`worktree-write-target*.sh`（4 本）・`token-guard.sh:split_commands`・`lib/token_guard_sleep.py`・`workflow-common.sh:wf_split`・リポジトリ直下の `check-skill-shell-vars.py`。ヒアドキュメントの除去の自作が 3 本 | 約 1,960 | tree-sitter-bash（py-tree-sitter）。bashlex は `[[ -f y ]]` で ParsingError を出すので使えない | すべて（PreToolUse） |
+| 9 | 版数の比較と一括の書き換え | `instructions_lib/versions.py`・`relay_lib/version_dir.version_key`・リポジトリ直下の `token-usage.py:version_key`・`check-doc-staleness.py:base_of`・`release-steps.py` の `Editor`・`cmd_bump` ほか | 約 220 | semver（比較）・bump-my-version（15 箇所の書き換え） | `version_dir`（ラッパー） |
 | 10 | パスのパターン照合 | `lib/pace.py:glob_re`・`glossary.declared_path_matches`・`collect._matches_file_pattern` | 約 30 | pathspec | なし |
 | 11 | unified diff の解釈 | `glossary.added_lines`（`doc-lint` からも呼ぶ） | 30 | unidiff | なし |
 | 12 | コードのコメントの除去 | `glossary.mask_comments` | 47 | pygments（`Token.Comment`） | なし |
-| 13 | frontmatter と YAML の読み書き | `skill-stats.py:parse_front_matter`・根の `check-skill-frontmatter.py`・`build-runtime-plugins.sh` の埋め込み・`dev.kiro/install.sh`・mcp-serena の `project_yml.py` | 約 220 | ruamel.yaml（引用符とコメントを保つ往復の読み書き） | なし |
-| 14 | 待ちとやり直し | `merged-steps.py:cmd_merge_when_green`・`watch_stuck_checks`・`lib/post_queue.py:retry`・`upkeep.py` の待ち・`engine.gh_limit_wait` | 約 290 | tenacity（上限の待ちは githubkit） | なし |
+| 13 | frontmatter と YAML の読み書き | `skill-stats.py:parse_front_matter`・リポジトリ直下の `check-skill-frontmatter.py`・`build-runtime-plugins.sh` の埋め込み・`dev.kiro/install.sh`・mcp-serena の `project_yml.py` | 約 220 | ruamel.yaml（引用符とコメントを保つ往復の読み書き） | なし |
+| 14 | 待ちとリトライ | `merged-steps.py:cmd_merge_when_green`・`watch_stuck_checks`・`lib/post_queue.py:retry`・`upkeep.py` の待ち・`engine.gh_limit_wait` | 約 290 | tenacity（上限の待ちは githubkit） | なし |
 | 15 | HTTP と Slack の呼び出し | `lib/refresh.py`・`jev._post`・`wait-notify.py:slack_api` | 約 100 | httpx（githubkit が引き込む）・slack_sdk | `wait-notify.py`（hook） |
 | 16 | `.env` の読み取り | `wait-notify.py` の `_parse_env`・`_find_env`・`load_env_file` | 30 | python-dotenv | `wait-notify.py`（hook） |
 | 17 | `claude -p` の起動と結果の読み取り | `supervise_lib/claude.py` の `claude_cmd`・`call_claude`・`mvv-gate.py:ask`・`steps.last_json` | 約 100 | claude-agent-sdk（CLI をサブプロセスで起こす。サーバーは立てない） | なし |
 | 18 | 擬似端末の中継 | `relay_lib/terminal.py:Terminal` | 213 | ptyprocess | ラッパー |
 | 19 | テストの結果の読み取り・ファイル種別の判定 | `refactor_lib/testcmd.py:failed_nodes`・`pathkinds.py`・`review_lib/categories.py` の拡張子と shebang の判定 | 約 100 | pytest の `--junitxml`（読むのは標準の xml）・identify | なし |
-| 20 | 同じ処理の重複 | remote の URL から owner/repo を取る処理が 5 か所・原子的な書き込みが 4 か所（`lib/jsonio.write_atomic` と重複）・中央値と分位点（`statistics` で足りる） | 約 80 | 1 か所へまとめる（URL は giturlparse の上で `lib/repo.py` へ。書き込みは `lib/jsonio`。統計は標準ライブラリ） | 一部 |
+| 20 | 同じ処理の重複 | remote の URL から owner/repo を取る処理が 5 か所・アトミックな書き込みが 4 か所（`lib/jsonio.write_atomic` と重複）・中央値と分位点（`statistics` で足りる） | 約 80 | 1 か所へまとめる（URL は giturlparse の上で `lib/repo.py` へ。書き込みは `lib/jsonio`。統計は標準ライブラリ） | 一部 |
 
-候補の見つからないものは 4 つある。シェルの設定ファイルの管理ブロック（`relay_lib/shellrc.py`・37 行）・
-ラッパーのバージョンディレクトリの複製と世代の管理（`version_dir.VersionDir`・137 行。`uv tool install` が近い）・
-テストのコマンドの書き換え（`testcmd.py`・105 行）・パスの字面での正規化（`worktree-common.sh`・43 行）。
-この 4 つは置き換えず、候補が見つかった時点で起票する。
+**置き換え先の候補が見つからないものは 4 つある。** この 4 つは置き換えず、候補が見つかった時点で Issue を起票する。
 
-見つかった不具合: 根の `scripts/token-usage.py:version_key` は `dev.10` を `dev.9` より前に並べる（接尾辞を
-文字列で比べる）。即時修正で直す。
+| 自作 | 場所と行数 | 近い候補 |
+| --- | --- | --- |
+| シェルの設定ファイルの管理ブロック | `relay_lib/shellrc.py`・37 行 | — |
+| ラッパーのバージョンディレクトリの複製と世代の管理 | `version_dir.VersionDir`・137 行 | `uv tool install` |
+| テストのコマンドの書き換え | `testcmd.py`・105 行 | — |
+| パスの字面での正規化 | `worktree-common.sh`・43 行 | — |
 
-## 決定 19: 汎用の処理は、ライブラリを包む 1 か所だけが呼ぶ
+見つかった不具合: リポジトリ直下の `scripts/token-usage.py:version_key` は `dev.10` を `dev.9` より前に並べる
+（接尾辞を文字列で比べる）。即時修正で直す。
 
-**ライブラリは `lib/` の包みのモジュールが 1 か所で呼び、エントリポイントとパッケージは包みを呼ぶ。** 包みは、
-ライブラリの振る舞いとこのリポジトリの契約の差（誤りの文言を日本語で返す・`\|` のエスケープ・右寄せの列・
-`-dev.<n>` の版の形）を 1 か所で吸収する。包みを置かずに呼ぶと、同じ差を呼び出し側がそれぞれ埋め直し、
-今の重複（囲みを追う実装が 9 本）と同じ形が戻る。
+## 決定 19: 汎用の処理は、ライブラリを呼ぶアダプターの 1 か所だけが呼ぶ
 
-| 包み（新設） | 呼ぶライブラリ | 受け持つ種類 |
+**ライブラリは `lib/` のアダプター 1 か所が呼び、エントリポイントとパッケージはアダプターを呼ぶ。** アダプターは、
+ライブラリの振る舞いとこのリポジトリの契約の差を 1 か所で吸収する。差とは、エラーメッセージを日本語で返す・`\|` の
+エスケープ・右寄せの列・`-dev.<n>` の版の形である。アダプターを置かずに呼ぶと、同じ差を呼び出し側がそれぞれ
+埋め直す。そうなると、今の重複（コードブロックの境界を追う実装が 9 本）と同じ形が戻る。
+
+| アダプター（新設） | 呼ぶライブラリ | 受け持つ種類 |
 | --- | --- | --- |
 | `lib/md.py` | markdown-it-py・mdit-py-plugins | 3（読み取り。書き込みは節の外を変えないため、読み取った位置 `token.map` を使った行の操作で残す） |
 | `lib/mdtable.py` | tabulate | 4 |
@@ -79,26 +99,36 @@
 | `lib/waits.py` | tenacity | 14 |
 | `lib/notify.py` | slack_sdk・python-dotenv | 15・16 |
 
-GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_lib/claude.py`、擬似端末は
-`relay_lib/terminal.py` が包みを兼ねる。
+次の 3 つは、既存のモジュールがアダプターを兼ねる。
 
-**依存は `plugins/ndf/pyproject.toml` の extra に種類ごとに分けて宣言する**（決定 17 の形。`deps.require("md")` の
-ように名前で引く）。起動し直しの上乗せは 2 回目以降 0.12〜0.18 秒で（決定 17 の実測）、hook ではない
-エントリポイントには十分小さい。根の `scripts/`（開発と CI の検査）は、リポジトリの根に `pyproject.toml` と
-`uv.lock` を新設して同じ形で解決する。playwright-kit はすでに自分の `pyproject.toml` と `uv.lock` を持つため、
-そこへ足す。mcp-serena の `project_yml.py` は、mcp-serena に `pyproject.toml` と `uv.lock` を新設して解決する。hook の経路で
-読むため、起動の形は決定 25 に従う（D5 に含める）。
+| 種類 | アダプターを兼ねるモジュール |
+| --- | --- |
+| GitHub（決定 16・17） | `lib/gh_parts.py` |
+| `claude -p` | `supervise_lib/claude.py` |
+| 擬似端末 | `relay_lib/terminal.py` |
 
-**構造チェックに I14 を足す**: 包みが受け持つ標準ライブラリの部品（`fcntl`・`pty`・`termios`・
-`urllib.request`・`/proc/` の読み取り・囲みの正規表現）を、包みの外のモジュールが使ったら落とす。自作が
-戻るのを行数ではなく import で止める。
+**依存は `plugins/ndf/pyproject.toml` の extra に、種類ごとに分けて宣言する。** 形は決定 17 のとおりで、
+`deps.require("md")` のように名前で引く。起動し直しの上乗せは 2 回目以降 0.12〜0.18 秒である（決定 17 の実測）。
+hook ではないエントリポイントには十分小さい。
+
+依存の置き場は、配る単位ごとに次のとおりにする。
+
+| 対象 | 依存の置き場 |
+| --- | --- |
+| リポジトリ直下の `scripts/`（開発と CI の検査） | リポジトリ直下に `pyproject.toml` と `uv.lock` を新設し、同じ形で解決する |
+| playwright-kit | すでに持つ自分の `pyproject.toml` と `uv.lock` へ足す |
+| mcp-serena の `project_yml.py` | mcp-serena に `pyproject.toml` と `uv.lock` を新設する。hook の経路で読むため、起動の形は決定 25 に従う（D5 に含める） |
+
+**構造チェックに I14 を足す。** アダプターが受け持つ標準ライブラリの部品を、アダプターの外のモジュールが使ったら落とす。
+部品は `fcntl`・`pty`・`termios`・`urllib.request`・`/proc/` の読み取り・コードブロックの正規表現である。
+自作が戻るのを、行数ではなく import で止める。
 
 ## 決定 20: hook とラッパーも依存を持ち、hook は 1 本の Python のエントリポイントへまとめる（I13 を改める）
 
-**汎用の自作のうち約 2,300 行（種類 8 の全部と、3・6・7・15・16・18 の一部）が、I13（hook とラッパーの
-バージョンディレクトリは外部パッケージを使わない）の経路にある。** 最も大きいのはシェルの字句解析（約 1,960 行・
-自作が 3 本）で、PreToolUse の hook が Bash と Edit のたびに呼ぶ。2026-09-26 に利用者が「判断が要る箇所は、最終的に
-一番綺麗になるやり方で」と決めたため、I13 を保って重複だけをまとめる案は採らない。
+**汎用の自作のうち約 2,300 行が、I13 の経路にある。** I13 は「hook とラッパーのバージョンディレクトリは外部
+パッケージを使わない」である。当たるのは種類 8 の全部と、3・6・7・15・16・18 の一部である。最も大きいのはシェルの
+字句解析（約 1,960 行・自作が 3 本）で、PreToolUse の hook が Bash と Edit のたびに呼ぶ。2026-09-26 に利用者が
+「判断が要る箇所は、最終的に一番綺麗になるやり方で」と決めた。そのため、I13 を保って重複だけをまとめる案は採らない。
 
 | 経路 | 今の起動 | 実測（2026-09-26） |
 | --- | --- | --- |
@@ -108,40 +138,66 @@ GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_li
 | venv の python で bashlex を import して解析 | 参考 | 66〜88 ms |
 
 **hook は、PreToolUse・Stop・Notification を受ける 1 本の Python のエントリポイント（`scripts/hook.py`）へまとめる。**
-今の `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py`・`relay.py` の hook の入口は、その中の関数になる（`relay.py` の入口は、ラッパーを移す D6 で移す。D5 の時点では、token の guard がラッパーの告知を `relay_lib.mark` から同じプロセスで読む）。`worktree-guard.sh`・`token-guard.sh`・`wait-notify.py --runtime` は、パスを変えずに結ぶ Kiro CLI と agy のために、環境の python で `hook.py` を起動する包みとして残す。
-シェルの字句解析は tree-sitter-bash（bashlex は `[[ -f y ]]` で ParsingError を出すので使えない）、`.env` と Slack と
-ロックはライブラリへ置き換え、bash と jq の fork が消える。
+今の hook のエントリポイントは、その中の関数になる。
 
-**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** SessionStart の hook（`worktree-session.sh` が
-起動する `scripts/hook-env.py`）が `deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意し、
-プラグインの根ごとの目印 `~/.cache/ndf/roots<プラグインの根>` をその環境のディレクトリへ張る（symlink）。PreToolUse ほかの
-hook の command は、シェルの字面だけで目印の python を組み立て、`sh -c '[ -x "$0" ] || exit 0; exec "$0" "$@"'` の形で
-起動する（`"$HOME/.cache/ndf/roots${CLAUDE_PLUGIN_ROOT}/bin/python" <hook.py>` を渡す。版を読まない）。毎回の上乗せは
-python の起動と import だけになる。環境がまだ無い（SessionStart より前・uv を入れられない）ときは `[ -x ]` が偽になり、
-出力なし・終了コード 0 で通る（python を直に指す形は終了コード 127 で終わる。試行 T2）。hook が止まると Tool の呼び出しが
-全部止まるためで、今の guard も拒否しない案内が主である。目印を python の実行ファイルへ張らないのは、python が実行ファイルの
-symlink をたどった先で環境を探し、環境の外の python として動くためである。
+| 今のエントリポイント | まとめた後 |
+| --- | --- |
+| `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py` | `hook.py` の中の関数 |
+| `relay.py` の hook のエントリポイント | ラッパーを移す D6 で移す。D5 の時点では、token の guard がラッパーの告知を `relay_lib.mark` から同じプロセスで読む |
+| `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py --runtime` のパス | 環境の python で `hook.py` を起動するラッパースクリプトとして残す。パスを変えずに結ぶ Kiro CLI と agy のためである |
+
+シェルの字句解析は tree-sitter-bash に置き換える（bashlex は `[[ -f y ]]` で ParsingError を出すので使えない）。
+`.env` と Slack とロックもライブラリへ置き換え、bash と jq の fork が消える。
+
+**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** 起動の形は次のとおりである。
+
+1. SessionStart の hook が、`deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意する。
+   hook は `worktree-session.sh` が起動する `scripts/hook-env.py` である
+2. 同じ hook が、プラグインの根ごとの目印 `~/.cache/ndf/roots<プラグインの根>` を、その環境のディレクトリへ
+   symlink で張る
+3. PreToolUse ほかの hook の command は、シェルの字面だけで目印の python を組み立てる。起動の形は
+   `sh -c '[ -x "$0" ] || exit 0; exec "$0" "$@"'` である。渡すのは
+   `"$HOME/.cache/ndf/roots${CLAUDE_PLUGIN_ROOT}/bin/python" <hook.py>` で、版を読まない
+
+毎回の上乗せは、python の起動と import だけになる。
+
+**環境がまだ無いときは、出力なし・終了コード 0 で通る。** SessionStart より前や、uv を入れられないときは `[ -x ]` が
+偽になる。python を直に指す形は、終了コード 127 で終わる（実験版 T2）。hook が止まると Tool の呼び出しが全部
+止まるためで、今の guard も拒否しない案内が主である。
+
+**目印は python の実行ファイルへ張らない。** python は実行ファイルの symlink をたどった先で環境を探し、環境の外の
+python として動くためである。
 
 **構文木に読み直せない ERROR があるとき（`! case … esac`・`echo hi >` など）は、判定をせずに通して案内を出す。**
-構文木の癖 5 つ（試行 T2）は `lib/shparse.py` の包みが吸収し、癖で出る ERROR（`<>` の割れ・ヒアドキュメントの本文の
-`$((…))`）は読み直せるものとして数えない。
+構文木の癖 5 つ（実験版 T2）は `lib/shparse.py` のアダプターが吸収する。癖で出る ERROR（`<>` の割れ・ヒアドキュメントの
+本文の `$((…))`）は、読み直せるものとして数えない。
 
 **ラッパーのバージョンディレクトリは、複製のときに同じ lock から環境を作る**（複製先で `uv sync --frozen`）。
-`relay_lib/terminal.py` は ptyprocess、`proc`・`common`・`record` は psutil と filelock の上に置く。
+`relay_lib/terminal.py` は ptyprocess の上に、`proc`・`common`・`record` は psutil と filelock の上に置く。
 
 **I13 は「hook とラッパーの経路は、決まった環境の python から起動し、`deps.require()` を呼ばない」へ改める。**
 環境を用意するのは SessionStart とラッパーの複製の 2 か所だけで、ほかの hook は用意の有無だけを見る。
 
-**試行 T2（`experimental/`）は、選び直すためではなく成り立ちと退行を確かめるために行う。** 今の hook のテストの
-入力のすべてを tree-sitter-bash で解析して同じ判定になるか、hook 1 回の所要（今の 30〜32 ms と比べる）、環境が
-無いときにパススルーで終わるかを測る。どれかが成り立たなければ、そこで利用者へ戻す。
+**実験版 T2（`experimental/`）は、選び直すためではなく、成り立ちと退行を確かめるために行う。** 測るのは次の 3 つである。
+どれかが成り立たなければ、そこで利用者へ戻す。
 
-## 決定 21: 計画の実行とキューは DBOS Transact（SQLite）の上に置く（不足 i）
+- 今の hook のテストの入力のすべてを tree-sitter-bash で解析して、同じ判定になるか
+- hook 1 回の所要（今の 30〜32 ms と比べる）
+- 環境が無いときに、パススルーで終わるか
 
-2026-09-26 の試行（`experimental/runner-trial.py`・PR #1258）で、LangGraph（SqliteSaver）・Burr（SQLitePersister）・
-DBOS Transact（SQLite）の 3 つとも、サーバーを立てず SQLite のファイルだけで、実装の計画の雛形（`on_fail`・judge の
-選択・上限 20・承認ゲート）・キュー・kill -9 からの再開（流れていたステップから流し直し、済んだステップは流さない）・
-今の進捗ログと `supervise.py wait` を保てた。
+## 決定 21: プランの実行とキューは DBOS Transact（SQLite）の上に置く（不足 i）
+
+**DBOS を選ぶ。** キューと資源のタグごとの枠（#889 の GraphQL の共有の枠）をライブラリが持ち、自作が残らないのは
+DBOS だけである。
+
+2026-09-26 の実験版（`experimental/runner-trial.py`・PR #1258）で、3 つの候補を比べた。候補は LangGraph
+（SqliteSaver）・Burr（SQLitePersister）・DBOS Transact（SQLite）である。3 つとも、サーバーを立てず SQLite の
+ファイルだけで次を保てた。
+
+- 実装のプランの雛形（`on_fail`・judge の選択・上限 20・承認ゲート）
+- キュー
+- kill -9 からの再開（流れていたステップから流し直し、済んだステップは流さない）
+- 今の進捗ログと `supervise.py wait`
 
 | 観点 | LangGraph | Burr | DBOS |
 | --- | --- | --- | --- |
@@ -151,64 +207,71 @@ DBOS Transact（SQLite）の 3 つとも、サーバーを立てず SQLite の�
 | 大きさ・依存 | 54.9 MB・41 件 | 20.2 MB・2 件 | 60.6 MB・11 件（SQLite でも SQLAlchemy・psycopg-binary） |
 | import（冷えて / 温まって） | 0.82 / 0.26 秒 | 0.06 / 0.04 秒 | 0.78 / 0.24 秒 |
 
-**DBOS を選ぶ。** キューと資源のタグごとの枠（#889 の GraphQL の共有の枠）をライブラリが持ち、自作が残らないのは
-DBOS だけである。Burr は軽いが、キューの自作が残る（決定 19 の基準に反する）。import の 0.24 秒と所要の差は、
-1 本が数分〜数十分かかる計画の実行では小さい。計画の実行は hook の経路ではないため、決定 20 の所要の制約を受けない。
+Burr は軽いが、キューの自作が残る（決定 19 の基準に反する）。import の 0.24 秒と所要の差は、1 本が数分〜数十分
+かかるプランの実行では小さい。プランの実行は hook の経路ではないため、決定 20 の所要の制約を受けない。
 
-`supervise_lib` の `engine`・`state`・`queue`・`steps`・`slow` と `lib/post_queue.py:Queue`・2 本の `drive.py` の
-ループを DBOS のワークフローとステップへ置き換え、計画の JSON（`steps` と `next`・`on_fail`）の形と、
-`supervise.py` のエントリポイントの引数と出力・進捗ログの行の形は変えない。`--files` の重なり（#1248）と
-共有の一覧の衝突（#1249）は、キューへ入れる前の検査として置き換えの中で入れる。移行はミッション 2c
-（ミッション 2b の後）で、ステップの切り方は 2b の後に決める。
+**置き換える範囲と、変えない形は次のとおりである。** 設計の正本は [issue-1142-design-dbos.md](issue-1142-design-dbos.md)
+にある。
 
-## 決定 22: 全体テストは、根の 1 つの環境で本番と同じパッケージを入れて流す
+| 項目 | 中身 |
+| --- | --- |
+| DBOS のワークフローとステップへ置き換える | `supervise_lib` の `engine`・`state`・`queue`・`steps`・`slow` と `lib/post_queue.py:Queue`・2 本の `drive.py` のループ |
+| 変えない形 | プランの JSON（`steps` と `next`・`on_fail`）・`supervise.py` のエントリポイントの引数と出力・進捗ログの行 |
+| 置き換えの中で入れる | `--files` の重なり（#1248）と共有の一覧の衝突（#1249）を、キューへ入れる前の検査として |
+| 移行 | スプリント 2c（スプリント 2b の後）。ステップの切り方は 2b の後に決める |
 
-**包みを呼ぶ側のテストが、全体テストの環境に無いパッケージを import して落ちる。** 全体テストは CI
-（`.github/workflows/pytest.yml`）でも手元でも playwright-kit の venv で流しており、そこには包みが使う
-markdown-it・tabulate・pydantic・githubkit・psutil・filelock・ruamel.yaml・tenacity・slack_sdk が無い。
-エントリポイントは `deps.require()` で uv の環境へ起動し直すため実行時は動くが、テストはスクリプトを同じプロセスで
-import する（`test_mission_state.py`・`test_mission_close_merge_green.py` ほか）。2026-09-26 のステージ 2 で
+## 決定 22: 全体テストは、リポジトリ直下の 1 つの環境で本番と同じパッケージを入れて流す
+
+**アダプターを呼ぶ側のテストが、全体テストの環境に無いパッケージを import して落ちる。** 全体テストは CI
+（`.github/workflows/pytest.yml`）でも手元でも playwright-kit の venv で流していた。その venv には、アダプターが使う
+パッケージが無い（markdown-it・tabulate・pydantic・githubkit・psutil・filelock・ruamel.yaml・tenacity・slack_sdk）。
+エントリポイントは `deps.require()` で uv の環境へ起動し直すため、実行時は動く。テストはスクリプトを同じプロセスで
+import する（`test_mission_state.py`・`test_mission_close_merge_green.py` ほか）。2026-09-26 のステージ 2 で、
 D1〜D4 がこれで止まった。
 
-**根の `pyproject.toml` を全体テストの環境にする。** playwright_kit（パスで指定）・`plugins/ndf` の全 extra・
-pytest と pytest-xdist を、根の `uv.lock` の 1 つで固定する。CI と手元は
-`uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。根の `requires-python` は playwright_kit に
-合わせて 3.11 以上にする。
+**リポジトリ直下の `pyproject.toml` を全体テストの環境にする。** playwright_kit（パスで指定）・`plugins/ndf` の
+全 extra・pytest と pytest-xdist を、リポジトリ直下の `uv.lock` の 1 つで固定する。CI と手元は
+`uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。`requires-python` は playwright_kit に合わせて
+3.11 以上にする。
 
 | 比べた案 | 採らない理由 |
 | --- | --- |
 | 呼ぶ側のテストも uv の環境で流し直す | テストが二重に流れて遅くなり、流し直しの仕組みが呼ぶ側の数だけ増える |
-| 包みの import を関数の中へ遅らせる | 置き換えた関数に触れるテストは結局流れず、上のどちらかが要る |
+| アダプターの import を関数の中へ遅らせる | 置き換えた関数に触れるテストは結局流れず、上のどちらかが要る |
 
-**包みのテストの流し直し（`test_wrappers_uv_env.py`）は消す。** 全体テストの環境で包みのテストがその場で流れる。
-**子のプロセスを起こすテストは `sys.executable` で起動する。** `PATH` を絞って `python3` を探すと、包みの
-パッケージの無い python に当たり、`deps.require()` がテストの中で uv を取りに行く。
+**アダプターのテストの流し直し（`test_wrappers_uv_env.py`）は消す。** 全体テストの環境で、アダプターのテストがその場で流れる。
+
+**子のプロセスを起こすテストは `sys.executable` で起動する。** `PATH` を絞って `python3` を探すと、アダプターの
+パッケージの無い python に当たる。そうなると、`deps.require()` がテストの中で uv を取りに行く。
 
 **playwright_kit と ndf の依存が 1 つの lock で解けることを、L1b の最初に確かめる。** 解けなければ、そこで
 利用者へ戻す。
 
 ## 決定 23: `deps.require()` は複数のグループを 1 回で入れる
 
-**1 回の起動し直しで入るグループが 1 つだけだと、2 つ要るエントリポイントが止まる。** 2 つ目の `require()` は
-起動し直した後なので import できないとみなし、終了コード 3 で終わる。`wait-notify.py`（notify と locks）・
-`skill-stats.py`（mdtable と yamlio）・monitor（procs と locks）が当たる。
+**1 回の起動し直しで入るグループが 1 つだけだと、2 つ要るエントリポイントが止まる。** 2 つ目の `require()` は、
+起動し直した後なので import できないとみなし、終了コード 3 で終わる。当たるのは `wait-notify.py`（notify と locks）・
+`skill-stats.py`（mdtable と yamlio）・monitor（procs と locks）である。
 
 **`require("notify", "locks")` のように可変長で受け、`uv run` へ `--extra` を並べる。** 起動し直すのは 1 回である。
 
-## 決定 24: `claude -p` の包みは CLI の直の起動のまま残す
+## 決定 24: `claude -p` のアダプターは CLI の直の起動のまま残す
 
-試行 T2・T2b（PR #1264・#1267）で claude-agent-sdk 0.2.160 は今の 3 つの呼び出しの形を満たした。ただし既定のままだと
-子の CLI が会話タイトルを作る呼び出しを 1 回足し、費用が 2.77 倍になる。止める手段は文書に無い環境変数
-（`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`）だけで、CLI の更新で効かなくなると気づかないまま費用が戻る。置き換えで
-消える自作は約 130 行（起動・打ち切り・JSON の読み取り）で、SDK だけが持つ機能（型付きのメッセージ・逐次の受け取り・
-Python の中の hook）は今の使い方で使わない。**`supervise_lib/claude.py` は `-p --output-format json` のまま残し、
-プロセスの管理だけを `lib/procs.py` へ寄せる**（2026-09-26 利用者が決定）。
+**`supervise_lib/claude.py` は `-p --output-format json` のまま残す。** プロセスの管理だけを `lib/procs.py` へ寄せる
+（2026-09-26 利用者が決定）。
+
+実験版 T2・T2b（PR #1264・#1267）で、claude-agent-sdk 0.2.160 は今の 3 つの呼び出しの形を満たした。採らない理由は次の 3 つである。
+
+- 既定のままだと、子の CLI が会話タイトルを作る呼び出しを 1 回足し、費用が 2.77 倍になる
+- 止める手段は、文書に無い環境変数（`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`）だけである。CLI の更新で効かなくなると、気づかないまま費用が戻る
+- 置き換えで消える自作は約 130 行（起動・打ち切り・JSON の読み取り）である。SDK だけが持つ機能（型付きのメッセージ・逐次の受け取り・Python の中の hook）は、今の使い方で使わない
 
 ## 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する（決定 20 と同じ形）
 
 **mcp-serena の PreToolUse の hook は、Grep・Read・Bash・Serena の Tool の呼び出しのたびに `.serena/project.yml` を
-読む**（`plugins/mcp/mcp-serena/hooks/hooks.json` の `PreToolUse`・タイムアウト 5 秒、`scripts/serena_lsp/hooks.py`）。
-読み書きは自作の `scripts/serena_lsp/project_yml.py`（147 行）で、置き換え先の ruamel.yaml はシステムの python3 に無い。
+読む。** 定義は `plugins/mcp/mcp-serena/hooks/hooks.json` の `PreToolUse`（タイムアウト 5 秒）と
+`scripts/serena_lsp/hooks.py` にある。読み書きは自作の `scripts/serena_lsp/project_yml.py`（147 行）が行う。
+置き換え先の ruamel.yaml は、システムの python3 に無い。
 2026-09-26 のステージ 2 で、D8 はここで止まった。
 
 | 案 | 得 | 失 |
@@ -219,57 +282,66 @@ Python の中の hook）は今の使い方で使わない。**`supervise_lib/cla
 
 2026-09-26 に利用者が「NDF の hook と同じ形にする」と決めた。
 
-**SessionStart の hook（`serena-lsp.py hook session-start`）が、mcp-serena の `pyproject.toml` と `uv.lock` から
-`~/.cache/mcp-serena/venv/<版>` を `uv sync --frozen` で用意する。** PreToolUse の hook のコマンドはその環境の
-`bin/python` を指し、T2 で確かめた形 `sh -c '[ -x "$0" ] || exit 0; exec "$0" …'` で起動する。環境がまだ無い
-（SessionStart より前・uv を入れられない）ときは、判定をせずにパススルーで終わる。SessionStart の中の食い違いの
-通知は、環境を用意できたときだけその python で行い、用意できなければ通知を飛ばす。
+**SessionStart の hook が、mcp-serena の環境 `~/.cache/mcp-serena/venv/<版>` を用意する。** hook は
+`serena-lsp.py hook session-start` で、mcp-serena の `pyproject.toml` と `uv.lock` から `uv sync --frozen` で作る。
+PreToolUse の hook のコマンドは、その環境の `bin/python` を指す。起動は T2 で確かめた形
+`sh -c '[ -x "$0" ] || exit 0; exec "$0" …'` で行う。
 
-**hook ではないエントリポイント（`serena-lsp.py` の `check`・`configure` ほか。Skill の `language-servers` が呼ぶ）は、
-同じ環境へ自分を起動し直す。** 環境が無ければ用意し、uv が無ければ終了コード 3 で終わる（`deps.require()` と同じ
-契約）。**NDF の `lib/deps.py` は import しない。** プラグインは別々に配布され、mcp-serena だけを入れた利用者の
-手元に NDF は無い。起動し直しの数十行は `scripts/serena_lsp/env.py` に置く。
+| 場面 | 振る舞い |
+| --- | --- |
+| 環境がまだ無い（SessionStart より前・uv を入れられない） | 判定をせずに、パススルーで終わる |
+| SessionStart の中の食い違いの通知 | 環境を用意できたときだけ、その python で行う。用意できなければ通知を飛ばす |
 
-Codex の hook（`hooks/codex.json`）と Kiro（`dev.kiro/install.sh`）の経路も同じ環境を指す。全体テストは決定 22 の
-根の環境に ruamel.yaml が入っているので、mcp-serena のテストはそのまま import できる。
+**hook ではないエントリポイントは、同じ環境へ自分を起動し直す。** 対象は `serena-lsp.py` の `check`・`configure` ほかで、
+Skill の `language-servers` が呼ぶ。環境が無ければ用意し、uv が無ければ終了コード 3 で終わる（`deps.require()` と同じ
+契約）。
+
+**NDF の `lib/deps.py` は import しない。** プラグインは別々に配布され、mcp-serena だけを入れた利用者の手元に NDF は
+無い。起動し直しの数十行は `scripts/serena_lsp/env.py` に置く。
+
+Codex の hook（`hooks/codex.json`）と Kiro（`dev.kiro/install.sh`）の経路も、同じ環境を指す。全体テストは、決定 22 の
+リポジトリ直下の環境に ruamel.yaml が入っているので、mcp-serena のテストはそのまま import できる。
 
 **移行は D5 に含める**（NDF の hook と同じ時期。「移行の順序」の表）。受け入れ条件に次の 2 つを足す。
 
 - mcp-serena の PreToolUse の hook 1 回の所要が、移行の前と比べて悪くなっていない（移行の前を D5 の最初に測る。T2 と同じ測り方）
 - 環境が無いとき、mcp-serena の hook は判定をせずに終了コード 0 で終わる
 
-## 移行の順序（ミッション 2b。ミッション 2 の開発版の後、ミッション 3 の前）
+## 移行の順序（スプリント 2b の実施の記録）
 
-**ミッション 3（語の移行）の前に置く。** 語の移行は同じファイルを触るため、先に中身を置き換えておけば、語を
-直す行が 1 回で済む。計画の実行とキュー（不足 i）の置き換えは試行の結果で別のミッション（2c）にする。
+**この節はスプリント 2b の実施の記録である。** 残りの順序は [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md)
+の K1〜K3 が持つ。各移行ステップの PR は [issue-1142-design-migration.md](issue-1142-design-migration.md) の「実装の状況」にある。
+
+スプリント 2b は、スプリント 2 の開発版の後、スプリント 3（語の移行）の前に置いた。語の移行は同じファイルを触るため、
+先に中身を置き換えておけば、語を直す行が 1 回で済む。プランの実行とキュー（不足 i）の置き換えは、実験版の結果で
+別のスプリント（2c）にした。
 
 | ステージ | 移行ステップ | 触るファイル |
 | --- | --- | --- |
-| 0 | T2 試行（決定 20 の成り立ちと hook の所要・claude-agent-sdk と bump-my-version が今の契約を満たすか） | `experimental/` だけ |
-| 0 | 即時修正: `token-usage.py:version_key`、#1249（並列の計画が例外リストで衝突する） | 根の `scripts/token-usage.py`・構造チェックと実装の雛形 |
-| 1 | L1 包み | `lib/` の包み 12 本（新設。各 300 行以下）・`plugins/ndf/pyproject.toml` と `uv.lock` の extra・根の `pyproject.toml` と `uv.lock`（新設）・構造チェックの I14・`lib/README.md`・テスト。**呼び出し側はまだ変えない** |
-| 1 | L1b テストの環境（決定 22・23） | 根の `pyproject.toml` と `uv.lock`・`.github/workflows/pytest.yml`・`.ndf/supervise.json` のテストのコマンド・`lib/deps.py`・`test_wrappers_uv_env.py`（消す）・全体テストのコマンドを書いた文書（`CONTRIBUTING.md`・`.github/pull_request_template.md`・`docs/specifications/` の 3 本） |
-| 2 | D1 プランの実行 | C1 と同じファイル（`claude -p` の包みは決定 24 でプロセスの管理だけ） |
+| 0 | T2 実験版（決定 20 の成り立ちと hook の所要・claude-agent-sdk と bump-my-version が今の契約を満たすか） | `experimental/` だけ |
+| 0 | 即時修正: `token-usage.py:version_key`、#1249（並列のプランが例外リストで衝突する） | リポジトリ直下の `scripts/token-usage.py`・構造チェックと実装の雛形 |
+| 1 | L1 アダプター | `lib/` のアダプター 12 本（新設。各 300 行以下）・`plugins/ndf/pyproject.toml` と `uv.lock` の extra・リポジトリ直下の `pyproject.toml` と `uv.lock`（新設）・構造チェックの I14・`lib/README.md`・テスト。**呼び出し側はまだ変えない** |
+| 1 | L1b テストの環境（決定 22・23） | リポジトリ直下の `pyproject.toml` と `uv.lock`・`.github/workflows/pytest.yml`・`.ndf/supervise.json` のテストのコマンド・`lib/deps.py`・`test_wrappers_uv_env.py`（消す）・全体テストのコマンドを書いた文書（`CONTRIBUTING.md`・`.github/pull_request_template.md`・`docs/specifications/` の 3 本） |
+| 2 | D1 プランの実行 | C1 と同じファイル（`claude -p` のアダプターは決定 24 でプロセスの管理だけ） |
 | 2 | D2 cross-review | C2 と同じファイル（`skills/cross-review/tests` の monitor を差し替えるテストは D3） |
 | 2 | D3 外部 CLI と記録 | C3 と同じファイルと、`skills/cross-review/tests` の monitor を差し替えるテスト（`wait-notify.py` は切り離した子の `--send` の Slack だけ。hook が同期で呼ぶ `.env` とロックは D5 が移す） |
 | 2 | D4 cross-refactoring | C4 と同じファイル |
 | 2 | D7 リリースと文書 | C7 と同じファイルと `glossary.py`・`doc-lint.py`・`spec-copy.py`・`pr-steps.py` |
-| 2 | D8 根の scripts・playwright-kit | 根の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py`（mcp-serena は決定 25 で D5 へ移した） |
+| 2 | D8 リポジトリ直下の scripts・playwright-kit | リポジトリ直下の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py`（mcp-serena は決定 25 で D5 へ移した） |
 | 3 | D5 hook（決定 20） | `scripts/worktree-*.sh`・`token-guard.sh`・`lib/worktree-*.sh`・`lib/token_guard_sleep.py`・`workflow-common.sh`・`wait-notify.py`・`hooks/*.json`・mcp-serena（決定 25。`hooks/`・`scripts/serena_lsp/`・`dev.kiro/install.sh`・`pyproject.toml` と `uv.lock`（新設）） |
 | 3 | D6 ラッパー（決定 20） | `relay_lib/`（`proc`・`common`・`record`・`terminal`・`version_dir`・`mark`） |
 
 **ステージ 2 は 6 本で、並列の上限に収まる。** 触るファイルは C1〜C7 の区切りに合わせてあり、重ならない。
-ステージ 0 の #1249 を先に直すのは、ミッション 2 のステージ 2 で 7 本のうち 4 本が例外リストの衝突と範囲の
+ステージ 0 で #1249 を先に直したのは、スプリント 2 のステージ 2 で 7 本のうち 4 本が、例外リストの衝突と範囲の
 重なりで止まったためである。
 
-**D1〜D8 では、テストは差し替え先と import だけを変えた**（決定 3 と同じ）。振る舞いが変わるもの（`*` が `/` をまたがなく
-なる・frontmatter の値の形）は、その移行ステップの PR が変わる入力をテストで固定した。残りの K1〜K3 は決定 66 で、
-置き換えた関数のテストを作り直す。
+**テストの扱いは決定 66 が正本である。** D1〜D8 は差し替え先と import だけを変えた（決定 3）。残りの K1〜K3 は、置き換えた
+関数のテストを作り直す。
 
 ## 受け入れ条件（#1142 へ足す）
 
-- 上の 20 種類が包みの上に置き換わり、自作の関数が消えている（候補の見つからない 4 つを除く）。2026-11-13 の時点で
+- 上の 20 種類がアダプターの上に置き換わり、自作の関数が消えている（候補の見つからない 4 つを除く）。2026-11-13 の時点で
   種類 3・10・12・15 が満たしていない（決定 68。K1〜K3 で満たす）
-- 構造チェックの I14 が、包みの外で包みの受け持つ部品を使うモジュールを落とす
+- 構造チェックの I14 が、アダプターの外でアダプターの受け持つ部品を使うモジュールを落とす
 - 置き換えないものの一覧（この文書）に載っていない汎用の自作が、新しく足されていない
 - hook 1 回の所要が、移行の前（`worktree-guard.sh` の 30〜32 ms）と比べて悪くなっていない（T2 と同じ測り方）
