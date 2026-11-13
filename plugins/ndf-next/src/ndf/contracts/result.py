@@ -16,7 +16,8 @@ from ndf.contracts import causes, facts
 
 SCHEMA = contracts.schema_path("result")
 # 結果の status の語彙（result.schema.json の enum と事実の表 exit-codes の status 列と同じ）
-STATUSES = ("ok", "gate", "stopped")
+OK, GATE, STOPPED = "ok", "gate", "stopped"
+STATUSES = (OK, GATE, STOPPED)
 
 
 def result(
@@ -61,7 +62,7 @@ def stopped(
     `instance` と `retry_after` は `cause` へ、残りのキーワード（`extra`）は `result` へ渡す。
     """
     c = causes.cause(kind, detail, instance=instance, retry_after=retry_after)
-    return result(tool, "stopped", summary if summary is not None else detail, cause=c, **extra)
+    return result(tool, STOPPED, summary if summary is not None else detail, cause=c, **extra)
 
 
 def code_matches(status: str, code: int) -> bool:
@@ -78,9 +79,9 @@ def code_for(obj: Any) -> Optional[int]:
     if not isinstance(obj, dict):
         return None
     status = obj.get("status")
-    if status in ("ok", "gate"):
+    if status in (OK, GATE):
         return facts.rows(causes.EXIT_CODES, status=status)[0]["code"]
-    if status == "stopped":
+    if status == STOPPED:
         c = obj.get("cause")
         kind = c.get("kind") if isinstance(c, dict) else None
         if isinstance(kind, str) and kind in causes.table():
@@ -99,7 +100,7 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
         if not code_matches(obj["status"], code):
             errs.append(f"status {obj['status']} と終了コード {code} が合わない")
         expected = code_for(obj)
-        if obj["status"] == "stopped" and expected is not None and code != expected:
+        if obj["status"] == STOPPED and expected is not None and code != expected:
             errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
     return errs
 

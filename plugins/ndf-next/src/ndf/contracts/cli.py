@@ -53,12 +53,12 @@ def _cmd_check(_: argparse.Namespace) -> int:
         except contracts.ContractError:
             return _emit_unchecked(detail, items)
         return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
-    return result.emit(result.result(TOOL, "ok", "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
+    return result.emit(result.result(TOOL, result.OK, "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
 
 
 def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
     """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
-    obj = result.result(TOOL, "stopped", detail, items=items, cause=causes.build("invalid", detail))
+    obj = result.result(TOOL, result.STOPPED, detail, items=items, cause=causes.build("invalid", detail))
     print(json.dumps(obj, ensure_ascii=False))
     return int(facts.row(causes.EXIT_CODES, "unreadable")["code"])
 
