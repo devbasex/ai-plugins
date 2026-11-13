@@ -266,6 +266,27 @@ def detail_items(group: list[Doc], require: bool) -> list[dict]:
         raise StepError(str(exc), EXIT_UNREADABLE) from None
 
 
+def judge_docs(docs: list[Doc], require_detail: bool) -> tuple[list[dict], dict]:
+    """文書の並びに調査・レッドライン・詳細設計の判定を当て、指摘（判定の順）と metrics を返す。"""
+    groups = survey_groups(docs)
+    items: list[dict] = []
+    metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
+    for g in groups:
+        got, counts = judge_group(g)
+        items += got
+        for k, v in counts.items():
+            metrics[k] += v
+    unnamed = [it for d in docs for it in d.unnamed]
+    items += unnamed
+    metrics["unnamed_redline"] = len(unnamed)
+    detail = [it for g in groups for it in detail_items(g, require_detail)]
+    items += detail
+    metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
+    for rule in (*RULES, "detail_missing"):
+        metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
+    return items, metrics
+
+
 def cmd_check(a):
     root = git_root(a.root)
     if a.issue:
@@ -277,21 +298,7 @@ def cmd_check(a):
     else:
         texts = read_files(root, a.file)
     docs = [Doc(p, t) for p, t in texts]
-    items: list[dict] = []
-    metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
-    for g in survey_groups(docs):
-        got, counts = judge_group(g)
-        items += got
-        for k, v in counts.items():
-            metrics[k] += v
-    unnamed = [it for d in docs for it in d.unnamed]
-    items += unnamed
-    metrics["unnamed_redline"] = len(unnamed)
-    detail = [it for g in survey_groups(docs) for it in detail_items(g, a.require_detail)]
-    items += detail
-    metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
-    for rule in (*RULES, "detail_missing"):
-        metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
+    items, metrics = judge_docs(docs, a.require_detail)
     names = ", ".join(d.path for d in docs)
     if items:
         summary = (
