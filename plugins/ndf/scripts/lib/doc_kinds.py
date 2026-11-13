@@ -44,18 +44,34 @@ def use_contract(path) -> None:
     _path = DECLARATION if path is None else Path(path)
 
 
+def _flag_check(flag: str):
+    return (
+        lambda row, seen: not isinstance(row.get(flag), bool),
+        lambda row: f"の {row['kind']} の {flag} は真偽の値: {row.get(flag)!r}",
+    )
+
+
+# 種類の行の検査（破れる条件, 文面）。上から順に見て最初に破れたもので止める。後の検査は前の検査が通った行だけを見る
+_ROW_CHECKS = (
+    (
+        lambda row, seen: not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("suffix"), str),
+        lambda row: f"の行に kind と suffix が要る: {row!r}",
+    ),
+    (lambda row, seen: row["kind"] in seen, lambda row: f"に同じ種類が 2 つある: {row['kind']}"),
+    *(_flag_check(flag) for flag in _FLAGS),
+    (
+        lambda row, seen: "template" in row and not isinstance(row["template"], str),
+        lambda row: f"の {row['kind']} の template は文字列",
+    ),
+)
+
+
 def _validate_row(row, where: str, seen: set[str]) -> None:
     """種類の行 1 件を確かめ、種類を `seen` へ足す。"""
-    if not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("suffix"), str):
-        raise DocKindsError(f"設計文書の種類の契約 {where} の行に kind と suffix が要る: {row!r}")
-    if row["kind"] in seen:
-        raise DocKindsError(f"設計文書の種類の契約 {where} に同じ種類が 2 つある: {row['kind']}")
+    for broken, text in _ROW_CHECKS:
+        if broken(row, seen):
+            raise DocKindsError(f"設計文書の種類の契約 {where} {text(row)}")
     seen.add(row["kind"])
-    for flag in _FLAGS:
-        if not isinstance(row.get(flag), bool):
-            raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の {flag} は真偽の値: {row.get(flag)!r}")
-    if "template" in row and not isinstance(row["template"], str):
-        raise DocKindsError(f"設計文書の種類の契約 {where} の {row['kind']} の template は文字列")
 
 
 def _validate(raw, where: str) -> tuple[str, tuple[dict, ...]]:
