@@ -9,7 +9,7 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "設計の cross-review は上限 3 ラウンドで打ち切る（収束を待たない）。上限に達して未解決の指摘が 0 件なら、収束と同じ経路（直しの取り込み → 仕様のコピーの照合 → 用語チェック）を通って gate。未解決が残れば解決のフロー（直し → 再レビュー）を回し、解決できない（review-settled の判定）か駆動そのものが失敗したら gate。",
-  "上限": 35,
+  "上限": 39,
   "steps": [
     {
       "id": "glossary",
@@ -47,7 +47,47 @@
       "stage": "設計",
       "issues": true,
       "timeout": 3600,
-      "prompt": "/ndf:design #16。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。コミットする（push しない）。",
+      "prompt": "/ndf:design #16。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。詳細設計は後の段が書くため、ここでは書かない（設計文書の突き合わせで止める）。コミットする（push しない）。",
+      "next": "design-review"
+    },
+    {
+      "id": "design-review",
+      "type": "work",
+      "kind": "設計のレビュー",
+      "stage": "設計",
+      "timeout": 1800,
+      "prompt": "課題 #16 の設計文書だけをレビューする（詳細設計はまだ書いていない。後の段が書く）。\n1. 読むのは issues/ の課題 #16 の設計文書（issue-16-design*.md）と要求のコピー（issue-16-requirements.md）だけである\n2. 観点は <NDF>/skills/cross-review/scripts/review_lib/review_focus.py の定数 MODEL_REVIEW_TEMPLATE と DESIGN_REVIEW_TEMPLATE の箇条である。ファイルを開いて読み、\n   箇条を写して使う。DETAIL_REVIEW_TEMPLATE は読まない（詳細設計の文書が無い）\n3. 詳細設計を誤った設計の上に書かないよう、大きな誤り（受け入れ条件を満たさない構成・不変条件と矛盾する流れ・\n   決定どうしの矛盾・要求に無い範囲）を優先して挙げる。言い回しだけの指摘は挙げない\n4. 結果を作業ディレクトリ（下の「作業ディレクトリ」）の design-review.md へ書く（前の内容は上書きする）。\n   1 行目は `## 設計単体のレビュー`。指摘は「| # | 箇所 | 指摘 | 扱い |」の表の行で並べ、箇所は設計文書の節の見出し、\n   扱いは `未` と書く。指摘が無ければ `- 無し` の 1 行だけにする\n5. 設計文書を書き換えない。コミットしない。環境変数・トークンなどの秘密の値を引用しない",
+      "next": "design-review-check"
+    },
+    {
+      "id": "design-review-check",
+      "type": "run",
+      "stage": "設計",
+      "timeout": 60,
+      "cmd": "grep -qx -- '- 無し' {state_dir}/work/design-review.md",
+      "on_exit": {
+        "1": "design-fix"
+      },
+      "next": "detail-design"
+    },
+    {
+      "id": "design-fix",
+      "type": "work",
+      "kind": "修正",
+      "stage": "設計",
+      "timeout": 1800,
+      "prompt": "課題 #16 の設計単体のレビューの指摘を直す。指摘は作業ディレクトリ（下の「作業ディレクトリ」）の\ndesign-review.md の表にある。\n1. 扱いが `未` の行ごとに設計文書を直し、扱いを `直した` に替える\n2. 設計の判断や要求の変更が要り直せない行は、設計文書を変えずに扱いを `直さない: <理由>` に替える\n   （設計 Pull Request の本文に載り、設計承認ゲートで人が見る）\n3. 直した設計文書はコミットする（push しない）。詳細設計は書かない（次の段が書く）",
+      "next": "detail-design"
+    },
+    {
+      "id": "detail-design",
+      "type": "work",
+      "full": true,
+      "kind": "詳細設計",
+      "stage": "詳細設計",
+      "issues": true,
+      "timeout": 3600,
+      "prompt": "/ndf:design #16 詳細設計。設計文書（直した後のもの）の上に、詳細設計の文書 issues/issue-16-design-detail.md を 1,000 行以下で書く（超える主題は設計を 2 本に分けると報告して止まる）。書いたら `python3 <NDF>/scripts/design-survey.py check --file issues/issue-16-design.md issues/issue-16-design-detail.md --require-detail` を打ち、detail_* の指摘を直す。工程「設計」は記録し直さない。コミットする（push しない）。",
       "next": "rebuild"
     },
     {
@@ -70,7 +110,8 @@
       "title": "設計: #16",
       "summary": "#16 の設計（スプリント m9）",
       "append": [
-        "{state_dir}/work/glossary-candidates.md"
+        "{state_dir}/work/glossary-candidates.md",
+        "{state_dir}/work/design-review.md"
       ],
       "decisions": true,
       "next": "sync-body"
@@ -162,7 +203,7 @@
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16 --require-detail",
       "on_fail": "fix-survey",
       "next": "glossary-check"
     },
@@ -176,14 +217,14 @@
       ],
       "timeout": 1800,
       "next": "survey-recheck",
-      "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。"
+      "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。detail_* の指摘は詳細設計の文書（issues/issue-<番号>-design-detail.md）を直す: 雛形の節を足すか `省く: <理由>` を書く・副作用のある関数の異常系の処理の行・新設の関数の既存の部品の再利用の行を足す・ファイル配置のパスを設計の結果の触るファイルと揃える。"
     },
     {
       "id": "survey-recheck",
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 120,
-      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16",
+      "cmd": "python3 <NDF>/scripts/design-survey.py check --issue 16 --require-detail",
       "next": "glossary-check"
     },
     {

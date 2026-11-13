@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
@@ -35,14 +36,14 @@ deps.require("md", "mdtable", "textparse", "pathmatch")
 import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
-import glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
+import doc_kinds, glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
 DEFAULT_SOURCE = "docs/glossary/glossary.json"
 DEFAULT_DOCUMENT = "docs/glossary.md"
-DEFAULT_PATHS = ["issues/*-requirements.md", "issues/*-design.md", "issues/*-design-decisions.md"]
+DEFAULT_PATHS = doc_kinds.patterns("glossary")  # 宣言を作るときの既定の対象。設計文書の種類の契約から導く（#3144）
 DEFAULT_TERM_SECTIONS = ["用語"]
 DESIGN_MODES = ("standard", "legacy-refactor")
 FORMATS = ("json",)
@@ -286,39 +287,61 @@ def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], code
             hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
 
 
-def structure_findings(g: dict, decl: Declaration) -> list[dict]:
-    items = []
+def _hit_into(items: list[dict], path: str):
+    """用語集の構造の指摘（行は 0）を `items` へ足す関数を返す。"""
 
     def hit(rule, term, detail):
-        items.append({"rule": rule, "path": decl.source, "line": 0, "term": term, "detail": detail})
+        items.append({"rule": rule, "path": path, "line": 0, "term": term, "detail": detail})
 
+    return hit
+
+
+def _term_shape_problem(i: int, t) -> tuple[str, str] | None:
+    """語の行がオブジェクトでない・term / context / meaning が無いなら (語, 文面)。揃っていれば None。"""
+    if not isinstance(t, dict):
+        return "", f"terms[{i}] はオブジェクトで書く"
+    missing = [k for k in ("term", "context", "meaning") if not isinstance(t.get(k), str) or not t[k]]
+    if missing:
+        return str(t.get("term") or ""), f"terms[{i}] に {' / '.join(missing)} が無い"
+    return None
+
+
+def _term_banned_findings(t: dict, decl: Declaration, hit) -> None:
+    for w in glossary_banned.banned_in_term(t, decl.banned):
+        hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
+
+
+def _duplicate_findings(i: int, t: dict, seen: dict[tuple[str, str], int], code_seen: dict[tuple[str, str], int], hit) -> None:
+    """同じコンテキストで識別子・語が前の行と重なるかを見て、初めての組を控える。"""
+    if code_of(t):
+        ckey = (t["context"], code_of(t))
+        if ckey in code_seen:
+            hit("schema", code_of(t), f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
+        else:
+            code_seen[ckey] = i
+    key = (t["context"], t["term"])
+    if key in seen:
+        hit("duplicate", t["term"], f"コンテキスト {t['context']} で terms[{seen[key]}] と terms[{i}] が同じ語")
+    else:
+        seen[key] = i
+
+
+def structure_findings(g: dict, decl: Declaration) -> list[dict]:
+    items: list[dict] = []
+    hit = _hit_into(items, decl.source)
     live_by_ctx, codes_by_ctx = _live_index(g)
     ids = _context_findings(g, hit)
     seen: dict[tuple[str, str], int] = {}
     code_seen: dict[tuple[str, str], int] = {}
     for i, t in enumerate(g.get("terms", [])):
-        if not isinstance(t, dict):
-            hit("schema", "", f"terms[{i}] はオブジェクトで書く")
-            continue
-        missing = [k for k in ("term", "context", "meaning") if not isinstance(t.get(k), str) or not t[k]]
-        if missing:
-            hit("schema", str(t.get("term") or ""), f"terms[{i}] に {' / '.join(missing)} が無い")
+        problem = _term_shape_problem(i, t)
+        if problem:
+            hit("schema", *problem)
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
-        for w in glossary_banned.banned_in_term(t, decl.banned):
-            hit("banned", t["term"], f"語か意味の欄に禁止語「{w}」がある")
-        if code_of(t):
-            ckey = (t["context"], code_of(t))
-            if ckey in code_seen:
-                hit("schema", code_of(t), f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
-            else:
-                code_seen[ckey] = i
-        key = (t["context"], t["term"])
-        if key in seen:
-            hit("duplicate", t["term"], f"コンテキスト {t['context']} で terms[{seen[key]}] と terms[{i}] が同じ語")
-        else:
-            seen[key] = i
+        _term_banned_findings(t, decl, hit)
+        _duplicate_findings(i, t, seen, code_seen, hit)
     return items
 
 
@@ -381,33 +404,50 @@ def scan(text: str, term_sections: list[str]):
         yield n, mask_inline_code(line), terms.get(n)
 
 
-def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, dep_re, live_re) -> list[dict]:
+class WordPair(NamedTuple):
+    """廃止した形（`dep`）と生きた形（`live`）の正規表現の組。どちらも語が無ければ None。"""
+
+    dep: re.Pattern | None
+    live: re.Pattern | None
+
+
+def _uncovered(line: str, words: WordPair) -> list[re.Match]:
+    """`line` の中の廃止した形の一致のうち、生きた形の一致に完全に含まれないものを元の順で返す。"""
+    spans = [m.span() for m in words.live.finditer(line)] if words.live else []
+    return [m for m in words.dep.finditer(line) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
+
+
+class Target(NamedTuple):
+    """用語チェックで確かめる 1 ファイル。`wanted` は見る行（None なら全行、空なら見る行なし）。"""
+
+    path: str
+    text: str
+    wanted: set[int] | None
+
+
+def text_findings(target: Target, g: dict, decl: Declaration, words: WordPair) -> list[dict]:
     live = live_words(g)
     items = []
-    for n, body, term in scan(text, decl.term_sections):
-        if wanted is not None and n not in wanted:
+    for n, body, term in scan(target.text, decl.term_sections):
+        if target.wanted is not None and n not in target.wanted:
             continue
         if term and term not in live:
             items.append(
                 {
                     "rule": "unregistered",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": term,
                     "detail": "用語集に無い語。同じ変更で用語集へ足して render する",
                 }
             )
-        if dep_re is None:
+        if words.dep is None:
             continue
-        spans = [m.span() for m in live_re.finditer(body)] if live_re else []
-        for m in dep_re.finditer(body):
-            s, e = m.span()
-            if any(a <= s and e <= b for a, b in spans):
-                continue
+        for m in _uncovered(body, words):
             items.append(
                 {
                     "rule": "deprecated",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": m.group(0),
                     "detail": f"廃止した語。{replacement(g, m.group(0))} と書く",
@@ -416,21 +456,17 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
-def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re, live_re) -> list[dict]:
+def code_findings(target: Target, g: dict, words: WordPair) -> list[dict]:
     """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
     items = []
-    for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
-        if wanted is not None and n not in wanted:
+    for n, line in enumerate(mask_comments(target.text.splitlines(), Path(target.path).suffix), 1):
+        if target.wanted is not None and n not in target.wanted:
             continue
-        spans = [m.span() for m in live_re.finditer(line)] if live_re else []
-        for m in dep_re.finditer(line):
-            s, e = m.span()
-            if any(a <= s and e <= b for a, b in spans):
-                continue
+        for m in _uncovered(line, words):
             items.append(
                 {
                     "rule": "deprecated_code",
-                    "path": rel,
+                    "path": target.path,
                     "line": n,
                     "term": m.group(0),
                     "detail": f"廃止した識別子。{code_replacement(g, m.group(0))} と書く",
@@ -591,22 +627,10 @@ def _code_candidates(rel, lines, add):
             add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
 
 
-def cmd_candidates(a):
-    root = Path(a.root)
-    decl = load_declaration(root)
-    sections = decl.term_sections if decl else DEFAULT_TERM_SECTIONS
-    known = live_words(load_glossary(decl)) if decl and decl.source_path.exists() else set()
-    skip = {decl.document, decl.source} if decl else set()
-    found: dict[tuple[str, str], dict] = {}
-
-    def add(term, kind, where):
-        if not term or term in known:
-            return
-        it = found.setdefault((term, kind), {"term": term, "count": 0, "kind": kind, "first": where})
-        it["count"] += 1
-
-    files = git_checked(root, "ls-files").stdout.splitlines()
-    for rel in files:
+def _tracked_texts(root: Path, skip: set):
+    """git の追跡するファイルを `ls-files` の順に読み、`(相対パス, 本文)` を返す。
+    `skip`・ファイルでない・シンボリックリンク・大きすぎる・読めない・UTF-8 でないものは飛ばす。"""
+    for rel in git_checked(root, "ls-files").stdout.splitlines():
         p = root / rel
         if rel in skip or not p.is_file() or p.is_symlink():
             continue
@@ -616,10 +640,34 @@ def cmd_candidates(a):
             text = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        yield rel, text
+
+
+def _count_candidates(texts, known: set, sections: list[str]) -> dict[tuple[str, str], dict]:
+    """`(相対パス, 本文)` の並びから、既知の語を除いた候補を (語, 種類) ごとに数える（`first` は最初に見た場所）。"""
+    found: dict[tuple[str, str], dict] = {}
+
+    def add(term, kind, where):
+        if not term or term in known:
+            return
+        it = found.setdefault((term, kind), {"term": term, "count": 0, "kind": kind, "first": where})
+        it["count"] += 1
+
+    for rel, text in texts:
         if rel.endswith(".md"):
             _md_candidates(rel, text, sections, add)
         else:
             _code_candidates(rel, text.splitlines(), add)
+    return found
+
+
+def cmd_candidates(a):
+    root = Path(a.root)
+    decl = load_declaration(root)
+    sections = decl.term_sections if decl else DEFAULT_TERM_SECTIONS
+    known = live_words(load_glossary(decl)) if decl and decl.source_path.exists() else set()
+    skip = {decl.document, decl.source} if decl else set()
+    found = _count_candidates(_tracked_texts(root, skip), known, sections)
     items = [it for it in found.values() if it["kind"] != "bold" or it["count"] >= 3]
     items.sort(key=lambda it: (-it["count"], it["kind"], it["term"]))
     items = items[: a.limit]
@@ -651,33 +699,36 @@ def cmd_render(a):
     emit(result(TOOL, "ok", f"{decl.document} を書いた", [{"name": decl.document, "result": "written"}]))
 
 
-def _build_word_patterns(g):
-    """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
+def _build_word_patterns(g) -> tuple[WordPair, WordPair]:
+    """本文の廃止語・生きた語の組と、識別子の廃止形・生きた形の組。"""
     dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
     dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
-    return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
+    return WordPair(dep_re, live_re), WordPair(word_pattern(dep_forms), word_pattern(live_forms))
 
 
-def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
-    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。"""
-    targets: list[tuple[str, str, set[int] | None]] = []
+def _collect_targets(a, root: Path, decl) -> list[Target]:
+    """--file か --diff から、確かめるファイルの並び。生成した用語の文書（decl.document）は外す。"""
+    targets: list[Target] = []
     if a.file:
+        document = (root / decl.document).resolve()
         for f in a.file:
             p = Path(f)
             try:
                 text = p.read_text(encoding="utf-8")
             except OSError as e:
                 raise unreadable(f"{f} を読めない: {e}")
-            targets.append((f, text, None))
+            if document == p.resolve():
+                continue
+            targets.append(Target(f, text, None))
     else:
         for rel, lines in sorted(added_lines(root, a.diff).items()):
             if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or pathmatch.path_matches(rel, decl.paths)):
                 continue
             p = root / rel
             if p.is_file():
-                targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+                targets.append(Target(rel, p.read_text(encoding="utf-8", errors="replace"), lines))
     return targets
 
 
@@ -689,16 +740,14 @@ def cmd_check(a):
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
-        dep_re, live_re, dep_code_re, live_code_re = _build_word_patterns(g)
+        text_words, code_words = _build_word_patterns(g)
         targets = _collect_targets(a, root, decl)
-        for rel, text, wanted in targets:
-            if a.file and (root / decl.document).resolve() == Path(rel).resolve():
+        for t in targets:
+            if t.path.endswith(CODE_SUFFIXES):
+                if code_words.dep is not None:
+                    items += code_findings(t, g, code_words)
                 continue
-            if rel.endswith(CODE_SUFFIXES):
-                if dep_code_re is not None:
-                    items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
-                continue
-            items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
+            items += text_findings(t, g, decl, text_words)
     items += glossary_banned.banned_findings(a, root, decl.banned, added_lines, lambda w: replacement(g, w))
     for it in items:
         print(f"ERROR: {it['path']}:{it['line']}: {it['rule']}: {it['term']}", file=sys.stderr)

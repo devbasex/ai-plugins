@@ -36,6 +36,16 @@ DESIGN_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR
 - コンテキストの境界を越えていないか。宣言した関係の外で、ほかのコンテキストの集約を書き換えていないか。
 - ドメインモデルの節は確定したものとして扱う。変えるべきときは、指摘にそう書く。"""
 
+# 詳細設計の文書（`issues/issue-<番号>-design-detail.md`。#3144）の観点。設計 PR の詳細の段だけが読む。
+# 設計のプランの設計単体のレビュー（`design-review` の段）は詳細設計を書く前に走るため、この観点を読まない
+DETAIL_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 詳細設計
+- 責務を 1 文で書けない関数が無いか（1 つの関数が 2 つ以上の責務を持っていないか）。
+- 責務の重複が無いか。同じ責務を持つ関数・定数が、別の置き場や既存のコードにもう 1 つ無いか。
+- 既存の部品の再利用の表に、見落とした既存の関数・ライブラリが無いか（確かめた手段のコマンドで実際に当たるか）。
+- ファイル配置の依存の向きが一方向か。モジュールの間に循環が無いか。
+- 異常系の処理の表に、外部コマンド・ファイル・ネットワークを呼ぶ関数の失敗の行がそろっているか（原因・検出する場所・扱い・利用者に見える出力と終了コード・後始末）。
+- 並行と排他の表で、同時に走りうる処理が共有する資源（ファイル・状態・ブランチ）に排他の取り方と再開の仕方があるか。"""
+
 # 設計 PR の 1 ラウンド目（モデルの段、#1111）で渡す観点。詳細の段は DESIGN_REVIEW_TEMPLATE を渡す
 MODEL_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR（モデルの段）
 このラウンドは、設計文書のドメインモデルの節と、用語集の差分だけを見る。**節の外への指摘はこのラウンドでは書かない。**
@@ -118,7 +128,7 @@ INFRA_REVIEW_TEMPLATE = """## 自動追加レビュー観点: インフラ / デ
 CATEGORY_TEMPLATES = {
     "common": COMMON_REVIEW_TEMPLATE,
     "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
-    "design": DESIGN_REVIEW_TEMPLATE,
+    "design": DESIGN_REVIEW_TEMPLATE + "\n\n" + DETAIL_REVIEW_TEMPLATE,
     "code": CODE_REVIEW_TEMPLATE,
     "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
     "test": TEST_REVIEW_TEMPLATE,

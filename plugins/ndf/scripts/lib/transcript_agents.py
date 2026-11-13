@@ -62,6 +62,7 @@ NO_ROLE = "-"
 STEP_PHASES = {
     "要求と受け入れ条件": "設計",
     "作業場所の用意": "設計",
+    "詳細設計": "設計",
     "ドキュメント再構成": "設計",
     "ドキュメントレビュー": "設計",
     "ドキュメントレビューの後片付け": "実装",
@@ -298,22 +299,24 @@ def _ending_of(rows: list[dict]) -> str:
     return "rate_limit" if _error_status(last) == "429" else "api_error"
 
 
+def _content_blocks(row: dict) -> list[dict]:
+    """`message.content` が配列なら、その中の dict のブロックを並びのまま返す。それ以外は空。"""
+    content = _message(row).get("content")
+    return [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+
+
 def _tool_use_ids(rows: list[dict]) -> list[str]:
     """その記録が起動したサブエージェントの `tool_use` の id を集める。"""
     ids: list[str] = []
     for row in rows:
         if row.get("type") != "assistant":
             continue
-        content = _message(row).get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
+        for block in _content_blocks(row):
+            if block.get("type") != "tool_use" or block.get("name") != "Agent":
                 continue
-            if block.get("type") == "tool_use" and block.get("name") == "Agent":
-                block_id = block.get("id")
-                if isinstance(block_id, str) and block_id:
-                    ids.append(block_id)
+            block_id = block.get("id")
+            if isinstance(block_id, str) and block_id:
+                ids.append(block_id)
     return ids
 
 
@@ -325,10 +328,11 @@ def _token_stats(rows: list[dict]) -> tuple[int | None, int | None, int | None]:
         if row.get("type") != "assistant" or _is_synthetic(row):
             continue
         total = _input_total(row)
-        if total is not None:
-            if fixed is None:
-                fixed = total
-            peak = total if peak is None else max(peak, total)
+        if total is None:
+            continue
+        if fixed is None:
+            fixed = total
+        peak = total if peak is None else max(peak, total)
     work = peak - fixed if fixed is not None and peak is not None else None
     return fixed, peak, work
 
@@ -341,11 +345,12 @@ def _model_stats(rows: list[dict]) -> tuple[int, str | None]:
         if row.get("type") != "assistant" or _is_synthetic(row):
             continue
         message_id = _message(row).get("id")
-        if isinstance(message_id, str) and message_id and message_id not in seen:
-            seen.add(message_id)
-            model = _message(row).get("model")
-            if isinstance(model, str) and model:
-                models[model] += 1
+        if not isinstance(message_id, str) or not message_id or message_id in seen:
+            continue
+        seen.add(message_id)
+        model = _message(row).get("model")
+        if isinstance(model, str) and model:
+            models[model] += 1
     model = models.most_common(1)[0][0] if models else None
     return len(seen), model
 
@@ -391,21 +396,16 @@ def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
     """
     if record.ending != "rate_limit":
         return
-    for row in reversed(rows):
-        if row.get("type") != "assistant" or not _is_synthetic(row):
-            continue
-        quota = row.get("quotaLimits")
-        if isinstance(quota, dict):
-            resets = quota.get("resetsAt")
-            if isinstance(resets, (int, float)) and not isinstance(resets, bool):
-                record.resets_at = datetime.fromtimestamp(
-                    int(resets),
-                    tz=timezone.utc,
-                ).isoformat()
-            limit_type = quota.get("rateLimitType")
-            if isinstance(limit_type, str):
-                record.rate_limit_type = limit_type
-        break
+    last = next((row for row in reversed(rows) if row.get("type") == "assistant" and _is_synthetic(row)), None)
+    quota = last.get("quotaLimits") if last is not None else None
+    if not isinstance(quota, dict):
+        return
+    resets = quota.get("resetsAt")
+    if isinstance(resets, (int, float)) and not isinstance(resets, bool):
+        record.resets_at = datetime.fromtimestamp(int(resets), tz=timezone.utc).isoformat()
+    limit_type = quota.get("rateLimitType")
+    if isinstance(limit_type, str):
+        record.rate_limit_type = limit_type
 
 
 def read_agent_record(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
@@ -668,24 +668,33 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+@dataclass(frozen=True)
+class WaitPolicy:
+    """`wait_reset` の待ち方。`margin` は解除時刻に足す秒数、`max_sleep` は眠る上限（None なら無し）、
+    `now` は今の時刻（None なら呼んだ時点）、`sleeper` は眠る関数（None なら `_sleep`。テストが差し替える）。"""
+
+    margin: int = 60
+    max_sleep: int | None = None
+    now: datetime | None = None
+    sleeper: object = None
+
+
 def wait_reset(
     sessions: list[str],
     root: pathlib.Path | str | None = None,
     layer: str | None = None,
     depth: int | None = None,
-    margin: int = 60,
-    max_sleep: int | None = None,
-    now: datetime | None = None,
-    sleeper=None,
+    policy: WaitPolicy = WaitPolicy(),
 ) -> tuple[int, int, int]:
     """解除まで眠る。返すのは（眠った秒数、起きた時点の中断の件数、終了コード）である。
 
-    **眠るのは、まだ来ていない解除時刻のうち最も早いもの + `margin` までである。**
+    **眠るのは、まだ来ていない解除時刻のうち最も早いもの + `policy.margin` までである。**
     固定の間隔で待たない（AC41）。終了コードは 0 = 解除時刻を過ぎた、
-    3 = `max_sleep` で区切った（まだ解除前）。
+    3 = `policy.max_sleep` で区切った（まだ解除前）。
     """
-    sleeper = sleeper or _sleep
-    now = now or datetime.now(timezone.utc)
+    sleeper = policy.sleeper or _sleep
+    now = policy.now or datetime.now(timezone.utc)
+    margin, max_sleep = policy.margin, policy.max_sleep
 
     def pick() -> list[AgentRecord]:
         return interrupted(
@@ -834,8 +843,7 @@ def _run_wait_reset(args) -> int:
         args.session,
         layer=args.layer,
         depth=args.depth,
-        margin=args.margin,
-        max_sleep=args.max_sleep,
+        policy=WaitPolicy(margin=args.margin, max_sleep=args.max_sleep),
     )
     print(f"[transcript-agents] 眠った: {slept} 秒 / 中断した記録: {remaining} 件")
     return code

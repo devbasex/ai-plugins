@@ -21,6 +21,7 @@ WF_MODES=$'light\toperation\tlegacy-refactor\tstandard\tdocumentation'
 WF_STAGE_MATRIX=$'要求と受け入れ条件\tR\tR\t-\tR\tR
 作業場所の用意\tC\tC\tR\tR\tR
 設計\tC\tC\tR\tR\tR
+詳細設計\t-\t-\tR\tR\t-
 素材の収集と出典の確定\t-\t-\t-\t-\tR
 ドキュメント再構成\t-\t-\tC\tR\tR
 ドキュメントレビュー\t-\t-\tC\tR\tR
@@ -43,7 +44,7 @@ Pull Request\tR\tR\tR\tR\tR
 # 列とは別に持てば高さの定義を直さずに済む。
 #
 # **`documentation` の高さの根拠は工程の数ではない**（マイルストーン 10 の決定 2）。この表で
-# `R` を数えると `standard` が 17 個、`documentation` は 15 個であり、最多ではない。根拠は
+# `R` を数えると `standard` が 18 個、`documentation` は 15 個であり、最多ではない。根拠は
 # **混在が分割し損ねた状態であること**にある。`documentation` と他のモードが混ざる Pull Request
 # は分けると定めており、`documentation` の列にしかない必須の工程（素材の収集と出典の確定 /
 # 体裁レビュー）は、`standard` の側でチェックすると一度も求められない。混ざっていること自体が

@@ -7,7 +7,8 @@
     "paths": [
       "issues/*-requirements.md",
       "issues/*-design.md",
-      "issues/*-design-decisions.md"
+      "issues/*-design-decisions.md",
+      "issues/*-design-detail.md"
     ],
     "term_sections": [
       "用語"

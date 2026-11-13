@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -376,3 +377,199 @@ def test_unnamed_redline_is_judged_per_document(tmp_path):
     code, out = run(root, "--issue", "1")
     assert code == 1
     assert [it["name"].split(":")[0] for it in out["items"]] == ["issues/issue-1-design-decisions.md"]
+
+
+# --- 詳細設計の文書（#3144 の I3〜I6） ----------------------------------------------
+
+TEMPLATE = Path(__file__).resolve().parents[2] / "skills" / "design" / "references" / "detail-template.md"
+
+HEAD = """# 設計
+
+## 設計の結果
+
+| 課題 | 扱い | 取り込み先 | 触るファイル |
+| --- | --- | --- | --- |
+| #7 | 実装する | — | `src/a.py`、`src/b.py`（`src/c.py` は読むだけ） |
+"""
+
+LEGACY_HEAD = """# 設計
+
+## 現状の構造
+
+なにか
+
+## 変更後の構造
+
+なにか
+"""
+
+
+def detail_doc(**over: str) -> str:
+    """詳細設計の文書。節ごとの本文を `over` で差し替え、値に `None` 相当の "DROP" を渡すと節を消す。"""
+    body = {
+        "ファイル配置": "| パス | 種類 | 役割 1 文 | 依存する先 |\n| --- | --- | --- | --- |\n| `src/a.py` | 新設 | a | 無し |\n| `src/b.py` | 変更 | b | 無し |",
+        "クラスと関数の構造": "| 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |\n| --- | --- | --- |\n| `src/a.py` | a | `f` |",
+        "関数の仕様": (
+            "| 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |\n"
+            "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+            "| `f` | `src/a.py` | 新設 | `f()` | 読む | 無し | 無し | ファイルを読む |\n"
+            "| `g` | `src/b.py` | 変更 | `g()` | 計算 | 無し | 無し | 無し |"
+        ),
+        "異常系の処理": "| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 出力 | 後始末 |\n| --- | --- | --- | --- | --- | --- | --- |\n| `f` | 読めない | 無い | open | 止める | 2 | 無し |",
+        "処理の手順": "省く: 分岐が無い",
+        "内部のデータと定数": "省く: 足す定数が無い",
+        "並行と排他": "省く: 共有する資源が無い",
+        "ログと記録の出力": "省く: 出力を変えない",
+        "既存の部品の再利用": "| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |\n| --- | --- | --- | --- |\n| `f` | `md` | grep | 使えない |",
+        "単体テストの観点": "| 関数 | 正常 | 境界値 | 異常 |\n| --- | --- | --- | --- |\n| `f` | 読む | 空 | 無い |",
+    }
+    body.update(over)
+    parts = ["# 詳細設計\n"] + [f"## {title}\n\n{text}\n" for title, text in body.items() if text != "DROP"]
+    return "\n".join(parts)
+
+
+def detail_rules(out) -> list[str]:
+    return sorted(it["rule"] for it in out["items"] if it["rule"].startswith("detail_"))
+
+
+def test_a_complete_detail_document_passes(tmp_path):
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc()})
+    code, out = run(root, "--issue", "7", "--require-detail")
+    assert code == 0, out["items"]
+    assert out["metrics"]["detail_docs"] == 1
+
+
+def test_every_section_may_be_skipped_with_a_reason(tmp_path):
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    from design_detail import detail_sections  # noqa: PLC0415
+
+    skipped = {title: f"省く: {title}は当たらない" for title in detail_sections()}
+    root = repo(tmp_path, {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**skipped)})
+    code, out = run(root, "--issue", "7")
+    assert code == 0, out["items"]
+
+
+@pytest.mark.parametrize(
+    "over,rule",
+    [
+        ({"並行と排他": "DROP"}, "detail_section"),
+        ({"並行と排他": "省く:"}, "detail_section"),
+        ({"並行と排他": "なにか書いた"}, "detail_section"),
+        ({"異常系の処理": "| 関数 | 失敗 |\n| --- | --- |\n| `g` | `f` |"}, "detail_failure"),
+        ({"既存の部品の再利用": "| 新設する関数 | 結果 |\n| --- | --- |\n| `g` | 使う |"}, "detail_reuse"),
+        ({"ファイル配置": "| パス | 種類 |\n| --- | --- |\n| `src/c.py` | 変更 |"}, "detail_file"),
+    ],
+)
+def test_each_detail_rule_flags_its_gap(tmp_path, over, rule):
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc(**over)})
+    code, out = run(root, "--issue", "7")
+    assert code == 1
+    assert detail_rules(out) == [rule], out["items"]
+
+
+def test_the_spec_table_needs_kind_and_side_effect_columns(tmp_path):
+    spec = "| 関数 | 置き場 |\n| --- | --- |\n| `f` | `src/a.py` |"
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc(**{"関数の仕様": spec})})
+    _, out = run(root, "--issue", "7")
+    assert detail_rules(out) == ["detail_section", "detail_section"]
+
+
+def test_the_file_rule_follows_the_head_document(tmp_path):
+    outside = {"ファイル配置": "| パス | 種類 |\n| --- | --- |\n| `src/z.py` | 新設 |"}
+    legacy = repo(tmp_path / "l", {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**outside)})
+    assert run(legacy, "--issue", "7")[0] == 0
+    neither = repo(
+        tmp_path / "n", {"issues/issue-7-design.md": "# 設計\n\n## 構成要素\n\nなにか\n", "issues/issue-7-design-detail.md": detail_doc()}
+    )
+    _, out = run(neither, "--issue", "7")
+    assert [(it["rule"], it["name"].split()[-1]) for it in out["items"]] == [("detail_file", "設計の結果")]
+    alone = repo(tmp_path / "a", {"issues/issue-7-design-detail.md": detail_doc()})
+    _, out = run(alone, "--file", str(alone / "issues/issue-7-design-detail.md"))
+    assert detail_rules(out) == ["detail_file"]
+
+
+def test_require_detail_flags_a_missing_detail_document(tmp_path):
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD})
+    code, out = run(root, "--issue", "7", "--require-detail")
+    assert code == 1
+    assert [(it["rule"], it["name"]) for it in out["items"]] == [("detail_missing", "#7")]
+    assert run(root, "--issue", "7")[0] == 0
+    code, out = run(root, "--file", str(root / "issues/issue-7-design.md"), "--require-detail")
+    assert detail_rules(out) == ["detail_missing"]
+
+
+def _swap_template(tmp_path, template_text: str | None) -> dict:
+    """契約と雛形を写した置き場を作り、design-survey.py をそこから動かすための写しを返す。"""
+    plugin = tmp_path / "plugin"
+    shutil.copytree(SCRIPT.parent / "lib", plugin / "scripts" / "lib", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(SCRIPT, plugin / "scripts" / SCRIPT.name)
+    (plugin / "contracts").mkdir(parents=True)
+    shutil.copy(SCRIPT.parents[1] / "contracts" / "design-docs.json", plugin / "contracts" / "design-docs.json")
+    ref = plugin / "skills" / "design" / "references"
+    ref.mkdir(parents=True)
+    if template_text is not None:
+        (ref / "detail-template.md").write_text(template_text, encoding="utf-8")
+    return plugin / "scripts" / "design-survey.py"
+
+
+def _run_with(script, root, *args):
+    p = subprocess.run([sys.executable, str(script), "check", *args, "--root", str(root)], capture_output=True, text=True)
+    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def test_sections_come_from_the_template(tmp_path):
+    """雛形へ節を足すと、その節の無い文書で detail_section が出る（節の一覧を雛形から読む）。"""
+    script = _swap_template(tmp_path, TEMPLATE.read_text(encoding="utf-8") + "\n## 移行の手順\n\n| 手順 |\n| --- |\n| 1 |\n")
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc()})
+    code, out = _run_with(script, root, "--issue", "7")
+    assert code == 1
+    assert [it["name"].split(" ", 1)[1] for it in out["items"]] == ["移行の手順"]
+
+
+@pytest.mark.parametrize(
+    "template", [None, "# 雛形\n\n本文だけ\n", "# 雛形\n\n## ファイル配置\n\n## 異常系の処理\n\n## 既存の部品の再利用\n"]
+)
+def test_an_unreadable_template_stops_with_2(tmp_path, template):
+    script = _swap_template(tmp_path, template)
+    root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc()})
+    code, out = _run_with(script, root, "--issue", "7")
+    assert code == 2
+    assert out["status"] == "stopped"
+
+
+def test_findings_of_every_kind_keep_their_order_and_metrics(tmp_path):
+    """現状固定: 複数のまとまりで調査・レッドライン・詳細設計の指摘が共存するときの並びと metrics。"""
+    gap = {"異常系の処理": "| 関数 | 失敗 |\n| --- | --- |\n| `g` | `f` |", "並行と排他": "DROP"}
+    root = repo(
+        tmp_path,
+        {
+            "issues/issue-1-design.md": design(
+                SURVEY, decisions(decision(1, "自前で作る", None), "### 決定 2: x\n\n範囲は利用者が選ぶ。\n")
+            ),
+            "issues/issue-7-design.md": HEAD,
+            "issues/issue-7-design-detail.md": detail_doc(**gap),
+        },
+    )
+    code, out = run(root, "--issue", "1", "7", "--require-detail")
+    assert code == 1
+    assert [(it["rule"], it["name"]) for it in out["items"]] == [
+        ("no_candidates", "issues/issue-1-design.md:21 決定 1"),
+        ("unnamed_redline", "issues/issue-1-design.md:27"),
+        ("detail_missing", "#1"),
+        ("detail_section", "issues/issue-7-design-detail.md 並行と排他"),
+        ("detail_failure", "issues/issue-7-design-detail.md:20 f"),
+    ]
+    assert out["metrics"] == {
+        "docs": 3,
+        "decisions": 2,
+        "with_method": 1,
+        "self_built": 1,
+        "skipped": 0,
+        "unnamed_redline": 1,
+        "detail_docs": 1,
+        "detail_section": 1,
+        "detail_failure": 1,
+        "detail_reuse": 0,
+        "detail_file": 0,
+        "detail_missing": 1,
+    }

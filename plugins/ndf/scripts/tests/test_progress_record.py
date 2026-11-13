@@ -271,6 +271,7 @@ def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
 
 
 LIGHT_SKIPPED = (
+    "詳細設計",
     "素材の収集と出典の確定",
     "ドキュメント再構成",
     "ドキュメントレビュー",
@@ -314,7 +315,7 @@ def test_unrecorded_mode_keeps_every_stage_row(fake_gh):
     out = run(fake_gh, "123", "設計")
     assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
-    assert "モード: —" in written and len(_rows(written)) == 19
+    assert "モード: —" in written and len(_rows(written)) == 20
 
 
 # --- 結果 JSON（#2227 の I7）---

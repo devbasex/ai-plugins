@@ -805,6 +805,65 @@ def test_candidates_empty_repository_is_scratch(bare):
     assert code == 0 and out["items"] == [] and "スクラッチ" in out["summary"]
 
 
+def _candidates(root, *args):
+    code, out, err = run(root, "candidates", *args)
+    assert code == 0, err
+    return out
+
+
+def test_candidates_without_declaration_reads_default_sections_and_all_files(bare):
+    write(bare, "docs/a.md", "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | 品 |\n")
+    write(bare, "src/m.py", "class Order:\n    pass\n")
+    commit(bare)
+    out = _candidates(bare)
+    got = [(it["term"], it["kind"], it["count"], it["first"]) for it in out["items"]]
+    assert got == [("在庫", "table", 1, "docs/a.md:5"), ("Order", "type", 1, "src/m.py:1")]
+    assert out["summary"] == "語の候補 2 件"
+
+
+def test_candidates_bold_needs_three_and_label_with_colon_is_not_a_word(bare):
+    write(bare, "a.md", "**二回**と**二回**。**札:**と**札：**と**札:**と**札:**。**三回**、**三回**、**三回**\n")
+    commit(bare)
+    got = {(it["term"], it["count"]) for it in _candidates(bare)["items"]}
+    assert got == {("三回", 3)}
+
+
+def test_candidates_sort_by_count_then_kind_then_term_and_limit(bare):
+    write(bare, "a.ts", "class B {}\nclass A {}\nclass B {}\n")
+    write(bare, "b.md", "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| A | x |\n")
+    commit(bare)
+    got = [(it["term"], it["kind"]) for it in _candidates(bare)["items"]]
+    assert got == [("B", "type"), ("A", "table"), ("A", "type")]
+    out = _candidates(bare, "--limit", "1")
+    assert [it["term"] for it in out["items"]] == ["B"]
+    assert out["summary"] == "語の候補 1 件"
+
+
+def test_candidates_skip_declared_document_and_source(repo):
+    write(repo, "docs/x.md", "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 倉庫 | 置き場 |\n")
+    commit(repo)
+    items = _candidates(repo)["items"]
+    assert [(it["term"], it["first"]) for it in items] == [("倉庫", "docs/x.md:5")]
+
+
+def test_candidates_glossary_missing_means_nothing_is_known(bare):
+    write_json(bare, ".ndf/glossary.json", declaration())
+    write(bare, "a.md", "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 注文 | x |\n")
+    commit(bare)
+    assert [it["term"] for it in _candidates(bare)["items"]] == ["注文"]
+
+
+def test_candidates_ignore_untracked_large_binary_and_symlinked_files(bare):
+    write(bare, "big.py", "class Big: pass\n" + "#" * 1_000_001)
+    (bare / "bin.py").write_bytes(b"class Bin: pass\n\xff\xfe\n")
+    write(bare, "real.py", "class Real: pass\n")
+    (bare / "link.py").symlink_to("real.py")
+    commit(bare)
+    write(bare, "untracked.py", "class Untracked: pass\n")
+    got = [(it["term"], it["first"]) for it in _candidates(bare)["items"]]
+    assert got == [("Real", "real.py:1")]
+
+
 # --- パスの境界 ---------------------------------------------------------------------
 
 

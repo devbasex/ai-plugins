@@ -42,7 +42,7 @@
 | 取り直し | `_fetch_existing_comments(strict=True)` | ラウンドの開始でスナップショットを作り直すこと |
 | 通しのラウンド | `len(rounds) + 1` | 状態ファイル全体で数えたラウンドの番号。PR ごとの番号（`round_in_pr`）ではない |
 | 新しい指摘 | `_new_finding_count` | 直前のラウンドの指摘と一致しない、そのラウンドの指摘。証拠集約を通ったラウンドでは数える 3 つの指摘区分（`verified_blocking` / `needs_human_judgment` / `unrefuted`）だけ |
-| 設計 Pull Request | `design` | 変更ファイルに `issues/` 配下の `*-requirements.md` / `*-design.md` / `*-design-decisions.md` を含む Pull Request |
+| 設計 Pull Request | `design` | 変更ファイルに `issues/` 配下の `*-requirements.md` / `*-design.md` / `*-design-decisions.md` / `*-design-detail.md` を含む Pull Request |
 
 ## 対象範囲
 
@@ -150,9 +150,10 @@ cross-refactoring の適用のプロンプト（`prompts/apply.md`）の禁止�
 ### 設計 Pull Request の分類と観点
 
 分類の述語は、パスが `issues/` で始まり、ファイル名が `-requirements.md` / `-design.md` /
-`-design-decisions.md` のどれかで終わるときに真を返す（`_is_design_doc_path`）。分類の表
-（`PATH_CATEGORY_RULES`）の先頭に `design` を、観点の表（`CATEGORY_TEMPLATES`）に
-`DESIGN_REVIEW_TEMPLATE` を置く。2 つの表は対で直す。
+`-design-decisions.md` / `-design-detail.md` のどれかで終わるときに真を返す（`_is_design_doc_path`）。
+置き場と名前の末尾は、設計文書の種類の契約（`plugins/ndf/contracts/design-docs.json`）で設計 Pull Request の
+文書とした種類から引く。分類の表（`PATH_CATEGORY_RULES`）の先頭に `design` を、観点の表（`CATEGORY_TEMPLATES`）に
+`DESIGN_REVIEW_TEMPLATE` と詳細設計の観点（`DETAIL_REVIEW_TEMPLATE`）を置く。2 つの表は対で直す。
 
 観点テンプレートが求めることは次の 3 つである。
 

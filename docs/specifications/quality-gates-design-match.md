@@ -5,7 +5,8 @@
 **`standard` の完了判定は、実装を設計文書・既存の確定仕様と変更履歴・設計の決定と照らし、食い違いを実装 PR の本文の
 `## 設計と違う点` に残す。** 確認は 3 つで、(a) 設計に名前の出るテストが HEAD にあるか と (b) 変えたファイル・
 シンボルを参照する既存の確定仕様と `CHANGELOG.md` の列挙は `plugins/ndf/scripts/design-match.py`（`tests` / `specs`）が
-LLM を呼ばずに出し、(c) 設計の決定と実装の一致と、(b) で並んだ記述が変更後の振る舞いと合うかの判断は担い手
+LLM を呼ばずに出し、(c) 設計の決定と実装の一致（詳細設計の文書 `issue-<番号>-design-detail.md` があれば、その
+ファイル配置と関数の仕様と実装の一致も含む）と、(b) で並んだ記述が変更後の振る舞いと合うかの判断は担い手
 （単発は conductor、3 層は `design-match` の work ステップの worker）が行う。3 層（supervise.py）の `standard` の
 実装プランは、範囲テスト（`test-limited`）と `pr` の間に `design-tests` → `design-specs` → `design-match` を置き、
 `pr` のステップが節を本文へ 1 つだけ置く。

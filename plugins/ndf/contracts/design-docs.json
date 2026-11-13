@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "dir": "issues",
+  "kinds": [
+    {"kind": "requirements", "suffix": "-requirements.md", "line_limit": false, "glossary": true, "review": true},
+    {"kind": "design", "suffix": "-design.md", "line_limit": true, "glossary": true, "review": true},
+    {"kind": "decisions", "suffix": "-design-decisions.md", "line_limit": true, "glossary": true, "review": true},
+    {"kind": "detail", "suffix": "-design-detail.md", "line_limit": true, "glossary": true, "review": true,
+     "template": "skills/design/references/detail-template.md"}
+  ]
+}
