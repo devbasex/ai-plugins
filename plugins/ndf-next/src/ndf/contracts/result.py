@@ -44,10 +44,20 @@ def result(
     return out
 
 
-def stopped(tool: str, kind: str, detail: str, *, summary: Optional[str] = None, **extra: Any) -> dict[str, Any]:
-    """`stopped` の結果を種類と説明から組む。`summary` を省けば説明を使う。"""
-    instance = extra.pop("instance", None)
-    retry_after = extra.pop("retry_after", None)
+def stopped(
+    tool: str,
+    kind: str,
+    detail: str,
+    *,
+    summary: Optional[str] = None,
+    instance: Optional[str] = None,
+    retry_after: Optional[float] = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """`stopped` の結果を種類と説明から組む。`summary` を省けば説明を使う。
+
+    `instance` と `retry_after` は `cause` へ、残りのキーワード（`extra`）は `result` へ渡す。
+    """
     c = causes.cause(kind, detail, instance=instance, retry_after=retry_after)
     return result(tool, "stopped", summary if summary is not None else detail, cause=c, **extra)
 
