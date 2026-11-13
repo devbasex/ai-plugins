@@ -136,3 +136,18 @@ def test_worker_instructions_say_not_to_run_tests_locally(tmp_path):
     assert worker_steps.ci_only_plan(type("Ctx", (), {"plan": plan})())
     plan, _ = _impl(tmp_path / "b", _repo(tmp_path / "b", only=False))
     assert not worker_steps.ci_only_plan(type("Ctx", (), {"plan": plan})())
+
+
+def test_check_plan_drops_the_whole_tests_when_the_repository_has_a_cd(tmp_path, monkeypatch):
+    """#2773 の受け入れ条件 16・決定 11: CD のある場合は検査のプランに全体テストを置かず、マージが CI の結果を待つ。
+    CD の無い場合（受け入れ条件 19）は今のまま置く。"""
+    import release_case
+
+    from test_supervise import foreign_repo as other
+
+    root = other(tmp_path, {"version": 1, "test": {"command": "npm test -- {paths}", "all": "src"}})
+    _, steps = _steps(tmp_path, root, "check", "--pr", "5")
+    assert "test-all" in steps
+    monkeypatch.setattr(release_case, "case_of", lambda r: release_case.decide_case(True, 0, ""))
+    _, steps = _steps(tmp_path, root, "check", "--pr", "5")
+    assert "test-all" not in steps and all("test-run.py whole" not in (s.get("cmd") or "") for s in steps.values())

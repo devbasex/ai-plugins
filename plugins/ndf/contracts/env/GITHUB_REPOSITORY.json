@@ -1,5 +1,5 @@
 {
   "name": "GITHUB_REPOSITORY",
   "set_by": "ci",
-  "summary": "GitHub Actions が渡す owner/repo。証跡のチェックの workflow で release-steps.py approval-check が読む。無ければ origin の URL から決める（plugins/ndf/scripts/release_lib/reviewed.py の repo_of。#2773）"
+  "summary": "GitHub Actions が渡す owner/repo。証跡のチェックの workflow で release-steps.py approval-check が読む。無ければ origin の URL から決める（plugins/ndf/scripts/release_lib/reviewed.py の repo_or_stop。#2773）"
 }

@@ -438,7 +438,7 @@ def _trail_before_merge(root, a, n, case):
     """promote のマージの前（#2773 の決定 14）: 場合 1 は照合した先端の証跡を置き、場合 2 は有効な人の承認のレビューのコミットと
     先端を照らす。照合する先端は a.expect_head（承認資料の承認したコミット）。場合 2 で一致しなければ承認ゲート（10）で止める。
     場合 1 で先端が既に動いていれば証跡を書かずに戻り、merge-when-green の先端の照合（head_moved で 1）に止めさせる。"""
-    sha, repo = getattr(a, "expect_head", None), _repo_slug(root)
+    sha, repo = getattr(a, "expect_head", None), _promote_repo(root)
     if not sha or not repo:
         raise StepError(
             "CD のある場合の promote には照合する承認したコミット（--approved-from か --expect-head-from）とリポジトリが要る",
@@ -463,7 +463,7 @@ def _trail_before_merge(root, a, n, case):
     a.trail_item = {"kind": "review", "name": f"#{n}", "result": "approved", "approved_sha": got}
 
 
-def _repo_slug(root) -> str | None:
+def _promote_repo(root) -> str | None:
     """`owner/repo`。origin の URL から読み、読めなければ gh に聞く。"""
     if got := repo_lib.owner_repo(root):
         return got

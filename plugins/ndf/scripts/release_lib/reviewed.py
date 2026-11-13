@@ -44,7 +44,7 @@ def dev_workflow_of(root) -> str | None:
     return got if isinstance(got, str) and got else None
 
 
-def repo_of(root):
+def repo_or_stop(root):
     repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
     if not repo:
         raise StepError("リポジトリ（origin の owner/repo）を決められない", 2)
@@ -76,7 +76,7 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops):
         title = f"Release: {plugin} v{ver} を {prod} へ"
         body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         main_pr = ops.create_pr(root, prod, branch, title, body)
-    repo = repo_of(root)
+    repo = repo_or_stop(root)
     try:
         head = approval_trail.read_head(repo, main_pr)[0]
         judged = approval.approved_on_pr(repo, main_pr, head, case)
@@ -236,7 +236,7 @@ def approval_check(a):
     """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。"""
     root = git_root(a.root)
     prod = delivery.load_delivery(root).production
-    repo, head = repo_of(root), None
+    repo, head = repo_or_stop(root), None
     try:
         head, base, state = approval_trail.read_head(repo, a.pr)
         if base != prod:
@@ -271,7 +271,7 @@ def approval_post(a):
     path = Path(a.approval) if Path(a.approval).is_absolute() else root / a.approval
     if not path.is_file():
         raise StepError(f"承認資料が無い: {path}", EXIT_PRECONDITION)
-    repo = repo_of(root)
+    repo = repo_or_stop(root)
     try:
         head = approval_trail.read_head(repo, a.pr)[0]
         kept = approval_trail.has_request(approval_trail.read_comments(repo, a.pr), head)
