@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "smells": {
+    "S110": {"kind": 4, "mark": "boundary", "summary": "except の本体が pass だけ"},
+    "S112": {"kind": 4, "mark": "boundary", "summary": "except の本体が continue だけ"},
+    "BLE001": {"kind": 4, "mark": "boundary", "summary": "Exception・BaseException・素の except を受けて送出し直さない"},
+    "NDF201": {
+      "kind": 2,
+      "mark": "boundary-or-limit",
+      "summary": "ループの中の外部呼び出し",
+      "params": {
+        "calls": ["run", "check_output", "check_call", "Popen", "urlopen"],
+        "modules": ["subprocess", "httpx", "urllib", "github", "git", "ci", "llm", "notify"]
+      }
+    },
+    "NDF301": {"kind": 3, "mark": "none", "summary": "elif の長い連鎖", "params": {"min_elif": 4}},
+    "NDF302": {"kind": 3, "mark": "none", "summary": "分岐の多い関数", "params": {"max_branches": 9}},
+    "NDF303": {"kind": 3, "mark": "none", "summary": "深い入れ子", "params": {"max_nested": 3}},
+    "NDF401": {"kind": 4, "mark": "boundary", "summary": "定数を返して黙る except"},
+    "NDF402": {"kind": 4, "mark": "boundary", "summary": "contextlib.suppress"},
+    "NDF501": {"kind": 5, "mark": "boundary", "summary": "空の既定への or"},
+    "NDF502": {
+      "kind": 5,
+      "mark": "boundary",
+      "summary": "既定値つきの .get(k, 既定)",
+      "params": {"boundary_receivers": ["os.environ"]}
+    },
+    "NDF701": {"kind": 7, "mark": "none", "summary": "長い関数", "params": {"max_lines": 60}},
+    "NDF702": {"kind": 7, "mark": "none", "summary": "引数の多い関数", "params": {"max_args": 6}}
+  },
+  "boundaries": ["外部コマンド", "ネットワーク", "利用者の入力", "ファイル"],
+  "limit_label": "上限",
+  "exception_types": {
+    "boundary": [
+      "OSError", "FileNotFoundError", "PermissionError", "SubprocessError", "CalledProcessError",
+      "TimeoutExpired", "JSONDecodeError", "UnicodeDecodeError", "URLError", "HTTPError"
+    ],
+    "internal": ["TypeError", "AttributeError", "KeyError", "IndexError", "NameError", "AssertionError"]
+  },
+  "structure": {
+    "max_lines": 1000,
+    "layers": ["ndf.contracts", "ndf.adapters", "ndf.core", "ndf.progress", "ndf.domains"],
+    "durable_module": "ndf.core.durable",
+    "durable_imports": ["dbos"],
+    "decide_suffix": "_decide",
+    "decide_forbidden_imports": [
+      "dbos", "subprocess", "shutil", "tempfile", "os", "time", "random", "socket", "urllib", "http", "httpx",
+      "ndf.core.durable", "ndf.adapters"
+    ],
+    "decide_forbidden_calls": [
+      "open", "read_text", "write_text", "read_bytes", "write_bytes", "glob", "rglob", "iterdir", "exists",
+      "is_file", "is_dir", "mkdir", "unlink", "resolve", "stat"
+    ]
+  },
+  "facts": {
+    "min_str": 4,
+    "tables_dir": "contracts/facts"
+  },
+  "words": {
+    "glossary_config": ".ndf/glossary.json",
+    "skip_files": ["uv.lock"]
+  },
+  "invariants": {
+    "old_plugin": "plugins/ndf",
+    "immediate_fix_mark": "即時修正（plugins/ndf）:"
+  }
+}
