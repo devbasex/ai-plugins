@@ -1,0 +1,58 @@
+# 作り直しの NDF（#1142）の依存の宣言。版は隣の uv.lock が固定する（決定 78）。
+# テストは `uv run --frozen --project plugins/ndf-next pytest plugins/ndf-next/tests -q` で流す。
+# リポジトリの根の pyproject.toml は今の NDF のためのもので、ここからは読まない。
+#
+# 依存はグループに分けず 1 つの一覧に置く（決定 77）。選んだ理由は issues/issue-1142-design-libraries.md にある。
+# 足す・版を上げるのは、この宣言と uv.lock を同じ PR で変えるときだけにする。
+#
+# プラグインの版（.claude-plugin/plugin.json と .codex-plugin/plugin.json の version）:
+# - 形は `11.0.0-dev.N`。N は子 Issue の「流す順番」の番号（issues/issue-1142-design-next-design-detail.md）である
+# - 上げるのは子 Issue の PR を書く worker で、その子の順番が N より大きいときに、2 本の plugin.json を
+#   同じ PR で `11.0.0-dev.<順番>` にする。同じ順番の子どうしは同じ値を書くので、git の取り込みで衝突しない
+# - 入れ替え（S2）の PR が name を元のプラグイン名へ、版を `11.0.0` へ替える
+# - このファイルは版を持たない（版の正本は plugin.json の 2 本だけ）
+[project]
+name = "ndf-rebuild"
+version = "0"
+requires-python = ">=3.11"
+dependencies = [
+    "dbos==3.1.0",
+    "filelock==4.0.3",
+    "githubkit==0.16.1",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "markdown-it-py==4.2.0",
+    "mdit-py-plugins==0.6.1",
+    "pathspec==1.1.1",
+    "psutil==7.2.2",
+    "ptyprocess==0.7.0",
+    "pydantic==2.13.5",
+    "pygments==2.21.0",
+    "python-dotenv==1.2.3",
+    "ruamel-yaml==0.19.1",
+    "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
+    "semver==3.1.0",
+    "slack-sdk==3.44.1",
+    "tabulate==0.10.0",
+    "tenacity==9.1.4",
+    "tree-sitter==0.26.0",
+    "tree-sitter-bash==0.25.1",
+    "unidiff==1.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "pytest-xdist==3.8.0",
+]
+
+# src/ndf はパッケージとして入れず、bin/ndf とテストが src をパスへ足して読む
+[tool.uv]
+package = false
+
+# テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
+# テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

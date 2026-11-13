@@ -1,0 +1,74 @@
+name: ndf-next
+
+# 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
+# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）
+# edited: 検査の I2 は PR 本文の即時修正の印を読むため、本文を直したときも打ち直す
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - "plugins/ndf-next/**"
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - "plugins/ndf-next/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  # 本文の編集（edited）は検査だけを打ち直すため、push の実行（テストを含む）を取り消さないよう別の組にする
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'edited' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: plugins/ndf-next
+
+jobs:
+  # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
+  # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
+  ndf-next-tests:
+    # PR 本文を読まないので、本文の編集では流し直さない
+    if: github.event.action != 'edited'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      - run: uv run --frozen --project . pytest -q -n auto
+
+  ndf-next-checks:
+    runs-on: ubuntu-latest
+    steps:
+      # 検査の I2 が起点との merge-base を求めるため、履歴をすべて取る
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      # lock が宣言と食い違っていないか
+      - run: uv lock --check --project .
+      # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
+      - run: >-
+          python3 -c 'import json, sys;
+          a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
+          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
+          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
+      - run: bash -n bin/ndf
+      # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
+      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む
+      - run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            bin/ndf check --base "origin/$GITHUB_BASE_REF"
+          else
+            bin/ndf check
+          fi

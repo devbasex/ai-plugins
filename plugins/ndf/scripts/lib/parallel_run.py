@@ -48,7 +48,7 @@ from parallel_repo import dev_version, git_head, mark_organizer, poll_seconds, r
 @durable.step(name="parallel.init")
 def step_init(main: str, name: str) -> dict:
     """計画を読み、検査し、オーガナイザーの印を書く。"""
-    plan, items, _ = pp.check_data(pp.load_plan(Path(main), name))
+    plan, items, _ = pp.check_data(pp.load_plan(Path(main), name), ended=plg.ended_lanes(Path(main), name))
     if plan is None:
         return {"ok": False, "items": items}
     mark_organizer(Path(main), name)
