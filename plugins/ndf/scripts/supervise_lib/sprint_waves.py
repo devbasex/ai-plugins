@@ -136,6 +136,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
     doc = design_path(n)  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
     # 設計を送った後に題を H1 へ合わせ直す（レビューの直しで H1 が変わる。#1289 の決定 9）
     push = f"{PUSH_DESIGN} && python3 {shlex.quote(str(SELF))} sync-title --pr {{pr}} --doc {doc}"
+    detail = detail_design_runs(a.mode)  # 書く段と調査の検査の両方が使う 1 つの決定
     plan = {
         "フェーズ": "設計",
         "課題": [n],
@@ -146,11 +147,11 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
         "リポジトリ": repo,
         "規則": RULE_DESIGN,
         "steps": [
-            *writing_steps(a, n, copy),
+            *writing_steps(a, n, copy, detail),
             rebuild_step(n, doc),
             *with_base(pr_steps(a, n, doc), target),
             *_review_steps(n, copy, push),
-            *survey_steps(n, next_id="glossary-check", require_detail=detail_design_runs(a.mode)),
+            *survey_steps(n, next_id="glossary-check", require_detail=detail),
             *_glossary_steps(glossary_check, push),
             *gate_steps(),
         ],

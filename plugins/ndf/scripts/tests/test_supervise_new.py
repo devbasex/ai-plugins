@@ -1011,7 +1011,8 @@ def fresh_stage_class():
 
 
 def _writing(mode: str) -> dict[str, dict]:
-    return {s["id"]: s for s in design_steps.writing_steps(Namespace(mode=mode), 216, "issues/issue-216-requirements.md")}
+    copy = "issues/issue-216-requirements.md"
+    return {s["id"]: s for s in design_steps.writing_steps(Namespace(mode=mode), 216, copy, design_steps.detail_design_runs(mode))}
 
 
 def test_the_standard_design_plan_reviews_the_design_before_the_detail(tmp_path):

@@ -92,9 +92,8 @@ def detail_steps(n: int) -> list[dict]:
     ]
 
 
-def writing_steps(a, n: int, copy: str) -> list[dict]:
-    """用語集の入口の検査・要求・設計文書を書くステップ。詳細設計を通るモードでは `detail_steps` を続ける。"""
-    detail = detail_design_runs(a.mode)
+def writing_steps(a, n: int, copy: str, detail: bool) -> list[dict]:
+    """用語集の入口の検査・要求・設計文書を書くステップ。`detail`（詳細設計を通るか。`detail_design_runs`）なら `detail_steps` を続ける。"""
     design_note = "詳細設計は後の段が書くため、ここでは書かない（設計文書の突き合わせで止める）。" if detail else ""
     steps = [
         # 設計の工程の入口の検査（#1111 の I5）。用語集が無ければ worktree の中で起こし、設計 PR と一緒に
