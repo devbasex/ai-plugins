@@ -132,3 +132,21 @@ def test_no_table_reads_as_none(tmp_path, monkeypatch):
     assert ptab.read_plan(tmp_path, "p") is None
     assert ptab.lane_view(tmp_path, "p") == {}
     assert not (tmp_path / "none.sqlite").exists()  # 読むだけでは DB を作らない
+
+
+def test_row_input_points_the_lane_at_its_row(started):
+    """前のスプリントを終えたレーンを起こし直す入力は、レーンの進行表の ID と行で progress.py new を指す（決定 7）。"""
+    repo, _, _ = started
+    got = ptab.row_input(repo, "q", "b", 1)
+    assert "#2" in got and f"--lane {ptab.lane_table_id(repo, 'q', 'b')} --row 1" in got and "progress.py" in got
+
+
+def test_plan_state_reads_the_plan_table_first(started, monkeypatch):
+    """計画の状態の語は計画の進行表から読み、台帳を読まない（受け入れ条件 16）。"""
+    import parallel_ledger as plg
+
+    repo, _, _ = started
+    monkeypatch.setattr(plg, "ledger_plan_state", lambda *a: pytest.fail("台帳を読んだ"))
+    assert plg.plan_state(repo, "q", "PENDING") == "running"
+    ptab.cancel_plan(repo, "q", "止める")
+    assert plg.plan_state(repo, "q", None) == "closed"

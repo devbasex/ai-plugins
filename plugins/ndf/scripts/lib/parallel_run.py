@@ -259,7 +259,7 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
         self.admitting = True  # 依存のそろったレーンの起動をマシンのプランの本数に掛けるか。古い記録の打ち直しでは False（#2999）
         self.carrying = True  # 承認の後に加わった範囲を判定してよいか。古い記録の打ち直しでは False（#3020）
         self.wakeable: list[str] = []  # 最後に読んだ進行表で起こせる行を持つレーン（#3092）
-        self.tabled = True  # 起動を計画とレーンの進行表から決めるか。古い記録の打ち直しでは False（#3092）
+        self.tabled = False  # 起動を計画とレーンの進行表から決めるか。版の印 parallel-progress-tables の後の記録だけ True（#3092）
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
