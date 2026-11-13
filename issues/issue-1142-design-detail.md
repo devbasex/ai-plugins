@@ -32,7 +32,7 @@ plugins/ndf/
 │   ├── limits.json              （SF1a・DC5）
 │   └── workflow/stages/         （DC7。#3191 が新設）
 └── scripts/
-    ├── lib/{README.md, step_result.py, workflow_def.py, legacy_names.py, durable.py, post_queue.py, transcript_agents.py, report_fields.py}
+    ├── lib/{README.md, step_result.py, workflow_def.py, legacy_names.py, durable.py, post_queue.py, transcript_agents.py, report_fields.py, deps.py}
     ├── supervise_lib/{state.py, queue.py, verify_steps.py, delivery_templates.py}
     ├── hook_lib/token_guard.py
     └── {supervise.py, sprint-state.py, mvv-gate.py, check-trigger.py}
@@ -58,13 +58,14 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | `plugins/ndf/scripts/supervise_lib/verify_steps.py` | 変更 | SF3・DC5・SF2・SF4・W1 が順に触る（#3153・閾値・`on_cause`・マージの種類・語） | `plugins/ndf/scripts/lib/causes.py` |
 | `plugins/ndf/scripts/supervise_lib/delivery_templates.py` | 変更 | A1b が `RELEASE_PHASES` の持ち主にし、SF2 が `on_cause` で書き直し、W1 が語を替える | 無し |
 | `plugins/ndf/scripts/hook_lib/token_guard.py` | 変更 | DC5・SF12・A3d・DC7・W5 が順に触る | `plugins/ndf/scripts/lib/limits.py` |
-| `plugins/ndf/scripts/supervise.py` | 変更 | A1a・SF1b・SF5・SF13・K2・W1 が順に触る | `plugins/ndf/scripts/supervise_lib/commands.py` |
+| `plugins/ndf/scripts/supervise.py` | 変更 | DC1・A1a・SF1b・SF5・SF13・K2・W1 が順に触る（DC1 は `deps.require` に `jsonschema` を足す） | `plugins/ndf/scripts/supervise_lib/commands.py` |
 | `plugins/ndf/scripts/sprint-state.py` | 変更 | A1a・A1b・SF1b・SF13・A3e-2・DC7・K2 が順に触る | `plugins/ndf/scripts/lib/facts.py` |
 | `plugins/ndf/scripts/mvv-gate.py` | 変更 | A1a・SF13・A3e-1・DC7・K2・W1 が順に触る | `plugins/ndf/scripts/lib/facts.py` |
 | `plugins/ndf/scripts/check-trigger.py` | 変更 | A2・SF1b・A3e-1・DC7・K2・W1 が順に触る | `plugins/ndf/scripts/lib/facts.py` |
 | `scripts/check-ndf-contracts.py` | 変更 | DC2 が `const-fact`・`fact-table` を、SF1a が `causes_decl` を呼ぶ | `scripts/contracts_lib/causes_decl.py` |
 | `scripts/contracts_lib/ratchet.py` | 変更 | A0 が `initial` に検査の名前を、DC2 が `rows_added` を足す | 無し |
 | `.github/workflows/script-structure.yml` | 変更 | A0 が `check-ai-smells.py` の手順を、DC2 が `ndf-contracts-check` に uv を足す | `scripts/check-ai-smells.py` |
+| `plugins/ndf/scripts/lib/deps.py` | 変更 | DC1 が `GROUPS` に `jsonschema` を足し、SF1b が `_stop` を種類 `deps_missing` で返す形へ直す | `plugins/ndf/scripts/lib/run_core.py` |
 | `pyproject.toml` | 変更 | DC1 が依存 `jsonschema` のグループを足す。SF6 の判断の呼び出しも同じグループを使う | 無し |
 | `plugins/ndf/pyproject.toml` | 変更 | 同上（デプロイ先で答えを確かめ直す経路が使う） | 無し |
 
@@ -174,7 +175,7 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | `A3f-1` | smells | `skills/cross-refactoring/scripts/` の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 35 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
 | `A3f-2` | smells | 同じく後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 34 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
 | `A3g` | smells | cross-refactoring を除く Skill の `scripts/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 50 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `DC1` | data | 事実の表の読み手（`lib/facts.py`・`lib/facts.sh`）と表の共通の形、依存 `jsonschema` を足す | 12 本。data の詳細設計の「ファイル配置」 | 無し | 組 D | 1 本 | 無し | 無し | — |
+| `DC1` | data | 事実の表の読み手（`lib/facts.py`・`lib/facts.sh`）と表の共通の形、依存 `jsonschema` を足す | 13 本。data の詳細設計の「ファイル配置」 | 無し | 組 D | 1 本 | 無し | 無し | — |
 | `DC2` | data | 重複の検査 `const-fact`・`fact-table` と基準を入れる（DT1 の後半・DT7） | 15 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 無し（計測のスクリプトにテストは無い） | — |
 | `DC3` | data | ランタイムの表を置き、読み手を表から導く | 21 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | `test_state_review_pool.py` の消す分岐のテスト 2 件と、ランタイムの文字列の集まりを確かめる assert | — |
 | `DC4` | data | 収束ループのフェーズ・指摘の重さ・テストの印の表を置く | 20 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | `test_measure.py:687` の一致の確認 | #1774 |
@@ -184,7 +185,7 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | `DC8` | data | 子 Issue の後に残る組（`sprint_loop_record`・`release_lib`・`parallel_*`・`durable`・`decl`）を持ち主から引く | 11 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 持ち主へ寄せた定数の一致を確かめる assert | — |
 | `SF3` | scripted-flow | CI の監視が分割ジョブの失敗とまとめのチェックの未完了を読み違える不具合を直す（#3153） | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF3 の行 | 無し | 組 F | 1 本 | 無し | `test_ci_watch.py` の `decide_exit` の `after_merge` の関数 | #3153 |
 | `SF1a` | scripted-flow | 止まった理由の表 `causes.json` と読み手 `lib/causes.py` を契約に置く | 9 本。scripted-flow の設計文書の「子 Issue の案」の SF1a の行 | 無し | 組 F | 1 本 | 無し | 無し | — |
-| `SF1b` | scripted-flow | 結果 JSON の `cause` を必須にし、`stopped` を出すすべての手順のスクリプトが種類を返す | 134 本。scripted-flow の設計文書の「子 Issue の案」の SF1b の行と、詳細設計の「SF1b の移す先」の 127 本 | `SF1a` | 組 F | 1 本 | 無し | `test_step_result.py`・`test_step_result_readers.py`（ファイルごと）と `test_run_core.py` の関数 | — |
+| `SF1b` | scripted-flow | 結果 JSON の `cause` を必須にし、`stopped` を出すすべての手順のスクリプトが種類を返す | 135 本。scripted-flow の設計文書の「子 Issue の案」の SF1b の行と、詳細設計の「SF1b の移す先」の 127 本 | `SF1a` | 組 F | 1 本 | 無し | `test_step_result.py`・`test_step_result_readers.py`（ファイルごと）と `test_run_core.py` の関数 | — |
 | `SF2` | scripted-flow | プランの行き先を種類で選び、待てば解ける止まりを打ち直す。テンプレートを `on_cause` で書き直す | 46 本。scripted-flow の設計文書の「子 Issue の案」の SF2 の行（テンプレートの 11 本は詳細設計の「表の外にまとめたファイル」） | `SF1b` | 組 F | 1 本 | dbos の文書の「落ちた後の打ち直し（実測）」・決定 27 | `test_supervise_step_rerun.py`・`test_push_fix.py`・`test_supervise_limits.py`（ファイルごと）と 19 本の関数 | #2273 |
 | `SF4` | scripted-flow | マージの落ちたチェックをテストとテスト以外に分け、supervisor が CI を手で読む手順を外す | 9 本。scripted-flow の設計文書の「子 Issue の案」の SF4 の行 | `SF2`・`SF3` | 組 F | 1 本 | 無し | `test_ci_watch.py` の終了コード 2・3 の関数・`test_merged_probe.py` の CI の失敗の関数 | #2719 |
 | `SF5` | scripted-flow | 設計のプランの最後の judge を外し、レビューの結果で設計承認ゲートへ渡す | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF5 の行 | `SF2` | 組 F | 1 本 | 無し | 無し | — |

@@ -4,7 +4,7 @@
 
 **この主題は後方互換を持たない。** 形を変える定数・状態ファイル・検査の結果は、最終の形へ 1 回で変える。古い形を読む分岐と別名は、その事実を移す子 Issue の PR で消す。テストは下の「単体テストの観点」から作り直し、置き換えた範囲の古いテストは同じ PR で消す。
 
-**子 Issue の分け方**: 設計文書の移行ステップ DT1〜DT8 を、下の 8 つの子 Issue（DC1〜DC8）に組み直した。各行の「役割 1 文」の末尾の `（C<番号>）` が、そのファイルを触る子 Issue である。
+**子 Issue の分け方**: 設計文書の移行ステップ DT1〜DT8 を、下の 8 つの子 Issue（DC1〜DC8）に組み直した。各行の「役割 1 文」の末尾の `（DC<番号>）` が、そのファイルを触る子 Issue である。
 
 | 子 Issue | 移行ステップ | 先に要るもの |
 | --- | --- | --- |
@@ -50,6 +50,7 @@ plugins/ndf/
 │   └── index.md                                 (DC2 以降。生成)
 ├── scripts/lib/facts.py * / facts.sh *          (DC1)
 ├── scripts/lib/limits.py / doc_kinds.py / deps.py (DC1)
+├── scripts/supervise.py                        (DC1: deps.require に jsonschema)
 └── scripts/ と skills/*/scripts/ の読み手        (DC3〜DC8)
 ```
 
@@ -62,6 +63,7 @@ plugins/ndf/
 | `plugins/ndf/pyproject.toml` | 変更 | 同じグループを足す（デプロイ先で答えを確かめ直す経路が使う。設計文書の決定 46）（DC1） | 無し |
 | `plugins/ndf/uv.lock` | 変更 | 上の固定（DC1） | `plugins/ndf/pyproject.toml` |
 | `plugins/ndf/scripts/lib/deps.py` | 変更 | `GROUPS` に `"jsonschema": ["jsonschema"]` を足す（DC1） | 無し |
+| `plugins/ndf/scripts/supervise.py` | 変更 | 最初の 1 回の `deps.require(...)` に `"jsonschema"` を足す（DC1）。グループを登録しただけでは使うグループに選ばれず、scripted-flow の SF6 の判断の呼び出し（`supervise_lib/judge_call.py`）がデプロイ先で import できない | `plugins/ndf/scripts/lib/deps.py` |
 | `plugins/ndf/scripts/lib/facts.py` | 新設 | 事実の表の唯一の実行時の読み手と、シェル向けの副命令（DC1） | `plugins/ndf/contracts/facts/` |
 | `plugins/ndf/scripts/lib/facts.sh` | 新設 | シェルの読み手 `ndf_fact_ids`・`ndf_fact_value`（DC1） | `plugins/ndf/scripts/lib/facts.py` |
 | `plugins/ndf/contracts/facts/fact.schema.json` | 新設 | 表の共通の形（JSON Schema draft 2020-12）（DC1） | 無し |
@@ -75,7 +77,7 @@ plugins/ndf/
 | `scripts/contracts_lib/limits_decl.py` | 変更 | 呼び出しを集める `_Calls` を、import の名前と関数の名前の組を引数で受ける形にし、`facts_decl` と共有する（DC2） | 無し |
 | `scripts/contracts_lib/ratchet.py` | 変更 | 1 ファイルの基準の行の増加を merge-base と比べる関数を足す（DC2） | 無し |
 | `scripts/contracts_lib/render.py` | 変更 | 逆引きに節「事実の表」を足す（DC2） | `scripts/contracts_lib/facts_decl.py` |
-| `scripts/check-ndf-contracts.py` | 変更 | 規則 `const-fact`・`fact-table` を足し、検査の前に `jsonschema` を用意する（DC2） | 上の 4 つ・`plugins/ndf/scripts/lib/deps.py` |
+| `scripts/check-ndf-contracts.py` | 変更 | 規則 `const-fact`・`fact-table` を足し、検査と `--render` の前に `jsonschema` を用意する（DC2） | 上の 4 つ・`plugins/ndf/scripts/lib/deps.py` |
 | `scripts/const-fact-baseline.json` | 新設 | 重複の基準（DC2） | 無し |
 | `scripts/measure/const-facts.py` | 変更 | コア `const_facts.measure` を呼ぶだけにする。出力は変えない（DC2） | `scripts/contracts_lib/const_facts.py` |
 | `.github/workflows/script-structure.yml` | 変更 | ジョブ `ndf-contracts-check` に `astral-sh/setup-uv` を足す（`deps.require` が uv で起動し直す）（DC2） | 無し |
@@ -236,7 +238,7 @@ plugins/ndf/
 | `const_facts.measure` | `scripts/contracts_lib/const_facts.py` | 新設 | `measure(root: Path, parse) -> dict` | 計測のスクリプトの結果（`items`・`metrics`・`summary`）を作る | 無し | 今の `scripts/measure/const-facts.py --json` と同じ形と同じ数 | ファイルを読む（`scan` を通す） |
 | `const_baseline.load` | `scripts/contracts_lib/const_baseline.py` | 新設 | `load(path: Path) -> list[dict]` | 基準のファイルを読み、行のキーの形を確かめる | 無し | 返す行はすべて `key`・`kind`・`fact`・`plan` を文字列で持つ | ファイルを読む |
 | `const_baseline.compare` | `scripts/contracts_lib/const_baseline.py` | 新設 | `compare(found: Counter[str], rows: list[dict]) -> tuple[list[str], list[dict]]` | 今の組のキーと基準の行を多重集合として突き合わせる | 無し | 1 つ目は基準より多いキー（新しい重複）、2 つ目は今のツリーより多い基準の行（使われない行） | 無し |
-| `const_baseline.plan_violations` | `scripts/contracts_lib/const_baseline.py` | 新設 | `plan_violations(rows: list[dict]) -> list[dict]` | 扱いの形（`移す: C<番号>` か `移さない: <空でない理由>`）を確かめる（I-DT5） | 無し | 形の違う行ごとに 1 件 | 無し |
+| `const_baseline.plan_violations` | `scripts/contracts_lib/const_baseline.py` | 新設 | `plan_violations(rows: list[dict]) -> list[dict]` | 扱いの形（`移す: DC<1〜8>` か `移さない: <空でない理由>`）を確かめる（I-DT5）。移す先は子 Issue の番号で書き、設計文書の移行ステップ（`DT<番号>`）は受けない | 無し | 形の違う行ごとに 1 件 | 無し |
 | `const_baseline.violations` | `scripts/contracts_lib/const_baseline.py` | 新設 | `violations(root: Path, parse) -> list[tuple[str, str, str, str]]` | 規則 `const-fact` の違反（新しい重複・使われない行・扱いの無い行）を `(種類, パス, 名前, 理由)` で返す | 無し | 違反の `name` は組のキー | ファイルを読む |
 | `facts_decl.load_tables` | `scripts/contracts_lib/facts_decl.py` | 新設 | `load_tables(root: Path) -> tuple[dict[str, dict], list[tuple]]` | `contracts/facts/*.json` を読み、`fact.schema.json` で形を確かめる | `jsonschema` が import できる | 形の通った表だけを返し、通らない表は違反にする | ファイルを読む |
 | `facts_decl.row_violations` | `scripts/contracts_lib/facts_decl.py` | 新設 | `row_violations(name: str, t: dict) -> list[tuple]` | 列の宣言から行のスキーマを作り、各行を確かめ、`id` の重なりを見る（I-DT2） | `t` は `load_tables` を通った表 | 違反の `name` は `<表>:<id>` | 無し |
@@ -250,7 +252,7 @@ plugins/ndf/
 | `render.render` | `scripts/contracts_lib/render.py` | 変更 | `render(c: Contracts, root: Path \| None = None, parse=None) -> str` | 逆引きに「事実の表」の節を足す | 無し | `root` があれば「上限の宣言」の後に「事実の表」を置く | ファイルを読む |
 | `Checker.run` | `scripts/check-ndf-contracts.py` | 変更 | `run(self) -> tuple[list[dict], dict]` | 既存の違反に `const-fact` と `fact-table` を足す | 無し | `metrics` に `fact_tables`・`const_groups`・`baseline_rows` を足す | ファイルを読む |
 | `_baseline_ratchet` | `scripts/check-ndf-contracts.py` | 新設 | `_baseline_ratchet(root: Path, base: str, state: str) -> list[dict]` | 基準の行の増加を `const-fact` の違反にする | `state == "checked"` のときだけ比べる | merge-base の検査が `const-fact` を知らなければ空 | 外部コマンド（`git`） |
-| `main` | `scripts/check-ndf-contracts.py` | 変更 | `main(argv: list[str] \| None = None) -> int` | 検査の経路の前で `deps.require("jsonschema")` を呼ぶ（`--render`・`--draft` では呼ばない） | 無し | 終了コードの意味は変えない（0・1・2・3。依存の欠けは `deps` の 69） | 外部コマンド（`uv` で起動し直す） |
+| `main` | `scripts/check-ndf-contracts.py` | 変更 | `main(argv: list[str] \| None = None) -> int` | 検査の経路と `--render` の経路の前で `deps.require("jsonschema")` を呼ぶ（`--render` も `facts_decl.render_section → load_tables` で同じスキーマ検査を使うため。`--draft` は表を読まないので呼ばない） | 無し | 終了コードの意味は変えない（0・1・2・3。依存の欠けは `deps` の 69） | 外部コマンド（`uv` で起動し直す） |
 | `main` | `scripts/measure/const-facts.py` | 変更 | `main() -> None` | 引数を読み、`const_facts.measure` の結果を今と同じ形で出す | 無し | `--json` の出力の形と数が変わらない | ファイルを読む・標準出力 |
 | `_round_reviewers` | `plugins/ndf/skills/cross-review/scripts/review_lib/participants.py` | 変更 | `_round_reviewers(st: dict, round_no: int) -> list[str]` | ラウンドの担当を、記録・`only`・`participants` の順で決める。`host` だけの状態と何も無い状態の分岐を消す | 状態ファイルは `participants` を持つ | `participants` も `only` もラウンドの記録も無ければ `AssignmentError` | 無し |
 | `_no_result_agents` | `plugins/ndf/skills/cross-review/scripts/review_lib/participants.py` | 変更 | `_no_result_agents(round_entry: dict, only: str \| None, reviewers: list[str]) -> list[str]` | 結果の無い担当を返す。`reviewers` を必須にし、`AGENTS` への戻りを消す | 呼ぶ側は `_round_reviewers` の値を渡す | 返す担当は `reviewers` の部分集合 | 無し |
@@ -297,9 +299,9 @@ plugins/ndf/
 | `const_baseline.compare` | キーの今の数 > 基準の行の数 | 差の数だけ「新しい重複」（I-DT4a） |
 | `const_baseline.compare` | キーの今の数 < 基準の行の数 | 差の数だけ「使われない行」（I-DT4b） |
 | `const_baseline.compare` | 等しい | 違反なし |
-| `const_baseline.plan_violations` | `plan` が `移す: C<1〜8>` | 通す |
+| `const_baseline.plan_violations` | `plan` が `移す: DC<1〜8>` | 通す |
 | `const_baseline.plan_violations` | `plan` が `移さない: ` の後に 1 文字以上 | 通す |
-| `const_baseline.plan_violations` | それ以外（空・別の書式・`移す:` の後が C の番号でない） | 「扱いの無い行」（I-DT5） |
+| `const_baseline.plan_violations` | それ以外（空・別の書式・`移す:` の後が `DC<1〜8>` でない。`移す: DT2` も含む） | 「扱いの無い行」（I-DT5） |
 | `ratchet.rows_added` | 今の行のキーが merge-base にある（多重集合で数える） | 数えない |
 | `ratchet.rows_added` | 無い。merge-base から消えた行に `same`（種類・事実・ファイルを除いた定数の名前の並び）が等しい行がある | 置き換えとして数えず、消えた側を 1 つ減らす（I-DT4c） |
 | `ratchet.rows_added` | 無い。置き換えにも当たらない | 増えた行 |
@@ -446,7 +448,7 @@ plugins/ndf/
 | `render.render` | 「上限の宣言」の後に「事実の表」 | `root` が無ければ節を出さない | — |
 | `Checker.run` | 違反の無いツリーで `metrics` に 3 つの数 | — | 基準を壊すと `main` が終了コード 2 |
 | `_baseline_ratchet` | merge-base より行の増えた基準で `baseline-added` | merge-base の検査が `const-fact` を知らないと 0 件 | 起点が決まらないと CI で終了コード 3 |
-| `main`（`check-ndf-contracts.py`） | 検査の経路で `deps.require("jsonschema")` を 1 回呼ぶ | `--render` と `--draft` では呼ばない | `deps` が 69 を返す経路は `deps` のテストが持つ（ここでは呼ばれたことだけを見る） |
+| `main`（`check-ndf-contracts.py`） | 検査の経路と `--render` で `deps.require("jsonschema")` を 1 回呼ぶ | `--draft` では呼ばない | `deps` が 69 を返す経路は `deps` のテストが持つ（ここでは呼ばれたことだけを見る） |
 | `main`（`measure/const-facts.py`） | `--json` の 1 行のキーと `metrics` のキーが DC2 の前と同じ | `--limit 1` | — |
 | `_round_reviewers` | 記録・`only`・`participants` の順 | 判定済みのラウンドは宣言の外でも記録を返す | `participants` も `only` も記録も無い状態で `AssignmentError` |
 | `_print_round_summary` | `reviewers` のある記録 | `reviewers` の無い記録で担当の列が `—` | — |

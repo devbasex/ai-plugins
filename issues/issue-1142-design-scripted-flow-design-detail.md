@@ -68,6 +68,7 @@ scripts/
 | `plugins/ndf/scripts/lib/proc.py` | 変更 | `StepError` が種類を必須で受け、終了コードを種類から引く（SF1b） | `lib/causes.py` |
 | `plugins/ndf/scripts/lib/exit_codes.py` | 変更 | 3 の説明を「前提が無い・正常な否定の結果。種類で分ける」へ直す（SF1b） | 無し |
 | `plugins/ndf/scripts/lib/run_core.py` | 変更 | 核が組む止まりに種類を付ける（SF1b） | `lib/step_result.py`・`lib/causes.py` |
+| `plugins/ndf/scripts/lib/deps.py` | 変更 | 依存の欠けの止まりを種類 `deps_missing` で `exit_early` へ渡す（SF1b。`exit_early` の今の唯一の呼び手で、`stopped` を書かないため「SF1b の移す先」の数え方に入らない） | `lib/run_core.py` |
 | `plugins/ndf/agents/worker.md` | 変更 | 結果ファイルの `stopped`・`gate` の書き方に `--cause` を足す（SF1b） | 無し |
 | `plugins/ndf/scripts/supervise_lib/routes.py` | 新設 | ステップの止まりから cause を決め、`causes.pick` で行き先を返す。プランの検査（SF2） | `lib/causes.py`・`lib/run_core.py` の契約の引き方 |
 | `plugins/ndf/scripts/supervise_lib/engine.py` | 変更 | 失敗の分岐を `routes` へ置き換え、`gh_limit_wait` と `_next_on_exit` を消す（SF2）。判断の答えの扱い（SF6） | `supervise_lib/routes.py` |
@@ -88,7 +89,7 @@ scripts/
 | `plugins/ndf/scripts/merged_lib/merge.py` | 変更 | マージの拒否を `not_ci`・`base_conflict` に分ける（SF4）。承認ゲートの `routes`（SF13） | `lib/step_result.py` |
 | `plugins/ndf/agents/supervisor.md` | 変更 | CI を `gh pr checks` で手で読む手順を外す（SF4） | 無し |
 | `plugins/ndf/scripts/supervise_lib/commands.py` | 変更 | `cmd_design_gate` を足す（SF5）。`routes` を付ける（SF13） | `lib/step_result.py` |
-| `plugins/ndf/scripts/supervise.py` | 変更 | サブコマンド `design-gate` を足す（SF5） | `supervise_lib/commands.py` |
+| `plugins/ndf/scripts/supervise.py` | 変更 | サブコマンド `design-gate` を足す（SF5）。`judge_call` が使う `jsonschema` は、data の DC1 が最初の `deps.require(...)` に足す（SF6 の前の波） | `supervise_lib/commands.py`・`lib/deps.py` |
 | `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__supervise.py.json` | 変更 | `design-gate` の引数（SF5） | 無し |
 | `plugins/ndf/scripts/supervise_lib/judge_call.py` | 新設 | 判断の呼び出し: スキーマを組み、claude を呼び、答えを確かめて 1 回だけ打ち直す（SF6） | `supervise_lib/claude.py`・`jsonschema` |
 | `plugins/ndf/scripts/supervise_lib/claude.py` | 変更 | `claude -p --json-schema` を渡せるようにする（SF6） | 無し |
@@ -175,6 +176,7 @@ scripts/
 | `plugins/ndf/scripts/lib/step_result.py` | モジュール `step_result` | `result`・`validate_result`・`code_for`・`emit`・`gh_json`・`main_with`・`cli_parser`・`_cli_result`（変更）、`gate`（新設。SF13） |
 | `plugins/ndf/scripts/lib/proc.py` | `StepError` | `__init__`（変更）・`cause`（新設のプロパティ）。`run`（変更） |
 | `plugins/ndf/scripts/lib/run_core.py` | モジュール `run_core` | `core_stopped`・`exit_early`・`_from_code`（変更） |
+| `plugins/ndf/scripts/lib/deps.py` | モジュール `deps` | `_stop`（変更） |
 | `plugins/ndf/scripts/lib/step-result.sh` | シェルの関数 | `sr_emit`（変更） |
 | `plugins/ndf/scripts/supervise_lib/routes.py` | モジュール `routes` | `step_cause`・`retry_policy`・`route_of`・`plan_errors`（新設） |
 | `plugins/ndf/scripts/supervise_lib/engine.py` | `Engine` | `_route_failure`（新設）、`_next_after_step`・`_run_step`・`setup`・`_next_after_judge`（変更）、`_next_on_exit`・`gh_limit_wait`（削除） |
@@ -239,7 +241,8 @@ scripts/
 | `StepError.__init__` | `plugins/ndf/scripts/lib/proc.py` | 変更 | `__init__(self, msg: str, kind: str, *, instance: str \| None = None, retry_after: float \| None = None)` | 手順の失敗を種類つきで表す。`code` は種類から引く | `kind` は表の値 | `self.cause` は `causes.cause` の値、`self.code` は `causes.exit_code(kind)` | ファイル（初回だけ `causes.table` が表を読む） |
 | `proc.run` | `plugins/ndf/scripts/lib/proc.py` | 変更 | `run(cmd, cwd=None, check=True, env=None, timeout=None, input=None) -> CompletedProcess` | `check` で 0 以外を `StepError(..., "unknown", instance=<コマンドの先頭>)` にする | 無し | 成功なら結果 | 外部コマンド |
 | `run_core.core_stopped` | `plugins/ndf/scripts/lib/run_core.py` | 変更 | `core_stopped(entry_id: str, kind: str, gap_kind: str, name: str, summary: str) -> tuple[dict, int]` | 核が組む止まりに種類を付ける。例外は `unknown`、結果の形の誤りは `invalid`、打ち切りは `interrupted` | `kind` は表の値 | 結果は `gaps` を持つため `incomplete` 以外の種類では `gaps` を置かない（IS12）。`gap_kind` は `metrics.core` へ移す | 無し |
-| `run_core.exit_early` | `plugins/ndf/scripts/lib/run_core.py` | 変更 | `exit_early(summary: str, kind: str, gaps: list[dict] \| None = None) -> NoReturn` | 核に入る前の止まりを種類つきの結果にして終える | `kind` は表の値 | 終了コードは種類のもの | 標準出力・結果ファイル・プロセスの終了 |
+| `run_core.exit_early` | `plugins/ndf/scripts/lib/run_core.py` | 変更 | `exit_early(summary: str, kind: str, gaps: list[dict] \| None = None) -> NoReturn` | 核に入る前の止まりを種類つきの結果にして終える | `kind` は表の値。`gaps` は `kind` が `incomplete` のときだけ渡す（IS12） | 終了コードは種類のもの。`gaps` を渡さなければ結果に `gaps` を置かない（今の既定の 1 要素は消す） | 標準出力・結果ファイル・プロセスの終了 |
+| `deps._stop` | `plugins/ndf/scripts/lib/deps.py` | 変更 | `_stop(msg: str, groups: Sequence[str] = ()) -> NoReturn` | 依存の欠けを `exit_early(msg, "deps_missing")` で返す。欠けたグループ（無ければ `uv`）は `cause.detail` の文に書き、`gaps` には置かない（IS12） | 無し | 終了コードは `deps_missing` の 69。`run_core` を読めなければ今どおり結果を出さずに 69 で終える | 標準出力・標準エラー・プロセスの終了 |
 | `run_core._from_code` | `plugins/ndf/scripts/lib/run_core.py` | 変更 | `_from_code(entry_id: str, code: int) -> tuple[dict, int]` | 結果 JSON を出さない本体の終わりを結果にする。`stopped` は `unknown` | 無し | 終了コードから種類を推さない。`stopped` の結果の終了コードは `unknown` の 1 | 無し |
 | `sr_emit` | `plugins/ndf/scripts/lib/step-result.sh` | 変更 | `sr_emit --tool T --status S --summary X [--cause KIND DETAIL] [--route ANSWER CMD]...` | 溜めた値と種類を `step_result.py emit` へ渡す | `--status stopped` なら `--cause` を渡す | `emit` と同じ | 外部コマンド（`python3`）・標準出力・プロセスの終了 |
 | `routes.step_cause` | `plugins/ndf/scripts/supervise_lib/routes.py` | 新設 | `step_cause(step: dict, cur: dict) -> dict` | 失敗したステップの `cause` を、ハンドラーが置いた `cur["cause"]` → 出力の最後の結果 JSON の `cause` → ステップの `exit_cause` → `unknown` の順で決める | `cur` は終わったステップの記録（`exit`・`text`） | `causes.errors` が空の辞書を返す。文の中身から種類を推さない | 無し |
@@ -268,7 +271,7 @@ scripts/
 | `GreenWatch._stop_failed` | `plugins/ndf/scripts/merged_lib/checks.py` | 変更 | `_stop_failed(self, reading: CheckReading) -> NoReturn` | 落ちたチェックをテストのチェック（`test_strategy.ci_checks` の名前と分割ジョブ）とそれ以外に分け、テストがあれば `test_failed`、無ければ `check_failed` で止まる（SF4） | 無し | `items` の各チェックに `test: true/false` を付ける | 標準出力・プロセスの終了 |
 | `merge._merge_pr` | `plugins/ndf/scripts/merged_lib/merge.py` | 変更 | `_merge_pr(root, a, n, watch, items, waits)` | `gh pr merge` の拒否を、衝突なら `base_conflict`、保護の規則・権限なら `not_ci`、ほかは `unknown` で返す（SF4） | 無し | 拒否の理由の判定は `_conflicted` と `gh pr view --json mergeStateStatus` の値で行い、標準エラーの文を読まない | 外部コマンド（`gh`）・ネットワーク |
 | `verify_steps.judge_step` | `plugins/ndf/scripts/supervise_lib/verify_steps.py` | 変更 | `judge_step(after_tests: str, match: bool) -> dict` | 引数 `ci_merge` を外し（マージの失敗は `on_cause` の `test_failed` が `ci-fix` へ送る。SF4）、問いを選択肢の説明だけにする（SF6） | 無し | `choices` は `fix`・`after_tests`・`doc-lint`・`stop` | 無し |
-| `commands.cmd_design_gate` | `plugins/ndf/scripts/supervise_lib/commands.py` | 新設 | `cmd_design_gate(state_dir: str) -> tuple[dict, int]` | `review` と `glossary-recheck` のステップの結果 JSON を読み、承認資料（用語チェックの当たりを含む）を書いて承認ゲート 10 を返す（SF5） | 2 つのステップが状態ディレクトリに結果を残した | `status` が `gate` で `presentation_path` を持つ。読めなければ `invalid` で止まる | ファイル（結果を読み、承認資料を書く） |
+| `commands.cmd_design_gate` | `plugins/ndf/scripts/supervise_lib/commands.py` | 新設 | `cmd_design_gate(state_dir: str) -> tuple[dict, int]` | `review` と `glossary-recheck` のステップの結果 JSON を読み、承認資料（用語チェックの当たりを含む）を書いて承認ゲートの終了コード 10 を返す（SF5） | 2 つのステップが状態ディレクトリに結果を残した | `status` が `gate` で `presentation_path` を持つ。読めなければ `invalid` で止まる | ファイル（結果を読み、承認資料を書く） |
 | `design_steps.gate_steps` | `plugins/ndf/scripts/supervise_lib/design_steps.py` | 変更 | `gate_steps() -> list[dict]` | `gate` を `type: judge` から `supervise.py design-gate` の run へ替える（SF5） | 無し | Claude を起動するステップが無い | 無し |
 | `judge_call.answer_schema` | `plugins/ndf/scripts/supervise_lib/judge_call.py` | 新設 | `answer_schema(choices: list[str] \| None, schema: str \| None) -> dict` | 選択肢のモードは `forms/judge-answer.json` の `decision` の `enum` を選択肢にしたスキーマ、任意の JSON のモードは渡したファイルのスキーマを返す | `choices` と `schema` のどちらか 1 つだけ | 返るスキーマは draft 2020-12 で検査できる | ファイル（スキーマを読む） |
 | `judge_call.check_answer` | `plugins/ndf/scripts/supervise_lib/judge_call.py` | 新設 | `check_answer(answer: object, schema: dict) -> list[str]` | 答えを `jsonschema` で確かめる（IS6a・IS6b） | 無し | 空なら合う。文から近い選択肢を拾わない | 無し |
@@ -299,7 +302,7 @@ scripts/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `causes.table` | 表が無い・壊れている | 配布の欠け・手の書き換え | `causes.table` の読み込みと `validate` | 止める（`CausesError`） | 呼んだエントリポイントの実行の核が `invalid` の止まりにする。標準エラーに表のパスと行。2 | 何も書かない。表を直して打ち直せる |
+| `causes.table` | 表が無い・壊れている | 導入先のファイルの欠け・手の書き換え | `causes.table` の読み込みと `validate` | 止める（`CausesError`） | 呼んだエントリポイントの実行の核が `invalid` の止まりにする。標準エラーに表のパスと行。2 | 何も書かない。表を直して打ち直せる |
 | `causes.cause` | 表に無い種類・空の説明 | コードの誤り | `causes.cause` | 止める（`ValueError`） | 実行の核が `unknown` の止まりにし、例外の跡を標準エラーへ。1 | 契約の検査（`causes_decl`）が同じ誤りを CI で先に落とす |
 | `causes.errors` | 表を読めない | `causes.table` と同じ | `causes.table` | 呼び出し元へ返す（`CausesError`） | `causes.table` と同じ | 同上 |
 | `causes.exit_code` | 表に無い種類 | コードの誤り | `causes.exit_code` | 止める（`KeyError` を `CausesError` にする） | 2 | 同上 |
@@ -314,6 +317,7 @@ scripts/
 | `StepError.__init__` | 表に無い種類 | コードの誤り | `causes.exit_code` | 止める（`CausesError`） | 実行の核が `invalid` の止まりにする。2 | 契約の検査が先に落とす |
 | `proc.run` | コマンドが 0 以外 | 外部のコマンドの失敗 | `proc.run` | 呼び出し元へ返す（`StepError`・`unknown`） | 1 | 呼び手が種類を細かくできる（`except StepError` で読み替えずに、呼び手が先に結果を読んで種類を選ぶ） |
 | `run_core.exit_early` | 核に入る前の止まり（依存の欠け・契約に無い） | 環境 | `run_core.exit_early` の呼び手 | 止める | 種類の終了コード（`deps_missing` の 69 ほか） | 依存を入れて打ち直せる |
+| `deps._stop` | 依存を import できない・uv が無い・`run_core` を読めない | 環境 | `deps.require` | 止める（`deps_missing`） | 結果 JSON の `cause.detail` に欠けたグループ、終了コード 69。`run_core` を読めなければ結果を出さずに 69 | 依存を入れて打ち直せる |
 | `sr_emit` | `--status stopped` に `--cause` が無い | 書き手の誤り | `step_result.py emit` | 止める | 標準エラーに誤り。2 | 直して打ち直せる |
 | `routes.plan_errors` | 表に無い種類・知らない行き先・NDF のエントリポイントを打つステップの `exit_cause`・消したキーの残り | プランの JSON の誤り | `Engine.setup` | 止める | プランの結果が「止まった」と理由。queue の `done` に載る | プランの JSON を直して打ち直せる。何も流していない |
 | `Engine._route_failure` | `progress.jsonl` に書けない | ディスク | `RunState.progress_write` | 止める（例外を耐久ステップの失敗にする） | プランの記録が残らず、queue の `done` に耐久ステップの失敗 | DBOS が同じステップから回復する |
@@ -331,7 +335,7 @@ scripts/
 | `GreenWatch._stop_failed` | テストのチェックの名前の宣言が読めない | 宣言の欠け | `test_strategy.ci_checks` | 既定値で続ける（宣言が無ければ、すべてのチェックをテストとみなす。今の `is_test_check` の空の規則） | `test_failed`。1 | 無し |
 | `merge._merge_pr` | マージの拒否の理由を読めない | GitHub | `gh pr view` | 既定値で続ける（`unknown`） | 1 で人へ | 打ち直せる |
 | `commands.cmd_design_gate` | 2 つのステップの結果が無い・読めない・承認資料を書けない | 前のステップの欠け・ディスク | `cmd_design_gate` | 止める（`invalid`） | 2 で人へ | 設計のプランを `--from review` で打ち直せる |
-| `judge_call.answer_schema` | スキーマのファイルを読めない | 配布の欠け | `answer_schema` | 止める（`invalid`） | プランが 2 で止まる | 直して打ち直せる |
+| `judge_call.answer_schema` | スキーマのファイルを読めない | 導入先のファイルの欠け | `answer_schema` | 止める（`invalid`） | プランが 2 で止まる | 直して打ち直せる |
 | `judge_call.ask` | claude の失敗・答えがスキーマに合わない（2 回） | LLM・入力の不足 | `check_answer` | 再試行（1 回）。なお合わなければ呼び出し元へ返す（`needs_human`） | プランが `needs_human` で止まり、問い・2 回の答え・入力の参照が結果に載る | 入力を足して打ち直せる |
 | `JudgeStep.execute` | 同上 | 同上 | `judge_call.ask` | 呼び出し元へ返す | 同上 | 同上 |
 | `Engine._next_after_judge` | 答えが合わない | 同上 | `JudgeStep.execute` の `ok` | 止める（`needs_human`） | 「止まった」と `cause` | 同上 |
@@ -441,7 +445,7 @@ scripts/
 | `causes.use_contract` | `doc_kinds.use_contract`・`limits.use` | 同上 | 使う（同じ形） |
 | `causes.validate` | `limits.validate`・`doc_kinds` の行の検査 | 同上 | 使う（誤りを `where` つきの例外にする形を合わせる）。`jsonschema` はSF1a の時点で依存に無い（data の DT1 が足す）ため使えない |
 | `causes.cause` | `step_result._record_errors` | `grep -n '^def ' plugins/ndf/scripts/lib/step_result.py` | 使えない（`gaps` の要素のキーの検査で、種類の表の照合を持たない） |
-| `causes.errors` | 同上 | 同上 | 使う（空でない文字列の検査に `_record_errors` を呼ぶ） |
+| `causes.errors` | 同上 | 同上 | 使えない（`step_result` と `proc` が `causes` を読むため、`causes` から呼ぶと `step_result → causes → step_result` の輪になる。空でない文字列の検査は `causes.errors` の中に書く。2 行で、共通の部品にはしない） |
 | `causes.exit_code` | `exit_codes.label_of` | `cat plugins/ndf/scripts/lib/exit_codes.py` | 使えない（終了コードから見出しを引く向きで、種類から引く表を持たない） |
 | `causes.policy_of` | `limits.policy` | `grep -n 'def policy' -A8 plugins/ndf/scripts/lib/limits.py` | 使う |
 | `causes.pick` | `Engine._next_after_step`・`plan.fail_kind_matches` | `sed -n 370,402p plugins/ndf/scripts/supervise_lib/engine.py` | 使えない（終了コードとフラグで分岐し、`summary` を理由に添える。置き換える対象） |
@@ -486,6 +490,8 @@ scripts/
 | `StepError.__init__` | 種類から終了コード | `instance`・`retry_after` | 表に無い種類 → `CausesError` |
 | `run_core.core_stopped` | 例外 → `unknown`・形の誤り → `invalid`・打ち切り → `interrupted` | 無し | 無し |
 | `run_core._from_code` | 結果 JSON を出さずに 1 → `unknown` | 0・10 | 表に無い終了コード → `invalid` |
+| `run_core.exit_early` | `deps_missing` で 69 と `cause` を持つ `stopped`、`gaps` を置かない | `incomplete` と `gaps` を渡す → 6 | `incomplete` でない種類に `gaps` を渡す → `emit` の形の誤り（IS12） |
+| `deps._stop` | 欠けたグループの名前を `cause.detail` に持つ `deps_missing` の結果と 69 | グループを渡さない → `detail` に `uv` | `run_core` を読めない → 結果を出さずに 69 |
 | `sr_emit` | `--cause` つきの `stopped` を出す | `--cause` の説明に改行 | `--cause` の無い `stopped` → 2 |
 | `routes.step_cause` | 4 つの順をそれぞれ 1 件 | `exit_cause` に無い終了コード → `unknown` | 結果 JSON の `cause` が形の誤り → `unknown` |
 | `routes.retry_policy` | 宣言・プロジェクト・ステップの 3 つの重ね | 1 つのキーだけを上書き | 打ち直さない種類 → `None` |
@@ -526,7 +532,7 @@ scripts/
 
 | 子 | ファイルごと消す | 関数だけを消す（新しいテストへ移す） |
 | --- | --- | --- |
-| 1b | `plugins/ndf/scripts/tests/test_step_result.py`・`test_step_result_readers.py`（`test_causes.py` と作り直した `test_step_result.py` へ） | `test_run_core.py` の終了コードから結果を組む関数 |
+| 1b | `plugins/ndf/scripts/tests/test_step_result.py`・`test_step_result_readers.py`（`test_causes.py` と作り直した `test_step_result.py` へ） | `test_run_core.py` の終了コードから結果を組む関数と、依存の欠けの結果が `gaps` に `deps` を持つことを見る関数 |
 | 2 | `plugins/ndf/scripts/tests/test_supervise_step_rerun.py`・`test_push_fix.py`・`test_supervise_limits.py`（`test_routes.py`・`test_plan_routes.py` へ） | `test_supervise.py`（`on_exit`・`skip_to` を見る 27 か所）・`test_supervise_pace.py`・`test_supervise_design_match.py`・`test_supervise_new.py`・`test_base_sync.py`・`test_supervise_ci_only.py`・`test_sprint_lane_close.py`・`test_design_review_settled.py`・`test_impl_format_steps.py`・`test_sprint_bundles.py`・`test_supervise_prior_inputs.py`・`test_supervise_pace_verify.py`・`test_gate_rejections.py`・`test_project_mvv.py`・`test_review_criteria.py`・`test_usage_ledger.py`・`test_runtime_policy.py`・`test_drive_review.py` の該当の関数 |
 | 3 | 無し | `test_ci_watch.py` の `decide_exit` の `after_merge` の関数 |
 | 4 | 無し | `test_ci_watch.py` の終了コード 2・3 を見る関数・`test_merged_probe.py` の CI の失敗の終了コードの関数 |

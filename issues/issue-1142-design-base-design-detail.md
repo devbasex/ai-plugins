@@ -174,7 +174,7 @@ W1〜W7 の一覧のファイル（廃止語を生きた語へ替える。値・
 | `pace.matches` | `plugins/ndf/scripts/lib/pace.py` | 変更 | `matches(path: str, patterns) -> bool` | 範囲の宣言のパターンにパスが当たるかを返す | `deps.require("pathmatch")` の後 | 値は `pathmatch.path_matches(path, patterns)` と同じ | 無し |
 | `textparse.mask_comments` | `plugins/ndf/scripts/lib/textparse.py` | 新設 | `mask_comments(lines: list[str], suffix: str) -> list[str]` | コードの行のコメントを同じ幅の空白に置き換える | `deps.require("textparse")` の後。`suffix` は `.py`・`.sh`・`.js`・`.ts` のどれか | 戻り値の行の数と各行の長さは入力と同じ。pygments の `Token.Comment` の字だけが空白になる。ほかの拡張子は入力をそのまま返す | 無し |
 | `notify.post_json` | `plugins/ndf/scripts/lib/notify.py` | 新設 | `post_json(url: str, body: dict, headers: dict[str, str], timeout: float, transport=None) -> dict \| None` | JSON を 1 回 POST し、応答の JSON のオブジェクトを返す | `deps.require("notify")` の後。`transport` はテストが渡す `httpx.MockTransport` | 応答が 2xx で JSON のオブジェクトならその辞書、ほかは `None`。例外を外へ出さない | ネットワーク |
-| `notify.fetch_body` | `plugins/ndf/scripts/lib/notify.py` | 新設 | `fetch_body(url: str, timeout: float, transport=None) -> bytes` | URL の本文を、1 件あたりの総経過時間の上限の内で取得する | 同上 | 2xx の本文の全部を返す。上限を越えた・2xx でない・接続できないときは `FetchError`（理由の日本語 1 行） | ネットワーク |
+| `notify.fetch_body` | `plugins/ndf/scripts/lib/notify.py` | 新設 | `fetch_body(url: str, timeout: float, transport=None) -> bytes` | URL の本文を、1 件あたりの総経過時間の上限の内で取得する。リダイレクトは同じ上限の内で追う（httpx の `follow_redirects=True`。httpx は既定で追わないため明示する。今の `urllib.request.urlopen` と同じ振る舞い） | 同上 | 最終の応答が 2xx なら本文の全部を返す。上限を越えた・2xx でない・接続できないときは `FetchError`（理由の日本語 1 行） | ネットワーク |
 | `jev._post` | `plugins/ndf/scripts/lib/jev.py` | 変更 | `_post(body: dict[str, Any], timeout: int) -> Optional[dict[str, Any]]` | 判定の要求を 1 回送り、応答の JSON を返す | 呼ぶ側のエントリポイントが `deps.require("notify")` を呼んでいる | 鍵が無ければ送らずに `None`。送ったら帳簿へ 1 行（今のまま） | ネットワーク・使用量の帳簿への追記 |
 | `refresh.fetch` | `plugins/ndf/scripts/lib/refresh.py` | 変更 | `fetch(url: str, timeout: float, transport=None) -> FetchResult` | 出典を取得し、指紋か失敗の理由を返す | 同上 | 例外を外へ出さない。失敗は `ok=False` と `error` | ネットワーク |
 | `refresh.refresh` | `plugins/ndf/scripts/lib/refresh.py` | 変更 | `refresh(sources: list[dict], timeout: float, transport=None) -> tuple[list[str], int]` | 出典の一覧を取得し直して、表の行と失敗の数を返す | 同上 | 引数の名前を `opener` から `transport` へ替えるだけで、行の形と失敗の数え方は今のまま | ネットワーク |
@@ -190,7 +190,7 @@ W1〜W7 の一覧のファイル（廃止語を生きた語へ替える。値・
 | `notify.post_json` | 通信の失敗・上限の時間を越えた | ネットワーク・相手の停止 | `httpx.HTTPError` を受ける | 既定値で続ける（`None` を返す） | 無し（呼ぶ側が判定を見送る） | 後始末なし。次の呼び出しでそのまま再実行できる |
 | `notify.post_json` | 2xx でない・本文が JSON のオブジェクトでない | 鍵の誤り・相手の誤り | 応答の状態と `json.loads` | 既定値で続ける（`None`） | 無し | 同上 |
 | `notify.fetch_body` | 総経過時間の上限を越えた | 相手が遅い・送り続ける | 読み取りのたびに単調時計の期限を見る | 呼び出し元へ返す（`FetchError("<N> 秒を越えた")`） | 呼ぶ側の表の 1 行（`待ちを越えた（<N> 秒を越えた）`） | 接続は `with` で閉じる。再実行できる |
-| `notify.fetch_body` | 2xx でない | 相手の誤り・URL の誤り | 応答の状態 | 呼び出し元へ返す（`FetchError("HTTP <状態>")`） | 同上（`HTTP 404` など） | 同上 |
+| `notify.fetch_body` | 最終の応答が 2xx でない・転送が多すぎる | 相手の誤り・URL の誤り | 応答の状態・`httpx.TooManyRedirects` | 呼び出し元へ返す（`FetchError("HTTP <状態>")`） | 同上（`HTTP 404` など） | 同上 |
 | `notify.fetch_body` | 接続できない | 名前の解決・TLS・接続の拒否 | `httpx.TransportError` | 呼び出し元へ返す（`FetchError("接続できない（<型>）")`） | 同上 | 同上 |
 | `jev._post` | 鍵が無い | 環境変数 `AI_GATEWAY_API_KEY` が無い | 送る前 | 既定値で続ける（`None`。帳簿へ書かない） | 無し | 無し |
 | `jev._post` | 応答が無い | `notify.post_json` が `None` を返した | 戻り値 | 既定値で続ける（`None`。帳簿へは送った 1 行を書く） | 無し | 無し |
@@ -208,9 +208,11 @@ W1〜W7 の一覧のファイル（廃止語を生きた語へ替える。値・
 | `md.block_kinds` | 行が `blockquote_open` の区間 | `quote`（中の表・コードも `quote`） |
 | `md.block_kinds` | 行が `table_open` の区間 | `table` |
 | `md.block_kinds` | どれにも当たらない（段落・箇条・空行） | `other` |
+| `notify.fetch_body` | 3xx の転送（301・302・303・307・308） | 期限の残りの内で転送先を取りに行き、最終の応答で下の行を判定する。上限の秒数は転送の前後で通しで数える |
+| `notify.fetch_body` | 転送の数が httpx の上限（`max_redirects` の既定 20）を越えた | `FetchError("転送が多すぎる")` |
 | `notify.fetch_body` | 2xx・期限の内で読み終えた | 本文を返す |
 | `notify.fetch_body` | 2xx・読み取りの途中で期限を越えた | `FetchError("<N> 秒を越えた")` |
-| `notify.fetch_body` | 2xx でない | `FetchError("HTTP <状態>")`（本文を読まない） |
+| `notify.fetch_body` | 最終の応答が 2xx でない | `FetchError("HTTP <状態>")`（本文を読まない） |
 | `notify.fetch_body` | 接続の前か途中の通信の失敗 | `FetchError("接続できない（<型>）")` |
 | `Queue._dormant` | 耐久の記録のファイルが無い | 真（DBOS を起動せずに空と答える） |
 | `Queue._dormant` | 耐久の記録のファイルがある | 偽 |
@@ -273,7 +275,7 @@ W1〜W7 の一覧のファイル（廃止語を生きた語へ替える。値・
 | `pace.matches` | `plugins/ndf/scripts/lib/**` が下のファイルに当たる | `*` が `/` をまたがない・`**/.env*` が深い階層に当たる・`docs/` がディレクトリの中身に当たる | 無し |
 | `textparse.mask_comments` | `.py` の `#`・`.sh` の語の頭の `#`・`.js` の `//` と `/* */` が空白になる | 文字列の中の `#`・三連引用符をまたぐ行・`.sh` の `${x#y}`・知らない拡張子 | 無し |
 | `notify.post_json` | `MockTransport` の 200 と JSON で辞書 | 本文が JSON の配列 | 通信の失敗で `None`・500 で `None`・JSON でない本文で `None` |
-| `notify.fetch_body` | 200 の本文を返す | 期限ちょうどで読み終える | 期限の超過・404・接続の失敗のそれぞれの `FetchError` の文 |
+| `notify.fetch_body` | 200 の本文を返す。301 の転送の先の 200 の本文を返す | 期限ちょうどで読み終える。転送の後に期限を越える | 期限の超過・404・転送の先の 404・転送が多すぎる・接続の失敗のそれぞれの `FetchError` の文 |
 | `jev._post` | 鍵があり応答があれば辞書と帳簿の 1 行 | 鍵が空文字 | 鍵なしで送らない・応答なしで `None` と帳簿の 1 行 |
 | `refresh.fetch` | 指紋を返す | 空の本文 | `FetchError` を `ok=False` の理由へ写す |
 | `refresh.refresh` | 2 件中 1 件の失敗で表の 2 行と失敗 1 | 出典 0 件 | 全件の失敗 |
