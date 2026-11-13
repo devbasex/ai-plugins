@@ -310,7 +310,7 @@ NDF の外で作った `sprint/` のブランチである。どちらも本番�
 | --- | --- | --- | --- |
 | #3308 | 実装する | — | `plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/skills/worktree/references/declaration.md`、`plugins/ndf/scripts/tests/test_release_production_flow.py`（新設） |
 | #3310 | 実装する | — | `plugins/ndf/scripts/supervise_lib/sprint_waves.py`（スプリントブランチの作成で開始時の記録の起点を常に `--from` で渡す。決定 1 の E3）、`plugins/ndf/scripts/lib/repo.py`（`kept_sprint_branch` が開始時の記録を受け取る。決定 1 の E7・決定 6）、`plugins/ndf/scripts/merged-steps.py`（後片付けが目録の開始時の記録を渡す）、`plugins/ndf/scripts/tests/`（課題の再現手順 1〜4 のテスト） |
-| #3309 | 実装する（この設計の規則に含めない） | — | `plugins/ndf/scripts/lib/worktree-branch.sh`（既定ブランチの候補を `lib/branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` から読む）、`plugins/ndf/scripts/lib/branch_flow.py`、`scripts/check-skill-repo-assumptions.py`（引用符の有無・`origin/` の形・シェルの単語を拾う）、`plugins/ndf/scripts/tests/` |
+| #3309 | 実装する | — | `plugins/ndf/scripts/lib/worktree-branch.sh`（この設計の規則に含めない。既定ブランチの候補を `lib/branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` から読む）、`plugins/ndf/scripts/lib/branch_flow.py`、`scripts/check-skill-repo-assumptions.py`（引用符の有無・`origin/` の形・シェルの単語を拾う）、`plugins/ndf/scripts/tests/` |
 
 ## 人へ残す判断
 
