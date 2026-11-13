@@ -15,6 +15,8 @@ import re
 import signal
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
@@ -40,21 +42,22 @@ def parse_period(text: str) -> float:
     return int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
 
 
-def _run(command: str, wait_limit: int | None) -> int:
-    cwd = Path.cwd()
-    try:
-        limits = limits_mod.load_limits(cwd)
-    except limits_mod.SlotConfigError as exc:
-        return _stopped(str(exc), items=exc.items)
+def _load_limits(cwd: Path, wait_limit: int | None) -> limits_mod.Limits:
+    """設定の上限を読み、`--wait-limit` があれば待ちの上限を上書きする。誤った設定は `SlotConfigError` を送る。"""
+    limits = limits_mod.load_limits(cwd)
     if wait_limit is not None:
         limits = dataclasses.replace(limits, wait_limit_seconds=wait_limit)
-    # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
-    kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
+    return limits
+
+
+@contextmanager
+def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iterator[list[int]]:
+    """受けたシグナルを子のグループへ送り、受けたシグナルの一覧を渡す。出るときに元のハンドラーへ戻す。"""
     interrupted: list[int] = []
-    proc: subprocess.Popen | None = None
 
     def forward(signum: int, _frame: FrameType | None) -> None:
         interrupted.append(signum)
+        proc = get_proc()
         if proc is not None and proc.poll() is None:
             try:
                 os.killpg(proc.pid, signum)
@@ -63,25 +66,43 @@ def _run(command: str, wait_limit: int | None) -> int:
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED}
     try:
-        with slots.gate(command, cwd, kind=kind, suites=[], limits=limits) as held:
-            if interrupted:
-                raise KeyboardInterrupt
-            proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True)
-            held.watch(proc)
-            code = _wait(proc)
-            if interrupted:
-                raise KeyboardInterrupt  # 記録に interrupted を残す
-    except slots.Stopped as exc:
-        return _stopped(
-            exc.summary(),
-            metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
-            cause={"kind": exc.reason},
-        )
-    except KeyboardInterrupt:
-        return 128 + (interrupted[0] if interrupted else signal.SIGINT)
+        yield interrupted
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+
+
+def _stopped_from(exc: slots.Stopped) -> int:
+    return _stopped(
+        exc.summary(),
+        metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
+        cause={"kind": exc.reason},
+    )
+
+
+def _run(command: str, wait_limit: int | None) -> int:
+    cwd = Path.cwd()
+    try:
+        limits = _load_limits(cwd, wait_limit)
+    except limits_mod.SlotConfigError as exc:
+        return _stopped(str(exc), items=exc.items)
+    # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
+    kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
+    proc: subprocess.Popen | None = None
+    with _forwarding_signals(lambda: proc) as interrupted:
+        try:
+            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits) as held:
+                if interrupted:
+                    raise KeyboardInterrupt
+                proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True)
+                held.watch(proc)
+                code = _wait(proc)
+                if interrupted:
+                    raise KeyboardInterrupt  # 記録に interrupted を残す
+        except slots.Stopped as exc:
+            return _stopped_from(exc)
+        except KeyboardInterrupt:
+            return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     if held.note:
         print(held.note, file=sys.stderr)
     return code
