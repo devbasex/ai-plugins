@@ -1,8 +1,8 @@
 # #2963 の詳細設計: 判断の関数・耐久の層・検査の規則と、11 本の子 Issue のファイルと関数
 
-設計文書 [issue-2963-design.md](issue-2963-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。決定の番号（決定 1〜16）は [issue-2963-design-decisions.md](issue-2963-design-decisions.md) を、子 Issue の名前（`RF1`〜`RF8`）と不変条件（I1〜I13）は設計文書を指す。
+設計文書 [issue-2963-design.md](issue-2963-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。決定の番号（決定 1〜16）は [issue-2963-design-decisions.md](issue-2963-design-decisions.md) を指す。子 Issue の名前（`RF1`〜`RF8`）と不変条件（I1〜I13）は設計文書を指す。
 
-子 Issue の行と流す順序は、#1142 の頭の詳細設計 [issue-1142-design-detail.md](issue-1142-design-detail.md) の「実装計画」と「流す順序」へ入れた。この文書は 11 本の子 Issue の中のファイルと関数だけを持つ。
+子 Issue の行と流す順序は、#1142 の頭の詳細設計の「実装計画」と「流す順序」へ入れた（[issue-1142-design-detail.md](issue-1142-design-detail.md) ）。この文書は 11 本の子 Issue の中のファイルと関数だけを持つ。
 
 行番号は 2026-11-13 のworktree（develop c256d27a8 の上の設計のブランチ）のもので、着手の時点で数え直す。
 
@@ -53,7 +53,12 @@ scripts/
 docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria.md (RF2)
 ```
 
-**依存の向き。** 判断のモジュール（名前が `_decide.py` で終わるもの）と `lib/decide_loop.py` は、`durable`・`dbos`・プロセスとファイルを扱う部品を読まず、ほかのどのモジュールからも読まれる側に立つ。耐久の層（`supervise_lib/flow.py`・`lib/parallel_run.py`）は `durable` と判断のループと判断のモジュールの 3 つを読み、判断のモジュールは耐久の層を読まない。`supervise_lib` は `commands → flow → engine・queue → _decide のモジュール` の一方向で、`engine` と `queue` は `flow` を読まない（決定 3）。検査の側は `check-script-structure.py`・`check-ndf-contracts.py → scripts/lib/parsed.py` の一方向で、`parsed.py` はほかの検査のモジュールを読まない。この向きで輪は生じない。
+**依存の向き。** この向きで輪は生じない。
+
+- 判断のモジュール（名前が `_decide.py` で終わるもの）と `lib/decide_loop.py` は、`durable`・`dbos`・プロセスとファイルを扱う部品を読まない。ほかのどのモジュールからも読まれる側に立つ
+- 耐久の層（`supervise_lib/flow.py`・`lib/parallel_run.py`）は、`durable` と判断のループと判断のモジュールの 3 つを読む。判断のモジュールは耐久の層を読まない
+- `supervise_lib` は `commands → flow → engine・queue → _decide のモジュール` の一方向である。`engine` と `queue` は `flow` を読まない（決定 3）
+- 検査の側は `check-script-structure.py`・`check-ndf-contracts.py → scripts/lib/parsed.py` の一方向である。`parsed.py` はほかの検査のモジュールを読まない
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -335,7 +340,7 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `queue_decide.blocked_reason` | 前提の結果が `完了` でない（承認ゲートを含む） | 「前提のプランが完了でない: <名前>（<結果>）」 |
 | `queue_decide.blocked_reason` | すべての前提が `完了` | None（流す） |
 
-**再開の前置き（`queue_decide.resume_prelude`）。** `RESUME_ALWAYS` のステップ（`base-sync`・`deep-due`）は、前の実行の後にベースブランチや振り返りの範囲が変わりうるため、再開の開始点より前にあれば毎回通す（#3114・#3047）。
+**再開の前置き（`queue_decide.resume_prelude`）。** `RESUME_ALWAYS` のステップ（`base-sync`・`deep-due`）は、再開の開始点より前にあれば毎回通す（#3114・#3047）。前の実行の後に、ベースブランチや振り返りの範囲が変わりうるためである。
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
@@ -387,9 +392,14 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `stage_cd` | `cd-result`・`cd-guidance`・`record` | `_published`・`_sweep_candidates`・`_emit_record`・`record_promote`・`record_merged`・`_cd_revision` |
 | `stage_verify` | `run`・`check` | 無し（宣言の手順 `declared_steps` を確かめて流す。本番の手順もリリース後テストの手順も同じ部品で流し、どちらを流すかは引数 `--stage` が決める） |
 
-2 つ以上の段階が使う関数は、最初に使う段階に置き、ほかの段階はそこを読む。段階のモジュールどうしの向きは `stage_production → stage_present`・`stage_cd → stage_production` の一方向で、輪を作らない（`lazy-cycle` が確かめる）。
+2 つ以上の段階が使う関数は、最初に使う段階に置き、ほかの段階はそこを読む。段階のモジュールどうしの向きは `stage_production → stage_present`・`stage_cd → stage_production` の一方向である。輪を作らないことは `lazy-cycle` が確かめる。
 
-**規則 `decide-pure` が見るもの。** 名前が `_decide.py` で終わるモジュールの import のうち `DECIDE_FORBIDDEN_IMPORTS` に入る部品と、関数の呼び出しのうち `DECIDE_FORBIDDEN_CALLS` に入る名前を違反にする。import は直に読むものだけを見て、たどらない。判断のモジュールが読んでよい部品は、標準ライブラリの計算の部品（`dataclasses`・`typing`・`collections`・`itertools`・`datetime`・`pathlib` の純粋なパスの計算）と、ほかの判断のモジュールと `decide_loop` である。
+**規則 `decide-pure` が見るもの。** 対象は名前が `_decide.py` で終わるモジュールで、次の 2 つを違反にする。
+
+- import のうち、`DECIDE_FORBIDDEN_IMPORTS` に入る部品
+- 関数の呼び出しのうち、`DECIDE_FORBIDDEN_CALLS` に入る名前
+
+import は直に読むものだけを見て、たどらない。判断のモジュールが読んでよい部品は、標準ライブラリの計算の部品・ほかの判断のモジュール・`decide_loop` の 3 つである。標準ライブラリの計算の部品は、`dataclasses`・`typing`・`collections`・`itertools`・`datetime`・`pathlib` の純粋なパスの計算を指す。
 
 - 繰り返しの終わる条件: 判断のループは判断の関数が終わりの手を返すまで回る。遷移の判断は数えた回数の上限（プランの `上限`）で必ず終わり、見回りの判断は手順が値を返すか止める依頼で終わる（止める依頼の後の手順は `_handle_stop` が値を返す）
 - 計算量の注意: `peak_load` は終わっていないレーンの組を全部たどる（レーン n 本で 2 の n 乗）。上限 `named_limit` を超えるレーンの数のときは全部の和を返して上限の誤りにする。`strong_components` はファイル数と辺の数に比例する（Tarjan の方法）
