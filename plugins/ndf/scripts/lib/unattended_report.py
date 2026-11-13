@@ -243,13 +243,20 @@ def _material_errors(text: str, m: re.Match, items: dict[str, str], form: Report
     if _absent(got):
         return []
     if got == mat.body:
-        before = text[: m.start()]
-        if any(line.strip() == mat.heading for line in before.splitlines()):
-            return []
-        return [ERR_NO_MATERIAL_HEADING.format(**asdict(mat))]
-    if all(w.startswith(mat.url_prefix) and len(w) > len(mat.url_prefix) for w in got.split()):
+        return [] if _has_heading(text, m, mat.heading) else [ERR_NO_MATERIAL_HEADING.format(**asdict(mat))]
+    if _is_url_list(got, mat.url_prefix):
         return []
     return [ERR_BAD_MATERIAL.format(**asdict(mat), value=got)]
+
+
+def _has_heading(text: str, m: re.Match, heading: str) -> bool:
+    """結果の行 `m` より前に、前後の空白を除くと `heading` になる行があるか。"""
+    return any(line.strip() == heading for line in text[: m.start()].splitlines())
+
+
+def _is_url_list(got: str, prefix: str) -> bool:
+    """空白で区切った語がどれも `prefix` で始まり、`prefix` より長いか。"""
+    return all(w.startswith(prefix) and len(w) > len(prefix) for w in got.split())
 
 
 def report_errors(text: object, form: ReportForm) -> list[str]:
