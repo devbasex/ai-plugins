@@ -65,6 +65,30 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
     return path
 
 
+def _answer_hold(plan: Path, start: Optional[str], inp: dict) -> Optional[dict]:
+    """答え待ちの停止（#2707）の範囲にあるレーンで、新しい承認を生むプランなら流さず `gate`（`metrics.answer_hold`）で返す。
+
+    `supervise.py run` は停止を読まないため、キューの開始の判定（`parallel_hold.plan_hold`）と同じ判定をここで打つ。"""
+    import os
+    import shlex
+
+    import parallel_hold
+
+    lane = os.environ.get("NDF_RELAY_NAME")
+    if not lane:
+        return None
+    try:
+        doc = json.loads(Path(plan).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        doc = None
+    reason, _ = parallel_hold.plan_hold(lane, doc if isinstance(doc, dict) else None, start)
+    got = parallel_hold.skip_of(reason)
+    if got is None:
+        return None
+    park = f"python3 {shlex.quote(str(PARALLEL))} park {shlex.quote(got['plan'])} --lane {shlex.quote(got['lane'])} --table {shlex.quote(inp['table'])}"
+    return _act_report("ndf.plan", "gate", reason, plan=str(plan), answer_hold=got, park=park)
+
+
 def act_plan(inp: dict, args: dict) -> dict:
     """工程のプランを作り、`supervise.py run` で流す。承認と判断のゲートは `gate` で返す。"""
     work = Path(inp.get("work") or Path.cwd())
@@ -74,6 +98,9 @@ def act_plan(inp: dict, args: dict) -> dict:
         plan = Path(resume["plan"]) if resume else _plan_doc(inp, args, work)
     except RuntimeError as e:
         return _act_report("ndf.plan", "stopped", str(e))
+    held = _answer_hold(plan, resume["step"] if resume else None, inp)
+    if held is not None:
+        return held
     cmd = [sys.executable, str(SUPERVISE), "run", str(plan)] + (["--from", resume["step"]] if resume else [])
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=inp.get("cwd"))
     last = (p.stdout.strip().splitlines() or ["{}"])[-1]

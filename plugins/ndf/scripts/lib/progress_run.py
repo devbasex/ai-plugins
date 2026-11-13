@@ -189,6 +189,8 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
             answer = _wait_answer(tid, rev, key, {"stage": stage.name, "kind": act.kind, **({"next_step": hint} if hint else {})})
         res = step_activity(tid, rev, asdict(act), inp, answer)
         out = res["output"]
+        if out.get("status") == "gate" and (out.get("metrics") or {}).get("answer_hold"):  # 答え待ちの停止: 行を失敗にせず止まる
+            return "hold", {"row": key, "summary": out.get("summary"), **{k: out["metrics"][k] for k in ("answer_hold", "park")}}
         if out.get("status") == "gate":  # プランの中の承認と判断のゲート（詳細設計の act_plan の行）
             step_ = (out.get("metrics") or {}).get("gate_step")
             got = answer or _wait_answer(tid, rev, key, {"stage": stage.name, "kind": "plan-gate", "step": step_})
@@ -218,6 +220,8 @@ def _run_stage(ctx: dict, stage, children: tuple, rows: dict) -> tuple[str, Any]
         if r is None or r.state != pm.RUNNING:
             step_append(tid, [_wf_draft(wid, rev, "started", child)])
         status, got = _run_activities(ctx, stage, child, rows)
+        if status == "hold":
+            return status, got
         if status != "ok":
             step_append(tid, [_wf_draft(wid, rev, "failed", child, reason=got)])
             return status, got
@@ -272,6 +276,8 @@ def sprint_workflow(table_id: str, rev: int, stale: Optional[dict]) -> dict:
             step_append(table_id, [_wf_draft(wid, rev, "started", a.row)])
         step_record(table_id, a.row, "start")
         status, got = _run_stage(ctx, stage, children, rows)
+        if status == "hold":  # 行は実行中のまま残し、停止が解けた後の next が同じ行から続ける
+            return {"status": "hold", "row": a.row, **got}
         if status != "ok":
             step_append(table_id, [_wf_draft(wid, rev, "failed", a.row, reason=str(got)[:500])])
             return {"status": "stopped", "failed": [a.row], "reason": got}
@@ -309,6 +315,16 @@ def progress_report(status: str, summary: str, items: Optional[list] = None, **m
 def _run_report_of(table_id: str, out: dict) -> tuple[dict, int]:
     if out.get("status") == "ok":
         return progress_report("ok", "スプリントの進行表が完了した", table=table_id, next_row=out.get("next_row")), 0
+    if out.get("status") == "hold":  # 答え待ちの停止（#2707）: park の 1 行で止まり、解けたら next を打ち直す
+        item = {"kind": "answer_hold", "row": out.get("row"), **(out.get("answer_hold") or {})}
+        return progress_report(
+            "gate",
+            f"答え待ちの停止のため {out.get('row')} を流さなかった。{out.get('park')} を打つ",
+            [item],
+            table=table_id,
+            answer_hold=out.get("answer_hold"),
+            park=out.get("park"),
+        ), 10
     if out.get("plan_cancelled"):
         return progress_report("stopped", "計画が中止された。progress.py cancel を打つ", table=table_id, plan_cancelled=True), 3
     items = [{"row": r, "kind": "failed"} for r in out.get("failed") or []]

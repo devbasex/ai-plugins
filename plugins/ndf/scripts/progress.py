@@ -88,8 +88,23 @@ def _read_input_json(path: str | None, what: str) -> dict | None:
 
 
 def cmd_new(a, store: pdb.Store) -> tuple[dict, int]:
-    """スプリントの進行表を作り、要求とモード判定に終了の印を付ける（F2）。"""
+    """スプリントの進行表を作り、要求とモード判定に終了の印を付ける（F2）。
+
+    何かを書く前に、計画の外のセッションの判定（`parallel_guard`。#2733 の I9）と、pace: fast / auto を使ってよい条件
+    （`supervise_lib.pace_gate`）を通す。"""
     root = Path.cwd()
+    import parallel_guard
+
+    blocked = parallel_guard.entry_check(str(root), getattr(a, "outside_plan", None), "progress.py new")
+    if blocked is not None:
+        code = blocked.pop("exit")
+        return blocked, code
+    from supervise_lib import pace_gate
+
+    if why := pace_gate.pace_refusal(str(root), a.mode, a.pace, getattr(a, "state", None)):
+        rep = _cli_report("stopped", f"pace: {a.pace} を使えない: {why}。進行表を作らない", pace=a.pace)
+        rep["next"] = "--pace normal で打ち直すか、条件を満たしてから打ち直す"
+        return rep, EXIT_PRECONDITION
     snap = wd.load_mode_definition(a.mode)
     project = _project(root)
     declared = (project.get("workflow") or {}).get("stages") or {}
@@ -381,7 +396,9 @@ def main(argv: list[str] | None = None) -> "NoReturn":  # noqa: F821
     n.add_argument("name")
     n.add_argument("--mode", required=True, choices=wd.MODES)
     n.add_argument("--issues", type=int, nargs="+", required=True)
-    n.add_argument("--pace", default="normal")
+    n.add_argument("--pace", default="normal", choices=("normal", "fast", "auto"))
+    n.add_argument("--state", help="スプリントの状態（pace: fast / auto の承認の記録を読む）")
+    n.add_argument("--outside-plan", dest="outside_plan", help="動いている計画があるマシンで、計画の外として起動する理由")
     n.add_argument("--lane")
     n.add_argument("--row", type=int)
     n.add_argument("--disable", action="append", default=[])

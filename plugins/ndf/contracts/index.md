@@ -57,7 +57,7 @@
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `plan-json` | `plan.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `plan-md` | `plan.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |

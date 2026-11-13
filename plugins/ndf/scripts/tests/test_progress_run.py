@@ -32,6 +32,9 @@ CHILD = textwrap.dedent(
     def plan(inp, args):
         with open(log, "a") as f:
             f.write(inp["stage"] + "\\n")
+        if inp["stage"] == {hold!r} and not __import__("os").path.exists(log + ".released"):
+            m = {{"answer_hold": {{"plan": "p", "lane": "l"}}, "park": "python3 parallel.py park p --lane l --table t"}}
+            return {{"tool": "ndf.plan", "status": "gate", "summary": "答え待ちの停止のため流さなかった: p l", "items": [], "metrics": m}}
         if inp["stage"] == {fail!r}:
             return {{"tool": "ndf.plan", "status": "stopped", "summary": "落ちた", "items": [], "metrics": {{}}}}
         return {{"tool": "ndf.plan", "status": "ok", "summary": "済んだ", "items": [], "metrics": {{}}}}
@@ -76,9 +79,9 @@ def _new(store, name, mode, lane=None, row=None):
     return tid
 
 
-def _next(tmp, url, tid, fail="", version=""):
-    script = tmp / f"child-{fail or 'ok'}-{version or 'src'}.py"
-    script.write_text(CHILD.format(lib=str(LIB), log=str(tmp / "calls.log"), fail=fail, version=version))
+def _next(tmp, url, tid, fail="", version="", hold=""):
+    script = tmp / f"child-{fail or 'ok'}-{version or 'src'}-{hold or 'run'}.py"
+    script.write_text(CHILD.format(lib=str(LIB), log=str(tmp / "calls.log"), fail=fail, version=version, hold=hold))
     p = subprocess.run([sys.executable, str(script), url, tid], capture_output=True, text=True, timeout=300)
     return json.loads(p.stdout.strip().splitlines()[-1]), p.returncode
 
@@ -243,3 +246,20 @@ def test_stale_version_execution_is_cancelled_and_running_rows_fail(world):
         rows = pm.fold(pdb.read_progress_events(c, tid), 1)
     assert all(rows[k].state == pm.FAILED for k in running)
     assert _executions(store, tid)[-1] != old
+
+
+def test_answer_hold_returns_gate_and_keeps_row_running(world):
+    """答え待ちの停止（#2707）: 新しい承認を生むプランは流さず gate と park の 1 行で返し、行を失敗にしない。解けたら同じ行から続ける。"""
+    tmp, url, store = world
+    tid = _new(store, "h", "light")
+    rep, code = _next(tmp, url, tid, hold="実装")
+    assert code == 10 and rep["status"] == "gate", rep
+    assert rep["items"][0]["kind"] == "answer_hold" and "park" in rep["metrics"]["park"]
+    with pdb.transaction(store) as c:
+        rows = pm.fold(pdb.read_progress_events(c, tid), 1)
+    assert rows["実装"].state == pm.RUNNING
+    (tmp / "calls.log.released").write_text("")
+    rep, code = _next(tmp, url, tid, hold="実装")
+    assert code == 10 and rep["items"][0]["row"] == "デプロイ/release", rep  # 停止が解けたら実装から続け、デプロイの待ちまで進む
+    with pdb.transaction(store) as c:
+        assert pm.fold(pdb.read_progress_events(c, tid), 1)["実装"].state == pm.FINISHED

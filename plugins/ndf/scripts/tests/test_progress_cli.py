@@ -154,3 +154,11 @@ def test_lane_rows_and_carry_dropped(env):
     rep, code = run(env, "lane", "cancel-row", lane, "--row", "1", "--reason", "x")
     assert code == 3 and "I12a" in rep["summary"]
     assert run(env, "lane", "add-row", lane, "--issues", "9", "--reason", "足す")[1] == 0
+
+
+def test_new_refuses_fast_without_pace_declaration(env):
+    """pace: fast / auto は、宣言（.ndf/pace.json）と承認の記録が無ければ進行表を作らない。"""
+    rep, code = run(env, "new", "fast1", "--mode", "standard", "--issues", "1", "--pace", "fast")
+    assert code == 3 and rep["status"] == "stopped" and "pace.json" in rep["summary"], rep
+    rep, code = run(env, "new", "fast1", "--mode", "standard", "--issues", "1")
+    assert code == 0, rep  # 断ったときは何も書いていない

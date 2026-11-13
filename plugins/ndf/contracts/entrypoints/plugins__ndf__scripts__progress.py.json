@@ -85,9 +85,11 @@
           "--judgment",
           "--lane",
           "--mode",
+          "--outside-plan",
           "--pace",
           "--requirements",
-          "--row"
+          "--row",
+          "--state"
         ],
         "positionals": [
           "name"
@@ -205,6 +207,7 @@
     "approved-txt",
     "breakdown-md",
     "checkpoint-json",
+    "outside-plan-jsonl",
     "plan-json",
     "plan-md",
     "present-json",
