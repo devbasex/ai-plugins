@@ -2176,7 +2176,7 @@
       "term": "構造チェック",
       "code": "structure_check",
       "context": "ndf-workflow",
-      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
+      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数えるCI のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
@@ -3399,7 +3399,7 @@
     {
       "term": "ジョブの識別子",
       "context": "ndf-workflow",
-      "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
+      "meaning": "CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
@@ -3442,7 +3442,7 @@
     {
       "term": "宣言に無いジョブ",
       "context": "ndf-cross-refactoring",
-      "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
+      "meaning": "CI のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
       "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
@@ -5955,7 +5955,7 @@
     {
       "term": "一致の検査",
       "context": "ndf-issue-upkeep",
-      "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。継続的統合で動く",
+      "meaning": "記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。CI で動く",
       "source": "docs/specifications/ndf-issue-items.md"
     },
     {
