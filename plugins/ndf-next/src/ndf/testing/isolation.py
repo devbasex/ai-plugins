@@ -22,16 +22,18 @@ from pathlib import Path
 
 import pytest
 
+from ndf.testing import slots
+
 # 一時ディレクトリへ向ける環境変数（値は一時ディレクトリの下の名前）
 REDIRECTED_ENV = {
     "XDG_STATE_HOME": "state",
     "XDG_CACHE_HOME": "cache",
     "XDG_CONFIG_HOME": "config",
     "XDG_DATA_HOME": "data",
-    "NDF_TEST_SLOTS_DIR": "test-slots",
+    slots.SLOTS_DIR_ENV: "test-slots",
 }
 # テストの間は外す環境変数（ほかのプラグインの根・実行中の工程の識別子）
-REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", "NDF_TEST_SLOT_HELD")
+REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", slots.HELD_ENV)
 # ホームの下の本物の置き場
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 
