@@ -33,6 +33,11 @@ def split_commands(text: str) -> list[list[str]]:
         tokens = list(lexer)
     except ValueError:
         return []
+    return _group_tokens(tokens)
+
+
+def _group_tokens(tokens: list[str]) -> list[list[str]]:
+    """字句の並びを、区切りで単純コマンドへ分ける。リダイレクトとその先の語・記述子の番号は除く。"""
     commands: list[list[str]] = [[]]
     i = 0
     while i < len(tokens):
