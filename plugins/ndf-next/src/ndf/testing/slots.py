@@ -397,7 +397,7 @@ def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> N
         log.warning("枠の記録を書けない", extra={"error": str(exc), "result": result})
 
 
-def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, poll: float, read_memory: ReadMemory, held: Held) -> FileLock | None:
+def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, held: Held) -> FileLock | None:
     """空いた枠を取り、メモリが下限以上になるまで待つ。待ちの上限は枠待ちとメモリ待ちの合計で数える。"""
     start = time.monotonic()
     deadline = start + limits.wait_limit_seconds
@@ -406,14 +406,14 @@ def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, poll: float,
         while True:
             if lock is None:
                 lock = _take_free_slot(directory, cwd, limits.max_runs, held)
-            if lock is not None and _memory_ready(held, read_memory, limits.memory_floor_mib):
+            if lock is not None and _memory_ready(held, held._read_memory, limits.memory_floor_mib):
                 return lock
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if lock is not None:
                     _release(directory, held, lock)
                 return None
-            time.sleep(min(poll, remaining))
+            time.sleep(min(held._poll, remaining))
     finally:
         end = time.monotonic()
         held.waited_seconds = end - start
@@ -449,7 +449,7 @@ def _release(directory: Path, held: Held, lock: FileLock) -> None:
 
 def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll: float, read_memory: ReadMemory) -> Iterator[Held]:
     held = Held(_directory=directory, _floor_mib=limits.memory_floor_mib, _poll=poll, _read_memory=read_memory)
-    lock = _acquire(directory, cwd, limits, poll, read_memory, held)
+    lock = _acquire(directory, cwd, limits, held)
     if lock is None:
         held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
@@ -466,7 +466,7 @@ def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll
         if held.memory_stopped:
             result = MEMORY_STOPPED
         else:
-            held.available_mib = read_memory()
+            held.available_mib = held._read_memory()
         _release(directory, held, lock)
         _record(directory, cwd, kind, held, result)
     if result == MEMORY_STOPPED:
