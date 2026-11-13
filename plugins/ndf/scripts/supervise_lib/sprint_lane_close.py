@@ -25,7 +25,7 @@ from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, PARALLEL_PY
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_steps
+from supervise_lib.release_verify import release_verify_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
 from supervise_lib.sprint_routes import RECORD_FOUND
 from supervise_lib.verify_steps import merge_steps

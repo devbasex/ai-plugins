@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/supervise_lib/release_templates.py", "name": "", "kind": "lines", "reason": "PR #3272 の cross-refactoring（I-004）で、plan_release_package_plugin の dev と CD の有無の真偽値の組を種類（RELEASE_KINDS）の表へ置き換え、表の行・種類ごとの承認の手順の関数・引数の組（_KindArgs）を足した時点で 500 行を超えた（置き換えの前は 499 行）。表の関数は同じファイルの手順を呼ぶため別のモジュールへ移すと循環する。500 行以下にしたら消す", "lines": 561}

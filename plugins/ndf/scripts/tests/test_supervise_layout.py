@@ -325,15 +325,18 @@ def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("cd", [True, False])
 def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monkeypatch, cd):
-    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。"""
+    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。CD の無い
+    場合は今のまま（全体テストを手元で流す戦略なら置く）。このリポジトリは全体テストを CI に任せる戦略（local-scoped-ci-whole）で
+    CD の有無によらず外れるため、全体テストを手元で流す別のリポジトリで比べる。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(PKG.parent / "lib"))
     import inproc
     import release_case
+    from test_supervise import foreign_repo
 
     decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
-    root = SUPERVISE.parents[3]
+    root = foreign_repo(tmp_path, {"version": 1, "test": {"command": "npm test -- {paths}", "all": "src"}})
     out = tmp_path / "check.json"
     p = inproc.run(SUPERVISE, "new", "check", "--since-last", "--id", "m-1", "--worktree", str(root), "--out", str(out), cwd=root)
     assert p.returncode == 0, p.stdout + p.stderr
