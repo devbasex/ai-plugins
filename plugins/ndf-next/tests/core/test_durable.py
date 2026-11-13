@@ -47,9 +47,14 @@ def flow(start: list[int]) -> list[int]:
     return loop.run(decide, perform, start)
 
 
+def _sqlite_url(directory: Path, name: str) -> str:
+    """記録の置き場を durable へ渡す SQLite の URL。"""
+    return f"sqlite:///{directory / name}"
+
+
 @pytest.fixture
 def launched(tmp_path):
-    url = f"sqlite:///{tmp_path / 'durable.sqlite'}"
+    url = _sqlite_url(tmp_path, "durable.sqlite")
     performed.clear()
     durable.launch(url, "test", "durable-test")
     yield url
@@ -83,7 +88,7 @@ def _crash_run(url: str, log: Path, crash_at: int) -> subprocess.CompletedProces
 
 
 def test_recovery_continues_without_rerunning_finished_steps(tmp_path):
-    url = f"sqlite:///{tmp_path / 'crash.sqlite'}"
+    url = _sqlite_url(tmp_path, "crash.sqlite")
     log = tmp_path / "acts.log"
 
     first = _crash_run(url, log, crash_at=3)
