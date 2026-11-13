@@ -101,7 +101,7 @@ Factory の実行ジョブ（環境変数 `NDF_FACTORY_RUN` が空でない `cla
 | 場面 | 区間 | 結果の値と添えるもの |
 | --- | --- | --- |
 | 区分の無い問い（`.ndf/` をコミットするか・次のコマンドを流してよいか など） | 終えない | 自分で決め、`ask.py decide --question` で記録して続ける |
-| 承認ゲート（pace が MVV 判定で通さないとき） | 終える | `判断が要る`。区分 `ndf-gate:<番号>`・承認ゲート・Pull Request・材料 |
+| 承認ゲート（pace が MVV 判定で通さないとき） | 終える | `判断が要る`。区分 `ndf-gate:<番号>`・承認ゲート・材料。`ndf-gate:1` は Pull Request も（`ndf-gate:2` は Pull Request が無ければ `無し`） |
 | 承認を求める区分の問い（`redline`・`cost`・`irreversible`・`legal`・`extra` の区分） | 終える | `判断が要る`。区分・問い・材料 |
 | 人の操作が要る問い（`ndf-ask:human-action`） | 終える | `できなかった`。区分・人に頼むこと・理由 |
 | 工程を最後まで通した・カットポイント | 終える | `完了`。カットポイントでは `ndf-next` のブロックを添える |

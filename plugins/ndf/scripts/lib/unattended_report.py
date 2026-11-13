@@ -15,8 +15,9 @@ from pathlib import Path
 import jsonio
 
 FORM_PATH = Path(__file__).resolve().parents[2] / "contracts" / "forms" / "unattended-report.json"
-RESULT_RE = re.compile(r"^\s*-\s*結果:\s*(.*?)\s*$", re.MULTILINE)
-ITEM_RE = re.compile(r"^\s*-\s*([^:\n]+?):\s*(.*?)\s*$", re.MULTILINE)
+# 行内の空白は `[ \t]` だけにする（`\s` は改行を含み、空の値を次の行の文字列で補ってしまう）
+RESULT_RE = re.compile(r"^[ \t]*-[ \t]*結果:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+ITEM_RE = re.compile(r"^[ \t]*-[ \t]*([^:\n]+?):[ \t]*(.*?)[ \t]*$", re.MULTILINE)
 NONE_VALUE = "無し"
 
 ERR_NO_RESULT = "結果の行が無い"

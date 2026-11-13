@@ -13,7 +13,10 @@
     "required": {
       "判断が要る": {
         "always": ["区分", "問い", "材料"],
-        "when": [{"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート", "Pull Request"]}]
+        "when": [
+          {"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート"]},
+          {"item": "区分", "equals": "ndf-gate:1", "need": ["Pull Request"]}
+        ]
       },
       "完了": {"always": [], "when": []},
       "できなかった": {
@@ -76,6 +79,16 @@
       "text": "## 判断の材料\n\n設計の要点。\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-gate:1\n- 承認ゲート: 設計 Pull Request のマージ\n- 問い: 設計 Pull Request をマージしてよいか\n- Pull Request: 無し\n- 材料: 本文\n",
       "result": "判断が要る",
       "errors": ["「Pull Request」が無いか無しになっている（結果が 判断が要る のとき要る）"]
+    },
+    {
+      "text": "## 判断の材料\n\n本番の系へ出す版と手順。\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-gate:2\n- 承認ゲート: 本番の系へ届く操作\n- 問い: 本番の系へ出してよいか\n- Pull Request: 無し\n- 材料: 本文\n",
+      "result": "判断が要る",
+      "errors": []
+    },
+    {
+      "text": "## 判断の材料\n\n履歴を書き換える範囲。\n\n## 区間の報告\n\n- 結果: 判断が要る\n- 課題: #12\n- 区分: ndf-ask:redline:C4\n- 問い:\n- Pull Request: 無し\n- 材料: 本文\n",
+      "result": "判断が要る",
+      "errors": ["「問い」が無いか無しになっている（結果が 判断が要る のとき要る）"]
     },
     {
       "text": "## 区間の報告\n\n- 結果: できなかった\n- 課題: #5\n- 区分: ndf-ask:human-action\n- 人に頼むこと: 無し\n- 理由: 外部の系の手動確認が要る\n",
