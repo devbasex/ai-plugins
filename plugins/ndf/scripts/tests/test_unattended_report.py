@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -106,14 +107,14 @@ def test_report_items_reads_after_the_last_result_line():
 )
 def test_the_material_is_the_body_or_https_urls(material, before, errors):
     text = f"{before}## 区間の報告\n\n- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 払ってよいか\n- 材料: {material}\n"
-    mat = FORM.material
+    mat = asdict(FORM.material)
     want = {"NO_HEADING": ur.ERR_NO_MATERIAL_HEADING.format(**mat), "BAD": ur.ERR_BAD_MATERIAL.format(**mat, value=material)}
     assert ur.report_errors(text, FORM) == [want[e] for e in errors]
 
 
 def test_a_material_heading_after_the_report_does_not_count():
     text = "## 区間の報告\n\n- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 払ってよいか\n- 材料: 本文\n\n## 判断の材料\n"
-    assert ur.report_errors(text, FORM) == [ur.ERR_NO_MATERIAL_HEADING.format(**FORM.material)]
+    assert ur.report_errors(text, FORM) == [ur.ERR_NO_MATERIAL_HEADING.format(**asdict(FORM.material))]
 
 
 def test_a_gate_needs_the_gate_name_and_the_pull_request():
@@ -135,15 +136,20 @@ def _req(value: str, row) -> dict:
     return _shape(required={**REQ, value: row})
 
 
+def _cond(w: dict) -> ur.Condition:
+    """形の宣言の when の 1 つを、読み手の `Condition` にしたもの。"""
+    return ur.Condition(item=w["item"], need=tuple(w["need"]), prefix=w.get("prefix"), equals=w.get("equals"))
+
+
 def test_form_from_dict_turns_the_plugin_shape_into_the_reader_form():
     form = ur.form_from_dict(REPORT)
     assert form.values == ("判断が要る", "完了", "できなかった")
     assert form.items == tuple(SHAPE["items"])
-    assert form.material == MAT and form.material is not MAT
+    assert asdict(form.material) == MAT
     assert list(form.required) == list(REQ)
     for value, row in REQ.items():
-        assert form.required[value]["always"] == tuple(row["always"])
-        assert form.required[value]["when"] == tuple({**w, "need": tuple(w["need"])} for w in row["when"])
+        assert form.required[value].always == tuple(row["always"])
+        assert form.required[value].when == tuple(_cond(w) for w in row["when"])
     assert form == FORM
 
 
@@ -157,14 +163,14 @@ def test_form_from_dict_keeps_the_declared_order_and_accepts_equals_conditions()
     )
     form = ur.form_from_dict(data)
     assert form.values == ("b", "a")
-    assert form.required["a"] == {"always": ("理由", "課題"), "when": ({"item": "区分", "equals": "x", "need": ("問い",)},)}
-    assert form.required["b"]["when"] == ({**WHEN, "need": ("承認ゲート",)},)
+    assert form.required["a"] == ur.Requirement(always=("理由", "課題"), when=(_cond({"item": "区分", "equals": "x", "need": ("問い",)}),))
+    assert form.required["b"].when == (_cond({**WHEN, "need": ("承認ゲート",)}),)
 
 
 def test_form_from_dict_accepts_an_empty_need_as_it_is_now():
     """現状: when.need の空の並びは通る（_strs が空の並びを拒まない。「空でない」の文言と食い違う。不具合の疑い）。"""
     form = ur.form_from_dict(_req("完了", {"always": [], "when": [{**WHEN, "need": []}]}))
-    assert form.required["完了"]["when"] == ({**WHEN, "need": ()},)
+    assert form.required["完了"].when == (_cond({**WHEN, "need": ()}),)
 
 
 @pytest.mark.parametrize(

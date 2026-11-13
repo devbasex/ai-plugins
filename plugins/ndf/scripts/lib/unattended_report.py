@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import jsonio
@@ -33,13 +33,45 @@ class FormError(ValueError):
 
 
 @dataclass(frozen=True)
+class Condition:
+    """値ごとに要る項目の条件（`when` の 1 つ）。項目 `item` の値が `prefix` で始まるか `equals` と同じなら `need` が要る。"""
+
+    item: str
+    need: tuple[str, ...]
+    prefix: str | None = None
+    equals: str | None = None
+
+    def matches(self, items: dict[str, str]) -> bool:
+        got = items.get(self.item, "")
+        return got.startswith(self.prefix) if self.prefix is not None else got == self.equals
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """結果の値 1 つに要る項目（`shape.required` の 1 行）。"""
+
+    always: tuple[str, ...]
+    when: tuple[Condition, ...]
+
+
+@dataclass(frozen=True)
+class Material:
+    """材料の書き方（`shape.material`）。項目 `item` は本文 `body`（見出し `heading` の節）か `url_prefix` の URL。"""
+
+    item: str
+    body: str
+    heading: str
+    url_prefix: str
+
+
+@dataclass(frozen=True)
 class ReportForm:
     """形の宣言（`shape`）を読み手が使う形にしたもの。"""
 
     values: tuple[str, ...]
     items: tuple[str, ...]
-    material: dict[str, str]
-    required: dict[str, dict]
+    material: Material
+    required: dict[str, Requirement]
 
 
 def load_form(path: Path = FORM_PATH) -> ReportForm:
@@ -57,7 +89,7 @@ def _strs(value: object, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _when(rows: object, where: str, items: tuple[str, ...]) -> tuple[dict, ...]:
+def _when(rows: object, where: str, items: tuple[str, ...]) -> tuple[Condition, ...]:
     if not isinstance(rows, list):
         raise FormError(f"shape.{where}.when は並び")
     out = []
@@ -69,7 +101,7 @@ def _when(rows: object, where: str, items: tuple[str, ...]) -> tuple[dict, ...]:
         need = _strs(row.get("need"), f"{where}.when.need")
         if not isinstance(cond, str) or row["item"] not in items or not set(need) <= set(items):
             raise FormError(f"shape.{where}.when の項目名が items に無いか、条件が文字列でない")
-        out.append({**row, "need": need})
+        out.append(Condition(item=row["item"], need=need, prefix=row.get("prefix"), equals=row.get("equals")))
     return tuple(out)
 
 
@@ -85,7 +117,7 @@ def form_from_dict(data: dict) -> ReportForm:
     items = _strs(shape.get("items"), "items")
     _check_material(material, items)
     req = _required(required, values, items)
-    return ReportForm(values=values, items=items, material=dict(material), required=req)
+    return ReportForm(values=values, items=items, material=Material(**material), required=req)
 
 
 def _check_material(material: object, items: tuple[str, ...]) -> None:
@@ -100,18 +132,18 @@ def _check_material(material: object, items: tuple[str, ...]) -> None:
         raise FormError("shape.material.item が items に無い")
 
 
-def _required(required: object, values: tuple[str, ...], items: tuple[str, ...]) -> dict[str, dict]:
-    """値ごとに要る項目（`shape.required`）を確かめ、always と when をタプルにした辞書を返す。"""
+def _required(required: object, values: tuple[str, ...], items: tuple[str, ...]) -> dict[str, Requirement]:
+    """値ごとに要る項目（`shape.required`）を確かめ、値 → `Requirement` の辞書を返す。"""
     if not isinstance(required, dict) or set(required) != set(values):
         raise FormError("shape.required のキーは shape.values と同じ集合")
-    req: dict[str, dict] = {}
+    req: dict[str, Requirement] = {}
     for value, row in required.items():
         if not isinstance(row, dict) or set(row) != {"always", "when"}:
             raise FormError(f"shape.required.{value} は always と when を持つ")
         always = _strs(row["always"], f"required.{value}.always")
         if not set(always) <= set(items):
             raise FormError(f"shape.required.{value}.always の項目名が items に無い")
-        req[value] = {"always": always, "when": _when(row["when"], f"required.{value}", items)}
+        req[value] = Requirement(always=always, when=_when(row["when"], f"required.{value}", items))
     return req
 
 
@@ -151,12 +183,10 @@ def _absent(value: str) -> bool:
 def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[str]:
     """結果の値ごとに要る項目のうち、無いか `無し` のものを宣言の順に返す。"""
     rule = form.required[value]
-    need = list(rule["always"])
-    for cond in rule["when"]:
-        got = items.get(cond["item"], "")
-        hit = got.startswith(cond["prefix"]) if "prefix" in cond else got == cond["equals"]
-        if hit:
-            need.extend(cond["need"])
+    need = list(rule.always)
+    for cond in rule.when:
+        if cond.matches(items):
+            need.extend(cond.need)
     missing: list[str] = []
     for name in need:
         if _absent(items.get(name, NONE_VALUE)) and name not in missing:
@@ -167,17 +197,17 @@ def _missing_items(value: str, items: dict[str, str], form: ReportForm) -> list[
 def _material_errors(text: str, m: re.Match, items: dict[str, str], form: ReportForm) -> list[str]:
     """材料の値が本文か URL か、本文なら見出しが区間の報告（最後の結果の行 `m`）より前にあるかを確かめる。"""
     mat = form.material
-    got = items.get(mat["item"], "")
+    got = items.get(mat.item, "")
     if _absent(got):
         return []
-    if got == mat["body"]:
+    if got == mat.body:
         before = text[: m.start()]
-        if any(line.strip() == mat["heading"] for line in before.splitlines()):
+        if any(line.strip() == mat.heading for line in before.splitlines()):
             return []
-        return [ERR_NO_MATERIAL_HEADING.format(**mat)]
-    if all(w.startswith(mat["url_prefix"]) and len(w) > len(mat["url_prefix"]) for w in got.split()):
+        return [ERR_NO_MATERIAL_HEADING.format(**asdict(mat))]
+    if all(w.startswith(mat.url_prefix) and len(w) > len(mat.url_prefix) for w in got.split()):
         return []
-    return [ERR_BAD_MATERIAL.format(**mat, value=got)]
+    return [ERR_BAD_MATERIAL.format(**asdict(mat), value=got)]
 
 
 def report_errors(text: object, form: ReportForm) -> list[str]:
