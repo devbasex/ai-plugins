@@ -99,7 +99,7 @@ erDiagram
     進行表 |o--o{ 進行表 : 親
     進行表 {
         text 識別子 PK
-        text 段
+        text 階層
         text リポジトリ
         text 名前
         text 親の識別子
@@ -118,7 +118,7 @@ erDiagram
     }
 ```
 
-親子は、計画の進行表 → レーンの進行表 → スプリントの進行表の 3 段である。DBOS の表（`dbos` のスキーマ。SQLite は同じファイル）は DBOS が持ち、この設計では作らない。
+親子は、計画の進行表 → レーンの進行表 → スプリントの進行表の 3 階層である。DBOS の表（`dbos` のスキーマ。SQLite は同じファイル）は DBOS が持ち、この設計では作らない。
 
 ### テーブル定義
 
@@ -126,7 +126,7 @@ erDiagram
 
 | 列 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
-| `id` | text | 許さない | 主キー。`<段>:<リポジトリの短い鍵>:<名前>` |
+| `id` | text | 許さない | 主キー。`<階層>:<リポジトリの短い鍵>:<名前>` |
 | `level` | text | 許さない | `plan` / `lane` / `sprint` |
 | `repo` | text | 許さない | リポジトリの識別（origin の URL。無ければメインディレクトリの絶対パス） |
 | `name` | text | 許さない | 計画名・レーン名・スプリント名 |
@@ -155,7 +155,7 @@ erDiagram
 
 ### 状態
 
-| 段 | 行の状態 | 進行表全体の状態 |
+| 階層 | 行の状態 | 進行表全体の状態 |
 | --- | --- | --- |
 | スプリント | 未着手・実行中・終了・失敗・無効・中止（要求の S5） | 実行中・完了・中止 |
 | レーン | 未着手・実行中・完了・中止 | （持たない。計画の進行表から読む） |
@@ -165,9 +165,9 @@ erDiagram
 
 I6 の正本である。進行表のモデルがこの表を定数で持ち、追記の関数が検査する。
 
-| 事象の種類 | 段 | 書ける役 | 変わる状態 |
+| 事象の種類 | 階層 | 書ける役 | 変わる状態 |
 | --- | --- | --- | --- |
-| `created`（行の並びは定義か入力から） | 全段 | conductor（スプリント・レーンの行の追加）・オーガナイザー（計画とレーンの最初の順番表） | 未着手 |
+| `created`（行の並びは定義か入力から） | 全階層 | conductor（スプリント・レーンの行の追加）・オーガナイザー（計画とレーンの最初の順番表） | 未着手 |
 | `execution`（今の実行の ID） | スプリント | 進行表のワークフロー | — |
 | `started` / `finished` / `failed` | スプリント | 進行表のワークフロー | 実行中 / 終了 / 失敗 |
 | `skipped`（無効として飛ばした） | スプリント | 進行表のワークフロー | 無効 |
@@ -179,7 +179,7 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 | `row_started` / `row_ended` | レーン | conductor（スプリントの作成）/ 進行表のワークフロー（スプリントの終わり） | 実行中 / 完了・中止 |
 | `lane_added` / `lane_changed` / `request_opened` / `request_closed` | 計画 | オーガナイザー（`request_opened` は組み換えも） | — |
 | `plan_started` / `plan_completed` / `plan_cancelled` | 計画 | オーガナイザー / 耐久ワークフロー / オーガナイザー | 実行中 / 完了 / 中止 |
-| `adopted` | 全段 | 取り込み | 終了（取り込んだ行） |
+| `adopted` | 全階層 | 取り込み | 終了（取り込んだ行） |
 
 ### CRUD 図
 
@@ -203,7 +203,13 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 
 ### 検査の手段
 
-`uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_progress_db.py -q` を、`NDF_PROGRESS_DB` を SQLite と PostgreSQL の URL に替えて 2 回流す。CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
+次のコマンドを、`NDF_PROGRESS_DB` を SQLite と PostgreSQL の URL に替えて 2 回流す。
+
+```bash
+uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_progress_db.py -q
+```
+
+CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 
 ## 入出力の契約
 
@@ -246,7 +252,7 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 | `range` | `sprint_diff` / `issue_diff` / `lane` / `none` | 入力の範囲。`review` と `test` は `sprint_diff` か `issue_diff` だけ（I9） |
 | `per_issue` | `true` | `fast` で課題ごとの子の行にする工程（決定 9） |
 
-順序の決まりの検査（I8〜I10）: モードの全工程のアクティビティを並びの順に平らにし、`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`review` の `range` が差分でなければ断る。同じ `range` の `review` が 2 つあれば断る。
+順序の決まりの検査（I8〜I10）は、モードの全工程のアクティビティを並びの順に平らにして行う。`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`review` の `range` が差分でなければ断る。同じ `range` の `review` が 2 つあれば断る。
 
 ### 入出力規約
 
@@ -283,7 +289,7 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 | `lane add` / `set` | 計画の進行表への `lane_added` / `lane_changed`。移す先の行はレーンの進行表のスクリプトを通す | 引数を保つ |
 | `stop` | 計画の進行表を中止にし、未着手の行を中止、実行中のスプリントへ中止を送る | 引数を保つ |
 | `status` | 2 つの進行表から作る（受け入れ条件 16） | 出力の形を保つ。台帳は読まない |
-| `await` | 承認の答えの送り先を `progress.py answer` と同じ口に替える | 引数を保つ |
+| `await` | 承認の答えの送り先を `progress.py answer` と同じ経路に替える | 引数を保つ |
 
 ### 環境変数と設定
 
@@ -390,7 +396,7 @@ graph TD
     K --> L
 ```
 
-依頼は計画の進行表の `request_opened` で残り、オーガナイザーが `parallel.py lane add`・`set` で応えたら `request_closed` になる（I16 の「答えていない依頼」）。要否の判定は純粋な処理で、入力の 4 種類がすべて空で、他のレーンとの触る場所の重なりが無いときだけ「変更なし」にする。
+依頼は、計画の進行表に `request_opened` で残る（I16 の「答えていない依頼」）。オーガナイザーが `parallel.py lane add`・`set` で応えたら、`request_closed` になる。要否の判定は純粋な処理で、入力の 4 種類がすべて空で、他のレーンとの触る場所の重なりが無いときだけ「変更なし」にする。
 
 ## 非機能の実現方式
 
@@ -399,7 +405,7 @@ graph TD
 | 可用性 | conductor のセッションやプロセスが途中で止まっても、再開は最後に終了の印が付いた工程（ステップ）の次から始まり、終わった工程を流し直さない | 行の状態を事象から読んで飛ばす（決定 6）。アクティビティの中の途中は DBOS の回復が続ける。持ち主は `progress.py next` の前景のプロセス（決定 7） | アクティビティの途中でプロセスを止め、`next` を打ち直して、終わったアクティビティが流れないことをテストで見る |
 | 性能・拡張性 | 組み換えの「変更なし」と、次の工程の判断は LLM を起動しない。スプリントは数時間〜数日続き、承認待ちを挟んでも進行表が状態を失わない | 次の行の選択と組み換えの要否は純粋な処理。待ちは DB に残し、プロセスを抜ける | 起動の数を数えるテストで、変更なしと次の判断で Claude の起動が 0 回であることを見る |
 | 運用・保守性 | 進行表の変更（誰が・いつ・何を・理由）は履歴へ追記だけで残し、消さない。進行表の表示は統一 JSON レポートで返す | 事象の表に更新と削除の関数を作らない（I2）。`show` は統一 JSON レポート | 追記の関数だけが表へ書くことを、書き込みの関数の呼び元の検索のテストで見る |
-| 移行性 | 今の目録 `sprint.json`・進捗記録のファイル・`plan.json`・計画の台帳から進行表への移し方と、実行中のスプリントと計画をどう扱うかは未決 1 で設計が決め、実装の Pull Request の「移行の手順」に書く | `progress.py adopt`（下の「移行」）。元のファイルは消さない | 計画 p5 の写しの `sprint.json` と `plan.json` を取り込み、`show` と `parallel.py status` が元と同じ工程の状態を出すことを見る |
+| 移行性 | 今の目録 `sprint.json`・進捗記録のファイル・`plan.json`・計画の台帳から進行表への移し方と、実行中のスプリントと計画をどう扱うかは未決 1 で設計が決め、実装の Pull Request の「移行の手順」に書く | `progress.py adopt`（下の「移行」）。元のファイルは消さない | 計画 p5 のコピーの `sprint.json` と `plan.json` を取り込み、`show` と `parallel.py status` が元と同じ工程の状態を出すことを見る |
 | システム環境 | ローカルでは追加の常駐サーバーを要さず、SQLite で動く。Factory では PostgreSQL の URL で動く。追加する依存は Serverless Workflow の Python の SDK（未決 8）だけを見込む | 既定は SQLite のファイル。足す依存は SDK ではなく `jsonschema` 1 つ（決定 3。SDK は 1.0 の書式を読めない）。SQLAlchemy は DBOS の依存として既にある | `uv.lock` の差分が `jsonschema` とその依存だけであることを PR で見る |
 
 **要求の条件と違う点**: システム環境の「追加する依存は SDK だけ」は、SDK が仕様 1.0 を読めないため `jsonschema` に替える。依存の数は 1 つで変わらない。依存の追加は要求の「境界」のとおり設計承認ゲートで人が見る。
@@ -423,7 +429,7 @@ grep -rnE 'queue --resume|--from [a-z<]|new close|new sprint|sprint-state.py nex
   plugins/ndf/skills plugins/ndf/agents plugins/ndf/scripts --include=*.md --include=*.py --include=*.sh | grep -v '/tests/'
 ```
 
-2026-11-13 の時点で、先頭の 4 語のどれかに当たるファイルは 53 件ある（`--include` を同じにして `grep -rlE` で数えた）。扱いは次の 3 つに分ける。
+2026-11-13 の時点で、正規表現の先頭の 4 つのどれかに当たるファイルは 53 件ある（`--include` を同じにして `grep -rlE` で数えた）。4 つは `queue --resume`・`--from`・`new close`・`new sprint` である。扱いは次の 3 つに分ける。
 
 | 扱い | 対象 |
 | --- | --- |

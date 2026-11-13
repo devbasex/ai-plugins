@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 工程の並びは `development-workflow` の工程表にあるが、スプリントの目録（`sprint.json`）はまとめの工程を持たず、conductor が手順書を読んでまとめ・再開・課題の持ち越しを組む。工程の有効・無効はコードの定数と手順書に散り、計画の状態は 3 か所に分かれる
+- **今どうなっているか**: 工程の並びは `development-workflow` の工程表にある。しかしスプリントの目録（`sprint.json`）はまとめの工程を持たず、conductor が手順書を読んでまとめ・再開・課題の持ち越しを組む。工程の有効・無効はコードの定数と手順書に散り、計画の状態は 3 か所に分かれる
 - **誰に効くか**: 並列の計画とスプリントを流す利用者と、その conductor・オーガナイザー
 - **変えると何が成り立つか**: モードごとの全工程を登録済みの工程の定義から進行表の行として組み、スクリプトが進行表だけを読んで次の工程を流し、出力を入出力規約で検査して終了の印を付ける。計画とレーンも進行表で持ち、振り返りの後の組み換えでスプリントの結果を計画へ戻す
 
@@ -32,7 +32,7 @@
 | NDF の開発ワークフロー（`ndf-workflow`） | 工程・アクティビティ・進行表・終了の印・組み換え・レーン・計画 |
 | Neural Development Factory（`ndf-factory`） | 進行表の画面と、PostgreSQL の進行表の DB |
 
-関係は**公開された言語**とする。進行表の DB のスキーマと進行の事象の形（[issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「データ構造」）を文書化した共通の形式として、Factory は読むだけで、書き込みは NDF の進行表のスクリプトを通す。
+関係は**公開された言語**とする。進行表の DB のスキーマと進行の事象の形（[issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「データ構造」）を、文書化した共通の形式にする。Factory はこれを読むだけで、書き込みは NDF の進行表のスクリプトを通す。
 
 ### 集約
 
@@ -194,7 +194,7 @@ DBOS の実行の記録は、実行したステップの出力だけを持つ。
 
 URL は環境変数 `NDF_PROGRESS_DB` で受け、無ければチェックアウトの状態の置き場の SQLite（`<状態の置き場>/progress/ndf-progress.sqlite`）を使う。DBOS は同じ URL を `system_database_url` に受け、実行者の ID を進行表の ID にして回復を進行表ごとに分ける。表は 2 つ（進行表・進行の事象）と表の版の 1 行で、版を上げるときは起動の時に足りない列と表を足す。SQLAlchemy は DBOS の依存として手元にあり、新しい依存にならない。
 
-DBOS の記録と進行表を別の DB に置く形は、接続先が 2 つになり Factory の設定が増えるため採らない。移行の道具（LIB5）は、新しく置く 2 つの表に比べて重いため採らない。
+DBOS の記録と進行表を別の DB に置く形は、接続先が 2 つになり Factory の設定が増えるため採らない。移行のツール（LIB5）は、新しく置く 2 つの表に比べて重いため採らない。
 
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB4 / LIB5
@@ -203,7 +203,7 @@ DBOS の記録と進行表を別の DB に置く形は、接続先が 2 つに�
 
 ### 決定 3: 定義の書式を標準どおりに検査するため、Serverless Workflow 1.0.3 の公式スキーマを手元に置き、`jsonschema` で検査する
 
-Python の SDK は仕様 0.8 にしか対応せず、2022-04 から出ていない。公式スキーマ（STD1）を JSON に直して `plugins/ndf/contracts/workflow/serverless-workflow-1.0.3.schema.json` へ置き（取得元の URL と sha256 を文書の `$comment` に書く）、`jsonschema` の draft 2020-12 の検査器で形を確かめる。1.1.0 は出て 1 日のため採らず、上げるときはスキーマの差し替えと検査の通過で判断する。依存は `jsonschema` 1 つを足す（グループ `workflow`）。
+Python の SDK は仕様 0.8 にしか対応せず、2022-04 から出ていない。公式スキーマ（STD1）を JSON に直して `plugins/ndf/contracts/workflow/serverless-workflow-1.0.3.schema.json` へ置く。取得元の URL と sha256 は、文書の `$comment` に書く。形は `jsonschema` の draft 2020-12 の検査器で確かめる。1.1.0 は出て 1 日のため採らず、上げるときはスキーマの差し替えと検査の通過で判断する。依存は `jsonschema` 1 つを足す（グループ `workflow`）。
 
 SDK を使う形は 1.0 の書式を読めないため採らない。書式を自作する形は、利用者の決定（標準を借りる）に反するため採らない。
 
@@ -214,7 +214,7 @@ SDK を使う形は 1.0 の書式を読めないため採らない。書式を�
 
 ### 決定 4: モードの間で同じ工程を写さないため、工程を 1 つの文書にし、モードの文書は工程の文書を順に呼ぶだけにする
 
-工程の文書（`stages/<工程の ID>.json`）がアクティビティの並びと入出力規約を持ち、モードの文書（`modes/<モード>.json`）は `run.workflow` で工程の文書を名前と版で呼ぶ行を並べる。同じ工程を 5 つのモードで持っても、アクティビティの並びは 1 か所にある。工程の差がモードで要るときは、別の工程の文書を作る（例: `operation` の実装）。
+工程の文書（`stages/<工程の ID>.json`）が、アクティビティの並びと入出力規約を持つ。モードの文書（`modes/<モード>.json`）は、`run.workflow` で工程の文書を名前と版で呼ぶ行を並べる。同じ工程を 5 つのモードで持っても、アクティビティの並びは 1 か所にある。工程の差がモードで要るときは、別の工程の文書を作る（例: `operation` の実装）。
 
 モードごとの文書に全アクティビティを書く形は、同じ並びを最大 5 回写すため採らない。
 
@@ -222,7 +222,15 @@ SDK を使う形は 1.0 の書式を読めないため採らない。書式を�
 
 ### 決定 5: 式の評価器を持たずに済ませるため、NDF に固有の条件と属性は `metadata.ndf` に置き、定義の要素の `if` を使わない
 
-有効の条件（差分にコードがある・CI テストの宣言がある・振り返りが有効、など）・アクティビティの種類（レビュー・テスト・本番へ出す・記録）・範囲（スプリントの差分・ベースブランチ）は、`metadata.ndf` に閉じた語彙で書く。語彙は定義の検査が持つ一覧に限り、知らない語は登録で断る。使う要素は `do`・`run`（工程の呼び出し）・`call`（アクティビティ）・`listen`（承認ゲートの待ち）・`for`（`fast` の課題ごと）の 5 つに限る。
+`metadata.ndf` には、次の 3 つを閉じた語彙で書く。
+
+| 書くもの | 例 |
+| --- | --- |
+| 有効の条件 | 差分にコードがある・CI テストの宣言がある・振り返りが有効、など |
+| アクティビティの種類 | レビュー・テスト・本番へ出す・記録 |
+| 範囲 | スプリントの差分・ベースブランチ |
+
+語彙は定義の検査が持つ一覧に限り、知らない語は登録で断る。使う要素は `do`・`run`（工程の呼び出し）・`call`（アクティビティ）・`listen`（承認ゲートの待ち）・`for`（`fast` の課題ごと）の 5 つに限る。
 
 `if` は実行時の式（既定は jq）を求め、評価器の依存と、条件の誤りが実行の時に初めて分かる経路を足すため採らない。
 
@@ -242,11 +250,19 @@ DBOS の `fork_workflow` で指定したステップから流し直す形は、�
 
 根拠: Value 2 / Value 5（MVV 版 7）
 
-### 決定 8: 有効・無効を 1 か所で読めるようにするため、宣言は定義の条件 → プロジェクトの宣言 → スプリントの引数と conductor の操作の 3 段にし、計画の段を置かない
+### 決定 8: 有効・無効を 1 か所で読めるようにするため、宣言は定義の条件 → プロジェクトの宣言 → スプリントの引数と conductor の操作の 3 つの順位で上書きし、計画の順位を置かない
 
-定義の `metadata.ndf.when` が既定の条件を持ち、`.ndf/project.json` の `workflow.stages.<工程>`（`enabled` と `reason`）がプロジェクトの既定を上書きし、スプリントの作成の引数（`--disable <工程>=<理由>`）と conductor の操作が最後に上書きする。リファクタリングの停止は、定義の条件（CI テストの宣言がある・差分にコードがある）と、止めるときのプロジェクトの宣言で表し、`CROSS_REFACTORING_SUSPENDED` と `refactor_suspended` を消す。計画の単位で止めたいときは、オーガナイザーがレーンの入力の引数へ同じ `--disable` を渡す。
+番号の大きい順位が、小さい順位を上書きする。
 
-計画の進行表に宣言の段を置く形は、上書きの段が 4 つになり読む場所が増えるため採らない。
+| 順位 | 置き場 | 役割 |
+| --- | --- | --- |
+| 1 | 定義の `metadata.ndf.when` | 既定の条件を持つ |
+| 2 | `.ndf/project.json` の `workflow.stages.<工程>`（`enabled` と `reason`） | プロジェクトの既定を上書きする |
+| 3 | スプリントの作成の引数（`--disable <工程>=<理由>`）と conductor の操作 | 最後に上書きする |
+
+リファクタリングの停止は、定義の条件（CI テストの宣言がある・差分にコードがある）と、止めるときのプロジェクトの宣言で表す。停止の定数 `CROSS_REFACTORING_SUSPENDED` と `refactor_suspended` は消す。計画の単位で止めたいときは、オーガナイザーがレーンの入力の引数へ同じ `--disable` を渡す。
+
+計画の進行表に宣言の順位を置く形は、上書きの順位が 4 つになり読む場所が増えるため採らない。
 
 根拠: Value 4 / Value 11（MVV 版 7）
 
@@ -274,15 +290,21 @@ DBOS の `fork_workflow` で指定したステップから流し直す形は、�
 
 ### 決定 12: 工程の遷移を進行表のほかに残さないため、置き換わる公開インタフェースに互換の経路を残さず、実行中のスプリントと計画は取り込みの副命令で移す
 
-`supervise.py new sprint`・`new close`・`queue --resume --from`・`sprint.json` の書き出しと、`sprint-state.py next` の工程の判断を取り除く。`parallel.py` の副命令は名前と引数を保ち、中身だけを替える。リリースの時点で動いているスプリントと計画は、`progress.py adopt` が `sprint.json` と `done-<番号>.json`、`plan.json` と計画の台帳から進行表を作り、終わったステージに当たる工程を「手で終了（取り込み）」の事象で閉じる。元のファイルは消さない。
+次のものを取り除く。
+
+- `supervise.py new sprint`・`new close`・`queue --resume --from`
+- `sprint.json` の書き出し
+- `sprint-state.py next` の工程の判断
+
+`parallel.py` の副命令は名前と引数を保ち、中身だけを替える。リリースの時点で動いているスプリントと計画は、`progress.py adopt` が進行表へ取り込む。取り込みの元は、`sprint.json` と `done-<番号>.json`、`plan.json` と計画の台帳である。終わったステージに当たる工程は、「手で終了（取り込み）」の事象で閉じる。元のファイルは消さない。
 
 互換の経路を期間を決めて残す形は、遷移を決める場所がその期間 2 つになり受け入れ条件 11 に反するため採らない。
 
 根拠: Value 3 / Value 6（MVV 版 7）
 
-### 決定 13: 書き手を段ごとに 1 つに寄せるため、事象の種類ごとに書ける役を表で持ち、追記の関数が検査する
+### 決定 13: 書き手を階層ごとに 1 つに寄せるため、事象の種類ごとに書ける役を表で持ち、追記の関数が検査する
 
-追記の関数は、事象とその書き手の役（進行表のワークフロー・conductor・オーガナイザー・耐久ワークフロー・取り込み）を受け、[issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「事象の種類と書き手の表」にない組を断る。役はエントリポイント（`progress.py` の副命令・`parallel.py` の副命令・ワークフローの中）が決め、利用者は渡さない。脅威はうっかりの書き込みで、なりすましは考えない。
+追記の関数は、事象とその書き手の役（進行表のワークフロー・conductor・オーガナイザー・耐久ワークフロー・取り込み）を受ける。[issue-3092-design-runtime.md](issue-3092-design-runtime.md) の「事象の種類と書き手の表」にない組は断る。役はエントリポイント（`progress.py` の副命令・`parallel.py` の副命令・ワークフローの中）が決め、利用者は渡さない。脅威はうっかりの書き込みで、なりすましは考えない。
 
 DB の権限（ロール）で分ける形は、SQLite で表せないため採らない。
 
@@ -331,7 +353,6 @@ Skill が記録し、進行表と突き合わせる形は、記録が 2 か所�
 | #3092 | 実装する | — | `plugins/ndf/contracts/workflow/serverless-workflow-1.0.3.schema.json`（新設）、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/light.json`、`plugins/ndf/contracts/workflow/modes/operation.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/modes/documentation.json`、`plugins/ndf/contracts/workflow/stages/`（工程ごとの文書）、`plugins/ndf/contracts/workflow/schemas/`（入出力規約）、`plugins/ndf/contracts/env/NDF_PROGRESS_DB.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__progress.py.json`、`plugins/ndf/contracts/settings/project.json.json`、`plugins/ndf/contracts/index.md`、`plugins/ndf/scripts/progress.py`、`plugins/ndf/scripts/lib/workflow_def.py`、`plugins/ndf/scripts/lib/progress_model.py`、`plugins/ndf/scripts/lib/progress_db.py`、`plugins/ndf/scripts/lib/progress_run.py`、`plugins/ndf/scripts/lib/progress_activities.py`、`plugins/ndf/scripts/lib/progress_projection.py`、`plugins/ndf/scripts/lib/reshuffle.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_lane_cli.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/supervise_lib/queue_resume.py`、`plugins/ndf/scripts/supervise_lib/sprint_close_steps.py`、`plugins/ndf/scripts/supervise_lib/sprint_lane_close.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/pyproject.toml`、`pyproject.toml`、`uv.lock`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/workflow_defs.py`、`.github/workflows/pytest.yml`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/interrupt-resume.md`、`plugins/ndf/skills/development-workflow/references/projects-tracking.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/scripts/tests/test_workflow_def.py`、`plugins/ndf/scripts/tests/test_progress_model.py`、`plugins/ndf/scripts/tests/test_progress_db.py`、`plugins/ndf/scripts/tests/test_progress_run.py`、`plugins/ndf/scripts/tests/test_progress_cli.py`、`plugins/ndf/scripts/tests/test_progress_projection.py`、`plugins/ndf/scripts/tests/test_reshuffle.py`、`plugins/ndf/scripts/tests/test_parallel_tables.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 | #3097 | 取り込む | #3092 | — |
 | #3098 | 取り込む | #3092 | — |
-
 
 ## 人へ残す判断
 
