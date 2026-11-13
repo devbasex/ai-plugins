@@ -84,7 +84,7 @@ ruleset の必須のチェックはジョブを足した側から自動では増
 | I3 | チェックの名前は、必須のチェック・`not_required`・`awaiting` のどれかに当たる | 「未登録」で 1 |
 | I4 | 必須のチェックは、どれかのジョブのチェックの名前に当たる | 「消えた必須」で 1 |
 | I5 | 宣言の各行は空でない `reason` を持つ | 「理由の無い宣言」で 1 |
-| I6 | 宣言の各行の名前は、どれかのジョブのチェックの名前（名前を決められないジョブの `name:` / job id を含む）に当たる | 「古い宣言」で 1 |
+| I6 | 宣言の各行の名前は、どれかのジョブのチェックの名前（名前を決められないジョブの `name:` / job id を含む）か `statuses` の名前に当たる。`statuses` の行は `workflow` のファイルがある | 「古い宣言」で 1 |
 | I7 | `not_required` の名前は必須のチェックに載らない | 「宣言と ruleset の食い違い」で 1 |
 | I8 | `awaiting` の名前が必須のチェックに載ったら、宣言から外す | 「追加済み」を知らせて 0 のまま |
 | I9 | `pull_request` の起動を `paths` / `paths-ignore` で絞ったワークフローのジョブは、必須のチェックにも `awaiting` にも置かない | 「絞り込みのあるジョブ」で 1 |
@@ -103,7 +103,7 @@ ruleset の必須のチェックはジョブを足した側から自動では増
 | 書き込み | しない |
 
 「どこ」は、ジョブなら `<ワークフローのパス>#<job id>`（重なりは両方を `・` でつなぐ）、宣言なら
-`<宣言のパス> の not_required|awaiting`、消えた必須なら `ruleset の必須のチェック` である。
+`<宣言のパス> の not_required|awaiting|statuses`、消えた必須なら `ruleset の必須のチェック` である。
 
 種類:
 
@@ -157,11 +157,15 @@ matrix の組は、一覧の値を持つキーの直積から `exclude` に当�
   ],
   "awaiting": [
     {"name": "doc-line-limit-check", "reason": "#653 で必須にすると決めた。リリース承認ゲートで ruleset へ足す"}
+  ],
+  "statuses": [
+    {"name": "ndf/release-approval", "workflow": ".github/workflows/release-approval.yml", "reason": "ジョブが API で PR の先端へ付ける commit status の名前で必須になる"}
   ]
 }
 ```
 
-- 根のキーは `version`・`not_required`・`awaiting` だけ、各行のキーは `name`・`reason` だけを受ける
+- 根のキーは `version`・`not_required`・`awaiting`・`statuses` だけを受ける。`not_required`・`awaiting` の各行のキーは `name`・`reason` だけ、`statuses` の各行のキーは `name`・`workflow`・`reason` だけを受ける
+- `statuses` には、ジョブの名前でなく API で付ける commit status の名前で必須になるチェックを置く（#2773）。その名前はジョブの名前と同じく既知の名前として数え、必須にあっても「消えた必須」にしない。`workflow` のファイルが無い行は「古い宣言」（1）
 - `name` は空でない文字列でなければ読めない（2）。`reason` の欠けや空は「理由の無い宣言」（1）
 - `not_required` には、集約される前の分割ジョブ（`pytest (0/2)`・`pytest (1/2)`）と、重いジョブを省くかの判定だけの
   ジョブ（`pytest-scope`・`runtime-smoke-scope`）を置く。`awaiting` には ruleset へ足す承認を待つ名前を置く

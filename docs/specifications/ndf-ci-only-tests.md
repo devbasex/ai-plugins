@@ -128,7 +128,7 @@ graph TB
 
 対象は `new check --pr` と `new check --since-last` である（`verify_steps.check_ci_watch`）。
 
-- `whole_on_ci` が真のため、`test-all` と、それだけを入力に持つ judge・fix が外れる
+- `whole_on_ci` が真のため、`test-all` と、それだけを入力に持つ judge・fix が外れる。CI テストの宣言が無くても、本番チャネルへのマージで届く CD の宣言があるリポジトリでは同じく外れ、マージが CI の結果を待つ（`trim_check_steps` の `cd_case`。#2773）
 - `review` の後、`ready`（差分の検査では `finish`）の前に `ci-peek` を置く。`ci-fix` は直してコミットし、`git push` して `ci-peek` へ戻る
 - `merge` が落ちたら `ci-peek-merge` へ進む
 - リファクタリング（`assess` → `refactor`）を入れる
