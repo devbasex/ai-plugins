@@ -11,12 +11,9 @@
 from __future__ import annotations
 
 import contextlib
-import datetime
 import hashlib
-import json
 import os
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
@@ -25,16 +22,20 @@ from sqlalchemy import JSON, Column, Integer, MetaData, String, Table, Text, cre
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
+import clock
+import limits
+import progress_lanes as plr
 import progress_model as pm
 
 SCHEMA_VERSION = 1
 ENV_DB = "NDF_PROGRESS_DB"
 DEFAULT_DB = "progress/ndf-progress.sqlite"
-BUSY_TIMEOUT_SECONDS = 30
+BUSY_TIMEOUT_SECONDS = limits.seconds("progress.busy-timeout")  # 決定 18
 
 md = MetaData()
 TABLES = Table(
-    "ndf_progress_tables", md,
+    "ndf_progress_tables",
+    md,
     Column("id", String(512), primary_key=True),
     Column("level", String(16), nullable=False),
     Column("repo", Text, nullable=False),
@@ -43,14 +44,16 @@ TABLES = Table(
     Column("created_at", String(40), nullable=False),
 )
 DEFINITIONS = Table(
-    "ndf_progress_definitions", md,
+    "ndf_progress_definitions",
+    md,
     Column("table_id", String(512), primary_key=True),
     Column("rev", Integer, primary_key=True, autoincrement=False),
     Column("definition", JSON, nullable=False),
     Column("created_at", String(40), nullable=False),
 )
 EVENTS = Table(
-    "ndf_progress_events", md,
+    "ndf_progress_events",
+    md,
     Column("table_id", String(512), primary_key=True),
     Column("seq", Integer, primary_key=True, autoincrement=False),
     Column("rev", Integer, nullable=True),
@@ -90,10 +93,6 @@ class Store:
         return Path(self.engine.url.database) if self.is_sqlite and self.engine.url.database else None
 
 
-def now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-
-
 def default_url(root: Path) -> str:
     """`NDF_PROGRESS_DB` か、チェックアウトの状態の置き場の既定の SQLite の URL（決定 2）。"""
     got = os.environ.get(ENV_DB)
@@ -115,7 +114,7 @@ def connect(url: str) -> Store:
     shown = _hide(url)
     try:
         if url.startswith("sqlite:///"):
-            Path(url[len("sqlite:///"):]).parent.mkdir(parents=True, exist_ok=True)
+            Path(url[len("sqlite:///") :]).parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(url, future=True)
     except Exception as e:  # noqa: BLE001  URL の誤り・ドライバが無い（psycopg）
         raise Unreadable(f"{shown} へつなげない（{type(e).__name__}: {e}）") from None
@@ -155,18 +154,27 @@ def transaction(store: Store) -> Iterator[Connection]:
 
 def _event(row) -> pm.Event:
     return pm.Event(
-        kind=row.kind, actor=row.actor, row_key=row.row_key, rev=row.rev, state=row.state, reason=row.reason,
-        payload=row.payload, dedupe_key=row.dedupe_key, table_id=row.table_id, seq=row.seq, at=row.at,
+        kind=row.kind,
+        actor=row.actor,
+        row_key=row.row_key,
+        rev=row.rev,
+        state=row.state,
+        reason=row.reason,
+        payload=row.payload,
+        dedupe_key=row.dedupe_key,
+        table_id=row.table_id,
+        seq=row.seq,
+        at=row.at,
     )
 
 
-def read_events(conn: Connection, table_id: str, after: int = 0) -> list[pm.Event]:
+def read_progress_events(conn: Connection, table_id: str, after: int = 0) -> list[pm.Event]:
     """1 つの進行表の事象を番号の順に読む。"""
     q = select(EVENTS).where(EVENTS.c.table_id == table_id, EVENTS.c.seq > after).order_by(EVENTS.c.seq)
     return [_event(r) for r in conn.execute(q)]
 
 
-def table_row(conn: Connection, table_id: str):
+def progress_table(conn: Connection, table_id: str):
     return conn.execute(select(TABLES).where(TABLES.c.id == table_id)).first()
 
 
@@ -207,7 +215,7 @@ def append_events(
     `expect_seq` は呼ぶ側が読んだ最後の番号（省けば今の最後の番号）。下書きをその次から連番で書き、
     番号がぶつかれば `Conflict` を上げる。重複の鍵が既にある下書きは書かずに、その事象の番号を返す。"""
     level = pm.level_of(table_id)
-    events = read_events(conn, table_id)
+    events = read_progress_events(conn, table_id)
     seq = last_seq(conn, table_id) if expect_seq is None else expect_seq
     out: list[int] = []
     for d in drafts:
@@ -224,32 +232,50 @@ def append_events(
         pm.check_event(level, rows, d, heights)
         seq += 1
         values = dict(
-            table_id=table_id, seq=seq, rev=d.rev, row_key=d.row_key, kind=d.kind, state=d.resolved_state(), actor=d.actor,
-            reason=d.reason, payload=d.payload, dedupe_key=d.dedupe_key, at=now(),
+            table_id=table_id,
+            seq=seq,
+            rev=d.rev,
+            row_key=d.row_key,
+            kind=d.kind,
+            state=d.resolved_state(),
+            actor=d.actor,
+            reason=d.reason,
+            payload=d.payload,
+            dedupe_key=d.dedupe_key,
+            at=clock.now_iso("utc"),
         )
         try:
             conn.execute(EVENTS.insert().values(**values))
         except IntegrityError:
             raise Conflict(f"{table_id} の番号 {seq} がぶつかった（I2）") from None
-        events.append(pm.Event(**{k: v for k, v in values.items() if k not in ("table_id", "seq", "at")}, table_id=table_id, seq=seq, at=values["at"]))
+        events.append(
+            pm.Event(**{k: v for k, v in values.items() if k not in ("table_id", "seq", "at")}, table_id=table_id, seq=seq, at=values["at"])
+        )
         out.append(seq)
     return out
 
 
 def create_table(
-    conn: Connection, level: str, repo: str, name: str, parent_id: Optional[str], definition: Optional[dict],
+    conn: Connection,
+    level: str,
+    repo: str,
+    name: str,
+    parent_id: Optional[str],
+    definition: Optional[dict],
     drafts: list[pm.EventDraft],
 ) -> str:
     """進行表を作り、スプリントなら改訂 1 のスナップショットと最初の事象を書く。同じ ID があれば `Refused`（I1）。"""
     tid = pm.table_id(level, repo, name)
-    if table_row(conn, tid) is not None:
+    if progress_table(conn, tid) is not None:
         raise pm.Refused(f"同じ{_LEVEL_WORD[level]}の進行表がある（I1）", current=tid)
     try:
-        conn.execute(TABLES.insert().values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=now()))
+        conn.execute(
+            TABLES.insert().values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=clock.now_iso("utc"))
+        )
     except IntegrityError:
         raise pm.Refused(f"同じ{_LEVEL_WORD[level]}の進行表がある（I1）", current=tid) from None
     if definition is not None:
-        conn.execute(DEFINITIONS.insert().values(table_id=tid, rev=1, definition=definition, created_at=now()))
+        conn.execute(DEFINITIONS.insert().values(table_id=tid, rev=1, definition=definition, created_at=clock.now_iso("utc")))
     append_events(conn, tid, drafts, 0)
     return tid
 
@@ -259,7 +285,7 @@ def add_revision(conn: Connection, table_id: str, definition_: dict, drafts: lis
     rev, _ = definition(conn, table_id)
     new = rev + 1
     try:
-        conn.execute(DEFINITIONS.insert().values(table_id=table_id, rev=new, definition=definition_, created_at=now()))
+        conn.execute(DEFINITIONS.insert().values(table_id=table_id, rev=new, definition=definition_, created_at=clock.now_iso("utc")))
     except IntegrityError:
         raise Conflict(f"{table_id} の改訂 {new} がぶつかった") from None
     append_events(conn, table_id, pm.with_rev(drafts, new), None, heights)
@@ -275,13 +301,13 @@ def lane_name(row) -> str:
 
 def plan_and_lanes(conn: Connection, plan_id: str) -> tuple[dict, dict, dict]:
     """（計画の畳み込み, レーン名 → 順番表, レーン名 → レーンの進行表の ID）。"""
-    plan = pm.plan_view(read_events(conn, plan_id))
+    plan = plr.plan_view(read_progress_events(conn, plan_id))
     lanes, ids = {}, {}
     for row in children(conn, plan_id):
         if row.level != "lane":
             continue
         ln = lane_name(row)
-        lanes[ln] = pm.lane_rows(read_events(conn, row.id))
+        lanes[ln] = plr.lane_order_rows(read_progress_events(conn, row.id))
         ids[ln] = row.id
     for ln in plan["lanes"]:
         lanes.setdefault(ln, [])
@@ -290,7 +316,7 @@ def plan_and_lanes(conn: Connection, plan_id: str) -> tuple[dict, dict, dict]:
 
 def lane_write(conn: Connection, lane_id: str, draft: pm.EventDraft, *, _row_ended: bool = False) -> list[int]:
     """レーンの進行表へ 1 件書く。計画の決まり（I12a・I13・I18〜I21）を同じトランザクションで読み直して判定する。"""
-    lane = table_row(conn, lane_id)
+    lane = progress_table(conn, lane_id)
     if lane is None or lane.level != "lane":
         raise pm.Refused(f"レーンの進行表 {lane_id} が無い")
     ln = lane_name(lane)
@@ -298,7 +324,7 @@ def lane_write(conn: Connection, lane_id: str, draft: pm.EventDraft, *, _row_end
     draft = pm.EventDraft(**{**draft.__dict__, "payload": payload})
     if lane.parent_id:
         plan, lanes, _ = plan_and_lanes(conn, lane.parent_id)
-        errs = pm.check_lane_change(plan, lanes, draft)
+        errs = plr.check_lane_change(plan, lanes, draft)
         if errs:
             raise pm.Refused("; ".join(errs))
     return append_events(conn, lane_id, [draft], _row_ended=_row_ended)
@@ -306,10 +332,10 @@ def lane_write(conn: Connection, lane_id: str, draft: pm.EventDraft, *, _row_end
 
 def sprint_link(conn: Connection, sprint_id: str) -> Optional[tuple[str, int]]:
     """スプリントの進行表が指すレーンの進行表の ID と行の番号。計画の外なら None。"""
-    row = table_row(conn, sprint_id)
+    row = progress_table(conn, sprint_id)
     if row is None or not row.parent_id:
         return None
-    first = next((e for e in read_events(conn, sprint_id) if e.kind == "created" and e.row_key is None), None)
+    first = next((e for e in read_progress_events(conn, sprint_id) if e.kind == "created" and e.row_key is None), None)
     n = (first.payload or {}).get("lane_row") if first else None
     return (row.parent_id, int(n)) if n is not None else None
 
@@ -322,16 +348,49 @@ def end_lane_row(conn: Connection, sprint_id: str, outcome: str, actor: str) -> 
     if link is None:
         return None
     lane_id, n = link
-    done = any(e.kind == "row_ended" and (e.payload or {}).get("sprint") == sprint_id for e in read_events(conn, lane_id))
+    done = any(e.kind == "row_ended" and (e.payload or {}).get("sprint") == sprint_id for e in read_progress_events(conn, lane_id))
     if not done:
         state = pm.COMPLETED if outcome == "completed" else pm.CANCELLED
-        lane_write(conn, lane_id, pm.EventDraft("row_ended", actor, str(n), payload={"row": n, "state": state, "sprint": sprint_id}),
-                   _row_ended=True)
-    lane = table_row(conn, lane_id)
+        lane_write(
+            conn,
+            lane_id,
+            pm.EventDraft("row_ended", actor, str(n), payload={"row": n, "state": state, "sprint": sprint_id}),
+            _row_ended=True,
+        )
+    lane = progress_table(conn, lane_id)
     if not lane.parent_id:
         return {"next_row": None}
     plan, lanes, _ = plan_and_lanes(conn, lane.parent_id)
-    return {"next_row": pm.next_row(lane_name(lane), plan, lanes)}
+    return {"next_row": plr.next_row(lane_name(lane), plan, lanes)}
+
+
+def carry_dropped(store: Store, sprint_id: str, drop: list[int], reason: str):
+    """外した課題を、同じレーンの順番表の次の行へ足す（受け入れ条件 15）。断られたら依頼を開く。"""
+    with transaction(store) as conn:
+        link = sprint_link(conn, sprint_id)
+        if link is None:
+            return None, None
+        lane_id, n = link
+        rows = plr.lane_order_rows(read_progress_events(conn, lane_id))
+        pos = next((i for i, r in enumerate(rows) if r["row"] == n), len(rows) - 1) + 1
+        new = max(r["row"] for r in rows) + 1
+        try:
+            lane_write(
+                conn,
+                lane_id,
+                pm.EventDraft("row_added", "conductor", str(new), reason=reason, payload={"row": new, "issues": drop, "position": pos}),
+            )
+            return None, None
+        except pm.Refused as e:
+            why = e.reason
+    with transaction(store) as conn:
+        lane = progress_table(conn, lane_id)
+        rid = (
+            open_request(conn, lane.parent_id, {"carry": drop, "from": sprint_id}, f"{reason}（{why}）", "workflow")
+            if lane.parent_id
+            else None
+        )
+    return why, rid
 
 
 def open_request(conn: Connection, plan_id: str, body: dict, reason: str, actor: str) -> str:
@@ -372,11 +431,3 @@ def run_lock(store: Store, table_id: str) -> Iterator[None]:
             conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
     finally:
         conn.close()
-
-
-def dumps(obj) -> str:
-    return json.dumps(obj, ensure_ascii=False, default=str)
-
-
-def warn(msg: str) -> None:
-    print(msg, file=sys.stderr)

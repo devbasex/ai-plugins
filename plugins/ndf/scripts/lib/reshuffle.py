@@ -14,17 +14,19 @@ import shutil
 import subprocess
 from typing import Optional
 
+import limits
+import progress_lanes as plr
 import progress_model as pm
 
 INPUT_KINDS = ("carry", "dropped", "held", "filed")  # 振り返りの持ち越し・外した課題・保留した受け入れ条件・起票した課題
-PROPOSE_TIMEOUT = 600
+PROPOSE_TIMEOUT = limits.seconds("progress.reshuffle-propose")
 TOOL = "reshuffle"
 
 
 def _own_overlaps(lane: Optional[str], plan: Optional[dict], lanes: dict) -> list[str]:
     if not plan or not lane:
         return []
-    return [why for rule, why in pm._violations(plan, lanes) if rule == "I13" and f"{lane}#" in why]
+    return [why for rule, why in plr._violations(plan, lanes) if rule == "I13" and f"{lane}#" in why]
 
 
 def needs_reshuffle(inp: dict, plan: Optional[dict], lanes: dict) -> bool:
@@ -35,8 +37,15 @@ def needs_reshuffle(inp: dict, plan: Optional[dict], lanes: dict) -> bool:
 
 
 def unchanged(summary: str = "持ち越す課題も組を変える理由も無い") -> dict:
-    return {"tool": TOOL, "status": "ok", "summary": f"変更なし（{summary}）", "decision": "unchanged",
-            "lane_changes": [], "requests": [], "refused": []}
+    return {
+        "tool": TOOL,
+        "status": "ok",
+        "summary": f"変更なし（{summary}）",
+        "decision": "unchanged",
+        "lane_changes": [],
+        "requests": [],
+        "refused": [],
+    }
 
 
 PROMPT = """あなたは並列の計画の 1 レーンの組み換えを考える。次の入力から、自分のレーンの順番表への変更案を JSON 1 つで返す。
@@ -72,13 +81,20 @@ def propose(inp: dict, lane: list[dict], claude: Optional[str] = None) -> dict:
     raise RuntimeError("claude の出力に JSON の変更案が無い")
 
 
-def _draft(change: dict, actor: str, next_row: int) -> pm.EventDraft:
+def _change_draft(change: dict, actor: str, next_row: int) -> pm.EventDraft:
     op = change["op"]
     if op == "add":
-        return pm.EventDraft("row_added", actor, str(next_row), reason=change["reason"],
-                             payload={"row": next_row, "issues": change.get("issues") or [], "touches": change.get("touches") or []})
+        return pm.EventDraft(
+            "row_added",
+            actor,
+            str(next_row),
+            reason=change["reason"],
+            payload={"row": next_row, "issues": change.get("issues") or [], "touches": change.get("touches") or []},
+        )
     if op == "move":
-        return pm.EventDraft("row_moved", actor, str(change["row"]), reason=change["reason"], payload={"row": change["row"], "to": change["to"]})
+        return pm.EventDraft(
+            "row_moved", actor, str(change["row"]), reason=change["reason"], payload={"row": change["row"], "to": change["to"]}
+        )
     return pm.EventDraft("row_cancelled", actor, str(change["row"]), reason=change["reason"], payload={"row": change["row"]})
 
 
@@ -90,16 +106,16 @@ def apply_changes(store, sprint_id: str, proposal: dict, actor: str = "workflow"
     with pdb.transaction(store) as conn:
         link = pdb.sprint_link(conn, sprint_id)
         lane_id = link[0] if link else None
-        lane_row = pdb.table_row(conn, lane_id) if lane_id else None
+        lane_row = pdb.progress_table(conn, lane_id) if lane_id else None
         plan_id = lane_row.parent_id if lane_row else None
         for ch in proposal.get("lane_changes") or []:
             if lane_id is None:
                 refused.append({**ch, "reason": f"{ch.get('reason', '')}（計画の外のスプリント）"})
                 continue
-            rows = pm.lane_rows(pdb.read_events(conn, lane_id))
+            rows = plr.lane_order_rows(pdb.read_progress_events(conn, lane_id))
             n = max((r["row"] for r in rows), default=0) + 1
             try:
-                pdb.lane_write(conn, lane_id, _draft(ch, actor, n))
+                pdb.lane_write(conn, lane_id, _change_draft(ch, actor, n))
                 applied.append(ch)
             except pm.Refused as e:
                 refused.append({**ch, "reason": f"{ch.get('reason', '')}（断られた: {e.reason}）"})
@@ -111,5 +127,12 @@ def apply_changes(store, sprint_id: str, proposal: dict, actor: str = "workflow"
                 requests.append(item)
     decision = "changed" if applied or requests or refused else "unchanged"
     summary = f"反映 {len(applied)} 件・依頼 {len(requests)} 件・断られた {len(refused)} 件"
-    return {"tool": TOOL, "status": "ok", "summary": summary, "decision": decision,
-            "lane_changes": applied, "requests": requests, "refused": refused}
+    return {
+        "tool": TOOL,
+        "status": "ok",
+        "summary": summary,
+        "decision": decision,
+        "lane_changes": applied,
+        "requests": requests,
+        "refused": refused,
+    }

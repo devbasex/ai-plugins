@@ -298,6 +298,9 @@
 | `post-queue.sync-wait` | interval 0.01 | 投稿キューの耐久ステップを同期で待つ問い合わせの間隔 | `plugins/ndf/scripts/lib/post_queue.py:Queue._run` |
 | `post-queue.transient-reflush` | seconds 300 / interval 30 / same_cause 11 | 一時的な失敗で残った投稿キューの流し直し。上限の再実行の合計を超えない | `plugins/ndf/scripts/lib/post_queue.py:reflush` |
 | `procs.stop-tree` | seconds 3 / interval 0.1 | プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔 | `plugins/ndf/scripts/lib/procs.py:stop_tree` |
+| `progress.busy-timeout` | seconds 30 | 進行表の DB（SQLite）の書き込みの待ちの上限（#3092 の決定 18） | `plugins/ndf/scripts/lib/progress_db.py:<module>` |
+| `progress.next` | seconds 604800 / interval 0.2 | progress.py next が進行表のワークフローの終わりか承認の待ちを見る間隔と上限（#3092） | `plugins/ndf/scripts/lib/progress_run.py:run_next` |
+| `progress.reshuffle-propose` | seconds 600 | 組み換えの変更案を Claude で作る上限（#3092） | `plugins/ndf/scripts/lib/reshuffle.py:<module>` |
 | `project.git` | seconds 60 | プロジェクトの指紋を取る git の上限 | `plugins/ndf/scripts/project_lib/fingerprint.py:_git_text` |
 | `refresh.http` | seconds 10 | トークンの更新の宛先への HTTP の上限 | `plugins/ndf/scripts/lib/refresh.py:<module>` |
 | `relay.bedrock` | seconds 60 | 従量の接続（Bedrock）を確かめるコマンドの上限 | `plugins/ndf/scripts/relay_lib/bedrock.py:<module>` |

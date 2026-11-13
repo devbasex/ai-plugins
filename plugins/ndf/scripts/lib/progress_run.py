@@ -17,47 +17,55 @@ from __future__ import annotations
 import json
 import sys
 import threading
-import time
 from dataclasses import asdict
 from typing import Any, Optional
 
 import durable
+import limits
 import progress_activities as acts
 import progress_db as pdb
+import progress_lanes as plr
 import progress_model as pm
+import waits
 import workflow_def as wd
 
 DURABLE_KIND = "progress"
+NEXT_POLICY = "progress.next"
 TOOL = "progress"
 _CTX: dict[str, Any] = {"url": None, "store": None, "gate": None}
 _GATE = threading.Event()
 
 
-def _store() -> pdb.Store:
+def _progress_store() -> pdb.Store:
     if _CTX["store"] is None:
         _CTX["store"] = pdb.connect(_CTX["url"])
     return _CTX["store"]
 
 
 def _rows_dump(rows: dict) -> dict:
-    return {k: {"state": r.state, "reason": r.reason, "payload": r.payload, "kind": r.kind, "at": r.at, "seq": r.seq} for k, r in rows.items()}
+    return {
+        k: {"state": r.state, "reason": r.reason, "payload": r.payload, "kind": r.kind, "at": r.at, "seq": r.seq} for k, r in rows.items()
+    }
 
 
 def _rows_load(d: dict) -> dict:
-    return {k: pm.RowState(v["state"], v.get("seq", 0), v.get("at", ""), v.get("reason"), v.get("payload") or {}, v.get("kind", "")) for k, v in d.items()}
+    return {
+        k: pm.RowState(v["state"], v.get("seq", 0), v.get("at", ""), v.get("reason"), v.get("payload") or {}, v.get("kind", ""))
+        for k, v in d.items()
+    }
 
 
 def plan_cancelled(conn, table_id: str) -> bool:
     link = pdb.sprint_link(conn, table_id)
-    lane = pdb.table_row(conn, link[0]) if link else None
+    lane = pdb.progress_table(conn, link[0]) if link else None
     if lane is None or not lane.parent_id:
         return False
-    return pm.plan_view(pdb.read_events(conn, lane.parent_id))["state"] == pm.CANCELLED
+    return plr.plan_view(pdb.read_progress_events(conn, lane.parent_id))["state"] == pm.CANCELLED
 
 
 def answered(conn, table_id: str, rev: int, row: str) -> Optional[dict]:
     """今の改訂のその行の最新の `answered` の事象の値（答え直した後は新しい答え）。"""
-    got = [e for e in pdb.read_events(conn, table_id) if e.kind == "answered" and e.rev == rev and e.row_key == row]
+    got = [e for e in pdb.read_progress_events(conn, table_id) if e.kind == "answered" and e.rev == rev and e.row_key == row]
     return dict(got[-1].payload or {}) if got else None
 
 
@@ -66,15 +74,15 @@ def answered(conn, table_id: str, rev: int, row: str) -> Optional[dict]:
 
 @durable.step(name="ndf.progress.definition")
 def step_definition(table_id: str, rev: int) -> dict:
-    with pdb.transaction(_store()) as conn:
+    with pdb.transaction(_progress_store()) as conn:
         return pdb.definition(conn, table_id, rev)[1]
 
 
 @durable.step(name="ndf.progress.rows")
-def step_rows(table_id: str, rev: int) -> dict:
+def step_read_rows(table_id: str, rev: int) -> dict:
     """今の改訂の行の状態と、計画の中止を 1 つの耐久ステップで読む。"""
-    with pdb.transaction(_store()) as conn:
-        rows = pm.fold(pdb.read_events(conn, table_id), rev)
+    with pdb.transaction(_progress_store()) as conn:
+        rows = pm.fold(pdb.read_progress_events(conn, table_id), rev)
         return {"rows": _rows_dump(rows), "plan_cancelled": plan_cancelled(conn, table_id)}
 
 
@@ -83,7 +91,7 @@ def step_append(table_id: str, drafts: list[dict]) -> dict:
     """事象を追記し、進行表の `completed` があれば同じトランザクションでレーンの行を終える（決定 17）。"""
     for attempt in range(3):
         try:
-            with pdb.transaction(_store()) as conn:
+            with pdb.transaction(_progress_store()) as conn:
                 ds = [pm.EventDraft(**d) for d in drafts]
                 seqs = pdb.append_events(conn, table_id, ds)
                 nr = None
@@ -99,7 +107,7 @@ def step_append(table_id: str, drafts: list[dict]) -> dict:
 
 @durable.step(name="ndf.progress.answered")
 def step_answered(table_id: str, rev: int, row: str) -> Optional[dict]:
-    with pdb.transaction(_store()) as conn:
+    with pdb.transaction(_progress_store()) as conn:
         return answered(conn, table_id, rev, row)
 
 
@@ -107,8 +115,8 @@ def step_answered(table_id: str, rev: int, row: str) -> Optional[dict]:
 def step_activity(table_id: str, rev: int, act: dict, inp: dict, answer: Optional[dict]) -> dict:
     """アクティビティを流し、出力を規約で検査する（I3）。承認と判断のゲートの `gate` は検査しない。"""
     a = wd.ActivityDef(**act)
-    out = acts.run_activity(_store(), table_id, rev, a, inp, answer)
-    with pdb.transaction(_store()) as conn:
+    out = acts.run_activity(_progress_store(), table_id, rev, a, inp, answer)
+    with pdb.transaction(_progress_store()) as conn:
         snap = wd.Snapshot.from_dict(pdb.definition(conn, table_id, rev)[1]["snapshot"])
     errs = [] if out.get("status") == "gate" else wd.validate_io(snap, a.output_ref, out)
     return {"output": out, "errors": errs}
@@ -116,7 +124,7 @@ def step_activity(table_id: str, rev: int, act: dict, inp: dict, answer: Optiona
 
 @durable.step(name="ndf.progress.record")
 def step_record(table_id: str, row: str, phase: str) -> dict:
-    return acts.act_record(_store(), table_id, row, phase)
+    return acts.act_record(_progress_store(), table_id, row, phase)
 
 
 # --- 待ち --------------------------------------------------------------------
@@ -124,7 +132,7 @@ def step_record(table_id: str, row: str, phase: str) -> dict:
 
 def _answer_now(table_id: str, rev: int, row: str) -> bool:
     """待ちに入る直前に DB を読む（記録に残さない。主のスレッドへ知らせるかだけを決める）。"""
-    with pdb.transaction(_store()) as conn:
+    with pdb.transaction(_progress_store()) as conn:
         return answered(conn, table_id, rev, row) is not None
 
 
@@ -144,7 +152,7 @@ def topic_of(row: str) -> str:
 # --- ワークフロー --------------------------------------------------------------
 
 
-def _draft(wid: str, rev: int, kind: str, row: Optional[str] = None, **kw) -> dict:
+def _wf_draft(wid: str, rev: int, kind: str, row: Optional[str] = None, **kw) -> dict:
     return {"kind": kind, "actor": "workflow", "row_key": row, "rev": rev, "dedupe_key": f"{wid}:{row or ''}:{kind}", **kw}
 
 
@@ -158,10 +166,18 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
             outputs[act.id] = (r.payload or {}).get("output") or {}
             continue
         if r is None or r.state != pm.RUNNING:
-            step_append(tid, [_draft(wid, rev, "started", key)])
-        inp = {"table": tid, "stage": stage.name, "issues": raw.get("issues") or [], "mode": raw["snapshot"]["mode"],
-               "pace": raw.get("pace", "normal"), "cwd": raw.get("cwd"), "work": raw.get("work"), "previous": outputs,
-               "reshuffle": raw.get("reshuffle") or {}}
+            step_append(tid, [_wf_draft(wid, rev, "started", key)])
+        inp = {
+            "table": tid,
+            "stage": stage.name,
+            "issues": raw.get("issues") or [],
+            "mode": raw["snapshot"]["mode"],
+            "pace": raw.get("pace", "normal"),
+            "cwd": raw.get("cwd"),
+            "work": raw.get("work"),
+            "previous": outputs,
+            "reshuffle": raw.get("reshuffle") or {},
+        }
         if child:
             inp["issue"] = int(child.split("#", 1)[1])
         answer = step_answered(tid, rev, key)
@@ -179,9 +195,9 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
             out = res["output"]
         if res["errors"] or out.get("status") != "ok":
             why = "; ".join(res["errors"]) if res["errors"] else out.get("summary", "")
-            step_append(tid, [_draft(wid, rev, "failed", key, reason=why[:500], payload={"output": out})])
+            step_append(tid, [_wf_draft(wid, rev, "failed", key, reason=why[:500], payload={"output": out})])
             return "failed", f"{key}: {why}"[:500]
-        step_append(tid, [_draft(wid, rev, "finished", key, payload={"output": out})])
+        step_append(tid, [_wf_draft(wid, rev, "finished", key, payload={"output": out})])
         outputs[act.id] = out
     return "ok", outputs
 
@@ -196,12 +212,12 @@ def _run_stage(ctx: dict, stage, children: tuple, rows: dict) -> tuple[str, Any]
         if r is not None and r.state == pm.FINISHED:
             continue
         if r is None or r.state != pm.RUNNING:
-            step_append(tid, [_draft(wid, rev, "started", child)])
+            step_append(tid, [_wf_draft(wid, rev, "started", child)])
         status, got = _run_activities(ctx, stage, child, rows)
         if status != "ok":
-            step_append(tid, [_draft(wid, rev, "failed", child, reason=got)])
+            step_append(tid, [_wf_draft(wid, rev, "failed", child, reason=got)])
             return status, got
-        step_append(tid, [_draft(wid, rev, "finished", child)])
+        step_append(tid, [_wf_draft(wid, rev, "finished", child)])
         merged.update({f"{child}/{k}": v for k, v in got.items()})
     return "ok", merged
 
@@ -218,49 +234,49 @@ def _stage_output(outputs: dict) -> dict:
 def sprint_workflow(table_id: str, rev: int, stale: Optional[dict]) -> dict:
     """定義のスナップショットに沿って工程を 1 つずつ流す。終わった行は流し直さない。"""
     wid = durable.current_id()
-    step_append(table_id, [_draft(wid, rev, "execution", payload={"wid": wid})])
+    step_append(table_id, [_wf_draft(wid, rev, "execution", payload={"wid": wid})])
     raw = step_definition(table_id, rev)
     snap = wd.Snapshot.from_dict(raw["snapshot"])
     enabled = {k: wd.Enablement(**v) for k, v in (raw.get("enabled") or {}).items()}
     ctx = {"table": table_id, "rev": rev, "wid": wid, "raw": raw}
     if stale:  # 決定 21: 版が替わって回復できない途中の実行の行を失敗にする
-        rows = _rows_load(step_rows(table_id, rev)["rows"])
+        rows = _rows_load(step_read_rows(table_id, rev)["rows"])
         running = sorted(k for k, r in rows.items() if r.state == pm.RUNNING)
         why = f"版が替わり、途中の実行を回復できない（古い実行 {stale['wid']}・版 {stale['old']} → {stale['new']}）"
-        step_append(table_id, [_draft(wid, rev, "failed", k, reason=why) for k in running])
+        step_append(table_id, [_wf_draft(wid, rev, "failed", k, reason=why) for k in running])
         return {"status": "stopped", "failed": running, "reason": why}
     issues = tuple(raw.get("issues") or ())
     pace = raw.get("pace") or "normal"
     for _ in range(len(snap.stages) * 3 + 5):  # 1 周で行を 1 つ終えるか飛ばす
-        st = step_rows(table_id, rev)
+        st = step_read_rows(table_id, rev)
         rows = _rows_load(st["rows"])
         en = {**enabled, **{k: wd.Enablement(True, None, "sprint") for k, r in rows.items() if r.kind == "enabled"}}
         a = pm.next_action(snap, rows, en, st["plan_cancelled"], pace, issues)
         if a.kind == "complete":
-            got = step_append(table_id, [_draft(wid, rev, "completed")])
+            got = step_append(table_id, [_wf_draft(wid, rev, "completed")])
             return {"status": "ok", "next_row": got["next_row"]}
         if a.kind == "stop_plan_cancelled":
             return {"status": "stopped", "plan_cancelled": True, "reason": a.reason}
         if a.kind == "stop_failed":
             return {"status": "stopped", "failed": [a.row], "reason": a.reason}
         if a.kind == "skip":
-            step_append(table_id, [_draft(wid, rev, "skipped", a.row, reason=a.reason)])
+            step_append(table_id, [_wf_draft(wid, rev, "skipped", a.row, reason=a.reason)])
             continue
         stage = snap.stage(a.row)
         children = tuple(f"{stage.name}#{n}" for n in issues) if stage.per_issue and pace == "fast" and issues else ()
         if a.kind != "resume":
-            step_append(table_id, [_draft(wid, rev, "started", a.row)])
+            step_append(table_id, [_wf_draft(wid, rev, "started", a.row)])
         step_record(table_id, a.row, "start")
         status, got = _run_stage(ctx, stage, children, rows)
         if status != "ok":
-            step_append(table_id, [_draft(wid, rev, "failed", a.row, reason=str(got)[:500])])
+            step_append(table_id, [_wf_draft(wid, rev, "failed", a.row, reason=str(got)[:500])])
             return {"status": "stopped", "failed": [a.row], "reason": got}
         out = _stage_output(got)
         errs = wd.validate_io(snap, stage.output_ref, {"activities": out["activities"], "summary": out["summary"]})
         if errs:
-            step_append(table_id, [_draft(wid, rev, "failed", a.row, reason="; ".join(errs)[:500])])
+            step_append(table_id, [_wf_draft(wid, rev, "failed", a.row, reason="; ".join(errs)[:500])])
             return {"status": "stopped", "failed": [a.row], "reason": "; ".join(errs)}
-        step_append(table_id, [_draft(wid, rev, "finished", a.row, payload={"summary": out["summary"], "metrics": out["metrics"]})])
+        step_append(table_id, [_wf_draft(wid, rev, "finished", a.row, payload={"summary": out["summary"], "metrics": out["metrics"]})])
         step_record(table_id, a.row, "finish")
     return {"status": "stopped", "reason": "繰り返しの上限に当たった"}
 
@@ -268,7 +284,7 @@ def sprint_workflow(table_id: str, rev: int, stale: Optional[dict]) -> dict:
 # --- 前景の起動 ------------------------------------------------------------------
 
 
-def prefix_of(table_id: str) -> str:
+def run_prefix(table_id: str) -> str:
     return f"progress-{durable.key_hash(table_id)}"
 
 
@@ -282,44 +298,46 @@ def stale_execution(store: pdb.Store, wids: list[str], version: str) -> Optional
     return None
 
 
-def report(status: str, summary: str, items: Optional[list] = None, **metrics) -> dict:
+def progress_report(status: str, summary: str, items: Optional[list] = None, **metrics) -> dict:
     return {"tool": TOOL, "status": status, "summary": summary, "items": items or [], "metrics": metrics}
 
 
-def _finish(table_id: str, out: dict) -> tuple[dict, int]:
+def _run_report_of(table_id: str, out: dict) -> tuple[dict, int]:
     if out.get("status") == "ok":
-        return report("ok", "スプリントの進行表が完了した", table=table_id, next_row=out.get("next_row")), 0
+        return progress_report("ok", "スプリントの進行表が完了した", table=table_id, next_row=out.get("next_row")), 0
     if out.get("plan_cancelled"):
-        return report("stopped", "計画が中止された。progress.py cancel を打つ", table=table_id, plan_cancelled=True), 3
+        return progress_report("stopped", "計画が中止された。progress.py cancel を打つ", table=table_id, plan_cancelled=True), 3
     items = [{"row": r, "kind": "failed"} for r in out.get("failed") or []]
-    return report("stopped", f"工程が失敗した: {out.get('reason')}", items, table=table_id), 1
+    return progress_report("stopped", f"工程が失敗した: {out.get('reason')}", items, table=table_id), 1
 
 
 def _gate_exit(table_id: str) -> None:
     info = _CTX["gate"] or {}
-    rep = report("gate", f"{info.get('row')} が答えを待っている（progress.py answer の後に next を打つ）", [{"kind": "gate", **info}], table=table_id)
+    rep = progress_report(
+        "gate", f"{info.get('row')} が答えを待っている（progress.py answer の後に next を打つ）", [{"kind": "gate", **info}], table=table_id
+    )
     print(json.dumps(rep, ensure_ascii=False), flush=True)
     durable.exit_leaving_pending(10)
 
 
-def run_next(store: pdb.Store, table_id: str, poll: float = 0.2) -> tuple[dict, int]:
+def run_next(store: pdb.Store, table_id: str) -> tuple[dict, int]:
     """排他を取り、古い実行を始末し、進行表のワークフローを回復か新しく始めて流す（決定 6・7・21）。"""
     with pdb.run_lock(store, table_id):
         with pdb.transaction(store) as conn:
-            row = pdb.table_row(conn, table_id)
+            row = pdb.progress_table(conn, table_id)
             if row is None or row.level != "sprint":
                 raise pdb.Unreadable(f"スプリントの進行表 {table_id} が無い")
             rev, _ = pdb.definition(conn, table_id)
-            state = pm.table_state(pm.fold(pdb.read_events(conn, table_id), rev))
+            state = pm.table_state(pm.fold(pdb.read_progress_events(conn, table_id), rev))
         if state == pm.COMPLETED:
-            return report("ok", "スプリントの進行表はもう完了している", table=table_id, next_row=None), 0
+            return progress_report("ok", "スプリントの進行表はもう完了している", table=table_id, next_row=None), 0
         if state == pm.CANCELLED:
-            return report("stopped", "スプリントの進行表は中止されている", table=table_id), 3
+            return progress_report("stopped", "スプリントの進行表は中止されている", table=table_id), 3
         _CTX.update(url=store.url, store=store, gate=None)
         _GATE.clear()
         launched = durable.launch(DURABLE_KIND, table_id, url=store.url, app_version=None)
         try:
-            prefix = prefix_of(table_id)
+            prefix = run_prefix(table_id)
             wids = durable.workflow_ids(prefix + "-")
             stale = stale_execution(store, wids, launched.version)
             if stale:
@@ -330,28 +348,29 @@ def run_next(store: pdb.Store, table_id: str, poll: float = 0.2) -> tuple[dict, 
             else:
                 n = len(wids) + 1
                 wid = durable.start(durable.WorkflowRef(f"{prefix}-{n}", n, "start"), sprint_workflow, table_id, rev, stale)
-            while True:
-                if _GATE.is_set():
-                    _gate_exit(table_id)
-                if durable.status(wid) in durable.FINISHED:
-                    break
-                time.sleep(poll)
+            got = waits.wait_until(
+                lambda: _GATE.is_set() or durable.status(wid) in durable.FINISHED, bool, policy=limits.policy(NEXT_POLICY)
+            )
+            if _GATE.is_set():
+                _gate_exit(table_id)
+            if not got.done:
+                return progress_report("stopped", f"進行表のワークフローが上限までに終わらない: {got.reason}", table=table_id), 1
             try:
                 out = durable.output_of(wid)
             except Exception as e:  # noqa: BLE001  耐久ワークフローの失敗を結果の文にする
                 code = 3 if "Refused" in type(e).__name__ or "I12" in str(e) or "I18" in str(e) else 1
-                return report("stopped", f"進行表のワークフローが落ちた: {e}", table=table_id), code
-            return _finish(table_id, out)
+                return progress_report("stopped", f"進行表のワークフローが落ちた: {e}", table=table_id), code
+            return _run_report_of(table_id, out)
         finally:
             durable.close()
 
 
-def send_answer(store: pdb.Store, table_id: str, row: str, value: dict) -> bool:
+def send_progress_answer(store: pdb.Store, table_id: str, row: str, value: dict) -> bool:
     """途中の実行があれば答えを送る。送れなければ偽（`answered` の事象が残るため失われない）。"""
     try:
         wids = []
         with pdb.transaction(store) as conn:
-            wids = [e.payload.get("wid") for e in pdb.read_events(conn, table_id) if e.kind == "execution" and e.payload]
+            wids = [e.payload.get("wid") for e in pdb.read_progress_events(conn, table_id) if e.kind == "execution" and e.payload]
         if not wids:
             return False
         st = durable.status_from("", "", wids[-1], url=store.url)

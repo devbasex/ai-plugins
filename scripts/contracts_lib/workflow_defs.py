@@ -98,7 +98,7 @@ def check_workflow_defs(root: Path) -> list[dict]:
     snaps = {}
     for mode in wd.MODES:
         try:
-            snaps[mode] = wd.load_definition(mode, base)
+            snaps[mode] = wd.load_mode_definition(mode, base)
         except wd.WorkflowDefError as e:
             out += [_v(mode, err, f"{WORKFLOW}/modes/{mode}.json") for err in e.errors]
     try:

@@ -24,7 +24,7 @@ SUPERVISE = HERE.parent / "supervise.py"
 GATE_CODES = range(10, 20)
 
 
-def _report(tool: str, status: str, summary: str, **metrics) -> dict:
+def _act_report(tool: str, status: str, summary: str, **metrics) -> dict:
     return {"tool": tool, "status": status, "summary": summary, "items": [], "metrics": metrics}
 
 
@@ -43,9 +43,20 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
         return path
     refs = " ".join(f"#{n}" for n in target)
     doc = {
-        "フェーズ": stage, "課題": target, "モード": inp.get("mode"), "作業場所": inp.get("cwd") or str(Path.cwd()),
-        "steps": [{"id": "work", "type": "work", "kind": stage, "stage": stage,
-                   "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）", "next": "end"}],
+        "フェーズ": stage,
+        "課題": target,
+        "モード": inp.get("mode"),
+        "作業場所": inp.get("cwd") or str(Path.cwd()),
+        "steps": [
+            {
+                "id": "work",
+                "type": "work",
+                "kind": stage,
+                "stage": stage,
+                "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）",
+                "next": "end",
+            }
+        ],
     }
     (where / "plan.json").write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -59,7 +70,7 @@ def act_plan(inp: dict, args: dict) -> dict:
     try:
         plan = Path(resume["plan"]) if resume else _plan_doc(inp, args, work)
     except RuntimeError as e:
-        return _report("ndf.plan", "stopped", str(e))
+        return _act_report("ndf.plan", "stopped", str(e))
     cmd = [sys.executable, str(SUPERVISE), "run", str(plan)] + (["--from", resume["step"]] if resume else [])
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=inp.get("cwd"))
     last = (p.stdout.strip().splitlines() or ["{}"])[-1]
@@ -69,20 +80,20 @@ def act_plan(inp: dict, args: dict) -> dict:
         out = {}
     metrics = {"plan": str(plan), "code": p.returncode, **(out.get("metrics") or {})}
     if p.returncode == 0:
-        return _report("ndf.plan", "ok", out.get("summary") or "プランが終わった", **metrics)
+        return _act_report("ndf.plan", "ok", out.get("summary") or "プランが終わった", **metrics)
     if p.returncode in GATE_CODES:
         nxt = (out.get("metrics") or {}).get("next_step") or (out.get("metrics") or {}).get("step")
-        return _report("ndf.plan", "gate", out.get("summary") or "プランが承認ゲートで止まった", **metrics, gate_step=nxt)
-    return _report("ndf.plan", "stopped", out.get("summary") or f"プランが {p.returncode} で終わった", **metrics)
+        return _act_report("ndf.plan", "gate", out.get("summary") or "プランが承認ゲートで止まった", **metrics, gate_step=nxt)
+    return _act_report("ndf.plan", "stopped", out.get("summary") or f"プランが {p.returncode} で終わった", **metrics)
 
 
 def act_listen(answer: Optional[dict]) -> dict:
     """承認ゲートの答えかリリースの結果を出力の形へ写す。答えが無い（待ちの期限を過ぎた）なら `stopped`。"""
     if not answer:
-        return {**_report("ndf.listen", "stopped", "待ちの期限を過ぎた"), "answer": "rejected"}
+        return {**_act_report("ndf.listen", "stopped", "待ちの期限を過ぎた"), "answer": "rejected"}
     value = answer.get("answer")
     status = "ok" if value in ("approved", "released") else "stopped"
-    out = {**_report("ndf.listen", status, f"答え: {value}"), "answer": value}
+    out = {**_act_report("ndf.listen", status, f"答え: {value}"), "answer": value}
     if answer.get("release") is not None:
         out["release"] = answer["release"]
     return out
@@ -97,7 +108,7 @@ def act_record(store, table_id: str, row: str, phase: str) -> dict:
     except Exception as e:  # noqa: BLE001  進捗記録の失敗は工程を失敗にしない（詳細設計の act_record）
         got = {"projection": f"failed: {type(e).__name__}"}
     failed = [{"kind": "progress-record", "target": k, "result": v} for k, v in got.items() if str(v).startswith("failed")]
-    rep = _report("ndf.record", "ok", f"進捗記録 {len(got) - len(failed)} 件・書けなかった {len(failed)} 件", targets=got)
+    rep = _act_report("ndf.record", "ok", f"進捗記録 {len(got) - len(failed)} 件・書けなかった {len(failed)} 件", targets=got)
     rep["items"] = failed
     return rep
 
@@ -111,7 +122,7 @@ def act_reshuffle(store, table_id: str, inp: dict, propose: Optional[Callable] =
     with pdb.transaction(store) as conn:
         link = pdb.sprint_link(conn, table_id)
         if link:
-            lane_row = pdb.table_row(conn, link[0])
+            lane_row = pdb.progress_table(conn, link[0])
             lane = pdb.lane_name(lane_row)
             if lane_row.parent_id:
                 plan, lanes, _ = pdb.plan_and_lanes(conn, lane_row.parent_id)
@@ -125,14 +136,19 @@ def act_reshuffle(store, table_id: str, inp: dict, propose: Optional[Callable] =
     return reshuffle.apply_changes(store, table_id, proposal)
 
 
-ACTIVITIES: dict[str, str] = {"ndf.plan": "act_plan", "ndf.listen": "act_listen", "ndf.record": "act_record", "ndf.reshuffle": "act_reshuffle"}
+ACTIVITIES: dict[str, str] = {
+    "ndf.plan": "act_plan",
+    "ndf.listen": "act_listen",
+    "ndf.record": "act_record",
+    "ndf.reshuffle": "act_reshuffle",
+}
 
 
 def run_activity(store, table_id: str, rev: int, act, inp: dict, answer: Optional[dict] = None) -> dict:
     """`call` の名前から関数を引いて流し、出力を返す。知らない名前は `stopped`。"""
     name = ACTIVITIES.get(act.call)
     if name is None:
-        return _report(act.call or "unknown", "stopped", f"知らないアクティビティ {act.call}")
+        return _act_report(act.call or "unknown", "stopped", f"知らないアクティビティ {act.call}")
     if name == "act_plan":
         return act_plan(inp, act.with_)
     if name == "act_listen":
@@ -140,4 +156,3 @@ def run_activity(store, table_id: str, rev: int, act, inp: dict, answer: Optiona
     if name == "act_record":
         return act_record(store, table_id, inp["stage"], "finish")
     return act_reshuffle(store, table_id, inp)
-

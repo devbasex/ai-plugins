@@ -212,6 +212,8 @@ def _impl_plan(a, steps: list[dict], rule: str) -> dict:
 
 
 NO_REFACTOR_MODES = ("light", "operation", "documentation")  # 工程表で「構造改善」が「—」のモード
+
+
 def refactor_suspended(a) -> bool:
     """検査のプランから構造改善を外すか。CI テストの宣言の無いリポジトリは手元のテストの負荷のため外す（#3056 の決定 12）。
     工程としての構造改善の有効・無効は進行表の宣言（工程の定義の `when: ci_declared`・`.ndf/project.json` の

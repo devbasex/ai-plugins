@@ -122,8 +122,11 @@ class Snapshot:
             "version": self.version,
             "sha256": self.sha256,
             "stages": [
-                {**{k: v for k, v in asdict(s).items() if k != "activities"}, "when": list(s.when),
-                 "activities": [asdict(a) for a in s.activities]}
+                {
+                    **{k: v for k, v in asdict(s).items() if k != "activities"},
+                    "when": list(s.when),
+                    "activities": [asdict(a) for a in s.activities],
+                }
                 for s in self.stages
             ],
             "schemas": self.schemas,
@@ -133,8 +136,12 @@ class Snapshot:
     def from_dict(d: dict) -> "Snapshot":
         stages = tuple(
             StageDef(
-                name=s["name"], id=s["id"], when=tuple(s.get("when") or ()), per_issue=bool(s.get("per_issue")),
-                input_ref=s.get("input_ref"), output_ref=s.get("output_ref"),
+                name=s["name"],
+                id=s["id"],
+                when=tuple(s.get("when") or ()),
+                per_issue=bool(s.get("per_issue")),
+                input_ref=s.get("input_ref"),
+                output_ref=s.get("output_ref"),
                 activities=tuple(ActivityDef(**a) for a in s.get("activities") or ()),
             )
             for s in d["stages"]
@@ -145,7 +152,7 @@ class Snapshot:
 # --- 読み込み ---------------------------------------------------------------
 
 
-def _read(path: Path) -> dict:
+def _read_def_json(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -176,7 +183,7 @@ def _ref_of(task: dict, side: str) -> Optional[str]:
         return None
 
 
-def _items(do: list) -> list[tuple[str, dict]]:
+def _task_items(do: list) -> list[tuple[str, dict]]:
     return [next(iter(item.items())) for item in do if isinstance(item, dict) and item]
 
 
@@ -184,28 +191,34 @@ def _activity(stage: str, aid: str, task: dict) -> ActivityDef:
     meta = _ndf_meta(task)
     call = LISTEN_CALL if "listen" in task else task.get("call", "")
     return ActivityDef(
-        id=aid, stage=stage, call=call, kind=meta.get("kind", ""), range=meta.get("range", ""),
-        subject=meta.get("subject"), with_=dict(task.get("with") or {}),
-        input_ref=_ref_of(task, "input"), output_ref=_ref_of(task, "output"),
+        id=aid,
+        stage=stage,
+        call=call,
+        kind=meta.get("kind", ""),
+        range=meta.get("range", ""),
+        subject=meta.get("subject"),
+        with_=dict(task.get("with") or {}),
+        input_ref=_ref_of(task, "input"),
+        output_ref=_ref_of(task, "output"),
     )
 
 
-def load_definition(mode: str, root: Optional[Path] = None) -> Snapshot:
+def load_mode_definition(mode: str, root: Optional[Path] = None) -> Snapshot:
     """モードの文書と、それが呼ぶ工程の文書・入出力規約を読み、検査を通したスナップショットを返す。"""
     if mode not in MODES:
         raise WorkflowDefError([f"知らないモード: {mode}（{' / '.join(MODES)}）"])
     base = root or WORKFLOW_DIR
-    dsl = dsl_body(_read(base / DSL_SCHEMA))
-    mode_doc = _read(base / "modes" / f"{mode}.json")
+    dsl = dsl_body(_read_def_json(base / DSL_SCHEMA))
+    mode_doc = _read_def_json(base / "modes" / f"{mode}.json")
     errors = [f"modes/{mode}.json: {e}" for e in check_dsl(mode_doc, dsl) + check_vocabulary(mode_doc)]
     stages: list[StageDef] = []
     hasher = hashlib.sha256(json.dumps(mode_doc, sort_keys=True).encode())
-    for name, task in _items(mode_doc.get("do") or []):
+    for name, task in _task_items(mode_doc.get("do") or []):
         wf = (task.get("run") or {}).get("workflow") or {}
         sid = wf.get("name", "")
         path = base / "stages" / f"{sid}.json"
         try:
-            doc = _read(path)
+            doc = _read_def_json(path)
         except WorkflowDefError as e:
             errors.extend(e.errors)
             continue
@@ -213,13 +226,15 @@ def load_definition(mode: str, root: Optional[Path] = None) -> Snapshot:
         errors += [f"stages/{sid}.json: {e}" for e in check_dsl(doc, dsl) + check_vocabulary(doc)]
         dmeta = ((doc.get("document") or {}).get("metadata") or {}).get("ndf") or {}
         if doc.get("document", {}).get("version") != wf.get("version"):
-            errors.append(f"modes/{mode}.json: {name} は版 {wf.get('version')} を呼ぶが stages/{sid}.json は {doc.get('document', {}).get('version')}")
+            errors.append(
+                f"modes/{mode}.json: {name} は版 {wf.get('version')} を呼ぶが stages/{sid}.json は {doc.get('document', {}).get('version')}"
+            )
         if dmeta.get("stage") != name:
             errors.append(f"modes/{mode}.json: {name} が呼ぶ stages/{sid}.json の stage は {dmeta.get('stage')}")
         when = tuple(dmeta.get("when") or ()) + tuple(w for w in _ndf_meta(task).get("when") or () if w not in (dmeta.get("when") or ()))
-        acts = tuple(_activity(name, aid, t) for aid, t in _items(doc.get("do") or []))
+        acts = tuple(_activity(name, aid, t) for aid, t in _task_items(doc.get("do") or []))
         stages.append(StageDef(name, sid, when, bool(dmeta.get("per_issue")), _ref_of(doc, "input"), _ref_of(doc, "output"), acts))
-    schemas = {p.name: _read(p) for p in sorted((base / "schemas").glob("*.json"))}
+    schemas = {p.name: _read_def_json(p) for p in sorted((base / "schemas").glob("*.json"))}
     errors += check_contracts(stages, schemas)
     errors += check_order([a for s in stages for a in s.activities])
     if errors:
@@ -260,7 +275,7 @@ def check_dsl(doc: dict, schema: dict) -> list[str]:
 
 
 def _walk_tasks(do: list, path: str):
-    for name, task in _items(do):
+    for name, task in _task_items(do):
         here = f"{path}.{name}"
         yield here, task
         if isinstance(task, dict):
@@ -315,7 +330,7 @@ def _resolve_ref(ref: str, schemas: dict[str, dict]) -> Optional[str]:
     """参照先があれば None、無ければ理由。"""
     if not ref.startswith(REF_PREFIX):
         return f"参照 {ref} が {REF_PREFIX} で始まらない"
-    rest = ref[len(REF_PREFIX):]
+    rest = ref[len(REF_PREFIX) :]
     name, _, pointer = rest.partition("#")
     if name not in schemas:
         return f"参照先のファイル {name} が無い"
@@ -410,8 +425,6 @@ def validate_io(snap: Snapshot, ref: str, obj: object) -> list[str]:
     why = _resolve_ref(ref, snap.schemas)
     if why:
         return [why]
-    registry = Registry().with_resources(
-        [(REF_PREFIX + name, Resource.from_contents(body)) for name, body in snap.schemas.items()]
-    )
+    registry = Registry().with_resources([(REF_PREFIX + name, Resource.from_contents(body)) for name, body in snap.schemas.items()])
     validator = Draft202012Validator({"$ref": ref}, registry=registry)
     return [f"{e.json_path}: {e.message[:200]}" for e in validator.iter_errors(obj)]

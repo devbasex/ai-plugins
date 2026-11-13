@@ -10,11 +10,12 @@ import pytest
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
+import progress_lanes as plr  # noqa: E402
 import progress_model as pm  # noqa: E402
 import workflow_def as wd  # noqa: E402
 
 D = pm.EventDraft
-SNAP = wd.load_definition("standard")
+SNAP = wd.load_mode_definition("standard")
 HEIGHTS = wd.mode_heights()
 
 
@@ -30,8 +31,13 @@ def rows_of(*pairs):
 
 
 def test_fold_start_finish_and_rev_filter():
-    events = [ev(1, "created", "設計"), ev(2, "started", "設計"), ev(3, "finished", "設計"),
-              ev(4, "created", "設計", rev=2), ev(5, "answered", "設計", rev=2, payload={"answer": "approved"})]
+    events = [
+        ev(1, "created", "設計"),
+        ev(2, "started", "設計"),
+        ev(3, "finished", "設計"),
+        ev(4, "created", "設計", rev=2),
+        ev(5, "answered", "設計", rev=2, payload={"answer": "approved"}),
+    ]
     assert pm.fold(events, 1)["設計"].state == pm.FINISHED
     r2 = pm.fold(events, 2)["設計"]
     assert r2.state == pm.PENDING and r2.payload == {"answer": "approved"}  # state が空の事象は状態を変えない
@@ -54,9 +60,14 @@ def test_writer_table_allows_and_refuses():
     for kind in ("created", "adopted", "row_started", "lane_added", "request_opened", "plan_started"):
         level = {"row_started": "lane", "lane_added": "plan", "request_opened": "plan", "plan_started": "plan"}.get(kind, "sprint")
         pm.check_writer(level, kind, "adopt")
-    for level, kind, actor in [("sprint", "started", "organizer"), ("sprint", "cancelled", "organizer"),
-                               ("sprint", "started", "adopt"), ("sprint", "completed", "durable"),
-                               ("sprint", "finished", "conductor"), ("plan", "plan_completed", "organizer")]:
+    for level, kind, actor in [
+        ("sprint", "started", "organizer"),
+        ("sprint", "cancelled", "organizer"),
+        ("sprint", "started", "adopt"),
+        ("sprint", "completed", "durable"),
+        ("sprint", "finished", "conductor"),
+        ("plan", "plan_completed", "organizer"),
+    ]:
         with pytest.raises(pm.Refused):
             pm.check_writer(level, kind, actor)
 
@@ -88,7 +99,9 @@ def test_mode_only_goes_up():
     rows = rows_of((pm.TABLE_KEY, pm.RUNNING))
     pm.check_event("sprint", rows, D("mode_raised", "conductor", None, 2, reason="r", payload={"from": "light", "to": "standard"}), HEIGHTS)
     with pytest.raises(pm.Refused, match="I5"):
-        pm.check_event("sprint", rows, D("mode_raised", "conductor", None, 2, reason="r", payload={"from": "standard", "to": "light"}), HEIGHTS)
+        pm.check_event(
+            "sprint", rows, D("mode_raised", "conductor", None, 2, reason="r", payload={"from": "standard", "to": "light"}), HEIGHTS
+        )
 
 
 # --- next_action ---
@@ -126,8 +139,14 @@ def test_carry_rows():
     assert all(d.kind == "created" for d in pm.carry_rows(old, SNAP, names[0], 2))
 
 
-MAP = {"設計": ["設計", "ドキュメント再構成", "ドキュメントレビュー"], "実装": ["実装"], "検査": ["構造改善", "実装レビュー", "完了判定"],
-       "実装レビュー": ["実装レビュー"], "開発版": ["Pull Request", "後片付け", "デプロイ"], "本番": ["デプロイ"]}
+MAP = {
+    "設計": ["設計", "ドキュメント再構成", "ドキュメントレビュー"],
+    "実装": ["実装"],
+    "検査": ["構造改善", "実装レビュー", "完了判定"],
+    "実装レビュー": ["実装レビュー"],
+    "開発版": ["Pull Request", "後片付け", "デプロイ"],
+    "本番": ["デプロイ"],
+}
 
 
 def test_adopt_rows_full_partial_none():
@@ -146,8 +165,10 @@ def test_adopt_rows_full_partial_none():
 def lanes_plan():
     plan = {"lanes": {"a": {"touches": []}, "b": {"touches": []}}, "max_lanes": 2, "requests": {}}
     lanes = {
-        "a": [{"row": 1, "issues": [1], "touches": ["x/"], "after": [], "state": pm.RUNNING},
-              {"row": 2, "issues": [2], "touches": ["y/"], "after": [], "state": pm.PENDING}],
+        "a": [
+            {"row": 1, "issues": [1], "touches": ["x/"], "after": [], "state": pm.RUNNING},
+            {"row": 2, "issues": [2], "touches": ["y/"], "after": [], "state": pm.PENDING},
+        ],
         "b": [{"row": 1, "issues": [3], "touches": ["x/"], "after": ["a#1"], "state": pm.PENDING}],
     }
     return plan, lanes
@@ -157,47 +178,63 @@ def test_lane_change_overlaps_and_order():
     plan, lanes = lanes_plan()
     # after: a#1 の b#1 と a#1 は重なってよい（今の状態は通る）
     ok = D("row_added", "conductor", "3", payload={"lane": "a", "row": 3, "issues": [4], "touches": ["z/"]})
-    assert pm.check_lane_change(plan, lanes, ok) == []
+    assert plr.check_lane_change(plan, lanes, ok) == []
     bad = D("row_added", "conductor", "3", payload={"lane": "a", "row": 3, "issues": [4], "touches": ["x/"]})
     # a#3 は a#1 の後ろ・b#1 は a#1 の後ろで、a#3 と b#1 は同時に動き得る
-    assert any("I13" in e for e in pm.check_lane_change(plan, lanes, bad))
+    assert any("I13" in e for e in plr.check_lane_change(plan, lanes, bad))
     dup = D("row_added", "conductor", "3", payload={"lane": "a", "row": 3, "issues": [3], "touches": []})
-    assert any("I19" in e for e in pm.check_lane_change(plan, lanes, dup))
-    assert any("I12a" in e for e in pm.check_lane_change(plan, lanes, D("row_moved", "conductor", "1", payload={"lane": "a", "row": 1, "to": 1})))
-    assert any("I18" in e for e in pm.check_lane_change(plan, {**lanes, "a": [{**lanes["a"][0], "state": pm.PENDING}, lanes["a"][1]]},
-                                                         D("row_cancelled", "conductor", "1", payload={"lane": "a", "row": 1})))
-    assert any("I20" in e for e in pm.check_lane_change(plan, lanes, D("lane_added", "organizer", payload={"lane": "c", "touches": []})))
+    assert any("I19" in e for e in plr.check_lane_change(plan, lanes, dup))
+    assert any(
+        "I12a" in e for e in plr.check_lane_change(plan, lanes, D("row_moved", "conductor", "1", payload={"lane": "a", "row": 1, "to": 1}))
+    )
+    assert any(
+        "I18" in e
+        for e in plr.check_lane_change(
+            plan,
+            {**lanes, "a": [{**lanes["a"][0], "state": pm.PENDING}, lanes["a"][1]]},
+            D("row_cancelled", "conductor", "1", payload={"lane": "a", "row": 1}),
+        )
+    )
+    assert any("I20" in e for e in plr.check_lane_change(plan, lanes, D("lane_added", "organizer", payload={"lane": "c", "touches": []})))
     # a#2 が b#1 を待つ形へ、b#1 の前に a#2 を待つ行を足すと輪になる
     cyc = D("row_added", "conductor", "2", payload={"lane": "b", "row": 2, "issues": [9], "touches": [], "after": ["a#2"], "position": 0})
     lanes2 = {**lanes, "a": [lanes["a"][0], {**lanes["a"][1], "after": ["b#1"]}]}
-    assert any("I21" in e for e in pm.check_lane_change(plan, lanes2, cyc))
+    assert any("I21" in e for e in plr.check_lane_change(plan, lanes2, cyc))
 
 
 def test_next_row_and_wakeable_and_complete():
     plan, lanes = lanes_plan()
-    assert pm.next_row("a", plan, lanes) == {"lane": "a", "row": 2, "issues": [2], "args": []}
-    assert pm.next_row("b", plan, lanes) == "waiting_after"
-    assert pm.wakeable_lanes(plan, lanes) == []
+    assert plr.next_row("a", plan, lanes) == {"lane": "a", "row": 2, "issues": [2], "args": []}
+    assert plr.next_row("b", plan, lanes) == "waiting_after"
+    assert plr.wakeable_lanes(plan, lanes) == []
     lanes["a"][0]["state"] = pm.COMPLETED
-    assert pm.wakeable_lanes(plan, lanes) == [("a", 2), ("b", 1)]
+    assert plr.wakeable_lanes(plan, lanes) == [("a", 2), ("b", 1)]
     lanes["b"][0]["state"] = pm.COMPLETED
     lanes["a"][1]["state"] = pm.CANCELLED
-    assert pm.next_row("a", plan, lanes) is None
-    assert pm.plan_complete(lanes, [])
-    assert not pm.plan_complete(lanes, [{"open": True}])
-    assert pm.plan_complete(lanes, [{"open": False}])
+    assert plr.next_row("a", plan, lanes) is None
+    assert plr.plan_complete(lanes, [])
+    assert not plr.plan_complete(lanes, [{"open": True}])
+    assert plr.plan_complete(lanes, [{"open": False}])
 
 
 def test_lane_rows_and_plan_view_from_events():
-    events = [ev(1, "created", None, rev=None, actor="organizer"),
-              ev(2, "row_added", "1", rev=None, actor="organizer", payload={"row": 1, "issues": [1]}),
-              ev(3, "row_added", "2", rev=None, actor="conductor", payload={"row": 2, "issues": [2], "position": 0}),
-              ev(4, "row_started", "1", rev=None, actor="conductor", payload={"sprint": "sprint:x:s"})]
-    rows = pm.lane_rows(events)
+    events = [
+        ev(1, "created", None, rev=None, actor="organizer"),
+        ev(2, "row_added", "1", rev=None, actor="organizer", payload={"row": 1, "issues": [1]}),
+        ev(3, "row_added", "2", rev=None, actor="conductor", payload={"row": 2, "issues": [2], "position": 0}),
+        ev(4, "row_started", "1", rev=None, actor="conductor", payload={"sprint": "sprint:x:s"}),
+    ]
+    rows = plr.lane_order_rows(events)
     assert [r["row"] for r in rows] == [2, 1] and rows[1]["state"] == pm.RUNNING and rows[1]["sprint"] == "sprint:x:s"
-    pv = pm.plan_view([ev(1, "created", None, rev=None, payload={"max_lanes": 3}), ev(2, "lane_added", None, rev=None, payload={"lane": "a"}),
-                       ev(3, "plan_started", None, rev=None), ev(4, "request_opened", None, rev=None, payload={"x": 1}),
-                       ev(5, "request_closed", None, rev=None, payload={"request": "4"})])
+    pv = plr.plan_view(
+        [
+            ev(1, "created", None, rev=None, payload={"max_lanes": 3}),
+            ev(2, "lane_added", None, rev=None, payload={"lane": "a"}),
+            ev(3, "plan_started", None, rev=None),
+            ev(4, "request_opened", None, rev=None, payload={"x": 1}),
+            ev(5, "request_closed", None, rev=None, payload={"request": "4"}),
+        ]
+    )
     assert pv["state"] == pm.RUNNING and pv["max_lanes"] == 3 and not pv["requests"]["4"]["open"]
 
 
@@ -208,7 +245,9 @@ def test_table_id_is_stable():
 
 def test_model_does_not_import_dbos_or_db():
     """決定 20: 判断の関数は DBOS も durable も DB も import しない。"""
-    code = f"import sys; sys.path.insert(0, {str(LIB)!r}); import progress_model, reshuffle; " \
-           "bad = [m for m in ('dbos', 'durable', 'sqlalchemy', 'progress_db') if m in sys.modules]; print(bad)"
+    code = (
+        f"import sys; sys.path.insert(0, {str(LIB)!r}); import progress_model, reshuffle; "
+        "bad = [m for m in ('dbos', 'durable', 'sqlalchemy', 'progress_db') if m in sys.modules]; print(bad)"
+    )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
     assert out == "[]"

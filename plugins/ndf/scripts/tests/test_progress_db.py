@@ -43,8 +43,15 @@ def store(request, tmp_path):
 
 def sprint(conn, name="s1", parent=None, lane_row=None):
     first = D("created", "conductor", None, 1, payload={"lane_row": lane_row} if lane_row else None)
-    return pdb.create_table(conn, "sprint", "repo", name, parent, {"mode": "standard"},
-                            [first, D("created", "conductor", "設計", 1), D("created", "conductor", "実装", 1)])
+    return pdb.create_table(
+        conn,
+        "sprint",
+        "repo",
+        name,
+        parent,
+        {"mode": "standard"},
+        [first, D("created", "conductor", "設計", 1), D("created", "conductor", "実装", 1)],
+    )
 
 
 def test_three_levels_and_I1(store):
@@ -79,8 +86,8 @@ def test_append_seq_conflict_dedupe_and_writer(store):
     with pytest.raises(pm.Refused, match="決定 17"), pdb.transaction(store) as c:
         pdb.append_events(c, sid, [D("row_ended", "workflow", "1")])
     with pdb.transaction(store) as c:
-        assert [e.seq for e in pdb.read_events(c, sid)] == [1, 2, 3, 4]
-        assert pdb.read_events(c, sid, 4) == []
+        assert [e.seq for e in pdb.read_progress_events(c, sid)] == [1, 2, 3, 4]
+        assert pdb.read_progress_events(c, sid, 4) == []
 
 
 def test_transaction_rolls_back_everything(store):
@@ -88,7 +95,7 @@ def test_transaction_rolls_back_everything(store):
         sprint(c)
         raise RuntimeError("途中で落ちる")
     with pdb.transaction(store) as c:
-        assert pdb.table_row(c, pm.table_id("sprint", "repo", "s1")) is None
+        assert pdb.progress_table(c, pm.table_id("sprint", "repo", "s1")) is None
 
 
 def test_revision_keeps_old(store):
@@ -96,14 +103,21 @@ def test_revision_keeps_old(store):
         sid = sprint(c)
         pdb.append_events(c, sid, [D("started", "workflow", "設計", 1), D("finished", "workflow", "設計", 1)])
     with pdb.transaction(store) as c:
-        old = pm.fold(pdb.read_events(c, sid), 1)
-        rev = pdb.add_revision(c, sid, {"mode": "standard", "rev": 2},
-                               [D("scope_changed", "conductor", None, reason="課題を外す"),
-                                D("carried", "conductor", "設計", payload={"state": pm.FINISHED}), D("created", "conductor", "実装")])
+        old = pm.fold(pdb.read_progress_events(c, sid), 1)
+        rev = pdb.add_revision(
+            c,
+            sid,
+            {"mode": "standard", "rev": 2},
+            [
+                D("scope_changed", "conductor", None, reason="課題を外す"),
+                D("carried", "conductor", "設計", payload={"state": pm.FINISHED}),
+                D("created", "conductor", "実装"),
+            ],
+        )
         assert rev == 2
         assert pdb.add_revision(c, sid, {"rev": 3}, []) == 3
     with pdb.transaction(store) as c:
-        ev = pdb.read_events(c, sid)
+        ev = pdb.read_progress_events(c, sid)
         assert pm.fold(ev, 1) == old
         assert pm.fold(ev, 2)["設計"].state == pm.FINISHED
         assert pdb.definition(c, sid, 1)[1] == {"mode": "standard"}
@@ -111,9 +125,19 @@ def test_revision_keeps_old(store):
 
 
 def _plan_with_lane(c):
-    plan = pdb.create_table(c, "plan", "repo", "p", None, None,
-                            [D("created", "organizer", payload={"max_lanes": 3}), D("lane_added", "organizer", payload={"lane": "a", "touches": []}),
-                             D("plan_started", "organizer")])
+    plan = pdb.create_table(
+        c,
+        "plan",
+        "repo",
+        "p",
+        None,
+        None,
+        [
+            D("created", "organizer", payload={"max_lanes": 3}),
+            D("lane_added", "organizer", payload={"lane": "a", "touches": []}),
+            D("plan_started", "organizer"),
+        ],
+    )
     lane = pdb.create_table(c, "lane", "repo", "p/a", plan, None, [D("created", "organizer")])
     for n in (1, 2):
         pdb.lane_write(c, lane, D("row_added", "organizer", str(n), payload={"row": n, "issues": [n], "touches": []}))
@@ -130,7 +154,7 @@ def test_end_lane_row_is_idempotent_and_returns_next(store):
         assert got == {"next_row": {"lane": "a", "row": 2, "issues": [2], "args": []}}
         assert pdb.end_lane_row(c, sid, "completed", "workflow") == got  # 流し直しで 2 度呼んでも書かない
     with pdb.transaction(store) as c:
-        assert sum(e.kind == "row_ended" for e in pdb.read_events(c, lane)) == 1
+        assert sum(e.kind == "row_ended" for e in pdb.read_progress_events(c, lane)) == 1
         alone = sprint(c, name="alone")
         assert pdb.end_lane_row(c, alone, "completed", "workflow") is None
 
@@ -152,8 +176,11 @@ def test_default_url_is_shared_by_worktrees(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "x"], check=True,
-                   env={**os.environ, "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@b", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@b"})
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "x"],
+        check=True,
+        env={**os.environ, "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@b", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@b"},
+    )
     subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(tmp_path / "wt")], check=True)
     a, b = pdb.default_url(repo), pdb.default_url(tmp_path / "wt")
     assert a == b and a.endswith("/.git/ndf/state/progress/ndf-progress.sqlite")

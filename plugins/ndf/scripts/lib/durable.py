@@ -398,7 +398,9 @@ def open_client(kind: str, identity: str, start: Optional[Path] = None, url: Opt
         c.destroy()
 
 
-def send_to(kind: str, identity: str, wid: str, msg: Any, topic: str, key: str, start: Optional[Path] = None, url: Optional[str] = None) -> None:
+def send_to(
+    kind: str, identity: str, wid: str, msg: Any, topic: str, key: str, start: Optional[Path] = None, url: Optional[str] = None
+) -> None:
     """外から耐久ワークフロー `wid` へメッセージを送る。同じ `key` の 2 度目は数えない。"""
     with open_client(kind, identity, start, url) as c:
         c.send(wid, msg, topic, idempotency_key=key)

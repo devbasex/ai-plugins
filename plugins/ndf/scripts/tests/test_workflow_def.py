@@ -44,7 +44,7 @@ def _edit(path: Path, fn):
 def test_five_modes_match_the_stage_table():
     text = (REPO / wdefs.SKILL_MD).read_text()
     columns = wdefs.stage_columns(text)
-    snaps = {m: wd.load_definition(m) for m in wd.MODES}
+    snaps = {m: wd.load_mode_definition(m) for m in wd.MODES}
     assert wdefs.check_table_match(snaps, columns) == []
     assert snaps["standard"].stage_names[-3:] == ["振り返り", "組み換え", "棚卸し"]
     assert "組み換え" not in snaps["light"].stage_names
@@ -52,7 +52,7 @@ def test_five_modes_match_the_stage_table():
 
 
 def test_table_match_catches_missing_reordered_and_extra_stage():
-    snaps = {"standard": wd.load_definition("standard")}
+    snaps = {"standard": wd.load_mode_definition("standard")}
     names = snaps["standard"].stage_names
     assert any("定義に無い" in v["detail"] for v in wdefs.check_table_match(snaps, {"standard": names + ["新しい工程"]}))
     assert any("工程表に無い" in v["detail"] for v in wdefs.check_table_match(snaps, {"standard": names[1:]}))
@@ -74,22 +74,29 @@ def test_table_columns_treat_conditional_cells_as_present():
 def test_missing_contract_reference_is_refused(defs):
     _edit(defs / "stages/review.json", lambda d: d["do"][0]["review"].pop("output"))
     with pytest.raises(wd.WorkflowDefError) as e:
-        wd.load_definition("standard", defs)
+        wd.load_mode_definition("standard", defs)
     assert any("output の規約の参照が無い" in x for x in e.value.errors)
 
 
 def test_missing_contract_file_is_refused(defs):
     (defs / "schemas/answer.schema.json").unlink()
     with pytest.raises(wd.WorkflowDefError) as e:
-        wd.load_definition("standard", defs)
+        wd.load_mode_definition("standard", defs)
     assert any("answer.schema.json が無い" in x for x in e.value.errors)
 
 
 def test_output_not_matching_contract_is_reported():
-    snap = wd.load_definition("standard")
+    snap = wd.load_mode_definition("standard")
     ref = snap.stage("組み換え").activities[0].output_ref
-    good = {"tool": "reshuffle", "status": "ok", "summary": "変更なし", "decision": "unchanged",
-            "lane_changes": [], "requests": [], "refused": []}
+    good = {
+        "tool": "reshuffle",
+        "status": "ok",
+        "summary": "変更なし",
+        "decision": "unchanged",
+        "lane_changes": [],
+        "requests": [],
+        "refused": [],
+    }
     assert wd.validate_io(snap, ref, good) == []
     assert wd.validate_io(snap, ref, {"tool": "reshuffle", "status": "ok", "summary": "x"})
     assert wd.validate_io(snap, ref, {**good, "status": "done"})
@@ -99,10 +106,14 @@ def test_output_not_matching_contract_is_reported():
 
 
 def test_vocabulary_refuses_if_unknown_words_and_review_without_subject():
-    doc = {"do": [{"a": {"call": "ndf.plan", "if": "${ true }", "metadata": {"ndf": {"kind": "review", "range": "sprint_diff"}}}},
-                  {"b": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "work", "range": "none", "subject": "code"}}}},
-                  {"c": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "fly", "range": "none"}}}},
-                  {"d": {"set": {"x": 1}}}]}
+    doc = {
+        "do": [
+            {"a": {"call": "ndf.plan", "if": "${ true }", "metadata": {"ndf": {"kind": "review", "range": "sprint_diff"}}}},
+            {"b": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "work", "range": "none", "subject": "code"}}}},
+            {"c": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "fly", "range": "none"}}}},
+            {"d": {"set": {"x": 1}}},
+        ]
+    }
     errs = wd.check_vocabulary(doc)
     assert any("if は使わない" in e for e in errs)
     assert any("subject が無い" in e for e in errs)
@@ -112,9 +123,13 @@ def test_vocabulary_refuses_if_unknown_words_and_review_without_subject():
 
 
 def test_vocabulary_accepts_the_five_kinds():
-    doc = {"do": [{"a": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "review", "range": "sprint_diff", "subject": "code"}}}},
-                  {"b": {"listen": {"to": {"one": {"with": {"type": "x"}}}}, "metadata": {"ndf": {"kind": "gate", "range": "none"}}}},
-                  {"c": {"do": [{"d": {"run": {"workflow": {"namespace": "n", "name": "x", "version": "1.0.0"}}}}]}}]}
+    doc = {
+        "do": [
+            {"a": {"call": "ndf.plan", "metadata": {"ndf": {"kind": "review", "range": "sprint_diff", "subject": "code"}}}},
+            {"b": {"listen": {"to": {"one": {"with": {"type": "x"}}}}, "metadata": {"ndf": {"kind": "gate", "range": "none"}}}},
+            {"c": {"do": [{"d": {"run": {"workflow": {"namespace": "n", "name": "x", "version": "1.0.0"}}}}]}},
+        ]
+    }
     assert wd.check_vocabulary(doc) == []
 
 
@@ -138,7 +153,7 @@ def test_borrowed_schema_hash_is_checked(tmp_path):
 
 def test_five_modes_pass_the_order_rules():
     for m in wd.MODES:
-        assert wd.check_order(wd.load_definition(m).activities()) == []
+        assert wd.check_order(wd.load_mode_definition(m).activities()) == []
 
 
 def test_close_plan_of_2026_11_12_is_refused():
@@ -163,8 +178,11 @@ def test_order_rules_test_twice_and_verify_before_release():
 
 
 def test_code_and_docs_review_on_same_range_pass():
-    acts = [A("a", "r1", "review", "sprint_diff", "code"), A("b", "r2", "review", "sprint_diff", "docs"),
-            A("c", "rel", "release", "sprint_diff")]
+    acts = [
+        A("a", "r1", "review", "sprint_diff", "code"),
+        A("b", "r2", "review", "sprint_diff", "docs"),
+        A("c", "rel", "release", "sprint_diff"),
+    ]
     assert wd.check_order(acts) == []
 
 
@@ -178,7 +196,7 @@ FACTS = {w: True for w in wd.VOCABULARY["when"]}
 
 
 def test_enable_resolution_three_ranks():
-    snap = wd.load_definition("standard")
+    snap = wd.load_mode_definition("standard")
     facts = {**FACTS, "ci_declared": False}
     r = wd.resolve_enabled(snap, facts, {}, {})
     assert r["構造改善"] == wd.Enablement(False, "ci_declared", "definition")
@@ -193,21 +211,21 @@ def test_enable_resolution_three_ranks():
 
 
 def test_reshuffle_follows_retro():
-    snap = wd.load_definition("standard")
+    snap = wd.load_mode_definition("standard")
     r = wd.resolve_enabled(snap, FACTS, {}, {"振り返り": "要らない"})
     assert not r["組み換え"].enabled and r["組み換え"].reason == "retro_enabled"
-    op = wd.load_definition("operation")
+    op = wd.load_mode_definition("operation")
     r = wd.resolve_enabled(op, {**FACTS, "retro_enabled": False}, {}, {})
     assert not r["振り返り"].enabled and not r["組み換え"].enabled
 
 
 def test_missing_fact_is_an_error():
     with pytest.raises(wd.WorkflowDefError):
-        wd.resolve_enabled(wd.load_definition("standard"), {}, {}, {})
+        wd.resolve_enabled(wd.load_mode_definition("standard"), {}, {}, {})
 
 
 def test_snapshot_roundtrip():
-    snap = wd.load_definition("documentation")
+    snap = wd.load_mode_definition("documentation")
     back = wd.Snapshot.from_dict(json.loads(json.dumps(snap.to_dict())))
     assert back == snap
 
@@ -222,8 +240,8 @@ def test_mode_heights_from_the_single_source(tmp_path):
 
 def test_unknown_mode_and_broken_json(defs):
     with pytest.raises(wd.WorkflowDefError):
-        wd.load_definition("heavy")
+        wd.load_mode_definition("heavy")
     (defs / "stages/plan.json").write_text("{")
     with pytest.raises(wd.WorkflowDefError) as e:
-        wd.load_definition("standard", defs)
+        wd.load_mode_definition("standard", defs)
     assert any("JSON の誤り" in x for x in e.value.errors)

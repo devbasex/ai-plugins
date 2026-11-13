@@ -224,7 +224,8 @@
     "10": "承認ゲート: 承認ゲートかリリースの結果の待ちに入った（status gate）"
   },
   "callers": [
-    "plugins/ndf/scripts/lib/progress_model.py",
+    "plugins/ndf/scripts/lib/progress_adopt.py",
+    "plugins/ndf/scripts/lib/progress_lanes.py",
     "plugins/ndf/scripts/lib/progress_run.py",
     "plugins/ndf/scripts/supervise_lib/templates.py",
     "plugins/ndf/skills/development-workflow/SKILL.md"
