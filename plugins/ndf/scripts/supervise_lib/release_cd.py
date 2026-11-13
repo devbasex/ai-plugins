@@ -62,19 +62,23 @@ def _prod_pr_cmd(a, v: str) -> str:
     return f'$(gh pr list --head release/v{v} --base {a.production_branch} --state open --json number --jq ".[0].number")'
 
 
-def _approval_post_step(a, repo: str | None, v: str, approval: str, after: str) -> dict:
-    """承認資料を本番の PR へ承認資料のコメントで置く（#2773 の E4）。この後にリリース承認ゲートで止まる。"""
-    cmd = f"sh -c '{STEPS_PY} approval-post --pr {_prod_pr_cmd(a, v)} --approval {shlex.quote(material_path(repo, approval))}'"
+def _deploy_pr_step(step_id: str, repo: str | None, subcommand: str, **extra) -> dict:
+    """本番の PR に対して release-steps.py の `subcommand` を打つデプロイのステップ（repo があればその下で打つ）。`extra` は遷移。"""
     return {
-        "id": "approval-post",
+        "id": step_id,
         "type": "run",
         "stage": "デプロイ",
         "timeout": 300,
         **({"cwd": repo} if repo else {}),
-        "cmd": cmd,
-        "on_fail": "judge",
-        "next": after,
+        "cmd": f"sh -c '{STEPS_PY} {subcommand}'",
+        **extra,
     }
+
+
+def _approval_post_step(a, repo: str | None, v: str, approval: str, after: str) -> dict:
+    """承認資料を本番の PR へ承認資料のコメントで置く（#2773 の E4）。この後にリリース承認ゲートで止まる。"""
+    sub = f"approval-post --pr {_prod_pr_cmd(a, v)} --approval {shlex.quote(material_path(repo, approval))}"
+    return _deploy_pr_step("approval-post", repo, sub, on_fail="judge", next=after)
 
 
 def _approve_pr_step(a, repo: str | None, v: str, by: str) -> dict:
@@ -82,17 +86,8 @@ def _approve_pr_step(a, repo: str | None, v: str, by: str) -> dict:
     同じプランの facts の出力から読み、利用者の承認は --answer-from の記録で確かめる。先端が動いていれば 10 で終える。"""
     state = getattr(a, "state", None)
     answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
-    cmd = f"sh -c '{STEPS_PY} approve --pr {_prod_pr_cmd(a, v)} --facts-from {{state_dir}}{answer} --by {by}'"
-    return {
-        "id": "approve-pr",
-        "type": "run",
-        "stage": "デプロイ",
-        "timeout": 300,
-        **({"cwd": repo} if repo else {}),
-        "cmd": cmd,
-        "next": "release",
-        "gate_next": "end",
-    }
+    sub = f"approve --pr {_prod_pr_cmd(a, v)} --facts-from {{state_dir}}{answer} --by {by}"
+    return _deploy_pr_step("approve-pr", repo, sub, next="release", gate_next="end")
 
 
 def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:
