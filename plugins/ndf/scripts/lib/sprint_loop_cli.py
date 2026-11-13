@@ -87,7 +87,6 @@ def keep_outside_plan(env, name: str, reason: str | None) -> None:
 
 def _dispatch(a, update) -> dict | None:
     import sprint_loop as sl  # loop のときだけ読む
-    import sprint_loop_gate as sl_gate
     import sprint_loop_select as sl_select
 
     env = sl.Env(Path(a.root or ".").resolve())
@@ -105,7 +104,6 @@ def _dispatch(a, update) -> dict | None:
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
             "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra), a.judgments),
-            "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done, update=update),
             "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr, revise=a.revise, note=a.note),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
             "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=update),
@@ -183,9 +181,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--mode", help="照合するモード。省くと判定の根拠から決まるモードで組む")
     s.add_argument("--dev", help="明示の開発版。省くと流す直前に次に空いている版を決める")
     s.add_argument("--prod", help="明示の本番の版（--dev と一緒に渡す）")
-    s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す
-    s = name(ls.add_parser("gate"))
-    s.add_argument("--done", required=True)
+    s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて進行表の文脈（工程のプランへ渡す引数）へ残す
     s = name(ls.add_parser("answer"))
     s.add_argument("issue", type=int)
     g = s.add_mutually_exclusive_group(required=True)

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import jsonio
-from sprint_loop_record import PROGRESS, SPRINT_STATE, SUPERVISE, resume_command, selected_issues
+from sprint_loop_record import PROGRESS, SPRINT_STATE, resume_command, selected_issues
 
 
 def approved_issues(rec: dict) -> set[int]:
@@ -70,22 +70,24 @@ def lap_context(rec: dict, lap: dict, carry: list[int]) -> Path:
     """まとめの工程が読む開発ループの文脈（ループの名前・回・マイルストーン・持ち越し・版）。今の `new close --pace auto` の
     `--loop`・`--lap`・`--milestone`・`--carry` と、`new sprint` の `--version` にあたる。"""
     doc = {"loop": rec["name"], "lap": lap["n"], "milestone": lap.get("milestone"), "carry": list(carry), "versions": lap["versions"]}
-    doc["extra"] = list(lap.get("sprint_extra") or [])  # `loop sprint ... --` の後の引数（工程のプランへ渡す）
+    doc["extra"] = list(lap.get("sprint_extra") or [])
+    if lap.get("lane"):  # レーンで動くループ: デプロイの工程がリリースの依頼を送る先
+        doc["lane"] = lap["lane"]  # `loop sprint ... --` の後の引数（工程のプランへ渡す）
     jsonio.write_atomic(Path(lap["dir"]) / "context.json", doc, indent=1)
     return Path(lap["dir"]) / "context.json"
 
 
-def new_sprint_argv(root: str, rec: dict, lap: dict, notes: list[str], carry: list[int] = ()) -> list[str]:
+def new_sprint_argv(root: str, rec: dict, lap: dict, notes: list[str], carry: list[int] = (), issues: list[int] | None = None) -> list[str]:
     """`progress.py new --pace auto` のコマンド（#3092）。ループの 1 回の進行表を作り、要求と受け入れ条件の工程を済んだ工程として渡す。
     設計を承認済みの課題は、設計の工程を通さない（`--disable 設計=…`）。`notes` は出し直しの指摘（`--revise-note`）。
     版（`--dev` を渡したときだけ）と `loop sprint ... --` の後の引数は文脈（`--context`）で工程のプランへ渡す（#2164）。"""
-    issues = selected_issues(lap)
+    issues = list(issues) if issues is not None else selected_issues(lap)  # 作り直し（モードを下げた続き）は残った課題で
     new = [sys.executable, str(PROGRESS), "new", lap["sprint"], "--mode", lap["mode"], "--issues", *map(str, issues), "--pace", "auto"]
     new += ["--state", lap["state_path"], "--work", str(Path(lap["dir"]) / "work")]
     new += ["--requirements", str(lap_requirements(lap, issues)), "--context", str(lap_context(rec, lap, list(carry)))]
     if lap.get("judgments_path"):
         new += ["--judgment", lap["judgments_path"]]
-    if not design_issues(rec, issues):  # 全課題の設計を承認済み: 設計の工程を流さない（今の --designed）
+    if lap.get("designed") or not design_issues(rec, issues):  # 設計を通した（作り直し）か承認済み: 設計の工程を流さない（今の --designed）
         new += [x for st in DESIGN_STAGES for x in ("--disable", f"{st}=設計承認ゲートで承認済み")]
     if rec.get("outside_plan"):  # 例外として始めたループは、内側の起動の判定でも同じ理由で通す（#2733）
         new += ["--outside-plan", rec["outside_plan"]]
@@ -113,26 +115,6 @@ def next_pipeline(rec: dict, table: str, done: Path) -> str:
         f"python3 {q(str(PROGRESS))} next {q(table)} > {q(str(part))}; mv {q(str(part))} {q(str(done))}; "
         f"python3 {q(str(SPRINT_STATE))} loop lap {rec['name']} --done {q(str(done))}"
     )
-
-
-def redo_sprint_argv(root: str, rec: dict, lap: dict, issues: list[int], mode: str, out: str) -> list[str]:
-    """モードを決め直して下がったとき、設計承認ゲートの後のステージを新しいモードで作り直す supervise.py new sprint の
-    コマンド（#2923 の決定 4）。設計は済んでいるため --design を渡さず、残った課題を --designed で渡す。"""
-    dev = lap["versions"]["dev"]
-    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
-    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", mode, "--designed", *map(str, issues)]
-    if dev:
-        new += ["--version", dev]
-    new += ["--out", out]
-    if rec.get("outside_plan"):
-        new += ["--outside-plan", rec["outside_plan"]]
-    new += list(lap.get("sprint_extra") or [])
-    return new
-
-
-def stage_plan(index: list[dict], stage: str) -> str | None:
-    """マニフェストのステージの先頭のプラン。ステージが無ければ None。"""
-    return next((p for e in index if e.get("name") == stage for p in e.get("plans", [])), None)
 
 
 def sprint_guidance(rec: dict, chosen: list[int], lap_dir: str) -> str:

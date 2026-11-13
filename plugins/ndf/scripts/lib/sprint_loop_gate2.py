@@ -17,7 +17,6 @@ from sprint_loop_record import (
     RELEASE_GATE,
     canonical,
     SPRINT_STATE,
-    SUPERVISE,
     TOOL,
     DONE,
     FAILED,
@@ -32,15 +31,10 @@ from sprint_loop_record import (
 )
 from sprint_loop_gate import (
     after_close,
-    build_close,
     finish_lap,
-    gate2_resume_step,
     loop_ok,
-    plan_info,
-    queue_command,
-    stages_after,
-    wait_lap,
 )
+from sprint_loop_table import cancel_table, table_finish_ok, table_finish_pipeline, table_gate2_pipeline, table_versions
 
 
 EPOCH = clock.parse("1970-01-01T00:00:00Z")  # 時刻の無い答え（止まった時刻の無い古い記録のとき）の並びの値
@@ -79,25 +73,11 @@ def latest_gate2_answer(gates: list[dict], rejections: list[dict], since: str | 
 
 
 def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
-    """リリース承認ゲートの承認の後の続き: 止まった計画を経路に合う再開のステップから続け → 同じ queue の残りのステージと
-    まとめの queue → wait → loop lap の 1 行。続けるステップが無い計画（gate-2 のプラン）は手で行う本番を先に示す。"""
-    # 止まった記録の values.pr は検査のスプリント PR で、記録の PR ではない。まとめは {queue_record} で流す時点に探す（#2230 の決定 5）
-    close = build_close(env, rec, lap, lap.get("issues_kept") or selected_issues(lap))
-    done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
-    plan = lap.get("gate2_plan") or lap.get("prod_plan") or "<本番のプラン>"
-    moved = {w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]}
-    rest = [
-        [p for p in s if not (set(plan_info(p).get("課題") or []) and set(plan_info(p).get("課題") or []) <= moved)]
-        for s in stages_after(lap, plan)
-    ]
-    stages = [s for s in rest if s] + [close]
-    queue = queue_command(stages, done)
-    lap.setdefault("dones", []).append(str(done))
-    step = gate2_resume_step(plan)
-    if step is None:
-        return f"手で行う本番のステージ（{plan} の後）を終えてから: {queue} && {wait_lap(rec, done)}"
-    run = f"python3 {shlex.quote(str(SUPERVISE))} run {shlex.quote(plan)} --from {step}"
-    return f"{run} && {queue} && {wait_lap(rec, done)}"
+    """リリース承認ゲートの承認の後の続き: 進行表の待ちの行へ承認を書き、同じ進行表を次の工程から流して締める（#3092）。
+    進行表を持たないループの 1 回（この版より前に組んだもの）は、手で行う本番を終えてからスプリント状態の行で締める。"""
+    if lap.get("table"):
+        return table_gate2_pipeline(rec, lap)
+    return f"手で行う本番を終えてから: python3 {shlex.quote(str(SPRINT_STATE))} loop lap {rec['name']}"
 
 
 # ---------------------------------------------------------------- 保留したループの 1 回（#2436 の受け入れ条件 6a・6d・6e）
@@ -134,24 +114,18 @@ def answer_of(answers: dict, rid: str | None) -> dict | None:
 
 
 def finish_pipeline(env: Env, rec: dict, lap: dict) -> str:
-    """保留したループの 1 回の残り（質問待ちなら止まったプランの続き → 同じ queue の残りのステージ）とまとめを流し、
-    `loop finish` で締め直す 1 行。組んだ行は記録へ残し、打ち直しでは同じ行を返す（まとめを二重に流さない）。"""
+    """保留したループの 1 回の残り（答えを進行表の待ちの行へ届けて、同じ進行表の残りのまとめ）を流し、`loop finish` で締め直す 1 行。
+    組んだ行は記録へ残し、打ち直しでは同じ行を返す（まとめを二重に流さない）。進行表を持たないループの 1 回（この版より前に組んだもの）は
+    残りを流さずに締め直す。"""
     part = lap["release"] if lap["outcome"] == RELEASE_PENDING else lap["question"]
     if (part.get("finish") or {}).get("pipeline"):
         return part["finish"]["pipeline"]
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
     lap.setdefault("dones", []).append(str(done))
-    head = ""
-    if lap["outcome"] == RELEASE_PENDING:
-        stages = list(part.get("stages") or [])
+    if lap.get("table"):
+        pipeline = table_finish_pipeline(rec, lap, done)
     else:
-        head = f"python3 {shlex.quote(str(SUPERVISE))} run {shlex.quote(part['plan'])} --from {shlex.quote(part['step'])} && "
-        stages = [st for st in stages_after(lap, part["plan"]) if st != lap.get("close_plans")]
-    stages = [st for st in [*stages, part.get("close_plans") or lap.get("close_plans") or []] if st]
-    finish = f"python3 {shlex.quote(str(SPRINT_STATE))} loop finish {rec['name']} {lap['n']} --done {shlex.quote(str(done))}"
-    wait = f"python3 {shlex.quote(str(SUPERVISE))} wait {shlex.quote(str(done))}"
-    body = f"{queue_command(stages, done)} && {wait} && " if stages else ""
-    pipeline = f"{head}{body}{finish}"
+        pipeline = f"python3 {shlex.quote(str(SPRINT_STATE))} loop finish {rec['name']} {lap['n']} --done {shlex.quote(str(done))}"
     part["finish"] = {"started_at": env.now(), "done": str(done), "pipeline": pipeline}
     return pipeline
 
@@ -188,6 +162,8 @@ def settle_release(env: Env, rec: dict, lap: dict, a: dict) -> None:
         if a.get("version"):
             lap.setdefault("versions", {})["prod"] = a["version"]
         return
+    if lap.get("table"):  # 差し戻し・失敗の進行表は流し直さない（まとめは流さない）。中止できなくても締める
+        cancel_table(env, lap, f"リリースの依頼の答え: {a.get('result')}")
     if a.get("result") == "rejected":
         finish_lap(env, rec, lap, RETURNED)
         rec.setdefault("fixes", []).append(
@@ -239,31 +215,18 @@ def pending_pipeline(env: Env, rec: dict, before: dict) -> dict:
     return finish_result(env, rec, before, lap)
 
 
-def finish_held(env: Env, rec: dict, before: dict, lap: dict, items: list[dict], state: dict) -> dict:
-    """`loop finish`: 保留したループの 1 回の残りの done を読み、ループの 1 回を 1 回だけ締め直してループの 1 回の境へ戻る。
-    質問待ちの続きがリリースの依頼で止まったら、リリース待ちへ移して答えを待つ。"""
-    from sprint_loop_gate import DONE_RESULTS, RELEASE_REQUEST_PHASE, failure_key, handle_release_pending
-
+def finish_held_table(env: Env, rec: dict, before: dict, lap: dict, done: str, state: dict) -> dict:
+    """`loop finish`（進行表で流したループの 1 回）: `progress.py next` の出力で 1 回だけ締め直す。リリースまで届いたループの 1 回は
+    完了で締め、後のまとめの失敗は失敗の鍵とは別に残す（#2911）。"""
     part = lap["release"] if lap["outcome"] == RELEASE_PENDING else lap["question"]
     (part.setdefault("finish", {}))["ended_at"] = env.now()
-    request = next(
-        (i["plan"] for i in items if i.get("result") == "関門" and plan_info(i.get("plan") or "").get("フェーズ") == RELEASE_REQUEST_PHASE),
-        None,
-    )
-    if lap["outcome"] == QUESTION_PENDING and request:
-        lap["outcome"] = "進行中"
-        return handle_release_pending(env, rec, before, lap, request)
-    bad = [i for i in items if i.get("unfilled") or i.get("result") not in DONE_RESULTS]
+    ok = table_finish_ok(done)
     version = (lap.get("versions") or {}).get("prod")
     released = lap["outcome"] == RELEASE_PENDING and released_answer(lap)
-    finish_lap(env, rec, lap, DONE if released or not (bad or not items) else FAILED, state)
-    if released and (bad or not items):
-        # リリースまで届いたループの 1 回は完了で締め、後のまとめの失敗は失敗の鍵とは別に残す（#2911。同じ失敗の判定に数えない）
-        lap["close_failure"] = failure_key(state) or {
-            "issues": lap.get("issues_kept") or selected_issues(lap),
-            "kind": "まとめ",
-            "step": "止まった",
-        }
+    table_versions(env, lap)
+    finish_lap(env, rec, lap, DONE if released or ok else FAILED, state)
+    if released and not ok:
+        lap["close_failure"] = {"issues": lap.get("issues_kept") or selected_issues(lap), "kind": "まとめ", "step": "止まった"}
     if version and lap["outcome"] == DONE:
         lap.setdefault("versions", {})["prod"] = version
     return after_close(env, rec, before, f"ループの {lap['n']} 回目 の残りを流し、{lap['outcome']} で締め直した")

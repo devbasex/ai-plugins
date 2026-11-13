@@ -42,6 +42,23 @@ def _notes_of(inp: dict, target: list) -> str:
     return f"。出し直しの指摘の入力（全回を読み、指摘への対応の表を設計文書へ書く）: {'、'.join(got)}"
 
 
+def _context_text(inp: dict) -> str:
+    """まとめの工程（振り返り・棚卸し）の起動指示へ添える、開発ループの文脈（今の `new close --loop --lap --milestone --carry`）。
+    文脈の無いスプリントでは空。"""
+    ctx = inp.get("context") or {}
+    stage = inp.get("stage")
+    if not ctx.get("loop") or stage not in ("振り返り", "棚卸し"):
+        return ""
+    text = f"。開発ループ {ctx['loop']} の {ctx.get('lap')} 回目"
+    if stage == "振り返り" and ctx.get("milestone"):
+        text += f"。マイルストーン {ctx['milestone']} を振り返りの材料にする"
+    if stage == "棚卸し":
+        text += "。差分の棚卸し（--depth diff）として無人で通す"
+        if carry := [str(n) for n in ctx.get("carry") or []]:
+            text += f"。ループの前の 1 回の持ち越し {' '.join('#' + n for n in carry)} を `upkeep.py` の `--add` で候補へ渡す（{' '.join(carry)}）"
+    return text
+
+
 def _release_args(inp: dict, args: dict) -> list[str]:
     """リリースのプランの経路（`with.channel`）と、開発ループが明示した版（文脈の `versions`）。版が無ければ流す時点に決める（#2164）。"""
     if args.get("kind") != "release" or not args.get("channel"):
@@ -76,7 +93,7 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
                 "type": "work",
                 "kind": stage,
                 "stage": stage,
-                "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）{_notes_of(inp, target)}",
+                "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）{_notes_of(inp, target)}{_context_text(inp)}",
                 "next": "end",
             }
         ],
@@ -150,6 +167,13 @@ def _lane_of(store, table_id: str) -> Optional[tuple[str, str]]:
     return plan_row.name, pdb.lane_name(lane_row)
 
 
+def _context_lane(inp: dict) -> Optional[tuple[str, str]]:
+    """文脈の lane（レーンで動く開発ループが渡す {plan, lane}）。ループの 1 回の進行表はレーンの順番表の行を持たないため、
+    リリースの依頼の宛先はここから読む。無ければ None。"""
+    got = (inp.get("context") or {}).get("lane") or {}
+    return (got["plan"], got["lane"]) if got.get("plan") and got.get("lane") else None
+
+
 def _prs_of(outputs: dict) -> list[str]:
     prs: list[str] = []
     for out in outputs.values():
@@ -168,7 +192,7 @@ def act_request(store, table_id: str, inp: dict, listen_row: str) -> dict:
     import progress_db as pdb
     import progress_model as pm
 
-    lane = _lane_of(store, table_id)
+    lane = _lane_of(store, table_id) or _context_lane(inp)
     if lane is None:
         return _act_report("ndf.request", "ok", "並列の計画の外のスプリントのため、リリースの依頼を送らない", requested=False)
     state = Path(inp.get("work") or Path.cwd()) / "release-request"

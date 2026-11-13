@@ -158,11 +158,6 @@
       "unit": "session",
       "window_seconds": 86400
     },
-    "loop gate": {
-      "key": "supervise.loop:name={name}",
-      "unit": "session",
-      "window_seconds": 86400
-    },
     "loop lap": {
       "key": "supervise.loop:name={name}",
       "unit": "session",

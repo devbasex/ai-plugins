@@ -34,14 +34,10 @@ from sprint_loop_record import (
     BUDGET_DEFAULT,
     EXIT_REFUSED,
     EXIT_STOPPED,
-    DONE,
-    FAILED,
     RETURNED,
     QUESTION_PENDING,
     PENDING,
     DESIGN_GATE,
-    FINISHED,
-    NOT_RUN,
     LoopError,
     Env,
     ResumeContext,
@@ -67,17 +63,11 @@ from sprint_loop_record import (
 from sprint_loop_gate import (
     loop_ok,
     select_cmd,
-    wait_lap,
     refusal_order,
     refused_stop,
     copy_mvv_gate,
-    read_done_items,
-    continuation,
-    CONTINUATION_STEP,
     mark_issue,
     refresh_state,
-    handle_gate,
-    failure_key,
     close_lap,
     after_close,
     research_command,
@@ -86,9 +76,9 @@ from sprint_loop_gate import (
     sync_mode,
 )
 
-from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
+from sprint_loop_gate2 import finish_held_table, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
 from sprint_loop_select import resume_answer_hold
-from sprint_loop_table import lap_by_table
+from sprint_loop_table import TABLE_CONTINUATION_STEP, cancel_table, lap_by_table, table_continuation
 from sprint_loop_stop import STOP_FILE, read_stop_order, stop_order_text
 
 
@@ -227,6 +217,8 @@ def _resume_gate2(ctx: ResumeContext) -> tuple[dict | None, str]:
     if answer is None:
         return stopped_result(env, rec, "リリース承認ゲートの答え（承認か差し戻し）がまだ無い"), nxt
     if answer == "rejected":
+        if lap.get("table"):  # 差し戻した進行表は流し直さない（#3092）
+            cancel_table(env, lap, "リリース承認ゲートで差し戻した")
         close_lap(env, rec, lap, RETURNED)
         return None, nxt
     return None, gate2_pipeline(env, rec, lap, stop)
@@ -236,19 +228,19 @@ def _resume_refused(ctx: ResumeContext) -> tuple[dict | None, str]:
     env, rec, stop, lap, nxt = ctx.env, ctx.rec, ctx.stop, ctx.lap, ctx.nxt
     if not lap:
         return None, nxt
-    if (stop.get("values") or {}).get("step") != CONTINUATION_STEP:
-        return (
-            None,
-            f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）",
-        )
-    # 設計承認ゲートの後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
-    moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
-    try:
-        queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
-    except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-        write_record(env, rec, ctx.before)
-        return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
-    return None, f"{queue} && {wait_lap(rec, done)}"
+    step = (stop.get("values") or {}).get("step")
+    if step == TABLE_CONTINUATION_STEP:  # 進行表の続き（scope か作り直し）を組めなかった: 残した課題で組み直す（#3092）
+        moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
+        notes: list[str] = []
+        try:
+            return None, table_continuation(env, rec, lap, moved, lap.get("issues_kept") or [], notes)
+        except (LoopError, OSError, ValueError) as e:
+            write_record(env, rec, ctx.before)
+            return stopped_result(env, rec, f"設計承認ゲートの後の続きをまだ組めない: {str(e)[:200]}"), nxt
+    return (
+        None,
+        f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --judgments <判定の根拠のファイル>（判定の根拠を確かめて組み直す）",
+    )
 
 
 _RESUME_HANDLERS = {
@@ -336,6 +328,7 @@ def _make_plans(env: Env, rec: dict, before: dict, lap: dict, issues: list[int],
     try:
         notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
         lap["sprint_extra"] = list(extra)
+        lap["lane"] = lane_identity(env)  # レーンで動くループは、デプロイの工程がリリースの依頼を送る先（文脈の lane）
         new = new_sprint_argv(root, rec, lap, notes, lap_carry(rec, lap))
     except OSError as e:
         return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e)), [], None
@@ -556,18 +549,10 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
         lap = current_lap(rec)
         if not lap:
             return refusal_order("進行中のループの 1 回が無い")
-        if lap.get("table"):
-            return lap_by_table(env, rec, before, lap, failed, done, deferred_issues)
-        items = read_done_items(done) if done else []
-        refresh_state(lap, update)
-        if any(i.get("result") == "関門" for i in items):
-            return handle_gate(env, rec, before, lap, items)
-        state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-        # 差し込みを埋められずに流さなかった計画（unfilled。記録の PR が見つからないまとめなど）は失敗に数える（#2230 の決定 7）
-        bad = [i for i in items if i.get("unfilled") or (i.get("result") not in FINISHED and i.get("result") != NOT_RUN)]
-        outcome = FAILED if failed or bad or failure_key(state) else DONE
-        close_lap(env, rec, lap, outcome, state, deferred_issues)
-        return after_close(env, rec, before, f"ループの {lap['n']} 回目 を {outcome} で締めた")
+        # 進行表を持たないループの 1 回（この版より前に組んだもの）は、done を読まずスプリント状態の行で締める（#3092）
+        if not lap.get("table"):
+            refresh_state(lap, update)
+        return lap_by_table(env, rec, before, lap, failed, done if lap.get("table") else None, deferred_issues)
 
 
 def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None = None) -> dict:
@@ -578,9 +563,8 @@ def cmd_finish(env: Env, name: str, n: int, done: str, update: Callable | None =
             return refusal_order(f"ループの {n} 回目 は保留したループの 1 回でない（締め直しは 1 回だけ）")
         if done not in lap.setdefault("dones", []):
             lap["dones"].append(done)
-        refresh_state(lap, update)
         state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-        return finish_held(env, rec, before, lap, read_done_items(done), state)
+        return finish_held_table(env, rec, before, lap, done, state)
 
 
 def cmd_pending(env: Env, name: str) -> dict:
@@ -600,6 +584,18 @@ def cmd_hold_question(env: Env, name: str, ref: str, plan: str, step: str, paral
         close_lap(env, rec, lap, QUESTION_PENDING)
         lap["held_at"] = lap["ended_at"]
         return after_close(env, rec, before, f"ループの {lap['n']} 回目 の問い（{ref}）をオーガナイザーへ送り、質問待ちで締めた")
+
+
+def lane_identity(env: Env) -> dict | None:
+    """自分が属する動いている並列の計画とレーン（{plan, lane}）。無ければ None。ループの 1 回の進行表はレーンの順番表の行を
+    持たないため（ループのレーンは 1 行で何回も回る）、レーンの依頼の宛先は文脈で渡す（#3092）。"""
+    try:
+        import parallel_lane
+
+        got = parallel_lane.lane_of(env.main_dir())
+    except Exception:  # noqa: BLE001 — 計画を読めないときはレーンでないものとして扱う
+        return None
+    return {"plan": got[0], "lane": got[1].name} if got else None
 
 
 def lane_plan_name(env: Env) -> str | None:
