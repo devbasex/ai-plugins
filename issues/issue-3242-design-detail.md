@@ -51,7 +51,7 @@ docs/ndf-plugin-reference.md
 | `plugins/ndf/contracts/env/NDF_FACTORY_RUN.json` | 変更 | 要約に、`hook.py` の人のいない実行の hook が読むことを足す | 無し |
 | `plugins/ndf/contracts/limits.json` | 変更 | 方針 `hook.unattended-pushback`（`attempts: 2`）と `hook.unattended-mark`（`seconds: 604800`）を足す | 無し |
 | `plugins/ndf/contracts/index.md` | 変更 | 契約の項目から生成し直す（手で書かない） | 契約の項目 |
-| `plugins/ndf/hooks/claude.json` | 変更 | UserPromptSubmit・Stop・SessionEnd に、`NDF_FACTORY_RUN` が空なら sh だけで終える行を 1 つずつ足す | `scripts/hook.py` |
+| `plugins/ndf/hooks/claude.json` | 変更 | UserPromptSubmit・Stop・SessionEnd に、`NDF_FACTORY_RUN` が空なら sh だけで終える行を 1 つずつ足す。続きは `python3` で `hook.py unattended-<副命令>` を起動する（hook 用の仮想環境の python を使わない） | `scripts/hook.py` |
 | `plugins/ndf/scripts/hook.py` | 変更 | 副命令 `unattended-start`・`unattended-stop`・`unattended-end` を hook の部品へ振り分ける | `hook_lib/unattended.py` |
 | `plugins/ndf/scripts/hook_lib/unattended.py` | 新設 | 印の作成・回数の更新・削除と、差し戻すかの決定と、案内の文・差し戻しの文 | `lib/unattended_report.py`・`lib/limits.py`・`lib/state_home.py`・`lib/jsonio.py` |
 | `plugins/ndf/scripts/lib/unattended_report.py` | 新設 | 契約のファイルを読み、応答の文から結果の値と形の誤りの一覧を返す | 無し（標準ライブラリだけ） |
@@ -106,11 +106,13 @@ docs/ndf-plugin-reference.md
 | `start` | `plugins/ndf/scripts/hook_lib/unattended.py` | 新設 | `start(hook_input: dict, now: float) -> str \| None` | 対象のセッションに印を作り、案内の文を返す | `NDF_FACTORY_RUN` が空でない（登録の行が確かめる） | 対象なら印（`pushbacks: 0`）があり案内の文を返す。対象でなければ印を作らず None。どちらでも過ぎた印は消えている | ファイルの書き込みと削除 |
 | `stop` | `plugins/ndf/scripts/hook_lib/unattended.py` | 新設 | `stop(hook_input: dict) -> dict \| None` | 印のあるセッションの Stop で、差し戻すかを決めて回数を更新する | 同上 | 差し戻すなら `{"decision": "block", "reason": …}` を返し、印の回数は 1 増えている。通すなら None。印は消さない | ファイルの読み書き |
 | `end` | `plugins/ndf/scripts/hook_lib/unattended.py` | 新設 | `end(hook_input: dict) -> None` | セッションの印を消す | 同上 | そのセッションの印が無い | ファイルの削除 |
-| `dispatch` | `plugins/ndf/scripts/hook.py` | 変更 | `dispatch(command: str, runtime: str, raw: dict \| None) -> dict \| str \| None`（変えない） | 副命令 `unattended-*` を hook の部品へ渡し、その出力 1 つだけを返す（`_merge` と guard と待ちの通知を通さない） | 無し | `unattended-start` は対象なら `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": …}}`、`unattended-stop` は部品の返り値、`unattended-end` は None。`raw` が None なら 3 つとも None | hook の部品の副作用 |
+| `dispatch` | `plugins/ndf/scripts/hook.py` | 変更 | `dispatch(command: str, runtime: str, raw: dict \| None) -> dict \| str \| None`（変えない） | 副命令 `unattended-*` を hook の部品へ渡し、その出力 1 つだけを返す（`_merge` と guard と待ち通知を通さない） | 無し | `unattended-start` は対象なら `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": …}}`、`unattended-stop` は部品の返り値、`unattended-end` は None。`raw` が None なら 3 つとも None | hook の部品の副作用 |
 | `_check_form` | `scripts/contracts_lib/model.py` | 変更 | `_check_form(f: Path, d: dict) -> None`（変えない） | 受け渡しの形に任意のキー `shape` を許し、あれば `_check_shape` へ渡す | 無し | `shape` の無い既存の 4 つの形の判定は変わらない | 無し |
 | `_check_shape` | `scripts/contracts_lib/model.py` | 新設 | `_check_shape(f: Path, shape: dict) -> None` | 形の宣言のキーと型を確かめる | `shape` は辞書 | 「内部のデータと定数」の `shape` の形に合わなければ `ContractError` | 無し |
 
 `hook.py` の `main` は変えない。`dispatch` が返した辞書を 1 行の JSON で出し、例外を飲み込んで終了コード 0 を返す既存の振る舞いを、3 つの副命令もそのまま使う。
+
+3 つの副命令は `python3` で起動され、hook 用の仮想環境が未用意でも動く。`dispatch` は 3 つの副命令の振り分けを guard の import より前に置き、たどる import を `hook_lib/payload.py`・`hook_lib/unattended.py` と、その先の `lib/unattended_report.py`・`lib/limits.py`・`lib/state_home.py`・`lib/jsonio.py` に限る。どれも標準ライブラリだけを import する。
 
 ## 異常系の処理
 
@@ -120,7 +122,7 @@ docs/ndf-plugin-reference.md
 | `form_from_dict` | 形の宣言が違う | `shape` が無い・型が違う・`required` のキーが `values` と違う・項目名が `items` に無い | 関数の中の型と集合の比較 | `FormError` を上げて呼び出し元へ返す | 無し（呼び出し元が決める） | 後始末は無い |
 | `start` | 印が書けない・過ぎた印が消せない | 状態の根に書けない・ディスクの不足 | `OSError` | 呼び出し元へ返す（`hook.py` の `main` が飲み込む） | 標準エラーへ `ndf: unattended-start: <例外の型>` の 1 行。標準出力は空で、案内は渡らない。終了コード 0 | 半端な印は残らない（`write_mark` の原子的な書き込み）。次のプロンプトで作り直す |
 | `start` | 案内を返さない | 入力が辞書でない・`prompt` が文字列でない・セッションの識別子が `SESSION_RE` に合わない | `is_target` と `mark_path` | 既定値で続ける（対象でない扱い） | 何も出さない。終了コード 0 | 後始末は無い |
-| `stop` | 契約のファイルが読めない・形の宣言が違う | 配布物の破損・宣言の誤り | `load_form` の `FormError` | 止める側でなく通す側へ倒す（差し戻さない。回数も変えない） | 標準エラーへ `ndf: unattended-stop: 区間の報告の契約を読めない: <理由>` の 1 行。標準出力は空。終了コード 0 | 印は残る。次の Stop で読み直す |
+| `stop` | 契約のファイルが読めない・形の宣言が違う | リリース対象の破損・宣言の誤り | `load_form` の `FormError` | 止める側でなく通す側へ倒す（差し戻さない。回数も変えない） | 標準エラーへ `ndf: unattended-stop: 区間の報告の契約を読めない: <理由>` の 1 行。標準出力は空。終了コード 0 | 印は残る。次の Stop で読み直す |
 | `stop` | 上限の宣言が読めない | `limits.json` の破損・方針 `hook.unattended-pushback` が無い | `limits.LimitsError` | 通す側へ倒す（差し戻さない） | 標準エラーへ `ndf: unattended-stop: <LimitsError の文>` の 1 行。終了コード 0 | 印は残る |
 | `stop` | 印が読めない | 印が無い（対象でないセッション・消された）・壊れている | `read_mark` が None | 既定値で続ける（差し戻さない） | 何も出さない。終了コード 0 | 壊れた印はそのまま。SessionEnd か次の `start` の掃除で消える |
 | `stop` | 回数が書けない | 状態の根に書けない | `write_mark` の `OSError` | 差し戻しの判定は返す。書けなかったことを標準エラーへ残す | 差し戻すときは `decision: "block"` を出す。標準エラーへ `ndf: unattended-stop: 回数を書けない: <理由>` の 1 行。終了コード 0 | 回数が増えないため、差し戻しが Claude Code の上限（8 回続けて）まで続きうる。残リスクとして下の注記に置く |
@@ -128,6 +130,8 @@ docs/ndf-plugin-reference.md
 | `prune_marks` | 1 つの印が消せない | 権限・別のプロセスが先に消した | `OSError` | 既定値で続ける（そのファイルを飛ばして残りを消す） | 何も出さない | 次の `start` で再び試す |
 | `read_mark` | 読めない・形が違う | ファイルが無い・JSON が壊れている・キーか型が違う | `jsonio.read` の `missing`・`broken` と型の比較 | 既定値で続ける（None を返す） | 何も出さない | 呼び出し元の扱いに従う |
 | `write_mark` | 書けない | 状態の根に書けない | `jsonio.write_atomic` の `OSError` | 呼び出し元へ返す | 無し（呼び出し元が決める） | 一時ファイルは `write_atomic` が消す |
+| 登録の行 | hook の環境が未用意 | 新しいコンテナの最初のプロンプトで、SessionStart の hook 用の仮想環境がまだ作られていない | 無し（仮想環境を使わない） | `python3` で `hook.py` を起動するため、仮想環境の有無によらず動く | 対象なら案内を返し印を作る。終了コード 0 | 後始末は無い |
+| 登録の行 | `python3` が無い・プラグインの根が決まらない | イメージに `python3` が無い・`CLAUDE_PLUGIN_ROOT` と `PLUGIN_ROOT` が空 | sh の `command -v python3` と空の判定 | 既定値で続ける（何もせずに終える） | 何も出さない。終了コード 0 | 印が作られず差し戻しも働かない。リリース後テストの「印のファイルが作られるか」で分かる |
 | `dispatch` | 標準入力が JSON でない | Claude Code の入力の形の変化・空の入力 | `main` の `json.loads` | 既定値で続ける（`raw` を None にし、3 つの副命令は何も返さない） | 何も出さない。終了コード 0 | 後始末は無い |
 | `_check_shape` | 形の宣言が違う | 契約のファイルの書き誤り | 関数の中の型と集合の比較 | 止める（`ContractError`） | `check-ndf-contracts.py` が `<ファイル名>: shape.<キー> …` を出し、終了コード 2 | 契約のファイルを直して打ち直す |
 
@@ -185,15 +189,15 @@ docs/ndf-plugin-reference.md
 | `hook.unattended-mark` | 設定値 | `plugins/ndf/contracts/limits.json` | `seconds: 604800`（7 日。消し残した印を消すまでの秒。`limits.seconds(...)` で引く） |
 
 - 値・項目・値ごとに要る項目・材料の見出しは形の宣言だけが持つ。読み手の部品はそこから読み、コードに書き写さない（不変条件 I2）。誤りの文の定数は文の型だけを持ち、項目名と値は形の宣言から埋める
-- 形の宣言の型は 2 か所で確かめる。契約の検査（`_check_shape`）は CI で宣言の誤りを止め、読み手の部品（`form_from_dict`）は実行時に壊れた配布物を通す側へ倒すために確かめる。確かめる中身（キーの集合と型）は同じ表から書くが、2 つの部品は依存の向きが別（CI の側とプラグインの側）のため、1 つの関数にまとめない
-- 上限の秒を `hook.unattended-mark` に置くのは、構造の検査 `limit-literal` がコードの中の時間の数値を止めるためである。既存の待ちの通知の `RECORD_DAYS` とは別の方針にし、印の寿命を独立に変えられるようにする
+- 形の宣言の型は 2 か所で確かめる。契約の検査（`_check_shape`）は CI で宣言の誤りを止め、読み手の部品（`form_from_dict`）は実行時に壊れたリリース対象を通す側へ倒すために確かめる。確かめる中身（キーの集合と型）は同じ表から書くが、2 つの部品は依存の向きが別（CI の側とプラグインの側）のため、1 つの関数にまとめない
+- 上限の秒を `hook.unattended-mark` に置くのは、構造の検査 `limit-literal` がコードの中の時間の数値を止めるためである。既存の待ち通知の `RECORD_DAYS` とは別の方針にし、印の寿命を独立に変えられるようにする
 
 ## 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 同じセッションの UserPromptSubmit・Stop・SessionEnd の hook | そのセッションの印のファイル | 取らない。Claude Code は 1 つのセッションの事象を順に起こし、同じ事象の同じ登録の行を並べて起動しない | `write_mark` は原子的に書くため、中断しても前の中身か新しい中身のどちらかが残る。`end` は何度呼んでもよい（無ければ何もしない） |
-| 同じ Stop に重なる別の hook（待ちの通知・relay の印・`/goal` の条件の判定） | 無し（印は人のいない実行の hook だけが読み書きする） | 不要 | NDF の回数は人のいない実行の hook が差し戻したときだけ増える（不変条件 I5） |
+| 同じ Stop に重なる別の hook（待ち通知・relay の印・`/goal` の条件の判定） | 無し（印は人のいない実行の hook だけが読み書きする） | 不要 | NDF の回数は人のいない実行の hook が差し戻したときだけ増える（不変条件 I5） |
 | 別のセッション（worker・レビューの `claude -p`・並行のレーンの conductor） | 印のディレクトリ | ファイル名がセッションの識別子で分かれるため取らない | `prune_marks` が他のセッションの印を消すのは `hook.unattended-mark` の秒を過ぎたものだけで、動いているセッションの印は更新時刻が新しく残る |
 | `prune_marks` と別のセッションの `end` が同じ印を消す | 印のファイル | 取らない | 先に消えていれば `FileNotFoundError` を失敗に数えずに次へ進む |
 
@@ -215,7 +219,7 @@ docs/ndf-plugin-reference.md
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `load_form` | `lib/jsonio.py` の `read` | `grep -n "^def " plugins/ndf/scripts/lib/jsonio.py` | 使う（`missing` と `broken` を `RAISE` にして `JsonReadError` を `FormError` へ直す） |
-| `form_from_dict` | `scripts/contracts_lib/model.py` の `_need` | `grep -n "def _need" scripts/contracts_lib/model.py` | 使えない。CI の側の部品で、プラグインの実行時の経路から import すると配布物の外を読む |
+| `form_from_dict` | `scripts/contracts_lib/model.py` の `_need` | `grep -n "def _need" scripts/contracts_lib/model.py` | 使えない。CI の側の部品で、プラグインの実行時の経路から import するとリリース対象の外を読む |
 | `result_value` | `tests/test_ndf_next_form.py` の `RESULT_LINE` と `decision_needed`・`relay_lib/mark.py` | `grep -rn "結果:" --include=*.py plugins/ndf/scripts/relay.py plugins/ndf/scripts/relay_lib plugins/ndf/scripts/lib` | 使えない。プラグインのコードに結果の行の読み手は無く（検索の当たりは `lib/dist_record.py` の `CD の結果:` だけ）、テストの中の正規表現は import する部品でない。新設の `RESULT_RE` を唯一の置き場にする |
 | `report_items` | `hook_lib/goal_skill.py` の `parse_goal` | `Read plugins/ndf/scripts/hook_lib/goal_skill.py` | 使えない。`/goal` の 1 行目だけを読む関数で、項目の行を読まない |
 | `report_errors` | 無し（区間の報告は新しい形） | `grep -rn "区間の報告" plugins/ndf/scripts` | 使えない。当たりが無い |
@@ -256,7 +260,7 @@ docs/ndf-plugin-reference.md
 | `start` | 対象のプロンプトで印（`pushbacks: 0`）ができ、案内の文を返す | 過ぎた印が消え、新しい印は残る | 対象でないプロンプト・識別子の合わない入力で印を作らず None。書けない状態の根で `OSError` が上がる（`hook.py` が飲み込み終了コード 0） |
 | `stop` | 印があり結果の行の無い応答で `decision: "block"` と誤りの一覧を返し、回数が 1 になる | 続けて 3 回目の形に合わない Stop を通し印を残す。形に合った Stop で回数が 0 に戻り、次の形に合わない Stop を再び差し戻す。`stop_hook_active` が真の入力でも回数は 1 だけ増える。形に合った Stop の後も印が残る | 印が無いセッションで何もしない。忙しい Stop で差し戻さず回数を変えない。契約のファイルが読めない・上限の宣言が読めないときに差し戻さず標準エラーへ 1 行。回数が書けないときに差し戻しを返し標準エラーへ 1 行 |
 | `end` | 印が消える | 印が無くても何も出さない | 消せないときに `OSError` が上がる（`hook.py` が飲み込み終了コード 0） |
-| `dispatch` | 3 つの副命令がそれぞれ部品の出力だけを返し、待ちの通知を送らない | 無し | 入力が JSON でないとき 3 つとも何も出さず終了コード 0 |
+| `dispatch` | 3 つの副命令がそれぞれ部品の出力だけを返し、待ち通知を送らない | hook 用の仮想環境が無い状態で、登録の行と `python3 -S hook.py unattended-start`（site-packages を読まない）が印を作り案内を返す | 入力が JSON でないとき 3 つとも何も出さず終了コード 0 |
 | `_check_shape` | プラグインの契約のファイルを通す | `when` が空の値 | `required` の値に `always` が無い・`material` に `heading` が無い・`values` が辞書でないもので `ContractError` と終了コード 2 |
 | `_check_form` | `shape` の無い既存の 4 つの形を今どおり通す | 区間の報告の例の組の形（`text`・`result`・`errors`）を通す | `errors` が文字列の並びでない例の組で `ContractError` |
 

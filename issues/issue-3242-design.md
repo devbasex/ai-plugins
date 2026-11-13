@@ -330,7 +330,8 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 
 - Stop の hook は複数あれば並んで動き、どれか 1 つが差し戻せば Stop は止まる（STD1）。`/goal` の条件の判定と NDF の差し戻しが同じ Stop に重なっても、NDF は自分の判定だけで回数を数える（I5）
 - どちらも終了コードは 0（I9）
-- 登録の行は `sh -c '[ -n "${NDF_FACTORY_RUN:-}" ] || exit 0; …'` で始め、空なら Python を起動しない（I8）。続きは既存の hook の行と同じく、SessionStart が用意した hook 用の仮想環境の python で `hook.py` を直に起動する（`uv run` を挟まない。構造の検査 `hook-deps`）
+- 登録の行は `sh -c '[ -n "${NDF_FACTORY_RUN:-}" ] || exit 0; …'` で始め、空なら Python を起動しない（I8）。続きは既存の relay の行と同じく、プラグインの根を決めて `python3` で `hook.py unattended-<副命令>` を直に起動する（`uv run` を挟まない。構造の検査 `hook-deps`）。SessionStart が用意する hook 用の仮想環境の python は使わない（決定 6）
+- `hook.py` から人のいない実行の部品までの import の経路（`hook.py`・`hook_lib/payload.py`・`hook_lib/unattended.py`・`lib/unattended_report.py`・`lib/limits.py`・`lib/state_home.py`・`lib/jsonio.py`）は標準ライブラリだけを import する。テストは site-packages を読まない `python3 -S` で 3 つの副命令を打って縛る
 - 差し戻しの上限の回数は、上限の宣言（`plugins/ndf/contracts/limits.json` ）に方針 `hook.unattended-pushback`（`attempts: 2`）として置く。`lib/limits.py` で引く（構造の検査 `limit-literal`）
 - 案内の文は次の 3 つを指す。形の表は写さない
   - 人のいない実行であること
@@ -346,7 +347,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 | `started_at` | 文字列（ISO 8601） | 印を作った時刻 |
 | `pushbacks` | 整数 | 形に合わない Stop が続いた間に差し戻した回数。形に合った Stop を通すと 0 に戻る |
 
-状態の根は既存の `state_home.container_home` で決める（待ちの通知・guard と同じ、セッションを持つ状態の根。`state_home` の置き場の表の「コンテナのプロセス」）。ファイル名の `session_id` は英数字と `-` 以外を含めば印を作らない。
+状態の根は既存の `state_home.container_home` で決める（待ち通知・guard と同じ、セッションを持つ状態の根。`state_home` の置き場の表の「コンテナのプロセス」）。ファイル名の `session_id` は英数字と `-` 以外を含めば印を作らない。
 
 ## 処理の流れ
 
@@ -455,7 +456,9 @@ Stop で毎回 transcript の最初のプロンプトを読む形は採らない
 
 UserPromptSubmit と Stop はすべてのプロンプトと応答で起きる。登録の行の先頭で環境変数を読み、空なら Python を起動せずに終える。既存の relay の行（`NDF_RELAY_DIR`）と同じ形である。
 
-既存の `hook.py` の Stop の行（待ち通知）の中で判定する形は採らない。人がいる会話でも Python の中まで入り、非機能の条件（環境変数の読み 1 回）を満たさない。
+続きの起動には、SessionStart が用意する hook 用の仮想環境の python ではなく `python3` を使う。この仮想環境は `worktree-session.sh` が `hook-env.py --wait 8` で用意し、8 秒で終わらなければ続きをバックグラウンドで行う。その間、仮想環境の python を使う行は `[ -x "$0" ] || exit 0` で何もせずに終わる。Factory の区間は実行ジョブごとに新しいコンテナで始まり、`claude -p` の UserPromptSubmit は最初のプロンプトの 1 回だけ起きる。仮想環境の python を使うと、最初の区間で印が作られず、その区間のすべての Stop を差し戻さない（受け入れ条件 7 が働かない）。人のいない実行の部品は標準ライブラリだけで書けるため、仮想環境を待つ理由が無い。
+
+既存の `hook.py` の Stop の行（待ち通知）の中で判定する形は採らない。人がいる会話でも Python の中まで入り、非機能の条件（環境変数の読み 1 回）を満たさない。印が無いときに Stop の側で `NDF_FACTORY_RUN` と最初のプロンプトから対象を決め直す形も採らない。最初のプロンプトは transcript からしか読めず、決定 3 で採らなかった読み方になる。人のいない実行の hook だけを別のエントリポイント（`unattended.py` など）に分ける形も採らない。`hook.py` の副命令のままで import の経路が標準ライブラリだけに収まり、エントリポイントと契約の項目を増やさずに済む。
 
 根拠: Value 2 / Value 4（MVV 版 7）
 
@@ -494,6 +497,7 @@ UserPromptSubmit と Stop はすべてのプロンプトと応答で起きる。
 | I7 | 形に合った Stop を通しても印を残し、同じセッションの後の Stop（`/goal` の続き）も判定する。SessionEnd で印を消す。上限の宣言の日数を過ぎた印は次の `unattended-start` で消える | Stop で印を消す。SessionEnd で消さない |
 | 受け入れ条件 8・I8 | 登録の行が、`NDF_FACTORY_RUN` が空のとき Python を起動せず終了コード 0 で何も出さない。既存の hook・問いの区分・`ndf-next` のブロックのテストを変えずに通す | sh の判定を外す。既存のテストのファイルを書き換える |
 | I9 | 入力が JSON でない・契約のファイルが読めない・印が書けないとき、終了コード 0 で何も出さない（差し戻さない） | 例外をそのまま上げる |
+| 受け入れ条件 7（hook の環境が未用意） | hook 用の仮想環境が無い状態で、登録の行を `NDF_FACTORY_RUN` を付けて打つと印ができ案内を返す。`python3 -S`（site-packages を読まない）で 3 つの副命令が動く | 登録の行を仮想環境の python で起動するように戻す。人のいない実行の経路に標準ライブラリの外の import を足す |
 | 受け入れ条件 2〜6 | リリース後テストで、要求の「再現手順」の 2 を開発版のチャネルで打ち、`stream-json` の最後の `result` の文と `ask.py summary --since <起動の時刻（UTC の ISO 8601）> --cwd <試しのリポジトリの根>` の `metrics.decision.no_ref` を見る | LLM の応答に依るため、ユニットテストでは縛らない |
 | 受け入れ条件 4・5（`.ndf/ask.json` が区分を許さないとき） | リリース後テストで、試しのリポジトリに `"allow": []` の `.ndf/ask.json` を置き、人の操作が要る課題と、費用の出る操作（有料の API の呼び出しなど）を求める課題を流す。最後の結果の行がそれぞれ `できなかった`（人に頼むことつき）と `判断が要る`（区分 `ndf-ask:cost`・問い・材料つき）になる | LLM の応答に依るため、ユニットテストでは縛らない |
 | 背景の作業を残した Stop（I4） | リリース後テストで、conductor が supervisor を背景で起動して待つ区間を流し、背景の作業がある Stop の後に `result` が返るか、`result` の最後の結果の行があるかを見る | 「未確認のまま残ること」の確かめ方 |
