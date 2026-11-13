@@ -244,30 +244,36 @@ def infer_reviews(samples: dict[str, list[frozenset]], release_marks: dict[str, 
 
     `release_marks` はリリースブランチの PR の cross-review の印が、衝突の解消のレビューの PR（`resolution`）と本番チャネル宛の
     PR（`pr`）のどちらに何件あったか。"""
-    out = {}
-    for kind in branch_flow.REVIEW_KINDS:
-        allowed = branch_flow.REVIEW_ALLOWED[kind]
-        got = samples.get(kind) or []
-        counts = Counter(_checks_key(m & frozenset(allowed["checks"])) for m in got)
-        est = infer_field(counts, REVIEWS_COMMAND, f"{kind} の PR の印")
-        if (unreadable or {}).get(kind):
-            est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable[kind]} 件"})
-        if "value" in est:
-            checks = [] if est["value"] == "(無し)" else est["value"].split("+")
-            if not checks:
-                diff = "none"
-            elif kind == "release":
-                diff = "resolution" if release_marks.get("resolution", 0) >= max(release_marks.get("pr", 0), 1) else "pr"
-            else:
-                diff = next(d for d in allowed["diff"] if d != "none")
-            est["value"] = {"checks": checks, "diff": diff}
-        out[kind] = est
-    return out
+    return {
+        kind: _infer_kind(kind, samples.get(kind) or [], release_marks, (unreadable or {}).get(kind)) for kind in branch_flow.REVIEW_KINDS
+    }
 
 
-def collect_reviews(gh, pulls: list[dict], base: str, production: str) -> dict:
-    """種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件選び、印を集めて推す。衝突の解消のレビューの PR（閉じてマージしない）は
-    同じ版の本番チャネル宛の PR の標本へ寄せる。"""
+def _infer_kind(kind: str, got: list[frozenset], release_marks: dict[str, int], unreadable: int | None) -> dict:
+    """1 つの種類の印の組から推す。`unreadable` は読めなかった PR の件数。"""
+    allowed = branch_flow.REVIEW_ALLOWED[kind]
+    counts = Counter(_checks_key(m & frozenset(allowed["checks"])) for m in got)
+    est = infer_field(counts, REVIEWS_COMMAND, f"{kind} の PR の印")
+    if unreadable:
+        est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable} 件"})
+    if "value" not in est:
+        return est
+    checks = [] if est["value"] == "(無し)" else est["value"].split("+")
+    est["value"] = {"checks": checks, "diff": _review_diff(kind, checks, allowed, release_marks)}
+    return est
+
+
+def _review_diff(kind: str, checks: list[str], allowed: dict, release_marks: dict[str, int]) -> str:
+    """推したレビューの対象の差分。レビューを掛けなければ none、リリースは cross-review の印の多い側。"""
+    if not checks:
+        return "none"
+    if kind == "release":
+        return "resolution" if release_marks.get("resolution", 0) >= max(release_marks.get("pr", 0), 1) else "pr"
+    return next(d for d in allowed["diff"] if d != "none")
+
+
+def _pick_samples(pulls: list[dict], base: str, production: str) -> tuple[dict[str, list[dict]], dict[str, dict]]:
+    """(種類ごとの直近のマージ済みの PR を最大 `REVIEW_SAMPLES` 件, 版ごとの衝突の解消のレビューの PR)。"""
     chosen: dict[str, list[dict]] = {k: [] for k in branch_flow.REVIEW_KINDS}
     reviews: dict[str, dict] = {}
     for p in pulls:
@@ -279,6 +285,13 @@ def collect_reviews(gh, pulls: list[dict], base: str, production: str) -> dict:
             reviews.setdefault(head[len(branch_flow.REVIEW_PREFIX) :], p)
         elif p.get("merged_at") and len(chosen[kind]) < REVIEW_SAMPLES:
             chosen[kind].append(p)
+    return chosen, reviews
+
+
+def collect_reviews(gh, pulls: list[dict], base: str, production: str) -> dict:
+    """種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件選び、印を集めて推す。衝突の解消のレビューの PR（閉じてマージしない）は
+    同じ版の本番チャネル宛の PR の標本へ寄せる。"""
+    chosen, reviews = _pick_samples(pulls, base, production)
     samples: dict[str, list[frozenset]] = {k: [] for k in branch_flow.REVIEW_KINDS}
     unreadable: Counter = Counter()
     release_marks: Counter = Counter()
