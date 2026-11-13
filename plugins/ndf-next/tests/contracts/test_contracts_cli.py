@@ -153,3 +153,64 @@ def test_check_all_broken_limits_also_breaks_causes(contracts_copy):
 def test_check_all_ignores_schemas_outside_its_list(contracts_copy):
     contracts_copy("schemas/extra.schema.json", text="{")
     assert contracts_cli.check_all() == []
+
+
+# 現状固定（I-011）: emit の --code の扱いと、--out を書くのは形と終了コードが合うときだけであること。
+def test_emit_explicit_code_writes_out(capsys, tmp_path):
+    dest = tmp_path / "r.json"
+    code, out, err = _emit(capsys, "ok", "--code", "0", "--out", str(dest))
+    line = '{"tool": "w", "status": "ok", "summary": "s", "items": [], "metrics": {}}\n'
+    assert (code, out, err) == (0, line, "")
+    assert dest.read_text(encoding="utf-8") == line
+
+
+@pytest.mark.parametrize(
+    ("status", "extra", "err"),
+    [
+        ("ok", ("--code", "3"), "結果の形の誤り: status ok と終了コード 3 が合わない\n"),
+        (
+            "stopped",
+            ("--cause", "infra_wait", "d", "--code", "2"),
+            "結果の形の誤り: cause.kind infra_wait の終了コードは 75（渡された値 2）\n",
+        ),
+        ("stopped", ("--cause", "nope", "d"), "結果の形の誤り: cause.kind 'nope' は止まった理由の表に無い\n"),
+        ("gate", (), "結果の形の誤り: (最上位): 'routes' is a required property\n"),
+    ],
+)
+def test_emit_refusals_write_nothing(capsys, tmp_path, status, extra, err):
+    dest = tmp_path / "r.json"
+    assert _emit(capsys, status, *extra, "--out", str(dest)) == (2, "", err)
+    assert not dest.exists()
+
+
+def test_emit_passes_every_field(capsys):
+    code, out, _ = _emit(
+        capsys,
+        "stopped",
+        "--cause",
+        "infra_wait",
+        "d",
+        "--cause-instance",
+        "i1",
+        "--retry-after",
+        "30",
+        "--item",
+        '{"a": 1}',
+        "--metrics",
+        '{"n": 2}',
+        "--next",
+        "nx",
+        "--presentation-path",
+        "p.md",
+    )
+    assert code == 75
+    assert json.loads(out) == {
+        "tool": "w",
+        "status": "stopped",
+        "summary": "s",
+        "items": [{"a": 1}],
+        "metrics": {"n": 2},
+        "cause": {"kind": "infra_wait", "detail": "d", "instance": "i1", "retry_after": 30.0},
+        "presentation_path": "p.md",
+        "next": "nx",
+    }
