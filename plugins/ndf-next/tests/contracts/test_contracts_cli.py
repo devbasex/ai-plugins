@@ -121,3 +121,35 @@ def test_fact_value_missing_table(capsys):
     code, out, err = _run(capsys, "fact-value", "no-such", "a", "b")
     assert (code, out) == (2, "")
     assert err.startswith("contracts: 契約 ") and "facts/no-such.json を読めない" in err
+
+
+# 現状固定（I-010）: check_all が確かめるスキーマの名前と、壊れた 1 ファイルごとの誤りの数と順。
+@pytest.mark.parametrize(
+    ("broken", "count"),
+    [
+        ("schemas/result.schema.json", 1),
+        ("schemas/causes.schema.json", 2),
+        ("schemas/limits.schema.json", 3),
+        ("schemas/release-verification.schema.json", 1),
+        ("causes.json", 1),
+        ("facts/exit-codes.json", 2),
+    ],
+)
+def test_check_all_reports_one_broken_file(contracts_copy, broken, count):
+    path = contracts_copy(broken, text="{")
+    errs = contracts_cli.check_all()
+    assert len(errs) == count
+    assert all(e.startswith(f"契約 {path} が JSON として壊れている: ") for e in errs)
+
+
+def test_check_all_broken_limits_also_breaks_causes(contracts_copy):
+    path = contracts_copy("limits.json", text="{")
+    errs = contracts_cli.check_all()
+    assert len(errs) == 2
+    assert errs[0].startswith(f"契約 {path} が JSON として壊れている: ")
+    assert errs[1].startswith("止まった理由の表 causes.json の誤り: ci_pending の再試行の方針: ")
+
+
+def test_check_all_ignores_schemas_outside_its_list(contracts_copy):
+    contracts_copy("schemas/extra.schema.json", text="{")
+    assert contracts_cli.check_all() == []
