@@ -9,19 +9,23 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 SRC = PLUGIN_ROOT / "src"
 
 
+def _imports_dbos(node: ast.AST) -> bool:
+    """AST のノード 1 つが DBOS の絶対 import か（相対 import は数えない）。"""
+    if isinstance(node, ast.Import):
+        names = [alias.name for alias in node.names]
+    elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        names = [node.module]
+    else:
+        return False
+    return any(name.split(".")[0] == "dbos" for name in names)
+
+
 def _dbos_importers(root: Path) -> set[str]:
     found = set()
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names = [node.module]
-            else:
-                continue
-            if any(name.split(".")[0] == "dbos" for name in names):
-                found.add(path.relative_to(PLUGIN_ROOT).as_posix())
+        if any(_imports_dbos(node) for node in ast.walk(tree)):
+            found.add(path.relative_to(PLUGIN_ROOT).as_posix())
     return found
 
 
