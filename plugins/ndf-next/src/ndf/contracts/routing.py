@@ -65,9 +65,9 @@ def _retry_wait(state: RetryState, *, requires_retry_after: bool) -> Optional[fl
 
 
 def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState, *, requires_retry_after: bool) -> Route:
-    """打ち直せるなら retry、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
+    """打ち直せるなら retry（待ち 0 秒も打ち直す）、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
     wait = _retry_wait(state, requires_retry_after=requires_retry_after)
-    if wait is not None and wait > 0:
+    if wait is not None:
         return Route(RETRY, None, wait, kind)
     return _fallback(kind, on_fail)
 

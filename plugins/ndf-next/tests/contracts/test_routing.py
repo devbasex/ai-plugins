@@ -32,6 +32,7 @@ def test_pick_default_retry_within_attempts_then_moves_on():
 
 def test_pick_usage_limit_needs_retry_after():
     assert _pick("usage_limit", retry_after=120).wait == 120
+    assert _pick("usage_limit", retry_after=0) == routing.Route("retry", None, 0.0, "usage_limit")
     assert _pick("usage_limit", on_fail="x").to == "step"
     assert _pick("usage_limit").to == "human"
 
