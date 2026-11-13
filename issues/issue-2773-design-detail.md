@@ -131,7 +131,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `decide` | `plugins/ndf/scripts/lib/release_case.py` | 新設 | `(has_cd: bool, approvals: int \| None, why: str) -> Case` | CD の有無と承認数から 3 つの場合のどれかを返す | 無し | 判定表（処理の手順）のとおり。`Case.reason` は 1 行 | 無し |
 | `read_approvals` | `plugins/ndf/scripts/lib/release_case.py` | 新設 | `(root: Root, branch: str) -> tuple[int \| None, str]` | 本番チャネルの ruleset を読み、規則が無ければ従来のブランチ保護を読んで承認数を返す | 無し | 読めなければ `(None, 読めなかった理由)` | ネットワーク（`gh api` を 2 回まで） |
 | `case_of` | `plugins/ndf/scripts/lib/release_case.py` | 新設 | `(root: Root) -> Case` | 宣言と GitHub の設定から場合を決める | 無し | CD の行が無ければネットワークを使わずに場合 3 | ファイル（`.ndf/project.json`・`.ndf/worktree.json`）・ネットワーク |
-| `cmd_approval_check` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | PR の証跡を判定し、先端へ commit status を付けて結果を出す | `--pr` がある | 宛先が本番チャネルでなければ何も付けずに 0。`open_prs_at` で同じ先端の開いた PR を読み、判定する PR のほかにあれば `failure`（I10）。PR が閉じていれば、同じ先端の開いた PR が 1 本だけのときにその PR を判定し、0 本なら何も付けない。判定できれば `success` / `failure` を付けて 0 | ネットワーク（読み・commit status） |
+| `cmd_approval_check` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | PR の証跡を判定し、先端へ commit status を付けて結果を出す | `--pr` がある | 宛先が本番チャネルでなければ何も付けずに 0。`open_prs_at` で同じ先端の開いた PR を読み、判定する PR のほかにあれば `failure`（I10）。`success` を付けたときは、付けた後に `open_prs_at` と証跡を読み直して判定し直し、`failure` になれば付け直す（`failure` は読み直さない）。PR が閉じていれば、同じ先端の開いた PR が 1 本だけのときにその PR を判定し、0 本なら何も付けない。判定できれば `success` / `failure` を付けて 0 | ネットワーク（読み・commit status） |
 | `cmd_approval_post` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | 承認資料を承認資料のコメントとして PR に置く | `--approval` のファイルがある | 同じ先端の承認資料のコメントが 1 件だけある | ファイルの読み・ネットワーク |
 | `cmd_release_case` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | `case_of` の結果を `metrics` に出す | 無し | `metrics` に `case`・`approval_place`・`merger`・`reason` | ネットワーク（`case_of` 経由） |
 | `cmd_release` | `plugins/ndf/scripts/release-steps.py` | 変更 | `(a: Args) -> NoReturn` | `--channel` と場合で経路を選ぶ | 今と同じ | 場合 3 と宣言の無い開発版は今の振る舞いのまま | 今と同じ（git・gh） |
@@ -274,7 +274,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 証跡のチェックの workflow の実行（PR の出来事とコメントの出来事が続けて起きる） | 先端の SHA への `ndf/release-approval` の commit status | `concurrency: group: release-approval-<PR 番号>`・`cancel-in-progress: true`。後の実行だけが残る | 判定は毎回すべてのコメントを読み直すため、どの実行が最後でも同じ結果になる |
+| 証跡のチェックの workflow の実行（PR の出来事とコメントの出来事が続けて起きる） | 先端の SHA への `ndf/release-approval` の commit status | `concurrency: group: release-approval-<PR 番号>`・`cancel-in-progress: true`。同じ PR の中では後の実行だけが残る。**PR をまたぐ実行は排他しない**（group を 1 つにすると、GitHub は同じ group で待つ実行を取り消すため、別の PR の判定が抜ける） | 同じ PR の中では、判定が毎回すべてのコメントを読み直すため、どの実行が最後でも同じ結果になる。PR をまたぐと、PR A の実行が PR B の出現前に読んだ `success` を、B の実行の `failure` の後に付けうる。そこで `success` を付けた実行は付けた後に読み直し、同じ先端の PR が増えていれば `failure` に付け直す。B の実行の `failure` より後に A が `success` を付けたなら、A の読み直しは B の出現より後になり、B を見て `failure` に戻す。`failure` は安全側のため読み直さない |
 | 本番のプランの `approve-pr` と、同じ PR への手での証跡の書き込み | PR のコメント | 取らない | 同じ人・同じ SHA の編集されていない証跡があれば `write_trail` は置かない。別の人の証跡が増えても判定は「最新の承認権限を持つ人の証跡」で決まる |
 | `release --channel prod` の打ち直し（承認ゲートの前と後） | 本番の PR・開発版の PR | 取らない（ステップの実行器が同じプランを 1 本だけ走らせる） | 本番の PR は `find_pr` で使い回す。マージ済みなら公開の後から続ける |
 | `approval-post` の打ち直し | PR のコメント | 取らない | 同じ先端の承認資料のコメントがあれば置かない。先端が変われば新しい承認資料のコメントを置く |
@@ -353,7 +353,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `read_approvals` | ruleset の承認数 | ruleset に規則が無くブランチ保護の 404 で 0 | 両方読めなければ `None` と理由 |
 | `case_of` | ai-plugins の宣言と承認数 0 で場合 1 | CD の行が無ければ `gh` を呼ばない | 宣言を読めなければ `CaseUnreadable` |
 | `open_prs_at` | 同じ先端の PR の番号を返す | 先端の違う PR を含めない | 読めないとき `TrailError("unreadable")` |
-| `cmd_approval_check` | 通る PR で `success` を付けて 0 | develop 宛てで何も付けずに 0 | 読めないとき `error` を付けて 1 |
+| `cmd_approval_check` | 通る PR で `success` を付けて 0。`success` を付けた直後の読み直しで同じ先端の PR が増えていれば `failure` に付け直す | develop 宛てで何も付けずに 0 | 読めないとき `error` を付けて 1 |
 | `cmd_approval_post` | 置いて 0 | 同じ先端の 2 回目は置かずに 0 | ファイルが無ければ 3。投稿の失敗で 1 |
 | `cmd_release_case` | `metrics` の 4 項目 | — | 宣言を読めなければ 3 |
 | `cmd_release` | 場合 3 の今のテストが通る | 宣言の無い開発版は手元でマージ | 場合 1 で `--approval` を渡すと 3 |
