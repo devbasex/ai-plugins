@@ -246,12 +246,14 @@ def test_merge_back_failure_is_reported_apart_from_the_published_release():
 
     a = type("A", (), {"version": "1.1.0"})()
     items, metrics = [{"kind": "tag", "name": "ndf--v1.1.0", "result": "created"}], {}
-    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops(StepError("衝突")))
+    back = promotion.merge_back_after(
+        Path("."), a, "ndf", promotion.ReleaseBranches(BRANCH, "develop", "main"), 30, _Ops(StepError("衝突"))
+    )
     status, code, summary = back(items, metrics, "タグを作った")
     assert (status, code) == ("stopped", 1) and summary.startswith("タグを作った。") and "本番は出ている" in summary
     assert items[0]["result"] == "created" and items[-1]["result"] == "failed" and items[-1]["head"] == f"{BRANCH}-sync"
     items, metrics = [], {}
-    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops())
+    back = promotion.merge_back_after(Path("."), a, "ndf", promotion.ReleaseBranches(BRANCH, "develop", "main"), 30, _Ops())
     assert back(items, metrics, "タグを作った") == ("ok", 0, "タグを作った") and metrics["sync_pr"] == 31
     assert items == [{"kind": "pr", "base": "develop", "head": f"{BRANCH}-sync", "name": "#31", "result": "merged"}]
 
