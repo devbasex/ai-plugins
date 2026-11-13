@@ -38,8 +38,11 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 事実の表 | 表の行が「持ち主」に書くコンテキストの PR | `contracts/facts/<名前>.json` | 行（`id` で決まる） | 列の値 |
-| 外部の表 | 並行の設計の PR（#3092・#3144）と既存の契約の PR | `contracts/workflow/`・`contracts/design-docs.json`・`contracts/limits.json`・`contracts/settings/`・`contracts/forms/` | 行・方針 | — |
+| 事実の表 | 表の `owner` に書いた 1 つのコンテキスト（表ごとに 1 つ。ほかのコンテキストは読むだけ） | `contracts/facts/<名前>.json` | 行（`id` で決まる） | 列の値 |
+| 外部の表: 既存の契約 | 契約（このコンテキスト。値を移す移行ステップの PR が、読み手とそのテストを同じ PR で直す） | `contracts/limits.json`・`contracts/settings/`・`contracts/forms/` | 行・方針 | — |
+| 外部の表: 工程とモードの表 | #3092 の NDF の開発ワークフロー（工程の定義） | `contracts/workflow/` | 行・方針 | — |
+| 外部の表: 設計文書の種類の表 | #3144 の開発の工程（設計文書の種類） | `contracts/design-docs.json` | 種類の行 | — |
+| 外部の表: 止まった理由の種類の表 | #1142 のライブラリ（[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) の集約） | `contracts/causes.json` | 種類 | — |
 | 重複の基準 | 移行ステップの PR（自分が直した行を消す） | `scripts/const-fact-baseline.json` | 基準の行（組の鍵で決まる） | 種類・事実・扱い |
 
 ### 不変条件
@@ -49,7 +52,8 @@
 | I-DT1 | 事実の表 | 1 つの事実は、1 つの表か 1 つの持ち主のモジュールの定数にだけ字で書かれる。ほかは引くか import する | 継続的統合の規則 `const-fact` が落とす（基準の行を除く） |
 | I-DT2 | 事実の表 | 表は `contracts/facts/fact.schema.json` を満たし、`id` が表の中で重ならない | 継続的統合が落とす |
 | I-DT3 | 事実の表 | 表の行が別の表を指す値（外部キー）は相手の表にある（例: 収束ループのフェーズと `limits.json` の `monitor.phase.<id>`） | 継続的統合が落とす |
-| I-DT4 | 重複の基準 | 今の木で拾った組がすべて基準にあり、基準の行はすべて今の木で見つかる | 増えた組と使われない行の両方を落とす |
+| I-DT4a | 重複の基準 | 今の木で拾った組は、すべて基準にある | 増えた組として継続的統合が落とす。組を増やした PR の中で直す |
+| I-DT4b | 重複の基準 | 基準の行は、すべて今の木で見つかる | 使われない行として継続的統合が落とす。組を直した PR が、同じ PR で基準の行を消す |
 | I-DT5 | 重複の基準 | 基準の行はすべて扱い（`移す: <移行ステップ>` か `移さない: <理由>`）を持つ | 継続的統合が落とす |
 | I-DT6 | 事実の表 | 実行時の読み手は標準ライブラリの `json` だけで表を読む（hook の経路でも読む） | 構造チェックの `hook-deps` と同じ形で落とす |
 
@@ -276,7 +280,7 @@ flowchart TD
 | DT8 | 子の課題が触るファイルの残り: `tool` の名前・状態の語の持ち主・閾値の残り | `plugins/ndf/scripts/lib/sprint_loop_record.py`（#2994）、`plugins/ndf/scripts/release_lib/materials.py`・`plugins/ndf/scripts/release_lib/others.py`・`plugins/ndf/scripts/release_lib/carry.py`（#2995）、`plugins/ndf/scripts/lib/parallel_switch.py`・`plugins/ndf/scripts/lib/parallel_lane.py`・`plugins/ndf/scripts/lib/parallel_ledger.py`（#2992）、`plugins/ndf/scripts/lib/durable.py`（#2990）、`plugins/ndf/scripts/supervise_lib/decl.py`（#2993） | それぞれの子の課題の後。子の課題の PR が同じ事実に触れたら、その PR で表から引く形にしてよい |
 | E9 | 測り直し | `scripts/measure/const-facts.py` を打ち、前後の数を課題のコメントへ | DT1〜DT8 |
 
-DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 は DT2 の後に流す。どの移行ステップも、直した組の基準の行を同じ PR で消す（I-DT4 が使われない行を落とすため、消し忘れは残らない）。
+DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 は DT2 の後に流す。どの移行ステップも、直した組の基準の行を同じ PR で消す（I-DT4b が使われない行を落とすため、消し忘れは残らない）。
 
 ## 消す一致のテスト
 
@@ -387,7 +391,8 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 | 要求「新しく足す定数が既にあるデータと同じ事実を持たないことを CI が確かめる」 | 表の `id` を 2 つ含む集まりを持つ定数を足した木で、`const-fact` が落ちる | 表の値との照合を外す |
 | I-DT2 | `id` の重なる表・列の型の違う行で `fact-table` が落ちる | スキーマの検査を外す |
 | I-DT3 | `loop-phases.json` に `limits.json` の `monitor.phase.<id>` に無い行を足すと落ちる | 外部キーの照合を外す |
-| I-DT4 | 基準に無い組を足すと落ち、直した組の行を残すと「使われない行」で落ちる | どちらかの照合を外す |
+| I-DT4a | 基準に無い組を足すと「増えた組」で落ちる | 拾った組と基準の照合を外す |
+| I-DT4b | 直した組の行を基準に残すと「使われない行」で落ちる | 基準の行と今の木の照合を外す |
 | I-DT6 | `lib/facts.py` を hook の経路から import した木で、構造チェックの `hook-deps` が外部パッケージの import を見つけない | `lib/facts.py` が `jsonschema` を import する |
 | 決定 48 | `ndf_fact_ids runtimes host=true` が bash 3.2 で導入先のランタイムを改行区切りで返す | 列の条件を読まずに全行を返す |
 

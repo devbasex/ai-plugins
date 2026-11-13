@@ -6910,7 +6910,13 @@
     {
       "term": "境界の印",
       "context": "ndf-workflow",
-      "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `# noqa: <規則> <境界の種類>: <理由>`",
+      "meaning": "握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える",
+      "pending_source": "issues/issue-1142-design-smells.md"
+    },
+    {
+      "term": "判定データ",
+      "context": "ndf-workflow",
+      "meaning": "分岐の多い判定を置き換える「鍵 → 値か判定の関数」のデータと、それを引く 1 つの関数。用語集の「判定表」（モードを判定する順の表）とは別",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
