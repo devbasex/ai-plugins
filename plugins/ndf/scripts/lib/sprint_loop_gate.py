@@ -1,4 +1,4 @@
-"""sprint_loop_gate.py: 開発ループの 1 回の締め・まとめのステージ・承認ゲートの扱い（#2089）。"""
+"""sprint_loop_gate.py: 開発ループの 1 回の締めと、設計承認ゲートの人の判断待ちの行の扱い（#2089）。承認ゲートの答え待ちの振り分けは sprint_loop_table が持つ（#3092）。"""
 
 from __future__ import annotations
 

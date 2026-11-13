@@ -12,7 +12,7 @@
 | --- | --- |
 | まとめたリリース・一時レーン・レーンの側・止める・異常のときのオーガナイザーの手順 | [`development-workflow` の `references/parallel.md`](../../plugins/ndf/skills/development-workflow/references/parallel.md) |
 | レーンの終わり・止める・問い・版の要るまとめの待ち | [`lib/parallel_end.py`](../../plugins/ndf/scripts/lib/parallel_end.py) |
-| レーンのまとめのプランの組み立て | [`supervise_lib/sprint_lane_close.py`](../../plugins/ndf/scripts/supervise_lib/sprint_lane_close.py) |
+| レーンのリリースの依頼（工程の進行表のデプロイの工程。#3092 で `supervise_lib/sprint_lane_close.py` から移した） | [`lib/progress_activities.py`](../../plugins/ndf/scripts/lib/progress_activities.py) の `act_request` |
 | 台帳の行の種類 | [`contracts/forms/parallel-ledger.json`](../../plugins/ndf/contracts/forms/parallel-ledger.json)・[ndf-parallel-plan-ledger.md](ndf-parallel-plan-ledger.md) |
 | 並列の計画とオーガナイザーの全体 | [ndf-parallel-organizer.md](ndf-parallel-organizer.md) |
 | レーンの本番のステージと経路 | [ndf-parallel-lane-prod-stage-and-dropped-issues.md](ndf-parallel-lane-prod-stage-and-dropped-issues.md) |
