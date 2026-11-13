@@ -169,9 +169,8 @@ Pull Request が最後かどうかを判断できない。
 - CD が無い場合: ベースブランチの先端を承認に出し、承認を得たら `release-steps.py approve --approval <承認資料>` で承認の記録を書く
   （`--approved-sha` は提示の時点で控えた `approval-facts` の `metrics.approved_sha`。資料を読み直した値は渡さない）。MVV 判定で通したときは
   `mvv-gate.py` が書く。承認の記録の無い承認資料ではリリースが通らない
-- CD があり、レビューなしでマージできる場合: 本番の PR の先端（版上げまで積んだ `release/v<版>` の先頭）を承認に出す。承認資料は
-  `release-steps.py approval-post` で本番の PR へ置き、承認を得たら `release-steps.py approve --pr <本番の PR>` で承認の証跡を書く。
-  誰がいつ承認したかは、GitHub が付けた証跡のコメントの作成者と作成時刻で読む（証跡の書式は `scripts/release_lib/approval_trail.py`）
+- CD があり、レビューなしでマージできる場合: 本番の PR の先端を承認に出し、`approval-post` で承認資料を置き、承認を得たら
+  `approve --pr` で証跡を書く（打ち方は references の「CD のある場合の本番」）。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
 - CD があり、レビューが必須の場合: 本番の PR のレビューの承認がリリース承認である
 差し戻されたら直後に差し戻しの記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「答えを記録する」）。
 
@@ -278,14 +277,10 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 **Claude Code のプラグインの形では、マージまでを `release-steps.py release --channel dev|prod` が行う**
 （打ち方は [references/release-steps.md](references/release-steps.md)）。`stopped` なら `summary` を報告して止まる。
 
-- **CD が無い場合**: `--channel prod` は「公開前の提示と承認」で承認を得るまで打たない。承認したコミットを渡す
-  （`--approved-sha <SHA>` か `--approval <承認資料>`）。リリース対象に触れる承認の外の変更が入っていれば `gate`（10）で止まり、
-  本番チャネルの PR もタグも作られていない。MVV 判定で通さず人へ戻す
-- **CD のある場合**: `--channel prod` は承認したコミットを受けない。承認の前に打つと、本番の PR を作って CI の必須チェックを待ち、
-  `gate`（10）で止まる（`metrics.main_pr`・`metrics.approved_sha` は先端）。承認資料を置いて承認を得、証跡を書いてから打ち直すと、
-  承認と先端が一致したときだけ `--admin` なしでマージし、CD の結果を読む
-- **開発版**: `.ndf/supervise.json` の `release.dev_workflow` があれば、`--channel dev` は開発版の PR を作り、その workflow を起動して
-  結果を待つ。workflow が CI の必須チェックの通過を待ってから迂回なしでマージする。宣言が無ければ手元でマージする
+- **CD が無い場合**: `--channel prod` は「公開前の提示と承認」で承認を得るまで打たず、承認したコミット（`--approved-sha <SHA>` か
+  `--approval <承認資料>`）を渡す。承認の外の変更が入っていれば `gate`（10）で止まり、PR もタグも作られない。MVV 判定で通さず人へ戻す
+- **CD のある場合と開発版の workflow**: 進み方は references の「CD のある場合の本番」にある。承認と本番の PR の先端が一致したときだけ
+  `--admin` なしでマージし、一致しなければ `gate`（10）で止まって承認を取り直す
 
 **本番チャネルへのマージの後のタグと GitHub Release は、`delivery` の行の `publishes_release` が真なら CD が作り、無ければ `--channel prod` が作る。**
 リリースの手順は全体テストを流し直さない。テストは CI の必須チェックが受け持ち、マージはその通過を待つ。

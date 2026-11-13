@@ -259,7 +259,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 - `cd-review`: 証跡を書かず、承認権限として有効な人（共同作業者の権限が admin か write）の最新の承認のレビューのコミットを先端と比べる
 - `release --channel dev`: `.ndf/supervise.json` の `release.dev_workflow` があれば、開発版の PR を作るか使い回し、開いていればその
   workflow を `gh workflow run` で起動し、実行が終わるまで待つ（上限は `release-steps.dev-workflow`。75 で止まる）。workflow は宛先と
-  版の接尾辞を確かめ、CI の必須チェックが通るのを待って `merge-when-green --no-admin` でマージする
+  版の接尾辞を確かめ、CI の必須チェックが通るのを待って `merge-when-green --no-admin` でマージする。宣言が無ければ手元でマージする
 
 ### 置き換える箇条
 

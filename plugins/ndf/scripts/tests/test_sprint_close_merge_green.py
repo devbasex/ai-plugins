@@ -934,7 +934,7 @@ def test_merge_gate_judges_without_gh(repo, gh):
     assert gh.get().get("calls", []) == []
 
 
-def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
+def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh, tmp_path):
     """I7: リリースの Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
     declare(repo, *TRYGROUP)
     gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop")]})
@@ -943,7 +943,8 @@ def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
     gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
     code, out, err = call(
         "merged-steps.py",
-        ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0", "--gate-approved", "mvv"],
+        # CD のある場合（TRYGROUP）は照合する承認したコミットが要る（#2773）
+        [*promote_args("--expect-head-from", str(verified_material(tmp_path)), "--gate-approved", "mvv")],
         gh.env,
         repo,
     )
