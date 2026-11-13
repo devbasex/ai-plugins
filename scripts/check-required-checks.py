@@ -339,6 +339,21 @@ def read_required(repo: str, branch: str, rules_file: Path | None) -> list[str] 
 # --- 突き合わせ -------------------------------------------------------------
 
 
+def _declaration_findings(decl: Declaration, known: set[str], allow_rel: str, root: Path | None) -> list[Finding]:
+    """宣言の行（not_required・awaiting・statuses の順）の診断: 理由の無い宣言と、知らない名前か付ける workflow のファイルが
+    `root` の下に無い（statuses）古い宣言。"""
+    out: list[Finding] = []
+    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting), ("statuses", decl.statuses)):
+        for r in rows:
+            where = f"{allow_rel} の {key}"
+            if not str(r.get("reason") or "").strip():
+                out.append(Finding("理由の無い宣言", r["name"], where))
+            gone = key == "statuses" and root is not None and not (root / str(r.get("workflow") or "")).is_file()
+            if r["name"] not in known or gone:
+                out.append(Finding("古い宣言", r["name"], where))
+    return out
+
+
 def compare(
     names: list[CheckName], undetermined: list[Finding], required: list[str], decl: Declaration, allow_rel: str, root: Path | None = None
 ) -> list[Finding]:
@@ -364,14 +379,7 @@ def compare(
         elif any(c.filtered for c in cs) and n in req | awaiting:
             out.append(Finding("絞り込みのあるジョブ", n, where))
     out += [Finding("消えた必須", n, "ruleset の必須のチェック") for n in sorted(req - set(by_name) - statuses)]
-    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting), ("statuses", decl.statuses)):
-        for r in rows:
-            where = f"{allow_rel} の {key}"
-            if not str(r.get("reason") or "").strip():
-                out.append(Finding("理由の無い宣言", r["name"], where))
-            gone = key == "statuses" and root is not None and not (root / str(r.get("workflow") or "")).is_file()
-            if r["name"] not in known or gone:
-                out.append(Finding("古い宣言", r["name"], where))
+    out += _declaration_findings(decl, known, allow_rel, root)
     out += [Finding("宣言と ruleset の食い違い", n, f"{allow_rel} の not_required") for n in sorted(not_req & req)]
     for r in decl.awaiting:
         kind = "追加済み" if r["name"] in req else "追加待ち"
