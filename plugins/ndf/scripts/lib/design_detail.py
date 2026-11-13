@@ -87,14 +87,14 @@ def _first_column(table: md.Table | None) -> set[str]:
     return {_cell_text(r[0]) for r in table.rows if r} if table else set()
 
 
-def _item(name: str, rule: str, text: str) -> dict:
+def _finding(name: str, rule: str, text: str) -> dict:
     return {"name": name, "rule": rule, "text": text}
 
 
 def _row_item(path: str, lines: list[str], rule: str, table: md.Table, k: int, name: str) -> dict:
     at = _doc_line(table, k)
     src = lines[at].strip() if at < len(lines) else name
-    return _item(f"{path}:{at + 1} {name}", rule, src)
+    return _finding(f"{path}:{at + 1} {name}", rule, src)
 
 
 def _column(row: list[str], header: list[str], col: str) -> str:
@@ -113,9 +113,9 @@ def _section_findings(path: str, text: str) -> tuple[list[dict], dict[str, md.Ta
         sec, table, skip = _section_table(text, title)
         read[title] = table
         if sec is None:
-            items.append(_item(f"{path} {title}", "detail_section", f"節「{title}」が無い"))
+            items.append(_finding(f"{path} {title}", "detail_section", f"節「{title}」が無い"))
         elif not (table and table.rows) and not skip:
-            items.append(_item(f"{path} {title}", "detail_section", f"節「{title}」が表の行も `省く: <理由>` も持たない"))
+            items.append(_finding(f"{path} {title}", "detail_section", f"節「{title}」が表の行も `省く: <理由>` も持たない"))
     return items, read
 
 
@@ -129,7 +129,7 @@ def _spec_findings(path: str, lines: list[str], read: dict[str, md.Table | None]
         return missing, failures_found, reuses_found
     header = [_cell_text(h) for h in spec.header]
     for col in (c for c in ("種類", "副作用") if c not in header):
-        missing.append(_item(f"{path} {_SPEC}", "detail_section", f"節「{_SPEC}」の表に列「{col}」が無い"))
+        missing.append(_finding(f"{path} {_SPEC}", "detail_section", f"節「{_SPEC}」の表に列「{col}」が無い"))
     failures, reuses = _first_column(read.get(_FAILURES)), _first_column(read.get(_REUSE))
     for k, row in enumerate(spec.rows):
         name = _cell_text(row[0]) if row else ""
@@ -145,7 +145,7 @@ def _spec_findings(path: str, lines: list[str], read: dict[str, md.Table | None]
 def _file_findings(path: str, lines: list[str], read: dict[str, md.Table | None], result_files: set[str] | None, why: str) -> list[dict]:
     """ファイル配置の表のパスを、頭の設計文書の触るファイルと照らす。"""
     if result_files is None:
-        return [_item(f"{path} 設計の結果", "detail_file", why)] if why else []
+        return [_finding(f"{path} 設計の結果", "detail_file", why)] if why else []
     files = read.get(_FILES)
     items: list[dict] = []
     for k, row in enumerate(files.rows if files else []):
