@@ -172,11 +172,9 @@ def _scalar(v: object) -> str | None:
     return None
 
 
-def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
-    """matrix → 組の並び（GitHub の exclude / include の規則で作る）。静的に決められなければ None。"""
-    if not isinstance(matrix, dict):
-        return None
-    base: dict[str, list[str]] = {}
+def _matrix_axes(matrix: dict) -> dict[str, list[str]] | None:
+    """matrix の軸（include / exclude 以外の鍵）→ 鍵ごとの値の並び。静的に決められなければ None。"""
+    axes: dict[str, list[str]] = {}
     for key, values in matrix.items():
         if key in ("include", "exclude"):
             continue
@@ -185,37 +183,53 @@ def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
         vals = [_scalar(v) for v in values]
         if None in vals:
             return None
-        base[str(key)] = vals
+        axes[str(key)] = vals
+    return axes
 
-    def objects(key: str) -> list[dict[str, str]] | None:
-        rows = matrix.get(key) or []
-        if not isinstance(rows, list):
-            return None
-        out = []
-        for row in rows:
-            if not isinstance(row, dict):
-                return None
-            obj = {str(k): _scalar(v) for k, v in row.items()}
-            if None in obj.values():
-                return None
-            out.append(obj)
-        return out
 
-    include, exclude = objects("include"), objects("exclude")
-    if include is None or exclude is None:
+def _matrix_objects(matrix: dict, key: str) -> list[dict[str, str]] | None:
+    """matrix の include / exclude の行の並び。静的に決められなければ None。"""
+    rows = matrix.get(key) or []
+    if not isinstance(rows, list):
         return None
-    combos = [dict(zip(base, vals)) for vals in itertools.product(*base.values())] if base else []
-    combos = [c for c in combos if not any(all(c.get(k) == v for k, v in e.items()) for e in exclude)]
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        obj = {str(k): _scalar(v) for k, v in row.items()}
+        if None in obj.values():
+            return None
+        out.append(obj)
+    return out
+
+
+def _apply_include(combos: list[dict[str, str]], base_keys: dict[str, list[str]], include: list[dict[str, str]]) -> list[dict[str, str]]:
+    """include の行を当てる。元の組に一致すれば広げ、一致しなければ足す（足した組は次の行の対象にしない）。"""
     originals = len(combos)
     for obj in include:
         added = False
         for c in combos[:originals]:
-            if all(c[k] == v for k, v in obj.items() if k in base):
+            if all(c[k] == v for k, v in obj.items() if k in base_keys):
                 c.update(obj)
                 added = True
         if not added:
             combos.append(dict(obj))
-    return combos or None
+    return combos
+
+
+def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
+    """matrix → 組の並び（GitHub の exclude / include の規則で作る）。静的に決められなければ None。"""
+    if not isinstance(matrix, dict):
+        return None
+    base = _matrix_axes(matrix)
+    if base is None:
+        return None
+    include, exclude = _matrix_objects(matrix, "include"), _matrix_objects(matrix, "exclude")
+    if include is None or exclude is None:
+        return None
+    combos = [dict(zip(base, vals)) for vals in itertools.product(*base.values())] if base else []
+    combos = [c for c in combos if not any(all(c.get(k) == v for k, v in e.items()) for e in exclude)]
+    return _apply_include(combos, base, include) or None
 
 
 def job_check_names(job_id: str, job: object) -> list[str] | None:
