@@ -12,7 +12,7 @@ import branch_flow
 
 from supervise_lib.decl import DeclError, sprint_flow
 from supervise_lib.paths import STEPS_PY
-from supervise_lib import templates  # 循環（templates → release_templates → release_flow）のため、呼ぶ時点で引く
+from supervise_lib.procedures import review_step
 
 
 def release_ref(a, dev: bool) -> str:
@@ -108,7 +108,7 @@ def review_range_steps(a, repo: str | None, version: str, after: str = "facts") 
             "pr_from": "review_pr",
             "next": "review",
         },
-        {**templates.review_step("{pr}", "review-close", "judge"), **cwd},
+        {**review_step("{pr}", "review-close", "judge"), **cwd},
         {**run, "id": "review-close", "cmd": f"{STEPS_PY} review-close --version {version}", "next": after},
     ]
 
