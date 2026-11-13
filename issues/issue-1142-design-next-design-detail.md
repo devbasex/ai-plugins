@@ -12,29 +12,59 @@
 
 | パス | 中身 | 作る子 |
 | --- | --- | --- |
-| `plugins/ndf-next/.claude-plugin/plugin.json`・`.codex-plugin/plugin.json` | 名前 `ndf-next`・版 `11.0.0-dev.N` | X0 |
-| `plugins/ndf-next/pyproject.toml`・`uv.lock` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択） | X0 |
+| `plugins/ndf-next/.claude-plugin/plugin.json` | Claude Code 用の定義。名前 `ndf-next`・版 `11.0.0-dev.N` | X0 |
+| `plugins/ndf-next/.codex-plugin/plugin.json` | Codex 用の定義（同じ名前と版） | X0 |
+| `plugins/ndf-next/pyproject.toml` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択） | X0 |
+| `plugins/ndf-next/uv.lock` | 依存の lock | X0 |
 | `plugins/ndf-next/bin/ndf` | 入口 1 本。依存の環境を用意して `python -m ndf` を呼ぶ | X0 |
-| `plugins/ndf-next/src/ndf/__main__.py`・`cli.py` | 副命令の表から各パッケージの `main` を呼ぶだけ | X0 |
+| `plugins/ndf-next/src/ndf/__main__.py` | `cli.main` を呼ぶだけ | X0 |
+| `plugins/ndf-next/src/ndf/cli.py` | 副命令の表から各パッケージの `main` を呼ぶ | X0 |
 | `plugins/ndf-next/src/ndf/identity.py` | 自分のディレクトリ・プラグイン名・Skill の前置き・状態の置き場を求める | X0 |
 | `plugins/ndf-next/src/ndf/checks/` | 検査 1 本（構文木を 1 回作り、規則を当てる） | X1 |
-| `plugins/ndf-next/contracts/` | 事実の表・止まった理由の表・結果 JSON のスキーマ・上限の宣言 | D1・D2 |
-| `plugins/ndf-next/src/ndf/contracts/` | 表の読み手 | D1・D2 |
-| `plugins/ndf-next/src/ndf/adapters/{github,git,ci}.py` | GitHub・git・CI の結果の読み取り | AD1 |
-| `plugins/ndf-next/src/ndf/adapters/{markdown,paths,notify}.py` | テキストと通知 | AD2 |
-| `plugins/ndf-next/src/ndf/adapters/{llm,cli}.py` | LLM の呼び出しと外部 CLI | AD3 |
-| `plugins/ndf-next/src/ndf/core/loop.py`・`durable.py` | 判断のループ・判断の関数の型・DBOS の殻（DBOS を import するのは `durable.py` だけ） | C1 |
+| `plugins/ndf-next/contracts/facts/` | 事実の表 | D1 |
+| `plugins/ndf-next/contracts/causes.json` | 止まった理由の表 | D1 |
+| `plugins/ndf-next/contracts/schemas/` | 結果 JSON のスキーマ（`cause` を必須） | D1 |
+| `plugins/ndf-next/contracts/limits.json` | 上限の宣言 | D1 |
+| `plugins/ndf-next/contracts/domains/` | 領域の表（ランタイム・収束ループ・宣言・環境変数・PR の見出し・指示書） | D2 |
+| `plugins/ndf-next/src/ndf/contracts/` | 表の読み手 | D1 |
+| `plugins/ndf-next/src/ndf/adapters/github.py` | GitHub の読み書き（まとめたクエリ） | AD1 |
+| `plugins/ndf-next/src/ndf/adapters/git.py` | git の操作 | AD1 |
+| `plugins/ndf-next/src/ndf/adapters/ci.py` | CI の結果の読み取りと落ちたチェックの分類 | AD1 |
+| `plugins/ndf-next/src/ndf/adapters/markdown.py` | Markdown のコードブロック・コメントの扱い | AD2 |
+| `plugins/ndf-next/src/ndf/adapters/paths.py` | パスの照合 | AD2 |
+| `plugins/ndf-next/src/ndf/adapters/notify.py` | 通知（httpx） | AD2 |
+| `plugins/ndf-next/src/ndf/adapters/llm.py` | LLM の呼び出し（答えをスキーマで縛る） | AD3 |
+| `plugins/ndf-next/src/ndf/adapters/cli.py` | 外部 CLI の起動と監視・実行の識別子 | AD3 |
+| `plugins/ndf-next/src/ndf/core/loop.py` | 判断のループと判断の関数の型 | C1 |
+| `plugins/ndf-next/src/ndf/core/durable.py` | DBOS の殻（DBOS を import するのはここだけ） | C1 |
 | `plugins/ndf-next/src/ndf/core/plan/` | プランの実行（遷移・キュー・組み立て・再開・待ち） | C2 |
-| `plugins/ndf-next/src/ndf/core/route.py`・`plugins/ndf-next/contracts/templates/` | 行き先の選び方とプランの雛形 | C3 |
+| `plugins/ndf-next/src/ndf/core/route.py` | 行き先の選び方 | C3 |
+| `plugins/ndf-next/contracts/templates/` | プランの雛形 | C3 |
 | `plugins/ndf-next/src/ndf/core/refs.py` | 起動の外の成果の解決 | C4 |
 | `plugins/ndf-next/src/ndf/core/worker.py` | worker の規則文と受け渡し | C5 |
-| `plugins/ndf-next/contracts/workflow/`・`plugins/ndf-next/src/ndf/progress/{model,store,run,invoke}.py` | 工程の定義・スプリントの進行表・工程から作業を呼ぶ層 | P1 |
+| `plugins/ndf-next/contracts/workflow/` | 工程の定義（モードと工程）とスプリントの文脈の鍵のスキーマ | P1 |
+| `plugins/ndf-next/src/ndf/progress/model.py` | 進行表の型と純粋な判断 | P1 |
+| `plugins/ndf-next/src/ndf/progress/store.py` | 進行表の保存（SQLite と PostgreSQL） | P1 |
+| `plugins/ndf-next/src/ndf/progress/run.py` | `next` と `answer` の実行 | P1 |
+| `plugins/ndf-next/src/ndf/progress/invoke.py` | 工程から作業を呼ぶ層 | P1 |
 | `plugins/ndf-next/src/ndf/progress/gate.py` | 承認ゲート | P2 |
-| `plugins/ndf-next/src/ndf/progress/{plan,lane}.py` | 計画と Lane の進行表 | P3 |
+| `plugins/ndf-next/src/ndf/progress/plan.py` | 計画の進行表 | P3 |
+| `plugins/ndf-next/src/ndf/progress/lane.py` | Lane の進行表 | P3 |
 | `plugins/ndf-next/src/ndf/progress/reshape.py` | 組み換え | P4 |
-| `plugins/ndf-next/src/ndf/domains/{loop,release,relay,hooks,crossrefactor,crossreview,backlog,records}/` | 領域ごとの部品 | M1〜M7 |
-| `plugins/ndf-next/src/ndf/testing/`・`plugins/ndf-next/tests/` | テスト基盤とテスト（子ごとに `tests/<パッケージ>/`） | T1 と各子 |
-| `plugins/ndf-next/skills/`・`agents/`・`hooks/`・`manifests/` | Skill 本文・エージェント定義・hook の入口・配る Skill の表 | S1 |
+| `plugins/ndf-next/src/ndf/domains/loop/` | 開発ループとスプリント | M1 |
+| `plugins/ndf-next/src/ndf/domains/release/` | リリース（段階ごとのモジュール） | M2 |
+| `plugins/ndf-next/src/ndf/domains/relay/` | 中継 | M3 |
+| `plugins/ndf-next/src/ndf/domains/hooks/` | hook の判定 | M3 |
+| `plugins/ndf-next/src/ndf/domains/crossrefactor/` | cross-refactoring | M4 |
+| `plugins/ndf-next/src/ndf/domains/crossreview/` | cross-review | M5 |
+| `plugins/ndf-next/src/ndf/domains/backlog/` | 棚卸し | M6 |
+| `plugins/ndf-next/src/ndf/domains/records/` | 記録（確定仕様化・引継ぎ・用語集・使用量・MVV） | M7 |
+| `plugins/ndf-next/src/ndf/testing/` | テスト基盤（隔離・揺れない待ち・同時実行の枠） | T1 |
+| `plugins/ndf-next/tests/` | テスト（子ごとに `tests/<パッケージ>/`） | X0 |
+| `plugins/ndf-next/skills/` | Skill 本文 | S1 |
+| `plugins/ndf-next/agents/` | エージェント定義 | S1 |
+| `plugins/ndf-next/hooks/` | hook の入口 | S1 |
+| `plugins/ndf-next/manifests/` | 配る Skill の表 | S1 |
 | `.github/workflows/ndf-next.yml` | 新しいディレクトリのテストと検査 | X0 |
 
 ## クラスと関数の構造
@@ -59,13 +89,14 @@
 
 ## 異常系の処理
 
-| 異常 | 扱い |
-| --- | --- |
-| 文脈に入力の鍵が無い | 行を始めない。止まった理由 `input_missing` と、足りない鍵を返す |
-| 工程の定義に無い鍵を作業が出力した | 書かずに捨て、結果の `warnings` に載せる |
-| `plugin.json` が読めない | 起動を止める（終了コードは止まった理由の表の `config_broken`） |
-| 旧い状態の置き場の退避先が既にある | 日付に時刻を足した名前で退避する。消さない |
-| 同じ範囲を 2 つの工程が受け持つ定義 | 工程の定義の登録が断る（#3092 の順序の決まりに足す） |
+| 関数 | 異常 | 扱い |
+| --- | --- | --- |
+| `identity.load()` | `plugin.json` が読めない | 起動を止める（終了コードは止まった理由の表の `config_broken`） |
+| `identity.prepare_state_dir(ident)` | 旧い状態の置き場の退避先が既にある | 日付に時刻を足した名前で退避する。消さない |
+| `invoke.invoke(stage, context, cwd)` | 文脈に入力の鍵が無い | 行を始めない。止まった理由 `input_missing` と、足りない鍵を返す |
+| `invoke.invoke(stage, context, cwd)` | 作業が統一 JSON レポートを返さない | 行を失敗にし、止まった理由 `bad_report` を返す |
+| `invoke.record_outputs(table, row, result)` | 工程の定義に無い鍵を作業が出力した | 書かずに捨て、結果の `warnings` に載せる |
+| 工程の定義の登録（P1） | 同じ範囲を 2 つの工程が受け持つ | 登録で断る（#3092 の順序の決まりに足す） |
 
 ## 処理の手順
 
