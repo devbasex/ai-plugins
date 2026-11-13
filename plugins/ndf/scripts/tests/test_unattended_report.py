@@ -172,6 +172,14 @@ def test_form_from_dict_keeps_the_declared_order_and_accepts_equals_conditions()
     assert form.required["b"].when == (_cond({**WHEN, "need": ("承認ゲート",)}),)
 
 
+def test_form_from_dict_reads_a_shape_with_a_single_value():
+    """値が 1 つだけの形でも、値と意味を持った形として読める（#3329 の詳細設計の境界値）。"""
+    form = ur.form_from_dict(_shape(values={"済んだ": "通し切った"}, required={"済んだ": {"always": [], "when": []}}))
+    assert form.values == ("済んだ",)
+    assert form.meanings == {"済んだ": "通し切った"}
+    assert list(ur.form_examples(form)) == ["済んだ"]
+
+
 def test_form_from_dict_accepts_an_empty_need_as_it_is_now():
     """現状: when.need の空の並びは通る（_strs が空の並びを拒まない。「空でない」の文言と食い違う。不具合の疑い）。"""
     form = ur.form_from_dict(_req("完了", {"always": [], "when": [{**WHEN, "need": []}]}))
