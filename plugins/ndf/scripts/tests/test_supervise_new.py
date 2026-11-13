@@ -15,6 +15,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 from release_repo import push_origin  # noqa: E402
+from gh_fake import install_gh_pr_create  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
@@ -386,19 +387,7 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
     (root / "d.md").write_text("d\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "Add: d")
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "gh").write_text(
-        f"#!{PY}\nimport os, sys\na = sys.argv[1:]\n"
-        "if a[:2] == ['pr', 'create']:\n"
-        "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
-        "    print('https://github.com/o/r/pull/5')\n"
-        "sys.exit(0)\n"
-    )
-    (bindir / "gh").chmod(0o755)
-    body = tmp_path / "body.txt"
-    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_GH_BODY", str(body))
+    body = install_gh_pr_create(tmp_path, monkeypatch)
     state = tmp_path / "state"
     (state / "work").mkdir(parents=True)
     (state / "work" / "cand.md").write_text("## 用語集の候補\n\n- 目印の語\n")

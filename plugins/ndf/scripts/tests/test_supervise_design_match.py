@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,13 +11,13 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, pr as pr_step  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+from gh_fake import install_gh_pr_create  # noqa: E402
 
 HEADING = "## 設計と違う点"
 
@@ -112,18 +111,7 @@ def pr_repo(tmp_path, monkeypatch):
     (root / "b.txt").write_text("b\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "Add: b")
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "gh").write_text(
-        f"#!{PY}\nimport os, sys\na = sys.argv[1:]\n"
-        "if a[:2] == ['pr', 'create']:\n"
-        "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
-        "    print('https://github.com/o/r/pull/5')\n"
-        "sys.exit(0)\n"
-    )
-    (bindir / "gh").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_GH_BODY", str(tmp_path / "body.txt"))
+    install_gh_pr_create(tmp_path, monkeypatch)
     return root
 
 
