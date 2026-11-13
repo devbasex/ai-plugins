@@ -69,7 +69,9 @@ plugins/ndf/
 | `review_stop` | 回数を書けない | 状態の置き場に書けない | `_save_count` の `OSError` | 既定値で続ける（今どおり、警告して判定は返す） | 差し戻すなら今どおり `decision: block`、標準エラーに 1 行、終了コード 0 | 印の回数は古いまま。次の Stop で数え直す |
 | `review_stop` | 上限に達した後も形に合わない | conductor が差し戻しの上限の回数を使い切っても形を直さなかった | `next_count` が差し戻さないと返し、誤りが空でなく背景の作業も予定も無い | 止める（Stop を差し戻さずに通し、記録だけ残す） | 標準出力は空、標準エラーに `ndf: unattended-stop: 差し戻しの上限（<回数> 回）に達したため通す: <誤り> / <誤り>`、終了コード 0 | 回数を変えない。区間はそのまま終わり、結果は Factory のランナーが決める |
 
-`describe_form`・`form_examples`・`_requirement_lines`・`_condition_text`・`_example`・`pushback_reason`・`start_guide` は純粋な関数で、`form_from_dict` を通った `ReportForm` に対しては失敗しない。
+次の 7 つは純粋な関数で、`form_from_dict` を通った `ReportForm` に対しては失敗しない。
+
+- `describe_form`・`form_examples`・`_requirement_lines`・`_condition_text`・`_example`・`pushback_reason`・`start_guide`
 
 ## 処理の手順
 
@@ -90,7 +92,7 @@ plugins/ndf/
 | `_example` | 項目が `always` にあり、材料の項目でない | 値は仮の値 `<項目>` |
 | `_example` | 項目が `always` に無い | 値は `無し`（`NONE_VALUE`） |
 
-`_example` が条件つきの項目を `無し` にしてよいのは、仮の値 `<項目>` がどの条件の `prefix` にも `equals` にも当たらないためである（条件の値は空でない文字列で、`<` で始まる値は今の契約に無い）。仮の値が条件に当たる契約に変わったときは、`form_examples` の事後条件を縛るテスト（I3）が落ちる。
+`_example` が条件つきの項目を `無し` にしてよいのは、仮の値 `<項目>` がどの条件の `prefix` にも `equals` にも当たらないためである。条件の値は空でない文字列で、`<` で始まる値は今の契約に無い。仮の値が条件に当たる契約に変わったときは、`form_examples` の事後条件を縛るテスト（I3）が落ちる。
 
 形の説明の文の並び（設計文書の「入出力の契約」の順）:
 
