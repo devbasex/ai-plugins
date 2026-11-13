@@ -146,15 +146,15 @@
 | 結果の状態の語（`failed`・`pending`・`完了` など） | 46 | 81 | 2,354 | GitHub の check の結論の 2 組（`gh_checks.FAILED_CONCLUSIONS` と `review_lib/ci.CI_FAILED_CONCLUSIONS`、`gh_checks.CI_ONLY_PASSING` と `gh_pr_status.OK_RESULTS`）は持ち主のモジュール `lib/gh_checks.py`。DBOS の状態（`durable.RUNNING` ほか 2 つ）は `lib/durable.py` | import | 残りは移さない。別の状態機械の語が同じ字を持つだけで、事実が違う（R3） |
 | 閾値と版 | 15 | 38 | 714 | 名前の同じ閾値（`TAIL_LINES`・`RECORD_DAYS`・`ERROR_EXCERPT`・`RECLAIM_LIMIT`・`BODY_MATCH_CHARS` と `OSCILLATION_BODY_CHARS`・`FOREIGN_WINDOW` と `WINDOW`）は既存の `contracts/limits.json` の方針 | `limits.get(<方針>)` | 形式の版（`VERSION = 1`・`DECLARATION_VERSION = 1`）は移さない。ファイルの形式ごとに別の事実（決定 28、R4） |
 | 結果 JSON の `tool` の名前 | 17 | 31 | 1,635 | エントリポイントのモジュールの `TOOL` を持ち主にする | 下のモジュールは import か引数で受ける | 偶然の一致（`TOOL = "release"` と `DEV_SERIES = "release"`）は移さない（R3） |
-| ランタイム（`claude`・`codex`・`kiro`・`agy`） | 105 | 18 | 175 | 新しい表 `contracts/facts/runtimes.json`。行はランタイム、列は `host`（導入先）・`partner`（相手役）・`auth_probe`・`usage_observable`・`model_args` | `facts.ids("runtimes", host=True)` などの条件で引く。部分集合を定数に写さない | 無し。テストの字の集まり 80 か所も表から引く形に直す |
-| 宣言と状態のファイル名（`.ndf/worktree.json`・`.worktrees`・`glossary.json` ほか） | 8 | 18 | 1,226 | 既存の `contracts/settings/<名前>.json` の `file` と `contracts/files/` の型 | `facts.setting_path("worktree.json")`。シェルは `lib/facts.sh` | 無し |
+| ランタイム（`claude`・`codex`・`kiro`・`agy`） | 105 | 18 | 175 | 新しい表 `contracts/facts/runtimes.json`。行はランタイム（輪番の順）、列は `default_seat`・`hook_events`・`usage_observable`・`delegate`・`executable`・`label`・`host_env`・`auth_probe`・`model_probe`・`model_args`（詳細設計の「内部のデータと定数」） | `facts.ids("runtimes", default_seat=True)` などの条件で引く。部分集合を定数に写さない | 無し。テストの字の集まり 80 か所も表から引く形に直す |
+| 宣言と状態のファイル名（`.ndf/worktree.json`・`.worktrees`・`glossary.json` ほか） | 8 | 18 | 1,226 | 既存の `contracts/settings/<名前>.json` の `file` と、新しい表 `contracts/facts/places.json`（`.ndf`・`.worktrees`） | `facts.setting_path("worktree.json")`。シェルは `lib/facts.sh` | 無し |
 | 工程名とフェーズ（`設計`・`実装`・`検査`・`仕上げ`・`取り込み`） | 8 | 14 | 304 | #3092 の工程の文書 `contracts/workflow/stages/<工程>.json` に列 `phase` を足す（#3092 の後） | `STEP_PHASES`・`STAGE_PREFIXES`・`POSTS`・`WF_FAST_*_STAGES` は工程の文書から導く | 無し。`agent-layers.md` の表との一致のテストを消す |
 | 収束ループのフェーズ（`fix`・`implement`・`add-tests` ほか） | 20 | 13 | 418 | 新しい表 `contracts/facts/loop-phases.json`。列は `coding`・`fix`・`resume_as`。`limits.json` の `monitor.phase.<id>` は外部キー（I-DT3） | cross-review と cross-refactoring の両方が同じ表を引く | 無し |
 | 指摘の重さ（`critical`・`major`・`minor`・`nit`） | 14 | 12 | 70 | 新しい表 `contracts/facts/severities.json`。列は `rank`・`blocking` | cross-review・fix・pr-review・`lib/body_findings.py` | 無し |
 | 環境変数名（`NDF_CLAUDE_ACCOUNT` ほか） | 7 | 11 | 124 | 持ち主のモジュール（`lib/claude_accounts.py`・`lib/claude_api_keys.py`）の定数。`lib/assignee_env.py` は import | import | `contracts/env/` は登録簿で、コードとの一致を `check-ndf-contracts.py` が既に見るため写しに数えない |
 | PR 本文の見出しと印（`## 利用者向けの変化`・`## 移行の手順`・`## 同意を求めること`・レビューの印） | 7 | 11 | 101 | 既存の置き場 `contracts/forms/` に `pr-body.json` を足す | `pr-steps.py`・`release_lib/`・`lib/step_result.py` が引く | 無し |
 | モード（要求の例） | 11 | 7 | 1,187 | #3092 のモードの文書 `contracts/workflow/modes/` から導く。「設計を通るモード」は工程「設計」を持つモード、「詳細設計を通るモード」は工程「詳細設計」を持つモード | `glossary.DESIGN_MODES`・`pace.DEFAULT_MODES` は導出に変える | 無し。`WF_MODES`・`WF_MODE_HEIGHT` を正規表現で読むテスト 5 か所を消す |
-| 設計文書の種類（要求の例） | 3 | 3 | 1,075 | #3144 の `contracts/design-docs.json` | #3144 の `lib/doc_kinds.py` | 無し。#3144 の実装が移し、この設計は基準の行を消すだけ |
+| 設計文書の種類（要求の例） | 3 | 3 | 1,075 | #3144 の `contracts/design-docs.json` | #3144 の `lib/doc_kinds.py` | 無し。#3144 の実装が移し終えた（`const-facts.py --json` に `-design.md` を持つ組が 0 件。2026-11-13、HEAD 7fc42b7b8）。基準を作る時点で行が無い |
 
 ### 残りの事実（規則で扱う）
 
@@ -168,7 +168,7 @@
 | R4 | ファイルの形式の版 | 移さない（決定 28） |
 | R5 | 部分集合で、部分が全体の属性で決まるもの（例: 導入先のランタイム） | 全体の表に列を足し、部分は条件で引く |
 
-R1 に当たるもので上の表に無い事実: ブランチの接頭辞（`sprint/`・`design/`・`release/`。8 定義。`WF_DESIGN_PREFIX` をシェルが持つ）は `contracts/facts/branches.json`、承認ゲートと承認のラベル（`design`・`release`・`design-approved`。6 定義。`WF_APPROVAL_LABEL` をシェルが持つ）は `contracts/facts/gates.json`、進め方（`auto`・`fast`・`normal`。5 定義。`WF_PACES`）は #3092 の後に `contracts/workflow/paces.json`、指示書のファイル（`AGENTS.md`・`CLAUDE.md`・`KIRO.md`。6 定義）は `contracts/facts/instruction-files.json`、版の上げ幅・実行主体の層・プランの種類・テストの置き場と名前の印は R2 で持ち主のモジュールへ寄せる。
+R1 に当たるもので上の表に無い事実: ブランチの接頭辞（`sprint/`・`design/`・`release/`。8 定義。`WF_DESIGN_PREFIX` をシェルが持つ）は `contracts/facts/branches.json`、承認ゲートと承認のラベル（`design`・`release`・`design-approved`。6 定義。`WF_APPROVAL_LABEL` をシェルが持つ）は `contracts/facts/gates.json`、進め方（`auto`・`fast`・`normal`。5 定義。`WF_PACES`）は #3092 の後に `contracts/workflow/paces.json`、指示書のファイル（`AGENTS.md`・`CLAUDE.md`・`KIRO.md`。6 定義）は `contracts/facts/instruction-files.json`、テストの置き場と名前の印（`TEST_PATH_MARKERS`・`TEST_NAME_MARKERS`。cross-review と cross-refactoring の 2 つのコンテキストが読む）は `contracts/facts/test-markers.json`、版の上げ幅・実行主体の層・プランの種類は R2 で持ち主のモジュールへ寄せる。
 
 ## 構成要素
 
@@ -176,19 +176,23 @@ R1 に当たるもので上の表に無い事実: ブランチの接頭辞（`sp
 | --- | --- |
 | `contracts/facts/<名前>.json`（新設） | 事実の表。行と列だけを持ち、コードを持たない |
 | `contracts/facts/fact.schema.json`（新設） | 表の共通の形（STD1） |
-| `plugins/ndf/scripts/lib/facts.py`（新設） | 実行時の読み手。表を標準ライブラリの `json` で 1 プロセスに 1 回読み、行・`id`・条件での絞り込みを返す。副命令 `ids` でシェルにも返す |
+| `plugins/ndf/scripts/lib/facts.py`（新設） | 実行時の読み手。`contracts/facts/` の表を標準ライブラリの `json` で 1 プロセスに 1 回読み、行・`id`・条件での絞り込みを返す。副命令 `ids`・`value` でシェルにも返す。契約の置き場の探し方（`contract_path`）も持ち、`lib/limits.py`・`lib/doc_kinds.py` はそれを呼ぶ。#3092 と #3144 の文書は読まない（それぞれの読み手 `lib/workflow_def.py`・`lib/doc_kinds.py` が持つ） |
 | `plugins/ndf/scripts/lib/facts.sh`（新設） | シェルの読み手。`ndf_fact_ids <表> [<列>=<値>]` が `lib/facts.py ids` を 1 回呼び、改行区切りで受ける |
 | `scripts/contracts_lib/const_facts.py`（新設） | 重複の組を拾う核。`scripts/measure/const-facts.py` と検査が同じ核を呼ぶ |
+| `scripts/contracts_lib/const_baseline.py`（新設） | 重複の基準の読み込み・扱いの形の検査・今の組との照合 |
+| `scripts/contracts_lib/facts_decl.py`（新設） | 表の形（`jsonschema`）・外部キー・逆引きの節「事実の表」 |
 | `scripts/check-ndf-contracts.py`（変更） | 規則 `const-fact`（重複の組と基準の照合）と `fact-table`（表の形・外部キー）を足す |
 | `scripts/const-fact-baseline.json`（新設） | 重複の基準。組の鍵・種類・事実・扱い |
-| `scripts/measure/const-facts.py`（この設計の PR で新設） | 移行の前後を測る。DT1 で核を `const_facts.py` へ移し、出力は変えない |
+| `scripts/measure/const-facts.py`（この設計の PR で新設） | 移行の前後を測る。DT1 で核を `const_facts.py` へ移し、出力は変えない（E9 で同じ物差しを使うため。後方互換のためではない） |
 
 ```mermaid
 flowchart LR
   T[contracts/facts/*.json] --> F[lib/facts.py]
-  W[#3092 contracts/workflow/] --> F
-  D[#3144 contracts/design-docs.json] --> F
+  W[#3092 contracts/workflow/] --> WD[lib/workflow_def.py]
+  D[#3144 contracts/design-docs.json] --> DK[lib/doc_kinds.py]
   F --> P[Python の読み手]
+  WD --> P
+  DK --> P
   F --> S[lib/facts.sh]
   S --> H[シェルの読み手]
   C[contracts_lib/const_facts.py] --> K[check-ndf-contracts.py]
@@ -207,14 +211,14 @@ flowchart LR
   "summary": "NDF が起動するランタイム",
   "owner": "外部 CLI の起動",
   "columns": {
-    "host": {"type": "boolean", "summary": "NDF を導入する先（Claude Code・Codex）"},
-    "partner": {"type": "boolean", "summary": "cross-review・cross-refactoring の相手役として起動する"}
+    "default_seat": {"type": "boolean", "summary": "cross-review・cross-refactoring の既定の母集合に入る"},
+    "usage_observable": {"type": "boolean", "summary": "使用量の実測を取れる"}
   },
   "rows": [
-    {"id": "claude", "host": true, "partner": true},
-    {"id": "codex", "host": true, "partner": true},
-    {"id": "kiro", "host": false, "partner": true},
-    {"id": "agy", "host": false, "partner": true}
+    {"id": "claude", "default_seat": true, "usage_observable": true},
+    {"id": "codex", "default_seat": true, "usage_observable": true},
+    {"id": "agy", "default_seat": false, "usage_observable": false},
+    {"id": "kiro", "default_seat": true, "usage_observable": false}
   ]
 }
 ```
@@ -224,7 +228,7 @@ flowchart LR
 | `version` | 整数 | 表の形式の版（決定 28 と同じく NDF の版から切り離す） |
 | `summary` | 字 | 事実の 1 行の説明。`contracts/index.md` の逆引きに出る |
 | `owner` | 字 | 表を書き換えてよいコンテキスト（[issue-1142-design.md](issue-1142-design.md) のコンテキストの名前） |
-| `columns` | 名前 → `{type, summary, ref?}` | 列。`ref` は外部キーの先（例: `limits.json#monitor.phase`） |
+| `columns` | 名前 → `{type, summary, optional?, ref?}` | 列。型は `boolean`・`string`・`integer`・`array`（字の配列）。`ref` は外部キーの先（例: `limits.json#monitor.phase.`）。列 `id` にも `ref` を書ける |
 | `rows` | 配列 | 並びは意味を持つ（工程の順のように順序が事実のときは並びで表す） |
 
 **基準の行**（`scripts/const-fact-baseline.json` の `rows`）:
@@ -271,21 +275,23 @@ flowchart TD
 
 | 移行ステップ | 中身 | 触るファイル | 後に置く課題 |
 | --- | --- | --- | --- |
-| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | 依存の宣言と固定（根とプラグインの両方。どのファイルとどのグループ名かは実装で決める。v10.27.61 の時点で `jsonschema` はどちらにも無い）、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
+| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | 依存の宣言と固定（`pyproject.toml`・`uv.lock`・`plugins/ndf/pyproject.toml`・`plugins/ndf/uv.lock` のグループ `jsonschema` と `plugins/ndf/scripts/lib/deps.py`。v10.27.61 の時点で `jsonschema` はどちらにも無い）、`scripts/contracts_lib/const_baseline.py`、`scripts/contracts_lib/facts_decl.py`、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
 | DT2 | ランタイム | `plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` と、字の集まりを直すテスト | DT1 |
 | DT3 | 収束ループのフェーズ・指摘の重さ・テストの印 | `plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/scripts/lib/body_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-refactoring/scripts/assignee_launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/safety_net.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_findings.py` | DT1 |
 | DT4 | 閾値（`limits.json` へ） | `plugins/ndf/contracts/limits.json`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/relay_lib/version_dir.py`、`plugins/ndf/scripts/lib/run_owner.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/lib/finding_match.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py` | DT2（`hook_lib/wait_notify.py` が重なる） |
 | DT5 | 宣言のファイル名・環境変数名・PR 本文の見出し・指示書のファイル | `plugins/ndf/contracts/forms/pr-body.json`、`plugins/ndf/contracts/facts/instruction-files.json`、`plugins/ndf/scripts/hook_lib/worktree.py`、`plugins/ndf/scripts/lib/worktree-common.sh`、`plugins/ndf/scripts/lib/worktree_deps.py`、`plugins/ndf/scripts/lib/worktree_base.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/merged_lib/base_sync.py`、`plugins/ndf/scripts/lib/diff_kinds.py`、`plugins/ndf/scripts/lib/assignee_env.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/lib/pr_mode.py`、`plugins/ndf/scripts/instructions_lib/declaration.py`、`plugins/ndf/scripts/project_lib/fingerprint.py`、`plugins/ndf/scripts/project_lib/measure_repo.py`、`plugins/ndf/scripts/project_lib/mvv_collect.py` | DT1。`supervise_lib/decl.py` は #2993 の後（DT8） |
 | DT6 | モード・工程名とフェーズ・進め方・ブランチの接頭辞・承認ゲートとラベル | `plugins/ndf/contracts/workflow/stages/`（列 `phase`）、`plugins/ndf/contracts/workflow/paces.json`、`plugins/ndf/contracts/facts/branches.json`、`plugins/ndf/contracts/facts/gates.json`、`plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh`、`plugins/ndf/scripts/lib/transcript_agents.py`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/lib/pace.py`、`plugins/ndf/scripts/glossary.py`、`plugins/ndf/scripts/lib/branch_flow.py`、`plugins/ndf/scripts/lib/legacy_names.py`、`plugins/ndf/scripts/lib/gate_rejections.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/skills/cross-review/scripts/classifications.py`、`plugins/ndf/scripts/tests/test_transcript_agents.py`、`plugins/ndf/skills/development-workflow/tests/test_document_rebuild_stage.py`、`plugins/ndf/skills/development-workflow/tests/test_documentation_mode.py`、`plugins/ndf/skills/development-workflow/tests/test_operation_mode.py` | #3092（工程とモードの文書）・#3144（設計文書の種類）。`hook_lib/token_guard.py` が重なる DT4 と、`glossary.py` が重なる DT5 の後 |
-| DT7 | 設計文書の種類 | 基準の行を消すだけ（`scripts/const-fact-baseline.json`） | #3144 の実装 |
+| DT7 | 設計文書の種類 | 無し（#3144 の実装が移し終えた。C2 に吸収） | — |
 | DT8 | 子の課題が触るファイルの残り: `tool` の名前・状態の語の持ち主・閾値の残り | `plugins/ndf/scripts/lib/sprint_loop_record.py`（#2994）、`plugins/ndf/scripts/release_lib/materials.py`・`plugins/ndf/scripts/release_lib/others.py`・`plugins/ndf/scripts/release_lib/carry.py`（#2995）、`plugins/ndf/scripts/lib/parallel_switch.py`・`plugins/ndf/scripts/lib/parallel_lane.py`・`plugins/ndf/scripts/lib/parallel_ledger.py`（#2992）、`plugins/ndf/scripts/lib/durable.py`（#2990）、`plugins/ndf/scripts/supervise_lib/decl.py`（#2993） | それぞれの子の課題の後。子の課題の PR が同じ事実に触れたら、その PR で表から引く形にしてよい |
 | E9 | 測り直し | `scripts/measure/const-facts.py` を打ち、前後の数を課題のコメントへ | DT1〜DT8 |
 
 DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 は DT2 の後に流す。どの移行ステップも、直した組の基準の行を同じ PR で消す（I-DT4b が使われない行を落とすため、消し忘れは残らない）。
 
+**子の課題への組み直し**: 実装の PR は、詳細設計（[issue-1142-design-data-design-detail.md](issue-1142-design-data-design-detail.md) ）の C1〜C8 で切る。DT1 は読み手（C1。先に要るもの無し）と検査（C2。#2996 の後）に分け、事実を移す DT2〜DT6・DT8（C3〜C8）は C2 を待たず C1 の後に流す（決定 53）。DT7 は #3144 の実装が移し終えたため C2 に吸収した。各子の課題の触るファイルの正本は詳細設計のファイル配置の表で、上の表の DT2・DT3 のファイルの一覧に無い読み手（`lib/procs.py`・`lib/usage_ledger.py`・`review_lib/commands/report.py`・`cross-refactoring/scripts/drive.py`・`refactor_lib/commands/phases.py`・`refactor_lib/commands/reassign.py`・`refactor_lib/vocabulary.py`・`mode-materials.py` ほか）もそちらにある。DT3 の `cross-refactoring/scripts/safety_net.py` は `cross-refactoring/scripts/refactor_lib/safety_net.py` が正しい置き場である。
+
 ## 消す一致のテスト
 
-**移した事実の一致を縛るテストは、その移行ステップの PR で消す。** 振る舞いを確かめるテストは、表から引いた値で書き直して残す。
+**移した事実の一致を縛るテストは、その移行ステップの PR で消す。** 読み手のテストは詳細設計の「単体テストの観点」から子の課題ごとに新しく作り、置き換えた範囲の古いテスト（一致の縛り・定数の値そのものを確かめる assert・消す枝のテスト）は同じ PR で消す。古いテストを移行の安全網として残さない。
 
 | テスト | 縛っているもの | 消す移行ステップ |
 | --- | --- | --- |
@@ -311,7 +317,7 @@ DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 
 
 ### 決定 46: 表の形をそろえて機械で確かめるため、新しい事実は `contracts/facts/<名前>.json` の 1 事実 1 ファイルにし、JSON Schema の draft 2020-12 で形を確かめる
 
-#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` は最初に使う移行ステップの DT1 が、手元の検査と配布先（プラグインの依存の導入の経路。#3092 の決定 3 と同じ置き場）の両方で使えるようにする。片方だけだと、DT1 の後に流す scripted-flow の子 6 が配布先で答えを確かめ直すときに、依存が無くて止まる。どのファイルとどのグループ名に足すかは実装で決める。#3092 は決定 3 で `jsonschema` を足すとしたが、マージした実装（PR #3171、v10.27.61）は依存に入れておらず、公式スキーマの検査も置いていない。そのため DT1 が足し、#3092 の決定 3 の検査を後から置くときもこの依存を使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
+#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` は最初に使う移行ステップの DT1（詳細設計の C1）が、根とプラグインの `pyproject.toml` のグループ `jsonschema` に足し、`lib/deps.py` の `GROUPS` に載せる。手元の検査と配布先（プラグインの依存の導入の経路。#3092 の決定 3 と同じ置き場）の両方で使える。#3092 の決定 3 のグループ名 `workflow` ではなく、このグループを共有する。片方だけだと、DT1 の後に流す scripted-flow の子 6 が配布先で答えを確かめ直すときに、依存が無くて止まる。#3092 は決定 3 で `jsonschema` を足すとしたが、マージした実装（PR #3171、v10.27.61）は依存に入れておらず、公式スキーマの検査も置いていない。そのため DT1 が足し、#3092 の決定 3 の検査を後から置くときもこの依存を使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
 
 1 つの大きな JSON に全事実をまとめる案は、すべての移行ステップが同じファイルを触って並列に流せないため採らない。YAML は標準ライブラリで読めず hook の経路で使えないため採らない。
 
@@ -372,6 +378,8 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 
 一致のテストを移行の後も残す案は、同じことを検査とテストが重ねて確かめるため採らない。
 
+**事実を移す PR は後方互換を持たない（2026-11-13 利用者の方針）。** 形を変える定数・状態ファイル・検査の結果は最終の形へ 1 回で変え、古い形を読む枝と別名を同じ PR で消す。例: ランタイムを移す C3 は、cross-review の `review_lib/participants.py` の `LEGACY_AGENTS` と別名 `AGENTS`、`participants` を持たない状態ファイルを読む 2 つの枝を消し、その状態は `AssignmentError` で止める。テストは観点から作り直し、古いテストを安全網にしない。古い形を残すと、事実を 1 か所にしても読み手の側に古い値の写しが残る。
+
 根拠: Value 11（MVV 版 7）
 
 ### 決定 53: 子の課題と触るファイルを重ねないため、検査の土台は #2996 の後、工程とモードは #3092 の後に置き、残りは子の課題が触るファイルを除いて先に流し、除いた分を子の課題の後に置く
@@ -379,6 +387,8 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 #2996 は構造の検査と契約の検査の構文木の解析を 1 回にし、`check-ndf-contracts.py` を触る。先に規則を足すと、#2996 が解析を組み直すときに規則も書き直しになる。`parallel_*`（#2992）・`sprint_loop_*`（#2994）・`release_lib/`（#2995）・`durable.py`（#2990）・`supervise_lib/`（#2993）に当たる分は DT8 にまとめ、子の課題の後に流す。子の課題の PR が同じ事実に触れたときは、その PR で表から引く形にしてよく、DT8 の行が減る。
 
 子の課題より先にすべてを移す案は、子の課題の PR と同じファイルで衝突するため採らない。
+
+**#2996 を待つのは検査（C2）だけで、事実を移す子の課題（C3〜C8）は読み手（C1）の後に流す。** 移す PR は `check-ndf-contracts.py` を触らず、基準が無い間に移した組は、C2 が基準を作る時点で初めから基準に無い。C2 の前は新しい重複を CI が止めないが、移した事実は表にしか無いため、読み手が字の集まりを書き戻さない限り組は増えない。
 
 根拠: Value 5（MVV 版 7）
 
@@ -388,7 +398,7 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 | --- | --- | --- |
 | 要求「同じ事実を 2 か所以上の定数に持つ箇所の一覧がある」 | `const-facts.py --json` が組の一覧を返し、基準のファイルが全組を持つ | 核から種類を 1 つ外す（例: `affix` を拾わない）と、#3144 の例の 3 組が一覧から消える |
 | 要求「箇所ごとに、移したか移さない理由が残る」・I-DT5 | 扱いの無い基準の行で検査が落ちる | 扱いを空にした行を通す |
-| 要求「値を足すときに直すファイルが 1 つになる」・I-DT1 | ランタイムの表に行を 1 つ足すだけで、`host` の条件で引く読み手の結果に現れる | 読み手が字の集まりを持つ |
+| 要求「値を足すときに直すファイルが 1 つになる」・I-DT1 | ランタイムの表に行を 1 つ足すだけで、`default_seat` の条件で引く読み手の結果に現れる | 読み手が字の集まりを持つ |
 | 要求「新しく足す定数が既にあるデータと同じ事実を持たないことを CI が確かめる」 | 表の `id` を 2 つ含む集まりを持つ定数を足した木で、`const-fact` が落ちる | 表の値との照合を外す |
 | I-DT2 | `id` の重なる表・列の型の違う行で `fact-table` が落ちる | スキーマの検査を外す |
 | I-DT3 | `loop-phases.json` に `limits.json` の `monitor.phase.<id>` に無い行を足すと落ちる | 外部キーの照合を外す |
@@ -396,15 +406,15 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 | I-DT4b | 直した組の行を基準に残すと「使われない行」で落ちる | 基準の行と今の木の照合を外す |
 | I-DT4c | 定数を別のファイルへ移し、基準の行のファイルだけを同じ数だけ書き換えた PR が通る。種類か事実か定数の名前の違う行を足した PR と、消した数より多く足した PR は落ちる | 置き換えを数えずに増えた行として落とす・ファイル以外の違う行も置き換えとして通す |
 | I-DT6 | `lib/facts.py` を hook の経路から import した木で、構造チェックの `hook-deps` が外部パッケージの import を見つけない | `lib/facts.py` が `jsonschema` を import する |
-| 決定 48 | `ndf_fact_ids runtimes host=true` が bash 3.2 で導入先のランタイムを改行区切りで返す | 列の条件を読まずに全行を返す |
+| 決定 48 | `ndf_fact_ids runtimes default_seat=true` が bash 3.2 で既定の母集合のランタイムを改行区切りで返す | 列の条件を読まずに全行を返す |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1142 | 実装する | — | `scripts/measure/const-facts.py`、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/tests/test_const_facts.py`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/scripts/tests/test_facts.py`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/contracts/facts/branches.json`、`plugins/ndf/contracts/facts/gates.json`、`plugins/ndf/contracts/facts/instruction-files.json`、`plugins/ndf/contracts/forms/pr-body.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/index.md` |
+| #1142 | 実装する | — | `scripts/measure/const-facts.py`、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/tests/test_const_facts.py`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/contracts_lib/const_baseline.py`、`scripts/contracts_lib/facts_decl.py`、`pyproject.toml`、`uv.lock`、`plugins/ndf/pyproject.toml`、`plugins/ndf/uv.lock`、`plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/scripts/tests/test_facts.py`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/facts/test-markers.json`、`plugins/ndf/contracts/facts/places.json`、`plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/contracts/facts/branches.json`、`plugins/ndf/contracts/facts/gates.json`、`plugins/ndf/contracts/facts/instruction-files.json`、`plugins/ndf/contracts/forms/pr-body.json`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/contracts/index.md` |
 
-移行ステップごとの触るファイルは「移行の順序」の表にあり、DT2〜DT8 の各 PR がその行のファイルを触る。#1142 の先頭の設計文書の表へは、移行ステップを並べる時点で写す（DT6・DT8 は #3092 と子の課題の後のため、この設計の承認の時点では並べない）。
+移行ステップごとの触るファイルは「移行の順序」の表と、詳細設計のファイル配置の表（子の課題 C1〜C8 ごと。こちらが正本）にあり、DT2〜DT8 の各 PR がその行のファイルを触る。#1142 の先頭の設計文書の表へは、移行ステップを並べる時点で写す（DT6・DT8 は #3092 と子の課題の後のため、この設計の承認の時点では並べない）。
 
 ## 人へ残す判断
 
@@ -416,5 +426,5 @@ hook は用意済みの環境の python を直に起動し、外部パッケー�
 | --- | --- |
 | 基準の行の数 | 417 組のうち R3（別の事実）で移さない組の数は、基準のファイルを作る DT1 で 1 組ずつ扱いを書いた時点で決まる。上の表の事実への分け方は字の規則で、`その他` の 121 組はまだ分けていない |
 | 検査の所要時間 | `const-facts.py` は手元で約 3.6 秒（`time` で測った）。#2996 の 1 回の解析に乗せた後の増分は DT1 の CI で測る |
-| `lib/facts.sh` の起動の費用 | source のたびに python を 1 回起動する。worktree の hook の経路のシェル（`worktree-common.sh`）で体感の遅れが出るかは DT5 で測る |
+| `lib/facts.sh` の起動の費用 | source のたびに引く値ごとに python を 1 回起動する。worktree の hook の経路のシェル（`worktree-common.sh`）で体感の遅れが出るかは DT5 で測る |
 | #3092 の工程の文書に列 `phase` を足せるか | #3092 の工程の文書は Serverless Workflow の書式で、独自の列を置ける場所（`metadata` など）は #3092 の実装で決まる。置けなければ `contracts/facts/stage-phases.json` に工程の名前を外部キーとして持つ |

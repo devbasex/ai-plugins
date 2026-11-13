@@ -87,7 +87,7 @@
 | IA1 | 兆候の基準 | ファイルごと・規則ごとの今の数（印の付いた箇所を除く）は、そのファイルの基準を超えない。基準ファイルの無いファイルの基準は 0 | 検査が落とす |
 | IA2 | 兆候の基準 | 基準は今の数と等しい。今の数が下回ったら、同じ PR で基準を下げる | 検査が落とす（下げ方を出す） |
 | IA3 | 兆候の基準 | 規則ごとの基準の合計は、ベースブランチとの merge-base の合計を超えない。ただし merge-base がまだ兆候の検査を持たない初回の導入（A0）に限り、merge-base と比べずに基準を置いてよい（決定 38） | 検査が落とす |
-| IA4 | 境界の印 | 印は 4 つの境界の種類（外部コマンド・ネットワーク・利用者の入力・ファイル）のどれかと理由を持つ。ただし規則 `NDF201`（ループの中の呼び出し）の印に限り、境界の種類の代わりに `上限: <件数と根拠>` を持ってよい（決定 41）。内部の例外の型だけを受ける `except` には付けられない | 検査が落とす。`NDF201` 以外の規則の `上限:` の印も落とす |
+| IA4 | 境界の印 | 兆候を外す印は、印を許す規則（握りつぶし・フォールバック・ループの中の呼び出し）に付き、4 つの境界の種類（外部コマンド・ネットワーク・利用者の入力・ファイル）のどれかと理由を持つ。ただし規則 `NDF201`（ループの中の呼び出し）の印に限り、境界の種類の代わりに `上限: <件数と根拠>` を持ってよい（決定 41）。内部の例外の型だけを受ける `except` の印は兆候を外さない。兆候の無い行に正しい形の印を置かない | 形の誤った印・許さない規則の印・内部の型の印は兆候を外さず、その行は数に入る（基準を超えれば IA1 で落ちる。落ちた行の説明に印の誤りを添える）。兆候の無い行の正しい形の印は検査が落とす（決定 39） |
 | IA5 | （計測） | `scripts/measure/ai-smells.py` の数え方は E1 から E9 まで変えない | 振り返りで E1 の出力と見比べる |
 
 ### ドメインイベント
@@ -96,8 +96,8 @@
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| EA1 | 兆候の基準を記録した | 移行ステップ A0 | 子の課題の PR と A1〜A4（以後、増やす変更が落ちる） |
-| EA2 | 兆候を直して基準を下げた | A1〜A4 と子の課題の PR | 次の PR の検査 |
+| EA1 | 兆候の基準を記録した | 移行ステップ A0 | 子の課題の PR と A1〜A3（以後、増やす変更が落ちる） |
+| EA2 | 兆候を直して基準を下げた | A1〜A3 と子の課題の PR | 次の PR の検査 |
 | E9 | 移行の後を同じ物差しで測り直した | conductor（`ai-smells.py` を足す） | 振り返り |
 
 ### 用語
@@ -189,8 +189,9 @@ ruff は違反の数の基準を持たない（ruff の Issue #1149「Support ba
 | `scripts/structure_checks/smells_rules.py`（新設） | 自作の規則（ループの中の外部呼び出し・`elif` の連鎖・定数の `return` と `contextlib.suppress` の握りつぶし・空のフォールバック・60 行を超える関数）を構文木で数える |
 | `scripts/ai-smells-rules.json`（新設。データ） | 採る ruff の規則としきい値、自作の規則、例外の型の分類（境界 / 内部 / どちらも）、境界の種類の 4 つ |
 | `scripts/ai-smells-baseline/`（新設。データ） | 兆候の基準ファイル。元のファイル 1 本に 1 つ |
-| `.github/workflows/script-structure.yml` の `script-structure-check` | 上のエントリポイントを打つ手順を 1 つ足す（必須のチェックの名前は変えない） |
-| `pyproject.toml` の `[tool.ruff.lint]` | `external = ["NDF"]` を足す（自作の規則の印を ruff が誤った印として扱わない） |
+| `.github/workflows/script-structure.yml` の `script-structure-check` | 上のエントリポイントを打つ手順を 1 つ足す（必須のチェックの名前は変えない）。ruff を uv の環境から起動するため uv を用意する手順の後に置き、merge-base を求めるため履歴をすべて取る（`fetch-depth: 0`） |
+| `scripts/contracts_lib/ratchet.py`（変更） | 起点の merge-base を決める `base_ref` と、初回の導入の判定 `initial` を、この検査と契約の検査が共有する（`initial` に検査の名前を渡せるようにする） |
+| `.ndf/project.json` の `test.suites` | この検査を静的解析の suite として宣言する（手元の範囲テストと CI の対応） |
 
 ```mermaid
 flowchart LR
@@ -221,9 +222,11 @@ except OSError:  # noqa: S110 ファイル: 消えたロックは片付け済み
 for pr in prs[:2]:  # noqa: NDF201 上限: ランタイムは claude と codex の 2 つだけ
 ```
 
-ruff の規則（S110 など）の印は ruff がそのまま読んで外す。自作の規則（`NDF` で始まる）の印は検査が読む。
-ruff は `external` に載る印を誤りとして扱わない（手元で `lint.external` の無い設定と有る設定の両方を試し、
-ruff の規則の印に理由の文が続いても ruff が外すことを確かめた）。
+検査は ruff を `--ignore-noqa` で起動して印を無視した全件を受け、ruff の規則（S110 など）の印も自作の規則
+（`NDF` で始まる）の印も、検査が同じ規則で読んで外す（決定 39）。`NDF` で始まる印は ruff の側で誤りとして
+扱われないため、`pyproject.toml` に `lint.external` は足さない。ruff 0.16.9 で `# noqa: NDF201 上限: …` と
+`# noqa: NDF301 ファイル: …` の行を、`--select F`・`--select RUF100`・`--select RUF100` と `lint.external = ["NDF"]`
+の 3 通りで検査し、どれも指摘が出ないことを確かめた（2026-11-13）。
 
 ## 処理の流れ
 
@@ -315,11 +318,22 @@ merge-base がまだ兆候の検査を持たない初回の導入（A0）に限�
 
 握りつぶしとフォールバックを許すのは、外部との境界（外部コマンド・ネットワーク・利用者の入力・ファイル）だけに
 する。許した箇所には、その行の行末に `# noqa: <規則> <境界の種類>: <理由>` を書く。ruff の規則の印は ruff が
-そのまま外し、自作の規則の印は検査が外す。印の無い理由・4 つ以外の境界の種類は検査が落とす（IA4）。`NDF201` の印だけは `上限: <件数と根拠>` を許す（決定 41）。一覧は
+そのまま外し、自作の規則の印は検査が外す。理由の無い印・4 つ以外の境界の種類の印は兆候を外さない（IA4）。`NDF201` の印だけは `上限: <件数と根拠>` を許す（決定 41）。一覧は
 検査の `--allowed` が印から作る（定義から作り、手で写さない）。
 
-印は理由がコードの隣にあり、行が動いても付いて動く。ruff の `--add-noqa=<理由>` で書け、`RUF100` が要らなく
-なった印を見つけられる。
+印は理由がコードの隣にあり、行が動いても付いて動く。ruff の `--add-noqa=<理由>` で書ける。
+
+印を外す判断は検査が 1 か所で持つ。ruff は `--ignore-noqa` で印を無視した全件を返し、検査が ruff の規則と自作の
+規則の印を同じ規則で読む。ruff に印を外させると、外した行が出力に現れず、形の誤った印（理由の無い
+`# noqa: S110`）を見分けられない。兆候の無い行の正しい形の印は、要らなくなった印として検査が落とす（`RUF100` の
+代わり。`RUF100` は選んでいない規則の印も指摘する）。
+
+形の誤った印・許さない規則の印・内部の型だけを受ける `except` の印は、落とさずに兆候を外さない（その行は数に
+入る）。今のコードに `# noqa: BLE001 — <理由>` の形の印が 84 箇所（53 ファイル。うち 18 本は子の課題の範囲）あり、
+境界の種類を持たない（`grep -rnE '# noqa: ?BLE001' --include=*.py plugins/ndf` を tests・experimental を除いて
+数えた。2026-11-13）。形の誤りで落とすと、A0 がこの 53 本を書き換えて子の課題と衝突する（決定 43）。数に入れる
+扱いなら、A0 はこの行を基準に入れるだけで済み、書き換えはそのファイルを直す PR が行う。誤った印で許したつもりの
+行は、基準を超えた時点で落ち、落ちた行の説明が印の誤りを示す。
 
 例外リスト（1 項目 1 ファイル）に「ファイル:関数:規則」で載せる案は、1 つの関数に同じ規則の箇所が複数あると
 区別できず、理由がコードから離れるため採らない。
@@ -341,6 +355,15 @@ merge-base がまだ兆候の検査を持たない初回の導入（A0）に限�
 フォールバックは、境界で 1 回だけ形を確かめて型へ直し（既存の `lib/schema.py` の pydantic の包み）、内部は
 確かめた型を信じて `.get(k, 既定)` と `or {}` を持たない形へ直す。境界で読む `.get` には境界の印を付ける。
 
+**古い形を読むためのフォールバックは境界として許さず、消す。** エントリポイントの旧名の引数、計画の JSON・
+状態ファイル・記録の旧名のキーと旧い値、旧名のブランチの頭を読み替える経路（`lib/legacy_names.py`・
+`lib/legacy_values.py`・`data/legacy-values.json` と、旧名のエントリポイント `bundle-close.py`・`mission-close.py`・
+`mission-state.py`・`phase-steps.py`、`wait-notify.py --runtime`）は、今の形だけを受ける形へ直し、古い形は
+読めない入力として止める。境界のモデルも今の形だけを持ち、古いキーを既定値で埋めない。古い形を移行の間だけ
+受ける経路を残すと、外す時点が決まらないまま `.get` と分岐が残り、この主題が数える兆候そのものになる
+（例: `supervise_lib/sprint_waves.py` の `_branch_of` は旧名のブランチの頭ごとに `git for-each-ref` を打ち、
+ループの中の外部呼び出しに数えられている）。この経路はまとめて移行ステップ A1 で消す。
+
 型で分けずに印だけで許す案は、`KeyError` の握りつぶしにも「ファイル」と書けば通るため採らない。
 
 根拠: Value 7 / Value 9（MVV 版 7）
@@ -351,7 +374,8 @@ PR・Issue ごとの `gh` は、GraphQL のフィールドの別名で 1 回の�
 `gh pr list --head` は、開いた PR の一覧を 1 回で取り手元で絞る（STD2。例 `merged-steps.py` の `probe_prs`）。
 `git` は 1 回の呼び出しで全体を出して手元で分ける（例 `release-verification-steps.py` の `_verify_runtimes` は
 プラグインごとの `git diff --name-only` を、パスの組を渡した 1 回の `git diff --name-only` と手元の振り分けへ）。
-まとめる部品はコンテキストのモジュールに書かず、`lib/gh_parts.py` と git の包み（決定 16・19）に置く。
+まとめる部品はコンテキストのモジュールに書かず、GitHub の部品（`lib/gh_rest.py` の `numbered_nodes`。既存の
+`pr_head_branches` の別名の組み立てを一般化する）と git の包み（決定 16・19）に置く。
 
 ループが 1 回か上限の小さい回数で済む箇所（ランタイムの 2 つなど）は直さず、`# noqa: NDF201 上限: <件数と
 その根拠>` を残す。書き込み（PR へのコメント・ラベル）のように 1 回へまとめられない副作用は、境界の種類
@@ -382,12 +406,17 @@ JSON か `.ndf/` の宣言）へ置き、モジュールの中だけで使うな
 
 根拠: Value 8 / Value 9（MVV 版 7）
 
-### 決定 43: 子の課題と触るファイルを重ねないため、検査と基準を最初の移行ステップ A0 で入れ、子の課題の範囲は子の課題が直し、範囲の外を A1〜A4 で直す
+### 決定 43: 子の課題と触るファイルを重ねないため、検査と基準を最初の移行ステップ A0 で入れ、子の課題の範囲は子の課題が直し、範囲の外を A2・A3 で直す
 
 検査を先に入れると、以後の子の課題の PR は兆候を増やせない。子の課題（リファクタリング計画の #2990・#2963・
 #2993・#2992・#2994・#2995）は判断を純粋な関数へ切り出すため、切り出した新しいファイルは基準 0 から始まり、
 兆候を持ち込めない。子の課題の範囲のファイルの兆候は、その子の課題の PR が移すときに直す（直さずに移すことは
-IA3 で許す）。範囲の外のファイルだけを A1〜A4 が直し、子の課題と同時に流しても触るファイルが重ならない。
+IA3 で許す）。範囲の外のファイルだけを A2・A3 が直し、子の課題と同時に流しても触るファイルが重ならない。
+
+古い形を読む経路を消す A1a・A1b（決定 40）だけは範囲をまたぎ、`supervise_lib/`・`lib/sprint_loop*`・`lib/parallel_*`
+のファイルを触る。経路は 1 つのモジュール（`legacy_names.py`・`legacy_values.py`）とその呼び出しの組で、子の課題ごとに
+分けて消すと、最後の呼び出しが消えるまでモジュールが残る。そこで A1a・A1b は該当する子の課題（#2963・#2993・#2994・
+#2992）より先に流し、子の課題が移すコードから経路を先に除く。
 
 A0 は構造チェックの本体（`scripts/check-script-structure.py`）と例外リストを触らない。#2991（ファイルを分ける
 基準を責務へ）と #2996（構文木の解析を 1 回に）が触るのはそちらで、A0 は別のエントリポイントとして足す。
@@ -424,16 +453,35 @@ A0 は構造チェックの本体（`scripts/check-script-structure.py`）と例
 | #2994 | `scripts/lib/sprint_loop*.py` | 3 | 4 | 138 |
 | #2995 | `scripts/release-steps.py`・`scripts/release_lib/` | 9 | 11 | 92 |
 | #2990 | `scripts/lib/durable.py`・`scripts/lib/post_queue.py`・2 本の `drive.py` | 1 | 7 | 66 |
-| 範囲の外（A1〜A4） | 上のほか | 31 | 375 | 1,972 |
+| 範囲の外（A1〜A3） | 上のほか | 31 | 375 | 1,972 |
 
-| 移行ステップ | 何をするか | 触るファイル |
-| --- | --- | --- |
-| A0 | 検査・規則・基準を入れる。基準は A0 の時点の数で `--write-baseline` が書く | `scripts/check-ai-smells.py`・`scripts/structure_checks/smells_rules.py`・`scripts/ai-smells-rules.json`・`scripts/ai-smells-baseline/`（新設）・`scripts/tests/test_check_ai_smells.py`・`.github/workflows/script-structure.yml`・`pyproject.toml` |
-| A1 | 範囲の外の握りつぶしとフォールバックを直すか境界の印を付ける（内部の型の握りつぶしから） | A1 の着手の時点で `check-ai-smells.py` が出す範囲の外のファイルと、その基準ファイル |
-| A2 | 範囲の外のループの中の外部呼び出しを直すか上限の印を付ける | 下の 22 本と、その基準ファイル。まとめる部品は `plugins/ndf/scripts/lib/gh_parts.py` |
-| A3 | 範囲の外の分岐の多い判定を判定データへ（71 本） | A3 の着手の時点で `check-ai-smells.py` が出す範囲の外のファイルと、その基準ファイル |
-| A4 | 範囲の外の長い関数と多い引数（60 行を超える 28・引数 7 個以上 77） | 同上 |
-| E9 | `ai-smells.py` で測り直し、表の前後を残す | — |
+**移行ステップは 1 本の PR に 1 つ置き、1 本の PR が触る元のファイルは 50 本以下にする。** 範囲の外の兆候は、
+種類ごとではなくディレクトリごとに 1 本の PR がすべての種類を直す（同じファイルを種類ごとに何度も触らない）。
+ループの中の外部呼び出しだけは、まとめる部品を共有するため A2 で先に直す。各 PR は、振る舞いを変えた関数の
+テストを詳細設計の「単体テストの観点」から書き直し、握りつぶしや既定値への倒れを期待値に持つ古いテストを
+同じ PR で消す。関数の粒度の設計は [issue-1142-design-smells-design-detail.md](issue-1142-design-smells-design-detail.md) にある。
+
+| 移行ステップ | 何をするか | 触るファイル（`plugins/ndf/` から。根の `scripts/` などはそのまま） | 先に要るもの |
+| --- | --- | --- | --- |
+| A0 | 検査・規則・基準を入れる。基準は A0 の時点の数で `--write-baseline` が書く | 根の `scripts/check-ai-smells.py`・`scripts/structure_checks/smells_rules.py`・`scripts/ai-smells-rules.json`・`scripts/ai-smells-baseline/`（新設）・`scripts/contracts_lib/ratchet.py`・`scripts/tests/test_check_ai_smells.py`・`scripts/tests/test_smells_rules.py`・`.github/workflows/script-structure.yml`・`.ndf/project.json` | 無し |
+| A1a | 旧名を読み替える経路を消す（旧名の引数・エントリポイント・キー・ブランチの頭・記録の見出し・承認ゲートの旧名）。決定 40 | `scripts/lib/legacy_names.py`・`scripts/bundle-close.py`・`scripts/mission-close.py`・`scripts/mission-state.py`・`scripts/phase-steps.py` とその契約 4 本（削除）、`scripts/supervise.py`・`scripts/mvv-gate.py`・`scripts/project-mvv.py`・`scripts/sprint-state.py`・`scripts/gate-rejections.py`・`scripts/wait-notify.py`・`scripts/resolve.sh`・`scripts/lib/gate_answer.py`・`scripts/lib/dist_record.py`・`scripts/lib/pr_mode.py`・`scripts/lib/project_mvv_signals.py`・`scripts/lib/parallel_external.py`・`scripts/lib/sprint_loop_record.py`・`scripts/lib/sprint_loop_gate.py`・`scripts/lib/sprint_loop_gate2.py`・`scripts/lib/sprint_mvv.py`・`scripts/lib/gate_rejections.py`・`scripts/supervise_lib/state.py`・`scripts/supervise_lib/sprint_waves.py`・`scripts/lib/README.md` と、`mvv-gate.py`・`project-mvv.py`・`resolve.sh`・`plan-to-spec-steps.py`・`release-verification-steps.py` の契約 | A0。#2963・#2993・#2994・#2992・DT6 と触るファイルが重なり、それらより先に流す |
+| A1b | 旧い値を読み替える経路を消す（計画のフェーズ・記録の値・見出し）。決定 40 | `scripts/lib/legacy_values.py`・`scripts/data/legacy-values.json`（削除）、`scripts/estimate.py`・`scripts/context-policy.py`・`scripts/sprint-state.py`・`scripts/progress-record.sh`・`scripts/lib/estimate_records.py`・`scripts/lib/slow_step.py`・`scripts/lib/stage_skills.py`・`scripts/lib/transcript_agents.py`・`scripts/lib/parallel_repo.py`・`scripts/lib/parallel_status.py`・`scripts/lib/sprint_loop_record.py`・`scripts/lib/sprint_loop_gate.py`・`scripts/lib/dist_record.py`・`scripts/sprint_close_lib/final_stage.py`・`scripts/supervise_lib/queue.py`・`scripts/supervise_lib/delivery_templates.py`・`scripts/lib/README.md` | A1a（`sprint-state.py`・`dist_record.py` などが重なる）。A1a と同じく #2963・#2993・#2994・#2992・DT6 より先 |
+| A2 | 範囲の外のループの中の外部呼び出しを 1 回の問い合わせへまとめるか印を付ける。決定 41 | 下の 22 本と、その基準ファイル。まとめる部品は `scripts/lib/gh_rest.py` の `numbered_nodes` | A0 |
+| A3a〜A3g | 範囲の外の握りつぶし・フォールバック・分岐の多い判定・長い関数と多い引数を、ディレクトリごとに直す。決定 40・42 | 着手の時点で `check-ai-smells.py` が出す範囲の外のファイルのうち、下の表のディレクトリの下のものと、その基準ファイルとテスト | A0・A2（22 本を含むディレクトリ）・A1a と A1b（そのファイルを含むディレクトリ）。「定数からデータへ」の DT2〜DT5 と scripted-flow の子と重なるファイルは、頭の設計文書の規則 2・3 で順に流す |
+| E9 | `ai-smells.py` で測り直し、表の前後を残す | — | すべての移行ステップと子の課題 |
+
+| 移行ステップ | ディレクトリ（`plugins/ndf/` から） | 元のファイルの数（2026-11-13） |
+| --- | --- | ---: |
+| A3a | `scripts/lib/` のうち名前が a〜f で始まるもの | 42 |
+| A3b | `scripts/lib/` のうち名前が g〜o で始まるもの | 43 |
+| A3c | `scripts/lib/` のうち名前が p〜z で始まるもの（`parallel_*`・`post_queue.py`・`sprint_loop*` は子の課題の範囲で除く） | 52 |
+| A3d | `scripts/hook_lib/`・`scripts/relay_lib/` | 34 |
+| A3e | `scripts/` の直下の `.py`・`scripts/merged_lib/`・`scripts/project_lib/`・`scripts/instructions_lib/`・`scripts/sprint_close_lib/`・`scripts/pr_steps_lib/` | 58 |
+| A3f | `skills/cross-refactoring/scripts/`（`drive.py` は #2990 の範囲で除く） | 69 |
+| A3g | `skills/` のうち cross-refactoring を除く Skill の `scripts/`（cross-review の `drive.py` は除く） | 50 |
+
+元のファイルの数は、`ai-smells.py` の箇所の一覧（種類 1・6 を除く）を、子の課題の範囲を除いてディレクトリで
+数えた。50 本を超える A3c・A3e・A3f は、着手の時点の一覧を名前の順で 2 本に割る。
 
 A2 の 22 本（`plugins/ndf/` から）: `scripts/check-trigger.py`・`scripts/lib/formatting.py`・`scripts/lib/gate1_requests.py`・
 `scripts/lib/gh_rest.py`・`scripts/lib/project_mvv.py`・`scripts/lib/test_triage.py`・`scripts/lib/tool_paths.py`・
@@ -442,10 +490,6 @@ A2 の 22 本（`plugins/ndf/` から）: `scripts/check-trigger.py`・`scripts/
 `scripts/sprint_close_lib/collect.py`・`skills/backlog-refinement/scripts/upkeep_gh.py`・`skills/backlog-refinement/scripts/upkeep_overhaul.py`・
 `skills/backlog-refinement/scripts/upkeep_routes.py`・`skills/cross-refactoring/scripts/refactor_lib/worktree.py`・
 `skills/cross-review/scripts/review_lib/commands/verify_findings.py`・`skills/fix/scripts/fix-steps.py`。
-
-A1・A3・A4 は範囲の外のファイルが数十〜数百本あり、1 本の PR に収めない。着手の時点の一覧をディレクトリ
-（`scripts/lib/`・`scripts/hook_lib/`・`scripts/relay_lib/`・各 Skill の `scripts/`）で分け、触るファイルが
-重ならない PR に割る。A1〜A4 は互いに同じファイルを触りうるため、同じディレクトリの PR は順に流す。
 
 ## テスト設計
 
@@ -456,7 +500,8 @@ A1・A3・A4 は範囲の外のファイルが数十〜数百本あり、1 本�
 | IA2 | 兆候を 1 つ直して基準を下げないと落ち、`--write-baseline` の後は通る | 下回りを許すと落ちる |
 | IA3 | 兆候を持つ関数を別の新しいファイルへ移し、両方の基準を書き直すと通る。移さずに新しいファイルの基準だけを足すと落ちる | merge-base との比較を外すと落ちる |
 | IA3（初回の導入） | merge-base が検査を持たない木で、0 でない基準を足すと通る。merge-base が検査を持つ木で同じ基準を足すと落ちる | 初回の判定を外すと前者が落ち、初回の判定を常に真にすると後者が落ちる |
-| IA4 | 理由の無い印・4 つ以外の境界の種類・内部の型だけを受ける `except` の印・`NDF201` 以外の規則の `上限:` の印で落ちる。`# noqa: NDF201 上限: <件数と根拠>` の行と正しい境界の印の行は数えず、`--allowed` に理由つきで出る | 印の形を確かめずに外すと落ちる・`上限:` の印を拒むと落ちる |
+| IA4 | 理由の無い印・4 つ以外の境界の種類・内部の型だけを受ける `except` の印・`NDF201` 以外の規則の `上限:` の印・印を許さない規則（分岐・長さ）の印は、その行を数に入れ、基準 0 の木で落ちる。`# noqa: NDF201 上限: <件数と根拠>` の行と正しい境界の印の行は数えず、`--allowed` に理由つきで出る。兆候の無い行の正しい形の印で落ちる | 印の形を確かめずに外すと落ちる・`上限:` の印を拒むと落ちる・要らない印を見逃すと落ちる |
+| 古い形を読む経路が無い（決定 40） | 旧名の引数（`supervise.py new mission`）・旧名のキー（計画の `ミッション状態`）・旧い値（フェーズ `配布（本番）`）を渡すと、新しい形と同じ扱いにならず、知らない値として止まるか読まれない | 読み替えを残すと落ちる |
 | 握りつぶしを `contextlib.suppress` へ書き換えても数が減らない | `pass` の握りつぶしを `suppress` へ書き換えた差分で数が変わらない | `suppress` を数えないと落ちる |
 | ruff のしきい値が要求の物差しに合う | 入れ子の深さ 4 の関数で PLR1702 が当たり、3 では当たらない。引数 7 個で PLR0913 が当たり 6 個では当たらない | しきい値をずらすと落ちる |
 | 前後の数が残る（E1・E9） | `ai-smells.py` の出力の形（種類ごとの数と箇所）を読む側のテストは置かない。E9 で E1 の値（この文書の表）と並べて残す | — |
@@ -467,7 +512,7 @@ A1・A3・A4 は範囲の外のファイルが数十〜数百本あり、1 本�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1142 | 実装する | — | `scripts/check-ai-smells.py`、`scripts/structure_checks/smells_rules.py`、`scripts/ai-smells-rules.json`、`scripts/ai-smells-baseline/`（新設）、`scripts/tests/test_check_ai_smells.py`、`.github/workflows/script-structure.yml`、`pyproject.toml`（A0。A1〜A4 は上の「直す順序と触るファイル」） |
+| #1142 | 実装する | — | `scripts/check-ai-smells.py`、`scripts/structure_checks/smells_rules.py`、`scripts/ai-smells-rules.json`、`scripts/ai-smells-baseline/`（新設）、`scripts/contracts_lib/ratchet.py`、`scripts/tests/test_check_ai_smells.py`、`scripts/tests/test_smells_rules.py`、`.github/workflows/script-structure.yml`、`.ndf/project.json`（A0。A1a〜A3g は上の「直す順序と触るファイル」） |
 
 ## 人へ残す判断
 
@@ -478,6 +523,8 @@ A1・A3・A4 は範囲の外のファイルが数十〜数百本あり、1 本�
 | 項目 | 内容 |
 | --- | --- |
 | 基準ファイルの数 | A0 で書く基準ファイルは約 450 本の見込み（自作の規則の対象を持つファイルの数）。ruff の規則の分を足した実数は A0 で `--write-baseline` を打って分かる |
-| 検査の所要時間 | ruff は 529 ファイルで約 0.1 秒、`ai-smells.py` の構文木の走査は約 3 秒（手元）。merge-base の基準を読む `git show` の回数を含めた CI の時間は A0 の CI で分かる |
+| 検査の所要時間 | ruff は 529 ファイルで約 0.1 秒、`ai-smells.py` の構文木の走査は約 3 秒（手元）。merge-base の基準は `git ls-tree` と `git archive` の 2 回で読む。CI の時間は A0 の CI で分かる |
+| 古い形を渡してくる呼び出し元 | 旧名の承認ゲートの名前（`関門 1`・`関門 2`）は、別のリポジトリの Neural Development Factory のランナーが渡し続けている（`lib/legacy_names.py` の `GATE_NAMES` の注記。#2619 の決定 5）。A1a の後は知らない名前として止まる。ランナーの側の書き換えはこのリポジトリの外で、A1a の着手の前に Factory の側の課題で揃える必要があるかは確かめていない |
+| 利用者の手元の古い記録 | 見積もりの実績・開発ループの記録・リリース記録の旧い値は、A1b の後は読み替えずに読む（今の値と一致しない行として集計から外れる）。手元に旧い値の行がどれだけ残るかは測っていない |
 | PLR1702 の数え方の差 | 入れ子の深さ 4 以上は `ai-smells.py` で 107、PLR1702（`max-nested-blocks = 3`）で 76。差は `try`・`with` と内包表記の数え方の違いと見ているが、箇所ごとの突き合わせはしていない。A0 のテストを書くときに 1 つずつの例で分かる |
 | ruff を 0.17 系へ上げたときの規則の振る舞い | preview の PLR1702 は版で変わりうる。版を上げる PR で検査が落ちたら分かり、基準をその PR で書き直す |

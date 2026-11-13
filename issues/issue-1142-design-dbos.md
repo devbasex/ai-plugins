@@ -1,6 +1,6 @@
 # #1142 の設計の追加: プランの実行とキューを DBOS Transact へ置き換える（スプリント 2c）
 
-> **2026-11-13 の作り直しの設計（PR #3179）で見直す対象。** この文書は前の企画（スプリント 1〜2c）の設計で、develop に取り込み済みである。今回の詳細設計と設計レビューは、この文書の全文も対象にする（利用者 2026-11-13）。この行は、Pull Request でこの文書へコメントを付けられるようにするための印で、見直しが済んだら消すか、見直しの結果に置き換える。
+> **2026-11-13 に見直した。** スプリント 2c（Q0〜Q7）は実装済み（PR #1538〜#1553、まとめ #1554）で、この文書はその記録である。変えた点は決定 65（投稿キューの移行の前のファイルの取り込みを消す。K4）と決定 66（C-3 の「変えないもの」と C-3a・C-3d の突き合わせは、残りの実装に当てない）である。
 
 **この文書はスプリント 2c だけを扱う。** 要求と受け入れ条件（C-1〜C-8）は #1142 の本文の「スプリント 2c の要求と
 受け入れ条件」にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。DBOS Transact を選んだ
@@ -80,7 +80,7 @@ DBOS が SQLite の記録から耐久ワークフローを続ける。済んだ�
 | `scripts/supervise_lib/engine.py` | `Engine.run` | `while` / `for` の文 |
 | `scripts/supervise_lib/state.py` | `RunState.record` | `state.json` へ書く辞書に `log`・`llm`・`project_mvv` 以外の鍵 |
 | `scripts/supervise_lib/queue.py` | モジュール全体 | `subprocess.Popen`・`.poll()` の呼び出し・`run_batch` という名前の関数 |
-| `scripts/lib/post_queue.py` | `Queue` | `os.open`・`glob` の呼び出し（`_import_legacy` を除く） |
+| `scripts/lib/post_queue.py` | `Queue` | `os.open`・`glob` の呼び出し（`_import_legacy` を除く。K4 が取り込みと除外を消す） |
 | `skills/cross-review/scripts/drive.py` | `Drive.run` と `save_ds`・`ds_path` | `for` / `while` の文。`save_ds`・`ds_path` という名前のメソッド |
 | `skills/cross-refactoring/scripts/drive.py` | `Drive.run`・`Drive.phases`・`Drive.final_gate` と `save_ds`・`ds_path` | 同上 |
 
@@ -370,7 +370,7 @@ executor_id と `application_version` の両方が一致する `PENDING` の耐�
 | `<プラン>.log`（`queue` の隣） | 残る。中身は子の標準出力から、そのプランの `## フェーズの報告` に替わる |
 | `<done>`・`<done>.plans.json`・`<done>.wait.json` | 残る（`wait` が読む。形は変えない） |
 | `$TMP_DIR/drive-pr<N>.json`・`drive-rf<ID>.json` | 書かない（耐久の記録へ移す） |
-| `<待ち行列>/pending/<連番>-*.json` | 書かない。移行の前に積まれていたものは、最初に耐久の記録を開いた操作（`flush`・`count` ほか）が同じ連番のまま取り込み、`pending/imported/` へ移す |
+| `<待ち行列>/pending/<連番>-*.json` | 書かない。2c では移行の前に積まれていたものを最初に耐久の記録を開いた操作が取り込んだが、K4 がこの取り込みと `pending/imported/` を消す（決定 65） |
 | `<待ち行列>/pending/dropped/` | 残る（恒久の失敗の控え。人が読む） |
 | `<プラン>-state/step.pid` | 新設（孤児の片付け。ステップが流れている間だけある） |
 
@@ -388,6 +388,8 @@ executor_id と `application_version` の両方が一致する `PENDING` の耐�
 ## 入出力の契約
 
 ### 変えないもの（C-3）
+
+**2c の実装はこの表を守った。** 残りの実装は決定 65 で形を最終形へ直接変えてよく、この表に縛られない。
 
 | 契約 | 境界（どこで守るか） |
 | --- | --- |
@@ -723,6 +725,8 @@ psycopg-binary を引き込む（試行の 11 件・60.6 MB）が、宣言と lo
 
 ## 移行ステップと戻し方
 
+**この節は 2c の実施の記録である。** 残りの子の課題の戻し方は移行の文書の「戻し方」にある（決定 66）。
+
 **移行ステップは 1 本の PR で閉じ、その revert 1 つで 1 つ前に戻る（I10）。** 名前は 2c の `Q` を付ける。
 
 | ステージ | 移行ステップ | 触るファイル | 先に要るもの |
@@ -752,6 +756,8 @@ C7 に当たる。** 1 本の PR に分け、人の承認を得てからマー�
 | Q7 | revert | — |
 
 ## テスト設計
+
+**この表は 2c の受け入れ条件の記録である。** C-3a・C-3d（移行の前の版との突き合わせ・既存のテストが差し替え先の変更だけで通る）は残りの実装に当てない（決定 66）。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
