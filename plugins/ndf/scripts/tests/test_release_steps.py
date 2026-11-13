@@ -1218,8 +1218,9 @@ def test_cd_result_reads_the_merge_commit_of_the_last_pr_not_the_branch_tip(monk
 HEAD = "c" * 40
 
 
-def _case(mod, name):
-    rc = mod.reviewed.release_case
+def _case(name):
+    import release_case as rc
+
     return {
         "no-cd": rc.decide_case(False, None, ""),
         "cd-no-review": rc.decide_case(True, 0, ""),
@@ -1242,8 +1243,8 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。"""
     import argparse
 
-    mod = _release_steps_module(monkeypatch)
-    rv = mod.reviewed
+    from release_lib import reviewed as rv
+
     merged, published, ci = [], [], []
     monkeypatch.setattr(
         rv, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "", "")
@@ -1266,7 +1267,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     codes = _exits(monkeypatch, rv)
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0)
     with pytest.raises(SystemExit) as e:
-        rv.release_prod(tmp_path, a, _case(mod, case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", ops)
+        rv.release_prod(tmp_path, a, _case(case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", ops)
     return e.value.code, (codes[-1] if codes else None), merged, published, ci
 
 
@@ -1311,10 +1312,10 @@ def test_cd_cases_refuse_the_approved_commit_argument(monkeypatch, arg):
     a = argparse.Namespace(channel="prod", version="1.2.3", approved_sha=None, approval=None)
     setattr(a, arg, "a" * 40)
     with pytest.raises(mod.StepError) as e:
-        mod.approval.approved_of(".", a, "ndf", _case(mod, "cd-no-review"))
+        mod.approval.approved_of(".", a, "ndf", _case("cd-no-review"))
     assert e.value.code == mod.EXIT_PRECONDITION
     a.approval, a.approved_sha = None, "a" * 40
-    assert mod.approval.approved_of(".", a, "ndf", _case(mod, "no-cd")) == "a" * 40
+    assert mod.approval.approved_of(".", a, "ndf", _case("no-cd")) == "a" * 40
 
 
 def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin"):
