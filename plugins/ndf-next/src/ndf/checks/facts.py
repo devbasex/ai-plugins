@@ -91,27 +91,40 @@ def _by_value(items: list[Const], key) -> dict[object, list[Const]]:
     return groups
 
 
-def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
-    """`same-str`・`same-set`・`same-num`・`subset`・`member` の組を返す。どの組も 2 つ以上のファイルにまたがる。"""
-    strs = [c for c in all_consts if isinstance(c.value, str) and len(c.value) >= min_str]
-    sets = [c for c in all_consts if isinstance(c.value, frozenset)]
-    nums = [c for c in all_consts if isinstance(c.value, (int, float))]
+def _same_values(strs: list[Const], sets: list[Const], nums: list[Const]) -> list[Finding]:
+    """同じ値（`same-str`・`same-set`）と同じ名前と数（`same-num`）で集めた組のうち、2 つ以上のファイルにまたがるもの。"""
     found = [_report("same-str", g, repr(v)) for v, g in _by_value(strs, lambda c: c.value).items() if _spread(g)]
     found += [_report("same-set", g, "同じ集まり") for g in _by_value(sets, lambda c: c.value).values() if _spread(g)]
     found += [_report("same-num", g, f"同じ名前と数 {k[1]}") for k, g in _by_value(nums, lambda c: (c.name, c.value)).items() if _spread(g)]
-    found += [
+    return found
+
+
+def _subsets(sets: list[Const]) -> list[Finding]:
+    """集まりが別のファイルの集まりに真に含まれる組（`subset`）。"""
+    return [
         _report("subset", [a, b], "集まりが別のファイルの集まりに含まれる")
         for a in sets
         for b in sets
         if a.rel != b.rel and a.value < b.value
     ]
-    found += [
+
+
+def _members(strs: list[Const], sets: list[Const]) -> list[Finding]:
+    """文字列が別のファイルの集まりの要素である組（`member`）。"""
+    return [
         _report("member", [s, b], f"{s.value!r} が別のファイルの集まりの要素")
         for s in strs
         for b in sets
         if s.rel != b.rel and s.value in b.value
     ]
-    return found
+
+
+def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
+    """`same-str`・`same-set`・`same-num`・`subset`・`member` の組を返す。どの組も 2 つ以上のファイルにまたがる。"""
+    strs = [c for c in all_consts if isinstance(c.value, str) and len(c.value) >= min_str]
+    sets = [c for c in all_consts if isinstance(c.value, frozenset)]
+    nums = [c for c in all_consts if isinstance(c.value, (int, float))]
+    return _same_values(strs, sets, nums) + _subsets(sets) + _members(strs, sets)
 
 
 @cache
