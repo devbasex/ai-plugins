@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# エントリポイント。uv.lock が固定する依存の仮想環境を用意して `python -m ndf` を呼ぶ。
+# 仮想環境はプラグインの外（`<キャッシュのホーム>/<プラグイン名>/venv/<版>`）に置き、版ごとに分ける。
+# プラグインの根はこのファイルの位置から求め、子へ CLAUDE_PLUGIN_ROOT で渡す（ほかのプラグインの値を引き継がない）。
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+manifest="$root/.claude-plugin/plugin.json"
+if ! meta="$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["name"]); print(d["version"])' "$manifest" 2>&1)"; then
+  printf '%s\n' "plugin.json を読めない: $manifest: $meta" >&2
+  exit 2
+fi
+{ read -r name; read -r version; } <<<"$meta"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv が見つからない（https://docs.astral.sh/uv/ から入れる）" >&2
+  exit 69
+fi
+
+export CLAUDE_PLUGIN_ROOT="$root"
+export UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/$name/venv/$version"
+export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
+exec uv run --frozen --no-dev --quiet --project "$root" python -m ndf "$@"
