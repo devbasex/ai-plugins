@@ -13,7 +13,6 @@ from ndf import contracts
 
 DECLARATION = "limits.json"
 SCHEMA = contracts.schema_path("limits")
-VALUE_KEYS = ("seconds", "interval", "factor", "max_interval", "per_call", "attempts", "same_cause", "count")
 
 
 class LimitsError(contracts.ContractError):
@@ -33,6 +32,10 @@ class Policy(NamedTuple):
     attempts: Optional[int] = None
     same_cause: Optional[int] = None
     count: Optional[int] = None
+
+
+# 方針の値の名前（名前と説明を除いた Policy の項目）
+VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
 
 
 def validate(raw: object) -> dict[str, Policy]:
