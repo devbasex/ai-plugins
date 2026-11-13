@@ -6892,6 +6892,48 @@
       "context": "ndf-workflow",
       "meaning": "スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別",
       "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "レビューの単位",
+      "context": "ndf-workflow",
+      "meaning": "PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の中に書く",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "PR の種類",
+      "context": "ndf-workflow",
+      "meaning": "NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "スプリントの PR",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチからベースブランチへ出す、検査のプランの PR",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "リリースブランチの PR",
+      "context": "ndf-workflow",
+      "meaning": "選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "対象の差分",
+      "context": "ndf-workflow",
+      "meaning": "レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "未検査の差分",
+      "context": "ndf-workflow",
+      "meaning": "前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方",
+      "pending_source": "issues/issue-3163-requirements.md"
+    },
+    {
+      "term": "衝突の解消の差分",
+      "context": "ndf-workflow",
+      "meaning": "スプリントブランチをリリースブランチへ集めるマージのコミットが、親のどちらにも無い形で持つ差分（衝突の解消と組み合わせで生じた変更）",
+      "pending_source": "issues/issue-3163-requirements.md"
     }
   ]
 }
