@@ -3,6 +3,8 @@
 形（結果の値・項目・値ごとに要る項目・材料の書き方）の正本は `contracts/forms/unattended-report.json` の `shape` で、
 この部品はそこから読む（コードに書き写さない）。結果の行の読み方は `ndf-next-block.json` の規則の後半と同じで、
 `RESULT_RE` がプラグインの中の唯一の置き場である。`load_form` だけがファイルを読み、ほかは純粋な関数。
+`describe_form` は同じ宣言から形の説明（置き方・値ごとの意味と要る項目・材料の書き方・値ごとの例）の文を作る（#3329）。
+契約のファイルを Read できない conductor へ、hook が差し戻しの文と案内に載せて渡す。
 標準ライブラリだけを import する（hook 用の仮想環境が無くても `python3` で動く）。
 """
 
@@ -16,7 +18,8 @@ import jsonio
 
 FORM_PATH = Path(__file__).resolve().parents[2] / "contracts" / "forms" / "unattended-report.json"
 # 行内の空白は `[ \t]` だけにする（`\s` は改行を含み、空の値を次の行の文字列で補ってしまう）
-RESULT_RE = re.compile(r"^[ \t]*-[ \t]*結果:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+RESULT_ITEM = "結果"
+RESULT_RE = re.compile(rf"^[ \t]*-[ \t]*{re.escape(RESULT_ITEM)}:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
 ITEM_RE = re.compile(r"^[ \t]*-[ \t]*([^:\n]+?):[ \t]*(.*?)[ \t]*$", re.MULTILINE)
 NONE_VALUE = "無し"
 
@@ -27,6 +30,23 @@ ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告よ�
 ERR_BAD_MATERIAL = "「{item}」が{body}でも {url_prefix} の URL でもない: {value}"
 
 MATERIAL_KEYS = ("item", "body", "heading", "url_prefix")
+
+# 形の説明の言い回し。値・項目の名前・条件の値・材料の 4 欄は持たず、契約の `shape` から埋める
+TEXT_HEAD = "区間の報告の形（契約のファイルから作った説明）:"
+TEXT_PLACEMENT = (
+    "- 置き方: 最後の応答の末尾に置く。「- {result}: <値>」の行の後ろに「- <項目>: <値>」の行を並べる（どの行も行頭は「- 」）。"
+    "項目は {items} の順。要らない項目は「{none}」と書く"
+)
+TEXT_VALUES = "結果の値（値: 意味。要る項目は無しにしない）:"
+TEXT_ALWAYS = "要る項目: {items}"
+TEXT_PREFIX = "「{item}」が {cond} で始まるとき「{need}」も要る"
+TEXT_EQUALS = "「{item}」が {cond} のとき「{need}」も要る"
+TEXT_MATERIAL = (
+    "- 材料の書き方: 「{item}」は {body} か、{url_prefix} で始まる URL（空白で区切って並べてよい）。"
+    "{body} と書くときは、結果の行より前に「{heading}」の行を置き、その節に材料を書く"
+)
+TEXT_EXAMPLE = "例（{value}）:"
+EXAMPLE_MATERIAL = "<人が判断するための材料>"
 
 
 class FormError(ValueError):
@@ -73,6 +93,7 @@ class ReportForm:
     items: tuple[str, ...]
     material: Material
     required: dict[str, Requirement]
+    meanings: dict[str, str]
 
 
 def load_form(path: Path = FORM_PATH) -> ReportForm:
@@ -112,13 +133,17 @@ def form_from_dict(data: dict) -> ReportForm:
     if not isinstance(shape, dict):
         raise FormError("shape が無い")
     values_decl, material, required = shape.get("values"), shape.get("material"), shape.get("required")
-    if not isinstance(values_decl, dict) or not values_decl or not all(isinstance(k, str) and k for k in values_decl):
-        raise FormError("shape.values は値 → 意味の空でない辞書")
+    if (
+        not isinstance(values_decl, dict)
+        or not values_decl
+        or not all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in values_decl.items())
+    ):
+        raise FormError("shape.values は値 → 意味（空でない文字列）の空でない辞書")
     values = tuple(values_decl)
     items = _strs(shape.get("items"), "items")
     _check_material(material, items)
     req = _required(required, values, items)
-    return ReportForm(values=values, items=items, material=Material(**material), required=req)
+    return ReportForm(values=values, items=items, material=Material(**material), required=req, meanings=dict(values_decl))
 
 
 def _check_material(material: object, items: tuple[str, ...]) -> None:
@@ -223,3 +248,58 @@ def report_errors(text: object, form: ReportForm) -> list[str]:
     items = _items_after(m)
     errors = [ERR_MISSING.format(item=name, value=value) for name in _missing_items(value, items, form)]
     return errors + _material_errors(text, m, items, form)
+
+
+def _condition_text(cond: Condition) -> str:
+    """条件つきの項目 1 つを文にする。"""
+    need = "・".join(cond.need)
+    if cond.prefix is not None:
+        return TEXT_PREFIX.format(item=cond.item, cond=cond.prefix, need=need)
+    return TEXT_EQUALS.format(item=cond.item, cond=cond.equals, need=need)
+
+
+def _requirement_lines(form: ReportForm) -> list[str]:
+    """結果の値ごとに、値・意味・要る項目・条件つきの項目を 1 行にする（`form.values` の順）。"""
+    lines = []
+    for value in form.values:
+        rule = form.required[value]
+        parts = [form.meanings[value], TEXT_ALWAYS.format(items="・".join(rule.always) or NONE_VALUE)]
+        parts.extend(_condition_text(c) for c in rule.when)
+        lines.append(f"- {value}: " + "。".join(parts))
+    return lines
+
+
+def _example(value: str, form: ReportForm) -> str:
+    """結果の値 1 つの、判定に通る区間の報告の例。要る項目は仮の値 `<項目>`、ほかは `無し`。"""
+    mat = form.material
+    always = form.required[value].always
+    head: list[str] = []
+    lines = [f"- {RESULT_ITEM}: {value}"]
+    for name in form.items:
+        if name == RESULT_ITEM:
+            continue
+        if name not in always:
+            got = NONE_VALUE
+        elif name == mat.item:
+            got = mat.body
+            head = [mat.heading, "", EXAMPLE_MATERIAL, ""]
+        else:
+            got = f"<{name}>"
+        lines.append(f"- {name}: {got}")
+    return "\n".join(head + lines) + "\n"
+
+
+def form_examples(form: ReportForm) -> dict[str, str]:
+    """結果の値ごとに、判定（`report_errors`）に通る区間の報告の例を 1 つ作る。"""
+    return {value: _example(value, form) for value in form.values}
+
+
+def describe_form(form: ReportForm) -> str:
+    """形の宣言から、置き方・値ごとの意味と要る項目・材料の書き方・値ごとの例の順に並べた形の説明の文を作る。"""
+    items = "・".join(name for name in form.items if name != RESULT_ITEM)
+    lines = [TEXT_HEAD, TEXT_PLACEMENT.format(result=RESULT_ITEM, items=items, none=NONE_VALUE), TEXT_VALUES]
+    lines.extend(_requirement_lines(form))
+    lines.append(TEXT_MATERIAL.format(**asdict(form.material)))
+    for value, example in form_examples(form).items():
+        lines.extend([TEXT_EXAMPLE.format(value=value), "```markdown", example.rstrip("\n"), "```"])
+    return "\n".join(lines)
