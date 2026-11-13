@@ -4,28 +4,28 @@ import pytest
 
 from ndf.contracts import facts
 
-TABLE = {
-    "version": 1,
-    "summary": "試しの表",
-    "owner": "テスト",
-    "columns": {
-        "flag": {"type": "boolean", "summary": "真偽"},
-        "size": {"type": "integer", "summary": "数"},
-        "tags": {"type": "array", "summary": "文字列の並び", "optional": True},
-        "policy": {"type": "string", "summary": "方針", "optional": True, "ref": "limits.json#monitor.phase."},
-        "code": {"type": "string", "summary": "区分", "optional": True, "ref": "facts/exit-codes"},
-    },
-    "rows": [
-        {"id": "a", "flag": True, "size": 1, "tags": ["x", "y"], "policy": "review", "code": "ok"},
-        {"id": "b", "flag": False, "size": 2},
-        {"id": "c", "flag": True, "size": 2, "tags": []},
-    ],
+COLUMNS = {
+    "flag": {"type": "boolean", "summary": "真偽"},
+    "size": {"type": "integer", "summary": "数"},
+    "tags": {"type": "array", "summary": "文字列の並び", "optional": True},
+    "policy": {"type": "string", "summary": "方針", "optional": True, "ref": "limits.json#monitor.phase."},
+    "code": {"type": "string", "summary": "区分", "optional": True, "ref": "facts/exit-codes"},
 }
+ROWS = [
+    {"id": "a", "flag": True, "size": 1, "tags": ["x", "y"], "policy": "review", "code": "ok"},
+    {"id": "b", "flag": False, "size": 2},
+    {"id": "c", "flag": True, "size": 2, "tags": []},
+]
 
 
 @pytest.fixture
-def sample(contracts_copy):
-    contracts_copy("facts/sample.json", lambda _: TABLE)
+def sample_table(fact_table):
+    return fact_table(COLUMNS, ROWS, summary="試しの表", owner="テスト")
+
+
+@pytest.fixture
+def sample(contracts_copy, sample_table):
+    contracts_copy("facts/sample.json", lambda _: sample_table)
     return contracts_copy
 
 
@@ -76,8 +76,8 @@ def test_lookup_errors_stop(sample, call):
         lambda t: {**t, "columns": {"Bad": {"type": "string", "summary": "x"}}},
     ],
 )
-def test_wrong_shape_stops(contracts_copy, change):
-    contracts_copy("facts/sample.json", lambda _: change(TABLE))
+def test_wrong_shape_stops(contracts_copy, sample_table, change):
+    contracts_copy("facts/sample.json", lambda _: change(sample_table))
     with pytest.raises(facts.FactsError):
         facts.table("sample")
 
@@ -89,8 +89,8 @@ def test_broken_json_stops(contracts_copy, text):
         facts.table("sample")
 
 
-def test_ref_errors_point_at_missing_targets(contracts_copy):
-    bad = {**TABLE, "rows": [{"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"}]}
+def test_ref_errors_point_at_missing_targets(contracts_copy, sample_table):
+    bad = {**sample_table, "rows": [{"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"}]}
     contracts_copy("facts/sample.json", lambda _: bad)
     errs = facts.ref_errors("sample", {"monitor.phase.review"})
     assert len(errs) == 2
