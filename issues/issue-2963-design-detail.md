@@ -96,7 +96,7 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `plugins/ndf/scripts/supervise_lib/plan_decide.py` | 新設 | 差し込み `{state_dir}` に使う置き場を絶対のパスで決める | 無し |
 | `plugins/ndf/scripts/supervise_lib/engine.py` | 変更 | `Engine.run` を消し、`flow` を読まない | `plugins/ndf/scripts/supervise_lib/queue.py` |
 | `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 変更 | 着手の時点の兆候を直す。前提の結果の読み取り `results_named` は変えない | `plugins/ndf/scripts/supervise_lib/state.py` |
-| `plugins/ndf/scripts/supervise_lib/queue_resume.py` | 変更 | 再開の開始点に前置きのステップを添える | `plugins/ndf/scripts/supervise_lib/queue_decide.py` |
+| `plugins/ndf/scripts/supervise_lib/queue_resume.py` | 変更 | 再開の開始点に前置きのステップを添える。RF4 が 再開の対象の判断（`resume_targets`）を判断の関数へ移す（#3086） | `plugins/ndf/scripts/supervise_lib/queue_decide.py` |
 | `plugins/ndf/scripts/supervise_lib/admission.py` | 変更 | 同時に流す組の判定を `queue_decide` へ移し、資源の枠のタグだけを持つ | 無し |
 | `plugins/ndf/scripts/supervise_lib/commands.py` | 変更 | プランの実行とキューの起動を `flow` から呼び、置き場を `plan_decide` から受ける | `plugins/ndf/scripts/supervise_lib/flow.py` |
 | `plugins/ndf/scripts/supervise_lib/state.py` | 変更 | 着手の時点の兆候を直す | `plugins/ndf/scripts/lib/durable.py` |
@@ -120,7 +120,7 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `plugins/ndf/scripts/lib/parallel_route.py` | 変更 | `lane_repo`・`repo_lane` の置き場になる | `plugins/ndf/scripts/lib/parallel_files.py` |
 | `plugins/ndf/scripts/lib/parallel_launch.py` | 変更 | 着手の時点の兆候を直し、起動の判断（`came_up`）を `parallel_decide` へ移す | `plugins/ndf/scripts/lib/parallel_decide.py` |
 | `plugins/ndf/scripts/lib/parallel_observe.py` | 変更 | 問われているレーンの判断を `parallel_decide` へ移す | `plugins/ndf/scripts/lib/parallel_decide.py` |
-| `plugins/ndf/scripts/lib/parallel_machine.py` | 変更 | 予約の数え方を `parallel_decide` から受ける | `plugins/ndf/scripts/lib/parallel_decide.py` |
+| `plugins/ndf/scripts/lib/parallel_machine.py` | 変更 | 予約の数え方を `parallel_decide` から受ける。RF6b が プランの合計の上限をマシン全体で数える判断を上限の判断の関数へ移す（#2999） | `plugins/ndf/scripts/lib/parallel_decide.py` |
 | `plugins/ndf/scripts/parallel.py` | 変更 | 答えの組み立てを `parallel_decide` から受け（RF6a）、提示で上限を検査し直さない（RF6b） | `plugins/ndf/scripts/lib/parallel_decide.py` |
 | `scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_answer.py--cycle--lazy-cycle.json` | 削除 | 輪 L3 をほどいたので項目を消す（RF6a） | — |
 | `scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--parallel_workflow--durable-boundary.json` | 削除 | 見回りのループを判断のループへ移したので項目を消す（RF6a） | — |
@@ -134,7 +134,7 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `plugins/ndf/scripts/lib/parallel_lane.py` | 変更 | 着手の時点の兆候を直す | `plugins/ndf/scripts/lib/parallel_external.py` |
 | `plugins/ndf/scripts/lib/parallel_external.py` | 変更 | `request_errors` を `parallel_request_form` から読み、`parallel_lane` を読まない | 無し |
 | `plugins/ndf/scripts/lib/parallel_plan.py` | 変更 | 上限の検査を `parallel_plan_decide` から受け、終わったレーンを数えない | `plugins/ndf/scripts/lib/parallel_plan_decide.py` |
-| `plugins/ndf/scripts/lib/parallel_lane_cli.py` | 変更 | レーンの追加の検査へ、終わったレーンの名前を渡す | `plugins/ndf/scripts/lib/parallel_plan.py` |
+| `plugins/ndf/scripts/lib/parallel_lane_cli.py` | 変更 | レーンの追加の検査へ、終わったレーンの名前を渡す。RF6a が レーンの初期化（`step_init`）の判断を判断の関数から引く（#2834） | `plugins/ndf/scripts/lib/parallel_plan.py` |
 | `scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_files.py--cycle--lazy-cycle.json` | 削除 | 輪 L7 をほどいたので項目を消す（RF6b） | — |
 | `scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_external.py--cycle--lazy-cycle.json` | 削除 | 輪 L9 をほどいたので項目を消す（RF6b） | — |
 | `plugins/ndf/scripts/tests/test_parallel_plan_decide.py` | 新設 | 最大の負荷と上限の誤りを確かめる | `plugins/ndf/scripts/lib/parallel_plan_decide.py` |
@@ -165,6 +165,17 @@ docs/specifications/ndf-scripts-import-cycles.md・ndf-script-structure-criteria
 | `plugins/ndf/scripts/tests/test_release_stages.py` | 新設 | 段階ごとの判断と、エントリポイントの形（I12）を確かめる | `plugins/ndf/scripts/release_lib/stage_present.py` |
 | `plugins/ndf/scripts/tests/test_release_steps.py` | 変更 | 段階の判断だけを見るテストを移して消す | `plugins/ndf/scripts/release-steps.py` |
 | `plugins/ndf/scripts/tests/test_release_included.py` | 変更 | リリース対象のファイルを変えた PR に「利用者向けの変化なし」を付けない入力を足す | `plugins/ndf/scripts/release_lib/included.py` |
+| `plugins/ndf/scripts/supervise_lib/paths.py` | 変更 | `{state_dir}` の埋め込みを組み立ての判断の関数から引く（RF5a、#2949） | 無し |
+| `plugins/ndf/scripts/lib/parallel_release.py` | 変更 | 計画の外の本番の PR が開いている間の待ちと、リリースの組み方を判断の関数へ移す（RF6a、#2441・#2783） | 無し |
+| `plugins/ndf/scripts/lib/parallel_helper.py` | 変更 | 手助けの判断を判断の関数へ移す（RF6a、#2730） | 無し |
+| `plugins/ndf/scripts/sprint-state.py` | 変更 | 周の状態の読み取りを判断の関数の結果から返す（RF7、#2132・#2820） | 無し |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__sprint-state.py.json` | 変更 | 周の状態の副命令の宣言を直す（RF7、#2820） | 無し |
+| `plugins/ndf/skills/development-workflow/references/loop.md` | 変更 | 周の結果の読み方を判断の関数の結果に合わせる（RF7、#2923） | 無し |
+| `plugins/ndf/scripts/release_lib/others.py` | 変更 | ほかの計画のリリースの判断を段階のモジュールから引く（RF8、#2217） | 無し |
+| `plugins/ndf/scripts/release_lib/user_config.py` | 変更 | 利用者の設定の行（`_claude_row`）の読み取りの誤りを直す（RF8、#2896） | 無し |
+| `plugins/ndf/scripts/lib/loop_drive.py` | 変更 | 流し直しで前の回の続きとして再開する（安全網の上限で止まった回を含む）（RF1b、#2640・#3053） | 無し |
+| `plugins/ndf/scripts/lib/run_owner.py` | 変更 | 実行の識別子を流し直しで引き継ぐ（`run_args`）（RF1b、#2640） | 無し |
+| `plugins/ndf/scripts/lib/run_state.py` | 変更 | 止まっていた段階を状態ファイルへ残し、新しい回の初期値にする（RF1b、#2827・#3053） | 無し |
 
 ## クラスと関数の構造
 

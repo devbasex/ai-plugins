@@ -1,0 +1,394 @@
+# #1142 の受け入れ条件: ラベル `rebuild-1142` の Issue を閉じる子 Issue
+
+**ラベル `rebuild-1142` の開いている Issue 283 件それぞれについて、どの子 Issue の変更で閉じるかを決めた表である。** #1142 の受け入れ条件「ラベルの Issue が #1142 の改善ですべて閉じる」（2026-11-13 利用者）を、子 Issue の範囲へ下ろすために置く。子 Issue の中身と流す順序は頭の詳細設計 [issue-1142-design-detail.md](issue-1142-design-detail.md) の「実装計画」にある。ラベルの残りを受け持つ新しい子 Issue（N1〜N12）の設計は [issue-1142-design-fixes.md](issue-1142-design-fixes.md) と [issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) にある。
+
+## 決め方
+
+| 区分 | 件数 | 決め方 |
+| --- | ---: | --- |
+| 子 Issue そのもの | 55 | 子 Issue（#1142 の 47 本とリファクタリング計画の 8 件）は自分の PR で閉じる。#2990・#2992・#2993 は 2 本の子（RF1 と RF1b など）が両方マージされた時点で閉じる |
+| 既にある子 Issue へ割り当て | 112 | 本文が名指すファイルと関数が、その子 Issue の変更の中にあるものだけ。触るファイルを広げた子は、設計の結果と主題の詳細設計のファイル配置に足した |
+| 新しい子 Issue（N1〜N12）へ割り当て | 110 | 既にある子 Issue の範囲に入らないもの。触るファイルと主題でまとめた |
+| 閉じられない | 6 | 下の「閉じられない Issue」。ラベルを外すかは、理由を添えてオーガナイザーへ依頼する |
+
+**実装が develop に既にある Issue も子 Issue へ割り当てた。** 子 Issue の PR で再現の手順を 1 回通し、直った PR を添えて閉じる（頭の詳細設計の「ログと記録の出力」）。理由の列に「実装は develop にある」と書いた行がそれである。
+
+**割り当ての下調べ**は `.ndf/parallel/p6/work/rebuild-assign/all.json`（各行の決定と理由）で、新しい子 Issue に入れた Issue は worker が本文とコードを読み直して確かめた。
+
+## 子 Issue ごとの件数
+
+子 Issue そのものを含む。
+
+| 子 Issue | 件数 |
+| --- | ---: |
+| `N1` | 13 |
+| `N2b` | 13 |
+| `SF2` | 12 |
+| `N4` | 11 |
+| `RF6a` | 11 |
+| `N3` | 10 |
+| `RF7` | 10 |
+| `N11` | 9 |
+| `N9` | 9 |
+| `RF8` | 9 |
+| `N5` | 8 |
+| `N2a` | 7 |
+| `N8b` | 7 |
+| `RF5a` | 7 |
+| `RF6b` | 7 |
+| `SF9` | 7 |
+| `A3d` | 6 |
+| `DC4` | 6 |
+| `DC6` | 6 |
+| `N7` | 6 |
+| `N8a` | 6 |
+| `SF4` | 6 |
+| `A3e-1` | 5 |
+| `A3g` | 5 |
+| `N10` | 5 |
+| `N6` | 5 |
+| `A3e-2` | 4 |
+| `RF1b` | 4 |
+| `SF13` | 4 |
+| `SF5` | 4 |
+| `A3a` | 3 |
+| `A3c-2` | 3 |
+| `DC1` | 3 |
+| `DC7` | 3 |
+| `RF5b` | 3 |
+| `SF1b` | 3 |
+| `SF3` | 3 |
+| `RF4` | 2 |
+| `SF12` | 2 |
+| `A0` | 1 |
+| `A1a` | 1 |
+| `A1b` | 1 |
+| `A2` | 1 |
+| `A3b` | 1 |
+| `A3c-1` | 1 |
+| `A3f-1` | 1 |
+| `A3f-2` | 1 |
+| `DC2` | 1 |
+| `DC3` | 1 |
+| `DC5` | 1 |
+| `DC8` | 1 |
+| `K1` | 1 |
+| `K2` | 1 |
+| `K3` | 1 |
+| `N12` | 1 |
+| `RF1` | 1 |
+| `RF2` | 1 |
+| `RF3` | 1 |
+| `SF10` | 1 |
+| `SF11` | 1 |
+| `SF1a` | 1 |
+| `SF6` | 1 |
+| `SF7` | 1 |
+| `SF8` | 1 |
+| `W1` | 1 |
+| `W2` | 1 |
+| `W3` | 1 |
+| `W4` | 1 |
+| `W5` | 1 |
+| `W6` | 1 |
+| `W7` | 1 |
+| `W8` | 1 |
+
+## 閉じられない Issue
+
+| Issue | 題 | 理由 1 文 |
+| --- | --- | --- |
+| #1571 | 工程ごとの単価（日本円）の基礎統計を、全プロジェクトの実績から出すスクリプト（サブスクリプションあり・なしの 2 通り） | 工程ごとの単価の統計を出す新しい実験版のスクリプトの追加で、既存のスクリプトの作り直しが生む振る舞いではなく、数字の置き場も社内の非公開リポジトリにあるため |
+| #1601 | metrics.aggregate が本番から呼ばれず、#933 の後の cross-refactoring の状態ファイルの形とも合わない | 直し方（metrics.py の aggregate・format_report とテストを消す）は 44bbb466d（#2369「呼び手の無い関数を消す その 1」）で済み、develop に metrics.py も test_metrics.py も無い。作り直しを待たず今閉じられる |
+| #2316 | conductor どうしの排他が無い: Issue・プラン・ファイル・版数などの対象ごとにロックを置き、並列の conductor が同じ物を同時に書き換えないようにする | conductor どうしの排他（Issue・ファイル・版数・作業場所の寿命・マシンをまたぐロック）で、ロックの置き場が Issue の中で未決（利用者が決める）。Factory の側（volareinc/nd-factory）の実装も要り、#1142 の子のどれにも合わない。開発ループの選定とキューの done の 2 行は #2342 で直っている |
+| #2341 | 入口の引数・環境変数・設定の受け取り方を 1 つの読み込み部品にそろえる | #2335 の柱 P8 で、入口の引数・環境変数・設定の受け取りをリポジトリ全体でそろえる。受け入れ条件 17 件と子の Issue 14 件を持ち、1 本の子 Issue に収まらない。「旧い引数名を次の正式版まで受ける」前提が #1142 の「後方互換を意識しない」と A1a に反する |
+| #3113 | whole-test-timing.py peak: 承認待ちで止まった他レーンの queue を作業中と数えて計測を断る | 直す場所が実験版（scripts/experimental/）の whole-test-timing.py で、#1142 の作り直しの範囲（既定で動くスクリプト）に入らず、実験版の経路で直すか消す |
+| #3189 | MVV 版 7 の覆し: 6 件の原因が MVV の文言か判定の仕組みかを切り分ける | MVV 版 7 の覆し 6 件の原因を切り分ける調査で、閉じる条件が表と判断の記録でありスクリプトの変更では閉じない（判定の仕組みが原因の分はこの調査の結果として別の Issue へ結ぶ） |
+
+## 割り当ての表
+
+| Issue | 題 | 閉じる子 Issue | 理由 1 文 |
+| --- | --- | --- | --- |
+| #620 | cross-refactoring: テストを足す項目（add-tests）が pytest の収集しないファイルへテストを足し、実行されないまま検証を通る | `N5` | add-tests の確かめで、足したテストのファイルが宣言の suite の全体の実行に収集されるかを test_strategy.py から確かめ、収集されなければ項目を差し戻す |
+| #622 | cross-refactoring の --scope がファイル単位のため、issue と関係の無い既存の関数まで整理し、変わった範囲が issue から読めない | `N5` | 提案の範囲を PR の差分が触る関数・シンボルに絞り、外の既存の関数への提案は見送り（範囲外）にする。検査のプランの 2 経路も cross-refactoring の側で差分から関数を引くため同じ範囲になる |
+| #750 | cross-refactoring: 提案担当の codex が結果ファイルを提出先に書けず NO_RESULT になる（提出先が読み取り用ディレクトリの外） | `N5` | propose・plan・judge の結果ファイルの置き場を担当の読み取り用ディレクトリの中（.cross_refactoring/）へ移し、終わった後に起動層が一時ディレクトリへ回収する |
+| #1339 | テストのパスと変更の分類を、PHP・TypeScript・Vue の慣習でも正しく判定する | `DC4` | DC4 がテストの印の表（test-markers.json）を置き pathkinds.py・review_lib/categories.py を触るので、その表の照合をファイル名の部分一致からパスの要素と言語ごとの慣習（PHP・TypeScript・Vue）へ広げ、codemetrics.py の言語判定も表から引くよう足す |
+| #1411 | cross-review の監視が、err.log に写った既存コメントの「quota exceeded」を codex の利用上限と誤判定して中断する | `N10` | 利用上限の一般語（quota exceeded・rate limit exceeded）を、CLI が自分で出す行の形（行頭の ERROR: か HTTP の状態行）に限り、プロンプトの写しの中の平文を照合しない |
+| #1502 | mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、設計承認ゲート の助言が unknown になる | `N11` | `pr.py` の `_machine_body` が、行き先で分岐した非 0（要求の写しが無い requirements-check の 2）を失敗として載せず、後の requirements-recheck の結果で置き換える |
+| #1516 | supervise.py のフェーズレポートが、設計の設計承認ゲート でも「承認ゲート: 本番系へ届く操作」と書く | `DC7` | DC7 が承認ゲートの表（gates.json）を置くので、state.py の gate_line（「本番系へ届く操作」の固定文）をゲートの種類で表から引く変更を足す |
+| #1571 | 工程ごとの単価（日本円）の基礎統計を、全プロジェクトの実績から出すスクリプト（サブスクリプションあり・なしの 2 通り） | 閉じられない | 工程ごとの単価の統計を出す新しい実験版のスクリプトの追加で、既存のスクリプトの作り直しが生む振る舞いではなく、数字の置き場も社内の非公開リポジトリにあるため |
+| #1592 | supervise.py のキューを頭から流し直すとき、状態ディレクトリを退避しても dbos の queue-*/review-* の記録から途中のステップへ戻る | `N1` | キューを同じ並びのまま頭から流し直す `supervise.py queue --fresh <done>` を足し、状態ディレクトリと、そのキューの `queue-<鍵>` と配下のプランの `review-<鍵>` の耐久の記録をまとめて退避する |
+| #1595 | backlog-refinement: apply が plan の rejected を依存先として一致した別の候補の値で記録し、却下が効かない | `N7` | plan の却下を照合するとき本人の候補を先に採り、本人の候補が無く依存先にしか無い番号は plan の誤りとして返す。前倒しを全部退けても後ろ倒しの却下を古くなった記録として消さない |
+| #1601 | metrics.aggregate が本番から呼ばれず、#933 の後の cross-refactoring の状態ファイルの形とも合わない | 閉じられない | 直し方（metrics.py の aggregate・format_report とテストを消す）は 44bbb466d（#2369「呼び手の無い関数を消す その 1」）で済み、develop に metrics.py も test_metrics.py も無い。作り直しを待たず今閉じられる |
+| #1616 | glossary.py render: docs/glossary.md を複数ファイルへ分割して出せるようにし、行数検査の EXEMPT を外す | `N8a` | glossary.py render がコンテキストごとのファイルと索引（docs/glossary.md）を出し、check-doc-line-limit.py の EXEMPT から docs/glossary.md を外す |
+| #1640 | 棚卸しで上限を超えて持ち越した候補が、次のスプリントの棚卸しへ渡らない | `N7` | upkeep の状態（候補・却下・見積・持ち越し）の置き場を一時ディレクトリからメインディレクトリの .ndf/backlog/ へ移し、candidates が前回の持ち越しを経路 carried で拾う |
+| #1653 | supervise: pr のステップの push が一時的な拒否（missing necessary objects）で落ちても再試行せずプランを止める | `SF2` | SF2 は待てば解ける止まりを打ち直すが、push_rejected を pre-push の拒否として直すステップへ送るだけなので、pr のステップの push の一時的な拒否（missing necessary objects）を待てば解ける種類（SF1a の causes.json）に分けて打ち直す行き先を足す |
+| #1682 | 実装のプランが要求の手動確認（マージ前）を残したまま「完了」で返り、検査のプランの merge-gate まで conductor に見えない | `SF2` | SF2 が worker_steps.py・state.py の結果の行き先を種類で選ぶので、要求の手動確認（マージ前）の残りを持つ実装の報告を「完了」でなく承認ゲートの種類で返し conductor へ出す判定を足す |
+| #1707 | cross-review: ai-plugins 以外のリポジトリで SKILL.md のとおりに単独起動すると、Skill のディレクトリが git リポジトリでないため PR を取れずに止まる | `N6` | 対象のリポジトリを --repo・状態ファイル・作業ディレクトリの origin の順で決め、作業ディレクトリが git リポジトリでなく他の手がかりも無ければ「対象のリポジトリを決められない（対象のリポジトリで打つか --repo を渡す）」で止める。SKILL.md の起動の 1 行を対象のリポジトリで打つ形（resolve.sh scripts cross-review の入口）に直す |
+| #1715 | plan-to-spec: spec-finalize が --spec を 1 つしか受けず、既存の複数ファイルの確定仕様へ溶かすと残りのファイルがコミットに入らないまま ok で終わる | `N8a` | spec-finalize の --spec を複数受け、すべてをコミットへ入れる。用語の出所は語ごとに定義を含むファイルを選び、選べなければ止まる |
+| #1734 | cross-review: 修正担当（claude -p）がテストを背景で起動して通知を待ったまま終わり、結果ファイルを書かない | `N2a` | WORK_SYSTEM に前景で待つ規則を足し、pause の worker が結果ファイルを書かずに終わったら同じ会話を RESUME_PROMPT で起こし直す（WorkStep の full の起こし直しと同じ関数を使う） |
+| #1735 | test_external_ai_run の codex の成功ケースが CI でだけまれに落ちる | `N9` | external-ai.py run の子プロセスのケース（codex・kiro・agy）が CI でだけ落ちる原因を、assert の出力（結果 JSON の summary）と agy の `launch_failed`・`pid ... cmdline does not ...` から特定し、偽の CLI の起動の確かめを起動の順に依らない形にする |
+| #1742 | スプリントの実装のプランの pr のステップが append を持たず、worker が書いた PR の本文の下書きが載らない | `N2a` | 実装のプランの pr のステップに append の既定（{state_dir}/work/pr_body.md）を置き、IMPL_RULES に下書きの置き場の 1 行を足す |
+| #1756 | release: plugin_dir と changed-plugins がプラグインの置き場を ndf・playwright-kit の名前で決め打ち、他のリポジトリで package-plugin の手順が止まる | `RF8` | #2995 は release-steps.py を段階ごとに分ける全部を受け持つので、other_plugins と lib/step_result.py の plugin_dir の名前の決め打ちを marketplace.json の source を引く 1 つの関数へまとめる変更を足す |
+| #1774 | CI のチェックの結論を失敗と数える集合が lib/gh_checks.py と merged_lib/checks.py で別々にあり、取り消しと stale の扱いが食い違う | `DC4` | 頭の詳細設計の bug の割り当てで割り当てた（DC4 の変更で直る） |
+| #1777 | cross-refactoring の assess が dbt の .sql をプロダクションコードに数えず、飛ばしてよいと判定する | `DC4` | DC4 が pathkinds.py とテストの印の表を触るので、プロダクションコードの拡張子 CODE_EXTENSIONS も表へ移し .sql を足す |
+| #1785 | 引き継ぎ文書に大きさの上限が無く、milestone-26.md が 52KB に育って conductor が区間の頭で毎回 3 万文字を読み込む | `N8a` | handoff.py check にバイト数の上限を足し、--trim が雛形に無い節も退避先へ移す。parallel-<計画名> の名も検査の対象にする |
+| #1811 | supervise: 設計の置き場所のテストのディレクトリが重なりの判定に当たり、スプリントの実装のプランがすべて直列になる | `N2b` | 重なりの判定はディレクトリの宣言（末尾 /）を使わず、等しいファイルの宣言と共有の一覧だけで組を決める形が develop に入っている（73c7c5558・0be4e9482。admission.py の is_dir_decl、design_stage.py の marked_dirs）。課題の進行は完了判定まで済み（実装は develop にある。実装済み。残りはリリース後テスト（受け入れ条件 6 の模擬の記録を含む）で、この子の変更では閉じない。#1811 の工程のまま閉じる） |
+| #1835 | 引継ぎ文書に「作成済み」と書いたファイルが実在しなくても、書く時点にも読む時点にも気付けない | `N8a` | handoff.py check が本文に書いたリポジトリの中のパスと既知の状態の置き場のパスの実在を確かめ、無いものを一覧で返す |
+| #1877 | relay: /goal の続きの応答では stop_hook_active が真になり、背景の作業が残る ndf-next の応答で Stop を止めて知らせる仕組みが働かない | `N4` | hold_once から stop_hook_active の条件を外し、同じ区間・同じ候補で 1 度だけ止める判定（held.json）だけで繰り返しを防ぐ |
+| #1886 | worktreeから起動したキューが、後片付けで消えた cwd により --then の計画で落ちる | `RF5a` | #2993 は engine・flow・queue の輪をほどく組み直しを受け持つので、queue_workflow・plan_workflow がプランごとにリポジトリへ移り消えた cwd を読まない変更を足す |
+| #1893 | 後片付けを終えても課題の工程表の「後片付け」の行が未チェックのまま残る | `N8a` | merged-steps.py の後片付けが、PR が閉じる課題ごとに工程「後片付け」を記録する。記録済みの課題には打ち直さない |
+| #1919 | conductor が NDF のスクリプトをシェルでつないで待つと、hook が止めてプランと wait を案内する | `N4` | PreToolUse の hook が、背景の Bash でも NDF のスクリプトを 2 つ以上 && / ; でつないだコマンドと sleep の後に NDF のスクリプトを続けるコマンドを拒み、プランのキューと supervise.py wait を案内する |
+| #1958 | cross-review の修正の worker が /ndf:fix の手順書を持たない最小構成で起動し、1 回 503k・16 往復を使う → 手順書を確実に読ませ、1 回の費用を実測で下げる | `N2a` | pause の種類ごとに届ける手順書（fix と sweep は fix の SKILL.md）を stage-skills.json の表に持たせ、_delegate_pause が種類から引いて届ける。受け入れ条件 1・3 の実測は実装の PR の本文に載せる |
+| #1967 | test_relay.py の test_guard_* が並列の全体テストでだけ落ち、全体テストを使う工程が揺れで止まる | `N9` | `test_guard_exit_queued_behind_question` の `time.sleep(2.5)` と `NDF_RELAY_TERM_WAIT=1` の組のように壁時計で SIGTERM の有無を見る確かめを、シグナルファイルのファイルを待つ形へ替える |
+| #1978 | usage-report.py の閉じた課題の数が UTC の日付で数えられ、使用量の集計（JST の日付）と期間がずれる → JST の両端で数える | `N8b` | 閉じた課題の数を JST の日付の両端（<since>T00:00:00+09:00..<until>T23:59:59+09:00）で検索する |
+| #1979 | 使用量の帳簿が同じ message.id の最後の usage を捨て、続けたサブエージェントを 2 回数え、日をまたぐ会話を丸ごと採るか落とす → 会話の記録の合計と一致させる | `N8b` | 会話の記録の読みを message.id ごとの最後の行の使用量にし、同じ agent_id の 2 回目以降の停止は差だけを書き、期間の集計は応答ごとの時刻で絞る。runtime: claude の work の行を報告に 1 回だけ載せる |
+| #1983 | リリースのプランで judge が同じ CI の失敗に打ち直しを 7 回返し、上限まで同じ run を読み直す → 同じ失敗が続いたら止めて人へ戻す | `SF2` | SF2 が止まりの種類から行き先を選び judge を通らない経路を作るので、同じステップが同じ失敗（同じ要約・同じ CI の run）で 2 回落ちたら打ち直さず人へ戻す判定を足す |
+| #1984 | supervise が worker の進捗ログの「止まった」の語に反応し、作業の中身（止まったものとみなす実装）でも conductor へ attention を出す | `N2a` | 進捗ログの 1 行に state 欄（working / failing / stopped / gate）があり、classify_worker は state と同じ文の繰り返しだけで分ける形が develop に入っている（8f4a319cf、#2337）。語の正規表現 PROGRESS_STOP は state.py に無い（実装は develop にある。解消済みの見込み。受け入れ条件 1〜3 の再現（作業の中身に「止まった」を含む報告で attention が出ないこと）を確かめて閉じる。テストの有無（受け入れ条件 3）は未確認） |
+| #2005 | LLM へ渡す規則の「closing keywordsを PR 本文に書かない」が範囲を限らず、スプリント PR の「閉じる課題」の節を規則違反と読ませる | `N2a` | FULL_SYSTEM・PR_SYSTEM のclosing keywordsの行を「自分で書くコミットと PR 本文」に限り、スプリント PR の『閉じる課題』の節はコードが書くと添える |
+| #2010 | .ndf/project.json の計測値（ファイル数・テストの時間）が実行のたびに書き戻され、追跡ファイルを汚す → 宣言と計測値を分ける | `DC6` | DC6 が宣言の置き場の表（places.json）を置き project_lib/measure_repo.py・fingerprint.py を触るので、計測値（files・test_duration.measured）を追跡しない置き場へ分ける変更を足す |
+| #2011 | テストのコマンドを .ndf/supervise.json の test と .ndf/project.json の test.suites の 2 か所が持つ → 宣言の 1 か所にする | `DC6` | DC6 が宣言の置き場を 1 つの表へ集めるので、.ndf/supervise.json の test を .ndf/project.json の test.suites から読み、テストのコマンドを宣言の 1 か所にする変更を足す |
+| #2041 | merge-when-green の --expect-head が短い SHA を完全一致で比べ、同じ先端でも head_moved で止まる | `SF4` | SF4 は checks.py の落ちたチェックの分け方を触るが先端の照合は変えないため、GreenWatch._check_expected が短い SHA を前方一致で比べ誤りの文に完全な値を出す変更を足す |
+| #2049 | 検査のプランのリファクタリングが --sync-command を渡さず、生成元に触れる改善が push で止まる | `N11` | 検査のプランの refactor のステップが、`.ndf/supervise.json` の `sync_checks` の同期のコマンドを `--sync-command` で cross-refactoring の drive.py へ渡す |
+| #2054 | サブモジュールのリポジトリで new fix の作業場所が .git/modules の下になる | `N11` | `templates.fix_worktree` のメインディレクトリの求め方を `lib/decl.py` の `main_dir`（core.worktree を読みサブモジュールを解く）へ寄せる |
+| #2056 | design-results の書き直しが、主題で束ねた実装のプランの触るファイルと課題を先頭の課題の分だけにする | `N2b` | design_stage.rewrite は、プランの `課題` のうち閉じる・取り込むでない課題すべてと取り込んだ課題の `files_of` の和を `触るファイル` に書き、`課題` を落とさない形になっている（5c1b0c1bf、#3081）（実装は develop にある。解消済みの見込み。受け入れ条件 1〜3 を test_design_results_rewrite.py か再現で確かめて閉じる（確かめは未実施）） |
+| #2057 | cross-refactoring の drive が完了した回を返す案内に、持たない --reopen を書く | `N5` | loop_drive.keep_finished_output が案内に出す打ち直しの手段を呼ぶ側の drive から受け取り、cross-refactoring の drive は --reopen を書かない |
+| #2059 | 監視が先に別の早期の警告を出していると、非致命にした permission_denials の件数を警告に残さない | `N10` | 監視のループの早期の警告を種類（標準エラーの記録・permission_denials）ごとに 1 回ずつ出す（#2338 の設計の Pull Request 2） |
+| #2064 | 棚卸しの candidates が --add で渡した課題も上限で切り、利用者が指定した対象が持ち越しへ回る | `N7` | 候補を上限で切る並びで、--add で渡した課題（経路 manual）を commit-subject より先に残す |
+| #2067 | gws-check.py がトークンの無い状態（auth_method: none）を認証済みと判定して exit 0 を返す | `A3g` | A3g は Skill の scripts/ の既定値への倒れを直すが、設計は credential_source != "none" の判定をその直し方で直らないとしたため、_report_gws が client_secret.json だけの状態を未認証（exit 11）にする変更を A3g へ足す |
+| #2096 | cross-refactoring: 全体テストを CI に任せる戦略の着手前のテストがディレクトリを {paths} へ入れ、ファイルだけを受けるテンプレートで落ちる | `N5` | CI に任せる戦略の着手前の範囲テストへ、テストの置き場所（ディレクトリ）ではなくその配下のテストのファイルを渡す |
+| #2118 | 実装のプランの design-tests が、設計で改名を決めたテストを止まりと判定せず、止まった理由を全文で残す | `N11` | `pr.py` の run ステップの要約を 120 字で切らずに載せ、`design-match.py` の `extract_names`・`classify_span` が「採らなかった案」の中の名前と設計が宣言した改名の前の名前を missing にしない |
+| #2130 | 全角の文字を含むパスに置いた worktree で、コマンドの文字列を照合する 2 件のテストが落ちる | `N9` | コマンドの文字列を照合する 2 件の期待値を、shlex.split で分けた語の並びで比べる形にする |
+| #2132 | 開発ループのループの 1 回の created[] を書く経路が無く、ループの 1 回の中で起票した課題が記録に残らない | `RF7` | #2994 は開発ループの判定・選定・記録を責務で分けるので、sprint-state.py loop にループの 1 回の created[] を書く経路を足す |
+| #2140 | リリースのプランの verify が、メインディレクトリが本番ブランチにいると develop を fast-forward できずに止まる | `N11` | リリースのプランの verify のステップがメインディレクトリで git pull せず、`verify-install` に `--root <リリースの worktree>` を渡す |
+| #2147 | merge-when-green: 自動反映の本番チャネルへのマージで、リリース承認ゲート で見た先端と merge-approved がマージする先端を照合しない | `SF13` | SF13 が merge.py の承認ゲートの結果に routes を足すので、gate_stop が止まる時点の先端を承認資料と結果に残し、続けの next に --expect-head を載せる変更を足す |
+| #2158 | cross-refactoring: 着手前のテストが上限の近くで通ると、範囲テストのテンプレートの試走の残り時間が数秒になり init が止まる | `N5` | 雛形の試走の上限に、着手前のテストの所要から独立した下限を持たせる |
+| #2165 | 設計を持たない実装のプランが触るファイルを宣言せず、同時に流す別のプランと重なるとそのファイルを「変えない」と指示されて止まる | `N2b` | 触るファイルを宣言しない実装のプランを、同じステージのどのプランとも重なるものとして直列にし、キューの記録に「宣言なし」の組を出す |
+| #2217 | 他のプラグインの版上げで、リリース対象に関わらない差分（テストだけ）なら上げないを選べるようにする | `RF8` | #2995 が release-steps.py の段階（release_lib）を分けるので、set_level と decided_versions に「上げない」を足す変更を足す |
+| #2224 | 待ちの部品 wait_until が上限の時刻に最後の照会を打たず、上限の最大 2 分前に CI 待ちを打ち切る | `SF3` | SF3 は CI の監視の読み違えを直すが待ちの部品は変えないため、wait_until（_stop_by_idle）が上限の時刻に最後の照会を打つ変更を足す |
+| #2232 | 棚卸しの切り出しの境界が人の判断待ちの行を容量に数える | `N7` | 切り出しの境界へ渡す行から人の判断待ちの行を除く |
+| #2235 | require-groups の例外リストに残した 11 本へ依存の宣言を足す | `DC1` | DC1 が lib/deps.py と依存（jsonschema）を触るので、require-groups の例外に残した 11 本へ deps.require を足し例外を外す変更を足す |
+| #2246 | 要求の工程が、## 受け入れ条件 の節を持たない本文を通す（承認後の new sprint で初めて落ちる） | `N2b` | 受け入れ条件の節の判定を lib/acceptance.py の 1 関数にし、sprint_inputs.body_lack と spec-copy.py check が共有する。要求のステップの後に requirements-check をもう一度通す |
+| #2273 | 設計 PR のマージのプランがベースブランチとの衝突（DIRTY）で取り込みへ戻らず止まり、並行の設計 PR の用語集の衝突を手で解く | `SF2` | 頭の詳細設計の bug の割り当てで割り当てた（SF2 の変更で直る） |
+| #2274 | 取り込み（absorb）の後、取り込まれた課題の受け入れ条件の一部が取り込み先の実装から落ちたまま完了になる | `N2b` | 設計の結果に読めなかった課題（unread）があれば実装へ進めず止め、実装のプランの完了判定で取り込んだ課題を含む `課題` のすべての受け入れ条件の区分を求める（取り込まれた課題の設計文書は #2453 の docs_of が番号でつながる文書として載せる） |
+| #2289 | 承認資料が結果の試行の選び方を自前の last_result に持ち、共通の読み手（step_read.py）を通らない | `RF8` | #2995 が release_lib を分けるので、materials.py の last_result の試行の選び方を lib/step_read.py へ移し approval.py と共有する変更を足す |
+| #2293 | sprint-close: --with-verification を付け忘れると、リリース後テストに不合格の行を持つ課題も閉じる | `N8a` | 記録の PR にリリース後テストの記録があれば、--with-verification の有無によらず閉じる条件 2 を見る |
+| #2316 | conductor どうしの排他が無い: Issue・プラン・ファイル・版数などの対象ごとにロックを置き、並列の conductor が同じ物を同時に書き換えないようにする | 閉じられない | conductor どうしの排他（Issue・ファイル・版数・作業場所の寿命・マシンをまたぐロック）で、ロックの置き場が Issue の中で未決（利用者が決める）。Factory の側（volareinc/nd-factory）の実装も要り、#1142 の子のどれにも合わない。開発ループの選定とキューの done の 2 行は #2342 で直っている |
+| #2317 | 全体テストの CI 待ちが、PR で外したチェックをメインディレクトリの宣言から読んで待ち続ける | `SF3` | SF3 は CI の監視でまとめのチェックの未完了の読み違えを直すので、checks_outcome が永久に現れないチェックを pending とみなし続ける扱いと test-run.py の _wait_ci が待つ名前を PR の head から読む変更を足す |
+| #2324 | 中継の Stop の hook が、別のセッションの承認待ちを報告しただけの応答を「本文で承認を待って終わった」と差し戻す | `N4` | prose_wait_reason が本文の語だけで決めず、背景の処理の待ち・このセッションの判断の記録・別の場所での答えの案内を差し戻さない材料にし、差し戻した応答の要約と材料をラッパーの記録へ残す |
+| #2337 | 結果の契約をそろえ、失敗・未収束・判定できないを ok で返す経路を無くす | `SF1b` | SF1a・SF1b が結果 JSON の cause を必須にし stopped を出すすべての手順のスクリプト（135 本）が種類を返すため、失敗・未収束・判定できないを ok で返す経路を無くす柱の中身と一致する |
+| #2338 | 1 回の実行を識別子 1 つで追える記録とログにそろえる | `N10` | 書き口 lib/run_log.py を新設し、実行の核（lib/run_core.py）から始まり・判断・診断・終わりを実行の記録へ書き、monitor_loop.py と check-trigger.py の標準エラーへの直書きと先頭 N 字の切り詰めを書き口へ移す（設計 issues/issue-2338-design.md、マージ済みの設計 PR #2497） |
+| #2339 | 内部データに型と版を持たせ、同じ意味の値を 1 つの名前にそろえる | `DC1` | DC1 が事実の表の共通の形と jsonschema の読み手を入れるので、実行・プラン・状態・記録・結果の種類ごとの型と版、名前の対応表の検査を同じ読み手へ足す |
+| #2340 | 機械が読む出力を 1 行 JSON にそろえ、Markdown と本文の見出しから判定しない | `SF1b` | 1 本の子 Issue（1 PR）で閉じられない。範囲が全エントリポイントに及び、子の Issue の仕分け（受け入れ条件 3）を伴う。#2335 の柱として残すか、#1142 で柱ごとの子 Issue 群（棚卸し・置き換え・仕分け）を別に設計する |
+| #2341 | 入口の引数・環境変数・設定の受け取り方を 1 つの読み込み部品にそろえる | 閉じられない | #2335 の柱 P8 で、入口の引数・環境変数・設定の受け取りをリポジトリ全体でそろえる。受け入れ条件 17 件と子の Issue 14 件を持ち、1 本の子 Issue に収まらない。「旧い引数名を次の正式版まで受ける」前提が #1142 の「後方互換を意識しない」と A1a に反する |
+| #2344 | プランは値でなく参照を持ち、実行の直前に解決して照合する | `N1` | 版・記録の PR を値でなく参照で持ち、ステップの直前に `lib/refs.py` で解決し、解決の値と出所を進捗ログへ残す。実行条件を参照より先に評価し、完了したプランをプランのハッシュで照らして流し直さない |
+| #2349 | queue の再開が、取り込み済み・完了済みの実装のプランを流し直し、差分なしの PR 作成で止まる | `SF2` | 3 つ目（差分の無い実装のプランで `pr` が終了コード 1）は #2344・#2664 とも範囲から外している。止まった理由の種類（SF1a の causes.json に「差分なし」）と行き先（SF2 の on_cause で次へ）で閉じるため SF2 |
+| #2357 | 受け入れ条件の区分と退行しない条件の前提の確認が、雛形のプランで流すスプリントで書かれない | `N2b` | 雛形の実装のプランへ受け入れ条件の区分のステップ（worker が acceptance-check.py record を打ち、run のステップが区分の欠けを落とす）を足し、要求の検査（spec-copy.py check）が退行しない条件の前提の確認の行を確かめる |
+| #2370 | スプリントの検査で cross-review が未解決 0 件のまま上限や error で終わると検査ごと落ち、conductor が手で review を飛ばして再開する | `N11` | 検査のプランの review のステップの行き先を、cross-review の結果（unresolved・final）の種類で分け、未解決 0 件で上限か error に当たったら次の工程へ進み、そうでなければ人へ戻す。どちらへ進んだかを検査の記録に残す |
+| #2400 | 開発ループの設計承認ゲート で「直してから出し直す」と答えても差し戻しの記録に残らず、振り返りの差し戻しが 0 件になる | `RF7` | #2994 が開発ループの記録を責務で分けるので、loop answer --revise が設計承認ゲート の差し戻しを gate-rejections.jsonl へ書く変更を足す |
+| #2408 | まとめのプランの release-verify が、リリース記録の番号が実行の時点で 0 になっても流れて ok で終わり、記録の無いまま「リリース後テスト」の印が付く | `N1` | まとめのプランの `release-verify` を、記録の PR の参照が 0（本番の記録なし）に解決されたときは流さず「飛ばした」で残す（ステップを置く判断を組む時点から流す直前へ移す） |
+| #2423 | 棚卸しの見直しのステップに費用と秒の上限が効かない | `N7` | 見直し・大整理の work ステップの打ち切りを depths.<深さ>.seconds から読み、効かない usd を既定から外す。打ち切ったときに持ち越しを depths.jsonl へ書く |
+| #2424 | project-decl.py measure が requirements.txt のオプションの行をライブラリとして出す | `A3e-2` | A3e-2 が触る project-decl.py の measure に、requirements.txt のオプションの行（-- で始まる行）を依存の候補から外す判定を足す |
+| #2434 | relay.py のリレーハブの環境変数 3 つと hub/ の受け渡しのファイルが契約の宣言に無く、契約の検査も検出しない | `DC6` | DC6（環境変数名の表）に、契約の抽出が env_num で読む NDF_RELAY_HUB_WAIT ほかを拾う直しと、relay.py の hub/ の受け渡しのファイル・副命令の宣言（contracts/env・files・entrypoints）を足す |
+| #2435 | 開発ループをループの 1 回の途中で止めると記録が止まった状態にならず、/goal の終わりの条件を満たせない | `RF7` | #2994（sprint_loop の周の判定・記録の組み直し）の範囲に、ループの 1 回の途中で止めて status: stopped・user_stop を書く loop stop --now を sprint_loop.py・sprint_loop_cli.py に足す |
+| #2438 | relay.py: /goal の目標が未達のカットポイントで、ndf-next を出しても次の区間へ切り替わらない | `N4` | _tick が切り替えない理由を毎回ラッパーの記録へ書き、目標の未達の判定をシグナルファイルの書き直しの時刻ではなく同じ候補を最初に書いた時刻と比べる |
+| #2440 | cross-review: 修正中に PR のブランチへ別の push が入ると止まり、流し直しても同じ状態から止まる | `N6` | 修正の push が non-fast-forward で拒まれたら、origin の先頭を取り込んで自分の未送信のコミットを載せ直す取り込みを 1 回試みてから送り直す。流し直しの初めに、レビュー用のworktreeを origin の先頭へ合わせ自分の未送信のコミットだけを載せ直す |
+| #2441 | 並列開発: 1 台の中のオーガナイザーが、Factory などの外の本番の Pull Request が開いている間はリリースを組まずに待つ | `RF6a` | #2992（並列の計画の判断を純粋な関数へ）の範囲に、計画の外の本番の PR（main 宛て release/v・develop head）が開いている間はリリースを組まず待ちの理由を返す判断を lib/parallel_release.py に足す |
+| #2444 | 設計のプランで、組み直しの読み手役が残した「足すべき内容」がレビューへ渡らず、扱われないまま設計承認ゲート へ届く | `SF5` | SF5（設計のプランの judge を外しレビューの結果で承認ゲートへ渡す）の範囲に、rebuild の「足すべき内容」を review の指示へ差し込み、扱わなかった件を承認資料の未確認の点へ載せる形を supervise_lib/procedures.py・design_steps.py に足す |
+| #2446 | マージを判定するフックが gh pr merge の --repo を見ず、作業ディレクトリのリポジトリで PR を引く | `N10` | マージの hook の wf_merge_target が -R / --repo と REST の repos/<所有者>/<名前>/pulls/ の部分から対象のリポジトリを取り出し、wf_check_merge がその slug で PR を引く。対象が作業ディレクトリと違えば本番チャネルの判定に作業ディレクトリの宣言を使わず、対象の宣言を読めなければ止める |
+| #2447 | ndf の依存の仮想環境が壊れていると、cross-review が「PR の head を取得できない」と実際と違う理由で止まる | `A3g` | A3g が触る cross-review の review_lib/github.py の _fetch_pr_metadata が失敗（依存の import の失敗を含む）を None に握りつぶし「head を取得できない」と誤った理由で止まる形で、握りつぶさずに種類（deps_missing は SF1b の deps._stop）を返す A3g の直し方で閉じる |
+| #2448 | cross 系で kiro を起動すると、worktreeの .amazonq/cli-agents/*.json を書き換えて .bak を残す | `N10` | kiro の起動（scripts/lib/launch-cli.sh の run_runtime の kiro の枝）の前後でworktreeの .amazonq/cli-agents を写しておき、起動の後に追跡対象の変更を戻し、起動の間に増えた .bak を消す |
+| #2449 | cross-refactoring のテンプレートの試走が test.suites の paths 配下の他言語のファイル（tests/e2e の JS）を runner へ渡して止まる | `DC4` | DC4（テストの置き場と名前の印の表 test-markers.json）に runner ごとの対象の拡張子の列を足し、cross-refactoring のテンプレートの試走が test.suites の paths から runner の扱えないファイルを外す |
+| #2453 | 設計の結果の触るファイルが分割した設計文書へのリンクを辿らず、実装のプランから変更対象が抜ける | `N2b` | 分割した設計文書を番号でつなぐ docs_of・base_docs と、リンクで委ねたセルを止める DesignCellError が develop に入っている（lib/design_results.py・supervise_lib/design_stage.py）。課題の進行は確定仕様化・後片付けまで済み（実装は develop にある。実装済み。残りは体裁レビューとリリース後テストで、この子では閉じない。#2453 の工程のまま閉じる） |
+| #2461 | install-wrapper が PATH 上に ndf-relay コマンドを置き、relay.py をどこからでも呼べるようにする | `N4` | install-wrapper が ~/.local/bin/ndf-relay（~/.claude/ndf/relay.py を呼ぶだけ）を置き、uninstall で消し、status で有無を出す |
+| #2464 | relay.py account use の指定を supervise.py の子の claude -p が読まない | `N4` | アカウントの指定（pinned.json）の読み出しを relay_lib/pin.py から lib/claude_accounts.py へ移し、choose が指定を先に見るようにして、supervise の子の claude -p も指定に従う |
+| #2477 | 並列の計画: ループを終えたレーンがオーガナイザーから running に見え、stall の問いも出ない | `N3` | 開発ループの記録が waiting_only 以外で止まったのに一覧が running のレーンを、区切りを待たずに停滞の問いにする（閉じた PR #2919 の parallel_watch.ask_loop_stops を今の develop の上へ作り直す） |
+| #2489 | 出し直しのループの 1 回の設計プランが、設計 PR の最新から始まらず指摘も設計の指示へ渡さない | `N1` | 出し直しのループの 1 回の設計のプランに `起点のコミット: origin/design/issue-<番号>` を書き、既存の worktree を設計 PR の head へ fast-forward してから流す（指摘を設計の指示へ渡す部分は `sprint_revise.with_revise_note` に既にある） |
+| #2504 | 中継: tmux に起動するレーンの claude で Prompt suggestions を止める | `N4` | リレーハブが tmux に起動するラッパーの環境へ CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false を足す（子の claude はラッパーの環境を継ぐため、アカウントの切り替えの後の区間にも効く） |
+| #2528 | 開発ループ: 前のループの 1 回でマージ済みの設計を、次のループの 1 回の loop sprint が設計からやり直す | `N1` | `lib/sprint_loop_argv.py` の `approved_issues` が、記録の承認の行に加えて設計 PR のマージの状態（ラベル design-approved つきでマージ済み）を GitHub から引き、マージ済みの課題を `--designed` へ入れる |
+| #2539 | 設計で実装を複数の Pull Request に分けると決めても、スプリントの実装のプランは課題ごとに 1 本で組まれ、食い違いで止まらない | `N2b` | 設計の結果の表で 1 つの課題に PR の単位（触るファイルのセルの先頭の括弧の名前）が 2 つ以上あれば、実装のプランを 1 本で組まずに設計の結果のステージで止める（または単位ごとにプランを組む） |
+| #2540 | backlog-refinement: 見直しが見積の欠けた課題を残したまま終わり、持ち越しで次の見直しがすぐに起動する | `N7` | 見直しの順位の算出で、記録の要約値が今の課題と違う見積と前回の表から戻した見積を excluded（採点し直す）で返す |
+| #2553 | 完了判定の設計とテストの照合が、サブディレクトリからの相対パスで書いたテストを実在するのに無いと判定して止まる | `N2b` | design-match.py の _path_present が、根からのパスで見つからない `/` を含む名前を末尾の一致（`*/<名前>`）でも探す |
+| #2554 | 並列の計画: リリースの版を develop の plugin.json から取り、既に出した版数で承認資料を組む | `SF9` | SF9（版数が出し済みのリリースを差し戻しの候補として返す）の範囲に、lib/parallel_repo.py の dev_version がタグのある版・本番以下の版を繰り上げ、比べる元を本番の最新のタグにする直しを足す |
+| #2557 | cross-refactoring: テストのファイルの名前の判定が 2 通りあり、パスの判定は latest_version.py をテストと読む | `DC4` | DC4 は pathkinds.py のテストの印を test-markers.json から導く。scope.py の TEST_NAME_PATTERNS も同じ表から導く形を DC4 に足せば、2 通りの判定が 1 つになる |
+| #2563 | 中継: relay.py spawn・restart が「起動した」を返すのに、ラッパーが立ち上がっていない | `N4` | 期待の 1 つ目はコミット 4aaf8046a で入った。残る期待の 2 つ目（同じ名前の止まったラッパーがあっても起動できる）をテストで縛り、再現を通して閉じる |
+| #2568 | リリースだけのループの 1 回で、リリースプランの record が {queue_prs} を置き換えずに落ち、まとめのプランが流されない | `N1` | `{queue_prs}` を、今の queue の items と計画の課題を閉じる PR の和で、先頭のステージと `supervise.py run` でも解決し、残ったまま打たない |
+| #2569 | 検査のプランを途中から流し直すと、検査の記録の行に前の実行のレビューの件数が入らず、stats の findings が null になる | `N1` | ステップの件数（counts）を進捗ログのステップの行にも書き、`check-trigger.py record` の `findings_of` が同じ計画の頭からの実行の区間の最後の件数を進捗ログから読む |
+| #2575 | 使用量の帳簿が書き手ごとに別の置き場へ書かれ、サブエージェントの行と claude -p の行を同じ集計で読めない | `N8b` | 帳簿のディレクトリの決め方から CLAUDE_PLUGIN_DATA を外し、hook とスクリプトが同じ置き場（NDF_USAGE_DIR → 状態のホームの usage）へ書く |
+| #2576 | サブエージェントの停止の hook が最後の応答を読む前に帳簿を書き、使用量を最後の応答 1 件分少なく数える | `N8b` | 集計の側で、サブエージェントの帳簿の行の和と会話の記録の合計の差を会話の記録から補う。hook の側は #1979 の差を書く形で次の停止が抜けを拾う |
+| #2583 | relay: プラグインの更新でリレーハブの版のラッパーの置き場が消え、レーンの起こし直しが何も出さずに失敗する | `N4` | コードの変更は要らない。片付けが使用中の印のある置き場を消さない処理（version_dir.prune）と、置き場が消えたら relay.current の版で起こす処理（hub.launch の launch_python）は develop にある（実装は develop にある。受け入れ条件 1 は #2647 の受け入れ条件 18（PR #2886、テスト test_hub_launches_from_relay_current_when_its_version_dir_is_gone）、受け入れ条件 2 はコミット 4aaf8046a で入った。再現の確かめで閉じる） |
+| #2584 | 並列の計画: レーンが新しい版で送った依頼が、古い版のオーガナイザーの wait に届かない | `N3` | コードの変更は要らない。台帳の行の版の違い・知らない形の行・台帳に無い待ちを wait の metrics に出す処理（parallel_ledger.ledger_report）は #2647 の PR #2886 で develop にある（実装は develop にある。#2647 の受け入れ条件 12〜14 の実装は develop にある（git log origin/develop --grep '#2647' で 9cd5ccbc6 ほか、ledger_report の versions・unknown_ids・orphans）。残るのは再現の手順を 1 回通して閉じる判断だけで、新しい子の変更では閉じない。リリース後テストか棚卸しで閉じるのが合う） |
+| #2585 | 並列の計画: 起こし直しが失敗していた時間も含めて stall を数え、実際より長い「動いていない」の問いが出る | `RF6a` | 束 C の事例: stall の時間に起こし直しの失敗の時間を含め、試みの回数と結果を載せない。NEW-lane-liveness（#2649 の受け入れ条件 7〜9）で閉じる |
+| #2595 | 並列の計画: オーガナイザーの文脈が 800k を超えても、文脈の量による再起動が掛からない | `SF12` | SF12（文脈の上限の案内が切るか続けるかを数で決める）が触る hook_lib/token_guard.py の判定の対象に、オーガナイザーの parallel.py wait（背景・env 前置・&& の形を含む）を足し、start・answer ほかは拒まない形を足す |
+| #2596 | 開発ループ: 承認した設計の結果を読めないと、その課題の実装を外したまま ok でリリースへ進む | `N2b` | 設計の結果を読めなかった設計の課題があるとき ok を返さず、cause 付きの stopped で止める（設計 PR のマージを待って打ち直す行き先） |
+| #2600 | 工程が書くファイルの置き場・持ち主・消す時点をスクリプトで固定する（.ndf/ と issues/） | `DC6` | DC6 は .ndf と .worktrees の置き場の表 places.json を置く。表の行に持ち主と終わり（消す時点）の欄を必須で足し、契約の検査と supervise.py new の --out の置き場の固定を DC6 に足す |
+| #2601 | 承認資料の「利用者向けの変化なし」が、リリースされるファイルの変化を見ずに PR 本文の「利用者向けの変化: 無し」だけで付く | `RF8` | #2995（release-steps.py と release_lib の責務の整理）の範囲に、release_lib/included.py の「利用者向けの変化なし」を PR 本文でなく差分のリリースされるパスで決める直しを足す |
+| #2602 | PR 本文の「残リスク: マージの前に決める」を、自動の工程が判断の記録なしでマージする | `SF4` | SF4（マージの止まりの種類分け）が触る merged_lib/merge.py に、PR 本文の「残リスク: マージの前に決める」に判断の記録が無ければ種類つきで止まる確かめを足す |
+| #2603 | MVV 改訂の兆候の集計が、worktree で打った判定の記録を数えず「判定できない」を 0 件と出す | `N8b` | MVV の記録の repo を書く側でメインディレクトリへ解く（mvv_repo_key）。worktree から打った判定も同じリポジトリとして数える |
+| #2614 | スプリント MVV の照合が同じ本文を毎回 LLM で判定し直し、判定の揺れで開発ループが止まる | `N8b` | （実装は develop にある。実装済み。コミット 08f51d00a（照合の入力が同じで最新の判定が「従う」なら再利用）と 2ed8952a1（手順書）が PR #2830 でマージされている。作業場所の project_lib/mvv_llm.py に input_sha256・reused_from・vet_body(reuse=...) がある。本文の工程表で「リリース後テスト」が未チェックのため、リリース後テストを済ませて閉じる） |
+| #2617 | 並列の計画: 耐久ワークフローを作り直すと保留中の依頼と問いを失い、その後の答えを黙って捨てる | `N3` | コードの変更は要らない。作り直しで依頼と問いを台帳から戻す処理（parallel_ledger.restore・RunState.adopt）と、知らない依頼への答えの保留は develop にある（実装は develop にある。受け入れ条件 1・2 は #2647 の PR #2886 と コミット 4aaf8046a で入った。直し方の案 3（answer --resend）は #2647 が S14 として範囲外にした。残るのは再現の確かめで、閉じるか --resend を別 Issue にするかは supervisor が決める） |
+| #2637 | 並列の計画: オーガナイザーのセッションを替えると organizer の印が付かず、同時に動かす数に数えられてレーンの起動が断られる | `N3` | コードの変更は要らない。start が動いている run でも印を付け直す処理（parallel_cli の mark_organizer）と、前のセッションの印を外す処理（relay_lib/hub_client._clear_organizers）は develop にある（実装は develop にある。受け入れ条件 1 はコミット 4aaf8046a、前の印の外しは #2647 の受け入れ条件 16（PR #2886）で入った。残るのは再現の確かめだけ） |
+| #2638 | 開発ループ: 保留のループの 1 回を締め直す途中で出た問いを loop hold-question が「進行中のループの 1 回が無い」で断り、答えを当てる場所が無くなる | `N1` | `loop hold-question` が `--plan` の属するループの 1 回（進行中か締め直しの途中の保留のループの 1 回）を引いて質問待ちへ戻し、戻した後に届いた `loop finish` を断る |
+| #2639 | queue --resume の --from がフルパスを断り、再開したキューがリリースの依頼の承認ゲートで 10 を返して loop lap が打たれない | `SF13` | 2 つ目（リリースの依頼・設計承認ゲートの終了コード 10 が pipeline の && を切り、loop lap が打たれない）は終了コードと pipeline の契約の問題で、開発ループのサブコマンドの断りと止まりに種類と next を返す SF11 か、承認ゲートの結果に routes を足す SF13 が合う |
+| #2640 | cross-refactoring: 流し直すと実行の識別子が変わり、前の回の続きとして再開できない（--run を手で渡すまで init が 4 で断る） | `RF1b` | #2990（耐久の殻の共通の形。2 本の drive.py を含む）の範囲に、流し直しで耐久の回が変わっても前の回の実行の識別子を引き継ぐ形（drive.py と lib/run_owner.py の run_args）を足す |
+| #2647 | carul の根本原因 A: 計画の状態（依頼・問い・役割・使う版）が計画より短命な入れ物にしか無く、再起動・作り直し・版の更新で消える | `N3` | コードの変更は要らない。計画の台帳（lib/parallel_ledger.py）と台帳からの作り直しは PR #2886 で develop にマージ済みで、進行は「デプロイ」まで済んでいる（実装は develop にある。残るのは受け入れ条件 21（束の 4 件の再現を通して閉じるか残すかを書く）とリリース後テストで、#2647 自身の工程で閉じる。#2808 の再開はこの台帳を土台にする） |
+| #2648 | carul の根本原因 B: ループの 1 回とプランが「今の起動」の外にある成果（差し込みの値・検査の件数・問いの当て先・再開の位置）を参照せず、締め直しと再開で食い違う | `N1` | 傘の Issue。#2663・#2664・#2665 の 3 本をこの子で閉じたら閉じる（本文の「直しても残るもの」は #2639 の 2 つ目だけ） |
+| #2649 | carul の根本原因 C: レーンの生死を中継の一覧の 1 行（state・at）だけで決め、一覧の成否・起動の回・起動後の生存を照合しない | `N3` | 見回りの判定（一時レーンの今の起動・停滞の問いの経過と取り下げ・開発ループの止まり）を新しい判断のモジュールへ置き、閉じた PR #2919（ブランチ sprint/lcore-13、develop の 974 コミット前から分かれた）の中身を今の develop の上で作り直す |
+| #2655 | 並列リリースの承認資料の「検査の結果」が常に「無し」になり、リリース承認ゲート の MVV 判定が「判定できない」を返す | `RF8` | #2995 の範囲に、並列リリースの提示のプラン（supervise_lib/release_templates.py:121-123）が --check-state を渡さず release_lib/materials.py が「無し」に倒れる経路を、PR ごとの検査の状態を集めて載せる形へ直すことを足す |
+| #2663 | carul の根本原因 B-1: プランの差し込みの値と検査の件数を、今の起動の外から参照で解決する | `N1` | 差し込みの値（`{queue_prs}`）と検査の件数を、今の起動の外から参照で解決する（受け入れ条件 1〜14） |
+| #2664 | carul の根本原因 B-2: 問いの当て先と再開の位置を、今のループの 1 回の外から参照で解決する | `N1` | 問いの当て先（保留のループの 1 回を含む）と再開の位置（名前・フルパス・相対パス、実行条件、完了の照合）を今のループの 1 回・起動の外から解決する（受け入れ条件 1〜24。本文が外した #2639 の 2 つ目と #2349 の 3 つ目は除く） |
+| #2665 | carul の根本原因 B-3: 次のループの 1 回の設計の起点を、設計 PR の状態から決める | `N1` | 次のループの 1 回の設計の起点（設計を飛ばすか・出し直しの起点・指摘）を設計 PR の状態から決める |
+| #2680 | cross-refactoring の最終ゲートが、衝突して CI の始まらない Pull Request を上限まで待って止まる | `SF2` | SF2 は base_conflict の既定の行き先を取り込みのステップにする。cross-refactoring の final-gate（refactor.py）が PR の DIRTY を見て base_conflict で返す確かめを SF2 に足せば、検査のプランが base-sync へ戻り待ち続けない |
+| #2690 | CI の状態が不整合なチェックを待ち続け、全部通った後も工程が止まる | `SF4` | SF4（CI の未完了を ci_pending で返す）の範囲に、lib/gh_checks.py の run_result が completed_at のある in_progress を完了として読む直しを足す（test-run.py の _wait_ci が同じ値を使う） |
+| #2701 | 棚卸し: 親の無い課題を含む付け直しを、親の照会の 404 を読めずに大整理の apply が 1 件も書かずに止める | `A3g` | A3g が触る upkeep_actions.py の _parent_of と upkeep_gh.py:150 の 404 の判定を、例外の文の字面でなく HTTP の状態で行う形を A3g に足す（Gh.call の例外に状態を持たせる） |
+| #2711 | OOM Killer 対策: pytest などの重い処理がランナーの CPU とメモリを使いつぶさないようにする | `N12` | テストの直しでなく、重い処理の同時実行の枠とメモリの待ち・止めの仕組みを足す機能である（files のうち test-slot.py・lib/test_slots.py・lib/test_weight.py・hook_lib/test_guard.py は設計が新設するファイル）（実装は develop にある。独立の子にする。設計は承認済み（PR 2744、ブランチ design/issue-2711 に残る。2026-11-07 に共有の置き場を /work の下にすると利用者が決めた）で、触るファイル 17 本は hook.py（DC3・W5）・lib/procs.py（DC3）・steps.py（SF2・SF6）・refactor_lib/process.py（W4）・test-run.py（SF1b）と重なり、N9 のテストの直しと流す順が合わない） |
+| #2714 | 開発ループ: loop answer の先端の比較とマージで読む先端が食い違うと、動いた先端へ承認の記録が残る | `RF7` | #2994 の範囲に、sprint_loop.cmd_answer が先端を 1 回だけ読み regated_answer と design_pr_merge.merge_approved へ同じ値を渡す（か head_moved で書いた答えを取り消す）直しを足す |
+| #2719 | merge の CI の待ちの上限がランナーの待ちを含まず、CI が落ちていないのにプランが止まる | `SF4` | 頭の詳細設計の bug の割り当てで割り当てた（SF4 の変更で直る） |
+| #2722 | 開発ループ: 直して出し直す課題が棚卸しの判断待ちの印で選定から外れる | `RF7` | #2994（選定の責務の分離）の範囲に、sprint_loop_select.exclusion_reason が first_issues の先頭指定に棚卸しの判断待ちを当てない優先の順の直しを足す（SF11 は断りの種類だけを足す） |
+| #2730 | 一時レーンのリリースが承認の後で止まる: 版の違うスクリプトが承認の記録を別の名前で書き、run が止まっても後段へ流れる | `RF6a` | #2992 の範囲に、parallel_helper.helper_task が使う版をプランのコマンドの版にそろえる直しと、承認を記録した後の --from approve を再生せず流す形を足す。承認ゲートで run が 0 を返す件は SF13 の routes と終了コード 10〜19 で解ける |
+| #2746 | 開発ループの選定で、切り出しの境界がある経路でも外す理由のある行が枠を使い切って止まる | `RF7` | #2994 の範囲に、切り出しの境界がある経路で外す理由のある行を枠に数えない選定の直し（#2627 の決定 1 と同じ数え方）を sprint_loop_select.py に足す |
+| #2751 | 並列の計画: 答えの直後の wait が中身の無い questions で起きる | `SF9` | SF9（wait の結果の行き先）の範囲に、items の空の questions を parallel_run が発行せず parallel.py cmd_wait が読み飛ばす直しと parallel_answer.py の読み取りの合わせを足す |
+| #2752 | 全体テストの待ちが、宛先と衝突して CI の起動しない PR を待ち続けて打ち切られる | `SF2` | SF2 は base_conflict の既定の行き先を取り込みのステップにする。test-run.py whole が PR の mergeStateStatus DIRTY を見て待たずに base_conflict で返す確かめを SF2 に足せば、実装プランが base-sync へ戻る |
+| #2753 | relay.py restart が止めた後に上限で断り、レーンが止まったまま残る | `N4` | restart の停止をリレーハブの中へ移し、上限の判定で対象のレーンを数えずに通ったときだけ止めて起こす。断るときは止めない |
+| #2758 | 壁時計の短い上限を持つテストが高負荷の全件テストで落ち、プランを止める | `N9` | 壁時計の短い上限（time.time() - x < N）を持つ 17 件のテストの上限を、待たなかった場合にかかる時間に合わせる（待つ側を長くして打ち切り・早い戻りの意図を保つ） |
+| #2770 | cross-review の駆動が、PR の巻き直しの後と駆動の外のコミットの後に修正の結果を取り込まない | `N6` | 巻き直しの後も状態ファイル・結果ファイル・修正担当への指示を元の PR 番号の 1 つの規則でそろえ、結果ファイルの中の pr は元の番号と今の番号のどちらも受ける。start-round が修正の結果ファイルの残りを見つけたら取り込んでから次のラウンドへ進む |
+| #2776 | テストの入力 `{壊れた行` が本物の差し戻しの台帳へ上書きで書かれ、それより前の記録が消えていた | `N9` | テストの共通の前提（tests/conftest.py）が本物の状態の根（~/.claude/ndf/state・~/.local/state/ndf）への書き込みを落とす形にし、`g2_ledger` が台帳のパスが一時ディレクトリの下かを確かめる |
+| #2777 | MVV の改訂の兆候が、「判定できない」で人へ戻して人が通した承認を「覆し」と数え、改訂を求め続ける | `N8b` | MVV 判定が「判定できない」で人が通した承認を覆しに数えず、別の数（unknown_pass）にする。同じスプリント状態・承認ゲート・PR の覆しは 1 件にまとめる |
+| #2781 | 並列の計画: wait --after 0 が seq 1 の「まだ変化が無い」を返し続け、後から届いた依頼を返さない | `SF9` | SF9 の範囲に、wait --after 0 が seq 1 の「まだ変化が無い」を返し続け後から届いた依頼を返さない cmd_wait の読み方の直しを足す |
+| #2783 | 並列の計画でまとめて出した正式版で、各スプリントのリリース記録が書かれず、まとめのプランが課題を閉じられない | `RF6a` | #2992 の範囲に、まとめたリリースで各スプリントの PR を release-steps.py record の --prs へ渡し本番のリリースの PR に記録を書く形（parallel_release と close の --record-pr）を足す |
+| #2788 | 開発ループが、実装で止まった課題をループの 1 回の途中で外せず、残りの課題の検査・リリースまで止まる | `RF7` | #2994 の範囲に、実装で止まった課題をループの 1 回の途中で外し残りで検査から先の pipeline を返す形（sprint_loop.cmd_lap か loop exclude）と、親課題を承認した設計として選ばない選定を足す |
+| #2789 | 文脈の量の guard: 判定の記録が、relay を計算していない判定にも false と書き、ラッパーの外と見分けられない | `A3d` | A3d が直す hook_lib の既定値への倒れそのもの: token_guard.py:402 が relay を計算しない判定にも既定値 false を書く。計算しないときは null を書く A3d の直し方で閉じる |
+| #2791 | スプリント lcore-1 のクロスリファクタリングで時間の上限により後へ回した 15 件を適用する | `A3a` | 15 件の長い関数・重複は A3a（lib/design_pr_merge.py）・A3e-2（sprint-close.py）・A3g（upkeep_research.py）と 8 件の範囲（engine・worker_steps・commands は #2993、durable は #2990、release_lib は #2995、check-ndf-contracts は #2996）で直る。テストのヘルパー 2 件（cross-refactoring/tests の crossref_helpers.py・test_culprit_git.py）を A3f-2 に足す |
+| #2798 | cross-refactoring の worktree が親ごと消えると、テスト環境の割り当てが回収されずスロットを占め続ける | `N9` | `worktree-testenv-sweep.sh` の `_reclaim_location_seen` が、親のディレクトリが無いとき最も近い残っている祖先でファイルシステムを確かめ、同じなら stale として回収する |
+| #2806 | supervise.py queue --resume の --from が計画のパスを受け付けず「前の起動の一覧に無い」と断る | `N1` | `resume_targets` の照合を `match_plan` に替え、一覧の値と同じファイルを指すフルパス・相対パスも受け、断る文に「名前かフルパスで渡す」を出す |
+| #2808 | 並列の計画: レーンを安全に止め、止めた計画を同じ名前で再開する手段が無い | `N3` | parallel.py stop を既定で区切り（周の境・プランの開始の前）で止める形にし、止めた時点の各レーンの続きの位置を台帳へ書き、同じ計画名の start が止めた計画を台帳から作り直して続ける |
+| #2820 | 開発ループの停止の命令が鍵を先に返し、ループの 1 回の途中で別のセッションが入れる | `RF7` | #2994 が組み直す sprint_loop_* に、loop stop を「停止の要求を置くだけで鍵を返さない」形へ変える変更（鍵の解放はループの 1 回の境と期限切れだけ）と契約の lease.release の書き換えを足す |
+| #2822 | 並列の計画: wait が最新の知らせだけを返し、途中の confirmed と設計承認の依頼を読み飛ばす | `SF9` | SF9 は wait の結果の行き先を選ぶが知らせの読み飛ばしを扱わないため、parallel_cli の wait が --after より後の未処理の confirmed・release の起動と未回答の questions をどの action の応答にも添える変更を SF9 に足す |
+| #2827 | cross-review の駆動を新しい実行の回で流し直すと、止まっていた段階（fix・sweep・newtext）を引き継がずに init から回る | `RF1b` | #2990 は 2 本の drive.py を判断の関数と耐久の殻に分ける範囲を持つので、止まっていた段階（fix・sweep・newtext）を状態ファイルへ残し新しい実行の回の初期値にする変更を足す |
+| #2831 | 並列の計画の plan.md が再開したレーンを stopped のまま描く | `RF6b` | #2992 が組み直す parallel_* の plan.md の描画に、レーンの状態をループの記録（relay.py restart・loop start の後）から描き直す変更を足す |
+| #2834 | 並列の計画: 動いている計画にレーンを足す手段が無く、手で足したレーンを耐久ワークフローが観測しない | `RF6a` | レーンを足す副命令は parallel.py lane add（#2733）で既にあるため、残る「run が足したレーンを観測し finished の判定に入れる」（step_init が一覧を読み直す）変更を #2992 の parallel_run の組み直しに足す |
+| #2838 | PR のマージの hook が、別のリポジトリの PR をセッションのリポジトリの delivery で判定して止める | `A3e-1` | A3e-1 が直す hook.py のマージの判定に、gh pr merge の -R（または cwd）の宛先リポジトリの .ndf/project.json の delivery で判定する変更を足す |
+| #2844 | 開発ループ: 全体テストが同じ原因で落ち判定役が修正を返す循環を、同じ原因の打ち直しの上限が数えず止まらない | `SF2` | SF2 は rerun.py・engine.py を種類で選ぶ形に書き直すので、判定役が別のステップ（fix）を返しても同じ原因（cause）の落ちを打ち直しの上限で数える変更を足す |
+| #2853 | 設計の出し直しで worker が PR 本文の「テスト」の節に足した行が、次の本文の組み直しで消え、同じ指摘で何度も人へ戻る | `SF5` | SF5 が書き直す設計のプランの pr・sync-body の組み立てに、worker が出し直しで足した節（テストの節）と打ち直した requirements-check の結果を材料へ入れ、対応表の「記載した」を機械で照合する変更を足す |
+| #2867 | 設計のプランで worker が gate を返すと失敗で止まり、開発ループが課題を人の判断待ちへ移さない | `SF2` | SF2 は worker_steps.py と行き先を種類で選ぶ形にするので、work ステップの worker の gate を失敗でなく承認ゲートの終わりとして返す行き先を足す（R26 は子が無い） |
+| #2876 | template 経路のレーンで開発版のプランが本番の提示の承認ゲートで終わると、リリースの依頼のプランが流れず {queue_prs} も埋まらない | `RF5a` | #2993 が組み直す queue に、レーンでは前の計画の承認ゲートの終わりを後続のステージ（リリースの依頼）を止める理由にせず {queue_prs} を埋める変更を足す |
+| #2888 | 並列の計画: 答えの後の wait --after に answer の seq を渡す手順で、答えを待つ間に立ったリリースの知らせを読み飛ばし、一時レーンが起動されない | `SF9` | SF9 の next は wait の結果だけに載るため、answer の metrics.next に次の wait --after の値（答えを待つ前の seq）を載せ、手順書の手順 4 を next を打つ 1 行にする変更を足す |
+| #2896 | リリース後テスト: 利用者の設定の控えが、Claude Code が一時的に書く managed のプラグイン行を変化と数えて止まる | `RF8` | #2995 が整理する release_lib の利用者の設定の控えに、scope: managed の行を変化として数えない比べ方を足す |
+| #2898 | relay: account --help の副命令の一覧に API キーの副命令（add-api-key ほか）が出ない | `A3d` | A3d が直す relay_lib/__init__.py の副命令の表に、API キーの副命令（add-api-key・api-key-use ほか）を account --help の一覧へ足す変更を加える |
+| #2923 | 開発ループ: モードの判定の根拠が記録されず全周が standard になり、課題を外した後も決め直さない | `RF7` | モードの判定（R27）は子を置かないとしたため、#2994 の周の判定・選定・記録の組み直しに、loop sprint が判定の根拠を必須で受けて記録し、課題を外したら決め直す変更を足す |
+| #2932 | 開発ループ: 設計の出し直しで、worktreeのコミットが設計 PR の head に入らないまま CI の確認と cross-review へ進んで止まる | `SF5` | SF5 が書き直す設計のプランに、出し直しでworktreeのコミットを push して PR の head に入ったことを確かめてから CI の確認と cross-review へ進む順序を足す |
+| #2933 | DooD の環境で cross-refactoring の作業ディレクトリ /tmp/ndf-worktrees がデーモンから見えず compose のテストが走らない | `A3c-2` | A3c-2 が直す lib/worktree_base.py の既定の置き場に、compose の宣言があり /tmp がデーモンから見えないときはリポジトリの中の置き場を使うか NDF_WORKTREE_BASE を案内して止まる分岐を足す |
+| #2934 | parallel.py await が答えの選択肢と note を返さず、案内の read_answer はシステムの python3 で import できない | `SF9` | SF9 が触る parallel_answer.py と parallel.py に、await の結果へ答えの choice・note・by・at を載せる変更を足す（引継ぎ文書の read_answer の案内を外す） |
+| #2935 | 設計 PR のマージのプランが、ラベル design-approved が無いと approved のステップで止まる | `DC7` | DC7 は承認ゲートの名前（ラベル）を表から引き design_merge.py を触るので、approved のステップがラベルの無いリポジトリでラベルを作ってから付ける変更を足す |
+| #2936 | 並列の計画: レーンの起動・起こし直し・誤報の処理をオーガナイザーが中継し、token の 4 割をそれに使う（耐久ワークフローへ移す） | `N3` | コードの変更は要らない。一時レーンの起動・起こし直し・立ち上がりの確かめを耐久ワークフローが打つ処理（lib/parallel_launch.py の launch_once・relaunch・launch_wakes）は develop にあり、進行は「デプロイ」まで済んでいる（実装は develop にある。残るのはリリース後テストだけ。#2963 の設計の RF6a も #2936 を「マージ済み」として先に要るものに置いている。#3173・#3243 の直しはこの仕組みの上に足す） |
+| #2949 | supervise.py queue: プランを相対パスで渡すと {state_dir} が相対のまま埋まり、worktree の中の review-settled が失敗して検査を飛ばす | `RF5a` | #2993 が組み直すプランの組み立てに、相対パスで渡したプランの {state_dir} を絶対パスで埋め、状態ファイルを読めない review-settled を検査を飛ばす経路へ流さない変更を足す |
+| #2950 | mvv-gate.py: MVV 判定の記録のコメントに boundary が載らず、承認する人がレッドレーンの中身を PR から読めない | `SF13` | SF13 は mvv-gate.py の結果に問いの区分（レッドレーン）を載せるので、記録のコメントにも boundary の節を書く変更を足す |
+| #2962 | 中継の切り替えの判断を時計と端末から切り離し、擬似端末の結合テストを単体のテストへ移す（テストの所要 20〜40 秒減の見込み） | `A3d` | A3d が直す relay_lib の長い関数・分岐の多い判定として、_tick と SpinGuard の判断を時刻と値を引数で受ける関数へ抜き、擬似端末の結合テストを単体のテストへ移す変更を足す |
+| #2963 | supervise のステップの遷移の判断を耐久の起動から切り離し、遷移のテストで DBOS を起こさない（テストの所要 40〜52 秒減の見込み） | `RF4` | 子 Issue そのもの |
+| #2964 | テストの前提作りの重複と固定の待ちを除く: 雛形の sleep 5・通過記録の積み上げ・reclaim の照合・収集の 3 回（テストの所要 32〜35 秒減の見込み） | `N9` | 雛形の sleep 5 をテストの側で差し替え、通過記録を 1 度に置くフィクスチャを足し、`_reclaim_check_owner` の照合を読み込んだ値を受ける関数に分け、`_collected_ids` の収集を 1 回にする |
+| #2967 | new close: 進め方 normal のスプリントでも .ndf/pace.json の fast.verify を要求して止まる | `RF5b` | #2993 が組み直す sprint・sprint_waves の組み立てに、進め方 normal の merged-by-check では fast.verify を読まない分岐を足す |
+| #2968 | new close: --record-pr 0 を偽として読み捨て、まとめのプランに {queue_record} が残る | `RF5b` | #2993 が組み直す sprint.py の close_plan に、--record-pr 0 を偽として読み捨てず「リリース記録なし」として組む変更を足す |
+| #2969 | 検査のプラン: マージで worktree の登録が外れ、続く record のステップが not a git repository で落ちる | `N2b` | 作業場所がディレクトリとして残っていても git のworktreeとして使えなければ、Engine.keep_cwd がリポジトリの根へ移る。record のステップはこの cwd で `--root .` を打つ |
+| #2970 | retrospective: メインディレクトリで打つ project-mvv.py signals が本番のブランチの古い MVV の版で兆候を数える | `A3e-2` | A3e-2 が直す project-mvv.py に、signals の既定で開発のベースブランチ（.ndf/worktree.json の base_branch）の宣言を読む変更を足す |
+| #2974 | テスト: 消えた機能の残骸・検査スクリプトと同じ確かめ・文言の固定・総当たりを削る（#2309 の残り） | `N9` | 消えた機能が無いことだけを確かめるテスト（B）・構造の検査と同じ 500 行の確かめ（C）・文言と行数の固定（D）を消し、総当たり（E）を代表 1〜3 件へ縮める |
+| #2983 | 検査のプラン: 全体テストの上限が test_duration の少ない記録から決まり、実測 244〜371 秒のテストを 226 秒で打ち切る | `A3c-2` | A3c-2 が直す lib/test_strategy.py に、test_duration の記録の母数が少ないときに上限を実測より短くしない決め方（記録の採り方と下限）を足す |
+| #2985 | 中継: 起こしたセッションに VS Code の git 認証の環境変数が残り、窓を閉じた後の push と fetch が固まる | `A3d` | A3d が直す relay_lib の起動に、次のセッションへ渡す環境から VS Code の git 認証の変数（GIT_ASKPASS・VSCODE_GIT_*）を外す変更を足す |
+| #2990 | 耐久ワークフロー: 判断を純粋な関数に、耐久の層を薄い殻に分ける共通の形と、DBOS を起こさない実行器を置く（リファクタリングの土台） | `RF1`・`RF1b` | 子 Issue そのもの |
+| #2991 | 構造の検査: ファイルを分ける基準を行数から責務へ置き直し、500 行に合わせる Fix の往復をやめる（リファクタリングの土台） | `RF2` | 子 Issue そのもの |
+| #2992 | 並列の計画: 判断を純粋な関数へまとめ、parallel_* の 3 組の輪をほどいて責務で組み直す（Fix 40 件/30 日） | `RF6a`・`RF6b` | 子 Issue そのもの |
+| #2993 | supervise: engine・flow・queue の輪をほどき、プランの組み立て・遷移・キューの判断を責務で組み直す（Fix 43 件/30 日・テスト 548 秒） | `RF5a`・`RF5b` | 子 Issue そのもの |
+| #2994 | 開発ループ: sprint_loop_* の周の判定・選定・記録を責務で分け、記録を実際のリリースと一致させる（Fix 24 件/30 日） | `RF7` | 子 Issue そのもの |
+| #2995 | リリース: release-steps.py（1,284 行）を段階ごとに分け、release_lib と責務をそろえる（Fix 15 件/30 日） | `RF8` | 子 Issue そのもの |
+| #2996 | CI の検査: 構造の検査と契約の検査の構文木の解析を 1 回の実行で 1 回にする（31 秒の約半分） | `RF3` | 子 Issue そのもの |
+| #2999 | 並列の計画: プランの合計の上限を計画ごとでなくマシン全体で数える（ai-plugins と carul で合わせて 12 本まで並ぶ） | `RF6b` | 並列の計画の上限（レーン数・プランの本数）を「同時に動きうる組」とマシン全体で数え直し、終わったレーン・after で直列のレーンを除き、読み直す副命令では上限を外す子（parallel_plan.py・parallel_machine.py・parallel.py の checked_plan） |
+| #3003 | 検査のプラン: 振る舞いの確認の後に head が進んでも、マージの前に確かめ直さない | `N11` | 検査のプランのマージの前に、振る舞いの確認を記録した head から今の head までに振る舞いを決める文書が変わったかを見るステップを足し、変わっていれば確かめ直しへ、変わっていなければそのまま進む |
+| #3020 | 並列の計画: 承認の後に加わった範囲が文書だけなら、リリース承認ゲートを出し直さずに新しい範囲で出す | `RF6a` | #2992 が判断を純粋な関数へ抜く parallel_run の confirm に、加わった範囲が文書だけ（diff_kinds）なら出し直さずに新しい範囲で確定する分岐を足す |
+| #3021 | 並列の計画: レーンの追加の上限の検査が、終わって止まったレーンのレーン数とプラン数も数えて断る | `RF6b` | レーンの追加の上限の検査が終わって止まったレーンを数える誤りで、NEW-parallel-limits の「同時に動きうるレーンとプランだけを数える」で直る |
+| #3022 | 検査のプランで merge の後の record が片付いた worktree の中で落ち、マージ済みなのに「止まった」になる | `N2b` | #2969 と同じ直しで record と abort がリポジトリの根で打たれる（今の keep_cwd は is_dir だけを見るため、登録の外れた worktree のディレクトリが残ると移らない） |
+| #3023 | 文書だけの Pull Request の検査で、assess が文書だけと判定しても全体テストが走る | `SF2` | `test-run.py` の `cmd_whole` は文書だけの差分を既に判定する（421〜440 行）が、その判定の前に `container_reach.env_for(root)` でテスト環境を起こすため、compose の migrate の失敗で落ちる（コードを読んだ推定。再現は未実行）。直す場所はテンプレートでなく test-run.py の順序で、test-run.py を触る SF1b か、即時修正の 4 条件で判断する |
+| #3035 | 並列の計画: レーン lflow の設計承認ゲートの AskUserQuestion がオーガナイザーへ転送されず、画面で止まる | `A3d` | A3d が直す hook_lib/ask_guard.py と relay_lib/mark.py に、after 付きで耐久ワークフローが起動したレーンでも NDF_RELAY_NAME から計画を引いて AskUserQuestion を台帳へ転送する変更を足す |
+| #3038 | cross-refactoring: 最終ゲートが全体テストの失敗を直すためにリファクタリング計画の対象範囲の外のファイルを変える | `N5` | 最終ゲートの直しがリファクタリング計画の対象範囲の外のファイルを変えたら取り込まず、失敗を範囲外として記録して止まる。範囲が空のときに検査を飛ばす分岐をなくす |
+| #3039 | 閉じのプラン: 確定仕様化が変更を作らないと pr のステップが No commits between で落ちて止まる | `SF2` | SF2 の止まった理由の種類と行き先に「変更なし」を足し、閉じのプランの pr のステップが差分の無いとき PR を作らずに次へ進む行き先を加える |
+| #3047 | まとめのプラン: --from retro で流し直すと deep-due が飛ばされ、振り返りの範囲が無いまま retro が起動する | `RF5a` | 再開の開始のステップの決まり（--from が前提のステップ deep-due・base-sync を飛ばさない、end を完了として受ける、head が変われば前回の報告を返さない）をまとめて直す子（queue_resume.py の resume_targets・flow.py の prefix_of と開始の検査） |
+| #3049 | cross-refactoring: 範囲テストを触ったモジュールに対応するテストへ絞り、実質の全体テストにしない | `N5` | 項目の範囲テストの対象を、触ったソースのモジュールを import するテストのファイルへ絞る。ディレクトリを対象に受けない。引けないときは最終ゲートへ寄せて記録する |
+| #3053 | cross-refactoring: 安全網の上限で止まった実行を --safety-net-minutes を大きくして打ち直しても続かない | `RF1b` | #2990 は 2 本の drive.py を判断の関数と耐久の殻へ分けるので、安全網の上限（Halt）で終えた実行を --safety-net-minutes を大きくした打ち直しで続きから流す再開を足す |
+| #3064 | 並列の計画: レーンを足して上限を超えた計画で、parallel.py present が上限つきで検査し直し I2 で止まる | `RF6b` | 動いている計画を読み直す副命令（present・confirm・settle）が上限つきで検査する誤りで、NEW-parallel-limits の「読むときは上限を外す」で直る |
+| #3077 | issue-file.py create: 別のリポジトリへの起票で、由来の行が番号だけになり起票先の別の課題を指す | `A3e-1` | A3e-1 が直す issue-file.py に、起票先が別のリポジトリなら由来の行を <所有者>/<リポジトリ>#<番号> で書く変更を足す |
+| #3086 | supervise の再開: リリースの依頼の答えの後に --from <プラン>=end で続けると「知らないステップ: end」で止まり、まとめのプランが流れない | `RF4` | --from <プラン>=end を完了として受ける変更で、NEW-queue-resume で直る |
+| #3087 | 検査のトリガー: リリースの PR を除いた行数が二重に差し引かれ、範囲の変更行数が実際より小さくなる | `A3e-1` | A3e-1 が直す check-trigger.py の changed_lines に、除いた PR の行数を足して引かず、範囲から除いた PR の差分を除いた差分で数える変更を足す |
+| #3093 | 設計 PR の本文で、モードの行が「決めたこと」の節の中へ入り pr-body-decisions-check が落ちる | `DC6` | DC6 は PR 本文の見出しを表に置き pr_mode.py を触るので、モードの行を「決めたこと」の節の外（見出しの表で決まる位置）へ置く変更を足す |
+| #3105 | 共有の依存の環境: python の選び方が呼び出しで食い違い、走っているプロセスの最中に環境が作り直されて import が落ちる | `N4` | 共有の依存の環境を作る python の選び方を lib/deps.py の 1 つの関数にし、deps の uv run・ラッパーの uv sync・hook-env の uv sync が同じ --python を渡す。環境の置き場の名前に python の版を含め、別の python の環境を同じ置き場に作り直さない |
+| #3106 | cross-review: 作業中の /tmp の worktree の登録が消え、取り込みが push できずに止まる | `N6` | レビュー用のworktreeを作った直後に git worktree lock を掛け、片付け（merged-steps.py の remove_worktree・lib/run_state.py）が外す前に unlock する。prune は lock した登録を消さない（手元で確かめた） |
+| #3108 | 開発版のデプロイ: リリース後テストの前の取り込みが、メインディレクトリに残った版のファイルの変更で落ちる | `N11` | 開発版のデプロイの verify の前の取り込みを #2140 と同じ形にし（メインディレクトリで pull しない）、メインディレクトリの未コミットの変更で落ちないようにする |
+| #3109 | クロスレビュー: レビュー中に PR の worktree の管理情報が消え、result_posts.py fix が「リポジトリを決められない」で止まる | `N6` | result_posts.py fix がリポジトリを引く前にworktreeの管理情報（git rev-parse --git-dir）を確かめ、無ければ「worktreeの管理情報が無い（<パス>）」を理由に止める。fix-steps.py の結果とログの既定の置き場を /tmp からworktreeの .cross_review へ移す |
+| #3110 | リリースの承認資料: 「指示書の変更」が .ndf/ の設定の変更を載せず、C7 の変更を人が見られない | `RF8` | #2995 が整理する release_lib の承認資料の「指示書の変更」に、.ndf/ の下の設定の変更（C7）を載せる集め方を足す |
+| #3111 | supervise: conductor がプランを手で書き換えた差分と理由が残らず、飛ばした工程を振り返りで判定できない | `N2a` | supervise.py に plan-edit（理由を必須にし、控え・差分・理由・日時を進捗ログへ 1 行書く）と plan-edits（スプリントの書き換えの一覧）を足す |
+| #3112 | 実装のプラン: impl の担当が全体テストを打ち、過負荷で無進捗の打ち切りになる | `N11` | 実装の指示の共通の規則（`IMPL_RULES`）に「全体テストを打たない（後段の全体テストのステップが受け持つ）」を足す |
+| #3113 | whole-test-timing.py peak: 承認待ちで止まった他レーンの queue を作業中と数えて計測を断る | 閉じられない | 直す場所が実験版（scripts/experimental/）の whole-test-timing.py で、#1142 の作り直しの範囲（既定で動くスクリプト）に入らず、実験版の経路で直すか消す |
+| #3114 | supervise.py queue の再開: --from が base-sync より後を指すと、間に入った PR を取り込まず衝突する | `RF5a` | --from が base-sync より後を指す再開で取り込みを飛ばす誤りで、NEW-queue-resume で直る |
+| #3115 | リリース後テストの記録: 対象の版を「ndf v<版>」と書くと照合できず、close が他スプリントのブロックで判定する | `A3a` | A3a が直す lib/dist_record.py の読み取りに、対象の版の値からプラグイン名の前置き（ndf v）を落として照合する変更を足す |
+| #3118 | 並列の計画: 差し戻しを受けた後に同じ状態ディレクトリでリリースの依頼を打ち直すと、同じ ID のため台帳へ載らないのに「送った」と返る | `RF6b` | #2992 が組み直す parallel_lane に、差し戻しを受けた後の打ち直しで新しい ID を振り、台帳へ書けない打ち直しを「送った」と返さない変更を足す |
+| #3128 | 並列の計画: リリースの答えにリリース記録の PR が無く、レーンが main 宛ての PR を new close --record-pr に渡して close が記録を読めない | `RF6a` | #2992 が組み直す parallel_run のリリースの答えに、リリース記録の PR の番号を載せ、レーンが new close --record-pr へ機械で渡せる変更を足す |
+| #3129 | コミットの件名「Fix: #N」: GitHub がclosing keywordsと読み、main への取り込みで課題が工程の途中に閉じる（#1271 の再発） | `N2a` | pr のステップが push の前に base..HEAD のコミットの件名と本文を lib/closing.py の CLOSING（`Fix: #N` の形も当たる）で照らし、当たれば push せずに止める。規則文の例を `Fix: #番号` を含む形へ直す |
+| #3136 | 並列の計画: まとめたリリースの差し戻しが gate-rejections の記録に残らず、振り返りの差し戻しが 0 件になる | `RF6a` | #2992 が組み直す parallel_run の settle に、rejected のとき gate-rejections の記録を 1 件ずつ打つ変更を足す |
+| #3140 | テスト: test_peak_measures_each_count_of_runs が同時に流す 2 本の起動の順で落ち、文書だけの PR の CI を止める | `N9` | `test_peak_measures_each_count_of_runs` の `started` の比べ方を、同時に流す回の中の順に依らない形（回ごとの集まりで比べる）にする |
+| #3145 | parallel.py check: プランの本数の上限（I2）が after で直列のレーンも足し合わせ、順番待ちのレーンを足せない | `RF6b` | _check_limits が after で直列のレーンも足し合わせる誤りで、NEW-parallel-limits の「同時に動きうる組の本数の和の最大」で直る |
+| #3153 | ci-watch.py: マージがシャードのテストの失敗で落ちた直後に、まとめのチェックが pending だと CI 以外の理由と読む | `SF3` | 子 Issue そのもの |
+| #3167 | project-decl.py measure: 丸ごと出すリポジトリで、ベースブランチから切ったスプリントブランチの起点を production と数える | `A3e-2` | A3e-2 が直す measure_branch_flow.py に、丸ごと出すリポジトリでスプリントブランチの起点を base と数える判定を足す |
+| #3169 | リリース承認ゲートの承認資料: 実行されなかった CI のチェック（skipping）を未通過と数え、MVV 判定が判定できないを返す | `RF8` | #2995 が段階ごとに分ける release-steps.py の承認資料に、skipping のチェックを分母から外すか内訳を出す数え方を足す |
+| #3172 | 並列の計画: 古い記録から再開した耐久ワークフローが閉じた PR の依頼を外さず、差し戻すたびに中身の無いリリースを組み直す | `RF6a` | #2992 が判断を純粋な関数へ抜く parallel_route に、古い記録から再開した耐久ワークフローでも閉じた PR の依頼を外す読み取りを足す |
+| #3173 | 並列の計画: 終わった 1 スプリントのレーンのラッパーが止まらず残り、動いていないとの問いが人へ届く | `N3` | relay.py stop が tmux のセッションとラッパーのプロセスの終わりを確かめてから止まったと返し、耐久ワークフローの step_halt がその結果で止まったかを決める。終わりの印の無い古い版のレーンは、開発ループかスプリントの記録が終わっていれば終わったと数える |
+| #3174 | parallel.py answer: --choice と --note を一緒に渡すと指摘が答えに載らず、レーンへ届かない | `RF6a` | SF9 が触る parallel_answer.py に、--choice と --note の組で note を答えへ載せる変更を足す |
+| #3176 | supervise run: 差し戻しの後に同じ --from で打ち直すと、直した head を流さず前回の報告を返す | `RF5a` | 耐久の実行の鍵が head を持たず前回の報告を返す誤りで、NEW-queue-resume の再開の決まり（鍵に head を入れるか、head の違いを知らせて止める）で直る |
+| #3181 | cross-review: 設計 PR の 2 ラウンド目以降が前の head からの差分だけを見て、詳細レビューを通らない節を残したまま収束する | `A3g` | A3g が直す cross-review のスクリプトに、設計 PR では 2 ラウンド目以降も詳細レビューを通らない節を範囲に残す diff_scope の決め方を足す |
+| #3186 | supervise.py: merge で終わるプランの報告で、消えた作業場所のまま gh を打ち PR 本文の通した工程を書き直せない | `N2b` | Engine.report の冒頭で keep_cwd を呼び、refresh_mode_line の gh をリポジトリの根で打つ |
+| #3187 | 振る舞いの確認: claude -p の起動で標準入力が閉じず、ほかの対象の依頼文が入力に付く | `A3e-1` | A3e-1 が直す behavior-check.py に、claude -p の起動をスクリプトへ移すか起動の形に < /dev/null を足して標準入力を閉じる変更を加える |
+| #3188 | 実装のプランの CI の修正: 落ちたテストを手元で打たずに push し、同じ原因の落ちで CI を往復する | `SF4` | SF4 は CI の落ちたチェックをテストとテスト以外に分け verify_steps.py を触るので、ci-fix の結果に手元で打った落ちたテストのコマンドと合否を残し、落ちたまま push しない検査を足す |
+| #3189 | MVV 版 7 の覆し: 6 件の原因が MVV の文言か判定の仕組みかを切り分ける | 閉じられない | MVV 版 7 の覆し 6 件の原因を切り分ける調査で、閉じる条件が表と判断の記録でありスクリプトの変更では閉じない（判定の仕組みが原因の分はこの調査の結果として別の Issue へ結ぶ） |
+| #3196 | #1142 A0: 検査・規則・基準を入れ、兆候を増やす変更を CI で落とす | `A0` | 子 Issue そのもの |
+| #3197 | #1142 DC1: 事実の表の読み手（`lib/facts.py`・`lib/facts.sh`）と表の共通の形、依存 `jsonschema` を足す | `DC1` | 子 Issue そのもの |
+| #3198 | #1142 SF1a: 止まった理由の表 `causes.json` と読み手 `lib/causes.py` を契約に置く | `SF1a` | 子 Issue そのもの |
+| #3199 | #1142 A1a: 旧名を読み替える経路と、旧 K4 の撤去（呼び出し元の無いエントリポイント・投稿キューの移行の前のファイルの取り込み）を消す | `A1a` | 子 Issue そのもの |
+| #3200 | #1142 A2: 範囲の外のループの中の外部呼び出しを 1 回のクエリへまとめるか上限の印を付ける | `A2` | 子 Issue そのもの |
+| #3201 | #1142 DC2: 重複の検査 `const-fact`・`fact-table` と基準を入れる（DT1 の後半・DT7） | `DC2` | 子 Issue そのもの |
+| #3202 | #1142 A1b: 古い値を読み替える経路を消す | `A1b` | 子 Issue そのもの |
+| #3203 | #1142 SF1b: 結果 JSON の `cause` を必須にし、`stopped` を出すすべての手順のスクリプトが種類を返す | `SF1b` | 子 Issue そのもの |
+| #3204 | #1142 DC3: ランタイムの表を置き、読み手を表から導く | `DC3` | 子 Issue そのもの |
+| #3205 | #1142 DC4: 収束ループのフェーズ・指摘の重さ・テストの印の表を置く | `DC4` | 子 Issue そのもの |
+| #3206 | #1142 DC6: 宣言の置き場・環境変数名・PR 本文の見出し・指示書の表を置く | `DC6` | 子 Issue そのもの |
+| #3207 | #1142 SF9: 並列の計画の待ちの結果の行き先をスクリプトが選ぶ | `SF9` | 子 Issue そのもの |
+| #3208 | #1142 SF10: 手順 0 の 3 つの確かめを 1 回の結果 JSON にまとめる | `SF10` | 子 Issue そのもの |
+| #3209 | #1142 SF11: 開発ループのサブコマンドの断りと止まりが種類と `next` を返す | `SF11` | 子 Issue そのもの |
+| #3210 | #1142 K3: HTTP を `notify` の httpx へ移す | `K3` | 子 Issue そのもの |
+| #3211 | #1142 A3f-1: `skills/cross-refactoring/scripts/` の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3f-1` | 子 Issue そのもの |
+| #3212 | #1142 A3f-2: `skills/cross-refactoring/scripts/` の後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3f-2` | 子 Issue そのもの |
+| #3213 | #1142 DC5: 閾値を上限の宣言へ移す | `DC5` | 子 Issue そのもの |
+| #3214 | #1142 A3c-1: `scripts/lib/` の p〜z の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3c-1` | 子 Issue そのもの |
+| #3215 | #1142 SF2: プランの行き先を種類で選び、待てば解ける止まりを打ち直す。テンプレートを `on_cause` で書き直す | `SF2` | 子 Issue そのもの |
+| #3216 | #1142 SF12: 会話の切れ目と中断の点検の行き先を結果で返す | `SF12` | 子 Issue そのもの |
+| #3217 | #1142 K1: Markdown のコードブロックの判定をアダプター `md` へ移す | `K1` | 子 Issue そのもの |
+| #3218 | #1142 W4: cross-refactoring の語: 用語集の廃止語を生きた語へ替える | `W4` | 子 Issue そのもの |
+| #3219 | #1142 A3b: `scripts/lib/` の g〜oの握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3b` | 子 Issue そのもの |
+| #3220 | #1142 A3d: `scripts/hook_lib/`・`scripts/relay_lib/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3d` | 子 Issue そのもの |
+| #3221 | #1142 A3g: cross-refactoring を除く Skill の `scripts/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3g` | 子 Issue そのもの |
+| #3222 | #1142 DC8: 子 Issue の後に残る組（`sprint_loop_record`・`release_lib`・`parallel_*`・`durable`・`decl`）を持ち主から引く | `DC8` | 子 Issue そのもの |
+| #3223 | #1142 SF4: マージの落ちたチェックをテストとテスト以外に分け、supervisor が CI を手で読む手順を外す | `SF4` | 子 Issue そのもの |
+| #3224 | #1142 SF5: 設計のプランの最後の judge を外し、レビューの結果で設計承認ゲートへ渡す | `SF5` | 子 Issue そのもの |
+| #3225 | #1142 SF7: プランの wait が attention を種類つきで返し、次のコマンドを `next` に載せる | `SF7` | 子 Issue そのもの |
+| #3226 | #1142 SF6: 判断の呼び出しの答えを選択肢か JSON のスキーマで縛る | `SF6` | 子 Issue そのもの |
+| #3227 | #1142 SF13: 承認ゲートの結果に答えごとの `routes` を必須で足し、問いの区分と選択肢を結果に載せる | `SF13` | 子 Issue そのもの |
+| #3228 | #1142 A3a: `scripts/lib/` の a〜fの握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3a` | 子 Issue そのもの |
+| #3229 | #1142 A3c-2: `scripts/lib/` の p〜z の後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3c-2` | 子 Issue そのもの |
+| #3230 | #1142 A3e-1: `scripts/` の直下と下位の 5 つのうち名前の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3e-1` | 子 Issue そのもの |
+| #3231 | #1142 A3e-2: `scripts/` の直下と下位の 5 つのうち名前の後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | `A3e-2` | 子 Issue そのもの |
+| #3232 | #1142 DC7: 工程とフェーズ（`metadata.ndf.phase`）・モード・進め方・ブランチの接頭辞・承認ゲートを表と工程の文書から引く | `DC7` | 子 Issue そのもの |
+| #3233 | #1142 W6: ラッパーの語: 用語集の廃止語を生きた語へ替える | `W6` | 子 Issue そのもの |
+| #3234 | #1142 SF8: 進行表が工程の失敗の種類から行き先を選び、conductor へ `routes` だけを返す。工程の失敗の終了コード 6 を IS11 に合わせる | `SF8` | 子 Issue そのもの |
+| #3235 | #1142 K2: パスの照合とコメントの除去をアダプターへ移し、`comment_mask.py` を消す | `K2` | 子 Issue そのもの |
+| #3236 | #1142 W3: 外部 CLI と記録の語: 用語集の廃止語を生きた語へ替える | `W3` | 子 Issue そのもの |
+| #3237 | #1142 W5: worktree と hook の語: 用語集の廃止語を生きた語へ替える | `W5` | 子 Issue そのもの |
+| #3238 | #1142 W1: プランの実行の語（フェーズの結果の語を `report_fields` に集める）: 用語集の廃止語を生きた語へ替える | `W1` | 子 Issue そのもの |
+| #3239 | #1142 W2: cross-review の語: 用語集の廃止語を生きた語へ替える | `W2` | 子 Issue そのもの |
+| #3240 | #1142 W7: リリースと文書の語: 用語集の廃止語を生きた語へ替える | `W7` | 子 Issue そのもの |
+| #3241 | #1142 W8: W1〜W7 で外した廃止語を禁止語にする | `W8` | 子 Issue そのもの |
+| #3243 | 並列の計画: 認証の一時的な失敗で /goal が外れたレーンを running のまま扱い、止まりを検知しない | `N3` | ラッパーの記録の「認証に失敗し替えられるアカウントが無い」の行を relay.py ls の行の止まりの理由として出し、耐久ワークフローがそれを停滞として扱い、アカウントが使えれば起こし直し、使えなければ stall の問いにする |

@@ -91,6 +91,7 @@ A1a・A1b は import を消すだけで、新しい向きを足さない。
 | `plugins/ndf/scripts/merged-steps.py` | 変更 | 調べる PR を開いた PR の一覧 1 回から選ぶ（A2） | `plugins/ndf/scripts/lib/gh_rest.py` |
 | `plugins/ndf/scripts/release-verification-steps.py` | 変更 | プラグインごとの変更を 1 回の `git diff` から分ける（A2） | git |
 | `plugins/ndf/scripts/sprint_close_lib/collect.py` | 変更 | 参照だけの Issue の状態を 1 回のクエリで読む（A2） | `plugins/ndf/scripts/lib/gh_rest.py` |
+| `plugins/ndf/scripts/lib/delivery.py` | 変更 | hook の宣言の読み取りの既定値への倒れを直す（A3e-1、#2838） | 無し |
 
 次のファイルは、設計文書の「直す順序と触るファイル」の表が持つ。ここでは関数の責務を変えるものだけを上に挙げた。
 
