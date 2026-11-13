@@ -261,10 +261,11 @@ def test_design_plan_sets_up_glossary_and_requirements_before_design(tmp_path):
 
 
 def test_design_plan_rebuilds_the_design_document_before_the_pr(tmp_path):
-    """設計の worker は push しない指示で組み直しの手前で止まるため、プランが組み直しのステップを持つ。"""
+    """設計の worker は push しない指示で組み直しの手前で止まるため、プランが組み直しのステップを持つ。
+    standard では詳細設計の段の後に組み直す（#3144）。"""
     plan = design_plan(tmp_path)
     st = {s["id"]: s for s in plan["steps"]}
-    assert st["design"]["next"] == "rebuild"
+    assert st["detail-design"]["next"] == "rebuild"
     rb = st["rebuild"]
     assert rb["type"] == "work" and rb["stage"] == "ドキュメント再構成" and rb["next"] == "pr"
     assert "/ndf:document-rebuild" in rb["prompt"] and "issues/issue-216-design.md" in rb["prompt"]
@@ -989,3 +990,152 @@ def test_guidance_is_not_given_to_a_documentation_sprint(tmp_path):
 def test_guidance_is_given_when_delivery_is_missing(tmp_path):
     manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, None)
     assert "delivery" in manifest["CD の案内"]["missing"]
+
+
+# --- #3144: 設計単体のレビューと詳細設計の段 ----------------------------------------------
+
+from argparse import Namespace  # noqa: E402
+
+from supervise_lib import design_steps, procedures, sprint_revise  # noqa: E402
+from supervise_lib.decl import DeclError  # noqa: E402
+
+DETAIL_ROUTE = ["design", "design-review", "design-review-check", "design-fix", "detail-design", "rebuild"]
+DETAIL_IDS = {"design-review", "design-review-check", "design-fix", "detail-design"}
+
+
+@pytest.fixture()
+def fresh_stage_class():
+    design_steps._stage_class.cache_clear()
+    yield
+    design_steps._stage_class.cache_clear()
+
+
+def _writing(mode: str) -> dict[str, dict]:
+    return {s["id"]: s for s in design_steps.writing_steps(Namespace(mode=mode), 216, "issues/issue-216-requirements.md")}
+
+
+def test_the_standard_design_plan_reviews_the_design_before_the_detail(tmp_path):
+    """受け入れ条件 8・10、I7・I8・I10: design → design-review → check →（指摘ありなら fix）→ detail-design → rebuild。"""
+    plan = design_plan(tmp_path)
+    ids = [s["id"] for s in plan["steps"]]
+    assert ids[ids.index("design") : ids.index("rebuild") + 1] == DETAIL_ROUTE
+    st = {s["id"]: s for s in plan["steps"]}
+    assert st["design"]["next"] == "design-review" and st["design-review"]["next"] == "design-review-check"
+    assert st["design-review-check"]["on_exit"] == {"1": "design-fix"} and st["design-review-check"]["next"] == "detail-design"
+    assert st["design-fix"]["next"] == "detail-design"  # 直した後にレビューを打ち直さない
+    assert [st[k]["stage"] for k in ("design-review", "design-review-check", "design-fix")] == ["設計"] * 3
+    assert st["detail-design"]["stage"] == "詳細設計" and st["detail-design"]["next"] == "rebuild"
+    assert "/ndf:design #216 詳細設計" in st["detail-design"]["prompt"]
+    assert st["survey-check"]["cmd"].endswith("--require-detail") and st["survey-recheck"]["cmd"] == st["survey-check"]["cmd"]
+    assert [s["id"] for s in plan["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートを増やさない
+    assert design_steps.DESIGN_REVIEW_NOTE in st["pr"]["append"]
+
+
+@pytest.mark.parametrize("mode", ["standard", "legacy-refactor"])
+def test_the_detail_steps_follow_the_stage_matrix(mode):
+    st = _writing(mode)
+    assert DETAIL_IDS <= set(st) and st["design"]["next"] == "design-review"
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
+def test_modes_without_the_detail_stage_keep_their_design_steps(mode):
+    """受け入れ条件 9: 詳細設計を通らないモードは design から rebuild へ進み、4 段も --require-detail も持たない。"""
+    st = _writing(mode)
+    assert not DETAIL_IDS & set(st) and st["design"]["next"] == "rebuild"
+    assert "詳細設計" not in st["design"]["prompt"]
+    assert not any("--require-detail" in s.get("cmd", "") for s in procedures.survey_steps(216, "glossary-check"))
+
+
+def _matrix_copy(tmp_path, edit) -> Path:
+    """工程の分類だけを `edit` で書き換えた写し。本物を読んでから `WF_STAGE_MATRIX` を上書きする（隣のファイルを読むため）。"""
+    src = design_steps.WORKFLOW_COMMON.read_text(encoding="utf-8")
+    matrix = re.search(r"^WF_STAGE_MATRIX=\$'[^']*'", src, re.M).group(0)
+    dst = tmp_path / "workflow-common.sh"
+    dst.write_text(f". '{design_steps.WORKFLOW_COMMON}'\n{edit(matrix)}\n", encoding="utf-8")
+    return dst
+
+
+def test_the_modes_come_from_the_stage_matrix(tmp_path, monkeypatch, fresh_stage_class):
+    """決定 5: 工程の分類の写しで light の「詳細設計」を R にすると、light にも 4 段が並ぶ。"""
+    lib = _matrix_copy(tmp_path, lambda s: s.replace("詳細設計\\t-\\t-\\tR", "詳細設計\\tR\\t-\\tR", 1))
+    monkeypatch.setattr(design_steps, "WORKFLOW_COMMON", lib)
+    assert DETAIL_IDS <= set(_writing("light"))
+
+
+@pytest.mark.parametrize("broken", ["no-row", "no-file", "unknown-mode"])
+def test_an_unreadable_stage_matrix_stops_the_plan(tmp_path, monkeypatch, fresh_stage_class, broken):
+    mode = "standard"
+    if broken == "no-row":
+        lib = _matrix_copy(tmp_path, lambda s: re.sub(r"\n詳細設計\\t[^\n]*", "", s, count=1))
+    elif broken == "no-file":
+        lib = tmp_path / "missing.sh"
+    else:
+        lib, mode = design_steps.WORKFLOW_COMMON, "bogus"
+    monkeypatch.setattr(design_steps, "WORKFLOW_COMMON", lib)
+    with pytest.raises(DeclError):
+        design_steps.detail_design_runs(mode)
+
+
+def test_the_stage_matrix_is_read_once_per_mode(monkeypatch, fresh_stage_class):
+    calls = []
+    real = subprocess.run
+    monkeypatch.setattr(design_steps.subprocess, "run", lambda *a, **k: calls.append(a) or real(*a, **k))
+    assert design_steps.detail_design_runs("standard") and design_steps.detail_design_runs("standard")
+    assert not design_steps.detail_design_runs("light")
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "body,code",
+    [
+        ("## 設計単体のレビュー\n\n- 無し\n", 0),
+        ("## 設計単体のレビュー\n\n| # | 箇所 | 指摘 | 扱い |\n| --- | --- | --- | --- |\n| 1 | 構成要素 | - 無し と書いた | 未 |\n", 1),
+        (None, 2),
+    ],
+)
+def test_the_review_check_branches_on_the_review_file(tmp_path, body, code):
+    """受け入れ条件 10（分岐）: 「- 無し」の 1 行で 0、指摘の表だけで 1、ファイルが無ければ 2。"""
+    (tmp_path / "work").mkdir()
+    if body is not None:
+        (tmp_path / "work" / "design-review.md").write_text(body, encoding="utf-8")
+    cmd = {s["id"]: s for s in design_steps.detail_steps(216)}["design-review-check"]["cmd"].replace("{state_dir}", str(tmp_path))
+    assert subprocess.run(["sh", "-c", cmd]).returncode == code
+
+
+def test_the_design_review_reads_only_the_design_focus():
+    """受け入れ条件 5: 詳細設計の 6 観点は設計 PR の観点に入り、設計単体のレビューが読む 2 つの定数には入らない。"""
+    sys.path.insert(0, str(SCRIPTS.parent / "skills" / "cross-review" / "scripts"))
+    from review_lib import review_focus  # noqa: PLC0415
+
+    detail = review_focus.DETAIL_REVIEW_TEMPLATE.splitlines()[1:]
+    assert len(detail) == 6
+    assert all(line in review_focus.CATEGORY_TEMPLATES["design"] for line in detail)
+    for template in (review_focus.MODEL_REVIEW_TEMPLATE, review_focus.DESIGN_REVIEW_TEMPLATE):
+        assert not any(line in template for line in detail)
+    prompt = {s["id"]: s for s in design_steps.detail_steps(216)}["design-review"]["prompt"]
+    assert str(design_steps.REVIEW_FOCUS) in prompt and "MODEL_REVIEW_TEMPLATE" in prompt and "DESIGN_REVIEW_TEMPLATE" in prompt
+
+
+def _revise_plan(with_detail: bool) -> dict:
+    steps = [
+        {"id": "glossary", "next": "requirements-check"},
+        {"id": "requirements-check", "next": "design"},
+        {"id": "requirements", "prompt": "要求"},
+        {"id": "design", "prompt": "設計"},
+        *([{"id": "detail-design", "prompt": "詳細設計"}] if with_detail else []),
+        {"id": "push-glossary", "next": "ready"},
+    ]
+    return {"steps": steps}
+
+
+@pytest.mark.parametrize("with_detail", [True, False])
+def test_the_revise_note_reaches_the_detail_step(monkeypatch, with_detail):
+    monkeypatch.setattr(sprint_revise.revise_note, "read_input", lambda path: {"rounds": []})
+    monkeypatch.setattr(sprint_revise.revise_note, "prompt_text", lambda data, doc=None: "出し直しの指摘")
+    plan = sprint_revise.with_revise_note(
+        _revise_plan(with_detail), Namespace(revise_notes={216: "n.json"}), 216, "issues/issue-216-design.md"
+    )
+    st = {s["id"]: s for s in plan["steps"]}
+    assert st["design"]["prompt"].endswith("出し直しの指摘")
+    if with_detail:
+        assert st["detail-design"]["prompt"].endswith("出し直しの指摘")

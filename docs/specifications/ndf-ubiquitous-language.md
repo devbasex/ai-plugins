@@ -146,7 +146,7 @@ stateDiagram-v2
 | 設計の手順 0 | `standard` / `legacy-refactor` | `gate --mode <モード>` が 0 以外なら作る手順を示して止まる |
 | 設計の手順 3 | すべて | ドメインモデルの節（コンテキスト・集約・不変条件・ドメインイベント・用語）を最初に書く。コンテキストが 2 つ以上にまたがるなら、関係を 1 つ宣言する。書いた後に `check --file <設計文書>` を打ち、新しい語・意味の変わった語・廃止する語を同じ変更で用語集へ反映して `render` する |
 | 設計の手順 5 | すべて | 7 つ目の突き合わせる対「不変条件 ↔ テスト設計」: 不変条件ごとにテスト設計の行がある |
-| 設計の手順 6 | `standard` | `spec-copy.py check` が 0 であることを確かめてから設計 Pull Request を出す。1 なら `write` でコピーを作り直す（本文が正） |
+| 設計の手順 7 | `standard` | `spec-copy.py check` が 0 であることを確かめてから設計 Pull Request を出す。1 なら `write` でコピーを作り直す（本文が正） |
 | テスト駆動の手順 1 | すべて | 設計文書に不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件のテストより先に書く。テストの名前か docstring に不変条件の番号を書く |
 | 振り返り | すべて | その変更の起点と終点で `diff` を打ち、「用語集の変化」の節にコンテキストごとに 1 行ずつ載せる。0 件なら節を書かない |
 | `backlog-refinement` | — | 起点（直近の本番のタグ）と終点（`HEAD`）で `diff` を打ち、完了報告の表の「用語集の変化」の行に、足された語の数・廃止された語の数と語の並びを載せる |
@@ -237,7 +237,7 @@ stateDiagram-v2
 | `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
 | `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `requirements-recheck` |
 | `requirements-recheck` | run | `spec-copy.py check <課題> <コピー>`（レビューの直しの後も、コピーが課題の本文と一致するか） | `survey-check`。0 以外は `on_fail` を置かずに止まる |
-| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか） | 0 → `glossary-check`。0 以外 → `fix-survey` |
+| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか。詳細設計を通るモードでは `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる） | 0 → `glossary-check`。0 以外 → `fix-survey` |
 | `fix-survey` | work | 指摘の決定の作り方・比べた候補を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は直さずに「判断が要る」と報告する | `survey-recheck` |
 | `survey-recheck` | run | `survey-check` と同じ | 0 → `glossary-check`。0 以外は `on_fail` を置かずに止まる |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
@@ -257,7 +257,7 @@ stateDiagram-v2
 | 項目 | 形 |
 | --- | --- |
 | ラウンドの種類を決める関数 | `classifications.review_stage(kind, round_no, has_model)`。`design` かつ 1 ラウンド目かつ `has_model` なら `model`、ほかの `design` は `detail`、`code` は `None` |
-| `has_model` | `init` が決め、状態ファイルの `design_has_model` に持つ。変更した設計文書（`-design.md` / `-design-decisions.md`）のどれかに見出し `## ドメインモデル` があれば真 |
+| `has_model` | `init` が決め、状態ファイルの `design_has_model` に持つ。変更した設計文書（`-design.md` / `-design-decisions.md` / `-design-detail.md`）のどれかに見出し `## ドメインモデル` があれば真 |
 | 状態ファイル | `design_has_model`・`review_instructions_by_stage`（`{"model": 文字列, "detail": 文字列}`）・ラウンドごとの `rounds[].stage` |
 | 担当へ渡す観点 | `launch-reviewer.sh` がそのラウンドの種類の文字列を追加レビュー観点へ差し込む。`review_instructions_by_stage` が無い状態ファイルは `review_instructions` を使う |
 | 抜ける条件 | `model` のラウンドが収束しても抜けない（`verdict: model_confirmed`、`MODEL_CONFIRMED=1` を出して終了コード 2）。修正を挟まずに詳細レビューのラウンドへ進む。`detail` のラウンドは収束の判定で抜ける。ラウンドの上限 3 と承認ゲートの数は変わらない |
@@ -297,7 +297,9 @@ stateDiagram-v2
 | `check.banned` | オブジェクト | 許す | 禁止語の宣言。`words`（禁止語の配列）・`paths`（検査する範囲の glob）・`exclude`（外す範囲の glob。無くてよい）。無ければ規則 `banned` を走らせない |
 
 `init` が書く用語集の設定は、`check.paths` に `issues/*-requirements.md`・`issues/*-design.md`・
-`issues/*-design-decisions.md`、`check.term_sections` に `["用語"]` を持ち、`check.source_paths` を持たない。
+`issues/*-design-decisions.md`・`issues/*-design-detail.md`、`check.term_sections` に `["用語"]` を持ち、
+`check.source_paths` を持たない。`check.paths` の既定は、設計文書の種類の契約
+（`plugins/ndf/contracts/design-docs.json`）で用語チェックの対象とした種類から作る。
 
 ### 用語集（`source`）
 

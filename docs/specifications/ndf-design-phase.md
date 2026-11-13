@@ -83,6 +83,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 工程 | `light` | `operation` | `legacy-refactor` | `standard` |
 | --- | --- | --- | --- | --- |
 | 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` |
+| 詳細設計 | — | — | `design` | `design` |
 | ドキュメント再構成 | — | — | 設計 Pull Request を分けた場合 | `document-rebuild` |
 | ドキュメントレビュー | — | — | 設計 Pull Request を分けた場合 | `pr` → `cross-review` → `merged` |
 

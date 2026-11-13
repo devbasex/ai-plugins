@@ -4,6 +4,7 @@
   "stages": {
     "要求と受け入れ条件": ["document-style"],
     "設計": ["document-style"],
+    "詳細設計": ["document-style"],
     "ドキュメント再構成": ["document-style"],
     "ドキュメントレビュー": ["document-style"],
     "計画": ["document-style"],
