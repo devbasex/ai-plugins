@@ -326,13 +326,16 @@ def flat_args(args: dict) -> set[tuple[str, str, str]]:
 
 def args_of(options: set[tuple[str, str]], positionals: list[tuple[str, str]]) -> dict:
     """拾った引数を契約の args の形にする。位置引数は呼び出しで並びが意味を持つため、登録した順のまま置く。"""
-    out: dict = {"options": sorted(o for s, o in options if not s), "positionals": [p for s, p in positionals if not s]}
+    out: dict = {"options": sorted(_for_sub(options, "")), "positionals": _for_sub(positionals, "")}
     subs = sorted(({s for s, _ in options} | {s for s, _ in positionals}) - {""})
     if subs:
-        out["subcommands"] = {
-            s: {"options": sorted(o for t, o in options if t == s), "positionals": [p for t, p in positionals if t == s]} for s in subs
-        }
+        out["subcommands"] = {s: {"options": sorted(_for_sub(options, s)), "positionals": _for_sub(positionals, s)} for s in subs}
     return out
+
+
+def _for_sub(pairs, sub: str) -> list[str]:
+    """(副命令, 名前) の組から、副命令が `sub` のものの名前を並びの順に取り出す。"""
+    return [name for s, name in pairs if s == sub]
 
 
 def positional_order(args: dict) -> dict[str, list[str]]:
