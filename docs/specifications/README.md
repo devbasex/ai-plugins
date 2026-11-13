@@ -169,5 +169,7 @@
 | [ndf-sprint-final-check-scope.md](ndf-sprint-final-check-scope.md) | スプリントのまとめの最後の検査を確定仕様化のマージの後に置き、範囲をスプリントに属しまだ検査していない Pull Request に絞ること（check-trigger.py の --sprint・final_scope）、検査の印を進めてよい位置、検査の Pull Request の起点と先頭の合わせ方 |
 | [ndf-whole-test-ci-wait-conflict-stop.md](ndf-whole-test-ci-wait-conflict-stop.md) | CI に任せる全体テストの待ちが、ベースブランチと衝突した Pull Request を照会のたびに読み（fetch_mergeable）、上限まで待たずに stopped で止まり base-sync を次の 1 手に示すこと |
 | [ndf-detailed-design-stage.md](ndf-detailed-design-stage.md) | 詳細設計の工程（standard・legacy-refactor で設計の直後に置く）と設計単体のレビューの段、詳細設計の検査の 5 規則（design-survey.py check）、設計文書の種類の契約（design-docs.json）の常に成り立つ条件・決定と理由・テスト観点。書き方は design の references/detailed-design.md が正 |
+| [ndf-branch-flow-review-units.md](ndf-branch-flow-review-units.md) | ブランチ運用の宣言のレビューの単位（`branch_flow.reviews`）: PR の種類ごとに掛けるレビューと対象の差分、許す値と既定値の表、実装の差分がレビューされない宣言と既定値の重なりを止める検査、目録のスナップショット、リリースブランチの PR の衝突の解消のレビュー（`review-open`・`review-close`）、測定とずれ。書き方は `worktree` の `references/declaration.md` が正 |
+| [ndf-release-approval-on-pr.md](ndf-release-approval-on-pr.md) | CD のある場合のリリース承認をリリースの PR の上で取ること: 承認の証跡のコメントと証跡のチェック（`ndf/release-approval` の commit status・`release-approval.yml`）、リリースの場合（`cd-no-review` / `cd-review` / `no-cd`）の判定、管理者の迂回なしのマージ、本番のプランの並び、開発版の workflow（`release-dev.yml`）、ruleset の移行の順序。手順は `release` の SKILL.md と `references/release-steps.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

@@ -6909,13 +6909,13 @@
       "term": "スプリントの PR",
       "context": "ndf-workflow",
       "meaning": "スプリントブランチからベースブランチへ出す、検査のプランの PR",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "リリースブランチの PR",
       "context": "ndf-release",
       "meaning": "選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "対象の差分",
@@ -6927,7 +6927,7 @@
       "term": "未検査の差分",
       "context": "ndf-workflow",
       "meaning": "前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方",
-      "pending_source": "issues/issue-3163-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
       "term": "衝突の解消の差分",
@@ -6951,43 +6951,43 @@
       "term": "リリースの PR",
       "context": "ndf-release",
       "meaning": "本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める",
-      "pending_source": "issues/issue-2773-requirements.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "証跡のチェック",
       "context": "ndf-release",
       "meaning": "リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック",
-      "pending_source": "issues/issue-2773-requirements.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "承認権限",
       "context": "ndf-release",
       "meaning": "リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain",
-      "pending_source": "issues/issue-2773-requirements.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "リリースの場合",
       "context": "ndf-release",
       "meaning": "CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める",
-      "pending_source": "issues/issue-2773-design.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "承認資料のコメント",
       "context": "ndf-release",
       "meaning": "承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない",
-      "pending_source": "issues/issue-2773-design.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "開発版の workflow",
       "context": "ndf-release",
       "meaning": "手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow",
-      "pending_source": "issues/issue-2773-design.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "承認の証跡",
       "context": "ndf-release",
       "meaning": "リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない",
-      "pending_source": "issues/issue-2773-design.md"
+      "source": "docs/specifications/ndf-release-approval-on-pr.md"
     },
     {
       "term": "兆候",
