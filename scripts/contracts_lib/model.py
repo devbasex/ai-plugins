@@ -253,15 +253,20 @@ def _check_form(f: Path, d: dict) -> None:
     if not d["cases"]:
         raise ContractError(f"{f.name}: cases は 1 つ以上")
     for i, case in enumerate(d["cases"]):
-        if not isinstance(case, dict):
-            raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
-        shape = next((sh for sh in CASE_SHAPES if set(case) == set(sh)), CASE_SHAPES[0])
-        _need(f, case, shape)
-        for k in ("blocks", "errors"):
-            if k in shape and not all(isinstance(x, str) for x in case[k]):
-                raise ContractError(f"{f.name}: cases[{i}].{k} は文字列の並び")
+        _check_case(f, i, case)
     if "shape" in d:
         _check_shape(f, d["shape"])
+
+
+def _check_case(f: Path, i: int, case: object) -> None:
+    """例の組 1 件: キーの集合が一致する CASE_SHAPES の形（無ければ先頭）を満たし、blocks・errors は文字列の並び。"""
+    if not isinstance(case, dict):
+        raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
+    shape = next((sh for sh in CASE_SHAPES if set(case) == set(sh)), CASE_SHAPES[0])
+    _need(f, case, shape)
+    for k in ("blocks", "errors"):
+        if k in shape and not all(isinstance(x, str) for x in case[k]):
+            raise ContractError(f"{f.name}: cases[{i}].{k} は文字列の並び")
 
 
 def _check_shape(f: Path, shape: dict) -> None:
