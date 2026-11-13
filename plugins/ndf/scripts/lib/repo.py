@@ -14,6 +14,7 @@ from pathlib import Path
 
 import branch_flow
 import decl
+import limits
 import proc
 from closing import defer_closing
 
@@ -170,7 +171,7 @@ def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
 
 
 # 本番チャネルを取り込み直す上限（秒）。応答の無い origin でプランの組み立てを止め続けないため（#3308）
-PRODUCTION_FETCH_TIMEOUT = 60
+PRODUCTION_FETCH_TIMEOUT = limits.seconds("repo.production-fetch")
 
 
 def _fetch_tracking(root, name: str) -> bool:
