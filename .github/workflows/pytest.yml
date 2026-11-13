@@ -124,6 +124,36 @@ jobs:
           path: pytest-junit-${{ matrix.shard }}.xml
           if-no-files-found: warn
 
+  # 進行表の DB と進行表のワークフローの結合のテストを PostgreSQL でも流す（#3092 の受け入れ条件 9）。
+  # SQLite の 1 回目は pytest-shard が流す。同じテストを NDF_TEST_PG_URL の置き場で流し直す
+  pytest-postgres:
+    name: pytest (PostgreSQL)
+    needs: ci-scope
+    if: ${{ !cancelled() && needs.ci-scope.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ndf
+          POSTGRES_DB: ndf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests/test_progress_db.py -q
+        env:
+          NDF_TEST_PG_URL: postgresql+psycopg://postgres:ndf@localhost:5432/ndf
+
   # 文書のファイルだけの PR で、テストが読む文書を読むテストだけを回す（#2925）。テストの一覧は判定の出力を
   # 環境変数で渡す（PR の宣言から来る値を式でシェルへ埋めない）
   pytest-docs:
@@ -155,16 +185,18 @@ jobs:
   # 判定が省いたときは分けたジョブが skipped になり、文書のテストを出したならその成功を、出さなければ
   # 文書のテストのジョブの skipped を求める
   pytest:
-    needs: [ci-scope, pytest-shard, pytest-docs]
+    needs: [ci-scope, pytest-shard, pytest-docs, pytest-postgres]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           SHARD: ${{ needs.pytest-shard.result }}
+          PG: ${{ needs.pytest-postgres.result }}
           DOCS: ${{ needs.pytest-docs.result }}
           SKIP: ${{ needs.ci-scope.outputs.skip }}
           DOCS_TESTS: ${{ needs.ci-scope.outputs.docs_tests }}
         run: |
-          test "$SHARD" = success && exit 0
+          test "$SHARD" = success && test "$PG" = success && exit 0
+          test "$SHARD" = success && exit 1
           test "$SKIP" = true && test "$SHARD" = skipped || exit 1
           if test -n "$DOCS_TESTS"; then test "$DOCS" = success; else test "$DOCS" = skipped; fi
