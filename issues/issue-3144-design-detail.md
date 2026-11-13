@@ -18,7 +18,8 @@ docs/
 └── glossary/glossary.json
 plugins/ndf/
 ├── contracts/
-│   └── design-docs.json *                 # 設計文書の種類と名前の契約（唯一の置き場）
+│   ├── design-docs.json *                 # 設計文書の種類と名前の契約（唯一の置き場）
+│   └── entrypoints/plugins__ndf__scripts__design-survey.py.json
 ├── scripts/
 │   ├── design-survey.py                   # 検査のエントリポイント
 │   ├── glossary.py
@@ -60,6 +61,7 @@ plugins/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__design-survey.py.json` | 変更 | `check` の `options` に `--require-detail` を足す（`scripts/check-ndf-contracts.py` が引数と照らす） | 無し |
 | `plugins/ndf/contracts/design-docs.json` | 新設 | 設計文書の置き場と、種類ごとの名前の末尾・行数の上限を見るか・用語チェックの既定の対象か・設計 PR の文書か・雛形のパスを持つ | 無し |
 | `plugins/ndf/scripts/lib/doc_kinds.py` | 新設 | `design-docs.json` を読み、真偽の名前ごとの末尾・パスの形・パスの種類・雛形のパスを返す | 無し（標準ライブラリだけ） |
 | `plugins/ndf/scripts/lib/design_detail.py` | 新設 | 詳細設計の文書 1 本を節・異常系・再利用・ファイルの規則で判定し、指摘の行を返す。節の一覧は雛形から読む | `md`・`design_docs`・`doc_kinds` |
