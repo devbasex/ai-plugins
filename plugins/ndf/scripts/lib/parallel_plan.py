@@ -174,11 +174,13 @@ class ParallelPlan(BaseModel):
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
 
     def _check_limits(self, ctx: dict) -> None:
-        """レーン数とプラン本数の合計の上限（I2）。"""
+        """レーン数とプラン本数の合計の上限（I2）。終わりの記録のあるレーン（`ended`）は同時に動かないので数えない（#3021）。"""
+        ended = set(ctx.get("ended") or ())
+        live = [ln for ln in self.lanes if ln.name not in ended]
         cap = int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
-        if len(self.lanes) > cap:
-            raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(self.lanes), "cap": cap})
-        total, limit = sum(ln.plans for ln in self.lanes), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
+        if len(live) > cap:
+            raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(live), "cap": cap})
+        total, limit = sum(ln.plans for ln in live), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
         if total > limit:
             raise PydanticCustomError("I2", "プランの本数の合計 {n} が上限 {cap} を超える", {"n": total, "cap": limit})
 
@@ -278,16 +280,18 @@ def check_data(
     estimates: Optional[Mapping[str, Mapping[int, list[str]]]] = None,
     shared: Iterable[Mapping] | Mapping[str, list] = (),  # レーン → 共有の一覧（`touch_estimate.lane_estimates`）か 1 つの一覧
     estimate_error: Optional[str] = None,
+    ended: Iterable[str] = (),
 ) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
     `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。
     `estimates`（レーン → 課題 → 触る場所の見込み）を渡すと、同じ時間帯に動くレーンの課題の見込みの重なりを I21 の警告にする。
-    見込みを集められなかったときは `estimate_error` に理由を渡し、I21 の警告を 1 つ出す（#2997 の決定 4）。"""
+    見込みを集められなかったときは `estimate_error` に理由を渡し、I21 の警告を 1 つ出す（#2997 の決定 4）。
+    `ended`（終わりの記録のあるレーン名。`parallel_ledger.ended_lanes`）は上限（I2）の数から外す（#3021）。"""
     plans_cap, plans_note = max_plans()
     named_cap, named_note = named_limit()
     caps = {"max_plans": plans_cap, "max_named": named_cap}
     notes = [n for n in (plans_note, named_note) if n]
-    ctx = {**caps, "home": str(home) if home else None}
+    ctx = {**caps, "home": str(home) if home else None, "ended": set(ended)}
     try:
         plan = ParallelPlan.model_validate(data, context=ctx)
     except ValidationError as exc:
