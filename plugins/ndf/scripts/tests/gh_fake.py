@@ -55,20 +55,20 @@ def fake(monkeypatch):
     return f
 
 
-GH_PR_CREATE = (
-    "#!{py}\nimport os, sys\na = sys.argv[1:]\n"
-    "if a[:2] == ['pr', 'create']:\n"
-    "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
-    "    print('https://github.com/o/r/pull/5')\n"
-    "sys.exit(0)\n"
-)
+PY = sys.executable
 
 
 def install_gh_pr_create(tmp_path: Path, monkeypatch) -> Path:
     """`gh pr create` の --body を書き出す偽の `gh` を PATH の先頭へ置く。本文を書くファイルのパスを返す。"""
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    (bindir / "gh").write_text(GH_PR_CREATE.format(py=sys.executable))
+    (bindir / "gh").write_text(
+        f"#!{PY}\nimport os, sys\na = sys.argv[1:]\n"
+        "if a[:2] == ['pr', 'create']:\n"
+        "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
+        "    print('https://github.com/o/r/pull/5')\n"
+        "sys.exit(0)\n"
+    )
     (bindir / "gh").chmod(0o755)
     body = tmp_path / "body.txt"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
