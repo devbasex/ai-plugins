@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fact.schema.json",
+  "title": "事実の表の共通の形",
+  "description": "contracts/facts/<名前>.json の形。列の宣言から行の形を作り、読み手（ndf.contracts.facts）が各行を確かめる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "summary", "owner", "columns", "rows"],
+  "properties": {
+    "version": {"const": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1, "description": "表を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
+    "columns": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "summary"],
+        "properties": {
+          "type": {"enum": ["boolean", "string", "integer", "array"]},
+          "summary": {"type": "string", "minLength": 1},
+          "optional": {"type": "boolean"},
+          "ref": {"type": "string", "pattern": "^(limits\\.json#[a-z.-]+|facts/[a-z][a-z0-9-]*)$"}
+        }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}
