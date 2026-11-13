@@ -214,7 +214,7 @@ def test_every_kind_of_pushback_carries_the_form(home: Path, kind):
         for name in rule.always:
             assert name in got["reason"]
         for cond in rule.when:
-            assert cond.item in got["reason"] and (cond.prefix or cond.equals) in got["reason"]
+            assert cond.item in got["reason"] and cond.value in got["reason"]
             assert all(n in got["reason"] for n in cond.need)
 
 

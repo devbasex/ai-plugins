@@ -41,6 +41,9 @@ TEXT_VALUES = "結果の値（値: 意味。要る項目は無しにしない）
 TEXT_ALWAYS = "要る項目: {items}"
 TEXT_PREFIX = "「{item}」が {cond} で始まるとき「{need}」も要る"
 TEXT_EQUALS = "「{item}」が {cond} のとき「{need}」も要る"
+# 条件の種類（`when` の要素の鍵）ごとの照合と文の型。種類はこの 2 つの表の鍵だけ
+MATCHERS = {"prefix": str.startswith, "equals": str.__eq__}
+CONDITION_TEXTS = {"prefix": TEXT_PREFIX, "equals": TEXT_EQUALS}
 TEXT_MATERIAL = (
     "- 材料の書き方: 「{item}」は {body} か、{url_prefix} で始まる URL（空白で区切って並べてよい）。"
     "{body} と書くときは、結果の行より前に「{heading}」の行を置き、その節に材料を書く"
@@ -55,16 +58,15 @@ class FormError(ValueError):
 
 @dataclass(frozen=True)
 class Condition:
-    """値ごとに要る項目の条件（`when` の 1 つ）。項目 `item` の値が `prefix` で始まるか `equals` と同じなら `need` が要る。"""
+    """値ごとに要る項目の条件（`when` の 1 つ）。項目 `item` の値が種類 `op`（`MATCHERS` の鍵）で `value` に合えば `need` が要る。"""
 
     item: str
     need: tuple[str, ...]
-    prefix: str | None = None
-    equals: str | None = None
+    op: str
+    value: str
 
     def matches(self, items: dict[str, str]) -> bool:
-        got = items.get(self.item, "")
-        return got.startswith(self.prefix) if self.prefix is not None else got == self.equals
+        return MATCHERS[self.op](items.get(self.item, ""), self.value)
 
 
 @dataclass(frozen=True)
@@ -119,18 +121,15 @@ def _when(rows: object, where: str, items: tuple[str, ...]) -> tuple[Condition, 
 
 def _condition_from_row(row: object, where: str, items: tuple[str, ...]) -> Condition:
     """`when` の 1 行を確かめて `Condition` にする（形 → need → 項目名と条件の順）。"""
-    if (
-        not isinstance(row, dict)
-        or not isinstance(row.get("item"), str)
-        or len(set(row) & {"prefix", "equals"}) != 1
-        or not set(row) <= {"item", "prefix", "equals", "need"}
-    ):
+    ops = set(row) & set(MATCHERS) if isinstance(row, dict) else set()
+    if not isinstance(row, dict) or not isinstance(row.get("item"), str) or len(ops) != 1 or not set(row) <= {"item", "need", *MATCHERS}:
         raise FormError(f"shape.{where}.when の要素は item・need と prefix か equals の 1 つを持つ")
-    cond = row.get("prefix", row.get("equals"))
+    (op,) = ops
+    cond = row[op]
     need = _strs(row.get("need"), f"{where}.when.need")
     if not isinstance(cond, str) or row["item"] not in items or not set(need) <= set(items):
         raise FormError(f"shape.{where}.when の項目名が items に無いか、条件が文字列でない")
-    return Condition(item=row["item"], need=need, prefix=row.get("prefix"), equals=row.get("equals"))
+    return Condition(item=row["item"], need=need, op=op, value=cond)
 
 
 def form_from_dict(data: dict) -> ReportForm:
@@ -264,10 +263,7 @@ def report_errors(text: object, form: ReportForm) -> list[str]:
 
 def _condition_text(cond: Condition) -> str:
     """条件つきの項目 1 つを文にする。"""
-    need = "・".join(cond.need)
-    if cond.prefix is not None:
-        return TEXT_PREFIX.format(item=cond.item, cond=cond.prefix, need=need)
-    return TEXT_EQUALS.format(item=cond.item, cond=cond.equals, need=need)
+    return CONDITION_TEXTS[cond.op].format(item=cond.item, cond=cond.value, need="・".join(cond.need))
 
 
 def _requirement_lines(form: ReportForm) -> list[str]:

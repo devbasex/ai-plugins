@@ -142,7 +142,8 @@ def _req(value: str, row) -> dict:
 
 def _cond(w: dict) -> ur.Condition:
     """形の宣言の when の 1 つを、読み手の `Condition` にしたもの。"""
-    return ur.Condition(item=w["item"], need=tuple(w["need"]), prefix=w.get("prefix"), equals=w.get("equals"))
+    (op,) = set(w) & set(ur.MATCHERS)
+    return ur.Condition(item=w["item"], need=tuple(w["need"]), op=op, value=w[op])
 
 
 def test_form_from_dict_turns_the_plugin_shape_into_the_reader_form():
@@ -288,7 +289,7 @@ def _parts(form: ur.ReportForm) -> list[str]:
     for rule in form.required.values():
         out.extend(rule.always)
         for cond in rule.when:
-            out.extend([cond.item, cond.prefix or cond.equals, *cond.need])
+            out.extend([cond.item, cond.value, *cond.need])
     return out
 
 
@@ -326,8 +327,8 @@ def test_the_requirement_lines_follow_the_values_and_name_no_items_as_none():
 
 
 def test_the_condition_text_follows_prefix_or_equals_and_lists_every_need():
-    prefix = ur.Condition(item="区分", need=("承認ゲート", "Pull Request"), prefix="ndf-gate:")
-    equals = ur.Condition(item="区分", need=("人に頼むこと",), equals="ndf-ask:human-action")
+    prefix = ur.Condition(item="区分", need=("承認ゲート", "Pull Request"), op="prefix", value="ndf-gate:")
+    equals = ur.Condition(item="区分", need=("人に頼むこと",), op="equals", value="ndf-ask:human-action")
     assert ur._condition_text(prefix) == ur.TEXT_PREFIX.format(item="区分", cond="ndf-gate:", need="承認ゲート・Pull Request")
     assert ur._condition_text(equals) == ur.TEXT_EQUALS.format(item="区分", cond="ndf-ask:human-action", need="人に頼むこと")
 
