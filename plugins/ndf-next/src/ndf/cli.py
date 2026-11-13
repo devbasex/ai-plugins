@@ -13,7 +13,9 @@ import sys
 from ndf import identity
 
 # 副命令の名前 → モジュールのパス
-COMMANDS: dict[str, str] = {}
+COMMANDS: dict[str, str] = {
+    "check": "ndf.checks.run",
+}
 
 # 呼び出しの誤り・設定の壊れ（`plugin.json` が読めない）の終了コード。
 # 止まった理由の表（契約の子 D1）ができたら、`config_broken` の行の終了コードを引く形へ替える
