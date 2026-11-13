@@ -211,7 +211,7 @@ scripts/contracts_lib/workflow_defs.py          *
 | `append_events` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, table_id: str, drafts: list[EventDraft], expect_seq: int) -> list[int]` | 事象を追記する唯一の関数。書く前に書き手の表と遷移を判定する（I2・I6） | 呼ぶ側は `expect_seq` を読んだ最後の番号にする | 下書きを `expect_seq + 1` から連番で書き、書いた番号を返す。重複の鍵が既にある下書きは書かずに今の番号を返す | DB の書き込み |
 | `create_table` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, level: str, repo: str, name: str, parent_id: str \| None, definition: dict \| None, drafts: list[EventDraft]) -> str` | 進行表を作り、スプリントなら改訂 1 のスナップショットと最初の事象を書く | 同じトランザクションの中で呼ぶ | 進行表の ID を返す。同じ ID があれば `Refused`（I1）に今の ID を入れて上げる | DB の書き込み |
 | `add_revision` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, table_id: str, definition: dict, drafts: list[EventDraft]) -> int` | 新しい改訂のスナップショットと、その改訂の事象を書く（決定 16） | 呼ぶ側は実行の鍵の排他を持つ | 上げた改訂の番号を返す。前の改訂の行と事象は変わらない | DB の書き込み |
-| `end_lane_row` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, sprint_id: str, outcome: str, actor: str) -> dict \| None` | スプリントの終わりをレーンの進行表の行へ写す唯一の関数（決定 17） | `completed` か `cancelled` を書いたのと同じトランザクションの中で呼ぶ。呼び元は `step_append`（完了）と `cmd_cancel`（中止）の 2 つ | レーンの行が無ければ `None`。あれば `row_ended` を書き、`next_row` の結果を返す | DB の読み込みと書き込み |
+| `end_lane_row` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, sprint_id: str, outcome: str, actor: str) -> dict \| None` | スプリントの終わりをレーンの進行表の行へ写す唯一の関数（決定 17） | `completed` か `cancelled` を書いたのと同じトランザクションの中で呼ぶ。呼び元は `step_append`（完了）と `cmd_cancel`（中止）の 2 つ | レーンの行が無ければ `None`。あれば `row_ended` を書き、`next_row` の結果を返す。同じスプリントの `row_ended` が既にあれば書かずに、同じ `next_row` の結果を返す（冪等。耐久ステップの流し直しで 2 度呼ばれても `Refused` を上げない） | DB の読み込みと書き込み |
 | `open_request` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(conn: Conn, plan_id: str, body: dict, reason: str, actor: str) -> str` | 計画の進行表へ依頼を開く（`request_opened`） | 無し | 依頼の ID（事象の番号から作る）を返す | DB の書き込み |
 | `run_lock` | `plugins/ndf/scripts/lib/progress_db.py` | 新設 | `(store: Store, table_id: str) -> ContextManager[None]` | 実行の鍵の排他を、DB と同じ範囲に効く形で取る（I14・決定 20） | 無し | 取れたら抜けるまで持つ。取れなければ待たずに `Refused` を上げる | SQLite: ロックのファイル（`<DB のファイル>.<進行表の ID>.lock`）。PostgreSQL: 専用の接続と勧告的ロック |
 | `run_next` | `plugins/ndf/scripts/lib/progress_run.py` | 新設 | `(store: Store, table_id: str) -> tuple[Report, int]` | 排他を取り、古い実行を始末し、進行表のワークフローを回復か新しく始めて、`ok`・`gate`・`stopped` のどれかまで流す（決定 6・7・21） | 進行表はスプリントの階層 | 戻りの組は統一 JSON レポートと終了コード。`gate` のときはプロセスを抜けて戻らない | DBOS の起動と停止・DB の読み書き・プロセスの終了（`gate`） |
@@ -270,7 +270,8 @@ scripts/contracts_lib/workflow_defs.py          *
 | `append_events` | 書き手か遷移が許されない | I4・I5・I6・I12b ほか | `check_writer`・`check_event` | 呼び出し元へ返す（`Refused`） | `stopped` と理由、3 | 書かない。操作を変えて打ち直す |
 | `create_table` | 同じ進行表がある | I1（中止したものを含む） | 主キーの一意の違反 | 呼び出し元へ返す（`Refused` に今の ID） | `stopped` と今の ID、3 | 書かない。別の名前で作り直す |
 | `add_revision` | 改訂を書けない | 番号のぶつかり・DB の切断 | 主キーの一意の違反 | 呼び出し元へ返す | `stopped`、1 | トランザクションごと戻る。打ち直せる |
-| `end_lane_row` | レーンの決まりで断られる | I12b・I18 に当たる状態 | `check_lane_change` | 呼び出し元へ返す（`Refused`） | E13 の書き込みごと戻り、`stopped`、3 | 何も残らない。オーガナイザーへ戻す |
+| `end_lane_row` | 同じスプリントがレーンの行を既に終えている | 耐久ステップの流し直し（確定の後、DBOS がステップの出力を記録する前に落ちた） | 同じスプリントの `row_ended` の有無 | 書かずに続ける（`check_lane_change` へ渡さない） | 正常（`next_row` の結果を返す） | `row_ended` は 1 度だけ残る |
+| `end_lane_row` | レーンの決まりで断られる | 別のスプリントか手での操作が終えた行など、I12b・I18 に当たる状態 | `check_lane_change` | 呼び出し元へ返す（`Refused`） | E13 の書き込みごと戻り、`stopped`、3 | 何も残らない。オーガナイザーへ戻す |
 | `open_request` | 書けない | DB の切断 | SQL の実行 | 呼び出し元へ返す | 呼び元の行に従う | 呼び元のトランザクションごと戻る |
 | `run_lock` | 排他を取れない | 同じ進行表の `next` が動いている（I14） | `filelock` の即時の取得・`pg_try_advisory_lock` の偽 | 呼び出し元へ返す（`Refused`） | `stopped`（「動いている実行がある」）、3 | 何も書かない。前の実行が終わってから打つ |
 | `run_next` | 工程が失敗した | アクティビティの失敗・出力が規約に合わない（I3） | `sprint_workflow` の戻り | 呼び出し元へ返す | `stopped`（失敗の行・理由・出力のパス）、1 | `failed` が残る。`retry`・`finish`・`cancel` を選ぶ |
@@ -507,7 +508,7 @@ scripts/contracts_lib/workflow_defs.py          *
 | `append_events` | 連番で書ける | 重複の鍵の 2 度目は書かない | 番号のぶつかりで `Conflict`・書き手の誤りで `Refused` |
 | `create_table` | 3 階層を作れる | 計画の外の単独のスプリント | 同じ名前の 2 つ目・中止の後の同じ名前（I1） |
 | `add_revision` | 改訂 2 を書ける | 改訂 3 まで続けて | 番号のぶつかり |
-| `end_lane_row` | 完了でレーンの行が完了になり `next_row` が返る | 計画の外で `None` | レーンの決まりで断られて E13 ごと戻る |
+| `end_lane_row` | 完了でレーンの行が完了になり `next_row` が返る | 計画の外で `None`・同じスプリントで 2 度呼ぶと書かずに同じ `next_row` | レーンの決まりで断られて E13 ごと戻る |
 | `open_request` | 依頼が開く | 同じ本文の 2 つ目 | 切断で呼び元ごと戻る |
 | `run_lock` | 1 つ目が取れる | 1 つ目のプロセスを落とした後に取れる | 2 つ目のプロセスが断られる（SQLite と PostgreSQL） |
 | `run_next` | 最後の工程まで流れて `ok` | 承認ゲートで `gate`（10）、答えの後の `next` で続く | 工程の失敗で 1・排他で 3・DBOS の起動の失敗で 2・計画の中止で 3 |
