@@ -34,7 +34,7 @@
 | プランの実行と並列の計画（`ndf-workflow`） | 判断の関数・耐久の層・遷移の判断・子 Issue と流す順序 |
 | リポジトリの検査（`repo-dev-checks`） | 構造の検査の規則・例外リスト・import の輪・構文木の解析 |
 
-検査が順応者、`ndf-workflow` が上流である（順応者）。検査はスクリプトのモジュールと import の形をそのまま読み、上流へ形を求めない。上流の側は、判断のモジュールの名前の決まり（決定 2）を守ることで検査の対象になる。
+2 つは共有カーネルの関係である。共有するのは、判断のモジュールの名前の決まり（`_decide.py` で終わる。決定 2）と、耐久の層の置き場の一覧（構造の検査の `DURABLE_BOUNDARY`。決定 6）の 2 つだけで、検査はこの 2 つを通してスクリプトに形（`decide-pure`・`durable-boundary`）を求める。どちらかを変える子 Issue は、スクリプトの側と検査の側を同じ PR で変える。それ以外のモジュールと import の形は、検査がそのまま読み、形を求めない。
 
 ### 集約
 
@@ -44,8 +44,11 @@
 | プランの遷移 | `plugins/ndf/scripts/supervise_lib/step_decide.py`（RF4） | 遷移の状態 | — | 上限・数えた回数・遅れの再試行の回数・次のステップ |
 | キューの前提 | `plugins/ndf/scripts/supervise_lib/queue_decide.py`（RF4 が置き、RF5a が広げる） | 前提の判定 | — | 流さなかった理由・前提のプランの結果 |
 | 周の結果 | `plugins/ndf/scripts/lib/sprint_loop_decide.py`（RF7） | 周の結果の判定 | — | リリースの事実・周の終わり方 |
-| 例外リストの項目 | `scripts/script-structure-allow/`（RF2 と、輪をほどく子 Issue） | 項目のファイル | — | 種類・パス・名前・理由 |
+| 例外リストの項目 | 項目のファイルごとに 1 本の子 Issue。RF2 が置き、「設計の結果」の下の項目の表が名指す子 Issue だけが消す | 項目のファイル（1 項目 1 集約） | — | 種類・パス・名前・理由 |
 | 子 Issue の計画 | #1142 の頭の詳細設計（`issues/issue-1142-design-detail.md`） | 子 Issue | — | 触るファイル・先に要るもの・順番 |
+| 構文木の解析の共有 | `scripts/lib/parsed.py`（RF3） | 1 回の検査の実行 | — | パス・構文木 |
+| リリースの段階 | `plugins/ndf/scripts/release-steps.py` と `release_lib/stage_*.py`（RF8） | 副命令の振り分け | — | 副命令・段階 |
+| 耐久の記録の形 | `plugins/ndf/scripts/lib/durable.py` の `FORMAT`（変える子 Issue は無い。決定 16） | 形式の版 | — | 耐久ワークフローの名前・耐久ステップの名前と呼ぶ順 |
 
 ### 不変条件
 
@@ -53,16 +56,21 @@
 | --- | --- | --- | --- |
 | I1 | 判断のループ | 判断の関数のモジュール（名前が `_decide.py` で終わる）は、`durable`・`dbos`・プロセスとファイルを扱う部品を import しない | 構造の検査が `decide-pure` で落とす |
 | I2 | 判断のループ | 判断の関数は、同じ状態と入力に同じ次の手を返す | 単体のテストが落ちる |
-| I3 | 判断のループ | 耐久の層は、判断の関数が返した手を 1 つずつ実行するだけで、自分で次の手を選ばない | 構造の検査の `durable-boundary` が落とす |
-| I4 | プランの遷移 | 数えた回数が上限を超えたら止まる。遅れの見張りの再試行は数えない。知らないステップで止まる | 単体のテストが落ちる |
-| I5 | キューの前提 | 前提のプランが後ろにある・見つからない・完了でない（承認ゲートも完了でない）のどれかなら、その理由を添えて流さない。前提の結果は引数で受け、ファイルを読まない | 単体のテストが落ちる |
+| I3 | 判断のループ | 耐久の層は、判断の関数が返した手を 1 つずつ実行するだけで、自分で次の手を選ばない | 構造の検査の `durable-boundary` が落とす（見る範囲は決定 6） |
+| I4a | プランの遷移 | 数えた回数が上限を超えたら止まる | 単体のテストが落ちる |
+| I4b | プランの遷移 | 遅れの見張りの再試行は数えない | 単体のテストが落ちる |
+| I4c | プランの遷移 | 知らないステップで止まる | 単体のテストが落ちる |
+| I5a | キューの前提 | 前提のプランが後ろにある・見つからない・完了でない（承認ゲートも完了でない）のどれかなら、その理由を添えて流さない | 単体のテストが落ちる |
+| I5b | キューの前提 | 前提の結果は引数で受け、ファイルを読まない | 構造の検査が `decide-pure` で落とす |
 | I6 | 子 Issue の計画 | 同じ順番の子 Issue は触るファイルが重ならず、先に要るものは前の順番にある | 流す順序の確かめのスクリプトが終了コード 1 を返す |
-| I7 | 例外リストの項目 | 遅延の輪は例外リストに載った組だけが許され、新しい組は落ち、ほどいた組の項目が残れば落ちる | 構造の検査が `lazy-cycle`・`unused-allow` で落とす |
+| I7a | 例外リストの項目 | 遅延の輪は例外リストに載った組だけが許され、載っていない組は落ちる | 構造の検査が `lazy-cycle` で落とす |
+| I7b | 例外リストの項目 | ほどいた組の項目が残れば落ちる | 構造の検査が `unused-allow` で落とす |
 | I8 | 例外リストの項目 | 1,000 行を超えるファイルは例外リストに載り、載せた行数を超えない | 構造の検査が `lines` で落とす |
-| I9 | — | 1 回の検査の実行の中で、1 つのファイルの構文木の解析は 1 回である | 単体のテストが落ちる |
-| I10 | — | 解析を共有した前後で、2 本の検査の違反の一覧は同じ入力に同じである | 結合のテストが落ちる |
+| I9 | 構文木の解析の共有 | 1 回の検査の実行の中で、1 つのファイルの構文木の解析は 1 回である | 単体のテストが落ちる |
+| I10 | 構文木の解析の共有 | 解析を共有した前後で、2 本の検査の違反の一覧は同じ入力に同じである | 結合のテストが落ちる |
 | I11 | 周の結果 | 周の結果（完了・失敗・人へ戻した）は、実際のリリースの事実から導く | 単体のテストが落ちる |
-| I12 | — | `release-steps.py` は引数の解釈と段階への振り分けだけを持つ | 構造の検査の `same-body` と単体のテストが落ちる |
+| I12 | リリースの段階 | `release-steps.py` の最上位の関数は `main`・`build_parser`・副命令のハンドラー（`cmd_*`）だけで、ハンドラーは段階のモジュールの関数を 1 つ呼んで返す | RF8 の単体のテスト（`release-steps.py` の構文木を読んで関数と呼び出しを数える）が落ちる |
+| I13 | 耐久の記録の形 | 8 件の子 Issue は、耐久ワークフローの名前・耐久ステップの名前・1 回の実行の中で耐久ステップを呼ぶ順を変えない | 耐久を通す代表のテスト（C8）が、記録した耐久ステップの名前の並びを着手前の並びと比べて落ちる |
 
 ### ドメインイベント
 
@@ -70,9 +78,9 @@
 | --- | --- | --- | --- |
 | E1 | 8 件の設計承認ゲートで設計が承認された | 設計 PR の承認 | 詳細設計の段（後の段） |
 | E2 | 分けた子 Issue（RF1b・RF5b・RF6b）を起票し、#1142 の sub-issue に結んだ | 設計の結果のステージ | 流す順序（順番が来たら次の子 Issue を起動する監視） |
-| E3 | 土台（RF1・RF2・RF3）の子 Issue がマージされた | 子 Issue の PR | 後の順番の子 Issue（RF4〜RF8・RF1b・DC2） |
+| E3 | 土台（#2990・#2991。RF1・RF2）の子 Issue がマージされた | 子 Issue の PR | 後の順番の子 Issue（RF4〜RF8・RF1b） |
 | E4 | supervise（RF4・RF5a・RF5b）の子 Issue が SF1b の前にマージされた | 子 Issue の PR | SF1b |
-| E5 | 検査（RF3）の子 Issue が DC2 の前にマージされた | 子 Issue の PR | DC2 |
+| E5 | 検査（#2996。RF3）の子 Issue が DC2 の前にマージされた | 子 Issue の PR | DC2 |
 | E6 | 並列の計画（RF6a・RF6b）の子 Issue がマージされた | 子 Issue の PR | SF1b・SF9・DC8 |
 | E7 | 開発ループ（RF7）・リリース（RF8）の子 Issue がマージされた | 子 Issue の PR | SF1b・SF11・K3・DC8 |
 | E8 | 割り当てた bug を、子 Issue の PR で再現の手順を 1 回通して閉じた | 子 Issue の PR | bug の Issue |
@@ -82,9 +90,9 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 判断の関数 | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。置き場のモジュールの名前は `_decide.py` で終わる | 追加（`ndf-workflow`） |
-| 耐久の層 | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | 追加（`ndf-workflow`） |
-| 判断のループ | 判断の関数と、手を実行する関数を受けて回す共通の部品（`lib/decide_loop.py`）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる | 追加（`ndf-workflow`） |
+| 判断の関数 | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。置き場のモジュールの名前は `_decide.py` で終わる | 追加済み（この設計の PR。`docs/glossary.md`） |
+| 耐久の層 | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | 追加済み（この設計の PR。`docs/glossary.md`） |
+| 判断のループ | 判断の関数と、手を実行する関数を受けて回す共通の部品（`lib/decide_loop.py`）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる | 追加済み（この設計の PR。`docs/glossary.md`） |
 | 遷移の判断 | プランの次のステップと結果の確定を決める判断。判断の関数の 1 つ | 追加済み（要求の段） |
 | DBOS を起こさない実行器 | 判断のループに、耐久ステップでない関数を渡して回す経路 | 追加済み（要求の段） |
 
@@ -247,6 +255,8 @@ sequenceDiagram
 
 テストでは、耐久ステップの代わりに偽の結果を返す関数を渡す。参加者は判断のループと遷移の判断だけになり、DBOS は起動しない。
 
+判断のループ自身は耐久ステップではなく、耐久ワークフローの関数の中で回る。耐久の記録に残るのは、判断のループが実行する耐久ステップの呼び出しだけである。判断を関数へ移しても、耐久ステップの名前と呼ぶ順は着手前と同じにする（I13）。このため耐久の記録の形は変わらず、形式の版（`lib/durable.py` の `FORMAT`）は上げない（決定 16）。
+
 この図はプランの 1 回だけを描く。**図に含めない要素**: キューの判断・プランの組み立て・スプリントの判断・並列の計画の判断（耐久の層が同じ形で判断のループへ渡す）、周の結果の判断とリリースの段階（耐久の層を通らない）、構文木の解析の共有と 2 本の検査（CI の中で別に走る）。
 
 ## 非機能の実現方式
@@ -255,7 +265,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 性能・拡張性 | 判断のテストは DBOS を起動しない。対象のテストの所要が着手前より縮む | 判断のテストは判断の関数を直に呼ぶか、DBOS を起こさない実行器で回す。測り方は「子 Issue の行」の測る手順 |
 | 運用・保守性 | 8 件の範囲に遅延の輪が無い。兆候は A0 の基準を超えない | 構造の検査の `lazy-cycle` が新しい輪を落とし、ほどいた組の例外は `unused-allow` が落とす（決定 6）。A0 の検査は各 PR の CI で走る |
-| 移行性 | 後方互換を置かない。形を変えた PR は移行の手順を本文に書く | 子 Issue の PR は、変えた形の読み手を同じ PR で書き換え、`rg` で古い形の参照が 0 件であることと、利用者の手元の状態ファイル・台帳・耐久の記録を作り直すかを本文に書く（C34） |
+| 移行性 | 後方互換を置かない。形を変えた PR は移行の手順を本文に書く。記録の形を変えるときは、変えた形と理由を設計に書く（C9 を改めた条件） | 耐久の記録の形は変えない（I13・決定 16）。実行中のワークフローは、更新の後も同じ記録から再実行で続く。子 Issue の PR は、変えた形の読み手を同じ PR で書き換え、`rg` で古い形の参照が 0 件であることと、利用者の手元の状態ファイル・台帳を作り直すかを本文に書く（C34） |
 
 ## 子 Issue の行
 
@@ -265,14 +275,14 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `RF1`（#2990） | 土台 | 判断のループと判断の関数の型を置き、耐久の層で回す代表のテストと DBOS を起こさないテストを足す | 3 本 | 無し | 組 R | 1 本 | 無し | 無し | — |
 | `RF1b`（#2990 から分ける） | 土台 | 耐久の層の利用者のうち 8 件の組み直しが触らない 4 本（`durable.py`・`post_queue.py`・2 本の `drive.py`）の兆候を直す | 4 本と基準のディレクトリ・テスト 3 本 | `A1a`・`RF2` | 組 R | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合 | — |
-| `RF2`（#2991） | 土台 | 行数の上限を 1,000 の安全網にし、遅延の輪と判断のモジュールの純粋さを構造の検査の規則にする | 5 本と例外リスト | `A1a` | 組 R | 1 本 | 決定 18（行数の上限） | `test_import_cycles.py`（ファイルごと。規則へ移す） | — |
+| `RF2`（#2991） | 土台 | 行数の上限を 1,000 の安全網にし、遅延の輪と判断のモジュールの純粋さを構造の検査の規則にし、耐久の層の境界の規則を 2 つの耐久の層へ広げる | 5 本と例外リスト | `A1a` | 組 R | 1 本 | 決定 18（行数の上限） | `test_import_cycles.py`（ファイルごと。規則へ移す） | — |
 | `RF3`（#2996） | 土台 | 2 本の検査の構文木の解析を 1 回の実行で 1 回にし、`limits_decl.references` を 1 回にする | 8 本 | `RF2` | 組 R | 1 本 | 無し | 無し | — |
-| `RF4`（#2963） | supervise | 遷移の判断とキューの前提の判断を判断の関数へ移し、遷移だけを見るテストを DBOS を起こさない形へ作り直す | 10 本 | `RF1`・`RF2`・`A1b` | 組 R | 1 本 | 無し | `test_supervise_limits.py`・`test_design_review_settled.py`・`test_base_sync.py` のうち遷移だけを見るテスト | #3086 |
-| `RF5a`（#2993） | supervise | `engine`・`flow`・`queue` の輪をほどき、プランの組み立てと再開・重なりの判断を判断の関数へ移す | 13 本と例外 1 本 | `RF4` | 組 R | 1 本 | dbos の文書の「`queue`: ステージ・重なり・資源の枠」 | `test_supervise_queue.py`・`test_supervise_resume.py` のうち判断だけを見るテスト | #3176・#3114・#3047・#2949 |
+| `RF4`（#2963） | supervise | 遷移の判断とキューの前提の判断を判断の関数へ移し、遷移だけを見るテストを DBOS を起こさない形へ作り直す | 10 本と例外 1 本 | `RF1`・`RF2`・`A1b` | 組 R | 1 本 | 無し | `test_supervise_limits.py`・`test_design_review_settled.py`・`test_base_sync.py`・`test_supervise_stop_exit.py` のうち遷移だけを見るテスト | #3086 |
+| `RF5a`（#2993） | supervise | `engine`・`flow`・`queue` の輪をほどき、プランの組み立てと再開・重なりの判断を判断の関数へ移す | 15 本と例外 1 本 | `RF4` | 組 R | 1 本 | dbos の文書の「`queue`: ステージ・重なり・資源の枠」 | `test_supervise_queue.py`・`test_supervise_resume.py` のうち判断だけを見るテスト | #3176・#3114・#3047・#2949 |
 | `RF5b`（#2993 から分ける） | supervise | スプリントの順番の組み方と閉じのプランの判断を判断の関数へ移し、`sprint`・`sprint_waves` を責務で分ける | 7 本 | `A1a`・`RF2` | 組 R | 1 本 | 無し | `test_supervise_sprint_chain.py`・`test_supervise_close_auto.py` のうち判断だけを見るテスト | #2968・#2967 |
-| `RF6a`（#2992） | 並列の計画 | `_Run` の知らせ・問い・答え・リリース・起動の判断を判断の関数へ移して耐久の層を薄くし、L3 の輪をほどく | 12 本と例外 1 本 | `RF1`・`RF2`・`A1b`・#2936（マージ済み） | 組 R | 1 本 | 無し | `test_parallel_run.py`・`test_parallel_answer.py` のうち判断だけを見るテスト | #3174・#3096・#2585 |
+| `RF6a`（#2992） | 並列の計画 | `_Run` の知らせ・問い・答え・リリース・起動の判断を判断の関数へ移して耐久の層を薄くし、L3 の輪をほどく | 13 本と例外 2 本 | `RF1`・`RF2`・`A1b`・#2936（マージ済み） | 組 R | 1 本 | 無し | `test_parallel_run.py`・`test_parallel_answer.py` のうち判断だけを見るテスト | #3174・#3096・#2585 |
 | `RF6b`（#2992 から分ける） | 並列の計画 | 計画の上限・置き場・レーンの判断を判断の関数へ移し、L7・L9 の輪をほどく | 11 本と例外 2 本 | `RF6a` | 組 R | 1 本 | 無し | `test_parallel_plan.py`・`test_parallel_lane.py`・`test_parallel_external.py` のうち判断だけを見るテスト | #3145・#3064・#3021 |
-| `RF7`（#2994） | 開発ループ | 周の結果と選定の除外を判断の関数へ移し、周の結果をリリースの事実から導く。L10 の輪をほどく | 9 本と例外 1 本 | `A1b`・`RF2` | 組 R | 1 本 | 無し | `test_sprint_loop.py` のうち判断だけを見るテスト | #2722 |
+| `RF7`（#2994） | 開発ループ | 周の結果と選定の除外を判断の関数へ移し、周の結果をリリースの事実から導く。L10 の輪をほどく | 10 本と例外 1 本 | `A1b`・`RF2` | 組 R | 1 本 | 無し | `test_sprint_loop.py` のうち判断だけを見るテスト | #2722 |
 | `RF8`（#2995） | リリース | `release-steps.py` の副命令を段階ごとのモジュールへ分け、エントリポイントを振り分けだけにする | 12 本と例外 1 本 | `RF2` | 組 R | 1 本 | 無し | `test_release_steps.py` のうち段階の判断だけを見るテスト | #3110・#2601・#1755 |
 
 「のうち〜だけを見るテスト」の一覧は、子 Issue の PR が着手の時点で数え、PR 本文に載せる（C33）。分けた子 Issue（RF1b・RF5b・RF6b）は E2 で起票し、番号を詳細設計の段で表へ写す。
@@ -316,7 +326,7 @@ EOF
 | 1 | `SF3`・`A0`・`SF1a`・`DC1`・`RF1` | `RF1` は新しいファイルだけを触る |
 | 2 | `A1a`・`A2` | `DC2` を順番 5 へ移した（`RF3` の後） |
 | 3 | `A1b`・`RF2` | `RF2` ← `A1a`（`scripts/check-script-structure.py`） |
-| 4 | `RF3`・`RF4`・`RF5b`・`RF6a`・`RF7`・`RF8`・`RF1b` | `RF3` ← `RF2`（`scripts/check-script-structure.py`）、`RF4` ← `A1b`（`supervise_lib/queue.py`）、ほかは `RF2`（例外リストの項目と行数の扱い）と `A1a`・`A1b` の後 |
+| 4 | `RF3`・`RF4`・`RF5b`・`RF6a`・`RF7`・`RF8`・`RF1b` | `RF3` ← `RF2`（`scripts/check-script-structure.py`）、`RF4` ← `A1b`（`supervise_lib/queue.py`）、ほかは `RF2`（例外リストの項目と行数の扱い）と `A1a`・`A1b` の後。例外リストは項目のファイルの名前で触るため、同じ順番で重ならない |
 | 5 | `RF5a`・`RF6b`・`DC2` | `RF5a` ← `RF4`（`supervise_lib/flow.py`）、`RF6b` ← `RF6a`、`DC2` ← `RF3`（`scripts/check-ndf-contracts.py`） |
 | 6 | `SF1b` | `SF1b` ← `RF5a`・`RF6b`・`RF7`・`RF8`・`RF1b`（触るファイルが重なる） |
 | 7〜16 | 今の順番 5〜14 の子 Issue | 先に要るものに 8 件を戻しても、今の順番 5 以降は `SF1b` の後にあり、互いの前後は変わらない |
@@ -328,6 +338,7 @@ EOF
 | `SF1b` | `RF4`・`RF5a`・`RF5b`・`RF6a`・`RF6b`・`RF7`・`RF8`・`RF1b` | 127 本のファイルが 8 件の範囲を含む（scripted-flow の詳細設計の「並行と排他」） |
 | `SF2`・`SF6`・`SF7` | `RF4`・`RF5a` | `supervise_lib/engine.py`・`flow.py`・`queue.py`・`state.py` が重なる |
 | `SF9` | `RF6a`・`RF6b` | `lib/parallel_answer.py`・`parallel.py` が重なる |
+| `SF8` | `RF1`・`RF1b` | 耐久の待ち `durable.sleep`（`lib/durable.py`）を受け持ち、判断のループの上で行き先を足す（決定 15） |
 | `SF11` | `RF7` | `lib/sprint_loop_cli.py` が重なる |
 | `SF13` | `RF5a`・`RF5b` | `supervise_lib/commands.py`・`sprint.py` が重なる |
 | `DC2` | `RF3` | data の決定 53（検査の土台は #2996 の後） |
@@ -340,24 +351,29 @@ EOF
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| C1・C7・I4 | 遷移の判断に、上限の内の経路・上限を超える経路・遅れの再試行を挟む経路・知らないステップを渡すと、次の手と結果・理由が決まる。DBOS を起動しない | 遅れの再試行を数えるように壊す・知らないステップを飛ばすように壊すと落ちる |
-| C2・C8 | `drive()` を使う 4 ファイルのうち、耐久を通すことを確かめる代表のテストだけが DBOS を起動し、プランを最後まで流す | 判断のループが耐久ステップを呼ばないように壊すと代表のテストが落ちる |
-| C3・I5 | キューの前提の判断が、後ろにある・見つからない・完了でない・承認ゲートの 4 つの理由の文を返し、前提の結果を引数で受ける | 承認ゲートを完了と読むように壊す・ファイルを読みに行くように壊すと落ちる |
+| C1・C7・I4a・I4b・I4c | 遷移の判断に、上限の内の経路・上限を超える経路・遅れの再試行を挟む経路・知らないステップを渡すと、次の手と結果・理由が決まる。DBOS を起動しない | 遅れの再試行を数えるように壊す・知らないステップを飛ばすように壊すと落ちる |
+| C2・C8・I13 | `drive()` を使う 4 ファイル（`test_supervise_limits.py`・`test_design_review_settled.py`・`test_base_sync.py`・`test_supervise_stop_exit.py`）のうち、耐久を通すことを確かめる代表のテストだけが DBOS を起動し、プランを最後まで流す。代表のテストは、記録した耐久ステップの名前の並びを着手前の並びと比べる | 判断のループが耐久ステップを呼ばないように壊す・耐久ステップを呼ぶ順を入れ替えると代表のテストが落ちる |
+| C3・I5a・I5b | キューの前提の判断が、後ろにある・見つからない・完了でない・承認ゲートの 4 つの理由の文を返し、前提の結果を引数で受ける | 承認ゲートを完了と読むように壊す・ファイルを読みに行くように壊すと落ちる |
 | C4・C10・C17・C21・C30 | 子 Issue の PR の JUnit の対象のファイルの和が、着手前の値より小さい | 測る手順で比べ、小さくなければ PR 本文に書いて止まる（テストではなく測定で縛る） |
 | C6・I1 | `_decide.py` で終わるモジュールが `durable`・`dbos`・プロセスとファイルを扱う部品を import すると、構造の検査が `decide-pure` を返す | 判断のモジュールに `import durable` を足すと落ちる |
 | I2 | 判断の関数を同じ状態と入力で 2 回呼ぶと同じ次の手を返す | 時刻や乱数を読むように壊すと落ちる |
-| I3 | 耐久の層の関数が `for`・`while` を持つと、構造の検査が `durable-boundary` を返す | 耐久の層にループを書き戻すと落ちる |
+| I3 | 2 つの耐久の層の、耐久ワークフローの関数とそれが同じモジュールで直に呼ぶ関数（耐久ステップを除く）が `for`・`while` を持つと、構造の検査が `durable-boundary` を返す（見る範囲は決定 6） | 耐久の層にループを書き戻すと落ちる |
 | C11・C12・C13・I8 | 1,000 行を超えるファイルが例外リストに無ければ `lines` で落ち、1,000 行以下は 500 行を超えても落ちない。例外リストの行数を超えたら落ちる | 上限を 500 に戻すと 501〜1,000 行の入力で落ちる |
-| C15・C18・C22・I7 | 関数の中の import だけで輪になる組が例外リストに無ければ `lazy-cycle` で落ち、例外リストにあってほどけていれば `unused-allow` で落ちる | 関数の中の import を数えないように壊すと、輪の入力で落ちない |
+| C15・C18・C22・I7a・I7b | 関数の中の import だけで輪になる組が例外リストに無ければ `lazy-cycle` で落ち、例外リストにあってほどけていれば `unused-allow` で落ちる | 関数の中の import を数えないように壊すと、輪の入力で落ちない |
 | C14・C19 | 並列の計画・プランの組み立て・キューの判断の関数が、状態と入力から次の手を返す（子 Issue ごとの単体のテスト） | 判断の関数がファイルを読むように壊すと `decide-pure` で落ちる |
 | C23・I11 | 「失敗と記録された周が実際はリリースしていた」形の事実を周の結果の判断に渡すと、完了を返す | 終了コードだけで判定するように壊すと落ちる |
-| C25・C26・I12 | `release-steps.py` の副命令が段階のモジュールの関数へ振り分けられ、段階ごとの判断の関数が単体で確かめられる | エントリポイントに判断を書き戻すと単体のテストの対象から外れる |
+| C25・C26・I12 | `release-steps.py` の副命令が段階のモジュールの関数へ振り分けられ、段階ごとの判断の関数が単体で確かめられる。RF8 の単体のテストが `release-steps.py` の構文木を読み、最上位の関数が `main`・`build_parser`・`cmd_*` だけで、各 `cmd_*` が段階のモジュールの関数を 1 つ呼ぶことを確かめる | エントリポイントに判断の関数を書き戻す・ハンドラーに分岐を足すと落ちる |
 | C28・C29・I9 | 1 回の検査の実行で、`limits_decl.references` の呼び出しが 1 回、1 つのファイルの解析が 1 回 | 解析の共有を外すと回数の確かめで落ちる |
 | C31・I10 | 同じ木を入力に、着手前と後で 2 本の検査の違反の一覧が同じ | 共有した構文木を規則が書き換えるように壊すと、後の規則の結果が変わって落ちる |
 | C32 | 子 Issue の PR で A0 の検査が兆候を基準より増やさない | A0 の検査の CI が落ちる |
 | C33 | 子 Issue の PR が消した古いテストの一覧が「子 Issue の行」の「消す古いテスト」と一致する | PR 本文の一覧と表の食い違いをコードレビューで見る |
 | C34 | 形を変えた子 Issue の PR に、古い形の参照の `rg` の結果が 0 件として載る | 結果が 0 件でなければ PR を出さない |
-| D1〜D7・I6 | 詳細設計の段で、流す順序の確かめのスクリプトが 0 件を返し、終了コード 0 で終わる | 同じ順番に重なる 2 本を置くと終了コード 1 |
+| D1 | 詳細設計の段で、流す順序の確かめのスクリプトが「設計の結果・流す順序・実装計画の子 Issue の食い違い」を 0 件と返す。列の並びは頭の詳細設計の「実装計画」の見出しの行と同じ | 子 Issue を 1 つの表から落とすと、スクリプトが食い違いを返す |
+| D2・D3・I6 | 詳細設計の段で、流す順序の確かめのスクリプトが同じ順番の重なりと先に要るものの逆転を 0 件と返し、終了コード 0 で終わる。D2 が挙げる #1142 の子 Issue（SF1b・SF2・SF6・SF7・SF9・SF11・SF13・DC2・DC8・K1〜K3）の先に要るものに 8 件が載る | 同じ順番に重なる 2 本を置く・先に要るものを後の順番に置くと終了コード 1 |
+| D4 | 「開いている bug の割り当て」の表に出る Issue の番号が 48 件で重複が無く、範囲外の行がどれも理由の 1 文を持つ。詳細設計の段で、表から番号を抜き出して数える | 行を 1 つ消すと 47 件になる・2 行に同じ番号を書くと重複が出る |
+| D5 | A0 のマージの後に `check-ai-smells.py` が返す兆候のあるファイルのうち 8 件の範囲のものが、どれかの子 Issue の触るファイルに入るか、入れない理由を持つ。詳細設計の段で、2 つの一覧の差を取って 0 件を確かめる | 兆候のあるファイルを触るファイルから外すと、差に出る |
+| D6 | 詳細設計の段で、決定 15 の受け持ちの表の左右の部分を、頭の詳細設計の SF2・SF6〜SF9・SF11・A0 の行と 8 件の子 Issue の行がそれぞれ移す関数の名前で突き合わせ、両方に載る関数が 0 件である | 同じ関数を 2 つの行の中身に書くと、突き合わせで出る |
+| D7 | 「測る手順と縮める対象」の表に 11 本の子 Issue の行がそろい、各行が縮める対象（テストのファイルの正規表現か検査の名前）を持つ | 子 Issue の行を表から落とすと、11 本にそろわない |
 
 ## 設計の結果
 
@@ -367,15 +383,28 @@ EOF
 | #2990 | 実装する | — | （RF1b。分けて起票する）`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/skills/cross-review/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`scripts/ai-smells-baseline/`、`plugins/ndf/scripts/tests/test_durable.py`、`plugins/ndf/scripts/tests/test_post_queue.py`、`plugins/ndf/skills/cross-refactoring/scripts/tests/test_drive_deferred.py` |
 | #2991 | 実装する | — | （RF2）`scripts/check-script-structure.py`、`scripts/tests/test_check_script_structure.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_import_cycles.py`、`docs/specifications/ndf-scripts-import-cycles.md`、`docs/specifications/ndf-script-structure-criteria.md` |
 | #2996 | 実装する | — | （RF3）`scripts/lib/parsed.py`、`scripts/lib/py_imports.py`、`scripts/check-script-structure.py`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/limits_decl.py`、`scripts/contracts_lib/core_checks.py`、`scripts/contracts_lib/extract_py.py`、`scripts/tests/test_parsed.py` |
-| #2963 | 実装する | — | （RF4）`plugins/ndf/scripts/supervise_lib/step_decide.py`、`plugins/ndf/scripts/supervise_lib/queue_decide.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/tests/test_step_decide.py`、`plugins/ndf/scripts/tests/test_queue_decide.py`、`plugins/ndf/scripts/tests/test_supervise_limits.py`、`plugins/ndf/scripts/tests/test_design_review_settled.py`、`plugins/ndf/scripts/tests/test_base_sync.py`、`plugins/ndf/scripts/tests/test_supervise_stop_exit.py` |
-| #2993 | 実装する | — | （RF5a）`plugins/ndf/scripts/supervise_lib/plan_decide.py`、`plugins/ndf/scripts/supervise_lib/queue_decide.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/queue_resume.py`、`plugins/ndf/scripts/supervise_lib/admission.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_plan_decide.py`、`plugins/ndf/scripts/tests/test_supervise_queue.py`、`plugins/ndf/scripts/tests/test_supervise_resume.py`、`plugins/ndf/scripts/tests/test_queue_decide.py` |
+| #2963 | 実装する | — | （RF4）`plugins/ndf/scripts/supervise_lib/step_decide.py`、`plugins/ndf/scripts/supervise_lib/queue_decide.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/tests/test_step_decide.py`、`plugins/ndf/scripts/tests/test_queue_decide.py`、`plugins/ndf/scripts/tests/test_supervise_limits.py`、`plugins/ndf/scripts/tests/test_design_review_settled.py`、`plugins/ndf/scripts/tests/test_base_sync.py`、`plugins/ndf/scripts/tests/test_supervise_stop_exit.py`、`scripts/script-structure-allow/plugins__ndf__scripts__supervise_lib__flow.py--_plan_steps--durable-boundary.json` |
+| #2993 | 実装する | — | （RF5a）`plugins/ndf/scripts/supervise_lib/plan_decide.py`、`plugins/ndf/scripts/supervise_lib/queue_decide.py`、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/flow.py`、`plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/queue_fill.py`、`plugins/ndf/scripts/supervise_lib/queue_resume.py`、`plugins/ndf/scripts/supervise_lib/admission.py`、`plugins/ndf/scripts/supervise_lib/commands.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/supervise.py`、`scripts/script-structure-allow/plugins__ndf__scripts__supervise_lib__engine.py--cycle--lazy-cycle.json`、`plugins/ndf/scripts/tests/test_plan_decide.py`、`plugins/ndf/scripts/tests/test_supervise_queue.py`、`plugins/ndf/scripts/tests/test_supervise_resume.py`、`plugins/ndf/scripts/tests/test_queue_decide.py` |
 | #2993 | 実装する | — | （RF5b。分けて起票する）`plugins/ndf/scripts/supervise_lib/sprint_decide.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/sprint_routes.py`、`plugins/ndf/scripts/tests/test_sprint_decide.py`、`plugins/ndf/scripts/tests/test_supervise_sprint_chain.py`、`plugins/ndf/scripts/tests/test_supervise_close_auto.py` |
-| #2992 | 実装する | — | （RF6a）`plugins/ndf/scripts/lib/parallel_decide.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_reply.py`、`plugins/ndf/scripts/lib/parallel_answer.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_observe.py`、`plugins/ndf/scripts/lib/parallel_machine.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_parallel_decide.py`、`plugins/ndf/scripts/tests/test_parallel_run.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_machine.py` |
-| #2992 | 実装する | — | （RF6b。分けて起票する）`plugins/ndf/scripts/lib/parallel_plan_decide.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_homes.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_external.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_lane_cli.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_parallel_plan_decide.py`、`plugins/ndf/scripts/tests/test_parallel_plan.py`、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_parallel_external.py` |
-| #2994 | 実装する | — | （RF7）`plugins/ndf/scripts/lib/sprint_loop_decide.py`、`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_select.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_gate2.py`、`plugins/ndf/scripts/lib/sprint_loop_exclusion.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_sprint_loop_decide.py`、`plugins/ndf/scripts/tests/test_sprint_loop.py` |
-| #2995 | 実装する | — | （RF8）`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release_lib/stage_present.py`、`plugins/ndf/scripts/release_lib/stage_approve.py`、`plugins/ndf/scripts/release_lib/stage_production.py`、`plugins/ndf/scripts/release_lib/stage_cd.py`、`plugins/ndf/scripts/release_lib/stage_verify.py`、`plugins/ndf/scripts/release_lib/included.py`、`plugins/ndf/scripts/release_lib/instructions.py`、`plugins/ndf/scripts/release_lib/materials.py`、`scripts/script-structure-allow/`、`plugins/ndf/scripts/tests/test_release_stages.py`、`plugins/ndf/scripts/tests/test_release_steps.py`、`plugins/ndf/scripts/tests/test_release_included.py` |
+| #2992 | 実装する | — | （RF6a）`plugins/ndf/scripts/lib/parallel_decide.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_reply.py`、`plugins/ndf/scripts/lib/parallel_answer.py`、`plugins/ndf/scripts/lib/parallel_route.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_observe.py`、`plugins/ndf/scripts/lib/parallel_machine.py`、`plugins/ndf/scripts/parallel.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_answer.py--cycle--lazy-cycle.json`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--parallel_workflow--durable-boundary.json`、`plugins/ndf/scripts/tests/test_parallel_decide.py`、`plugins/ndf/scripts/tests/test_parallel_run.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_machine.py` |
+| #2992 | 実装する | — | （RF6b。分けて起票する）`plugins/ndf/scripts/lib/parallel_plan_decide.py`、`plugins/ndf/scripts/lib/parallel_files.py`、`plugins/ndf/scripts/lib/parallel_homes.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_external.py`、`plugins/ndf/scripts/lib/parallel_plan.py`、`plugins/ndf/scripts/lib/parallel_lane_cli.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_files.py--cycle--lazy-cycle.json`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_external.py--cycle--lazy-cycle.json`、`plugins/ndf/scripts/tests/test_parallel_plan_decide.py`、`plugins/ndf/scripts/tests/test_parallel_plan.py`、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_parallel_external.py` |
+| #2994 | 実装する | — | （RF7）`plugins/ndf/scripts/lib/sprint_loop_decide.py`、`plugins/ndf/scripts/lib/sprint_loop.py`、`plugins/ndf/scripts/lib/sprint_loop_select.py`、`plugins/ndf/scripts/lib/sprint_loop_record.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/lib/sprint_loop_gate2.py`、`plugins/ndf/scripts/lib/sprint_loop_exclusion.py`、`plugins/ndf/scripts/lib/sprint_loop_cli.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__sprint_loop.py--cycle--lazy-cycle.json`、`plugins/ndf/scripts/tests/test_sprint_loop_decide.py`、`plugins/ndf/scripts/tests/test_sprint_loop.py` |
+| #2995 | 実装する | — | （RF8）`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release_lib/stage_present.py`、`plugins/ndf/scripts/release_lib/stage_approve.py`、`plugins/ndf/scripts/release_lib/stage_production.py`、`plugins/ndf/scripts/release_lib/stage_cd.py`、`plugins/ndf/scripts/release_lib/stage_verify.py`、`plugins/ndf/scripts/release_lib/included.py`、`plugins/ndf/scripts/release_lib/instructions.py`、`plugins/ndf/scripts/release_lib/materials.py`、`scripts/script-structure-allow/plugins__ndf__scripts__release-steps.py--lines.json`、`plugins/ndf/scripts/tests/test_release_stages.py`、`plugins/ndf/scripts/tests/test_release_steps.py`、`plugins/ndf/scripts/tests/test_release_included.py` |
 
-`scripts/script-structure-allow/` は 1 項目 1 ファイルの置き場で、子 Issue ごとに消す項目のファイルが違う（決定 6）。ファイルの名前は詳細設計の段が一覧にする。触るファイルの数は詳細設計の段で数え直し、「子 Issue の行」の数を合わせる。
+例外リスト（`scripts/script-structure-allow/`）は 1 項目 1 ファイルの置き場である。ディレクトリのまま触るのは RF2 だけで、RF2 と同じ順番 3 の `A1b` はこの置き場を触らない（#1142 の設計文書の「設計の結果」で、置き場を名指す行は K1・K3 だけ）。ほかの子 Issue は、自分が消す項目のファイルを名前で触る。ファイルの名前は今の検査の `allow_file_name()` の決まり（パスの `/` を `__` に替え、`<パス>--<名前>--<種類>.json`）で決まる。遅延の輪の項目は、パスを輪の中で辞書順に最初のモジュール、名前を `cycle` にする（決定 6）。
+
+| 項目のファイル（置き場の中の名前） | 何の項目か | 置く子 Issue | 消す子 Issue |
+| --- | --- | --- | --- |
+| `plugins__ndf__scripts__supervise_lib__flow.py--_plan_steps--durable-boundary.json` | プランの遷移のループ | RF2 | RF4 |
+| `plugins__ndf__scripts__supervise_lib__engine.py--cycle--lazy-cycle.json` | 輪 L5（`engine`・`flow`・`queue`） | RF2 | RF5a |
+| `plugins__ndf__scripts__lib__parallel_answer.py--cycle--lazy-cycle.json` | 輪 L3（`parallel_answer`・`parallel_reply`・`parallel_run`） | RF2 | RF6a |
+| `plugins__ndf__scripts__lib__parallel_run.py--parallel_workflow--durable-boundary.json` | 並列の計画の見回りのループ | RF2 | RF6a |
+| `plugins__ndf__scripts__lib__parallel_files.py--cycle--lazy-cycle.json` | 輪 L7（`parallel_files`・`parallel_homes`） | RF2 | RF6b |
+| `plugins__ndf__scripts__lib__parallel_external.py--cycle--lazy-cycle.json` | 輪 L9（`parallel_external`・`parallel_lane`） | RF2 | RF6b |
+| `plugins__ndf__scripts__lib__sprint_loop.py--cycle--lazy-cycle.json` | 輪 L10（`sprint_loop`・`sprint_loop_select`） | RF2 | RF7 |
+| `plugins__ndf__scripts__release-steps.py--lines.json` | 1,000 行を超える `release-steps.py` | 今ある | RF8 |
+
+輪 L1・L2・L4・L6・L8 の項目も RF2 が置き、8 件の範囲の外なので消す子 Issue は無い。触るファイルの数は詳細設計の段で数え直し、「子 Issue の行」の数を合わせる。
 
 ## 開いている bug の割り当て
 
@@ -421,13 +450,17 @@ EOF
 | --- | --- |
 | `supervise.py`・`supervise_lib/` のうち `engine`・`flow`・`queue`・`queue_*`・`admission`・`commands`・`plan` | RF4・RF5a |
 | `supervise_lib/` のうち `sprint*` | RF5b |
-| `supervise_lib/` の残り（`state`・`steps`・`worker_steps`・`verify_steps`・`templates` ほか） | RF5a が触るファイルへ足す（詳細設計の段で、兆候のあるファイルを数えて足す） |
-| `parallel.py`・`lib/parallel_*` | RF6a・RF6b（RF6a は耐久の層と答え・リリース・起動、RF6b は計画・置き場・レーン） |
+| `supervise_lib/state.py` | RF5a（触るファイルに入れた） |
+| `supervise_lib/` の残り（`steps`・`worker_steps`・`verify_steps`・`templates` ほか） | RF5a が触るファイルへ足す（詳細設計の段で、兆候のあるファイルを数えて足す） |
+| `parallel.py` | RF6a（触るファイルに入れた） |
+| `lib/parallel_*` | RF6a・RF6b（RF6a は耐久の層と答え・リリース・起動、RF6b は計画・置き場・レーン） |
 | `lib/sprint_loop*` | RF7 |
 | `release-steps.py`・`release_lib/` | RF8 |
 | `lib/durable.py`・`lib/post_queue.py`・2 本の `drive.py` | RF1b |
 
-`supervise_lib/` の残りを RF5a へ寄せるのは、同じパッケージの中で 2 本の子 Issue が同じファイルを触ると流す順序が伸びるためである。RF5a の触るファイルが 30 本を超えたら、詳細設計の段で RF5a を分ける（決定 9）。
+`supervise.py` と `supervise_lib/state.py` は、`K2`・`SF2`・`SF6`・`SF7` が重なりで RF5a を待つ根拠のファイルなので、この設計で RF5a の触るファイルに入れた。`parallel.py` は同じ理由（`SF9`）で RF6a に入れた。
+
+`supervise_lib/` の残りを RF5a へ寄せるのは、同じパッケージの中で 2 本の子 Issue が同じファイルを触ると流す順序が伸びるためである。残りは A0 のマージの後でなければ兆候のあるファイルが決まらず、この設計では数えられない。足しても順番は崩れない: RF5a と同じ順番 5 に置く `RF6b` は `lib/parallel_*` だけを、`DC2` は data の詳細設計の「ファイル配置」の 15 本を触り、`supervise_lib/` を触る子 Issue は順番 5 に無い（DC2 の 15 本に `supervise_lib/` が無いことは、詳細設計の段の D3 の確かめで確かめる）。RF5a の触るファイルが 30 本を超えたら、詳細設計の段で RF5a を分ける（決定 9）。
 
 ## 人へ残す判断
 

@@ -59,10 +59,17 @@ DBOS の関数をテストで回す勧め（PRD1）は、テストごとに DBOS
 
 根拠: Value 3 / Value 10（MVV 版 7）
 
-### 決定 6: 輪を作り直す手順に頼らず CI で止めるため、遅延の輪と判断の純粋さを構造の検査の規則にし、例外は組ごとに 1 ファイルにする
+### 決定 6: 輪を作り直す手順に頼らず CI で止めるため、遅延の輪と判断の純粋さを構造の検査の規則にし、耐久の層の境界の規則を 2 つの耐久の層へ広げ、例外は組ごとに 1 ファイルにする
 
 構造の検査に規則 `lazy-cycle` と `decide-pure` を足す。`lazy-cycle` は、最上位・関数の中の import と `importlib.import_module` の文字列の定数を辺にした強連結成分を数え、例外リストに無い組を落とす（関数の中の import を数える範囲は PRD4 に倣う。`if TYPE_CHECKING:` の中は実行時に読まないため数えない）。
 今の 10 組（`docs/scripts-map/README.md` の L1〜L10）は例外リストに組ごとに 1 ファイルで載せ、L3・L7・L9（RF6a・RF6b）・L5（RF5a）・L10（RF7）はその子 Issue が輪をほどいて自分の項目を消す。残る L1・L2・L4・L6・L8 は 8 件の範囲の外で、項目の理由にそう書く。
+遅延の輪の項目は、パスを輪の中で辞書順に最初のモジュール、名前を `cycle` にする。ファイルの名前は今の `allow_file_name()` の決まりのまま決まり（例 `plugins__ndf__scripts__supervise_lib__engine.py--cycle--lazy-cycle.json`）、子 Issue は流す順序の表に項目のファイルの名前で載る。ディレクトリで載せると、確かめのスクリプトがディレクトリの包含を重なりと数え、同じ順番の子 Issue がすべて重なる。
+
+耐久の層の境界（I3）は、今ある規則 `durable-boundary` の置き場の一覧（`DURABLE_BOUNDARY`）に 2 つの耐久の層（`supervise_lib/flow.py`・`lib/parallel_run.py`）を足して守る。見るのは、そのモジュールで `durable.workflow` を付けた関数のうちステップの遷移を回すもの（`plan_workflow`・`parallel_workflow`）と、それが同じモジュールで直に呼ぶ関数（耐久ステップを除く）の `for`・`while` の文である。`flow.py` の `group_workflow`・`wait_workflow`・`queue_workflow` は子のワークフローを起こして待つだけで遷移の判断を持たないため見ない。
+今これに当たるのは `flow.py` の `_plan_steps`（`while sid`）と `parallel_run.py` の `parallel_workflow`（`while True` と手順の `for`）の 2 つで、RF2 が例外リストに載せ、RF4・RF6a が判断のループへ移して消す。
+`parallel_run.py` の `for`・`while` の文は 11 か所ある（`grep -nE '^\s*(for|while) ' lib/parallel_run.py`、2026-11-13）。`parallel_workflow` の 2 か所のほかは、耐久ステップの中のもの（`step_observe`）と、`_Run` のメソッドや見回りの補助の関数の中で答え・リリース・レーンの一覧をたどるものである。後者は耐久ステップを呼ばない状態の更新で、RF6a が判断の関数へ移す。耐久ステップの中のループは 1 つの手の実行の中にあり、規則の対象に入れない。
+
+見る関数を遷移を回す 2 つに絞るのは、`durable.workflow` を付けた関数すべてに広げると、子のワークフローを起こして待つだけのループ（`group_workflow` の `for m in members`）まで落ちるためである。
 今の `tests/test_import_cycles.py` が確かめる 2 組（I7〜I9）は、この規則が同じことを全体で確かめるため、規則へ移してテストを消す。C15 の「`docs/scripts-map/` を作り直して確かめる」は、地図を作るスクリプトがリポジトリに無い（`grep -rln 強連結 scripts/ plugins/ndf/scripts` は該当なし、2026-11-13）ため、この規則の結果で確かめる。
 
 import-linter（LIB1）と grimp（LIB2）は対象がパッケージで、`lib/` の直下に並ぶモジュールを扱えないため採らない。pylint（LIB3）はスクリプトが実行時に足す検索経路をたどらず、依存も増えるため採らない。pydeps（LIB4）は図を描くツールで、例外つきで落とす検査を持たないため採らない。
@@ -165,6 +172,17 @@ RF1 は新しいファイルだけを触るため順番 1 に置く。RF2 は `c
 | SF11 | 開発ループの断りと止まりの種類と `next` | RF7 の周の結果と選定の判断と輪のほどき |
 | A0 | 関数の長さ・引数・分岐の多さの規則 | RF2 のモジュールの行数と遅延の輪の規則 |
 
-SF の子 Issue は 8 件の子 Issue の後に流れるため、8 件の子 Issue は SF の変更を先取りせず、SF の子 Issue は 8 件が作った判断の関数の上で行き先を足す。
+この表の SF の子 Issue（SF2・SF6〜SF9・SF11）は 8 件の子 Issue の後（順番 7 以降）に流れ、先に要るものに受け持ちの相手の 8 件の子 Issue を持つ（設計文書の「流す順序への入れ方」）。SF8 は `durable.sleep`（`lib/durable.py`）を受け持つため、`lib/durable.py` を触る RF1b と判断のループの RF1 を先に要るものに持つ。
+8 件の子 Issue は SF の変更を先取りせず、SF の子 Issue は 8 件が作った判断の関数の上で行き先を足す。順番 1 の SF1a・SF3 は止まった理由の表と CI の監視の不具合で、この表の受け持ちに無く、8 件の子 Issue と触るファイルが重ならない。
 
 根拠: Value 11（MVV 版 7）
+
+### 決定 16: 実行中のワークフローを更新の後も記録から続けられるよう、耐久の記録の形を変えない
+
+判断を関数へ移しても、耐久ワークフローの名前・耐久ステップの名前・1 回の実行の中で耐久ステップを呼ぶ順は変えない（I13）。判断のループは耐久ステップではなく、耐久ワークフローの関数の中で回るため、記録に残るのは手の実行（耐久ステップ）の呼び出しだけである。耐久ワークフローは名前を明示して登録している（`durable.workflow(name="ndf.supervise.plan_workflow")` ほか）ため、RF5a が起こす場所を `flow` へ寄せても名前は変わらない。
+このため形式の版（`lib/durable.py` の `FORMAT`）は上げず、8 件の子 Issue は `lib/durable.py` を触るのを RF1b だけにする。耐久を通す代表のテスト（C8）が、記録した耐久ステップの名前の並びを着手前と比べて守る。
+
+子 Issue ごとに形を変えて `FORMAT` を上げる案は採らない。上げると古い記録は続けず実行の回を頭から流す（`lib/durable.py` の `resolve`。2026-11-13）ため、更新のたびに実行中のプランが最初からやり直しになり、`FORMAT` を上げる子 Issue どうしが `lib/durable.py` で重なって流す順序が伸びる。
+子 Issue が呼ぶ順を変えざるを得ないと分かったときは、その子 Issue の PR で `FORMAT` を上げ、`lib/durable.py` を触るファイルに足し、詳細設計の段で流す順序を確かめ直す。
+
+根拠: Value 5 / Value 7（MVV 版 7）
