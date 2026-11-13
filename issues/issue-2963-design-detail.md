@@ -28,7 +28,7 @@ plugins/ndf/scripts/
 │   ├── sprint_loop_decide.py*     (RF7)
 │   └── sprint_loop{,_select,_record,_gate,_gate2,_exclusion,_cli}.py (RF7)
 ├── supervise_lib/
-│   ├── step_decide.py*・queue_decide.py*   (RF4。queue_decide は RF5a が広げる)
+│   ├── step_decide.py*・queue_decide.py*   (RF4。queue_decide は RF4 のマージの後に RF5a が変える)
 │   ├── plan_decide.py*            (RF5a)
 │   ├── sprint_decide.py*          (RF5b)
 │   ├── flow.py・queue.py          (RF4・RF5a)
