@@ -57,15 +57,6 @@ plugins/ndf/
     └── （A1a・A1b・A2・A3 の呼び出し側。下の表）
 ```
 
-**依存は一方向で、循環しない。**
-
-| モジュール | import するもの |
-| --- | --- |
-| 検査 | 自作の規則・`scripts/lib/allowlist.py`・`scripts/contracts_lib/ratchet.py` |
-| 自作の規則 | 標準ライブラリ（`ast`・`tokenize`・`json`）だけ。検査を import しない |
-| `ratchet.py` | 新しいモジュールを import しない |
-| `gh_rest.py`（プラグインの側） | `gh_call`・`gh_quota`・`gh_fields` だけ（今の向きを変えない）。`numbered_nodes` は `gh_call.gh` だけを使う |
-
 A1a・A1b は import を消すだけで、新しい向きを足さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
@@ -106,6 +97,16 @@ A1a・A1b は import を消すだけで、新しい向きを足さない。
 - A1a・A1b の呼び出し側（import と読み替えの呼び出しを消すだけのファイル）
 - A2 の残り 18 本
 - A3a〜A3g のファイル
+
+**依存は一方向で、循環しない。**
+
+| モジュール | import するもの |
+| --- | --- |
+| 検査 | 自作の規則・`scripts/lib/allowlist.py`・`scripts/contracts_lib/ratchet.py` |
+| 自作の規則 | 標準ライブラリ（`ast`・`tokenize`・`json`）だけ。検査を import しない |
+| `ratchet.py` | 新しいモジュールを import しない |
+| `gh_rest.py`（プラグインの側） | `gh_call`・`gh_quota`・`gh_fields` だけ（今の向きを変えない）。`numbered_nodes` は `gh_call.gh` だけを使う |
+
 
 ## クラスと関数の構造
 

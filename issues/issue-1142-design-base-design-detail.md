@@ -1,13 +1,13 @@
 # #1142 の詳細設計: 前の企画（スプリント 1〜2c）の残り
 
 **前の企画の設計のうち、まだ実装していない部分をファイルと関数の粒度へ下ろした文書である。** 残りは次の 3 つで、決定 65〜68（決定の記録）の方針で作る。
-承認する人は、この 3 つを下の子 Issue（K1〜K4・W1〜W8）の分け方と順序で実装へ進めるかを決める。
+承認する人は、この 3 つを下の子 Issue（K1〜K3・W1〜W8）の分け方で実装へ進めるかを決める。撤去（旧 K4）は smells の A1a にまとめた（同じファイル `legacy_names.py`・`phase-steps.py`・`bundle-close.py` を消すため。頭の詳細設計 [issue-1142-design-detail.md](issue-1142-design-detail.md) の決定）。流す順序は頭の詳細設計の「実装計画」が持つ。
 済んだ部分は書かない。済みと未着手の判定と根拠（PR 番号）は、移行の文書の「実装の状況（2026-11-13）」にある。
 
 | 残り | 中身 | 子 Issue |
 | --- | --- | --- |
 | スプリント 2b の残り（決定 68） | 汎用の処理の 20 種類のうち、アダプターへ移り切っていない 4 種類（Markdown のコードブロック・パスの照合・コメントの除去・HTTP） | K1〜K3 |
-| 撤去（決定 65） | 呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込み | K4 |
+| 撤去（決定 65） | 呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込み | smells の A1a にまとめた（旧 K4） |
 | 語の移行（決定 65・67） | 用語集の廃止語を、スクリプトの値・出力・docstring・コメントから外し、禁止語にする | W1〜W8 |
 
 前の企画の設計は次の文書にある。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。
@@ -18,16 +18,16 @@
 - [issue-1142-design-modules.md](issue-1142-design-modules.md) ・ [issue-1142-design-decisions.md](issue-1142-design-decisions.md)
 
 **子 Issue の案。** 触るファイルの全体は「ファイル配置」の表と一覧にある（パスは `plugins/ndf/` から。ルートの `scripts/` と `.ndf/` はリポジトリのルートから）。
-先に要るものは、頭の設計文書の「3 つの主題をまとめた順序」の規則 1・2（触るファイルが重なる 2 つは並列に流さない）から決めた。
+先に要るものは、触るファイルが重なる 2 つを並列に流さない規則から決めた。リファクタリング計画の 8 件（#2963・#2990〜#2996）を先に要るものから外すか、流す順序と波は頭の詳細設計の「実装計画」が持つ（利用者の判断待ち）。
 
 | 案の名前 | 中身 1 文 | 先に要るもの | 消す古いテスト | 大きさの目安 |
 | --- | --- | --- | --- | --- |
 | K1 Markdown のコードブロックの判定をアダプターへ | 節の読み書きと待ち通知の地の文の判定を `md` の上に置き、fence-regex の例外 2 項目を消す | #3153（`ci-watch.py`）・data の DT4（`issue-file.py`）・#2990（cross-review の `drive.py`） | `scripts/tests/test_gh_parts.py` のコードブロックの現状固定のテスト・`scripts/tests/test_wait_notify.py` の地の文の行のテスト | 14 本 |
 | K2 パスの照合とコメントの除去をアダプターへ | `pace.matches` を `pathmatch` へ、コメントの除去を pygments へ移し、`comment_mask.py` を消す | K1（cross-review の `state.py`）・#2963・#2993（`supervise.py`）・data の DT6（`pace.py`） | `scripts/tests/test_pace.py` の照合のテスト | 15 本 |
 | K3 HTTP をアダプターへ | `jev` と `refresh` の urllib を `notify` の httpx へ移し、urllib.request の例外 2 項目を消す | #2995（`release-steps.py`） | `scripts/tests/test_refresh.py`・`scripts/tests/test_instructions_check.py` の `refresh_lib.fetch` の opener のテスト・`scripts/tests/test_jev.py` の `_post` のテスト | 12 本 |
-| K4 撤去 | 呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込みを消す | #2990（`post_queue.py`）・#2991・#2996（`check-script-structure.py`）・data の DT1 | `scripts/tests/test_step_scripts.py` の phase-steps の節・`scripts/tests/test_legacy_names.py` の bundle-close の引数・`scripts/tests/test_post_queue.py` の取り込みのテスト | 13 本 |
+| （旧 K4 撤去） | smells の A1a にまとめた。中身（呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込みを消す）と下の関数の仕様は変えない | A1a の先に要るもの | `scripts/tests/test_step_scripts.py` の phase-steps の節・`scripts/tests/test_legacy_names.py`・`scripts/tests/test_post_queue.py` の取り込みのテスト（A1a が消す） | A1a に含む |
 | W1 プランの実行の語 | 廃止語を替え、フェーズの結果の語と見出しを `report_fields` に集める | 3 主題とリファクタリング計画の子 Issue のうち、一覧のファイルを触るものすべて・K2 | 結果の値の字面を写すテスト（`scripts/tests/test_supervise*.py` ほか 23 本の該当の assert） | 約 70 本 |
-| W2 cross-review の語 | 廃止語を替える | 同上・K1・K2・K4 | 無し（字面を写す assert だけ直す） | 約 30 本 |
+| W2 cross-review の語 | 廃止語を替える | 同上・K1・K2・A1a（旧 K4） | 無し（字面を写す assert だけ直す） | 約 30 本 |
 | W3 外部 CLI と記録の語 | 同上 | 同上・#2990 | 同上 | 約 18 本 |
 | W4 cross-refactoring の語 | 同上（`改修計画` → リファクタリング計画ほか） | 同上・K3 | 同上 | 約 45 本 |
 | W5 worktree と hook の語 | 同上（`作業ツリー`・`主ディレクトリ`・`共有の宣言`・`個人の宣言` ほか） | 同上・data の DT5 | 同上 | 約 30 本 |
@@ -63,17 +63,16 @@ plugins/ndf/scripts/
 │   ├── notify.py             # K3: HTTP の 2 関数
 │   ├── jev.py                # K3
 │   ├── refresh.py            # K3
-│   ├── post_queue.py         # K4: 移行の前のファイルの取り込みを外す
-│   ├── legacy_names.py       # K4: 旧名のエントリポイントの 1 行を外す
+│   ├── post_queue.py         # A1a（旧 K4）: 移行の前のファイルの取り込みを外す
 │   └── report_fields.py      # W1: フェーズの結果の語の持ち主
 ├── glossary.py               # K2: コメントの除去の呼び先
-├── - phase-steps.py          # K4
-├── - bundle-close.py         # K4
+├── - phase-steps.py          # A1a（旧 K4）
+├── - bundle-close.py         # A1a（旧 K4）
 └── （語の移行）               # W1〜W7: 下の一覧
-plugins/ndf/contracts/entrypoints/  # K4: 消すエントリポイントの契約 2 本と、呼び出し元の一覧
-scripts/check-script-structure.py    # K4: 取り込みの例外を外す（リポジトリの根）
+plugins/ndf/contracts/entrypoints/  # A1a（旧 K4）: 消すエントリポイントの契約 2 本と、呼び出し元の一覧
+scripts/check-script-structure.py    # A1a（旧 K4）: 取り込みの例外を外す（リポジトリの根）
 scripts/script-structure-allow/      # K1・K3: wrapped の例外 4 項目を消す（リポジトリの根）
-scripts/contract-allow/              # K4: 消すエントリポイントの例外 3 項目（リポジトリの根）
+scripts/contract-allow/              # A1a（旧 K4）: 消すエントリポイントの例外 3 項目（リポジトリの根）
 .ndf/glossary.json                   # W8: 禁止語（リポジトリの根）
 ```
 
@@ -85,31 +84,36 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `plugins/ndf/scripts/lib/md.py` | 変更 | 行ごとのブロックの種類を返す `block_kinds` を足す | markdown-it-py |
-| `plugins/ndf/scripts/lib/gh_sections.py` | 変更 | 節の読み書きのコードブロックと見出しの判定を `md` の結果で行う | `lib/md.py` |
-| `plugins/ndf/scripts/lib/wait_notice.py` | 変更 | 待ちの文を探す地の文の行を `md.block_kinds` で選ぶ | `lib/md.py` |
-| `plugins/ndf/scripts/lib/pace.py` | 変更 | 範囲の照合を `pathmatch.path_matches` で行い、自作の変換を消す | `lib/pathmatch.py` |
-| `plugins/ndf/scripts/lib/pathmatch.py` | 変更 | docstring の `pace.py:glob_re` の 1 行を消す | pathspec |
-| `plugins/ndf/scripts/lib/textparse.py` | 変更 | コードのコメントを pygments の字句で空白にする `mask_comments` を足す | unidiff・pygments |
-| `plugins/ndf/scripts/lib/comment_mask.py` | 削除 | 自作のコメントの走査（`textparse.mask_comments` へ移す） | 無し |
-| `plugins/ndf/scripts/glossary.py` | 変更 | コメントの除去を `textparse.mask_comments` から呼ぶ | `lib/textparse.py` |
-| `plugins/ndf/scripts/lib/notify.py` | 変更 | JSON の POST と本文の取得を httpx で行う 2 関数を足す | httpx・slack_sdk・python-dotenv |
-| `plugins/ndf/scripts/lib/jev.py` | 変更 | 判定の要求を `notify.post_json` で送る | `lib/notify.py`・`lib/usage_capture.py` |
-| `plugins/ndf/scripts/lib/refresh.py` | 変更 | 出典の取得を `notify.fetch_body` で行う | `lib/notify.py` |
-| `plugins/ndf/scripts/lib/post_queue.py` | 変更 | 移行の前のファイルの取り込みと `imported/` を消す | `lib/durable.py` |
-| `plugins/ndf/scripts/lib/legacy_names.py` | 変更 | `SCRIPTS` から `bundle-close.py` の行を消す | 無し |
-| `plugins/ndf/scripts/phase-steps.py` | 削除 | 呼び出し元の無い互換のエントリポイント | 無し |
-| `plugins/ndf/scripts/bundle-close.py` | 削除 | 呼び出し元の無い旧名のエントリポイント | 無し |
-| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__phase-steps.py.json` | 削除 | 消すエントリポイントの契約 | 無し |
-| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__bundle-close.py.json` | 削除 | 消すエントリポイントの契約 | 無し |
-| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__plan-to-spec-steps.py.json` | 変更 | 呼び出し元の一覧から `phase-steps.py` を消す | 無し |
-| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__release-verification-steps.py.json` | 変更 | 呼び出し元の一覧から `phase-steps.py` を消す | 無し |
-| `scripts/check-script-structure.py` | 変更 | `_no_file_queue` の `_import_legacy` の除外と docstring の 1 文を消す | 無し |
-| `scripts/script-structure-allow/`（wrapped の 4 項目） | 削除 | `gh_sections.py`・`wait_notice.py` の fence-regex、`jev.py`・`refresh.py` の urllib.request の例外 | 無し |
-| `scripts/contract-allow/`（phase-steps と bundle-close の 3 項目） | 削除 | 消すエントリポイントの例外 | 無し |
-| `plugins/ndf/scripts/lib/report_fields.py` | 変更 | フェーズの結果の語とフェーズレポートの見出しの唯一の置き場 | 無し |
-| W1〜W7 の一覧のファイル | 変更 | 廃止語を生きた語へ替える（値・出力・docstring・コメント） | 無し |
-| `.ndf/glossary.json` | 変更 | W1〜W7 で外した廃止語を `check.banned.words` へ足す | 無し |
+| `plugins/ndf/scripts/lib/md.py` | 変更 | 行ごとのブロックの種類を返す `block_kinds` を足す（K1） | markdown-it-py |
+| `plugins/ndf/scripts/lib/gh_sections.py` | 変更 | 節の読み書きのコードブロックと見出しの判定を `md` の結果で行う（K1） | `lib/md.py` |
+| `plugins/ndf/scripts/lib/wait_notice.py` | 変更 | 待ちの文を探す地の文の行を `md.block_kinds` で選ぶ（K1） | `lib/md.py` |
+| `plugins/ndf/scripts/lib/pace.py` | 変更 | 範囲の照合を `pathmatch.path_matches` で行い、自作の変換を消す（K2） | `lib/pathmatch.py` |
+| `plugins/ndf/scripts/lib/pathmatch.py` | 変更 | docstring の `pace.py:glob_re` の 1 行を消す（K2） | pathspec |
+| `plugins/ndf/scripts/lib/textparse.py` | 変更 | コードのコメントを pygments の字句で空白にする `mask_comments` を足す（K2） | unidiff・pygments |
+| `plugins/ndf/scripts/lib/comment_mask.py` | 削除 | 自作のコメントの走査（`textparse.mask_comments` へ移す）（K2） | 無し |
+| `plugins/ndf/scripts/glossary.py` | 変更 | コメントの除去を `textparse.mask_comments` から呼ぶ（K2） | `lib/textparse.py` |
+| `plugins/ndf/scripts/lib/notify.py` | 変更 | JSON の POST と本文の取得を httpx で行う 2 関数を足す（K3） | httpx・slack_sdk・python-dotenv |
+| `plugins/ndf/scripts/lib/jev.py` | 変更 | 判定の要求を `notify.post_json` で送る（K3） | `lib/notify.py`・`lib/usage_capture.py` |
+| `plugins/ndf/scripts/lib/refresh.py` | 変更 | 出典の取得を `notify.fetch_body` で行う（K3） | `lib/notify.py` |
+| `plugins/ndf/scripts/lib/post_queue.py` | 変更 | 移行の前のファイルの取り込みと `imported/` を消す（A1a。旧 K4） | `lib/durable.py` |
+| `plugins/ndf/scripts/phase-steps.py` | 削除 | 呼び出し元の無い互換のエントリポイント（A1a。旧 K4） | 無し |
+| `plugins/ndf/scripts/bundle-close.py` | 削除 | 呼び出し元の無い旧名のエントリポイント（A1a。旧 K4） | 無し |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__phase-steps.py.json` | 削除 | 消すエントリポイントの契約（A1a。旧 K4） | 無し |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__bundle-close.py.json` | 削除 | 消すエントリポイントの契約（A1a。旧 K4） | 無し |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__plan-to-spec-steps.py.json` | 変更 | 呼び出し元の一覧から `phase-steps.py` を消す（A1a。旧 K4） | 無し |
+| `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__release-verification-steps.py.json` | 変更 | 呼び出し元の一覧から `phase-steps.py` を消す（A1a。旧 K4） | 無し |
+| `scripts/check-script-structure.py` | 変更 | `_no_file_queue` の `_import_legacy` の除外と docstring の 1 文を消す（A1a。旧 K4） | 無し |
+| `scripts/script-structure-allow/plugins__ndf__scripts__lib__gh_sections.py--fence-regex--wrapped.json` | 削除 | `gh_sections.py` の fence-regex の例外（K1） | 無し |
+| `scripts/script-structure-allow/plugins__ndf__scripts__lib__wait_notice.py--fence-regex--wrapped.json` | 削除 | `wait_notice.py` の fence-regex の例外（K1） | 無し |
+| `scripts/script-structure-allow/plugins__ndf__scripts__lib__jev.py--urllib.request--wrapped.json` | 削除 | `jev.py` の urllib.request の例外（K3） | 無し |
+| `scripts/script-structure-allow/plugins__ndf__scripts__lib__refresh.py--urllib.request--wrapped.json` | 削除 | `refresh.py` の urllib.request の例外（K3） | 無し |
+| `scripts/contract-allow/plugins__ndf__scripts__bundle-close.py--core-entry.json` | 削除 | 消すエントリポイントの例外（A1a。旧 K4） | 無し |
+| `scripts/contract-allow/plugins__ndf__scripts__phase-steps.py--args-unparsed.json` | 削除 | 消すエントリポイントの例外（A1a。旧 K4） | 無し |
+| `scripts/contract-allow/plugins__ndf__scripts__phase-steps.py--core-entry.json` | 削除 | 消すエントリポイントの例外（A1a。旧 K4） | 無し |
+| `plugins/ndf/scripts/lib/report_fields.py` | 変更 | フェーズの結果の語とフェーズレポートの見出しの唯一の置き場（W1） | 無し |
+| `.ndf/glossary.json` | 変更 | W1〜W7 で外した廃止語を `check.banned.words` へ足す（W8） | 無し |
+
+W1〜W7 の一覧のファイル（廃止語を生きた語へ替える。値・出力・docstring・コメント）は、下の「W1〜W7 の触るファイル」の表にある。
 
 **K1〜K3 で `deps.require` にアダプターのグループを足すエントリポイント**（構造チェックの `require-groups` が落とすもの。
 2026-11-13 にアダプターの import を足したコピーへ `check-script-structure.py` を掛けて列挙した。関数は変えない）:
@@ -125,13 +129,13 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 
 | 子 Issue | 本数・か所 | ファイル |
 | --- | --- | --- |
-| W1 プランの実行 | 57 本・302 か所 | `scripts/check-trigger.py` `scripts/design-match.py` `scripts/lib/closing-issues.sh` `scripts/lib/durable.py` `scripts/lib/parallel_external.py` `scripts/lib/parallel_launch.py` `scripts/lib/parallel_release.py` `scripts/lib/parallel_route.py` `scripts/lib/parallel_run.py` `scripts/lib/parallel_switch.py` `scripts/lib/post_requests.py` `scripts/lib/pr_mode.py` `scripts/lib/project_mvv.py` `scripts/lib/report_fields.py` `scripts/lib/revise_note.py` `scripts/lib/run_state.py` `scripts/lib/sprint_loop.py` `scripts/lib/sprint_loop_gate.py` `scripts/lib/sprint_loop_gate2.py` `scripts/lib/sprint_loop_record.py` `scripts/lib/step_result.py` `scripts/lib/test_strategy.py` `scripts/lib/test_triage.py` `scripts/mvv-gate.py` `scripts/parallel.py` `scripts/project_lib/merge.py` `scripts/refactor-scope.py` `scripts/sprint-close.py` `scripts/supervise.py` `scripts/supervise_lib/` の 30 本（`absorb` `actuals` `claude` `decl` `delivery_templates` `design_stage` `engine` `flow` `new_args` `paths` `plan` `pr` `procedures` `prompts` `queue` `queue_fill` `queue_resume` `release_flow` `release_templates` `slow` `sprint` `sprint_close_steps` `sprint_waves` `state` `steps` `templates` `verify_steps`）`scripts/test-run.py`。値を読む手順: `skills/development-workflow/SKILL.md` `skills/development-workflow/references/agent-layers.md` `skills/development-workflow/references/waiting.md` `skills/development-workflow/references/context-window.md` `skills/development-workflow/references/pace.md` `skills/development-workflow/references/glossary.md` `agents/supervisor.md` `agents/supervisor-waits.md` `contracts/forms/ndf-next-block.json` |
+| W1 プランの実行 | 57 本・302 か所 | `scripts/check-trigger.py` `scripts/design-match.py` `scripts/lib/closing-issues.sh` `scripts/lib/durable.py` `scripts/lib/parallel_external.py` `scripts/lib/parallel_launch.py` `scripts/lib/parallel_release.py` `scripts/lib/parallel_route.py` `scripts/lib/parallel_run.py` `scripts/lib/parallel_switch.py` `scripts/lib/post_requests.py` `scripts/lib/pr_mode.py` `scripts/lib/project_mvv.py` `scripts/lib/report_fields.py` `scripts/lib/revise_note.py` `scripts/lib/run_state.py` `scripts/lib/sprint_loop.py` `scripts/lib/sprint_loop_gate.py` `scripts/lib/sprint_loop_gate2.py` `scripts/lib/sprint_loop_record.py` `scripts/lib/step_result.py` `scripts/lib/test_strategy.py` `scripts/lib/test_triage.py` `scripts/mvv-gate.py` `scripts/parallel.py` `scripts/project_lib/merge.py` `scripts/refactor-scope.py` `scripts/sprint-close.py` `scripts/supervise.py` `scripts/supervise_lib/` の 27 本（`absorb` `actuals` `claude` `decl` `delivery_templates` `design_stage` `engine` `flow` `new_args` `paths` `plan` `pr` `procedures` `prompts` `queue` `queue_fill` `queue_resume` `release_flow` `release_templates` `slow` `sprint` `sprint_close_steps` `sprint_waves` `state` `steps` `templates` `verify_steps`）`scripts/test-run.py`。値を読む手順: `skills/development-workflow/SKILL.md` `skills/development-workflow/references/agent-layers.md` `skills/development-workflow/references/waiting.md` `skills/development-workflow/references/context-window.md` `skills/development-workflow/references/pace.md` `skills/development-workflow/references/glossary.md` `agents/supervisor.md` `agents/supervisor-waits.md` `contracts/forms/ndf-next-block.json` |
 | W2 cross-review | 28 本・134 か所 | `scripts/lib/post_queue.py` `scripts/lib/result_posts.py` `scripts/lib/review_criteria.py` `skills/cross-review/scripts/` の 25 本（`_tmpdir.sh` `classifications.py` `critique-round.sh` `critique.sh` `drive.py` `launch-reviewer.sh` `measure.py` `monitor.py` `review_lib/ci.py` `review_lib/commands/` の 8 本 `review_lib/github.py` `review_lib/participants.py` `review_lib/posts.py` `review_lib/review_focus.py` `review_lib/workspace.py` `rotate-pr.sh` `state.py` `wait-review.sh`） |
 | W3 外部 CLI と記録 | 16 本・78 か所 | `scripts/lib/assignment.py` `scripts/lib/auth.py` `scripts/lib/bg-wait.sh` `scripts/lib/launch-cli.sh` `scripts/lib/models.py` `scripts/lib/monitor.py` `scripts/lib/monitor_loop.py` `scripts/lib/monitor_outcome.py` `scripts/lib/monitor_patterns.py` `scripts/lib/monitor_proc.py` `scripts/lib/monitor_types.py` `scripts/lib/run_metrics.py` `scripts/lib/transcript_agents.py` `scripts/lib/usage_aggregate.py` `scripts/parallel-measure.py` `scripts/usage-report.py` |
 | W4 cross-refactoring | 42 本・264 か所 | `skills/cross-refactoring/scripts/` の `drive.py` `launch-cli.sh` `prepare-worktrees.sh` `refactor.py` と `refactor_lib/` の 38 本（語の当たるファイルすべて） |
 | W5 worktree と hook | 27 本・240 か所 | `scripts/hook.py` `scripts/hook_lib/issue_guard.py` `scripts/hook_lib/token_guard.py` `scripts/hook_lib/worktree.py` `scripts/lib/git-credential.sh` `scripts/lib/hook_python.py` `scripts/lib/projects-common.sh` `scripts/lib/state_checkout.py` `scripts/lib/state_home.py` `scripts/lib/worktree-branch.sh` `scripts/lib/worktree-common.sh` `scripts/lib/worktree-copy.sh` `scripts/lib/worktree-declaration.sh` `scripts/lib/worktree-registry.sh` `scripts/lib/worktree-testenv-sweep.sh` `scripts/lib/worktree_base.py` `scripts/lib/worktree_deps.py` `scripts/progress-record.sh` `scripts/projects-sync.sh` `scripts/state-home.py` `scripts/worktree-deps.sh` `scripts/worktree-guard.sh` `scripts/worktree-localenv.sh` `scripts/worktree-session.sh` `scripts/worktree-setup.sh` `scripts/worktree-testenv.sh` `skills/development-workflow/scripts/lib/workflow-common.sh` |
 | W6 ラッパー | 11 本・76 か所 | `scripts/lib/claude_api_keys.py` `scripts/relay_lib/` の `__init__.py` `claude.py` `common.py` `install.py` `mark.py` `record.py` `run.py` `runtime.py` `shellrc.py` `switch.py` |
-| W7 リリースと文書 | 42 本・167 か所。`legacy_names.py` を除く | `scripts/instructions-check.py` `scripts/instructions_lib/`（`collect` `declaration` `findings` `versions`）`scripts/lib/`（`assignee_env` `container_reach` `delivery` `formatting` `glossary_lookup` `glossary_words` `jev` `limits` `loop_drive` `proc` `statefile` `waits`）`scripts/merged-steps.py` `scripts/merged_lib/`（`checks` `main_lock` `merge` `probe_table` `pull` `trash`）`scripts/pr-body-decisions.sh` `scripts/pr-steps.py` `scripts/pr_steps_lib/gh_pr.py` `scripts/project-decl.py` `scripts/release-steps.py` `scripts/release-verification-steps.py` `scripts/release_lib/`（`deploy` `materials` `others` `promotion` `step_run` `version_merge`）`skills/backlog-refinement/scripts/upkeep_depth.py` `skills/backlog-refinement/scripts/upkeep_research.py` `skills/external-ai/scripts/external-ai.py` `skills/fix/scripts/fix-steps.py` `skills/pr-review/scripts/pr-review-steps.py` `skills/skill-stats/scripts/skill-stats.py` |
+| W7 リリースと文書 | 42 本・162 か所。`legacy_names.py` を除く | `scripts/instructions-check.py` `scripts/instructions_lib/`（`collect` `declaration` `findings` `versions`）`scripts/lib/`（`assignee_env` `container_reach` `delivery` `formatting` `glossary_lookup` `glossary_words` `jev` `limits` `loop_drive` `proc` `statefile` `waits`）`scripts/merged-steps.py` `scripts/merged_lib/`（`checks` `main_lock` `merge` `probe_table` `pull` `trash`）`scripts/pr-body-decisions.sh` `scripts/pr-steps.py` `scripts/pr_steps_lib/gh_pr.py` `scripts/project-decl.py` `scripts/release-steps.py` `scripts/release-verification-steps.py` `scripts/release_lib/`（`deploy` `materials` `others` `promotion` `step_run` `version_merge`）`skills/backlog-refinement/scripts/upkeep_depth.py` `skills/backlog-refinement/scripts/upkeep_research.py` `skills/external-ai/scripts/external-ai.py` `skills/fix/scripts/fix-steps.py` `skills/pr-review/scripts/pr-review-steps.py` `skills/skill-stats/scripts/skill-stats.py` |
 
 **着手の時点で数え直す。** 上の一覧は 2026-11-13 の値で、先に流れる子 Issueがファイルを分けると変わる。各 W の PR は
 着手の時点の develop で同じ数え方をやり直し、その一覧を PR 本文に載せる。
@@ -224,7 +228,6 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | 取得と送信の上限の秒数 | 設定値 | `plugins/ndf/contracts/limits.json`（`refresh.http`・`jev.probe`・`jev.ask`。今のまま） | 今の値 |
 | `report_fields.DONE`・`GATE`・`STOPPED`・`NO_REPORT` | 定数 | `plugins/ndf/scripts/lib/report_fields.py` | `"完了"`・`"承認ゲート"`・`"止まった"`・`"報告なし"` |
 | `report_fields.HEADING` | 定数 | `plugins/ndf/scripts/lib/report_fields.py` | `"## フェーズレポート"` |
-| `legacy_names.SCRIPTS` | 定数 | `plugins/ndf/scripts/lib/legacy_names.py` | `bundle-close.py` の行を除いた 2 行 |
 | 禁止語 | 設定値 | `.ndf/glossary.json` の `check.banned.words` | 今の 2 語に、W1〜W7 で外した廃止語を足す |
 
 **フェーズの結果の語は `report_fields` だけが持つ。** 今は `関門` の字面が、12 ファイルの定数と比較に散っている。
@@ -235,7 +238,7 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | W1 のマージと、流れているプラン・キュー・並列の計画 | 耐久の記録・`<プラン>-state/`・done のファイルに書いた結果の値（`関門`） | 取らない。#1142 の実装の間はほかの開発を止める（決定 65）ため、W1 のマージの時点で流れているプランを持たない | 古い値を読み替えない（決定 65）。W1 の前に `関門` で止まったプランは、W1 の後に `--from` で頭から流し直す |
-| K4 のマージと、積まれた投稿キュー | キューのディレクトリの `<連番>-*.json` | 取らない | 取り込みを外すため、移行の前のファイルは送られない。2c（PR #1554、2026-09-30）から 6 週を越え、`post_queue.py count` が 0 であることを K4 の PR の確認の手順に入れる |
+| A1a（旧 K4）のマージと、積まれた投稿キュー | キューのディレクトリの `<連番>-*.json` | 取らない | 取り込みを外すため、移行の前のファイルは送られない。2c（PR #1554、2026-09-30）から 6 週を越え、`post_queue.py count` が 0 であることを A1a の PR の確認の手順に入れる |
 | hook（`wait_notice`）と同じ時刻の別の hook | 無し（読み取りだけ） | 不要 | 冪等 |
 | `refresh.refresh` の取得 | 外部のサイト | 1 件ずつ順に取得する（今のまま） | 冪等。打ち直せる |
 

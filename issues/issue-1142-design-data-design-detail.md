@@ -150,7 +150,8 @@ plugins/ndf/
 | `plugins/ndf/scripts/tests/test_places_and_forms.py` | 新設 | 置き場・指示書・PR 本文の見出しを引く読み手の単体テスト（DC6） | 上の読み手 |
 | `plugins/ndf/contracts/facts/branches.json` | 新設 | ブランチの接頭辞の表（DC7） | 無し |
 | `plugins/ndf/contracts/facts/gates.json` | 新設 | 承認ゲートとラベルの表（DC7） | 無し |
-| `plugins/ndf/contracts/workflow/stages/` | 変更 | 工程の文書の `metadata.ndf.phase` にフェーズを書く（#3092 の文書）（DC7） | 無し |
+| `plugins/ndf/contracts/workflow/stages/` | 変更 | 工程の文書の `metadata.ndf.phase` にフェーズを書く（#3092 の文書）（DC7） | `plugins/ndf/scripts/lib/workflow_def.py` |
+| `plugins/ndf/scripts/lib/workflow_def.py` | 変更 | 閉じた語彙 `VOCABULARY` の `metadata.ndf` のキーに `phase` を足す（#3191 が新設。語彙に無いキーは登録で断られる）（DC7） | 無し |
 | `plugins/ndf/contracts/workflow/paces.json` | 新設 | 進め方の表（#3092 の置き場）（DC7） | 無し |
 | `plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh` | 変更 | `WF_DESIGN_PREFIX`・`WF_APPROVAL_LABEL`・`WF_PACES` を `lib/facts.sh` で引く。`WF_STAGE_MATRIX`・`WF_MODES`・`WF_MODE_HEIGHT` は #3092 が消す（DC7） | `lib/facts.sh` |
 | `plugins/ndf/scripts/lib/transcript_agents.py` | 変更 | `STEP_PHASES`・`POSTS` を工程の文書から導く（DC7） | `lib/workflow_def.py`（#3092） |
