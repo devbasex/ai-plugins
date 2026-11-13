@@ -139,6 +139,7 @@ pace: fast
 | 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` | `requirements-design` |
 | 作業場所の用意 | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
 | 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` | `design` |
+| 詳細設計 | — | — | `design` | `design` | — |
 | 素材の収集と出典の確定 | — | — | — | — | `document-sources` |
 | ドキュメント再構成 | — | — | `document-rebuild`（設計 Pull Request を分けた場合） | `document-rebuild` | `document-rebuild` |
 | ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` |
@@ -174,6 +175,7 @@ pace: fast
 | 工程 | 決まり |
 | --- | --- |
 | 作業場所の用意 | **モードを判定した後に行う。** 要求と受け入れ条件は `issues/` に書くため、メインディレクトリのままで済む。開発の変更は `.worktrees/<ブランチ名>` の worktree の中で行う。後から移すと、メインディレクトリに差分が残ったまま並行作業が始まる。`light` でも、プロダクションコードの文言やテストを触るなら worktree を使う。`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、メインディレクトリのままでよい |
+| 詳細設計 | **設計の直後に置き、`standard`・`legacy-refactor` だけが通る。** ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に `issues/issue-<番号>-design-detail.md` へ書く（`design` の手順「詳細設計を書く」）。設計のプランは、詳細設計の段の前に設計文書だけを 1 つの AI にレビューさせ、指摘を直してから詳細設計へ進む。**承認ゲートを増やさない。** 詳細設計は設計 Pull Request に載り、設計承認ゲートで設計とまとめて 1 回見る。理由は [references/stage-notes.md](references/stage-notes.md) にある |
 | ドキュメント再構成 | 書き上げた設計文書を章立てから組み直す。`document-rebuild` が決める・測る・組み直す・整える・測り直すの手順を持ち、整える手順で `document-style` のセルフチェックとキーワードの確かめを通す（`document-style` はこの工程で掛かり、工程表に別の行を持たない）。**レビューの前に置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出し、どちらの指摘なのかが混ざる |
 | ドキュメントレビュー | 設計だけを載せた Pull Request を、実装より先にマージする。新しい Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**マージには人間の承認が要る**（止まり方は「自走で工程を通す」）。head のブランチ名は `design/` で始め、マージした後は実装用の worktree を作り直す |
 | 実装（`operation`） | **実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**「本番系へ届く操作」の承認ゲート（リリース承認ゲート）に当たる** |

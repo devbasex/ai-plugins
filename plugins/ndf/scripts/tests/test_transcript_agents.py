@@ -601,7 +601,7 @@ class Sleeper:
 
 def test_wait_reset_returns_at_once_when_every_reset_time_has_passed(mod) -> None:
     sleeper = Sleeper()
-    slept, remaining, code = mod.wait_reset(["sess-c"], root=FIXTURES, now=mod.parse_now(AFTER), sleeper=sleeper)
+    slept, remaining, code = mod.wait_reset(["sess-c"], root=FIXTURES, policy=mod.WaitPolicy(now=mod.parse_now(AFTER), sleeper=sleeper))
     assert (slept, code) == (0, 0)
     assert sleeper.slept in ([], [0])
     assert remaining == 3
@@ -609,7 +609,7 @@ def test_wait_reset_returns_at_once_when_every_reset_time_has_passed(mod) -> Non
 
 def test_wait_reset_sleeps_until_the_earliest_reset_time_plus_the_margin(mod) -> None:
     sleeper = Sleeper()
-    slept, _, code = mod.wait_reset(["sess-c"], root=FIXTURES, now=mod.parse_now(BEFORE), sleeper=sleeper)
+    slept, _, code = mod.wait_reset(["sess-c"], root=FIXTURES, policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), sleeper=sleeper))
     # 08:35:00 から 09:00:00（早い方）+ 60 秒の余白まで
     assert slept == 25 * 60 + 60
     assert sleeper.slept == [slept]
@@ -633,8 +633,7 @@ def test_wait_reset_uses_only_the_selected_layer(mod, tmp_path) -> None:
         ["sess-c"],
         root=root,
         layer="supervisor",
-        now=mod.parse_now(BEFORE),
-        sleeper=sleeper,
+        policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), sleeper=sleeper),
     )
 
     # worker の解除は 08:45、指定した supervisor の最初の解除は 09:00 である。
@@ -644,27 +643,33 @@ def test_wait_reset_uses_only_the_selected_layer(mod, tmp_path) -> None:
 
 
 def test_wait_reset_takes_the_margin_from_the_argument(mod) -> None:
-    slept, _, code = mod.wait_reset(["sess-c"], root=FIXTURES, now=mod.parse_now(BEFORE), margin=0, sleeper=Sleeper())
+    slept, _, code = mod.wait_reset(
+        ["sess-c"], root=FIXTURES, policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), margin=0, sleeper=Sleeper())
+    )
     assert (slept, code) == (25 * 60, 0)
 
 
 def test_wait_reset_sleeps_for_a_lone_worker_launched_by_the_conductor(mod) -> None:
     """conductor が直接起動した worker だけが中断しているときも眠る。"""
     sleeper = Sleeper()
-    slept, remaining, code = mod.wait_reset(["sess-d"], root=FIXTURES, depth=1, now=mod.parse_now(BEFORE), sleeper=sleeper)
+    slept, remaining, code = mod.wait_reset(
+        ["sess-d"], root=FIXTURES, depth=1, policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), sleeper=sleeper)
+    )
     assert slept > 0 and sleeper.slept == [slept]
     assert (remaining, code) == (1, 0)
 
 
 def test_wait_reset_stops_at_the_max_sleep_and_returns_three(mod) -> None:
     sleeper = Sleeper()
-    slept, _, code = mod.wait_reset(["sess-d"], root=FIXTURES, depth=1, now=mod.parse_now(BEFORE), max_sleep=540, sleeper=sleeper)
+    slept, _, code = mod.wait_reset(
+        ["sess-d"], root=FIXTURES, depth=1, policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), max_sleep=540, sleeper=sleeper)
+    )
     assert (slept, code) == (540, 3)
     assert sleeper.slept == [540]
 
 
 def test_wait_reset_ends_with_zero_when_nothing_is_interrupted(mod) -> None:
-    slept, remaining, code = mod.wait_reset(["sess-b"], root=FIXTURES, now=mod.parse_now(BEFORE), sleeper=Sleeper())
+    slept, remaining, code = mod.wait_reset(["sess-b"], root=FIXTURES, policy=mod.WaitPolicy(now=mod.parse_now(BEFORE), sleeper=Sleeper()))
     assert (slept, remaining, code) == (0, 0, 0)
 
 
@@ -704,7 +709,7 @@ def test_wait_reset_never_wakes_before_the_reset_time(mod) -> None:
     """端数を切り捨てると解除時刻より早く起きる。`--margin 0` でも前に戻らない。"""
     sleeper = Sleeper()
     slept, _, code = mod.wait_reset(
-        ["sess-c"], root=FIXTURES, margin=0, sleeper=sleeper, now=mod.parse_now("2026-09-17T08:59:59.500000+00:00")
+        ["sess-c"], root=FIXTURES, policy=mod.WaitPolicy(margin=0, sleeper=sleeper, now=mod.parse_now("2026-09-17T08:59:59.500000+00:00"))
     )
     # 解除は 09:00:00。0.5 秒を捨てると 0 秒になり、解除の前に戻る
     assert slept == 1

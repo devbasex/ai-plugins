@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import functools
+from pathlib import Path
+
 # 収束の判定が数える区分（#156、#732）。**残る 3 つは数えない。** 数えないのは、誤りだと
 # 示された棄却と、承認を妨げない軽微な指摘だけである。棄却した指摘を数えると、そのぶん
 # ラウンドが増える（#69 で同じ論点が 5 ラウンド続いた事象）。
@@ -29,8 +32,31 @@ DEFAULT_MAX_ROUNDS = {"design": 3, "code": 12}
 # 1 本の設計文書の行数の上限。超える主題は設計を 2 本に分ける
 DESIGN_DOC_MAX_LINES = 1000
 DESIGN_BRANCH_PREFIX = "design/"
-# 行数を見る設計文書（`design` が `issues/` に置く文書のうち、要求の文書を除く）
-DESIGN_DOC_FILE_SUFFIXES = ("-design.md", "-design-decisions.md")
+
+
+@functools.cache
+def _doc_kinds():
+    """設計文書の種類の契約の読み手 `doc_kinds` を、プロセスで 1 回だけ取り込んで返す。
+
+    このモジュールは `measure.py` から `scripts/lib` を `sys.path` に足さずに取り込まれるため、
+    初めて呼ばれたときに足してから取り込む。
+    """
+    import sys
+
+    lib = str(Path(__file__).resolve().parents[3] / "scripts" / "lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import doc_kinds
+
+    return doc_kinds
+
+
+def _line_limited(path: str, placed: bool) -> bool:
+    """行数を見る種類の設計文書か。種類と名前の末尾は設計文書の種類の契約から引く（#3144 の決定 12）。
+
+    契約を読めなければ `DocKindsError` を返す側へ投げる。
+    """
+    return _doc_kinds().has_flag(path, "line_limit", placed=placed)
 
 
 def review_kind(head_branch: str | None, categories: list[str] | tuple[str, ...]) -> str:
@@ -57,24 +83,24 @@ def diff_scope(kind: str, round_no: int) -> str:
     return "since_previous" if kind == "design" and round_no >= 2 else "full"
 
 
-def oversized_design_docs(root, paths, limit: int = DESIGN_DOC_MAX_LINES) -> list[dict]:
-    """設計文書のうち行数が上限を超えるものを `{"path", "lines"}` で返す。読めないものは飛ばす。"""
-    from pathlib import Path
-
+def _design_doc_lines(root, paths, placed: bool):
+    """`paths` のうち行数を見る種類の設計文書を、重なりを除いて並びのまま開き、`(パス, 行の並び)` を返す。読めないものは飛ばす。"""
     from_root = Path(root) if root else None
-    out = []
     for p in dict.fromkeys(paths or ()):
-        if not (isinstance(p, str) and p.startswith("issues/") and p.endswith(DESIGN_DOC_FILE_SUFFIXES)):
+        if not (isinstance(p, str) and _line_limited(p, placed=placed)):
             continue
         f = from_root / p if from_root else Path(p)
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
-                lines = sum(1 for _ in fh)
+                lines = fh.readlines()
         except OSError:
             continue
-        if lines > limit:
-            out.append({"path": p, "lines": lines})
-    return out
+        yield p, lines
+
+
+def oversized_design_docs(root, paths, limit: int = DESIGN_DOC_MAX_LINES) -> list[dict]:
+    """設計文書のうち行数が上限を超えるものを `{"path", "lines"}` で返す。読めないものは飛ばす。"""
+    return [{"path": p, "lines": len(lines)} for p, lines in _design_doc_lines(root, paths, placed=True) if len(lines) > limit]
 
 
 # --- 設計 PR のレビューの段（#1111） -------------------------------------------------
@@ -96,17 +122,4 @@ def review_stage(kind: str, round_no: int, has_model: bool) -> str | None:
 
 def has_domain_model(root, paths) -> bool:
     """変更した設計文書のどれかに見出し `## ドメインモデル` があるか。読めないものは飛ばす。"""
-    from pathlib import Path
-
-    from_root = Path(root) if root else None
-    for p in dict.fromkeys(paths or ()):
-        if not (isinstance(p, str) and p.endswith(DESIGN_DOC_FILE_SUFFIXES)):
-            continue
-        f = from_root / p if from_root else Path(p)
-        try:
-            with open(f, encoding="utf-8", errors="replace") as fh:
-                if any(line.rstrip() == DOMAIN_MODEL_HEADING for line in fh):
-                    return True
-        except OSError:
-            continue
-    return False
+    return any(any(line.rstrip() == DOMAIN_MODEL_HEADING for line in lines) for _, lines in _design_doc_lines(root, paths, placed=False))
