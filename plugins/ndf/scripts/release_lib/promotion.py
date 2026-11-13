@@ -19,6 +19,7 @@ import branch_flow
 import repo as repo_lib
 from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
+from release_lib.context import ReleaseCtx
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 
 
@@ -73,12 +74,13 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
     return ac.AllowedPR(n, tip, listed.stdout.split() if listed.returncode == 0 else [])
 
 
-def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base: str, prod: str, approved, ops, case=None) -> tuple:
+def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
     `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
     承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
     本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
+    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
     tag = names.release_tag(plugin, a.version)

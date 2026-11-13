@@ -107,6 +107,7 @@ from release_lib import others, promotion, publish, record, replaced, review_ran
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
+from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
@@ -675,14 +676,15 @@ def cmd_release(a):
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
     branch = _prepare_release_branch(root, a, plugin)
     on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
+    ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod)
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
-        got = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops, case if on_pr else None)
+        got = promotion.release_selected(ctx, approved, ops, case if on_pr else None)
         _published(root, a, plugin, prod, *got)
     if on_pr:
-        reviewed.release_prod(root, a, case, plugin, plugins, branch, base, prod, _prod_ops())
+        reviewed.release_prod(ctx, case, _prod_ops())
     if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)):
-        reviewed.release_dev(root, a, plugin, plugins, branch, base, wf, sys.modules[__name__])
+        reviewed.release_dev(ctx, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,

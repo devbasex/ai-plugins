@@ -27,6 +27,7 @@ import repo as repo_lib
 import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
+from release_lib.context import ReleaseCtx
 from release_lib.names import release_tag
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
@@ -66,9 +67,10 @@ class ProdOps:
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
 
 
-def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops: ProdOps):
+def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     """場合 1・2 の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → 迂回なしのマージ → 公開の後（#2773）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
+    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
     ver = a.version
     metrics = {
         "channel": "prod",
@@ -226,8 +228,9 @@ def release_dev_by_workflow(root, a, workflow, pr):
     return run_.get("url") or ""
 
 
-def release_dev(root, a, plugin, plugins, branch, base, workflow, ops):
+def release_dev(ctx: ReleaseCtx, workflow, ops):
     """宣言 release.dev_workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
+    root, a, plugin, plugins, branch, base = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base
     pr = ops._reusable_release_pr(root, branch, base)
     if pr is None:
         pr = {

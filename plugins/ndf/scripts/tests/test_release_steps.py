@@ -1244,6 +1244,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     import argparse
 
     from release_lib import reviewed as rv
+    from release_lib.context import ReleaseCtx
 
     merged, published, ci = [], [], []
     monkeypatch.setattr(
@@ -1267,7 +1268,8 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     codes = _exits(monkeypatch, rv)
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0)
     with pytest.raises(SystemExit) as e:
-        rv.release_prod(tmp_path, a, _case(case), "ndf", ["ndf"], "release/v1.2.3", "develop", "main", ops)
+        ctx = ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3", "develop", "main")
+        rv.release_prod(ctx, _case(case), ops)
     return e.value.code, (codes[-1] if codes else None), merged, published, ci
 
 
@@ -1432,6 +1434,8 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     """受け入れ条件 1・15: 宣言があれば開発版の PR のマージを workflow に任せ、マージ済みなら起動しない。"""
     import argparse
 
+    from release_lib.context import ReleaseCtx
+
     mod = _release_steps_module(monkeypatch)
     rv = mod.reviewed
     runs = []
@@ -1442,7 +1446,7 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     for state in ("OPEN", "MERGED"):
         monkeypatch.setattr(mod, "_reusable_release_pr", lambda r, b, base, s=state: {"number": 4, "state": s})
         with pytest.raises(SystemExit) as e:
-            rv.release_dev(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "release-dev.yml", mod)
+            rv.release_dev(ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "main"), "release-dev.yml", mod)
         assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
     assert runs == [("release-dev.yml", 4)]
 
