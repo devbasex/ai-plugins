@@ -171,6 +171,8 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | --- | --- | --- | --- | --- | --- | --- |
 | `read_comments` | API の失敗 | 権限・ネットワーク・上限 | `gh_rest` の戻り値の `ok` | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び手が出す | 後始末なし。打ち直せる |
 | `read_roles` | 1 人の権限を読めない | 共同作業者でない・トークンの権限 | API の 404 / 403 | 既定値で続ける（その人を `None`） | `judge` の説明に「権限を読めない <login>」 | 後始末なし。打ち直せる |
+| `read_permissions` | 1 人の権限を読めない | 共同作業者でない・トークンの権限 | API の 404 / 403 | 既定値で続ける（その人を `None`。`approved_review_commit` はその人の承認を数えない） | 呼び手の説明に「権限を読めない <login>」 | 後始末なし。打ち直せる |
+| `open_prs_at` | API の失敗 | 権限・ネットワーク・上限 | `gh_rest` の戻り値の `ok` | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び手が出す（証跡のチェックは `error`） | 後始末なし。打ち直せる |
 | `read_head` | PR を読めない | 番号の誤り・ネットワーク | API の失敗 | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び手が出す | 打ち直せる |
 | `read_reviews` | API の失敗 | 権限・ネットワーク | API の失敗 | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び手が出す | 打ち直せる |
 | `post_status` | commit status を付けられない | `statuses: write` が無い・ネットワーク | API の失敗 | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び手が出す | 打ち直せる（同じ名前の最新が効く） |
@@ -308,6 +310,8 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `has_request` | 無し | `grep -rn "release-approval-request" plugins/ndf/scripts` が 0 件 | 足す |
 | `read_comments` | `lib/gh_rest.py` の `_rest_pages` | `grep -n "def _rest_pages" -A15 plugins/ndf/scripts/lib/gh_rest.py` | 使う（ページを辿る部品。私有の名前のため、公開の関数 `rest_pages` として出し直すか、同じモジュールに読みの関数を足す。どちらにするかは実装で決める） |
 | `read_roles` | 無し | `grep -rn "collaborators/" plugins/ndf/scripts scripts` が 0 件 | 足す（`gh api` を `gh_call` で呼ぶ） |
+| `read_permissions` | `read_roles`（この設計で足す） | 同じ API（`collaborators/{login}/permission`）の応答の別の欄を読むことを `gh api` の出力で確かめた | 応答を読む部品を `read_roles` と共有し、読む欄（`permission`）だけを分ける |
+| `open_prs_at` | `lib/gh_rest.py` の `pr_list` | `grep -n "^def " plugins/ndf/scripts/lib/gh_rest.py` | 使う（`state=open` と宛先で絞り、先端の SHA の比較だけを足す） |
 | `read_head` | `lib/gh_rest.py` の `view_json` | `grep -n "def view_json" plugins/ndf/scripts/lib/gh_rest.py` | 使う（`headRefOid,baseRefName,state`） |
 | `read_reviews` | `lib/gh_rest.py` の `_rest_pages` | 上と同じ | 使う |
 | `post_status` | 無し | `grep -rn "/statuses/" plugins/ndf/scripts scripts` が 0 件 | 足す（`gh api --method POST`） |
