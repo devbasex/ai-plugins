@@ -141,17 +141,27 @@ def _check_lease(f: Path, lease: dict) -> None:
     """`lease` は副命令の名前（無ければ空）→ 鍵の形・単位・寿命の窓・返す副命令か・持ち主がいても走る副命令か。"""
     for sub, decl in lease.items():
         where = f"{f.name}: lease[{sub!r}]"
-        if not isinstance(decl, dict) or not set(LEASE_KEYS) <= set(decl) or not set(decl) <= {*LEASE_KEYS, "release", "shared"}:
+        if not _lease_shape_ok(decl):
             raise ContractError(f"{where} は key・unit・window_seconds と任意の release・shared を持つ")
         if not isinstance(decl["key"], str) or "{" not in decl["key"]:
             raise ContractError(f"{where}.key は入力の名前を {{}} で埋める鍵の形")
         if decl["unit"] not in LEASE_UNITS:
             raise ContractError(f"{where}.unit は {'/'.join(LEASE_UNITS)}")
-        if not isinstance(decl["window_seconds"], int) or isinstance(decl["window_seconds"], bool) or decl["window_seconds"] <= 0:
+        if not _is_positive_int(decl["window_seconds"]):
             raise ContractError(f"{where}.window_seconds は正の整数")
         for flag in ("release", "shared"):
             if not isinstance(decl.get(flag, False), bool):
                 raise ContractError(f"{where}.{flag} は真偽値")
+
+
+def _lease_shape_ok(decl: object) -> bool:
+    """持ち主の宣言 1 件が key・unit・window_seconds をそろえ、ほかは任意の release・shared だけを持つか。"""
+    return isinstance(decl, dict) and set(LEASE_KEYS) <= set(decl) <= {*LEASE_KEYS, "release", "shared"}
+
+
+def _is_positive_int(value: object) -> bool:
+    """真偽値でない正の整数か。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def core_exempt(entry: dict) -> str | None:
