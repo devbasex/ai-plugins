@@ -673,13 +673,7 @@ def cmd_release(a):
     except approval.Gate as g:
         emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
-    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
-        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
-    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
-    bump.require_bumped(root, plugin, ver)
-
-    git(root, "push", "-q", "-u", "origin", "HEAD")
+    branch = _prepare_release_branch(root, a, plugin)
     on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
@@ -739,6 +733,19 @@ def cmd_release(a):
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _prepare_release_branch(root, a, plugin) -> str:
+    """作業ツリーが release/v<版> にあり、コミットしていない変更が無く、版を上げ済みであることを確かめて push する。ブランチ名を返す。"""
+    ver = a.version
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
+        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
+    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
+    bump.require_bumped(root, plugin, ver)
+
+    git(root, "push", "-q", "-u", "origin", "HEAD")
+    return branch
 
 
 def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
