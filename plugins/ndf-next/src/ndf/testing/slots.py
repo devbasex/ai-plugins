@@ -62,8 +62,6 @@ POLL_SECONDS = 2.0
 STOP_INTERVAL_SECONDS = 30.0
 # 止めたグループが SIGTERM で終わらないときに SIGKILL を送るまでの秒
 KILL_GRACE_SECONDS = 10.0
-# 止めたグループの終了を確かめる間隔
-STOP_POLL_SECONDS = 0.1
 STOP_FILE = "stop.json"
 
 DIRECT = "direct"
@@ -263,28 +261,25 @@ def _stop_group(proc: subprocess.Popen) -> None:
     except ProcessLookupError:
         return
     own_group = pgid == os.getpgrp()
-    _send_signal(proc, pgid, own_group, signal.SIGTERM)
+
+    def send(sig: int) -> None:
+        try:
+            proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass
+
+    def alive() -> bool:
+        leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
+        return leader_alive if own_group else _group_alive(pgid)
+
+    send(signal.SIGTERM)
     deadline = time.monotonic() + KILL_GRACE_SECONDS
-    while _target_alive(proc, pgid, own_group):
+    while alive():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            _send_signal(proc, pgid, own_group, signal.SIGKILL)
+            send(signal.SIGKILL)
             return
-        time.sleep(min(STOP_POLL_SECONDS, remaining))
-
-
-def _send_signal(proc: subprocess.Popen, pgid: int, own_group: bool, sig: int) -> None:
-    """自分と同じグループならテストの先頭だけへ、別のグループならグループ全体へ送る。"""
-    try:
-        proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
-    except ProcessLookupError:
-        pass
-
-
-def _target_alive(proc: subprocess.Popen, pgid: int, own_group: bool) -> bool:
-    """送り先がまだ生きているか（自分と同じグループなら先頭、別のグループならグループ全体で見る）。"""
-    leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
-    return leader_alive if own_group else _group_alive(pgid)
+        time.sleep(min(0.1, remaining))
 
 
 def _group_alive(pgid: int) -> bool:
