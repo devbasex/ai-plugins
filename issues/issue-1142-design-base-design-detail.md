@@ -1,32 +1,32 @@
 # #1142 の詳細設計: 前の企画（スプリント 1〜2c）の残り
 
-設計文書 `issues/issue-1142-design.md` のうち、前の企画（スプリント 1〜2c）の設計
-（[issue-1142-design-migration.md](issue-1142-design-migration.md) ・ [issue-1142-design-libraries.md](issue-1142-design-libraries.md) ・
-[issue-1142-design-dbos.md](issue-1142-design-dbos.md) ・ [issue-1142-design-modules.md](issue-1142-design-modules.md) ・
-[issue-1142-design-decisions.md](issue-1142-design-decisions.md) ）で、まだ実装していない部分をファイルと関数の粒度へ下ろした文書である。
-書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。#1142 の 3 つの主題（smells・data・scripted-flow）の
-詳細設計は、それぞれの主題の詳細設計が持つ。
+**前の企画の設計のうち、まだ実装していない部分をファイルと関数の粒度へ下ろした文書である。** 残りは次の 3 つで、決定 65〜68（決定の記録）の方針で作る。
+承認する人は、この 3 つを下の子 Issue（K1〜K4・W1〜W8）の分け方と順序で実装へ進めるかを決める。
+済んだ部分は書かない。済みと未着手の判定と根拠（PR 番号）は、移行の文書の「実装の状況（2026-11-13）」にある。
 
-**済んだ部分は書かない。** 済みと未着手の判定と根拠（PR 番号）は、移行の文書の「実装の状況（2026-11-13）」にある。
-残りは次の 3 つで、決定 65〜68（決定の記録）の方針で作る。
-
-| 残り | 中身 | 子の課題 |
+| 残り | 中身 | 子 Issue |
 | --- | --- | --- |
-| スプリント 2b の残り（決定 68） | 汎用の処理の 20 種類のうち、包みへ移り切っていない 4 種類（Markdown のコードブロック・パスの照合・コメントの除去・HTTP） | K1〜K3 |
+| スプリント 2b の残り（決定 68） | 汎用の処理の 20 種類のうち、アダプターへ移り切っていない 4 種類（Markdown のコードブロック・パスの照合・コメントの除去・HTTP） | K1〜K3 |
 | 撤去（決定 65） | 呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込み | K4 |
 | 語の移行（決定 65・67） | 用語集の廃止語を、スクリプトの値・出力・docstring・コメントから外し、禁止語にする | W1〜W8 |
 
-**子の課題の案。** 触るファイルの全体は「ファイル配置」の表と一覧にある（パスは `plugins/ndf/` から。根の `scripts/` と
-`.ndf/` はリポジトリの根から）。先に要るものは、頭の設計文書の「3 つの主題をまとめた順序」の規則 1・2（触るファイルが
-重なる 2 つは並列に流さない）から決めた。
+前の企画の設計は次の文書にある。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。
+#1142 の 3 つの主題（smells・data・scripted-flow）の詳細設計は、それぞれの主題の詳細設計が持つ。
+
+- 設計文書 `issues/issue-1142-design.md`
+- [issue-1142-design-migration.md](issue-1142-design-migration.md) ・ [issue-1142-design-libraries.md](issue-1142-design-libraries.md) ・ [issue-1142-design-dbos.md](issue-1142-design-dbos.md)
+- [issue-1142-design-modules.md](issue-1142-design-modules.md) ・ [issue-1142-design-decisions.md](issue-1142-design-decisions.md)
+
+**子 Issue の案。** 触るファイルの全体は「ファイル配置」の表と一覧にある（パスは `plugins/ndf/` から。ルートの `scripts/` と `.ndf/` はリポジトリのルートから）。
+先に要るものは、頭の設計文書の「3 つの主題をまとめた順序」の規則 1・2（触るファイルが重なる 2 つは並列に流さない）から決めた。
 
 | 案の名前 | 中身 1 文 | 先に要るもの | 消す古いテスト | 大きさの目安 |
 | --- | --- | --- | --- | --- |
-| K1 Markdown のコードブロックの判定を包みへ | 節の読み書きと待ち通知の地の文の判定を `md` の上に置き、fence-regex の例外 2 項目を消す | #3153（`ci-watch.py`）・data の DT4（`issue-file.py`）・#2990（cross-review の `drive.py`） | `scripts/tests/test_gh_parts.py` のコードブロックの現状固定のテスト・`scripts/tests/test_wait_notify.py` の地の文の行のテスト | 14 本 |
-| K2 パスの照合とコメントの除去を包みへ | `pace.matches` を `pathmatch` へ、コメントの除去を pygments へ移し、`comment_mask.py` を消す | K1（cross-review の `state.py`）・#2963・#2993（`supervise.py`）・data の DT6（`pace.py`） | `scripts/tests/test_pace.py` の照合のテスト | 15 本 |
-| K3 HTTP を包みへ | `jev` と `refresh` の urllib を `notify` の httpx へ移し、urllib.request の例外 2 項目を消す | #2995（`release-steps.py`） | `scripts/tests/test_refresh.py`・`scripts/tests/test_instructions_check.py` の `refresh_lib.fetch` の opener のテスト・`scripts/tests/test_jev.py` の `_post` のテスト | 12 本 |
+| K1 Markdown のコードブロックの判定をアダプターへ | 節の読み書きと待ち通知の地の文の判定を `md` の上に置き、fence-regex の例外 2 項目を消す | #3153（`ci-watch.py`）・data の DT4（`issue-file.py`）・#2990（cross-review の `drive.py`） | `scripts/tests/test_gh_parts.py` のコードブロックの現状固定のテスト・`scripts/tests/test_wait_notify.py` の地の文の行のテスト | 14 本 |
+| K2 パスの照合とコメントの除去をアダプターへ | `pace.matches` を `pathmatch` へ、コメントの除去を pygments へ移し、`comment_mask.py` を消す | K1（cross-review の `state.py`）・#2963・#2993（`supervise.py`）・data の DT6（`pace.py`） | `scripts/tests/test_pace.py` の照合のテスト | 15 本 |
+| K3 HTTP をアダプターへ | `jev` と `refresh` の urllib を `notify` の httpx へ移し、urllib.request の例外 2 項目を消す | #2995（`release-steps.py`） | `scripts/tests/test_refresh.py`・`scripts/tests/test_instructions_check.py` の `refresh_lib.fetch` の opener のテスト・`scripts/tests/test_jev.py` の `_post` のテスト | 12 本 |
 | K4 撤去 | 呼び出し元の無いエントリポイント 2 本と、投稿キューの移行の前のファイルの取り込みを消す | #2990（`post_queue.py`）・#2991・#2996（`check-script-structure.py`）・data の DT1 | `scripts/tests/test_step_scripts.py` の phase-steps の節・`scripts/tests/test_legacy_names.py` の bundle-close の引数・`scripts/tests/test_post_queue.py` の取り込みのテスト | 13 本 |
-| W1 プランの実行の語 | 廃止語を替え、フェーズの結果の語と見出しを `report_fields` に集める | 3 主題とリファクタリング計画の子の課題のうち、一覧のファイルを触るものすべて・K2 | 結果の値の字面を写すテスト（`scripts/tests/test_supervise*.py` ほか 23 本の該当の assert） | 約 70 本 |
+| W1 プランの実行の語 | 廃止語を替え、フェーズの結果の語と見出しを `report_fields` に集める | 3 主題とリファクタリング計画の子 Issue のうち、一覧のファイルを触るものすべて・K2 | 結果の値の字面を写すテスト（`scripts/tests/test_supervise*.py` ほか 23 本の該当の assert） | 約 70 本 |
 | W2 cross-review の語 | 廃止語を替える | 同上・K1・K2・K4 | 無し（字面を写す assert だけ直す） | 約 30 本 |
 | W3 外部 CLI と記録の語 | 同上 | 同上・#2990 | 同上 | 約 18 本 |
 | W4 cross-refactoring の語 | 同上（`改修計画` → リファクタリング計画ほか） | 同上・K3 | 同上 | 約 45 本 |
@@ -41,9 +41,9 @@
 
 | 語 | この文書での意味 |
 | --- | --- |
-| 包み | 外部ライブラリを呼ぶ唯一のモジュール（決定 19。`lib/md.py` など） |
+| アダプター | 外部ライブラリを呼ぶ唯一のモジュール（決定 19。`lib/md.py` など） |
 | 廃止語 | 用語集（`docs/glossary/glossary.json`）の `deprecated` に載った語 |
-| 禁止語 | `.ndf/glossary.json` の `check.banned.words`。継続的統合の用語チェックが、足した行に現れたら落とす |
+| 禁止語 | `.ndf/glossary.json` の `check.banned.words`。CI の用語チェックが、足した行に現れたら落とす |
 | フェーズの結果の語 | フェーズレポートの `結果:` の値（`完了`・`承認ゲート`・`止まった`・`報告なし`） |
 
 ## ファイル配置
@@ -78,7 +78,7 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 ```
 
 **依存の向き。** エントリポイント → 業務のモジュール（`gh_sections`・`wait_notice`・`pace`・`glossary`・`jev`・`refresh`・
-`post_queue`）→ 包み（`md`・`pathmatch`・`textparse`・`notify`・`durable`）→ 外部ライブラリの一方向である。包みは業務の
+`post_queue`）→ アダプター（`md`・`pathmatch`・`textparse`・`notify`・`durable`）→ 外部ライブラリの一方向である。アダプターは業務の
 モジュールを import しない（`notify` が import するのは `limits` だけ）。語の移行は import を足さず、W1 の
 `report_fields` を読む側が import する向き（`supervise_lib`・`sprint_loop*`・`parallel*` → `lib/report_fields.py`）だけを足す。
 `report_fields` は標準ライブラリだけを import するため循環は起きない。
@@ -111,8 +111,8 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | W1〜W7 の一覧のファイル | 変更 | 廃止語を生きた語へ替える（値・出力・docstring・コメント） | 無し |
 | `.ndf/glossary.json` | 変更 | W1〜W7 で外した廃止語を `check.banned.words` へ足す | 無し |
 
-**K1〜K3 で `deps.require` に包みのグループを足すエントリポイント**（構造チェックの `require-groups` が落とすもの。
-2026-11-13 に包みの import を足したコピーへ `check-script-structure.py` を掛けて列挙した。関数は変えない）:
+**K1〜K3 で `deps.require` にアダプターのグループを足すエントリポイント**（構造チェックの `require-groups` が落とすもの。
+2026-11-13 にアダプターの import を足したコピーへ `check-script-structure.py` を掛けて列挙した。関数は変えない）:
 
 | グループ | エントリポイント |
 | --- | --- |
@@ -120,19 +120,20 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | `pathmatch`（K2） | `scripts/check-trigger.py`・`scripts/mvv-gate.py`・`scripts/sprint-state.py`・`scripts/supervise.py`・`scripts/lib/review_criteria.py`・`skills/cross-review/scripts/state.py`・`skills/fix/scripts/fix-steps.py`・`scripts/experimental/queue-overlap-replay.py`・`scripts/experimental/selection-replay.py` |
 | `notify`（K3） | `scripts/instructions-check.py`・`scripts/release-steps.py`・`skills/cross-refactoring/scripts/refactor.py` |
 
-**W1〜W7 の触るファイル**（2026-11-13 の develop で、廃止語を用語チェックと同じ正規表現（`glossary_words.word_pattern` の
-カタカナの境界つき）で数えた。テストと `experimental/` を除く。`lib/legacy_names.py` と `data/legacy-values.json` は旧名を
-読むための表なので外す）。パスは `plugins/ndf/` から。
+**W1〜W7 の触るファイル。** 2026-11-13 の develop で、廃止語を用語チェックと同じ正規表現（`glossary_words.word_pattern` のカタカナの境界つき）で数えた。
+テストと `experimental/` を除く。`lib/legacy_names.py` と `data/legacy-values.json` は旧名を読むための表なので外す。パスは `plugins/ndf/` から。
 
-- W1 プランの実行（57 本・302 か所）: `scripts/check-trigger.py` `scripts/design-match.py` `scripts/lib/closing-issues.sh` `scripts/lib/durable.py` `scripts/lib/parallel_external.py` `scripts/lib/parallel_launch.py` `scripts/lib/parallel_release.py` `scripts/lib/parallel_route.py` `scripts/lib/parallel_run.py` `scripts/lib/parallel_switch.py` `scripts/lib/post_requests.py` `scripts/lib/pr_mode.py` `scripts/lib/project_mvv.py` `scripts/lib/report_fields.py` `scripts/lib/revise_note.py` `scripts/lib/run_state.py` `scripts/lib/sprint_loop.py` `scripts/lib/sprint_loop_gate.py` `scripts/lib/sprint_loop_gate2.py` `scripts/lib/sprint_loop_record.py` `scripts/lib/step_result.py` `scripts/lib/test_strategy.py` `scripts/lib/test_triage.py` `scripts/mvv-gate.py` `scripts/parallel.py` `scripts/project_lib/merge.py` `scripts/refactor-scope.py` `scripts/sprint-close.py` `scripts/supervise.py` `scripts/supervise_lib/` の 30 本（`absorb` `actuals` `claude` `decl` `delivery_templates` `design_stage` `engine` `flow` `new_args` `paths` `plan` `pr` `procedures` `prompts` `queue` `queue_fill` `queue_resume` `release_flow` `release_templates` `slow` `sprint` `sprint_close_steps` `sprint_waves` `state` `steps` `templates` `verify_steps`）`scripts/test-run.py`。値を読む手順: `skills/development-workflow/SKILL.md` `skills/development-workflow/references/agent-layers.md` `skills/development-workflow/references/waiting.md` `skills/development-workflow/references/context-window.md` `skills/development-workflow/references/pace.md` `skills/development-workflow/references/glossary.md` `agents/supervisor.md` `agents/supervisor-waits.md` `contracts/forms/ndf-next-block.json`
-- W2 cross-review（28 本・134 か所）: `scripts/lib/post_queue.py` `scripts/lib/result_posts.py` `scripts/lib/review_criteria.py` `skills/cross-review/scripts/` の 25 本（`_tmpdir.sh` `classifications.py` `critique-round.sh` `critique.sh` `drive.py` `launch-reviewer.sh` `measure.py` `monitor.py` `review_lib/ci.py` `review_lib/commands/` の 8 本 `review_lib/github.py` `review_lib/participants.py` `review_lib/posts.py` `review_lib/review_focus.py` `review_lib/workspace.py` `rotate-pr.sh` `state.py` `wait-review.sh`）
-- W3 外部 CLI と記録（16 本・78 か所）: `scripts/lib/assignment.py` `scripts/lib/auth.py` `scripts/lib/bg-wait.sh` `scripts/lib/launch-cli.sh` `scripts/lib/models.py` `scripts/lib/monitor.py` `scripts/lib/monitor_loop.py` `scripts/lib/monitor_outcome.py` `scripts/lib/monitor_patterns.py` `scripts/lib/monitor_proc.py` `scripts/lib/monitor_types.py` `scripts/lib/run_metrics.py` `scripts/lib/transcript_agents.py` `scripts/lib/usage_aggregate.py` `scripts/parallel-measure.py` `scripts/usage-report.py`
-- W4 cross-refactoring（42 本・264 か所）: `skills/cross-refactoring/scripts/` の `drive.py` `launch-cli.sh` `prepare-worktrees.sh` `refactor.py` と `refactor_lib/` の 38 本（語の当たるファイルすべて）
-- W5 worktree と hook（27 本・240 か所）: `scripts/hook.py` `scripts/hook_lib/issue_guard.py` `scripts/hook_lib/token_guard.py` `scripts/hook_lib/worktree.py` `scripts/lib/git-credential.sh` `scripts/lib/hook_python.py` `scripts/lib/projects-common.sh` `scripts/lib/state_checkout.py` `scripts/lib/state_home.py` `scripts/lib/worktree-branch.sh` `scripts/lib/worktree-common.sh` `scripts/lib/worktree-copy.sh` `scripts/lib/worktree-declaration.sh` `scripts/lib/worktree-registry.sh` `scripts/lib/worktree-testenv-sweep.sh` `scripts/lib/worktree_base.py` `scripts/lib/worktree_deps.py` `scripts/progress-record.sh` `scripts/projects-sync.sh` `scripts/state-home.py` `scripts/worktree-deps.sh` `scripts/worktree-guard.sh` `scripts/worktree-localenv.sh` `scripts/worktree-session.sh` `scripts/worktree-setup.sh` `scripts/worktree-testenv.sh` `skills/development-workflow/scripts/lib/workflow-common.sh`
-- W6 ラッパー（11 本・76 か所）: `scripts/lib/claude_api_keys.py` `scripts/relay_lib/` の `__init__.py` `claude.py` `common.py` `install.py` `mark.py` `record.py` `run.py` `runtime.py` `shellrc.py` `switch.py`
-- W7 リリースと文書（42 本・167 か所。`legacy_names.py` を除く）: `scripts/instructions-check.py` `scripts/instructions_lib/`（`collect` `declaration` `findings` `versions`）`scripts/lib/`（`assignee_env` `container_reach` `delivery` `formatting` `glossary_lookup` `glossary_words` `jev` `limits` `loop_drive` `proc` `statefile` `waits`）`scripts/merged-steps.py` `scripts/merged_lib/`（`checks` `main_lock` `merge` `probe_table` `pull` `trash`）`scripts/pr-body-decisions.sh` `scripts/pr-steps.py` `scripts/pr_steps_lib/gh_pr.py` `scripts/project-decl.py` `scripts/release-steps.py` `scripts/release-verification-steps.py` `scripts/release_lib/`（`deploy` `materials` `others` `promotion` `step_run` `version_merge`）`skills/backlog-refinement/scripts/upkeep_depth.py` `skills/backlog-refinement/scripts/upkeep_research.py` `skills/external-ai/scripts/external-ai.py` `skills/fix/scripts/fix-steps.py` `skills/pr-review/scripts/pr-review-steps.py` `skills/skill-stats/scripts/skill-stats.py`
+| 子 Issue | 本数・か所 | ファイル |
+| --- | --- | --- |
+| W1 プランの実行 | 57 本・302 か所 | `scripts/check-trigger.py` `scripts/design-match.py` `scripts/lib/closing-issues.sh` `scripts/lib/durable.py` `scripts/lib/parallel_external.py` `scripts/lib/parallel_launch.py` `scripts/lib/parallel_release.py` `scripts/lib/parallel_route.py` `scripts/lib/parallel_run.py` `scripts/lib/parallel_switch.py` `scripts/lib/post_requests.py` `scripts/lib/pr_mode.py` `scripts/lib/project_mvv.py` `scripts/lib/report_fields.py` `scripts/lib/revise_note.py` `scripts/lib/run_state.py` `scripts/lib/sprint_loop.py` `scripts/lib/sprint_loop_gate.py` `scripts/lib/sprint_loop_gate2.py` `scripts/lib/sprint_loop_record.py` `scripts/lib/step_result.py` `scripts/lib/test_strategy.py` `scripts/lib/test_triage.py` `scripts/mvv-gate.py` `scripts/parallel.py` `scripts/project_lib/merge.py` `scripts/refactor-scope.py` `scripts/sprint-close.py` `scripts/supervise.py` `scripts/supervise_lib/` の 30 本（`absorb` `actuals` `claude` `decl` `delivery_templates` `design_stage` `engine` `flow` `new_args` `paths` `plan` `pr` `procedures` `prompts` `queue` `queue_fill` `queue_resume` `release_flow` `release_templates` `slow` `sprint` `sprint_close_steps` `sprint_waves` `state` `steps` `templates` `verify_steps`）`scripts/test-run.py`。値を読む手順: `skills/development-workflow/SKILL.md` `skills/development-workflow/references/agent-layers.md` `skills/development-workflow/references/waiting.md` `skills/development-workflow/references/context-window.md` `skills/development-workflow/references/pace.md` `skills/development-workflow/references/glossary.md` `agents/supervisor.md` `agents/supervisor-waits.md` `contracts/forms/ndf-next-block.json` |
+| W2 cross-review | 28 本・134 か所 | `scripts/lib/post_queue.py` `scripts/lib/result_posts.py` `scripts/lib/review_criteria.py` `skills/cross-review/scripts/` の 25 本（`_tmpdir.sh` `classifications.py` `critique-round.sh` `critique.sh` `drive.py` `launch-reviewer.sh` `measure.py` `monitor.py` `review_lib/ci.py` `review_lib/commands/` の 8 本 `review_lib/github.py` `review_lib/participants.py` `review_lib/posts.py` `review_lib/review_focus.py` `review_lib/workspace.py` `rotate-pr.sh` `state.py` `wait-review.sh`） |
+| W3 外部 CLI と記録 | 16 本・78 か所 | `scripts/lib/assignment.py` `scripts/lib/auth.py` `scripts/lib/bg-wait.sh` `scripts/lib/launch-cli.sh` `scripts/lib/models.py` `scripts/lib/monitor.py` `scripts/lib/monitor_loop.py` `scripts/lib/monitor_outcome.py` `scripts/lib/monitor_patterns.py` `scripts/lib/monitor_proc.py` `scripts/lib/monitor_types.py` `scripts/lib/run_metrics.py` `scripts/lib/transcript_agents.py` `scripts/lib/usage_aggregate.py` `scripts/parallel-measure.py` `scripts/usage-report.py` |
+| W4 cross-refactoring | 42 本・264 か所 | `skills/cross-refactoring/scripts/` の `drive.py` `launch-cli.sh` `prepare-worktrees.sh` `refactor.py` と `refactor_lib/` の 38 本（語の当たるファイルすべて） |
+| W5 worktree と hook | 27 本・240 か所 | `scripts/hook.py` `scripts/hook_lib/issue_guard.py` `scripts/hook_lib/token_guard.py` `scripts/hook_lib/worktree.py` `scripts/lib/git-credential.sh` `scripts/lib/hook_python.py` `scripts/lib/projects-common.sh` `scripts/lib/state_checkout.py` `scripts/lib/state_home.py` `scripts/lib/worktree-branch.sh` `scripts/lib/worktree-common.sh` `scripts/lib/worktree-copy.sh` `scripts/lib/worktree-declaration.sh` `scripts/lib/worktree-registry.sh` `scripts/lib/worktree-testenv-sweep.sh` `scripts/lib/worktree_base.py` `scripts/lib/worktree_deps.py` `scripts/progress-record.sh` `scripts/projects-sync.sh` `scripts/state-home.py` `scripts/worktree-deps.sh` `scripts/worktree-guard.sh` `scripts/worktree-localenv.sh` `scripts/worktree-session.sh` `scripts/worktree-setup.sh` `scripts/worktree-testenv.sh` `skills/development-workflow/scripts/lib/workflow-common.sh` |
+| W6 ラッパー | 11 本・76 か所 | `scripts/lib/claude_api_keys.py` `scripts/relay_lib/` の `__init__.py` `claude.py` `common.py` `install.py` `mark.py` `record.py` `run.py` `runtime.py` `shellrc.py` `switch.py` |
+| W7 リリースと文書 | 42 本・167 か所。`legacy_names.py` を除く | `scripts/instructions-check.py` `scripts/instructions_lib/`（`collect` `declaration` `findings` `versions`）`scripts/lib/`（`assignee_env` `container_reach` `delivery` `formatting` `glossary_lookup` `glossary_words` `jev` `limits` `loop_drive` `proc` `statefile` `waits`）`scripts/merged-steps.py` `scripts/merged_lib/`（`checks` `main_lock` `merge` `probe_table` `pull` `trash`）`scripts/pr-body-decisions.sh` `scripts/pr-steps.py` `scripts/pr_steps_lib/gh_pr.py` `scripts/project-decl.py` `scripts/release-steps.py` `scripts/release-verification-steps.py` `scripts/release_lib/`（`deploy` `materials` `others` `promotion` `step_run` `version_merge`）`skills/backlog-refinement/scripts/upkeep_depth.py` `skills/backlog-refinement/scripts/upkeep_research.py` `skills/external-ai/scripts/external-ai.py` `skills/fix/scripts/fix-steps.py` `skills/pr-review/scripts/pr-review-steps.py` `skills/skill-stats/scripts/skill-stats.py` |
 
-**着手の時点で数え直す。** 上の一覧は 2026-11-13 の値で、先に流れる子の課題がファイルを分けると変わる。各 W の PR は
+**着手の時点で数え直す。** 上の一覧は 2026-11-13 の値で、先に流れる子 Issueがファイルを分けると変わる。各 W の PR は
 着手の時点の develop で同じ数え方をやり直し、その一覧を PR 本文に載せる。
 
 ## クラスと関数の構造
@@ -226,15 +227,14 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | `legacy_names.SCRIPTS` | 定数 | `plugins/ndf/scripts/lib/legacy_names.py` | `bundle-close.py` の行を除いた 2 行 |
 | 禁止語 | 設定値 | `.ndf/glossary.json` の `check.banned.words` | 今の 2 語に、W1〜W7 で外した廃止語を足す |
 
-**フェーズの結果の語は `report_fields` だけが持つ。** 今は `関門` の字面が 12 ファイルの定数と比較に散っている
-（`engine.PHASE_STATUS`・`actuals.OUTCOMES`・`queue_fill.FINISHED`・`queue_resume.RESUMABLE`・`state.PROGRESS_ATTENTION`・
-`sprint_loop_record.FINISHED` ほか）。W1 はこれらを `report_fields` の定数から引く形にし、語を替えるのを 1 か所にする。
+**フェーズの結果の語は `report_fields` だけが持つ。** 今は `関門` の字面が、12 ファイルの定数と比較に散っている。
+例は `engine.PHASE_STATUS`・`actuals.OUTCOMES`・`queue_fill.FINISHED`・`queue_resume.RESUMABLE`・`state.PROGRESS_ATTENTION`・`sprint_loop_record.FINISHED` である。W1 はこれらを `report_fields` の定数から引く形にし、語を替えるのを 1 か所にする。
 
 ## 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| W1 のマージと、流れているプラン・キュー・並列の計画 | 耐久の記録・`<プラン>-state/`・done のファイルに書いた結果の値（`関門`） | 取らない。#1142 の実装の間はほかの開発を止める（方針 1）ため、W1 のマージの時点で流れているプランを持たない | 古い値を読み替えない（決定 65）。W1 の前に `関門` で止まったプランは、W1 の後に `--from` で頭から流し直す |
+| W1 のマージと、流れているプラン・キュー・並列の計画 | 耐久の記録・`<プラン>-state/`・done のファイルに書いた結果の値（`関門`） | 取らない。#1142 の実装の間はほかの開発を止める（決定 65）ため、W1 のマージの時点で流れているプランを持たない | 古い値を読み替えない（決定 65）。W1 の前に `関門` で止まったプランは、W1 の後に `--from` で頭から流し直す |
 | K4 のマージと、積まれた投稿キュー | キューのディレクトリの `<連番>-*.json` | 取らない | 取り込みを外すため、移行の前のファイルは送られない。2c（PR #1554、2026-09-30）から 6 週を越え、`post_queue.py count` が 0 であることを K4 の PR の確認の手順に入れる |
 | hook（`wait_notice`）と同じ時刻の別の hook | 無し（読み取りだけ） | 不要 | 冪等 |
 | `refresh.refresh` の取得 | 外部のサイト | 1 件ずつ順に取得する（今のまま） | 冪等。打ち直せる |
@@ -260,7 +260,7 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 ## 単体テストの観点
 
 **テストは作り直す（決定 66）。** 置き換えた関数の古いテストは同じ PR で消し、下の観点で書き直す。消す古いテストは
-各子の課題の行の「消す古いテスト」にある。
+各子 Issueの行の「消す古いテスト」にある。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -278,5 +278,5 @@ scripts/contract-allow/              # K4: 消すエントリポイントの例�
 | `Queue._session` | 開いて閉じる | 開いている間の入れ子の呼び出し | 起動の失敗で `DurableError` |
 | `Queue.paths` | 連番の順 | 項目 0 件 | 読めない記録で例外 |
 | `_no_file_queue` | `Queue` に `glob` を書くと違反 | `_import_legacy` という名前のメソッドでも違反になる | 無し |
-| W1〜W7 | 用語チェックを `--file` で各子の課題の一覧へ掛け、廃止語の当たりが 0 | `legacy_names.py`・`data/legacy-values.json` は数えない | フェーズの結果の語のテストは `report_fields` の定数を読み、字面を写さない |
+| W1〜W7 | 用語チェックを `--file` で各子 Issueの一覧へ掛け、廃止語の当たりが 0 | `legacy_names.py`・`data/legacy-values.json` は数えない | フェーズの結果の語のテストは `report_fields` の定数を読み、字面を写さない |
 | W8 | 足した行に禁止語を書いた差分で用語チェックが落ちる | 外した範囲（`docs/archive/**` ほか）では落ちない | 無し |

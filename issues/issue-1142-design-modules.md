@@ -1,19 +1,29 @@
 # 1142: モジュールの分け方
 
-> **2026-11-13 に見直した。** この文書の分け方はスプリント 2（L0・C1〜C7）で実装済みで、その記録である。その後の課題でモジュールが足され、名前も変わった（例: `mission.py` → `sprint.py`）。今の構成の正本はコードと `docs/scripts-map/` にある。残りの実装はモジュールを分けない（決定 68 の包みへの移し替えと語の移行だけ）。テストの差し替えの扱いは決定 66 で変えた。
+[issue-1142-design.md](issue-1142-design.md) の続きである。移行の後のパッケージとモジュールの構成と、500 行を超えるファイルを分ける先を、関数とクラスの単位で持つ。
+移行ステップ（[issue-1142-design-migration.md](issue-1142-design-migration.md) ）は、この表のとおりに移した。
 
-[issue-1142-design.md](issue-1142-design.md) の続きである。移行の後のパッケージとモジュールの構成と、500 行を超える
-ファイルを分ける先を、関数とクラスの単位で持つ。移行ステップ（[issue-1142-design-migration.md](issue-1142-design-migration.md) ）は
-この表のとおりに移す。
+**この文書の分け方はスプリント 2（L0・C1〜C7）で実装済みで、その記録である。**
 
-**行数の区分は決定 18 のとおりである**（`markdown-writing` のルール 9 と同じ）。300 行までを目安にし、301〜500 行は
-1 つの状態機械・1 つのクラスの本体・大半が表のファイルのように分けると理解が落ちるときだけ認め、501 行以上は置かない。
-表の見積りの行数は、2026-09-26 の develop（b8a189e0）を構文木で測った各定義の行数（直前か直後の空行とコメントを含む）に、
-import と docstring の分を足したものである。
+| 承認する人が知りたいこと | 答え |
+| --- | --- |
+| 残りの実装はモジュールを分けるか | 分けない。決定 68 のアダプターへの移し替えと語の移行だけである |
+| 今の構成の正本はどこか | コードと `docs/scripts-map/`。実装の後の Issue でモジュールが足され、名前も変わった（例: `mission.py` → `sprint.py`） |
+| テストの差し替えの記述は残りに当たるか | 当たらない。スプリント 2 の記録で、残りの実装は決定 66 に従い、テストを作り直してよい |
 
-**スプリント 2 では、テストの差し替えを効かせたまま分けるため、呼ぶ側は移した先の関数をモジュールの属性として呼んだ**（`github._gh_rest(...)` の形。
-`from github import _gh_rest` で名前を取り込まない）。テストの差し替え先は定義したモジュールへ向け直した（決定 3）。
-`raising=False` の差し替えは、名前が無くなっても落ちずに効かなくなるため、移すときに必ず向け直した。残りの実装は決定 66 でテストを作り直してよい。
+**行数の区分は決定 18 のとおりである**（`document-style` のルール 9 と同じ）。
+
+| 行数 | 扱い |
+| --- | --- |
+| 300 行まで | 目安 |
+| 301〜500 行 | 1 つの状態機械・1 つのクラスの本体・大半が表のファイルのように、分けると理解が落ちるときだけ認める |
+| 501 行以上 | 置かない |
+
+表の見積りの行数は、2026-09-26 の develop（b8a189e0）を構文木で測った各定義の行数（直前か直後の空行とコメントを含む）に、import と docstring の分を足したものである。
+
+**呼ぶ側は、移した先の関数をモジュールの属性として呼ぶ**（`github._gh_rest(...)` の形。`from github import _gh_rest` で名前を取り込まない）。
+スプリント 2 で、テストの差し替えを効かせたまま分けるためにこの形にした。テストの差し替え先は、定義したモジュールへ向け直した（決定 3）。
+`raising=False` の差し替えは、名前が無くなっても落ちずに効かなくなるため、移すときに必ず向け直した。
 
 ## パッケージ・モジュール構成
 
@@ -47,10 +57,19 @@ scripts/                          # リポジトリの根（開発用）
 └── + measure/structure-baseline.py  + measure/claude-p-usage.py
 ```
 
-501 行以上のファイルは、移行の後に 0 本になる（移行の範囲の外のものは例外リストに残る。決定 18）。301〜500 行に入るのは、
-`relay_lib/run.py`（約 350）・`review_lib/commands/init.py`（約 435）・`review_lib/workspace.py`（約 375）・`review_lib/github.py`（約 365）・
-`worktree-shell-lex.sh`（約 310）・`worktree-write-target.sh`（約 415）・`worktree-write-target-scan.sh`（約 475）・
-`worktree-write-target-track.sh`（約 440）の 8 本で、理由は各節にある。
+501 行以上のファイルは、移行の後に 0 本になる（移行の範囲の外のものは例外リストに残る。決定 18）。
+301〜500 行に入るのは次の 8 本で、理由は各節にある。
+
+| ファイル | 見積りの行数 |
+| --- | ---: |
+| `relay_lib/run.py` | 約 350 |
+| `review_lib/commands/init.py` | 約 435 |
+| `review_lib/workspace.py` | 約 375 |
+| `review_lib/github.py` | 約 365 |
+| `worktree-shell-lex.sh` | 約 310 |
+| `worktree-write-target.sh` | 約 415 |
+| `worktree-write-target-scan.sh` | 約 475 |
+| `worktree-write-target-track.sh` | 約 440 |
 
 ## 分け方
 
@@ -59,7 +78,7 @@ scripts/                          # リポジトリの根（開発用）
 
 - **`worker_steps.py`:** 5 つのハンドラーのうち `PrStep` を除く 4 つを `steps.py` へ入れると約 310 行になる。`WorkStep` と `DriveStep` はどちらも `call_worker` で worker を起動する。このため、この 2 つを 1 本にまとめて分ける
 - **`release_templates.py`:** `templates.py` にリリースのプランまで入れると約 405 行になる。リリースのプランは形（`release.form`）ごとの表 `RELEASE_FORMS` を持ち、`plan_release_package_plugin` だけで 109 行ある
-- **`mission_waves.py`:** `mission.py` にミッションのすべてを入れると約 405 行になる。さらに、`plan_fast_design` が `plan_mission_design` を呼び、`mission_plans` と `close_waves` が `plan_fast_*` を呼ぶため、`pace: fast` の部分だけを別のモジュールへ出すと循環 import が起きる。そこで、ステージごとのプランを作る関数を下のモジュールへ、組み立てと拒否の判定を上のモジュールへ分ける
+- **`mission_waves.py`:** `mission.py` にスプリントのすべてを入れると約 405 行になる。さらに、`plan_fast_design` が `plan_mission_design` を呼び、`mission_plans` と `close_waves` が `plan_fast_*` を呼ぶため、`pace: fast` の部分だけを別のモジュールへ出すと循環 import が起きる。そこで、ステージごとのプランを作る関数を下のモジュールへ、組み立てと拒否の判定を上のモジュールへ分ける
 - **`new_args.py`:** `new` の引数の表と検査を `supervise.py` に残すと約 345 行になる。種別ごとの引数の表（`NEW_ARGS` 66 行・`NEW_KINDS` 26 行）と、`main` の中で `new` だけを検査する 40 行は、ほかの副命令と共有しない
 
 | モジュール | 持つもの | 見積りの行数 |
@@ -89,9 +108,9 @@ scripts/                          # リポジトリの根（開発用）
 
 **import の向き:** 下から順に、`decl`・`plan`・`prompts`・`claude` は `lib/` だけを import する。`paths`（`decl`・`plan`）→ `state` → `slow`・`steps` → `worker_steps`・`pr` → `engine` の順に、上のモジュールは下のモジュールだけを import する。プランを作る側は `templates` → `release_templates` と、`mission` → `mission_waves` → `templates`・`release_templates` の向きだけを持ち、`engine` を import しない。`queue` は `paths` と `plan` だけを import し、プランは `SELF` の `run` として別プロセスで流す。`engine` を import するのは `commands` だけで、`supervise.py` は `commands`・`templates`・`mission`・`queue`・`new_args`・`decl`・`plan` を import する。これで循環は起きない。
 
-**テストの差し替え先:** `monkeypatch.setattr` は 10 件ある。このうち `sv.run_batch` の 3 件は `supervise_lib.queue` に、`sv.ensure_worktree` の 1 件は `cmd_queue` が名前を引く `supervise_lib.paths` に向く。`sv.subprocess` の 3 件（`cmd_design_glossary` の 2 件・`ensure_worktree` の 1 件）と `sv.gh_parts` の 3 件（`Engine.gh_limit_wait`）は、`supervise.py` がそのモジュールを import しなくなるため、`subprocess.run` と `lib/gh_call.py` の `gh_call.RUNNER` を差し替える形に変わる（`RUNNER` は再エクスポートしない。lib/gh_parts.py の節）。
+**テストの差し替え先:** `monkeypatch.setattr` の 10 件は、スプリント 2 で定義元のモジュールへ向け直した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。
 
-#### Engine と周りのクラス
+### supervise_lib の Engine と周りのクラス
 
 `Supervisor`（1049 行・50 メソッド）のメソッドを次の 7 本へ分け、文面の定数を `prompts.py` へ置く。`__init__`（48 行）は `Engine` と `RunState` で分け、下の表の「メソッドの実測」には含めない。実測の行数は、次のメソッドまでの空行とコメントを含む。`state.py`・`worker_steps.py`・`pr.py` の 3 本は新設する。`supervise_lib` 全体の分け方は `supervise_lib の分け方` にある。
 
@@ -113,7 +132,7 @@ scripts/                          # リポジトリの根（開発用）
 
 **import の向き:** `prompts`・`claude` は `lib/` だけを import する。`state` の上に `slow`・`steps` を置き、その上の `worker_steps` と `pr` は `steps`・`claude`・`prompts` を import する。`engine` はここまでのすべてを import し、`engine` を import するのは `commands` だけである。`SlowWatch` と各ハンドラーは、`RunState`・`ClaudeRunner`・`base_branch`・`pr_number` を `Engine` が渡す `ctx` から受け取る。このため、`slow` から `steps` へも、ハンドラーから `engine` へも import の向きが生じず、循環は起きない。
 
-**テストの差し替え先:** `sv.gh_parts.RUNNER` の 3 件（`gh_limit_wait`）は `supervise.py` が `gh_parts` を import しなくなるため、`lib/gh_call.py` の `gh_call.RUNNER` を差し替える形に変わる（`RUNNER` は再エクスポートしない。lib/gh_parts.py の節）。`Supervisor` のメソッドを差し替えるテストは無いが、18 か所の `sv.Supervisor(...)` は `Engine` を使う形に、`.results`・`.log` の読み取りは `RunState` を通す形に変わる。
+**テストの差し替え先:** `sv.gh_parts.RUNNER` の 3 件と `sv.Supervisor(...)` の 18 か所は、スプリント 2 で `gh_call.RUNNER` と `Engine`・`RunState` を使う形へ変えた（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。
 
 ### review_lib
 `state.py` のトップレベルの定義 299 個（関数・クラス・定数。計 5,068 行）を、14 個の副命令からたどれる範囲で 1 つずつモジュールへ割り当てる。行数は、定義の本体と直前の空行・コメントを実測した値に、import と docstring の見積り（6 行 + import するモジュール 1 つにつき 1 行）を足したもの。予定の 7 本（`__init__`・`store`・`workspace`・`github`・`categories`・`participants`・`findings`）に `ci`・`posts`・`matching`・`fix_result`・`review_focus` の 5 本を足し、`commands/` の 9 本と合わせて 21 本にする。どのモジュールも 500 行以下で、301〜500 行に入るのは `commands/init.py`・`workspace.py`・`github.py` の 3 本だけである。
@@ -150,13 +169,19 @@ scripts/                          # リポジトリの根（開発用）
 - **`matching`**: 指摘どうし・指摘とコメントを照合する規則を持つ。新規性の数え方と振動の判定が同じ照合を使う。
 - **`fix_result`**: 修正の結果ファイルを見つけ、それが今のラウンドのものかを確かめる。取り込んだ値の正規化とは分ける。
 
-301〜500 行に入る 3 本は分けない。`commands/init.py` は再開と新規の 2 つの経路が `_InitResult` と `_print_init_result` を共有しているため、`workspace.py` は `_sync_worktree` の 1 つの手順を 10 個の関数に分けたものであるため、`github.py` は gh と REST の失敗の扱いを 1 か所に集めるため（クラス図の `GitHubClient`）である。
+301〜500 行に入る 3 本は分けない。
+
+| ファイル | 分けない理由 |
+| --- | --- |
+| `commands/init.py` | 再開と新規の 2 つの経路が `_InitResult` と `_print_init_result` を共有している |
+| `workspace.py` | `_sync_worktree` の 1 つの手順を 10 個の関数に分けたものである |
+| `github.py` | gh と REST の失敗の扱いを 1 か所に集める（クラス図の `GitHubClient`） |
 
 `commands/` は 1 ファイル 1 副命令にしない。50 行に満たない副命令（`flush`・`unresolved-threads`・`should-rotate`・`set-current-pr`）を 1 本ずつ置くと、drive.py が続けて呼ぶ一連の処理が別々のファイルに散るためである。まとめる相手は、drive.py の中で続けて呼ぶ副命令にした。`flush` は `judge` が終了コード 8 を返したときの続きなので `judge.py` に置く。`check-oscillation`・`should-rotate`・`set-current-pr` は、ループを止めるか・PR を巻き直すか・巻き直した PR へ移るかを決めるので `loop.py` に置く。`verify-sweep` と `unresolved-threads` は、どちらも GitHub 上に残っている未解決の指摘を数えて完了報告の数を確かめるので、`report.py` に置く。
 
 import の向きは、`__init__` ← `store`・`github`・`categories`・`review_focus` ← `workspace`・`ci`・`findings`（いずれも `github` を使う）・`posts`（`github`・`store`）・`fix_result`（`store`） ← `participants`（`posts` の `NO_RESULT` を使う） ← `matching`（`findings`・`participants`・`store`） ← `commands/*` ← `state.py` の一方向にする。`commands/` どうしは import し合わず、`commands/` より下のモジュールは `commands/` を import しない。割り当てた後の依存をたどっても、循環は起きない。`classifications`・`assignment`・`auth` などの `scripts/` にあるモジュールは `state.py` を import しないので、`review_lib` から import しても循環しない。
 
-テストのうち、名前を渡して `state_mod` を差し替えている 131 か所（ast で数えた数。改行をまたぐ呼び出しを含む）は、定義を置いたモジュールへ向く。内訳は `review_lib.github` 67（`_gh_rest` 12・`_repo_from_git` 11・`_review_exists` 11・`_fetch_pr_metadata` 10・`_fetch_changed_files` 7・`_fetch_unresolved_threads` 7・`_git_remote_url` 4・`FETCH_COMMENTS_SCRIPT` 2・`_gh_output` 2・`_fetch_existing_comments` 1）、`review_lib` 23（`_sh`）、`review_lib.workspace` 20（`_is_registered_worktree` 8・`_sync_worktree` 8・`_create_worktree` 4）、`review_lib.ci` 9（`_round_ci` 4・`_fetch_check_runs` 4・`_classify_ci` 1）、`review_lib.commands.start_round` 5（`_sync_before_round` 4・`_guard_previous_round` 1）、`review_lib.posts` 4（`_auto_flush` 3・`_pending_posts` 1）、`review_lib.findings` 2（`_record_carried_over`）である。conftest.py が変数で渡している 1 か所（`_GITHUB_LOOKUPS`）は、`_fetch_check_runs` を `review_lib.ci` へ、`_fetch_pr_metadata` を `review_lib.github` へ分けて向ける。`state_mod.subprocess`・`state_mod.auth` など、モジュールの属性を差し替えている 37 か所は同じモジュールのオブジェクトを指すので、向きは変わらない。`skills/fix/tests/test_fix_steps.py` は差し替えずに `_normalize_fix_result` を呼んでいるだけなので、呼び先は `review_lib.commands.merge_fix` になる。この差し替えが効くように、呼ぶ側は `from ... import 関数` で名前を取り込まず、`github._gh_rest` のようにモジュールの属性として呼ぶ。
+**テストの差し替え先:** 名前を渡して `state_mod` を差し替えている 131 か所は、スプリント 2 で定義元のモジュールへ向け直した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。この差し替えが効くように、呼ぶ側は `from ... import 関数` で名前を取り込まず、`github._gh_rest` のようにモジュールの属性として呼ぶ。
 
 使われていない定義 `CI_CODE_PATTERNS` と `_classify_round` は、C2 で消す（state.py の中からもテストからも参照されていない。2026-09-26 に確かめた）。
 
@@ -182,7 +207,7 @@ import の向きは、`__init__` ← `store`・`github`・`categories`・`review
 
 import は一方向で、ランチャー → `__init__` → run・mark・install・proc、run → terminal・claude・record・mark・common、install → shellrc・version_dir・proc・common、mark → record・proc・common の向きになる。proc・record・claude・terminal・shellrc・version_dir は common だけを import し、common は標準ライブラリと `lib/clock.py`・`lib/jsonio.py` だけを import するので、循環は無く I2 を満たす。循環と逆向きを作らないため、`LockBusy`（mark の `cmd_question` が使う）と `config_dir`・`copy_path`（shellrc が使う）を common に置く。run が起動時に全モジュールを import する（決定 5）のは一方向の import なので、この向きを崩さない。
 
-`test_relay.py` の差し替えは 12 件ある（`monkeypatch.setattr` 10・`monkeypatch.setitem` 1・`Relay._tick` への代入 1）。差し替え先が変わるのは 3 件で、`make_relay_dir` は `relay_lib.record`、`proc_info` は `relay_lib.proc`、`Relay._tick` は `relay_lib.run.Relay` へ向ける（決定 3）。前の 2 件が効くように、run は `record.make_relay_dir()`、install は `proc.proc_info()` とモジュール越しに呼ぶ。残りの 9 件は変えない。内訳は `os.isatty` 3・`os.execve` 1・`os.getpid` 1・`time.gmtime` 1・`sys.platform` 2・`sys.modules["pty"]` 1 で、どれも標準ライブラリの属性なので、どのモジュールから呼んでも効く。差し替え以外の `mod.` の参照は、定義元（claude 4・shellrc 3・common 3・run 5・mark 3・record 1・install 5・version_dir 1・`__init__` 1）へ向け直す。
+**テストの差し替え先:** `test_relay.py` の差し替え 12 件のうち 3 件を、スプリント 2 で定義元のモジュールへ向け直した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。向け直しが効くように、run は `record.make_relay_dir()`、install は `proc.proc_info()` とモジュール越しに呼ぶ。
 
 **動いている `run` が使うバージョンディレクトリは、そのディレクトリの中の `inuse-<pid>` が示す。** `run` は起動時に読み込んだ
 バージョンディレクトリへ `inuse-<pid>` を置き、終わるときに消す。古いバージョンディレクトリを消す `startup` は、生きている pid の
@@ -201,7 +226,7 @@ import は一方向で、ランチャー → `__init__` → run・mark・install
 
 import の向きは `monitor.py` → `monitor_loop` → `monitor_scan`・`monitor_proc` → `monitor_types`・`monitor_patterns` の一方向で（`monitor_loop` は `monitor_types`・`monitor_patterns` も直接読む）、`monitor_proc` と `monitor_patterns` は標準ライブラリだけ、`monitor_types` は `assignment`・`limits` だけを読むため、循環は起きない。`monitor_outcome` は `_record_outcome` が `AgentPaths.for_` を呼ぶために `monitor_types` を読み、`monitor_types` からは `monitor_outcome` を読まない。`supervise.py` は `USAGE_LIMIT_FATAL` を `monitor_patterns` から読む。移した先の名前は、別のモジュールからは `monitor_proc._kill_pid(...)` のようにモジュールの属性として引き、`from ... import` で名前を取り込まない（`monitor.py` の再エクスポートと、`_run_all` が裸で呼ぶ `monitor_agent`・`_record_outcome` だけが例外）。
 
-テストの差し替え 43 か所のうち、`monitor_agent`・`_record_outcome` の 2 か所（`test_seat_names.py`。呼ぶ側の `_run_all` が `monitor.py` に残る）は差し替え先を変えず、`_tmp_dir` の 9 か所と `_TMP_DIR_OVERRIDE` の 4 か所は `monitor_types` へ、`_pid_alive` 11・`_kill_pid` 6・`_pid_cmdline_matches` 6・`_is_zombie` 5 の計 28 か所は `monitor_proc` へ差し替え先を変える（呼ぶ側が移った先のモジュールの名前空間で名前を引くため、`monitor.py` 側で差し替えても効かない。`_TMP_DIR_OVERRIDE` は `raising=False` のため効かなくても落ちない）。`main` は `global _TMP_DIR_OVERRIDE` の代わりに `monitor_types._TMP_DIR_OVERRIDE` へ代入し、シムの名前空間を確かめる `test_monitor_generic_stem.py` の `monitor_agent.__globals__` の assert は `_run_all.__globals__` を見る形に変える。
+**テストの差し替え先:** 43 か所のうち 41 か所を、スプリント 2 で `monitor_types`・`monitor_proc` へ向け直した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。`main` は `global _TMP_DIR_OVERRIDE` の代わりに `monitor_types._TMP_DIR_OVERRIDE` へ代入する。
 
 ### lib/worktree-common.sh
 | ファイル | 持つもの（関数の名前。多ければ接頭辞でまとめ、件数を添える） | 見積りの行数 |
@@ -217,9 +242,11 @@ import の向きは `monitor.py` → `monitor_loop` → `monitor_scan`・`monito
 
 `_wt_extract_scan` の中で定義している 17 個の関数は、最上位の関数として `worktree-write-target-scan.sh` と `worktree-write-target-track.sh` へ置き、接頭辞のない 10 個（`_emit` `_push_group` `_redir_target` など）は `_wt_scan_` を付けた名前にする。これらは `_wt_extract_scan` の局所変数を動的スコープで読み書きするため、`_wt_extract_scan` の中からだけ呼ぶ。
 
-source の順序: 呼び出し側は `worktree-common.sh` だけを source し、`worktree-common.sh` は定数と基本の関数を定義した後、末尾で `$(dirname "${BASH_SOURCE[0]}")` からの相対パスで declaration → branch → shell-lex → write-target → write-target-scan → write-target-track → registry の順に source し、1 本でも読めなければ 1 を返す。source の時点で実行されるのは定数の代入と registry の `lock-common.sh` の source だけで、関数どうしの呼び出しは実行時に解決されるため、ファイルの間に定義の順序の制約はない（bash 3.2 でも同じ）。
+**source の順序。** 呼び出し側は `worktree-common.sh` だけを source する。
+`worktree-common.sh` は定数と基本の関数を定義した後、末尾で `$(dirname "${BASH_SOURCE[0]}")` からの相対パスで、declaration → branch → shell-lex → write-target → write-target-scan → write-target-track → registry の順に source する。1 本でも読めなければ 1 を返す。
+source の時点で実行されるのは、定数の代入と registry の `lock-common.sh` の source だけである。関数どうしの呼び出しは実行時に解決されるため、ファイルの間に定義の順序の制約はない（bash 3.2 でも同じ）。
 
-テストへの影響: 関数を呼ぶテストは `worktree-common.sh` を source するだけで、分けた後もそのまま通る。ファイルの本文を読むテスト 3 本（`test_declaration_check.py` の `unreadable` の置き場所、`test_registry.py` の `_lock_body`、`test_lock_common.py` の `lock-common.sh` の source 行）は、読む先を `worktree-declaration.sh` と `worktree-registry.sh` へ変える。
+**テストへの影響:** 関数を呼ぶテストは `worktree-common.sh` を source するだけで、分けた後もそのまま通った。ファイルの本文を読むテスト 3 本は、スプリント 2 で読む先を変えた（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。
 
 `worktree-branch.sh` は、宣言ファイルの読み取り（172 行）が独立して読める単位なので `worktree-declaration.sh` へ分ける。
 
@@ -241,7 +268,7 @@ instructions_lib を 2 本（`__init__`・`model`）より増やすのは、2 �
 
 import の向きは `model` ← `declaration` ← `collect` ← `findings`・`versions` ← `report` ← 本体の一方向で、下位のモジュールは上位も本体も import しないので循環しない（`versions` は `collect` の `_inside_root`・`display_path` を、`report` は `collect` の `display_path` を使う）。`__file__` を使う `in_development_repo`（スクリプトの実体が `--root` の下にあるかの判定）と `main`（観点のデータの既定の位置）は本体に残す。本体は `instructions_lib` を import する前に、スクリプトのディレクトリと `lib/` の両方を `sys.path` の先頭へ入れる（テストは `spec_from_file_location` で読み込むので、スクリプトのディレクトリが `sys.path` に入らない）。`declaration.py` はそのあとで `import refresh as refresh_lib`（`DEFAULT_TIMEOUT_SECONDS` を使う）を行う。
 
-テストの差し替え先は変わらない。`test_instructions_check.py` の差し替えは `module.refresh_lib.fetch` の代入だけで（`monkeypatch.setattr` / `mock.patch` は 0 件）、`refresh` のモジュールオブジェクトは本体と `declaration.py` で共有され、`run_refresh` も本体に残るからである。変えるのは `install_script` だけで、`instructions_lib/` のディレクトリ全体（7 本）を `shutil.copytree(..., ignore=shutil.ignore_patterns("__pycache__"))` で複製の対象に足す。
+**テストの差し替え先:** 変わらない。`test_instructions_check.py` の差し替えは `module.refresh_lib.fetch` の代入だけで、`refresh` のモジュールオブジェクトは本体と `declaration.py` で共有されるからである。複製の対象には `instructions_lib/` のディレクトリ全体（7 本）を足した（`shutil.copytree(..., ignore=shutil.ignore_patterns("__pycache__"))`）。
 
 ### lib/gh_parts.py
 
@@ -255,7 +282,7 @@ import の向きは `model` ← `declaration` ← `collect` ← `findings`・`ve
 | `gh_call.py` | GitHub の呼び出しの最下層: `GhResult`・`_subprocess_gh`・`RUNNER`・`gh`・`_output_via_runner`・`RestResponse`・`parse_rest_headers`・`rest`・`_REPO_URL`・`resolve_repo`。L0: `rest` の ETag 付きの要求（`If-None-Match`・304 の判定・`RestResponse` に状態コード）・`rest_cached`（プロセスの中の ETag のキャッシュ `_ETAGS`）。githubkit の場合は `client()`（`gh auth token` の値と `http_cache`・`auto_retry` で作る）を足し、`rest` をその上に書き直す | 約 170 / 約 160（定義 103。L0 は約 +45 / 約 +40） |
 | `gh_quota.py` | 枠の使い分けと上限: `_RATE_LIMIT_MARKERS`・`is_rate_limited`。L0: `rate_limits`（`rate_limit` の端点で GraphQL と REST の残りと reset を読む）・`with_fallback`（片方の枠が上限なら、代われる操作をもう片方で行う）・`wait_for_reset`（代われない操作を回復の時刻まで待つ。`sleep` と時刻は引数で差し替える）・`PollInterval`（変化が無い間は 10 秒から 60 秒へ伸ばし、変化があったら縮める）・`poll_until`（ETag 付きの読み直しと間隔の伸長を組む） | 約 190 / 約 170（定義 12。L0 は約 +160 / 約 +140） |
 | `gh_fields.py` | REST の応答を GraphQL の `--json` の形へ変える対応表: `_rest_state`・`_rest_merge_commit`・`_VIEW_FIELDS`・`_VIEW_REST_PATH`。L0: 単発の読み取りと一覧で使うフィールド（`isDraft`・`author`・`headRefName`・`headRefOid`・`baseRefName`・`labels`・`mergedAt` など）の追加と、一覧の 1 件を変える `to_json_shape` | 約 100 / 約 100（定義 38。L0 は約 +45） |
-| `gh_rest.py` | PR と課題の単発の読み書き（REST）: `view_json`・`fetch_body`・`update_body`・`viewer_login`。L0: `pr_list`・`issue_list`（ページ送り・状態とラベルの絞り込み）・`pr_create`・`issue_create`・`pr_edit`・`issue_edit`・`comment`・`pr_merge`、`view_json` を REST を先に読む形へ変える | 約 240 / 約 170（定義 48。L0 は約 +180 / 約 +110） |
+| `gh_rest.py` | PR と Issue の単発の読み書き（REST）: `view_json`・`fetch_body`・`update_body`・`viewer_login`。L0: `pr_list`・`issue_list`（ページ送り・状態とラベルの絞り込み）・`pr_create`・`issue_create`・`pr_edit`・`issue_edit`・`comment`・`pr_merge`、`view_json` を REST を先に読む形へ変える | 約 240 / 約 170（定義 48。L0 は約 +180 / 約 +110） |
 | `gh_graphql.py` | 入れ子の読み取りと REST に無い操作（GraphQL）: `UNRESOLVED_THREADS_QUERY`・`UNRESOLVED_THREADS_JQ`・`unresolved_threads`。L0: `graphql`（クエリと変数・ページ送りの 1 回の要求） | 約 90 / 約 80（定義 54。L0 は約 +20） |
 | `gh_checks.py` | チェックジョブ: `CHECK_RUNS_PER_PAGE`・`CHECK_RUNS_MAX_PAGES`・`FAILED_CONCLUSIONS`・`fetch_check_runs`・`_run_order`・`fold_check_runs`・`run_result`・`check_result`・`_JOB_ID`・`_safe`・`save_failed_log` | 約 130 / 約 130（定義 111） |
 | `gh_pr_info.py` | `pr-info` の組み立て: `PR_VIEW_FIELDS`・`WITH_PARTS`・`_meta_from_graphql`・`_meta_from_rest`・`fetch_pr_meta`・`default_out_dir`・`_save_diff`・`pr_info` | 約 165 / 約 165（定義 148） |
@@ -265,7 +292,7 @@ import の向きは `model` ← `declaration` ← `collect` ← `findings`・`ve
 
 **import の向き:** `gh_call` は標準ライブラリ（githubkit の場合は githubkit も）だけを import し、`gh_fields` と `gh_sections` は標準ライブラリだけを import する。`gh_quota`・`gh_checks`・`gh_graphql` は `gh_call` を、`gh_rest` は `gh_call`・`gh_quota`・`gh_fields` を、`gh_pr_info` は `gh_call`・`gh_quota`・`gh_checks`・`gh_graphql`・`gh_rest`・`step_result` を import し、`gh_parts` だけがすべてと `step_result`（`post_queue`・`result_posts` は関数の中で遅れて import）を import する。どの `gh_*` も `gh_parts` を import せず、`step_result`・`post_queue`・`result_posts` も `gh_*` を import しないので、循環しない。モジュールどうしは `gh_call.gh(...)` のようにモジュールの属性として呼ぶ（`from gh_call import gh` で取り込まない）。
 
-**テストの差し替え先:** `RUNNER` の差し替え 6 件（`test_supervise.py` の `sv.gh_parts` 3 件・`test_release_steps.py` の `mod.gh_parts` 2 件・`test_gh_parts.py` の `fake` フィクスチャの `gp` 1 件）は、定義元の `gh_call.RUNNER` へ向け直す。`test_gh_parts.py` は `gh_parts.py` を `ndf_lib_gh_parts` の名前で読み込むが、移す先は `sys.path` から通常の名前で読まれ、スクリプトと同じ `gh_call` を共有するので、`gh_call` を import して差し替えれば全部に効く。`setattr(result_posts, "post_review", ...)` は `review_post` が `result_posts.post_review` を属性として呼ぶので変えなくてよい。githubkit の場合は、REST の差し替え先が `gh_call.client` になり、`RUNNER` は `gh auth token` と `gh run view --log-failed` だけの差し替え先になるので、`gh api` の argv で応答を返している `FakeGh` のテストは REST のパスで応答を返す形へ書き直す。
+**テストの差し替え先:** `RUNNER` の差し替え 6 件は、スプリント 2 で定義元の `gh_call.RUNNER` へ向け直した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。
 
 **`gh api` は 304 のとき終了コード 1 を返す**（2026-09-26 に実測: stdout にヘッダー、stderr に `gh: HTTP 304`）。`gh_call.rest` は終了コードではなく、ヘッダーの状態コードで 304 を見分け、変わっていないことを失敗として扱わない。
 
@@ -284,6 +311,6 @@ import の向きは `model` ← `declaration` ← `collect` ← `findings`・`ve
 
 `pathkinds`・`process`・`github`・`worktree`・`results` は `paths`・`gh_parts`・`statefile`・`models`・`monitor_outcome` と `refactor_lib` の `die`・`info` だけを import する。`publish` はそこに `worktree`（`_dirty_paths`・`_discard_worktree_changes`・`_require_clean_worktree`）・`process`（`run_with_timeout`）・`plan`・`vocabulary`・`timeline` を足す。`gitfacts` は `pathkinds`（`is_test_path`）と `process`（`run_test_at`）を使い、再エクスポートのために全部を import する。移す先のどれも `gitfacts` を import せず、`plan`・`paths`・`timeline`・`vocabulary` も `gitfacts` を import しないので、循環しない。
 
-`patch_lib`（`refactor_lib` の下で同じ名前を持つモジュールすべてを差し替える）を通る差し替え（`sh`・`run_with_timeout`・`push_head`・`_sync_generated`・`commits_in_range` など）は、定義元・再エクスポートした `gitfacts`・使う側のどれにも当たるので変えなくてよい。`gitfacts` を直に指す 17 件は定義元へ向け直す。`test_git_facts.py` の `setattr(gitfacts, "sh", ...)` 13 件は `github`（`check_run_result` は `_gh_api_get` の `sh` を呼ぶ）へ、`test_push_credential_fallback.py` の `_CREDENTIAL_LIB` 1 件と `gh_available` 3 件は `publish` へ向け直す（`gh_available` は `raising=False` なので、向け直さないと差し替えが効かないまま黙って通る）。あわせて `tests/conftest.py` の `_MODULES` に移す先の 6 本を足し、フィクスチャから取れるようにする。
+**テストの差し替え先:** `patch_lib` を通る差し替えは変えず、`gitfacts` を直に指す 17 件をスプリント 2 で定義元へ向け直し、`tests/conftest.py` の `_MODULES` に移す先の 6 本を足した（決定 3）。件数と向け先の内訳は、この文書のコミット ca52d46cf の版（`git show ca52d46cf:issues/issue-1142-design-modules.md`）のこの節にある。残りの実装は決定 66 に従い、テストを作り直してよい。
 
 `refactor_lib/github.py` の関数は、GitHub への呼び出しを `lib/gh_parts.py` の関数で行う（決定 16）。このモジュールが持つのは cross-refactoring が読む形への変換だけである。

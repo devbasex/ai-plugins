@@ -6924,6 +6924,12 @@
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
+      "term": "アダプター",
+      "context": "ndf-workflow",
+      "meaning": "外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別",
+      "pending_source": "issues/issue-1142-design-decisions.md"
+    },
+    {
       "term": "事実の表",
       "context": "ndf-workflow",
       "meaning": "1 つの事実（例: ランタイムの一覧）を行と列で持つ契約の JSON。`contracts/facts/` の 1 ファイル",
