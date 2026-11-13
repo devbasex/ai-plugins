@@ -325,3 +325,51 @@ def test_real_roots_include_the_original_state_variables(tmp_path):
     assert os.path.realpath(tmp_path / "slots") in roots
     assert not any(r.endswith("relative") for r in roots)
     assert os.path.realpath(home / ".claude") in roots
+
+
+EARLIER_CONFTEST = textwrap.dedent(
+    """
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _earlier(monkeypatch, tmp_path):
+        # forbid_real_state より先に動き、状態の置き場の環境変数を書き換える（tests/conftest.py の _isolated_env と同じ形）
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "earlier-state"))
+    """
+)
+
+ORIGINAL_STATE_INNER = textwrap.dedent(
+    """
+    import os
+    from pathlib import Path
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _iso(forbid_real_state):
+        return forbid_real_state
+
+    def test_write_to_the_original_state_home():
+        Path(os.environ["ORIGINAL_STATE"], "ledger.jsonl").write_text("x")
+    """
+)
+
+
+def test_original_state_variable_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_path, src_env):
+    original = tmp_path / "original-state"
+    original.mkdir()
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    (inner / "conftest.py").write_text(EARLIER_CONFTEST)
+    (inner / "test_inner.py").write_text(ORIGINAL_STATE_INNER)
+    env = {**src_env, "HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(original), "ORIGINAL_STATE": str(original)}
+    basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        cwd=inner,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0, proc.stdout
+    assert "本物の状態の置き場へ書こうとした" in proc.stdout
+    assert not (original / "ledger.jsonl").exists()

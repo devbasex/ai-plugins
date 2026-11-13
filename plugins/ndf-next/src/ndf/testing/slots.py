@@ -14,7 +14,8 @@
 使い方（実行の関数は `Popen` の前後だけを包む）:
 
     with slots.gate(command, cwd) as held:          # 取れるまで待つ。諦めたら Stopped
-        proc = subprocess.Popen(command, env={**env, **held.env}, start_new_session=True)
+        proc = subprocess.Popen(command, env={**env, **held.env}, start_new_session=True,
+                                preexec_fn=held.preexec)    # exec の前に OOM の優先度を上げる
         held.watch(proc)                            # メモリの監視を始める
         proc.wait()
                                                     # 出るときに監視が止めていれば Stopped
@@ -205,12 +206,18 @@ class Held:
     started_at: float = 0.0
     _monitor: _MemoryMonitor | None = None
 
+    @property
+    def preexec(self) -> Callable[[], None] | None:
+        """`Popen` の `preexec_fn` へ渡す関数。子が exec する前にテストの OOM の優先度を上げる（決定 7）。
+
+        Popen の後に親から書くと、書くより先に fork した子孫（`cd sub && pytest -n 4` の pytest など）が
+        既定の優先度のまま残るため、exec の前に子自身が書く。何もしない形では None。
+        """
+        return None if self.index is None else machine.raise_own_oom_score
+
     def watch(self, proc: subprocess.Popen) -> None:
-        """テストの OOM の優先度を上げ、メモリの監視を始める。何もしない形では何もしない。"""
-        if self.index is None:
-            return
-        machine.raise_oom_score(proc.pid)
-        if not self.measured:
+        """メモリの監視を始める。何もしない形と、監視しない形では何もしない。"""
+        if self.index is None or not self.measured:
             return
         assert self._monitor is not None
         self._monitor.start(proc, self.index, self.started_at)

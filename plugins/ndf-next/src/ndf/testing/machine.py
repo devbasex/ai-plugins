@@ -156,10 +156,19 @@ def oom_kill_count(vmstat: Path = Path("/proc/vmstat")) -> int | None:
     return None
 
 
-def raise_oom_score(pid: int, value: int = TEST_OOM_SCORE_ADJ) -> bool:
-    """プロセスの OOM の優先度を上げる。上げられなければ False（権限・Linux 以外）。"""
+def raise_own_oom_score(value: int = TEST_OOM_SCORE_ADJ) -> None:
+    """このプロセスの OOM の優先度を上げる。上げられなければ何もしない（権限・Linux 以外）。
+
+    `Popen` の `preexec_fn` として子が exec する前に呼ぶ。子が fork する前に値が入るので、子孫がみな受け継ぐ。
+    exec の前の子で動くため、例外を出さず、ファイルの記述子を直に扱う。
+    """
     try:
-        Path(f"/proc/{pid}/oom_score_adj").write_text(str(value), encoding="ascii")
+        fd = os.open("/proc/self/oom_score_adj", os.O_WRONLY)
     except OSError:
-        return False
-    return True
+        return
+    try:
+        os.write(fd, str(value).encode("ascii"))
+    except OSError:
+        pass
+    finally:
+        os.close(fd)

@@ -242,3 +242,22 @@ def test_memory_stop_kills_descendants_that_outlive_the_group_leader(monkeypatch
         if slots._group_alive(proc.pid):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/oom_score_adj"), reason="OOM の優先度は Linux だけ")
+def test_preexec_raises_the_oom_score_before_the_child_forks():
+    # bash が fork した子孫（cd ... && の後ろのコマンド）も、exec の前に上げた優先度を受け継ぐ
+    if int(Path("/proc/self/oom_score_adj").read_text()) > slots.machine.TEST_OOM_SCORE_ADJ:
+        pytest.skip("既に優先度が高く、権限なしでは下げられない")
+    out = subprocess.run(
+        ["bash", "-c", "cd / && cat /proc/self/oom_score_adj"],
+        preexec_fn=slots.Held(index=0).preexec,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out.strip() == str(slots.machine.TEST_OOM_SCORE_ADJ)
+
+
+def test_preexec_is_none_when_running_without_a_slot():
+    assert slots.Held().preexec is None

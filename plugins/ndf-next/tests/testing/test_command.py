@@ -176,14 +176,23 @@ def test_signal_is_forwarded_and_recorded_as_interrupted(project, slots_dir):
     assert rows[0]["kind"] == slots.DIRECT
 
 
+def _catches(pid: int, signum: int) -> bool:
+    """プロセスが `signum` のハンドラーを入れたか（/proc/<pid>/status の SigCgt のビット）。"""
+    for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        if line.startswith("SigCgt:"):
+            return bool(int(line.split()[1], 16) >> (signum - 1) & 1)
+    return False
+
+
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="シグナルのハンドラーを /proc で読む")
 def test_signal_while_waiting_for_a_slot_ends_the_wait(project, slots_dir):
     root, bin_dir, log = project
     with _slot_held_elsewhere(root, slots_dir):
         proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log)
         try:
-            # 枠が埋まっているので待ちに入る（起動して待ちに入るまでの時間を空ける）。待ちの間の SIGTERM で、
-            # 上限（120 秒）を待たずに抜ける
-            time.sleep(3)
+            # 枠が埋まっているので待ちに入る。SIGTERM のハンドラーを入れたのを待ってから送る（起動の速さに
+            # 頼らない）。待ちの間の SIGTERM で、上限（120 秒）を待たずに抜ける
+            waits.wait_until(lambda: _catches(proc.pid, signal.SIGTERM), what="SIGTERM のハンドラーの設定")
             assert proc.poll() is None
             proc.send_signal(signal.SIGTERM)
             with waits.returns_before(30):

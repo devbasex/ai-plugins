@@ -100,7 +100,9 @@ def _run(command: str, wait_limit: int | None) -> int:
             with slots.gate(command, cwd, kind=kind, suites=[], limits=limits) as held:
                 if interrupted:
                     raise KeyboardInterrupt
-                proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True)
+                proc = subprocess.Popen(
+                    ["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec
+                )
                 held.watch(proc)
                 code = _wait(proc)
                 if interrupted:
