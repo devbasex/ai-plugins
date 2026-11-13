@@ -68,6 +68,153 @@
             "selected"
           ],
           "default": "whole"
+        },
+        "reviews": {
+          "type": "object",
+          "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。書いていない種類は既定値",
+          "additionalProperties": false,
+          "properties": {
+            "impl": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "sprint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "unchecked",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "release": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "resolution",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "design": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "spec": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            }
+          }
         }
       }
     },

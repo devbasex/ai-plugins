@@ -11,10 +11,13 @@ import shlex
 
 import limits
 from supervise_lib.paths import HERE
+from supervise_lib.review_units import spec_review_steps
 
 
 def _spec_pr_steps(a, refs: str, after: str) -> list[dict]:
-    """確定仕様化のコミットと、その Pull Request を出して ready にするまで。CI は ready から進み、後ろの作業と重なる（決定 1）。"""
+    """確定仕様化のコミットと、その Pull Request を出して ready にするまで。CI は ready から進み、後ろの作業と重なる（決定 1）。
+    確定仕様化の PR のレビューの単位が `pr` なら、`pr` と `ready` の間に文書の cross-review を置く（#3163）。"""
+    review = spec_review_steps(a, "ready")
     return [
         {
             "id": "spec",
@@ -35,8 +38,9 @@ def _spec_pr_steps(a, refs: str, after: str) -> list[dict]:
             "title": f"確定仕様化: スプリント {a.name}",
             "summary": f"スプリント {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
             "changes": "無し（文書の置き場所だけ）",
-            "next": "ready",
+            "next": review[0]["id"] if review else "ready",
         },
+        *review,
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": after},
     ]
 
