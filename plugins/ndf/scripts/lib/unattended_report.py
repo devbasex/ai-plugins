@@ -83,6 +83,13 @@ def form_from_dict(data: dict) -> ReportForm:
         raise FormError("shape.values は値 → 意味の空でない辞書")
     values = tuple(values_decl)
     items = _strs(shape.get("items"), "items")
+    _check_material(material, items)
+    req = _required(required, values, items)
+    return ReportForm(values=values, items=items, material=dict(material), required=req)
+
+
+def _check_material(material: object, items: tuple[str, ...]) -> None:
+    """材料の書き方（`shape.material`）は MATERIAL_KEYS の空でない文字列を持ち、item は items のどれか。"""
     if (
         not isinstance(material, dict)
         or set(material) != set(MATERIAL_KEYS)
@@ -91,6 +98,10 @@ def form_from_dict(data: dict) -> ReportForm:
         raise FormError(f"shape.material は {'・'.join(MATERIAL_KEYS)} の文字列を持つ")
     if material["item"] not in items:
         raise FormError("shape.material.item が items に無い")
+
+
+def _required(required: object, values: tuple[str, ...], items: tuple[str, ...]) -> dict[str, dict]:
+    """値ごとに要る項目（`shape.required`）を確かめ、always と when をタプルにした辞書を返す。"""
     if not isinstance(required, dict) or set(required) != set(values):
         raise FormError("shape.required のキーは shape.values と同じ集合")
     req: dict[str, dict] = {}
@@ -101,7 +112,7 @@ def form_from_dict(data: dict) -> ReportForm:
         if not set(always) <= set(items):
             raise FormError(f"shape.required.{value}.always の項目名が items に無い")
         req[value] = {"always": always, "when": _when(row["when"], f"required.{value}", items)}
-    return ReportForm(values=values, items=items, material=dict(material), required=req)
+    return req
 
 
 def _last_result(text: object) -> re.Match | None:
