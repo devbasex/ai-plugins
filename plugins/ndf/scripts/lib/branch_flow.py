@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 DECL_KEY = "branch_flow"
@@ -523,3 +525,18 @@ def schema_fragment() -> dict:
             REVIEWS_KEY: reviews,
         },
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """シェルのスクリプトへ定数を渡す入口。`default-candidates` は既定ブランチの候補を 1 行 1 件で出す。
+
+    `worktree-branch.sh` の `wt_default_branch` が、候補を自分で並べずにここから読む（#3309）。"""
+    ap = argparse.ArgumentParser(description="ブランチ運用の定数を出す")
+    ap.add_argument("name", choices=("default-candidates",))
+    ap.parse_args(argv)
+    print("\n".join(DEFAULT_BRANCH_CANDIDATES))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

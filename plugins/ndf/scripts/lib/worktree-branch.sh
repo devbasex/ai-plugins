@@ -89,17 +89,26 @@ wt_follow_enabled() {
   printf '%s' "$decl" | jq -e '.follow_branch == true' >/dev/null 2>&1 || return 1
 }
 
+# 既定ブランチの候補を読む `branch_flow.py` の置き場。source した時点の自分の位置から決める
+# （`worktree-common.sh` と同じく、`cd` で戻らずプラグインルートを外さない）。
+_WT_BRANCH_FLOW_PY="$(dirname "${BASH_SOURCE[0]}")/branch_flow.py"
+
 # 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
-# 取れなければ main / master の順で存在するものを返す。
+# 取れなければ `branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` の順で存在するものを返す。
+# 候補はここで並べない（置き場は定数の 1 か所。#3309）。python3 が無いか候補を読めなければ 1 を返す。
 wt_default_branch() {
-  local main_dir="${1:-}" ref candidate
+  local main_dir="${1:-}" ref candidate candidates
   [ -n "$main_dir" ] || return 1
   ref=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
-  for candidate in main master; do
+  if ! candidates=$(python3 -I "$_WT_BRANCH_FLOW_PY" default-candidates 2>/dev/null); then
+    printf 'NOTE: 既定ブランチの候補を %s から読めません\n' "$_WT_BRANCH_FLOW_PY" >&2
+    return 1
+  fi
+  for candidate in $candidates; do
     if git -C "$main_dir" show-ref --verify --quiet "refs/heads/$candidate"; then
       printf '%s\n' "$candidate"
       return 0
