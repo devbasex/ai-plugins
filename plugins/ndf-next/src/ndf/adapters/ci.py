@@ -252,7 +252,8 @@ class Watch:
                 return WatchResult(reading, rounds, now - start, self._queued, exhausted)
             self.sleep(wait)
             if reading.only_queued:
-                self._queued += self.clock() - now
+                # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
+                self._queued += max(self.clock() - now, wait)
             interval = min(interval * float(policy.factor), float(policy.max_interval))
 
     def _next_wait(self, reading: Reading, interval: float, elapsed: float, runner_cap: float) -> float:
