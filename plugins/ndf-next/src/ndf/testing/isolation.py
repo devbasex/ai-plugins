@@ -82,6 +82,21 @@ def _within(path: str, roots: tuple[str, ...]) -> bool:
     return any(path == root or path.startswith(root + os.sep) for root in roots)
 
 
+def _write_targets(event: str, args: tuple) -> list[tuple[object, object]]:
+    """監査イベントが書き込む対象の（パス, そのパスを解決する dir_fd）の並び。書き込みでなければ空。"""
+    targets: list[tuple[object, object]] = []
+    if event == "open":
+        path, mode, flags = (tuple(args) + (None, None, None))[:3]
+        writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
+        if writing:
+            targets.append((path, None))
+    elif event in _WRITE_EVENTS:
+        for at, fd_at in _WRITE_EVENTS[event]:
+            if at < len(args):
+                targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None))
+    return targets
+
+
 class _Guard:
     """監査フックは外せないので 1 度だけ入れ、守る根の一覧を差し替えて有効・無効を切り替える。
 
@@ -104,17 +119,7 @@ class _Guard:
     def _hook(self, event: str, args: tuple) -> None:
         if not self.roots or getattr(self.local, "busy", False):
             return
-        targets: list[tuple[object, object]] = []
-        if event == "open":
-            path, mode, flags = (tuple(args) + (None, None, None))[:3]
-            writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
-            if writing:
-                targets.append((path, None))
-        elif event in _WRITE_EVENTS:
-            for at, fd_at in _WRITE_EVENTS[event]:
-                if at < len(args):
-                    targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None))
-        for path, dir_fd in targets:
+        for path, dir_fd in _write_targets(event, args):
             self._check(path, dir_fd)
 
     def _check(self, path: object, dir_fd: object = None) -> None:
