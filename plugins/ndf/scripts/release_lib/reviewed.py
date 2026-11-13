@@ -70,27 +70,19 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops: ProdOp
     """場合 1・2 の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → 迂回なしのマージ → 公開の後（#2773）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
     ver = a.version
-    metrics = {"channel": "prod", "version": ver, "case": case.case, "release_pr": None, "sync_pr": None, "main_pr": None}
-    metrics.update({"tag": None, "merge_commit": None, "plugins": ",".join(plugins)})
+    metrics = {
+        "channel": "prod",
+        "version": ver,
+        "case": case.case,
+        "release_pr": None,
+        "sync_pr": None,
+        "main_pr": None,
+        "tag": None,
+        "merge_commit": None,
+        "plugins": ",".join(plugins),
+    }
     items: list[dict] = []
-    git(root, "fetch", "-q", "origin", "--tags")
-    done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
-        git(root, "fetch", "-q", "origin")
-        merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-        items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
-        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics)
-    if done:
-        main_pr = done["number"]
-    else:
-        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
-            raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
-        release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
-        metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
-        repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
-        title = f"Release: {plugin} v{ver} を {prod} へ"
-        body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-        main_pr = ops.create_pr(root, prod, branch, title, body)
+    main_pr = _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops)
     repo = repo_or_stop(root)
 
     def waiting(head, judged):
@@ -114,6 +106,28 @@ def release_prod(root, a, case, plugin, plugins, branch, base, prod, ops: ProdOp
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": False})
     git(root, "fetch", "-q", "origin")
     ops.published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
+
+
+def _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops: ProdOps) -> int:
+    """本番の PR を引くか作り、その番号を返す。マージ済みなら公開の後へ進む（再開）。無ければ開発版の PR をマージしてから作る。"""
+    ver = a.version
+    git(root, "fetch", "-q", "origin", "--tags")
+    done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
+    if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
+        git(root, "fetch", "-q", "origin")
+        merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
+        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics)
+    if done:
+        return done["number"]
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
+        raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
+    release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
+    metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
+    repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
+    title = f"Release: {plugin} v{ver} を {prod} へ"
+    body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    return ops.create_pr(root, prod, branch, title, body)
 
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
