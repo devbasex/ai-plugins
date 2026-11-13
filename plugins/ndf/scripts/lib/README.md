@@ -114,6 +114,7 @@
 | [workflow_def.py](workflow_def.py) | 工程の定義（`contracts/workflow/` の Serverless Workflow 1.0.3 の JSON）の読み込みと検査。標準のスキーマ・`metadata.ndf` の語彙・入出力規約の参照（I7）・順序の決まり（I8〜I10）・有効と無効の 3 つの順位（`resolve_enabled`）・入出力の検査（`validate_io`）。使う側は `deps.require(..., "workflow")`（#3092） | `progress.py`・`progress_run.py`・`scripts/contracts_lib/workflow_defs.py` |
 | [progress_model.py](progress_model.py) | 進行表のモデル。進行の事象の畳み込み・次の手（`next_action`）・書き手の表（I6）・遷移の判定・改訂と取り込みの行。DB も DBOS も import しない（#3092 の決定 20） | `progress_db.py`・`progress_run.py`・`progress.py` |
 | [progress_lanes.py](progress_lanes.py) | 計画の進行表とレーンの進行表の規則。順番表の畳み込み・レーンをまたぐ決まり（I12a・I13・I18〜I21）・次の行・起こすレーン・計画の完了（I16）。純粋な処理（#3092） | `progress_db.py`・`reshuffle.py`・`parallel_*` |
+| [parallel_tables.py](parallel_tables.py) | 並列の計画の副命令と耐久ワークフローが計画の進行表とレーンの進行表を読み書きする口。作成（`start`）・レーンの追加と書き換え（`lane`）・状態（`status`）・中止（`stop`）・完了（耐久ワークフローの終わり）（#3092） | `parallel_cli.py`・`parallel_lane_cli.py`・`parallel_status.py`・`parallel_ledger.py`・`parallel_run.py`・`parallel.py` |
 | [progress_db.py](progress_db.py) | 進行表の DB。URL（`NDF_PROGRESS_DB`）で SQLite と PostgreSQL へ同じコードで読み書きし、事象を追記する唯一の関数・レーンの行を終える関数・実行の鍵の排他（I14）を持つ（#3092） | `progress.py`・`progress_run.py`・`reshuffle.py` |
 | [progress_run.py](progress_run.py) | 進行表のワークフロー（DBOS）。工程を事象から選んで流し、出力を規約で検査して終了の印を付け、承認の待ちで実行を残して抜ける（#3092 の決定 6・7・21） | `progress.py` |
 | [progress_activities.py](progress_activities.py) | 工程の定義の `call` の名前 → アクティビティ（プラン・答えの待ち・進捗記録・組み換え） | `progress_run.py` |

@@ -3,7 +3,8 @@
 `lane <計画名> add --from <JSON>` はレーン 1 本の宣言を、`lane <計画名> set --lane <名> --from <JSON>` は書き換えるキー
 （`input`・`plans`・`touches`・`after`・`handoff`）を受ける。上限を含む計画の検査を通ったときだけ `plan.json`・`plan.md`・
 引継ぎ文書を書き、計画の所在の一覧へ置き場を書き、耐久ワークフローへ `lanes_changed` を送る（I13）。レーンの名前と `repo` は
-`set` で変えない（名前は答え待ちの停止・再開の印・依頼の持ち主のキーのため。決定 13）。
+`set` で変えない（名前は答え待ちの停止・再開の印・依頼の持ち主のキーのため。決定 13）。計画の状態の正本は計画の進行表で、
+書く前に `parallel_tables.record_lane` が `lane_added`・`lane_changed` を計画の決まりで判定して書く（#3092）。
 
 終了コード: 検査の誤り・使い方の誤り 1、計画が無い・読めない・書けない 2。
 """
@@ -166,6 +167,16 @@ def cmd_lane(a) -> None:
     if plan is None:
         items = cap_hint_items(items, len(new.get("lanes") or []))
         emit_reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
+    import parallel_tables as ptab
+    import progress_db as pdb
+    import progress_model as pm
+
+    try:  # 正本の計画の進行表へ先に書く（#3092 の受け入れ条件 13・17）。plan.json は計画の入力の写し
+        ptab.record_lane(main, a.name, plan.lane(lane_name), a.action, f"parallel.py lane {a.action}")
+    except pm.Refused as exc:
+        emit_reply("stopped", f"計画の進行表の決まりで断った。何も書いていない: {exc.reason}", items, 1)
+    except pdb.Unreadable as exc:
+        emit_reply("stopped", f"計画の進行表を読めない: {exc}", items, 2)
     try:
         written = write_lane(main, plan, new, lane_name, a.action)
         parallel_homes.record_home(main)

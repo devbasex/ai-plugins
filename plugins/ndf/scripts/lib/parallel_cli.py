@@ -67,6 +67,16 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
         )
     except OSError as exc:
         reply("stopped", f"計画の台帳へ書けないため run を起動しない: {exc}", notes, 2)
+    import parallel_tables as ptab
+    import progress_db as pdb
+    import progress_model as pm
+
+    try:  # 計画の進行表とレーンの進行表・最初の順番表を作る（#3092 の受け入れ条件 13。在れば作り直さない）
+        ptab.create_plan_tables(main, plan)
+    except pm.Refused as exc:
+        reply("stopped", f"計画の進行表を作れないため run を起動しない: {exc.reason}", notes, 1)
+    except pdb.Unreadable as exc:
+        reply("stopped", f"計画の進行表の DB を開けないため run を起動しない: {exc}", notes, 2)
     log = pp.plan_dir(main, a.name) / "run.log"
     pl.clear_settled(main, a.name)  # 切り離した run が消す前に判定が読んでも、動いていないと読まない
     with open(pp.plan_dir(main, a.name) / "run.log", "ab") as f:

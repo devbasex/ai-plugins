@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -97,11 +98,26 @@ def _launch_waits(main: Path, name: str) -> dict[str, dict]:
         return {}
 
 
+def _table_view(main: Path, name: str) -> dict[str, dict]:
+    """レーン → レーンの進行表の表示（順番表の状態・実行中のスプリントの進行表・行）。進行表が無いか読めなければ空。"""
+    try:
+        import parallel_tables as ptab
+
+        return ptab.lane_view(main, name)
+    except Exception as exc:  # noqa: BLE001  進行表を読めなくても他の欄は返す（I6）
+        print(f"レーンの進行表を読めない: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return {}
+
+
 def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
     """計画のレーンごとの 1 行と、一覧にある計画の一時レーン（`<計画名>-rel…`・役割 helper）の 1 行。
+    `progress` はレーンの進行表の表示（計画の進行表の無い取り込み前の計画では None）。
     起動を待っているレーンは `waiting` に理由とマシンの合計・このレーンの本数・上限を持つ（待っていなければ None）。"""
     rows, (last, waiting) = _ls(main), _ledger_view(main, name)
     launch_waits = _launch_waits(main, name)
+    tables = _table_view(main, name)
+    if tables:  # 計画の進行表があれば、答えていない依頼は進行表から読む（#3092 の受け入れ条件 16）
+        waiting = {n for n, v in tables.items() if v["asking"]}
     out = []
     lanes = [(ln.name, ln) for ln in plan.lanes]
     helpers = sorted(n for n, r in rows.items() if n.startswith(f"{name}-rel") and r.get("role") == "helper")
@@ -115,6 +131,7 @@ def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
             "last_at": last.get(n),
             "attach": f"python3 {RELAY} attach {n}" if asking else None,
             "waiting": launch_waits.get(n),
+            "progress": tables.get(n),
         })  # fmt: skip
     return out
 

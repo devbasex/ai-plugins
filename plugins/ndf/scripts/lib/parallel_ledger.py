@@ -221,7 +221,12 @@ def kinds(main: Path, name: str) -> set[str]:
 
 
 def plan_state(main: Path, name: str, status: Optional[str]) -> str:
-    """計画の状態: `running`（動いている）・`lost`（失われた）・`closed`（閉じた）・`legacy`（台帳の無い ERROR）・`fresh`（未開始）。"""
+    """計画の状態: `running`（動いている）・`lost`（失われた）・`closed`（閉じた）・`legacy`（台帳の無い ERROR）・`fresh`（未開始）。
+
+    計画の進行表があればその畳み込みから決める（#3092 の受け入れ条件 16）。台帳から決めるのは、進行表の無い取り込み前の計画だけ。"""
+    got = _table_state(main, name, status)
+    if got is not None:
+        return got
     if status in RUNNING:
         return "running"
     if status == "SUCCESS":
@@ -233,6 +238,16 @@ def plan_state(main: Path, name: str, status: Optional[str]) -> str:
         return "lost" if "opened" in seen else "legacy"
     progress = seen - {"opened", "role"} or checkpoint_path(main, name).exists()
     return "lost" if "opened" in seen and progress else "fresh"
+
+
+def _table_state(main: Path, name: str, status: Optional[str]) -> Optional[str]:
+    try:
+        import parallel_tables as ptab
+
+        return ptab.table_plan_state(main, name, status, RUNNING)
+    except Exception as exc:  # noqa: BLE001  進行表の DB を読めなければ台帳から決める（status の表示を止めない）
+        print(f"計画の進行表を読めないため台帳から計画の状態を決める: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None
 
 
 def accepts(state: str) -> bool:

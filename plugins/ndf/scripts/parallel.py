@@ -288,10 +288,24 @@ def cmd_stop(a) -> None:
         sent(pl.deliver_message, main, a.name, msg, "inbox", key)
     elif st == "lost":  # 失われた計画は閉じる（作り直さない。I11）
         sent(plg.append_ledger_row, main, a.name, "closed", "closed", by="organizer")
+    sprints = _cancel_plan_table(main, a.name)
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
     if left:
         reply("stopped", f"止まらないレーンがある: {', '.join(left)}", [{"lane": n} for n in left], 1, not_stopped=left)
-    reply("ok", f"並列の計画 {a.name} のレーン {len(plan.lanes)} 本へ停止を打った", [{"lane": ln.name} for ln in plan.lanes])
+    reply("ok", f"並列の計画 {a.name} のレーン {len(plan.lanes)} 本へ停止を打った", [{"lane": ln.name} for ln in plan.lanes],
+          running_sprints=sprints)  # fmt: skip
+
+
+def _cancel_plan_table(main: Path, name: str) -> list[str]:
+    """計画の進行表を中止にし、未着手の行を中止にする（#3092 の D: 中止）。実行中のスプリントの進行表の ID を返す。
+    スプリントの進行表の状態はレーンの conductor だけが書く（I6）ため、止めたレーンを起こすときに `progress.py cancel` を渡す。"""
+    import parallel_tables as ptab
+    import progress_db as pdb
+
+    try:
+        return ptab.cancel_plan(main, name, "parallel.py stop")
+    except pdb.Unreadable as exc:
+        reply("stopped", f"計画の進行表を読めない: {exc}", code=2)
 
 
 # ---- レーンの側 ----

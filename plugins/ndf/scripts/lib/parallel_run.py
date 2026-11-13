@@ -164,7 +164,11 @@ def step_stop_lanes(main: str, names: list[str]) -> list[str]:
 
 @durable.step(name="parallel.finish")
 def step_finish(main: str, name: str, progress: dict) -> None:
-    """役割の印を消し、止める指示のファイルと再開の印を消し、`plan.md` を描画し直し、台帳を閉じる（I11）。"""
+    """役割の印を消し、止める指示のファイルと再開の印を消し、`plan.md` を描画し直し、台帳を閉じる（I11）。
+    全レーンの行が完了か中止で答えていない依頼が無ければ、計画の進行表を完了にする（#3092 の I16。中止した計画には書かない）。"""
+    import parallel_tables as ptab
+
+    ptab.finish_plan(Path(main), name)
     mark_organizer(Path(main), name, clear=True)
     plg.close_ledger(Path(main), name)
     ph.clear_plan(Path(main), name)
