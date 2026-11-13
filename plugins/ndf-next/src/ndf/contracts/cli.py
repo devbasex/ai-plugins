@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ndf import contracts
 from ndf.contracts import causes, facts, limits, result
@@ -21,28 +21,25 @@ from ndf.contracts import causes, facts, limits, result
 TOOL = "contracts"
 
 
+def _collect(errs: list[str], fn: Callable[[], Any]) -> Any:
+    """`fn` を呼んで返り値を返す。`ContractError` は `errs` へ足して None を返す。"""
+    try:
+        return fn()
+    except contracts.ContractError as exc:
+        errs.append(str(exc))
+        return None
+
+
 def check_all() -> list[str]:
     """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ）の誤りを並べる。空なら通る。"""
     errs: list[str] = []
     for name in ("result", "causes", "limits", "release-verification"):
-        try:
-            contracts.schema_errors({}, contracts.schema_path(name))
-        except contracts.ContractError as exc:
-            errs.append(str(exc))
-    try:
-        policy_names = set(limits.table())
-    except contracts.ContractError as exc:
-        errs.append(str(exc))
-        policy_names = set()
+        _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
+    policy_names = set(_collect(errs, limits.table) or ())
     for name in facts.names():
-        try:
-            errs += facts.ref_errors(name, policy_names)
-        except contracts.ContractError as exc:
-            errs.append(str(exc))
-    try:
-        causes.table()
-    except contracts.ContractError as exc:
-        errs.append(str(exc))
+        refs = _collect(errs, lambda name=name: facts.ref_errors(name, policy_names))
+        errs += refs or []
+    _collect(errs, causes.table)
     return errs
 
 
