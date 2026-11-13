@@ -1,4 +1,4 @@
-"""DBOS の殻を通した判断のループ（耐久を通す代表）と、DBOS を import する場所の決まり。"""
+"""DBOS の殻を通した判断のループ（耐久を通す代表）。"""
 
 from __future__ import annotations
 
