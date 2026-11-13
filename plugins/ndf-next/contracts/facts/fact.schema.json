@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "fact.schema.json",
   "title": "事実の表の共通の形",
-  "description": "contracts/facts/<名前>.json の形。列の宣言から行の形を作り、読み手（ndf.contracts.facts）が各行を確かめる",
+  "description": "contracts/facts/<名前>.json と contracts/domains/<名前>.json の形。列の宣言から行の形を作り、読み手（ndf.contracts.facts）が各行を確かめる",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "summary", "owner", "columns", "rows"],
@@ -21,7 +21,7 @@
           "type": {"enum": ["boolean", "string", "integer", "array"]},
           "summary": {"type": "string", "minLength": 1},
           "optional": {"type": "boolean"},
-          "ref": {"type": "string", "pattern": "^(limits\\.json#[a-z.-]+|facts/[a-z][a-z0-9-]*)$"}
+          "ref": {"type": "string", "pattern": "^(limits\\.json#[a-z.-]+|(facts|domains)/[a-z][a-z0-9-]*)$"}
         }
       }
     },

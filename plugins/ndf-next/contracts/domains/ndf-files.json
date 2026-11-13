@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "summary": "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）の置き場・持ち主・消す時点。工程はこの表に無いパスへ書かない。宣言の最上位のキーは表をまたいで 1 つのファイルだけが持つ（テストのコマンドは project.json の test だけが持つ）。実行で変わる計測値は追跡する宣言へ書き戻さず、状態の置き場へ書く",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "place": {"type": "string", "summary": "置き場", "ref": "domains/places"},
+    "path": {"type": "string", "summary": "置き場からの相対パス。<名前> は実行ごとに決まる部分（<n> は Issue の番号、<repo> はリポジトリの鍵、<id> は実行の識別子）"},
+    "kind": {"type": "string", "summary": "中身の種類。declaration は人が決める宣言、measured は実行で変わる計測値、record は実行の記録、document は工程が書く文書、exchange はプロセスの間の受け渡し"},
+    "tracked": {"type": "boolean", "summary": "git が追跡するファイル。追跡しない置き場の下では偽"},
+    "writer": {"type": "string", "summary": "書き手（人か、書く子 Issue の記号）"},
+    "ends": {"type": "string", "summary": "消す時点。kept は残す（人が消す）、replaced は書くたびに置き換える、cleanup は後片付けの工程が消す、run は書いた実行が終わるときに消す、archived は後片付けの工程が issues/old へ移す"},
+    "keys": {"type": "array", "summary": "宣言の最上位のキー（version と $schema を除く）。同じキーを 2 つのファイルが持たない", "optional": true}
+  },
+  "rows": [
+    {"id": "project", "place": "ndf", "path": "project.json", "kind": "declaration", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["languages", "test", "ci", "services", "delivery", "issues", "checks", "ndf_policies", "instructions", "materials", "docs", "analysis"]},
+    {"id": "project-measured", "place": "measured", "path": "<repo>/project.json", "kind": "measured", "tracked": false, "writer": "解析とテストの実行（M7）", "ends": "replaced", "keys": ["file_counts", "test_durations"]},
+    {"id": "supervise", "place": "ndf", "path": "supervise.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["sync_checks", "format", "release"]},
+    {"id": "release", "place": "ndf", "path": "release.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["steps"]},
+    {"id": "worktree", "place": "ndf", "path": "worktree.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["base_branch", "production_branch", "guard"]},
+    {"id": "worktree-local", "place": "ndf", "path": "worktree.local.json", "kind": "declaration", "tracked": false, "writer": "人（各自の機械の値。worktree.json のキーを上書きする）", "ends": "kept"},
+    {"id": "glossary", "place": "ndf", "path": "glossary.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["format", "source", "document", "check"]},
+    {"id": "instructions", "place": "ndf", "path": "instructions.json", "kind": "declaration", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["files", "imports", "released", "decisions", "pending_marker", "budget"]},
+    {"id": "mvv", "place": "ndf", "path": "mvv.json", "kind": "declaration", "tracked": true, "writer": "人の承認（M7）", "ends": "kept", "keys": ["body", "settings", "versions"]},
+    {"id": "mvv-body", "place": "ndf", "path": "mvv.md", "kind": "declaration", "tracked": true, "writer": "人の承認（M7）", "ends": "kept"},
+    {"id": "pace", "place": "ndf", "path": "pace.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["fast", "auto", "areas", "boundary_paths", "triggers", "loop"]},
+    {"id": "review", "place": "ndf", "path": "review.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["focus"]},
+    {"id": "backlog", "place": "ndf", "path": "backlog.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["quality"]},
+    {"id": "handoff", "place": "ndf-handoff", "path": "<id>.md", "kind": "record", "tracked": false, "writer": "中継（M3）", "ends": "cleanup"},
+    {"id": "sprint", "place": "ndf-sprints", "path": "<id>/", "kind": "record", "tracked": false, "writer": "開発ループとスプリント（M1）", "ends": "cleanup"},
+    {"id": "parallel", "place": "ndf-parallel", "path": "<id>/", "kind": "record", "tracked": false, "writer": "計画の進行表（P3）", "ends": "cleanup"},
+    {"id": "scratch", "place": "ndf-tmp", "path": "<id>/", "kind": "record", "tracked": false, "writer": "各副命令", "ends": "run"},
+    {"id": "requirements", "place": "issues", "path": "issue-<n>-requirements.md", "kind": "document", "tracked": true, "writer": "要求の工程", "ends": "archived"},
+    {"id": "design", "place": "issues", "path": "issue-<n>-design.md", "kind": "document", "tracked": true, "writer": "設計の工程", "ends": "archived"},
+    {"id": "design-detail", "place": "issues", "path": "issue-<n>-design-detail.md", "kind": "document", "tracked": true, "writer": "詳細設計の工程", "ends": "archived"},
+    {"id": "approval", "place": "issues", "path": "approval-<id>.md", "kind": "document", "tracked": false, "writer": "承認ゲート（P2）", "ends": "cleanup"},
+    {"id": "archived-docs", "place": "issues-old", "path": "<name>.md", "kind": "document", "tracked": true, "writer": "後片付けの工程", "ends": "kept"},
+    {"id": "relay-hub-state", "place": "relay-hub", "path": "hub.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
+    {"id": "relay-hub-registry", "place": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
+    {"id": "relay-hub-request", "place": "relay-hub", "path": "requests/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継の頼む側（M3）", "ends": "run"},
+    {"id": "relay-hub-result", "place": "relay-hub", "path": "results/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "run"},
+    {"id": "relay-hub-log", "place": "relay-hub", "path": "hub-log.jsonl", "kind": "record", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "cleanup"}
+  ]
+}
