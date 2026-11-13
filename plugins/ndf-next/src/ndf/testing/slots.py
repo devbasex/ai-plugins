@@ -128,10 +128,15 @@ def _try_lock(path: Path) -> FileLock | None:
     return lock
 
 
-def _write_json(path: Path, data: Mapping[str, object]) -> None:
+def _replace_text(path: Path, text: str) -> None:
+    """一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def _write_json(path: Path, data: Mapping[str, object]) -> None:
+    _replace_text(path, json.dumps(data, ensure_ascii=False) + "\n")
 
 
 def _read_json(path: Path) -> dict[str, object] | None:
@@ -172,9 +177,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
                 fh.write(line + "\n")
             return
         kept = (kept + [line])[-KEEP_ROWS:]
-        tmp = path.with_name(f".{EVENTS_FILE}.{os.getpid()}")
-        tmp.write_text("".join(ln + "\n" for ln in kept), encoding="utf-8")
-        os.replace(tmp, path)
+        _replace_text(path, "".join(ln + "\n" for ln in kept))
 
 
 def _loads(line: str) -> dict[str, object]:
