@@ -113,19 +113,28 @@ def _check_entry(f: Path, d: dict) -> None:
     _one_of(f, d, "stdin", STDIN)
     _one_of(f, d, "stdout", STDOUT)
     _check_args(f, d["args"])
-    for s in d["settings"]:
-        if not isinstance(s, dict) or set(s) != {"file", "keys"} or not isinstance(s["keys"], list):
-            raise ContractError(f"{f.name}: settings の要素は file と keys を持つ")
+    _check_entry_settings(f, d["settings"])
     if not d["exit"] or not all(isinstance(v, str) and v.strip() for v in d["exit"].values()):
         raise ContractError(f"{f.name}: exit は終了コード → 意味（unknown なら理由）")
     if "lease" in d:
         _check_lease(f, d["lease"])
     if "core" in d:
-        core = d["core"]
-        if set(core) != {"exempt", "evidence"} or core["exempt"] not in CORE_EXEMPT:
-            raise ContractError(f"{f.name}: core は exempt（{'/'.join(CORE_EXEMPT)}）と evidence を持つ")
-        if not isinstance(core["evidence"], str) or not core["evidence"].strip():
-            raise ContractError(f"{f.name}: core.evidence は根拠の文")
+        _check_core(f, d["core"])
+
+
+def _check_entry_settings(f: Path, settings: list) -> None:
+    """入口の行の `settings` の要素は file と keys（並び）を持つ。"""
+    for s in settings:
+        if not isinstance(s, dict) or set(s) != {"file", "keys"} or not isinstance(s["keys"], list):
+            raise ContractError(f"{f.name}: settings の要素は file と keys を持つ")
+
+
+def _check_core(f: Path, core: dict) -> None:
+    """核の対象外の宣言（`core`）は exempt（CORE_EXEMPT のどれか）と根拠の文 evidence を持つ。"""
+    if set(core) != {"exempt", "evidence"} or core["exempt"] not in CORE_EXEMPT:
+        raise ContractError(f"{f.name}: core は exempt（{'/'.join(CORE_EXEMPT)}）と evidence を持つ")
+    if not isinstance(core["evidence"], str) or not core["evidence"].strip():
+        raise ContractError(f"{f.name}: core.evidence は根拠の文")
 
 
 def _check_lease(f: Path, lease: dict) -> None:
