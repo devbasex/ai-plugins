@@ -6874,6 +6874,12 @@
       "context": "ndf-workflow",
       "meaning": "進行表と DBOS の記録を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL",
       "pending_source": "issues/issue-3092-design.md"
+    },
+    {
+      "term": "定義の改訂",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別",
+      "pending_source": "issues/issue-3092-design.md"
     }
   ]
 }

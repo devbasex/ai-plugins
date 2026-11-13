@@ -192,10 +192,10 @@ I6 の正本である。進行表のモデルがこの表を定数で持ち、�
 | `answered`（承認ゲートの答え・リリースの結果） | スプリント | オーガナイザー・conductor | — |
 | `cancelled` | スプリント | conductor | 中止（残りの行も中止） |
 | `completed` | スプリント | 進行表のワークフロー | 完了 |
-| `row_added` / `row_moved` / `row_cancelled` | レーン | conductor（組み換えを含む）・オーガナイザー（レーンをまたぐ移動） | 未着手 / — / 中止 |
+| `row_added` / `row_moved` / `row_cancelled` | レーン | conductor・進行表のワークフロー（組み換えのアクティビティ）・オーガナイザー（レーンをまたぐ移動） | 未着手 / — / 中止 |
 | `row_started` | レーン | conductor（スプリントの作成） | 実行中 |
 | `row_ended` | レーン | レーンの進行表の行を終える関数だけ。`completed` か `cancelled` と同じトランザクションの中で呼ばれ、役はそれを書いた役（進行表のワークフローか conductor）を継ぐ（決定 17） | 完了・中止 |
-| `lane_added` / `lane_changed` / `request_opened` / `request_closed` | 計画 | オーガナイザー（`request_opened` は組み換えも） | — |
+| `lane_added` / `lane_changed` / `request_opened` / `request_closed` | 計画 | オーガナイザー（`request_opened` は進行表のワークフローの組み換えのアクティビティも） | — |
 | `plan_started` / `plan_completed` / `plan_cancelled` | 計画 | オーガナイザー / 耐久ワークフロー / オーガナイザー | 実行中 / 完了 / 中止 |
 | `adopted` | 全階層 | 取り込み | 終了か失敗（決定 19） |
 
@@ -266,12 +266,12 @@ CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 | --- | --- | --- |
 | `stage` | 工程表の行名 | 工程の行の鍵。I11 の突き合わせに使う |
 | `when` | `code_in_diff` / `docs_only_diff` / `behavior_docs_in_diff` / `ci_declared` / `prod_branch` / `release_record` / `retro_enabled` / `design_pr` | すべてが真のときだけ有効。偽なら「無効（条件の名前）」で飛ばす |
-| `kind` | `review` / `test` / `release` / `merge` / `work` / `gate` / `record` | 順序の決まり（I8〜I10）の対象を決める |
-| `range` | `sprint_diff` / `issue_diff` / `lane` / `none` | 入力の範囲。`review` と `test` は `sprint_diff` か `issue_diff` だけ（I9） |
+| `kind` | `review` / `test` / `release` / `verify` / `merge` / `work` / `gate` / `record` | 順序の決まり（I8〜I10）の対象を決める。`verify` はリリースした版を確かめるアクティビティ（リリース後テスト）で、取り込み前の検査（`review`・`test`）と分ける |
+| `range` | `sprint_diff` / `issue_diff` / `released` / `lane` / `none` | 入力の範囲。`review` と `test` は `sprint_diff` か `issue_diff` だけ、`verify` は `released`（リリースした版）だけ（I9） |
 | `subject` | `code` / `docs` / `design` | レビューの対象。`kind: review` では必須で、ほかでは書かない（I10） |
 | `per_issue` | `true` | `fast` で課題ごとの子の行にする工程（決定 9） |
 
-順序の決まりの検査（I8〜I10）は、モードの全工程のアクティビティを並びの順に平らにして行う。`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`review` の `range` が差分でなければ断る。同じ `range` と `subject` の組の `review` が 2 つあれば断る（実装レビューの `code` とドキュメントレビューの `docs` は範囲が同じでも通る）。
+順序の決まりの検査（I8〜I10）は、モードの全工程のアクティビティを並びの順に平らにして行う。`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`verify` はこの順序の対象でなく、`kind: release` より後ろに置ける。`review`・`test` の `range` が差分でなければ断り、`verify` の `range` が `released` でなければ断る。同じ `range` と `subject` の組の `review` が 2 つあれば断る（コードレビューの `code` とドキュメントレビューの `docs` は範囲が同じでも通る）。
 
 ### 入出力規約
 
@@ -293,11 +293,11 @@ CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 | `show <進行表の ID>` | — | 工程ごとの状態・時刻・出力の要約・無効の理由・事象の履歴 | 無い ID は 2 |
 | `disable` / `enable <ID> <工程> --reason <理由>` | — | 書いた事象 | 実行中の行は 6（I4） |
 | `retry <ID> <工程> --reason <理由>` | — | 書いた事象 | 失敗でない行と、動いている実行がある間は 6（決定 6） |
-| `finish <ID> <工程> --output <ファイル> --reason <理由>` | 出力のファイル | 書いた事象 | 規約に合わなければ 6 と検査の誤り（I4） |
-| `scope <ID> (--add <番号> \| --drop <番号> \| --mode <モード>) --reason <理由>` | — | 上げた改訂と、やり直す最初の工程・取り消した実行（決定 16）。`--drop` で外した課題は、レーンの進行表があれば同じレーンの順番表の次の行へ足す（受け入れ条件 15） | モードを下げれば 6（I5）。動いている実行がある間は 6（I15）。次の行への追加がレーンをまたぐ制約で断られたら 6 と理由（オーガナイザーへの依頼を残す） |
+| `finish <ID> <工程> --output <ファイル> --reason <理由>` | 出力のファイル | 書いた事象 | 規約に合わなければ 6 と検査の誤り（I17） |
+| `scope <ID> (--add <番号> \| --drop <番号> \| --mode <モード>) --reason <理由>` | — | 上げた改訂と、やり直す最初の工程・取り消した実行（決定 16）。`--drop` で外した課題は、レーンの進行表があれば同じレーンの順番表の次の行へ足す（受け入れ条件 15） | モードを下げれば 6（I5）。動いている実行がある間は 6（I22）。次の行への追加がレーンをまたぐ制約で断られたら 6 と理由（オーガナイザーへの依頼を残す） |
 | `cancel <ID> --reason <理由>` | — | 中止にした行の数・取り消した実行・終えたレーンの行（決定 17） | 完了の表と、動いている実行がある間は 6 |
 | `answer <ID> <工程> (--approved \| --rejected \| --release-result <ファイル>)` | — | 送った答え | 待っていない工程は 6 |
-| `lane add-row` / `move-row` / `cancel-row <レーンの進行表の ID> ...` | 課題・位置・理由 | 書いた事象 | レーンをまたぐ制約で 6（I12・I13） |
+| `lane add-row` / `move-row` / `cancel-row <レーンの進行表の ID> ...` | 課題・位置・理由 | 書いた事象 | レーンをまたぐ制約で 6（I12・I13・I18〜I21） |
 | `adopt (--sprint <sprint.json> \| --plan <計画名>)` | 今の目録か計画 | 作った進行表の ID・失敗にした工程と理由（決定 19） | 読めない・対応の無いステージ・I1 は 2 で、何も書かない（1 つのトランザクション） |
 
 ### 計画の進行表のスクリプト（`parallel.py`）
