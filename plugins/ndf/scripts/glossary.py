@@ -381,6 +381,12 @@ def scan(text: str, term_sections: list[str]):
         yield n, mask_inline_code(line), terms.get(n)
 
 
+def _uncovered(line: str, dep_re, live_re) -> list[re.Match]:
+    """`line` の中の `dep_re` の一致のうち、`live_re` の一致に完全に含まれないものを元の順で返す。"""
+    spans = [m.span() for m in live_re.finditer(line)] if live_re else []
+    return [m for m in dep_re.finditer(line) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
+
+
 def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, dep_re, live_re) -> list[dict]:
     live = live_words(g)
     items = []
@@ -399,11 +405,7 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
             )
         if dep_re is None:
             continue
-        spans = [m.span() for m in live_re.finditer(body)] if live_re else []
-        for m in dep_re.finditer(body):
-            s, e = m.span()
-            if any(a <= s and e <= b for a, b in spans):
-                continue
+        for m in _uncovered(body, dep_re, live_re):
             items.append(
                 {
                     "rule": "deprecated",
@@ -422,11 +424,7 @@ def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re,
     for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
         if wanted is not None and n not in wanted:
             continue
-        spans = [m.span() for m in live_re.finditer(line)] if live_re else []
-        for m in dep_re.finditer(line):
-            s, e = m.span()
-            if any(a <= s and e <= b for a, b in spans):
-                continue
+        for m in _uncovered(line, dep_re, live_re):
             items.append(
                 {
                     "rule": "deprecated_code",
