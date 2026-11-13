@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import approved_commit
 import ci_workflows
 import delivery
 import gh_parts
@@ -290,21 +291,30 @@ def approval_check(a):
 
 
 def approval_post(a):
-    """承認資料を承認資料のコメントとしてリリースの PR に置く。同じ先端のものがあれば置かない（#2773 の E4）。"""
+    """承認資料を承認資料のコメントとしてリリースの PR に置く。資料の「承認したコミット」が PR の先端と違えば置かずに止め、
+    同じ先端・同じ本文のものがあれば置かない（#2773 の E4。提示した資料と承認の対象を食い違わせない）。"""
     root = git_root(a.root)
     path = Path(a.approval) if Path(a.approval).is_absolute() else root / a.approval
     if not path.is_file():
         raise StepError(f"承認資料が無い: {path}", EXIT_PRECONDITION)
+    try:
+        material_sha = approved_commit.material_sha(path)
+    except ValueError as e:
+        raise StepError(str(e), EXIT_PRECONDITION) from e
     repo = repo_or_stop(root)
     try:
         head = approval_trail.read_head(repo, a.pr)[0]
-        kept = approval_trail.has_request(approval_trail.read_comments(repo, a.pr), head)
+        comments = approval_trail.read_comments(repo, a.pr) if material_sha == head.lower() else []
     except approval_trail.TrailError as e:
         raise StepError(str(e))
-    metrics = {"pr": a.pr, "head": head, "approval": str(path)}
-    if kept:
-        emit(result(TOOL, "ok", f"PR #{a.pr} に先端 {head[:8]} の承認資料が既にある", [], metrics))
-    got = gh_rest.comment(repo, a.pr, approval_trail.render_request(path.read_text(encoding="utf-8"), head))
+    metrics = {"pr": a.pr, "head": head, "approval": str(path), "approved_sha": material_sha}
+    if material_sha != head.lower():
+        nxt = f"release-steps.py release --version <版> --channel prod を打ち直して先端 {head[:8]} で承認資料を作り直す"
+        raise StepError(f"承認資料の承認したコミット {material_sha[:8]} が PR #{a.pr} の先端 {head[:8]} と違う（{nxt}）", EXIT_PRECONDITION)
+    body = approval_trail.render_request(path.read_text(encoding="utf-8"), head)
+    if any((c.get("body") or "").strip() == body.strip() for c in comments if isinstance(c, dict)):
+        emit(result(TOOL, "ok", f"PR #{a.pr} に先端 {head[:8]} の同じ承認資料が既にある", [], metrics))
+    got = gh_rest.comment(repo, a.pr, body)
     if not got.ok:
         raise StepError(f"承認資料のコメントを置けない: {got.error[:300]}")
     metrics["comment_url"] = (got.value or {}).get("url")

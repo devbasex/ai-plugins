@@ -7,7 +7,7 @@
 が受け持ち、PR の番号を設計のプランの報告から読み、承認の証跡（承認ラベルか、スプリント状態ファイルの設計承認ゲートの利用者の承認の記録）
 が無ければ承認ゲート（終了コード 10）で止まる。リリース承認ゲートの後の本番は別の `command` のままで、先頭の `approve` が承認の記録を書く。CD のある場合（リリースの場合の判定が
 `cd-no-review` か `cd-review`）の本番のプランは先頭に `approve` を置かず、承認資料を本番の PR へ置いた後の `approve-pr` が
-同じ照合（`--facts-from`・`--answer-from`）で承認の証跡を本番の PR へ書く（[ndf-release-approved-commit.md](ndf-release-approved-commit.md)）。
+同じ照合（`--facts-from`・`--answer-from`）で承認の証跡を本番の PR へ書く。`cd-review` は `approve-pr` を置かず、PR のレビューの承認を `release` が照らす（[ndf-release-approved-commit.md](ndf-release-approved-commit.md)）。
 
 **止まったプランは `supervise.py queue --resume <done>` の 1 回で、止まったステップから続き、後続のステージも流れる。** 前の起動が
 done の隣に残した一覧（`<done>.plans.json`）からステージの並びを読むため、conductor が知る必要があるのは done のパスだけである。

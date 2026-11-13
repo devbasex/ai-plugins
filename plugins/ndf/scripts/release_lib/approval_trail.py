@@ -4,7 +4,7 @@
 承認した人と時刻は GitHub がコメントに付けた作成者（`user.login`）と作成の時刻（`created_at`）で読み、本文の記述を
 判定に使わない。作成の後に編集された証跡は数えない（書き込み権限を持つ人は他人のコメントを編集できる）。
 
-- 書式の解釈と判定（`parse_trail`・`trails_of`・`judge`・`approved_review_commit`・`render_*`・`has_request`）は純粋な関数
+- 書式の解釈と判定（`parse_trail`・`trails_of`・`judge`・`approved_review_commit`・`render_*`）は純粋な関数
 - GitHub の読み書き（`read_*`・`open_prs_at`・`post_status`・`write_trail`）は `gh` を通す。失敗は `TrailError`
 
 証跡の書式の印と行の名前はこのモジュールだけが持つ。手順書は書式を写さず、ここを指す。
@@ -138,15 +138,6 @@ def render_trail(sha: str, by: str) -> str:
 def render_request(material: str, head: str) -> str:
     """承認資料のコメントの本文（承認資料の印・先端の行・承認資料の本文）。証跡に数えない。"""
     return f"{REQUEST_MARK}\n{HEAD_LINE} `{head}`\n\n{material.rstrip()}\n"
-
-
-def has_request(comments: list[dict], head: str) -> bool:
-    """同じ先端の承認資料のコメントが既にあるか。"""
-    for c in comments or []:
-        body = (c.get("body") or "") if isinstance(c, dict) else ""
-        if REQUEST_MARK in body and head.lower() in [s.lower() for s in _line_shas(body, HEAD_LINE)]:
-            return True
-    return False
 
 
 # ---------- GitHub の読み書き ----------

@@ -264,6 +264,51 @@ def test_cd_prod_plan_stacks_the_bumps_before_the_approval_and_merges_after_it(t
     )
 
 
+@pytest.mark.parametrize("mvv", [False, True])
+def test_cd_review_prod_plan_writes_no_trail_and_returns_to_release(tmp_path, monkeypatch, mvv):
+    """受け入れ条件 18・I8: レビューが必須の場合は approve-pr（証跡の書き込み）を置かず、承認の後は release へ戻る。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 1, ""))
+    out = tmp_path / "plan.json"
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
+    assert "approve-pr" not in steps and "approve --pr" not in json.dumps(list(steps.values()), ensure_ascii=False)
+    assert steps["approval-post"]["next"] == ("mvv" if mvv else "end")
+    assert steps["release"]["gate_next"] == "facts" and "10" not in steps["release"]["on_exit"]
+    if mvv:
+        assert steps["note"]["next"] == "release"
+
+
+@pytest.mark.parametrize("mvv", [False, True])
+def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp_path, monkeypatch, mvv):
+    """MVV 判定のプランでは release の承認待ちの 10 を承認ゲートに数えず facts へ進む（後の mvv が判定し、マージまで済めば完了）。
+    利用者が承認するプランは今のまま承認ゲートで止まる。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    out = tmp_path / "plan.json"
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    release = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}["release"]
+    assert release["on_exit"].get("75") == "stop"
+    if mvv:
+        assert "gate_next" not in release and release["on_exit"]["10"] == "facts"
+    else:
+        assert release["gate_next"] == "facts" and "10" not in release["on_exit"]
+
+
 def test_cd_dev_plan_has_no_approval_material_steps(tmp_path, monkeypatch):
     plan = _release_plan(tmp_path, monkeypatch, "dev", "10.17.11-dev.1", cd=True)
     steps = {s["id"]: s for s in plan["steps"]}
@@ -274,3 +319,21 @@ def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
     """受け入れ条件 19・I9: CD の無い場合の本番のプランは今のまま承認の記録が先頭に来る。"""
     plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=False)
     assert plan["steps"][0]["id"] == "approve" and "approval-post" not in {s["id"] for s in plan["steps"]}
+
+
+@pytest.mark.parametrize("cd", [True, False])
+def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monkeypatch, cd):
+    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
+    root = SUPERVISE.parents[3]
+    out = tmp_path / "check.json"
+    p = inproc.run(SUPERVISE, "new", "check", "--since-last", "--id", "m-1", "--worktree", str(root), "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stdout + p.stderr
+    ids = {s["id"] for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
+    assert ("test-all" in ids) is not cd

@@ -139,7 +139,7 @@ def test_open_review_shows_only_the_conflict_resolution(env):
     assert "+B1+B2" in diff and "-<<<<<<<" in diff and "g.txt" not in diff
     assert git(repo, "rev-parse", f"origin/{SHOW}^{{tree}}") == git(repo, "rev-parse", f"{head}^{{tree}}")
     body = gh.prs[100]["body"]
-    assert rr.read_mark(body, rr.RANGE_END_MARK) == head and rr.read_mark(body, rr.SHOWN_MARK)
+    assert rr.mark_in_body(body, rr.RANGE_END_MARK) == head and rr.mark_in_body(body, rr.SHOWN_MARK)
 
 
 def test_a_release_branch_without_conflicts_opens_nothing(env):
@@ -171,7 +171,7 @@ def test_close_review_moves_fixes_and_the_next_open_finds_nothing(env):
     assert got["moved"] == 1 and got["head"] == tip and got["reviewed"] == tip
     assert (git(repo, "show", f"{tip}:f.txt")) == "a\nB1 and B2\nc"
     assert git(repo, "log", "-1", "--format=%s", tip) == git(repo, "log", "-1", "--format=%s", fix)
-    assert gh.prs[100]["state"] == "CLOSED" and rr.read_mark(gh.prs[100]["body"], rr.REVIEWED_MARK) == tip
+    assert gh.prs[100]["state"] == "CLOSED" and rr.mark_in_body(gh.prs[100]["body"], rr.REVIEWED_MARK) == tip
     assert not {SHOW, BASE} & remote_heads(repo)
     again = rr.open_review(repo, VERSION, "resolution", "main", gh)
     assert again["review_pr"] is None and again["from"] == tip and gh.open_numbers() == []
@@ -185,7 +185,7 @@ def test_close_review_after_a_merge_was_added_records_the_range_end_and_stops(en
     add_merge(repo, "s3")
     with pytest.raises(StepError, match="review-open から打ち直す"):
         rr.close_review(repo, VERSION, gh)
-    assert rr.read_mark(gh.prs[100]["body"], rr.REVIEWED_MARK) == head and gh.open_numbers() == []
+    assert rr.mark_in_body(gh.prs[100]["body"], rr.REVIEWED_MARK) == head and gh.open_numbers() == []
     nxt = rr.open_review(repo, VERSION, "pr", "main", gh)
     assert nxt["from"] == head and nxt["files"] == 1
 
@@ -263,9 +263,21 @@ def test_open_stops_when_the_release_branch_of_an_open_pr_is_gone(env):
     assert gh.open_numbers() == [100]
 
 
+def test_open_stops_when_the_shown_mark_of_an_open_pr_is_unreadable(env):
+    """I11: 見せる先頭の印を読めない PR を直しが無いと扱わず、PR と一時のブランチを残して止まる。"""
+    repo, gh = env
+    build_release(repo, ["s1", "s2"])
+    rr.open_review(repo, VERSION, "resolution", "main", gh)
+    push_fix(repo, SHOW, "f.txt", "a\nB12\nc\n")
+    gh.prs[100]["body"] = "印の消えた本文"
+    with pytest.raises(StepError, match="印が無い"):
+        rr.open_review(repo, VERSION, "resolution", "main", gh)
+    assert gh.open_numbers() == [100] and {SHOW, BASE} <= remote_heads(repo)
+
+
 def test_marks_round_trip():
     body = rr.with_mark("本文", rr.REVIEWED_MARK, "abc1234")
-    assert rr.read_mark(rr.with_mark(body, rr.REVIEWED_MARK, "def5678"), rr.REVIEWED_MARK) == "def5678"
+    assert rr.mark_in_body(rr.with_mark(body, rr.REVIEWED_MARK, "def5678"), rr.REVIEWED_MARK) == "def5678"
     assert rr.review_version_of(SHOW) == VERSION and rr.review_version_of(BASE) is None
 
 

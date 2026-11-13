@@ -93,7 +93,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
-| `plugins/ndf/scripts/release_lib/approval_trail.py` | モジュール `approval_trail`・型 `Trail`・型 `Judgment`・例外 `TrailError` | 新設: `parse_trail`・`trails_of`・`judge`・`approved_review_commit`・`render_trail`・`render_request`・`has_request`・`read_comments`・`read_roles`・`read_permissions`・`read_head`・`read_reviews`・`open_prs_at`・`post_status`・`write_trail` |
+| `plugins/ndf/scripts/release_lib/approval_trail.py` | モジュール `approval_trail`・型 `Trail`・型 `Judgment`・例外 `TrailError` | 新設: `parse_trail`・`trails_of`・`judge`・`approved_review_commit`・`render_trail`・`render_request`・`read_comments`・`read_roles`・`read_permissions`・`read_head`・`read_reviews`・`open_prs_at`・`post_status`・`write_trail` |
 | `plugins/ndf/scripts/lib/release_case.py` | モジュール `release_case`・型 `Case`・例外 `CaseUnreadable` | 新設: `required_approvals`・`decide`・`read_approvals`・`case_of` |
 | `plugins/ndf/scripts/release-steps.py` | モジュール | 新設: `cmd_approval_check`・`cmd_approval_post`・`cmd_release_case`・`_release_prod_reviewed`・`_release_dev_by_workflow`・`_wait_ci_except`・`_wait_trail_status`。変更: `cmd_release`・`cmd_approve`・`wait_and_merge`・`build_parser` |
 | `plugins/ndf/scripts/release_lib/approval.py` | モジュール | 新設: `approved_on_pr`・`approve_on_pr`。変更: `approved_of`・`approve` |
@@ -117,8 +117,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `judge` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(trails: list[Trail], roles: dict[str, str \| None], head: Sha) -> Judgment` | 承認権限を持つ人の最新の、編集されていない証跡と先端を照らす | `roles` は証跡を書いた人ごとの `role_name`（読めなければ `None`） | `Judgment.state` は `success` / `failure`。説明は 140 字以下。`success` は I1 を満たすときだけ | 無し |
 | `approved_review_commit` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(reviews: list[dict], perms: dict[str, str \| None]) -> Sha \| None` | レビューの並びから、必須レビューの承認者として有効な人の最新の `APPROVED` のレビューの `commit_id` を返す | 各要素は PR のレビューの API の形。`perms` はレビューを書いた人ごとの `permission`（読めなければ `None`） | `perms` が `admin` か `write` の人の `APPROVED` だけを数え、無ければ `None`。`submitted_at` の最大のもの | 無し |
 | `render_trail` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(sha: Sha, by: str) -> str` | 設計文書の「証跡のコメントの書式」の本文を組む | `by` は `user` か `mvv` | `parse_trail(render_trail(s, b)) == s` | 無し |
-| `render_request` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(material: str, head: Sha) -> str` | 承認資料のコメントの本文（承認資料の印・先端の行・承認資料の本文）を組む | 無し | `parse_trail` は `None` を返す。`has_request` で先端を読める | 無し |
-| `has_request` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(comments: list[dict], head: Sha) -> bool` | 同じ先端の承認資料のコメントが既にあるかを返す | 無し | 承認資料の印と同じ先端の行を持つコメントがあれば `True` | 無し |
+| `render_request` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(material: str, head: Sha) -> str` | 承認資料のコメントの本文（承認資料の印・先端の行・承認資料の本文）を組む | 無し | `parse_trail` は `None` を返す | 無し |
 | `read_comments` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(repo: Repo, pr: int) -> list[dict]` | PR のコメントをすべてのページで読む | `gh` が認証済み | 全ページを読んだ並び | ネットワーク（`GET repos/{repo}/issues/{pr}/comments`） |
 | `read_roles` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(repo: Repo, logins: list[str]) -> dict[str, str \| None]` | 書いた人ごとに共同作業者の `role_name` を読む | 無し | 読めない人は `None`。同じ人は 1 度だけ読む | ネットワーク（`GET repos/{repo}/collaborators/{login}/permission`） |
 | `read_permissions` | `plugins/ndf/scripts/release_lib/approval_trail.py` | 新設 | `(repo: Repo, logins: list[str]) -> dict[str, str \| None]` | レビューを書いた人ごとに共同作業者の `permission` を読む | 無し | 読めない人は `None`。同じ人は 1 度だけ読む | ネットワーク（`GET repos/{repo}/collaborators/{login}/permission`。`read_roles` と同じ応答の別の欄） |
@@ -132,7 +131,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `read_approvals` | `plugins/ndf/scripts/lib/release_case.py` | 新設 | `(root: Root, branch: str) -> tuple[int \| None, str]` | 本番チャネルの ruleset を読み、規則が無ければ従来のブランチ保護を読んで承認数を返す | 無し | 読めなければ `(None, 読めなかった理由)` | ネットワーク（`gh api` を 2 回まで） |
 | `case_of` | `plugins/ndf/scripts/lib/release_case.py` | 新設 | `(root: Root) -> Case` | 宣言と GitHub の設定から場合を決める | 無し | CD の行が無ければネットワークを使わずに場合 3 | ファイル（`.ndf/project.json`・`.ndf/worktree.json`）・ネットワーク |
 | `cmd_approval_check` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | PR の証跡を判定し、先端へ commit status を付けて結果を出す | `--pr` がある | 宛先が本番チャネルでなければ何も付けずに 0。`open_prs_at` で同じ先端の開いた PR を読み、判定する PR のほかにあれば `failure`（I10）。`success` を付けたときは、付けた後に `open_prs_at` と証跡を読み直して判定し直し、`failure` になれば付け直す（`failure` は読み直さない）。PR が閉じていれば、同じ先端の開いた PR が 1 本だけのときにその PR を判定し、0 本なら何も付けない。判定できれば `success` / `failure` を付けて 0 | ネットワーク（読み・commit status） |
-| `cmd_approval_post` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | 承認資料を承認資料のコメントとして PR に置く | `--approval` のファイルがある | 同じ先端の承認資料のコメントが 1 件だけある | ファイルの読み・ネットワーク |
+| `cmd_approval_post` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | 承認資料を承認資料のコメントとして PR に置く | `--approval` のファイルがあり、その「承認したコミット」が PR の先端と一致する | 同じ先端・同じ本文の承認資料のコメントが 1 件だけある | ファイルの読み・ネットワーク |
 | `cmd_release_case` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a: Args) -> NoReturn` | `case_of` の結果を `metrics` に出す | 無し | `metrics` に `case`・`approval_place`・`merger`・`reason` | ネットワーク（`case_of` 経由） |
 | `cmd_release` | `plugins/ndf/scripts/release-steps.py` | 変更 | `(a: Args) -> NoReturn` | `--channel` と場合で経路を選ぶ | 今と同じ | 場合 3 と宣言の無い開発版は今の振る舞いのまま | 今と同じ（git・gh） |
 | `_release_prod_reviewed` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(root: Root, a: Args, case: Case, plugin: str, plugins: list[str], branch: str, base: str, prod: str) -> NoReturn` | 場合 1・2 の本番の経路（開発版の PR のマージ・本番の PR・CI の待ち・承認の照合・迂回なしのマージ・公開の後）を通す | worktreeが `release/v<版>` で、版上げがコミット済み | 承認が先端と一致したときだけ本番の PR がマージ済み。一致しなければ 10 | git の push・ネットワーク（PR の作成・待ち・マージ） |
@@ -183,6 +182,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `cmd_approval_check` | 判定の途中で読めない | `TrailError("unreadable")` | `approval_trail` の関数 | 止める（先端へ `error` を付けてから） | `stopped`・終了コード 1。commit status は `error` | 打ち直せる（workflow の再実行） |
 | `cmd_approval_check` | PR が本番チャネル宛てでない | develop 宛てなど | `read_head` の宛先 | 既定値で続ける（何も付けない） | `ok`・0・「宛先が本番チャネルでない」 | 後始末なし |
 | `cmd_approval_post` | 承認資料のファイルが無い | 前のステップが書いていない | ファイルの読み | 止める | `stopped`・3 | 承認資料を作って打ち直す |
+| `cmd_approval_post` | 承認資料の「承認したコミット」が PR の先端と違う | 資料を作った後に先端が動いた | `approved_commit.material_sha` との比較 | 置かずに止める | `stopped`・3 | 新しい先端で承認資料を作り直す |
 | `cmd_approval_post` | コメントを置けない | 権限・ネットワーク | `gh_rest.comment` | 止める | `stopped`・1 | 打ち直せる（同じ先端なら置き直さない） |
 | `cmd_release_case` | 宣言を読めない | `CaseUnreadable` | `case_of` | 止める | `stopped`・3 | 宣言を直して打ち直す |
 | `cmd_release` | 場合 1・2 で承認したコミットの引数がある | 場合 3 の打ち方のまま | `approved_of` | 止める | `stopped`・3。`next` に `approve --pr` の打ち方 | 引数を外して打ち直す |
@@ -279,7 +279,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | 証跡のチェックの workflow の実行（PR の出来事とコメントの出来事が続けて起きる） | 先端の SHA への `ndf/release-approval` の commit status | `concurrency: group: release-approval-<PR 番号>`・`cancel-in-progress: true`。同じ PR の中では後の実行だけが残る。**PR をまたぐ実行は排他しない**（group を 1 つにすると、GitHub は同じ group で待つ実行を取り消すため、別の PR の判定が抜ける） | 同じ PR の中では、判定が毎回すべてのコメントを読み直すため、どの実行が最後でも同じ結果になる。PR をまたぐと、PR A の実行が PR B の出現前に読んだ `success` を、B の実行の `failure` の後に付けうる。そこで `success` を付けた実行は付けた後に読み直し、同じ先端の PR が増えていれば `failure` に付け直す。B の実行の `failure` より後に A が `success` を付けたなら、A の読み直しは B の出現より後になり、B を見て `failure` に戻す。`failure` は安全側のため読み直さない |
 | 本番のプランの `approve-pr` と、同じ PR への手での証跡の書き込み | PR のコメント | 取らない | 同じ人・同じ SHA の編集されていない証跡があれば `write_trail` は置かない。別の人の証跡が増えても判定は「最新の承認権限を持つ人の証跡」で決まる |
 | `release --channel prod` の打ち直し（承認ゲートの前と後） | 本番の PR・開発版の PR | 取らない（ステップの実行器が同じプランを 1 本だけ走らせる） | 本番の PR は `find_pr` で使い回す。マージ済みなら公開の後から続ける |
-| `approval-post` の打ち直し | PR のコメント | 取らない | 同じ先端の承認資料のコメントがあれば置かない。先端が変われば新しい承認資料のコメントを置く |
+| `approval-post` の打ち直し | PR のコメント | 取らない | 同じ先端・同じ本文の承認資料のコメントがあれば置かない。先端が変わるか資料を作り直せば新しい承認資料のコメントを置く |
 | 開発版の workflow と、同じ開発版の PR への手でのマージ | 開発版の PR | `concurrency: group: release-dev-<PR 番号>`・`cancel-in-progress: false` | `merge-when-green` はマージ済みの PR を `already_merged` で扱う。`_release_dev_by_workflow` はマージ済みなら起動しない |
 | `release-case` を読む複数のプランの組み立て | GitHub の規則（読みだけ） | 取らない | 読みだけで状態を持たない。呼ぶたびに読み直す |
 
@@ -307,7 +307,6 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `approved_review_commit` | `lib/gh_parts.py` の `review_post` | `grep -rn "reviews" plugins/ndf/scripts/lib/gh_parts.py` | 使えない理由: レビューを書く部品で、読む部品が無い |
 | `render_trail` | `lib/approved_commit.py` の `material_row` | `sed -n 179,197p plugins/ndf/scripts/lib/approved_commit.py` | 使えない理由: 承認資料の表の行を組む部品で、コメントの書式と違う |
 | `render_request` | `release_lib/materials.py` | `grep -n "^def " plugins/ndf/scripts/release_lib/materials.py` | 使えない理由: 承認資料の節を書く部品で、本文を包む印を持たない。承認資料の本文はファイルから読んでそのまま包む |
-| `has_request` | 無し | `grep -rn "release-approval-request" plugins/ndf/scripts` が 0 件 | 足す |
 | `read_comments` | `lib/gh_rest.py` の `_rest_pages` | `grep -n "def _rest_pages" -A15 plugins/ndf/scripts/lib/gh_rest.py` | 使う（ページを辿る部品。私有の名前のため、公開の関数 `rest_pages` として出し直すか、同じモジュールに読みの関数を足す。どちらにするかは実装で決める） |
 | `read_roles` | 無し | `grep -rn "collaborators/" plugins/ndf/scripts scripts` が 0 件 | 足す（`gh api` を `gh_call` で呼ぶ） |
 | `read_permissions` | `read_roles`（この設計で足す） | 同じ API（`collaborators/{login}/permission`）の応答の別の欄を読むことを `gh api` の出力で確かめた | 応答を読む部品を `read_roles` と共有し、読む欄（`permission`）だけを分ける |
@@ -344,8 +343,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `judge` | admin の最新の証跡が先端で `success`。maintain でも `success` | 古い証跡が先端・新しい証跡が別の SHA なら `failure`。説明が 140 字で切れる | 証跡なし・write / triage・権限を読めない・編集済みでそれぞれ `failure` と理由 |
 | `approved_review_commit` | 最新の `APPROVED` の `commit_id` | `APPROVED` の後に `COMMENTED` があっても `APPROVED` を返す。read・triage・読めない人の後の `APPROVED` は飛ばし、write の人の前の `APPROVED` を返す | `APPROVED` が無ければ `None`。有効な人の `APPROVED` が無ければ `None` |
 | `render_trail` | `parse_trail` で同じ SHA に戻る | `by` が `mvv` | — |
-| `render_request` | `has_request` が同じ先端で `True` | — | `parse_trail` が `None`（証跡に数えない） |
-| `has_request` | 同じ先端で `True` | 別の先端なら `False` | 証跡の印だけのコメントは `False` |
+| `render_request` | 先端の行に先端を持つ | — | `parse_trail` が `None`（証跡に数えない） |
 | `read_comments` | 2 ページを結合する（`gh` を偽物にする） | 0 件 | API の失敗で `TrailError("unreadable")` |
 | `read_roles` | 人ごとの `role_name` | 同じ人を 1 度だけ読む | 404 / 403 で `None` |
 | `read_head` | 先端・宛先・状態 | — | API の失敗で `TrailError("unreadable")` |
@@ -358,7 +356,7 @@ workflow は既定ブランチを取り出して、`release-steps.py` と `merge
 | `case_of` | ai-plugins の宣言と承認数 0 で場合 1 | CD の行が無ければ `gh` を呼ばない | 宣言を読めなければ `CaseUnreadable` |
 | `open_prs_at` | 同じ先端の PR の番号を返す | 先端の違う PR を含めない | 読めないとき `TrailError("unreadable")` |
 | `cmd_approval_check` | 通る PR で `success` を付けて 0。`success` を付けた直後の読み直しで同じ先端の PR が増えていれば `failure` に付け直す | develop 宛てで何も付けずに 0 | 読めないとき `error` を付けて 1 |
-| `cmd_approval_post` | 置いて 0 | 同じ先端の 2 回目は置かずに 0 | ファイルが無ければ 3。投稿の失敗で 1 |
+| `cmd_approval_post` | 置いて 0 | 同じ先端・同じ本文の 2 回目は置かずに 0。資料を作り直せば置き直す | ファイルが無いか、資料の承認したコミットが先端と違えば 3。投稿の失敗で 1 |
 | `cmd_release_case` | `metrics` の 4 項目 | — | 宣言を読めなければ 3 |
 | `cmd_release` | 場合 3 の今のテストが通る | 宣言の無い開発版は手元でマージ | 場合 1 で `--approval` を渡すと 3 |
 | `_release_prod_reviewed` | 場合 1 で証跡が一致してマージ・場合 2 でレビューが一致してマージ | 本番の PR がマージ済みなら公開の後から | 証跡が無い・承認の後の push で 10。GitHub の拒否で 1。`--admin` を渡さない |

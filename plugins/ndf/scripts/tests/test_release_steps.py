@@ -1405,7 +1405,7 @@ def test_approval_post_writes_once_per_head(monkeypatch, tmp_path):
     mod = _release_steps_module(monkeypatch)
     rv, at = mod.reviewed, mod.reviewed.approval_trail
     material = tmp_path / "approval.md"
-    material.write_text("# 承認資料\n", encoding="utf-8")
+    material.write_text(f"# 承認資料\n\n| 項目 | 値 |\n| --- | --- |\n| 承認したコミット | {HEAD} |\n", encoding="utf-8")
     comments, written = [], []
 
     class Ok:
@@ -1420,10 +1420,34 @@ def test_approval_post_writes_once_per_head(monkeypatch, tmp_path):
     for _ in range(2):
         with pytest.raises(SystemExit):
             rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(material)))
-    assert len(written) == 1 and at.has_request(comments, HEAD) and at.parse_trail(written[0]) is None
+    assert len(written) == 1 and f"`{HEAD}`" in written[0] and at.parse_trail(written[0]) is None
     with pytest.raises(mod.StepError) as e:
         rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(tmp_path / "missing.md")))
     assert e.value.code == mod.EXIT_PRECONDITION
+    # 同じ先端で資料を作り直したら、古いコメントを使い回さずに置き直す
+    material.write_text(material.read_text(encoding="utf-8") + "\n追記\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(material)))
+    assert len(written) == 2 and "追記" in written[1]
+
+
+def test_approval_post_refuses_a_material_for_another_head(monkeypatch, tmp_path):
+    """資料の「承認したコミット」が PR の先端と違えば、承認資料のコメントを置かずに 3 で止まる。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    rv, at = mod.reviewed, mod.reviewed.approval_trail
+    material = tmp_path / "approval.md"
+    material.write_text(f"| 項目 | 値 |\n| --- | --- |\n| 承認したコミット | {'d' * 40} |\n", encoding="utf-8")
+    written = []
+    monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(at, "read_head", lambda repo, n: (HEAD, "main", "open"))
+    monkeypatch.setattr(at, "read_comments", lambda repo, n: [])
+    monkeypatch.setattr(rv.gh_rest, "comment", lambda repo, n, body: written.append(body))
+    with pytest.raises(mod.StepError) as e:
+        rv.approval_post(argparse.Namespace(root=str(tmp_path), pr=9, approval=str(material)))
+    assert e.value.code == mod.EXIT_PRECONDITION and "先端" in str(e.value) and written == []
 
 
 def test_approve_on_pr_writes_the_trail_and_gates_on_a_moved_head(monkeypatch, tmp_path):

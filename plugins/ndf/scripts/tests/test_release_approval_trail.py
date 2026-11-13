@@ -109,11 +109,6 @@ def test_approved_review_commit_counts_only_effective_reviewers():
     assert at.approved_review_commit(reviews, {}) is None
 
 
-def test_has_request_by_head():
-    cs = [comment(at.render_request("資料", A)), comment(at.render_trail(B, "user"))]
-    assert at.has_request(cs, A) and not at.has_request(cs, B)
-
-
 class FakeGh:
     def __init__(self, table):
         self.table, self.calls = table, []

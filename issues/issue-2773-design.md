@@ -303,7 +303,7 @@ classDiagram
 | 名前 | 入力 | 出力（成功） | 失敗の形 | 互換性 |
 | --- | --- | --- | --- | --- |
 | `release-steps.py approval-check --pr <番号>` | PR の番号。リポジトリは `GITHUB_REPOSITORY` か `--root` の origin | commit status を付け、判定を `lib/step_result.py` の 1 行の JSON で出して 0 | 宛先が本番チャネルでない PR は何も付けずに 0。API の失敗は `error` を付けて 1 | 新設 |
-| `release-steps.py approval-post --pr <番号> --approval <資料>` | PR と承認資料のファイル | 承認資料のコメントを置いて 0。同じ先端の承認資料のコメントがあれば置かずに 0 | 投稿の失敗は 1 | 新設 |
+| `release-steps.py approval-post --pr <番号> --approval <資料>` | PR と承認資料のファイル | 承認資料のコメントを置いて 0。同じ先端・同じ本文の承認資料のコメントがあれば置かずに 0 | 資料の承認したコミットが PR の先端と違えば置かずに 3。投稿の失敗は 1 | 新設 |
 | `release-steps.py approve --pr <番号> --approved-sha <SHA> --by user\|mvv` | PR・承認したコミット・担い手 | 証跡のコメントを置いて 0。同じ SHA の編集されていない証跡を同じ人が既に置いていれば置かずに 0 | SHA が PR の先端と違えば置かずに 10（承認資料を作り直す）。投稿の失敗は 1 | `--pr` を足す。`--approval` を渡す今の形は場合 3 のために残す |
 | `release-steps.py release-case [--root <dir>]` | 宣言と ruleset | `metrics` に `case`（`cd-no-review` / `cd-review` / `no-cd`）・`approval_place`・`merger`・`reason` を出して 0 | 宣言を読めなければ 3 | 新設 |
 | `release-steps.py release --channel prod --version <版>` | 版。場合 1・2 では承認したコミットを受けない | 場合 1: 証跡が先端と一致し CI が通っていればマージして 0。証跡が無ければ PR を作って CI を待ち、10（承認ゲート。`metrics.approved_sha` は先端・`metrics.main_pr`）。場合 2: 最新の承認のレビューのコミットが先端と一致すればマージして 0、未承認か一致しなければ 10 | 場合 1・2 で `--approved-sha` か `--approval` を渡すと 3。先端が証跡と違えば 10 | 場合 3 は今の引数と振る舞いのまま |

@@ -439,7 +439,8 @@ def plan_check_since(a) -> dict:
         cond += " --final"  # eval は --final と --review を同時に受けない（--review は final を見ない）
     steps = check_since_steps(a, name, flag, no_refactor)
     after_whole = "ci-peek" if ci_only(a) else "finish"
-    steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor), "finish", "abort", fix_push=True)
+    cd_case = release_case.case_at(repo).has_cd  # CD のある場合は全体テストを流さない（plan_check と同じ。#2773 の受け入れ条件 16）
+    steps = check_ci_watch(a, trim_check_steps(a, steps, after_whole, no_refactor, cd_case), "finish", "abort", fix_push=True)
     issues = check_issues(a)
     plan = {
         "フェーズ": "検査",

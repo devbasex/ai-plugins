@@ -32,7 +32,7 @@ def _mark_re(mark: str) -> re.Pattern:
     return re.compile(re.escape(mark).replace(re.escape("{sha}"), _MARK_SHA))
 
 
-def read_mark(body: str | None, mark: str) -> str | None:
+def mark_in_body(body: str | None, mark: str) -> str | None:
     """本文の最後の印の SHA。無ければ None。"""
     found = _mark_re(mark).findall(body or "")
     return found[-1] if found else None
@@ -142,7 +142,7 @@ def review_from(root, version: str, head: str, production: str, gh: GitHub) -> t
     """範囲の始まり。同じ版の閉じたレビューの PR のレビュー済みの先頭が `head` の祖先ならそこ、無ければ本番チャネル（I10）。"""
     _, show, _ = review_names(version)
     closed = sorted(gh.list_prs(root, "closed", head=show), key=lambda it: -int(it.get("number") or 0))
-    marks = [m for it in closed if (m := read_mark(it.get("body"), REVIEWED_MARK))]
+    marks = [m for it in closed if (m := mark_in_body(it.get("body"), REVIEWED_MARK))]
     for sha in marks:
         if branch_flow.ancestor_of(root, sha, head):
             return _sha(root, sha), []
@@ -161,7 +161,8 @@ def close_stale(root, version: str, head: str, gh: GitHub) -> tuple[int | None, 
     """開いている衝突の解消のレビューの PR を版に依らず調べ、直しを移し終えたものを閉じて一時のブランチを消す（I11）。
 
     移していない直しを持つ PR が `version` の PR で、本文の範囲の終わりが `head` と同じなら使い直す（番号を返す）。
-    それ以外の移していない直しを持つ PR か、比べるリリースブランチを取得できない PR があれば、何も閉じずに止める。
+    それ以外の移していない直しを持つ PR か、比べるリリースブランチ・見せるブランチ・見せる先頭の印を読めない PR があれば、
+    何も閉じずに止める（読めないものを直しが無いと扱って消さない）。
     戻り値は（使い直す PR の番号か None, 閉じた PR の番号）。"""
     reuse, closable, blocked = None, [], []
     for it in gh.list_prs(root, "open"):
@@ -173,17 +174,26 @@ def close_stale(root, version: str, head: str, gh: GitHub) -> tuple[int | None, 
         if not _fetch_branch(root, release):
             blocked.append(f"#{n}（{release} を取得できない）")
             continue
-        shown = read_mark(it.get("body"), SHOWN_MARK)
-        fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown) if shown and _fetch_branch(root, show) else []
+        shown = mark_in_body(it.get("body"), SHOWN_MARK)
+        if not shown:
+            blocked.append(f"#{n}（本文に見せる先頭の印が無い）")
+            continue
+        if not _fetch_branch(root, show):
+            if _remote_has(root, show):
+                blocked.append(f"#{n}（{show} を取得できない）")
+                continue
+            fixes = []  # 見せるブランチがもう無い。移す直しは残っていない
+        else:
+            fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown)
         if not fixes:
             closable.append((n, show, base))
-        elif ver == version and read_mark(it.get("body"), RANGE_END_MARK) == head and reuse is None:
+        elif ver == version and mark_in_body(it.get("body"), RANGE_END_MARK) == head and reuse is None:
             reuse = n
         else:
             blocked.append(f"#{n}（移していない直し {', '.join(c[:12] for c in fixes)}）")
     if blocked:
         raise StepError(
-            "移していない直しを持つか、比べるリリースブランチが無い衝突の解消のレビューの PR がある: "
+            "移していない直しを持つか、比べるブランチ・本文の印を読めない衝突の解消のレビューの PR がある: "
             + "・".join(blocked)
             + "。review-close から打ち直すか、直しを捨てると決めて PR を閉じてから review-open を打ち直す"
         )
@@ -259,7 +269,7 @@ def close_review(root, version: str, gh: GitHub) -> dict:
     if pr is None:
         raise StepError(f"{version} の衝突の解消のレビューの PR が開いていない（review-open から打ち直す）")
     n, body = int(pr["number"]), pr.get("body") or ""
-    shown, range_end = read_mark(body, SHOWN_MARK), read_mark(body, RANGE_END_MARK)
+    shown, range_end = mark_in_body(body, SHOWN_MARK), mark_in_body(body, RANGE_END_MARK)
     if not shown or not range_end or not _fetch_branch(root, show) or not _fetch_branch(root, release):
         raise StepError(f"レビューの PR #{n} の本文の印か、{show}・{release} を読めない")
     fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown)

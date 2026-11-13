@@ -24,7 +24,8 @@ from supervise_lib.verify_steps import (
     with_margin,
 )
 from supervise_lib.procedures import with_record
-from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, has_release_cd, material_path, mvv_gate_steps
+from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, material_path, mvv_gate_steps, release_cd_case
+from supervise_lib.release_cd import cd_release_wait
 from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
 
@@ -223,7 +224,7 @@ def _prepare_steps(
     return steps
 
 
-def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: bool = False) -> dict:
+def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: str | None = None) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
@@ -247,7 +248,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: 
     if on_pr and not dev:
         # CD のある場合（#2773）: 承認はリリースの PR の上で取る。承認の前は本番の PR を作って 10 で止まり、承認資料を組んで置く
         step["cmd"] += promotion_flag(a)
-        step["gate_next"] = "facts"
+        step.update(cd_release_wait(a, on_pr, step["on_exit"]))
     elif not dev:
         step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + promotion_flag(a)
         step["gate_next"] = "handoff" if getattr(a, "mvv", None) else "end"
@@ -326,9 +327,9 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
 
 
 def _release_verify_steps(
-    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: bool = False
+    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: str | None = None
 ) -> list[dict]:
-    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。"""
+    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合の名前。"""
     dev_next = ("release-branch" if release_units(a) else "end" if on_pr else "facts") if dev else "cleanup"
     return [
         _release_step(a, v, dev, repo, approval, on_pr),
@@ -382,6 +383,7 @@ class _KindArgs(NamedTuple):
     v: str
     base: str
     units: list
+    cd: str | None  # CD のある場合の名前（release_cd.release_cd_case）。CD が無ければ None
 
 
 def _dev_approvals(c: _KindArgs) -> list[dict]:
@@ -390,12 +392,8 @@ def _dev_approvals(c: _KindArgs) -> list[dict]:
 
 def _cd_prod_approvals(c: _KindArgs) -> list[dict]:
     return cd_prod_steps(
-        c.a, c.v, c.prs, c.repo, c.approval, _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.v)[1])
+        c.a, c.v, c.prs, c.repo, c.approval, _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, release_names(c.v)[1]), c.cd
     )
-
-
-def _no_approvals(c: _KindArgs) -> list[dict]:
-    return []
 
 
 def _insert_approve_step(steps: list[dict], c: _KindArgs) -> None:
@@ -421,11 +419,12 @@ class ReleaseKind(NamedTuple):
 
 
 FACTS_IDS = ("facts", "explain", "others")
+_NO_APPROVALS: Callable[[_KindArgs], list[dict]] = lambda c: []  # noqa: E731
 RELEASE_KINDS = {
     "dev": ReleaseKind(RULE_RELEASE_DEV, FACTS_IDS, "facts", _dev_approvals, _no_gate),
-    "dev-cd": ReleaseKind(RULE_RELEASE_DEV, (), "end", _no_approvals, _no_gate),
-    "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _no_approvals, _insert_approve_step),
-    "prod-mvv": ReleaseKind(RULE_RELEASE_PROD_MVV, (), "facts", _no_approvals, _mvv_gate),
+    "dev-cd": ReleaseKind(RULE_RELEASE_DEV, (), "end", _NO_APPROVALS, _no_gate),
+    "prod": ReleaseKind(RULE_RELEASE_PROD, (), "facts", _NO_APPROVALS, _insert_approve_step),
+    "prod-mvv": ReleaseKind(RULE_RELEASE_PROD_MVV, (), "facts", _NO_APPROVALS, _mvv_gate),
     "prod-cd": ReleaseKind(RULE_RELEASE_PROD_CD, (*FACTS_IDS, "approval-post"), "end", _cd_prod_approvals, _no_gate),
 }
 
@@ -452,7 +451,7 @@ def plan_release_package_plugin(a) -> dict:
     plugin, runtimes = _validate_release_decl(a.release, dev, a)
     rts = ",".join(runtimes)
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
-    on_pr = has_release_cd(a, repo)  # CD のある場合は承認をリリースの PR の上で取る（#2773）
+    on_pr = (cd := release_cd_case(a, repo)) is not None  # CD のある場合は承認をリリースの PR の上で取る（#2773）
     v, base = release_version_of(a)  # 開発版の本番承認の提示物は正式版の番号で作る
     # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
     prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
@@ -472,14 +471,14 @@ def plan_release_package_plugin(a) -> dict:
     ref = a.base if dev else a.production_branch
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs, on_pr)
+    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs, cd)
     if not dev:
         # 後片付け: デプロイの PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo, release_review_row(a).diff != "none"))
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
-    ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units)
+    ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
     steps += kind.approval_steps(ctx)
     steps += _judge_fix_steps(run_ids, after_notes)
     if not dev:
