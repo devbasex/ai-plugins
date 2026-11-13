@@ -49,7 +49,14 @@ class Server:
 def test_pull_reads_rest_fields() -> None:
     server = Server({("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull(body=None))]})  # type: ignore[arg-type]
     pull = _hub(server).pull(7)
-    assert (pull.number, pull.head_sha, pull.head_ref, pull.base_ref, pull.body, pull.merge_state) == (7, HEAD, "feat/x", "develop", "", "clean")
+    assert (pull.number, pull.head_sha, pull.head_ref, pull.base_ref, pull.body, pull.merge_state) == (
+        7,
+        HEAD,
+        "feat/x",
+        "develop",
+        "",
+        "clean",
+    )
 
 
 def test_merge_resolves_short_expected_head_and_sends_full_sha() -> None:
@@ -212,7 +219,9 @@ def test_nodes_refuses_unknown_node() -> None:
 
 
 def test_job_log_returns_text() -> None:
-    server = Server({("GET", f"/repos/{REPO}/actions/jobs/5/logs"): [httpx.Response(200, text="line\n", headers={"content-type": "text/plain"})]})
+    server = Server(
+        {("GET", f"/repos/{REPO}/actions/jobs/5/logs"): [httpx.Response(200, text="line\n", headers={"content-type": "text/plain"})]}
+    )
     assert _hub(server).job_log(5) == "line\n"
 
 

@@ -268,7 +268,6 @@ def watch_head(github: GitHub, sha: str, required: list[str], tests: list[str]) 
     return lambda: read(github.check_runs(sha), required, tests)
 
 
-
 # 副命令 `ndf ci` の道具の名前（結果 JSON の tool）
 TOOL = "ci"
 

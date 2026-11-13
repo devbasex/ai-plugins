@@ -220,7 +220,9 @@ def test_watch_reads_once_more_at_the_deadline() -> None:
 
 def test_watch_returns_as_soon_as_checks_conclude() -> None:
     clock, reads, seen = Clock(), [], []
-    w = ci.Watch(_reader([RUNNING, PASSED], clock, reads), 3600, on_round=lambda r, t: seen.append((r.verdict, t)), clock=clock, sleep=clock.sleep)
+    w = ci.Watch(
+        _reader([RUNNING, PASSED], clock, reads), 3600, on_round=lambda r, t: seen.append((r.verdict, t)), clock=clock, sleep=clock.sleep
+    )
     done = w.run()
     assert done.rounds == 2 and done.cause(["pytest"]) is None
     # #2317: 読むたびに、待っているものと経過を渡す
@@ -250,7 +252,15 @@ def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "") -> 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/pulls/7"):
-            pull = {"number": 7, "state": "open", "merged": False, "body": "", "mergeable_state": "clean", "head": {"sha": HEAD, "ref": "x"}, "base": {"ref": "develop"}}
+            pull = {
+                "number": 7,
+                "state": "open",
+                "merged": False,
+                "body": "",
+                "mergeable_state": "clean",
+                "head": {"sha": HEAD, "ref": "x"},
+                "base": {"ref": "develop"},
+            }
             return httpx.Response(200, json=pull)
         if path.endswith("/check-runs"):
             return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
