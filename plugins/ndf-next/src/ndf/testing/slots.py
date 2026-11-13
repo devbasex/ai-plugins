@@ -234,35 +234,33 @@ class _MemoryMonitor:
     poll: float
     read_memory: ReadMemory
     on_stop: Callable[[int], None]
-    index: int | None = None
-    started_at: float = 0.0
     _stop: threading.Event = field(default_factory=threading.Event)
     _thread: threading.Thread | None = None
 
-    def start(self, proc: subprocess.Popen) -> None:
-        self._thread = threading.Thread(target=self._run, args=(proc,), name="ndf-test-slot-monitor", daemon=True)
+    def start(self, proc: subprocess.Popen, index: int, started_at: float) -> None:
+        self._thread = threading.Thread(target=self._run, args=(proc, index, started_at), name="ndf-test-slot-monitor", daemon=True)
         self._thread.start()
 
-    def _run(self, proc: subprocess.Popen) -> None:
+    def _run(self, proc: subprocess.Popen, index: int, started_at: float) -> None:
         while not self._stop.wait(self.poll):
             if proc.poll() is not None:
                 return
             available = self.read_memory()
             if available is None or available >= self.floor_mib:
                 continue
-            if not self._is_last_started() or not self._claim_stop():
+            if not self._is_last_started(index, started_at) or not self._claim_stop(index):
                 continue
             self.on_stop(available)
-            log.warning("使えるメモリが下限を割ったのでテストを止める", extra={"available_mib": available, "slot": self.index})
+            log.warning("使えるメモリが下限を割ったのでテストを止める", extra={"available_mib": available, "slot": index})
             _stop_group(proc)
             return
 
-    def _is_last_started(self) -> bool:
+    def _is_last_started(self, own_index: int, started_at: float) -> bool:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
-        mine = (self.started_at, self.index or 0)
+        mine = (started_at, own_index or 0)
         for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
             index = _slot_index(path)
-            if index is None or index == self.index:
+            if index is None or index == own_index:
                 continue
             started = (_read_json(path) or {}).get("started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
@@ -273,7 +271,7 @@ class _MemoryMonitor:
             probe.release()
         return True
 
-    def _claim_stop(self) -> bool:
+    def _claim_stop(self, index: int) -> bool:
         """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
         try:
             with _lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
@@ -281,7 +279,7 @@ class _MemoryMonitor:
                 now = time.time()
                 if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
                     return False
-                _write_json(self.directory / STOP_FILE, {"at": now, "slot": self.index})
+                _write_json(self.directory / STOP_FILE, {"at": now, "slot": index})
                 return True
         except (OSError, Timeout):
             return False  # 停止の時刻を守れないときは止めない
@@ -303,6 +301,7 @@ class Held:
     measured: bool = True
     memory_stopped: bool = False
     available_mib: int | None = None
+    started_at: float = 0.0
     _monitor: _MemoryMonitor | None = None
 
     def watch(self, proc: subprocess.Popen) -> None:
@@ -313,7 +312,12 @@ class Held:
         if not self.measured:
             return
         assert self._monitor is not None
-        self._monitor.start(proc)
+        self._monitor.start(proc, self.index, self.started_at)
+
+    def _run_without_slot(self, note: str) -> None:
+        """枠を取らずに走らせる形にする（監視もしない）。"""
+        self.index, self._monitor = None, None
+        self.note = note
 
     def _stopped_by_memory(self, available: int) -> None:
         self.available_mib = available
@@ -522,18 +526,16 @@ def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
         lock = _acquire(ctx, held)
         if lock is None:
             return None
-        assert held._monitor is not None
-        held._monitor.started_at = time.time()
+        held.started_at = time.time()
         try:
-            _write_json(_slot_path(ctx.directory, held.index, ".json"), _owner(held._monitor.started_at, ctx.cwd))
+            _write_json(_slot_path(ctx.directory, held.index, ".json"), _owner(held.started_at, ctx.cwd))
         except BaseException:
             _release(ctx.directory, held, lock, quiet=True)
             raise
         return lock
     except OSError as exc:
         log.warning("枠の置き場へ書けないので枠を取らずに走らせる", extra={"error": str(exc)})
-        held.index, held._monitor = None, None
-        held.note = f"枠の置き場へ書けないので枠を取らずに走らせた: {exc}"
+        held._run_without_slot(f"枠の置き場へ書けないので枠を取らずに走らせた: {exc}")
         return None
 
 
@@ -556,7 +558,6 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
         held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
-    monitor.index = held.index
     held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
     try:
