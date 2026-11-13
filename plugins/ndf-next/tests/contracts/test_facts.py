@@ -161,7 +161,7 @@ ROW_COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "ar
 
 
 def test_row_schema_from_column_declarations_in_contracts():
-    assert facts._row_schema(ROW_COLUMNS) == {
+    assert facts.row_schema(ROW_COLUMNS) == {
         "type": "object",
         "additionalProperties": False,
         "required": ["id", "rank"],
@@ -174,7 +174,7 @@ def test_row_schema_from_column_declarations_in_contracts():
 
 
 def test_row_schema_declared_id_replaces_the_default_in_contracts():
-    schema = facts._row_schema({"id": {"type": "string", "summary": "i"}, "name": {"type": "string", "summary": "n"}})
+    schema = facts.row_schema({"id": {"type": "string", "summary": "i"}, "name": {"type": "string", "summary": "n"}})
     assert list(schema["properties"]) == ["id", "name"]
     assert schema["properties"]["id"] == {"type": "string"}
     assert schema["required"] == ["id", "name"]

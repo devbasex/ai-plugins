@@ -39,18 +39,23 @@ class Table(NamedTuple):
     rows: tuple[dict[str, Any], ...]
 
 
-def _row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """列の宣言から行の形を作る。宣言に無い列を持たず、`optional` でない列を欠かず、列の型に合う。
+
+    `id` は既定で空でない文字列で、`id` の列の宣言があればそれで置き換える。`optional` は `True` のときだけ欠いてよい
+    （共通の形が `optional` を真偽に限るため、表を読む経路ではどちらの書き方でも同じ）。
+    """
     props: dict[str, Any] = {"id": {"type": "string", "minLength": 1}}
     for col, decl in columns.items():
         kind = decl["type"]
         props[col] = {"type": "array", "items": {"type": "string"}} if kind == "array" else {"type": kind}
-    required = ["id", *(c for c, d in columns.items() if c != "id" and not d.get("optional"))]
+    required = ["id", *(c for c, d in columns.items() if c != "id" and d.get("optional") is not True)]
     return {"type": "object", "additionalProperties": False, "required": required, "properties": props}
 
 
 def _validate_rows(raw: dict[str, Any], where: str) -> None:
     """行を列の宣言から作った形で確かめ、最初に形の違う行で `FactsError`。"""
-    validator = Draft202012Validator(_row_schema(raw["columns"]))
+    validator = Draft202012Validator(row_schema(raw["columns"]))
     for i, row in enumerate(raw["rows"]):
         bad = sorted(e.message for e in validator.iter_errors(row))
         if bad:
