@@ -373,3 +373,51 @@ def test_original_state_variable_stays_protected_after_an_earlier_fixture_rewrit
     assert proc.returncode != 0, proc.stdout
     assert "本物の状態の置き場へ書こうとした" in proc.stdout
     assert not (original / "ledger.jsonl").exists()
+
+
+EARLIER_HOME_CONFTEST = textwrap.dedent(
+    """
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _earlier(monkeypatch, tmp_path):
+        # forbid_real_state より先に動き、HOME を一時領域へ向ける
+        monkeypatch.setenv("HOME", str(tmp_path / "earlier-home"))
+    """
+)
+
+ORIGINAL_HOME_INNER = textwrap.dedent(
+    """
+    import os
+    from pathlib import Path
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _iso(forbid_real_state):
+        return forbid_real_state
+
+    def test_write_under_the_original_home():
+        Path(os.environ["ORIGINAL_HOME"], ".claude", "ledger.jsonl").write_text("x")
+    """
+)
+
+
+def test_original_home_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_path, src_env):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    (inner / "conftest.py").write_text(EARLIER_HOME_CONFTEST)
+    (inner / "test_inner.py").write_text(ORIGINAL_HOME_INNER)
+    env = {**src_env, "HOME": str(home), "ORIGINAL_HOME": str(home)}
+    basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        cwd=inner,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0, proc.stdout
+    assert "本物の状態の置き場へ書こうとした" in proc.stdout
+    assert not (home / ".claude" / "ledger.jsonl").exists()

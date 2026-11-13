@@ -255,6 +255,19 @@ def _stop_group(proc: subprocess.Popen) -> None:
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
         return
+    _end_group(proc, pgid, signal.SIGTERM)
+
+
+def end_group(proc: subprocess.Popen) -> None:
+    """`start_new_session` で起こした子のグループ全体が終わるのを猶予まで待ち、残れば SIGKILL を送る。
+
+    シグナルを転送した後に呼ぶ。先頭が刈り取られた後でもグループの番号（先頭の pid）で残りを見る。
+    """
+    _end_group(proc, proc.pid, None)
+
+
+def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
+    """`first` を送り（None なら送らない）、猶予の間にグループが終わらなければ SIGKILL を送る。"""
     own_group = pgid == os.getpgrp()
 
     def send(sig: int) -> None:
@@ -267,7 +280,8 @@ def _stop_group(proc: subprocess.Popen) -> None:
         leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
         return leader_alive if own_group else _group_alive(pgid)
 
-    send(signal.SIGTERM)
+    if first is not None:
+        send(first)
     deadline = time.monotonic() + KILL_GRACE_SECONDS
     while alive():
         remaining = deadline - time.monotonic()
@@ -300,6 +314,7 @@ class SlotContext:
     limits: limits_mod.Limits
     poll: float
     read_memory: ReadMemory
+    interrupted: Callable[[], bool] = lambda: False
 
 
 @contextmanager
@@ -314,10 +329,12 @@ def gate(
     directory: Path | None = None,
     poll: float = POLL_SECONDS,
     read_memory: ReadMemory = machine.available_mib,
+    interrupted: Callable[[], bool] = lambda: False,
 ) -> Iterator[Held]:
     """重い処理なら枠とメモリを待って取り、出るときに返して記録を足す。
 
     `kind` を渡すと判定を飛ばしてその種類で枠を取る（`None` なら宣言から判定する）。
+    `interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
     誤った設定は `limits.SlotConfigError`、待ちの諦めとメモリの停止は `Stopped` を送る。
     """
     env = os.environ if environ is None else environ
@@ -338,7 +355,7 @@ def gate(
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
         yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
         return
-    yield from _held(SlotContext(directory, cwd, limits, poll, read_memory), kind)
+    yield from _held(SlotContext(directory, cwd, limits, poll, read_memory, interrupted), kind)
 
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
@@ -369,6 +386,8 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
     lock: FileLock | None = None
     try:
         while True:
+            if ctx.interrupted():
+                raise KeyboardInterrupt  # シグナルを受けた（受けたのが待ちに入る前でも、ここで抜ける）
             if lock is None:
                 lock = _take_free_slot(ctx.directory, ctx.cwd, ctx.limits.max_runs, held)
             if lock is not None and _memory_ready(held, ctx.read_memory, ctx.limits.memory_floor_mib):

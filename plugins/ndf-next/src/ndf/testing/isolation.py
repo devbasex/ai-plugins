@@ -67,6 +67,8 @@ REAL_STATE_ENV = ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SL
 # 読み込んだ時点（conftest の読み込み・fixture より前）の値。fixture の実行時には、先に動いたほかの autouse の
 # fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の置き場を読めないため
 _ORIGINAL_ENV = {name: value for name in REAL_STATE_ENV if (value := os.environ.get(name)) is not None}
+# 同じ理由で、ホームも読み込んだ時点の値を持つ（先に動いた fixture が HOME を一時領域へ向けても、本来のホームの下を守る）
+_ORIGINAL_HOME = Path.home()
 
 
 class RealStateWriteError(PermissionError):
@@ -184,7 +186,7 @@ def real_roots(home: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
 def forbid_real_state(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """状態の置き場を一時ディレクトリへ向け、本物の置き場への書き込みを落とす。一時ディレクトリの根を返す。"""
     # 読み込んだ時点の値と今の値の両方が指す場所を守る（今の値が一時領域なら、下の allowed が書き込みを通す）
-    roots = tuple(dict.fromkeys(real_roots(Path.home(), _ORIGINAL_ENV) + real_roots(Path.home(), os.environ)))
+    roots = tuple(dict.fromkeys(real_roots(_ORIGINAL_HOME, _ORIGINAL_ENV) + real_roots(Path.home(), os.environ)))
     base = tmp_path_factory.mktemp("ndf-state")
     for name, sub in REDIRECTED_ENV.items():
         monkeypatch.setenv(name, str(base / sub))

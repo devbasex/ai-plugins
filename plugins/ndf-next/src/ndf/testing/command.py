@@ -54,17 +54,16 @@ def _load_limits(cwd: Path, wait_limit: int | None) -> limits_mod.Limits:
 def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iterator[list[int]]:
     """受けたシグナルを子のグループへ送り、受けたシグナルの一覧を渡す。出るときに元のハンドラーへ戻す。
 
-    子をまだ起こしていない（枠・メモリを待っている）ときは `KeyboardInterrupt` を送って待ちを抜ける。
-    取りかけた枠は `slots.gate` が返す。
+    子をまだ起こしていない（枠・メモリを待っている）ときは一覧へ足すだけにする。ここで例外を送ると、ハンドラーを
+    入れてから `slots.gate` が待ちに入るまでの間に受けたときに記録が残らないため、待ちを抜けるのは
+    `slots.gate` の `interrupted`（一覧を見る）に任せる。取りかけた枠は `slots.gate` が返す。
     """
     interrupted: list[int] = []
 
     def forward(signum: int, _frame: FrameType | None) -> None:
         interrupted.append(signum)
         proc = get_proc()
-        if proc is None:
-            raise KeyboardInterrupt
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             try:
                 os.killpg(proc.pid, signum)
             except ProcessLookupError:
@@ -97,15 +96,19 @@ def _run(command: str, wait_limit: int | None) -> int:
     proc: subprocess.Popen | None = None
     with _forwarding_signals(lambda: proc) as interrupted:
         try:
-            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits) as held:
+            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted)) as held:
                 if interrupted:
                     raise KeyboardInterrupt
                 proc = subprocess.Popen(
                     ["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec
                 )
+                if interrupted:
+                    _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
                 held.watch(proc)
                 code = _wait(proc)
                 if interrupted:
+                    # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
+                    slots.end_group(proc)
                     raise KeyboardInterrupt  # 記録に interrupted を残す
         except slots.Stopped as exc:
             return _stopped_from(exc)
@@ -114,6 +117,13 @@ def _run(command: str, wait_limit: int | None) -> int:
     if held.note:
         print(held.note, file=sys.stderr)
     return code
+
+
+def _signal_group(proc: subprocess.Popen, signum: int) -> None:
+    try:
+        os.killpg(proc.pid, signum)
+    except ProcessLookupError:
+        pass
 
 
 def _wait(proc: subprocess.Popen) -> int:
