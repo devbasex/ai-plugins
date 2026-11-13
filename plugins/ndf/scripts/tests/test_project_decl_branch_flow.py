@@ -210,3 +210,106 @@ def test_write_refuses_an_answer_outside_the_table(tmp_path):
     code, _, text = run("write", "--measure", str(meas), "--answers", str(answers), "--root", str(tree))
     assert code == 1, text
     assert (tree / ".ndf" / "worktree.json").read_text() == before
+
+
+# --- レビューの単位（#3163） ---------------------------------------------------------------
+
+
+class MarksGh:
+    """PR の番号 → (レビューの本文, コメントの本文)。番号が無ければ読めない。"""
+
+    repo = "o/r"
+
+    def __init__(self, marks: dict[int, tuple[list[str], list[str]]]):
+        self.marks = marks
+
+    def get(self, path: str):
+        n = int(path.split("/")[4])
+        if n not in self.marks:
+            raise RuntimeError("404")
+        reviews, comments = self.marks[n]
+        return [{"body": b} for b in (reviews if "/reviews" in path else comments)]
+
+
+def gh_pr(n, base, head, merged=True):
+    return {"number": n, "base": {"ref": base}, "head": {"ref": head}, "merged_at": "t" if merged else None}
+
+
+CR, RF, BH = "## 🤖 cross-review | round 1 | a | APPROVE", "<!-- cross-refactoring plan rf1 -->", "<!-- ndf:behavior-check head=abc1234 -->"
+
+
+@pytest.mark.parametrize(
+    "head, base_ref, kind",
+    [
+        ("feat/issue-1-s", "sprint/s", "impl"),
+        ("sprint/s", "develop", "sprint"),
+        ("release/v1.0.0", "main", "release"),
+        (branch_flow.REVIEW_PREFIX + "1.0.0", branch_flow.REVIEW_PREFIX + "1.0.0-base", "release"),
+        ("design/issue-1", "develop", "design"),
+        ("spec/s", "develop", "spec"),
+        ("chore/x", "develop", None),
+    ],
+)
+def test_pr_kind_reads_the_head_and_the_target(head, base_ref, kind):
+    assert mbf.pr_kind(head, base_ref, "develop", "main") == kind
+
+
+def test_marks_of_tells_the_three_reviews_apart():
+    gh = MarksGh({1: ([CR], [RF, BH]), 2: ([], ["no marks"])})
+    assert mbf.marks_of(gh, 1) == frozenset(branch_flow.CHECKS)
+    assert mbf.marks_of(gh, 2) == frozenset()
+
+
+def test_measure_infers_review_units_per_pr_kind():
+    """受け入れ条件 10: 種類ごとの PR の印から、推した値と確からしさを出す。標本が 3 件に満たない種類は unknown と理由。"""
+    pulls, marks = [], {}
+    for i in range(4):
+        pulls += [gh_pr(10 + i, "sprint/s", f"feat/issue-{i}-s"), gh_pr(20 + i, "develop", f"sprint/s{i}")]
+        pulls += [gh_pr(30 + i, "main", f"release/v1.{i}.0"), gh_pr(40 + i, "x", f"{branch_flow.REVIEW_PREFIX}1.{i}.0", merged=False)]
+        marks.update({10 + i: ([CR], []), 20 + i: ([], [RF, BH]), 30 + i: ([], []), 40 + i: ([CR], [])})
+    pulls += [gh_pr(50, "develop", "design/issue-1")]
+    marks[50] = ([CR], [])
+    got = mbf.collect_reviews(MarksGh(marks), pulls, "develop", "main")
+    assert got["impl"]["value"] == {"checks": ["cross-review"], "diff": "pr"} and got["impl"]["confidence"] == "高"
+    assert got["sprint"]["value"] == {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"}
+    assert got["release"]["value"] == {"checks": ["cross-review"], "diff": "resolution"}
+    assert "value" not in got["design"] and "3 件に満たない" in got["design"]["unknown"]
+    assert "value" not in got["spec"]
+
+
+def test_unreadable_prs_are_left_out_of_the_samples():
+    pulls = [gh_pr(i, "develop", f"spec/s{i}") for i in range(4)]
+    got = mbf.collect_reviews(MarksGh({0: ([], []), 1: ([], []), 2: ([], [])}), pulls, "develop", "main")
+    assert got["spec"]["value"] == {"checks": [], "diff": "none"}
+    assert any("読めない PR 1 件" in e["text"] for e in got["spec"]["evidence"])
+
+
+def _item(reviews):
+    return {"fields": {}, branch_flow.REVIEWS_KEY: {k: {"value": v, "confidence": "高", "evidence": []} for k, v in reviews.items()}}
+
+
+def test_drift_lists_review_units_that_differ_from_the_declaration():
+    """受け入れ条件 11: 宣言と違う種類だけ branch_flow.reviews.<種類> の行を出す。"""
+    declared = branch_flow.parse_flow(
+        {
+            **SELECTED,
+            "reviews": {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"}},
+        }
+    )
+    item = _item({"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": list(branch_flow.CHECKS), "diff": "unchecked"}})
+    rows = mbf.drift(declared, item)
+    assert [r["name"] for r in rows] == ["branch_flow.reviews.sprint"]
+
+
+def test_drift_compares_unwritten_kinds_with_both_default_columns():
+    """受け入れ条件 11: 書いていない種類は既定値の 2 列のどちらかに合えば出さない。測れない種類は比べない。"""
+    declared = branch_flow.parse_flow(None)
+    item = _item(
+        {
+            "impl": {"checks": [], "diff": "none"},  # まとまりの記録なしの列
+            "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},  # ありの列
+            "design": {"checks": [], "diff": "none"},  # どちらとも違う
+        }
+    )
+    item[branch_flow.REVIEWS_KEY]["spec"] = {"unknown": "標本が無い", "evidence": []}
+    assert [r["name"] for r in mbf.drift(declared, item)] == ["branch_flow.reviews.design"]

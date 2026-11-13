@@ -8,6 +8,10 @@
 - 守らせている仕組み（ルールセット）は根拠の行としてだけ出す
 
 推す規則と判定は純粋な関数（`infer`）にし、git と gh の呼び出し（`collect`）と分ける。
+
+レビューの単位（`branch_flow.reviews`。#3163 の決定 8）は、PR の種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件読み、
+レビューごとの印の有無から推す（`infer_reviews`）。推した値は項目の `reviews` に置き、`write` の自動の書き出し（4 項目の
+`proposal`）へは渡さない。
 """
 
 from __future__ import annotations
@@ -166,7 +170,12 @@ def collect_flow(root, gh, base: str, production: str) -> dict:
     except Exception as e:  # noqa: BLE001  守らせている仕組みは根拠の行だけで、測定を止めない
         extra.append({"command": f"gh api repos/{gh.repo}/rulesets", "text": f"読めない: {str(e)[:120]}"})
     fields = infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s])
-    return as_item(fields, extra)
+    item = as_item(fields, extra)
+    try:
+        item[branch_flow.REVIEWS_KEY] = mask(collect_reviews(gh, [p for p in pulls if isinstance(p, dict)], base, production))
+    except Exception as e:  # noqa: BLE001  レビューの単位は 4 項目の測定を止めない
+        item[branch_flow.REVIEWS_KEY] = {k: {"unknown": f"読めない: {str(e)[:120]}", "evidence": []} for k in branch_flow.REVIEW_KINDS}
+    return item
 
 
 def measure_flow(root, gh_repo: str | None, deadline: float) -> dict:
@@ -186,8 +195,113 @@ def measure_flow(root, gh_repo: str | None, deadline: float) -> dict:
         return unknown(f"gh を使えない: {e}")
 
 
+REVIEW_SAMPLES = 10
+# 掛けたレビューの印（書き手: cross-review の投稿の見出し `lib/result_posts.REVIEW_HEAD`・cross-refactoring の計画の
+# コメント `refactor_lib/plan.py`・振る舞いの確認の記録 `behavior-check.py` の `MARK`）。書き手はこのモジュールから
+# import できない（外部パッケージの環境・ハイフンの名前のスクリプト）ため、印の頭だけを置く
+REVIEW_MARKS = {
+    "cross-review": ("reviews", "## 🤖 cross-review"),
+    "cross-refactoring": ("comments", "<!-- cross-refactoring plan"),
+    "behavior": ("comments", "<!-- ndf:behavior-check"),
+}
+REVIEWS_COMMAND = "gh api repos/<R>/pulls/<N>/reviews と repos/<R>/issues/<N>/comments（印の有無だけを数える）"
+IMPL_PREFIX = "feat/issue-"
+DOC_PREFIXES = {"design/": "design", "spec/": "spec"}
+
+
+def pr_kind(head: str, base_ref: str, base: str, production: str) -> str | None:
+    """PR の head と宛先から PR の種類。当たらなければ None。"""
+    if head.startswith(IMPL_PREFIX):
+        return "impl"
+    if head.startswith(branch_flow.SPRINT_PREFIX) and base_ref == base:
+        return "sprint"
+    if head.startswith(branch_flow.RELEASE_PREFIX) and base_ref == production:
+        return "release"
+    if head.startswith(branch_flow.REVIEW_PREFIX) and not head.endswith(branch_flow.REVIEW_BASE_SUFFIX):
+        return "release"
+    return next((k for pre, k in DOC_PREFIXES.items() if head.startswith(pre)), None)
+
+
+def marks_of(gh, number: int) -> frozenset:
+    """PR のレビューとコメントから、掛けたレビューの印の組。読めなければ例外（呼ぶ側が標本から外す）。"""
+    texts = {
+        "reviews": [str(r.get("body") or "") for r in gh.get(f"repos/{gh.repo}/pulls/{number}/reviews?per_page=100") or []],
+        "comments": [str(c.get("body") or "") for c in gh.get(f"repos/{gh.repo}/issues/{number}/comments?per_page=100") or []],
+    }
+    return frozenset(
+        check
+        for check, (where, mark) in REVIEW_MARKS.items()
+        if any(t.lstrip().startswith(mark) if where == "reviews" else mark in t for t in texts[where])
+    )
+
+
+def _checks_key(checks) -> str:
+    return "+".join(c for c in branch_flow.CHECKS if c in checks) or "(無し)"
+
+
+def infer_reviews(samples: dict[str, list[frozenset]], release_marks: dict[str, int], unreadable: dict[str, int] | None = None) -> dict:
+    """種類ごとの印の組から、掛けるレビュー・対象の差分・確からしさを推す。標本が足りない種類は `unknown` と理由。
+
+    `release_marks` はリリースブランチの PR の cross-review の印が、衝突の解消のレビューの PR（`resolution`）と本番チャネル宛の
+    PR（`pr`）のどちらに何件あったか。"""
+    out = {}
+    for kind in branch_flow.REVIEW_KINDS:
+        allowed = branch_flow.REVIEW_ALLOWED[kind]
+        got = samples.get(kind) or []
+        counts = Counter(_checks_key(m & frozenset(allowed["checks"])) for m in got)
+        est = infer_field(counts, REVIEWS_COMMAND, f"{kind} の PR の印")
+        if (unreadable or {}).get(kind):
+            est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable[kind]} 件"})
+        if "value" in est:
+            checks = [] if est["value"] == "(無し)" else est["value"].split("+")
+            if not checks:
+                diff = "none"
+            elif kind == "release":
+                diff = "resolution" if release_marks.get("resolution", 0) >= max(release_marks.get("pr", 0), 1) else "pr"
+            else:
+                diff = next(d for d in allowed["diff"] if d != "none")
+            est["value"] = {"checks": checks, "diff": diff}
+        out[kind] = est
+    return out
+
+
+def collect_reviews(gh, pulls: list[dict], base: str, production: str) -> dict:
+    """種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件選び、印を集めて推す。衝突の解消のレビューの PR（閉じてマージしない）は
+    同じ版の本番チャネル宛の PR の標本へ寄せる。"""
+    chosen: dict[str, list[dict]] = {k: [] for k in branch_flow.REVIEW_KINDS}
+    reviews: dict[str, dict] = {}
+    for p in pulls:
+        head, base_ref = p["head"]["ref"], p["base"]["ref"]
+        kind = pr_kind(head, base_ref, base, production)
+        if kind is None:
+            continue
+        if head.startswith(branch_flow.REVIEW_PREFIX):
+            reviews.setdefault(head[len(branch_flow.REVIEW_PREFIX) :], p)
+        elif p.get("merged_at") and len(chosen[kind]) < REVIEW_SAMPLES:
+            chosen[kind].append(p)
+    samples: dict[str, list[frozenset]] = {k: [] for k in branch_flow.REVIEW_KINDS}
+    unreadable: Counter = Counter()
+    release_marks: Counter = Counter()
+    for kind, prs in chosen.items():
+        for p in prs:
+            try:
+                marks = marks_of(gh, p["number"])
+                extra = frozenset()
+                rv = reviews.get(p["head"]["ref"][len(branch_flow.RELEASE_PREFIX) :].split("-")[0]) if kind == "release" else None
+                if rv is not None:
+                    extra = marks_of(gh, rv["number"])
+            except Exception:  # noqa: BLE001  読めない PR は標本から外し、根拠に件数を出す
+                unreadable[kind] += 1
+                continue
+            release_marks["pr"] += "cross-review" in marks and kind == "release"
+            release_marks["resolution"] += "cross-review" in extra
+            samples[kind].append(marks | extra)
+    return infer_reviews(samples, dict(release_marks), dict(unreadable))
+
+
 def drift(declared: branch_flow.BranchFlow, item: dict | None) -> list[dict]:
-    """宣言（無ければ既定値の行）と測った値のずれ。測れなかった項目は比べない。ずれが無ければ空。"""
+    """宣言（無ければ既定値の行）と測った値のずれ。測れなかった項目は比べない。ずれが無ければ空。
+    レビューの単位は、書いていない種類を既定値の 2 列（課題のまとまりの記録の有無）のどちらかに合えばずれとしない。"""
     fields = (item or {}).get("fields") or {}
     rows = []
     want = declared.as_dict()
@@ -204,6 +318,32 @@ def drift(declared: branch_flow.BranchFlow, item: dict | None) -> list[dict]:
                 "confidence": f.get("confidence"),
                 "evidence": f.get("evidence", []),
                 "proposal": f"{branch_flow.DECL_KEY}.{key} を {f['value']} にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）",
+            }
+        )
+    return rows + _review_drift(declared, (item or {}).get(branch_flow.REVIEWS_KEY) or {})
+
+
+def _review_drift(declared: branch_flow.BranchFlow, est: dict) -> list[dict]:
+    rows = []
+    for kind in branch_flow.REVIEW_KINDS:
+        e = est.get(kind) or {}
+        if "value" not in e:
+            continue
+        got = e["value"]
+        row = declared.reviews.declared.get(kind)
+        wants = [row.as_dict()] if row else [branch_flow.REVIEW_DEFAULTS[kind][b].as_dict() for b in (True, False)]
+        if got in wants:
+            continue
+        key = f"{branch_flow.DECL_KEY}.{branch_flow.REVIEWS_KEY}.{kind}"
+        rows.append(
+            {
+                "kind": "drift",
+                "name": key,
+                "declared": wants[0] if row else {"既定値": wants},
+                "measured": got,
+                "confidence": e.get("confidence"),
+                "evidence": e.get("evidence", []),
+                "proposal": f"{key} を {got} にする（成り立たない組み合わせは check が直すキーと理由を出す）",
             }
         )
     return rows

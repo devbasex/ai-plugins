@@ -67,6 +67,7 @@ MODULES = [
     "verify_steps",
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_templates",
+    "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",
@@ -102,6 +103,7 @@ NO_ENGINE = [
     "templates",
     "release_flow",
     "release_templates",
+    "review_units",
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",

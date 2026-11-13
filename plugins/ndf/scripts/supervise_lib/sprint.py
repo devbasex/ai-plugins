@@ -15,6 +15,7 @@ from supervise_lib.decl import PRODUCTION_SOURCES, decl_roots, sprint_flow, with
 from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
+from supervise_lib.review_units import fast_review_row
 from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
@@ -109,11 +110,10 @@ def fast_sprint_plans(a) -> list[dict]:
     impl = {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}}
     if design_read(a):
         impl["then_of"] = first
-    waves += [
-        impl,
-        {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": first},
-        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": first},
-    ]
+    waves += [impl, {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": first}]
+    if fast_review_row(a).runs("cross-review"):  # スプリントの PR に cross-review を掛けなければ置かない（#3163）
+        review = plan_fast_check(a, repo, f"{a.name}-review", review_only=True)
+        waves.append({"name": "実装レビュー", "plans": {"review": review}, "then_of": first})
     if not has_release_template(a):
         return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [

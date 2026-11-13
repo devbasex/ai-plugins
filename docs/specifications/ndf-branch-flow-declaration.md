@@ -51,7 +51,7 @@ NDF は、スプリントブランチをどこから切り、設計 PR と確定
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| ブランチ運用の宣言 | `project-decl.py write` と利用者の手の編集 | `.ndf/worktree.json` の `branch_flow` | — | 4 項目の値 |
+| ブランチ運用の宣言 | `project-decl.py write` と利用者の手の編集 | `.ndf/worktree.json` の `branch_flow` | — | 4 項目の値・レビューの単位（`reviews`） |
 | スプリント | `supervise.py new sprint`（開始時に 1 回だけ書く） | スプリントの目録（`sprint.json`） | スプリントブランチ | スナップショット（解決済みのブランチ名つき） |
 | リリース | リリースのプラン | 承認資料と承認したコミット | リリースブランチ | 選んだリリースの単位と本番チャネルの、組んだ時点のそれぞれの先頭 |
 
@@ -142,6 +142,7 @@ sequenceDiagram
 - **ベースブランチとの衝突**: 検査の Pull Request のマージで現れ、止めて人へ戻す。人はスプリントブランチを変えず、ベースブランチから一時の結合用のブランチを切って衝突を解き、そこから検査の Pull Request を出し直す（手順は `development-workflow` の `references/parallel-work.md`）。解き方は `git rerere` が記録し、リリースブランチを組むときに再利用される
 - **検査の Pull Request のマージ**: マージの前に `gh pr list --base <スプリントブランチ> --state open` を打ち、1 件でもあればマージせず一覧を出して止める。マージで origin からスプリントブランチが消えた（GitHub の `delete_branch_on_merge`）ときは、ローカルの先端を push し直す。強制 push はしない
 - **リリースブランチ**: 開発版のデプロイの後、承認資料の前に `release-steps.py release-branch --production <本番チャネル> --units <スプリントブランチ>` で組む。一時の作業ツリーで detached HEAD に組み、呼び手の作業ツリーに触れない。origin に既にあれば（組み直し）、その先頭から本番チャネルと単位をマージで足し、強制 push をしない
+- **リリースブランチの PR のレビュー**: レビューの単位の `release` が `none` でなければ、`release-branch` と承認資料の間で `release-steps.py review-open` → cross-review → `review-close` を通す。承認資料はレビューの直しを移した後の先頭で作る。使い方は `release` の [references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md) にある
 - **本番チャネルへの Pull Request**: リリースブランチから本番チャネルへ直接出す。先頭が、承認したコミットに版上げ・変更履歴などのマージでないコミットだけを積んだものであるときだけマージする。承認の後にマージで足した単位は承認の外として止め、組み直しへ戻す
 - **戻すマージ**: 本番チャネルへ入れてタグと GitHub Release を作った後、開発版と同じ `release/v<版>-sync` のブランチでリリースブランチをベースブランチへ戻す。版数の衝突は本番の版を取る。失敗は本番の完了と分けて報告する。ベースブランチの作り直し（強制 push が要る）はしない
 - **後片付け**: スプリントブランチは `git merge-base --is-ancestor <スプリントブランチ> origin/<本番チャネル>` が真になるまで消さない。確定仕様化の PR はスプリントブランチへ入り、次のリリースの単位になる
@@ -174,8 +175,9 @@ sequenceDiagram
 | `integrate` | `check` | `check` | スプリントブランチをベースブランチへ入れる時点 |
 | `doc_prs` | `base` / `sprint` | `base` | 設計 PR と確定仕様化の PR の宛先 |
 | `promotion` | `whole` / `selected` | `whole` | 本番への取り込み方 |
+| `reviews` | PR の種類（`impl`・`sprint`・`release`・`design`・`spec`）ごとの `checks` と `diff` | 書かない種類は既定値 | PR の種類ごとに掛けるレビューと対象の差分（レビューの単位）。`release` は取り込み方の行がリリースの単位を選ぶときだけ書ける。実装の差分がどの PR でも cross-review されない宣言と、既定値と重なって同じ実装の差分を 2 回 cross-review する宣言は `FlowError` で止める |
 
-書き方の例は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) が持つ。
+書き方の例と、レビューの単位の許す値・既定値の表は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) が持つ。
 
 ### スナップショットの形
 
@@ -186,10 +188,13 @@ sequenceDiagram
   "ブランチ運用": {
     "start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected",
     "start_branch": "main", "base_branch": "develop", "production_branch": "main",
-    "source": ".ndf/worktree.json の branch_flow"
+    "source": ".ndf/worktree.json の branch_flow",
+    "reviews": {"release": {"checks": ["cross-review"], "diff": "resolution"}}
   }
 }
 ```
+
+`reviews` は宣言に書いた種類だけを写し、書いた種類が無ければ `{}` にする。書いていない種類は、プランを組む時点で課題のまとまりの記録の有無から既定値で解く。`reviews` の無い目録は `{}` として読み、宣言を読み直さない。
 
 ### 宣言の作成と変更
 
@@ -207,6 +212,7 @@ sequenceDiagram
 ### 測定（`project-decl.py measure`）
 
 既存の出力に `branch_flow` の項目を足す。4 項目それぞれに `{value, confidence, evidence[]}` か `{unknown: 理由}` を出す。
+レビューの単位は項目の `reviews.<種類>` に、PR の種類ごとに直近のマージ済みの PR（最大 10 件）のレビューの印の有無から推した値を出す。この推定は `write` の書き出しへ渡さない。
 
 - 標本は直近のマージ済みの Pull Request（最大 100 件。`gh api repos/<R>/pulls?state=closed&per_page=100`）と origin のスプリントブランチ
 - 確からしさは、推した値に合う標本の割合が 0.9 以上で `高`、0.6 以上で `中`。標本が 3 件未満か 0.6 未満なら値を出さず `unknown` と理由を出す
@@ -217,6 +223,7 @@ sequenceDiagram
 ### ずれの検出（`project-decl.py drift --measure FILE`）
 
 宣言（無ければ既定値の行）と `measure` の結果を項目ごとに比べる。ずれた項目ごとに `items` の行（項目・宣言の値・測った値・根拠・更新の案）を出す。
+レビューの単位は `branch_flow.reviews.<種類>` の行で出す。書いていない種類は、既定値の 2 列（課題のまとまりの記録の有無）のどちらとも違うときだけ出す。
 ずれが無ければ `items` は空で終了コード 0、宣言が壊れていれば 3。`check` は `gh` を呼ばず、`branch_flow` の形の誤りだけを見る。
 `retrospective` と `backlog-refinement` が `measure` → `drift` を打つ。
 

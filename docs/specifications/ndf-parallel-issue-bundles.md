@@ -75,7 +75,8 @@ Practices「Small CLs」 https://google.github.io/eng-practices/review/developer
 | まとまりの重なりの検査（`touch_estimate.py` の `bundle_overlaps`） | 規則 `bundle-overlap` の項目。規則 `I21` の項目へ `bundles` の欄を足す |
 | 計画の描画（`parallel_bundles.render_rows`） | `plan.md` に「課題のまとまり」の表を足す（欄のあるレーンだけ） |
 | レーンのまとまりの読み出し（`parallel_bundles.bundles_of`） | 動いている計画のこのレーンのまとまりの一覧を返す。壊れた計画のレーンでは `BrokenPlanError` を投げる |
-| スプリントの組み立て（`supervise_lib/sprint_bundles.py`・`sprint_waves.py`・`absorb.py`・`design_stage.py`） | 設計の課題を代表へ寄せ、実装のステージをまとまりごとのプランにし、検査のプランから cross-review を外す |
+| スプリントの組み立て（`supervise_lib/sprint_bundles.py`・`sprint_waves.py`・`absorb.py`・`design_stage.py`） | 設計の課題を代表へ寄せ、実装のステージをまとまりごとのプランにする |
+| レビューの単位（`supervise_lib/review_units.py`） | ブランチ運用の宣言のレビューの単位（`branch_flow.reviews`）を解き、実装のプランへ cross-review を差し込み、検査のプランから選ばないレビューを外す |
 | レビューのステップ（`supervise_lib/templates.py` の `review_step`） | コードレビューの cross-review のステップを 1 か所で組む。検査のプランとまとまりの実装のプランが共有する |
 | レビュー範囲（cross-review の `review_lib/review_scope.py`・`commands/start_round.py`） | 全差分の base を、base のブランチの今の先頭との merge base にする |
 | 宛て先の区分（`lib/pr_mode.py` の `needs_review`・`pr-steps.py` の `bundled_sprint`） | まとまりの記録のあるスプリントブランチ宛てを、レビューを通す区分として返す |
@@ -137,6 +138,8 @@ classDiagram
 | I8c | まとまりの記録があるスプリントでは、スプリントの Pull Request の検査は cross-review を回さない | テストが落とす |
 | I9 | まとまりの記録の無いスプリントは、課題ごとの実装のプランと、スプリントの Pull Request の全差分への cross-review 1 回で組む | テストが落とす |
 | I10 | レビュー範囲の全差分の base は、PR の base のブランチの今の先頭と head の merge base である | テストが落とす |
+
+I8b・I8c・I9 は、ブランチ運用の宣言のレビューの単位で実装 PR（`impl`）とスプリントの PR（`sprint`）を書いていないときの既定値である。書いた種類は、まとまりの記録の有無に依らずその値で組む（[ndf-branch-flow-declaration.md](ndf-branch-flow-declaration.md) の「宣言の形」）。
 
 **起動の後に `plan.json` を手で直して I1〜I3 が破れた計画は、どの経路からも誤りとして止まる。** `init`・`check` と、計画を読む
 経路（`load_valid_plan`。レーンの起動・スプリントの組み立てが通る）が同じ検証を通す。レーンの判定（`parallel_lane.lane_of`）は

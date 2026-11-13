@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import shlex
 
+import branch_flow
+
 from supervise_lib.decl import DeclError, sprint_flow
 from supervise_lib.paths import STEPS_PY
+from supervise_lib.procedures import review_step
 
 
 def release_ref(a, dev: bool) -> str:
@@ -56,10 +59,14 @@ def promotion_flag(a) -> str:
     return f" --promotion {row.name}" if row.selects_units else ""
 
 
-def release_branch_step(a, repo: str | None, version: str, units: list[str]) -> dict:
+def _production(a) -> str | None:
+    return sprint_flow(a).production_branch or a.production_branch
+
+
+def release_branch_step(a, repo: str | None, version: str, units: list[str], next_id: str = "facts") -> dict:
     """開発版のデプロイの後・承認資料の前に、選んだ単位だけを本番チャネルから組んだリリースブランチを作る（E10・I5）。
-    衝突すれば止まり（judge）、承認資料を出さない。`version` は接尾辞を外した版。"""
-    prod = sprint_flow(a).production_branch or a.production_branch
+    衝突すれば止まり（judge）、承認資料を出さない。`version` は接尾辞を外した版。`next_id` は次のステップ。"""
+    prod = _production(a)
     return {
         "id": "release-branch",
         "type": "run",
@@ -70,8 +77,40 @@ def release_branch_step(a, repo: str | None, version: str, units: list[str]) -> 
         + (f" --production {shlex.quote(prod)}" if prod else "")
         + f" --units {' '.join(map(shlex.quote, units))}",
         "on_fail": "judge",
-        "next": "facts",
+        "next": next_id,
     }
+
+
+def release_review_row(a) -> branch_flow.ReviewRow:
+    """リリースブランチの PR のレビューの単位（目録のスナップショットから。この種類の既定値はまとまりの記録の有無で変わらない）。"""
+    return sprint_flow(a).flow.reviews.row("release", False)
+
+
+REVIEW_RANGE_IDS = ("review-open", "review-close")
+
+
+def review_range_steps(a, repo: str | None, version: str, after: str = "facts") -> list[dict]:
+    """リリースブランチの PR のレビュー（#3163 の決定 6）。行が `none` なら空。`pr` か `resolution` なら、
+    review-open（衝突の解消のレビューの PR を組む。差分が空なら終了コード 3 で `after` へ）→ cross-review →
+    review-close（直しをリリースブランチへ移して PR を閉じる）。`version` は接尾辞を外した版。"""
+    row = release_review_row(a)
+    if row.diff == "none":
+        return []
+    prod = _production(a)
+    cwd = {"cwd": repo} if repo else {}
+    run = {"type": "run", "stage": "デプロイ", "timeout": 900, **cwd, "on_fail": "judge"}
+    return [
+        {
+            **run,
+            "id": "review-open",
+            "cmd": f"{STEPS_PY} review-open --version {version} --diff {row.diff}" + (f" --production {shlex.quote(prod)}" if prod else ""),
+            "on_exit": {"3": after},
+            "pr_from": "review_pr",
+            "next": "review",
+        },
+        {**review_step("{pr}", "review-close", "judge"), **cwd},
+        {**run, "id": "review-close", "cmd": f"{STEPS_PY} review-close --version {version}", "next": after},
+    ]
 
 
 def fast_flow_refusal(a, pin) -> str | None:

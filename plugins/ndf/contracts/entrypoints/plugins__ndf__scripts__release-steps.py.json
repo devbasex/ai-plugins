@@ -133,6 +133,20 @@
         ],
         "positionals": []
       },
+      "review-close": {
+        "options": [
+          "--version"
+        ],
+        "positionals": []
+      },
+      "review-open": {
+        "options": [
+          "--diff",
+          "--production",
+          "--version"
+        ],
+        "positionals": []
+      },
       "run": {
         "options": [
           "--dry-run",

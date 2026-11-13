@@ -26,6 +26,8 @@
     python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
                                             [--prs <PR番号>...] [--approval <承認資料> [--set <名前>=<上げ幅>]...]
                                             [--decided <承認資料>]
+    python3 release-steps.py review-open    --version <版> --diff pr|resolution [--production <ブランチ>]  # 差分が空なら 3
+    python3 release-steps.py review-close   --version <版>
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
                                             [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
@@ -93,7 +95,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, promotion, publish, record, replaced  # noqa: E402
+from release_lib import others, promotion, publish, record, replaced, review_range  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -1010,6 +1012,20 @@ def cmd_release_branch(a):
     emit(result(TOOL, "ok", f"{got['branch']} を {prod} から組んだ（先頭 {got['head'][:12]}）", items, got))
 
 
+def cmd_review_open(a):
+    """リリースブランチの PR のレビューの PR を組む（#3163。本体は release_lib/review_range.py）。差分が空なら 3。"""
+    root = git_root(a.root)
+    got = review_range.open_review(root, a.version, a.diff, a.production or release_decl(root, a)[1], review_range.GitHub(create_pr))
+    status, summary, items, code = review_range.open_outcome(a.version, got)
+    emit(result(TOOL, status, summary, items, got), code)
+
+
+def cmd_review_close(a):
+    """レビューの直しをリリースブランチへ移し、レビューの PR を閉じる（#3163 の I9〜I11）。"""
+    got = review_range.close_review(git_root(a.root), a.version, review_range.GitHub(create_pr))
+    emit(result(TOOL, "ok", f"直し {got['moved']} 件を移し、レビューの PR #{got['review_pr']} を閉じた", [], got))
+
+
 def cmd_approve(a):
     """リリース承認ゲートの承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
     try:
@@ -1222,6 +1238,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--units", nargs="+", required=True, metavar="ブランチ", help="選んだリリースの単位（スプリントブランチ）")
     p.add_argument("--production", help="本番チャネル（既定は宣言の値）")
     p.set_defaults(func=cmd_release_branch)
+    p = sub.add_parser("review-open", parents=[common], help="リリースブランチの PR のレビューの PR を組む（差分が空なら 3）")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--diff", required=True, choices=("pr", "resolution"), help="対象の差分（PR の差分全体か衝突の解消の差分）")
+    p.add_argument("--production", help="本番チャネル（既定は宣言の値）")
+    p.set_defaults(func=cmd_review_open)
+    p = sub.add_parser("review-close", parents=[common], help="レビューの直しをリリースブランチへ移し、レビューの PR を閉じる")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.set_defaults(func=cmd_review_close)
 
     p = sub.add_parser("record", parents=[common], help="リリースの後に、本番のリリースの PR へリリース記録（## リリース記録）を書く")
     g = p.add_mutually_exclusive_group(required=True)

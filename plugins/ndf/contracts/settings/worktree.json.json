@@ -20,7 +20,7 @@
       "place": "main"
     },
     "branch_flow": {
-      "summary": "ブランチ運用の宣言（スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方。読み分けの正本は lib/branch_flow.py）。リリースの範囲の決め方を Pull Request の変更で動かせないよう、メインディレクトリから読む（#3121）",
+      "summary": "ブランチ運用の宣言（スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方と、PR の種類ごとのレビューの単位 reviews（#3163）。読み分けの正本は lib/branch_flow.py）。リリースの範囲の決め方を Pull Request の変更で動かせないよう、メインディレクトリから読む（#3121）",
       "place": "main"
     },
     "guard": {
