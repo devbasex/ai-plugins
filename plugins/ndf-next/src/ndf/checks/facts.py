@@ -52,8 +52,13 @@ def consts(tree: ast.Module, rel: str) -> list[Const]:
     """モジュールの最上位の大文字の定数のうち、`lit` が読めたもの。"""
     found = []
     for node in tree.body:
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(
-            node, ast.AnnAssign) and node.value is not None else []
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+            if isinstance(node, ast.AnnAssign) and node.value is not None
+            else []
+        )
         names = [t.id for t in targets if isinstance(t, ast.Name) and CONST.match(t.id)]
         value = lit(node.value) if names else None
         found += [Const(rel, node.lineno, n, value) for n in names if value is not None]
@@ -84,12 +89,19 @@ def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
     nums = [c for c in all_consts if isinstance(c.value, (int, float))]
     found = [_report("same-str", g, repr(v)) for v, g in _by_value(strs, lambda c: c.value).items() if _spread(g)]
     found += [_report("same-set", g, "同じ集まり") for g in _by_value(sets, lambda c: c.value).values() if _spread(g)]
-    found += [_report("same-num", g, f"同じ名前と数 {k[1]}")
-              for k, g in _by_value(nums, lambda c: (c.name, c.value)).items() if _spread(g)]
-    found += [_report("subset", [a, b], "集まりが別のファイルの集まりに含まれる")
-              for a in sets for b in sets if a.rel != b.rel and a.value < b.value]
-    found += [_report("member", [s, b], f"{s.value!r} が別のファイルの集まりの要素")
-              for s in strs for b in sets if s.rel != b.rel and s.value in b.value]
+    found += [_report("same-num", g, f"同じ名前と数 {k[1]}") for k, g in _by_value(nums, lambda c: (c.name, c.value)).items() if _spread(g)]
+    found += [
+        _report("subset", [a, b], "集まりが別のファイルの集まりに含まれる")
+        for a in sets
+        for b in sets
+        if a.rel != b.rel and a.value < b.value
+    ]
+    found += [
+        _report("member", [s, b], f"{s.value!r} が別のファイルの集まりの要素")
+        for s in strs
+        for b in sets
+        if s.rel != b.rel and s.value in b.value
+    ]
     return found
 
 
@@ -128,8 +140,11 @@ def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str
     for name, ids in table_ids.items():
         idset = set(ids)
         for c in all_consts:
-            hit = len(c.value & idset) >= 2 if isinstance(c.value, frozenset) else (
-                isinstance(c.value, str) and len(c.value) >= min_str and c.value in idset)
+            hit = (
+                len(c.value & idset) >= 2
+                if isinstance(c.value, frozenset)
+                else (isinstance(c.value, str) and len(c.value) >= min_str and c.value in idset)
+            )
             if hit:
                 kind = "table-set" if isinstance(c.value, frozenset) else "table-str"
                 found.append(Finding("const-fact", c.rel, c.line, f"{kind}: {c.name} が表 {name} の id を写す"))

@@ -6,7 +6,7 @@ CODES = frozenset({"NDF201", "NDF502", "NDF701", "BLE001"})
 
 
 def test_read_marks_keeps_malformed_marks():
-    text = 'a = 1  # noqa: NDF502 利用者の入力: 未設定は空\nb = 2  # noqa: NDF502\nc = 3  # noqa: E501\n'
+    text = "a = 1  # noqa: NDF502 利用者の入力: 未設定は空\nb = 2  # noqa: NDF502\nc = 3  # noqa: E501\n"
     found = marks.read_marks(text, CODES)
     assert found[1] == [marks.Mark(1, ("NDF502",), "利用者の入力", "未設定は空")]
     assert found[2] == [marks.Mark(2, ("NDF502",), "", "")]

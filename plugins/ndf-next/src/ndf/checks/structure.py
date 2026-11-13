@@ -32,8 +32,7 @@ def _import_findings(rel: str, module: str, imps: list[imports.Import], rules: d
         if mine is not None and theirs is not None and theirs > mine:
             found.append(Finding("layer", rel, imp.line, f"下の層 {layers[mine]} が上の層 {layers[theirs]} を読む"))
         if _within(imp.module, rules["durable_imports"]) and module != rules["durable_module"]:
-            found.append(Finding("durable-boundary", rel, imp.line,
-                                 f"{imp.module} を読めるのは {rules['durable_module']} だけ"))
+            found.append(Finding("durable-boundary", rel, imp.line, f"{imp.module} を読めるのは {rules['durable_module']} だけ"))
         if is_decide and _within(imp.module, rules["decide_forbidden_imports"]):
             found.append(Finding("decide-pure", rel, imp.line, f"判断のモジュールが {imp.module} を読む"))
     return found

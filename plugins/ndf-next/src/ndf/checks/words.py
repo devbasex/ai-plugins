@@ -67,6 +67,5 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
         if src.path.name in conf["skip_files"]:
             continue
         for no, line in enumerate(src.text.splitlines(), 1):
-            found += [Finding("banned-word", src.rel, no, f"「{m.group()}」: {words[m.group()]}")
-                      for m in found_pattern.finditer(line)]
+            found += [Finding("banned-word", src.rel, no, f"「{m.group()}」: {words[m.group()]}") for m in found_pattern.finditer(line)]
     return found

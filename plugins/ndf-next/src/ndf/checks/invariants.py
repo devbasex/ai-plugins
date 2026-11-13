@@ -32,15 +32,13 @@ def _name_pattern(names: set[str]) -> re.Pattern[str]:
 
 def _docstrings(tree: ast.Module) -> set[int]:
     owners = [tree, *(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))]
-    return {id(o.body[0].value) for o in owners
-            if o.body and isinstance(o.body[0], ast.Expr) and isinstance(o.body[0].value, ast.Constant)}
+    return {id(o.body[0].value) for o in owners if o.body and isinstance(o.body[0], ast.Expr) and isinstance(o.body[0].value, ast.Constant)}
 
 
 def _strings(tree: ast.Module) -> list[tuple[int, str]]:
     """文字列の定数（docstring を除く）を行とともに返す。"""
     docs = _docstrings(tree)
-    return [(n.lineno, n.value) for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+    return [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
 
 
 def _shell_lines(src: Source) -> list[tuple[int, str]]:
@@ -61,8 +59,11 @@ def own_name(scope: Scope) -> list[Finding]:
             texts = _shell_lines(src)
         else:
             continue
-        found += [Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
-                  for no, text in texts if text in names or pattern.search(text)]
+        found += [
+            Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
+            for no, text in texts
+            if text in names or pattern.search(text)
+        ]
     return found
 
 
@@ -75,8 +76,7 @@ def declared_tops(plugin_root: Path) -> frozenset[str]:
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
     dists = {_normalize(re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0]) for s in specs}
-    installed = {top for top, owners in metadata.packages_distributions().items()
-                 if any(_normalize(o) in dists for o in owners)}
+    installed = {top for top, owners in metadata.packages_distributions().items() if any(_normalize(o) in dists for o in owners)}
     # 入れていない依存（`--no-dev` の環境の開発用の依存）は、依存の名前から最上位のモジュールの名前を推す
     return frozenset(installed | {d.replace("-", "_") for d in dists})
 
@@ -93,10 +93,12 @@ def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
     for src in scope.python():
         for node in ast.walk(src.tree):
             tops = _import_tops(node)
-            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}")
-                      for t in tops if t not in allowed]
-        found += [Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
-                  for no, text in _strings(src.tree) if path_pattern.search(text)]
+            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in tops if t not in allowed]
+        found += [
+            Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
+            for no, text in _strings(src.tree)
+            if path_pattern.search(text)
+        ]
     return found
 
 
@@ -121,7 +123,7 @@ def changed_files(repo_root: Path, base: str, old_plugin: str) -> list[str]:
 
 def immediate_fix_reason(pr_body: str, mark: str) -> str:
     """PR 本文の、印で始まる行の理由。印の行が無いか理由が空なら空の文字列。"""
-    reasons = [line.strip()[len(mark):].strip() for line in pr_body.splitlines() if line.strip().startswith(mark)]
+    reasons = [line.strip()[len(mark) :].strip() for line in pr_body.splitlines() if line.strip().startswith(mark)]
     return next((r for r in reasons if r), "")
 
 

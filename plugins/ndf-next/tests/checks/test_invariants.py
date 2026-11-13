@@ -10,8 +10,9 @@ OLD = "/".join(("plugins", "ndf"))
 
 
 def test_own_name_in_code_fails(plugin):
-    plugin.write("src/ndf/a.py", '"""ndf-next の説明"""\nP = "ndf-next"\nQ = "a/ndf-next/b"\nR = "ndf-next:design"\n'
-                                  'S = "ndf-nextgen"\nT = "ndf"\n')
+    plugin.write(
+        "src/ndf/a.py", '"""ndf-next の説明"""\nP = "ndf-next"\nQ = "a/ndf-next/b"\nR = "ndf-next:design"\nS = "ndf-nextgen"\nT = "ndf"\n'
+    )
     plugin.write("bin/run", "#!/bin/sh\n# ndf-next/ を見る\necho plugins/ndf-next/x\n")
     plugin.write("skills/a/SKILL.md", "/ndf-next:design を呼ぶ\n")
     found = invariants.own_name(plugin.scope())
@@ -19,8 +20,7 @@ def test_own_name_in_code_fails(plugin):
 
 
 def test_imports_outside_declared_fail(plugin):
-    plugin.write("tests/x/test_a.py", f'import json\nimport requests\nfrom ndf import a\nP = "{OLD}/scripts"\n'
-                                       'Q = "plugins/ndf-next"\n')
+    plugin.write("tests/x/test_a.py", f'import json\nimport requests\nfrom ndf import a\nP = "{OLD}/scripts"\nQ = "plugins/ndf-next"\n')
     found = invariants.old_imports(plugin.scope(), OLD)
     assert [(f.rule, f.line) for f in found] == [("I3", 2), ("I3", 4)]
 

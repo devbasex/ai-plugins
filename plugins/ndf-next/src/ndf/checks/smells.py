@@ -96,9 +96,7 @@ def _quiet(body: list[ast.stmt]) -> bool:
     def const_return(s: ast.stmt) -> bool:
         return isinstance(s, ast.Return) and (s.value is None or isinstance(s.value, ast.Constant))
 
-    return any(const_return(s) for s in body) and all(
-        isinstance(s, (ast.Pass, ast.Continue)) or const_return(s) for s in body
-    )
+    return any(const_return(s) for s in body) and all(isinstance(s, (ast.Pass, ast.Continue)) or const_return(s) for s in body)
 
 
 def _handler_hits(handler: ast.ExceptHandler) -> Iterator[str]:

@@ -49,10 +49,8 @@ def mark_problem(mark: Mark, code: str, caught: tuple[str, ...] | None, rules: d
         (not mark.label or not mark.reason, "印の形が `<規則> <境界の種類>: <理由>` でない"),
         (kind == "none", "この規則は印で外せない。直す"),
         (mark.label == rules["limit_label"] and code != "NDF201", "`上限:` はループの中の外部呼び出しだけ"),
-        (mark.label not in (*rules["boundaries"], rules["limit_label"]),
-         "境界の種類は " + " / ".join(rules["boundaries"])),
-        (code in EXCEPT_RULES and bool(caught) and set(caught) <= internal,
-         "内部の型だけを受ける except は直す（握りつぶさずに送出する）"),
+        (mark.label not in (*rules["boundaries"], rules["limit_label"]), "境界の種類は " + " / ".join(rules["boundaries"])),
+        (code in EXCEPT_RULES and bool(caught) and set(caught) <= internal, "内部の型だけを受ける except は直す（握りつぶさずに送出する）"),
     )
     return next((why for bad, why in problems if bad), None)
 
@@ -65,8 +63,7 @@ class Applied:
     unused: list[tuple[Mark, str]]
 
 
-def apply(hits: list[tuple[int, str]], marks: dict[int, list[Mark]], caught: dict[int, tuple[str, ...]],
-          rules: dict[str, Any]) -> Applied:
+def apply(hits: list[tuple[int, str]], marks: dict[int, list[Mark]], caught: dict[int, tuple[str, ...]], rules: dict[str, Any]) -> Applied:
     """兆候に印を当て、数に入るものと要らない印に分ける。"""
     counted: list[tuple[int, str, str | None]] = []
     used: set[tuple[int, str]] = set()
@@ -77,6 +74,5 @@ def apply(hits: list[tuple[int, str]], marks: dict[int, list[Mark]], caught: dic
         if own and None in problems:
             continue
         counted.append((line, code, next((p for p in problems if p), None)))
-    unused = [(m, code) for ms in marks.values() for m in ms for code in m.codes
-              if m.label and m.reason and (m.line, code) not in used]
+    unused = [(m, code) for ms in marks.values() for m in ms for code in m.codes if m.label and m.reason and (m.line, code) not in used]
     return Applied(counted, unused)

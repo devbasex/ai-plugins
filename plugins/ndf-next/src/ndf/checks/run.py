@@ -62,9 +62,10 @@ def smell_findings(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     for src in scope.code():
         hits, caught = smells.scan(src.tree, rules["smells"])
         applied = marks.apply(hits, marks.read_marks(src.text, codes), caught, rules)
-        found += [Finding(code, src.rel, line, rules["smells"][code]["summary"] + (f"。印を受けない: {why}" if why
-                                                                                   else ""))
-                  for line, code, why in applied.counted]
+        found += [
+            Finding(code, src.rel, line, rules["smells"][code]["summary"] + (f"。印を受けない: {why}" if why else ""))
+            for line, code, why in applied.counted
+        ]
         found += [Finding("mark-unused", src.rel, m.line, f"{code} の兆候が無い行の印") for m, code in applied.unused]
     return found
 
@@ -80,8 +81,7 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
 
 def _repo_root(plugin_root: Path) -> Path:
     try:
-        done = subprocess.run(["git", "-C", str(plugin_root), "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(["git", "-C", str(plugin_root), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git の worktree で実行する: {plugin_root}") from exc
     return Path(done.stdout.strip()).resolve()
@@ -109,8 +109,7 @@ def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="新しいプラグインだけを見る検査")
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
-    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""),
-                        help="PR 本文を読む GitHub の事象の JSON")
+    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""), help="PR 本文を読む GitHub の事象の JSON")
     args = parser.parse_args(argv)
     try:
         ident = identity.load()
