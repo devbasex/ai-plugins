@@ -433,7 +433,7 @@ graph TD
 | 移行性 | 今の目録 `sprint.json`・進捗記録のファイル・`plan.json`・計画の台帳から進行表への移し方と、実行中のスプリントと計画をどう扱うかは未決 1（[issue-3092-requirements.md](issue-3092-requirements.md) の「未決」）で設計が決め、実装の Pull Request の「移行の手順」に書く | `progress.py adopt`（下の「移行」。判定と戻し方は決定 19）。元のファイルは消さない | 計画 p5 のコピーの `sprint.json` と `plan.json` を取り込み、`show` と `parallel.py status` が元と同じ工程の状態を出すことを見る |
 | システム環境 | ローカルでは追加の常駐サーバーを要さず、SQLite で動く。Factory では PostgreSQL の URL で動く。追加する依存は Serverless Workflow の Python の SDK（未決 8。[issue-3092-requirements.md](issue-3092-requirements.md) の「未決」）だけを見込む | 既定は SQLite のファイル。足す依存は SDK ではなく `jsonschema` 1 つ（決定 3。SDK は 1.0 の書式を読めない）。SQLAlchemy は DBOS の依存として既にある | `uv.lock` の差分が `jsonschema` とその依存だけであることを PR で見る |
 
-**要求の条件と違う点**: システム環境の「追加する依存は SDK だけ」は、SDK が仕様 1.0 を読めないため `jsonschema` に替える。依存の数は 1 つで変わらない。依存の追加は要求の「境界」のとおり設計承認ゲートで人が見る（設計文書の「人へ残す判断」の 1・2）。
+**要求の条件と違う点**: システム環境の「追加する依存は SDK だけ」は、SDK が仕様 1.0 を読めないため `jsonschema` に替える。依存の数は 1 つで変わらない。依存の追加は要求の「境界」の「確認してから行う」に当たり、設計文書の決定 3（`jsonschema` を足す）と決定 2（DBOS は 3.1.0 のまま）で決めた。
 
 ## 移行
 
