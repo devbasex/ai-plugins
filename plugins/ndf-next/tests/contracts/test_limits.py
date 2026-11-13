@@ -51,7 +51,9 @@ def test_wrong_shape_stops(contracts_copy, change):
 
 
 def test_duplicate_policy_names_stop(contracts_copy):
-    contracts_copy("limits.json", text='{"version": 1, "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}')
+    contracts_copy(
+        "limits.json", text='{"version": 1, "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}'
+    )
     with pytest.raises(limits.LimitsError, match="a.b"):
         limits.table()
 

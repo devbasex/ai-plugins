@@ -22,7 +22,9 @@ def test_plugin_table_rows_have_type_and_stopped_exit_code():
     assert all(row.exit in codes and row.std_type for row in table.values())
 
 
-@pytest.mark.parametrize(("kind", "code"), [("base_conflict", 4), ("not_applicable", 3), ("precondition", 3), ("deps_missing", 69), ("infra_wait", 75)])
+@pytest.mark.parametrize(
+    ("kind", "code"), [("base_conflict", 4), ("not_applicable", 3), ("precondition", 3), ("deps_missing", 69), ("infra_wait", 75)]
+)
 def test_exit_code(kind, code):
     assert causes.exit_code(kind) == code
 

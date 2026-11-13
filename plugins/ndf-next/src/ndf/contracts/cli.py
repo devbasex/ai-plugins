@@ -1,10 +1,10 @@
 """副命令 `contracts`: 契約の表の検査と、シェルから表を引く口と、結果 JSON の出力。
 
-    ndf contracts check                          契約の表をすべて確かめ、結果 JSON を出す
-    ndf contracts fact-ids <表> [<列>=<値>...]    条件に合う行の id を改行区切りで出す
-    ndf contracts fact-value <表> <id> <列>       1 つの値を出す（配列は 1 行に 1 要素）
-    ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] ...
-                                                 結果 JSON を確かめて 1 行で出す（シェルと worker が使う）
+ndf contracts check                          契約の表をすべて確かめ、結果 JSON を出す
+ndf contracts fact-ids <表> [<列>=<値>...]    条件に合う行の id を改行区切りで出す
+ndf contracts fact-value <表> <id> <列>       1 つの値を出す（配列は 1 行に 1 要素）
+ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] ...
+                                             結果 JSON を確かめて 1 行で出す（シェルと worker が使う）
 """
 
 from __future__ import annotations

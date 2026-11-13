@@ -66,19 +66,51 @@ def test_fact_lookup_error_is_one_stderr_line(capsys):
 
 def test_emit_stopped_with_cause_takes_the_kind_code(capsys, tmp_path):
     dest = tmp_path / "r.json"
-    code, out, _ = _run(capsys, "emit", "--tool", "w", "--status", "stopped", "--summary", "s", "--cause", "infra_wait", "Runner が付かない", "--out", str(dest))
+    code, out, _ = _run(
+        capsys,
+        "emit",
+        "--tool",
+        "w",
+        "--status",
+        "stopped",
+        "--summary",
+        "s",
+        "--cause",
+        "infra_wait",
+        "Runner が付かない",
+        "--out",
+        str(dest),
+    )
     assert code == 75
     assert json.loads(out)["cause"]["kind"] == "infra_wait"
     assert json.loads(dest.read_text()) == json.loads(out)
 
 
 def test_emit_incomplete_with_gaps(capsys):
-    code, _, _ = _run(capsys, "emit", "--tool", "w", "--status", "stopped", "--summary", "s", "--cause", "incomplete", "欠け", "--gap", "test", "x", "未確認")
+    code, _, _ = _run(
+        capsys,
+        "emit",
+        "--tool",
+        "w",
+        "--status",
+        "stopped",
+        "--summary",
+        "s",
+        "--cause",
+        "incomplete",
+        "欠け",
+        "--gap",
+        "test",
+        "x",
+        "未確認",
+    )
     assert code == 6
 
 
 def test_emit_gate_with_routes(capsys):
-    code, out, _ = _run(capsys, "emit", "--tool", "w", "--status", "gate", "--summary", "s", "--route", "approved", "ndf go", "--route", "rejected", "-")
+    code, out, _ = _run(
+        capsys, "emit", "--tool", "w", "--status", "gate", "--summary", "s", "--route", "approved", "ndf go", "--route", "rejected", "-"
+    )
     assert code == 10
     assert json.loads(out)["routes"] == {"approved": "ndf go", "rejected": None}
 

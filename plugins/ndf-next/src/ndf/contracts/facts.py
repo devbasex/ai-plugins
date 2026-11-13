@@ -124,7 +124,11 @@ def ref_errors(name: str, policy_names: set[str]) -> list[str]:
         values = [(r["id"], r[col]) for r in t.rows if col in r]
         if ref.startswith("limits.json#"):
             prefix = ref.split("#", 1)[1]
-            errs += [f"{name}:{rid} の {col} {v!r} の方針 {prefix}{v} が上限の宣言に無い" for rid, v in values if f"{prefix}{v}" not in policy_names]
+            errs += [
+                f"{name}:{rid} の {col} {v!r} の方針 {prefix}{v} が上限の宣言に無い"
+                for rid, v in values
+                if f"{prefix}{v}" not in policy_names
+            ]
         else:
             other = ref.split("/", 1)[1]
             known = set(ids(other))
