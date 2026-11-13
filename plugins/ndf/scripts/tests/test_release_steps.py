@@ -1338,13 +1338,14 @@ def test_cd_cases_refuse_the_approved_commit_argument(monkeypatch, arg):
     assert mod.approval.approved_of(".", a, "ndf", _case("no-cd")) == "a" * 40
 
 
-def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin"):
+def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin", case="cd-no-review"):
     """approval-check を流し、(結果, 付けた状態の並び) を返す。rounds は open_prs_at が順に返す番号。"""
     import argparse
 
     mod = _release_steps_module(monkeypatch)
     rv, at = mod.reviewed, mod.reviewed.approval_trail
     posted, left = [], list(rounds)
+    monkeypatch.setattr(rv, "release_case_or_stop", lambda r: _case(case))
     monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
     monkeypatch.setattr(rv.delivery, "load_delivery", lambda r: rv.delivery.DeliveryDecl(base="develop", production="main"))
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
@@ -1373,6 +1374,48 @@ def test_approval_check_fails_for_write_role_and_skips_other_bases(monkeypatch, 
     assert posted == ["failure"]
     out, posted = _check(monkeypatch, tmp_path, base="develop")
     assert posted == [] and out["status"] == "ok"
+
+
+def test_approval_check_posts_nothing_for_cd_review(monkeypatch, tmp_path):
+    """I8: レビューで承認する場合は証跡のチェックを付けない（付けると証跡が無い failure でマージが止まる）。"""
+    out, posted = _check(monkeypatch, tmp_path, case="cd-review")
+    assert posted == [] and out["status"] == "ok" and out["metrics"]["case"] == "cd-review"
+
+
+def _trail_wait(monkeypatch, required, statuses):
+    """wait_trail_status を流し、読んだ status の回数を返す。statuses は先端の status の読みが順に返す状態（None は付いていない）。"""
+    mod = _release_steps_module(monkeypatch)
+    rv = mod.reviewed
+    left, reads = list(statuses), []
+    rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c} for c in required]}}]
+
+    def gh_json(root, args, what):
+        if "/rules/branches/" in args[1]:
+            return rules
+        reads.append(1)
+        st = left.pop(0) if len(left) > 1 else left[0]
+        return {"statuses": [{"context": rv.approval_trail.STATUS_CONTEXT, "state": st}] if st else []}
+
+    monkeypatch.setattr(rv, "gh_json", gh_json)
+    monkeypatch.setattr(rv.waits, "wait_until", lambda read, done, policy: _Waited(read, done))
+    rv.wait_trail_status(".", "o/r", "main", HEAD, 5)
+    return len(reads)
+
+
+class _Waited:
+    def __init__(self, read, done):
+        for _ in range(5):
+            self.value = read()
+            if done(self.value):
+                break
+        self.done = done(self.value)
+
+
+def test_wait_trail_status_waits_for_a_present_status_even_when_not_required(monkeypatch):
+    """必須でなくても先端に付いた failure は merge-when-green を止めるため、success まで待つ。付いていなければ待たない。"""
+    assert _trail_wait(monkeypatch, [], [None]) == 1
+    assert _trail_wait(monkeypatch, [], ["failure", "failure", "success"]) == 3
+    assert _trail_wait(monkeypatch, ["ndf/release-approval"], ["pending", "success"]) == 2
 
 
 def test_approval_check_rejudges_the_other_pr_when_one_closes(monkeypatch, tmp_path):

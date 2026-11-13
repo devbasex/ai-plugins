@@ -53,7 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits", "durable", "md", "procs", "locks", "schema")
+deps.require("waits", "durable", "md", "mdtable", "procs", "locks", "schema", "versions")
 from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
 import gh_parts  # noqa: E402

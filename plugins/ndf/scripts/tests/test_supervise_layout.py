@@ -265,8 +265,9 @@ def test_cd_prod_plan_stacks_the_bumps_before_the_approval_and_merges_after_it(t
 
 
 @pytest.mark.parametrize("mvv", [False, True])
-def test_cd_review_prod_plan_writes_no_trail_and_returns_to_release(tmp_path, monkeypatch, mvv):
-    """受け入れ条件 18・I8: レビューが必須の場合は approve-pr（証跡の書き込み）を置かず、承認の後は release へ戻る。"""
+def test_cd_review_prod_plan_writes_no_trail_and_ends_at_the_gate(tmp_path, monkeypatch, mvv):
+    """受け入れ条件 18・I8: レビューが必須の場合は approve-pr（証跡の書き込み）を置かない。MVV 判定はレビューの承認を代えられない
+    ため、MVV 判定のプランでも判定の記録の後は release へ戻らずに終える（release の 10 から MVV 判定までの輪を作らない）。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(PKG.parent / "lib"))
     import inproc
@@ -283,7 +284,7 @@ def test_cd_review_prod_plan_writes_no_trail_and_returns_to_release(tmp_path, mo
     assert steps["approval-post"]["next"] == ("mvv" if mvv else "end")
     assert steps["release"]["gate_next"] == "facts" and "10" not in steps["release"]["on_exit"]
     if mvv:
-        assert steps["note"]["next"] == "release"
+        assert steps["note"]["next"] == "end"
 
 
 @pytest.mark.parametrize("mvv", [False, True])

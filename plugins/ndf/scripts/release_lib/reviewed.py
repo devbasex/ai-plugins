@@ -184,19 +184,21 @@ def wait_ci_except(root, n, skip, timeout, ops):
 
 
 def wait_trail_status(root, repo, prod, head, timeout=None):
-    """`ndf/release-approval` が本番チャネルの必須チェックにあるとき、先端のその状態が success になるまで待つ。
-    `timeout` を省くと `release-steps.trail-status` の上限（`merged_lib.merge.promote` の場合 1 が使う）。"""
+    """`ndf/release-approval` が本番チャネルの必須チェックにあるか、先端に既に付いているとき、先端のその状態が success に
+    なるまで待つ（必須でなくても付いた failure は merge-when-green を止める）。`timeout` を省くと `release-steps.trail-status`
+    の上限（`merged_lib.merge.promote` の場合 1 が使う）。"""
     timeout = limits.policy("release-steps.trail-status").seconds if timeout is None else timeout
-    try:  # 読めなければ待たない（マージの判定は GitHub が必須チェックで持つ）
+    try:  # 読めなければ必須とみなさない（マージの判定は GitHub が必須チェックで持つ）
         required = ci_workflows.required_contexts(gh_json(root, ["api", f"repos/{repo}/rules/branches/{prod}"], "gh api rules")) or []
     except (StepError, ValueError):
         required = []
-    if approval_trail.STATUS_CONTEXT not in required:
-        return
 
     def read():
         d = gh_json(root, ["api", f"repos/{repo}/commits/{head}/status"], "gh api status") or {}
         return next((s for s in d.get("statuses") or [] if s.get("context") == approval_trail.STATUS_CONTEXT), {})
+
+    if approval_trail.STATUS_CONTEXT not in required and not read():
+        return
 
     policy = limits.policy("release-steps.trail-status")._replace(seconds=timeout)
     got = waits.wait_until(read, lambda s: s.get("state") == "success", policy=policy)
@@ -271,7 +273,7 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
 
 def _dev_merge_by_workflow(ctx: ReleaseCtx, workflow, ops, n, new):
     """開いた開発版の PR を workflow でマージし、(取り込んだ PR, workflow の実行の URL) を返す。ベースブランチと衝突していれば
-    手元の経路と同じく release/v<版>-sync で取り込み（`_merge_sync_pr`）、その PR のマージも workflow に任せる。
+    手元の経路と同じく同期のブランチ（<開発版のブランチ>-sync）で取り込み（`_merge_sync_pr`）、その PR のマージも workflow に任せる。
     再開で -sync が取り込み済みなら（`_merged_sync_pr`）起動しない。"""
     root, a, branch, base = ctx.root, ctx.a, ctx.branch, ctx.base
     if not new and (synced := ops._merged_sync_pr(root, branch, base)):
@@ -306,7 +308,8 @@ def judge_pr(repo, pr, head, prod):
 
 
 def approval_check(a):
-    """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。"""
+    """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。
+    レビューが必須の場合（cd-review）は証跡を書かないため何も付けない（I8。付けると証跡が無い failure でマージが止まる）。"""
     root = git_root(a.root)
     prod = delivery.load_delivery(root).production
     repo, head = repo_or_stop(root), None
@@ -314,6 +317,9 @@ def approval_check(a):
         head, base, state = approval_trail.read_head(repo, a.pr)
         if base != prod:
             emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
+        if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW:
+            msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
+            emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
         pr = a.pr
         if state != "open":  # 閉じた PR の先端を持つ開いた PR を判定し直す（I10）
             same = approval_trail.open_prs_at(repo, head, prod)

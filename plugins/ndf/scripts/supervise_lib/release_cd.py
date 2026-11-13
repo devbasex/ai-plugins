@@ -17,7 +17,7 @@ MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記�
 RULE_RELEASE_PROD_CD = (
     "CD のある場合（#2773）: release は本番の PR を作って承認を待つ間 10 で止まり、承認資料を組んで本番の PR へ置いたところで"
     "リリース承認ゲートに入る。承認の後は、レビューを必須にしないリポジトリ（cd-no-review）では approve-pr から、レビューが必須の"
-    "リポジトリ（cd-review）では本番の PR のレビューの承認を得てから release から続ける。run のステップが落ちたら、直せるもの"
+    "リポジトリ（cd-review）では MVV 判定のプランでも承認ゲートで終え、本番の PR のレビューの承認を得てから release から続ける。run のステップが落ちたら、直せるもの"
     "（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
 
@@ -48,9 +48,11 @@ def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval
     run <計画> --from approve-pr で続ける。
 
     レビューが必須の場合（`cd-review`）は証跡を書かない（#2773 の I8・受け入れ条件 18）。approve-pr を置かず、承認の後は
-    PR のレビューの承認を照合する release へ戻る（MVV 判定は従っても release へ進み、レビューの承認が無ければ release が 10 で止まる）。"""
+    PR のレビューの承認を照合する release から続ける。MVV 判定はレビューの承認を代えられないため、MVV 判定のプランでも判定の
+    記録を置いたところで承認ゲートとして終え（release へ戻すと release の 10 から MVV 判定までを上限まで繰り返す）、レビューの
+    承認の後に run <計画> --from release で続ける。"""
     mvv = getattr(a, "mvv", None)
-    after_gate = "release" if case == release_case.CD_REVIEW else "approve-pr"
+    after_gate = "end" if case == release_case.CD_REVIEW else "approve-pr"
     steps = approval_steps
     for s in steps:
         if s.get("next") == "end":  # others（助言の MVV 判定があれば mvv-note）の後は承認資料を置く
