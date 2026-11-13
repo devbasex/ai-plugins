@@ -37,7 +37,7 @@ import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
 import doc_kinds, glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
-from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
+from glossary_words import is_kanji_edged, word_pattern  # noqa: E402  文書の中の語の正規表現（#2733・#3190）
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -47,7 +47,7 @@ DEFAULT_PATHS = doc_kinds.patterns("glossary")  # 宣言を作るときの既定
 DEFAULT_TERM_SECTIONS = ["用語"]
 DESIGN_MODES = ("standard", "legacy-refactor")
 FORMATS = ("json",)
-STRUCTURE_RULES = ("schema", "duplicate", "stale_document")
+STRUCTURE_RULES = ("schema", "duplicate", "stale_document", "deprecated_meaning")
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
@@ -149,6 +149,17 @@ def deprecated_of(t: dict) -> list[str]:
     return [w for w in d if isinstance(w, str)] if isinstance(d, list) else []
 
 
+def deprecated_standalone_of(t: dict) -> list[str]:
+    """単独で照合する廃止した語（前後が漢字の出現には当てない。1 文字でよい）。空でない文字列の要素だけを元の順で返す。"""
+    d = t.get("deprecated_standalone")
+    return [w for w in d if isinstance(w, str) and w] if isinstance(d, list) else []
+
+
+def all_deprecated_of(t: dict) -> list[str]:
+    """語の項目の廃止した語を 2 つの欄を合わせて返す（重なりは先に出た方を残す）。"""
+    return list(dict.fromkeys(deprecated_of(t) + deprecated_standalone_of(t)))
+
+
 def code_of(t: dict) -> str | None:
     c = t.get("code")
     return c if isinstance(c, str) and CODE_SHAPE.fullmatch(c) else None
@@ -200,7 +211,7 @@ def render_text(g: dict, source: str) -> str:
             continue
         body = []
         for t in rows:
-            dep = "、".join(deprecated_of(t))
+            dep = "、".join(deprecated_of(t) + [f"{w}（単独）" for w in deprecated_standalone_of(t)])
             code = f"`{code_of(t)}`" if code_of(t) else ""
             dep_code = "、".join(f"`{w}`" for w in deprecated_code_of(t))
             src = f"`{t['source']}`" if t.get("source") else ""
@@ -287,6 +298,40 @@ def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], code
             hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
 
 
+def _standalone_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], hit) -> None:
+    """単独で照合する廃止した語の欄の形（空でない文字列の配列・先頭か末尾が漢字・同じコンテキストの生きた語と重ならない）。"""
+    if "deprecated_standalone" not in t:
+        return
+    raw = t["deprecated_standalone"]
+    if not isinstance(raw, list) or len(deprecated_standalone_of(t)) != len(raw):
+        hit("schema", t["term"], f"terms[{i}] の deprecated_standalone は空でない文字列の配列で書く")
+    for w in deprecated_standalone_of(t):
+        if not is_kanji_edged(w):
+            hit(
+                "schema",
+                w,
+                f"terms[{i}] の単独で照合する廃止した語「{w}」は先頭か末尾を漢字にする（漢字で始まりも終わりもしない語は deprecated へ置く）",
+            )
+        if w in live_by_ctx.get(t["context"], set()):
+            hit("schema", w, f"terms[{i}] の単独で照合する廃止した語が同じコンテキストの生きた語と重なる")
+
+
+def _meaning_findings(g: dict, words: WordPair, hit) -> None:
+    """語の項目とコンテキストの意味の説明に現れる廃止した語を 1 件ずつ当てる（生きた語の内側・インラインコードの中は除く）。"""
+    if words.dep is None:
+        return
+    for it, name in [(t, t.get("term")) for t in terms_of(g)] + [(c, c.get("id")) for c in contexts_of(g)]:
+        meaning = it.get("meaning")
+        if not isinstance(meaning, str):
+            continue
+        for m in _uncovered(mask_inline_code(meaning), words):
+            hit(
+                "deprecated_meaning",
+                str(name or ""),
+                f"意味の欄に廃止した語「{m.group(0)}」がある。{replacement(g, m.group(0))} と書く",
+            )
+
+
 def _hit_into(items: list[dict], path: str):
     """用語集の構造の指摘（行は 0）を `items` へ足す関数を返す。"""
 
@@ -326,7 +371,8 @@ def _duplicate_findings(i: int, t: dict, seen: dict[tuple[str, str], int], code_
         seen[key] = i
 
 
-def structure_findings(g: dict, decl: Declaration) -> list[dict]:
+def structure_findings(g: dict, decl: Declaration, words: WordPair | None = None) -> list[dict]:
+    """用語集の形・重なり・禁止語と、意味の説明の廃止した語。`words` を省くと本文の正規表現の組をここで作る。"""
     items: list[dict] = []
     hit = _hit_into(items, decl.source)
     live_by_ctx, codes_by_ctx = _live_index(g)
@@ -340,8 +386,10 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             continue
         _term_schema_findings(i, t, decl, ids, hit)
         _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        _standalone_findings(i, t, live_by_ctx, hit)
         _term_banned_findings(t, decl, hit)
         _duplicate_findings(i, t, seen, code_seen, hit)
+    _meaning_findings(g, words if words is not None else _build_word_patterns(g)[0], hit)
     return items
 
 
@@ -497,7 +545,7 @@ def code_replacement(g: dict, form: str) -> str:
 
 
 def replacement(g: dict, word: str) -> str:
-    names = [t["term"] for t in terms_of(g) if word in deprecated_of(t) and isinstance(t.get("term"), str)]
+    names = [t["term"] for t in terms_of(g) if word in all_deprecated_of(t) and isinstance(t.get("term"), str)]
     return " / ".join(names) or "用語集の語"
 
 
@@ -701,8 +749,10 @@ def cmd_render(a):
 
 def _build_word_patterns(g) -> tuple[WordPair, WordPair]:
     """本文の廃止語・生きた語の組と、識別子の廃止形・生きた形の組。"""
-    dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-    dep_re, live_re = word_pattern(dep_words, katakana=True), word_pattern(live_words(g))
+    live = live_words(g)
+    dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live
+    standalone = {w for t in terms_of(g) for w in deprecated_standalone_of(t)} - live
+    dep_re, live_re = word_pattern(dep_words, katakana=True, standalone=standalone), word_pattern(live)
     live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
     dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
     return WordPair(dep_re, live_re), WordPair(word_pattern(dep_forms), word_pattern(live_forms))
@@ -738,9 +788,9 @@ def cmd_check(a):
     if decl is None:
         emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語チェックをしない"))
     g = load_glossary(decl)
-    items = structure_findings(g, decl) + stale_findings(g, decl)
+    text_words, code_words = _build_word_patterns(g)
+    items = structure_findings(g, decl, text_words) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
-        text_words, code_words = _build_word_patterns(g)
         targets = _collect_targets(a, root, decl)
         for t in targets:
             if t.path.endswith(CODE_SUFFIXES):
@@ -790,8 +840,8 @@ def diff_items(before: dict, after: dict) -> list[dict]:
             items.append(
                 {"change": "meaning_changed", "context": ctx, "term": term, "before": old.get("meaning"), "after": t.get("meaning")}
             )
-        for w in deprecated_of(t):
-            if w not in deprecated_of(old):
+        for w in all_deprecated_of(t):
+            if w not in all_deprecated_of(old):
                 items.append({"change": "deprecated", "context": ctx, "term": w, "before": None, "after": term})
     for key, t in b.items():
         if key not in h:
