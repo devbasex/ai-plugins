@@ -11,7 +11,6 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 
 from filelock import FileLock
@@ -25,21 +24,11 @@ RECORD_LOCK_SECONDS = 10.0
 
 EVENTS_FILE = "events.jsonl"
 
-
-class Result(StrEnum):
-    """記録の行の結果。str と等しく、JSON にも値の文字列で書かれる。"""
-
-    FINISHED = "finished"
-    GAVE_UP = "gave_up"
-    MEMORY_STOPPED = "memory_stopped"
-    INTERRUPTED = "interrupted"
-
-
-# 既存の呼び出し元のための別名
-FINISHED = Result.FINISHED
-GAVE_UP = Result.GAVE_UP
-MEMORY_STOPPED = Result.MEMORY_STOPPED
-INTERRUPTED = Result.INTERRUPTED
+# 記録の行の結果
+FINISHED = "finished"
+GAVE_UP = "gave_up"
+MEMORY_STOPPED = "memory_stopped"
+INTERRUPTED = "interrupted"
 
 
 def _lock(path: Path) -> FileLock:

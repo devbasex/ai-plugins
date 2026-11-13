@@ -42,7 +42,7 @@ from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
 # 記録の結果（FINISHED など）は records の名前を slots からも読めるように再び公開する
-from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, Result, _file_lock, _lock, _replace_text
+from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, _file_lock, _lock, _replace_text
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ ReadMemory = Callable[[], "int | None"]
 class Stopped(Exception):
     """待ちを諦めたか、メモリで止めた。落ちたテストとして数えない（終了コード 2。I9）。"""
 
-    def __init__(self, reason: Result, waited_seconds: float, available_mib: int | None):
+    def __init__(self, reason: str, waited_seconds: float, available_mib: int | None):
         self.reason = reason
         self.waited_seconds = waited_seconds
         self.available_mib = available_mib
@@ -351,7 +351,7 @@ def gate(
     yield from _held(SlotContext(directory, cwd, limits, poll, read_memory), kind)
 
 
-def _record(ctx: SlotContext, kind: str, held: Held, result: Result) -> None:
+def _record(ctx: SlotContext, kind: str, held: Held, result: str) -> None:
     row = {
         "at": records._now_iso(time.time()),
         "worktree": str(ctx.cwd),
@@ -491,7 +491,7 @@ def _give_up(ctx: SlotContext, kind: str, held: Held) -> NoReturn:
     raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
 
 
-def _finish_run(ctx: SlotContext, kind: str, held: Held, lock: FileLock, result: Result) -> Result:
+def _finish_run(ctx: SlotContext, kind: str, held: Held, lock: FileLock, result: str) -> str:
     """監視を止めて結果を決め、枠を返して記録する。決めた結果を返す（メモリで止めていれば MEMORY_STOPPED）。"""
     held._finish()
     if held.memory_stopped:
