@@ -20,7 +20,7 @@ RULE_RELEASE_PROD_CD = (
 )
 
 
-def reviewed(a, repo: str | None) -> bool:
+def has_release_cd(a, repo: str | None) -> bool:
     """CD のある場合（`cd-no-review` / `cd-review`）か。宣言を読めなければ組まずに DeclError。"""
     try:
         case = release_case.case_at(repo or a.worktree, strict=True)

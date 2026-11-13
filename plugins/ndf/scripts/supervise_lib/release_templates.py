@@ -24,7 +24,7 @@ from supervise_lib.verify_steps import (
     with_margin,
 )
 from supervise_lib.procedures import with_record
-from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, material_path, mvv_gate_steps, reviewed
+from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, has_release_cd, material_path, mvv_gate_steps
 from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
 
@@ -452,7 +452,7 @@ def plan_release_package_plugin(a) -> dict:
     plugin, runtimes = _validate_release_decl(a.release, dev, a)
     rts = ",".join(runtimes)
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
-    on_pr = reviewed(a, repo)  # CD のある場合は承認をリリースの PR の上で取る（#2773）
+    on_pr = has_release_cd(a, repo)  # CD のある場合は承認をリリースの PR の上で取る（#2773）
     v, base = release_version_of(a)  # 開発版の本番承認の提示物は正式版の番号で作る
     # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
     prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
