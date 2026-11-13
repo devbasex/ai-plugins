@@ -68,6 +68,7 @@ MODULES = [
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_cd",  # CD のある場合の本番のリリースプランの部品（#2773 で release_templates から分けた）
     "release_templates",
+    "release_verify",  # リリースのプランの確かめと判断のステップ（release_templates から分けた）
     "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
     "delivery_templates",
     "sprint_revise",
@@ -105,6 +106,7 @@ NO_ENGINE = [
     "release_flow",
     "release_cd",
     "release_templates",
+    "release_verify",
     "review_units",
     "delivery_templates",
     "sprint_revise",
