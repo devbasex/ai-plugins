@@ -32,6 +32,19 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/supervise.py note` | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
 | `scripts/parallel-measure.py capacity` | 並列に起動してよい本数を出す |
 
+## 工程の進行表
+
+| エントリポイント | 使うとき |
+| --- | --- |
+| `scripts/progress.py new` | スプリントの進行表を、モードの工程の定義（`contracts/workflow/`）から作る。`--disable <工程>=<理由>` で工程を無効にする |
+| `scripts/progress.py next` | 進行表だけを読んで次の工程を流し、出力を入出力規約で検査して終了の印を付ける。承認ゲートとリリースの結果の待ちに入ると終了コード 10 で抜ける |
+| `scripts/progress.py show` | 工程ごとの状態・時刻・無効の理由・進行の事象の履歴を出す |
+| `scripts/progress.py disable` / `enable` / `retry` / `finish` | 工程を無効・有効にする、失敗の行をやり直す、手で終了にする（理由は必須） |
+| `scripts/progress.py scope` / `cancel` | 課題の範囲かモードを変えて定義の改訂を上げる・スプリントを中止する |
+| `scripts/progress.py answer` | 承認ゲートの答えかリリースの結果を進行表へ書く |
+| `scripts/progress.py lane` | レーンの進行表の順番表の行を足す・動かす・取り消す |
+| `scripts/progress.py adopt` | 動いているスプリント（`sprint.json`）か計画を進行表へ取り込む |
+
 ## スプリントの状態と承認ゲート
 
 | エントリポイント | 使うとき |
