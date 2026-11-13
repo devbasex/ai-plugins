@@ -7057,6 +7057,27 @@
       "meaning": "問い合わせの区分（承認ゲート・レッドライン・費用など）のどれにも当たらない問い。AI が決めて記録する",
       "source": "",
       "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区間の報告",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "人のいない実行の印",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "結果の行の差し戻し",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。同じセッションで 2 回まで",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
     }
   ]
 }
