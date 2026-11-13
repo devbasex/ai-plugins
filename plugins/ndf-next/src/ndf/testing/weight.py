@@ -140,14 +140,22 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
         runner = suite.get("runner")
         if not isinstance(runner, str) or not runner:
             continue
-        pos = runner_position(words, runner)
-        if pos is None:
-            continue
-        args = words[pos + 1 :]
-        if _has_parallel(args):
-            return SCOPE
-        if all(t == "." for t in _targets(args)):
-            return WHOLE
+        kind = _classify_runner(words, runner)
+        if kind:
+            return kind
+    return None
+
+
+def _classify_runner(words: list[str], runner: str) -> str | None:
+    """`runner` がコマンドの位置にあれば、並列の指定で SCOPE、対象が全体なら WHOLE。どちらでもなければ None。"""
+    pos = runner_position(words, runner)
+    if pos is None:
+        return None
+    args = words[pos + 1 :]
+    if _has_parallel(args):
+        return SCOPE
+    if all(t == "." for t in _targets(args)):
+        return WHOLE
     return None
 
 
