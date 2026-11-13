@@ -53,13 +53,14 @@ def exit_code_bounds(row: Mapping[str, Any]) -> tuple[int, int]:
     return row["code"], row.get("last", row["code"])
 
 
+def status_ranges(status: str) -> tuple[tuple[int, int], ...]:
+    """`status` の終了コードの範囲（始点と終点）の並び（事実の表 exit-codes から）。"""
+    return tuple(exit_code_bounds(r) for r in facts.rows(EXIT_CODES, status=status))
+
+
 def codes_for_status(status: str) -> frozenset[int]:
     """`status` の結果が返してよい終了コード（事実の表 exit-codes から）。"""
-    out: set[int] = set()
-    for r in facts.rows(EXIT_CODES, status=status):
-        first, last = exit_code_bounds(r)
-        out.update(range(first, last + 1))
-    return frozenset(out)
+    return frozenset(c for first, last in status_ranges(status) for c in range(first, last + 1))
 
 
 def stopped_codes() -> frozenset[int]:
