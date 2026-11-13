@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -40,6 +41,10 @@ class Limits:
     max_runs: int
     memory_floor_mib: int
     wait_limit_seconds: int
+
+
+# 設定の鍵（Limits のフィールドの名前と同じ）
+_LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
 
 
 def default_limits(cpus: int, total_mib: int | None) -> Limits:
@@ -83,14 +88,10 @@ def load_limits(cwd: Path, *, cpus: int | None = None, total_mib: int | None = N
     if not isinstance(section, dict):
         raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
     errors: list[str] = []
-    values = {key: _positive(section, key, path, errors) for key in ("max_runs", "memory_floor_mib", "wait_limit_seconds")}
+    values = {key: _positive(section, key, path, errors) for key in _LIMIT_KEYS}
     if errors:
         raise SlotConfigError(f"設定の値が誤っている: {path}", errors)
-    return Limits(
-        max_runs=values["max_runs"] or base.max_runs,
-        memory_floor_mib=values["memory_floor_mib"] or base.memory_floor_mib,
-        wait_limit_seconds=values["wait_limit_seconds"] or base.wait_limit_seconds,
-    )
+    return dataclasses.replace(base, **{key: value for key, value in values.items() if value is not None})
 
 
 def load_suites(cwd: Path) -> list[dict[str, object]]:
