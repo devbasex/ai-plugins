@@ -73,7 +73,7 @@ plugins/ndf/
 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` | 変更 | 工程とフェーズの表に「詳細設計 → 設計」を足す | 無し |
 | `plugins/ndf/skills/development-workflow/references/parallel-work.md` | 変更 | 動く単位の表に「詳細設計」を設計のプランの中の段として足す | 無し |
 | `plugins/ndf/skills/development-workflow/references/stage-notes.md` | 変更 | 詳細設計の工程を置いた理由を書く | 無し |
-| `plugins/ndf/skills/design/SKILL.md` | 変更 | 手順に「詳細設計を書く」を足し、設計のプランの段から呼ばれたときの止め方を書く | 無し |
+| `plugins/ndf/skills/design/SKILL.md` | 変更 | 手順に「詳細設計を書く」を足し、設計のプランの段から呼ばれたときの止め方を書く。「進行を記録する」の契機に、詳細設計を書き始めるときの `projects-sync.sh <課題> stage "詳細設計"` を足す。設計のプランの段（`/ndf:design #<番号> 詳細設計`）から呼ばれたときは、工程「設計」を打ち直さない | 無し |
 | `plugins/ndf/skills/design/references/detailed-design.md` | 新設 | 10 の項目の書き方・節の見出し・表の列・省く書き方・既存の参照との分担を持つ | 無し |
 | `plugins/ndf/skills/design/references/deliverables.md` | 変更 | パッケージ・モジュール構成の行に「詳細設計を通るモードでは詳細設計の文書に書く」を添える | 無し |
 | `plugins/ndf/skills/design/references/design-template.md` | 変更 | 詳細設計の文書のテンプレート（10 の節）を足す | 無し |
@@ -114,10 +114,10 @@ plugins/ndf/
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `is_detail` | `lib/design_detail.py` | 新設 | `is_detail(path: str) -> bool` | パスの名前が詳細設計の文書（`issue-<番号>-design-detail.md`）かを返す | 無し | 名前が `design_docs.DESIGN_NAME` に合い、`DETAIL_SUFFIX` で終わるときだけ真 | 無し |
-| `check_detail` | `lib/design_detail.py` | 新設 | `check_detail(path: str, text: str, result_files: set[str] \| None, why: str = "") -> list[dict]` | 1 本の詳細設計の文書を `detail_section`・`detail_failure`・`detail_reuse`・`detail_file` で判定する | `text` は `path` の中身。`result_files` は頭の設計文書の「設計の結果」の触るファイルで、読めなければ `None` と理由 `why` | 指摘の行（`name`・`rule`・`text`）を、規則の順・行の順で返す。指摘が無ければ空の一覧 | 無し |
+| `check_detail` | `lib/design_detail.py` | 新設 | `check_detail(path: str, text: str, result_files: set[str] \| None, why: str = "") -> list[dict]` | 1 本の詳細設計の文書を `detail_section`・`detail_failure`・`detail_reuse`・`detail_file` で判定する | `text` は `path` の中身。`result_files` は頭の設計文書の「設計の結果」の触るファイルで、読めなければ `None` と理由 `why`。`None` で `why` が空なら照合する先が無い（`legacy-refactor` の書式）ことを表し、`detail_file` を当てない | 指摘の行（`name`・`rule`・`text`）を、規則の順・行の順で返す。指摘が無ければ空の一覧 | 無し |
 | `_section_table` | `lib/design_detail.py` | 新設 | `_section_table(text: str, title: str) -> tuple[md.Section \| None, md.Table \| None, str \| None]` | `##` の見出しが `title` の節と、その節の最初の表と、`省く:` の理由を返す | 無し | 節が無ければ `(None, None, None)`。理由は `省く:` の後の字を空白で詰めたもの（無ければ `None`） | 無し |
 | `detail_items` | `design-survey.py` | 新設 | `detail_items(group: list[Doc], require: bool) -> list[dict]` | まとまりの中の詳細設計の文書ごとに `check_detail` を当て、`require` なら文書の欠けを指摘する | `group` は `survey_groups` が返した 1 つのまとまり | 指摘の行の一覧。`require` で詳細設計の文書が無いまとまりには `detail_missing` の行が 1 つ | 無し |
-| `_result_files` | `design-survey.py` | 新設 | `_result_files(head: Doc \| None) -> tuple[set[str] \| None, str]` | 頭の設計文書の「設計の結果」から、扱いが「実装する」の行の触るファイルを集める | 無し | 読めれば `(ファイルの集合, "")`、読めなければ `(None, 理由)` | 無し |
+| `_result_files` | `design-survey.py` | 新設 | `_result_files(head: Doc \| None) -> tuple[set[str] \| None, str]` | 頭の設計文書の「設計の結果」から、扱いが「実装する」の行の触るファイルを集める | 無し | 読めれば `(ファイルの集合, "")`。頭の設計文書が `legacy-refactor` の書式（「設計の結果」の節が無く、「現状の構造」と「変更後の構造」の節がある）なら `(None, "")`。それ以外で読めなければ `(None, 理由)` | 無し |
 | `Doc.__init__` | `design-survey.py` | 変更 | `Doc(path: str, text: str)` | 1 つの文書から既存の読み取りを行い、詳細設計の判定のために `text` を持つ | 既存どおり | 既存の属性に `self.text` が加わる | 無し |
 | `cmd_check` | `design-survey.py` | 変更 | `cmd_check(a: argparse.Namespace) -> None` | まとまりごとに既存の 4 規則と詳細設計の 5 規則を当て、1 行の JSON と終了コードで返す | `a.issue` か `a.file` のどちらか。`a.require_detail` は真偽 | 指摘が無ければ終了コード 0、あれば 1。`metrics` に `detail_docs` と規則ごとの件数が加わる | 標準出力へ 1 行の JSON・プロセスの終了コード・git の読み取り（`--issue` のとき） |
 | `build_parser` | `design-survey.py` | 変更 | `build_parser() -> argparse.ArgumentParser` | `check` に `--require-detail` を足す | 無し | `--require-detail` は `--issue`・`--file` のどちらとも組め、既定は偽 | 無し |
@@ -136,7 +136,7 @@ plugins/ndf/
 | `cmd_check` | 文書が 1 つも無い | `--issue` の番号の文書が HEAD に無い | 既存の `find_closed` の戻り値 | 止める（既存どおり） | `stopped`・終了コード 3 | 同上 |
 | `cmd_check` | 詳細設計の規則に指摘がある | 節の欠け・異常系の行の欠け・再利用の行の欠け・触るファイルの外のパス・詳細設計の文書の欠け | `detail_items` | 呼び出し元へ返す（既存の 4 規則と同じ指摘の一覧へ混ぜる） | `stopped`・終了コード 1。`items` の `rule` が `detail_*` | 後始末なし。文書を直して打ち直せる |
 | `_result_files` | 頭の設計文書がまとまりに無い | `--file` に詳細設計の文書だけを渡した | `head` が `None` | 既定値で続ける（`None` と理由を返し、`check_detail` が `detail_file` の指摘にする） | `detail_file` の行（`name` は `<パス> 設計の結果`、`text` に「頭の設計文書が読んだ文書に無い」） | 頭の設計文書も渡して打ち直せる |
-| `_result_files` | 設計の結果の表を読めない | 節が無い・表の見出しが違う（`parse_results` が `None`） | `design_results.parse_results` の戻り値 | 既定値で続ける（同上） | `detail_file` の行（`text` に「設計の結果の表を読めない」） | 設計文書を直して打ち直せる |
+| `_result_files` | 設計の結果の表を読めない | 節が無く `legacy-refactor` の 2 節も欠ける・表の見出しが違う（`parse_results` が `None`） | `design_results.parse_results` の戻り値 | 既定値で続ける（同上） | `detail_file` の行（`text` に「設計の結果の表を読めない」） | 設計文書を直して打ち直せる |
 | `_result_files` | 触るファイルのセルの書式が違う | セルにコードスパンの外の字・リンクがある | `parse_results` が投げる `DesignCellError` を捕まえる | 既定値で続ける（例外の文を理由にする） | `detail_file` の行（`text` に例外の文の先頭 300 字） | 同上 |
 | `check_detail` | 節の表の形が崩れている | 列の数が見出しと合わない・表が無い | `_section_table` が表を返さない | 既定値で続ける（「行が無い」として `detail_section` にする） | `detail_section` の行 | 文書を直して打ち直せる |
 | `check_detail` | 関数の仕様の表に「副作用」か「種類」の列が無い | 列の名前を変えた | 見出しの行で列を探して見つからない | 既定値で続ける（その規則を当てず、`detail_section` に「列 <名前> が無い」を出す） | `detail_section` の行 | 同上 |
@@ -175,6 +175,16 @@ grep -qx -- '- 無し' {state_dir}/work/design-review.md
 | ある | 1 行以上 | どちらでも | 指摘なし |
 | ある | 0 行 | 空でない | 指摘なし |
 | ある | 0 行 | 無いか空 | `detail_section` |
+
+`_result_files` の判定（頭の設計文書の書式）:
+
+| 頭の設計文書 | 「設計の結果」の節 | 「現状の構造」と「変更後の構造」の節 | 戻り値 | `detail_file` |
+| --- | --- | --- | --- | --- |
+| 無い | — | — | `(None, 理由)` | 1 行 |
+| ある | ある（表を読める） | どちらでも | `(ファイルの集合, "")` | 集合に無いパスごとに 1 行 |
+| ある | ある（表を読めない） | どちらでも | `(None, 理由)` | 1 行 |
+| ある | 無い | 2 つともある | `(None, "")` | 当てない（ファイル配置の表が正本） |
+| ある | 無い | 欠けている | `(None, 理由)` | 1 行 |
 
 `cmd_check` の詳細設計の判定（まとまりごと）:
 
@@ -244,10 +254,10 @@ grep -qx -- '- 無し' {state_dir}/work/design-review.md
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `is_detail` | `issues/issue-7-design-detail.md` が真 | `issue-7-8-design-detail.md` が真、`issue-7-design.md`・`issue-7-design-decisions.md` が偽 | `notes/detail.md` が偽 |
-| `check_detail` | 10 の節に表の行があり、副作用・新設・パスがそろった文書で指摘なし | 全節が `省く: <理由>` の文書で指摘なし。節の本文が `省く:` だけ（理由が空）で `detail_section` | 節の欠け（`detail_section`）・副作用ありの関数が異常系の表に無い（`detail_failure`）・`新設` が再利用の表に無い（`detail_reuse`）・パスが触るファイルに無い（`detail_file`）。`変更` の関数には再利用を求めない。異常系の表の 2 列目以降に名前があっても照合しない |
+| `check_detail` | 10 の節に表の行があり、副作用・新設・パスがそろった文書で指摘なし | 全節が `省く: <理由>` の文書で指摘なし。`result_files` が `None` で `why` が空なら `detail_file` を出さない。節の本文が `省く:` だけ（理由が空）で `detail_section` | 節の欠け（`detail_section`）・副作用ありの関数が異常系の表に無い（`detail_failure`）・`新設` が再利用の表に無い（`detail_reuse`）・パスが触るファイルに無い（`detail_file`）。`変更` の関数には再利用を求めない。異常系の表の 2 列目以降に名前があっても照合しない |
 | `_section_table` | 見出しと表のある節で表を返す | 表が 2 つある節で最初の表を返す。コードブロックの中の `省く:` を読まない | 見出しが無ければ `(None, None, None)` |
 | `detail_items` | 詳細設計の文書のあるまとまりで `check_detail` の結果を返す | 番号を共有する 2 つの課題のまとまりで、文書ごとに判定する | `require` で文書が無いまとまりに `detail_missing` が 1 行 |
-| `_result_files` | 「実装する」の行の触るファイルを集める | 「取り込む」「閉じる」の行のファイルを数えない。括弧の注記の中のパスを数えない | 頭の設計文書が無い・表が読めない・`DesignCellError` で `None` と理由 |
+| `_result_files` | 「実装する」の行の触るファイルを集める | 「取り込む」「閉じる」の行のファイルを数えない。括弧の注記の中のパスを数えない。`legacy-refactor` の書式の頭の設計文書で `(None, "")` | 頭の設計文書が無い・表が読めない・`DesignCellError`・「設計の結果」が無く `legacy-refactor` の 2 節も欠けるときに `None` と理由 |
 | `cmd_check` | 指摘なしで終了コード 0、`metrics.detail_docs` が詳細設計の文書の数 | `--require-detail` を `--file` と組める | 規則の指摘で終了コード 1。既存の 2・3 は変わらない |
 | `build_parser` | `--require-detail` を受ける | 省けば偽 | 値を渡すと argparse が終了コード 2 |
 | `detail_steps` | 4 段の `next` と `on_exit` が決定 4 の表のとおり | `design-fix` の `next` が `detail-design`（打ち直しの輪を作らない） | `design-review-check` の `cmd` を 3 通りのファイルで打って 0・1・2 |
