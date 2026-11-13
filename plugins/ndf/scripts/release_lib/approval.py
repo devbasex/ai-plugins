@@ -56,30 +56,45 @@ def approved_of(root, a, plugin, case=None):
     承認したコミットの引数を受けない（渡せば 3。#2773 の決定 10）。"""
     sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
     if case is not None and case.has_cd:
-        if sha or material:
-            raise StepError(
-                f"リリースの場合 {case.case} では --approved-sha も --approval も渡さない（承認はリリースの PR の"
-                + (
-                    "証跡のコメント。release-steps.py approve --pr <本番の PR> --approved-sha <先端> --by user で書く）"
-                    if case.case == release_case.CD_NO_REVIEW
-                    else "レビューの承認）"
-                ),
-                EXIT_PRECONDITION,
-            )
-        return None
+        return _approved_from_pr(case, sha, material)
     if a.channel == "dev":
         if sha or material:
             raise StepError("--channel dev には --approved-sha も --approval も渡さない", EXIT_UNREADABLE)
         return None
     if sha:
-        try:
-            return ac.parse_sha(sha)
-        except ValueError as e:
-            raise StepError(str(e), EXIT_UNREADABLE)
+        return _approved_from_arg(sha)
     if not material:
         raise StepError(
             "--channel prod には --approved-sha か --approval が要る（承認資料の next のコマンドをそのまま打つ）", EXIT_UNREADABLE
         )
+    return _approved_from_material(root, a, plugin, material)
+
+
+def _approved_from_pr(case, sha, material) -> None:
+    """CD のある場合: 承認の正本は PR の証跡かレビューで、承認したコミットの引数を受けない（渡せば 3。#2773 の決定 10）。"""
+    if sha or material:
+        raise StepError(
+            f"リリースの場合 {case.case} では --approved-sha も --approval も渡さない（承認はリリースの PR の"
+            + (
+                "証跡のコメント。release-steps.py approve --pr <本番の PR> --approved-sha <先端> --by user で書く）"
+                if case.case == release_case.CD_NO_REVIEW
+                else "レビューの承認）"
+            ),
+            EXIT_PRECONDITION,
+        )
+    return None
+
+
+def _approved_from_arg(sha: str) -> str:
+    """--approved-sha の値。形の誤りは 2。"""
+    try:
+        return ac.parse_sha(sha)
+    except ValueError as e:
+        raise StepError(str(e), EXIT_UNREADABLE)
+
+
+def _approved_from_material(root, a, plugin, material):
+    """--approval の承認資料の承認したコミット。承認の記録が無いか SHA が違えば Gate、資料・欄が無い・形の誤りは 3。"""
     path = _material(root, material)
     try:
         return ac.from_material(path)
