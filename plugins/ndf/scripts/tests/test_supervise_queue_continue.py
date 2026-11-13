@@ -55,29 +55,6 @@ def test_resume_continues_from_the_stopped_step_and_runs_the_next_stage(tmp_path
     assert not list(t.glob("*-r2.json"))  # プランのファイルを写さない
 
 
-def test_resume_with_from_and_without_a_listing(tmp_path, env):
-    """--from で開始のステップを上書きする。一覧の無い done では何も流さない（I6）。"""
-    t, q = tmp_path, Queue(tmp_path, env)
-    p, res = resume(q)
-    assert (p.returncode, res["status"], res["items"]) == (1, "stopped", [])
-    g = q.plan(
-        "g",
-        [
-            {**run_step(note(t, "g1", f"test -f {t / 'ok'} || exit 10"), "g1"), "gate_next": "end", "next": "g2"},
-            run_step(note(t, "g2"), "g2"),
-        ],
-    )
-    p, res = q.run(g)
-    assert results(res) == {"g": "関門"}
-    p, res = resume(q, "--from", "nothing=g1")
-    assert (res["status"], q.visits()) == ("stopped", ["g1"])
-    (t / "ok").touch()
-    p, res = resume(q, "--from", "g=g2")
-    assert (results(res), res["items"][0]["resumed_from"], q.visits()) == ({"g": "完了"}, "g2", ["g1", "g2"])
-    listing = json.loads((t / "done.plans.json").read_text())
-    assert (listing["stages"], listing["max"], listing["starts"]) == ([[g]], 3, {g: "g2"})
-
-
 def test_resume_reruns_a_gate_from_the_same_step(tmp_path, env):
     """続ける対象が承認ゲートで終わっていれば、同じ開始のステップでも新しい実行の回で流す。過去の承認ゲートの結果を返し続けない。"""
     t, q = tmp_path, Queue(tmp_path, env)
@@ -108,19 +85,6 @@ def test_resume_keeps_the_start_of_a_finished_plan(tmp_path, env):
     stages, _, found = queue_resume.resume_targets(done)
     assert stages == [["d"], ["v"]]
     assert {t.plan: t.step for t in found}["d"] == "approve"
-
-
-def test_resume_with_from_after_a_kill_starts_from_the_given_step(tmp_path, env):
-    """受け入れ条件 7（#2325）: 強制終了で途中のまま残っても、--from は前の途中を止めて指定のステップから流す。"""
-    t, q = tmp_path, Queue(tmp_path, env)
-    g = q.plan("g", [run_step(once_slow(t, "g1"), "g1"), run_step(note(t, "g2"), "g2")])
-    q.kill_when_sleeping(g, "g1", g)
-
-    p, res = resume(q, "--from", "g=g2")
-
-    assert p.returncode == 0, p.stderr
-    assert (results(res), q.visits()) == ({"g": "完了"}, ["g1", "g2"])  # 前の途中（g1）を続けない
-    assert res["lease"]["outcome"] == "reclaimed"  # 強制終了した前の起動の持ち主の記録を引き取った
 
 
 def test_resume_without_from_after_a_kill_continues_the_previous_run(tmp_path, env):

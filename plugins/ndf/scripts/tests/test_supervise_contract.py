@@ -31,11 +31,11 @@ import inproc  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "supervise-contract"
 SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
-KINDS = ["sprint", "impl", "fix", "check", "release", "close"]
+KINDS = ["impl", "fix", "check", "release"]
 USAGE_OF = [[s] for s in SUBCOMMANDS] + [["new", k] for k in KINDS] + [["history", "import"]]
 
 
-# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+# new impl は課題の本文を gh で読む。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
@@ -89,20 +89,15 @@ def make_repo(tmp: Path) -> Path:
 def new_argv(root: Path, out: Path) -> dict[str, list[str]]:
     w = ["--worktree", str(root)]
     return {
-        "sprint": ["new", "sprint", *w, "--issue", "16", "17", "--design", "16", "--name", "m9", "--version", "1.2.0-dev.1", "--out", str(out / "sprint")],
         "impl": ["new", "impl", *w, "--issue", "11", "--title", "Impl: x", "--files", "src/a.py", "--tests", "tests/test_a.py", "--out", str(out / "impl.json")],
         "fix": ["new", "fix", *w, "--issue", "12", "--title", "Fix: x", "--tests", "tests/test_x.py", "--out", str(out / "fix.json")],
         "check": ["new", "check", *w, "--issue", "13", "--pr", "5", "--out", str(out / "check.json")],
         "release": ["new", "release", *w, "--issue", "14", "--version", "1.2.0-dev.1", "--prs", "5", "6", "--channel", "dev", "--repo", "o/r", "--out", str(out / "release.json")],
-        "close": [
-            "new", "close", *w, "--issue", "15", "--name", "m9", "--version", "1.2.0-dev.2", "--prod", "1.2.0",
-            "--state", str(out / "sprint" / "sprint.json"), "--out", str(out / "close"),
-        ],
     }  # fmt: skip
 
 
 def render_plans(tmp: Path) -> dict[str, dict]:
-    """種別ごとに `new` を打ち、書き出したファイル（種別/相対パス → 中身）を返す。close は sprint の状態を読む。"""
+    """種別ごとに `new` を打ち、書き出したファイル（種別/相対パス → 中身）を返す。"""
     root = make_repo(tmp)
     out = tmp / "out"
     out.mkdir()

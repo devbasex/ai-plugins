@@ -20,7 +20,6 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
-import inproc  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import approved_commit as ac  # noqa: E402
 from release_lib import included, promotion  # noqa: E402
@@ -166,12 +165,6 @@ def make_repo(tmp_path: Path, flow=None, pace=None) -> Path:
     return repo
 
 
-def new_sprint(tmp_path: Path, repo: Path, *extra: str):
-    out = tmp_path / "out"
-    args = ["new", "sprint", "--name", "s1", "--worktree", str(repo), "--issue", "11", "--version", "1.1.0-dev.1", "--out", str(out)]
-    return inproc.run(SUPERVISE, *args, *extra, cwd=repo), out
-
-
 def release_plans(out: Path) -> tuple[dict, dict]:
     def load(stem):
         return json.loads(next(out.glob(f"*-{stem}.json")).read_text(encoding="utf-8"))
@@ -181,47 +174,6 @@ def release_plans(out: Path) -> tuple[dict, dict]:
 
 def step(plan: dict, sid: str) -> dict | None:
     return next((s for s in plan["steps"] if s["id"] == sid), None)
-
-
-@pytest.mark.usefixtures("issue_bodies")
-def test_selected_sprint_builds_the_release_branch_and_releases_it_directly(tmp_path):
-    """開発版のデプロイの後・承認資料の前にスプリントブランチだけでリリースブランチを組み、承認資料はその先頭を出す。
-    本番は組んだリリースブランチから作業ツリーを作り、版上げの比べ先を本番チャネルにし、本番チャネルへ直接出す。"""
-    repo = make_repo(tmp_path, SELECTED)
-    p, out = new_sprint(tmp_path, repo)
-    assert p.returncode == 0, p.stdout + p.stderr
-    dev, prod = release_plans(out)
-    build = step(dev, "release-branch")
-    assert build and "--units sprint/s1" in build["cmd"] and "--production main" in build["cmd"]
-    assert step(dev, "verify")["next"] == "release-branch" and build["next"] == "facts"
-    assert f"--head {BRANCH}" in step(dev, "facts")["cmd"] and f"--head {BRANCH}" in step(dev, "others")["cmd"]
-    assert prod["起点のコミット"] == f"origin/{BRANCH}"
-    assert "--base main" in step(prod, "bump")["cmd"]
-    assert "--promotion selected" in step(prod, "release")["cmd"]
-    assert "origin develop" in step(prod, "verify")["cmd"]  # 作業ツリーはベースブランチを追う（本番チャネルは ff で入らない）
-
-
-@pytest.mark.usefixtures("issue_bodies")
-def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
-    """受け入れ条件 2・I2: 宣言が無ければリリースブランチを組まず、本番はベースブランチ経由のまま。"""
-    repo = make_repo(tmp_path)
-    p, out = new_sprint(tmp_path, repo)
-    assert p.returncode == 0, p.stdout + p.stderr
-    dev, prod = release_plans(out)
-    assert step(dev, "release-branch") is None and step(dev, "verify")["next"] == "facts"
-    assert "--head" not in step(dev, "facts")["cmd"] and "--head" not in step(dev, "others")["cmd"]
-    assert "起点のコミット" not in prod
-    assert "--base develop" in step(prod, "bump")["cmd"] and "--promotion" not in step(prod, "release")["cmd"]
-
-
-@pytest.mark.usefixtures("issue_bodies")
-def test_fast_pace_refuses_the_selected_flow(tmp_path):
-    """pace: fast はスプリントブランチを作らないため、選んで集める宣言では計画を書かない。"""
-    repo = make_repo(tmp_path, SELECTED, pace={"version": 1, "fast": {"enabled": True, "modes": ["standard"], "verify": "true"}})
-    p, out = new_sprint(tmp_path, repo, "--pace", "fast")
-    got = json.loads(p.stdout.strip().splitlines()[-1])
-    assert got["status"] == "stopped" and "branch_flow.promotion" in got["summary"]
-    assert not (out / "sprint.json").exists()
 
 
 class _Ops:

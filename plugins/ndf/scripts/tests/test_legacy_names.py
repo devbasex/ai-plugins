@@ -12,11 +12,9 @@ import hashlib
 import importlib.util
 import json
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -27,7 +25,6 @@ sys.path.insert(0, str(SCRIPTS))
 import legacy_names as ln  # noqa: E402
 import pr_mode  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
-from supervise_lib import sprint_waves  # noqa: E402
 
 PY = sys.executable
 SUPERVISE = SCRIPTS / "supervise.py"
@@ -51,23 +48,6 @@ def notices(stderr: str) -> list[str]:
 
 
 # ---------------------------------------------------------------- 入口の引数（AC4・I1）
-
-
-def new_sprint_args(tmp_path: Path, out: Path) -> list[str]:
-    return ["--name", "m9", "--worktree", str(tmp_path), "--issue", "11", "--design", "11", "--version", "10.18.0-dev.1", "--out", str(out)]
-
-
-def test_new_mission_writes_the_same_plans_as_new_sprint(tmp_path):
-    out = tmp_path / "out"
-    new = run(SUPERVISE, "new", "sprint", *new_sprint_args(tmp_path, out))
-    assert new.returncode == 0, new.stdout + new.stderr
-    files = snapshot(out)
-    assert "sprint.json" in files and json.loads(files["sprint.json"])["ブランチ"] == "sprint/m9"
-    shutil.rmtree(out)
-    old = run(SUPERVISE, "new", "mission", *new_sprint_args(tmp_path, out))
-    assert (old.returncode, old.stdout, snapshot(out)) == (new.returncode, new.stdout, files)
-    assert notices(new.stderr) == []
-    assert notices(old.stderr) == [ln.rename_notice("supervise.py new mission", "new sprint")]
 
 
 def test_new_check_with_mission_is_the_same_as_with_sprint(tmp_path):
@@ -139,14 +119,6 @@ def test_old_scripts_are_thin_entries_to_the_table():
 # ---------------------------------------------------------------- 受け付けをやめた後（AC7・I6）
 
 
-def test_refuse_stops_with_two_and_names_the_new_name(capsys):
-    with pytest.raises(SystemExit) as e:
-        ln.rewrite_argv("supervise.py", ["new", "mission"], mode="refuse")
-    assert e.value.code == 2
-    err = capsys.readouterr().err.strip().splitlines()
-    assert err == [ln.refusal("supervise.py new mission", "new sprint")] and "new sprint" in err[0]
-
-
 def test_refuse_does_not_run_the_new_script(tmp_path, monkeypatch, capsys):
     ran = []
     monkeypatch.setattr(ln.os, "execv", lambda *a: ran.append(a))
@@ -154,14 +126,6 @@ def test_refuse_does_not_run_the_new_script(tmp_path, monkeypatch, capsys):
         ln.forward(str(SCRIPTS / "mission-state.py"), mode="refuse")
     assert e.value.code == 2 and ran == []
     assert "sprint-state.py" in capsys.readouterr().err
-
-
-def test_refuse_writes_no_plans(tmp_path, monkeypatch):
-    out = tmp_path / "out"
-    code = f"import legacy_names; legacy_names.MODE = 'refuse'; import runpy, sys; sys.argv = {[str(SUPERVISE), 'new', 'mission', *new_sprint_args(tmp_path, out)]!r}; runpy.run_path({str(SUPERVISE)!r}, run_name='__main__')"
-    p = subprocess.run([PY, "-c", code], capture_output=True, text=True, env={"PYTHONPATH": str(SCRIPTS / "lib"), "PATH": "/usr/bin:/bin"})
-    assert p.returncode == 2 and not out.exists()
-    assert "new sprint" in p.stderr
 
 
 # ---------------------------------------------------------------- 改名の前のプランと記録（AC5・I3）
@@ -212,39 +176,6 @@ def test_old_record_labels_are_read(tmp_path):
 
 
 # ---------------------------------------------------------------- ブランチの頭（AC4・I4）
-
-
-def git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
-
-
-@pytest.fixture
-def repo(tmp_path):
-    r = tmp_path / "repo"
-    r.mkdir()
-    git(r, "init", "-q", "-b", "develop")
-    git(r, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x")
-    sprint_waves._branch_of.cache_clear()
-    return r
-
-
-def branch_for(repo: Path, name: str) -> str:
-    sprint_waves._branch_of.cache_clear()
-    return sprint_waves.sprint_branch(SimpleNamespace(worktree=str(repo), name=name))
-
-
-def test_existing_old_branch_is_kept(repo, capsys):
-    assert branch_for(repo, "m1") == "sprint/m1"
-    git(repo, "branch", "mission/m1")
-    assert branch_for(repo, "m1") == "mission/m1"
-    assert "mission/m1" in capsys.readouterr().err
-    git(repo, "branch", "sprint/m1")
-    assert branch_for(repo, "m1") == "sprint/m1"
-
-
-def test_old_remote_branch_is_kept(repo):
-    git(repo, "update-ref", "refs/remotes/origin/mission/m2", "HEAD")
-    assert branch_for(repo, "m2") == "mission/m2"
 
 
 def test_pr_target_reads_both_prefixes():

@@ -30,10 +30,6 @@ DRIVES = {
     "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
 }
 REFACTOR_VOCABULARY = DRIVES["cross-refactoring"].parent / "refactor_lib" / "vocabulary.py"
-# 設計 PR のレビュー観点の置き場。設計単体のレビューの段はここの観点を読ませ、指示の文へ写さない（#3144 の決定 11）
-REVIEW_FOCUS = DRIVES["cross-review"].parent / "review_lib" / "review_focus.py"
-# 工程の分類（`WF_STAGE_MATRIX`）を持つライブラリ。詳細設計を通るモードはここから引く（#3144 の決定 5）
-WORKFLOW_COMMON = SKILLS / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 
 
@@ -218,24 +214,13 @@ GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
 # 完了判定の設計との突き合わせ（確認 (a) tests・確認 (b) specs。#1241）
 DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
-# 自前で作る決定に外部の調査で比べた候補があるかの検査（#2519）
-DESIGN_SURVEY_PY = f"python3 {HERE / 'design-survey.py'}"
 DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
-# 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
-PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
 # PR を送ってから Draft を外す。push が落ちたら gh pr ready へ進まず止まる（`;` でつなぐと落ちても ready になる。#1908）
 READY = "sh -c 'git push -q && gh pr ready {pr}'"
-# 設計のプランの Draft 外し。push は直前の push-glossary（on_fail 無し）が済ませ、落ちればここへ来ない。
-# レビューの駆動が落ちた経路では別の場所の直しに追いついていない HEAD を送らない
-DESIGN_READY = "gh pr ready {pr}"
-# PR を作った直後に本文の「決めたこと」を確かめる。pr のステップ（decisions）が作る時点で揃えるため、
-# 揃っていれば書き込まず（本文の編集で CI を再起動しない）、揃わなかったときだけ直す
-SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
 PARALLEL_PY = f"python3 {HERE / 'parallel.py'}"  # 並列の計画と進行（#2436）
-WORKTREE_SETUP = SELF.parent / "worktree-setup.sh"
 
 
 def report_result(text: str) -> str:

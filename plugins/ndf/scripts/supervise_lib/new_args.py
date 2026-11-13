@@ -232,6 +232,7 @@ NEW_ARGS = [
         },
         "release",
     ),
+    ("--state", {"help": "prod: リリース承認ゲートの利用者の承認の記録を読むスプリントの状態（先頭の approve が読む）"}, "release"),
     (
         "--level",
         {

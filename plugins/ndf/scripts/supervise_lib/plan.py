@@ -218,7 +218,6 @@ GitHub から読み、段階が本番かデプロイなしで `スプリント:`
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
@@ -231,11 +230,6 @@ QUEUE_NAMED = re.compile(r"\{queue_(?:pr|state):[A-Za-z0-9._-]+\}|\{queue_record
 def leftover_placeholders(text: str) -> list[str]:
     """置き換わらずに残った {queue_pr:<名>}・{queue_state:<名>}・{queue_record}（出た順、重なりは 1 つ。#2079・#2230）。"""
     return list(dict.fromkeys(QUEUE_NAMED.findall(text or "")))
-
-
-def sprint_state_path(a) -> str:
-    """スプリントの状態ファイルの絶対パス。"""
-    return str(Path(a.state).resolve())
 
 
 def _part_prompt(base_prompt: str, i: int, parts: list[dict]) -> str:

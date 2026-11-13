@@ -14,7 +14,6 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import revise_note as rn  # noqa: E402
-from supervise_lib import sprint_waves  # noqa: E402
 
 
 def row(note="- 絞る", by=None, count=1, at="2026-11-05T00:00:00Z", missing=None):
@@ -142,33 +141,6 @@ def input_file(tmp_path, *notes):
     p = tmp_path / "revise-42.json"
     p.write_text(json.dumps(data_of(*notes), ensure_ascii=False))
     return str(p)
-
-
-def test_a_plan_with_notes_always_runs_requirements_and_carries_every_round(tmp_path):
-    path = input_file(tmp_path, "- 第一の指摘", "- 第二の指摘")
-    ds = steps_of(sprint_waves.plan_mvv_design(plan_args(tmp_path, {42: path}), 42, str(tmp_path)))
-    assert "requirements-check" not in ds and ds["glossary"]["next"] == "requirements"
-    for sid in ("requirements", "design"):
-        assert "第一の指摘" in ds[sid]["prompt"] and "第二の指摘" in ds[sid]["prompt"] and rn.ASK in ds[sid]["prompt"]
-    assert rn.TABLE in ds["design"]["prompt"] and rn.TABLE not in ds["requirements"]["prompt"]
-    assert ds["push-glossary"]["next"] == "revise-check" and ds["revise-check"]["next"] == "mvv"
-    assert ds["revise-check"]["gate_next"] == "end" and f"--notes {path}" in ds["revise-check"]["cmd"]
-    assert f"--revise-note {path}" in ds["mvv"]["cmd"] and ds["push-glossary-gate"]["next"] == "ready"
-
-
-def test_the_base_plan_with_notes_goes_on_to_ready_after_the_check(tmp_path):
-    path = input_file(tmp_path, "- 指摘")
-    ds = steps_of(sprint_waves.plan_sprint_design(plan_args(tmp_path, {42: path}), 42, str(tmp_path)))
-    assert ds["push-glossary"]["next"] == "revise-check" and ds["revise-check"]["next"] == "ready"
-
-
-def test_a_plan_without_notes_is_unchanged(tmp_path):
-    plain = sprint_waves.plan_mvv_design(plan_args(tmp_path), 42, str(tmp_path))
-    other = input_file(tmp_path, "- 別の課題の指摘")
-    assert plain == sprint_waves.plan_mvv_design(plan_args(tmp_path, {43: other}), 42, str(tmp_path))
-    ds = steps_of(plain)
-    assert ds["glossary"]["next"] == "requirements-check" and ds["requirements-check"]["next"] == "design" and "revise-check" not in ds
-    assert "--revise-note" not in ds["mvv"]["cmd"] and "指摘の全回" not in ds["design"]["prompt"]
 
 
 def run_check(tmp_path, doc: str, body: str = "") -> tuple[int, dict]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -25,7 +24,6 @@ from supervise_lib import commands, engine, pr as pr_step  # noqa: E402
 from supervise_lib.verify_steps import RECLAIM_LIMIT, with_margin  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sprint_args import new_sprint_args  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -52,87 +50,7 @@ def plain_repo(tmp_path, release=None):
     return root
 
 
-def new_sprint(root, out, *extra):
-    return cli(*new_sprint_args(root, out, *extra, name="m6", issue=("216", "247"), design=("216",), version="3.8.0-dev.1"), cwd=root)
-
-
 # --- #1192: リリースの雛形の無い形 -------------------------------------------------
-
-
-@pytest.mark.parametrize("release", [None, {"form": "merge"}])
-def test_new_sprint_without_release_template_writes_until_check(tmp_path, release):
-    root = plain_repo(tmp_path, release)
-    out = tmp_path / "m"
-    p = new_sprint(root, out)
-    assert p.returncode == 0, p.stderr
-    res = json.loads(p.stdout)
-    assert res["status"] == "ok" and "/ndf:release" in res["next"]
-    manifest = json.loads((out / "sprint.json").read_text())
-    names = [w["name"] for w in manifest["ステージ"]]
-    assert names == ["設計", "設計承認ゲート", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "リリース"]
-    last = manifest["ステージ"][-1]
-    assert last["manual"] == "/ndf:release" and "plans" not in last and "command" not in last
-    assert any(it.get("manual") == "/ndf:release" for it in res["items"])
-    waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert waves["設計 PR のマージ"]["command"].endswith(" ".join(waves["検査"]["plans"]))  # 検査の後に流す計画は無い
-
-
-def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    out = tmp_path / "m"
-    p = new_sprint(root, out)
-    assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names[-1] == "デプロイ" and "/ndf:release" not in json.loads(p.stdout)["next"]
-    assert "production_branch" in json.loads(p.stdout)["next"]  # 本番のブランチが無いので本番を置かない（#1914 の決定 3）
-
-
-def test_normal_sprint_without_a_production_branch_keeps_gate_2_on_the_release(tmp_path):
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    state = tmp_path / "state.json"
-    state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    out = tmp_path / "m"
-    p = new_sprint(root, out, "--state", str(state))
-    assert p.returncode == 0, p.stdout + p.stderr
-    last = json.loads((out / "sprint.json").read_text())["ステージ"][-1]
-    assert last["name"] == "デプロイ" and "--by user" in last["note"]
-
-
-def close_cli(root, out, *extra):
-    return cli(
-        "new",
-        "close",
-        "--name",
-        "m6",
-        "--worktree",
-        str(root),
-        "--issue",
-        "216",
-        "--state",
-        str(root / "s.json"),
-        "--out",
-        str(out),
-        *extra,
-        cwd=root,
-    )
-
-
-@pytest.mark.parametrize("delivery", [None, {"unknown": "CI の設定を読めない"}])
-def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
-    """#1336 の AC5: delivery が無い・不明でも止まらず、手で行うデプロイのステージが入り、理由が note に出る。"""
-    root = plain_repo(tmp_path)
-    if delivery is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}, ensure_ascii=False))
-    out = tmp_path / "c"
-    p = close_cli(root, out)
-    assert p.returncode == 0, p.stderr
-    manifest = json.loads((out / "sprint.json").read_text())
-    assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "リリース"]
-    note = manifest["ステージ"][2]["note"]
-    assert "delivery" in note and ("不明" in note if delivery else "無い" in note)
-    close = json.loads(Path(manifest["ステージ"][0]["plans"][0]).read_text())
-    assert "--record-pr {queue_record} " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")  # #2230
-    assert "unknown" not in json.dumps(close["steps"], ensure_ascii=False)
 
 
 VERSION_LIKE = re.compile(r"\b\d+\.\d+\.\d+(?:-(?:dev|rc)\.\d+)?\b")
@@ -140,30 +58,6 @@ VERSION_LIKE = re.compile(r"\b\d+\.\d+\.\d+(?:-(?:dev|rc)\.\d+)?\b")
 
 def release_plans(out: Path) -> dict[str, dict]:
     return {f.stem: json.loads(f.read_text()) for f in sorted(out.glob("*release*.json"))}
-
-
-def test_new_sprint_and_close_without_versions_write_no_version(tmp_path):
-    """#2164 の受け入れ条件 1・I1: 版を渡さずに作ったプランと sprint.json は具体的な版を持たず、作業場所・branch・承認資料は
-    版の差し込みで書く。本番は開発版のプラン release の版の記録を読む（系列）。"""
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", "production_branch": "live"}\n')
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(root, out, "--level", "minor", name="m6", issue=("216",), version=None), cwd=root)
-    assert p.returncode == 0, p.stderr
-    c = close_cli(root, tmp_path / "c")
-    assert c.returncode == 0, c.stderr
-    for d in (out, tmp_path / "c"):
-        assert not VERSION_LIKE.search((d / "sprint.json").read_text())
-        plans = release_plans(d)
-        assert plans, d
-        for name, plan in plans.items():
-            assert not VERSION_LIKE.search(json.dumps(plan, ensure_ascii=False)), name
-            assert plan["branch"] == "release/v{release_version}" and plan["作業場所"].endswith("/release/v{release_version}")
-            prod = plan["版"]["チャネル"] == "prod"
-            assert plan["版"]["明示"] is None and plan["版"]["系列"] == ("release" if prod else None)
-            approval = "approval-foo-v{release_base}.md"
-            assert approval in json.dumps(plan["steps"], ensure_ascii=False), name
-    assert {p["版"]["上げ幅"] for p in release_plans(out).values()} == {"minor"}
 
 
 SAMPLES = {
@@ -204,100 +98,7 @@ SAMPLES = {
 CLOSE_STAGES = {"carmo-system-console": ["導入の確認", "CD の結果"], "carmo-contractors-app": ["導入の確認", "CD の結果", "リリース"]}
 
 
-@pytest.mark.parametrize("name", list(SAMPLES))
-def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
-    """#1336 の AC3・AC4・AC11: 版数の無い宣言で new sprint と new close が --version・--prod・release.form 無しで通り、
-    経路に合ったステージだけが検査の後に入る（ベースブランチへのマージで届く経路とデプロイしない宣言は置かない）。"""
-    wt, rows, expected, stages = SAMPLES[name]
-    root = plain_repo(tmp_path)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
-    (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
-    (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), cwd=root)
-    assert p.returncode == 0, p.stderr
-    manifest = json.loads((out / "sprint.json").read_text())
-    assert [(r["route"], r["stage"]) for r in manifest["リリースの経路"]] == expected
-    names = [w["name"] for w in manifest["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", *stages]
-    if "本番" in stages:
-        promote = json.loads(Path(manifest["ステージ"][3]["plans"][0]).read_text())
-        cmds = {s["id"]: s.get("cmd") for s in promote["steps"]}
-        assert "promote --head develop --base main" in cmds["promote"] and "--gate-approved" not in cmds["promote"]
-        assert cmds["promote-approved"].endswith("--gate-approved user")
-        assert manifest["ステージ"][3]["then_of"] == "スプリントブランチ"  # 設計承認ゲートの後は 1 本の --then（#1426）
-    close_out = tmp_path / "c"
-    p = close_cli(root, close_out)
-    assert p.returncode == 0, p.stderr
-    closing = json.loads((close_out / "sprint.json").read_text())
-    assert [w["name"] for w in closing["ステージ"]] == ["まとめ", "最終の検査", *CLOSE_STAGES.get(name, stages)]
-
-
 # --- #1193: 設計のプランの入口 --------------------------------------------------------
-
-
-def design_plan(tmp_path):
-    root = plain_repo(tmp_path)
-    out = tmp_path / "m"
-    assert new_sprint(root, out).returncode == 0
-    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    return json.loads(Path(waves["設計"]["plans"][0]).read_text())
-
-
-def test_design_plan_sets_up_glossary_and_requirements_before_design(tmp_path):
-    plan = design_plan(tmp_path)
-    ids = [s["id"] for s in plan["steps"]]
-    assert ids[:4] == ["glossary", "requirements-check", "requirements", "design"]
-    st = {s["id"]: s for s in plan["steps"]}
-    assert "design-glossary" in st["glossary"]["cmd"] and "{state_dir}" in st["glossary"]["cmd"]
-    assert st["glossary"]["next"] == "requirements-check"
-    chk = st["requirements-check"]
-    assert "spec-copy.py check 216 issues/issue-216-requirements.md" in chk["cmd"]
-    assert chk["next"] == "design" and chk["on_fail"] == "requirements"  # 本文にあれば要求を飛ばす
-    req = st["requirements"]
-    assert req["type"] == "work" and req["full"] and "/ndf:requirements-design #216" in req["prompt"]
-    assert req["next"] == "design"
-    assert [s["id"] for s in plan["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートを増やさない
-    assert any("glossary-candidates" in f for f in st["pr"]["append"])
-
-
-def test_design_plan_rebuilds_the_design_document_before_the_pr(tmp_path):
-    """設計の worker は push しない指示で組み直しの手前で止まるため、プランが組み直しのステップを持つ。
-    standard では詳細設計の段の後に組み直す（#3144）。"""
-    plan = design_plan(tmp_path)
-    st = {s["id"]: s for s in plan["steps"]}
-    assert st["detail-design"]["next"] == "rebuild"
-    rb = st["rebuild"]
-    assert rb["type"] == "work" and rb["stage"] == "ドキュメント再構成" and rb["next"] == "pr"
-    assert "/ndf:document-rebuild" in rb["prompt"] and "issues/issue-216-design.md" in rb["prompt"]
-
-
-def test_design_plan_stops_when_the_review_fix_edits_only_the_requirements_copy(tmp_path, monkeypatch):
-    """#1769: レビューの直しの後の requirements-recheck は、写しだけを書き換えた状態で止まる（本文に合えば先へ進む）。"""
-    st = {s["id"]: s for s in design_plan(tmp_path)["steps"]}
-    steps = [dict(st["requirements-recheck"], next="after"), {"id": "after", "type": "run", "cmd": "true", "next": "end"}]
-    bindir = tmp_path / "spec-gh"
-    bindir.mkdir()
-    view = bindir / "view.json"
-    view.write_text(json.dumps({"title": "題", "body": "## 受け入れ条件\n\n- [ ] 1. 動く\n"}, ensure_ascii=False))
-    (bindir / "gh").write_text(f'#!/bin/bash\n[ "$2" = view ] && cat {view}\n')
-    (bindir / "gh").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    wt = tmp_path / "wt"
-    wt.mkdir()
-    subprocess.run([PY, str(SCRIPTS / "spec-copy.py"), "write", "216", "issues/issue-216-requirements.md"], cwd=wt, check=True)
-
-    def run(name):
-        e = engine.Engine({"フェーズ": "試験", "課題": [216], "作業場所": str(wt), "steps": steps}, tmp_path / name)
-        return e, e.run()
-
-    e, _ = run("same")
-    assert [x["id"] for x in e.state.log] == ["requirements-recheck", "after"]
-    copy = wt / "issues" / "issue-216-requirements.md"
-    copy.write_text(copy.read_text().replace("1. 動く", "1. 速く動く"))  # 写しだけを直した
-    e, text = run("differs")
-    assert [x["id"] for x in e.state.log] == ["requirements-recheck"]
-    assert "requirements-recheck が失敗した" in text
 
 
 def glossary_repo(tmp_path):
@@ -414,15 +215,6 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
 # --- #1194: 種別ごとの help ------------------------------------------------------------
 
 
-def test_new_sprint_help_shows_only_its_arguments_and_declarations(tmp_path):
-    p = cli("new", "sprint", "--help", cwd=tmp_path)
-    assert p.returncode == 0
-    for word in ("--design", "--version", "base_branch", "test.command", "release.form", "/ndf:release"):
-        assert word in p.stdout, word
-    for word in ("--prs", "--channel", "--title", "--since-last"):
-        assert word not in p.stdout, word
-
-
 def test_new_impl_help_differs_from_sprint(tmp_path):
     impl = cli("new", "impl", "--help", cwd=tmp_path).stdout
     assert "--tests" in impl and "--test-cmd" in impl and "--design" not in impl and "--channel" not in impl
@@ -439,14 +231,6 @@ def test_every_new_argument_has_help(tmp_path):
                 # 引数の名前だけの行は、次の行に説明が続く
                 nxt = opts[i + 1].strip() if i + 1 < len(opts) else ""
                 assert nxt and not nxt.startswith("-"), (kind, s)
-
-
-def test_top_help_has_phase_table(tmp_path):
-    out = cli("--help", cwd=tmp_path).stdout
-    for kind in ("new sprint", "new impl", "new fix", "new check", "new release", "new close"):
-        assert kind in out, kind
-    for sub in ("run", "queue", "wait"):
-        assert cli(sub, "--help", cwd=tmp_path).stdout.count("\n") > 5, sub
 
 
 # --- #1142: 即時修正のプラン（不足 a） --------------------------------------------------
@@ -727,25 +511,9 @@ def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
     assert plan["base_branch"] == "develop"
 
 
-def test_a_lint_test_cmd_never_builds_a_whole_test_on_the_dot(tmp_path):
-    """#1483 AC18 — 静的解析の `--test-cmd` は `{paths}` を `.` にした全体テストを組まず、`--tests` の範囲を `test-run.py` へ渡す。"""
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    out = tmp_path / "m"
-    p = new_sprint(root, out, "--test-cmd", "shellcheck -s bash {paths}", "--test-kind", "lint", "--tests", "scripts/a.sh")
-    assert p.returncode == 0, p.stderr
-    wholes = [
-        s["cmd"]
-        for f in sorted(out.glob("*.json"))
-        for s in json.loads(f.read_text()).get("steps") or []
-        if "test-run.py whole" in str(s.get("cmd"))
-    ]
-    assert wholes and all("--test-kind lint" in c and "--paths scripts/a.sh --limit {test_limit:whole_timeout:" in c for c in wholes)
-
-
 # --- #1437: 戦略の注記を計画の作成の時点で標準エラーへ出す ---------------------------------
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
-import test_strategy as ts  # noqa: E402
 
 PYTEST_SUITE = {"version": 1, "test": {"suites": [{"name": "py", "runner": "pytest", "command": "pytest -q"}]}}
 
@@ -768,41 +536,6 @@ def _wholes(out):
         for s in json.loads(f.read_text()).get("steps") or []
         if "test-run.py whole" in str(s.get("cmd"))
     ]
-
-
-def test_a_whole_test_from_the_template_is_reported_once_when_planning(tmp_path):
-    """#1437 AC3・I5 — 宣言が無く種別 test の雛形なら、注記が標準エラーにちょうど 1 度出て、終了コードは宣言ありと同じ。"""
-    root = _repo_1437(tmp_path)
-    p = new_sprint(root, tmp_path / "m", "--test-cmd", "shellcheck -s bash {paths}", "--tests", "a.sh")
-    declared = new_sprint(
-        _repo_1437(tmp_path / "d", PYTEST_SUITE), tmp_path / "d" / "m", "--test-cmd", "shellcheck -s bash {paths}", "--tests", "a.sh"
-    )
-    assert p.returncode == declared.returncode == 0, p.stderr + declared.stderr
-    assert p.stderr.count(ts.WHOLE_FROM_TEMPLATE) == 1
-    assert ts.WHOLE_FROM_TEMPLATE not in declared.stderr
-
-
-def test_a_declared_lint_run_fills_the_whole_lint_with_the_tests(tmp_path):
-    """#1437 AC5 — 宣言あり・`--test-kind lint`・`--tests` の計画は、`test-all` に範囲を渡し、静的解析の全体テストをそのパスで埋める。"""
-    path = "images/redmine7/postresync.sh"
-    template = "uvx --from shellcheck-py shellcheck -s bash {paths}"
-    out = tmp_path / "m"
-    p = new_sprint(_repo_1437(tmp_path, PYTEST_SUITE), out, "--test-cmd", template, "--test-kind", "lint", "--tests", path)
-    assert p.returncode == 0, p.stderr
-    wholes = _wholes(out)
-    assert wholes and all(f"--paths {path}" in c for c in wholes)
-    s = ts.resolve(PYTEST_SUITE, baseline_test=template, template_kind="lint", scope_paths=[path])
-    assert [x.command for x in s.suites if x.kind == "lint"] == [f"uvx --from shellcheck-py shellcheck -s bash {path}"]
-
-
-def test_every_strategy_note_is_reported_once_when_planning(tmp_path):
-    """#1437 D3・I5 — `--test-kind lint` で範囲のパスが無ければ `NO_LINT_WHOLE` も 1 度出て、終了コードはパスがあるときと同じ。"""
-    args = ("--test-cmd", "shellcheck -s bash {paths}", "--test-kind", "lint")
-    p = new_sprint(_repo_1437(tmp_path, PYTEST_SUITE), tmp_path / "m", *args)
-    with_paths = new_sprint(_repo_1437(tmp_path / "w", PYTEST_SUITE), tmp_path / "w" / "m", *args, "--tests", "a.sh")
-    assert p.returncode == with_paths.returncode == 0, p.stderr + with_paths.stderr
-    assert p.stderr.count(ts.NO_LINT_WHOLE) == 1
-    assert ts.NO_LINT_WHOLE not in with_paths.stderr
 
 
 # 現状固定: new_args.check_new の引数の組の判定（I-012）。止まるときは ap.error の文言と終了コード 2。
@@ -905,205 +638,17 @@ def test_check_new_check_reports_since_last_with_pr_before_missing_id(capsys):
 # --- #2623: デプロイとリリースを CD で解く -----------------------------------------
 
 
-def cd_sprint(tmp_path, wt, rows, *extra, name="r"):
-    """宣言の形ごとの作業用のリポジトリで new sprint を打ち、(目録, プランの並び) を返す。"""
-    root = plain_repo(tmp_path / name if (tmp_path / name).mkdir() is None else tmp_path)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
-    if rows is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
-    (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
-    out = tmp_path / name / "m"
-    p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), *extra, cwd=root)
-    assert p.returncode == 0, p.stderr
-    manifest = json.loads((out / "sprint.json").read_text())
-    plans = [json.loads(Path(x).read_text()) for e in manifest["ステージ"] for x in e.get("plans", [])]
-    return manifest, plans, json.loads(p.stdout)
-
-
 TWO_BRANCHES = {"base_branch": "develop", "production_branch": "main"}
 ONE_BRANCH = {"base_branch": "main", "production_branch": "main"}
 CD_ROW = {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "branch": "main", "versioned": False}
 HAND_ROW = {"target": "aws", "kind": "manual", "trigger": "cdk deploy", "versioned": False}
 
 
-@pytest.mark.parametrize("wt", [TWO_BRANCHES, ONE_BRANCH])
-def test_cd_form_has_no_step_that_bumps_tags_or_publishes(tmp_path, wt):
-    """受け入れ条件 2・I1: CD の形のプランに版上げ・変更履歴・タグ・GitHub Release のコマンドが無い。"""
-    _, plans, _ = cd_sprint(tmp_path, wt, [CD_ROW])
-    cmds = [s.get("cmd") or "" for p in plans for s in p["steps"]]
-    for word in ("release-steps.py bump", "release-steps.py changelog", " tag ", "release create", "release-steps.py publish"):
-        assert not [c for c in cmds if word in c], word
-
-
-def test_promote_plan_reads_the_cd_result_after_the_merge_and_stops_on_failure(tmp_path):
-    _, plans, _ = cd_sprint(tmp_path, TWO_BRANCHES, [CD_ROW])
-    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（本番チャネルへのマージ）")["steps"]}
-    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
-    assert "cd-result --base main --head develop" in steps["cd-result"]["cmd"] and steps["cd-result"]["next"] == "record"
-    assert "--cd-result {state_dir}/work/cd-result.json" in steps["record"]["cmd"] and steps["record"]["on_exit"] == {"5": "stop"}
-
-
-def test_direct_production_branch_gets_the_cd_result_stage(tmp_path):
-    """決定 9: ベースブランチが本番チャネルなら本番チャネルへ入れるリリースプランが無いため、CD の結果のステージが記録を書く。"""
-    manifest, plans, _ = cd_sprint(tmp_path, ONE_BRANCH, [CD_ROW])
-    assert [w["name"] for w in manifest["ステージ"]][-1] == "CD の結果"
-    steps = {s["id"]: s for s in next(p for p in plans if p["フェーズ"] == "リリース（CD の結果）")["steps"]}
-    assert "cd-result --base main --prs {queue_prs} --out" in steps["cd-result"]["cmd"] and "--head" not in steps["cd-result"]["cmd"]
-    assert "record --merged --base main" in steps["record"]["cmd"]
-
-
-def test_a_base_channel_cd_on_another_branch_has_no_cd_result_stage(tmp_path):
-    row = {**CD_ROW, "branch": "develop"}
-    manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, [row])
-    assert "CD の結果" not in [w["name"] for w in manifest["ステージ"]]
-
-
-def test_guidance_goes_to_the_manifest_and_items_without_changing_the_stages(tmp_path):
-    """受け入れ条件 9・13: 案内の有無でステージの数と終了コードが変わらない。"""
-    without, _, res_a = cd_sprint(tmp_path, TWO_BRANCHES, [{**HAND_ROW, "manual_reason": "人が確かめる"}], name="a")
-    guided, _, res_b = cd_sprint(tmp_path, TWO_BRANCHES, [HAND_ROW], name="b")
-    assert "CD の案内" not in without and guided["CD の案内"]["rows"] == ["aws"]
-    assert [w["name"] for w in without["ステージ"]] == [w["name"] for w in guided["ステージ"]]
-    assert [i for i in res_b["items"] if i.get("kind") == "cd-guidance"] and not [
-        i for i in res_a["items"] if i.get("kind") == "cd-guidance"
-    ]
-    assert len(res_b["items"]) == len(res_a["items"]) + 1
-
-
-def test_guidance_is_not_given_to_a_documentation_sprint(tmp_path):
-    """I7: documentation の提出は CD の定義に含めない。"""
-    manifest, _, res = cd_sprint(tmp_path, TWO_BRANCHES, None, "--mode", "documentation")
-    assert "CD の案内" not in manifest and not [i for i in res["items"] if i.get("kind") == "cd-guidance"]
-
-
-def test_guidance_is_given_when_delivery_is_missing(tmp_path):
-    manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, None)
-    assert "delivery" in manifest["CD の案内"]["missing"]
-
-
 # --- #3144: 設計単体のレビューと詳細設計の段 ----------------------------------------------
 
-from argparse import Namespace  # noqa: E402
-
-from supervise_lib import design_steps, procedures, sprint_revise  # noqa: E402
-from supervise_lib.decl import DeclError  # noqa: E402
 
 DETAIL_ROUTE = ["design", "design-review", "design-review-check", "design-fix", "detail-design", "rebuild"]
 DETAIL_IDS = {"design-review", "design-review-check", "design-fix", "detail-design"}
-
-
-@pytest.fixture()
-def fresh_stage_class():
-    design_steps._stage_class.cache_clear()
-    yield
-    design_steps._stage_class.cache_clear()
-
-
-def _writing(mode: str) -> dict[str, dict]:
-    copy = "issues/issue-216-requirements.md"
-    return {s["id"]: s for s in design_steps.writing_steps(Namespace(mode=mode), 216, copy, design_steps.detail_design_runs(mode))}
-
-
-def test_the_standard_design_plan_reviews_the_design_before_the_detail(tmp_path):
-    """受け入れ条件 8・10、I7・I8・I10: design → design-review → check →（指摘ありなら fix）→ detail-design → rebuild。"""
-    plan = design_plan(tmp_path)
-    ids = [s["id"] for s in plan["steps"]]
-    assert ids[ids.index("design") : ids.index("rebuild") + 1] == DETAIL_ROUTE
-    st = {s["id"]: s for s in plan["steps"]}
-    assert st["design"]["next"] == "design-review" and st["design-review"]["next"] == "design-review-check"
-    assert st["design-review-check"]["on_exit"] == {"1": "design-fix"} and st["design-review-check"]["next"] == "detail-design"
-    assert st["design-fix"]["next"] == "detail-design"  # 直した後にレビューを打ち直さない
-    assert [st[k]["stage"] for k in ("design-review", "design-review-check", "design-fix")] == ["設計"] * 3
-    assert st["detail-design"]["stage"] == "詳細設計" and st["detail-design"]["next"] == "rebuild"
-    assert "/ndf:design #216 詳細設計" in st["detail-design"]["prompt"]
-    assert st["survey-check"]["cmd"].endswith("--require-detail") and st["survey-recheck"]["cmd"] == st["survey-check"]["cmd"]
-    assert [s["id"] for s in plan["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートを増やさない
-    assert design_steps.DESIGN_REVIEW_NOTE in st["pr"]["append"]
-
-
-@pytest.mark.parametrize("mode", ["standard", "legacy-refactor"])
-def test_the_detail_steps_follow_the_stage_matrix(mode):
-    st = _writing(mode)
-    assert DETAIL_IDS <= set(st) and st["design"]["next"] == "design-review"
-
-
-@pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
-def test_modes_without_the_detail_stage_keep_their_design_steps(mode):
-    """受け入れ条件 9: 詳細設計を通らないモードは design から rebuild へ進み、4 段も --require-detail も持たない。"""
-    st = _writing(mode)
-    assert not DETAIL_IDS & set(st) and st["design"]["next"] == "rebuild"
-    assert "詳細設計" not in st["design"]["prompt"]
-    assert not any("--require-detail" in s.get("cmd", "") for s in procedures.survey_steps(216, "glossary-check"))
-
-
-def _matrix_copy(tmp_path, edit) -> Path:
-    """工程の分類だけを `edit` で書き換えた写し。本物を読んでから `WF_STAGE_MATRIX` を上書きする（隣のファイルを読むため）。"""
-    src = design_steps.WORKFLOW_COMMON.read_text(encoding="utf-8")
-    matrix = re.search(r"^WF_STAGE_MATRIX=\$'[^']*'", src, re.M).group(0)
-    dst = tmp_path / "workflow-common.sh"
-    dst.write_text(f". '{design_steps.WORKFLOW_COMMON}'\n{edit(matrix)}\n", encoding="utf-8")
-    return dst
-
-
-def test_the_modes_come_from_the_stage_matrix(tmp_path, monkeypatch, fresh_stage_class):
-    """決定 5: 工程の分類の写しで light の「詳細設計」を R にすると、light にも 4 段が並ぶ。"""
-    lib = _matrix_copy(tmp_path, lambda s: s.replace("詳細設計\\t-\\t-\\tR", "詳細設計\\tR\\t-\\tR", 1))
-    monkeypatch.setattr(design_steps, "WORKFLOW_COMMON", lib)
-    assert DETAIL_IDS <= set(_writing("light"))
-
-
-@pytest.mark.parametrize("broken", ["no-row", "no-file", "unknown-mode"])
-def test_an_unreadable_stage_matrix_stops_the_plan(tmp_path, monkeypatch, fresh_stage_class, broken):
-    mode = "standard"
-    if broken == "no-row":
-        lib = _matrix_copy(tmp_path, lambda s: re.sub(r"\n詳細設計\\t[^\n]*", "", s, count=1))
-    elif broken == "no-file":
-        lib = tmp_path / "missing.sh"
-    else:
-        lib, mode = design_steps.WORKFLOW_COMMON, "bogus"
-    monkeypatch.setattr(design_steps, "WORKFLOW_COMMON", lib)
-    with pytest.raises(DeclError):
-        design_steps.detail_design_runs(mode)
-
-
-def test_the_stage_matrix_is_read_once_per_mode(monkeypatch, fresh_stage_class):
-    calls = []
-    real = subprocess.run
-    monkeypatch.setattr(design_steps.subprocess, "run", lambda *a, **k: calls.append(a) or real(*a, **k))
-    assert design_steps.detail_design_runs("standard") and design_steps.detail_design_runs("standard")
-    assert not design_steps.detail_design_runs("light")
-    assert len(calls) == 2
-
-
-@pytest.mark.parametrize(
-    "body,code",
-    [
-        ("## 設計単体のレビュー\n\n- 無し\n", 0),
-        ("## 設計単体のレビュー\n\n| # | 箇所 | 指摘 | 扱い |\n| --- | --- | --- | --- |\n| 1 | 構成要素 | - 無し と書いた | 未 |\n", 1),
-        (None, 2),
-    ],
-)
-def test_the_review_check_branches_on_the_review_file(tmp_path, body, code):
-    """受け入れ条件 10（分岐）: 「- 無し」の 1 行で 0、指摘の表だけで 1、ファイルが無ければ 2。"""
-    (tmp_path / "work").mkdir()
-    if body is not None:
-        (tmp_path / "work" / "design-review.md").write_text(body, encoding="utf-8")
-    cmd = {s["id"]: s for s in design_steps.detail_steps(216)}["design-review-check"]["cmd"].replace("{state_dir}", str(tmp_path))
-    assert subprocess.run(["sh", "-c", cmd]).returncode == code
-
-
-def test_the_design_review_reads_only_the_design_focus():
-    """受け入れ条件 5: 詳細設計の 6 観点は設計 PR の観点に入り、設計単体のレビューが読む 2 つの定数には入らない。"""
-    sys.path.insert(0, str(SCRIPTS.parent / "skills" / "cross-review" / "scripts"))
-    from review_lib import review_focus  # noqa: PLC0415
-
-    detail = review_focus.DETAIL_REVIEW_TEMPLATE.splitlines()[1:]
-    assert len(detail) == 6
-    assert all(line in review_focus.CATEGORY_TEMPLATES["design"] for line in detail)
-    for template in (review_focus.MODEL_REVIEW_TEMPLATE, review_focus.DESIGN_REVIEW_TEMPLATE):
-        assert not any(line in template for line in detail)
-    prompt = {s["id"]: s for s in design_steps.detail_steps(216)}["design-review"]["prompt"]
-    assert str(design_steps.REVIEW_FOCUS) in prompt and "MODEL_REVIEW_TEMPLATE" in prompt and "DESIGN_REVIEW_TEMPLATE" in prompt
 
 
 def _revise_plan(with_detail: bool) -> dict:
@@ -1116,16 +661,3 @@ def _revise_plan(with_detail: bool) -> dict:
         {"id": "push-glossary", "next": "ready"},
     ]
     return {"steps": steps}
-
-
-@pytest.mark.parametrize("with_detail", [True, False])
-def test_the_revise_note_reaches_the_detail_step(monkeypatch, with_detail):
-    monkeypatch.setattr(sprint_revise.revise_note, "read_input", lambda path: {"rounds": []})
-    monkeypatch.setattr(sprint_revise.revise_note, "prompt_text", lambda data, doc=None: "出し直しの指摘")
-    plan = sprint_revise.with_revise_note(
-        _revise_plan(with_detail), Namespace(revise_notes={216: "n.json"}), 216, "issues/issue-216-design.md"
-    )
-    st = {s["id"]: s for s in plan["steps"]}
-    assert st["design"]["prompt"].endswith("出し直しの指摘")
-    if with_detail:
-        assert st["detail-design"]["prompt"].endswith("出し直しの指摘")

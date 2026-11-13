@@ -35,8 +35,6 @@
   },
   "callers": [
     "plugins/ndf/scripts/lib/design_docs.py",
-    "plugins/ndf/scripts/supervise_lib/paths.py",
-    "plugins/ndf/scripts/supervise_lib/procedures.py",
     "plugins/ndf/skills/design/SKILL.md",
     "plugins/ndf/skills/design/references/decisions.md"
   ]

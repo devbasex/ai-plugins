@@ -15,7 +15,6 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 STEPS = SCRIPTS / "release-steps.py"
@@ -23,8 +22,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import queue, release_templates  # noqa: E402
-from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
+from test_supervise_pace_auto import load, steps_of  # noqa: E402
 from test_supervise_pace_manual import commit_all  # noqa: E402
 
 MODES = ["light", "standard", "legacy-refactor"]
@@ -51,23 +49,6 @@ def make_repo(tmp_path: Path, rows, auto: str = "echo check-stg", fast: str = "e
     return repo
 
 
-def new_sprint(tmp_path, repo, pace: str | None = "auto"):
-    out = tmp_path / "m"
-    args = ["new", "sprint", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--out", str(out)]
-    if pace:
-        args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
-    p = inproc.run(SUPERVISE, *args, cwd=repo)
-    assert p.returncode == 0, p.stdout + p.stderr
-    return load(out / "sprint.json")["ステージ"]
-
-
-def new_close(tmp_path, repo):
-    out = tmp_path / "c"
-    args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--state", str(sprint_state(tmp_path, "auto"))]
-    p = inproc.run(SUPERVISE, *args, "--out", str(out), cwd=repo)
-    return p, out
-
-
 def plans_of(waves) -> list[dict]:
     return [load(p) for w in waves for p in w.get("plans", [])]
 
@@ -78,51 +59,6 @@ def verify_steps(waves) -> list[dict]:
 
 def wave(waves, name) -> dict:
     return next(w for w in waves if w["name"] == name)
-
-
-@pytest.mark.parametrize("pace, used, other", [("auto", "check-stg", "smoke-stg"), ("fast", "smoke-stg", "check-stg")])
-def test_the_promote_plan_verifies_before_the_mvv_judge(tmp_path, pace, used, other):
-    """AC1・AC2・AC5・AC9・I1・I2・I3: 本番チャネルへ入れるリリースプランの先頭が選んだ節の verify で、mvv の材料に確認の資料があり、確認は 1 つだけ。"""
-    waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
-    plan = load(wave(waves, "本番")["plans"][0])
-    ids = [s["id"] for s in plan["steps"]]
-    assert ids[:5] == ["verify", "prepare", "mvv", "note", "promote"], ids
-    s = steps_of(plan)
-    assert f"echo {used}" in s["verify"]["cmd"] and other not in s["verify"]["cmd"] and "--base develop" in s["verify"]["cmd"]
-    assert s["verify"]["timeout"] == 1500 and "on_fail" not in s["verify"]
-    assert "{state_dir}/work/approval-verify.md" in s["mvv"]["cmd"]
-    assert len(verify_steps(waves)) == 1 and "導入の確認" not in [w["name"] for w in waves]
-
-
-def run_promote(tmp_path, verify):
-    """本番チャネルへ入れるリリースプランの verify 以外のステップを、走った id を記録するだけのコマンドに差し替えて流す。"""
-    repo = make_repo(tmp_path, [STG, PRD], auto=verify)
-    plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
-    ran = tmp_path / "ran"
-    for s in plan["steps"]:
-        if s["id"] != "verify":
-            s["cmd"] = f"echo {s['id']} >> {ran}"
-    path = tmp_path / "promote.json"
-    path.write_text(json.dumps(plan, ensure_ascii=False))
-    res = queue.cmd_queue([str(path)], 1, poll=0.05)
-    return res, (ran.read_text().split() if ran.exists() else [])
-
-
-def test_a_failed_verify_stops_before_the_promote_pr(tmp_path):
-    """AC3: 確認が 0 以外なら prepare・mvv・note・promote のどれも走らずに止まる。"""
-    res, ran = run_promote(tmp_path, "false")
-    assert ran == [] and res["items"][0]["result"] != "完了", res
-
-
-@pytest.mark.parametrize("pace", ["auto", "fast"])
-def test_the_promote_merges_only_the_commit_the_mvv_judge_read(tmp_path, pace):
-    """#1529 の AC4・AC6・I4: fast / auto の promote は mvv の材料と同じ導入の確認の承認資料で照合し、落ちたら handoff へ進む。"""
-    plan = load(wave(new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace), "本番")["plans"][0])
-    s = steps_of(plan)
-    material = "{state_dir}/work/approval-verify.md"
-    assert material in s["verify"]["cmd"] and material in s["mvv"]["cmd"]
-    assert f"--expect-head-from {material} " in s["promote"]["cmd"] and s["promote"]["on_fail"] == "handoff"
-    assert "--expect-head-from" not in s["promote-approved"]["cmd"]
 
 
 def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
@@ -143,86 +79,6 @@ def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
     assert fast["promote"]["cmd"].endswith(want)
     for s in (*normal.values(), *fast.values()):
         assert "develop" not in str(s.get("cmd")) and " main" not in str(s.get("cmd"))
-
-
-def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
-    """#1529 の AC4・AC5: 導入の確認の承認資料が無ければ、plan の promote はマージせずに落ち、handoff が
-    リリース承認ゲートの by: mvv の記録を外して承認ゲートで終わる。"""
-    repo = make_repo(tmp_path, [STG, PRD])
-    state = sprint_state(tmp_path, "auto")
-    plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
-    log = tmp_path / "mvv-gate.jsonl"
-    stub = {
-        "verify": "true",  # 承認資料を書かない
-        "prepare": "true",
-        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} 'リリース承認ゲート' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
-        "note": "true",
-        "record": f"touch {tmp_path / 'recorded'}",
-    }
-    for s in plan["steps"]:
-        if s["id"] in stub:
-            s["cmd"] = stub[s["id"]]
-    path = tmp_path / "promote.json"
-    path.write_text(json.dumps(plan, ensure_ascii=False))
-    res = queue.cmd_queue([str(path)], 1, poll=0.05)
-    assert res["status"] == "gate" and res["items"][0]["result"] == "関門", res
-    assert not (tmp_path / "recorded").exists()
-    assert not [g for g in load(state)["gates"] if g["name"] == "リリース承認ゲート"]
-
-
-def test_a_passed_verify_keeps_the_order(tmp_path):
-    """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
-    res, ran = run_promote(tmp_path, "true")
-    assert ran == ["prepare", "mvv", "note", "promote", "cd-result", "record"] and res["items"][0]["result"] == "完了", res
-
-
-@pytest.mark.parametrize("pace", ["auto", "fast"])
-def test_merge_only_places_a_verify_stage(tmp_path, pace):
-    """AC8・I1: 経路 merge だけなら検査の後に「導入の確認」を then_of で置き、確認が落ちたら止まる。manual は後に続く。"""
-    repo = make_repo(tmp_path, [STG, API], auto="false", fast="false")
-    waves = new_sprint(tmp_path, repo, pace)
-    names = [w["name"] for w in waves]
-    assert names[-2:] == ["導入の確認", "リリース"] and "本番" not in names, names
-    w = wave(waves, "導入の確認")
-    assert w["then_of"] == wave(waves, "検査")["then_of"]
-    assert len(verify_steps(waves)) == 1
-    res = queue.cmd_queue([w["plans"][0]], 1, poll=0.05)
-    assert res["items"][0]["result"] == "止まった", res
-
-
-@pytest.mark.parametrize("rows, stage", [([STG, PRD], "本番"), ([STG], "導入の確認")])
-def test_close_verifies_only_when_changed(tmp_path, rows, stage):
-    """AC10・I7: new close も同じ形で組み、fast の verify を使い、実行の条件（changed）が 3 なら確認も走らない。"""
-    repo = make_repo(tmp_path, rows)
-    p, out = new_close(tmp_path, repo)
-    assert p.returncode == 0, p.stdout + p.stderr
-    waves = load(out / "sprint.json")["ステージ"]
-    assert [w["name"] for w in waves] == ["まとめ", "最終の検査", stage]
-    plan = load(wave(waves, stage)["plans"][0])
-    assert plan["実行の条件"]["skip_code"] == 3 and len(verify_steps(waves)) == 1
-    mark = tmp_path / "ran"
-    s = steps_of(plan)["verify"]
-    assert "smoke-stg" in s["cmd"]
-    s["cmd"] = f"touch {mark}"
-    plan["実行の条件"]["cmd"] = "exit 3"
-    path = tmp_path / "close.json"
-    path.write_text(json.dumps(plan, ensure_ascii=False))
-    res = queue.cmd_queue([str(path)], 1, poll=0.05)
-    assert res["items"][0]["result"] == "完了" and not mark.exists(), res
-
-
-def test_close_without_verify_writes_no_plan(tmp_path):
-    """I3: new close で fast の節に verify が無ければ、プランを書かずに 2 で終える。"""
-    p, out = new_close(tmp_path, make_repo(tmp_path, [STG, PRD], fast=""))
-    assert p.returncode == 2 and "fast.verify" in p.stderr and not (out / "sprint.json").exists()
-
-
-def test_normal_keeps_the_promote_plan(tmp_path):
-    """AC11・I6: --pace 無しの本番チャネルへ入れるリリースプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
-    waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
-    ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
-    assert ids == ["promote", "promote-approved", "cd-result", "record", "judge-record"]
-    assert verify_steps(waves) == [] and "導入の確認" not in [w["name"] for w in waves]
 
 
 def verify_facts(repo, verify, out, base="develop"):
@@ -259,89 +115,7 @@ def test_verify_facts_stops_when_head_is_not_the_base(tmp_path):
     assert code == 3 and not mark.exists() and not out.exists(), res
 
 
-def test_gate_2_and_the_template_keep_their_stages(tmp_path):
-    """AC12・I6: 手動反映の本番系の facts（cmd・上限・cwd）と、release.form の雛形のステージは変わらない。"""
-    import test_supervise_pace_auto as pa
-    import test_supervise_pace_manual as pm
-
-    waves = pm.waves_of(tmp_path / "g", [pm.PRD])
-    facts = steps_of(load(wave(waves, "リリース承認ゲート")["plans"][0]))["facts"]
-    repo = str((tmp_path / "g" / "repo").resolve())
-    assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "デプロイ" and facts["next"] == "mvv"
-    assert "deploy-facts --root" in facts["cmd"] and "--out {state_dir}/work/approval-deploy.md" in facts["cmd"]
-    repo = pa.make_repo(tmp_path / "t", {"auto": pa.AUTO}, form=True)
-    p, out = pa.new_sprint(tmp_path / "t", repo, pa.sprint_state(tmp_path / "t", "auto"))
-    assert p.returncode == 0, p.stdout + p.stderr
-    waves = load(out / "sprint.json")["ステージ"]
-    assert [w["name"] for w in waves] == pa.STAGES and verify_steps(waves) == []
-
-
-@pytest.mark.parametrize("pace", [None, "fast"])
-def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
-    """#1870 AC2: リリースの Pull Request のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
-    waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
-    steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
-    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "cd-result"
-    assert steps["cd-result"]["next"] == "record"
-    rec = steps["record"]
-    assert "release-steps.py record --promote --head develop --base main --prs " in rec["cmd"]
-    assert rec["on_fail"] == "judge-record" and rec["pr_from"] == "release_pr_url"
-    assert steps["judge-record"]["choices"] == ["record", "stop"]
-
-
-def close_steps(tmp_path, rows) -> dict:
-    p, out = new_close(tmp_path, make_repo(tmp_path, rows))
-    assert p.returncode == 0, p.stdout + p.stderr
-    close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
-    return close["steps"]
-
-
-def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
-    """#1870 AC3・AC6: リリースの Pull Request で届く経路のまとめは、まとめより前の本番の記録（{queue_record}。#3126 の決定 1）を読み、
-    その前にリリース後テストを置く。"""
-    steps = close_steps(tmp_path, [STG, PRD])
-    ids = [s["id"] for s in steps]
-    close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr {queue_record} " in close["cmd"]
-    assert ids.index("release-verify") < ids.index("retro") < ids.index("close")
-    rv = steps[ids.index("release-verify")]
-    assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_record}" in rv["prompt"]
-    # 「リリース後テスト」と記録するのは、受け入れ条件ごとに確かめて記録を書くこのステップだけ（#2288 の AC1）
-    assert [s["id"] for s in steps if s.get("stage") == "リリース後テスト"] == ["release-verify"]
-
-
 PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}  # ベースブランチへのマージで本番へ届く
-
-
-@pytest.mark.parametrize("rows", [[STG], [PRD_ON_BASE], [API], [STG, API]], ids=["stg-only", "merged", "manual", "stg-manual"])
-def test_close_without_a_plan_record_resolves_it_when_run(tmp_path, rows):
-    """#2230 の受け入れ条件 1・3・5: 雛形もリリースの Pull Request も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown を
-    組まず、{queue_record} を close とリリース後テストの両方に持つ。"""
-    steps = close_steps(tmp_path, rows)
-    by = {s["id"]: s for s in steps}
-    assert "--record-pr {queue_record} " in by["close"]["cmd"] and "unknown" not in by["close"]["cmd"]
-    assert "#{queue_record}" in by["release-verify"]["prompt"]
-
-
-def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
-    """#1875 1875-3: 届けない経路（delivery が []）だけなら今どおり --record-pr 0 で、リリース後テストを置かない。"""
-    steps = close_steps(tmp_path, [])
-    close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr 0 " in close["cmd"]
-    assert not {"config-save", "release-verify", "config-check", "config-check-on-fail"} & {s["id"] for s in steps}
-
-
-@pytest.mark.parametrize("rows", [[STG, PRD], [STG]], ids=["record", "queue-record"])
-def test_release_verify_is_wrapped_by_the_user_config_check(tmp_path, rows):
-    """#2401 の受け入れ条件 2・4（I4・I5）: リリース後テストの前に控えを取り、後で比べる。リリース後テストが失敗しても
-    比べて止まり、比べるステップは on_fail を持たない（0 以外で振り返りへ進まない）。起動指示は導入しないことの要点を持つ。"""
-    by = {s["id"]: s for s in close_steps(tmp_path, rows)}
-    save, check, on_fail = by["config-save"], by["config-check"], by["config-check-on-fail"]
-    assert save["cmd"].endswith("user-config-save --dir {state_dir}")
-    assert check["cmd"] == on_fail["cmd"] and check["cmd"].endswith("user-config-check --dir {state_dir}")
-    assert by["release-verify"]["on_fail"] == "config-check-on-fail" and on_fail["on_exit"] == {"0": "stop"}
-    assert all(s["type"] == "run" and "on_fail" not in s and "stage" not in s for s in (save, check, on_fail))
-    assert release_templates.NO_USER_INSTALL in by["release-verify"]["prompt"]
 
 
 def chain(steps) -> list[str]:
@@ -367,39 +141,3 @@ DEPTH_TAIL = [
     "review-release",
 ]
 MERGE_TAIL = ["merge-gate", "merge", "close"]  # マージの後は課題を閉じる close だけ（#2914 の I3・I8）
-
-
-@pytest.mark.parametrize(
-    "rows, want",
-    [
-        ([STG, PRD], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
-        ([], ["ready", "deep-due", "retro"]),
-        ([STG], ["ready", "config-save", "release-verify", "config-check", "deep-due", "retro"]),
-    ],
-    ids=["record", "no-delivery", "queue-record"],
-)
-def test_close_comes_after_the_merge_and_the_refine(tmp_path, rows, want):
-    """#2228 の I6・#2914 の決定 1・4: next のつながりで リリース後テスト → 起動の判定 → 振り返り → 棚卸し → マージ → 課題を閉じる。
-    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を同じプランの進捗記録から選ぶ。"""
-    steps = close_steps(tmp_path, rows)
-    got = chain(steps)
-    assert got == [*want, *DEPTH_TAIL, *MERGE_TAIL]  # 差分の棚卸しの後に大整理と見直し（#2315 の決定 5）
-    by = {s["id"]: s for s in steps}
-    assert "--final-stage-from {state_dir}/progress.jsonl" in by["close"]["cmd"] and by["close"]["next"] == "end"
-    for sid in ("retro", "release-verify"):
-        if sid in by:
-            assert "課題は閉じない" in by[sid]["prompt"]
-
-
-@pytest.mark.parametrize("mode", ["light", "operation", "documentation", "legacy-refactor"])
-def test_close_comes_after_the_merge_in_every_mode(tmp_path, mode):
-    """#2228 の受け入れ条件 6・#2914 の I3: どのモードで組んでも close は確定仕様化の Pull Request のマージの後にある。"""
-    repo = make_repo(tmp_path, [])
-    out = tmp_path / "c"
-    args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--mode", mode]
-    args += ["--state", str(sprint_state(tmp_path, "auto")), "--out", str(out)]
-    p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
-    assert p.returncode == 0, p.stdout + p.stderr
-    close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
-    got = chain(close["steps"])
-    assert got[got.index("refine") - 2 :] == ["deep-due", "retro", *DEPTH_TAIL, *MERGE_TAIL]

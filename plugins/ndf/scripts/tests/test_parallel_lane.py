@@ -45,48 +45,6 @@ def test_queue_max_default(tmp_path, monkeypatch):
     assert supervise.default_max(str(tmp_path / "other")) == 3
 
 
-def test_generated_queue_lines_use_lane_plans(tmp_path, monkeypatch):
-    """スプリントのステージが組む queue の 1 行も、レーンのプランの本数で流す。"""
-    from supervise_lib import sprint
-
-    monkeypatch.setattr(pl, "lane_plans", lambda m, lane=None: 1)
-    wave = {"name": "実装", "plans": {"a": {"name": "a", "steps": []}}}
-    assert " --max 1 --done " in sprint._stage_entry(wave, 1, tmp_path)["command"]
-
-
-def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
-    from supervise_lib import sprint
-
-    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: None)
-    assert list(sprint.prod_plans(None, "/r", lambda: {"x": 1})) == ["release-prod"]
-    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    import parallel_release
-
-    monkeypatch.setattr(
-        parallel_release,
-        "plan_release_request",
-        lambda a, repo, plan, lane, prs=None: {"フェーズ": "リリースの依頼", "plan": plan, "lane": lane},
-    )
-    got = sprint.prod_plans(None, "/r", lambda: {"x": 1})
-    assert got == {"release-request": {"フェーズ": "リリースの依頼", "plan": "p1", "lane": "la"}}
-
-
-def test_selected_lane_builds_its_own_prod_plan(monkeypatch):
-    """選んで集める取り込み方（#3121）はまとめたリリースを組まないため、レーンでも自分の本番のプランを組む。
-    sprint_plans のリリース承認ゲートの分岐も同じ判定（release_lane）を読む。"""
-    import argparse
-
-    from supervise_lib import sprint
-
-    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    flow = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
-    a = argparse.Namespace(flow=flow, base="develop", production_branch="main")
-    assert sprint.release_lane(a, "/r") is None
-    assert list(sprint.prod_plans(a, "/r", lambda: {"x": 1})) == ["release-prod"]
-    whole = argparse.Namespace(flow=None, base="develop", production_branch="main")
-    assert sprint.release_lane(whole, "/r") == ("p1", "la")
-
-
 def test_release_request_plan_has_one_gate_step():
     import argparse
 
@@ -106,18 +64,6 @@ def test_present_gate_puts_approve_after_mvv(tmp_path):
     steps = parallel_release.present_gate_steps(str(tmp_path / "a.json"), "/r", "issues/x.md", "1 2", "standard", "/f", "/a")
     ids = [s["id"] for s in steps]
     assert ids[:3] == ["mvv", "note", "approve"] and steps[1]["next"] == "approve" and steps[2]["next"] == "end"
-
-
-def test_lane_request_without_prs_uses_previous_stage_prs(monkeypatch):
-    from supervise_lib import sprint
-
-    import parallel_release
-
-    seen = {}
-    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    monkeypatch.setattr(parallel_release, "plan_release_request", lambda a, repo, plan, lane, prs=None: seen.setdefault("prs", prs))
-    sprint.prod_plans(None, "/r", lambda: {})
-    assert seen["prs"] == ["{queue_prs}"]
 
 
 def test_closes_by_pr_reads_in_bulk(tmp_path):
@@ -188,24 +134,6 @@ def test_present_writes_to_present_plan_state_dir(tmp_path, monkeypatch):
     parallel_release.present(tmp_path, plan, tmp_path / "a.md", [], d, closes_of=lambda r, prs: {})
     work = state_dir_of(str(d / "present.json")) / "work"
     assert (work / "prs.txt").read_text().strip() == "5" and (work / "approved.txt").read_text().strip() == "abc"
-
-
-def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
-    import argparse
-
-    from supervise_lib import sprint
-
-    monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    monkeypatch.setattr(sprint, "has_release_template", lambda a: True)
-    monkeypatch.setattr(sprint, "has_prod_branch", lambda a: True)
-    monkeypatch.setattr(sprint, "design_read", lambda a: False)
-    monkeypatch.setattr(sprint, "advises", lambda a: False)
-    for f in ("plan_sprint_branch", "sprint_impl_plans", "plan_sprint_check", "plan_sprint_release"):
-        monkeypatch.setattr(sprint, f, lambda *a, **k: {})
-    monkeypatch.setattr(sprint, "prod_plans", lambda a, repo, build, prs=None: {"release-request": {}})
-    a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal")
-    waves = sprint.sprint_plans(a)
-    assert waves[-1]["name"] == "本番" and waves[-1]["then_of"] == waves[0]["name"]  # 先頭の command へ --then でつなぐ
 
 
 def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch):

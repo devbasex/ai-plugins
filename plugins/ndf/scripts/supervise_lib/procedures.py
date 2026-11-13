@@ -7,51 +7,19 @@
 from __future__ import annotations
 
 import shlex
-from pathlib import Path
 
-from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, DESIGN_SURVEY_PY, HERE, MERGED_PY, SPEC_COPY_PY
+from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, HERE, MERGED_PY, SPEC_COPY_PY
 from supervise_lib.prompts import DESIGN_MATCH_PROMPT
 
 RECORD_SH = HERE / "projects-sync.sh"  # 課題の本文の「進行」へ工程を記録するスクリプト
 REQUIREMENTS = "issues/issue-{n}-requirements.md"  # 要求の写しの置き場（NDF の規約。決定 11）
 DESIGN_DOC = "issues/issue-{n}-design.md"  # 設計文書の頭のファイル（#1289 の決定 2）
 DETAIL_DOC = "issues/issue-{n}-design-detail.md"  # 詳細設計の文書（#3144）
-DESIGN_RESULTS = "design-results.json"  # 設計の結果のステージが計画の置き場へ書くファイル
 
 
 def requirements_path(n: int) -> str:
     """課題 n の要求の写し（作業ツリーの根からの相対パス）。"""
     return REQUIREMENTS.format(n=n)
-
-
-def design_path(n: int) -> str:
-    """課題 n の設計文書の頭のファイル（作業ツリーの根からの相対パス）。"""
-    return DESIGN_DOC.format(n=n)
-
-
-def detail_path(n: int) -> str:
-    """課題 n の詳細設計の文書（作業ツリーの根からの相対パス）。"""
-    return DETAIL_DOC.format(n=n)
-
-
-def rebuild_step(n: int, doc: str) -> dict:
-    """設計文書を組み直すステップ（工程「ドキュメント再構成」）。
-
-    design の Skill は組み直しを設計 PR を出す手順の直前に置き、push しない指示の worker はその手前で止まる。
-    プランがこのステップを持たないと、組み直しを通さないまま PR とレビューへ進む。
-    """
-    return {
-        "id": "rebuild",
-        "type": "work",
-        "full": True,
-        "kind": "設計",
-        "stage": "ドキュメント再構成",
-        "issues": True,
-        "timeout": 3600,
-        "next": "pr",
-        "prompt": f"/ndf:document-rebuild {doc}（#{n} の設計文書。同じディレクトリの issue-{n}-design-*.md も含む）。"
-        "内容を足さずに組み直し、前後の値の表を報告に載せる。コミットする（push しない）。",
-    }
 
 
 def with_record(plan: dict) -> dict:
@@ -168,11 +136,6 @@ def base_sync_steps(source: str, nxt: str, *, push: bool, on_error: str | None, 
     return [sync, fix, {**back, "next": "base-sync"}]
 
 
-def sprint_materials(collect: str, design_results: str, closes: list[int]) -> dict:
-    """スプリント PR の材料。`collect` へマージした実装の PR・設計の結果・スプリントの課題の Closes・手動確認。"""
-    return {"manual": True, "collect": collect, "design_results": design_results, "closes": list(closes)}
-
-
 def record_steps(name: str, *, target_pr: str | None = None, advance: bool = False, review: bool = False, pr: bool = False) -> list[dict]:
     """検査の記録の `record` と `abort`（と、差分の検査なら `abort-before-pr`）のステップ。
 
@@ -197,62 +160,3 @@ def record_steps(name: str, *, target_pr: str | None = None, advance: bool = Fal
     if pr:
         steps.append({"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"})
     return steps
-
-
-def _skip_condition(text: str) -> dict:
-    """実装プランを飛ばす `実行の条件`（理由を出し、終了コード 3 で結果は「完了」）。"""
-    return {"cmd": f"echo {shlex.quote(text)}; exit 3", "skip_code": 3}
-
-
-def absorbed_condition(issue: int, host: int) -> dict:
-    """設計で他の課題へ取り込んだ課題の実装プランを飛ばす `実行の条件`。"""
-    return _skip_condition(f"#{issue} は設計で #{host} へ取り込んだ（#{host} の実装プランが実装する）")
-
-
-def closed_condition(issue: int) -> dict:
-    """設計で「閉じる」とした課題の実装プランを飛ばす `実行の条件`（実装の PR を持たずにスプリント PR で閉じる）。"""
-    return _skip_condition(f"#{issue} は設計で閉じるとした（実装の PR を持たずにスプリント PR で閉じる）")
-
-
-def sprint_out(a) -> Path:
-    """スプリントの計画の置き場（`--out`、省けば `sprint-<名前>`）。"""
-    return Path(a.out or f"sprint-{a.name}")
-
-
-def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
-    """設計のプランの外部の調査の検査（survey-check / fix-survey / survey-recheck。#2519 の決定 7）。
-
-    レビューの直しで決定が変わった後に確かめる。直しは 1 回だけ試み、残れば `on_fail` を置かずにプランを止める。
-    `require_detail`（詳細設計を通るモード。#3144）なら検査に `--require-detail` を付け、詳細設計の文書の形も確かめる。"""
-    check = f"{DESIGN_SURVEY_PY} check --issue {n}" + (" --require-detail" if require_detail else "")
-    detail_fix = (
-        "detail_* の指摘は詳細設計の文書（issues/issue-<番号>-design-detail.md）を直す: 雛形の節を足すか `省く: <理由>` を書く・"
-        "副作用のある関数の異常系の処理の行・新設の関数の既存の部品の再利用の行を足す・ファイル配置のパスを設計の結果の触るファイルと"
-        "揃える。"
-        if require_detail
-        else ""
-    )
-    return [
-        {
-            "id": "survey-check",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": check,
-            "on_fail": "fix-survey",
-            "next": next_id,
-        },
-        {
-            "id": "fix-survey",
-            "type": "work",
-            "kind": "修正",
-            "stage": "ドキュメントレビュー",
-            "inputs": ["survey-check"],
-            "timeout": 1800,
-            "next": "survey-recheck",
-            "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を"
-            "直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘"
-            "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。" + detail_fix,
-        },
-        {"id": "survey-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120, "cmd": check, "next": next_id},
-    ]

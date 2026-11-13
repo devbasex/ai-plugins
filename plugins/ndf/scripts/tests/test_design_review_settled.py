@@ -1,6 +1,5 @@
-"""設計のプランで cross-review が上限到達（終了コード 6）で終わったときの経路と、解決できないの判定（#2388）。
+"""cross-review が上限到達（終了コード 6）で終わったときの、解決できないの判定（#2388）。
 
-経路はプランの組み立て（`sprint_waves`）の出力を、ハンドラーをスタブに替えた実行器へ流して確かめる。
 判定は `supervise.py review-settled` に実行の記録（state.json）を渡して確かめる。
 """
 
@@ -9,7 +8,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -17,9 +15,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib import commands, limits, sprint_waves  # noqa: E402
+from supervise_lib import commands, limits  # noqa: E402
 from test_supervise_contract import cli  # noqa: E402
-from test_supervise_limits import drive  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
@@ -27,12 +24,6 @@ LIMITS = dict(max_attempts=2, max_cost=1.5, max_seconds=3600)
 
 
 # --- 経路 ---------------------------------------------------------------------
-
-
-def build(kind: str, tmp: Path) -> dict:
-    a = SimpleNamespace(base="main", mode="standard", name="m1", worktree=str(tmp), state=str(tmp / "state"), revise_notes=None)
-    fn = {"normal": sprint_waves.plan_sprint_design, "advise": sprint_waves.plan_advise_design, "mvv": sprint_waves.plan_mvv_design}[kind]
-    return limits.fill(fn(a, 42, str(tmp)))
 
 
 def codes(**seqs):
@@ -53,75 +44,6 @@ def after(ran: list[str], start: str = "review") -> list[str]:
 
 SETTLED_TO_PUSH = ["review-settled", "sync-review", "requirements-recheck", "survey-check", "glossary-check", "push-glossary"]
 RESOLVE = ["review-settled", "resolve-sync", "resolve", "push-resolve", "review"]
-
-
-def test_mvv_plan_runs_mvv_when_the_review_hits_the_limit_with_nothing_left(tmp_path):
-    """受け入れ条件 1: 上限到達・未解決 0 件なら sync-review 以降を経て mvv を流し、gate を流さない（最終状態によらない
-    ことは下の review-settled の判定で確かめる。受け入れ条件 2）。"""
-    ran, _, _ = drive(tmp_path, build("mvv", tmp_path), codes(review=[6], review_settled=[0]))
-    assert after(ran)[: len(SETTLED_TO_PUSH) + 2] == ["review", *SETTLED_TO_PUSH, "mvv"]
-    assert "gate" not in ran and "resolve" not in ran
-
-
-def test_advise_plan_runs_the_advice_and_stops_at_the_gate(tmp_path):
-    """受け入れ条件 5: --state 付きの normal は sync-review 以降と助言の mvv を経て gate で止まる。"""
-    ran, text, _ = drive(tmp_path, build("advise", tmp_path), codes(review=[6], review_settled=[0]))
-    assert after(ran) == ["review", *SETTLED_TO_PUSH, "ready", "mvv", "mvv-note", "gate"]
-    assert "結果: 関門" in text
-
-
-@pytest.mark.parametrize(
-    "kind,tail",
-    [
-        ("normal", ["ready", "gate"]),
-        ("advise", ["ready", "mvv", "mvv-note", "gate"]),
-        ("mvv", ["mvv"]),
-    ],
-)
-def test_every_pace_resolves_the_left_findings_before_the_gate(tmp_path, kind, tail):
-    """受け入れ条件 3: 未解決が残れば解決のフローを回し、0 件になれば sync-review 以降へ進む。"""
-    ran, _, _ = drive(tmp_path, build(kind, tmp_path), codes(review=[6, 6], review_settled=[1, 0]))
-    assert after(ran)[: 1 + len(RESOLVE) + len(SETTLED_TO_PUSH) + len(tail)] == ["review", *RESOLVE, *SETTLED_TO_PUSH, *tail]
-    if kind == "mvv":
-        assert "gate" not in ran
-
-
-@pytest.mark.parametrize("kind", ["normal", "advise", "mvv"])
-def test_an_unresolvable_review_goes_to_the_gate_without_mvv(tmp_path, kind):
-    """受け入れ条件 3・I3: 解決できない（終了コード 2）なら ready → gate。fast / auto は mvv を流さない。"""
-    ran, text, _ = drive(tmp_path, build(kind, tmp_path), codes(review=[6], review_settled=[2]))
-    assert after(ran)[:3] == ["review", "review-settled", "ready"] and ran[-1] == "gate"
-    assert "sync-review" not in ran and "結果: 関門" in text
-    if kind == "mvv":
-        assert "mvv" not in ran
-
-
-def test_a_failed_drive_goes_to_the_gate_without_review_settled(tmp_path):
-    """受け入れ条件 4・I4: 駆動の失敗（終了コード 1）は review-settled を通らずに ready → gate。"""
-    ran, _, _ = drive(tmp_path, build("mvv", tmp_path), codes(review=[1]))
-    assert after(ran) == ["review", "ready", "gate"]
-
-
-def test_a_failed_re_review_goes_to_the_gate(tmp_path):
-    """I4: 解決のフローの中の再レビューで駆動が失敗しても ready → gate。"""
-    ran, _, _ = drive(tmp_path, build("mvv", tmp_path), codes(review=[6, 1], review_settled=[1]))
-    assert after(ran) == ["review", *RESOLVE, "ready", "gate"]
-
-
-def test_a_converged_review_does_not_run_review_settled(tmp_path):
-    """受け入れ条件 6・I5: 収束（終了コード 0）なら review-settled を通らない。"""
-    ran, _, _ = drive(tmp_path, build("mvv", tmp_path), codes())
-    assert after(ran)[:2] == ["review", "sync-review"] and "review-settled" not in ran
-
-
-@pytest.mark.parametrize("kind", ["normal", "advise", "mvv"])
-def test_two_resolve_rounds_fit_in_the_step_limit(tmp_path, kind):
-    """上限: 解決のフローを 2 回回してから解決できないと判定しても、ステップの上限で止まらずに gate へ進む。"""
-    plan = build(kind, tmp_path)
-    fixes, _ = limits.loops(plan)
-    assert fixes["review→review-settled"] == len(RESOLVE) and "review-settled→resolve-sync" not in fixes
-    ran, text, _ = drive(tmp_path, plan, codes(review=[6, 6, 6], review_settled=[1, 1, 2]))
-    assert ran.count("resolve") == 2 and ran[-1] == "gate" and "結果: 関門" in text
 
 
 # --- 上限の数え方 ---------------------------------------------------------------

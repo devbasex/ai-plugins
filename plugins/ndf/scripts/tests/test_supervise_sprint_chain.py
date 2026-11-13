@@ -11,7 +11,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sprint_args import DESIGN_SPRINT_STAGES  # noqa: E402
 from test_supervise import cli  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("issue_bodies")  # 課題の本文は偽の gh が返す
@@ -45,35 +44,6 @@ def queue_words(command: str) -> list[list[str]]:
             continue
         cur.append(w)
     return [*stages, cur]
-
-
-def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
-    stages = sprint(tmp_path, "--design", "11", "12")
-    names = [s["name"] for s in stages]
-    assert names == DESIGN_SPRINT_STAGES
-    by = {s["name"]: s for s in stages}
-    merge = by["設計 PR のマージ"]
-    for n, path in zip((11, 12), merge["plans"]):
-        assert Path(path).name == f"3-design-merge-{n}.json"
-        plan = json.loads(Path(path).read_text())
-        assert plan["Pull Request"] == f"{{queue_pr:design-{n}}}"
-        assert [s["id"] for s in plan["steps"]] == ["approved", "merge-gate", "merge", "merge-approved"]
-        assert "design-approved --pr {pr}" in plan["steps"][0]["cmd"] and plan["steps"][0]["gate_next"] == "end"
-    # 設計承認ゲートの後はマージのステージの command 1 本だけで、後続はその --then の順に並ぶ
-    chained = names[3:8]
-    assert all("command" not in by[n] and by[n]["then_of"] == "設計 PR のマージ" for n in chained)
-    assert queue_words(merge["command"]) == [merge["plans"], *(by[n]["plans"] for n in chained)]
-    done = str((tmp_path / "m" / "done-3.json").resolve())
-    assert f"--done {done}" in merge["command"]
-    # 止まったときの手は queue --resume の 1 つ（AC8）
-    for n in ["設計 PR のマージ", *chained]:
-        assert by[n]["resume"].endswith(f"queue --resume {done}")
-    assert by["設計"]["resume"].endswith("queue --resume " + str((tmp_path / "m" / "done-1.json").resolve()))
-    assert by["本番"]["resume"].endswith("queue --resume " + str((tmp_path / "m" / "done-10.json").resolve()))
-    assert "resume" not in by["設計承認ゲート"] and "resume" not in by["リリース承認ゲート"]
-    # 本番のプランの先頭が approve（AC9）
-    prod = json.loads(Path(by["本番"]["plans"][0]).read_text())
-    assert prod["steps"][0]["id"] == "approve" and "--facts-from '{queue_state?:release}'" in prod["steps"][0]["cmd"]
 
 
 def test_normal_without_design_chains_from_the_sprint_branch(tmp_path):

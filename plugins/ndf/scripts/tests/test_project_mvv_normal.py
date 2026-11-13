@@ -11,7 +11,6 @@ claude と gh は `test_project_mvv` の偽物を使う（呼ばれるたびに 
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,11 +23,10 @@ import worker_fake  # noqa: E402
 OK_LINE = '{"tool": "external-ai", "status": "ok", "summary": "s", "items": [], "metrics": {}}'
 
 from test_project_mvv import BODY, GATE_PY, MVV_PY, STATE_PY, answer, approve, body_file, calls, env, run, sha  # noqa: F401
-from test_supervise_pace import assert_transitions_exist, cli, load, steps_of
 
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
-from supervise_lib import engine, worker_steps  # noqa: E402
+from supervise_lib import worker_steps  # noqa: E402
 from supervise_lib.prompts import FULL_SYSTEM, WORK_SYSTEM  # noqa: E402
 from supervise_lib.state import RunState  # noqa: E402
 from supervise_lib.steps import JudgeStep  # noqa: E402
@@ -308,119 +306,4 @@ def test_a_changed_sprint_mvv_falls_back_to_the_project_mvv_with_a_note(env):
 # ---------------------------------------------------------------- normal のスプリントのプラン（AC4・AC5・I2・I7）
 
 
-def new_normal_sprint(tmp_path: Path, *extra: str):
-    out = tmp_path / "m"
-    p = cli(
-        "new",
-        "sprint",
-        *("--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "--design", "11"),
-        *("--version", "10.18.0-dev.1", "--out", str(out)),
-        *extra,
-    )
-    assert p.returncode == 0, p.stdout + p.stderr
-    return load(out / "sprint.json"), json.loads(p.stdout.splitlines()[-1])
-
-
-def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
-    state = tmp_path / "state.json"
-    state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    manifest, out = new_normal_sprint(tmp_path, "--state", str(state))
-    assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
-    waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert (
-        "--what <要約> --by user --pr <設計 PR>" in waves["設計承認ゲート"]["gate"] and "--by user" in waves["リリース承認ゲート"]["gate"]
-    )
-    assert "note" not in waves["デプロイ"] and "'リリース承認ゲート' --what" in waves["リリース承認ゲート"]["gate"]
-    # 状態があれば承認の記録は本番のプランの先頭の approve が書き、conductor は打たない（#1426 の決定 1）
-    assert "--approved-sha" not in waves["リリース承認ゲート"]["gate"]
-    assert waves["リリース承認ゲート"]["gate"].index("'リリース承認ゲート' --what") < waves["リリース承認ゲート"]["gate"].index(
-        "「本番」のステージ"
-    )
-    # 承認資料は本番の release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）
-    assert re.search(r"承認資料（/\S+/issues/approval-\S+\.md）", waves["リリース承認ゲート"]["gate"])
-    assert "sprint-state.py gate" in out["next"]
-    design = load(waves["設計"]["plans"][0])
-    ds = steps_of(design)
-    assert [s["id"] for s in design["steps"]][-4:] == ["mvv", "mvv-note", "gate", "reject"]
-    assert ds["push-glossary"]["next"] == "ready" and ds["ready"]["next"] == "mvv" and ds["glossary-recheck"]["on_fail"] == "push-glossary"
-    assert ds["mvv"]["cmd"].endswith("--advise") and "--gate design --pr {pr}" in ds["mvv"]["cmd"]
-    assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
-    assert "mvv" in ds["gate"]["inputs"] and "gate_next" not in ds["mvv"]
-    rel = steps_of(load(waves["デプロイ"]["plans"][0]))
-    assert (
-        rel["explain"]["next"] == "others"
-        and rel["others"]["next"] == "mvv"
-        and rel["mvv"]["next"] == "mvv-note"
-        and rel["mvv-note"]["next"] == "end"
-    )
-    assert "--gate release" in rel["mvv"]["cmd"] and rel["mvv"]["cmd"].endswith("--advise") and "gate_as_ok" not in rel["facts"]
-    for w in manifest["ステージ"]:
-        for path in w.get("plans", []):
-            plan = load(path)
-            assert plan["スプリント状態"] == str(state.resolve())
-            assert_transitions_exist(plan)
-    assert sum(1 for w in manifest["ステージ"] for p in w.get("plans", []) for s in load(p)["steps"] if s["id"] == "mvv") == 2
-    assert not {"mvv", "note", "handoff"} & set(steps_of(load(waves["本番"]["plans"][0])))  # 本番は利用者が答える（#1914 の I4）
-
-
-def test_normal_sprint_without_a_state_is_unchanged(tmp_path):
-    manifest, out = new_normal_sprint(tmp_path)
-    assert "状態" not in manifest and "進め方" not in manifest
-    for w in manifest["ステージ"]:
-        for path in w.get("plans", []):
-            plan = load(path)
-            assert "スプリント状態" not in plan and not any(s["id"] in ("mvv", "mvv-note") for s in plan["steps"])
-    assert "sprint-state.py" not in out["next"]
-
-
-@pytest.mark.parametrize("code", [0, 1])
-def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypatch, code):
-    state = tmp_path / "state.json"
-    state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    manifest, _ = new_normal_sprint(tmp_path, "--state", str(state))
-    design = load(next(w for w in manifest["ステージ"] if w["name"] == "設計")["plans"][0])
-    tail = [s for s in design["steps"] if s["id"] in ("mvv", "mvv-note", "gate", "reject")]
-    tail[0]["cmd"], tail[1]["cmd"], tail[3]["cmd"] = f"exit {code}", "true", "false"  # reject は --from でだけ入る
-    fake = tmp_path / "judge.sh"
-    fake.write_text(
-        """#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"設計承認ゲート\\"}", "usage": {}}'\n"""
-    )
-    fake.chmod(0o755)
-    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", str(fake))
-    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    plan = {"フェーズ": "設計", "課題": [11], "作業場所": str(tmp_path), "steps": tail}
-    engine.Engine(plan, tmp_path / "sv").run()
-    assert "- 結果: 関門" in (tmp_path / "sv" / "report.md").read_text()
-
-
 # ---------------------------------------------------------------- 助言のステップの現状固定（I-010・I-011）
-
-
-def test_advise_design_steps_keeps_its_current_shape(tmp_path):
-    from supervise_lib.sprint_waves import MVV_NOTE, MVV_PY, advise_design_steps
-
-    state = tmp_path / "state.json"
-    a = SimpleNamespace(state=str(state), mode="standard")
-    note = MVV_NOTE
-    assert advise_design_steps(a) == [
-        {
-            "id": "mvv",
-            "type": "run",
-            "stage": "設計",
-            "timeout": 900,
-            "cmd": f"rm -f {note} && {MVV_PY} check --sprint {state.resolve()} --gate design --pr {{pr}} --mode standard --root . "
-            f"--note {note} --advise",
-            "on_fail": "mvv-note",
-            "next": "mvv-note",
-        },
-        {
-            "id": "mvv-note",
-            "type": "run",
-            "stage": "設計",
-            "timeout": 300,
-            "cmd": f"sh -c '[ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}'",
-            "on_fail": "gate",
-            "next": "gate",
-        },
-    ]

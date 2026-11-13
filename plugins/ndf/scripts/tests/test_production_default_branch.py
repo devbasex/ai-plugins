@@ -16,8 +16,6 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
-from pace_state import sprint_state  # noqa: E402
-from sprint_args import new_sprint_args  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
@@ -106,38 +104,6 @@ def test_prod_release_falls_back_to_the_default_branch_before_the_worktree_exist
     assert list(after) == list(before) and verify_ref(after) == head
 
 
-def test_without_any_source_prod_stops_naming_three_sources_and_dev_and_normal_go_on(tmp_path):
-    """受け入れ条件 4・I5: 3 つの出所のどれでも決まらなければ本番だけ止まり、文面が 3 つの出所を挙げる。"""
-    main = make_repo(tmp_path, "trunk", set_head=False)
-    p = release(main, tmp_path / "prod.json")
-    assert p.returncode == 2
-    for src in ("--production-branch", ".ndf/worktree.json の production_branch", "既定ブランチ"):
-        assert src in p.stderr, p.stderr
-    p = release(main, tmp_path / "dev.json", "dev")
-    assert p.returncode == 0, p.stderr
-    out = tmp_path / "m"
-    wt = main / ".worktrees" / "feat" / "m"
-    p = inproc.run(SUPERVISE, *new_sprint_args(wt, out, design=("1",), version="1.0.0-dev.1"), cwd=main)
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert NO_PROD in json.loads(p.stdout)["next"] and "既定ブランチ" in json.loads(p.stdout)["next"]
-
-
-@pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
-def test_sprint_puts_gate_2_and_production_before_the_worktree_exists(tmp_path, pace):
-    """受け入れ条件 5: まだ作っていない worktree のパスでも、どの進め方もリリース承認ゲートと本番を置く。
-    fast / auto は開発版のチャネルが要るため、起点を develop・既定ブランチを main にする。"""
-    main = make_repo(tmp_path, base="develop")
-    wt = main / ".worktrees" / "feat" / "m"
-    extra = ("--pace", pace, "--state", str(sprint_state(tmp_path, pace))) if pace != "normal" else ()
-    out = tmp_path / "m"
-    p = inproc.run(SUPERVISE, *new_sprint_args(wt, out, *extra, design=("1",), version="1.0.0-dev.1"), cwd=main)
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert NO_PROD not in json.loads(p.stdout)["next"]
-    stages = json.loads((out / "sprint.json").read_text())["ステージ"]
-    text = "".join(Path(plan).read_text() for st in stages for plan in st.get("plans", []))
-    assert "--channel prod" in text and ("release-steps.py approve" in text or "--gate release" in text)
-
-
 @pytest.mark.parametrize(
     ("wt", "extra", "want"),
     [
@@ -195,18 +161,3 @@ def test_first_git_tree_skips_missing_and_non_git_paths(tmp_path):
     assert repo_lib.first_git_tree([main / ".worktrees" / "x", plain, main]) == main
     assert repo_lib.first_git_tree([tmp_path / "none", plain]) is None
     assert repo_lib.production_branch(None, {})[0] is None
-
-
-def test_sprint_stages_do_not_depend_on_whether_the_worktree_exists(tmp_path):
-    """受け入れ条件 6（リリースの Pull Request で届く経路）・決定 2: 起点が既定ブランチと違い production_branch の無い組で、worktree の有無でステージが変わらない。"""
-    main = make_repo(tmp_path, base="develop")
-    wt = main / ".worktrees" / "feat" / "m"
-
-    def stages(out: Path) -> list[str]:
-        p = inproc.run(SUPERVISE, *new_sprint_args(wt, out, design=("1",), version="1.0.0-dev.1"), cwd=main)
-        assert p.returncode == 0, p.stdout + p.stderr
-        return [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-
-    before = stages(tmp_path / "before")
-    git(main, "worktree", "add", "-q", str(wt), "-b", "feat/m", "origin/develop")
-    assert stages(tmp_path / "after") == before

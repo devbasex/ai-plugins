@@ -15,7 +15,7 @@ SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import decl, paths, sprint_waves  # noqa: E402
+from supervise_lib import paths  # noqa: E402
 from supervise_lib.verify_steps import with_margin  # noqa: E402
 import inproc  # noqa: E402
 
@@ -129,40 +129,12 @@ def test_the_argument_wins_over_the_declaration(tmp_path):
     assert_budget(steps(tmp_path / "c.json")["refactor"], 20)
 
 
-@pytest.mark.parametrize("by", ["decl", "arg"])
-def test_sprint_and_close_pass_the_same_values_to_every_child_plan(tmp_path, by):
-    """AC5: new sprint の課題ごとの実装のプランと検査のプラン、new close の最終の検査に同じ値が入る。"""
-    root = repo(tmp_path, **({"impl_timeout": 5000, "refactor_budget_minutes": 45} if by == "decl" else {}))
-    extra = ("--impl-timeout", "5000", "--refactor-budget-minutes", "45") if by == "arg" else ()
-    plans = sprint_plans(root, tmp_path / "s", *extra)
-    assert [s["timeout"] for s in plans["impl"]] == [5000, 5000]
-    assert plans["refactor"]
-    for r in plans["refactor"]:
-        assert_budget(r, 45)
-    refactors = close_refactors(root, tmp_path / "c", *(("--refactor-budget-minutes", "45") if by == "arg" else ()))
-    assert refactors
-    for r in refactors:
-        assert_budget(r, 45)
-
-
 def test_sprint_without_values_has_no_elapsed_limit(tmp_path):
     plans = sprint_plans(repo(tmp_path), tmp_path / "s")
     assert [s.get("timeout") for s in plans["impl"]] == [None, None]
     assert [s["stall"] for s in plans["impl"]] == [1800, 1800]
     for r in plans["refactor"]:
         assert "--budget-minutes" not in r["cmd"]
-
-
-def test_fast_sprint_plans_take_the_values_through_decl_fields(tmp_path):
-    """AC5: pace: fast の実装と検査のプランも decl_fields から同じ値を受ける。"""
-    a = argparse.Namespace(**{k: None for k in decl.decl_fields(argparse.Namespace())})
-    a.__dict__.update(
-        impl_timeout=5000, refactor_budget_minutes=45, base="main", name="m1", tests=None, mode="standard", issue=[11], state=None
-    )
-    impl = next(s for s in sprint_waves.plan_fast_impl(a, 11, str(tmp_path))["steps"] if s["id"] == "impl")
-    assert impl["timeout"] == 5000
-    check = sprint_waves.plan_fast_check(a, str(tmp_path), "m1-final", final=True)
-    assert_budget(next(s for s in check["steps"] if s["id"] == "refactor"), 45)
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "x"])

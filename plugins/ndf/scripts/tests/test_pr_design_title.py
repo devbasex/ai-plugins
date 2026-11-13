@@ -14,7 +14,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import engine, pr as pr_step, sprint_waves  # noqa: E402
+from supervise_lib import engine, pr as pr_step  # noqa: E402
 
 H1 = "設計の承認: 題から目的が読めない → 題と承認資料の先頭で読める（#1）"
 DOC = "issues/issue-1-design.md"
@@ -213,17 +213,3 @@ def plan_args(tmp_path: Path) -> SimpleNamespace:
 
 def steps_of(plan: dict) -> dict:
     return {s["id"]: s for s in plan["steps"]}
-
-
-def test_sprint_design_pr_reads_the_design_doc_and_falls_back(tmp_path):
-    ds = steps_of(sprint_waves.plan_sprint_design(plan_args(tmp_path), 42, str(tmp_path)))
-    assert ds["pr"]["title_doc"] == "issues/issue-42-design.md" and ds["pr"]["title"] == "設計: #42"
-    assert ds["push-glossary"]["cmd"].endswith(" sync-title --pr {pr} --doc issues/issue-42-design.md")
-
-
-def test_both_design_pushes_of_the_mvv_plan_sync_the_title(tmp_path):
-    ds = steps_of(sprint_waves.plan_mvv_design(plan_args(tmp_path), 42, str(tmp_path)))
-    assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["push-glossary-gate"]["next"] == "ready"
-    for i in ("push-glossary", "push-glossary-gate"):
-        cmd = ds[i]["cmd"]
-        assert cmd.startswith("git push -q && ") and cmd.endswith(" sync-title --pr {pr} --doc issues/issue-42-design.md")

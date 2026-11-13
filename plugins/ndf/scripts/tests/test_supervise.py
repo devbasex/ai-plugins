@@ -35,7 +35,6 @@ import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
-from sprint_args import DESIGN_SPRINT_STAGES, new_sprint_args  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -766,34 +765,6 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
     assert p.returncode == 0, p.stderr
     ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
     assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
-
-
-@pytest.mark.suspended_refactor
-def test_suspended_refactor_drops_assess_and_refactor_for_every_mode(tmp_path):
-    # 緊急の停止（2026-11-11）の間は standard でも構造改善を外し、PR の次を review にする
-    out = tmp_path / "c.json"
-    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", "standard", "--out", str(out))
-    assert p.returncode == 0, p.stderr
-    steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
-    assert next(iter(steps)) == "review" and "assess" not in steps and "refactor" not in steps
-    # 構造改善を通していない回は実装レビューだけの回として記録し、check-done/check を進めない（PR 3062 のレビュー）
-    assert "--review" in steps["record"]["cmd"]
-    m = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, m))
-    assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((m / "sprint.json").read_text())["ステージ"]}
-    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
-    assert steps["pr"]["next"] == "review" and "refactor" not in steps
-    assert all("--review" in steps[i]["cmd"] for i in ("prepare", "record") if i in steps)
-
-
-def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, "--mode", "light"))
-    assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
-    assert steps["pr"]["next"] == "review" and "refactor" not in steps
 
 
 def test_new_impl_requires_title():
@@ -1672,109 +1643,6 @@ def assert_plan_transitions_valid(manifest):
                         assert s[k] in steps or s[k] == "end", (path, s)
                 for c in s.get("choices", []):
                     assert c in steps or c in ("stop", "gate"), (path, c)
-
-
-def assert_design_plan(design: dict) -> None:
-    """スプリントの設計のプランのステップの並びと遷移（test_new_sprint_writes_waves_in_order が見る）。"""
-    review = next(s for s in design["steps"] if s["id"] == "review")
-    assert "--max-rounds" not in review["args"]  # 設計の既定（3 ラウンド）に任せる
-    assert design["branch"].startswith("design/")
-    # 設計の工程の入口で用語集を見る（#1111）。無ければ worktree の中で起こす（#1193）。それ以外は on_fail を置かずに止まる
-    ds = {s["id"]: s for s in design["steps"]}
-    assert [s["id"] for s in design["steps"]] == [
-        "glossary",
-        "requirements-check",
-        "requirements",
-        "design",
-        "design-review",
-        "design-review-check",
-        "design-fix",
-        "detail-design",
-        "rebuild",
-        "pr",
-        "sync-body",
-        "review",
-        "review-settled",
-        "resolve-sync",
-        "resolve",
-        "push-resolve",
-        "sync-review",
-        "requirements-recheck",
-        "survey-check",
-        "fix-survey",
-        "survey-recheck",
-        "glossary-check",
-        "fix-glossary",
-        "glossary-recheck",
-        "push-glossary",
-        "ready",
-        "gate",
-    ]
-    assert "design-glossary --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
-    # PR 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が中断する
-    assert ds["pr"]["decisions"] is True and ds["pr"]["next"] == "sync-body" and ds["sync-body"]["next"] == "review"
-    assert "pr-body-decisions.sh" in ds["sync-body"]["cmd"] and ds["sync-body"]["cmd"].endswith(" sync {pr}")
-    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "requirements-recheck"
-    # レビューの直しの後にも写しと本文の一致を見て、食い違えば on_fail を置かずに止まる（#1769）
-    assert "spec-copy.py check" in ds["requirements-recheck"]["cmd"] and "on_fail" not in ds["requirements-recheck"]
-    assert ds["requirements-recheck"]["next"] == "survey-check"
-    # 自前で作る決定に比べた候補が無ければ 1 回だけ直し、残れば on_fail を置かずに止まる（#2519）
-    assert "design-survey.py check --issue" in ds["survey-check"]["cmd"] and ds["survey-check"]["on_fail"] == "fix-survey"
-    assert ds["fix-survey"]["next"] == "survey-recheck" and ds["survey-recheck"]["cmd"] == ds["survey-check"]["cmd"]
-    assert "on_fail" not in ds["survey-recheck"] and ds["survey-check"]["next"] == ds["survey-recheck"]["next"] == "glossary-check"
-    assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
-    assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
-    assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
-    assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
-    # 設計 PR は Draft で作り、設計承認ゲートの前に Draft を外す（#1908）。レビューの駆動が落ちても承認ゲートの前に通る
-    assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
-    # push は push-glossary（on_fail 無し）だけが行う。ready は送り直さない（重複の push と、レビューが落ちた経路で
-    # 直しに追いついていない HEAD を送る non-fast-forward を避ける）
-    assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
-    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 承認ゲートの数は変わらない
-    assert "glossary-recheck" in ds["gate"]["inputs"]
-
-
-def test_new_sprint_writes_waves_in_order(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
-    assert p.returncode == 0, p.stderr
-    res = json.loads(p.stdout)
-    assert res["status"] == "ok"
-    manifest = json.loads((out / "sprint.json").read_text())
-    assert manifest["ブランチ"] == "sprint/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == DESIGN_SPRINT_STAGES
-    waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "plans" not in waves["設計承認ゲート"] and waves["設計承認ゲート"]["gate"]
-    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
-    assert_plan_transitions_valid(manifest)
-
-    assert_design_plan(json.loads(Path(waves["設計"]["plans"][0]).read_text()))
-
-    impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
-    assert impl["起点"] == "origin/sprint/v10-18"
-    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "sprint/v10-18"
-
-    check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
-    assert check["branch"] == "sprint/v10-18" and "Pull Request" not in check
-    pr = next(s for s in check["steps"] if s["type"] == "pr")
-    # 閉じる課題は本文の材料（materials の closes）から「閉じる課題」の節へ 1 行ずつ入る（#1485 の AC10）
-    assert pr["base"] == "develop" and pr["materials"]["closes"] == [11, 12]
-    assert "Closes" not in pr["summary"] and "関連" not in pr["changes"]
-    assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
-
-
-def test_new_sprint_without_design_skips_gate(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
-    assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", "デプロイ", "リリース承認ゲート", "本番"]
-
-
-@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
-def test_new_sprint_rejects_bad_args(tmp_path, args):
-    assert cli("new", "sprint", "--worktree", str(tmp_path), *args).returncode == 2
 
 
 FAKE_GH_PR = """#!{py}
@@ -2677,15 +2545,6 @@ def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
     assert f"ndf_scope=$(python3 {SCRIPTS / 'refactor-scope.py'} --pr 999 --scope 'extra dir')" in refactor["cmd"]
 
 
-def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, "--tests", "tests/cli", "--scope", "lib/a"))
-    assert p.returncode == 0, p.stderr
-    check = next(out.glob("*-check.json"))
-    refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
-    assert f"$(python3 {SCRIPTS / 'refactor-scope.py'} --pr {{pr}} --tests tests/cli --scope lib/a)" in refactor["cmd"]
-
-
 def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(tmp_path):
     """範囲を組めない（refactor-scope.py が終了コード 2）ときは、駆動を空の --scope で起動せずに 2 で止まる。"""
     from types import SimpleNamespace
@@ -2702,65 +2561,6 @@ def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(
         refactor = next(s for s in _inspect_steps(SimpleNamespace(), "1", scope) if s["id"] == "refactor")
         p = subprocess.run(refactor["cmd"], shell=True, env=env, capture_output=True, text=True)
         assert (p.returncode, marker.exists()) == (code, started), p.stderr
-
-
-def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
-    assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    for name in ("検査", "デプロイ"):
-        for path in waves[name]["plans"]:
-            assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
-    release = json.loads(Path(waves["デプロイ"]["plans"][0]).read_text())
-    assert release["フェーズ"] == "開発版のデプロイ"
-    assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
-    # デプロイは最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
-    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["デプロイ"]["plans"][0])
-    assert "command" not in waves["デプロイ"] and waves["デプロイ"]["then_of"] == "スプリントブランチ"
-
-
-def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
-    """normal の雛形の経路はリリースの後にリリース承認ゲートと本番を置き、本番は承認の後に単独で流す（#1914）。"""
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
-    assert p.returncode == 0, p.stderr
-    index = json.loads((out / "sprint.json").read_text())["ステージ"]
-    assert [w["name"] for w in index][-3:] == ["デプロイ", "リリース承認ゲート", "本番"]
-    waves = {w["name"]: w for w in index}
-    gate, prod = waves["リリース承認ゲート"], waves["本番"]
-    assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
-    assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
-    assert f"queue {prod['plans'][0]} --max 3 --done " in prod["command"] and "--then" not in prod["command"]
-    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["デプロイ"]
-    plan = json.loads(Path(prod["plans"][0]).read_text())
-    steps = {s["id"]: s for s in plan["steps"]}
-    assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
-    assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
-    assert not {"mvv", "note", "handoff"} & set(steps)
-    assert plan["steps"][0]["id"] == "approve"  # リリース承認ゲートの承認の記録を先頭で書く（#1426 の AC9）
-
-
-def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
-    """リリース承認ゲートの後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
-    from supervise_lib import paths, queue
-
-    out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
-    assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
-    check, prod = waves["検査"]["plans"][0], waves["本番"]["plans"][0]
-    alone = tmp_path / "alone"
-    alone.mkdir()
-    for f in (check, prod):
-        (alone / Path(f).name).write_text(Path(f).read_text())
-    d = paths.state_dir_of(str(alone / Path(check).name))
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n- Pull Request: 4242\n")
-    target = alone / Path(prod).name
-    assert queue.fill_queue_pr(str(target), []) is None
-    text = target.read_text()
-    assert "{queue_pr:check}" not in text and "--prs 4242" in text
 
 
 def test_new_impl_with_several_issues_refers_to_all_of_them(tmp_path):

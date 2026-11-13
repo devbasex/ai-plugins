@@ -6,7 +6,6 @@ import argparse
 import json
 import subprocess
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -16,7 +15,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import design_results as dr  # noqa: E402
 import gh_call  # noqa: E402
-from supervise_lib import design_stage, templates  # noqa: E402
+from supervise_lib import templates  # noqa: E402
 
 DOC = "issues/issue-11-design.md"
 TABLE = """# 設計
@@ -58,48 +57,6 @@ def with_fixes(plan: dict) -> dict:
 # ---------- 補正と設計文書のパス（1651-1・1651-2） ----------
 
 
-def test_rewrite_keeps_the_fixes_in_order():
-    """1651-1・I1: 補正は同じ順で残り、課題と触る範囲は設計の結果のとおり。"""
-    plans = {11: with_fixes(plan_of(11)), 12: plan_of(12)}
-    design_stage.rewrite(plans, results())
-    prompt = impl_prompt_of(plans[11])
-    lines = prompt.splitlines()
-    assert lines[0].startswith("課題 #11・#12 を実装する")
-    assert "触る範囲: pkg/a.py、pkg/b.py" in lines
-    kept = [ln for ln in lines if ln in (FIX_A, FIX_B)]
-    assert kept == [FIX_A, FIX_B] and lines[-2:] == kept  # 補正は雛形の行の後へ順のまま
-    assert sum(ln.startswith("課題 ") for ln in lines) == 1
-
-
-def test_rewrite_twice_is_the_same():
-    """1651-1・I2: 同じ入力で 2 回流しても、補正・触る範囲・設計文書の行が重ならない。"""
-    plans = {11: with_fixes(plan_of(11)), 12: plan_of(12)}
-    design_stage.rewrite(plans, results())
-    once = json.dumps(plans, ensure_ascii=False)
-    design_stage.rewrite(plans, results())
-    assert json.dumps(plans, ensure_ascii=False) == once
-
-
-def test_rewrite_puts_the_design_docs():
-    """1651-2: 課題の設計文書と、取り込んだ課題の設計文書のパスが入る。"""
-    res = dr.DesignResults()
-    res.add(dr.parse_results(TABLE.split("| #12")[0], DOC))
-    res.add(dr.parse_results(TABLE.replace("| #11 | 実装する | — | `pkg/a.py`、`pkg/b.py` |\n", ""), "issues/issue-12-design.md"))
-    plans = {11: plan_of(11), 12: plan_of(12)}
-    design_stage.rewrite(plans, res)
-    assert plans[11]["設計文書"] == [DOC, "issues/issue-12-design.md"]
-    assert f"設計文書: {DOC}、issues/issue-12-design.md" in impl_prompt_of(plans[11])
-    assert res.to_json()["rows"][0]["doc"] == DOC
-    assert dr.DesignResults.from_json(res.to_json()).rows[1].doc == "issues/issue-12-design.md"
-
-
-def test_rewrite_with_the_glossary_adds_one_line():
-    plans = {11: with_fixes(plan_of(11)), 12: plan_of(12)}
-    design_stage.rewrite(plans, results(), glossary=True)
-    design_stage.rewrite(plans, results(), glossary=True)
-    assert impl_prompt_of(plans[11]).count("glossary.py check") == 1
-
-
 # ---------- 読み取りの一時的な失敗（1941-1〜1941-3） ----------
 
 
@@ -138,98 +95,11 @@ class Fake:
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
 
-@pytest.fixture
-def fake(monkeypatch):
-    def use(**kw) -> Fake:
-        f = Fake(**kw)
-        monkeypatch.setattr(gh_call, "RUNNER", f.gh)
-        monkeypatch.setattr(design_stage, "subprocess", types.SimpleNamespace(run=f.run))
-        monkeypatch.setattr(design_stage, "SLEEP", lambda _s: None)
-        return f
-
-    return use
-
-
 def sprint(tmp_path: Path) -> tuple[argparse.Namespace, dict[int, Path]]:
     return stage(tmp_path, issues=(11, 12))
 
 
-def test_a_transient_failure_is_retried(tmp_path, fake):
-    """1941-1: 1 回目に 504 で落ちても打ち直して読めれば、失敗が無いときと同じプランを書いて ok。"""
-    (tmp_path / "clean").mkdir()
-    (tmp_path / "retried").mkdir()
-    a, paths = sprint(tmp_path / "clean")
-    fake()
-    res, code = design_stage.cmd_design_results(a)
-    clean = {p.name: p.read_text() for p in paths.values()}
-    a, paths = sprint(tmp_path / "retried")
-    f = fake(fails={"pr list": 1, "pr view": 1, "git show": 1})
-    res2, code2 = design_stage.cmd_design_results(a)
-    assert (code, code2) == (0, 0) and res2["status"] == "ok", res2
-    assert {p.name: p.read_text() for p in paths.values()} == clean
-    assert f.calls.count("pr list") == 3  # 11 は 1 度打ち直す。12 は PR が 40 と同じ文書を返す
-    assert "issues/gone.md" not in json.dumps(res2)  # 起点から消えた文書は読み飛ばす（失敗にしない）
-
-
-def test_a_lasting_failure_writes_nothing(tmp_path, fake):
-    """1941-2・I4: 打ち直しても読めなければ、プランも design-results.json も書かずに stopped・2。"""
-    a, paths = sprint(tmp_path)
-    before = {p.name: p.read_text() for p in paths.values()}
-    f = fake(fails={"pr list": 99})
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 2 and res["status"] == "stopped"
-    assert "#11" in res["summary"] and "504 Gateway Timeout" in res["summary"] and "#12" in res["summary"]
-    assert res["metrics"] == {"failed_issue": 11, "not_read": [12]}
-    assert {p.name: p.read_text() for p in paths.values()} == before
-    assert not (tmp_path / "design-results.json").exists()
-    assert f.calls.count("pr list") == 3  # 1 コマンド 30 秒まで（15 秒おきに 3 回）
-
-
-def test_the_total_wait_is_bounded(fake):
-    """決定 9: 1 回の実行の待ちの合計は 120 秒まで。使い切った後は打ち直さない。"""
-    fake(fails={"pr list": 99})
-    budget = design_stage.Budget()
-    for _ in range(5):
-        with pytest.raises(design_stage.ReadFailed):
-            design_stage.merged_design_pr(".", "develop", 11, budget)
-    import limits
-
-    assert budget.left >= 0 and budget.left < limits.value(design_stage.POLICY, "interval")
-
-
-def test_no_pr_and_no_table_stay_unread(tmp_path, fake):
-    """1941-3: gh が 0 で空（PR が無い）なら今のまま unread で ok。"""
-    a, _ = sprint(tmp_path)
-    fake(pr="")
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 0 and res["metrics"]["unread"] == [11, 12]
-    assert dr.parse_results("# 設計\n\n## 決定の記録\n", DOC) is None  # 表が無い文書は読めなかった扱い
-
-
 # ---------- 書き出しの取り込み（new sprint --absorb）と表の取り込みを合わせる（#1426 の決定 8） ----------
-
-
-def test_rewrite_keeps_absorptions_made_when_writing_the_plans():
-    """表に無い書き出しの取り込み（`取り込み先`）を保ち、表の取り込みと合わせて取り込み先の `課題` を作る。"""
-    plans = {11: plan_of(11), 12: plan_of(12), 13: plan_of(13)}
-    plans[13]["取り込み先"] = 11
-    items = design_stage.rewrite(plans, results())
-    assert plans[11]["課題"] == [11, 13, 12]
-    assert plans[13]["実行の条件"] and plans[12]["実行の条件"]
-    assert {"issue": 13, "absorbed_into": 11} in items
-
-
-@pytest.mark.parametrize("row", ["| #11 | 取り込む | #12 | — |", "| #11 | 閉じる | — | — |"], ids=["host-absorbed", "host-closed"])
-def test_rewrite_stops_when_the_absorb_host_does_not_implement(row):
-    """--absorb 13:11 の取り込み先 #11 を設計の結果が別へ取り込む・閉じると、#13 を実装するプランが無くなる（#2247）。
-    書き換える前に止まる。"""
-    table = f"# 設計\n\n## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n{row}\n| #12 | 実装する | — | — |\n"
-    plans = {11: plan_of(11), 12: plan_of(12), 13: plan_of(13)}
-    plans[13]["取り込み先"] = 11
-    before = json.dumps(plans, ensure_ascii=False)
-    with pytest.raises(dr.DesignResultsError, match="#13 の取り込み先 #11"):
-        design_stage.rewrite(plans, results(table))
-    assert json.dumps(plans, ensure_ascii=False) == before
 
 
 # ---------- 設計の結果の食い違いのメッセージ（#2361） ----------
@@ -286,19 +156,6 @@ def test_same_results_in_another_order_do_not_stop():
     assert len(res.rows) == 1
 
 
-def test_mismatch_stops_the_stage_and_writes_nothing(tmp_path, fake):
-    """受け入れ条件 7・I5: 食い違いなら stopped・2、要約の前後は変えず、プランも design-results.json も書かない。"""
-    a, paths = sprint(tmp_path)
-    before = {p.name: p.read_text() for p in paths.values()}
-    fake(shows=[TABLE, TABLE.replace("`pkg/a.py`、`pkg/b.py`", "`pkg/a.py`")])
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 2 and res["status"] == "stopped", res
-    assert res["summary"].startswith("設計の結果を書けない: #11 の設計の結果が 2 本の設計文書で違う")
-    assert res["summary"].endswith("触るファイル: 2 個 / 1 個（先にだけある: pkg/b.py ）。人へ戻す")
-    assert {p.name: p.read_text() for p in paths.values()} == before
-    assert not (tmp_path / "design-results.json").exists()
-
-
 # ---------- 分割した設計文書と触るファイルのセルの形（#2453） ----------
 
 
@@ -334,17 +191,6 @@ class Repo:
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
 
-@pytest.fixture
-def repo(monkeypatch):
-    def use(base: dict[str, str], changed: dict[int, list[str]]) -> Repo:
-        r = Repo(base, changed)
-        monkeypatch.setattr(gh_call, "RUNNER", r.gh)
-        monkeypatch.setattr(design_stage, "subprocess", types.SimpleNamespace(run=r.run))
-        return r
-
-    return use
-
-
 def stage(tmp_path: Path, issues=(1,)) -> tuple[argparse.Namespace, dict[int, Path]]:
     paths = {n: tmp_path / f"5-impl-{n}.json" for n in issues}
     for n, p in paths.items():
@@ -364,72 +210,12 @@ def split_base(**extra: str) -> dict[str, str]:
     return base
 
 
-@pytest.mark.parametrize("changed", [[D1, LOOP, FAIL], [D1, "issues/issue-1-design-gone.md"]], ids=["all-in-pr", "head-only-fix"])
-def test_every_design_doc_of_the_issue_is_listed(tmp_path, repo, changed):
-    """2453 受け入れ条件 1〜4・6・I1・I2: プランの `設計文書` と指示文の行に 3 本が載り、表を持つ文書が先頭で残りは昇順。
-    要求のコピー・番号を共有しない文書・ベースブランチから消えた文書は載らない。"""
-    a, paths = stage(tmp_path)
-    repo(split_base(), {1: changed})
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 0, res
-    docs = [D1, FAIL, LOOP]
-    plan = written(paths)[1]
-    assert plan["設計文書"] == docs
-    lines = [ln for ln in impl_prompt_of(plan).splitlines() if ln.startswith("設計文書:")]
-    assert lines == [templates.DESIGN_DOCS_LINE.format(docs="、".join(docs))]
-    assert json.loads((tmp_path / "design-results.json").read_text())["base_docs"] == sorted(split_base())[:3] + [
-        "issues/issue-99-design.md"
-    ]
-
-
 def test_the_head_is_the_doc_with_the_table():
     """2453 受け入れ条件 5: 表を分割した文書が持てば、その文書が先頭で、表の無い先頭の名前の文書も載る。"""
     ndf = "issues/issue-1-design-ndf.md"
     res = dr.DesignResults(base_docs=[D1, ndf])
     res.add(dr.parse_results(table_of(ROW1), ndf))
     assert res.docs_of([1]) == [ndf, D1]
-
-
-def test_rows_of_two_issues_share_the_list():
-    """2453 受け入れ条件 7: 1 つの表の #1・#2 は同じ一覧になり、#2 を #1 へ取り込むと #1 のプランに両方の課題の文書が載る。"""
-    d2 = "issues/issue-2-design.md"
-    res = dr.DesignResults(base_docs=[D1, LOOP, d2, "issues/issue-3-design.md"])
-    res.add(dr.parse_results(table_of(ROW1, "| #2 | 実装する | — | `pkg/b.py` |"), D1))
-    assert res.docs_of([1]) == res.docs_of([2]) == [D1, LOOP, d2]
-    absorbed = dr.DesignResults(base_docs=[D1, LOOP, d2])
-    absorbed.add(dr.parse_results(table_of(ROW1), D1))
-    absorbed.add(dr.parse_results(table_of("| #2 | 取り込む | #1 | — |"), d2))
-    plans = {1: plan_of(1), 2: plan_of(2)}
-    design_stage.rewrite(plans, absorbed)
-    assert plans[1]["設計文書"] == [D1, d2, LOOP]
-
-
-@pytest.mark.parametrize("changed", [[LOOP], ["plugins/x.py"]], ids=["split-only-fix", "no-issue-docs"])
-def test_the_table_is_found_in_the_base_docs(tmp_path, repo, changed):
-    """2453 I6（決定 8）: PR が分割した文書だけを変えた・`issues/` を変えなかった課題も、ベースブランチの文書から表を読む。"""
-    a, paths = stage(tmp_path)
-    repo(split_base(), {1: changed})
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 0 and res["metrics"]["unread"] == [], res
-    assert written(paths)[1]["設計文書"] == [D1, FAIL, LOOP]
-    assert written(paths)[1]["触るファイル"][0] == "pkg/a.py"
-
-
-def test_no_table_anywhere_stays_unread_and_single_docs_stay_single(tmp_path, repo):
-    """2453 受け入れ条件 8・9: 表がどこにも無い課題は unread で `設計文書` を書かない。分割していない課題は 1 本で、
-    2 回打っても変わらず、補正の行は残り、「設計文書:」の行は 1 行である。"""
-    a, paths = stage(tmp_path, (1, 2))
-    plan1 = with_fixes(plan_of(1))
-    paths[1].write_text(json.dumps(plan1, ensure_ascii=False))
-    repo({D1: table_of(ROW1), "issues/issue-2-design.md": SPLIT}, {1: [D1], 2: ["issues/issue-2-design.md"]})
-    res, _ = design_stage.cmd_design_results(a)
-    assert res["metrics"]["unread"] == [2]
-    once = written(paths)
-    assert once[1]["設計文書"] == [D1] and "設計文書" not in once[2]
-    design_stage.cmd_design_results(a)
-    assert written(paths) == once
-    prompt = impl_prompt_of(once[1])
-    assert prompt.count("設計文書:") == 1 and FIX_A in prompt and FIX_B in prompt
 
 
 CELL_2436 = (
@@ -488,29 +274,6 @@ def test_cells_of_absorbed_and_closed_rows_are_not_checked():
     assert [r.files for r in rows] == [["pkg/a.py"], [], []]
 
 
-def test_cell_errors_stop_the_stage_and_a_fixed_doc_passes(tmp_path, repo):
-    """2453 受け入れ条件 12・13・I3: 2 本の文書の誤りを 1 つの要約に並べ、何も書かずに止まる。直した文書の後は通る。"""
-    a, paths = stage(tmp_path, (1, 2))
-    before = {p.name: p.read_text() for p in paths.values()}
-    d2 = "issues/issue-2-design.md"
-    bad = {
-        D1: table_of("| #1 | 実装する | — | `a.py`。残りは [l](issue-1-design-loop.md) |"),
-        d2: table_of("| #2 | 実装する | — | `b.py`, c.py |"),
-    }
-    r = repo(bad, {1: [D1], 2: [d2]})
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 2 and res["status"] == "stopped", res
-    summary = res["summary"]
-    assert f"#1（{D1}）の触るファイルのセルを読めない: " in summary and "issue-1-design-loop.md" in summary
-    assert f"#2（{d2}）の触るファイルのセルを読めない: c.py" in summary
-    assert summary.count(dr.CELL_FIX) == 1 and summary.endswith(dr.CELL_FIX + "。人へ戻す")
-    assert {p.name: p.read_text() for p in paths.values()} == before
-    assert not (tmp_path / "design-results.json").exists()
-    r.base = {D1: table_of(ROW1), d2: table_of("| #2 | 実装する | — | `b.py`、`c.py` |")}
-    res, code = design_stage.cmd_design_results(a)
-    assert code == 0 and written(paths)[2]["触るファイル"][:2] == ["b.py", "c.py"], res
-
-
 # ---------- 現状固定: 触るファイルのセルの読み方（_files の分割の前に固定する） ----------
 
 
@@ -556,18 +319,3 @@ def test_characterize_the_files_of_a_cell(cell, files):
 
 
 # ---------- ディレクトリの宣言を揃えて知らせる（#1811） ----------
-
-
-def test_directories_in_the_touched_files_end_with_a_slash_and_are_reported(tmp_path, capsys):
-    """#1811 の受け入れ条件 4・I5: 末尾 `/` の行と `--root` の下の既存のディレクトリは末尾 `/` の形でプランへ書かれ、
-    課題の番号とパスを標準エラーへ出して ok で進む。ファイルの行と存在しないパスはそのまま。"""
-    (tmp_path / "pkg" / "tests").mkdir(parents=True)
-    a, paths = sprint(tmp_path)
-    text = TABLE.replace("`pkg/a.py`、`pkg/b.py`", "`x/`、`pkg/tests`、`pkg/a.py`、`pkg/none`")
-    res, code = design_stage.cmd_design_results(a, read=lambda *_: results(text))
-    assert code == 0 and res["status"] == "ok", res
-    assert written(paths)[11]["触るファイル"] == ["x/", "pkg/tests/", "pkg/a.py", "pkg/none"]
-    assert res["metrics"]["dirs"] == {11: ["x/", "pkg/tests/"]}
-    assert "#11" in (err := capsys.readouterr().err) and "x/ pkg/tests/" in err
-    saved = json.loads((tmp_path / "design-results.json").read_text())
-    assert next(r for r in saved["rows"] if r["issue"] == 11)["files"] == ["x/", "pkg/tests/", "pkg/a.py", "pkg/none"]
