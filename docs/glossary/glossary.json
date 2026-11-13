@@ -6541,7 +6541,7 @@
     {
       "term": "課題のまとまり",
       "context": "ndf-workflow",
-      "meaning": "並列の計画を作る時点で、似た課題を 1 つのレビューの単位としてまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
+      "meaning": "並列の計画を作る時点で、似た課題を、1 本の実装の Pull Request でレビューするためにまとめたもの。スプリントのレーンの入力に書き、まとまり 1 つが実装の Pull Request 1 本になる。1 件の課題だけのまとまりもある",
       "source": "docs/specifications/ndf-parallel-issue-bundles.md"
     },
     {
@@ -6913,7 +6913,7 @@
     },
     {
       "term": "リリースブランチの PR",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "選んで集める取り込み方（`promotion: selected`）で、リリースブランチから本番チャネルへ出す PR",
       "pending_source": "issues/issue-3163-requirements.md"
     },
@@ -6931,13 +6931,13 @@
     },
     {
       "term": "衝突の解消の差分",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "スプリントブランチをリリースブランチへ集めるマージのコミットが、親を自動でマージし直した結果（衝突の印を含む）と比べて持つ差分。衝突の解消と、組み合わせのためにマージのコミットで足した変更が入る",
       "pending_source": "issues/issue-3163-requirements.md"
     },
     {
       "term": "衝突の解消のレビューの PR",
-      "context": "ndf-workflow",
+      "context": "ndf-release",
       "meaning": "衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューの後に閉じる",
       "pending_source": "issues/issue-3163-design.md"
     },

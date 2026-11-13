@@ -58,7 +58,7 @@ docs/
 | `plugins/ndf/scripts/supervise_lib/review_units.py` | 新設 | 解いた行（`ReviewRow`）を受けて、プランへレビューのステップを差し込む・外す | `lib/branch_flow.py`・`supervise_lib/templates.py`・`supervise_lib/paths.py`・`supervise_lib/decl.py` |
 | `plugins/ndf/scripts/supervise_lib/sprint_bundles.py` | 変更 | `with_review`・`without_review`・`_redirect` を `review_units.py` へ移し、まとまりの読み出しと設計への受け渡しだけを残す | `supervise_lib/absorb.py` |
 | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | 実装・検査・pace `fast` の検査・設計の各プランを組む所で `review_units` を呼ぶ | `supervise_lib/review_units.py` |
-| `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | pace `fast` のステージで、cross-review を選ばなければ実装レビューのステージを置かない | `supervise_lib/review_units.py` |
+| `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | pace `fast` のステージで、cross-review を選ばなければコードレビューのステージを置かない | `supervise_lib/review_units.py` |
 | `plugins/ndf/scripts/supervise_lib/sprint_close_steps.py` | 変更 | 確定仕様化の PR に、選んだときだけ cross-review のステップを置く | `supervise_lib/review_units.py` |
 | `plugins/ndf/scripts/supervise_lib/release_flow.py` | 変更 | 開発版のデプロイのプランへ置く `review-open`・`review`・`review-close` のステップを組む | `lib/branch_flow.py`・`supervise_lib/templates.py` |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 変更 | `release-branch` と `facts` の間にレビューのステップを置き、本番のリリースのプランの後片付けで一時のブランチを消す | `supervise_lib/release_flow.py` |
@@ -126,18 +126,18 @@ docs/
 | `sprint_impl_plans` | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | `(a, repo: str, pace: str \| None = None) -> dict` | まとまりの有無に依らず、各プランへ `apply_impl` を当てる | 無し | まとまりの記録が無く `impl` を書いていなければ、今と同じプラン | 無し |
 | `plan_sprint_check` | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | `(a, repo: str) -> dict` | `without_review` の代わりに `apply_check` を当てる | 無し | 同上（I5） | 無し |
 | `plan_fast_check` | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | `(a, repo, name, final=False, review_only=False) -> dict` | cross-refactoring を選ばなければ `review_only` として組み、`apply_check` を当てる | 無し | 検査の記録の `--review` の印と、置いたステップが一致する | 無し |
-| `fast_sprint_plans` | `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | `(a) -> list[dict]` | `sprint` の行が cross-review を持たなければ実装レビューのステージを置かない | 無し | 宣言の無いリポジトリでは今と同じステージ | 無し |
+| `fast_sprint_plans` | `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | `(a) -> list[dict]` | `sprint` の行が cross-review を持たなければコードレビューのステージを置かない | 無し | 宣言の無いリポジトリでは今と同じステージ | 無し |
 | `_spec_pr_steps` | `plugins/ndf/scripts/supervise_lib/sprint_close_steps.py` | 変更 | `(a, refs: str, after: str) -> list[dict]` | `spec` の行が `pr` なら `pr` と `ready` の間に文書の cross-review（`spec-review`）を置く | 無し | `none` なら今と同じ並び | 無し |
 | `review_range_steps` | `plugins/ndf/scripts/supervise_lib/release_flow.py` | 新設 | `(a, repo: str \| None, version: str, after: str) -> list[dict]` | `release` の行が `none` でなければ `review-open` → `review` → `review-close` のステップを返す | `version` は接尾辞を外した版 | `none` なら空のリスト | 無し |
 | `release_branch_step` | `plugins/ndf/scripts/supervise_lib/release_flow.py` | 変更 | `(a, repo, version, units, next_id: str = "facts") -> dict` | 次のステップの `id` を引数で受ける | 無し | 既定では今と同じステップ | 無し |
-| `plan_release_package_plugin` | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 変更 | `(a) -> dict` | 開発版で単位があれば、`release-branch` の後に `review_range_steps` を置き、judge の戻り先へ足す | 無し | `release` が `none` なら今と同じプラン | 無し |
+| `plan_release_package_plugin` | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 変更 | `(a) -> dict` | 開発版で単位があれば、`release-branch` の後に `review_range_steps` を置き、judge の復帰先へ足す | 無し | `release` が `none` なら今と同じプラン | 無し |
 | `_cleanup_step` | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 変更 | `(v: str, prs: str, repo: str \| None) -> dict` | 後片付けのコマンドへ、その版の衝突の解消のレビューの一時のブランチを消す処理を足す | 無し | ブランチが無ければ何もせず成功する | 無し |
 | `remerge_patch` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, frm: str, head: str) -> str` | `frm..head` の first-parent のマージの再マージの差分を 1 つのパッチにして返す | `frm` は `head` の祖先 | 衝突の無いマージだけなら空文字 | 外部コマンド（`git log`） |
-| `build_review_pair` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, head: str, patch: str) -> tuple[str, str]` | パッチを `head` へ逆に当てた土台のコミットと、その子で `head` と同じ tree の見せるコミットを作る | `patch` は空でない | 土台と見せるコミットの差分は `patch` と等しい。呼び手の作業ツリーに触れない | ファイル（一時の作業ツリー）・外部コマンド（`git worktree`・`git apply`・`git commit-tree`） |
+| `build_review_pair` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, head: str, patch: str) -> tuple[str, str]` | パッチを `head` へ逆に当てた土台のコミットと、その子で `head` と同じ tree の見せるコミットを作る | `patch` は空でない | 土台と見せるコミットの差分は `patch` と等しい。呼び手の worktree に触れない | ファイル（一時の worktree）・外部コマンド（`git worktree`・`git apply`・`git commit-tree`） |
 | `review_from` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, version: str, head: str, production: str) -> str` | 範囲の始まり（前回のレビュー済みの先頭か本番チャネル）を決める | `git fetch` の後 | 戻り値は `head` の祖先 | ネットワーク（`gh pr list`）・外部コマンド（`git merge-base`） |
-| `close_stale` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root) -> list[dict]` | 開いている衝突の解消のレビューの PR を版に依らず閉じ、一時のブランチを消す（I11） | 無し | head が `REVIEW_PREFIX` で始まる開いた PR が 0 件 | ネットワーク（`gh pr close`・`git push --delete`） |
-| `open_review` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, version: str, diff: str, production: str) -> dict` | 片付け・範囲・差分・ブランチの送信・PR の作成を順に行い、結果の欄を返す | `diff` は `pr` か `resolution` | 戻り値の `review_pr` が開いた PR の番号。差分が空なら `review_pr` は `None` | ネットワーク（`git push`・`gh pr create`）・外部コマンド（`git`） |
-| `close_review` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, version: str) -> dict` | レビューの PR の直しのコミットをリリースブランチへ移して送り、レビュー済みの先頭を本文へ書き、PR を閉じて一時のブランチを消す | その版のレビューの PR が開いている | 成功したらリリースブランチの先頭が直しをすべて含む（I9） | ファイル（一時の作業ツリー）・ネットワーク（`git push`・`gh pr edit`・`gh pr close`） |
+| `close_stale` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root) -> list[dict]` | 開いている衝突の解消のレビューの PR を版に依らず調べ、直しを移し終えたもの（本文の見せる先頭より後のコミットが無いか、`git cherry <リリースブランチ> <head> <見せる先頭>` がすべて `-`）だけを閉じ、一時のブランチを消す。移していない直しを持つ PR があれば何も閉じずに止める（I11） | 無し | 成功したら head が `REVIEW_PREFIX` で始まる開いた PR が 0 件。止めたら、移していない直しを持つ PR と一時のブランチが残る | ネットワーク（`gh pr close`・`git push --delete`）・外部コマンド（`git cherry`） |
+| `open_review` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, version: str, diff: str, production: str) -> dict` | 片付け・範囲・差分・ブランチの送信・PR の作成（本文に見せる先頭を書く）を順に行い、結果の欄を返す | `diff` は `pr` か `resolution` | 戻り値の `review_pr` が開いた PR の番号。差分が空なら `review_pr` は `None` | ネットワーク（`git push`・`gh pr create`）・外部コマンド（`git`） |
+| `close_review` | `plugins/ndf/scripts/release_lib/review_range.py` | 新設 | `(root, version: str) -> dict` | レビューの PR の直しのコミットをリリースブランチへ移して送り、レビュー済みの先頭を本文へ書き、PR を閉じて一時のブランチを消す | その版のレビューの PR が開いている | 成功したらリリースブランチの先頭が直しをすべて含む（I9） | ファイル（一時の worktree）・ネットワーク（`git push`・`gh pr edit`・`gh pr close`） |
 | `cmd_review_open` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a) -> None` | 引数を `open_review` へ渡し、結果 JSON の `metrics.review_pr` に番号を出す | 無し | 差分が空なら終了コード 3 | ネットワーク（`open_review` を通して） |
 | `cmd_review_close` | `plugins/ndf/scripts/release-steps.py` | 新設 | `(a) -> None` | 引数を `close_review` へ渡し、結果 JSON を出す | 無し | 失敗なら終了コード 1 で、PR と一時のブランチを残す | ネットワーク（`close_review` を通して） |
 | `pr_kind` | `plugins/ndf/scripts/project_lib/measure_branch_flow.py` | 新設 | `(head: str, base_ref: str, base: str, production: str) -> str \| None` | PR の head と宛先から PR の種類を決める | 無し | 当たらなければ `None` | 無し |
@@ -160,13 +160,14 @@ docs/
 | `drop_unchosen` | 無し（無い `id` は外さないだけ） | — | — | — | — | — |
 | `apply_design` | `requirements-recheck` が無い | テンプレートの変更 | 付け替えの前 | 止める（`ValueError`） | 同上 | 同上 |
 | `remerge_patch` | git が失敗 | `frm` が無い・git が古い（`--remerge-diff` は 2.36 から） | `git log` の終了コード | 止める（`StepError`、コード 1） | `review-open` が終了コード 1 と git の標準エラーの末尾 | 何も作っていない。原因を直して打ち直せる |
-| `build_review_pair` | 逆に当てられない | 範囲の後のマージかレビューの直しが同じ行を変えた | `git apply -R --check` の終了コード | 止める（`StepError`、コード 1。推定で縮めない。I8） | 終了コード 1 と当たらなかったファイルの一覧 | 一時の作業ツリーを消す。PR とブランチは作らない。人が範囲を見て決める |
+| `build_review_pair` | 逆に当てられない | 範囲の後のマージかレビューの直しが同じ行を変えた | `git apply -R --check` の終了コード | 止める（`StepError`、コード 1。推定で縮めない。I8） | 終了コード 1 と当たらなかったファイルの一覧 | 一時の worktree を消す。PR とブランチは作らない。人が範囲を見て決める |
 | `review_from` | 本文を読めない | `gh` の失敗 | `gh pr list` の終了コード | 止める（`StepError`、コード 1） | 終了コード 1 | 何も作っていない。打ち直せる |
 | `review_from` | 前回の先頭が祖先でない | リリースブランチを手で作り直した | `git merge-base --is-ancestor` | 既定値で続ける（本番チャネルから） | 結果の `items` に「前回の先頭が祖先でないため本番チャネルから取る」を出す | 範囲が広がるだけで、打ち直せる |
 | `close_stale` | 閉じられない | `gh` の失敗・権限 | `gh pr close` の終了コード | 止める（`StepError`、コード 1） | 終了コード 1 と PR の番号 | 閉じた分はそのまま。打ち直すと残りを閉じる |
+| `close_stale` | 移していない直しがある | `review-close` が移せずに止まった後の打ち直し | `git cherry` に `+` の行がある | 止める（`StepError`、コード 1。I9・I11）。閉じず・消さず・新しい PR を作らない | 終了コード 1 と PR の番号・移していないコミット | 人が原因を直して `review-close` から打ち直すか、直しを捨てると決めて PR を閉じてから `review-open` を打ち直す |
 | `open_review` | 差分が空 | 範囲のマージがどれも衝突しない | `remerge_patch` が空文字 | 呼び出し元へ返す（`review_pr` が `None`） | `cmd_review_open` が終了コード 3（打たずに `facts` へ） | ブランチも PR も作らない |
 | `open_review` | 送れない・PR を作れない | push の拒否・`gh pr create` の失敗 | `git push`・`create_pr` の終了コード | 止める（`StepError`、コード 1） | 終了コード 1。プランは `judge` で止まる | 送ったブランチは残る。次の `review-open` の `close_stale` が消す |
-| `close_review` | 直しを移せない | cherry-pick の衝突・リリースブランチが動いた（push の拒否） | `git cherry-pick`・`git push` の終了コード | 止める（`StepError`、コード 1。I9） | 終了コード 1。リリースブランチは動かさない | PR と一時のブランチを残す（人が見る材料）。次の `review-open` が片付ける |
+| `close_review` | 直しを移せない | cherry-pick の衝突・リリースブランチが動いた（push の拒否） | `git cherry-pick`・`git push` の終了コード | 止める（`StepError`、コード 1。I9） | 終了コード 1。リリースブランチは動かさない | PR と一時のブランチを残す（人が見る材料）。直しを移し終えるまで、次の `review-open` も閉じない |
 | `close_review` | 開いた PR が無い | 打ち直しで既に閉じた | `find_pr` が `None` | 止める（`StepError`、コード 1） | 終了コード 1 と「その版のレビューの PR が開いていない」 | 開発版のデプロイのプランを `review-open` から打ち直す |
 | `cmd_review_open` | 引数の誤り | `--diff` に `pr`・`resolution` 以外 | argparse | 止める | 終了コード 2 | 何も作らない |
 | `cmd_review_close` | 下の `close_review` の失敗 | 同上 | 同上 | 呼び出し元へ返す | 同上 | 同上 |
@@ -191,8 +192,8 @@ docs/
 | `insert_reviews` | `checks` に `cross-refactoring` | `_inspect_steps` の `assess`・`refactor` を置く。`assess` の `skip_to` と `refactor` の `on_exit` の行き先は、次に置くステップへ付け替える |
 | `insert_reviews` | `checks` に `behavior` | `BEHAVIOR_STEPS` を置き、`base-sync` を指す行き先を `review-pull` へ付け替える |
 | `drop_unchosen` | ステップの `id` が選ばない組の `STEP_IDS` にある | 並びの順に外し、外した `id` への遷移をそのステップの `next` へ付け替える（外した後続が続けば、その先まで順に付け替わる） |
-| `plan_fast_check` | `review_only` が偽で、`sprint` の行が `cross-refactoring` を選ばない | `review_only=True` として組む（記録の印と実行の条件を揃える） |
-| `fast_sprint_plans` | `sprint` の行が `cross-review` を選ばない | 「実装レビュー」のステージを置かない |
+| `plan_fast_check` | `review_only` が偽で、`sprint` の行が `cross-refactoring` を選ばない | `review_only=True` として組む（記録の印と実行条件を揃える） |
+| `fast_sprint_plans` | `sprint` の行が `cross-review` を選ばない | 「コードレビュー」のステージを置かない |
 | `review_range_steps` | `release` の行が `none` | 空のリスト（`release-branch` の次は今と同じ `facts`） |
 | `review_range_steps` | `pr` か `resolution` | `review-open`（`on_exit` で 3 は `facts`、`pr_from` は `review_pr`、失敗は `judge`）→ `review`（`review_step`。収束しなければ `judge`）→ `review-close`（失敗は `judge`）→ `facts` |
 | `review_from` | 同じ版の閉じたレビューの PR があり、本文のレビュー済みの先頭が `head` の祖先 | その先頭から（I10） |
@@ -242,10 +243,10 @@ docs/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 同じスプリントで `new sprint` の打ち直しと動いているプラン | 目録（`sprint.json`） | 取らない。書くのは `cmd_new_sprint` だけで、`reviews` は開始時の値をそのまま書き直す | 打ち直しはスナップショットから同じ `steps` を組む（I6） |
-| 開発版のデプロイのプランの打ち直し（`review-open` から） | 衝突の解消のレビューの PR・一時のブランチ | `review-open` の始めの `close_stale` が、開いているものを閉じてから作る | 冪等。版ごとに開いているのは 1 組まで（I11） |
+| 開発版のデプロイのプランの打ち直し（`review-open` から） | 衝突の解消のレビューの PR・一時のブランチ | `review-open` の始めの `close_stale` が、直しを移し終えた開いているものを閉じてから作る。移していない直しを持つものがあれば作らずに止める | 冪等。版ごとに開いているのは 1 組まで（I11）。直しは失われない（I9） |
 | `review-close` とリリースブランチの組み直し（`release-branch`） | origin のリリースブランチ | 同じプランの中で順に走るため重ならない。別の操作が先に送れば `git push` が早送りでないとして拒む | 拒まれたら終了コード 1 で止まり、`release-branch` からの打ち直しで直しは残る（origin の先頭から積む。I9） |
 | 本番のリリースのプランの `cleanup` と、次の版の `review-open` | 一時のブランチ | 消す側はブランチの有無を見てから消す（無ければ何もしない） | 冪等 |
-| `build_review_pair`・`close_review` を 2 つ同時に打つ | 手元のリポジトリの作業ツリーの一覧 | 一時の作業ツリーを `tempfile.mkdtemp` で別のパスに作り、呼び手の作業ツリーに触れない | 中断で残った一時の作業ツリーは `git worktree prune` の対象（既存の `build_branch` と同じ扱い） |
+| `build_review_pair`・`close_review` を 2 つ同時に打つ | 手元のリポジトリの worktree の一覧 | 一時の worktree を `tempfile.mkdtemp` で別のパスに作り、呼び手の worktree に触れない | 中断で残った一時の worktree は `git worktree prune` の対象（既存の `build_branch` と同じ扱い） |
 | `project-decl.py measure` を 2 つ同時に打つ | 無し（読むだけ） | 不要 | 冪等 |
 
 ## ログと記録の出力
@@ -279,9 +280,9 @@ docs/
 | `apply_design` | `sprint_waves._review_steps` | `grep -n "def _review_steps" supervise_lib/sprint_waves.py` | 使う（外す `id` の並びをこの出力と照らす） |
 | `review_range_steps` | `release_flow.release_branch_step`・`templates.review_step`・エンジンの `pr_from` | `grep -rn "pr_from" supervise_lib/engine.py supervise_lib/plan.py` | 使う（`pr_from` で `{pr}` を渡す。#1273） |
 | `remerge_patch` | git の `--remerge-diff` | 設計文書の「再マージの差分の実測」 | 使う（設計文書の LIB1） |
-| `build_review_pair` | `release_lib/promotion.build_branch` の一時の作業ツリー・`git commit-tree` | `grep -n "mkdtemp\|worktree" release_lib/promotion.py` | 使う（一時の作業ツリーの作り方と後始末を同じ形にする） |
+| `build_review_pair` | `release_lib/promotion.build_branch` の一時の worktree・`git commit-tree` | `grep -n "mkdtemp\|worktree" release_lib/promotion.py` | 使う（一時の worktree の作り方と後始末を同じ形にする） |
 | `review_from` | `release-steps.find_pr`・`branch_flow.ancestor_of` | `grep -n "def find_pr\|def ancestor_of" release-steps.py lib/branch_flow.py` | `ancestor_of` を使う。`find_pr` は head と宛先の組で探すため、版の閉じた PR を探す `gh pr list --head` を `step_result.gh_json` で打つ |
-| `close_stale` | `merged-steps.py cleanup`（マージ済みの PR の作業ツリーとローカルブランチの片付け） | `grep -n "def cmd_cleanup" merged-steps.py` | 使えない（マージ済みだけを扱い、閉じた PR を扱わない）。`gh pr close --delete-branch` を使う |
+| `close_stale` | `merged-steps.py cleanup`（マージ済みの PR の worktree とローカルブランチの片付け） | `grep -n "def cmd_cleanup" merged-steps.py` | 使えない（マージ済みだけを扱い、閉じた PR を扱わない）。`gh pr close --delete-branch` を使う |
 | `open_review` | `release-steps.create_pr` | `grep -n "def create_pr" release-steps.py` | 使う（`release_lib` から呼べるよう、呼び手が関数を渡す。`promotion.release_selected` の `ops` と同じ形） |
 | `close_review` | `release-steps.find_pr`・`git cherry-pick` | 同上 | 使う |
 | `cmd_review_open` | `cmd_release_branch` の形（引数 → `release_lib` → `emit`） | `grep -n "def cmd_release_branch" release-steps.py` | 使う |
@@ -316,16 +317,16 @@ docs/
 | `sprint_impl_plans` | 受け入れ条件 2 の宣言で選んだ `id` だけが現れる | まとまりの記録の有無で既定値が変わる | 無し |
 | `plan_sprint_check` | 同上 | 同上 | 無し |
 | `plan_fast_check` | cross-refactoring を選ばないと `prepare` の引数に `--review` | — | 無し |
-| `fast_sprint_plans` | cross-review を選ばないと「実装レビュー」のステージが無い | 宣言の無いリポジトリで今と同じステージ | 無し |
+| `fast_sprint_plans` | cross-review を選ばないと「コードレビュー」のステージが無い | 宣言の無いリポジトリで今と同じステージ | 無し |
 | `_spec_pr_steps` | `pr` で `pr` → `spec-review` → `ready` | `none` で今と同じ | 無し |
 | `review_range_steps` | `resolution` で 3 ステップ | `none` で空 | 無し |
 | `release_branch_step` | `next_id` を渡すとその値 | 省くと `facts` | 無し |
 | `plan_release_package_plugin` | `release` を書くと `release-branch` → `review-open` | 書かないと ndf v10.27.61 と同じ並び | 無し |
 | `_cleanup_step` | 一時のブランチがあれば消すコマンドを持つ | 無くても成功する | 無し |
 | `remerge_patch` | 衝突したマージだけが差分を持つ | 衝突の無い範囲で空文字 | 無い参照で `StepError` |
-| `build_review_pair` | 土台と見せるコミットの差分が衝突の解消の差分と等しい | — | 後のマージが同じ行を変えた範囲で `StepError`、一時の作業ツリーが残らない |
+| `build_review_pair` | 土台と見せるコミットの差分が衝突の解消の差分と等しい | — | 後のマージが同じ行を変えた範囲で `StepError`、一時の worktree が残らない |
 | `review_from` | 前回の先頭が祖先ならそこから（I10） | 閉じた PR が無ければ本番チャネル | 前回の先頭が祖先でなければ本番チャネルと `items` の行。`gh` の失敗で `StepError` |
-| `close_stale` | 開いた PR を閉じ、ブランチを消す（I11） | 開いた PR が無ければ何もしない | `gh` の失敗で `StepError` |
+| `close_stale` | 直しの無い・移し終えた開いた PR を閉じ、ブランチを消す（I11） | 開いた PR が無ければ何もしない | 移していない直しを持つ PR があれば何も閉じずに `StepError`（PR とブランチが残る）。`gh` の失敗で `StepError` |
 | `open_review` | `resolution` で PR を作り番号を返す | 空の差分で `review_pr` が `None` | 送れないとき `StepError` |
 | `close_review` | 直しのコミットをリリースブランチへ移す（I9） | 直しが無ければ本文だけ書いて閉じる | cherry-pick の衝突でリリースブランチを動かさず `StepError`。開いた PR が無いとき `StepError` |
 | `cmd_review_open` | 終了コード 0 と `metrics.review_pr` | 空の差分で終了コード 3 | 失敗で終了コード 1、`--diff none` で 2 |
