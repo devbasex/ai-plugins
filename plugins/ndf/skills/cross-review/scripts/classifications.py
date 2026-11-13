@@ -29,8 +29,24 @@ DEFAULT_MAX_ROUNDS = {"design": 3, "code": 12}
 # 1 本の設計文書の行数の上限。超える主題は設計を 2 本に分ける
 DESIGN_DOC_MAX_LINES = 1000
 DESIGN_BRANCH_PREFIX = "design/"
-# 行数を見る設計文書（`design` が `issues/` に置く文書のうち、要求の文書を除く）
-DESIGN_DOC_FILE_SUFFIXES = ("-design.md", "-design-decisions.md")
+
+
+def _line_limited(path: str, placed: bool) -> bool:
+    """行数を見る種類の設計文書か。種類と名前の末尾は設計文書の種類の契約から引く（#3144 の決定 12）。
+
+    このモジュールは `measure.py` から `scripts/lib` を `sys.path` に足さずに取り込まれるため、
+    呼ばれたときに足してから `doc_kinds` を取り込む。契約を読めなければ `DocKindsError` を返す側へ投げる。
+    """
+    import sys
+    from pathlib import Path
+
+    lib = str(Path(__file__).resolve().parents[3] / "scripts" / "lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import doc_kinds
+
+    kind = doc_kinds.kind_of(path, placed=placed)
+    return kind is not None and any(path.endswith(s) for s in doc_kinds.suffixes("line_limit"))
 
 
 def review_kind(head_branch: str | None, categories: list[str] | tuple[str, ...]) -> str:
@@ -64,7 +80,7 @@ def oversized_design_docs(root, paths, limit: int = DESIGN_DOC_MAX_LINES) -> lis
     from_root = Path(root) if root else None
     out = []
     for p in dict.fromkeys(paths or ()):
-        if not (isinstance(p, str) and p.startswith("issues/") and p.endswith(DESIGN_DOC_FILE_SUFFIXES)):
+        if not (isinstance(p, str) and _line_limited(p, placed=True)):
             continue
         f = from_root / p if from_root else Path(p)
         try:
@@ -100,7 +116,7 @@ def has_domain_model(root, paths) -> bool:
 
     from_root = Path(root) if root else None
     for p in dict.fromkeys(paths or ()):
-        if not (isinstance(p, str) and p.endswith(DESIGN_DOC_FILE_SUFFIXES)):
+        if not (isinstance(p, str) and _line_limited(p, placed=False)):
             continue
         f = from_root / p if from_root else Path(p)
         try:

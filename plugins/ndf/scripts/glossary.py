@@ -35,14 +35,15 @@ deps.require("md", "mdtable", "textparse", "pathmatch")
 import jsonio, md, mdtable, pathmatch, proc, textparse  # noqa: E402,E401
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
-import glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
+import doc_kinds, glossary_banned, glossary_lookup, glossary_merge, ndf_tracking  # noqa: E402,E401  glossary_lookup は lookup と --field（#2909）
 from glossary_words import word_pattern  # noqa: E402,F401  文書の中の語の正規表現（#2733）
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
 DEFAULT_SOURCE = "docs/glossary/glossary.json"
 DEFAULT_DOCUMENT = "docs/glossary.md"
-DEFAULT_PATHS = ["issues/*-requirements.md", "issues/*-design.md", "issues/*-design-decisions.md"]
+# 宣言を作るときの既定の対象。設計文書の種類の契約の `glossary` から導く（#3144 の決定 12）
+DEFAULT_PATHS = doc_kinds.patterns("glossary")
 DEFAULT_TERM_SECTIONS = ["用語"]
 DESIGN_MODES = ("standard", "legacy-refactor")
 FORMATS = ("json",)

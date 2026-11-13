@@ -10,6 +10,7 @@ from typing import Any
 
 import review_lib  # noqa: E402
 from classifications import oversized_design_docs  # noqa: E402
+import doc_kinds  # noqa: E402  review_lib が scripts/lib を sys.path に足す
 
 
 DOC_EXTENSIONS = {
@@ -326,12 +327,10 @@ def _is_infra_path(path: str) -> bool:
     return _contains_any(normalized, INFRA_MARKERS) or name in INFRA_FILENAMES or ext in INFRA_EXTENSIONS or lower.endswith(".tfvars.json")
 
 
-# 設計 PR の文書の名前（#542 の決定 5）。`design` の成果物が `issues/` に置く 3 文書。
-DESIGN_DOC_SUFFIXES = ("-requirements.md", "-design.md", "-design-decisions.md")
-
-
 def _is_design_doc_path(path: str) -> bool:
-    return path.startswith("issues/") and path.endswith(DESIGN_DOC_SUFFIXES)
+    """設計 PR の文書か（#542 の決定 5）。種類と名前の末尾は設計文書の種類の契約の `review` から引く（#3144）。"""
+    kind = doc_kinds.kind_of(path)
+    return kind is not None and any(path.endswith(s) for s in doc_kinds.suffixes("review"))
 
 
 PATH_CATEGORY_RULES = (
