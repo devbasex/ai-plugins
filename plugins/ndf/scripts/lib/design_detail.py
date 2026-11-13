@@ -87,6 +87,74 @@ def _first_column(table: md.Table | None) -> set[str]:
     return {_cell_text(r[0]) for r in table.rows if r} if table else set()
 
 
+def _item(name: str, rule: str, text: str) -> dict:
+    return {"name": name, "rule": rule, "text": text}
+
+
+def _row_item(path: str, lines: list[str], rule: str, table: md.Table, k: int, name: str) -> dict:
+    at = _doc_line(table, k)
+    src = lines[at].strip() if at < len(lines) else name
+    return _item(f"{path}:{at + 1} {name}", rule, src)
+
+
+def _column(row: list[str], header: list[str], col: str) -> str:
+    """行の `col` 列の値（列が無い・行が短いときは空文字）。"""
+    if col not in header:
+        return ""
+    i = header.index(col)
+    return _cell_text(row[i]) if i < len(row) else ""
+
+
+def _section_findings(path: str, text: str) -> tuple[list[dict], dict[str, md.Table | None]]:
+    """雛形の節ごとの判定（節が無い・表の行も `省く:` も無い）と、節ごとの最初の表。"""
+    items: list[dict] = []
+    read: dict[str, md.Table | None] = {}
+    for title in detail_sections():
+        sec, table, skip = _section_table(text, title)
+        read[title] = table
+        if sec is None:
+            items.append(_item(f"{path} {title}", "detail_section", f"節「{title}」が無い"))
+        elif not (table and table.rows) and not skip:
+            items.append(_item(f"{path} {title}", "detail_section", f"節「{title}」が表の行も `省く: <理由>` も持たない"))
+    return items, read
+
+
+def _spec_findings(path: str, lines: list[str], read: dict[str, md.Table | None]) -> tuple[list[dict], list[dict], list[dict]]:
+    """関数の仕様の表の判定。列の欠け・異常系に無い関数・再利用に無い新設の関数を返す。"""
+    missing: list[dict] = []
+    failures_found: list[dict] = []
+    reuses_found: list[dict] = []
+    spec = read.get(_SPEC)
+    if spec is None or not spec.rows:
+        return missing, failures_found, reuses_found
+    header = [_cell_text(h) for h in spec.header]
+    for col in (c for c in ("種類", "副作用") if c not in header):
+        missing.append(_item(f"{path} {_SPEC}", "detail_section", f"節「{_SPEC}」の表に列「{col}」が無い"))
+    failures, reuses = _first_column(read.get(_FAILURES)), _first_column(read.get(_REUSE))
+    for k, row in enumerate(spec.rows):
+        name = _cell_text(row[0]) if row else ""
+        if not name:
+            continue
+        if "副作用" in header and _column(row, header, "副作用") != "無し" and name not in failures:
+            failures_found.append(_row_item(path, lines, "detail_failure", spec, k, name))
+        if "種類" in header and _column(row, header, "種類") == "新設" and name not in reuses:
+            reuses_found.append(_row_item(path, lines, "detail_reuse", spec, k, name))
+    return missing, failures_found, reuses_found
+
+
+def _file_findings(path: str, lines: list[str], read: dict[str, md.Table | None], result_files: set[str] | None, why: str) -> list[dict]:
+    """ファイル配置の表のパスを、頭の設計文書の触るファイルと照らす。"""
+    if result_files is None:
+        return [_item(f"{path} 設計の結果", "detail_file", why)] if why else []
+    files = read.get(_FILES)
+    items: list[dict] = []
+    for k, row in enumerate(files.rows if files else []):
+        rel = _cell_text(row[0]) if row else ""
+        if rel and rel not in result_files:
+            items.append(_row_item(path, lines, "detail_file", files, k, rel))
+    return items
+
+
 def check_detail(path: str, text: str, result_files: set[str] | None, why: str = "") -> list[dict]:
     """1 本の詳細設計の文書を 4 規則で判定し、指摘の行（`name`・`rule`・`text`）を規則の順・行の順で返す。
 
@@ -94,51 +162,6 @@ def check_detail(path: str, text: str, result_files: set[str] | None, why: str =
     `None` で `why` が空なら照合する先が無い（`legacy-refactor` の書式）ことを表し、`detail_file` を当てない。
     """
     lines = text.splitlines()
-    found: dict[str, list[dict]] = {"detail_section": [], "detail_failure": [], "detail_reuse": [], "detail_file": []}
-    read: dict[str, md.Table | None] = {}
-    for title in detail_sections():
-        sec, table, skip = _section_table(text, title)
-        read[title] = table
-        if sec is None:
-            found["detail_section"].append({"name": f"{path} {title}", "rule": "detail_section", "text": f"節「{title}」が無い"})
-        elif not (table and table.rows) and not skip:
-            found["detail_section"].append(
-                {"name": f"{path} {title}", "rule": "detail_section", "text": f"節「{title}」が表の行も `省く: <理由>` も持たない"}
-            )
-
-    def _row_item(rule: str, table: md.Table, k: int, name: str) -> dict:
-        at = _doc_line(table, k)
-        src = lines[at].strip() if at < len(lines) else name
-        return {"name": f"{path}:{at + 1} {name}", "rule": rule, "text": src}
-
-    spec = read.get(_SPEC)
-    if spec is not None and spec.rows:
-        header = [_cell_text(h) for h in spec.header]
-        missing = [c for c in ("種類", "副作用") if c not in header]
-        for col in missing:
-            found["detail_section"].append(
-                {"name": f"{path} {_SPEC}", "rule": "detail_section", "text": f"節「{_SPEC}」の表に列「{col}」が無い"}
-            )
-        failures, reuses = _first_column(read.get(_FAILURES)), _first_column(read.get(_REUSE))
-        for k, row in enumerate(spec.rows):
-            name = _cell_text(row[0]) if row else ""
-            if not name:
-                continue
-            if "副作用" in header:
-                cell = row[header.index("副作用")] if header.index("副作用") < len(row) else ""
-                if _cell_text(cell) != "無し" and name not in failures:
-                    found["detail_failure"].append(_row_item("detail_failure", spec, k, name))
-            if "種類" in header:
-                cell = row[header.index("種類")] if header.index("種類") < len(row) else ""
-                if _cell_text(cell) == "新設" and name not in reuses:
-                    found["detail_reuse"].append(_row_item("detail_reuse", spec, k, name))
-
-    if result_files is None and why:
-        found["detail_file"].append({"name": f"{path} 設計の結果", "rule": "detail_file", "text": why})
-    elif result_files is not None:
-        files = read.get(_FILES)
-        for k, row in enumerate(files.rows if files else []):
-            rel = _cell_text(row[0]) if row else ""
-            if rel and rel not in result_files:
-                found["detail_file"].append(_row_item("detail_file", files, k, rel))
-    return [it for rule in found.values() for it in rule]
+    sections, read = _section_findings(path, text)
+    missing, failures, reuses = _spec_findings(path, lines, read)
+    return sections + missing + failures + reuses + _file_findings(path, lines, read, result_files, why)
