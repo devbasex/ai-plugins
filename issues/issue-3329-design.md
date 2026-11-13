@@ -133,7 +133,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 区間の報告の読み手（`plugins/ndf/scripts/lib/unattended_report.py`） | 形の宣言（`ReportForm`）から形の説明の文を作る純粋な関数を足す。値ごとの例も同じ宣言から作り、例が判定で誤り 0 件になるように組む。ファイル・環境変数・時刻を読まない |
+| 区間の報告の読み手（`plugins/ndf/scripts/lib/unattended_report.py`） | 形の宣言（`ReportForm`）に値の意味を持たせ、そこから形の説明の文を作る純粋な関数を足す。値ごとの例も同じ宣言から作り、例が判定で誤り 0 件になるように組む。ファイル・環境変数・時刻を読まない |
 | 人のいない実行の hook（`plugins/ndf/scripts/hook_lib/unattended.py`） | Stop で、差し戻しの文に形の説明を足す（判定に使ったのと同じ `ReportForm` を渡す）。上限に達した後の形に合わない Stop で、誤りの一覧を標準エラーへ 1 行残す。UserPromptSubmit で契約を読み、読めれば案内に形の説明を足す |
 | 問い合わせの決まり（`plugins/ndf/skills/development-workflow/references/asking.md` の「人のいない実行」） | 差し戻しの文と案内が形の説明を載せること、上限の後は通して標準エラーへ残すことを、振る舞いに合わせて書く。値と項目の一覧は写さず、契約のファイルを指す |
 | 人のいない実行の hook のテスト（`plugins/ndf/scripts/tests/test_hook_unattended.py`） | 差し戻しの文・案内の中身、上限の後の扱い、契約の読み込みの回数を縛る |
@@ -167,7 +167,7 @@ graph TB
 
 ## 構造
 
-触る型は無い。`ReportForm`・`Requirement`・`Condition`・`Material` は形を変えず、新しい関数が読むだけである。関数の関係を示す。
+触る型は `ReportForm` だけで、値の意味（契約の `shape.values` の説明）を持つ欄を足す。形の説明は値の意味を載せるため、判定に使う `ReportForm` から意味も読めるようにし、契約の読み込みを 1 回に保つ（I8）。`Requirement`・`Condition`・`Material` は形を変えず、新しい関数が読むだけである。関数の関係を示す。
 
 ```mermaid
 classDiagram
@@ -181,9 +181,12 @@ classDiagram
         +review_stop(hook_input) dict
         +pushback_reason(errors, remaining, form) str
     }
-    class ReportForm
+    class ReportForm {
+        +values tuple
+        +meanings dict
+    }
     unattended ..> unattended_report: 判定と形の説明を呼ぶ
-    unattended_report ..> ReportForm: 読むだけ
+    unattended_report ..> ReportForm: 作って読む
 ```
 
 `describe_form` は新設、`pushback_reason` は引数に `ReportForm` を足す。関数の名前と引数の細部は詳細設計で決める。
