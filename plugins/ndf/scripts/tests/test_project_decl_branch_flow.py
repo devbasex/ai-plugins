@@ -139,6 +139,28 @@ def test_sprint_start_is_read_from_base_only_commits(repo):
     assert mbf.sprint_start(repo, "origin/sprint/from-prod", "develop", "main") == "production"
 
 
+def test_sprint_start_stays_base_after_a_whole_release_ships_the_fork_point(repo):
+    """丸ごとのリリースで分岐点が後から本番に入っても base。本番チャネルの先頭（リリースのマージ）から切ったものは production。#3167。"""
+    git(repo, "checkout", "-q", "-b", "sprint/old", "develop")
+    commit(repo, "old")
+    git(repo, "checkout", "-q", "develop")
+    commit(repo, "dev-more")
+    # ベースブランチへ一度取り込んだ後も伸びたスプリントブランチ（分岐点はスプリント自身のコミット）
+    git(repo, "checkout", "-q", "-b", "sprint/merged", "develop")
+    commit(repo, "m1")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "sprint/merged")
+    git(repo, "checkout", "-q", "sprint/merged")
+    commit(repo, "m2")
+    merge_into_main(repo, "develop")
+    git(repo, "checkout", "-q", "-b", "sprint/from-release", "main")
+    commit(repo, "z")
+    publish(repo)
+    assert mbf.sprint_start(repo, "origin/sprint/old", "develop", "main") == "base"
+    assert mbf.sprint_start(repo, "origin/sprint/merged", "develop", "main") == "base"
+    assert mbf.sprint_start(repo, "origin/sprint/from-release", "develop", "main") == "production"
+
+
 def test_drift_lists_only_items_that_differ():
     """受け入れ条件 12: ずれた項目は宣言の値・測った値・根拠・更新の案を持つ。合っていれば空。"""
     item = mbf.as_item(mbf.infer(ai_plugins_history(), "develop", "main", ["whole"] * 5, []), [])

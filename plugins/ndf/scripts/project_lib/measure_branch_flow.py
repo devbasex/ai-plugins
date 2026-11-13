@@ -73,7 +73,9 @@ def infer(prs: list[dict], base: str, production: str, release_kinds: list[str],
         ),
     }
     starts = infer_field(
-        Counter(sprint_starts), "git merge-base <スプリントブランチ> origin/<ベースブランチ>", "本番に入っていないスプリントブランチの起点"
+        Counter(sprint_starts),
+        "git merge-base <スプリントブランチ> origin/<ベースブランチ>・origin/<本番チャネル> と git rev-list --first-parent",
+        "本番に入っていないスプリントブランチの起点",
     )
     row = branch_flow.PROMOTIONS.get(out["promotion"].get("value") or "")
     if "unknown" in starts and row is not None and len(row.allowed_start) == 1:
@@ -119,13 +121,27 @@ def classify_release(root, merge_commit: str, head: str, base: str) -> str | Non
 
 
 def sprint_start(root, ref: str, base: str, production: str) -> str | None:
-    """本番チャネルに含まれていないスプリントブランチの起点のチャネル。ベースブランチにだけあるコミットを持てば `base`。"""
-    if branch_flow.ancestor_of(root, ref, f"origin/{production}"):
+    """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`）。
+
+    1. 本番チャネルとの分岐点がベースブランチに無い（本番チャネルにだけあるコミットから切った）なら `production`
+    2. ベースブランチとの分岐点が本番チャネルに無い（ベースブランチにだけあるコミットから切った）なら `base`
+    3. 分岐点が両方にある（丸ごとのリリースで後から本番に入った、または本番の直しをベースブランチへ戻した）なら、
+       分岐点が本番チャネルの first-parent の列にあれば `production`（本番で作ったコミット）、無ければ（リリースの
+       マージの第 2 親の側から本番に入ったなら）`base`
+    """
+    prod, origin_base = f"origin/{production}", f"origin/{base}"
+    if branch_flow.ancestor_of(root, ref, prod):
         return None
-    mb = branch_flow.git_run(root, "merge-base", ref, f"origin/{base}").stdout.strip()
+    mb_prod = branch_flow.git_run(root, "merge-base", ref, prod).stdout.strip()
+    if mb_prod and not branch_flow.ancestor_of(root, mb_prod, origin_base):
+        return "production"
+    mb = branch_flow.git_run(root, "merge-base", ref, origin_base).stdout.strip()
     if not mb:
         return None
-    return "production" if branch_flow.ancestor_of(root, mb, f"origin/{production}") else "base"
+    if not branch_flow.ancestor_of(root, mb, prod):
+        return "base"
+    chain = branch_flow.git_run(root, "rev-list", "--first-parent", f"^{mb}^@", prod).stdout.split()
+    return "production" if mb in chain else "base"
 
 
 def collect_flow(root, gh, base: str, production: str) -> dict:
