@@ -668,24 +668,33 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+@dataclass(frozen=True)
+class WaitPolicy:
+    """`wait_reset` の待ち方。`margin` は解除時刻に足す秒数、`max_sleep` は眠る上限（None なら無し）、
+    `now` は今の時刻（None なら呼んだ時点）、`sleeper` は眠る関数（None なら `_sleep`。テストが差し替える）。"""
+
+    margin: int = 60
+    max_sleep: int | None = None
+    now: datetime | None = None
+    sleeper: object = None
+
+
 def wait_reset(
     sessions: list[str],
     root: pathlib.Path | str | None = None,
     layer: str | None = None,
     depth: int | None = None,
-    margin: int = 60,
-    max_sleep: int | None = None,
-    now: datetime | None = None,
-    sleeper=None,
+    policy: WaitPolicy = WaitPolicy(),
 ) -> tuple[int, int, int]:
     """解除まで眠る。返すのは（眠った秒数、起きた時点の中断の件数、終了コード）である。
 
-    **眠るのは、まだ来ていない解除時刻のうち最も早いもの + `margin` までである。**
+    **眠るのは、まだ来ていない解除時刻のうち最も早いもの + `policy.margin` までである。**
     固定の間隔で待たない（AC41）。終了コードは 0 = 解除時刻を過ぎた、
-    3 = `max_sleep` で区切った（まだ解除前）。
+    3 = `policy.max_sleep` で区切った（まだ解除前）。
     """
-    sleeper = sleeper or _sleep
-    now = now or datetime.now(timezone.utc)
+    sleeper = policy.sleeper or _sleep
+    now = policy.now or datetime.now(timezone.utc)
+    margin, max_sleep = policy.margin, policy.max_sleep
 
     def pick() -> list[AgentRecord]:
         return interrupted(
@@ -834,8 +843,7 @@ def _run_wait_reset(args) -> int:
         args.session,
         layer=args.layer,
         depth=args.depth,
-        margin=args.margin,
-        max_sleep=args.max_sleep,
+        policy=WaitPolicy(margin=args.margin, max_sleep=args.max_sleep),
     )
     print(f"[transcript-agents] 眠った: {slept} 秒 / 中断した記録: {remaining} 件")
     return code
