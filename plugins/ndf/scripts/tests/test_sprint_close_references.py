@@ -7,13 +7,13 @@ test_sprint_close_merge_green.py のものを使う。
 
 from __future__ import annotations
 
-import importlib.util
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("sprint_close_harness_refs", HERE / "test_sprint_close_merge_green.py")
-harness = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(harness)
+sys.path.insert(0, str(HERE))
+import sprint_close_harness as harness  # noqa: E402
+
 call, issues_of, DIST_PROD = harness.call, harness.issues_of, harness.DIST_PROD
 repo, gh = harness.repo, harness.gh  # pytest の fixture
 

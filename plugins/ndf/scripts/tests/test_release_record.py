@@ -6,7 +6,6 @@ gh は PATH の先頭に置いた偽物で置き換え、git は origin（裸の
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -24,9 +23,8 @@ import deps  # noqa: E402
 deps.require("md")
 import dist_record  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location("sprint_close_harness_1273", HERE / "test_sprint_close_merge_green.py")
-harness = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(harness)
+sys.path.insert(0, str(HERE))
+import sprint_close_harness as harness  # noqa: E402
 
 FAKE_GH = r"""#!{py}
 import json, os, sys
