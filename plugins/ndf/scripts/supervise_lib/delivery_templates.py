@@ -113,7 +113,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
         raise DeclError(f"本番チャネルへのマージに要る本番チャネルが無い（{PRODUCTION_SOURCES}）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
     wait = f" --timeout {ci_wait}"
-    if release_case.case_at(repo or getattr(a, "worktree", None)).case != release_case.NO_CD:
+    if release_case.case_at(repo or getattr(a, "worktree", None)).has_cd:
         wait += " --no-admin"  # CD のある場合は管理者の迂回なしでマージする（#2773 の I7）
     timeout = ci_wait + max(MARGIN_FLOOR, ci_wait // 10)
     approved = {

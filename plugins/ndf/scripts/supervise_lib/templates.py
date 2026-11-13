@@ -330,7 +330,7 @@ def plan_check(a) -> dict:
     )
     after_whole = "ci-peek" if ci_only(a) else "ready"
     # CD のある場合は全体テストを流さず、マージが CI の結果を待つ（#2773）。作業場所はまだ無いことがあり、宣言は元のリポジトリで読む
-    cd_case = release_case.case_at(getattr(a, "repo", None) or a.worktree.split("/.worktrees/")[0]).case != release_case.NO_CD
+    cd_case = release_case.case_at(getattr(a, "repo", None) or a.worktree.split("/.worktrees/")[0]).has_cd
     plan["steps"] = trim_check_steps(a, plan["steps"], after_whole, refactor_suspended(a) or a.mode in NO_REFACTOR_MODES, cd_case)
     plan["steps"] = check_ci_watch(a, plan["steps"], "ready", "abort", fix_push=True)
     return with_record(plan)

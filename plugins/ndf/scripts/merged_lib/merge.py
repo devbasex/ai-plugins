@@ -418,7 +418,7 @@ def promote(a, cleanup):
             case = release_case.case_of(root)
         except release_case.CaseUnreadable as e:
             raise StepError(f"リリースの場合を決められない: {e}", EXIT_PRECONDITION) from e
-        if case.case != release_case.NO_CD:  # CD のある場合は迂回なしでマージし、場合 1 は先に証跡を書く（#2773 の決定 14）
+        if case.has_cd:  # CD のある場合は迂回なしでマージし、場合 1 は先に証跡を書く（#2773 の決定 14）
             _trail_before_merge(root, a, n, case)
             a.no_admin = True
     a.pr, a.no_cleanup = n, True

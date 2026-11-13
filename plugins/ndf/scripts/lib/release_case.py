@@ -31,6 +31,11 @@ class Case(NamedTuple):
     merger: str
     reason: str
 
+    @property
+    def has_cd(self) -> bool:
+        """CD のある場合（cd-no-review・cd-review）か。"""
+        return self.case != NO_CD
+
 
 class CaseUnreadable(Exception):
     """宣言（`.ndf/project.json` など）を読めず、場合を決められない。"""

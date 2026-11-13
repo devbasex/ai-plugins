@@ -55,7 +55,7 @@ def approved_of(root, a, plugin, case=None):
     `case` が CD のある場合（`release_case` の cd-no-review / cd-review）なら、承認の正本は PR の証跡かレビューで、
     承認したコミットの引数を受けない（渡せば 3。#2773 の決定 10）。"""
     sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
-    if case is not None and case.case != release_case.NO_CD:
+    if case is not None and case.has_cd:
         if sha or material:
             raise StepError(
                 f"リリースの場合 {case.case} では --approved-sha も --approval も渡さない（承認はリリースの PR の"

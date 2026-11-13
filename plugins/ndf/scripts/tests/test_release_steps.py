@@ -770,7 +770,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
     # CD の無い場合（場合 3）の経路。CD の行の有無は公開の担い手だけに効かせる（#2773 の受け入れ条件 19）
-    monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.release_case.decide_case(False, None, ""))
+    monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.reviewed.release_case.decide_case(False, None, ""))
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(
             argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40, ci_wait=3600.0)
@@ -1219,7 +1219,7 @@ HEAD = "c" * 40
 
 
 def _case(mod, name):
-    rc = mod.release_case
+    rc = mod.reviewed.release_case
     return {
         "no-cd": rc.decide_case(False, None, ""),
         "cd-no-review": rc.decide_case(True, 0, ""),

@@ -26,7 +26,7 @@ def reviewed(a, repo: str | None) -> bool:
         case = release_case.case_at(repo or a.worktree, strict=True)
     except release_case.CaseUnreadable as e:
         raise DeclError(f"リリースの場合を決められない: {e}") from e
-    return case.case != release_case.NO_CD
+    return case.has_cd
 
 
 def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict]) -> list[dict]:

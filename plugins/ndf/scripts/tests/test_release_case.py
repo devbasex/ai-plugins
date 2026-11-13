@@ -39,6 +39,11 @@ def test_decide_case(has_cd, approvals, case):
     assert got.case == case and got.reason
 
 
+@pytest.mark.parametrize("case, has_cd", [(rc.NO_CD, False), (rc.CD_NO_REVIEW, True), (rc.CD_REVIEW, True)])
+def test_has_cd_is_true_for_the_cd_cases(case, has_cd):
+    assert rc.Case(case, "", "", "").has_cd is has_cd
+
+
 def fake(table):
     calls = []
 

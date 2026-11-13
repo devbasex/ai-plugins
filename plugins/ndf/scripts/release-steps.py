@@ -132,7 +132,6 @@ from step_result import (
     version_arg,
 )
 import gh_parts  # noqa: E402
-import release_case  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import branch_flow  # noqa: E402
 import delivery  # noqa: E402
@@ -681,7 +680,7 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
-    on_pr = case is not None and case.case != release_case.NO_CD  # CD のある場合は承認を PR の上で照らす（#2773）
+    on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
         got = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops, case if on_pr else None)
