@@ -12,7 +12,7 @@ import sys
 from typing import Any, Optional, TextIO
 
 from ndf import contracts
-from ndf.contracts import causes, facts
+from ndf.contracts import causes, exit_codes
 
 SCHEMA = contracts.schema_path("result")
 # 結果の status の語彙（result.schema.json の enum と事実の表 exit-codes の status 列と同じ）
@@ -67,7 +67,7 @@ def stopped(
 
 def code_matches(status: str, code: int) -> bool:
     """status と終了コードが事実の表 exit-codes の区分で食い違わないか。"""
-    return any(first <= code <= last for first, last in causes.status_ranges(status))
+    return exit_codes.matches(status, code)
 
 
 def code_for(obj: Any) -> Optional[int]:
@@ -76,7 +76,7 @@ def code_for(obj: Any) -> Optional[int]:
         return None
     status = obj.get("status")
     if status in (OK, GATE):
-        return facts.rows(causes.EXIT_CODES, status=status)[0]["code"]
+        return exit_codes.first_code(status)
     if status == STOPPED:
         c = obj.get("cause")
         kind = c.get("kind") if isinstance(c, dict) else None

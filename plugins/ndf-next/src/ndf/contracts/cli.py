@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ndf import contracts
-from ndf.contracts import causes, facts, limits, result
+from ndf.contracts import causes, exit_codes, facts, limits, result
 
 TOOL = "contracts"
 
@@ -60,7 +60,7 @@ def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
     """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
     obj = result.result(TOOL, result.STOPPED, detail, items=items, cause=causes.build("invalid", detail))
     print(json.dumps(obj, ensure_ascii=False))
-    return int(facts.row(causes.EXIT_CODES, "unreadable")["code"])
+    return exit_codes.code_of("unreadable")
 
 
 def _print_value(value: Any) -> None:

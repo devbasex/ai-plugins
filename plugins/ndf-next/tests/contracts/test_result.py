@@ -6,7 +6,7 @@ import json
 import pytest
 
 from ndf import contracts
-from ndf.contracts import causes, result
+from ndf.contracts import exit_codes, result
 
 GAP = {"kind": "record", "name": "x", "reason": "書けなかった"}
 
@@ -96,7 +96,7 @@ def _stopped_range(data):
 
 def test_stopped_range_is_read_from_code_to_last(contracts_copy):
     contracts_copy("facts/exit-codes.json", _stopped_range)
-    assert causes.stopped_codes() == frozenset([1, 2, 3, 4, 5, 6, *range(69, 90), 75])
+    assert exit_codes.codes("stopped") == frozenset([1, 2, 3, 4, 5, 6, *range(69, 90), 75])
     assert [result.code_matches("stopped", c) for c in (68, 69, 80, 89, 90, 75, 7)] == [False, True, True, True, False, True, False]
     assert [result.code_matches("gate", c) for c in (9, 10, 19, 20, 29, 30)] == [False, True, True, True, True, False]
     assert result.code_matches("ok", 0) and not result.code_matches("ok", 1)

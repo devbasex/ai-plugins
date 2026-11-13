@@ -4,7 +4,7 @@ import inspect
 
 import pytest
 
-from ndf.contracts import causes, limits
+from ndf.contracts import causes, exit_codes, limits
 
 
 def _edit_cause(kind: str, **changes):
@@ -18,7 +18,7 @@ def _edit_cause(kind: str, **changes):
 def test_plugin_table_rows_have_type_and_stopped_exit_code():
     table = causes.table()
     assert len(table) == 24
-    codes = causes.stopped_codes()
+    codes = exit_codes.codes("stopped")
     assert all(row.exit in codes and row.std_type for row in table.values())
 
 

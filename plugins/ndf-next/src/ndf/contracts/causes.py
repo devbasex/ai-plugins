@@ -12,13 +12,12 @@ from functools import cache
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
-from ndf.contracts import facts, limits
+from ndf.contracts import exit_codes, limits
 
 TABLE = "causes.json"
 SCHEMA = contracts.schema_path("causes")
 # 結果 JSON の `cause` の形（正本は結果のスキーマの $defs）
 CAUSE_SCHEMA = contracts.schema_path("result") + "#/$defs/cause"
-EXIT_CODES = "exit-codes"
 # 既定の行き先（表の route）と、選んだ行き先（Route.to）の語
 RETRY, STEP, HUMAN, END, STOP = "retry", "step", "human", "end", "stop"
 # プランの on_cause の値のうち、ステップの id でないもの
@@ -48,26 +47,6 @@ class Route(NamedTuple):
     kind: str
 
 
-def exit_code_bounds(row: Mapping[str, Any]) -> tuple[int, int]:
-    """事実の表 exit-codes の 1 行の終了コードの範囲（始点と終点。last が無ければ code だけ）。"""
-    return row["code"], row.get("last", row["code"])
-
-
-def status_ranges(status: str) -> tuple[tuple[int, int], ...]:
-    """`status` の終了コードの範囲（始点と終点）の並び（事実の表 exit-codes から）。"""
-    return tuple(exit_code_bounds(r) for r in facts.rows(EXIT_CODES, status=status))
-
-
-def codes_for_status(status: str) -> frozenset[int]:
-    """`status` の結果が返してよい終了コード（事実の表 exit-codes から）。"""
-    return frozenset(c for first, last in status_ranges(status) for c in range(first, last + 1))
-
-
-def stopped_codes() -> frozenset[int]:
-    """`stopped` の結果が返してよい終了コード。"""
-    return codes_for_status("stopped")
-
-
 def _policy_errors(row: CauseRow) -> list[str]:
     if row.retry is None:
         return []
@@ -87,7 +66,7 @@ def validate(raw: Any) -> dict[str, CauseRow]:
     if errs:
         raise CausesError(f"止まった理由の表 {TABLE} の形が違う: {'; '.join(errs)}")
     out: dict[str, CauseRow] = {}
-    codes = stopped_codes()
+    codes = exit_codes.codes("stopped")
     for item in raw["causes"]:
         row = CauseRow(**item)
         if row.kind in out:
