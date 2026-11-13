@@ -597,22 +597,10 @@ def _code_candidates(rel, lines, add):
             add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
 
 
-def cmd_candidates(a):
-    root = Path(a.root)
-    decl = load_declaration(root)
-    sections = decl.term_sections if decl else DEFAULT_TERM_SECTIONS
-    known = live_words(load_glossary(decl)) if decl and decl.source_path.exists() else set()
-    skip = {decl.document, decl.source} if decl else set()
-    found: dict[tuple[str, str], dict] = {}
-
-    def add(term, kind, where):
-        if not term or term in known:
-            return
-        it = found.setdefault((term, kind), {"term": term, "count": 0, "kind": kind, "first": where})
-        it["count"] += 1
-
-    files = git_checked(root, "ls-files").stdout.splitlines()
-    for rel in files:
+def _tracked_texts(root: Path, skip: set):
+    """git の追跡するファイルを `ls-files` の順に読み、`(相対パス, 本文)` を返す。
+    `skip`・ファイルでない・シンボリックリンク・大きすぎる・読めない・UTF-8 でないものは飛ばす。"""
+    for rel in git_checked(root, "ls-files").stdout.splitlines():
         p = root / rel
         if rel in skip or not p.is_file() or p.is_symlink():
             continue
@@ -622,10 +610,34 @@ def cmd_candidates(a):
             text = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        yield rel, text
+
+
+def _count_candidates(texts, known: set, sections: list[str]) -> dict[tuple[str, str], dict]:
+    """`(相対パス, 本文)` の並びから、既知の語を除いた候補を (語, 種類) ごとに数える（`first` は最初に見た場所）。"""
+    found: dict[tuple[str, str], dict] = {}
+
+    def add(term, kind, where):
+        if not term or term in known:
+            return
+        it = found.setdefault((term, kind), {"term": term, "count": 0, "kind": kind, "first": where})
+        it["count"] += 1
+
+    for rel, text in texts:
         if rel.endswith(".md"):
             _md_candidates(rel, text, sections, add)
         else:
             _code_candidates(rel, text.splitlines(), add)
+    return found
+
+
+def cmd_candidates(a):
+    root = Path(a.root)
+    decl = load_declaration(root)
+    sections = decl.term_sections if decl else DEFAULT_TERM_SECTIONS
+    known = live_words(load_glossary(decl)) if decl and decl.source_path.exists() else set()
+    skip = {decl.document, decl.source} if decl else set()
+    found = _count_candidates(_tracked_texts(root, skip), known, sections)
     items = [it for it in found.values() if it["kind"] != "bold" or it["count"] >= 3]
     items.sort(key=lambda it: (-it["count"], it["kind"], it["term"]))
     items = items[: a.limit]

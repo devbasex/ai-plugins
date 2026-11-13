@@ -805,7 +805,6 @@ def test_candidates_empty_repository_is_scratch(bare):
     assert code == 0 and out["items"] == [] and "スクラッチ" in out["summary"]
 
 
-
 def _candidates(root, *args):
     code, out, err = run(root, "candidates", *args)
     assert code == 0, err
