@@ -133,9 +133,10 @@ graph TB
 - `merge` が落ちたら `ci-peek-merge` へ進む
 - リファクタリング（`assess` → `refactor`）を入れる
 
-リファクタリングを外す条件は `supervise_lib/templates.py` の `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つである。`CROSS_REFACTORING_SUSPENDED` は `False` で、宣言の無いリポジトリでは `refactor_suspended` が真になる。次の 3 か所はすべてこの条件を読む。
+リファクタリングを外す条件は `supervise_lib/templates.py` の `refactor_suspended(a) = CROSS_REFACTORING_SUSPENDED or not ci_only(a)` の 1 つである。`CROSS_REFACTORING_SUSPENDED` は `False` で、宣言の無いリポジトリでは `refactor_suspended` が真になる。次の 4 か所はすべてこの条件を読む。
 
 - `assess`・`refactor` を外す判定（`trim_check_steps`）
+- レビューの単位で実装のプランへ cross-refactoring を差し込むかの判定（`review_units.chosen_checks`）
 - 検査の記録をレビューだけの回にする `--review`
 - 差分の検査の `no_refactor`
 
