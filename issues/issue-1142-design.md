@@ -43,18 +43,19 @@
 
 ### 3 つの主題をまとめた順序
 
-触るファイルの重なりで順序を決めた。同じ行の中は並列に流せる。
+触るファイルの重なりで順序を決めた。同じ行の中は並列に流せる。リファクタリング計画の子の課題（#2963・#2990・#2992〜#2995）と触るファイルが重なる行は、その子の課題の実装の後に置く（data の DT8 と同じ扱い）。#3153 は不具合の修正のため、`supervise_lib/verify_steps.py` が #2993 と重なっても先に出す（scripted-flow の決定 64）。
 
 | 順 | 流すもの | 先に要るもの | 重なりの理由 |
 | ---: | --- | --- | --- |
 | 1 | #3153（scripted-flow の子 3）・smells の A0 | — | A0 は `.github/workflows/script-structure.yml` と `pyproject.toml` を触る |
 | 2 | scripted-flow の子 1（種類の表と結果 JSON） | — | `scripts/check-ndf-contracts.py` を data の DT1 と共有するため、DT1 より先に入れる |
 | 3 | data の DT1 | #2996・順 1 の A0・順 2 の子 1 | `script-structure.yml` を A0 と、`check-ndf-contracts.py` を子 1 と共有する |
-| 4 | data の DT2・DT3・DT5、scripted-flow の子 2・9・10・11・13、smells の A1〜A4 | 順 2・順 3 | 互いの触るファイルは各文書の表で重ならない組だけを同時に流す。A1〜A4 は着手の時点の一覧で割る |
-| 5 | data の DT4、scripted-flow の子 4〜7・12 | 順 4 の前提の行 | 各文書の「先に要るもの」 |
-| 6 | data の DT6・DT7、scripted-flow の子 8 | #3092・#3144 の実装 | 工程・モード・設計文書の種類の置き場が先に要る |
-| 7 | data の DT8 | 子の課題 #2990・#2992・#2993・#2994・#2995 | 子の課題が触るファイルの残り |
-| 8 | E9（測り直し） | 上のすべて | `scripts/measure/ai-smells.py`・`const-facts.py`・`ai-branching.py` を同じコマンドで打つ |
+| 4 | data の DT2・DT3・DT5、scripted-flow の子 10、smells の A1〜A4 | 順 2・順 3 | 互いの触るファイルは各文書の表で重ならない組だけを同時に流す。A1〜A4 は着手の時点の一覧で割る |
+| 5 | scripted-flow の子 2・9・11 | 順 2 と、子 2 は #2963・#2990・#2993、子 9 は #2992、子 11 は #2994 の実装 | 子 2 は `supervise_lib/` と `lib/durable.py`、子 9 は `parallel.py`・`lib/parallel_*.py`、子 11 は `lib/sprint_loop_cli.py` を子の課題と共有する |
+| 6 | data の DT4、scripted-flow の子 4〜7・12・13 | 順 4・順 5 の前提の行 | 各文書の「先に要るもの」。子 4〜7・13 は `supervise_lib/` か `supervise.py` を触るため、子 2 と同じく #2993 の後になる |
+| 7 | data の DT6・DT7、scripted-flow の子 8 | #3092・#3144 の実装 | 工程・モード・設計文書の種類の置き場が先に要る |
+| 8 | data の DT8 | 子の課題 #2990・#2992・#2993・#2994・#2995 | 子の課題が触るファイルの残り |
+| 9 | E9（測り直し） | 上のすべて | `scripts/measure/ai-smells.py`・`const-facts.py`・`ai-branching.py` を同じコマンドで打つ |
 
 **子の課題（リファクタリング計画の #2990〜#2996）の範囲の兆候は、その子の課題が直す**（smells の決定 43）。
 
