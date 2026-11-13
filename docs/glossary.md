@@ -589,6 +589,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | — |
+| 異常系の処理 | — | 関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

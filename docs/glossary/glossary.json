@@ -6802,6 +6802,20 @@
       "context": "ndf-workflow",
       "meaning": "選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "詳細設計",
+      "context": "ndf-workflow",
+      "meaning": "設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める",
+      "source": "",
+      "pending_source": "issues/issue-3144-requirements.md"
+    },
+    {
+      "term": "異常系の処理",
+      "context": "ndf-workflow",
+      "meaning": "関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める",
+      "source": "",
+      "pending_source": "issues/issue-3144-requirements.md"
     }
   ]
 }
