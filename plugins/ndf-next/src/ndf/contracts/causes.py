@@ -161,6 +161,13 @@ class RetryState(NamedTuple):
     cap: Optional[float]
 
 
+def _fallback(kind: str, on_fail: Optional[str]) -> Route:
+    """打ち直さないときの落とし先: on_fail があればそのステップ、無ければ人へ。"""
+    if on_fail:
+        return Route(STEP, on_fail, 0.0, kind)
+    return Route(HUMAN, None, 0.0, kind)
+
+
 def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Route:
     """打ち直せるなら retry、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
     policy = state.policy
@@ -171,9 +178,7 @@ def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Rout
         wait = backoff(policy, state.used, state.retry_after, state.cap)  # type: ignore[arg-type]
         if wait > 0:
             return Route(RETRY, None, wait, kind)
-    if on_fail:
-        return Route(STEP, on_fail, 0.0, kind)
-    return Route(HUMAN, None, 0.0, kind)
+    return _fallback(kind, on_fail)
 
 
 def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: RetryState) -> Route:
@@ -194,6 +199,7 @@ def pick(kind: str, on_cause: Mapping[str, str], on_fail: Optional[str], state: 
     if target is not None:
         # 指定はステップの id
         return Route(STEP, target, 0.0, kind)
-    if to == STEP and on_fail:
-        return Route(STEP, on_fail, 0.0, kind)
-    return Route(HUMAN, None, 0.0, kind)
+    if to == STEP:
+        return _fallback(kind, on_fail)
+    # 既定が人への種類は on_fail を見ない
+    return _fallback(kind, None)
