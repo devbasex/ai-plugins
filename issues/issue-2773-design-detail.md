@@ -46,10 +46,11 @@ scripts/
 ```
 
 依存の向きは「エントリポイント（`release-steps.py`・`merged-steps.py`・workflow）→ `release_lib` / `merged_lib` / `supervise_lib` → `lib`」の一方向である。
-`lib/release_case.py` は `lib/delivery.py` と `lib/ci_workflows.py` だけを読み、`release_lib` を読まない。`release_lib/approval_trail.py` は
-`lib/gh_rest.py`・`lib/approved_commit.py` を読み、`release_lib/approval.py` を読まない（`approval.py` が `approval_trail.py` を読む）。
+`lib/release_case.py` は `lib/delivery.py` と `lib/ci_workflows.py` だけを読み、`release_lib` を読まない。
+`release_lib/approval_trail.py` は `lib/gh_rest.py`・`lib/approved_commit.py` を読む。
+`release_lib/approval.py` は読まない（`approval.py` が `approval_trail.py` を読む）。
 `merged_lib/merge.py` は `release_lib/approval_trail.py` と `lib/release_case.py` を読む。逆向きの読み込みは無く、循環しない。
-workflow は既定ブランチを取り出して `release-steps.py` と `merged-steps.py` を呼ぶだけで、Python のモジュールから workflow は読まない。
+workflow は既定ブランチを取り出して、`release-steps.py` と `merged-steps.py` を呼ぶだけである。Python のモジュールから workflow は読まない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -107,7 +108,7 @@ workflow は既定ブランチを取り出して `release-steps.py` と `merged-
 
 ## 関数の仕様
 
-型の略記: `Repo` は `owner/name` の文字列、`Sha` は 40 桁の 16 進の文字列、`Root` はworktreeの `Path`、`Args` は `argparse.Namespace`。
+型の略記: `Repo` は `owner/name` の文字列、`Sha` は 40 桁の 16 進の文字列、`Root` は worktree の `Path`、`Args` は `argparse.Namespace`。
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -158,8 +159,8 @@ workflow は既定ブランチを取り出して `release-steps.py` と `merged-
 | `read_declaration` | `scripts/check-required-checks.py` | 変更 | `(path: Path) -> Declaration` | `statuses`（`name`・`workflow`・`reason`）を読む | 今と同じ | `Declaration.statuses` は空の並びが既定 | ファイルの読み |
 | `compare` | `scripts/check-required-checks.py` | 変更 | `(names, undetermined, required, decl, allow_rel, root: Path) -> list[Finding]` | 宣言した commit status の名前を、ジョブの名前と同じく既知の必須として数える | 今と同じ | `statuses` の名前は「消えた必須」に出ない。`workflow` のファイルが無い宣言は「古い宣言」 | ファイルの存在の確認 |
 
-`plan_promote`（`delivery_templates.py`）と `plan_check`（`templates.py`）は引数を 1 つ足すか渡すだけで、上の 3 つ（シグネチャ・責務・失敗の扱い）を
-変えない。`plan_promote` は場合 1・2 なら promote のコマンドへ `--no-admin` を足し、`plan_check` は `case_of(root).case != "no-cd"` を
+`plan_promote`（`delivery_templates.py`）と `plan_check`（`templates.py`）は、引数を 1 つ足すか渡すだけである。
+上の 3 つ（シグネチャ・責務・失敗の扱い）は変えない。`plan_promote` は場合 1・2 なら promote のコマンドへ `--no-admin` を足し、`plan_check` は `case_of(root).case != "no-cd"` を
 `trim_check_steps` の `cd_case` へ渡す。`merged-steps.py` の `build_parser` は説明の文だけを直す。
 
 ## 異常系の処理
@@ -240,7 +241,7 @@ workflow は既定ブランチを取り出して `release-steps.py` と `merged-
 | `promote` | 場合 1・2、`--gate-approved` がある | `_trail_before_merge` → `merge_when_green`（`no_admin=True`） |
 
 - 繰り返しの終わる条件: `_wait_ci_except` は `skip` 以外のチェックがすべて終わるか、上限の秒（`--ci-wait`）で終わる。`_wait_trail_status` は `success` を読むか、上限（`release-steps.trail-status`）で終わる。`_release_dev_by_workflow` は実行の `status == completed` か、上限（`release-steps.dev-workflow`）で終わる。`read_comments`・`read_reviews` は次のページが無くなるまで読む
-- 計算量の注意: `read_roles` は証跡を書いた人の数だけ API を呼ぶ（同じ人は 1 度）。証跡を書く人は承認権限を持つ数人で、上限を設けない。commit status は SHA と名前ごとに 1000 件が上限（STD3）で、証跡のチェックは出来事ごとに 1 件を付けるため、同じ先端で 1000 回を超えて出来事が起きると付けられない。リリースの PR では起きない回数として扱う
+- 計算量の注意: `read_roles` は証跡を書いた人の数だけ API を呼ぶ（同じ人は 1 度）。証跡を書く人は承認権限を持つ数人で、上限を設けない。commit status は SHA と名前ごとに 1000 件が上限である（STD3）。証跡のチェックは出来事ごとに 1 件を付けるため、同じ先端で 1000 回を超えて出来事が起きると付けられない。リリースの PR では起きない回数として扱う
 
 ## 内部のデータと定数
 
@@ -263,7 +264,7 @@ workflow は既定ブランチを取り出して `release-steps.py` と `merged-
 | `Declaration.statuses` | 型の項目（`name`・`workflow`・`reason` の並び） | `scripts/check-required-checks.py` | 空の並び |
 
 - 開発版の workflow の実行は、`run-name: "release-dev #${{ inputs.pr }}"` の表示名で起動した実行を見分ける。表示名の形は `release-dev.yml` と
-  `_release_dev_by_workflow` の 2 か所に出るため、`_release_dev_by_workflow` は workflow のファイルの `run-name` を読んで照合の文を作り、
+  `_release_dev_by_workflow` の 2 か所に出る。そのため `_release_dev_by_workflow` は workflow のファイルの `run-name` を読んで照合の文を作り、
   文字列を Python の側に持たない
 - 証跡の書式の印と行の名前（`承認したコミット:`）は `approval_trail.py` だけが持つ。手順書は書式を写さず、このモジュールを指す
 
