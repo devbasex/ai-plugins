@@ -2,6 +2,19 @@
   "version": 1,
   "base_branch": "develop",
   "production_branch": "main",
+  "branch_flow": {
+    "start": "production",
+    "integrate": "check",
+    "doc_prs": "sprint",
+    "promotion": "selected",
+    "reviews": {
+      "impl": {"checks": ["cross-review"], "diff": "pr"},
+      "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
+      "release": {"checks": ["cross-review"], "diff": "resolution"},
+      "design": {"checks": ["cross-review"], "diff": "pr"},
+      "spec": {"checks": [], "diff": "none"}
+    }
+  },
   "guard": {
     "allow_paths": [
       "issues/",
