@@ -7036,6 +7036,27 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "人のいない実行",
+      "context": "ndf-factory",
+      "meaning": "環境変数 NDF_FACTORY_RUN が空でない実行ジョブの区間。AskUserQuestion が使えず、応答を人が読まない",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "結果の行",
+      "context": "ndf-factory",
+      "meaning": "最後の応答の文の中の、最後の「- 結果: <値>」の行。値は 判断が要る / 完了 / できなかった の 3 つで、Factory が区間の結果を決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区分の無い問い",
+      "context": "ndf-workflow",
+      "meaning": "問い合わせの区分（承認ゲート・レッドライン・費用など）のどれにも当たらない問い。AI が決めて記録する",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
     }
   ]
 }
