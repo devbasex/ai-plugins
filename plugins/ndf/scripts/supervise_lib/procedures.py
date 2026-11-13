@@ -207,11 +207,19 @@ def sprint_out(a) -> Path:
     return Path(a.out or f"sprint-{a.name}")
 
 
-def survey_steps(n: int, next_id: str) -> list:
+def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
     """設計のプランの外部の調査の検査（survey-check / fix-survey / survey-recheck。#2519 の決定 7）。
 
-    レビューの直しで決定が変わった後に確かめる。直しは 1 回だけ試み、残れば `on_fail` を置かずにプランを止める。"""
-    check = f"{DESIGN_SURVEY_PY} check --issue {n}"
+    レビューの直しで決定が変わった後に確かめる。直しは 1 回だけ試み、残れば `on_fail` を置かずにプランを止める。
+    `require_detail`（詳細設計を通るモード。#3144）なら検査に `--require-detail` を付け、詳細設計の文書の形も確かめる。"""
+    check = f"{DESIGN_SURVEY_PY} check --issue {n}" + (" --require-detail" if require_detail else "")
+    detail_fix = (
+        "detail_* の指摘は詳細設計の文書（issues/issue-<番号>-design-detail.md）を直す: 雛形の節を足すか `省く: <理由>` を書く・"
+        "副作用のある関数の異常系の処理の行・新設の関数の既存の部品の再利用の行を足す・ファイル配置のパスを設計の結果の触るファイルと"
+        "揃える。"
+        if require_detail
+        else ""
+    )
     return [
         {
             "id": "survey-check",
@@ -232,7 +240,7 @@ def survey_steps(n: int, next_id: str) -> list:
             "next": "survey-recheck",
             "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を"
             "直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘"
-            "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。",
+            "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。" + detail_fix,
         },
         {"id": "survey-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120, "cmd": check, "next": next_id},
     ]

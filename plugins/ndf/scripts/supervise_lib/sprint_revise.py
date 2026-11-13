@@ -31,6 +31,10 @@ def with_revise_note(plan: dict, a, n: int, doc: str) -> dict:
     by_id["glossary"]["next"] = "requirements"
     by_id["requirements"]["prompt"] += "\n\n" + revise_note.prompt_text(data)
     by_id["design"]["prompt"] += "\n\n" + revise_note.prompt_text(data, doc)
+    # 詳細設計を通るモード（#3144）。詳細設計にも同じ指摘を当てる。対応の表は頭のファイル（設計文書）の 1 か所だけに
+    # 置き、突き合わせ（REVISE_CHECK）もそこを読むため、詳細設計の段には表を書く指示を渡さない
+    if "detail-design" in by_id:
+        by_id["detail-design"]["prompt"] += "\n\n" + revise_note.prompt_text(data)
     push = by_id["push-glossary"]
     check = {
         "id": REVISE_CHECK,

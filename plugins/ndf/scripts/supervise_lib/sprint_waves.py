@@ -15,7 +15,7 @@ import legacy_names
 from gate_answer import DESIGN_GATE
 
 from supervise_lib.decl import decl_fields, sprint_flow
-from supervise_lib.design_steps import gate_steps, pr_steps, writing_steps
+from supervise_lib.design_steps import detail_design_runs, gate_steps, pr_steps, writing_steps
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.procedures import survey_steps
@@ -150,7 +150,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             rebuild_step(n, doc),
             *with_base(pr_steps(a, n, doc), target),
             *_review_steps(n, copy, push),
-            *survey_steps(n, next_id="glossary-check"),
+            *survey_steps(n, next_id="glossary-check", require_detail=detail_design_runs(a.mode)),
             *_glossary_steps(glossary_check, push),
             *gate_steps(),
         ],
