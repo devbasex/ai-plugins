@@ -287,7 +287,7 @@ scripts/contracts_lib/workflow_defs.py          *
 | `step_append` | 書き手か遷移が許されない | 定義とモデルの食い違い（実装の誤り） | `Refused` | 止める（その行を `failed` にする事象は書かずに実行を `ERROR` で終える） | `stopped`（理由）、1 | `retry` は効かない。不具合として起票する |
 | `run_activity` | 知らない `call` の名前 | 定義の検査をすり抜けた | `ACTIVITIES` の引き当て | 呼び出し元へ返す（行を失敗にする） | `stopped`、1 | 定義を直して `retry` |
 | `act_plan` | プランが失敗した | `supervise.py queue` が 0 以外で終わった | 子のプロセスの終了コード | 呼び出し元へ返す（行を失敗にする） | `stopped`（プランの出力のパス）、1 | プランの作業ディレクトリは残す。`retry` で流し直せる |
-| `act_plan` | `supervise.py queue` が承認ゲートで止まった | プランの中の承認 | 終了コード 10〜19 | 呼び出し元へ返す（待ちとして扱う） | `gate`、10 | 答えの後の `next` でプランを `queue` から続ける |
+| `act_plan` | `supervise.py queue` が承認ゲートで止まった | プランの中の承認と判断のゲート（`judge` の gate を含む） | 終了コード 10〜19 | 呼び出し元へ返す（待ちとして扱う。止まったステップの名前を行の出力に残す） | `gate`（`items` に待っている行と止まったステップ）、10 | 人の答えは `progress.py answer` でその行へ書く。次の `next` で `act_plan` が `answered` を読み、`supervise.py run <プラン> --from <ゲートの次のステップ>` で続ける（`queue --resume` は使わない。2026-11-13 の設計承認ゲートで A を選んだ） |
 | `act_listen` | 答えが規約に合わない | リリースの結果のファイルの形の誤り | `validate_io` | 呼び出し元へ返す（行を失敗にする） | `stopped`（検査の誤り）、1 | 失敗の行に正しい答えを `answer` で書いてから `retry` を打つ。`act_listen` はその行の最新の `answered` を読むため、前の不正な答えは使われない |
 | `act_record` | 進捗記録を書けない | `gh` の認証・ネットワーク・ボードの選択肢が無い | `project_stage` の結果 | 既定値で続ける（工程は進める） | 結果の `items` に `kind: progress-record` の失敗を載せる。終了コードは変えない | 次の工程の記録で書き直される |
 | `act_reshuffle` | 変更案が規約に合わない | Claude の出力の誤り | `validate_io` | 呼び出し元へ返す（行を失敗にする） | `stopped`、1 | `retry` で作り直せる |
@@ -517,7 +517,7 @@ scripts/contracts_lib/workflow_defs.py          *
 | `step_rows` | 行と `plan_cancelled` を返す | 計画の外 | 切断の再試行が尽きる |
 | `step_append` | 流し直しで 1 度だけ残る。`completed` の下書きでレーンの行に `row_ended` が同じトランザクションで書かれ `next_row` が返る | 下書き 0 件・計画の外のスプリントの完了（`next_row` が `None`） | 書き手の誤りで実行が終わる・`end_lane_row` が断ると `completed` も残らない |
 | `run_activity` | 4 つの名前を引ける | — | 知らない名前で行が失敗 |
-| `act_plan` | `queue` の出力を返す | 承認ゲートで 10 | 0 以外の終了で行が失敗 |
+| `act_plan` | `queue` の出力を返す | 承認ゲートで 10・答えの後は `run --from <ゲートの次>` で続ける | 0 以外の終了で行が失敗 |
 | `act_listen` | `answered` の事象があれば受信を待たない | 答えがまだ無く待ちに入る・答え直した行では最新の `answered` を使う | 規約に合わない答えで失敗 |
 | `act_record` | 開始と終了の記録 | ボードの宣言が無い | `gh` の失敗でも工程が進む |
 | `act_reshuffle` | 変更なしで Claude を起動しない | 変更案が 0 件 | 規約に合わない案で失敗 |
