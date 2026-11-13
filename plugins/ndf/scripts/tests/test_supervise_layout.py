@@ -145,18 +145,23 @@ def run(*args: str) -> subprocess.CompletedProcess:
 def lib_imports(name: str) -> set[str]:
     """supervise_lib の中の `name` が import する supervise_lib のモジュール。"""
     tree = ast.parse((PKG / f"{name}.py").read_text(encoding="utf-8"))
-    got: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("supervise_lib"):
-            if node.module == "supervise_lib":
-                got |= {a.name for a in node.names}
-            else:
-                got.add(node.module.split(".", 1)[1])
-        elif isinstance(node, ast.ImportFrom) and node.level:
-            got |= {a.name for a in node.names} if not node.module else {node.module}
-        elif isinstance(node, ast.Import):
-            got |= {a.name.split(".", 1)[1] for a in node.names if a.name.startswith("supervise_lib.")}
-    return got
+    return set().union(*(_imported_lib_names(node) for node in ast.walk(tree)))
+
+
+def _imported_lib_names(node: ast.AST) -> set[str]:
+    """AST のノード 1 つが参照する supervise_lib のモジュールの名前。import でなければ空。"""
+    if isinstance(node, ast.Import):
+        return {a.name.split(".", 1)[1] for a in node.names if a.name.startswith("supervise_lib.")}
+    if not isinstance(node, ast.ImportFrom):
+        return set()
+    module = node.module or ""
+    if module == "supervise_lib":
+        return {a.name for a in node.names}
+    if module.startswith("supervise_lib"):
+        return {module.split(".", 1)[1]}
+    if not node.level:
+        return set()
+    return {module} if module else {a.name for a in node.names}
 
 
 def test_subcommands_do_not_change():
