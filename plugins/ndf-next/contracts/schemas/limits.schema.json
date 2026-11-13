@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "limits.schema.json",
+  "title": "上限の宣言",
+  "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "policies"],
+  "properties": {
+    "version": {"const": 1},
+    "policies": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["summary"],
+        "minProperties": 2,
+        "properties": {
+          "summary": {"type": "string", "pattern": "\\S"},
+          "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
+          "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
+          "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
+          "max_interval": {"type": "number", "minimum": 0, "description": "伸ばした間隔の頭打ちの秒"},
+          "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
+          "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
+          "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
+          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"}
+        }
+      }
+    }
+  }
+}

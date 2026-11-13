@@ -367,3 +367,12 @@ def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path,
         pcli.start_plan(a, reply, main, checked, SCRIPTS / "parallel.py")
     assert marked == [("p1", False)] and out["metrics"]["organizer"] is True
     assert spawned and spawned[0][-2:] == ["run", "p1"]
+
+
+def test_ended_lanes_do_not_count_toward_caps(monkeypatch):
+    """終わりの記録があるレーンは、レーン数とプランの本数の上限に数えない（#3021）。"""
+    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "4")
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "2")
+    assert ("error", "I2") in rules_of(BASE)
+    plan, items, _ = pp.check_data(BASE, ended={"lroot"})
+    assert plan is not None and not [it for it in items if it["level"] == "error"]

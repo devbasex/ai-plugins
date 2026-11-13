@@ -7,6 +7,10 @@
 1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → develop）
 2. PR の差分が文書のファイルだけ（NDF の差分の分類 `lib/diff_kinds.py`。宣言は `.ndf/project.json` の `docs`）。
    テストが読む文書があれば `docs_tests` に対応するテストを出し、文書のテストのジョブが走らせる
+2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/`）と
+   その workflow だけ。そのディレクトリは自分の workflow（`ndf-next.yml`）のテストと検査で確かめ、根のテストと
+   runtime smoke はそのディレクトリを読まない（マーケットプレイスに載せていない。#1142 の決定 74）。
+   入れ替え（#1142 の S2）で ndf-next.yml と一緒に `SELF_TESTED` を消す
 3. head の first-parent の祖先 A のうち、A..head の差分が版数と説明だけで、A が develop への
    push でこの workflow を通ったものがある。本番の PR（develop → main）。base が merge-base
    から中身を足していないこと（マージの結果が head の木と同じになること）も求める。宛先（base のコミット）の
@@ -45,6 +49,8 @@ import branch_flow  # noqa: E402
 import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
+# 自分の workflow で確かめるディレクトリと、その workflow（規則 2b）
+SELF_TESTED = ("plugins/ndf-next/", ".github/workflows/ndf-next.yml")
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
     r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/)?plugin\.json)$"
@@ -156,6 +162,13 @@ def decide(
     if k.docs_only():
         tests = () if as_code else tuple(k.tests)
         return Decision(True, f"差分が文書のファイルだけ（文書 {len(k.docs)} ファイル・テストが読む文書 {len(k.tested)} ファイル）", tests)
+    if not k.unknown and k.code and all(f.startswith(SELF_TESTED) for f in k.code):
+        tests = () if as_code else tuple(k.tests)
+        return Decision(
+            True,
+            f"差分が自分の workflow で確かめる {SELF_TESTED[0]} と文書だけ（{len(k.code)} ファイル・文書 {len(k.docs)} ファイル）",
+            tests,
+        )
     ok, why = version_only(root, mb.stdout.strip(), head, as_code)
     if ok:
         return Decision(True, "差分が版数と説明だけ")

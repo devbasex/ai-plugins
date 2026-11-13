@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_lane as pl
+import parallel_ledger as plg
 import parallel_plan as pp
 
 SET_KEYS = ("input", "plans", "touches", "after", "handoff")
@@ -162,9 +163,10 @@ def cmd_lane(a) -> None:
     new, lane_name, err = updated(raw, a.action, a.lane, body)
     if err:
         emit_reply("stopped", err, code=1)
-    plan, items, metrics = pp.check_data(new, home=main)
+    ended = plg.ended_lanes(main, a.name)
+    plan, items, metrics = pp.check_data(new, home=main, ended=ended)
     if plan is None:
-        items = cap_hint_items(items, len(new.get("lanes") or []))
+        items = cap_hint_items(items, sum(1 for x in new.get("lanes") or [] if isinstance(x, dict) and x.get("name") not in ended))
         emit_reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
     try:
         written = write_lane(main, plan, new, lane_name, a.action)
