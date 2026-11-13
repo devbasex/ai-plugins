@@ -201,19 +201,23 @@ def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list
     return ids, found
 
 
+def _hit_kind(c: Const, idset: set[str], min_str: int) -> str | None:
+    """定数 1 つが表の `id` を写すときの種別（`table-set`・`table-str`）。写さなければ `None`。"""
+    if isinstance(c.value, frozenset):
+        return "table-set" if len(c.value & idset) >= 2 else None
+    if isinstance(c.value, str) and len(c.value) >= min_str and c.value in idset:
+        return "table-str"
+    return None
+
+
 def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str: int) -> list[Finding]:
     """表の `id` を 2 つ以上含む集まり（`table-set`）と、表の `id` に等しい文字列（`table-str`）。"""
     found = []
     for name, ids in table_ids.items():
         idset = set(ids)
         for c in all_consts:
-            hit = (
-                len(c.value & idset) >= 2
-                if isinstance(c.value, frozenset)
-                else (isinstance(c.value, str) and len(c.value) >= min_str and c.value in idset)
-            )
-            if hit:
-                kind = "table-set" if isinstance(c.value, frozenset) else "table-str"
+            kind = _hit_kind(c, idset, min_str)
+            if kind is not None:
                 found.append(Finding("const-fact", c.rel, c.line, f"{kind}: {c.name} が表 {name} の id を写す"))
     return found
 
