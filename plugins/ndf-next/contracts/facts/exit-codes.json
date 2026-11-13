@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "summary": "副命令の終了コードの区分。結果 JSON の status と終了コードの対応と、止まった理由の表の exit が取れる値を決める",
+  "owner": "D1（ndf.contracts）",
+  "columns": {
+    "code": {"type": "integer", "summary": "区分の最初の終了コード"},
+    "last": {"type": "integer", "summary": "区分の最後の終了コード（範囲の区分だけ）", "optional": true},
+    "status": {"type": "string", "summary": "この区分の終了コードを返してよい結果 JSON の status（ok・gate・stopped）"},
+    "label": {"type": "string", "summary": "人へ見せる見出し"}
+  },
+  "rows": [
+    {"id": "ok", "code": 0, "status": "ok", "label": "成功"},
+    {"id": "failed", "code": 1, "status": "stopped", "label": "失敗"},
+    {"id": "unreadable", "code": 2, "status": "stopped", "label": "読めない・呼び出しの誤り"},
+    {"id": "precondition", "code": 3, "status": "stopped", "label": "前提が無い・正常な否定の結果"},
+    {"id": "base_conflict", "code": 4, "status": "stopped", "label": "ベースブランチと衝突"},
+    {"id": "cd_failed", "code": 5, "status": "stopped", "label": "CD の結果が失敗"},
+    {"id": "incomplete", "code": 6, "status": "stopped", "label": "欠けが残る"},
+    {"id": "gate", "code": 10, "last": 19, "status": "gate", "label": "承認ゲート"},
+    {"id": "pause", "code": 20, "last": 29, "status": "gate", "label": "判断待ち"},
+    {"id": "deps_missing", "code": 69, "status": "stopped", "label": "依存の欠け"},
+    {"id": "infra_wait", "code": 75, "status": "stopped", "label": "基盤待ち"}
+  ]
+}

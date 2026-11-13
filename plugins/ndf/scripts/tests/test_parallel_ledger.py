@@ -377,3 +377,11 @@ def test_pending_questions_of_an_opened_plan_skip_settled_release_gates(tmp_path
     _resume(tmp_path, 5, "settle")
     _resume(tmp_path, 6, "confirm")
     assert [q["id"] for q in plg.pending_questions(tmp_path, "p1")] == ["rel-7"]
+
+
+def test_ended_lanes_reads_lane_end_rows(tmp_path):
+    """上限の検査で外すレーンは、台帳の終わりの記録（`lane_end`）の行から読む（#3021）。"""
+    assert plg.ended_lanes(tmp_path, "p1") == set()
+    plg.append_ledger_row(tmp_path, "p1", "lane_end", "lane_end:la", {"kind": "lane_end", "id": "la", "lane": "la"}, by="la")
+    plg.append_ledger_row(tmp_path, "p1", "request", "request:r1", {"id": "r1", "lane": "lb"}, by="lb")
+    assert plg.ended_lanes(tmp_path, "p1") == {"la"}
