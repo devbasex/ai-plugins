@@ -13,38 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from worktree_helpers import add_origin, git, push_branch, run_lib, write_declaration
-
-
-def resolve(main_repo: Path) -> tuple[str, str, int]:
-    got = run_lib(f'wt_production_branch "{main_repo}"; echo rc=$?', cwd=main_repo)
-    lines = got.stdout.splitlines()
-    rc = int(lines.pop().removeprefix("rc="))
-    return "\n".join(lines), got.stderr, rc
-
-
-def test_without_declaration_uses_the_default_branch(main_repo: Path) -> None:
-    add_origin(main_repo)
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "main"
-
-
-def test_without_the_key_uses_the_default_branch(main_repo: Path) -> None:
-    add_origin(main_repo)
-    write_declaration(main_repo, json.dumps({"version": 1}))
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "main"
-
-
-def test_the_declared_branch_is_used(main_repo: Path) -> None:
-    add_origin(main_repo)
-    push_branch(main_repo, "release")
-    write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "release"}))
-    out, _, rc = resolve(main_repo)
-    assert rc == 0
-    assert out == "release"
+from worktree_helpers import add_origin, git, resolve, write_declaration
 
 
 def test_the_base_branch_is_not_borrowed(main_repo: Path) -> None:
@@ -52,7 +21,7 @@ def test_the_base_branch_is_not_borrowed(main_repo: Path) -> None:
     add_origin(main_repo)
     git(main_repo, "branch", "develop")
     write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
-    out, _, rc = resolve(main_repo)
+    out, _, rc = resolve(main_repo, "wt_production_branch")
     assert rc == 0
     assert out == "main"
 
@@ -61,7 +30,7 @@ def test_a_branch_that_does_not_exist_is_refused(main_repo: Path) -> None:
     """本番のチャネルを取り違えると、リリースの承認の対象が変わる。既定へ落とさない。"""
     add_origin(main_repo)
     write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "nowhere"}))
-    _out, err, rc = resolve(main_repo)
+    _out, err, rc = resolve(main_repo, "wt_production_branch")
     assert rc == 1
     assert "production_branch" in err
 

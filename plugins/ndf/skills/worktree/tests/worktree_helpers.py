@@ -38,6 +38,14 @@ def run_lib(snippet: str, cwd: Path | None = None, env: dict | None = None) -> s
     )
 
 
+def resolve(main_repo: Path, fn: str) -> tuple[str, str, int]:
+    """lib のブランチを解決するシェル関数 `fn`（wt_base_branch・wt_production_branch）を打ち、(標準出力, 標準エラー, 終了コード)。"""
+    got = run_lib(f'{fn} "{main_repo}"; echo rc=$?', cwd=main_repo)
+    lines = got.stdout.splitlines()
+    rc = int(lines.pop().removeprefix("rc="))
+    return "\n".join(lines), got.stderr, rc
+
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
