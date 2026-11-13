@@ -450,9 +450,7 @@ def _trail_before_merge(root, a, n, case):
             written, url = approval_trail.write_trail(repo, n, sha, a.gate_approved)
             a.trail_item = {"kind": "comment", "name": url or f"#{n}", "result": "written" if written else "kept", "approved_sha": sha}
             return
-        reviews = approval_trail.read_reviews(repo, n)
-        logins = [str((r.get("user") or {}).get("login") or "") for r in reviews if r.get("state") == "APPROVED"]
-        got = approval_trail.approved_review_commit(reviews, approval_trail.read_permissions(repo, logins))
+        got = approval_trail.read_review_commit(repo, n)
     except approval_trail.TrailError as e:
         if e.kind != "head_moved":
             raise StepError(str(e)) from e

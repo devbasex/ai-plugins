@@ -225,8 +225,7 @@ def judge_pr(repo, pr, head, prod):
     others = [n for n in approval_trail.open_prs_at(repo, head, prod) if n != pr]
     if others:
         return approval_trail.Judgment("failure", f"同じ先端の PR がほかにある: {', '.join(f'#{n}' for n in others)}")
-    trails = approval_trail.trails_of(approval_trail.read_comments(repo, pr))
-    return approval_trail.judge(trails, approval_trail.read_roles(repo, [t.login for t in trails if not t.edited]), head)
+    return approval_trail.judge_trails_on(repo, pr, head)
 
 
 def approval_check(a):

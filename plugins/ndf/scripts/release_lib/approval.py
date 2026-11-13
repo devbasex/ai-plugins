@@ -317,16 +317,13 @@ def approved_on_pr(repo: str, pr: int, head: str, case) -> "trail.Judgment":
     """場合 1（cd-no-review）は証跡、場合 2（cd-review）は有効な人の最新の承認のレビューのコミットで先端を照らす（#2773 の決定 7）。
     許可リストの許容を使わず、完全な一致だけを success にする。読めなければ TrailError。"""
     if case.case == release_case.CD_REVIEW:
-        reviews = trail.read_reviews(repo, pr)
-        logins = [str((r.get("user") or {}).get("login") or "") for r in reviews if r.get("state") == "APPROVED"]
-        got = trail.approved_review_commit(reviews, trail.read_permissions(repo, logins))
+        got = trail.read_review_commit(repo, pr)
         if got is None:
             return trail.Judgment("failure", "有効な承認のレビューが無い")
         if got != head.lower():
             return trail.Judgment("failure", f"承認のレビュー {got[:7]} ≠ 先端 {head[:7]}")
         return trail.Judgment("success", f"承認のレビュー {got[:7]}")
-    trails = trail.trails_of(trail.read_comments(repo, pr))
-    return trail.judge(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited]), head)
+    return trail.judge_trails_on(repo, pr, head)
 
 
 def _sha_on_pr(root, a) -> tuple[str, dict]:

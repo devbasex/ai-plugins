@@ -202,6 +202,19 @@ def read_permissions(repo: str, logins: list[str]) -> dict[str, str | None]:
     return _read_permission_field(repo, logins, "permission")
 
 
+def read_review_commit(repo: str, pr: int) -> str | None:
+    """PR の上の有効な人（permission が admin・write）の最新の承認のレビューのコミット。無ければ None（場合 2。I8）。"""
+    reviews = read_reviews(repo, pr)
+    logins = [str((r.get("user") or {}).get("login") or "") for r in reviews if r.get("state") == "APPROVED"]
+    return approved_review_commit(reviews, read_permissions(repo, logins))
+
+
+def judge_trails_on(repo: str, pr: int, head: str) -> Judgment:
+    """PR の上の証跡を先端 `head` で判定する。編集されていない証跡を書いた人の権限だけを読む（場合 1。I1〜I4）。"""
+    trails = trails_of(read_comments(repo, pr))
+    return judge(trails, read_roles(repo, [t.login for t in trails if not t.edited]), head)
+
+
 def read_head(repo: str, pr: int) -> tuple[str, str, str]:
     """(先端の SHA, 宛先のブランチ, 状態 open / closed)。"""
     try:

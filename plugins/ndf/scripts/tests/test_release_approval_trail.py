@@ -156,6 +156,43 @@ def test_open_prs_at_and_post_status(monkeypatch):
     assert f"context={at.STATUS_CONTEXT}" in posted and "state=failure" in posted
 
 
+def test_read_review_commit_reads_reviews_and_permissions_of_approvers(monkeypatch):
+    def rv(login, state, sha, at_):
+        return {"user": {"login": login}, "state": state, "commit_id": sha, "submitted_at": at_}
+
+    reviews = [rv("w", "APPROVED", A, "1"), rv("c", "COMMENTED", B, "2"), rv("r", "APPROVED", B, "3")]
+    fake = FakeGh(
+        {
+            "pulls/5/reviews": (0, "\n".join(json.dumps(r) for r in reviews)),
+            "collaborators/w/": (0, json.dumps({"permission": "write"})),
+            "collaborators/r/": (0, json.dumps({"permission": "read"})),
+        }
+    )
+    monkeypatch.setattr(gh_call, "RUNNER", fake)
+    assert at.read_review_commit("o/r", 5) == A
+    assert not any("collaborators/c/" in " ".join(c) for c in fake.calls)  # 承認していない人の権限は読まない
+    monkeypatch.setattr(gh_call, "RUNNER", FakeGh({"pulls/5/reviews": (0, "")}))
+    assert at.read_review_commit("o/r", 5) is None
+
+
+def test_judge_trails_on_reads_roles_of_unedited_trails_only(monkeypatch):
+    cs = [
+        comment(at.render_trail(A, "user"), login="boss", cid=1),
+        comment(at.render_trail(A, "user"), login="old", updated="2026-11-14T00:00:00Z", cid=2),
+    ]
+    fake = FakeGh(
+        {
+            "issues/5/comments": (0, "\n".join(json.dumps(c) for c in cs)),
+            "collaborators/boss/": (0, json.dumps({"role_name": "admin"})),
+        }
+    )
+    monkeypatch.setattr(gh_call, "RUNNER", fake)
+    got = at.judge_trails_on("o/r", 5, A)
+    assert (got.state, got.approver) == ("success", "boss")
+    assert not any("collaborators/old/" in " ".join(c) for c in fake.calls)
+    assert at.judge_trails_on("o/r", 5, B).state == "failure"
+
+
 def test_write_trail(monkeypatch):
     monkeypatch.setattr(at, "read_head", lambda repo, pr: (A, "main", "open"))
     monkeypatch.setattr(at.gh_rest, "viewer_login", lambda: "boss")
