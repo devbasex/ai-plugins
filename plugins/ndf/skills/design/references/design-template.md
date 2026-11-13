@@ -2,7 +2,7 @@
 
 不要な節は削る。空の見出しを残さない。**触らない領域の節は作らない。**
 
-詳細設計の文書（`standard`・`legacy-refactor`）は、この雛形ではなく [detail-template.md](detail-template.md) で別のファイルに書く。
+詳細設計の文書（`standard`・`legacy-refactor`）は、[detail-template.md](detail-template.md) の雛形で別のファイルに書く。
 
 ```markdown
 # {対象}: {何ができるようになるか}（#{課題番号}）
