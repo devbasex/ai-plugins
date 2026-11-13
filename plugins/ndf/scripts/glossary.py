@@ -42,8 +42,7 @@ TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
 DEFAULT_SOURCE = "docs/glossary/glossary.json"
 DEFAULT_DOCUMENT = "docs/glossary.md"
-# 宣言を作るときの既定の対象。設計文書の種類の契約の `glossary` から導く（#3144 の決定 12）
-DEFAULT_PATHS = doc_kinds.patterns("glossary")
+DEFAULT_PATHS = doc_kinds.patterns("glossary")  # 宣言を作るときの既定の対象。設計文書の種類の契約から導く（#3144）
 DEFAULT_TERM_SECTIONS = ["用語"]
 DESIGN_MODES = ("standard", "legacy-refactor")
 FORMATS = ("json",)

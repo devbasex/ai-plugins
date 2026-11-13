@@ -45,7 +45,7 @@ def _line_limited(path: str, placed: bool) -> bool:
         sys.path.insert(0, lib)
     import doc_kinds
 
-    kind = doc_kinds.kind_of(path, placed=placed)
+    kind = doc_kinds.doc_kind(path, placed=placed)
     return kind is not None and any(path.endswith(s) for s in doc_kinds.suffixes("line_limit"))
 
 

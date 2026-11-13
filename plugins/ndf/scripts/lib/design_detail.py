@@ -21,7 +21,7 @@ import doc_kinds
 import md
 from design_docs import DESIGN_NAME
 
-# 規則が名指す節と列（規則そのものの一部。雛形の見出しに無ければ `sections()` が止める）
+# 規則が名指す節と列（規則そのものの一部。雛形の見出しに無ければ `detail_sections()` が止める）
 _FILES, _SPEC, _FAILURES, _REUSE = "ファイル配置", "関数の仕様", "異常系の処理", "既存の部品の再利用"
 _NAMED = (_FILES, _SPEC, _FAILURES, _REUSE)
 _SKIP = re.compile(r"^\s*(?:[-*+]\s+)?省く\s*[:：](?P<why>.*)$")
@@ -32,7 +32,7 @@ class DetailTemplateError(Exception):
 
 
 @functools.lru_cache(maxsize=8)
-def _read_sections(path: str) -> tuple[str, ...]:
+def _template_titles(path: str) -> tuple[str, ...]:
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -46,18 +46,18 @@ def _read_sections(path: str) -> tuple[str, ...]:
     return titles
 
 
-def sections() -> tuple[str, ...]:
+def detail_sections() -> tuple[str, ...]:
     """詳細設計の雛形の `##` 見出しを並びのまま返す。"""
-    return _read_sections(str(doc_kinds.template_path("detail")))
+    return _template_titles(str(doc_kinds.template_path("detail")))
 
 
 def is_detail(path: str) -> bool:
     """パスの名前が詳細設計の文書（`issue-<番号>-design-detail.md`）か。"""
     name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-    return bool(DESIGN_NAME.match(name)) and doc_kinds.kind_of(path, placed=False) == "detail"
+    return bool(DESIGN_NAME.match(name)) and doc_kinds.doc_kind(path, placed=False) == "detail"
 
 
-def _plain(cell: str) -> str:
+def _cell_text(cell: str) -> str:
     return cell.replace("`", "").strip()
 
 
@@ -78,13 +78,13 @@ def _section_table(text: str, title: str) -> tuple[md.Section | None, md.Table |
     return sec, table, why
 
 
-def _row_line(table: md.Table, k: int) -> int:
+def _doc_line(table: md.Table, k: int) -> int:
     """表の本文の k 行目の、文書の中の行（0 始まり。見出しと区切りの 2 行の後）。"""
     return table.start + 2 + k
 
 
 def _first_column(table: md.Table | None) -> set[str]:
-    return {_plain(r[0]) for r in table.rows if r} if table else set()
+    return {_cell_text(r[0]) for r in table.rows if r} if table else set()
 
 
 def check_detail(path: str, text: str, result_files: set[str] | None, why: str = "") -> list[dict]:
@@ -96,7 +96,7 @@ def check_detail(path: str, text: str, result_files: set[str] | None, why: str =
     lines = text.splitlines()
     found: dict[str, list[dict]] = {"detail_section": [], "detail_failure": [], "detail_reuse": [], "detail_file": []}
     read: dict[str, md.Table | None] = {}
-    for title in sections():
+    for title in detail_sections():
         sec, table, skip = _section_table(text, title)
         read[title] = table
         if sec is None:
@@ -107,28 +107,30 @@ def check_detail(path: str, text: str, result_files: set[str] | None, why: str =
             )
 
     def _row_item(rule: str, table: md.Table, k: int, name: str) -> dict:
-        at = _row_line(table, k)
+        at = _doc_line(table, k)
         src = lines[at].strip() if at < len(lines) else name
         return {"name": f"{path}:{at + 1} {name}", "rule": rule, "text": src}
 
     spec = read.get(_SPEC)
     if spec is not None and spec.rows:
-        header = [_plain(h) for h in spec.header]
+        header = [_cell_text(h) for h in spec.header]
         missing = [c for c in ("種類", "副作用") if c not in header]
         for col in missing:
-            found["detail_section"].append({"name": f"{path} {_SPEC}", "rule": "detail_section", "text": f"節「{_SPEC}」の表に列「{col}」が無い"})
+            found["detail_section"].append(
+                {"name": f"{path} {_SPEC}", "rule": "detail_section", "text": f"節「{_SPEC}」の表に列「{col}」が無い"}
+            )
         failures, reuses = _first_column(read.get(_FAILURES)), _first_column(read.get(_REUSE))
         for k, row in enumerate(spec.rows):
-            name = _plain(row[0]) if row else ""
+            name = _cell_text(row[0]) if row else ""
             if not name:
                 continue
             if "副作用" in header:
                 cell = row[header.index("副作用")] if header.index("副作用") < len(row) else ""
-                if _plain(cell) != "無し" and name not in failures:
+                if _cell_text(cell) != "無し" and name not in failures:
                     found["detail_failure"].append(_row_item("detail_failure", spec, k, name))
             if "種類" in header:
                 cell = row[header.index("種類")] if header.index("種類") < len(row) else ""
-                if _plain(cell) == "新設" and name not in reuses:
+                if _cell_text(cell) == "新設" and name not in reuses:
                     found["detail_reuse"].append(_row_item("detail_reuse", spec, k, name))
 
     if result_files is None and why:
@@ -136,7 +138,7 @@ def check_detail(path: str, text: str, result_files: set[str] | None, why: str =
     elif result_files is not None:
         files = read.get(_FILES)
         for k, row in enumerate(files.rows if files else []):
-            rel = _plain(row[0]) if row else ""
+            rel = _cell_text(row[0]) if row else ""
             if rel and rel not in result_files:
                 found["detail_file"].append(_row_item("detail_file", files, k, rel))
     return [it for rule in found.values() for it in rule]

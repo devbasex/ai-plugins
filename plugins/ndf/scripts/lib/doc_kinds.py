@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 from typing import Optional
@@ -19,7 +20,11 @@ from typing import Optional
 # ラッパーの複製（バージョンディレクトリ）では `lib/` と並ぶ `contracts/`
 _LIB_DIR = Path(__file__).resolve().parent
 DECLARATION = next(
-    (p for p in (_LIB_DIR.parents[1] / "contracts" / "design-docs.json", _LIB_DIR.parent / "contracts" / "design-docs.json") if p.is_file()),
+    (
+        p
+        for p in (_LIB_DIR.parents[1] / "contracts" / "design-docs.json", _LIB_DIR.parent / "contracts" / "design-docs.json")
+        if p.is_file()
+    ),
     _LIB_DIR.parents[1] / "contracts" / "design-docs.json",
 )
 VERSION = 1
@@ -31,14 +36,12 @@ class DocKindsError(Exception):
 
 
 _path = DECLARATION
-_cache: Optional[tuple[str, tuple[dict, ...]]] = None
 
 
-def use(path) -> None:
-    """読み込み先を差し替え、読んだ表を捨てる（テストが使う）。`None` でプラグインの契約へ戻す。"""
-    global _path, _cache
-    _path = Path(path) if path is not None else DECLARATION
-    _cache = None
+def use_contract(path) -> None:
+    """読み込み先を差し替える（テストが使う）。`None` でプラグインの契約へ戻す。読んだ表は置き場ごとに控える。"""
+    global _path
+    _path = DECLARATION if path is None else Path(path)
 
 
 def _validate(raw, where: str) -> tuple[str, tuple[dict, ...]]:
@@ -62,41 +65,43 @@ def _validate(raw, where: str) -> tuple[str, tuple[dict, ...]]:
     return place.strip("/"), tuple(kinds)
 
 
-def _table() -> tuple[str, tuple[dict, ...]]:
-    """契約を 1 プロセスに 1 回読み、置き場と種類の行（契約の並びのまま）を返す。"""
-    global _cache
-    if _cache is None:
-        try:
-            text = _path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise DocKindsError(f"設計文書の種類の契約 {_path} を読めない: {exc}") from None
-        try:
-            raw = json.loads(text)
-        except ValueError as exc:
-            raise DocKindsError(f"設計文書の種類の契約 {_path} が JSON として壊れている: {exc}") from None
-        _cache = _validate(raw, str(_path))
-    return _cache
+@functools.lru_cache(maxsize=4)
+def _read_contract(path: Path) -> tuple[str, tuple[dict, ...]]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DocKindsError(f"設計文書の種類の契約 {path} を読めない: {exc}") from None
+    try:
+        raw = json.loads(text)
+    except ValueError as exc:
+        raise DocKindsError(f"設計文書の種類の契約 {path} が JSON として壊れている: {exc}") from None
+    return _validate(raw, str(path))
+
+
+def _contract() -> tuple[str, tuple[dict, ...]]:
+    """契約を置き場ごとに 1 プロセスに 1 回読み、置き場と種類の行（契約の並びのまま）を返す。"""
+    return _read_contract(_path)
 
 
 def suffixes(flag: str) -> tuple[str, ...]:
     """真偽の名前（`line_limit`・`glossary`・`review`）が真の種類の名前の末尾を、契約の並びで返す。"""
     if flag not in _FLAGS:
         raise DocKindsError(f"設計文書の種類の契約に真偽の名前 {flag} は無い（{', '.join(_FLAGS)}）")
-    return tuple(row["suffix"] for row in _table()[1] if row[flag])
+    return tuple(row["suffix"] for row in _contract()[1] if row[flag])
 
 
 def patterns(flag: str) -> list[str]:
     """`suffixes(flag)` を置き場と合わせたパスの形（`issues/*-design.md` など）で返す。"""
-    place = _table()[0]
+    place = _contract()[0]
     return [f"{place}/*{suffix}" for suffix in suffixes(flag)]
 
 
-def kind_of(rel: str, placed: bool = True) -> Optional[str]:
+def doc_kind(rel: str, placed: bool = True) -> Optional[str]:
     """パスの名前の末尾から設計文書の種類を返す。最も長く一致する末尾の種類を選ぶ。
 
     `placed` が真なら、親のディレクトリが置き場でないパスは `None` を返す。
     """
-    place, kinds = _table()
+    place, kinds = _contract()
     path = str(rel).replace("\\", "/")
     parent, _, name = path.rpartition("/")
     if placed and parent.strip("/").removeprefix("./") != place:
@@ -109,7 +114,7 @@ def kind_of(rel: str, placed: bool = True) -> Optional[str]:
 
 def template_path(kind: str) -> Path:
     """種類の行の雛形のパスを、プラグインの根からの絶対パスで返す（在るかは見ない）。"""
-    for row in _table()[1]:
+    for row in _contract()[1]:
         if row["kind"] == kind:
             if not row.get("template"):
                 raise DocKindsError(f"設計文書の種類 {kind} は雛形を持たない")

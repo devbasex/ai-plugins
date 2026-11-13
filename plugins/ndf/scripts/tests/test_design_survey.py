@@ -441,9 +441,9 @@ def test_a_complete_detail_document_passes(tmp_path):
 
 def test_every_section_may_be_skipped_with_a_reason(tmp_path):
     sys.path.insert(0, str(SCRIPT.parent / "lib"))
-    from design_detail import sections  # noqa: PLC0415
+    from design_detail import detail_sections  # noqa: PLC0415
 
-    skipped = {title: f"省く: {title}は当たらない" for title in sections()}
+    skipped = {title: f"省く: {title}は当たらない" for title in detail_sections()}
     root = repo(tmp_path, {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**skipped)})
     code, out = run(root, "--issue", "7")
     assert code == 0, out["items"]
@@ -478,7 +478,9 @@ def test_the_file_rule_follows_the_head_document(tmp_path):
     outside = {"ファイル配置": "| パス | 種類 |\n| --- | --- |\n| `src/z.py` | 新設 |"}
     legacy = repo(tmp_path / "l", {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**outside)})
     assert run(legacy, "--issue", "7")[0] == 0
-    neither = repo(tmp_path / "n", {"issues/issue-7-design.md": "# 設計\n\n## 構成要素\n\nなにか\n", "issues/issue-7-design-detail.md": detail_doc()})
+    neither = repo(
+        tmp_path / "n", {"issues/issue-7-design.md": "# 設計\n\n## 構成要素\n\nなにか\n", "issues/issue-7-design-detail.md": detail_doc()}
+    )
     _, out = run(neither, "--issue", "7")
     assert [(it["rule"], it["name"].split()[-1]) for it in out["items"]] == [("detail_file", "設計の結果")]
     alone = repo(tmp_path / "a", {"issues/issue-7-design-detail.md": detail_doc()})
@@ -524,7 +526,9 @@ def test_sections_come_from_the_template(tmp_path):
     assert [it["name"].split(" ", 1)[1] for it in out["items"]] == ["移行の手順"]
 
 
-@pytest.mark.parametrize("template", [None, "# 雛形\n\n本文だけ\n", "# 雛形\n\n## ファイル配置\n\n## 異常系の処理\n\n## 既存の部品の再利用\n"])
+@pytest.mark.parametrize(
+    "template", [None, "# 雛形\n\n本文だけ\n", "# 雛形\n\n## ファイル配置\n\n## 異常系の処理\n\n## 既存の部品の再利用\n"]
+)
 def test_an_unreadable_template_stops_with_2(tmp_path, template):
     script = _swap_template(tmp_path, template)
     root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc()})

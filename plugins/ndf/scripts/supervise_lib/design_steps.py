@@ -22,7 +22,7 @@ def _stage_class(lib: str, mode: str, stage: str) -> str:
     try:
         p = subprocess.run(
             ["bash", "-c", 'source "$1" && wf_stage_class "$2" "$3"', "_", lib, mode, stage],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True,
         )  # fmt: skip
     except (OSError, subprocess.SubprocessError) as exc:
         raise DeclError(f"工程の分類を読めない: {exc}") from None

@@ -29,9 +29,9 @@ PLUGIN_CONTRACT = SCRIPTS.parent / "contracts" / "design-docs.json"
 
 @pytest.fixture(autouse=True)
 def _restore():
-    doc_kinds.use(None)
+    doc_kinds.use_contract(None)
     yield
-    doc_kinds.use(None)
+    doc_kinds.use_contract(None)
 
 
 def _contract(tmp_path: pathlib.Path, kinds: list[dict], **extra) -> pathlib.Path:
@@ -46,18 +46,18 @@ def _plugin_kinds() -> list[dict]:
 
 
 def test_the_plugin_contract_is_read_in_order() -> None:
-    place, kinds = doc_kinds._table()
+    place, kinds = doc_kinds._contract()
     assert place == "issues"
     assert [k["kind"] for k in kinds] == ["requirements", "design", "decisions", "detail"]
 
 
 def test_the_contract_is_read_once(tmp_path, monkeypatch) -> None:
-    doc_kinds.use(_contract(tmp_path, _plugin_kinds()))
-    doc_kinds._table()
+    doc_kinds.use_contract(_contract(tmp_path, _plugin_kinds()))
+    doc_kinds._contract()
     calls = []
     real = pathlib.Path.read_text
     monkeypatch.setattr(pathlib.Path, "read_text", lambda self, *a, **k: calls.append(self) or real(self, *a, **k))
-    doc_kinds._table()
+    doc_kinds._contract()
     assert calls == []
 
 
@@ -66,7 +66,13 @@ def test_the_contract_is_read_once(tmp_path, monkeypatch) -> None:
     [
         None,  # ファイルが無い
         "{ not json",
-        json.dumps({"version": 2, "dir": "issues", "kinds": [{"kind": "a", "suffix": "-a.md", "line_limit": True, "glossary": True, "review": True}]}),
+        json.dumps(
+            {
+                "version": 2,
+                "dir": "issues",
+                "kinds": [{"kind": "a", "suffix": "-a.md", "line_limit": True, "glossary": True, "review": True}],
+            }
+        ),
         json.dumps(
             {
                 "version": 1,
@@ -77,7 +83,13 @@ def test_the_contract_is_read_once(tmp_path, monkeypatch) -> None:
                 ],
             }
         ),
-        json.dumps({"version": 1, "dir": "issues", "kinds": [{"kind": "a", "suffix": "-a.md", "line_limit": "yes", "glossary": True, "review": True}]}),
+        json.dumps(
+            {
+                "version": 1,
+                "dir": "issues",
+                "kinds": [{"kind": "a", "suffix": "-a.md", "line_limit": "yes", "glossary": True, "review": True}],
+            }
+        ),
     ],
     ids=["missing", "not-json", "version", "duplicate", "flag-not-bool"],
 )
@@ -85,7 +97,7 @@ def test_an_unreadable_contract_stops(tmp_path, body) -> None:
     path = tmp_path / "design-docs.json"
     if body is not None:
         path.write_text(body, encoding="utf-8")
-    doc_kinds.use(path)
+    doc_kinds.use_contract(path)
     with pytest.raises(doc_kinds.DocKindsError):
         doc_kinds.suffixes("review")
 
@@ -109,8 +121,8 @@ def test_suffixes_and_patterns_follow_the_flags() -> None:
         ("docs/issue-7-design.md", False, "design"),
     ],
 )
-def test_kind_of(path, placed, kind) -> None:
-    assert doc_kinds.kind_of(path, placed=placed) == kind
+def test_doc_kind(path, placed, kind) -> None:
+    assert doc_kinds.doc_kind(path, placed=placed) == kind
 
 
 def test_template_path() -> None:
@@ -159,7 +171,7 @@ def test_the_design_pr_documents(path, want) -> None:
 def test_a_new_kind_in_the_contract_reaches_every_reader(tmp_path) -> None:
     """契約へ種類を足すと、行数の検査・設計 PR の分類・用語チェックの既定の対象がそろって変わる。"""
     kinds = _plugin_kinds() + [{"kind": "notes", "suffix": "-design-notes.md", "line_limit": True, "glossary": True, "review": True}]
-    doc_kinds.use(_contract(tmp_path, kinds))
+    doc_kinds.use_contract(_contract(tmp_path, kinds))
     (tmp_path / "issues").mkdir()
     (tmp_path / "issues" / "issue-7-design-notes.md").write_text("x\n" * 1001, encoding="utf-8")
     assert classifications.oversized_design_docs(tmp_path, ["issues/issue-7-design-notes.md"])
@@ -171,7 +183,7 @@ def test_a_new_kind_in_the_contract_reaches_every_reader(tmp_path) -> None:
 
 
 def test_the_readers_stop_on_an_unreadable_contract(tmp_path) -> None:
-    doc_kinds.use(tmp_path / "missing.json")
+    doc_kinds.use_contract(tmp_path / "missing.json")
     with pytest.raises(doc_kinds.DocKindsError):
         classifications.oversized_design_docs(tmp_path, ["issues/issue-7-design.md"])
     with pytest.raises(doc_kinds.DocKindsError):

@@ -329,7 +329,7 @@ def _is_infra_path(path: str) -> bool:
 
 def _is_design_doc_path(path: str) -> bool:
     """設計 PR の文書か（#542 の決定 5）。種類と名前の末尾は設計文書の種類の契約の `review` から引く（#3144）。"""
-    kind = doc_kinds.kind_of(path)
+    kind = doc_kinds.doc_kind(path)
     return kind is not None and any(path.endswith(s) for s in doc_kinds.suffixes("review"))
 
 

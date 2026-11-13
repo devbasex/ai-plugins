@@ -244,7 +244,7 @@ def _result_files(head: Doc | None) -> tuple[set[str] | None, str]:
 
 def _head_of(detail: Doc, group: list[Doc]) -> Doc | None:
     """詳細設計の文書と同じ番号を持つ、種類が `design` の設計文書。"""
-    return next((d for d in group if d.nums == detail.nums and doc_kinds.kind_of(d.path, placed=False) == "design"), None)
+    return next((d for d in group if d.nums == detail.nums and doc_kinds.doc_kind(d.path, placed=False) == "design"), None)
 
 
 def detail_items(group: list[Doc], require: bool) -> list[dict]:
@@ -294,7 +294,9 @@ def cmd_check(a):
         metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計に {len(items)} 件の指摘がある"
+        summary = (
+            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計に {len(items)} 件の指摘がある"
+        )
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
     summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件・人へ残す判断・詳細設計 {metrics['detail_docs']} 件に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)

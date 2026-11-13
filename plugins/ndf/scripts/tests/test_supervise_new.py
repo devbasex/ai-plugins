@@ -1085,7 +1085,14 @@ def test_the_stage_matrix_is_read_once_per_mode(monkeypatch, fresh_stage_class):
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("body,code", [("## 設計単体のレビュー\n\n- 無し\n", 0), ("## 設計単体のレビュー\n\n| # | 箇所 | 指摘 | 扱い |\n| --- | --- | --- | --- |\n| 1 | 構成要素 | - 無し と書いた | 未 |\n", 1), (None, 2)])
+@pytest.mark.parametrize(
+    "body,code",
+    [
+        ("## 設計単体のレビュー\n\n- 無し\n", 0),
+        ("## 設計単体のレビュー\n\n| # | 箇所 | 指摘 | 扱い |\n| --- | --- | --- | --- |\n| 1 | 構成要素 | - 無し と書いた | 未 |\n", 1),
+        (None, 2),
+    ],
+)
 def test_the_review_check_branches_on_the_review_file(tmp_path, body, code):
     """受け入れ条件 10（分岐）: 「- 無し」の 1 行で 0、指摘の表だけで 1、ファイルが無ければ 2。"""
     (tmp_path / "work").mkdir()
@@ -1125,7 +1132,9 @@ def _revise_plan(with_detail: bool) -> dict:
 def test_the_revise_note_reaches_the_detail_step(monkeypatch, with_detail):
     monkeypatch.setattr(sprint_revise.revise_note, "read_input", lambda path: {"rounds": []})
     monkeypatch.setattr(sprint_revise.revise_note, "prompt_text", lambda data, doc=None: "出し直しの指摘")
-    plan = sprint_revise.with_revise_note(_revise_plan(with_detail), Namespace(revise_notes={216: "n.json"}), 216, "issues/issue-216-design.md")
+    plan = sprint_revise.with_revise_note(
+        _revise_plan(with_detail), Namespace(revise_notes={216: "n.json"}), 216, "issues/issue-216-design.md"
+    )
     st = {s["id"]: s for s in plan["steps"]}
     assert st["design"]["prompt"].endswith("出し直しの指摘")
     if with_detail:
