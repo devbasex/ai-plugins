@@ -76,7 +76,7 @@ plugins/ndf/
 | `plugins/ndf/skills/design/SKILL.md` | 変更 | 手順に「詳細設計を書く」を足し、設計のプランの段から呼ばれたときの止め方を書く | 無し |
 | `plugins/ndf/skills/design/references/detailed-design.md` | 新設 | 10 の項目の書き方・節の見出し・表の列・省く書き方・既存の参照との分担を持つ | 無し |
 | `plugins/ndf/skills/design/references/deliverables.md` | 変更 | パッケージ・モジュール構成の行に「詳細設計を通るモードでは詳細設計の文書に書く」を添える | 無し |
-| `plugins/ndf/skills/design/references/design-template.md` | 変更 | 詳細設計の文書の雛形（10 の節）を足す | 無し |
+| `plugins/ndf/skills/design/references/design-template.md` | 変更 | 詳細設計の文書のテンプレート（10 の節）を足す | 無し |
 | `plugins/ndf/skills/cross-review/scripts/classifications.py` | 変更 | 行数の検査の対象の名前に `-design-detail.md` を足す | 無し |
 | `plugins/ndf/skills/cross-review/scripts/review_lib/categories.py` | 変更 | 設計 Pull Request の文書の名前に `-design-detail.md` を足す | 無し |
 | `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | 設計 Pull Request の詳細レビューの観点に詳細設計の 6 観点を足す | 無し |
@@ -122,7 +122,7 @@ plugins/ndf/
 | `cmd_check` | `design-survey.py` | 変更 | `cmd_check(a: argparse.Namespace) -> None` | まとまりごとに既存の 4 規則と詳細設計の 5 規則を当て、1 行の JSON と終了コードで返す | `a.issue` か `a.file` のどちらか。`a.require_detail` は真偽 | 指摘が無ければ終了コード 0、あれば 1。`metrics` に `detail_docs` と規則ごとの件数が加わる | 標準出力へ 1 行の JSON・プロセスの終了コード・git の読み取り（`--issue` のとき） |
 | `build_parser` | `design-survey.py` | 変更 | `build_parser() -> argparse.ArgumentParser` | `check` に `--require-detail` を足す | 無し | `--require-detail` は `--issue`・`--file` のどちらとも組め、既定は偽 | 無し |
 | `detail_steps` | `supervise_lib/design_steps.py` | 新設 | `detail_steps(n: int) -> list[dict]` | `design-review`・`design-review-check`・`design-fix`・`detail-design` の 4 段を組む | `n` は課題の番号 | 段の遷移は設計文書の決定 4 の表のとおりで、最後の段の `next` は `rebuild` | 無し |
-| `writing_steps` | `supervise_lib/design_steps.py` | 変更 | `writing_steps(a, n: int, copy: str) -> list[dict]`（変えない） | 用語集の入口の検査・要求・設計文書を書く段を並べ、詳細設計を通るモードでは `detail_steps` を続ける | `a.mode` を持つ | `a.mode` が `DETAIL_DESIGN_MODES` にあれば `design` の `next` が `design-review` で、`design` の指示に「詳細設計は後の段が書く」が加わる。ほかのモードは今と同じ並び | 無し |
+| `writing_steps` | `supervise_lib/design_steps.py` | 変更 | `writing_steps(a, n: int, copy: str) -> list[dict]`（変えない） | 設計の工程に入る前の用語集の検査・要求・設計文書を書く段を並べ、詳細設計を通るモードでは `detail_steps` を続ける | `a.mode` を持つ | `a.mode` が `DETAIL_DESIGN_MODES` にあれば `design` の `next` が `design-review` で、`design` の指示に「詳細設計は後の段が書く」が加わる。ほかのモードは今と同じ並び | 無し |
 | `pr_steps` | `supervise_lib/design_steps.py` | 変更 | `pr_steps(a, n: int, doc: str) -> list[dict]`（変えない） | 設計 PR を出す段を組み、本文へ足すファイルに設計単体のレビューの結果を加える | 既存どおり | `pr` の段の `append` が `[DESIGN_GLOSSARY_NOTE, DESIGN_REVIEW_NOTE]` になる | 無し |
 | `survey_steps` | `supervise_lib/procedures.py` | 変更 | `survey_steps(n: int, next_id: str, require_detail: bool = False) -> list` | 外部の調査の検査の 3 段を組み、詳細設計を通るモードでは検査に `--require-detail` を付ける | 既存どおり | `require_detail` が真なら `survey-check`・`survey-recheck` の `cmd` が `--require-detail` で終わり、`fix-survey` の指示に詳細設計の規則の直し方が加わる。偽なら今と同じ | 無し |
 | `with_revise_note` | `supervise_lib/sprint_revise.py` | 変更 | `with_revise_note(plan: dict, a, n: int, doc: str) -> dict`（変えない） | 出し直しの指摘を要求・設計に加えて詳細設計の段の指示にも入れる | 既存どおり | プランに `detail-design` の段があれば、その指示の末尾に `revise_note.prompt_text(data, <詳細設計の文書>)` が加わる。無ければ今と同じ | 入力のファイルを読む（既存の `revise_note.read_input`） |
@@ -155,7 +155,11 @@ plugins/ndf/
 | `standard`・`legacy-refactor` | `design-review` | `design-review` → `design-review-check` →（指摘ありなら `design-fix`）→ `detail-design` → `rebuild` |
 | `light`・`operation`・`documentation` | `rebuild` | 無し（今と同じ） |
 
-`design-review-check` の `cmd` は `grep -qx -- '- 無し' {state_dir}/work/design-review.md` である（2026-11-13 に手元で 0・1・2 を確かめた）。
+`design-review-check` の `cmd` は次のとおりで、終了コード 0・1・2 を 2026-11-13 に手元で確かめた。
+
+```bash
+grep -qx -- '- 無し' {state_dir}/work/design-review.md
+```
 
 | `design-review.md` | 終了コード | 行き先 |
 | --- | --- | --- |
@@ -193,7 +197,7 @@ plugins/ndf/
 | `DETAIL_DESIGN_MODES` | 定数 | `supervise_lib/design_steps.py` | `("standard", "legacy-refactor")`。`WF_STAGE_MATRIX` の「詳細設計」の行の `R` の列とテストで一致を縛る（決定 5） |
 | `DESIGN_REVIEW_NOTE` | 定数 | `supervise_lib/design_steps.py` | `{state_dir}/work/design-review.md` |
 | `REVIEW_FOCUS` | 定数 | `supervise_lib/paths.py` | `DRIVES["cross-review"].parent / "review_lib" / "review_focus.py"` |
-| `DESIGN_REVIEW_PROMPT` | 定数（`format` で `focus`・`n` を埋める） | `supervise_lib/prompts.py` | 設計文書と要求の写しだけを読み、`REVIEW_FOCUS` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の観点で指摘を作業ディレクトリの `design-review.md` へ書く。設計文書を書き換えない・コミットしない |
+| `DESIGN_REVIEW_PROMPT` | 定数（`format` で `focus`・`n` を埋める） | `supervise_lib/prompts.py` | 設計文書と要求のコピーだけを読み、`REVIEW_FOCUS` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の観点で指摘を作業ディレクトリの `design-review.md` へ書く。設計文書を書き換えない・コミットしない |
 | `DESIGN_FIX_PROMPT` | 定数 | `supervise_lib/prompts.py` | `design-review.md` の扱いが `未` の行を直してコミットし（push しない）、扱いを `直した` か `直さない: <理由>` に替える |
 | `DESIGN_MATCH_PROMPT` | 定数（変更） | `supervise_lib/prompts.py` | 手順に「詳細設計の文書があれば、ファイル配置と関数の仕様の表を実装と照らす」を足す |
 | `DEFAULT_PATHS` | 定数（変更） | `glossary.py` | `issues/*-design-detail.md` を足す |
@@ -233,7 +237,7 @@ plugins/ndf/
 | `detail_items` | `survey_groups`（まとまりの組み方） | `design-survey.py` を読んだ | 使う。まとまりは既存の 4 規則と同じものを使い、組み直さない |
 | `_result_files` | `design_results.parse_results`・`Row.files` | `grep -n "def parse_results" plugins/ndf/scripts/lib/design_results.py` | 使う。設計の結果の表を 2 通りに読まない |
 | `detail_steps` | `survey_steps`（検査 → 直し → 検査の段）・`_review_steps`（`cross-review` の段） | `grep -n "def survey_steps\|def _review_steps" plugins/ndf/scripts/supervise_lib/*.py` | 使えない。前者は run の検査を打ち直す輪で、後者は Pull Request を要る。段の辞書の形と `on_exit` の書き方は前者に倣う |
-| `DETAIL_DESIGN_MODES`（定数） | `glossary.DESIGN_MODES`（同じ値） | `grep -rn '("standard", "legacy-refactor")' plugins/ndf/scripts plugins/ndf/skills --include=*.py` | 使えない。用語集の入口の検査を通すモードという別の概念で、片方を変えたときにもう片方が引きずられる。`glossary.DESIGN_MODES` との値の一致はテストで縛らない |
+| `DETAIL_DESIGN_MODES`（定数） | `glossary.DESIGN_MODES`（同じ値） | `grep -rn '("standard", "legacy-refactor")' plugins/ndf/scripts plugins/ndf/skills --include=*.py` | 使えない。設計の工程に入る前の用語集の検査を通すモードという別の概念で、片方を変えたときにもう片方が引きずられる。`glossary.DESIGN_MODES` との値の一致はテストで縛らない |
 
 ## 単体テストの観点
 

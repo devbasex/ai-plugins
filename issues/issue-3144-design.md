@@ -303,7 +303,7 @@ sequenceDiagram
     P->>W: design の段（設計文書を書く）
     W-->>P: issue-N-design.md をコミット
     alt モードが standard か legacy-refactor
-        P->>A: design-review の段（設計文書と要求の写しだけを読む）
+        P->>A: design-review の段（設計文書と要求のコピーだけを読む）
         A-->>P: 作業ディレクトリの design-review.md（指摘の表か「- 無し」）
         P->>P: design-review-check（「- 無し」なら detail-design へ）
         opt 指摘が 1 件以上
@@ -331,7 +331,7 @@ sequenceDiagram
 - `design-fix` が直せない指摘は、扱いの列に `直さない: <理由>` を書いて詳細設計の段へ進む。その行は設計 Pull Request の本文に載り、`cross-review` と設計承認ゲートで人が見る
 - 詳細設計の worker が 1,000 行の上限に当たったら、設計を 2 本に分けると報告して止まる（設計の段と同じ）。プランは既存の work の段の失敗の扱いで止まる
 - `survey-check` の指摘を `fix-survey` が直せなければ、既存どおりプランを止めて人へ戻す
-- `light`・`operation`・`documentation` の設計のプランは `design` の段から `rebuild` へ進み、設計単体のレビューの段・詳細設計の段・`--require-detail` のどれも持たない
+- `light`・`operation`・`documentation` の設計のプランは `design` の段から `rebuild` へ進む。設計単体のレビューの段・詳細設計の段・`--require-detail` のどれも持たない
 
 ## 非機能の実現方式
 
@@ -444,9 +444,9 @@ grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
 
 ### 決定 11: 費用と時間を抑えるため、設計単体のレビューは 1 つの AI の軽いレビューにし、`cross-review` にしない
 
-`design-review` の段は、新しい文脈の worker 1 つ（既定の claude -p）に、設計文書と要求の写しだけを読ませる。観点は `cross-review` の設計 Pull Request の観点（`cross-review/scripts/review_lib/review_focus.py` の `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE`）をそのファイルから読んで使い、指示の文へ写さない。直した後にレビューを打ち直さない。
+`design-review` の段は、新しい文脈の worker 1 つ（既定の claude -p）に、設計文書と要求のコピーだけを読ませる。観点は `cross-review` の設計 Pull Request の観点をそのファイルから読んで使い、指示の文へ写さない。観点の置き場は `cross-review/scripts/review_lib/review_focus.py` である。使うのは `MODEL_REVIEW_TEMPLATE` と `DESIGN_REVIEW_TEMPLATE` の 2 つである。直した後にレビューを打ち直さない。
 
-費用と効果を、次の実績で比べた。出典はメインディレクトリの `.ndf/sprint-*/1-design-*-state/report.md` で、2026-11-09〜11-13 に流した設計のプランの報告のうち `review` の段が動いた 22 件である（手元の実行記録で、コミットしない）。
+費用と効果を、次の実績で比べた。出典は、2026-11-09〜11-13 に流した設計のプランの報告のうち、`review` の段が動いた 22 件である。報告の置き場はメインディレクトリの `.ndf/sprint-*/1-design-*-state/report.md` で、手元の実行記録のためコミットしない。
 
 | 量 | `cross-review`（設計のプランの `review` の段） | 近い work の段（`rebuild`。同じ設計文書を読む） |
 | --- | --- | --- |
@@ -456,12 +456,18 @@ grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
 | ラウンド | 2〜3 | 1 |
 | 見つけた指摘 | 中央値 3.5 件（合計 84 件、直した 73 件） | — |
 
-数え方は、各報告の段ごとの表の `review`・`rebuild` の行と、件数の行の `rounds`・`findings`・`fixed`、`CLI（drive・work の中）` の行の `codex N 回`・`kiro N 回` を読んだ。
+数え方は、各報告の次の 3 か所を読んだ。
+
+| 報告の箇所 | 読んだ値 |
+| --- | --- |
+| 段ごとの表 | `review`・`rebuild` の行 |
+| 件数の行 | `rounds`・`findings`・`fixed` |
+| `CLI（drive・work の中）` の行 | `codex N 回`・`kiro N 回` |
 
 比べた結果、次の 3 点で軽いレビューを選ぶ。
 
 - **`cross-review` は Pull Request を要る。** 設計単体に当てるには、`pr`・`sync-body`・`review` と解決のフローを詳細設計の段の前へもう 1 組置き、詳細設計を送った後にもう 1 度 `cross-review` を流すことになる。1 件あたり中央値で約 519 秒と外部の AI の起動 5〜10 回が増え、継続的統合も 2 度起動する
-- **設計文書は後の `cross-review` でもう一度見られる。** 設計と詳細設計をまとめた `cross-review` は、1 ラウンド目でドメインモデルの節を、2 ラウンド目以降で残りの節を見る（`08-review-categories.md` の「設計 PR のモデルレビューと詳細レビュー」）。設計単体のレビューの役目は、詳細設計が誤った設計の上に立つ前に大きな誤りを止めることに絞れる
+- **設計文書は後の `cross-review` でもう一度見られる。** 設計と詳細設計をまとめた `cross-review` は、1 ラウンド目でドメインモデルの節を、2 ラウンド目以降で残りの節を見る。この分担は `08-review-categories.md` の「設計 PR のモデルレビューと詳細レビュー」にある。設計単体のレビューの役目は、詳細設計が誤った設計の上に立つ前に大きな誤りを止めることに絞れる
 - **軽いレビューは外部の AI の起動を持たない。** 外部の AI を起動する経路の失敗（起動・待ち・回収）を、すべての `standard` の設計のプランへ増やさない。複数の AI の見方の違いは後の `cross-review` が持つ
 
 `cross-review` を設計単体にも当てる形は、上のとおり時間と外部の AI の起動が倍になるため採らない。軽いレビューの worker を外部の AI（`"runtime": "codex"`）で起動する形は、観点の多様さを足せるが、外部の AI の失敗の経路をすべての設計のプランへ足すため採らない。直した後にレビューを打ち直す形は、後の `cross-review` が直した設計を見るため、同じ確認を 2 度行うことになり採らない。
