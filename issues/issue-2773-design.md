@@ -314,7 +314,7 @@ classDiagram
 
 | workflow | 起動 | 権限 | 中身 |
 | --- | --- | --- | --- |
-| 証跡のチェック（`release-approval.yml`） | `pull_request_target`（宛先 main、`opened`・`synchronize`・`reopened`・`edited`・`closed`）と `issue_comment`（`created`・`edited`・`deleted`） | 上の「配置」の表 | 既定ブランチを取り出し、`approval-check --pr <番号>` を打つ。PR でないコメントでは何もしない。PR が閉じたときは、その先端の SHA を持つ main 宛ての開いた PR を判定し直す（I10）。コメントの編集・削除でも判定し直し、編集された証跡は数えない。同時実行は PR ごとに 1 本（`cancel-in-progress: true`）。PR をまたぐ実行の順序には頼らず、`success` を付けた後に同じ先端の開いた PR と証跡を読み直し、結果が変われば `failure` に付け直す（I10） |
+| 証跡のチェック（`release-approval.yml`） | `pull_request_target`（宛先 main、`opened`・`synchronize`・`reopened`・`edited`・`closed`）と `issue_comment`（`created`・`edited`・`deleted`） | 上の「配置」の表 | 既定ブランチを取り出し、`approval-check --pr <番号>` を打つ。PR でないコメントと、作成・編集・削除の前後の本文に証跡の印（`ndf:release-approval`）を含まないコメントでは起動しない。PR が閉じたときは、その先端の SHA を持つ main 宛ての開いた PR を判定し直す（I10）。コメントの編集・削除でも判定し直し、編集された証跡は数えない。同時実行は PR ごとに 1 本（`cancel-in-progress: true`）。PR をまたぐ実行の順序には頼らず、`success` を付けた後に同じ先端の開いた PR と証跡を読み直し、結果が変われば `failure` に付け直す（I10） |
 | 開発版（`release-dev.yml`） | `workflow_dispatch`（入力 `pr`） | 上の「配置」の表 | 宛先と版の接尾辞を確かめ、`merge-when-green <pr> --no-cleanup --no-admin` を打つ |
 
 ## 処理の流れ

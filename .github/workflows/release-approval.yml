@@ -17,14 +17,20 @@ permissions:
   issues: read
   statuses: write
 
-concurrency:
-  # PR ごとに 1 本。PR をまたぐ実行は排他しない（同じ先端の PR は approval-check が読み直して塞ぐ）
-  group: release-approval-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
-
 jobs:
   approval-check:
-    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    # コメントの出来事は、証跡の印（ndf:release-approval）を含むコメントの作成・編集・削除だけで起動する（印の無いコメントで
+    # runner を起こさない）。編集は前の本文（changes.body.from）も見る（印を消した編集でも判定し直す）
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (contains(github.event.comment.body, 'ndf:release-approval') ||
+        contains(github.event.changes.body.from, 'ndf:release-approval')))
+    # PR ごとに 1 本。PR をまたぐ実行は排他しない（同じ先端の PR は approval-check が読み直して塞ぐ）。
+    # job に置くのは、印の無いコメントで飛ばした実行が、走っている判定を取り消さないため
+    concurrency:
+      group: release-approval-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
