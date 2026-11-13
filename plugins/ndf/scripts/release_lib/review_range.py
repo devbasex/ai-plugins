@@ -64,8 +64,18 @@ class GitHub:
     create: object = None
 
     def list_prs(self, root, state: str, head: str | None = None) -> list[dict]:
-        args = ["pr", "list", "--state", state, "--json", "number,headRefName,body", "--limit", "100"]
-        return gh_json(root, [*args, *(["--head", head] if head else [])], "gh pr list") or []
+        """`state` の PR（`number`・`headRefName`・`body`）。`head` を省くと全ページを読む（取得の上限で見落とした
+        レビューの PR の直しを、無いと扱って消さない。I11）。"""
+        if head:
+            args = ["pr", "list", "--state", state, "--head", head, "--json", "number,headRefName,body", "--limit", "100"]
+            return gh_json(root, args, "gh pr list") or []
+        path = f"repos/{{owner}}/{{repo}}/pulls?state={state}&per_page=100"
+        pages = gh_json(root, ["api", "--paginate", "--slurp", path], "gh api pulls") or []
+        return [
+            {"number": p["number"], "headRefName": (p.get("head") or {}).get("ref") or "", "body": p.get("body")}
+            for page in pages
+            for p in page
+        ]
 
     def create_pr(self, root, base: str, head: str, title: str, body: str) -> int:
         return self.create(root, base, head, title, body)

@@ -289,3 +289,21 @@ def test_open_outcome_matches_the_result_contract():
         status, summary, items, code = rr.open_outcome(VERSION, dict(got))
         assert (status, code) == want and summary
         assert validate_result(result("release-steps", status, summary, items, {}), code) == []
+
+
+def test_list_prs_reads_every_page_without_head(monkeypatch):
+    """head を省いた一覧は全ページを読む（100 件の上限の外のレビューの PR を見落とさない。I11）。"""
+    calls = []
+    pages = [
+        [{"number": n, "head": {"ref": f"b{n}"}, "body": ""} for n in range(100)],
+        [{"number": 100, "head": {"ref": SHOW}, "body": "x"}],
+    ]
+
+    def fake(root, args, what):
+        calls.append(args)
+        return pages
+
+    monkeypatch.setattr(rr, "gh_json", fake)
+    got = rr.GitHub().list_prs(Path("."), "open")
+    assert "--paginate" in calls[0] and len(got) == 101
+    assert got[-1] == {"number": 100, "headRefName": SHOW, "body": "x"}
