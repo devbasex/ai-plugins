@@ -6948,6 +6948,48 @@
       "pending_source": "issues/issue-3163-design.md"
     },
     {
+      "term": "リリースの PR",
+      "context": "ndf-release",
+      "meaning": "本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "証跡のチェック",
+      "context": "ndf-release",
+      "meaning": "リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "承認権限",
+      "context": "ndf-release",
+      "meaning": "リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "リリースの場合",
+      "context": "ndf-release",
+      "meaning": "CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "承認資料のコメント",
+      "context": "ndf-release",
+      "meaning": "承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "開発版の workflow",
+      "context": "ndf-release",
+      "meaning": "手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "承認の証跡",
+      "context": "ndf-release",
+      "meaning": "リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
       "term": "兆候",
       "context": "ndf-workflow",
       "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
