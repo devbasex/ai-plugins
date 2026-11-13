@@ -117,6 +117,8 @@ elif a[:3] == ["api", "-X", "POST"] and a[4].endswith("/comments"):  # 承認の
     out = 'HTTP/2.0 201 Created\n\n{{"html_url": "https://github.com/o/r/pull/9#c1"}}'
 elif a[:1] == ["api"] and "rules/branches/" in a[-1]:
     out = json.dumps(st.get("rules", []))
+elif a[:1] == ["api"] and a[-1].endswith("/status"):  # 先端の commit status（ndf/release-approval の待ち）
+    out = json.dumps({{"statuses": st.get("statuses", [])}})
 elif a[:1] == ["api"] and "/protection/" in a[-1]:
     code = 1
     sys.stderr.write("gh: Not Found (HTTP 404)\n")
@@ -1215,6 +1217,16 @@ def test_promote_no_review_case_writes_trail_then_merges(repo, gh, tmp_path):
     assert code == 0, (out, err)
     assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c1", "result": "written", "approved_sha": X} in out["items"]
     assert len(gh.get()["comments"]) == 1 and merges(gh) == [["pr", "merge", "9", "--merge", "--match-head-commit", X]]
+
+
+def test_promote_no_review_case_waits_for_trail_status_before_merge(repo, gh, tmp_path):
+    """証跡のチェックが必須なら、証跡を書いた後にその status が success になるのを確かめてからマージへ入る。"""
+    rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ndf/release-approval"}]}}]
+    code, out, err = _promote_cd(repo, gh, tmp_path, rules=rules, statuses=[{"context": "ndf/release-approval", "state": "success"}])
+    assert code == 0, (out, err)
+    calls = gh.get()["calls"]
+    status = next(i for i, c in enumerate(calls) if c[:1] == ["api"] and c[-1].endswith(f"/commits/{X}/status"))
+    assert status < next(i for i, c in enumerate(calls) if c[:2] == ["pr", "merge"])
 
 
 def test_promote_no_review_case_keeps_own_existing_trail(repo, gh, tmp_path):

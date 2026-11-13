@@ -610,11 +610,11 @@ def _merged_sync_pr(root, branch, base):
     return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
 
 
-def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False):
-    """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、
-    release/v<版>-sync → ベースブランチの PR でマージする。release/v<版> そのものへはベースブランチを取り込まない。
-    待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
-    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。"""
+def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False, merge=None):
+    """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、その PR でマージする。
+    release/v<版> そのものへはベースブランチを取り込まない。待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
+    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。
+    `merge` は PR 番号からマージコミットを返す仕方（開発版の workflow）で、省くと手元の wait_and_merge。"""
     sync = f"{branch}-sync"
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         git(root, "fetch", "-q", "origin", base)
@@ -636,7 +636,7 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
         try:
-            return n, wait_and_merge(root, n, ci_wait=a.ci_wait)
+            return n, merge(n) if merge else wait_and_merge(root, n, ci_wait=a.ci_wait)
         except Conflicted:
             if not left:
                 raise
@@ -683,7 +683,7 @@ def cmd_release(a):
         _published(root, a, plugin, prod, *got)
     if on_pr:
         reviewed.release_prod(ctx, case, _prod_ops())
-    if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)):
+    if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)) and reviewed.dev_workflow_ready(root, wf):
         reviewed.release_dev(ctx, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {

@@ -1482,6 +1482,8 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     rv = mod.reviewed
     runs = []
     monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: "c")
+    monkeypatch.setattr(mod, "_merged_sync_pr", lambda r, b, base: None)
+    monkeypatch.setattr(mod, "pr_view", lambda r, n, f: {"mergeStateStatus": "CLEAN"})
     monkeypatch.setattr(rv, "release_dev_by_workflow", lambda r, a, wf, n: runs.append((wf, n)) or "https://x/runs/1")
     _exits(monkeypatch, rv)
     a = argparse.Namespace(version="1.2.3-dev.1")
@@ -1491,6 +1493,56 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
             rv.release_dev(ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "main"), "release-dev.yml", mod)
         assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
     assert runs == [("release-dev.yml", 4)]
+
+
+@pytest.mark.parametrize("synced", [None, 6])
+def test_release_dev_takes_a_conflicting_pr_through_the_sync_pr(monkeypatch, tmp_path, synced):
+    """開発版の PR がベースブランチと衝突していれば -sync の PR で取り込み、そのマージも workflow に任せる。
+    再開で -sync が取り込み済みなら workflow を起動しない。"""
+    import argparse
+
+    from release_lib.context import ReleaseCtx
+
+    mod = _release_steps_module(monkeypatch)
+    rv = mod.reviewed
+    runs, syncs = [], []
+    monkeypatch.setattr(mod, "merge_commit_of", lambda r, n: f"c{n}")
+    monkeypatch.setattr(mod, "_reusable_release_pr", lambda r, b, base: {"number": 4, "state": "OPEN"})
+    monkeypatch.setattr(mod, "_merged_sync_pr", lambda r, b, base: synced)
+    monkeypatch.setattr(mod, "pr_view", lambda r, n, f: {"mergeStateStatus": "DIRTY"})
+    monkeypatch.setattr(rv, "release_dev_by_workflow", lambda r, a, wf, n: runs.append(n) or f"https://x/runs/{n}")
+
+    def merge_sync(root, a, plugin, branch, base, release_pr, merge=None):
+        syncs.append(release_pr)
+        return 5, merge(5)
+
+    monkeypatch.setattr(mod, "_merge_sync_pr", merge_sync)
+    _exits(monkeypatch, rv)
+    with pytest.raises(SystemExit) as e:
+        ctx = ReleaseCtx(tmp_path, argparse.Namespace(version="1.2.3-dev.1"), "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "main")
+        rv.release_dev(ctx, "release-dev.yml", mod)
+    out = e.value.code
+    want = synced or 5
+    assert (out["metrics"]["sync_pr"], out["metrics"]["merge_commit"]) == (want, f"c{want}")
+    assert out["items"][0]["result"] == "compared" and out["items"][1]["name"] == f"#{want}"
+    assert (runs, syncs) == (([], []) if synced else ([5], [4]))
+
+
+@pytest.mark.parametrize("code, stderr, want", [(0, "", True), (1, "gh: Not Found (HTTP 404)", False)])
+def test_dev_workflow_ready_reads_the_default_branch(monkeypatch, tmp_path, code, stderr, want):
+    """宣言の workflow が既定ブランチに無ければ（404）手元でマージする側へ戻す。"""
+    import subprocess
+
+    sys.path.insert(0, str(SCRIPT.parent))
+    from release_lib import reviewed
+
+    seen = []
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setattr(
+        reviewed.gh_parts, "gh", lambda args, cwd=None: seen.append(args) or subprocess.CompletedProcess(args, code, "", stderr)
+    )
+    assert reviewed.dev_workflow_ready(tmp_path, "release-dev.yml") is want
+    assert seen[0][1] == "repos/o/r/contents/.github/workflows/release-dev.yml"
 
 
 def test_dev_run_title_comes_from_the_workflow_file():

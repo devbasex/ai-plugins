@@ -44,6 +44,19 @@ def dev_workflow_of(root) -> str | None:
     return got if isinstance(got, str) and got else None
 
 
+def dev_workflow_ready(root, workflow) -> bool:
+    """宣言の開発版の workflow が既定ブランチにあるか。`workflow_dispatch` は既定ブランチの定義とコードで動くため、
+    宣言を入れた変更が既定ブランチへ届くまでは起動できない（その間は手元でマージする）。workflow と、それが打つ
+    `merge-when-green --no-admin` は同じ変更で入るので、workflow があればコードも揃っている。読めなければ 1 で止める。"""
+    repo = repo_or_stop(root)
+    p = gh_parts.gh(["api", f"repos/{repo}/contents/{ci_workflows.WORKFLOW_DIR}/{workflow}", "--silent"], cwd=root)
+    if p.returncode == 0:
+        return True
+    if "404" in (p.stderr or ""):
+        return False
+    raise StepError(f"{workflow} が既定ブランチにあるかを読めない: {(p.stderr or '').strip()[:300]}")
+
+
 def repo_or_stop(root):
     repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
     if not repo:
@@ -170,8 +183,10 @@ def wait_ci_except(root, n, skip, timeout, ops):
         raise StepError(f"PR #{n} のチェックが上限 {timeout:g} 秒までに終わらない", EXIT_INFRA_WAIT)
 
 
-def wait_trail_status(root, repo, prod, head, timeout):
-    """`ndf/release-approval` が本番チャネルの必須チェックにあるとき、先端のその状態が success になるまで待つ。"""
+def wait_trail_status(root, repo, prod, head, timeout=None):
+    """`ndf/release-approval` が本番チャネルの必須チェックにあるとき、先端のその状態が success になるまで待つ。
+    `timeout` を省くと `release-steps.trail-status` の上限（`merged_lib.merge.promote` の場合 1 が使う）。"""
+    timeout = limits.policy("release-steps.trail-status").seconds if timeout is None else timeout
     try:  # 読めなければ待たない（マージの判定は GitHub が必須チェックで持つ）
         required = ci_workflows.required_contexts(gh_json(root, ["api", f"repos/{repo}/rules/branches/{prod}"], "gh api rules")) or []
     except (StepError, ValueError):
@@ -229,24 +244,57 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
     """宣言 release.dev_workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
     root, a, plugin, plugins, branch, base = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base
     pr = ops._reusable_release_pr(root, branch, base)
-    if pr is None:
+    new = pr is None
+    if new:
         pr = {
             "number": ops.create_pr(root, base, branch, f"Release: {plugin} v{a.version}", ops._release_pr_body(root, a, plugin, plugins)),
             "state": "OPEN",
         }
-    n = pr["number"]
-    item = {"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": base}
+    n = merged = pr["number"]
+    items = [{"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": base}]
     if pr["state"] == "OPEN":
-        item.update({"result": "merged", "run": release_dev_by_workflow(root, a, workflow, n)})
+        merged, run_url = _dev_merge_by_workflow(ctx, workflow, ops, n, new)
+        items[0].update({"result": "merged" if merged == n else "compared", "run": run_url})
+        if merged != n:  # 衝突したので -sync の PR が取り込んだ。元の PR は照合にだけ使う（_merge_release_pr と同じ形）
+            items.append({"kind": "pr", "name": f"#{merged}", "result": "merged", "base": base, "head": f"{branch}-sync"})
     metrics = {
         "channel": "dev",
         "version": a.version,
         "release_pr": n,
-        "merge_commit": ops.merge_commit_of(root, n),
+        "sync_pr": merged if merged != n else None,
+        "merge_commit": ops.merge_commit_of(root, merged),
         "plugins": ",".join(plugins),
     }
     metrics["dev_workflow"] = workflow
-    emit(result(TOOL, "ok", f"{plugin} v{a.version} を {base} へ出した（#{n}・{workflow}）", [item], metrics))
+    emit(result(TOOL, "ok", f"{plugin} v{a.version} を {base} へ出した（#{merged}・{workflow}）", items, metrics))
+
+
+def _dev_merge_by_workflow(ctx: ReleaseCtx, workflow, ops, n, new):
+    """開いた開発版の PR を workflow でマージし、(取り込んだ PR, workflow の実行の URL) を返す。ベースブランチと衝突していれば
+    手元の経路と同じく release/v<版>-sync で取り込み（`_merge_sync_pr`）、その PR のマージも workflow に任せる。
+    再開で -sync が取り込み済みなら（`_merged_sync_pr`）起動しない。"""
+    root, a, branch, base = ctx.root, ctx.a, ctx.branch, ctx.base
+    if not new and (synced := ops._merged_sync_pr(root, branch, base)):
+        return synced, None
+    if not _pr_conflicting(root, n, ops):
+        try:
+            return n, release_dev_by_workflow(root, a, workflow, n)
+        except StepError as e:  # workflow の中の merge-when-green が衝突で落ちたときだけ -sync へ回す
+            if e.code == EXIT_INFRA_WAIT or not _pr_conflicting(root, n, ops):
+                raise
+    runs = []
+
+    def merge(m):
+        runs.append(release_dev_by_workflow(root, a, workflow, m))
+        return ops.merge_commit_of(root, m)
+
+    sync_n, _ = ops._merge_sync_pr(root, a, ctx.plugin, branch, base, n, merge=merge)
+    return sync_n, runs[-1] if runs else None
+
+
+def _pr_conflicting(root, n, ops) -> bool:
+    """PR がベースブランチと衝突しているか（mergeStateStatus が DIRTY）。"""
+    return (ops.pr_view(root, n, "mergeStateStatus") or {}).get("mergeStateStatus") == "DIRTY"
 
 
 def judge_pr(repo, pr, head, prod):

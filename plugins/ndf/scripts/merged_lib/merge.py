@@ -19,7 +19,7 @@ import release_case
 import repo as repo_lib
 import test_strategy
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from release_lib import approval_trail
+from release_lib import approval_trail, reviewed
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
 
@@ -452,6 +452,8 @@ def _trail_before_merge(root, a, n, case) -> dict | None:
     try:
         if case.case == release_case.CD_NO_REVIEW:
             written, url = approval_trail.write_trail(repo, n, sha, a.gate_approved)
+            # PR を開いた時点の failure（証跡が無い）を workflow が付け直すまで待つ。待たないと merge-when-green が落ちたチェックとして止まる
+            reviewed.wait_trail_status(root, repo, a.base, sha)
             return {"kind": "comment", "name": url or f"#{n}", "result": "written" if written else "kept", "approved_sha": sha}
         got = approval_trail.read_review_commit(repo, n)
     except approval_trail.TrailError as e:
