@@ -41,8 +41,9 @@ def test_check_reports_missing_ref_target(contracts_copy, fact_table):
     assert contracts_cli.check_all() == ["sample:a の phase 'nope' の方針 monitor.phase.nope が上限の宣言に無い"]
 
 
-def test_fact_ids_filters_by_column(capsys):
+def test_fact_ids_and_value(capsys):
     assert _run(capsys, "fact-ids", "exit-codes", "status=gate")[1].split() == ["gate", "pause"]
+    assert _run(capsys, "fact-value", "exit-codes", "gate", "last")[1].strip() == "19"
 
 
 def test_fact_value_prints_arrays_and_booleans(contracts_copy, fact_table, capsys):
