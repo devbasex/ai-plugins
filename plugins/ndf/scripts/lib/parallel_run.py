@@ -36,6 +36,7 @@ from parallel_files import RELAY
 from parallel_end import LaneEnding
 from parallel_helper import SUPERVISE, helper_spawn
 from parallel_launch import LaunchRouting
+from parallel_wake import spawn_rows, step_wakeable
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
 from parallel_question import cause_of
 from parallel_reply import AnswerRouting, step_prior_waits, step_waiting_lanes
@@ -257,6 +258,8 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
         self.launching = True  # 起動と再起動を耐久ワークフローが打つか。古い記録の打ち直しでは False（#2936）
         self.admitting = True  # 依存のそろったレーンの起動をマシンのプランの本数に掛けるか。古い記録の打ち直しでは False（#2999）
         self.carrying = True  # 承認の後に加わった範囲を判定してよいか。古い記録の打ち直しでは False（#3020）
+        self.wakeable: list[str] = []  # 最後に読んだ進行表で起こせる行を持つレーン（#3092）
+        self.tabled = True  # 起動を計画とレーンの進行表から決めるか。古い記録の打ち直しでは False（#3092）
         self.launches: dict[str, dict] = {}  # 起動の目的 → 起動の記録（#2936 の I2・I3）
         self.helper_seen: dict[str, int] = {}  # 一時レーン → 今の起動の後に続けて止まって観えた回数（I4）
         self.woken: set[str] = set()  # 設計の答えを当てるために再起動し、まだ動いて観えていないレーン
@@ -632,6 +635,7 @@ def parallel_workflow(main: str, name: str) -> dict:
     run.admitting = durable.patched("parallel-admit")  # 起動の判定をマシンの本数に掛けるか。古い記録は今までの道（#2999 の決定 6）
     run.carrying, run.closing = durable.patched("parallel-docs-carry"), durable.patched("parallel-closed-requests")  # 古い記録は今までの道
     run.ending, run.approved_only = durable.patched("parallel-lane-end"), durable.patched("parallel-approved-sha")  # #3058・#3070
+    run.tabled = durable.patched("parallel-progress-tables")  # 起動を計画とレーンの進行表から決めるか。古い記録は今までの道（#3092）
     run.announce_ending()  # 目録の側が、版の要るまとめを流せる計画かを読む（#3058）
     restored = step_restore(main, name) if ledgered else None
     run.adopt(restored)  # 台帳から戻し、running と戻した問いを立てる
@@ -726,10 +730,18 @@ def _spawn_ready(run: _Run, main: str) -> None:
     if run.hold.plan:
         return
     view, started = _plan_view(run), set(_started(run))
+    if run.tabled and (tables := step_wakeable(main, run.name))["tables"]:
+        spawn_rows(run, main, view, started, tables["wake"], tables["ended"], _admit)
+        return
     stopped = run.counted(run.stopped()) - _asking_lanes(run) - set(run.revive) - set(run.marks)  # 終わりの記録で数える（#3058 の I2）
     ready = pp.ready_lanes(view, started, stopped)
     if ready and any(a in stopped for ln in ready for a in ln.after):  # 依存で起こすときだけループの記録を読む
         ready = pp.ready_lanes(view, started, stopped - set(step_waiting_lanes(main, run.name)))
+    _admit(run, main, ready)
+
+
+def _admit(run: _Run, main: str, ready: list) -> None:
+    """`ready` のレーンを計画の最初の入力で起動し、結果をレーンの状態へ反映する。"""
     if not ready:
         return
     import parallel_machine
@@ -745,6 +757,7 @@ def _spawn_ready(run: _Run, main: str) -> None:
 def _run_finished(run: _Run) -> bool:
     """リリースの途中でも残りでもなく、答えていない問いも再開の印も無く、全レーンが止まっている（I11）。前のループの待ちの問いは終わりを止めない（#2510 の I12）。"""
     idle = run.current is None and not run.pending and not run.blocking() and not run.marks and not run.open_verifies()
+    idle = idle and not run.wakeable  # 進行表に起こせる行が残る間は終えない（#3092 の受け入れ条件 14）
     return run.ls_ok and idle and len(run.counted(run.stopped())) == len(run.order)
 
 

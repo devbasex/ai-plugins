@@ -180,9 +180,13 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
         }
         if child:
             inp["issue"] = int(child.split("#", 1)[1])
+        listen = next((x for x in stage.activities[stage.activities.index(act) + 1 :] if x.call == wd.LISTEN_CALL), None)
+        if listen is not None:  # 依頼を送るアクティビティが、答えを待つ行を依頼の記録へ書く（`parallel.py await` が答えを届ける先）
+            inp["listen_row"] = f"{child or stage.name}/{listen.id}"
         answer = step_answered(tid, rev, key)
         if act.call == wd.LISTEN_CALL and answer is None:
-            answer = _wait_answer(tid, rev, key, {"stage": stage.name, "kind": act.kind})
+            hint = next((o["metrics"]["next_step"] for o in outputs.values() if (o.get("metrics") or {}).get("next_step")), None)
+            answer = _wait_answer(tid, rev, key, {"stage": stage.name, "kind": act.kind, **({"next_step": hint} if hint else {})})
         res = step_activity(tid, rev, asdict(act), inp, answer)
         out = res["output"]
         if out.get("status") == "gate":  # プランの中の承認と判断のゲート（詳細設計の act_plan の行）

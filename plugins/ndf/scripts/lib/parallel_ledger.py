@@ -221,7 +221,15 @@ def kinds(main: Path, name: str) -> set[str]:
 
 
 def plan_state(main: Path, name: str, status: Optional[str]) -> str:
-    """計画の状態: `running`（動いている）・`lost`（失われた）・`closed`（閉じた）・`legacy`（台帳の無い ERROR）・`fresh`（未開始）。"""
+    """計画の状態: `running`（動いている）・`lost`（失われた）・`closed`（閉じた）・`legacy`（台帳の無い ERROR）・`fresh`（未開始）。
+    計画の進行表があればその畳み込みから決め（#3092 の受け入れ条件 16）、無ければ取り込み前の計画として台帳から決める。"""
+    import parallel_tables as ptab  # 進行表の DB（SQLAlchemy）は計画の状態を読むときだけ読み込む
+
+    return ptab.plan_state_word(main, name, status)
+
+
+def ledger_plan_state(main: Path, name: str, status: Optional[str]) -> str:
+    """取り込み前の計画の状態を台帳と耐久ワークフローの状態から決める（語は `plan_state` と同じ）。"""
     if status in RUNNING:
         return "running"
     if status == "SUCCESS":
@@ -409,7 +417,7 @@ class RunState:
 
 def open_run(main: Path, name: str, retired: Optional[Path]) -> None:
     """耐久ワークフローを始める直前: 失われた計画なら作り直しの行（`rebuilt:<回>`）を足し、開いた行を足す（E1・E7）。"""
-    if retired is not None or plan_state(main, name, None) == "lost":
+    if retired is not None or ledger_plan_state(main, name, None) == "lost":
         n = sum(1 for r in read_ledger_rows(main, name).rows if r["kind"] == "rebuilt") + 1
         append_ledger_row(main, name, "rebuilt", f"rebuilt:{n}", {"retired": str(retired or "")}, by="organizer")
         print(f"parallel: 耐久ワークフローを作り直す（{n} 回目。退避: {retired or '記録が無い'}）", file=sys.stderr, flush=True)

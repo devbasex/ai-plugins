@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
+deps.require("durable", "workflow", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -345,11 +345,33 @@ def cmd_await(a) -> None:
     if ans is None:
         reply("stopped", "答えがまだ無い", code=3, deferred=dfr)
     res = ans.get("result")
+    forwarded = _forward_to_table(record, ans)
     code = {"released": 0, "rejected": 10}.get(res, 1)
     status = {0: "ok", 10: "gate"}.get(code, "stopped")
     nxt = "今のリリース承認ゲートの差し戻しと同じに扱う" if code == 10 else None
     reply(status, f"リリースの依頼 {record['id']} の答え: {res}", code=code, next_step=nxt, result=res, version=ans.get("version"),
-          release=ans.get("release"), reason=ans.get("reason"), deferred=dfr)  # fmt: skip
+          release=ans.get("release"), reason=ans.get("reason"), deferred=dfr, forwarded=forwarded)  # fmt: skip
+
+
+def _forward_to_table(record: dict, ans: dict) -> bool:
+    """依頼の記録がスプリントの進行表の行を指す（`ndf.request` が送った依頼）なら、答えをその行へ `answered` で届ける。
+    リリースの答えは `progress.py answer` と同じ経路で進行表のワークフローへ渡る（#3092）。届けたら真。"""
+    if not record.get("table") or not record.get("row"):
+        return False
+    import progress_db as pdb
+    import progress_model as pm
+    import progress_run
+
+    released = ans.get("result") == "released"
+    value = {"answer": "released" if released else "rejected"}
+    if released:
+        value["release"] = {"version": ans.get("version"), "release": ans.get("release"), "prs": record.get("prs")}
+    store = pdb.connect(pdb.default_url(main_of()))
+    with pdb.transaction(store) as conn:
+        rev, _ = pdb.definition(conn, record["table"])
+        pdb.append_events(conn, record["table"], [pm.EventDraft("answered", "organizer", record["row"], rev, payload=value)])
+    progress_run.send_progress_answer(store, record["table"], record["row"], value)
+    return True
 
 
 # ---- 問いと一時レーン（#2436 の 6c・6d・6f） ----

@@ -3,6 +3,8 @@
 - `ndf.plan`: 工程のプランを作って `supervise.py run` で流す。`with.kind` があれば `supervise.py new <種類>` の雛形、
   無ければ `with.skill` の Skill を起動する 1 ステップのプランにする。承認と判断のゲート（終了コード 10〜19）は
   待ちとして返し、答えの後は止まったステップの次から `run --from` で続ける
+- `ndf.request`: 並列の計画のレーンのスプリントなら、オーガナイザーへリリースの依頼を送る（`parallel.py request`）。
+  答えは `parallel.py await` が読み、同じ工程の `ndf.listen` の行へ `answered` で届ける。レーンの外のスプリントでは何もしない
 - `ndf.listen`: 承認ゲートの答えとリリースの結果の待ち。DBOS の受信はワークフローの中でしか打てないため、
   進行表のワークフロー（`progress_run`）が持つ。ここでは答えを出力の形へ写すだけ
 - `ndf.record`: 進捗記録の生成（`progress_projection`）。失敗しても工程を止めない
@@ -21,6 +23,7 @@ from typing import Callable, Optional
 
 HERE = Path(__file__).resolve().parent
 SUPERVISE = HERE.parent / "supervise.py"
+PARALLEL = HERE.parent / "parallel.py"
 GATE_CODES = range(10, 20)
 
 
@@ -87,6 +90,68 @@ def act_plan(inp: dict, args: dict) -> dict:
     return _act_report("ndf.plan", "stopped", out.get("summary") or f"プランが {p.returncode} で終わった", **metrics)
 
 
+def _lane_of(store, table_id: str) -> Optional[tuple[str, str]]:
+    """スプリントの進行表が指す（計画名, レーン名）。計画の外なら None。"""
+    import progress_db as pdb
+
+    with pdb.transaction(store) as conn:
+        link = pdb.sprint_link(conn, table_id)
+        lane_row = pdb.progress_table(conn, link[0]) if link else None
+        plan_row = pdb.progress_table(conn, lane_row.parent_id) if lane_row is not None and lane_row.parent_id else None
+    if lane_row is None or plan_row is None:
+        return None
+    return plan_row.name, pdb.lane_name(lane_row)
+
+
+def _prs_of(outputs: dict) -> list[str]:
+    prs: list[str] = []
+    for out in outputs.values():
+        m = (out or {}).get("metrics") or {}
+        for v in [*(m.get("prs") or []), m.get("pr")]:
+            if v is not None and str(v).isdigit() and str(v) not in prs:
+                prs.append(str(v))
+    return prs
+
+
+def act_request(store, table_id: str, inp: dict, listen_row: str) -> dict:
+    """レーンのスプリントのリリースの依頼を送る（`supervise_lib.sprint_lane_close` の依頼のプランを移した。#3092）。
+
+    依頼を送れば、依頼の記録へ進行表の ID と答えを待つ行を足し、`parallel.py await` が答えをその行へ届けられるようにする。
+    自分の Pull Request がすでに本番にある（`parallel.py request` が 0）なら、待つ行へ `released` の答えをここで書く。"""
+    import progress_db as pdb
+    import progress_model as pm
+
+    lane = _lane_of(store, table_id)
+    if lane is None:
+        return _act_report("ndf.request", "ok", "並列の計画の外のスプリントのため、リリースの依頼を送らない", requested=False)
+    state = Path(inp.get("work") or Path.cwd()) / "release-request"
+    (state / "work").mkdir(parents=True, exist_ok=True)
+    prs = _prs_of(inp.get("previous") or {})
+    issues = [str(n) for n in inp.get("issues") or []]
+    cmd = [sys.executable, str(PARALLEL), "request", lane[0], "--lane", lane[1], "--state", str(state)]
+    cmd += (["--prs", *prs] if prs else []) + (["--issues", *issues] if issues else [])
+    p = subprocess.run(cmd, capture_output=True, text=True, cwd=inp.get("cwd"))
+    record = state / "work" / "request.txt"
+    try:
+        data = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _act_report("ndf.request", "stopped", f"parallel.py request が {p.returncode} で終わり、依頼の記録が無い: {p.stdout[-300:]}")
+    import parallel_lane as pl
+
+    data.update({"table": table_id, "row": listen_row})
+    pl.write_request(state, data)
+    if p.returncode == 0:  # 送らずに済んだ（すでに本番にある）
+        value = {"answer": "released", "release": {"version": data.get("version"), "prs": data.get("prs")}}
+        with pdb.transaction(store) as conn:
+            rev, _ = pdb.definition(conn, table_id)
+            pdb.append_events(conn, table_id, [pm.EventDraft("answered", "workflow", listen_row, rev, payload=value)])
+        return _act_report("ndf.request", "ok", "Pull Request はすでに本番にある。依頼を送らない", requested=False, record=str(record))
+    if p.returncode != 10:
+        return _act_report("ndf.request", "stopped", f"parallel.py request が {p.returncode} で終わった: {p.stdout[-300:]}")
+    nxt = f"python3 {PARALLEL} await {lane[0]} --from {record}"
+    return _act_report("ndf.request", "ok", f"リリースの依頼 {data.get('id')} を送った", requested=True, record=str(record), next_step=nxt)
+
+
 def act_listen(answer: Optional[dict]) -> dict:
     """承認ゲートの答えかリリースの結果を出力の形へ写す。答えが無い（待ちの期限を過ぎた）なら `stopped`。"""
     if not answer:
@@ -138,6 +203,7 @@ def act_reshuffle(store, table_id: str, inp: dict, propose: Optional[Callable] =
 
 ACTIVITIES: dict[str, str] = {
     "ndf.plan": "act_plan",
+    "ndf.request": "act_request",
     "ndf.listen": "act_listen",
     "ndf.record": "act_record",
     "ndf.reshuffle": "act_reshuffle",
@@ -153,6 +219,8 @@ def run_activity(store, table_id: str, rev: int, act, inp: dict, answer: Optiona
         return act_plan(inp, act.with_)
     if name == "act_listen":
         return act_listen(answer)
+    if name == "act_request":
+        return act_request(store, table_id, inp, inp["listen_row"])
     if name == "act_record":
         return act_record(store, table_id, inp["stage"], "finish")
     return act_reshuffle(store, table_id, inp)

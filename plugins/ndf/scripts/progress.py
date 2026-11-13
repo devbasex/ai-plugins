@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("durable", "workflow", "schema", "md", "waits")
+deps.require("durable", "workflow", "schema", "md", "mdtable", "versions", "procs", "waits")
 import progress_adopt  # noqa: E402
 import progress_db as pdb  # noqa: E402
 import run_core  # noqa: E402

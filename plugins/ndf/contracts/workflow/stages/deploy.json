@@ -56,6 +56,31 @@
       }
     },
     {
+      "request": {
+        "call": "ndf.request",
+        "metadata": {
+          "ndf": {
+            "kind": "release",
+            "range": "sprint_diff"
+          }
+        },
+        "input": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/stage-io.schema.json#/$defs/activity-in"
+            }
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "ndf://schemas/report.schema.json"
+            }
+          }
+        }
+      }
+    },
+    {
       "release": {
         "listen": {
           "to": {

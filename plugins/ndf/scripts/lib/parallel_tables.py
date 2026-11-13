@@ -17,6 +17,7 @@ import progress_lanes as plr
 import progress_model as pm
 
 ORGANIZER, DURABLE = "organizer", "durable"
+PROGRESS = Path(__file__).resolve().parent.parent / "progress.py"
 
 
 def plan_table_id(main: Path, name: str) -> str:
@@ -206,8 +207,29 @@ def wake_list(main: Path, name: str) -> list[tuple[str, int]]:
     return plr.wakeable_lanes(got[0], got[1]) if got else []
 
 
+def lane_table_id(main: Path, plan: str, lane: str) -> str:
+    return pm.table_id("lane", pdb.progress_repo_key(main), lane_table_name(plan, lane))
+
+
+def row_input(main: Path, plan: str, lane: str, row: int) -> str:
+    """前のスプリントを終えて止まったレーンを、順番表の行 `row` で起こし直す最初の入力（#3092 の決定 7）。
+
+    レーンの conductor は要求と受け入れ条件・モード判定を済ませてから `progress.py new ... --lane <ID> --row <行>` で
+    スプリントの進行表を作り、`progress.py next` で流す。工程の遷移は進行表が決める。"""
+    got = read_plan(main, plan)
+    rows = (got[1].get(lane) or []) if got else []
+    issues = next((r["issues"] for r in rows if r["row"] == row), [])
+    tag = " ".join(f"#{i}" for i in issues) or "（課題なし）"
+    lid = lane_table_id(main, plan, lane)
+    return (
+        f"/goal /ndf:development-workflow {tag} を計画 {plan} のレーン {lane} の順番表の行 {row} として始める -- "
+        f"スプリントの進行表は python3 {PROGRESS} new <スプリント名> --mode <モード> --issues {' '.join(map(str, issues))} "
+        f"--lane {lid} --row {row} で作り、python3 {PROGRESS} next <進行表の ID> で流す"
+    )
+
+
 def plan_state_word(main: Path, name: str, status: Optional[str]) -> str:
-    """計画の状態の語（`parallel_ledger.plan_state` と同じ語）。計画の進行表があればその畳み込みから決め（受け入れ条件 16）、
+    """計画の状態の語（`parallel_ledger.plan_state` が呼ぶ）。計画の進行表があればその畳み込みから決め（受け入れ条件 16）、
     無ければ取り込み前の計画として台帳から決める。"""
     import parallel_ledger as plg
 
@@ -216,4 +238,4 @@ def plan_state_word(main: Path, name: str, status: Optional[str]) -> str:
     except pdb.Unreadable as exc:
         print(f"計画の進行表を読めないため台帳から計画の状態を決める: {exc}", file=sys.stderr)
         got = None
-    return got if got is not None else plg.plan_state(main, name, status)
+    return got if got is not None else plg.ledger_plan_state(main, name, status)
