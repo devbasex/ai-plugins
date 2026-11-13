@@ -271,6 +271,7 @@ def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
 
 
 LIGHT_SKIPPED = (
+    "詳細設計",
     "素材の収集と出典の確定",
     "ドキュメント再構成",
     "ドキュメントレビュー",

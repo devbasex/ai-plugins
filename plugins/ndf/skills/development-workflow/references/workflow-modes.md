@@ -95,7 +95,8 @@ flowchart TD
     B --> D{モード判定}
     D --> S[作業場所の用意]
     S --> C[設計]
-    C --> DR[ドキュメント再構成]
+    C --> DD[詳細設計]
+    DD --> DR[ドキュメント再構成]
     DR --> F[ドキュメントレビュー<br/>PR → 承認 → マージ]
     F --> W[実装用の worktree を<br/>作り直す]
     W --> G[実装計画]
@@ -113,7 +114,8 @@ flowchart TD
     Q --> T[振り返り] --> BR[棚卸し]
     RL -.->|standard / 未検証の項目なし| T
     A -.->|legacy-refactor| D
-    C -.->|"legacy-refactor で分けない / operation"| G
+    DD -.->|"legacy-refactor で分けない"| G
+    C -.->|operation| G
     C -.->|"light / 領域に当たる"| I
     S -.->|"operation / 領域に当たらない"| G
     S -.->|"light / operation / 領域に当たる"| C
@@ -159,6 +161,9 @@ flowchart TD
   DR（ドキュメント再構成）と F（ドキュメントレビュー）は、**設計 Pull Request を分けたときだけ**
   通る。H は「現状固定テスト」、R は「段階的改善」、I は「本番の振る舞いが変わっていないことの
   確認」として読む
+- **DD（詳細設計）を通るのは `standard` と `legacy-refactor` だけである。** C（設計）の直後に立ち、
+  ファイル配置・関数の責務・異常系の処理を実装の前に決める。`legacy-refactor` で設計 Pull Request を
+  分けないときは、DD から G（実装計画）へ進む。`light`・`operation`・`documentation` は DD を通らない
 
 モードごとの経路の詳細と、図から読み取れない条件は下の「モード別の詳細」にある。
 

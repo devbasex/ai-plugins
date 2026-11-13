@@ -446,3 +446,68 @@ def test_the_fast_stage_names_are_rows_of_the_workflow_table() -> None:
     ):
         result = run_lib(f'wf_is_stage "{stage}"')
         assert result.returncode == 0, stage
+
+
+# --- 工程表と対応表の行名（#3144 の I9） -------------------------------------
+
+_SKILL_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _matrix_stages() -> list[str]:
+    result = run_lib("wf_stages")
+    assert result.returncode == 0, result.stderr
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def _table_rows(path: Path, header: tuple[str, ...]) -> list[list[str]]:
+    """見出しの先頭の列が `header` の Markdown の表を読み、本文の行のセルを返す（記号 ` を外す）。"""
+    rows: list[list[str]] = []
+    inside = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("|"):
+            if inside:
+                break
+            continue
+        cells = [c.replace("`", "").strip() for c in line.strip().strip("|").split("|")]
+        if not inside:
+            inside = tuple(cells[: len(header)]) == header
+            continue
+        if set(cells[0]) <= {"-", " "}:
+            continue
+        rows.append(cells)
+    return rows
+
+
+def test_the_mode_table_lists_the_matrix_stages_in_order() -> None:
+    """SKILL.md の「モードごとに起動する Skill」の行名の並びが、工程の分類の行名の並びと一致する。"""
+    rows = _table_rows(_SKILL_ROOT / "SKILL.md", ("工程", "light", "operation"))
+    assert [r[0] for r in rows] == _matrix_stages()
+
+
+def test_the_board_table_uses_the_matrix_stage_names() -> None:
+    """projects-tracking.md の対応表の 1 列目と `stage` の値が、工程の分類の行名にある。"""
+    rows = _table_rows(
+        _SKILL_ROOT / "references" / "projects-tracking.md",
+        ("工程表の行", "記録する Skill", "stage の値"),
+    )
+    stages = set(_matrix_stages())
+    assert rows
+    for row in rows:
+        assert row[0] in stages, row
+        assert row[2] in stages, row
+
+
+def test_the_detailed_design_stage_follows_the_design_stage() -> None:
+    """「詳細設計」は「設計」の直後で、legacy-refactor・standard だけが必須である（#3144 の I1）。"""
+    stages = _matrix_stages()
+    assert stages[stages.index("設計") + 1] == "詳細設計"
+    for mode, want in (
+        ("light", "-"),
+        ("operation", "-"),
+        ("legacy-refactor", "R"),
+        ("standard", "R"),
+        ("documentation", "-"),
+    ):
+        result = run_lib(f"wf_stage_class {mode} 詳細設計")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == want, mode
