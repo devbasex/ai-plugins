@@ -17,6 +17,8 @@ from ndf.core import durable, loop
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 SRC = PLUGIN_ROOT / "src"
 CRASH_SCRIPT = Path(__file__).with_name("_durable_crash.py")
+# _durable_crash.py が落ちる手で落ちたときの終了コード（同名の定数と同じ値。そちらは import すると引数を読む）
+CRASH_EXIT_CODE = 9
 
 performed: list[int] = []
 
@@ -68,6 +70,7 @@ def test_workflow_runs_loop_and_rerun_returns_recorded_result(launched):
 
 
 def _crash_run(url: str, log: Path, crash_at: int) -> subprocess.CompletedProcess[str]:
+    """_durable_crash.py を子プロセスで流す。crash_at の手で落ちると終了コードは CRASH_EXIT_CODE になる。"""
     env = {**os.environ, "PYTHONPATH": str(SRC)}
     return subprocess.run(
         [sys.executable, str(CRASH_SCRIPT), url, "wf-crash", str(log), str(crash_at)],
@@ -84,7 +87,7 @@ def test_recovery_continues_without_rerunning_finished_steps(tmp_path):
     log = tmp_path / "acts.log"
 
     first = _crash_run(url, log, crash_at=3)
-    assert first.returncode == 9, first.stderr
+    assert first.returncode == CRASH_EXIT_CODE, first.stderr
     assert log.read_text().split() == ["1", "2", "3"]
 
     second = _crash_run(url, log, crash_at=0)

@@ -17,6 +17,8 @@ from ndf.core import durable, loop
 
 DB_URL, WORKFLOW_ID, LOG, CRASH_AT = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4])
 EXECUTOR = "crash-test"
+# 落ちる手で落ちたことを示す終了コード（test_durable.py の CRASH_EXIT_CODE と同じ値）
+CRASH_EXIT_CODE = 9
 
 
 @durable.step
@@ -24,7 +26,7 @@ def perform(act: int) -> int:
     with LOG.open("a") as f:
         f.write(f"{act}\n")
     if act == CRASH_AT:
-        os._exit(9)
+        os._exit(CRASH_EXIT_CODE)
     return act * 10
 
 
