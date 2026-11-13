@@ -49,6 +49,8 @@ _WRITE_EVENTS: dict[str, tuple[tuple[int, int | None], ...]] = {
     "os.remove": ((0, 1),),
     "os.rmdir": ((0, 1),),
     "os.rename": ((0, 2), (1, 3)),
+    # 本物の置き場のファイルへのハードリンクは、別名への書き込みで本物を書き換えられるのでリンク元も見る
+    "os.link": ((0, 2), (1, 3)),
     "os.truncate": ((0, None),),
     "os.chmod": ((0, 2),),
     "shutil.rmtree": ((0, 1),),

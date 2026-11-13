@@ -45,6 +45,11 @@ INNER = textwrap.dedent(
         finally:
             os.close(fd)
 
+    def test_hard_link_from_the_real_state_fails(tmp_path):
+        alias = tmp_path / "alias"
+        os.link(Path.home() / ".claude" / "kept", alias)
+        alias.write_text("x")
+
     def test_redirected_state_is_writable():
         Path(os.environ["XDG_STATE_HOME"]).mkdir(parents=True)
         (Path(os.environ["XDG_STATE_HOME"]) / "ok").write_text("ok")
@@ -57,6 +62,7 @@ FLAGGED = {
     "test_swallowed_write_still_fails",
     "test_symlink_into_the_real_state_fails",
     "test_dir_fd_removal_in_the_real_state_fails",
+    "test_hard_link_from_the_real_state_fails",
 }
 
 
