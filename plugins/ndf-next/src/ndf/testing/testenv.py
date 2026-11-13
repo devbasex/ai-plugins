@@ -15,7 +15,8 @@ OWN = "own"
 FOREIGN = "foreign"
 
 
-def _within(path: str, base: str) -> bool:
+def within(path: str, base: str) -> bool:
+    """path が base そのものか base の下か。"""
     return path == base or path.startswith(base.rstrip("/") + "/")
 
 
@@ -26,7 +27,7 @@ def location_seen(worktree: Path, main_dir: Path) -> bool:
     メインディレクトリと同じファイルシステムなら真。残る祖先がファイルシステムの根だけか、別のファイルシステムなら
     偽（別のコンテナの `/tmp` などを、こちらから見えないだけの割り当てと取り違えない）。
     """
-    if _within(os.path.abspath(worktree), os.path.abspath(main_dir)):
+    if within(os.path.abspath(worktree), os.path.abspath(main_dir)):
         return True
     ancestor = Path(os.path.abspath(worktree)).parent
     while not ancestor.is_dir():
@@ -50,6 +51,6 @@ def owner_of(container_workdirs: Iterable[str], row_worktrees: Iterable[str]) ->
         return NONE, ""
     worktrees = [w for w in row_worktrees if w]
     for workdir in workdirs:
-        if not any(_within(workdir, w) for w in worktrees):
+        if not any(within(workdir, w) for w in worktrees):
             return FOREIGN, f"別の位置から起動されたコンテナがある: {workdir or '（作業ディレクトリの値が空）'}"
     return OWN, ""

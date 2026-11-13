@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from ndf.testing import slots
+from ndf.testing.testenv import within
 
 # 一時ディレクトリへ向ける環境変数（値は一時ディレクトリの下の名前）
 REDIRECTED_ENV = {
@@ -78,8 +79,8 @@ def _fd_dir(fd: object) -> str | None:
         return None
 
 
-def _within(path: str, roots: tuple[str, ...]) -> bool:
-    return any(path == root or path.startswith(root + os.sep) for root in roots)
+def _within_any(path: str, roots: tuple[str, ...]) -> bool:
+    return any(within(path, root) for root in roots)
 
 
 def _write_targets(event: str, args: tuple) -> list[tuple[object, object]]:
@@ -134,7 +135,7 @@ class _Guard:
             resolved = os.path.realpath(os.path.join(base, text) if base else text)
         finally:
             self.local.busy = False
-        if _within(resolved, self.allowed) or not _within(resolved, self.roots):
+        if _within_any(resolved, self.allowed) or not _within_any(resolved, self.roots):
             return
         self.violations.append(resolved)
         raise RealStateWriteError(f"テストが本物の状態の置き場へ書こうとした: {resolved}")
