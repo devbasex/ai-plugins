@@ -15,6 +15,8 @@ from ndf import contracts
 from ndf.contracts import causes, facts
 
 SCHEMA = contracts.schema_path("result")
+# 結果の status の語彙（result.schema.json の enum と事実の表 exit-codes の status 列と同じ）
+STATUSES = ("ok", "gate", "stopped")
 
 
 def result(
@@ -93,7 +95,7 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
         return errs
     if "cause" in obj:
         errs += causes.errors(obj["cause"])
-    if code is not None and obj.get("status") in ("ok", "gate", "stopped"):
+    if code is not None and obj.get("status") in STATUSES:
         if not code_matches(obj["status"], code):
             errs.append(f"status {obj['status']} と終了コード {code} が合わない")
         expected = code_for(obj)

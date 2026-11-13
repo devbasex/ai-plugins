@@ -126,7 +126,7 @@ def parser() -> argparse.ArgumentParser:
     p.set_defaults(run=_cmd_fact_value)
     p = sub.add_parser("emit", help="結果 JSON を確かめて出す")
     p.add_argument("--tool", required=True)
-    p.add_argument("--status", required=True, choices=("ok", "gate", "stopped"))
+    p.add_argument("--status", required=True, choices=result.STATUSES)
     p.add_argument("--summary", required=True)
     p.add_argument("--cause", nargs=2, metavar=("KIND", "DETAIL"))
     p.add_argument("--cause-instance")
