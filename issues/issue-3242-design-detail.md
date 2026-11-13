@@ -41,7 +41,7 @@ scripts/
 docs/ndf-plugin-reference.md
 ```
 
-依存の向きは一方向で、循環は無い。`hook.py` が `hook_lib/unattended.py` を import し、`hook_lib/unattended.py` が `lib/unattended_report.py`・`lib/limits.py`・`lib/state_home.py`・`lib/jsonio.py` を import する。`lib/unattended_report.py` は標準ライブラリだけを import し、hook の部品を知らない。契約の検査（`scripts/contracts_lib/model.py`）は CI の側の部品で、プラグインの実行時の部品を import しない。読み手の部品も契約の検査を import しない（形の宣言の型は 2 か所で別の目的に確かめる。下の「内部のデータと定数」）。
+依存の向きは一方向で、循環は無い。`hook.py` は `hook_lib/unattended.py` を import する。`hook_lib/unattended.py` は `lib/unattended_report.py`・`lib/limits.py`・`lib/state_home.py`・`lib/jsonio.py` を import する。`lib/unattended_report.py` は標準ライブラリだけを import し、hook の部品を知らない。契約の検査（`scripts/contracts_lib/model.py`）は CI の側の部品で、プラグインの実行時の部品を import しない。読み手の部品も契約の検査を import しない（形の宣言の型は 2 か所で別の目的に確かめる。下の「内部のデータと定数」）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -66,7 +66,14 @@ docs/ndf-plugin-reference.md
 
 ## クラスと関数の構造
 
-型の関係は設計文書の「構造」の節のクラス図を指し、ここでは描き直さない。クラス図の `UnattendedReportForm` は `ReportForm`、`ReportCheck` は読み手の部品のモジュール、`UnattendedHook` は hook の部品のモジュール、`Mark` は `Mark` に当たる。
+型の関係は設計文書の「構造」の節のクラス図を指し、ここでは描き直さない。クラス図の名前は次に当たる。
+
+| クラス図の名前 | この文書での置き場 |
+| --- | --- |
+| `UnattendedReportForm` | `ReportForm` |
+| `ReportCheck` | 読み手の部品のモジュール |
+| `UnattendedHook` | hook の部品のモジュール |
+| `Mark` | `Mark` |
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
@@ -226,7 +233,7 @@ docs/ndf-plugin-reference.md
 | `end` | 無し（`hooks/claude.json` に SessionEnd の登録が無い） | `grep -n "SessionEnd" plugins/ndf/hooks/claude.json` | 使えない。当たりが無い |
 | `_check_shape` | `scripts/contracts_lib/model.py` の `_need`・`_strs` | `grep -n "^def " scripts/contracts_lib/model.py` | 使う（`shape` と `material`・`required` の各値のキーと型を確かめる） |
 
-上限の回数と秒は `lib/limits.py` の `value` と `seconds` で引き、状態の根は `lib/state_home.py` の `container_home` で決める（`stop`・`start` が呼ぶ）。
+上限の回数と秒は `lib/limits.py` の `value` と `seconds` で引き、状態の根は `lib/state_home.py` の `container_home` で決める。どちらも `stop`・`start` が呼ぶ。
 
 ## 単体テストの観点
 
