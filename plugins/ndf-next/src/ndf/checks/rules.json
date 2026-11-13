@@ -3,7 +3,8 @@
   "smells": {
     "S110": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が pass だけ"},
     "S112": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が continue だけ"},
-    "BLE001": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "Exception・BaseException・素の except を受けて送出し直さない"},
+    "BLE001": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "Exception・BaseException を受けて送出し直さない"},
+    "E722": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "素の except"},
     "NDF201": {
       "kind": 2,
       "mark": "boundary-or-limit",

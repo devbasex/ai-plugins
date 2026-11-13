@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from ndf.checks.marks import EXCEPT_RULES
 from ndf.checks.model import CheckError, Source
 
 # ruff の終了コード: 0 は指摘なし、1 は指摘あり。ほかは起動や設定の誤り
@@ -48,7 +50,27 @@ def scan(sources: list[Source], rules: dict[str, Any]) -> dict[Path, list[tuple[
         found = json.loads(done.stdout)
     except ValueError as exc:
         raise CheckError(f"ruff の結果を読めない: {exc}") from exc
+    by_path = {s.path.resolve(): s for s in sources}
+    headers: dict[Path, dict[int, int]] = {}
     hits: dict[Path, list[tuple[int, str]]] = defaultdict(list)
     for item in found:
-        hits[Path(item["filename"]).resolve()].append((item["location"]["row"], item["code"]))
+        path, row, code = Path(item["filename"]).resolve(), item["location"]["row"], item["code"]
+        if code in EXCEPT_RULES and path in by_path:
+            if path not in headers:
+                headers[path] = handler_rows(by_path[path])
+            row = headers[path].get(row, row)
+        hits[path].append((row, code))
     return hits
+
+
+def handler_rows(src: Source) -> dict[int, int]:
+    """`except` の見出し（`except` から本体の前まで）の各行 → `except` の行。
+
+    ruff は BLE001 を例外の型の式の位置に置くため、複数行の `except (` では印を書く `except` の行とずれる。
+    """
+    rows: dict[int, int] = {}
+    for node in ast.walk(src.tree):
+        if isinstance(node, ast.ExceptHandler):
+            end = max(node.lineno, node.body[0].lineno - 1)
+            rows.update(dict.fromkeys(range(node.lineno, end + 1), node.lineno))
+    return rows

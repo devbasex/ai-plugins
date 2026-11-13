@@ -33,7 +33,8 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 | `PLR1702` | ブロックの入れ子が 3 を超える関数（ruff の数え方） | 入れ子の外側のブロックの行 | 受けない |
 | `S110` | 本体が `pass` だけの `except`（型を指定した `except` も数える） | `except` の行 | 境界の種類 |
 | `S112` | 本体が `continue` だけの `except`（同上） | `except` の行 | 境界の種類 |
-| `BLE001` | `Exception`・`BaseException`・素の `except` を受け、本体で送出し直さない | `except` の行 | 境界の種類 |
+| `BLE001` | `Exception`・`BaseException` を受け、本体で送出し直さない | `except` の行 | 境界の種類 |
+| `E722` | 素の `except`（型を書かない `except:`） | `except` の行 | 境界の種類 |
 | `NDF401` | 本体が定数の `return` を含み、`pass`・`continue`・定数の `return` だけでできた `except` | `except` の行 | 境界の種類 |
 | `NDF402` | `contextlib.suppress(...)` の呼び出し | 呼び出しの行 | 境界の種類 |
 | `NDF501` | 右端が空の値（`{}`・`[]`・`()`・`""`・`0`・`None`）の `or` | 式の行 | 境界の種類 |
@@ -43,7 +44,7 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 
 入れ子の関数・クラス・`lambda` は、外の関数の長さ以外では外の関数に数えず、それぞれ 1 つの関数として数える。
 
-**`S110`・`S112`・`BLE001`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の境界の印は NDF の規則として `marks` が当てる。
+**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の境界の印は NDF の規則として `marks` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから印を当てる。
 
 ### 境界の印
 

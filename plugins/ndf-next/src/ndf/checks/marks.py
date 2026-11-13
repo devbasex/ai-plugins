@@ -14,7 +14,7 @@ from typing import Any
 
 MARK = re.compile(r"#\s*noqa:\s*(?P<codes>[A-Z]+[0-9]+(?:\s*,\s*[A-Z]+[0-9]+)*)(?P<rest>.*)$")
 LABELED = re.compile(r"^\s*(?P<label>[^:：]+?)\s*[:：]\s*(?P<reason>\S.*?)\s*$")
-EXCEPT_RULES = frozenset({"S110", "S112", "BLE001", "NDF401"})
+EXCEPT_RULES = frozenset({"S110", "S112", "BLE001", "E722", "NDF401"})
 
 
 @dataclass(frozen=True)
