@@ -34,11 +34,18 @@ def cgroup_memory_remaining(root: Path = CGROUP_ROOT) -> int | None:
     return max(0, limit - current)
 
 
+def _virtual_memory(field: str) -> int | None:
+    """psutil のメモリの値（バイト）。読めなければ None。"""
+    try:
+        return int(getattr(psutil.virtual_memory(), field))
+    except (OSError, RuntimeError, AttributeError):
+        return None
+
+
 def available_mib(cgroup_root: Path = CGROUP_ROOT) -> int | None:
     """使えるメモリ（MiB）。ホストの使えるメモリと cgroup の残りの小さい方。読めなければ None。"""
-    try:
-        available = int(psutil.virtual_memory().available)
-    except (OSError, RuntimeError, AttributeError):
+    available = _virtual_memory("available")
+    if available is None:
         return None
     remaining = cgroup_memory_remaining(cgroup_root)
     if remaining is not None:
@@ -48,9 +55,8 @@ def available_mib(cgroup_root: Path = CGROUP_ROOT) -> int | None:
 
 def total_mib(cgroup_root: Path = CGROUP_ROOT) -> int | None:
     """全体のメモリ（MiB）。cgroup の上限があれば物理メモリとの小さい方。"""
-    try:
-        total = int(psutil.virtual_memory().total)
-    except (OSError, RuntimeError, AttributeError):
+    total = _virtual_memory("total")
+    if total is None:
         return None
     limit = _read_int(cgroup_root / "memory.max")
     if limit is not None:
