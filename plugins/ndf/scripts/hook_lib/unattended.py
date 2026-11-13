@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as _dt
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import jsonio
@@ -83,7 +83,7 @@ def read_mark(path: Path) -> Mark | None:
 
 def write_mark(path: Path, mark: Mark) -> None:
     """印を原子的に書く。書けなければ `OSError` を呼び出し元へ返す。"""
-    jsonio.write_atomic(path, {"session_id": mark.session_id, "started_at": mark.started_at, "pushbacks": mark.pushbacks})
+    jsonio.write_atomic(path, asdict(mark))
 
 
 def prune_marks(directory: Path, now: float, max_age: float) -> int:
@@ -184,7 +184,7 @@ def _load_rules() -> tuple[ur.ReportForm, int] | None:
 def _save_count(path: Path, mark: Mark, count: int) -> None:
     """差し戻しの回数を印へ書く。書けなければ警告して続ける。"""
     try:
-        write_mark(path, Mark(session_id=mark.session_id, started_at=mark.started_at, pushbacks=count))
+        write_mark(path, replace(mark, pushbacks=count))
     except OSError as e:
         _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
 
