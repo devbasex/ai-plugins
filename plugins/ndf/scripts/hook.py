@@ -3,6 +3,8 @@
 
     <hook の環境の python> hook.py [worktree-guard | token-guard | wait-notify] [--runtime claude|codex|kiro]
     <hook の環境の python> hook.py goal-skill  < UserPromptSubmit の JSON   # `/goal` の条件の Skill の案内（hook_lib/goal_skill.py）
+    python3 hook.py unattended-start|unattended-stop|unattended-end  < hook の JSON
+        # 人のいない実行（NDF_FACTORY_RUN）の印と区間の報告の差し戻し（hook_lib/unattended.py。#3242）
     <hook の環境の python> hook.py words     < コマンドの本文   # 語の分割（workflow-guard.sh の wf_split）
     <hook の環境の python> hook.py merge-target --base <宛先> [--root <dir>]
         # マージの宛先の判定（workflow-merge.sh の wf_check_merge。lib/delivery.py。1 行目が判定、2 行目が理由）
@@ -21,6 +23,7 @@
 | PreToolUse（AskUserQuestion。止めなかったとき）・Stop・Notification・PermissionRequest | 待ちの Slack 通知（`hook_lib/wait_notify.py`） |
 | userPromptSubmit（Kiro CLI） | worktree の guard の、パスを見ない案内 |
 | UserPromptSubmit（Claude Code。副命令 `goal-skill`） | `/goal /<プラグイン>:<Skill>` の条件の Skill を読み込む案内（`hook_lib/goal_skill.py`） |
+| UserPromptSubmit・Stop・SessionEnd（Claude Code。副命令 `unattended-*`。`NDF_FACTORY_RUN` があるときだけ） | 人のいない実行の印と、区間の報告の形に合わない最後の応答の差し戻し（`hook_lib/unattended.py`） |
 
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
@@ -38,7 +41,18 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "goal-skill", "words", "merge-target")
+COMMANDS = (
+    "worktree-guard",
+    "token-guard",
+    "wait-notify",
+    "goal-skill",
+    "words",
+    "merge-target",
+    "unattended-start",
+    "unattended-stop",
+    "unattended-end",
+)
+UNATTENDED = ("unattended-start", "unattended-stop", "unattended-end")
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
@@ -83,6 +97,8 @@ def _merge_top_level(outs: list) -> dict:
 
 
 def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
+    if command in UNATTENDED:  # guard と待ち通知を通さず、部品の出力 1 つを返す（標準ライブラリだけの経路。#3242）
+        return _unattended(command, raw)
     from hook_lib import payload as pl
 
     if command == "wait-notify":
@@ -105,6 +121,26 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
 
         wait_notify.hook(runtime, raw)
     return _merge(outs)
+
+
+def _unattended(command: str, raw: dict | None) -> dict | None:
+    """人のいない実行の hook（`hook_lib/unattended.py`）。失敗は標準エラーへ 1 行残して通す（#3242 の I9）。"""
+    if raw is None:
+        return None
+    import time
+
+    from hook_lib import unattended
+
+    try:
+        if command == "unattended-start":
+            text = unattended.start(raw, time.time())
+            return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
+        if command == "unattended-stop":
+            return unattended.stop(raw)
+        unattended.end(raw)
+    except Exception as e:  # noqa: BLE001 — 印の読み書きの失敗で Stop と UserPromptSubmit を止めない
+        print(f"ndf: {command}: {type(e).__name__}", file=sys.stderr)
+    return None
 
 
 def _denied(outs: list) -> bool:

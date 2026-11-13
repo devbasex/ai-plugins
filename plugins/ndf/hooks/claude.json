@@ -50,6 +50,13 @@
             "description": "NDF: when /goal names a Skill first (/<plugin>:<skill>), tell the session to load that Skill before working",
             "timeout": 5,
             "continueOnError": true
+          },
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-start'",
+            "description": "NDF: in a Factory run (NDF_FACTORY_RUN), mark the development-workflow session and tell it to decide unclassified questions and end with the run report",
+            "timeout": 5,
+            "continueOnError": true
           }
         ]
       }
@@ -153,6 +160,26 @@
             "type": "command",
             "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" mark; exit 0'",
             "description": "NDF: under the relay, copy the ndf-next block of the last reply to the relay mark",
+            "timeout": 5,
+            "continueOnError": true
+          },
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-stop'",
+            "description": "NDF: in a Factory run, send the reply back when it ends without the run report (twice at most in a row)",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_FACTORY_RUN:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$ROOT/scripts/hook.py\" unattended-end'",
+            "description": "NDF: in a Factory run, remove the session mark",
             "timeout": 5,
             "continueOnError": true
           }

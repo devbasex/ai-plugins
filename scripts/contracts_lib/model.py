@@ -222,16 +222,21 @@ def _load_forms(base: Path, c: Contracts) -> None:
         c.forms[d["name"]] = d
 
 
-# 例の組の形。ndf-next のブロック（文 → 拾うブロックと起動の有無）と、メッセージの形（メッセージ → 正しいか。#2436 の配布の依頼）
+# 例の組の形。ndf-next のブロック（文 → 拾うブロックと起動の有無）と、メッセージの形（メッセージ → 正しいか。#2436 の配布の依頼）と、
+# 区間の報告（文 → 結果の値と形の誤りの一覧。#3242）
 CASE_SHAPES: tuple[dict[str, type], ...] = (
     {"text": str, "blocks": list, "launch": bool},
     {"message": dict, "valid": bool},
+    {"text": str, "result": str, "errors": list},
 )
+# 形の宣言（`shape`。#3242）のキーと、材料の書き方のキー
+SHAPE_KEYS = {"values": dict, "items": list, "material": dict, "required": dict}
+SHAPE_MATERIAL_KEYS = ("item", "body", "heading", "url_prefix")
 
 
 def _check_form(f: Path, d: dict) -> None:
     """受け渡しの形（`forms/`）: 規則の文と、読み手が同じ答えを返すべき例の組（#2347 の決定 8）。"""
-    _need(f, d, {"name": str, "summary": str, "rule": str, "writers": list, "readers": list, "cases": list})
+    _need(f, d, {"name": str, "summary": str, "rule": str, "writers": list, "readers": list, "cases": list}, {"shape": dict})
     if f.name != d["name"] + ".json":
         raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
     for k in ("writers", "readers"):
@@ -243,8 +248,54 @@ def _check_form(f: Path, d: dict) -> None:
             raise ContractError(f"{f.name}: cases[{i}] はオブジェクト")
         shape = next((sh for sh in CASE_SHAPES if set(case) == set(sh)), CASE_SHAPES[0])
         _need(f, case, shape)
-        if "blocks" in shape and not all(isinstance(x, str) for x in case["blocks"]):
-            raise ContractError(f"{f.name}: cases[{i}].blocks は文字列の並び")
+        for k in ("blocks", "errors"):
+            if k in shape and not all(isinstance(x, str) for x in case[k]):
+                raise ContractError(f"{f.name}: cases[{i}].{k} は文字列の並び")
+    if "shape" in d:
+        _check_shape(f, d["shape"])
+
+
+def _check_shape(f: Path, shape: dict) -> None:
+    """形の宣言（`shape`）: 結果の値 → 意味・項目・材料の書き方・値ごとに要る項目（#3242 の区間の報告）。"""
+    where = f"{f.name}: shape"
+    _need(f, shape, SHAPE_KEYS)
+    values, items, material, required = shape["values"], shape["items"], shape["material"], shape["required"]
+    if not values or not all(isinstance(k, str) and k and isinstance(v, str) for k, v in values.items()):
+        raise ContractError(f"{where}.values は値 → 意味の文字列の空でない辞書")
+    if not items or not all(isinstance(x, str) and x for x in items):
+        raise ContractError(f"{where}.items は空でない文字列の並び")
+    if set(material) != set(SHAPE_MATERIAL_KEYS) or not all(isinstance(v, str) and v for v in material.values()):
+        raise ContractError(f"{where}.material は {'・'.join(SHAPE_MATERIAL_KEYS)} の文字列を持つ")
+    if material["item"] not in items:
+        raise ContractError(f"{where}.material.item は items のどれか")
+    if set(required) != set(values):
+        raise ContractError(f"{where}.required のキーは values と同じ集合")
+    for value, row in required.items():
+        _check_required_row(f"{where}.required.{value}", row, set(items))
+
+
+def _check_required_row(where: str, row: object, items: set[str]) -> None:
+    """値ごとに要る項目の 1 行（`always` と、条件つきの `when`）。"""
+    if (
+        not isinstance(row, dict)
+        or set(row) != {"always", "when"}
+        or not isinstance(row["always"], list)
+        or not isinstance(row["when"], list)
+    ):
+        raise ContractError(f"{where} は always（並び）と when（並び）を持つ")
+    if not all(isinstance(x, str) and x in items for x in row["always"]):
+        raise ContractError(f"{where}.always は items の項目名の並び")
+    for cond in row["when"]:
+        ok = (
+            isinstance(cond, dict)
+            and set(cond) in ({"item", "prefix", "need"}, {"item", "equals", "need"})
+            and cond["item"] in items
+            and isinstance(cond.get("prefix", cond.get("equals")), str)
+            and isinstance(cond["need"], list)
+            and all(isinstance(x, str) and x in items for x in cond["need"])
+        )
+        if not ok:
+            raise ContractError(f"{where}.when の要素は items の項目名の item・need と、prefix か equals の文字列を持つ")
 
 
 def flat_args(args: dict) -> set[tuple[str, str, str]]:
