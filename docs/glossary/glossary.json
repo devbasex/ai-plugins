@@ -7157,6 +7157,12 @@
       "context": "ndf-workflow",
       "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる",
       "pending_source": "issues/issue-3119-requirements.md"
+    },
+    {
+      "term": "戻すマージ",
+      "context": "ndf-release",
+      "meaning": "正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る",
+      "pending_source": "issues/issue-3119-design.md"
     }
   ]
 }
