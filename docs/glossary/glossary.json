@@ -7036,6 +7036,18 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "遷移の判断",
+      "context": "ndf-workflow",
+      "meaning": "プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く",
+      "pending_source": "issues/issue-2963-requirements.md"
+    },
+    {
+      "term": "DBOS を起こさない実行器",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローの判断の関数を、DBOS を起動せずに回すテスト用の実行の経路",
+      "pending_source": "issues/issue-2963-requirements.md"
     }
   ]
 }
