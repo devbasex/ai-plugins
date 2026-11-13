@@ -1294,6 +1294,24 @@ def test_reviewed_prod_resumes_after_the_merge(monkeypatch, tmp_path):
     assert merged == [] and published == [9]
 
 
+def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
+    """入口が release_prod へ渡す操作は、呼ぶ時点の入口の関数である（マージは _merge_release_pr、公開の後は _published）。"""
+    mod = _release_steps_module(monkeypatch)
+    wired = {
+        "find_pr": "find_pr",
+        "create_pr": "create_pr",
+        "merge_commit_of": "merge_commit_of",
+        "merge_release_pr": "_merge_release_pr",
+        "published": "_published",
+        "wait_and_merge": "wait_and_merge",
+        "pr_check_buckets": "pr_check_buckets",
+    }
+    for name in wired.values():
+        monkeypatch.setattr(mod, name, object())
+    ops = mod._prod_ops()
+    assert {field: getattr(ops, field) for field in wired} == {field: getattr(mod, name) for field, name in wired.items()}
+
+
 def test_wait_and_merge_passes_no_admin(monkeypatch):
     mod = _release_steps_module(monkeypatch)
     calls = []
