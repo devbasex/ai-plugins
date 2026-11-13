@@ -72,7 +72,7 @@ def stored_outside_plan(root: str | None, name: str) -> str | None:
 
 
 def keep_outside_plan(env, name: str, reason: str | None) -> None:
-    """例外の起動の理由をループの記録の `outside_plan` へ残す（#2733）。ループが組む `supervise.py new sprint` へ引き継ぐ。
+    """例外の起動の理由をループの記録の `outside_plan` へ残す（#2733）。ループの 1 回の進行表を作る `progress.py new` へ引き継ぐ。
     理由が無い・記録が無い（始めるのを断った）・同じ理由なら何もしない。"""
     import sprint_loop_record as slr
 

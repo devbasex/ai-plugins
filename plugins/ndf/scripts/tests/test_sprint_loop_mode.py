@@ -10,7 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_sprint_loop as base  # noqa: E402
-from test_sprint_loop import judgments_file, ms, rank_out, rec, sl, sl_gate, sl_record, sl_select, sprint, start, write_done  # noqa: E402
+from test_sprint_loop import design_wait, gate, judgments_file, ms, progress_calls, rank_out, rec, sl, sl_record, sl_select, sprint, start  # noqa: E402
 
 env, mvv = base.env, base.mvv  # フィクスチャを受け継ぐ
 
@@ -26,8 +26,8 @@ def record_bytes(env):
 
 
 def new_sprints(env):
-    """ループの 1 回の進行表を作る呼び出し（progress.py new。#3092）と、モードを下げたときの作り直しの new sprint。"""
-    return [c for c in env.calls if "new" in c and (str(sl_record.PROGRESS) in c or c[c.index("new") + 1] == "sprint")]
+    """ループの 1 回の進行表を作る呼び出し（progress.py new。モードを下げたときの作り直しを含む。#3092）。"""
+    return progress_calls(env, "new")
 
 
 def syncs(env):
@@ -35,8 +35,8 @@ def syncs(env):
 
 
 def gate_out(env, issue):
-    lap = sl.current_lap(rec(env))
-    return sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{issue}.json"), "result": "関門"}]))
+    """設計承認ゲートの課題 `issue` の子の行で止まった進行表の done で loop lap を打つ。"""
+    return gate(env, design_wait(issue))
 
 
 # ---------------- 受け入れ条件 1・I1〜I3・I8: 根拠の無いモードで組まない ----------------
@@ -107,39 +107,24 @@ def test_a_failed_mode_sync_is_noted_and_does_not_stop_the_sprint(env):
 # ---------------- 受け入れ条件 5・6・I4・I5: 課題を外したら決め直す ----------------
 
 
-def designed_only_manifest(env):
-    """作り直しの new sprint（--designed だけ）は設計のステージを持たないマニフェストを書く。"""
-    run = env.run
-
-    def wrapped(cmd, cwd=None, stdin=None):
-        code, so, se = run(cmd, cwd, stdin)
-        if "new" in cmd and cmd[cmd.index("new") + 1] == "sprint" and "--design" not in cmd:
-            m = Path(cmd[cmd.index("--out") + 1]) / "sprint.json"
-            stages = json.loads(m.read_text())["ステージ"]
-            m.write_text(json.dumps({"ステージ": [s for s in stages if s["name"] not in ("設計", "設計承認ゲート")]}, ensure_ascii=False))
-        return code, so, se
-
-    env.run = wrapped
-
-
-def test_dropping_the_standard_issue_lowers_the_mode_and_rebuilds_the_rest(env):
+def test_dropping_the_standard_issue_lowers_the_mode_and_rebuilds_the_table(env):
     selected(env, [11, 12])
     sprint(env, "l1", None, None, None, ["--x"], modes={11: "standard", 12: "light"})
-    designed_only_manifest(env)
+    first = sl.current_lap(rec(env))["table"]
     env.calls.clear()
     out = gate_out(env, 11)
     assert out["status"] == "ok"
     lap = sl.current_lap(rec(env))
-    assert lap["mode"] == "light" and lap["manifest"].endswith("sprint-2/sprint.json")
+    assert lap["mode"] == "light" and lap["table"] != first and lap["tables"] == [lap["table"]]
     d = lap["mode_decisions"][-1]
     assert (d["trigger"], d["issues"], d["from_mode"], d["mode"]) == ("設計承認ゲート", [12], "standard", "light") and d["at"]
+    assert any(first in c for c in progress_calls(env, "cancel")) and not progress_calls(env, "scope")
     new = new_sprints(env)
-    assert len(new) == 1 and new[0][new[0].index("--mode") + 1] == "light" and "--design" not in new[0]
-    assert new[0][new[0].index("--designed") + 1 :][:1] == ["12"] and new[0][-1] == "--x"
-    close = next(c for c in env.calls if "new" in c and c[c.index("new") + 1] == "close")
-    assert close[close.index("--mode") + 1] == "light"
-    q = out["metrics"]["queue"]
-    assert "sprint-2/impl-12.json" in q and "design-12.json" not in q and "impl-11.json" not in q
+    assert len(new) == 1 and new[0][new[0].index("--mode") + 1] == "light"
+    assert new[0][new[0].index("--issues") + 1 : new[0].index("--pace")] == ["12"] and "設計=設計承認ゲートで承認済み" in new[0]
+    context = json.loads(Path(new[0][new[0].index("--context") + 1]).read_text())
+    assert context["extra"] == ["--x"]  # loop sprint の -- の後の引数は作り直した進行表にも渡る
+    assert f"next {lap['table']}" in out["metrics"]["pipeline"]
     assert ["12", "mode", "light"] in syncs(env)
 
 
@@ -149,23 +134,25 @@ def test_dropping_one_of_two_standard_issues_keeps_the_mode_and_still_records(en
     env.calls.clear()
     assert gate_out(env, 11)["status"] == "ok"
     lap = sl.current_lap(rec(env))
-    assert lap["mode"] == "standard" and not new_sprints(env)
+    assert lap["mode"] == "standard" and not new_sprints(env) and len(progress_calls(env, "scope")) == 1
     d = lap["mode_decisions"][-1]
     assert (d["trigger"], d["issues"], d["from_mode"], d["mode"]) == ("設計承認ゲート", [12], "standard", "standard")
     assert syncs(env) == []  # モードが変わらなければ本文とボードへ書き直さない
 
 
-def test_a_failed_rebuild_keeps_the_mode_manifest_and_decisions_and_stops_refused(env):
+def test_a_failed_rebuild_keeps_the_mode_table_and_decisions_and_stops_refused(env):
     selected(env, [11, 12])
     sprint(env, "l1", None, None, None, [], modes={11: "standard", 12: "light"})
     before = sl.current_lap(rec(env))
     run = env.run
-    env.run = lambda cmd, cwd=None, stdin=None: (1, "", "断った") if "--designed" in cmd and "--design" not in cmd else run(cmd, cwd, stdin)
+    env.run = lambda cmd, cwd=None, stdin=None: (
+        (1, "", "断った") if str(sl_record.PROGRESS) in cmd and "new" in cmd else run(cmd, cwd, stdin)
+    )
     out = gate_out(env, 11)
     r = rec(env)
     lap = next(x for x in r["laps"] if x["n"] == before["n"])
     assert r["status"] == "stopped" and r["stop"]["condition"] == "refused" and out["status"] != "ok"
-    assert (lap["mode"], lap["manifest"], lap["mode_decisions"]) == (before["mode"], before["manifest"], before["mode_decisions"])
+    assert (lap["mode"], lap["table"], lap["mode_decisions"]) == (before["mode"], before["table"], before["mode_decisions"])
 
 
 # ---------------- I6・移行性: 根拠の無い記録 ----------------

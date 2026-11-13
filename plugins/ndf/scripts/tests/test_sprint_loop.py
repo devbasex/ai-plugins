@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -751,7 +752,9 @@ def test_mvv_change_stops_and_is_not_resumed(env, mvv):
 def write_done(env, items=(), status="gate", name="done.json"):
     """`progress.py next` の出力（統一 JSON レポート）を done に置く。答え待ちは status gate と待ちの行の項目。"""
     p = env.root / name
-    p.write_text(json.dumps({"tool": "progress", "status": status, "summary": "要約", "items": list(items), "metrics": {}}, ensure_ascii=False))
+    p.write_text(
+        json.dumps({"tool": "progress", "status": status, "summary": "要約", "items": list(items), "metrics": {}}, ensure_ascii=False)
+    )
     return str(p)
 
 
@@ -910,7 +913,11 @@ def test_gate_1_stops_with_refused_when_the_scope_is_refused(env):
     out = gate(env, design_wait(11))
     stop = out["metrics"]["stop"]
     assert out["exit"] == 3 and stop["condition"] == "refused"
-    assert stop["values"]["step"] == sl_table.TABLE_CONTINUATION_STEP and stop["values"]["exit"] == 1 and "断った理由" in stop["values"]["summary"]
+    assert (
+        stop["values"]["step"] == sl_table.TABLE_CONTINUATION_STEP
+        and stop["values"]["exit"] == 1
+        and "断った理由" in stop["values"]["summary"]
+    )
     assert f"ループの 1 回を組めなかった（{sl_table.TABLE_CONTINUATION_STEP}）" in out["summary"]
     r = rec(env)
     assert r["status"] == "stopped" and [w["number"] for w in r["waiting"]] == [11]  # 移した課題は記録に残る
@@ -1279,7 +1286,7 @@ def test_gate_2_approval_answers_the_waiting_row_and_runs_the_same_table(env):
     approve_gate_2(sl.current_lap(rec(env)))
     nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
     answer, rest = nxt.split(" && ", 1)
-    assert f"answer {lap['table']} デプロイ/release --approved --by conductor" in answer
+    assert f"answer {lap['table']} {shlex.quote('デプロイ/release')} --approved --by conductor" in answer
     assert f"next {lap['table']}" in rest and "loop lap l1 --done" in rest and "done-2.json" in rest
 
 

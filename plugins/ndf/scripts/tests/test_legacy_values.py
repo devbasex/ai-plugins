@@ -21,7 +21,6 @@ import dist_record  # noqa: E402
 import estimate_records as er  # noqa: E402
 import legacy_values  # noqa: E402
 import slow_step  # noqa: E402
-import sprint_loop_gate as sl_gate  # noqa: E402
 import sprint_loop_select as sl_select  # noqa: E402
 import stage_skills  # noqa: E402
 import transcript_agents  # noqa: E402
@@ -149,10 +148,10 @@ def test_old_failure_of_a_closed_lap_reads_as_the_new_kind():
     assert got["laps"][0]["failure"] == {"kind": "リリース", "step": "リリースの失敗"}
 
 
-def test_plan_of_the_previous_version_keeps_its_meaning(tmp_path):
-    plan = tmp_path / "p.json"
-    plan.write_text(json.dumps({"フェーズ": "配布の依頼"}, ensure_ascii=False), encoding="utf-8")
-    assert sl_gate.plan_info(str(plan))["フェーズ"] == sl_gate.RELEASE_REQUEST_PHASE
+def test_plan_of_the_previous_version_keeps_its_meaning():
+    import parallel_release
+
+    assert legacy_values.current_plan({"フェーズ": "配布の依頼"})["フェーズ"] == parallel_release.RELEASE_REQUEST_PHASE
 
 
 @pytest.mark.parametrize("old,kind", [("配布（開発版）", "開発版"), ("配布（本番）", "本番")])

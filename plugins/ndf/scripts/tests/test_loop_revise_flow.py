@@ -14,14 +14,15 @@ import parallel_lane  # noqa: E402
 import test_sprint_loop as base  # noqa: E402
 from test_sprint_loop import (  # noqa: E402
     built_lap,
-    design_report,
+    design_verdict,
+    design_wait,
+    gate,
     rec,
     set_state,
     sl,
     sl_gate,
     sl_select,
     start,
-    write_done,
 )
 import gate1_requests as g1  # noqa: E402
 import revise_note as rn  # noqa: E402
@@ -33,10 +34,10 @@ TABLE = "# 設計\n\n## 出し直しの指摘への対応\n\n| 項目 | 指摘 |
 
 
 def to_waiting(env, n=11, pr=501):
-    """課題を人の判断待ちの行へ入れる（ループの 1 回を締めて次の境へ進める）。"""
+    """課題を人の判断待ちの行へ入れる（設計承認ゲートの課題 n の子の行で止まった進行表。判定は設計 PR pr を持つ）。"""
     lap = built_lap(env)
-    report = design_report(env, f"design-{n}", f"https://github.com/o/r/pull/{pr}")
-    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門", "report": report}]))
+    design_verdict(env, lap, pr)
+    gate(env, design_wait(n))
     return lap
 
 
@@ -113,17 +114,15 @@ def waiting_again(env, doc, note="- 絞る"):
     box = serve_doc(env, doc)
     sl_select.cmd_select(env, "l1")
     base.sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
-    lap = sl.current_lap(rec(env))
-    report = design_report(env, "design-11", "https://github.com/o/r/pull/501")
-    item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門", "report": report}
-    return box, item
+    design_verdict(env, sl.current_lap(rec(env)), 501)
+    return box, design_wait(11)
 
 
 def test_a_table_gap_returns_to_auto_revise_without_asking(env, monkeypatch):
     box, item = waiting_again(env, "# 設計\n", "- 絞る\n- 分ける")
     sent = []
     monkeypatch.setattr(sl_gate, "lane_gate1", lambda *a, **k: sent.append(a) or None)
-    sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    gate(env, item)
     w = rec(env)["waiting"][-1]
     assert (w["answer"], w["by"], w["note"], w["revise_count"]) == ("revise", "auto", "", 2)
     assert w["missing"] == ["l1:1-1", "l1:1-2"] and sent == []
@@ -133,29 +132,28 @@ def test_a_table_gap_returns_to_auto_revise_without_asking(env, monkeypatch):
 
 def test_after_an_auto_revise_a_gap_goes_to_the_human_with_the_missing_items(env):
     box, item = waiting_again(env, "# 設計\n")
-    sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    gate(env, item)
     closed_lap = sl.current_lap(rec(env))
     if closed_lap:
         closed(env)
     sl_select.cmd_select(env, "l1")
     base.sprint(env, "l1", "standard", "1.0.0-dev.3", None, [])
-    lap = sl.current_lap(rec(env))
-    item = {**item, "plan": str(Path(lap["out"]) / "design-11.json")}
-    sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    design_verdict(env, sl.current_lap(rec(env)), 501)
+    gate(env, item)
     w = rec(env)["waiting"][-1]
     assert not w.get("answer") and "届いていない項目: l1:1-1" in w["reason"]
 
 
 def test_a_complete_table_is_copied_to_the_pr_and_asks_the_human(env):
     box, item = waiting_again(env, TABLE)
-    sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    gate(env, item)
     w = rec(env)["waiting"][-1]
     assert not w.get("answer") and "| l1:1-1 |" in box["body"]
 
 
 def test_an_unreadable_doc_asks_the_human_with_the_reason(env):
     box, item = waiting_again(env, None)
-    sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    gate(env, item)
     w = rec(env)["waiting"][-1]
     assert not w.get("answer") and "表を読めなかった" in w["reason"]
 

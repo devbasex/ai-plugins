@@ -46,14 +46,12 @@ def test_queue_max_default(tmp_path, monkeypatch):
 
 
 def test_generated_queue_lines_use_lane_plans(tmp_path, monkeypatch):
-    """スプリントのステージとループの 1 回のまとめが組む queue の 1 行も、レーンのプランの本数で流す。"""
-    import sprint_loop_gate as gate
+    """スプリントのステージが組む queue の 1 行も、レーンのプランの本数で流す。"""
     from supervise_lib import sprint
 
     monkeypatch.setattr(pl, "lane_plans", lambda m, lane=None: 1)
     wave = {"name": "実装", "plans": {"a": {"name": "a", "steps": []}}}
     assert " --max 1 --done " in sprint._stage_entry(wave, 1, tmp_path)["command"]
-    assert " --max 1 --done " in gate.queue_command([["a.json"]], tmp_path / "done.json")
 
 
 def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
