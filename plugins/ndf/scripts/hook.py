@@ -41,18 +41,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = (
-    "worktree-guard",
-    "token-guard",
-    "wait-notify",
-    "goal-skill",
-    "words",
-    "merge-target",
-    "unattended-start",
-    "unattended-stop",
-    "unattended-end",
-)
 UNATTENDED = ("unattended-start", "unattended-stop", "unattended-end")
+COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "goal-skill", "words", "merge-target", *UNATTENDED)
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
