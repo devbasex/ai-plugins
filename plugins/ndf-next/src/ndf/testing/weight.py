@@ -105,13 +105,18 @@ def _targets(args: Sequence[str]) -> list[str]:
     return out
 
 
+def is_test_suite(suite: Mapping[str, object]) -> bool:
+    """宣言の suite がテストか（`kind` が `lint` でなければテスト。既定は `test`）。"""
+    return suite.get("kind", "test") != "lint"
+
+
 def classify(command: str | Sequence[str], suites: Iterable[Mapping[str, object]]) -> str | None:
     """重い処理なら種類（`whole` / `scope`）、重くなければ None を返す。
 
     `command` は文字列（シェルのコマンド）か語の並び（そのまま 1 つの単純コマンドとして読む）。
     `suites` は宣言のうちテストの suite（`kind` が `lint` でないもの）を渡す。
     """
-    suite_list = [s for s in suites if s.get("kind", "test") != "lint"]
+    suite_list = [s for s in suites if is_test_suite(s)]
     if isinstance(command, str):
         text = command.strip()
         if any(text == str(s.get("command", "")).strip() for s in suite_list if s.get("command")):

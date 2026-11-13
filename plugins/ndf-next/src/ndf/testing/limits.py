@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ndf.testing import machine
+from ndf.testing import machine, weight
 
 RESOURCES_FILE = "resources.json"
 PROJECT_FILE = "project.json"
@@ -105,4 +105,4 @@ def load_suites(cwd: Path) -> list[dict[str, object]]:
         return []
     if not isinstance(suites, list):
         return []
-    return [s for s in suites if isinstance(s, dict) and s.get("kind", "test") != "lint"]
+    return [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)]
