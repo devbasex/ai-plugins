@@ -101,6 +101,54 @@ def test_read_mark_is_none_for_missing_or_broken_marks(home: Path, body):
     assert un.read_mark(path) is None
 
 
+def _mark_body(**over) -> dict:
+    body = {"session_id": SID, "started_at": "t", "pushbacks": 1}
+    body.update(over)
+    return body
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [],
+        "s",
+        1,
+        {},
+        _mark_body(session_id=None),
+        _mark_body(session_id=1),
+        _mark_body(started_at=None),
+        _mark_body(started_at=0),
+        _mark_body(pushbacks=None),
+        _mark_body(pushbacks=True),
+        _mark_body(pushbacks=False),
+        _mark_body(pushbacks=-1),
+        _mark_body(pushbacks=1.0),
+        {"session_id": SID, "started_at": "t"},
+    ],
+)
+def test_read_mark_refuses_each_field_of_the_wrong_shape(home: Path, data):
+    path = home / f"{SID}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert un.read_mark(path) is None
+
+
+@pytest.mark.parametrize(
+    ("data", "want"),
+    [
+        (_mark_body(pushbacks=0), un.Mark(SID, "t", 0)),
+        (_mark_body(pushbacks=7), un.Mark(SID, "t", 7)),
+        (_mark_body(session_id="", started_at=""), un.Mark("", "", 1)),
+        ({**_mark_body(), "extra": [1]}, un.Mark(SID, "t", 1)),
+    ],
+)
+def test_read_mark_accepts_the_shape_and_ignores_other_keys(home: Path, data, want):
+    path = home / f"{SID}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert un.read_mark(path) == want
+
+
 def test_write_mark_raises_and_leaves_no_temp_file(tmp_path: Path):
     blocker = tmp_path / "file"
     blocker.write_text("x", encoding="utf-8")
