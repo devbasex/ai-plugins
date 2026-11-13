@@ -59,7 +59,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | マイルストーン | 着手の順序を表す単位。スプリントはこの中から切り出す | GitHub の milestone。open は `<2 桁の連番> <主題>`、closed は `v<版数>` | [parallel-work.md](parallel-work.md) の「用語」 |
-| スプリント | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。区切りは 1 回のリリースとして出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
+| スプリント | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。区切りは 1 回のリリースとして出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、工程の進行表（`progress.py`）、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
 | スプリント課題 | 「スプリントを閉じる」が閉じる対象にする課題。スプリントに含まれる Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）か閉じる予定の参照（`最終工程の後に閉じる: #N`）で指す課題と、`--issues` で渡した課題の和 | `sprint-close.py` が閉じる | [progress-tracking](../../progress-tracking/SKILL.md) |
 | 工程 | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | 進捗記録の `stage` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
@@ -169,11 +169,11 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| 進捗記録 | 工程に入った時点で 1 回打つ記録。リリース後テストだけは、受け入れ条件ごとの記録を投稿してその工程を終えた時点で打つ。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh`、`progress-record.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
+| 進捗記録 | 課題の本文の `## 進行`・ボード・スプリント PR の「通した工程」へ書く工程の記録。工程の進行表のワークフローが、工程の開始（ボード）と終了の印（工程表と通した工程）から書く。Skill と conductor は打たない | `projects-sync.sh`、`progress-record.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
-| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | [sprint-state.py](../../../scripts/sprint-state.py) の docstring |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決める。工程の状態は持たず、工程の進行表が持つ。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | [sprint-state.py](../../../scripts/sprint-state.py) の docstring |
 | 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`supervise.py note` | [handoff.md](handoff.md) |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |

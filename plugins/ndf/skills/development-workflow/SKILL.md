@@ -366,7 +366,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 **承認ゲートで止まれるのは conductor だけである。** 起動の指示・報告の形・モデルの基準・到達点の置き直しも `agent-layers.md` にある。
 
 **supervisor を起動するときは `$SCRIPTS` を解き、起動指示の「進捗記録」へ絶対パスで書く。** supervisor はこの 1 行で
-進行を記録し、この Skill も `progress-tracking` も起動しない。規則は `agent-layers.md` の「conductor → supervisor」にある。
+`worktree`・`plan` を記録し、この Skill も `progress-tracking` も起動しない。工程の `stage` は工程の進行表のワークフローが書き、supervisor は打たない。規則は `agent-layers.md` の「conductor → supervisor」にある。
 
 ### 会話をまたいで続ける
 

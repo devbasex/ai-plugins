@@ -203,7 +203,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 **規則は `/ndf:release` が持つ。** 本番チャネルは `.ndf/worktree.json` の `production_branch`、
 設定が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める承認ゲート」。
 
-この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「進捗記録」を使う）。
+**進捗記録（課題の工程表・ボード・スプリント PR の「通した工程」）は、工程の進行表のワークフローが工程の開始と終了の印から書く。この Skill からは打たない**（`development-workflow` の `references/projects-tracking.md`）。
 
 ## 関連
 

@@ -178,7 +178,7 @@ python3 "$SCRIPTS/release-verification-steps.py" user-config-check --dir <控え
 要否を決めるのは `development-workflow` である。この Skill は判定結果を受け取って実行する。
 呼ばれた時点で、この工程が要ると判定されている。
 
-進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "リリース後テスト"` は、工程に入った時点でなく、**リリース後テストの記録をリリース記録の Pull Request へ投稿した後に** 1 行打つ。印が付いていれば記録がある、と読めるようにするためである。プランのステップとして起動され、起動指示が打たないと言うときは打たない（ステップが ok で終わった後にプランが打つ。起動指示が本文に優先する）（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
+**進捗記録（課題の工程表・ボード・スプリント PR の「通した工程」）は、工程の進行表のワークフローが書く。この Skill からは打たない。** 工程「リリース後テスト」の終了の印は、リリース後テストの記録をリリース記録の Pull Request へ投稿してこの工程が ok で終わった後に付く。印が付いていれば記録がある、と読めるようにするためである（`development-workflow` の `references/projects-tracking.md`）。
 
 ## スプリントを閉じる
 

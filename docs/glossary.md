@@ -210,7 +210,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る | 範囲テストの雛形 | — | `docs/specifications/cross-refactoring-scope-template-probe.md` |
 | JUnit の置き場 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。工程の状態は持たず、工程の進行表が持つ） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 開発ループ | — | スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | ループの 1 回 | — | 開発ループの 1 回分。次のスプリントの選定・スプリント 1 つ・棚卸しと止まる条件の判定からなり、スプリントと 1 対 1 | 周回 | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | 選定 | — | 開発ループの 1 回で、実装する課題を棚卸しの順位と記録から選ぶ処理。選ばなかった課題には落選の理由を残す | — | — | `docs/specifications/ndf-loop-select-prerequisites.md` |
@@ -591,7 +591,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
 | 異常系の処理 | — | 関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
-| 進行表 | — | 工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える | — | — | — |
+| 進行表 | — | 工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。工程の状態と終了の印の正本で、`progress.py` が読み書きする | — | — | — |
 | スプリントの進行表 | — | スプリント 1 つの工程の行と状態を持つ進行表。スプリント 1 つにつき 1 つ | — | — | — |
 | レーンの進行表 | — | レーン 1 つの中のスプリントの順番表を持つ進行表。レーンの conductor が持つ | — | — | — |
 | 計画の進行表 | — | 開発計画 1 つのレーンの配列と、レーンをまたぐ決まりを持つ進行表。オーガナイザーが持つ | — | — | — |

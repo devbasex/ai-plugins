@@ -251,21 +251,12 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 3 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
-入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
-3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前の段が記録した）。issue の本文の
-`## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
-
-```bash
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "詳細設計"
-bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
-```
+**進捗記録（工程「設計」「詳細設計」「ドキュメントレビュー」）は、工程の進行表のワークフローが工程の開始と終了の印から書く。
+この Skill からは打たない**（`development-workflow` の `references/projects-tracking.md`）。
 
 **手順 7 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
 
-**2 つ目の契機は詳細設計を通るモード（`standard`・`legacy-refactor`）だけに掛かる。3 つ目の契機と `document-rebuild` は、
+**手順 6（詳細設計）は詳細設計を通るモード（`standard`・`legacy-refactor`）だけに掛かる。手順 7 と `document-rebuild` は、
 設計 Pull Request を出すモードだけに掛かる。** `light` と `operation` では手順 6・7 を通らないため、どれも呼ばない。工程の分類でも
 「ドキュメント再構成」と「ドキュメントレビュー」はこの 2 モードで対象外である。
 

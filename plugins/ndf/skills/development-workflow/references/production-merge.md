@@ -29,7 +29,7 @@
 **判定と止める場所は `merged-steps.py` が持つ**（本体は `lib/delivery.py` の `judge_target`。`gh` を呼ばず、宣言と宛先だけで決める）。
 `merge-when-green` は最初の読みで宛先を判定し、当たれば CI を待たずに終了コード 10（`metrics.gate: production-merge`）で止まり、
 承認資料を書く。承認（`ndf-gate:2`）を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` の MVV 判定が通したときは `mvv`）を付けて打ち直す。
-プランでは `merge-gate` のステップがプランを終え、承認の後に `run <プラン> --from merge-approved` で続ける。
+プランでは `merge-gate` のステップがプランを終える。工程の進行表で流すスプリントでは、承認を `progress.py answer <進行表の ID> <行> --approved` で書き、`progress.py next <進行表の ID>` が同じプランを `merge-approved` から続ける。進行表の外で流すプランは `run <プラン> --from merge-approved` で続ける。
 エージェントが直接打つ `gh pr merge` は hook（`workflow-guard.sh`）が同じ判定で拒み、`merge-when-green` へ案内する。
 人の手によるマージ（端末・GitHub の画面）は止めない。
 
@@ -40,7 +40,7 @@
 ## 選んで集める取り込み方のリリース
 
 宣言 `.ndf/worktree.json` の `branch_flow.promotion` が `selected` のスプリントは、ベースブランチを本番チャネルへ入れない。
-スプリントの開始時に目録へ書いたスナップショットで、リリースのプランが次の順に組む。
+スプリントの開始時に取った宣言のスナップショット（プランの引数 `--flow`）で、リリースのプランが次の順に組む。
 
 1. 開発版のデプロイ（ベースブランチ）の後、承認資料の前に `release-steps.py release-branch` がリリースブランチ `release/v<版>` を
    `origin/<本番チャネル>` から切り、そのスプリントのブランチだけを `--no-ff` でマージして push する。衝突すれば止まり、承認資料を出さない

@@ -210,7 +210,8 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 | 進め方 | 承認 | 差し戻し |
 | --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
+| 工程の進行表で流すスプリント（`progress.py next` が終了コード 10 で待ちに入った） | `python3 "$SCRIPTS/progress.py" answer <進行表の ID> <行> --approved` と、下の `gate-rejections.py record --outcome approved` | `progress.py answer <進行表の ID> <行> --rejected`（行が失敗になる。直してから `progress.py retry <進行表の ID> <工程> --reason <理由>`）と、下の `gate-rejections.py record` |
+| 進行表の外で流す、`reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
 | スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome rejected [--pr <N>]` |
 | 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
 

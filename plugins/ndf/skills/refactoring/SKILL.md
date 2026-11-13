@@ -163,5 +163,5 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   工程表は `standard` と `legacy-refactor` のリファクタリングにそちらを置く。適用を担う側は
   この Skill を手順として読む
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示にある進捗記録のコマンドを使う）。
+**進捗記録（課題の工程表・ボード・スプリント PR の「通した工程」）は、工程の進行表のワークフローが工程の開始と終了の印から書く。この Skill からは打たない**（`development-workflow` の `references/projects-tracking.md`）。
 

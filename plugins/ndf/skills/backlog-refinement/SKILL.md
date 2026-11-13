@@ -481,7 +481,7 @@ python3 "$UPKEEP/upkeep.py" report
 
 **未設定の件数を報告へ残す。** 残った件数と理由が、次の棚卸しの材料になる。
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "棚卸し"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+**進捗記録（課題の工程表・ボード・スプリント PR の「通した工程」）は、工程の進行表のワークフローが工程の開始と終了の印から書く。この Skill からは打たない**（`development-workflow` の `references/projects-tracking.md`）。
 
 ## 関連
 

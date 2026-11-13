@@ -2586,7 +2586,7 @@
     {
       "term": "スプリント状態ファイル",
       "context": "ndf-workflow",
-      "meaning": "スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル）",
+      "meaning": "スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。工程の状態は持たず、工程の進行表が持つ）",
       "code": "sprint_state",
       "deprecated": [
         "ミッション状態ファイル",
@@ -6818,7 +6818,7 @@
     {
       "term": "進行表",
       "context": "ndf-workflow",
-      "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。今の `sprint.json` を置き換える",
+      "meaning": "工程の並びと、それぞれの状態を持つ表。計画の進行表・レーンの進行表・スプリントの進行表の 3 段がある。工程の状態と終了の印の正本で、`progress.py` が読み書きする",
       "pending_source": "issues/issue-3092-requirements.md"
     },
     {

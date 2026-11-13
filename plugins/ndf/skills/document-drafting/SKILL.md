@@ -98,7 +98,7 @@ allowed-tools:
 執筆の過程で、この文書の範囲外の課題（別の文書の誤り、手順の不備など）に気づいたら、
 その場で `/ndf:out-of-scope` が issue にする。
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+**進捗記録（課題の工程表・ボード・スプリント PR の「通した工程」）は、工程の進行表のワークフローが工程の開始と終了の印から書く。この Skill からは打たない**（`development-workflow` の `references/projects-tracking.md`）。
 
 ## 関連
 
