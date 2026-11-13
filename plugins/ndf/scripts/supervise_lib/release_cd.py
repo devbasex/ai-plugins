@@ -22,6 +22,10 @@ RULE_RELEASE_PROD_CD = (
 )
 
 
+class PlanRefused(DeclError):
+    """プランを組めない（宣言の誤りではなく、渡した引数で組むと必ず止まるプランになる）。`new` は stopped の結果で止める。"""
+
+
 def release_cd_case(a, repo: str | None) -> str | None:
     """CD のある場合なら場合の名前（`cd-no-review` / `cd-review`）、CD が無ければ None。宣言を読めなければ組まずに DeclError。"""
     try:
@@ -103,6 +107,11 @@ def _approve_pr_step(a, repo: str | None, v: str, by: str) -> dict:
     """リリース承認ゲートの承認を本番の PR へ承認の証跡で書き、release（マージ）へ進む（#2773 の E5）。承認したコミットは
     同じプランの facts の出力から読み、利用者の承認は --answer-from の記録で確かめる。先端が動いていれば 10 で終える。"""
     state = getattr(a, "state", None)
+    if by == "user" and not state:  # --by user は --answer-from の承認の記録を必ず読み、無いと毎回 10 で止まる
+        raise PlanRefused(
+            "CD のある本番のプランは --state（スプリントの状態）なしでは組まない: approve-pr がリリース承認ゲートの利用者の承認の記録を"
+            " --answer-from で読むため、無いと承認の後も証跡を書けずに止まる。--state を付けて組み直す"
+        )
     answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
     sub = f"approve --pr {_prod_pr_cmd(a, v)} --facts-from {{state_dir}}{answer} --by {by}"
     return _deploy_pr_step("approve-pr", repo, sub, next="release", gate_next="end")

@@ -14,7 +14,8 @@ from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.release_templates import MVV_NOTE, judge_record_step, mvv_gate_steps
+from supervise_lib.release_cd import MVV_NOTE, mvv_gate_steps
+from supervise_lib.release_verify import judge_record_step
 from supervise_lib.verify_steps import CD_FAILED_STOP, CD_RESULT_FILE, MARGIN_FLOOR, cd_result_step, handoff_step, reject_step
 
 

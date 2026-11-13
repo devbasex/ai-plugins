@@ -68,6 +68,7 @@ MODULES = [
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_cd",  # CD のある場合の本番のリリースプランの部品（#2773 で release_templates から分けた）
     "release_templates",
+    "release_verify",  # リリースのプランの確かめと判断のステップ（release_templates から分けた）
     "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
     "delivery_templates",
     "sprint_revise",
@@ -105,6 +106,7 @@ NO_ENGINE = [
     "release_flow",
     "release_cd",
     "release_templates",
+    "release_verify",
     "review_units",
     "delivery_templates",
     "sprint_revise",
@@ -236,6 +238,7 @@ def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -
         monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / f"{channel}-{cd}.json"
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel]
+    args += ["--state", str(tmp_path / "state.json")] if cd and channel == "prod" else []  # approve-pr --by user が承認の記録を読む
     p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=SUPERVISE.parents[3])
     assert p.returncode == 0, p.stdout + p.stderr
     return json.loads(out.read_text(encoding="utf-8"))
@@ -298,7 +301,7 @@ def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp
 
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / "plan.json"
-    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    extra = ["--mvv" if mvv else "--state", str(tmp_path / "state.json")]
     args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
     p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
     assert p.returncode == 0, p.stdout + p.stderr
@@ -324,15 +327,18 @@ def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("cd", [True, False])
 def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monkeypatch, cd):
-    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。"""
+    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。CD の無い
+    場合は今のまま（全体テストを手元で流す戦略なら置く）。このリポジトリは全体テストを CI に任せる戦略（local-scoped-ci-whole）で
+    CD の有無によらず外れるため、全体テストを手元で流す別のリポジトリで比べる。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(PKG.parent / "lib"))
     import inproc
     import release_case
+    from test_supervise import foreign_repo
 
     decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
-    root = SUPERVISE.parents[3]
+    root = foreign_repo(tmp_path, {"version": 1, "test": {"command": "npm test -- {paths}", "all": "src"}})
     out = tmp_path / "check.json"
     p = inproc.run(SUPERVISE, "new", "check", "--since-last", "--id", "m-1", "--worktree", str(root), "--out", str(out), cwd=root)
     assert p.returncode == 0, p.stdout + p.stderr

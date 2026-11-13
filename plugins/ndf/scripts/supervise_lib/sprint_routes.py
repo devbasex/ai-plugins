@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 
 import delivery
+import release_case
 from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
@@ -12,6 +13,7 @@ from supervise_lib.decl import DeclError, decl_roots, delivery_decl
 from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_cd_result, plan_gate_2, plan_promote, plan_verify
+from supervise_lib.release_cd import release_cd_case
 from supervise_lib.release_templates import RELEASE_FORMS, material_path
 from supervise_lib.verify_steps import plan_limits
 
@@ -232,6 +234,31 @@ def normal_gate_2(a) -> str:
     return (
         "リリース承認ゲート: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者がリリースに答えたら、"
         f"`{user_gate_cmd(a, RELEASE_GATE, False)}` を打つ"
+    )
+
+
+def normal_prod_waves(a, repo: str, release: dict, prod_plan: dict, first: str, prod: str | None, advise: bool) -> list[dict]:
+    """pace: normal のデプロイの後のステージ。CD の無い場合はリリース承認ゲートのステージの後に本番を単独で流す（#1914）。
+    CD のある場合はゲートのステージを置かず、本番をデプロイの後へ --then でつなぎ、本番のプランの approval-post の後で
+    リリース承認ゲートに入る（#2773 の決定 6。承認資料は本番の PR の先端で組むため、開発版の承認資料を待たない）。"""
+    if case := release_cd_case(a, repo):
+        return [release, {"name": "本番", "plans": prod_plan, "then_of": first, "note": normal_cd_gate_2(a, case)}]
+    return [release, {"name": RELEASE_GATE, "gate": normal_gate_2_stage(a, repo, prod, advise)}, {"name": "本番", "plans": prod_plan}]
+
+
+def normal_cd_gate_2(a, case: str) -> str:
+    """CD のある場合（#2773 の決定 6）の本番のステージの文。リリース承認ゲートは本番のプランの中にあり、承認資料を本番の PR へ
+    置いた（approval-post）ところで止まる。承認の手順はここの 1 か所に置く。"""
+    if case == release_case.CD_REVIEW:
+        return (
+            "リリース承認ゲートは本番のプランの中にある: approval-post が承認資料を本番の Pull Request へ置いて止まる。本番の Pull Request の"
+            f"レビューの承認を得たら `{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、承認されたら"
+            f" `python3 {shlex.quote(str(SELF))} run <本番のプラン> --from release` で続ける（差し戻されたら打たない）"
+        )
+    return (
+        "リリース承認ゲートは本番のプランの中にある: approval-post が承認資料を本番の Pull Request へ置いて止まる。利用者が答えたら"
+        f" `{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、承認されたら"
+        f" `python3 {shlex.quote(str(SELF))} run <本番のプラン> --from approve-pr` で証跡を書いてマージへ進む（差し戻されたら打たない）"
     )
 
 

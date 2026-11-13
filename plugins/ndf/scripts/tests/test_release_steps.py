@@ -1338,8 +1338,9 @@ def test_cd_cases_refuse_the_approved_commit_argument(monkeypatch, arg):
     assert mod.approval.approved_of(".", a, "ndf", _case("no-cd")) == "a" * 40
 
 
-def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin", case="cd-no-review"):
-    """approval-check を流し、(結果, 付けた状態の並び) を返す。rounds は open_prs_at が順に返す番号。"""
+def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin", case="cd-no-review", required=()):
+    """approval-check を流し、(結果, 付けた状態の並び) を返す。rounds は open_prs_at が順に返す番号。required は本番チャネルの
+    ruleset の必須チェックの名前。"""
     import argparse
 
     mod = _release_steps_module(monkeypatch)
@@ -1355,6 +1356,8 @@ def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), 
     monkeypatch.setattr(at, "read_comments", lambda repo, n: [trail])
     monkeypatch.setattr(at, "read_roles", lambda repo, logins: {"boss": role})
     monkeypatch.setattr(at, "post_status", lambda repo, sha, j: posted.append(j.state))
+    rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c} for c in required]}}]
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: rules if "/rules/branches/main" in args[1] else None)
     _exits(monkeypatch, rv)
     with pytest.raises(SystemExit) as e:
         rv.approval_check(argparse.Namespace(root=str(tmp_path), pr=5))
@@ -1380,6 +1383,14 @@ def test_approval_check_posts_nothing_for_cd_review(monkeypatch, tmp_path):
     """I8: レビューで承認する場合は証跡のチェックを付けない（付けると証跡が無い failure でマージが止まる）。"""
     out, posted = _check(monkeypatch, tmp_path, case="cd-review")
     assert posted == [] and out["status"] == "ok" and out["metrics"]["case"] == "cd-review"
+
+
+def test_approval_check_judges_cd_review_when_the_status_is_required(monkeypatch, tmp_path):
+    """決定 12 の手順 3: 承認数 1 のまま ruleset の必須チェックに証跡のチェックがあれば、レビュー必須でも証跡を判定して付ける。"""
+    out, posted = _check(monkeypatch, tmp_path, case="cd-review", required=["ndf/release-approval"])
+    assert posted == ["success"] and out["metrics"]["state"] == "success"
+    out, posted = _check(monkeypatch, tmp_path, case="cd-review", required=["ci"])
+    assert posted == [] and out["metrics"]["case"] == "cd-review"
 
 
 def _trail_wait(monkeypatch, required, statuses):

@@ -2741,6 +2741,26 @@ def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     assert plan["steps"][0]["id"] == "approve"  # リリース承認ゲートの承認の記録を先頭で書く（#1426 の AC9）
 
 
+def test_normal_sprint_with_cd_gates_inside_the_prod_plan(tmp_path, monkeypatch):
+    """#2773 の決定 6: CD のある場合はリリース承認ゲートのステージを置かず、本番のプランの approval-post の後の approve-pr を
+    承認ゲートにする（開発版の承認資料を待たない）。本番はデプロイの後へ --then でつなぐ。"""
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"name": "m", "issues": [1], "gates": []}))
+    out = tmp_path / "m"
+    p = cli(*new_sprint_args(tmp_path, out, "--state", str(state)))
+    assert p.returncode == 0, p.stdout + p.stderr
+    index = json.loads((out / "sprint.json").read_text())["ステージ"]
+    assert [w["name"] for w in index][-2:] == ["デプロイ", "本番"] and "リリース承認ゲート" not in [w["name"] for w in index]
+    prod = {w["name"]: w for w in index}["本番"]
+    assert prod["then_of"] == "スプリントブランチ" and prod["plans"][0].endswith("-release-prod.json")
+    steps = {s["id"]: s for s in json.loads(Path(prod["plans"][0]).read_text())["steps"]}
+    assert "approve" not in steps and steps["approval-post"]["next"] == "end" and steps["approve-pr"]["next"] == "release"
+    assert f"--answer-from {state}" in steps["approve-pr"]["cmd"]
+
+
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
     """リリース承認ゲートの後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
     from supervise_lib import paths, queue
@@ -3199,7 +3219,7 @@ def test_release_package_plugin_plan_shape_by_channel_cd_and_mvv(tmp_path, monke
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
     version = "10.17.11-dev.1" if channel == "dev" else "10.17.11"
     out = tmp_path / "plan.json"
-    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else ["--state", str(tmp_path / "state.json")] if cd else []
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
     p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -3212,6 +3232,18 @@ def test_release_package_plugin_plan_shape_by_channel_cd_and_mvv(tmp_path, monke
     assert {i for i, s in steps.items() if s.get("gate_as_ok")} == ({"facts"} if (channel, cd, mvv) == ("dev", False, True) else set())
     assert steps["fix"]["next"] == "sync" and steps["judge"].get("next") is None
     assert steps["notes"]["next"] == ("snapshot" if channel == "prod" else "sync") and steps["sync"]["next"] == "release"
+
+
+def test_cd_prod_plan_without_state_stops(tmp_path, monkeypatch):
+    """CD のある本番の approve-pr（--by user）は --answer-from の承認の記録を読むため、--state なしでは組まずに stopped で止める。"""
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    out = tmp_path / "plan.json"
+    args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod"]
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=REPO)
+    assert p.returncode != 0 and not out.exists()
+    assert json.loads(p.stdout)["status"] == "stopped" and "--state" in json.loads(p.stdout)["summary"]
 
 
 @pytest.mark.parametrize(
@@ -3232,7 +3264,7 @@ def test_release_package_plugin_plan_links_by_channel_cd_and_mvv(tmp_path, monke
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
     version = "10.17.11-dev.1" if channel == "dev" else "10.17.11"
     out = tmp_path / "plan.json"
-    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else ["--state", str(tmp_path / "state.json")] if cd else []
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
     p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
     assert p.returncode == 0, p.stdout + p.stderr
