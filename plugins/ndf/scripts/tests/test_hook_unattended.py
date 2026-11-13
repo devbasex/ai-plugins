@@ -217,6 +217,8 @@ def test_pending_command_errors_reads_only_a_line_with_a_command():
     assert un.pending_command_errors(STALLED) == [un.ERR_NEXT_COMMAND]
     assert un.pending_command_errors("- 次のコマンド: `/ndf:release`\n- 結果: できなかった\n") == [un.ERR_NEXT_COMMAND]
     assert un.pending_command_errors("次のコマンド:\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("- 次のコマンド: `無し（supervisor で回す: 設計）`\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("- 次のコマンド: ``\n- 結果: できなかった\n") == []
     assert un.pending_command_errors("次のコマンド: /ndf:release\n- 結果: 完了\n") == []
     assert un.pending_command_errors(None) == []
 

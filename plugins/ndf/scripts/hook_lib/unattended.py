@@ -127,7 +127,8 @@ def pending_command_errors(text: object) -> list[str]:
     """`次のコマンド:` にコマンドが載ったまま、結果が `STOP_RESULTS` のどれでもなく区分が `HUMAN_ACTION` でもなければ誤りを 1 つ返す。"""
     if not isinstance(text, str):
         return []
-    commands = [v for v in NEXT_COMMAND_RE.findall(text) if v and not v.startswith(ur.NONE_VALUE)]
+    values = (v.strip("` \t") for v in NEXT_COMMAND_RE.findall(text))
+    commands = [v for v in values if v and not v.startswith(ur.NONE_VALUE)]
     if not commands or ur.result_value(text) in STOP_RESULTS or ur.report_items(text).get("区分") == HUMAN_ACTION:
         return []
     return [ERR_NEXT_COMMAND]
