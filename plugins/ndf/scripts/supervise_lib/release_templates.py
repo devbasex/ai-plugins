@@ -6,9 +6,11 @@ import re
 import shlex
 from pathlib import Path
 
+import branch_flow
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
-from supervise_lib.release_flow import bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
+from supervise_lib.release_flow import REVIEW_RANGE_IDS, bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
+from supervise_lib.release_flow import release_review_row, review_range_steps
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import (
@@ -111,10 +113,18 @@ def _snapshot_step(plugin: str, v: str, after_notes: str) -> dict:
     }
 
 
-def _cleanup_step(v: str, prs: str, repo: str | None) -> dict:
+def _cleanup_step(v: str, prs: str, repo: str | None, review: bool = False) -> dict:
+    """本番のリリースの後片付け。`review` なら、その版の衝突の解消のレビューの一時のブランチが残っていれば消す（#3163 の I11）。"""
+    drop = ""
+    if review:
+        heads = " ".join(f"{branch_flow.REVIEW_PREFIX}{v}{s}" for s in ("", branch_flow.REVIEW_BASE_SUFFIX))
+        drop = (
+            f' && for b in {heads}; do if git ls-remote --exit-code --heads origin "$b" >/dev/null; '
+            'then git push -q origin --delete "$b" || exit 1; fi; done'
+        )
     cmd = (
         f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
-        f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}\''
+        f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}{drop}\''
     )
     return {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo, "cmd": cmd, "on_fail": "judge", "next": "end"}
 
@@ -376,7 +386,9 @@ def plan_release_package_plugin(a) -> dict:
     after_notes = "sync" if sync else "release"
     run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes", *([] if dev else ["snapshot"]), *(["sync"] if sync else [])]
     units = release_units(a)
-    run_ids += ["release", "verify", *(["release-branch"] if dev and units else []), *(["facts", "explain", "others"] if dev else [])]
+    reviews = review_range_steps(a, repo, base) if dev and units else []  # リリースブランチの PR のレビュー（#3163）
+    run_ids += ["release", "verify", *(["release-branch"] if dev and units else []), *(REVIEW_RANGE_IDS if reviews else ())]
+    run_ids += ["facts", "explain", "others"] if dev else []
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
@@ -388,9 +400,9 @@ def plan_release_package_plugin(a) -> dict:
         # 後片付け: デプロイの PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
-        steps.append(_cleanup_step(v, prs, repo))
+        steps.append(_cleanup_step(v, prs, repo, release_review_row(a).diff != "none"))
     mvv = getattr(a, "mvv", None)
-    steps += [release_branch_step(a, repo, base, units)] if dev and units else []
+    steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else "facts"), *reviews] if dev and units else []
     if dev:
         steps += _dev_approval_steps(a, repo, approval, prs, rts, release_names(base)[1] if units else None)
     steps += _judge_fix_steps(run_ids, after_notes)
