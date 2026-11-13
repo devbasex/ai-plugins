@@ -6948,6 +6948,48 @@
       "pending_source": "issues/issue-3163-design.md"
     },
     {
+      "term": "リリースの PR",
+      "context": "ndf-release",
+      "meaning": "本番チャネル（main）へ版を入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "証跡のチェック",
+      "context": "ndf-release",
+      "meaning": "リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "承認権限",
+      "context": "ndf-release",
+      "meaning": "リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain",
+      "pending_source": "issues/issue-2773-requirements.md"
+    },
+    {
+      "term": "リリースの場合",
+      "context": "ndf-release",
+      "meaning": "CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "承認資料のコメント",
+      "context": "ndf-release",
+      "meaning": "承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "開発版の workflow",
+      "context": "ndf-release",
+      "meaning": "手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
+      "term": "承認の証跡",
+      "context": "ndf-release",
+      "meaning": "リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない",
+      "pending_source": "issues/issue-2773-design.md"
+    },
+    {
       "term": "兆候",
       "context": "ndf-workflow",
       "meaning": "AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない",
@@ -7036,6 +7078,48 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
+    },
+    {
+      "term": "人のいない実行",
+      "context": "ndf-factory",
+      "meaning": "環境変数 NDF_FACTORY_RUN が空でない実行ジョブの区間。AskUserQuestion が使えず、応答を人が読まない",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "結果の行",
+      "context": "ndf-factory",
+      "meaning": "最後の応答の文の中の、最後の「- 結果: <値>」の行。値は 判断が要る / 完了 / できなかった の 3 つで、Factory が区間の結果を決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区分の無い問い",
+      "context": "ndf-workflow",
+      "meaning": "問い合わせの区分（承認ゲート・レッドライン・費用など）のどれにも当たらない問い。AI が決めて記録する",
+      "source": "",
+      "pending_source": "issues/issue-3242-requirements.md"
+    },
+    {
+      "term": "区間の報告",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "人のいない実行の印",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "結果の行の差し戻し",
+      "context": "ndf-factory",
+      "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す",
+      "source": "",
+      "pending_source": "issues/issue-3242-design.md"
     },
     {
       "term": "遷移の判断",
