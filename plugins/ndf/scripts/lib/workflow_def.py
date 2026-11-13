@@ -1,6 +1,6 @@
 """工程の定義の読み込みと検査（#3092 の決定 3・4・5・8）。
 
-工程の定義は `plugins/ndf/contracts/workflow/` の Serverless Workflow 1.0.3 の書式の JSON である。
+工程の定義は NDF のプラグインの中の `contracts/workflow/`（`WORKFLOW_DIR`）にある Serverless Workflow 1.0.3 の書式の JSON である。
 
 - `modes/<モード>.json`: 工程の文書を `run.workflow` で順に呼ぶだけ（決定 4）
 - `stages/<工程の ID>.json`: 工程ごとのアクティビティの並び（`call`・`listen`）と入出力規約の参照
