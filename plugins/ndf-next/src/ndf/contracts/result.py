@@ -54,7 +54,7 @@ def stopped(tool: str, kind: str, detail: str, *, summary: Optional[str] = None,
 
 def code_matches(status: str, code: int) -> bool:
     """status と終了コードが事実の表 exit-codes の区分で食い違わないか。"""
-    for r in facts.rows("exit-codes", status=status):
+    for r in facts.rows(causes.EXIT_CODES, status=status):
         if r["code"] <= code <= r.get("last", r["code"]):
             return True
     return False
@@ -66,7 +66,7 @@ def code_for(obj: Any) -> Optional[int]:
         return None
     status = obj.get("status")
     if status in ("ok", "gate"):
-        return facts.rows("exit-codes", status=status)[0]["code"]
+        return facts.rows(causes.EXIT_CODES, status=status)[0]["code"]
     if status == "stopped":
         c = obj.get("cause")
         kind = c.get("kind") if isinstance(c, dict) else None

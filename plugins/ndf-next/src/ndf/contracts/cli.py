@@ -63,7 +63,7 @@ def _emit_unchecked(detail: str, items: list[dict[str, Any]]) -> int:
     """止まった理由の表そのものが読めないとき、表で確かめずに invalid の結果を出す。終了コードは事実の表の unreadable。"""
     obj = result.result(TOOL, "stopped", detail, items=items, cause={"kind": "invalid", "detail": detail})
     print(json.dumps(obj, ensure_ascii=False))
-    return int(facts.row("exit-codes", "unreadable")["code"])
+    return int(facts.row(causes.EXIT_CODES, "unreadable")["code"])
 
 
 def _print_value(value: Any) -> None:

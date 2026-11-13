@@ -46,12 +46,17 @@ class Route(NamedTuple):
     kind: str
 
 
-def stopped_codes() -> frozenset[int]:
-    """`stopped` の結果が返してよい終了コード（事実の表 exit-codes から）。"""
+def codes_for_status(status: str) -> frozenset[int]:
+    """`status` の結果が返してよい終了コード（事実の表 exit-codes から）。"""
     out: set[int] = set()
-    for r in facts.rows(EXIT_CODES, status="stopped"):
+    for r in facts.rows(EXIT_CODES, status=status):
         out.update(range(r["code"], r.get("last", r["code"]) + 1))
     return frozenset(out)
+
+
+def stopped_codes() -> frozenset[int]:
+    """`stopped` の結果が返してよい終了コード。"""
+    return codes_for_status("stopped")
 
 
 def _policy_errors(row: CauseRow) -> list[str]:
