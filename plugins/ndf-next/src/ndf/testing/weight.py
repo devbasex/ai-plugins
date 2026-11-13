@@ -95,10 +95,20 @@ def _has_parallel(args: Sequence[str]) -> bool:
     return False
 
 
+def _looks_like_path(word: str) -> bool:
+    """パス・ファイル名・テストの節点（`tests/a.py`・`a.py`・`.`・`a.py::t`）に見える語か。"""
+    return "/" in word or "." in word or "::" in word
+
+
 def _targets(args: Sequence[str]) -> list[str]:
-    """対象の語（選択肢でも、選択肢の値でも、並列の指定の値でもない語）。"""
+    """対象の語（選択肢でも、選択肢の値でも、並列の指定の値でもない語）。
+
+    実行器ごとの選択肢の表は持たないので、`=` を含まない選択肢の直後の語は、パスに見えなければ選択肢の値として読む
+    （`pytest --tb short` の `short` を対象と取り違えて全体の実行を軽いと判定しない。迷う語は重い側へ倒す）。
+    """
     out: list[str] = []
     skip = False
+    after_option = False
     for arg in args:
         if skip:
             skip = False
@@ -107,6 +117,10 @@ def _targets(args: Sequence[str]) -> list[str]:
             skip = True
             continue
         if arg.startswith("-") or "=" in arg:
+            after_option = arg.startswith("-") and "=" not in arg
+            continue
+        value, after_option = after_option, False
+        if value and not _looks_like_path(arg):
             continue
         out.append(arg)
     return out

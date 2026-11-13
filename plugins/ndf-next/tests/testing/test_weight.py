@@ -95,7 +95,7 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
         (["pytest", "--jobs", "3"], DECLARED, "scope"),
         (["pytest", "-n4"], DECLARED, "scope"),
         (["make", "-j8", "test"], [{"runner": "make"}], "scope"),  # -j へ数を続けた形も -j 8 と同じ
-        (["make", "-jx", "test"], [{"runner": "make"}], None),
+        (["make", "-jx", "out/test"], [{"runner": "make"}], None),
         (["pytest", "--numprocesses=2", "a"], DECLARED, "scope"),
         (["pytest", "--maxWorkers=2"], DECLARED, "scope"),
         (["pytest", "-j"], DECLARED, "scope"),
@@ -103,7 +103,10 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
         (["pytest"], DECLARED, "whole"),  # 対象が無い
         (["pytest", "."], DECLARED, "whole"),
         (["pytest", "-x=1"], DECLARED, "whole"),  # = を含む語は対象でない
-        (["pytest", ".", "-k", "x"], DECLARED, None),  # 選択肢の値も対象として読む
+        (["pytest", ".", "-k", "x"], DECLARED, "whole"),  # パスに見えない選択肢の値は対象に数えない
+        (["pytest", "--tb", "short"], RUNNERS, "whole"),
+        (["pytest", "-x", "tests/a.py"], RUNNERS, None),  # パスに見える語は選択肢の後でも対象
+        (["pytest", "-q", "a.py::t"], RUNNERS, None),
         (["/usr/bin/pytest", "."], RUNNERS, "whole"),
         (["npx", "vitest"], RUNNERS, "whole"),  # 先の suite が外れても次の suite を見る
         (["vitest", "a.ts"], RUNNERS, None),
