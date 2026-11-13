@@ -72,15 +72,20 @@ def _smallest(values: list[int | None]) -> int | None:
     return min(known) if known else None
 
 
-def cgroup_memory_limit(dirs: tuple[Path, ...] | None = None) -> int | None:
+def _resolve(cgroups: tuple[Path, ...] | None) -> tuple[Path, ...]:
+    """渡された cgroup のディレクトリの並び。None なら今のプロセスの所属先と祖先を読む。"""
+    return cgroup_dirs() if cgroups is None else cgroups
+
+
+def cgroup_memory_limit(cgroups: tuple[Path, ...] | None = None) -> int | None:
     """cgroup v2 の `memory.max` の、祖先を含めた一番小さい値（バイト）。上限が無いか読めなければ None。"""
-    return _smallest([_read_int(d / "memory.max") for d in (cgroup_dirs() if dirs is None else dirs)])
+    return _smallest([_read_int(d / "memory.max") for d in _resolve(cgroups)])
 
 
-def cgroup_memory_remaining(dirs: tuple[Path, ...] | None = None) -> int | None:
+def cgroup_memory_remaining(cgroups: tuple[Path, ...] | None = None) -> int | None:
     """cgroup v2 の上限までの残り（バイト）。祖先を含め一番少ない段の値。上限が無いか読めなければ None。"""
     remaining: list[int | None] = []
-    for d in cgroup_dirs() if dirs is None else dirs:
+    for d in _resolve(cgroups):
         limit, current = _read_int(d / "memory.max"), _read_int(d / "memory.current")
         remaining.append(None if limit is None or current is None else max(0, limit - current))
     return _smallest(remaining)
@@ -133,7 +138,7 @@ def cpu_count(cgroups: tuple[Path, ...] | None = None) -> int:
         count = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         count = os.cpu_count() or 1
-    quota = _smallest([_cpu_quota(d) for d in (cgroup_dirs() if cgroups is None else cgroups)])
+    quota = _smallest([_cpu_quota(d) for d in _resolve(cgroups)])
     if quota is not None:
         count = min(count, quota)
     return max(1, count)
