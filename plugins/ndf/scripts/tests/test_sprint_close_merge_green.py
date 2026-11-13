@@ -123,7 +123,12 @@ elif a[:1] == ["api"] and "/protection/" in a[-1]:
 elif a[:2] == ["api", "user"]:
     out = st.get("login", "me")
 elif a[:1] == ["api"] and "/comments" in " ".join(a):
-    out = ""
+    out = "\n".join(json.dumps(c) for c in st.get("issue_comments", []))
+elif a[:1] == ["api"] and "reviews" in st and any("/reviews?" in x for x in a):  # キーが無ければ従来どおり読めない
+    out = "\n".join(json.dumps(r) for r in st["reviews"])
+elif a[:1] == ["api"] and a[-1].endswith("/permission") and a[-1].split("/")[-2] in st.get("perms", {{}}):
+    p = st["perms"][a[-1].split("/")[-2]]
+    out = json.dumps({{"permission": p, "role_name": p}})
 elif a[:1] == ["api"] and __import__("re").search(r"/pulls/\d+$", a[-1]):
     seq = st.get("pr_seq", {{}}).get(a[-1].rsplit("/", 1)[1]) or [{{}}]
     cur = seq[0]
@@ -1149,6 +1154,95 @@ def test_promote_user_approval_needs_the_material(repo, gh):
     code, out, err = call("merged-steps.py", promote_args("--gate-approved", "user"), gh.env, repo)
     assert code == 2 and out["status"] == "stopped", (out, err)
     assert "--approved-from" in out["next"] and gh.get().get("calls", []) == []
+
+
+# 現状固定テスト（I-010: merged_lib/merge.py の _trail_before_merge を promote から通す。期待値は今の実装の出力）
+REVIEW_RULES = [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
+REDO = "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）"
+
+
+def _promote_cd(repo, gh, tmp_path, *args, material=True, **state):
+    declare(repo, *TRYGROUP)
+    gh.set(**{"open_prs": [{"number": 9}], "pr_seq": {"9": [dict(to("main", X), headRefName="develop")] * 3}, **state})
+    extra = ["--approved-from", str(promote_material(tmp_path))] if material else []
+    return call("merged-steps.py", promote_args(*extra, *(args or ("--gate-approved", "user"))), gh.env, repo)
+
+
+def _approved_review(login, commit):
+    return {"user": {"login": login}, "state": "APPROVED", "commit_id": commit, "submitted_at": "2026-11-13T09:00:00Z"}
+
+
+def test_promote_review_case_merges_when_valid_review_matches(repo, gh, tmp_path):
+    code, out, err = _promote_cd(repo, gh, tmp_path, rules=REVIEW_RULES, reviews=[_approved_review("u", X)], perms={"u": "write"})
+    assert code == 0 and out["status"] == "ok", (out, err)
+    assert {"kind": "review", "name": "#9", "result": "approved", "approved_sha": X} in out["items"]
+    assert out["items"][-1] == {
+        "kind": "pr",
+        "name": "#9",
+        "result": "merged",
+        "method": "merge",
+        "head": X,
+        "admin": False,
+        "gate_approved": "user",
+    }
+    assert merges(gh) == [["pr", "merge", "9", "--merge", "--match-head-commit", X]] and not gh.get().get("comments")
+
+
+@pytest.mark.parametrize(
+    "reviews, perms, summary, review_commit",
+    [
+        ([], {}, "#9 をマージしない: 有効な人の承認のレビューが無い", None),
+        ([_approved_review("u", X)], {"u": "read"}, "#9 をマージしない: 有効な人の承認のレビューが無い", None),
+        ([_approved_review("u", Y)], {"u": "admin"}, "#9 をマージしない: 承認のレビュー bbbbbbbb が承認したコミット aaaaaaaa と違う", Y),
+    ],
+)
+def test_promote_review_case_gates_without_matching_review(repo, gh, tmp_path, reviews, perms, summary, review_commit):
+    code, out, err = _promote_cd(repo, gh, tmp_path, rules=REVIEW_RULES, reviews=reviews, perms=perms)
+    assert code == 10 and out["status"] == "gate", (out, err)
+    assert out["summary"] == summary and out["items"] == [] and out["next"] == REDO
+    assert out["metrics"] == {"approved_sha": X, "review_commit": review_commit}
+    assert merges(gh) == []
+
+
+def test_promote_review_case_stops_when_reviews_are_unreadable(repo, gh, tmp_path):
+    code, out, err = _promote_cd(repo, gh, tmp_path, rules=REVIEW_RULES)
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert out["summary"].startswith("PR #9 のレビューを読めない") and merges(gh) == []
+
+
+def test_promote_no_review_case_writes_trail_then_merges(repo, gh, tmp_path):
+    code, out, err = _promote_cd(repo, gh, tmp_path)
+    assert code == 0, (out, err)
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c1", "result": "written", "approved_sha": X} in out["items"]
+    assert len(gh.get()["comments"]) == 1 and merges(gh) == [["pr", "merge", "9", "--merge", "--match-head-commit", X]]
+
+
+def test_promote_no_review_case_keeps_own_existing_trail(repo, gh, tmp_path):
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval_trail
+
+    mine = {"id": 5, "body": approval_trail.render_trail(X, "user"), "user": {"login": "me"}, "created_at": "t", "updated_at": "t"}
+    mine["html_url"] = "https://github.com/o/r/pull/9#c5"
+    code, out, err = _promote_cd(repo, gh, tmp_path, issue_comments=[mine])
+    assert code == 0, (out, err)
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c5", "result": "kept", "approved_sha": X} in out["items"]
+    assert not gh.get().get("comments") and len(merges(gh)) == 1
+
+
+def test_promote_no_review_case_does_not_write_trail_when_head_moved(repo, gh, tmp_path):
+    code, out, err = _promote_cd(repo, gh, tmp_path, pr_seq={"9": [dict(to("main", Y), headRefName="develop")] * 3})
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert out["items"] == [{"kind": "pr", "name": "#9", "result": "head_moved", "head": Y, "expected": X}]
+    assert not gh.get().get("comments") and merges(gh) == []
+
+
+def test_promote_cd_case_needs_the_approved_commit(repo, gh, tmp_path):
+    code, out, err = _promote_cd(repo, gh, tmp_path, "--gate-approved", "mvv", material=False)
+    assert code == 3 and out["status"] == "stopped", (out, err)
+    assert (
+        out["summary"] == "CD のある場合の promote には照合する承認したコミット（--approved-from か --expect-head-from）とリポジトリが要る"
+    )
+    assert merges(gh) == []
 
 
 # 現状固定テスト（I-003: release_lib/approval.py の approved_on_pr。期待値は今の実装の出力）
