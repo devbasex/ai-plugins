@@ -49,11 +49,12 @@ def _cmd_check(_: argparse.Namespace) -> int:
     if errs:
         detail = f"契約の表に誤りが {len(errs)} 件ある"
         items = [{"kind": "violation", "reason": e} for e in errs]
+        # 表で確かめて出せなければ（止まった理由の表・結果のスキーマ・終了コードの表のどれが壊れていても）、
+        # 確かめずに出す。出力の前に投げるので、標準出力へ 2 行出ることは無い
         try:
-            causes.table()
+            return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
         except contracts.ContractError:
             return result.emit_unchecked(TOOL, "invalid", detail, items)
-        return result.emit(result.stopped(TOOL, "invalid", detail, items=items))
     return result.emit(result.result(TOOL, result.OK, "契約の表はすべて形に合う", metrics={"fact_tables": len(facts.names())}))
 
 

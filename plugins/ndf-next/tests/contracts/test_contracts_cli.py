@@ -42,6 +42,15 @@ def test_check_reports_every_broken_table(contracts_copy, capsys):
     assert len(report["items"]) >= 2
 
 
+@pytest.mark.parametrize("rel", ["schemas/result.schema.json", "causes.json"])
+def test_check_reports_json_when_output_contract_is_broken(contracts_copy, capsys, rel):
+    contracts_copy(rel, text="{")
+    code, out, _ = _run(capsys, "check")
+    report = json.loads(out)
+    assert code == exit_codes.code_of("unreadable")
+    assert (report["status"], report["cause"]["kind"]) == ("stopped", "invalid")
+
+
 def test_check_reports_missing_ref_target(contracts_copy, fact_table):
     table = fact_table({"phase": {"type": "string", "summary": "s", "ref": "limits.json#monitor.phase."}}, [{"id": "a", "phase": "nope"}])
     contracts_copy("facts/sample.json", lambda _: table)
