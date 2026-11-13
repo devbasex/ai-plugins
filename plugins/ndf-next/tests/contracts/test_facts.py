@@ -153,3 +153,45 @@ def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
     assert len(errs) == 2
     assert any("domains/runtimes.json にある" in e for e in errs)
     assert any("'nobody' が表 runtimes に無い" in e for e in errs)
+
+
+# 現状固定テスト（I-001）: 列の宣言から作る行の形。`checks/facts.py` の `row_schema` と違い、`id` は既定で空を許さず、`id` の列の宣言があればそれで置き換える。
+
+ROW_COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
+
+
+def test_row_schema_from_column_declarations_in_contracts():
+    assert facts._row_schema(ROW_COLUMNS) == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["id", "rank"],
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "rank": {"type": "integer"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+
+
+def test_row_schema_declared_id_replaces_the_default_in_contracts():
+    schema = facts._row_schema({"id": {"type": "string", "summary": "i"}, "name": {"type": "string", "summary": "n"}})
+    assert list(schema["properties"]) == ["id", "name"]
+    assert schema["properties"]["id"] == {"type": "string"}
+    assert schema["required"] == ["id", "name"]
+
+
+def test_row_shape_errors_name_the_first_bad_row(contracts_copy, fact_table):
+    rows = [{"id": "a", "rank": 1}, {"id": "b", "rank": "1", "tags": [1], "x": 1}, {"id": "c"}]
+    contracts_copy("facts/sample.json", lambda _: fact_table(ROW_COLUMNS, rows))
+    with pytest.raises(facts.FactsError) as err:
+        facts.table("sample")
+    assert str(err.value) == (
+        "事実の表 facts/sample.json の行 1（'b'）の形が違う: "
+        "'1' is not of type 'integer'; 1 is not of type 'string'; Additional properties are not allowed ('x' was unexpected)"
+    )
+
+
+def test_row_shape_missing_required_column(contracts_copy, fact_table):
+    contracts_copy("facts/sample.json", lambda _: fact_table(ROW_COLUMNS, [{"id": "c", "tags": ["x"]}]))
+    with pytest.raises(facts.FactsError, match=r"^事実の表 facts/sample.json の行 0（'c'）の形が違う: 'rank' is a required property$"):
+        facts.table("sample")
