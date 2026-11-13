@@ -336,7 +336,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 | `started_at` | 文字列（ISO 8601） | 印を作った時刻 |
 | `pushbacks` | 整数 | 形に合わない Stop が続いた間に差し戻した回数。形に合った Stop を通すと 0 に戻る |
 
-状態の根は既存の `state_home` の関数で決める（問い合わせの記録と同じ根）。ファイル名の `session_id` は英数字と `-` 以外を含めば印を作らない。
+状態の根は既存の `state_home.container_home` で決める（待ちの通知・guard と同じ、セッションを持つ状態の根。`state_home` の置き場の表の「コンテナのプロセス」）。ファイル名の `session_id` は英数字と `-` 以外を含めば印を作らない。
 
 ## 処理の流れ
 
@@ -492,7 +492,7 @@ UserPromptSubmit と Stop はすべてのプロンプトと応答で起きる。
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3242 | 実装する | — | `plugins/ndf/contracts/forms/unattended-report.json`（新設）、`scripts/contracts_lib/model.py`、`scripts/tests/test_check_ndf_contracts.py`、`plugins/ndf/scripts/lib/unattended_report.py`（新設）、`plugins/ndf/scripts/hook_lib/unattended.py`（新設）、`plugins/ndf/scripts/hook.py`、`plugins/ndf/hooks/claude.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__hook.py.json`、`plugins/ndf/contracts/files/unattended-mark-json.json`（新設）、`plugins/ndf/contracts/env/NDF_FACTORY_RUN.json`、`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/ndf-plugin-reference.md`、`plugins/ndf/scripts/tests/test_unattended_report.py`（新設）、`plugins/ndf/scripts/tests/test_hook_unattended.py`（新設）、`docs/glossary/glossary.json`・`docs/glossary.md`（用語 6 語。要求と設計の Pull Request で入れてある） |
+| #3242 | 実装する | — | `plugins/ndf/contracts/forms/unattended-report.json`（新設）、`scripts/contracts_lib/model.py`、`scripts/tests/test_check_ndf_contracts.py`、`plugins/ndf/scripts/lib/unattended_report.py`（新設）、`plugins/ndf/scripts/hook_lib/unattended.py`（新設）、`plugins/ndf/scripts/hook.py`、`plugins/ndf/hooks/claude.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__hook.py.json`、`plugins/ndf/contracts/files/unattended-mark-json.json`（新設）、`plugins/ndf/contracts/env/NDF_FACTORY_RUN.json`、`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/ndf-plugin-reference.md`、`plugins/ndf/scripts/tests/test_unattended_report.py`（新設）、`plugins/ndf/scripts/tests/test_hook_unattended.py`（新設）、`docs/glossary/glossary.json`、`docs/glossary.md`（用語 6 語。要求と設計の Pull Request で入れてある） |
 
 ## 人へ残す判断
 
