@@ -186,7 +186,6 @@ def call(script, args, env, cwd):
     return p.returncode, out, p.stderr
 
 
-
 DIST_PROD = "## リリース記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nスプリント: PR #11 / #12\n"
 
 
