@@ -25,6 +25,26 @@ def _dbos_importers(root: Path) -> set[str]:
     return found
 
 
+def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path, monkeypatch):
+    """現状固定: import の構文ごとに、DBOS を読むファイルとして数えるかどうか。"""
+    sources = {
+        "plain.py": "import dbos\n",
+        "alias_multi.py": "import os, dbos.sub as d\n",
+        "from_abs.py": "from dbos import DBOS\n",
+        "from_sub.py": "from dbos.sub import x\n",
+        "similar.py": "import dboss\nfrom dbosx import y\n",
+        "relative.py": "from . import dbos\nfrom .dbos import z\n",
+        "not_import.py": "x = 'dbos'\n",
+        "nested/deep.py": "import json\nimport dbos\n",
+    }
+    for name, text in sources.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    monkeypatch.setitem(_dbos_importers.__globals__, "PLUGIN_ROOT", tmp_path)
+    assert _dbos_importers(tmp_path) == {"plain.py", "alias_multi.py", "from_abs.py", "from_sub.py", "nested/deep.py"}
+
+
 def test_only_durable_imports_dbos():
     importers = _dbos_importers(PLUGIN_ROOT / "src") | _dbos_importers(PLUGIN_ROOT / "tests")
     assert importers == {"src/ndf/core/durable.py"}
