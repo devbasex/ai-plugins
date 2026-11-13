@@ -341,6 +341,22 @@ def cmd_await(a) -> None:
 # ---- 問いと一時レーン（#2436 の 6c・6d・6f） ----
 
 
+def cmd_request_close(a) -> None:
+    """答えていない依頼を採らずに `request_closed`（理由つき）で閉じる。閉じた依頼は計画の完了を止めない（#3092 の I16）。"""
+    import progress_db as pdb
+    import progress_model as pm
+
+    store = pdb.connect(pdb.default_url(main_of()))
+    tid = pm.table_id("plan", pdb.progress_repo_key(main_of()), a.name)
+    with pdb.transaction(store) as conn:
+        view = pdb.plan_view_of(conn, tid)
+        req = view["requests"].get(a.id) if view else None
+        if req is None or not req["open"]:
+            reply("stopped", f"計画 {a.name} に答えていない依頼 {a.id} が無い", code=3)
+        pdb.append_events(conn, tid, [pm.EventDraft("request_closed", "organizer", None, reason=a.reason, payload={"request": a.id})])
+    reply("ok", f"依頼 {a.id} を採らずに閉じた", id=a.id)
+
+
 def cmd_request_ask(a) -> None:
     main = main_of()
     try:

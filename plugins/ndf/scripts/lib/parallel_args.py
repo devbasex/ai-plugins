@@ -28,7 +28,7 @@ def add_run_parsers(sub) -> None:
 
 
 def add_release_parsers(sub) -> None:
-    """副命令 present・confirm・carried・settle・request・await・request-ask・request-gate2 の引数を足す。"""
+    """副命令 present・confirm・carried・settle・request・await・request-ask・request-gate2・request-close の引数を足す。"""
     p = sub.add_parser("present")
     p.add_argument("name", nargs="?")
     p.add_argument("n", type=int)
@@ -72,6 +72,10 @@ def add_release_parsers(sub) -> None:
     rg.add_argument("n", type=int)
     rg.add_argument("k", type=int)
     rg.add_argument("--report", required=True)
+    rc = sub.add_parser("request-close")  # 答えていない依頼を採らずに閉じる（#3092 の I16）
+    rc.add_argument("name")
+    rc.add_argument("id")
+    rc.add_argument("--reason", required=True)
 
 
 def add_answer_parsers(sub) -> None:

@@ -134,6 +134,15 @@
           "name"
         ]
       },
+      "request-close": {
+        "options": [
+          "--reason"
+        ],
+        "positionals": [
+          "name",
+          "id"
+        ]
+      },
       "request-gate2": {
         "options": [
           "--report"
@@ -238,6 +247,7 @@
     "NDF_PARALLEL_SPAWN_REFUSALS",
     "NDF_PARALLEL_STALL_MINUTES",
     "NDF_PRESENTATION_DIR",
+    "NDF_PROGRESS_DB",
     "NDF_RELAY_DIR",
     "NDF_RELAY_MAX_NAMED",
     "NDF_RELAY_NAME",

@@ -105,6 +105,19 @@ def default_url(root: Path) -> str:
     return f"sqlite:///{state_home.checkout_home(Path(root)) / DEFAULT_DB}"
 
 
+def progress_repo_key(root: Path) -> str:
+    """進行表の ID に入れるリポジトリの識別（origin の URL。無ければメインディレクトリの絶対パス）。どの worktree でも同じ値。"""
+    import subprocess
+
+    import state_home
+
+    p = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True)
+    if p.returncode == 0 and p.stdout.strip():
+        return p.stdout.strip()
+    got = state_home.find_git_dir(Path(root))
+    return str(got[1].parent if got else Path(root).resolve())
+
+
 def _hide(url: str) -> str:
     return re.sub(r"//([^:/@]+):[^@]*@", r"//\1:***@", url)
 
@@ -312,6 +325,11 @@ def plan_and_lanes(conn: Connection, plan_id: str) -> tuple[dict, dict, dict]:
     for ln in plan["lanes"]:
         lanes.setdefault(ln, [])
     return plan, lanes, ids
+
+
+def plan_view_of(conn: Connection, plan_id: str) -> Optional[dict]:
+    """計画の進行表の畳み込み。進行表が無ければ None。"""
+    return plr.plan_view(read_progress_events(conn, plan_id)) if progress_table(conn, plan_id) is not None else None
 
 
 def lane_write(conn: Connection, lane_id: str, draft: pm.EventDraft, *, _row_ended: bool = False) -> list[int]:

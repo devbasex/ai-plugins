@@ -36,7 +36,7 @@ def _done_stages(manifest: dict, base: Path) -> set[str]:
     """`done-<番号>.json` が終わりを示すステージ。承認ゲートは、後ろのプランのステージが終わっていれば終わったとする。"""
     items: dict[str, dict] = {}
     for f in sorted(base.glob("done-*.json")):
-        for it in (_read(f) or {}).get("items") or []:
+        for it in (_read_source_json(f) or {}).get("items") or []:
             if it.get("plan"):
                 items[str(it["plan"])] = it
     done, later = set(), False
@@ -50,7 +50,7 @@ def _done_stages(manifest: dict, base: Path) -> set[str]:
     return done
 
 
-def _read(path: Path) -> dict:
+def _read_source_json(path: Path) -> dict:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:

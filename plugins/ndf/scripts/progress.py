@@ -42,18 +42,6 @@ def _cli_report(status: str, summary: str, items=None, **metrics) -> dict:
     return result(TOOL, status, summary, items, metrics)
 
 
-def _repo(root: Path) -> str:
-    import subprocess
-
-    p = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True)
-    if p.returncode == 0 and p.stdout.strip():
-        return p.stdout.strip()
-    import state_home
-
-    got = state_home.find_git_dir(root)
-    return str(got[1].parent if got else root.resolve())
-
-
 def _project(root: Path) -> dict:
     import decl
 
@@ -126,7 +114,7 @@ def cmd_new(a, store: pdb.Store) -> tuple[dict, int]:
             drafts.append(pm.EventDraft("disabled", "conductor", s.name, 1, reason=enabled[s.name].reason or "無効"))
     doc = _snapshot_doc(snap, enabled, a.issues, a.pace, root, {"judgment": judged})
     with pdb.transaction(store) as conn:
-        tid = pdb.create_table(conn, "sprint", _repo(root), a.name, a.lane, doc, drafts)
+        tid = pdb.create_table(conn, "sprint", pdb.progress_repo_key(root), a.name, a.lane, doc, drafts)
         if a.lane:
             pdb.lane_write(conn, a.lane, pm.EventDraft("row_started", "conductor", str(a.row), payload={"row": a.row, "sprint": tid}))
     off = [{"stage": k, "reason": v.reason, "source": v.source} for k, v in enabled.items() if not v.enabled]
@@ -358,11 +346,11 @@ def cmd_adopt(a, store: pdb.Store) -> tuple[dict, int]:
         enabled = {s.name: wd.Enablement(True) for s in snap.stages}
         doc = _snapshot_doc(snap, enabled, issues, m.get("進め方") or "normal", root, {"adopted_from": str(path)})
         with pdb.transaction(store) as conn:
-            tid = pdb.create_table(conn, "sprint", _repo(root), m.get("スプリント") or path.parent.name, None, doc, drafts)
+            tid = pdb.create_table(conn, "sprint", pdb.progress_repo_key(root), m.get("スプリント") or path.parent.name, None, doc, drafts)
         failed = [{"stage": d.row_key, "reason": d.reason} for d in drafts if d.kind == "adopted" and d.resolved_state() == pm.FAILED]
         return _cli_report("ok", f"スプリントを取り込んだ（失敗にした工程 {len(failed)}）", failed, table=tid), 0
     head, lane_rows = progress_adopt.plan_drafts(root, a.plan)
-    repo, lanes = _repo(root), {}
+    repo, lanes = pdb.progress_repo_key(root), {}
     with pdb.transaction(store) as conn:
         pid = pdb.create_table(conn, "plan", repo, a.plan, None, None, head)
         for name, rows in lane_rows.items():
