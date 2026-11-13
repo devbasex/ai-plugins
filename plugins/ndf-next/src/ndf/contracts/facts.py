@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from functools import cache
 from typing import Any, NamedTuple
 
 from jsonschema import Draft202012Validator
@@ -29,10 +30,6 @@ class Table(NamedTuple):
     owner: str
     columns: dict[str, dict[str, Any]]
     rows: tuple[dict[str, Any], ...]
-
-
-_cache: dict[str, Table] = {}
-contracts.on_reset(_cache.clear)
 
 
 def _row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -71,13 +68,15 @@ def table(name: str) -> Table:
     """表 `facts/<name>.json` を 1 プロセスに 1 回読んで返す。"""
     if not NAME.match(name):
         raise FactsError(f"表の名前が違う形: {name!r}")
-    if name not in _cache:
-        try:
-            raw = contracts.load_json(f"{FACTS_DIR}/{name}.json")
-        except contracts.ContractError as exc:
-            raise FactsError(str(exc)) from None
-        _cache[name] = _validate(raw, name)
-    return _cache[name]
+    return _read(name)
+
+
+@cache
+def _read(name: str) -> Table:
+    return _validate(contracts.load_as(f"{FACTS_DIR}/{name}.json", FactsError), name)
+
+
+contracts.on_reset(_read.cache_clear)
 
 
 def _require_columns(t: Table, cols) -> None:

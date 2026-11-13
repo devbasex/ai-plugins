@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -66,6 +68,23 @@ def load_json(rel: str) -> Any:
         raise ContractError(f"契約 {path}: {exc}") from None
     except ValueError as exc:
         raise ContractError(f"契約 {path} が JSON として壊れている: {exc}") from None
+
+
+@contextmanager
+def raised_as(error_cls: type[ContractError]) -> Iterator[None]:
+    """中で起きた `ContractError` を読み手の例外 `error_cls` へ包み直す（`error_cls` はそのまま通す）。"""
+    try:
+        yield
+    except error_cls:
+        raise
+    except ContractError as exc:
+        raise error_cls(str(exc)) from None
+
+
+def load_as(rel: str, error_cls: type[ContractError]) -> Any:
+    """`load_json` の誤りを読み手の例外 `error_cls` で返す。"""
+    with raised_as(error_cls):
+        return load_json(rel)
 
 
 @cache

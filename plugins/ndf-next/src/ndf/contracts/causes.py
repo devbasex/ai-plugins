@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import cache
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -43,10 +44,6 @@ class Route(NamedTuple):
     target: Optional[str]
     wait: float
     kind: str
-
-
-_cache: dict[str, CauseRow] = {}
-contracts.on_reset(_cache.clear)
 
 
 def stopped_codes() -> frozenset[int]:
@@ -90,17 +87,14 @@ def validate(raw: Any) -> dict[str, CauseRow]:
     return out
 
 
+@cache
 def table() -> dict[str, CauseRow]:
     """表を 1 プロセスに 1 回読み、種類ごとの行を返す。"""
-    if not _cache:
-        try:
-            raw = contracts.load_json(TABLE)
-            _cache.update(validate(raw))
-        except CausesError:
-            raise
-        except contracts.ContractError as exc:
-            raise CausesError(str(exc)) from None
-    return _cache
+    with contracts.raised_as(CausesError):
+        return validate(contracts.load_json(TABLE))
+
+
+contracts.on_reset(table.cache_clear)
 
 
 def row(kind: str) -> CauseRow:

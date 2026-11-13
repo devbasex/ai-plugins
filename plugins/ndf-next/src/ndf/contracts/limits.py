@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from functools import cache
 from typing import NamedTuple, Optional
 
 from ndf import contracts
@@ -34,10 +35,6 @@ class Policy(NamedTuple):
     count: Optional[int] = None
 
 
-_cache: dict[str, Policy] = {}
-contracts.on_reset(_cache.clear)
-
-
 def validate(raw: object) -> dict[str, Policy]:
     """宣言の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
     errs = contracts.schema_errors(raw, SCHEMA)
@@ -46,15 +43,13 @@ def validate(raw: object) -> dict[str, Policy]:
     return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
 
 
+@cache
 def table() -> dict[str, Policy]:
     """宣言を 1 プロセスに 1 回読む。"""
-    if not _cache:
-        try:
-            raw = contracts.load_json(DECLARATION)
-        except contracts.ContractError as exc:
-            raise LimitsError(str(exc)) from None
-        _cache.update(validate(raw))
-    return _cache
+    return validate(contracts.load_as(DECLARATION, LimitsError))
+
+
+contracts.on_reset(table.cache_clear)
 
 
 def policy(name: str) -> Policy:
