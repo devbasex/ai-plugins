@@ -75,8 +75,10 @@ def declared_tops(plugin_root: Path) -> frozenset[str]:
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
     dists = {_normalize(re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0]) for s in specs}
-    return frozenset(top for top, owners in metadata.packages_distributions().items()
-                     if any(_normalize(o) in dists for o in owners))
+    installed = {top for top, owners in metadata.packages_distributions().items()
+                 if any(_normalize(o) in dists for o in owners)}
+    # 入れていない依存（`--no-dev` の環境の開発用の依存）は、依存の名前から最上位のモジュールの名前を推す
+    return frozenset(installed | {d.replace("-", "_") for d in dists})
 
 
 def _normalize(dist: str) -> str:
@@ -86,7 +88,7 @@ def _normalize(dist: str) -> str:
 def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
     """I3: 自分のパッケージ・標準ライブラリ・宣言した依存の外の import と、旧いプラグインのパスの文字。"""
     allowed = LOCAL_TOPS | frozenset(sys.stdlib_module_names) | declared_tops(scope.plugin_root)
-    path_pattern = re.compile(rf"(?<![\w-]){re.escape(old_plugin)}(?![\w-])")
+    path_pattern = re.compile(rf"(?<![\w-]){re.escape(old_plugin)}(?=/|$)")
     found = []
     for src in scope.python():
         for node in ast.walk(src.tree):

@@ -56,7 +56,7 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["structure"]
     found = []
     for src in scope.code():
-        lines = src.text.count("\n") + 1
+        lines = len(src.text.splitlines())
         if lines > conf["max_lines"]:
             found.append(Finding("lines", src.rel, 1, f"{lines} 行（安全網 {conf['max_lines']} 行）。責務で分ける"))
         module = module_name(scope, src)
