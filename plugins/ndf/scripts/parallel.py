@@ -53,6 +53,7 @@ import parallel_external_cli as px  # noqa: E402
 import parallel_hold_cli as phc  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_ledger as plg  # noqa: E402
+import parallel_tables as ptab  # noqa: E402
 from parallel_args import add_answer_parsers, add_release_parsers, add_run_parsers  # noqa: E402
 from parallel_lane_cli import add_lane_parser, cmd_lane  # noqa: E402,F401  副命令 lane（#2733）
 from parallel_end import add_end_parsers, cmd_end, cmd_verified, send_verify  # noqa: E402,F401  副命令 end・verified（#3058）
@@ -147,7 +148,7 @@ QUEUED = "。耐久ワークフローが動いていないため、台帳に残�
 def accepting(main: Path, name: str) -> dict:
     """依頼・問い・答えを受け付ける計画か（動いているか失われた。#2647 の決定 8）。受け付けなければ 1 で終える。
     失われた計画なら `{"queued": True}`（結果の `metrics` へ足す）を返す。"""
-    st = plg.plan_state(main, name, pl.run_status(main, name))
+    st = ptab.plan_state_word(main, name, pl.run_status(main, name))
     if not plg.accepts(st):
         reply("stopped", f"並列の計画 {name} が動いていない", code=1)
     return {"queued": True} if st == "lost" else {}
@@ -282,7 +283,7 @@ def cmd_stop(a) -> None:
     plan, items, _ = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
-    st = plg.plan_state(main, a.name, pl.run_status(main, a.name))
+    st = ptab.plan_state_word(main, a.name, pl.run_status(main, a.name))
     if st == "running":
         msg, key = ({"kind": "stop", "force": True}, "stop:force") if a.force else ({"kind": "stop"}, "stop")
         sent(pl.deliver_message, main, a.name, msg, "inbox", key)
@@ -299,7 +300,6 @@ def cmd_stop(a) -> None:
 def _cancel_plan_table(main: Path, name: str) -> list[str]:
     """計画の進行表を中止にし、未着手の行を中止にする（#3092 の D: 中止）。実行中のスプリントの進行表の ID を返す。
     スプリントの進行表の状態はレーンの conductor だけが書く（I6）ため、止めたレーンを起こすときに `progress.py cancel` を渡す。"""
-    import parallel_tables as ptab
     import progress_db as pdb
 
     try:

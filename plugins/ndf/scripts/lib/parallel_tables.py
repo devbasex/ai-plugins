@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -26,7 +27,7 @@ def lane_table_name(plan: str, lane: str) -> str:
     return f"{plan}/{lane}"
 
 
-def _store(main: Path, create: bool) -> Optional[pdb.Store]:
+def _plan_store(main: Path, create: bool) -> Optional[pdb.Store]:
     """進行表の DB。`create` が偽で SQLite のファイルがまだ無ければ None（読むだけの副命令で DB を作らない）。"""
     try:
         url = pdb.default_url(main)
@@ -40,7 +41,7 @@ def _store(main: Path, create: bool) -> Optional[pdb.Store]:
 @contextlib.contextmanager
 def plan_tx(main: Path, create: bool = False) -> Iterator[Optional[object]]:
     """計画の進行表の DB の 1 つのトランザクション。DB が無ければ None を渡す。"""
-    store = _store(main, create)
+    store = _plan_store(main, create)
     if store is None:
         yield None
         return
@@ -201,3 +202,16 @@ def wake_list(main: Path, name: str) -> list[tuple[str, int]]:
     """起こせるレーンと行（`after` を満たす未着手の行があり、実行中の行が無いレーン）。進行表が無ければ空。"""
     got = read_plan(main, name)
     return plr.wakeable_lanes(got[0], got[1]) if got else []
+
+
+def plan_state_word(main: Path, name: str, status: Optional[str]) -> str:
+    """計画の状態の語（`parallel_ledger.plan_state` と同じ語）。計画の進行表があればその畳み込みから決め（受け入れ条件 16）、
+    無ければ取り込み前の計画として台帳から決める。"""
+    import parallel_ledger as plg
+
+    try:
+        got = table_plan_state(main, name, status, plg.RUNNING)
+    except pdb.Unreadable as exc:
+        print(f"計画の進行表を読めないため台帳から計画の状態を決める: {exc}", file=sys.stderr)
+        got = None
+    return got if got is not None else plg.plan_state(main, name, status)

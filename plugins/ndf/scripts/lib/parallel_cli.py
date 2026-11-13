@@ -18,6 +18,7 @@ import parallel_hold as ph
 import parallel_homes
 import parallel_lane as pl
 import parallel_ledger as plg
+import parallel_tables as ptab
 import parallel_plan as pp
 import parallel_route as prt
 
@@ -43,7 +44,7 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
         marked = pr_run.mark_organizer(main, a.name)  # 打ったセッションへ付け直す（#2637）
         reply("ok", f"run は動いている（pid {pid}）", notes, pid=pid, organizer=marked, next=wait_line(self_path, a.name), environment=env)
     status = pl.run_status(main, a.name)
-    state = plg.plan_state(main, a.name, status)
+    state = ptab.plan_state_word(main, a.name, status)
     if state == "closed" and status != "SUCCESS":
         reply("stopped", f"並列の計画 {a.name} は閉じている（作り直さない）", notes, 1)
     if status is None:
@@ -67,7 +68,6 @@ def start_plan(a, reply, main: Path, checked_plan, self_path: Path) -> None:
         )
     except OSError as exc:
         reply("stopped", f"計画の台帳へ書けないため run を起動しない: {exc}", notes, 2)
-    import parallel_tables as ptab
     import progress_db as pdb
     import progress_model as pm
 
@@ -173,7 +173,7 @@ def wait_plan(a, reply, main: Path, self_path: Path) -> None:
 
     restart = f"python3 {self_path} start {a.name}"
     if not pl.record_exists(main, a.name):
-        if plg.plan_state(main, a.name, None) == "lost":
+        if ptab.plan_state_word(main, a.name, None) == "lost":
             if pl.live_run_pid(main, a.name) is not None:  # 作り直しの run が記録を開く前
                 reply("stopped", "run が耐久ワークフローを作り直している。同じ wait を打ち直す", code=3, next=wait_line(self_path, a.name))
             reply(

@@ -164,11 +164,10 @@ def step_stop_lanes(main: str, names: list[str]) -> list[str]:
 
 @durable.step(name="parallel.finish")
 def step_finish(main: str, name: str, progress: dict) -> None:
-    """役割の印を消し、止める指示のファイルと再開の印を消し、`plan.md` を描画し直し、台帳を閉じる（I11）。
-    全レーンの行が完了か中止で答えていない依頼が無ければ、計画の進行表を完了にする（#3092 の I16。中止した計画には書かない）。"""
-    import parallel_tables as ptab
-
-    ptab.finish_plan(Path(main), name)
+    """役割の印を消し、止める指示のファイルと再開の印を消し、`plan.md` を描画し直し、台帳を閉じる（I11）。計画の進行表の完了も書く（#3092 の I16）。"""
+    __import__("parallel_tables").finish_plan(
+        Path(main), name
+    )  # 全レーンの行が終わり答えていない依頼が無いときだけ。中止した計画には書かない
     mark_organizer(Path(main), name, clear=True)
     plg.close_ledger(Path(main), name)
     ph.clear_plan(Path(main), name)
@@ -293,14 +292,8 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
         return {"lanes": self.lanes, "releases": [{k: v for k, v in r.items() if k != "presented"} for r in self.releases]}
 
     def summary(self, status: str) -> dict:
-        return {
-            "status": status,
-            "lanes": self.lanes,
-            "releases": self.progress()["releases"],
-            "pending": [r["id"] for r in self.pending],
-            "holds": self.holds,
-            "prior_waits": [q for q in self.questions if q.get("loop")],
-        }
+        return {"status": status, "lanes": self.lanes, "releases": self.progress()["releases"], "pending": [r["id"] for r in self.pending],
+                "holds": self.holds, "prior_waits": [q for q in self.questions if q.get("loop")]}  # fmt: skip
 
     def stopped(self) -> set[str]:
         return {n for n, st in self.lanes.items() if st.get("started") and st.get("state") == "stopped"}

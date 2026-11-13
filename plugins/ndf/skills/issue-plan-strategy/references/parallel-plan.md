@@ -19,9 +19,14 @@ python3 "$NDF_SCRIPTS/parallel.py" init p1 <<'EOF'
 EOF
 ```
 
-`init` は検査を通った下書きから、メインディレクトリの `.ndf/parallel/p1/plan.json`（正本）・`plan.md`（人が読む描画）と、
+`init` は検査を通った下書きから、メインディレクトリの `.ndf/parallel/p1/plan.json`（計画の入力）・`plan.md`（人が読む描画）と、
 レーンの数だけの引継ぎ文書（`.ndf/handoff/loop-lroot.md`・`loop-lflow.md`・`issue-2400.md`）を書く。
 どれもコミットしない。
+
+計画の状態の正本は、`start` が作る計画の進行表（レーンの配列・上限・答えていない依頼。オーガナイザーが書く）と、レーンごとの
+レーンの進行表（スプリントの順番表。最初の行は `input`。レーンの側が書く）である。置き場は工程の進行表と同じ DB（環境変数
+`NDF_PROGRESS_DB`。無ければチェックアウトの状態の置き場の SQLite）。`lane add`・`set` は書く前に計画の決まり（触る場所の重なり・
+`after` の輪・上限）で判定し、断れば何も書かない。計画の台帳はメッセージの記録だけを持つ。
 
 ## レーンごとに決めること
 
