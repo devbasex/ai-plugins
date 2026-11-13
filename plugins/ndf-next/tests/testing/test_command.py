@@ -100,3 +100,93 @@ def test_report_refuses_a_wrong_period(tmp_path):
     proc = _ndf(["report", "--since", "seven"], tmp_path)
     proc.communicate()
     assert proc.returncode == 2
+
+
+# --- 現状固定テスト（_run の経路: 待ちの上限の上書き・諦め・置き場を使えない・シグナル・CI・入力の誤り） ---
+
+
+def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(project):
+    from ndf.testing.limits import Limits
+
+    root, bin_dir, log = project
+    directory = Path(os.environ[slots.SLOTS_DIR_ENV])
+    holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
+    with slots.gate("fakerun .", root, kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9):
+        proc = _ndf(["run", "--wait-limit", "1", "--", "fakerun ."], root, bin_dir, log)
+        out, err = proc.communicate()
+    assert (proc.returncode, out) == (2, "")
+    result = json.loads(err)
+    assert result["status"] == "stopped"
+    assert result["cause"] == {"kind": slots.GAVE_UP}
+    assert result["metrics"]["available_mib"] is None
+    assert result["metrics"]["waited_seconds"] >= 1
+    assert "諦めた" in result["summary"]
+    assert not log.exists()
+    rows = slots.read_events(directory)
+    assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
+    assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
+
+
+def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):
+    root, bin_dir, log = project
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, **{slots.SLOTS_DIR_ENV: str(blocker / "slots")})
+    out, err = proc.communicate()
+    assert (proc.returncode, out) == (0, "out\n")
+    assert "err" in err.splitlines()
+    assert err.splitlines()[-1].startswith("枠の置き場を使えないので枠を取らずに走らせた: ")
+    assert log.exists()
+
+
+def test_signal_is_forwarded_and_recorded_as_interrupted(project):
+    import signal
+
+    from ndf.testing import waits
+
+    root, bin_dir, log = project
+    proc = _ndf(["run", "--", "fakerun . && sleep 60"], root, bin_dir, log)
+    try:
+        waits.wait_until(lambda: log.exists() and "start" in log.read_text(), what="fakerun の開始")
+        proc.send_signal(signal.SIGTERM)
+        with waits.returns_before(60):
+            _, err = proc.communicate()
+    finally:
+        proc.kill()
+    assert proc.returncode == 128 + signal.SIGTERM
+    rows = slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV]))
+    assert [row["result"] for row in rows] == [slots.INTERRUPTED]
+    assert rows[0]["kind"] == slots.DIRECT
+
+
+def test_ci_run_takes_no_slot_and_keeps_the_exit_code(project):
+    root, bin_dir, log = project
+    proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, GITHUB_ACTIONS="true", FAKE_EXIT="3")
+    out, err = proc.communicate()
+    assert (proc.returncode, out, err) == (3, "out\n", "err\n")
+    assert slots.read_events(Path(os.environ[slots.SLOTS_DIR_ENV])) == []
+
+
+def test_command_without_double_dash_is_accepted(project):
+    root, bin_dir, log = project
+    proc = _ndf(["run", "fakerun ."], root, bin_dir, log)
+    out, _ = proc.communicate()
+    assert (proc.returncode, out) == (0, "out\n")
+
+
+@pytest.mark.parametrize(
+    ("args", "summary"),
+    [
+        (["run", "--wait-limit", "0", "--", "fakerun ."], "--wait-limit は 1 以上の秒にする"),
+        (["run", "--", "a", "b"], "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す"),
+        (["run", "--"], "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す"),
+        (["run", "--", "  "], "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す"),
+    ],
+)
+def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
+    root, bin_dir, log = project
+    proc = _ndf(args, root, bin_dir, log)
+    out, err = proc.communicate()
+    assert (proc.returncode, out) == (2, "")
+    assert json.loads(err) == {"status": "stopped", "summary": summary}
+    assert not log.exists()
