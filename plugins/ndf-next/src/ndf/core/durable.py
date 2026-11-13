@@ -21,9 +21,6 @@ R = TypeVar("R")
 # DBOS の記録に載せるログの下限。標準出力は結果 JSON の 1 行に使うため、DBOS の INFO を出さない
 LOG_LEVEL = "WARNING"
 
-# 終わっていない耐久ワークフローの状態（落ちた後の回復では ENQUEUED に見えることがある）
-UNFINISHED = frozenset({"PENDING", "ENQUEUED"})
-
 
 def workflow(fn: Callable[..., R]) -> Callable[..., R]:
     """関数を耐久ワークフローにする。中で呼んだ耐久ステップの結果が記録に残る。"""
