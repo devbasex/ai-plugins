@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -88,7 +89,10 @@ def test_wrong_setting_refuses_to_run(project):
 def test_report_reads_the_records(tmp_path):
     directory = Path(os.environ[slots.SLOTS_DIR_ENV])
     directory.mkdir(parents=True)
-    slots.append_event(directory, {"at": slots._now_iso(time.time()), "waited_seconds": 3, "result": "gave_up"})
+    slots.append_event(
+        directory,
+        {"at": datetime.fromtimestamp(time.time(), timezone.utc).isoformat(timespec="seconds"), "waited_seconds": 3, "result": "gave_up"},
+    )
     proc = _ndf(["report", "--since", "1d"], tmp_path)
     out, _ = proc.communicate()
     assert proc.returncode == 0

@@ -8,6 +8,7 @@ import sys
 import textwrap
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,11 @@ from ndf.testing.limits import Limits
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 PLENTY = 10**9
 POLL = 0.01
+
+
+def _at(seconds: float) -> str:
+    """記録の行の時刻（UTC の ISO 8601、秒まで）。実装の整形に頼らず作る。"""
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="seconds")
 
 
 def _limits(max_runs: int, wait: int = 60, floor: int = 1) -> Limits:
@@ -217,10 +223,10 @@ def test_memory_stop_ends_only_the_last_started_run(tmp_path):
 def test_records_drop_old_and_excess_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(slots, "KEEP_ROWS", 5)
     now = time.time()
-    old = {"at": slots._now_iso(now - 31 * 86400), "result": "finished"}
-    recent = {"at": slots._now_iso(now - 60), "result": "finished"}
+    old = {"at": _at(now - 31 * 86400), "result": "finished"}
+    recent = {"at": _at(now - 60), "result": "finished"}
     (tmp_path / slots.EVENTS_FILE).write_text("\n".join(json.dumps(r) for r in [old] + [recent] * 5) + "\n")
-    slots.append_event(tmp_path, {"at": slots._now_iso(now), "result": "gave_up"}, now=now)
+    slots.append_event(tmp_path, {"at": _at(now), "result": "gave_up"}, now=now)
     rows = slots.read_events(tmp_path)
     assert len(rows) == 5 and rows[-1]["result"] == "gave_up" and old not in rows
 
@@ -228,10 +234,10 @@ def test_records_drop_old_and_excess_rows(tmp_path, monkeypatch):
 def test_report_counts_and_never_lets_the_oom_increase_go_negative(tmp_path):
     now = time.time()
     rows = [
-        {"at": slots._now_iso(now - 9 * 86400), "waited_seconds": 99, "result": "gave_up", "oom_kill": 0},  # 期間の外
-        {"at": slots._now_iso(now - 300), "waited_seconds": 4, "result": "finished", "oom_kill": 5},
-        {"at": slots._now_iso(now - 200), "waited_seconds": 0, "result": "memory_stopped", "oom_kill": 7},
-        {"at": slots._now_iso(now - 100), "waited_seconds": 6, "result": "gave_up", "oom_kill": 1},  # 再起動で減った
+        {"at": _at(now - 9 * 86400), "waited_seconds": 99, "result": "gave_up", "oom_kill": 0},  # 期間の外
+        {"at": _at(now - 300), "waited_seconds": 4, "result": "finished", "oom_kill": 5},
+        {"at": _at(now - 200), "waited_seconds": 0, "result": "memory_stopped", "oom_kill": 7},
+        {"at": _at(now - 100), "waited_seconds": 6, "result": "gave_up", "oom_kill": 1},  # 再起動で減った
     ]
     (tmp_path / slots.EVENTS_FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
     got = slots.report(tmp_path, 7 * 86400, now=now, current_oom=3)
@@ -254,7 +260,7 @@ def _write_rows(directory: Path, rows: list[dict], tail: str = "") -> None:
 
 def test_report_skips_unreadable_rows_sorts_by_time_and_ignores_non_integer_oom(tmp_path):
     now = 1_800_000_000.0
-    iso = slots._now_iso
+    iso = _at
     rows = [
         {"at": iso(now - 100), "waited_seconds": 0.04, "result": "finished", "oom_kill": 4},
         {"at": iso(now - 300), "waited_seconds": 0.03, "result": "finished", "oom_kill": 2},  # 書いた順でなく時刻の順に並べる
