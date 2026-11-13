@@ -37,11 +37,12 @@ MEASURED_161 = [
     "実装レビュー",
     "後片付け",
 ]
-# 上の並びに、実装・構造改善・Pull Request を足した完全版。抜けは確定仕様化だけになる。
+# 上の並びに、詳細設計・実装・構造改善・Pull Request を足した完全版。抜けは確定仕様化だけになる。
 FULL_161 = [
     "作業場所の用意",
     "要求と受け入れ条件",
     "設計",
+    "詳細設計",
     "ドキュメント再構成",
     "ドキュメントレビュー",
     "後片付け",
@@ -137,7 +138,7 @@ def test_the_report_shows_how_to_record_the_missing_stage(repo: Path, state: Pat
 
 
 def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
-    seed(repo, state, 161, "standard", MEASURED_161[:4])
+    seed(repo, state, 161, "standard", [*MEASURED_161[:3], "詳細設計", MEASURED_161[3]])
 
     out = report(repo, state, 161).stdout
 
@@ -152,7 +153,18 @@ def test_a_conditional_stage_is_listed_apart(repo: Path, state: Path) -> None:
         state,
         161,
         "legacy-refactor",
-        ["作業場所の用意", "設計", "計画", "実装", "構造改善", "実装レビュー", "完了判定", "Pull Request", "後片付け"],
+        [
+            "作業場所の用意",
+            "設計",
+            "詳細設計",
+            "計画",
+            "実装",
+            "構造改善",
+            "実装レビュー",
+            "完了判定",
+            "Pull Request",
+            "後片付け",
+        ],
     )
 
     out = report(repo, state, 161).stdout
@@ -378,6 +390,7 @@ FAST_THROUGH_RELEASE = [
     "要求と受け入れ条件",
     "作業場所の用意",
     "設計",
+    "詳細設計",
     "ドキュメント再構成",
     "ドキュメントレビュー",
     "計画",
