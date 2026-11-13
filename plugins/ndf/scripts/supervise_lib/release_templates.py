@@ -115,13 +115,9 @@ def _snapshot_step(plugin: str, v: str, after_notes: str) -> dict:
 
 def _cleanup_step(v: str, prs: str, repo: str | None, review: bool = False) -> dict:
     """本番のリリースの後片付け。`review` なら、その版の衝突の解消のレビューの一時のブランチが残っていれば消す（#3163 の I11）。"""
-    drop = ""
-    if review:
-        heads = " ".join(f"{branch_flow.REVIEW_PREFIX}{v}{s}" for s in ("", branch_flow.REVIEW_BASE_SUFFIX))
-        drop = (
-            f' && for b in {heads}; do if git ls-remote --exit-code --heads origin "$b" >/dev/null; '
-            'then git push -q origin --delete "$b" || exit 1; fi; done'
-        )
+    heads = f"{branch_flow.REVIEW_PREFIX}{v} {branch_flow.REVIEW_PREFIX}{v}{branch_flow.REVIEW_BASE_SUFFIX}"
+    drop = f' && for b in {heads}; do if git ls-remote -q --exit-code --heads origin "$b"; then git push -q origin --delete "$b" || exit 1; fi; done'
+    drop = drop if review else ""
     cmd = (
         f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
         f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}{drop}\''

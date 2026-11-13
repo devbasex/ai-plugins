@@ -269,7 +269,10 @@ def _item(reviews):
 def test_drift_lists_review_units_that_differ_from_the_declaration():
     """受け入れ条件 11: 宣言と違う種類だけ branch_flow.reviews.<種類> の行を出す。"""
     declared = branch_flow.parse_flow(
-        {**SELECTED, "reviews": {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"}}}
+        {
+            **SELECTED,
+            "reviews": {"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"}},
+        }
     )
     item = _item({"impl": {"checks": ["cross-review"], "diff": "pr"}, "sprint": {"checks": list(branch_flow.CHECKS), "diff": "unchecked"}})
     rows = mbf.drift(declared, item)

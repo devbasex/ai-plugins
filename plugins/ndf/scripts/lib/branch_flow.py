@@ -223,7 +223,7 @@ class ReviewRow:
         return {"checks": list(self.checks), "diff": self.diff}
 
 
-def _row(kind: str, checks: tuple, diff: str) -> ReviewRow:
+def _ordered_row(kind: str, checks: tuple, diff: str) -> ReviewRow:
     return ReviewRow(kind, tuple(c for c in CHECKS if c in checks), diff)
 
 
@@ -237,14 +237,14 @@ REVIEW_ALLOWED: dict[str, dict] = {
 }
 # 書いていない種類の値。キーは課題のまとまりの記録が有るか（I5。ndf v10.27.61 の決め打ちと同じ）
 REVIEW_DEFAULTS: dict[str, dict[bool, ReviewRow]] = {
-    "impl": {True: _row("impl", ("cross-review",), "pr"), False: _row("impl", (), "none")},
+    "impl": {True: _ordered_row("impl", ("cross-review",), "pr"), False: _ordered_row("impl", (), "none")},
     "sprint": {
-        True: _row("sprint", ("cross-refactoring", "behavior"), "unchecked"),
-        False: _row("sprint", CHECKS, "unchecked"),
+        True: _ordered_row("sprint", ("cross-refactoring", "behavior"), "unchecked"),
+        False: _ordered_row("sprint", CHECKS, "unchecked"),
     },
-    "release": {True: _row("release", (), "none"), False: _row("release", (), "none")},
-    "design": {True: _row("design", ("cross-review",), "pr"), False: _row("design", ("cross-review",), "pr")},
-    "spec": {True: _row("spec", (), "none"), False: _row("spec", (), "none")},
+    "release": {True: _ordered_row("release", (), "none"), False: _ordered_row("release", (), "none")},
+    "design": {True: _ordered_row("design", ("cross-review",), "pr"), False: _ordered_row("design", ("cross-review",), "pr")},
+    "spec": {True: _ordered_row("spec", (), "none"), False: _ordered_row("spec", (), "none")},
 }
 
 
@@ -264,112 +264,86 @@ class ReviewUnits:
 
     def uncovered(self) -> list[dict]:
         """まとまりの記録の有無の各場合で、実装の差分を cross-review で覆う行が無ければ指摘の行（I4）。"""
-        out = []
-        for bundled in (True, False):
-            if not any(self.row(k, bundled).covers_impl() for k in COVERING):
-                case = "有る" if bundled else "無い"
-                out.append(
-                    {
-                        "key": REVIEWS_KEY,
-                        "value": self.as_dict(),
-                        "allowed": [f"{k} に cross-review / {d}" for k, d in COVERING.items()],
-                        "because": f"課題のまとまりの記録が{case}とき、実装の差分がどの PR でも cross-review されない",
-                    }
-                )
-        return out
+        want = [f"{k} に cross-review / {d}" for k, d in COVERING.items()]
+        return [
+            _flow_item(
+                REVIEWS_KEY,
+                self.as_dict(),
+                want,
+                f"課題のまとまりの記録が{'有る' if b else '無い'}とき、実装の差分がどの PR でも cross-review されない",
+            )
+            for b in (True, False)
+            if not any(self.row(k, b).covers_impl() for k in COVERING)
+        ]
 
     def overlaps(self) -> list[dict]:
         """書いた行と書いていない種類の既定値の行が、同じ場合に実装の差分を覆えば指摘の行（I12）。"""
-        out = []
-        for kind in COVERING:
-            if kind in self.declared:
-                continue
-            for bundled in (True, False):
-                written = [k for k, r in self.declared.items() if r.covers_impl()]
-                if written and REVIEW_DEFAULTS[kind][bundled].covers_impl():
-                    out.append(
-                        {
-                            "key": f"{REVIEWS_KEY}.{kind}",
-                            "value": None,
-                            "allowed": [f"{kind} の行を書き、cross-review を掛けるかを決める"],
-                            "because": f"既定値の {kind} が、書いた {', '.join(written)} と同じ実装の差分を cross-review する",
-                        }
-                    )
-                    break
-        return out
+        written = [k for k, r in self.declared.items() if r.covers_impl()]
+        return [
+            _flow_item(
+                f"{REVIEWS_KEY}.{kind}",
+                None,
+                [f"{kind} の行を書き、cross-review を掛けるかを決める"],
+                f"既定値の {kind} が、書いた {', '.join(written)} と同じ実装の差分を cross-review する",
+            )
+            for kind in COVERING
+            if written and kind not in self.declared and any(REVIEW_DEFAULTS[kind][b].covers_impl() for b in (True, False))
+        ]
 
     def as_dict(self) -> dict:
         return {k: self.declared[k].as_dict() for k in REVIEW_KINDS if k in self.declared}
 
 
+def _flow_item(key: str, value, allowed: list, because: str | None = None) -> dict:
+    """直すキー・値・許す値（・理由）の指摘の行（`FlowError.items` の形）。"""
+    return {"key": key, "value": value, "allowed": allowed, **({"because": because} if because else {})}
+
+
 def _review_row_items(kind: str, value) -> tuple[ReviewRow | None, list[dict]]:
     """種類 1 行の形を読む（I1）。"""
-    key = f"{REVIEWS_KEY}.{kind}"
-    allowed = REVIEW_ALLOWED[kind]
+    key, allowed = f"{REVIEWS_KEY}.{kind}", REVIEW_ALLOWED[kind]
     if not isinstance(value, dict):
-        return None, [{"key": key, "value": value, "allowed": ["checks と diff のオブジェクト"]}]
-    items = [
-        {"key": f"{key}.{k}", "value": v, "allowed": ["(このキーは無い)", "checks", "diff"]}
-        for k, v in value.items()
-        if k not in ("checks", "diff")
-    ]
-    checks = value.get("checks")
+        return None, [_flow_item(key, value, ["checks と diff のオブジェクト"])]
+    items = [_flow_item(f"{key}.{k}", v, ["(このキーは無い)", "checks", "diff"]) for k, v in value.items() if k not in ("checks", "diff")]
+    checks, diff = value.get("checks"), value.get("diff")
     if not (
-        isinstance(checks, list)
-        and all(isinstance(c, str) and c in allowed["checks"] for c in checks)
-        and len(set(checks)) == len(checks)
+        isinstance(checks, list) and all(isinstance(c, str) and c in allowed["checks"] for c in checks) and len(set(checks)) == len(checks)
     ):
-        items.append({"key": f"{key}.checks", "value": checks, "allowed": list(allowed["checks"])})
-    diff = value.get("diff")
+        items.append(_flow_item(f"{key}.checks", checks, list(allowed["checks"])))
     if not isinstance(diff, str) or diff not in allowed["diff"]:
-        items.append({"key": f"{key}.diff", "value": diff, "allowed": list(allowed["diff"])})
-    if items:
-        return None, items
-    return _row(kind, tuple(checks), diff), []
+        items.append(_flow_item(f"{key}.diff", diff, list(allowed["diff"])))
+    return (None, items) if items else (_ordered_row(kind, tuple(checks), diff), [])
+
+
+def _combination_items(kind: str, row: ReviewRow, promotion: Promotion | None) -> list[dict]:
+    """形を通った行の組み合わせの誤り（I2・I3）。"""
+    key, items = f"{REVIEWS_KEY}.{kind}", []
+    if row.diff == "none" and row.checks:
+        items.append(_flow_item(f"{key}.checks", list(row.checks), ["[]"], "diff = none"))
+    elif row.diff != "none" and not row.checks:
+        items.append(_flow_item(f"{key}.checks", [], list(REVIEW_ALLOWED[kind]["checks"]), f"diff = {row.diff}"))
+    if promotion is not None and REVIEW_ALLOWED[kind]["needs_units"] and not promotion.selects_units:
+        items.append(_flow_item(key, row.as_dict(), ["(書かない)"], f"promotion = {promotion.name}"))
+    return items
 
 
 def parse_reviews(value, promotion: Promotion | None) -> tuple[ReviewUnits, list[dict]]:
     """`reviews` の値を読み、形と組み合わせ（I1〜I4・I12）の指摘の行と一緒に返す。指摘があれば `ReviewUnits()`。
 
-    `promotion` が None（取り込み方の値が誤り）なら、取り込み方との組み合わせ（I3）を見ない。"""
-    if value is None:
-        value = {}
+    `promotion` が None（取り込み方の値が誤り）なら、取り込み方との組み合わせ（I3）を見ない。形の誤りがあれば組み合わせを、
+    組み合わせの誤りがあれば I4・I12 を見ない（誤った行で覆いを数えない）。"""
+    value = {} if value is None else value
     if not isinstance(value, dict):
-        return ReviewUnits(), [{"key": REVIEWS_KEY, "value": value, "allowed": ["PR の種類をキーにしたオブジェクト"]}]
-    items = [
-        {"key": f"{REVIEWS_KEY}.{k}", "value": v, "allowed": ["(この種類は無い)", *REVIEW_KINDS]}
-        for k, v in value.items()
-        if k not in REVIEW_KINDS
-    ]
+        return ReviewUnits(), [_flow_item(REVIEWS_KEY, value, ["PR の種類をキーにしたオブジェクト"])]
+    items = [_flow_item(f"{REVIEWS_KEY}.{k}", v, ["(この種類は無い)", *REVIEW_KINDS]) for k, v in value.items() if k not in REVIEW_KINDS]
     rows = {}
-    for kind in REVIEW_KINDS:
-        if kind in value:
-            row, bad = _review_row_items(kind, value[kind])
-            items += bad
-            if row:
-                rows[kind] = row
-    if items:
-        return ReviewUnits(), items
-    for kind, row in rows.items():
-        if row.diff == "none" and row.checks:
-            items.append({"key": f"{REVIEWS_KEY}.{kind}.checks", "value": list(row.checks), "allowed": ["[]"], "because": "diff = none"})
-        elif row.diff != "none" and not row.checks:
-            items.append(
-                {
-                    "key": f"{REVIEWS_KEY}.{kind}.checks",
-                    "value": [],
-                    "allowed": list(REVIEW_ALLOWED[kind]["checks"]),
-                    "because": f"diff = {row.diff}",
-                }
-            )
-        if promotion is not None and REVIEW_ALLOWED[kind]["needs_units"] and not promotion.selects_units:
-            items.append(
-                {"key": f"{REVIEWS_KEY}.{kind}", "value": row.as_dict(), "allowed": ["(書かない)"], "because": f"promotion = {promotion.name}"}
-            )
-    if items:
-        return ReviewUnits(), items
+    for kind in (k for k in REVIEW_KINDS if k in value):
+        row, bad = _review_row_items(kind, value[kind])
+        items += bad
+        rows.update({kind: row} if row else {})
+    items = items or [i for kind, row in rows.items() for i in _combination_items(kind, row, promotion)]
     units = ReviewUnits(rows)
-    items = units.uncovered() + units.overlaps()
+    items = items or units.uncovered() + units.overlaps()
     return (ReviewUnits(), items) if items else (units, [])
 
 

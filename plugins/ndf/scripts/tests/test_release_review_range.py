@@ -16,7 +16,7 @@ from release_lib import review_range as rr  # noqa: E402
 from step_result import StepError  # noqa: E402
 
 VERSION = "2.0.0"
-RELEASE, SHOW, BASE = rr.names(VERSION)
+RELEASE, SHOW, BASE = rr.review_names(VERSION)
 
 
 def git(repo: Path, *args: str) -> str:
@@ -257,7 +257,7 @@ def test_open_stops_when_the_release_branch_of_an_open_pr_is_gone(env):
     repo, gh = env
     build_release(repo, ["s1", "s2"])
     rr.open_review(repo, VERSION, "resolution", "main", gh)
-    gh.prs[100]["headRefName"] = rr.names("9.9.9")[1]
+    gh.prs[100]["headRefName"] = rr.review_names("9.9.9")[1]
     with pytest.raises(StepError, match="取得できない"):
         rr.open_review(repo, VERSION, "resolution", "main", gh)
     assert gh.open_numbers() == [100]
@@ -266,4 +266,4 @@ def test_open_stops_when_the_release_branch_of_an_open_pr_is_gone(env):
 def test_marks_round_trip():
     body = rr.with_mark("本文", rr.REVIEWED_MARK, "abc1234")
     assert rr.read_mark(rr.with_mark(body, rr.REVIEWED_MARK, "def5678"), rr.REVIEWED_MARK) == "def5678"
-    assert rr.version_of(SHOW) == VERSION and rr.version_of(BASE) is None
+    assert rr.review_version_of(SHOW) == VERSION and rr.review_version_of(BASE) is None

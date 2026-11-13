@@ -38,4 +38,3 @@ def apply_bundle_design(a, waves: list[dict]) -> None:
         design = plans.get(f"design-{h}")
         for m in b.issues[1:] if design is not None else ():
             include_in_design(design, h, m, f"まとまりの課題 #{m} の受け入れ内容も #{h} の設計に含める（#{m} の本文も読む）。")
-

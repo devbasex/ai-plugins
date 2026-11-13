@@ -22,7 +22,7 @@ from supervise_lib.procedures import design_path, survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
-from supervise_lib.review_units import apply_check, apply_design, apply_impl, drop_unchosen, review_row
+from supervise_lib.review_units import apply_check, apply_design, apply_impl, drop_unchosen, fast_review_row
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
@@ -156,8 +156,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             *gate_steps(),
         ],
     }
-    apply_design(a, plan)  # 設計 PR のレビューの単位が none なら、レビューのまとまりを外す（#3163）
-    return with_record(with_revise_note(plan, a, n, doc))
+    return with_record(with_revise_note(apply_design(a, plan), a, n, doc))  # 設計 PR のレビューの単位で組む（#3163）
 
 
 def with_base(steps: list[dict], target: str) -> list[dict]:
@@ -284,9 +283,8 @@ def keep_branch_merge(steps: list[dict], branch: str) -> list[dict]:
 
 
 def sprint_impl_plans(a, repo: str, pace: str | None = None) -> dict:
-    """実装のステージのプラン。まとまりの記録があれば、まとまり 1 つにつき 1 本（#3081 の I8a）。無ければ課題ごとに 1 本（I9）。
-    実装 PR のレビューはレビューの単位の `impl` の行で置く（既定はまとまりの記録があるときだけ cross-review。#3163）。
-    `pace` はプランへ書く進め方。"""
+    """実装のステージのプラン。まとまりの記録があればまとまり 1 つにつき 1 本（#3081 の I8a）、無ければ課題ごとに 1 本（I9）。
+    レビューはレビューの単位の `impl` の行で置く（#3163）。`pace` はプランへ書く進め方。"""
     bundles = getattr(a, "bundles", None)
     if bundles is None:
         plans = {f"impl-{n}": apply_impl(a, plan_sprint_impl(a, n, repo)) for n in a.issue}
@@ -455,14 +453,8 @@ def plan_fast_impl(a, n: int, repo: str) -> dict:
     return apply_impl(a, plan, bundled=False)  # pace: fast は課題のまとまりで実装を組まない（#3163）
 
 
-def fast_review_row(a) -> branch_flow.ReviewRow:
-    """pace: fast の検査のスプリントの PR の行。fast は課題のまとまりで実装を組まないため、まとまりの記録の無い列で解く。"""
-    return review_row(a, "sprint", bundled=False)
-
-
 def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: bool = False) -> dict:
-    """pace: fast の検査（未検査の差分）。cross-refactoring を選ばなければ実装レビューだけで組み（記録の `--review` の印と
-    置いたステップをそろえる）、選ばないレビューのステップを外す（#3163）。"""
+    """pace: fast の検査。cross-refactoring を選ばなければ実装レビューだけで組み、選ばないレビューのステップを外す（#3163）。"""
     row = fast_review_row(a)
     checks = row.checks if row.diff != "none" else ()
     review_only = review_only or "cross-refactoring" not in checks

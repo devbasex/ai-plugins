@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import branch_flow
-from step_result import StepError, gh_json, git, run
+from step_result import EXIT_PRECONDITION, StepError, gh_json, git, run
 
 # レビューの PR の本文に書く印（見せる先頭・範囲の終わり・レビュー済みの先頭）
 SHOWN_MARK = "<!-- ndf:shown-head {sha} -->"
@@ -44,13 +44,13 @@ def with_mark(body: str | None, mark: str, sha: str) -> str:
     return f"{text}\n\n{mark.format(sha=sha)}\n"
 
 
-def names(version: str) -> tuple[str, str, str]:
+def review_names(version: str) -> tuple[str, str, str]:
     """(リリースブランチ, 見せるブランチ, 土台のブランチ)。"""
     show = f"{branch_flow.REVIEW_PREFIX}{version}"
     return f"{branch_flow.RELEASE_PREFIX}{version}", show, show + branch_flow.REVIEW_BASE_SUFFIX
 
 
-def version_of(show: str) -> str | None:
+def review_version_of(show: str) -> str | None:
     """見せるブランチの名前から版。レビューの PR のブランチでなければ None。"""
     if not show.startswith(branch_flow.REVIEW_PREFIX) or show.endswith(branch_flow.REVIEW_BASE_SUFFIX):
         return None
@@ -81,7 +81,7 @@ class GitHub:
             raise StepError(f"レビューの PR #{n} を閉じられない: {p.stderr.strip()[-400:]}")
 
 
-def _fetch(root, branch: str) -> bool:
+def _fetch_branch(root, branch: str) -> bool:
     ref = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
     return git(root, "fetch", "-q", "origin", ref, check=False).returncode == 0
 
@@ -122,11 +122,12 @@ def build_review_pair(root, head: str, patch: str) -> tuple[str, str]:
     tmp = Path(tempfile.mkdtemp(prefix="ndf-review-range-"))
     env = {**os.environ, "GIT_INDEX_FILE": str(tmp / "index")}
     try:
-        (tmp / "remerge.patch").write_text(patch, encoding="utf-8")
         run(["git", "-C", str(root), "read-tree", head], env=env)
-        p = run(["git", "-C", str(root), "apply", "-R", "--cached", str(tmp / "remerge.patch")], env=env, check=False)
+        p = run(["git", "-C", str(root), "apply", "-R", "--cached", "-"], env=env, check=False, input=patch)
         if p.returncode != 0:
-            raise StepError(f"衝突の解消の差分を {head[:12]} へ逆に当てられない（後のマージか直しが同じ行を変えた）: {p.stderr.strip()[-400:]}")
+            raise StepError(
+                f"衝突の解消の差分を {head[:12]} へ逆に当てられない（後のマージか直しが同じ行を変えた）: {p.stderr.strip()[-400:]}"
+            )
         tree = run(["git", "-C", str(root), "write-tree"], env=env).stdout.strip()
     finally:
         for f in tmp.iterdir():
@@ -139,7 +140,7 @@ def build_review_pair(root, head: str, patch: str) -> tuple[str, str]:
 
 def review_from(root, version: str, head: str, production: str, gh: GitHub) -> tuple[str, list[dict]]:
     """範囲の始まり。同じ版の閉じたレビューの PR のレビュー済みの先頭が `head` の祖先ならそこ、無ければ本番チャネル（I10）。"""
-    _, show, _ = names(version)
+    _, show, _ = review_names(version)
     closed = sorted(gh.list_prs(root, "closed", head=show), key=lambda it: -int(it.get("number") or 0))
     marks = [m for it in closed if (m := read_mark(it.get("body"), REVIEWED_MARK))]
     for sha in marks:
@@ -148,7 +149,11 @@ def review_from(root, version: str, head: str, production: str, gh: GitHub) -> t
     start = _sha(root, f"origin/{production}")
     if not marks:
         return start, []
-    note = {"kind": "range", "result": "widened", "reason": f"前回のレビュー済みの先頭 {marks[0][:12]} が祖先でないため {production} から取る"}
+    note = {
+        "kind": "range",
+        "result": "widened",
+        "reason": f"前回のレビュー済みの先頭 {marks[0][:12]} が祖先でないため {production} から取る",
+    }
     return start, [note]
 
 
@@ -160,16 +165,16 @@ def close_stale(root, version: str, head: str, gh: GitHub) -> tuple[int | None, 
     戻り値は（使い直す PR の番号か None, 閉じた PR の番号）。"""
     reuse, closable, blocked = None, [], []
     for it in gh.list_prs(root, "open"):
-        ver = version_of(it.get("headRefName") or "")
+        ver = review_version_of(it.get("headRefName") or "")
         if ver is None:
             continue
         n = int(it["number"])
-        release, show, base = names(ver)
-        if not _fetch(root, release):
+        release, show, base = review_names(ver)
+        if not _fetch_branch(root, release):
             blocked.append(f"#{n}（{release} を取得できない）")
             continue
         shown = read_mark(it.get("body"), SHOWN_MARK)
-        fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown) if shown and _fetch(root, show) else []
+        fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown) if shown and _fetch_branch(root, show) else []
         if not fixes:
             closable.append((n, show, base))
         elif ver == version and read_mark(it.get("body"), RANGE_END_MARK) == head and reuse is None:
@@ -192,9 +197,9 @@ def open_review(root, version: str, diff: str, production: str, gh: GitHub) -> d
     """片付け → 範囲 → 差分 → ブランチの送信 → PR の作成。差分が空なら `review_pr` は None。"""
     if diff not in ("pr", "resolution"):
         raise StepError(f"--diff は pr か resolution（{diff}）", 2)
-    release, show, base_branch = names(version)
+    release, show, base_branch = review_names(version)
     git(root, "fetch", "-q", "origin")
-    if not _fetch(root, release):
+    if not _fetch_branch(root, release):
         raise StepError(f"{release} が origin に無い（release-branch を先に打つ）")
     head = _sha(root, f"origin/{release}")
     reuse, closed = close_stale(root, version, head, gh)
@@ -227,6 +232,15 @@ def open_review(root, version: str, diff: str, production: str, gh: GitHub) -> d
     return {**out, "review_pr": n, "files": len(files)}
 
 
+def open_outcome(version: str, got: dict) -> tuple[str, list[dict], int]:
+    """`open_review` の結果から（要約, items, 終了コード）。差分が空なら 3（打たずに進む）。結果の欄から items を外す。"""
+    items = [*got.pop("items", []), *({"kind": "pr", "number": n, "result": "closed"} for n in got.get("closed") or [])]
+    if got.get("review_pr") is None:
+        return f"{version} のリリースブランチの PR にレビューする差分が無い（打たずに進む）", items, EXIT_PRECONDITION
+    how = "使い直す" if got.get("reused") else f"作った（ファイル {got.get('files')} 件）"
+    return f"レビューの PR #{got['review_pr']} を{how}", items, 0
+
+
 def _only_fixes_since(root, range_end: str, tip: str, show_ref: str) -> bool:
     """`range_end..tip` が直しだけか（マージが無く、どのコミットも見せるブランチの直しと同じ変更）。"""
     if not branch_flow.ancestor_of(root, range_end, tip):
@@ -239,14 +253,14 @@ def _only_fixes_since(root, range_end: str, tip: str, show_ref: str) -> bool:
 def close_review(root, version: str, gh: GitHub) -> dict:
     """直しをリリースブランチへ移して送り（I9）、レビュー済みの先頭を本文へ書き（I10）、PR を閉じて一時のブランチを消す。
     範囲の終わりから先頭までに直し以外のコミットがあれば、範囲の終わりを書いて閉じた後に止める。"""
-    release, show, base_branch = names(version)
+    release, show, base_branch = review_names(version)
     git(root, "fetch", "-q", "origin")
     pr = next(iter(gh.list_prs(root, "open", head=show)), None)
     if pr is None:
         raise StepError(f"{version} の衝突の解消のレビューの PR が開いていない（review-open から打ち直す）")
     n, body = int(pr["number"]), pr.get("body") or ""
     shown, range_end = read_mark(body, SHOWN_MARK), read_mark(body, RANGE_END_MARK)
-    if not shown or not range_end or not _fetch(root, show) or not _fetch(root, release):
+    if not shown or not range_end or not _fetch_branch(root, show) or not _fetch_branch(root, release):
         raise StepError(f"レビューの PR #{n} の本文の印か、{show}・{release} を読めない")
     fixes = pending_fixes(root, f"origin/{release}", f"origin/{show}", shown)
     tip = _sha(root, f"origin/{release}")

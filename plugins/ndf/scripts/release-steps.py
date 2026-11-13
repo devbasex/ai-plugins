@@ -1013,22 +1013,17 @@ def cmd_release_branch(a):
 
 
 def cmd_review_open(a):
-    """リリースブランチの PR のレビューの PR を組む（#3163 の決定 5・6。本体は release_lib/review_range.py）。差分が空なら 3。"""
+    """リリースブランチの PR のレビューの PR を組む（#3163。本体は release_lib/review_range.py）。差分が空なら 3。"""
     root = git_root(a.root)
-    prod = a.production or release_decl(root, a)[1]
-    got = review_range.open_review(root, a.version, a.diff, prod, review_range.GitHub(create=create_pr))
-    items = [*got.pop("items", []), *({"kind": "pr", "number": n, "result": "closed"} for n in got.get("closed") or [])]
-    if got.get("review_pr") is None:
-        emit(result(TOOL, "ok", f"{a.version} のリリースブランチの PR にレビューする差分が無い（打たずに進む）", items, got), EXIT_PRECONDITION)
-    how = "使い直す" if got.get("reused") else f"作った（ファイル {got.get('files')} 件）"
-    emit(result(TOOL, "ok", f"レビューの PR #{got['review_pr']} を{how}", items, got))
+    got = review_range.open_review(root, a.version, a.diff, a.production or release_decl(root, a)[1], review_range.GitHub(create_pr))
+    summary, items, code = review_range.open_outcome(a.version, got)
+    emit(result(TOOL, "ok", summary, items, got), code)
 
 
 def cmd_review_close(a):
     """レビューの直しをリリースブランチへ移し、レビューの PR を閉じる（#3163 の I9〜I11）。"""
-    root = git_root(a.root)
-    got = review_range.close_review(root, a.version, review_range.GitHub(create=create_pr))
-    emit(result(TOOL, "ok", f"直し {got['moved']} 件を移し、レビューの PR #{got['review_pr']} を閉じた（先頭 {got['head'][:12]}）", [], got))
+    got = review_range.close_review(git_root(a.root), a.version, review_range.GitHub(create_pr))
+    emit(result(TOOL, "ok", f"直し {got['moved']} 件を移し、レビューの PR #{got['review_pr']} を閉じた", [], got))
 
 
 def cmd_approve(a):

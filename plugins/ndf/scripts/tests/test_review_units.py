@@ -106,7 +106,9 @@ def test_drop_unchosen_redirects_to_the_following_step():
 
 def test_apply_impl_and_apply_check_follow_the_declaration():
     """受け入れ条件 2: 選んだレビューのステップだけが現れる。"""
-    a = args({"impl": {"checks": ["cross-review", "behavior"], "diff": "pr"}, "sprint": {"checks": ["cross-refactoring"], "diff": "unchecked"}})
+    a = args(
+        {"impl": {"checks": ["cross-review", "behavior"], "diff": "pr"}, "sprint": {"checks": ["cross-refactoring"], "diff": "unchecked"}}
+    )
     impl = ru.apply_impl(a, impl_plan())
     assert {"review", *BEHAVIOR_IDS} <= set(ids(impl)) and "assess" not in ids(impl)
     check = ru.apply_check(a, check_plan())
@@ -147,7 +149,9 @@ def test_spec_pr_gets_a_document_review_only_when_chosen():
 
 
 def test_release_review_steps_follow_the_release_row():
-    a = args({"release": {"checks": ["cross-review"], "diff": "resolution"}}, )
+    a = args(
+        {"release": {"checks": ["cross-review"], "diff": "resolution"}},
+    )
     got = release_flow.review_range_steps(a, "/r", "2.0.0")
     assert [s["id"] for s in got] == ["review-open", "review", "review-close"]
     assert got[0]["on_exit"] == {"3": "facts"} and got[0]["pr_from"] == "review_pr" and "--diff resolution" in got[0]["cmd"]

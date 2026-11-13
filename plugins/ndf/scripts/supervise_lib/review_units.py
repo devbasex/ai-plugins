@@ -42,6 +42,11 @@ def review_row(a, kind: str, bundled: bool | None = None) -> branch_flow.ReviewR
     return sprint_flow(a).flow.reviews.row(kind, bundled)
 
 
+def fast_review_row(a) -> branch_flow.ReviewRow:
+    """pace: fast の検査のスプリントの PR の行。fast は課題のまとまりで実装を組まないため、まとまりの記録の無い列で解く。"""
+    return review_row(a, "sprint", bundled=False)
+
+
 def chosen_checks(a, row: branch_flow.ReviewRow) -> tuple[str, ...]:
     """行の掛けるレビュー。リファクタリングを止める条件に当たれば cross-refactoring を外す（I7）。"""
     off = templates.refactor_suspended(a) or getattr(a, "mode", None) in templates.NO_REFACTOR_MODES

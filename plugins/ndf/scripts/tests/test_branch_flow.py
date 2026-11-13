@@ -330,13 +330,25 @@ def test_declarations_that_leave_impl_diff_unreviewed_stop(reviews):
 
 def test_design_review_does_not_count_as_covering_impl():
     with pytest.raises(bf.FlowError):
-        _flow({**ALL_REVIEWS, "impl": {"checks": [], "diff": "none"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"},
-               "release": {"checks": [], "diff": "none"}, "design": {"checks": ["cross-review"], "diff": "pr"}})
+        _flow(
+            {
+                **ALL_REVIEWS,
+                "impl": {"checks": [], "diff": "none"},
+                "sprint": {"checks": ["behavior"], "diff": "unchecked"},
+                "release": {"checks": [], "diff": "none"},
+                "design": {"checks": ["cross-review"], "diff": "pr"},
+            }
+        )
 
 
 def test_release_pr_diff_covers_impl():
-    flow = _flow({"impl": {"checks": [], "diff": "none"}, "sprint": {"checks": ["behavior"], "diff": "unchecked"},
-                  "release": {"checks": ["cross-review"], "diff": "pr"}})
+    flow = _flow(
+        {
+            "impl": {"checks": [], "diff": "none"},
+            "sprint": {"checks": ["behavior"], "diff": "unchecked"},
+            "release": {"checks": ["cross-review"], "diff": "pr"},
+        }
+    )
     assert flow.reviews.row("release", True).covers_impl()
 
 
