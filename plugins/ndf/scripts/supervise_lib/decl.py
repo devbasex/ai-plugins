@@ -210,19 +210,16 @@ def queue_decl_of(plans: list[dict]) -> dict:
 
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
-# sprint と close はリリースの形を要らない（リリースの経路を delivery から導く。雛形で組む経路だけが版数を要する。#1336）
 NEEDS = {
     "impl": ("base", "test"),
     "fix": ("base", "test"),
     "check": ("base", "test"),
     "release": ("base", "release"),
-    "sprint": ("base", "test"),
-    "close": ("base", "test"),
 }
 # 本番のブランチの出所（決め方の順。決め方の正本は `repo.production_of`）。エラーと案内の文面に使う（#2097 の決定 3）
 PRODUCTION_SOURCES = f"--production-branch・.ndf/{WORKTREE_DECL} の production_branch・既定ブランチ（origin/HEAD → main / master）"
 # 本番のブランチを使う雛形（`--production-branch` を受ける種別と同じ）。ほかの種別では既定ブランチを問い合わせない（git の起動を増やさない）
-USES_PRODUCTION = ("release", "sprint", "close")
+USES_PRODUCTION = ("release",)
 
 
 def test_kind(a) -> str:
@@ -255,8 +252,6 @@ def apply_decls(a) -> None:
 
     - ブランチ運用（a.flow）: worktree.json の branch_flow をブランチ名まで解いたスナップショット（`flow_snapshot`）。
       宣言が壊れていれば既定値へ倒さずに DeclError（#3121 の I1）
-
-    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
@@ -278,7 +273,7 @@ FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
 
 def flow_snapshot(a, wt: dict) -> dict:
     """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあればそれを使う。
-    スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。"""
+    宣言が壊れていれば DeclError（#3121 の I3）。"""
     if isinstance(getattr(a, "flow", None), dict) and a.flow:
         return a.flow
     try:

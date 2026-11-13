@@ -72,13 +72,3 @@ def release_branch_step(a, repo: str | None, version: str, units: list[str]) -> 
         "on_fail": "judge",
         "next": "facts",
     }
-
-
-def fast_flow_refusal(a, pin) -> str | None:
-    """pace: fast はスプリントブランチを作らないため、スプリントブランチを本番に届くまで使う取り込み方と組めない。
-    `pin` は目録の開始時の値を `a` へ読む関数（`sprint_waves.pin_flow`。同じスプリントの打ち直しは開始時の値で見る）。"""
-    pin(a)
-    row = sprint_flow(a).row
-    if row.keeps_sprint_branch:
-        return f"取り込み方 {row.name}（.ndf/worktree.json の branch_flow.promotion）はスプリントブランチを使うため fast と組めない"
-    return None

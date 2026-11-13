@@ -123,7 +123,7 @@
 | [progress_adopt.py](progress_adopt.py) | 実行中のスプリント（`sprint.json`）と計画（`plan.json`・台帳）を進行表へ取り込む事象の下書き（#3092 の決定 19） | `progress.py` |
 | [reshuffle.py](reshuffle.py) | 組み換え。要否の判定（純粋。変更が要らなければ Claude を起動しない）・変更案・反映とオーガナイザーへの依頼（#3092・#3098） | `progress_activities.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
-| [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
+| [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` |
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
 | [parallel_end.py](parallel_end.py) | 1 スプリントのレーンの終わり。終わりの記録・猶予の後に止める耐久ステップ・止められなかったレーンと終わりの記録の無い停止と終わった後の差し戻しの問い・`released` の後の版の要るまとめの待ちと一時レーン。副命令 `end`・`verified` | `parallel_run.py`（`_Run` が継ぐ）/ `parallel.py` |

@@ -234,7 +234,7 @@ def leftover_placeholders(text: str) -> list[str]:
 
 
 def sprint_state_path(a) -> str:
-    """スプリントの状態ファイルの絶対パス（sprint.py と sprint_waves.py が共有する）。"""
+    """スプリントの状態ファイルの絶対パス。"""
     return str(Path(a.state).resolve())
 
 

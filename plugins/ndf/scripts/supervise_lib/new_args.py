@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import re
 
-from supervise_lib.absorb import absorb_arg
 from supervise_lib.decl import NEEDS
 from supervise_lib.templates import fix_worktree
 
@@ -23,8 +21,6 @@ DECL_WORDS = {
 OPTIONAL_DECLS = {
     "impl": ("impl_timeout", "impl_stall_seconds"),
     "check": ("refactor_budget_minutes",),
-    "sprint": ("release", "impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"),
-    "close": ("release", "refactor_budget_minutes"),
 }
 
 
@@ -64,22 +60,6 @@ NEW_KINDS = {
         "release → verify-install（本番のブランチ）→ 後片付け。実装の queue へ --then で渡すと、実装がすべて"
         "完了した後に続けて流れる",
     ),
-    "sprint": (
-        "スプリントのステージごとのプランと sprint.json を書き出す",
-        "ステージ: 設計（--design の課題ごと。用語集 → 要求と受け入れ条件 → 設計 → 設計 Pull Request → "
-        "cross-review → 用語チェック）→ 設計承認ゲート→ スプリントブランチ → 実装（課題ごと。スプリントの"
-        "ブランチへ集める）→ 検査 1 回 → リリース（開発版）。ステージの中は queue --max 3 で流す。\n"
-        "リリースの形（release.form）が無いか雛形の無い形なら、リリースのプランを書かず、最後のステージに"
-        "「/ndf:release で行う」を置く。\n"
-        "--state <状態>（normal）: 設計の用語チェックの後と開発版の承認資料の後に助言の MVV 判定（mvv-gate.py check --advise）を置く。"
-        "承認は利用者が行う。\n"
-        "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（設計承認ゲートは MVV 判定）→ 実装（起点の"
-        "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（リリース承認ゲートは MVV 判定）を書く",
-    ),
-    "close": (
-        "スプリントの終わりのプラン",
-        "ステージ: 確定仕様化・課題を閉じる・振り返り・棚卸し → 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）",
-    ),
 }
 # 引数: (名前, add_argument の引数, 受ける種別)
 NEW_ARGS = [
@@ -89,13 +69,11 @@ NEW_ARGS = [
             "required": True,
             "help": {
                 "*": "作業場所（worktree）",
-                "sprint": "リポジトリの根",
-                "close": "リポジトリの根",
                 "check": "作業場所（worktree。--since-last はリポジトリの根）",
                 "fix": "作業場所（worktree。省けば --branch から <リポジトリ>/.worktrees/<ブランチ>）",
             },
         },
-        "impl fix check release sprint close",
+        "impl fix check release",
     ),
     (
         "--issue",
@@ -105,23 +83,21 @@ NEW_ARGS = [
             "default": [],
             "help": {
                 "*": "課題の番号",
-                "sprint": "実装する課題（課題ごとに実装のプランを書く）",
-                "close": "スプリントの課題（最後に閉じる）",
                 "fix": "関連する課題の番号（任意）",
             },
         },
-        "impl fix check release sprint close",
+        "impl fix check release",
     ),
-    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release sprint close"),
+    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release"),
     (
         "--production-branch",
         {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch → 既定ブランチ（origin/HEAD → main / master））"},
-        "release sprint close",
+        "release",
     ),
     (
         "--test-cmd",
         {"help": "範囲テストの雛形（{paths} を 1 語で含むコマンド）。宣言（.ndf/project.json の test）より先に効く"},
-        "impl fix check sprint close",
+        "impl fix check",
     ),
     (
         "--test-kind",
@@ -130,20 +106,18 @@ NEW_ARGS = [
             "default": "test",
             "help": "範囲テストの雛形（--test-cmd）の種別。test = テスト / lint = 静的解析（整形の検査を含む）。既定 test",
         },
-        "impl fix check sprint close",
+        "impl fix check",
     ),
-    ("--test-all", {"help": "廃止（知らせて無視する。全体テストは宣言の suites[].command）"}, "impl fix check sprint close"),
-    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release sprint close"),
+    ("--test-all", {"help": "廃止（知らせて無視する。全体テストは宣言の suites[].command）"}, "impl fix check"),
+    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release"),
     (
         "--out",
         {
             "help": {
                 "*": "書き出すプランのファイル",
-                "sprint": "書き出すディレクトリ（既定 sprint-<名前>）",
-                "close": "書き出すディレクトリ（既定 sprint-<名前>）",
             }
         },
-        "impl fix check release sprint close",
+        "impl fix check release",
     ),
     (
         "--tests",
@@ -151,17 +125,14 @@ NEW_ARGS = [
             "nargs": "+",
             "default": [],
             "metavar": "PATH",
-            "help": {
-                "*": "範囲テストの対象（テストのコマンドの {paths} に入る）",
-                "sprint": "課題ごとの実装のプランの範囲テストの対象（{paths} に入る。既定 .）",
-            },
+            "help": "範囲テストの対象（テストのコマンドの {paths} に入る）",
         },
-        "impl fix sprint",
+        "impl fix",
     ),
     (
         "--scope",
         {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲に足すパス（PR の差分のファイルとテストの置き場所に足す）"},
-        "check sprint",
+        "check",
     ),
     (
         "--impl-timeout",
@@ -170,7 +141,7 @@ NEW_ARGS = [
             "metavar": "SECONDS",
             "help": "実装のステップの経過時間の上限（秒）。既定は .ndf/supervise.json の impl_timeout。どちらも無ければ上限なし",
         },
-        "impl sprint",
+        "impl",
     ),
     (
         "--impl-stall",
@@ -180,7 +151,7 @@ NEW_ARGS = [
             "metavar": "SECONDS",
             "help": "実装のステップの無進捗の許容時間（秒）。既定は .ndf/supervise.json の impl_stall_seconds、無ければ 1800",
         },
-        "impl sprint",
+        "impl",
     ),
     (
         "--refactor-budget-minutes",
@@ -189,7 +160,7 @@ NEW_ARGS = [
             "metavar": "MINUTES",
             "help": "構造改善の想定最大時間（分。cross-refactoring の --budget-minutes）。既定は .ndf/supervise.json の refactor_budget_minutes",
         },
-        "check sprint close",
+        "check",
     ),
     ("--title", {"help": "Pull Request の題名"}, "impl fix"),
     ("--summary", {"help": "Pull Request 本文の要約"}, "impl fix"),
@@ -241,14 +212,8 @@ NEW_ARGS = [
     ("--sprint", {"help": "スプリントの状態（--since-last と組。課題を読む）"}, "check"),
     (
         "--version",
-        {
-            "help": {
-                "*": "配る版（例 10.17.11-dev.1）",
-                "sprint": "開発版の明示の版（例 3.8.0-dev.1。省けばデプロイのステップを流す時点に origin から次に空いている版を決める）",
-                "close": "開発版の明示の版（最終の検査で変更があったときに配る。省けばデプロイのステップを流す時点に決める）",
-            }
-        },
-        "release sprint close",
+        {"help": "配る版（例 10.17.11-dev.1）"},
+        "release",
     ),
     ("--prs", {"type": int, "nargs": "+", "default": [], "help": "含む Pull Request"}, "release"),
     (
@@ -267,112 +232,20 @@ NEW_ARGS = [
         },
         "release",
     ),
-    ("--name", {"help": "スプリントの名前（英数字・. _ -。ブランチは sprint/<名前>）"}, "sprint close"),
-    (
-        "--design",
-        {
-            "type": int,
-            "nargs": "+",
-            "default": [],
-            "help": "設計のプラン（設計 Pull Request と設計承認ゲート）を作る課題。省けば設計と設計承認ゲートのステージを置かない",
-        },
-        "sprint",
-    ),
-    (
-        "--designed",
-        {
-            "type": int,
-            "nargs": "+",
-            "default": [],
-            "help": "設計を承認済みの課題（設計のプランを作らず、設計の結果のステージで設計 PR の設計の結果を読む）",
-        },
-        "sprint",
-    ),
-    (
-        "--revise-note",
-        {
-            "action": "append",
-            "default": [],
-            "metavar": "<課題>=<パス>",
-            "help": "課題の出し直しの指摘の入力（繰り返し可）。--design の課題の設計のプランへ指摘を入れ、要求のステップを必ず流す",
-        },
-        "sprint",
-    ),
-    (
-        "--pace",
-        {
-            "choices": ["normal", "fast", "auto"],
-            "default": "normal",
-            "help": {
-                "*": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で設計承認ゲート・リリース承認ゲートを MVV 判定にする）",
-                "close": "auto なら最終の検査・開発版・本番を置かず、まとめのステージだけを組む（開発ループの 1 回。#2089）。"
-                "省けば今の形（fast のスプリントの終わり）",
-            },
-        },
-        "sprint close",
-    ),
-    (
-        "--state",
-        {
-            "help": {
-                "*": "スプリントの状態（sprint-state.py のファイル）",
-                "sprint": "スプリントの状態（sprint-state.py のファイル）。--pace fast / auto では要る。normal で渡すと設計承認ゲート・リリース承認ゲートの前に"
-                "助言の MVV 判定を置き、worker と judge が状態のスプリント MVV を読む",
-                "release": "prod: リリース承認ゲートの利用者の承認の記録を読むスプリントの状態（先頭の approve が読む）",
-            }
-        },
-        "sprint close release",
-    ),
-    (
-        "--outside-plan",
-        {
-            "metavar": "理由",
-            "help": "動いている並列の計画の外で、例外としてスプリントを始める（理由はマシンの記録に残る。#2733）。省くと、動いている計画が"
-            "あるマシンで計画の外なら終了コード 3 で止まる",
-        },
-        "sprint",
-    ),
-    (
-        "--absorb",
-        {
-            "type": absorb_arg,
-            "nargs": "+",
-            "default": [],
-            "metavar": "ISSUE:HOST",
-            "help": "取り込んだ課題と取り込み先（<課題>:<取り込み先>）。取り込み先の設計と実装のプランへ含め、取り込んだ課題の設計のプランは書かない",
-        },
-        "sprint",
-    ),
-    ("--prod", {"help": "本番の明示の版（例 10.18.0。省けば開発版のプランの版の記録の基底の版）"}, "close"),
     (
         "--level",
         {
             "choices": ["patch", "minor", "major"],
             "help": "版を流す時点に決めるときの上げ幅（既定 patch。新しい系列を始めるときだけ使い、明示の版には使わない）",
         },
-        "sprint close",
+        "release",
     ),
-    (
-        "--record-pr",
-        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けばリリースの経路から導く。#2089）"},
-        "close",
-    ),
-    (
-        "--carry",
-        {"type": int, "nargs": "+", "default": [], "help": "ループの前の 1 回の棚卸しの持ち越し。棚卸しのステップへ --add で渡す（#2089）"},
-        "close",
-    ),
-    ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
-    ("--loop", {"help": "まとめを組む開発ループの名前（差分の棚卸しの深さの記録の行に残す。#2315）"}, "close"),
-    ("--lap", {"type": int, "help": "まとめを組む開発ループの 1 回の番号（--loop と組）"}, "close"),
 ]
 NEW_REQUIRED = {
     "impl": "--issue・--tests・--title",
     "fix": "--worktree か --branch・--tests・--title",
     "check": "--pr か --since-last（--id と組）",
     "release": "--version・--prs（か --prs-from-queue）・--channel",
-    "sprint": "--name・--issue",
-    "close": "--name・--issue・--state",
 }
 
 
@@ -460,33 +333,3 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
     check = NEW_CHECKS.get(a.kind)
     if check is not None:
         check(ap, a)
-
-
-def parse_revise_notes(ap: argparse.ArgumentParser, a) -> dict[int, str]:
-    """`--revise-note <課題>=<パス>` を {課題: パス} にする。--design の課題の入力を読めなければ断る。"""
-    import revise_note
-
-    out: dict[int, str] = {}
-    for raw in getattr(a, "revise_note", None) or []:
-        n, _, path = raw.partition("=")
-        if not (n.isdigit() and path):
-            ap.error(f"--revise-note は <課題>=<パス> で書く: {raw}")
-        if int(n) not in a.design:
-            continue
-        try:
-            revise_note.read_input(path)
-        except (OSError, ValueError) as e:
-            ap.error(f"--revise-note の入力を読めない: {e}")
-        out[int(n)] = path
-    return out
-
-
-def check_sprint(ap: argparse.ArgumentParser, a) -> None:
-    """sprint / close の引数の組を確かめる。版数（--version・--prod）は任意で、無ければデプロイのステップを流す時点に決める（#2164）。"""
-    if not (a.name and a.issue):
-        ap.error(f"new {a.kind} には --name・--issue が要る")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
-        ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
-    if a.kind == "close" and not a.state:
-        ap.error("new close には --state（スプリントの状態）が要る")
-    a.revise_notes = parse_revise_notes(ap, a)

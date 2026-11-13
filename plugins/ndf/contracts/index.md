@@ -57,7 +57,7 @@
 | `lease-json` | `*.lease.json` | state | home | `plugins/ndf/scripts/merged-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/drive.py`<br>`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`<br>`plugins/ndf/skills/cross-review/scripts/drive.py`<br>`plugins/ndf/skills/cross-review/scripts/state.py` | — |
 | `loop-json` | `loop.json` | result | main | `plugins/ndf/scripts/sprint-state.py` | — |
 | `measures-json` | `measures.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
-| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `outside-plan-jsonl` | `outside-plan.jsonl` | record | home | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py` | — |
 | `phase-result-json` | `phase-result.json` | result | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `plan-json` | `plan.json` | record | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `plan-md` | `plan.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
@@ -75,7 +75,7 @@
 | `restore-json` | `*.restore.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `result-file` | `*-result.json` | result | state-dir | `plugins/ndf/scripts/lib/run_core.py:_write_result_file`<br>`plugins/ndf/scripts/lib/step_result.py:_write_out` | — |
 | `resume-mark-json` | `*.mark.json` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/progress.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
-| `revise-json` | `revise-*.json` | state | main | `plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/revise-note.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
+| `revise-json` | `revise-*.json` | state | main | `plugins/ndf/scripts/mvv-gate.py`<br>`plugins/ndf/scripts/revise-note.py`<br>`plugins/ndf/scripts/sprint-state.py` | — |
 | `revise-md` | `revise-*.md` | state | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py` | — |
 | `run-done` | `run.done` | record | main | `plugins/ndf/scripts/lib/parallel_lane.py:settled_status` | — |
 | `run-log` | `run.log` | report | main | `plugins/ndf/scripts/parallel.py` | — |
@@ -322,9 +322,7 @@
 | `supervise.ci-fix` | attempts 3 | CI テストの宣言のあるリポジトリで、CI の結果の監視（ci-watch.py peek）が CI の失敗の改修を起こす回数の上限。数えるのは落ちた head の数 | `plugins/ndf/scripts/ci-watch.py:cmd_peek` |
 | `supervise.claude-reap` | seconds 5 | 止めた claude の子の出力を回収する待ちの上限 | `plugins/ndf/scripts/supervise_lib/children.py:kill_group` |
 | `supervise.condition` | seconds 900 | ステップの条件のコマンドの上限の既定 | `plugins/ndf/scripts/supervise_lib/steps.py:run_condition` |
-| `supervise.depth-work` | seconds 5400 | 見直し・大整理の work ステップの打ち切り。持ち主の見張りも同じ秒数で止まる | `plugins/ndf/scripts/supervise_lib/sprint_close_steps.py:<module>` |
 | `supervise.design-merge-gh` | seconds 120 | 設計の Pull Request のマージの gh の上限 | `plugins/ndf/scripts/supervise_lib/design_merge.py:_gh_out` |
-| `supervise.design-stage-read` | seconds 120 / interval 15 / per_call 30 / same_cause 3 | 設計の結果の gh / git の一時的な失敗の打ち直し。seconds は 1 回の実行の合計、per_call は 1 コマンドの待ち | `plugins/ndf/scripts/supervise_lib/design_stage.py:Budget.__init__`<br>`plugins/ndf/scripts/supervise_lib/design_stage.py:_retrying` |
 | `supervise.impl-stall` | seconds 1800 | 実装のステップの無進捗の許容の既定。実測の記録の間隔の最大 706 秒を十分に上回る値 | `plugins/ndf/scripts/supervise_lib/verify_steps.py:<module>` |
 | `supervise.judge-step` | seconds 600 | 判定役（judge）の呼び出しの上限。ステップの timeout で上書きする | `plugins/ndf/scripts/supervise_lib/pr.py:PrStep._llm_body`<br>`plugins/ndf/scripts/supervise_lib/steps.py:JudgeStep.execute` |
 | `supervise.limit-retry` | seconds 900 | claude の利用上限のリセット時刻が読めないときの待ち。計画の limit_retry_seconds で上書きする | `plugins/ndf/scripts/supervise_lib/claude.py:ClaudeRunner.call` |

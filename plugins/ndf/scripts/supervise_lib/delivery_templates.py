@@ -1,6 +1,6 @@
 """リリースプラン（導入の確認・本番チャネルへのマージ・リリース承認ゲート）の雛形（#1336 の F5・#1454・#1457）。`engine` を import しない。
 
-スプリントの経路（sprint_routes）が使う。リリースの雛形（release_templates）のリリース承認ゲートの MVV 判定の部品を共有する。
+リリースの雛形（release_templates）のリリース承認ゲートの MVV 判定の部品を共有する。
 """
 
 from __future__ import annotations

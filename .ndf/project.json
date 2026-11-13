@@ -391,7 +391,6 @@
         ],
         "tests": [
           "plugins/ndf/scripts/tests/test_legacy_names.py",
-          "plugins/ndf/scripts/tests/test_sprint_inputs.py",
           "plugins/ndf/scripts/tests/test_supervise_pace.py"
         ]
       },

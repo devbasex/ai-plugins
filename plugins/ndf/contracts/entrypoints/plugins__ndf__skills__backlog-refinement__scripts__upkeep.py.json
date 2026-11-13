@@ -81,7 +81,6 @@
     "plugins/ndf/scripts/lib/run_state_kinds.py",
     "plugins/ndf/scripts/lib/sprint_loop_record.py",
     "plugins/ndf/scripts/lib/sprint_loop_select.py",
-    "plugins/ndf/scripts/supervise_lib/sprint_close_steps.py",
     "plugins/ndf/skills/backlog-refinement/SKILL.md"
   ]
 }

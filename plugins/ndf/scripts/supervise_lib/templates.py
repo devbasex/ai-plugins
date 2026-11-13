@@ -72,7 +72,7 @@ def impl_prompt(a) -> str:
     """実装の指示文。--prompt が無ければ課題への参照（と設計文書・触る範囲）を組み、共通の規則を足す。
 
     用語集のあるプロジェクト（`a.glossary_ready`）では用語集と突き合わせる行を規則へ足す。`a.kept` の行
-    （conductor の補正。`design_stage.rewrite` が渡す）は規則の後へ順のまま置く。整形と静的解析は worker に
+    （conductor の補正）は規則の後へ順のまま置く。整形と静的解析は worker に
     打たせず、ステップが受け持つ（`pre_test_steps`）。
     同時に流れる他のプランの `触るファイル` の除外は、流す時点で `WorkStep` が足す（#1248）。"""
     n = a.issue[0]

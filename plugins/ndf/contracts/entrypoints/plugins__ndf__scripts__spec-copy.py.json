@@ -37,7 +37,6 @@
     "2": "読めない・呼び出しの誤り（status stopped）"
   },
   "callers": [
-    "plugins/ndf/scripts/supervise_lib/design_steps.py",
     "plugins/ndf/scripts/supervise_lib/paths.py",
     "plugins/ndf/skills/design/SKILL.md",
     "plugins/ndf/skills/development-workflow/references/glossary.md",

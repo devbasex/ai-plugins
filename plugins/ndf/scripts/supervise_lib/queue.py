@@ -118,9 +118,7 @@ NO_REPORT = "報告なし"
 QUEUE_POLL, WAIT_POLL = limits.value("supervise.queue-poll", "interval"), limits.value("supervise.queue-wait-poll", "interval")
 
 
-def cmd_queue(
-    plans: list[str], max_: int, poll: float = QUEUE_POLL, then=None, done: str | None = None, starts=None, rerun=None, restart=False
-) -> dict:
+def cmd_queue(plans: list[str], max_: int, poll: float = QUEUE_POLL, then=None, done: str | None = None, starts=None, rerun=None) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
     流れているプランの progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
@@ -136,7 +134,7 @@ def cmd_queue(
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
     記録を止めて頭から流す（完了か承認ゲートの記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
     キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
-    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。`restart`（`--from`）なら前の途中を止める（#2325）。"""
+    キューの続きが渡し、そのプランは承認ゲートの記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -149,7 +147,7 @@ def cmd_queue(
     flow.Engine.queued = True
     try:
         try:
-            prefix = flow.launch_queue(done_path, max_, decl["resources"], restart or changed)
+            prefix = flow.launch_queue(done_path, max_, decl["resources"], changed)
         except durable.DurableError as e:
             return _not_started(str(e), max_, done_path)
         try:

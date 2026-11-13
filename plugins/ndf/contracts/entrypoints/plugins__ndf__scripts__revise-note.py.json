@@ -56,7 +56,6 @@
   "callers": [
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/revise_note.py",
-    "plugins/ndf/scripts/supervise_lib/sprint_revise.py",
     "plugins/ndf/skills/development-workflow/references/loop.md",
     "plugins/ndf/skills/pr/SKILL.md"
   ]

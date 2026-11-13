@@ -35,18 +35,6 @@ supervisor の役割を主に担い、このスクリプトがフェーズの手
         # --prs に足す（--prs の固定の番号と併用できる）。prod のステップの最後は後片付け（merged-steps.py cleanup）
     supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
-    supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 設計承認ゲート→ 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → デプロイ
-        # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。デプロイは検査の queue が --then で流す
-        # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
-        # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 設計承認ゲート
-        # release.form が無いか雛形の無い形ならリリースプランを書かず、最後のステージを「/ndf:release で行う」にする
-        # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（設計承認ゲートは MVV 判定）→ 実装（develop へ直接）
-        # → 検査（実行の条件）→ 開発版 → 本番（リリース承認ゲートは MVV 判定）を書く。条件に外れれば計画を書かずに止まる
-    supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
-        # スプリントの終わり: 確定仕様化・閉じる・振り返り・棚卸し → 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）
-    supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
-        # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-approved --pr N [--state <状態>]
         # 設計 PR のマージのプランの入口: 承認ラベルか設計承認ゲートの利用者の承認の記録が無ければ 10
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
@@ -56,8 +44,9 @@ supervisor の役割を主に担い、このスクリプトがフェーズの手
         # 続けて流す（実装の queue の後のデプロイなど）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
         # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧とステージの並びを done の隣（<done>.plans.json）へ書く
-    supervise.py queue --resume <done> [--from <プラン名>=<ステップ>]... [--max N]
-        # キューの続き: 前の起動の止まった・承認ゲートのプランを終えたステップから続け、後続のステージも同じ条件で流す
+    supervise.py queue --resume <done> [--max N]
+        # キューの続き: 前の起動の止まった・承認ゲートのプランを終えたステップから続け、後続のステージも同じ条件で流す。
+        # まとめたリリースの続き（parallel.py の continue）が使う。スプリントの工程の続きは工程の進行表（progress.py next）
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
@@ -96,7 +85,7 @@ import deps  # noqa: E402
 deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable", "versions", "waits"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
-from supervise_lib import commands, design_merge, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
+from supervise_lib import commands, design_merge, new_args, queue, queue_resume, templates  # noqa: E402
 from supervise_lib import advance  # noqa: E402
 from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
@@ -107,13 +96,12 @@ from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path 
 
 MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
   フェーズ                                 種別
-  設計 → 設計承認ゲート→ 実装 → 検査（スプリント）  new sprint（リリースの形に雛形があればリリースまで）
   実装（1 課題の Pull Request）              new impl
   即時修正（worker の実装なしで Pull Request）  new fix
   検査（1 本の Pull Request か前回からの差分）   new check
   リリース（開発版か本番）                   new release
-  スプリントの終わり                         new close
-書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。"""
+書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。
+スプリントの工程の並びと再開は工程の進行表（progress.py new・next）が持つ。"""
 
 
 def build_parser(sub) -> None:
@@ -168,8 +156,11 @@ def add_queue_parsers(sub) -> None:
     )
     q.add_argument("plans", nargs="*", help="流すプランの JSON（--resume と併せて渡さない）")
     q.add_argument("--max", type=int, help="同時に流す本数（既定 3。並列の計画のレーンならレーンのプランの本数。--resume は前の起動の値）")
-    q.add_argument("--resume", metavar="DONE", help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す")
-    q.add_argument("--from", dest="from_", action="append", default=[], metavar="PLAN=STEP", help="--resume: 続けるプランの開始のステップ")
+    q.add_argument(
+        "--resume",
+        metavar="DONE",
+        help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す（まとめたリリースの続き。スプリントの工程の続きは progress.py next）",
+    )
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
     q.add_argument(
         "--then",
@@ -203,7 +194,7 @@ def add_queue_parsers(sub) -> None:
 
 
 def add_design_parsers(sub) -> None:
-    """副命令 design-glossary・design-results・design-approved の引数を足す。"""
+    """副命令 design-glossary・design-approved の引数を足す。"""
     g = sub.add_parser(
         "design-glossary",
         help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
@@ -213,17 +204,6 @@ def add_design_parsers(sub) -> None:
     g.add_argument("--mode", default="standard", help="モード（設計の工程の入口で用語集を見るモードか）")
     g.add_argument("--root", default=".", help="worktree の根")
     g.add_argument("--out", required=True, help="候補の語を書く Markdown のパス")
-    d = sub.add_parser(
-        "design-results",
-        help="設計の結果のステージ: マージした設計 PR の設計の結果を読み、実装のステージのプランを書き換える",
-        description="design/issue-<番号> のマージした PR が変えた issues/*.md の「設計の結果」の表を読み、実装のプランへ "
-        "触るファイル・取り込んだ課題・実行の条件を書く。design-results.json を manifest の隣へ書く",
-        epilog="終了コード: 書いた = 0（読めなかった設計の課題があっても 0）/ manifest を読めない・取り込み先が無い・扱いが食い違う = 2",
-    )
-    d.add_argument("--manifest", required=True, help="スプリントの計画の sprint.json")
-    d.add_argument("--base", required=True, help="設計 PR をマージしたベースブランチ")
-    d.add_argument("--root", default=".", help="リポジトリの根")
-    d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
     da = sub.add_parser(
         "design-approved",
         help="設計 PR のマージのプランの入口: 承認の証跡（承認ラベルか設計承認ゲートの利用者の承認の記録）を確かめる",
@@ -273,28 +253,8 @@ def add_tool_parsers(sub) -> None:
     rs.add_argument("--max-seconds", type=float, required=True, help="最初の直しから後の、直しとレビューの秒の合計の上限")
 
 
-def outside_plan(a: argparse.Namespace) -> dict | None:
-    """計画の外のセッションの起動の判定（`lib/sprint_loop_cli.outside_plan`）。止めるなら結果（`exit` つき）、通すなら None。"""
-    import parallel_guard
-
-    return parallel_guard.entry_check(a.worktree, getattr(a, "outside_plan", None), "supervise.py new sprint")
-
-
 def _cmd_new(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
     new_args.fill_new_defaults(a)
-    if a.kind in ("sprint", "close"):
-        new_args.check_sprint(ap, a)
-        if a.kind == "sprint" and (blocked := outside_plan(a)) is not None:  # 何かを書く前に判定する（#2733 の I9）
-            emit(blocked, blocked.pop("exit"))
-        try:
-            apply_decls(a)
-            sprint_routes.apply_routes(a)
-            if a.kind == "close":
-                emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
-            res = sprint.cmd_new_sprint(a)
-            emit(res, 1 if res["status"] == "stopped" else None)
-        except DeclError as e:
-            ap.error(str(e))
     new_args.check_new(ap, a)
     try:
         apply_decls(a)
@@ -307,9 +267,9 @@ def _cmd_queue(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn"
     if a.resume:
         if a.plans or a.then or a.done:
             ap.error("queue --resume は位置引数のプラン・--then・--done と併せて渡さない")
-        emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
-    if not a.plans or a.from_:
-        ap.error("queue にはプランが要る（--from は --resume と使う）")
+        emit(queue_resume.cmd_queue_resume(a.resume, a.max and max(1, a.max), a.poll, queue.cmd_queue))
+    if not a.plans:
+        ap.error("queue にはプランが要る")
     emit(queue.cmd_queue(a.plans, max(1, a.max or default_max()), a.poll, a.then, a.done))
 
 
@@ -335,7 +295,6 @@ COMMANDS = {
     "wait": _cmd_wait,
     "advance": lambda ap, a: emit(*advance.cmd_advance(a.step, a.start)),
     "design-glossary": lambda ap, a: emit(*commands.cmd_design_glossary(a.root, a.mode, a.out)),
-    "design-results": lambda ap, a: emit(*design_stage.cmd_design_results(a)),
     "design-approved": lambda ap, a: emit(*design_merge.cmd_design_approved(a.pr, a.state)),
     "note": lambda ap, a: emit(commands.cmd_note(a.doc, a.report, a.next, a.section)),
     "sync-check": lambda ap, a: emit(commands.sync_check(a.root, a.commit)),

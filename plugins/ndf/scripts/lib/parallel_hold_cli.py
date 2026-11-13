@@ -70,7 +70,7 @@ def cmd_park(main: Path, a, reply) -> None:
         _clear(main, a, reply)
     if getattr(a, "table", None):  # 工程の進行表で流すスプリントは、進行表が次の工程を決める（#3092）
         resume = f"python3 {shlex.quote(str(PROGRESS))} next {shlex.quote(a.table)}"
-    else:
+    else:  # 手で流したキュー（`supervise.py queue` の answer_hold の park）の続き。スプリントの工程は --table で来る
         resume = f"python3 {shlex.quote(str(SUPERVISE))} queue --resume {shlex.quote(str(a.done))}"
     if not ph.covered(ph.read_hold(main, a.name), a.lane):
         reply("ok", f"レーン {a.lane} の答え待ちの停止は解けている。止まらずに続ける", cleared=True, next=resume)

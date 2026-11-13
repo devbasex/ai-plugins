@@ -94,7 +94,6 @@
     "breakdown-md",
     "checkpoint-json",
     "lease-json",
-    "outside-plan-jsonl",
     "phase-result-json",
     "plan-json",
     "plan-md",
@@ -106,7 +105,6 @@
     "request-txt",
     "requests-json",
     "resume-mark-json",
-    "revise-json",
     "state-json"
   ],
   "reads": [],
