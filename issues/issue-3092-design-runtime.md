@@ -271,7 +271,7 @@ CI は `pytest.yml` の PostgreSQL のサービスで 2 回目を流す。
 | `subject` | `code` / `docs` / `design` | レビューの対象。`kind: review` では必須で、ほかでは書かない（I10） |
 | `per_issue` | `true` | `fast` で課題ごとの子の行にする工程（決定 9） |
 
-順序の決まりの検査（I8〜I10）は、モードの全工程のアクティビティを並びの順に平らにして行う。`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`verify` はこの順序の対象でなく、`kind: release` より後ろに置ける。`review`・`test` の `range` が差分でなければ断り、`verify` の `range` が `released` でなければ断る。同じ `range` と `subject` の組の `review` が 2 つあれば断る（コードレビューの `code` とドキュメントレビューの `docs` は範囲が同じでも通る）。
+順序の決まりの検査（I8〜I10）は、モードの全工程のアクティビティを並びの順に平らにして行う。`kind: release` のアクティビティより後ろに、同じ `range` の `review`・`test` があれば断る。`verify` は同じ並びの `kind: release` のアクティビティより後ろにだけ置け、前にあるか `kind: release` が無ければ断る。`review`・`test` の `range` が差分でなければ断り、`verify` の `range` が `released` でなければ断る。同じ `range` と `subject` の組の `review` が 2 つあれば断る（コードレビューの `code` とドキュメントレビューの `docs` は範囲が同じでも通る）。
 
 ### 入出力規約
 
