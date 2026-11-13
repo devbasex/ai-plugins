@@ -14,7 +14,7 @@ description: "Write the design document before coding: data structures, interfac
 | --- | --- |
 | どの工程が必要か（モード判定） | `development-workflow` |
 | 何を満たすか（受け入れ条件・仕様） | `requirements-design` |
-| **どう作るか（データ構造・入出力の契約・処理の流れ・決定の理由）** | この Skill |
+| **どう作るか（データ構造・入出力の契約・処理の流れ・決定の理由）と、詳細設計（ファイル配置・関数の責務・異常系の処理）** | この Skill |
 | どう分解するか（タスク・順序・対象ファイル） | `implementation-plan` |
 | 完了後に何を残すか | `plan-to-spec` |
 
@@ -154,7 +154,24 @@ issue のことではない。
 候補の行を足す）。比べずには直せない指摘は、設計を進めずに人へ戻す。規則 `unnamed_redline` の指摘は、判断を設計者が
 決めて決定の記録へ書き直すか、レッドラインに当たるなら `## 人へ残す判断` の表へ番号となぜ当たるかを添えて移す。
 
-### 6. 設計 Pull Request を出す
+### 6. 詳細設計を書く（`standard` / `legacy-refactor`）
+
+**工程表の「詳細設計」が必須のモードだけが通る**（`light`・`operation`・`documentation` は通らない）。手順 5 の後に、
+設計文書の構成要素と構造を、ファイル・関数の粒度へ下ろした詳細設計の文書 `issues/issue-<番号>-design-detail.md` を書く。
+ファイル配置・関数の責務・異常系の処理を実装の前に決め、設計 Pull Request に載せて設計レビューと設計承認ゲートで見せる。
+
+- 雛形は [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
+  [references/detailed-design.md](references/detailed-design.md) にある
+- 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
+- 1 本は 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
+- 書いたら `python3 "$SCRIPTS/design-survey.py" check --file <設計文書> <詳細設計の文書> --require-detail` を打ち、
+  `detail_*` の指摘を直す（規則は `design-survey.py` の冒頭にある）
+
+**設計のプランの段から呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` の段の指示に
+「詳細設計は後の段が書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
+繰り返さずにこの手順だけを行う（設計文書は前の段が書き、設計単体のレビューで直してある）。
+
+### 7. 設計 Pull Request を出す
 
 **この手順を行うのは、設計 Pull Request が必須または任意のモードだけである**（「設計の
 書き先」の表）。`light` と `operation` は独立した設計文書を作らないため、この手順と、次節の
@@ -183,7 +200,7 @@ pr → cross-review → merged → worktree（実装用に作り直す）
 
 | 項目 | 設計 Pull Request |
 | --- | --- |
-| 載せるもの | 要求仕様と設計文書だけ。実装を含めない |
+| 載せるもの | 要求仕様と設計文書（詳細設計の文書を含む）だけ。実装を含めない |
 | 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。GitHub の closing keywords（`Closes` / `Fixes` / `Resolves` の後に課題の番号を書くと、マージ時にその課題を自動で閉じる機能）を書かない |
 
 **closing keywords を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、
@@ -234,20 +251,22 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 2 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
-入るときに 1 つ目、手順 6（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
+**契機は 3 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
+入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
+3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前の段が記録した）。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
+bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "詳細設計"
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
 ```
 
-**手順 6 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
+**手順 7 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
 
-**2 つ目の契機と `document-rebuild` は、設計 Pull Request を出すモードだけに掛かる。**
-`light` と `operation` では手順 6 を通らないため、どちらも呼ばない。工程の分類でも
+**2 つ目の契機は詳細設計を通るモード（`standard`・`legacy-refactor`）だけに掛かる。3 つ目の契機と `document-rebuild` は、
+設計 Pull Request を出すモードだけに掛かる。** `light` と `operation` では手順 6・7 を通らないため、どれも呼ばない。工程の分類でも
 「ドキュメント再構成」と「ドキュメントレビュー」はこの 2 モードで対象外である。
 
 ## 関連
