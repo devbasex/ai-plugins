@@ -460,12 +460,12 @@ def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll
     result = INTERRUPTED
     try:
         yield held
-        result = MEMORY_STOPPED if held.memory_stopped else FINISHED
+        result = FINISHED
     finally:
         held._finish()
         if held.memory_stopped:
             result = MEMORY_STOPPED
-        if result != MEMORY_STOPPED:
+        else:
             held.available_mib = read_memory()
         _release(directory, held, lock)
         _record(directory, cwd, kind, held, result)
