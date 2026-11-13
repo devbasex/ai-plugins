@@ -34,11 +34,7 @@ from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNRE
 TOOL = approval.TOOL
 
 
-def release_case_or_stop(root):
-    try:
-        return release_case.case_of(root)
-    except release_case.CaseUnreadable as e:
-        raise StepError(f"リリースの場合を決められない: {e}", EXIT_PRECONDITION)
+release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
 
 
 def dev_workflow_of(root) -> str | None:

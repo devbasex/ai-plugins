@@ -19,6 +19,7 @@ from typing import NamedTuple
 
 import delivery
 import gh_call
+from step_result import EXIT_PRECONDITION, StepError
 
 CD_NO_REVIEW = "cd-no-review"
 CD_REVIEW = "cd-review"
@@ -57,6 +58,14 @@ def decide_case(has_cd: bool, approvals: int | None, why: str) -> Case:
     if approvals is not None and approvals >= 1:
         return Case(CD_REVIEW, "PR のレビューの承認", "利用者のアカウント", why or f"本番チャネルの承認数が {approvals}")
     return Case(CD_NO_REVIEW, "リリースの PR の証跡のコメント", "利用者のアカウント", why or "本番チャネルの承認数が 0")
+
+
+def case_or_stop(root) -> Case:
+    """`case_of` の場合。宣言を読めなければ StepError（前提が無い。終了コード 3）で止める。"""
+    try:
+        return case_of(root)
+    except CaseUnreadable as e:
+        raise StepError(f"リリースの場合を決められない: {e}", EXIT_PRECONDITION) from e
 
 
 def _gh_read(root, path: str):

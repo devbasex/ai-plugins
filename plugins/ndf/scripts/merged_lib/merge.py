@@ -19,7 +19,7 @@ import release_case
 import repo as repo_lib
 import test_strategy
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from release_lib import approval_trail, reviewed
+from release_lib import approval_trail
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
 
@@ -419,7 +419,7 @@ def promote(a, cleanup):
         _prepare_promote(root, a, n, item)
     trail_item = None
     if a.gate_approved:
-        case = reviewed.release_case_or_stop(root)
+        case = release_case.case_or_stop(root)
         if case.has_cd:  # CD のある場合は迂回なしでマージし、場合 1 は先に証跡を書く（#2773 の決定 14）
             trail_item = _trail_before_merge(root, a, n, case)
             a.no_admin = True
