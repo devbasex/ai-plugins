@@ -78,7 +78,7 @@ def test_split_commands_current_behavior(text, commands):
     assert weight.split_commands(text) == commands
 
 
-# --- 現状固定テスト（_classify_words: 宣言の一致・runner の無い suite・並列・対象・suite の順） ---
+# --- 現状固定テスト（classify に語の並びを渡す: 宣言の一致・runner の無い suite・並列・対象・suite の順） ---
 
 DECLARED = [{"runner": "pytest", "command": "pytest tests/a.py -q"}, {"runner": "vitest", "command": "cd x && vitest run"}]
 RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
@@ -117,5 +117,5 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
         (["x", "a"], [{"command": "'unb"}], None),  # 読めない宣言は一致しない
     ],
 )
-def test_classify_words_current_behavior(words, suites, kind):
-    assert weight._classify_words(words, suites) == kind
+def test_classify_word_list_current_behavior(words, suites, kind):
+    assert weight.classify(words, suites) == kind
