@@ -53,9 +53,6 @@ SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
 # 枠のファイルの名前の頭（`slot-<番号>.lock`・`slot-<番号>.json`）
 SLOT_PREFIX = "slot-"
-# 枠のロックと持ち主の記述の拡張子
-SLOT_LOCK_SUFFIX = ".lock"
-SLOT_OWNER_SUFFIX = ".json"
 # 枠とメモリを確かめる間隔
 POLL_SECONDS = 2.0
 # 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
@@ -163,14 +160,14 @@ class _MemoryMonitor:
     def _is_last_started(self, own_index: int, started_at: float) -> bool:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
         mine = (started_at, own_index or 0)
-        for path in self.directory.glob(f"{SLOT_PREFIX}*{SLOT_OWNER_SUFFIX}"):
+        for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
             index = _slot_index(path)
             if index is None or index == own_index:
                 continue
             started = (_read_json(path) or {}).get("started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
-            probe = _try_lock(_slot_lock_path(self.directory, index))
+            probe = _try_lock(_slot_path(self.directory, index, ".lock"))
             if probe is None:
                 return False  # 後に始めた実行が生きている
             probe.release()
@@ -235,14 +232,6 @@ class Held:
 
 def _slot_path(directory: Path, index: int | None, suffix: str = "") -> Path:
     return directory / f"{SLOT_PREFIX}{index}{suffix}"
-
-
-def _slot_lock_path(directory: Path, index: int | None) -> Path:
-    return _slot_path(directory, index, SLOT_LOCK_SUFFIX)
-
-
-def _slot_owner_path(directory: Path, index: int | None) -> Path:
-    return _slot_path(directory, index, SLOT_OWNER_SUFFIX)
 
 
 def _slot_index(path: Path) -> int | None:
@@ -397,11 +386,11 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
 def _take_free_slot(ctx: SlotContext, held: Held) -> FileLock | None:
     """番号の小さい方から空いた枠を取り、持ち主を仮に書く。空きが無ければ None。"""
     for index in range(ctx.limits.max_runs):
-        lock = _try_lock(_slot_lock_path(ctx.directory, index))
+        lock = _try_lock(_slot_path(ctx.directory, index, ".lock"))
         if lock is not None:
             held.index = index
             try:
-                _write_json(_slot_owner_path(ctx.directory, index), _owner(None, ctx.cwd))
+                _write_json(_slot_path(ctx.directory, index, ".json"), _owner(None, ctx.cwd))
             except BaseException:
                 lock.release()
                 raise
@@ -421,7 +410,7 @@ def _memory_ready(held: Held, read_memory: ReadMemory, floor_mib: int) -> bool:
 def _release(ctx: SlotContext, held: Held, lock: FileLock, *, quiet: bool = False) -> None:
     """持ち主の記述を消して枠を返す。`quiet` なら記述を消せなくても送らない（別の例外の後始末のとき）。"""
     try:
-        _slot_owner_path(ctx.directory, held.index).unlink(missing_ok=True)
+        _slot_path(ctx.directory, held.index, ".json").unlink(missing_ok=True)
     except OSError:
         if not quiet:
             raise
@@ -441,7 +430,7 @@ def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
             return None
         held.started_at = time.time()
         try:
-            _write_json(_slot_owner_path(ctx.directory, held.index), _owner(held.started_at, ctx.cwd))
+            _write_json(_slot_path(ctx.directory, held.index, ".json"), _owner(held.started_at, ctx.cwd))
         except BaseException:
             _release(ctx, held, lock, quiet=True)
             raise
