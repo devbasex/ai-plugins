@@ -194,21 +194,30 @@ def read_events(directory: Path) -> list[dict[str, object]]:
 def report(directory: Path, since_seconds: float, now: float | None = None, current_oom: int | None = None) -> dict[str, int | float]:
     """期間の中で待った・止めた・諦めた回数と秒、OOM Killer の回数の増分を返す。"""
     now = time.time() if now is None else now
-    rows = [(at, row) for row in read_events(directory) if (at := _parse_iso(row.get("at"))) is not None and at >= now - since_seconds]
-    rows.sort(key=lambda item: item[0])
-    waited = [float(row.get("waited_seconds") or 0) for _, row in rows]
-    counts = [row.get("oom_kill") for _, row in rows] + [current_oom]
-    counts = [c for c in counts if isinstance(c, int) and not isinstance(c, bool)]
-    # 隣どうしの差のうち正の値だけを足す（再起動で回数が減っても負にならない）
-    increase = sum(max(0, b - a) for a, b in zip(counts, counts[1:]))
+    rows = _rows_since(directory, since_seconds, now)
+    waited = [float(row.get("waited_seconds") or 0) for row in rows]
     return {
         "runs": len(rows),
         "waited_runs": sum(1 for w in waited if w > 0),
         "waited_seconds": round(sum(waited), 1),
-        "memory_stopped": sum(1 for _, row in rows if row.get("result") == MEMORY_STOPPED),
-        "gave_up": sum(1 for _, row in rows if row.get("result") == GAVE_UP),
-        "oom_kill_increase": increase,
+        "memory_stopped": sum(1 for row in rows if row.get("result") == MEMORY_STOPPED),
+        "gave_up": sum(1 for row in rows if row.get("result") == GAVE_UP),
+        "oom_kill_increase": _oom_increase([row.get("oom_kill") for row in rows] + [current_oom]),
     }
+
+
+def _rows_since(directory: Path, since_seconds: float, now: float) -> list[dict[str, object]]:
+    """期間の中の記録の行を時刻の順に返す。時刻の読めない行は除く。"""
+    rows = [(at, row) for row in read_events(directory) if (at := _parse_iso(row.get("at"))) is not None and at >= now - since_seconds]
+    rows.sort(key=lambda item: item[0])
+    return [row for _, row in rows]
+
+
+def _oom_increase(counts: Sequence[object]) -> int:
+    """OOM Killer の回数の並びの増分。真偽値を除いた整数だけを取る。"""
+    values = [c for c in counts if isinstance(c, int) and not isinstance(c, bool)]
+    # 隣どうしの差のうち正の値だけを足す（再起動で回数が減っても負にならない）
+    return sum(max(0, b - a) for a, b in zip(values, values[1:]))
 
 
 @dataclass
