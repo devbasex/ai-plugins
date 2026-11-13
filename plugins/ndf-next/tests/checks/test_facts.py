@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from ndf.checks import facts
+from ndf.checks.model import CheckError
 
 
 def kinds(found) -> list[str]:
@@ -27,6 +31,9 @@ def test_member_of_another_files_set(plugin, rules):
     assert kinds(facts.check(plugin.scope(), rules)) == ["member"]
 
 
+SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "facts" / facts.SCHEMA_NAME
+
+
 def table(rows, columns) -> str:
     return json.dumps({"version": 1, "summary": "s", "owner": "o", "columns": columns, "rows": rows})
 
@@ -34,7 +41,7 @@ def table(rows, columns) -> str:
 def test_fact_table_shape_and_copied_ids(plugin, rules):
     plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}, {"id": "verify"}], {}))
     plugin.write("contracts/facts/dup.json", table([{"id": "a"}, {"id": "a"}], {}))
-    plugin.write("contracts/facts/fact.schema.json", "{}")
+    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
     plugin.write("src/ndf/a.py", 'STAGES = ("deploy", "verify")\nONE = "verify"\n')
     found = facts.check(plugin.scope(), rules)
     assert sorted(f.rule for f in found) == ["const-fact", "const-fact", "fact-table"]
@@ -42,6 +49,7 @@ def test_fact_table_shape_and_copied_ids(plugin, rules):
 
 
 def test_fact_table_is_validated_by_schema(plugin, rules):
+    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
     columns = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
     plugin.write("contracts/facts/ok.json", table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], columns))
     plugin.write("contracts/facts/no_owner.json", json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []}))
@@ -53,3 +61,9 @@ def test_fact_table_is_validated_by_schema(plugin, rules):
     bad_rows = sorted(d for name, d in found if name == "bad_rows.json")
     assert len(bad_rows) == 3 and all(d.startswith("表の形: $.rows[") for d in bad_rows)
     assert len([d for name, d in found if name == "bad_column.json"]) == 2
+
+
+def test_table_without_schema_beside_it_stops(plugin, rules):
+    plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}], {}))
+    with pytest.raises(CheckError, match="表の共通の形を読めない"):
+        facts.check(plugin.scope(), rules)

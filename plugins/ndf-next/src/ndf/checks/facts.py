@@ -1,6 +1,6 @@
 """事実の重複の規則: 同じ事実を 2 つ以上のファイルの最上位の定数に持たない（`const-fact`）。事実の表の形（`fact-table`）。
 
-事実の表（`contracts/facts/*.json`）がある事実は、表から読む。表の形は `fact.schema.json` と列の宣言から作る行の形を
+事実の表（`contracts/facts/*.json`）がある事実は、表から読む。表の形は表と同じ置き場の `fact.schema.json`（I-DT2・DC1）と列の宣言から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
 """
 
@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
-from ndf.checks.model import Finding, Scope
+from ndf.checks.model import CheckError, Finding, Scope
 
 CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 SET_CALLS = frozenset({"set", "frozenset", "tuple", "list"})
-SCHEMA_PATH = Path(__file__).with_name("fact.schema.json")
+SCHEMA_NAME = "fact.schema.json"
 
 
 @dataclass(frozen=True)
@@ -111,9 +112,17 @@ def groups(all_consts: list[Const], min_str: int) -> list[Finding]:
 
 
 @cache
-def _table_validator() -> Draft202012Validator:
-    """表の共通の形（`fact.schema.json`）の検証器。1 プロセスで 1 回だけ読む。"""
-    return Draft202012Validator(json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
+def table_validator(schema_path: Path) -> Draft202012Validator:
+    """表の共通の形（表と同じ置き場の `fact.schema.json`）の検証器。1 プロセスで置き場ごとに 1 回だけ読む。
+
+    無い・読めない・スキーマとして誤りなら `CheckError`（表の形を確かめられないまま通さない）。
+    """
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+    except (OSError, ValueError, SchemaError) as exc:
+        raise CheckError(f"表の共通の形を読めない: {schema_path}: {exc}") from exc
+    return Draft202012Validator(schema)
 
 
 def _column_schema(decl: dict[str, Any]) -> dict[str, Any]:
@@ -128,22 +137,22 @@ def row_schema(columns: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {"type": "object", "required": required, "properties": props, "additionalProperties": False}
 
 
-def shape_errors(data: object) -> list[str]:
+def shape_errors(data: object, common: Draft202012Validator) -> list[str]:
     """表の形の違反。共通の形に合ってから、列の宣言から作った行の形で各行を確かめる。"""
-    errors = sorted(_table_validator().iter_errors(data), key=lambda e: (e.json_path, e.message))
+    errors = sorted(common.iter_errors(data), key=lambda e: (e.json_path, e.message))
     if not errors:
         rows = Draft202012Validator({"properties": {"rows": {"items": row_schema(data["columns"])}}})
         errors = sorted(rows.iter_errors(data), key=lambda e: (e.json_path, e.message))
     return [f"{e.json_path}: {e.message}" for e in errors]
 
 
-def _table_rows(path: Path, rel: str) -> tuple[list[str], list[Finding]]:
+def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[list[str], list[Finding]]:
     """事実の表 1 本の `id` の並びと、形の違反。形が違えば `id` を返さない。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [], [Finding("fact-table", rel, 1, f"表を読めない: {exc}")]
-    bad = [Finding("fact-table", rel, 1, f"表の形: {m}") for m in shape_errors(data)]
+    bad = [Finding("fact-table", rel, 1, f"表の形: {m}") for m in shape_errors(data, common)]
     if bad:
         return [], bad
     ids = [r["id"] for r in data["rows"]]
@@ -152,14 +161,16 @@ def _table_rows(path: Path, rel: str) -> tuple[list[str], list[Finding]]:
 
 
 def tables(scope: Scope, tables_dir: str) -> tuple[dict[str, list[str]], list[Finding]]:
-    """事実の表を読み、表の名前 → `id` の並びと、形の違反を返す。置き場が無ければ空。"""
+    """事実の表を読み、表の名前 → `id` の並びと、形の違反を返す。表が無ければ空。"""
     base = scope.plugin_root / tables_dir
+    paths = [p for p in sorted(base.glob("*.json")) if not p.name.endswith(".schema.json")] if base.is_dir() else []
     found: list[Finding] = []
     ids: dict[str, list[str]] = {}
-    for path in sorted(base.glob("*.json")) if base.is_dir() else []:
-        if path.name.endswith(".schema.json"):
-            continue
-        ids[path.stem], bad = _table_rows(path, scope.rel(path))
+    if not paths:
+        return ids, found
+    common = table_validator(base / SCHEMA_NAME)
+    for path in paths:
+        ids[path.stem], bad = _table_rows(path, scope.rel(path), common)
         found += bad
     return ids, found
 
