@@ -127,7 +127,8 @@ def cmd_new(a, store: pdb.Store) -> tuple[dict, int]:
     for s in snap.stages:
         if not enabled[s.name].enabled:
             drafts.append(pm.EventDraft("disabled", "conductor", s.name, 1, reason=enabled[s.name].reason or "無効"))
-    doc = _snapshot_doc(snap, enabled, a.issues, a.pace, root, {"judgment": judged})
+    state = getattr(a, "state", None)  # pace: fast / auto の待ちの行で MVV 判定が読むスプリントの状態
+    doc = _snapshot_doc(snap, enabled, a.issues, a.pace, root, {"judgment": judged, "state": str(Path(state).resolve()) if state else None})
     with pdb.transaction(store) as conn:
         tid = pdb.create_table(conn, "sprint", pdb.progress_repo_key(root), a.name, a.lane, doc, drafts)
         if a.lane:

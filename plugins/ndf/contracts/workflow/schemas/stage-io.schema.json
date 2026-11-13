@@ -30,6 +30,12 @@
         "pace": {
           "type": "string"
         },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "issue": {
           "type": "integer"
         },

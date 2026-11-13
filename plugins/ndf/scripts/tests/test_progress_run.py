@@ -263,3 +263,37 @@ def test_answer_hold_returns_gate_and_keeps_row_running(world):
     assert code == 10 and rep["items"][0]["row"] == "デプロイ/release", rep  # 停止が解けたら実装から続け、デプロイの待ちまで進む
     with pdb.transaction(store) as c:
         assert pm.fold(pdb.read_progress_events(c, tid), 1)["実装"].state == pm.FINISHED
+
+
+def test_mvv_gate_applies_only_to_fast_and_auto_and_not_to_lane_release():
+    """pace: fast / auto の承認ゲートとリリースの待ちだけに MVV 判定を当て、オーガナイザーへ依頼を送った待ちには当てない。"""
+    import progress_activities as acts
+
+    assert acts.mvv_gate_of({"pace": "normal"}, "gate", {}) is None
+    assert acts.mvv_gate_of({"pace": "auto"}, "gate", {}) == "design"
+    assert acts.mvv_gate_of({"pace": "fast"}, "release", {"request": {"metrics": {"requested": False}}}) == "release"
+    assert acts.mvv_gate_of({"pace": "auto"}, "release", {"request": {"metrics": {"requested": True}}}) is None
+    assert acts.mvv_gate_of({"pace": "auto"}, "work", {}) is None
+
+
+@pytest.mark.parametrize("code, answered_by", [(0, "mvv"), (10, None)])
+def test_mvv_answer_writes_answered_only_when_it_follows(world, monkeypatch, code, answered_by):
+    """mvv-gate.py が従う（0）ときだけ待ちの行へ by: mvv の answered を書き、ほか（10）は人の答えを待つ。"""
+    import progress_activities as acts
+
+    tmp, url, store = world
+    tid = _new(store, f"m{code}", "light")
+    fake = tmp / "mvv-gate.py"
+    fake.write_text(f"import sys\nsys.exit({code})\n")
+    monkeypatch.setattr(acts, "MVV_GATE", fake)
+    state = tmp / "state.json"
+    state.write_text("{}")
+    inp = {"pace": "auto", "state": str(state), "work": str(tmp / "w"), "cwd": str(tmp), "mode": "light", "previous": {}}
+    got = acts.act_mvv(store, tid, 1, "デプロイ/release", inp, "release")
+    with pdb.transaction(store) as c:
+        events = [e for e in pdb.read_progress_events(c, tid) if e.kind == "answered"]
+    if answered_by is None:
+        assert got is None and events == []
+    else:
+        assert got["answer"] == "approved" and got["by"] == answered_by
+        assert events and events[-1].payload["by"] == "mvv" and events[-1].payload["record"].endswith("mvv-note.md")

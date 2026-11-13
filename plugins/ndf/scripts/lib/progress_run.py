@@ -122,6 +122,12 @@ def step_activity(table_id: str, rev: int, act: dict, inp: dict, answer: Optiona
     return {"output": out, "errors": errs}
 
 
+@durable.step(name="ndf.progress.mvv")
+def step_mvv(table_id: str, rev: int, row: str, inp: dict, gate: str) -> Optional[dict]:
+    """pace: fast / auto の待ちの行に MVV 判定で答える（従えば `answered` を書いた答え、ほかは None）。"""
+    return acts.act_mvv(_progress_store(), table_id, rev, row, inp, gate)
+
+
 @durable.step(name="ndf.progress.record")
 def step_record(table_id: str, row: str, phase: str) -> dict:
     return acts.act_record(_progress_store(), table_id, row, phase)
@@ -173,6 +179,7 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
             "issues": raw.get("issues") or [],
             "mode": raw["snapshot"]["mode"],
             "pace": raw.get("pace", "normal"),
+            "state": raw.get("state"),
             "cwd": raw.get("cwd"),
             "work": raw.get("work"),
             "previous": outputs,
@@ -184,6 +191,8 @@ def _run_activities(ctx: dict, stage, child: Optional[str], rows: dict) -> tuple
         if listen is not None:  # 依頼を送るアクティビティが、答えを待つ行を依頼の記録へ書く（`parallel.py await` が答えを届ける先）
             inp["listen_row"] = f"{child or stage.name}/{listen.id}"
         answer = step_answered(tid, rev, key)
+        if act.call == wd.LISTEN_CALL and answer is None and (gate := acts.mvv_gate_of(inp, act.kind, outputs)):
+            answer = step_mvv(tid, rev, key, inp, gate)  # 従えば人を待たずに続ける（今の承認ゲートの段の MVV 判定と同じ）
         if act.call == wd.LISTEN_CALL and answer is None:
             hint = next((o["metrics"]["next_step"] for o in outputs.values() if (o.get("metrics") or {}).get("next_step")), None)
             answer = _wait_answer(tid, rev, key, {"stage": stage.name, "kind": act.kind, **({"next_step": hint} if hint else {})})

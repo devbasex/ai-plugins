@@ -7,6 +7,7 @@
   答えは `parallel.py await` が読み、同じ工程の `ndf.listen` の行へ `answered` で届ける。レーンの外のスプリントでは何もしない
 - `ndf.listen`: 承認ゲートの答えとリリースの結果の待ち。DBOS の受信はワークフローの中でしか打てないため、
   進行表のワークフロー（`progress_run`）が持つ。ここでは答えを出力の形へ写すだけ
+  pace: fast / auto では、待ちに入る前に `act_mvv` が MVV 判定を打ち、従えば `by: mvv` の答えを書いて止まらずに続ける
 - `ndf.record`: 進捗記録の生成（`progress_projection`）。失敗しても工程を止めない
 - `ndf.reshuffle`: 組み換え（`reshuffle`）
 
@@ -24,6 +25,7 @@ from typing import Callable, Optional
 HERE = Path(__file__).resolve().parent
 SUPERVISE = HERE.parent / "supervise.py"
 PARALLEL = HERE.parent / "parallel.py"
+MVV_GATE = HERE.parent / "mvv-gate.py"
 GATE_CODES = range(10, 20)
 
 
@@ -171,12 +173,55 @@ def act_request(store, table_id: str, inp: dict, listen_row: str) -> dict:
         value = {"answer": "released", "release": {"version": data.get("version"), "prs": data.get("prs")}}
         with pdb.transaction(store) as conn:
             rev, _ = pdb.definition(conn, table_id)
-            pdb.append_events(conn, table_id, [pm.EventDraft("answered", "workflow", listen_row, rev, payload=value)])
+            # 書き手の表（I6）で `answered` を書けるのはオーガナイザーと conductor。この処理は conductor が打つ `progress.py next` の中で動く
+            pdb.append_events(conn, table_id, [pm.EventDraft("answered", "conductor", listen_row, rev, payload=value)])
         return _act_report("ndf.request", "ok", "Pull Request はすでに本番にある。依頼を送らない", requested=False, record=str(record))
     if p.returncode != 10:
         return _act_report("ndf.request", "stopped", f"parallel.py request が {p.returncode} で終わった: {p.stdout[-300:]}")
     nxt = f"python3 {PARALLEL} await {lane[0]} --from {record}"
     return _act_report("ndf.request", "ok", f"リリースの依頼 {data.get('id')} を送った", requested=True, record=str(record), next_step=nxt)
+
+
+MVV_PACES = ("fast", "auto")
+MVV_GATES = {"gate": "design", "release": "release"}  # 待ちの行の kind → mvv-gate.py の --gate
+
+
+def mvv_gate_of(inp: dict, kind: str, outputs: dict) -> Optional[str]:
+    """MVV 判定で答えてよい待ちの行なら mvv-gate.py の `--gate` を返す（純粋な判定）。
+
+    pace: fast / auto のスプリントの承認ゲートとリリースの待ちに当てる。レーンのリリースの依頼を送った
+    （`metrics.requested` が真）待ちは、オーガナイザーが答えるため当てない。"""
+    if inp.get("pace") not in MVV_PACES or kind not in MVV_GATES:
+        return None
+    if kind == "release" and any(((o or {}).get("metrics") or {}).get("requested") for o in outputs.values()):
+        return None
+    return MVV_GATES[kind]
+
+
+def act_mvv(store, table_id: str, rev: int, row: str, inp: dict, gate: str) -> Optional[dict]:
+    """待ちに入る前に MVV 判定（`mvv-gate.py check`）を打つ。今の承認ゲートの段（`plan_mvv_design`・`plan_mvv_release`）と
+    同じ判定で、従う（越えない線なし。終了コード 0）なら待ちの行へ `answered`（`by: mvv`・判定の記録のパス）を書いて
+    その答えを返す。ほかの判定（終了コード 10 など）と、スプリントの状態が無いときは None（人の答えを待つ）。"""
+    import progress_db as pdb
+    import progress_model as pm
+
+    state = inp.get("state")
+    if not state:
+        return None
+    where = Path(inp.get("work") or Path.cwd()) / "mvv" / row.replace("/", "_")
+    where.mkdir(parents=True, exist_ok=True)
+    note = where / "mvv-note.md"
+    prs = _prs_of(inp.get("previous") or {})
+    cmd = [sys.executable, str(MVV_GATE), "check", "--sprint", str(state), "--gate", gate]
+    cmd += ["--mode", str(inp.get("mode") or ""), "--root", str(inp.get("cwd") or Path.cwd()), "--note", str(note)]
+    cmd += ["--pr", *prs] if prs else []
+    p = subprocess.run(cmd, capture_output=True, text=True, cwd=inp.get("cwd"))
+    if p.returncode != 0:
+        return None
+    value = {"answer": "approved", "by": "mvv", "record": str(note), "gate": gate}
+    with pdb.transaction(store) as conn:
+        pdb.append_events(conn, table_id, [pm.EventDraft("answered", "conductor", row, rev, payload=value)])
+    return value
 
 
 def act_listen(answer: Optional[dict]) -> dict:
