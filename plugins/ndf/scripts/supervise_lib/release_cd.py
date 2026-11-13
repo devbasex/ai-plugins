@@ -19,6 +19,7 @@ RULE_RELEASE_PROD_CD = (
     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
 )
 
+
 def reviewed(a, repo: str | None) -> bool:
     """CD のある場合（`cd-no-review` / `cd-review`）か。宣言を読めなければ組まずに DeclError。"""
     try:
