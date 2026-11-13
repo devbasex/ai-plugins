@@ -156,3 +156,10 @@ def test_release_review_steps_follow_the_release_row():
     step = release_flow.release_branch_step(a, "/r", "2.0.0", ["sprint/s1"], "review-open")
     assert step["next"] == "review-open"
     assert release_flow.release_branch_step(a, "/r", "2.0.0", ["sprint/s1"])["next"] == "facts"
+
+
+def test_cleanup_deletes_the_review_branches_only_when_the_release_row_reviews():
+    from supervise_lib.release_templates import _cleanup_step
+
+    assert "review/release/v2.0.0-base" in _cleanup_step("2.0.0", "1", "/r", True)["cmd"]
+    assert "review/release" not in _cleanup_step("2.0.0", "1", "/r")["cmd"]
