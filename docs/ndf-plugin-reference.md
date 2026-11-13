@@ -131,6 +131,15 @@ Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の
 hook の無いランタイムでは、区分に当たる問いを本文か各ランタイムの問い合わせの Tool で出し、区分の名前を問いの先頭に書きます。
 止めた問いでは Slack の待ち通知を送りません。
 
+人のいない実行（Factory の実行ジョブ。環境変数 `NDF_FACTORY_RUN` がある `claude -p`）では、次の hook が働きます。
+`NDF_FACTORY_RUN` が空なら、登録の行の sh が Python を起動せずに終えます。区間の終え方の正本は `asking.md` の「人のいない実行」です。
+
+| 事象 | 起動 | 働き |
+|---|---|---|
+| UserPromptSubmit | `python3 scripts/hook.py unattended-start` | プロンプトの 1 行目が `/ndf:development-workflow` のセッションに人のいない実行の印を付け、決まりの案内を渡す |
+| Stop | `python3 scripts/hook.py unattended-stop` | 印のあるセッションで、最後の応答が区間の報告（`contracts/forms/unattended-report.json`）の形に合わなければ差し戻す（続けて 2 回まで） |
+| SessionEnd | `python3 scripts/hook.py unattended-end` | 印を消す |
+
 ## Slack 通知
 
 利用者の回答か承認を待つときだけ、`plugins/ndf/scripts/wait-notify.py` が Slack へ知らせます。送る時点・本文・

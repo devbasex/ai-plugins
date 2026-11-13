@@ -79,7 +79,7 @@ scripts/
 | `plugins/ndf/scripts/supervise_lib/rerun.py` | 変更 | 同じ原因の鍵を種類と対象から作る（SF2） | `lib/causes.py` |
 | `plugins/ndf/scripts/supervise_lib/state.py` | 変更 | 打ち直しの回数 `retry_counts` を持ち運ぶ（SF2）。attention に種類を付ける（SF7） | 無し |
 | `plugins/ndf/scripts/supervise_lib/steps.py` | 変更 | `RunStep.is_skip` を消す（SF2）。`JudgeStep` を判断の呼び出しへ、`parse_decision` を消す（SF6） | `supervise_lib/judge_call.py` |
-| `plugins/ndf/scripts/supervise_lib/pr.py` | 変更 | 節の欠けを `check_failed`、push の拒否を `push_rejected` で残す（SF2） | `lib/causes.py` |
+| `plugins/ndf/scripts/supervise_lib/pr.py` | 変更 | 節の欠けを `check_failed`、push の拒否を `push_rejected` で残す（SF2）。SF5 が 出し直しで worker が足した節を PR 本文の材料へ入れる（#2853） | `lib/causes.py` |
 | `plugins/ndf/scripts/supervise_lib/worker_steps.py` | 変更 | worker の結果ファイルの `cause` をコピーし、無ければ `work_stopped` を付ける（SF2） | `lib/causes.py` |
 | `plugins/ndf/skills/cross-refactoring/SKILL.md` | 変更 | 終了コード 6 の行の `on_exit` を `on_cause` の `incomplete` へ（SF2） | 無し |
 | `plugins/ndf/scripts/lib/ci_watch.py` | 変更 | 分割ジョブの照合・マージの結果の引き継ぎ（SF3）。種類を返す（SF4） | 無し |
@@ -119,6 +119,12 @@ scripts/
 | `plugins/ndf/scripts/lib/ask_policy.py` | 変更 | 問いの区分を結果に載せる（SF13） | 無し |
 | `plugins/ndf/skills/development-workflow/references/asking.md` | 変更 | 問いの後に `routes` を打つ（SF13） | 無し |
 | `plugins/ndf/skills/development-workflow/references/pace.md` | 変更 | 手順の表 4 を `routes` を打つ 1 行へ（SF13） | 無し |
+| `plugins/ndf/skills/cross-refactoring/scripts/refactor.py` | 変更 | 最終ゲートが PR の DIRTY を見て `base_conflict` を返す（SF2、#2680） | 無し |
+| `plugins/ndf/scripts/test-run.py` | 変更 | 全体テストの待ちが PR の DIRTY を見て待たずに `base_conflict` を返す（SF2、#2752） | 無し |
+| `plugins/ndf/scripts/lib/waits.py` | 変更 | CI の待ちの未完了の読み直しを分割ジョブの照合に合わせる（SF3、#2224） | 無し |
+| `plugins/ndf/scripts/lib/gh_checks.py` | 変更 | チェックの結論を失敗と数える集合を 1 か所にする（SF3、#2317）。SF4 が `completed_at` のある `in_progress` を完了として読む（#2690） | 無し |
+| `plugins/ndf/scripts/supervise_lib/procedures.py` | 変更 | 組み直しの「足すべき内容」をレビューの指示へ差し込む（SF5、#2444） | 無し |
+| `plugins/ndf/scripts/lib/parallel_repo.py` | 変更 | リリースの版を本番の最新のタグと比べて決める（SF9、#2554） | 無し |
 
 表の外にまとめたファイル:
 

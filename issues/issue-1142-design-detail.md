@@ -10,16 +10,20 @@
 | data | [issue-1142-design-data-design-detail.md](issue-1142-design-data-design-detail.md) | DC1〜DC8（設計文書の移行ステップ DT1〜DT8 との対応は data の詳細設計の冒頭の表） |
 | scripted-flow | [issue-1142-design-scripted-flow-design-detail.md](issue-1142-design-scripted-flow-design-detail.md) | SF1a・SF1b・SF2〜SF13（SF3 は既存の #3153） |
 | 前の企画の残り | [issue-1142-design-base-design-detail.md](issue-1142-design-base-design-detail.md) | K1〜K3・W1〜W8（旧 K4 は A1a にまとめた） |
+| リファクタリング計画の 8 件 | [issue-2963-design-detail.md](issue-2963-design-detail.md) | RF1・RF1b・RF2・RF3・RF4・RF5a・RF5b・RF6a・RF6b・RF7・RF8 |
+| ラベル `rebuild-1142` の残り | [issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) | N1・N2a・N2b・N3〜N7・N8a・N8b・N9〜N12 |
 
-子 Issue は 47 本で、14 の順番に分けて流す。開いている bug 110 件のうち、子 Issue の変更で直る見込みがあるのは 4 件である。
+子 Issue は 72 本で、22 の順番に分けて流す。ラベル `rebuild-1142` の開いている Issue 283 件のうち 277 件を子 Issue の変更で閉じ、6 件は閉じられない（行き先の表は [issue-1142-design-labels.md](issue-1142-design-labels.md) ）。
 
 **この文書で決めたこと（conductor の決定を写したもの）。**
 
 - 旧 K4（撤去）は A1a にまとめる。どちらも `legacy_names.py`・`phase-steps.py`・`bundle-close.py` を消すため。K4 の残り（`post_queue.py` の取り込み・契約の 3 項目・構造チェックの除外）も A1a が持つ
 - W1 の `lib/report_fields.py` と data の R3 は食い違わない。R3 は事実の表（`contracts/facts/`）へ移さないという意味で、W1 は 1 つのコンテキストだけが読む語を持ち主のモジュールに置く
 - #3191（#3092 の実装）が工程の失敗を終了コード 6 で返す点は、#1142 の IS11（終了コードは止まった理由の種類から引く）を正とし、SF8 で合わせる
-- リファクタリング計画の 8 件は、設計承認ゲート（2026-11-13）で推奨どおり #1142 の子 Issue に取り込み、別の設計 PR で設計すると決まった（設計文書の「人へ残す判断」の (d)）。下の表と順番は、8 件を先に要るものから外した形で組んだもので、8 件の設計 PR で組み直す。下の「リファクタリング計画の 8 件」の節のとおり、8 件に依る子 Issue が後ろへ移る
+- リファクタリング計画の 8 件は、設計承認ゲート（2026-11-13）で推奨どおり #1142 の子 Issue に取り込み、別の設計 PR で設計すると決まった（設計文書の「人へ残す判断」の (d)）。8 件は #2963 の設計 PR で 11 本の子 Issue（`RF*`）にし、下の「実装計画」の表と「流す順序」へ入れた
 - #3191 が要る DC7・SF8 は、先に要るものに #3191 を書き、後ろの順番へ置く
+- ラベル `rebuild-1142` の Issue（2026-11-13 利用者の受け入れ条件）は、既にある子 Issue の範囲に入るものをその子へ足し（触るファイルを設計の結果と主題の詳細設計に足した）、入らないものを 14 本の新しい子 Issue（N1〜N12）にした。設計は [issue-1142-design-fixes.md](issue-1142-design-fixes.md) にある
+- SF2 は解消する Issue が 15 件を超えるため、雛形のステップ固有の 9 件を N11 へ分けた（ラベルの残りの設計文書の決定 71）
 
 ## ファイル配置
 
@@ -96,15 +100,16 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | --- | --- | --- |
 | 順番の決め方 | 子 Issue に先に要るもの（主題の詳細設計の列と、#3191）がある | 先に要るものの順番の後の順番へ置く |
 | 順番の決め方 | 2 つの子 Issue が同じファイルを触る（ディレクトリは包含で見る。生成物 `contracts/index.md` は除く） | 次の優先の順で前の子 Issue を先の順番へ置き、2 つを同じ順番に置かない |
-| 優先の順 | 主題をまたいで重なる | SF3 → A0 → SF1a → DC1 → A1a → A1b → A2 → SF1b → DC2〜DC6 → K3 → K1 → SF2・SF4・SF5・SF9〜SF12・SF7・SF6・SF13 → A3a〜A3g → DC8 → DC7 → K2 → SF8 → W1〜W7 → W8 |
+| 優先の順 | 主題をまたいで重なる | SF3 → A0 → SF1a → DC1 → A1a → A1b → A2 → SF1b → DC2〜DC6 → K3 → K1 → SF2・SF4・SF5・SF9〜SF12・SF7・SF6・SF13 → N1〜N12（ラベルの残り） → A3a〜A3g → DC8 → DC7 → K2 → SF8 → W1〜W7 → W8 |
 | 優先の順の理由 | 古い経路を消す A1a・A1b | 子 Issue が移すコードから先に経路を除く（smells の決定 43） |
 | 優先の順の理由 | 種類の契約 SF1b | 種類を返す 127 本を先にそろえ、A3 の直し方（握りつぶさずに返す）が種類を使える |
 | 優先の順の理由 | A3a〜A3g | ファイルごとに中身を直すため、事実を移す DC と行き先を変える SF の後に置き、同じファイルを 2 度直さない |
+| 優先の順の理由 | N1〜N12 | 関数の中身を直すため、事実を移す DC・行き先を変える SF・リファクタリング計画の RF の後、兆候だけを直す A3 と語だけを替える W の前に置く（ラベルの残りの設計文書の決定 70） |
 | 優先の順の理由 | W1〜W7 | 語だけを替えるため最後に置き、先の子 Issue が足した文も同じ PR で替える |
 | 優先の順の理由 | DC7・SF8 | #3191 のマージを待つため後ろへ置く |
 | E9（測り直し） | すべての子 Issue のマージの後 | `scripts/measure/ai-smells.py`・`const-facts.py --json`・`ai-branching.py` を打ち、前後の数を #1142 のコメントへ残す |
 
-- 繰り返しの終わる条件: 子 Issue は 47 本で有限。順番は先に要るものと重なりの有向グラフの最長の道で決まり、輪は無い（優先の順が全順序のため）
+- 繰り返しの終わる条件: 子 Issue は 72 本で有限。順番は先に要るものと重なりの有向グラフの最長の道で決まり、輪は無い（優先の順が全順序のため）
 - 計算量の注意: 無し
 
 ## 内部のデータと定数
@@ -157,7 +162,7 @@ pyproject.toml・plugins/ndf/pyproject.toml
 
 ## 実装計画
 
-子 Issue は 47 本である。触るファイルの全体は設計文書の「設計の結果」の表にあり、`design-survey.py check` が主題の詳細設計のファイル配置の表と照合する。PR は子 Issue ごとに 1 本で、その revert 1 つで 1 つ前に戻る（I10）。A3a〜A3g と W1〜W7 の触るファイルは、2026-11-13（7da134096）の一覧で、着手の時点で数え直す。
+子 Issue は 72 本である。触るファイルの全体は設計文書（`RF*` は #2963 の設計文書、`N*` はラベルの残りの設計文書）の「設計の結果」の表にあり、`design-survey.py check` が主題の詳細設計のファイル配置の表と照合する。PR は子 Issue ごとに 1 本で、その revert 1 つで 1 つ前に戻る（I10）。A3a〜A3g と W1〜W7 の触るファイルは、2026-11-13（7da134096）の一覧で、着手の時点で数え直す。
 
 | 子 Issue | 主題 | 中身 1 文 | 触るファイル（数と、主題の詳細設計の節への参照） | 先に要るもの | 並列の組 | PR の単位 | 見直す前の企画の設計文書の節 | 消す古いテスト | この子で解消する Issue |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -165,41 +170,41 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | `A1a` | smells | 旧名を読み替える経路と、旧 K4 の撤去（呼び出し元の無いエントリポイント・投稿キューの移行の前のファイルの取り込み）を消す | 45 本。smells の設計文書の「直す順序と触るファイル」の A1a の行と前の企画の詳細設計の「（A1a。旧 K4）」の行 | `A0` | 組 S | 1 本 | 移行の文書の「撤去（3 件）」・決定 65 | `test_legacy_names.py`・`test_gate_names.py`、`test_step_scripts.py` の phase-steps の節、`test_post_queue.py` の取り込みのテスト | — |
 | `A1b` | smells | 古い値を読み替える経路を消す | 20 本。smells の設計文書の「直す順序と触るファイル」の A1b の行 | `A1a` | 組 S | 1 本 | 決定 65 | `test_legacy_values.py` | — |
 | `A2` | smells | 範囲の外のループの中の外部呼び出しを 1 回のクエリへまとめるか上限の印を付ける | 23 本。smells の設計文書の「直す順序と触るファイル」の「A2 の 22 本」 | `A0` | 組 S | 1 本 | 無し | `test_merged_probe.py` の head ごとに `gh pr list --head` を呼ぶ場合 | — |
-| `A3a` | smells | `scripts/lib/` の a〜fの握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 42 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
+| `A3a` | smells | `scripts/lib/` の a〜fの握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 42 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2791・#3115 |
 | `A3b` | smells | `scripts/lib/` の g〜oの握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 43 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
 | `A3c-1` | smells | `scripts/lib/` の p〜z の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 26 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `A3c-2` | smells | `scripts/lib/` の p〜z の後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 26 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `A3d` | smells | `scripts/hook_lib/`・`scripts/relay_lib/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 34 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `A3e-1` | smells | `scripts/` の直下と下位の 5 つのうち名前の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 29 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `A3e-2` | smells | 同じく後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 28 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
+| `A3c-2` | smells | `scripts/lib/` の p〜z の後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 26 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2933・#2983 |
+| `A3d` | smells | `scripts/hook_lib/`・`scripts/relay_lib/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 34 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2789・#2898・#2962・#2985・#3035 |
+| `A3e-1` | smells | `scripts/` の直下と下位の 5 つのうち名前の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 30 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2838・#3077・#3087・#3187 |
+| `A3e-2` | smells | 同じく後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 28 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2424・#2970・#3167 |
 | `A3f-1` | smells | `skills/cross-refactoring/scripts/` の前半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 35 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
 | `A3f-2` | smells | 同じく後半の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 34 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `A3g` | smells | cross-refactoring を除く Skill の `scripts/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 50 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | — |
-| `DC1` | data | 事実の表の読み手（`lib/facts.py`・`lib/facts.sh`）と表の共通の形、依存 `jsonschema` を足す | 13 本。data の詳細設計の「ファイル配置」 | 無し | 組 D | 1 本 | 無し | 無し | — |
-| `DC2` | data | 重複の検査 `const-fact`・`fact-table` と基準を入れる（DT1 の後半・DT7） | 15 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 無し（計測のスクリプトにテストは無い） | — |
+| `A3g` | smells | cross-refactoring を除く Skill の `scripts/`の握りつぶし・フォールバック・分岐の多い判定・長い関数を直す | 50 本。smells の設計文書の「直す順序と触るファイル」の A3 の表（7da134096 の兆候のあるファイル） | `A0` | 組 S | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合（smells の詳細設計の「単体テストの観点」の後の表） | #2067・#2447・#2701・#3181 |
+| `DC1` | data | 事実の表の読み手（`lib/facts.py`・`lib/facts.sh`）と表の共通の形、依存 `jsonschema` を足す | 13 本。data の詳細設計の「ファイル配置」 | 無し | 組 D | 1 本 | 無し | 無し | #2235・#2339 |
+| `DC2` | data | 重複の検査 `const-fact`・`fact-table` と基準を入れる（DT1 の後半・DT7） | 15 本。data の詳細設計の「ファイル配置」 | `DC1`、`RF3` | 組 D | 1 本 | 無し | 無し（計測のスクリプトにテストは無い） | — |
 | `DC3` | data | ランタイムの表を置き、読み手を表から導く | 21 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | `test_state_review_pool.py` の消す分岐のテスト 2 件と、ランタイムの文字列の集まりを確かめる assert | — |
-| `DC4` | data | 収束ループのフェーズ・指摘の重さ・テストの印の表を置く | 20 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | `test_measure.py:687` の一致の確認 | #1774 |
+| `DC4` | data | 収束ループのフェーズ・指摘の重さ・テストの印の表を置く | 21 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | `test_measure.py:687` の一致の確認 | #1339・#1774・#1777・#2449・#2557 |
 | `DC5` | data | 閾値を上限の宣言へ移す | 16 本。data の詳細設計の「ファイル配置」 | `DC3` | 組 D | 1 本 | 無し | `test_relay.py:2885`・`test_queue_idempotency.py:52`・`test_testenv_reclaim.py:862` の一致の確認 | — |
-| `DC6` | data | 宣言の置き場・環境変数名・PR 本文の見出し・指示書の表を置く | 19 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 置き場・指示書・見出しの文字列の集まりだけを確かめる assert | — |
-| `DC7` | data | 工程とフェーズ（`metadata.ndf.phase`）・モード・進め方・ブランチの接頭辞・承認ゲートを表と工程の文書から引く | 28 本。data の詳細設計の「ファイル配置」 | #3191、`DC5`・`DC6`・`A1a`・`A1b` | 組 D | 1 本 | 移行の文書の「値として読まれる古い語」の R2 | `test_transcript_agents.py` の 2 件と development-workflow の定義の文字列を読むテスト | — |
-| `DC8` | data | 子 Issue の後に残る組（`sprint_loop_record`・`release_lib`・`parallel_*`・`durable`・`decl`）を持ち主から引く | 11 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 持ち主へ寄せた定数の一致を確かめる assert | — |
-| `SF3` | scripted-flow | CI の監視が分割ジョブの失敗とまとめのチェックの未完了を読み違える不具合を直す（#3153） | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF3 の行 | 無し | 組 F | 1 本 | 無し | `test_ci_watch.py` の `decide_exit` の `after_merge` の関数 | #3153 |
+| `DC6` | data | 宣言の置き場・環境変数名・PR 本文の見出し・指示書の表を置く | 22 本。data の詳細設計の「ファイル配置」 | `DC1` | 組 D | 1 本 | 無し | 置き場・指示書・見出しの文字列の集まりだけを確かめる assert | #2010・#2011・#2434・#2600・#3093 |
+| `DC7` | data | 工程とフェーズ（`metadata.ndf.phase`）・モード・進め方・ブランチの接頭辞・承認ゲートを表と工程の文書から引く | 28 本。data の詳細設計の「ファイル配置」 | #3191、`DC5`・`DC6`・`A1a`・`A1b` | 組 D | 1 本 | 移行の文書の「値として読まれる古い語」の R2 | `test_transcript_agents.py` の 2 件と development-workflow の定義の文字列を読むテスト | #1516・#2935 |
+| `DC8` | data | 子 Issue の後に残る組（`sprint_loop_record`・`release_lib`・`parallel_*`・`durable`・`decl`）を持ち主から引く | 11 本。data の詳細設計の「ファイル配置」 | `DC1`、`RF1`・`RF5a`・`RF6a`・`RF6b`・`RF7`・`RF8` | 組 D | 1 本 | 無し | 持ち主へ寄せた定数の一致を確かめる assert | — |
+| `SF3` | scripted-flow | CI の監視が分割ジョブの失敗とまとめのチェックの未完了を読み違える不具合を直す（#3153） | 7 本。scripted-flow の設計文書の「子 Issue の案」の SF3 の行 | 無し | 組 F | 1 本 | 無し | `test_ci_watch.py` の `decide_exit` の `after_merge` の関数 | #2224・#2317・#3153 |
 | `SF1a` | scripted-flow | 止まった理由の表 `causes.json` と読み手 `lib/causes.py` を契約に置く | 9 本。scripted-flow の設計文書の「子 Issue の案」の SF1a の行 | 無し | 組 F | 1 本 | 無し | 無し | — |
-| `SF1b` | scripted-flow | 結果 JSON の `cause` を必須にし、`stopped` を出すすべての手順のスクリプトが種類を返す | 135 本。scripted-flow の設計文書の「子 Issue の案」の SF1b の行と、詳細設計の「SF1b の移す先」の 127 本 | `SF1a` | 組 F | 1 本 | 無し | `test_step_result.py`・`test_step_result_readers.py`（ファイルごと）と `test_run_core.py` の関数 | — |
-| `SF2` | scripted-flow | プランの行き先を種類で選び、待てば解ける止まりを打ち直す。テンプレートを `on_cause` で書き直す | 46 本。scripted-flow の設計文書の「子 Issue の案」の SF2 の行（テンプレートの 11 本は詳細設計の「表の外にまとめたファイル」） | `SF1b` | 組 F | 1 本 | dbos の文書の「落ちた後の打ち直し（実測）」・決定 27 | `test_supervise_step_rerun.py`・`test_push_fix.py`・`test_supervise_limits.py`（ファイルごと）と 19 本の関数 | #2273 |
-| `SF4` | scripted-flow | マージの落ちたチェックをテストとテスト以外に分け、supervisor が CI を手で読む手順を外す | 9 本。scripted-flow の設計文書の「子 Issue の案」の SF4 の行 | `SF2`・`SF3` | 組 F | 1 本 | 無し | `test_ci_watch.py` の終了コード 2・3 の関数・`test_merged_probe.py` の CI の失敗の関数 | #2719 |
-| `SF5` | scripted-flow | 設計のプランの最後の judge を外し、レビューの結果で設計承認ゲートへ渡す | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF5 の行 | `SF2` | 組 F | 1 本 | 無し | 無し | — |
-| `SF6` | scripted-flow | 判断の呼び出しの答えを選択肢か JSON のスキーマで縛る | 10 本。scripted-flow の設計文書の「子 Issue の案」の SF6 の行 | `SF2`・`SF4`・`DC1` | 組 F | 1 本 | 無し | `test_slow_step.py`・`test_supervise_slow.py` の答えを読めないときに `wait` へ倒す関数 | — |
-| `SF7` | scripted-flow | プランの wait が attention を種類つきで返し、次のコマンドを `next` に載せる | 4 本。scripted-flow の設計文書の「子 Issue の案」の SF7 の行 | `SF1b`・`SF2` | 組 F | 1 本 | dbos の文書の「`queue`: ステージ・重なり・資源の枠」 | `test_queue_waits.py`（作り直す） | — |
-| `SF8` | scripted-flow | 進行表が工程の失敗の種類から行き先を選び、conductor へ `routes` だけを返す。工程の失敗の終了コード 6 を IS11 に合わせる | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF8 の行と `lib/workflow_def.py`（語彙に `on_cause` を足す。設計文書の「進行表（#3092）との受け渡し」） | #3191、`SF2`・`SF13` | 組 F | 1 本 | —（#3092 の設計） | 無し | — |
-| `SF9` | scripted-flow | 並列の計画の待ちの結果の行き先をスクリプトが選ぶ | 6 本。scripted-flow の設計文書の「子 Issue の案」の SF9 の行 | `SF1b` | 組 F | 1 本 | 無し | 無し | — |
+| `SF1b` | scripted-flow | 結果 JSON の `cause` を必須にし、`stopped` を出すすべての手順のスクリプトが種類を返す | 135 本。scripted-flow の設計文書の「子 Issue の案」の SF1b の行と、詳細設計の「SF1b の移す先」の 127 本 | `SF1a`、`RF4`・`RF5a`・`RF5b`・`RF6a`・`RF6b`・`RF7`・`RF8`・`RF1b` | 組 F | 1 本 | 無し | `test_step_result.py`・`test_step_result_readers.py`（ファイルごと）と `test_run_core.py` の関数 | #2337・#2340 |
+| `SF2` | scripted-flow | プランの行き先を種類で選び、待てば解ける止まりを打ち直す。テンプレートを `on_cause` で書き直す | 48 本。scripted-flow の設計文書の「子 Issue の案」の SF2 の行（テンプレートの 11 本は詳細設計の「表の外にまとめたファイル」） | `SF1b`、`RF4`・`RF5a` | 組 F | 1 本 | dbos の文書の「落ちた後の打ち直し（実測）」・決定 27 | `test_supervise_step_rerun.py`・`test_push_fix.py`・`test_supervise_limits.py`（ファイルごと）と 19 本の関数 | #1653・#1682・#1983・#2273・#2349・#2680・#2752・#2844・#2867・#3023・#3039 |
+| `SF4` | scripted-flow | マージの落ちたチェックをテストとテスト以外に分け、supervisor が CI を手で読む手順を外す | 10 本。scripted-flow の設計文書の「子 Issue の案」の SF4 の行 | `SF2`・`SF3` | 組 F | 1 本 | 無し | `test_ci_watch.py` の終了コード 2・3 の関数・`test_merged_probe.py` の CI の失敗の関数 | #2041・#2602・#2690・#2719・#3188 |
+| `SF5` | scripted-flow | 設計のプランの最後の judge を外し、レビューの結果で設計承認ゲートへ渡す | 7 本。scripted-flow の設計文書の「子 Issue の案」の SF5 の行 | `SF2` | 組 F | 1 本 | 無し | 無し | #2444・#2853・#2932 |
+| `SF6` | scripted-flow | 判断の呼び出しの答えを選択肢か JSON のスキーマで縛る | 10 本。scripted-flow の設計文書の「子 Issue の案」の SF6 の行 | `SF2`・`SF4`・`DC1`、`RF4`・`RF5a` | 組 F | 1 本 | 無し | `test_slow_step.py`・`test_supervise_slow.py` の答えを読めないときに `wait` へ倒す関数 | — |
+| `SF7` | scripted-flow | プランの wait が attention を種類つきで返し、次のコマンドを `next` に載せる | 4 本。scripted-flow の設計文書の「子 Issue の案」の SF7 の行 | `SF1b`・`SF2`、`RF4`・`RF5a` | 組 F | 1 本 | dbos の文書の「`queue`: ステージ・重なり・資源の枠」 | `test_queue_waits.py`（作り直す） | — |
+| `SF8` | scripted-flow | 進行表が工程の失敗の種類から行き先を選び、conductor へ `routes` だけを返す。工程の失敗の終了コード 6 を IS11 に合わせる | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF8 の行と `lib/workflow_def.py`（語彙に `on_cause` を足す。設計文書の「進行表（#3092）との受け渡し」） | #3191、`SF2`・`SF13`、`RF1`・`RF1b` | 組 F | 1 本 | —（#3092 の設計） | 無し | — |
+| `SF9` | scripted-flow | 並列の計画の待ちの結果の行き先をスクリプトが選ぶ | 7 本。scripted-flow の設計文書の「子 Issue の案」の SF9 の行 | `SF1b`、`RF6a`・`RF6b` | 組 F | 1 本 | 無し | 無し | #2554・#2751・#2781・#2822・#2888・#2934 |
 | `SF10` | scripted-flow | 手順 0 の 3 つの確かめを 1 回の結果 JSON にまとめる | 4 本。scripted-flow の設計文書の「子 Issue の案」の SF10 の行 | `SF1b` | 組 F | 1 本 | 無し | 無し | — |
-| `SF11` | scripted-flow | 開発ループのサブコマンドの断りと止まりが種類と `next` を返す | 4 本。scripted-flow の設計文書の「子 Issue の案」の SF11 の行 | `SF1b` | 組 F | 1 本 | 無し | `test_sprint_loop.py` の終了コードと `metrics.blocked` を見る関数 | — |
-| `SF12` | scripted-flow | 会話の切れ目と中断の点検の行き先を結果で返す | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF12 の行 | `SF1b`・`DC5` | 組 F | 1 本 | 無し | `test_token_guard.py` の案内の文を見る関数 | — |
-| `SF13` | scripted-flow | 承認ゲートの結果に答えごとの `routes` を必須で足し、問いの区分と選択肢を結果に載せる | 19 本。scripted-flow の設計文書の「子 Issue の案」の SF13 の行 | `SF1b`・`SF5`・`SF9` | 組 F | 1 本 | 無し | 無し | — |
-| `K1` | 前の企画 | Markdown のコードブロックの判定をアダプター `md` へ移す | 16 本。前の企画の詳細設計の「ファイル配置」の K1 の行 | `SF3`・`DC5` | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_gh_parts.py` のコードブロックの現状固定のテスト・`test_wait_notify.py` の地の文の行のテスト | — |
-| `K2` | 前の企画 | パスの照合とコメントの除去をアダプターへ移し、`comment_mask.py` を消す | 15 本。前の企画の詳細設計の「ファイル配置」の K2 の行 | `K1`・`DC7` | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_pace.py` の照合のテスト | — |
-| `K3` | 前の企画 | HTTP を `notify` の httpx へ移す | 11 本。前の企画の詳細設計の「ファイル配置」の K3 の行 | 無し | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_refresh.py`・`test_instructions_check.py` の opener のテスト・`test_jev.py` の `_post` のテスト | — |
+| `SF11` | scripted-flow | 開発ループのサブコマンドの断りと止まりが種類と `next` を返す | 4 本。scripted-flow の設計文書の「子 Issue の案」の SF11 の行 | `SF1b`、`RF7` | 組 F | 1 本 | 無し | `test_sprint_loop.py` の終了コードと `metrics.blocked` を見る関数 | — |
+| `SF12` | scripted-flow | 会話の切れ目と中断の点検の行き先を結果で返す | 5 本。scripted-flow の設計文書の「子 Issue の案」の SF12 の行 | `SF1b`・`DC5` | 組 F | 1 本 | 無し | `test_token_guard.py` の案内の文を見る関数 | #2595 |
+| `SF13` | scripted-flow | 承認ゲートの結果に答えごとの `routes` を必須で足し、問いの区分と選択肢を結果に載せる | 19 本。scripted-flow の設計文書の「子 Issue の案」の SF13 の行 | `SF1b`・`SF5`・`SF9`、`RF5a`・`RF5b` | 組 F | 1 本 | 無し | 無し | #2147・#2639・#2950 |
+| `K1` | 前の企画 | Markdown のコードブロックの判定をアダプター `md` へ移す | 16 本。前の企画の詳細設計の「ファイル配置」の K1 の行 | `SF3`・`DC5`、`RF1b` | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_gh_parts.py` のコードブロックの現状固定のテスト・`test_wait_notify.py` の地の文の行のテスト | — |
+| `K2` | 前の企画 | パスの照合とコメントの除去をアダプターへ移し、`comment_mask.py` を消す | 15 本。前の企画の詳細設計の「ファイル配置」の K2 の行 | `K1`・`DC7`、`RF5a` | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_pace.py` の照合のテスト | — |
+| `K3` | 前の企画 | HTTP を `notify` の httpx へ移す | 11 本。前の企画の詳細設計の「ファイル配置」の K3 の行 | `RF8` | 組 B | 1 本 | libraries の文書の「実装の状態と残り」・決定 68 | `test_refresh.py`・`test_instructions_check.py` の opener のテスト・`test_jev.py` の `_post` のテスト | — |
 | `W1` | 前の企画 | プランの実行の語（フェーズの結果の語を `report_fields` に集める）: 用語集の廃止語を生きた語へ替える | 66 本。前の企画の詳細設計の「W1〜W7 の触るファイル」の W1 の行 | 触るファイルの重なる子のすべて（流す順番で決まる） | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」・決定 65・67 | 無し（字面を写す assert だけ直す） | — |
 | `W2` | 前の企画 | cross-review の語: 用語集の廃止語を生きた語へ替える | 28 本。前の企画の詳細設計の「W1〜W7 の触るファイル」の W2 の行 | 触るファイルの重なる子のすべて（流す順番で決まる） | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」・決定 65・67 | 無し（字面を写す assert だけ直す） | — |
 | `W3` | 前の企画 | 外部 CLI と記録の語: 用語集の廃止語を生きた語へ替える | 16 本。前の企画の詳細設計の「W1〜W7 の触るファイル」の W3 の行 | 触るファイルの重なる子のすべて（流す順番で決まる） | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」・決定 65・67 | 無し（字面を写す assert だけ直す） | — |
@@ -208,12 +213,39 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | `W6` | 前の企画 | ラッパーの語: 用語集の廃止語を生きた語へ替える | 11 本。前の企画の詳細設計の「W1〜W7 の触るファイル」の W6 の行 | 触るファイルの重なる子のすべて（流す順番で決まる） | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」・決定 65・67 | 無し（字面を写す assert だけ直す） | — |
 | `W7` | 前の企画 | リリースと文書の語: 用語集の廃止語を生きた語へ替える | 42 本。前の企画の詳細設計の「W1〜W7 の触るファイル」の W7 の行 | 触るファイルの重なる子のすべて（流す順番で決まる） | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」・決定 65・67 | 無し（字面を写す assert だけ直す） | — |
 | `W8` | 前の企画 | W1〜W7 で外した廃止語を禁止語にする | 1 本。`.ndf/glossary.json` の 1 本 | `W1`〜`W7` | 組 B | 1 本 | 移行の文書の「スプリント 3 の行き先」 | 無し | — |
+| `RF1` | リファクタリング計画 | 判断のループと判断の関数の型を置き、耐久の層で回す代表のテストと DBOS を起こさないテストを足す（#2990） | 3 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | 無し | 組 R | 1 本 | 無し | 無し | — |
+| `RF1b` | リファクタリング計画 | 耐久の層の利用者のうち 8 件の組み直しが触らない 4 本の兆候を直す（#2990 から分ける） | 11 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `A1a`・`RF2` | 組 R | 1 本 | 無し | 握りつぶし・既定値への倒れを期待値に持つ場合 | #2640・#2827・#3053 |
+| `RF2` | リファクタリング計画 | 行数の上限を 1,000 の安全網にし、遅延の輪・判断のモジュールの純粋さ・2 つの耐久の層の境界を構造の検査の規則にする（#2991） | 6 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `A1a` | 組 R | 1 本 | 決定 18（行数の上限） | `test_import_cycles.py`（ファイルごと） | — |
+| `RF3` | リファクタリング計画 | 2 本の検査の構文木の解析を 1 回の実行で 1 回にする（#2996） | 9 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF2` | 組 R | 1 本 | 無し | 無し | — |
+| `RF4` | リファクタリング計画 | プランの遷移とキューの前提の判断を判断の関数へ移す（#2963） | 12 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF1`・`RF2`・`A1b` | 組 R | 1 本 | 無し | `drive()` を使う 4 ファイルのうち遷移だけを見るテスト | #3086 |
+| `RF5a` | リファクタリング計画 | `engine`・`flow`・`queue` の輪をほどき、プランの組み立てと再開・重なりの判断を判断の関数へ移す（#2993） | 17 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF4` | 組 R | 1 本 | dbos の文書の「`queue`: ステージ・重なり・資源の枠」 | `test_supervise_queue.py`・`test_supervise_resume.py` のうち判断だけを見るテスト | #1886・#2876・#2949・#3047・#3114・#3176 |
+| `RF5b` | リファクタリング計画 | スプリントの順番の組み方と閉じのプランの判断を判断の関数へ移す（#2993 から分ける） | 8 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `A1a`・`RF2` | 組 R | 1 本 | 無し | `test_supervise_sprint_chain.py`・`test_supervise_close_auto.py` のうち判断だけを見るテスト | #2967・#2968 |
+| `RF6a` | リファクタリング計画 | 並列の計画の耐久の層の判断を判断の関数へ移し、輪 L3 をほどく（#2992） | 18 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF1`・`RF2`・`A1b`・#2936（マージ済み） | 組 R | 1 本 | 無し | `test_parallel_run.py`・`test_parallel_answer.py` のうち判断だけを見るテスト | #2441・#2585・#2730・#2783・#2834・#3020・#3096・#3128・#3136・#3172・#3174 |
+| `RF6b` | リファクタリング計画 | 計画の上限・置き場・レーンの判断を判断の関数へ移し、輪 L7・L9 をほどく（#2992 から分ける） | 15 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF6a` | 組 R | 1 本 | 無し | `test_parallel_plan.py`・`test_parallel_lane.py`・`test_parallel_external.py` のうち判断だけを見るテスト | #2831・#2999・#3021・#3064・#3118・#3145 |
+| `RF7` | リファクタリング計画 | 周の結果と選定の除外を判断の関数へ移し、周の結果をリリースの事実から導く（#2994） | 14 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `A1b`・`RF2` | 組 R | 1 本 | 無し | `test_sprint_loop.py` のうち判断だけを見るテスト | #2132・#2400・#2435・#2714・#2722・#2746・#2788・#2820・#2923 |
+| `RF8` | リファクタリング計画 | `release-steps.py` の副命令を段階ごとのモジュールへ分ける（#2995） | 15 本。#2963 の設計文書の「子 Issue の行」と、#2963 の詳細設計の「ファイル配置」 | `RF2` | 組 R | 1 本 | 無し | `test_release_steps.py` のうち段階の判断だけを見るテスト | #1755・#1756・#2217・#2289・#2601・#2655・#2896・#3110・#3169 |
+| `N1` | ラベルの残り | プランとループの 1 回が今の起動の外にある成果（版・記録の PR・前のステージの PR・検査の件数・問いの当て先・再開の位置・設計の起点）を、流す直前に参照の部品で解決し、解決できなければ種類つきで止まる | 26 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF2`・`RF4`・`RF5a`・`RF5b`・`RF7`・`RF1b`・`SF1b`・`SF11` | 組 N | 1 本 | 無し | plugins/ndf/scripts/tests/test_release_version.py のうち queue_fill を直に呼ぶ関数（17 か所。refs の version の種類のテストへ作り直す）、test_record_find.py・test_lane_prod_stage.py ほか（詳細設計） | #1592・#2344・#2408・#2489・#2528・#2568・#2569・#2638・#2648・#2663・#2664・#2665・#2806 |
+| `N2a` | ラベルの残り | worker への規則文と受け渡し（前景で待つ規則・結果ファイルが無いときの起こし直し・修正の手順書の届け方・PR 本文の下書きの置き場・closing keywordsの範囲）を直し、closing keywordsの形のコミットを push の前に断る子と、conductor がプランを書き換える副命令を足す | 19 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`SF2`・`RF5a` | 組 N | 1 本 | 無し | test_drive_refactor.py の「結果ファイルを書かなかった」で終わることを期待する箇所（233 行目付近） | #1734・#1742・#1958・#1984・#2005・#3111・#3129 |
+| `N2b` | ラベルの残り | 設計の結果を読めない承認済みの課題・分割した PR・サブディレクトリの相対パスのテストで止まるか正しく判定し、受け入れ条件の節と区分をプランの中で確かめ、触るファイルの宣言の無いプランを直列にし、マージで消えた作業場所の後のステップと報告をリポジトリの根で打つ | 27 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`SF2`・`RF5a`・`A1b` | 組 N | 1 本 | 無し | test_design_match.py の test_judge_names_test_file_by_path_dir_and_basename の `"sub/test_b.py": "missing"` の期待 ほか（詳細設計） | #1811・#2056・#2165・#2246・#2274・#2357・#2453・#2539・#2553・#2596・#2969・#3022・#3186 |
+| `N3` | ラベルの残り | 並列の計画で、止めた計画を同じ名前で再開でき、レーンの生死を一覧の 1 行ではなく開発ループの記録・ラッパーの認証の止まり・止めた後の確かめと照らして決める | 18 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`RF6a`・`RF6b`・`SF1b`・`SF9` | 組 N | 1 本 | 無し | test_parallel_run.py のうち見回りの判定を _Run 越しに見るテスト（test_a_stalled_lane_is_asked_once・test_a_stopped_helper_without_settle_is_asked・test_a_helper_*_is_not_asked 系 ほか（詳細設計） | #2477・#2584・#2617・#2637・#2647・#2649・#2808・#2936・#3173・#3243 |
+| `N4` | ラベルの残り | 中継（relay）の Stop の hook・区間の切り替え・リレーハブの起動と起こし直し・アカウントの指定・PATH の入口と、共有の依存の環境の python の選び方を、事実で判定し失敗を返す形にそろえる | 25 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`DC1`・`DC5`・`SF12`・`SF1b`・`SF6`・`A2` | 組 N | 1 本 | 無し | test_relay_hub.py の test_process_restart_of_running_name_is_taken（動いている名前の restart を断る期待値で、restart をリレーハブの中で止めてから起こす形と食い違う）。test_relay.py（4,884 行）のうち mark ほか（詳細設計） | #1877・#1919・#2324・#2438・#2461・#2464・#2504・#2563・#2583・#2753・#3105 |
+| `N5` | ラベルの残り | cross-refactoring の振る舞いの不具合 8 件を直す。足したテストが全体の実行に入るかの確かめ・提案の範囲を課題が触る関数へ絞る・読み取りの担当の結果ファイルの置き場・drive の案内・着手前のテストのパスの種類・雛形の試走の上限・最終ゲートの範囲外の直し・項目の範囲テストの絞り込み | 33 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`DC5` | 組 N | 1 本 | 無し | plugins/ndf/scripts/tests/test_lib_loop_drive.py の test_keep_finished_compares_reopen_head_then_args（案内の字面 --reopen を期待値に持つ） ほか（詳細設計） | #620・#622・#750・#2057・#2096・#2158・#3038・#3049 |
+| `N6` | ラベルの残り | cross-review の対象リポジトリの決め方・PR のブランチとレビュー用のworktreeの同期・巻き直しの後の番号の規則・作業中のworktreeの登録の保護を、事実で決めて理由を返す形にそろえる | 16 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`RF1b`・`K1`・`A2`・`SF13`・`DC4` | 組 N | 1 本 | 無し | skills/cross-review/tests/test_state_start_round_sync.py のうち、修正必須の判定で記録が無いときに必ず終了コード 5 で止まることを期待するテスト（結果ファイルが残る場合は取り込む形に変わる） ほか（詳細設計） | #1707・#2440・#2770・#3106・#3109 |
+| `N7` | ラベルの残り | 棚卸し（backlog-refinement）の候補・持ち越し・却下・切り出しの境界・見直しの上限と採点の欠けの不具合 6 件を直す | 16 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`K1`・`SF2`・`DC5`・`A2` | 組 N | 1 本 | 無し | plugins/ndf/skills/backlog-refinement/tests/test_upkeep_rank_cli.py の test_rejected_move_is_remembered_by_apply_only（依存先の一致で記録する形を前提にした期待値を持つなら作り直す） ほか（詳細設計） | #1595・#1640・#2064・#2232・#2423・#2540 |
+| `N8a` | ラベルの残り | 工程の終わりの記録（確定仕様化・後片付けの工程表・リリース後テストの合否）、引継ぎ文書の大きさと実在の確かめ、用語集の分割の出力を直す | 18 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`SF13`・`A2`・`DC6`・`DC3`・`A1a`・`DC5` | 組 N | 1 本 | 無し | plugins/ndf/scripts/tests/test_handoff.py の test_check_line_limit_and_trim_moves_demoted_section（退避の対象が「前の会話の進み」だけの前提） ほか（詳細設計） | #1616・#1715・#1785・#1835・#1893・#2293 |
+| `N8b` | ラベルの残り | 使用量の帳簿（日付の区切り・同じ応答の数え方・置き場・停止の hook の順序）と MVV の記録（worktree の判定・判定の再利用・覆しの数え方）を直す | 8 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`SF13`・`A2`・`DC6`・`DC3`・`A1a`・`DC5` | 組 N | 1 本 | 無し | plugins/ndf/scripts/tests/test_handoff.py の test_check_line_limit_and_trim_moves_demoted_section（退避の対象が「前の会話の進み」だけの前提） ほか（詳細設計） | #1978・#1979・#2575・#2576・#2603・#2614・#2777 |
+| `N9` | ラベルの残り | テストの揺れ（壁時計・並列・パスの形・起動の順）を待たなかった場合だけ落ちる形へ直し、本物の状態の置き場からテストを隔離し、残骸と重複のテストを削り、親ごと消えた worktree のテスト環境の割り当てを回収する | 28 本。ラベルの残りの詳細設計の「ファイル配置」 | `RF2`・`DC5`・`SF6`・`SF11`・`RF7`・`SF12` | 組 N | 1 本 | 無し | test_removed_review_phase.py（2 件）・test_no_command_parsing.py（2 件）・test_training_optout.py::test_experimental_copy_is_gone ほか（詳細設計） | #1735・#1967・#2130・#2758・#2776・#2798・#2964・#2974・#3140 |
+| `N10` | ラベルの残り | 外部 CLI の監視の照合の範囲と警告の出し方、1 回の実行を識別子 1 つで追う記録（#2338 の設計 PR #2497 のとおり）、マージの hook の対象リポジトリの決め方、kiro の起動がworktreeを書き換えないことを直す | 28 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1a`・`SF1b`・`A2`・`DC5`・`DC6`・`DC3` | 組 N | 1 本 | 無し | test_monitor_layout.py と skills/cross-review/tests/test_monitor_early_error.py のうち、平文の quota exceeded を利用上限と読む前提の期待値（行頭の ERROR: の無い形）を消す ほか（詳細設計） | #1411・#2059・#2338・#2446・#2448 |
+| `N11` | ラベルの残り | SF2 が `on_cause` で書き直したプランの雛形に、検査・リリース・閉じ・実装のプランのステップごとの不具合 9 件の直しを足す | 12 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF2`・`SF1a`・`SF1b`・`RF5a`・`RF1b` | 組 N | 1 本 | 無し | SF2 が作り直すテンプレートのテストのうち、`last[:120]` の切れ・`git pull -q --ff-only origin` を含む verify の cmd の文字列・refactor の cmd に `--sync-command` が無いことを期待値に持つ assert（着手の時点で grep で数える） | #1502・#2049・#2054・#2118・#2140・#2370・#3003・#3108・#3112 |
+| `N12` | ラベルの残り | 重いテストの同時実行を作業マシンの上限（枠）に収め、メモリの下限を割ったら OOM Killer より先に NDF が待たせるか止める（#2711） | 18 本。ラベルの残りの詳細設計の「ファイル配置」 | `SF1b` | 組 N | 1 本 | 無し | 無し | #2711 |
 
-**smells の範囲の外の残り。** smells の決定 43 は、リファクタリング計画の 8 件の範囲（`supervise.py`・`supervise_lib/`・`parallel.py`・`lib/parallel_*`・`lib/sprint_loop*`・`release-steps.py`・`release_lib/`・`lib/durable.py`・`lib/post_queue.py`・2 本の `drive.py`。兆候のあるファイル 101 本）を A3 から除いた。8 件を外した形ではこの範囲を直す子 Issue が無く、兆候は基準のラチェットで増えないが減らない。推奨の案（8 件を取り込む）では、8 件の子 Issue がこの範囲を直す。E9 で前後の数を残す。
+**「この子で解消する Issue」の列は、ラベル `rebuild-1142` の Issue の行き先（[issue-1142-design-labels.md](issue-1142-design-labels.md) ）と、ラベルの無い割り当て済みの bug（#3096・#1755）を持つ。** 範囲を広げた子 Issue は、触るファイルを設計の結果と主題の詳細設計のファイル配置に足し、上の数を数え直した。
+
+**smells の範囲の外の残り。** smells の決定 43 は、リファクタリング計画の 8 件の範囲（`supervise.py`・`supervise_lib/`・`parallel.py`・`lib/parallel_*`・`lib/sprint_loop*`・`release-steps.py`・`release_lib/`・`lib/durable.py`・`lib/post_queue.py`・2 本の `drive.py`。兆候のあるファイル 101 本）を A3 から除いた。この範囲は 8 件の子 Issue（`RF*`）が、移すときに直す（受け持ちは #2963 の設計文書の「smells の決定 43 が外した範囲の割り当て」）。E9 で前後の数を残す。
 
 ### リファクタリング計画の 8 件
 
-上の表は、8 件を先に要るものから外した形で組んだ。各主題の「先に要るもの」に書かれた 8 件は表から外し、この形で同じ目的の一部を受け持つ子 Issue を次に示す。「受け持たない部分」が、8 件を取り込む推奨の案で 8 件の子 Issue が受け持つ範囲である。
+8 件と同じ目的の一部を受け持つ #1142 の子 Issue を次に示す。「受け持たない部分」は 8 件の子 Issue（`RF*`）が受け持つ。関数の粒度の受け持ちの分け方は #2963 の決定 15 にある。
 
 | Issue | 目的 | 受け持つ子 Issue | 受け持たない部分 |
 | --- | --- | --- | --- |
@@ -226,45 +258,53 @@ pyproject.toml・plugins/ndf/pyproject.toml
 | #2995 | `release-steps.py` を段階ごとに分ける | 無し | 全部 |
 | #2996 | 構造と契約の検査の構文木の解析を 1 回に | 無し（DC2 の `const_facts` は自分で解析する） | 全部 |
 
-推奨の案（8 件を子 Issue に取り込み、別の設計 PR で設計する）を採ったときに変わる点:
+8 件を子 Issue に取り込んで変わった点:
 
-- 8 件を子 Issue として設計し、SF1b・SF2・SF6・SF7・SF9・SF11・SF13・DC2・DC8・K1〜K3 の先に要るものへ戻すため、順番が増え、#2963・#2993 が SF1b の前、#2996 が DC2 の前に入る
+- 8 件を 11 本の子 Issue として設計し、SF1b・SF2・SF6・SF7・SF9・SF11・SF13・DC2・DC8・K1〜K3 の先に要るものへ戻すため、順番が増え、#2963・#2993 が SF1b の前、#2996 が DC2 の前に入る
 - smells の決定 43 のとおり、上の「smells の範囲の外の残り」の 101 本の兆候は、その範囲の子 Issue が移すときに直す
-- 開いている bug は、別の設計 PR で 8 件の子 Issue へ割り当て直す（下の「開いている bug の割り当て」で範囲外とした行のうち、8 件の範囲のもの）
+- 開いている bug のうち 8 件の範囲のもの（下の「開いている bug の割り当て」で範囲外とした行）は、#2963 の設計文書の「開いている bug の割り当て」で 8 件の子 Issue へ割り当てた
 - 8 件に依らない子 Issue（順番 1 の SF3・A0・SF1a・DC1、順番 2 の A1a・A2、順番 3 の A1b など）は、8 件の設計を待たずに着手する
 
 ### 流す順序
 
-同じ順番の子 Issue は、触るファイルが重ならず、先に要るものが前の順番にある。順番の中の並びは優先の順（「処理の手順」）である。
+同じ順番の子 Issue は、触るファイルが重ならず、先に要るものが前の順番にある。順番の中の並びは優先の順（「処理の手順」）である。リファクタリング計画の 8 件の子 Issue（`RF*`）を置いた理由は #2963 の設計文書の「流す順序への入れ方」にある。
 
 | 順番 | 同時に流せる子 Issue | 待つ理由（その順番を決めた前の子 Issue と、重なるファイルか先に要るもの） |
 | --- | --- | --- |
-| 1 | `SF3`・`A0`・`SF1a`・`DC1` | 無し（最初の順番） |
-| 2 | `A1a`・`A2`・`DC2` | `A1a` ← `SF1a`（`scripts/lib/README.md`）、`A2` ← `A0`（先に要るもの）、`DC2` ← `DC1`（先に要るもの） |
-| 3 | `A1b` | `A1b` ← `A1a`（`scripts/lib/README.md` ほか 4 本） |
-| 4 | `SF1b` | `SF1b` ← `A1b`（`scripts/context-policy.py` ほか 8 本） |
-| 5 | `DC3`・`DC4`・`DC6`・`K3`・`SF9`・`SF10`・`SF11` | `DC3` ← `SF1b`（`scripts/training-optout.py` ほか 2 本）、`DC4` ← `SF1b`（`scripts/mode-materials.py` ほか 1 本）、`DC6` ← `SF1b`（`scripts/glossary.py` ほか 3 本）、`K3` ← `SF1b`（`scripts/release-steps.py`）、`SF9` ← `SF1b`（`scripts/lib/parallel_cli.py` ほか 1 本）、`SF10` ← `SF1b`（先に要るもの）、`SF11` ← `SF1b`（`scripts/lib/sprint_loop_cli.py`） |
-| 6 | `DC5`・`A3f-1`・`A3f-2` | `DC5` ← `DC3`（`scripts/hook_lib/wait_notify.py`）、`A3f-1` ← `K3`（`skills/cross-refactoring/scripts/refactor.py`）、`A3f-2` ← `DC4`（`skills/cross-refactoring/scripts/refactor_lib/pathkinds.py` ほか 1 本） |
-| 7 | `K1`・`SF2`・`SF12`・`A3c-1`・`W4` | `K1` ← `DC5`（`scripts/issue-file.py`）、`SF2` ← `DC5`（`scripts/supervise_lib/verify_steps.py`）、`SF12` ← `DC5`（`scripts/hook_lib/token_guard.py`）、`A3c-1` ← `DC5`（`scripts/lib/run_owner.py`）、`W4` ← `A3f-2`（`skills/cross-refactoring/scripts/refactor_lib/github.py` ほか 19 本） |
-| 8 | `SF4`・`SF5`・`SF7`・`A3b`・`A3d`・`A3g`・`DC8` | `SF4` ← `SF2`（`scripts/supervise_lib/verify_steps.py`）、`SF5` ← `SF2`（`scripts/supervise_lib/design_steps.py`）、`SF7` ← `SF2`（`scripts/supervise_lib/state.py`）、`A3b` ← `K1`（`scripts/lib/gh_parts.py` ほか 2 本）、`A3d` ← `SF12`（`scripts/hook_lib/token_guard.py`）、`A3g` ← `K1`（`skills/backlog-refinement/scripts/upkeep.py` ほか 1 本）、`DC8` ← `SF2`（`scripts/lib/durable.py`） |
-| 9 | `SF6`・`SF13` | `SF6` ← `SF4`（先に要るもの）、`SF13` ← `SF7`（`skills/development-workflow/references/waiting.md`） |
-| 10 | `A3a`・`A3c-2`・`A3e-1`・`A3e-2` | `A3a` ← `SF13`（`scripts/lib/ask_policy.py`）、`A3c-2` ← `SF13`（`scripts/lib/step_result.py`）、`A3e-1` ← `SF13`（`scripts/merged-steps.py` ほか 2 本）、`A3e-2` ← `SF13`（`scripts/sprint-close.py` ほか 1 本） |
-| 11 | `DC7`・`W6` | `DC7` ← `A3e-2`（`scripts/sprint-state.py`）、`W6` ← `A3a`（`scripts/lib/claude_api_keys.py`）、`DC7` は #3191 のマージも待つ |
-| 12 | `K2`・`SF8`・`W3`・`W5` | `K2` ← `DC7`（`scripts/check-trigger.py` ほか 4 本）、`SF8` ← `DC7`（`scripts/lib/workflow_def.py` ほか 1 本）、`W3` ← `DC7`（`scripts/lib/transcript_agents.py`）、`W5` ← `DC7`（`scripts/hook_lib/token_guard.py` ほか 1 本）、`SF8` は #3191 のマージも待つ |
-| 13 | `W1`・`W2`・`W7` | `W1` ← `SF8`（`skills/development-workflow/references/agent-layers.md`）、`W2` ← `K2`（`scripts/lib/review_criteria.py` ほか 1 本）、`W7` ← `K2`（`skills/fix/scripts/fix-steps.py`） |
-| 14 | `W8` | `W8` ← `W7`（先に要るもの） |
+| 1 | `A0`・`DC1`・`SF3`・`SF1a`・`RF1` | 無し（最初の順番） |
+| 2 | `A1a`・`A2` | `A1a` ← `A0`（先に要るもの）、`A2` ← `A0`（先に要るもの） |
+| 3 | `A1b`・`RF2` | `A1b` ← `A1a`（先に要るもの）、`RF2` ← `A1a`（先に要るもの） |
+| 4 | `RF1b`・`RF3`・`RF4`・`RF5b`・`RF6a`・`RF7`・`RF8` | `RF1b` ← `RF2`（先に要るもの）、`RF3` ← `RF2`（先に要るもの）、`RF4` ← `A1b`（先に要るもの）、`RF5b` ← `RF2`（先に要るもの）、`RF6a` ← `A1b`（先に要るもの）、`RF7` ← `RF2`（先に要るもの）、`RF8` ← `RF2`（先に要るもの） |
+| 5 | `DC2`・`RF5a`・`RF6b` | `DC2` ← `RF3`（先に要るもの）、`RF5a` ← `RF4`（先に要るもの）、`RF6b` ← `RF6a`（先に要るもの） |
+| 6 | `SF1b` | `SF1b` ← `RF6b`（先に要るもの） |
+| 7 | `DC3`・`DC4`・`DC6`・`SF9`・`SF10`・`SF11`・`K3` | `DC3` ← `SF1b`（`scripts/training-optout.py` ほか 2 本）、`DC4` ← `SF1b`（`scripts/mode-materials.py` ほか 1 本）、`DC6` ← `SF1b`（`scripts/glossary.py` ほか 4 本）、`SF9` ← `SF1b`（先に要るもの）、`SF10` ← `SF1b`（先に要るもの）、`SF11` ← `SF1b`（先に要るもの）、`K3` ← `SF1b`（`scripts/release-steps.py`） |
+| 8 | `DC5` | `DC5` ← `DC3`（先に要るもの） |
+| 9 | `SF2`・`SF12`・`K1` | `SF2` ← `DC5`（`scripts/supervise_lib/verify_steps.py`）、`SF12` ← `DC5`（先に要るもの）、`K1` ← `DC5`（先に要るもの） |
+| 10 | `SF4`・`SF5`・`SF7`・`N5` | `SF4` ← `SF2`（先に要るもの）、`SF5` ← `SF2`（先に要るもの）、`SF7` ← `SF2`（先に要るもの）、`N5` ← `SF2`（`skills/cross-refactoring/SKILL.md` ほか 1 本） |
+| 11 | `SF6`・`SF13` | `SF6` ← `SF4`（先に要るもの）、`SF13` ← `SF5`（先に要るもの） |
+| 12 | `N1`・`N3`・`N6`・`N8b` | `N1` ← `SF6`（`scripts/supervise_lib/engine.py`）、`N3` ← `SF13`（`scripts/parallel.py`）、`N6` ← `SF13`（先に要るもの）、`N8b` ← `SF13`（先に要るもの） |
+| 13 | `N2a`・`N7` | `N2a` ← `N1`（`scripts/supervise.py`）、`N7` ← `N1`（`scripts/lib/sprint_loop_record.py`） |
+| 14 | `N2b`・`N4`・`N8a`・`A3g` | `N2b` ← `N2a`（`scripts/supervise_lib/paths.py` ほか 3 本）、`N4` ← `N2a`（`scripts/supervise_lib/claude.py`）、`N8a` ← `N7`（`contracts/limits.json`）、`A3g` ← `N7`（`skills/backlog-refinement/scripts/upkeep.py` ほか 5 本） |
+| 15 | `N9`・`A3d` | `N9` ← `N4`（`scripts/tests/test_relay.py` ほか 1 本）、`A3d` ← `N4`（`scripts/hook_lib/token_guard.py` ほか 10 本） |
+| 16 | `N10` | `N10` ← `N9`（`scripts/tests/test_monitor_layout.py`） |
+| 17 | `N11`・`N12`・`A3a`・`A3b`・`DC8` | `N11` ← `N10`（`scripts/check-trigger.py`）、`N12` ← `N10`（`conftest.py` ほか 1 本）、`A3a` ← `N10`（`scripts/lib/durable_keys.py`）、`A3b` ← `N10`（`scripts/lib/monitor_loop.py` ほか 1 本）、`DC8` ← `N10`（`scripts/lib/durable.py`） |
+| 18 | `A3c-1`・`A3c-2`・`A3e-1`・`A3e-2`・`A3f-1`・`A3f-2`・`W6` | `A3c-1` ← `N12`（`scripts/lib/procs.py`）、`A3c-2` ← `N12`（`scripts/lib/test_triage.py`）、`A3e-1` ← `N11`（`scripts/behavior-check.py` ほか 2 本）、`A3e-2` ← `N12`（`scripts/test-run.py`）、`A3f-1` ← `N12`（`skills/cross-refactoring/scripts/refactor.py`）、`A3f-2` ← `N12`（`skills/cross-refactoring/scripts/refactor_lib/process.py`）、`W6` ← `A3a`（`scripts/lib/claude_api_keys.py`） |
+| 19 | `DC7`・`W4` | `DC7` ← `A3c-1`（`scripts/lib/pace.py` ほか 1 本）、`W4` ← `A3f-1`（`skills/cross-refactoring/scripts/refactor.py` ほか 14 本）、`DC7` は #3191 のマージも待つ |
+| 20 | `K2`・`SF8`・`W3`・`W5` | `K2` ← `DC7`（先に要るもの）、`SF8` ← `DC7`（`scripts/lib/workflow_def.py` ほか 1 本）、`W3` ← `DC7`（`scripts/lib/transcript_agents.py`）、`W5` ← `DC7`（`scripts/hook_lib/token_guard.py` ほか 1 本）、`SF8` は #3191 のマージも待つ |
+| 21 | `W1`・`W2`・`W7` | `W1` ← `K2`（`scripts/check-trigger.py` ほか 2 本）、`W2` ← `K2`（`scripts/lib/review_criteria.py` ほか 1 本）、`W7` ← `K2`（`skills/fix/scripts/fix-steps.py`） |
+| 22 | `W8` | `W8` ← `W7`（先に要るもの） |
 
-確かめ方（リポジトリの根で打つ。2026-11-13 に打ち、「子 Issue 47・順番 14: 同じ順番の重なりと先に要るものの逆転は 0 件」を返した）:
+確かめ方（リポジトリの根で打つ。2026-11-13 に打ち、「子 Issue 72・順番 22: 同じ順番の重なりと先に要るものの逆転は 0 件」を返した）:
 
 ```bash
 python3 - <<'EOF'
 import itertools, re, sys
-D = open("issues/issue-1142-design.md", encoding="utf-8").read()
+D = "".join(open(f"issues/issue-{n}-design.md", encoding="utf-8").read() for n in (1142, 2963))
 H = open("issues/issue-1142-design-detail.md", encoding="utf-8").read()
 SHARED = {"plugins/ndf/contracts/index.md"}  # 生成物。後からマージする PR が --render で書き直す
 files = {}
-for line in D.split("\n## 設計の結果\n", 1)[1].split("\n## ", 1)[0].splitlines():
-    m = re.match(r"\| #\d+ \| 実装する \| — \| （([^。）]+)。[^）]*）(.*) \|$", line)
+for line in "".join(d.split("\n## ", 1)[0] for d in D.split("\n## 設計の結果\n")[1:]).splitlines():
+    m = re.match(r"\| #\d+ \| 実装する \| — \| （([^。）]+)(?:。[^）]*)?）(.*) \|$", line)
     if m:
         files[m.group(1)] = set(re.findall(r"`([^`]+)`", m.group(2))) - SHARED
 def hit(a, b):
@@ -290,146 +330,77 @@ EOF
 
 ### レーンへの割り当ての案
 
-並列の計画 p6 は「同時に動くレーンは 3 本まで」の規則を持つ。lflow は #3092（PR #3191）を続けるため、残りの 2 本を使い、lflow が終わったら lrel を足す。オーガナイザーは `parallel.py lane p6 set --lane <名前> --from <JSON>` で割り当て直す。
+**#1142 の関連レーンは同時に 6 本まで使う**（2026-11-13 利用者。ほかのリポジトリの開発を止め、#1142 に注力する）。#1142 の前に済ませる lflow（#3092・PR #3191）・lbr2・lsw の 3 本を `after` に入れ、3 本が終わってから実装の子 Issue を起動する。上限は `relay.py cap --named 13 --plans 13` に上げてあり、6 本 × プラン 2 本の 12 本が収まる。オーガナイザーは `parallel.py lane p6 add` でレーンを足す。
 
-| レーン | 受け持つ組 | プランの本数 | いつ | 役割 |
-| --- | --- | ---: | --- | --- |
-| lrebuild | 組 S（smells）と、lflow が終わるまでに順番の来た組 D・組 B の子 Issue | 2 | 今から | 組 S を流し、**流す順番を見張る**（前の順番の PR のマージを確かめてから、次の順番の子 Issue を各レーンへ知らせる） |
-| lbranch（割り当て直し） | 組 F（scripted-flow） | 2 | 今から | SF3 から流す。SF8 は #3191 のマージの後 |
-| lflow | #3092（PR #3191）の続き | 1 | 今のまま | #3191 のマージが DC7・SF8 の先に要るもの |
-| lrel（割り当て直し、`after: ["lflow"]`） | lflow の後の組 D・組 B の残り（DC7・DC8・K2・W1〜W8 ほか） | 2 | lflow の後 | 組 D と組 B を lrebuild から引き継ぐ |
-| lclean | 割り当てない | — | — | 同時に動くレーンを 4 本に上げると利用者が決めたら、組 B を lrel から移す |
+**レーンは主題で分け、触るファイルが重なる子 Issue の前後は流す順番で決める。** 主題をまたいで同じファイルを触る子 Issue（`supervise_lib/state.py` など）があり、レーンの触るファイルを完全に分けられない。そのため、同じ順番の子 Issue だけを同時に流し（「流す順序」で重なりが 0 件）、lrebuild が前の順番の PR のマージを確かめてから次の順番の子 Issue を受け持つレーンへ知らせる。
 
-`lane set` に渡す JSON の形（子 Issue を起票した後に番号を入れる）:
+| レーン | 受け持つ子 Issue | 子 Issue の数 | 順番の範囲 | 主に触るディレクトリ | after | プランの本数 | 役割 |
+| --- | --- | ---: | --- | --- | --- | ---: | --- |
+| lrebuild | 組 S（`A0`・`A1a`・`A1b`・`A2`・`A3a`〜`A3g`）と順番の見張り | 14 | 1〜18 | `scripts/`（検査）・`plugins/ndf/scripts/lib/`・`plugins/ndf/scripts/hook_lib/`・`plugins/ndf/scripts/relay_lib/`・`plugins/ndf/skills/*/scripts/` | 既にある（after は今の `[]` のまま。実装の着手は 3 本の後） | 2 | 組 S を流し、**流す順番を見張る**（前の順番の PR のマージを確かめてから、次の順番の子 Issue を受け持つレーンへ知らせる） |
+| lr-flow | 組 F（`SF1a`〜`SF13`） | 14 | 1〜20 | `plugins/ndf/scripts/supervise_lib/`・`plugins/ndf/scripts/lib/step_result.py`・`plugins/ndf/contracts/causes.json` | `["lflow", "lbr2", "lsw"]` | 2 | SF3 から流す。SF8 は #3191 のマージの後 |
+| lr-data | 組 D（`DC1`〜`DC8`）と組 B の `K1`〜`K3` | 11 | 1〜20 | `plugins/ndf/contracts/`・`scripts/contracts_lib/`・`plugins/ndf/scripts/lib/` | `["lflow", "lbr2", "lsw"]` | 2 | DC7 は #3191 のマージの後 |
+| lr-rf | 組 R（`RF1`〜`RF8`）の後に組 B の `W1`〜`W8` | 19 | 1〜22 | `plugins/ndf/scripts/supervise_lib/`・`plugins/ndf/scripts/lib/parallel_*`・`plugins/ndf/scripts/lib/sprint_loop*`・`plugins/ndf/scripts/release_lib/`・`scripts/check-script-structure.py` | `["lflow", "lbr2", "lsw"]` | 2 | RF は順番 1〜5 で終わり、W は順番 18 から始まる。間は組 N の残りを lr-fix-a・lr-fix-b から引き受ける |
+| lr-fix-a | 組 N のうち supervise と並列の計画と中継（`N1`・`N2a`・`N2b`・`N3`・`N4`・`N11`） | 6 | 12〜17 | `plugins/ndf/scripts/supervise_lib/`・`plugins/ndf/scripts/lib/parallel_*`・`plugins/ndf/scripts/relay_lib/` | `["lflow", "lbr2", "lsw"]` | 2 | N11 は SF2 の後 |
+| lr-fix-b | 組 N のうち Skill と記録とテスト（`N5`〜`N7`・`N8a`・`N8b`・`N9`・`N10`・`N12`） | 8 | 10〜17 | `plugins/ndf/skills/cross-refactoring/`・`plugins/ndf/skills/cross-review/`・`plugins/ndf/skills/backlog-refinement/`・`plugins/ndf/scripts/lib/usage_*`・`plugins/ndf/scripts/tests/` | `["lflow", "lbr2", "lsw"]` | 2 | — |
+
+順番ごとの子 Issue と受け持つレーンは次のとおりである。1 本のレーンが同時に流すプランは 2 本までのため、同じ順番に 3 本以上の子 Issue を持つレーン（順番 4 の lr-rf の 7 本、順番 7 の lr-flow と lr-data の 3〜4 本、順番 18 の lrebuild の 6 本）の残りは、**その順番に子 Issue を持たないレーンへ lrebuild が回す**（`parallel.py lane p6 set` で受け持ちを移す）。
+
+| 順番 | 子 Issue（レーン） |
+| --- | --- |
+| 1 | `A0`（lrebuild）・`SF3`（lr-flow）・`SF1a`（lr-flow）・`DC1`（lr-data）・`RF1`（lr-rf） |
+| 2 | `A1a`（lrebuild）・`A2`（lrebuild） |
+| 3 | `A1b`（lrebuild）・`RF2`（lr-rf） |
+| 4 | `RF1b`（lr-rf）・`RF3`（lr-rf）・`RF4`（lr-rf）・`RF5b`（lr-rf）・`RF6a`（lr-rf）・`RF7`（lr-rf）・`RF8`（lr-rf） |
+| 5 | `DC2`（lr-data）・`RF5a`（lr-rf）・`RF6b`（lr-rf） |
+| 6 | `SF1b`（lr-flow） |
+| 7 | `SF9`（lr-flow）・`SF10`（lr-flow）・`SF11`（lr-flow）・`DC3`（lr-data）・`DC4`（lr-data）・`DC6`（lr-data）・`K3`（lr-data） |
+| 8 | `DC5`（lr-data） |
+| 9 | `SF2`（lr-flow）・`SF12`（lr-flow）・`K1`（lr-data） |
+| 10 | `SF4`（lr-flow）・`SF5`（lr-flow）・`SF7`（lr-flow）・`N5`（lr-fix-b） |
+| 11 | `SF6`（lr-flow）・`SF13`（lr-flow） |
+| 12 | `N1`（lr-fix-a）・`N3`（lr-fix-a）・`N6`（lr-fix-b）・`N8b`（lr-fix-b） |
+| 13 | `N2a`（lr-fix-a）・`N7`（lr-fix-b） |
+| 14 | `A3g`（lrebuild）・`N2b`（lr-fix-a）・`N4`（lr-fix-a）・`N8a`（lr-fix-b） |
+| 15 | `A3d`（lrebuild）・`N9`（lr-fix-b） |
+| 16 | `N10`（lr-fix-b） |
+| 17 | `A3a`（lrebuild）・`A3b`（lrebuild）・`DC8`（lr-data）・`N11`（lr-fix-a）・`N12`（lr-fix-b） |
+| 18 | `A3c-1`（lrebuild）・`A3c-2`（lrebuild）・`A3e-1`（lrebuild）・`A3e-2`（lrebuild）・`A3f-1`（lrebuild）・`A3f-2`（lrebuild）・`W6`（lr-rf） |
+| 19 | `DC7`（lr-data）・`W4`（lr-rf） |
+| 20 | `SF8`（lr-flow）・`K2`（lr-data）・`W3`（lr-rf）・`W5`（lr-rf） |
+| 21 | `W1`（lr-rf）・`W2`（lr-rf）・`W7`（lr-rf） |
+| 22 | `W8`（lr-rf） |
+
+`lane add` に渡す JSON の形（子 Issue を起票した後に番号を入れる。lr-fix-a の例）:
 
 ```json
-{"name": "lbranch", "input": {"kind": "sprint", "issues": [<SF3 の #3153 と SF の子 Issue の番号>]}, "plans": 2,
- "touches": ["plugins/ndf/scripts/supervise_lib/", "plugins/ndf/scripts/lib/", "plugins/ndf/contracts/"], "after": []}
+{"name": "lr-fix-a", "input": {"kind": "sprint", "issues": [<N1・N2a・N2b・N3・N4・N11 の番号>]}, "plans": 2,
+ "touches": ["plugins/ndf/scripts/supervise_lib/", "plugins/ndf/scripts/lib/", "plugins/ndf/scripts/relay_lib/"], "after": ["lflow", "lbr2", "lsw"]}
 ```
 
 ## 開いている bug の割り当て
 
-2026-11-13 の時点で開いている bug 110 件の本文を読み、本文が名指すファイル・振る舞いと子 Issue の変更内容を突き合わせた。**ファイルが重なるだけでは割り当てない。** 子 Issue の変更で直る見込みがあるものだけを割り当てた。
+**ラベル `rebuild-1142` の Issue 283 件の行き先は [issue-1142-design-labels.md](issue-1142-design-labels.md) にある。** #1142 の受け入れ条件（2026-11-13 利用者）は、ラベルの Issue が #1142 の改善ですべて閉じることである。この節は件数の要約と、ラベルの無い bug の扱いだけを持つ。
 
-| 割り当て | 件数 |
+| 行き先 | 件数 |
 | --- | ---: |
-| SF3 | 1 |
-| SF2 | 1 |
-| SF4 | 1 |
-| DC4 | 1 |
-| 範囲外 | 106 |
+| 子 Issue そのもの（自分の PR で閉じる） | 55 |
+| 既にある子 Issue（A・DC・SF・K・W・RF）の変更で閉じる | 112 |
+| ラベルの残りを受け持つ子 Issue（N1〜N12）の変更で閉じる | 110 |
+| 閉じられない（理由を添えてオーガナイザーへ送る） | 6（#1571・#1601・#2316・#2341・#3113・#3189） |
 
-範囲外の大半は、手順の誤り・別の原因・作り直しが変えない振る舞い（再開の決まり・並列の計画の上限・リリースの資料・cross-refactoring の手順）である。割り当てた Issue は、子 Issue の PR で再現の手順を 1 回通し、直った PR を添えて閉じる。範囲外の Issue は #1142 の作り直しの後も開いたまま残し、作り直しの後に閉じるか理由を書く。
+2026-11-13 の時点で開いている bug 110 件のうち 96 件はラベルを持ち、上の表の行き先に入る。ラベルの無い 14 件のうち #3096・#1755 は #2963 の設計で `RF6a`・`RF8` へ割り当てた。残りの 12 件は #1142 の範囲の外として開いたまま残し、作り直しの後に閉じるか理由を書く。
 
-| Issue | 題 | 割り当て（子 Issue か「範囲外」） | 理由 1 文 |
+| Issue | 題 | 割り当て | 理由 1 文 |
 | --- | --- | --- | --- |
-| #3187 | 振る舞いの確認: claude -p の起動で標準入力が閉じず、ほかの対象の依頼文が入力に付く | 範囲外 | `behavior-check.py` の worker の手順の起動の形（標準入力を閉じない）の誤りで、作り直しの子はこの手順を変えない |
-| #3186 | supervise.py: merge で終わるプランの報告で、消えた作業場所のまま gh を打ち PR 本文の通した工程を書き直せない | 範囲外 | `Engine.report()` が消えた作業場所を cwd に `gh` を打つ別の原因で、SF2 は `engine.py` の失敗の分岐だけを替える |
-| #3181 | cross-review: 設計 PR の 2 ラウンド目以降が前の head からの差分だけを見て、詳細レビューを通らない節を残したまま収束する | 範囲外 | cross-review の `classifications.diff_scope` の範囲の決め方の誤りで、作り直しの範囲の外 |
-| #3176 | supervise run: 差し戻しの後に同じ --from で打ち直すと、直した head を流さず前回の報告を返す | 範囲外 | 耐久の実行の鍵が head を持たず前回の報告を返す別の原因で、SF2 の行き先の表は実行の鍵を変えない |
 | #3175 | 並列の計画: リリース承認ゲートの承認を送った後、約 6 時間リリースが進まなかった | 範囲外 | 原因を確かめていない（一時レーンの起動の待ちか承認のイベントの受け取り）。SF9 の待ちの行き先では直らない |
-| #3174 | parallel.py answer: --choice と --note を一緒に渡すと指摘が答えに載らず、レーンへ届かない | 範囲外 | `parallel_answer.answer_arg_error` が `--choice` と `--note` の組を扱わない引数の誤りで、SF9 は差し戻しの候補を足すだけ |
-| #3173 | 並列の計画: 終わった 1 スプリントのレーンのラッパーが止まらず残り、動いていないとの問いが人へ届く | 範囲外 | 終わったレーンのラッパーを止める手順の欠けで、作り直しの範囲の外（#3058 の続き） |
-| #3172 | 並列の計画: 古い記録から再開した耐久ワークフローが閉じた PR の依頼を外さず、差し戻すたびに中身の無いリリースを組み直す | 範囲外 | 10.27.60 より前の耐久の記録から再開した別の原因で、作り直した後は空のリリースが組まれていない（本文の表） |
-| #3169 | リリース承認ゲートの承認資料: 実行されなかった CI のチェック（skipping）を未通過と数え、MVV 判定が判定できないを返す | 範囲外 | `release-steps.py` の承認資料が skipping を分母に数える集計の誤りで、作り直しの子はこの集計を変えない |
 | #3168 | selected のリリース: 承認の後の直接のコミットと、動いたスプリントの先頭を確かめずに本番へ入れる | 範囲外 | selected の取り込み方の承認と本番の比べ方の欠けで、新しい確かめの機能が要り作り直しの範囲の外 |
-| #3167 | project-decl.py measure: 丸ごと出すリポジトリで、ベースブランチから切ったスプリントブランチの起点を production と数える | 範囲外 | `project-decl.py measure` のブランチの起点の判定の誤りで、作り直しの範囲の外 |
-| #3153 | ci-watch.py: マージがシャードのテストの失敗で落ちた直後に、まとめのチェックが pending だと CI 以外の理由と読む | SF3 | SF3 がこの Issue そのもの（分割ジョブの照合・マージの結果の引き継ぎ・未完了の読み直し） |
-| #3145 | parallel.py check: プランの本数の上限（I2）が after で直列のレーンも足し合わせ、順番待ちのレーンを足せない | 範囲外 | `parallel_plan._check_limits` が `after` を見ない上限の数え方の誤りで、作り直しの範囲の外 |
-| #3140 | テスト: test_peak_measures_each_count_of_runs が同時に流す 2 本の起動の順で落ち、文書だけの PR の CI を止める | 範囲外 | テストが起動の順に依存する書き方の誤りで、スクリプトの作り直しでは直らない |
-| #3136 | 並列の計画: まとめたリリースの差し戻しが gate-rejections の記録に残らず、振り返りの差し戻しが 0 件になる | 範囲外 | `parallel_run` の settle が `gate-rejections` の記録を打たない欠けで、作り直しの子はこの記録を足さない |
-| #3129 | コミットの件名「Fix: #N」: GitHub が`閉じる語`と読み、main への取り込みで課題が工程の途中に閉じる（#1271 の再発） | 範囲外 | コミットの件名を決めるプロンプトの書き方（`Fix: #N`）の誤りで、作り直しの範囲の外 |
-| #3128 | 並列の計画: リリースの答えにリリース記録の PR が無く、レーンが main 宛ての PR を new close --record-pr に渡して close が記録を読めない | 範囲外 | リリースの答えにリリース記録の PR を載せない受け渡しの欠けで、SF9 の待ちの行き先では直らない |
-| #3118 | 並列の計画: 差し戻しを受けた後に同じ状態ディレクトリでリリースの依頼を打ち直すと、同じ ID のため台帳へ載らないのに「送った」と返る | 範囲外 | 同じ ID の依頼を台帳が重複として捨てる別の原因で、SF9 の待ちの行き先では直らない |
-| #3115 | リリース後テストの記録: 対象の版を「ndf v<版>」と書くと照合できず、close が他スプリントのブロックで判定する | 範囲外 | `dist_record._strip_note` がプラグイン名の前置きを落とさない読み取りの誤りで、A1a・A1b は古い見出しを外すだけ |
-| #3114 | supervise.py queue の再開: --from が base-sync より後を指すと、間に入った PR を取り込まず衝突する | 範囲外 | `--from` が base-sync を飛ばす再開の決まりの欠けで、作り直しの子はこの再開点を変えない |
-| #3113 | whole-test-timing.py peak: 承認待ちで止まった他レーンの queue を作業中と数えて計測を断る | 範囲外 | `whole-test-timing.py peak` の作業中の判定の誤りで、作り直しの範囲の外 |
-| #3112 | 実装のプラン: impl の担当が全体テストを打ち、過負荷で無進捗の打ち切りになる | 範囲外 | impl の担当への指示文が全体テストを禁じない手順の欠けで、作り直しの範囲の外 |
-| #3110 | リリースの承認資料: 「指示書の変更」が .ndf/ の設定の変更を載せず、C7 の変更を人が見られない | 範囲外 | 承認資料の「指示書の変更」が `.ndf/` を見ない集め方の欠けで、DC6 の指示書の表はこの集め方を変えない |
-| #3109 | クロスレビュー: レビュー中に PR の worktree の管理情報が消え、result_posts.py fix が「リポジトリを決められない」で止まる | 範囲外 | worktree の管理情報が消える別の原因（片付けの側）で、作り直しの範囲の外 |
-| #3108 | 開発版のデプロイ: リリース後テストの前の取り込みが、メインディレクトリに残った版のファイルの変更で落ちる | 範囲外 | メインディレクトリに残った版のファイルの変更という手順の順序の誤りで、作り直しの範囲の外 |
-| #3106 | cross-review: 作業中の /tmp の worktree の登録が消え、取り込みが push できずに止まる | 範囲外 | 作業中の worktree の登録が消える別の原因（片付けの側）で、作り直しの範囲の外 |
-| #3105 | 共有の依存の環境: python の選び方が呼び出しで食い違い、走っているプロセスの最中に環境が作り直されて import が落ちる | 範囲外 | 共有の依存の環境の python の選び方と作り直しの時点の誤りで、作り直しの範囲の外 |
-| #3096 | parallel_machine: 回答後・再起動前の保留レーンがマシン全体の上限の予約から外れ、別の計画の起動と重なると上限を超える | 範囲外 | `parallel_machine` の予約の数え方の誤りで、作り直しの範囲の外 |
-| #3093 | 設計 PR の本文で、モードの行が「決めたこと」の節の中へ入り pr-body-decisions-check が落ちる | 範囲外 | `pr_mode.with_mode_line` の置き場所の誤りで、DC6 は見出しを表から引くだけで置き場所を変えない |
 | #3089 | 並列の計画: レーンが手順書どおり parallel.py await を打つと、既定の待ち時間 0 で待たずに戻る | 範囲外 | `parallel.py await` の待ち時間の既定と手順書の食い違いで、SF9 はオーガナイザーの wait の行き先だけを扱う |
-| #3087 | 検査のトリガー: リリースの PR を除いた行数が二重に差し引かれ、範囲の変更行数が実際より小さくなる | 範囲外 | `check-trigger.py` の `changed_lines` の差し引き方の誤りで、作り直しの範囲の外 |
-| #3086 | supervise の再開: リリースの依頼の答えの後に --from <プラン>=end で続けると「知らないステップ: end」で止まり、まとめのプランが流れない | 範囲外 | 再開の開始のステップに `end` を受けない決まりの欠けで、SF2 の行き先の表は再開の開始を変えない |
-| #3077 | issue-file.py create: 別のリポジトリへの起票で、由来の行が番号だけになり起票先の別の課題を指す | 範囲外 | `issue-file.py create` の由来の行の書き方の誤りで、作り直しの範囲の外 |
-| #3064 | 並列の計画: レーンを足して上限を超えた計画で、parallel.py present が上限つきで検査し直し I2 で止まる | 範囲外 | `present` が上限つきで計画を読み直す誤りで、作り直しの範囲の外 |
-| #3053 | cross-refactoring: 安全網の上限で止まった実行を --safety-net-minutes を大きくして打ち直しても続かない | 範囲外 | cross-refactoring の安全網の後の再開の欠けで、作り直しの範囲の外 |
-| #3047 | まとめのプラン: --from retro で流し直すと deep-due が飛ばされ、振り返りの範囲が無いまま retro が起動する | 範囲外 | `--from retro` が deep-due を飛ばす再開の決まりの欠けで、作り直しの範囲の外 |
-| #3039 | 閉じのプラン: 確定仕様化が変更を作らないと pr のステップが No commits between で落ちて止まる | 範囲外 | 確定仕様化が変更を作らないときの pr のステップの扱いの欠けで、SF2 の行き先の表に「変更なし」の種類を足す設計は無い |
-| #3038 | cross-refactoring: 最終ゲートが全体テストの失敗を直すために`改修計画`の対象範囲の外のファイルを変える | 範囲外 | cross-refactoring の最終ゲートが範囲の外を変える Skill の手順の誤りで、作り直しの範囲の外 |
-| #3035 | 並列の計画: レーン lflow の設計承認ゲートの AskUserQuestion がオーガナイザーへ転送されず、画面で止まる | 範囲外 | レーンの `AskUserQuestion` を転送する hook の欠けで、作り直しの範囲の外 |
-| #3023 | 文書だけの Pull Request の検査で、assess が文書だけと判定しても全体テストが走る | 範囲外 | assess の「文書だけ」の判定を全体テストのステップが読まない欠けで、SF2 のテンプレートの書き直しはこの分岐を足さない |
-| #3022 | 検査のプランで merge の後の record が片付いた worktree の中で落ち、マージ済みなのに「止まった」になる | 範囲外 | マージの後に片付いた worktree の中で record を打つ作業場所の誤りで、作り直しの範囲の外 |
-| #3021 | 並列の計画: レーンの追加の上限の検査が、終わって止まったレーンのレーン数とプラン数も数えて断る | 範囲外 | レーンの追加の上限が終わったレーンを数える誤りで、作り直しの範囲の外 |
 | #3017 | mvv-gate.py: #2912 の後の指示文が、レッドライン（C2・C3・C4・C6・P1）に当たる設計を boundary 空の「従う」と判定し、承認ゲートを省ける | 範囲外 | MVV 判定の指示文の誤りで、スクリプトの作り直しでは直らない |
-| #2985 | 中継: 起こしたセッションに VS Code の git 認証の環境変数が残り、窓を閉じた後の push と fetch が固まる | 範囲外 | ラッパーが VS Code の環境変数を引き継ぐ起動の環境の誤りで、作り直しの範囲の外 |
 | #2984 | 手動確認: worker が確かめ終えても PR 本文の手動確認の項目に済んだ印が付かない | 範囲外 | 手動確認の印を付ける責務が手順に無い Skill の手順の欠けで、作り直しの範囲の外 |
-| #2983 | 検査のプラン: 全体テストの上限が test_duration の少ない記録から決まり、実測 244〜371 秒のテストを 226 秒で打ち切る | 範囲外 | 全体テストの上限を少ない記録から決める見積もりの誤りで、作り直しの範囲の外 |
-| #2970 | retrospective: メインディレクトリで打つ project-mvv.py signals が本番のブランチの古い MVV の版で兆候を数える | 範囲外 | `project-mvv.py signals` が既定の `--root` で本番のブランチを読む別の原因で、作り直しの範囲の外 |
-| #2969 | 検査のプラン: マージで worktree の登録が外れ、続く record のステップが not a git repository で落ちる | 範囲外 | マージの後に片付いた worktree の中で record を打つ作業場所の誤り（#3022 と同じ）で、作り直しの範囲の外 |
-| #2968 | new close: --record-pr 0 を偽として読み捨て、まとめのプランに {queue_record} が残る | 範囲外 | `close_plan` が `--record-pr 0` を偽と読む誤りで、子の範囲（`supervise_lib/`）を直す A3 は推奨案では無い |
-| #2967 | new close: 進め方 normal のスプリントでも .ndf/pace.json の fast.verify を要求して止まる | 範囲外 | `route_waves` が normal でも `fast.verify` を読む誤りで、作り直しの範囲の外 |
-| #2950 | mvv-gate.py: MVV 判定の記録のコメントに boundary が載らず、承認する人がレッドラインの中身を PR から読めない | 範囲外 | `mvv-gate.py` の記録のコメントが boundary を書かない欠けで、作り直しの範囲の外 |
-| #2949 | supervise.py queue: プランを相対パスで渡すと {state_dir} が相対のまま埋まり、worktree の中の review-settled が失敗して検査を飛ばす | 範囲外 | `{state_dir}` を相対パスのまま埋める誤りで、作り直しの範囲の外 |
-| #2935 | 設計 PR のマージのプランが、ラベル design-approved が無いと approved のステップで止まる | 範囲外 | ラベルが無いリポジトリでラベルを作らない欠けで、DC7 は名前を表から引くだけでラベルを作らない |
-| #2934 | parallel.py await が答えの選択肢と note を返さず、案内の read_answer はシステムの python3 で import できない | 範囲外 | `parallel.py await` が答えの中身を返さない欠けで、SF9 はオーガナイザーの wait の行き先だけを扱う |
-| #2933 | DooD の環境で cross-refactoring の作業ディレクトリ /tmp/ndf-worktrees がデーモンから見えず compose のテストが走らない | 範囲外 | DooD の環境の作業ディレクトリの置き場の問題で、作り直しの範囲の外 |
-| #2932 | 開発ループ: 設計の出し直しで、`作業ツリー`のコミットが設計 PR の head に入らないまま CI の確認と cross-review へ進んで止まる | 範囲外 | 設計の出し直しで push と CI の確認の順序が逆の手順の誤りで、作り直しの範囲の外 |
-| #2923 | 開発ループ: モードの判定の根拠が記録されず全周が standard になり、課題を外した後も決め直さない | 範囲外 | 開発ループのモードの判定の根拠を記録しない欠けで、作り直しの範囲の外 |
-| #2898 | relay: account --help の副命令の一覧に API キーの副命令（add-api-key ほか）が出ない | 範囲外 | `relay.py account --help` の一覧の欠けで、W6 は語を替えるだけで副命令の一覧を足さない |
-| #2896 | リリース後テスト: 利用者の設定の控えが、Claude Code が一時的に書く managed のプラグイン行を変化と数えて止まる | 範囲外 | 利用者の設定の控えが managed の行を変化と数える比べ方の誤りで、作り直しの範囲の外 |
-| #2888 | 並列の計画: 答えの後の wait --after に answer の seq を渡す手順で、答えを待つ間に立ったリリースの知らせを読み飛ばし、一時レーンが起動されない | 範囲外 | 手順書が `answer` の seq を `wait --after` へ渡させる誤りで、SF9 の `next` は wait の結果だけに載り answer の後の値を決めない |
-| #2838 | PR のマージの hook が、別のリポジトリの PR をセッションのリポジトリの delivery で判定して止める | 範囲外 | マージの hook が宛先のリポジトリの宣言を読まない判定の誤りで、作り直しの範囲の外 |
-| #2722 | 開発ループ: 直して出し直す課題が棚卸しの判断待ちの印で選定から外れる | 範囲外 | `sprint_loop_select.exclusion_reason` の優先の順の誤りで、SF11 は断りに種類と `next` を足すだけ |
-| #2719 | merge の CI の待ちの上限がランナーの待ちを含まず、CI が落ちていないのにプランが止まる | SF4 | マージの CI の待ちの止まりが `ci_pending`・`infra_wait` で返り、SF2 の行き先がその種類を上限の内で耐久の待ちの後に打ち直す（R08・R09） |
-| #2701 | 棚卸し: 親の無い課題を含む付け直しを、親の照会の 404 を読めずに大整理の apply が 1 件も書かずに止める | 範囲外 | `_parent_of` が例外の文の `404` で親の無さを判定する誤りで、A2・A3g の直し方（まとめる・握りつぶさない）では直らない |
-| #2680 | cross-refactoring の最終ゲートが、衝突して CI の始まらない Pull Request を上限まで待って止まる | 範囲外 | cross-refactoring の最終ゲートが PR の衝突を見ない欠けで、作り直しの範囲の外 |
-| #2655 | 並列リリースの承認資料の「検査の結果」が常に「無し」になり、`承認ゲート 2` の MVV 判定が「判定できない」を返す | 範囲外 | 並列リリースの承認資料が検査の状態を読めない集め方の欠けで、作り直しの範囲の外 |
-| #2638 | 開発ループ: 保留の`周回`を締め直す途中で出た問いを loop hold-question が「進行中の`周回`が無い」で断り、答えを当てる場所が無くなる | 範囲外 | 保留したループの 1 回の締め直しの途中の問いを受ける経路の欠けで、SF11 は断りに種類と `next` を足すだけ |
-| #2637 | 並列の計画: オーガナイザーのセッションを替えると organizer の印が付かず、同時に動かす数に数えられてレーンの起動が断られる | 範囲外 | オーガナイザーの印の付け方の欠けで、コミット 4aaf8046a で一部を直し、残りは作り直しの範囲の外 |
-| #2617 | 並列の計画: 耐久ワークフローを作り直すと保留中の依頼と問いを失い、その後の答えを黙って捨てる | 範囲外 | 耐久ワークフローの作り直しで依頼と問いを引き継がない欠けで、作り直しの範囲の外 |
-| #2603 | MVV 改訂の兆候の集計が、worktree で打った判定の記録を数えず「判定できない」を 0 件と出す | 範囲外 | `project_mvv_signals` が worktree の記録を別のリポジトリと数える誤りで、作り直しの範囲の外 |
-| #2602 | PR 本文の「残リスク: マージの前に決める」を、自動の工程が判断の記録なしでマージする | 範囲外 | PR 本文の残リスクをマージのステップが読まない欠けで、作り直しの範囲の外 |
-| #2601 | 承認資料の「`配布物の変化なし`」が、`配布`されるファイルの変化を見ずに PR 本文の「利用者向けの変化: 無し」だけで付く | 範囲外 | `release_lib/included.py` がリリース対象の変化を PR 本文だけで決める誤りで、作り直しの範囲の外 |
-| #2585 | 並列の計画: 起こし直しが失敗していた時間も含めて stall を数え、実際より長い「動いていない」の問いが出る | 範囲外 | stall の時間の数え方の誤りで、作り直しの範囲の外 |
-| #2584 | 並列の計画: レーンが新しい版で送った依頼が、古い版のオーガナイザーの wait に届かない | 範囲外 | 版をまたいで依頼を読めない受け渡しの欠けで、作り直しの範囲の外 |
-| #2583 | relay: プラグインの更新で`統括役`の版のラッパーの置き場が消え、レーンの起こし直しが何も出さずに失敗する | 範囲外 | 片付けが動いているラッパーの版の置き場を消す欠けで、作り直しの範囲の外 |
-| #2576 | サブエージェントの停止の hook が最後の応答を読む前に帳簿を書き、使用量を最後の応答 1 件分少なく数える | 範囲外 | 停止の hook が最後の応答を読む前に帳簿を書く時点の誤りで、作り直しの範囲の外 |
-| #2575 | 使用量の帳簿が書き手ごとに別の置き場へ書かれ、サブエージェントの行と claude -p の行を同じ集計で読めない | 範囲外 | 帳簿の置き場が書き手ごとに分かれる別の原因で、DC3 は帳簿の `RUNTIMES` を表から引くだけ |
-| #2453 | 設計の結果の触るファイルが分割した設計文書へのリンクを辿らず、実装のプランから変更対象が抜ける | 範囲外 | セルのリンクを形の誤りとして止める直しが `design_results.py` に入っている（`DesignCellError`）。残りの指示文の設計文書は作り直しの範囲の外 |
-| #2324 | 中継の Stop の hook が、別のセッションの承認待ちを報告しただけの応答を「本文で承認を待って終わった」と差し戻す | 範囲外 | Stop の hook の文の分類が別のセッションの報告を待ちと読む誤りで、作り直しの範囲の外 |
-| #2316 | conductor どうしの排他が無い: Issue・プラン・ファイル・版数などの対象ごとにロックを置き、並列の conductor が同じ物を同時に書き換えないようにする | 範囲外 | conductor どうしの排他の仕組みが無い欠けで、作り直しの範囲の外 |
-| #2273 | 設計 PR のマージのプランがベースブランチとの衝突（DIRTY）で取り込みへ戻らず止まり、並行の設計 PR の用語集の衝突を手で解く | SF2 | テンプレートを `on_cause` で書き直し、`base_conflict` の既定の行き先を取り込みのステップにする（R10）ため、設計 PR のマージの衝突が取り込みへ戻る |
 | #2176 | 文書検査: mermaid の構文を解析せず、GitHub で描画できない図が`承認ゲート 1` まで届く | 範囲外 | 文書の検査が mermaid の構文を見ない欠けで、作り直しの範囲の外 |
-| #2158 | cross-refactoring: 着手前のテストが上限の近くで通ると、`範囲テストの雛形`の試走の残り時間が数秒になり init が止まる | 範囲外 | 範囲テストのテンプレートの試走の上限の決め方の誤りで、作り直しの範囲の外 |
-| #2140 | リリースのプランの verify が、メインディレクトリが本番ブランチにいると develop を fast-forward できずに止まる | 範囲外 | リリースのプランの verify がメインディレクトリで pull する手順の誤りで、作り直しの範囲の外 |
-| #2118 | 実装のプランの design-tests が、設計で改名を決めたテストを止まりと判定せず、止まった理由を全文で残す | 範囲外 | `design-match` が改名を止まりと判定しない誤りで、作り直しの範囲の外 |
 | #2114 | document-rebuild: 読み手役を外部の CLI で立てるときに、止まらず文脈を持たない形で起動できるようにする | 範囲外 | `document-rebuild` の読み手役の起動の形が書かれていない Skill の手順の欠けで、作り直しの範囲の外 |
 | #2113 | document-rebuild: 未決の問いがある提案書の冒頭の章が、組み直しと執筆の決まりで食い違わないようにする | 範囲外 | `document-rebuild` の 3 つの文書が食い違う Skill の手順の誤りで、作り直しの範囲の外 |
-| #2096 | cross-refactoring: 全体テストを CI に任せる戦略の着手前のテストがディレクトリを {paths} へ入れ、ファイルだけを受けるテンプレートで落ちる | 範囲外 | cross-refactoring の着手前のテストがディレクトリを `{paths}` へ入れる誤りで、作り直しの範囲の外 |
 | #2078 | system-repo.md の記録の説明に Marp と比較の言い回しが残り、#2065 の受け入れ条件 15・16 が通らない | 範囲外 | Skill の参照文書の言い回しの誤りで、スクリプトの作り直しでは直らない |
-| #2067 | gws-check.py がトークンの無い状態（auth_method: none）を認証済みと判定して exit 0 を返す | 範囲外 | `gws-check.py` の認証の判定の誤りで、A3g の直し方（握りつぶさない・既定値へ倒さない）では直らない |
 | #2037 | supervise queue の重なりの判定がファイル単位のため、設計が関数単位で分けた実装のプランも直列になる（スプリント a1 で 58 分が 2 時間 47 分） | 範囲外 | キューの重なりの判定がファイル単位の決まりで、作り直しの範囲の外 |
 | #2028 | Skill を足す設計の触るファイルに Skill の数を持つ箇所が入らず、実装のステップが範囲外の失敗で止まる | 範囲外 | Skill の数を持つ箇所が設計の触るファイルに入らない手順の欠けで、作り直しの範囲の外 |
-| #1984 | supervise が worker の`途中の報告`の「止まった」の語に反応し、作業の中身（止まったものとみなす実装）でも conductor へ attention を出す | 範囲外 | 進捗ログの語で attention を出す `classify_worker` の誤りで、SF7 は attention に種類を足すだけで語の分類を外さない |
-| #1979 | 使用量の帳簿が同じ message.id の最後の usage を捨て、続けたサブエージェントを 2 回数え、日をまたぐ会話を丸ごと採るか落とす → 会話の記録の合計と一致させる | 範囲外 | 使用量の帳簿の数え方の誤りで、作り直しの範囲の外 |
-| #1978 | usage-report.py の閉じた課題の数が UTC の日付で数えられ、使用量の集計（JST の日付）と期間がずれる → JST の両端で数える | 範囲外 | `usage_aggregate.closed_issues` の日付の解釈の誤りで、作り直しの範囲の外 |
-| #1958 | cross-review の修正の worker が /ndf:fix の手順書を持たない最小構成で起動し、1 回 503k・16 往復を使う → 手順書を確実に読ませ、1 回の費用を実測で下げる | 範囲外 | 修正の worker の起動の構成が手順書を読ませない欠けで、作り直しの範囲の外 |
-| #1877 | relay: /goal の続きの応答では stop_hook_active が真になり、背景の作業が残る ndf-next の応答で Stop を止めて知らせる仕組みが働かない | 範囲外 | `/goal` の続きで `stop_hook_active` が真になる hook の判定の欠けで、作り直しの範囲の外 |
-| #1811 | supervise: 設計の置き場所のテストのディレクトリが重なりの判定に当たり、スプリントの実装のプランがすべて直列になる | 範囲外 | 重なりの判定がディレクトリの包含を重なりと読む決まりで、作り直しの範囲の外 |
-| #1774 | CI のチェックの結論を失敗と数える集合が lib/gh_checks.py と merged_lib/checks.py で別々にあり、取り消しと stale の扱いが食い違う | DC4 | `review_lib/ci.py` の写しを消して持ち主 `lib/gh_checks.py` から引く。`merged_lib/reading.py` の集合は DC4 の行に無く、着手の時点で同じ持ち主へ寄せるかを決める |
-| #1756 | release: plugin_dir と changed-plugins がプラグインの置き場を ndf・playwright-kit の名前で決め打ち、他のリポジトリで package-plugin の手順が止まる | 範囲外 | プラグインの置き場を名前で決め打つ誤りで、data の事実の表に置き場の行は無く作り直しの範囲の外 |
-| #1755 | CHANGELOG の ndf 10.17.61 の節から移行の手順が消え、利用者が認証のし直しを知れない | 範囲外 | `release-steps.py notes` が版の節を差し替える誤りで、作り直しの範囲の外 |
-| #1715 | plan-to-spec: spec-finalize が --spec を 1 つしか受けず、既存の複数ファイルの確定仕様へ溶かすと残りのファイルがコミットに入らないまま ok で終わる | 範囲外 | `spec-finalize` が `--spec` を 1 つしか受けない欠けで、作り直しの範囲の外 |
-| #1707 | cross-review: ai-plugins 以外のリポジトリで SKILL.md のとおりに単独起動すると、Skill のディレクトリが git リポジトリでないため PR を取れずに止まる | 範囲外 | cross-review の Skill の手順と cwd の決め方の食い違いで、作り直しの範囲の外 |
 | #1659 | cross-refactoring: docs が SKILL.md にあるとする rf / rf_eval の定義が無く、自作すると中断が効かない形を踏みうる | 範囲外 | cross-refactoring の文書が無い定義を指す Skill の手順の誤りで、作り直しの範囲の外 |
-| #1653 | supervise: pr のステップの push が一時的な拒否（missing necessary objects）で落ちても再試行せずプランを止める | 範囲外 | push の一時的な拒否の原因が分かっておらず、SF2 の `push_rejected` は pre-push の hook の拒否だけを直すステップへ送る |
-| #1595 | backlog-refinement: apply が plan の rejected を依存先として一致した別の候補の値で記録し、却下が効かない | 範囲外 | `RankPlan.candidate` の照合の誤りで、作り直しの範囲の外 |
-| #1516 | supervise.py のフェーズレポートが、設計の`関門 1` でも「`関門`: `本番の系`へ届く操作」と書く | 範囲外 | `state.py` がゲートの種類を見ずに固定の文を書く誤りで、W1 は語を `report_fields` へ集めるだけでゲートの種類を見分けない |
-| #1502 | mvv-gate: 設計のプランで、設計の前に打った requirements-check の exit 2 を材料に読み、`関門 1` の助言が unknown になる | 範囲外 | `on_fail` で分岐したステップの終了コードを本文が最終の結果として載せる誤りで、作り直しの範囲の外 |
-| #750 | cross-refactoring: 提案担当の codex が結果ファイルを提出先に書けず NO_RESULT になる（提出先が読み取り用ディレクトリの外） | 範囲外 | cross-refactoring の提出先が読み取り用ディレクトリの外にある起動の形の誤りで、作り直しの範囲の外 |
-| #620 | cross-refactoring: テストを足す項目（add-tests）が pytest の収集しないファイルへテストを足し、実行されないまま検証を通る | 範囲外 | add-tests が収集されないファイルへテストを足す誤りで、作り直しの範囲の外 |

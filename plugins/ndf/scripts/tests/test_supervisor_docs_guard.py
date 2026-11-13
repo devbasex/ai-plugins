@@ -121,3 +121,44 @@ def test_env_turns_guard_off(tmp_path, other):
 def test_broken_manifest_passes(tmp_path):
     broken = plugin(tmp_path / "broken", manifest="{not json")
     assert run(read(broken / REL), tmp_path) is None
+
+
+# --- hook.py の _supervisor_docs_guard の包みの現状固定（cross-refactoring I-011） ---
+
+
+@pytest.fixture
+def docs_hook(monkeypatch):
+    monkeypatch.syspath_prepend(str(OWN / "scripts" / "lib"))
+    monkeypatch.syspath_prepend(str(OWN / "scripts"))
+    import hook
+    from hook_lib import supervisor_docs
+
+    return hook, supervisor_docs
+
+
+@pytest.mark.parametrize(
+    ("impl", "want"),
+    [
+        (lambda ev: {"d": 1}, [{"d": 1}]),
+        (lambda ev: None, [None]),
+        (lambda ev: (_ for _ in ()).throw(RuntimeError("x")), []),
+        (lambda ev: (_ for _ in ()).throw(OSError("x")), []),
+    ],
+    ids=["decision", "none", "runtime-error", "os-error"],
+)
+def test_supervisor_docs_wrapper_lists_the_decision_and_swallows_errors(docs_hook, monkeypatch, impl, want):
+    hook, supervisor_docs = docs_hook
+    monkeypatch.setattr(supervisor_docs, "docs_decision", impl)
+    assert hook._supervisor_docs_guard(object()) == want
+
+
+def test_supervisor_docs_wrapper_lets_the_deadline_through(docs_hook, monkeypatch):
+    hook, supervisor_docs = docs_hook
+    from hook_lib import deadline
+
+    def late(ev):
+        raise deadline.HookDeadlineExceeded("supervisor-docs")
+
+    monkeypatch.setattr(supervisor_docs, "docs_decision", late)
+    with pytest.raises(deadline.HookDeadlineExceeded):
+        hook._supervisor_docs_guard(object())

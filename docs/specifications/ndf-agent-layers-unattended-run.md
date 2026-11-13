@@ -231,6 +231,8 @@ supervisor の報告は最後の応答の**末尾**に置き、見出しの後�
 | ある | `止まった` | `理由` を添えて利用者へ報告し、終える |
 | ある | `スイッチポイント` | 同じフェーズを `次の工程` から通す supervisor として起動し直す（`subagent_type` は上の選び方）。承認ゲートを問わない。同じ `次の工程` の `スイッチポイント` が続けて 2 回返ったら `止まった` と同じに扱う |
 
+人のいない実行（環境変数 `NDF_FACTORY_RUN` がある Factory の実行ジョブ）では、`関門` でも `AskUserQuestion` を出さない。conductor は最後の応答の末尾に区間の報告（結果 `判断が要る`）を置いて区間を終える。決まりの正本は [`asking.md`](../../plugins/ndf/skills/development-workflow/references/asking.md) の「人のいない実行」、形の正本は [`unattended-report.json`](../../plugins/ndf/contracts/forms/unattended-report.json) にある。
+
 **スイッチポイントは hook が決める。** `token-guard.sh` は、寿命 5 分の supervisor（入力の `agent_type` が
 `ndf:supervisor`）が `cross-review` / `cross-refactoring` を起動するとき、自身の記録の今の文脈が最初の
 呼び出しの文脈の 1.5 倍以上なら止め、やり直しても止め続ける（比は `NDF_SUPERVISOR_CUT_RATIO`、

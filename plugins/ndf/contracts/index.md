@@ -83,6 +83,7 @@
 | `snapshot-json` | `snapshot.json` | record | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `state-json` | `state.json` | state | state-dir | `plugins/ndf/scripts/supervise.py` | — |
 | `target-json` | `target.json` | result | tmp | `plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` | — |
+| `unattended-mark-json` | `*.json` | state | state-dir | `plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/hook_lib/unattended.py:write_mark` | — |
 | `user-config-before-json` | `user-config-before.json` | state | state-dir | `plugins/ndf/scripts/release-verification-steps.py` | — |
 
 ## 環境変数
@@ -261,6 +262,8 @@
 | `hook.deadline-margin` | seconds 1.5 | hook の期限の手前に残す余白 | `plugins/ndf/scripts/hook_lib/deadline.py:<module>` |
 | `hook.git-remote` | seconds 5 | 起票の guard と issue-file.py create が今のリポジトリを調べる git remote get-url の上限 | `plugins/ndf/scripts/lib/issue_items.py:origin_repo` |
 | `hook.git-rev-parse` | seconds 5 | hook が worktree を調べる git rev-parse の上限 | `plugins/ndf/scripts/hook_lib/worktree.py:_git_lines` |
+| `hook.unattended-mark` | seconds 604800 | 人のいない実行の印のうち、SessionEnd で消し残したものを次の unattended-start が消すまでの秒（7 日） | `plugins/ndf/scripts/hook_lib/unattended.py:mark_session` |
+| `hook.unattended-pushback` | attempts 2 | 人のいない実行（NDF_FACTORY_RUN）で、区間の報告の形に合わない Stop が続く間に差し戻す回数の上限。形に合った Stop で数え直す（#3242 の決定 4） | `plugins/ndf/scripts/hook_lib/unattended.py:review_stop` |
 | `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |

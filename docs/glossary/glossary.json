@@ -7120,6 +7120,36 @@
       "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す",
       "source": "",
       "pending_source": "issues/issue-3242-design.md"
+    },
+    {
+      "term": "遷移の判断",
+      "context": "ndf-workflow",
+      "meaning": "プランの次のステップと結果の確定を決める判断（上限との比較・遅れの再試行を数えない・知らないステップで止まる）。耐久ステップの呼び出しとは別に置く",
+      "pending_source": "issues/issue-2963-requirements.md"
+    },
+    {
+      "term": "DBOS を起こさない実行器",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローの判断の関数を、DBOS を起動せずに回すテスト用の実行の経路",
+      "pending_source": "issues/issue-2963-requirements.md"
+    },
+    {
+      "term": "判断の関数",
+      "context": "ndf-workflow",
+      "meaning": "状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。置き場のモジュールの名前は _decide.py で終わる",
+      "pending_source": "issues/issue-2963-design.md"
+    },
+    {
+      "term": "耐久の層",
+      "context": "ndf-workflow",
+      "meaning": "判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない",
+      "pending_source": "issues/issue-2963-design.md"
+    },
+    {
+      "term": "判断のループ",
+      "context": "ndf-workflow",
+      "meaning": "判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる",
+      "pending_source": "issues/issue-2963-design.md"
     }
   ]
 }

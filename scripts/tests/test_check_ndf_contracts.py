@@ -902,6 +902,63 @@ def test_load_rejects_malformed_items_per_kind(tmp_path: Path, kind, fname, data
     assert message in str(e.value)
 
 
+# --- 形の宣言（shape）と区間の報告の例の組（#3242） ---
+
+REPORT_FORM = json.loads((REPO / _model.CONTRACTS / "forms" / "unattended-report.json").read_text(encoding="utf-8"))
+
+
+def _report_form(**shape) -> dict:
+    return dict(REPORT_FORM, name="f", shape={**REPORT_FORM["shape"], **shape})
+
+
+def test_the_unattended_report_form_and_shapeless_forms_load(tmp_path: Path):
+    """プラグインの区間の報告の契約（shape つき）と、shape の無い既存の形をどちらも通す。"""
+    c = _load_one(tmp_path, "forms", "f.json", _report_form())
+    assert c.forms["f"]["shape"] == REPORT_FORM["shape"]
+    assert _load_one(tmp_path, "forms", "f.json", FORM).forms == {"f": FORM}
+
+
+def test_a_report_case_with_an_empty_when_loads(tmp_path: Path):
+    """when が空の値（完了）と、区間の報告の例の組の形（text・result・errors）を通す。"""
+    req = {**REPORT_FORM["shape"]["required"], "判断が要る": {"always": ["区分"], "when": []}}
+    cases = [{"text": "- 結果: 完了\n", "result": "完了", "errors": []}]
+    data = dict(_report_form(required=req), cases=cases)
+    assert _load_one(tmp_path, "forms", "f.json", data).forms["f"]["cases"] == cases
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        (_report_form(values=["完了"]), "values の型が違う"),
+        (_report_form(values={}), "shape.values は値 → 意味"),
+        (_report_form(items=[]), "shape.items は空でない"),
+        (_report_form(material={"item": "材料", "body": "本文", "url_prefix": "https://"}), "shape.material は"),
+        (_report_form(material={"item": "無い項目", "body": "本文", "heading": "## h", "url_prefix": "https://"}), "material.item は"),
+        (_report_form(required={"完了": {"always": [], "when": []}}), "required のキーは values と同じ集合"),
+        (
+            _report_form(required={**REPORT_FORM["shape"]["required"], "完了": {"when": []}}),
+            "required.完了 は always（並び）と when（並び）を持つ",
+        ),
+        (
+            _report_form(required={**REPORT_FORM["shape"]["required"], "完了": {"always": ["無い項目"], "when": []}}),
+            "required.完了.always は items の項目名",
+        ),
+        (
+            _report_form(
+                required={**REPORT_FORM["shape"]["required"], "完了": {"always": [], "when": [{"item": "区分", "need": ["理由"]}]}}
+            ),
+            "required.完了.when の要素は",
+        ),
+        (dict(_report_form(), shape=[]), "shape の型が違う"),
+        (dict(_report_form(), cases=[{"text": "t", "result": "", "errors": [1]}]), "cases[0].errors は文字列の並び"),
+    ],
+)
+def test_a_malformed_shape_or_report_case_is_refused(tmp_path: Path, data, message):
+    with pytest.raises(_model.ContractError) as e:
+        _load_one(tmp_path, "forms", "f.json", data)
+    assert message in str(e.value)
+
+
 def test_load_accepts_setting_key_extras_and_place(tmp_path: Path):
     keys = {"k": {"summary": "s", "migrate_from": "o", "duplicates": [], "place": "worktree"}}
     c = _load_one(tmp_path, "settings", "s.json.json", dict(SETTING_ITEM, keys=keys))
@@ -1115,3 +1172,99 @@ def test_base_runtime_count_counts_only_runtime_marks_at_the_given_commit(tmp_pa
     second = _commit_tree(tmp_path)
     assert core_checks.base_runtime_count(tmp_path, second) == 2
     assert core_checks.base_runtime_count(tmp_path, first[:12]) == 3  # 短縮形も読む
+
+
+# --- model._check_entry: 入口の項目の形の検査を分岐ごとに固定する（現状固定） ---
+
+_ENTRY_F = Path(_model.entry_file_name(LOAD_ENTRY["path"]))
+_LEASE = {"key": "run:{run}", "unit": "run", "window_seconds": 60}
+
+
+def _without(d: dict, k: str) -> dict:
+    return {x: v for x, v in d.items() if x != k}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        LOAD_ENTRY,
+        dict(_without(LOAD_ENTRY, "external"), callers=["a/SKILL.md"]),
+        dict(LOAD_ENTRY, args={"unparsed": "手で読む"}),
+        dict(LOAD_ENTRY, args={"options": [], "positionals": [], "subcommands": {"s": {"options": [], "positionals": []}}}),
+        dict(LOAD_ENTRY, settings=[{"file": "w.json", "keys": ["k"]}]),
+        dict(LOAD_ENTRY, lease={"": _LEASE, "s": dict(_LEASE, unit="session", release=True, shared=False)}),
+        dict(LOAD_ENTRY, lease={}),
+        dict(LOAD_ENTRY, core={"exempt": "hook", "evidence": "hook が起動する"}),
+        dict(LOAD_ENTRY, core={"exempt": "runtime", "evidence": "e"}),
+    ],
+)
+def test_check_entry_accepts_well_formed_items(data):
+    assert _model._check_entry(_ENTRY_F, data) is None
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        (dict(LOAD_ENTRY, extra=1), "知らないキー ['extra']"),
+        (_without(LOAD_ENTRY, "summary"), "summary が無い"),
+        (dict(LOAD_ENTRY, version="1"), "version の型が違う"),
+        (dict(LOAD_ENTRY, external=1), "external の型が違う"),
+        (dict(LOAD_ENTRY, lease=[]), "lease の型が違う"),
+        (_without(LOAD_ENTRY, "external"), "callers と external はどちらか 1 つ"),
+        (dict(LOAD_ENTRY, callers=["a"]), "callers と external はどちらか 1 つ"),
+        (dict(LOAD_ENTRY, path="plugins/ndf/scripts/b.py"), "ファイル名は plugins__ndf__scripts__b.py.json にする"),
+        (dict(LOAD_ENTRY, env=[1]), "env は文字列の並び"),
+        (dict(LOAD_ENTRY, writes=[1]), "writes は文字列の並び"),
+        (dict(LOAD_ENTRY, reads=[None]), "reads は文字列の並び"),
+        (dict(_without(LOAD_ENTRY, "external"), callers=[1]), "callers は文字列の並び"),
+        (dict(LOAD_ENTRY, stdin="bad"), "stdin は none/json/text/hook-json のどれか: bad"),
+        (dict(LOAD_ENTRY, stdout="bad"), "stdout は step-result/json/kv/text/markdown/none のどれか: bad"),
+        (dict(LOAD_ENTRY, args={"unparsed": " "}), "args の unparsed は理由の文字列だけを持つ"),
+        (dict(LOAD_ENTRY, args={"unparsed": "r", "options": []}), "args の unparsed は理由の文字列だけを持つ"),
+        (dict(LOAD_ENTRY, args={"options": []}), "positionals が無い"),
+        (dict(LOAD_ENTRY, args={"options": [], "positionals": [], "subcommands": {"s": 1}}), "subcommands.s はオブジェクト"),
+        (dict(LOAD_ENTRY, settings=["w.json"]), "settings の要素は file と keys を持つ"),
+        (dict(LOAD_ENTRY, settings=[{"file": "w.json"}]), "settings の要素は file と keys を持つ"),
+        (dict(LOAD_ENTRY, settings=[{"file": "w.json", "keys": "k"}]), "settings の要素は file と keys を持つ"),
+        (dict(LOAD_ENTRY, exit={}), "exit は終了コード → 意味（unknown なら理由）"),
+        (dict(LOAD_ENTRY, exit={"0": " "}), "exit は終了コード → 意味（unknown なら理由）"),
+        (dict(LOAD_ENTRY, exit={"0": 0}), "exit は終了コード → 意味（unknown なら理由）"),
+        (dict(LOAD_ENTRY, lease={"": 1}), "lease[''] は key・unit・window_seconds と任意の release・shared を持つ"),
+        (dict(LOAD_ENTRY, lease={"": _without(_LEASE, "unit")}), "lease[''] は key・unit・window_seconds"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, x=1)}), "lease[''] は key・unit・window_seconds"),
+        (dict(LOAD_ENTRY, lease={"s": dict(_LEASE, key="run")}), "lease['s'].key は入力の名前を {} で埋める鍵の形"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, key=1)}), "lease[''].key は"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, unit="day")}), "lease[''].unit は run/session"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, window_seconds=0)}), "lease[''].window_seconds は正の整数"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, window_seconds=True)}), "lease[''].window_seconds は正の整数"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, window_seconds=1.5)}), "lease[''].window_seconds は正の整数"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, release="yes")}), "lease[''].release は真偽値"),
+        (dict(LOAD_ENTRY, lease={"": dict(_LEASE, shared=1)}), "lease[''].shared は真偽値"),
+        (dict(LOAD_ENTRY, core={"exempt": "other", "evidence": "e"}), "core は exempt（hook/runtime）と evidence を持つ"),
+        (dict(LOAD_ENTRY, core={"exempt": "hook"}), "core は exempt（hook/runtime）と evidence を持つ"),
+        (dict(LOAD_ENTRY, core={"exempt": "hook", "evidence": " "}), "core.evidence は根拠の文"),
+        (dict(LOAD_ENTRY, core={"exempt": "hook", "evidence": 1}), "core.evidence は根拠の文"),
+    ],
+)
+def test_check_entry_rejects_each_malformed_shape(data, message):
+    with pytest.raises(_model.ContractError) as e:
+        _model._check_entry(_ENTRY_F, data)
+    assert str(e.value).startswith(f"{_ENTRY_F.name}: ") and message in str(e.value)
+
+
+def test_check_entry_reports_the_first_violation_in_check_order():
+    """複数の違反があるとき、キーの検査 → callers/external → ファイル名 → 文字列の並び → stdin/stdout → args → settings → exit → lease → core の順で最初の 1 つで止まる。"""
+    bad = dict(LOAD_ENTRY, path="x.py", env=[1], stdin="bad", exit={}, core={"exempt": "x", "evidence": "e"})
+    order = [
+        ("path", "ファイル名は"),
+        ("env", "env は文字列の並び"),
+        ("stdin", "stdin は"),
+        ("exit", "exit は終了コード"),
+        ("core", "core は exempt"),
+    ]
+    for key, message in order:
+        with pytest.raises(_model.ContractError) as e:
+            _model._check_entry(_ENTRY_F, bad)
+        assert message in str(e.value)
+        bad[key] = LOAD_ENTRY.get(key, {"exempt": "hook", "evidence": "e"})
+    assert _model._check_entry(_ENTRY_F, bad) is None
