@@ -181,22 +181,24 @@ def _token_guard(ev) -> list:
     return [token_guard.decision(ev)] if ev.tool in token_guard.TOOLS else []
 
 
+def _decision_or_pass(decide, ev) -> list:
+    """判定を 1 本打ち、出力を要素 1 個の並びにする。判定の途中の失敗（Exception）は空の並びにして通す。"""
+    try:
+        return [decide(ev)]
+    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
+        return []
+
+
 def _worker_skills_guard(ev) -> list:
     from hook_lib import worker_skills
 
-    try:
-        return [worker_skills.skills_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(worker_skills.skills_decision, ev)
 
 
 def _supervisor_docs_guard(ev) -> list:
     from hook_lib import supervisor_docs
 
-    try:
-        return [supervisor_docs.docs_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(supervisor_docs.docs_decision, ev)
 
 
 def _ci_test_guard(ev) -> list:
@@ -212,10 +214,7 @@ def _ci_test_guard(ev) -> list:
 def _issue_guard(ev) -> list:
     from hook_lib import issue_guard
 
-    try:
-        return [issue_guard.issue_decision(ev)]
-    except Exception:  # noqa: BLE001 — 判定の途中の失敗は通す（ほかの guard の結果は残す）
-        return []
+    return _decision_or_pass(issue_guard.issue_decision, ev)
 
 
 def _ask_guard(ev) -> list:
