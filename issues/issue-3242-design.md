@@ -39,7 +39,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 区間の報告の形 | 契約のファイル `unattended-report.json`（人が Pull Request で変える。コードは読むだけ） | 形の宣言 | — | 結果の値（3 つ）・報告の項目・値ごとに要る項目・例の組 |
-| 人のいない実行の印 | `hook_lib/unattended.py`（UserPromptSubmit で作り、Stop で数を足して消す） | 印のファイル（セッション 1 つに 1 つ） | — | セッションの識別子・差し戻した回数 |
+| 人のいない実行の印 | `hook_lib/unattended.py`（UserPromptSubmit で作り、Stop で回数を足すか 0 に戻し、SessionEnd で消す） | 印のファイル（セッション 1 つに 1 つ） | — | セッションの識別子・続けて差し戻した回数 |
 
 conductor が書く最後の応答は集約に入れない。応答は Claude Code が持ち、NDF の hook は読んで差し戻すだけで書き換えない。
 
@@ -49,11 +49,11 @@ conductor が書く最後の応答は集約に入れない。応答は Claude Co
 | --- | --- | --- | --- |
 | I1 | 区間の報告の形 | 結果の行の値は、`ndf-next-block.json` の規則の後半（応答の文の最後の「- 結果:」の行の値。前後の空白を除く）と同じ読み方で読む。同じ文に対して 2 つの読み手が同じ値を返す | テストが落ちる。読み方を 2 か所に書かない |
 | I2 | 区間の報告の形 | 結果の値は `判断が要る` / `完了` / `できなかった` の 3 つだけで、値ごとに要る項目は契約のファイルの宣言だけが決める | 3 つの外の値・要る項目の欠けは形の誤りとして差し戻す |
-| I3 | 人のいない実行の印 | 印のあるセッションの Stop で、最後の応答が形に合わなければ差し戻す（`decision: "block"` と誤りの一覧） | — |
-| I4 | 人のいない実行の印 | 背景の作業（`background_tasks`）か予定（`session_crons`）が残る Stop は差し戻さず、印も消さない | — |
-| I5 | 人のいない実行の印 | 差し戻しは同じセッションで 2 回までで、3 回目の Stop は形に合わなくても通す | 通した後の判定は Factory の側（行が無ければ失敗） |
+| I3 | 人のいない実行の印 | 印のあるセッションの Stop のうち、I4 にも I5 の上限にも当たらないもので、最後の応答が形に合わなければ差し戻す（`decision: "block"` と誤りの一覧） | — |
+| I4 | 人のいない実行の印 | 背景の作業（`background_tasks`）か予定（`session_crons`）が残る Stop は差し戻さず、回数も変えない | — |
+| I5 | 人のいない実行の印 | 形に合わない Stop が続く間の差し戻しは 2 回までで、続けて 3 回目の形に合わない Stop は通す。形に合った Stop を通したら回数を 0 に戻す。数えるのは NDF の hook が差し戻した回数だけで、同じ Stop を別の hook（`/goal` の条件の判定など）が差し戻しても NDF の数は 1 つだけ増える | 通した後の判定は Factory の側（行が無ければ失敗） |
 | I6 | 人のいない実行の印 | 印が付くのは、`NDF_FACTORY_RUN` が空でなく、プロンプトの先頭が `/ndf:development-workflow`（前に `/goal ` を許す）のセッションだけである。worker・レビューの `claude -p` には付かない | — |
-| I7 | 人のいない実行の印 | Stop を通したとき（形に合った・上限に達した）に印を消す | 消せなくても Stop は止めない |
+| I7 | 人のいない実行の印 | 印はセッションの終わり（SessionEnd）まで残し、Stop では消さない。1 つのセッションで Stop が何度起きても（`/goal` が条件を満たすまで Stop を差し戻す実行を含む）、最後の Stop まで I3 の判定を受ける | SessionEnd で消せなかった印は、次の `unattended-start` が作られてから上限の宣言の日数を過ぎたものを消す。消せなくても hook は止めない |
 | I8 | 人のいない実行の印 | `NDF_FACTORY_RUN` が空の実行では、hook は環境変数を 1 回読んで終わり、Python を起動せず、応答の文を読まない | — |
 | I9 | 人のいない実行の印 | hook のどの失敗（入力・契約・印の読み書き）も Stop と UserPromptSubmit を止めない側へ倒す | 標準エラーへ 1 行残して通す |
 
@@ -78,7 +78,12 @@ conductor が書く最後の応答は集約に入れない。応答は Claude Co
 | --- | --- | --- |
 | 区間の報告 | 人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は `contracts/forms/unattended-report.json` | 追加（`ndf-factory`） |
 | 人のいない実行の印 | 人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める | 追加（`ndf-factory`） |
-| 結果の行の差し戻し | 人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。同じセッションで 2 回まで | 追加（`ndf-factory`） |
+| 結果の行の差し戻し | 人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す | 追加（`ndf-factory`） |
+| 人のいない実行 | 環境変数 `NDF_FACTORY_RUN` が空でない実行ジョブの区間。`AskUserQuestion` が使えず、応答を人が読まない（要求の定義のまま） | 追加済み（要求と同じ変更。`ndf-factory`） |
+| 結果の行 | 最後の応答の文の中の、最後の `- 結果: <値>` の行。値は `判断が要る` / `完了` / `できなかった` の 3 つ（要求の定義のまま） | 追加済み（要求と同じ変更。`ndf-factory`） |
+| 区分の無い問い | `asking.md` の「区分」のどれにも当たらない問い。AI が決めて記録する（要求の定義のまま） | 追加済み（要求と同じ変更。`ndf-workflow`） |
+
+用語集の正本は `docs/glossary/glossary.json` で、`docs/glossary.md` は `glossary.py render` で作る。上の 6 語は、この設計と要求の Pull Request の中で 2 つのファイルへ入れてある（設計の結果の「触るファイル」）。
 
 ## 外部の調査
 
@@ -117,10 +122,22 @@ claude -p --model haiku --settings "$S" "「了解」とだけ答えて" </dev/n
 | 差し戻した後の Stop の入力 | `stop_hook_active: true`、`last_assistant_message: "了解\n- 結果: 完了"` |
 | `--output-format json` の `result` | `"了解\n- 結果: 完了"`、`num_turns: 2`。差し戻した後の応答がランナーの読む文になる |
 
+問い合わせの記録を区間で絞れるかは、手元で `ask.py summary` を打って確かめた（2026-11-13）。`--since` と `--cwd` の引数を持ち、記録の時刻（`at`。UTC の ISO 8601、例 `2026-11-13T01:23:45+00:00`）を文字列として比べる（`plugins/ndf/scripts/ask.py` の `cmd_summary`）。そのため `--since` には UTC の時刻を渡す。
+
+```bash
+$ python3 plugins/ndf/scripts/ask.py summary --help
+usage: ask.py summary [-h] [--since SINCE] [--cwd CWD]
+$ python3 plugins/ndf/scripts/ask.py summary --since 2026-11-13T00:00:00+09:00 --cwd <空のディレクトリ>
+{"tool": "ask", "status": "ok", "summary": "問い合わせ: 止めた 0 件・通した 0 件・案内だけ 0 件、代わりの判断が無い止めた問い 0 件", "items": [], "metrics": {"verdict": {"deny": 0, "allow": 0, "advise": 0}, "source": {}, "decision": {"ref": 0, "no_ref": 0}, "unanswered": 0}}
+```
+
+AI が自分で決めて `--question` で記録した問いは `metrics.decision.no_ref` に数えられる。
+
 ### 確かめられなかったこと
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
+| `claude -p` で背景の作業（`background_tasks`）を残して応答を終えたとき、プロセスが作業の完了を待って応答を続けるのか、そのまま `result` を返して終わるのか | 試していない（実測は単発の質問 1 件だけ） | 背景の作業を残す実行の実測を足していない。「未確認のまま残ること」へ置き、リリース後テストで確かめる |
 | Factory のランナーの起動の形（`--bare` の有無・`--permission-prompt-tool` の有無）と結果の行の読み方 | 試していない | 別のリポジトリにあり、この課題の対象範囲の外。要求の前提 1 と「未確認のまま残ること」へ置く |
 
 調べた量: 候補 4 件・取得の試み 5 回。
@@ -131,7 +148,7 @@ claude -p --model haiku --settings "$S" "「了解」とだけ答えて" </dev/n
 | --- | --- | --- |
 | F1 | 区間の報告の形を契約のファイルで読む（結果の値・項目・値ごとに要る項目・例の組） | Factory のランナー、NDF の hook とテスト |
 | F2 | 人のいない実行の conductor のセッションに印を付け、人のいない実行の決まりを案内する | conductor |
-| F3 | 区間の報告の形に合わない最後の応答を差し戻す（2 回まで） | conductor |
+| F3 | 区間の報告の形に合わない最後の応答を差し戻す（形に合わない Stop が続く間は 2 回まで） | conductor |
 | F4 | 人のいない実行での問いの扱い（区分ごとに、決めて続けるか・どの結果で区間を終えるか）を決まりとして読む | conductor |
 
 ## 構成要素
@@ -141,12 +158,12 @@ claude -p --model haiku --settings "$S" "「了解」とだけ答えて" </dev/n
 | 区間の報告の契約（`plugins/ndf/contracts/forms/unattended-report.json`。新設） | 区間の報告の形の正本。結果の行の読み方は `ndf-next-block.json` の規則の後半を指し、結果の値・項目・値ごとに要る項目・例の組を宣言する |
 | 契約の検査（`scripts/contracts_lib/model.py`） | 受け渡しの形（`forms/`）の項目に、形の宣言のキーと、区間の報告の例の組の形を許す |
 | 区間の報告の読み手（`plugins/ndf/scripts/lib/unattended_report.py`。新設） | 契約のファイルを読み、応答の文から結果の値と形の誤りの一覧を返す。ファイル・環境変数・時刻を読まない純粋な関数（契約のファイルの読み込みだけを別の関数に分ける） |
-| 人のいない実行の hook（`plugins/ndf/scripts/hook_lib/unattended.py`。新設） | UserPromptSubmit で対象のセッションを判定して印を作り案内の文を返す。Stop で印を読み、読み手の判定と回数から差し戻すかを決め、通すときに印を消す |
-| hook のエントリポイント（`plugins/ndf/scripts/hook.py`） | 副命令 `unattended-start`・`unattended-stop` を受け、`hook_lib/unattended.py` へ渡す |
-| hook の登録（`plugins/ndf/hooks/claude.json`） | UserPromptSubmit と Stop に、`NDF_FACTORY_RUN` が空なら sh だけで終える行を 1 つずつ足す |
+| 人のいない実行の hook（`plugins/ndf/scripts/hook_lib/unattended.py`。新設） | UserPromptSubmit で対象のセッションを判定して印を作り案内の文を返す。Stop で印を読み、読み手の判定と回数から差し戻すかを決め、回数を足すか 0 に戻す。SessionEnd で印を消す |
+| hook のエントリポイント（`plugins/ndf/scripts/hook.py`） | 副命令 `unattended-start`・`unattended-stop`・`unattended-end` を受け、`hook_lib/unattended.py` へ渡す |
+| hook の登録（`plugins/ndf/hooks/claude.json`） | UserPromptSubmit・Stop・SessionEnd に、`NDF_FACTORY_RUN` が空なら sh だけで終える行を 1 つずつ足す |
 | 契約の項目（`contracts/entrypoints/plugins__ndf__scripts__hook.py.json`・`contracts/files/unattended-mark-json.json`（新設）・`contracts/env/NDF_FACTORY_RUN.json`・生成する `contracts/index.md`） | hook.py が読む環境変数と書く印のファイルを宣言する |
-| 上限の宣言（`plugins/ndf/contracts/limits.json`） | 差し戻しの上限の回数（方針 `hook.unattended-pushback`）を持つ |
-| 問い合わせの決まり（`plugins/ndf/skills/development-workflow/references/asking.md`） | 「人のいない実行」の節を足す。区分ごとの扱いと、区間の報告の契約のファイルへの参照を持つ（形を写さない） |
+| 上限の宣言（`plugins/ndf/contracts/limits.json`） | 差し戻しの上限の回数（方針 `hook.unattended-pushback`）と、消し残した印を消すまでの日数を持つ |
+| 問い合わせの決まり（`plugins/ndf/skills/development-workflow/references/asking.md`） | 「人のいない実行」の節を足す。区分ごとの扱い（承認を求める区分と人の操作が要る区分は `.ndf/ask.json` に関わらず区間を終える）と、区間の報告の契約のファイルへの参照を持つ（形を写さない）。`.ndf/ask.json` の `allow` の行からこの節を指す |
 | 工程の決まり（`development-workflow/SKILL.md`・`references/agent-layers.md`） | 「自走で工程を通す」と「conductor の報告」から、人のいない実行では承認ゲートで `AskUserQuestion` の代わりに区間の報告で区間を終えることを `asking.md` の節へ指す |
 | hook の説明（`docs/ndf-plugin-reference.md`） | hook の節に、人のいない実行の 2 本の hook を 1 行ずつ足す |
 
@@ -199,13 +216,14 @@ classDiagram
   class UnattendedHook {
     +start(hook_input) str
     +stop(hook_input) dict
+    +end(hook_input)
   }
   class Mark {
     +session_id: str
     +pushbacks: int
   }
   UnattendedHook --> ReportCheck : 判定を頼む
-  UnattendedHook --> Mark : 作る・数を足す・消す
+  UnattendedHook --> Mark : 作る・数を足す・0 に戻す・消す
   ReportCheck --> UnattendedReportForm : 宣言を読む
 ```
 
@@ -217,7 +235,13 @@ classDiagram
 
 conductor は区間を終える最後の応答の**末尾**に次の節を置く。見出しの後ろに他の見出しを置かない。`ndf-next` のブロックは節の後ろに置いてよい。
 
+人の判断の材料は、ランナーのコンテナの外から読める形で渡す。コンテナの中のファイルのパスは区間が終わった後に人が開けないため、項目の値にしない。材料の中身（`approval-request.md` の 2 層を持つ承認資料、または問いの判断に要る事実・得失・推奨）は、同じ応答の本文の節「## 判断の材料」に書き、区間の報告の直前に置く。応答の文は Factory が区間の結果として受け取るため、人はそこで材料を読める。
+
 ```markdown
+## 判断の材料
+
+（承認資料の本文。`approval-request.md` の 2 層）
+
 ## 区間の報告
 
 - 結果: 判断が要る
@@ -226,7 +250,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 - 承認ゲート: 設計 Pull Request のマージ
 - 問い: 設計 Pull Request をマージしてよいか
 - Pull Request: https://github.com/<所有者>/<リポジトリ>/pull/<番号>
-- 承認資料: /tmp/<…>/approval-12.md
+- 材料: 本文
 - 人に頼むこと: 無し
 - 理由: 無し
 ```
@@ -239,7 +263,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 | 承認ゲート | `設計 Pull Request のマージ` / `本番の系へ届く操作` | `無し` |
 | 問い | 人に決めてほしいことを 1 行 | `無し` |
 | Pull Request | URL を空白区切り | `無し` |
-| 承認資料 | `approval-request.md` の 2 層を持つ承認資料のファイルの絶対パス | `無し` |
+| 材料 | `本文`（同じ応答に「## 判断の材料」の節がある）か、コンテナの外から開ける `https://` の URL を空白区切り | `無し` |
 | 人に頼むこと | 人にしかできない操作を 1 行 | `無し` |
 | 理由 | 1 行 | `無し` |
 
@@ -247,10 +271,11 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 
 | 結果 | 要る項目 | 条件つきで要る項目 |
 | --- | --- | --- |
-| `判断が要る` | 区分・問い | 区分が `ndf-gate:<番号>` なら承認ゲートと承認資料 |
+| `判断が要る` | 区分・問い・材料 | 区分が `ndf-gate:<番号>` なら承認ゲートと Pull Request |
 | `完了` | — | — |
 | `できなかった` | 理由 | 区分が `ndf-ask:human-action` なら人に頼むこと |
 
+- 材料の値が `本文` のときは、区間の報告より前に見出し「## 判断の材料」が要る。`本文` でも `https://` で始まる URL でもない値（ファイルのパスなど）は形の誤りとする。この 2 つも契約のファイルの `shape` が宣言し、hook が確かめる
 - **結果の行の読み方**は `ndf-next-block.json` の規則の後半と同じ（応答の文の最後の「- 結果:」の行の値、前後の空白を除く）。Factory のランナーが読むのは値だけで、ほかの項目は人が読む
 - `完了` に `ndf-next` のブロックが添えば、区間はカットポイントで終わり、次の区間はブロックの中身で始まる（`ndf-next-block.json` の規則どおり）。ブロックが無ければ工程を最後まで通した
 - 項目の読み方: 結果の行より後ろの、`- <項目>: <値>` の形の行を項目として読む。同じ項目が 2 つあれば後ろを読む
@@ -266,9 +291,10 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
   "rule": "結果の行は ndf-next-block の規則の後半と同じく、応答の文の最後の「- 結果:」の行の値（前後の空白を除く）。値は shape.values のどれか。結果の行より後ろの「- <項目>: <値>」の行を項目として読み、shape.required が値ごとに要る項目（無しにしない）を決める",
   "shape": {
     "values": {"判断が要る": "承認ゲートか承認を求める区分の問いで止まった", "完了": "工程を最後まで通した。ndf-next があればカットポイント", "できなかった": "続けられない・人の操作が要る"},
-    "items": ["結果", "課題", "区分", "承認ゲート", "問い", "Pull Request", "承認資料", "人に頼むこと", "理由"],
+    "items": ["結果", "課題", "区分", "承認ゲート", "問い", "Pull Request", "材料", "人に頼むこと", "理由"],
+    "material": {"item": "材料", "body": "本文", "heading": "## 判断の材料", "url_prefix": "https://"},
     "required": {
-      "判断が要る": {"always": ["区分", "問い"], "when": [{"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート", "承認資料"]}]},
+      "判断が要る": {"always": ["区分", "問い", "材料"], "when": [{"item": "区分", "prefix": "ndf-gate:", "need": ["承認ゲート", "Pull Request"]}]},
       "完了": {"always": [], "when": []},
       "できなかった": {"always": ["理由"], "when": [{"item": "区分", "equals": "ndf-ask:human-action", "need": ["人に頼むこと"]}]}
     }
@@ -283,7 +309,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 ```
 
 - 例の組の形は `{"text": 文, "result": 結果の値（行が無ければ空の文字列）, "errors": 形の誤りの一覧}`。誤りの文言は読み手の関数が返す文と一致させる
-- 例の組は少なくとも、3 つの値の正しい形・行が無い・3 つの外の値・値ごとの要る項目の欠け・条件つきの欠け・結果の行が 2 つある（後ろを読む）を持つ
+- 例の組は少なくとも、3 つの値の正しい形・行が無い・3 つの外の値・値ごとの要る項目の欠け・条件つきの欠け（承認ゲートで Pull Request が無い）・材料が `本文` なのに「## 判断の材料」の節が無い・材料がファイルのパス・結果の行が 2 つある（後ろを読む）を持つ
 - `shape` の形（キーと型）は契約の検査が確かめる
 
 ### hook の入出力
@@ -292,6 +318,9 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 | --- | --- | --- | --- |
 | `hook.py unattended-start` | UserPromptSubmit | `session_id`・`prompt` | 対象なら印を作り `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":<案内>}}`。対象でなければ何も出さない |
 | `hook.py unattended-stop` | Stop | `session_id`・`last_assistant_message`・`background_tasks`・`session_crons` | 差し戻すなら `{"decision":"block","reason":<誤りの一覧と契約のパス>}`。通すなら何も出さない |
+| `hook.py unattended-end` | SessionEnd | `session_id` | 印を消す。何も出さない |
+
+- Stop の hook は複数あれば並んで動き、どれか 1 つが差し戻せば Stop は止まる（STD1）。`/goal` の条件の判定と NDF の差し戻しが同じ Stop に重なっても、NDF は自分の判定だけで回数を数える（I5）
 
 - どちらも終了コードは 0（I9）
 - 登録の行は `sh -c '[ -n "${NDF_FACTORY_RUN:-}" ] || exit 0; …'` で始め、空なら Python を起動しない（I8）。続きは既存の hook の行と同じく、SessionStart が用意した hook 用の仮想環境の python で `hook.py` を直に起動する（`uv run` を挟まない。構造の検査 `hook-deps`）
@@ -305,7 +334,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 | --- | --- | --- |
 | `session_id` | 文字列 | Claude Code のセッションの識別子 |
 | `started_at` | 文字列（ISO 8601） | 印を作った時刻 |
-| `pushbacks` | 整数 | このセッションで差し戻した回数 |
+| `pushbacks` | 整数 | 形に合わない Stop が続いた間に差し戻した回数。形に合った Stop を通すと 0 に戻る |
 
 状態の根は既存の `state_home` の関数で決める（問い合わせの記録と同じ根）。ファイル名の `session_id` は英数字と `-` 以外を含めば印を作らない。
 
@@ -315,7 +344,7 @@ conductor は区間を終える最後の応答の**末尾**に次の節を置く
 sequenceDiagram
   participant R as Factory のランナー
   participant C as conductor
-  participant U as UserPromptSubmit hook
+  participant U as UserPromptSubmit・SessionEnd hook
   participant S as Stop hook
   participant F as 区間の報告の読み手
   R->>C: claude -p "/ndf:development-workflow #12"
@@ -327,28 +356,34 @@ sequenceDiagram
   S->>F: 最後の応答の文
   F-->>S: 結果の値と形の誤り
   alt 誤りがあり回数が 2 未満で背景の作業が無い
+    S->>S: 回数を 1 足す
     S-->>C: decision block と誤りの一覧
     C->>S: 区間の報告を足して終える
-  else 形に合った・上限に達した
-    S->>S: 印を消す
+  else 形に合った
+    S->>S: 回数を 0 に戻す
+  else 上限に達した・背景の作業がある
+    S->>S: 回数を変えない
   end
   S-->>R: result の文（最後の結果の行）
+  U->>U: SessionEnd で印を消す
 ```
 
-U と S は人のいない実行の hook の 2 つのエントリポイントで、hook の登録の行と `hook.py` を通って起動する。F が読む契約のファイルと S が引く上限の宣言、conductor が読む問い合わせの決まりと工程の決まり、契約の検査・契約の項目・hook の説明は、この図に入れない（構成要素図にある）。
+U と S は人のいない実行の hook のエントリポイントで、hook の登録の行と `hook.py` を通って起動する。F が読む契約のファイルと S が引く上限の宣言、conductor が読む問い合わせの決まりと工程の決まり、契約の検査・契約の項目・hook の説明は、この図に入れない（構成要素図にある）。
 
 conductor が区間を終える場面と結果の値:
 
 | 場面 | 結果 | 決まり |
 | --- | --- | --- |
 | 区分の無い問い | 終えない | 決めて `ask.py decide --question` で記録し、続ける |
-| 承認ゲート（pace が MVV 判定で通さないとき） | `判断が要る` | 区分 `ndf-gate:<番号>`・承認ゲート・Pull Request・承認資料を添える |
-| 区分のある問いのうち `.ndf/ask.json` が許すもの（レッドライン・費用・取り消せない操作・規約・`extra`） | `判断が要る` | 区分・問い、材料は承認資料か本文に添える |
-| 人の操作が要る問い（`ndf-ask:human-action` を許すとき） | `できなかった` | 区分・人に頼むこと・理由 |
-| `.ndf/ask.json` が許さない区分 | 終えない | 人がいる会話と同じく、決めて記録し続ける |
+| 承認ゲート（pace が MVV 判定で通さないとき） | `判断が要る` | 区分 `ndf-gate:<番号>`・承認ゲート・Pull Request・材料を添える |
+| 承認を求める区分の問い（レッドライン・費用・取り消せない操作・規約への同意） | `判断が要る` | 区分・問い・材料。`.ndf/ask.json` の `allow` と `mode` に関わらず区間を終える |
+| 人の操作が要る問い（`ndf-ask:human-action`） | `できなかった` | 区分・人に頼むこと・理由。`.ndf/ask.json` の `allow` と `mode` に関わらず区間を終える |
+| プロジェクトが `.ndf/ask.json` の `extra` に足した区分の問い | `判断が要る` | 区分・問い・材料 |
 | 工程の最後まで通した | `完了` | — |
 | カットポイント | `完了` | `ndf-next` のブロックを添える（既存の決まり） |
 | 続けられない（スクリプトの失敗・権限の不足） | `できなかった` | 理由 |
+
+`.ndf/ask.json` の `allow` は、人がいる会話で「人へ回してよい区分」を絞る設定で、外した区分は AI が決める。人のいない実行ではこの絞り込みを当てない。外した区分を AI が決めて進めると、人のいない所でレッドライン・費用・取り消せない操作・規約への同意を AI が承認し、AI にはできない人の操作を「決めて続ける」ことになる。これは要求の境界（AI によるレッドラインの操作の承認を行わない）と共通原則の C1〜C8 に反するため、承認を求める区分と人の操作が要る区分は、設定に関わらず区間を終える。`asking.md` の「人のいない実行」の節はこの扱いを書き、`allow` の表の行からそこを指す。
 
 ## 非機能の実現方式
 
@@ -373,6 +408,8 @@ Factory は `判断が要る` を「人の答えを待って止まった」と�
 
 承認ゲート以外の問いに別の値（`問いが要る` など）を足す形は採らない。ランナーの変更が要り、対象範囲の外である。
 
+この値は要求の未決 2 への設計の案で、承認ゲートの外の承認でも同じ値でよいかは、設計承認ゲートで利用者が Factory の側と合わせて決める（「人へ残す判断」）。
+
 根拠: Value 1 / Value 4 / C1〜C8（MVV 版 7）
 
 ### 決定 3: worker とレビューの claude -p を巻き込まないため、差し戻しの対象を UserPromptSubmit が付ける印で決める
@@ -386,9 +423,13 @@ Stop で毎回 transcript の最初のプロンプトを読む形は採らない
 
 根拠: Value 2 / Value 3（MVV 版 7）
 
-### 決定 4: 差し戻しを無駄に繰り返さないため、差し戻しは同じセッションで 2 回までにし、回数を印に持つ
+### 決定 4: 差し戻しを無駄に繰り返さないため、形に合わない Stop が続く間の差し戻しは 2 回までにし、回数を印に持つ
 
 1 回目で直らない応答は、2 回目で直ることがある（形の誤りの一覧を読んで足す）が、3 回目以降は同じ応答の繰り返しになりやすい。2 回で直らなければ Stop を通し、Factory は行の無い区間を失敗として扱う（前提 1）。回数は印のファイルに持ち、上限の値は上限の宣言に置く。
+
+回数は形に合った Stop で 0 に戻し、印はセッションの終わりまで残す。`/goal /ndf:development-workflow` で始まるセッションでは、`/goal` が条件を満たすまで Stop を差し戻して続けさせるため、1 つのセッションに Stop が何度も起きる。途中の Stop で印を消すと、最後の Stop が判定されない。セッションで通算して数えると、途中の Stop で使い切った回数のために最後の Stop を差し戻せない。続けて形に合わない Stop だけを数えれば、どの Stop も同じ上限で判定される。
+
+上限の 2 回は要求の未決 1 への設計の案で、決めるのは設計承認ゲートの利用者である（「人へ残す判断」）。
 
 `stop_hook_active` で回数を数える形は採らない。Claude Code は Tool を呼ぶと続けた回数を数え直し（STD1）、`/goal` の続きでは常に真になる（`ndf-relay-goal-skill-and-prose-wait.md`）ため、同じセッションの差し戻しの回数を表さない。Claude Code の上限（8 回続けて）に任せる形も採らない。報告を書かないまま 8 回分の費用がかかる。
 
@@ -396,7 +437,7 @@ Stop で毎回 transcript の最初のプロンプトを読む形は採らない
 
 ### 決定 5: Factory と人が読む材料を欠かさないため、hook は値だけでなく値ごとに要る項目まで確かめる
 
-受け入れ条件 2・4・5・6 は、値と一緒に承認ゲートの名前・承認資料・人に頼むこと・理由が載ることを求める。値だけを確かめると、項目の欠けた報告がそのまま Factory へ届き、人が読む材料が無い。項目の有無は文の照合ではなく行の形で決まるため、決定的に確かめられる。項目の中身の正しさ（URL が開けるか・理由が筋が通るか）は確かめない。
+受け入れ条件 2・4・5・6 は、値と一緒に承認ゲートの名前・設計 Pull Request の URL・問いと材料・人に頼むこと・理由が載ることを求める。値だけを確かめると、項目の欠けた報告がそのまま Factory へ届き、人が読む材料が無い。項目の有無は文の照合ではなく行の形で決まるため、決定的に確かめられる。材料は、値が `本文` なら「## 判断の材料」の節があるか、そうでなければ `https://` の URL かまでを確かめる。ランナーのコンテナの中のファイルのパスは区間が終わった後に人が開けず、材料を添えたことにならないためである。項目の中身の正しさ（URL が開けるか・理由が筋が通るか）は確かめない。
 
 根拠: Value 1 / Value 3（MVV 版 7）
 
@@ -436,22 +477,29 @@ UserPromptSubmit と Stop はすべてのプロンプトと応答で起きる。
 | I2 | 3 つの外の値・値ごとに要る項目の欠け・条件つきの欠けを誤りとして返す。要る項目を契約のファイルから読む | 要る項目を関数の中に書き写す（契約のファイルの `required` を変えても判定が変わらない） |
 | 受け入れ条件 7・I3 | 印のあるセッションで、結果の行の無い応答の Stop に `decision: "block"` と誤りの一覧を返す | 印を読まずに通す。誤りがあっても何も出さない |
 | I4 | `background_tasks` か `session_crons` が空でない Stop では差し戻さず、印を残す | 背景の作業を見ずに差し戻す。印を消す |
-| I5 | 同じセッションの 3 回目の形に合わない Stop を通し、印を消す | 回数を数えない。2 回目で止める |
+| I5 | 続けて 3 回目の形に合わない Stop を通し、印を残す | 回数を数えない。2 回目で止める |
 | I6 | `NDF_FACTORY_RUN` があり先頭が `/ndf:development-workflow` か `/goal /ndf:development-workflow` のプロンプトだけ印を作る。`/ndf:design #1` や普通の文では作らず、何も出さない | 先頭の語を見ずに印を作る |
-| I7 | 形に合った Stop で印を消す | 印を残す |
+| I5 | 形に合った Stop の後は回数が 0 に戻り、次に形に合わない Stop が続けば再び 2 回まで差し戻す。別の hook が同じ Stop を差し戻した入力（`stop_hook_active` が真）でも、NDF の回数は 1 つだけ増える | 回数を戻さない。`stop_hook_active` で回数を数える |
+| I7 | 形に合った Stop を通しても印を残し、同じセッションの後の Stop（`/goal` の続き）も判定する。SessionEnd で印を消す。上限の宣言の日数を過ぎた印は次の `unattended-start` で消える | Stop で印を消す。SessionEnd で消さない |
 | 受け入れ条件 8・I8 | 登録の行が、`NDF_FACTORY_RUN` が空のとき Python を起動せず終了コード 0 で何も出さない。既存の hook・問いの区分・`ndf-next` のブロックのテストを変えずに通す | sh の判定を外す。既存のテストのファイルを書き換える |
 | I9 | 入力が JSON でない・契約のファイルが読めない・印が書けないとき、終了コード 0 で何も出さない（差し戻さない） | 例外をそのまま上げる |
-| 受け入れ条件 2〜6 | リリース後テストで、要求の「再現手順」の 2 を開発版のチャネルで打ち、`stream-json` の最後の `result` の文と `ask.py summary --since <起動の時刻>` を見る | LLM の応答に依るため、ユニットテストでは縛らない |
+| I2・受け入れ条件 2・5 | 値が `判断が要る` で、材料が `無し`・ファイルのパス・`本文` なのに「## 判断の材料」の節が無いもの、区分が `ndf-gate:<番号>` で Pull Request が無いものを誤りとして返す | 材料の形を見ない。Pull Request を条件つきの要る項目から外す |
+| 受け入れ条件 2〜6 | リリース後テストで、要求の「再現手順」の 2 を開発版のチャネルで打ち、`stream-json` の最後の `result` の文と `ask.py summary --since <起動の時刻（UTC の ISO 8601）> --cwd <試しのリポジトリの根>` の `metrics.decision.no_ref` を見る | LLM の応答に依るため、ユニットテストでは縛らない |
+| 受け入れ条件 4・5（`.ndf/ask.json` が区分を許さないとき） | リリース後テストで、試しのリポジトリに `"allow": []` の `.ndf/ask.json` を置き、人の操作が要る課題と、費用の出る操作（有料の API の呼び出しなど）を求める課題を流す。最後の結果の行がそれぞれ `できなかった`（人に頼むことつき）と `判断が要る`（区分 `ndf-ask:cost`・問い・材料つき）になる | LLM の応答に依るため、ユニットテストでは縛らない |
+| 背景の作業を残した Stop（I4） | リリース後テストで、conductor が supervisor を背景で起動して待つ区間を流し、背景の作業がある Stop の後に `result` が返るか、`result` の最後の結果の行があるかを見る | 「未確認のまま残ること」の確かめ方 |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3242 | 実装する | — | `plugins/ndf/contracts/forms/unattended-report.json`（新設）、`scripts/contracts_lib/model.py`、`scripts/tests/test_check_ndf_contracts.py`、`plugins/ndf/scripts/lib/unattended_report.py`（新設）、`plugins/ndf/scripts/hook_lib/unattended.py`（新設）、`plugins/ndf/scripts/hook.py`、`plugins/ndf/hooks/claude.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__hook.py.json`、`plugins/ndf/contracts/files/unattended-mark-json.json`（新設）、`plugins/ndf/contracts/env/NDF_FACTORY_RUN.json`、`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/ndf-plugin-reference.md`、`plugins/ndf/scripts/tests/test_unattended_report.py`（新設）、`plugins/ndf/scripts/tests/test_hook_unattended.py`（新設） |
+| #3242 | 実装する | — | `plugins/ndf/contracts/forms/unattended-report.json`（新設）、`scripts/contracts_lib/model.py`、`scripts/tests/test_check_ndf_contracts.py`、`plugins/ndf/scripts/lib/unattended_report.py`（新設）、`plugins/ndf/scripts/hook_lib/unattended.py`（新設）、`plugins/ndf/scripts/hook.py`、`plugins/ndf/hooks/claude.json`、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__hook.py.json`、`plugins/ndf/contracts/files/unattended-mark-json.json`（新設）、`plugins/ndf/contracts/env/NDF_FACTORY_RUN.json`、`plugins/ndf/contracts/index.md`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`docs/ndf-plugin-reference.md`、`plugins/ndf/scripts/tests/test_unattended_report.py`（新設）、`plugins/ndf/scripts/tests/test_hook_unattended.py`（新設）、`docs/glossary/glossary.json`・`docs/glossary.md`（用語 6 語。要求と設計の Pull Request で入れてある） |
 
 ## 人へ残す判断
 
-無し
+| # | 判断 | 設計の案 | 決める人と時期 |
+| --- | --- | --- | --- |
+| 1 | 結果の行の差し戻しが続けて効かないとき、何回で諦めて応答を終えるか（要求の未決 1） | 形に合わない Stop が続く間は 2 回まで。3 回目は通し、Factory は行の無い区間を失敗とする（決定 4。値は上限の宣言 `hook.unattended-pushback` で変えられる） | 利用者。設計承認ゲート |
+| 2 | 承認ゲートの外の承認を求める区分の問い（レッドライン・費用・取り消せない操作・規約への同意）の結果の値を `判断が要る` にするか（要求の未決 2） | `判断が要る` にし、`- 区分:` の項目で承認ゲートと見分ける（決定 2）。Factory はこの値を「承認ゲートで止まった」と読むため、同じ値でよいかを Factory の側と合わせる必要がある | 利用者が Factory の側と合わせて決める。設計承認ゲート |
 
 ## 未確認のまま残ること
 
@@ -459,4 +507,5 @@ UserPromptSubmit と Stop はすべてのプロンプトと応答で起きる。
 | --- | --- |
 | Factory のランナーの読み方 | ランナーが最後の結果の行の値で区間の結果を決め、行が無ければ失敗とすること（要求の前提 1）は、ランナーのリポジトリにあり確かめていない。リリース後テストで Factory の実行ジョブの区間の結果を見て分かる |
 | Factory のランナーの起動の形 | ランナーが `--bare` を付けていればプラグインの hook が動かず（STD2）、差し戻しと案内が働かない。リリース後テストで、`stream-json` に Stop hook の差し戻しが現れるか、印のファイルが作られるかで分かる |
+| 背景の作業を残した Stop の後の `claude -p` の振る舞い | conductor は supervisor を背景で起動して待つ。背景の作業が残る Stop は差し戻さない（I4）。プロセスが作業の完了を待って応答を続けるなら、最後の Stop で判定される。そのまま `result` を返して終わるなら、結果の行の無い `result` が差し戻されずにランナーへ届き、受け入れ条件 7 が働かない。手元では単発の質問 1 件しか実測しておらず、どちらかは確かめていない。リリース後テストで、背景の作業を残す区間の `stream-json` の最後の `result` と Stop の入力の `background_tasks` を見て分かる。後者だったときは、背景の作業を残して区間を終えないことを `asking.md` の「人のいない実行」の節へ足すかを、次の課題で決める |
 | conductor の振る舞い（受け入れ条件 2〜6） | 案内と決まりを読んだ conductor が、区分の無い問いを決めて承認ゲートまで進むかは LLM の応答に依る。Factory のモデル（Claude Sonnet 5.5）でのリリース後テストで分かる |

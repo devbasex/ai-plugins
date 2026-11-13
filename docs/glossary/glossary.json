@@ -7075,7 +7075,7 @@
     {
       "term": "結果の行の差し戻し",
       "context": "ndf-factory",
-      "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。同じセッションで 2 回まで",
+      "meaning": "人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す",
       "source": "",
       "pending_source": "issues/issue-3242-design.md"
     }
