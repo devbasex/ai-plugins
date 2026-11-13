@@ -56,12 +56,17 @@ def run(decide: Decide[S, D, A], perform: Perform[A, D], state: S) -> S:
     """
     result: D | None = None
     while True:
-        nxt = decide(state, result)
-        if not isinstance(nxt, Next):
-            raise DecideLoopError(f"判断の関数が次の手でない値を返した: {nxt!r}")
+        nxt = _checked(decide(state, result))
         if nxt.finished:
             return nxt.state
-        if nxt.act is None:
-            raise DecideLoopError(f"終わりでない次の手が実行する手を持たない: {nxt!r}")
         state = nxt.state
         result = perform(nxt.act)
+
+
+def _checked(nxt: object) -> Next[Any, Any]:
+    """判断の関数の戻り値が次の手の形かを確かめて返す。形でなければ DecideLoopError を上げる。"""
+    if not isinstance(nxt, Next):
+        raise DecideLoopError(f"判断の関数が次の手でない値を返した: {nxt!r}")
+    if not nxt.finished and nxt.act is None:
+        raise DecideLoopError(f"終わりでない次の手が実行する手を持たない: {nxt!r}")
+    return nxt
