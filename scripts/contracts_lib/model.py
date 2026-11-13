@@ -174,10 +174,10 @@ def load(root: Path) -> Contracts:
     base = root / CONTRACTS
     c = Contracts()
     _load_entrypoints(root, base, c)
-    _load_dir(base, "files", _check_file, "name", c.files)
-    _load_dir(base, "settings", _check_setting, "file", c.settings)
-    _load_dir(base, "env", _check_env, "name", c.env)
-    _load_dir(base, "forms", _check_form, "name", c.forms)
+    _load_files(base, c)
+    _load_settings(base, c)
+    _load_env(base, c)
+    _load_forms(base, c)
     return c
 
 
@@ -189,32 +189,30 @@ def _load_entrypoints(root: Path, base: Path, c: Contracts) -> None:
         c.entry_files[d["path"]] = f.relative_to(root).as_posix()
 
 
-def _load_dir(base: Path, sub: str, check, key: str, into: dict[str, dict]) -> None:
-    """`<base>/<sub>/*.json` を名前の順に読み、`check` で確かめ、`key` の値を名前にして `into` へ登録する。"""
-    for f in sorted((base / sub).glob("*.json")):
+def _load_files(base: Path, c: Contracts) -> None:
+    for f in sorted((base / "files").glob("*.json")):
         d = _read(f)
-        check(f, d)
-        into[d[key]] = d
+        # writers: 呼ぶ側が渡したパスへ書く関数（`<path>:<関数>`）。書き先を静的に拾えなくても file-dynamic にしない（#2337）
+        _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list}, {"writers": list})
+        _strs(f, d, "writers")
+        _one_of(f, d, "kind", FILE_KINDS)
+        _one_of(f, d, "place", FILE_PLACES)
+        if f.name != d["name"] + ".json":
+            raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
+        c.files[d["name"]] = d
 
 
-def _check_file(f: Path, d: dict) -> None:
-    # writers: 呼ぶ側が渡したパスへ書く関数（`<path>:<関数>`）。書き先を静的に拾えなくても file-dynamic にしない（#2337）
-    _need(f, d, {"name": str, "pattern": str, "kind": str, "place": str, "skill_readers": list}, {"writers": list})
-    _strs(f, d, "writers")
-    _one_of(f, d, "kind", FILE_KINDS)
-    _one_of(f, d, "place", FILE_PLACES)
-    if f.name != d["name"] + ".json":
-        raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
-
-
-def _check_setting(f: Path, d: dict) -> None:
-    _need(f, d, {"file": str, "place": str, "scope": str, "readers": list, "keys": dict, "summary": str})
-    _one_of(f, d, "place", SETTING_PLACES)
-    _one_of(f, d, "scope", SCOPES)
-    _strs(f, d, "readers")
-    _check_setting_keys(f, d)
-    if f.name != d["file"] + ".json":
-        raise ContractError(f"{f.name}: ファイル名は {d['file']}.json にする")
+def _load_settings(base: Path, c: Contracts) -> None:
+    for f in sorted((base / "settings").glob("*.json")):
+        d = _read(f)
+        _need(f, d, {"file": str, "place": str, "scope": str, "readers": list, "keys": dict, "summary": str})
+        _one_of(f, d, "place", SETTING_PLACES)
+        _one_of(f, d, "scope", SCOPES)
+        _strs(f, d, "readers")
+        _check_setting_keys(f, d)
+        if f.name != d["file"] + ".json":
+            raise ContractError(f"{f.name}: ファイル名は {d['file']}.json にする")
+        c.settings[d["file"]] = d
 
 
 def _check_setting_keys(f: Path, d: dict) -> None:
@@ -226,11 +224,21 @@ def _check_setting_keys(f: Path, d: dict) -> None:
             raise ContractError(f"{f.name}: keys.{k}.place は {' / '.join(SETTING_PLACES)} のどれか")
 
 
-def _check_env(f: Path, d: dict) -> None:
-    _need(f, d, {"name": str, "set_by": str, "summary": str})
-    _one_of(f, d, "set_by", SET_BY)
-    if f.name != d["name"] + ".json":
-        raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
+def _load_env(base: Path, c: Contracts) -> None:
+    for f in sorted((base / "env").glob("*.json")):
+        d = _read(f)
+        _need(f, d, {"name": str, "set_by": str, "summary": str})
+        _one_of(f, d, "set_by", SET_BY)
+        if f.name != d["name"] + ".json":
+            raise ContractError(f"{f.name}: ファイル名は {d['name']}.json にする")
+        c.env[d["name"]] = d
+
+
+def _load_forms(base: Path, c: Contracts) -> None:
+    for f in sorted((base / "forms").glob("*.json")):
+        d = _read(f)
+        _check_form(f, d)
+        c.forms[d["name"]] = d
 
 
 # 例の組の形。ndf-next のブロック（文 → 拾うブロックと起動の有無）と、メッセージの形（メッセージ → 正しいか。#2436 の配布の依頼）と、
