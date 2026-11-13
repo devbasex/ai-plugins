@@ -164,16 +164,21 @@ def _fallback(kind: str, on_fail: Optional[str]) -> Route:
     return Route(HUMAN, None, 0.0, kind)
 
 
+def _retry_wait(kind: str, state: RetryState) -> Optional[float]:
+    """打ち直せるなら次の待ちの秒。方針が無い・回数の上限に当たった・待つべき retry_after が無ければ None。"""
+    policy = state.policy
+    if policy is None or policy.attempts is None or state.used >= policy.attempts:
+        return None
+    if row(kind).requires_retry_after and state.retry_after is None:
+        return None
+    return backoff(policy, state.used, state.retry_after, state.cap)
+
+
 def _retry_or_next(kind: str, on_fail: Optional[str], state: RetryState) -> Route:
     """打ち直せるなら retry、上限に当たったら打ち直しを外して on_fail へ、無ければ人へ。"""
-    policy = state.policy
-    can = policy is not None and policy.attempts is not None and state.used < policy.attempts
-    if can and row(kind).requires_retry_after and state.retry_after is None:
-        can = False
-    if can:
-        wait = backoff(policy, state.used, state.retry_after, state.cap)  # type: ignore[arg-type]
-        if wait > 0:
-            return Route(RETRY, None, wait, kind)
+    wait = _retry_wait(kind, state)
+    if wait is not None and wait > 0:
+        return Route(RETRY, None, wait, kind)
     return _fallback(kind, on_fail)
 
 
