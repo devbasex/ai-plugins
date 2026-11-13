@@ -20,6 +20,7 @@ import parallel_lane as pl
 import parallel_plan as pp
 
 SUPERVISE = Path(__file__).resolve().parent.parent / "supervise.py"
+PROGRESS = SUPERVISE.with_name("progress.py")
 
 
 def _lane_or_stop(main: Path, a, reply) -> pp.Lane:
@@ -67,7 +68,10 @@ def cmd_park(main: Path, a, reply) -> None:
     lane = _lane_or_stop(main, a, reply)
     if a.clear:
         _clear(main, a, reply)
-    resume = f"python3 {shlex.quote(str(SUPERVISE))} queue --resume {shlex.quote(str(a.done))}"
+    if getattr(a, "table", None):  # 工程の進行表で流すスプリントは、進行表が次の工程を決める（#3092）
+        resume = f"python3 {shlex.quote(str(PROGRESS))} next {shlex.quote(a.table)}"
+    else:
+        resume = f"python3 {shlex.quote(str(SUPERVISE))} queue --resume {shlex.quote(str(a.done))}"
     if not ph.covered(ph.read_hold(main, a.name), a.lane):
         reply("ok", f"レーン {a.lane} の答え待ちの停止は解けている。止まらずに続ける", cleared=True, next=resume)
     try:

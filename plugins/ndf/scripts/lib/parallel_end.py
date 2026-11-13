@@ -70,8 +70,7 @@ class LaneEnding:
     ending = False  # 印 `parallel-lane-end` の後の記録だけ True（決定 10）
 
     def announce_ending(self) -> None:
-        """印 `parallel-lane-end` の後の記録だけ、イベント `lane-end` を立てる。レーンの目録（`sprint_lane_close.plan_ends`）は
-        これを読み、立っていない古い記録の計画では今までのまとめ（答えを待ってから課題を閉じる）を組む。"""
+        """印 `parallel-lane-end` の後の記録だけ、イベント `lane-end` を立てる（版の要るまとめを流せる計画の印）。"""
         if self.ending:
             durable.set_event(ENDING_EVENT, True)
 

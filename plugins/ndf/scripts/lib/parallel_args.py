@@ -95,6 +95,7 @@ def add_answer_parsers(sub) -> None:
     pk.add_argument("--lane", required=True)
     pg = pk.add_mutually_exclusive_group(required=True)
     pg.add_argument("--done")
+    pg.add_argument("--table", help="スプリントの進行表の ID（続きは progress.py next。#3092）")
     pg.add_argument("--clear", action="store_true")
     hp = sub.add_parser("helper")
     hp.add_argument("name")

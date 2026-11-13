@@ -95,7 +95,8 @@
         "options": [
           "--clear",
           "--done",
-          "--lane"
+          "--lane",
+          "--table"
         ],
         "positionals": [
           "name"

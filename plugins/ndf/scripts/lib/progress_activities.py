@@ -114,7 +114,7 @@ def _prs_of(outputs: dict) -> list[str]:
 
 
 def act_request(store, table_id: str, inp: dict, listen_row: str) -> dict:
-    """レーンのスプリントのリリースの依頼を送る（`supervise_lib.sprint_lane_close` の依頼のプランを移した。#3092）。
+    """レーンのスプリントのリリースの依頼を送る（今までの 1 スプリントのレーンの依頼のプランを工程へ移した。#3092）。
 
     依頼を送れば、依頼の記録へ進行表の ID と答えを待つ行を足し、`parallel.py await` が答えをその行へ届けられるようにする。
     自分の Pull Request がすでに本番にある（`parallel.py request` が 0）なら、待つ行へ `released` の答えをここで書く。"""

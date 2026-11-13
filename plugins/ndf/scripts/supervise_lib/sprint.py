@@ -39,7 +39,6 @@ from supervise_lib.sprint_routes import (
 )
 from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _retro_step, _spec_pr_steps, deep_due_step, refine_steps
-from supervise_lib.sprint_lane_close import issue_lists, with_lane_close
 
 
 def parallel_lane(repo: str) -> tuple[str, str] | None:
@@ -160,6 +159,11 @@ def auto_sprint_plans(a) -> list[dict]:
             "then_of": first,
         },
     ]
+
+
+def issue_lists(a) -> tuple[str, str]:
+    """課題の番号の並びの 2 形: カンマ区切り（スクリプトの引数）と `#` 付きの空白区切り（本文）。"""
+    return ",".join(map(str, a.issue)), " ".join(f"#{i}" for i in a.issue)
 
 
 def close_plan(a, repo: str) -> dict:
@@ -372,8 +376,9 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         return stop
     if not closing:
         pin_flow(a)  # 同じスプリントの打ち直しは開始時のブランチ運用で組む（#3121 の I3）
-    # 設計 PR の前にスプリントブランチ（#3121）、レーンのまとめ（#3058）。課題のまとまりは _new_refusal で見る（#3081）
-    waves = waves if waves is not None else with_lane_close(a, sprint_branch_first(a, sprint_plans(a)), close_plan)
+    # 設計 PR の前にスプリントブランチ（#3121）。課題のまとまりは _new_refusal で見る（#3081）。1 スプリントのレーンのまとめと
+    # 終わりは工程の進行表（progress.py）が持つ（#3092）
+    waves = waves if waves is not None else sprint_branch_first(a, sprint_plans(a))
     if not closing:
         absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
         apply_bundle_design(a, waves)  # まとまりの課題を代表の設計へ渡す（#3081）

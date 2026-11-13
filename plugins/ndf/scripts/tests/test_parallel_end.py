@@ -113,7 +113,7 @@ def test_an_old_record_counts_any_stopped_lane_and_ignores_end_rows(monkeypatch)
 
 @pytest.mark.parametrize("ending", [True, False], ids=["new", "old"])
 def test_only_a_record_after_the_mark_tells_the_lanes_it_ends_them(monkeypatch, ending):
-    """目録の側（`sprint_lane_close.plan_ends`）はイベント `lane-end` で、版の要るまとめを流せる計画かを読む。"""
+    """印 `parallel-lane-end` の後の記録だけ、イベント `lane-end` を立てる。"""
     got = []
     monkeypatch.setattr(durable, "set_event", lambda k, v: got.append((k, v)))
     r = prun._Run("/m", "p1", LANES)
