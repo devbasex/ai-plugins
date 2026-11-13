@@ -101,6 +101,11 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     return errs
 
 
+def dumps_line(obj: Any) -> str:
+    """結果を 1 行の JSON にする（非 ASCII はそのまま）。"""
+    return json.dumps(obj, ensure_ascii=False)
+
+
 def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
     """結果を確かめて 1 行で出し、終了コードを返す。形が違えば出さずに誤りを標準エラーへ書き、invalid の終了コードを返す。"""
     if code is None:
@@ -110,5 +115,5 @@ def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextI
         for line in errs or ["終了コードを決められない（stopped に cause が無い）"]:
             print(f"結果の形の誤り: {line}", file=sys.stderr)
         return causes.exit_code("invalid")
-    print(json.dumps(obj, ensure_ascii=False), file=stream or sys.stdout)
+    print(dumps_line(obj), file=stream or sys.stdout)
     return code
