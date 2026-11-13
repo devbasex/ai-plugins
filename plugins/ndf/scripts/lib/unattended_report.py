@@ -114,17 +114,23 @@ def _strs(value: object, where: str) -> tuple[str, ...]:
 def _when(rows: object, where: str, items: tuple[str, ...]) -> tuple[Condition, ...]:
     if not isinstance(rows, list):
         raise FormError(f"shape.{where}.when は並び")
-    out = []
-    for row in rows:
-        ok = isinstance(row, dict) and isinstance(row.get("item"), str) and len(set(row) & {"prefix", "equals"}) == 1
-        if not ok or not set(row) <= {"item", "prefix", "equals", "need"}:
-            raise FormError(f"shape.{where}.when の要素は item・need と prefix か equals の 1 つを持つ")
-        cond = row.get("prefix", row.get("equals"))
-        need = _strs(row.get("need"), f"{where}.when.need")
-        if not isinstance(cond, str) or row["item"] not in items or not set(need) <= set(items):
-            raise FormError(f"shape.{where}.when の項目名が items に無いか、条件が文字列でない")
-        out.append(Condition(item=row["item"], need=need, prefix=row.get("prefix"), equals=row.get("equals")))
-    return tuple(out)
+    return tuple(_condition_from_row(row, where, items) for row in rows)
+
+
+def _condition_from_row(row: object, where: str, items: tuple[str, ...]) -> Condition:
+    """`when` の 1 行を確かめて `Condition` にする（形 → need → 項目名と条件の順）。"""
+    if (
+        not isinstance(row, dict)
+        or not isinstance(row.get("item"), str)
+        or len(set(row) & {"prefix", "equals"}) != 1
+        or not set(row) <= {"item", "prefix", "equals", "need"}
+    ):
+        raise FormError(f"shape.{where}.when の要素は item・need と prefix か equals の 1 つを持つ")
+    cond = row.get("prefix", row.get("equals"))
+    need = _strs(row.get("need"), f"{where}.when.need")
+    if not isinstance(cond, str) or row["item"] not in items or not set(need) <= set(items):
+        raise FormError(f"shape.{where}.when の項目名が items に無いか、条件が文字列でない")
+    return Condition(item=row["item"], need=need, prefix=row.get("prefix"), equals=row.get("equals"))
 
 
 def form_from_dict(data: dict) -> ReportForm:
