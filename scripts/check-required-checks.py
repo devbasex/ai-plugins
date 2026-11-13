@@ -232,6 +232,29 @@ def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
     return _apply_include(combos, base, include) or None
 
 
+def _job_matrix(job: dict) -> object:
+    """ジョブの strategy.matrix。無ければ None。"""
+    return (job.get("strategy") or {}).get("matrix") if isinstance(job.get("strategy"), dict) else None
+
+
+def _expand_named(name: str, combos: list[dict[str, str]]) -> list[str] | None:
+    """名前の matrix の式を組ごとの値で埋める。matrix 以外の式か、組に無いキーの式があれば None。"""
+    if "${{" in MATRIX_EXPR.sub("", name):
+        return None  # matrix 以外の式
+    if any(k not in c for c in combos for k in MATRIX_EXPR.findall(name)):
+        return None
+    return [MATRIX_EXPR.sub(lambda m, c=c: c[m.group(1)], name) for c in combos]
+
+
+def _suffix_names(name: str, combos: list[dict[str, str]]) -> list[str] | None:
+    """名前に matrix の式が無いときは GitHub が「名前 (値, 値)」を付ける。キーが 2 つ以上のときの並びは
+    実測していないため、キーが 1 つのときだけ決める（設計の「未確認のまま残ること」）。"""
+    keys = {k for c in combos for k in c}
+    if len(keys) != 1:
+        return None
+    return [f"{name} ({next(iter(c.values()))})" for c in combos]
+
+
 def job_check_names(job_id: str, job: object) -> list[str] | None:
     """1 ジョブ → チェックの名前の並び。静的に決められなければ None（設計の I2）。"""
     if not isinstance(job, dict) or "uses" in job:
@@ -240,24 +263,13 @@ def job_check_names(job_id: str, job: object) -> list[str] | None:
     if not isinstance(raw, str):
         return None
     name = str(raw)
-    matrix = (job.get("strategy") or {}).get("matrix") if isinstance(job.get("strategy"), dict) else None
+    matrix = _job_matrix(job)
     if matrix is None:
         return None if "${{" in name else [name]
     combos = matrix_combos(matrix)
     if combos is None:
         return None
-    if "${{" in name:
-        if "${{" in MATRIX_EXPR.sub("", name):
-            return None  # matrix 以外の式
-        if any(k not in c for c in combos for k in MATRIX_EXPR.findall(name)):
-            return None
-        return [MATRIX_EXPR.sub(lambda m, c=c: c[m.group(1)], name) for c in combos]
-    # 名前に matrix の式が無いときは GitHub が「名前 (値, 値)」を付ける。キーが 2 つ以上のときの並びは
-    # 実測していないため、キーが 1 つのときだけ決める（設計の「未確認のまま残ること」）
-    keys = {k for c in combos for k in c}
-    if len(keys) != 1:
-        return None
-    return [f"{name} ({next(iter(c.values()))})" for c in combos]
+    return _expand_named(name, combos) if "${{" in name else _suffix_names(name, combos)
 
 
 def read_workflows(root: Path, wf_dir: Path, branch: str) -> tuple[list[CheckName], list[Finding]]:
