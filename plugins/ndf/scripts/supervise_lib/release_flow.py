@@ -28,13 +28,15 @@ PICK_BUMPS = (
 )
 
 
-def bump_others_cmd(a, plugin: str, material: str) -> str:
+def bump_others_cmd(a, plugin: str, material: str, prs: str | None = None) -> str:
     """本番のリリースプランの bump-others（不足 c）。前のタグからの差分のある、宣言の release.plugin 以外の
     プラグインを changed-plugins で列挙し、承認資料（material）の表の上げ幅で 1 つずつ上げる（#1752）。
-    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。"""
+    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。`prs` を渡すと（CD のある場合。#2773 の決定 6）、
+    承認資料はリリースの PR を作った後に組むため、表でなく PR の本文の候補（--prs）の上げ幅で上げ、承認資料の表で人が見る。"""
     since = f" --since {shlex.quote(a.prev_tag)}" if getattr(a, "prev_tag", None) else ""
+    source = f"--prs {prs}" if prs is not None else f"--decided {shlex.quote(material)}"
     return (
-        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} --decided {shlex.quote(material)}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
+        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} {source}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
         f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
         f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {release_ref(a, False)} || exit 1; done'
     )
@@ -84,6 +86,12 @@ def release_branch_step(a, repo: str | None, version: str, units: list[str], nex
 def release_review_row(a) -> branch_flow.ReviewRow:
     """リリースブランチの PR のレビューの単位（目録のスナップショットから。この種類の既定値はまとまりの記録の有無で変わらない）。"""
     return sprint_flow(a).flow.reviews.row("release", False)
+
+
+def review_branch_drop(v: str) -> str:
+    """後片付けの cmd へ足す、版 `v` の衝突の解消のレビューの一時のブランチが残っていれば消す shell の続き（#3163 の I11）。"""
+    heads = f"{branch_flow.REVIEW_PREFIX}{v} {branch_flow.REVIEW_PREFIX}{v}{branch_flow.REVIEW_BASE_SUFFIX}"
+    return f' && for b in {heads}; do if git ls-remote -q --exit-code --heads origin "$b"; then git push -q origin --delete "$b" || exit 1; fi; done'
 
 
 REVIEW_RANGE_IDS = ("review-open", "review-close")

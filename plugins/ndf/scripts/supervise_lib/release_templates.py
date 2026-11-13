@@ -6,11 +6,10 @@ import re
 import shlex
 from pathlib import Path
 
-import branch_flow
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.release_flow import REVIEW_RANGE_IDS, bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
-from supervise_lib.release_flow import release_review_row, review_range_steps
+from supervise_lib.release_flow import release_review_row, review_branch_drop, review_range_steps
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import (
@@ -115,9 +114,7 @@ def _snapshot_step(plugin: str, v: str, after_notes: str) -> dict:
 
 def _cleanup_step(v: str, prs: str, repo: str | None, review: bool = False) -> dict:
     """本番のリリースの後片付け。`review` なら、その版の衝突の解消のレビューの一時のブランチが残っていれば消す（#3163 の I11）。"""
-    heads = f"{branch_flow.REVIEW_PREFIX}{v} {branch_flow.REVIEW_PREFIX}{v}{branch_flow.REVIEW_BASE_SUFFIX}"
-    drop = f' && for b in {heads}; do if git ls-remote -q --exit-code --heads origin "$b"; then git push -q origin --delete "$b" || exit 1; fi; done'
-    drop = drop if review else ""
+    drop = review_branch_drop(v) if review else ""
     cmd = (
         f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
         f'--jq ".[] | select(.headRefName | startswith(\\"release/v{v}\\")) | .number") {prs}{drop}\''
@@ -197,17 +194,14 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
 def _prepare_steps(
     a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str, on_pr: bool = False
 ) -> list[dict]:
-    """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。`on_pr`（CD のある場合。#2773）の本番は、
-    承認資料をリリースの PR を作った後に組むため、bump-others は承認資料の表でなく PR の本文の候補（--prs）で上げる（決定 6）。"""
+    """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。`on_pr`（CD のある場合。#2773）の本番の
+    bump-others は PR の本文の候補（--prs）で上げる（release_flow.bump_others_cmd）。"""
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (
         f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
         f'(git diff --cached --quiet || git commit -q -m "Release: {plugin} v{v}")\''
     )
-    material = material_path(repo, approval)
-    bump_others = bump_others_cmd(a, plugin, material)
-    if on_pr:  # 候補の上げ幅で上げ、承認資料の「版を上げる他のプラグイン」の表で人が見る（差し戻しなら bump-others からやり直す）
-        bump_others = bump_others.replace(f"--decided {shlex.quote(material)}", f"--prs {prs}")
+    bump_others = bump_others_cmd(a, plugin, material_path(repo, approval), prs if on_pr else None)
     others = {"id": "bump-others", "type": "run", "stage": "デプロイ", "cmd": bump_others}
     steps = [
         {
