@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "causes.schema.json",
+  "title": "止まった理由の表",
+  "description": "contracts/causes.json の形。種類の重なり・終了コードの区分・再試行の方針の有無は読み手（ndf.contracts.causes）が確かめる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "causes"],
+  "properties": {
+    "version": {"const": 1},
+    "causes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "meaning", "std_type", "exit", "route", "retry"],
+        "properties": {
+          "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "meaning": {"type": "string", "minLength": 1},
+          "std_type": {
+            "description": "Serverless Workflow DSL 1.0.3 の標準の誤りの型",
+            "enum": ["configuration", "validation", "expression", "authentication", "authorization", "timeout", "communication", "runtime"]
+          },
+          "exit": {"type": "integer"},
+          "route": {"enum": ["retry", "step", "human"]},
+          "retry": {"type": ["string", "null"], "pattern": "^cause\\.[a-z][a-z0-9-]*$"},
+          "requires_retry_after": {"type": "boolean", "description": "真なら、結果の cause に retry_after があるときだけ打ち直す"}
+        },
+        "if": {"properties": {"route": {"const": "retry"}}},
+        "then": {"properties": {"retry": {"type": "string"}}},
+        "else": {"properties": {"retry": {"type": "null"}, "requires_retry_after": false}}
+      }
+    }
+  }
+}

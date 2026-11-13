@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf import cli
+from ndf.contracts import causes
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,7 +30,7 @@ def test_no_args_prints_usage(capsys):
 
 
 def test_unknown_subcommand_is_a_usage_error(capsys):
-    assert cli.main(["no-such-command"]) == cli.EXIT_UNREADABLE
+    assert cli.main(["no-such-command"]) == causes.exit_code("invalid")
     assert "no-such-command" in capsys.readouterr().err
 
 
@@ -45,10 +46,11 @@ def test_dispatches_to_module_main(monkeypatch):
 
 
 def test_broken_plugin_json_stops_with_config_broken(broken_root, capsys):
-    assert cli.main([]) == cli.EXIT_UNREADABLE
+    assert cli.main([]) == causes.exit_code("config_broken")
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "stopped"
-    assert report["cause"] == {"kind": "config_broken"}
+    assert report["cause"]["kind"] == "config_broken"
+    assert "plugin.json" in report["cause"]["detail"]
 
 
 def test_entrypoint_stops_when_plugin_json_is_unreadable(tmp_path):
