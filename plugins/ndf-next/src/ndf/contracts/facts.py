@@ -19,6 +19,9 @@ FACTS_DIR = "facts"
 SCHEMA_FILE = "fact.schema.json"
 SCHEMA = f"{FACTS_DIR}/{SCHEMA_FILE}"
 NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+# 列の ref の 2 つの形の頭（`limits.json#<接頭辞>` と `facts/<表>`）。limits.json は limits.DECLARATION と同じ
+LIMITS_REF = "limits.json#"
+TABLE_REF = f"{FACTS_DIR}/"
 
 
 class FactsError(contracts.ContractError):
@@ -135,6 +138,13 @@ def _table_ref_errors(name: str, col: str, other: str, values: list[tuple[str, A
     return [f"{name}:{rid} の {col} {v!r} が表 {other} に無い" for rid, v in values if v not in known]
 
 
+def _parse_ref(ref: str) -> tuple[str, str]:
+    """列の `ref` を種類（`LIMITS_REF` か `TABLE_REF`）と先（方針の接頭辞か表の名前）に分ける。"""
+    if ref.startswith(LIMITS_REF):
+        return LIMITS_REF, ref.split("#", 1)[1]
+    return TABLE_REF, ref.split("/", 1)[1]
+
+
 def ref_errors(name: str, policy_names: set[str]) -> list[str]:
     """列の `ref`（`limits.json#<接頭辞>` か `facts/<表>`）の先に値があるかを確かめる。"""
     t = table(name)
@@ -144,10 +154,11 @@ def ref_errors(name: str, policy_names: set[str]) -> list[str]:
         if not ref:
             continue
         values = [(r["id"], r[col]) for r in t.rows if col in r]
-        if ref.startswith("limits.json#"):
-            errs += _limits_ref_errors(name, col, ref.split("#", 1)[1], values, policy_names)
+        kind, target = _parse_ref(ref)
+        if kind == LIMITS_REF:
+            errs += _limits_ref_errors(name, col, target, values, policy_names)
         else:
-            errs += _table_ref_errors(name, col, ref.split("/", 1)[1], values)
+            errs += _table_ref_errors(name, col, target, values)
     return errs
 
 

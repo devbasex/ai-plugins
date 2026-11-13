@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.contracts import facts
+from ndf.contracts import facts, limits
 
 COLUMNS = {
     "flag": {"type": "boolean", "summary": "真偽"},
@@ -87,6 +87,10 @@ def test_broken_json_stops(contracts_copy, text):
     contracts_copy("facts/sample.json", text=text)
     with pytest.raises(facts.FactsError):
         facts.table("sample")
+
+
+def test_limits_ref_names_the_limits_declaration():
+    assert facts.LIMITS_REF == f"{limits.DECLARATION}#"
 
 
 def test_ref_errors_point_at_missing_targets(contracts_copy, sample_table):
