@@ -6914,7 +6914,7 @@
     {
       "term": "判定データ",
       "context": "ndf-workflow",
-      "meaning": "分岐の多い判定を置き換える「鍵 → 値か判定の関数」のデータと、それを引く 1 つの関数。用語集の「判定表」（モードを判定する順の表）とは別",
+      "meaning": "分岐の多い判定を置き換える「鍵 → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計の雛形の「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別",
       "pending_source": "issues/issue-1142-design-smells.md"
     },
     {
@@ -6948,7 +6948,7 @@
       "pending_source": "issues/issue-1142-design-scripted-flow.md"
     },
     {
-      "term": "種類の表",
+      "term": "止まった理由の表",
       "context": "ndf-workflow",
       "meaning": "止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`）",
       "pending_source": "issues/issue-1142-design-scripted-flow.md"

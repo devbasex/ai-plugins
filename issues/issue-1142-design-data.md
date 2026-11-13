@@ -22,7 +22,7 @@
 | STD1（JSON Schema の `enum`） | 外部の一次情報 | 値の集まりをデータとして宣言し、形を機械で確かめる標準の形がある |
 | PRD1（GitHub Linguist の `languages.yml`） | 外部の一次情報 | 言語の一覧という事実を 1 つのデータに置き、ID は生成で足す運用が広く使われている |
 
-要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) の「定数からデータへ（2026-11-13 追記）」と受け入れ条件「定数からデータへ」）。この文書は「どう作るか」だけを扱う。全体の設計は [issue-1142-design.md](issue-1142-design.md) 、移行の順序の全体は [issue-1142-design-migration.md](issue-1142-design-migration.md) 、決定 1〜25 は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。並行の設計のうち、工程とモードの表は #3092（[issue-3092-design.md](issue-3092-design.md) ）、設計文書の種類の表は #3144（[issue-3144-design-detail.md](issue-3144-design-detail.md) の「内部のデータと定数」）が持つ。
+要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) の「定数からデータへ（2026-11-13 追記）」と受け入れ条件「定数からデータへ」）。この文書は「どう作るか」だけを扱う。全体の設計は [issue-1142-design.md](issue-1142-design.md) 、移行の順序の全体は [issue-1142-design-migration.md](issue-1142-design-migration.md) 、決定 1〜25 は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。並行の設計のうち、工程とモードの表は #3092（[issue-3092-design.md](issue-3092-design.md) ）、設計文書の種類の契約は #3144（[issue-3144-design-detail.md](issue-3144-design-detail.md) の「内部のデータと定数」）が持つ。
 
 ## ドメインモデル
 
@@ -41,8 +41,8 @@
 | 事実の表 | 表の `owner` に書いた 1 つのコンテキスト（表ごとに 1 つ。ほかのコンテキストは読むだけ） | `contracts/facts/<名前>.json` | 行（`id` で決まる） | 列の値 |
 | 外部の表: 既存の契約 | 契約（このコンテキスト。値を移す移行ステップの PR が、読み手とそのテストを同じ PR で直す） | `contracts/limits.json`・`contracts/settings/`・`contracts/forms/` | 行・方針 | — |
 | 外部の表: 工程とモードの表 | #3092 の NDF の開発ワークフロー（工程の定義） | `contracts/workflow/` | 行・方針 | — |
-| 外部の表: 設計文書の種類の表 | #3144 の開発の工程（設計文書の種類） | `contracts/design-docs.json` | 種類の行 | — |
-| 外部の表: 止まった理由の種類の表 | #1142 のライブラリ（[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) の集約） | `contracts/causes.json` | 種類 | — |
+| 外部の表: 設計文書の種類の契約 | #3144 の開発の工程（設計文書の種類） | `contracts/design-docs.json` | 種類の行 | — |
+| 外部の表: 止まった理由の表 | #1142 のライブラリ（[issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) の集約） | `contracts/causes.json` | 種類 | — |
 | 重複の基準 | 移行ステップの PR（自分が直した行を消す）。定数を別のファイルへ移す PR は行を置き換える（I-DT4c） | `scripts/const-fact-baseline.json` | 基準の行（組の鍵で決まる） | 種類・事実・扱い |
 
 ### 不変条件
@@ -99,7 +99,7 @@
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | `jsonschema` | 4.26.0 | MIT | 2026-01-07 | 無し | 満たす。draft 2020-12 で表の形を検査できる。最初に使う DT1 が、手元の検査と配布先の両方で使えるようにする（決定 46）。#3092 の決定 3 が先に足していればそのまま使う | https://pypi.org/pypi/jsonschema/json （2026-11-13） |
+| LIB1 | `jsonschema` | 4.26.0 | MIT | 2026-01-07 | 無し | 満たす。draft 2020-12 で表の形を検査できる。最初に使う DT1 が、手元の検査と配布先の両方で使えるようにする（決定 46）。#3092 は決定 3 で足すとしたが、マージした実装（v10.27.61）は依存に入れていない | https://pypi.org/pypi/jsonschema/json （2026-11-13） |
 | LIB2 | `check-jsonschema` | 0.39.0 | PyPI の license 欄は空（確かめていない） | 2026-10-26 | 無し | 一部。スキーマに照らす CLI で、表の外部キーと定数との重複は見られない | https://pypi.org/pypi/check-jsonschema/json （2026-11-13） |
 | LIB3 | `pydantic` | 2.14.3 | MIT | 2026-11-05 | 無し | 満たさない。読み手の型は作れるが、hook の経路で外部パッケージを読まない（I-DT6・決定 20） | https://pypi.org/pypi/pydantic/json （2026-11-13） |
 | LIB4 | `pylint` の `duplicate-code`（R0801） | 4.1.3 | GPL-2.0-or-later | 2026-10-11 | 無し | 確かめられなかった（下）。名前からは似た行の検出で、定数の値の集合の一致を見るものではない | https://pypi.org/pypi/pylint/json （2026-11-13） |
@@ -271,7 +271,7 @@ flowchart TD
 
 | 移行ステップ | 中身 | 触るファイル | 後に置く課題 |
 | --- | --- | --- | --- |
-| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | 依存の宣言と固定（根とプラグインの両方。どのファイルとどのグループ名かは実装で決める。#3092 が先に足していれば触らない）、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
+| DT1 | 検査の土台: 核・規則・基準・読み手・表の形・`jsonschema` の依存 | 依存の宣言と固定（根とプラグインの両方。どのファイルとどのグループ名かは実装で決める。v10.27.61 の時点で `jsonschema` はどちらにも無い）、`scripts/contracts_lib/const_facts.py`、`scripts/check-ndf-contracts.py`、`scripts/const-fact-baseline.json`、`scripts/measure/const-facts.py`、`plugins/ndf/scripts/lib/facts.py`、`plugins/ndf/scripts/lib/facts.sh`、`plugins/ndf/contracts/facts/fact.schema.json`、`plugins/ndf/contracts/index.md`、`.github/workflows/script-structure.yml`、`docs/specifications/ndf-entrypoint-contracts.md`、`scripts/tests/test_const_facts.py`、`plugins/ndf/scripts/tests/test_facts.py` | #2996（構文木の 1 回の解析に乗る）。#2991 とは触るファイルが重ならない |
 | DT2 | ランタイム | `plugins/ndf/contracts/facts/runtimes.json`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/usage_capture.py`、`plugins/ndf/scripts/lib/models.py`、`plugins/ndf/scripts/lib/wait_notice.py`、`plugins/ndf/scripts/hook.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/training-optout.py`、`plugins/ndf/skills/external-ai/scripts/external-ai.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/participants.py`、`plugins/ndf/skills/pr-review/scripts/pr-review-steps.py` と、字の集まりを直すテスト | DT1 |
 | DT3 | 収束ループのフェーズ・指摘の重さ・テストの印 | `plugins/ndf/contracts/facts/loop-phases.json`、`plugins/ndf/contracts/facts/severities.json`、`plugins/ndf/scripts/lib/body_findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/findings.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/categories.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/ci.py`、`plugins/ndf/skills/cross-refactoring/scripts/assignee_launch.py`、`plugins/ndf/skills/cross-refactoring/scripts/safety_net.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/pr-review/scripts/pr_review_findings.py` | DT1 |
 | DT4 | 閾値（`limits.json` へ） | `plugins/ndf/contracts/limits.json`、`plugins/ndf/scripts/hook_lib/token_guard.py`、`plugins/ndf/scripts/issue-file.py`、`plugins/ndf/scripts/issue-items.py`、`plugins/ndf/scripts/hook_lib/wait_notify.py`、`plugins/ndf/scripts/relay_lib/version_dir.py`、`plugins/ndf/scripts/lib/run_owner.py`、`plugins/ndf/scripts/lib/post_queue.py`、`plugins/ndf/scripts/lib/finding_match.py`、`plugins/ndf/scripts/lib/container_reach.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py` | DT2（`hook_lib/wait_notify.py` が重なる） |
@@ -311,7 +311,7 @@ DT2・DT3・DT5 は触るファイルが重ならず、並列に流せる。DT4 
 
 ### 決定 46: 表の形をそろえて機械で確かめるため、新しい事実は `contracts/facts/<名前>.json` の 1 事実 1 ファイルにし、JSON Schema の draft 2020-12 で形を確かめる
 
-#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` は最初に使う移行ステップの DT1 が、手元の検査と配布先（プラグインの依存の導入の経路。#3092 の決定 3 と同じ置き場）の両方で使えるようにする。片方だけだと、DT1 の後に流す scripted-flow の子 6 が配布先で答えを確かめ直すときに、依存が無くて止まる。どのファイルとどのグループ名に足すかは実装で決める。#3092 が先に足していればそのまま使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
+#3092 と同じ draft と同じ `jsonschema` を使い、別の依存を増やさない。`jsonschema` は最初に使う移行ステップの DT1 が、手元の検査と配布先（プラグインの依存の導入の経路。#3092 の決定 3 と同じ置き場）の両方で使えるようにする。片方だけだと、DT1 の後に流す scripted-flow の子 6 が配布先で答えを確かめ直すときに、依存が無くて止まる。どのファイルとどのグループ名に足すかは実装で決める。#3092 は決定 3 で `jsonschema` を足すとしたが、マージした実装（PR #3171、v10.27.61）は依存に入れておらず、公式スキーマの検査も置いていない。そのため DT1 が足し、#3092 の決定 3 の検査を後から置くときもこの依存を使う。1 事実 1 ファイルにすると、移行ステップごとに触るファイルが分かれ、並列の PR が衝突しない。部分集合は列で表し（R5）、Linguist の `languages.yml` と同じく一覧は 1 つのデータにだけ書く。
 
 1 つの大きな JSON に全事実をまとめる案は、すべての移行ステップが同じファイルを触って並列に流せないため採らない。YAML は標準ライブラリで読めず hook の経路で使えないため採らない。
 

@@ -4,12 +4,12 @@
 
 - **今どうなっているか**: プランが止まった後の立て直し・待ちの知らせの扱い・承認の答えの後の行き先を、conductor と supervisor の AI が出力の文と手順書の表を読んで決めている。直近 30 日の会話の記録では、AI がプランの記録の文を読んだ回が 2,040 回、`--from` と `--resume` で再開点を自分で選んだ回が 983 回ある。2026-11-12 には CI の監視の「CI 以外の理由」を AI が読み、レーン lrel が手でやり直しを組んだ（#3153）
 - **誰に効くか**: 並列の計画とスプリントを流す利用者と、その conductor・オーガナイザー・supervisor
-- **変えると何が成り立つか**: 手順のスクリプトが止まった理由を閉じた語彙の種類で結果 JSON に返し、プランと進行表が種類の表から行き先（待って打ち直す・直す作業へ・判断の呼び出し・人へ）を機械で選ぶ。AI は、スクリプトが決められない中身（直し方・関係の有無・文書）のためだけに、スクリプトが決めた時点で、選択肢か JSON の形で呼ばれる
+- **変えると何が成り立つか**: 手順のスクリプトが止まった理由を閉じた語彙の種類で結果 JSON に返し、プランと進行表が止まった理由の表から行き先（待って打ち直す・直す作業へ・判断の呼び出し・人へ）を機械で選ぶ。AI は、スクリプトが決められない中身（直し方・関係の有無・文書）のためだけに、スクリプトが決めた時点で、選択肢か JSON の形で呼ばれる
 
 ## 適用範囲
 
 - **働く範囲**: NDF を使うすべてのリポジトリ。結果 JSON の契約・プランの雛形・進行表は NDF が配るため、利用先でも同じに働く
-- **プロジェクトごとに違うもの**: 待って打ち直す回数と間隔の上書きは `.ndf/supervise.json` の `causes.<種類>` で受ける（既定は種類の表）。種類の語彙と既定の行き先はプロジェクトで変えない
+- **プロジェクトごとに違うもの**: 待って打ち直す回数と間隔の上書きは `.ndf/supervise.json` の `causes.<種類>` で受ける（既定は止まった理由の表）。種類の語彙と既定の行き先はプロジェクトで変えない
 - **当たるモード**: 5 つすべて。プランで流す工程と、並列の計画のオーガナイザーの手順に当たる
 
 ## あるべき姿の根拠
@@ -95,16 +95,16 @@ python3 scripts/measure/ai-branching.py --ndf /work/ai-plugins/.ndf --since 2026
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| ライブラリ | 止まった理由の種類・種類の表・結果 JSON の `cause` と `routes`（答えごとの行き先） |
+| ライブラリ | 止まった理由の種類・止まった理由の表・結果 JSON の `cause` と `routes`（答えごとの行き先） |
 | プランの実行 | 行き先・再試行の方針・判断の呼び出し・ステップの `on_cause` |
 | 進行表（#3092 の NDF の開発ワークフロー） | 工程の失敗の事象に載る種類・工程の行き先（`metadata.ndf.on_cause`） |
 
-**コンテキストマップ。** 種類の表と結果 JSON の 2 つの項目は、ライブラリが持つ共有カーネルである。下流は表の語彙を写さずに読み、形を変えるときは上流の PR が下流の読み手とそのテストを同じ PR で直す（全体の設計のコンテキストマップと同じ規則）。
+**コンテキストマップ。** 止まった理由の表と結果 JSON の 2 つの項目は、ライブラリが持つ共有カーネルである。下流は表の語彙を写さずに読み、形を変えるときは上流の PR が下流の読み手とそのテストを同じ PR で直す（全体の設計のコンテキストマップと同じ規則）。
 
 | 上流（契約を決める） | 下流（従う） | 関係 | 契約 |
 | --- | --- | --- | --- |
-| ライブラリ | プランの実行 | 共有カーネル / 順応者 | 種類の表の語彙・既定の行き先・再試行の方針と、結果 JSON の `cause`・`routes`（`lib/README.md`） |
-| ライブラリ | 進行表 | 共有カーネル / 順応者 | 同じ種類の表。工程の失敗の事象（#3092 の E8）へ `cause` を写す |
+| ライブラリ | プランの実行 | 共有カーネル / 順応者 | 止まった理由の表の語彙・既定の行き先・再試行の方針と、結果 JSON の `cause`・`routes`（`lib/README.md`） |
+| ライブラリ | 進行表 | 共有カーネル / 順応者 | 同じ止まった理由の表。工程の失敗の事象（#3092 の E8）へ `cause` を写す |
 | ライブラリ | 手順のスクリプトを持つほかのコンテキスト（リリース・worktree・収束ループ・文書の検査ほか） | 共有カーネル / 順応者 | `cause.kind` に表の値だけを書く（IS1） |
 | プランの実行 | 進行表 | 公開ホストサービス / 順応者 | プランの結果に写した止めたステップの `cause`（#3092 の決定 10 のアクティビティの出力の規約） |
 | 進行表 | Factory（`ndf-factory`） | 公開された言語 | 工程の失敗の事象に載る種類と、その標準の誤りの型（IS10） |
@@ -115,11 +115,11 @@ conductor はコンテキストではなく、`progress.py next` と承認ゲー
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 止まった理由の種類の表 | ライブラリ（結果 JSON の契約を変える PR。下流の読み手とそのテストを同じ PR で直す）。実行の中では読むだけ | 種類の表（`contracts/causes.json`） | 種類 | 既定の行き先・再試行の方針・標準の誤りの型 |
+| 止まった理由の表 | ライブラリ（結果 JSON の契約を変える PR。下流の読み手とそのテストを同じ PR で直す）。実行の中では読むだけ | 止まった理由の表（`contracts/causes.json`） | 種類 | 既定の行き先・再試行の方針・標準の誤りの型 |
 | プランの実行（既存） | `supervise_lib` の実行の核 | プランの実行 | ステップの試行 | 止まった理由・行き先の表（`on_cause`）・再試行の回数 |
 | 判断の呼び出し | 判断の呼び出しの関数（`supervise_lib` の judge を置き換えるもの）。プランのステップと進行表のアクティビティは、問いと選択肢を渡して答えを受けるだけ | 判断の呼び出し | 試行（最大 2 回） | 問い・選択肢・答えのスキーマ・答え |
 
-種類の表は、[issue-1142-design-data.md](issue-1142-design-data.md) の集約では外部の表のうちの「止まった理由の種類の表」に当たる。2 つ以上のコンテキストが読む事実を契約の表に置く規則（data の決定 45）に従うが、`contracts/facts/` の事実の表ではない（行が意味だけでなく行き先と再試行の方針を持ち、形を結果 JSON の契約と一緒に変えるため）。
+止まった理由の表は、[issue-1142-design-data.md](issue-1142-design-data.md) の集約では外部の表の 1 つに当たる。名前は #3144 の「設計文書の種類の契約」（`contracts/design-docs.json`）と紛れないよう、「種類の表」と呼ばない。2 つ以上のコンテキストが読む事実を契約の表に置く規則（data の決定 45）に従うが、`contracts/facts/` の事実の表ではない（行が意味だけでなく行き先と再試行の方針を持ち、形を結果 JSON の契約と一緒に変えるため）。
 
 ### 不変条件
 
@@ -127,19 +127,19 @@ conductor はコンテキストではなく、`progress.py next` と承認ゲー
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| IS1 | 止まった理由の種類の表 | 結果 JSON の `cause.kind` は種類の表にある値だけである | `emit` が形の誤りとして出さず 2 で終える |
+| IS1 | 止まった理由の表 | 結果 JSON の `cause.kind` は止まった理由の表にある値だけである | `emit` が形の誤りとして出さず 2 で終える |
 | IS2 | 結果 JSON | `cause` を置けるのは `status` が `stopped` か、`gate` で終了コードが 20〜29（判断待ち）のときだけである | 同上 |
-| IS3 | プランの実行 | ステップの `on_cause` の鍵は種類の表にあり、行き先はプランのステップの id・`end`・`stop`・`retry` のどれかである | プランの検査（`on_exit_error` と同じ場所）が実行の前に断る |
+| IS3 | プランの実行 | ステップの `on_cause` の鍵は止まった理由の表にあり、行き先はプランのステップの id・`end`・`stop`・`retry` のどれかである | プランの検査（`on_exit_error` と同じ場所）が実行の前に断る |
 | IS4 | プランの実行 | 失敗したステップの行き先は、`on_cause` → `on_exit` → 種類の既定の行き先 → `on_fail` → 止まる、の順で最初に当たったもので決まる。種類の既定の行き先は、打ち直し（上限の内）と人へをここで決め、既定がステップ（直すステップ・取り込みのステップ・判断）の種類は次の `on_fail` へ進む。既定が人への種類（`unknown` を含む）は `on_fail` に渡さない | 表を引く 1 つの関数だけが行き先を返し、ほかに分岐を書かない |
-| IS5a | プランの実行 | 打ち直しの回数は、種類ごとの上限（種類の表か、ステップの `retry` の上書き）を超えない | 上限に当たった試行を記録し、それ以上は打ち直さない |
+| IS5a | プランの実行 | 打ち直しの回数は、種類ごとの上限（止まった理由の表か、ステップの `retry` の上書き）を超えない | 上限に当たった試行を記録し、それ以上は打ち直さない |
 | IS5b | プランの実行 | 上限に当たった後の行き先は、IS4 の順から打ち直しを除いた残りで決まる | IS4 と同じ関数が返す |
 | IS6a | 判断の呼び出し | 選択肢のモード（`choices` を持つ）では、答えは既定の答えの形（`decision`・`reason`・`basis`）に合い、`decision` が選択肢の中にある | 1 回だけ打ち直し、なお合わなければ `cause.kind: needs_human` で止まる。答えの文から近い選択肢を拾わない |
 | IS6b | 判断の呼び出し | 任意の JSON のモード（`schema` を持ち、`choices` を持たない）では、答えは指定のスキーマだけに合えばよい。`decision` の有無と所属は確かめない | IS6a と同じ |
 | IS7 | プランの実行・進行表 | 行き先を選ぶ関数は `summary`・`detail`・出力の文を読まない | 構造の検査（行き先の関数の引数に文が無い）とテストで落とす |
-| IS8 | 止まった理由の種類の表 | 種類を決められない止まりは `unknown` で、その既定の行き先は人へ戻すことである | AI に種類を推させない（IS4 の順で `on_fail` より先に人へ戻す） |
+| IS8 | 止まった理由の表 | 種類を決められない止まりは `unknown` で、その既定の行き先は人へ戻すことである | AI に種類を推させない（IS4 の順で `on_fail` より先に人へ戻す） |
 | IS9 | 結果 JSON | 承認ゲート（10〜19）の結果は、答えごとの次のコマンドを `routes` に持つ | `emit` が形の誤りとして出さない（`presentation_path` と同じ扱い）。必須の検査は、承認ゲートを返すエントリポイントがすべて `routes` を返す子 13 で有効にする。それまでの `emit` は `routes` を置いたときの形だけを確かめる |
-| IS10 | 止まった理由の種類の表 | 各種類は Serverless Workflow の標準の誤りの型（STD1）を 1 つ持つ | 契約の検査が落とす |
-| IS11 | 止まった理由の種類の表 | 「終了コードからの既定」の列は、1 つの終了コードを 1 つの種類にだけ割り当てる | 同上 |
+| IS10 | 止まった理由の表 | 各種類は Serverless Workflow の標準の誤りの型（STD1）を 1 つ持つ | 契約の検査が落とす |
+| IS11 | 止まった理由の表 | 「終了コードからの既定」の列は、1 つの終了コードを 1 つの種類にだけ割り当てる | 同上 |
 
 既定が人への種類（`unknown` を含む）を `on_fail` より先に人へ戻すのは、`on_fail` が種類を問わない受け皿で、上限に当たった止まりや `cause` を返さないスクリプトの止まりまで直すステップや判断の呼び出しへ送ってしまうためである（決定 55）。`on_cause` と `on_exit` を先に引くのは、プランの書き手がそのスクリプトの終了コードの意味を知って書いた表だからである（今の雛形にも `on_exit` の `"1"` がある）。
 
@@ -160,7 +160,7 @@ conductor はコンテキストではなく、`progress.py next` と承認ゲー
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 止まった理由の種類 | 手順のスクリプトとプランが止まった理由を、閉じた語彙の 1 語で表したもの。結果 JSON の `cause.kind` に入る。人の読む文（`cause.detail`）とは別で、行き先はこれだけで決まる | 追加 |
-| 種類の表 | 止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`） | 追加 |
+| 止まった理由の表 | 止まった理由の種類ごとに、意味・既定の行き先・再試行の方針・標準の誤りの型を持つデータ（`plugins/ndf/contracts/causes.json`） | 追加 |
 | 行き先 | 止まったステップや工程の次に進む先。プランのステップ・`retry`（待って打ち直す）・判断の呼び出し・人へのどれか | 追加 |
 | 判断の呼び出し | スクリプトが決めた時点で、選択肢か JSON のスキーマを渡して AI を 1 回呼び、答えをスキーマで確かめる操作。今の `type: judge` のステップを置き換える | 追加 |
 | 答えごとの行き先 | 承認ゲートと人への問いの結果に添える、答えの値から次に打つコマンドへの表（結果 JSON の `routes`） | 追加 |
@@ -177,7 +177,7 @@ conductor はコンテキストではなく、`progress.py next` と承認ゲー
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | Serverless Workflow DSL 1.0.3 の `Error`・Standard Error Types・`try`/`catch` | 誤りは `type`（URI）・`status`（整数）を必須とし、`title`・`detail`・`instance` を任意に持つ。標準の型は configuration・validation・expression・authentication・authorization・timeout・communication・runtime の 8 つ。`catch` は `errors`（型の絞り込み）・`when`・`retry`・`do` を持つ | 種類の表の各行に標準の型を 1 つ持たせ（IS10）、`cause` を `kind`・`detail`・`instance` の形にする（決定 54） | `gh api repos/serverlessworkflow/specification/contents/dsl-reference.md?ref=v1.0.3` の「Error」「Standard Error Types」「Catch」（2026-11-13） |
+| STD1 | Serverless Workflow DSL 1.0.3 の `Error`・Standard Error Types・`try`/`catch` | 誤りは `type`（URI）・`status`（整数）を必須とし、`title`・`detail`・`instance` を任意に持つ。標準の型は configuration・validation・expression・authentication・authorization・timeout・communication・runtime の 8 つ。`catch` は `errors`（型の絞り込み）・`when`・`retry`・`do` を持つ | 止まった理由の表の各行に標準の型を 1 つ持たせ（IS10）、`cause` を `kind`・`detail`・`instance` の形にする（決定 54） | `gh api repos/serverlessworkflow/specification/contents/dsl-reference.md?ref=v1.0.3` の「Error」「Standard Error Types」「Catch」（2026-11-13） |
 | STD2 | RFC 9457 Problem Details for HTTP APIs | RFC 7807 を廃した後継。`type`・`status`・`title`・`detail`・`instance` を持ち、知らない拡張の項目は受け手が無視する | 任意の項目を足しても既存の読み手が壊れない形にする（決定 54）。STD1 はこの形を引く | https://www.rfc-editor.org/rfc/rfc9457.html （2026-11-13） |
 
 ### 主要な製品
@@ -222,21 +222,21 @@ conductor はコンテキストではなく、`progress.py next` と承認ゲー
 
 | 要素 | 責務 |
 | --- | --- |
-| 種類の表（`plugins/ndf/contracts/causes.json`。新設） | 種類ごとの意味・既定の行き先・再試行の方針（回数・間隔・倍率・上限）・標準の誤りの型。データだけを持つ |
+| 止まった理由の表（`plugins/ndf/contracts/causes.json`。新設） | 種類ごとの意味・既定の行き先・再試行の方針（回数・間隔・倍率・上限）・標準の誤りの型。データだけを持つ |
 | 結果 JSON の契約（`lib/step_result.py`・`lib/step-result.sh`・`lib/README.md`） | 任意の項目 `cause` と `routes` の形を確かめる（IS1・IS2・IS9）。`emit` と `sr_emit` が受ける |
-| 種類の読み取り（`lib/causes.py`。新設） | 種類の表を読み、結果 JSON から種類を取り出す（`cause` が無ければ終了コードから既定の種類を引く。決定 55）。純粋な処理 |
+| 種類の読み取り（`lib/causes.py`。新設） | 止まった理由の表を読み、結果 JSON から種類を取り出す（`cause` が無ければ終了コードから既定の種類を引く。決定 55）。純粋な処理 |
 | 行き先の関数（`supervise_lib/routes.py`。新設） | ステップの定義・種類・試行の回数から行き先を返す 1 つの関数（IS4・IS5a・IS5b・IS7）。文を受けない |
 | プランの実行の核（`supervise_lib/engine.py`） | 失敗したステップで行き先の関数を引き、`retry` なら耐久の待ちの後に同じステップを打つ |
 | 耐久の包み（`lib/durable.py`） | `DBOS.sleep` を包む `sleep` を足す（I16 のとおり DBOS を import するのはここだけ） |
 | 判断の呼び出し（`supervise_lib/steps.py` の judge の置き換え・`supervise_lib/claude.py`） | 問い・選択肢・スキーマを `claude -p --json-schema` で渡し、答えを確かめる（IS6a・IS6b） |
 | 手順のスクリプト（`ci-watch.py`・`merged-steps.py` ほか子の課題が挙げるもの） | 止まるときに種類を返す |
-| 進行表（#3092 の `lib/progress_model.py`・`lib/progress_run.py`） | 工程の失敗の事象に `cause` を写し、種類の表で工程の行き先を選ぶ |
+| 進行表（#3092 の `lib/progress_model.py`・`lib/progress_run.py`） | 工程の失敗の事象に `cause` を写し、止まった理由の表で工程の行き先を選ぶ |
 | 計測（`scripts/measure/ai-branching.py`） | 洗い出しの回数を数える（作り直しの前後で同じコマンド） |
 
 ```mermaid
 graph LR
     S[手順のスクリプト] -->|結果 JSON の cause| E[プランの実行の核]
-    T[種類の表 causes.json] --> C[種類の読み取り]
+    T[止まった理由の表 causes.json] --> C[種類の読み取り]
     C --> R[行き先の関数]
     E --> R
     R -->|retry| D[耐久の包み sleep]
@@ -245,7 +245,7 @@ graph LR
     J -->|答えの decision| E
     R -->|人へ| P[プランの結果 cause]
     P --> W[進行表のワークフロー]
-    W -->|種類の表で行き先| N[progress.py next の結果 next・routes]
+    W -->|止まった理由の表で行き先| N[progress.py next の結果 next・routes]
     N --> K[conductor はコマンドを打つだけ]
 ```
 
@@ -258,7 +258,7 @@ graph LR
 
 | 項目 | 必須 | 形 | 意味 |
 | --- | --- | --- | --- |
-| `cause` | いいえ | オブジェクト。`kind`（種類の表の値）・`detail`（空でない文字列）、任意で `instance`（落ちた対象。チェックの名前・ステップの id・ファイル）・`retry_after`（打ち直してよい時刻までの秒。利用上限の解除など） | 止まった理由の種類。`stopped`、または `gate` の 20〜29 のときだけ置ける（IS2） |
+| `cause` | いいえ | オブジェクト。`kind`（止まった理由の表の値）・`detail`（空でない文字列）、任意で `instance`（落ちた対象。チェックの名前・ステップの id・ファイル）・`retry_after`（打ち直してよい時刻までの秒。利用上限の解除など） | 止まった理由の種類。`stopped`、または `gate` の 20〜29 のときだけ置ける（IS2） |
 | `routes` | いいえ | オブジェクト。鍵は答えの値（`approved`・`rejected` か、問いの選択肢）、値は次に打つコマンドの文字列か `null`（打たない） | 答えごとの行き先。承認ゲート（10〜19）では必ず置く（IS9）。人への問い（`cause.kind` の既定が人へ）にも置ける |
 
 例（`ci-watch.py peek --after-merge` が、分割ジョブの失敗を読んだとき。終了コード 1）:
@@ -270,7 +270,7 @@ graph LR
  "cause": {"kind": "test_failed", "detail": "Python tests / pytest (0/2) が failure", "instance": "Python tests / pytest (0/2)"}}
 ```
 
-### 種類の表（`contracts/causes.json`）
+### 止まった理由の表（`contracts/causes.json`）
 
 | 種類 | 意味 | 標準の誤りの型（STD1） | 既定の行き先 | 再試行（回数・最初の間隔・倍率・上限） | 終了コードからの既定（`cause` が無いとき） |
 | --- | --- | --- | --- | --- | --- |
@@ -299,7 +299,7 @@ graph LR
 | 鍵 | 形 | 意味 |
 | --- | --- | --- |
 | `on_cause` | `{"<種類>": "<ステップの id>" \| "end" \| "stop" \| "retry"}` | 種類ごとの行き先。IS4 の順で最初に引く |
-| `retry` | `{"<種類>": {"max_attempts": 数, "interval": 秒, "backoff": 倍率, "max_interval": 秒}}` | 種類の表の再試行を、このステップだけ上書きする |
+| `retry` | `{"<種類>": {"max_attempts": 数, "interval": 秒, "backoff": 倍率, "max_interval": 秒}}` | 止まった理由の表の再試行を、このステップだけ上書きする |
 
 ### 判断の呼び出しの形（`type: judge` を置き換える）
 
@@ -319,7 +319,7 @@ graph LR
 | --- | --- |
 | プラン → アクティビティの出力 | プランの結果（done の項目）に、止めたステップの `cause` をそのまま写す。アクティビティの出力の規約（#3092 の決定 10。統一 JSON レポートを包む形）は `cause` を任意で持つ |
 | アクティビティ → 工程の失敗の事象 | 進行表のワークフローは `failed` の事象（#3092 の E8）に `cause` を載せる |
-| 工程の行き先 | `progress_model` の純粋な関数が、種類の表の既定の行き先と工程の定義の `metadata.ndf.on_cause`（#3092 の `metadata.ndf` の語彙へ 1 つ足す）から選ぶ。打ち直しと判断は `progress.py next` の中で済ませ、人へだけを `stopped` で返す |
+| 工程の行き先 | `progress_model` の純粋な関数が、止まった理由の表の既定の行き先と工程の定義の `metadata.ndf.on_cause`（#3092 の `metadata.ndf` の語彙へ 1 つ足す）から選ぶ。打ち直しと判断は `progress.py next` の中で済ませ、人へだけを `stopped` で返す |
 | conductor へ | `progress.py next` の結果の `cause` と `routes`（例: `{"fixed": "progress.py retry <ID> <工程> --reason <理由>", "abandon": "progress.py cancel <ID> --reason <理由>"}`）。conductor は `routes` の値を打つだけで、`summary` から行き先を決めない |
 
 ## 処理の流れ
@@ -349,7 +349,7 @@ sequenceDiagram
     else どれにも当たらない
         R-->>E: 止まる（cause を結果へ）
         E-->>W: プランの結果と cause
-        W->>W: 種類の表と工程の on_cause で行き先を選ぶ
+        W->>W: 止まった理由の表と工程の on_cause で行き先を選ぶ
         W-->>C: stopped・cause・routes
         C->>C: 人へ伝え、答えに当たる routes の値を打つ
     end
@@ -373,7 +373,7 @@ sequenceDiagram
 ### 決定 55: 既存の読み手と終了コードの契約を壊さないため、終了コードは変えず、種類を終了コードと別に持ち、`cause` の無い結果は終了コードから既定の種類を引く
 
 終了コードは「読めない（2）」「前提が無い（3）」のように意味が広く、同じ値がスクリプトによって別の事情を表す（`ci-watch.py` の 2 は改修の上限、3 は CI 以外の理由）。種類を終了コードへ詰めると、範囲の契約（10〜19・20〜29）と衝突し、既存の `on_exit` の表がすべて読み替えになる。
-そのため、終了コードは今のまま成否と大きな区分だけを表し、細かな理由は `cause.kind` が持つ。`cause` を返さないスクリプトは、種類の表の「終了コードからの既定」の列で種類を引く（1 は `unknown`）。こうすれば子の課題がスクリプトを 1 本ずつ移しても、移していないスクリプトの止まりは人へ戻るだけで、黙って誤った行き先へ進まない。
+そのため、終了コードは今のまま成否と大きな区分だけを表し、細かな理由は `cause.kind` が持つ。`cause` を返さないスクリプトは、止まった理由の表の「終了コードからの既定」の列で種類を引く（1 は `unknown`）。こうすれば子の課題がスクリプトを 1 本ずつ移しても、移していないスクリプトの止まりは人へ戻るだけで、黙って誤った行き先へ進まない。
 
 終了コードを種類ごとに足す形（例: テストの失敗を 7 にする）は、80 余りのエントリポイントの契約の `exit` と呼ぶ側の `on_exit` を一度に直すことになり、採らない。
 
@@ -396,7 +396,7 @@ PRD1 の `Retry` → `Catch` のように、当てる順を決めた表にすれ
 基盤の待ちの文を読んだ回は 408 回、`gh run rerun` の手打ちは 27 回ある（R09）。いずれも、待ってから同じステップを打ち直せば済む。PRD2 と同じく、待てば解ける種類だけに打ち直しを持たせ、ほかの種類は打ち直さない。
 待ちは DBOS のステップの再試行ではなく、ワークフローの中の `DBOS.sleep`（LIB1）で行う。プランのステップは 1 回の試行ごとに記録（`NN-<ステップ>.out`）を残すため、再試行をステップの中に隠すと試行の記録が 1 つにまとまってしまう。`DBOS.sleep` は `lib/durable.py` の包みを通して呼ぶ（#1142 の I16）。上限を超えたら打ち直しを外して次の順へ進む（IS5）。
 
-DBOS のステップの `retries_allowed` に任せる形は、試行ごとの記録と `should_retry` の判定を NDF の種類の表と二重に持つため採らない。
+DBOS のステップの `retries_allowed` に任せる形は、試行ごとの記録と `should_retry` の判定を NDF の止まった理由の表と二重に持つため採らない。
 
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / PRD1 / PRD2
@@ -406,7 +406,7 @@ DBOS のステップの `retries_allowed` に任せる形は、試行ごとの�
 ### 決定 58: 工程の粒度とその中の行き先を食い違わせないため、プランの止まりの種類を #3092 の工程の失敗の事象へ写し、行き先を進行表の純粋な関数が選ぶ
 
 #3092 は、次にどの工程を流すかを進行表に寄せ、工程が失敗したら `progress.py next` が `stopped` で conductor へ返す（#3092 の決定 6・7）。そのとき conductor が理由の文を読むと、この主題の問題が工程の境で残る。
-そのため、プランの結果の `cause` をアクティビティの出力と `failed` の事象へそのまま写し、`progress_model` の純粋な関数が種類の表と工程の定義の `metadata.ndf.on_cause` から行き先を選ぶ（#3092 の決定 20 と同じく DBOS を import しない）。打ち直しと判断は `progress.py next` の中で済ませ、conductor へ返すのは人へ戻す止まりだけで、そのとき `routes` に打つコマンドを載せる。#3092 の `retry` は失敗の行だけに当たるため（#3092 の決定 6）、再開点を conductor が選ぶ余地は残らない（R03 の 983 回）。
+そのため、プランの結果の `cause` をアクティビティの出力と `failed` の事象へそのまま写し、`progress_model` の純粋な関数が止まった理由の表と工程の定義の `metadata.ndf.on_cause` から行き先を選ぶ（#3092 の決定 20 と同じく DBOS を import しない）。打ち直しと判断は `progress.py next` の中で済ませ、conductor へ返すのは人へ戻す止まりだけで、そのとき `routes` に打つコマンドを載せる。#3092 の `retry` は失敗の行だけに当たるため（#3092 の決定 6）、再開点を conductor が選ぶ余地は残らない（R03 の 983 回）。
 
 止まりの扱いをプランの中だけで閉じ、工程へは成否だけを渡す形は、プランで決められない止まり（`precondition`・`refused`）の行き先を conductor が文から決めることになり採らない。
 
@@ -474,13 +474,13 @@ AI の呼び出しの回数の多さで判定する形は、回数が少なく�
 
 | 子 | 題 | 範囲（洗い出しの行） | 受け入れ条件の要点 | 触るファイル | 先に要るもの |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 結果 JSON に止まった理由の種類と答えごとの行き先を足し、種類の表を契約に置く | R01・R13 の契約 | `cause` の形の誤りと、置いたときの `routes` の形の誤りを `emit` と `sr_emit` が出さない（IS1・IS2）。種類の表の各行が標準の誤りの型を持ち、終了コードからの既定が重ならない（IS10・IS11）。`cause` の無い結果で終了コードから既定の種類が引ける | `plugins/ndf/contracts/causes.json`（新設）、`plugins/ndf/scripts/lib/causes.py`（新設）、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/lib/README.md`、`scripts/check-ndf-contracts.py`、`plugins/ndf/scripts/tests/test_causes.py`（新設） | — |
+| 1 | 結果 JSON に止まった理由の種類と答えごとの行き先を足し、止まった理由の表を契約に置く | R01・R13 の契約 | `cause` の形の誤りと、置いたときの `routes` の形の誤りを `emit` と `sr_emit` が出さない（IS1・IS2）。止まった理由の表の各行が標準の誤りの型を持ち、終了コードからの既定が重ならない（IS10・IS11）。`cause` の無い結果で終了コードから既定の種類が引ける | `plugins/ndf/contracts/causes.json`（新設）、`plugins/ndf/scripts/lib/causes.py`（新設）、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/lib/README.md`、`scripts/check-ndf-contracts.py`、`plugins/ndf/scripts/tests/test_causes.py`（新設） | — |
 | 2 | プランの行き先を止まった理由の種類で選び、待てば解ける止まりを打ち直す | R03・R09・R10 | 行き先の関数が IS4 の順で引き、文を受けない（IS7）。`infra_wait` と `ci_pending` が上限の内で待って打ち直され、上限の後は次の順へ進む（IS5a・IS5b）。`on_cause` の誤りを実行の前に断る（IS3） | `plugins/ndf/scripts/supervise_lib/routes.py`（新設）、`plugins/ndf/scripts/supervise_lib/engine.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/limits.py`、`plugins/ndf/scripts/lib/durable.py`、`plugins/ndf/scripts/tests/test_routes.py`（新設） | 1・#2963・#2990・#2993 |
 | 3（#3153。既存） | CI の監視が分割ジョブの失敗とまとめのチェックの未完了を「CI 以外の理由」と読み違える | R19 | #3153 の直し方 1〜3。直し方 4（種類で返す）は子 4 が引き取る | `plugins/ndf/scripts/lib/ci_watch.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/tests/test_ci_watch.py` | — |
 | 4 | マージと CI の監視が落ちたチェックの種類を返し、雛形が種類で直すステップへ進む | R06・R08・R19 の直し方 4 | `merge-when-green` の 1 が `test_failed`・`check_failed`・`not_ci` に分かれる。`ci-watch.py` が `test_failed`・`ci_pending` を返す。すべての雛形の `merge` が `base_conflict` で取り込みへ進む。supervisor の定義に CI を手で読む手順が残らない | `plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/lib/ci_watch.py`、`plugins/ndf/scripts/ci-watch.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/agents/supervisor.md`、`plugins/ndf/scripts/tests/test_merged_probe.py` | 1・2・3 |
 | 5 | 設計のプランの最後の judge を外し、レビューの結果で設計承認ゲートへ渡す | R17 | `review` が収束し `glossary-recheck` が通れば Claude を起動せずに承認ゲートへ渡る。用語チェックの当たりは承認資料に載る | `plugins/ndf/scripts/supervise_lib/design_steps.py`、`plugins/ndf/scripts/tests/test_design_steps.py`（新設） | 1・2 |
 | 6 | 判断の呼び出しの答えを選択肢か JSON のスキーマで縛る | R20（と、できない R14・R21 の呼ぶ形） | 選択肢の外とスキーマに合わない答えで 1 回打ち直し、なお合わなければ `needs_human` で止まる（IS6a・IS6b）。入力に前のステップの `cause` が構造のまま渡る。遅れの見張りと worker の止まりの後の判断も同じ形で呼ぶ | `plugins/ndf/scripts/supervise_lib/steps.py`、`plugins/ndf/scripts/supervise_lib/claude.py`、`plugins/ndf/scripts/supervise_lib/slow.py`、`plugins/ndf/scripts/supervise_lib/verify_steps.py`、`plugins/ndf/scripts/tests/test_judge_call.py`（新設） | 1・2・4・#2993・data の DT1 |
-| 7 | プランの wait が止まった理由の種類と次のコマンドを返す | R07・R01 | `supervise.py wait` の結果の `next` が種類の表から決まり、`attention` の行を種類つきで返す。`waiting.md` の「終わり方」の表が `next` を打つ 1 行になる | `plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/scripts/tests/test_queue_waits.py` | 1・2・#2993 |
+| 7 | プランの wait が止まった理由の種類と次のコマンドを返す | R07・R01 | `supervise.py wait` の結果の `next` が止まった理由の表から決まり、`attention` の行を種類つきで返す。`waiting.md` の「終わり方」の表が `next` を打つ 1 行になる | `plugins/ndf/scripts/supervise_lib/queue.py`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/scripts/tests/test_queue_waits.py` | 1・2・#2993 |
 | 8 | 進行表が工程の失敗の種類から行き先を選び、conductor へ `routes` だけを返す | R03・R04・R24 | `failed` の事象に `cause` が載り、打ち直しと判断は `progress.py next` の中で済む。conductor へ返るのは人へ戻す止まりだけで、`routes` を持つ。`assess` の終了コードの分岐が定義の条件になる | `plugins/ndf/scripts/lib/progress_model.py`（#3092 が新設）、`plugins/ndf/scripts/lib/progress_run.py`（#3092 が新設）、`plugins/ndf/contracts/workflow/schemas/report.schema.json`（#3092 が新設）、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/scripts/tests/test_progress_model.py`（#3092 が新設） | 1・2・#3092 |
 | 9 | 並列の計画の待ちの結果の行き先をスクリプトが選ぶ | R05・R16・R22・R25 | `action: error` で耐久ワークフローを起こし直す。`mvv.eligible` の依頼は `answer` の中で判定を打つ。中身が空・版数が出し済みのリリースは問う前に差し戻しの候補として返る。`parallel.md` の手順 3 の表が `next` を打つ 1 行になる。`parallel.py` の承認ゲート（10〜19）の結果が `routes` を持つ | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_cli.py`、`plugins/ndf/scripts/lib/parallel_status.py`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/scripts/tests/test_parallel_routes.py`（新設） | 1・#2992 |
 | 10 | 手順 0 の 3 つの確かめを 1 回の結果 JSON にまとめる | R15 | 1 つのエントリポイントが `worktree-setup.sh check`・`project-decl.py check`・`project-mvv.py check` を打ち、`next` に進む先を返す。`SKILL.md` の終了コードの表が消える | `plugins/ndf/scripts/preflight.py`（新設）、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__preflight.py.json`（新設）、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/scripts/tests/test_preflight.py`（新設） | 1 |
@@ -505,7 +505,7 @@ AI の呼び出しの回数の多さで判定する形は、回数が少なく�
 | IS5a・IS5b・決定 57 | `infra_wait` が上限の回数まで打ち直され、上限の後は `on_fail` か止まりへ進む。待ちの途中で落としても、続きの待ちから再開する | 上限を外す・待ちを前景の `time.sleep` にする |
 | IS4・IS8・決定 55 | `cause` の無い終了コード 1 の結果が `unknown` になり、`on_fail` を持つステップでも人へ戻る。既定が人への種類（例: `fix_limit`）も `on_fail` を持つステップで人へ戻る | 既定を打ち直しや `on_fail` にする・既定が人への判定を `on_fail` の後へ置く |
 | IS9・決定 61 | 子 13 の後、承認ゲートの結果に `routes` が無いと `emit` が出さない。`routes` の値が打てるコマンドである。子 1 だけの版では、`routes` の無い既存の承認ゲートの結果がそのまま出る | `routes` を任意にする・子 1 で必須にする |
-| IS10 | 種類の表の各行が STD1 の 8 つの型のどれかを持つことを契約の検査が確かめる | 型の列を空にする |
+| IS10 | 止まった理由の表の各行が STD1 の 8 つの型のどれかを持つことを契約の検査が確かめる | 型の列を空にする |
 | IS11 | 終了コードからの既定に同じ終了コードを 2 つの種類で持つ表を、契約の検査が落とす | 重なりの照合を外す |
 | 決定 58 | プランの `cause` が `failed` の事象に写り、`progress.py next` が打ち直しの種類を conductor へ返さずに済ませる | 事象に `cause` を写さない |
 | #3153 | 分割ジョブの失敗とまとめのチェックの未完了で、`ci-peek-merge` が `ci-fix` へ進む | 名前の完全一致に戻す |
@@ -521,4 +521,4 @@ AI の呼び出しの回数の多さで判定する形は、回数が少なく�
 | `claude -p --json-schema` の振る舞い | `--help` に項目があることだけを確かめた。ラッパー（`relay.py`）の下と、`supervise_lib/claude.py` の起動の形で答えが縛られるかは、子 6 の実装で 1 回打って確かめる。縛られなくても `jsonschema` の確かめ直し（決定 59）で IS6a・IS6b は守れる |
 | 種類の分布 | 今の止まりのうち、終了コードから既定の種類を引くと `unknown` になる割合は分からない（今の記録に種類が無い）。子 1・2 のリリースの後に同じスクリプトで数え、`unknown` が多い手順のスクリプトから子 4 以降で種類を返させる |
 | 会話の数の重なり | 会話の数は NDF を開発した会話を含む上限である。どれだけが開発の会話かは分けていない。作り直しの後も同じ規則で数えるため、前後の比較には使える |
-| 待ちの上限の値 | 種類の表の再試行の回数と間隔（`ci_pending` 10 回・60 秒、`infra_wait` 3 回・600 秒）は今の CI の所要と基盤の待ちの記録からの見積りで、実測していない。子 2 のリリースの後に、上限に当たった回を記録から数えて直す |
+| 待ちの上限の値 | 止まった理由の表の再試行の回数と間隔（`ci_pending` 10 回・60 秒、`infra_wait` 3 回・600 秒）は今の CI の所要と基盤の待ちの記録からの見積りで、実測していない。子 2 のリリースの後に、上限に当たった回を記録から数えて直す |
