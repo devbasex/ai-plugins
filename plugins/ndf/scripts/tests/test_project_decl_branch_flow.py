@@ -145,11 +145,19 @@ def test_sprint_start_stays_base_after_a_whole_release_ships_the_fork_point(repo
     commit(repo, "old")
     git(repo, "checkout", "-q", "develop")
     commit(repo, "dev-more")
+    # ベースブランチへ一度取り込んだ後も伸びたスプリントブランチ（分岐点はスプリント自身のコミット）
+    git(repo, "checkout", "-q", "-b", "sprint/merged", "develop")
+    commit(repo, "m1")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "sprint/merged")
+    git(repo, "checkout", "-q", "sprint/merged")
+    commit(repo, "m2")
     merge_into_main(repo, "develop")
     git(repo, "checkout", "-q", "-b", "sprint/from-release", "main")
     commit(repo, "z")
     publish(repo)
     assert mbf.sprint_start(repo, "origin/sprint/old", "develop", "main") == "base"
+    assert mbf.sprint_start(repo, "origin/sprint/merged", "develop", "main") == "base"
     assert mbf.sprint_start(repo, "origin/sprint/from-release", "develop", "main") == "production"
 
 
