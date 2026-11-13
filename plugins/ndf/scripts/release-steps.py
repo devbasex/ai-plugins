@@ -28,7 +28,7 @@
                                             [--decided <承認資料>]
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
-                                            [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+                                            [--approved-sha <SHA> | --approval <承認資料>]   # CD の無い prod はどちらかが要る
     python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
     python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
     python3 release-steps.py record         --merged --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
@@ -37,6 +37,10 @@
     python3 release-steps.py cd-guidance    [--root <dir>]   # CD の案内
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
+    python3 release-steps.py approve        --pr <本番の PR> (--approved-sha <SHA> | --facts-from <状態> [--answer-from <状態>]) --by user|mvv
+    python3 release-steps.py approval-post  --pr <本番の PR> --approval <承認資料>   # 承認資料をリリースの PR へ置く
+    python3 release-steps.py approval-check --pr <PR番号>   # 証跡のチェック（workflow が打つ）
+    python3 release-steps.py release-case   [--root <dir>]   # リリースの場合
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
@@ -47,6 +51,10 @@ release --channel prod は承認したコミットを受け取り、`origin/rele
 本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。承認の後にベースブランチが
 進んでも止まらず、本番チャネルの PR は head を release/v<版> にして比べた先端だけを出す（#2436 の R2）。本番チャネルの
 PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まったデプロイの再開）。
+ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
+承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
+一致すれば `--admin` なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
+`.ndf/supervise.json` の release.dev_workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
 
 record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ
 release/v<版>-sync → ベースブランチ）へリリース記録
@@ -79,6 +87,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -95,6 +104,7 @@ from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
 from release_lib import others, promotion, publish, record, replaced  # noqa: E402
 import limits
+import waits  # noqa: E402
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
@@ -121,8 +131,12 @@ from step_result import (
     today,
     version_arg,
 )
+import ci_workflows  # noqa: E402
 import gh_parts  # noqa: E402
+import gh_rest  # noqa: E402
+import release_case  # noqa: E402
 import repo as repo_lib  # noqa: E402
+from release_lib import approval_trail  # noqa: E402
 import branch_flow  # noqa: E402
 import delivery  # noqa: E402
 from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps, run_steps  # noqa: E402,F401
@@ -501,16 +515,17 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None, no_admin=False):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
     PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
-    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。no_admin なら管理者の迂回なしでマージする（#2773 の I7）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     cmd += ["--expect-head", expect] if expect else []
     cmd += ["--gate-approved", gate_approved] if gate_approved else []
+    cmd += ["--no-admin"] if no_admin else []
     p = run(cmd, cwd=root, check=False)
     out = step_read.last_json(p.stdout) or {}
     if p.returncode != 0:
@@ -656,8 +671,9 @@ def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
+    case = _case(root) if a.channel == "prod" else None
     try:
-        approved = approval.approved_of(root, a, plugin)
+        approved = approval.approved_of(root, a, plugin, case)
     except approval.Gate as g:
         emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
@@ -668,10 +684,15 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
+    reviewed = case is not None and case.case != release_case.NO_CD  # CD のある場合は承認を PR の上で照らす（#2773）
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
-        main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
-        _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
+        got = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops, case if reviewed else None)
+        _published(root, a, plugin, prod, *got)
+    if reviewed:
+        _release_prod_reviewed(root, a, case, plugin, plugins, branch, base, prod)
+    if a.channel == "dev" and (wf := (delivery.load_delivery(root).release or {}).get("dev_workflow")):
+        _release_dev_emit(root, a, plugin, plugins, branch, base, wf)
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
@@ -737,6 +758,273 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
     status, code, done = back(items, metrics, done) if back else ("ok", None, done)
     emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
+
+
+# ---------- CD のある場合のリリース（#2773） ----------
+
+
+def _case(root):
+    try:
+        return release_case.case_of(root)
+    except release_case.CaseUnreadable as e:
+        raise StepError(f"リリースの場合を決められない: {e}", EXIT_PRECONDITION)
+
+
+def _repo(root):
+    repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
+    if not repo:
+        raise StepError("リポジトリ（origin の owner/repo）を決められない", 2)
+    return repo
+
+
+def _release_prod_reviewed(root, a, case, plugin, plugins, branch, base, prod):
+    """場合 1・2 の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → 迂回なしのマージ → 公開の後（#2773）。
+    承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
+    ver = a.version
+    metrics = {"channel": "prod", "version": ver, "case": case.case, "release_pr": None, "sync_pr": None, "main_pr": None}
+    metrics.update({"tag": None, "merge_commit": None, "plugins": ",".join(plugins)})
+    items: list[dict] = []
+    git(root, "fetch", "-q", "origin", "--tags")
+    done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
+    if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
+        git(root, "fetch", "-q", "origin")
+        merge = merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
+        _published(root, a, plugin, prod, done["number"], merge, items, metrics)
+    if done:
+        main_pr = done["number"]
+    else:
+        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
+            raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
+        release_pr, merged_pr, _ = _merge_release_pr(root, a, plugin, plugins, branch, base)
+        metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
+        repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた release/v<版> を戻す
+        title = f"Release: {plugin} v{ver} を {prod} へ"
+        body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        main_pr = create_pr(root, prod, branch, title, body)
+    repo = _repo(root)
+    try:
+        head = approval_trail.read_head(repo, main_pr)[0]
+        judged = approval.approved_on_pr(repo, main_pr, head, case)
+    except approval_trail.TrailError as e:
+        raise StepError(str(e))
+    metrics.update({"main_pr": main_pr, "approved_sha": head, "compared_head": head, "reason": judged.description})
+    if judged.state != "success":
+        _wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait)
+        how = (
+            f"release-steps.py approval-post --pr {main_pr} --approval <承認資料> で承認資料を置いて承認を求め、承認を得たら "
+            f"release-steps.py approve --pr {main_pr} --approved-sha {head} --by user で証跡を書いて"
+            if case.case == release_case.CD_NO_REVIEW
+            else f"PR #{main_pr} の先端 {head[:8]} のレビューの承認を得て"
+        )
+        nxt = f"{how}、release-steps.py release --version {ver} --channel prod を打ち直す"
+        summary = f"{plugin} v{ver} のリリース承認を待つ（本番の PR #{main_pr}・先端 {head[:8]}）: {judged.description}"
+        emit(
+            result(
+                TOOL,
+                "gate",
+                summary,
+                items + [{"kind": "pr", "name": f"#{main_pr}", "result": "awaiting_approval", "base": prod}],
+                metrics,
+                None,
+                nxt,
+            ),
+            EXIT_GATE,
+        )
+    if case.case == release_case.CD_NO_REVIEW:
+        _wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
+    try:
+        merge = wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=True)
+    except HeadMoved:
+        nxt = f"承認の後に先端が動いた。新しい先端で承認を取り直し、release-steps.py release --version {ver} --channel prod を打ち直す"
+        emit(
+            result(
+                TOOL,
+                "gate",
+                f"{plugin} v{ver} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた",
+                items,
+                metrics,
+                None,
+                nxt,
+            ),
+            EXIT_GATE,
+        )
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": False})
+    git(root, "fetch", "-q", "origin")
+    _published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
+
+
+def _wait_ci_except(root, n, skip, timeout):
+    """`skip` の名前を除く PR のチェックがすべて通るまで待つ。落ちたら 1、上限で 75。"""
+    policy = limits.policy("release-steps.ci-wait")._replace(seconds=timeout)
+    bad = ("fail", "cancel")
+
+    def done(rows):
+        rows = [r for r in rows if r.get("name") not in skip]
+        return bool(rows) and (all(r.get("bucket") in ("pass", "skipping") for r in rows) or any(r.get("bucket") in bad for r in rows))
+
+    got = waits.wait_until(lambda: pr_check_buckets(root, n), done, policy=policy)
+    rows = [r for r in got.value or [] if r.get("name") not in skip]
+    if failed := [r.get("name") for r in rows if r.get("bucket") in bad]:
+        raise StepError(f"PR #{n} のチェックが落ちた: {', '.join(map(str, failed))}")
+    if not got.done:
+        raise StepError(f"PR #{n} のチェックが上限 {timeout:g} 秒までに終わらない", EXIT_INFRA_WAIT)
+
+
+def _wait_trail_status(root, repo, prod, head, timeout):
+    """`ndf/release-approval` が本番チャネルの必須チェックにあるとき、先端のその状態が success になるまで待つ。"""
+    try:  # 読めなければ待たない（マージの判定は GitHub が必須チェックで持つ）
+        required = ci_workflows.required_contexts(gh_json(root, ["api", f"repos/{repo}/rules/branches/{prod}"], "gh api rules")) or []
+    except (StepError, ValueError):
+        required = []
+    if approval_trail.STATUS_CONTEXT not in required:
+        return
+
+    def read():
+        d = gh_json(root, ["api", f"repos/{repo}/commits/{head}/status"], "gh api status") or {}
+        return next((s for s in d.get("statuses") or [] if s.get("context") == approval_trail.STATUS_CONTEXT), {})
+
+    policy = limits.policy("release-steps.trail-status")._replace(seconds=timeout)
+    got = waits.wait_until(read, lambda s: s.get("state") == "success", policy=policy)
+    if not got.done:
+        last = got.value or {}
+        raise StepError(
+            f"{approval_trail.STATUS_CONTEXT} が success にならない（{last.get('state') or '無い'}）: {last.get('description') or ''}"
+        )
+
+
+def _dev_run_title(root, workflow, pr):
+    """開発版の workflow の run-name（`release-dev.yml` が持つ形）へ PR の番号を入れた表示名。"""
+    text = (root / ci_workflows.WORKFLOW_DIR / workflow).read_text(encoding="utf-8")
+    m = re.search(r"^run-name:\s*[\"']?(.+?)[\"']?\s*$", text, re.M)
+    if not m:
+        raise StepError(f"{workflow} に run-name が無い（起動した実行を見分けられない）", EXIT_PRECONDITION)
+    return re.sub(r"\$\{\{\s*inputs\.pr\s*\}\}", str(pr), m.group(1))
+
+
+def _release_dev_by_workflow(root, a, workflow, pr):
+    """開発版の workflow を起動し、その実行が終わるまで待つ。成功ならその URL、失敗は 1、上限は 75。"""
+    title = _dev_run_title(root, workflow, pr)
+    fields = ["run", "list", "--workflow", workflow, "--json", "databaseId,displayTitle,status,conclusion,url", "--limit", "50"]
+    before = {r.get("databaseId") for r in gh_json(root, fields, "gh run list") or []}
+    p = gh_parts.gh(["workflow", "run", workflow, "-f", f"pr={pr}"], cwd=root)
+    if p.returncode != 0:
+        raise StepError(f"{workflow} を起動できない: {p.stderr.strip()[:300]}")
+
+    def latest():
+        runs = [
+            r for r in gh_json(root, fields, "gh run list") or [] if r.get("displayTitle") == title and r.get("databaseId") not in before
+        ]
+        return runs[0] if runs else {}
+
+    got = waits.wait_until(latest, lambda r: r.get("status") == "completed", policy=limits.policy("release-steps.dev-workflow"))
+    run_ = got.value or {}
+    if not got.done:
+        raise StepError(f"{workflow} の実行（{run_.get('url') or '未検出'}）が上限までに終わらない", EXIT_INFRA_WAIT)
+    if run_.get("conclusion") != "success":
+        raise StepError(f"{workflow} の実行が {run_.get('conclusion')} で終わった: {run_.get('url')}")
+    return run_.get("url") or ""
+
+
+def _release_dev_emit(root, a, plugin, plugins, branch, base, workflow):
+    """宣言 release.dev_workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
+    pr = _reusable_release_pr(root, branch, base)
+    if pr is None:
+        pr = {
+            "number": create_pr(root, base, branch, f"Release: {plugin} v{a.version}", _release_pr_body(root, a, plugin, plugins)),
+            "state": "OPEN",
+        }
+    n = pr["number"]
+    item = {"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": base}
+    if pr["state"] == "OPEN":
+        item.update({"result": "merged", "run": _release_dev_by_workflow(root, a, workflow, n)})
+    metrics = {
+        "channel": "dev",
+        "version": a.version,
+        "release_pr": n,
+        "merge_commit": merge_commit_of(root, n),
+        "plugins": ",".join(plugins),
+    }
+    metrics["dev_workflow"] = workflow
+    emit(result(TOOL, "ok", f"{plugin} v{a.version} を {base} へ出した（#{n}・{workflow}）", [item], metrics))
+
+
+def _judge_pr(repo, pr, head, prod):
+    """証跡のチェックの判定（I1〜I4・I10）。同じ先端の開いた PR がほかにあれば落とす。"""
+    others = [n for n in approval_trail.open_prs_at(repo, head, prod) if n != pr]
+    if others:
+        return approval_trail.Judgment("failure", f"同じ先端の PR がほかにある: {', '.join(f'#{n}' for n in others)}")
+    trails = approval_trail.trails_of(approval_trail.read_comments(repo, pr))
+    return approval_trail.judge(trails, approval_trail.read_roles(repo, [t.login for t in trails if not t.edited]), head)
+
+
+def cmd_approval_check(a):
+    """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。"""
+    root = git_root(a.root)
+    prod = delivery.load_delivery(root).production
+    repo, head = _repo(root), None
+    try:
+        head, base, state = approval_trail.read_head(repo, a.pr)
+        if base != prod:
+            emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
+        pr = a.pr
+        if state != "open":  # 閉じた PR の先端を持つ開いた PR を判定し直す（I10）
+            same = approval_trail.open_prs_at(repo, head, prod)
+            if not same:
+                emit(result(TOOL, "ok", f"PR #{a.pr} は閉じていて、同じ先端の開いた PR が無い（何も付けない）", [], {"pr": a.pr}))
+            pr = same[0]
+        j = _judge_pr(repo, pr, head, prod)
+        approval_trail.post_status(repo, head, j)
+        if j.state == "success":  # 並んだ実行が同じ先端の PR を開いていないかを読み直す（I10）
+            again = _judge_pr(repo, pr, head, prod)
+            if again.state != "success":
+                approval_trail.post_status(repo, head, again)
+                j = again
+    except approval_trail.TrailError as e:
+        if head:
+            try:
+                approval_trail.post_status(repo, head, approval_trail.Judgment("error", str(e)))
+            except approval_trail.TrailError:
+                pass  # 付けられなければ結果 JSON の stopped だけで知らせる
+        raise StepError(str(e))
+    metrics = {"pr": pr, "head": head, "state": j.state, "description": j.description, "approver": j.approver, "at": j.at}
+    emit(result(TOOL, "ok", f"PR #{pr} の {approval_trail.STATUS_CONTEXT}: {j.state}（{j.description}）", [], metrics))
+
+
+def cmd_approval_post(a):
+    """承認資料を承認資料のコメントとしてリリースの PR に置く。同じ先端のものがあれば置かない（#2773 の E4）。"""
+    root = git_root(a.root)
+    path = Path(a.approval) if Path(a.approval).is_absolute() else root / a.approval
+    if not path.is_file():
+        raise StepError(f"承認資料が無い: {path}", EXIT_PRECONDITION)
+    repo = _repo(root)
+    try:
+        head = approval_trail.read_head(repo, a.pr)[0]
+        kept = approval_trail.has_request(approval_trail.read_comments(repo, a.pr), head)
+    except approval_trail.TrailError as e:
+        raise StepError(str(e))
+    metrics = {"pr": a.pr, "head": head, "approval": str(path)}
+    if kept:
+        emit(result(TOOL, "ok", f"PR #{a.pr} に先端 {head[:8]} の承認資料が既にある", [], metrics))
+    got = gh_rest.comment(repo, a.pr, approval_trail.render_request(path.read_text(encoding="utf-8"), head))
+    if not got.ok:
+        raise StepError(f"承認資料のコメントを置けない: {got.error[:300]}")
+    metrics["comment_url"] = (got.value or {}).get("url")
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"PR #{a.pr} に先端 {head[:8]} の承認資料を置いた",
+            [{"kind": "comment", "name": metrics["comment_url"], "result": "written"}],
+            metrics,
+        )
+    )
+
+
+def cmd_release_case(a):
+    """リリースの場合（#2773 の F1）を metrics に出す。"""
+    c = _case(git_root(a.root))
+    emit(result(TOOL, "ok", f"リリースの場合: {c.case}（{c.reason}）", [], c._asdict()))
 
 
 def _sweep_candidates(root, merge):
@@ -1211,8 +1499,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
     p.add_argument("--ci-wait", type=float, default=3600.0, help="待つ PR ごとの CI の待ちの上限（秒）")
     g = p.add_mutually_exclusive_group()
-    g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
-    g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
+    g.add_argument(
+        "--approved-sha", metavar="SHA", help="prod の CD が無い場合: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）"
+    )
+    g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
@@ -1252,8 +1542,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cd-guidance", parents=[common], help="CD が無いリポジトリへ CD の設定と方式の記録を促す案内を出す")
     p.set_defaults(func=cmd_cd_guidance)
 
-    p = sub.add_parser("approve", parents=[common], help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する")
-    p.add_argument("--approval", required=True, help="承認資料")
+    p = sub.add_parser(
+        "approve",
+        parents=[common],
+        help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する（--pr ならリリースの PR へ証跡を書く）",
+    )
+    p.add_argument("--approval", help="承認資料（--pr の無い経路で要る）")
+    p.add_argument("--pr", type=int, help="CD のある場合: 承認の証跡のコメントを置くリリースの PR（#2773）")
     p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
     p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
     p.add_argument(
@@ -1261,6 +1556,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
+
+    p = sub.add_parser("approval-check", parents=[common], help="リリースの PR の承認の証跡を判定し、先端へ commit status を付ける")
+    p.add_argument("--pr", type=int, required=True)
+    p.set_defaults(func=cmd_approval_check)
+    p = sub.add_parser("approval-post", parents=[common], help="承認資料をリリースの PR へ承認資料のコメントとして置く")
+    p.add_argument("--pr", type=int, required=True)
+    p.add_argument("--approval", required=True, help="承認資料")
+    p.set_defaults(func=cmd_approval_post)
+    p = sub.add_parser("release-case", parents=[common], help="リリースの場合（cd-no-review / cd-review / no-cd）を出す")
+    p.set_defaults(func=cmd_release_case)
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)
