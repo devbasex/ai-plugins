@@ -184,7 +184,8 @@ def check_event(level: str, rows: Rows, draft: EventDraft, heights: Optional[dic
     if draft.kind not in _FROM:
         return
     cur = rows.get(draft.row_key)
-    before = cur.state if cur else None
+    # アクティビティの行（`<工程>/<ID>`）と課題ごとの子の行（`<工程>#<番号>`）は、最初の事象の前を未着手とする
+    before = cur.state if cur else (PENDING if ("/" in draft.row_key or "#" in draft.row_key) else None)
     if before not in _FROM[draft.kind]:
         if draft.kind == "disabled" and before == RUNNING:
             raise Refused(f"実行中の行 {draft.row_key} は無効にできない（I4）")
