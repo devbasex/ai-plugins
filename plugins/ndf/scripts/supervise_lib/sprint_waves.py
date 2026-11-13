@@ -18,7 +18,7 @@ from supervise_lib.decl import decl_fields, sprint_flow
 from supervise_lib.design_steps import detail_design_runs, gate_steps, pr_steps, writing_steps
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
-from supervise_lib.procedures import survey_steps
+from supervise_lib.procedures import design_path, survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
@@ -133,7 +133,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
     target = flow.doc_target(sprint_branch(a))
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(target)} --root ."
     copy = requirements_path(n)
-    doc = f"issues/issue-{n}-design.md"  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
+    doc = design_path(n)  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
     # 設計を送った後に題を H1 へ合わせ直す（レビューの直しで H1 が変わる。#1289 の決定 9）
     push = f"{PUSH_DESIGN} && python3 {shlex.quote(str(SELF))} sync-title --pr {{pr}} --doc {doc}"
     plan = {

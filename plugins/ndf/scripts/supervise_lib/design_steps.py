@@ -8,6 +8,7 @@ import subprocess
 
 from supervise_lib.decl import DeclError
 from supervise_lib.paths import DESIGN_READY, DESIGN_SURVEY_PY, REVIEW_FOCUS, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKFLOW_COMMON
+from supervise_lib.procedures import design_path, detail_path
 from supervise_lib.prompts import DESIGN_FIX_PROMPT, DESIGN_REVIEW_PROMPT
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -40,7 +41,7 @@ def detail_design_runs(mode: str) -> bool:
 
 def detail_steps(n: int) -> list[dict]:
     """設計単体のレビュー → 直し（指摘があれば）→ 詳細設計の 4 段（#3144 の決定 4）。最後の段は rebuild へ進む。"""
-    detail = f"issues/issue-{n}-design-detail.md"
+    detail = detail_path(n)
     return [
         # 設計文書だけを 1 つの AI がレビューする。cross-review にしない（Pull Request をもう 1 組出さない。決定 11）
         {
@@ -83,7 +84,7 @@ def detail_steps(n: int) -> list[dict]:
             "prompt": f"/ndf:design #{n} 詳細設計。設計文書（直した後のもの）の上に、詳細設計の文書 {detail} を 1,000 行以下で"
             "書く（超える主題は設計を 2 本に分けると報告して止まる）。書いたら "
             # コミットの前に打つため、HEAD を読む --issue ではなく worktree から読む --file で 2 つの文書を渡す
-            f"`{DESIGN_SURVEY_PY} check --file issues/issue-{n}-design.md {detail} --require-detail` を打ち、"
+            f"`{DESIGN_SURVEY_PY} check --file {design_path(n)} {detail} --require-detail` を打ち、"
             "detail_* の指摘を直す。工程「設計」は記録し直さない。"
             "コミットする（push しない）。",
             "next": "rebuild",
