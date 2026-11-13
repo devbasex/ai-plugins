@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import shlex
 import sys
 from pathlib import Path
@@ -14,9 +15,9 @@ from pathlib import Path
 import pytest
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import sprint_close_harness as harness  # noqa: E402
-
+_spec = importlib.util.spec_from_file_location("sprint_close_harness_acc", HERE / "test_sprint_close_merge_green.py")
+harness = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(harness)
 call, issues_of, DIST_PROD, load_sprint_close = harness.call, harness.issues_of, harness.DIST_PROD, harness.load_sprint_close
 repo, gh = harness.repo, harness.gh  # fixture
 
