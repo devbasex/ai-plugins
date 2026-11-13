@@ -42,6 +42,15 @@ def _notes_of(inp: dict, target: list) -> str:
     return f"。出し直しの指摘の入力（全回を読み、指摘への対応の表を設計文書へ書く）: {'、'.join(got)}"
 
 
+def _release_args(inp: dict, args: dict) -> list[str]:
+    """リリースのプランの経路（`with.channel`）と、開発ループが明示した版（文脈の `versions`）。版が無ければ流す時点に決める（#2164）。"""
+    if args.get("kind") != "release" or not args.get("channel"):
+        return []
+    version = (((inp.get("context") or {}).get("versions")) or {}).get(args["channel"])
+    where = ["--worktree", inp["cwd"]] if inp.get("cwd") else []
+    return ["--channel", args["channel"], *where, *(["--version", version] if version else [])]
+
+
 def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
     stage, issues = inp["stage"], inp.get("issues") or []
     target = [inp["issue"]] if inp.get("issue") else issues
@@ -49,7 +58,7 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
     where.mkdir(parents=True, exist_ok=True)
     path = where / "plan.json"
     if args.get("kind"):
-        extra = [str(x) for x in (inp.get("with") or {}).get("args", [])]
+        extra = [str(x) for x in (inp.get("with") or {}).get("args", [])] + _release_args(inp, args)
         cmd = [sys.executable, str(SUPERVISE), "new", args["kind"], "--out", str(path), *extra]
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=inp.get("cwd"))
         if p.returncode != 0:

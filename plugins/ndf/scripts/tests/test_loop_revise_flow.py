@@ -25,6 +25,7 @@ from test_sprint_loop import (  # noqa: E402
 )
 import gate1_requests as g1  # noqa: E402
 import revise_note as rn  # noqa: E402
+import sprint_loop_record as sl_record  # noqa: E402
 
 env, mvv = base.env, base.mvv  # フィクスチャを受け継ぐ
 SHA_A, SHA_B = "a" * 40, "b" * 40
@@ -79,7 +80,7 @@ def test_the_next_sprint_passes_the_input_of_every_round(env):
     closed(env)
     sl_select.cmd_select(env, "l1")
     base.sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
-    new = next(c for c in reversed(env.calls) if "new" in c and "sprint" in c)
+    new = next(c for c in reversed(env.calls) if "new" in c and str(sl_record.PROGRESS) in c)  # progress.py new（#3092）
     at = new.index("--revise-note") + 1
     n, path = new[at].split("=", 1)
     data = rn.read_input(path)

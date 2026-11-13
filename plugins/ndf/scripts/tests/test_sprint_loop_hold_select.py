@@ -116,15 +116,16 @@ def test_a_hold_only_lap_refuses_to_build_a_design_step(lane):
     assert out["exit"] == 2 and sl_argv.HOLD_ONLY_REFUSAL in out["summary"] and "#11" in out["summary"]
 
 
-def test_the_classification_and_the_design_step_use_the_same_rule(env):
-    """I2: 選定が承認の要らない作業とした課題は、組んだスプリントの --design に入らない。"""
-    r = {"waiting": [{"number": 12, **APPROVED}], "outside_plan": None}
+def test_the_classification_and_the_design_step_use_the_same_rule(env, tmp_path):
+    """I2: 選定が承認の要らない作業とした課題だけのループの 1 回は、進行表の設計の工程を無効で渡す（#3092）。"""
+    r = {"name": "l1", "waiting": [{"number": 12, **APPROVED}], "outside_plan": None, "laps": []}
     lap = {"selection": [{"number": n, "decision": sl_record.SELECTED} for n in (11, 12)], "versions": {"dev": ""}}
-    lap.update(state_path="s", sprint="l1-1", mode="standard", out="o")
+    lap.update(state_path="s", sprint="l1-1", mode="standard", out="o", dir=str(tmp_path), n=1)
     argv = sl_argv.new_sprint_argv(str(env.root), r, lap, [])
-    design = argv[argv.index("--design") + 1 : argv.index("--designed")]
-    assert design == ["11"] == [str(n) for n in sl_argv.design_issues(r, [11, 12])]
-    assert argv[argv.index("--designed") + 1 :] == ["12"]
+    assert sl_argv.design_issues(r, [11, 12]) == [11] and "--disable" not in argv
+    lap["selection"] = [{"number": 12, "decision": sl_record.SELECTED}]
+    argv = sl_argv.new_sprint_argv(str(env.root), r, lap, [])
+    assert sl_argv.design_issues(r, [12]) == [] and "設計=設計承認ゲートで承認済み" in argv
 
 
 @pytest.mark.parametrize("hours, picked, inside", [(INSIDE, [12, 13], True), (OUTSIDE, [13, 11], False), (None, [12, 13], True)])

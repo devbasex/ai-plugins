@@ -19,7 +19,7 @@ from sprint_mvv import MVV_PACES
 from supervise_lib.decl import SUPERVISE_DECL, WORKTREE_DECL, DeclError, decl_roots, delivery_decl, read_decl
 
 
-def _section(roots: list[Path], name: str) -> dict | str:
+def _declared_pace(roots: list[Path], name: str) -> dict | str:
     for r in roots:
         try:
             return read_pace(r)[name]
@@ -54,12 +54,12 @@ def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | 
     return project_mvv.approval_refusal(state, root or Path.cwd())
 
 
-def pace_refusal(worktree: str, mode: str, pace: str, state: str | None, repo: str | None = None) -> str | None:
+def pace_use_refusal(worktree: str, mode: str, pace: str, state: str | None, repo: str | None = None) -> str | None:
     """進め方 `pace` を使ってよい条件を確かめ、外れた理由を返す（満たせば None。normal は常に None）。"""
     if pace not in MVV_PACES:
         return None
     roots = decl_roots(worktree, repo)
-    sec = _section(roots, pace)
+    sec = _declared_pace(roots, pace)
     if isinstance(sec, str):
         return sec
     if not sec["enabled"]:

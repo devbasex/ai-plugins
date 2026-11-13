@@ -127,6 +127,7 @@
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない） | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
 | [parallel_end.py](parallel_end.py) | 1 スプリントのレーンの終わり。終わりの記録・猶予の後に止める耐久ステップ・止められなかったレーンと終わりの記録の無い停止と終わった後の差し戻しの問い・`released` の後の版の要るまとめの待ちと一時レーン。副命令 `end`・`verified` | `parallel_run.py`（`_Run` が継ぐ）/ `parallel.py` |
+| [sprint_loop_table.py](sprint_loop_table.py) | 工程の進行表で流した開発ループの 1 回を、`progress.py next` の出力で締める。完了なら完了・工程の失敗なら失敗で締め、答え待ちでは締めずに同じ 1 行を返す | `sprint_loop` |
 | [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
 | [run_environment.py](run_environment.py) | 実行環境の調査: 動く場所・CPU・メモリ・レーンとプランの数を読み、同時の数の候補を返す。読むだけで書かない | `sprint_loop` / `sprint_loop_cli` / `parallel_run` |
 | [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |

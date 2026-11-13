@@ -102,7 +102,7 @@ def cmd_new(a, store: pdb.Store) -> tuple[dict, int]:
         return blocked, code
     from supervise_lib import pace_gate
 
-    if why := pace_gate.pace_refusal(str(root), a.mode, a.pace, getattr(a, "state", None)):
+    if why := pace_gate.pace_use_refusal(str(root), a.mode, a.pace, getattr(a, "state", None)):
         rep = _cli_report("stopped", f"pace: {a.pace} を使えない: {why}。進行表を作らない", pace=a.pace)
         rep["next"] = "--pace normal で打ち直すか、条件を満たしてから打ち直す"
         return rep, EXIT_PRECONDITION
@@ -417,7 +417,9 @@ def main(argv: list[str] | None = None) -> "NoReturn":  # noqa: F821
     n.add_argument("--judgment")
     n.add_argument("--work", help="工程のプランを書く作業ディレクトリ（既定は今のディレクトリ）")
     n.add_argument("--context", help="まとめの工程が読む文脈の JSON（開発ループの名前・回・持ち越し・版）")
-    n.add_argument("--revise-note", dest="revise_note", action="append", default=[], help="設計の工程へ渡す出し直しの指摘 <課題>=<ファイル>")
+    n.add_argument(
+        "--revise-note", dest="revise_note", action="append", default=[], help="設計の工程へ渡す出し直しの指摘 <課題>=<ファイル>"
+    )
     nx = sub.add_parser("next")
     nx.add_argument("id")
     sh = sub.add_parser("show")

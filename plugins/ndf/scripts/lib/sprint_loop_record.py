@@ -50,8 +50,7 @@ from sprint_loop_names import LOOP_DIR, PENDING, QUESTION_PENDING, RELEASE_PENDI
 TOOL = "sprint-state"
 SCRIPTS = Path(__file__).resolve().parents[1]
 SPRINT_STATE = SCRIPTS / "sprint-state.py"
-SUPERVISE = SCRIPTS / "supervise.py"
-PROGRESS = SCRIPTS / "progress.py"
+SUPERVISE, PROGRESS = SCRIPTS / "supervise.py", SCRIPTS / "progress.py"
 UPKEEP = SCRIPTS.parent / "skills" / "backlog-refinement" / "scripts" / "upkeep.py"
 HANDOFF_TEMPLATE = SCRIPTS / "data" / "handoff-template.md"
 HANDOFF_DIR = Path(".ndf") / "handoff"

@@ -88,6 +88,7 @@ from sprint_loop_gate import (
 
 from sprint_loop_gate2 import finish_held, gate2_answer, gate2_pipeline, pending_pipeline, cmd_reclose as cmd_reclose
 from sprint_loop_select import resume_answer_hold
+from sprint_loop_table import lap_by_table
 from sprint_loop_stop import STOP_FILE, read_stop_order, stop_order_text
 
 
@@ -334,7 +335,8 @@ def _make_plans(env: Env, rec: dict, before: dict, lap: dict, issues: list[int],
         copy_mvv_gate(rec, lap, state, mvv)
     try:
         notes, skipped = revise_note.write_inputs(env.main_dir(), rec, design_issues(rec, issues), lap["dir"])
-        new = new_sprint_argv(root, rec, lap, [*notes, *extra], lap_carry(rec, lap))
+        lap["sprint_extra"] = list(extra)
+        new = new_sprint_argv(root, rec, lap, notes, lap_carry(rec, lap))
     except OSError as e:
         return refused_stop(env, rec, before, "出し直しの指摘の入力", 1, str(e)), [], None
     code, so, se = env.run(new, cwd=root)
@@ -549,42 +551,13 @@ def cmd_stop(env: Env, name: str, by: str = "unknown", reason: str = "") -> dict
 # ---------------------------------------------------------------- lap
 
 
-def _lap_by_table(env: Env, rec: dict, before: dict, lap: dict, failed: bool, done: str | None, deferred_issues: list[int]) -> dict:
-    """工程の進行表で流したループの 1 回を、`progress.py next` の出力（done）で締める（#3092）。
-
-    完了なら完了、工程の失敗・中止なら失敗で締める。答え待ち（`gate`）では締めず、答えの後に同じ 1 行を打ち直す。"""
-    rep = jsonio.read(done, missing={}, broken={}, want=dict) if done else {}
-    status = rep.get("status")
-    if status == "gate" and not failed:
-        pipeline = next_pipeline(rec, lap["table"], Path(done))
-        write_record(env, rec, before)
-        update_handoff(env, rec, f"ループの {lap['n']} 回目 の進行表が答えを待っている", resume_command(rec), pipeline)
-        return loop_ok(
-            f"ループの {lap['n']} 回目 の進行表が答えを待っている: {rep.get('summary', '')}",
-            rec,
-            rep.get("items") or [],
-            status="gate",
-            next_=f"progress.py answer で答えてから: {pipeline}",
-            table=lap["table"],
-            pipeline=pipeline,
-        )
-    state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-    ok = status == "ok" if done else failure_key(state) is None  # done を渡さない締めは、今までどおりスプリント状態の行で決める
-    outcome = DONE if ok and not failed else FAILED
-    close_lap(env, rec, lap, outcome, state, deferred_issues)
-    rows = [i.get("row") for i in rep.get("items") or [] if i.get("kind") == "failed" and i.get("row")]
-    if outcome == FAILED and rows:  # 同じ失敗の判定（failure_streak）が読む鍵: 課題・失敗した工程（理由の文は含めない）
-        lap["failure"] = {"issues": selected_issues(lap), "kind": rows[0], "step": "失敗"}
-    return after_close(env, rec, before, f"ループの {lap['n']} 回目 を {outcome} で締めた")
-
-
 def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues: list[int], update: Callable | None = None) -> dict:
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
             return refusal_order("進行中のループの 1 回が無い")
         if lap.get("table"):
-            return _lap_by_table(env, rec, before, lap, failed, done, deferred_issues)
+            return lap_by_table(env, rec, before, lap, failed, done, deferred_issues)
         items = read_done_items(done) if done else []
         refresh_state(lap, update)
         if any(i.get("result") == "関門" for i in items):

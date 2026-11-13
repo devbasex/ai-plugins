@@ -383,14 +383,14 @@ def test_notify_skips_finished_plan(two_repos, monkeypatch):
 # ---- 第 3 ラウンドの指摘（例外の起動の引き継ぎ・別のリポジトリの前のループの答え・保留したループの一時レーン） ----
 
 
-def test_outside_plan_reason_carries_to_sprint_command():
+def test_outside_plan_reason_carries_to_sprint_command(tmp_path):
     import sprint_loop_argv as sla
 
-    lap = {"versions": {"dev": ""}, "state_path": "/s.json", "sprint": "s1", "mode": "auto", "out": "/o", "issues": [1]}
-    lap["selected"] = [{"number": 1}]
-    got = sla.new_sprint_argv("/r", {"outside_plan": "急ぎの修正", "waiting": []}, lap, [])
+    lap = {"versions": {"dev": ""}, "state_path": "/s.json", "sprint": "s1", "mode": "standard", "out": "/o", "dir": str(tmp_path), "n": 1}
+    lap["selection"] = [{"number": 1, "decision": "選んだ"}]
+    got = sla.new_sprint_argv("/r", {"name": "l", "laps": [], "outside_plan": "急ぎの修正", "waiting": []}, lap, [])
     assert got[got.index("--outside-plan") + 1] == "急ぎの修正"
-    assert "--outside-plan" not in sla.new_sprint_argv("/r", {"waiting": []}, lap, [])
+    assert "--outside-plan" not in sla.new_sprint_argv("/r", {"name": "l", "laps": [], "waiting": []}, lap, [])
 
 
 def test_loop_start_reuses_stored_reason(tmp_path):

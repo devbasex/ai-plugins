@@ -6,7 +6,6 @@ import json
 import shlex
 from pathlib import Path
 
-import project_mvv
 from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError
 from step_result import result
@@ -19,6 +18,7 @@ from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_ad
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
+from supervise_lib.pace_gate import mvv_refusal  # 正本は pace_gate（progress.py new と同じ照合）
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.release_templates import release_verify_steps, strip_suffix
@@ -241,20 +241,6 @@ def pace_refusal(a) -> str | None:
         return why
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)
-
-
-def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | None:
-    """MVV の承認の照合（`lib/project_mvv.approval_refusal`）。スプリント MVV の承認の記録とハッシュの一致、
-    無ければ承認済みのプロジェクト MVV と状態に残した参照の一致を見る。外れた理由を返す。"""
-    if not state_path:
-        return f"--pace {pace} には --state（スプリントの状態）が要る"
-    try:
-        state = json.loads(Path(state_path).read_text())
-    except (OSError, ValueError) as e:
-        return f"スプリントの状態を読めない: {e}"
-    if not isinstance(state, dict):
-        return "スプリントの状態を読めない: オブジェクトでない"
-    return project_mvv.approval_refusal(state, root or Path.cwd())
 
 
 def advises(a, closing: bool = False) -> bool:

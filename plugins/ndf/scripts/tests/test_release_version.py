@@ -19,8 +19,6 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import release_version as rv  # noqa: E402
-import sprint_loop as sl  # noqa: E402
-import sprint_loop_record as sl_record  # noqa: E402
 from supervise_lib import queue, queue_fill  # noqa: E402
 from supervise_lib.paths import state_dir_of  # noqa: E402
 
@@ -349,33 +347,15 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
 # ---- 開発ループが組むプラン（#2354） ----
 
 
-def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
-    """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
+def looped(tmp: Path, world: World, dev: str = "") -> dict:
+    """開発ループの 1 回の進行表のデプロイの工程と同じ組み立て（`progress_activities` の ndf.plan）で実物の開発版のプランを組む（#3092）。"""
+    import progress_activities as pa
+
     ndf = world.repo / ".ndf"
     (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
-    auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
-    (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))
-    d = tmp / "lap"
-    d.mkdir()
-    (d / "mvv.md").write_text("## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n")
-    lap = {
-        "versions": {"dev": dev, "prod": prod},
-        "state_path": str(d / "state.json"),
-        "sprint": "s1",
-        "dir": str(d),
-        "out": str(d / "sprint"),
-        "mode": "standard",
-        "milestone": "01 近い",
-        "selection": [{"number": 11, "decision": sl_record.SELECTED}],
-    }
-    rec = {"name": "l1", "waiting": []}
-    root = str(world.repo)
-    gate = [sys.executable, str(sl.SPRINT_STATE), "gate", lap["state_path"], "MVV", "--what", "MVV を承認"]
-    for cmd in (sl.sprint_state_init_argv(root, rec, lap, [11]), gate, sl.new_sprint_argv(root, rec, lap, list(extra))):
-        p = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
-        assert p.returncode == 0, p.stdout + p.stderr
-    index = json.loads((Path(lap["out"]) / "sprint.json").read_text())["ステージ"]
-    return {**lap, "dev_plan": sl.stage_plan(index, "開発版"), "prod_plan": sl.stage_plan(index, "本番")}
+    inp = {"stage": "デプロイ", "issues": [11], "table": "t", "cwd": str(world.repo), "context": {"versions": {"dev": dev}}}
+    plan = pa._plan_doc(inp, {"kind": "release", "channel": "dev"}, tmp / "lap")
+    return {"dev_plan": str(plan)}
 
 
 def version_field(lap: dict) -> dict:
@@ -383,11 +363,10 @@ def version_field(lap: dict) -> dict:
 
 
 def test_loop_plan_without_dev_holds_no_version_number(tmp_path, world):
-    """受け入れ条件 1: --dev なしで組むとプランにも sprint.json にも版数が無い。"""
+    """受け入れ条件 1: --dev なしで組むとプランに版数が無い。"""
     lap = looped(tmp_path, world)
     assert version_field(lap)["明示"] is None
-    for f in (lap["dev_plan"], lap["prod_plan"], Path(lap["out"]) / "sprint.json"):
-        assert not re.search(r"\d+\.\d+\.\d+", Path(f).read_text())
+    assert not re.search(r"\d+\.\d+\.\d+", Path(lap["dev_plan"]).read_text())
 
 
 def test_loop_plan_without_dev_takes_the_next_free_version(tmp_path, world):
@@ -414,15 +393,10 @@ def test_loop_plan_without_dev_redecides_on_a_rerun(tmp_path, world, monkeypatch
 
 def test_loop_plan_with_dev_stays_explicit_and_stops_when_taken(tmp_path, world):
     """受け入れ条件 5: --dev の版が既出なら流さず taken になる。"""
-    lap = looped(tmp_path, world, dev="10.27.5-dev.1", prod="10.27.5")
+    lap = looped(tmp_path, world, dev="10.27.5-dev.1")
     assert version_field(lap)["明示"] == "10.27.5-dev.1"
     why, info = fill(Path(lap["dev_plan"]))
     assert why and info["cause"] == "taken"
-
-
-def test_loop_plan_takes_the_level_after_the_separator(tmp_path, world):
-    """受け入れ条件 8: `--` より後の --level が開発版のプランの上げ幅になる。"""
-    assert version_field(looped(tmp_path, world, extra=("--level", "minor")))["上げ幅"] == "minor"
 
 
 def test_recorded_version_reads_only_a_usable_record(tmp_path, world):

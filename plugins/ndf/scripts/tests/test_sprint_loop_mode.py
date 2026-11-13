@@ -26,7 +26,8 @@ def record_bytes(env):
 
 
 def new_sprints(env):
-    return [c for c in env.calls if "new" in c and c[c.index("new") + 1] == "sprint"]
+    """ループの 1 回の進行表を作る呼び出し（progress.py new。#3092）と、モードを下げたときの作り直しの new sprint。"""
+    return [c for c in env.calls if "new" in c and (str(sl_record.PROGRESS) in c or c[c.index("new") + 1] == "sprint")]
 
 
 def syncs(env):

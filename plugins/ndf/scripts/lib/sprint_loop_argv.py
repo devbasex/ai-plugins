@@ -7,6 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 
+import jsonio
 from sprint_loop_record import PROGRESS, SPRINT_STATE, SUPERVISE, resume_command, selected_issues
 
 
@@ -53,11 +54,10 @@ DESIGN_STAGES = ("設計", "詳細設計", "ドキュメント再構成", "ド�
 def lap_requirements(lap: dict, issues: list[int]) -> Path:
     """要求と受け入れ条件の工程の出力（`stage-io` の `requirements-out`）。開発ループの選定が受け入れ条件を確かめた課題を選ぶため、
     進行表を作る前に済んだ工程として渡す。"""
-    path = Path(lap["dir"]) / "requirements.json"
     refs = " ".join(f"#{n}" for n in issues)
     doc = {"activities": {}, "summary": f"開発ループ の選定（ループの {lap['n']} 回目）で受け入れ条件を確かめた課題: {refs}"}
-    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
-    return path
+    jsonio.write_atomic(Path(lap["dir"]) / "requirements.json", doc, indent=1)
+    return Path(lap["dir"]) / "requirements.json"
 
 
 def lap_carry(rec: dict, lap: dict) -> list[int]:
@@ -69,15 +69,16 @@ def lap_carry(rec: dict, lap: dict) -> list[int]:
 def lap_context(rec: dict, lap: dict, carry: list[int]) -> Path:
     """まとめの工程が読む開発ループの文脈（ループの名前・回・マイルストーン・持ち越し・版）。今の `new close --pace auto` の
     `--loop`・`--lap`・`--milestone`・`--carry` と、`new sprint` の `--version` にあたる。"""
-    path = Path(lap["dir"]) / "context.json"
     doc = {"loop": rec["name"], "lap": lap["n"], "milestone": lap.get("milestone"), "carry": list(carry), "versions": lap["versions"]}
-    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
-    return path
+    doc["extra"] = list(lap.get("sprint_extra") or [])  # `loop sprint ... --` の後の引数（工程のプランへ渡す）
+    jsonio.write_atomic(Path(lap["dir"]) / "context.json", doc, indent=1)
+    return Path(lap["dir"]) / "context.json"
 
 
-def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str], carry: list[int] = ()) -> list[str]:
+def new_sprint_argv(root: str, rec: dict, lap: dict, notes: list[str], carry: list[int] = ()) -> list[str]:
     """`progress.py new --pace auto` のコマンド（#3092）。ループの 1 回の進行表を作り、要求と受け入れ条件の工程を済んだ工程として渡す。
-    設計を承認済みの課題は、設計の工程を通さない（`--disable 設計=…`）。版は流す時点に決める（#2164）。"""
+    設計を承認済みの課題は、設計の工程を通さない（`--disable 設計=…`）。`notes` は出し直しの指摘（`--revise-note`）。
+    版（`--dev` を渡したときだけ）と `loop sprint ... --` の後の引数は文脈（`--context`）で工程のプランへ渡す（#2164）。"""
     issues = selected_issues(lap)
     new = [sys.executable, str(PROGRESS), "new", lap["sprint"], "--mode", lap["mode"], "--issues", *map(str, issues), "--pace", "auto"]
     new += ["--state", lap["state_path"], "--work", str(Path(lap["dir"]) / "work")]
@@ -88,7 +89,7 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str], carry: li
         new += [x for st in DESIGN_STAGES for x in ("--disable", f"{st}=設計承認ゲートで承認済み")]
     if rec.get("outside_plan"):  # 例外として始めたループは、内側の起動の判定でも同じ理由で通す（#2733）
         new += ["--outside-plan", rec["outside_plan"]]
-    new += list(extra)
+    new += list(notes)
     return new
 
 

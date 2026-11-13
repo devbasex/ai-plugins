@@ -1,0 +1,7 @@
+{
+  "name": "requirements-json",
+  "pattern": "requirements.json",
+  "kind": "state",
+  "place": "main",
+  "skill_readers": []
+}
