@@ -212,13 +212,11 @@ def _impl_plan(a, steps: list[dict], rule: str) -> dict:
 
 
 NO_REFACTOR_MODES = ("light", "operation", "documentation")  # 工程表で「構造改善」が「—」のモード
-CROSS_REFACTORING_SUSPENDED = False  # 緊急の停止の印（2026-11-11）。宣言の無いリポジトリは `refactor_suspended` が外す（#3056）
-
-
 def refactor_suspended(a) -> bool:
-    """構造改善を外すか。CI テストの宣言の無いリポジトリは手元のテストの負荷のため外す（#3056 の決定 12）。外す判定・記録の
-    `--review`・差分の検査の `no_refactor` のすべてがこれを読む。"""
-    return CROSS_REFACTORING_SUSPENDED or not ci_only(a)
+    """検査のプランから構造改善を外すか。CI テストの宣言の無いリポジトリは手元のテストの負荷のため外す（#3056 の決定 12）。
+    工程としての構造改善の有効・無効は進行表の宣言（工程の定義の `when: ci_declared`・`.ndf/project.json` の
+    `workflow.stages`・`progress.py new --disable`）が決める（#3092 の決定 8）。ここは同じ条件をプランの中で読むだけ。"""
+    return not ci_only(a)
 
 
 def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:

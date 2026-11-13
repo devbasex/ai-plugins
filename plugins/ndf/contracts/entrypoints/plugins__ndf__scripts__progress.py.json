@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/progress.py",
+  "summary": "progress.py: 工程の進行表のスクリプト（#3092）。スプリントの進行表とレーンの進行表を作り、流し、変える。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "adopt": {
+        "options": [
+          "--plan",
+          "--sprint"
+        ],
+        "positionals": []
+      },
+      "answer": {
+        "options": [
+          "--approved",
+          "--by",
+          "--rejected",
+          "--release-result"
+        ],
+        "positionals": [
+          "id",
+          "row"
+        ]
+      },
+      "cancel": {
+        "options": [
+          "--reason"
+        ],
+        "positionals": [
+          "id"
+        ]
+      },
+      "disable": {
+        "options": [
+          "--reason"
+        ],
+        "positionals": [
+          "id",
+          "stage"
+        ]
+      },
+      "enable": {
+        "options": [
+          "--reason"
+        ],
+        "positionals": [
+          "id",
+          "stage"
+        ]
+      },
+      "finish": {
+        "options": [
+          "--output",
+          "--reason"
+        ],
+        "positionals": [
+          "id",
+          "stage"
+        ]
+      },
+      "lane": {
+        "options": [
+          "--after",
+          "--by",
+          "--issues",
+          "--position",
+          "--reason",
+          "--row",
+          "--to",
+          "--touches"
+        ],
+        "positionals": [
+          "op",
+          "id"
+        ]
+      },
+      "new": {
+        "options": [
+          "--disable",
+          "--fact",
+          "--issues",
+          "--judgment",
+          "--lane",
+          "--mode",
+          "--pace",
+          "--requirements",
+          "--row"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
+      "next": {
+        "options": [],
+        "positionals": [
+          "id"
+        ]
+      },
+      "retry": {
+        "options": [
+          "--reason"
+        ],
+        "positionals": [
+          "id",
+          "stage"
+        ]
+      },
+      "scope": {
+        "options": [
+          "--add",
+          "--drop",
+          "--mode",
+          "--reason"
+        ],
+        "positionals": [
+          "id"
+        ]
+      },
+      "show": {
+        "options": [],
+        "positionals": [
+          "id"
+        ]
+      }
+    }
+  },
+  "env": [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "HOME",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_API_KEY_CHECK_MODEL",
+    "NDF_API_KEY_CHECK_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_CLAUDE_API_KEY_GENERATION",
+    "NDF_CLAUDE_API_KEY_NAME",
+    "NDF_CLAUDE_KEY_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_MVV_STATE_DIR",
+    "NDF_ORGANIZER_DIR",
+    "NDF_ORGANIZER_LANE",
+    "NDF_PARALLEL_MAX_PLANS",
+    "NDF_PRESENTATION_DIR",
+    "NDF_PROGRESS_DB",
+    "NDF_RELAY_MAX_NAMED",
+    "NDF_RELAY_NAME",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_STATE_HOME",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL",
+    "NDF_SV_STATE_DIR",
+    "NDF_VERSION",
+    "NDF_WHOLE_RUNS_DIR",
+    "UV_PROJECT_ENVIRONMENT",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "docs",
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release",
+        "shared"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [
+    "answer-hold-json",
+    "answer-hold-log-jsonl",
+    "answer-hold-ran-json",
+    "answer-json",
+    "approved-txt",
+    "breakdown-md",
+    "checkpoint-json",
+    "plan-json",
+    "plan-md",
+    "present-json",
+    "presented-json",
+    "prs-txt",
+    "request-id-txt",
+    "request-txt",
+    "requests-json",
+    "resume-mark-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "失敗: 工程が失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り: 引数・定義の誤りか読めない DB（status stopped）",
+    "3": "前提が無い（正常な否定の結果）: 不変条件・状態・排他で断った操作（status stopped）",
+    "10": "承認ゲート: 承認ゲートかリリースの結果の待ちに入った（status gate）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/progress_model.py",
+    "plugins/ndf/scripts/lib/progress_run.py",
+    "plugins/ndf/scripts/supervise_lib/templates.py",
+    "plugins/ndf/skills/development-workflow/SKILL.md"
+  ]
+}

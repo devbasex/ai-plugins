@@ -275,7 +275,7 @@ def lane_rows(events: list) -> list[dict]:
     data: dict[int, dict] = {}
     for e in events:
         p = e.payload or {}
-        if e.kind == "row_added":
+        if e.kind == "row_added" or (e.kind == "created" and (e.row_key or "").isdigit()):  # 最初の順番表の行は created
             n = int(p["row"])
             data[n] = {"row": n, "issues": list(p.get("issues") or []), "touches": list(p.get("touches") or []),
                        "after": list(p.get("after") or []), "args": list(p.get("args") or []), "state": PENDING, "sprint": None}

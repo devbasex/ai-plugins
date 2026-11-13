@@ -54,6 +54,9 @@
     },
     "analysis": {
       "summary": "analysis（このリポジトリの宣言にある最上位のキー）"
+    },
+    "workflow": {
+      "summary": "工程ごとの有効・無効の既定（`workflow.stages.<工程表の行名>` に `{\"enabled\": bool, \"reason\": str}`）。工程の定義の条件を上書きし、`progress.py new --disable` が上書きする（#3092 の決定 8）"
     }
   }
 }

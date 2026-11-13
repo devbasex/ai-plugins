@@ -31,7 +31,9 @@ def _report(tool: str, status: str, summary: str, **metrics) -> dict:
 def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
     stage, issues = inp["stage"], inp.get("issues") or []
     target = [inp["issue"]] if inp.get("issue") else issues
-    path = work / f"{stage.replace('/', '_')}.plan.json"
+    where = work / stage.replace("/", "_")
+    where.mkdir(parents=True, exist_ok=True)
+    path = where / "plan.json"
     if args.get("kind"):
         extra = [str(x) for x in (inp.get("with") or {}).get("args", [])]
         cmd = [sys.executable, str(SUPERVISE), "new", args["kind"], "--out", str(path), *extra]
@@ -45,7 +47,7 @@ def _plan_doc(inp: dict, args: dict, work: Path) -> Path:
         "steps": [{"id": "work", "type": "work", "kind": stage, "stage": stage,
                    "prompt": f"/ndf:{args.get('skill')} {refs}（工程: {stage}。進行表 {inp['table']}）", "next": "end"}],
     }
-    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    (where / "plan.json").write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
 

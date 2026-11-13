@@ -1,0 +1,5 @@
+{
+  "name": "NDF_PROGRESS_DB",
+  "set_by": "user",
+  "summary": "工程の進行表の DB の SQLAlchemy の URL（sqlite:///… か postgresql+psycopg://…）。無ければ <git の共通ディレクトリ>/ndf/state/progress/ndf-progress.sqlite（plugins/ndf/scripts/lib/progress_db.py。#3092 の決定 2）"
+}
