@@ -317,6 +317,7 @@
 | `release-verification-steps.env-i` | seconds 600 | リリース後テストの素の環境のコマンドの上限 | `plugins/ndf/scripts/release-verification-steps.py:run_env_i` |
 | `release.cd-poll` | interval 15 | CD の結果の照会の間隔（#2623。GitHub の実行の状態は秒単位で変わらない） | `plugins/ndf/scripts/release_lib/cd_result.py:<module>` |
 | `release.declared-step` | seconds 600 | 宣言したリリースの手順のコマンドの上限の既定 | `plugins/ndf/scripts/release_lib/declared_steps.py:<module>` |
+| `repo.production-fetch` | seconds 60 | 本番チャネルを origin から取り込み直す上限。応答の無い origin でリリースのプランの組み立てを止め続けないため（#3308） | `plugins/ndf/scripts/lib/repo.py:<module>` |
 | `run-core.kill-grace` | seconds 5 | 実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/run_core.py:<module>` |
 | `sprint-close.issue-lock` | seconds 30 | 課題ごとの錠の待ち（body-lock の既定と同じ） | `plugins/ndf/scripts/sprint-close.py:<module>` |
 | `sprint-loop-record.lock` | seconds 60 | 開発ループの記録の排他を待つ上限 | `plugins/ndf/scripts/lib/sprint_loop_record.py:locked` |
