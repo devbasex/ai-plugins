@@ -60,3 +60,17 @@ def test_entrypoint_stops_when_plugin_json_is_unreadable(tmp_path):
 
     assert done.returncode == 2
     assert "plugin.json" in done.stderr
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る")
+def test_entrypoint_does_not_import_from_callers_directory(tmp_path):
+    # 呼び出し元のディレクトリに置かれた同じ名前のパッケージを読まない
+    fake = tmp_path / "ndf"
+    fake.mkdir()
+    (fake / "__init__.py").write_text("")
+    (fake / "__main__.py").write_text("print('HIJACKED')\n")
+
+    done = subprocess.run([str(PLUGIN_ROOT / "bin" / "ndf")], cwd=tmp_path, capture_output=True, text=True, check=False)
+
+    assert "HIJACKED" not in done.stdout
+    assert done.returncode == 0

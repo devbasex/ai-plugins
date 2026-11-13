@@ -19,4 +19,5 @@ fi
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/$name/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
-exec uv run --frozen --no-dev --quiet --project "$root" python -m ndf "$@"
+# -P: 呼び出し元のディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）
+exec uv run --frozen --no-dev --quiet --project "$root" python -P -m ndf "$@"

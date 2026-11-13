@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -66,13 +67,25 @@ def _retire_target(state_dir: Path, now: datetime) -> Path:
     return candidate
 
 
+def lock_path(ident: PluginIdentity) -> Path:
+    """状態の置き場を用意する処理どうしを排他するロックのファイル。退避で動かないよう置き場の隣に置く。"""
+    return ident.state_dir.with_name(ident.state_dir.name + ".lock")
+
+
 def prepare_state_dir(ident: PluginIdentity, now: datetime | None = None) -> Path:
     """状態の置き場を用意して返す。
 
     形の版のファイルが無く、ほかのファイルがある置き場は旧い実装のものとして、名前を変えて退避してから作り直す。
     退避は名前の変更だけなので戻せる（決定 79・判断 (b)）。
+    判定から形の版のファイルの作成までをロックで排他し、同時に起動した処理が書いたデータを切り離さない。
     """
-    state_dir = ident.state_dir
+    ident.state_dir.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path(ident), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _prepare_locked(ident.state_dir, now)
+
+
+def _prepare_locked(state_dir: Path, now: datetime | None) -> Path:
     if state_dir.is_dir() and not (state_dir / FORMAT_FILE).exists() and any(state_dir.iterdir()):
         target = _retire_target(state_dir, now or datetime.now())
         state_dir.rename(target)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -115,3 +117,19 @@ def test_prepare_adds_time_when_retired_name_exists(ident):
     assert (earlier / "keep").read_text() == "1"
     assert (parent / "p.v10-20261113T203005" / "old").read_text() == "2"
     assert (parent / "p.v10-20261113T203005-1" / "old").read_text() == "3"
+
+
+def test_prepare_waits_for_the_state_lock(ident):
+    # 判定から format.json の作成までは、同じ置き場を用意するほかの処理と重ならない
+    ident.state_dir.parent.mkdir(parents=True, exist_ok=True)
+    with open(identity.lock_path(ident), "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        worker = threading.Thread(target=identity.prepare_state_dir, args=(ident,), kwargs={"now": NOW})
+        worker.start()
+        worker.join(0.3)
+        assert worker.is_alive()
+        assert not (ident.state_dir / "format.json").exists()
+        fcntl.flock(held, fcntl.LOCK_UN)
+    worker.join(5)
+
+    assert (ident.state_dir / "format.json").exists()
