@@ -72,7 +72,11 @@ def _run(command: str, wait_limit: int | None) -> int:
             if interrupted:
                 raise KeyboardInterrupt  # 記録に interrupted を残す
     except slots.Stopped as exc:
-        return _stopped(exc.summary(), metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib}, cause={"kind": exc.reason})
+        return _stopped(
+            exc.summary(),
+            metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
+            cause={"kind": exc.reason},
+        )
     except KeyboardInterrupt:
         return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     finally:

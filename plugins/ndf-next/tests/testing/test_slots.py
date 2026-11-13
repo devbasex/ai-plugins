@@ -25,7 +25,9 @@ def _limits(max_runs: int, wait: int = 60, floor: int = 1) -> Limits:
 
 
 def _gate(directory: Path, limits: Limits, read_memory=lambda: PLENTY, environ=None):
-    return slots.gate("pytest .", directory, kind="whole", limits=limits, environ=environ or {}, directory=directory, poll=POLL, read_memory=read_memory)
+    return slots.gate(
+        "pytest .", directory, kind="whole", limits=limits, environ=environ or {}, directory=directory, poll=POLL, read_memory=read_memory
+    )
 
 
 class Counter:
@@ -91,7 +93,14 @@ def test_nested_and_ci_runs_take_no_slot(tmp_path, environ):
 
 def test_light_command_takes_no_slot(tmp_path):
     with _gate(tmp_path, _limits(1)):
-        with slots.gate("pytest a.py", tmp_path, suites=[{"runner": "pytest", "command": "pytest ."}], environ={}, directory=tmp_path, limits=_limits(1, wait=1)) as held:
+        with slots.gate(
+            "pytest a.py",
+            tmp_path,
+            suites=[{"runner": "pytest", "command": "pytest ."}],
+            environ={},
+            directory=tmp_path,
+            limits=_limits(1, wait=1),
+        ) as held:
             assert held.index is None
 
 
@@ -113,7 +122,11 @@ def test_waits_for_memory_and_does_not_count_the_wait(tmp_path):
         assert held.waited_seconds > 0
     assert slots.waited_since(started) >= held.waited_seconds
     row = slots.read_events(tmp_path)[-1]
-    assert row["result"] == slots.FINISHED and row["measured"] is True and set(row) >= {"at", "worktree", "kind", "waited_seconds", "available_mib", "oom_kill"}
+    assert (
+        row["result"] == slots.FINISHED
+        and row["measured"] is True
+        and set(row) >= {"at", "worktree", "kind", "waited_seconds", "available_mib", "oom_kill"}
+    )
 
 
 def test_unmeasurable_memory_starts_at_once(tmp_path):

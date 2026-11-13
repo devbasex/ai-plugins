@@ -24,7 +24,9 @@ class WaitTimeout(AssertionError):
     """条件が上限の秒までに成り立たなかった。"""
 
 
-def wait_until(predicate: Callable[[], T], *, timeout: float = DEFAULT_TIMEOUT, interval: float = DEFAULT_INTERVAL, what: str = "条件") -> T:
+def wait_until(
+    predicate: Callable[[], T], *, timeout: float = DEFAULT_TIMEOUT, interval: float = DEFAULT_INTERVAL, what: str = "条件"
+) -> T:
     """`predicate` が真の値を返すまで待ち、その値を返す。上限を超えたら `WaitTimeout`。"""
     deadline = time.monotonic() + timeout
     while True:

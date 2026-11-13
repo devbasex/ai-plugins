@@ -65,7 +65,9 @@ def test_behavior_check_does_not_inherit_the_callers_stdin(tmp_path):
         "print(behavior.launch(argv, Path('.'), timeout=60).stdout, end='')"
     )
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
-    result = subprocess.run([sys.executable, "-c", caller], input="other prompts\n", cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        [sys.executable, "-c", caller], input="other prompts\n", cwd=tmp_path, env=env, capture_output=True, text=True, check=True
+    )
     assert result.stdout.strip() == "''"
 
 

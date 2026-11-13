@@ -21,11 +21,15 @@ def project(tmp_path):
     (root / ".ndf").mkdir(parents=True)
     suites = [{"name": "fake", "runner": "fakerun", "command": "fakerun ."}]
     (root / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}))
-    (root / ".ndf" / "resources.json").write_text(json.dumps({"test_slots": {"max_runs": 1, "memory_floor_mib": 1, "wait_limit_seconds": 120}}))
+    (root / ".ndf" / "resources.json").write_text(
+        json.dumps({"test_slots": {"max_runs": 1, "memory_floor_mib": 1, "wait_limit_seconds": 120}})
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "fakerun"
-    fake.write_text('#!/bin/sh\necho "start $(date +%s.%N)" >> "$LOG"\nsleep 0.3\necho "end $(date +%s.%N)" >> "$LOG"\necho out; echo err >&2\nexit "${FAKE_EXIT:-0}"\n')
+    fake.write_text(
+        '#!/bin/sh\necho "start $(date +%s.%N)" >> "$LOG"\nsleep 0.3\necho "end $(date +%s.%N)" >> "$LOG"\necho out; echo err >&2\nexit "${FAKE_EXIT:-0}"\n'
+    )
     fake.chmod(0o755)
     return root, bin_dir, tmp_path / "log"
 
@@ -36,7 +40,9 @@ def _ndf(args, cwd, bin_dir=None, log=None, **extra):
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
     if log:
         env["LOG"] = str(log)
-    return subprocess.Popen([sys.executable, "-m", "ndf", "test-slot", *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return subprocess.Popen(
+        [sys.executable, "-m", "ndf", "test-slot", *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
 
 
 def test_run_keeps_output_and_exit_code(project):
