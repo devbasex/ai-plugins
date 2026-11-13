@@ -226,6 +226,73 @@ def _oom_increase(counts: Sequence[object]) -> int:
 
 
 @dataclass
+class _MemoryMonitor:
+    """枠を持つ実行のメモリの監視。下限を割ったら、最後に始めた実行だけを前の停止から 30 秒空けて止める。"""
+
+    directory: Path
+    floor_mib: int
+    poll: float
+    read_memory: ReadMemory
+    on_stop: Callable[[int], None]
+    index: int | None = None
+    started_at: float = 0.0
+    _stop: threading.Event = field(default_factory=threading.Event)
+    _thread: threading.Thread | None = None
+
+    def start(self, proc: subprocess.Popen) -> None:
+        self._thread = threading.Thread(target=self._run, args=(proc,), name="ndf-test-slot-monitor", daemon=True)
+        self._thread.start()
+
+    def _run(self, proc: subprocess.Popen) -> None:
+        while not self._stop.wait(self.poll):
+            if proc.poll() is not None:
+                return
+            available = self.read_memory()
+            if available is None or available >= self.floor_mib:
+                continue
+            if not self._is_last_started() or not self._claim_stop():
+                continue
+            self.on_stop(available)
+            log.warning("使えるメモリが下限を割ったのでテストを止める", extra={"available_mib": available, "slot": self.index})
+            _stop_group(proc)
+            return
+
+    def _is_last_started(self) -> bool:
+        """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
+        mine = (self.started_at, self.index or 0)
+        for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
+            index = _slot_index(path)
+            if index is None or index == self.index:
+                continue
+            started = (_read_json(path) or {}).get("started_at")
+            if not isinstance(started, (int, float)) or (started, index) <= mine:
+                continue
+            probe = _try_lock(_slot_path(self.directory, index, ".lock"))
+            if probe is None:
+                return False  # 後に始めた実行が生きている
+            probe.release()
+        return True
+
+    def _claim_stop(self) -> bool:
+        """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
+        try:
+            with _lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+                last = (_read_json(self.directory / STOP_FILE) or {}).get("at")
+                now = time.time()
+                if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
+                    return False
+                _write_json(self.directory / STOP_FILE, {"at": now, "slot": self.index})
+                return True
+        except (OSError, Timeout):
+            return False  # 停止の時刻を守れないときは止めない
+
+    def finish(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+
+
+@dataclass
 class Held:
     """枠を持つ実行。重くない・入れ子・CI・置き場を使えないときは何もしない形（`index` が None）で返る。"""
 
@@ -236,13 +303,7 @@ class Held:
     measured: bool = True
     memory_stopped: bool = False
     available_mib: int | None = None
-    _directory: Path | None = None
-    _started_at: float = 0.0
-    _floor_mib: int = 0
-    _poll: float = POLL_SECONDS
-    _read_memory: ReadMemory = machine.available_mib
-    _stop: threading.Event = field(default_factory=threading.Event)
-    _thread: threading.Thread | None = None
+    _monitor: _MemoryMonitor | None = None
 
     def watch(self, proc: subprocess.Popen) -> None:
         """テストの OOM の優先度を上げ、メモリの監視を始める。何もしない形では何もしない。"""
@@ -251,59 +312,16 @@ class Held:
         machine.raise_oom_score(proc.pid)
         if not self.measured:
             return
-        self._thread = threading.Thread(target=self._monitor, args=(proc,), name="ndf-test-slot-monitor", daemon=True)
-        self._thread.start()
+        assert self._monitor is not None
+        self._monitor.start(proc)
 
-    def _monitor(self, proc: subprocess.Popen) -> None:
-        while not self._stop.wait(self._poll):
-            if proc.poll() is not None:
-                return
-            available = self._read_memory()
-            if available is None or available >= self._floor_mib:
-                continue
-            if not self._is_last_started() or not self._claim_stop():
-                continue
-            self.available_mib = available
-            self.memory_stopped = True
-            log.warning("使えるメモリが下限を割ったのでテストを止める", extra={"available_mib": available, "slot": self.index})
-            _stop_group(proc)
-            return
-
-    def _is_last_started(self) -> bool:
-        """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
-        assert self._directory is not None
-        mine = (self._started_at, self.index or 0)
-        for path in self._directory.glob(f"{SLOT_PREFIX}*.json"):
-            index = _slot_index(path)
-            if index is None or index == self.index:
-                continue
-            started = (_read_json(path) or {}).get("started_at")
-            if not isinstance(started, (int, float)) or (started, index) <= mine:
-                continue
-            probe = _try_lock(_slot_path(self._directory, index, ".lock"))
-            if probe is None:
-                return False  # 後に始めた実行が生きている
-            probe.release()
-        return True
-
-    def _claim_stop(self) -> bool:
-        """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
-        assert self._directory is not None
-        try:
-            with _lock(self._directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
-                last = (_read_json(self._directory / STOP_FILE) or {}).get("at")
-                now = time.time()
-                if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
-                    return False
-                _write_json(self._directory / STOP_FILE, {"at": now, "slot": self.index})
-                return True
-        except (OSError, Timeout):
-            return False  # 停止の時刻を守れないときは止めない
+    def _stopped_by_memory(self, available: int) -> None:
+        self.available_mib = available
+        self.memory_stopped = True
 
     def _finish(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join()
+        if self._monitor is not None:
+            self._monitor.finish()
 
 
 def _slot_path(directory: Path, index: int | None, suffix: str = "") -> Path:
@@ -397,7 +415,7 @@ def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> N
         log.warning("枠の記録を書けない", extra={"error": str(exc), "result": result})
 
 
-def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, held: Held) -> FileLock | None:
+def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, held: Held, monitor: _MemoryMonitor) -> FileLock | None:
     """空いた枠を取り、メモリが下限以上になるまで待つ。待ちの上限は枠待ちとメモリ待ちの合計で数える。"""
     start = time.monotonic()
     deadline = start + limits.wait_limit_seconds
@@ -406,14 +424,14 @@ def _acquire(directory: Path, cwd: Path, limits: limits_mod.Limits, held: Held) 
         while True:
             if lock is None:
                 lock = _take_free_slot(directory, cwd, limits.max_runs, held)
-            if lock is not None and _memory_ready(held, held._read_memory, limits.memory_floor_mib):
+            if lock is not None and _memory_ready(held, monitor.read_memory, limits.memory_floor_mib):
                 return lock
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if lock is not None:
                     _release(directory, held, lock)
                 return None
-            time.sleep(min(held._poll, remaining))
+            time.sleep(min(monitor.poll, remaining))
     finally:
         end = time.monotonic()
         held.waited_seconds = end - start
@@ -448,14 +466,17 @@ def _release(directory: Path, held: Held, lock: FileLock) -> None:
 
 
 def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll: float, read_memory: ReadMemory) -> Iterator[Held]:
-    held = Held(_directory=directory, _floor_mib=limits.memory_floor_mib, _poll=poll, _read_memory=read_memory)
-    lock = _acquire(directory, cwd, limits, held)
+    held = Held()
+    monitor = _MemoryMonitor(directory, limits.memory_floor_mib, poll, read_memory, on_stop=held._stopped_by_memory)
+    held._monitor = monitor
+    lock = _acquire(directory, cwd, limits, held, monitor)
     if lock is None:
         held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
-    held._started_at = time.time()
-    _write_json(_slot_path(directory, held.index, ".json"), _owner(held._started_at, cwd))
+    monitor.index = held.index
+    monitor.started_at = time.time()
+    _write_json(_slot_path(directory, held.index, ".json"), _owner(monitor.started_at, cwd))
     held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
     try:
@@ -466,7 +487,7 @@ def _held(directory: Path, cwd: Path, kind: str, limits: limits_mod.Limits, poll
         if held.memory_stopped:
             result = MEMORY_STOPPED
         else:
-            held.available_mib = held._read_memory()
+            held.available_mib = monitor.read_memory()
         _release(directory, held, lock)
         _record(directory, cwd, kind, held, result)
     if result == MEMORY_STOPPED:
