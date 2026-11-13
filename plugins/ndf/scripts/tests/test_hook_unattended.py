@@ -252,11 +252,18 @@ def test_start_marks_the_conductor_and_returns_the_guide(home: Path):
     assert _count(home) == 0
 
 
-def test_start_returns_the_plain_guide_when_the_contract_cannot_be_read(home: Path, monkeypatch, capsys):
+@pytest.fixture
+def break_form(monkeypatch):
+    """呼ぶと契約を読めなくする（`un.ur.load_form` が `FormError` を投げる）関数を返す。"""
+
     def broken():
         raise ur.FormError("壊れている")
 
-    monkeypatch.setattr(un.ur, "load_form", broken)
+    return lambda: monkeypatch.setattr(un.ur, "load_form", broken)
+
+
+def test_start_returns_the_plain_guide_when_the_contract_cannot_be_read(home: Path, break_form, capsys):
+    break_form()
     assert _start() == un.GUIDE
     assert _count(home) == 0
     assert "ndf: unattended-start: 区間の報告の契約を読めない" in capsys.readouterr().err
@@ -402,13 +409,9 @@ def test_stop_without_a_mark_does_nothing(home: Path):
     assert not home.exists()
 
 
-def test_stop_lets_through_when_the_contract_cannot_be_read(home: Path, monkeypatch, capsys):
+def test_stop_lets_through_when_the_contract_cannot_be_read(home: Path, break_form, capsys):
     _start()
-
-    def broken():
-        raise ur.FormError("壊れている")
-
-    monkeypatch.setattr(un.ur, "load_form", broken)
+    break_form()
     assert _stop() is None
     assert _count(home) == 0
     assert "ndf: unattended-stop: 区間の報告の契約を読めない" in capsys.readouterr().err
