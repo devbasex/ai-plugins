@@ -46,11 +46,17 @@ class Route(NamedTuple):
     kind: str
 
 
+def exit_code_bounds(row: Mapping[str, Any]) -> tuple[int, int]:
+    """事実の表 exit-codes の 1 行の終了コードの範囲（始点と終点。last が無ければ code だけ）。"""
+    return row["code"], row.get("last", row["code"])
+
+
 def codes_for_status(status: str) -> frozenset[int]:
     """`status` の結果が返してよい終了コード（事実の表 exit-codes から）。"""
     out: set[int] = set()
     for r in facts.rows(EXIT_CODES, status=status):
-        out.update(range(r["code"], r.get("last", r["code"]) + 1))
+        first, last = exit_code_bounds(r)
+        out.update(range(first, last + 1))
     return frozenset(out)
 
 

@@ -55,7 +55,8 @@ def stopped(tool: str, kind: str, detail: str, *, summary: Optional[str] = None,
 def code_matches(status: str, code: int) -> bool:
     """status と終了コードが事実の表 exit-codes の区分で食い違わないか。"""
     for r in facts.rows(causes.EXIT_CODES, status=status):
-        if r["code"] <= code <= r.get("last", r["code"]):
+        first, last = causes.exit_code_bounds(r)
+        if first <= code <= last:
             return True
     return False
 

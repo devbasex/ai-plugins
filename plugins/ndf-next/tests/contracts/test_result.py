@@ -6,7 +6,7 @@ import json
 import pytest
 
 from ndf import contracts
-from ndf.contracts import result
+from ndf.contracts import causes, result
 
 GAP = {"kind": "record", "name": "x", "reason": "書けなかった"}
 
@@ -86,3 +86,23 @@ def test_release_verification_version_is_bare(version, ok):
     # #3115: 対象の版は前置きを持たない版数だけで、本番の版と文字列のまま照合できる
     record = {"version": version, "issues": [{"number": 3115, "result": "passed", "evidence": "PR #3102"}]}
     assert (contracts.schema_errors(record, contracts.schema_path("release-verification")) == []) is ok
+
+
+# 現状固定（I-009）: exit-codes の区分の範囲の読み方（始点・終点・範囲外・last の省略・範囲内の非整数）。
+def _stopped_range(data):
+    data["rows"] = [{**r, "last": 89} if r["id"] == "deps_missing" else r for r in data["rows"]]
+    return data
+
+
+def test_stopped_range_is_read_from_code_to_last(contracts_copy):
+    contracts_copy("facts/exit-codes.json", _stopped_range)
+    assert causes.stopped_codes() == frozenset([1, 2, 3, 4, 5, 6, *range(69, 90), 75])
+    assert [result.code_matches("stopped", c) for c in (68, 69, 80, 89, 90, 75, 7)] == [False, True, True, True, False, True, False]
+    assert [result.code_matches("gate", c) for c in (9, 10, 19, 20, 29, 30)] == [False, True, True, True, True, False]
+    assert result.code_matches("ok", 0) and not result.code_matches("ok", 1)
+
+
+def test_code_matches_compares_non_integers_by_range():
+    assert result.code_matches("gate", 10.5)
+    assert not result.code_matches("stopped", 3.5)
+    assert not result.code_matches("ok", 0.5)
