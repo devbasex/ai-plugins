@@ -24,6 +24,7 @@ from design_docs import DESIGN_NAME
 # 規則が名指す節と列（規則そのものの一部。雛形の見出しに無ければ `detail_sections()` が止める）
 _FILES, _SPEC, _FAILURES, _REUSE = "ファイル配置", "関数の仕様", "異常系の処理", "既存の部品の再利用"
 _NAMED = (_FILES, _SPEC, _FAILURES, _REUSE)
+RULES = ("detail_section", "detail_failure", "detail_reuse", "detail_file")  # 規則の順（指摘の並びと metrics の鍵）
 _SKIP = re.compile(r"^\s*(?:[-*+]\s+)?省く\s*[:：](?P<why>.*)$")
 
 
@@ -164,4 +165,7 @@ def check_detail(path: str, text: str, result_files: set[str] | None, why: str =
     lines = text.splitlines()
     sections, read = _section_findings(path, text)
     missing, failures, reuses = _spec_findings(path, lines, read)
-    return sections + missing + failures + reuses + _file_findings(path, lines, read, result_files, why)
+    found: dict[str, list[dict]] = {rule: [] for rule in RULES}
+    for it in sections + missing + failures + reuses + _file_findings(path, lines, read, result_files, why):
+        found[it["rule"]].append(it)
+    return [it for rule in found.values() for it in rule]

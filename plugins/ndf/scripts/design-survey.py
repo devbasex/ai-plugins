@@ -40,7 +40,7 @@ import deps  # noqa: E402
 deps.require("md")
 import md  # noqa: E402
 import doc_kinds  # noqa: E402
-from design_detail import DetailTemplateError, check_detail, is_detail  # noqa: E402
+from design_detail import RULES, DetailTemplateError, check_detail, is_detail  # noqa: E402
 from design_docs import find_closed, name_numbers, read_files, require_repo  # noqa: E402
 from design_results import IMPLEMENT, DesignCellError, parse_results  # noqa: E402
 from step_result import (  # noqa: E402
@@ -290,7 +290,7 @@ def cmd_check(a):
     detail = [it for g in survey_groups(docs) for it in detail_items(g, a.require_detail)]
     items += detail
     metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
-    for rule in ("detail_section", "detail_failure", "detail_reuse", "detail_file", "detail_missing"):
+    for rule in (*RULES, "detail_missing"):
         metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
     names = ", ".join(d.path for d in docs)
     if items:
