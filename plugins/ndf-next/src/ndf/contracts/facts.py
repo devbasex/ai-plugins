@@ -15,7 +15,9 @@ from jsonschema import Draft202012Validator
 from ndf import contracts
 
 FACTS_DIR = "facts"
-SCHEMA = f"{FACTS_DIR}/fact.schema.json"
+# 表の共通の形のファイル（置き場に表と並ぶが、表ではない）
+SCHEMA_FILE = "fact.schema.json"
+SCHEMA = f"{FACTS_DIR}/{SCHEMA_FILE}"
 NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
@@ -64,7 +66,7 @@ def _validate(raw: Any, name: str) -> Table:
 def names() -> tuple[str, ...]:
     """置き場にある表の名前（辞書順。共通の形のファイルは含まない）。"""
     found = (contracts.contracts_dir() / FACTS_DIR).glob("*.json")
-    return tuple(sorted(p.stem for p in found if p.name != "fact.schema.json"))
+    return tuple(sorted(p.stem for p in found if p.name != SCHEMA_FILE))
 
 
 def table(name: str) -> Table:
