@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-r"""スプリントの状態を sprint.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
+r"""スプリントの状態をスプリント状態ファイル（例 `sprint-state.json`）に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
 
 LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.py` に任せる）。入力は supervise.py queue の done の JSON と
 各計画の report.md だけである。
 
 | 副命令 | 何をする |
 | --- | --- |
-| `init <sprint.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
-| `update <sprint.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <sprint.json> <承認ゲートの名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 承認ゲートの承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は承認ゲートを通さず、差し戻しを差し戻しの記録（`gate-rejections.jsonl`。`lib/gate_rejections.py`）へ 1 行書く（状態ファイルは変えない）。`--by user` の `設計承認ゲート` / `リリース承認ゲート` の承認も差し戻しの記録へ 1 行書く（差し戻しの件数の 0 と未記録を分ける）。利用者の答えが同じ承認ゲートの直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ承認ゲートの `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に承認ゲートへ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した承認ゲートへは以後 `--by mvv` を書かない |
-| `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
-| `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
-| `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>] [--reason <再起動の理由>]` | ndf-next の囲みを出し、判定「再起動」を記録する（`lib/context_decisions.py`。#2262）。`--replace` なら引継ぎ文書のその節も置き換える |
-| `get <sprint.json> [--field <JSON Pointer>]...` | 読むだけ（#2909）。計画ごとの状態・PR・次の欄を `items` に、最初の終わっていない計画の `<名>: <次の欄>` を `next` に返す。`--field` は状態ファイルを根にした値だけを `metrics` に返す（中身は `lib/state_get.py`）。0 = 読めた / 2 = 読めない / 3 = 無い |
+| `init <状態ファイル> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
+| `update <状態ファイル> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
+| `gate <状態ファイル> <承認ゲートの名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 承認ゲートの承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は承認ゲートを通さず、差し戻しを差し戻しの記録（`gate-rejections.jsonl`。`lib/gate_rejections.py`）へ 1 行書く（状態ファイルは変えない）。`--by user` の `設計承認ゲート` / `リリース承認ゲート` の承認も差し戻しの記録へ 1 行書く（差し戻しの件数の 0 と未記録を分ける）。利用者の答えが同じ承認ゲートの直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ承認ゲートの `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に承認ゲートへ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した承認ゲートへは以後 `--by mvv` を書かない |
+| `render <状態ファイル> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
+| `status <状態ファイル>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
+| `next <状態ファイル> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>] [--reason <再起動の理由>]` | ndf-next の囲みを出し、判定「再起動」を記録する（`lib/context_decisions.py`。#2262）。`--replace` なら引継ぎ文書のその節も置き換える |
+| `get <状態ファイル> [--field <JSON Pointer>]...` | 読むだけ（#2909）。計画ごとの状態・PR・次の欄を `items` に、最初の終わっていない計画の `<名>: <次の欄>` を `next` に返す。`--field` は状態ファイルを根にした値だけを `metrics` に返す（中身は `lib/state_get.py`）。0 = 読めた / 2 = 読めない / 3 = 無い |
 | `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `get` / `list`。`get` は読むだけで、次の操作を `next` に、`--field` の値を `metrics` に返す（#2909）。中身は `lib/sprint_loop_cli.py` と `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
@@ -494,7 +494,7 @@ def cmd_next(a) -> dict | None:
             return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
         heading = heading_text(found.head_line)
     if not (m.get("goal_template") or "").strip():
-        return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
+        return outcome("stopped", "状態ファイルに /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)
     context_decisions.record_restart(context_decisions.work_id(" ".join(f"#{i}" for i in m.get("issues", []))), a.reason)
     if not a.replace:

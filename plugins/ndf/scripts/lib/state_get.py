@@ -1,6 +1,6 @@
 """state_get.py: スプリントの状態と開発ループの記録を読むだけの取り出し（#2909 の F1・F2。用語集の F3 は `glossary_lookup.py`）。
 
-`sprint-state.py get <sprint.json> [--field <JSON Pointer>]...` と `sprint-state.py loop get <ループ名> [--field ...]` の中身。
+`sprint-state.py get <状態ファイル> [--field <JSON Pointer>]...` と `sprint-state.py loop get <ループ名> [--field ...]` の中身。
 どちらも状態ファイルを書き換えず（I2）、読めた限り `ok` で返す（決定 3）。次の操作は `next` に置くだけで、続けてよいかは
 判断しない。`--field` の評価は `json_pick.py` が持つ。
 
