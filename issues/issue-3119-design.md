@@ -24,7 +24,7 @@
 | 利用者の指示（2026-11-12） | 利用者の指示の原文 | 「各スプリントの変更だけをmainに届けられる仕組みが必要」「ndf自体の制約ではなく、あくまでもこのリポジトリのルールとして実現」「レビューをどの単位でやるかのルールも入れたい」 |
 
 要求と受け入れ条件は #3119 の本文にある（コピーは [issue-3119-requirements.md](issue-3119-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-ブランチの流れ（受け入れ条件 1〜6）の決定 11〜20 は [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) と確定仕様
+ブランチの流れ（受け入れ条件 1〜6）は、決定 11〜20 が決める。決定 11〜20 は [issue-3121-design-repo-rules.md](issue-3121-design-repo-rules.md) と確定仕様
 [ndf-branch-flow-declaration.md](../docs/specifications/ndf-branch-flow-declaration.md) が持ち、この文書は写さずに番号で参照する。
 レビューの単位の仕組みは [ndf-branch-flow-review-units.md](../docs/specifications/ndf-branch-flow-review-units.md) にある。
 
@@ -193,7 +193,7 @@ sequenceDiagram
 [ndf-branch-flow-declaration.md](../docs/specifications/ndf-branch-flow-declaration.md) の「スプリントの流れ（選んで集める取り込み方）」にある。
 
 この図には宣言を読むメインディレクトリとブランチだけを描く。構成要素の表の文書（正本の文書・`AGENTS.md`・`CONTRIBUTING.md`・
-`docs/plugin-development-guide.md`・確定仕様・用語集）は段 3 の PR に宣言と一緒に載るだけで、流れの中で読み手を持たないため描かない。
+`docs/plugin-development-guide.md`・確定仕様・用語集）は描かない。これらは段 3 の PR に宣言と一緒に載るだけで、流れの中で読み手を持たない。
 
 段 5 で各 PR に掛けるレビューは次のとおりである（決定 1 の値）。
 
@@ -242,11 +242,11 @@ graph TD
 確定仕様化の PR の差分（文書）を cross-review する PR は、この値では無い。スプリントの PR は未検査の差分を見るが、掛けるのは cross-refactoring と振る舞いの確認だけである。
 リリースブランチの PR は衝突の解消の差分だけを見る。要求の目的「どこでもレビューされない差分も生じない」との差であり、設計承認ゲートで確かめる（「人へ残す判断」）。
 
-`parse_flow` はこの値を `promotion: selected` と組み合わせて指摘なしで読む（2026-11-13 に実行して確かめた。下のエビデンス）。
-
 実装 PR でレビューしない値（スプリントの PR だけで cross-review と cross-refactoring を 1 回）は採らない。課題のまとまりごとの指摘がスプリントの大きな差分に混ざり、課題のまとまりごとに cross-review する手法（#3081）の動機に反する。
 リリースブランチの PR で範囲全体を cross-review し直す値（`release` を `cross-review / pr`）も採らない。実装 PR と同じ差分を 2 度見ることになり、リリースの範囲が大きいほど費用が増える。
 この値は NDF の I12 の指摘には当たらない（I12 は書いていない行の既定値との重なりだけを見る）ため、2 度のレビューは値の選び方で避ける。
+
+`parse_flow` はこの値を `promotion: selected` と組み合わせて指摘なしで読む（2026-11-13 に実行して確かめた。下のエビデンス）。
 
 ```console
 $ python3 - （plugins/ndf/scripts で、ブランチの流れ 4 項目と各 reviews を parse_flow に渡し、指摘の理由を出す）
@@ -255,7 +255,7 @@ impl の行を消す : 課題のまとまりの記録が無いとき、実装の
 sprint の行を消す : 既定値の sprint が、書いた impl と同じ実装の差分を cross-review する
 ```
 
-2 行目は NDF の I4、3 行目は I12 の指摘である。同じ値を `promotion: whole` と組むと、`release` の行と起点・文書の宛先に「`promotion = whole`」の指摘が出る（同じ日に実行）。
+2 行目は NDF の I4、3 行目は NDF の I12 の指摘である。同じ値を `promotion: whole` と組むと、`release` の行と起点・文書の宛先に「`promotion = whole`」の指摘が出る（同じ日に実行）。
 
 根拠: Value 2 / Value 11 / Value 1（MVV 版 7）
 
@@ -290,7 +290,7 @@ NDF は書いていない種類を、課題のまとまりの記録の有無で 
 
 ### 決定 5: 確定仕様に今の値と食い違う記述を残さず、NDF の仕様に ai-plugins の置き場を持ち込まないため、宣言の文書の末尾の 1 文を削除する
 
-[ndf-branch-flow-declaration.md](../docs/specifications/ndf-branch-flow-declaration.md) の末尾は「ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている」と書いている。
+[ndf-branch-flow-declaration.md](../docs/specifications/ndf-branch-flow-declaration.md) の末尾には次の 1 文がある。「ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている」。
 この課題のマージで事実と食い違うため、この 1 文を削除し、代わりの文は書かない。
 この文書は NDF の「プロジェクトの宣言」が公表する仕様であり、NDF の側は ai-plugins の値を前提にしない（「コンテキスト」）。
 
@@ -303,7 +303,7 @@ NDF は書いていない種類を、課題のまとまりの記録の有無で 
 要求の段で `project-decl.py write` がメインディレクトリの `.ndf/worktree.json` に今の運用の値（`whole`）を書き、未コミットのまま残っている（要求の前提 4）。
 宣言を読む工程はメインディレクトリのファイルを読む（`branch_flow.read_flow`）。この差分が残ると、メインディレクトリが `develop` を取り込むときに同じファイルの変更として衝突し、取り込みが止まる。
 
-書き換えは worktree の中でコミットし、スプリントの検査の PR が `develop` へ入った後、メインディレクトリの `.ndf/worktree.json` の未コミットの差分を戻して `develop` を取り込む。
+書き換えは worktree の中でコミットする。スプリントの検査の PR が `develop` へ入った後、メインディレクトリの `.ndf/worktree.json` の未コミットの差分を戻してから `develop` を取り込む。
 戻す値は要求の前提 4 に記録があり、新しい値はコミットに入っているため、戻しても失われる情報は無い。メインディレクトリの `.ndf/project.json` の未コミットの差分は、この課題の対象の外のため触らない。
 
 メインディレクトリで直接コミットする形は採らない。開発の変更は worktree の中で行う規則（`AGENTS.md` の「Git運用ルール」）に合わない。
@@ -356,4 +356,4 @@ NDF は書いていない種類を、課題のまとまりの記録の有無で 
 | 衝突の解消の差分の大きさ | リリースブランチへ集めたときの衝突の解消の差分が、cross-review に見合う大きさになるかは実測が無い。段 5 の最初のリリースの `review-open` の結果で分かる |
 | 受け入れ条件 9 の標本 | 段 5 の最初のスプリントだけでは、種類によって標本が 3 件に満たず `unknown` になる。ずれ 0 件の確かめは、標本がそろう種類から順に分かる |
 | 受け入れ条件 4 の承認資料の範囲 | 「承認資料の範囲は、含めたスプリントブランチの PR の和と一致する」は、このスプリントでは確かめない。段 5 の最初のリリースで、承認資料に載った PR の一覧と、含めた各スプリントブランチへマージされた PR（`gh pr list --base sprint/<名前> --state merged`）とスプリントの PR の和を比べ、過不足が 0 件であることを見る |
-| 外部の貢献者の宛先の運用 | 保守者が課題ごとにスプリントブランチを示す手順（決定 4）が、外部の貢献で回るかは実例が無い。最初の外部の Pull Request で分かる |
+| 外部の貢献者の宛先の運用 | 保守者が課題ごとにスプリントブランチを示す手順（決定 4）が、外部の貢献で回るかは実例が無い。最初の外部の PR で分かる |

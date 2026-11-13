@@ -2,8 +2,8 @@
 
 設計文書 [issue-3119-design.md](issue-3119-design.md) の「構成要素」を、ファイルと節の粒度へ下ろした文書である。
 
-**この課題はコードを足さず、変えもしない。** 書き換えるのは宣言（`.ndf/worktree.json`）と運用の文書だけで、
-宣言の読み分け・`main` 宛の検査・全体テストの省略の判定は NDF の既存の関数（#3121・#3163）がそのまま受ける。
+**この課題はコードを足さず、変えもしない。** 書き換えるのは宣言（`.ndf/worktree.json`）と運用の文書だけである。
+宣言の読み分け・`main` 宛の検査・全体テストの省略の判定は、NDF の既存の関数（#3121・#3163）がそのまま受ける。
 そのため関数を単位にする節（クラスと関数の構造・関数の仕様・異常系の処理・処理の手順・ログ・再利用・単体テスト）は
 `省く:` にし、代わりに「ファイル配置」の下にファイルと節ごとの変更点を置く。
 
@@ -22,7 +22,7 @@ docs/
 ├── specifications/
 │   └── ndf-branch-flow-declaration.md  # 末尾の 1 文を削除
 ├── glossary/
-│   └── glossary.json                 # 用語「戻すマージ」（設計 Pull Request で反映済み）
+│   └── glossary.json                 # 用語「戻すマージ」（設計 PR で反映済み）
 └── glossary.md                       # glossary.py render の出力（同上）
 ```
 
@@ -34,11 +34,11 @@ docs/
 | `CONTRIBUTING.md` | 変更 | NDF のスプリントの外の変更の起点と宛先（決定 4）を外部の貢献者へ示す | `AGENTS.md` |
 | `docs/plugin-development-guide.md` | 変更 | 既存プラグインの削除の手順の宛先を決定 4 に合わせる | `AGENTS.md` |
 | `docs/specifications/ndf-branch-flow-declaration.md` | 変更 | NDF の宣言の仕様から ai-plugins の値の記述を除く（決定 5） | 無し |
-| `docs/glossary/glossary.json` | 変更 | 用語「戻すマージ」の定義を持つ。設計 Pull Request の時点で追加済みのため、実装 Pull Request では触らない | 無し |
-| `docs/glossary.md` | 変更 | `glossary.py render` が `glossary.json` から作る。実装 Pull Request では触らない | `docs/glossary/glossary.json` |
+| `docs/glossary/glossary.json` | 変更 | 用語「戻すマージ」の定義を持つ。設計 PR の時点で追加済みのため、実装 PR では触らない | 無し |
+| `docs/glossary.md` | 変更 | `glossary.py render` が `glossary.json` から作る。実装 PR では触らない | `docs/glossary/glossary.json` |
 
-**依存の向きは一方向で、循環が無い。** 宣言は NDF のスキーマだけに依存し、文書の側を読まない。正本の文書は宣言と用語集を指し、
-`AGENTS.md` は正本の文書を、`CONTRIBUTING.md` と `docs/plugin-development-guide.md` は `AGENTS.md` を指す。
+**依存の向きは一方向で、循環が無い。** 宣言は NDF のスキーマだけに依存し、文書の側を読まない。正本の文書は宣言と用語集を指す。
+`AGENTS.md` は正本の文書を指し、`CONTRIBUTING.md` と `docs/plugin-development-guide.md` は `AGENTS.md` を指す。
 確定仕様（`ndf-branch-flow-declaration.md`）は ai-plugins のどのファイルも指さない（設計文書の「コンテキスト」の公表された言語の関係）。
 
 ### `.ndf/worktree.json` の書き換え
@@ -61,8 +61,8 @@ docs/
 | 正式版を出す（新しい小節 4 つ） | 無し | 「依存するスプリントを出す」「本番の不具合を直す」「取り込み方を戻す」（決定 20 の 4 段の順序）「PR の種類ごとのレビュー」（決定 1 の 5 行の表。値は宣言と同じ） |
 
 新しい小節は `###` で「正式版を出す」の下に置く。この文書は 439 行あり（2026-11-13 に `wc -l` で数えた）、4 つの小節で 80 行前後増えると 500 行を超える見込みである。
-超えた分は、「正式版を出す」を別の文書へ分けずに、置き換える段落（`develop` を本流とする説明・`--base develop` の段落）を
-新しい段落へ書き換えて足し引きで縮める（通しで読む手順のため、`document-style` の分割の判断基準で単一ファイルに残す）。
+超えた分は、「正式版を出す」を別の文書へ分けずに縮める。置き換える段落（`develop` を本流とする説明・`--base develop` の段落）を
+新しい段落へ書き換え、足し引きで縮める。通しで読む手順のため、`document-style` の分割の判断基準で単一ファイルに残す。
 縮めても 500 行を超えるときは、`document-style` の行数の基準どおり節ごとに分ける。
 
 ### `AGENTS.md` の節ごとの変更
@@ -86,7 +86,7 @@ docs/
 | Pull Request を出す（2.） | `--base develop` を付ける | `--base sprint/<名前>` を付ける。名前は課題に示されたもの |
 
 一括の整形の節は I5 の検索（`origin/develop` を読む記述）に掛かるため、
-同じ実装 Pull Request で直す。
+同じ実装 PR で直す。
 
 ### `docs/plugin-development-guide.md` の変更
 
@@ -95,8 +95,8 @@ docs/
 
 ### `docs/specifications/ndf-branch-flow-declaration.md` の変更
 
-「ai-plugins の本番チャネル宛の検査」の節の末尾の 1 文「ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている。」
-（251 行目）を削除する。代わりの文は書かない（決定 5）。同じ節のほかの段落と、`measure` の閾値の行（292 行目）は ai-plugins の値を書いていないため残す。
+「ai-plugins の本番チャネル宛の検査」の節の末尾（251 行目）にある次の 1 文を削除する。
+「ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている。」代わりの文は書かない（決定 5）。同じ節のほかの段落と、`measure` の閾値の行（292 行目）は ai-plugins の値を書いていないため残す。
 
 ## クラスと関数の構造
 
@@ -176,4 +176,4 @@ docs/
 
 ## 単体テストの観点
 
-省く: テストを足さない（要求の「前提とする取り決め」）。実装 Pull Request で確かめるコマンドと壊し方は設計文書の「テスト設計」にあり、宣言の値は `branch_flow.read_flow` で指摘が出ないこと、`AGENTS.md` は `instructions-check.py --root .` が 0 を返すことで見る
+省く: テストを足さない（要求の「前提とする取り決め」）。実装 PR で確かめるコマンドと壊し方は設計文書の「テスト設計」にある。宣言の値は `branch_flow.read_flow` で指摘が出ないことで見る。`AGENTS.md` は `instructions-check.py --root .` が 0 を返すことで見る
