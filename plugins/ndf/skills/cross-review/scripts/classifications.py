@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 # 収束の判定が数える区分（#156、#732）。**残る 3 つは数えない。** 数えないのは、誤りだと
@@ -33,11 +34,12 @@ DESIGN_DOC_MAX_LINES = 1000
 DESIGN_BRANCH_PREFIX = "design/"
 
 
-def _line_limited(path: str, placed: bool) -> bool:
-    """行数を見る種類の設計文書か。種類と名前の末尾は設計文書の種類の契約から引く（#3144 の決定 12）。
+@functools.cache
+def _doc_kinds():
+    """設計文書の種類の契約の読み手 `doc_kinds` を、プロセスで 1 回だけ取り込んで返す。
 
     このモジュールは `measure.py` から `scripts/lib` を `sys.path` に足さずに取り込まれるため、
-    呼ばれたときに足してから `doc_kinds` を取り込む。契約を読めなければ `DocKindsError` を返す側へ投げる。
+    初めて呼ばれたときに足してから取り込む。
     """
     import sys
 
@@ -46,7 +48,15 @@ def _line_limited(path: str, placed: bool) -> bool:
         sys.path.insert(0, lib)
     import doc_kinds
 
-    return doc_kinds.has_flag(path, "line_limit", placed=placed)
+    return doc_kinds
+
+
+def _line_limited(path: str, placed: bool) -> bool:
+    """行数を見る種類の設計文書か。種類と名前の末尾は設計文書の種類の契約から引く（#3144 の決定 12）。
+
+    契約を読めなければ `DocKindsError` を返す側へ投げる。
+    """
+    return _doc_kinds().has_flag(path, "line_limit", placed=placed)
 
 
 def review_kind(head_branch: str | None, categories: list[str] | tuple[str, ...]) -> str:
