@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -190,12 +191,11 @@ def _required(required: object, values: tuple[str, ...], items: tuple[str, ...])
 
 
 def _last_result(text: object) -> re.Match | None:
+    """応答の文の最後の結果の行の一致。行が無い・文字列でなければ None。"""
     if not isinstance(text, str):
         return None
-    last = None
-    for last in RESULT_RE.finditer(text):
-        pass
-    return last
+    last = deque(RESULT_RE.finditer(text), maxlen=1)
+    return last[0] if last else None
 
 
 def result_value(text: object) -> str:
