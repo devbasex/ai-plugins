@@ -158,22 +158,10 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
 
     dl = deadline.Deadline()
     dl.start()
-    is_claude_pretool = not command and runtime == "claude" and ev.event == "PreToolUse"
     try:
-        if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
-            _run_guard(dl, "worktree-guard", _worktree_guard, ev, outs)
-        if command == "token-guard" or is_claude_pretool:
-            _run_guard(dl, "token-guard", _token_guard, ev, outs)
-        if is_claude_pretool and ev.tool in ("Agent", "Task"):
-            _run_guard(dl, "worker-skills", _worker_skills_guard, ev, outs)
-        if is_claude_pretool and ev.tool in ("Read", "Bash"):
-            _run_guard(dl, "supervisor-docs", _supervisor_docs_guard, ev, outs)
-        if not command and runtime in ("claude", "codex") and ev.event == "PreToolUse" and ev.tool_kind == "shell":
-            _run_guard(dl, "ci-test-guard", _ci_test_guard, ev, outs)
-        if is_claude_pretool and ev.tool == "Bash":
-            _run_guard(dl, "issue-guard", _issue_guard, ev, outs)
-        if is_claude_pretool and ev.tool == "AskUserQuestion":
-            _run_guard(dl, "ask-guard", _ask_guard, ev, outs)
+        for name, applies, guard in GUARDS:
+            if applies(command, runtime, ev):
+                _run_guard(dl, name, guard, ev, outs)
     except deadline.HookDeadlineExceeded as e:
         print(dl.notice(e.name), file=sys.stderr)
     finally:
@@ -239,6 +227,30 @@ def _ask_guard(ev) -> list:
     from hook_lib import ask_guard
 
     return [ask_guard.ask_decision(ev)]
+
+
+def _is_claude_pretool(command: str, runtime: str, ev) -> bool:
+    return not command and runtime == "claude" and ev.event == "PreToolUse"
+
+
+# guard の表（名前・掛かる条件・guard）。並びが打つ順で、締め切りを過ぎたら後ろを飛ばす
+GUARDS = (
+    (
+        "worktree-guard",
+        lambda c, r, ev: c in ("", "worktree-guard") and bool(ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")),
+        _worktree_guard,
+    ),
+    ("token-guard", lambda c, r, ev: c == "token-guard" or _is_claude_pretool(c, r, ev), _token_guard),
+    ("worker-skills", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool in ("Agent", "Task"), _worker_skills_guard),
+    ("supervisor-docs", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool in ("Read", "Bash"), _supervisor_docs_guard),
+    (
+        "ci-test-guard",
+        lambda c, r, ev: not c and r in ("claude", "codex") and ev.event == "PreToolUse" and ev.tool_kind == "shell",
+        _ci_test_guard,
+    ),
+    ("issue-guard", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool == "Bash", _issue_guard),
+    ("ask-guard", lambda c, r, ev: _is_claude_pretool(c, r, ev) and ev.tool == "AskUserQuestion", _ask_guard),
+)
 
 
 def _opt(argv: list[str], name: str) -> str | None:
