@@ -25,6 +25,21 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 
 `documentation` モードの提出とモバイルアプリのストアへの提出は CD に含めず、下の形ごとの手順で進める。
 
+### リリースの場合
+
+**リリース承認を取る場所とマージする主体は、CD の有無とレビュー必須の有無で決まる。** 判定は `release-steps.py release-case` が出す
+（`metrics.case`。正本は `scripts/lib/release_case.py`）。CD の有無は `delivery` の本番チャネルへのマージで届く `kind: auto` の行、
+レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。
+
+| 場合（`case`） | リリース承認を取る場所 | マージする主体 |
+| --- | --- | --- |
+| CD があり、レビューなしでマージできる（`cd-no-review`。ai-plugins） | マージの前に、リリースの PR へ承認の証跡のコメントを置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡と先端の一致を確かめる |
+| CD があり、レビューが必須（`cd-review`） | リリースの PR のレビューの承認。証跡は書かない | 利用者のアカウントで NDF が `--admin` なしにマージする。承認のレビューのコミットが先端と一致したときだけ |
+| CD が無い（`no-cd`） | 手元の承認資料（今の `release` の工程） | NDF。マージの後に手でリリースする |
+
+CD のある場合は、承認したコミットと本番の PR の先端が違えば（承認の後のコミット・スプリントの組み直し）マージされず、承認を取り直す。
+マージの後のタグと GitHub Release は CD が作り、会話の中でタグを打たない。
+
 ## リリースの形
 
 **何をもって「受け取れる」かは対象で変わる。** 形を先に決める。手順の骨格は共通で、
@@ -149,9 +164,15 @@ Pull Request が最後かどうかを判断できない。
 **Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
 書き出す。** 打ち方と `status` の読み方は [references/release-steps.md](references/release-steps.md) にある。
 
-**承認の対象は承認資料の「承認したコミット」（ベースブランチの先端の 40 桁）である。** 承認を得たら `release-steps.py approve`
-で承認の記録を書く（`--approved-sha` は提示の時点で控えた `approval-facts` の `metrics.approved_sha`。資料を読み直した値は
-渡さない）。MVV 判定で通したときは `mvv-gate.py` が書く。承認の記録の無い承認資料ではリリースが通らない。
+**承認の対象は承認資料の「承認したコミット」（40 桁）である。** 記録の置き場は「リリースの場合」で変わる。
+
+- CD が無い場合: ベースブランチの先端を承認に出し、承認を得たら `release-steps.py approve --approval <承認資料>` で承認の記録を書く
+  （`--approved-sha` は提示の時点で控えた `approval-facts` の `metrics.approved_sha`。資料を読み直した値は渡さない）。MVV 判定で通したときは
+  `mvv-gate.py` が書く。承認の記録の無い承認資料ではリリースが通らない
+- CD があり、レビューなしでマージできる場合: 本番の PR の先端（版上げまで積んだ `release/v<版>` の先頭）を承認に出す。承認資料は
+  `release-steps.py approval-post` で本番の PR へ置き、承認を得たら `release-steps.py approve --pr <本番の PR>` で承認の証跡を書く。
+  誰がいつ承認したかは、GitHub が付けた証跡のコメントの作成者と作成時刻で読む（証跡の書式は `scripts/release_lib/approval_trail.py`）
+- CD があり、レビューが必須の場合: 本番の PR のレビューの承認がリリース承認である
 差し戻されたら直後に差し戻しの記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「答えを記録する」）。
 
 **本番リリースの承認は、この工程の中で必ず求める。** 前の工程（コードレビュー・完了判定）を通ったことは
@@ -255,13 +276,19 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 **CD の形では、公開は CD が行う。** この手順は「マージの前に承認を取り、マージの後に CD の結果を読む」になる（下の「CD の結果を確かめる」）。
 
 **Claude Code のプラグインの形では、マージまでを `release-steps.py release --channel dev|prod` が行う**
-（打ち方は [references/release-steps.md](references/release-steps.md)）。**`--channel prod` は
-「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら `summary` を報告して止まる。
+（打ち方は [references/release-steps.md](references/release-steps.md)）。`stopped` なら `summary` を報告して止まる。
 
-**`--channel prod` には承認したコミットを渡す**（`--approved-sha <SHA>` か `--approval <承認資料>`）。リリース対象に触れる承認の外の
-変更が入っていれば `gate`（10）で止まり、本番チャネルの PR もタグも作られていない。読み方は同じ references にある。MVV 判定で通さず人へ戻す。
+- **CD が無い場合**: `--channel prod` は「公開前の提示と承認」で承認を得るまで打たない。承認したコミットを渡す
+  （`--approved-sha <SHA>` か `--approval <承認資料>`）。リリース対象に触れる承認の外の変更が入っていれば `gate`（10）で止まり、
+  本番チャネルの PR もタグも作られていない。MVV 判定で通さず人へ戻す
+- **CD のある場合**: `--channel prod` は承認したコミットを受けない。承認の前に打つと、本番の PR を作って CI の必須チェックを待ち、
+  `gate`（10）で止まる（`metrics.main_pr`・`metrics.approved_sha` は先端）。承認資料を置いて承認を得、証跡を書いてから打ち直すと、
+  承認と先端が一致したときだけ `--admin` なしでマージし、CD の結果を読む
+- **開発版**: `.ndf/supervise.json` の `release.dev_workflow` があれば、`--channel dev` は開発版の PR を作り、その workflow を起動して
+  結果を待つ。workflow が CI の必須チェックの通過を待ってから迂回なしでマージする。宣言が無ければ手元でマージする
 
-**`--channel prod` の後のタグと GitHub Release は、`delivery` の行の `publishes_release` が真なら CD が作り、無ければこのコマンドが作る。**
+**本番チャネルへのマージの後のタグと GitHub Release は、`delivery` の行の `publishes_release` が真なら CD が作り、無ければ `--channel prod` が作る。**
+リリースの手順は全体テストを流し直さない。テストは CI の必須チェックが受け持ち、マージはその通過を待つ。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
 待っている間はこの工程が続いている状態で、`release-verification` はまだ始められない。

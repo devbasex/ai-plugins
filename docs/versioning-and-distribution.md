@@ -133,15 +133,21 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、リリース承認ゲートで承認したコミット
-（`develop` のコミット）から `release/v<版>` を切って版上げのコミットを積み、`release/v<版>` を先に `develop` へ
-取り込んでから、`release/v<版>` を head にした `main` 宛の Pull Request を管理者の bypass でマージする。
+**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、`develop` から `release/v<版>` を切って
+版上げ・変更履歴・トークン消費の記録のコミットを積み、`release/v<版>` を先に `develop` へ取り込んでから、`release/v<版>` を
+head にした `main` 宛の Pull Request（リリースの PR）を作る。リリース承認はこのリリースの PR の先端に対して**マージの前に**取る。
 `main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は
 `develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
 
-**承認の後に `develop` が進んでも、デプロイは止まらない。** リリース（`release-steps.py release --channel prod`）が
-承認したコミットと比べる相手は `origin/release/v<版>` の先端とし、`develop` の先端は比べる相手に入れない。`release/v<版>` に
-承認したコミットと版上げの外のコミットがあれば、承認ゲート（終了コード 10）で止まる。承認の後に `develop` へ
+**ai-plugins は CD があるため、リリース承認はリリースの PR の上で取る**（`release` の Skill の「リリースの場合」。判定は
+`release-steps.py release-case`）。`main` の ruleset の承認数が 0 なら、承認資料と承認の証跡（承認したコミットの 40 桁）を
+リリースの PR へコメントで置く。誰がいつ承認したかは、GitHub が付けた証跡のコメントの作成者と作成時刻で読む。
+`.github/workflows/release-approval.yml` が証跡を確かめて PR の先端へ必須チェック `ndf/release-approval` を付け、証跡の無い PR・
+証跡と先端の違う PR・承認権限（admin か maintain）の無い人の証跡だけの PR は `main` へマージできない。承認数が 1 以上なら、
+リリースの PR のレビューの承認をリリース承認とみなす。
+
+**承認の後に `develop` が進んでも、デプロイは止まらない。** 承認の対象はリリースの PR の先端で、`develop` の先端は比べる相手に
+入れない。承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。承認の後に `develop` へ
 入った変更は、この版の `main` には入らず次のリリースで出る。
 
 **`release/v<版>` を `develop` へ取り込むときに版数を持つ箇所が衝突したら、本番の版を取る。** 承認の後に
@@ -176,14 +182,15 @@ remote:
 差分で確かめる（承認の後に `develop` が進んでいれば、`develop` とは一致しない）。
 
 ```bash
-gh pr create --base main --head release/v<版> --title "Release: v<版>" --body "..."
-gh pr merge <番号> --merge --admin      # 承認 1 件必須。メンテナーが 1 人の間は bypass で通す
+python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # リリースの PR を作り、承認を待って 10
+python3 plugins/ndf/scripts/release-steps.py approval-post --pr <番号> --approval <承認資料> --root .
+python3 plugins/ndf/scripts/release-steps.py approve --pr <番号> --approved-sha <先端> --by user --root .   # 承認を得てから
+python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 先端と承認が一致すればマージ
 git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空であること
 ```
 
-**`--admin` を使うのは、GitHub が自分の Pull Request を自分で承認できないためである。**
-承認 1 件必須のもとでメンテナーが 1 人の間は、これが唯一の経路になる。承認できる人が増えたら
-`--admin` を外し、通常の承認を経てマージする。
+**リリースの PR のマージは管理者の bypass（`--admin`）を使わない。** マージは利用者のアカウントで、承認した先端に固定して行い、
+`main` への push が CD を起動する。必須のチェックか承認が足りなければ GitHub がマージを拒む。
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
@@ -204,7 +211,8 @@ git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空で
 （`runtime-plugin-validate` など）は常に回す。
 
 **`main` を進めるのが `release` の「本番リリース」である。** そちらには承認が要る。`develop`
-へのマージは「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。
+へのマージは「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。開発版の PR は手元で作り、マージは
+`.github/workflows/release-dev.yml`（`.ndf/supervise.json` の `release.dev_workflow`）が CI の必須チェックの通過を待って行う。
 
 **正式版のリリースの Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
 `.ndf/release.json` のリリースコマンド（`scripts/token-usage-snapshot.py --released <版>`）が走り、

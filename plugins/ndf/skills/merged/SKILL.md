@@ -139,7 +139,7 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 ```bash
 python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メインディレクトリ> \
   [--gate-approved user|mvv] [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] \
-  [--stale-after 300] [--no-cleanup]
+  [--stale-after 300] [--no-cleanup] [--no-admin]
 ```
 
 - **最初の読みで宛先を判定し、自動反映の本番チャネル（判定を決められない宛先を含む）なら、`--gate-approved` が無い限り
@@ -153,7 +153,12 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
   秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
 - 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
-- 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
+- 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。`--no-admin` なら `--admin` を付けず
+  （ruleset の迂回を使わない）、マージの行に `admin: false` が残る。必須のチェックやレビューが足りなければ GitHub が拒み、
+  `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release --channel prod`・`promote`）と
+  開発版の workflow が付ける（`release` の Skill の「リリースの場合」）。`promote --gate-approved` は CD のある場合、マージの前に
+  承認したコミットの証跡をリリースの Pull Request へ書き（cd-no-review）か承認のレビューのコミットと先端を照らし（cd-review。
+  違えば `gate`（10））、自分で `--no-admin` を付けてマージする
   `status` の読み方は上の表と同じ
 - 上限の時間を過ぎてもチェックが終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
 - 実行が終わった（`completed`）のにチェックが pending のまま `--stale-after` 秒続けば、GitHub 側で
