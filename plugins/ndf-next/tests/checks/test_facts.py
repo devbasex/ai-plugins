@@ -31,7 +31,7 @@ def test_member_of_another_files_set(plugin, rules):
     assert kinds(facts.check(plugin.scope(), rules)) == ["member"]
 
 
-SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "facts" / facts.SCHEMA_NAME
+SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "facts" / facts.SCHEMA_FILE
 
 
 def table(rows, columns) -> str:
