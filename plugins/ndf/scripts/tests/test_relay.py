@@ -799,19 +799,14 @@ def test_run_exception_keeps_child_and_restores(term, tmp_path):
 
 # ---------------------------------------------------------------- 素通しと本物の claude（AC15 / AC20）
 
-import importlib.util  # noqa: E402
-
 
 class Execd(Exception):
     pass
 
 
 @pytest.fixture()
-def mod(tmp_path, monkeypatch):
-    """relay.py を読み込み、os.execve を差し替える。環境は一時の HOME にそろえる。"""
-    spec = importlib.util.spec_from_file_location("relay_under_test", RELAY)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+def relay_env(tmp_path, monkeypatch):
+    """環境を一時の HOME（`tmp_path/home`）にそろえ、NDF・XDG・CLAUDE・DEVBASE の変数を落とす。HOME を返す。"""
     for k in list(os.environ):
         # DEVBASE_SHELLRC_DIR と ZDOTDIR も落とす（isolated_env と同じ。本物の読み込み先を見ない）
         if (k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) or k == "ZDOTDIR") and k != "NDF_RELAY_UV":
@@ -819,15 +814,20 @@ def mod(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+@pytest.fixture()
+def execs(monkeypatch):
+    """os.execve を差し替え、呼び出し（パス・引数・環境）を記録して `Execd` を投げる。記録の並びを返す。"""
     calls = []
 
     def fake_execve(path, argv, env):
         calls.append((path, argv, dict(env)))
         raise Execd()
 
-    monkeypatch.setattr(m.os, "execve", fake_execve)
-    m.calls = calls
-    return m
+    monkeypatch.setattr(os, "execve", fake_execve)
+    return calls
 
 
 @pytest.mark.parametrize(
@@ -876,41 +876,41 @@ def mod(tmp_path, monkeypatch):
         ([], []),
     ],
 )
-def test_carried_args(mod, args, expected):
+def test_carried_args(args, expected):
     """最初の区間の引数から、2 つ目以降の区間へ引き継ぐものを選ぶ（#936）。"""
     assert relay_claude.carried_args(args) == expected
 
 
 @pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])
-def test_running_tasks_ignores_non_list_inputs(mod, tasks):
+def test_running_tasks_ignores_non_list_inputs(tasks):
     assert bool(relay_mark.running_tasks(tasks)) is False
 
 
-def test_running_tasks_ignores_non_dict_items(mod):
+def test_running_tasks_ignores_non_dict_items():
     assert bool(relay_mark.running_tasks(["running", 1, None])) is False
 
 
-def test_running_tasks_detects_running_dict(mod):
+def test_running_tasks_detects_running_dict():
     tasks = [{"status": "queued"}, {"status": "running"}]
 
     assert bool(relay_mark.running_tasks(tasks)) is True
 
 
-def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
+def test_fallback_cwd_uses_nearest_existing_parent(relay_env, tmp_path):
     parent = tmp_path / "a"
     parent.mkdir()
 
     assert relay_common.fallback_cwd(str(parent / "b" / "c")) == str(parent)
 
 
-def test_fallback_cwd_uses_existing_parent_when_worktree_main_is_gone(mod, tmp_path):
+def test_fallback_cwd_uses_existing_parent_when_worktree_main_is_gone(relay_env, tmp_path):
     cwd = tmp_path / "gone" / ".worktrees" / "x" / "y"
 
     assert relay_common.fallback_cwd(str(cwd)) == str(tmp_path)
 
 
 @pytest.mark.parametrize("cwd", ["nope/deeper", ""])
-def test_fallback_cwd_uses_home_when_relative_path_has_no_existing_parent(mod, tmp_path, cwd):
+def test_fallback_cwd_uses_home_when_relative_path_has_no_existing_parent(relay_env, tmp_path, cwd):
     assert relay_common.fallback_cwd(cwd) == str(tmp_path / "home")
 
 
@@ -923,10 +923,10 @@ def real_claude(tmp_path, name="real"):
 
 
 @pytest.mark.parametrize("case", ["relay-off", "under-relay", "print", "help", "subcommand", "stdin-pipe"])
-def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
+def test_run_passthrough(relay_env, execs, tmp_path, monkeypatch, capsys, case):
     claude = real_claude(tmp_path)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
-    monkeypatch.setattr(mod.os, "isatty", lambda fd: case != "stdin-pipe")
+    monkeypatch.setattr(os, "isatty", lambda fd: case != "stdin-pipe")
     args = {"print": ["-p", "hi"], "help": ["--help"], "subcommand": ["mcp", "list"]}.get(case, ["--model", "haiku"])
     if case == "relay-off":
         monkeypatch.setenv("NDF_RELAY", "0")
@@ -935,7 +935,7 @@ def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
     before = dict(os.environ)
     with pytest.raises(Execd):
         relay_run.cmd_run(args)
-    path, argv, env = mod.calls[0]
+    path, argv, env = execs[0]
     assert path == str(claude)
     assert argv == [str(claude)] + args
     diff = {k for k in set(env) | set(before) if env.get(k) != before.get(k)}
@@ -946,7 +946,7 @@ def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
 
 
 @pytest.mark.parametrize("case", ["no-pty", "list-fails", "no-ndf", "list-hangs", "list-bad-json"])
-def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, capsys, case):
+def test_run_cannot_start_says_then_passthrough(relay_env, execs, tmp_path, monkeypatch, capsys, case):
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
     body = {
@@ -959,17 +959,17 @@ def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, caps
     claude.chmod(0o755)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
     monkeypatch.setenv("NDF_RELAY_LIST_TIMEOUT", "0.5")
-    monkeypatch.setattr(mod.os, "isatty", lambda fd: True)
+    monkeypatch.setattr(os, "isatty", lambda fd: True)
     if case == "no-pty":
         monkeypatch.setitem(sys.modules, "pty", None)
     with pytest.raises(Execd):
         relay_run.cmd_run([])
     err = capsys.readouterr().err
     assert err.startswith("ndf-relay: ラッパーを始めない（") and err.count("\n") == 1
-    assert mod.calls[0][1] == [str(claude)]
+    assert execs[0][1] == [str(claude)]
 
 
-def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch, capsys):
+def test_run_relay_dir_oserror_says_then_passthrough(relay_env, execs, tmp_path, monkeypatch, capsys):
     """現状固定: 一覧は読めてもラッパー用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
     実体へ素通しする（cmd_run の make_relay_dir が OSError になる経路）。"""
     claude = tmp_path / "bin" / "claude"
@@ -978,7 +978,7 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     claude.chmod(0o755)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
     monkeypatch.setenv("NDF_RELAY_LIST_TIMEOUT", "5")
-    monkeypatch.setattr(mod.os, "isatty", lambda fd: True)
+    monkeypatch.setattr(os, "isatty", lambda fd: True)
 
     def boom():
         raise OSError(errno.EACCES, "no dir")
@@ -988,10 +988,10 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
         relay_run.cmd_run([])
     err = capsys.readouterr().err
     assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する\n"
-    assert mod.calls[0][1] == [str(claude)]
+    assert execs[0][1] == [str(claude)]
 
 
-def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
+def test_resolve_skips_wrappers(relay_env, tmp_path, monkeypatch):
     """`claude` という名前でラッパーを呼ぶ別のスクリプトを飛ばし、本物を選ぶ（AC20）。"""
     wrapper = tmp_path / "wrap" / "claude"
     wrapper.parent.mkdir()
@@ -1008,7 +1008,7 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
     assert relay_claude.resolve_claude() == str(forced)
 
 
-def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
+def test_resolve_keeps_unreadable_claude(relay_env, tmp_path, monkeypatch):
     """読めない（実行だけできる）claude はラッパーと見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
     real = real_claude(tmp_path)
     real.chmod(0o111)
@@ -1051,7 +1051,7 @@ def _set_env(monkeypatch, env):
 
 
 @pytest.mark.parametrize("depth", ["1", "2"])
-def test_run_spawned_drops_parent_env_before_judging(mod, tmp_path, monkeypatch, capsys, depth):
+def test_run_spawned_drops_parent_env_before_judging(relay_env, execs, tmp_path, monkeypatch, capsys, depth):
     """#2656 の I1・I2: 起動の印を持つ `run` は、親のセッションの環境（`NDF_RELAY_DIR`・深さ 2 を含む）があっても
     パススルーの判定にも終了コード 127 にも当たらない。外すのは親のセッションの環境だけで、利用者の設定は残す。
     ここでは `-p` の素通しで、判定の後の環境を exec の引数から読む。"""
@@ -1063,7 +1063,7 @@ def test_run_spawned_drops_parent_env_before_judging(mod, tmp_path, monkeypatch,
     monkeypatch.setattr(relay_run.tmux, "session_value", lambda name, key: None)
     with pytest.raises(Execd):
         relay_run.cmd_run(["-p", "hi"])
-    env = mod.calls[0][2]
+    env = execs[0][2]
     assert env["NDF_RELAY_DEPTH"] == "1"
     gone = set(PARENT_SESSION) - {"NDF_RELAY_DEPTH"} | {"NDF_RELAY_DIR", "NDF_SHARED_CONFIG_DIR"}
     assert not gone & set(env), gone & set(env)
@@ -1072,14 +1072,14 @@ def test_run_spawned_drops_parent_env_before_judging(mod, tmp_path, monkeypatch,
     assert "MARK" not in capsys.readouterr().err  # 外した値を画面へ出さない（I6）
 
 
-def test_run_without_spawned_mark_keeps_env(mod, tmp_path, monkeypatch):
+def test_run_without_spawned_mark_keeps_env(relay_env, execs, tmp_path, monkeypatch):
     """#2656 の I4: 起動の印が無ければ環境は変わらず、今と同じくパススルーになる。"""
     claude = real_claude(tmp_path)
     _set_env(monkeypatch, {**PARENT_SESSION, "NDF_RELAY_DEPTH": "1", "NDF_RELAY_DIR": str(tmp_path), "NDF_RELAY_CLAUDE": str(claude)})
     before = dict(os.environ)
     with pytest.raises(Execd):
         relay_run.cmd_run(["--model", "haiku"])
-    env = mod.calls[0][2]
+    env = execs[0][2]
     assert {k: v for k, v in env.items() if k != "NDF_RELAY_DEPTH"} == {k: v for k, v in before.items() if k != "NDF_RELAY_DEPTH"}
     assert env["NDF_RELAY_DEPTH"] == "2"
 
@@ -1452,9 +1452,9 @@ def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
     assert (root / "b-emptypid" / "stop").exists()
 
 
-def test_make_relay_dir_is_new_each_time(mod, tmp_path, monkeypatch):
+def test_make_relay_dir_is_new_each_time(relay_env, tmp_path, monkeypatch):
     """pid が同じでも作業ディレクトリは起動ごとに新しい。親が無くても作る（AC26）。"""
-    monkeypatch.setattr(mod.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(os, "getpid", lambda: 4242)
     monkeypatch.setattr(relay_record.time, "gmtime", lambda *a: time.struct_time((2026, 9, 23, 0, 0, 0, 2, 266, 0)))
     a = relay_record.make_relay_dir()
     (pathlib.Path(a) / "stop").touch()
@@ -1991,14 +1991,13 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
 
 
 @pytest.fixture()
-def mac(mod, tmp_path, monkeypatch):
-    """relay.py を macOS の bash として動かす。HOME は一時ディレクトリ（mod が用意する）。"""
+def mac(relay_env, tmp_path, monkeypatch):
+    """relay.py を macOS の bash として動かす。HOME は一時ディレクトリ（relay_env が用意する）。"""
     for k in ("DEVBASE_SHELLRC_DIR", "ZDOTDIR"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("SHELL", "/bin/bash")
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert mod.os.path.expanduser("~") == str(home_of(tmp_path))
-    return mod
+    assert os.path.expanduser("~") == str(home_of(tmp_path))
 
 
 def test_mac_install_adds_to_bash_profile_and_uninstall_removes(mac, tmp_path, capsys):
@@ -2028,7 +2027,7 @@ def test_mac_status_warns_when_only_bashrc_has_loader(mac, tmp_path, capsys):
 # -- status は今のセッションとラッパーとの位置を示す（#1187）
 
 
-def session_lines(m, capsys):
+def session_lines(capsys):
     before = {p for p in home_of_now().rglob("*")}
     assert relay_install.cmd_status() == 0
     assert {p for p in home_of_now().rglob("*")} == before
@@ -2039,64 +2038,62 @@ def home_of_now():
     return pathlib.Path(os.environ["HOME"])
 
 
-def test_status_session_relay(mod, tmp_path, monkeypatch, capsys):
+def test_status_session_relay(relay_env, tmp_path, monkeypatch, capsys):
     # 関数で呼ぶ status の親は pytest の親。そこを child.pid にすると最初に当たる claude がラッパーの子になる
     r = FakeRelayDir(tmp_path, child_pid=os.getppid())
     (r.dir / "relay.pid").write_text("4321")
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
-        assert session_lines(mod, capsys) == [f"ndf-relay: このセッション: ラッパー経由（relay PID 4321、claude PID {os.getppid()}）"]
+        assert session_lines(capsys) == [f"ndf-relay: このセッション: ラッパー経由（relay PID 4321、claude PID {os.getppid()}）"]
     finally:
         r.release()
 
 
-def test_status_session_no_dir(mod, capsys):
-    assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"]
+def test_status_session_no_dir(relay_env, capsys):
+    assert session_lines(capsys) == ["ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"]
 
 
-def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys):
+def test_status_session_no_dir_hints_when_loader_is_in_rc(relay_env, tmp_path, capsys):
     home = home_of(tmp_path)
     (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n")
-    assert session_lines(mod, capsys) == [
+    assert session_lines(capsys) == [
         "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）。"
         f"{home / '.bashrc'} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、"
         "または IDE から起動した"
     ]
 
 
-def test_status_session_no_dir_hints_when_loader_is_in_zshrc(mod, tmp_path, capsys):
+def test_status_session_no_dir_hints_when_loader_is_in_zshrc(relay_env, tmp_path, capsys):
     home = home_of(tmp_path)
     (home / ".zshrc").write_text("# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n")
-    assert f"{home / '.zshrc'} に読み込みの行はある" in session_lines(mod, capsys)[0]
+    assert f"{home / '.zshrc'} に読み込みの行はある" in session_lines(capsys)[0]
 
 
-def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, monkeypatch, capsys):
+def test_status_session_no_dir_hints_when_devbase_loader_exists(relay_env, tmp_path, monkeypatch, capsys):
     dl = tmp_path / "shellrc.d"
     dl.mkdir()
     (dl / "ndf-relay.sh").write_text(relay_shellrc.loader_body())
     monkeypatch.setenv("DEVBASE_SHELLRC_DIR", str(dl))
-    assert f"{dl / 'ndf-relay.sh'} に読み込みの行はある" in session_lines(mod, capsys)[0]
+    assert f"{dl / 'ndf-relay.sh'} に読み込みの行はある" in session_lines(capsys)[0]
 
 
-def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
+def test_status_session_not_running(relay_env, tmp_path, monkeypatch, capsys):
     r = FakeRelayDir(tmp_path)
     r.release()
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
-    assert session_lines(mod, capsys) == [
-        "ndf-relay: このセッション: ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"
-    ]
+    assert session_lines(capsys) == ["ndf-relay: このセッション: ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"]
 
 
-def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
+def test_status_session_not_child(relay_env, tmp_path, monkeypatch, capsys):
     r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
-        assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
+        assert session_lines(capsys) == ["ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
     finally:
         r.release()
 
 
-def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys):
+def test_status_session_cannot_trace_parents(relay_env, tmp_path, monkeypatch, capsys):
     # /proc も ps も使えない環境。ほかの行はそのまま出す
     r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
@@ -2121,7 +2118,7 @@ def test_mac_uninstall_removes_blocks_in_both_files(mac, tmp_path):
 
 
 @pytest.mark.parametrize("name", [".bash_profile", ".bash_login", ".profile"])
-def test_bash_definition_in_login_file_is_not_overridden(mod, tmp_path, monkeypatch, capsys, name):
+def test_bash_definition_in_login_file_is_not_overridden(relay_env, tmp_path, monkeypatch, capsys, name):
     monkeypatch.delenv("DEVBASE_SHELLRC_DIR", raising=False)
     monkeypatch.setenv("SHELL", "/bin/bash")
     home = home_of(tmp_path)
@@ -2139,7 +2136,7 @@ def test_mac_does_not_create_bash_profile_that_shadows_profile(mac, tmp_path, ca
     assert f"{home / '.profile'} を読んでいる" in capsys.readouterr().out
 
 
-def test_linux_bash_still_adds_to_bashrc(mod, tmp_path, monkeypatch, capsys):
+def test_linux_bash_still_adds_to_bashrc(relay_env, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("DEVBASE_SHELLRC_DIR", raising=False)
     monkeypatch.setenv("SHELL", "/bin/bash")
     monkeypatch.setattr(sys, "platform", "linux")
@@ -2337,7 +2334,7 @@ def test_startup_unwritable_exits_zero(tmp_path, home):
     assert p.returncode == 0 and p.stdout == ""
 
 
-def test_version_key(mod):
+def test_version_key():
     k = relay_version_dir.version_key
     assert k("10.17.5-dev.2") < k("10.17.5-dev.10") < k("10.17.5-rc.1") < k("10.17.5") < k("10.17.6-dev.1")
     assert k("x") is None and k(None) is None
@@ -2604,7 +2601,7 @@ def test_guard_exit_wait_resumes_after_question(term):
     t.finish()
 
 
-def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
+def test_relay_quiet_defaults_to_five_seconds(relay_env, tmp_path, monkeypatch):
     """`NDF_RELAY_QUIET` が無ければ静止の待ちは 5 秒（#964）。有れば値に従う。"""
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
@@ -4541,7 +4538,7 @@ def _start_row(d, **extra):
     ],
     ids=["same", "differs", "unknown", "cache"],
 )
-def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, current, expected):
+def test_status_shows_running_wrapper(relay_env, tmp_path, monkeypatch, capsys, row, current, expected):
     """ラッパー経由の status は、動いているラッパーのバージョンディレクトリと複製との違いを示す（AC14・AC16）。"""
     base = pathlib.Path(relay_common.config_dir())
     for n in ("relay-10.17.52-aaaa1111", "relay-10.17.53-bbbb2222"):
@@ -4562,7 +4559,7 @@ def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, c
     assert lines[i + 1] == "ndf-relay: 動いているラッパー: " + expected
 
 
-def test_status_outside_relay_has_no_running_wrapper_line(mod, capsys):
+def test_status_outside_relay_has_no_running_wrapper_line(relay_env, capsys):
     assert relay_install.cmd_status() == 0
     assert "動いているラッパー" not in capsys.readouterr().out
 
