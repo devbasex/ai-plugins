@@ -36,11 +36,6 @@ def _lock(path: Path) -> FileLock:
     return FileLock(path, thread_local=False, fallback_to_soft=False, preserve_lock_file=True)
 
 
-def _file_lock(directory: Path, name: str) -> FileLock:
-    """置き場のファイル `name` を守るロック（`<name>.lock`）を、待ちの上限つきで取る。"""
-    return _lock(directory / (name + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS)
-
-
 def _replace_text(path: Path, text: str) -> None:
     """一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
@@ -66,7 +61,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
     now = time.time() if now is None else now
     path = directory / EVENTS_FILE
     line = json.dumps(row, ensure_ascii=False)
-    with _file_lock(directory, EVENTS_FILE):
+    with _lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
