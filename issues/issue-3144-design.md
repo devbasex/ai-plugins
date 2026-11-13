@@ -156,7 +156,12 @@ graph TD
 
 ### 値の集合へ値を足すことで当てはまらなくなる規則
 
-工程の集合に「詳細設計」を、設計文書の名前の集合に `-design-detail.md` を足す。集合の名前と既存の値（`ドキュメント再構成`・`-design-decisions.md`）でリリース対象を検索し（ `grep -rn "ドキュメント再構成" plugins/ndf` 、 `grep -rn "design-decisions" plugins/ndf --include=*.py` ）、新しい値に当てはまらない規則を上の表へ載せた。
+工程の集合に「詳細設計」を、設計文書の名前の集合に `-design-detail.md` を足す。集合の名前と既存の値（`ドキュメント再構成`・`-design-decisions.md`）で、リリース対象を検索した。新しい値に当てはまらない規則は、上の表へ載せた。検索のコマンドは次の 2 つである。
+
+```bash
+grep -rn "ドキュメント再構成" plugins/ndf
+grep -rn "design-decisions" plugins/ndf --include=*.py
+```
 
 | 規則 | 置き場 | 当てはまるか |
 | --- | --- | --- |
@@ -202,7 +207,19 @@ classDiagram
 
 異常系の処理: `check_detail` は読み取りだけで失敗を持たない。表の形が崩れた節は「行が無い」として `detail_section` で指摘する。ファイルを読めない・git を読めないときの扱いは既存の `cmd_check` の終了コード 2 のままである。
 
-既存の部品の再利用: 新設の 2 関数について、Markdown の節と表の読み取りは `lib/md.py`、文書の探索は `lib/design_docs.py`、設計の結果の読み取りは設計の結果のステージの既存の関数を使う。詳細設計の文書を読む既存の関数は無い（ `grep -rln "design-detail\|詳細設計" plugins/ndf/scripts plugins/ndf/skills` の当たりは worktree の部品とそのテストのコメントにある過去の設計文書の名前だけ。2026-11-13 に実行）。
+既存の部品の再利用: 新設の 2 関数は、次の既存の部品を使う。
+
+| 読み取るもの | 使う部品 |
+| --- | --- |
+| Markdown の節と表 | `lib/md.py` |
+| 文書の探索 | `lib/design_docs.py` |
+| 設計の結果 | 設計の結果のステージの既存の関数 |
+
+詳細設計の文書を読む既存の関数は無い。次の検索の当たりは、worktree の部品とそのテストのコメントにある過去の設計文書の名前だけだった（2026-11-13 に実行）。
+
+```bash
+grep -rln "design-detail\|詳細設計" plugins/ndf/scripts plugins/ndf/skills
+```
 
 ## 入出力の契約
 
@@ -325,7 +342,13 @@ sequenceDiagram
 
 ### 決定 5: 詳細設計を通るモードをプランが引けるよう、`design_steps.py` に定数を置き、工程の分類との一致をテストで縛る
 
-プランの組み立ては Python で、工程の分類はシェルの `WF_STAGE_MATRIX` にある。実行時にシェルの変数を Python で読む既存の部品は無い（ `grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py` の当たりは `development-workflow/tests/` の 2 ファイルだけ。2026-11-13 に実行）。定数 `DETAIL_DESIGN_MODES = ("standard", "legacy-refactor")` を置き、`WF_STAGE_MATRIX` の「詳細設計」の行で `R` の列と一致することをテストで確かめる。既存の `DESIGN_MATCH_MODES` と同じ置き方である。
+プランの組み立ては Python で、工程の分類はシェルの `WF_STAGE_MATRIX` にある。実行時にシェルの変数を Python で読む既存の部品は無い。次の検索の当たりは、`development-workflow/tests/` の 2 ファイルだけだった（2026-11-13 に実行）。
+
+```bash
+grep -rln "WF_STAGE_MATRIX" plugins/ndf --include=*.py
+```
+
+定数 `DETAIL_DESIGN_MODES = ("standard", "legacy-refactor")` を置く。この定数が `WF_STAGE_MATRIX` の「詳細設計」の行で `R` の列と一致することを、テストで確かめる。既存の `DESIGN_MATCH_MODES` と同じ置き方である。
 
 実行時にシェルの表を読み取る形は、表の書式を読む部品を新しく作ることになり、#3092（工程の進行表をスクリプトで組む）が置き場を作り直すまでの間だけのために増えるため採らない。
 
