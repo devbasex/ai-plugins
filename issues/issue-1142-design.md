@@ -43,20 +43,17 @@
 
 ### 3 つの主題をまとめた順序
 
-触るファイルの重なりで順序を決めた。同じ行の中は並列に流せる。リファクタリング計画の子の課題（#2963・#2990・#2992〜#2995）と触るファイルが重なる行は、その子の課題の実装の後に置く（data の DT8 と同じ扱い）。#3153 は不具合の修正のため、`supervise_lib/verify_steps.py` が #2993 と重なっても先に出す（scripted-flow の決定 64）。
+**移行ステップと子の課題は、次の 5 つの規則で流す。**
 
-| 順 | 流すもの | 先に要るもの | 重なりの理由 |
-| ---: | --- | --- | --- |
-| 1 | #3153（scripted-flow の子 3）・smells の A0 | — | A0 は `.github/workflows/script-structure.yml` と `pyproject.toml` を触る |
-| 2 | scripted-flow の子 1（種類の表と結果 JSON） | — | `scripts/check-ndf-contracts.py` を data の DT1 と共有するため、DT1 より先に入れる |
-| 3 | data の DT1 | #2996・順 1 の A0・順 2 の子 1 | `script-structure.yml` を A0 と、`check-ndf-contracts.py` を子 1 と共有する |
-| 4 | data の DT2・DT3・DT5、scripted-flow の子 10、smells の A1〜A4 | 順 2・順 3 | 互いの触るファイルは各文書の表で重ならない組だけを同時に流す。A1〜A4 は着手の時点の一覧で割る |
-| 5 | scripted-flow の子 2・9・11 | 順 2 と、子 2 は #2963・#2990・#2993、子 9 は #2992、子 11 は #2994 の実装 | 子 2 は `supervise_lib/` と `lib/durable.py`、子 9 は `parallel.py`・`lib/parallel_*.py`、子 11 は `lib/sprint_loop_cli.py` を子の課題と共有する |
-| 6 | data の DT4、scripted-flow の子 4〜7・12 | 順 4・順 5 の前提の行 | 各文書の「先に要るもの」。子 4〜7 は `supervise_lib/` か `supervise.py` を触るため、子 2 と同じく #2993 の後になる |
-| 7 | scripted-flow の子 13 | 順 6 の子 4 | 子 13 の範囲の 6 本に `merged-steps.py` が入り、子 4 と触るファイルが重なる。`supervise.py` を触るため、子 7（`supervise_lib/` 周辺）とも触る範囲が近い |
-| 8 | data の DT6・DT7、scripted-flow の子 8 | #3092・#3144 の実装 | 工程・モード・設計文書の種類の置き場が先に要る |
-| 9 | data の DT8 | 子の課題 #2990・#2992・#2993・#2994・#2995 | 子の課題が触るファイルの残り |
-| 10 | E9（測り直し） | 上のすべて | `scripts/measure/ai-smells.py`・`const-facts.py`・`ai-branching.py` を同じコマンドで打つ |
+1. 先に要るものの後に流す。先に要るものは、各文書の「先に要るもの」「後に置く課題」の列と、#3092・#3144 の実装と、リファクタリング計画の子の課題（#2963・#2990・#2992〜#2995）である
+2. 触るファイルが重なる 2 つは並列に流さず、先に要るものの列に書いた側の後へ置く
+3. 重なりは着手の時点で、各文書の「触るファイル」の表から引いて判定する
+4. #3153（scripted-flow の子 3）は不具合の修正のため、`supervise_lib/verify_steps.py` が #2993 と重なっても先に出す（scripted-flow の決定 64）
+5. E9（測り直し）は最後に流す
+
+**規則を破ったときの壊れ方。** 触るファイルが重なる 2 本を並列に流すと、同じファイルで衝突する。先に要るものより先に流すと、検査が使う依存や行き先の経路がまだ無く、検査や工程が止まる。
+
+大まかな並びは、#3153 と smells の A0 と scripted-flow の子 1 → data の DT1 → data の DT2〜DT5 と scripted-flow の子 2・4〜13 と smells の A1〜A4 → #3092・#3144 の後の DT6・DT7 と子 8 → 子の課題の後の DT8 → E9 である。行ごとの並列の組み方は、実装の実行計画（`issue-plan-strategy` の実行計画）で上の規則から決める。
 
 **子の課題（リファクタリング計画の #2990〜#2996）の範囲の兆候は、その子の課題が直す**（smells の決定 43）。
 
