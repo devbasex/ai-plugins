@@ -14,7 +14,8 @@ import pytest
 from ndf.testing import records, slots, waits
 from ndf.testing.limits import Limits
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]
+# 子プロセスへ読ませる src（conftest の src_env と同じ求め方）
+SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 
 
 @pytest.fixture
@@ -57,7 +58,7 @@ def _slot_held_elsewhere(root: Path, directory: Path):
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
     # CI（GITHUB_ACTIONS）と入れ子の印は枠を飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", slots.HELD_ENV)}
-    env.update({"PYTHONPATH": str(PLUGIN_ROOT / "src"), **extra})
+    env.update({"PYTHONPATH": str(SRC_DIR), **extra})
     if bin_dir:
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
     if log:

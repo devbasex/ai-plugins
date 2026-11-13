@@ -15,7 +15,6 @@ import pytest
 from ndf.testing import records, slots, waits
 from ndf.testing.limits import Limits
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 PLENTY = 10**9
 POLL = 0.01
 
@@ -156,9 +155,8 @@ HOLDER = textwrap.dedent(
 )
 
 
-def test_slot_frees_when_the_owner_is_killed(tmp_path):
-    env = {**os.environ, "PYTHONPATH": str(PLUGIN_ROOT / "src")}
-    holder = subprocess.Popen([sys.executable, "-c", HOLDER, str(tmp_path)], env=env)
+def test_slot_frees_when_the_owner_is_killed(tmp_path, src_env):
+    holder = subprocess.Popen([sys.executable, "-c", HOLDER, str(tmp_path)], env=src_env)
     try:
         waits.wait_for_file(tmp_path / "holding")
         holder.kill()

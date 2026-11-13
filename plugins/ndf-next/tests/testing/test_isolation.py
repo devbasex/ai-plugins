@@ -4,13 +4,10 @@ import os
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 import pytest
 
 from ndf.testing import isolation
-
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
 INNER = textwrap.dedent(
     """
@@ -67,13 +64,13 @@ FLAGGED = {
 
 
 @pytest.mark.parametrize("basetemp_under_real_state", [False, True])
-def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, basetemp_under_real_state):
+def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, src_env, basetemp_under_real_state):
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
     (home / ".claude" / "kept").write_text("kept")
     (home / ".local" / "state").mkdir(parents=True)
     (tmp_path / "test_inner.py").write_text(INNER)
-    env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(PLUGIN_ROOT / "src")}
+    env = {**src_env, "HOME": str(home)}
     # 一時ディレクトリを本物の置き場の下に置いても、その外の本物の置き場は守られたまま
     basetemp = ["--basetemp", str(home / ".local" / "state" / "pytest")] if basetemp_under_real_state else []
     proc = subprocess.run(

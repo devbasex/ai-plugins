@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import sys
@@ -57,16 +56,15 @@ def test_owner_of_compares_workdirs_with_row_worktrees():
     assert owner == testenv.FOREIGN and "/w/ab" in why
 
 
-def test_behavior_check_does_not_inherit_the_callers_stdin(tmp_path):
+def test_behavior_check_does_not_inherit_the_callers_stdin(tmp_path, src_env):
     # 呼び出し元の標準入力にほかの依頼文がつながっていても、起動した確認は何も読まない
     caller = (
         "import sys; from pathlib import Path; from ndf.testing import behavior; "
         "argv = [sys.executable, '-c', 'import sys; print(repr(sys.stdin.read()))']; "
         "print(behavior.launch(argv, Path('.'), timeout=60).stdout, end='')"
     )
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
     result = subprocess.run(
-        [sys.executable, "-c", caller], input="other prompts\n", cwd=tmp_path, env=env, capture_output=True, text=True, check=True
+        [sys.executable, "-c", caller], input="other prompts\n", cwd=tmp_path, env=src_env, capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "''"
 
