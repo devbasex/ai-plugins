@@ -13,12 +13,23 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 import approved_commit as ac
 import branch_flow
-from release_lib import approval, names
+import repo as repo_lib
+from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
+from release_lib.context import ReleaseCtx
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
+
+
+class ReleaseBranches(NamedTuple):
+    """選んで集める取り込み方のリリースが使う 3 つのブランチの役割。"""
+
+    release: str  # リリースブランチ
+    base: str  # 戻すマージの宛先のベースブランチ（開発版のチャネル）
+    production: str  # 本番チャネル
 
 
 def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
@@ -72,11 +83,14 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
     return ac.AllowedPR(n, tip, listed.stdout.split() if listed.returncode == 0 else [])
 
 
-def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base: str, prod: str, approved: str, ops) -> tuple:
+def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
     `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
-    承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。"""
+    承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
+    本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
+    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
+    branches = ReleaseBranches(release=branch, base=base, production=prod)
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
     tag = names.release_tag(plugin, a.version)
@@ -89,7 +103,7 @@ def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base
         main_pr = done["number"]  # 再開: 本番チャネルへのマージは済んでいる（取り消せない）
         git(root, "fetch", "-q", "origin")
         merge = ops.merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-        if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+        if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
             raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
     else:
@@ -101,13 +115,17 @@ def release_selected(root, a, plugin: str, plugins: list[str], branch: str, base
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
         main_pr = done["number"] if done else ops.create_pr(root, prod, branch, title, body)
-        merge, verdict = _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops)
-        metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-        items += approval.tolerated_items(verdict)
+        if case is not None:
+            metrics["case"] = case.case
+            merge = _merge_exact(root, a, plugin, (branches.release, branches.production), main_pr, case, items, metrics, ops)
+        else:
+            merge, verdict = _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops)
+            metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+            items += approval.tolerated_items(verdict)
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-    return main_pr, merge, items, metrics, merge_back_after(root, a, plugin, branch, base, prod, main_pr, ops)
+    return main_pr, merge, items, metrics, merge_back_after(root, a, plugin, branches, main_pr, ops)
 
 
 def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops):
@@ -125,25 +143,45 @@ def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, 
     raise StepError("本番の PR をマージできない")  # 届かない（最後の回は gate で出る）
 
 
-def merge_back(root, a, plugin, branch, base, prod, main_pr, ops) -> tuple[int, str]:
+def _merge_exact(root, a, plugin, refs, main_pr, case, items, metrics, ops):
+    """CD のある場合（#2773 の決定 7）: 本番の PR の先端が PR の上の承認と完全に一致するときだけ、迂回なしで 1 回だけマージする。
+    承認の後のコミットの追加・組み直しで先端が動けば承認ゲート（10）で止め、入れ直さない。`refs` は (リリースブランチ, 本番チャネル)。"""
+    branch, prod = refs
+    redo = f"release-steps.py release-branch で組み直したら承認資料を作り直し、本番の PR #{main_pr} の新しい先端で承認を取り直して打ち直す"
+
+    def waiting(head, judged):
+        return f"{plugin} v{a.version} のリリース承認を待つ（本番の PR #{main_pr}・{branch} の先端 {head[:8]}）: {judged.description}", redo
+
+    def moved(head):
+        return f"{plugin} v{a.version} のリリースを止めた: 本番の PR #{main_pr} の先端が承認した {head[:8]} から動いた", redo
+
+    return reviewed.merge_on_pr_approval(
+        root, repo_lib.owner_repo(root), a, case, main_pr, prod, items, metrics, ops, waiting=waiting, moved=moved
+    )
+
+
+def merge_back(root, a, plugin, branches: ReleaseBranches, main_pr, ops) -> tuple[int, str]:
     """本番チャネルへ入れたリリースブランチを、`<リリースブランチ>-sync` でベースブランチへ戻す（E13・決定 17）。版数の衝突は本番の版を、
     CHANGELOG.md の同じ版の節の衝突はリリースブランチの節を取る（開発版のデプロイがベースブランチへ同じ見出しの節を書くため）。
     前の回が戻し済みなら作り直さない。(PR 番号, 結果) を返す。"""
+    branch, base, prod = branches.release, branches.base, branches.production
     if found := ops._merged_sync_pr(root, branch, base):
         return found, "already_merged"
     lead = f"{plugin} v{a.version} を {prod} へ出した（#{main_pr}）ため、リリースブランチを {base} へ戻す"
     return ops._merge_sync_pr(root, a, plugin, branch, base, main_pr, lead=lead, sections=True)[0], "merged"
 
 
-def merge_back_after(root, a, plugin, branch, base, prod, main_pr, ops):
+def merge_back_after(root, a, plugin, branches: ReleaseBranches, main_pr, ops):
     """公開（タグ・GitHub Release）の後に打つ戻すマージ（`release-steps.py` の `_published` の `back`）。本番は出ているため、戻すマージで
     止まっても本番の完了と分けて報告する: 結果の項目を足し、(状態, 終了コード, 要約の後半) を返す。打ち直すと本番のマージと公開は
     済みとして飛ばし、戻すマージからやり直す。"""
 
+    branch, base = branches.release, branches.base
+
     def back(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
         sync = {"kind": "pr", "base": base, "head": f"{branch}-sync"}
         try:
-            metrics["sync_pr"], merged = merge_back(root, a, plugin, branch, base, prod, main_pr, ops)
+            metrics["sync_pr"], merged = merge_back(root, a, plugin, branches, main_pr, ops)
         except StepError as e:
             items.append({**sync, "name": f"{branch}-sync", "result": "failed", "reason": str(e)[:300]})
             return "stopped", e.code or 1, f"{done}。{base} へ戻すマージで止まった（本番は出ている）: {str(e)[:200]}"

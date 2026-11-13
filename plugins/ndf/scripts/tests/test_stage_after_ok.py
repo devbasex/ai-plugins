@@ -13,7 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 WF_LIB = SCRIPTS.parent / "skills" / "development-workflow" / "scripts" / "lib" / "workflow-common.sh"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import engine, release_templates  # noqa: E402
+from supervise_lib import engine, release_verify  # noqa: E402
 from supervise_lib.claude import UsageLimit  # noqa: E402
 from supervise_lib.slow import SlowAction  # noqa: E402
 from supervise_lib.state import STAGES_AFTER_OK  # noqa: E402
@@ -121,7 +121,7 @@ def test_a_failing_record_after_ok_does_not_stop_the_plan(tmp_path):
 
 def test_the_after_ok_stages_are_workflow_stages_and_the_template_stage():
     """決定 1: 後へ回す工程は工程表の行名で、まとめのプランの release-verify の stage と同じ。"""
-    step = release_templates.release_verify_step("m1", "#1", "20")
+    step = release_verify.release_verify_step("m1", "#1", "20")
     assert step["stage"] in STAGES_AFTER_OK
     for stage in STAGES_AFTER_OK:
         p = subprocess.run(["bash", "-c", f'. "{WF_LIB}"; wf_is_stage "$1"', "_", stage], capture_output=True, text=True)
@@ -130,5 +130,5 @@ def test_the_after_ok_stages_are_workflow_stages_and_the_template_stage():
 
 def test_the_release_verify_worker_does_not_record_progress():
     """決定 2・決定 5: まとめのプランの release-verify は worker に進捗記録を打たせない。"""
-    prompt = release_templates.release_verify_step("m1", "#1", "20")["prompt"]
+    prompt = release_verify.release_verify_step("m1", "#1", "20")["prompt"]
     assert "進捗記録" in prompt and "打たない" in prompt

@@ -143,6 +143,79 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 - 既存のリポジトリの使い方から案を作るときは `project-decl.py measure` を打ち、宣言と実際の使い方のずれは
   `project-decl.py drift` で見る（`development-workflow` の `references/project-analysis.md`）
 
+### レビューの単位
+
+どの PR に何のレビューを掛けるかを、`branch_flow.reviews` に PR の種類ごとに書く。書かない種類は既定値で動く。
+
+| キー | 値 | 意味 |
+| --- | --- | --- |
+| `reviews.<種類>` | `impl`（実装 PR）・`sprint`（スプリントの PR）・`release`（リリースブランチの PR）・`design`（設計 PR）・`spec`（確定仕様化の PR） | PR の種類 |
+| `reviews.<種類>.checks` | `cross-refactoring`・`cross-review`・`behavior`（振る舞いの確認）の重複の無い並び | 掛けるレビュー。並びの順は意味を持たず、ステップは常にリファクタリング → cross-review → 振る舞いの確認の順に置く |
+| `reviews.<種類>.diff` | `pr`（PR の差分全体）・`unchecked`（未検査の差分）・`resolution`（衝突の解消の差分）・`none`（掛けない） | 対象の差分 |
+
+種類ごとに許す値:
+
+| 種類 | 許す `checks` | 許す `diff` | 書ける条件 |
+| --- | --- | --- | --- |
+| `impl` | 3 つすべて | `pr` / `none` | 常に |
+| `sprint` | 3 つすべて | `unchecked` / `none` | 常に |
+| `release` | `cross-review` | `pr` / `resolution` / `none` | `promotion` が `selected` のとき |
+| `design` | `cross-review` | `pr` / `none` | 常に |
+| `spec` | `cross-review` | `pr` / `none` | 常に |
+
+書かない種類の既定値は、課題のまとまりの記録（並列の計画のレーンのまとまり）の有無で決まる。
+
+| 種類 | まとまりの記録あり | まとまりの記録なし |
+| --- | --- | --- |
+| `impl` | `cross-review` / `pr` | 掛けない |
+| `sprint` | `cross-refactoring`・`behavior` / `unchecked` | 3 つすべて / `unchecked` |
+| `release` | 掛けない | 掛けない |
+| `design` | `cross-review` / `pr` | `cross-review` / `pr` |
+| `spec` | 掛けない | 掛けない |
+
+成り立たない組み合わせは、読む側（`supervise.py new sprint`・`project-decl.py check / write`）が直すキーと理由を
+1 件 1 行で出して終了コード 2 で止まる。
+
+- `diff` が `none` なのに `checks` を書いた・`none` 以外なのに `checks` が空
+- `promotion` が `whole` なのに `release` を書いた
+- 実装の差分がどの PR でも cross-review されない。実装の差分を覆うのは `impl` の `pr`・`sprint` の `unchecked`・
+  `release` の `pr` の 3 つで、`release` の `resolution` は衝突の解消の差分しか見ないため数えない。書かない種類を
+  既定値で埋め、まとまりの記録の有無の両方で確かめる
+- 書かない種類の既定値が、書いた行と同じ実装の差分を cross-review する（同じ差分を 2 回レビューする）。
+  キーは書かない種類（`branch_flow.reviews.<種類>`）で、その種類を書いて cross-review を掛けるかを決める。
+  両方の行に書いた重なりは意図したものとして通す
+
+リファクタリングを止める条件（CI テストの宣言の無いリポジトリ・リファクタリングの無いモード）は宣言より先に効き、
+`cross-refactoring` を選んでも外れる。
+
+実装 PR で cross-review し、リリースブランチの PR では衝突の解消だけをレビューする例:
+
+```json
+{
+  "version": 1,
+  "base_branch": "develop",
+  "production_branch": "main",
+  "branch_flow": {
+    "start": "production",
+    "integrate": "check",
+    "doc_prs": "sprint",
+    "promotion": "selected",
+    "reviews": {
+      "impl": {"checks": ["cross-review"], "diff": "pr"},
+      "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
+      "release": {"checks": ["cross-review"], "diff": "resolution"},
+      "design": {"checks": ["cross-review"], "diff": "pr"},
+      "spec": {"checks": [], "diff": "none"}
+    }
+  }
+}
+```
+
+- リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に掛ける。`release-steps.py
+  review-open` が一時の PR（衝突の解消のレビューの PR）を組み、レビューの直しは `review-close` がリリースブランチへ
+  移す（`release` の `references/release-steps.md`）。衝突したマージが無ければレビューを打たずに進む
+- 動いているスプリントは、開始時に目録（`sprint.json`）の `ブランチ運用` の `reviews` へ書いた値のまま進む
+
 ## メインディレクトリのブランチを稼働中の worktree へ追従させる
 
 **セッション開始 hook は、既定ではメインディレクトリの HEAD を動かさない。** 並列に動く

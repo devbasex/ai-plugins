@@ -246,11 +246,65 @@ def test_merge_back_failure_is_reported_apart_from_the_published_release():
 
     a = type("A", (), {"version": "1.1.0"})()
     items, metrics = [{"kind": "tag", "name": "ndf--v1.1.0", "result": "created"}], {}
-    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops(StepError("衝突")))
+    back = promotion.merge_back_after(
+        Path("."), a, "ndf", promotion.ReleaseBranches(BRANCH, "develop", "main"), 30, _Ops(StepError("衝突"))
+    )
     status, code, summary = back(items, metrics, "タグを作った")
     assert (status, code) == ("stopped", 1) and summary.startswith("タグを作った。") and "本番は出ている" in summary
     assert items[0]["result"] == "created" and items[-1]["result"] == "failed" and items[-1]["head"] == f"{BRANCH}-sync"
     items, metrics = [], {}
-    back = promotion.merge_back_after(Path("."), a, "ndf", BRANCH, "develop", "main", 30, _Ops())
+    back = promotion.merge_back_after(Path("."), a, "ndf", promotion.ReleaseBranches(BRANCH, "develop", "main"), 30, _Ops())
     assert back(items, metrics, "タグを作った") == ("ok", 0, "タグを作った") and metrics["sync_pr"] == 31
     assert items == [{"kind": "pr", "base": "develop", "head": f"{BRANCH}-sync", "name": "#31", "result": "merged"}]
+
+
+# --- #2773: CD のある場合は先端と PR の上の承認の完全な一致だけで通す（#3168 を統合） ------------------------------------
+
+
+class _MergeOps:
+    """本番の PR のマージだけを差し替えた `release-steps.py` の代わり。"""
+
+    def __init__(self, moved=False):
+        self.merged, self.moved = [], moved
+
+    def wait_and_merge(self, root, n, **kw):
+        if self.moved:
+            raise promotion.HeadMoved("動いた")
+        self.merged.append(kw)
+        return "m"
+
+
+@pytest.mark.parametrize(
+    "state, moved, merged",
+    [("failure", False, False), ("success", True, False), ("success", False, True)],
+)
+def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, state, moved, merged):
+    """受け入れ条件 13・I6: 承認の後にコミットが足される・組み直すと先端が承認と違い 10 で止まる（許可リストの許容を使わない）。
+    先端が承認と一致すれば迂回なしで 1 回だけマージする。マージを待つ間に動けば入れ直さずに 10。"""
+    import release_case
+
+    from release_lib import reviewed
+
+    head = "c" * 40
+    codes = []
+
+    def emit(obj, code=None):
+        codes.append(code)
+        raise SystemExit(obj)
+
+    monkeypatch.setattr(promotion.repo_lib, "owner_repo", lambda r: "o/r")
+    monkeypatch.setattr(reviewed.approval_trail, "read_head", lambda repo, n: (head, "main", "open"))
+    monkeypatch.setattr(reviewed.approval, "approved_on_pr", lambda repo, n, h, c: reviewed.approval_trail.Judgment(state, "理由"))
+    monkeypatch.setattr(reviewed, "wait_ci_except", lambda *a: None)
+    monkeypatch.setattr(reviewed, "wait_trail_status", lambda *a: None)
+    monkeypatch.setattr(reviewed, "emit", emit)
+    ops = _MergeOps(moved)
+    a = type("A", (), {"version": "1.1.0", "ci_wait": 60.0})()
+    case = release_case.decide_case(True, 0, "")
+    if merged:
+        assert promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops) == "m"
+        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}]
+        return
+    with pytest.raises(SystemExit):
+        promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops)
+    assert codes == [10] and ops.merged == []

@@ -194,7 +194,7 @@ cross-refactoring の駆動も同じ `keep_finished_output` を通る（#1263。
 
 ### hook の締め切り
 
-`hook.py` の `dispatch` は事象を問わず `_guards` を通し、`_guards` が `Deadline` を掛けてから guard を打つ。guard を打つのは
+`hook.py` の `dispatch` は、副命令 `wait-notify`・`goal-skill`・`unattended-start`・`unattended-stop`・`unattended-end`（人のいない実行の hook）を除き、事象を問わず `_guards` を通し、`_guards` が `Deadline` を掛けてから guard を打つ。guard を打つのは
 Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ちの Slack 通知（`wait_notify`）は締め切りを外した後に打つ。
 読む Skill の guard（`hook_lib/worker_skills.py`。Claude Code の PreToolUse の Agent・Task）・規約の文書の guard（`hook_lib/supervisor_docs.py`。Claude Code の PreToolUse の Read・Bash）・手元のテストの guard（`hook_lib/ci_test_guard.py`。Claude Code と Codex の PreToolUse のシェルの Tool）・起票の guard（`hook_lib/issue_guard.py`。Claude Code の PreToolUse の Bash）・問い合わせの guard（`hook_lib/ask_guard.py`。Claude Code の PreToolUse の `AskUserQuestion`）も締め切りの中で打ち、問い合わせの guard が`deny` を返したときは待ちの通知を打たない。
 副命令 `wait-notify` と `goal-skill`（Claude Code の `UserPromptSubmit` の `/goal` の条件の Skill の案内）は `_guards` を通さず、締め切りを掛けない。

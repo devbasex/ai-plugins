@@ -44,6 +44,8 @@ BEFORE = {
     "hook.deadline-margin": {"seconds": 1.5},
     "hook.wait-notify-lock": {"seconds": 5},
     "hook.git-rev-parse": {"seconds": 5},
+    "hook.unattended-pushback": {"attempts": 2},  # #3242 で足した
+    "hook.unattended-mark": {"seconds": 604800},  # #3242 で足した
     "hook.git-remote": {"seconds": 5},
     "auth.probe": {"seconds": 120},
     "claude-account-dir.lock": {"seconds": 2},
@@ -95,6 +97,9 @@ BEFORE = {
     "relay.claude-auth": {"seconds": 30},
     "relay.runtime-install": {"seconds": 600},
     "release-steps.head-moved": {"attempts": 4},
+    "release-steps.trail-status": {"seconds": 600, "interval": 10},  # #2773 で足した承認の証跡のチェックの待ち
+    "release-steps.ci-wait": {"seconds": 3600, "interval": 15},  # #2773 で足した CD のある場合の本番の PR の待ち
+    "release-steps.dev-workflow": {"seconds": 3900, "interval": 15},  # #2773 で足した開発版の workflow の待ち
     "release-verification-steps.env-i": {"seconds": 600},
     "release.cd-poll": {"interval": 15},
     "release.declared-step": {"seconds": 600},

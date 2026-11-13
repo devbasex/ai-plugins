@@ -168,5 +168,6 @@
 | [ndf-parallel-empty-requests-and-settled-gates.md](ndf-parallel-empty-requests-and-settled-gates.md) | 並列の計画のレーンのまとめで、リリースの依頼のプランが最終の検査の実行条件を持つこと、Pull Request がすべてマージされずに閉じた依頼をリリースを組む直前に答えて外すこと、確定か締めで処理したリリース承認ゲートを答え待ちの依頼に数えないこと（settled_gates） |
 | [ndf-sprint-final-check-scope.md](ndf-sprint-final-check-scope.md) | スプリントのまとめの最後の検査を確定仕様化のマージの後に置き、範囲をスプリントに属しまだ検査していない Pull Request に絞ること（check-trigger.py の --sprint・final_scope）、検査の印を進めてよい位置、検査の Pull Request の起点と先頭の合わせ方 |
 | [ndf-whole-test-ci-wait-conflict-stop.md](ndf-whole-test-ci-wait-conflict-stop.md) | CI に任せる全体テストの待ちが、ベースブランチと衝突した Pull Request を照会のたびに読み（fetch_mergeable）、上限まで待たずに stopped で止まり base-sync を次の 1 手に示すこと |
+| [ndf-detailed-design-stage.md](ndf-detailed-design-stage.md) | 詳細設計の工程（standard・legacy-refactor で設計の直後に置く）と設計単体のレビューの段、詳細設計の検査の 5 規則（design-survey.py check）、設計文書の種類の契約（design-docs.json）の常に成り立つ条件・決定と理由・テスト観点。書き方は design の references/detailed-design.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

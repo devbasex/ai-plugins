@@ -66,7 +66,10 @@ MODULES = [
     "templates",
     "verify_steps",
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
+    "release_cd",  # CD のある場合の本番のリリースプランの部品（#2773 で release_templates から分けた）
     "release_templates",
+    "release_verify",  # リリースのプランの確かめと判断のステップ（release_templates から分けた）
+    "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",
@@ -101,7 +104,10 @@ NO_ENGINE = [
     "pr",
     "templates",
     "release_flow",
+    "release_cd",
     "release_templates",
+    "release_verify",
+    "review_units",
     "delivery_templates",
     "sprint_revise",
     "sprint_waves",
@@ -216,3 +222,125 @@ def test_imports_have_no_cycle():
 
     for m in MODULES:
         visit(m, ())
+
+
+# --- #2773: CD のある場合のリリースプランの並び -------------------------------------------------------------
+
+
+def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -> dict:
+    """new release をこのリポジトリの宣言で組む。cd なら場合の判定を「CD があり、レビューなしでマージできる」に固定する。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    if cd:
+        monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    out = tmp_path / f"{channel}-{cd}.json"
+    args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel]
+    args += ["--state", str(tmp_path / "state.json")] if cd and channel == "prod" else []  # approve-pr --by user が承認の記録を読む
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_cd_prod_plan_stacks_the_bumps_before_the_approval_and_merges_after_it(tmp_path, monkeypatch):
+    """受け入れ条件 14・決定 6: 版上げ〜消費の記録は承認ゲートの前に積み、承認の後は証跡とマージだけが進む。"""
+    plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=True)
+    ids = [s["id"] for s in plan["steps"]]
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert ids[0] == "bump" and "approve" not in steps
+    assert [ids.index(i) for i in ("bump", "bump-others", "changelog", "notes", "snapshot")] == sorted(
+        ids.index(i) for i in ("bump", "bump-others", "changelog", "notes", "snapshot")
+    )
+    assert ids.index("snapshot") < ids.index("release")
+    assert "--decided" not in steps["bump-others"]["cmd"] and "--prs 995" in steps["bump-others"]["cmd"]
+    release = steps["release"]
+    assert release["gate_next"] == "facts" and release["next"] == "cd-result" and "--approval" not in release["cmd"]
+    assert (steps["facts"]["next"], steps["explain"]["next"], steps["others"]["next"]) == ("explain", "others", "approval-post")
+    assert "--head release/v10.17.11" in steps["facts"]["cmd"]
+    assert steps["approval-post"]["next"] == "end" and "approval-post --pr" in steps["approval-post"]["cmd"]
+    assert (
+        steps["approve-pr"]["next"] == "release"
+        and "approve --pr" in steps["approve-pr"]["cmd"]
+        and "--by user" in steps["approve-pr"]["cmd"]
+    )
+
+
+@pytest.mark.parametrize("mvv", [False, True])
+def test_cd_review_prod_plan_writes_no_trail_and_ends_at_the_gate(tmp_path, monkeypatch, mvv):
+    """受け入れ条件 18・I8: レビューが必須の場合は approve-pr（証跡の書き込み）を置かない。MVV 判定はレビューの承認を代えられない
+    ため、MVV 判定のプランでも判定の記録の後は release へ戻らずに終える（release の 10 から MVV 判定までの輪を作らない）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 1, ""))
+    out = tmp_path / "plan.json"
+    extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
+    args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    steps = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
+    assert "approve-pr" not in steps and "approve --pr" not in json.dumps(list(steps.values()), ensure_ascii=False)
+    assert steps["approval-post"]["next"] == ("mvv" if mvv else "end")
+    assert steps["release"]["gate_next"] == "facts" and "10" not in steps["release"]["on_exit"]
+    if mvv:
+        assert steps["note"]["next"] == "end"
+
+
+@pytest.mark.parametrize("mvv", [False, True])
+def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp_path, monkeypatch, mvv):
+    """MVV 判定のプランでは release の承認待ちの 10 を承認ゲートに数えず facts へ進む（後の mvv が判定し、マージまで済めば完了）。
+    利用者が承認するプランは今のまま承認ゲートで止まる。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
+    out = tmp_path / "plan.json"
+    extra = ["--mvv" if mvv else "--state", str(tmp_path / "state.json")]
+    args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod", *extra]
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=SUPERVISE.parents[3])
+    assert p.returncode == 0, p.stdout + p.stderr
+    release = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}["release"]
+    assert release["on_exit"].get("75") == "stop"
+    if mvv:
+        assert "gate_next" not in release and release["on_exit"]["10"] == "facts"
+    else:
+        assert release["gate_next"] == "facts" and "10" not in release["on_exit"]
+
+
+def test_cd_dev_plan_has_no_approval_material_steps(tmp_path, monkeypatch):
+    plan = _release_plan(tmp_path, monkeypatch, "dev", "10.17.11-dev.1", cd=True)
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert not {"facts", "explain", "others", "approval-post"} & set(steps) and steps["verify"]["next"] == "end"
+
+
+def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
+    """受け入れ条件 19・I9: CD の無い場合の本番のプランは今のまま承認の記録が先頭に来る。"""
+    plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=False)
+    assert plan["steps"][0]["id"] == "approve" and "approval-post" not in {s["id"] for s in plan["steps"]}
+
+
+@pytest.mark.parametrize("cd", [True, False])
+def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monkeypatch, cd):
+    """受け入れ条件 16: pace fast の前回の検査からの差分の検査（--since-last）も、CD のある場合は全体テストを流さない。CD の無い
+    場合は今のまま（全体テストを手元で流す戦略なら置く）。このリポジトリは全体テストを CI に任せる戦略（local-scoped-ci-whole）で
+    CD の有無によらず外れるため、全体テストを手元で流す別のリポジトリで比べる。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    import inproc
+    import release_case
+    from test_supervise import foreign_repo
+
+    decided = release_case.decide_case(True, 0, "") if cd else release_case.decide_case(False, None, "")
+    monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: decided)
+    root = foreign_repo(tmp_path, {"version": 1, "test": {"command": "npm test -- {paths}", "all": "src"}})
+    out = tmp_path / "check.json"
+    p = inproc.run(SUPERVISE, "new", "check", "--since-last", "--id", "m-1", "--worktree", str(root), "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stdout + p.stderr
+    ids = {s["id"] for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
+    assert ("test-all" in ids) is not cd

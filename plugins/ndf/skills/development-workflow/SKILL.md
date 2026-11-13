@@ -329,6 +329,12 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 `branch` に持つ行があるものである。マージで本番系への反映が自動で始まる。それ以外の宛先へのマージは止めない。
 判定の表・止める場所・承認の後の続け方は [references/production-merge.md](references/production-merge.md) にある。
 
+**マージからリリースまでの工程は、リリースの場合（CD の有無とレビュー必須の有無。`release-steps.py release-case`）で 3 つに分かれる。**
+CD があり、レビューなしでマージできるリポジトリ（ai-plugins）は、リリース承認をマージの前にリリースの PR の証跡のコメントで取り、
+NDF が `--admin` なしでマージして CD が反映する。CD があり、レビューが必須なら PR のレビューの承認をリリース承認とみなす。
+CD が無ければ今の `release` の工程のまま、マージの後に手でリリースする。場合ごとの承認の場所とマージの主体は
+[references/production-merge.md](references/production-merge.md) の「リリースの場合ごとの承認の場所とマージの主体」にある。
+
 **どのブランチが本番チャネルかは、リポジトリの設定が決める。** 読み取りの順序は次の 2 つである。
 
 1. `.ndf/worktree.json` の `production_branch`
@@ -357,6 +363,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 | --- | --- |
 | 設計 Pull Request のマージ（`standard`） | 承認を得るまで実装の工程へ進まない |
 | 本番系へ届く操作 | 承認を得るまで進めない。**開発版のデプロイまでは自動で進めてよい**。`operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない |
+
+**人のいない実行（環境変数 `NDF_FACTORY_RUN` がある Factory の実行ジョブ）では `AskUserQuestion` を使わない。** 区分の無い問いは決めて記録して続け、
+承認ゲート・区分のある問い・終わり・続けられないときは、最後の応答の末尾に区間の報告を置いて区間を終える（[asking.md](references/asking.md) の「人のいない実行」）。
 
 **工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。

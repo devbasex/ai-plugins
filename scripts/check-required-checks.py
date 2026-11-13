@@ -9,7 +9,8 @@ Pull Request で走るジョブを足したのに ruleset の必須のチェッ�
 - 宛先のブランチの必須のチェック: `gh api --method GET repos/<repo>/rules/branches/<branch>`
   （`--rules-file` を渡せば、その応答の JSON を API の代わりに読む）
 - 必須のチェックの宣言（`--allow`）: 必須にしないジョブ（`not_required`）と、ruleset へ足す承認を待つ
-  チェック（`awaiting`）を、理由と組で持つ
+  チェック（`awaiting`）を、理由と組で持つ。ジョブでなく API で付ける commit status（`statuses`。名前・付ける
+  workflow・理由）は、ジョブの名前と同じく既知の名前として数え、必須にあっても「消えた必須」にしない（#2773）
 
 出力は 1 件 1 行で `<種類>: <チェックの名前>（<ワークフローのパス>#<job id>）→ <直し方>`、最後に件数の行。
 
@@ -43,8 +44,9 @@ import yamlio  # noqa: E402  matrix と name: を構造として読む（#653 �
 CALL_LIMIT = 30  # gh の 1 回の呼び出しの上限（秒）
 PR_EVENTS = ("pull_request", "pull_request_target")
 MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
-DECL_KEYS = {"version", "not_required", "awaiting"}
+DECL_KEYS = {"version", "not_required", "awaiting", "statuses"}
 ENTRY_KEYS = {"name", "reason"}
+STATUS_KEYS = {"name", "workflow", "reason"}
 
 # 種類 → (失敗か, 直し方)。設計の「入出力の契約」の表と同じ並び
 KINDS = {
@@ -88,6 +90,7 @@ class Finding(NamedTuple):
 class Declaration(NamedTuple):
     not_required: list[dict]
     awaiting: list[dict]
+    statuses: list[dict] = []
 
 
 def read_declaration(path: Path) -> Declaration:
@@ -100,12 +103,12 @@ def read_declaration(path: Path) -> Declaration:
     if unknown := set(data) - DECL_KEYS:
         raise Unreadable(f"宣言に未知のキーがある: {path}（{', '.join(sorted(unknown))}）")
     lists = []
-    for key in ("not_required", "awaiting"):
+    for key, keys in (("not_required", ENTRY_KEYS), ("awaiting", ENTRY_KEYS), ("statuses", STATUS_KEYS)):
         rows = data.get(key) or []
         if not isinstance(rows, list) or not all(isinstance(r, dict) and isinstance(r.get("name"), str) and r["name"] for r in rows):
-            raise Unreadable(f"宣言の {key} が {{name, reason}} の並びでない: {path}")
+            raise Unreadable(f"宣言の {key} が {{{', '.join(sorted(keys))}}} の並びでない: {path}")
         for r in rows:
-            if unknown := set(r) - ENTRY_KEYS:
+            if unknown := set(r) - keys:
                 raise Unreadable(f"宣言に未知のキーがある: {path} の {key}（{', '.join(sorted(unknown))}）")
         lists.append(rows)
     return Declaration(*lists)
@@ -169,11 +172,9 @@ def _scalar(v: object) -> str | None:
     return None
 
 
-def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
-    """matrix → 組の並び（GitHub の exclude / include の規則で作る）。静的に決められなければ None。"""
-    if not isinstance(matrix, dict):
-        return None
-    base: dict[str, list[str]] = {}
+def _matrix_axes(matrix: dict) -> dict[str, list[str]] | None:
+    """matrix の軸（include / exclude 以外の鍵）→ 鍵ごとの値の並び。静的に決められなければ None。"""
+    axes: dict[str, list[str]] = {}
     for key, values in matrix.items():
         if key in ("include", "exclude"):
             continue
@@ -182,37 +183,76 @@ def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
         vals = [_scalar(v) for v in values]
         if None in vals:
             return None
-        base[str(key)] = vals
+        axes[str(key)] = vals
+    return axes
 
-    def objects(key: str) -> list[dict[str, str]] | None:
-        rows = matrix.get(key) or []
-        if not isinstance(rows, list):
-            return None
-        out = []
-        for row in rows:
-            if not isinstance(row, dict):
-                return None
-            obj = {str(k): _scalar(v) for k, v in row.items()}
-            if None in obj.values():
-                return None
-            out.append(obj)
-        return out
 
-    include, exclude = objects("include"), objects("exclude")
-    if include is None or exclude is None:
+def _matrix_objects(matrix: dict, key: str) -> list[dict[str, str]] | None:
+    """matrix の include / exclude の行の並び。静的に決められなければ None。"""
+    rows = matrix.get(key) or []
+    if not isinstance(rows, list):
         return None
-    combos = [dict(zip(base, vals)) for vals in itertools.product(*base.values())] if base else []
-    combos = [c for c in combos if not any(all(c.get(k) == v for k, v in e.items()) for e in exclude)]
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        obj = {str(k): _scalar(v) for k, v in row.items()}
+        if None in obj.values():
+            return None
+        out.append(obj)
+    return out
+
+
+def _apply_include(combos: list[dict[str, str]], base_keys: dict[str, list[str]], include: list[dict[str, str]]) -> list[dict[str, str]]:
+    """include の行を当てる。元の組に一致すれば広げ、一致しなければ足す（足した組は次の行の対象にしない）。"""
     originals = len(combos)
     for obj in include:
         added = False
         for c in combos[:originals]:
-            if all(c[k] == v for k, v in obj.items() if k in base):
+            if all(c[k] == v for k, v in obj.items() if k in base_keys):
                 c.update(obj)
                 added = True
         if not added:
             combos.append(dict(obj))
-    return combos or None
+    return combos
+
+
+def matrix_combos(matrix: object) -> list[dict[str, str]] | None:
+    """matrix → 組の並び（GitHub の exclude / include の規則で作る）。静的に決められなければ None。"""
+    if not isinstance(matrix, dict):
+        return None
+    base = _matrix_axes(matrix)
+    if base is None:
+        return None
+    include, exclude = _matrix_objects(matrix, "include"), _matrix_objects(matrix, "exclude")
+    if include is None or exclude is None:
+        return None
+    combos = [dict(zip(base, vals)) for vals in itertools.product(*base.values())] if base else []
+    combos = [c for c in combos if not any(all(c.get(k) == v for k, v in e.items()) for e in exclude)]
+    return _apply_include(combos, base, include) or None
+
+
+def _job_matrix(job: dict) -> object:
+    """ジョブの strategy.matrix。無ければ None。"""
+    return (job.get("strategy") or {}).get("matrix") if isinstance(job.get("strategy"), dict) else None
+
+
+def _expand_named(name: str, combos: list[dict[str, str]]) -> list[str] | None:
+    """名前の matrix の式を組ごとの値で埋める。matrix 以外の式か、組に無いキーの式があれば None。"""
+    if "${{" in MATRIX_EXPR.sub("", name):
+        return None  # matrix 以外の式
+    if any(k not in c for c in combos for k in MATRIX_EXPR.findall(name)):
+        return None
+    return [MATRIX_EXPR.sub(lambda m, c=c: c[m.group(1)], name) for c in combos]
+
+
+def _suffix_names(name: str, combos: list[dict[str, str]]) -> list[str] | None:
+    """名前に matrix の式が無いときは GitHub が「名前 (値, 値)」を付ける。キーが 2 つ以上のときの並びは
+    実測していないため、キーが 1 つのときだけ決める（設計の「未確認のまま残ること」）。"""
+    keys = {k for c in combos for k in c}
+    if len(keys) != 1:
+        return None
+    return [f"{name} ({next(iter(c.values()))})" for c in combos]
 
 
 def job_check_names(job_id: str, job: object) -> list[str] | None:
@@ -223,24 +263,13 @@ def job_check_names(job_id: str, job: object) -> list[str] | None:
     if not isinstance(raw, str):
         return None
     name = str(raw)
-    matrix = (job.get("strategy") or {}).get("matrix") if isinstance(job.get("strategy"), dict) else None
+    matrix = _job_matrix(job)
     if matrix is None:
         return None if "${{" in name else [name]
     combos = matrix_combos(matrix)
     if combos is None:
         return None
-    if "${{" in name:
-        if "${{" in MATRIX_EXPR.sub("", name):
-            return None  # matrix 以外の式
-        if any(k not in c for c in combos for k in MATRIX_EXPR.findall(name)):
-            return None
-        return [MATRIX_EXPR.sub(lambda m, c=c: c[m.group(1)], name) for c in combos]
-    # 名前に matrix の式が無いときは GitHub が「名前 (値, 値)」を付ける。キーが 2 つ以上のときの並びは
-    # 実測していないため、キーが 1 つのときだけ決める（設計の「未確認のまま残ること」）
-    keys = {k for c in combos for k in c}
-    if len(keys) != 1:
-        return None
-    return [f"{name} ({next(iter(c.values()))})" for c in combos]
+    return _expand_named(name, combos) if "${{" in name else _suffix_names(name, combos)
 
 
 def read_workflows(root: Path, wf_dir: Path, branch: str) -> tuple[list[CheckName], list[Finding]]:
@@ -322,8 +351,26 @@ def read_required(repo: str, branch: str, rules_file: Path | None) -> list[str] 
 # --- 突き合わせ -------------------------------------------------------------
 
 
-def compare(names: list[CheckName], undetermined: list[Finding], required: list[str], decl: Declaration, allow_rel: str) -> list[Finding]:
-    """差の一覧。名前を決められないジョブは、その name:（無ければ job id）を必須にしないジョブとして宣言すれば数えない。"""
+def _declaration_findings(decl: Declaration, known: set[str], allow_rel: str, root: Path | None) -> list[Finding]:
+    """宣言の行（not_required・awaiting・statuses の順）の診断: 理由の無い宣言と、知らない名前か付ける workflow のファイルが
+    `root` の下に無い（statuses）古い宣言。"""
+    out: list[Finding] = []
+    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting), ("statuses", decl.statuses)):
+        for r in rows:
+            where = f"{allow_rel} の {key}"
+            if not str(r.get("reason") or "").strip():
+                out.append(Finding("理由の無い宣言", r["name"], where))
+            gone = key == "statuses" and root is not None and not (root / str(r.get("workflow") or "")).is_file()
+            if r["name"] not in known or gone:
+                out.append(Finding("古い宣言", r["name"], where))
+    return out
+
+
+def compare(
+    names: list[CheckName], undetermined: list[Finding], required: list[str], decl: Declaration, allow_rel: str, root: Path | None = None
+) -> list[Finding]:
+    """差の一覧。名前を決められないジョブは、その name:（無ければ job id）を必須にしないジョブとして宣言すれば数えない。
+    宣言した commit status（`statuses`）の名前は既知の名前として数え、付ける workflow のファイルが `root` の下に無ければ古い宣言とする。"""
     out: list[Finding] = []
     by_name: dict[str, list[CheckName]] = {}
     for c in names:
@@ -335,21 +382,16 @@ def compare(names: list[CheckName], undetermined: list[Finding], required: list[
     not_req = {r["name"] for r in decl.not_required}
     awaiting = {r["name"] for r in decl.awaiting}
     out += [u for u in undetermined if u.name not in not_req]
-    known = set(by_name) | {u.name for u in undetermined}
+    statuses = {r["name"] for r in decl.statuses}
+    known = set(by_name) | {u.name for u in undetermined} | statuses
     for n, cs in by_name.items():
         where = f"{cs[0].workflow}#{cs[0].job_id}"
         if n not in req | not_req | awaiting:
             out.append(Finding("未登録", n, where))
         elif any(c.filtered for c in cs) and n in req | awaiting:
             out.append(Finding("絞り込みのあるジョブ", n, where))
-    out += [Finding("消えた必須", n, "ruleset の必須のチェック") for n in sorted(req - set(by_name))]
-    for key, rows in (("not_required", decl.not_required), ("awaiting", decl.awaiting)):
-        for r in rows:
-            where = f"{allow_rel} の {key}"
-            if not str(r.get("reason") or "").strip():
-                out.append(Finding("理由の無い宣言", r["name"], where))
-            if r["name"] not in known:
-                out.append(Finding("古い宣言", r["name"], where))
+    out += [Finding("消えた必須", n, "ruleset の必須のチェック") for n in sorted(req - set(by_name) - statuses)]
+    out += _declaration_findings(decl, known, allow_rel, root)
     out += [Finding("宣言と ruleset の食い違い", n, f"{allow_rel} の not_required") for n in sorted(not_req & req)]
     for r in decl.awaiting:
         kind = "追加済み" if r["name"] in req else "追加待ち"
@@ -380,7 +422,7 @@ def run(args: argparse.Namespace) -> int:
         print("失敗 0 件・知らせ 1 件")
         return 0
     allow_rel = allow.relative_to(root).as_posix() if allow.is_relative_to(root) else str(allow)
-    findings = compare(names, undetermined, required, decl, allow_rel)
+    findings = compare(names, undetermined, required, decl, allow_rel, root)
     findings.sort(key=lambda f: (not KINDS[f.kind][0], list(KINDS).index(f.kind), f.name))
     for f in findings:
         print(f.line())

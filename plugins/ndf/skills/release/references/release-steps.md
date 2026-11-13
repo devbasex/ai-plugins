@@ -115,8 +115,17 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
 # 選んで集める取り込み方（branch_flow.promotion: selected）: 本番チャネルから組んだリリースブランチで出す
 python3 "$SCRIPTS/release-steps.py" release-branch --version <版> --units <スプリントブランチ>... [--production <本番チャネル>] --root .
+# リリースブランチの PR のレビュー（branch_flow.reviews.release が none でないとき。差分が空なら終了コード 3）
+python3 "$SCRIPTS/release-steps.py" review-open --version <版> --diff pr|resolution [--production <本番チャネル>] --root .
+python3 "$SCRIPTS/release-steps.py" review-close --version <版> --root .
 python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs --head release/v<版> --approval <承認資料> --root .
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --promotion selected --root .
+# CD のある場合（release-case の metrics.case が cd-no-review / cd-review）の本番
+python3 "$SCRIPTS/release-steps.py" release-case --root .   # リリースの場合を出す
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .   # 承認の前: 本番の PR を作り CI を待って gate（10）
+python3 "$SCRIPTS/release-steps.py" approval-post --pr <本番の PR> --approval <承認資料> --root .   # 承認資料を本番の PR へ置く
+python3 "$SCRIPTS/release-steps.py" approve --pr <本番の PR> --approved-sha <先端> --by user --root .   # cd-no-review: 承認の証跡を書く
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .   # 承認の後: --admin なしでマージし CD の結果を読む
 ```
 
 - 選んで集める取り込み方: `release-branch` は `release/v<版>` を `origin/<本番チャネル>` から切り（origin に既にあればその先頭へ足す。
@@ -125,6 +134,21 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、タグと GitHub Release を
   作った後に `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
   `references/production-merge.md` の「選んで集める取り込み方のリリース」にある
+- リリースブランチの PR のレビュー（`branch_flow.reviews.release`。`worktree` の `references/declaration.md` の
+  「レビューの単位」）: 開発版のデプロイのプランが `release-branch` と `approval-facts` の間で打つ。
+  - `review-open` は、範囲（同じ版の前のレビュー済みの先頭、無ければ本番チャネルから、リリースブランチの先頭まで）の差分を
+    一時の PR（衝突の解消のレビューの PR。head は `review/release/v<版>`、宛先は `review/release/v<版>-base`）にして、
+    `metrics.review_pr` に番号を出す。`--diff resolution` は範囲の first-parent のマージの再マージの差分
+    （`git log --remerge-diff`）だけを見せ、衝突したマージが無ければ PR を作らずに 3 で終える。`--diff pr` は範囲の差分全体を見せる。
+    逆に当てられない・PR を作れないなら 1
+  - 始めに、開いている衝突の解消のレビューの PR を版に依らず調べ、直しをリリースブランチへ移し終えたものを閉じて一時の
+    ブランチを消す。同じ版で範囲の終わりがリリースブランチの先頭と同じ、移していない直しを持つ PR は使い直す。それ以外の
+    移していない直しを持つ PR か、比べるリリースブランチを取得できない PR があれば、何も閉じずに 1 で止める
+  - `review-close` は、cross-review が見せるブランチへ積んだ直しのうち、まだリリースブランチへ移していないものを
+    cherry-pick して送り、レビュー済みの先頭を PR の本文へ書いて閉じ、一時のブランチを消す。移せなければリリースブランチを
+    動かさず、PR とブランチを残して 1 で止める（人が原因を直して `review-close` から打ち直す）。レビューの後にリリースブランチへ
+    マージが足されていれば、閉じた後に 1 で止める（`review-open` から打ち直すと、足したマージだけを範囲に取る）
+  - 本番のリリースのプランの後片付けは、その版の一時のブランチが残っていれば消す
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
@@ -211,6 +235,31 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   | `items[]` の `result: unapproved` | 承認の外のコミット（`name` が SHA、`subject`、分かれば `pr`） |
 
   承認の外の変更を含めて `approval-facts` で承認資料を作り直し、承認を取り直して `next` のとおり打ち直す
+
+### CD のある場合の本番
+
+`release-case` が出す場合（`metrics.case`）が `cd-no-review` か `cd-review` のとき、`release --channel prod` は次の形で進む。
+場合の意味は [SKILL.md](../SKILL.md) の「リリースの場合」にある。
+
+- `release --channel prod`: `--approved-sha` も `--approval` も受けない（渡すと 3。承認の正本は本番の PR の上にある）。
+  本番の PR が無ければ、開発版の PR をマージし、`release/v<版>` を戻して本番の PR を作る。承認が先端と一致しなければ、
+  `ndf/release-approval` を除くチェックが通るのを待ってから `gate`（10）で止まる（本番の PR は開いたまま。`metrics.main_pr`・
+  `metrics.approved_sha` は先端・`metrics.reason` は照合の理由）。一致すれば、`cd-no-review` は先端の `ndf/release-approval` が
+  `success` になるのを待ち、先端に固定して `merge-when-green --no-admin` でマージし、CD の結果を読む。マージ済みなら公開の後から続ける。
+  選んで集める取り込み方も同じ照合を使い、許可リストの許容と先端の入れ直しを使わない。承認の後に先端が動けば `gate`（10）で止まる
+- `approval-post`: 承認資料を本番の PR へ承認資料のコメント（証跡に数えない印つき）で置く。同じ先端の承認資料のコメントがあれば
+  置かずに 0。承認資料が無ければ 3
+- `approve --pr`: `cd-no-review` の承認の証跡を本番の PR へ書く。承認したコミットは `--approved-sha` か、`--facts-from`（本番のプランの
+  状態ディレクトリの `facts` の出力。`--by user` なら `--answer-from` の利用者の承認の記録も要る）。PR の先端が承認したコミットと違えば
+  書かずに `gate`（10）。同じ人が同じコミットの証跡を既に置いていれば置き直さない
+- `approval-check`: 証跡のチェックの workflow（`.github/workflows/release-approval.yml`）が打つ。本番チャネル宛ての PR の証跡を判定し、
+  先端へ commit status `ndf/release-approval` を付ける。承認権限（admin か maintain）を持つ人の最新の、作成の後に編集されていない
+  証跡が先端を指すときだけ `success` で、説明に理由を 1 行で出す（例: `証跡 0123abc ≠ 先端 89abcde`）。同じ先端の開いた PR が
+  ほかにあれば落とす。読めなければ `error` を付けて 1
+- `cd-review`: 証跡を書かず、承認権限として有効な人（共同作業者の権限が admin か write）の最新の承認のレビューのコミットを先端と比べる
+- `release --channel dev`: `.ndf/supervise.json` の `release.dev_workflow` があれば、開発版の PR を作るか使い回し、開いていればその
+  workflow を `gh workflow run` で起動し、実行が終わるまで待つ（上限は `release-steps.dev-workflow`。75 で止まる）。workflow は宛先と
+  版の接尾辞を確かめ、CI の必須チェックが通るのを待って `merge-when-green --no-admin` でマージする。宣言が無ければ手元でマージする
 
 ### 置き換える箇条
 

@@ -39,7 +39,7 @@
 | `plugins/ndf/scripts/supervise_lib/state.py` の `RunState.record_stage(stage, plan, cwd, after_ok=False)` | 呼ばれた時点（`after_ok`）と工程から、今印を付けるかを決め、付けるときは計画の `記録` のスクリプトを課題ごとに呼ぶ |
 | `plugins/ndf/scripts/supervise_lib/engine.py` の `Engine._run_step` | ステップの始めに `record_stage(stage, …)` を呼ぶ |
 | `plugins/ndf/scripts/supervise_lib/engine.py` の `Engine._next_after_step` | ok の分岐（`if ok:`）で `record_stage(stage, …, after_ok=True)` を呼ぶ |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `release_verify_step` | まとめのプランの `release-verify` の worker への指示に「進捗記録は打たない（このステップが ok で終わった後にプランが打つ）」を含める |
+| `plugins/ndf/scripts/supervise_lib/release_verify.py` の `release_verify_step` | まとめのプランの `release-verify` の worker への指示に「進捗記録は打たない（このステップが ok で終わった後にプランが打つ）」を含める |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_release_verify_steps` | 本番と開発版の `verify` を stage「デプロイ」で組む。導入の確認だけを流すステップを「リリース後テスト」と記録しない |
 
 ## 仕様

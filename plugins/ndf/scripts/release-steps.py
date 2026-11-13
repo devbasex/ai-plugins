@@ -26,9 +26,11 @@
     python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
                                             [--prs <PR番号>...] [--approval <承認資料> [--set <名前>=<上げ幅>]...]
                                             [--decided <承認資料>]
+    python3 release-steps.py review-open    --version <版> --diff pr|resolution [--production <ブランチ>]  # 差分が空なら 3
+    python3 release-steps.py review-close   --version <版>
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
-                                            [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+                                            [--approved-sha <SHA> | --approval <承認資料>]   # CD の無い prod はどちらかが要る
     python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
     python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
     python3 release-steps.py record         --merged --base <本番チャネル> --prs <PR番号>... [--cd-result <ファイル>] [--root <dir>]
@@ -37,6 +39,10 @@
     python3 release-steps.py cd-guidance    [--root <dir>]   # CD の案内
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
+    python3 release-steps.py approve        --pr <本番の PR> (--approved-sha <SHA> | --facts-from <状態> [--answer-from <状態>]) --by user|mvv
+    python3 release-steps.py approval-post  --pr <本番の PR> --approval <承認資料>   # 承認資料をリリースの PR へ置く
+    python3 release-steps.py approval-check --pr <PR番号>   # 証跡のチェック（workflow が打つ）
+    python3 release-steps.py release-case   [--root <dir>]   # リリースの場合
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
@@ -47,6 +53,10 @@ release --channel prod は承認したコミットを受け取り、`origin/rele
 本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。承認の後にベースブランチが
 進んでも止まらず、本番チャネルの PR は head を release/v<版> にして比べた先端だけを出す（#2436 の R2）。本番チャネルの
 PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まったデプロイの再開）。
+ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
+承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
+一致すれば管理者の迂回なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
+`.ndf/supervise.json` の release.dev_workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
 
 record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ
 release/v<版>-sync → ベースブランチ）へリリース記録
@@ -93,10 +103,11 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, promotion, publish, record, replaced  # noqa: E402
+from release_lib import others, promotion, publish, record, replaced, review_range, reviewed  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
+from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
@@ -501,16 +512,17 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None, no_admin=False):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
     PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
-    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。no_admin なら管理者の迂回なしでマージする（#2773 の I7）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     cmd += ["--expect-head", expect] if expect else []
     cmd += ["--gate-approved", gate_approved] if gate_approved else []
+    cmd += ["--no-admin"] if no_admin else []
     p = run(cmd, cwd=root, check=False)
     out = step_read.last_json(p.stdout) or {}
     if p.returncode != 0:
@@ -598,11 +610,11 @@ def _merged_sync_pr(root, branch, base):
     return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
 
 
-def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False):
-    """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、
-    release/v<版>-sync → ベースブランチの PR でマージする。release/v<版> そのものへはベースブランチを取り込まない。
-    待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
-    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。"""
+def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False, merge=None):
+    """release/v<版>-sync に origin/<ベースブランチ> を取り込み（版数だけの衝突は本番の版を取る。R5）、その PR でマージする。
+    release/v<版> そのものへはベースブランチを取り込まない。待つ間にベースブランチが進んで再び衝突すれば、-sync の先頭へ積み直す（強制 push はしない）。(PR 番号, マージコミット) を返す。
+    `lead` は PR の本文の頭、`sections` は CHANGELOG.md の版の節の衝突も解く（選んで集める取り込み方の戻すマージ。#3121 の決定 17）。
+    `merge` は PR 番号からマージコミットを返す仕方（開発版の workflow）で、省くと手元の wait_and_merge。"""
     sync = f"{branch}-sync"
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
         git(root, "fetch", "-q", "origin", base)
@@ -624,7 +636,7 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
         try:
-            return n, wait_and_merge(root, n, ci_wait=a.ci_wait)
+            return n, merge(n) if merge else wait_and_merge(root, n, ci_wait=a.ci_wait)
         except Conflicted:
             if not left:
                 raise
@@ -656,22 +668,23 @@ def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
+    case = reviewed.release_case_or_stop(root) if a.channel == "prod" else None
     try:
-        approved = approval.approved_of(root, a, plugin)
+        approved = approval.approved_of(root, a, plugin, case)
     except approval.Gate as g:
         emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
-    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
-        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
-    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
-    bump.require_bumped(root, plugin, ver)
-
-    git(root, "push", "-q", "-u", "origin", "HEAD")
+    branch = _prepare_release_branch(root, a, plugin)
+    on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
+    ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod)
     if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
-        main_pr, merge, items, metrics, back = promotion.release_selected(root, a, plugin, plugins, branch, base, prod, approved, ops)
-        _published(root, a, plugin, prod, main_pr, merge, items, metrics, back)
+        got = promotion.release_selected(ctx, approved, ops, case if on_pr else None)
+        _published(root, a, plugin, prod, *got)
+    if on_pr:
+        reviewed.release_prod(ctx, case, _prod_ops())
+    if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)) and reviewed.dev_workflow_ready(root, wf):
+        reviewed.release_dev(ctx, wf, sys.modules[__name__])
     release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics = {
         "channel": a.channel,
@@ -724,6 +737,32 @@ def cmd_release(a):
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
 
 
+def _prod_ops() -> reviewed.ProdOps:
+    """CD のある場合の本番が呼ぶ操作（呼ぶ時点のこのモジュールの関数）。"""
+    return reviewed.ProdOps(
+        find_pr=find_pr,
+        create_pr=create_pr,
+        merge_commit_of=merge_commit_of,
+        merge_release_pr=_merge_release_pr,
+        published=_published,
+        wait_and_merge=wait_and_merge,
+        pr_check_buckets=pr_check_buckets,
+    )
+
+
+def _prepare_release_branch(root, a, plugin) -> str:
+    """作業ツリーがリリースブランチにあり、コミットしていない変更が無く、版を上げ済みであることを確かめて push する。ブランチ名を返す。"""
+    ver = a.version
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
+        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
+    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
+    bump.require_bumped(root, plugin, ver)
+
+    git(root, "push", "-q", "-u", "origin", "HEAD")
+    return branch
+
+
 def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
     """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足し、`back`（戻すマージ）を打って結果を出す。"""
     ver, tag = a.version, release_tag(plugin, a.version)
@@ -737,6 +776,21 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None)
     done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
     status, code, done = back(items, metrics, done) if back else ("ok", None, done)
     emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
+
+
+def cmd_approval_check(a):
+    """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773。本体は release_lib/reviewed.py）。"""
+    reviewed.approval_check(a)
+
+
+def cmd_approval_post(a):
+    """承認資料をリリースの PR へ承認資料のコメントとして置く（#2773。本体は release_lib/reviewed.py）。"""
+    reviewed.approval_post(a)
+
+
+def cmd_release_case(a):
+    """リリースの場合を metrics に出す（#2773。本体は lib/release_case.py）。"""
+    reviewed.release_case_out(a)
 
 
 def _sweep_candidates(root, merge):
@@ -1010,6 +1064,20 @@ def cmd_release_branch(a):
     emit(result(TOOL, "ok", f"{got['branch']} を {prod} から組んだ（先頭 {got['head'][:12]}）", items, got))
 
 
+def cmd_review_open(a):
+    """リリースブランチの PR のレビューの PR を組む（#3163。本体は release_lib/review_range.py）。差分が空なら 3。"""
+    root = git_root(a.root)
+    got = review_range.open_review(root, a.version, a.diff, a.production or release_decl(root, a)[1], review_range.GitHub(create_pr))
+    status, summary, items, code = review_range.open_outcome(a.version, got)
+    emit(result(TOOL, status, summary, items, got), code)
+
+
+def cmd_review_close(a):
+    """レビューの直しをリリースブランチへ移し、レビューの PR を閉じる（#3163 の I9〜I11）。"""
+    got = review_range.close_review(git_root(a.root), a.version, review_range.GitHub(create_pr))
+    emit(result(TOOL, "ok", f"直し {got['moved']} 件を移し、レビューの PR #{got['review_pr']} を閉じた", [], got))
+
+
 def cmd_approve(a):
     """リリース承認ゲートの承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
     try:
@@ -1211,8 +1279,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
     p.add_argument("--ci-wait", type=float, default=3600.0, help="待つ PR ごとの CI の待ちの上限（秒）")
     g = p.add_mutually_exclusive_group()
-    g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
-    g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
+    g.add_argument(
+        "--approved-sha", metavar="SHA", help="prod の CD が無い場合: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）"
+    )
+    g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
@@ -1222,6 +1292,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--units", nargs="+", required=True, metavar="ブランチ", help="選んだリリースの単位（スプリントブランチ）")
     p.add_argument("--production", help="本番チャネル（既定は宣言の値）")
     p.set_defaults(func=cmd_release_branch)
+    p = sub.add_parser("review-open", parents=[common], help="リリースブランチの PR のレビューの PR を組む（差分が空なら 3）")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--diff", required=True, choices=("pr", "resolution"), help="対象の差分（PR の差分全体か衝突の解消の差分）")
+    p.add_argument("--production", help="本番チャネル（既定は宣言の値）")
+    p.set_defaults(func=cmd_review_open)
+    p = sub.add_parser("review-close", parents=[common], help="レビューの直しをリリースブランチへ移し、レビューの PR を閉じる")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.set_defaults(func=cmd_review_close)
 
     p = sub.add_parser("record", parents=[common], help="リリースの後に、本番のリリースの PR へリリース記録（## リリース記録）を書く")
     g = p.add_mutually_exclusive_group(required=True)
@@ -1252,8 +1330,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cd-guidance", parents=[common], help="CD が無いリポジトリへ CD の設定と方式の記録を促す案内を出す")
     p.set_defaults(func=cmd_cd_guidance)
 
-    p = sub.add_parser("approve", parents=[common], help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する")
-    p.add_argument("--approval", required=True, help="承認資料")
+    p = sub.add_parser(
+        "approve",
+        parents=[common],
+        help="本番へのリリースの承認（リリース承認ゲート）を承認資料へ記録する（--pr ならリリースの PR へ証跡を書く）",
+    )
+    p.add_argument("--approval", help="承認資料（--pr の無い経路で要る）")
+    p.add_argument("--pr", type=int, help="CD のある場合: 承認の証跡のコメントを置くリリースの PR（#2773）")
     p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
     p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
     p.add_argument(
@@ -1261,6 +1344,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
+
+    p = sub.add_parser("approval-check", parents=[common], help="リリースの PR の承認の証跡を判定し、先端へ commit status を付ける")
+    p.add_argument("--pr", type=int, required=True)
+    p.set_defaults(func=cmd_approval_check)
+    p = sub.add_parser("approval-post", parents=[common], help="承認資料をリリースの PR へ承認資料のコメントとして置く")
+    p.add_argument("--pr", type=int, required=True)
+    p.add_argument("--approval", required=True, help="承認資料")
+    p.set_defaults(func=cmd_approval_post)
+    p = sub.add_parser("release-case", parents=[common], help="リリースの場合（cd-no-review / cd-review / no-cd）を出す")
+    p.set_defaults(func=cmd_release_case)
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)

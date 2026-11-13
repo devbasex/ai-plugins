@@ -103,7 +103,8 @@ from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
 import handoff_doc  # noqa: E402
 import legacy_names  # noqa: E402
-from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
+from step_result import emit, result  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
+from supervise_lib.release_cd import PlanRefused  # noqa: E402
 
 MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
   フェーズ                                 種別
@@ -293,12 +294,16 @@ def _cmd_new(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn": 
                 emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
             res = sprint.cmd_new_sprint(a)
             emit(res, 1 if res["status"] == "stopped" else None)
+        except PlanRefused as e:
+            emit(result("supervise-new", "stopped", f"{e}。計画を書かない", [], {}))
         except DeclError as e:
             ap.error(str(e))
     new_args.check_new(ap, a)
     try:
         apply_decls(a)
         emit(templates.cmd_new(a))
+    except PlanRefused as e:
+        emit(result("supervise-new", "stopped", f"{e}。計画を書かない", [], {}))
     except DeclError as e:
         ap.error(str(e))
 
