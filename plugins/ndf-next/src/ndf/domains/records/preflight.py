@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.contracts import causes, facts, limits, result
-from ndf.domains.records import files
+from ndf.domains.records import files, jsonfile
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import preflight_decide as pd
 
@@ -48,11 +48,9 @@ def declaration_checked(root: Path) -> pd.Checked:
     if not path.is_file():
         return pd.Checked(pd.DECLARATION, result.result(TOOL, result.OK, "プロジェクトの宣言が無い（既定で動く）"))
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return pd.Checked(pd.DECLARATION, result.stopped(TOOL, "precondition", f"{path} を読めない: {exc}"))
-    if not isinstance(raw, dict):
-        return pd.Checked(pd.DECLARATION, result.stopped(TOOL, "precondition", f"{path} が object でない"))
+        raw = jsonfile.read_object(path)
+    except jsonfile.JsonFileError as exc:
+        return pd.Checked(pd.DECLARATION, result.stopped(TOOL, "precondition", str(exc)))
     known = set(facts.value("ndf-files", "project", "keys")) | {"version", "$schema"}
     # 知らないキーは NDF が読まないだけなので止めない（利用者の宣言の追記を拒まない）
     warnings = [f"{path} の知らないキー（NDF は読まない）: {k}" for k in sorted(set(raw) - known)]
@@ -72,10 +70,8 @@ def mvv_state(root: Path) -> str:
     if not path.is_file():
         return md.status(None, None)
     try:
-        decl = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return md.State.UNREADABLE
-    if not isinstance(decl, dict):
+        decl = jsonfile.read_object(path)
+    except jsonfile.JsonFileError:
         return md.State.UNREADABLE
     body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
     return md.status(decl, _sha256(path.parent / body))

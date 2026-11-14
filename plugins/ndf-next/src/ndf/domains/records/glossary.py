@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.domains.records import files
+from ndf.domains.records import files, jsonfile
 from ndf.domains.records import glossary_decide as gd
 
 # 宣言に max_lines が無いときの 1 ファイルの上限の行数（document_dir が無ければ索引のパスから拡張子を除いたディレクトリ）
@@ -23,9 +22,9 @@ class GlossaryError(ValueError):
 
 def _read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise GlossaryError(f"{path} を読めない: {exc}") from exc
+        return jsonfile.read(path)
+    except jsonfile.JsonFileError as exc:
+        raise GlossaryError(str(exc)) from exc
 
 
 def layout(root: Path) -> gd.Layout:
