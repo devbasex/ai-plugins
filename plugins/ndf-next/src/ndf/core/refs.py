@@ -158,19 +158,30 @@ class Sources(Protocol):
 # --- 宣言 ---------------------------------------------------------------------------------
 
 
-def _ref(name: str, raw: Any) -> Ref:
-    if not isinstance(raw, Mapping) or raw.get("kind") not in REF_KINDS:
-        raise RefError(f"参照 {name} の kind は {'・'.join(REF_KINDS)} のどれか: {raw!r}")
+def _text_fields(name: str, raw: Mapping[str, Any]) -> dict[str, str]:
+    """宣言の `of`・`key` のうち書かれたもの。書かれていて空でない文字列でなければ `RefError`。"""
     texts = {k: raw[k] for k in ("of", "key") if k in raw}
     bad = [k for k, v in texts.items() if not isinstance(v, str) or not v]
     if bad:
         raise RefError(f"参照 {name} の {'・'.join(bad)} は空でない文字列にする")
-    if raw["kind"] != QUEUE_PRS_KIND and "of" not in raw:
-        raise RefError(f"参照 {name} に参照の先（of）が無い")
-    when = raw["when_empty"] if "when_empty" in raw else None
+    return texts
+
+
+def _skip_when_empty(name: str, raw: Mapping[str, Any]) -> bool:
+    """宣言の `when_empty` が `skip` なら True、無ければ False。ほかの値は `RefError`。"""
+    when = raw.get("when_empty")
     if when not in (None, WHEN_EMPTY_SKIP):
         raise RefError(f"参照 {name} の when_empty は {WHEN_EMPTY_SKIP} だけ: {when!r}")
-    return Ref(name, raw["kind"], texts["of"] if "of" in texts else None, texts["key"] if "key" in texts else None, when is not None)
+    return when is not None
+
+
+def _ref(name: str, raw: Any) -> Ref:
+    if not isinstance(raw, Mapping) or raw.get("kind") not in REF_KINDS:
+        raise RefError(f"参照 {name} の kind は {'・'.join(REF_KINDS)} のどれか: {raw!r}")
+    texts = _text_fields(name, raw)
+    if raw["kind"] != QUEUE_PRS_KIND and "of" not in raw:
+        raise RefError(f"参照 {name} に参照の先（of）が無い")
+    return Ref(name, raw["kind"], texts.get("of"), texts.get("key"), _skip_when_empty(name, raw))
 
 
 def declared(plan_raw: Mapping[str, Any]) -> list[Ref]:
