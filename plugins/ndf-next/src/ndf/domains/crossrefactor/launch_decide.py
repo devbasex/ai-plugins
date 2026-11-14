@@ -31,11 +31,15 @@ def coding_phases() -> frozenset[str]:
 
 @dataclass(frozen=True)
 class ResultPlace:
-    """担当が書く結果ファイル（`submit`）と、起動の側が回収する先（`collect`）。"""
+    """担当が書く結果ファイル（`submit`）と、起動の側が回収する先（`collect`）。
+
+    `progress` は担当が作業の途中で追記する進捗のファイルで、担当が動くディレクトリの中に置く（無進捗の監視が大きさを測る）。
+    """
 
     workdir: PurePath
     submit: PurePath
     collect: PurePath
+    progress: PurePath
 
 
 def workdir_of(phase: str, runtime: str, read_root: PurePath, work: PurePath) -> PurePath:
@@ -50,5 +54,6 @@ def result_place(phase: str, runtime: str, stem: str, dirs: tuple[PurePath, Pure
     """
     read_root, work, tmp = dirs
     workdir = workdir_of(phase, runtime, read_root, work)
-    name = f"{runtime}-{phase}-{stem}-result.json"
-    return ResultPlace(workdir, workdir / RESULT_DIR / name, tmp / name)
+    base = f"{runtime}-{phase}-{stem}"
+    name = f"{base}-result.json"
+    return ResultPlace(workdir, workdir / RESULT_DIR / name, tmp / name, workdir / RESULT_DIR / f"{base}-progress.log")

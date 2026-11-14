@@ -5,7 +5,9 @@
   読む Tool だけを許した起動で、`--output-format json` の外側の JSON の `result` の本文から結果を探す。ほかは
   ランタイムの表の `review_args` の起動である
 - コードを書く工程の担当（claude）は書き込み用の作業ディレクトリで動き、結果ファイルを作業ディレクトリの
-  `.cross_refactoring/` へ書く。起動の側が終わった後に回収先へ移す。担当は作業ディレクトリの外を書かない
+  `.cross_refactoring/` へ書く。起動の側が終わった後に回収先へ移す。担当は作業ディレクトリの外を書かない。
+  `--output-format json` は完了まで標準出力を出さないため、担当は同じ `.cross_refactoring/` の進捗ファイルへ
+  作業の途中で追記し、無進捗の監視はそのファイルの増え方も測る
 - 担当が結果を出さずに終わったら None を返す（続け方は `phase_decide.on_no_result` が決める）
 """
 
@@ -14,7 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -71,10 +73,16 @@ def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
     return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
 
 
-def _coding(req: Request, workdir: Path, paths_stem: Path, submit: Path) -> agents.Launch:
+def _coding(req: Request, workdir: Path, paths_stem: Path, place: launch_decide.ResultPlace) -> agents.Launch:
     call = claude.ClaudeCall(system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=CODE_TOOLS)
-    prompt = f"{req.prompt}\n\n終えたら結果の JSON を {submit.relative_to(workdir)} へ書く（作業ディレクトリの外は書かない）。"
-    return agents.Launch(req.runtime, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(paths_stem), _limit(req))
+    submit, progress = Path(place.submit), Path(place.progress)
+    prompt = (
+        f"{req.prompt}\n\n作業の途中は、ファイルを編集するたび・テストを打つたびに、何をしたかを 1 行で "
+        f"{progress.relative_to(workdir)} へ追記する（追記が止まると無進捗として止められる）。\n"
+        f"終えたら結果の JSON を {submit.relative_to(workdir)} へ書く（作業ディレクトリの外は書かない）。"
+    )
+    paths = replace(agents.AgentPaths.at(paths_stem), progress=progress)
+    return agents.Launch(req.runtime, (*claude.claude_args(call), prompt), workdir, paths, _limit(req))
 
 
 def _answer_text(req: Request, out: Path) -> str:
@@ -120,7 +128,7 @@ def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tupl
         spec = _read_only(req, Path(where.workdir), stem)
     else:
         Path(where.submit).parent.mkdir(parents=True, exist_ok=True)
-        spec = _coding(req, Path(where.workdir), stem, Path(where.submit))
+        spec = _coding(req, Path(where.workdir), stem, where)
     status = launcher(spec)
     if read_only:
         return _collect_stdout(req, spec.paths.out, Path(where.collect)), status

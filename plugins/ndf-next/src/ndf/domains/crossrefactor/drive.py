@@ -88,8 +88,8 @@ class RunConfig:
     def args(self) -> list[str]:
         """結果を変える引数の並び。安全網の上限は入れない（大きくして打ち直すと、止まった所から続ける）。"""
         return [
-            self.base, *self.scope, "--symbols", *self.symbols, "--participants", *self.participants,
-            "--max-fix", str(self.max_fix), "--budget-minutes", str(self.budget),
+            self.base, *self.scope, "--required", *self.required, "--ci-test", *self.tests, "--symbols", *self.symbols,
+            "--participants", *self.participants, "--max-fix", str(self.max_fix), "--budget-minutes", str(self.budget),
         ]  # fmt: skip
 
     @property
@@ -558,6 +558,19 @@ def _publish(run: _Run, finish: Finish) -> Finish:
     return Finish(finish.kind, finish.detail, finish.items, metrics, finish.notes)
 
 
+def _resume_mismatch(cfg: RunConfig, state: Mapping[str, Any], path: Path) -> Optional[Finish]:
+    """未完了の状態を続ける前に、記録の対象ブランチと結果を変える引数を今と比べる。違えば止まる（続けない）。
+
+    違う引数で続けると、前回の範囲で選んだ項目と予算をそのまま処理し、今回の範囲の外まで公開してしまう。
+    """
+    if "args" not in state:
+        return None
+    if state["branch"] == cfg.branch and list(state["args"]) == cfg.args():
+        return None
+    detail = f"未完了の状態の対象ブランチか結果を変える引数が今回と違う。前と同じ引数で打ち直すか、状態ファイル {path} を消してから打ち直す"
+    return Finish("invalid", detail)
+
+
 def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish]]:
     root = workspace.root_of(git.Git(cfg.repo), cfg.pr)
     path = store.path_of(root)
@@ -567,6 +580,9 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
         return None, reused
     if "done" in state:
         state = {}
+    mismatch = _resume_mismatch(cfg, state, path)
+    if mismatch is not None:
+        return None, mismatch
     runtimes = (*participants.assign(cfg.participants), participants.FIXER)
     ws = workspace.prepare(git.Git(cfg.repo), cfg.pr, cfg.branch, runtimes)
     return _Run(cfg, ports, ws, state, path), None

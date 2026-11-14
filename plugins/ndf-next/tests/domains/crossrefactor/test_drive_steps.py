@@ -166,6 +166,10 @@ def test_coding_launch_that_runs_out_the_safety_net_stops_and_the_item_is_redone
     assert got.kind == "fix_limit" and "--safety-net-minutes" in got.detail
     state = _state(world)
     assert state["items"][0]["status"] == "open" and "add-tests" in state["phase_seconds"]
+    # 結果を変える引数を変えて打ち直すと、前回の範囲で選んだ項目を続けずに止まる（状態は残す）
+    narrowed = drive.drive(world.config(scope=("src/geo.py",), safety_net_minutes=60), ports(FakeAgents(_acts()), FakeHub("clean"), ci=ci))
+    assert narrowed.kind == "invalid" and "状態ファイル" in narrowed.detail
+    assert _state(world)["items"][0]["status"] == "open"
     again = drive.drive(world.config(safety_net_minutes=60), ports(FakeAgents(_acts(propose=None, plan=None)), FakeHub("clean"), ci=ci))
     assert again.kind == "ok", again.detail
     assert _state(world)["items"][0]["status"] == "adopted"
@@ -225,3 +229,9 @@ def test_flaky_fix_that_changes_non_test_files_is_sent_back_once_then_undone(wor
     assert [(f["key"], f["result"]) for f in _state(world)["flaky_fixes"]] == [("flaky:src/geo.py", "undone")]
     assert bad[0] == 2
     assert sh(world.origin, "show", f"refs/heads/{BRANCH}:docs/a.md") == "# a"
+
+
+@pytest.mark.parametrize("over", [{"required": ("pytest", "lint")}, {"tests": ("pytest", "lint")}])
+def test_required_checks_and_ci_tests_are_args_that_change_the_result(world, over) -> None:
+    # 必須の検査や CI のテストを変えたのに、同じ head の前回の成功を返さない
+    assert world.config(**over).args() != world.config().args()

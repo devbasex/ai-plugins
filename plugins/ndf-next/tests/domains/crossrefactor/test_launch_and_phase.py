@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from pathlib import PurePosixPath as P
 
 import pytest
 
+from ndf.adapters import agents
 from ndf.contracts import facts
-from ndf.domains.crossrefactor import finished_decide, launch_decide, phase_decide
+from ndf.domains.crossrefactor import finished_decide, launch, launch_decide, phase_decide
 
 DIRS = (P("/rf/read"), P("/rf/work"), P("/tmp/rf"))
 
@@ -28,10 +30,28 @@ def test_propose_result_is_inside_the_read_only_dir():
 def test_every_launched_phase_submits_inside_its_own_workdir(phase):
     got = launch_decide.result_place(phase, "claude", "rf1-r1", DIRS)
     assert got.submit.is_relative_to(got.workdir)
+    # 進捗のファイルも担当が動くディレクトリの中に置く（外は書けず、無進捗で止められる）
+    assert got.progress.is_relative_to(got.workdir / launch_decide.RESULT_DIR)
 
 
 def test_coding_phases_run_in_the_writable_work_dir():
     assert launch_decide.workdir_of("implement", "claude", *DIRS[:2]) == P("/rf/work")
+
+
+def test_coding_launch_names_and_watches_a_progress_file_inside_the_work_dir(tmp_path: Path):
+    # claude の --output-format json は完了まで標準出力を出さないため、担当が追記する進捗のファイルで無進捗を測る
+    seen: list[agents.Launch] = []
+
+    def launcher(spec: agents.Launch) -> agents.AgentStatus:
+        seen.append(spec)
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    dirs = launch.Dirs(tmp_path / "read", tmp_path / "work", tmp_path / "logs")
+    launch.run(launch.Request("implement", "claude", "直す", "rf1-r1"), dirs, launcher)
+    progress = seen[0].paths.progress
+    assert progress is not None and progress in seen[0].paths.watched()
+    assert progress.is_relative_to(dirs.work)
+    assert str(progress.relative_to(dirs.work)) in seen[0].argv[-1]
 
 
 def test_finished_guidance_without_a_reopen_flag_does_not_name_one():

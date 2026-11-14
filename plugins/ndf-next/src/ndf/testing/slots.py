@@ -502,7 +502,8 @@ def run_command(
 ) -> subprocess.CompletedProcess[str]:
     """シェルのコマンド 1 つを、重ければ枠の下で、自分のプロセスの組で起こして終わりを待つ（出力は捕まえる）。
 
-    上限 `timeout` を超えたら組ごと（子孫まで）止めて回収し、`subprocess.TimeoutExpired` を送る。待ちの諦めと
+    上限 `timeout` を超えたとき・中断（Ctrl+C など）で抜けるときは、組ごと（子孫まで）止めて回収してから枠を返し、
+    例外をそのまま送る（時間切れは `subprocess.TimeoutExpired`）。待ちの諦めと
     メモリの停止は `Stopped` を送る（落ちたコマンドとして数えない）。`suites` は重さの判定に使う宣言（省けば `cwd` から読む）。
     """
     with gate(command, cwd, options=GateOptions(suites=suites)) as held:
@@ -513,7 +514,8 @@ def run_command(
         held.watch(proc)
         try:
             out, err = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except BaseException:
+            # 自分の組で起こした子は端末の中断を受けないため、止めずに枠だけ返すと別の検証と並んで動き続ける
             process_group.stop_group(proc, grace_key=STOP_TEST)
             for stream in (proc.stdout, proc.stderr):
                 if stream is not None:
