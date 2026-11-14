@@ -164,7 +164,7 @@ def _review_args(a: argparse.Namespace) -> dict[str, Any]:
 def _named(sub: Any, cmd: str, help_text: str, write: Optional[Write] = None, session: bool = False) -> argparse.ArgumentParser:
     p = sub.add_parser(cmd, help=help_text)
     p.add_argument("name")
-    p.set_defaults(write=write)
+    p.set_defaults(write=write, handler=_get if write is None else _write)
     if session:
         p.add_argument("--session", required=True, help="打ったセッションの識別子")
     return p
@@ -213,12 +213,14 @@ def _parser() -> argparse.ArgumentParser:
     _add_writes(sub)
     _named(sub, "get", "記録を読む").add_argument("--field", choices=tuple(view(rec.LoopState())), default=None)
     c = sub.add_parser("close-plan", help="スプリントの閉じの手順と要否を決める")
+    c.set_defaults(handler=_close_plan)
     c.add_argument("--pace", required=True)
     c.add_argument("--route", nargs="+", required=True, choices=sprint_decide.ROUTE_STAGES)
     c.add_argument("--mvv", action="store_true", help="MVV の判定がある")
     c.add_argument("--record-pr", type=int, default=None, help="リリース記録の PR の番号（0 は記録なし）")
     c.add_argument("--retrospective-due", action="store_true")
     r = sub.add_parser("review-args", help="レビューの起動の引数を組む")
+    r.set_defaults(handler=_review_args)
     r.add_argument("--purpose", required=True, choices=("design", "code"), help="cross-review run の --purpose")
     r.add_argument("--pr", type=int, required=True)
     r.add_argument("--state-dir", required=True)
@@ -229,13 +231,7 @@ def _parser() -> argparse.ArgumentParser:
 def _run(a: argparse.Namespace) -> dict[str, Any]:
     a.cwd = Path(os.path.realpath(a.cwd if a.cwd is not None else Path.cwd()))
     try:
-        if a.command == "close-plan":
-            return _close_plan(a)
-        if a.command == "review-args":
-            return _review_args(a)
-        if a.write is None:
-            return _get(a)
-        return _write(a)
+        return a.handler(a)
     except (select_decide.CandidateError, sprint_decide.SprintError) as exc:
         return result.stopped(TOOL, "invalid", str(exc))
     except store.StoreError as exc:
