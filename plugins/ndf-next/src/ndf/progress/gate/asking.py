@@ -212,7 +212,11 @@ def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:
 
 @dataclass(frozen=True)
 class Answer:
-    """`ndf answer` が受ける答え。`by` は答えた者（`service:<主体>` など）、`key` は冪等の鍵、`seen` は見た対象。"""
+    """`ndf answer` が受ける答え。`by` は答えた者（`service:<主体>` など）、`key` は冪等の鍵、`seen` は見た対象。
+
+    `outputs` は答えと同じトランザクションで工程の出力としてスプリントの文脈へ書く値（まとめたリリースの版と
+    リリース記録の PR。#2783）。
+    """
 
     gate_id: str
     value: str
@@ -222,3 +226,4 @@ class Answer:
     notes: Optional[Path] = None
     seen: Target = field(default_factory=Target)
     drop: tuple[int, ...] = ()
+    outputs: Mapping[str, Any] = field(default_factory=dict)

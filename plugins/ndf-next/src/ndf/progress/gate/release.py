@@ -87,6 +87,18 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
     return dict(held.release) if held is not None and held.release is not None else None
 
 
+# まとめたリリースの答えの鍵 → スプリントの文脈の鍵（デプロイの出力）
+RELEASED_OUTPUTS = {"version": "version", "release": "release_pr"}
+
+
+def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
+    """出した答えが持つ版とリリース記録の PR（文脈の `version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
+    文脈から読み、リリースの PR を探さない（#2783）。承認しない答えや、値の無い鍵は書かない。"""
+    if value != run.APPROVED:
+        return {}
+    return {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
+
+
 def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: Observe = no_observe) -> Optional[dict[str, Any]]:
     """リリース承認ゲートが待つ依頼に答えがあれば、承認ゲートの答え（`organizer`）として書く。書いた結果を返す。
 
@@ -105,5 +117,5 @@ def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: 
     seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else {}
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの答え（{reply['result']}）"
     target = Target(seen.get("head"), seen.get("material_sha256"))
-    given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target)
+    given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target, outputs=_released(reply, value))
     return answer(st, table_id, given, observe)

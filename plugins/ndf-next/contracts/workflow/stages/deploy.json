@@ -28,7 +28,8 @@
       ],
       "outputs": [
         "delivery",
-        "version"
+        "version",
+        "release_pr"
       ]
     }
   },

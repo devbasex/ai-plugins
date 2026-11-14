@@ -65,6 +65,40 @@ def test_the_organizers_release_on_the_plan_becomes_the_gate_answer(st, lane_spr
     assert gate.take_reply(st, tid, {}) is None
 
 
+def test_the_organizers_release_writes_the_version_and_the_record_pr_into_the_sprint_context(st, lane_sprint, flow):
+    """まとめたリリースの版とリリース記録の PR は、答えと同じ書き込みで文脈へ入り、閉じが PR を探さずに読める（#2783）。"""
+    pid, tid = lane_sprint()
+    q = _at_release(st, tid, flow)
+    sent = gate.request_release(st, run.read(st, tid), q, {})
+    with store.transaction(st) as conn:
+        plan.record_release(conn, pid, [sent["request"]], plan.ReleaseAnswer(plan.RELEASED, "出した", "11.0.0", "https://x/pull/9"))
+    gate.take_reply(st, tid, {})
+    v = run.read(st, tid)
+    assert v.context()["version"] == "11.0.0" and v.context()["release_pr"] == "https://x/pull/9"
+    kinds = [e.draft.kind for e in v.events][-2:]
+    assert kinds == ["answered", "outputs_recorded"]
+
+
+def test_a_rejection_from_the_organizer_writes_no_release_into_the_context(st, new_table, flow, tmp_path):
+    tid = new_table()
+    q = _at_release(st, tid, flow)
+    env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_ORGANIZER_LANE": "a", "NDF_VERSION": "11.0.0"}
+    gate.request_release(st, run.read(st, tid), q, env)
+    (tmp_path / "org" / "answers").mkdir()
+    reply = {"result": "rejected", "version": "11.0.0", "release": "https://x/pull/9"}
+    (tmp_path / "org" / "answers" / f"{gate.request_id(q)}.json").write_text(json.dumps(reply))
+    gate.take_reply(st, tid, env)
+    assert "release_pr" not in run.read(st, tid).context()
+
+
+def test_an_answer_carrying_a_key_the_stage_does_not_output_is_refused(st, new_table, flow):
+    tid = new_table()
+    q = _at_release(st, tid, flow)
+    with pytest.raises(model.Refused, match="outputs に無い鍵"):
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "出した", BY, "k-x", outputs={"pr": 3}))
+    assert run.decide(run.read(st, tid)).action == run.Action.GATE
+
+
 def test_under_an_external_organizer_the_request_and_the_answer_are_files(st, new_table, flow, tmp_path):
     tid = new_table()
     q = _at_release(st, tid, flow)

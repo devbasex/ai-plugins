@@ -17,7 +17,7 @@ from typing import Any, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
-from ndf.progress import command, lane, model, plan, run, store
+from ndf.progress import command, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     REJECTING,
     TOOL,
@@ -131,11 +131,22 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             "release_request": rejected,
         }
         draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
-        seqs = store.append_events(conn, table_id, [draft], v.events[-1].seq if v.events else 0)
+        drafts = [draft, *_outputs(v, q, a)]
+        seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ答え {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"table_id": table_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
     out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", table_id))
     return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
+
+
+def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
+    """答えが運ぶ値（`Answer.outputs`）を、承認ゲートの工程の出力として文脈へ書く事象。宣言に無い鍵は断る。"""
+    if not a.outputs:
+        return []
+    draft, dropped = stages.outputs_draft(v.snap.stage(q.stage), v.rev, a.outputs, run.ACTOR)
+    if dropped:
+        raise model.Refused(f"工程 {q.stage} の定義の outputs に無い鍵は答えから書けない: {'; '.join(dropped)}")
+    return [draft] if draft is not None else []
 
 
 def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:
