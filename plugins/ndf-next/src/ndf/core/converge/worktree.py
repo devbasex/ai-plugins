@@ -260,13 +260,19 @@ def _untracked_in_the_way(g: git.Git, remote: str) -> list[str]:
     if not untracked:
         return []
     files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", remote).split("\0") if p}
-    dirs = {"/".join(parts[:i]) for parts in (f.split("/") for f in files) for i in range(1, len(parts))}
+    dirs = {d for f in files for d in _parents(f)}
+    return [p for p in untracked if _clashes(p, files, dirs)]
 
-    def clashes(path: str) -> bool:
-        parts = path.split("/")
-        return path in files or path in dirs or any("/".join(parts[:i]) in files for i in range(1, len(parts)))
 
-    return [p for p in untracked if clashes(p)]
+def _parents(path: str) -> list[str]:
+    """`path` の親のディレクトリ（根に近い順。`a/b/c` なら `a` と `a/b`）。"""
+    parts = path.split("/")
+    return ["/".join(parts[:i]) for i in range(1, len(parts))]
+
+
+def _clashes(path: str, files: set[str], dirs: set[str]) -> bool:
+    """`path` が追跡されるファイルかディレクトリと同じか、追跡されるファイルを親に持つか。"""
+    return path in files or path in dirs or any(p in files for p in _parents(path))
 
 
 def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
