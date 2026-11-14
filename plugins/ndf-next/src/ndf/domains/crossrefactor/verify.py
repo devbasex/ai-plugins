@@ -21,11 +21,11 @@ from typing import Any
 from ndf.adapters import git
 from ndf.contracts import limits
 from ndf.core.converge import worktree
-from ndf.domains.crossrefactor import scope, tests_decide, verify_decide
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.domains.crossrefactor import scope, verify_decide
+from ndf.testing.scoped import in_scope
 from ndf.testing import limits as test_limits
 from ndf.testing import slots, weight
-from ndf.testing.rerun import SCOPE_KEY
+from ndf.testing import scoped
 
 RUN_POLICY = "test-run.test"
 
@@ -53,8 +53,8 @@ def _declaration(work: Path) -> Mapping[str, Any]:
 
 
 def _suite(raw: Mapping[str, Any]) -> Suite | None:
-    template = raw.get(SCOPE_KEY)
-    if not isinstance(template, str) or tests_decide.PATHS_SLOT not in template:
+    template = raw.get(scoped.SCOPE_KEY)
+    if not isinstance(template, str) or scoped.PATHS_SLOT not in template:
         return None
     paths = raw["paths"] if isinstance(raw.get("paths"), list) else ["."]
     return Suite(str(raw["name"]), template, tuple(str(p) for p in paths), weight.is_test_suite(raw))
@@ -97,9 +97,9 @@ def failing(work: Path, found: Sequence[Suite], picked: Mapping[str, Sequence[st
     keys: set[str] = set()
     for name, files in picked.items():
         template = by_name[name].template
-        if _passes(work, tests_decide.fill_paths(template, files), timeout):
+        if _passes(work, scoped.fill_paths(template, files), timeout):
             continue
-        keys.update(verify_decide.failure_key(name, f) for f in files if not _passes(work, tests_decide.fill_paths(template, [f]), timeout))
+        keys.update(verify_decide.failure_key(name, f) for f in files if not _passes(work, scoped.fill_paths(template, [f]), timeout))
     return frozenset(keys)
 
 

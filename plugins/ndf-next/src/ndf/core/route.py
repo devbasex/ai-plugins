@@ -29,13 +29,15 @@
         止まった結果の同じ原因の鍵（種類と落ちたテストの集まり）を記録へ足し、続いた回数が
         `supervise.step-rerun` の `same_cause` を超えたら `fix_limit` で止まる（人へ戻す）
     ndf route test [--result <結果 JSON のファイル>] -- <コマンド>
-    ndf route test [--result <結果 JSON のファイル>] --nodes-from <CI の結果 JSON のファイル>
         手元のテストのコマンドを `ndf test-slot run` で打つ。シグナル（128 以上）を除く 0 以外の終了コードは
         どれも `test_failed` の止まった結果にし（`--result` があればそこへも書く。`ndf route repeat` が数える）、
-        `test-slot` 自身が止まった結果はそのまま返す。`--nodes-from` はコマンドの代わりに、CI の落ちたテストの
-        node id を持つテストの suite（`.ndf/project.json` の `test.suites`）だけを、その `scope_command` の
-        `{paths}` へ node id を入れて打つ（`ndf.testing.rerun`）。通ったときも打ったコマンドと合否を ok の結果に
-        残す。CI の結果を読めない・落ちたテストが無い・持つ suite か `{paths}` が無いときは、全体を打たずに `invalid`
+        `test-slot` 自身が止まった結果はそのまま返す
+    ndf route test --failed-from <CI の結果 JSON のファイル> [--result <結果 JSON のファイル>]
+        CI の修正の後の確かめ（#3188）。CI で落ちたテストのファイルだけを、打った場所の宣言（`.ndf/project.json`）の
+        テストの suite の `scope_command` の `{paths}` へ入れて打つ。落ちたテストを持つ suite だけを打ち、全体テストは
+        打たない。落ちたテストが無い・どの suite にも当たらないファイルがあれば打たずに `precondition`、
+        CI の結果や宣言を読めなければ `invalid`。通ったときも落ちたときも、打ったコマンドと合否を結果 JSON の
+        `items` に並べる（`--result` があればそこへも書く）
 
 結果 JSON を標準出力へ 1 行で出す。
 """
@@ -61,7 +63,7 @@ from ndf.contracts.routing import END
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
 from ndf.testing import limits as test_limits
-from ndf.testing import rerun
+from ndf.testing import scoped
 
 TOOL = cli.tool_of(__name__)
 # 雛形の置き場（contracts/ の下）と、雛形でない決まった名前のファイル
@@ -567,39 +569,94 @@ def _run_passing(argv: Sequence[str]) -> tuple[int, Optional[dict[str, Any]]]:
     return proc.returncode, steps.last_json(last)
 
 
-def _rerun_command(a: argparse.Namespace) -> tuple[str, list[str]]:
-    """CI の落ちたテストだけを打ち直すコマンドと、その node id。組めなければ `RouteError`（全体は打たない）。"""
-    nodes = _failed_nodes(Path(a.nodes_from))
+def _passed_through(code: int, own: Optional[dict[str, Any]]) -> bool:
+    """枠（test-slot）自身が止まった結果か、シグナルで止まった子か（テストの落ちと読まず、終了コードをそのまま返す）。"""
+    return own is not None or code >= SIGNAL_EXIT_BASE
+
+
+def _write_result(path: Optional[str], found: Mapping[str, Any]) -> None:
+    if path is None:
+        return
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(found, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _declared_suites(cwd: Path) -> Any:
+    """打った場所から根へ探した宣言の `test.suites`（宣言か鍵が無ければ空か None。形の確かめは `scoped.scoped_runs` が持つ）。読めなければ `RouteError`。"""
+    path = test_limits.find_setting(cwd, test_limits.PROJECT_FILE)
+    if path is None:
+        return []
     try:
-        return " && ".join(rerun.commands(test_limits.load_suites(Path.cwd()), nodes)), nodes
-    except rerun.RerunError as exc:
-        raise RouteError(f"CI の落ちたテストだけを打ち直せない（全体は打たずに止まる）: {exc}") from None
+        found = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RouteError(f"宣言 {path} を読めない: {exc}") from None
+    test = found.get("test") if isinstance(found, Mapping) else None
+    return test.get("suites") if isinstance(test, Mapping) else None
+
+
+class _NotRunnable(Exception):
+    """落ちたテストを手元で範囲を絞って打てない（`precondition`）。"""
+
+    def __init__(self, detail: str, nodes: Sequence[str]) -> None:
+        super().__init__(detail)
+        self.nodes = list(nodes)
+
+
+def _scoped_plan(ci_result: Path, cwd: Path) -> tuple[list[str], list[scoped.ScopedRun]]:
+    """CI の落ちたテストと、それを打つ範囲のテスト。打てなければ `_NotRunnable`、読めなければ `RouteError`。"""
+    nodes = _failed_nodes(ci_result)
+    files = scoped.files_of(nodes)
+    if not files:
+        raise _NotRunnable(f"CI の結果 {ci_result} に落ちたテストが無い（全体テストは打たずに止まる）", nodes)
+    runs, rest = scoped.scoped_runs(_declared_suites(cwd), files)
+    if rest:
+        detail = f"範囲を打てるテストの suite（{scoped.SCOPE_KEY} に {scoped.PATHS_SLOT}）に当たらない: {', '.join(rest)}"
+        raise _NotRunnable(detail, nodes)
+    return nodes, runs
+
+
+def _cmd_failed_from(a: argparse.Namespace) -> int:
+    try:
+        nodes, runs = _scoped_plan(Path(a.failed_from), Path.cwd())
+    except RouteError as exc:
+        return _invalid(str(exc))
+    except _NotRunnable as exc:
+        found = result.stopped(TOOL, "precondition", str(exc), metrics={"failed_tests": exc.nodes})
+        _write_result(a.result, found)
+        return result.emit(found)
+    items: list[dict[str, Any]] = []
+    for run in runs:
+        code, own = _run_passing([*TEST_SLOT, run.command])
+        if _passed_through(code, own):
+            return code
+        passed = code == exit_codes.code_of("ok")
+        items.append({"kind": "test_run", "suite": run.suite, "command": run.command, "exit_code": code, "passed": passed})
+    failed = [i for i in items if not i["passed"]]
+    metrics = {"failed_tests": nodes, "runs": len(items), "failed_runs": len(failed)}
+    if failed:
+        detail = f"CI で落ちたテストを手元で打ち、{len(items)} 本のうち {len(failed)} 本が落ちた: {failed[0]['command']}"
+        found = result.stopped(TOOL, "test_failed", detail, items=items, metrics=metrics)
+    else:
+        found = result.result(TOOL, OK, f"CI で落ちたテストを手元で {len(items)} 本のコマンドで打ち、通った", items, metrics)
+    _write_result(a.result, found)
+    return result.emit(found)
 
 
 def _cmd_test(a: argparse.Namespace) -> int:
-    if (a.nodes_from is None) == (a.command is None):
-        return _invalid("ndf route test は -- <コマンド> か --nodes-from <CI の結果 JSON> のどちらか一方を渡す")
-    nodes: list[str] = []
-    command = a.command
-    if a.nodes_from is not None:
-        try:
-            command, nodes = _rerun_command(a)
-        except RouteError as exc:
-            return _invalid(str(exc))
-    code, own = _run_passing([*TEST_SLOT, command])
+    if a.failed_from is not None:
+        if a.command is not None:
+            return _invalid("--failed-from はコマンドを取らない（打つコマンドは宣言の scope_command から組む）")
+        return _cmd_failed_from(a)
+    if a.command is None:
+        return _invalid("打つテストのコマンドが無い（-- <コマンド> か --failed-from を渡す）")
+    code, own = _run_passing([*TEST_SLOT, a.command])
     # 枠（test-slot）自身が止まった結果は出したまま返す。シグナルで止まった子はテストの落ちと読まない
-    if (own is not None and code != exit_codes.code_of("ok")) or code >= SIGNAL_EXIT_BASE:
+    if code == exit_codes.code_of("ok") or _passed_through(code, own):
         return code
-    metrics = {"command": command, "exit_code": code, "failed_tests": nodes}
-    if code == exit_codes.code_of("ok"):
-        # 打ち直しは通ったときも、打ったコマンドと合否を結果に残す
-        passed = result.result(TOOL, OK, f"CI の落ちたテスト {len(nodes)} 件を手元で打ち直して通った", metrics=metrics)
-        return result.emit(passed) if a.nodes_from is not None else code
+    metrics = {"exit_code": code, "failed_tests": []}
     found = result.stopped(TOOL, "test_failed", f"テストのコマンドが終了コード {code} で落ちた", metrics=metrics)
-    if a.result is not None:
-        out = Path(a.result)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(found, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_result(a.result, found)
     return result.emit(found)
 
 
@@ -620,7 +677,7 @@ def _parser() -> argparse.ArgumentParser:
     rp.set_defaults(fn=_cmd_repeat)
     tp = sub.add_parser("test", help="手元のテストを打ち、落ちを test_failed にする")
     tp.add_argument("--result")
-    tp.add_argument("--nodes-from")
+    tp.add_argument("--failed-from")
     tp.add_argument("command", nargs="?")
     tp.set_defaults(fn=_cmd_test)
     return p

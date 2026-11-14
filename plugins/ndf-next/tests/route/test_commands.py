@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 
+from ndf.contracts import causes
 from ndf.core import route
 from ndf.core.plan import model, steps
 
@@ -92,7 +93,8 @@ def test_test_steps_run_through_route_test():
     """手元のテスト・全体テスト・CI の落ちの確かめ直しは ndf route test で打つ（終了コードの読み替えを 1 か所にする）。"""
     impl = plan_of("implement", test_command="pytest -q")
     assert step_of(impl, "test").run == ("ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "pytest -q")
-    assert step_of(impl, "ci-local").run == ("ndf", "route", "test", "--nodes-from", "{state_dir}/ci.json")
+    ci_local = ("ndf", "route", "test", "--failed-from", "{state_dir}/ci.json", "--result", "{state_dir}/ci-local.json")
+    assert step_of(impl, "ci-local").run == ci_local
     whole = step_of(plan_of("check", whole_test_command="make test"), "test-all").run
     assert whole == ("ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "make test")
 
@@ -111,16 +113,6 @@ def test_ci_only_plans_drop_local_test_steps_and_follow_on():
     assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
     check = route.render(route.choose("check"), values("check"), local_tests=False)
     assert {s["id"]: s for s in check["steps"]}["fix"]["next"] == "refactor"
-
-
-def _declare(tmp_path, monkeypatch, suites):
-    """打った場所に `.ndf/project.json` のテストの suite を置き、そこへ移る。"""
-    (tmp_path / ".ndf").mkdir(exist_ok=True)
-    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}), encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-
-
-PYTEST = {"name": "pytest", "command": "pytest -q", "scope_command": "pytest -q {paths}"}
 
 
 def test_route_test_reads_any_non_signal_failure_as_test_failed(tmp_path, monkeypatch, capsys, last_result):
@@ -145,83 +137,108 @@ def test_route_test_passes_signal_and_slot_results_through(tmp_path, monkeypatch
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == own
 
 
-def test_ci_local_runs_only_failed_tests_and_reports_failure(tmp_path, monkeypatch, capsys, last_result):
-    """#3473: CI で落ちたテストの node id だけを、テストの suite の scope_command の {paths} へ入れて打つ。落ちれば test_failed。"""
-    _declare(tmp_path, monkeypatch, [PYTEST])
-    ci = tmp_path / "ci.json"
-    _ci_result(ci, ["tests/a.py::t1", "tests/b.py::t2"])
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    assert route.main(["test", "--nodes-from", str(ci)]) == 0
-    assert seen.read_text().splitlines() == ["pytest -q tests/a.py::t1 tests/b.py::t2"]
-    passed = last_result(capsys.readouterr().out)
-    assert passed["status"] == "ok" and passed["metrics"]["command"] == "pytest -q tests/a.py::t1 tests/b.py::t2"
-    _slot(monkeypatch, tmp_path, "exit 2")
-    route.main(["test", "--nodes-from", str(ci)])
+SUITES = [
+    {"name": "py", "command": "pytest -q", "scope_command": "pytest -q {paths}", "paths": ["tests"]},
+    {"name": "web", "command": "vitest run", "scope_command": "vitest run {paths}", "paths": ["web"]},
+    {"name": "lint", "kind": "lint", "command": "ruff check", "scope_command": "ruff check {paths}"},
+]
+
+
+def _declare(monkeypatch, tmp_path, suites=SUITES):
+    """打つ場所（作業場所）の宣言 `.ndf/project.json` にテストの suite を置き、そこへ移る。"""
+    (tmp_path / ".ndf").mkdir(exist_ok=True)
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+
+def _slots(monkeypatch, tmp_path, body):
+    """`_slot` と同じだが、打つたびに受けたコマンドを 1 行ずつ足す（suite ごとに打つ回数を数える）。"""
+    seen = tmp_path / "seen.txt"
+    bindir = fake_bin(tmp_path, "slot", f'printf "%s\\n" "$@" >> {shlex.quote(str(seen))}\n{body}')
+    monkeypatch.setattr(route, "TEST_SLOT", (str(bindir / "slot"),))
+    return seen
+
+
+def _failed_from(ci, out):
+    return route.main(["test", "--failed-from", str(ci), "--result", str(out)])
+
+
+def test_ci_local_runs_failed_test_files_through_their_suite_and_records_the_command(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: CI で落ちたテストのファイルだけを、それを持つ suite の scope_command の {paths} へ入れて打つ。
+
+    落ちたテストを持たない suite（web）と検査の suite（lint）は打たない。通ったときも打ったコマンドと合否を結果 JSON に残す。
+    """
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "state" / "ci-local.json"
+    nodes = ["tests/a.py::t1", "tests/a.py::t2", "tests/b.py::t3"]
+    _ci_result(ci, nodes)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    assert _failed_from(ci, out) == 0
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py tests/b.py"]
     found = last_result(capsys.readouterr().out)
-    assert (found["cause"]["kind"], found["metrics"]["failed_tests"]) == ("test_failed", ["tests/a.py::t1", "tests/b.py::t2"])
-    assert found["metrics"]["command"] == "pytest -q tests/a.py::t1 tests/b.py::t2"
+    assert found["status"] == "ok" and found["metrics"]["failed_tests"] == nodes
+    assert [(i["command"], i["passed"]) for i in found["items"]] == [("pytest -q tests/a.py tests/b.py", True)]
+    assert json.loads(out.read_text(encoding="utf-8")) == found
 
 
-def test_ci_local_runs_only_suites_holding_failed_tests(tmp_path, monkeypatch):
-    """#3473: suite が複数でも、落ちたテストを持つ suite だけを打つ（いちばん深い paths の suite が持つ。lint は打たない）。"""
-    suites = [
-        {**PYTEST, "paths": ["."]},
-        {"name": "web", "command": "vitest run", "scope_command": "vitest run {paths}", "paths": ["web"]},
-        {"name": "api", "command": "go test ./...", "scope_command": "go test {paths}", "paths": ["api"]},
-        {"name": "lint", "kind": "lint", "command": "ruff check", "scope_command": "ruff check {paths}"},
-    ]
-    _declare(tmp_path, monkeypatch, suites)
-    ci = tmp_path / "ci.json"
-    _ci_result(ci, ["web/a.test.ts::x", "tests/a.py::t1"])
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    assert route.main(["test", "--nodes-from", str(ci)]) == 0
-    assert seen.read_text().splitlines() == ["pytest -q tests/a.py::t1 && vitest run web/a.test.ts::x"]
+def test_ci_local_runs_each_suite_holding_failed_tests_and_reports_failure(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: suite が複数なら、落ちたテストを持つ suite ごとに 1 回打つ。どれかが落ちれば test_failed（push しない）。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    nodes = ["tests/a.py::t1", "web/b.test.ts"]
+    _ci_result(ci, nodes)
+    seen = _slots(monkeypatch, tmp_path, 'case "$1" in vitest*) exit 1 ;; esac')
+    assert _failed_from(ci, out) == causes.exit_code("test_failed")
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py", "vitest run web/b.test.ts"]
+    found = last_result(capsys.readouterr().out)
+    assert (found["cause"]["kind"], found["metrics"]["failed_tests"]) == ("test_failed", nodes)
+    assert [(i["suite"], i["exit_code"], i["passed"]) for i in found["items"]] == [("py", 0, True), ("web", 1, False)]
+    assert json.loads(out.read_text(encoding="utf-8")) == found
 
 
-def test_ci_local_without_rerunnable_nodes_stops_without_running_the_whole_suite(tmp_path, monkeypatch, capsys, last_result):
-    """#3473: 落ちたテストを読めない・持つ suite が無い・scope_command に {paths} が無いときは、全体を打たずに invalid で止まる。"""
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    ci = tmp_path / "ci.json"
-    cases = [
-        ([PYTEST], []),
-        ([{**PYTEST, "paths": ["tests"]}], ["other/a.py::t"]),
-        ([{"name": "pytest", "command": "pytest -q"}], ["tests/a.py::t"]),
-    ]
-    for suites, nodes in cases:
-        _declare(tmp_path, monkeypatch, suites)
+def test_ci_local_stops_without_running_whole_tests_when_failed_tests_are_unknown(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: 落ちたテストを読めない（空）か、範囲を打てる suite に当たらないファイルがあれば、全体テストを打たずに止まる。"""
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    for nodes in ([], ["tests/a.py::t1", "docs/x.py::t"]):
+        ci = tmp_path / "ci.json"
         _ci_result(ci, nodes)
-        route.main(["test", "--nodes-from", str(ci)])
-        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
-        assert not seen.exists()
+        _failed_from(ci, tmp_path / "ci-local.json")
+        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "precondition"
+    _declare(monkeypatch, tmp_path, [{"name": "py", "command": "pytest -q"}])
+    _ci_result(ci, ["tests/a.py::t1"])
+    _failed_from(ci, tmp_path / "ci-local.json")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "precondition"
+    assert not seen.exists()
 
 
 def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkeypatch, capsys, last_result):
     """CI の結果を読めないときは、テストを打たずに invalid の結果 JSON で止まる（テストの落ちの終了コードと衝突しない）。"""
-    _declare(tmp_path, monkeypatch, [PYTEST])
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    route.main(["test", "--nodes-from", str(tmp_path / "no.json")])
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    _failed_from(tmp_path / "no.json", tmp_path / "ci-local.json")
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert not seen.exists()
 
 
 def test_route_test_takes_either_a_command_or_failed_tests(tmp_path, monkeypatch, capsys, last_result):
-    """コマンドと --nodes-from は 1 つだけを渡す（両方・どちらも無しは打たずに invalid）。"""
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    for argv in (["test"], ["test", "--nodes-from", str(tmp_path / "ci.json"), "--", "pytest -q"]):
+    """コマンドと --failed-from は 1 つだけを渡す（両方・どちらも無しは打たずに invalid）。"""
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    for argv in (["test"], ["test", "--failed-from", str(tmp_path / "ci.json"), "--", "pytest -q"]):
         route.main(argv)
         assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert not seen.exists()
 
 
-def test_ci_local_quotes_failed_test_ids_for_the_shell(tmp_path, monkeypatch):
-    """落ちたテストの node id は 1 つずつシェルの引用へ通して入れる（空白・`$(...)`・`;` を分割も実行もしない）。"""
-    _declare(tmp_path, monkeypatch, [PYTEST])
+def test_ci_local_quotes_failed_test_files_for_the_shell(tmp_path, monkeypatch):
+    """落ちたテストのファイルは 1 つずつシェルの引用へ通して {paths} へ入れる（空白・`$(...)`・`;` を分割も実行もしない）。"""
+    _declare(monkeypatch, tmp_path)
     ci = tmp_path / "ci.json"
-    nodes = ["tests/a.py::t[a b]", "tests/b.py::t[$(touch hit); x]"]
-    _ci_result(ci, nodes)
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    assert route.main(["test", "--nodes-from", str(ci)]) == 0
-    assert shlex.split(seen.read_text().splitlines()[-1]) == ["pytest", "-q", *nodes]
+    files = ["tests/a b.py", "tests/$(touch hit); x.py"]
+    _ci_result(ci, [f"{f}::t[1]" for f in files])
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    assert _failed_from(ci, tmp_path / "ci-local.json") == 0
+    assert shlex.split(seen.read_text().splitlines()[-1]) == ["pytest", "-q", *files]
     assert not (tmp_path / "hit").exists()
 
 

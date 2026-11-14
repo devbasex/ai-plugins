@@ -214,7 +214,7 @@ def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_pa
     plan = Path(argv[argv.index("next") + 1])
     assert plan.parent == work and json.loads(plan.read_text())["worktree"] == place
     # プランの実行は同じ引数を断らずに受け、作業場所はプランの作業場所に入る
-    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_cli._pairs(sets, "--set"))
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_runner.RunOptions(plan_cli._pairs(sets, "--set")))
     assert inv.plan.worktree == place and inv.values["worktree"] == place
 
 
@@ -471,13 +471,13 @@ def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_roun
     first = invoke.plan_argv(run, work, None, tmp_path)
     assert "--from" not in first
     plan = Path(first[first.index("next") + 1])
-    inv = plan_runner.prepare(root, plan, None, str(work), tmp_path, {"issues": "[1]"})
+    inv = plan_runner.prepare(root, plan, None, str(work), tmp_path, plan_runner.RunOptions({"issues": "[1]"}))
     plan_runner._record_run(inv)
     final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": "b", "count": 2}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
     again = invoke.plan_argv(run, work, None, tmp_path)
     assert again[again.index("--from") + 1] == "b" and again.index("--from") < again.index("--state-dir")
-    retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, {"issues": "[1]"})
+    retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, plan_runner.RunOptions({"issues": "[1]"}))
     assert retried.key != inv.key and retried.round_no == inv.round_no + 1
     # 新しい回が承認ゲートで待つ間（結果の控えが無い）は、答えを渡す呼び出しも同じ開始点で同じ回に届く
     plan_runner._record_run(retried)
@@ -497,7 +497,7 @@ def _stop_at(root: Path, plan: Path, work: Path, argv: list[str], last: str = "b
     """`argv` の呼び出しでプランの回を流し、ステップ `last` で止まった結果を控えに残す。"""
     start = argv[argv.index("--from") + 1] if "--from" in argv else None
     sets = plan_cli._pairs([argv[i + 1] for i, a in enumerate(argv) if a == "--set"], "--set")
-    inv = plan_runner.prepare(root, plan, start, str(work), work, sets)
+    inv = plan_runner.prepare(root, plan, start, str(work), work, plan_runner.RunOptions(sets))
     plan_runner._record_run(inv)
     final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": last, "count": 2}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
@@ -531,7 +531,7 @@ def _gate_ended(tmp_path: Path, monkeypatch) -> tuple[invoke.StageRun, Path]:
     run = _plan_run({"issues": [1]})
     argv = invoke.plan_argv(run, work, None, tmp_path)
     plan = Path(argv[argv.index("next") + 1])
-    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), work, {"issues": "[1]"})
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), work, plan_runner.RunOptions({"issues": "[1]"}))
     plan_runner._record_run(inv)
     final = {"status": "gate", "kind": None, "detail": "判断を待つ", "last": "a", "count": 1}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
