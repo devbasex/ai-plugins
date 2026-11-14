@@ -17,7 +17,6 @@ import pytest
 from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
-from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, run, stages, store
 from ndf.progress import records as progress_records
 
@@ -45,13 +44,6 @@ def _new(capsys, mode: str = "standard", *extra: str) -> str:
     code, out = _main(capsys, command.main, "new", "s1", "--mode", mode, "--issues", str(ISSUE), *extra)
     assert code == 0, out
     return out["metrics"]["table_id"]
-
-
-@pytest.fixture
-def st(repo):
-    root = durable.prepare_store(command.store_root_of(repo)).root  # 置き場を用意してから開く（`ndf progress` の副命令と同じ順）
-    with store.open_store(store.default_url(root), root) as opened:
-        yield opened
 
 
 class Fake:

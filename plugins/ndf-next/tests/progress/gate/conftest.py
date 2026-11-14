@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.core import durable
 from ndf.progress import command, lane, plan, run, store
 from plan_decls import REPO
 from plan_decls import decl as _decl
@@ -31,13 +30,6 @@ def _load_lanes():
 
 
 lanes = _load_lanes()
-
-
-@pytest.fixture
-def st(repo):
-    root = durable.prepare_store(command.store_root_of(repo)).root
-    with store.open_store(store.default_url(root), root) as opened:
-        yield opened
 
 
 @pytest.fixture
