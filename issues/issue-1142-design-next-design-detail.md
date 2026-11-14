@@ -343,8 +343,8 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 | 関数 | 種類 | 入力 | 出力 | 副作用 | 前提と後条件 |
 | --- | --- | --- | --- | --- | --- |
-| `entry.main(argv)` | 外部呼び出し | `argv[1]` のランタイムと事象・標準入力の payload | 終了コード（いつも 0。止めるときも、ランタイムの契約表の形の JSON を標準出力へ出す） | 計測の 1 行・数え手の更新。SessionStart のときだけ `env.mark_root`・`env.touch_used`・`metrics.prune(14)` | 環境の python で動く。`dispatch` と依存を import する前に `strict.check` を呼び、止める答えならそれを返して終わる。import の失敗・例外・締め切り超えは何も出さずに 0 で終わる |
-| `boot.main(argv)` | 外部呼び出し | `entry.main` と同じ | 終了コード（いつも 0） | SessionStart のときだけ `env.mark_root` と `env.kick_prepare`。`.failed` があれば 1 行の案内を出す | システムの `python3` で動き、標準ライブラリだけを import する。`strict.check` のほかの guard は呼ばない。版がシステムの `python3` の下限（`imports.json` の `boot.python`）より古ければ 0 で終わる |
+| `entry.main(argv)` | 外部呼び出し | `argv[1]` のランタイム・`argv[2]` の事象・標準入力の payload | 終了コード（いつも 0。止めるときも、ランタイムの契約表の形の JSON を標準出力へ出す） | 計測の 1 行・数え手の更新。SessionStart のときだけ `env.mark_root`・`env.touch_used`・`metrics.prune(14)` | 環境の python で動く。`dispatch` と依存を import する前に `strict.check` を呼び、止める答えならそれを返して終わる。import の失敗・例外・締め切り超えは何も出さずに 0 で終わる |
+| `boot.main(argv)` | 外部呼び出し | `entry.main` と同じ（`argv[1]` のランタイム・`argv[2]` の事象・標準入力の payload。登録の command が `hooks/entry.py` のパスを `shift` で外してから渡す） | 終了コード（いつも 0） | SessionStart のときだけ `env.mark_root` と `env.kick_prepare`。`.failed` があれば 1 行の案内を出す | システムの `python3` で動き、標準ライブラリだけを import する。`strict.check` のほかの guard は呼ばない。版がシステムの `python3` の下限（`imports.json` の `boot.python`）より古ければ 0 で終わる |
 | `strict.check(raw_payload, root)` | 読むだけ | payload・作業ディレクトリ | 止める答えか `None` | 無し | シェルの字句は `shlex` で読む。字句を読めない・宣言（`.ndf/project.json` の `delivery`）を読めないときは止める答えを返す |
 | `dispatch.run(ctx, specs, limits, counter)` | 純粋に近い（guard が副作用を持つときは表に書く） | 文脈・表・予算・数え手 | `Outcome`（まとめた判定・guard ごとの所要と判定） | 無し（数え手は `counter` を通す） | 締め切りの残りが余白を下回ったら、残りの guard を呼ばずに通す。`deny` が上限を超えたら `advise` へ下げる。複数の判定は `deny` > `pushback` > `advise` > `pass` の順で 1 つにまとめる |
 | `dispatch.render(outcome, runtime_table)` | 純粋な関数 | 判定・契約表 | 終了コードと標準出力 | 無し | 注入の文が上限の字数を超えたら、`<状態の置き場>/hooks/notes/` へ書いたファイルのパスと先頭の要点に置き換える |
@@ -362,7 +362,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 | 場所 | 異常 | 扱い |
 | --- | --- | --- |
-| 登録の command | 環境の python が無い | システムの `python3` で `boot.main` を起動する。`python3` も無ければ何もせずに 0 |
+| 登録の command | 環境の python が無い | システムの `python3` で `boot.main` を起動する。`hooks/entry.py` のパスは `shift` で外し、ランタイムと事象を `entry.main` と同じ位置で渡す。`python3` も無ければ何もせずに 0 |
 | `entry.main` | 依存の import に失敗した | `strict.check` は import の前に済んでいる。ほかは入口の `except` で何も出さずに 0 で終わる |
 | `prepare.py` | `uv` が無い・依存を取得できない・作れない | 一時の置き場を消し、`<hash>.failed` に理由を書いて終わる。次の SessionStart の `boot.main` が 1 行の案内を出し、用意を起動し直す |
 | `entry.main` | payload が JSON でない・契約表に無い事象・知らない Tool | 何も出さずに 0。計測に `input_shape` か `unknown_event` と書く |
@@ -451,9 +451,10 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | M3-H13 | M3 | 見本の入力で入口を事象ごとに 20 回起動し、p95 が予算の 3 倍を超えたら落ちる CI のテストを置く | 決定 90・決定 94 |
 | M3-H14 | M3 | 依存の環境を lock の hash ごとの置き場に作り、SessionStart は用意を切り離して起動して待たない。環境が無いときの用意は、システムの `python3` で動く `boot.py` から `prepare.py` を起動する。環境を消した状態から SessionStart の登録を打ち、SessionStart の timeout の中で 0 で返ること・切り離した用意が終わって環境の python ができること・その後の PreToolUse の登録が `entry` で動く（計測の `path` が `entry`）ことを、テストで確かめる（依存の取得は CI が先に温めた uv のキャッシュから `--offline` で行う）。根の目印（SessionStart の入口が書く）から指されず、`.last-used`（SessionStart の `entry` と用意の終わりが書く）が 7 日より古い置き場を消す。予算の経路では目印と `.last-used` を書かない。使い中の置き場を作り直さない | 決定 89・決定 93 |
 | S1-H1 | S1 | `hooks/claude.json` と `hooks/codex.json` は事象ごとに登録 1 行で、すべての登録に予算の timeout を付ける。登録は `ndf hooks render` が契約表と予算から作り、CI で作り直した結果と一致することを確かめる | 決定 88・決定 90・IH1・IH3 |
-| S1-H2 | S1 | 登録の command は `sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 \|\| exit 0; exec python3 "${1%/*}/boot.py" "$@"'` で、環境の python があれば `hooks/entry.py` を直に起動し、無ければシステムの `python3` で `hooks/boot.py` を起動する。`bin/ndf` と `uv run` を通らない。環境を消した状態で全事象の登録を打ち、`strict` の guard に当たる入力のほかは出力なし・0 を確かめる。`python3` を `PATH` から外した状態でも 0 を確かめる。環境を消した状態から SessionStart の登録で用意が終わるまでを M3-H14 のテストで通す | 決定 89・決定 91・IH2 |
+| S1-H2 | S1 | 登録の command は `sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 \|\| exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'` で、環境の python があれば `hooks/entry.py` を直に起動し、無ければシステムの `python3` で `hooks/boot.py` を起動する。boot の経路は `hooks/entry.py` のパスを `shift` で外してから渡す。`bin/ndf` と `uv run` を通らない。環境を消した状態で全事象の登録を打ち、`strict` の guard に当たる入力のほかは出力なし・0 を確かめる。`python3` を `PATH` から外した状態でも 0 を確かめる。環境を消した状態から SessionStart の登録で用意が終わるまでを M3-H14 のテストで通す | 決定 89・決定 91・IH2 |
 | S1-H3 | S1 | Codex の登録は、契約表で Codex が持つ事象（UserPromptSubmit を含む）を並べる。Codex で働かない guard は契約表に理由を書く | 決定 95 |
 | S1-H4 | S1 | 「ndf-next だけを読む起動」のスクリプトで起動したセッションで、計測の記録に ndf-next の行だけが出て、ndf の hook が走らないことを確かめる | 決定 74・指摘 12 |
+| S1-H5 | S1 | 登録の command を 3 つの経路で打ち、起動されたスクリプトの `argv` を確かめるテストを置く。環境の python がある経路は `[hooks/entry.py, ランタイム, 事象]`、環境の python が無い経路は `[hooks/boot.py, ランタイム, 事象]`（`hooks/entry.py` のパスを含まない）、`python3` も `PATH` に無い経路は何も起動せずに 0。`boot.main` が読むランタイムと事象が `entry.main` と同じになることを、事象ごとに確かめる | 決定 89・IH2 |
 
 ## 単体テストの観点
 
