@@ -183,22 +183,28 @@ def _cmd(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
     return result.command(TOOL, *args, ask=ask)
 
 
+def _enum_of_property(node: dict[str, Any], key: str) -> Optional[list[str]]:
+    """スキーマの節 `node` の性質 `key` の `enum`。無ければ None。"""
+    props = node["properties"] if isinstance(node.get("properties"), dict) else {}
+    prop = props[key] if key in props else None
+    return list(prop["enum"]) if isinstance(prop, dict) and "enum" in prop else None
+
+
+def _children(node: Any) -> Iterable[Any]:
+    """スキーマの木の子（オブジェクトなら値、配列なら要素）。"""
+    if isinstance(node, dict):
+        return node.values()
+    if isinstance(node, list):
+        return node
+    return ()
+
+
 def _find_enum(node: Any, key: str) -> Optional[list[str]]:
     """スキーマの木から、性質 `key` の `enum` を探す。"""
-    if isinstance(node, dict):
-        props = node["properties"] if isinstance(node.get("properties"), dict) else {}
-        if key in props and isinstance(props[key], dict) and "enum" in props[key]:
-            return list(props[key]["enum"])
-        children: Iterable[Any] = node.values()
-    elif isinstance(node, list):
-        children = node
-    else:
-        return None
-    for child in children:
-        found = _find_enum(child, key)
-        if found is not None:
-            return found
-    return None
+    own = _enum_of_property(node, key) if isinstance(node, dict) else None
+    if own is not None:
+        return own
+    return next((found for child in _children(node) if (found := _find_enum(child, key)) is not None), None)
 
 
 def choices(m: Move) -> list[str]:
