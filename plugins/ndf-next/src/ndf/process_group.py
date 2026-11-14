@@ -43,7 +43,7 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
     if send_first:
         try:
             pgid = os.getpgid(proc.pid)
-        except ProcessLookupError:  # noqa: NDF401 外部コマンド: 既に終わっていれば止める先が無い
+        except ProcessLookupError:  # 外部コマンド: 既に終わっていれば止める先が無い（直接の子だけ回収する）
             proc.poll()
             return
     else:
