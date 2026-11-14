@@ -82,6 +82,25 @@ def _print_retired(items: list[dict[str, str]]) -> None:
         print(identity.RETIRED_LINE.format(**item), file=sys.stderr)
 
 
+def _unknown(ident: identity.PluginIdentity, name: str) -> int:
+    print(f"知らない副命令: {name}", file=sys.stderr)
+    print(_usage(ident.name), file=sys.stderr)
+    return _stop(TOOL, "invalid", f"知らない副命令: {name}")
+
+
+def _prepare(ident: identity.PluginIdentity) -> int | None:
+    """状態の置き場を用意し、退避した元と先を標準エラーへ書く。用意できなければ止まった結果の終了コード。"""
+    try:
+        ready = identity.prepare_state_dir(ident)
+    except (OSError, identity.IdentityError) as exc:
+        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
+        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
+        _print_retired(retired)
+        return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
+    _print_retired(ready.items())
+    return None
+
+
 def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
@@ -92,17 +111,10 @@ def _run(args: list[str]) -> int:
         return 0
     module = COMMANDS.get(args[0])
     if module is None:
-        print(f"知らない副命令: {args[0]}", file=sys.stderr)
-        print(_usage(ident.name), file=sys.stderr)
-        return _stop(TOOL, "invalid", f"知らない副命令: {args[0]}")
-    try:
-        ready = identity.prepare_state_dir(ident)
-    except (OSError, identity.IdentityError) as exc:
-        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
-        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
-        _print_retired(retired)
-        return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
-    _print_retired(ready.items())
+        return _unknown(ident, args[0])
+    stopped = _prepare(ident)
+    if stopped is not None:
+        return stopped
     return _call(args[0], module, args[1:])
 
 
