@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -18,6 +19,15 @@ from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
 
 REPO = "devbasex/ai-plugins"
+
+# テストのパッケージ同士は import で届かない（根に `__init__.py` が無い）ため、GraphQL の PR の節点は
+# GitHub のアダプターのテストと同じ作り方をファイルから読む。
+_GITHUB_HELPERS = Path(__file__).resolve().parents[1] / "adapters" / "_github_helpers.py"
+_spec = importlib.util.spec_from_file_location("_refs_github_helpers", _GITHUB_HELPERS)
+assert _spec is not None and _spec.loader is not None
+_github_helpers = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_github_helpers)
+
 _ALIAS = re.compile(r"\b(a\d+): (\w+)\(([^)]*)\)")
 
 
@@ -66,12 +76,8 @@ def write_progress(state_dir: Path, rows: Sequence[Mapping[str, Any]], tail: str
 
 
 def graphql_pull(number: int, merged: bool, state: str, head: str, ref: str) -> dict[str, Any]:
-    """GraphQL の PR の節点（`github.PULL_FIELDS` の形）。"""
-    return {
-        "number": number, "state": state.upper(), "merged": merged, "headRefOid": head, "headRefName": ref,
-        "baseRefName": "develop", "body": "", "mergeStateStatus": "CLEAN", "author": {"login": "octocat"},
-        "authorAssociation": "OWNER",
-    }  # fmt: skip
+    """GraphQL の PR の節点（`github.PULL_FIELDS` の形。本文は空）。"""
+    return _github_helpers.graphql_pull_node(number, state.upper(), merged, head, ref, "")
 
 
 def hub(handler: Callable[[httpx.Request], httpx.Response]) -> github.GitHub:
