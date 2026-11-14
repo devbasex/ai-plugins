@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -34,9 +35,14 @@ def _read(name: str) -> Any:
     return json.loads((HERE / f"{name}.json").read_text(encoding="utf-8"))
 
 
+@functools.cache
+def _schema() -> dict[str, Any]:
+    """`schema.json`。共有の値なので、呼び手は書き換えずに写してから鍵を足す。"""
+    return _read("schema")
+
+
 def _schema_errors(name: str, doc: Any) -> list[str]:
-    schema = _read("schema")
-    schema["$ref"] = f"#/$defs/{SHAPES[name]}"
+    schema = {**_schema(), "$ref": f"#/$defs/{SHAPES[name]}"}
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     found = sorted(("/".join(str(p) for p in e.absolute_path) or "(最上位)", e.message) for e in validator.iter_errors(doc))
     return [f"{name}: {where}: {message}" for where, message in found]
