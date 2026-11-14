@@ -245,8 +245,9 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
     try:
         with _conn(spec) as conn:
             first = first_input(conn, spec["plan_id"], act)
-            own = machine.lanes_of(*lane.read_view(conn, spec["plan_id"]))
-            plans = lane.read_plan(conn, spec["plan_id"])[0].lanes[lane_name].plans
+            view, rows = lane.read_view(conn, spec["plan_id"])
+            own = machine.lanes_of(view, rows)
+            plans = view.lanes[lane_name].plans
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
 
