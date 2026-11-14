@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import os
 import re
@@ -31,6 +32,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
+from ndf.adapters import paths
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf import identity
@@ -351,7 +353,7 @@ def github_records(cwd: Path) -> Records:
     return GitHubRecords(GitHub(Git(cwd).remote_repo(), client()))
 
 
-Facts = Callable[[stages.StageDef, Mapping[str, Any], Path], Mapping[str, bool]]
+Facts = Callable[[tuple[str, ...], Mapping[str, Any], Path], Mapping[str, bool]]
 Launch = Callable[[store.Store, str, Path], None]
 Invoker = Callable[[invoke.StageRun, Path, Path, Optional[str]], invoke.StageResult]
 
@@ -490,11 +492,24 @@ def _forced(v: View, stage: str) -> bool:
     return last == "enabled"
 
 
+RETRO_STAGE_ID = "retrospective"
+
+
+def _retro_enabled(v: View) -> bool:
+    """振り返りの工程が進行表にあって終わったか。無い・無効・中止なら偽（#3092 の前提 4）。"""
+    rows = v.rows
+    return any(s.id == RETRO_STAGE_ID and s.name in rows and rows[s.name].state == "finished" for s in v.snap.stages)
+
+
+TABLE_FACTS: dict[str, Callable[[View], bool]] = {"retro_enabled": _retro_enabled}  # 進行表から求める条件の語
+
+
 def _when_off(d: Drive, v: View, s: stages.StageDef) -> Optional[str]:
     """定義の条件のうち最初の偽の語。すべて真か、conductor が戻した行なら None。求められなければ `FactUnknown`。"""
     if not s.when or _forced(v, s.name):
         return None
-    values = d.env.facts(s, v.context(), d.cwd)
+    outer = tuple(w for w in s.when if w not in TABLE_FACTS)
+    values = {**d.env.facts(outer, v.context(), d.cwd), **{w: TABLE_FACTS[w](v) for w in s.when if w in TABLE_FACTS}}
     off = [w for w in s.when if not values[w]]
     return off[0] if off else None
 
@@ -792,28 +807,87 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
 # --- 副命令 ndf progress のエントリポイント ----------------------------------------------------------------
 
 
-def _ci_declared(cwd: Path) -> bool:
-    """`.ndf/project.json` の `test.ci.only` が真か（CI テストの宣言）。ファイルが無ければ偽。"""
+WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
+BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
+
+
+def _declaration(cwd: Path, name: str) -> dict[str, Any]:
+    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。"""
     top = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
-    path = top / command.PROJECT_FILE
-    if not path.exists():
-        return False
-    node: Any = command._read_json(path, "を読めない")
-    for key in ("test", "ci", "only"):
+    path = top / name
+    raw = command._read_json(path, "を読めない") if path.exists() else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _dig(node: Any, *keys: str) -> Any:
+    for key in keys:
         node = node.get(key) if isinstance(node, dict) else None
-    return node is True
+    return node
 
 
-def facts_of(stage: stages.StageDef, context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """工程の定義の条件（`when`）の語の値。今の材料から求められない語は `FactUnknown`。"""
+@dataclass(frozen=True)
+class DiffKinds:
+    """差分の分け方。`docs_only` は文書が 1 件以上あり、コードと振る舞いを決める文書が 0 件のときだけ真。"""
+
+    code: bool
+    docs_only: bool
+    behavior: bool
+
+
+def _patterns(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = _dig(project, "docs", key)
+    return tuple(value) if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
+
+
+def diff_kinds(files: list[str], project: Mapping[str, Any]) -> DiffKinds:
+    """差分のファイルを、文書（`docs.files`）・振る舞いを決める文書（`docs.behavior`）・コードに分ける。"""
+    code = [f for f in files if not paths.path_matches(f, _patterns(project, "files", DOC_FILES))]
+    behavior = [f for f in files if f not in code and paths.path_matches(f, _patterns(project, "behavior", BEHAVIOR_DOCS))]
+    return DiffKinds(bool(code), bool(files) and not code and not behavior, bool(behavior))
+
+
+def sprint_diff(context: Mapping[str, Any], cwd: Path) -> list[str]:
+    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`）の分岐点からの差分のファイル。
+
+    ベースブランチは手元の名前、無ければ `origin/` の名前で引く。求められなければ `FactUnknown`。
+    """
+    base = _dig(_declaration(cwd, WORKTREE_FILE), "base_branch")
+    if not isinstance(base, str) or not base:
+        raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} に base_branch が無い")
+    git = Git(Path(context.get("worktree") or cwd))
+    head = str(context.get("branch") or "HEAD")
+    errors = []
+    for ref in (base, f"origin/{base}"):
+        try:
+            return git.changed_files(git.merge_base(ref, head), head)
+        except GitError as exc:
+            errors.append(str(exc))
+    raise FactUnknown(f"差分を求められない: {errors[-1]}")
+
+
+def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
+    kinds = functools.cache(lambda: diff_kinds(sprint_diff(context, cwd), _declaration(cwd, command.PROJECT_FILE)))
     known: dict[str, Callable[[], bool]] = {
-        "ci_declared": lambda: _ci_declared(cwd),
+        "code_in_diff": lambda: kinds().code,
+        "docs_only_diff": lambda: kinds().docs_only,
+        "behavior_docs_in_diff": lambda: kinds().behavior,
+        "ci_declared": lambda: _dig(_declaration(cwd, command.PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(_dig(_declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }
-    unknown = [w for w in stage.when if w not in known]
+    unknown = [w for w in words if w not in known]
     if unknown:
-        raise FactUnknown(unknown[0])
-    return {w: known[w]() for w in stage.when}
+        raise FactUnknown(f"条件 {unknown[0]} を求める手段が無い")
+    out = {}
+    for w in words:
+        try:
+            out[w] = known[w]()
+        except FactUnknown as exc:
+            raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
+    return out
 
 
 def _env() -> Env:

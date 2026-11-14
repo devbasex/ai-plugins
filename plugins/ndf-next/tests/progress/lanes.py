@@ -29,7 +29,7 @@ class _NoRecords:
 def _env(cwd: Path) -> run.Env:
     values = {"worktree": str(cwd), "branch": "sprint/s", "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}, "version": "11.0.0"}
     return run.Env(
-        facts=lambda s, ctx, c: {w: True for w in s.when},
+        facts=lambda words, ctx, c: {w: True for w in words},
         launch=lambda st, tid, c: None,
         invoker=lambda r, c, w, a: _ok(r, values),
         records=lambda c: _NoRecords(),

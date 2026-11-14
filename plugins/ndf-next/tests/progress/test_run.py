@@ -49,7 +49,7 @@ def _new(capsys, mode: str = "light", *extra: str) -> str:
 
 @pytest.fixture
 def st(repo):
-    root = _root(repo)
+    root = durable.prepare_store(_root(repo)).root  # 置き場を用意してから開く（`ndf progress` の副命令と同じ順）
     with store.open_store(store.default_url(root), root) as opened:
         yield opened
 
@@ -94,7 +94,7 @@ class Records:
 def env(repo):
     fake, recs, launched, slept = Fake(repo), Records(), [], []
     e = run.Env(
-        facts=lambda s, ctx, cwd: {w: True for w in s.when},
+        facts=lambda words, ctx, cwd: {w: True for w in words},
         launch=lambda st_, tid, cwd: launched.append(tid),
         invoker=fake,
         records=lambda cwd: recs,
@@ -272,7 +272,7 @@ def test_badly_shaped_outputs_are_not_passed_on(repo, st, env, capsys):
 
 def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
     tid = _new(capsys, "standard")
-    env.env = run.Env(**{**vars(env.env), "facts": lambda s, ctx, cwd: {w: w != "code_in_diff" for w in s.when}})
+    env.env = run.Env(**{**vars(env.env), "facts": lambda words, ctx, cwd: {w: w != "code_in_diff" for w in words}})
     _turn(st, tid, repo, env)
     _approve(st, tid, "設計")
     _turn(st, tid, repo, env)
@@ -290,12 +290,85 @@ def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, ca
     assert _labels(st, tid)["リファクタリング"] == "pending"
 
 
-def test_facts_of_reads_the_ci_declaration(repo):
-    stage = definition.stages.StageDef("x", "x", "implement", (), when=("ci_declared", "design_pr"))
-    assert run.facts_of(stage, {}, repo) == {"ci_declared": False, "design_pr": False}
+def test_facts_of_reads_the_declarations_and_the_context(repo):
+    words = ("ci_declared", "design_pr", "prod_branch", "release_record")
+    assert run.facts_of(words, {}, repo) == dict.fromkeys(words, False)
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}))
-    assert run.facts_of(stage, {"design_pr": 3}, repo) == {"ci_declared": True, "design_pr": True}
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
+    assert run.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@example.com", "-c", "user.name=t", *args], check=True, capture_output=True)
+
+
+def _sprint_branch(repo: Path, *changed: str) -> None:
+    """ベースブランチ develop から sprint/s1 を切り、`changed` のファイルを足すコミットを積む。"""
+    _git(repo, "checkout", "-q", "-b", "develop")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(repo, "checkout", "-q", "-b", "sprint/s1")
+    for name in changed:
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("x\n")
+    if changed:
+        _git(repo, "add", "--", *changed)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "change")
+    (repo / ".ndf").mkdir(exist_ok=True)
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
+
+
+@pytest.mark.parametrize(
+    ("changed", "kinds"),
+    [
+        (["src/a.py", "README.md"], (True, False, False)),
+        (["docs/a.md"], (False, True, False)),
+        (["plugins/x/skills/y/SKILL.md", "docs/a.md"], (False, False, True)),
+        ([], (False, False, False)),
+    ],
+)
+def test_diff_words_split_the_sprint_diff_into_code_and_docs(repo, changed, kinds):
+    _sprint_branch(repo, *changed)
+    words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
+    ctx = {"worktree": str(repo), "branch": "sprint/s1"}
+    assert tuple(run.facts_of(words, ctx, repo)[w] for w in words) == kinds
+
+
+def test_diff_words_follow_the_docs_declaration():
+    project = {"docs": {"files": ["**/*.md", "**/*.txt"], "behavior": ["rules/*.txt"]}}
+    assert run.diff_kinds(["a.txt"], project) == run.DiffKinds(False, True, False)
+    assert run.diff_kinds(["rules/a.txt"], project) == run.DiffKinds(False, False, True)
+    assert run.diff_kinds(["a.txt"], {}) == run.DiffKinds(True, False, False)
+
+
+def test_diff_words_without_a_base_branch_cannot_be_decided(repo):
+    with pytest.raises(run.FactUnknown, match="code_in_diff"):
+        run.facts_of(("code_in_diff",), {}, repo)
+
+
+def test_next_flows_the_refactor_row_from_the_sprint_diff(repo, st, env, capsys):
+    _sprint_branch(repo, "README.md")
+    tid = _new(capsys, "standard")
+    env.env = run.Env(**{**vars(env.env), "facts": run.facts_of})
+    _turn(st, tid, repo, env)
+    _approve(st, tid, "設計")
+    _turn(st, tid, repo, env)
+    row = run.read(st, tid).rows["リファクタリング"]
+    assert row.state == "disabled" and row.reason == "条件 code_in_diff が偽"
+
+
+def test_retro_enabled_needs_a_finished_retrospective_row():
+    retro = definition.stages.StageDef("retrospective", "振り返り", "close", ())
+    other = definition.stages.StageDef("x", "x", "close", ())
+
+    def view(state, stages=(retro, other)):
+        rows = {} if state is None else {"振り返り": model.RowState(state, 1, None)}
+        return SimpleNamespace(rows=rows, snap=SimpleNamespace(stages=stages))
+
+    assert run.TABLE_FACTS["retro_enabled"](view("finished"))
+    assert not run.TABLE_FACTS["retro_enabled"](view("disabled"))
+    assert not run.TABLE_FACTS["retro_enabled"](view(None))
+    assert not run.TABLE_FACTS["retro_enabled"](view("finished", (other,)))
 
 
 def test_missing_input_does_not_start_the_row(repo, st, env, capsys):
