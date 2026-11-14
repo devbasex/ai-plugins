@@ -525,6 +525,15 @@ def _drain_locked(outbox: Path, deliver: Deliver, sleep: Callable[[float], None]
     return True
 
 
+def _try_once(lock: FileLock, outbox: Path, deliver: Deliver, sleep: Callable[[float], None], out: Drained) -> bool | None:
+    """排他を取って送信待ちを 1 回送る。排他を取れなければ `None`、打ち直しても送れない 1 件で止めたら偽。"""
+    try:
+        with lock.acquire(timeout=0):
+            return _drain_locked(outbox, deliver, sleep, out)
+    except Timeout:
+        return None
+
+
 def drain(outbox: Path, deliver: Deliver, sleep: Callable[[float], None] = time.sleep) -> Drained:
     """送信待ちを送る送り手。排他で 1 つだけ動き、ほかの送り手が動いていれば何もせずに `busy` で返す。
 
@@ -535,17 +544,12 @@ def drain(outbox: Path, deliver: Deliver, sleep: Callable[[float], None] = time.
     outbox.mkdir(parents=True, exist_ok=True)
     out = Drained()
     lock = FileLock(outbox / _LOCK)
-    first = True
-    while first or pending(outbox):
-        try:
-            with lock.acquire(timeout=0):
-                finished = _drain_locked(outbox, deliver, sleep, out)
-        except Timeout:
-            out.busy = first
-            return out
-        first = False
-        if not finished:
-            return out
+    finished = _try_once(lock, outbox, deliver, sleep, out)
+    if finished is None:
+        out.busy = True
+        return out
+    while finished and pending(outbox):
+        finished = _try_once(lock, outbox, deliver, sleep, out)
     return out
 
 
