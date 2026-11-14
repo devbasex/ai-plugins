@@ -27,6 +27,9 @@
   レーンが動き出したら依頼を閉じる（#2585）
 - 最後の行が終わったレーンのラッパーがまだ動いていれば止める（#3173）。止められなければ依頼（中身の `kind` は
   `halt_failed`）で知らせる
+- 行を始める起動は、マシン全体のプランの本数の上限（`ndf.progress.lane.machine`。#2999）に収まるときだけ打つ。
+  マシンの起動の排他の中で、同じマシンで動いているレーンのプランの本数を数えてから起こし、収まらなければその読み直しでは
+  起こさずに待たせる（起動の失敗に数えない）
 - 依頼は同じトランザクションで計画の状態を読み直してから書く。起動の最中に計画が止められたら書かない
 - レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`。同じリポジトリかの
   判定は `PlanView.lane_repo`）の置き場を解決する経路はまだ無いので、打った場所で流さずに起こせない失敗にする
@@ -48,7 +51,7 @@ from ndf.contracts import facts, limits
 from ndf.core import durable, loop
 from ndf.progress import command, lane, model, store
 from ndf.progress import plan as table
-from ndf.progress.lane import launch, liveness
+from ndf.progress.lane import launch, liveness, machine
 from ndf.progress.plan import run_decide
 from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep, Withdraw
 
@@ -246,13 +249,23 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
     try:
         with _conn(spec) as conn:
             first = first_input(conn, spec["plan_id"], act)
+            own = machine.lanes_of(*lane.read_view(conn, spec["plan_id"]))
+            plans = lane.read_plan(conn, spec["plan_id"])[0].lanes[lane_name].plans
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
-    # 前の行を終えた conductor のラッパーも同じ名前で残るので、行を始めるときも中止のときも先に止める
-    stopped = launch.stop(spec["repo"], spec["plan"], lane_name)
-    if not stopped["ok"]:
-        return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
-    return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
+
+    def go() -> dict[str, Any]:
+        # 前の行を終えた conductor のラッパーも同じ名前で残るので、行を始めるときも中止のときも先に止める
+        stopped = launch.stop(spec["repo"], spec["plan"], lane_name)
+        if not stopped["ok"]:
+            return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
+        return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
+
+    if any((act.cancel, act.resume, act.goal)):
+        # 動いているレーンの続き（中止・答えの後の next・/goal の入れ直し）は、上限で待たせない
+        return go()
+    wrapper = launch.wrapper_name(spec["repo"], spec["plan"], lane_name)
+    return machine.admitted(own, wrapper, plans, lambda: launch.wrappers(), go)
 
 
 def write_report(conn: Any, plan_id: str, notice: Report) -> str | None:

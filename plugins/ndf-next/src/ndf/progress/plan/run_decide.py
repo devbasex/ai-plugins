@@ -31,6 +31,9 @@
 起こし直しが失敗していた時間を数えない。知らせた後にレーンが動き出せば（判定を読めた読み直しで、その鍵の止まりが
 消えたら）依頼を閉じ（`Withdraw`）、同じ鍵がまた止まりになれば知らせ直す。
 
+行を始める起動がマシン全体のプランの本数の上限で待たされた（結果に `waiting` を持つ。#2999）ときは、起動の失敗に
+数えず、その読み直しでは打ち直さない。次の読み直しで数え直して起こす。
+
 認証の失敗で `/goal` が外れたレーン（`stalled`）は、子を起動するアカウントが使えれば（写しの `relaunch`）止まりとして
 知らせずに `/goal` を入れ直して起こし直す（#3243）。同じスプリントで起こし直せるのは `Policy.attempts` 回までで、
 尽きたら（または起こし直しの起動が尽きたら）止まりとして知らせる。アカウントが使えなければ写しに載らず、知らせる。
@@ -411,6 +414,9 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
 
 def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: Policy) -> RunState:
     state = replace(state, tried=(*state.tried, act.key))
+    if value.get("waiting"):
+        # マシンの上限で待たされた起動は失敗でも起動でもない（次の読み直しで数え直す）
+        return state
     if not act.halt:
         state = replace(state, history=(*state.history, (act.lane, act.row, act.key, bool(value["ok"]), str(value["detail"]))))
     if value["ok"]:

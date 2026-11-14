@@ -26,7 +26,7 @@ from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import limits, result
 from ndf.progress import lane, model, store
-from ndf.progress.lane import liveness
+from ndf.progress.lane import launch, liveness, machine
 
 # 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
 # 副モジュール `ndf.progress.plan.cli` を読む前の `from ndf.progress.plan import cli` が `ndf.cli` を返す
@@ -35,7 +35,7 @@ TOOL = top.tool_of(f"{__name__}.cli")
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
 # 同時に動くレーンの上限とレーンごとのプランの本数の上限の既定（計画の宣言の max_lanes・max_plans で変える）
-LIMIT_POLICY = ("relay.max-named", "count")
+LIMIT_POLICY = machine.CAP_POLICY
 # 答えが載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
 ANSWER_NEXT_GRACE_SECONDS = 600
 
@@ -326,20 +326,44 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     return item
 
 
+def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], listed: Any) -> dict[str, dict[str, Any]]:
+    """起こせる行を持つレーンのうち、マシンのプランの本数の上限で起動を待つもの（レーン → 待ちの理由と数。#2999）。
+
+    `listed` はラッパーの一覧（読めなければ None で、待ちを出さない）。
+    """
+    wakeable = lane.wakeable_lanes(view, rows)
+    if not wakeable or listed is None:
+        return {}
+    own = machine.lanes_of(view, rows)
+    limit = machine.cap()
+    out = {}
+    for name, _ in wakeable:
+        wrapper = launch.wrapper_name(str(view.repo), view.name, name)
+        got = machine.machine_count(own, listed, wrapper)
+        plans = view.lanes[name].plans
+        if not machine.admit(got.total, plans, limit):
+            out[name] = machine.waiting(machine.RULE, got, plans, limit)["waiting"]
+    return out
+
+
 def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
     """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。閉じた依頼の答えも載せる（#3128）。
 
     `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
-    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。
+    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
+    レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
     """
     view, rows = lane.read_view(conn, pid)
     verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
+    waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
     items = []
     for name, spec in view.lanes.items():
         lane_rows = [_row_item(r, now) for r in rows[name]]
         item = {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows}
         if name in verdicts:
             item["liveness"] = verdicts[name].as_dict()
+        if name in waits:
+            item["machine_wait"] = waits[name]
         items.append(item)
     stalls = [
         f"レーン {i['lane']} の行 {r['row']}: 答えが載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
