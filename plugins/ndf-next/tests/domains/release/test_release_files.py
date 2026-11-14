@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -124,3 +125,63 @@ def test_release_steps_is_registered_and_stops_with_cause(monkeypatch: pytest.Mo
     code = release_cli.main(["approval-check", "--pr", "7", "--production", "main"])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["status"] == "stopped" and out["cause"]["kind"] == "not_applicable" and code != 0
+
+
+def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
+    """副命令ごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    return {
+        name: [
+            (a.option_strings[0], a.required, a.default, tuple(a.choices) if a.choices else None, a.type, type(a).__name__)
+            for a in sp._actions
+            if a.option_strings and a.dest != "help"
+        ]
+        for name, sp in sub.choices.items()
+    }
+
+
+def test_release_steps_parser_current_behavior() -> None:
+    """現状固定（_parser）: 副命令の並びと、副命令ごとの引数の必須・既定・選択肢・型。"""
+    common = [("--root", False, ".", None, None, "_StoreAction"), ("--repo", False, None, None, None, "_StoreAction")]
+
+    def req(name: str, type_: type | None = None, choices: tuple | None = None) -> tuple:
+        return (name, True, None, choices, type_, "_StoreAction")
+
+    def opt(name: str, default: str | None = None, choices: tuple | None = None) -> tuple:
+        return (name, False, default, choices, None, "_StoreAction")
+
+    target = [
+        req("--base"),
+        req("--production"),
+        req("--channel", choices=("production", "dev")),
+        opt("--level", "patch", ("major", "minor", "patch")),
+        opt("--plugin"),
+    ]
+    pr = req("--pr", int)
+    expected = {
+        "assemble": common + target,
+        "materials": common + target + [opt("--out")],
+        "present": common + [pr, opt("--material")],
+        "answer": common + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by")],
+        "approval-check": common + [pr, req("--production")],
+        "merge": common + [pr, req("--base"), req("--production"), req("--budget", float)],
+        "publish": common + [req("--revision")],
+        "sync-base": common + [req("--main-dir"), req("--base")],
+        "config-snapshot": common + [req("--out")],
+        "config-check": common + [req("--before")],
+        "cleanup": common + [("--branch", True, None, None, None, "_AppendAction")],
+    }
+    got = _options(release_cli._parser())
+    assert list(got) == list(expected) == list(release_cli.HANDLERS)
+    assert got == expected
+
+
+def test_release_steps_parser_parses_and_requires_a_command() -> None:
+    """現状固定（_parser）: 副命令は必須で、引数は名前空間の属性になる。"""
+    parser = release_cli._parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([])
+    args = parser.parse_args(["cleanup", "--branch", "a", "--branch", "b"])
+    assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"]}
+    args = parser.parse_args(["merge", "--pr", "3", "--base", "develop", "--production", "main", "--budget", "1.5"])
+    assert (args.pr, args.budget, args.base, args.production) == (3, 1.5, "develop", "main")
