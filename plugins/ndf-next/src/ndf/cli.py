@@ -21,6 +21,7 @@ COMMANDS: dict[str, str] = {
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "launch-args": "ndf.adapters.cli",
+    "progress": "ndf.progress.command",
     "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
 }
@@ -40,7 +41,7 @@ def tool_of(module: str) -> str:
 
 def _usage(name: str) -> str:
     lines = [f"使い方: {name} <副命令> [引数...]", "副命令:"]
-    lines += [f"  {cmd}" for cmd in sorted(COMMANDS)] or ["  （まだ無い）"]
+    lines += [f"  {cmd}" for cmd in sorted(COMMANDS)]
     return "\n".join(lines)
 
 
