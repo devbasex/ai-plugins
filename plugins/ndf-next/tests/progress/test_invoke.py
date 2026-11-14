@@ -257,6 +257,20 @@ def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defau
         assert "ndf-gate" in text
 
 
+def test_test_command_joins_every_test_suite_in_declared_order():
+    # PR 3469（lr-flow の C3 の保留分）: テストの suite が複数あれば、宣言の順に && でつないだ 1 つのコマンドにする。
+    # テストでない suite（kind が lint）と command の無い suite は入れない
+    suites = [
+        {"name": "unit", "command": "pytest -q tests/unit"},
+        {"name": "lint", "kind": "lint", "command": "ruff check"},
+        {"name": "empty", "kind": "test"},
+        {"name": "e2e", "kind": "test", "command": "pytest -q tests/e2e"},
+    ]
+    got = invoke._project_value("test_command", {"test": {"suites": suites}})
+    assert got == "pytest -q tests/unit && pytest -q tests/e2e"
+    assert invoke._project_value("test_command", {"test": {"suites": suites[1:3]}}) is None
+
+
 def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
     # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない

@@ -316,7 +316,7 @@ FILL_SOURCES = {
     "gate": FROM_DEFAULT,
     "branch": FROM_WORKTREE,
 }
-# `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite 1 つの command）
+# `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite の command を宣言の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
@@ -354,8 +354,8 @@ def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Valu
     if name == "test_command":
         suites = _dig(project, "test", "suites")
         found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
-        cmd = found[0].get("command") if len(found) == 1 else None
-        return cmd if isinstance(cmd, str) and cmd else None
+        cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
+        return " && ".join(cmds) if cmds else None
     return _strings(_dig(project, *PROJECT_KEYS[name]))
 
 
