@@ -203,3 +203,33 @@ def test_install_writes_set_the_mode_and_leave_no_temporary_file(tmp_path):
     assert root_file.read_text(encoding="utf-8") == f"{tmp_path / 'plugin'}\n"
     assert got.copy.path.read_text(encoding="utf-8") == install.launcher(9)
     assert _no_temporary(tmp_path) == []
+
+
+# 現状固定（I-002）: 中継の置き場は状態の置き場の下にあり、宣言（places・ndf-files）のパスと一致する
+def test_relay_places_match_the_declared_paths():
+    from ndf.domains.relay import hub
+
+    state = Path("/s")
+    got = {
+        "relay-hub": hub.hub_dir(state),
+        "relay-wrappers": registry.wrappers_dir(state),
+        "relay-accounts": accounts.accounts_dir(state),
+        "relay-marks": marks.mark_path(state, "s1").parent,
+    }
+    assert {k: str(v) for k, v in got.items()} == {
+        "relay-hub": "/s/relay/hub",
+        "relay-wrappers": "/s/relay/wrappers",
+        "relay-accounts": "/s/relay/accounts",
+        "relay-marks": "/s/relay/marks",
+    }
+    for place, path in got.items():
+        assert facts.value("places", place, "root") == "state", place
+        assert path == state / facts.value("places", place, "path"), place
+    assert registry.wrapper_dir(state, "t1") == Path("/s/relay/wrappers/t1")
+    assert accounts.pin_path(state) == Path("/s/relay/accounts/pinned.json")
+    assert accounts.usage_path(state) == Path("/s/relay/accounts/usage.json")
+    assert marks.mark_path(state, "s1") == Path("/s/relay/marks/s1.json")
+    declared = {r["path"] for r in facts.rows("ndf-files", place="relay-hub")}
+    assert {hub.STATE_FILE, hub.REGISTRY_FILE, hub.LOG_FILE} <= declared
+    wrapper = {r["path"] for r in facts.rows("ndf-files", place="relay-wrappers")}
+    assert {f"<名前>/{n}" for n in (registry.STATE_FILE, registry.LOCK_FILE, registry.LOG_FILE)} <= wrapper
