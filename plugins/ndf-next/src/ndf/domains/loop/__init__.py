@@ -10,6 +10,7 @@
 | 選定（外す理由の優先の順と枠） | `select_decide` |
 | 副命令ごとの判断（書く事象か、断りの種類と次の 1 手） | `control_decide` |
 | スプリントの閉じの手順と要否 | `sprint_decide` |
+| 検査のトリガーの行数の判定 | `check_trigger` |
 | 記録の置き場と排他 | `store` |
 | 副命令 `ndf loop` | `cli` |
 
