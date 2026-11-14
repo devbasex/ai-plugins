@@ -12,6 +12,7 @@ from filelock import FileLock, Timeout
 
 from ndf import contracts
 from ndf.adapters import notify
+from ndf.contracts import limits
 
 NOW = 1_800_000_000.0
 
@@ -173,7 +174,7 @@ def test_drain_window_key_is_sent_again_after_window(outbox: Path, wall: list[fl
     deliver = _Deliver()
     _write(outbox, "a", window=True)
     notify.drain(outbox, deliver)
-    wall[0] += notify.WINDOW_SECONDS - 1
+    wall[0] += limits.seconds("notify.window") - 1
     _write(outbox, "b", key="a", window=True, created_at=wall[0])
     assert notify.drain(outbox, deliver).duplicate == 1
     wall[0] += 2
@@ -329,7 +330,7 @@ def test_busy_drain_reports_ok_without_sending(outbox: Path, wall: list[float]) 
 
 # ---- 送ったキーの記録と、送れなかった 1 件の保持 ----
 
-KEEP = NOW - notify.KEEP_DAYS * 86400
+KEEP = NOW - limits.seconds("notify.keep")
 
 
 def _sent_record(outbox: Path) -> object:

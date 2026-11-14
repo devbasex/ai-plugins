@@ -313,7 +313,7 @@ class NoticeError(Exception):
 
 @dataclass(frozen=True)
 class Notice:
-    """送信待ちの 1 件。`key` が同じ通知は重ねて送らない（`window` が真なら 60 秒の内だけ）。"""
+    """送信待ちの 1 件。`key` が同じ通知は重ねて送らない（`window` が真なら上限の宣言の `notify.window` の秒の内だけ）。"""
 
     kind: str
     key: str
@@ -354,9 +354,6 @@ OUTBOX_PARTS = ("hooks", "outbox")
 _LOCK = ".sender.lock"
 _SENT = ".sent.json"
 _UNSENT = "unsent"
-# `window` の通知を重ねない秒・送ったキーと送れなかった 1 件を残す日数
-WINDOW_SECONDS = 60
-KEEP_DAYS = 7
 
 
 def outbox_dir(state_dir: Path) -> Path:
@@ -388,7 +385,7 @@ def pending(outbox: Path) -> list[Path]:
 
 def _keep_since(now: float) -> float:
     """送ったキーと送れなかった 1 件を残す期限の境。これより前のものは捨てる。"""
-    return now - KEEP_DAYS * 86400
+    return now - limits.seconds("notify.keep")
 
 
 def _load_sent(outbox: Path, now: float) -> dict[str, float]:
@@ -419,7 +416,7 @@ def _duplicate(notice: Notice, sent: dict[str, float], now: float) -> bool:
     at = sent.get(notice.key)
     if at is None:
         return False
-    return not notice.window or now - at < WINDOW_SECONDS
+    return not notice.window or now - at < limits.seconds("notify.window")
 
 
 def _retrying(sleep: Callable[[float], None]) -> tenacity.Retrying:
