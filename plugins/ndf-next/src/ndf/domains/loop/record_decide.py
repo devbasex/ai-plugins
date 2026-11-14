@@ -241,9 +241,13 @@ def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     return _apply_lap(state, ev)
 
 
-def fold(events: Iterable[Mapping[str, Any]]) -> LoopState:
-    """事象の列を古い順に畳んだ今の状態。"""
-    state = LoopState()
+def apply_all(state: LoopState, events: Iterable[Mapping[str, Any]]) -> LoopState:
+    """`state` へ事象の列を古い順に当てた次の状態。"""
     for ev in events:
         state = apply(state, ev)
     return state
+
+
+def fold(events: Iterable[Mapping[str, Any]]) -> LoopState:
+    """事象の列を古い順に畳んだ今の状態。"""
+    return apply_all(LoopState(), events)

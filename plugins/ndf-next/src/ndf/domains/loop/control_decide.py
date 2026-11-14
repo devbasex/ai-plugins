@@ -252,13 +252,10 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
     ]
     closing, outcome, why = _close_event(lap, replace(facts, released=(*lap.released, *(e["version"] for e in shipped))), c.now)
     events = [*shipped, closing]
-    after = state
-    for ev in events:
-        after = rec.apply(after, ev)
+    after = rec.apply_all(state, events)
     tail = _boundary(after, c)
     tail = tail if tail else [rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)]
-    for ev in tail:
-        after = rec.apply(after, ev)
+    after = rec.apply_all(after, tail)
     events += tail
     return Decision(f"周 {lap.number} を{outcome}で締めた: {why}", tuple(events), next=next_step(after, c.name),
                     metrics={"lap": lap.number, "outcome": outcome, "streak": lap_decide.failure_streak(after)})  # fmt: skip

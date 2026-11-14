@@ -21,9 +21,7 @@ def _ctx(session: str | None = "s1", now: float = 10.0) -> ctl.Ctx:
 
 def _apply(state: rec.LoopState, d: ctl.Decision) -> rec.LoopState:
     assert not d.refused, d.summary
-    for ev in d.events:
-        state = rec.apply(state, ev)
-    return state
+    return rec.apply_all(state, d.events)
 
 
 def _running(issues: tuple[int, ...] = (1, 2), mode: bool = True) -> rec.LoopState:
