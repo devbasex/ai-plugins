@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Callable, Mapping, Optional
 import pytest
 
 from ndf.adapters.git import Completed, Git
-from ndf.domains.worktree import container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_sweep
+from ndf.domains.worktree import cli_env, container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_sweep
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:
@@ -211,3 +212,86 @@ def test_test_values_refuses_evidence_outside_worktree(main_repo: Path, out: Pat
     t = _values_target(main_repo, {"e2e": {"out_env": "OUT"}})
     with pytest.raises(testenv.TestenvError, match="証跡の置き場が worktree の外を指す"):
         testenv.test_values(t, "e2e", ROW, out)
+
+
+# 現状固定（I-010）: `cli_env.run_localenv` の分岐ごとの結果 JSON。期待値は今の実装の出力。
+LE_TARGET = localenv.Target(Path("/w"), Path("/m"), {})
+
+
+def _le_ok(summary: str, items: Optional[list] = None, metrics: Optional[dict] = None) -> dict:
+    return {"tool": "t", "status": "ok", "summary": summary, "items": items or [], "metrics": metrics or {}}
+
+
+def _le_stopped(kind: str, summary: str) -> dict:
+    return {"tool": "t", "status": "stopped", "summary": summary, "items": [], "metrics": {}, "cause": {"kind": kind, "detail": summary}}
+
+
+def _le_run(monkeypatch: pytest.MonkeyPatch, action: str, **fakes: Callable) -> dict:
+    monkeypatch.setattr(localenv, "target", lambda p: LE_TARGET)
+    monkeypatch.setattr(container.Shell, "from_env", classmethod(lambda cls: "SHELL"))
+    for name, fn in fakes.items():
+        monkeypatch.setattr(localenv, name, fn)
+    return cli_env.run_localenv("t", argparse.Namespace(action=action, worktree=Path("/w"), cwd=Path("/")))
+
+
+def _le_verdict(r: str) -> localenv_decide.Verdict:
+    return localenv_decide.Verdict(r, f"text-{r}")
+
+
+def _le_raise(*args: object) -> None:
+    raise localenv.LocalenvError("boom")
+
+
+def test_run_localenv_not_applicable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(localenv, "target", lambda p: None)
+    got = cli_env.run_localenv("t", argparse.Namespace(action="setup", worktree=None, cwd=Path("/")))
+    assert got == _le_ok("適用外（宣言か、その節が無い）")
+
+
+def test_run_localenv_setup_and_aim(monkeypatch: pytest.MonkeyPatch) -> None:
+    shells: list = []
+    assert _le_run(monkeypatch, "setup", setup=lambda t: 2) == _le_ok("複製した: 2 件")
+    got = _le_run(monkeypatch, "aim", aim=lambda t, s: shells.append(s) or 3)
+    assert got == _le_ok("ローカル環境が指すコードを /w へ向けた（コンテナ 3 件）") and shells == ["SHELL"]
+    assert _le_run(monkeypatch, "setup", setup=_le_raise) == _le_stopped("precondition", "boom")
+    assert _le_run(monkeypatch, "aim", aim=_le_raise) == _le_stopped("precondition", "boom")
+
+
+def test_run_localenv_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    got = _le_run(monkeypatch, "mode", mode=lambda t: (_le_verdict(localenv_decide.ISOLATE), ["a（*）"]))
+    assert got == _le_ok("text-isolate", [{"path": "a（*）"}], {"result": "isolate"})
+    got = _le_run(monkeypatch, "mode", mode=lambda t: (_le_verdict(localenv_decide.SHARE), []))
+    assert got == _le_ok("text-share", [], {"result": "share"})
+
+
+@pytest.mark.parametrize(
+    ("verdict", "want"),
+    [
+        (localenv_decide.MATCH, _le_ok("text-match", [], {"result": "match"})),
+        (localenv_decide.MISMATCH, _le_stopped("check_failed", "text-mismatch")),
+        (localenv_decide.NOT_RUNNING, _le_stopped("not_applicable", "text-not_running")),
+    ],
+)
+def test_run_localenv_verify(monkeypatch: pytest.MonkeyPatch, verdict: str, want: dict) -> None:
+    assert _le_run(monkeypatch, "verify", verify=lambda t, s: _le_verdict(verdict)) == want
+
+
+@pytest.mark.parametrize(
+    ("verdict", "rc", "want"),
+    [
+        (localenv_decide.MISMATCH, None, _le_stopped("check_failed", "text-mismatch")),
+        (localenv_decide.NOT_RUNNING, None, _le_stopped("not_applicable", "text-not_running")),
+        (localenv_decide.MATCH, None, _le_ok("動作確認のコマンドが宣言されていない")),
+        (localenv_decide.MATCH, 0, _le_ok("動作確認が通った")),
+        (localenv_decide.MATCH, 4, _le_stopped("check_failed", "動作確認のコマンドが失敗した（終了コード 4）")),
+    ],
+)
+def test_run_localenv_healthcheck(monkeypatch: pytest.MonkeyPatch, verdict: str, rc: Optional[int], want: dict) -> None:
+    assert _le_run(monkeypatch, "healthcheck", healthcheck=lambda t, s: (_le_verdict(verdict), rc)) == want
+
+
+def test_run_localenv_does_not_catch_errors_of_mode_verify_healthcheck(monkeypatch: pytest.MonkeyPatch) -> None:
+    # NOTE: 現状固定。setup と aim の外の LocalenvError は結果 JSON にせず、そのまま上がる
+    for action in ("mode", "verify", "healthcheck"):
+        with pytest.raises(localenv.LocalenvError):
+            _le_run(monkeypatch, action, **{action: _le_raise})
