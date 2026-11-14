@@ -7,7 +7,7 @@ import copy
 import pytest
 
 from ndf import contracts
-from ndf.progress import definition, model
+from ndf.progress import definition, model, stages
 
 E = "file:///workflow/stage-io.schema.json#/$defs/"
 
@@ -203,19 +203,19 @@ def test_close_plan_of_2026_11_12_is_refused_with_reasons():
 
 
 def test_order_rules_are_checked_one_by_one():
-    def st(i: str, kind: str, rng: str, subject: str | None = None) -> model.StepDef:
-        return model.StepDef(i, "工程", "ndf.plan", kind, rng, subject)
+    def st(i: str, kind: str, rng: str, subject: str | None = None) -> stages.StepDef:
+        return stages.StepDef(i, "工程", "ndf.plan", kind, rng, subject)
 
-    assert model.check_order([st("t", "test", "sprint_diff"), st("r", "release", "sprint_diff"), st("v", "verify", "released")]) == []
-    assert model.check_order([st("t", "test", "lane")])[0].startswith("I9:")
-    assert model.check_order([st("v", "verify", "sprint_diff"), st("r", "release", "sprint_diff")])[0].startswith("I9:")
-    assert model.check_order([st("v", "verify", "released")])[0].startswith("I8b:")
-    assert model.check_order([st("r", "release", "sprint_diff"), st("t", "test", "sprint_diff")])[0].startswith("I8a:")
+    assert stages.check_order([st("t", "test", "sprint_diff"), st("r", "release", "sprint_diff"), st("v", "verify", "released")]) == []
+    assert stages.check_order([st("t", "test", "lane")])[0].startswith("I9:")
+    assert stages.check_order([st("v", "verify", "sprint_diff"), st("r", "release", "sprint_diff")])[0].startswith("I9:")
+    assert stages.check_order([st("v", "verify", "released")])[0].startswith("I8b:")
+    assert stages.check_order([st("r", "release", "sprint_diff"), st("t", "test", "sprint_diff")])[0].startswith("I8a:")
     # 範囲が違えば、リリースの後のテストは断らない
-    assert model.check_order([st("r", "release", "sprint_diff"), st("t", "test", "issue_diff")]) == []
-    assert model.check_order([st("a", "test", "sprint_diff"), st("b", "test", "sprint_diff")])[0].startswith("I10:")
+    assert stages.check_order([st("r", "release", "sprint_diff"), st("t", "test", "issue_diff")]) == []
+    assert stages.check_order([st("a", "test", "sprint_diff"), st("b", "test", "sprint_diff")])[0].startswith("I10:")
     # コードのレビューとドキュメントのレビューは範囲が同じでも通る
-    assert model.check_order([st("a", "review", "sprint_diff", "code"), st("b", "review", "sprint_diff", "docs")]) == []
+    assert stages.check_order([st("a", "review", "sprint_diff", "code"), st("b", "review", "sprint_diff", "docs")]) == []
 
 
 def test_context_schema_holds_the_closed_vocabulary():
@@ -226,4 +226,4 @@ def test_context_schema_holds_the_closed_vocabulary():
 
 def test_snapshot_round_trips_through_json():
     snap = definition.load_definition("documentation")
-    assert model.snapshot_from(model.snapshot_dict(snap)) == snap
+    assert stages.snapshot_from(stages.snapshot_dict(snap)) == snap

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ndf.progress import definition, model
+from ndf.progress import definition, model, stages
 
 AT = datetime(2026, 11, 14, tzinfo=UTC)
 
@@ -125,18 +125,18 @@ def test_enablement_priority_is_sprint_then_project_then_definition():
     )
     facts["code_in_diff"] = False
     declared = {"リファクタリング": {"enabled": True, "reason": ""}, "振り返り": {"enabled": False, "reason": "プロジェクトで止めている"}}
-    got = model.resolve_enabled(snap, facts, declared, {"振り返り": "このスプリントでは止める"})
-    assert got["振り返り"] == model.Enablement(False, "このスプリントでは止める", "sprint")
-    assert got["リファクタリング"] == model.Enablement(True, None, "project")
-    assert model.resolve_enabled(snap, facts, {}, {})["リファクタリング"] == model.Enablement(False, "code_in_diff", "definition")
-    assert model.resolve_enabled(snap, None, {}, {})["リファクタリング"].enabled
+    got = stages.resolve_enabled(snap, facts, declared, {"振り返り": "このスプリントでは止める"})
+    assert got["振り返り"] == stages.Enablement(False, "このスプリントでは止める", "sprint")
+    assert got["リファクタリング"] == stages.Enablement(True, None, "project")
+    assert stages.resolve_enabled(snap, facts, {}, {})["リファクタリング"] == stages.Enablement(False, "code_in_diff", "definition")
+    assert stages.resolve_enabled(snap, None, {}, {})["リファクタリング"].enabled
 
 
 def test_refactoring_suspension_is_a_declaration():
     # 受け入れ条件 3: リファクタリングの停止は .ndf/project.json の宣言で表す
     snap = definition.load_definition("standard")
     declared = {"リファクタリング": {"enabled": False, "reason": "#1142 の作り直しの間は止める"}}
-    assert model.resolve_enabled(snap, None, declared, {})["リファクタリング"] == model.Enablement(
+    assert stages.resolve_enabled(snap, None, declared, {})["リファクタリング"] == stages.Enablement(
         False, "#1142 の作り直しの間は止める", "project"
     )
 

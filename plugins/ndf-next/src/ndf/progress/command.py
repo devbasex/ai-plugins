@@ -26,7 +26,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, result
 from ndf.core import durable
-from ndf.progress import definition, model, store
+from ndf.progress import definition, model, stages, store
 
 # 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -67,8 +67,8 @@ def _declared(cwd: Path) -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         raise contracts.ContractError(f"{path} を読めない: {exc}") from exc
     workflow = raw.get("workflow") if isinstance(raw, dict) else None
-    stages = workflow.get("stages") if isinstance(workflow, dict) else None
-    return stages if isinstance(stages, dict) else {}
+    declared = workflow.get("stages") if isinstance(workflow, dict) else None
+    return declared if isinstance(declared, dict) else {}
 
 
 def _read_json(path: Path) -> Any:
@@ -81,14 +81,16 @@ def _read_json(path: Path) -> Any:
 # --- 進行表の読み書き ---------------------------------------------------------------------
 
 
-def _current(conn: Any, table_id: str) -> tuple[int, model.Snapshot, list[model.Event]]:
+def _current(conn: Any, table_id: str) -> tuple[int, stages.Snapshot, list[model.Event]]:
     if store.read_table(conn, table_id) is None:
         raise model.Refused(f"進行表 {table_id} は無い")
     rev, raw = store.read_definition(conn, table_id)
-    return rev, model.snapshot_from(raw), store.read_events(conn, table_id)
+    return rev, stages.snapshot_from(raw), store.read_events(conn, table_id)
 
 
-def _append(st: store.Store, table_id: str, build: Callable[[int, model.Snapshot, list[model.Event]], list[model.EventDraft]]) -> list[int]:
+def _append(
+    st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
+) -> list[int]:
     """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
     for attempt in range(1, APPEND_ATTEMPTS + 1):
         try:
@@ -102,7 +104,7 @@ def _append(st: store.Store, table_id: str, build: Callable[[int, model.Snapshot
     raise AssertionError("到達しない")
 
 
-def _rows(snap: model.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
+def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
     folded = model.fold(events, rev)
     out = []
     for s in snap.stages:
@@ -125,7 +127,7 @@ def _rows(snap: model.Snapshot, events: list[model.Event], rev: int) -> list[dic
 # --- 副命令 ------------------------------------------------------------------------------
 
 
-def _new_drafts(snap: model.Snapshot, enabled: dict[str, model.Enablement], finished: list[tuple[str, str]]) -> list[model.EventDraft]:
+def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], finished: list[tuple[str, str]]) -> list[model.EventDraft]:
     drafts = [model.EventDraft("created", ACTOR, s.name, rev=1) for s in snap.stages]
     for name, en in enabled.items():
         if not en.enabled:
@@ -135,7 +137,7 @@ def _new_drafts(snap: model.Snapshot, enabled: dict[str, model.Enablement], fini
     return drafts
 
 
-def _requirements(snap: model.Snapshot, path: str | None) -> list[tuple[str, str]]:
+def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, str]]:
     """`--requirements` の出力を最初の工程の出力の規約で確かめ、終了の印を付ける工程の一覧にする。"""
     if path is None:
         return []
@@ -149,15 +151,15 @@ def _requirements(snap: model.Snapshot, path: str | None) -> list[tuple[str, str
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     snap = definition.load_definition(a.mode)
     disables = dict(item.split("=", 1) for item in a.disable)
-    unknown = model.unknown_stages(snap, disables)
+    unknown = stages.unknown_stages(snap, disables)
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
     context = {"issues": a.issues, "mode": a.mode, "pace": a.pace}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
-    enabled = model.resolve_enabled(snap, None, _declared(cwd), disables)
-    doc = {**model.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
+    enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
+    doc = {**stages.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
     drafts = _new_drafts(snap, enabled, _requirements(snap, a.requirements))
     with store.transaction(st) as conn:
         tid = store.create_table(conn, (model.SPRINT, _repo(cwd, st.root), a.name), a.parent, doc, drafts)
@@ -178,7 +180,7 @@ def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
 
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    def build(rev: int, snap: model.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
+    def build(rev: int, snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
         snap.stage(a.stage)
         return [model.EventDraft(kind, ACTOR, a.stage, reason=a.reason, payload=payload, rev=rev)]
 
@@ -208,7 +210,7 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    def build(rev: int, snap: model.Snapshot, events: list[model.Event]) -> list[model.EventDraft]:
+    def build(rev: int, snap: stages.Snapshot, events: list[model.Event]) -> list[model.EventDraft]:
         folded = model.fold(events, rev)
         live = [s.name for s in snap.stages if s.name in folded and not model.is_terminal(folded[s.name].state)]
         drafts = [model.EventDraft("cancelled", ACTOR, name, reason=a.reason, rev=rev) for name in live]

@@ -19,7 +19,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from ndf import contracts
-from ndf.progress import model
+from ndf.progress import stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
 NDF_SCHEMA = "workflow/ndf.schema.json"
@@ -117,18 +117,18 @@ def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
     return [f"{part}: 文脈の鍵 {k} が無い" for k in keys if k not in have]
 
 
-def _validate_stage(stage: model.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
+def _validate_stage(stage: stages.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
     if ref is None:
         return [f"工程 {stage.name} に{what}の規約が無い"]
     return validate_io(ref, obj) + _missing_keys(obj, part, keys)
 
 
-def validate_stage_output(stage: model.StageDef, obj: Any) -> list[str]:
+def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
     """工程の出力を、工程の出力の規約と、工程が書く文脈の鍵（`outputs`）で確かめる。"""
     return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
 
 
-def validate_stage_input(stage: model.StageDef, obj: Any) -> list[str]:
+def validate_stage_input(stage: stages.StageDef, obj: Any) -> list[str]:
     """工程の入力を、工程の入力の規約と、工程が読む文脈の鍵（`inputs`）で確かめる。"""
     return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")
 
@@ -225,9 +225,9 @@ def check_contracts(doc: Mapping[str, Any]) -> list[str]:
 # --- 組み立て ----------------------------------------------------------------------------
 
 
-def _step_def(stage: str, name: str, body: dict[str, Any]) -> model.StepDef:
+def _step_def(stage: str, name: str, body: dict[str, Any]) -> stages.StepDef:
     meta = _ndf_meta(body)
-    return model.StepDef(
+    return stages.StepDef(
         id=name,
         stage=stage,
         call=body["call"],
@@ -240,10 +240,10 @@ def _step_def(stage: str, name: str, body: dict[str, Any]) -> model.StepDef:
     )
 
 
-def _stage_def(doc: Mapping[str, Any]) -> model.StageDef:
+def _stage_def(doc: Mapping[str, Any]) -> stages.StageDef:
     meta = _ndf_meta(doc)
     name = meta["stage"]
-    return model.StageDef(
+    return stages.StageDef(
         id=doc["document"]["name"],
         name=name,
         phase=meta["phase"],
@@ -284,7 +284,7 @@ def _digest(mode_doc: Mapping[str, Any], docs: list[Any]) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> model.Snapshot:
+def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> stages.Snapshot:
     """モードの文書と工程の文書から、検査を通したスナップショットを作る。通らなければ `WorkflowDefError`。"""
     errs = [f"mode: {e}" for e in check_dsl(mode_doc)]
     if errs:
@@ -295,13 +295,13 @@ def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> model.S
         errs += _stage_doc_errors(row, ref, stage_docs)
     if errs:
         raise WorkflowDefError(errs)
-    stages = tuple(_stage_def(stage_docs[ref]) for _, ref in called)
-    errs = model.check_unique_stage_names(stages) + model.check_order([st for s in stages for st in s.steps])
+    defs = tuple(_stage_def(stage_docs[ref]) for _, ref in called)
+    errs = stages.check_unique_stage_names(defs) + stages.check_order([st for s in defs for st in s.steps])
     if errs:
         raise WorkflowDefError(errs)
     doc = mode_doc["document"]
     digest = _digest(mode_doc, [stage_docs[ref] for _, ref in called])
-    return model.Snapshot(doc["name"], doc["version"], digest, _ndf_meta(mode_doc)["height"], stages)
+    return stages.Snapshot(doc["name"], doc["version"], digest, _ndf_meta(mode_doc)["height"], defs)
 
 
 def modes() -> list[str]:
@@ -313,7 +313,7 @@ def _stage_docs() -> dict[str, Any]:
     return {p.stem: contracts.load_json(f"{STAGES_DIR}/{p.name}") for p in sorted((contracts.contracts_dir() / STAGES_DIR).glob("*.json"))}
 
 
-def load_definition(mode: str) -> model.Snapshot:
+def load_definition(mode: str) -> stages.Snapshot:
     """モードの文書と、それが呼ぶ工程の文書を読み、検査を通したスナップショットを返す。"""
     if mode not in modes():
         raise WorkflowDefError([f"モード {mode} の定義が無い（あるのは {', '.join(modes())}）"])
