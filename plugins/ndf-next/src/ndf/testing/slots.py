@@ -103,7 +103,7 @@ def slots_dir(environ: Mapping[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
     if env.get(SLOTS_DIR_ENV):
         return Path(env[SLOTS_DIR_ENV])
-    return identity.prepare_state_dir(identity.load()) / SLOTS_DIR_NAME
+    return identity.prepare_state_dir(identity.load()).path / SLOTS_DIR_NAME
 
 
 def _try_lock(path: Path) -> FileLock | None:

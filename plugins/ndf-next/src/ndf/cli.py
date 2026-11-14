@@ -2,16 +2,24 @@
 
 副命令を足す子 Issue は、`COMMANDS` へ 1 行（副命令の名前 → `main(argv: list[str]) -> int` を持つモジュール）を足す。
 モジュールは呼ぶときだけ読む（ほかの副命令の依存を起動のたびに読まない）。
+
+どの副命令も結果 JSON を 1 行出して終わる。副命令が捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
+（argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
 """
 
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 
 from ndf import contracts, identity
-from ndf.contracts import causes, result
+from ndf.contracts import result
 
+log = logging.getLogger(__name__)
+
+# argparse が使い方の誤りで終わるときの終了コード
+ARGPARSE_USAGE_EXIT = 2
 # 結果 JSON の tool の名前（副命令へ渡す前に止まったとき）
 TOOL = "cli"
 
@@ -65,5 +73,20 @@ def _run(args: list[str]) -> int:
     if module is None:
         print(f"知らない副命令: {args[0]}", file=sys.stderr)
         print(_usage(ident.name), file=sys.stderr)
-        return causes.exit_code("invalid")
-    return importlib.import_module(module).main(args[1:])
+        return result.emit(result.stopped(TOOL, "invalid", f"知らない副命令: {args[0]}"))
+    return _call(args[0], module, args[1:])
+
+
+def _call(name: str, module: str, argv: list[str]) -> int:
+    """副命令の `main` を呼ぶ。結果 JSON を出さずに抜けた例外と使い方の誤りも、結果 JSON にして返す。"""
+    try:
+        return importlib.import_module(module).main(argv)
+    except SystemExit as exc:
+        if exc.code != ARGPARSE_USAGE_EXIT:
+            raise
+        return result.emit(result.stopped(name, "invalid", f"{name} の引数の誤り（使い方は標準エラーに出した）"))
+    except contracts.ContractError:
+        raise
+    except Exception as exc:  # 副命令が捕まえない例外も結果 JSON（stopped/unknown）で終える
+        log.exception("副命令が捕まえない例外で止まった: %s", name)
+        return result.emit(result.stopped(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}"))

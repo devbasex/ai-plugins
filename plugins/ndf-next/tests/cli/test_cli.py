@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -9,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.contracts import causes
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +22,7 @@ def broken_root(tmp_path, monkeypatch):
     root = tmp_path / "broken"
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "plugin.json").write_text("{")
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setattr(identity, "ROOT", root)
     return root
 
 
@@ -29,9 +31,57 @@ def test_no_args_prints_usage(capsys):
     assert "使い方" in capsys.readouterr().out
 
 
-def test_unknown_subcommand_is_a_usage_error(capsys):
+def test_unknown_subcommand_is_a_usage_error(capsys, last_result):
     assert cli.main(["no-such-command"]) == causes.exit_code("invalid")
-    assert "no-such-command" in capsys.readouterr().err
+    out = capsys.readouterr()
+    assert "no-such-command" in out.err
+    assert last_result(out.out)["cause"]["kind"] == "invalid"
+
+
+def _fake_subcommand(monkeypatch, main):
+    fake = types.ModuleType("fake_sub")
+    fake.main = main
+    monkeypatch.setitem(sys.modules, "fake_sub", fake)
+    monkeypatch.setitem(cli.COMMANDS, "fake", "fake_sub")
+
+
+def test_uncaught_exception_ends_with_an_unknown_result(monkeypatch, capsys, last_result):
+    # 3394-3: 副命令が捕まえない例外も、結果 JSON（stopped/unknown）で終わる
+    def boom(argv):
+        raise RuntimeError("壊れた")
+
+    _fake_subcommand(monkeypatch, boom)
+
+    assert cli.main(["fake"]) == causes.exit_code("unknown")
+    report = last_result(capsys.readouterr().out)
+    assert (report["tool"], report["status"], report["cause"]["kind"]) == ("fake", "stopped", "unknown")
+    assert "RuntimeError" in report["cause"]["detail"]
+
+
+def test_usage_error_of_a_subcommand_ends_with_an_invalid_result(monkeypatch, capsys, last_result):
+    # 3394-3: argparse の使い方の誤り（終了コード 2 の SystemExit）も、結果 JSON（stopped/invalid）で終わる
+    def parse(argv):
+        argparse.ArgumentParser(prog="fake").parse_args(argv)
+        return 0
+
+    _fake_subcommand(monkeypatch, parse)
+
+    assert cli.main(["fake", "--bogus"]) == causes.exit_code("invalid")
+    out = capsys.readouterr()
+    assert last_result(out.out)["cause"]["kind"] == "invalid"
+    assert "--bogus" in out.err
+
+
+def test_help_of_a_subcommand_is_not_a_result(monkeypatch, capsys):
+    def parse(argv):
+        argparse.ArgumentParser(prog="fake").parse_args(argv)
+        return 0
+
+    _fake_subcommand(monkeypatch, parse)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["fake", "--help"])
+    assert exc.value.code == 0
 
 
 def test_dispatches_to_module_main(monkeypatch):
@@ -62,6 +112,38 @@ def test_entrypoint_stops_when_plugin_json_is_unreadable(tmp_path):
 
     assert done.returncode == 2
     assert "plugin.json" in done.stderr
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る")
+def test_entrypoint_is_found_through_a_link_on_path(tmp_path):
+    # 3366-4: PATH の上のリンクから呼んでも、リンクをたどって実体の根を求める
+    link_dir = tmp_path / "bin"
+    link_dir.mkdir()
+    (link_dir / "ndf").symlink_to(PLUGIN_ROOT / "bin" / "ndf")
+    env = {**os.environ, "PATH": f"{link_dir}{os.pathsep}{os.environ['PATH']}"}
+
+    done = subprocess.run(["ndf"], cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
+
+    assert done.returncode == 0
+    assert "使い方" in done.stdout
+
+
+def test_entrypoint_without_uv_or_curl_stops_with_deps_missing(tmp_path, last_result):
+    # 要求の 316 行: uv が無く入れられないときは、理由を結果 JSON で出して止まる
+    path_dir = tmp_path / "path"
+    path_dir.mkdir()
+    for cmd in ("bash", "python3", "dirname", "readlink", "env", "tail", "mkdir"):
+        found = shutil.which(cmd)
+        assert found is not None
+        (path_dir / cmd).symlink_to(found)
+    env = {"HOME": str(tmp_path / "home"), "XDG_CACHE_HOME": str(tmp_path / "cache"), "PATH": str(path_dir)}
+
+    done = subprocess.run([str(PLUGIN_ROOT / "bin" / "ndf")], env=env, capture_output=True, text=True, check=False)
+
+    assert done.returncode == causes.exit_code("deps_missing")
+    report = last_result(done.stdout)
+    assert (report["status"], report["cause"]["kind"]) == ("stopped", "deps_missing")
+    assert "uv" in report["cause"]["detail"]
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る")

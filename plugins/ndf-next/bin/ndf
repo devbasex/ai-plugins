@@ -1,23 +1,64 @@
 #!/usr/bin/env bash
 # エントリポイント。uv.lock が固定する依存の仮想環境を用意して `python -m ndf` を呼ぶ。
 # 仮想環境はプラグインの外（`<キャッシュのホーム>/<プラグイン名>/venv/<版>`）に置き、版ごとに分ける。
-# プラグインの根はこのファイルの位置から求め、子へ CLAUDE_PLUGIN_ROOT で渡す（ほかのプラグインの値を引き継がない）。
+# プラグインの根はこのファイルの実体の位置から求め、子へ CLAUDE_PLUGIN_ROOT で渡す（ほかのプラグインの値を引き継がない）。
+#
+# 見つけ方: 呼ぶ側はパスを書かず、名前 `ndf` で呼ぶ。
+# - Claude Code は、有効なプラグインの `bin/` を Bash の PATH へ足すので、`ndf` で見つかる
+# - それ以外（Codex・端末）は、PATH の上に置いたこのファイルへのシンボリックリンクで呼ぶ。リンクをたどって
+#   実体の位置から根を求めるので、リンクの置き場は問わない
+#
+# uv が無いとき: 版を固定した uv（UV_VERSION）を `<キャッシュのホーム>/<プラグイン名>/uv/<版>` へ入れてから続ける。
+# 入れられない（curl が無い・ネットワークが無いなど）ときは、理由を結果 JSON（stopped・deps_missing）で出し、
+# 終了コード 69 で止まる。
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UV_VERSION="0.13.7"
+DEPS_MISSING_EXIT=69
+
+# このファイルの実体のパス（シンボリックリンクをたどる。bash 3.2 と macOS の readlink で動く形）
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  dir="$(cd -P "$(dirname "$self")" && pwd)"
+  self="$(readlink "$self")"
+  case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+done
+root="$(cd -P "$(dirname "$self")/.." && pwd)"
 manifest="$root/.claude-plugin/plugin.json"
 if ! meta="$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["name"]); print(d["version"])' "$manifest" 2>&1)"; then
   printf '%s\n' "plugin.json を読めない: $manifest: $meta" >&2
   exit 2
 fi
 { read -r name; read -r version; } <<<"$meta"
-if ! command -v uv >/dev/null 2>&1; then
-  echo "uv が見つからない（https://docs.astral.sh/uv/ から入れる）" >&2
-  exit 69
+cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/$name"
+
+# 依存の欠けを結果 JSON 1 行で出して止まる（Python の ndf を起こせないので、ここで組む）
+stop_deps_missing() {
+  printf '%s\n' "$1" >&2
+  python3 -c 'import json, sys; print(json.dumps({"tool": "cli", "status": "stopped", "summary": sys.argv[1], "items": [], "metrics": {}, "cause": {"kind": "deps_missing", "detail": sys.argv[1]}}, ensure_ascii=False))' "$1"
+  exit "$DEPS_MISSING_EXIT"
+}
+
+uv_bin="$(command -v uv || true)"
+if [ -z "$uv_bin" ]; then
+  uv_dir="$cache_home/uv/$UV_VERSION"
+  uv_bin="$uv_dir/uv"
+  if [ ! -x "$uv_bin" ]; then
+    if ! command -v curl >/dev/null 2>&1; then
+      stop_deps_missing "uv が無く、入れるための curl も無い（https://docs.astral.sh/uv/ から uv $UV_VERSION を入れる）"
+    fi
+    mkdir -p "$cache_home/uv"
+    installer="$uv_dir.install.sh"
+    if ! log="$(curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" -o "$installer" 2>&1)" \
+      || ! log="$(env UV_UNMANAGED_INSTALL="$uv_dir" sh "$installer" 2>&1)" || [ ! -x "$uv_bin" ]; then
+      stop_deps_missing "uv が無く、uv $UV_VERSION を $uv_dir へ入れられない（ネットワークを確かめる）: $(printf '%s' "$log" | tail -n 1)"
+    fi
+    rm -f "$installer"
+  fi
 fi
 
 export CLAUDE_PLUGIN_ROOT="$root"
-export UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/$name/venv/$version"
+export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
 # -P: 呼び出し元のディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）
-exec uv run --frozen --no-dev --quiet --project "$root" python -P -m ndf "$@"
+exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P -m ndf "$@"

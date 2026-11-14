@@ -1,7 +1,7 @@
 """契約の表（`contracts/`）の置き場と、JSON とスキーマの読み込み。
 
-契約の表はプラグインのコードと一緒に配るため、置き場はこのファイルの位置だけから求める（環境変数を読まない。
-ほかのプラグインの `CLAUDE_PLUGIN_ROOT` が残っていても、そのプラグインの表を読まない）。
+契約の表はプラグインのコードと一緒に配るため、置き場はプラグインの根（`identity.ROOT`。ファイルの位置から求める
+1 通り）の下に置く（環境変数を読まない。ほかのプラグインの `CLAUDE_PLUGIN_ROOT` が残っていても、そのプラグインの表を読まない）。
 表ごとの読み手（`facts`・`causes`・`limits`・`result`・`chosen`・`version`）はここを通して読み、1 プロセスに 1 回だけ読む。
 D1 を閉じた後の契約の変更は #3284 の追補（D1+）の PR で出す（持ち主は `contracts/version.json` の `owner`）。
 """
@@ -19,7 +19,9 @@ from typing import Any, TypeVar
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-DEFAULT_DIR = Path(__file__).resolve().parents[3] / "contracts"
+from ndf.identity import ROOT
+
+DEFAULT_DIR = ROOT / "contracts"
 SCHEMAS = "schemas"
 T = TypeVar("T")
 
