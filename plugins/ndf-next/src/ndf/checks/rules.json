@@ -75,6 +75,8 @@
   },
   "invariants": {
     "old_plugin": "plugins/ndf",
-    "immediate_fix_mark": "即時修正（plugins/ndf）:"
+    "immediate_fix_mark": "即時修正（plugins/ndf）:",
+    "port_mark": "移す先（ndf-next）:",
+    "no_port_mark": "移さない理由（ndf-next）:"
   }
 }

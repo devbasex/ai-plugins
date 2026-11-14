@@ -48,26 +48,54 @@ def test_declared_dependency_is_allowed(plugin):
     assert invariants.old_imports(plugin.scope(), OLD) == []
 
 
+def _old_change(plugin):
+    (plugin.repo / OLD).mkdir(parents=True, exist_ok=True)
+    (plugin.repo / OLD / "x.py").write_text("x = 1\n")
+
+
 @pytest.fixture
 def changed(plugin):
+    """新しいプラグインの子の PR: 新しいプラグインと旧いプラグインの両方を変える。"""
     base = plugin.commit("base")
-    (plugin.repo / OLD).mkdir(parents=True)
-    (plugin.repo / OLD / "x.py").write_text("x = 1\n")
+    _old_change(plugin)
+    plugin.write("src/ndf/new.py", "y = 1\n")
     plugin.commit("old")
     return base
 
 
+@pytest.fixture
+def old_only(plugin):
+    """旧いプラグインだけを変える PR。"""
+    base = plugin.commit("base")
+    _old_change(plugin)
+    plugin.commit("old")
+    return base
+
+
+def port_line(rules, value="#3343"):
+    return f"{rules['invariants']['port_mark']} {value}\n"
+
+
 def test_old_plugin_diff_fails(plugin, rules, changed):
     found = invariants.old_plugin_diff(plugin.scope(base=changed), rules["invariants"])
-    assert [(f.rule, f.path) for f in found] == [("I2", f"{OLD}/x.py")]
+    assert [(f.rule, f.path) for f in found] == [("port", f"{OLD}/x.py"), ("I2", f"{OLD}/x.py")]
 
 
 def test_immediate_fix_mark_allows_diff(plugin, rules, changed):
     mark = rules["invariants"]["immediate_fix_mark"]
-    body = f"本文\n\n{mark} 旧い hook が止まる不具合を直す\n"
+    body = f"本文\n\n{mark} 旧い hook が止まる不具合を直す\n{port_line(rules)}"
     assert invariants.old_plugin_diff(plugin.scope(base=changed, pr_body=body), rules["invariants"]) == []
-    empty = f"{mark}\n"
-    assert len(invariants.old_plugin_diff(plugin.scope(base=changed, pr_body=empty), rules["invariants"])) == 1
+    empty = f"{mark}\n{port_line(rules)}"
+    assert [f.rule for f in invariants.old_plugin_diff(plugin.scope(base=changed, pr_body=empty), rules["invariants"])] == ["I2"]
+
+
+def test_old_only_diff_needs_port_line_but_not_i2(plugin, rules, old_only):
+    conf = rules["invariants"]
+    assert [(f.rule, f.path) for f in invariants.old_plugin_diff(plugin.scope(base=old_only), conf)] == [("port", f"{OLD}/x.py")]
+    for body in (port_line(rules), f"{conf['no_port_mark']} 旧いプラグインだけの文書の誤字\n"):
+        assert invariants.old_plugin_diff(plugin.scope(base=old_only, pr_body=body), conf) == []
+    for body in (port_line(rules, "あとで"), f"{conf['no_port_mark']}\n"):
+        assert [f.rule for f in invariants.old_plugin_diff(plugin.scope(base=old_only, pr_body=body), conf)] == ["port"]
 
 
 def test_no_base_skips_diff(plugin, rules, changed):

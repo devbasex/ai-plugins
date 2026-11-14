@@ -46,9 +46,9 @@ def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
     old.mkdir()
     (old / "x.py").write_text("x = 1\n")
     plugin.commit("old")
-    mark = load_rules()["invariants"]["immediate_fix_mark"]
+    conf = load_rules()["invariants"]
     event = tmp_path / "event.json"
-    event.write_text(json.dumps({"pull_request": {"body": f"{mark} 直す"}}, ensure_ascii=False))
+    event.write_text(json.dumps({"pull_request": {"body": f"{conf['port_mark']} #1"}}, ensure_ascii=False))
     assert run.main(["--base", base, "--event", str(event)]) == 0
     event.write_text(json.dumps({"pull_request": {"body": None}}))
     assert run.main(["--base", base, "--event", str(event)]) == exit_codes.code_of("failed")
