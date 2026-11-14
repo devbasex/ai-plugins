@@ -32,6 +32,7 @@ from ndf.domains.release import (
     cleanup,
     land,
     materials_decide,
+    sync_decide,
     tagging,
     trail,
     user_config_decide,
@@ -117,7 +118,7 @@ def cmd_publish(args: argparse.Namespace) -> dict:
 
 def cmd_sync_base(args: argparse.Namespace) -> dict:
     plan = verify.sync_base(Path(args.main_dir), args.base)
-    if plan.action == "stop":
+    if plan.action == sync_decide.STOP:
         detail = f"メインディレクトリの変更が取り込む差分と重なり、origin と中身が違う: {', '.join(plan.paths)}"
         return result.stopped(TOOL, "precondition", detail, items=[{"kind": "path", "path": p} for p in plan.paths])
     return result.result(TOOL, result.OK, f"{args.base} を origin へそろえた（{plan.action}）", outputs={"action": plan.action})
