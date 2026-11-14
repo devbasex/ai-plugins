@@ -22,13 +22,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, registry, session_env, signals
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
 STATE_FILE = "hub.json"
-REGISTRY_FILE = "registry.json"
 LOG_FILE = "hub-log.jsonl"
 
 
@@ -153,24 +153,6 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     return Outcome(False, f"知らない依頼: {kind}", "invalid")
 
 
-def read_registry(state_dir: Path) -> dict[str, dict[str, Any]]:
-    path = hub_dir(state_dir) / REGISTRY_FILE
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise registry.RegistryError(f"登録簿を読めない（{path}）: {exc}") from exc
-    entries = data.get("entries") if isinstance(data, dict) else None
-    if not isinstance(entries, dict):
-        raise registry.RegistryError(f"登録簿の形が違う（{path}）")
-    return entries
-
-
-def _save_registry(state_dir: Path, entries: Mapping[str, Any]) -> None:
-    signals.replace_json(hub_dir(state_dir) / REGISTRY_FILE, {"version": 1, "entries": dict(entries)})
-
-
 def _next_name(taken: set[str]) -> str:
     n = 1
     while f"t{n}" in taken:
@@ -180,7 +162,7 @@ def _next_name(taken: set[str]) -> str:
 
 def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     """新しく起動する。"""
-    entries = read_registry(ctx.state_dir)
+    entries = registry.read_registry(hub_dir(ctx.state_dir))
     running = registry.all_running(ctx.state_dir, ctx.environ)
     refused = _refused(hub_decide.mixed(ctx.version, running), "precondition")
     if refused is not None:
@@ -199,13 +181,13 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     got = _launch(ctx, name, entry)
     if got.ok:
         entries[name] = {**entry, "version": ctx.version}
-        _save_registry(ctx.state_dir, entries)
+        registry.save_registry(hub_dir(ctx.state_dir), entries)
     return got
 
 
 def restart(ctx: Context, name: str) -> Outcome:
     """止める前に上限と版を判定し、通ったときだけ止めてから起こす。"""
-    entries = read_registry(ctx.state_dir)
+    entries = registry.read_registry(hub_dir(ctx.state_dir))
     entry = entries.get(name)
     if entry is None:
         return Outcome(False, f"{name} は登録簿に無い。spawn で起動する", "invalid")
@@ -221,15 +203,22 @@ def restart(ctx: Context, name: str) -> Outcome:
     if refused is not None:
         return refused
     pending = ctx.pending()
-    if target:
-        stopped = stop(ctx, name)
-        if not stopped.ok:
-            return stopped
+    unstopped = _await_exit(ctx, name, target)
+    if unstopped is not None:
+        return unstopped
     entry = {**entry, "starts": starts.bumped().as_json(), "version": ctx.version}
     got = _launch(ctx, name, entry)
     entries[name] = entry
-    _save_registry(ctx.state_dir, entries)
+    registry.save_registry(hub_dir(ctx.state_dir), entries)
     return _with_pending(got, pending)
+
+
+def _await_exit(ctx: Context, name: str, running: bool) -> Optional[Outcome]:
+    """動いていれば止めて終わるまで待つ。止められなければその結果、止めた・動いていなければ None。"""
+    if not running:
+        return None
+    stopped = stop(ctx, name)
+    return None if stopped.ok else stopped
 
 
 def _refused(d: hub_decide.Decision, cause: str) -> Optional[Outcome]:
@@ -264,7 +253,7 @@ def stop(ctx: Context, name: str) -> Outcome:
 
 
 def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
-    ndf = ctx.plugin_root / "bin" / "ndf"
+    ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")
@@ -292,7 +281,7 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
     """登録簿の各行に、動いているか・ラッパーの状態（`stalled` など。#3243）と理由を足す。"""
     running = {r.name: r for r in registry.running(ctx.state_dir)}
     out = []
-    for name, entry in sorted(read_registry(ctx.state_dir).items()):
+    for name, entry in sorted(registry.read_registry(hub_dir(ctx.state_dir)).items()):
         state = registry.read_state(registry.wrapper_dir(ctx.state_dir, name))
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
         out.append({"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason"), **entry})  # noqa: NDF501 ファイル: 状態が無ければ理由も無い

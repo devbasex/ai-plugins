@@ -16,6 +16,11 @@ class Import:
     names: tuple[str, ...]
 
 
+def is_under(module: str, package: str) -> bool:
+    """モジュールがパッケージそのものか、その下にあるか（`ndf.pq` は `ndf.p` の下でない）。"""
+    return module == package or module.startswith(package + ".")
+
+
 def _absolute(node: ast.ImportFrom, module: str, is_package: bool) -> str:
     if not node.level:
         return str(node.module)  # 絶対の import は必ず名前を持つ

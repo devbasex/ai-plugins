@@ -59,7 +59,7 @@ def test_valid_plan_passes():
         (variant(x=lambda d: d["lanes"][0].__setitem__("name", "p1-rel1")), "I1"),
         (variant(x=lambda d: d["lanes"][1].__setitem__("name", "lroot")), "I1"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("handoff", "loop-lflow")), "I1"),
-        (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 3)), "I2"),
+        (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 7)), "I2"),
         (variant(x=lambda d: d["lanes"].append({**d["lanes"][0], "name": "l4", "plans": 0})), "form"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("after", ["nope"])), "I3"),
         (variant(x=lambda d: d["lanes"][1].__setitem__("after", ["lfac"])), "I3"),
@@ -75,18 +75,16 @@ def test_name_at_limit_passes():
     assert pp.check_data(variant(name="a" * 24))[0] is not None
 
 
-def test_total_plans_boundary(monkeypatch):
-    assert pp.check_data(BASE)[0] is not None  # 合計 6 は上限ちょうど
-    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "5")
+def test_only_a_single_lane_over_the_cap_is_refused(monkeypatch):
+    """上限は同時に動く数のためのもので、計画の宣言の合計とレーンの数は数えない（#3021）。1 本で上限を超えるレーンだけを断る。"""
+    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "2")
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "1")
+    assert pp.check_data(BASE)[0] is not None  # 合計 6・3 本でも、どのレーンも 2 以下
+    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "1")
     assert ("error", "I2") in rules_of(BASE)
     monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "zero")
     _, _, metrics = pp.check_data(BASE)
     assert metrics["max_plans"] == 6 and metrics["notes"]
-
-
-def test_lane_count_over_named_cap(monkeypatch):
-    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "2")
-    assert ("error", "I2") in rules_of(BASE)
 
 
 def test_touch_overlap_is_warning():
@@ -369,10 +367,14 @@ def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path,
     assert spawned and spawned[0][-2:] == ["run", "p1"]
 
 
-def test_ended_lanes_do_not_count_toward_caps(monkeypatch):
-    """終わりの記録があるレーンは、レーン数とプランの本数の上限に数えない（#3021）。"""
-    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "4")
-    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "2")
-    assert ("error", "I2") in rules_of(BASE)
-    plan, items, _ = pp.check_data(BASE, ended={"lroot"})
-    assert plan is not None and not [it for it in items if it["level"] == "error"]
+def test_ended_lanes_do_not_raise_overlaps():
+    """終わりの記録があるレーンは、触る場所（I4）と課題（I19）の重なりに数えない（#3021 の残り）。"""
+    d = variant(x=lambda d: d["lanes"].append(
+        {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["plugins/ndf/scripts/"], "handoff": "sprint-lnew"}
+    ))  # fmt: skip
+    assert ("error", "I19") in rules_of(d)  # lfac #2400 と重なる
+    plan, items, _ = pp.check_data(d, ended={"lfac", "lroot"})
+    assert plan is not None
+    assert not [it for it in items if it["rule"] in ("I4", "I19")]
+    plan, items, _ = pp.check_data(d, ended={"lfac"})
+    assert [it["lanes"] for it in items if it["rule"] == "I4"] == [["lroot", "lnew"]]
