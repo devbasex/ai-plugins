@@ -198,7 +198,9 @@ def test_call_claude_refuses_before_launch_without_cache(tmp_path):
 def test_run_agent_refuses_codex_without_cache(tmp_path):
     training.cache_path().unlink()
     marker = tmp_path / "ran"
-    spec = agents.Launch("codex", (sys.executable, "-c", f"open({str(marker)!r}, 'w')"), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30)
+    spec = agents.Launch(
+        "codex", (sys.executable, "-c", f"open({str(marker)!r}, 'w')"), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30
+    )
 
     status = agents.run_agent(spec, poll=0.05)
 

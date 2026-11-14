@@ -31,7 +31,9 @@ def test_full_args_default_to_own_root():
 
 def test_minimal_args_stay_minimal_without_plugin_settings():
     no_tools = cli.claude_args(cli.ClaudeCall(system="sys"))
-    with_tools = cli.claude_args(cli.ClaudeCall(system="sys", permission=cli.Permission.TOOLS, tools="Read,Grep", model="m"), base=("x", "y"))
+    with_tools = cli.claude_args(
+        cli.ClaudeCall(system="sys", permission=cli.Permission.TOOLS, tools="Read,Grep", model="m"), base=("x", "y")
+    )
 
     assert no_tools == ["claude", *MINIMAL_HEAD, "--disable-slash-commands", "--system-prompt", "sys", "--tools", ""]
     assert with_tools[:2] == ["x", "y"] and with_tools[-2:] == ["--model", "m"]
@@ -188,7 +190,7 @@ LIMIT_JSON = json.dumps({"is_error": True, "api_error_status": 429, "result": "Y
     "script",
     [
         f"import sys; sys.stdin.read(); print({LIMIT_JSON!r})",
-        "import sys; sys.stdin.read(); sys.stderr.write(\"You've hit your limit · resets 3pm\\n\"); sys.exit(1)",
+        'import sys; sys.stdin.read(); sys.stderr.write("You\'ve hit your limit · resets 3pm\\n"); sys.exit(1)',
     ],
 )
 def test_call_claude_tells_usage_limit_apart(no_run_env, script):
