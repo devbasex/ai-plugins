@@ -36,6 +36,7 @@ import gh_call  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
 from sprint_args import DESIGN_SPRINT_STAGES, new_sprint_args  # noqa: E402
+from git_fixture import init_with_origin  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -1791,18 +1792,10 @@ sys.exit(1)
 
 def pr_repo(tmp_path, monkeypatch):
     """develop から切った feat/x を持つリポジトリと、pr create の本文を書き出す偽の gh を用意する。"""
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
-    root = tmp_path / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "develop")
-    git(root, "config", "user.email", "t@example.com")
-    git(root, "config", "user.name", "t")
-    git(root, "config", "commit.gpgsign", "false")
+    root = init_with_origin(tmp_path)
     (root / "a.txt").write_text("a\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "remote", "add", "origin", str(origin))
     git(root, "push", "-q", "-u", "origin", "develop")
     git(root, "checkout", "-q", "-b", "feat/x")
     (root / "b.txt").write_text("b\n")
