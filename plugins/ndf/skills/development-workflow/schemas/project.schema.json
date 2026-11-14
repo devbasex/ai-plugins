@@ -1217,6 +1217,84 @@
       ],
       "title": "Workflow",
       "type": "object"
+    },
+    "WorkflowLaunch": {
+      "additionalProperties": false,
+      "description": "工程から呼ぶプランの雛形の起動（語の並び）。雛形の差し込み `review`・`rebuild`・`refactor` の値になる（#3092・#3473）。",
+      "properties": {
+        "review": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review"
+        },
+        "rebuild": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rebuild"
+        },
+        "refactor": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refactor"
+        }
+      },
+      "title": "WorkflowLaunch",
+      "type": "object"
+    },
+    "WorkflowSettings": {
+      "additionalProperties": false,
+      "description": "開発の工程の設定。",
+      "properties": {
+        "launch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowLaunch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "WorkflowSettings",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -1424,6 +1502,17 @@
       ],
       "default": null,
       "title": "Docs"
+    },
+    "workflow": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "analysis": {
       "anyOf": [
