@@ -105,20 +105,26 @@ def _exit_cause(step_id: str, raw: Mapping[str, str]) -> dict[int, str]:
     return out
 
 
+def _command(sid: str, raw: Mapping[str, Any], key: str, required: bool) -> Optional[tuple[str, ...]]:
+    """ステップの `key` のコマンド。無ければ None（`required` なら誤り）、空でない文字列の配列でなければ `PlanError`。"""
+    value = raw.get(key)
+    if value is None and not required:
+        return None
+    if not isinstance(value, list) or not value or not all(isinstance(a, str) for a in value):
+        raise PlanError(f"ステップ {sid} の {key} は空でない文字列の配列にする")
+    return tuple(value)
+
+
 def _step(raw: Mapping[str, Any]) -> Step:
     if not isinstance(raw, Mapping) or not isinstance(raw.get("id"), str) or not raw["id"]:
         raise PlanError(f"ステップに id が無い: {raw!r}")
     sid = raw["id"]
-    run = raw.get("run")
-    if not isinstance(run, list) or not run or not all(isinstance(a, str) for a in run):
-        raise PlanError(f"ステップ {sid} の run は空でない文字列の配列にする")
+    run = _command(sid, raw, "run", True)
     retry = {kind: _policy(sid, kind, values) for kind, values in dict(_opt(raw, "retry", {})).items()}
-    probe = raw.get("probe")
-    if probe is not None and (not isinstance(probe, list) or not probe or not all(isinstance(a, str) for a in probe)):
-        raise PlanError(f"ステップ {sid} の probe は空でない文字列の配列にする")
+    probe = _command(sid, raw, "probe", False)
     return Step(
         id=sid,
-        run=tuple(run),
+        run=run,
         next=raw.get("next"),
         on_fail=raw.get("on_fail"),
         on_cause=dict(_opt(raw, "on_cause", {})),
@@ -127,7 +133,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
         on_answer=dict(_opt(raw, "on_answer", {})),
         timeout=raw.get("timeout"),
         place=_opt(raw, "in", IN_WORKTREE),
-        probe=tuple(probe) if probe is not None else None,
+        probe=probe,
     )
 
 
