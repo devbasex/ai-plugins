@@ -131,3 +131,104 @@ def test_a_sprint_outside_a_lane_and_organizer_sends_no_request(st, new_table, f
     tid = new_table()
     q = _at_release(st, tid, flow)
     assert gate.request_release(st, run.read(st, tid), q, {}) is None
+
+
+# --- 現状固定（I-019 の前に request_release の分岐ごとの出し先と副作用を固定する） ---------------------------
+
+ORG_ENV = {"NDF_ORGANIZER_LANE": "a", "NDF_VERSION": "11.0.0"}
+# 今の事象の表で answered を書ける書き手（BY の human:reviewer は今の表では断られ、_at_release を通れない）
+WRITER = "conductor"
+
+
+def _now_at_release(st, tid, flow):
+    """設計承認ゲートを WRITER で承認し、リリース承認ゲートの待ちまで流して承認資料を置く。"""
+    flow.turn(tid)
+    q = gate.waiting(run.read(st, tid))
+    gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", WRITER, "k-design"))
+    assert flow.turn(tid)["status"] == "gate"
+    v = run.read(st, tid)
+    q = gate.waiting(v)
+    assert q is not None and q.gate == "release"
+    gate.write_material(st.root, v, q)  # 呼び出し元（gate.present）と同じく、依頼の前に承認資料を置く
+    return q
+
+
+def _seen(st, q):
+    return gate.material_path(st.root, q).with_name(q.id + ".seen.json")
+
+
+def test_current_a_design_gate_sends_no_request_and_leaves_no_seen_file(st, lane_sprint, flow):
+    pid, tid = lane_sprint()
+    flow.turn(tid)
+    q = gate.waiting(run.read(st, tid))
+    assert q is not None and q.gate == "design"
+    assert gate.request_release(st, run.read(st, tid), q, {}) is None
+    assert not _seen(st, q).exists() and _requests(st, pid) == []
+
+
+def test_current_the_seen_file_keeps_the_target_of_the_first_request(st, lane_sprint, flow):
+    _pid, tid = lane_sprint()
+    q = replace(_now_at_release(st, tid, flow), target=gate.Target(head="h1", material="m1"))
+    gate.request_release(st, run.read(st, tid), q, {})
+    gate.request_release(st, run.read(st, tid), replace(q, target=gate.Target(head="h2", material="m2")), {})
+    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == {"head": "h1", "material_sha256": "m1"}
+
+
+def test_current_the_plan_request_returns_where_it_was_sent_and_holds_the_request_fields(st, lane_sprint, flow):
+    pid, tid = lane_sprint()
+    q = _now_at_release(st, tid, flow)
+    sent = gate.request_release(st, run.read(st, tid), q, {})
+    (req,) = _requests(st, pid)
+    assert sent == {"kind": "plan", "id": gate.request_id(q), "plan": pid, "request": req.key}
+    assert set(req.body) == {"id", "lane", "prs", "issues", "sprint_state", "at", "kind"}
+    assert req.body["id"] == gate.request_id(q) and req.body["lane"] == "a" and req.body["kind"] == gate.RELEASE_KIND
+
+
+def test_current_a_sprint_outside_a_lane_still_leaves_the_seen_file(st, new_table, flow):
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    assert gate.request_release(st, run.read(st, tid), q, {}) is None
+    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == {"head": q.target.head, "material_sha256": q.target.material}
+
+
+def test_current_the_file_request_returns_its_path_and_is_the_same_when_sent_again(st, new_table, flow, tmp_path):
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), **ORG_ENV}
+    first = gate.request_release(st, run.read(st, tid), q, env)
+    again = gate.request_release(st, run.read(st, tid), q, env)
+    path = tmp_path / "org" / "requests" / f"{gate.request_id(q)}.json"
+    assert first == {"kind": "file", "id": gate.request_id(q), "path": str(path)}
+    assert again == first
+    body = json.loads(path.read_text(encoding="utf-8"))
+    assert body["id"] == gate.request_id(q) and body["sprint_state"] == tid and body["issues"] == [3092]
+
+
+@pytest.mark.parametrize("given", [{}, {"NDF_VERSION": ""}])
+def test_current_without_a_given_version_the_file_request_uses_the_plugin_version(st, new_table, flow, tmp_path, monkeypatch, given):
+    monkeypatch.setattr(lane, "ndf_version", lambda: "9.9.9")
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_ORGANIZER_LANE": "a", **given}
+    sent = gate.request_release(st, run.read(st, tid), q, env)
+    assert json.loads(open(sent["path"], encoding="utf-8").read())["ndf_version"] == "9.9.9"
+
+
+def test_current_an_unreadable_version_refuses_the_file_request_after_the_seen_file(st, new_table, flow, tmp_path, monkeypatch):
+    monkeypatch.setattr(lane, "ndf_version", lambda: None)
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_ORGANIZER_LANE": "a"}
+    with pytest.raises(model.Refused, match="NDF の版が読めず"):
+        gate.request_release(st, run.read(st, tid), q, env)
+    assert _seen(st, q).exists() and not (tmp_path / "org" / "requests").exists()
+
+
+def test_current_a_file_request_without_a_lane_name_is_refused_by_the_exchange(st, new_table, flow, tmp_path):
+    from ndf.progress.plan import external
+
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_VERSION": "11.0.0"}
+    with pytest.raises(external.ExchangeError, match="lane"):
+        gate.request_release(st, run.read(st, tid), q, env)
