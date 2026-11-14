@@ -17,11 +17,6 @@ from ndf.core.plan import assemble_decide, model, records, runner
 from . import _plan_helpers as H
 
 
-@pytest.fixture
-def repo(tmp_path) -> Path:
-    return H.make_repo(tmp_path / "repo")
-
-
 def test_each_plan_round_has_its_own_key_and_is_retired(repo, tmp_path):
     """実行の回ごとに 1 つの鍵で流し、終わった鍵のファイルは retired/ へ移る（B1・B7）。"""
     a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")])
