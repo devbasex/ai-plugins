@@ -104,9 +104,14 @@ def _list(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"worktree は {len(rows)} 件", rows, {"count": len(rows)})
 
 
+def _hub(main: Git) -> github_mod.GitHub:
+    """メインディレクトリの origin のリポジトリを読む GitHub の窓口。"""
+    return github_mod.GitHub(main.remote_repo(), github_mod.client())
+
+
 def _cleanup(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     main = Git(where.main_dir)
-    hub = github_mod.GitHub(main.remote_repo(), github_mod.client())
+    hub = _hub(main)
     got = cleanup.cleanup(where.main_dir, args.cwd, hub, dry_run=args.dry_run, git=main)
     removed = sum(1 for o in got if o.removed)
     metrics = {"worktrees": len(got), "removed": removed, "branches_deleted": sum(1 for o in got if o.branch_deleted)}
@@ -142,7 +147,7 @@ def _guard(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 
 def _merged(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     main = Git(where.main_dir)
-    hub = github_mod.GitHub(main.remote_repo(), github_mod.client())
+    hub = _hub(main)
     rec = merged.after_merge(where.main_dir, args.prs, hub, merged.read_flow_record(args.flow_record))
     counted = (("worktree", outcomes.REMOVED), ("branch", outcomes.DELETED), ("worktree", outcomes.KEPT), ("branch", outcomes.KEPT))
     metrics = {f"{kind}:{word}": rec.count(kind, word) for kind, word in counted}
