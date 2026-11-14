@@ -7247,6 +7247,24 @@
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
+      "term": "文書の行き先",
+      "context": "ndf-workflow",
+      "meaning": "プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）と持ち主の子と時期",
+      "source": "docs/ndf-swap-doc-destinations.md"
+    },
+    {
+      "term": "入れ替えの起点のコミット",
+      "context": "ndf-workflow",
+      "meaning": "入れ替えの PR が分かれた develop のコミット。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う",
+      "source": "docs/ndf-swap-doc-destinations.md"
+    },
+    {
+      "term": "非公開の参照",
+      "context": "ndf-workflow",
+      "meaning": "公開のリポジトリや公開の Issue に入っている、非公開リポジトリへの完全な参照・手元のアカウント名・個人のメール。一覧には場所と分類だけを書き、値を写さない",
+      "source": "issues/issue-3410-private-refs.md"
+    },
+    {
       "term": "プラグインの定義",
       "context": "ndf-workflow",
       "meaning": "プラグインの `plugin.json` が持つプラグイン名と版",
