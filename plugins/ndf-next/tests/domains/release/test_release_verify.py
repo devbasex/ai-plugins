@@ -9,7 +9,7 @@ import pytest
 
 from ndf.domains.release import sync_decide, verify
 
-from ._fakes import git, init_repo
+from ._fakes import clone, git, init_repo
 
 
 def _setup(tmp_path: Path) -> tuple[Path, Path]:
@@ -21,14 +21,8 @@ def _setup(tmp_path: Path) -> tuple[Path, Path]:
     git(seed, "branch", "main")
     origin = tmp_path / "origin.git"
     git(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
-    main_dir = tmp_path / "main"
-    git(tmp_path, "clone", "-q", "-b", "develop", str(origin), str(main_dir))
-    other = tmp_path / "other"
-    git(tmp_path, "clone", "-q", "-b", "develop", str(origin), str(other))
-    for repo in (main_dir, other):
-        git(repo, "config", "user.email", "t@example.invalid")
-        git(repo, "config", "user.name", "t")
-        git(repo, "config", "commit.gpgsign", "false")
+    main_dir = clone(tmp_path, origin, "main")
+    other = clone(tmp_path, origin, "other")
     (other / "plugin.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
     git(other, "commit", "-q", "-am", "bump")
     git(other, "push", "-q", "origin", "develop")

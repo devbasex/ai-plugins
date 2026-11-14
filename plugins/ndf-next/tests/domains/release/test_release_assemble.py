@@ -12,7 +12,7 @@ from ndf.domains.release import assemble, changes_decide, checks_decide, gather,
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, git, init_repo, write_json
+from ._fakes import FakeHub, clone, git, init_repo, write_json
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -44,12 +44,7 @@ def _origin_with_change(tmp_path: Path, test_only: bool) -> Path:
     git(seed, "merge", "-q", "--no-ff", "feat/x", "-m", "Merge pull request #5 from o/feat/x")
     origin = tmp_path / "origin.git"
     git(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
-    work = tmp_path / "work"
-    git(tmp_path, "clone", "-q", "-b", "develop", str(origin), str(work))
-    git(work, "config", "user.email", "t@example.invalid")
-    git(work, "config", "user.name", "t")
-    git(work, "config", "commit.gpgsign", "false")
-    return work
+    return clone(tmp_path, origin, "work")
 
 
 def _hub() -> FakeHub:

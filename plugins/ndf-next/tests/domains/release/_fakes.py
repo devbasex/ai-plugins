@@ -73,13 +73,25 @@ def git(cwd: Path, *args: str) -> str:
     return done.stdout
 
 
-def init_repo(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    git(path, "init", "-q", "-b", "develop")
+def configure(path: Path) -> Path:
+    """コミットの作者と署名なしを、そのリポジトリだけに設定する。"""
     git(path, "config", "user.email", "t@example.invalid")
     git(path, "config", "user.name", "t")
     git(path, "config", "commit.gpgsign", "false")
     return path
+
+
+def init_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-q", "-b", "develop")
+    return configure(path)
+
+
+def clone(tmp_path: Path, origin: Path, name: str, branch: str = "develop") -> Path:
+    """origin のブランチを `tmp_path/<name>` へ clone し、設定する。"""
+    path = tmp_path / name
+    git(tmp_path, "clone", "-q", "-b", branch, str(origin), str(path))
+    return configure(path)
 
 
 def write_json(path: Path, data: Any) -> None:
