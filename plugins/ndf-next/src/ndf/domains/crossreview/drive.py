@@ -197,6 +197,16 @@ def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[li
     return raised, answered
 
 
+def _ledger_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
+    """台帳の 1 行（未解決で始まる）。"""
+    return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
+
+
+def _next_id(run: _Run, round_no: int) -> str:
+    """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
+    return f"r{round_no}-{sum(1 for f in run.ledger.values() if f.get('round') == round_no) + 1}"
+
+
 def _enter(run: _Run, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
     """指摘を台帳へ入れ、このラウンドで出た鍵を返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
     by_key = {f.get("key"): f for f in run.ledger.values()}
@@ -212,9 +222,8 @@ def _enter(run: _Run, round_no: int, raised: Sequence[dict[str, Any]]) -> frozen
         keys.add(key)
         known = by_key.get(key)
         if known is None:
-            fid = f"r{round_no}-{sum(1 for f in run.ledger.values() if f.get('round') == round_no) + 1}"
-            run.ledger[fid] = {"id": fid, "key": key, "text": text, "section": _text(item.get("section")), "round": round_no}
-            run.ledger[fid] |= {"outcome": fin.UNRESOLVED, "reason": None, "by": item.get("by")}
+            fid = _next_id(run, round_no)
+            run.ledger[fid] = _ledger_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
         elif known.get("outcome") == fin.FIXED:
             known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
     return frozenset(keys)
@@ -264,8 +273,7 @@ def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
         if fid in run.ledger:
             run.ledger[fid] |= {"outcome": item["outcome"], "reason": reason}
         elif fid in handed:
-            run.ledger[fid] = {"id": fid, "key": None, "text": handed[fid], "section": None, "round": round_no}
-            run.ledger[fid] |= {"outcome": item["outcome"], "reason": reason, "by": "rebuild"}
+            run.ledger[fid] = _ledger_row(fid, round_no, handed[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
     os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
