@@ -156,10 +156,9 @@ def _close_request(request: Optional[str], reason: str) -> list[model.EventDraft
     return [model.EventDraft("request_closed", "organizer", request, reason=reason)] if request else []
 
 
-def _check_request(conn: sa.Connection, pid: str, request: Optional[str]) -> None:
+def _check_request(view: lane.PlanView, request: Optional[str]) -> None:
     if request is None:
         return
-    view, _ = lane.read_plan(conn, pid)
     found = view.requests.get(request)
     if found is None or found.closed is not None:
         raise model.Refused(f"計画 {view.name} に開いている依頼 {request} は無い")
@@ -172,7 +171,7 @@ def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optio
     meta = store.read_table(conn, pid)
     if decl["name"] in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {decl['name']} は既にある")
-    _check_request(conn, pid, request)
+    _check_request(view, request)
     before = _errors_now(conn, pid)
     tid = model.table_id("lane", meta["repo"], lane.lane_table_name(view.name, decl["name"]))
     drafts = [model.EventDraft("lane_added", "organizer", decl["name"], payload=lane_payload(decl, tid))]
@@ -190,7 +189,7 @@ def change_lane(conn: sa.Connection, pid: str, name: str, changes: dict[str, Any
         raise model.Refused(f"計画 {view.name} にレーン {name} は無い")
     if not changes:
         raise model.Refused("変える値が無い")
-    _check_request(conn, pid, request)
+    _check_request(view, request)
     before = _errors_now(conn, pid)
     drafts = [model.EventDraft("lane_changed", "organizer", name, reason=reason, payload=changes)]
     _append(conn, pid, drafts + _close_request(request, reason))
@@ -247,7 +246,8 @@ def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: st
 
 def close_request(conn: sa.Connection, pid: str, key: str, reason: str, actor: str = "organizer") -> None:
     """答えていない依頼を採らずに閉じる（オーガナイザー。止まりの知らせはレーンが動き出したら耐久ワークフローが閉じる）。"""
-    _check_request(conn, pid, key)
+    view, _ = lane.read_plan(conn, pid)
+    _check_request(view, key)
     _append(conn, pid, [model.EventDraft("request_closed", actor, key, reason=reason)])
 
 
@@ -279,8 +279,9 @@ def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: Relea
         raise model.Refused("まとめたリリースの依頼が無いか、同じ依頼が重なっている")
     if answer.result == RELEASED and not (answer.version and answer.release):
         raise model.Refused("リリースした答えには版とリリース記録の PR が要る")
+    view, _ = lane.read_plan(conn, pid)
     for key in keys:
-        _check_request(conn, pid, key)
+        _check_request(view, key)
     done = {"result": answer.result, "version": answer.version, "release": answer.release, "batch": list(keys)}
     drafts = [model.EventDraft("request_closed", "organizer", key, reason=answer.reason, payload={"release": done}) for key in keys]
     _append(conn, pid, drafts)
