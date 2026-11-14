@@ -70,7 +70,11 @@ def _shaped(fn: Callable[[Any], dict[str, str]], value: Any, where: Path, bad: l
 
 def snapshot() -> Snapshot:
     """利用者の設定ディレクトリの控え。"""
-    claude, codex = config_dirs()
+    return snapshot_at(*config_dirs())
+
+
+def snapshot_at(claude: Path, codex: Path) -> Snapshot:
+    """渡した設定ディレクトリ（Claude Code・Codex）の控え。"""
     bad: list[str] = []
     items = _shaped(user_config_decide.claude_plugins, _read(claude / CLAUDE_INSTALLED, json.loads, bad), claude / CLAUDE_INSTALLED, bad)
     items |= _shaped(user_config_decide.claude_marketplaces, _read(claude / CLAUDE_KNOWN, json.loads, bad), claude / CLAUDE_KNOWN, bad)

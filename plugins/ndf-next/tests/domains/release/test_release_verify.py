@@ -105,6 +105,19 @@ def test_snapshot_of_missing_dirs_is_empty(tmp_path: Path, monkeypatch: pytest.M
     assert verify.snapshot() == verify.Snapshot({}, ())
 
 
+def test_snapshot_at_reads_given_dirs_without_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """snapshot_at: 渡したディレクトリだけを読み、環境変数の設定ディレクトリを読まない。"""
+    claude, codex = _config_dirs(tmp_path, monkeypatch)
+    monkeypatch.setenv(verify.CLAUDE_DIR_ENV, str(tmp_path / "none1"))
+    monkeypatch.setenv(verify.CODEX_DIR_ENV, str(tmp_path / "none2"))
+    installed = {"plugins": {"kit@m": [{"scope": "user", "version": "1.0.0"}]}}
+    (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(installed), encoding="utf-8")
+    assert verify.snapshot_at(claude, codex) == verify.Snapshot(
+        {"claude:plugin:kit@m": "user:1.0.0", "codex:plugin:kit@m": "enabled=- versions=0.9.0,1.0.0"}, ()
+    )
+    assert verify.snapshot() == verify.Snapshot({}, ())
+
+
 def test_config_dirs_fall_back_to_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """現状固定（config_dirs）: 環境変数が無いか空なら、ホームの .claude と .codex。"""
     monkeypatch.delenv(verify.CLAUDE_DIR_ENV, raising=False)
