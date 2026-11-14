@@ -312,27 +312,35 @@ def _acquire(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
     taken: slot_pool.Taken | None = None
     try:
         while True:
-            if ctx.options.interrupted():
-                raise KeyboardInterrupt  # シグナルを受けた（受けたのが待ちに入る前でも、ここで抜ける）
-            if taken is None:
-                taken = _take_free_slot(ctx, held)
+            taken = _try_once(ctx, held, taken)
             if taken is not None and _memory_ready(held, ctx.options.read_memory, ctx.limits.memory_floor_mib):
                 return taken
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             time.sleep(min(ctx.options.poll, remaining))
-        if taken is not None:
-            taken.release()
+        _give_back(taken)
         return None
     except BaseException:
-        if taken is not None:
-            taken.release(quiet=True)
+        _give_back(taken, quiet=True)
         raise
     finally:
         end = time.monotonic()
         held.waited_seconds = end - start
         _note_wait(start, end)
+
+
+def _try_once(ctx: SlotContext, held: Held, taken: slot_pool.Taken | None) -> slot_pool.Taken | None:
+    """待ちの 1 周分。中断を確かめ、枠がまだ無ければ取る。取った枠（無ければ None）を返す。"""
+    if ctx.options.interrupted():
+        raise KeyboardInterrupt  # シグナルを受けた（受けたのが待ちに入る前でも、ここで抜ける）
+    return taken if taken is not None else _take_free_slot(ctx, held)
+
+
+def _give_back(taken: slot_pool.Taken | None, *, quiet: bool = False) -> None:
+    """取った枠があれば返す。`quiet` は `Taken.release` と同じ（別の例外の後始末のとき）。"""
+    if taken is not None:
+        taken.release(quiet=quiet)
 
 
 def _take_free_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
