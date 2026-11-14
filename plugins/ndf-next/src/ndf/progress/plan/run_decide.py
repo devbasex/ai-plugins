@@ -280,6 +280,10 @@ def _finish(state: RunState, outcome: str) -> loop.Next[Act, RunState]:
     return loop.Next.finish(replace(state, outcome=outcome))
 
 
+# 起動の候補を探す計画の状態
+OBSERVED_STATES = (RUNNING, PAUSED, CANCELLED, COMPLETED)
+
+
 def _end_of(snap: dict[str, Any]) -> Optional[str]:
     """写しの計画が耐久ワークフローを終える状態なら、終わりの語。"""
     if snap["state"] == COMPLETED:
@@ -293,18 +297,19 @@ def _end_of(snap: dict[str, Any]) -> Optional[str]:
 
 def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     snap = _snap(state)
-    found = _candidates(state, policy) if snap["state"] in (RUNNING, PAUSED, CANCELLED, COMPLETED) else []
+    running = snap["state"] == RUNNING
+    found = _candidates(state, policy) if snap["state"] in OBSERVED_STATES else []
     # 終わったレーンのラッパーは、計画を完了にする前と耐久ワークフローを終える前に止める（#3173）
     halts = [a for a in found if a.halt]
     end = _end_of(snap)
     if end is not None:
         return loop.Next.step(halts[0], state) if halts else _finish(state, end)
-    if snap["state"] == RUNNING and snap["complete"]:
+    if running and snap["complete"]:
         return loop.Next.step(halts[0] if halts else Complete(), state)
-    gone = _withdrawable(snap) if snap["state"] == RUNNING else []
+    gone = _withdrawable(snap) if running else []
     if gone:
         return loop.Next.step(gone[0], state)
-    if snap["state"] == RUNNING and state.unreported:
+    if running and state.unreported:
         return loop.Next.step(state.unreported[0], state)
     if found:
         return loop.Next.step(found[0], state)
