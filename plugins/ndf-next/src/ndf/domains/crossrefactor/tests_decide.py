@@ -50,16 +50,19 @@ def module_names(path: str) -> frozenset[str]:
 
 def imports_of(source: str) -> frozenset[str]:
     """テストのファイルが import する名前。`from a import b` は `a` と `a.b` の両方。構文の誤りは `SyntaxError`。"""
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Import):
-            names.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module
-            names.update(f"{base}.{a.name}" if base else a.name for a in node.names)
-            if base:
-                names.add(base)
-    return frozenset(names)
+    return frozenset(name for node in ast.walk(ast.parse(source)) for name in _imported(node))
+
+
+def _imported(node: ast.AST) -> list[str]:
+    """1 つのノードが import する名前（import でなければ空）。"""
+    if isinstance(node, ast.Import):
+        return [a.name for a in node.names]
+    if not isinstance(node, ast.ImportFrom):
+        return []
+    base = node.module
+    if not base:
+        return [a.name for a in node.names]
+    return [*(f"{base}.{a.name}" for a in node.names), base]
 
 
 def _stem(path: str) -> str:
