@@ -60,7 +60,7 @@ def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:
         found, _ = decoder.raw_decode(text, at)
     except json.JSONDecodeError:
         # 相手役の出力の途中の `{` は JSON の始まりでない。呼び手が前の `{` を試す
-        return None
+        found = None
     return found
 
 
