@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -53,6 +53,35 @@ def test_reconcile_takes_the_transcript_over_rows_and_counts_unknown_rows() -> N
     ]
     total, unknown = ud.reconcile(rows, {"a": ud.Usage(0, 3, 0, 0), "b": ud.UNKNOWN})
     assert total == ud.Usage(0, 8, 0, 0) and unknown == 1
+
+
+# 現状固定（I-003 の前）: reconcile の分岐ごとの振る舞い
+_RECONCILE_ROWS = [
+    {"at": "2026-11-14T01:00:00Z", "agent_id": "a", "usage": {"output_tokens": 100}},
+    {"at": "2026-11-14T01:00:00Z", "agent_id": "b", "usage": {"output_tokens": 2}},
+    {"at": "2026-11-13T01:00:00Z", "agent_id": "b", "usage": {"output_tokens": 50}},
+    {"at": "2026-11-13T01:00:00Z", "usage": "unknown"},
+    {"usage": {"output_tokens": 7}},
+    {"at": "2026-11-14T02:00:00Z", "agent_id": 7, "usage": {"input_tokens": 1}},
+    {"at": "2026-11-14T03:00:00Z", "usage": None},
+]
+_RECONCILE_TRANSCRIPTS = {"a": ud.Usage(0, 3, 0, 0), "b": ud.UNKNOWN, "": ud.Usage(9, 9, 9, 9), "z": ud.Usage(1, 0, 0, 0)}
+
+
+def test_reconcile_within_a_period_skips_rows_outside_or_without_time_and_ignores_the_empty_agent() -> None:
+    a = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
+    b = datetime(2026, 11, 14, 23, 0, tzinfo=timezone.utc)
+    assert ud.reconcile(_RECONCILE_ROWS, _RECONCILE_TRANSCRIPTS, a, b) == (ud.Usage(2, 5, 0, 0), 1)
+
+
+def test_reconcile_without_a_period_counts_every_row_not_covered_by_a_transcript() -> None:
+    assert ud.reconcile(_RECONCILE_ROWS, _RECONCILE_TRANSCRIPTS) == (ud.Usage(2, 62, 0, 0), 2)
+
+
+def test_reconcile_with_no_transcripts_counts_rows_since_the_start_only() -> None:
+    a = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
+    assert ud.reconcile(_RECONCILE_ROWS, {}, a, None) == (ud.Usage(1, 102, 0, 0), 1)
+    assert ud.reconcile([], {}) == (ud.Usage(), 0)
 
 
 def _transcript(path: Path, lines: list[dict]) -> Path:
