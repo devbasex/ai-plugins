@@ -175,7 +175,7 @@ class _MemoryMonitor:
             started = _owner_value(path, "started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
-            probe = _try_lock(_slot_path(self.directory, index, ".lock"))
+            probe = _try_lock(_lock_file(self.directory, index))
             if probe is None:
                 return False  # 後に始めた実行が生きている
             probe.release()
@@ -242,6 +242,16 @@ class Held:
     def _finish(self) -> None:
         if self._monitor is not None:
             self._monitor.finish()
+
+
+def _lock_file(directory: Path, index: int | None) -> Path:
+    """枠のロックのファイル（`slot-<番号>.lock`）。"""
+    return _slot_path(directory, index, ".lock")
+
+
+def _owner_file(directory: Path, index: int | None) -> Path:
+    """枠の今の持ち主の記述（`slot-<番号>.json`）。"""
+    return _slot_path(directory, index, ".json")
 
 
 def _slot_path(directory: Path, index: int | None, suffix: str = "") -> Path:
@@ -441,11 +451,11 @@ def _wait_for_slot(ctx: SlotContext, held: Held, deadline: float) -> tuple[FileL
 def _take_free_slot(ctx: SlotContext, held: Held) -> FileLock | None:
     """番号の小さい方から空いた枠を取り、持ち主を仮に書く。空きが無ければ None。"""
     for index in range(ctx.limits.max_runs):
-        lock = _try_lock(_slot_path(ctx.directory, index, ".lock"))
+        lock = _try_lock(_lock_file(ctx.directory, index))
         if lock is not None:
             held.index = index
             try:
-                _write_json(_slot_path(ctx.directory, index, ".json"), _owner(None, ctx.cwd))
+                _write_json(_owner_file(ctx.directory, index), _owner(None, ctx.cwd))
             except BaseException:
                 lock.release()
                 raise
@@ -465,7 +475,7 @@ def _memory_ready(held: Held, read_memory: ReadMemory, floor_mib: int) -> bool:
 def _release(directory: Path, held: Held, lock: FileLock, *, quiet: bool = False) -> None:
     """持ち主の記述を消して枠を返す。`quiet` なら記述を消せなくても送らない（別の例外の後始末のとき）。"""
     try:
-        _slot_path(directory, held.index, ".json").unlink(missing_ok=True)
+        _owner_file(directory, held.index).unlink(missing_ok=True)
     except OSError:
         if not quiet:
             raise
@@ -485,7 +495,7 @@ def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
             return None
         held.started_at = time.time()
         try:
-            _write_json(_slot_path(ctx.directory, held.index, ".json"), _owner(held.started_at, ctx.cwd))
+            _write_json(_owner_file(ctx.directory, held.index), _owner(held.started_at, ctx.cwd))
         except BaseException:
             _release(ctx.directory, held, lock, quiet=True)
             raise
