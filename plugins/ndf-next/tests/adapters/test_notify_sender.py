@@ -153,6 +153,11 @@ def test_every_kind_the_schema_accepts_can_be_messaged(outbox: Path) -> None:
         assert notify.read_notice(_write(outbox, kind, kind=kind, text="x")).message("").endswith(": x")
 
 
+def test_kind_labels_match_the_schema_kinds() -> None:
+    schema = contracts.load_json(contracts.schema_path("notice"))
+    assert set(notify.KIND_LABELS) == set(schema["properties"]["kind"]["enum"])
+
+
 # ---- drain ----
 
 

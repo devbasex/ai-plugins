@@ -302,7 +302,8 @@ def slack_call(
 
 # ---- 送信待ちの 1 件 ----
 
-# 知らせる事象（送信待ちの `kind`）と、本文の先頭に付ける見出し
+# 知らせる事象（送信待ちの `kind`）と、本文の先頭に付ける見出し。事象の一覧の正本はスキーマ（notice.schema.json）の
+# kind の enum で、鍵の集合はそれと一致させる（テストが確かめる）
 KIND_LABELS = {"question": "回答待ち", "approval": "承認待ち", "done": "完了"}
 NOTICE_SCHEMA = contracts.schema_path("notice")
 
