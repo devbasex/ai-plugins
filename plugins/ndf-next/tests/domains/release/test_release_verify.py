@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from ndf.domains.release import sync_decide, verify
 
@@ -58,3 +61,55 @@ def test_user_change_that_differs_from_origin_stops(tmp_path: Path) -> None:
     plan = verify.sync_base(main_dir, "develop")
     assert plan == sync_decide.Plan(sync_decide.STOP, ("plugin.json",))
     assert (main_dir / "plugin.json").read_text(encoding="utf-8") == '{"version": "9.9.9"}\n'
+
+
+def _config_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """利用者の設定ディレクトリ（Claude Code・Codex）を tmp_path の下へ向ける。"""
+    claude, codex = tmp_path / "claude", tmp_path / "codex"
+    (claude / "plugins").mkdir(parents=True)
+    for version in ("1.0.0", "0.9.0"):
+        (codex / "plugins" / "cache" / "m" / "kit" / version).mkdir(parents=True)
+    (codex / "plugins" / "cache" / "m" / "kit" / "note.txt").write_text("x", encoding="utf-8")
+    (codex / "plugins" / "cache" / "m" / "loose.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv(verify.CLAUDE_DIR_ENV, str(claude))
+    monkeypatch.setenv(verify.CODEX_DIR_ENV, str(codex))
+    return claude, codex
+
+
+def test_snapshot_reads_config_dirs_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """現状固定（snapshot）: 環境変数の設定ディレクトリから 4 つの置き場を読み、鍵の順に並べる。"""
+    claude, codex = _config_dirs(tmp_path, monkeypatch)
+    installed = {"plugins": {"kit@m": [{"scope": "user", "version": "1.0.0"}]}}
+    (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(installed), encoding="utf-8")
+    known = {"m": {"source": {"source": "github", "repo": "o/r"}}}
+    (claude / "plugins" / "known_marketplaces.json").write_text(json.dumps(known), encoding="utf-8")
+    toml = '[marketplaces.m]\nsource_type="git"\nsource="https://example.invalid/r.git"\n[plugins."kit@m"]\nenabled=true\n'
+    (codex / "config.toml").write_text(toml, encoding="utf-8")
+    got = verify.snapshot()
+    assert got == verify.Snapshot(
+        {
+            "claude:marketplace:m": '{"repo": "o/r", "source": "github"}',
+            "claude:plugin:kit@m": "user:1.0.0",
+            "codex:marketplace:m": '{"ref": null, "source": "https://example.invalid/r.git", "source_type": "git"}',
+            "codex:plugin:kit@m": "enabled=true versions=0.9.0,1.0.0",
+        },
+        (),
+    )
+    assert list(got.items) == sorted(got.items)
+
+
+def test_snapshot_of_missing_dirs_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """現状固定（snapshot）: 設定ディレクトリが無ければ控えも読めなかったものも空。"""
+    monkeypatch.setenv(verify.CLAUDE_DIR_ENV, str(tmp_path / "none1"))
+    monkeypatch.setenv(verify.CODEX_DIR_ENV, str(tmp_path / "none2"))
+    assert verify.snapshot() == verify.Snapshot({}, ())
+
+
+def test_config_dirs_fall_back_to_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """現状固定（config_dirs）: 環境変数が無いか空なら、ホームの .claude と .codex。"""
+    monkeypatch.delenv(verify.CLAUDE_DIR_ENV, raising=False)
+    monkeypatch.delenv(verify.CODEX_DIR_ENV, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert verify.config_dirs() == (tmp_path / ".claude", tmp_path / ".codex")
+    monkeypatch.setenv(verify.CLAUDE_DIR_ENV, "")
+    assert verify.config_dirs() == (tmp_path / ".claude", tmp_path / ".codex")
