@@ -97,16 +97,15 @@ def _capture(args: argparse.Namespace) -> int:
 
 
 def _render(check: bool) -> int:
-    if check:
-        found = registration.stale()
-        if found:
-            items = [{"path": str(p)} for p in found]
-            summary = f"作り直した結果と違う登録が {len(found)} 件ある（ndf hooks render で作り直す）"
-            return result.emit(result.stopped(TOOL, "check_failed", summary, items=items))
-        return result.emit(result.result(TOOL, result.OK, "登録は作り直した結果と同じ"))
-    written = registration.write()
-    items = [{"path": str(p)} for p in written]
-    return result.emit(result.result(TOOL, result.OK, f"登録を {len(written)} 件書いた", items=items))
+    changed = registration.stale() if check else registration.write()
+    return result.render_report(
+        TOOL,
+        [{"path": str(p)} for p in changed],
+        check,
+        stale_summary=f"作り直した結果と違う登録が {len(changed)} 件ある（ndf hooks render で作り直す）",
+        ok_summary="登録は作り直した結果と同じ",
+        written_summary=f"登録を {len(changed)} 件書いた",
+    )
 
 
 def main(argv: list[str]) -> int:

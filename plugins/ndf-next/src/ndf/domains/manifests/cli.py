@@ -21,12 +21,14 @@ def _render(check: bool) -> int:
         changed = render.stale(root) if check else render.write(root)
     except (table.TableError, render.RenderError, front_matter.FrontMatterError) as exc:
         return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
-    items = [{"path": str(p.relative_to(root))} for p in changed]
-    if check and changed:
-        summary = f"作り直した結果と違うファイルが {len(changed)} 件ある（ndf manifests render で作り直す）"
-        return result.emit(result.stopped(TOOL, "check_failed", summary, items=items))
-    summary = "ランタイムの定義は配る Skill の表と同じ" if check else f"ランタイムの定義を {len(changed)} 件書いた・消した"
-    return result.emit(result.result(TOOL, result.OK, summary, items=items))
+    return result.render_report(
+        TOOL,
+        [{"path": str(p.relative_to(root))} for p in changed],
+        check,
+        stale_summary=f"作り直した結果と違うファイルが {len(changed)} 件ある（ndf manifests render で作り直す）",
+        ok_summary="ランタイムの定義は配る Skill の表と同じ",
+        written_summary=f"ランタイムの定義を {len(changed)} 件書いた・消した",
+    )
 
 
 def main(argv: list[str]) -> int:
