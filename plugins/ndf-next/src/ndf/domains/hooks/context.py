@@ -247,10 +247,19 @@ class HookContext:
 def _last_assistant_text(tail: str) -> str:
     for line in reversed(tail.splitlines()):
         rec = _line_json(line) if '"assistant"' in line else None
-        message = rec.get("message") if rec else None
-        content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, list):
-            texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
-            if texts:
-                return "\n".join(t for t in texts if isinstance(t, str))
+        text = _record_text(rec) if rec else None
+        if text is not None:
+            return text
     return ""
+
+
+def _record_text(rec: dict[str, Any]) -> Optional[str]:
+    """会話の記録の 1 レコードの本文。text の要素が無ければ None（文字列でない text だけなら空文字）。"""
+    message = rec.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return None
+    texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    if not texts:
+        return None
+    return "\n".join(t for t in texts if isinstance(t, str))
