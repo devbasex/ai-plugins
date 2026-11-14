@@ -98,3 +98,46 @@ def test_last_reply_falls_back_to_the_transcript(tmp_path):
     _transcript(tmp_path)
     ctx = context.HookContext("claude", "Stop", {"transcript_path": str(tmp_path / "transcript.jsonl")})
     assert ctx.last_reply == "どうしますか？" and ctx.last_reply_kind == "prose_wait"
+
+
+def _assistant(content) -> str:
+    return json.dumps({"type": "assistant", "message": {"content": content}})
+
+
+_EARLIER = _assistant([{"type": "text", "text": "前"}])
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        # 会話の記録が空・応答の行が無い
+        ([], ""),
+        ([json.dumps({"type": "user", "message": {"content": [{"type": "text", "text": "人"}]}})], ""),
+        # いちばん後ろの応答の text をつなぐ（text でない部品と文字列でない text は外す）
+        ([_EARLIER, _assistant([{"type": "text", "text": "a"}, {"type": "tool_use"}, {"type": "text", "text": "b"}])], "a\nb"),
+        ([_assistant([{"type": "text", "text": "a"}, {"type": "text", "text": 3}, "x", {"type": "text", "text": "c"}])], "a\nc"),
+        # text の部品があれば、text の値が文字列でなくてもそこで止まる（空を返す）
+        ([_EARLIER, _assistant([{"type": "text"}])], ""),
+        # text の部品が無い・content が配列でない・message が無い行は飛ばして前を読む
+        ([_EARLIER, _assistant([{"type": "tool_use"}])], "前"),
+        ([_EARLIER, _assistant("文字列の content")], "前"),
+        ([_EARLIER, json.dumps({"type": "assistant", "message": "x"})], "前"),
+        ([_EARLIER, json.dumps({"type": "assistant"})], "前"),
+        # 書きかけの行・オブジェクトでない行は飛ばす
+        ([_EARLIER, '{"type": "assistant", "mess'], "前"),
+        ([_EARLIER, json.dumps(["assistant"])], "前"),
+        # "assistant" の語を含まない行は読まない
+        ([json.dumps({"type": "x", "message": {"content": [{"type": "text", "text": "読まない"}]}})], ""),
+    ],
+)
+def test_last_assistant_text_reads_the_last_text_reply(lines, expected):
+    assert context._last_assistant_text("\n".join(lines)) == expected
+
+
+def test_last_reply_prefers_the_payload_message_over_the_transcript(tmp_path):
+    _transcript(tmp_path)
+    payload = {"transcript_path": str(tmp_path / "transcript.jsonl"), "last_assistant_message": "入力の応答"}
+    assert context.HookContext("claude", "Stop", payload).last_reply == "入力の応答"
+    payload["last_assistant_message"] = 1
+    assert context.HookContext("claude", "Stop", payload).last_reply == "どうしますか？"
+    assert context.HookContext("claude", "Stop", {}).last_reply == ""
