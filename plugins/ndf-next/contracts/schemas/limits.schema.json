@@ -26,7 +26,12 @@
           "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
           "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
           "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
-          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"}
+          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"},
+          "p95_ms": {"type": "number", "minimum": 0, "description": "hook の予算: 所要の目標の p95 のミリ秒"},
+          "deadline": {"type": "number", "minimum": 0, "description": "hook の予算: 処理を打ち切る締め切りの秒"},
+          "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
+          "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
+          "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"}
         }
       }
     }
