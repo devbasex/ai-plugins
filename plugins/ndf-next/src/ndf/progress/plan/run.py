@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import os
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -64,8 +66,11 @@ def policy() -> Policy:
 # --- 耐久ステップ -------------------------------------------------------------------------------
 
 
-def _spec_where(spec: dict[str, Any]) -> tuple[str, Path]:
-    return spec["url"], Path(spec["root"])
+@contextlib.contextmanager
+def _conn(spec: dict[str, Any]) -> Iterator[Any]:
+    """耐久ステップが進行表を読み書きする接続（置き場を開き、トランザクションを張る）。"""
+    with store.open_store(spec["url"], Path(spec["root"])) as st, store.transaction(st) as conn:
+        yield conn
 
 
 def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
@@ -78,8 +83,7 @@ def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
 @durable.step
 def observe(spec: dict[str, Any]) -> dict[str, Any]:
     """計画とレーンの進行表を読む耐久ステップ。"""
-    url, root = _spec_where(spec)
-    with store.open_store(url, root) as st, store.transaction(st) as conn:
+    with _conn(spec) as conn:
         return read_snapshot(conn, spec["plan_id"])
 
 
@@ -96,9 +100,8 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
 @durable.step
 def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None) -> dict[str, Any]:
     """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。"""
-    url, root = _spec_where(spec)
     act = Launch(lane_name, row, cancel)
-    with store.open_store(url, root) as st, store.transaction(st) as conn:
+    with _conn(spec) as conn:
         first = first_input(conn, spec["plan_id"], act)
     return launch.spawn(spec["plan"], lane_name, Path(spec["cwd"]), first)
 
@@ -106,8 +109,7 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | No
 @durable.step
 def complete(spec: dict[str, Any]) -> bool:
     """計画を完了にする耐久ステップ（書けたら真）。"""
-    url, root = _spec_where(spec)
-    with store.open_store(url, root) as st, store.transaction(st) as conn:
+    with _conn(spec) as conn:
         return table.complete_plan(conn, spec["plan_id"])
 
 
