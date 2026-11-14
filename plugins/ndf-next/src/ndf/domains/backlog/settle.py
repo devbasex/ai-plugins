@@ -1,0 +1,128 @@
+"""解消する Issue を、閉じる証拠を GitHub で確かめてから閉じる（`ndf issues settle`。#3395 の「閉じる操作」・IY5）。
+
+解消する Issue を閉じるのはこの操作だけで、子の PR の closing keywords では閉じない。確かめられない行は閉じずに
+理由を返し、結果を `stopped`（種類 `refused`）にする。閉じるときは証拠をコメントに書いてから閉じる。
+"""
+
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import quote
+
+from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, text_of
+from ndf.contracts import limits
+from ndf.domains.backlog import issues_gh
+from ndf.domains.backlog import settle_decide as sd
+from ndf.domains.backlog.settle_decide import IMPROVED, REMOVED, Row
+
+
+def default_branch(gh: GitHub) -> str:
+    return text_of(gh.rest("GET", f"/repos/{gh.repo}")["default_branch"])
+
+
+def file_text(gh: GitHub, path: str, ref: str) -> Optional[str]:
+    """基底のブランチ `ref` のファイルの中身。無ければ（HTTP 404）None。"""
+    try:
+        raw = gh.rest("GET", f"/repos/{gh.repo}/contents/{quote(path)}", params={"ref": ref})
+    except GitHubError as exc:
+        if exc.status != issues_gh.NOT_FOUND:
+            raise
+        return None
+    if not isinstance(raw, dict) or raw.get("encoding") != "base64":
+        return ""
+    return base64.b64decode(text_of(raw["content"])).decode("utf-8", errors="replace")
+
+
+def pull_files(gh: GitHub, pr: int) -> dict[str, str]:
+    """PR の変更ファイル → 差分（`github.list-pages` ページまで）。"""
+    pages = int(limits.value("github.list-pages", "count"))
+    out: dict[str, str] = {}
+    for page in range(1, pages + 1):
+        body = gh.rest("GET", f"/repos/{gh.repo}/pulls/{int(pr)}/files", params={"per_page": PER_PAGE, "page": page})
+        out.update({text_of(f["filename"]): text_of(f.get("patch")) for f in body})
+        if len(body) < PER_PAGE:
+            return out
+    raise GitHubError(f"PR #{pr} の変更ファイルが {pages} ページを超えた（github.list-pages）")
+
+
+def _merged_pull(gh: GitHub, pr: int) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    try:
+        raw = gh.rest("GET", f"/repos/{gh.repo}/pulls/{int(pr)}")
+    except GitHubError as exc:
+        if exc.status != issues_gh.NOT_FOUND:
+            raise
+        return None, f"PR #{pr} が無い"
+    if not raw["merged"]:
+        return None, f"PR #{pr} がマージされていない"
+    return raw, None
+
+
+def check_improved(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
+    """改善の証拠を確かめる。確かめられなければ理由。"""
+    path, func = sd.test_target(ev["test"])
+    _, why = _merged_pull(gh, ev["pr"])
+    if why is not None:
+        return why
+    files = pull_files(gh, ev["pr"])
+    if path not in files:
+        return f"PR #{ev['pr']} の変更ファイルにテストのファイル {path} が無い"
+    if not sd.adds_def(files[path], func):
+        return f"PR #{ev['pr']} の差分がテストの関数 {func} の定義を足していない"
+    text = file_text(gh, path, base)
+    if text is None or not sd.defines(text, func):
+        return f"基底のブランチ {base} の {path} にテストの関数 {func} が無い"
+    return None
+
+
+def check_removed(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
+    try:
+        gh.rest("GET", f"/repos/{gh.repo}/commits/{quote(ev['commit'])}")
+    except GitHubError as exc:
+        if exc.status not in (issues_gh.NOT_FOUND, 422):
+            raise
+        return f"コミット {ev['commit']} が無い"
+    if file_text(gh, ev["path"], base) is not None:
+        return f"基底のブランチ {base} に {ev['path']} がまだある"
+    return None
+
+
+def check_not_reproduced(gh: GitHub, ev: dict[str, Any], cwd: Path) -> Optional[str]:
+    record = Path(ev["record"]) if Path(ev["record"]).is_absolute() else cwd / ev["record"]
+    if not record.is_file():
+        return f"再現の記録 {ev['record']} が無い"
+    raw, why = _merged_pull(gh, ev["after_pr"])
+    if why is not None:
+        return why
+    merged_at = sd.parse_time(text_of(raw["merged_at"]))
+    at = sd.parse_time(ev["at"])
+    if merged_at is None or at is None or at <= merged_at:
+        return f"再現の日時 {ev['at']} が PR #{ev['after_pr']} のマージ（{raw['merged_at']}）の後でない"
+    return None
+
+
+def check(gh: GitHub, row: Row, base: str, cwd: Path) -> Optional[str]:
+    if row.kind == IMPROVED:
+        return check_improved(gh, row.evidence, base)
+    if row.kind == REMOVED:
+        return check_removed(gh, row.evidence, base)
+    return check_not_reproduced(gh, row.evidence, cwd)
+
+
+def settle(gh: GitHub, rows: list[Row], base: str, cwd: Path, dry_run: bool) -> list[dict[str, Any]]:
+    """行ごとに証拠を確かめ、確かめられた open の Issue を閉じる。行ごとの結果（`result` と理由）を返す。"""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = {"kind": "issue", "name": f"#{row.issue}", "issue": row.issue, "child": row.child, "evidence": row.kind}
+        if issues_gh.issue_state(gh, row.issue) == "closed":
+            out.append({**item, "result": "already_closed"})
+            continue
+        why = check(gh, row, base, cwd)
+        if why is not None:
+            out.append({**item, "result": "unverified", "reason": why})
+            continue
+        if not dry_run:
+            issues_gh.close_with_comment(gh, row.issue, sd.comment(row))
+        out.append({**item, "result": "verified" if dry_run else "closed"})
+    return out
