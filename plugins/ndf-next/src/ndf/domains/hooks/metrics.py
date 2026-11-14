@@ -41,7 +41,7 @@ def state_dir_or_none() -> Optional[Path]:
 
 
 def metrics_dir(state_dir: Path) -> Path:
-    return state_dir / "hooks"
+    return tables.hooks_dir(state_dir)
 
 
 def _day_file(state_dir: Path, now: datetime) -> Path:

@@ -132,7 +132,7 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, record: dic
     with Counter.open(ctx.session_id, state_dir) as counter:
         outcome = dispatch.run(ctx, dispatch.select(dispatch.load_specs(), ctx, off), found, counter, state_dir)
         record["pushbacks"] = counter.data["pushbacks"] if counter.usable else None
-    _, out = dispatch.render(outcome, runtime, event, found, state_dir / "hooks" / "notes")
+    _, out = dispatch.render(outcome, runtime, event, found, tables.hooks_dir(state_dir) / "notes")
     if outcome.limited:
         _notify_wait(state_dir, ctx, outcome.notes.get("limited_reason"))
     _record_outcome(record, outcome)

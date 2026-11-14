@@ -41,6 +41,11 @@ def json_object(text: str) -> Optional[dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def hooks_dir(state_dir: Path) -> Path:
+    """状態の置き場の下の hook の置き場（計測・送信待ち・セッションの数え手・注入の控え）。"""
+    return state_dir / "hooks"
+
+
 def policies() -> dict[str, dict[str, Any]]:
     """上限の宣言の方針の表（名前 → 値）。"""
     return load("limits.json")["policies"]

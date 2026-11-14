@@ -28,7 +28,7 @@ def notify_configured(env: Mapping[str, str]) -> bool:
 
 
 def outbox_dir(state_dir: Path) -> Path:
-    return state_dir / "hooks" / "outbox"
+    return tables.hooks_dir(state_dir) / "outbox"
 
 
 def enqueue(state_dir: Path, kind: str, payload: dict[str, Any]) -> Path:

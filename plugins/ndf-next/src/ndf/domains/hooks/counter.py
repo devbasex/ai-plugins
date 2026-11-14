@@ -49,7 +49,7 @@ class Counter:
         """セッションの数え手を開く。識別子が形に合わない・排他を取れないときは数えない数え手を返す。"""
         if not isinstance(session_id, str) or not SESSION_RE.match(session_id):
             return cls.unusable()
-        path = state_dir / "hooks" / "sessions" / f"{session_id}.json"
+        path = tables.hooks_dir(state_dir) / "sessions" / f"{session_id}.json"
         limit = tables.policy_value("hook.counter-lock", "seconds") if wait is None else wait
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
