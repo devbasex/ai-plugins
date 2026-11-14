@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import fcntl
 import io
 import json
+import os
 import subprocess
 
 import pytest
 
 from ndf import cli as top
 from ndf import identity
-from ndf.domains.relay import accounts, cli, marks, pending
+from ndf.contracts import causes
+from ndf.domains.relay import accounts, cli, marks, pending, registry
 
 
 def _last(capsys) -> dict:
@@ -100,3 +103,75 @@ def test_pending_reads_the_plan_command_result(tmp_path):
 def test_pending_reports_why_the_list_could_not_be_read(tmp_path, runner):
     got = pending.read(tmp_path, 5, runner=runner)
     assert got.runs is None and got.note
+
+
+# 現状固定（I-018）: install・uninstall・status の結果 JSON（要約・項目・警告）と、--replace-old の断り
+@pytest.fixture
+def places(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "bin"))
+    monkeypatch.setenv("NDF_STATE_HOME", str(tmp_path / "old"))
+    return tmp_path / "claude" / "ndf" / "relay.py", tmp_path / "bin" / "ndf-relay"
+
+
+def _expect(copy, entry, states, warnings=None) -> dict:
+    out = {
+        "tool": "relay",
+        "status": "ok",
+        "summary": f"複製: {states[0]}（{copy}）・エントリポイント: {states[1]}（{entry}）",
+        "items": [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}],
+        "metrics": {},
+    }
+    if warnings:
+        out["warnings"] = warnings
+    return out
+
+
+def test_install_status_uninstall_report_both_places(places, monkeypatch, capsys):
+    copy, entry = places
+    base = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", base)
+    assert cli.main(["status"]) == 0
+    hint = f'{entry.parent} が PATH に無い。export PATH="{entry.parent}:$PATH" を足す'
+    assert _last(capsys) == _expect(copy, entry, ("absent", "absent"), [hint])
+    monkeypatch.setenv("PATH", f"{entry.parent}{os.pathsep}{base}")
+    assert cli.main(["install"]) == 0
+    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
+    assert cli.main(["status"]) == 0
+    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
+    assert cli.main(["uninstall"]) == 0
+    assert _last(capsys) == _expect(copy, entry, ("absent", "absent"))
+    assert not copy.exists() and not entry.exists()
+
+
+def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(places, tmp_path, monkeypatch, capsys):
+    copy, entry = places
+    monkeypatch.setenv("PATH", str(entry.parent))
+    copy.parent.mkdir(parents=True)
+    copy.write_text("old\n", encoding="utf-8")
+    assert cli.main(["install"]) == 0
+    warn = "旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える"
+    assert _last(capsys) == _expect(copy, entry, ("foreign", "ours"), [warn])
+    old = tmp_path / "old" / "relay" / "20261113T1"
+    old.mkdir(parents=True)
+    fd = os.open(old / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        assert cli.main(["install", "--replace-old"]) == causes.exit_code("precondition")
+        why = "旧い NDF のラッパーが動いている: 20261113T1。止めてから置き換える"
+        assert _last(capsys) == {
+            "tool": "relay",
+            "status": "stopped",
+            "summary": why,
+            "items": [],
+            "metrics": {},
+            "cause": {"kind": "precondition", "detail": why},
+        }
+        assert copy.read_text(encoding="utf-8") == "old\n"
+        # --replace-old を付けなければ、旧いラッパーが動いていても断らずに旧い複製を残す
+        assert cli.main(["install"]) == 0
+        assert _last(capsys)["items"][0]["state"] == "foreign"
+    finally:
+        os.close(fd)
+    assert cli.main(["install", "--replace-old"]) == 0
+    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
