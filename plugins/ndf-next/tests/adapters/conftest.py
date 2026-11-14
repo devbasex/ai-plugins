@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -30,3 +32,19 @@ def _launch_allowed(monkeypatch):
 
     training.save([training.Reading(rt, False, "テストの前提") for rt in training.checked()], time.time())
     monkeypatch.setenv(slots.HELD_ENV, "テストの前提")
+
+
+@pytest.fixture
+def marker_launch(tmp_path):
+    """起動されたら印のファイルを作る起動を組む関数。`marker_launch(agent)` が (印のパス, claude の argv, run_agent の Launch)。
+
+    起動しなかったことは `assert not marker.exists()` で確かめる。
+    """
+    from ndf.adapters import agents
+
+    def build(agent: str) -> tuple[Path, list[str], agents.Launch]:
+        marker = tmp_path / "ran"
+        argv = [sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+        return marker, argv, agents.Launch(agent, tuple(argv), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30)
+
+    return build

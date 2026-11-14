@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -82,14 +81,12 @@ def test_broken_slot_setting_stops(pool, tmp_path):
         pytest.fail("設定が読めないのに起動した")
 
 
-def test_call_claude_and_run_agent_stop_without_slot(pool, tmp_path, monkeypatch):
+def test_call_claude_and_run_agent_stop_without_slot(pool, marker_launch, monkeypatch):
     monkeypatch.setattr(launch_slot.machine, "available_mib", lambda: PLENTY_MIB)
-    marker = tmp_path / "ran"
-    script = f"open({str(marker)!r}, 'w')"
+    marker, argv, spec = marker_launch("kiro")
     taken = fill(pool)
     try:
-        reply = claude.call_claude([sys.executable, "-c", script], "q", 30)
-        spec = agents.Launch("kiro", (sys.executable, "-c", script), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30)
+        reply = claude.call_claude(argv, "q", 30)
         status = agents.run_agent(spec, poll=0.05)
     finally:
         taken.release()

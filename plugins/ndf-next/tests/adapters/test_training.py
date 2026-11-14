@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -185,22 +184,19 @@ def test_unsupported_runtimes_launch_without_cache(runtime):
     assert training.refusal(runtime, NOW) is None
 
 
-def test_call_claude_refuses_before_launch_without_cache(tmp_path):
+def test_call_claude_refuses_before_launch_without_cache(marker_launch):
     training.cache_path().unlink()
-    marker = tmp_path / "ran"
+    marker, argv, _ = marker_launch("claude")
 
-    got = claude.call_claude([sys.executable, "-c", f"open({str(marker)!r}, 'w')"], "q", 30)
+    got = claude.call_claude(argv, "q", 30)
 
     assert got.failure is claude.Failure.REFUSED and training.CHECK_COMMAND in got.error
     assert not marker.exists()
 
 
-def test_run_agent_refuses_codex_without_cache(tmp_path):
+def test_run_agent_refuses_codex_without_cache(marker_launch):
     training.cache_path().unlink()
-    marker = tmp_path / "ran"
-    spec = agents.Launch(
-        "codex", (sys.executable, "-c", f"open({str(marker)!r}, 'w')"), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30
-    )
+    marker, _, spec = marker_launch("codex")
 
     status = agents.run_agent(spec, poll=0.05)
 
