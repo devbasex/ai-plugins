@@ -33,6 +33,7 @@ class FakeHub:
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
+    commits_of: dict[int, list[dict]] = field(default_factory=dict)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -60,6 +61,9 @@ class FakeHub:
 
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
+
+    def pull_commits(self, number: int) -> list[dict]:
+        return list(self.commits_of.get(number, []))
 
     def check_runs(self, sha: str) -> list[dict]:
         return list(self.runs)
