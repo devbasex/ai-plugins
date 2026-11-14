@@ -32,6 +32,13 @@ def _collect(errs: list[str], fn: Callable[[], Any]) -> Any:
         return None
 
 
+def _collect_errors(errs: list[str], fn: Callable[[], list[str]]) -> None:
+    """誤りの一覧を返す `fn` を `_collect` で呼び、返った誤りを `errs` へ足す。"""
+    found = _collect(errs, fn)
+    if found is not None:
+        errs += found
+
+
 def check_all() -> list[str]:
     """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ・契約の版）の誤りを並べる。空なら通る。"""
     errs: list[str] = []
@@ -40,13 +47,9 @@ def check_all() -> list[str]:
     policies = _collect(errs, limits.table)
     policy_names = set(policies) if policies is not None else None
     for name in facts.names():
-        refs = _collect(errs, lambda name=name: facts.ref_errors(name, policy_names))
-        if refs is not None:
-            errs += refs
+        _collect_errors(errs, lambda name=name: facts.ref_errors(name, policy_names))
     if _collect(errs, causes.table) is not None:
-        found = _collect(errs, version.errors)
-        if found is not None:
-            errs += found
+        _collect_errors(errs, version.errors)
     return errs
 
 
