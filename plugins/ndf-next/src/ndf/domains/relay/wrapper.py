@@ -54,6 +54,17 @@ class Settings:
     transcript_bytes: int
 
 
+@dataclass(frozen=True)
+class Launch:
+    """区間を始める要求。`resume` が真なら `--resume` で同じ会話を続け、偽なら `--session-id` で新しく始める。"""
+
+    number: int
+    session_id: str
+    account: Optional[str]
+    prompt: str
+    resume: bool
+
+
 @dataclass
 class Section:
     """今の区間。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。"""
@@ -129,7 +140,7 @@ class Wrapper:
             return self._loop(prompt)
 
     def _loop(self, prompt: str) -> Ended:
-        self._start(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False)
+        self._start(Launch(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False))
         while True:
             self._pump(self.s.tick)
             try:
@@ -187,11 +198,11 @@ class Wrapper:
         if step.kind == "switch":
             account = self._account_for_next(sec.account)
             signals.drop(self.dir, signals.NEXT_FILE)
-            self._replace(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False)
+            self._replace(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
             return None
         if step.kind in ("account", "restart"):
             self._count_start()
-            self._replace(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True)
+            self._replace(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
             return None
         if step.kind == "handover":
             self._send(step.prompt)
@@ -213,20 +224,21 @@ class Wrapper:
             self._log({"kind": "account", "reason": pick.reason})
         return pick.account
 
-    def _start(self, number: int, session_id: str, account: Optional[str], prompt: str, resume: bool) -> None:
-        env = {**session_env.child_env(self.s.environ, self.s.state_dir, account), **signals.dir_env(self.dir)}
-        head = ["--resume", session_id] if resume else ["--session-id", session_id]
-        argv = [CLAUDE, *head, *self.s.args, *([prompt] if prompt else [])]
-        if prompt:
-            marks.mark(self.s.state_dir, session_id)
+    def _start(self, req: Launch) -> None:
+        env = {**session_env.child_env(self.s.environ, self.s.state_dir, req.account), **signals.dir_env(self.dir)}
+        head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
+        argv = [CLAUDE, *head, *self.s.args, *([req.prompt] if req.prompt else [])]
+        if req.prompt:
+            marks.mark(self.s.state_dir, req.session_id)
         child = self.spawn(argv, env, self.s.cwd)
-        self.section = Section(number, session_id, account, child, last_output=self.clock())
-        self._write_state("running", f"区間 {number} を始めた")
-        self._log({"kind": "section", "section": number, "session_id": session_id, "account": account, "resume": resume})
+        self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
+        self._write_state("running", f"区間 {req.number} を始めた")
+        log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": req.account, "resume": req.resume}
+        self._log(log)
 
-    def _replace(self, number: int, session_id: str, account: Optional[str], prompt: str, resume: bool) -> None:
+    def _replace(self, req: Launch) -> None:
         self._stop_child()
-        self._start(number, session_id, account, prompt, resume)
+        self._start(req)
 
     def _stop_child(self) -> None:
         sec = self.section
