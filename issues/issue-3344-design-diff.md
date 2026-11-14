@@ -28,7 +28,7 @@
 
 | 直した文書 | 直した所 |
 | --- | --- |
-| [issue-1142-design-next.md](issue-1142-design-next.md) | 人へ残す判断 (f)・(g)・集約・不変条件 I5〜I10・イベント EN2・EN3・用語・外部の調査・節「DBOS の記録と進行表の置き場（#3344）」（受け入れ条件との対応表）・決定 77 の帯・決定 81〜87・テスト設計・未確認のまま残ること |
+| [issue-1142-design-next.md](issue-1142-design-next.md) | 人へ残す判断 (f)・(g)・集約・不変条件 I5〜I12・イベント EN2・EN3・用語・外部の調査・節「DBOS の記録と進行表の置き場（#3344）」（受け入れ条件との対応表）・決定 77 の帯・決定 81〜87・テスト設計・未確認のまま残ること |
 | [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) | 子 C1+・ファイル配置・関数の構造と仕様・異常系・定数・並行と排他・ログ・単体テストの観点・節「#3344 で子へ足す受け入れ条件」 |
 | [issue-1142-design-dbos.md](issue-1142-design-dbos.md) | 決定 26・決定 28 の帯、I17 の引き継ぎ先 |
 
