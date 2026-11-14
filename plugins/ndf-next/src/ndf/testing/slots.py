@@ -224,14 +224,12 @@ def _owner(started_at: float | None, cwd: Path) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class SlotContext:
-    """1 本の実行が枠を取るときに使う値の組（置き場・作業場所・上限・確かめる間隔・メモリの読み取り）。"""
+    """1 本の実行が枠を取るときに使う値の組（置き場・作業場所・上限・`gate` の周りの値）。"""
 
     directory: Path
     cwd: Path
     limits: limits_mod.Limits
-    poll: float
-    read_memory: ReadMemory
-    interrupted: Callable[[], bool] = lambda: False
+    options: GateOptions
 
 
 @dataclass(frozen=True)
@@ -283,7 +281,7 @@ def gate(
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
         yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
         return
-    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind)
+    yield from _held(SlotContext(directory, cwd, limits, options), kind)
 
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
@@ -314,16 +312,16 @@ def _acquire(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
     taken: slot_pool.Taken | None = None
     try:
         while True:
-            if ctx.interrupted():
+            if ctx.options.interrupted():
                 raise KeyboardInterrupt  # シグナルを受けた（受けたのが待ちに入る前でも、ここで抜ける）
             if taken is None:
                 taken = _take_free_slot(ctx, held)
-            if taken is not None and _memory_ready(held, ctx.read_memory, ctx.limits.memory_floor_mib):
+            if taken is not None and _memory_ready(held, ctx.options.read_memory, ctx.limits.memory_floor_mib):
                 return taken
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            time.sleep(min(ctx.poll, remaining))
+            time.sleep(min(ctx.options.poll, remaining))
         if taken is not None:
             taken.release()
         return None
@@ -383,7 +381,7 @@ def _take_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
 def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
     directory, cwd = ctx.directory, ctx.cwd
     held = Held()
-    monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
+    monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory)
     held._monitor = monitor
     try:
         taken = _take_slot(ctx, held)
@@ -407,7 +405,7 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
         if held.memory_stopped:
             result = MEMORY_STOPPED
         else:
-            held.available_mib = ctx.read_memory()
+            held.available_mib = ctx.options.read_memory()
         taken.release()
         _record(directory, cwd, kind, held, result)
     if result == MEMORY_STOPPED:
