@@ -20,26 +20,21 @@
 
 ```text
 plugins/
-├── ndf/skills/
-│   ├── cherry-pick-pr/SKILL.md   手順 3・5・6、核心ルールの表、「なぜ必要か」
-│   ├── ndf-policies/SKILL.md     ブランチ運用の原則 3
-│   └── deploy/SKILL.md           「cherry-pick-pr との使い分け」の表の 1 セル
 └── ndf-next/skills/
-    ├── cherry-pick-pr/SKILL.md   同じ直し（手順 4 の止まり方は残す）
-    ├── ndf-policies/SKILL.md     同じ直し
-    └── deploy/SKILL.md           同じ直し
+    ├── cherry-pick-pr/SKILL.md   手順 3・5・6、核心ルールの表、「なぜ必要か」（手順 4 の止まり方は残す）
+    ├── ndf-policies/SKILL.md     ブランチ運用の原則 3
+    └── deploy/SKILL.md           「cherry-pick-pr との使い分け」の表の 1 セル
 ```
+
+今の `plugins/ndf/skills/` の同じ 3 つの Skill は変えない（設計文書の決定 7）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `plugins/ndf/skills/cherry-pick-pr/SKILL.md` | 変更 | 選んだコミットだけを環境ブランチ宛の Pull Request にする手順を持つ | `plugins/ndf/skills/ndf-policies/SKILL.md`（原則の番号と見出しを指す） |
-| `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | 変更 | 作り直しの側の同じ手順を持つ | `plugins/ndf-next/skills/ndf-policies/SKILL.md` |
-| `plugins/ndf/skills/ndf-policies/SKILL.md` | 変更 | ブランチ運用の原則の正本を持つ | 無し（実行手順として `cherry-pick-pr` を名指すだけ） |
-| `plugins/ndf-next/skills/ndf-policies/SKILL.md` | 変更 | 作り直しの側の同じ原則を持つ | 無し |
-| `plugins/ndf/skills/deploy/SKILL.md` | 変更 | ブランチ全体を環境へ届ける手順と、cherry-pick-pr との使い分けの表を持つ | `plugins/ndf/skills/cherry-pick-pr/SKILL.md`（表の cherry-pick-pr の列が手順を写す） |
-| `plugins/ndf-next/skills/deploy/SKILL.md` | 変更 | 作り直しの側の同じ手順と表を持つ | `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` |
+| `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | 変更 | 選んだコミットだけを環境ブランチ宛の Pull Request にする手順を持つ | `plugins/ndf-next/skills/ndf-policies/SKILL.md`（原則の番号と見出しを指す） |
+| `plugins/ndf-next/skills/ndf-policies/SKILL.md` | 変更 | ブランチ運用の原則の正本を持つ | 無し（実行手順として `cherry-pick-pr` を名指すだけ） |
+| `plugins/ndf-next/skills/deploy/SKILL.md` | 変更 | ブランチ全体を環境へ届ける手順と、cherry-pick-pr との使い分けの表を持つ | `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md`（表の cherry-pick-pr の列が手順を写す） |
 
-依存の向きは「`deploy` の表 → `cherry-pick-pr` → `ndf-policies`」の一方向である。`ndf-policies` は `cherry-pick-pr` を実行手順の置き場として名指すだけで、その中身を読まない。`plugins/ndf/` と `plugins/ndf-next/` の間に参照は無く、同じ直しをそれぞれに持つ（設計文書の I8）。
+依存の向きは「`deploy` の表 → `cherry-pick-pr` → `ndf-policies`」の一方向である。`ndf-policies` は `cherry-pick-pr` を実行手順の置き場として名指すだけで、その中身を読まない。直しは `plugins/ndf-next/` の側だけが持ち、`plugins/ndf/` は変えない（設計文書の I8）。
 
 ## クラスと関数の構造
 
@@ -47,9 +42,9 @@ plugins/
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
-| `plugins/ndf/skills/cherry-pick-pr/SKILL.md` と `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | cherry-pick-pr の Skill | 変更: `手順3 コミット一覧の確認`・`手順5 cherry-pick 実行`・`手順6 宛先の最新の取り込み`・核心ルールの表の 2 行・「なぜ必要か」の 1 文。変えない: 手順 1・2・4・7・8 |
-| `plugins/ndf/skills/ndf-policies/SKILL.md` と `plugins/ndf-next/skills/ndf-policies/SKILL.md` | ndf-policies の Skill | 変更: ブランチ運用の原則 3 の文。変えない: 原則 1・2・4・5 |
-| `plugins/ndf/skills/deploy/SKILL.md` と `plugins/ndf-next/skills/deploy/SKILL.md` | deploy の Skill | 変更: 使い分けの表の「ベースブランチの取り込み」の行の cherry-pick-pr の列。変えない: deploy の列・処理フロー |
+| `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | cherry-pick-pr の Skill | 変更: `手順3 コミット一覧の確認`・`手順5 cherry-pick 実行`・`手順6 宛先の最新の取り込み`・核心ルールの表の 2 行・「なぜ必要か」の 1 文。変えない: 手順 1・2・4・7・8 |
+| `plugins/ndf-next/skills/ndf-policies/SKILL.md` | ndf-policies の Skill | 変更: ブランチ運用の原則 3 の文。変えない: 原則 1・2・4・5 |
+| `plugins/ndf-next/skills/deploy/SKILL.md` | deploy の Skill | 変更: 使い分けの表の「ベースブランチの取り込み」の行の cherry-pick-pr の列。変えない: deploy の列・処理フロー |
 
 文書の行の書き直しは次のとおり（関数の仕様の表には載せない。実行されない文のため）。
 
@@ -69,11 +64,11 @@ deploy の列のセルは、行の見出しを「取り込むもの」へ変え�
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `手順3 コミット一覧の確認` | `plugins/ndf/skills/cherry-pick-pr/SKILL.md` | 変更 | 入力: `$dev_base`・`<base-branch>`・HEAD。出力: 選んだコミットの列（古い順） | 届けるコミットを候補から利用者に選ばせる | 手順 1 が `$dev_base` を決め、手順 2 がブランチ名を決めた | 選んだコミットが 1 件以上決まっている。0 件なら手順 4 へ進んでいない（I6） | `git fetch`（ネットワーク）。利用者への問い |
-| `手順5 cherry-pick 実行` | `plugins/ndf/skills/cherry-pick-pr/SKILL.md` | 変更 | 入力: 選んだコミットの列（古い順）。出力: 短命ブランチのコミット・飛ばしたコミットの列 | 選んだコミットを 1 件ずつ `-x` 付きで当て、空になったものを飛ばす | 手順 4 で短命ブランチへ切り替わっている。worktreeに未コミットの変更が無い | 短命ブランチが環境ブランチの先端に足すコミットは、選んで空にならなかったコミットの cherry-pick だけで（I9）、それぞれに `-x` の行がある（I3）。空のコミットは無く（I4）、飛ばしたものは列に載る（I10） | worktreeと短命ブランチの書き換え。利用者への衝突の報告 |
-| `手順6 宛先の最新の取り込み` | `plugins/ndf/skills/cherry-pick-pr/SKILL.md` | 新設 | 入力: `<base-branch>`・短命ブランチ・飛ばしたコミットの列。出力: 足すコミットの件数・飛ばしたコミットの列（rebase で落ちたものを足したもの） | push の直前に宛先の最新を取得し、短命ブランチをその先端へ rebase する | 手順 5 が終わり、cherry-pick の途中の状態が無い | 成功したとき、短命ブランチは取得した環境ブランチの先端を子孫に持ち（I2）、merge のコミットを持たない（I1）。rebase で落ちた元のハッシュが列に足されている（I10）。足すコミットが 0 件なら手順 7 へ進んでいない（I5）。衝突したら rebase を中止して手順 8 へ進んでいる | `git fetch`（ネットワーク）。短命ブランチの書き換え（push 前のローカルの履歴だけ） |
+| `手順3 コミット一覧の確認` | `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | 変更 | 入力: `$dev_base`・`<base-branch>`・HEAD。出力: 選んだコミットの列（古い順） | 届けるコミットを候補から利用者に選ばせる | 手順 1 が `$dev_base` を決め、手順 2 がブランチ名を決めた | 選んだコミットが 1 件以上決まっている。0 件なら手順 4 へ進んでいない（I6） | `git fetch`（ネットワーク）。利用者への問い |
+| `手順5 cherry-pick 実行` | `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | 変更 | 入力: 選んだコミットの列（古い順）。出力: 短命ブランチのコミット・飛ばしたコミットの列 | 選んだコミットを 1 件ずつ `-x` 付きで当て、空になったものを飛ばす | 手順 4 で短命ブランチへ切り替わっている。worktreeに未コミットの変更が無い | 短命ブランチが環境ブランチの先端に足すコミットは、選んで空にならなかったコミットの cherry-pick だけで（I9）、それぞれに `-x` の行がある（I3）。空のコミットは無く（I4）、飛ばしたものは列に載る（I10） | worktreeと短命ブランチの書き換え。利用者への衝突の報告 |
+| `手順6 宛先の最新の取り込み` | `plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` | 新設 | 入力: `<base-branch>`・短命ブランチ・飛ばしたコミットの列。出力: 足すコミットの件数・飛ばしたコミットの列（rebase で落ちたものを足したもの） | push の直前に宛先の最新を取得し、短命ブランチをその先端へ rebase する | 手順 5 が終わり、cherry-pick の途中の状態が無い | 成功したとき、短命ブランチは取得した環境ブランチの先端を子孫に持ち（I2）、merge のコミットを持たない（I1）。rebase で落ちた元のハッシュが列に足されている（I10）。足すコミットが 0 件なら手順 7 へ進んでいない（I5）。衝突したら rebase を中止して手順 8 へ進んでいる | `git fetch`（ネットワーク）。短命ブランチの書き換え（push 前のローカルの履歴だけ） |
 
-`plugins/ndf-next/skills/cherry-pick-pr/SKILL.md` の 3 つの手順は、上の表と同じ仕様を持つ。置き場の列には `plugins/ndf/` の側だけを書いた。手順の番号は設計文書の決定 6 のとおりで、今の手順 6（cherry-pick）が手順 5 へ移り、今の手順 5（ベースブランチの取り込み）が消えて、手順 6 に宛先の最新の取り込みが入る。
+置き場は `plugins/ndf-next/` の側だけで、`plugins/ndf/skills/cherry-pick-pr/SKILL.md` は変えない。手順の番号は設計文書の決定 6 のとおりで、今の手順 6（cherry-pick）が手順 5 へ移り、今の手順 5（ベースブランチの取り込み）が消えて、手順 6 に宛先の最新の取り込みが入る。
 
 ## 異常系の処理
 
