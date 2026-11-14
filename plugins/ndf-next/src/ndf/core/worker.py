@@ -61,8 +61,7 @@ TOOL = cli.tool_of(__name__)
 # 結果ファイルを書かずに応答を終えた worker を、同じ会話で起こし直す回数の上限
 RESUMES = 3
 RESUME_PROMPT = (
-    "結果ファイルがまだ書かれていない。背景で起動したコマンドがあれば前景で終わりまで待ち、"
-    "作業を終えてから結果ファイルを書いて応答を終える"
+    "結果ファイルがまだ書かれていない。背景で起動したコマンドがあれば前景で終わりまで待ち、作業を終えてから結果ファイルを書いて応答を終える"
 )
 # worker の起動 1 回の期限の既定（秒）
 WORK_TIMEOUT = 3600.0
@@ -425,8 +424,13 @@ def _load_sources(path: Optional[str]) -> list[Source]:
 def _cmd_run(a: argparse.Namespace) -> int:
     root = identity.load().root
     handoff = Handoff(
-        a.kind, _read_input(a.prompt_file, "作業の本文"), Path(a.result_file), Path(a.cwd), Path(a.state_dir),
-        tuple(_load_sources(a.sources)), a.timeout,
+        a.kind,
+        _read_input(a.prompt_file, "作業の本文"),
+        Path(a.result_file),
+        Path(a.cwd),
+        Path(a.state_dir),
+        tuple(_load_sources(a.sources)),
+        a.timeout,
     )
     system = system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources)
     done = delegate(handoff, system, root=root)
