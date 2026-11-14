@@ -7301,7 +7301,7 @@
     {
       "term": "目的の物差し",
       "context": "ndf-workflow",
-      "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。行き先を選んだ主体の事象で数える",
+      "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則",
       "pending_source": "issues/issue-3395-requirements.md"
     },
     {

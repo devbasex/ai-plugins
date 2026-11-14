@@ -37,6 +37,7 @@
 | `src/ndf/checks/smells.py`（X1+。変更） | `checks.smells` | `duplicate_bodies`（新設。規則 NDF601）・`scan`（変更: 規則 NDF602 の呼び出しの一覧を見る） |
 | `src/ndf/checks/rules.json`（X1+。変更） | 規則のデータ | `smells` に NDF601・NDF602（種類 6）を足す |
 | `src/ndf/checks/children.json`（X1+。変更） | 子の表のコピー | 子の行の `superseded_by`、`review_items` を足す |
+| `.github/workflows/ndf-next.yml`（リポジトリの根。X1+。変更） | CI の定義 | `on.pull_request.paths` と `on.push.paths` に正本の表 `issues/issue-1142-design-review-routing.md` を足す。`on.schedule` に週 1 回（`cron: "0 0 * * 1"`）を足す。`permissions` に `issues: read` を足す。検査のジョブに `bin/ndf check review-items` を打つ手順を足し、`GH_TOKEN` に `github.token` を渡す（`bin/ndf check` は副命令 `review-items` を通らないため、別の手順にする）。`schedule` の実行では、この手順だけを打つ |
 | `contracts/limits.json`（X1+・T1+。変更） | 上限の表 | `tests.function-budget`（X1+）・`tests.ci-seconds-budget`・`procs.stop-test`（T1+）を足す |
 | `contracts/schemas/route-chosen.schema.json`（D1+。新設） | 選択の記録の JSON Schema | — |
 | `src/ndf/process_group.py`（T1+。新設） | `process_group` | `stop_group`・`alive`（新設） |
@@ -60,10 +61,10 @@
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `review_items.extract` | `src/ndf/checks/review_items.py` | 新設 | `extract(number: int, body: str, quoted: bool) -> list[Item]` | 1 本の Issue の本文から項目を抜き出す | `body` は GitHub から読んだ本文そのまま | 返す並びは本文の上からの順で、`Item.key` は `<number>-<連番>`。連番は取り消し線の無いチェックボックスの行だけを数える。`quoted` が偽なら `## 進行` より前の引用でない行、真なら引用 `> ` の中の行を数える | 無し |
+| `review_items.extract` | `src/ndf/checks/review_items.py` | 新設 | `extract(number: int, body: str, quoted: bool) -> list[Item]` | 1 本の Issue の本文から項目を抜き出す | `body` は GitHub から読んだ本文そのまま | 返す並びは本文の上からの順で、`Item.key` は `<number>-<連番>`。連番は取り消し線の無いチェックボックスの行だけを数える。この鍵は本文の順の仮の鍵で、表の鍵は `generate` が `text_sha` の一致で決める（取り消し線を引くと後ろの仮の鍵は 1 つずつ前へずれる）。`quoted` が偽なら `## 進行` より前の引用でない行、真なら引用 `> ` の中の行を数える | 無し |
 | `review_items.text_sha` | 同上 | 新設 | `text_sha(line: str) -> str` | 項目の同一性の値を作る | — | チェックボックスの記号（`- [ ] `・`- [x] `）と行頭の空白・引用の印を除いた文の UTF-8 の sha256 の 16 進の先頭 12 文字を返す | 無し |
-| `review_items.read_table` | 同上 | 新設 | `read_table(text: str) -> dict[str, TableRow]` | 正本の表の文書から行き先の表の行を読む | `text` は正本の表の文書の本文 | 節「行き先の表」の行ごとに、鍵が項目の番号、値が 6 列（要旨・行き先・順番・新設か追補か・要求の行）の `TableRow`。行き先は `・` で分けた並び、`済み（PR <番号>）` は `済み` に寄せる | 無し |
-| `review_items.generate` | 同上 | 新設 | `generate(rows: dict[str, TableRow], extracted: dict[int, list[Item]], previous: dict[str, dict] \| None) -> dict[str, dict]` | 正本の表と抜き出しから `review_items.items` を作る | `rows` の鍵がすべて `extracted` の項目にある（無ければ呼ぶ側が規則 1・2 の指摘にする） | 返す辞書の鍵は `rows` の鍵と同じ。`text_sha` は `previous` に同じ鍵があればその値、無ければ抜き出しの値。`to`・`order`・`kind`・`req` は表の列から作る（`順番` の `—` は `null`、要求の行の `無し` は `"none"`） | 無し |
+| `review_items.read_table` | 同上 | 新設 | `read_table(text: str) -> dict[str, TableRow]` | 正本の表の文書から行き先の表の行を読む | `text` は正本の表の文書の本文 | 節「行き先の表」の行ごとに、鍵が項目の番号、値が 6 列（要旨・行き先・順番・新設か追補か・要求の行）の `TableRow`。行き先は `・` で分けた並び、`済み（PR <番号>）` は `済み` に寄せる。順番は先頭の数を読み、直後の全角の括弧の注記（`2（比較の結論まで着手しない）`）は読み捨てる | 無し |
+| `review_items.generate` | 同上 | 新設 | `generate(rows: dict[str, TableRow], extracted: dict[int, list[Item]], previous: dict[str, dict] \| None) -> dict[str, dict]` | 正本の表と抜き出しから `review_items.items` を作る | `previous` の `text_sha` の値は互いに重ならない。`rows` の鍵は、下の手順で抜き出しの項目へ割り当てた鍵のどれかである（割り当てに無い鍵と、鍵の割り当たらない項目は、呼ぶ側が規則 1・2 の指摘にする） | 抜き出しの項目ごとに鍵を決める。`text_sha` が `previous` のどれかの値と一致すればその鍵を引き継ぎ、一致しなければ、同じ Issue で `previous` の鍵と既に振った鍵の連番の最大 + 1 を振る（`previous` が `None` なら `Item.key` をそのまま使う）。返す辞書の鍵は `rows` の鍵と同じで、`text_sha` は抜き出しの値。`to`・`order`・`kind`・`req` は表の列から作る（`順番` の `—` は `null`、要求の行の `無し` は `"none"`） | 無し |
 | `review_items.check` | 同上 | 新設 | `check(copy: dict, children: dict[str, dict], extracted: dict[int, list[Item]], rows: dict[str, TableRow]) -> list[Finding]` | 設計文書の規則 1〜6 を当てる | `copy` は `children.json` の `review_items`、`children` は同じファイルの `children` | 返す指摘は規則ごとに 1 項目 1 件で、`Finding.rule` は `review-items`、`detail` の先頭に規則の番号を置く。指摘が無ければ空 | 無し |
 | `review_items.main` | 同上 | 新設 | `main(argv: list[str]) -> int` | 副命令 `ndf check review-items [--write]` を動かす | `bin/ndf` から呼ばれる。GitHub のトークンが環境にある | `--write` が無ければ結果 JSON を 1 行出し、指摘があれば終了コード 1。`--write` があれば `children.json` の `review_items.items` を `generate` の結果で置き換えて書く | GitHub の GraphQL で `sources` の本文を読む。`--write` のとき `children.json` を書く |
 | `budget.count_tests` | `src/ndf/checks/budget.py` | 新設 | `count_tests(sources: list[Source]) -> int` | テストの関数の数を数える | `sources` は `tests/` の下の `.py` | `def test_`・`async def test_` で始まる関数の定義の数（入れ子の関数とクラスのメソッドを含む）。数え方は設計文書の「テストと CI の予算」の `grep` と同じ数になる | `Source.tree` がファイルを読む |
@@ -82,7 +83,7 @@
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `review_items.read_table` | 表の行の列が 6 でない・順番が数でも `—` でもない | 正本の表の書き損じ | 行を読むとき | 止める（`CheckError`） | 呼び出し元の `main` が `stopped`・止まった理由 `config_broken`、終了コード 2 | 書き込まない。表を直して打ち直す |
+| `review_items.read_table` | 表の行の列が 6 でない・順番が数（全角の括弧の注記を添えてよい）でも `—` でもない | 正本の表の書き損じ | 行を読むとき | 止める（`CheckError`） | 呼び出し元の `main` が `stopped`・止まった理由 `config_broken`、終了コード 2 | 書き込まない。表を直して打ち直す |
 | `review_items.main` | GitHub の本文を読めない | ネットワーク・API の上限・トークンが無い | `GitHub.nodes` の `GitHubError` | 止める（設計文書の「抜き出しは GitHub を読む」） | `stopped`・止まった理由 `infra_wait`、終了コード 75。トークンが無いときは `precondition`、終了コード 3 | 書き込まない。`infra_wait` は `limits.json` の `cause.infra-wait` の打ち直しに乗る |
 | `review_items.main` | `children.json` が読めない・`review_items` の鍵が欠ける | ファイルの書き損じ | 読み込みのとき | 止める | `stopped`・`config_broken`、終了コード 2 | 書き込まない |
 | `review_items.main` | `sources` の番号の Issue が無い | 番号の書き損じ・Issue の削除 | `GitHub.nodes` が空の辞書を返す | 規則 1 の指摘にせず止める（無い Issue の項目を「表に無い」と数えない） | `stopped`・`config_broken`、終了コード 2。`detail` に番号 | 書き込まない |
@@ -97,7 +98,7 @@
 | `pytest_sessionfinish` | 予算の鍵が無い | 鍵の書き損じ | `limits.seconds` | テストの結果を失敗にする | `session.exitstatus` を 1 にし、鍵の名前を 1 行出す | 鍵を直して打ち直す |
 | `settle.load_input` | 読めない・JSON でない・必須の鍵が欠ける・種類が知らない値 | 入力の書き損じ | 読み込みと形の確かめ | 止める（1 行も閉じない） | `stopped`・`invalid`、終了コード 2。`items` に行の位置と欠けた鍵 | 入力を直して打ち直す |
 | `settle.verify` | GitHub か git を読めない | ネットワーク・API の上限・`origin/<base>` が無い | `GitHubError`・`GitError` | その行を確かめられない行にする | その行を `items` へ理由とともに載せ、結果は `stopped`・`incomplete`、終了コード 6 | 閉じない。打ち直せる |
-| `settle.verify` | 証拠が通らない | テストが基底のブランチに無い・PR が未マージ・パスが残る・記録が無い | 「処理の手順」の判定 | その行を閉じない | 同上。`reason` に通らなかった条件 | 閉じない。証拠を直して打ち直す |
+| `settle.verify` | 証拠が通らない | テストが基底のブランチに無い・PR が未マージ・PR がテストの関数を足していない・パスが残る・記録が無い | 「処理の手順」の判定 | その行を閉じない | 同上。`reason` に通らなかった条件 | 閉じない。証拠を直して打ち直す |
 | `settle.close` | コメントは書けたが閉じられない | ネットワーク・権限 | REST の `GitHubError` | その行を閉じられなかった行にする | 同上 | 打ち直すと、印のあるコメントを見つけて書き直さずに閉じるだけを行う |
 | `settle.close` | 権限が無い | トークンに Issue の書き込みが無い | REST の 403 | 止める（残りの行も閉じない） | `stopped`・`precondition`、終了コード 3 | 権限を直して打ち直す |
 | `settle.main` | `--file`・`--base` が無い | 呼び出しの誤り | 引数の解析 | 止める（1 行も確かめない） | `stopped`・`invalid`、終了コード 2 | 引数を直して打ち直す |
@@ -120,7 +121,7 @@
 | `review_items.check` | `kind` が `追補` で、`to` の先頭が `+` で終わらない | 規則 4 |
 | `review_items.check` | `req` が整数でも `"none"` でもない | 規則 5 |
 | `review_items.check` | `generate(rows, extracted, copy["items"])` の結果が `copy["items"]` と違う | 規則 6（違う鍵ごとに 1 件） |
-| `settle.verify` | `improved`: PR がマージ済みで、宛先が `base` で、テストのノードのファイルが `origin/<base>` にあり、そのファイルに `def <テストの関数名>` がある | `ok` |
+| `settle.verify` | `improved`: PR がマージ済みで、宛先が `base` で、PR の変更ファイル（`GitHub.pulls` の `files`）にテストのノードのファイルがあり、マージのコミットの差分（`git diff <merge>^1 <merge> -- <ファイル>`）の足した行に `def <テストの関数名>` があり、そのファイルが `origin/<base>` にあって `def <テストの関数名>` を持つ | `ok` |
 | `settle.verify` | `improved`: 上のどれかが通らない | `ok` でない。`reason` は最初に通らなかった条件 |
 | `settle.verify` | `removed`: パスが `origin/<base>` に無く（`git cat-file -e` が失敗する）、`commit` が `origin/<base>` の祖先 | `ok` |
 | `settle.verify` | `not_reproduced`: `exit` が 0、`record` のファイルが `origin/<base>` にあり、`at` が `after_pr` のマージの日時より後で、今より前 | `ok` |
@@ -141,7 +142,7 @@
 | `KINDS` | 定数 | 同上 | `("新設", "追補", "既存", "#3395 の設計", "済み", "範囲の外")` |
 | `SHA_LENGTH` | 定数 | 同上 | `12` |
 | `review_items.sources`・`quoted`・`table` | 設定値 | `src/ndf/checks/children.json` | 設計文書の「`review_items` の形」のとおり。抜き出す Issue の番号はここだけが持つ |
-| `superseded_by` | 設定値 | 同上（子の行） | 追補の単位へ置き換えた子と分けた子だけが持つ |
+| `superseded_by` | 設定値 | 同上（子の行） | 追補の単位へ置き換えた子（D1・D2・T1・X0・X1・C1・AD1・AD2・AD3）と分けた子（M3・S1）だけが持つ。C1 は `["C1+", "C2"]` |
 | `tests.function-budget` | 設定値 | `contracts/limits.json` | `{"count": 4348}`（設計文書の「テストと CI の予算」） |
 | `tests.ci-seconds-budget` | 設定値 | 同上 | `{"seconds": 465}`（同上） |
 | `procs.stop-tree` | 設定値 | 同上（既存） | `{"seconds": 3, "interval": 0.1}`。外部の CLI の組を止める猶予 |
@@ -158,7 +159,7 @@
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| `ndf check review-items --write` を打つオーガナイザーと、`children.json` を変える子の PR | `src/ndf/checks/children.json` | 排他を取らない。書き手はオーガナイザーだけで（設計文書の「表とコピーを直す時と書き手」）、子の PR の書き換えは規則 6 が落とす | 同じ表と本文から同じ `items` を作る（`text_sha` は既にある値を引き継ぐ）。途中で止まっても元のファイルは残る |
+| `ndf check review-items --write` を打つオーガナイザーと、`children.json` を変える子の PR | `src/ndf/checks/children.json` | 排他を取らない。書き手はオーガナイザーだけで（設計文書の「表とコピーを直す時と書き手」）、子の PR の書き換えは規則 6 が落とす | 同じ表と本文から同じ `items` を作る（鍵は `text_sha` の一致で既にある鍵を引き継ぐ）。途中で止まっても元のファイルは残る |
 | 週 1 回の検査と、本文に取り消し線を引くオーガナイザー | 入力の Issue の本文 | 排他を取らない | 引いた直後の検査は規則 2 で落ちる。生成し直した後の検査は通る（設計文書のとおり、残ったずれは週 1 回の検査が落とす） |
 | `ndf issues settle` の 2 回の実行 | 解消する Issue のコメントと状態 | 印 `<!-- ndf-settle -->` のコメントを読んでから書く | 閉じた Issue は `already_closed` で飛ばす。コメントの後で止まっても、次の実行は閉じるだけを行う |
 | テストの枠の停止と外部の CLI の停止 | プロセスの組 | 組ごとに 1 つの `stop_group` が送る。同じ組を 2 か所から止めても、2 回目は `ProcessLookupError` で戻る | 何度呼んでもよい |
@@ -194,7 +195,7 @@
 | `process_group.alive` | 同上の `_group_alive`（2 つ） | 同上 | まとめる。`PermissionError` を生きているとみなす `slots.py` の扱いに揃える |
 | `pytest_sessionfinish` | pytest の hook `pytest_sessionfinish`・pytest-xdist | pytest の hook の一覧・`plugins/ndf-next/uv.lock` | 使う。xdist の子の側では総所要を持たないため、`session.config.workerinput` がある側では何もしない |
 | `settle.load_input` | `contracts` の `require_schema` | `git show origin/develop:plugins/ndf-next/src/ndf/contracts/__init__.py` の 126 行 | 使う。形を手で確かめない |
-| `settle.verify` | `GitHub.pulls`（`merged`・`baseRefName`）・`Git.run`・`Git.is_ancestor` | `…/adapters/github.py` の 271 行・`…/adapters/git.py` の `Git` | 使う |
+| `settle.verify` | `GitHub.pulls`（`merged`・`baseRefName`・`files`・`mergeCommit`）・`Git.run`・`Git.is_ancestor` | `…/adapters/github.py` の 271 行・`…/adapters/git.py` の `Git` | 使う |
 | `settle.close` | `GitHub.rest`・`GitHub.nodes`（`issue` の `state` とコメント） | `…/adapters/github.py` の 231・263 行 | 使う |
 | `settle.main` | `contracts/result.py` の `result`・`stopped`・`emit` | `git show origin/develop:plugins/ndf-next/src/ndf/contracts/result.py` | 使う |
 | `count_choices` | `collections.Counter`・今の形の `count_progress` | `scripts/measure/ai-branching.py` の 111 行 | `Counter` を使う。`count_progress` は今の形の記録の読み手で、新しい形の行を読まない |
@@ -205,8 +206,8 @@
 | --- | --- | --- | --- |
 | `review_items.extract` | チェックボックス 3 行の本文から `<番号>-1`〜`-3` | 取り消し線の行を挟むと連番が飛ばない。`## 進行` の後の行は数えない。`quoted` が真なら引用の中だけを数える。コードブロックの中は数えない | — |
 | `review_items.text_sha` | 同じ文で同じ値 | `- [ ]` と `- [x]` の違い・行頭の空白・引用の印では値が変わらない | — |
-| `review_items.read_table` | 正本の表の 182 行を読む | `済み（PR 3360）` が `済み` に寄る。順番の `—` が `None` | 列が 5 の行で `CheckError` |
-| `review_items.generate` | 表と抜き出しから `items` を作る | `previous` にある鍵は `text_sha` を引き継ぎ、本文の行の順が変わっても値が変わらない | — |
+| `review_items.read_table` | 正本の表の 182 行を読む | `済み（PR 3360）` が `済み` に寄る。順番の `—` が `None`。`2（比較の結論まで着手しない）` が `2` | 列が 5 の行・順番が `二` の行で `CheckError` |
+| `review_items.generate` | 表と抜き出しから `items` を作る | 本文の途中の項目に取り消し線を引き、表からその行を消すと、後ろの項目は `previous` の鍵を引き継ぎ、規則 1・2・6 の指摘が 0 件。本文の末尾に足した項目は、その Issue の既存の最大の連番 + 1 の鍵になる | — |
 | `review_items.check` | 生成した直後のコピーで指摘 0 件 | 閉じた子（`superseded_by` なし）と予約の値 3 つを指す行では落ちない | 規則 1〜6 をそれぞれ 1 つずつ壊した入力で、その規則の指摘だけが出る（設計文書の「テスト設計」の 3〜5） |
 | `review_items.main` | 偽の GitHub で `ok`、`--write` で `children.json` が生成の結果になる | 指摘があると終了コード 1 | 本文を読めないと `infra_wait`・75。無い Issue で `config_broken`・2。表の書き損じで `config_broken`・2。書き込みの失敗で元のファイルが残る |
 | `budget.count_tests` | 関数とメソッドと `async def` を数える | 入れ子の関数を数える。`test` で始まらない関数を数えない | 構文の誤りのファイルは数えず、`syntax` の違反が出る |
@@ -216,7 +217,7 @@
 | `process_group.alive` | 生きた組で真 | 先頭が終わり子孫が残る組で真 | 成員の無い組で偽。`PermissionError` で真 |
 | `pytest_sessionfinish` | 予算以下で終了の状態を変えない | `CI` が無いと何もしない。xdist の子では何もしない | 予算を超えると 1。鍵が無いと 1 |
 | `settle.load_input` | 3 種類の行を読む | 空の `settle` は 0 行 | 鍵の欠け・知らない種類で `invalid`・2、1 行も閉じない |
-| `settle.verify` | 3 種類のそれぞれが通る | `not_reproduced` の `at` が `after_pr` のマージの日時と同じなら通らない | テストが基底のブランチに無い・PR が未マージ・パスが残る・`exit` が 0 でない・記録が無い、それぞれで `ok` が偽になり `reason` に条件が出る。GitHub を読めないと確かめられない行になる |
+| `settle.verify` | 3 種類のそれぞれが通る | `not_reproduced` の `at` が `after_pr` のマージの日時と同じなら通らない | テストが基底のブランチに無い・PR が未マージ・PR の差分がテストの関数を足していない（既存のテストを指す）・パスが残る・`exit` が 0 でない・記録が無い、それぞれで `ok` が偽になり `reason` に条件が出る。GitHub を読めないと確かめられない行になる |
 | `settle.close` | コメントを書いてから閉じる | 既に閉じた Issue は `already_closed` でコメントを書かない | 閉じるのに失敗した後の打ち直しでコメントが 2 件にならない。403 で `precondition`・3 |
 | `settle.main` | 全行が閉じて `ok` | 既に閉じた行だけでも `ok` | 1 行が通らないと、その行を閉じずに `stopped`・`incomplete`・6 で、ほかの行は閉じる |
 | `count_choices` | 規則と主体ごとに数える | `since` より前の行と `route_chosen` でない行を数えない | `rule` の欠けた行を数えず `warnings` に数が出る |
