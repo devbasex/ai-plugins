@@ -28,10 +28,11 @@ _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
 
 
 class Fake:
-    """偽の相手役と修正担当。`script[相手役][ラウンド - 1]` は指摘の本文の並びか `FAIL`。"""
+    """偽の相手役と修正担当。`script[相手役][n]` は相手役の n 回目（0 から）の起動の指摘の本文の並びか `FAIL`。
 
-    # 相手役は毎ラウンド 1 回ずつ起動されるので、相手役の n 回目（0 から）の起動がラウンド n + 1 にあたる。
-    # 台本の位置と修正の回数は偽物が数える（相手役は並べて起動されるので、数える値はロックで守る）。
+    相手役は毎ラウンド 1 回ずつ起動されるので、n はラウンドの番号 - 1 にあたる。台本の位置と修正の回数は偽物が
+    数える（相手役は並べて起動されるので、数える値はロックで守る）。
+    """
 
     def __init__(self, state_dir: Path, script: dict[str, list[Any]], decide: Optional[Callable[[str], Optional[dict]]] = None):
         self.state_dir = state_dir
