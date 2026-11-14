@@ -1,6 +1,6 @@
 # #3518 の詳細設計: ndf-next の宣言と入出力の規約の生成と検査
 
-設計文書 [issue-3518-design.md](issue-3518-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜10）は [issue-3518-design-decisions.md](issue-3518-design-decisions.md) を、不変条件の番号（I1〜I15）は設計文書の「不変条件」の表を指す。パスは断りの無い限り `plugins/ndf-next/` からの相対パスである。
+設計文書 [issue-3518-design.md](issue-3518-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜13）は [issue-3518-design-decisions.md](issue-3518-design-decisions.md) を、不変条件の番号（I1〜I15）は設計文書の「不変条件」の表を指す。パスは断りの無い限り `plugins/ndf-next/` からの相対パスである。
 
 ### 用語の対応
 
@@ -175,7 +175,7 @@ plugins/ndf-next/
 | `skill_findings` | `src/ndf/checks/spec_docs.py` | 新設 | `skill_findings(model: SpecModel, scope: Scope) -> list[Finding]` | I7 と、Skill の本文・references・エージェント定義の書かれた呼び出し（I8）を当てる | 無し | I8 が見るのは `skills/` と `agents/` の下の `.md` だけ。公開する Skill が Skill の入出力の表に `args`・`env` を持てば指摘する（決定 6） | 無し |
 | `written_calls` | `src/ndf/checks/spec_docs.py` | 新設 | `written_calls(text: str) -> list[tuple[int, list[str]]]` | 本文の行から `ndf` か末尾が `/bin/ndf` の語で始まる呼び出しを探し、行と後ろの語の並びを返す | 無し | `shlex.split` で語に分ける。引用符が閉じない行は空白で分ける。`ndf:` で始まる語（Skill の名前）は呼び出しに数えない | 無し |
 | `call_errors` | `src/ndf/checks/spec_docs.py` | 新設 | `call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]` | 呼び出しの語を副命令・下位の命令・引数の名前で引数の木に当て、当たらない語を返す | 無し | `-` で始まる語は `=` の前までを名前として見る。位置の引数の数と値の型は見ない（決定 4）。`<…>` と `$…` の語は置き換え用の語として飛ばす | 無し |
-| `public_findings` | `src/ndf/checks/spec_docs.py` | 新設 | `public_findings(model: SpecModel, plugin_root: Path) -> list[Finding]` | I10 と I15 を当てる | 無し | 列 `order` が `caller-first` の行は I10 の対象から外し、契約のページの「呼び手と合わせる前の行」に載る（設計の「人へ残す判断」の 3 の推奨。判断が違えばこの外し方だけを変える） | ファイルの有無を見る |
+| `public_findings` | `src/ndf/checks/spec_docs.py` | 新設 | `public_findings(model: SpecModel, plugin_root: Path) -> list[Finding]` | I10 と I15 を当てる | 無し | 列 `order` が `caller-first` の行は I10 の対象から外し、契約のページの「呼び手と合わせる前の行」に載る（設計の決定 13） | ファイルの有無を見る |
 | `docs_findings` | `src/ndf/checks/spec_docs.py` | 新設 | `docs_findings(rendered: dict[str, str], plugin_root: Path, repo_root: Path) -> list[Finding]` | I9 を当て、描画した中身とコミットされたファイルの違いと、描画に無い生成物の残りを返す | 無し | 指摘はファイルごとに 1 件で、行は最初に違う行の番号 | ファイルを読む |
 | `write` | `src/ndf/checks/spec_docs.py` | 新設 | `write(rendered: dict[str, str], plugin_root: Path) -> list[str]` | 描画した中身を書き、描画に無い生成物を消す | `rendered` のキーはプラグインの根からの相対パス | 中身の同じファイルは書かない（更新の時刻を変えない）。消すのは `docs/contracts/*.md` と `contracts/schemas/io/*.args.schema.json` に当たるファイルだけ | 生成物のファイルを書く・消す |
 
