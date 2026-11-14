@@ -143,6 +143,16 @@ def _slot_piece(slot: Optional[dict[str, Any]]) -> Optional[int]:
     return slot["slice"] if slot and slot["status"] == SLOT_FIT else None
 
 
+def _slot_used(slot: Optional[dict[str, Any]]) -> int:
+    """枠の 1 切れが使う Size（当てた切れが無ければ 0）。"""
+    return slot["size"] if _slot_piece(slot) is not None else 0
+
+
+def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], below_min: bool) -> bool:
+    """品質の枠に入るか。ratio の枠に収まるか、min 件に満たないうちは容量の残りに収まるか。"""
+    return budget is None or total + size <= budget or (below_min and total + size <= room)
+
+
 def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], blocked: set[int]) -> Optional[dict[str, Any]]:
     """品質の枠。宣言が無ければ None。容量の ratio 分（最低 min 件）を品質のラベルの課題から先に取る。
 
@@ -155,15 +165,15 @@ def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], 
     pool = [r for r in rows if q["label"] in board.issues[r.number]["labels"] and r.number != piece and r.number not in blocked]
     pool.sort(key=lambda r: (not r.observed_harm, board.issues[r.number]["created_at"], model.row_key(r)))
     budget = None if cfg.capacity is None else math.floor(cfg.capacity * q["ratio"])
-    room = None if cfg.capacity is None else cfg.capacity - (slot["size"] if piece is not None else 0)
+    room = None if cfg.capacity is None else cfg.capacity - _slot_used(slot)
     deps = depends_on_map(board.edges)
     taken: list[int] = []
     total = 0
     for r in pool:
         if not set(_of(deps, r.number)) <= set(taken):
             continue
-        fits = budget is None or total + r.size <= budget or (len(taken) < q["min"] and total + r.size <= room)
-        if (budget is None and len(taken) >= q["min"]) or (not fits and len(taken) >= q["min"]):
+        fits = _fits(total, r.size, budget, room, len(taken) < q["min"])
+        if len(taken) >= q["min"] and (budget is None or not fits):
             break
         if fits:
             taken.append(r.number)
@@ -182,7 +192,7 @@ def boundary(
         return None
     piece = _slot_piece(slot)
     reserved = set(quality["issues"]) if quality else set()
-    rest = capacity - (slot["size"] if piece is not None else 0) - (quality["size_sum"] if quality else 0)
+    rest = capacity - _slot_used(slot) - (quality["size_sum"] if quality else 0)
     pool = [r for r in rows if r.number not in reserved and r.number != piece]
     if not pool:
         return None
