@@ -64,7 +64,7 @@ SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを答える。"
 # 打ち直しても直らない `claude -p` の失敗 → 止まった理由（表に無い失敗は前提の欠け）
 SKILL_FAILURES = {claude.Failure.USAGE_LIMIT: "usage_limit", claude.Failure.TIMEOUT: "interrupted"}
-ACTOR = "workflow"
+ACTOR = model.WORKFLOW_ACTOR
 # 承認の答えの語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
 APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の置き場に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前

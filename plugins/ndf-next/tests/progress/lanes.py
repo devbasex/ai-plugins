@@ -77,7 +77,7 @@ def lane(url: str, root: str, cwd: str, name: str, rounds: int, barrier, out) ->
     """全員がそろってから、`rounds` 回のスプリントを流し、(名前, busy の回数, 完了した数) を `out` へ置く。"""
     here = Path(cwd)
     env = _env(here)
-    repo = command._repo(here, Path(root))
+    repo = command.repo_id(here, Path(root))
     barrier.wait()
     busy = done = 0
     for i in range(rounds):
