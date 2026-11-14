@@ -219,7 +219,9 @@ def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
     def build(rev: int, snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
-        snap.stage(a.stage)
+        stage = snap.stage(a.stage)
+        if kind == "disabled" and stage.gates:
+            raise model.Refused(stages.gate_refusal(stage))
         return [model.EventDraft(kind, ACTOR, a.stage, reason=a.reason, payload=payload, rev=rev)]
 
     seqs = _append(st, a.table_id, build)

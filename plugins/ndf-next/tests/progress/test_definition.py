@@ -227,3 +227,9 @@ def test_context_schema_holds_the_closed_vocabulary():
 def test_snapshot_round_trips_through_json():
     snap = definition.load_definition("documentation")
     assert stages.snapshot_from(stages.snapshot_dict(snap)) == snap
+
+
+def test_gate_stage_with_a_condition_is_refused():
+    gated = _stage_doc("g", "行", [_step("gate", "gate", "none", gate="design")], when=["code_in_diff"])
+    errs = _errors(_mode_doc([("行", "g")]), {"g": gated})
+    assert any("承認ゲート" in e and "行" in e for e in errs)
