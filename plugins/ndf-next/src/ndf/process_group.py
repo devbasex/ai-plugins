@@ -31,6 +31,14 @@ def alive(proc: subprocess.Popen, pgid: int) -> bool:
     return True
 
 
+def signal_group(pgid: int, sig: int) -> None:
+    """組 `pgid` へ `sig` を送る。組が既に終わっていれば何もしない。"""
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:  # noqa: S110 外部コマンド: 組が既に終わっていれば送る先が無い
+        pass
+
+
 def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first: bool = True) -> None:
     """組を SIGTERM から猶予の後の SIGKILL まで 1 つの手順で止める。
 
@@ -51,9 +59,12 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
     own_group = pgid == os.getpgrp()
 
     def send(sig: int) -> None:
+        if not own_group:
+            signal_group(pgid, sig)
+            return
         try:
-            proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
-        except ProcessLookupError:  # noqa: S110 外部コマンド: 組が既に終わっていれば送る先が無い
+            proc.send_signal(sig)
+        except ProcessLookupError:  # noqa: S110 外部コマンド: 子が既に終わっていれば送る先が無い
             pass
 
     def remaining_members() -> bool:

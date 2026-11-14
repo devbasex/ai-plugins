@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-import os
 import signal
 import subprocess
 from collections.abc import Callable
 
+from ndf import process_group
 from ndf.testing import waits
 
 
@@ -28,8 +28,5 @@ def kill_group_when(proc: subprocess.Popen, ready: Callable[[], object], *, what
         return ready()
 
     waits.wait_until(reached, timeout=timeout, what=what)
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:  # noqa: S110 外部コマンド: 送る直前に組が終わっていれば送る先が無い
-        pass
+    process_group.signal_group(proc.pid, signal.SIGKILL)
     return proc.wait()

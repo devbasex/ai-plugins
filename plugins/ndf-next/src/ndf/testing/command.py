@@ -74,7 +74,7 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
         interrupted.append(signum)
         proc = get_proc()
         if proc is not None and proc.poll() is None:
-            _signal_group(proc, signum)
+            process_group.signal_group(proc.pid, signum)
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED}
     try:
@@ -132,7 +132,7 @@ def _run_child(command: str, held: slots.Held, interrupted: list[int], started: 
     proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec)
     started.append(proc)
     if interrupted:
-        _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
+        process_group.signal_group(proc.pid, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
     held.watch(proc)
     code = _wait(proc)
     if interrupted:
@@ -140,13 +140,6 @@ def _run_child(command: str, held: slots.Held, interrupted: list[int], started: 
         process_group.stop_group(proc, grace_key=slots.STOP_TEST, send_first=False)
         raise KeyboardInterrupt  # 記録に interrupted を残す
     return code
-
-
-def _signal_group(proc: subprocess.Popen, signum: int) -> None:
-    try:
-        os.killpg(proc.pid, signum)
-    except ProcessLookupError:  # noqa: S110 外部コマンド: 子のグループが既に終わっていれば送る先が無い
-        pass
 
 
 def _wait(proc: subprocess.Popen) -> int:
