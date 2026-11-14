@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +20,16 @@ PATHS_SLOT = "{paths}"
 SCOPE_KEY = "scope_command"
 # テストの id のうち、ファイルと名前を分ける区切り（pytest の node id）
 NODE_SEPARATOR = "::"
+
+
+@dataclass(frozen=True)
+class Suite:
+    """範囲を打てる宣言の suite 1 件: 名前・`scope_command`・`paths`（省けば `.`）・テストか（`kind` が `lint` でない）。"""
+
+    name: str
+    template: str
+    paths: tuple[str, ...]
+    test: bool
 
 
 @dataclass(frozen=True)
@@ -53,9 +63,16 @@ def files_of(test_ids: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(f for f in found if f))
 
 
-def _scope_paths(raw: Mapping[str, Any]) -> tuple[str, ...]:
+def suite_of(raw: Any) -> Suite | None:
+    """宣言の suite 1 件を読む。`scope_command` に `{paths}` を持たない suite と、dict でない要素は None。"""
+    if not isinstance(raw, dict):
+        return None
+    template = raw.get(SCOPE_KEY)
+    if not isinstance(template, str) or PATHS_SLOT not in template:
+        return None
     paths = raw.get("paths")
-    return tuple(str(p) for p in paths) if isinstance(paths, list) else (".",)
+    scope = tuple(str(p) for p in paths) if isinstance(paths, list) else (".",)
+    return Suite(str(raw["name"]), template, scope, weight.is_test_suite(raw))
 
 
 def scoped_runs(suites: Any, files: Sequence[str]) -> tuple[list[ScopedRun], list[str]]:
@@ -65,13 +82,11 @@ def scoped_runs(suites: Any, files: Sequence[str]) -> tuple[list[ScopedRun], lis
     """
     rest = list(files)
     runs: list[ScopedRun] = []
-    for raw in suites if isinstance(suites, list) else []:
-        template = raw.get(SCOPE_KEY) if isinstance(raw, dict) else None
-        if not isinstance(template, str) or PATHS_SLOT not in template or not weight.is_test_suite(raw):
+    for s in (suite_of(r) for r in (suites if isinstance(suites, list) else [])):
+        if s is None or not s.test:
             continue
-        scope = _scope_paths(raw)
-        taken = [f for f in rest if in_scope(f, scope)]
+        taken = [f for f in rest if in_scope(f, s.paths)]
         if taken:
-            runs.append(ScopedRun(str(raw["name"]), fill_paths(template, taken), tuple(taken)))
+            runs.append(ScopedRun(s.name, fill_paths(s.template, taken), tuple(taken)))
             rest = [f for f in rest if f not in taken]
     return runs, rest
