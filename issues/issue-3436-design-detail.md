@@ -9,7 +9,7 @@
 触るファイルの構成（すべて既存のファイルの変更。新設は無い）:
 
 ```text
-plugins/ndf/skills/
+plugins/ndf-next/skills/
 ├── requirements-design/
 │   ├── SKILL.md                                # 手順 4 に規則の節へのリンクを足す
 │   └── references/
@@ -22,12 +22,12 @@ plugins/ndf/skills/
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `plugins/ndf/skills/requirements-design/references/nonfunctional-requirements.md` | 変更 | 性能の条件の書き方の規則の正本（`### 合否に置く性能の条件` の節）を持つ | 無し |
-| `plugins/ndf/skills/requirements-design/references/acceptance-criteria.md` | 変更 | 受け入れ条件の書き換えの例を持ち、性能の条件は規則の節へリンクで渡す | `nonfunctional-requirements.md` の規則の節 |
-| `plugins/ndf/skills/requirements-design/SKILL.md` | 変更 | 手順 4 から規則の節へたどれる入口を持つ | `nonfunctional-requirements.md` の規則の節 |
-| `plugins/ndf/skills/design/references/nonfunctional.md` | 変更 | 非機能設計表の例を持ち、確かめ方も規則の節に従うと示す | `nonfunctional-requirements.md` の規則の節 |
+| `plugins/ndf-next/skills/requirements-design/references/nonfunctional-requirements.md` | 変更 | 性能の条件の書き方の規則の正本（`### 合否に置く性能の条件` の節）を持つ | 無し |
+| `plugins/ndf-next/skills/requirements-design/references/acceptance-criteria.md` | 変更 | 受け入れ条件の書き換えの例を持ち、性能の条件は規則の節へリンクで渡す | `nonfunctional-requirements.md` の規則の節 |
+| `plugins/ndf-next/skills/requirements-design/SKILL.md` | 変更 | 手順 4 から規則の節へたどれる入口を持つ | `nonfunctional-requirements.md` の規則の節 |
+| `plugins/ndf-next/skills/design/references/nonfunctional.md` | 変更 | 非機能設計表の例を持ち、確かめ方も規則の節に従うと示す | `nonfunctional-requirements.md` の規則の節 |
 
-依存の向き: 3 本の文書が規則の正本 1 本を見出しへのリンクで指し、正本はほかの 3 本を指さない。向きは一方向で循環は無い。`design` の本文（`plugins/ndf/skills/design/SKILL.md`）は既存のリンク（66 行目の「非機能の条件が仕様にある」の行）で `nonfunctional.md` を指しており、変えない（設計文書の「構成要素」）。
+依存の向き: 3 本の文書が規則の正本 1 本を見出しへのリンクで指し、正本はほかの 3 本を指さない。向きは一方向で循環は無い。`design` の本文（`plugins/ndf-next/skills/design/SKILL.md`）は既存のリンク（66 行目の「非機能の条件が仕様にある」の行）で `nonfunctional.md` を指しており、変えない（設計文書の「構成要素」）。
 
 ## クラスと関数の構造
 
@@ -35,10 +35,10 @@ plugins/ndf/skills/
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
-| `plugins/ndf/skills/requirements-design/references/nonfunctional-requirements.md` | 非機能の条件の参照文書 | `### 性能・拡張性`（41 行目。変更: 表の性能の行と処理量の行の書き方と例を置き換え、表の直後の「書き方と例は変わらない」を性能と処理量の例が変わった事実の文へ置き換える）／`### 合否に置く性能の条件`（新設: `### 性能・拡張性` の直後、`### 運用・保守性` の前に置く）／`## 書き方の共通の決まり`（91 行目。変更: 数字の行を「秒以内」の語を持たず測る場所を含む形にする）／`## 現行 4 種からの移り先`（99 行目。変更: 「書き方と例をそのままに」を、性能と処理量の例だけが変わった形に合わせる） |
-| `plugins/ndf/skills/requirements-design/references/acceptance-criteria.md` | 受け入れ条件の書き方の参照文書 | `## 書き換えの例`（36 行目。変更: 40 行目の性能の行を問い合わせの回数の形へ置き換える）／`## 非機能の条件`（46 行目。変更: 末尾に、性能の条件は規則の節に従うという 1 文と、`nonfunctional-requirements.md#合否に置く性能の条件` へのリンクを足す） |
-| `plugins/ndf/skills/requirements-design/SKILL.md` | 受け入れ条件を書く手順の本文 | `### 4. 成功条件を観測可能な形へ変換する`（144 行目。変更: 性能の条件を書くときは `references/nonfunctional-requirements.md#合否に置く性能の条件` に従うという 1 文とリンクを足す。規則の文は写さない） |
-| `plugins/ndf/skills/design/references/nonfunctional.md` | 非機能の実現方式の参照文書 | 冒頭の段落（5〜6 行目。変更: 要求の側の参照をパスの記法からリンクへ変え、確かめ方も規則の節に従うという 1 文を足す）／`## 非機能設計表の書き方`（21 行目。変更: 29 行目の設計表の性能・拡張性の行を、設計文書の「置き換える例の行」の最後の行の値へ置き換える） |
+| `plugins/ndf-next/skills/requirements-design/references/nonfunctional-requirements.md` | 非機能の条件の参照文書 | `### 性能・拡張性`（41 行目。変更: 表の性能の行と処理量の行の書き方と例を置き換え、表の直後の「書き方と例は変わらない」を性能と処理量の例が変わった事実の文へ置き換える）／`### 合否に置く性能の条件`（新設: `### 性能・拡張性` の直後、`### 運用・保守性` の前に置く）／`## 書き方の共通の決まり`（91 行目。変更: 数字の行を「秒以内」の語を持たず測る場所を含む形にする）／`## 現行 4 種からの移り先`（99 行目。変更: 「書き方と例をそのままに」を、性能と処理量の例だけが変わった形に合わせる） |
+| `plugins/ndf-next/skills/requirements-design/references/acceptance-criteria.md` | 受け入れ条件の書き方の参照文書 | `## 書き換えの例`（36 行目。変更: 40 行目の性能の行を問い合わせの回数の形へ置き換える）／`## 非機能の条件`（46 行目。変更: 末尾に、性能の条件は規則の節に従うという 1 文と、`nonfunctional-requirements.md#合否に置く性能の条件` へのリンクを足す） |
+| `plugins/ndf-next/skills/requirements-design/SKILL.md` | 受け入れ条件を書く手順の本文 | `### 4. 成功条件を観測可能な形へ変換する`（144 行目。変更: 性能の条件を書くときは `references/nonfunctional-requirements.md#合否に置く性能の条件` に従うという 1 文とリンクを足す。規則の文は写さない） |
+| `plugins/ndf-next/skills/design/references/nonfunctional.md` | 非機能の実現方式の参照文書 | 冒頭の段落（5〜6 行目。変更: 要求の側の参照をパスの記法からリンクへ変え、確かめ方も規則の節に従うという 1 文を足す）／`## 非機能設計表の書き方`（21 行目。変更: 29 行目の設計表の性能・拡張性の行を、設計文書の「置き換える例の行」の最後の行の値へ置き換える） |
 
 新設する節 `### 合否に置く性能の条件` の中の並びは、設計文書の「規則の節に書く中身」の表の行の順（3 つの形と例 → 相対の形の測る場所 → 秒数の上限の測る場所 → 共有の開発機で測った所要 → 時間で区切った負荷試験と資料の形）とする。載せる値と例は設計文書のその表が正本で、ここに写さない。
 

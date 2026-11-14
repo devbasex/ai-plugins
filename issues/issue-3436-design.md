@@ -114,12 +114,12 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 非機能の条件の参照文書（`plugins/ndf/skills/requirements-design/references/nonfunctional-requirements.md`） | 規則の正本を持つ。「性能・拡張性」の表の下に `### 合否に置く性能の条件` の節を新設し、3 つの形と形ごとの例・相対の形と秒数の上限を置くときの測る場所の書き方・共有の開発機で測った所要を合否に使わない規則・時間で区切った負荷試験を置かない規則と資料の形を書く。表の性能の行と処理量の行（どちらも書き方と例）を置き換え、表の直後の「書き方と例は変わらない」の文を性能の例が変わった事実に合わせる。「書き方の共通の決まり」の数字の行を測る場所を含む形にする。「現行 4 種からの移り先」の「書き方と例をそのままに」を、性能の例だけが変わった形に合わせる |
-| 受け入れ条件の書き方の参照文書（`plugins/ndf/skills/requirements-design/references/acceptance-criteria.md`） | 書き換えの例の性能の行を、マシンに依らない形へ置き換える。「非機能の条件」の節に、性能の条件は規則の節に従うという 1 文と規則の節へのリンクを足す |
-| 受け入れ条件を書く手順の本文（`plugins/ndf/skills/requirements-design/SKILL.md` の手順 4） | 性能の条件を書くときに規則の節へたどれる 1 文とリンクを足す。規則の文は写さない |
-| 非機能の実現方式の参照文書（`plugins/ndf/skills/design/references/nonfunctional.md`） | 非機能設計表の例の性能・拡張性の行を、要求の側の性能の例を写した形にし、確かめ方を回数の測り方で書く。冒頭の要求の側の参照をリンクにし、確かめ方も規則の節に従うという 1 文を足す |
+| 非機能の条件の参照文書（`plugins/ndf-next/skills/requirements-design/references/nonfunctional-requirements.md`） | 規則の正本を持つ。「性能・拡張性」の表の下に `### 合否に置く性能の条件` の節を新設し、3 つの形と形ごとの例・相対の形と秒数の上限を置くときの測る場所の書き方・共有の開発機で測った所要を合否に使わない規則・時間で区切った負荷試験を置かない規則と資料の形を書く。表の性能の行と処理量の行（どちらも書き方と例）を置き換え、表の直後の「書き方と例は変わらない」の文を性能の例が変わった事実に合わせる。「書き方の共通の決まり」の数字の行を測る場所を含む形にする。「現行 4 種からの移り先」の「書き方と例をそのままに」を、性能の例だけが変わった形に合わせる |
+| 受け入れ条件の書き方の参照文書（`plugins/ndf-next/skills/requirements-design/references/acceptance-criteria.md`） | 書き換えの例の性能の行を、マシンに依らない形へ置き換える。「非機能の条件」の節に、性能の条件は規則の節に従うという 1 文と規則の節へのリンクを足す |
+| 受け入れ条件を書く手順の本文（`plugins/ndf-next/skills/requirements-design/SKILL.md` の手順 4） | 性能の条件を書くときに規則の節へたどれる 1 文とリンクを足す。規則の文は写さない |
+| 非機能の実現方式の参照文書（`plugins/ndf-next/skills/design/references/nonfunctional.md`） | 非機能設計表の例の性能・拡張性の行を、要求の側の性能の例を写した形にし、確かめ方を回数の測り方で書く。冒頭の要求の側の参照をリンクにし、確かめ方も規則の節に従うという 1 文を足す |
 
-`design` の本文（`plugins/ndf/skills/design/SKILL.md`）の参照の表は、既に「非機能の条件が仕様にある」の行で非機能の実現方式の参照文書へリンクしている（66 行目）。受け入れ条件 6 の「`design` の本文の参照の表から `nonfunctional.md` へたどれ」はこのリンクで満たすため、本文は変えない。
+`design` の本文（`plugins/ndf-next/skills/design/SKILL.md`）の参照の表は、既に「非機能の条件が仕様にある」の行で非機能の実現方式の参照文書へリンクしている（66 行目）。受け入れ条件 6 の「`design` の本文の参照の表から `nonfunctional.md` へたどれ」はこのリンクで満たすため、本文は変えない。
 
 ```mermaid
 graph TD
@@ -222,6 +222,22 @@ graph TD
 
 根拠: Value 4 / Value 14（MVV 版 7）
 
+### 決定 6: 受け入れ条件 8 のリンク切れは、CI と同じ `scripts/check-markdown-links.py --root .` で判定する
+
+要求は `plugins/ndf/scripts/tests/` の参照の検査を名指すが、その pytest の範囲はリポジトリの文書のリンクを照合しない（テスト設計の対応の表）。CI がリンクを照合するのは `scripts/check-markdown-links.py` だけである。判定には CI と同じ検査を使い、要求の文言を検査の名前へ揃える。pytest の範囲は、既存のテストを壊さないことの確認として走らせる。
+
+pytest の範囲だけで判定する形は採らない。リンクが切れても通るため、受け入れ条件 8 を確かめたことにならないためである。
+
+根拠: Value 13（MVV 版 7）
+
+### 決定 7: 直す先は `plugins/ndf-next/` の写しにし、今の `plugins/ndf/` は変えない
+
+#1142 の作り直しでは、11.0.0 で `plugins/ndf-next/` が `plugins/ndf/` と入れ替わり、今の `plugins/ndf/` は即時修正を除いて変えない（#3303 S1a の対象範囲 I2）。この課題の変更は方針（性能の条件の書き方）を変えるため、即時修正の条件 3 に当たらない。そこで、S1a が `plugins/ndf-next/skills/` へ移した `requirements-design`・`design` の写しを直す。4 本の文書の変える節と新設する節は、移した写しでも同じ見出しと行に残る（S1a は本文を変えず、スクリプトのパスとコマンドだけを直す）。
+
+今の `plugins/ndf/` を直す形は採らない。入れ替えまでの間だけ効く変更に工程を使い、写しとの食い違いを S1a へ持ち込むためである。実装の着手は、2 つの Skill の写しが `plugins/ndf-next/skills/` に入った後にする（先に要るもの: S1a #3303）。
+
+根拠: Value 4 / Value 11（MVV 版 7）
+
 ## テスト設計
 
 `.md` の文言を照合するテストは足さない（`AGENTS.md` の DON'T と要求の「前提とする取り決め」）。リンクは既存の検査、文面はレビューで縛る。
@@ -231,7 +247,7 @@ graph TD
 | 受け入れ条件 1 | レビューで、規則の節に 3 つの形と形ごとの例が 1 つ以上あることを見る | 形の 1 つの例を消すと、レビューが差し戻す |
 | 受け入れ条件 2 | レビューで、秒数の上限と相対の形に測る場所を添える規則と、共有の開発機で測った所要（秒数と比）を合否に使わない規則があることを見る | どれかの規則を消すか、相対の形の例から測る場所を外すと、レビューが差し戻す |
 | 受け入れ条件 3 | レビューで、時間で区切った負荷試験を置かない規則と、資料の形（スペック・条件・結果）があることを見る | 資料の形の 3 項目の 1 つを消すと、レビューが差し戻す |
-| 受け入れ条件 4・不変条件 I2 | `grep -rn '秒以内' plugins/ndf/skills/requirements-design plugins/ndf/skills/design` の当たる行が、すべて同じ行に測る場所を持つ | 書き換えの例を「1 秒以内に収まる」へ戻すと、測る場所を持たない行が当たる |
+| 受け入れ条件 4・不変条件 I2 | `grep -rn '秒以内' plugins/ndf-next/skills/requirements-design plugins/ndf-next/skills/design` の当たる行が、すべて同じ行に測る場所を持つ | 書き換えの例を「1 秒以内に収まる」へ戻すと、測る場所を持たない行が当たる |
 | 受け入れ条件 5・不変条件 I3 | レビューで、設計表の性能・拡張性の行の要求の条件が要求の側の性能の例と同じ文で、確かめ方が回数の測り方であることを見る | 要求の側の例だけを直して設計表を古い文のまま残すと、2 つの文が食い違う |
 | 受け入れ条件 6・不変条件 I4 | `python3 scripts/check-markdown-links.py --root .` が 0 で終わる（見出しへのリンクを見出しの名前で照合する。表の下の実測） | 規則の節の見出しを変えてリンクを直さないと、検査が 1 で終わる |
 | 受け入れ条件 7 | 差分で、性能・拡張性以外の 5 つの大項目の節と、容量・増加への備えの行に変更が無いことを見る | 可用性の例を書き換えると、差分に現れてレビューが差し戻す |
@@ -259,19 +275,13 @@ exit=0
 | `python3 scripts/check-markdown-links.py --root .` | する。CI も同じコマンドで走らせる | `.github/workflows/runtime-plugin-validate.yml:97` |
 | `pytest plugins/ndf/scripts/tests -q -n 4 -k "link or reference or skill"` | しない。範囲は 216 件で、`check-markdown-links.py` を呼ぶ唯一のテスト（`test_handoff.py:222`。一時ディレクトリに作ったリポジトリへ走らせる）を含まない | `--collect-only` の出力「216/8545 tests collected」、範囲の中の `test_handoff` の件数 0、`grep -rln check-markdown-links plugins/ndf/scripts/tests` の当たりは `test_handoff.py` と固定データだけ |
 
-要求の文言（`plugins/ndf/scripts/tests/` の参照の検査）と判定に使う検査がずれるため、「人へ残す判断」に挙げる。
+要求の文言（`plugins/ndf/scripts/tests/` の参照の検査）と判定に使う検査がずれる。判定に使う検査は決定 6 で決めた。
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3436 | 実装する | — | `plugins/ndf/skills/requirements-design/references/nonfunctional-requirements.md`、`plugins/ndf/skills/requirements-design/references/acceptance-criteria.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/design/references/nonfunctional.md` |
-
-## 人へ残す判断
-
-| 判断 | 材料 | 推奨 |
-| --- | --- | --- |
-| 受け入れ条件 8 の「リンク切れの検査」を `scripts/check-markdown-links.py` で判定してよいか | 要求は `plugins/ndf/scripts/tests/` の参照の検査を名指すが、検証手段の pytest の範囲はリポジトリの文書のリンクを照合しない（テスト設計の対応の表）。CI がリンクを照合するのは `scripts/check-markdown-links.py` である | `scripts/check-markdown-links.py` を判定に使い、要求の文言を検査の名前へ揃える。pytest の範囲は既存のテストを壊さないことの確認として走らせる |
+| #3436 | 実装する | — | `plugins/ndf-next/skills/requirements-design/references/nonfunctional-requirements.md`、`plugins/ndf-next/skills/requirements-design/references/acceptance-criteria.md`、`plugins/ndf-next/skills/requirements-design/SKILL.md`、`plugins/ndf-next/skills/design/references/nonfunctional.md`（S1a #3303 が移した写し。決定 7） |
 
 ## 未確認のまま残ること
 
