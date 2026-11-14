@@ -29,7 +29,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import durable
-from ndf.progress import definition, model, stages, store
+from ndf.progress import definition, invoke, model, stages, store
 
 # 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -243,10 +243,23 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     output = _read_json(Path(a.output))
     with store.transaction(st) as conn:
         _, snap, _ = _current(conn, a.table_id)
-    errs = definition.validate_stage_output(snap.stage(a.stage), output)
+    stage = snap.stage(a.stage)
+    errs = definition.validate_stage_output(stage, output)
     if errs:
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}")
-    return _changed(a, st, "manual_finished", {"output": a.output})
+    dropped: list[str] = []
+
+    def build(rev: int, _snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
+        """終了の印と、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
+        draft, dropped[:] = invoke.record_outputs(stage, rev, output.get("outputs") or {}, ACTOR)
+        done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
+        return [done, *([draft] if draft is not None else [])]
+
+    seqs = _append(st, a.table_id, build)
+    st.warnings.extend(dropped)
+    return result.result(
+        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に manual_finished を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+    )
 
 
 def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:

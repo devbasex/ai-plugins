@@ -260,6 +260,20 @@ def test_stage_output_that_breaks_the_contract_gets_no_finish_mark(repo, st, env
     assert _labels(st, tid)["作業場所の用意"] == "failed"
 
 
+def test_finish_by_hand_writes_the_outputs_to_the_context_like_the_workflow(repo, st, capsys, tmp_path):
+    tid = _new(capsys)
+    out_file = tmp_path / "worktree.json"
+    outputs = {"worktree": str(repo), "branch": "sprint/s1"}
+    out_file.write_text(json.dumps({"steps": [], "summary": "手で用意した", "outputs": outputs}))
+    code, out = _main(capsys, command.main, "finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で行った")
+    assert code == 0, out
+    v = run.read(st, tid)
+    assert v.rows["作業場所の用意"].state == "finished"
+    assert {k: v.context()[k] for k in outputs} == outputs
+    recorded = [e for e in v.events if e.draft.kind == invoke.OUTPUTS_EVENT]
+    assert [e.draft.actor for e in recorded] == ["conductor"]
+
+
 def test_badly_shaped_outputs_are_not_passed_on(repo, st, env, capsys):
     # 3364-7: 次の工程の引数になる値は形を確かめてから渡す
     tid = _new(capsys)

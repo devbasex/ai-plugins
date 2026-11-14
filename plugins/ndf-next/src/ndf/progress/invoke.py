@@ -278,8 +278,12 @@ def invoke(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str] = Non
     raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
 
 
-def record_outputs(stage: stages.StageDef, rev: int, outputs: Mapping[str, Any]) -> tuple[Optional[model.EventDraft], list[str]]:
+def record_outputs(
+    stage: stages.StageDef, rev: int, outputs: Mapping[str, Any], actor: str = ACTOR
+) -> tuple[Optional[model.EventDraft], list[str]]:
     """工程の出力を文脈へ書く事象 `outputs_recorded` の下書き。鍵は工程の定義の `outputs` に列挙したものだけ。
+
+    `actor` は書き手。工程を流した作業（`workflow`）か、手で終えた conductor（`ndf progress finish`）。
 
     宣言に無い鍵は書かずに捨て、捨てた鍵を警告で返す。書く鍵が無ければ下書きは None。
     """
@@ -287,4 +291,4 @@ def record_outputs(stage: stages.StageDef, rev: int, outputs: Mapping[str, Any])
     warnings = [f"工程 {stage.name} の定義の outputs に無い鍵を捨てた: {k}" for k in sorted(set(outputs) - set(kept))]
     if not kept:
         return None, warnings
-    return model.EventDraft(OUTPUTS_EVENT, ACTOR, stage.name, payload={"outputs": kept}, rev=rev), warnings
+    return model.EventDraft(OUTPUTS_EVENT, actor, stage.name, payload={"outputs": kept}, rev=rev), warnings
