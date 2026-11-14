@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.checks.model import CheckError, Finding, Scope
+from ndf.checks.model import Finding, Scope, read_json
 
 KATAKANA = r"゠-ヿ"
 ONLY_KATAKANA = re.compile(rf"^[{KATAKANA}]+$")
@@ -20,10 +19,7 @@ ONLY_ASCII = re.compile(r"^[\x00-\x7f]+$")
 
 
 def _read(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"用語集を読めない: {path}: {exc}") from exc
+    return read_json(path, "用語集を読めない")
 
 
 def banned_words(repo_root: Path, config_name: str) -> dict[str, str]:

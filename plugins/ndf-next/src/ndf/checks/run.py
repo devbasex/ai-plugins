@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -19,7 +18,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, lint, marks, smells, structure, words
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, read_json
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -102,10 +101,7 @@ def _pr_body(event: str) -> str:
     """GitHub の事象の JSON から PR 本文を読む。事象が無い・PR でないときは空。"""
     if not event:
         return ""
-    try:
-        data = json.loads(Path(event).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"事象の JSON を読めない: {event}: {exc}") from exc
+    data = read_json(event, "事象の JSON を読めない")
     pull = data["pull_request"] if "pull_request" in data else {}
     return pull["body"] if isinstance(pull.get("body"), str) else ""
 

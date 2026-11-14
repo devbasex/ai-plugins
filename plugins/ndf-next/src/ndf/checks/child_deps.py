@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
@@ -24,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope, Source, module_name
+from ndf.checks.model import CheckError, Finding, Scope, Source, module_name, read_json_text
 
 RULE = "child-deps"
 # 子の表のコピーの置き場（プラグインの根からの相対パス）
@@ -86,11 +85,7 @@ def _validate(rows: dict[str, Child], tables: dict[str, tuple[str, ...]]) -> Non
 
 def load_children(path: Path, rel: str) -> Children:
     """`children.json` を読む。無い・形が違う・知らない子を指すときは `CheckError`。`rel` は指摘に書くパス。"""
-    try:
-        text = path.read_text(encoding="utf-8")
-        data = json.loads(text)
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"children.json を読めない: {path}: {exc}") from exc
+    text, data = read_json_text(path, "children.json を読めない")
     if not isinstance(data, dict) or not isinstance(data.get("children"), dict) or not isinstance(data.get("tables"), dict):
         raise CheckError(f"children.json に children と tables の表が無い: {path}")
     rows = {name: _child(name, row) for name, row in data["children"].items()}

@@ -94,12 +94,23 @@ def module_name(scope: Scope, src: Source) -> str:
     return ".".join(parts)
 
 
+def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
+    """JSON のファイルの本文と値。読めない・JSON でなければ `CheckError`（`<unreadable>: <渡したパス>: <例外>`）。"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+        return text, json.loads(text)
+    except (OSError, ValueError) as exc:
+        raise CheckError(f"{unreadable}: {path}: {exc}") from exc
+
+
+def read_json(path: Path | str, unreadable: str) -> Any:
+    """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
+    return read_json_text(path, unreadable)[1]
+
+
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側の鍵の参照（欠ければ `KeyError`）に任せず、ここで鍵の有無を見る。"""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"規則のデータを読めない: {path}: {exc}") from exc
+    data = read_json(path, "規則のデータを読めない")
     missing = [
         k
         for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
