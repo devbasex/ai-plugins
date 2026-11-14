@@ -67,3 +67,49 @@ def test_combine_rejects_a_different_order() -> None:
     a = pd.Checked(pd.MVV, OK)
     with pytest.raises(ValueError):
         pd.combine([a, a, a])
+
+
+# 現状固定（I-018 の前）: mvv_state が宣言と本文を読むときの分岐
+_SHA_X = hashlib.sha256(b"x").hexdigest()
+
+
+def _approved(body: Any = "mvv.md", sha: Any = _SHA_X) -> bytes:
+    decl: dict[str, Any] = {"versions": [{"version": 1, "sha256": sha}]}
+    if body is not None:
+        decl["body"] = body
+    return json.dumps(decl).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("decl", "files", "state"),
+    [
+        (None, {"mvv.json": None}, "absent"),
+        (b"{", {}, "unreadable"),
+        (b"[]", {}, "unreadable"),
+        (_approved(body=None), {"mvv.md": b"x"}, "approved"),
+        (_approved(body=1), {"mvv.md": b"x"}, "approved"),
+        (_approved(body="b.md"), {"mvv.md": b"y", "b.md": b"x"}, "approved"),
+        (json.dumps({"body": "none.md", "versions": []}).encode("utf-8"), {}, "unapproved"),
+        (_approved(sha=1), {"mvv.md": b"x"}, "unapproved"),
+        (_approved(), {"mvv.md": b"z"}, "mismatch"),
+        (_approved(), {"mvv.md": None}, "unreadable"),
+    ],
+)
+def test_mvv_state_reads_the_declaration_and_the_body(tmp_path: Path, decl: bytes | None, files: dict, state: str) -> None:
+    (tmp_path / ".ndf").mkdir()
+    if decl is not None:
+        (tmp_path / ".ndf" / "mvv.json").write_bytes(decl)
+    for name, data in files.items():
+        if data is None:
+            (tmp_path / ".ndf" / name).mkdir()
+        else:
+            (tmp_path / ".ndf" / name).write_bytes(data)
+    assert preflight.mvv_state(tmp_path) == state
+
+
+# NOTE: 現状固定。UTF-8 でない宣言は unreadable にならず、UnicodeDecodeError がそのまま出る
+def test_mvv_state_raises_on_a_declaration_that_is_not_utf8(tmp_path: Path) -> None:
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "mvv.json").write_bytes(b"\xff")
+    with pytest.raises(UnicodeDecodeError):
+        preflight.mvv_state(tmp_path)

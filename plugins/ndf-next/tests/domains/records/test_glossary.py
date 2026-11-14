@@ -76,3 +76,50 @@ def test_layout_reads_document_dir_and_max_lines(tmp_path: Path) -> None:
 def test_layout_without_declaration_raises(tmp_path: Path) -> None:
     with pytest.raises(glossary.GlossaryError):
         glossary.layout(tmp_path)
+
+
+# 現状固定（I-018 の前）: 用語集の宣言と正本を読むときの誤りと既定
+def _decl_only(tmp_path: Path, data: bytes) -> Path:
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "glossary.json").write_bytes(data)
+    return tmp_path
+
+
+def test_layout_reports_unreadable_json_and_a_declaration_without_source_or_document(tmp_path: Path) -> None:
+    root = _decl_only(tmp_path, b"{")
+    with pytest.raises(glossary.GlossaryError, match=r"glossary\.json を読めない: "):
+        glossary.layout(root)
+    for data in (b"[]", json.dumps({"source": "glossary.json"}).encode("utf-8")):
+        (root / ".ndf" / "glossary.json").write_bytes(data)
+        with pytest.raises(glossary.GlossaryError) as exc:
+            glossary.layout(root)
+        assert str(exc.value) == "用語集の設定に source と document が無い"
+
+
+def test_layout_falls_back_to_the_defaults_for_a_non_int_max_lines(tmp_path: Path) -> None:
+    root = _decl_only(tmp_path, json.dumps({"source": "glossary.json", "document": "docs/g.md", "max_lines": "9"}).encode("utf-8"))
+    assert glossary.layout(root) == gd.Layout("glossary.json", "docs/g.md", "docs/g", glossary.DEFAULT_MAX_LINES)
+
+
+def test_load_reports_a_missing_or_malformed_source(tmp_path: Path) -> None:
+    root = _decl_only(tmp_path, json.dumps({"source": "glossary.json", "document": "docs/g.md"}).encode("utf-8"))
+    lay = glossary.layout(root)
+    with pytest.raises(glossary.GlossaryError, match=r"glossary\.json を読めない: "):
+        glossary.load(root, lay)
+    (root / "glossary.json").write_text(json.dumps({"contexts": {}, "terms": []}), encoding="utf-8")
+    with pytest.raises(glossary.GlossaryError) as exc:
+        glossary.load(root, lay)
+    assert str(exc.value) == "glossary.json に contexts と terms の配列が無い"
+    (root / "glossary.json").write_text(json.dumps({"contexts": [], "terms": []}), encoding="utf-8")
+    assert glossary.load(root, lay) == {"contexts": [], "terms": []}
+
+
+# NOTE: 現状固定。UTF-8 でない宣言・正本は GlossaryError にならず、UnicodeDecodeError がそのまま出る
+def test_layout_and_load_raise_on_bytes_that_are_not_utf8(tmp_path: Path) -> None:
+    root = _decl_only(tmp_path, b"\xff")
+    with pytest.raises(UnicodeDecodeError):
+        glossary.layout(root)
+    (root / ".ndf" / "glossary.json").write_text(json.dumps({"source": "glossary.json", "document": "docs/g.md"}), encoding="utf-8")
+    (root / "glossary.json").write_bytes(b"\xff")
+    with pytest.raises(UnicodeDecodeError):
+        glossary.load(root, glossary.layout(root))
