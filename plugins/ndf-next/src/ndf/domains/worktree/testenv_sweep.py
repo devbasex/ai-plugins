@@ -102,7 +102,12 @@ def expose(t: Target) -> str:
     url = f"https://{host}"
     if not _claim(t, url, str(conf["ttl"]) if conf.get("ttl") else DEFAULT_TTL):
         raise TestenvError("拒否: 別のテスト環境が公開中（同時に開けるのは 1 本）")
-    values = {"NDF_EXPOSE_URL": url, "NDF_EXPOSE_HOST": host, "NDF_EXPOSE_ENVIRONMENT": row["environment"], "NDF_EXPOSE_SLOT": str(row["slot"])}
+    values = {
+        "NDF_EXPOSE_URL": url,
+        "NDF_EXPOSE_HOST": host,
+        "NDF_EXPOSE_ENVIRONMENT": row["environment"],
+        "NDF_EXPOSE_SLOT": str(row["slot"]),
+    }
     if t.shell.sh(str(conf["open_command"]), t.path, values).returncode != 0:
         # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す
         t.book.update(t.key, _close, pick=lambda r: r.get("expose") is not None and r["expose"].get("closed_at") is None)

@@ -52,7 +52,9 @@ def run_deps(tool: str, args: argparse.Namespace) -> dict[str, Any]:
     except deps.DepsError as exc:
         return result.stopped(tool, "precondition", f"依存の用意: 宣言が壊れている（{exc}）")
     if got.failed:
-        return result.stopped(tool, "check_failed", f"依存の用意: 失敗（{got.failed}・{got.seconds} 秒）", items=[{"line": x} for x in got.tail])
+        return result.stopped(
+            tool, "check_failed", f"依存の用意: 失敗（{got.failed}・{got.seconds} 秒）", items=[{"line": x} for x in got.tail]
+        )
     summary = "依存の用意: 用意の印があった" if got.skipped else f"依存の用意: 済み（{got.steps} 件・{got.seconds} 秒）"
     return result.result(tool, result.OK, summary, metrics=deps.summary(got))
 
@@ -85,7 +87,11 @@ def run_localenv(tool: str, args: argparse.Namespace) -> dict[str, Any]:
         return _verdict(tool, localenv.verify(t, shell), [])
     verdict, rc = localenv.healthcheck(t, shell)
     if verdict.result != localenv_decide.MATCH or rc is None:
-        return _verdict(tool, verdict, []) if verdict.result != localenv_decide.MATCH else result.result(tool, result.OK, "動作確認のコマンドが宣言されていない")
+        return (
+            _verdict(tool, verdict, [])
+            if verdict.result != localenv_decide.MATCH
+            else result.result(tool, result.OK, "動作確認のコマンドが宣言されていない")
+        )
     if rc != 0:
         return result.stopped(tool, "check_failed", f"動作確認のコマンドが失敗した（終了コード {rc}）")
     return result.result(tool, result.OK, "動作確認が通った")
@@ -108,7 +114,9 @@ def _te_bake(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str
     if not args.golden:
         return result.stopped(tool, "invalid", "--tag が要る")
     created, existing = testenv.bake(t, args.golden)
-    return result.result(tool, result.OK, f"基準を {created} 件作った（既にあった {existing} 件）", metrics={"created": created, "existing": existing})
+    return result.result(
+        tool, result.OK, f"基準を {created} 件作った（既にあった {existing} 件）", metrics={"created": created, "existing": existing}
+    )
 
 
 def _rc(tool: str, label: str, rc: int) -> dict[str, Any]:
@@ -128,7 +136,13 @@ def _te_test(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str
 
 def _te_compose_env(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     values = testenv.compose_env(t)
-    return result.result(tool, result.OK, "割り当ては無い" if not values else f"渡す値 {len(values)} 件", [{"key": k, "value": v} for k, v in values.items()], outputs=values)
+    return result.result(
+        tool,
+        result.OK,
+        "割り当ては無い" if not values else f"渡す値 {len(values)} 件",
+        [{"key": k, "value": v} for k, v in values.items()],
+        outputs=values,
+    )
 
 
 def _te_reap(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
@@ -142,7 +156,12 @@ def _te_reap(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str
 
 def _te_reclaim(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     items = testenv.reclaim(t)
-    return result.result(tool, result.OK, f"回収した: {sum(1 for i in items if i['result'] != 'kept')} 件（残した {sum(1 for i in items if i['result'] == 'kept')} 件）", items)
+    return result.result(
+        tool,
+        result.OK,
+        f"回収した: {sum(1 for i in items if i['result'] != 'kept')} 件（残した {sum(1 for i in items if i['result'] == 'kept')} 件）",
+        items,
+    )
 
 
 def _te_expose(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:

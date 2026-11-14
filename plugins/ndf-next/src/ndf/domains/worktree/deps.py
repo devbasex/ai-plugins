@@ -178,7 +178,10 @@ def _verify(wt: Git, top: Path, steps: dict[str, list[str]], before: str, since:
     after = wt.run("status", "--porcelain")
     if after != before:
         out.failed = "git の状態"
-        out.log += ["用意の前後で git の状態が変わった。依存物は git が無視するパスに置く:", *sorted(set(after.splitlines()) - set(before.splitlines()))]
+        out.log += [
+            "用意の前後で git の状態が変わった。依存物は git が無視するパスに置く:",
+            *sorted(set(after.splitlines()) - set(before.splitlines())),
+        ]
 
 
 def prepare(worktree: Path, if_unprepared: bool = False, shell: Optional[container.Shell] = None) -> Prepared:

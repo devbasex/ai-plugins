@@ -46,7 +46,9 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
     (wt / "notes.txt").write_text("keep me", encoding="utf-8")  # 追跡していないファイルは退避してから外す
     (wt / "__pycache__").mkdir()
     (wt / "__pycache__" / "m.pyc").write_text("", encoding="utf-8")
-    run_git(main_repo, "update-ref", "refs/remotes/origin/develop", "develop")  # 取得済みの参照を古くし、取り込みが fetch を読むことを確かめる
+    run_git(
+        main_repo, "update-ref", "refs/remotes/origin/develop", "develop"
+    )  # 取得済みの参照を古くし、取り込みが fetch を読むことを確かめる
 
     rec = merged.after_merge(main_repo, [7, 8, 9], FakeHub({7: _pull(7, "feat/a", True), 8: _pull(8, "feat/b", False)}))
 

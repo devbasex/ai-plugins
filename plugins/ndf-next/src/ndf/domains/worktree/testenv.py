@@ -188,14 +188,16 @@ def bake(t: Target, value: str) -> tuple[int, int]:
         raise TestenvError("コンテナの実行系が見つからない")
     volumes = t.at("golden_volumes")
     created = existing = 0
-    for source, golden in (volumes.items() if isinstance(volumes, dict) else []):
+    for source, golden in volumes.items() if isinstance(volumes, dict) else []:
         name = f"{golden}-{value}"
         if t.shell.docker_run("volume", "inspect", name).returncode == 0:
             existing += 1
             continue
         if t.shell.docker_run("volume", "create", name).returncode != 0:
             raise TestenvError(f"基準のボリュームを作れない: {name}")
-        copied = t.shell.docker_run("run", "--rm", "-v", f"{source}:/from:ro", "-v", f"{name}:/to", "alpine", "sh", "-c", "cd /from && cp -a . /to")
+        copied = t.shell.docker_run(
+            "run", "--rm", "-v", f"{source}:/from:ro", "-v", f"{name}:/to", "alpine", "sh", "-c", "cd /from && cp -a . /to"
+        )
         if copied.returncode != 0:
             t.shell.docker_run("volume", "rm", name)
             raise TestenvError(f"基準を作れない: {name}")

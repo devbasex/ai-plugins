@@ -114,4 +114,3 @@ def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Option
         return Created(target, branch, base, branch, False, warnings)
     g.run("worktree", "add", "-q", "--no-track", "-b", branch, str(target), ref)
     return Created(target, branch, base, ref, True, warnings)
-

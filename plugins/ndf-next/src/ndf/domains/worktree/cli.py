@@ -92,7 +92,9 @@ def _create(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
         return result.stopped(TOOL, exc.kind, str(exc))
     outputs = {"worktree": str(got.path), "branch": got.branch}
     item = {"path": str(got.path), "branch": got.branch, "base": got.base, "start_ref": got.start_ref, "new_branch": got.new_branch}
-    return result.result(TOOL, result.OK, f"worktree を用意した: {got.path}（起点 {got.base}）", [item], outputs=outputs, warnings=got.warnings)
+    return result.result(
+        TOOL, result.OK, f"worktree を用意した: {got.path}（起点 {got.base}）", [item], outputs=outputs, warnings=got.warnings
+    )
 
 
 def _list(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
