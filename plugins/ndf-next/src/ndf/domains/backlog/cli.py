@@ -337,7 +337,7 @@ def _apply_outcome(repo: str, run_id: str, plan_path: str, got: dict[str, Any]) 
     if waiting or skipped:
         nxt = []
         if waiting:
-            nxt.append("承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す")
+            nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
         if skipped:
             nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
         again = result.command(TOOL, "apply", "--repo", repo, "--plan", plan_path, "--run-id", run_id)

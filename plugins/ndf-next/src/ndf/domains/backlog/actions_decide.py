@@ -101,9 +101,10 @@ def changes_of(act: dict[str, Any]) -> dict[str, Any]:
 
 def ledger_key(repo: str, act: dict[str, Any]) -> str:
     """記録の鍵。plan の更新の時刻と要約値も含め、後の回の同じ変更を「済み」にしない。"""
-    return f"{repo}#{act['number']}:" + model.stable_digest(
-        {"changes": changes_of(act), "updated_at": act["updated_at"], "digest": act["digest"]}
-    )[:12]
+    return (
+        f"{repo}#{act['number']}:"
+        + model.stable_digest({"changes": changes_of(act), "updated_at": act["updated_at"], "digest": act["digest"]})[:12]
+    )
 
 
 def gate(act: dict[str, Any], rec: Optional[dict[str, Any]]) -> Optional[tuple[str, str]]:
