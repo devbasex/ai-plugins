@@ -292,6 +292,14 @@ def _try_flock(handle: IO[str], mode: int) -> bool:
     return True
 
 
+def _lock(handle: IO[str], mode: int, wait: bool) -> bool:
+    """`wait` なら取れるまで待って真、そうでなければ待たずに試して取れたかを返す。"""
+    if wait:
+        fcntl.flock(handle, mode)
+        return True
+    return _try_flock(handle, mode)
+
+
 def store_root(name: str, cwd: Path) -> Path:
     """チェックアウトの置き場 `<git の共通ディレクトリ>/<name>/state`。どの worktree から打っても同じパス。"""
     out = subprocess.run(
@@ -330,9 +338,7 @@ def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
     path = root.parent / MAINT_LOCK
     handle = _open_lock_file(path)
     try:
-        if wait:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        elif not _try_flock(handle, fcntl.LOCK_EX):
+        if not _lock(handle, fcntl.LOCK_EX, wait):
             yield None
             return
         yield path
@@ -365,9 +371,7 @@ def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
     path = _dbos_dir(root) / f"{name}{LOCK_SUFFIX}"
     while True:
         handle = _open_lock_file(path)
-        if wait:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        elif not _try_flock(handle, fcntl.LOCK_EX):
+        if not _lock(handle, fcntl.LOCK_EX, wait):
             handle.close()
             yield None
             return
