@@ -149,6 +149,15 @@ class RunRecord:
     app_version: str | None = None
 
 
+@dataclass(frozen=True)
+class LedgerRow:
+    """台帳 `ndf_runs` の 1 行。鍵の名前・実行の鍵・起こした時刻。"""
+
+    run_name: str
+    run_key: str
+    started_at: datetime
+
+
 # 置き場のロックを共有で持ち続けるファイル（プロセスが終わるまで放さない）
 _held_stores: dict[Path, IO[str]] = {}
 
@@ -738,13 +747,13 @@ def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> 
             raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
 
 
-def _ledger(database_url: str) -> list[tuple[str, str, datetime]]:
+def _ledger(database_url: str) -> list[LedgerRow]:
     """台帳の行（鍵の名前・実行の鍵・起こした時刻）。表が無ければ空。"""
     table = _runs_table(sa.MetaData())
     with _engine(database_url) as engine, engine.connect() as conn:
         if not sa.inspect(conn).has_table(RUNS_TABLE):
             return []
-        return [tuple(row) for row in conn.execute(sa.select(table))]  # type: ignore[misc]
+        return [LedgerRow(*row) for row in conn.execute(sa.select(table))]
 
 
 def _forget_run(database_url: str, name: str) -> None:
@@ -778,11 +787,11 @@ def sweep_url(database_url: str, now: datetime | None, root: Path) -> SweepResul
             out.warnings.append(f"台帳を読めない: {exc}")
             rows = []
         cutoff = now - timedelta(days=KEEP_DAYS)
-        for name, _run_key, started_at in rows:
+        for row in rows:
             try:
-                _sweep_url_run(database_url, name, started_at, cutoff, out)
+                _sweep_url_run(database_url, row.run_name, row.started_at, cutoff, out)
             except Exception as exc:  # noqa: BLE001 ネットワーク: 1 つの鍵を片付けられなくても止めず、warnings に載せる
-                out.warnings.append(f"{name}: {exc}")
+                out.warnings.append(f"{row.run_name}: {exc}")
     if out.warnings:
         log.warning("URL の片付けで読めない鍵があった", extra={"count": len(out.warnings), "sample": out.warnings[:10]})
     return out
@@ -827,7 +836,7 @@ def pending(root_or_url: Path | str) -> list[RunRecord]:
     """待ちを抱えた（`PENDING`・`ENQUEUED`）実行を集める。置き場なら鍵ごとのファイル、URL なら台帳の鍵から。"""
     if isinstance(root_or_url, Path):
         return _pending_in(root_or_url)
-    names = [row[0] for row in _ledger(root_or_url)]
+    names = [row.run_name for row in _ledger(root_or_url)]
     return _records(root_or_url, names, list(WAITING)) if names else []
 
 

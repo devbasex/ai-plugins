@@ -53,11 +53,11 @@ def test_register_writes_a_key_once_and_forget_removes_it(tmp_path, disposed):
     durable._register_run(url, "run-b", "key-b", STARTED)
 
     rows = durable._ledger(url)
-    assert sorted((r[0], r[1]) for r in rows) == [("run-a", "key-a"), ("run-b", "key-b")]
-    assert {r[2].replace(tzinfo=None) for r in rows} == {STARTED.replace(tzinfo=None)}
+    assert sorted((r.run_name, r.run_key) for r in rows) == [("run-a", "key-a"), ("run-b", "key-b")]
+    assert {r.started_at.replace(tzinfo=None) for r in rows} == {STARTED.replace(tzinfo=None)}
 
     durable._forget_run(url, "run-a")
-    assert [r[0] for r in durable._ledger(url)] == ["run-b"]
+    assert [r.run_name for r in durable._ledger(url)] == ["run-b"]
     assert disposed["created"] == disposed["disposed"] == 6
 
 
