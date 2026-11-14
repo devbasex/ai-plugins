@@ -187,6 +187,22 @@ def test_every_plan_a_stage_calls_has_a_route_template():
     assert [c for c in sorted(called) if c[2] not in known] == []
 
 
+def test_a_stage_calling_a_plan_run_in_the_worktree_takes_the_worktree_as_an_input():
+    # PR 3486 の指摘: 作業場所で打つ雛形（差し込みに worktree）を呼ぶ工程は、文脈の作業場所を入力に持つ。持たないと
+    # 雛形の差し込みがブランチ名から別の作業場所を推し、そこの HEAD を push する
+    templates = route.templates()
+    lacking = sorted(
+        (mode, s.name, st.id)
+        for mode in definition.modes()
+        for s in definition.load_definition(mode).stages
+        for st in s.steps
+        if st.call == "ndf.plan"
+        and "worktree" in templates[invoke.stage_run(s, st, {}).name].params
+        and "worktree" not in s.inputs
+    )
+    assert lacking == []
+
+
 def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_path, monkeypatch):
     # PR 3464 の指摘: --set worktree=... はプランの実行が決まった名前の上書きとして断る
     _plan_template(monkeypatch, params=("worktree",))
