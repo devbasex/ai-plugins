@@ -274,13 +274,18 @@ def counts_of(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     回の始まりの行は `{"event": "run", "start": <開始のステップか null>}`、件数の行は
     `{"event": "step", "step": <id>, "counts": {...}}`。途中から流し直した回は区間を切らず、前の回の件数を残す。
     """
+    return {row["step"]: row["counts"] for row in _last_section(rows) if _is_counts_row(row)}
+
+
+def _last_section(rows: Sequence[Mapping[str, Any]]) -> Sequence[Mapping[str, Any]]:
+    """最後の頭からの回（`start` が null の回の始まり）から後の行。頭からの回が無ければ全部。"""
     heads = [i for i, r in enumerate(rows) if r.get("event") == EVENT_RUN and r.get("start") is None]
-    section = rows[heads[-1] :] if heads else rows
-    out: dict[str, Any] = {}
-    for row in section:
-        if row.get("event") == EVENT_STEP and isinstance(row.get("step"), str) and isinstance(row.get("counts"), dict):
-            out[row["step"]] = row["counts"]
-    return out
+    return rows[heads[-1] :] if heads else rows
+
+
+def _is_counts_row(row: Mapping[str, Any]) -> bool:
+    """ステップの件数の行（`step` が文字列で `counts` が辞書）か。"""
+    return row.get("event") == EVENT_STEP and isinstance(row.get("step"), str) and isinstance(row.get("counts"), dict)
 
 
 def _counts(ref: Ref, ctx: Context, src: Sources) -> Got:
