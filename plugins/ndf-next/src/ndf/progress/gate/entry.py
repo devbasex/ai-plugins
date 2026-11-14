@@ -184,6 +184,15 @@ def progress_verbs() -> set[str]:
     return _verbs(run.parser()) | _verbs(command.parser())
 
 
+Dispatch = Callable[[argparse.Namespace, Path], dict[str, Any]]
+# `ndf answer` の副命令の名前 → （引数の解析器を作る関数, 受ける関数）。`work` は exec するので表の外で受ける
+ANSWER_VERBS: dict[str, tuple[Callable[[], argparse.ArgumentParser], Dispatch]] = {
+    "ask": (ask_parser, lambda a, _cwd: ask(a.gate)),
+    "head": (head_parser, lambda a, cwd: command.with_store(cwd, _cmd_head, a)),
+    "list": (list_parser, lambda a, cwd: command.with_store(cwd, _cmd_list, a)),
+}
+
+
 def main(argv: list[str]) -> int:
     """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
 
@@ -191,14 +200,11 @@ def main(argv: list[str]) -> int:
     - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
       トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
     """
-    if argv and argv[0] == "ask":
-        return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
+    if argv and argv[0] in ANSWER_VERBS:
+        make, dispatch = ANSWER_VERBS[argv[0]]
+        return command.run_main(make(), dispatch, argv[1:])
     if argv and argv[0] == "work":
         return _cmd_work(argv[1:])
-    if argv and argv[0] == "head":
-        return command.run_main(head_parser(), lambda a, cwd: command.with_store(cwd, _cmd_head, a), argv[1:])
-    if argv and argv[0] == "list":
-        return command.run_main(list_parser(), lambda a, cwd: command.with_store(cwd, _cmd_list, a), argv[1:])
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
     if not argv or argv[0].startswith("-") or argv[0] in progress_verbs():
