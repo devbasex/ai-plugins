@@ -62,7 +62,7 @@ def rejections(events: Iterable[model.Event]) -> dict[str, int]:
     """承認しなかった答え（承認しない・差し戻し）を承認ゲートの区分ごとに数える（gate-rejections の正本は事象）。"""
     out: dict[str, int] = {}
     for ev in events:
-        p = ev.draft.payload if ev.draft.payload is not None else {}
+        p = run.payload_of(ev)
         if ev.draft.kind == run.ANSWERED and p.get("answer") in REJECTING and p.get("kind") == invoke.LISTEN:
             gate = str(p["gate"]) if p.get("gate") else "plan"
             out[gate] = out[gate] + 1 if gate in out else 1
@@ -78,7 +78,7 @@ def answers(v: run.View) -> list[dict[str, Any]]:
     for ev in v.events:
         if ev.draft.kind != run.ANSWERED:
             continue
-        p = ev.draft.payload if ev.draft.payload is not None else {}
+        p = run.payload_of(ev)
         out.append(
             {
                 "seq": ev.seq,

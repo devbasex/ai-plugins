@@ -73,7 +73,7 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
 
 def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
     for ev in v.events:
-        p = ev.draft.payload if ev.draft.payload is not None else {}
+        p = run.payload_of(ev)
         if ev.draft.kind == run.ANSWERED and p.get("key") == key and ev.draft.rev == v.rev:
             return ev
     return None
@@ -150,7 +150,7 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
 
 
 def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:
-    p = held.draft.payload if held.draft.payload is not None else {}
+    p = run.payload_of(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等の鍵 {a.key} は別の答え（{p.get('answer')}・問い {p.get('gate_id')}）に使った")
     summary = f"冪等の鍵 {a.key} の答えは書いてある（事象 {held.seq}）"
@@ -212,7 +212,7 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
     m = run.decide(v)
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
-    p = m.event.draft.payload if m.event.draft.payload is not None else {}
+    p = run.payload_of(m.event)
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))

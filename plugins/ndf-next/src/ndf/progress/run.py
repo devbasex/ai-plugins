@@ -104,11 +104,11 @@ class View:
         out = dict(self.doc["context"])
         for ev in self.events:
             if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == self.rev:
-                out.update(_payload(ev)["outputs"])
+                out.update(payload_of(ev)["outputs"])
         return out
 
 
-def _payload(ev: model.Event) -> dict[str, Any]:
+def payload_of(ev: model.Event) -> dict[str, Any]:
     """事象の payload。無ければ空。"""
     return ev.draft.payload if ev.draft.payload is not None else {}
 
@@ -174,11 +174,11 @@ class StepProgress:
         return None
 
     def answer_value(self) -> Optional[str]:
-        return str(_payload(self.answer)["answer"]) if self.answer is not None else None
+        return str(payload_of(self.answer)["answer"]) if self.answer is not None else None
 
     def see(self, ev: model.Event) -> None:
         """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの revise）なら世代を上げてステップを初めから流し直す。"""
-        kind, p = ev.draft.kind, _payload(ev)
+        kind, p = ev.draft.kind, payload_of(ev)
         if kind == ANSWERED:
             self._answered(ev, p)
         elif kind == STARTED:
@@ -358,7 +358,7 @@ def _metrics(v: View, m: Move) -> dict[str, Any]:
 
 def _failed_report(v: View, m: Move) -> dict[str, Any]:
     assert m.stage is not None
-    p = _payload(m.event) if m.event is not None else {}
+    p = payload_of(m.event) if m.event is not None else {}
     cause = p["cause"] if isinstance(p.get("cause"), dict) else {}
     kind = causes.kind_of(cause)
     kind = kind if kind is not None and kind in causes.table() else "unknown"
@@ -619,7 +619,7 @@ def _launched(d: Drive, v: View, m: Move) -> dict[str, Any]:
 
 def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
     """承認ゲートのステップの出力（答えを持つ結果 JSON）。"""
-    p = _payload(answer)
+    p = payload_of(answer)
     summary = f"承認ゲート {step.gate} の答え: {p['answer']}（{answer.draft.reason}）"
     return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
 
@@ -627,7 +627,7 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 def _consume(d: Drive, v: View, m: Move) -> None:
     """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。"""
     assert m.stage is not None and m.step is not None and m.event is not None and m.progress is not None
-    if _payload(m.event)["answer"] == APPROVED:
+    if payload_of(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
         payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
