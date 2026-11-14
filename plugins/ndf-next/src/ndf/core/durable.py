@@ -56,7 +56,7 @@ LOG_LEVEL = "WARNING"
 FORMAT = 1
 # 耐久ワークフローの関数（`@durable.workflow` を付けた src の関数）のソースの sha256。
 # 関数を変えたら、FORMAT を上げるか、呼び出しの順が変わらないと判断してこの値だけを書き直す
-FORMAT_SOURCE_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+FORMAT_SOURCE_HASH = "1f008bfee90a33d69bd70f2dcbead91dee794d53cd67ad5b82fd603887c30b29"
 # チェックアウトの置き場の `format.json` の番号（決定 85）
 STORE_FORMAT = 1
 # retired/・broken/ と URL の終わった実行を消すまでの日数（決定 83）
