@@ -92,7 +92,7 @@ jobs:
           a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
           diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
           sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
-      - run: bash -n bin/ndf
+      - run: bash -n bin/ndf && bash -n bin/ndf-claude
       # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
       # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
       # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない。
@@ -130,11 +130,14 @@ jobs:
           PYTHONPATH=src uv run --frozen --project . python - "$copy" <<'EOF'
           import json, pathlib, sys
           from ndf import identity
+          from ndf.domains.hooks import registration
           for rel in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"):
               path = pathlib.Path(sys.argv[1], rel)
               data = json.loads(path.read_text(encoding="utf-8"))
               data["name"] = identity.FINAL_NAME
               path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          # hook の登録は名前から作る生成物なので、入れ替えの PR と同じく作り直す（ndf hooks render）
+          registration.write(pathlib.Path(sys.argv[1]))
           EOF
           git -C "$RUNNER_TEMP/copy" init -q
           git -C "$RUNNER_TEMP/copy" add -A

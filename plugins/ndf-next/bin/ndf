@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# エントリポイント。uv.lock が固定する依存の仮想環境を用意して `python -m ndf` を呼ぶ。
+# エントリポイント。uv.lock が固定する依存の仮想環境を用意し、`bin/start.py` で欠けを確かめてから `python -m ndf` を呼ぶ。
 # 仮想環境はプラグインの外（`<キャッシュのホーム>/<プラグイン名>/venv/<版>`）に置き、版ごとに分ける。
 # プラグインの根はこのファイルの実体の位置から求め、子へ CLAUDE_PLUGIN_ROOT で渡す（ほかのプラグインの値を引き継がない）。
 #
@@ -88,5 +88,6 @@ export NDF_CALLER_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
-# -P: 呼び出し元のディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）
-exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P -m ndf "$@"
+# -P: 呼び出し元のディレクトリとこのディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）。
+# start.py は依存の環境の欠けを確かめてから `python -m ndf` と同じに呼ぶ（欠けていれば入れ直しの手順で止まる。#2447）
+exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P "$root/bin/start.py" "$@"

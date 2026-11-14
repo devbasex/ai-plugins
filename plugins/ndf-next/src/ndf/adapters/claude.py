@@ -86,9 +86,27 @@ class ClaudeCall:
 
 
 def plugin_args(root: Path) -> list[str]:
-    """入っている旧い NDF を外し、`root` のプラグインを読む `claude` の引数。"""
-    settings = json.dumps({"enabledPlugins": DISABLED_PLUGINS}, separators=(",", ":"))
-    return ["--settings", settings, "--plugin-dir", str(root)]
+    """入っている旧い NDF を外し、`root` のプラグインを読む `claude` の引数。
+
+    外す設定（`DISABLED_PLUGINS`）のうち、`root` の `plugin.json` の名前と同じ名前の行は外さない（入れ替えの後、
+    マーケットプレイスの登録の名前が自分と同じになっても、自分を外さない）。外す行が残らなければ `--settings` を付けない。
+    """
+    own = _plugin_name(root)
+    disabled = {key: value for key, value in DISABLED_PLUGINS.items() if key.split("@", 1)[0] != own}
+    load = ["--plugin-dir", str(root)]
+    if not disabled:
+        return load
+    return ["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load]
+
+
+def _plugin_name(root: Path) -> Optional[str]:
+    """`root` の `.claude-plugin/plugin.json` の名前。読めなければ None（外す設定をすべて残す）。"""
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 名前を読めないプラグインの根は、外す設定をすべて残す
+        return None
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) else None
 
 
 def minimal_args(system: str) -> list[str]:

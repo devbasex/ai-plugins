@@ -4,8 +4,8 @@ M3-H13 は所要時間で合否を決めない（マシンのスペックと混�
 エントリポイントが起動する子のプロセスの数・読み込むモジュールの数・ディレクトリの走査を数え、決めた値と比べる。
 所要時間（p50・p95）は `ndf hooks stats` に記録するだけである。
 
-登録の command は S1 が `hooks/claude.json` に置く形（決定 89）をそのまま打つ。`hooks/entry.py` と `hooks/boot.py` は
-S1 が置くため、ここでは同じ働きの薄いスクリプト（本体の `run_entry`・`run_boot` を呼ぶだけ）を一時の置き場に置く。
+登録の command は `hooks/claude.json` の形（決定 89。`registration.SCRIPT`）をそのまま打つ。数える対象を一時の置き場に
+限るため、`hooks/entry.py` と `hooks/boot.py` と同じ働きの薄いスクリプト（本体の `run_entry`・`run_boot` を呼ぶだけ）を置く。
 """
 
 from __future__ import annotations
@@ -21,14 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.hooks import budget, env
+from ndf.domains.hooks import budget, env, registration
 from ndf.testing.waits import wait_until
 
 from ._hooks import AUTO, SRC, bash, make_repo, read_sample, records, sample, sample_paths, state_dir
 
-REGISTRATION = (
-    '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'
-)
+REGISTRATION = registration.SCRIPT
 # エントリポイント 1 回の重さの上限（M3-H13）。モジュールは 2026-11-14 の実測（PreToolUse 83・Stop 146・SessionStart 70・
 # UserPromptSubmit 61・PostToolUse と SessionEnd 58）へ約 2 割を足した値。子のプロセスはどの事象も起動しない。
 # ディレクトリの走査は SessionStart の掃除（状態ディレクトリの hooks の下）だけが行う

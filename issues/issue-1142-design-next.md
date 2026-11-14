@@ -489,7 +489,13 @@ graph TD
 
 ### 決定 74: 開発の間は `ndf-next` をマーケットプレイスへ載せない
 
-試すのは `claude --plugin-dir plugins/ndf-next` と CI のテストだけにする。載せると、開発版の利用者の手元で hook が `ndf` と二重に走り、状態の置き場も混ざる。さらに、develop が main へ入るときに外す決まりが要る。
+試すのは起動のスクリプト `plugins/ndf-next/bin/ndf-claude` と CI のテストだけにする。載せると、開発版の利用者の手元で hook が `ndf` と二重に走り、状態の置き場も混ざる。さらに、develop が main へ入るときに外す決まりが要る。
+
+`claude --plugin-dir plugins/ndf-next` だけでは、入っている `ndf` も読まれ、同じ名前の Skill と `ndf` の hook が並ぶ（[issue-3347-source-note.md](issue-3347-source-note.md) の「ndf-next を試す起動の手順」の実測）。起動のスクリプトは、入っている `ndf` を `--settings` の `enabledPlugins` で外し、`--plugin-dir` で `ndf-next` を読む。
+
+- 外す設定と読む引数は `ndf launch-args`（`adapters/claude.py` の `plugin_args`）の 1 か所から読む。Skill を回す `claude -p` も同じ値で起こす
+- `--settings` はその起動だけに効く。利用者の設定ファイルは書き換えない
+- 外す設定のうち、自分の `plugin.json` の名前と同じ名前の行は外さない。入れ替え（S2）で名前が `ndf` になった後も、自分を外さない
 
 ### 決定 75: 新しいディレクトリの中では、自分の名前を文字で持たない
 
