@@ -334,6 +334,15 @@ def test_new_stops_as_invalid_with_one_item_per_error(repo, capsys, extra, prefi
     assert out["items"] and all(i["error"].startswith(prefix) for i in out["items"])
 
 
+@pytest.mark.parametrize("extra", [("--pace", "slow"), ("--issues", "5", "5"), ("--disable", "存在しない=理由")])
+def test_new_that_stops_as_invalid_leaves_no_table(repo, capsys, extra):
+    """現状固定: 文脈か --disable で止まった new は進行表を残さず、同じ名前で作り直せる。"""
+    code, out = _new(capsys, *extra)
+    assert code == 2 and out["cause"]["kind"] == "invalid"
+    code, out = _new(capsys)
+    assert code == 0 and out["status"] == "ok"
+
+
 def test_new_of_an_unknown_mode_is_invalid(repo, capsys):
     code, out = _run(capsys, "new", "s1", "--mode", "nope", "--issues", "1")
     assert code == 2 and out["cause"]["kind"] == "invalid"
