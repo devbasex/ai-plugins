@@ -250,6 +250,65 @@ def test_ci_local_quotes_failed_test_files_for_the_shell(tmp_path, monkeypatch):
     assert not (tmp_path / "hit").exists()
 
 
+def test_ci_local_passes_signal_and_slot_results_through_without_running_the_rest(tmp_path, monkeypatch, capsys):
+    """現状固定: --failed-from でも枠の止まり・シグナルの終了コードはそのまま返し、残りの suite を打たず結果ファイルも書かない。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    _ci_result(ci, ["tests/a.py::t1", "web/b.test.ts"])
+    seen = _slots(monkeypatch, tmp_path, "exit 130")
+    assert _failed_from(ci, out) == 130
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
+    assert capsys.readouterr().out == "" and not out.exists()
+    seen.unlink()
+    own = {"tool": "test-slot", "status": "stopped", "summary": "待ちの上限", "cause": {"kind": "wait_timeout", "detail": "x"}}
+    seen = _slots(monkeypatch, tmp_path, f"echo {shlex.quote(json.dumps(own))}; exit 3")
+    assert _failed_from(ci, out) == 3
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == own and not out.exists()
+
+
+def test_ci_local_writes_the_precondition_result_with_the_failed_tests(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: 打てずに止まるときも --result へ同じ結果を書き、metrics.failed_tests に CI の落ちたテストを残す。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "state" / "ci-local.json"
+    nodes = ["tests/a.py::t1", "docs/x.py::t"]
+    _ci_result(ci, nodes)
+    code = _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert code == causes.exit_code("precondition")
+    assert (found["cause"]["kind"], found["metrics"]) == ("precondition", {"failed_tests": nodes})
+    assert json.loads(out.read_text(encoding="utf-8")) == found
+
+
+def test_ci_local_invalid_result_is_not_written_to_the_result_file(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: CI の結果を読めない invalid は標準出力だけに出し、--result のファイルは作らない。"""
+    _declare(monkeypatch, tmp_path)
+    out = tmp_path / "ci-local.json"
+    assert _failed_from(tmp_path / "no.json", out) == causes.exit_code("invalid")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+    assert not out.exists()
+
+
+def test_ci_local_counts_runs_and_names_the_first_failed_command(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: metrics の runs・failed_runs は打った本数と落ちた本数。落ちの詳細は最初に落ちたコマンドを名指す。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    nodes = ["tests/a.py::t1", "web/b.test.ts"]
+    _ci_result(ci, nodes)
+    _slots(monkeypatch, tmp_path, "exit 1")
+    _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 2}
+    assert found["cause"]["detail"].endswith(": pytest -q tests/a.py")
+    assert "2 本のうち 2 本" in found["cause"]["detail"]
+    assert [i["kind"] for i in found["items"]] == ["test_run", "test_run"]
+    _slots(monkeypatch, tmp_path, "exit 0")
+    _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 0}
+    assert "2 本" in found["summary"]
+
+
 _RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの照合が止まっている。マージの前に決める"
 
 
