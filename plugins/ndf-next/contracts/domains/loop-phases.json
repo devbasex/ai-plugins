@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "summary": "収束ループ（cross-review と cross-refactoring）のフェーズ。行の並びはフェーズが進む順で、各フェーズの監視の上限は上限の宣言の monitor.phase.<id> が持つ",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "id": {"type": "string", "summary": "フェーズの名前", "ref": "limits.json#monitor.phase."},
+    "skill": {"type": "string", "summary": "フェーズを持つ収束ループ（cross-review か cross-refactoring）"},
+    "launch": {"type": "boolean", "summary": "cross-refactoring の進行がフェーズの開始を記録し、担当の CLI を起動するフェーズ"},
+    "coding": {"type": "boolean", "summary": "担当がコードを書くフェーズ。安全網（書いた変更を検証で戻す仕組み）に数える"},
+    "fix": {"type": "boolean", "summary": "指摘を直すフェーズ"},
+    "alive": {"type": "boolean", "summary": "監視が心拍のファイルを更新するフェーズ（最後の修正は除く）"},
+    "reassign": {"type": "boolean", "summary": "担当を替えられるフェーズ"},
+    "relaunch_in_place": {"type": "boolean", "summary": "担当を替えたとき、同じフェーズの中で起動し直すフェーズ（偽のフェーズは前のフェーズへ戻る）"},
+    "undo": {"type": "boolean", "summary": "担当を替えたとき、そのフェーズが書いた範囲を取り消すフェーズ"},
+    "resume_as": {"type": "string", "summary": "止まった実行を再開するときの位置（修正は検証の繰り返しの中にあり、修正からでなく検証から再開する）", "optional": true}
+  },
+  "rows": [
+    {"id": "review", "skill": "cross-review", "launch": false, "coding": false, "fix": false, "alive": false, "reassign": false, "relaunch_in_place": false, "undo": false},
+    {"id": "critique", "skill": "cross-review", "launch": false, "coding": false, "fix": false, "alive": false, "reassign": false, "relaunch_in_place": false, "undo": false},
+    {"id": "propose", "skill": "cross-refactoring", "launch": true, "coding": false, "fix": false, "alive": false, "reassign": true, "relaunch_in_place": true, "undo": false},
+    {"id": "plan", "skill": "cross-refactoring", "launch": true, "coding": false, "fix": false, "alive": true, "reassign": true, "relaunch_in_place": true, "undo": true},
+    {"id": "judge-test-changes", "skill": "cross-refactoring", "launch": false, "coding": false, "fix": false, "alive": false, "reassign": false, "relaunch_in_place": false, "undo": false},
+    {"id": "add-tests", "skill": "cross-refactoring", "launch": true, "coding": true, "fix": false, "alive": true, "reassign": true, "relaunch_in_place": true, "undo": true},
+    {"id": "implement", "skill": "cross-refactoring", "launch": true, "coding": true, "fix": false, "alive": true, "reassign": true, "relaunch_in_place": true, "undo": true},
+    {"id": "fix", "skill": "cross-refactoring", "launch": true, "coding": true, "fix": true, "alive": true, "reassign": true, "relaunch_in_place": false, "undo": false, "resume_as": "verify"},
+    {"id": "final-fix", "skill": "cross-refactoring", "launch": true, "coding": true, "fix": true, "alive": false, "reassign": true, "relaunch_in_place": false, "undo": false, "resume_as": "final"},
+    {"id": "judge", "skill": "cross-refactoring", "launch": true, "coding": false, "fix": false, "alive": false, "reassign": false, "relaunch_in_place": false, "undo": false},
+    {"id": "flaky-fix", "skill": "cross-refactoring", "launch": true, "coding": true, "fix": false, "alive": false, "reassign": false, "relaunch_in_place": false, "undo": false}
+  ]
+}

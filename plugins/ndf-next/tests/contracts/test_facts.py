@@ -102,6 +102,13 @@ def test_ref_errors_point_at_missing_targets(contracts_copy, sample_table):
     assert any("exit-codes" in e for e in errs)
 
 
+def test_ref_errors_skip_limits_refs_when_limits_unreadable(contracts_copy, sample_table):
+    bad = {**sample_table, "rows": [{"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"}]}
+    contracts_copy("facts/sample.json", lambda _: bad)
+    errs = facts.ref_errors("sample", None)
+    assert len(errs) == 1 and "exit-codes" in errs[0]
+
+
 def test_ref_errors_pass_when_targets_exist(sample):
     assert facts.ref_errors("sample", {"monitor.phase.review"}) == []
 
@@ -121,3 +128,93 @@ def test_parse_where(args, expected):
 def test_parse_where_needs_equals():
     with pytest.raises(facts.FactsError):
         facts.parse_where(["flag"])
+
+
+def test_domain_tables_are_read_by_name(contracts_copy, fact_table):
+    contracts_copy("domains/sample.json", lambda _: fact_table({}, [{"id": "x"}]))
+    assert "sample" in facts.names() and "runtimes" in facts.names()
+    assert facts.place("sample") == "domains/sample.json"
+    assert facts.ids("sample") == ("x",)
+
+
+def test_same_name_in_both_places_is_refused(contracts_copy, fact_table):
+    contracts_copy("domains/exit-codes.json", lambda _: fact_table({}, [{"id": "x"}]))
+    with pytest.raises(facts.FactsError, match="2 つの置き場"):
+        facts.table("exit-codes")
+
+
+def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
+    columns = {
+        "seat": {"type": "string", "summary": "s", "ref": "facts/runtimes"},
+        "next": {"type": "string", "summary": "n", "ref": "domains/runtimes"},
+    }
+    contracts_copy("domains/sample.json", lambda _: fact_table(columns, [{"id": "a", "seat": "claude", "next": "nobody"}]))
+    errs = facts.ref_errors("sample", set())
+    assert len(errs) == 2
+    assert any("domains/runtimes.json にある" in e for e in errs)
+    assert any("'nobody' が表 runtimes に無い" in e for e in errs)
+
+
+# 現状固定テスト（I-001）: 列の宣言から作る行の形。`checks/facts.py` の `row_schema` と違い、`id` は既定で空を許さず、`id` の列の宣言があればそれで置き換える。
+
+ROW_COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
+
+
+def test_row_schema_from_column_declarations_in_contracts():
+    assert facts.row_schema(ROW_COLUMNS) == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["id", "rank"],
+        "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "rank": {"type": "integer"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+
+
+def test_row_schema_declared_id_replaces_the_default_in_contracts():
+    schema = facts.row_schema({"id": {"type": "string", "summary": "i"}, "name": {"type": "string", "summary": "n"}})
+    assert list(schema["properties"]) == ["id", "name"]
+    assert schema["properties"]["id"] == {"type": "string"}
+    assert schema["required"] == ["id", "name"]
+
+
+def test_row_shape_errors_name_the_first_bad_row(contracts_copy, fact_table):
+    rows = [{"id": "a", "rank": 1}, {"id": "b", "rank": "1", "tags": [1], "x": 1}, {"id": "c"}]
+    contracts_copy("facts/sample.json", lambda _: fact_table(ROW_COLUMNS, rows))
+    with pytest.raises(facts.FactsError) as err:
+        facts.table("sample")
+    assert str(err.value) == (
+        "事実の表 facts/sample.json の行 1（'b'）の形が違う: "
+        "'1' is not of type 'integer'; 1 is not of type 'string'; Additional properties are not allowed ('x' was unexpected)"
+    )
+
+
+def test_row_shape_missing_required_column(contracts_copy, fact_table):
+    contracts_copy("facts/sample.json", lambda _: fact_table(ROW_COLUMNS, [{"id": "c", "tags": ["x"]}]))
+    with pytest.raises(facts.FactsError, match=r"^事実の表 facts/sample.json の行 0（'c'）の形が違う: 'rank' is a required property$"):
+        facts.table("sample")
+
+
+# 現状固定テスト（I-008）: 列の ref の先に無い値の文面と順。列の宣言の順に、列の中は行の順に並ぶ。
+
+
+def test_ref_errors_lists_missing_values_in_column_then_row_order(contracts_copy, sample_table):
+    rows = [
+        {"id": "a", "flag": True, "size": 1, "policy": "nope", "code": "zz"},
+        {"id": "b", "flag": True, "size": 1},
+        {"id": "c", "flag": True, "size": 1, "policy": "review", "code": "yy"},
+        {"id": "d", "flag": True, "size": 1, "policy": "gone"},
+    ]
+    contracts_copy("facts/sample.json", lambda _: {**sample_table, "rows": rows})
+    assert facts.ref_errors("sample", {"monitor.phase.review"}) == [
+        "sample:a の policy 'nope' の方針 monitor.phase.nope が上限の宣言に無い",
+        "sample:d の policy 'gone' の方針 monitor.phase.gone が上限の宣言に無い",
+        "sample:a の code 'zz' が表 exit-codes に無い",
+        "sample:c の code 'yy' が表 exit-codes に無い",
+    ]
+    assert facts.ref_errors("sample", None) == [
+        "sample:a の code 'zz' が表 exit-codes に無い",
+        "sample:c の code 'yy' が表 exit-codes に無い",
+    ]

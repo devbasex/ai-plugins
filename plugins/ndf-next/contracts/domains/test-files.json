@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。置き場の行はパスのディレクトリの 1 段の名前と比べる。どれか 1 行に当たればテストのファイル。cross-review・cross-refactoring・試走の候補が同じ表を読む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "where": {"type": "string", "summary": "照らす所。name はファイル名、dir はディレクトリの 1 段の名前"},
+    "pattern": {"type": "string", "summary": "where が name なら fnmatch の形、dir なら名前そのもの"},
+    "language": {"type": "string", "summary": "名前の形の慣習を持つ言語（dir の行は言語を持たない）", "ref": "domains/languages", "optional": true}
+  },
+  "rows": [
+    {"id": "dir-test", "where": "dir", "pattern": "test"},
+    {"id": "dir-tests", "where": "dir", "pattern": "tests"},
+    {"id": "dir-spec", "where": "dir", "pattern": "spec"},
+    {"id": "dir-specs", "where": "dir", "pattern": "specs"},
+    {"id": "dir-jest", "where": "dir", "pattern": "__tests__"},
+    {"id": "python-prefix", "where": "name", "pattern": "test_*.py", "language": "python"},
+    {"id": "python-suffix", "where": "name", "pattern": "*_test.py", "language": "python"},
+    {"id": "go-suffix", "where": "name", "pattern": "*_test.go", "language": "go"},
+    {"id": "php-suffix", "where": "name", "pattern": "*Test.php", "language": "php"},
+    {"id": "java-suffix", "where": "name", "pattern": "*Test.java", "language": "java"},
+    {"id": "kotlin-suffix", "where": "name", "pattern": "*Test.kt", "language": "kotlin"},
+    {"id": "csharp-suffix", "where": "name", "pattern": "*Tests.cs", "language": "csharp"},
+    {"id": "ruby-spec", "where": "name", "pattern": "*_spec.rb", "language": "ruby"},
+    {"id": "ruby-test", "where": "name", "pattern": "*_test.rb", "language": "ruby"},
+    {"id": "js-test", "where": "name", "pattern": "*.test.js", "language": "javascript"},
+    {"id": "js-spec", "where": "name", "pattern": "*.spec.js", "language": "javascript"},
+    {"id": "jsx-test", "where": "name", "pattern": "*.test.jsx", "language": "javascript"},
+    {"id": "jsx-spec", "where": "name", "pattern": "*.spec.jsx", "language": "javascript"},
+    {"id": "ts-test", "where": "name", "pattern": "*.test.ts", "language": "typescript"},
+    {"id": "ts-spec", "where": "name", "pattern": "*.spec.ts", "language": "typescript"},
+    {"id": "tsx-test", "where": "name", "pattern": "*.test.tsx", "language": "typescript"},
+    {"id": "tsx-spec", "where": "name", "pattern": "*.spec.tsx", "language": "typescript"},
+    {"id": "rust-tests", "where": "name", "pattern": "*_test.rs", "language": "rust"},
+    {"id": "swift-tests", "where": "name", "pattern": "*Tests.swift", "language": "swift"}
+  ]
+}
