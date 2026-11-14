@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import warnings
 from pathlib import Path
 
@@ -44,3 +45,19 @@ def test_plans_and_wrappers_run_rounds_without_lock_errors(tmp_path: Path) -> No
     assert out["quick_check"]["count"] < out["calls"], text
     assert out["sweep"]["count"] == 1, text
     assert out["sweep"]["called"] > out["sweep"]["count"], text
+
+
+def test_recorder_holds_the_next_round_until_wrappers_on_the_round_before_return() -> None:
+    # 前の回への `next` が次の回の後に届くと、差し込みの値の違う打ち直しとして前の回が流れ直す（#3291 の CI の 2 回流れ）。
+    # ラッパーが前の回を読んで打っている間は、プランの実行は次の回へ進まない
+    rec = L.Recorder(["p"])
+    moved = threading.Event()
+    with rec.joining("p") as n:
+        assert n == 1
+        t = threading.Thread(target=lambda: (rec.next_round("p", 2), moved.set()))
+        t.start()
+        assert not moved.wait(0.2)
+    assert moved.wait(5)
+    t.join()
+    with rec.joining("p") as n:
+        assert n == 2

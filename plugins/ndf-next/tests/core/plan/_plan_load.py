@@ -27,7 +27,8 @@ import sys
 import tempfile
 import threading
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -138,10 +139,33 @@ class Recorder:
         # プランごとの今の回の番号（ラッパーが同じ回へ `next` を打つ）と、最後の回を終えた印
         self.rounds: dict[str, int] = {p: 1 for p in plans}
         self.done: dict[str, threading.Event] = {p: threading.Event() for p in plans}
+        # ラッパーが打っている途中の `next` の数（プラン・回ごと）。前の回への `next` が次の回の後に届くと、差し込みの値の
+        # 違う打ち直しとして前の回が流れ直す（#3053 の決まり）。プランの実行は前の回への `next` が抜けてから次の回へ進む
+        self.turn = threading.Condition()
+        self.inflight: Counter[tuple[str, int]] = Counter()
 
     def add(self, row: dict[str, Any]) -> None:
         with self.lock:
             self.calls.append(row)
+
+    def next_round(self, plan: str, n: int) -> None:
+        """プランの今の回を `n` にし、前の回へ打っている途中のラッパーの `next` が抜けるまで待つ。"""
+        with self.turn:
+            self.rounds[plan] = n
+            self.turn.wait_for(lambda: not any(c for (p, r), c in self.inflight.items() if p == plan and r < n))
+
+    @contextmanager
+    def joining(self, plan: str) -> Iterator[int]:
+        """ラッパーが今の回を読み、その回へ `next` を打つ間、打っている途中として数える。"""
+        with self.turn:
+            n = self.rounds[plan]
+            self.inflight[(plan, n)] += 1
+        try:
+            yield n
+        finally:
+            with self.turn:
+                self.inflight[(plan, n)] -= 1
+                self.turn.notify_all()
 
 
 def _call(repo: Path, env: dict[str, str], sink: Path, args: list[str], rec: Recorder, role: str) -> None:
@@ -168,18 +192,19 @@ def _plan_loop(repo: Path, env: dict[str, str], sink: Path, plan: str, rounds: i
     """1 本のプランの実行: 回を 1 から `rounds` まで `next` で流す。"""
     start.wait()
     for n in range(1, rounds + 1):
-        rec.rounds[plan] = n
+        rec.next_round(plan, n)
         _call(repo, env, sink, ["next", plan, "--set", f"round={n}"], rec, "plan")
     rec.done[plan].set()
 
 
 def _wrapper_loop(repo: Path, env: dict[str, str], sink: Path, plan: str, rec: Recorder, start: threading.Barrier) -> None:
     """1 本のラッパー: プランが最後の回を終えるまで、今の回へ `wait` と `next` を打つ。`next` は流れている回の終わりを
-    待つか、終わった回の控えを返す。"""
+    待つか、終わった回の控えを返す。回を読んでから `next` が抜けるまで、プランの実行は次の回へ進まない（`joining`）"""
     start.wait()
     while not rec.done[plan].is_set():
         _call(repo, env, sink, ["wait", plan, "--timeout", WAIT_TIMEOUT], rec, "wrapper")
-        _call(repo, env, sink, ["next", plan, "--set", f"round={rec.rounds[plan]}"], rec, "wrapper")
+        with rec.joining(plan) as n:
+            _call(repo, env, sink, ["next", plan, "--set", f"round={n}"], rec, "wrapper")
 
 
 def _counts(rows: list[dict[str, Any]], names: tuple[str, ...]) -> dict[str, int]:
