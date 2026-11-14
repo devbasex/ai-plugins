@@ -20,7 +20,7 @@
       {"use": "pr"},
       {"use": "conflict-check"},
       {"use": "ci", "next": "end"},
-      {"use": "worker", "id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
+      {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},
       {"use": "ci-local"},

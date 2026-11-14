@@ -8,7 +8,7 @@
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
-      {"use": "worker", "id": "spec", "run": ["{{worker}}", "plan-to-spec"]},
+      {"id": "spec", "run": ["{{worker}}", "plan-to-spec"]},
       {
         "id": "changes-check",
         "run": ["sh", "-c", "! git diff --quiet \"origin/$0...HEAD\"", "{{base}}"],

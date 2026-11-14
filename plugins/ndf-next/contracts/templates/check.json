@@ -24,7 +24,7 @@
       {"id": "behavior-recheck", "run": ["{{behavior}}"]},
       {"use": "merge-gate"},
       {"use": "merge", "next": "end"},
-      {"use": "worker", "id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},
+      {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},
       {"use": "ci-local"},

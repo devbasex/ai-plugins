@@ -8,7 +8,7 @@
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
-      {"use": "worker", "id": "design", "run": ["{{worker}}", "design"]},
+      {"id": "design", "run": ["{{worker}}", "design"]},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr", "next": "end"},
       {"use": "fix-push"}
