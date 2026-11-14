@@ -117,9 +117,14 @@ def latest(runs: Iterable[dict]) -> list[Check]:
     return [check_of(best[name][1]) for name in sorted(best)]
 
 
+def _unprefixed(name: str) -> str:
+    """ワークフローの名前の前置き `<ワークフロー> / ` を最後の ` / ` で外した名前（空白と分割ジョブの末尾は残す）。"""
+    return name.rpartition(" / ")[2]
+
+
 def bare_name(name: str) -> str:
     """照合に使う名前。分割ジョブの末尾 `(k/n)` と、ワークフローの名前の前置き `<ワークフロー> / ` を外す。"""
-    return _SHARD.sub("", name.rpartition(" / ")[2]).strip()
+    return _SHARD.sub("", _unprefixed(name)).strip()
 
 
 def bare_names(names: Iterable[str]) -> set[str]:
@@ -129,7 +134,7 @@ def bare_names(names: Iterable[str]) -> set[str]:
 
 def _short_name(name: str) -> str:
     """ワークフローの名前の前置き `<ワークフロー> / ` を外し、前後の空白を除いた名前（分割ジョブの末尾は保つ）。"""
-    return name.rpartition(" / ")[2].strip()
+    return _unprefixed(name).strip()
 
 
 def required_key(name: str) -> str:
