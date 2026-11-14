@@ -132,8 +132,8 @@ def _rank_metrics(repo: str, a: argparse.Namespace, board: rank_decide.Board, go
     return metrics
 
 
-def _save_rank(sd: Path, metrics: dict[str, Any], milestones: list[dict[str, Any]], kept: dict[str, Any]) -> None:
-    state.write(sd, "backlog-rank", {"metrics": metrics, "milestones": milestones})
+def _save_rank(sd: Path, metrics: dict[str, Any], got: dict[str, Any], kept: dict[str, Any]) -> None:
+    state.write(sd, "backlog-rank", {"metrics": metrics, "milestones": got["milestones"], "board": got["board"]})
     state.write(sd, "backlog-estimates", kept)
 
 
@@ -147,7 +147,7 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
     except rank_decide.CycleError as exc:
         raise Stop("invalid", str(exc), [{"number": n} for n in exc.numbers]) from exc
     metrics = _rank_metrics(repo, a, board, got, excluded, sized)
-    _save_rank(sd, metrics, got["milestones"], kept)
+    _save_rank(sd, metrics, got, kept)
     summary = f"順位を {len(board.estimates)} 件で算出した: 前倒し {len(got['forward'])} 件・後ろ倒し {len(got['backward'])} 件・外した {len(excluded)} 件"
     if a.depth == model.REVIEW and excluded:
         gaps = [{"kind": "estimate", "name": f"#{e['number']}", "reason": e["reason"]} for e in excluded]
@@ -159,26 +159,29 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
 
 
 class _CheckedRank(NamedTuple):
-    """plan が照らす rank.json の metrics と、照合で保留にした番号（移動を承認待ちで止める課題）。"""
+    """plan が照らす rank.json の metrics と、照合で保留にした番号（移動を承認待ちで止める課題）と、表を組み直す値。"""
 
     metrics: dict[str, Any]
     holds: set[int]
+    board: dict[str, Any]
 
 
 def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
     """plan が照らす rank.json の metrics と保留。順位（rank）・却下・移動を持つ plan は rank.json と同じ digest を要る。"""
     if not (plan.get("rank") or plan.get("rejected") or plan.get("reschedule")):
-        return _CheckedRank({}, set())
+        return _CheckedRank({}, set(), {})
     rank = state.read(sd, "backlog-rank", None)
     if not isinstance(rank, dict) or not isinstance(rank.get("metrics"), dict):
         raise Stop("precondition", "rank.json が無い（rank を打ってから plan を作る）")
+    if not isinstance(rank.get("board"), dict):
+        raise Stop("precondition", "rank.json に表を組み直す値が無い（rank を打ち直して plan を作り直す）")
     if plan.get("rank") != rank["metrics"].get("digest"):
         raise Stop("invalid", "plan の rank が rank.json の digest と違う（rank を打ち直して plan を作り直す）")
     checked = plan_decide.check(plan, rank["metrics"])
     if checked.errors:
         raise Stop("invalid", "plan の誤り（1 件も書いていない）: " + " / ".join(checked.errors))
     metrics = rank["metrics"]
-    return _CheckedRank(metrics, checked.holds if metrics else set())
+    return _CheckedRank(metrics, checked.holds if metrics else set(), rank["board"])
 
 
 def _read_plan(path: str) -> dict[str, Any]:
@@ -200,34 +203,22 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
     reparent.entries_of(plan)
-    metrics, holds = _checked_rank(sd, plan)
+    metrics, holds, board = _checked_rank(sd, plan)
     ledger = actions.Ledger(sd)
     if metrics:
         state.write(sd, "backlog-rejected", plan_decide.rejected_after(state.read(sd, "backlog-rejected", []), plan, metrics))
     gh = hub(repo)
     acted = actions.apply_actions(gh, ledger, plan)
     made = actions.create(gh, ledger, plan)
-    moved, move_failed = actions.reschedule(gh, plan, holds)
+    moves = actions.reschedule(gh, plan, holds, rank_decide.origin(board) if board else {})
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
-    deferred = plan_decide.deferred_placements(metrics, plan, holds)
-    tables = _write_tables(gh, sd, metrics, moved, deferred) if plan.get("rank") else {}
+    # 表は rank の時点の所属に、実際に済んだ移動を重ね、閉じた課題を除いて組み直す（退けた・保留の移動は動かさない）
+    tables = tables_mod.write(gh, rank_decide.retable(board, moves.placed, set(acted["gone"]))) if plan.get("rank") else {}
     # sd は <置き場>/<repo> なので、打ち直しには置き場（親）を渡す
     again = ["--repo", repo, "--plan", str(Path(a.plan).resolve()), "--run-id", run_id, "--state-dir", str(sd.parent)]
-    return _apply_outcome(repo, run_id, again, {"acted": acted, "made": made, "moved": moved, "move_failed": move_failed,
+    return _apply_outcome(repo, run_id, again, {"acted": acted, "made": made, "moved": moves.moved, "move_failed": moves.failed,
                                                 "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
-
-
-def _write_tables(gh: github.GitHub, sd: Path, metrics: dict[str, Any], moved: list[int], deferred: set[int]) -> dict[str, Any]:
-    """順位の表を書く。表は自動・承認済みの移動を済んだものとして置くため、その移動が 1 件でも済んでいなければ書かない。
-
-    plan が退けた・保留にした移動（`deferred`）は失敗に数えず、`deferred` として返す（rank の打ち直しで表へ反映する）。
-    """
-    unmoved = {n for n, _ in plan_decide.placed_moves(metrics)} - set(moved)
-    if unmoved:
-        return {"written": [], "unchanged": [], "failed": [], "truncated": {},
-                "unmoved": sorted(unmoved - deferred), "deferred": sorted(unmoved & deferred)}  # fmt: skip
-    return tables_mod.write(gh, state.read(sd, "backlog-rank", {})["milestones"])
 
 
 def _apply_failures(got: dict[str, Any]) -> list[dict[str, Any]]:
@@ -235,9 +226,7 @@ def _apply_failures(got: dict[str, Any]) -> list[dict[str, Any]]:
     tables = got["tables"]
     return [*got["move_failed"], *got["parents"]["failed"], *got["acted"]["failed"],
             *({"title": f["title"], "error": f["reason"]} for f in got["made"]["failed"]),
-            *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else [])),
-            *({"number": n, "error": "表が移したものとして置く移動が済んでいないため、順位の表を書かなかった"}
-              for n in (tables["unmoved"] if tables and "unmoved" in tables else []))]  # fmt: skip
+            *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else []))]  # fmt: skip
 
 
 def _apply_summary(got: dict[str, Any]) -> str:
@@ -249,16 +238,13 @@ def _apply_summary(got: dict[str, Any]) -> str:
             f"人へ返した {len(buckets[actions_decide.RETURNED_BUCKET])} 件")  # fmt: skip
 
 
-def _next_steps(waiting: list[int], skipped: list[int], holds: list[int], unplaced: list[int]) -> list[str]:
+def _next_steps(waiting: list[int], skipped: list[int], holds: list[int]) -> list[str]:
     nxt = []
     if waiting:
         nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
     if holds:
         nxt.append("承認を待つ移動 " + " ".join(f"#{n}" for n in holds)
                    + " は、承認を得たら rank を --approved で打ち直し、その rank で plan を作り直して apply を打つ")  # fmt: skip
-    if unplaced:
-        nxt.append("退けた・保留の移動 " + " ".join(f"#{n}" for n in unplaced)
-                   + " があるため順位の表を書かなかった。rank を打ち直し、その rank で plan を作り直して apply を打つと表が書かれる")  # fmt: skip
     if skipped:
         nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
     return nxt
@@ -277,9 +263,8 @@ def _apply_outcome(repo: str, run_id: str, again_args: list[str], got: dict[str,
         raise Stop("incomplete", f"{summary}。{len(failed)} 件が失敗した（同じ plan で打ち直せば済んだものは記録で飛ぶ。"
                    f"付け直しを戻すは ndf issues revert --run {run_id}）", acted["items"], failed)  # fmt: skip
     waiting, skipped, holds = buckets[actions_decide.WAITING], buckets[actions_decide.SKIPPED], sorted(got["holds"])
-    unplaced = tables["deferred"] if tables and "deferred" in tables else []
-    if waiting or skipped or holds or unplaced:
-        nxt = _next_steps(waiting, skipped, holds, unplaced)
+    if waiting or skipped or holds:
+        nxt = _next_steps(waiting, skipped, holds)
         again = result.command(TOOL, "apply", *again_args)
         out["next_steps"] = nxt
         return result.result(TOOL, result.GATE, summary + "。" + "。".join(nxt), acted["items"], out, run_id=run_id,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.backlog import issues_gh, model, state
@@ -51,20 +51,39 @@ def each_number(
     return done, failed
 
 
-def reschedule(gh: GitHub, plan: dict[str, Any], holds: set[int]) -> tuple[list[int], list[dict[str, Any]]]:
-    """plan の `reschedule` のうち保留でない課題のマイルストーンを移す。(移した番号, 失敗の {number, error})。"""
+class Rescheduled(NamedTuple):
+    """移動の結果。`placed` は課題ごとの今の所属（移した課題は移す先、rank の後に人が移した課題はその所属）。"""
+
+    moved: list[int]
+    failed: list[dict[str, Any]]
+    placed: dict[int, Optional[str]]
+
+
+def reschedule(gh: GitHub, plan: dict[str, Any], holds: set[int], origin: dict[int, Optional[str]]) -> Rescheduled:
+    """plan の `reschedule` のうち保留でない課題のマイルストーンを移す。
+
+    書く前に今の所属を rank の時点の所属（`origin`）と照らし、rank の後に人が移した課題は上書きせず失敗として返す。
+    """
     moves = [e for e in plan["reschedule"] if e["number"] not in holds] if "reschedule" in plan else []
     if not moves:
-        return [], []
+        return Rescheduled([], [], {})
     titles = issues_gh.milestones(gh)
+    placed: dict[int, Optional[str]] = {}
 
     def write(e: dict[str, Any]) -> Optional[str]:
+        n = e["number"]
         if e["milestone"] not in titles:
             return f"マイルストーン {e['milestone']!r} が無い"
-        issues_gh.set_milestone(gh, e["number"], titles[e["milestone"]])
+        now = issues_gh.issue(gh, n)["milestone"]
+        if n in origin and now != origin[n] and now != e["milestone"]:
+            placed[n] = now
+            return f"rank の後に所属が変わった（{origin[n]!r} → {now!r}）ため移さなかった（rank を打ち直す）"
+        issues_gh.set_milestone(gh, n, titles[e["milestone"]])
+        placed[n] = e["milestone"]
         return None
 
-    return each_number(moves, write)
+    moved, failed = each_number(moves, write)
+    return Rescheduled(moved, failed, placed)
 
 
 def _write(gh: GitHub, n: int, d: ad.Diff, done: ad.Diff) -> None:
@@ -108,10 +127,15 @@ def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str
 
 
 def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
-    """plan の `actions` を反映する。区分ごとの番号と、課題ごとの行を返す。"""
+    """plan の `actions` を反映する。区分ごとの番号と、課題ごとの行を返す。
+
+    `gone` は plan が閉じる課題のうち閉じた状態にあるもの（この回に閉じた・前の打ち直しで閉じた・もう閉じていた）。
+    順位の表はこれを除いて組み直す。
+    """
     buckets: dict[str, list[int]] = {b: [] for b in ad.BUCKETS}
     items = []
     closed: list[int] = []
+    gone: list[int] = []
     failed: list[dict[str, Any]] = []
     for act in plan["actions"] if "actions" in plan else []:
         try:
@@ -122,9 +146,11 @@ def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str,
         items.append({"kind": "issue", "name": f"#{act['number']}", "result": bucket, "verdict": act["verdict"], "reason": reason})
         if bucket == ad.FAILED:
             failed.append({"number": act["number"], "error": reason})
-        elif bucket == ad.APPLIED and ad.changes_of(act).get("state") == "closed":
-            closed.append(act["number"])
-    return {"buckets": buckets, "items": items, "closed": closed, "failed": failed}
+        elif ad.changes_of(act).get("state") == "closed" and bucket in (ad.APPLIED, ad.ALREADY, ad.UNCHANGED):
+            gone.append(act["number"])
+            if bucket == ad.APPLIED:
+                closed.append(act["number"])
+    return {"buckets": buckets, "items": items, "closed": closed, "gone": gone, "failed": failed}
 
 
 def create(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:

@@ -113,7 +113,8 @@ class FakeHub:
         if not i:
             return httpx.Response(404, json={})
         return httpx.Response(200, json={"number": n, "id": i["id"], "state": i["state"], "title": i["title"], "body": i["body"],
-                                         "labels": [{"name": lb} for lb in i["labels"]], "updated_at": i["updated"]})  # fmt: skip
+                                         "labels": [{"name": lb} for lb in i["labels"]], "updated_at": i["updated"],
+                                         "milestone": {"title": i["milestone"]} if i["milestone"] else None})  # fmt: skip
 
     def _parent(self, m: re.Match, body: Any, params: Any) -> httpx.Response:
         parent = self.issues[int(m.group(1))]["parent"]

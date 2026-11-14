@@ -58,6 +58,8 @@ def _issue(raw: dict[str, Any]) -> dict[str, Any]:
         "number": int(raw["number"]),
         "title": text_of(raw["title"]),
         "body": text_of(raw["body"]),
+        # open の課題だけを読む（要約値が状態も含む）
+        "state": "open",
         "milestone": _milestone_title(raw["milestone"]),
         "labels": [text_of(n["name"]) for n in raw["labels"]["nodes"]],
         "created_at": text_of(raw["createdAt"]),
@@ -118,7 +120,7 @@ def set_milestone(gh: GitHub, n: int, number: Optional[int]) -> None:
 
 
 def issue(gh: GitHub, n: int) -> dict[str, Any]:
-    """Issue の今の題・本文・状態・ラベル・更新の時刻（REST）。"""
+    """Issue の今の題・本文・状態・マイルストーン・ラベル・更新の時刻（REST）。"""
     raw = _issue_raw(gh, n)
     labels = raw["labels"] if isinstance(raw.get("labels"), list) else []
     return {
@@ -126,6 +128,7 @@ def issue(gh: GitHub, n: int) -> dict[str, Any]:
         "title": text_of(raw.get("title")),
         "body": text_of(raw.get("body")),
         "state": text_of(raw.get("state")).lower(),
+        "milestone": _milestone_title(raw.get("milestone")),
         "labels": [text_of(lb["name"]) if isinstance(lb, dict) else text_of(lb) for lb in labels],
         "updated_at": text_of(raw.get("updated_at")),
     }

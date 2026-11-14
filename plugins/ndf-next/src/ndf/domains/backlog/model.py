@@ -44,8 +44,13 @@ def stable_digest(obj: Any) -> str:
 
 
 def snapshot_digest(issue: dict) -> str:
-    """課題の題と本文の要約値。見積を付けた後に課題が書き換わったかを比べる。"""
-    return stable_digest({"title": issue["title"], "body": issue["body"]})
+    """課題の要約値。apply が書き換えうる欄（題・本文・状態・マイルストーン・ラベル）をまとめる。
+
+    見積を付けた後と plan を作った後に課題が書き換わったかを比べる。題と本文だけでは、状態・ラベルだけの
+    並行した更新を見落として、古い plan で閉じ直したりラベルを外したりする。
+    """
+    return stable_digest({"title": issue["title"], "body": issue["body"], "state": issue["state"],
+                          "milestone": issue["milestone"], "labels": sorted(issue["labels"])})  # fmt: skip
 
 
 @dataclass(frozen=True)

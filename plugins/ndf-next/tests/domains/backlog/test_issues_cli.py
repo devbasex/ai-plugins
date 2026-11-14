@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ndf import cli as top
-from ndf.domains.backlog import cli, depth, state
+from ndf.domains.backlog import cli, depth, model, state
 from ndf.domains.backlog.model import FORWARD
 
 
@@ -218,3 +218,62 @@ def test_rank_reads_capacity_and_label_floor_from_the_declaration(repo_dir, fake
     got = run_issues("rank", "--repo", "acme/widgets", "--scores", _scores(tmp_path / "s.json", rows))
     table = got["items"][0]
     assert [r["number"] for r in table["rows"]] == [2, 1] and table["boundary"]["capacity"] == 1
+
+
+def _rank_auto(fake, run_issues, tmp_path, approved: str | None = None) -> dict:
+    # 直近に #1・#2、次に #9（利用者へ届いた不具合で UBV 20。前倒しは自動）
+    fake.issue(1, milestone="01 直近")
+    fake.issue(2, milestone="01 直近")
+    fake.issue(9, milestone="02 次")
+    fake.milestones = {"01 直近": 1, "02 次": 2}
+    rows = [{"number": n, "ubv": u, "tc": 1, "rr_oe": 1, "size": 1, "digest": f"d{n}", "observed_harm": n == 9}
+            for n, u in ((1, 2), (2, 1), (9, 20))]  # fmt: skip
+    extra = ["--approved", approved] if approved else []
+    return run_issues("rank", "--repo", "acme/widgets", "--scores", _scores(tmp_path / "s.json", rows), "--capacity", "2", *extra)
+
+
+def _apply_plan(run_issues, tmp_path, plan: dict) -> dict:
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan, ensure_ascii=False))
+    return run_issues("apply", "--repo", "acme/widgets", "--plan", str(path))
+
+
+def test_rejecting_an_auto_move_writes_the_tables_without_a_gate(repo_dir, fake, run_issues, tmp_path):
+    # 自動の前倒しを退けただけの apply は承認待ちで止まらず、#9 を移す前の所属で表を書く
+    ranked = _rank_auto(fake, run_issues, tmp_path)
+    assert ranked["metrics"]["forward"][0]["decision"] == model.AUTO
+    got = _apply_plan(run_issues, tmp_path, {"rank": ranked["metrics"]["digest"], "rejected": [{"number": 9, "direction": FORWARD}]})
+    assert got["status"] == "ok" and sorted(got["metrics"]["tables"]["written"]) == ["01 直近", "02 次"]
+    assert "#9" not in fake.descriptions[1] and "#9" in fake.descriptions[2] and fake.issues[9]["milestone"] == "02 次"
+
+
+def test_tables_drop_issues_closed_by_the_same_apply(repo_dir, fake, run_issues, tmp_path):
+    ranked = _rank_auto(fake, run_issues, tmp_path)
+    i = fake.issues[2]
+    close = {"number": 2, "verdict": "閉じてよい", "updated_at": i["updated"], "digest": model.snapshot_digest(i),
+             "changes": {"state": "closed", "state_reason": "completed"}}  # fmt: skip
+    plan = {"rank": ranked["metrics"]["digest"], "rejected": [{"number": 9, "direction": FORWARD}], "actions": [close]}
+    got = _apply_plan(run_issues, tmp_path, plan)
+    assert got["status"] == "ok" and got["metrics"]["closed"] == [2]
+    assert "#1" in fake.descriptions[1] and "#2" not in fake.descriptions[1]
+
+
+def test_a_move_does_not_overwrite_a_milestone_changed_after_rank(repo_dir, fake, run_issues, tmp_path):
+    ranked = _rank_auto(fake, run_issues, tmp_path)
+    fake.milestones["03 他"] = 3
+    fake.issues[9]["milestone"] = "03 他"
+    plan = {"rank": ranked["metrics"]["digest"], "reschedule": [{"number": 9, "direction": FORWARD, "milestone": "01 直近"}]}
+    got = _apply_plan(run_issues, tmp_path, plan)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete" and [g["name"] for g in got["gaps"]] == ["#9"]
+    assert fake.issues[9]["milestone"] == "03 他" and "#9" not in fake.descriptions[1]
+
+
+def test_a_label_only_change_after_the_plan_is_skipped(repo_dir, fake, run_issues, tmp_path):
+    # 題・本文が同じでも、plan の後にラベルだけ変わった課題は書かずに飛ばす
+    fake.issue(5, labels=("keep",))
+    i = fake.issues[5]
+    act = {"number": 5, "verdict": "追記が要る", "updated_at": i["updated"], "digest": model.snapshot_digest(i),
+           "changes": {"remove_labels": ["keep"]}}  # fmt: skip
+    fake.issue(5, labels=("keep", "human"), updated="2026-11-02T00:00:00Z")
+    got = _apply_plan(run_issues, tmp_path, {"actions": [act]})
+    assert got["status"] == "gate" and got["metrics"]["skipped_changed"] == [5] and fake.issues[5]["labels"] == ["keep", "human"]

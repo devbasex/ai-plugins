@@ -14,7 +14,7 @@ from collections import Counter
 import math
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 from ndf.domains.backlog import model
@@ -176,8 +176,13 @@ def _slot_used(slot: Optional[dict[str, Any]]) -> int:
 
 
 def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], below_min: bool) -> bool:
-    """品質の枠に入るか。ratio の枠に収まるか、min 件に満たないうちは容量の残りに収まるか。"""
-    return budget is None or total + size <= budget or (below_min and total + size <= room)
+    """品質の枠に入るか。容量の残り（大きい課題の枠を引いた分）に収まり、ratio の枠にも収まるか、min 件に満たないか。
+
+    ratio は大きい課題の枠と別々に宣言できるため、ratio の枠だけで判定すると 2 つの枠の和が容量を超える。
+    """
+    if budget is None or room is None:
+        return True
+    return total + size <= room and (below_min or total + size <= budget)
 
 
 def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], blocked: set[int]) -> Optional[dict[str, Any]]:
@@ -392,24 +397,65 @@ def released_counts(edges: Iterable[Edge]) -> dict[int, int]:
 
 
 def compute(board: Board) -> dict[str, Any]:
-    """マイルストーンごとの順位の表と、前倒し・後ろ倒しの候補。見積の無い課題は表に載せない。"""
+    """マイルストーンごとの順位の表と、前倒し・後ろ倒しの候補。見積の無い課題は表に載せない。
+
+    依存の輪は、マイルストーンに分ける前に採点した課題の全体で確かめる（マイルストーンをまたぐ輪と未所属の課題の輪も止める）。
+    """
     released = released_counts(board.edges)
     rows = {
         n: model.score(est, board.issues[n]["labels"], released[n] if n in released else 0, board.cfg)
         for n, est in board.estimates.items()
         if n in board.issues
     }
+    topo_order(rows, board.edges, lambda n: n)
     place = {n: board.issues[n]["milestone"] for n in rows}
     got = moves(board, rows, place) if board.order else {"forward": [], "backward": [], "dropped": [], "rejected_stale": []}
     after = placed_after(place, got)
     tables = [_milestone_out(board, rows, after, t, i) for i, t in enumerate(board.order)]
-    return {"milestones": tables, **got}
+    return {"milestones": tables, **got, "board": snapshot(board, rows, place)}
+
+
+def snapshot(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]) -> dict[str, Any]:
+    """表を組み直すのに要る値（JSON にできる形）。`place` は rank の時点の所属（移動の前）。
+
+    apply はこれから、実際に済んだ移動と閉じた課題を反映した表を組む（`retable`）。順位の行は採点し直さない。
+    """
+    cfg = board.cfg
+    return {
+        "order": list(board.order),
+        "cfg": {"capacity": cfg.capacity, "large_slot_ratio": cfg.large_slot_ratio, "large_min_size": cfg.large_min_size,
+                "quality": cfg.quality},
+        "issues": [{"number": n, "milestone": place[n], "labels": board.issues[n]["labels"], "created_at": board.issues[n]["created_at"],
+                    "sized": n in board.sized, "row": asdict(rows[n])} for n in sorted(rows)],
+        "edges": sorted([a, b] for a, b in board.edges),
+        "sub_issues": [[p, sorted(kids)] for p, kids in sorted(board.sub_issues.items())],
+    }  # fmt: skip
+
+
+def origin(snap: dict[str, Any]) -> dict[int, Optional[str]]:
+    """rank の時点の所属（移動の前）。"""
+    return {i["number"]: i["milestone"] for i in snap["issues"]}
+
+
+def retable(snap: dict[str, Any], moved: dict[int, Optional[str]], gone: set[int]) -> list[dict[str, Any]]:
+    """`snapshot` から順位の表を組み直す。`moved` は実際に移した所属、`gone` は閉じた課題（表・枠・境界から除く）。"""
+    kept = [i for i in snap["issues"] if i["number"] not in gone]
+    rows = {i["number"]: Row(**i["row"]) for i in kept}
+    place = {i["number"]: moved[i["number"]] if i["number"] in moved else i["milestone"] for i in kept}
+    issues = {i["number"]: {"milestone": place[i["number"]], "labels": i["labels"], "created_at": i["created_at"]} for i in kept}
+    c = snap["cfg"]
+    cfg = Config(capacity=c["capacity"], large_slot_ratio=c["large_slot_ratio"], large_min_size=c["large_min_size"], quality=c["quality"])
+    board = Board(issues, {}, cfg, list(snap["order"]),
+                  sub_issues={p: [k for k in kids if k not in gone] for p, kids in snap["sub_issues"] if p not in gone},
+                  edges=frozenset((a, b) for a, b in snap["edges"] if a not in gone and b not in gone),
+                  sized=frozenset(i["number"] for i in kept if i["sized"]))  # fmt: skip
+    return [_milestone_out(board, rows, place, t, k) for k, t in enumerate(board.order)]
 
 
 def placed_after(place: dict[int, Optional[str]], got: dict[str, Any]) -> dict[int, Optional[str]]:
     """表が置く所属。前倒しの自動・承認済み（依存先も一緒）と後ろ倒しの承認済みは、移す先に置く。
 
-    apply はこれらの移動がすべて済んだときだけ表を書く（済まなければ表は移動前の所属と食い違う）。
+    rank の結果の表はこの所属で組む。apply は実際に済んだ移動で組み直す（`retable`）。
     """
     after = dict(place)
     for c in got["forward"]:

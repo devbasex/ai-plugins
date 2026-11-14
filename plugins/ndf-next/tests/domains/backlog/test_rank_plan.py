@@ -309,14 +309,43 @@ def test_holds_spread_through_a_shared_dependency_until_stable():
     assert checked.errors == [] and checked.holds == {10, 20, 30}
 
 
-def test_rejected_and_held_placements_are_deferred_not_failed():
-    # 退けた自動の前倒し（#10 と依存先 #11）と、保留の先頭（#20）の依存先 #21 は、移さないのが正しい結果
-    def cand(n, decision, group):
-        return {"number": n, "to": NEAR, "group": group, "decision": decision, "move_digest": f"A{n}"}
+def _numbers(table: dict) -> list[int]:
+    return [r["number"] for r in table["rows"]]
 
-    metrics = {"forward": [cand(10, model.AUTO, [11]), cand(20, model.AUTO, [21]), cand(40, model.AUTO, [])], "backward": []}
-    plan = {"rejected": [{"number": 10, "direction": FORWARD}]}
-    assert plan_decide.deferred_placements(metrics, plan, {20}) == {10, 11, 20, 21}
+
+def test_retable_keeps_unmoved_issues_where_rank_found_them():
+    # 承認済みの #9 の前倒しを移さなかった（退けた・保留）とき、表は #9 を移す前の所属に置く
+    board = _board([_est(1, 2), _est(2, 1), _est(9, 20)], {1: NEAR, 2: NEAR, 9: NEXT}, capacity=2, approved=frozenset({9}))
+    got = rank_decide.compute(board)
+    near, nxt = rank_decide.retable(got["board"], {}, set())
+    assert _numbers(near) == [1, 2] and _numbers(nxt) == [9]
+    # 移動が済めば rank の表と同じになる
+    assert rank_decide.retable(got["board"], {9: NEAR}, set()) == got["milestones"]
+
+
+def test_retable_drops_closed_issues_and_recomputes_the_boundary():
+    board = _board([_est(1, 2), _est(2, 1), _est(3, 1)], {1: NEAR, 2: NEAR, 3: NEAR}, capacity=2)
+    got = rank_decide.compute(board)
+    assert got["milestones"][0]["boundary"]["number"] == 2
+    near, _ = rank_decide.retable(got["board"], {}, {2})
+    assert 2 not in _numbers(near) and near["boundary"]["number"] == 3
+
+
+def test_cycle_across_milestones_is_refused():
+    # 別々のマイルストーンにある #1 → #2 → #1 の輪も、未所属の課題の輪も止める
+    for place in ({1: NEAR, 2: NEXT}, {1: None, 2: None}):
+        board = _board([_est(1, 2), _est(2, 1)], place, edges=frozenset({(1, 2), (2, 1)}))
+        with pytest.raises(rank_decide.CycleError):
+            rank_decide.compute(board)
+
+
+def test_quality_slot_leaves_room_for_the_large_slot():
+    # 容量 20・大きい課題の枠の ratio 0.8・品質の ratio 0.8: Size 13 の大きい課題を当てると、Size 13 の品質の課題は入らない
+    rows = [_row(1, size=13, cod=20), _row(2, size=13)]
+    board = _qboard(rows, 20, _q(ratio=0.8, minimum=0), labels={2: [QL]})
+    slot = {"issue": 1, "slice": 1, "size": 13, "budget": 16, "status": model.SLOT_FIT}
+    got = rank_decide.quality_slot(rows, board, slot, set())
+    assert got["issues"] == [] and got["size_sum"] == 0
 
 
 def test_tables_place_approved_moves_at_their_destination():
@@ -325,7 +354,6 @@ def test_tables_place_approved_moves_at_their_destination():
     assert got["forward"][0]["decision"] == model.APPROVED
     near, nxt = got["milestones"]
     assert 9 in [r["number"] for r in near["rows"]] and 9 not in [r["number"] for r in nxt["rows"]]
-    assert plan_decide.placed_moves(got) == [(9, FORWARD)]
 
 
 def test_config_reads_the_declaration_and_the_argument_overrides_capacity():

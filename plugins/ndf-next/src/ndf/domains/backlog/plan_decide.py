@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.backlog.model import APPROVAL, AUTO, APPROVED, BACKWARD, DIRECTIONS, FORWARD
+from ndf.domains.backlog.model import APPROVAL, DIRECTIONS, FORWARD
 
 
 class Checked(NamedTuple):
@@ -127,27 +127,6 @@ def check(plan: Mapping[str, Any], metrics: Mapping[str, Any]) -> Checked:
     moved = {(e.get("number"), e.get("milestone")) for e in moves if e.get("direction") == FORWARD}
     errors += [err for e in moves if (err := _check_move(metrics, e, moved)) is not None]
     return Checked(errors, set() if errors else _holds(metrics, moves))
-
-
-def placed_moves(metrics: Mapping[str, Any]) -> list[tuple[int, str]]:
-    """順位の表が移したものとして置く移動（前倒しの自動・承認済みと依存先、後ろ倒しの承認済み）。"""
-    placed = [(n, FORWARD) for c in _list(metrics, FORWARD) if c["decision"] in (AUTO, APPROVED) for n in [c["number"], *c["group"]]]
-    return placed + [(c["number"], BACKWARD) for c in _list(metrics, BACKWARD) if c["decision"] == APPROVED]
-
-
-def deferred_placements(metrics: Mapping[str, Any], plan: Mapping[str, Any], holds: set[int]) -> set[int]:
-    """表が移したものとして置く移動のうち、plan が退けたか保留にしたもの。前倒しは先頭と依存先をまとめて数える。
-
-    これらは移さないのが正しい結果で、移動の失敗ではない。表は rank を打ち直すまで書けない。
-    """
-    rejected = {(e["number"], e["direction"]) for e in (plan["rejected"] if "rejected" in plan else [])}
-    out = set(holds)
-    for c in _list(metrics, FORWARD):
-        members = {c["number"], *c["group"]}
-        if (c["number"], FORWARD) in rejected or members & holds:
-            out |= members
-    out |= {c["number"] for c in _list(metrics, BACKWARD) if (c["number"], BACKWARD) in rejected}
-    return out & {n for n, _ in placed_moves(metrics)}
 
 
 def rejected_after(current: list[dict[str, Any]], plan: Mapping[str, Any], metrics: Mapping[str, Any]) -> list[dict[str, Any]]:
