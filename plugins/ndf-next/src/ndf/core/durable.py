@@ -54,14 +54,15 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, TypeVar
 
 from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.core import durable_locks as locks
+from ndf.core import durable_sweep as sweeping
 from ndf.core.durable_ledger import (
     RUNS_TABLE as RUNS_TABLE,
     LedgerRow as LedgerRow,
@@ -85,6 +86,26 @@ from ndf.core.durable_locks import (
     sa_url as sa_url,
     store_lock as store_lock,
 )
+from ndf.core.durable_sweep import (
+    BACKUP_DIR as BACKUP_DIR,
+    BROKEN_DIR as BROKEN_DIR,
+    CHECK_INTERVAL as CHECK_INTERVAL,
+    CHECKED_SUFFIX as CHECKED_SUFFIX,
+    DB_SUFFIX as DB_SUFFIX,
+    DBOS_DIR as DBOS_DIR,
+    FINISHED as FINISHED,
+    KEEP_DAYS as KEEP_DAYS,
+    LOCK_SUFFIX as LOCK_SUFFIX,
+    RETIRED_DIR as RETIRED_DIR,
+    SIDE_SUFFIXES as SIDE_SUFFIXES,
+    SWEPT_MARK as SWEPT_MARK,
+    SweepResult as SweepResult,
+    _dbos_dir,
+    _free_name,
+    _move_out,
+    is_fresh as is_fresh,
+    touch_mark as touch_mark,
+)
 
 # 置き場の先頭の形の番号のファイル名は、状態の置き場（identity）と同じ名前を使う
 from ndf.identity import FORMAT_FILE
@@ -103,12 +124,8 @@ FORMAT = 1
 FORMAT_SOURCE_HASH = "1f008bfee90a33d69bd70f2dcbead91dee794d53cd67ad5b82fd603887c30b29"
 # チェックアウトの置き場の `format.json` の番号（決定 85）
 STORE_FORMAT = 1
-# retired/・broken/ と URL の終わった実行を消すまでの日数（決定 83）
-KEEP_DAYS = 14
 # 鍵の名前の接頭辞。名前の形を決めるだけで、URL の片付けの絞り込みには使わない（絞るのは台帳）
 RUN_PREFIX = "run-"
-# quick_check と片付けの走査の間隔（決定 82・83）
-CHECK_INTERVAL = timedelta(hours=24)
 # DBOS を閉じる前に、走っている耐久ワークフローが記録を終えたかを見る間隔（秒）
 SHUTDOWN_POLL_SECONDS = 0.05
 # 耐久の記録への問い合わせの間隔の宣言。DBOS の通知の見回り（DBOS の既定は 1 秒）にも当てる。閉じるときに見回りの
@@ -116,24 +133,12 @@ SHUTDOWN_POLL_SECONDS = 0.05
 # 見回りは待っている recv が無ければ DB を読まない
 POLL = "durable.poll"
 
-DBOS_DIR = "dbos"
-RETIRED_DIR = "retired"
-BROKEN_DIR = "broken"
-SWEPT_MARK = ".swept"
 PROGRESS_LOCK = "progress.sqlite.lock"
-# SQLite の本体に付いて動くファイルの接尾辞。退避では本体とそろえて移す
-SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
-# 鍵ごとのファイルの本体・検査の目印・鍵のロックの接尾辞
-DB_SUFFIX = ".sqlite"
-CHECKED_SUFFIX = ".checked"
-LOCK_SUFFIX = ".lock"
-FINISHED = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
 WAITING = ("PENDING", "ENQUEUED", "DELAYED")
 # 置き場の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
 PREPARE_ATTEMPTS = 3
-# 表の移行の前に取る鍵のファイルの控えの置き場（dbos/ の下）と、置き場の format.json に並べる DBOS の記録の鍵（B12）
-BACKUP_DIR = "backup"
-FORMAT_DBOS_KEY = "dbos"
+# 置き場の format.json に並べる DBOS の記録の鍵（B12）。記録の置き場（durable_sweep.DBOS_DIR）と同じ名前を使う
+FORMAT_DBOS_KEY = DBOS_DIR
 # 耐久の記録に書く値の serializer の名前。DBOS の既定（py_pickle）と別の名前にしないと、DBOS が既定の serializer を使う
 SERIALIZER_NAME = "ndf_redacted_pickle"
 # 入れてある DBOS の版と、SQLite の表の版（DBOS が `dbos_migrations.version` に書く、移行の数）
@@ -147,17 +152,6 @@ class StoreReady:
     root: Path
     retired_to: Path | None = None
     pending_count: int = 0
-
-
-@dataclass
-class SweepResult:
-    """片付けの結果。`skipped` は走査しなかった（ほかが走査中・目印が新しい）こと、`busy` は開いている鍵の数。"""
-
-    retired: list[Path] = field(default_factory=list)
-    deleted: list[str] = field(default_factory=list)
-    skipped: bool = False
-    busy: int = 0
-    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -383,10 +377,6 @@ def run_url(root: Path, run_key: str) -> str:
     return locks.sqlite_url(_dbos_dir(root) / f"{run_name(run_key)}{DB_SUFFIX}")
 
 
-def _dbos_dir(root: Path) -> Path:
-    return root / DBOS_DIR
-
-
 # --- ロック -----------------------------------------------------------------------------
 
 
@@ -428,18 +418,6 @@ def _read_format(root: Path) -> int | None:
         return int(json.loads((root / FORMAT_FILE).read_text(encoding="utf-8"))["format"])
     except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 無い・読めない format.json は番号の無い置き場として退避する
         return 0
-
-
-def _free_name(base: Path, now: datetime) -> Path:
-    """`base` が無ければそのまま、あれば時刻を足し、それもあれば番号を足した名前。消さない。"""
-    if not base.exists():
-        return base
-    stamped = base.with_name(base.name + now.strftime("T%H%M%S"))
-    candidate, n = stamped, 1
-    while candidate.exists():
-        candidate = stamped.with_name(f"{stamped.name}-{n}")
-        n += 1
-    return candidate
 
 
 def _write_format(root: Path) -> None:
@@ -575,19 +553,6 @@ def release_store(root: Path) -> None:
 # --- 鍵ごとのファイルの検査と退避（決定 82・83） -----------------------------------------
 
 
-def is_fresh(mark: Path, now: datetime) -> bool:
-    try:
-        return now.timestamp() - mark.stat().st_mtime < CHECK_INTERVAL.total_seconds()
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 目印が無ければ古いとして扱う
-        return False
-
-
-def touch_mark(mark: Path, now: datetime) -> None:
-    mark.parent.mkdir(parents=True, exist_ok=True)
-    mark.touch()
-    os.utime(mark, (now.timestamp(), now.timestamp()))
-
-
 def check_file(path: Path) -> bool:
     """SQLite のファイルに `PRAGMA quick_check` を打ち、1 行の `ok` が返れば真。ファイルが無ければ真。
 
@@ -603,31 +568,6 @@ def check_file(path: Path) -> bool:
             conn.close()
     except sqlite3.DatabaseError:  # noqa: NDF401 ファイル: 開けない・検査を通らないファイルは壊れているとして扱う
         return False
-
-
-def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Path:
-    """鍵のファイルの本体と `-wal`・`-shm`・`-journal` をそろえて移し、目印 `.checked` と最後に `.lock` を消す。
-
-    移した時刻を更新時刻にし、`KEEP_DAYS` を移した時から数える。時刻は移す前に付ける。移した後に付けると、
-    その間は元の古い時刻で退避先に見え、別の鍵の `sweep` が退避したばかりのファイルを消せる。
-    `.lock` を消すのは呼び手が `run_lock` を持つときだけ。
-    """
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    target = _free_name(dest_dir / target_name, now)
-    stamp = (now.timestamp(), now.timestamp())
-    for suffix in ("", *SIDE_SUFFIXES):
-        src = body.with_name(body.name + suffix)
-        if src.exists():
-            os.utime(src, stamp)
-            src.rename(target.with_name(target.name + suffix))
-    _drop_marks(body)
-    return target
-
-
-def _drop_marks(body: Path) -> None:
-    """鍵のファイルの目印 `.checked` と、最後に `.lock` を消す。"""
-    body.with_suffix(CHECKED_SUFFIX).unlink(missing_ok=True)
-    body.with_suffix(LOCK_SUFFIX).unlink(missing_ok=True)
 
 
 def _check_key_file(path: Path, now: datetime) -> None:
@@ -720,19 +660,16 @@ def workflows(database_url: str, run_key: str | None = None) -> list[RunRecord]:
     return _records(database_url, None if run_key is None else [run_name(run_key)])
 
 
-def _retire_name(root: Path, name: str, now: datetime) -> Path | None:
-    body = _dbos_dir(root) / f"{name}{DB_SUFFIX}"
-    if not body.exists():
-        _drop_marks(body)
-        return None
-    if any(r.status not in FINISHED for r in _records(locks.sqlite_url(body), None)):
-        return None
-    conn = sqlite3.connect(body, timeout=30)
-    try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    finally:
-        conn.close()
-    return _move_out(body, _dbos_dir(root) / RETIRED_DIR, body.name, now)
+# --- 片付け（本体は durable_sweep。DBOS の記録を読む口と消す口をここで渡す） -----------------------
+
+
+def _delete_workflows(database_url: str, ids: list[str]) -> None:
+    """集めた ID をすべて並べて消す。`delete_children` には頼らない（I8）。"""
+    with _client(database_url) as client:
+        client.delete_workflows(ids, delete_children=False)
+
+
+_RECORDS = sweeping.Records(read=_records, delete=_delete_workflows)
 
 
 def retire(root: Path, run_key: str, now: datetime | None = None) -> Path | None:
@@ -740,144 +677,17 @@ def retire(root: Path, run_key: str, now: datetime | None = None) -> Path | None
 
     呼び手が `run_lock` を持ち、DBOS を閉じた後に呼ぶ。
     """
-    return _retire_name(root, run_name(run_key), now or datetime.now(UTC))
-
-
-@contextmanager
-def _sweep_guard(root: Path, now: datetime) -> Iterator[bool]:
-    """`maint_lock` を待たずに取り、目印 `dbos/.swept` を読み直して古ければ真を渡し、抜けるときに目印を更新する。"""
-    with maint_lock(root, wait=False) as held:
-        mark = _dbos_dir(root) / SWEPT_MARK
-        if held is None or is_fresh(mark, now):
-            yield False
-            return
-        yield True
-        touch_mark(mark, now)
-
-
-def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, SweepResult], None], message: str) -> SweepResult:
-    """`_sweep_guard` が走査を許したときだけ `body` を流し、読めなかったものを `message` でログに残す。"""
-    now = now or datetime.now(UTC)
-    out = SweepResult()
-    with _sweep_guard(root, now) as go:
-        if not go:
-            out.skipped = True
-            return out
-        body(now, out)
-    if out.warnings:
-        log.warning(message, extra={"count": len(out.warnings), "sample": out.warnings[:10]})
-    return out
+    return sweeping.retire_name(root, run_name(run_key), _RECORDS, now or datetime.now(UTC))
 
 
 def sweep(root: Path, now: datetime | None = None) -> SweepResult:
-    """終わった鍵のファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
-
-    24 時間に 1 回だけ走査する。開いているプロセスがいる鍵（`run_lock` を待たずに取れない鍵）は触らない。
-    """
-
-    def body(now: datetime, out: SweepResult) -> None:
-        dbos_dir = _dbos_dir(root)
-        if dbos_dir.is_dir():
-            _sweep_live(root, now, out)
-            _sweep_kept(dbos_dir, now, out)
-
-    return _guarded_sweep(root, now, body, "片付けで読めないファイルがあった")
-
-
-def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
-    _retire_finished(root, now, out)
-    _drop_orphans(root)
-
-
-def _retire_finished(root: Path, now: datetime, out: SweepResult) -> None:
-    """開いているプロセスのいない鍵のファイルのうち、耐久ワークフローがすべて終わったものを retired/ へ移す。"""
-    for body in sorted(_dbos_dir(root).glob(f"*{DB_SUFFIX}")):
-        with locks.file_run_lock(_dbos_dir(root) / f"{body.stem}{LOCK_SUFFIX}", wait=False) as held:
-            if held is None:
-                out.busy += 1
-                continue
-            try:
-                moved = _retire_name(root, body.stem, now)
-            except Exception as exc:  # noqa: BLE001 ファイル: 1 つのファイルを読めなくても片付けを止めず、warnings に載せる
-                out.warnings.append(f"{body}: {exc}")
-                continue
-            if moved is not None:
-                out.retired.append(moved)
-
-
-def _drop_orphans(root: Path) -> None:
-    """本体の無い `.checked` と、本体が無くだれも持たない `.lock` を消す。"""
-    dbos_dir = _dbos_dir(root)
-    for mark in dbos_dir.glob(f"*{CHECKED_SUFFIX}"):
-        if not mark.with_suffix(DB_SUFFIX).exists():
-            mark.unlink(missing_ok=True)
-    for lock in dbos_dir.glob(f"*{LOCK_SUFFIX}"):
-        if lock.with_suffix(DB_SUFFIX).exists():
-            continue
-        with locks.file_run_lock(_dbos_dir(root) / f"{lock.stem}{LOCK_SUFFIX}", wait=False) as held:
-            if held is not None:
-                lock.unlink(missing_ok=True)
-
-
-def _sweep_kept(dbos_dir: Path, now: datetime, out: SweepResult) -> None:
-    cutoff = (now - timedelta(days=KEEP_DAYS)).timestamp()
-    for kept in (dbos_dir / RETIRED_DIR, dbos_dir / BROKEN_DIR, dbos_dir / BACKUP_DIR):
-        if not kept.is_dir():
-            continue
-        for path in sorted(kept.iterdir()):
-            if path.is_file() and path.stat().st_mtime < cutoff:
-                path.unlink()
-                out.deleted.append(str(path))
-
-
-# --- URL（PostgreSQL）の台帳と片付け（決定 83・I12・I13） ---------------------------------
-
-
-def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -> bool:
-    """鍵の実行がすべて終わり、どれも `cutoff` より前に終わったか。実行が無ければ台帳の時刻で決める。"""
-    if not records:
-        return started_at < cutoff
-    return all(r.status in FINISHED and r.updated_at is not None and r.updated_at < cutoff for r in records)
+    """終わった鍵のファイルを retired/ へ移し、古い退避を消す（`durable_sweep.sweep`）。"""
+    return sweeping.sweep(root, _RECORDS, now)
 
 
 def sweep_url(root: Path, database_url: str, now: datetime | None = None) -> SweepResult:
-    """台帳の鍵のうち、実行（子を含む）がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す（A6・A12）。
-
-    目印と排他は `sweep` と同じ。鍵ごとに DB 側の鍵のロックを待たずに試し、取れない鍵は触らない（I13）。
-    消すときは集めた ID をすべて並べて `delete_workflows` を呼び、`delete_children` には頼らない（I8）。
-    """
-
-    def body(now: datetime, out: SweepResult) -> None:
-        try:
-            rows = _ledger(database_url)
-        except sa.exc.SQLAlchemyError as exc:
-            out.warnings.append(f"台帳を読めない: {exc}")
-            rows = []
-        cutoff = now - timedelta(days=KEEP_DAYS)
-        for row in rows:
-            try:
-                _sweep_url_run(database_url, row.run_name, row.started_at, cutoff, out)
-            except Exception as exc:  # noqa: BLE001 ネットワーク: 1 つの鍵を片付けられなくても止めず、warnings に載せる
-                out.warnings.append(f"{row.run_name}: {exc}")
-
-    return _guarded_sweep(root, now, body, "URL の片付けで読めない鍵があった")
-
-
-def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: datetime, out: SweepResult) -> None:
-    """鍵 1 つを、DB 側の鍵のロックを待たずに取れたときだけ、すべて終わって日数が過ぎていれば消す。"""
-    with locks.pg_run_lock(database_url, name, wait=False) as held:
-        if held is None:
-            out.busy += 1
-            return
-        records = _records(database_url, [name])
-        if not _expired(records, started_at, cutoff):
-            return
-        ids = [r.workflow_id for r in records]
-        if ids:
-            with _client(database_url) as client:
-                client.delete_workflows(ids, delete_children=False)
-        _forget_run(database_url, name)
-        out.deleted.extend(ids)
+    """台帳の鍵のうち、すべて終わって日数が過ぎた鍵の実行と台帳の行を消す（`durable_sweep.sweep_url`）。"""
+    return sweeping.sweep_url(root, database_url, _RECORDS, now)
 
 
 # --- 待ちを抱えた実行の一覧（決定 86） ---------------------------------------------------
