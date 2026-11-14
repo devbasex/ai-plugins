@@ -45,6 +45,16 @@ class Target:
     production: str
     plugin: str | None = None
 
+    @property
+    def is_production(self) -> bool:
+        """本番のリリースか。"""
+        return self.channel == version_decide.PRODUCTION
+
+    @property
+    def pr_base(self) -> str:
+        """リリースの PR の宛先（本番は本番ブランチ、開発版はベースブランチ）。"""
+        return self.production if self.is_production else self.base
+
 
 @dataclass(frozen=True)
 class Built:
@@ -142,6 +152,5 @@ def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     title = f"Release: {named.plugin} v{named.next}"
     head = _commit_and_push(repo_git, branch, title)
     facts = facts._replace(head=head)
-    base = target.production if target.channel == version_decide.PRODUCTION else target.base
-    number, url = _open_pr(hub, branch, base, title, materials_decide.render(facts))
+    number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
     return Built(branch, named.next, number, url, facts)
