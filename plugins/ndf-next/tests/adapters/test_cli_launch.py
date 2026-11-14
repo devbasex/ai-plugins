@@ -142,3 +142,48 @@ def test_call_claude_timeout_is_not_ok(no_run_env):
 
     assert (got.ok, got.answer, got.raw, got.cost) == (False, None, "", 0.0)
     assert got.error.startswith("claude を起動できない・期限を超えた: ")
+
+
+START_DUMP = (
+    "import json, os, sys\n"
+    "seen = {k: os.environ.get(k) for k in ('NDF_RUN_ID', 'NDF_RUN_LOG', 'X_SPEC', 'PIN_PARENT')}\n"
+    "own = os.getsid(0) == os.getpid()\n"
+    "print(json.dumps({'env': seen, 'cwd': os.getcwd(), 'stdin': sys.stdin.read(), 'own_session': own}))\n"
+    "sys.stderr.write('err')\n"
+)
+
+
+def _start_spec(tmp_path: Path) -> cli.Launch:
+    paths = cli.AgentPaths.at(tmp_path / "deep" / "run" / "codex")
+    env = {"X_SPEC": "s", "NDF_RUN_ID": "from-spec"}
+    return cli.Launch("codex", (sys.executable, "-c", START_DUMP), tmp_path, paths, 30, env=env)
+
+
+def test_start_writes_files_in_new_session_with_spec_env(tmp_path, no_run_env):
+    spec = _start_spec(tmp_path)
+
+    assert cli._start(spec).wait(timeout=30) == 0
+
+    got = json.loads(spec.paths.out.read_text())
+    assert got["env"] == {"NDF_RUN_ID": "from-spec", "NDF_RUN_LOG": None, "X_SPEC": "s", "PIN_PARENT": "kept"}
+    assert (got["cwd"], got["stdin"], got["own_session"]) == (str(tmp_path), "", True)
+    assert spec.paths.err.read_text() == "err"
+
+
+def test_start_run_log_env_overrides_spec_env(tmp_path, no_run_env):
+    spec = _start_spec(tmp_path)
+    log = cli.open_run("entry", run_id="r2", location="repo")
+
+    assert cli._start(spec).wait(timeout=30) == 0
+
+    got = json.loads(spec.paths.out.read_text())
+    assert got["env"] == {"NDF_RUN_ID": "r2", "NDF_RUN_LOG": str(log.path), "X_SPEC": "s", "PIN_PARENT": "kept"}
+
+
+def test_start_without_spec_env_keeps_parent_env(tmp_path, no_run_env):
+    spec = cli.Launch("codex", (sys.executable, "-c", START_DUMP), tmp_path, cli.AgentPaths.at(tmp_path / "codex"), 30)
+
+    assert cli._start(spec).wait(timeout=30) == 0
+
+    got = json.loads(spec.paths.out.read_text())
+    assert got["env"] == {"NDF_RUN_ID": None, "NDF_RUN_LOG": None, "X_SPEC": None, "PIN_PARENT": "kept"}
