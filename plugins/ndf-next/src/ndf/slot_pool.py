@@ -151,12 +151,7 @@ def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, ob
         total, alive = _live_weights(directory)
         if alive and total + weight > capacity_mib:
             return None
-        index = 0
-        while True:
-            held = None if index in alive else try_lock(slot_path(directory, index, ".lock"))
-            if held is not None:
-                break
-            index += 1
+        index, held = _lock_free_index(directory, alive)
         taken = Taken(directory, index, weight, held)
         try:
             taken.describe(owner)
@@ -164,3 +159,13 @@ def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, ob
             held.release()
             raise
         return taken
+
+
+def _lock_free_index(directory: Path, alive: set[int]) -> tuple[int, FileLock]:
+    """生きた持ち主の番号を飛ばし、0 から数えて最初にロックの取れた番号とそのロック。"""
+    index = 0
+    while True:
+        held = None if index in alive else try_lock(slot_path(directory, index, ".lock"))
+        if held is not None:
+            return index, held
+        index += 1
