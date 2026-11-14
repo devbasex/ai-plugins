@@ -7357,8 +7357,20 @@
     {
       "term": "起票の前に人へ見せる場",
       "context": "ndf-workflow",
-      "meaning": "多観点レビューの指摘を分類し、分類ごとのあるべき姿と受け入れ条件の案を人へ示してから起票する場（利用者の決定、2026-11-14。#3388）",
-      "pending_source": "issues/issue-3388-requirements.md"
+      "meaning": "多観点レビューの範囲の外の指摘を分類し、分類ごとのあるべき姿と受け入れ条件の案を、設計承認ゲートの承認資料の節「多観点レビューの分類」に載せる場。人が答えた承認ゲートの後にだけ起票する（#3388）",
+      "pending_source": "issues/issue-3388-design.md"
+    },
+    {
+      "term": "11.x の対応表",
+      "context": "ndf-workflow",
+      "meaning": "振り分け表の 11.x の行ごとに、11.x での行き先（11.x の子の記号・開いている Issue・作らない理由のどれか 1 つ）を持つ表 issues/issue-3388-design-routing.md。11.x の行の行き先の正本（#3388）",
+      "pending_source": "issues/issue-3388-design.md"
+    },
+    {
+      "term": "11.x の子",
+      "context": "ndf-workflow",
+      "meaning": "11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388）",
+      "pending_source": "issues/issue-3388-design.md"
     }
   ]
 }
