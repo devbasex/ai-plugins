@@ -21,11 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.checks.model import CheckError, Finding, Scope, Source
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source
 
 OWN_PACKAGE = __name__.split(".")[0]
 LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
-CODE_DIRS = ("bin/", "hooks/")
 # I1 が定義の行を通す `identity` のファイル（プラグインの根からの相対パス）と、通す名前
 IDENTITY_FILE = "src/" + identity.__name__.replace(".", "/") + ".py"
 DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
@@ -72,7 +71,7 @@ def own_name(scope: Scope) -> list[Finding]:
         if src.is_python and rel.startswith("src/"):
             skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
             texts = [(no, text) for no, text in _strings(src.tree) if no not in skip]
-        elif rel.startswith(CODE_DIRS):
+        elif rel.startswith(SCRIPT_PREFIXES):
             texts = _shell_lines(src)
         else:
             continue

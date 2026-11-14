@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 RULES_PATH = Path(__file__).with_name("rules.json")
+# スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
+SCRIPT_PREFIXES = ("bin/", "hooks/")
 
 
 class CheckError(Exception):
@@ -74,6 +76,10 @@ class Scope:
     def code(self) -> list[Source]:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
         return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith("src/")]
+
+    def code_files(self) -> list[Source]:
+        """コードのファイル（テストを含む `.py` と `bin/`・`hooks/` のスクリプト）。行数の上限が見る。"""
+        return [s for s in self.sources if s.is_python or self.plugin_rel(s).startswith(SCRIPT_PREFIXES)]
 
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
