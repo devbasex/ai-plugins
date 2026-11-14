@@ -238,6 +238,20 @@ def _sample(names: Sequence[str]) -> dict[str, Value]:
     return {n: ([f"<{n}>"] if defs[n].is_list else f"<{n}>") for n in names}
 
 
+def _param_name_errors(t: Template, used: set[str]) -> list[str]:
+    errs = [f"雛形 {t.name} が params に無い差し込みを使う: {n}" for n in sorted(used - set(t.params))]
+    errs += [f"雛形 {t.name} が使わない差し込みを params に持つ: {n}" for n in sorted(set(t.params) - used)]
+    return errs
+
+
+def _sample_render_errors(t: Template) -> list[str]:
+    try:
+        render(t, _sample(t.params))
+    except RouteError as exc:
+        return [str(exc)]
+    return []
+
+
 def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
     errs = [f"雛形 {t.name} の params に定義の無い名前: {n}" for n in t.params if n not in defs]
     if errs:
@@ -246,14 +260,10 @@ def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
         used = used_names(expanded(t))
     except RouteError as exc:
         return [f"雛形 {t.name}: {exc}"]
-    errs += [f"雛形 {t.name} が params に無い差し込みを使う: {n}" for n in sorted(used - set(t.params))]
-    errs += [f"雛形 {t.name} が使わない差し込みを params に持つ: {n}" for n in sorted(set(t.params) - used)]
-    if not errs:
-        try:
-            render(t, _sample(t.params))
-        except RouteError as exc:
-            errs.append(str(exc))
-    return errs
+    errs = _param_name_errors(t, used)
+    if errs:
+        return errs
+    return _sample_render_errors(t)
 
 
 def template_errors(found: Iterable[Template]) -> list[str]:
