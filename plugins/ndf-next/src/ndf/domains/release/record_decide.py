@@ -29,6 +29,10 @@ VERIFICATION_MARK = f"<!-- {_NS}:release-verification -->"
 _JSON_BLOCK = re.compile(r"^```json\n(?P<body>.*?)\n```$", re.MULTILINE | re.DOTALL)
 
 
+class UnreadableRecord(ValueError):
+    """印を持つコメントの JSON のコードブロックが JSON として読めない（書き手が本文を手で壊した）。"""
+
+
 class Record(NamedTuple):
     """リリース記録 1 件。`included` は含めた PR の番号（小さい順）。"""
 
@@ -59,7 +63,10 @@ def render_verification(payload: Mapping[str, Any]) -> str:
 
 
 def payload_of(body: str, mark: str) -> dict[str, Any] | None:
-    """印 `mark` を持つコメントの JSON のコードブロック。印が無い・JSON が読めない・オブジェクトでなければ None。"""
+    """印 `mark` を持つコメントの JSON のコードブロック。印かコードブロックが無い・オブジェクトでなければ None。
+
+    印とコードブロックを持つのに JSON として読めなければ `UnreadableRecord`（記録を壊れたまま読み飛ばさない）。
+    """
     if mark not in body:
         return None
     m = _JSON_BLOCK.search(body, body.index(mark))
@@ -67,8 +74,8 @@ def payload_of(body: str, mark: str) -> dict[str, Any] | None:
         return None
     try:
         got = json.loads(m.group("body"))
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as exc:
+        raise UnreadableRecord(f"{mark} の記録の JSON が読めない: {exc}") from exc
     return got if isinstance(got, dict) else None
 
 

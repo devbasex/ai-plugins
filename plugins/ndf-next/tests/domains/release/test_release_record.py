@@ -107,3 +107,9 @@ def test_read_skips_untrusted_writers() -> None:
 def test_body_without_json_block_is_not_a_record() -> None:
     assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象の版: {VERSION}\n") is None
     assert record_decide.parse_record('```json\n{"version": "1.2.4", "release": 1, "included": []}\n```') is None
+
+
+def test_marked_body_with_broken_json_is_reported_not_skipped() -> None:
+    body = f"{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{\"version\": \n```\n"
+    with pytest.raises(record_decide.UnreadableRecord):
+        record_decide.parse_record(body)
