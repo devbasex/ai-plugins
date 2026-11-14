@@ -242,6 +242,12 @@ def _enablement(
     return _by_definition(stage, facts)
 
 
+def enabled_by_project(saved: Mapping[str, Mapping[str, Any]], stage: str) -> bool:
+    """作成の時点で保存した enablement で、プロジェクトの宣言が工程を有効にしていたか（宣言 > 定義の条件）。"""
+    en = saved.get(stage)
+    return en is not None and en["source"] == "project" and en["enabled"] is True
+
+
 def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
     """モードの工程に無い名前。"""
     known = {s.name for s in snap.stages}

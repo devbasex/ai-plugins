@@ -569,17 +569,9 @@ def _retro_enabled(v: View) -> bool:
 TABLE_FACTS: dict[str, Callable[[View], bool]] = {"retro_enabled": _retro_enabled}  # 進行表から求める条件の語
 
 
-def _enabled_by_project(v: View, stage: str) -> bool:
-    """プロジェクトの宣言が工程を有効にしていたか（作成の時点で保存した enablement）。宣言 > 定義の条件。"""
-    en = v.doc.get("enablement", {}).get(stage)
-    return isinstance(en, dict) and en.get("source") == "project" and en.get("enabled") is True
-
-
 def _when_off(d: Drive, v: View, s: stages.StageDef) -> Optional[str]:
-    """定義の条件のうち最初の偽の語。すべて真か、conductor が戻した行か、プロジェクトの宣言が有効にした行なら None。
-
-    求められなければ `command.FactUnknown`。"""
-    if not s.when or _forced(v, s.name) or _enabled_by_project(v, s.name):
+    """定義の条件の最初の偽の語。全て真・conductor が戻した・宣言が有効にした行は None。求められなければ `command.FactUnknown`。"""
+    if not s.when or _forced(v, s.name) or stages.enabled_by_project(v.doc["enablement"], s.name):
         return None
     outer = tuple(w for w in s.when if w not in TABLE_FACTS)
     values = {**d.env.facts(outer, v.context(), d.cwd), **{w: TABLE_FACTS[w](v) for w in s.when if w in TABLE_FACTS}}
