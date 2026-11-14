@@ -6,6 +6,8 @@
 
 **旧い実装計画は使わない。** [issue-1142-design-detail.md](issue-1142-design-detail.md) の「実装計画」「流す順序」「レーンへの割り当ての案」は、この文書の表に置き換わる。[issue-1142-design-labels.md](issue-1142-design-labels.md) の行き先の列も同じである。
 
+> **#3347:** この文書の「実装計画」「流す順番」「レーンの割り当て」は、[issue-3347-design-detail.md](issue-3347-design-detail.md) の同じ名前の節が置き換える（P1 を P1a・P1b に分け、書かれていない依存を足し、P4 を lrebuild へ移した。決定 97〜99）。
+
 ## 実装計画
 
 | 子 | Issue | 中身 | 取り込む旧い子・Issue | 先に要るもの | 順番 | レーン |
