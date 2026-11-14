@@ -1,7 +1,8 @@
 """新しいプラグインの不変条件 I1〜I3（issues/issue-1142-design-next.md の「不変条件」）。
 
-- I1: コード（`src/` の `.py`・`bin/`・`hooks/`）は、自分のプラグイン名・ディレクトリ名・状態の置き場の名前を文字で
-  持たない。名前は `identity` が `plugin.json` から求める
+- I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の置き場の名前を
+  文字で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
+  `plugin.json` から作る生成物で、照合しない（名前を変えたら作り直す）
 - I2: 新しいプラグインの子の PR（差分が新しいプラグインも変える）は、旧いプラグインのディレクトリを変えない。即時修正だけは、
   PR 本文の印の行で許す
 - port: 旧いプラグインを変えた PR は、PR 本文に新しいプラグインへ移す先の Issue か移さない理由を持つ（#3343）
@@ -32,6 +33,8 @@ DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
 ISSUE_REF = re.compile(r"#\d+")
 # Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
+# `bin/`・`hooks/` の下で、I1 が照合しない生成物（hook の登録）の拡張子
+GENERATED_SUFFIX = ".json"
 # `old_plugin_diff` が出す規則。差分と PR 本文だけで決まり、プラグインのファイルを読まない
 DIFF_RULES = frozenset({"port", "I2"})
 
@@ -78,13 +81,15 @@ def own_name(scope: Scope) -> list[Finding]:
 def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
     """I1 が照合する行と文字。製品の Python は文字列の定数（`identity` の定義の行を除く）、スクリプトはコメントを除いた行。
 
+    `bin/`・`hooks/` の `.json`（`ndf hooks render` が作る登録）は照合しない。
+
     ほかのファイルは照合しない（空）。
     """
     rel = scope.plugin_rel(src)
     if src.is_python and rel.startswith(SRC_DIR + "/"):
         skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
         return [(no, text) for no, text in _strings(src.tree) if no not in skip]
-    if rel.startswith(SCRIPT_PREFIXES):
+    if rel.startswith(SCRIPT_PREFIXES) and not rel.endswith(GENERATED_SUFFIX):
         return _shell_lines(src)
     return []
 

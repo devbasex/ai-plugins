@@ -1,5 +1,7 @@
 {
   "name": "ndf11",
-  "version": "11.0.0-dev.6",
-  "description": "Rebuild of the NDF plugin (#1142). Not listed in the marketplace."
+  "version": "11.0.0-dev.8",
+  "description": "Rebuild of the NDF plugin (v11.0.0-dev.8, #1142). Not listed in the marketplace.",
+  "skills": [],
+  "hooks": "./hooks/codex.json"
 }

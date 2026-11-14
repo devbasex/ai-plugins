@@ -3,6 +3,7 @@
     ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）
     ndf hooks capture <ランタイム> <版> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
+    ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）を契約表と予算から作り直す
 
 hook の経路ではない（利用者と CI が打つ）。
 """
@@ -18,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.contracts import causes, result
-from ndf.domains.hooks import budget, metrics, tables
+from ndf.domains.hooks import budget, metrics, registration, tables
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -95,8 +96,21 @@ def _capture(args: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, result.OK, f"見本を書いた: {path}", items=[{"path": str(path)}]))
 
 
+def _render(check: bool) -> int:
+    if check:
+        found = registration.stale()
+        if found:
+            items = [{"path": str(p)} for p in found]
+            summary = f"作り直した結果と違う登録が {len(found)} 件ある（ndf hooks render で作り直す）"
+            return result.emit(result.stopped(TOOL, "check_failed", summary, items=items))
+        return result.emit(result.result(TOOL, result.OK, "登録は作り直した結果と同じ"))
+    written = registration.write()
+    items = [{"path": str(p)} for p in written]
+    return result.emit(result.result(TOOL, result.OK, f"登録を {len(written)} 件書いた", items=items))
+
+
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本")
+    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本・登録の生成")
     sub = parser.add_subparsers(dest="action", required=True)
     st = sub.add_parser("stats", help="事象・guard ごとの所要と判定の数")
     st.add_argument("--days", type=float, default=metrics.keep_days())
@@ -105,6 +119,8 @@ def main(argv: list[str]) -> int:
     cap.add_argument("runtime")
     cap.add_argument("version")
     cap.add_argument("event")
+    ren = sub.add_parser("render", help="登録を契約表と予算から作り直す")
+    ren.add_argument("--check", action="store_true", help="書かずに、作り直した結果と違えば stopped")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -113,4 +129,6 @@ def main(argv: list[str]) -> int:
         return _stats(args.days)
     if args.action == "check-budget":
         return _check_budget()
+    if args.action == "render":
+        return _render(args.check)
     return _capture(args)
