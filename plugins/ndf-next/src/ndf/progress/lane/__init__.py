@@ -331,19 +331,34 @@ def _reach(edges: Mapping[tuple[str, str], set[tuple[str, str]]], start: tuple[s
     return seen
 
 
+def _concurrent(edges: Mapping[tuple[str, str], set[tuple[str, str]]], x: tuple[str, str], y: tuple[str, str]) -> bool:
+    """2 つの行の間に前後の鎖が無いか（同時に動き得るか）。"""
+    return y not in _reach(edges, x) and x not in _reach(edges, y)
+
+
+def _concurrent_pairs(edges: Mapping[tuple[str, str], set[tuple[str, str]]], lanes: Lanes, a: str, b: str) -> list[str]:
+    """レーン a と b の終わっていない行のうち、同時に動き得る組。"""
+    return [
+        f"{a}/{x.key}・{b}/{y.key}"
+        for x, y in itertools.product([r for r in lanes[a] if r.live], [r for r in lanes[b] if r.live])
+        if _concurrent(edges, (a, x.key), (b, y.key))
+    ]
+
+
+def _touch_hits(la: LaneSpec, lb: LaneSpec) -> list[str]:
+    """2 つのレーンの触る場所の重なる組。"""
+    return sorted({f"{x}・{y}" for x, y in itertools.product(la.touches, lb.touches) if touch_hit(x, y)})
+
+
 def _touch_errors(view: PlanView, lanes: Lanes) -> list[str]:
     """同時に動き得る行の組（前後の鎖が無い別のレーンの行どうし）の間で、触る場所が重なる組（I13）。"""
     edges, errs = _order_graph(view, lanes), []
     for a, b in itertools.combinations(_live_lanes(view, lanes), 2):
         la, lb = view.lanes[a], view.lanes[b]
-        hits = sorted({f"{x}・{y}" for x, y in itertools.product(la.touches, lb.touches) if touch_hit(x, y)})
+        hits = _touch_hits(la, lb)
         if not hits or not _same_repo(la, lb):
             continue
-        pairs = [
-            f"{a}/{x.key}・{b}/{y.key}"
-            for x, y in itertools.product([r for r in lanes[a] if r.live], [r for r in lanes[b] if r.live])
-            if (b, y.key) not in _reach(edges, (a, x.key)) and (a, x.key) not in _reach(edges, (b, y.key))
-        ]
+        pairs = _concurrent_pairs(edges, lanes, a, b)
         if pairs:
             errs.append(f"同時に動き得る行 {', '.join(pairs)} の触る場所が重なる（I13）: {', '.join(hits)}")
     return errs
