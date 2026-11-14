@@ -106,8 +106,8 @@ def _start(tid: str, row: str) -> None:
 def test_running_row_cannot_be_disabled_and_bad_output_cannot_finish(repo, capsys, tmp_path):
     _, made = _new(capsys)
     tid = made["metrics"]["table_id"]
-    _start(tid, "設計")
-    _, out = _run(capsys, "disable", tid, "設計", "--reason", "止めたい")
+    _start(tid, "実装")
+    _, out = _run(capsys, "disable", tid, "実装", "--reason", "止めたい")
     assert out["cause"]["kind"] == "refused" and "実行中" in out["cause"]["detail"]
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"steps": []}))
