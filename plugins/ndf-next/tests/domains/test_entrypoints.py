@@ -29,6 +29,9 @@ def accepts(entrypoint: str, call: str, env: list[str]) -> bool:
     ep = facts.row(EP, entrypoint)
     if not set(env) <= set(ep["env"]):
         return False
+    if ep["kind"] == "block":
+        head = f"(?:{re.escape(ep.get('lead', ''))})?/[^ /:]+:{re.escape(ep['target'])} "
+        return any(re.fullmatch(head + f"(?:{arg})", call) for arg in ep["args"])
     if ep["kind"] in ARG_KINDS:
         return any(re.fullmatch(arg, call) for arg in ep["args"])
     if ep["kind"] == "hook":

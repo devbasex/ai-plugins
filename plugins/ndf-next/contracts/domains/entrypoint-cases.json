@@ -3,7 +3,7 @@
   "owner": "D2（contracts/domains）",
   "columns": {
     "entrypoint": {"type": "string", "summary": "確かめるエントリポイント", "ref": "domains/entrypoints"},
-    "call": {"type": "string", "summary": "呼び手が渡す値。skill・block・command は引数、report は結果の行の値、hook は事象、file は置き場からの相対パス"},
+    "call": {"type": "string", "summary": "呼び手が渡す値。skill・command は引数、block は ndf-next ブロックの中身、report は結果の行の値、hook は事象、file は置き場からの相対パス"},
     "env": {"type": "array", "summary": "呼び手が入れる環境変数の名前"},
     "valid": {"type": "boolean", "summary": "エントリポイントが受けるか"},
     "meaning": {"type": "string", "summary": "見本が表す場面"}
@@ -15,8 +15,8 @@
     {"id": "loop-name-case", "entrypoint": "skill-workflow", "call": "--loop Team_A", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "今の開発ループが受けるループの名前（大文字・_ を含む）で始める"},
     {"id": "loop-options", "entrypoint": "skill-workflow", "call": "--loop l1 --milestones \"01 近い,02\" --budget-laps 2 --budget-usd default", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "選ぶマイルストーンと予算を開発ループの起動で上書きする"},
     {"id": "loop-bad-budget", "entrypoint": "skill-workflow", "call": "--loop l1 --budget-laps many", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": false, "meaning": "予算の値は数か default だけ"},
-    {"id": "resume-loop", "entrypoint": "block-next", "call": "--loop Team_A --budget-laps 2", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "ndf-next ブロックの中身で開発ループを再開する"},
-    {"id": "resume", "entrypoint": "block-next", "call": "#895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "区間の報告の ndf-next ブロックの中身で次の区間を始める"},
+    {"id": "resume-loop", "entrypoint": "block-next", "call": "/goal /ndf:development-workflow --loop Team_A -- 終わり: [ndf-loop] stopped Team_A の行を出したとき", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "今の NDF が出す再開のコマンド（/goal の前置きと終わりの条件の節。sprint_loop_record.resume_command）の ndf-next ブロックで開発ループを再開する"},
+    {"id": "resume", "entrypoint": "block-next", "call": "/ndf:development-workflow #895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "区間の報告の ndf-next ブロックの中身で次の区間を始める"},
     {"id": "unknown-flag", "entrypoint": "skill-workflow", "call": "--resume 895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": false, "meaning": "契約に無い引数は受けない"},
     {"id": "terminal-env", "entrypoint": "skill-workflow", "call": "#895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN", "NDF_RELAY_NAME"], "valid": false, "meaning": "端末で中継を使うときの環境変数はサービスのエントリポイントに無い"},
     {"id": "report-done", "entrypoint": "report-unattended", "call": "完了", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "区間を最後まで通した"},
