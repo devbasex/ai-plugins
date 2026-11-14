@@ -32,7 +32,6 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from ndf.adapters import paths
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf import identity
@@ -804,7 +803,7 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     raise AssertionError("到達しない")
 
 
-# --- 副命令 ndf progress のエントリポイント ----------------------------------------------------------------
+# --- 工程の条件の語 ------------------------------------------------------------------------------------------
 
 
 WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
@@ -814,8 +813,7 @@ BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behav
 
 def _declaration(cwd: Path, name: str) -> dict[str, Any]:
     """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。"""
-    top = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
-    path = top / name
+    path = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
     raw = command._read_json(path, "を読めない") if path.exists() else {}
     return raw if isinstance(raw, dict) else {}
 
@@ -826,53 +824,59 @@ def _dig(node: Any, *keys: str) -> Any:
     return node
 
 
-@dataclass(frozen=True)
-class DiffKinds:
-    """差分の分け方。`docs_only` は文書が 1 件以上あり、コードと振る舞いを決める文書が 0 件のときだけ真。"""
+def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:
+    """差分の語の値。振る舞いを決める文書は文書の部分集合。文書だけは、文書が 1 件以上でコードと振る舞いの文書が 0 件。"""
+    code, behavior = files - docs, behavior & docs
+    return {
+        "code_in_diff": bool(code),
+        "docs_only_diff": bool(files) and not code and not behavior,
+        "behavior_docs_in_diff": bool(behavior),
+    }
 
-    code: bool
-    docs_only: bool
-    behavior: bool
 
-
-def _patterns(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
+    """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
     value = _dig(project, "docs", key)
-    return tuple(value) if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
+    patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
+    return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
-def diff_kinds(files: list[str], project: Mapping[str, Any]) -> DiffKinds:
-    """差分のファイルを、文書（`docs.files`）・振る舞いを決める文書（`docs.behavior`）・コードに分ける。"""
-    code = [f for f in files if not paths.path_matches(f, _patterns(project, "files", DOC_FILES))]
-    behavior = [f for f in files if f not in code and paths.path_matches(f, _patterns(project, "behavior", BEHAVIOR_DOCS))]
-    return DiffKinds(bool(code), bool(files) and not code and not behavior, bool(behavior))
-
-
-def sprint_diff(context: Mapping[str, Any], cwd: Path) -> list[str]:
-    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`）の分岐点からの差分のファイル。
-
-    ベースブランチは手元の名前、無ければ `origin/` の名前で引く。求められなければ `FactUnknown`。
-    """
+def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
+    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
     base = _dig(_declaration(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base:
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} に base_branch が無い")
     git = Git(Path(context.get("worktree") or cwd))
     head = str(context.get("branch") or "HEAD")
-    errors = []
-    for ref in (base, f"origin/{base}"):
-        try:
-            return git.changed_files(git.merge_base(ref, head), head)
-        except GitError as exc:
-            errors.append(str(exc))
-    raise FactUnknown(f"差分を求められない: {errors[-1]}")
+    try:
+        git.rev_parse(base)
+        ref = base
+    except GitError:
+        ref = f"origin/{base}"
+    return git, f"{git.merge_base(ref, head)}...{head}"
+
+
+def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
+    return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
+
+
+def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """スプリントの差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。"""
+    project = _declaration(cwd, command.PROJECT_FILE)
+    try:
+        git, rng = _sprint_range(context, cwd)
+        files = _diff_names(git, rng, [])
+        docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
+        return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+    except GitError as exc:
+        raise FactUnknown(f"差分を求められない: {exc}") from exc
 
 
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
     """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
-    kinds = functools.cache(lambda: diff_kinds(sprint_diff(context, cwd), _declaration(cwd, command.PROJECT_FILE)))
+    kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
-        "code_in_diff": lambda: kinds().code,
-        "docs_only_diff": lambda: kinds().docs_only,
-        "behavior_docs_in_diff": lambda: kinds().behavior,
+        **{w: (lambda w=w: kinds()[w]) for w in ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")},
         "ci_declared": lambda: _dig(_declaration(cwd, command.PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: bool(_dig(_declaration(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
@@ -888,6 +892,9 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
         except FactUnknown as exc:
             raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
     return out
+
+
+# --- 副命令 ndf progress のエントリポイント ----------------------------------------------------------------
 
 
 def _env() -> Env:

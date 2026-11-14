@@ -29,7 +29,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import durable
-from ndf.progress import definition, invoke, model, stages, store
+from ndf.progress import definition, model, stages, store
 
 # 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -251,7 +251,7 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
     def build(rev: int, _snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
         """終了の印と、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
-        draft, dropped[:] = invoke.record_outputs(stage, rev, output.get("outputs") or {}, ACTOR)
+        draft, dropped[:] = stages.outputs_draft(stage, rev, output["outputs"] if "outputs" in output else {}, ACTOR)
         done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
         return [done, *([draft] if draft is not None else [])]
 

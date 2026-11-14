@@ -348,11 +348,17 @@ def test_diff_words_split_the_sprint_diff_into_code_and_docs(repo, changed, kind
     assert tuple(run.facts_of(words, ctx, repo)[w] for w in words) == kinds
 
 
-def test_diff_words_follow_the_docs_declaration():
-    project = {"docs": {"files": ["**/*.md", "**/*.txt"], "behavior": ["rules/*.txt"]}}
-    assert run.diff_kinds(["a.txt"], project) == run.DiffKinds(False, True, False)
-    assert run.diff_kinds(["rules/a.txt"], project) == run.DiffKinds(False, False, True)
-    assert run.diff_kinds(["a.txt"], {}) == run.DiffKinds(True, False, False)
+def test_diff_words_follow_the_docs_declaration(repo):
+    _sprint_branch(repo, "a.txt", "rules/b.txt")
+    words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
+    ctx = {"worktree": str(repo), "branch": "sprint/s1"}
+    assert run.facts_of(words, ctx, repo) == {"code_in_diff": True, "docs_only_diff": False, "behavior_docs_in_diff": False}
+    docs = {"files": ["**/*.md", "**/*.txt"], "behavior": ["rules/*.txt"]}
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
+    assert run.facts_of(words, ctx, repo) == {"code_in_diff": False, "docs_only_diff": False, "behavior_docs_in_diff": True}
+    docs["files"] = ["**/*.txt", "!rules/**"]
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
+    assert run.facts_of(words, ctx, repo)["code_in_diff"] is True
 
 
 def test_diff_words_without_a_base_branch_cannot_be_decided(repo):
