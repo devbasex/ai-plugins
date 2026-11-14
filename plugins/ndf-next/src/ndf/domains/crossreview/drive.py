@@ -30,10 +30,6 @@ from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import fixgate_decide, push, scope_decide, store
 
-# 状態ファイルの鍵（rounds・reviewed_sections は store が持つ）
-ROUNDS = store.ROUNDS
-REVIEWED = store.REVIEWED
-FINDINGS = "findings"
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
 # ラウンドの上限の既定
@@ -121,7 +117,7 @@ def _list(data: Mapping[str, Any], key: str) -> list[Any]:
 
 def _ingest_pending(run: _Run) -> None:
     """前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ取り込む（#2770）。"""
-    rounds = _list(run.data, ROUNDS)
+    rounds = _list(run.data, store.ROUNDS)
     last = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
     pending = store.pending_fix_result(run.cfg.state_dir, run.ref)
     gate = fixgate_decide.require_fix_for_changes(len(rounds), last.get("verdict"), last.get("fix"), str(pending) if pending else None)
@@ -139,7 +135,7 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    ledger = {str(f["id"]): f for f in _list(data, FINDINGS) if isinstance(f, dict) and "id" in f}
+    ledger = {str(f["id"]): f for f in _list(data, store.FINDINGS) if isinstance(f, dict) and "id" in f}
     run = _Run(cfg, g, ref, data, ledger, [], [], [])
     _ingest_pending(run)
     return run
@@ -266,7 +262,7 @@ def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     """修正の結果を台帳へ取り込み、結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。"""
     found = store.read_fix_result(path, run.ref)
     handed = {h.id: h.text for h in run.cfg.handed}
-    reported = [f for f in _list(found, FINDINGS) if isinstance(f, dict) and f.get("outcome") in (fin.FIXED, fin.SKIPPED)]
+    reported = [f for f in _list(found, store.FINDINGS) if isinstance(f, dict) and f.get("outcome") in (fin.FIXED, fin.SKIPPED)]
     for item in reported:
         fid = str(item.get("id"))
         reason = _text(item.get("reason"))
@@ -321,7 +317,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> 
 
 
 def _save(run: _Run) -> None:
-    run.data[FINDINGS] = list(run.ledger.values())
+    run.data[store.FINDINGS] = list(run.ledger.values())
     store.write_object(run.ref.path, run.data)
 
 
@@ -333,14 +329,14 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
     )
     path = run.cfg.state_dir / SUMMARY_NAME
     rows = [dict(f._asdict()) for f in findings]
-    store.write_object(path, {"final": final, ROUNDS: rounds, FINDINGS: rows, "pr": run.ref.origin_pr})
+    store.write_object(path, {"final": final, store.ROUNDS: rounds, store.FINDINGS: rows, "pr": run.ref.origin_pr})
     return Outcome(fin.Review(final, rounds, findings), path, tuple(run.warnings), tuple(run.process))
 
 
 def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     cfg = run.cfg
-    rounds = run.data.setdefault(ROUNDS, [])
+    rounds = run.data.setdefault(store.ROUNDS, [])
     reviewed = scope_decide.reviewed_of(run.data)
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
     scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
@@ -352,7 +348,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         return fin.ERROR
     run.history.append(_enter(run, round_no, raised))
     if scope.kind == scope_decide.FULL:
-        run.data[REVIEWED] = sorted(reviewed | set(sections))
+        run.data[store.REVIEWED] = sorted(reviewed | set(sections))
     record: dict[str, Any] = {"round": round_no, "head": head, "scope": scope.kind}
     rounds.append(record)
     open_, handed = _pending(run)
@@ -376,10 +372,10 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent) -> Outcome:
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     final, done = fin.MAX_ROUNDS, 0
-    first = len(_list(run.data, ROUNDS)) + 1
+    first = len(_list(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):
         ended = _round(run, round_no, launch)
-        done = len(_list(run.data, ROUNDS)) - first + 1
+        done = len(_list(run.data, store.ROUNDS)) - first + 1
         _save(run)
         if ended is not None:
             final = ended

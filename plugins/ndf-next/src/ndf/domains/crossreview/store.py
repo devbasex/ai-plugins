@@ -26,6 +26,7 @@ CURRENT_KEY = "current_pr"
 REPO_KEY = "target_repo"
 ROUNDS = "rounds"
 REVIEWED = "reviewed_sections"
+FINDINGS = "findings"
 
 
 class StateBroken(Exception):
