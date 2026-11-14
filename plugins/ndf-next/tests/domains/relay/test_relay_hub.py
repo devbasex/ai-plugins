@@ -162,6 +162,21 @@ def test_busy_hub_times_out_without_leaving_the_request(ctx):
     assert got.cause == "wait_timeout" and not list((base / "requests").glob("*.json"))
 
 
+def test_secret_values_never_reach_the_tmux_arguments():
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs.get("env")))
+        return type("D", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    env = {"GH_TOKEN": "ghp_secret", "ANTHROPIC_API_KEY": "sk-secret", "AWS_SECRET_ACCESS_KEY": "aws", "NDF_RELAY_NAME": "t1"}
+    assert Tmux({}, 1.0, runner=runner).start("t1", Path("/w"), ["ndf", "relay", "run"], env).ok
+    argv, passed = calls[0]
+    joined = " ".join(argv)
+    assert "NDF_RELAY_NAME=t1" in joined and not any(v in joined for v in ("ghp_secret", "sk-secret", "aws"))
+    assert passed == env
+
+
 def test_tmux_runner_failures_are_reported():
     def boom(*a, **k):
         raise OSError("no tmux")
