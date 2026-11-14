@@ -115,11 +115,11 @@ def _delete_branch(main: Git, branch: str, rec: Record) -> None:
         rec.add("branch", branch, "absent")
         return
     sha = main.rev_parse(f"refs/heads/{branch}")
-    done = main.runner(["branch", "-d", branch], main.cwd)
-    if done.returncode == 0:
+    refused = repo.delete_merged_branch(main, branch)
+    if refused is None:
         rec.add("branch", branch, "deleted", sha=sha, restore=f"git branch {branch} {sha}")
         return
-    why = f"git がマージ済みと認めない（消すなら人が確かめて -D で消す）: {done.stderr.strip()}"
+    why = f"git がマージ済みと認めない（{repo.MANUAL_FORCE}）: {refused}"
     rec.add("branch", branch, "kept", why, sha=sha)
 
 

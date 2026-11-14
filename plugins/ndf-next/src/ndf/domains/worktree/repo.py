@@ -15,6 +15,9 @@ from typing import Iterable, Optional
 from ndf.adapters.git import Git, GitError, WorktreeEntry, parse_worktree_list
 from ndf.contracts import facts
 
+# マージ済みと認められなかったブランチを残すときに添える文（`-D` は NDF が打たず、人が確かめて打つ。C4）
+MANUAL_FORCE = "消すなら人が確かめて -D で消す"
+
 
 def worktrees_dir(main_dir: Path) -> Path:
     """開発 worktree を置くディレクトリ（メインディレクトリの下）。"""
@@ -78,6 +81,12 @@ def dirty_paths(git: Git, untracked: bool = False) -> list[str]:
     """未コミットの変更の `<状態> <パス>`（既定は追跡しているファイルだけ）。"""
     mode = "--untracked-files=normal" if untracked else "--untracked-files=no"
     return [line for line in git.run("status", "--porcelain", mode).splitlines() if line.strip()]
+
+
+def delete_merged_branch(git: Git, branch: str) -> Optional[str]:
+    """`git branch -d` でブランチを消す（`-D` は使わない）。消せたら `None`、git が断ったらその標準エラー。"""
+    done = git.runner(["branch", "-d", branch], git.cwd)
+    return None if done.returncode == 0 else done.stderr.strip()
 
 
 def has_ref(git: Git, ref: str) -> bool:

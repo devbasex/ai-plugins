@@ -84,9 +84,9 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
         g.run("worktree", "remove", str(item.path))
     except GitError as exc:
         return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消せなかった: {exc}")
-    done = g.runner(["branch", "-d", str(item.branch)], g.cwd)
-    if done.returncode != 0:
-        note = f"ブランチは残した（git がマージ済みと認めない。消すなら人が確かめて -D で消す）: {done.stderr.strip()}"
+    refused = repo.delete_merged_branch(g, str(item.branch))
+    if refused is not None:
+        note = f"ブランチは残した（git がマージ済みと認めない。{repo.MANUAL_FORCE}）: {refused}"
         return Outcome(item.path, item.branch, REMOVE, removed=True, note=note)
     return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True)
 
