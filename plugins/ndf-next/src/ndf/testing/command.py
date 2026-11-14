@@ -163,13 +163,14 @@ def _report(since: str) -> int:
     except ValueError as exc:
         return _stopped("invalid", str(exc))
     try:
-        directory = slots.slots_dir()
+        directory, retired = slots.slots_place()
     except identity.IdentityError as exc:
         return _stopped("config_broken", str(exc))
     # 記録が無ければ 0 件として読む
     metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"
-    return result.emit(result.result(TOOL, result.OK, summary, metrics=metrics))
+    # 置き場を用意するときに旧い状態の置き場を退避したら、元と先を items に載せる（復旧先を結果から引ける）
+    return result.emit(result.result(TOOL, result.OK, summary, items=retired, metrics=metrics))
 
 
 def _parser() -> argparse.ArgumentParser:

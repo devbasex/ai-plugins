@@ -6,6 +6,8 @@
 プラグインの根は、このファイルの位置（`ROOT`）の 1 通りで求める。契約の表（`ndf.contracts`）も同じ `ROOT` を読む。
 環境変数 `CLAUDE_PLUGIN_ROOT` は根を決めず、自分の根と同じかを確かめるだけに使う。違えば（ほかのプラグインの
 hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、旧い状態の置き場を退避しない（#3367）。
+`bin/ndf` は子へ自分の根を渡す前に、呼び出し元の値を `NDF_CALLER_PLUGIN_ROOT` へ写す。それがあれば（空でも）
+そちらを呼び出し元の値として確かめる。
 
 状態の置き場の用意（`prepare_state_dir`）:
 
@@ -18,6 +20,8 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
   処理は待ち、先の処理が置いた `format.json` を見て退避しない
 - `format.json` は一時の名前で書いてから置き換える（`os.replace`）。`format.json` があることが「用意が済んだ」印で、
   途中で落ちても中身の半端な `format.json` は残らない
+- 退避する置き場が別の退避する置き場の中にあれば（`XDG_STATE_HOME` と `CLAUDE_CONFIG_DIR` が同じなど）、外側の
+  置き場だけを名前を変え、中の置き場は外側と一緒に動く
 - 戻り値の `StateReady` が、退避した置き場の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）
 """
 
@@ -44,6 +48,8 @@ FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
 # 旧い置き場の退避先の名前の接尾辞（`<置き場の名前>.v10-<日付>`）
 RETIRED_SUFFIX = ".v10-"
+# `bin/ndf` が子へ自分の根を渡す前に写した、呼び出し元の `CLAUDE_PLUGIN_ROOT`
+CALLER_ROOT_ENV = "NDF_CALLER_PLUGIN_ROOT"
 
 
 class IdentityError(Exception):
@@ -96,7 +102,8 @@ def _config_home() -> Path:
 
 
 def _foreign_root(root: Path) -> Optional[Path]:
-    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    env = os.environ
+    env_root = env[CALLER_ROOT_ENV] if CALLER_ROOT_ENV in env else env.get("CLAUDE_PLUGIN_ROOT", "")
     if not env_root or Path(env_root).resolve() == root.resolve():
         return None
     return Path(env_root)
@@ -228,8 +235,14 @@ def _is_old(place: Path) -> bool:
     return place.is_dir() and not (place / FORMAT_FILE).exists() and any(place.iterdir())
 
 
+def _outermost(places: list[Path]) -> list[Path]:
+    """ほかの置き場の中にある置き場と、前に同じパスがある置き場を除く（外側を動かせば中も動く）。順は保つ。"""
+    resolved = [p.resolve() for p in places]
+    return [p for i, (p, r) in enumerate(zip(places, resolved)) if r not in resolved[:i] and not any(o in r.parents for o in resolved)]
+
+
 def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
-    old = [p for p in old_state_places(ident) if _is_old(p)]
+    old = _outermost([p for p in old_state_places(ident) if _is_old(p)])
     if old and ident.foreign_root is not None:
         raise IdentityError(
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の置き場を退避しない: "

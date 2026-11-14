@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.contracts import causes, result
 from ndf.testing import command, records, slots, waits
 from ndf.testing.limits import Limits
@@ -136,6 +137,23 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     assert (got["tool"], got["status"]) == ("test-slot", "ok")
     metrics = got["metrics"]
     assert (metrics["gave_up"], metrics["waited_runs"]) == (1, 1)
+
+
+def test_report_lists_the_old_state_places_it_retired(tmp_path):
+    # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる
+    state_home = tmp_path / "xdg-state"
+    old = state_home / identity.load().name
+    old.mkdir(parents=True)
+    (old / "ledger.jsonl").write_text("old")
+    extra = {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}
+
+    proc = _ndf(["report", "--since", "1d"], tmp_path, **extra)
+    out, err = proc.communicate()
+
+    assert proc.returncode == 0, err
+    items = _result(out, 0)["items"]
+    assert [item["retired_from"] for item in items] == [str(old)]
+    assert (Path(items[0]["retired_to"]) / "ledger.jsonl").read_text() == "old"
 
 
 def test_report_refuses_a_wrong_period(tmp_path):

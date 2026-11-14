@@ -9,11 +9,20 @@
 #   実体の位置から根を求めるので、リンクの置き場は問わない
 #
 # uv が無いとき: 版を固定した uv（UV_VERSION）を `<キャッシュのホーム>/<プラグイン名>/uv/<版>` へ入れてから続ける。
-# 入れられない（curl が無い・ネットワークが無いなど）ときは、理由を結果 JSON（stopped・deps_missing）で出し、
+# - 公式のインストーラを取り、埋めたハッシュ（UV_INSTALLER_SHA256）と照合してから実行する。インストーラは
+#   各アーカイブのハッシュを持ち、展開の前に照合するので、ここでインストーラを固定すると導入物まで固定される
+# - 取得と導入は呼ぶごとの一時ディレクトリで行い、できた uv を名前の変更（mv）で置く。同時に起動しても
+#   互いのインストーラを上書き・削除しない
+# 入れられない（curl が無い・ネットワークが無い・ハッシュが違うなど）ときは、理由を結果 JSON（stopped・deps_missing）で出し、
 # 終了コードの表（contracts/facts/exit-codes.json）の deps_missing の終了コードで止まる。
+#
+# 呼び出し元の CLAUDE_PLUGIN_ROOT は、子へ自分の根を渡す前に NDF_CALLER_PLUGIN_ROOT へ写す。Python 側は
+# それを読み、ほかのプラグインの根なら旧い状態の置き場を退避しない（identity.py）。
 set -euo pipefail
 
 UV_VERSION="0.13.7"
+# https://github.com/astral-sh/uv/releases/download/0.13.7/uv-installer.sh の sha256（astral.sh の配信と同じ中身）
+UV_INSTALLER_SHA256="d263ee68314cf5bea36b08e6bd9e2c4563240d7adb73756cf33af5c199b92db4"
 
 # このファイルの実体のパス（シンボリックリンクをたどる。bash 3.2 と macOS の readlink で動く形）
 self="${BASH_SOURCE[0]}"
@@ -55,15 +64,27 @@ if [ -z "$uv_bin" ]; then
       stop_deps_missing "uv が無く、入れるための curl も無い（https://docs.astral.sh/uv/ から uv $UV_VERSION を入れる）"
     fi
     mkdir -p "$cache_home/uv"
-    installer="$uv_dir.install.sh"
+    work="$(mktemp -d "$cache_home/uv/.install.XXXXXX")"
+    installer="$work/install.sh"
     if ! log="$(curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" -o "$installer" 2>&1)" \
-      || ! log="$(env UV_UNMANAGED_INSTALL="$uv_dir" sh "$installer" 2>&1)" || [ ! -x "$uv_bin" ]; then
+      || ! log="$(python3 -c '
+import hashlib, sys
+path, want = sys.argv[1], sys.argv[2]
+with open(path, "rb") as f:
+    got = hashlib.sha256(f.read()).hexdigest()
+if got != want:
+    sys.exit(f"インストーラのハッシュが違う（{got}）")
+' "$installer" "$UV_INSTALLER_SHA256" 2>&1)" \
+      || ! log="$(env UV_UNMANAGED_INSTALL="$work/bin" sh "$installer" 2>&1)" || [ ! -x "$work/bin/uv" ] \
+      || ! log="$(mkdir -p "$uv_dir" && mv -f "$work/bin/uv" "$uv_bin" 2>&1)"; then
+      rm -rf "$work"
       stop_deps_missing "uv が無く、uv $UV_VERSION を $uv_dir へ入れられない（ネットワークを確かめる）: $(printf '%s' "$log" | tail -n 1)"
     fi
-    rm -f "$installer"
+    rm -rf "$work"
   fi
 fi
 
+export NDF_CALLER_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"

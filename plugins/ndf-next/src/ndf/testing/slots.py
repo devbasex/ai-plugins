@@ -100,12 +100,16 @@ def waited_since(started: float) -> float:
         return sum(max(0.0, end - max(start, started)) for start, end in _ledger if end > started)
 
 
-def slots_dir(environ: Mapping[str, str] | None = None) -> Path:
-    """枠の置き場。`NDF_TEST_SLOTS_DIR` があればそこ、無ければ状態の置き場の下。"""
+def slots_place(environ: Mapping[str, str] | None = None) -> tuple[Path, list[dict[str, str]]]:
+    """枠の置き場と、そのために状態の置き場を用意したときに退避した旧い置き場（結果 JSON の `items` の形）。
+
+    `NDF_TEST_SLOTS_DIR` があればそこで、状態の置き場に触れない（退避は空）。無ければ状態の置き場の下。
+    """
     env = os.environ if environ is None else environ
     if env.get(SLOTS_DIR_ENV):
-        return Path(env[SLOTS_DIR_ENV])
-    return identity.prepare_state_dir(identity.load()).path / SLOTS_DIR_NAME
+        return Path(env[SLOTS_DIR_ENV]), []
+    ready = identity.prepare_state_dir(identity.load())
+    return ready.path / SLOTS_DIR_NAME, ready.items()
 
 
 def _try_lock(path: Path) -> FileLock | None:
@@ -410,7 +414,8 @@ def _skip_gate(env: Mapping[str, str]) -> bool:
 def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> Path | Held:
     """枠の置き場を用意して返す。使えなければ、理由を `note` に書いた枠を取らない形の `Held` を返す（I8）。"""
     try:
-        directory = options.directory or slots_dir(env)
+        # 退避した旧い置き場は identity が警告のログへ書く。テストの結果は変えないので結果へは載せない
+        directory = options.directory or slots_place(env)[0]
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）

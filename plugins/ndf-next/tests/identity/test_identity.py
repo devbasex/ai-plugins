@@ -54,6 +54,18 @@ def test_load_does_not_take_the_root_from_the_environment(tmp_path, monkeypatch)
     assert ident.foreign_root == other
 
 
+def test_load_checks_the_callers_root_that_the_entrypoint_kept(monkeypatch, tmp_path):
+    # bin/ndf は CLAUDE_PLUGIN_ROOT を自分の根で上書きする。写した呼び出し元の値（NDF_CALLER_PLUGIN_ROOT）で確かめる
+    other = make_plugin(tmp_path, "old", "ndf")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(PLUGIN_ROOT))
+    monkeypatch.setenv(identity.CALLER_ROOT_ENV, str(other))
+
+    assert identity.load().foreign_root == other
+
+    monkeypatch.setenv(identity.CALLER_ROOT_ENV, "")
+    assert identity.load().foreign_root is None
+
+
 def test_load_accepts_the_environment_naming_its_own_root(monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(PLUGIN_ROOT))
 
@@ -129,6 +141,24 @@ def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
     assert not config_state.exists()
     assert [r.source for r in ready.retired] == [ident.state_dir, config_state]
     assert ready.retired[1].target == moved
+
+
+def test_prepare_moves_a_place_inside_another_only_with_the_outer_one(tmp_path, monkeypatch):
+    # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと config-state が state-home の中にある。外側だけの名前を変える
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "same"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "same"))
+    ident = identity.load()
+    inner = ident.state_dir / "state"
+    inner.mkdir(parents=True)
+    (inner / "ledger.jsonl").write_text("old")
+
+    ready = identity.prepare_state_dir(ident, now=NOW)
+
+    moved = ident.state_dir.with_name("p.v10-20261113")
+    assert ready.retired == (identity.Retired(ident.state_dir, moved),)
+    assert (moved / "state" / "ledger.jsonl").read_text() == "old"
+    assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
 
 
 def test_old_state_places_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
