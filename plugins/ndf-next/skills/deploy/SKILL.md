@@ -92,12 +92,27 @@ DEPLOY_BRANCH="${FEATURE_BRANCH}_to_${ENV_SUFFIX}"
 EXISTING_PR=$(gh pr list --head "$DEPLOY_BRANCH" --base "$ARGUMENTS" \
   --json number,url --jq '.[0].url // empty')
 if [[ -n "$EXISTING_PR" ]]; then
-  echo "✅ PR already exists: $EXISTING_PR"
+  # 再デプロイ: PR は作り直さず、featureブランチと起点ブランチを deployブランチへ取り込んで push する
+  git fetch origin "$dev_base" "$DEPLOY_BRANCH" || exit 1
+  # ローカルに無ければ origin の deployブランチを追跡して作られる
+  git checkout "$DEPLOY_BRANCH" || exit 1
+  git merge --ff-only "origin/$DEPLOY_BRANCH" || {
+    echo "❌ ローカルの $DEPLOY_BRANCH が origin と分かれています。中身を確かめてください" >&2
+    git checkout "$FEATURE_BRANCH"; exit 1
+  }
+  git merge "$FEATURE_BRANCH" --no-edit && git merge "origin/$dev_base" --no-edit || {
+    echo "❌ deployブランチへの取り込みで merge conflict。featureブランチ側を先に同期してください" >&2
+    git merge --abort
+    git checkout "$FEATURE_BRANCH"; exit 1
+  }
+  git push origin "$DEPLOY_BRANCH" || { git checkout "$FEATURE_BRANCH"; exit 1; }
+  git checkout "$FEATURE_BRANCH"
+  echo "✅ 既存PRを更新しました: $EXISTING_PR"
   exit 0
 fi
 ```
 
-既存PRがあれば更新は「deployブランチにpushする」だけで済むため、再作成しない。
+既存PRがあれば、PRは作り直さず、deployブランチへ feature ブランチと起点ブランチを取り込んで push する（PR が更新される）。
 
 ### 4. deployブランチ作成 + ベースブランチの取り込み
 
@@ -156,7 +171,7 @@ git checkout "$FEATURE_BRANCH"
 - ベースブランチからの実行は禁止
 - ベースブランチの取り込みで conflict が出た場合、deployブランチを削除して戻る（featureブランチ側を先に同期すべき）
 - deployブランチは PR マージ後に削除してよい
-- 環境ブランチへの再デプロイは「同じ deployブランチに push」でPRが更新される
+- 環境ブランチへの再デプロイは、この Skill を呼び直すと同じ deployブランチへ push され、PRが更新される（手順 3）
 
 ## 関連
 
