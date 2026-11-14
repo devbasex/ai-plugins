@@ -199,3 +199,61 @@ def test_stopped_from_anything_else_is_a_precondition_outside_git():
     kind, detail, items, _ = _stopped(exc)
     assert kind == "precondition" and items == []
     assert detail == f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}"
+
+
+# --- 現状固定: `.ndf/project.json` の工程の宣言の読み取り（_declared） ----------------------------------
+
+
+def _declare(repo: Path, raw: str) -> Path:
+    (repo / ".ndf").mkdir(exist_ok=True)
+    path = repo / ".ndf" / "project.json"
+    path.write_text(raw, encoding="utf-8")
+    return path
+
+
+def test_declared_is_empty_without_the_project_file(repo):
+    assert command._declared(repo) == {}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "[]",
+        '"文字列"',
+        "{}",
+        '{"workflow": []}',
+        '{"workflow": {}}',
+        '{"workflow": {"stages": []}}',
+        '{"workflow": {"stages": "x"}}',
+    ],
+)
+def test_declared_is_empty_when_the_workflow_stages_are_not_an_object(repo, raw):
+    _declare(repo, raw)
+    assert command._declared(repo) == {}
+
+
+def test_declared_returns_the_stages_as_written(repo):
+    stages = {"リファクタリング": {"enabled": False, "reason": "止めている"}, "振り返り": {"enabled": True}}
+    _declare(repo, json.dumps({"workflow": {"stages": stages, "other": 1}, "test": {}}))
+    assert command._declared(repo) == stages
+
+
+def test_declared_reads_the_file_at_the_top_of_the_checkout_from_a_subdirectory(repo):
+    _declare(repo, json.dumps({"workflow": {"stages": {"実装": {"enabled": False, "reason": "外す"}}}}))
+    sub = repo / "a" / "b"
+    sub.mkdir(parents=True)
+    assert command._declared(sub) == {"実装": {"enabled": False, "reason": "外す"}}
+
+
+def test_declared_raises_a_contract_error_naming_the_file_when_it_is_not_json(repo):
+    path = _declare(repo, "{壊れている")
+    with pytest.raises(contracts.ContractError) as caught:
+        command._declared(repo)
+    assert str(caught.value).startswith(f"{path} を読めない: ")
+
+
+def test_new_stops_as_invalid_when_the_project_file_is_not_json(repo, capsys):
+    _declare(repo, "{壊れている")
+    code, out = _new(capsys)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and code == 2
+    assert "project.json を読めない" in out["cause"]["detail"]
