@@ -38,6 +38,8 @@ MIN_ACCOUNT_CHARS = 3
 # リポジトリへの参照（`https://github.com/<所有者>/<リポジトリ>...` と `<所有者>/<リポジトリ>#<番号>`）
 _REPO_URL = re.compile(r"https?://github\.com/(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?=[/#?\s)\]>\"'`]|$)[^\s)\]>\"'`]*")
 _REPO_REF = re.compile(r"(?<![\w./-])(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+)#\d+")
+# リポジトリへの参照の形（URL を先に置き換えてから番号の形を見る）
+_REPO_PATTERNS = (_REPO_URL, _REPO_REF)
 _HOME = re.compile(r"/(?:home|Users)/[^/\s)\]>\"'`]+")
 _EMAIL = re.compile(r"(?<![\w.+-])(?P<local>[\w.+-]+)@(?P<domain>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 
@@ -65,21 +67,23 @@ def local_accounts() -> frozenset[str]:
 
 def repo_refs(text: str) -> set[str]:
     """本文に出るリポジトリ（`<所有者>/<リポジトリ>`）。公開範囲を読む相手。"""
-    return {m["repo"] for pattern in (_REPO_URL, _REPO_REF) for m in pattern.finditer(text)}
+    return {m["repo"] for pattern in _REPO_PATTERNS for m in pattern.finditer(text)}
 
 
 def _drop_private_refs(text: str, private: set[str]) -> tuple[str, int]:
     lowered = {r.lower() for r in private}
+    count = 0
 
     def repl(m: re.Match[str]) -> str:
-        return PRIVATE_REF_TEXT if m["repo"].lower() in lowered else m[0]
+        nonlocal count
+        if m["repo"].lower() not in lowered:
+            return m[0]
+        count += 1
+        return PRIVATE_REF_TEXT
 
-    total = 0
-    for pattern in (_REPO_URL, _REPO_REF):
-        hits = sum(1 for m in pattern.finditer(text) if m["repo"].lower() in lowered)
+    for pattern in _REPO_PATTERNS:
         text = pattern.sub(repl, text)
-        total += hits
-    return text, total
+    return text, count
 
 
 def _drop_emails(text: str) -> tuple[str, int]:
