@@ -406,6 +406,21 @@ def probe_one(root, n, act, items):
     return cls, action
 
 
+def pick_class(found: list[tuple]) -> tuple[str, str]:
+    """PR ごとの (番号, クラス, 処置) から、最も優先するクラスとその処置を返す。無ければ ("none", "judge")。"""
+    if not found:
+        return "none", "judge"
+    _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
+    return cls, action
+
+
+def probe_summary(cls: str, action: str, items: list[dict], queued_runs: int) -> str:
+    """クラスと処置に応じた要約の文。チェックの名前（置き換えられたものを除く）とランナー待ちの数を埋める。"""
+    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
+    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
+    return template.format(names=names, queued_runs=queued_runs)
+
+
 def cmd_probe(a):
     """開いた PR のチェックを読み、取り残し・ランナー待ち・失敗・実行中に分ける（一次の調査）。"""
     if not a.pr and not a.head:
@@ -416,15 +431,10 @@ def cmd_probe(a):
         got = probe_one(root, n, a.act, items)
         if got:
             found.append((int(n), *got))
-    if not found:
-        cls, action = "none", "judge"
-    else:
-        _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
+    cls, action = pick_class(found)
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
-    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
-    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
-    summary = template.format(names=names, queued_runs=queued_runs)
+    summary = probe_summary(cls, action, items, queued_runs)
     pr_text = " ".join(f"#{n}" for n in prs)
     emit(
         result(TOOL, "ok", f"{pr_text} {summary}".strip(), items, {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}),
