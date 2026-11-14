@@ -43,6 +43,7 @@ import math
 import os
 import subprocess
 from collections.abc import Iterator
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -283,7 +284,7 @@ def write_report(conn: Any, plan_id: str, notice: Report) -> str | None:
 @durable.step
 def report(spec: dict[str, Any], notice: dict[str, Any]) -> str | None:
     """レーンの知らせ（`Report` の項目の辞書）を計画の進行表の依頼として書く耐久ステップ（`write_report`）。"""
-    got = Report(notice["lane"], notice["key"], notice["detail"], notice["kind"], tuple(tuple(f) for f in notice["facts"]))
+    got = Report(**{**notice, "facts": tuple(tuple(f) for f in notice["facts"])})
     with _conn(spec) as conn:
         return write_report(conn, spec["plan_id"], got)
 
@@ -317,12 +318,12 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
         return Done(act, observe(spec))
     if isinstance(act, Launch):
-        how = {"cancel": act.cancel, "resume": act.resume, "seq": act.seq, "halt": act.halt, "goal": act.goal}
+        how = {k: v for k, v in dataclasses.asdict(act).items() if k not in ("lane", "row")}
         return Done(act, launch_lane(spec, act.lane, act.row, how))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
     if isinstance(act, Report):
-        notice = {"lane": act.lane, "key": act.key, "detail": act.detail, "kind": act.kind, "facts": [list(f) for f in act.facts]}
+        notice = {**dataclasses.asdict(act), "facts": [list(f) for f in act.facts]}
         return Done(act, report(spec, notice))
     if isinstance(act, Withdraw):
         return Done(act, withdraw(spec, act.request, act.lane))
