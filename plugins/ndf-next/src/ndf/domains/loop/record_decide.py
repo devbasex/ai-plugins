@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from ndf.domains.release.approval_decide import APPROVED
@@ -117,7 +117,6 @@ class LoopState:
     lease_until: float = 0.0
     requested: Optional[Stop] = None
     stopped: Optional[Stop] = None
-    events: int = field(default=0, compare=False)
 
     @property
     def current(self) -> Optional[Lap]:
@@ -226,7 +225,6 @@ def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     """事象 1 件を当てた次の状態。"""
     check(ev)
     kind = ev["kind"]
-    state = replace(state, events=state.events + 1)
     if kind == LEASE_TAKEN:
         return replace(state, holder=ev["session"], lease_until=float(ev["until"]))
     if kind == LEASE_RETURNED:

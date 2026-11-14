@@ -248,7 +248,6 @@ def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str
     assert after.laps[0] == before.laps[0]
     for key, value in want.items():
         assert getattr(after.laps[1], key) == value
-    assert after.events == before.events + 1
     assert (after.holder, after.lease_until, after.requested, after.stopped) == (None, 0.0, None, None)
 
 
