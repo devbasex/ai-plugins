@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
+from ndf.contracts.exit_codes import OK
 
 
 class Pending(NamedTuple):
@@ -30,7 +31,7 @@ def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pen
     except (OSError, subprocess.TimeoutExpired) as exc:
         return Pending(None, f"ndf plan pending を打てない: {exc}")
     last = _last_json(done.stdout)
-    if last is None or last.get("status") != "ok":
+    if last is None or last.get("status") != OK:
         return Pending(None, _failure_note(last, done))
     items = last.get("items")
     return Pending(items if isinstance(items, list) else [], "")
