@@ -114,6 +114,13 @@ class LaneRow:
         """答えが載った後に conductor がまだ `ndf progress next` を打っていない実行中の行か。"""
         return self.state == RUNNING and self.answered_seq > self.resumed_seq
 
+    def stalled(self, now: datetime, grace_seconds: float) -> bool:
+        """答えの後の next 待ちのまま、答えが載ってから猶予の秒以上たったか（載った時刻が無ければ 0 秒とみなす）。"""
+        if not self.awaiting_next:
+            return False
+        waited = (now - self.answered_at).total_seconds() if self.answered_at else 0.0
+        return waited >= grace_seconds
+
     def issues(self) -> set[int]:
         return set(self.input["issues"]) if self.input.get("kind") == "sprint" else set()
 

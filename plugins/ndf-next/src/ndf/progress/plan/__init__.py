@@ -240,10 +240,9 @@ def complete_plan(conn: sa.Connection, pid: str) -> bool:
 def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     item = {"row": row.key, "state": row.state, "label": model.label(row.state), "input": row.input, "sprint_id": row.sprint_id}
     if row.awaiting_next:
-        waited = (now - row.answered_at).total_seconds() if row.answered_at else 0.0
         item["awaiting_next"] = {
             "since": row.answered_at.isoformat() if row.answered_at else None,
-            "stalled": waited >= ANSWER_NEXT_GRACE_SECONDS,
+            "stalled": row.stalled(now, ANSWER_NEXT_GRACE_SECONDS),
             "actor": "conductor",
             "next": result.command("progress", "next", row.sprint_id) if row.sprint_id else None,
         }

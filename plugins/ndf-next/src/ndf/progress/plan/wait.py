@@ -26,8 +26,8 @@ def read_seen(conn: sa.Connection, plan_id: str, after: int, now: datetime) -> S
     """計画の進行表の番号より後の知らせと、止まりの鍵を読む。"""
     view, events = lane.read_plan(conn, plan_id)
     found = wait_decide.notices([e.as_dict() for e in events], after)
-    out = table.status(conn, plan_id, now)
-    stalls = [f"{i['lane']}/{r['row']}" for i in out["items"] for r in i["rows"] if "awaiting_next" in r and r["awaiting_next"]["stalled"]]
+    rows = lane.folded(lane.read_lanes(conn, view))
+    stalls = [f"{name}/{r.key}" for name in view.lanes for r in rows[name] if r.stalled(now, table.ANSWER_NEXT_GRACE_SECONDS)]
     last = max([after, *(e["seq"] for e in found)])
     return Seen(state=view.state, ended=model.is_terminal(view.state), notices=tuple(found), last_seq=last, stalls=tuple(stalls))
 
