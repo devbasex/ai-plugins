@@ -7,7 +7,9 @@ import pytest
 from ndf.core import loop
 from ndf.core.loop import DecideLoopError, Next
 
-from ._counting import decide
+from ._counting_loader import _load_counting
+
+decide = _load_counting().decide
 
 
 def test_run_alternates_decide_and_perform_until_finish():
