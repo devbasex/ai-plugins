@@ -25,7 +25,7 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol, Union
 
@@ -305,22 +305,26 @@ def _source(ref: Ref, ctx: Context) -> str:
     return str(_target(ref, ctx))
 
 
+def _place(out: Resolved, skipped: list[str], ref: Ref, got: Got, ctx: Context) -> None:
+    """解いた結果 1 つを、値・解けない参照・飛ばす参照のどれかへ振り分ける。"""
+    if isinstance(got, Unresolved):
+        out.unresolved[ref.name] = got
+    elif isinstance(got, _Empty) and ref.skip_when_empty:
+        skipped.append(ref.name)
+    elif isinstance(got, _Empty):
+        out.unresolved[ref.name] = Unresolved("input_missing", got.reason)
+    else:
+        out.values[ref.name] = got
+        out.sources[ref.name] = _source(ref, ctx)
+
+
 def resolve(refs: Sequence[Ref], ctx: Context, src: Sources) -> Resolved:
     """参照をすべて値へ解く。解けない参照は種類と理由つきで `unresolved` に、空で飛ばす参照は `skipped` に入る。"""
     out = Resolved()
     skipped: list[str] = []
     for ref in refs:
-        got = _one(ref, ctx, src)
-        if isinstance(got, Unresolved):
-            out.unresolved[ref.name] = got
-        elif isinstance(got, _Empty) and ref.skip_when_empty:
-            skipped.append(ref.name)
-        elif isinstance(got, _Empty):
-            out.unresolved[ref.name] = Unresolved("input_missing", got.reason)
-        else:
-            out.values[ref.name] = got
-            out.sources[ref.name] = _source(ref, ctx)
-    return Resolved(out.values, out.sources, out.unresolved, tuple(skipped))
+        _place(out, skipped, ref, _one(ref, ctx, src), ctx)
+    return replace(out, skipped=tuple(skipped))
 
 
 def resolve_plan(plan_raw: Mapping[str, Any], ctx: Context, src: Sources) -> Resolved:
