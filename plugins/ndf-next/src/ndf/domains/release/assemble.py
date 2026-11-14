@@ -120,7 +120,7 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
     planned = gather.plan_bumps(root, found, change_list, decl, target.level, target.channel)
     if not planned:
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
-    pulls = gather.pull_facts(hub, gather.included(repo_git, span))
+    pulls = gather.pull_facts(hub, gather.included(repo_git, span, target.production))
     return materials_decide.Facts(
         target.channel,
         tuple(planned),

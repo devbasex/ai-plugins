@@ -68,10 +68,10 @@ def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.Pul
     ]
 
 
-def included(repo_git: git_mod.Git, span: Range) -> list[int]:
-    """範囲のベースブランチの first-parent の件名から、含む PR の番号。"""
+def included(repo_git: git_mod.Git, span: Range, production: str) -> list[int]:
+    """範囲のベースブランチの first-parent の件名から、含む PR の番号（本番ブランチ `production` から戻す PR を除く）。"""
     subjects = repo_git.run("log", "--first-parent", "--format=%s", git_mod.END_OF_OPTIONS, f"{span.since}..{span.until}")
-    return included_decide.numbers(subjects.splitlines())
+    return included_decide.numbers(subjects.splitlines(), (production,))
 
 
 def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:

@@ -29,6 +29,7 @@ class FakeHub:
     requests: list[tuple[str, str, Any]] = field(default_factory=list)
     responses: dict[tuple[str, str], Any] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
+    merge_methods: list[str | None] = field(default_factory=list)
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
@@ -65,6 +66,7 @@ class FakeHub:
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
         self.merged.append(number)
+        self.merge_methods.append(method)
         return MergeOutcome(True, None, f"#{number} をマージした", self.pulls[number].head_sha)
 
 

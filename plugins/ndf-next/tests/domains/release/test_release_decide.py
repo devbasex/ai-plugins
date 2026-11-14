@@ -80,8 +80,11 @@ def test_included_numbers_skip_release_branches() -> None:
         "直した (#14)",
         "ふつうのコミット",
         "Merge pull request #12 from o/feat/x",
+        "Merge pull request #15 from o/main",
     ]
-    assert included_decide.numbers(subjects) == [12, 14]
+    assert included_decide.numbers(subjects) == [12, 14, 15]
+    # 本番ブランチから戻す PR（head は本番ブランチ）は含めない
+    assert included_decide.numbers(subjects, ("main",)) == [12, 14]
 
 
 @pytest.mark.parametrize(

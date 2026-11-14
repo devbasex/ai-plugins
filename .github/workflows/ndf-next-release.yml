@@ -172,8 +172,10 @@ jobs:
           set -o pipefail
           case "$PR" in ''|*[!0-9]*) echo "PR の番号でない: $PR"; exit 2;; esac
           "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION" \
-            | tee "$RUNNER_TEMP/merge.json"
+            | tee "$RUNNER_TEMP/merge.json" || code=$?
+          # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"
+          exit "${code:-0}"
 
   approval:
     # 証跡の印を含むコメントの作成・編集・削除だけで起動する。編集は前の本文も見る（印を消した編集でも判定し直す）。
@@ -219,8 +221,10 @@ jobs:
         run: |
           set -o pipefail
           "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION" \
-            | tee "$RUNNER_TEMP/merge.json"
+            | tee "$RUNNER_TEMP/merge.json" || code=$?
+          # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"
+          exit "${code:-0}"
 
   publish:
     # 本番ブランチへマージした run の後（merge・approval の出力に本番ブランチへ入ったコミットがあるとき）か、
