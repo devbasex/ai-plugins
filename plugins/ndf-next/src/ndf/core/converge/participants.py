@@ -54,17 +54,30 @@ def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: 
     return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
 
 
+def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:
+    """`at` から始まる JSON の値。JSON の始まりでなければ None。"""
+    try:
+        found, _ = decoder.raw_decode(text, at)
+    except json.JSONDecodeError:
+        # 相手役の出力の途中の `{` は JSON の始まりでない。呼び手が前の `{` を試す
+        return None
+    return found
+
+
+def _findings_in(found: Any) -> Optional[list[dict[str, Any]]]:
+    """`{"findings": [...]}` の形なら辞書の指摘だけを返す。ほかは None。"""
+    if isinstance(found, dict) and isinstance(found.get("findings"), list):
+        return [f for f in found["findings"] if isinstance(f, dict)]
+    return None
+
+
 def findings_of(text: str) -> Optional[list[dict[str, Any]]]:
     """相手役の出力の最後の `{"findings": [...]}` の指摘。見つからなければ None（空の指摘と分ける）。"""
     decoder = json.JSONDecoder()
     at = text.rfind("{")
     while at >= 0:
-        try:
-            found, _ = decoder.raw_decode(text, at)
-        except json.JSONDecodeError:
-            # 相手役の出力の途中の `{` は JSON の始まりでない。前の `{` を試す
-            found = None
-        if isinstance(found, dict) and isinstance(found.get("findings"), list):
-            return [f for f in found["findings"] if isinstance(f, dict)]
+        found = _findings_in(_decode_at(decoder, text, at))
+        if found is not None:
+            return found
         at = text.rfind("{", 0, at)
     return None
