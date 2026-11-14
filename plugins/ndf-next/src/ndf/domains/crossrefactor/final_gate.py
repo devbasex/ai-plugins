@@ -109,16 +109,32 @@ def _failed_tests(hub: github.GitHub, watched: ci.WatchResult) -> Optional[list[
         return None
 
 
+@dataclass(frozen=True)
+class CiPort:
+    """CI との接続: 必須のチェックの待ちと、落ちたテストの node id の取得（テストで差し替える）。"""
+
+    wait: Callable[[github.GitHub, str, GateConfig], ci.WatchResult] = wait_ci
+    failed_tests: Callable[[github.GitHub, ci.WatchResult], Optional[list[str]]] = _failed_tests
+
+
 def _names(checks: Sequence[ci.Check]) -> list[str]:
     return [c.name for c in checks]
 
 
-def run_gate(g: git.Git, hub: github.GitHub, cfg: GateConfig, fix: FixLauncher, sleep: Callable[[float], None]) -> dict[str, Any]:
+def run_gate(
+    g: git.Git,
+    hub: github.GitHub,
+    cfg: GateConfig,
+    fix: FixLauncher,
+    sleep: Callable[[float], None],
+    ci_port: Optional[CiPort] = None,
+) -> dict[str, Any]:
     """最終ゲートを回し、通れば記録（`status` が `passed`・`rounds`）を返す。止まれば `GateStopped`。"""
+    port = ci_port if ci_port is not None else CiPort()
     for round_no in range(cfg.max_fix + 1):
         sha = send(g, cfg.branch)
         ensure_mergeable(hub, cfg.pr, sleep)
-        watched = wait_ci(hub, sha, cfg)
+        watched = port.wait(hub, sha, cfg)
         kind = watched.cause(cfg.tests)
         if kind is None:
             return {"status": "passed", "rounds": round_no, "head": sha}
@@ -126,7 +142,7 @@ def run_gate(g: git.Git, hub: github.GitHub, cfg: GateConfig, fix: FixLauncher, 
             raise GateStopped(
                 kind, f"最終ゲートの CI が通らない（{watched.reading.verdict}）", {"status": kind, "rounds": round_no, "head": sha}
             )
-        nodes = _failed_tests(hub, watched)
+        nodes = port.failed_tests(hub, watched)
         failed = nodes if nodes else _names(watched.reading.failed_tests)
         before = g.rev_parse("HEAD")
         if not fix(failed, round_no + 1):

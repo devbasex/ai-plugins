@@ -137,18 +137,27 @@ class Watched:
         return self.kind
 
 
-def fake_ci(monkeypatch: pytest.MonkeyPatch, *results: Watched) -> list[str]:
-    """最終ゲートの CI の待ちを差し替え、待った head を返す並びを渡す。"""
-    waited: list[str] = []
-    queue = list(results)
+@dataclass
+class FakeCi:
+    """最終ゲートの CI の代わり。待った head を `waited` に並べ、渡した結果を順に返す（最後の結果は繰り返す）。"""
 
-    def wait(hub: Any, sha: str, cfg: final_gate.GateConfig) -> Watched:
-        waited.append(sha)
-        return queue.pop(0) if len(queue) > 1 else queue[0]
+    results: list[Watched]
+    waited: list[str] = field(default_factory=list)
 
-    monkeypatch.setattr(final_gate, "wait_ci", wait)
-    monkeypatch.setattr(final_gate, "_failed_tests", lambda hub, watched: ["tests/test_geo.py::test_area"])
-    return waited
+    def wait(self, hub: Any, sha: str, cfg: final_gate.GateConfig) -> Watched:
+        self.waited.append(sha)
+        return self.results.pop(0) if len(self.results) > 1 else self.results[0]
+
+    def failed_tests(self, hub: Any, watched: Watched) -> list[str]:
+        return ["tests/test_geo.py::test_area"]
+
+    def port(self) -> final_gate.CiPort:
+        return final_gate.CiPort(self.wait, self.failed_tests)  # type: ignore[arg-type]
+
+
+def fake_ci(*results: Watched) -> FakeCi:
+    """最終ゲートの CI の代わりを、待った head に返す結果の並びで作る。"""
+    return FakeCi(list(results))
 
 
 @dataclass
@@ -162,6 +171,7 @@ class Comments:
         return f"https://example.com/pull/{pr}#c{len(self.bodies)}"
 
 
-def ports(fake: FakeAgents, hub: FakeHub, comments: Optional[Comments] = None) -> drive.Ports:
+def ports(fake: FakeAgents, hub: FakeHub, comments: Optional[Comments] = None, ci: Optional[FakeCi] = None) -> drive.Ports:
     post = comments if comments is not None else Comments()
-    return drive.Ports(launcher=fake, hub=lambda work: hub, sleep=lambda s: None, comment=post)  # type: ignore[arg-type,return-value]
+    port = ci.port() if ci is not None else final_gate.CiPort()
+    return drive.Ports(launcher=fake, hub=lambda work: hub, sleep=lambda s: None, comment=post, ci=port)  # type: ignore[arg-type,return-value]

@@ -61,8 +61,8 @@ def _state(world: World) -> dict:
 
 def test_items_follow_the_touched_function_and_results_stay_inside_each_workdir(world, monkeypatch, capsys) -> None:
     fake = FakeAgents(_acts())
-    waited = fake_ci(monkeypatch, Watched(None))
-    got = drive.drive(world.config(), ports(fake, FakeHub("clean")))
+    ci = fake_ci(Watched(None))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     state = _state(world)
     assert [(i["symbol"], i["status"]) for i in state["items"]] == [("area", "adopted")]
@@ -77,10 +77,10 @@ def test_items_follow_the_touched_function_and_results_stay_inside_each_workdir(
     assert (root / "logs" / "codex-propose-pr7-result.json").is_file()
     assert (root / "logs" / "claude-add-tests-I-001-result.json").is_file()
     pushed = sh(world.origin, "rev-parse", f"refs/heads/{BRANCH}")
-    assert waited == [pushed] and "product = w * h" in sh(world.origin, "show", f"{pushed}:src/geo.py")
+    assert ci.waited == [pushed] and "product = w * h" in sh(world.origin, "show", f"{pushed}:src/geo.py")
     assert not (root / "work").exists()
     # 同じ引数で打ち直すと、担当を起動せずに前回の結果を返す。持たない引数を案内しない
-    again = drive.drive(world.config(), ports(FakeAgents(_acts(propose=None)), FakeHub("clean")))
+    again = drive.drive(world.config(), ports(FakeAgents(_acts(propose=None)), FakeHub("clean"), ci=ci))
     assert again.as_json() == got.as_json()
     assert "--reopen" not in capsys.readouterr().err
 
@@ -90,8 +90,8 @@ def test_add_tests_without_a_result_skips_the_item_instead_of_stopping(world, mo
         commit_at({"tests/test_half.py": "x = 1\n"}, "途中")(spec, submit)
         return None
 
-    fake_ci(monkeypatch, Watched(None))
-    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"add-tests": silent})), FakeHub("clean")))
+    ci = fake_ci(Watched(None))
+    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"add-tests": silent})), FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     item = _state(world)["items"][0]
     assert item["status"] == "deferred" and item["reason"].startswith("add-tests")
@@ -114,24 +114,24 @@ def test_added_test_not_collected_by_the_whole_run_reverts_the_item(world, monke
         (spec.cwd / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
         return adds(spec, submit)
 
-    fake_ci(monkeypatch, Watched(None))
-    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"add-tests": with_decl})), FakeHub("clean")))
+    ci = fake_ci(Watched(None))
+    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"add-tests": with_decl})), FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     item = _state(world)["items"][0]
     assert item["status"] == "reverted" and "tests/geo_helpers.py" in item["reason"]
 
 
 def test_conflicting_pull_request_stops_without_waiting_for_ci(world, monkeypatch) -> None:
-    waited = fake_ci(monkeypatch, Watched(None))
-    got = drive.drive(world.config(), ports(FakeAgents(_acts()), FakeHub("unknown", "dirty")))
+    ci = fake_ci(Watched(None))
+    got = drive.drive(world.config(), ports(FakeAgents(_acts()), FakeHub("unknown", "dirty"), ci=ci))
     assert got.kind == "base_conflict"
-    assert waited == []
+    assert ci.waited == []
 
 
 def test_final_fix_outside_the_plan_scope_is_not_taken(world, monkeypatch) -> None:
-    fake_ci(monkeypatch, Watched("test_failed", ("pytest",)), Watched(None))
+    ci = fake_ci(Watched("test_failed", ("pytest",)), Watched(None))
     outside = commit_at({"docs/a.md": "# 直した\n"}, "範囲の外を直す")
-    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"final-fix": outside})), FakeHub("clean")))
+    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"final-fix": outside})), FakeHub("clean"), ci=ci))
     assert got.kind == "refused"
     final = _state(world)["final"]
     assert final["outside_failures"]["outside_files"] == ["docs/a.md"]

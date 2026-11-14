@@ -103,6 +103,7 @@ class Ports:
     sleep: Callable[[float], None] = time.sleep
     comment: Optional[Callable[[git.Git, int, str], str]] = None
     clock: Callable[[], float] = time.monotonic
+    ci: final_gate.CiPort = field(default_factory=final_gate.CiPort)
 
     def github(self, work: git.Git) -> github.GitHub:
         """作業場所の origin の GitHub。"""
@@ -504,7 +505,7 @@ def _final(run: _Run) -> None:
 
     hub = run.ports.github(run.work)
     try:
-        run.state["final"] = final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep)
+        run.state["final"] = final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep, run.ports.ci)
     except final_gate.GateStopped as exc:
         run.state["final"] = exc.record
         run.save()

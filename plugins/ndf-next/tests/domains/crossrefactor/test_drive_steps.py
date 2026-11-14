@@ -95,9 +95,9 @@ def _planned(spec, submit):
 
 
 def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are_written(world, monkeypatch) -> None:
-    fake_ci(monkeypatch, Watched(None))
+    ci = fake_ci(Watched(None))
     comments = Comments()
-    got = drive.drive(world.config(budget_minutes=30), ports(FakeAgents(_acts(plan=_planned)), FakeHub("clean"), comments))
+    got = drive.drive(world.config(budget_minutes=30), ports(FakeAgents(_acts(plan=_planned)), FakeHub("clean"), comments, ci=ci))
     assert got.kind == "ok", got.detail
     state = _state(world)
     assert [(i["title"], i["status"]) for i in state["items"]] == [("式に名前を付ける", "adopted")]
@@ -112,10 +112,10 @@ def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are
 
 
 def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world, monkeypatch) -> None:
-    fake_ci(monkeypatch, Watched(None))
+    ci = fake_ci(Watched(None))
     comments = Comments()
     tick = itertools.count(step=600)
-    slow = replace(ports(FakeAgents(_acts()), FakeHub("clean"), comments), clock=lambda: float(next(tick)))
+    slow = replace(ports(FakeAgents(_acts()), FakeHub("clean"), comments, ci=ci), clock=lambda: float(next(tick)))
     got = drive.drive(world.config(safety_net_minutes=5), slow)
     assert got.kind == "fix_limit" and "--safety-net-minutes" in got.detail
     state = _state(world)
@@ -130,7 +130,7 @@ def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world
 
 def test_stalled_fix_is_judged_by_another_runtime_and_an_infeasible_item_is_reverted(world, monkeypatch) -> None:
     _declare(world, "lines", LINES)
-    fake_ci(monkeypatch, Watched(None))
+    ci = fake_ci(Watched(None))
 
     def idle_fix(spec, submit):
         return {"commit": sh(spec.cwd, "rev-parse", "HEAD")}
@@ -140,7 +140,7 @@ def test_stalled_fix_is_judged_by_another_runtime_and_an_infeasible_item_is_reve
 
     acts = _acts(implement=commit_at(LONG, "長くする"), fix=idle_fix, judge=infeasible)
     fake = FakeAgents(acts)
-    got = drive.drive(world.config(participants=("codex",)), ports(fake, FakeHub("clean")))
+    got = drive.drive(world.config(participants=("codex",)), ports(fake, FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     item = _state(world)["items"][0]
     assert item["status"] == "reverted" and "成立しない" in item["reason"]
@@ -153,10 +153,10 @@ def test_stalled_fix_is_judged_by_another_runtime_and_an_infeasible_item_is_reve
 def test_flaky_failure_is_not_the_items_and_its_fix_is_asked_once(world, monkeypatch, tmp_path) -> None:
     _declare(world, "flaky", FLAKY)
     monkeypatch.setenv("FLAKY_COUNT", str(tmp_path / "count"))
-    fake_ci(monkeypatch, Watched(None))
+    ci = fake_ci(Watched(None))
     fix = commit_at({"tests/test_geo_flaky.py": "def test_x():\n    pass\n"}, "フレーキーを直す\n\nFlaky-Fix: flaky:src/geo.py")
     fake = FakeAgents(_acts(**{"flaky-fix": fix}))
-    got = drive.drive(world.config(), ports(fake, FakeHub("clean")))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     state = _state(world)
     assert state["items"][0]["status"] == "adopted"
@@ -169,7 +169,7 @@ def test_flaky_failure_is_not_the_items_and_its_fix_is_asked_once(world, monkeyp
 def test_flaky_fix_that_changes_non_test_files_is_sent_back_once_then_undone(world, monkeypatch, tmp_path) -> None:
     _declare(world, "flaky", FLAKY)
     monkeypatch.setenv("FLAKY_COUNT", str(tmp_path / "count"))
-    fake_ci(monkeypatch, Watched(None))
+    ci = fake_ci(Watched(None))
     bad = [0]
 
     def outside(spec, submit):
@@ -177,7 +177,7 @@ def test_flaky_fix_that_changes_non_test_files_is_sent_back_once_then_undone(wor
         return commit_at({"docs/a.md": f"# {bad[0]}\n"}, "範囲の外\n\nFlaky-Fix: flaky:src/geo.py")(spec, submit)
 
     fake = FakeAgents(_acts(**{"flaky-fix": outside}))
-    got = drive.drive(world.config(), ports(fake, FakeHub("clean")))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), ci=ci))
     assert got.kind == "ok", got.detail
     assert [(f["key"], f["result"]) for f in _state(world)["flaky_fixes"]] == [("flaky:src/geo.py", "undone")]
     assert bad[0] == 2
