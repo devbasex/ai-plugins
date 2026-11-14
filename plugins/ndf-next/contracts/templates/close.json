@@ -1,20 +1,16 @@
 {
   "template": "close",
   "purpose": "close",
-  "summary": "閉じ: 確定仕様化 → 変更が無ければ PR を作らずに終える → push → PR → CI → マージ",
+  "summary": "閉じ: 確定仕様化 → worker を打つ前の HEAD から変更が無ければ PR を作らずに終える → push → PR → CI → マージ",
   "params": ["repo", "worktree", "branch", "base", "title", "body_file", "test_command", "worker", "ci_budget", "required", "tests", "merge_method"],
   "plan": {
     "name": "close-{{branch}}",
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
+      {"use": "work-start"},
       {"id": "spec", "run": ["{{worker}}", "plan-to-spec"]},
-      {
-        "id": "changes-check",
-        "run": ["sh", "-c", "! git diff --quiet \"origin/$0...HEAD\"", "{{base}}"],
-        "exit_cause": {"1": "not_applicable"},
-        "on_cause": {"not_applicable": "end"}
-      },
+      {"use": "changes-check"},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},
       {"use": "conflict-check"},

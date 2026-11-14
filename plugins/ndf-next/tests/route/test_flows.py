@@ -82,7 +82,24 @@ def test_design_worker_gate_ends_plan_at_gate():
 def test_close_plan_ends_without_pr_when_nothing_changed():
     """#3039: 閉じのプランは、確定仕様化が変更を作らなければ PR を作らずに終える（No commits between で止まらない）。"""
     visited, state = walk(plan_of("close"), {"changes-check": [stopped("not_applicable")]})
-    assert visited == ["spec", "changes-check"]
+    assert visited == ["work-start", "spec", "changes-check"]
+    assert state.status == OK
+
+
+def test_merge_plan_fixes_non_test_check_failures_and_pushes():
+    """#3474: マージのプランは、テスト以外のチェックの落ち（check_failed）でも止まらず、直して push し直してからマージする。
+
+    落ちたテストが無いので、手元のテスト（ci-local）を打たずに push する。
+    """
+    visited, state = walk(plan_of("merge"), {"ci": [stopped("check_failed")]})
+    assert visited == ["conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "merge"]
+    assert state.status == OK
+
+
+def test_plan_to_spec_plan_delivers_the_spec_through_pr_and_merge():
+    """#3474: 確定仕様化のプランは、書いた確定仕様を作業場所から push → PR → CI → マージで宛先へ届ける。"""
+    visited, state = walk(plan_of("plan_to_spec"), {})
+    assert visited == ["work-start", "work", "changes-check", "push", "pr", "conflict-check", "ci", "merge"]
     assert state.status == OK
 
 

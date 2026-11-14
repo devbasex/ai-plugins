@@ -21,7 +21,7 @@
 打ち直すと、プランは前の回の控えの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
-テストのコマンド・必須のチェック・レビューと組み直しの起動は `.ndf/project.json` の宣言から読み、worker と承認ゲートの
+テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の宣言から読み、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
@@ -312,6 +312,7 @@ FILL_SOURCES = {
     "required": FROM_PROJECT,
     "review": FROM_PROJECT,
     "rebuild": FROM_PROJECT,
+    "refactor": FROM_PROJECT,
     "worker": FROM_DEFAULT,
     "gate": FROM_DEFAULT,
     "branch": FROM_WORKTREE,
@@ -321,6 +322,7 @@ PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
     "rebuild": ("workflow", "launch", "rebuild"),
+    "refactor": ("workflow", "launch", "refactor"),
 }
 # 課題の本文を書き出す置き場のファイルと、題の写し（プランの実行の置き場の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"

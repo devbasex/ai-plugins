@@ -1,0 +1,16 @@
+{
+  "template": "document-rebuild",
+  "purpose": "document_rebuild",
+  "summary": "ドキュメント再構成: 文書の組み直し（内容を足さずに見つけた「足すべき内容」は結果の items に残す）→ push",
+  "params": ["repo", "worktree", "branch", "rebuild", "worker"],
+  "plan": {
+    "name": "document-rebuild-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "rebuild", "run": ["{{rebuild}}", "--out", "{state_dir}/rebuild.json"]},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

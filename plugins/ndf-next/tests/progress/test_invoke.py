@@ -173,17 +173,32 @@ def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
     assert argv[1] == "-P"
 
 
-def test_stage_plans_name_the_route_templates_where_one_fits():
-    # 工程の with.plan は C3 の雛形の名前（route.templates() の鍵）。当たる雛形の無い工程は雛形が足されるまで止まる
-    pairs = {
-        (st.id, invoke.stage_run(s, st, {}).name)
-        for mode in ("light", "standard")
+def test_every_plan_a_stage_calls_has_a_route_template():
+    # #3474: 工程の定義の with.plan は C3 の雛形の名前（route.templates() の鍵）。どのモードのどの工程が呼ぶ名前も雛形にある
+    called = {
+        (s.name, st.id, invoke.stage_run(s, st, {}).name)
+        for mode in definition.modes()
         for s in definition.load_definition(mode).stages
         for st in s.steps
         if st.call == "ndf.plan"
     }
-    assert {("implement", "impl"), ("design", "design"), ("design-merge", "design-merge")} <= pairs
-    assert {"impl", "design", "design-merge"} <= set(route.templates())
+    assert {("実装", "implement", "impl"), ("作業場所の用意", "worktree", "worktree")} <= called
+    known = set(route.templates())
+    assert [c for c in sorted(called) if c[2] not in known] == []
+
+
+def test_a_stage_calling_a_plan_run_in_the_worktree_takes_the_worktree_as_an_input():
+    # PR 3486 の指摘: 作業場所で打つ雛形（差し込みに worktree）を呼ぶ工程は、文脈の作業場所を入力に持つ。持たないと
+    # 雛形の差し込みがブランチ名から別の作業場所を推し、そこの HEAD を push する
+    templates = route.templates()
+    lacking = sorted(
+        (mode, s.name, st.id)
+        for mode in definition.modes()
+        for s in definition.load_definition(mode).stages
+        for st in s.steps
+        if st.call == "ndf.plan" and "worktree" in templates[invoke.stage_run(s, st, {}).name].params and "worktree" not in s.inputs
+    )
+    assert lacking == []
 
 
 def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_path, monkeypatch):
@@ -518,10 +533,10 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
     assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"version": "11.0.0"}))
 
 
-def test_plan_without_a_template_stops_as_precondition(tmp_path):
-    # 作業場所の用意の with.plan（worktree）に当たる雛形は C3 にまだ無い
+def test_plan_without_a_template_stops_as_precondition(tmp_path, monkeypatch):
+    # 作業場所の用意の with.plan（worktree）に当たる雛形が無い
+    monkeypatch.setattr(route, "templates", lambda: {})
     run = _run("作業場所の用意", inputs={"issues": [1]})
-    assert run.name not in route.templates()
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     assert got.cause["detail"] == f"プランの雛形 {run.name} が無い"

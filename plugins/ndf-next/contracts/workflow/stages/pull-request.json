@@ -25,6 +25,7 @@
       "phase": "implement",
       "inputs": [
         "issues",
+        "worktree",
         "branch"
       ],
       "outputs": [
