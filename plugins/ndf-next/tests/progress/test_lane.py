@@ -276,3 +276,66 @@ def test_answer_just_recorded_is_not_yet_a_stall(opened):
 )
 def test_touch_hit(x, y, hit):
     assert lane.touch_hit(x, y) is hit
+
+
+# --- 触る場所の重なり（I13）の現状固定（リファクタリングの前に今の出力を記録する） -----------------------
+
+
+def _spec(name, touches=("src/a",), after=(), repo=None):
+    return lane.LaneSpec(name=name, table_id=f"t-{name}", kind="sprint", plans=1, touches=tuple(touches), after=tuple(after), repo=repo)
+
+
+def _view(*specs):
+    lanes = {s.name: s for s in specs}
+    return lane.PlanView(
+        table_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes
+    )
+
+
+def _lane_rows(*states):
+    return [lane.LaneRow(key=f"r{i + 1}", input={"kind": "sprint", "issues": []}, state=s) for i, s in enumerate(states)]
+
+
+@pytest.mark.parametrize(
+    ("view", "rows", "errors"),
+    [
+        # 同時に動き得る組をすべて並べ、重なる触る場所は整列して並べる
+        (
+            _view(_spec("a", ("src/a", "src/c/*.py")), _spec("b", ("src/a/x.py", "src/c/y.py"))),
+            {"a": _lane_rows("pending", "pending"), "b": _lane_rows("pending")},
+            ["同時に動き得る行 a/r1・b/r1, a/r2・b/r1 の触る場所が重なる（I13）: src/a・src/a/x.py, src/c/*.py・src/c/y.py"],
+        ),
+        # 別のリポジトリのレーンどうしは重ならない
+        (_view(_spec("a"), _spec("b", repo="x")), {"a": _lane_rows("pending"), "b": _lane_rows("pending")}, []),
+        # 触る場所が重ならない
+        (_view(_spec("a"), _spec("b", ("src/b",))), {"a": _lane_rows("pending"), "b": _lane_rows("pending")}, []),
+        # 終わった行は組に入らない
+        (
+            _view(_spec("a"), _spec("b")),
+            {"a": _lane_rows("completed", "running"), "b": _lane_rows("cancelled", "pending")},
+            ["同時に動き得る行 a/r2・b/r2 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # 終わったレーンは数えない
+        (_view(_spec("a"), _spec("b")), {"a": _lane_rows("completed"), "b": _lane_rows("pending")}, []),
+        # 行を指す after より後ろの行は、後のレーンと同時に動き得る
+        (
+            _view(_spec("a"), _spec("b", after=("a/r2",))),
+            {"a": _lane_rows("pending", "pending", "pending"), "b": _lane_rows("pending", "pending")},
+            ["同時に動き得る行 a/r3・b/r1, a/r3・b/r2 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # 前後は向きによらない（a が b の全行の後）
+        (_view(_spec("a", after=("b",)), _spec("b")), {"a": _lane_rows("pending"), "b": _lane_rows("pending", "pending")}, []),
+        # レーンの組ごとに 1 件ずつ、計画の並びの順に出す
+        (
+            _view(_spec("a"), _spec("b"), _spec("c")),
+            {"a": _lane_rows("pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
+            [
+                "同時に動き得る行 a/r1・b/r1 の触る場所が重なる（I13）: src/a・src/a",
+                "同時に動き得る行 a/r1・c/r1 の触る場所が重なる（I13）: src/a・src/a",
+                "同時に動き得る行 b/r1・c/r1 の触る場所が重なる（I13）: src/a・src/a",
+            ],
+        ),
+    ],
+)
+def test_touch_overlap_errors_as_they_are_now(view, rows, errors):
+    assert lane.plan_errors(view, rows) == errors
