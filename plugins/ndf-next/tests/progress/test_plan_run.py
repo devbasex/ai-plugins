@@ -25,8 +25,8 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=(), reported=()):
-    return run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported))
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=()):
+    return run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
 
 
 def _step(state, done):
@@ -62,6 +62,26 @@ def test_the_next_row_of_the_same_lane_is_launched_after_the_row_ends():
     state = RunState(launched=("a/r1",))
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r2")])))
     assert act == Launch("a", "r2") and state.launched == ()
+
+
+def test_a_row_with_an_answer_but_no_next_wakes_its_conductor_once_per_answer():
+    """答えが載った後に next が打たれていない行は、猶予を待たずに conductor を起こす。同じ答えでは 1 回だけ（3346-5）。"""
+    answered = [("a", "r1", "s1", 7)]
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=answered)))
+    assert act == Launch("a", "r1", resume="s1", seq=7) and act.key == "next:s1:7"
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=answered)))
+    assert act == Sleep(30.0)
+    # 次の答えが載れば、新しい鍵で起こし直す
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 9)])))
+    assert act == Launch("a", "r1", resume="s1", seq=9)
+
+
+def test_a_stopped_plan_does_not_wake_a_row_for_its_answer():
+    snap = _snap(state="cancelled", running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 7)])
+    act, _, _ = _step(RunState(), Done(Observe(), snap))
+    assert act == Launch("a", "r1", cancel="s1")
 
 
 def test_a_failed_launch_is_retried_on_the_next_poll_and_given_up_after_the_attempts():
@@ -212,6 +232,19 @@ def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
         text = run.first_input(conn, pid, Launch("a", "r1"))
         view, _ = lane.read_plan(conn, pid)
     assert "progress" in text and "--parent" in text and view.lanes["a"].table_id in text and '"start"' in text
+
+
+def test_snapshot_lists_a_running_row_whose_answer_has_no_next_and_drops_it_after_the_mark(opened):
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        sid = _start(conn, pid, "a", "r1")
+        seq = lane.record_answer(conn, sid, {"answer": "approved"})
+    assert _snapshot(opened, pid)["answered"] == [["a", "r1", sid, seq]]
+    with store.transaction(opened) as conn:
+        text = run.first_input(conn, pid, Launch("a", "r1", resume=sid, seq=seq))
+        lane.record_resumed(conn, sid, "conductor")
+    assert '"resumed"' in text and '"next"' in text and sid in text
+    assert _snapshot(opened, pid)["answered"] == []
 
 
 def test_first_input_refuses_a_lane_of_another_repository(opened):

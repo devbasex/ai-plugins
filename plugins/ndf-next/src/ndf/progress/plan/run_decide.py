@@ -5,10 +5,13 @@
 
 - `Observe`: 計画とレーンの進行表を読み直す
 - `Launch`: 止まっているレーンの conductor を起こす。`cancel` があれば、止めた計画で実行中のスプリントを
-  中止させる入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである
+  中止させる入力で起こす。`resume` があれば、答えが載った後に next が打たれていない実行中の行（3346-5）を、
+  答えの後の `ndf progress next` を打つ入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
 - `Report`: 起こせなかったレーンを、計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
 - `Sleep`: 次に読み直すまで待つ
+
+答えの後の起こし直しの鍵は答えの事象の番号を含む。同じ答えでは 1 回だけ起こし、次の答えが載れば新しい鍵で起こす。
 
 同じ読み直しの間に同じレーンの行を 2 回起こさない。起こしたレーンの行は、行が実行中になるか終わるまで
 起こし直さない（`launched`）。ただし起こしてから期限（`Policy.up` の秒）までに行が実行中にならなければ
@@ -44,15 +47,22 @@ class Observe:
 
 @dataclass(frozen=True)
 class Launch:
-    """レーン `lane` の conductor を、行 `row` を始める入力（`cancel` があればそのスプリントを中止する入力）で起こす手。"""
+    """レーン `lane` の conductor を、行 `row` を始める入力で起こす手。`cancel` があればそのスプリントを中止する入力、
+    `resume` があればそのスプリントへ答えの後の next を打つ入力（`seq` は答えの事象の番号）で起こす。"""
 
     lane: str
     row: str
     cancel: Optional[str] = None
+    resume: Optional[str] = None
+    seq: int = 0
 
     @property
     def key(self) -> str:
-        return f"cancel:{self.cancel}" if self.cancel else f"{self.lane}/{self.row}"
+        if self.cancel:
+            return f"cancel:{self.cancel}"
+        if self.resume:
+            return f"next:{self.resume}:{self.seq}"
+        return f"{self.lane}/{self.row}"
 
 
 @dataclass(frozen=True)
@@ -131,15 +141,18 @@ def snapshot(
     wakeable: list[tuple[str, str]],
     running: list[tuple[str, str, str]],
     reported: Sequence[str] = (),
+    answered: Sequence[tuple[str, str, str, int]] = (),
 ) -> dict[str, Any]:
     """`Observe` の結果の形（耐久の記録へ書くので JSON にできる値だけにする）。`running` は（レーン, 行, スプリントの ID）、
-    `reported` は計画の進行表に開いている、起こせなかった知らせの依頼の起動の鍵。"""
+    `reported` は計画の進行表に開いている、起こせなかった知らせの依頼の起動の鍵、`answered` は答えが載った後に next が
+    打たれていない実行中の行の（レーン, 行, スプリントの ID, 答えの事象の番号）。"""
     return {
         "state": state,
         "complete": complete,
         "wakeable": [list(w) for w in wakeable],
         "running": [list(r) for r in running],
         "reported": list(reported),
+        "answered": [list(a) for a in answered],
     }
 
 
@@ -154,9 +167,11 @@ def _snap(state: RunState) -> dict[str, Any]:
 
 
 def _launches(snap: dict[str, Any]) -> list[Launch]:
-    """写しから作る起動の手。起こせる行を始める手と、実行中のスプリントを中止させる手（それぞれ計画の並びの順）。"""
+    """写しから作る起動の手。起こせる行を始める手・答えの後の next を打たせる手・実行中のスプリントを中止させる手
+    （それぞれ計画の並びの順）。"""
     starts = [Launch(lane, row) for lane, row in snap["wakeable"]]
-    return starts + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
+    resumes = [Launch(lane, row, resume=sid, seq=seq) for lane, row, sid, seq in snap["answered"]]
+    return starts + resumes + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
 
 
 def _candidates(state: RunState) -> list[Launch]:

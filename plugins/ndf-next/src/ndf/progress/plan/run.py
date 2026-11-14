@@ -7,6 +7,9 @@
 - 判断は `run_decide.decide`（純粋な関数）が持ち、読み・起動・完了はそれぞれ耐久ステップで打つ。落ちた後の回復で
   済んだ起動を打ち直さない
 - レーンを起こす前に、同じ名前の元のラッパー（前の行を終えた conductor など）を止めてから起こす
+- 答えが載った後に conductor が next を打っていない実行中の行（3346-5）は、そのレーンの conductor を答えの後の
+  `ndf progress next` を打つ入力で起こす。契機は答えの事象（`row_answered`）がレーンの進行表に載った後の最初の
+  読み直しで、猶予（止まりの知らせ）を待たない。同じ答えでは 1 回だけ起こす
 - 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンをスプリントの中止の入力で起こし、実行中の行が
   無くなれば `stopped` で終わる。中止をすべて起こせなくなったら `cancel_failed` で終わる（終わった計画の進行表へは
   依頼を書けない）。`cancel_failed` で終えた耐久ワークフローの ID は再び使わず、`ndf lanes run` を打ち直すと
@@ -96,9 +99,12 @@ def _conn(spec: dict[str, Any]) -> Iterator[Any]:
 def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
     """計画とレーンの進行表から、判断へ渡す写しを作る。"""
     view, rows = lane.read_view(conn, plan_id)
-    running = [(name, r.key, r.sprint_id) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+    live = [(name, r) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+    running = [(name, r.key, r.sprint_id) for name, r in live]
+    answered = [(name, r.key, r.sprint_id, r.answered_seq) for name, r in live if r.awaiting_next]
     reported = [r.body["launch"] for r in view.open_requests() if r.body.get("kind") == LAUNCH_FAILED]
-    return run_decide.snapshot(view.state, lane.plan_complete(view, rows), lane.wakeable_lanes(view, rows), running, reported)
+    wakeable = lane.wakeable_lanes(view, rows)
+    return run_decide.snapshot(view.state, lane.plan_complete(view, rows), wakeable, running, reported, answered)
 
 
 @durable.step
@@ -117,15 +123,17 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
         raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {view.repo}）")
     if act.cancel is not None:
         return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
+    if act.resume is not None:
+        return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume))
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
     row = next(r for r in rows if r.key == act.row)
     return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].table_id, row))
 
 
 @durable.step
-def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None) -> dict[str, Any]:
+def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None, resume: str | None = None) -> dict[str, Any]:
     """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。"""
-    act = Launch(lane_name, row, cancel)
+    act = Launch(lane_name, row, cancel, resume)
     try:
         with _conn(spec) as conn:
             first = first_input(conn, spec["plan_id"], act)
@@ -169,7 +177,7 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
         return Done(act, observe(spec))
     if isinstance(act, Launch):
-        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel))
+        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel, act.resume))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
     if isinstance(act, Report):

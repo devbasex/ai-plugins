@@ -9,6 +9,8 @@
   （計画 `dev-api`／レーン `tests` と計画 `dev`／レーン `api-tests` など）でも重ならない
 - 起こせるのはスプリントの行（`kind: sprint`）だけで、開発ループの行（`kind: loop`）は起こす入力を組めないので
   `Unsupported` で断る（ndf-next に開発ループを始めるコマンドがまだ無い）
+- 答えの後の next を打つ: `ndf lanes row resumed <スプリントの ID>` で答えの後の next の印を書いてから、
+  `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
 
@@ -85,6 +87,13 @@ def cancel_commands(sprint_id: str) -> list[dict[str, Any]]:
     cancel = result.command("progress", "cancel", sprint_id, "--reason", STOP_REASON)
     end = result.command("lanes", "row", "end", sprint_id, "--outcome", CANCELLED)
     return [cancel, end]
+
+
+def resume_commands(sprint_id: str) -> list[dict[str, Any]]:
+    """答えが載った行で、答えの後の next の印を書いてから next を打つコマンドの並び。"""
+    mark = result.command("lanes", "row", "resumed", sprint_id)
+    nxt = result.command("progress", "next", sprint_id)
+    return [mark, nxt]
 
 
 def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
