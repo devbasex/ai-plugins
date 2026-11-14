@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -127,6 +128,25 @@ def test_render_removes_a_policy_no_longer_wanted_and_check_reports_it(plugin):
     assert render.stale(plugin) == [policy]
     assert render.write(plugin) == [policy]
     assert not policy.parent.exists()
+
+
+def test_render_write_returns_what_stale_found_and_leaves_matching_files_untouched(plugin):
+    # 現状固定（I-018）: write が書く集合は stale が見つけた集合と同じ。中身が同じファイルは書き直さず、空を返す
+    _write_table(plugin, [{"name": "s", "runtimes": ["claude", "codex"]}, {"name": "t", "runtimes": ["claude", "codex"]}])
+    _skill(plugin, "s", **{"disable-model-invocation": True})
+    _skill(plugin, "t")
+    definition = plugin / ".codex-plugin" / "plugin.json"
+    policy = plugin / "skills" / "s" / "agents" / "openai.yaml"
+
+    assert render.stale(plugin) == [definition, policy]
+    assert render.write(plugin) == [definition, policy]
+
+    old = 1_000_000_000
+    for path in (definition, policy):
+        os.utime(path, ns=(old, old))
+    assert render.stale(plugin) == []
+    assert render.write(plugin) == []
+    assert [p.stat().st_mtime_ns for p in (definition, policy)] == [old, old]
 
 
 def test_a_skill_outside_the_table_stops_the_render(plugin):
