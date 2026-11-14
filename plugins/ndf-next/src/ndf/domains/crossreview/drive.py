@@ -220,6 +220,11 @@ def _start(cfg: RunConfig) -> _Run:
     return run
 
 
+def _round_stem(run: _Run, round_no: int, suffix: str) -> Path:
+    """状態の置き場のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
+    return run.cfg.state_dir / f"round{round_no}{suffix}"
+
+
 def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
     """過程へ 1 行足す。`warning` があれば先に注意へも足す。"""
     if warning is not None:
@@ -262,7 +267,7 @@ def _reviewer_findings(status: agents.AgentStatus, out: Path) -> Optional[list[d
 def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], int]:
     """相手役を並べて起動し、指摘と、答えた相手役の数を返す。答えなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
-    specs = [participants.review_launch(a, cfg.worktree, prompt, cfg.state_dir / f"round{round_no}-{a}") for a in cfg.reviewers]
+    specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}")) for a in cfg.reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
         statuses = list(pool.map(launch, specs))
     raised: list[dict[str, Any]] = []
@@ -299,7 +304,7 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
 
 def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
     call = claude.ClaudeCall(system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS)
-    paths = agents.AgentPaths.at(run.cfg.state_dir / f"round{round_no}-fix")
+    paths = agents.AgentPaths.at(_round_stem(run, round_no, "-fix"))
     return agents.Launch(
         run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)
     )
@@ -382,7 +387,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
     scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
     head = run.g.rev_parse("HEAD")
-    diff = cfg.state_dir / f"round{round_no}.diff"
+    diff = _round_stem(run, round_no, ".diff")
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
     return _Prepared(scope, sections, reviewed, head, diff)
 
