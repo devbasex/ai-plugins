@@ -551,3 +551,57 @@ def test_append_lets_refusals_through_without_retrying(repo, st, capsys):
     assert len(calls) == 1
     with pytest.raises(model.Refused, match="無い"):
         run.append(st, "no-such-table", lambda v: [])
+
+
+# --- 現状固定: run.wait（I-026。作業が動く間だけ宣言の間隔で待ち、上限で同じ wait を返す） -------------
+
+
+def test_wait_without_live_work_returns_the_report_at_once_without_sleeping(repo, st, capsys):
+    tid = _new(capsys)
+    slept: list[float] = []
+    got = run.wait(st, tid, 60, sleep=slept.append)
+    v = run.read(st, tid)
+    assert slept == [] and got == run.report(v, run.decide(v))
+    assert got["next"]["argv"] == ["ndf", "progress", "next", tid]
+
+
+def test_wait_sleeps_the_declared_interval_until_the_work_lets_go(repo, st, capsys):
+    from contextlib import ExitStack
+
+    from ndf.contracts import limits
+
+    tid = _new(capsys)
+    held = ExitStack()
+    held.enter_context(store.run_lock(st, tid))
+    slept: list[float] = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        if len(slept) == 2:
+            held.close()  # 2 回待った後に作業が排他を放す
+
+    try:
+        got = run.wait(st, tid, 3600, sleep=sleep)
+    finally:
+        held.close()
+    v = run.read(st, tid)
+    assert slept == [limits.value(run.WAIT_POLL, "interval")] * 2
+    assert got == run.report(v, run.decide(v))
+
+
+def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st, capsys):
+    tid = _new(capsys)
+    slept: list[float] = []
+    with store.run_lock(st, tid):
+        at_once = run.wait(st, tid, 0, sleep=slept.append)
+        later = run.wait(st, tid, 0.05, sleep=lambda s: slept.append(s) or time.sleep(0.02))
+    assert at_once == result.stopped(
+        run.TOOL, "wait_timeout", f"進行表 {tid} を流す作業がまだ動いている（0 秒待った）", next=result.command(run.TOOL, "wait", tid)
+    )
+    assert later["cause"] == {"kind": "wait_timeout", "detail": f"進行表 {tid} を流す作業がまだ動いている（0.05 秒待った）"}
+    assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1
+
+
+def test_wait_on_a_missing_table_is_refused(repo, st):
+    with pytest.raises(model.Refused, match="無い"):
+        run.wait(st, "no-such-table", 0, sleep=lambda s: None)
