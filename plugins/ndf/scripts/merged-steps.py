@@ -48,8 +48,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -67,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.cleanup_context import CleanupContext  # noqa: E402
 from merged_lib.cleanup_metrics import cleanup_metrics as _cleanup_metrics  # noqa: E402
 from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
@@ -152,18 +151,6 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-@dataclass(frozen=True)
-class CleanupContext:
-    """後片付けの実行文脈。`main_dir` は主ディレクトリで、git を打つ根も兼ねる（消す作業ツリーから打たない）。
-
-    `slug` は一時の置き場の下のリポジトリの名前（決まらなければ `None`）、`wt_base` は一時の置き場、`add` は記録の 1 件を足す。"""
-
-    main_dir: str
-    slug: str | None
-    wt_base: Path
-    add: Callable[..., None]
-
-
 def _remove_pr_tmp_worktrees(ctx: CleanupContext, n):
     """PR の一時作業ツリー（wt_base/slug/pr<n> と rf<n> の中の worktree）を、`--force` を使わずに外す（#2229・#1680）。
 
@@ -184,34 +171,31 @@ def _remove_pr_tmp_worktrees(ctx: CleanupContext, n):
 
 def _remove_pr_worktrees(ctx: CleanupContext, branch, merge_commit):
     """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
-    root = main_dir = ctx.main_dir
-    add = ctx.add
     branch_free = True
-    for wt in list_worktrees(root):
+    for wt in list_worktrees(ctx.main_dir):
         if wt["branch"] != branch:
             continue
-        if wt["path"] == main_dir:
-            add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
+        if wt["path"] == ctx.main_dir:
+            ctx.add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
             branch_free = False
             continue
-        ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
-        add("worktree", wt["path"], "removed" if ok else "kept", why)
+        ok, why = remove_worktree(ctx.main_dir, wt["path"], branch, merge_commit)
+        ctx.add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
     return branch_free
 
 
 def _cleanup_pr(ctx: CleanupContext, n):
     """PR 1 件分の作業ツリーとブランチを片付ける。"""
-    root, add = ctx.main_dir, ctx.add
-    got = merged_pr_info(root, n, add)
+    got = merged_pr_info(ctx.main_dir, n, ctx.add)
     if got is None:
         return
     branch, merge_commit = got
     # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）
-    if why := repo.kept_sprint_branch(root, branch, repo.sprint_flow_record(root, branch)):
-        add("branch", branch, "kept", why)
+    if why := repo.kept_sprint_branch(ctx.main_dir, branch, repo.sprint_flow_record(ctx.main_dir, branch)):
+        ctx.add("branch", branch, "kept", why)
     elif _remove_pr_worktrees(ctx, branch, merge_commit):
-        _delete_branch(root, branch, add)
+        _delete_branch(ctx.main_dir, branch, ctx.add)
 
     if ctx.slug:
         _remove_pr_tmp_worktrees(ctx, n)
@@ -290,9 +274,7 @@ def cleanup(root, prs):
     main_dir = wts[0]["path"] if wts else str(root)
     # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
     root = main_dir
-    slug = repo_slug(root)
-    wt_base = worktree_base.worktree_parent(main_dir)
-    ctx = CleanupContext(main_dir=main_dir, slug=slug, wt_base=wt_base, add=add)
+    ctx = CleanupContext(main_dir=main_dir, slug=repo_slug(root), wt_base=worktree_base.worktree_parent(main_dir), add=add)
 
     for n in prs:
         with main_dir_lock(main_dir):
@@ -300,7 +282,7 @@ def cleanup(root, prs):
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
     # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
-    done = [wt_base / slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if slug else []
+    done = [ctx.wt_base / ctx.slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if ctx.slug else []
     swept = run_state.sweep_states(root, skip=done)
     items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
