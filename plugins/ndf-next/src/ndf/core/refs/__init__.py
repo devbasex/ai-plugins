@@ -37,7 +37,7 @@ from ndf.core.plan.queue_run import QUEUE_PRS
 from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
-from ndf.core.resume import SKIP, DesignPr
+from ndf.core.refs.resume import SKIP, DesignPr
 
 # 参照の宣言の鍵（種類・参照の先・読む outputs の鍵・空に解けたときの実行条件）
 KIND, OF, KEY, WHEN_EMPTY = "kind", "of", "key", "when_empty"
@@ -56,7 +56,7 @@ EVENT_RUN, EVENT_STEP = "run", "step"
 CLOSING_PER_ISSUE = 100
 # 課題を閉じる PR の GraphQL の接続の名前（クエリの選択と、答えの節点の鍵）
 _CLOSED_BY = "closedByPullRequestsReferences"
-_CLOSING_FIELDS = f"{_CLOSED_BY}(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number }} }}"
+_CLOSING_FIELDS = f"{_CLOSED_BY}(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number merged }} }}"
 
 
 class RefError(ValueError):
@@ -216,8 +216,8 @@ def _output(ref: Ref, ctx: Context, src: Sources, default_key: str) -> Union[Any
     return record.outputs[key]
 
 
-def _checked(ref: Ref, ctx: Context, src: Sources, default_key: str, check: Callable[[Any], Union[str, Unresolved]]) -> Got:
-    """参照の先の outputs の値を読み、読めて空でなければ `check` で参照の値（か解けない理由）にする。"""
+def _checked(ref: Ref, ctx: Context, src: Sources, default_key: str, check: Callable[[Any], Got]) -> Got:
+    """参照の先の outputs の値を読み、読めて空でなければ `check` で参照の値（か解けない理由・空）にする。"""
     got = _output(ref, ctx, src, default_key)
     if isinstance(got, (Unresolved, _Empty)):
         return got
@@ -230,10 +230,13 @@ def _version_text(got: Any) -> Union[str, Unresolved]:
     return str(got)
 
 
-def _pr_number_text(got: Any) -> Union[str, Unresolved]:
+def _pr_number_text(got: Any) -> Got:
+    """`#` を外した番号。数でなければ解けない理由、0（`#0`・`00` も）なら空（#2408）。"""
     text = str(got).lstrip("#")
-    if not text.isdigit():
+    if not (text.isascii() and text.isdigit()):
         return Unresolved("input_missing", f"記録の PR の番号でない: {got!r}")
+    if int(text) == 0:
+        return _Empty(f"記録の PR の番号が 0: {got!r}")
     return text
 
 
@@ -353,19 +356,22 @@ def resolve_plan(plan_raw: Mapping[str, Any], ctx: Context, src: Sources) -> Res
 
 
 def _unreadable(exc: github.GitHubError, what: str) -> Unreadable:
-    """GitHub の失敗を、打ち直せば通りうるもの（不達・5xx・上限）は transient、ほかは precondition へ写す。"""
-    passing = exc.status == 0 or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
+    """GitHub の失敗を、打ち直せば通りうるもの（不達・5xx・上限）は transient、ほかは precondition へ写す。
+
+    状態が 0 でも届いていない失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は precondition。
+    """
+    passing = exc.unreached or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
     return Unreadable("transient" if passing else "precondition", f"{what}を読めない: {exc}")
 
 
 def _closing_numbers(issue: int, node: Mapping[str, Any]) -> list[int]:
+    """課題を閉じる PR のうち、マージされた PR の番号。閉じた未マージ・開いたままの PR は入れない。"""
     conn = node[_CLOSED_BY] if _CLOSED_BY in node else None
     if not isinstance(conn, Mapping):
         raise Unreadable("precondition", f"#{issue} は課題でないか読めない")
-    numbers = [int(n["number"]) for n in conn["nodes"]]
-    if int(conn["totalCount"]) > len(numbers):
+    if int(conn["totalCount"]) > len(conn["nodes"]):
         raise Unreadable("precondition", f"#{issue} を閉じる PR が {conn['totalCount']} 本あり、{CLOSING_PER_ISSUE} 本を超える")
-    return numbers
+    return [int(n["number"]) for n in conn["nodes"] if n.get("merged") is True]
 
 
 @dataclass(frozen=True)

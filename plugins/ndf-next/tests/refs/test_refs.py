@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 import pytest
 
 from ndf.contracts import causes
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import refs, resume
+from ndf.core import refs
 from ndf.core.plan.queue_decide import Outcome
+from ndf.core.refs import resume
 
-from ._refs_helpers import FakeSources, failing_hub, graphql_hub, graphql_pull, write_progress, write_result
+from ._refs_helpers import FakeSources, failing_hub, graphql_hub, graphql_pull, hub, write_progress, write_result
 
 
 def _ctx(tmp_path: Path, prior: tuple[Outcome, ...] = (), issues: tuple[int, ...] = ()) -> refs.Context:
@@ -245,6 +248,34 @@ def test_repo_sources_map_github_failures(status: int, cause: str) -> None:
     assert raised.value.cause == cause
     with pytest.raises(refs.Unreadable):
         src.design_pr("design/issue-1")
+
+
+def _unreached(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("down", request=request)
+
+
+@pytest.mark.parametrize(
+    ("handler", "cause"),
+    [
+        (_unreached, "transient"),
+        (lambda _r: httpx.Response(200, json={"data": None, "errors": [{"message": "boom", "type": "FORBIDDEN"}]}), "precondition"),
+        (lambda _r: httpx.Response(200, json={"data": {"repository": None}}), "precondition"),
+    ],
+)
+def test_repo_sources_retry_only_a_github_that_was_not_reached(handler: Callable[[httpx.Request], httpx.Response], cause: str) -> None:
+    # 状態が 0 の失敗のうち、届かなかったものだけを打ち直す。GraphQL の誤りと repository が null は人へ戻す
+    with pytest.raises(refs.Unreadable) as raised:
+        refs.RepoSources(hub(handler)).closing_prs([1])
+    assert raised.value.cause == cause
+
+
+def test_repo_sources_take_only_the_merged_prs_that_close_the_issue() -> None:
+    # 閉じた未マージの PR（放棄・出し直しで置き換えた）と開いたままの PR は queue_prs へ入れない
+    def answer(node: str, args: str) -> dict:
+        nodes = [{"number": 7, "merged": True}, {"number": 8, "merged": False}, {"number": 9, "merged": False}]
+        return {"closedByPullRequestsReferences": {"totalCount": 3, "nodes": nodes}}
+
+    assert refs.RepoSources(graphql_hub(answer)).closing_prs([5]) == [7]
 
 
 def test_repo_sources_refuse_more_closing_prs_than_one_page() -> None:

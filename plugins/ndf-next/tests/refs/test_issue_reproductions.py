@@ -10,9 +10,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import refs, resume
+from ndf.core import refs
 from ndf.core.plan.queue_decide import Outcome
+from ndf.core.refs import resume
 
 from ._refs_helpers import graphql_hub, graphql_pull, write_progress, write_result
 
@@ -22,7 +25,7 @@ ISSUE, CLOSING_PR = 2568, 2601
 
 def _closing_answer(node: str, args: str) -> dict:
     assert node == "issue"
-    return {"closedByPullRequestsReferences": {"totalCount": 1, "nodes": [{"number": CLOSING_PR}]}}
+    return {"closedByPullRequestsReferences": {"totalCount": 1, "nodes": [{"number": CLOSING_PR, "merged": True}]}}
 
 
 def test_issue_3255_unresolved_refs_stop_with_a_kind_instead_of_running(tmp_path: Path) -> None:
@@ -46,9 +49,10 @@ def test_issue_2344_the_plan_holds_a_reference_and_reads_the_value_just_before_r
     assert plan == {"name": "release", "refs": {"version": {"kind": "version", "of": "bump.state"}}}
 
 
-def test_issue_2408_release_verify_is_skipped_not_ok_when_the_record_pr_resolves_to_zero(tmp_path: Path) -> None:
-    # #2408: リリース記録の番号が 0 でも流れて ok で終わり、「リリース後テスト」の印が付いた
-    write_result(tmp_path / "record.state", OK, {"record_pr": 0})
+@pytest.mark.parametrize("record_pr", [0, "#0", "00"])
+def test_issue_2408_release_verify_is_skipped_not_ok_when_the_record_pr_resolves_to_zero(tmp_path: Path, record_pr: object) -> None:
+    # #2408: リリース記録の番号が 0 でも流れて ok で終わり、「リリース後テスト」の印が付いた（`#` 付き・0 の並びも同じ）
+    write_result(tmp_path / "record.state", OK, {"record_pr": record_pr})
     src = refs.RepoSources(graphql_hub(_closing_answer))
     verify = {"name": "release-verify", "refs": {"pr": {"kind": "record_pr", "of": "record.state", "when_empty": "skip"}}}
     out = refs.resolve_plan(verify, refs.Context((), (), tmp_path), src)
