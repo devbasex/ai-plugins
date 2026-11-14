@@ -19,13 +19,14 @@ import sqlalchemy as sa
 from ndf.core import durable
 from ndf.core import durable_locks as locks
 
+from ._durable_helpers import postgres_url
 from ._durable_helpers import run_key_process as _run
 
 
 @pytest.fixture(scope="module")
 def pg_url(tmp_path_factory, start_postgres):
-    with start_postgres(tmp_path_factory) as (_, base):
-        yield base + "/postgres"
+    with postgres_url(tmp_path_factory, start_postgres) as url:
+        yield url
 
 
 @durable.workflow

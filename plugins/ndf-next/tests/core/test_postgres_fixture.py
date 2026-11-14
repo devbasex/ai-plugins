@@ -1,11 +1,12 @@
 """現状固定: durable URL の pg_url から共通化した PostgreSQL の起動契約。"""
 
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
 
-from .test_durable_url import pg_url
+from ._durable_helpers import postgres_url
 
 
 @pytest.fixture
@@ -60,22 +61,19 @@ def test_pg_url_keeps_database_start_options_and_shutdown(monkeypatch, tmp_path_
         return data
 
     monkeypatch.setattr(tmp_path_factory, "mktemp", mktemp)
-    fixture = pg_url.__wrapped__(tmp_path_factory, start_postgres)
-    assert next(fixture) == f"postgresql://ndf@127.0.0.1:{port}/postgres"
-    options = f"-c listen_addresses=127.0.0.1 -p {port} -k {data}"
-    assert calls == [
-        ([bindir / "initdb", "-D", data, "-U", "ndf", "--auth=trust", "-E", "UTF8"], {"check": True, "capture_output": True}),
-        (
-            [bindir / "pg_ctl", "-D", data, "-o", options, "-l", data / "log", "-w", "start"],
-            {"check": True, "capture_output": True},
-        ),
-    ]
-    if abort:
-        with pytest.raises(RuntimeError):
-            fixture.throw(RuntimeError("利用側の例外"))
-    else:
-        with pytest.raises(StopIteration):
-            next(fixture)
+    raised = pytest.raises(RuntimeError) if abort else nullcontext()
+    with raised, postgres_url(tmp_path_factory, start_postgres) as url:
+        assert url == f"postgresql://ndf@127.0.0.1:{port}/postgres"
+        options = f"-c listen_addresses=127.0.0.1 -p {port} -k {data}"
+        assert calls == [
+            ([bindir / "initdb", "-D", data, "-U", "ndf", "--auth=trust", "-E", "UTF8"], {"check": True, "capture_output": True}),
+            (
+                [bindir / "pg_ctl", "-D", data, "-o", options, "-l", data / "log", "-w", "start"],
+                {"check": True, "capture_output": True},
+            ),
+        ]
+        if abort:
+            raise RuntimeError("利用側の例外")
     assert calls[-1] == (
         [bindir / "pg_ctl", "-D", data, "-m", "immediate", "stop"],
         {"check": False, "capture_output": True},
