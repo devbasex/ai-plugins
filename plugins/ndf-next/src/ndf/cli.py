@@ -40,10 +40,13 @@ COMMANDS: dict[str, str] = {
     "plan": "ndf.core.plan.cli",
     "progress": "ndf.progress.command",
     "relay": "ndf.domains.relay.cli",
+    "route": "ndf.core.route",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
     "worker": "ndf.core.worker",
 }
+# モジュールのパス → 副命令の名前（`tool_of` の引き）
+_TOOL_OF: dict[str, str] = {path: name for name, path in COMMANDS.items()}
 
 
 def tool_of(module: str) -> str:
@@ -52,10 +55,9 @@ def tool_of(module: str) -> str:
     副命令の結果 JSON の `tool` はこの名前にする（各副命令は `TOOL = cli.tool_of(__name__)` で引き、名前を写さない）。
     表に無いモジュールは `LookupError`。
     """
-    for name, path in COMMANDS.items():
-        if path == module:
-            return name
-    raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
+    if module not in _TOOL_OF:
+        raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
+    return _TOOL_OF[module]
 
 
 def _usage(name: str) -> str:
@@ -83,6 +85,25 @@ def _print_retired(items: list[dict[str, str]]) -> None:
         print(identity.RETIRED_LINE.format(**item), file=sys.stderr)
 
 
+def _unknown(ident: identity.PluginIdentity, name: str) -> int:
+    print(f"知らない副命令: {name}", file=sys.stderr)
+    print(_usage(ident.name), file=sys.stderr)
+    return _stop(TOOL, "invalid", f"知らない副命令: {name}")
+
+
+def _prepare(ident: identity.PluginIdentity) -> int | None:
+    """状態の置き場を用意し、退避した元と先を標準エラーへ書く。用意できなければ止まった結果の終了コード。"""
+    try:
+        ready = identity.prepare_state_dir(ident)
+    except (OSError, identity.IdentityError) as exc:
+        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
+        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
+        _print_retired(retired)
+        return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
+    _print_retired(ready.items())
+    return None
+
+
 def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
@@ -93,26 +114,11 @@ def _run(args: list[str]) -> int:
         return 0
     module = COMMANDS.get(args[0])
     if module is None:
-        print(f"知らない副命令: {args[0]}", file=sys.stderr)
-        print(_usage(ident.name), file=sys.stderr)
-        return _stop(TOOL, "invalid", f"知らない副命令: {args[0]}")
-    stopped = _prepare_state(ident)
+        return _unknown(ident, args[0])
+    stopped = _prepare(ident)
     if stopped is not None:
         return stopped
     return _call(args[0], module, args[1:])
-
-
-def _prepare_state(ident: identity.PluginIdentity) -> int | None:
-    """状態の置き場を用意し、退避した元と先を標準エラーへ書く。用意できれば None、できなければ止まった終了コード。"""
-    try:
-        ready = identity.prepare_state_dir(ident)
-    except (OSError, identity.IdentityError) as exc:
-        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
-        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
-        _print_retired(retired)
-        return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
-    _print_retired(ready.items())
-    return None
 
 
 def _call(name: str, module: str, argv: list[str]) -> int:

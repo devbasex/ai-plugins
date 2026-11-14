@@ -1,0 +1,33 @@
+{
+  "template": "impl",
+  "purpose": "implement",
+  "summary": "実装: 今の HEAD が取り込み済みなら流さずに終える → worker の実装 → 手元のテスト → push → PR → CI。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "test_command", "worker", "ci_budget", "required", "tests"],
+  "plan": {
+    "name": "impl-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {
+        "id": "done-check",
+        "run": ["sh", "-c", "h=$(git rev-parse HEAD) || exit 2; m=$(gh pr list --head \"$0\" --state merged --json headRefOid --jq '.[].headRefOid') || exit 2; ! printf '%s\\n' \"$m\" | grep -qx \"$h\"", "{{branch}}"],
+        "exit_cause": {"1": "not_applicable", "2": "precondition"},
+        "on_cause": {"not_applicable": "end"}
+      },
+      {"use": "worker"},
+      {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
+      {"use": "push", "on_fail": "fix-push"},
+      {"use": "pr"},
+      {"use": "conflict-check"},
+      {"use": "ci", "next": "end"},
+      {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
+      {"use": "test-repeat"},
+      {"use": "repeat-check"},
+      {"use": "ci-fix"},
+      {"use": "ci-local"},
+      {"use": "fix-push"},
+      {"use": "base-sync"},
+      {"use": "fix-base"}
+    ]
+  }
+}

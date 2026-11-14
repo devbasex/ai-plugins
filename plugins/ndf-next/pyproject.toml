@@ -54,6 +54,6 @@ package = false
 # テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
 # テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests/support"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
