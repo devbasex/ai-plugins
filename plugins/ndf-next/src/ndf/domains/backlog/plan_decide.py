@@ -52,10 +52,15 @@ def _entries(plan: Mapping[str, Any], key: str, errors: list[str]) -> list[dict[
     return got
 
 
+def _direction_error(n: Any, d: Any) -> Optional[str]:
+    return None if d in DIRECTIONS else f"#{n} の向きは {' / '.join(DIRECTIONS)} のどれか: {d!r}"
+
+
 def _check_rejected(metrics: Mapping[str, Any], e: dict[str, Any]) -> Optional[str]:
     n, d = e.get("number"), e.get("direction")
-    if d not in DIRECTIONS:
-        return f"#{n} の向きは {' / '.join(DIRECTIONS)} のどれか: {d!r}"
+    wrong = _direction_error(n, d)
+    if wrong is not None:
+        return wrong
     if own_candidate(metrics, n, d) is not None:
         return None
     lead = lead_of(metrics, n) if d == FORWARD else None
@@ -67,21 +72,27 @@ def _check_rejected(metrics: Mapping[str, Any], e: dict[str, Any]) -> Optional[s
 def _check_move(metrics: Mapping[str, Any], e: dict[str, Any], moved: set[tuple[Any, Any]]) -> Optional[str]:
     """1 件の移動を照らす。`moved` は plan の前倒しの (番号, 移す先) の集まり。"""
     n, d, to = e.get("number"), e.get("direction"), e.get("milestone")
-    if d not in DIRECTIONS:
-        return f"#{n} の向きは {' / '.join(DIRECTIONS)} のどれか: {d!r}"
+    wrong = _direction_error(n, d)
+    if wrong is not None:
+        return wrong
     c = own_candidate(metrics, n, d)
     if c is None:
-        lead = lead_of(metrics, n) if d == FORWARD else None
-        if lead is None:
-            return f"#{n} の{d}は rank.json の候補に無い"
-        if (lead["number"], lead["to"]) not in moved or to != lead["to"]:
-            return f"#{n} は #{lead['number']} の依存先で、#{lead['number']} と同じ移す先 {lead['to']!r} で前倒しするときだけ移す"
-        return None
+        return _check_dependency_move(metrics, n, d, to, moved)
     if to != c["to"]:
         return f"#{n} の milestone は候補の移す先 {c['to']!r} と合わせる"
     missing = [g for g in c["group"] if (g, c["to"]) not in moved] if d == FORWARD else []
     if missing:
         return f"#{n} の前倒しは依存先 {', '.join(f'#{g}' for g in missing)} も同じ移す先で前倒しする"
+    return None
+
+
+def _check_dependency_move(metrics: Mapping[str, Any], n: Any, d: Any, to: Any, moved: set[tuple[Any, Any]]) -> Optional[str]:
+    """本人の候補が無い移動を照らす。前倒しの候補の依存先で、その候補と同じ移す先で前倒しするときだけ受ける。"""
+    lead = lead_of(metrics, n) if d == FORWARD else None
+    if lead is None:
+        return f"#{n} の{d}は rank.json の候補に無い"
+    if (lead["number"], lead["to"]) not in moved or to != lead["to"]:
+        return f"#{n} は #{lead['number']} の依存先で、#{lead['number']} と同じ移す先 {lead['to']!r} で前倒しするときだけ移す"
     return None
 
 
