@@ -306,6 +306,15 @@ def _guard_over(real) -> isolation._Guard:
     return guard
 
 
+def test_check_rejects_bytes_paths_under_a_root(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    guard = _guard_over(real)
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._check(os.fsencode(real / "ledger"), None, N)
+    assert guard.violations == [os.path.realpath(real / "ledger")]
+
+
 def test_hook_resolves_file_descriptors_to_their_paths(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
