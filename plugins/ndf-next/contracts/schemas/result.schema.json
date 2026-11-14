@@ -79,6 +79,11 @@
         "design_pr": {"type": "integer", "minimum": 1},
         "pr": {"type": "integer", "minimum": 1},
         "delivery": {"type": "object"},
+        "gaps": {
+          "description": "ステップが残した欠け（レビューの incomplete）。後のステップが ok でも、プランの結果は incomplete のまま、この欠けを持つ。後のステップの空の配列が前の欠けを消す",
+          "type": "array",
+          "items": {"$ref": "#/$defs/gap"}
+        },
         "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"}
       }
     },

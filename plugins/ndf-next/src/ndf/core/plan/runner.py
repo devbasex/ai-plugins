@@ -10,7 +10,9 @@
   止めない
 - 遷移の判断が行き先を選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の置き場の `progress.jsonl` へ追記する。
   書くのは耐久ステップで、回復で判断を流し直しても同じ選択を 2 回書かない
-- ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる
+- ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる。
+  `outputs.gaps` が空でなければ、最後まで ok で流れてもプランの結果は incomplete でその欠けを持つ（レビューの欠けを
+  CI の後まで引き継ぐ）
 - 承認の答えを待つ所に来たら、待ちの目印 `waiting-<鍵の名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
   DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローは鍵のファイルに残り、次の起動が回復する。B2）
 """
@@ -360,6 +362,10 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
         detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
         return result.stopped(TOOL, "unknown", detail, items=items, metrics=metrics, **shared)
     if final["status"] == OK:
+        gaps = outputs.get("gaps") if outputs else None
+        if gaps:
+            detail = f"{inv.plan.name} は終わったが、ステップが残した欠け {len(gaps)} 件がある"
+            return result.stopped(TOOL, "incomplete", detail, items=items, metrics=metrics, gaps=gaps, **shared)
         return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics, **shared)
     if final["status"] == STOPPED:
         items[0]["step"] = final["last"]

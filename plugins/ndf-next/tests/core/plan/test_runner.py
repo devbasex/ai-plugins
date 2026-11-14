@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import chosen, result, routing
+from ndf.contracts import causes, chosen, result, routing
 from ndf.core import durable
 from ndf.core.plan import assemble_decide, model, records, runner
 
@@ -190,6 +190,32 @@ def test_step_outputs_reach_the_plan_result(repo):
     plan = H.write_plan(repo, "o", [H.py_step("a", emit({"pr": 1, "mode": "standard"})), H.py_step("b", emit({"pr": 2}))])
     code, out = H.ndf(repo, "next", plan)
     assert (code, out["outputs"]) == (H.OK, {"pr": 2, "mode": "standard"})
+
+
+def test_review_gaps_survive_a_later_ok_step(repo):
+    """レビューが incomplete と gaps を返しても、後のステップ（CI）が ok ならプランの結果は incomplete のまま gaps を持つ
+    （PR #3462 の保留: 設計のプランの review の on_cause incomplete → push-reviewed → CI）。"""
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "節 A の根拠が無い"}
+    review = {"tool": "cross-review", "status": "stopped", "summary": "s", "cause": {"kind": "incomplete", "detail": "d"}}
+    review |= {"gaps": [gap], "outputs": {"gaps": [gap]}}
+    ok_line = json.dumps({"tool": "t", "status": "ok", "summary": "ci"})
+    stop = f"import sys; print({json.dumps(review)!r}); sys.exit({causes.exit_code('incomplete')})"
+    steps = [H.py_step("review", stop), H.py_step("ci", f"print({ok_line!r})")]
+    steps[0]["on_cause"] = {"incomplete": "ci"}
+    code, out = H.ndf(repo, "next", H.write_plan(repo, "rv", steps))
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "incomplete"
+    assert out["gaps"] == [gap] and result.errors(out, code) == []
+
+
+def test_an_empty_gaps_output_clears_earlier_gaps(repo):
+    """後のレビューが空の gaps を返せば、前の欠けは消えてプランは ok で終わる。"""
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
+
+    def emit(gaps: list) -> str:
+        return f"print({json.dumps({'tool': 't', 'status': 'ok', 'summary': 's', 'outputs': {'gaps': gaps}})!r})"
+
+    code, out = H.ndf(repo, "next", H.write_plan(repo, "rc", [H.py_step("a", emit([gap])), H.py_step("b", emit([]))]))
+    assert (code, out["status"]) == (H.OK, "ok")
 
 
 def test_outputs_out_of_the_contract_become_a_warning(repo):
