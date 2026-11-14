@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import signal
 import subprocess
 import threading
 import time
@@ -37,7 +36,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
-from ndf import identity
+from ndf import identity, process_group
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
@@ -57,8 +56,8 @@ SLOT_PREFIX = "slot-"
 POLL_SECONDS = 2.0
 # 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
 STOP_INTERVAL_SECONDS = 30.0
-# 止めたグループが SIGTERM で終わらないときに SIGKILL を送るまでの秒
-KILL_GRACE_SECONDS = 10.0
+# テストの組を止める猶予と間隔の方針（contracts/limits.json）
+STOP_TEST = "procs.stop-test"
 STOP_FILE = "stop.json"
 
 DIRECT = "direct"
@@ -160,7 +159,7 @@ class _MemoryMonitor:
                 continue
             self.on_stop(available)
             log.warning("使えるメモリが下限を割ったのでテストを止める", extra={"available_mib": available, "slot": index})
-            _stop_group(proc)
+            process_group.stop_group(proc, grace_key=STOP_TEST)
             return
 
     def _is_last_started(self, own_index: int, started_at: float) -> bool:
@@ -249,62 +248,6 @@ def _slot_path(directory: Path, index: int | None, suffix: str = "") -> Path:
 def _slot_index(path: Path) -> int | None:
     digits = path.stem.removeprefix(SLOT_PREFIX)
     return int(digits) if digits.isdigit() else None
-
-
-def _stop_group(proc: subprocess.Popen) -> None:
-    """自分の起こしたテストだけを止める。テストが自分と同じグループにいれば、グループでなくテストへ送る（I5）。
-
-    猶予の間に終わったかは、グループ全体で見る（先頭の `bash -c` が先に終わっても、SIGTERM を無視する子孫が
-    残っていれば SIGKILL を送る）。
-    """
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: テストが既に終わっていれば止める先が無い
-        return
-    _end_group(proc, pgid, signal.SIGTERM)
-
-
-def end_group(proc: subprocess.Popen) -> None:
-    """`start_new_session` で起こした子のグループ全体が終わるのを猶予まで待ち、残れば SIGKILL を送る。
-
-    シグナルを転送した後に呼ぶ。先頭が刈り取られた後でもグループの番号（先頭の pid）で残りを見る。
-    """
-    _end_group(proc, proc.pid, None)
-
-
-def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
-    """`first` を送り（None なら送らない）、猶予の間にグループが終わらなければ SIGKILL を送る。"""
-    own_group = pgid == os.getpgrp()
-
-    def send(sig: int) -> None:
-        try:
-            proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
-        except ProcessLookupError:  # noqa: S110 外部コマンド: グループが既に終わっていれば送る先が無い
-            pass
-
-    def alive() -> bool:
-        leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
-        return leader_alive if own_group else _group_alive(pgid)
-
-    if first is not None:
-        send(first)
-    deadline = time.monotonic() + KILL_GRACE_SECONDS
-    while alive():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            send(signal.SIGKILL)
-            return
-        time.sleep(min(0.1, remaining))
-
-
-def _group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: グループのプロセスが残っていない
-        return False
-    except PermissionError:  # noqa: NDF401 外部コマンド: 送る権限の無いプロセスが残っている（生きている）
-        return True
-    return True
 
 
 def _owner(started_at: float | None, cwd: Path) -> dict[str, object]:

@@ -233,40 +233,6 @@ def test_unwritable_slot_files_release_the_slot_and_run_without_it(tmp_path, mon
             assert held.index == 0  # 取りかけた枠は返してある
 
 
-def test_memory_stop_kills_descendants_that_outlive_the_group_leader(monkeypatch):
-    monkeypatch.setattr(slots, "KILL_GRACE_SECONDS", 0.5)
-    # 先頭の bash は SIGTERM で終わるが、SIGTERM を無視する子孫が残る
-    proc = subprocess.Popen(
-        ["bash", "-c", "(trap '' TERM; sleep 600) & echo started; wait"], stdout=subprocess.PIPE, start_new_session=True
-    )
-    try:
-        assert proc.stdout.readline() == b"started\n"
-        slots._stop_group(proc)
-        waits.wait_until(lambda: not slots._group_alive(proc.pid), what="グループ全体の終了")
-    finally:
-        if slots._group_alive(proc.pid):
-            os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-
-
-def test_end_group_waits_for_and_kills_descendants_after_the_leader_was_reaped(monkeypatch):
-    monkeypatch.setattr(slots, "KILL_GRACE_SECONDS", 0.5)
-    # シグナルの転送の後、先頭の bash は刈り取られたが SIGTERM を無視する子孫が残る（中断の経路）
-    proc = subprocess.Popen(
-        ["bash", "-c", "(trap '' TERM; sleep 600) & echo started; wait"], stdout=subprocess.PIPE, start_new_session=True
-    )
-    try:
-        assert proc.stdout.readline() == b"started\n"
-        os.killpg(proc.pid, signal.SIGTERM)
-        proc.wait()
-        assert slots._group_alive(proc.pid)
-        slots.end_group(proc)
-        waits.wait_until(lambda: not slots._group_alive(proc.pid), what="グループ全体の終了")
-    finally:
-        if slots._group_alive(proc.pid):
-            os.killpg(proc.pid, signal.SIGKILL)
-
-
 @pytest.mark.skipif(not os.path.exists("/proc/self/oom_score_adj"), reason="OOM の優先度は Linux だけ")
 def test_preexec_raises_the_oom_score_before_the_child_forks():
     # bash が fork した子孫（cd ... && の後ろのコマンド）も、exec の前に上げた優先度を受け継ぐ

@@ -76,6 +76,7 @@
     "parallel-switch.long-wait": {"summary": "文脈を読めないときに長い待ちのオーガナイザーを切り替える待ちの見込みの閾値（実測で最も大きかった文脈が切り替えに変わる時点）", "seconds": 14400},
     "parallel-switch.relay-check": {"summary": "切り替えの判定でラッパーの直接の子かを確かめる relay.py is-child の上限", "seconds": 10},
     "procs.stop-tree": {"summary": "プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔", "seconds": 3, "interval": 0.1},
+    "procs.stop-test": {"summary": "テストの枠が止めるテストのプロセスの組の、SIGTERM から SIGKILL までの猶予と、終わりを見る間隔", "seconds": 10, "interval": 0.1},
     "refresh.http": {"summary": "トークンの更新の宛先への HTTP の上限", "seconds": 10},
     "run-core.kill-grace": {"summary": "実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予", "seconds": 5},
     "sprint-loop-record.lock": {"summary": "開発ループの記録の排他を待つ上限", "seconds": 60},
