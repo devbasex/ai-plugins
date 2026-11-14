@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,79 @@ def test_a_plan_that_finished_keeps_the_start_of_its_round(tmp_path):
     final = {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 1}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
     assert invoke.plan_start(work) == "b"
+
+
+def _stop_at(root: Path, plan: Path, work: Path, argv: list[str], last: str = "b") -> plan_runner.Invocation:
+    """`argv` の呼び出しでプランの回を流し、ステップ `last` で止まった結果を控えに残す。"""
+    start = argv[argv.index("--from") + 1] if "--from" in argv else None
+    sets = plan_cli._pairs([argv[i + 1] for i, a in enumerate(argv) if a == "--set"], "--set")
+    inv = plan_runner.prepare(root, plan, start, str(work), work, sets)
+    plan_runner._record_run(inv)
+    final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": last, "count": 2}
+    plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
+    return inv
+
+
+def test_every_retry_of_a_plan_starts_a_new_round(tmp_path, monkeypatch):
+    # PR 3464 の指摘: 2 回目以降の打ち直しも、開始点と head が前の回と同じでプランが控えの結果を返すだけにならない
+    _plan_template(monkeypatch)
+    work, root = tmp_path / "w", tmp_path / "root"
+    work.mkdir()
+    run = _plan_run({"issues": [1]})
+    first = invoke.plan_argv(run, work, None, tmp_path)
+    plan = Path(first[first.index("next") + 1])
+    keys = [_stop_at(root, plan, work, first).key]
+    for again in (replace(run, again=True), replace(run, again=True), replace(run, retries=1)):
+        argv = invoke.plan_argv(again, work, None, tmp_path)
+        assert argv[argv.index("--from") + 1] == "b"
+        keys.append(_stop_at(root, plan, work, argv).key)
+    assert len(set(keys)) == 4
+    # 打ち直さない呼び出し（作業が落ちた後の続き・答え）は同じ回に届く
+    argv = invoke.plan_argv(run, work, None, tmp_path)
+    assert f"{invoke.ATTEMPT_SET}=3" in argv
+
+
+def _gate_ended(tmp_path: Path, monkeypatch) -> tuple[invoke.StageRun, Path]:
+    """プランの回がステップ a の承認ゲートで終わった（結果の控えが gate）置き場。"""
+    _plan_template(monkeypatch)
+    work = tmp_path / "w"
+    work.mkdir()
+    run = _plan_run({"issues": [1]})
+    argv = invoke.plan_argv(run, work, None, tmp_path)
+    plan = Path(argv[argv.index("next") + 1])
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), work, {"issues": "[1]"})
+    plan_runner._record_run(inv)
+    final = {"status": "gate", "kind": None, "detail": "判断を待つ", "last": "a", "count": 1}
+    plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
+    return run, work
+
+
+def test_an_answer_to_a_plan_that_ended_at_a_gate_starts_where_the_route_points(tmp_path, monkeypatch):
+    # PR 3464 の指摘: 終わった回へ --answer を渡すと、プランは控えの gate を返し続ける
+    run, work = _gate_ended(tmp_path, monkeypatch)
+    argv = invoke.plan_argv(run, work, "approved", tmp_path)
+    assert argv[argv.index("--from") + 1] == "b" and "--answer" not in argv
+
+
+def test_an_answer_with_no_route_ends_the_plan_without_running_it(tmp_path, monkeypatch):
+    run, work = _gate_ended(tmp_path, monkeypatch)
+    never = lambda *a: pytest.fail("打たない")  # noqa: E731
+    got = invoke.invoke(run, tmp_path, work, "rejected", runner=never)
+    assert got.status == "stopped" and got.cause["kind"] == "refused"
+
+
+def test_skills_and_scripts_run_in_the_worktree_of_the_inputs(tmp_path):
+    # PR 3464 の指摘: 打った場所でなく、用意した作業場所のファイルを読み書きする
+    place = tmp_path / "wt"
+    place.mkdir()
+    seen = []
+    run = invoke.StageRun(invoke.SCRIPT, "true", {"worktree": str(place)}, (), "sprint_diff", "s", {"argv": ["true"]})
+    ok = subprocess.CompletedProcess([], 0, json.dumps(result.result("script", "ok", "済んだ")), "")
+    invoke.invoke(run, tmp_path, tmp_path / "w", runner=lambda argv, cwd, env: seen.append(cwd) or ok)
+    assert seen == [place]
+    gone = replace(run, inputs={"worktree": str(tmp_path / "none")})
+    got = invoke.invoke(gone, tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.cause["kind"] == "precondition"
 
 
 def test_same_run_tells_a_stored_result_of_the_same_round():

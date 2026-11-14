@@ -65,7 +65,9 @@ class Fake:
         return lanes.ok_result(r, self.values)
 
     def __call__(self, r, cwd, work_dir, answer):
-        self.calls.append(SimpleNamespace(step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir))
+        self.calls.append(SimpleNamespace(
+            step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir, retries=r.retries, again=r.again
+        ))
         queued = self.script.get(r.step)
         return queued.pop(0)(r) if queued else self.ok(r)
 
@@ -224,6 +226,8 @@ def test_retryable_causes_are_retried_here_with_the_declared_backoff(repo, st, e
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate"
     assert env.slept == [2.0, 4.0]
+    # 打ち直しは作業へ打ち直しと知らせ、プランは新しい回を始める
+    assert [c.again for c in env.fake.calls if c.step == "worktree"] == [False, True, True]
 
 
 def test_a_plan_that_returns_the_same_round_again_is_not_retried_further(repo, st, env, capsys):
@@ -247,6 +251,7 @@ def test_failures_that_need_a_decision_return_routes_and_the_exit_code_of_the_ca
     assert run.advance(st, tid, repo, env.env)["cause"]["kind"] == "test_failed"
     _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "直した")
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
+    assert [c.retries for c in env.fake.calls if c.step == "worktree"] == [0, 1]
 
 
 def test_stage_output_that_breaks_the_contract_gets_no_finish_mark(repo, st, env, capsys):
@@ -270,10 +275,20 @@ def test_retry_after_a_stage_output_that_breaks_the_contract_runs_the_steps_agai
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
     again = env.fake.calls[before:]
     assert [c.step for c in again][0] == "worktree"
-    # 終わった回の控えの結果を受け取らないよう、プランは前と違う置き場で流し直す
+    # 終わった回の控えの結果を受け取らないよう、行の打ち直しの回数を渡し、プランは同じ置き場で新しい回を流す
     first = [c for c in env.fake.calls[:before] if c.step == "worktree"][-1]
-    assert first.work_dir.name == "worktree-g0" and again[0].work_dir.name == "worktree-g0-r1"
+    assert first.work_dir == again[0].work_dir and (first.retries, again[0].retries) == (0, 1)
     assert _labels(st, tid)["作業場所の用意"] == "finished"
+
+
+def test_a_plan_gate_in_a_step_with_an_output_contract_is_recorded_as_waiting():
+    # PR 3464 の指摘: 承認ゲートの待ちの結果は出力を持たないので、出力の規約で bad_report にしない
+    s = next(s for s in definition.load_definition("standard").stages if any(st.id == "release" for st in s.steps))
+    step = next(st for st in s.steps if st.id == "release")
+    assert step.output_ref
+    gate = invoke.StageResult(result.result("plan", "gate", "承認を待つ", routes={"approved": None}), {})
+    draft = run._step_draft(SimpleNamespace(rev=1), s, step, run.StepProgress(), gate)
+    assert draft.kind == run.STEP_EVENT and draft.payload["status"] == "waiting"
 
 
 def test_retry_after_a_failed_step_keeps_the_steps_that_finished(repo, st, env, capsys):

@@ -62,7 +62,7 @@ ANSWERED = _event("answered")
 FAILED = _event("failed")
 FINISHED = _event("finished")
 # 答えの語（承認と差し戻し）
-APPROVED = _answer("approved")
+APPROVED = invoke.APPROVED
 REVISE = _answer("revise")
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
@@ -151,18 +151,19 @@ class StepProgress:
     """実行中の行のステップの進み。`generation` は差し戻しの回数で、差し戻すとステップを初めから流し直す。
 
     `anchor` は答えを数え始める事象の番号（行の開始・ステップの記録・差し戻しの後の答えだけを使う）。
-    `redo` は工程全体の出力が規約に合わずに行が失敗したか。真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、
-    ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。`redos` はその流し直しの回数で、プランの実行の
-    置き場の名前に入れる（同じ置き場で打つと、プランは終わった回の控えの結果を返すだけだからである）。
+    `retries` は行の打ち直し（失敗の後の開始）の回数で、作業へ渡す（プランは打ち直すたびに新しい回を始める。同じ回の鍵で
+    打つと、プランは終わった回の控えの結果を返すだけだからである）。`redo` は工程全体の出力が規約に合わずに行が失敗したか。
+    真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
     """
 
     generation: int = 0
-    redos: int = 0
+    retries: int = 0
     done: dict[str, dict[str, Any]] = field(default_factory=dict)
     waiting: Optional[dict[str, Any]] = None
     anchor: int = 0
     answer: Optional[model.Event] = None
     notes: Optional[str] = None
+    failed: bool = False
     redo: bool = False
 
     def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
@@ -181,10 +182,12 @@ class StepProgress:
             self._answered(ev, p)
         elif kind == STARTED:
             self.anchor, self.answer, self.waiting = ev.seq, None, None
-            if self.redo:
-                self.done, self.redo = {}, False
-                self.redos += 1
+            if self.failed:
+                self.retries += 1
+                self.done = {} if self.redo else self.done
+                self.failed = self.redo = False
         elif kind == FAILED:
+            self.failed = True
             self.redo = "step" in p and p["step"] is None
         elif kind == STEP_EVENT:
             if p["status"] == FINISHED:
@@ -805,17 +808,18 @@ def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
     return min(delay, pol.max_interval) if pol.max_interval is not None else delay
 
 
-def _retrying(call: Callable[[], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
-    """打ち直しで直る止まりを方針どおりに打ち直す。プランは止まったステップから新しい回を始める（`invoke.plan_start`）。
+def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
+    """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
+    新しい回を始める。`invoke.plan_start`・`invoke.plan_attempt`）。
 
     打ち直しても同じプランの回の結果が返った（回が変わらず、控えの結果を返した）なら、それ以上は打ち直さない。
     """
     used = 0
-    res = call()
+    res = call(False)
     while res.status == result.STOPPED and (delay := retry_delay(res.cause, used)) is not None:
         sleep(delay)
         used += 1
-        again = call()
+        again = call(True)
         if invoke.same_run(res, again):
             return again
         res = again
@@ -832,11 +836,14 @@ def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail
 
 
 def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> model.EventDraft:
-    """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。"""
+    """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。
+
+    出力の規約は終わった結果（ok）だけに当てる。承認ゲートの待ちの結果は出力を持たないためである。
+    """
     if res.status == result.STOPPED:
         cause = res.cause if res.cause is not None else causes.cause("unknown", "作業が理由なく止まった")
         return _failed_with(s, step.id, v.rev, cause)
-    errs = definition.validate_io(step.output_ref, res.report) if step.output_ref else []
+    errs = definition.validate_io(step.output_ref, res.report) if step.output_ref and res.status == result.OK else []
     if errs:
         return _failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
     status = FINISHED if res.status == result.OK else "waiting"
@@ -845,8 +852,8 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
 
 
 def step_place(step: str, prog: StepProgress) -> str:
-    """ステップのプランの実行の置き場の名前。差し戻し（世代）と工程全体の出力の失敗の後の流し直しで新しい置き場にする。"""
-    return f"{step}-g{prog.generation}" + (f"-r{prog.redos}" if prog.redos else "")
+    """ステップのプランの実行の置き場の名前。差し戻し（世代）で新しい置き場にする（打ち直しは同じ置き場の新しい回）。"""
+    return f"{step}-g{prog.generation}"
 
 
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
@@ -856,11 +863,11 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return _failed(s, step.id, v.rev, exc.kind, str(exc))
-    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes)
+    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = work_root(d.st.root, v.table_id) / s.id / step_place(step.id, prog)
-    res = _retrying(lambda: d.env.invoker(run, d.cwd, work_dir, ans), d.env.sleep)
+    res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
 

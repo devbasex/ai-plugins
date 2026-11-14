@@ -17,7 +17,8 @@
 決め方（`route.derived`）で埋めたプランを実行の置き場へ書いて流す。プランへの作業場所（文脈の `worktree`）は
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
-同じく止まったステップから新しい回を始める。同じ引数で打ち直すと、プランは前の回の控えの結果を返すだけだからである。
+同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回の鍵を変える。同じ引数で
+打ち直すと、プランは前の回の控えの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude
 from ndf.adapters.git import GitError
-from ndf.contracts import limits, result
+from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
@@ -58,6 +59,11 @@ SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 J
 # 打ち直しても直らない `claude -p` の失敗 → 止まった理由（表に無い失敗は前提の欠け）
 SKILL_FAILURES = {claude.Failure.USAGE_LIMIT: "usage_limit", claude.Failure.TIMEOUT: "interrupted"}
 ACTOR = "workflow"
+# 承認の答えの語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
+APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
+# プランの実行の置き場に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
+ATTEMPT_FILE = "progress-attempt.json"
+ATTEMPT_SET = "progress_attempt"
 # このプラグインの Python のパッケージの名前（`python -m` で打つ名前）
 PACKAGE = __package__.partition(".")[0]
 # このパッケージの置き場（`src`。子プロセスの import の道）
@@ -115,6 +121,9 @@ class StageRun:
     args: dict[str, Any] = field(default_factory=dict)
     # 差し戻しの指摘の本文（承認ゲートの revise の答え）。作業へは環境変数 NDF_STAGE_NOTES か問いの末尾で渡す
     notes: Optional[str] = None
+    # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
+    retries: int = 0
+    again: bool = False
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
         out = ndf_env({**os.environ, **extra})
@@ -284,21 +293,62 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     return out
 
 
+def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    """置き場の前の回の記録（`run.json`）と、その回の結果の控え（終わっていなければ None）。"""
+    record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
+    if record is None:
+        return None, None
+    return record, plan_files.read_json(plan_runner.result_path(work_dir, durable.run_name(record["key"])))
+
+
+def _from_of(command: Any) -> Optional[str]:
+    """結果のコマンド（`next`・`routes` の値）の `--from` の値。無ければ None。"""
+    argv = command["argv"] if isinstance(command, dict) and isinstance(command.get("argv"), list) else []
+    return str(argv[argv.index("--from") + 1]) if "--from" in argv[:-1] else None
+
+
 def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
     止まっていなければ前の回の開始点（承認の答えを渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
     """
-    record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
+    record, done = _previous(work_dir)
     if record is None:
         return None
-    done = plan_files.read_json(plan_runner.result_path(work_dir, durable.run_name(record["key"])))
-    again = done["next"] if done is not None and done["status"] == result.STOPPED and isinstance(done.get("next"), dict) else None
-    argv = again["argv"] if again is not None else []
-    if "--from" in argv[:-1]:
-        return str(argv[argv.index("--from") + 1])
+    again = _from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
+    if again is not None:
+        return again
     start = record["start"] if "start" in record else None
     return start if isinstance(start, str) else None
+
+
+def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
+    """前の回が承認ゲートで終わっていれば、その結果の routes（答え → 続きのコマンドか None）。ほかは None。
+
+    終わった回へ `--answer` を渡しても、プランは控えの結果を返すだけである。続きは routes の開始点から新しい回で流す。
+    """
+    _, done = _previous(work_dir)
+    if done is None or done["status"] != result.GATE or not isinstance(done.get("routes"), dict):
+        return None
+    return dict(done["routes"])
+
+
+def plan_attempt(run: StageRun, work_dir: Path) -> int:
+    """プランの回の打ち直しの数。打ち直し（`retries` が増えたか `again`）で前の回が終わっていれば 1 つ上げて置き場に残す。
+
+    差し込み `progress_attempt` に載せて回の鍵を変える。開始点と head が前の回と同じでも、プランが終わった回の控えの結果を
+    返さず、新しい回を流すためである。打ち直さない呼び出し（承認の答え・作業が落ちた後の続き）は残した数をそのまま使い、同じ回に届く。
+    """
+    path = work_dir / ATTEMPT_FILE
+    held = plan_files.read_json(path)
+    attempt = int(held["attempt"]) if held is not None else 0
+    seen = int(held["retries"]) if held is not None else 0
+    _, done = _previous(work_dir)
+    if (run.again or run.retries > seen) and done is not None:
+        attempt += 1
+    if held is None or attempt != held["attempt"] or run.retries > seen:
+        plan_files.write_json(path, {"attempt": attempt, "retries": max(seen, run.retries)})
+    return attempt
 
 
 def _set_value(value: Any) -> str:
@@ -308,16 +358,37 @@ def _set_value(value: Any) -> str:
 def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -> list[str]:
     """`ndf plan next <プラン> [--from <ステップ>] --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。
 
-    作業場所（`worktree`）は `--set` に載せず、埋めたプランの作業場所で渡す（`plan_path`）。
+    作業場所（`worktree`）は `--set` に載せず、埋めたプランの作業場所で渡す（`plan_path`）。前の回が承認ゲートで終わって
+    いれば、答えの routes の開始点から `--answer` 無しで新しい回を流す（`stored_gate_routes`）。
     """
-    start = plan_start(work_dir)
+    routes = stored_gate_routes(work_dir) if answer else None
+    if routes is not None:
+        start, answer = _from_of(routes[answer] if answer in routes else None), None
+    else:
+        start = plan_start(work_dir)
+    attempt = plan_attempt(run, work_dir)
     argv = ndf_command(
         PLAN, "next", str(plan_path(run, work_dir, cwd)), *(["--from", start] if start else []), "--state-dir", str(work_dir)
     )
     for key, value in run.inputs.items():
         if key != "worktree":
             argv += ["--set", f"{key}={_set_value(value)}"]
+    if attempt:
+        argv += ["--set", f"{ATTEMPT_SET}={attempt}"]
     return argv + (["--answer", answer] if answer else [])
+
+
+def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
+    """承認ゲートで終わった回への答えに続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
+    routes = stored_gate_routes(work_dir) if answer else None
+    if routes is None or _from_of(routes[answer] if answer in routes else None) is not None:
+        return None
+    if answer == APPROVED:
+        _, done = _previous(work_dir)
+        assert done is not None
+        outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
+        return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))
+    return StageResult(result.stopped(PLAN, "refused", f"プラン {run.name} の承認ゲートで承認されなかった（答え {answer}）"), {})
 
 
 def same_run(before: StageResult, after: StageResult) -> bool:
@@ -338,6 +409,9 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         if template(run.name) is None:
             return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い"), {})
         work_dir.mkdir(parents=True, exist_ok=True)
+        ended = _no_route(run, work_dir, answer)
+        if ended is not None:
+            return ended
         argv = plan_argv(run, work_dir, answer, cwd)
     except route.RouteError as exc:
         return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}"), {})
@@ -387,12 +461,22 @@ def invoke(
 ) -> StageResult:
     """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の置き場、`answer` はプランの承認ゲートの答え。
 
-    `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。
+    `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
+    作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
     """
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
+    if run.kind not in (SCRIPT, SKILL):
+        raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
+    place = work_place(run, cwd)
+    if not place.is_dir():
+        return StageResult(result.stopped(run.kind, "precondition", f"作業場所 {place} が無い"), {})
     if run.kind == SCRIPT:
-        return _call_script(run, cwd, runner)
-    if run.kind == SKILL:
-        return _call_skill(run, cwd, call_claude)
-    raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
+        return _call_script(run, place, runner)
+    return _call_skill(run, place, call_claude)
+
+
+def work_place(run: StageRun, cwd: Path) -> Path:
+    """skill・script を打つ作業ディレクトリ。入力の作業場所（`worktree`）があればそこ、無ければ打った場所。"""
+    held = run.inputs["worktree"] if "worktree" in run.inputs else None
+    return Path(held) if isinstance(held, str) and held else cwd
