@@ -23,6 +23,7 @@ from typing import Optional
 from filelock import Timeout
 
 from ndf import identity, slot_pool
+from ndf.adapters import training
 from ndf.adapters.run_log import record
 from ndf.contracts import limits
 from ndf.testing import limits as test_limits
@@ -34,8 +35,20 @@ WAIT_POLICY = "launch.wait.llm-cli"
 ReadMemory = Callable[[], Optional[int]]
 
 
-class NoSlot(Exception):
+class NotLaunched(Exception):
+    """起動の前置きで起動しなかった。`kind` が種類（'refused'・'no_slot'）、`detail`（`str`）が理由。"""
+
+    kind = "refused"
+
+    @property
+    def detail(self) -> str:
+        return str(self)
+
+
+class NoSlot(NotLaunched):
     """待ちの上限までに枠が取れなかったか、枠の設定が読めない。`str` が理由。"""
+
+    kind = "no_slot"
 
 
 def _memory_ok(read_memory: ReadMemory, floor_mib: int) -> bool:
@@ -112,3 +125,13 @@ def held(
         taken.release(quiet=True)
         raise
     taken.release()
+
+
+@contextmanager
+def gate(agent: str, *, cwd: Optional[Path] = None) -> Iterator[None]:
+    """起動の前置き: 学習に使わない設定の控えを読み、重い起動の枠を取る。起動しないときは `NotLaunched`。"""
+    why = training.refusal(agent)
+    if why is not None:
+        raise NotLaunched(why)
+    with held(agent, cwd=cwd):
+        yield

@@ -3,7 +3,7 @@
 - 監視: 利用上限の語は CLI が出す行の形（行頭）だけを読み、コメントの写しの中の語を拾わない（#1411）。
   早期の警告は種類ごとに 1 回ずつ出す（#2059）
 - kiro: 起動の前後でworktree の `.amazonq/cli-agents` を写して戻し、起動の間に増えた `.bak` を消す（#2448）
-- 起動の前: 学習に使わない設定の控えを読み（`training.refusal`。#3391）、重い起動の枠を取る（`launch_slot.held`。#3368）
+- 起動の前: 学習に使わない設定の控えを読み（`training.refusal`。#3391）、重い起動の枠を取る（`launch_slot.held`。#3368）。2 つは `launch_slot.gate` の 1 か所が持つ
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
-from ndf.adapters import launch_slot, training
+from ndf.adapters import launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
 
@@ -303,14 +303,11 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動の枠が空かなければ
     `AgentState.NO_SLOT` を返す。
     """
-    why = training.refusal(spec.agent)
-    if why is not None:
-        return _not_started(spec, AgentState.REFUSED, why)
     try:
-        with launch_slot.held(spec.agent, cwd=spec.cwd):
+        with launch_slot.gate(spec.agent, cwd=spec.cwd):
             return _guarded_run(spec, poll)
-    except launch_slot.NoSlot as exc:
-        return _not_started(spec, AgentState.NO_SLOT, str(exc))
+    except launch_slot.NotLaunched as exc:
+        return _not_started(spec, AgentState(exc.kind), exc.detail)
 
 
 def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
