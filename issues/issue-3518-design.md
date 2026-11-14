@@ -40,10 +40,12 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 宣言の規約 | 宣言を読む子（スキーマの手書きの部分）・規約の検査（突き合わせ） | 宣言のファイル（置き場の表の宣言の行） | キー | 型・既定値・取りうる値・例・置き場・範囲・読む工程 |
-| 副命令の規約 | 副命令を持つ子（結果のスキーマ）・規約の生成（引数のスキーマ） | 副命令（副命令の表の行） | 下位の命令・引数 | 引数の形・結果の `metrics` と `items` の形・終了コード・止まった理由 |
+| 宣言の規約 | 宣言を読む子（宣言のスキーマと Markdown の宣言の形の表） | 宣言のファイル（置き場の表の宣言の行） | キー | 型・既定値・取りうる値・例・置き場・範囲・読む工程 |
+| 副命令の規約 | 副命令を持つ子（結果のスキーマと、手書きの引数の表の行） | 副命令（副命令の表の行） | 下位の命令・引数 | 結果の `metrics` と `items` の形・終了コード・止まった理由 |
 | Skill の規約 | Skill を移す子（Skill の入出力の表の行） | Skill（配る Skill の表の行） | — | 引数の形・`/goal` の終わりの条件・読む宣言・読む環境変数・結果の形 |
-| 契約のページ | 規約の生成だけ | 面ごとのページ | 表の行 | 公開か内部か |
+| 生成した規約 | 規約の生成だけ | 面ごとの契約のページと、副命令ごとの引数のスキーマ | 表の行・引数 | 公開か内部か・引数の形 |
+
+**規約の検査はどの集約の持ち主でもない。** 規約の検査はファイルを読んで突き合わせるだけで、書き換えない。`ndf check --write-spec` で書くのは規約の生成で、書く先は「生成した規約」の集約だけである。手で書くファイル（宣言のスキーマ・結果のスキーマ・手書きの引数の表・Skill の入出力の表）は規約の生成が書かない。
 
 環境変数・受け渡しのファイル・hook・終了コード・止まった理由・起動スクリプトは、それぞれの正本の表がそのまま集約の根になる。この課題はそれらの表を読むだけで、契約のページへ写さずに生成する。
 
@@ -52,16 +54,22 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 宣言の規約 | 置き場の表の宣言の行はすべて、スキーマ（JSON の宣言）か形の表（Markdown の宣言）を 1 つずつ持つ | `ndf check` が無い行の id を出して落ちる |
-| I2 | 宣言の規約 | スキーマの最上位のキーのうち非推奨でないものの集まりが、置き場の表の行の `keys` に等しく、`main_keys` はその部分集合である | 食い違うキーを宣言の id と並べて落ちる |
+| I2 | 宣言の規約 | スキーマの最上位のキーのうち非推奨でないものの集まりが、置き場の表の行の `keys` に等しい | 食い違うキーを宣言の id と並べて落ちる |
+| I12 | 宣言の規約 | 置き場の表の行の `main_keys` は、その行の `keys` の部分集合である | `keys` に無い `main_keys` のキーを宣言の id と並べて落ちる |
 | I3 | 宣言の規約 | 検査を打つリポジトリの `.ndf/` の JSON の宣言は、その宣言のスキーマに通る | 通らないファイルと JSON Pointer を出して落ちる |
-| I4 | 副命令の規約 | 副命令の表の副命令はすべて、引数のスキーマと結果のスキーマを 1 つずつ持つ。引数のスキーマはコードの引数の定義から生成した中身と一致する | 無い副命令・食い違う引数を出して落ちる |
-| I5 | 副命令の規約 | 副命令が出した結果 JSON は、結果の契約とその副命令の結果のスキーマの両方に通る | 通らなかった副命令と項目を出してテストが落ちる |
+| I4 | 副命令の規約 | 副命令の表の副命令はすべて、引数のスキーマと結果のスキーマを 1 つずつ持つ | 無い副命令とスキーマの種類を出して落ちる |
+| I13 | 副命令の規約 | 副命令ごとに、引数を与えるのは引数の取り出しか手書きの引数の表のどちらか一方である（argparse から取り出せる副命令は表に行を持たず、取り出せない副命令は表に行を持つ） | 両方に当たる副命令・どちらにも当たらない副命令を出して落ちる |
+| I5 | 副命令の規約 | 副命令が出した結果 JSON と終了コードの組は、結果の契約（形と、状態・止まった理由と終了コードの対応）に通る | 通らなかった副命令と項目を出してテストが落ちる |
+| I14 | 副命令の規約 | 副命令が出した結果 JSON は、その副命令の結果のスキーマに通る | 通らなかった副命令と項目を出してテストが落ちる |
 | I6 | 副命令の規約 | コードが名前の文字列で読む環境変数は、すべて環境変数の表に載る | 載っていない名前とファイルと行を出して落ちる |
 | I7 | Skill の規約 | 配る Skill の表の行のうち実体のある Skill は、すべて Skill の入出力の表に行を持つ | 無い Skill の名前を出して落ちる |
 | I8 | Skill の規約 | Skill の本文・references・エージェント定義に書かれた `ndf <副命令>` の呼び出しは、副命令と下位の命令と引数の名前が引数のスキーマにある | ファイル・行・呼び出しを出して落ちる |
-| I9 | 契約のページ | コミットされた契約のページは、正本の表とスキーマから生成し直した中身と 1 字も違わない | 差分のあるページを出して落ちる |
-| I10 | 契約のページ | 公開する面の表の行はすべて、契約のページのどれかの項目に当たる。当たった項目だけが公開になり、ほかは内部になる | 当たらない行の id を出して落ちる |
-| I11 | 契約のページ | `bin/` のファイルはすべて起動スクリプトの表に行を持つ | 無いファイルの名前を出して落ちる |
+| I9 | 生成した規約 | コミットされた契約のページと引数のスキーマは、正本の表・スキーマ・コードの引数の定義・手書きの引数の表から生成し直した中身と 1 字も違わない | 差分のあるファイルを出して落ちる |
+| I10 | 生成した規約 | 公開する面の表の行はすべて、契約のページのどれかの項目に当たる。当たった項目だけが公開になり、ほかは内部になる | 当たらない行の id を出して落ちる |
+| I15 | 生成した規約 | 公開する面の表は種類 `spec` の行を、契約のページ・宣言のスキーマ・入出力のスキーマの 3 つの置き場について 1 つずつ持ち、各行の `target` がプラグインの中に実在するディレクトリを指す | 欠けた置き場・実在しない `target` を出して落ちる |
+| I11 | 生成した規約 | `bin/` のファイルはすべて起動スクリプトの表に行を持つ | 無いファイルの名前を出して落ちる |
+
+hook の登録のファイル（`hooks/claude.json`・`codex.json`）の事象が hook の表に載ることは、この課題の不変条件に持たない。登録のファイルは hook の表から生成する生成物で、既存のテスト `tests/domains/hooks/test_registration.py` の `test_registration_files_are_what_render_makes`（`registration.stale` が生成し直した中身との差分を出す）が既に縛っている（`src/ndf/domains/hooks/registration.py:1-13`）。
 
 ### ドメインイベント
 
@@ -150,7 +158,8 @@
 | --- | --- |
 | 宣言のスキーマ（`contracts/schemas/declarations/<id>.schema.json`、18 個） | JSON の宣言ごとのキー・型・説明・既定値・取りうる値・例・非推奨と、ファイルの置き場・範囲・読む工程の注釈を持つ。手で書く |
 | Markdown の宣言の形の表（`contracts/schemas/declarations/mvv-body.sections.json`） | `mvv.md` の節の並びと、置き場・範囲・読む工程を持つ。手で書く |
-| 副命令の引数のスキーマ（`contracts/schemas/io/<副命令>.args.schema.json`、22 個） | 副命令・下位の命令ごとの引数の名前・型・必須・既定値・取りうる値・説明を持つ。規約の生成が作り、手で直さない |
+| 副命令の引数のスキーマ（`contracts/schemas/io/<副命令>.args.schema.json`、22 個） | 副命令・下位の命令ごとの引数の名前・型・必須・既定値・取りうる値・説明を持つ。22 個すべてを規約の生成が作り、手で直さない |
+| 手書きの引数の表（`contracts/domains/manual-args.json`） | argparse を使わない副命令（2026-11-14 時点で `launch-args`・`notify` の 2 個）の下位の命令と引数を持つ事実の表。規約の生成はこの表の行から、その副命令の引数のスキーマを作る |
 | 副命令の結果のスキーマ（`contracts/schemas/io/<副命令>.result.schema.json`、22 個） | 副命令の結果 JSON の `metrics` と `items` の形を持つ。結果の契約（`result.schema.json`）を `$ref` で指し、共通の欄を写さない。副命令を持つ子が手で書く |
 | Skill の入出力の表（`contracts/domains/skill-io.json`） | 実体のある配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ |
 | 起動スクリプトの表（`contracts/domains/launchers.json`） | `bin/` のファイルごとの種類（起動スクリプトか内部の部品か）と、渡し先・意味を持つ |
@@ -160,9 +169,9 @@
 | 規約のモデル（`src/ndf/checks/spec_model.py`） | 正本の表・スキーマ・配る Skill の表・`bin/` を読み、面ごとの項目と公開か内部かを 1 つのモデルに組む。ファイルを読むだけで書かない |
 | 引数の取り出し（`src/ndf/checks/spec_args.py`） | 副命令のモジュールの `main` を、引数を読む直前で止めて argparse の定義を受け取り、下位の命令まで辿って引数の木を作る |
 | 規約の描画（`src/ndf/checks/spec_render.py`） | モデルから契約のページのページと引数のスキーマの中身を文字列で作る。純粋な処理で、ファイルを触らない |
-| 規約の検査（`src/ndf/checks/spec_docs.py`） | 規則 `spec-docs`（生成の差分）・`spec-decl`（I1〜I3）・`spec-io`（I4・I6・I11）・`spec-skill`（I7・I8）・`spec-public`（I10）を当て、指摘を返す。`--write-spec` のときは描画した中身を書く |
+| 規約の検査（`src/ndf/checks/spec_docs.py`） | 規則 `spec-docs`（I9）・`spec-decl`（I1〜I3・I12）・`spec-io`（I4・I6・I11・I13）・`spec-skill`（I7・I8）・`spec-public`（I10・I15）を当て、指摘を返す。`--write-spec` のときは描画した中身を書く |
 | `ndf check` の配線（`src/ndf/checks/run.py`・`checks/README.md`・`checks/rules.json`） | 規約の検査を規則の 1 つとして呼ぶ。`--write-spec` を受ける。規則の名前と規約の置き場を `rules.json` に置く |
-| 全副命令の出力の検査（`tests/conftest.py`・`tests/cli/test_every_output.py`） | テストの間に出た結果 JSON を副命令の結果のスキーマで確かめ、実行の終わりに、ok の出力が 1 度も確かめられなかった副命令を落とす（I5） |
+| 全副命令の出力の検査（`tests/conftest.py`・`tests/cli/test_every_output.py`） | テストの間に出た結果 JSON と終了コードの組を結果の契約で、結果 JSON を副命令の結果のスキーマで確かめ、実行の終わりに、ok の出力が 1 度も確かめられなかった副命令を落とす（I5・I14） |
 | 契約のページ（`docs/contracts/` の 8 ページ） | `index.md`（面の一覧と公開か内部かの約束）・`declarations.md`・`commands.md`・`exit-codes.md`（終了コードと止まった理由）・`env.md`・`files.md`・`hooks.md`・`skills.md`（Skill と起動スクリプト）。すべて生成する |
 | 行き先の表（`docs/ndf-swap-doc-destinations.md`） | 契約のページ・宣言のスキーマ・入出力のスキーマの 3 行（扱い・持ち主・時期）を足す |
 
@@ -185,6 +194,7 @@ graph TD
         R[副命令の結果のスキーマ]
         K[Skill の入出力の表と起動スクリプトの表]
         C[副命令のコードの引数の定義]
+        H[手書きの引数の表]
     end
     subgraph 規約の仕組み
         A[引数の取り出し]
@@ -196,6 +206,7 @@ graph TD
         O[契約のページと引数のスキーマ]
     end
     C --> A --> M
+    H --> M
     T --> M
     S --> M
     R --> M
@@ -267,7 +278,8 @@ classDiagram
 | --- | --- | --- |
 | 宣言のスキーマ | JSON Schema 2020-12。最上位は `type: object`・`additionalProperties: false`。キーごとに `type`・`description`、既定値のあるキーは `default`、取りうる値が有限なら `enum`、ファイルに `examples` を 1 つ以上。ndf-next が読まないが実物に残るキーは `deprecated: true`。注釈 `x-ndf-place`（`worktree` か `main`）・`x-ndf-read-by`（読む副命令か工程と、読む時点の配列） | 宣言を読む子（初版はこの課題） |
 | Markdown の宣言の形の表 | 事実の表の形（`fact.schema.json`）。行は節の見出しと順番と必須か | 同上 |
-| 引数のスキーマ | JSON Schema 2020-12。下位の命令ごとに `oneOf` の枝を持ち、枝は引数の名前をキーにした `properties`（`type`・`description`・`default`・`enum`・配列なら `items`）と `required` を持つ | 規約の生成だけ |
+| 引数のスキーマ | JSON Schema 2020-12。下位の命令ごとに `oneOf` の枝を持ち、枝は引数の名前をキーにした `properties`（`type`・`description`・`default`・`enum`・配列なら `items`）と `required` を持つ | 規約の生成だけ（22 個すべて） |
+| 手書きの引数の表 | 事実の表の形。行は副命令で、列は下位の命令ごとの引数の並び（名前・型・必須・説明） | 副命令を持つ子（初版はこの課題） |
 | 結果のスキーマ | JSON Schema 2020-12。`allOf` で結果の契約を `$ref` し、`metrics` と `items` の形だけを足す | 副命令を持つ子（初版はこの課題） |
 | Skill の入出力の表 | 事実の表の形。列は `goal_end`（文字列か無し）・`declarations`（置き場の表の id）・`env`（環境変数の表の id）・`result`（`block`・`report`・`none`）・`args`（正規表現の配列。公開する面の Skill は持たない） | Skill を移す子（初版はこの課題） |
 | 起動スクリプトの表 | 事実の表の形。列は `kind`（`launcher`・`part`）・`passes_to`・`meaning` | 起動スクリプトを足す子（初版はこの課題） |
@@ -306,7 +318,7 @@ sequenceDiagram
     participant Spc as 規約の検査
     Dev->>Chk: ndf check [--write-spec]
     Chk->>Arg: 副命令の表の 22 個を順に
-    Arg-->>Chk: 引数の木（取り出せない副命令は手書きの引数のスキーマを読む）
+    Arg-->>Chk: 引数の木（取り出せない副命令は手書きの引数の表の行を読む）
     Chk->>Mod: 正本の表・スキーマ・引数の木・配る Skill の表・bin/
     Mod-->>Chk: 規約のモデル（読めなければ config_broken）
     Chk->>Ren: モデル
@@ -319,9 +331,9 @@ sequenceDiagram
     Chk->>Dev: 結果 JSON（違反があれば check_failed）
 ```
 
-図に現れない構成要素は、データの直しと追加（置き場の表・環境変数の表・エントリポイントの表と見本・行き先の表）と、`ndf check` の配線である。データは図の「正本の表」として読まれ、配線は図の `ndf check` そのものである。
+図に現れない構成要素は、データの直しと追加（置き場の表・環境変数の表・手書きの引数の表・エントリポイントの表と見本・行き先の表）と、`ndf check` の配線である。データは図の「正本の表」として読まれ、配線は図の `ndf check` そのものである。`--write-spec` が書くのは契約のページと引数のスキーマだけで、手書きの引数の表は入力として読むだけである。
 
-全副命令の出力の検査は、テストの実行の中で別に動く。結果 JSON を出す 1 か所（`ndf.contracts.result.emit`）をテストの間だけ包み、出た JSON をその副命令の結果のスキーマで確かめ、ok の出力を確かめた副命令の名前を記録する。テストの並列のプロセスの記録は、実行の終わりに 1 か所で集める。
+全副命令の出力の検査は、テストの実行の中で別に動く。結果 JSON を出す 1 か所（`ndf.contracts.result.emit`。結果 JSON と終了コードを受け、標準出力へ書いて終了コードを返す。`src/ndf/contracts/result.py:144-154`）をテストの間だけ包み、受けた結果 JSON と終了コードの組を結果の契約（`result.errors`。状態・止まった理由と終了コードの対応を見る）で、結果 JSON をその副命令の結果のスキーマで確かめ、ok の出力を確かめた副命令の名前を記録する。テストの並列のプロセスの記録は、実行の終わりに 1 か所で集める。
 
 ## 非機能の実現方式
 
@@ -342,19 +354,19 @@ sequenceDiagram
 | --- | --- | --- |
 | 受け入れ条件 1・I1 | 置き場の表の宣言の 19 行が宣言の文書に載り、各ファイルが置き場・範囲・キー・型・既定値・取りうる値・必須か・読む工程・例を持つ。`main_keys` のキーにメインディレクトリから読む印が付く | 置き場の表へ宣言の行を 1 つ足し、スキーマを置かないと、その id で落ちる |
 | 受け入れ条件 2 | JSON の宣言の 18 種にスキーマがあり、キーごとに型と説明、既定値のあるキーは `default`、有限の値は `enum` を持つ | キーの `description` を消すと落ちる |
-| 受け入れ条件 3・4・I2 | 置き場の表の `keys` とスキーマの最上位のキーが等しい | 表の `keys` へキーを 1 つ足すと、宣言の id とキーの名前を出して 0 以外で落ちる。スキーマだけにキーを足しても落ちる |
-| 受け入れ条件 5・I4 | 副命令の表の 22 個が規約に載り、引数のスキーマが引数の定義から生成した中身と一致する | 副命令の定義へ引数を 1 つ足すと、副命令と引数の名前を出して落ちる。副命令の表へ 1 行足しても落ちる |
+| 受け入れ条件 3・4・I2・I12 | 置き場の表の `keys` とスキーマの最上位のキーが等しく、`main_keys` が `keys` に含まれる。「コードが読むキー」を置き場の表の `keys` で代える扱いは「人へ残す判断」の 1 で決める | 表の `keys` へキーを 1 つ足すと、宣言の id とキーの名前を出して 0 以外で落ちる。スキーマだけにキーを足しても落ちる。`main_keys` へ `keys` に無いキーを足すと落ちる |
+| 受け入れ条件 5・I4・I13・I9 | 副命令の表の 22 個が規約に載り、引数のスキーマが引数の定義か手書きの引数の表から生成した中身と一致する | 副命令の定義へ引数を 1 つ足すと、副命令と引数の名前を出して落ちる。副命令の表へ 1 行足しても落ちる。argparse を使う副命令を手書きの引数の表にも載せると落ちる |
 | 受け入れ条件 5（環境変数）・I6 | コードが名前の文字列で読む環境変数がすべて環境変数の表に載る | 表に無い名前を読むコードを足すと、名前・ファイル・行を出して落ちる |
-| 受け入れ条件 5（受け渡しのファイル） | 置き場の表のすべての行が受け渡しのファイルのページに載り、形は外の呼び手が読む行だけに載る | 置き場の表に行を足して生成し直さないと `spec-docs` で落ちる |
-| 受け入れ条件 6・I5 | どの副命令の出力も、結果の契約と副命令の結果のスキーマに通る。全体の実行では、どの副命令も ok の出力が 1 度は確かめられる | 結果のスキーマに無い `metrics` の項目を出すように副命令を壊すと、その副命令と項目を出して落ちる。ある副命令の ok の出力を出すテストを外すと、実行の終わりにその副命令の名前で落ちる |
+| 受け入れ条件 5（受け渡しのファイル） | 置き場の表のすべての行が受け渡しのファイルのページに載り、形は外の呼び手が読む行だけに載る。置き場の表に無いファイルを読み書きするコードを見つける検査は持たず、扱いは「人へ残す判断」の 2 で決める | 置き場の表に行を足して生成し直さないと `spec-docs` で落ちる |
+| 受け入れ条件 6・I5・I14 | どの副命令の出力も、結果 JSON と終了コードの組が結果の契約に、結果 JSON が副命令の結果のスキーマに通る。全体の実行では、どの副命令も ok の出力が 1 度は確かめられる | 結果のスキーマに無い `metrics` の項目を出すように副命令を壊すと、その副命令と項目を出して落ちる。状態と食い違う終了コードを渡すように副命令を壊すと落ちる。ある副命令の ok の出力を出すテストを外すと、実行の終わりにその副命令の名前で落ちる |
 | 受け入れ条件 7 | 終了コードと止まった理由のページが 2 つの表の全行を持つ | 止まった理由の表へ行を足して生成し直さないと `spec-docs` で落ちる |
 | 受け入れ条件 8 | 環境変数の表の 49 行がページに載り、秘密の 4 行に値の例が無い | 秘密の行に例を描くように描画を壊すと落ちる |
-| 受け入れ条件 9 | hook の表のランタイム 2 つ・事象ごとに、読む入力の鍵と判定ごとの出力の形がページに載る。hook の登録のファイルの事象が hook の表に載る | 登録のファイルへ表に無い事象を足すと落ちる |
+| 受け入れ条件 9 | hook の表のランタイム 2 つ・事象ごとに、読む入力の鍵と判定ごとの出力の形がページに載る。hook の登録のファイルの事象が hook の表に載る（既存のテスト `tests/domains/hooks/test_registration.py` の `test_registration_files_are_what_render_makes` が縛り、この課題では足さない） | 登録のファイルへ表に無い事象を足すと、既存のテストが生成し直した中身との差分で落ちる。hook の表へ事象を足して契約のページを生成し直さないと `spec-docs` で落ちる |
 | 受け入れ条件 10・I10 | 公開する面の表の行がすべて規約の項目に当たり、当たった項目だけが公開と描かれる | 公開する面の表へ実在しない副命令を指す行を足すと、行の id を出して落ちる |
 | 受け入れ条件 11・I9 | 生成し直した中身とコミットされた文書・引数のスキーマが 1 字も違わない | 契約のページを手で 1 字直すと、そのページで落ちる。`--write-spec` の後は通る |
 | 受け入れ条件 12・I3 | このリポジトリの `.ndf/` の JSON の宣言 10 種がスキーマに通る。`.ndf/` の無いリポジトリでは 0 件で通る | 実物の宣言の値を型の違う値にしたコピーで検査すると、ファイルと JSON Pointer を出して落ちる |
 | 受け入れ条件 13 | 行き先の表に契約のページ・宣言のスキーマ・入出力のスキーマの 3 行がある | 行き先の表を読む検査は無い（2026-11-14 に `grep -rln ndf-swap-doc-destinations scripts plugins .github` で 0 件）。3 行の有無は実装の Pull Request のレビューで見る。`.md` の文言を照合するテストは書かない |
-| 受け入れ条件 14 | 公開する面の表に種類 `spec` の 3 行があり、それぞれに受ける見本がある | `spec` の行を消すと、規約の検査が置き場の行の欠けで落ちる |
+| 受け入れ条件 14・I15 | 公開する面の表に種類 `spec` の 3 行があり、それぞれが実在の置き場を指し、受ける見本がある | `spec` の行を消すと、`spec-public` が欠けた置き場の名前で落ちる。`target` を実在しないパスにしても落ちる |
 | 受け入れ条件 15 | ndf-next の既存のテストと `ndf check` が通り、宣言を読む側のコードを変えない | 宣言の読み手のファイル（`domains/worktree/declaration.py` ほか）が差分に入っていないことをレビューで見る |
 | 受け入れ条件 16・I7 | 実体のある配る Skill（2026-11-14 時点で 11 個）がすべて Skill のページに載る | `skills/` に Skill を 1 つ足して配る Skill の表に行を足し、Skill の入出力の表に行を足さないと、その名前で落ちる |
 | 受け入れ条件 17・I8 | Skill の本文・references・エージェント定義の `ndf <副命令>` の呼び出しが、副命令・下位の命令・引数の名前で規約に当たる | 規約に無い引数を使う呼び出しを 1 行足すと、ファイル・行・呼び出しを出して落ちる |
@@ -365,19 +377,27 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3518 | 実装する | — | `plugins/ndf-next/contracts/schemas/declarations/project.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/release.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree-local.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/glossary.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/instructions.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/mvv.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/pace.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/review.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/backlog.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/runtime-policy.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/ask.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/context.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/estimate.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/issue-items.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/projects.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/code-metrics.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/mvv-body.sections.json`、`plugins/ndf-next/contracts/schemas/io/`（副命令ごとの引数と結果のスキーマ 44 個。生成物と手書き）、`plugins/ndf-next/contracts/domains/skill-io.json`、`plugins/ndf-next/contracts/domains/launchers.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/domains/env.json`、`plugins/ndf-next/contracts/domains/entrypoints.json`、`plugins/ndf-next/contracts/domains/entrypoint-cases.json`、`plugins/ndf-next/src/ndf/checks/spec_model.py`、`plugins/ndf-next/src/ndf/checks/spec_args.py`、`plugins/ndf-next/src/ndf/checks/spec_render.py`、`plugins/ndf-next/src/ndf/checks/spec_docs.py`、`plugins/ndf-next/src/ndf/checks/run.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/README.md`、`plugins/ndf-next/tests/checks/test_spec_docs.py`、`plugins/ndf-next/tests/checks/test_spec_args.py`、`plugins/ndf-next/tests/conftest.py`、`plugins/ndf-next/tests/cli/test_every_output.py`、`plugins/ndf-next/tests/domains/test_entrypoints.py`、`plugins/ndf-next/docs/contracts/index.md`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/docs/contracts/commands.md`、`plugins/ndf-next/docs/contracts/exit-codes.md`、`plugins/ndf-next/docs/contracts/env.md`、`plugins/ndf-next/docs/contracts/files.md`、`plugins/ndf-next/docs/contracts/hooks.md`、`plugins/ndf-next/docs/contracts/skills.md`、`docs/ndf-swap-doc-destinations.md` |
+| #3518 | 実装する | — | `plugins/ndf-next/contracts/schemas/declarations/project.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/release.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree-local.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/glossary.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/instructions.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/mvv.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/pace.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/review.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/backlog.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/runtime-policy.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/ask.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/context.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/estimate.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/issue-items.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/projects.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/code-metrics.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/mvv-body.sections.json`、`plugins/ndf-next/contracts/schemas/io/`（副命令ごとの引数のスキーマ 22 個は生成物、結果のスキーマ 22 個は手書き）、`plugins/ndf-next/contracts/domains/manual-args.json`、`plugins/ndf-next/contracts/domains/skill-io.json`、`plugins/ndf-next/contracts/domains/launchers.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/domains/env.json`、`plugins/ndf-next/contracts/domains/entrypoints.json`、`plugins/ndf-next/contracts/domains/entrypoint-cases.json`、`plugins/ndf-next/src/ndf/checks/spec_model.py`、`plugins/ndf-next/src/ndf/checks/spec_args.py`、`plugins/ndf-next/src/ndf/checks/spec_render.py`、`plugins/ndf-next/src/ndf/checks/spec_docs.py`、`plugins/ndf-next/src/ndf/checks/run.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/README.md`、`plugins/ndf-next/tests/checks/test_spec_docs.py`、`plugins/ndf-next/tests/checks/test_spec_args.py`、`plugins/ndf-next/tests/conftest.py`、`plugins/ndf-next/tests/cli/test_every_output.py`、`plugins/ndf-next/tests/domains/test_entrypoints.py`、`plugins/ndf-next/docs/contracts/index.md`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/docs/contracts/commands.md`、`plugins/ndf-next/docs/contracts/exit-codes.md`、`plugins/ndf-next/docs/contracts/env.md`、`plugins/ndf-next/docs/contracts/files.md`、`plugins/ndf-next/docs/contracts/hooks.md`、`plugins/ndf-next/docs/contracts/skills.md`、`docs/ndf-swap-doc-destinations.md`、`docs/glossary.md`・`docs/glossary/glossary.json`（用語の 3 語。設計の Pull Request で足し、実装で意味が変われば直す） |
 | #3519 | 取り込む | #3518 | — |
 
 ## 人へ残す判断
 
-無し
+設計承認ゲートで決める。3 つとも、受け入れ条件の文言とこの設計の届く範囲が食い違う所である。
+
+| # | 判断 | 経緯 | 選択肢 | 推奨と理由 |
+| --- | --- | --- | --- | --- |
+| 1 | 受け入れ条件 3 の「ndf-next のコードが読むのに文書とスキーマに無いキー」を、「置き場の表の `keys` に載るのにスキーマに無いキー」と読んでよいか | 要求の未決は「コードが読む名前」を見つける方法を設計に委ね、選択肢に「読み手が置き場の表だけから名前を引くことを前提にする」を挙げている。この設計はその前提を採る（決定 1）。このとき、表の `keys` に載らないキーを読むコードを足したことは機械で見つからず、受け入れ条件 3 の「読むキーを 1 つ足した入力では落ちる」は「表の `keys` へキーを 1 つ足した入力では落ちる」に狭まる | (a) 狭めた読み方で受け入れ、コードから見つける検査は別の課題（決定 1 の最後の段落）へ回す。(b) この課題で読み手を 1 つの読み口へ寄せ、コードから見つける。宣言を読む 10 前後のモジュールを書き換え、レーン lr-tail・lr-fix-b のファイルを含むため、両レーンのマージまで着手を待つ | (a)。(b) は要求の境界（lr-tail・lr-fix-b のコードを変えない）に当たり、この課題が両レーンの完了を待つことになる（Value 5）。構文木からキーを集める方法は 65 件の候補の大半が宣言のキーでなく、使えなかった（決定 1） |
+| 2 | 受け入れ条件 5 の「コードにあって規約に無い受け渡しのファイル」を、「置き場の表にあって規約に無いファイル」と読んでよいか | 受け渡しのファイルのページは置き場の表から生成するため、表の行は必ず規約に載る。表に無いパスを文字列で書いて読み書きするコードを見つける規則はこの設計に無い。読み手がパスを置き場の表から引く例は `domains/release/declaration.py:69-70`・`domains/worktree/declaration.py:54-55`・`domains/backlog/state.py:21`・`progress/plan/external.py:45` にあるが、すべての読み書きが表を通ることは確かめていない | (a) 狭めた読み方で受け入れ、パスの文字列を書いたコードを見つける検査は判断 1 の別の課題に含める。(b) この課題で、`.ndf/` や状態の置き場を指すパスの文字列を構文木から集める規則を `spec-io` に足す。誤検出の数は測っていない | (a)。(b) は判断 1 の構文木の方法と同じく誤検出の数が分からず、測らずに足すと検査が落ち続けるおそれがある（Value 13） |
+| 3 | 公開する面の表の行 `gate-record`（副命令の表に無い `gate` を指す）を、規約の検査 I10 でどう扱うか | この行は順番が `caller-first`（呼び手を先に合わせる行）で、持ち主は子 P2 である。実装の時点で残っていれば I10 が落とし、P2 の子が直すまでこの課題はマージできない | (a) P2 の子が直すまで待つ。(b) この課題で行を直すか消す。(c) 順番が `caller-first` の行を I10 の対象から外し、契約のページに「呼び手と合わせる前の行」として載せる | (c)。(a) は他の子の進み具合でこの課題が止まる（Value 5）。(b) は持ち主の違う表の行と、呼び手（volareinc/nd-factory#183）との約束を変える。(c) は表の既存の列 `order` だけで決まり、他の子の行を変えない |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 置き場の表に載らないキーを読むコード | 規約の検査は、読み手が置き場の表の `keys` に載るキーだけを読むことを前提にし、表とスキーマの食い違いを落とす（決定 1）。表に載らないキーを読むコードを足したことは機械では見つからず、レビューに頼る。読み手を 1 つの読み口に寄せて機械で見つける形は、境界のレーンのコードを変えるため範囲外の課題（決定 1 の最後の段落）が扱う |
+| 置き場の表に載らないキーを読むコード | 規約の検査は、読み手が置き場の表の `keys` に載るキーだけを読むことを前提にし、表とスキーマの食い違いを落とす（決定 1）。表に載らないキーを読むコードを足したことは機械では見つからず、レビューに頼る。扱いは「人へ残す判断」の 1 で決める |
+| 置き場の表に無い受け渡しのファイルを読み書きするコード | 同じく機械では見つからない。扱いは「人へ残す判断」の 2 で決める |
+| 結果を `emit` を通さずに終わる副命令の経路 | 全副命令の出力の検査は `emit` が受けた結果 JSON と終了コードを見る。`emit` を通らずに `sys.exit` などで終わる経路があれば、その終了コードは確かめられない。経路の有無は実装で全副命令の `main` を辿って分かる |
 | 実物の宣言 10 種がスキーマに通るか | 実物には ndf-next の表に無いキー（`project.json` の `test_duration`・`supervise.json` の `test`）がある。非推奨のキーとして載せて通す（決定 5）が、入れ子のキーの食い違いの数はスキーマを書くまで分からない。実装で全 10 種を検査に通して分かる |
-| 公開する面の表の `gate-record` | 種類 `command` で `target` が `gate` だが、副命令の表に `gate` は無い（2026-11-14 の `cli.py` の `COMMANDS`）。順番が `caller-first` で、入れ替えの前に呼び手と合わせる行である。実装の時点で残っていれば規約の検査（I10）が落とし、表の持ち主（P2）の子が直すまでこの課題はマージできない。実装の着手時に `COMMANDS` を見て分かる |
+| 公開する面の表の `gate-record` | 種類 `command` で `target` が `gate` だが、副命令の表に `gate` は無い（2026-11-14 の `cli.py` の `COMMANDS`）。順番が `caller-first` で、入れ替えの前に呼び手と合わせる行である。実装の時点で残っているかは、実装の着手時に `COMMANDS` を見て分かる。残っていたときの扱いは「人へ残す判断」の 3 で決める |
 | 全副命令の出力の検査で ok の出力が無い副命令 | 既存のテストが ok の出力を出さない副命令があれば、`tests/cli/test_every_output.py` に呼び出しを足す。何個あるかは、出力の検査を入れて全体テストを流すまで分からない |
 | 書かれた呼び出しの件数 | 要求の前提 12 は `ndf hooks` の 1 件を挙げるが、2026-11-14 に `plugins/ndf-next/skills/` と `agents/` を `grep -rn 'ndf ' … \| grep -v 'ndf:'` で探して 0 件だった。検査は 0 件でも働き、S1a #3303 で Skill が移るにつれて増える |
