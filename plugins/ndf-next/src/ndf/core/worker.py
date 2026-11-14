@@ -58,19 +58,13 @@ log = logging.getLogger(__name__)
 
 TOOL = commands.tool_of(__name__)
 
-# 止まった理由の種類（contracts の causes.json の kind）
-INVALID = "invalid"
-PRECONDITION = "precondition"
-INTERRUPTED = "interrupted"
-USAGE_LIMIT = "usage_limit"
-REFUSED = "refused"
-INFRA_WAIT = "infra_wait"
-WORK_STOPPED = "work_stopped"
 # 結果ファイルを書かずに応答を終えた worker を、同じ会話で起こし直す回数の上限
 RESUMES = 3
 RESUME_PROMPT = (
     "結果ファイルがまだ書かれていない。背景で起動したコマンドがあれば前景で終わりまで待ち、作業を終えてから結果ファイルを書いて応答を終える"
 )
+# 作業の本文の後ろへ足す、結果ファイルの置き場の行
+RESULT_FILE_LINE = "結果ファイル（応答を終える前にここへ書く）: {result_file}"
 # worker の起動 1 回の期限の既定（秒）
 WORK_TIMEOUT = 3600.0
 # PR 本文の下書きの置き場（状態の置き場から）
@@ -159,7 +153,7 @@ def quote_source(source: Source) -> str:
 
 def skill_paths(kind: str, skills_dir: Path) -> list[Path]:
     """作業種別に届ける手順の Skill の SKILL.md のパス。表に無い種類は空。"""
-    names = PAUSE_SKILLS.get(kind, ())
+    names = PAUSE_SKILLS.get(kind, ())  # noqa: NDF502 利用者の入力: 手順の Skill を持たない作業種別は空
     return [skills_dir / name / SKILL_FILE for name in names]
 
 
@@ -170,7 +164,7 @@ def skills_section(kind: str, skills_dir: Path) -> str:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:  # ファイル: リリースの欠けは worker を起動せずに止める
-            raise WorkerError(PRECONDITION, f"作業 {kind} の手順書 {path} を読めない: {exc.strerror or exc}") from None
+            raise WorkerError("precondition", f"作業 {kind} の手順書 {path} を読めない: {exc.strerror or exc}") from None
         parts.append(f"## 手順書 {path.parent.name}（この手順に従って作業する）\n{text}")
     return "\n\n".join(parts)
 
@@ -190,11 +184,11 @@ def sources_of(raw: Any) -> list[Source]:
     形が違えば `WorkerError`（invalid）。trusted が真偽でなければ区分なし（信用されない側）にする。
     """
     if not isinstance(raw, list):
-        raise WorkerError(INVALID, "書き手の付いた本文は JSON の並びで渡す")
+        raise WorkerError("invalid", "書き手の付いた本文は JSON の並びで渡す")
     out = []
     for item in raw:
         if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in SOURCE_KEYS):
-            raise WorkerError(INVALID, f"書き手の付いた本文の形が違う（{'・'.join(SOURCE_KEYS)} の文字列が要る）: {item!r}")
+            raise WorkerError("invalid", f"書き手の付いた本文の形が違う（{'・'.join(SOURCE_KEYS)} の文字列が要る）: {item!r}")
         trusted = item.get("trusted")
         out.append(Source(*(item[k] for k in SOURCE_KEYS), trusted if isinstance(trusted, bool) else None))
     return out
@@ -207,17 +201,20 @@ Caller = Callable[[list[str], str, float, Optional[Path]], claude.ClaudeReply]
 
 # 起動の失敗 → 止まった理由の種類
 _FAILURE_CAUSES: dict[claude.Failure, str] = {
-    claude.Failure.LAUNCH: PRECONDITION,
-    claude.Failure.TIMEOUT: INTERRUPTED,
-    claude.Failure.USAGE_LIMIT: USAGE_LIMIT,
-    claude.Failure.REFUSED: REFUSED,
-    claude.Failure.NO_SLOT: INFRA_WAIT,
+    claude.Failure.LAUNCH: "precondition",
+    claude.Failure.TIMEOUT: "interrupted",
+    claude.Failure.USAGE_LIMIT: "usage_limit",
+    claude.Failure.REFUSED: "refused",
+    claude.Failure.NO_SLOT: "infra_wait",
 }
 
 
 @dataclass(frozen=True)
 class Handoff:
-    """worker へ渡す作業 1 つ。`prompt` は作業の本文、`result_file` は worker が書く結果ファイル。"""
+    """worker へ渡す作業 1 つ。`prompt` は作業の本文、`result_file` は worker が書く結果ファイル。
+
+    `result_file` と `state_dir` は絶対パスで渡す（worker は `cwd` で動き、相対パスは親と別の場所を指す）。
+    """
 
     kind: str
     prompt: str
@@ -276,7 +273,7 @@ def delegate(
         return claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=resume), root)
 
     argv = args_for(None) + ["--session-id", out.session]
-    prompt = handoff.prompt
+    prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
         reply = call(argv, prompt, handoff.timeout, handoff.cwd)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
@@ -285,7 +282,7 @@ def delegate(
             return out
         argv = args_for(out.session)
         prompt = RESUME_PROMPT
-    out.cause = WORK_STOPPED
+    out.cause = "work_stopped"
     out.detail = f"作業 {handoff.kind} の worker が {RESUMES} 回起こし直しても結果ファイル {handoff.result_file} を書かなかった"
     return out
 
@@ -338,12 +335,24 @@ def _new_text(new: Path) -> str:
         model.load(new)
         return new.read_text(encoding="utf-8")
     except model.PlanError as exc:
-        raise WorkerError(INVALID, f"新しいプランを使えない: {exc}") from None
+        raise WorkerError("invalid", f"新しいプランを使えない: {exc}") from None
+
+
+def _backup_path(plan: Path, at: str) -> Path:
+    """控えの置き場 `<プラン>.bak-<時刻>`。同じ時刻の控えが既にあれば `-<番号>` を足して上書きしない。
+
+    呼び手はプランのロックを持つ（ロックの中で採番と控えの書き込みを続けて行う）。
+    """
+    stem = plan.name + BACKUP_SUFFIX + re.sub(r"[^0-9A-Za-z]", "", at)
+    backup, number = plan.with_name(stem), 1
+    while backup.exists():
+        backup, number = plan.with_name(f"{stem}-{number}"), number + 1
+    return backup
 
 
 def _replace_plan(plan: Path, text: str, at: str) -> Path:
-    """前の中身を `<プラン>.bak-<時刻>` へ控え、一時ファイルを経てプランを `text` へ置き換える。控えのパスを返す。"""
-    backup = plan.with_name(plan.name + BACKUP_SUFFIX + re.sub(r"[^0-9A-Za-z]", "", at))
+    """前の中身を控え（`_backup_path`）、一時ファイルを経てプランを `text` へ置き換える。控えのパスを返す。"""
+    backup = _backup_path(plan, at)
     shutil.copy2(plan, backup)
     tmp = plan.with_name(plan.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -365,14 +374,14 @@ def edit_plan(plan: Path, new: Path, reason: str, state_dir: Path, now: Optional
     持っていれば `durable_locks.StoreInUse`。差分が無ければ何も書かずに None を返す。
     """
     if not reason.strip():
-        raise WorkerError(INVALID, "プランを書き換える理由が空")
+        raise WorkerError("invalid", "プランを書き換える理由が空")
     text = _new_text(new)
     at = now or _now()
     with durable_locks.exclusive_lock(plan.with_name(plan.name + ".lock")):
         try:
             old = plan.read_text(encoding="utf-8")
         except OSError as exc:  # ファイル: 書き換える元が無ければ呼び出しの誤り
-            raise WorkerError(INVALID, f"プラン {plan} を読めない: {exc.strerror or exc}") from None
+            raise WorkerError("invalid", f"プラン {plan} を読めない: {exc.strerror or exc}") from None
         diff = "".join(difflib.unified_diff(old.splitlines(True), text.splitlines(True), str(plan), str(new)))
         if not diff:
             return None
@@ -395,9 +404,9 @@ def _rows(path: Path) -> list[dict[str, Any]]:
         try:
             row = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise WorkerError(INVALID, f"{path} の {number} 行目が JSON でない: {exc}") from None
+            raise WorkerError("invalid", f"{path} の {number} 行目が JSON でない: {exc}") from None
         if not isinstance(row, dict):
-            raise WorkerError(INVALID, f"{path} の {number} 行目が JSON のオブジェクトでない")
+            raise WorkerError("invalid", f"{path} の {number} 行目が JSON のオブジェクトでない")
         rows.append(row)
     return rows
 
@@ -407,7 +416,7 @@ def list_edits(progress_files: Iterable[Path]) -> list[dict[str, Any]]:
     found = [r for path in progress_files for r in _rows(path) if r.get("event") == PLAN_EDIT_EVENT]
     untimed = [r for r in found if not isinstance(r.get("at"), str)]
     if untimed:
-        raise WorkerError(INVALID, f"時刻（at）の無いプランの書き換えの記録がある: {untimed[0]!r}")
+        raise WorkerError("invalid", f"時刻（at）の無いプランの書き換えの記録がある: {untimed[0]!r}")
     return sorted(found, key=lambda r: r["at"])
 
 
@@ -430,7 +439,7 @@ def _read_input(path: str, label: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8")
     except OSError as exc:  # 利用者の入力: 読めないファイルは呼び出しの誤り
-        raise WorkerError(INVALID, f"{label} {path} を読めない: {exc.strerror or exc}") from None
+        raise WorkerError("invalid", f"{label} {path} を読めない: {exc.strerror or exc}") from None
 
 
 def _load_sources(path: Optional[str]) -> list[Source]:
@@ -440,17 +449,18 @@ def _load_sources(path: Optional[str]) -> list[Source]:
     try:
         return sources_of(json.loads(text))
     except json.JSONDecodeError as exc:
-        raise WorkerError(INVALID, f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
+        raise WorkerError("invalid", f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
     root = identity.load().root
+    # 相対パスはこの副命令を呼んだ場所で解く（worker は --cwd で動き、親の確かめと worker の書き込みが同じ場所を指すようにする）
     handoff = Handoff(
         a.kind,
         _read_input(a.prompt_file, "作業の本文"),
-        Path(a.result_file),
-        Path(a.cwd),
-        Path(a.state_dir),
+        Path(a.result_file).resolve(),
+        Path(a.cwd).resolve(),
+        Path(a.state_dir).resolve(),
         tuple(_load_sources(a.sources)),
         a.timeout,
     )
@@ -480,15 +490,15 @@ def _cmd_closing(a: argparse.Namespace) -> int:
     try:
         hits = closing_commits(git.Git(Path(a.cwd)), a.base)
     except git.GitError as exc:
-        return result.emit(result.stopped(TOOL, INVALID, f"コミットを読めない: {exc}"))
+        return result.emit(result.stopped(TOOL, "invalid", f"コミットを読めない: {exc}"))
     if not hits:
         return result.emit(result.result(TOOL, OK, f"{a.base}..HEAD のコミットに closing keywords は無い"))
-    return result.emit(result.stopped(TOOL, REFUSED, _closing_detail(hits), items=_closing_items(hits)))
+    return result.emit(result.stopped(TOOL, "refused", _closing_detail(hits), items=_closing_items(hits)))
 
 
 def _plan_unusable(exc: model.PlanError) -> int:
     """プランの形を通らないことを invalid の結果 JSON にする。"""
-    return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
+    return result.emit(result.stopped(TOOL, "invalid", f"プランを使えない: {exc}"))
 
 
 def _cmd_plan_edit(a: argparse.Namespace) -> int:
@@ -572,7 +582,7 @@ def main(argv: list[str]) -> int:
     try:
         a = _parser().parse_args(argv)
     except SystemExit as exc:
-        return causes.exit_code(INVALID) if exc.code else exit_codes.code_of("ok")
+        return causes.exit_code("invalid") if exc.code else exit_codes.code_of("ok")
     try:
         return a.fn(a)
     except WorkerError as exc:

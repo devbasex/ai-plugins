@@ -157,3 +157,14 @@ def test_progress_append_failure_leaves_plan_replaced(tmp_path):
     assert plan.read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
     assert (tmp_path / "plan.json.bak-20261114T0100000000").read_text(encoding="utf-8") == old
     assert not (tmp_path / "plan.json.tmp").exists()
+
+
+def test_edits_in_the_same_second_keep_every_backup(tmp_path):
+    plan, state, at = _plan(tmp_path / "plan.json", "a", "b", "c"), tmp_path / "state", "2026-11-14T01:00:00+00:00"
+    first = plan.read_text(encoding="utf-8")
+    one = worker.edit_plan(plan, _plan(tmp_path / "n1.json", "a", "b"), "一回目", state, now=at)
+    second = plan.read_text(encoding="utf-8")
+    two = worker.edit_plan(plan, _plan(tmp_path / "n2.json", "a"), "二回目", state, now=at)
+    assert one["backup"] != two["backup"]
+    assert (tmp_path / one["backup"]).read_text(encoding="utf-8") == first
+    assert (tmp_path / two["backup"]).read_text(encoding="utf-8") == second
