@@ -1,20 +1,16 @@
 {
   "template": "plan-to-spec",
   "purpose": "plan_to_spec",
-  "summary": "確定仕様化: worker がマージした PR（入力の pr）の設計を作業場所で確定仕様へ移す → 変更が無ければ PR を作らずに終える → push → PR（題と本文はコミットから）→ CI → マージ。CI の落ちはマージの雛形と同じ経路で直す",
+  "summary": "確定仕様化: worker がマージした PR（入力の pr）の設計を作業場所で確定仕様へ移す → worker を打つ前の HEAD から変更が無ければ PR を作らずに終える → push → PR（題と本文はコミットから）→ CI → マージ。CI の落ちはマージの雛形と同じ経路で直す",
   "params": ["repo", "worktree", "branch", "base", "test_command", "worker", "ci_budget", "required", "tests", "merge_method"],
   "plan": {
     "name": "plan-to-spec-{{branch}}",
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
+      {"use": "work-start"},
       {"id": "work", "run": ["{{worker}}", "plan-to-spec"]},
-      {
-        "id": "changes-check",
-        "run": ["sh", "-c", "! git diff --quiet \"origin/$0...HEAD\"", "{{base}}"],
-        "exit_cause": {"1": "not_applicable"},
-        "on_cause": {"not_applicable": "end"}
-      },
+      {"use": "changes-check"},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr", "run": ["sh", "-c", "gh pr create --base \"$1\" --head \"$0\" --fill >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"", "{{branch}}", "{{base}}"]},
       {"use": "conflict-check"},
