@@ -33,6 +33,8 @@
     "github.check-runs": {"summary": "head の 1 つのコミットのチェックを読むページの上限（1 ページ 100 件）", "count": 10},
     "github.graphql-batch": {"summary": "番号ごとの読み取りを GraphQL のエイリアスで 1 回のクエリへまとめる件数", "count": 100},
     "github.failed-logs": {"summary": "落ちたテストのジョブのログを読んで落ちたテストを拾うジョブの数の上限", "count": 5},
+    "github.list-pages": {"summary": "一覧（Issue の番号・コメント）を読み切るページの上限（1 ページ 100 件）。超えたら途中で切らずに止まる", "count": 50},
+    "github.rest-fallback": {"summary": "GraphQL の枠が上限のとき、PR を REST の枠で 1 件ずつ読み替える件数の上限。超えたら読み替えずに上限で止まる", "count": 10},
     "merged.green-wait":{"summary": "merge-when-green の読み直しの間隔の倍率。間隔と上限は引数の --interval と --timeout", "factor": 1.5},
     "hook.ask-forward": {"summary": "AskUserQuestion の転送を待つ上限。hook の 10 秒の上限の中に収める", "seconds": 8},
     "hook.deadline": {"summary": "hook の処理を打ち切る期限", "seconds": 3.5},

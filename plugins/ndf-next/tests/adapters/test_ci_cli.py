@@ -26,6 +26,8 @@ PULL = {
     "mergeable_state": "clean",
     "head": {"sha": HEAD, "ref": "x"},
     "base": {"ref": "develop"},
+    "user": {"login": "octocat"},
+    "author_association": "OWNER",
 }
 
 

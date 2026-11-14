@@ -432,3 +432,14 @@ def test_cli_items_marks_missing_and_stale_test_checks() -> None:
         {"kind": "check", "name": "pytest", "result": "stale", "test": True},
         {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
     ]
+
+
+def test_watch_stretches_the_interval_only_while_nothing_changes() -> None:
+    # 不足 g: 変化が無い間は間隔を伸ばし、読んだ結果が変わったら最初の間隔へ戻す
+    policy = limits.policy("test-triage.check-wait")
+    first, factor = float(policy.interval), float(policy.factor)
+    other = _reading(running=["pytest", "doc-lint"])
+    clock, reads = Clock(), []
+    readings = [RUNNING, RUNNING, other, other, PASSED]
+    ci.Watch(_reader(readings, clock, reads), 3600, clock=clock, sleep=clock.sleep).run()
+    assert clock.sleeps == [first, first * factor, first, first * factor]

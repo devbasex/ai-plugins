@@ -293,7 +293,8 @@ class WatchResult:
 class Watch:
     """必須のチェックの結論が出るまで読み直す。
 
-    - 間隔は方針 `test-triage.check-wait`（最初の間隔・倍率・頭打ち）。待ちの合計は呼ぶ側が `budget` で渡す
+    - 間隔は方針 `test-triage.check-wait`（最初の間隔・倍率・頭打ち）。読んだ結果が変わらない間は伸ばし、変われば
+      最初の間隔へ戻す（不足 g）。待ちの合計は呼ぶ側が `budget` で渡す
     - 最後の眠りは上限までの残りに縮め、上限の時刻に最後の 1 回を読む（上限より前に打ち切らない。#2224）
     - 終わっていないチェックがすべてランナーの割り当てを待つ間は `budget` に数えず、`ci.runner-wait` で別に数える（#2719）
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
@@ -329,11 +330,16 @@ class Watch:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
         interval, rounds = float(policy.interval), 0
+        previous: Optional[Reading] = None
         while True:
             rounds += 1
             reading, now, done = self._round(rounds)
             if done is not None:
                 return done
+            if previous is not None and reading != previous:
+                # 読んだ結果が変わった（チェックが動いた）ら、間隔を最初の値へ戻す。変化が無い間だけ伸ばす（不足 g）
+                interval = float(policy.interval)
+            previous = reading
             wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
                 return self._exhausted_result(reading, rounds, now, runner_cap)
