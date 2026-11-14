@@ -111,7 +111,8 @@ def test_issue_2923_mode_needs_basis_and_is_redecided_after_exclusion() -> None:
 
 
 def test_issue_2132_created_issues_are_recorded_and_left_out_next_lap() -> None:
-    state = _apply(_running((1,)), ctl.created(_running((1,)), _ctx(), [30, 31]))
+    running = _running((1,))
+    state = _apply(running, ctl.created(running, _ctx(), [30, 31]))
     assert state.current is not None and state.current.created == (30, 31)
     facts = sel.facts_of(state, (), 3)
     assert sel.exclusion(sel.Row(30), facts) == sel.CREATED
@@ -119,7 +120,8 @@ def test_issue_2132_created_issues_are_recorded_and_left_out_next_lap() -> None:
 
 def test_issue_2820_stop_request_keeps_the_lease_until_the_boundary() -> None:
     """止める要求は鍵を返さず、周の途中でほかのセッションは入れない。鍵は周の境で返す。"""
-    state = _apply(_running((1,)), ctl.stop(_running((1,)), _ctx(None), "human", "今日は終わり", False))
+    running = _running((1,))
+    state = _apply(running, ctl.stop(running, _ctx(None), "human", "今日は終わり", False))
     assert state.status == rec.STOPPING and state.holder == "s1"
     other = ctl.start(state, _ctx("s2"), TTL)
     assert other.kind == ctl.REFUSED and _argv(other.next) == ("loop", "get")
@@ -182,19 +184,16 @@ def test_issue_2400_revise_answer_is_kept_as_a_rejection() -> None:
 
 
 @pytest.mark.parametrize(
-    ("make", "kind", "verb"),
+    ("given", "make", "kind", "verb"),
     [
-        (lambda s: ctl.open_lap(s, _ctx("s9"), (1,)), ctl.PRECONDITION, "start"),
-        (lambda s: ctl.open_lap(s, _ctx(), (1,)), ctl.REFUSED, "lap"),
-        (lambda s: ctl.decide_mode(s, _ctx(), "nope", "根拠", MODES), ctl.INVALID, "lap"),
+        (lambda: rec.LoopState(), lambda s: ctl.open_lap(s, _ctx("s9"), (1,)), ctl.PRECONDITION, "start"),
+        (lambda: _running((1,)), lambda s: ctl.open_lap(s, _ctx(), (1,)), ctl.REFUSED, "lap"),
+        (lambda: _running((1,)), lambda s: ctl.decide_mode(s, _ctx(), "nope", "根拠", MODES), ctl.INVALID, "lap"),
     ],
 )
-def test_refusals_carry_kind_and_next(make: Any, kind: str, verb: str) -> None:
+def test_refusals_carry_kind_and_next(given: Any, make: Any, kind: str, verb: str) -> None:
     """断りは止まった理由の種類と、打てる次の 1 手を持つ（SF11）。"""
-    state = _running((1,))
-    if verb == "start":
-        state = rec.LoopState()
-    d = make(state)
+    d = make(given())
     assert d.kind == kind
     assert d.next is not None and d.next.args[1] == verb
 
