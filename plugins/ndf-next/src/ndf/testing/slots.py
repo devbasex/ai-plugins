@@ -48,6 +48,8 @@ log = logging.getLogger(__name__)
 
 # 枠を持つ実行の子孫が受け継ぐ環境変数（入れ子の実行は枠を取らず待たない。I3）
 HELD_ENV = "NDF_TEST_SLOT_HELD"
+# CI で動いていることを示す環境変数。CI では枠を取らない（決定 12）
+CI_ENV = "GITHUB_ACTIONS"
 # 枠の置き場を別の開発コンテナと共有するときの環境変数（決定 8）
 SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
@@ -355,7 +357,7 @@ def gate(
     """
     options = GateOptions() if options is None else options
     env = os.environ if options.environ is None else options.environ
-    if env.get(HELD_ENV) or env.get("GITHUB_ACTIONS"):
+    if env.get(HELD_ENV) or env.get(CI_ENV):
         yield Held()  # 入れ子（I3）と CI（決定 12）
         return
     cwd = Path(cwd)
