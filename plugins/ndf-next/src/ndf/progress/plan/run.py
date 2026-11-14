@@ -41,9 +41,9 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 from ndf.core import durable, loop
-from ndf.progress import lane, model, store
+from ndf.progress import command, lane, model, store
 from ndf.progress import plan as table
 from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import run_decide
@@ -60,6 +60,8 @@ LAUNCH_FAILED, LANE_STALLED = run_decide.LAUNCH_FAILED, run_decide.LANE_STALLED
 # 依頼の中身で、知らせの鍵を持つ項目（知らせの kind → 項目）
 NOTICE_FIELDS = {LAUNCH_FAILED: "launch", LANE_STALLED: "stall"}
 REPORT_ACTOR = model.WORKFLOW_ACTOR
+# 切り離した `ndf lanes run` の出力を足していく、計画の記録の置き場の中のファイル
+RUN_LOG = "run.log"
 
 
 @dataclass(frozen=True)
@@ -267,15 +269,27 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
             attempt += 1
 
 
+def record_dir(cwd: Path, plan: str) -> Path:
+    """計画の記録の置き場（`places` の `ndf-parallel` の下の、`ndf-files` の `parallel` の `<id>` を計画の名前にしたもの）。"""
+    base = command.declaration_path(cwd, facts.value("places", "ndf-parallel", "path"))
+    return base / facts.value("ndf-files", "parallel", "path").replace("<id>", plan)
+
+
 def detach(plan: str, cwd: Path) -> int:
-    """`ndf lanes run <計画>` を切り離して起こし、pid を返す。結果は進行表と耐久の記録に残る。"""
-    proc = subprocess.Popen(
-        [str(identity.entrypoint(identity.ROOT)), "lanes", "run", plan],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        cwd=str(cwd),
-        env=dict(os.environ),
-    )
+    """`ndf lanes run <計画>` を切り離して起こし、pid を返す。結果は進行表と耐久の記録に残る。
+
+    切り離した実行の標準出力と標準エラーは、計画の記録の置き場の `RUN_LOG` へ足していく（落ちた理由を後から読める）。
+    """
+    where = record_dir(cwd, plan)
+    where.mkdir(parents=True, exist_ok=True)
+    with (where / RUN_LOG).open("ab") as log:
+        proc = subprocess.Popen(
+            [str(identity.entrypoint(identity.ROOT)), "lanes", "run", plan],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=str(cwd),
+            env=dict(os.environ),
+        )
     return proc.pid

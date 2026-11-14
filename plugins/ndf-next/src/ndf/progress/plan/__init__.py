@@ -8,6 +8,8 @@
 - `plan.json` は入力として読むだけで、計画の状態は書かない
 - 副命令 `ndf lanes` は `ndf.progress.plan.cli`、計画を進める耐久ワークフローは `ndf.progress.plan.run`、
   オーガナイザーが計画の知らせを待つ `wait` は `ndf.progress.plan.wait` にある
+- 外のオーガナイザー（`NDF_ORGANIZER_DIR`）とのファイルのやり取りは `ndf.progress.plan.external`、
+  計画の記録の置き場（`.ndf/parallel/<計画>/`）は `ndf.progress.plan.run.record_dir` が決める
 """
 
 from __future__ import annotations
