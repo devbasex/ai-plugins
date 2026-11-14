@@ -127,6 +127,42 @@ def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str
     return _relay(argv, run, "ラッパーを止められない")
 
 
+def _entry(*args: str) -> list[str]:
+    return [str(identity.entrypoint(identity.ROOT)), *args]
+
+
+def _last_json(stdout: str) -> Optional[dict[str, Any]]:
+    lines = stdout.strip().splitlines()
+    try:
+        out = json.loads(lines[-1]) if lines else None
+    except ValueError:  # noqa: NDF401 外部コマンド: 結果 JSON の無い出力は読めないとして呼び手が unknown にする
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _probe(argv: list[str], run: Optional[Any]) -> Optional[dict[str, Any]]:
+    """自分の副命令を打ち、結果 JSON（末尾の行）を返す。打てない・読めなければ None。"""
+    runner = run if run is not None else subprocess.run
+    try:
+        done = runner(argv, capture_output=True, text=True, check=False)
+    except OSError:  # noqa: NDF401 外部コマンド: 打てなければ呼び手が「読めない」として生死を unknown にする
+        return None
+    return _last_json(done.stdout)
+
+
+def wrappers(run: Optional[Any] = None) -> Optional[dict[str, dict[str, Any]]]:
+    """ラッパーの一覧（`ndf relay ls`）を名前で引ける形で返す。一覧を読めなければ None（止まりと読まない）。"""
+    out = _probe(_entry("relay", "ls"), run)
+    if out is None or out.get("status") != result.OK or not isinstance(out.get("items"), list):
+        return None
+    return {str(r["name"]): r for r in out["items"] if isinstance(r, dict) and "name" in r}
+
+
+def sprint_wait(sprint_id: str, run: Optional[Any] = None) -> Optional[dict[str, Any]]:
+    """スプリントの進行表の今の待ち（`ndf progress wait <ID> --timeout 0` の結果 JSON）。読めなければ None。"""
+    return _probe(_entry("progress", "wait", sprint_id, "--timeout", "0"), run)
+
+
 def _relay(argv: list[str], run: Optional[Any], failure: str) -> dict[str, Any]:
     runner = run if run is not None else subprocess.run
     try:

@@ -84,7 +84,7 @@ def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[s
 
 
 def _cmd_status(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    return status(conn, _pid(conn, repo, a.plan), datetime.now(UTC))
+    return status(conn, _pid(conn, repo, a.plan), datetime.now(UTC), run.probes(repo, a.plan))
 
 
 def _cmd_lane_add(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:

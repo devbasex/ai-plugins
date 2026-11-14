@@ -23,6 +23,7 @@ from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import limits, result
 from ndf.progress import lane, model, store
+from ndf.progress.lane import liveness
 
 # 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
 # 副モジュール `ndf.progress.plan.cli` を読む前の `from ndf.progress.plan import cli` が `ndf.cli` を返す
@@ -269,19 +270,28 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     return item
 
 
-def status(conn: sa.Connection, pid: str, now: datetime) -> dict[str, Any]:
-    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。"""
+def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
+    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。
+
+    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
+    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。
+    """
     view, rows = lane.read_view(conn, pid)
+    verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
     items = []
     for name, spec in view.lanes.items():
         lane_rows = [_row_item(r, now) for r in rows[name]]
-        items.append({"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows})
+        item = {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows}
+        if name in verdicts:
+            item["liveness"] = verdicts[name].as_dict()
+        items.append(item)
     stalls = [
         f"レーン {i['lane']} の行 {r['row']}: 答えが載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
         for i in items
         for r in i["rows"]
         if "awaiting_next" in r and r["awaiting_next"]["stalled"]
     ]
+    stalls += [f"レーン {name} の行 {v.row}: {v.reason}" for name, v in verdicts.items() if v.stall]
     metrics = {
         "plan_id": pid,
         "plan": view.name,

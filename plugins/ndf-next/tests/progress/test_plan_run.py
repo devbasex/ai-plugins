@@ -13,7 +13,7 @@ import pytest
 
 from ndf.core import durable, loop
 from ndf.progress import lane, plan, store
-from ndf.progress.lane import launch
+from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import run, run_decide
 from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
 from plan_decls import REPO
@@ -25,8 +25,16 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=()):
-    return run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=()):
+    snap = run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
+    return run_decide.with_stalls(snap, stalls)
+
+
+@pytest.fixture(autouse=True)
+def _no_liveness_probes(monkeypatch):
+    """生死の判定の材料（`ndf relay ls`・`ndf progress wait`）を打たない。読めない材料は判定を unknown にし、止まりにしない。"""
+    monkeypatch.setattr(launch, "wrappers", lambda run=None: None)
+    monkeypatch.setattr(launch, "sprint_wait", lambda sprint_id, run=None: None)
 
 
 def _step(state, done):
@@ -122,6 +130,23 @@ def test_a_launch_that_cannot_succeed_stays_failed_after_the_request_is_closed()
     # 行が動けば（鍵が変われば）その行は起こす
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r2")])))
     assert act == Launch("a", "r2")
+
+
+def test_a_stalled_lane_is_reported_once_per_notice_key():
+    """止まったレーンは依頼で 1 回だけ知らせ、依頼を閉じても同じ鍵では知らせ直さない。行か判定が変われば知らせる。"""
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった")
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert act == Report("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", run_decide.LANE_STALLED)
+    act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], reported=["stall:a/r1:ended"], stalls=[stall])))
+    assert act == Sleep(30.0)
+    # 依頼を閉じても、同じ止まりは知らせ直さない
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert act == Sleep(30.0) and state.unreported == ()
+    other = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった")
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[other])))
+    assert act == Report("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった", run_decide.LANE_STALLED)
 
 
 def test_a_launched_lane_that_does_not_start_its_row_in_time_counts_as_a_failure():
@@ -282,6 +307,27 @@ def test_snapshot_lists_the_launches_with_an_open_launch_failed_request(opened):
     with store.transaction(opened) as conn:
         plan.close_request(conn, pid, key, "直した")
     assert _snapshot(opened, pid)["reported"] == []
+
+
+def _probes(wrappers, sprints):
+    return liveness.Probes(wrapper_name=lambda name: f"w-{name}", wrappers=lambda: wrappers, sprint=sprints.get)
+
+
+def test_snapshot_lists_a_stalled_lane_but_not_a_lane_waiting_for_an_answer(opened):
+    """承認ゲートの答えを待つレーンは正常な待ちで、conductor が落ちたレーンだけを止まりとして写しへ載せる。"""
+    pid = _create(opened, _doc(_decl("a", [[1]]), _decl("b", [[2]], touches=("src/b",))))
+    with store.transaction(opened) as conn:
+        sa_, sb = _start(conn, pid, "a", "r1"), _start(conn, pid, "b", "r1")
+    gate = {"status": "gate", "summary": "承認ゲート"}
+    idle = {"status": "ok", "summary": "次の手"}
+    with store.transaction(opened) as conn:
+        snap = run.read_snapshot(conn, pid, _probes({}, {sa_: gate, sb: idle}))
+    assert [s[:2] for s in snap["stalls"]] == [["b", "stall:b/r1:ended"]]
+    with store.transaction(opened) as conn:
+        key = run.write_report(conn, pid, "b", "stall:b/r1:ended", "止まった", run.LANE_STALLED)
+    assert key is not None
+    with store.transaction(opened) as conn:
+        assert run.read_snapshot(conn, pid)["reported"] == ["stall:b/r1:ended"]
 
 
 def test_a_report_is_not_written_once_the_plan_is_stopped(opened):

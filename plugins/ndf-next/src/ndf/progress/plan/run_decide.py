@@ -8,7 +8,8 @@
   中止させる入力で起こす。`resume` があれば、答えが載った後に next が打たれていない実行中の行（3346-5）を、
   答えの後の `ndf progress next` を打つ入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
-- `Report`: 起こせなかったレーンを、計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
+- `Report`: 起こせなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`。`ndf.progress.lane.liveness`）を、
+  計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
 - `Sleep`: 次に読み直すまで待つ
 
 答えの後の起こし直しの鍵は答えの事象の番号を含む。同じ答えでは 1 回だけ起こし、次の答えが載れば新しい鍵で起こす。
@@ -20,6 +21,9 @@
 残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける（知らせる前の起動は `unreported`）。オーガナイザーが
 その依頼を閉じたら（写しの `reported` から消えたら）、打ち直せば起こせる失敗は `failed` と回数から外して起動の候補へ
 戻す。`final` の失敗は打ち直しても同じ失敗になるので `failed` に残し、行が動くか中止されるまで起こさない。
+
+止まりの知らせの鍵はレーン・行・判定の種類から作り（`liveness.notice_key`）、同じ鍵では 1 回だけ知らせる（`noticed`）。
+承認ゲートや問いの答えを待つ行は判定が止まりにならないので知らせない。
 
 区切りで止めた計画（`paused`）では次の行を起こさない。実行中の行は終わりまで流すので、答えの後の起こし直しは
 続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。
@@ -77,13 +81,18 @@ class Complete:
     """計画を完了にする手。"""
 
 
+# 計画の進行表の依頼の中身の kind: 起こせなかったレーンと、止まったレーン
+LAUNCH_FAILED, LANE_STALLED = "launch_failed", "lane_stalled"
+
+
 @dataclass(frozen=True)
 class Report:
-    """起こせなかったレーン `lane` の起動 `key` を、詳細 `detail` を添えてオーガナイザーへ知らせる手。"""
+    """レーン `lane` の知らせ `key` を、詳細 `detail` を添えてオーガナイザーへ知らせる手。`kind` は依頼の中身の種類。"""
 
     lane: str
     key: str
     detail: str
+    kind: str = LAUNCH_FAILED
 
 
 @dataclass(frozen=True)
@@ -120,7 +129,7 @@ class RunState:
     """判断の状態。`launched` は起こして行の始まりを待つ起動、`waits` は起こしてから読み直した回数、
     `started` は起こせた起動のすべて、`tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数、
     `final` は打ち直しても起こせない失敗、`unreported` はまだ知らせていない失敗（レーン, 起動, 詳細）、
-    `reported` は依頼で知らせた起動。"""
+    `reported` は依頼で知らせた起動、`noticed` は知らせると決めた止まりの鍵。"""
 
     snapshot: Optional[dict[str, Any]] = None
     launched: tuple[str, ...] = ()
@@ -130,8 +139,9 @@ class RunState:
     attempts: tuple[tuple[str, int], ...] = ()
     failed: tuple[str, ...] = ()
     final: tuple[str, ...] = ()
-    unreported: tuple[tuple[str, str, str], ...] = ()
+    unreported: tuple[tuple[str, str, str, str], ...] = ()
     reported: tuple[str, ...] = ()
+    noticed: tuple[str, ...] = ()
     outcome: Optional[str] = None
     errors: tuple[str, ...] = field(default=())
 
@@ -152,7 +162,7 @@ def snapshot(
 ) -> dict[str, Any]:
     """`Observe` の結果の形（耐久の記録へ書くので JSON にできる値だけにする）。`running` は（レーン, 行, スプリントの ID）、
     `reported` は計画の進行表に開いている、起こせなかった知らせの依頼の起動の鍵、`answered` は答えが載った後に next が
-    打たれていない実行中の行の（レーン, 行, スプリントの ID, 答えの事象の番号）。"""
+    打たれていない実行中の行の（レーン, 行, スプリントの ID, 答えの事象の番号）。止まったレーンは空で、`with_stalls` が載せる。"""
     return {
         "state": state,
         "complete": complete,
@@ -160,7 +170,13 @@ def snapshot(
         "running": [list(r) for r in running],
         "reported": list(reported),
         "answered": [list(a) for a in answered],
+        "stalls": [],
     }
+
+
+def with_stalls(snap: dict[str, Any], stalls: Sequence[tuple[str, str, str]]) -> dict[str, Any]:
+    """写しへ止まったレーンの（レーン, 知らせの鍵, 理由）を載せる。"""
+    return {**snap, "stalls": [list(t) for t in stalls]}
 
 
 def _skip(state: RunState) -> set[str]:
@@ -250,7 +266,17 @@ def _fail(state: RunState, lane: str, key: str, detail: str, policy: Policy, fin
     state = replace(state, failed=(*state.failed, key), final=(*state.final, key) if final else state.final)
     if _snap(state)["state"] == CANCELLED:
         return state
-    return replace(state, unreported=(*state.unreported, (lane, key, error)))
+    return replace(state, unreported=(*state.unreported, (lane, key, error, LAUNCH_FAILED)))
+
+
+def _notice_stalls(state: RunState) -> RunState:
+    """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の起動（`unreported`）に置く。"""
+    snap = _snap(state)
+    fresh = [(lane, key, reason) for lane, key, reason in snap["stalls"] if key not in state.noticed]
+    if not fresh:
+        return state
+    queued = tuple((lane, key, reason, LANE_STALLED) for lane, key, reason in fresh)
+    return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(k for _, k, _ in fresh)))
 
 
 def _expire_launched(state: RunState, policy: Policy) -> RunState:
@@ -290,7 +316,7 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
     if isinstance(done.act, Observe):
         snap = done.value
         fresh = _expire_launched(replace(_reopen_closed(state, snap), snapshot=snap, tried=()), policy)
-        return _after_observe(fresh, policy)
+        return _after_observe(_notice_stalls(fresh), policy)
     if isinstance(done.act, Launch):
         return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
     if isinstance(done.act, Report):
