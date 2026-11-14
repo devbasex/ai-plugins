@@ -21,6 +21,9 @@ from ndf.domains.release import plugins as plugins_mod
 
 # GET で対象が無いときの状態
 NOT_FOUND = HTTPStatus.NOT_FOUND
+# 結果の語と種類の語（`Made.result`・`Made.kind`）
+CREATED, EXISTS = "created", "exists"
+TAG, RELEASE = "tag", "release"
 
 
 class Made(NamedTuple):
@@ -47,16 +50,16 @@ def _missing(hub: GitHub, path: str) -> bool:
 
 def _tag(hub: GitHub, tag: str, revision: str) -> Made:
     if not _missing(hub, f"/repos/{hub.repo}/git/ref/tags/{tag}"):
-        return Made("tag", tag, "exists")
+        return Made(TAG, tag, EXISTS)
     hub.rest("POST", f"/repos/{hub.repo}/git/refs", {"ref": f"refs/tags/{tag}", "sha": revision})
-    return Made("tag", tag, "created")
+    return Made(TAG, tag, CREATED)
 
 
 def _release(hub: GitHub, tag: str, title: str, notes: str) -> Made:
     if not _missing(hub, f"/repos/{hub.repo}/releases/tags/{tag}"):
-        return Made("release", tag, "exists")
+        return Made(RELEASE, tag, EXISTS)
     hub.rest("POST", f"/repos/{hub.repo}/releases", {"tag_name": tag, "name": title, "body": notes, "make_latest": "true"})
-    return Made("release", tag, "created")
+    return Made(RELEASE, tag, CREATED)
 
 
 def publish(root: Path, hub: GitHub, revision: str) -> list[Made]:

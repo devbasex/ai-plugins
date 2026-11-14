@@ -112,7 +112,7 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 
 def cmd_publish(args: argparse.Namespace) -> dict:
     made = tagging.publish(Path(args.root), _hub(args), args.revision)
-    created = sum(1 for m in made if m.result == "created")
+    created = sum(1 for m in made if m.result == tagging.CREATED)
     return result.result(TOOL, result.OK, f"タグと GitHub Release を {created} 件作った", [m.item() for m in made])
 
 
