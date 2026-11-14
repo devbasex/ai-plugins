@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ndf.core import loop
 from ndf.core.plan import model, transition_decide
-from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
+from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Choice, Outcome, RunStep, Sleep
 
 
 def _plan(*steps: dict, limit: int | None = None) -> model.Plan:
@@ -66,11 +66,30 @@ def test_after_the_retry_limit_the_step_goes_to_on_fail():
     assert _ran(acts) == ["a", "a", "fix"]
 
 
-def test_a_human_kind_does_not_go_to_on_fail():
+def test_a_conductor_kind_does_not_go_to_on_fail():
+    """既定の行き先が conductor の種類は on_fail へ進まず、その種類で止まる（行き先の選択を残す）。"""
     plan = _plan({"id": "a", "on_fail": "fix"}, {"id": "fix"})
     acts, final = _drive(plan, {"a": [Outcome("stopped", None)]})
     assert _ran(acts) == ["a"]
     assert (final.status, final.kind) == ("stopped", "unknown")
+    assert final.choices == (Choice("R03", "script", "a", "conductor", "unknown"),)
+
+
+def test_usage_limit_without_retry_after_goes_to_the_human():
+    """retry_after の無い利用上限は打ち直さず、表の exhausted（人）で止まる。"""
+    plan = _plan({"id": "a", "on_fail": "fix"}, {"id": "fix"})
+    acts, final = _drive(plan, {"a": [Outcome("stopped", "usage_limit")]})
+    assert _ran(acts) == ["a"]
+    assert (final.status, final.kind) == ("stopped", "usage_limit")
+    assert final.choices == (Choice("R03", "script", "a", "human", "usage_limit"),)
+
+
+def test_each_choice_is_kept_in_order():
+    """打ち直し・ステップへの行き先を選ぶたびに、選択を 1 件ずつ足す。"""
+    plan = _plan({"id": "a", "on_fail": "fix", "retry": {"ci_pending": {"attempts": 1, "interval": 0}}}, {"id": "fix", "next": "end"})
+    stopped = Outcome("stopped", "ci_pending")
+    _, final = _drive(plan, {"a": [stopped, stopped]})
+    assert final.choices == (Choice("R03", "script", "a", "retry", "ci_pending"), Choice("R03", "script", "a", "fix", "ci_pending"))
 
 
 def test_not_applicable_to_end_finishes_ok():
@@ -93,6 +112,7 @@ def test_a_stopped_prelude_step_ends_with_its_cause():
     acts, final = _drive(plan, {"base-sync": [Outcome("stopped", "base_conflict")]}, start="pr", prelude=("base-sync",))
     assert _ran(acts) == ["base-sync"]
     assert (final.status, final.kind) == ("stopped", "base_conflict")
+    assert final.choices == (Choice("R10", "script", "base-sync", "conductor", "base_conflict"),)
 
 
 def test_starting_at_end_finishes_without_running_a_step():
@@ -122,6 +142,7 @@ def test_a_gate_with_answers_waits_and_follows_the_answer():
     assert [type(a).__name__ for a in acts] == ["RunStep", "AwaitAnswer", "AwaitAnswer", "RunStep"]
     assert _ran(acts) == ["ask", "release"]
     assert final.status == "ok"
+    assert final.choices == (Choice("R13", "human", "ask", "release"),)
 
 
 def test_an_unknown_answer_stops():

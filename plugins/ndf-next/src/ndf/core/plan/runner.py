@@ -8,6 +8,9 @@
 - `next` は状態の置き場のロック（`plan.lock`）を持って回を選び、流す。同じプランの別の回を同時に打つと、後の `next` は
   先の回が終わるか承認ゲートで抜けるまで上限まで待つ。ステップの打ち直しが、別の回の流れている子を前の回の残りとして
   止めない
+- 遷移の判断が行き先を選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の置き場の `progress.jsonl` へ追記する。
+  書くのは耐久ステップで、回復で判断を流し直しても同じ選択を 2 回書かない
+- ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる
 - 承認の答えを待つ所に来たら、待ちの目印 `waiting-<鍵の名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
   DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローは鍵のファイルに残り、次の起動が回復する。B2）
 """
@@ -18,7 +21,6 @@ import fcntl
 import functools
 import json
 import os
-import shlex
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -28,7 +30,8 @@ from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git
-from ndf.contracts import limits, result, routing
+from ndf import contracts
+from ndf.contracts import chosen, limits, result, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
@@ -36,7 +39,7 @@ from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcom
 
 # 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
 TOOL = next(name for name, module in cli.COMMANDS.items() if module == f"{__package__}.cli")
-CLI_NAME = "ndf"
+CLI_NAME = result.ENTRY
 RUN_FILE = "run.json"
 # 状態の置き場を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
 PLAN_LOCK = "plan.lock"
@@ -45,6 +48,11 @@ RESULTS_DIR = "results"
 WORK_DIR = "work"
 # ステップの結果が載せた PR の番号を、回をまたいで集める記録（プランの結果の items へ載せる）
 PRS_FILE = "prs.json"
+# ステップの結果の outputs を回をまたいで重ねる記録（プランの結果の outputs へ載せる）
+OUTPUTS_FILE = "outputs.json"
+OUTPUTS_SCHEMA = result.SCHEMA + "#/$defs/outputs"
+# 選択の記録を追記する進捗記録（追記だけ。書き換えない）
+PROGRESS_FILE = "progress.jsonl"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "answer"
 TOPIC_RETRY = "retry-wait"
@@ -94,7 +102,48 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     out["attempt"] = attempt
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
+    if out["outputs"]:
+        _add_outputs(ctx.state_dir, out["outputs"])
     return out
+
+
+def _add_outputs(state_dir: Path, outputs: dict[str, Any]) -> None:
+    found = read_json(state_dir / OUTPUTS_FILE)
+    write_json(state_dir / OUTPUTS_FILE, {**(found if found is not None else {}), **outputs})
+
+
+def recorded_outputs(state_dir: Path) -> tuple[Optional[dict[str, Any]], list[str]]:
+    """プランのステップが渡した outputs と、結果 JSON の形に合わないときの注意。形が違えば outputs を載せない。"""
+    found = read_json(state_dir / OUTPUTS_FILE)
+    if not found:
+        return None, []
+    errs = contracts.schema_errors(found, OUTPUTS_SCHEMA)
+    if errs:
+        return None, [f"ステップの outputs が結果 JSON の形に合わず載せなかった: {'; '.join(errs)}"]
+    return found, []
+
+
+@durable.step
+def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
+    """選択の記録を 1 件ずつ進捗記録へ追記する（耐久ステップ。回復で同じ選択を 2 回書かない）。"""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = [result.dumps_line(chosen.record(run_id, *c)) for c in choices]
+    with target.open("a", encoding="utf-8") as fh:
+        fh.write("".join(f"{line}\n" for line in lines))
+    return len(lines)
+
+
+def recorded_choices(state_dir: Path) -> list[dict[str, Any]]:
+    """進捗記録に残った選択の記録（書いた順）。"""
+    path = state_dir / PROGRESS_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # まだ 1 件も選んでいない回は記録が無い
+        return []
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [r for r in rows if isinstance(r, dict) and r.get("event") == chosen.EVENT]
 
 
 def _add_prs(state_dir: Path, prs: list[int]) -> None:
@@ -110,7 +159,7 @@ def recorded_prs(state_dir: Path) -> list[int]:
 
 
 @durable.step
-def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, str]) -> None:
+def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]]) -> None:
     """承認の答えを待つ目印を書く（呼び手と `wait` が読む）。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -142,12 +191,21 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     raise TypeError(f"知らない手: {act!r}")
 
 
+def _decide_and_record(spec: dict[str, Any], plan: model.Plan, state: Any, done: Optional[Outcome]) -> loop.Next:
+    """遷移の判断を呼び、判断が足した選択を選択の記録として書く。"""
+    nxt = transition_decide.decide(plan, state, done)
+    added = nxt.state.choices[len(state.choices) :]
+    if added:
+        record_choices(spec["progress"], spec["run_id"], [list(c) for c in added])
+    return nxt
+
+
 @durable.workflow
 def plan_workflow(spec: dict[str, Any]) -> dict[str, Any]:
     """プランの遷移を判断のループで回し、終わりの状態を返す。"""
     plan = model.parse(spec["plan"])
     state = transition_decide.start_state(plan, spec["start"], spec["prelude"])
-    final = loop.run(functools.partial(transition_decide.decide, plan), functools.partial(_perform, spec), state)
+    final = loop.run(functools.partial(_decide_and_record, spec, plan), functools.partial(_perform, spec), state)
     return {"status": final.status, "kind": final.kind, "detail": final.detail, "last": final.last, "count": final.count}
 
 
@@ -269,10 +327,9 @@ def _finished(root: Path, key: str) -> bool:
     return any((root / durable.DBOS_DIR / durable.RETIRED_DIR).glob(f"{name}*{durable.DB_SUFFIX}"))
 
 
-def _routes(inv: Invocation) -> dict[str, dict[str, str]]:
-    """承認の答えを待つステップごとの、答え → 次に打つコマンド。"""
-    base = [CLI_NAME, TOOL, "next", *inv.again]
-    return {s.id: {a: shlex.join([*base, "--answer", a]) for a in s.on_answer} for s in inv.plan.steps if s.on_answer}
+def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
+    """承認の答えを待つステップごとの、答え → 次に打つコマンド（結果 JSON の command の形）。"""
+    return {s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a) for a in s.on_answer} for s in inv.plan.steps if s.on_answer}
 
 
 def _spec(inv: Invocation) -> dict[str, Any]:
@@ -284,6 +341,8 @@ def _spec(inv: Invocation) -> dict[str, Any]:
         "values": inv.values,
         "waiting": str(inv.waiting_path),
         "routes": _routes(inv),
+        "progress": str(inv.state_dir / PROGRESS_FILE),
+        "run_id": durable.run_name(inv.key),
     }
 
 
@@ -322,7 +381,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
         items,
         {"round": inv.round_no},
         routes=marker["routes"],
-        next=shlex.join([CLI_NAME, TOOL, "wait", str(inv.plan_path)]),
+        next=result.command(TOOL, "wait", str(inv.plan_path)),
     )
 
 
@@ -331,17 +390,20 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
     items = [{"kind": "plan", "name": inv.plan.name, "run": durable.run_name(inv.key)}]
     items += [{"kind": "pr", "number": n} for n in recorded_prs(inv.state_dir)]
     metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
+    outputs, warnings = recorded_outputs(inv.state_dir)
+    shared = {"outputs": outputs, "warnings": warnings, "run_id": durable.run_name(inv.key)}
     if final is None:
-        return result.stopped(TOOL, "unknown", f"{inv.plan.name} の耐久ワークフローが {status} で終わった", items=items, metrics=metrics)
+        detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
+        return result.stopped(TOOL, "unknown", detail, items=items, metrics=metrics, **shared)
     if final["status"] == OK:
-        return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics)
+        return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics, **shared)
     if final["status"] == STOPPED:
         items[0]["step"] = final["last"]
-        again = shlex.join([CLI_NAME, TOOL, "next", *_with_start(inv.again, final["last"])]) if final["last"] else None
-        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again)
+        again = result.command(TOOL, "next", *_with_start(inv.again, final["last"])) if final["last"] else None
+        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again, **shared)
     after = inv.plan.following(final["last"])
-    cont = shlex.join([CLI_NAME, TOOL, "next", *_with_start(inv.again, after)]) if after else None
-    return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None})
+    cont = result.command(TOOL, "next", *_with_start(inv.again, after)) if after else None
+    return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None}, **shared)
 
 
 def _stored(inv: Invocation) -> dict[str, Any]:

@@ -7,6 +7,8 @@
 - `AwaitAnswer`: 承認の答えを待つ。答えから `on_answer` の行き先へ進む
 
 止まったステップの行き先は `ndf.contracts.routing.pick` だけが選ぶ（IS4・IS5）。`summary` などの文は読まない（IS7）。
+行き先を選ぶたび（止まったステップの行き先・承認の答えの行き先）に、選択（`Choice`）を状態の `choices` へ足す。
+書き手（`runner`）が足した分を選択の記録（`ndf.contracts.chosen`）として進捗記録へ 1 件ずつ書く。
 ステップの数が上限を超えるか、知らないステップへ進めば必ず終わる。DBOS も入出力も読まない。
 """
 
@@ -16,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Optional, Union
 
-from ndf.contracts import causes, limits, routing
+from ndf.contracts import causes, chosen, limits, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.loop import Next
 from ndf.core.plan.model import Plan, Step
@@ -26,6 +28,9 @@ SLEPT, ANSWERED = "slept", "answered"
 # 待ちの上限の名前（利用上限の待ちの頭打ち）
 USAGE_WAIT_MAX = "supervise.limit-wait-max"
 USAGE_LIMIT = "usage_limit"
+# 選択の記録の規則の番号（AI が判断している分岐の一覧。issues/issue-1142-design-scripted-flow.md）。
+# 止まったプランの再開点（R03）、衝突で止まったときの取り込み（R10）、承認の答えの後の行き先（R13）
+RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
 
 
 class RunStep(NamedTuple):
@@ -44,6 +49,16 @@ class AwaitAnswer(NamedTuple):
 
 
 Act = Union[RunStep, Sleep, AwaitAnswer]
+
+
+class Choice(NamedTuple):
+    """行き先の選択 1 件。`frm` は選んだときのステップ、`to` は行き先（ステップの id か routing の語）。"""
+
+    rule: str
+    chooser: str
+    frm: str
+    to: str
+    cause: Optional[str] = None
 
 
 class Outcome(NamedTuple):
@@ -70,6 +85,7 @@ class StepState:
     kind: Optional[str] = None
     detail: Optional[str] = None
     last: Optional[str] = None
+    choices: tuple[Choice, ...] = ()
 
 
 def start_state(plan: Plan, start: Optional[str], prelude: Sequence[str] = ()) -> StepState:
@@ -122,11 +138,27 @@ def _retry_state(step: Step, state: StepState, done: Outcome) -> routing.RetrySt
     return routing.RetryState(used, _policy(step, done.kind), done.retry_after, cap)
 
 
+def _chose(state: StepState, choice: Choice) -> StepState:
+    return replace(state, choices=(*state.choices, choice))
+
+
+def _taken(route: routing.Route, in_prelude: bool) -> str:
+    """選んだ行き先のうち、実際に進む先。前置きの中でステップへ進む選択は、止まって conductor へ戻る。"""
+    if route.to == routing.STEP:
+        return route.target if not in_prelude else routing.CONDUCTOR
+    return route.to
+
+
 def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next:
-    """止まったステップの行き先（IS4・IS5）。前置きの中で止まれば、そのステップの結果で終わる。"""
+    """止まったステップの行き先（IS4・IS5）。前置きの中で止まれば、そのステップの結果で終わる。
+
+    打ち直し・ステップ・終わり・conductor・人のどれへ進むかを、プランの宣言と止まった理由の表から選び、選択を残す。
+    """
     kind = done.kind if done.kind is not None else "unknown"
     done = done._replace(kind=kind)
-    route = routing.pick(kind, step.on_cause, step.on_fail, _retry_state(step, state, done))
+    route = routing.pick(kind, on_cause=step.on_cause, on_fail=step.on_fail, retry=_retry_state(step, state, done))
+    rule = RULE_CONFLICT if kind == "base_conflict" else RULE_STOPPED
+    state = _chose(state, Choice(rule, chosen.SCRIPT, step.id, _taken(route, bool(state.prelude)), kind))
     detail = f"ステップ {step.id} が {kind} で止まった"
     if route.to == routing.RETRY:
         key = _retry_key(step.id, kind)
@@ -136,6 +168,7 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
         return _finish(state, OK, None, None)
     if route.to == routing.STEP and not state.prelude:
         return _run(plan, replace(state, kind=kind), route.target)
+    # stop・conductor・human と、前置きの中の止まりは、その種類で止まる（行き先は止まった理由の表が持つ）
     return _finish(state, STOPPED, kind, detail)
 
 
@@ -153,7 +186,9 @@ def _after_answer(plan: Plan, state: StepState, step: Step, done: Outcome) -> Ne
         return Next.step(AwaitAnswer(step.id, state.gates), state)
     if done.answer not in step.on_answer:
         return _finish(state, STOPPED, "invalid", f"ステップ {step.id} の知らない答え: {done.answer}")
-    return _run(plan, state, step.on_answer[done.answer])
+    target = step.on_answer[done.answer]
+    choice = Choice(RULE_ANSWER, chosen.chooser(None, (), answered_by_human=True), step.id, target if target else routing.END)
+    return _run(plan, _chose(state, choice), target)
 
 
 def decide(plan: Plan, state: StepState, done: Optional[Outcome]) -> Next:

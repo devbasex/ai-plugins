@@ -3,6 +3,8 @@
 `ndf plan wait` は流れているプランを見回り、人の手が要るもの（止まった・承認ゲート）を種類つきで返す。
 結果の各行は止まりなら `cause`、承認ゲートなら `gate: true` と `routes` を持ち、`next` には続きの待ちを打つコマンドを
 載せる。読み手は文でなく `status`・`cause.kind`・`next` で次の手を決める。
+`routes` と `next` の値はそのまま打てるコマンド（`result.command` の形）である。結果の `routes` の鍵は答えの語彙だけを持つため、
+承認ゲートが 2 本以上あれば結果の `routes` は先頭の 1 本の分にし、各行の `routes` にそれぞれの分を残す。
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ class Watched(NamedTuple):
     status: Optional[str]
     kind: Optional[str] = None
     detail: Optional[str] = None
-    routes: Optional[Mapping[str, Optional[str]]] = None
+    routes: Optional[Mapping[str, Optional[dict[str, Any]]]] = None
 
 
 def _item(w: Watched) -> dict[str, Any]:
@@ -40,7 +42,7 @@ def settled(found: Sequence[Watched]) -> bool:
     return all(w.status is not None for w in found) or any(w.status in (GATE, STOPPED) for w in found)
 
 
-def attention(tool: str, found: Sequence[Watched], again: str) -> dict[str, Any]:
+def attention(tool: str, found: Sequence[Watched], again: dict[str, Any]) -> dict[str, Any]:
     """見回りの結果。止まりがあれば `stopped`（先頭の止まりの種類）、承認ゲートがあれば `gate`、すべて終われば `ok`。"""
     items = [_item(w) for w in found]
     stops = [w for w in found if w.status == STOPPED]
@@ -51,13 +53,15 @@ def attention(tool: str, found: Sequence[Watched], again: str) -> dict[str, Any]
         summary = f"{len(stops)} 本のプランが止まった（先頭: {stops[0].name}）"
         return result.result(tool, STOPPED, summary, items, metrics, cause=first, next=again)
     if gates:
-        routes = {k: v for w in gates if w.routes for k, v in w.routes.items()}
-        summary = f"{len(gates)} 本のプランが承認ゲートで待っている"
-        return result.result(tool, GATE, summary, items, metrics, routes=routes if routes else {"wait": again}, next=again)
+        head = next((w for w in gates if w.routes), gates[0])
+        # 答えを持たない承認ゲートは、答えの語彙の「同じ作業を打ち直す」で同じ待ちを打つ
+        routes = dict(head.routes) if head.routes else {"retry": again}
+        summary = f"{len(gates)} 本のプランが承認ゲートで待っている（routes は {head.name} の分）"
+        return result.result(tool, GATE, summary, items, metrics, routes=routes, next=again)
     return result.result(tool, OK, f"{len(found)} 本のプランが終わった", items, metrics)
 
 
-def timed_out(tool: str, found: Sequence[Watched], waited: float, again: str) -> dict[str, Any]:
+def timed_out(tool: str, found: Sequence[Watched], waited: float, again: dict[str, Any]) -> dict[str, Any]:
     """待ちの上限に達した結果。種類は wait_timeout、`next` は同じ待ち。"""
     running = [w.name for w in found if w.status is None]
     detail = f"{waited:.0f} 秒待ったが {len(running)} 本のプランが流れている"

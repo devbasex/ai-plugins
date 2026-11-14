@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -39,7 +38,9 @@ class Entry:
 
 def stable_dir(cwd: Path) -> Path:
     """消えない作業ディレクトリ（共通の git ディレクトリの親。主のチェックアウトの根）。"""
-    out = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd, capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd, capture_output=True, text=True, check=True
+    )
     return Path(out.stdout.strip()).resolve().parent
 
 
@@ -112,7 +113,9 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
     return None if reason is None else queue_decide.Outcome(entry.plan.name, STOPPED, "precondition", reason)
 
 
-def _run_wave(wave: list[Entry], prior: list[queue_decide.Outcome], cwd: Path, order: list[str], done: dict[str, queue_decide.Outcome]) -> list[queue_decide.Outcome]:
+def _run_wave(
+    wave: list[Entry], prior: list[queue_decide.Outcome], cwd: Path, order: list[str], done: dict[str, queue_decide.Outcome]
+) -> list[queue_decide.Outcome]:
     """組のプランを並べて流し、結果を組の並びで返す。"""
     started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
     for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
@@ -158,29 +161,44 @@ def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:
 
 
 def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path) -> dict[str, Any]:
-    """キューの結果。承認ゲートで待つプランの routes は `<プラン>:<答え>` の鍵で並べ、next は `--resume` の打ち直し。
+    """キューの結果。next は `--resume` の打ち直し。
 
-    止まったプランは、打ち直しの `--from` を止まったステップにする。同じ回の報告を返さずに、止まった所から続く。
+    承認ゲートで待つプランの routes は各行（items）に残し、結果の routes は先頭の 1 本の分にする（結果の routes の鍵は
+    答えの語彙だけを持つ）。止まったプランは、打ち直しの `--from` を止まったステップにする。同じ回の報告を返さずに、
+    止まった所から続く。
     """
     status, first = queue_decide.overall(outcomes)
-    items = [{"kind": "plan", "name": o.name, "status": o.status, "detail": o.detail} for o in outcomes]
+    items = [_item(o) for o in outcomes]
     metrics = {"plans": len(outcomes), "ok": sum(o.status == OK for o in outcomes)}
     stopped_at = {o.name: o.step for o in outcomes if o.status == STOPPED and o.step is not None}
-    resume = shlex.join([*again_args(stages, qdir, stopped_at), "--resume"])
+    resume = result.command(*again_args(stages, qdir, stopped_at), "--resume")
     if status == STOPPED and first is not None:
         kind = first.kind if first.kind is not None else "unknown"
         return result.stopped(tool, kind, f"{first.name}: {first.detail}", items=items, metrics=metrics, next=resume)
     if status == GATE:
-        routes = {f"{o.name}:{a}": cmd for o in outcomes if o.routes for a, cmd in o.routes.items()}
-        summary = f"承認の答えを待つプランがある（答えた後に {resume} で続ける）"
-        return result.result(tool, GATE, summary, items, metrics, routes=routes if routes else None, next=resume)
+        gated = next((o for o in outcomes if o.routes), None)
+        # 答えを持たない待ち（流していないプラン）は、答えの語彙の「同じ作業を打ち直す」で打ち直す
+        routes = dict(gated.routes) if gated is not None else {"retry": resume}
+        where = f"routes は {gated.name} の分。" if gated is not None else ""
+        summary = f"承認の答えを待つプランがある（{where}答えた後に next で続ける）"
+        return result.result(tool, GATE, summary, items, metrics, routes=routes, next=resume)
     return result.result(tool, OK, f"{len(outcomes)} 本のプランが終わった", items, metrics)
 
 
+def _item(o: queue_decide.Outcome) -> dict[str, Any]:
+    item: dict[str, Any] = {"kind": "plan", "name": o.name, "status": o.status, "detail": o.detail}
+    if o.routes:
+        item["routes"] = dict(o.routes)
+    return item
+
+
 def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None) -> list[str]:
-    """このキューを打ち直す引数（絶対のパス。作業場所の外から打っても同じキューを指す）。`starts` は開始点の上書き。"""
+    """このキューを打ち直す引数（エントリポイントの名前の後ろ。絶対のパスで、作業場所の外から打っても同じキューを指す）。
+
+    `starts` は開始点の上書き。
+    """
     starts = starts if starts is not None else {}
-    args = [runner.CLI_NAME, runner.TOOL, "queue", *(str(e.path) for e in stages[0])]
+    args = [runner.TOOL, "queue", *(str(e.path) for e in stages[0])]
     for stage in stages[1:]:
         args += ["--then", *(str(e.path) for e in stage)]
     for e in (e for stage in stages for e in stage):

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -27,7 +26,7 @@ from typing import Any, NoReturn, Optional
 
 from ndf import identity
 from ndf.adapters import run_log
-from ndf.contracts import causes, limits, result
+from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import assemble_decide, model, queue_decide, queue_run, runner, wait_decide
@@ -138,7 +137,7 @@ def _watched(path: Path) -> wait_decide.Watched:
 
 def _cmd_wait(a: argparse.Namespace) -> int:
     paths = [Path(p) for p in a.plans]
-    again = shlex.join([runner.CLI_NAME, TOOL, "wait", *a.plans, "--timeout", str(a.timeout)])
+    again = result.command(TOOL, "wait", *a.plans, "--timeout", str(a.timeout))
     interval = limits.value(WAIT_POLL, "interval")
     began = time.monotonic()
     while True:
@@ -219,5 +218,5 @@ def main(argv: list[str]) -> int:
     try:
         a = _parser().parse_args(argv)
     except SystemExit as exc:
-        return causes.exit_code("invalid") if exc.code else 0
+        return causes.exit_code("invalid") if exc.code else exit_codes.code_of("ok")
     return a.fn(a)

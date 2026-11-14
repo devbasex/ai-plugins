@@ -37,6 +37,7 @@ def test_digest_does_not_depend_on_key_order():
         {"on_cause": {"test_failed": "nowhere"}},
         {"on_cause": {"no_such_kind": "b"}},
         {"on_answer": {"approved": "retry"}},
+        {"on_answer": {"go": "end"}},
         {"next": "nowhere"},
         {"exit_cause": {"1": "no_such_kind"}},
         {"in": "elsewhere"},

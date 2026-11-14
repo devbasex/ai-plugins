@@ -6,13 +6,14 @@
 - 結果は標準出力の最後の JSON の行から読む。JSON を出さないコマンドは終了コードと `exit_cause` で種類を決める
 - 結果に載せる文は、秘密の環境変数の値とトークンの形を伏せてから返す（耐久の記録と結果 JSON へ秘密を入れない）
 - 結果 JSON の items の `{"kind": "pr", "number": <番号>}` を拾い、プランの結果とキューの `{queue_prs}` へ渡す
+- 結果 JSON の `outputs`（工程どうしで渡す値）を拾い、プランの結果の `outputs` へ渡す
 
 外部への操作（push・PR の作成・マージ・Issue を閉じる・ラベル・コメント・リリース）のステップは、`probe` に相手の状態を
 読むコマンドを持つ（B9）。`run` の前に毎回打ち、済んでいれば `run` を打たずに ok を返す。操作の直後にプロセスが落ちて
 耐久ステップの記録が残らなくても、回復で打ち直したステップは済んだ操作を繰り返さない。`probe` の答え:
 
-- 終了コード 0（結果 JSON なら `ok`）: 済んでいる。`run` を打たない
-- 終了コード 1（結果 JSON なら `not_applicable` で止まった）: まだ。`run` を打つ
+- 終了コードが成功（終了コードの表の `ok`。結果 JSON なら `ok`）: 済んでいる。`run` を打たない
+- 終了コードが失敗（終了コードの表の `failed`。結果 JSON なら `not_applicable` で止まった）: まだ。`run` を打つ
 - ほか: 済んだかを確かめられない。`run` を打たずに、その種類（結果 JSON の種類か `exit_cause`、無ければ unknown）で止まる
 
 見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
@@ -34,7 +35,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import git, run_log
-from ndf.contracts import limits
+from ndf.contracts import exit_codes, limits
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 from ndf.core.plan import assemble_decide
 from ndf.core.plan.model import Plan, Step
@@ -150,15 +151,30 @@ def _prs(found: dict[str, Any]) -> list[int]:
     return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
 
 
+def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) -> dict[str, Any]:
+    """結果 JSON を持たないステップの結果。"""
+    return {
+        "status": status,
+        "kind": kind,
+        "retry_after": None,
+        "routes": None,
+        "summary": summary,
+        "code": code,
+        "prs": [],
+        "outputs": None,
+    }
+
+
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
-    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`）。"""
+    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`）。"""
     found = _last_json(stdout)
     if found is None:
-        if code == 0:
-            return {"status": OK, "kind": None, "retry_after": None, "routes": None, "summary": "", "code": code, "prs": []}
+        if code == exit_codes.code_of("ok"):
+            return _plain(OK, None, "", code)
         kind = step.exit_cause[code] if code in step.exit_cause else "unknown"
-        return {"status": STOPPED, "kind": kind, "retry_after": None, "routes": None, "summary": f"終了コード {code}", "code": code, "prs": []}
+        return _plain(STOPPED, kind, f"終了コード {code}", code)
     cause = found.get("cause") if isinstance(found.get("cause"), dict) else None
+    outputs = found.get("outputs")
     return {
         "status": found["status"],
         "kind": cause.get("kind") if cause else None,
@@ -167,6 +183,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "summary": str(found.get("summary")),
         "code": code,
         "prs": _prs(found),
+        "outputs": outputs if isinstance(outputs, dict) and outputs else None,
     }
 
 
@@ -180,14 +197,15 @@ def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, A
     found = outcome_of(step, done.returncode, done.stdout)
     if found["status"] == OK:
         return {**found, "summary": f"済んでいた（{step.id} の probe）"}
-    if found["kind"] == "not_applicable" or (found["code"] == 1 and _last_json(done.stdout) is None):
+    not_yet = found["code"] == exit_codes.code_of("failed") and _last_json(done.stdout) is None
+    if found["kind"] == "not_applicable" or not_yet:
         return None
     kind = found["kind"] if found["kind"] is not None else "unknown"
     return _stopped(kind, f"ステップ {step.id} の probe で済んだかを確かめられない: {found['summary']}")
 
 
 def _stopped(kind: str, summary: str) -> dict[str, Any]:
-    return {"status": STOPPED, "kind": kind, "retry_after": None, "routes": None, "summary": summary, "code": None, "prs": []}
+    return _plain(STOPPED, kind, summary, None)
 
 
 def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:

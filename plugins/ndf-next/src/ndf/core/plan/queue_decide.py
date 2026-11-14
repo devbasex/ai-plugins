@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
@@ -118,7 +118,7 @@ class Outcome(NamedTuple):
     status: Optional[str]
     kind: Optional[str] = None
     detail: str = ""
-    routes: Optional[Mapping[str, Optional[str]]] = None
+    routes: Optional[Mapping[str, Optional[dict[str, Any]]]] = None
     prs: tuple[int, ...] = ()
     release: bool = False
     step: Optional[str] = None

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -27,17 +26,20 @@ def _fail_once(sid: str, mark: Path) -> dict:
 
 def _rerun(repo: Path, out: dict) -> tuple[int, dict]:
     """結果の `next`（`ndf plan next ...`）をそのまま打つ。"""
-    args = shlex.split(out["next"])
+    args = out["next"]["argv"]
     assert args[:3] == ["ndf", "plan", "next"]
     return H.ndf(repo, *args[2:])
 
 
 def test_a_stopped_round_continues_from_the_stopped_step(repo, tmp_path):
     """止まった回の結果の next は止まったステップから続け、前の段階を頭から流し直さない（#2827）。"""
-    plan = H.write_plan(repo, "c", [H.count_step("a", tmp_path / "a"), _fail_once("b", tmp_path / "b.mark"), H.count_step("c", tmp_path / "c")])
+    plan = H.write_plan(
+        repo, "c", [H.count_step("a", tmp_path / "a"), _fail_once("b", tmp_path / "b.mark"), H.count_step("c", tmp_path / "c")]
+    )
     code, out = H.ndf(repo, "next", plan)
     assert out["cause"]["kind"] == "check_failed"
-    assert "--from b" in out["next"]
+    argv = out["next"]["argv"]
+    assert argv[argv.index("--from") + 1] == "b"
     code, out = _rerun(repo, out)
     assert (code, out["status"]) == (0, "ok")
     assert (H.count(tmp_path / "a"), H.count(tmp_path / "c")) == (1, 1)
@@ -50,7 +52,11 @@ def test_the_owner_stays_the_same_across_rounds(repo, tmp_path):
         "if not o.exists(): o.write_text(v); sys.exit(1)\n"
         "sys.exit(0 if o.read_text() == v else 2)"
     )
-    step = {"id": "push", "run": [sys.executable, "-c", code_text, str(tmp_path / "owner"), "{owner}"], "exit_cause": {"1": "check_failed", "2": "refused"}}
+    step = {
+        "id": "push",
+        "run": [sys.executable, "-c", code_text, str(tmp_path / "owner"), "{owner}"],
+        "exit_cause": {"1": "check_failed", "2": "refused"},
+    }
     plan = H.write_plan(repo, "o", [H.count_step("a", tmp_path / "a"), step])
     first = H.ndf(repo, "next", plan)[1]
     code, out = _rerun(repo, first)
@@ -66,7 +72,7 @@ def test_a_changed_set_value_runs_instead_of_returning_the_old_report(repo, tmp_
     out = H.ndf(repo, "next", plan, "--set", "minutes=120")[1]
     assert out["cause"]["kind"] == "fix_limit"
     assert H.ndf(repo, "next", plan, "--set", "minutes=120")[1] == out
-    code, out = _rerun(repo, {"next": out["next"].replace("minutes=120", "minutes=180")})
+    code, out = _rerun(repo, {"next": {"argv": [a.replace("minutes=120", "minutes=180") for a in out["next"]["argv"]]}})
     assert (code, out["status"]) == (0, "ok")
     assert H.count(tmp_path / "a") == 1
 

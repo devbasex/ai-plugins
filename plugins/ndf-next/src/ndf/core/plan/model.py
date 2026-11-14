@@ -5,6 +5,7 @@
 ステップは打つコマンド（`run`）と、止まったときの行き先（`on_cause`・`on_fail`）・承認の答えの行き先（`on_answer`）を持つ。
 外部への操作のステップは、済んだかを相手の状態から確かめるコマンド（`probe`）を持てる（B9）。
 行き先の値はプランのステップの id か `end`・`stop`・`retry` のどれかで、`on_cause` の種類は止まった理由の表にある（IS3）。
+`on_answer` の答えは答えの語彙（`contracts/facts/answers.json`。結果 JSON の `routes` の鍵になる）にある。
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts import causes, limits
+from ndf.contracts import causes, facts, limits, result
 from ndf.contracts.routing import END, PLAN_TARGETS, STOP
 
 # ステップを打つ作業ディレクトリの語。worktree は作業場所（使えなければリポジトリの根）、repo はリポジトリの根
@@ -152,14 +153,21 @@ def _kind_errors(step: Step, table: Mapping[str, Any]) -> list[str]:
     return [f"ステップ {step.id} が知らない止まった理由の種類を持つ: {k}" for k in kinds if k not in table]
 
 
+def _answer_errors(step: Step, answers: set[str]) -> list[str]:
+    """承認の答えの語の誤り（答えの語彙に無い答えは結果 JSON の routes の鍵にできない）。"""
+    return [f"ステップ {step.id} の on_answer.{a} は答えの語彙に無い" for a in step.on_answer if a not in answers]
+
+
 def errors(plan: Plan) -> list[str]:
     """プランの形の誤り。空なら流せる。"""
     ids = [s.id for s in plan.steps]
     errs = [f"ステップの id が重なる: {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
     table = causes.table()
+    answers = set(facts.ids(result.ANSWERS))
     for step in plan.steps:
         errs += _target_errors(step, set(ids))
         errs += _kind_errors(step, table)
+        errs += _answer_errors(step, answers)
         if step.place not in PLACES:
             errs.append(f"ステップ {step.id} の in は {' か '.join(PLACES)}: {step.place}")
     if plan.limit < 1:

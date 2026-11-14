@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import sys
 from pathlib import Path
 
@@ -71,10 +70,12 @@ def test_resume_skips_the_finished_plans(repo, tmp_path):
     mark = tmp_path / "mark"
     fail_once = "import pathlib, sys; m = pathlib.Path(sys.argv[1]); first = not m.exists(); m.touch(); sys.exit(1 if first else 0)"
     a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")], touches=["a.py"])
-    b = H.write_plan(repo, "b", [{"id": "s", "run": [sys.executable, "-c", fail_once, str(mark)], "exit_cause": {"1": "check_failed"}}], touches=["b.py"])
+    b = H.write_plan(
+        repo, "b", [{"id": "s", "run": [sys.executable, "-c", fail_once, str(mark)], "exit_cause": {"1": "check_failed"}}], touches=["b.py"]
+    )
     out = H.ndf(repo, "queue", a, "--then", b)[1]
     assert out["cause"]["kind"] == "check_failed"
-    args = shlex.split(out["next"])
+    args = out["next"]["argv"]
     assert "--resume" in args and "b=s" in args
     code, out = H.ndf(repo, *args[2:])
     assert (code, out["status"]) == (0, "ok"), out

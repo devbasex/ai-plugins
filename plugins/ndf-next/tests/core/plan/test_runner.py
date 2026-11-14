@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import result
+from ndf.contracts import chosen, result
 from ndf.core import durable
+from ndf.core.plan import runner
 
 from . import _plan_helpers as H
 
@@ -60,13 +61,18 @@ def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
     plan = H.write_plan(
         repo,
         "g",
-        [H.count_step("before", tmp_path / "before"), ask, H.count_step("skip", tmp_path / "skip"), H.count_step("after", tmp_path / "after")],
+        [
+            H.count_step("before", tmp_path / "before"),
+            ask,
+            H.count_step("skip", tmp_path / "skip"),
+            H.count_step("after", tmp_path / "after"),
+        ],
     )
 
     code, out = H.ndf(repo, "next", plan)
     assert code == result.code_for({"status": "gate"})
     assert out["status"] == "gate"
-    assert "--answer approved" in out["routes"]["approved"]
+    assert out["routes"]["approved"]["argv"][-2:] == ["--answer", "approved"]
     pending = H.ndf(repo, "pending")[1]
     assert pending["metrics"]["pending"] == 1
 
@@ -101,8 +107,8 @@ def test_wait_reports_the_gate_with_its_routes(repo, tmp_path):
     H.ndf(repo, "next", plan)
     code, out = H.ndf(repo, "wait", plan, "--timeout", "5")
     assert out["status"] == "gate"
-    assert out["next"].startswith("ndf plan wait")
-    assert "--answer approved" in out["routes"]["approved"]
+    assert out["next"]["argv"][:3] == ["ndf", "plan", "wait"]
+    assert out["routes"]["approved"]["argv"][-2:] == ["--answer", "approved"]
 
 
 def test_two_rounds_of_one_plan_at_once_do_not_stop_each_other(repo, tmp_path):
@@ -118,3 +124,50 @@ def test_two_rounds_of_one_plan_at_once_do_not_stop_each_other(repo, tmp_path):
     ]
     outs = [json.loads(p.communicate(timeout=180)[0].splitlines()[-1]) for p in procs]
     assert [o["status"] for o in outs] == ["ok", "ok"], outs
+
+
+def _choices(repo: Path) -> list[dict]:
+    return [r for p in sorted(repo.rglob(runner.PROGRESS_FILE)) for r in runner.recorded_choices(p.parent)]
+
+
+def test_each_chosen_route_is_recorded_once(repo, tmp_path):
+    """行き先を選ぶたびに選択の記録を 1 件書き、終わった回を打ち直しても書き足さない（#3395 の決定 114）。"""
+    gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": None}})
+    fail = {
+        "id": "a",
+        "run": [sys.executable, "-c", "raise SystemExit(1)"],
+        "exit_cause": {"1": "test_failed"},
+        "on_cause": {"test_failed": "ask"},
+    }
+    ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "end"}}
+    plan = H.write_plan(repo, "r", [fail, ask])
+    assert H.ndf(repo, "next", plan)[1]["status"] == "gate"
+    code, out = H.ndf(repo, "next", plan, "--answer", "approved")
+    assert (code, out["status"]) == (0, "ok"), out
+    assert H.ndf(repo, "next", plan)[1] == out
+    rows = _choices(repo)
+    assert [chosen.errors(r) for r in rows] == [[], []]
+    assert [(r["rule"], r["chooser"], r["from"], r["to"], r.get("cause")) for r in rows] == [
+        ("R03", "script", "a", "ask", "test_failed"),
+        ("R13", "human", "ask", "end", None),
+    ]
+    assert {r["run_id"] for r in rows} == {out["run_id"]}
+
+
+def test_step_outputs_reach_the_plan_result(repo):
+    """ステップの結果 JSON の outputs を重ね（後のステップが勝つ）、プランの結果の outputs に載せる。"""
+
+    def emit(outputs: dict) -> str:
+        return f"print({json.dumps({'tool': 't', 'status': 'ok', 'summary': 's', 'outputs': outputs})!r})"
+
+    plan = H.write_plan(repo, "o", [H.py_step("a", emit({"pr": 1, "mode": "standard"})), H.py_step("b", emit({"pr": 2}))])
+    code, out = H.ndf(repo, "next", plan)
+    assert (code, out["outputs"]) == (0, {"pr": 2, "mode": "standard"})
+
+
+def test_outputs_out_of_the_contract_become_a_warning(repo):
+    line = json.dumps({"tool": "t", "status": "ok", "summary": "s", "outputs": {"unknown_key": 1}})
+    plan = H.write_plan(repo, "w", [H.py_step("a", f"print({line!r})")])
+    code, out = H.ndf(repo, "next", plan)
+    assert code == 0 and "outputs" not in out
+    assert out["warnings"] and result.errors(out) == []
