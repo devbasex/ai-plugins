@@ -118,7 +118,7 @@ def _list(data: Mapping[str, Any], key: str) -> list[Any]:
 def _ingest_pending(run: _Run) -> None:
     """前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ取り込む（#2770）。"""
     rounds = _list(run.data, store.ROUNDS)
-    last = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
+    last = store.last_round(run.data)
     pending = store.pending_fix_result(run.cfg.state_dir, run.ref)
     gate = fixgate_decide.require_fix_for_changes(len(rounds), last.get("verdict"), last.get("fix"), str(pending) if pending else None)
     if gate.kind == fixgate_decide.STOP:

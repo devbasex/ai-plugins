@@ -174,16 +174,10 @@ def cmd_state(args: argparse.Namespace) -> int:
     )
 
 
-def _last_round(ref: store.StateRef) -> dict[str, Any]:
-    data = store.read_state(ref)
-    rounds = data.get(store.ROUNDS)
-    return rounds[-1] if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else {}
-
-
 def cmd_fix_gate(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir)
     ref = store.state_pr(state_dir, args.pr)
-    last = _last_round(ref)
+    last = store.last_round(store.read_state(ref))
     pending = store.pending_fix_result(state_dir, ref)
     round_no = last.get("round", 0)  # noqa: NDF502 ファイル: ラウンドの記録が無ければ 0 ラウンド目
     gate = fixgate_decide.require_fix_for_changes(round_no, last.get("verdict"), last.get("fix"), str(pending) if pending else None)

@@ -47,14 +47,9 @@ def reviewed_of(state: Mapping[str, Any]) -> set[str]:
     return set(value) if isinstance(value, list) else set()
 
 
-def _prev_head(state: Mapping[str, Any]) -> Optional[str]:
-    rounds = state.get(store.ROUNDS)
-    return rounds[-1].get("head") if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else None
-
-
 def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str]) -> Scope:
     """状態ファイルの中身（最後のラウンドの head・詳細レビューを通った節）から、ラウンド `round_no` の範囲を決める。"""
-    return review_scope(every_section, round_no, _prev_head(state), sections, reviewed_of(state))
+    return review_scope(every_section, round_no, store.last_round(state).get("head"), sections, reviewed_of(state))
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:

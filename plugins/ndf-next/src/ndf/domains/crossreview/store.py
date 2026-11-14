@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -91,6 +92,12 @@ def state_pr(state_dir: Path, pr: int) -> StateRef:
 def read_state(ref: StateRef) -> dict[str, Any]:
     """状態ファイルを読む。まだ無ければ元の番号だけを持つ空の状態。"""
     return read_object(ref.path) if ref.path.is_file() else {ORIGIN_KEY: ref.origin_pr}
+
+
+def last_round(data: Mapping[str, Any]) -> dict[str, Any]:
+    """状態の最後のラウンドの記録（rounds が並びで末尾が辞書ならその辞書そのもの、ほかは空の辞書）。"""
+    rounds = data.get(ROUNDS)
+    return rounds[-1] if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else {}
 
 
 def record_current(ref: StateRef, current_pr: int) -> StateRef:
