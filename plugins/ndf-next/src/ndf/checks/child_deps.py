@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -86,6 +87,12 @@ def _validate(rows: dict[str, Child], tables: dict[str, tuple[str, ...]]) -> Non
 def load_children(path: Path, rel: str) -> Children:
     """`children.json` を読む。無い・形が違う・知らない子を指すときは `CheckError`。`rel` は指摘に書くパス。"""
     text, data = read_json_text(path, "children.json を読めない")
+    rows, tables = _parse(data, path)
+    return Children(rows, tables, rel, _line_numbers(text, rows))
+
+
+def _parse(data: Any, path: Path) -> tuple[dict[str, Child], dict[str, tuple[str, ...]]]:
+    """読んだ値から子の行と表の書き手を作り、形・参照・持ち主の重なりを確かめる。違えば `CheckError`。"""
     if not isinstance(data, dict) or not isinstance(data.get("children"), dict) or not isinstance(data.get("tables"), dict):
         raise CheckError(f"children.json に children と tables の表が無い: {path}")
     rows = {name: _child(name, row) for name, row in data["children"].items()}
@@ -93,9 +100,13 @@ def load_children(path: Path, rel: str) -> Children:
         raise CheckError(f"children.json の tables の書き手が子の記号の並びでない: {path}")
     tables = {table: tuple(ws) for table, ws in data["tables"].items()}
     _validate(rows, tables)
+    return rows, tables
+
+
+def _line_numbers(text: str, names: Iterable[str]) -> dict[str, int]:
+    """子の記号 → その記号を鍵に持つ最初の行（無ければ 1 行目）。"""
     text_lines = text.splitlines()
-    lines = {name: next((no for no, line in enumerate(text_lines, 1) if line.lstrip().startswith(f'"{name}"')), 1) for name in rows}
-    return Children(rows, tables, rel, lines)
+    return {name: next((no for no, line in enumerate(text_lines, 1) if line.lstrip().startswith(f'"{name}"')), 1) for name in names}
 
 
 def owner(module: str, children: Children) -> Optional[str]:
