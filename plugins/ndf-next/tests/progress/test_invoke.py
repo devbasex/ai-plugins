@@ -196,9 +196,7 @@ def test_a_stage_calling_a_plan_run_in_the_worktree_takes_the_worktree_as_an_inp
         for mode in definition.modes()
         for s in definition.load_definition(mode).stages
         for st in s.steps
-        if st.call == "ndf.plan"
-        and "worktree" in templates[invoke.stage_run(s, st, {}).name].params
-        and "worktree" not in s.inputs
+        if st.call == "ndf.plan" and "worktree" in templates[invoke.stage_run(s, st, {}).name].params and "worktree" not in s.inputs
     )
     assert lacking == []
 
