@@ -10,6 +10,10 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import result
+from ndf.core.plan import cli as plan_cli
+from ndf.core.plan import files as plan_files
+from ndf.core.plan import records as plan_records
+from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, invoke, model, stages
 
 
@@ -109,6 +113,91 @@ def test_plan_argv_passes_inputs_and_the_answer():
     assert argv[argv.index("--set") + 1] == "issues=[1, 2]"
     assert argv[-2:] == ["--answer", "approved"]
     assert argv[1] == "-P"
+
+
+def _plan_template(tmp_path: Path, monkeypatch, name: str = "design") -> Path:
+    """ステップ a・b のプランの雛形を置き、雛形の置き場をそこへ向ける。"""
+    template = tmp_path / f"{name}.json"
+    template.write_text(json.dumps({"name": name, "steps": [{"id": "a", "run": ["true"]}, {"id": "b", "run": ["true"]}]}))
+    monkeypatch.setattr(invoke, "template_path", lambda n: template)
+    return template
+
+
+def _plan_run(inputs: dict) -> invoke.StageRun:
+    return invoke.StageRun(invoke.PLAN, "design", inputs, (), "sprint_diff", "design")
+
+
+def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_path, monkeypatch):
+    # PR 3464 の指摘: --set worktree=... はプランの実行が決まった名前の上書きとして断る
+    template = _plan_template(tmp_path, monkeypatch)
+    work, place = tmp_path / "w", str(tmp_path / "wt")
+    work.mkdir()
+    argv = invoke.plan_argv(_plan_run({"issues": [1], "worktree": place}), work, None)
+    sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
+    assert sets == ["issues=[1]"]
+    plan = Path(argv[argv.index("next") + 1])
+    assert plan.parent == work and json.loads(plan.read_text())["worktree"] == place
+    assert "worktree" not in json.loads(template.read_text())
+    # プランの実行は同じ引数を断らずに受け、作業場所はプランの作業場所に入る
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_cli._pairs(sets, "--set"))
+    assert inv.plan.worktree == place and inv.values["worktree"] == place
+
+
+def test_plan_without_inputs_for_the_place_runs_the_template_itself(tmp_path, monkeypatch):
+    template = _plan_template(tmp_path, monkeypatch)
+    argv = invoke.plan_argv(_plan_run({"issues": [1]}), tmp_path / "w", None)
+    assert argv[argv.index("next") + 1] == str(template)
+
+
+def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_round(tmp_path, monkeypatch):
+    # PR 3464 の指摘: 同じ引数で呼び直すと、プランは前の回の控えの失敗を返すだけ
+    template = _plan_template(tmp_path, monkeypatch)
+    work, root = tmp_path / "w", tmp_path / "root"
+    work.mkdir()
+    run = _plan_run({"issues": [1]})
+    assert "--from" not in invoke.plan_argv(run, work, None)
+    inv = plan_runner.prepare(root, template, None, str(work), tmp_path, {"issues": "[1]"})
+    plan_runner._record_run(inv)
+    final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": "b", "count": 2}
+    plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
+    again = invoke.plan_argv(run, work, None)
+    assert again[again.index("--from") + 1] == "b" and again.index("--from") < again.index("--state-dir")
+    retried = plan_runner.prepare(root, template, "b", str(work), tmp_path, {"issues": "[1]"})
+    assert retried.key != inv.key and retried.round_no == inv.round_no + 1
+    # 新しい回が承認ゲートで待つ間（結果の控えが無い）は、答えを渡す呼び出しも同じ開始点で同じ回に届く
+    plan_runner._record_run(retried)
+    assert invoke.plan_start(work) == "b"
+
+
+def test_a_plan_that_finished_keeps_the_start_of_its_round(tmp_path, monkeypatch):
+    template = _plan_template(tmp_path, monkeypatch)
+    work = tmp_path / "w"
+    inv = plan_runner.prepare(tmp_path / "root", template, "b", str(work), tmp_path)
+    plan_runner._record_run(inv)
+    final = {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 1}
+    plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
+    assert invoke.plan_start(work) == "b"
+
+
+def test_same_run_tells_a_stored_result_of_the_same_round():
+    first = invoke.StageResult(result.stopped("plan", "transient", "5xx", run_id="r1"), {})
+    assert invoke.same_run(first, invoke.StageResult(result.stopped("plan", "transient", "5xx", run_id="r1"), {}))
+    assert not invoke.same_run(first, invoke.StageResult(result.stopped("plan", "transient", "5xx", run_id="r2"), {}))
+    bare = invoke.StageResult(result.stopped("plan", "transient", "5xx"), {})
+    assert not invoke.same_run(bare, bare)
+
+
+def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tmp_path, monkeypatch):
+    # PR 3464 の指摘: プランの結果は版を outputs に集め、metrics には回とステップの数だけを載せる
+    template = _plan_template(tmp_path, monkeypatch, "release")
+    work = tmp_path / "w"
+    inv = plan_runner.prepare(tmp_path / "root", template, None, str(work), tmp_path)
+    plan_records._add_outputs(work, {"version": "11.0.0"})
+    out = plan_runner.final_result(inv, {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 2}, "SUCCESS")
+    step = next(s for s in _stage("デプロイ").steps if s.id == "release")
+    assert "version" not in out["metrics"]
+    assert definition.validate_io(step.output_ref, out) == []
+    assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"version": "11.0.0"}))
 
 
 def test_plan_without_a_template_stops_as_precondition(tmp_path, monkeypatch):

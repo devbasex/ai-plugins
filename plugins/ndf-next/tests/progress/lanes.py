@@ -21,7 +21,7 @@ def values(cwd: Path, branch: str) -> dict:
 def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:
     """宣言した出力を `values` から持つ ok の結果。"""
     outputs = {k: values[k] for k in r.outputs}
-    return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", metrics={"version": "11.0.0"}, outputs=outputs or None))
+    return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", outputs=outputs or None))
 
 
 def turn(st: store.Store, tid: str, cwd: Path, env: run.Env) -> dict:

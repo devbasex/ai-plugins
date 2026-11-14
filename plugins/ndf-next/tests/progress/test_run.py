@@ -226,6 +226,16 @@ def test_retryable_causes_are_retried_here_with_the_declared_backoff(repo, st, e
     assert env.slept == [2.0, 4.0]
 
 
+def test_a_plan_that_returns_the_same_round_again_is_not_retried_further(repo, st, env, capsys):
+    # PR 3464 の指摘: 打ち直しても控えの結果しか返らない回で、待ちと起動だけを繰り返さない
+    tid = _new(capsys)
+    same = lambda r: invoke.StageResult(result.stopped("plan", "transient", "5xx", run_id="r1"), {})  # noqa: E731
+    env.fake.script["worktree"] = [same, same, same, same]
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["cause"]["kind"] == "transient"
+    assert [c.step for c in env.fake.calls].count("worktree") == 2 and env.slept == [2.0]
+
+
 def test_failures_that_need_a_decision_return_routes_and_the_exit_code_of_the_cause(repo, st, env, capsys):
     tid = _new(capsys)
     env.fake.script["worktree"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
@@ -246,6 +256,36 @@ def test_stage_output_that_breaks_the_contract_gets_no_finish_mark(repo, st, env
     out = lanes.turn(st, tid, repo, env.env)
     assert out["cause"]["kind"] == "bad_report" and "worktree" in out["cause"]["detail"]
     assert _labels(st, tid)["作業場所の用意"] == "failed"
+
+
+def test_retry_after_a_stage_output_that_breaks_the_contract_runs_the_steps_again(repo, st, env, capsys):
+    # PR 3464 の指摘: 全ステップが終わったまま失敗すると、retry → next でも同じ出力を照らし直すだけになる
+    tid = _new(capsys)
+    env.fake.script["worktree"] = [lambda r: invoke.finished(r, result.result("plan", "ok", "出力なし"))]
+    assert lanes.turn(st, tid, repo, env.env)["cause"]["kind"] == "bad_report"
+    failed = [e for e in run.read(st, tid).events if e.draft.kind == "failed"][-1]
+    assert failed.draft.payload["step"] is None  # 工程全体の出力の検査で落ちた
+    before = len(env.fake.calls)
+    _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "作り直す")
+    assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
+    assert [c.step for c in env.fake.calls[before:]][0] == "worktree"
+    assert _labels(st, tid)["作業場所の用意"] == "finished"
+
+
+def test_retry_after_a_failed_step_keeps_the_steps_that_finished(repo, st, env, capsys):
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    _approve(st, tid, "設計")
+    env.fake.script["implement"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
+    lanes.turn(st, tid, repo, env.env)
+    failed = [e for e in run.read(st, tid).events if e.draft.kind == "failed"][-1]
+    stage = failed.draft.row_key
+    assert failed.draft.payload["step"] == "implement"
+    prog = run.step_progress(run.read(st, tid), stage)
+    done = dict(prog.done)
+    _main(capsys, command.main, "retry", tid, stage, "--reason", "直した")
+    run.advance(st, tid, repo, env.env)  # 行を始め直す（作業は起こすだけ）
+    assert run.step_progress(run.read(st, tid), stage).done == done
 
 
 def test_finish_by_hand_writes_the_outputs_to_the_context_like_the_workflow(repo, st, capsys, tmp_path):
@@ -604,6 +644,44 @@ def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st,
     )
     assert later["cause"] == {"kind": "wait_timeout", "detail": f"進行表 {tid} を流す作業がまだ動いている（0.05 秒待った）"}
     assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1
+
+
+def _session_leader() -> subprocess.Popen:
+    """起こした作業の代わり（別のプロセスの組の頭。`launch_worker` と同じ起こし方）。"""
+    return subprocess.Popen(["sleep", "60"], start_new_session=True)
+
+
+def test_work_launched_but_not_yet_holding_the_lock_counts_as_live(repo, st, env, capsys):
+    # PR 3464 の指摘: next が排他を放してから作業が排他を取るまでの間に、wait・next が 2 本目を起こさない
+    tid = _new(capsys)
+    proc = _session_leader()
+    try:
+        env.env = run.Env(**{**vars(env.env), "launch": lambda st_, t, cwd: proc.pid})
+        assert run.advance(st, tid, repo, env.env)["next"]["argv"][2] == "wait"
+        assert run.launch_path(st.root, tid).is_file() and run.is_live(st, tid)
+        assert run.wait(st, tid, 0, sleep=lambda s: None)["cause"]["kind"] == "wait_timeout"
+        again = run.advance(st, tid, repo, env.env)
+        assert again["next"]["argv"][2] == "wait" and "動いている" in again["summary"]
+        assert len([e for e in run.read(st, tid).events if e.draft.kind == "started"]) == 1
+        assert run.hand(st, run.read(st, tid))["argv"][2] == "wait"
+        run.work(st, tid, repo, env.env)  # 作業が排他を取れば印は消える
+        assert not run.launch_path(st.root, tid).exists() and not run.is_live(st, tid)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_a_launch_mark_of_work_that_is_gone_is_not_live(repo, st, capsys):
+    tid = _new(capsys)
+    proc = _session_leader()
+    proc.kill()
+    proc.wait()
+    mark = run.launch_path(st.root, tid)
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    mark.write_text(json.dumps({"pid": proc.pid}))
+    assert not run.is_live(st, tid)
+    mark.write_text("{")  # 書きかけの印も起こした作業として数えない
+    assert not run.is_live(st, tid)
 
 
 def test_wait_on_a_missing_table_is_refused(repo, st):

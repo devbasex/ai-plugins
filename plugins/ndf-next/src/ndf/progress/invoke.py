@@ -4,7 +4,7 @@
 
 | `call` | 種類 | 呼ぶもの |
 | --- | --- | --- |
-| `ndf.plan` | `plan` | プランの実行（`ndf plan next <雛形>`）。雛形は `contracts/templates/<with.plan>.json` |
+| `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `contracts/templates/<with.plan>.json` |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
 | `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
 | `ndf.listen` | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
@@ -12,6 +12,11 @@
 作業へ渡す引数は工程の定義の `metadata.ndf.inputs` の鍵だけで、値は渡す前にスプリントの文脈の
 スキーマ（`contracts/workflow/context.schema.json`）で形を確かめる（3364-7）。作業の出力のうち工程の
 定義の `outputs` に無い鍵は書かずに捨て、結果の `warnings` に載せる。プランの実行は進行表を読まず、書かない。
+
+プランへの作業場所（文脈の `worktree`）は差し込みの値（`--set`）でなく、プランの作業場所（プランの `worktree`）で渡す。
+差し込みの `worktree` はプランの実行が決まった名前として持ち、上書きを断るためである。雛形の `worktree` を入力の値にした
+写しを実行の置き場へ書き、写しを流す。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
+同じく止まったステップから新しい回を始める。同じ引数で打ち直すと、プランは前の回の控えの結果を返すだけだからである。
 """
 
 from __future__ import annotations
@@ -28,7 +33,10 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude
 from ndf.contracts import limits, result
+from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
+from ndf.core.plan import files as plan_files
+from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
 
 # 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
@@ -248,7 +256,44 @@ def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
 
 
 def template_path(name: str) -> Path:
+    """プランの雛形（契約の置き場の下の雛形の置き場）。"""
     return contracts.contracts_dir() / TEMPLATES / f"{name}.json"
+
+
+def plan_path(run: StageRun, work_dir: Path) -> Path:
+    """流すプラン。入力に作業場所（`worktree`）があれば、雛形の `worktree` をその値にした写しを実行の置き場へ書く。
+
+    雛形が読めなければ `model.Refused`。
+    """
+    src = template_path(run.name)
+    if "worktree" not in run.inputs:
+        return src
+    try:
+        raw = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise model.Refused(f"プランの雛形 {src} を読めない: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise model.Refused(f"プランの雛形 {src} がオブジェクトでない")
+    out = work_dir / f"{run.name}.json"
+    out.write_text(json.dumps({**raw, "worktree": run.inputs["worktree"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
+def plan_start(work_dir: Path) -> Optional[str]:
+    """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
+
+    止まっていなければ前の回の開始点（承認の答えを渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
+    """
+    record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
+    if record is None:
+        return None
+    done = plan_files.read_json(plan_runner.result_path(work_dir, durable.run_name(record["key"])))
+    again = done["next"] if done is not None and done["status"] == result.STOPPED and isinstance(done.get("next"), dict) else None
+    argv = again["argv"] if again is not None else []
+    if "--from" in argv[:-1]:
+        return str(argv[argv.index("--from") + 1])
+    start = record["start"] if "start" in record else None
+    return start if isinstance(start, str) else None
 
 
 def _set_value(value: Any) -> str:
@@ -256,11 +301,22 @@ def _set_value(value: Any) -> str:
 
 
 def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str]) -> list[str]:
-    """`ndf plan next <雛形> --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。"""
-    argv = ndf_command(PLAN, "next", str(template_path(run.name)), "--state-dir", str(work_dir))
+    """`ndf plan next <プラン> [--from <ステップ>] --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。
+
+    作業場所（`worktree`）は `--set` に載せず、プランの作業場所で渡す（`plan_path`）。
+    """
+    start = plan_start(work_dir)
+    argv = ndf_command(PLAN, "next", str(plan_path(run, work_dir)), *(["--from", start] if start else []), "--state-dir", str(work_dir))
     for key, value in run.inputs.items():
-        argv += ["--set", f"{key}={_set_value(value)}"]
+        if key != "worktree":
+            argv += ["--set", f"{key}={_set_value(value)}"]
     return argv + (["--answer", answer] if answer else [])
+
+
+def same_run(before: StageResult, after: StageResult) -> bool:
+    """2 つの結果が同じプランの回の結果か（打ち直しても回が変わらず、プランが控えの結果を返した）。"""
+    run_id = before.report["run_id"] if "run_id" in before.report else None
+    return isinstance(run_id, str) and "run_id" in after.report and after.report["run_id"] == run_id
 
 
 def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> StageResult:
@@ -274,7 +330,11 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
     if not template_path(run.name).is_file():
         return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い（{template_path(run.name)}）"), {})
     work_dir.mkdir(parents=True, exist_ok=True)
-    return _from_process(run, runner(plan_argv(run, work_dir, answer), cwd, run.env({})))
+    try:
+        argv = plan_argv(run, work_dir, answer)
+    except model.Refused as exc:
+        return StageResult(result.stopped(PLAN, "invalid", exc.reason), {})
+    return _from_process(run, runner(argv, cwd, run.env({})))
 
 
 def _call_script(run: StageRun, cwd: Path, runner: Runner) -> StageResult:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -32,7 +33,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from ndf import identity
+from ndf import identity, process_group
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import causes, facts, limits, result
@@ -69,8 +70,9 @@ APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
 WAIT_DEFAULT_SECONDS = plan_cli.WAIT_DEFAULT_SECONDS
-# 作業の置き場（チェックアウトの置き場の下）
+# 作業の置き場（チェックアウトの置き場の下）と、起こした作業が排他を取るまで置く起動の印（作業の置き場の下）
 WORK_DIR = "progress-work"
+LAUNCH_FILE = "launched.json"
 
 
 # --- 進行表の読み書き ---------------------------------------------------------------------
@@ -149,6 +151,8 @@ class StepProgress:
     """実行中の行のステップの進み。`generation` は差し戻しの回数で、差し戻すとステップを初めから流し直す。
 
     `anchor` は答えを数え始める事象の番号（行の開始・ステップの記録・差し戻しの後の答えだけを使う）。
+    `redo` は工程全体の出力が規約に合わずに行が失敗したか。真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、
+    ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
     """
 
     generation: int = 0
@@ -157,6 +161,7 @@ class StepProgress:
     anchor: int = 0
     answer: Optional[model.Event] = None
     notes: Optional[str] = None
+    redo: bool = False
 
     def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
         for st in stage.steps:
@@ -174,6 +179,10 @@ class StepProgress:
             self._answered(ev, p)
         elif kind == STARTED:
             self.anchor, self.answer, self.waiting = ev.seq, None, None
+            if self.redo:
+                self.done, self.redo = {}, False
+        elif kind == FAILED:
+            self.redo = "step" in p and p["step"] is None
         elif kind == STEP_EVENT:
             if p["status"] == FINISHED:
                 self.done[p["step"]], self.waiting = p["report"], None
@@ -465,12 +474,12 @@ def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[l
 
 
 Facts = Callable[[tuple[str, ...], Mapping[str, Any], Path], Mapping[str, bool]]
-Launch = Callable[[store.Store, str, Path], None]
+Launch = Callable[[store.Store, str, Path], Optional[int]]
 Invoker = Callable[[invoke.StageRun, Path, Path, Optional[str]], invoke.StageResult]
 
 
-def launch_worker(st: store.Store, table_id: str, cwd: Path) -> None:
-    """工程を流す作業（`ndf progress work`）を、自分の終わりに巻き込まれない別のプロセスの組で起こす。
+def launch_worker(st: store.Store, table_id: str, cwd: Path) -> Optional[int]:
+    """工程を流す作業（`ndf progress work`）を、自分の終わりに巻き込まれない別のプロセスの組で起こし、組の番号（pid）を返す。
 
     作業の標準出力と標準エラーは作業の置き場の `work.log` へ追記する。"""
     log = work_root(st.root, table_id) / "work.log"
@@ -478,7 +487,8 @@ def launch_worker(st: store.Store, table_id: str, cwd: Path) -> None:
     with log.open("a", encoding="utf-8") as out:
         argv = invoke.ndf_command(TOOL, "work", table_id)
         env = invoke.ndf_env(os.environ)
-        subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
+    return proc.pid
 
 
 def _invoke(run: invoke.StageRun, cwd: Path, work_dir: Path, answer: Optional[str]) -> invoke.StageResult:
@@ -582,9 +592,19 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
     return None if d.inline else _launched(d, v, m)
 
 
+def launch_path(root: Path, table_id: str) -> Path:
+    """起動の印。`next` が作業を起こした後、作業が排他を取るまでの間だけ置く（中身は作業の組の番号）。"""
+    return work_root(root, table_id) / LAUNCH_FILE
+
+
 def _launched(d: Drive, v: View, m: Move) -> dict[str, Any]:
+    """作業を起こし、排他を持ったまま起動の印を書く。作業が排他を取るまでの間も `is_live` が生きているとみなす。"""
     assert m.stage is not None
-    d.env.launch(d.st, d.table_id, d.cwd)
+    pid = d.env.launch(d.st, d.table_id, d.cwd)
+    if pid is not None:
+        mark = launch_path(d.st.root, d.table_id)
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.write_text(json.dumps({"pid": pid}), encoding="utf-8")
     summary = f"工程 {m.stage.name} から流す作業を起こした。承認ゲート・失敗・完了までは wait で待つ"
     return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("wait", d.table_id))
 
@@ -671,11 +691,21 @@ def advance(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, An
         return _drive(Drive(st, table_id, cwd, env, inline=False))
 
 
+def _launching(st: store.Store, table_id: str) -> bool:
+    """起こした作業がまだ排他を取っていないか（起動の印があり、印の組が生きている）。"""
+    try:
+        raw = json.loads(launch_path(st.root, table_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 印が無い・書きかけなら起こした作業は無い
+        return False
+    pid = raw.get("pid") if isinstance(raw, dict) else None
+    return isinstance(pid, int) and pid > 0 and process_group.group_alive(pid)
+
+
 def is_live(st: store.Store, table_id: str) -> bool:
-    """同じ進行表を流す作業（か `next`）が動いているか。排他を取れなければ動いている。"""
+    """同じ進行表を流す作業（か `next`）が動いているか。排他を取れないか、起こした作業がまだ排他を取っていなければ動いている。"""
     try:
         with store.run_lock(st, table_id):
-            held = False
+            held = _launching(st, table_id)
     except model.Refused:
         held = True
     return held
@@ -773,12 +803,19 @@ def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
 
 
 def _retrying(call: Callable[[], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
+    """打ち直しで直る止まりを方針どおりに打ち直す。プランは止まったステップから新しい回を始める（`invoke.plan_start`）。
+
+    打ち直しても同じプランの回の結果が返った（回が変わらず、控えの結果を返した）なら、それ以上は打ち直さない。
+    """
     used = 0
     res = call()
     while res.status == result.STOPPED and (delay := retry_delay(res.cause, used)) is not None:
         sleep(delay)
         used += 1
-        res = call()
+        again = call()
+        if invoke.same_run(res, again):
+            return again
+        res = again
     return res
 
 
@@ -862,7 +899,9 @@ def _work_lock(stack: ExitStack, st: store.Store, table_id: str, sleep: Callable
 def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     """工程を順に流す。答えを待つステップ・失敗・進行表の終わりで抜ける。"""
     with ExitStack() as stack:
-        if not _work_lock(stack, st, table_id, env.sleep):
+        locked = _work_lock(stack, st, table_id, env.sleep)
+        launch_path(st.root, table_id).unlink(missing_ok=True)  # 排他を取った（か、ほかの作業が持つ）ので起動の印は要らない
+        if not locked:
             return result.result(TOOL, result.OK, f"進行表 {table_id} はほかの作業が流している", metrics={"table_id": table_id})
         return _drive(Drive(st, table_id, cwd, env, inline=True))
     raise AssertionError("到達しない")
