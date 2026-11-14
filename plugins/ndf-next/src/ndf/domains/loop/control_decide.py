@@ -239,6 +239,18 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     return Decision(f"PR #{pr} の答え {given} を記録した", (ev,), metrics={"head": head, "answer": given})
 
 
+def _closing_events(lap: rec.Lap, facts: lap_decide.LapFacts, now: float) -> list[dict[str, Any]]:
+    """周を締める事象の列: 渡した版のうち記録に無いもの（重複は 1 つ、渡した順）を出した版として残し、最後に周を締める。
+
+    結果は記録の版と、ここで残す版を合わせて決める。
+    """
+    shipped = [
+        rec.event(rec.VERSION_SHIPPED, now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released
+    ]
+    closing, _, _ = _close_event(lap, replace(facts, released=(*lap.released, *(e["version"] for e in shipped))), now)
+    return [*shipped, closing]
+
+
 def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: float) -> Decision:
     """周を締める。結果は `lap_decide.lap_outcome` が決める。
 
@@ -253,12 +265,8 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
         if stop:
             return Decision(f"止める要求があり、ループ {c.name} を止めた", tuple(stop))
         return refuse(PRECONDITION, "締めていない周が無い", next_step(state, c.name))
-    # 締めるときに渡した版は、記録に無いものだけを出した版として残す
-    shipped = [
-        rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released
-    ]
-    closing, outcome, why = _close_event(lap, replace(facts, released=(*lap.released, *(e["version"] for e in shipped))), c.now)
-    events = [*shipped, closing]
+    events = _closing_events(lap, facts, c.now)
+    outcome, why = events[-1]["outcome"], events[-1]["reason"]
     after = rec.apply_all(state, events)
     tail = _boundary(after, c)
     tail = tail if tail else [rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)]
