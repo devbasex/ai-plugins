@@ -28,7 +28,7 @@ COMMANDS: dict[str, str] = {
 
 def _usage(name: str) -> str:
     lines = [f"使い方: {name} <副命令> [引数...]", "副命令:"]
-    lines += [f"  {cmd}" for cmd in sorted(COMMANDS)] or ["  （まだ無い）"]
+    lines += [f"  {cmd}" for cmd in sorted(COMMANDS)]
     return "\n".join(lines)
 
 
