@@ -346,25 +346,16 @@ def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], list
     return out
 
 
-def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
-    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。閉じた依頼の答えも載せる（#3128）。
+def _lane_items(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], now: datetime) -> list[dict[str, Any]]:
+    """レーンごとの表示の基本の項目（生死とマシンの上限の待ちは呼び手が足す）。"""
+    return [
+        {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": [_row_item(r, now) for r in rows[name]]}
+        for name, spec in view.lanes.items()
+    ]
 
-    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
-    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
-    レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
-    """
-    view, rows = lane.read_view(conn, pid)
-    verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
-    waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
-    items = []
-    for name, spec in view.lanes.items():
-        lane_rows = [_row_item(r, now) for r in rows[name]]
-        item = {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows}
-        if name in verdicts:
-            item["liveness"] = verdicts[name].as_dict()
-        if name in waits:
-            item["machine_wait"] = waits[name]
-        items.append(item)
+
+def _stall_warnings(items: list[dict[str, Any]], verdicts: dict[str, Any]) -> list[str]:
+    """止まりの警告（答えの後に next を打たない行 → 生死の判定で止まったレーンの順）。"""
     stalls = [
         f"レーン {i['lane']} の行 {r['row']}: 答えが載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
         for i in items
@@ -372,7 +363,12 @@ def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[livene
         if "awaiting_next" in r and r["awaiting_next"]["stalled"]
     ]
     stalls += [f"レーン {name} の行 {v.row}: {v.reason}" for name, v in verdicts.items() if v.stall]
-    metrics = {
+    return stalls
+
+
+def _plan_metrics(pid: str, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], stalls: list[str]) -> dict[str, Any]:
+    """計画全体の集計（結果 JSON の metrics）。"""
+    return {
         "plan_id": pid,
         "plan": view.name,
         "state": view.state,
@@ -385,5 +381,26 @@ def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[livene
         "stalled": len(stalls),
         "releases": release_counts(view),
     }
+
+
+def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
+    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。閉じた依頼の答えも載せる（#3128）。
+
+    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
+    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
+    レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
+    """
+    view, rows = lane.read_view(conn, pid)
+    verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
+    waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
+    items = _lane_items(view, rows, now)
+    for item in items:
+        name = item["lane"]
+        if name in verdicts:
+            item["liveness"] = verdicts[name].as_dict()
+        if name in waits:
+            item["machine_wait"] = waits[name]
+    stalls = _stall_warnings(items, verdicts)
+    metrics = _plan_metrics(pid, view, rows, stalls)
     summary = f"計画 {view.name} は{model.label(view.state)}（レーン {len(items)}・止まり {len(stalls)}）"
     return result.result(TOOL, result.OK, summary, items=items, metrics=metrics, warnings=stalls)
