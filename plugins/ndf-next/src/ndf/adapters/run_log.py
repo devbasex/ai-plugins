@@ -2,6 +2,9 @@
 
 `open_run` が実行の識別子を振り、利用者の状態の置き場の `runs/<リポジトリ>/<UTC の日付>/<起点の識別子>.jsonl` へ
 1 行ずつ書く。子は環境変数 `NDF_RUN_ID`・`NDF_RUN_LOG` を受けて親と同じファイルへ書き、`parent_id` で親を指す。
+
+書き口は標準の `logging` の専用の logger `ndf.run`（`propagate` は偽）に出力先の `Handler`（`Sink`）を 1 つだけ
+足す形にする（#2338 の決定 1）。伏せる処理と行の上限は `RunLog` が先に済ませ、出力先は受け取った 1 行を書くだけにする。
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -48,12 +52,23 @@ SECRET_SHAPES = (
 HEAD_CHARS = 200
 # JSON に書いた 1 字の最大のバイト数（制御文字の `\u00XX`）。stderr の続きの行の 1 行に入る字数を決める
 JSON_CHAR_BYTES = 6
-# 置き場のリポジトリの名前に使えない値（runs の下の 1 階層だけを許す）
+# 置き場のリポジトリの名前・実行の識別子に使えない値（パスの 1 要素だけを許す）
 UNSAFE_LOCATION = re.compile(r"[/\\\x00]")
+# 書き口の logger（#2338 の決定 1）。ルートの logger へ流さない
+LOGGER_NAME = "ndf.run"
+_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER.propagate = False
 
 
 class RunLogError(Exception):
-    """記録を開けない（置き場に書けない・知らない出力先・既に開いている・置き場の名前が使えない）。"""
+    """記録を開けない（置き場に書けない・知らない出力先・既に開いている・置き場の名前や識別子が使えない）。"""
+
+
+def _safe_name(name: str, what: str) -> str:
+    """パスの 1 要素として使える名前を返す。使えなければ、作る・書く・消すの前に `RunLogError`。"""
+    if name in ("", ".", "..") or UNSAFE_LOCATION.search(name):
+        raise RunLogError(f"{what}に使えない: {name!r}（パスの 1 要素の名前だけ）")
+    return name
 
 
 def _secret_values() -> list[str]:
@@ -108,16 +123,50 @@ def _append_line(path: Path, data: bytes) -> None:
         fh.flush()
 
 
+class Sink(logging.Handler):
+    """記録の出力先。`record.msg` に入った改行を含まない 1 行を書き切る。
+
+    書けなければ `OSError` を書き口へ返す（`logging` の `handleError` で握りつぶさない）。
+    """
+
+    path: Optional[Path] = None
+
+
+class FileSink(Sink):
+    """状態の置き場のファイルへ、排他の中で 1 行を書き切る。"""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self.path is None:
+            raise OSError("記録のファイルが無い")
+        _append_line(self.path, (record.msg + "\n").encode())
+
+
+class StderrSink(Sink):
+    """標準エラー（コンテナのログ）へ 1 行を書く。"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        sys.stderr.write(record.msg + "\n")
+
+
 @dataclass
 class RunLog:
-    """開いた実行の記録。`path` は file の出力先のファイル（stderr なら None）。`failed` は書けなくなった理由。"""
+    """開いた実行の記録。`sink` は出力先（`Sink`）。`failed` は書けなくなった理由。"""
 
     run_id: str
     parent_id: Optional[str]
     entry: str
-    path: Optional[Path]
+    sink: Sink
     failed: Optional[str] = None
     _blobs: int = field(default=0, repr=False)
+
+    @property
+    def path(self) -> Optional[Path]:
+        """file の出力先のファイル（stderr なら None）。"""
+        return self.sink.path
 
     def child_env(self) -> dict[str, str]:
         """子へ渡す環境変数。子は同じファイルへ書き、自分の行の `parent_id` でこの実行を指す。"""
@@ -132,10 +181,11 @@ class RunLog:
         return (json.dumps(line, ensure_ascii=False, default=str) + "\n").encode()
 
     def _emit(self, data: bytes) -> None:
-        if self.path is None:
-            sys.stderr.write(data.decode())
-        else:
-            _append_line(self.path, data)
+        """1 行を logger `ndf.run` を通して出力先へ渡す。手放した後の記録は書けない（`OSError`）。"""
+        if self.sink not in _LOGGER.handlers:
+            raise OSError(f"実行の記録 {self.run_id} は手放した後で、出力先が無い")
+        msg = data.decode().removesuffix("\n")
+        _LOGGER.handle(_LOGGER.makeRecord(LOGGER_NAME, logging.INFO, __file__, 0, msg, None, None))
 
     def _blob(self, text: str, limit: int) -> dict[str, Any]:
         """文字列を切らずに全文で逃がし、行には参照と先頭だけを残す（I4）。
@@ -202,8 +252,9 @@ def current() -> Optional[RunLog]:
 
 
 def close() -> None:
-    """このプロセスの記録を手放す（書いたファイルは残す）。"""
+    """このプロセスの記録を手放す（書いたファイルは残す）。logger `ndf.run` から出力先を外す。"""
     _CURRENT.clear()
+    _LOGGER.handlers.clear()
 
 
 def runs_dir() -> Path:
@@ -238,9 +289,7 @@ class RunTarget:
 
 def _repo_dir(target: RunTarget) -> Path:
     """置き場のリポジトリのディレクトリ。runs の下の 1 階層でなければ、作る・消すの前に `RunLogError`。"""
-    name = target.location or Path.cwd().name
-    if name in ("", ".", "..") or UNSAFE_LOCATION.search(name):
-        raise RunLogError(f"記録の置き場のリポジトリの名前に使えない: {name!r}（{RUNS_DIR} の下の 1 階層の名前だけ）")
+    name = _safe_name(target.location or Path.cwd().name, f"記録の置き場のリポジトリの名前（{RUNS_DIR} の下の 1 階層）")
     return runs_dir() / name
 
 
@@ -289,14 +338,16 @@ def open_run(
     if _CURRENT:
         raise RunLogError(f"このプロセスは実行の記録を既に開いている: {_CURRENT[0].run_id}")
     parent = parent_id or _inherited_run_id()
-    rid = run_id or uuid.uuid4().hex
+    rid = _safe_name(run_id or uuid.uuid4().hex, "実行の識別子")
     try:
         path = _log_path(RunTarget(rid, parent, location, now or datetime.now(timezone.utc)))
     except OSError as exc:
         raise RunLogError(f"実行の記録の置き場を作れない: {exc}") from exc
-    log = RunLog(run_id=rid, parent_id=parent, entry=entry, path=path)
+    log = RunLog(run_id=rid, parent_id=parent, entry=entry, sink=StderrSink() if path is None else FileSink(path))
+    _LOGGER.handlers[:] = [log.sink]
     log.write("start", pid=os.getpid(), cwd=str(Path.cwd()))
     if log.failed:
+        _LOGGER.handlers.clear()
         raise RunLogError(log.failed)
     _CURRENT.append(log)
     return log

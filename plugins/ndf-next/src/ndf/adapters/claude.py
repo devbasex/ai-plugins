@@ -7,6 +7,7 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence
 
 from ndf import identity
+from ndf.adapters.agents import stop
 from ndf.adapters.run_log import child_process_env
 
 CLAUDE = "claude"
@@ -114,12 +116,26 @@ def _parse_reply(stdout: str) -> ClaudeReply:
 
 
 def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
-    """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。"""
-    env = child_process_env()
+    """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。
+
+    専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する（claude が動かした Tool の子孫を残さない）。
+    """
+    pipe = subprocess.PIPE
     try:
-        done = subprocess.run(list(argv), input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        proc = subprocess.Popen(
+            list(argv), stdin=pipe, stdout=pipe, stderr=pipe, text=True, cwd=cwd, env=child_process_env(), start_new_session=True
+        )
+    except OSError as exc:
         return ClaudeReply.failed("", f"claude を起動できない・期限を超えた: {exc}")
-    if done.returncode != 0 and not done.stdout.strip():
-        return ClaudeReply.failed(done.stderr, f"claude が終了コード {done.returncode} で終えた: {done.stderr[:200]}")
-    return _parse_reply(done.stdout)
+    try:
+        stdout, stderr = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        stop(proc)
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None:
+                with contextlib.suppress(OSError):
+                    stream.close()
+        return ClaudeReply.failed("", f"claude を起動できない・期限を超えた: {exc}")
+    if proc.returncode != 0 and not stdout.strip():
+        return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}")
+    return _parse_reply(stdout)

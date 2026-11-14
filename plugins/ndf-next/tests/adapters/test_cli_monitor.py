@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import cli
+from ndf.adapters import agents, cli
 from ndf.contracts import limits
 
 POLL = 0.05
@@ -118,6 +118,18 @@ def test_child_receives_run_id(tmp_path):
     assert (tmp_path / "run" / "codex.out").read_text().split() == ["p", str(log.path)]
 
 
+@pytest.mark.parametrize(("writes", "state"), [(True, "done"), (False, "stalled")])
+def test_progress_file_keeps_silent_claude_from_stalling(tmp_path, monkeypatch, writes, state):
+    monkeypatch.setattr(agents, "stall_seconds", lambda _agent: 0.6)
+    progress = tmp_path / "run" / "claude-progress.log"
+    step = f"    open({str(progress)!r}, 'a').write('.')\n" if writes else ""
+    script = f"import time\nfor _ in range(8):\n{step}    time.sleep(0.2)\n"
+
+    status = cli.run_agent(launch(tmp_path, script, agent="claude"), poll=POLL)
+
+    assert status.state == state
+
+
 def test_stall_seconds_falls_back_to_default():
     assert cli.stall_seconds("codex") == 180
     assert cli.stall_seconds("unknown-agent") == limits.seconds("monitor.stall-default")
@@ -171,3 +183,23 @@ def test_stop_kills_descendants_that_outlive_the_cli(tmp_path):
     while _running(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert proc.poll() is not None and not _running(pid)
+
+
+def test_call_claude_timeout_kills_descendants(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = (
+        "import os, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+        "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+        "time.sleep(60)\n"
+    )
+    parent = f"import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', {child!r}, {str(pid_file)!r}])\ntime.sleep(60)\n"
+
+    got = cli.call_claude([sys.executable, "-c", parent], "q", 2)
+
+    pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while _running(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not got.ok and not _running(pid)

@@ -99,7 +99,8 @@ def test_call_claude_reads_json_in_result_text(tmp_path, stdout, answer):
 def test_agent_paths_at_names_files_next_to_stem():
     paths = cli.AgentPaths.at(Path("/w/kiro"))
 
-    assert (paths.out.name, paths.err.name, paths.launch.name) == ("kiro.out", "kiro.err.log", "kiro-launch.json")
+    names = (paths.out.name, paths.err.name, paths.launch.name, paths.progress.name)
+    assert names == ("kiro.out", "kiro.err.log", "kiro-launch.json", "kiro-progress.log")
 
 
 # ---------------------------------------------------------------- 現状固定: 子へ渡す環境と失敗の形（I-011・I-012）

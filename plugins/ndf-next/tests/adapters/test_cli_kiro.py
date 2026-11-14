@@ -80,6 +80,19 @@ def test_restore_failure_keeps_backup_and_reports(tmp_path, monkeypatch):
     assert "戻せない" in (tmp_path / "run" / "kiro.err.log").read_text()
 
 
+def test_unrestored_backup_from_earlier_run_is_kept(tmp_path):
+    work = worktree(tmp_path)
+    old = tmp_path / "run" / "kiro-launch-amazonq"
+    old.mkdir(parents=True)
+    (old / "x.json").write_text("前の起動の元の設定")
+
+    status = cli.run_agent(kiro(work, tmp_path), poll=0.05)
+
+    kept = sorted((tmp_path / "run").glob("kiro-launch-amazonq-unrestored-*"))
+    assert status.restore == "restored"
+    assert [(k / "x.json").read_text() for k in kept] == ["前の起動の元の設定"]
+
+
 def test_other_agents_are_not_guarded(tmp_path):
     work = worktree(tmp_path)
     spec = cli.Launch("codex", (sys.executable, "-c", FAKE_KIRO), work, cli.AgentPaths.at(tmp_path / "run" / "codex"), 30)

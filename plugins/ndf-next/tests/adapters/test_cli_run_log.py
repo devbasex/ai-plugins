@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -152,7 +153,7 @@ def test_finish_writes_end_and_stops_when_record_failed(capsys):
     assert log.finish(obj, 0) == (obj, 0)
     assert lines(log.path)[-1]["fields"] == {"result": obj, "exit": 0}
 
-    log.path = log.path.parent / "gone" / "x.jsonl"
+    log.sink.path = log.path.parent / "gone" / "x.jsonl"
     stopped, code = log.finish(obj, 0)
     assert stopped["status"] == "stopped" and code != 0
     assert "実行の記録に書けない" in capsys.readouterr().err
@@ -202,6 +203,28 @@ def test_location_outside_runs_is_refused_before_touching_dirs(tmp_path, locatio
         cli.open_run("entry", location=location, now=NOW)
 
     assert old.is_dir() and cli.current() is None
+
+
+@pytest.mark.parametrize("run_id", ["../outside", "/abs/outside", "..", "a/b"])
+def test_run_id_outside_day_dir_is_refused_before_writing(run_id):
+    victim = run_log.runs_dir() / "repo" / "outside.jsonl"  # "../outside" が指す先
+    victim.parent.mkdir(parents=True, exist_ok=True)
+    victim.write_text("利用者のファイル\n")
+
+    with pytest.raises(cli.RunLogError):
+        cli.open_run("entry", run_id=run_id, location="repo", now=NOW)
+
+    assert victim.read_text() == "利用者のファイル\n" and cli.current() is None
+
+
+def test_lines_go_through_dedicated_logger_handler():
+    log = cli.open_run("entry", run_id="h", location="repo", now=NOW)
+    logger = logging.getLogger(run_log.LOGGER_NAME)
+
+    assert logger.handlers == [log.sink] and logger.propagate is False
+    assert isinstance(log.sink, logging.Handler)
+    cli.close()
+    assert logger.handlers == []
 
 
 def test_stderr_sink_keeps_full_text_in_part_lines(monkeypatch, capsys):

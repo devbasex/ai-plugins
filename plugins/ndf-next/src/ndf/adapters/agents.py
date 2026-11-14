@@ -45,15 +45,27 @@ TAIL_BYTES = 200 * 1024
 
 @dataclass(frozen=True)
 class AgentPaths:
-    """1 回の起動のファイル。`out` は標準出力、`err` は標準エラー、`launch` は起動の記録（JSON）。"""
+    """1 回の起動のファイル。`out` は標準出力、`err` は標準エラー、`launch` は起動の記録（JSON）。
+
+    `progress` は起動した担当が作業の途中で追記する進捗のファイル。完了まで標準出力へ何も出さない担当
+    （claude の `--output-format json`）の無進捗も、このファイルの増え方で測る。担当へは問いの中でこのパスを渡す。
+    """
 
     out: Path
     err: Path
     launch: Path
+    progress: Optional[Path] = None
 
     @classmethod
     def at(cls, stem: Path) -> "AgentPaths":
-        return cls(stem.with_name(stem.name + ".out"), stem.with_name(stem.name + ".err.log"), stem.with_name(stem.name + "-launch.json"))
+        def named(suffix: str) -> Path:
+            return stem.with_name(stem.name + suffix)
+
+        return cls(named(".out"), named(".err.log"), named("-launch.json"), named("-progress.log"))
+
+    def watched(self) -> tuple[Path, ...]:
+        """無進捗の判定で大きさを足すファイル。"""
+        return (self.out, self.err) + ((self.progress,) if self.progress is not None else ())
 
 
 def tail(path: Path, size: int = TAIL_BYTES) -> str:
@@ -201,7 +213,7 @@ class _Watch:
     warned: Warned = field(default_factory=Warned)
 
     def progressed(self, now: float) -> None:
-        size = sum(p.stat().st_size for p in (self.spec.paths.out, self.spec.paths.err) if p.exists())
+        size = sum(p.stat().st_size for p in self.spec.paths.watched() if p.exists())
         if size != self.size:
             self.size, self.last_change = size, now
 
@@ -328,11 +340,20 @@ def _guard_restore(paths: AgentPaths, backed: _AgentsBackup, kept: dict[str, Any
     kept["restore"] = RestoreState.RESTORED
 
 
+def _keep_unrestored(backup: Path) -> None:
+    """前の起動で戻せずに残った控えを、消さずに別名へ移す（唯一の元の設定のため）。"""
+    if not backup.exists():
+        return
+    kept = backup.with_name(f"{backup.name}-unrestored-{time.time_ns()}")
+    backup.rename(kept)
+    diag(f"前の kiro の起動で戻せなかった控えを {kept} へ移して残す（起動の前の {KIRO_AGENTS} の中身。戻すのは人の手で）", agent="kiro")
+
+
 def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
-    """worktree の `.amazonq/cli-agents` を控える。"""
+    """worktree の `.amazonq/cli-agents` を控える。戻せずに残った前の控えは別名で残す。"""
     agents = workdir / KIRO_AGENTS
     backup = paths.launch.with_name(paths.launch.stem + BACKUP_SUFFIX)
-    shutil.rmtree(backup, ignore_errors=True)
+    _keep_unrestored(backup)
     before_bak = frozenset(p.name for p in agents.glob("*.bak")) if agents.is_dir() else frozenset()
     if agents.is_dir():
         shutil.copytree(agents, backup)
