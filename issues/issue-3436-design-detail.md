@@ -2,7 +2,7 @@
 
 設計文書 [issue-3436-design.md](issue-3436-design.md) の「構成要素」と「規則の節に書く中身」を、ファイルと節の粒度へ下ろした文書である。
 
-**この変更は Markdown の参照文書 4 本だけを変え、コード・関数・永続データを持たない。** そのため、関数を単位にする節（関数の仕様・異常系の処理・処理の手順・内部のデータと定数・並行と排他・ログと記録の出力・既存の部品の再利用・単体テストの観点）は省き、ファイルごとに変える節を「クラスと関数の構造」の表で決める。この表では、1 本の文書をモジュール、その中の見出しの節を最上位の関数に当てて読む。
+**この変更は Markdown の参照文書 4 本だけを変え、コード・関数・永続データを持たない。** そのため、関数を単位にする 8 つの節は省き、ファイルごとに変える節を「クラスと関数の構造」の表で決める。省く節は、関数の仕様・異常系の処理・処理の手順・内部のデータと定数・並行と排他・ログと記録の出力・既存の部品の再利用・単体テストの観点である。この表では、1 本の文書をモジュール、その中の見出しの節を最上位の関数に当てて読む。
 
 ## ファイル配置
 
@@ -24,16 +24,18 @@ plugins/ndf-next/skills/
 | --- | --- | --- | --- |
 | `plugins/ndf-next/skills/requirements-design/references/nonfunctional-requirements.md` | 変更 | 性能の条件の書き方の規則の正本（`### 合否に置く性能の条件` の節）を持つ | 無し |
 | `plugins/ndf-next/skills/requirements-design/references/acceptance-criteria.md` | 変更 | 受け入れ条件の書き換えの例を持ち、性能の条件は規則の節へリンクで渡す | `nonfunctional-requirements.md` の規則の節 |
-| `plugins/ndf-next/skills/requirements-design/SKILL.md` | 変更 | 手順 4 から規則の節へたどれる入口を持つ | `nonfunctional-requirements.md` の規則の節 |
+| `plugins/ndf-next/skills/requirements-design/SKILL.md` | 変更 | 手順 4 から規則の節へたどれるリンクを持つ | `nonfunctional-requirements.md` の規則の節 |
 | `plugins/ndf-next/skills/design/references/nonfunctional.md` | 変更 | 非機能設計表の例を持ち、確かめ方も規則の節に従うと示す | `nonfunctional-requirements.md` の規則の節 |
 
-依存の向き: 3 本の文書が規則の正本 1 本を見出しへのリンクで指し、正本はほかの 3 本を指さない。向きは一方向で循環は無い。`design` の本文（`plugins/ndf-next/skills/design/SKILL.md`）は既存のリンク（66 行目の「非機能の条件が仕様にある」の行）で `nonfunctional.md` を指しており、変えない（設計文書の「構成要素」）。
+依存の向き: 3 本の文書が規則の正本 1 本を見出しへのリンクで指し、正本はほかの 3 本を指さない。向きは一方向で循環は無い。`design` の本文（`plugins/ndf-next/skills/design/SKILL.md`）は変えない（設計文書の「構成要素」）。66 行目の「非機能の条件が仕様にある」の行が、既存のリンクで `nonfunctional.md` を指している。
 
-**4 本の写しは、この文書を書いた時点では `plugins/ndf-next/skills/` にまだ無い。** 2026-11-14 の `ls plugins/ndf-next/skills` の出力に `requirements-design` と `design` は無く、写しを移す #3303（#1142 S1a: Skill 本文とエージェント定義を `plugins/ndf-next/` へ移す）は OPEN である。実装は写しが入った後に着手する（設計文書の決定 7）。S1a は本文を変えずに移すため、この文書の見出しと行番号は移す元の `plugins/ndf/skills/` の同じ名前のファイルで数え、写しにもそのまま当てる。
+**4 本のコピーは、この文書を書いた時点では `plugins/ndf-next/skills/` にまだ無い。** 2026-11-14 の `ls plugins/ndf-next/skills` の出力に、`requirements-design` と `design` は無い。コピーを移す #3303（#1142 S1a: Skill 本文とエージェント定義を `plugins/ndf-next/` へ移す）は OPEN である。実装はコピーが入った後に着手する（設計文書の決定 7）。
+
+この文書の見出しと行番号は、移す元の `plugins/ndf/skills/` の同じ名前のファイルで数え、コピーにもそのまま当てる。S1a は本文を変えずに移すためである。
 
 ## クラスと関数の構造
 
-文書をモジュール、見出しの節を最上位の関数に当てた、変える節の一覧である。行番号は 2026-11-14 の `design/issue-3436` の HEAD（`65d81857f`）で、移す元の `plugins/ndf/skills/` のファイルを数えた（「ファイル配置」の最後の段落）。
+文書をモジュール、見出しの節を最上位の関数に当てた、変える節の一覧である。行番号は、移す元の `plugins/ndf/skills/` のファイルで数えた（「ファイル配置」の最後の段落）。数えた時点は 2026-11-14 の `design/issue-3436` の HEAD（`65d81857f`）である。
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
@@ -42,7 +44,13 @@ plugins/ndf-next/skills/
 | `plugins/ndf-next/skills/requirements-design/SKILL.md` | 受け入れ条件を書く手順の本文 | `### 4. 成功条件を観測可能な形へ変換する`（144 行目。変更: 性能の条件を書くときは `references/nonfunctional-requirements.md#合否に置く性能の条件` に従うという 1 文とリンクを足す。規則の文は写さない） |
 | `plugins/ndf-next/skills/design/references/nonfunctional.md` | 非機能の実現方式の参照文書 | 冒頭の段落（5〜6 行目。変更: 要求の側の参照をパスの記法からリンクへ変え、確かめ方も規則の節に従うという 1 文を足す）／`## 非機能設計表の書き方`（21 行目。変更: 29 行目の設計表の性能・拡張性の行を、設計文書の「置き換える例の行」の最後の行の値へ置き換える） |
 
-新設する節 `### 合否に置く性能の条件` の中の並びは、設計文書の「規則の節に書く中身」の表の行の順（3 つの形と例 → 相対の形の測る場所 → 秒数の上限の測る場所 → 共有の開発機で測った所要 → 時間で区切った負荷試験と資料の形）とする。載せる値と例は設計文書のその表が正本で、ここに写さない。
+新設する節 `### 合否に置く性能の条件` の中は、設計文書の「規則の節に書く中身」の表の行の順に並べる。載せる値と例は設計文書のその表が正本で、ここに写さない。
+
+1. 3 つの形と例
+2. 相対の形の測る場所
+3. 秒数の上限の測る場所
+4. 共有の開発機で測った所要
+5. 時間で区切った負荷試験と資料の形
 
 見出しの名前 `合否に置く性能の条件` は、3 本の文書のリンクの見出しの部分と一致させる。見出しの名前を変えるときは、3 本のリンクを同じ変更で直す（不変条件 I4。`scripts/check-markdown-links.py` が食い違いを 1 で落とすことは設計文書の「テスト設計」の実測にある）。
 
@@ -52,7 +60,7 @@ plugins/ndf-next/skills/
 
 ## 異常系の処理
 
-省く: 実行される処理を持たない。文書の誤りは設計文書の「テスト設計」の検査（`scripts/check-markdown-links.py`・`scripts/check-skill-frontmatter.py`・`grep` の照合）とレビューで止める
+省く: 実行される処理を持たない。文書の誤りは、設計文書の「テスト設計」の検査とレビューで止める。検査は `scripts/check-markdown-links.py`・`scripts/check-skill-frontmatter.py`・`grep` の照合である
 
 ## 処理の手順
 
