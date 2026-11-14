@@ -6,6 +6,7 @@ git を起動するのはこのモジュールの `Git` だけで、呼ぶ側は
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Callable, Iterable
@@ -22,6 +23,12 @@ _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:,
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 # `git log --format` で各コミットの行の先頭に置く印（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
+# ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
+HEADS = "refs/heads/"
+# 取得と照合に使うリモートの名前
+ORIGIN = "origin"
+# git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
+NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 class GitError(Exception):
@@ -40,9 +47,9 @@ Runner = Callable[[list[str], Optional[Path]], Completed]
 
 
 def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
-    """git を 1 回起動する（既定の起動の関数）。"""
+    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False, env={**os.environ, **NO_PROMPT})
     except OSError as exc:
         raise GitError(f"git を起動できない: {exc}") from None
     return Completed(proc.returncode, proc.stdout, proc.stderr)
@@ -88,6 +95,51 @@ def repo_of_url(url: str) -> Optional[str]:
     return f"{m.group('owner')}/{m.group('name')}" if m else None
 
 
+class WorktreeEntry(NamedTuple):
+    """`git worktree list` の 1 件。`branch` は detached HEAD なら `None`。"""
+
+    path: Path
+    head: str
+    branch: Optional[str]
+    prunable: bool = False
+    locked: bool = False
+
+
+def _short_branch(ref: Optional[str]) -> Optional[str]:
+    """branch の行の参照（`refs/heads/<名前>`）の名前。ブランチの参照でなければ `None`。"""
+    return ref[len(HEADS) :] if ref is not None and ref.startswith(HEADS) else None
+
+
+def _entry(record: str) -> Optional[WorktreeEntry]:
+    """worktree 1 件の項目（NUL 区切り）を読む。`worktree` の行が無ければ `None`。"""
+    fields = dict(f.partition(" ")[::2] for f in record.split("\0") if f)
+    if "worktree" not in fields:
+        return None
+    head = fields["HEAD"] if "HEAD" in fields else ""
+    return WorktreeEntry(Path(fields["worktree"]), head, _short_branch(fields.get("branch")), "prunable" in fields, "locked" in fields)
+
+
+def parse_worktree_list(text: str) -> list[WorktreeEntry]:
+    """`git worktree list --porcelain -z` の出力を読む（項目は NUL、worktree は空の項目で区切られる）。先頭はメインディレクトリ。"""
+    return [e for e in (_entry(record) for record in text.split("\0\0")) if e is not None]
+
+
+def parse_status_z(text: str) -> list[str]:
+    """`git status --porcelain -z` の出力のパス。改名と複製（状態の先頭が `R`・`C`）は続く項目の変更前のパスも並べる。"""
+    fields = text.split("\0")
+    out, i = [], 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        out.append(entry[3:])
+        if entry[0] in "RC" and i < len(fields):
+            out.append(fields[i])
+            i += 1
+    return out
+
+
 @dataclass(frozen=True)
 class Git:
     """1 つの作業場所での git の操作。"""
@@ -95,9 +147,13 @@ class Git:
     cwd: Optional[Path] = None
     runner: Runner = run_git
 
+    def attempt(self, *args: str) -> Completed:
+        """git を起動して結果をそのまま返す（失敗でも例外にしない。成否を読むのは呼び手）。"""
+        return self.runner(list(args), self.cwd)
+
     def run(self, *args: str) -> str:
         """git を起動して標準出力を返す。終了コードが 0 でなければ `GitError`。"""
-        done = self.runner(list(args), self.cwd)
+        done = self.attempt(*args)
         if done.returncode != 0:
             raise GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
         return done.stdout
@@ -112,12 +168,20 @@ class Git:
     def merge_base(self, a: str, b: str) -> str:
         return self.run("merge-base", a, b).strip()
 
+    def _probe(self, what: str, *args: str) -> bool:
+        """真偽を終了コードで返す探り（0 は真・1 は偽）。それ以外は `GitError`（`what` を確かめられない）。"""
+        done = self.attempt(*args)
+        if done.returncode not in (0, 1):
+            raise GitError(f"{what}を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
+        return done.returncode == 0
+
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         """`ancestor` が `descendant` の祖先か。git の失敗（終了コード 1 以外）は `GitError`。"""
-        done = self.runner(["merge-base", "--is-ancestor", ancestor, descendant], self.cwd)
-        if done.returncode not in (0, 1):
-            raise GitError(f"祖先を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
-        return done.returncode == 0
+        return self._probe("祖先", "merge-base", "--is-ancestor", ancestor, descendant)
+
+    def has_ref(self, ref: str) -> bool:
+        """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
+        return self._probe("参照", "show-ref", "--verify", "--quiet", ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。
@@ -141,10 +205,35 @@ class Git:
         per_commit = first_parent_lines(log_text)
         return sum(n for sha, n in per_commit.items() if not any(sha_matches(d, sha) for d in drop))
 
-    def remote_repo(self, remote: str = "origin") -> str:
+    def common_dir(self) -> Path:
+        """git の共通ディレクトリ（linked worktree からでもメインの `.git`）の実体の絶対パス。"""
+        common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        return Path(os.path.realpath(common))
+
+    def remote_repo(self, remote: str = ORIGIN) -> str:
         """リモートの `<所有者>/<リポジトリ>`。GitHub の URL でなければ `GitError`。"""
         url = self.run("remote", "get-url", remote).strip()
         repo = repo_of_url(url)
         if repo is None:
             raise GitError(f"リモート {remote} は GitHub のリポジトリでない: {url}")
         return repo
+
+    def status_paths(self) -> list[str]:
+        """未コミットの変更のパス（追跡していないファイルは中まで含める）。改名と複製は変更前のパスも含める。"""
+        return parse_status_z(self.run("status", "--porcelain", "-z", "--untracked-files=all"))
+
+    def worktrees(self) -> list[WorktreeEntry]:
+        """このリポジトリの worktree の一覧（先頭はメインディレクトリ）。"""
+        return parse_worktree_list(self.run("worktree", "list", "--porcelain", "-z"))
+
+    def fetch(self, remote: str, *refspecs: str) -> Completed:
+        """`git fetch -q --no-tags <remote> <refspec>...` を打ち、結果をそのまま返す（失敗を止めるかは呼び手が決める）。
+
+        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
+        `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
+        """
+        return self.attempt("fetch", "-q", "--no-tags", remote, *refspecs)
+
+    def fetch_branch(self, remote: str, name: str) -> Completed:
+        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
+        return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
