@@ -36,6 +36,25 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
     assert got["items"][0]["kind"] == "state" and got["metrics"]["open"] == 0
 
 
+# 現状固定: 宣言のテストの置き場所の扱い（strip は判定だけに使い、採るときは末尾の / だけを除く）
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ([""], ["pkg/a.py", "pkg/tests"]),
+        (["  "], ["pkg/a.py", "pkg/tests"]),
+        (["./"], ["pkg/a.py", "pkg/tests"]),
+        ([".", "", "./"], ["pkg/a.py", "pkg/tests"]),
+        (["tests/"], ["pkg/a.py", "tests"]),
+        (["tests//"], ["pkg/a.py", "tests"]),
+        (["/"], ["pkg/a.py"]),
+        ([" tests/ "], ["pkg/a.py", " tests/ "]),
+        (["a/", "b"], ["pkg/a.py", "a", "b"]),
+    ],
+)
+def test_compose_declared_test_places_current_behavior(declared, expected) -> None:
+    assert range_decide.compose(["pkg/a.py"], declared, {"pkg/a.py": "pkg/tests"}, []) == expected
+
+
 # 現状固定: scope_args の各分岐（宣言の有無・全体の宣言・明示の範囲・空の差分・git の失敗）と、同じ包み方の tracked
 SCOPED = {
     "pkg/mod/a.py": "a = 1\n",
