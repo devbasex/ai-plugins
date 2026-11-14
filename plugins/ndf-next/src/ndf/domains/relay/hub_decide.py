@@ -26,28 +26,36 @@ class Lanes:
     max_starts: int
 
 
+GO = "go"
+REFUSE = "refuse"
+
+
 class Decision(NamedTuple):
-    """`kind` は `go`（進める）か `refuse`（断る。対象は止めない）。"""
+    """`kind` は `GO`（進める）か `REFUSE`（断る。対象は止めない）。"""
 
     kind: str
     reason: str
+
+    @property
+    def ok(self) -> bool:
+        return self.kind == GO
 
 
 def restart(lanes: Lanes) -> Decision:
     """起こし直してよいか。止める前に判定する。"""
     others = lanes.running - (1 if lanes.target_running else 0)
     if others + 1 > lanes.max_named:
-        return Decision("refuse", f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
+        return Decision(REFUSE, f"対象を除いて {others} 本が動いており、上限 {lanes.max_named} 本を超える。対象は止めない")
     if lanes.starts_today >= lanes.max_starts:
-        return Decision("refuse", f"今日起動し直した回数が上限（{lanes.max_starts} 回）に当たった。対象は止めない")
-    return Decision("go", "止めてから起動し直す")
+        return Decision(REFUSE, f"今日起動し直した回数が上限（{lanes.max_starts} 回）に当たった。対象は止めない")
+    return Decision(GO, "止めてから起動し直す")
 
 
 def spawn(lanes: Lanes) -> Decision:
     """新しく起動してよいか。"""
     if lanes.running + 1 > lanes.max_named:
-        return Decision("refuse", f"{lanes.running} 本が動いており、上限 {lanes.max_named} 本を超える")
-    return Decision("go", "起動する")
+        return Decision(REFUSE, f"{lanes.running} 本が動いており、上限 {lanes.max_named} 本を超える")
+    return Decision(GO, "起動する")
 
 
 @dataclass(frozen=True)
@@ -70,10 +78,10 @@ def mixed(own_version: str, running: list[Running]) -> Decision:
     """版の違うラッパーが動いていれば断る。"""
     other = [r for r in running if r.version != own_version]
     if not other:
-        return Decision("go", "動いているラッパーはすべて同じ版")
+        return Decision(GO, "動いているラッパーはすべて同じ版")
     names = "・".join(f"{r.name}（{r.version or '旧い NDF'}）" for r in other)
     return Decision(
-        "refuse",
+        REFUSE,
         f"版の違うラッパーが動いている: {names}。旧い版のラッパーを止めて（/exit）から、この版で起動し直す",
     )
 
@@ -82,11 +90,11 @@ def started(facts: Started, name: str) -> Decision:
     """起動を「起動した」と返してよいか。"""
     if not facts.wrapper_present:
         return Decision(
-            "refuse",
+            REFUSE,
             f"{name} のラッパーの置き場が無い（プラグインの更新で版の置き場が消えた）。ndf relay install で置き直してから打ち直す",
         )
     if not facts.process_alive:
-        return Decision("refuse", f"{name} のラッパーが立ち上がらなかった（プロセスが無い）")
+        return Decision(REFUSE, f"{name} のラッパーが立ち上がらなかった（プロセスが無い）")
     if not facts.registered:
-        return Decision("refuse", f"{name} のラッパーは動いているが、置き場の一覧に載らない")
-    return Decision("go", f"{name} を起動した")
+        return Decision(REFUSE, f"{name} のラッパーは動いているが、置き場の一覧に載らない")
+    return Decision(GO, f"{name} を起動した")

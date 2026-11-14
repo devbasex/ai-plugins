@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Mapping, NamedTuple
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, registry, session_env, signals
@@ -146,17 +146,17 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     """新しく起動する。"""
     entries = read_registry(ctx.state_dir)
     running = registry.all_running(ctx.state_dir, ctx.environ)
-    mix = hub_decide.mixed(ctx.version, running)
-    if mix.kind != "go":
-        return Outcome(False, mix.reason, "precondition")
+    refused = _refused(hub_decide.mixed(ctx.version, running), "precondition")
+    if refused is not None:
+        return refused
     names = {r.name for r in running}
     name = str(req.get("name") or _next_name(names | set(entries)))
     if name in names or ctx.tmux.has(name):
         return Outcome(False, f"{name} は既に動いている", "refused")
     lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, False, 0, ctx.max_starts)
-    ok = hub_decide.spawn(lanes)
-    if ok.kind != "go":
-        return Outcome(False, ok.reason, "refused")
+    refused = _refused(hub_decide.spawn(lanes), "refused")
+    if refused is not None:
+        return refused
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
     entry["starts"] = registry.Starts(date.today().isoformat(), 0).as_json()
     got = _launch(ctx, name, entry)
@@ -174,15 +174,15 @@ def restart(ctx: Context, name: str) -> Outcome:
         return Outcome(False, f"{name} は登録簿に無い。spawn で起動する", "invalid")
     running = registry.all_running(ctx.state_dir, ctx.environ)
     others = [r for r in running if r.name != name]
-    mix = hub_decide.mixed(ctx.version, others)
-    if mix.kind != "go":
-        return Outcome(False, mix.reason, "precondition")
+    refused = _refused(hub_decide.mixed(ctx.version, others), "precondition")
+    if refused is not None:
+        return refused
     starts = registry.Starts.today(entry.get("starts"))
     target = any(r.name == name for r in running)
     lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts.count, ctx.max_starts)
-    ok = hub_decide.restart(lanes)
-    if ok.kind != "go":
-        return Outcome(False, ok.reason, "refused")
+    refused = _refused(hub_decide.restart(lanes), "refused")
+    if refused is not None:
+        return refused
     pending = ctx.pending()
     if target:
         stopped = stop(ctx, name)
@@ -193,6 +193,11 @@ def restart(ctx: Context, name: str) -> Outcome:
     entries[name] = entry
     _save_registry(ctx.state_dir, entries)
     return _with_pending(got, pending)
+
+
+def _refused(d: hub_decide.Decision, cause: str) -> Optional[Outcome]:
+    """断る判断なら、その理由と `cause` の結果。進めるなら None。"""
+    return None if d.ok else Outcome(False, d.reason, cause)
 
 
 def _own_count(running: list[hub_decide.Running]) -> int:
@@ -248,7 +253,7 @@ def _confirm(ctx: Context, name: str) -> Outcome:
         ctx.sleep(ctx.started.interval)
     facts = hub_decide.Started(True, ctx.tmux.has(name), registry.lock_busy(lock))
     got = hub_decide.started(facts, name)
-    return Outcome(got.kind == "go", got.reason, "" if got.kind == "go" else "precondition", [{"name": name}])
+    return Outcome(got.ok, got.reason, "" if got.ok else "precondition", [{"name": name}])
 
 
 def listing(ctx: Context) -> list[dict[str, Any]]:

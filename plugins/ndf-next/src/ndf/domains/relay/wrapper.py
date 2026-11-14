@@ -113,7 +113,7 @@ class Wrapper:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")
             others = [r for r in registry.all_running(self.s.state_dir, self.s.environ) if r.name != self.s.name]
             mix = hub_decide.mixed(self.s.version, others)
-            if mix.kind != "go":
+            if not mix.ok:
                 return Ended("precondition", mix.reason)
             return self._loop(prompt)
 
