@@ -382,21 +382,34 @@ def _invalid(detail: str) -> int:
     return result.emit(result.stopped(TOOL, "invalid", detail))
 
 
-def _cmd_repeat(a: argparse.Namespace) -> int:
+def _stopped_key(a: argparse.Namespace) -> str:
+    """結果ファイルの同じ原因の鍵。読めない・止まった結果でなければ `RouteError`。"""
     try:
         found = steps.last_json(Path(a.result).read_text(encoding="utf-8"))
     except OSError as exc:
-        return _invalid(f"結果 {a.result} を読めない: {exc.strerror or exc}")
+        raise RouteError(f"結果 {a.result} を読めない: {exc.strerror or exc}") from None
     key = cause_key(found) if found is not None else None
     if key is None:
-        return _invalid(f"結果 {a.result} は止まった結果でない")
+        raise RouteError(f"結果 {a.result} は止まった結果でない")
+    return key
+
+
+def _append_key(log: Path, key: str) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"key": key}, ensure_ascii=False) + "\n")
+
+
+def _cmd_repeat(a: argparse.Namespace) -> int:
+    try:
+        key = _stopped_key(a)
+    except RouteError as exc:
+        return _invalid(str(exc))
     log = Path(a.log)
     history = _read_lines(log)
     same_cause = int(limits.value(REPEAT_LIMIT, "same_cause"))
     count = streak(history, key) + 1
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"key": key}, ensure_ascii=False) + "\n")
+    _append_key(log, key)
     metrics = {"streak": count, "same_cause": same_cause}
     if repeated(history, key, same_cause):
         detail = f"同じ原因が {count} 回続いた（上限 {same_cause}）: {key}"
