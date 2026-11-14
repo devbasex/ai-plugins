@@ -9,7 +9,7 @@ from ndf.checks.model import CheckError
 OLD = "/".join(("plugins", "ndf"))
 
 
-def test_own_name_in_code_fails(plugin):
+def test_own_name_in_code_fails(plugin, where):
     plugin.write(
         "src/ndf/a.py",
         '"""ndf11 の説明"""\nP = "ndf11"\nQ = "a/ndf-next/b"\nR = "ndf11:design"\nS = "ndf-next"\nT = "ndf"\n'
@@ -19,14 +19,14 @@ def test_own_name_in_code_fails(plugin):
     plugin.write("skills/a/SKILL.md", "/ndf11:design を呼ぶ\n")
     found = invariants.own_name(plugin.scope())
     lines = [("run", 3), ("a.py", 2), ("a.py", 3), ("a.py", 4), ("a.py", 6), ("a.py", 7), ("a.py", 8)]
-    assert [(f.path.rsplit("/", 1)[-1], f.line) for f in found] == lines
+    assert where(found) == lines
 
 
-def test_only_fixed_word_definitions_pass(plugin):
+def test_only_fixed_word_definitions_pass(plugin, where):
     plugin.write("src/ndf/identity.py", 'FINAL_NAME = "ndf"\nFIXED_WORDS = {\n    "declaration_dir": ".ndf",\n}\nZ = ".ndf"\n')
     plugin.write("src/ndf/b.py", 'FIXED_WORDS = {"d": ".ndf"}\n')
     found = invariants.own_name(plugin.scope())
-    assert [(f.path.rsplit("/", 1)[-1], f.line) for f in found] == [("b.py", 1), ("identity.py", 5)]
+    assert where(found) == [("b.py", 1), ("identity.py", 5)]
 
 
 def test_imports_outside_declared_fail(plugin):

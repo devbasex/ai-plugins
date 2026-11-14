@@ -13,12 +13,12 @@ def glossary(plugin) -> None:
     (plugin.repo / "g.json").write_text(json.dumps({"terms": terms}, ensure_ascii=False))
 
 
-def test_deprecated_and_banned_words_are_found(plugin, rules):
+def test_deprecated_and_banned_words_are_found(plugin, rules, where):
     glossary(plugin)
     plugin.write("skills/a/SKILL.md", "旧い語を書く\n旧名もある\n")
     plugin.write("src/ndf/a.py", "# gate を見る\n")
     found = words.check(plugin.scope(), rules)
-    assert [(f.path.rsplit("/", 1)[-1], f.line) for f in found] == [("SKILL.md", 1), ("SKILL.md", 2), ("a.py", 1)]
+    assert where(found) == [("SKILL.md", 1), ("SKILL.md", 2), ("a.py", 1)]
     assert "リリース" in found[0].detail
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ndf.checks import child_deps, run
-from ndf.checks.model import Scope, load_rules
+from ndf.checks.model import Finding, Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # 開発の間のディレクトリ名とプラグイン名（#3347 の決定 100）
@@ -66,3 +66,13 @@ def plugin(tmp_path: Path) -> Plugin:
 @pytest.fixture
 def rules() -> dict:
     return load_rules()
+
+
+def _where(found: list[Finding]) -> list[tuple[str, int]]:
+    return [(f.path.rsplit("/", 1)[-1], f.line) for f in found]
+
+
+@pytest.fixture
+def where():
+    """指摘を（ファイル名, 行）の組に縮める関数（`where(found)`）。"""
+    return _where
