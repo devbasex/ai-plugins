@@ -16,7 +16,7 @@ name = "ndf-rebuild"
 version = "0"
 requires-python = ">=3.11"
 dependencies = [
-    "dbos==3.1.0",
+    "dbos==3.4.0",
     "filelock==4.0.3",
     "githubkit==0.17.1",
     "httpx==0.28.1",
@@ -32,6 +32,7 @@ dependencies = [
     "ruamel-yaml==0.19.1",
     "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
     "semver==3.1.0",
+    "sqlalchemy==2.1.8",  # 台帳 ndf_runs と DB 側の鍵のロック（core/durable.py）。DBOS も同じ版を使う
     "slack-sdk==3.44.1",
     "tabulate==0.10.0",
     "tenacity==9.1.4",

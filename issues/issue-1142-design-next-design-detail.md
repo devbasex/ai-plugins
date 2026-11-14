@@ -16,7 +16,7 @@
 | X1 | #3283 | 検査 1 本（兆候 0 件・構造の規則・輪・事実の重複・禁止語・ループの中の外部呼び出し・I1〜I3） | A0・A2（規則）・DC2・RF2・RF3・W8 | X0 | 2 | lrebuild |
 | D1 | #3284 | 契約と読み手（事実の表・止まった理由の表・結果 JSON で `cause` を必須・上限の宣言） | DC1・SF1a・SF1b・DC5 | X0 | 2 | lr-data |
 | C1 | #3285 | 判断のループ・判断の関数の型・DBOS の殻 | RF1 | X0 | 2 | lr-flow |
-| C1+ | #3285 の追補（#3344） | DBOS の殻の直し（鍵ごとの記録・形の番号・退避・待ちの一覧・DBOS 3.5.0。設計の決定 81〜87） | 無し | C1 | 2 | lr-flow |
+| C1+ | #3285 の追補（#3344） | DBOS の殻の直し（鍵ごとの記録・形の番号・退避・待ちの一覧・DBOS 3.4.0。設計の決定 81〜87） | 無し | C1 | 2 | lr-flow |
 | T1 | #3286 | テスト基盤（隔離・揺れない待ち・同時実行の枠） | N9・N12 | X0 | 2 | lr-fix-b |
 | D2 | #3287 | 領域の表（ランタイム・収束ループ・宣言・環境変数・PR の見出し・指示書） | DC3・DC4・DC6 | D1 | 3 | lr-data |
 | AD1 | #3288 | GitHub・git のアダプターと CI の結果の監視・落ちたチェックの分類 | A2（クエリ）・SF3（#3153）・SF4 | D1 | 3 | lr-fix-a |
@@ -170,7 +170,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | --- | --- | --- |
 | `plugins/ndf-next/.claude-plugin/plugin.json` | Claude Code 用の定義。名前 `ndf-next`・版 `11.0.0-dev.N` | X0 |
 | `plugins/ndf-next/.codex-plugin/plugin.json` | Codex 用の定義（同じ名前と版） | X0 |
-| `plugins/ndf-next/pyproject.toml` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択）。DBOS の版は C1+ が 3.5.0 へ上げる | X0・C1+ |
+| `plugins/ndf-next/pyproject.toml` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択）。DBOS の版は C1+ が 3.4.0 へ上げ、11-18 以降に 3.5.0 へ上げる（決定 87） | X0・C1+ |
 | `plugins/ndf-next/uv.lock` | 依存の lock | X0・C1+ |
 | `plugins/ndf-next/bin/ndf` | エントリポイント 1 本。依存の仮想環境を用意して `python -m ndf` を呼ぶ | X0 |
 | `plugins/ndf-next/src/ndf/__main__.py` | `cli.main` を呼ぶだけ | X0 |
@@ -254,12 +254,12 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `durable.run_name(run_key)` | 純粋な関数 | 実行の鍵 | `"run-" + sha256(run_key)[:32]` | 無し | DBOS のアプリ名の規則（3〜256 文字・英小文字・数字・`-`・`_`）に収まる。同じ鍵には同じ名前 |
 | `durable.run_url(root, run_key)` | 純粋な関数 | 置き場・実行の鍵 | `sqlite:///<root>/dbos/<run_name>.sqlite` | 無し | — |
 | `durable.run_lock(root, run_key, database_url=None, wait=True)` | 書き込み | 置き場・実行の鍵・URL・待つか | 文脈マネージャ（`wait` が偽で取れなければ `None`） | SQLite: `<root>/dbos/<run_name>.lock` を `fcntl.flock` の排他で取る。URL: PostgreSQL のセッションの advisory lock `pg_advisory_lock(RUN_LOCK_SPACE, <run_name から求めた 32 ビットの値>)`（`wait` が偽なら `pg_try_advisory_lock`）を取る | `wait` なら 2 つ目は待つ（I6）。`wait=False` は片付け（`sweep`・`sweep_url`）が使う。ファイルのロックは、取った後にパスの inode と開いたファイルの inode が同じかを確かめ、違えば（片付けが `.lock` を消した）開き直して取り直す。URL の鍵のロックは DB 側の排他で、別の機械の起動と片付けも同じ鍵で直列にする（I13） |
-| `durable.launch(database_url, run_key)` | 外部呼び出し | URL・実行の鍵 | 無し | DBOS を起動する。URL なら台帳 `ndf_runs` へ 1 行を書く | 呼び手は `run_lock(root, run_key, database_url)` を持った状態で呼び、DBOS を閉じるまで持つ。`name`・`executor_id` は `run_name(run_key)`、`application_version` は `f"format-{FORMAT}"`。SQLite の URL なら、鍵ごとの目印 `dbos/<run_name>.checked` が `CHECK_INTERVAL` より古いか無いときだけ、起動の前に `check_file` を打ち、`ok` なら目印の時刻を今にする（鍵ごとの目印は `run_lock` の下で読み書きするため、別の排他は要らない）。PostgreSQL の URL なら、鍵のロックの下で、起動の前に台帳へ `run_name`・`run_key`・起こした時刻を書く（既にあれば書かない。I12・I13） |
+| `durable.launch(database_url, run_key)` | 外部呼び出し | URL・実行の鍵 | 無し | DBOS を起動する。URL なら台帳 `ndf_runs` へ 1 行を書く | 呼び手は `run_lock(root, run_key, database_url)` を持った状態で呼び、DBOS を閉じるまで持つ。`name`・`executor_id` は `run_name(run_key)`、`application_version` は `app_version(run_key)`（`f"format-{FORMAT}-{run_name(run_key)}"`）。SQLite の URL なら、鍵ごとの目印 `dbos/<run_name>.checked` が `CHECK_INTERVAL` より古いか無いときだけ、起動の前に `check_file` を打ち、`ok` なら目印の時刻を今にする（鍵ごとの目印は `run_lock` の下で読み書きするため、別の排他は要らない）。PostgreSQL の URL なら、鍵のロックの下で、起動の前に台帳へ `run_name`・`run_key`・起こした時刻を書く（既にあれば書かない。I12・I13） |
 | `durable.check_file(path)` | 読み取り | SQLite のファイル | `bool` | 無し | `PRAGMA quick_check` が 1 行の `ok` を返せば真。ファイルが無ければ真 |
 | `durable.retire(root, run_key)` | 書き込み | 置き場・実行の鍵 | 移した先のパス | 鍵のファイルの本体・`-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵ごとの目印 `dbos/<run_name>.checked` を消し、最後に `dbos/<run_name>.lock` を消す | 呼び手が `run_lock` を持ち、DBOS を閉じた後に呼ぶ（起動したプロセスが終わるときと、`sweep` が `wait=False` で取れた鍵）。耐久ワークフローがすべて `SUCCESS`・`ERROR`・`CANCELLED` のときだけ移す。待ちがあれば何も移さず消さない。移す前に `PRAGMA wal_checkpoint(TRUNCATE)` で WAL を本体へ書き戻す。`.lock` はロックを持ったまま消し、消した後に同じ鍵を待っていたプロセスは `run_lock` の inode の確かめで開き直す |
 | `durable.sweep(root, now)` | 書き込み | 置き場・時刻 | `SweepResult`（`retired`・`deleted`・`skipped`・`busy`） | 終わったファイルを移し、`retired/`・`broken/` の `KEEP_DAYS` より古いファイルを消す（本体と `-wal`・`-shm`・`-journal` をそろえて） | `maint_lock(root, wait=False)` を取り、取れなければ何もせず `skipped` を真にして返す。取れたら目印 `dbos/.swept` を読み直し、`CHECK_INTERVAL` より新しければ何もせず `skipped` を真にして返す。生きている置き場の鍵ごとに `run_lock(root, run_key, wait=False)` を試し、取れた鍵だけ状態を読んで `retire` を呼ぶ。取れない鍵（開いているプロセスがいる）は移さず `busy` に数える。本体の無い `.checked` は消し、本体の無い `.lock` は `run_lock` を試して取れたときだけ消す。走査したら目印の時刻を今にしてから `maint_lock` を放す。待ちを抱えたファイルは消さない（I8） |
-| `durable.sweep_url(url, now, root)` | 外部呼び出し | URL・時刻・置き場 | `SweepResult` | 台帳 `ndf_runs` に載った鍵のうち、実行がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す | 目印と排他は `sweep` と同じ（`root` の `maint_lock` と `dbos/.swept`）。台帳の鍵ごとに `run_lock(root, run_key, url, wait=False)`（DB 側の鍵のロック）を試し、取れない鍵は `busy` に数えて触らない。取れた鍵は、ロックを持ったまま `DBOSClient.list_workflows(application_name=<鍵の名前>)` で実行（子を含む）を集め、1 つでも `PENDING`・`ENQUEUED` か、`updated_at` が `now - KEEP_DAYS` より新しいものがあれば消さない。すべて条件を満たせば集めた ID をすべて並べて `delete_workflows(ids)` を呼び（`delete_children` は使わない）、台帳の行を消してからロックを放す（I8・I12・I13） |
-| `durable.pending(root_or_url)` | 読み取り | 置き場か URL | `list[PendingRun]`（`run_name`・`workflow_id`・`status`・`updated_at`） | 無し | `PENDING`・`ENQUEUED` の実行を集める |
+| `durable.sweep_url(root, url, now)` | 外部呼び出し | 置き場・URL・時刻 | `SweepResult` | 台帳 `ndf_runs` に載った鍵のうち、実行がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す | 目印と排他は `sweep` と同じ（`root` の `maint_lock` と `dbos/.swept`）。台帳の鍵ごとに `run_lock(root, run_key, url, wait=False)`（DB 側の鍵のロック）を試し、取れない鍵は `busy` に数えて触らない。取れた鍵は、ロックを持ったまま `DBOSClient.list_workflows(application_name=<鍵の名前>)` で実行（子を含む）を集め、1 つでも `PENDING`・`ENQUEUED`・`DELAYED` か、`updated_at` が `now - KEEP_DAYS` より新しいものがあれば消さない。すべて条件を満たせば集めた ID をすべて並べて `delete_workflows(ids)` を呼び（`delete_children` は使わない）、台帳の行を消してからロックを放す（I8・I12・I13） |
+| `durable.pending(root_or_url)` | 読み取り | 置き場か URL | `list[PendingRun]`（`run_name`・`workflow_id`・`status`・`updated_at`） | 無し | `PENDING`・`ENQUEUED`・`DELAYED` の実行を集める |
 | `store.sqlite_path(url)` | 純粋な関数 | URL | 実ファイルのパスか `None` | 無し | SQLite の URL なら `os.path.realpath` で解いた実ファイルのパスを返し、PostgreSQL の URL なら `None`。`open_store` と `restore` は同じこの関数で対象のファイルを決める。URL は #3092 の設計のまま `NDF_PROGRESS_DB` か、無ければ `sqlite:///<root>/progress.sqlite` |
 | `store.db_lock(path, exclusive)` | 書き込み | 実ファイル・排他か | 文脈マネージャ | 実ファイルが置き場の中でも外でも、`<実ファイル>.lock` を `fcntl.flock` で取る（`exclusive` なら `LOCK_EX \| LOCK_NB`、でなければ `LOCK_SH`） | 同じ実ファイルは、どのチェックアウトから・どちらの URL の書き方で開いても `sqlite_path` で同じパスに解け、同じ `<実ファイル>.lock` を取る。`state.lock` はチェックアウトごとに分かれるため、それだけでは接続が無いことを確かめられない。置き場の中のファイルだけ省くと、チェックアウト A の既定の DB を B が `NDF_PROGRESS_DB` で開いている間に、A の `restore` が通る（I11） |
 | `store.open_store(url, root)` | 外部呼び出し | URL・置き場 | SQLAlchemy の `Engine` | 置き場のロックを共有で取る。SQLite なら WAL と `busy_timeout` 30 秒を設定し、検査の後に控えを取る | **SQLite の URL のとき:** `sqlite_path(url)` の実ファイルへ接続する前に `db_lock(path, exclusive=False)` を取り、`Engine` の全接続を閉じる（`dispose`）まで持つ。取ってから実ファイルへ接続する。接続の後に取ると、その間に別のチェックアウトの `restore` が排他を取り、接続した DB を置き換える（I11）。目印 `state/progress.checked` が `CHECK_INTERVAL` より古いか無ければ、`maint_lock(root, wait=True)` を待って取り、目印を読み直す。まだ古ければ `quick_check` を打ち、`ok` なら `backup` を呼んで目印の時刻を今にしてから `maint_lock` を放す。待っていたプロセスは読み直しで新しい目印を見て検査しない。`ok` でなければ `StoreBroken` を投げ、書かない（I9）。書き込みが `SQLITE_CORRUPT` を受けたら目印を消す。**PostgreSQL の URL のとき:** `PRAGMA`・`quick_check`・`backup` を打たず、#3092 の設計のまま `pg_try_advisory_lock` で書き手を 1 つにする。壊れたときの検出と控えは DB の運用に任せる |
@@ -286,19 +286,19 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `durable.prepare_store(root, now)` | 退避が要るのに、置き場のロックか、旧い置き場の鍵のロックか `progress.sqlite.lock` が持たれている | 何も変えない。止まった理由 `store_in_use`。結果に取れなかったロックのパスを載せる |
 | `durable.launch(database_url, run_key)` | 鍵のファイルが `quick_check` を通らない | 本体と `-wal`・`-shm`・`-journal` をそろえて `dbos/broken/<run_name>-<日時>.sqlite`（と同じ接尾辞）へ移し、止まった理由 `store_broken`。打ち直すと実行の回 1 から流れる |
 | `durable.launch(database_url, run_key)` | URL のとき、台帳 `ndf_runs` に書けない | DBOS を起動しない。止まった理由 `store_broken`。台帳に無い鍵は片付けで消せないため、書かずに起動しない |
-| `durable.launch(database_url, run_key)` | 記録の `application_version` が今の `format-<FORMAT>` と違う `PENDING` がある | 起動の回復に任せない。呼び手（C2・P1）が #3092 の決定 21 の扱いで古い実行を取り消す |
+| `durable.launch(database_url, run_key)` | 記録の `application_version` が今の `app_version(run_key)`（`format-<FORMAT>-<鍵の名前>`）と違う `PENDING` がある | 起動の回復に任せない。呼び手（C2・P1）が #3092 の決定 21 の扱いで古い実行を取り消す |
 | `durable.run_lock(root, run_key, database_url=None, wait=True)` | ロックのファイルを作れない（置き場が書き込めない） | 止まった理由 `config_broken`。DBOS を起動しない |
 | `durable.run_lock(root, run_key, database_url=None, wait=True)` | 取った後に、パスの inode が開いたファイルと違う（片付けが `.lock` を消した） | 開き直して取り直す。回数は数えない（消すのは終わった鍵だけで、取り直した後は消されない） |
 | `durable.prepare_store(root, now)` | 共有で取り直した後の番号が自分と違う（退避の間に別の退避が割り込んだ） | (1) からやり直す。3 回で合わなければ何も変えずに止まった理由 `store_in_use` |
 | `durable.retire(root, run_key)` | 移す先に同じ名前がある | 日時を足した名前で移す。消さない |
 | `durable.sweep(root, now)` | 1 つのファイルの状態を読めない（壊れている・ロック中） | そのファイルは移さず消さず、`warnings` に載せて次のファイルへ進む。片付けの失敗で実行を止めない |
-| `durable.sweep(root, now)`・`sweep_url(url, now, root)` | 鍵の `run_lock` を `wait=False` で取れない（同じ鍵を開いたプロセスがいる） | その鍵は移さず消さず、`busy` に数えて次の鍵へ進む。目印は更新し、次の走査で見る |
-| `durable.sweep(root, now)`・`sweep_url(url, now, root)` | `maint_lock` を取れない（ほかのプロセスが検査か走査をしている） | 何もせず `skipped` を真にして返す |
+| `durable.sweep(root, now)`・`sweep_url(root, url, now)` | 鍵の `run_lock` を `wait=False` で取れない（同じ鍵を開いたプロセスがいる） | その鍵は移さず消さず、`busy` に数えて次の鍵へ進む。目印は更新し、次の走査で見る |
+| `durable.sweep(root, now)`・`sweep_url(root, url, now)` | `maint_lock` を取れない（ほかのプロセスが検査か走査をしている） | 何もせず `skipped` を真にして返す |
 | `store.backup(engine, root, now)` | 控えの書き込みに失敗する（容量不足など） | 書きかけの控えを消し、`warnings` に載せて進む。古い控えは消さない |
 | `store.restore(url, root, backup)` | 控えが `quick_check` を通らない | 何も移さずに止まる（`store_broken`）。一時名の写しを消す。結果に次に新しい控えのパスを載せる |
 | `store.restore(url, root, backup)` | 置き場のロックか、実ファイルの `<実ファイル>.lock` を排他で取れない（進行表の DB を開いたプロセスがいる。別のチェックアウトのプロセスも含む） | 何も移さずに止まる（`store_in_use`） |
 | `store.restore(url, root, backup)` | URL（PostgreSQL）を渡した | 何も移さずに止まる（`restore_unsupported`）。結果に「PostgreSQL の控えと戻しは DB の運用で行う」を載せる |
-| `durable.sweep_url(url, now, root)` | DB に届かない | 消さずに `warnings` に載せて進む。片付けの失敗で実行を止めない |
+| `durable.sweep_url(root, url, now)` | DB に届かない | 消さずに `warnings` に載せて進む。片付けの失敗で実行を止めない |
 | `store.open_store(url, root)` | `quick_check` が `ok` でない | 止まった理由 `store_broken`。結果に最新の控えのパスと `ndf progress restore --from <控え>` を載せる |
 | `store.open_store(url, root)` | `database is locked` が `busy_timeout` を超えた | 止まった理由 `store_busy`（再試行の方針は止まった理由の表） |
 
@@ -320,7 +320,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 | 名前 | 値 | 意味 |
 | --- | --- | --- |
-| `FORMAT` | `1` | 耐久ワークフローの中の DBOS の呼び出しの順の番号。アプリの版は `format-<FORMAT>`（決定 84） |
+| `FORMAT` | `1` | 耐久ワークフローの中の DBOS の呼び出しの順の番号。アプリの版は `format-<FORMAT>-<鍵の名前>`（`app_version(run_key)`。決定 84） |
 | `FORMAT_SOURCE_HASH` | 耐久ワークフローの関数のソースの sha256 | `FORMAT` の上げ忘れを落とすテストが比べる値 |
 | `STORE_FORMAT` | `1` | チェックアウトの置き場の `format.json` の番号（決定 85） |
 | `KEEP_DAYS` | `14` | `retired/`・`broken/` と URL の終わった実行を消すまでの日数（決定 83） |
@@ -563,7 +563,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | I11（`durable.prepare_store`・`store.restore`） | 別のプロセスが `state.lock` を共有で持つ間、番号の小さい置き場の退避と `restore` は `store_in_use` で止まり、`state/` の名前と中身が変わらない。旧い置き場の `dbos/*.lock` か `progress.sqlite.lock` を持つプロセス（別のチェックアウトから既定の DB を開いたプロセスを含む）がいる間も同じ。退避の後も `maint.lock` は同じパスにある。番号の小さい置き場を 2 つのプロセスが同時に開くと、退避は 1 回だけ起き、新しい置き場は退避されない（排他の下で読み直さないよう壊すと落ちる）。ロックを確かめないよう壊すと落ちる |
 | `store.backup` | 同じ日の 2 度目の起動では控えを取らない。8 本目を取ると最も古い 1 本が消える |
 | I10（`durable.prepare_store`） | 番号 0（`format.json` 無し）と自分より小さい番号は退避され、中身が残る。自分より大きい番号は何も変わらず `format_newer` で止まる |
-| `durable.pending` | `PENDING`・`ENQUEUED` だけが並び、`SUCCESS` は並ばない |
+| `durable.pending` | `PENDING`・`ENQUEUED`・`DELAYED` だけが並び、`SUCCESS` は並ばない |
 
 ## #3344 で子へ足す受け入れ条件
 
@@ -577,10 +577,10 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | A4 | C1+ | 鍵のファイルは、鍵ごとの目印が 24 時間より古いか無いときに起動の前に `quick_check` を打ち、通らなければ `broken/` へ移して `store_broken` で止まる | 決定 82 |
 | A5 | C1+ | 終わった実行の鍵のファイルを `retired/` へ移し、`retired/`・`broken/` の 14 日より古いファイルを、走査の目印が 24 時間より古い起動で消す。待ちを抱えたファイルは消さない。走査は鍵ごとに `run_lock` を待たずに試し、取れた鍵だけを移す。開いているプロセスがいる鍵を移さないことをテストで確かめる | 決定 83・I6・I8 |
 | A6 | C1+ | URL を渡したときも、台帳 `ndf_runs` に載った鍵のうち、実行（子を含む）がすべて終わって 14 日を過ぎた鍵の実行を `delete_workflows` で消す。1 つでも待ちか 14 日以内のものがある鍵は消さない。`delete_children=True` に頼らない | 決定 83・I8 |
-| A7 | C1+ | `application_version` は `format-<FORMAT>` で、`plugin.json` の版を上げて起動し直しても途中の実行が回復することをテストで確かめる。`FORMAT_SOURCE_HASH` の比べ合いのテストを置く | 決定 84・I7 |
+| A7 | C1+ | `application_version` は `format-<FORMAT>-<鍵の名前>`（`app_version(run_key)`）で、`plugin.json` の版を上げて起動し直しても途中の実行が回復することをテストで確かめる。`FORMAT_SOURCE_HASH` の比べ合いのテストを置く | 決定 84・I7 |
 | A8 | C1+ | チェックアウトの置き場の `format.json` を決定 85 の表のとおりに扱う。番号が自分より大きい置き場には書かない | 決定 85・I10 |
 | A9 | C1+ | `durable.pending` が置き場か URL から待ちを抱えた実行を集める | 決定 86 |
-| A10 | C1+ | `plugins/ndf-next/pyproject.toml` と `uv.lock` の DBOS を 3.5.0 にし、`plugins/ndf-next/tests/` がすべて通る | 決定 87 |
+| A10 | C1+ | `plugins/ndf-next/pyproject.toml` と `uv.lock` の DBOS を 3.4.0 にし（3.5.0 へは 11-18 以降。決定 87）、`plugins/ndf-next/tests/` がすべて通る | 決定 87 |
 | A11 | C1+ | 置き場を使うプロセスは `state.lock` を共有で持つ。置き場ごとの退避は、共有で番号を読み、共有を放して排他を待たずに取り、排他の下で番号を読み直し、`state.lock` と旧い置き場の `dbos/*.lock`・`progress.sqlite.lock` をすべて排他で取れたときだけ行い、共有で取り直して番号をもう一度確かめる。取れなければ何も変えずに `store_in_use` で止まること、2 つのプロセスが同時に開いても退避が 1 回だけであることをテストで確かめる | 決定 85・I11 |
 | A12 | C1+ | URL のとき `durable.launch` は DB 側の鍵のロックを取ってから台帳 `ndf_runs` へ鍵を書いて DBOS を起動し、片付けは台帳に無い `application_name` の実行を消さないことと、鍵のロックを持つ起動がいる鍵を消さないことをテストで確かめる | 決定 83・I12・I13 |
 | A13 | C1+ | 鍵のファイルを `retired/`・`broken/` へ移すときは、本体と `-wal`・`-shm`・`-journal` をそろえて移し、鍵ごとの `.checked` を消し、`.lock` は `run_lock` を持ったまま最後に消す。退避の後に生きている置き場へ鍵のファイルが 1 つも残らないことをテストで確かめる | 決定 82・83・I6 |
