@@ -5,8 +5,11 @@
 - 打つ前に、worktree の `.git` が指す管理情報（`HEAD`・`commondir`）があるかを確かめ、無ければ
   `WorktreeUnregistered`（worktree のパスと `.git` が指す先）で止める。「リポジトリを決められない」とは書かない
 - 流し直しの初めに、worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す。衝突したら
-  前の HEAD へ戻す（コミットを失わない）
-- 片付けは、lock の理由が NDF の作業のものだけを unlock してから外す。利用者の lock は外さない
+  前の HEAD へ戻す（コミットを失わない）。commit していない変更・送っていないマージのコミット（載せ直すと
+  マージで足した変更が消える）・origin の先頭が追跡するパスと重なる未追跡のファイル（ignored を含む。reset で
+  上書きされる）があれば、何も変えずに止める
+- 片付けは、lock の理由が NDF の作業のものだけを unlock してから強制で外す。利用者の lock は外さない。lock の無い
+  worktree は NDF が作ったと確かめられないので強制せずに外し、変更が残っていれば外さずに理由を返す
 
 関数は作業の名前（`tool`。`cross-review`・`cross-refactoring`）を受け、cross 系の作業が同じ部品を使う。
 """
@@ -45,7 +48,7 @@ class LockFailed(Exception):
 
 
 class SyncRefused(Exception):
-    """worktree に commit していない変更があり、origin へ合わせない。"""
+    """origin へ合わせると worktree の変更・コミット・ファイルを失うので合わせない。"""
 
 
 class Registration(NamedTuple):
@@ -142,10 +145,16 @@ def lock_of(repo: git.Git, worktree: Path) -> Optional[str]:
 def release(repo: git.Git, worktree: Path) -> Release:
     """NDF の lock なら外してから worktree を外す。利用者の lock（理由が NDF の前置きでない）は外さずに理由を返す。"""
     reason = lock_of(repo, worktree)
-    if reason is not None and not reason.startswith(LOCK_PREFIX):
+    if reason is None:
+        # NDF が作ったと確かめられない。強制せずに外し、利用者の変更が残れば git が拒むのでそのまま返す
+        try:
+            repo.run("worktree", "remove", str(worktree))
+        except git.GitError as exc:
+            return Release(False, f"NDF の lock が無く、変更が残るので強制では外さない: {exc}")
+        return Release(True, None)
+    if not reason.startswith(LOCK_PREFIX):
         return Release(False, f"利用者の lock なので外さない（理由: {reason or '無し'}）")
-    if reason is not None:
-        repo.run("worktree", "unlock", str(worktree))
+    repo.run("worktree", "unlock", str(worktree))
     repo.run("worktree", "remove", "--force", str(worktree))
     return Release(True, None)
 
@@ -166,12 +175,42 @@ def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
     return g.run("rev-list", "--reverse", "--no-merges", "--cherry-pick", "--right-only", f"{remote}...{head}").split()
 
 
+def _untracked_in_the_way(g: git.Git, remote: str) -> list[str]:
+    """未追跡のファイル（ignored を含む）のうち、`remote` が追跡するパスと重なる（reset で上書き・削除される）もの。"""
+    untracked = [p for p in g.run("ls-files", "--others", "-z").split("\0") if p]
+    if not untracked:
+        return []
+    files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", remote).split("\0") if p}
+    dirs = {"/".join(parts[:i]) for parts in (f.split("/") for f in files) for i in range(1, len(parts))}
+
+    def clashes(path: str) -> bool:
+        parts = path.split("/")
+        return path in files or path in dirs or any("/".join(parts[:i]) in files for i in range(1, len(parts)))
+
+    return [p for p in untracked if clashes(p)]
+
+
+def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
+    """合わせると失うもの（送っていないマージのコミット・上書きされる未追跡のファイル）があれば `SyncRefused`。"""
+    merges = g.run("rev-list", "--merges", f"{remote}..{before}").split()
+    if merges:
+        raise SyncRefused(
+            f"送っていないマージのコミットがあり、載せ直すとマージで足した変更が消える。送ってから流し直す: {', '.join(merges)}"
+        )
+    clashing = _untracked_in_the_way(g, remote)
+    if clashing:
+        raise SyncRefused(
+            f"未追跡のファイルが origin の先頭の追跡するパスと重なり、合わせると上書きされる。移してから流し直す: {', '.join(clashing)}"
+        )
+
+
 def sync_worktree(g: git.Git, head_branch: str) -> SyncResult:
-    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。"""
+    """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。"""
     if g.run("status", "--porcelain", "--untracked-files=no").strip():
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
     before = g.rev_parse("HEAD")
     remote = fetch_head(g, head_branch)
+    _refuse_lossy_sync(g, remote, before)
     own = own_commits(g, remote, before)
     g.run("reset", "--hard", remote)
     if not own:

@@ -264,13 +264,14 @@ def _branch_of(wt: Path) -> str:
 
 
 def _run_config(args: argparse.Namespace) -> drive.RunConfig:
-    wt = Path(args.worktree) if args.worktree else Path.cwd()
+    # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
+    wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
     return drive.RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
         base=args.base,
         pr=args.pr,
-        state_dir=Path(args.state_dir),
+        state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
         reviewers=participants.assign(args.reviewer if args.reviewer else ()),
         max_rounds=args.max_rounds,

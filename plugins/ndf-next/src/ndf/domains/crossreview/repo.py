@@ -16,7 +16,8 @@ from ndf.adapters import git
 # 決めた出所
 ARG = "arg"
 STATE = "state_file"
-ORIGIN = "origin"
+# cwd の origin（リモートの名前と同じ語）
+ORIGIN = git.ORIGIN
 
 
 class RepoUnresolved(Exception):

@@ -116,3 +116,13 @@ def test_cli_lock_reports_the_reason(repos: Repos, tmp_path: Path, capsys: pytes
     assert cli.main(["lock", str(wt), "--pr", "6"]) == 0
     assert last_result(capsys.readouterr().out)["items"][0]["locked"] == worktree.lock_reason(cli.CROSS_REVIEW, 6)
     assert worktree.lock_of(git.Git(repos.main), wt) == worktree.lock_reason(cli.CROSS_REVIEW, 6)
+
+
+def test_release_does_not_force_an_unlocked_worktree_with_changes(repos: Repos, tmp_path: Path) -> None:
+    """PR #3466 の指摘: lock の無い worktree は NDF が作ったと確かめられないので、変更が残れば強制で外さない。"""
+    plain = tmp_path / "plain"
+    sh(repos.main, "worktree", "add", "-q", "-b", "plain", str(plain), "HEAD")
+    (plain / "mine.txt").write_text("利用者の書きかけ\n", encoding="utf-8")
+    got = worktree.release(git.Git(repos.main), plain)
+    assert not got.removed and got.reason is not None
+    assert (plain / "mine.txt").read_text(encoding="utf-8") == "利用者の書きかけ\n"

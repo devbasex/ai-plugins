@@ -12,7 +12,9 @@
 
 状態ファイルへ rounds・reviewed_sections・台帳（findings）をラウンドごとに書き、終わったら `summary.json`
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
-前の起動が残した修正の結果ファイルを取り込む（#2770）。
+前の起動が残した修正の結果ファイルを取り込む（#2770）。修正の結果は状態ファイルへ書いてから結果ファイルを
+ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
+コミットが残っていれば、始めに送ってから進む。
 """
 
 from __future__ import annotations
@@ -200,6 +202,22 @@ def _ingest_pending(run: _Run) -> None:
         raise DriveStopped("work_stopped", str(gate.reason))
     if gate.kind == fixgate_decide.INGEST and pending is not None:
         last["fix"] = _take_fix(run, pending, len(rounds))
+        _save(run)
+        _consume(pending, len(rounds))
+
+
+def _resend(run: _Run, synced: worktree.SyncResult) -> None:
+    """前の起動が送れなかった修正のコミット（載せ直した自分のコミット）があれば送る。送れなければ記録して止める。"""
+    fix = store.last_round(run.data).get("fix")
+    if synced.replayed == 0 or not isinstance(fix, dict) or "pushed" in fix:
+        return
+    round_no = len(store.list_of(run.data, store.ROUNDS))
+    remote = run.g.rev_parse(f"refs/remotes/{git.ORIGIN}/{run.cfg.branch}")
+    # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの照合はしない
+    sent = _push(run, round_no, remote, fix, check_commit=False)
+    _save(run)
+    if not sent:
+        raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
 
 
 def _start(cfg: RunConfig) -> _Run:
@@ -212,6 +230,7 @@ def _start(cfg: RunConfig) -> _Run:
     data = store.read_state(ref)
     run = _Run(cfg, g, ref, data, FindingLedger(store.list_of(data, store.FINDINGS)), [], [], [])
     _ingest_pending(run)
+    _resend(run, synced)
     return run
 
 
@@ -306,12 +325,16 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
 
 
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
-    """修正の結果を台帳へ取り込み、結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。"""
+    """修正の結果を台帳へ取り込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
     found = store.read_fix_result(path, run.ref)
     reported = run.ledger.apply_fix(store.list_of(found, store.FINDINGS), run.cfg.handed, round_no)
-    os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
+
+
+def _consume(path: Path, round_no: int) -> None:
+    """取り込んだ結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。状態ファイルへ書いた後に呼ぶ。"""
+    os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
 
 
 def _fix(
@@ -333,12 +356,12 @@ def _fix(
     return fix
 
 
-def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> bool:
+def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], check_commit: bool = True) -> bool:
     """修正のコミットを送る。コミットが無ければ送らない。送れなければ、このラウンドで直したとした指摘を未解決へ戻し
     （PR に届いていない）、注意に載せて False。"""
     if run.g.rev_parse("HEAD") == reviewed_head:
         return True
-    commit = fix.get("commit") if isinstance(fix.get("commit"), str) else None
+    commit = fix.get("commit") if check_commit and isinstance(fix.get("commit"), str) else None
     sent = push.push_fix(run.g, run.cfg.branch, commit)
     if sent.ok:
         fix["pushed"] = sent.head
@@ -417,6 +440,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if fix is None:
         return fin.ERROR
     record["fix"] = fix
+    _save(run)
+    _consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
     return None if _push(run, round_no, prep.head, fix) else fin.ERROR
 
 

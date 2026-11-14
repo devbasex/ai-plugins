@@ -152,3 +152,39 @@ def test_sync_refuses_uncommitted_changes(repos: Repos, tmp_path: Path) -> None:
     (wt / "doc.md").write_text("書きかけ\n", encoding="utf-8")
     with pytest.raises(worktree.SyncRefused):
         worktree.sync_worktree(git.Git(wt), BRANCH)
+
+
+def test_sync_refuses_untracked_files_that_origin_would_overwrite(repos: Repos, tmp_path: Path) -> None:
+    """PR #3466 の指摘: origin の先頭が追跡するパスと重なる未追跡のファイル（ignored を含む）があれば、何も変えずに止める。"""
+    wt = _review_worktree(repos, tmp_path)
+    before = sh(wt, "rev-parse", "HEAD").strip()
+    sh(wt, "config", "core.excludesFile", str(tmp_path / "ignore"))
+    (tmp_path / "ignore").write_text("cache/\n", encoding="utf-8")
+    (wt / "new.txt").write_text("手元だけの中身\n", encoding="utf-8")
+    (wt / "cache").mkdir()
+    (wt / "cache" / "a.txt").write_text("ignored の中身\n", encoding="utf-8")
+    commit(repos.other, "new.txt", "origin の中身\n", "同じ名前を追跡")
+    commit(repos.other, "cache/a.txt", "origin の中身\n", "ignored と同じ名前を追跡")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    with pytest.raises(worktree.SyncRefused, match="new.txt") as refused:
+        worktree.sync_worktree(git.Git(wt), BRANCH)
+    assert "cache/a.txt" in str(refused.value)
+    assert sh(wt, "rev-parse", "HEAD").strip() == before
+    assert (wt / "new.txt").read_text(encoding="utf-8") == "手元だけの中身\n"
+    assert (wt / "cache" / "a.txt").read_text(encoding="utf-8") == "ignored の中身\n"
+
+
+def test_sync_refuses_an_unsent_merge_commit(repos: Repos, tmp_path: Path) -> None:
+    """PR #3466 の指摘: 送っていないマージのコミットは載せ直すとマージで足した変更が消えるので、reset の前に止める。"""
+    wt = _review_worktree(repos, tmp_path)
+    sh(wt, "checkout", "-q", "-b", "side", "HEAD")
+    commit(wt, "side.txt", "side\n", "横")
+    sh(wt, "checkout", "-q", "-")
+    commit(wt, "main.txt", "main\n", "縦")
+    sh(wt, "merge", "-q", "--no-ff", "-m", "マージ", "side")
+    before = sh(wt, "rev-parse", "HEAD").strip()
+    commit(repos.other, "o.txt", "o\n", "別の push")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    with pytest.raises(worktree.SyncRefused, match="マージ"):
+        worktree.sync_worktree(git.Git(wt), BRANCH)
+    assert sh(wt, "rev-parse", "HEAD").strip() == before

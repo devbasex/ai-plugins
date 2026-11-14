@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import pytest
 
-from ndf.adapters import agents
+from ndf.adapters import agents, git
 from ndf.contracts import result
 from ndf.domains.crossreview import cli, drive, store
 from ndf.domains.crossreview import finish_decide as fin
@@ -227,6 +227,38 @@ def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_pat
     state = _state(state_dir)
     assert state["rounds"][0]["fix"]["reported"] == 1 and state["findings"][0]["outcome"] == fin.FIXED
     assert store.pending_fix_result(state_dir, ref) is None
+
+
+def test_push_error_keeps_the_fix_record_and_the_restart_sends_it(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: push が例外（hook・通信）で止まっても修正の記録は状態ファイルに残り、次の起動は未送信の
+    修正を送ってから次のラウンドへ進む。"""
+    sent = drive.push.push_fix
+
+    def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise git.GitError("pre-push の hook が拒んだ")
+
+    monkeypatch.setattr(drive.push, "push_fix", broken)
+    first = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, first, wt)
+    assert got["cause"]["kind"] == "precondition"
+    ref = store.state_pr(first.state_dir, PR)
+    assert _state(first.state_dir)["rounds"][0]["fix"]["fixed"] == ["r1-1"]
+    assert store.pending_fix_result(first.state_dir, ref) is None
+    monkeypatch.setattr(drive.push, "push_fix", sent)
+    again = Fake(first.state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, again, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert "pushed" in _state(first.state_dir)["rounds"][0]["fix"]
+    assert sh(repos.origin, "rev-parse", BRANCH).strip() == sh(wt, "rev-parse", "HEAD").strip()
+    assert "fix0.txt" in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
+
+
+def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monkeypatch) -> None:
+    """PR #3466 の指摘: 相対の --state-dir と --worktree は打った場所の cwd を基準に絶対パスへそろえて子へ渡す。"""
+    monkeypatch.chdir(tmp_path)
+    argv = ["run", "--pr", str(PR), "--state-dir", "st", "--worktree", "wt", "--branch", BRANCH, "--base", "origin/main"]
+    cfg = cli._run_config(cli._parser().parse_args([*argv, "--reviewer", "codex", "--reviewer", "kiro"]))
+    assert (cfg.worktree, cfg.state_dir) == (tmp_path.resolve() / "wt", tmp_path.resolve() / "st")
 
 
 def test_issue_2770_changes_required_without_any_fix_stops(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
