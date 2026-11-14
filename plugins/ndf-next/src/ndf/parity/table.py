@@ -39,7 +39,11 @@ def _duplicates(ids: list[str]) -> list[str]:
 
 
 def _unknown_children(name: str, items: list[dict[str, Any]], places: Mapping[str, Any]) -> list[str]:
-    return [f"{name}: 行き先 {item['to']} が places に無い（{item.get('id') or item.get('issue')}）" for item in items if "to" in item and item["to"] not in places]
+    return [
+        f"{name}: 行き先 {item['to']} が places に無い（{item.get('id') or item.get('issue')}）"
+        for item in items
+        if "to" in item and item["to"] not in places
+    ]
 
 
 def shape_errors(features: Any, fixes: Any) -> list[str]:
@@ -60,7 +64,9 @@ def shape_errors(features: Any, fixes: Any) -> list[str]:
     for part in ("fixes", "regressions", "intake"):
         errs += _unknown_children(part, fixes[part], places)
     known = set(ids)
-    errs += [f"intake: #{i['issue']} の行 {i['row']} が対応表に無い" for i in fixes["intake"] if i["row"] is not None and i["row"] not in known]
+    errs += [
+        f"intake: #{i['issue']} の行 {i['row']} が対応表に無い" for i in fixes["intake"] if i["row"] is not None and i["row"] not in known
+    ]
     return errs
 
 
