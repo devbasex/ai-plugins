@@ -173,6 +173,13 @@ def _fill_text(text: str, values: Mapping[str, Value]) -> str:
     return _PARAM.sub(one, text)
 
 
+def _expand_list_item(item: str, name: str, values: Mapping[str, Value]) -> list[str]:
+    """並びの名前 `name` を含む要素を展開する。要素がその名前だけなら並びを差し込み、ほかの字を含めば値ごとに作る。"""
+    if item == "{{" + name + "}}":
+        return list(values[name])
+    return [_fill_text(item.replace("{{" + name + "}}", v), values) for v in values[name]]
+
+
 def _fill_item(item: Any, values: Mapping[str, Value]) -> list[Any]:
     """並びの要素 1 つを埋め、展開した要素の並びを返す。"""
     if not isinstance(item, str):
@@ -182,10 +189,7 @@ def _fill_item(item: Any, values: Mapping[str, Value]) -> list[Any]:
         return [_fill_text(item, values)]
     if len(lists) > 1:
         raise RouteError(f"1 つの要素に並びの差し込みが 2 つある: {item}")
-    name = lists[0]
-    if item == "{{" + name + "}}":
-        return list(values[name])
-    return [_fill_text(item.replace("{{" + name + "}}", v), values) for v in values[name]]
+    return _expand_list_item(item, lists[0], values)
 
 
 def _fill(value: Any, values: Mapping[str, Value]) -> Any:
