@@ -93,22 +93,25 @@ def _extra(plugin_root: Path, found_table: table.Table, want: dict[Path, str]) -
     return sorted(p for p in found if p not in want)
 
 
+def _differ(want: dict[Path, str]) -> list[Path]:
+    """作るファイルのうち、無いか中身が違うもの（`want` の並び）。"""
+    return [p for p, text in want.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
+
+
 def stale(plugin_root: Path) -> list[Path]:
     """作り直した結果と違う・無い・余ったファイル。"""
     found, want = _expected(plugin_root)
-    differ = [p for p, text in want.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
-    return sorted(differ + _extra(plugin_root, found, want))
+    return sorted(_differ(want) + _extra(plugin_root, found, want))
 
 
 def write(plugin_root: Path) -> list[Path]:
     """違うファイルを作り直し、余ったファイルを消す。書いた・消したファイルを返す。"""
     found, want = _expected(plugin_root)
     changed = []
-    for path, text in want.items():
-        if not path.is_file() or path.read_text(encoding="utf-8") != text:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            changed.append(path)
+    for path in _differ(want):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(want[path], encoding="utf-8")
+        changed.append(path)
     for path in _extra(plugin_root, found, want):
         path.unlink()
         if not any(path.parent.iterdir()):
