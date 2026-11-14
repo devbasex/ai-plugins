@@ -98,13 +98,12 @@ class Entrypoint(NamedTuple):
 
 def entrypoints(features: Mapping[str, Any], *, conductor_only: bool = False) -> list[Entrypoint]:
     """エントリポイントの一覧。`conductor_only` なら conductor が直に打つものだけ。"""
-    places = features["places"]
-    found = []
-    for r in features["rows"]:
-        if r["kind"] != "entrypoint" or (conductor_only and not r.get("conductor")):
-            continue
-        found.append(Entrypoint(r["now"], r.get("to"), _destination(places, r), bool(r.get("conductor"))))
-    return found
+    rows = [r for r in features["rows"] if r["kind"] == "entrypoint" and (r.get("conductor") or not conductor_only)]
+    return [_entrypoint(r, features["places"]) for r in rows]
+
+
+def _entrypoint(row: Mapping[str, Any], places: Mapping[str, Any]) -> Entrypoint:
+    return Entrypoint(row["now"], row.get("to"), _destination(places, row), bool(row.get("conductor")))
 
 
 def _destination(places: Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, ...]:
