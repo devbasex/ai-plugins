@@ -57,3 +57,65 @@ def test_usage_stop_never_fails_the_hook(repo: Path, capsys, last_result, monkey
     monkeypatch.setattr("sys.stdin", io.StringIO("壊れた入力"))
     code, got = _run(capsys, last_result, "--cwd", str(repo), "usage", "stop")
     assert code == 0 and got["items"] == []
+
+
+# 現状固定（I-017 の前）: `ndf records mvv signals / answer`（cli._mvv）の結果 JSON
+@pytest.fixture
+def mvv_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    origin, main = tmp_path / "origin.git", tmp_path / "main"
+    git_sandbox.sh(tmp_path, "init", "-q", "--bare", str(origin))
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "main", str(main))
+    (main / ".ndf").mkdir()
+    decl = {"body": "mvv.md", "versions": [{"version": 1, "sha256": "s"}], "settings": {"revise_after": {"overrides": 1}}}
+    (main / ".ndf" / "mvv.json").write_text(json.dumps(decl), encoding="utf-8")
+    git_sandbox.sh(main, "add", "-A")
+    git_sandbox.sh(main, "commit", "-q", "-m", "main")
+    git_sandbox.sh(main, "remote", "add", "origin", str(origin))
+    git_sandbox.sh(main, "push", "-q", "origin", "main")
+    git_sandbox.sh(main, "fetch", "-q", "origin")
+    return main
+
+
+def _answer(monkeypatch: pytest.MonkeyPatch, capsys, last_result, root: Path, stdin: str, *argv: str) -> tuple[int, dict]:
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    return _run(capsys, last_result, "--cwd", str(root), "mvv", "answer", *argv)
+
+
+def test_mvv_answer_refuses_a_non_object_input(mvv_repo: Path, capsys, last_result, monkeypatch: pytest.MonkeyPatch) -> None:
+    for stdin in ("壊れた", "[1]", ""):
+        code, got = _answer(monkeypatch, capsys, last_result, mvv_repo, stdin)
+        assert code != 0 and got["cause"]["kind"] == "invalid" and got["items"] == []
+        assert got["summary"] == "承認ゲートの答え（標準入力の JSON object）が無い"
+
+
+def test_mvv_answer_writes_only_an_override_and_signals_count_it(
+    mvv_repo: Path, capsys, last_result, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, got = _answer(monkeypatch, capsys, last_result, mvv_repo, json.dumps({"verdict": "follow", "approved": True}))
+    assert code == 0 and got["status"] == "ok" and got["summary"] == "覆しではないので書かなかった" and got["items"] == []
+    code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "main")
+    assert code == 0 and got["summary"] == "MVV の改訂の兆候は閾値に届かない" and got["metrics"] == {"revise": False}
+    assert got["items"] == [{"version": 1, "overrides": 0, "unknown_pass": 0, "unknown": 0}]
+    answer = {"verdict": "not_follow", "approved": True, "state": "s", "gate": "g", "pr": 3, "extra": "x"}
+    code, got = _answer(monkeypatch, capsys, last_result, mvv_repo, json.dumps(answer), "--version", "1")
+    row = got["items"][0]
+    assert code == 0 and got["summary"] == f"覆しの記録: {row['kind']}"
+    assert {k: row[k] for k in ("version", "repo", "state", "gate", "pr")} == {
+        "version": 1,
+        "repo": str(mvv_repo.resolve()),
+        "state": "s",
+        "gate": "g",
+        "pr": 3,
+    }
+    assert "extra" not in row
+    code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "main")
+    assert code == 0 and got["summary"] == "MVV の改訂を提案する兆候がある" and got["metrics"] == {"revise": True}
+    assert got["items"] == [{"version": 1, "overrides": 1, "unknown_pass": 0, "unknown": 0}]
+
+
+def test_mvv_signals_stops_when_the_base_branch_has_no_declaration(mvv_repo: Path, capsys, last_result) -> None:
+    code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "none")
+    assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
+    assert got["summary"].startswith("origin/none の MVV の宣言を読めない: ")
