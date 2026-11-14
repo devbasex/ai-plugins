@@ -86,19 +86,30 @@ def _table(conf: Mapping[str, Any], key: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def codex_entries(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> dict[str, str]:
-    """Codex の設定（`config.toml` の marketplaces・plugins）と導入の置き場の版の控え。"""
+def _codex_marketplaces(conf: Mapping[str, Any]) -> dict[str, str]:
+    """Codex の取得元（`config.toml` の marketplaces）の控え。取得元の鍵だけを写す。"""
     out = {}
     for name, entry in _table(conf, "marketplaces").items():
         fields = {k: entry[k] if isinstance(entry, dict) and k in entry else None for k in CODEX_SOURCE_KEYS}
         out[f"{CODEX_MARKET}{name}"] = json.dumps(mask(fields), sort_keys=True, ensure_ascii=False)
+    return out
+
+
+def _codex_plugins(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> dict[str, str]:
+    """Codex の導入（`config.toml` の plugins と導入の置き場の版）の控え。"""
     plugins = _table(conf, "plugins")
+    out = {}
     for name in sorted(set(plugins) | set(cached)):
         entry = plugins[name] if name in plugins and isinstance(plugins[name], dict) else {}
         enabled = str(entry["enabled"]).lower() if "enabled" in entry else "-"
         versions = ",".join(sorted(cached[name])) if name in cached else ""
         out[f"{CODEX_PLUGIN}{name}"] = f"enabled={enabled} versions={versions}"
     return out
+
+
+def codex_entries(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> dict[str, str]:
+    """Codex の設定（`config.toml` の marketplaces・plugins）と導入の置き場の版の控え。"""
+    return _codex_marketplaces(conf) | _codex_plugins(conf, cached)
 
 
 def diff(before: Mapping[str, str], after: Mapping[str, str]) -> list[str]:
