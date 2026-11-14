@@ -132,19 +132,14 @@ def _step(raw: Mapping[str, Any]) -> Step:
 
 
 def _target_errors(step: Step, ids: set[str]) -> list[str]:
-    """行き先の値の誤り（IS3）。"""
-    errs = []
+    """行き先の値の誤り（IS3）。（ラベル, 行き先, 許す語, 文の語）を並べ、ステップにも許す語にも無い行き先を誤りにする。"""
     named = [("next", step.next), ("on_fail", step.on_fail)]
-    for label, target in named:
-        if target is not None and target not in ids and target not in ANSWER_TARGETS:
-            errs.append(f"ステップ {step.id} の {label} が知らないステップ: {target}")
-    for kind, target in step.on_cause.items():
-        if target not in ids and target not in PLAN_TARGETS:
-            errs.append(f"ステップ {step.id} の on_cause.{kind} が知らない行き先: {target}")
-    for answer, target in step.on_answer.items():
-        if target not in ids and target not in ANSWER_TARGETS:
-            errs.append(f"ステップ {step.id} の on_answer.{answer} が知らない行き先: {target}")
-    return errs
+    rows = [
+        *((label, target, ANSWER_TARGETS, "知らないステップ") for label, target in named if target is not None),
+        *((f"on_cause.{kind}", target, PLAN_TARGETS, "知らない行き先") for kind, target in step.on_cause.items()),
+        *((f"on_answer.{answer}", target, ANSWER_TARGETS, "知らない行き先") for answer, target in step.on_answer.items()),
+    ]
+    return [f"ステップ {step.id} の {label} が{word}: {target}" for label, target, allowed, word in rows if target not in ids and target not in allowed]
 
 
 def _kind_errors(step: Step, table: Mapping[str, Any]) -> list[str]:
