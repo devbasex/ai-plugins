@@ -12,7 +12,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import command, definition, model, store
+from ndf.progress import command, definition, model, store, table
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -440,3 +440,39 @@ def test_gate_stage_cannot_be_disabled_by_the_conductor(repo, capsys):
     assert out["cause"]["kind"] == "refused" and "承認ゲート" in out["cause"]["detail"]
     # ほかの工程は今のまま外せる
     assert _run(capsys, "disable", tid, "振り返り", "--reason", "外す")[0] == 0
+
+
+# --- 現状固定: command._append（I-014。番号のぶつかりで読み直して作り直し、回数が尽きれば投げる） ---------
+
+
+def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, capsys, monkeypatch):
+    _, made = _new(capsys)
+    tid = made["metrics"]["table_id"]
+    real, calls = store.append_events, {"n": 0}
+
+    def conflict_once(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise store.Conflict("ぶつかった")
+        return real(*a, **k)
+
+    monkeypatch.setattr(store, "append_events", conflict_once)
+    code, out = _run(capsys, "disable", tid, "実装", "--reason", "外す")
+    assert code == 0 and calls["n"] == 2 and len(out["metrics"]["seqs"]) == 1
+
+    def always(*a, **k):
+        calls["n"] += 1
+        raise store.Conflict("ぶつかった")
+
+    builds: list[int] = []
+
+    def build(rev, snap, events):
+        builds.append(rev)
+        return [model.EventDraft("enabled", command.ACTOR, "実装", reason="戻す", rev=rev)]
+
+    calls["n"] = 0
+    monkeypatch.setattr(store, "append_events", always)
+    root = command.store_root_of(repo)
+    with store.open_store(store.default_url(root), root) as st, pytest.raises(store.Conflict):
+        command._append(st, tid, build)
+    assert calls["n"] == table.APPEND_ATTEMPTS and len(builds) == table.APPEND_ATTEMPTS
