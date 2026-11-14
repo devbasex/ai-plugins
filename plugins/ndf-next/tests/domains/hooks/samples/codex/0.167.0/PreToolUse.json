@@ -1,0 +1,14 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "turn_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "<text>"
+  },
+  "tool_use_id": "0x00-00000000-0000-0000-0000-000000000000"
+}

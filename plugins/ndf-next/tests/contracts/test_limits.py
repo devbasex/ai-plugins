@@ -67,7 +67,22 @@ def test_missing_declaration_stops(contracts_copy):
 
 
 # 現状固定（I-006）: 値の鍵は Policy の欄（name・summary を除く）と宣言の形の値の鍵の 3 か所が同じ集合を持つ。
-_SCHEMA_VALUE_KEYS = ("seconds", "interval", "factor", "max_interval", "per_call", "attempts", "same_cause", "count", "gib")
+_SCHEMA_VALUE_KEYS = (
+    "seconds",
+    "interval",
+    "factor",
+    "max_interval",
+    "per_call",
+    "attempts",
+    "same_cause",
+    "count",
+    "p95_ms",
+    "deadline",
+    "margin",
+    "timeout",
+    "inject_chars",
+    "gib",
+)
 
 
 def test_value_keys_match_policy_fields_and_schema():

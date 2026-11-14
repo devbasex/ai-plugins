@@ -33,6 +33,7 @@ COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
+    "hooks": "ndf.domains.hooks.cli",
     "launch-args": "ndf.adapters.cli",
     "notify": "ndf.adapters.notify",
     "progress": "ndf.progress.command",
