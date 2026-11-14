@@ -112,13 +112,17 @@ def _snap(state: RunState) -> dict[str, Any]:
     return state.snapshot
 
 
+def _launches(snap: dict[str, Any]) -> list[Launch]:
+    """写しから作る起動の手。起こせる行を始める手と、実行中のスプリントを中止させる手（それぞれ計画の並びの順）。"""
+    starts = [Launch(lane, row) for lane, row in snap["wakeable"]]
+    return starts + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
+
+
 def _candidates(state: RunState) -> list[Launch]:
     """起こしてよいレーンの手（計画の並びの順）。止めた計画では、実行中のスプリントを中止させる手になる。"""
     snap = _snap(state)
-    if snap["state"] == CANCELLED:
-        acts = [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
-    else:
-        acts = [Launch(lane, row) for lane, row in snap["wakeable"]]
+    cancelling = snap["state"] == CANCELLED
+    acts = [a for a in _launches(snap) if (a.cancel is not None) == cancelling]
     skip = _skip(state)
     return [a for a in acts if a.key not in skip]
 
@@ -143,7 +147,7 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
 
 def _live_launched(state: RunState, snap: dict[str, Any]) -> tuple[str, ...]:
     """起こした印のうち、まだ起こしたまま待っている行（まだ起こせる行に残っているもの）だけを残す。"""
-    waiting = {f"{lane}/{row}" for lane, row in snap["wakeable"]} | {f"cancel:{r[2]}" for r in snap["running"]}
+    waiting = {a.key for a in _launches(snap)}
     return tuple(k for k in state.launched if k in waiting)
 
 
