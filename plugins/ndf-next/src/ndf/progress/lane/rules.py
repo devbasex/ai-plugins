@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Any, Optional
 
 from ndf.progress import model
-from ndf.progress.lane.types import DONE_STATES, PENDING, RUNNING, Lanes, LaneRow, LaneSpec, PlanView
+from ndf.progress.lane.types import CANCELLED, COMPLETED, DONE_STATES, PENDING, RUNNING, WAITING_AFTER, Lanes, LaneRow, LaneSpec, PlanView
 
 
 def _rows_of(lanes: Lanes, name: str) -> list[LaneRow]:
@@ -224,5 +224,5 @@ def lane_state(view: PlanView, lanes: Lanes, lane: str) -> str:
         return RUNNING
     nxt = next_row(view, lanes, lane)
     if nxt is not None:
-        return "waiting_after" if nxt["waiting_after"] else PENDING
-    return "completed" if any(r.state == "completed" for r in rows) else "cancelled"
+        return WAITING_AFTER if nxt["waiting_after"] else PENDING
+    return COMPLETED if any(r.state == COMPLETED for r in rows) else CANCELLED

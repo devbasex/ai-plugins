@@ -35,9 +35,12 @@ from ndf.progress.lane.rules import (
     wakeable_lanes as wakeable_lanes,
 )
 from ndf.progress.lane.types import (
+    CANCELLED as CANCELLED,
+    COMPLETED as COMPLETED,
     DONE_STATES as DONE_STATES,
     PENDING as PENDING,
     RUNNING as RUNNING,
+    WAITING_AFTER as WAITING_AFTER,
     Lanes as Lanes,
     LaneRow as LaneRow,
     LaneSpec as LaneSpec,

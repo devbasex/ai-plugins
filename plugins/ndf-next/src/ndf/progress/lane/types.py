@@ -7,9 +7,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-# 行の状態の語（契約 progress.json の row_states.lane）
-PENDING, RUNNING = "pending", "running"
-DONE_STATES = ("completed", "cancelled")
+# 行の状態の語（契約 progress.json の row_states.lane。計画の状態 table_states.plan も同じ語）
+PENDING, RUNNING, COMPLETED, CANCELLED = "pending", "running", "completed", "cancelled"
+DONE_STATES = (COMPLETED, CANCELLED)
+# レーンの状態の語のうち、行の状態に無いもの（after 待ち）
+WAITING_AFTER = "waiting_after"
 
 
 @dataclass(frozen=True)

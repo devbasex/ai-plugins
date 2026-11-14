@@ -20,8 +20,9 @@ from typing import Any, Optional, Union
 
 from ndf.core import loop
 
-# 計画の状態（契約 progress.json の table_states.plan）
-RUNNING, COMPLETED, CANCELLED = "running", "completed", "cancelled"
+# 計画の状態（契約 progress.json の table_states.plan）は、レーンの行の状態と同じ語の定数を使う
+from ndf.progress.lane.types import CANCELLED, COMPLETED, RUNNING
+
 # 耐久ワークフローの終わりの語
 OUTCOME_COMPLETED, OUTCOME_STOPPED = "completed", "stopped"
 
