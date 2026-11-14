@@ -21,7 +21,7 @@ from ndf.adapters.git import Git
 from ndf.domains.worktree import declaration, repo
 
 # 取得するリモート
-REMOTE = "origin"
+REMOTE = repo.REMOTE
 
 
 class CreateError(Exception):
@@ -42,13 +42,6 @@ class Created:
     warnings: list[str] = field(default_factory=list)
 
 
-def default_branch(git: Git) -> Optional[str]:
-    """origin の既定ブランチ（取得済みの `refs/remotes/origin/HEAD`）。無ければ `None`。"""
-    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{REMOTE}/HEAD")
-    name = done.stdout.strip() if done.returncode == 0 else ""
-    return name[len(REMOTE) + 1 :] if name.startswith(REMOTE + "/") else None
-
-
 def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
     """スプリントのベースブランチ。決められなければ `CreateError`（precondition）。"""
     name: Optional[str] = None
@@ -59,7 +52,7 @@ def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
             raise CreateError("precondition", str(exc)) from exc
         name = decl.production_branch if channel == "production" else decl.base_branch
     if name is None:
-        name = default_branch(git)
+        name = repo.default_branch(git)
     if name is None:
         raise CreateError("precondition", "ベースブランチを決められない（宣言の base_branch も origin の既定ブランチも無い）")
     return name

@@ -51,7 +51,7 @@ def _wanted(main: Git, main_dir: Path, decl: declaration.Declaration) -> tuple[O
         return resolve(main, branch), f"worktree のブランチ {branch}"
     if verdict != session_decide.FOLLOW_BASE:
         return None, ""
-    base = decl.base_branch if decl.base_branch else create.default_branch(main)
+    base = repo.base_branch(main, decl)
     if base is None or repo.current_branch(main) == base:
         return None, ""
     return _resolve_base(main, base), f"ベースブランチ {base}"

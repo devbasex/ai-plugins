@@ -189,7 +189,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     flow = flow_record if flow_record is not None else declared_flow(decl)
     pulls = hub.pulls(numbers)
     rec = Record()
-    base = decl.base_branch if decl is not None and decl.base_branch else create.default_branch(main)
+    base = repo.base_branch(main, decl)
     # 先に取り込む: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
     with mainlock.held(main):
         sync_main(main, base, rec)

@@ -14,7 +14,10 @@ from typing import Iterable, Optional
 
 from ndf.adapters.git import Git, GitError, WorktreeEntry, parse_worktree_list
 from ndf.contracts import facts
+from ndf.domains.worktree import declaration
 
+# 取得するリモート
+REMOTE = "origin"
 # マージ済みと認められなかったブランチを残すときに添える文（`-D` は NDF が打たず、人が確かめて打つ。C4）
 MANUAL_FORCE = "消すなら人が確かめて -D で消す"
 
@@ -69,6 +72,18 @@ def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
         if path.startswith(root + os.sep) and not (path == scratch or path.startswith(scratch + os.sep)):
             picked.append(item)
     return picked
+
+
+def default_branch(git: Git) -> Optional[str]:
+    """origin の既定ブランチ（取得済みの `refs/remotes/origin/HEAD`）。無ければ `None`。"""
+    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{REMOTE}/HEAD")
+    name = done.stdout.strip() if done.returncode == 0 else ""
+    return name[len(REMOTE) + 1 :] if name.startswith(REMOTE + "/") else None
+
+
+def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:
+    """ベースブランチ: 宣言の `base_branch`、無ければ origin の既定ブランチ。"""
+    return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
 
 
 def current_branch(git: Git) -> Optional[str]:
