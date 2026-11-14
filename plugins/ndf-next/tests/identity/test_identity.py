@@ -14,11 +14,24 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 11, 13, 20, 30, 5)
 
 
-def make_plugin(base: Path, dirname: str, name: str) -> Path:
+# make_plugin の manifest の既定（plugin.json を名前と版から書く）
+FROM_NAME = object()
+
+
+def make_plugin(base: Path, dirname: str, name: str, manifest: object = FROM_NAME) -> Path:
+    """プラグインの根を作る。`manifest` が文字ならその中身で plugin.json を書き、None なら plugin.json を書かない。"""
     root = base / "plugins" / dirname
     (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": "1.0.0"}))
+    if manifest is FROM_NAME:
+        manifest = json.dumps({"name": name, "version": "1.0.0"})
+    if manifest is not None:
+        (root / ".claude-plugin" / "plugin.json").write_text(str(manifest))
     return root
+
+
+def _retired_names(ident: identity.PluginIdentity) -> list[str]:
+    """状態の置き場の親にある、退避先の名前。"""
+    return [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name]
 
 
 def test_load_reads_name_from_plugin_json_regardless_of_dirname(tmp_path, monkeypatch):
@@ -65,11 +78,7 @@ def test_load_uses_home_when_xdg_state_home_is_unset(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("content", [None, "{", "[]", '{"version": "1"}', '{"name": ""}'])
 def test_load_raises_when_plugin_json_is_unreadable(tmp_path, monkeypatch, content):
-    root = tmp_path / "broken"
-    (root / ".claude-plugin").mkdir(parents=True)
-    if content is not None:
-        (root / ".claude-plugin" / "plugin.json").write_text(content)
-    monkeypatch.setattr(identity, "ROOT", root)
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "broken", "p", manifest=content))
 
     with pytest.raises(identity.IdentityError):
         identity.load()
@@ -192,7 +201,7 @@ def test_prepare_does_not_retire_on_second_start(ident):
     identity.prepare_state_dir(ident, now=NOW)
 
     assert (ident.state_dir / "runs.db").read_text() == "new"
-    assert [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name] == []
+    assert _retired_names(ident) == []
 
 
 def test_prepare_does_not_retire_empty_dir(ident):
@@ -200,7 +209,7 @@ def test_prepare_does_not_retire_empty_dir(ident):
 
     identity.prepare_state_dir(ident, now=NOW)
 
-    assert [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name] == []
+    assert _retired_names(ident) == []
 
 
 def test_prepare_adds_time_when_retired_name_exists(ident):
