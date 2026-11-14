@@ -86,6 +86,11 @@ def _handed_decision(h: Handed, found: Finding) -> dict[str, str]:
     return {"decision": f"足すべき内容 {h.id} を{said}", "basis": h.text or h.id}
 
 
+def _settled(found: Finding) -> bool:
+    """直した、または理由を添えて見送った（終わり方は `_bad_input` が 3 種に限っている）。"""
+    return found.outcome == FIXED or (found.outcome == SKIPPED and bool(found.reason))
+
+
 def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """足すべき内容ごとの判断と、扱わなかった件の欠け。未解決の件の欠けは `_finding_gaps` が持つ。"""
     by_id = {f.id: f for f in findings}
@@ -94,7 +99,7 @@ def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list
         found = by_id.get(h.id)
         if found is None:
             gaps.append(_gap(GAP_UNHANDLED, h.id, f"レビューで直したとも見送ったとも決めていない: {h.text or h.id}"))
-        elif found.outcome != UNRESOLVED and (found.outcome == FIXED or found.reason):
+        elif _settled(found):
             decisions.append(_handed_decision(h, found))
     return decisions, gaps
 
