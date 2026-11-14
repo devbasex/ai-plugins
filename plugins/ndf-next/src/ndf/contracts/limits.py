@@ -31,6 +31,12 @@ class Policy(NamedTuple):
     attempts: Optional[int] = None
     same_cause: Optional[int] = None
     count: Optional[int] = None
+    # hook の予算（`hook.budget.<事象>`）だけが持つ値
+    p95_ms: Optional[float] = None
+    deadline: Optional[float] = None
+    margin: Optional[float] = None
+    timeout: Optional[float] = None
+    inject_chars: Optional[int] = None
 
 
 # 方針の値の名前（名前と説明を除いた Policy の項目）
