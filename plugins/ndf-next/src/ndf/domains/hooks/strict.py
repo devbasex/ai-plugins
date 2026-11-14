@@ -30,9 +30,7 @@ from ndf.domains.hooks.verdict import Verdict, deny
 GUARD_NAME = "merge-production"
 
 # 前に付いても後ろのコマンドを打つ語（後ろの語のうち gh・シェル・eval から読み直す）
-_WRAPPERS = frozenset(
-    {"command", "env", "exec", "nohup", "time", "sudo", "doas", "xargs", "timeout", "nice", "ionice", "stdbuf", "setsid"}
-)
+_WRAPPERS = frozenset({"command", "env", "exec", "nohup", "time", "sudo", "doas", "xargs", "timeout", "nice", "ionice", "stdbuf", "setsid"})
 # 後ろにコマンドが続く制御構文の語
 _KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}"})
 # `-c` の引数をスクリプトとして読むシェル
