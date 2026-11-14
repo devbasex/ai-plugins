@@ -275,6 +275,8 @@ class Watch:
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
     - `decided` が真を返したら、結論の出ていないチェックが残っていても待たずに返す（マージの段階から引き継いだ
       失敗で止まった理由が決まっているとき、読み直しに API と待ちを使わない）
+    - 予算は `started`（`clock` の値）から数える。省けば作った時点。前の段階で待ち始めた呼び手は、その時刻を渡して
+      同じ予算を引き継ぐ。始まりの時刻は `started` で読める
     """
 
     reader: Callable[[], Reading]
@@ -283,21 +285,22 @@ class Watch:
     decided: Optional[Callable[[Reading], bool]] = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+    started: Optional[float] = None
     _queued: float = field(default=0.0, init=False)
-    _start: float = field(default=0.0, init=False)
 
     def __post_init__(self) -> None:
-        # 予算は作った時点から数える（`run` の前の API の呼び出しも `remaining` で同じ予算に入れる）
-        self._start = self.clock()
+        # 省いたら作った時点から数える（`run` の前の API の呼び出しも `remaining` で同じ予算に入れる）
+        if self.started is None:
+            self.started = self.clock()
 
     def remaining(self) -> float:
         """待ちに使える残りの秒。ランナーの割り当ての待ちは予算に数えない（API の上限の待ちの締め切りに使う）。"""
-        return self.budget - (self.clock() - self._start - self._queued)
+        return self.budget - (self.clock() - self.started - self._queued)
 
     def run(self) -> WatchResult:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
-        interval, start, rounds = float(policy.interval), self._start, 0
+        interval, start, rounds = float(policy.interval), self.started, 0
         while True:
             reading = self.reader()
             rounds += 1

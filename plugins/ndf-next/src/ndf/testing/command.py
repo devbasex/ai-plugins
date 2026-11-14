@@ -15,7 +15,6 @@ import argparse
 import dataclasses
 import os
 import re
-import shlex
 import signal
 import subprocess
 import sys
@@ -30,7 +29,7 @@ from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
+TOOL = cli.tool_of(__name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
@@ -85,13 +84,13 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
             signal.signal(sig, handler)
 
 
-def _again(command: str, wait_limit: int | None) -> str:
-    """同じ待ちを打ち直すコマンド（`ndf test-slot run [--wait-limit N] -- '<コマンド>'`）。"""
+def _again(command: str, wait_limit: int | None) -> dict:
+    """同じ待ちを打ち直すコマンド（`ndf test-slot run [--wait-limit N] -- '<コマンド>'` の引数の配列）。"""
     limit = ["--wait-limit", str(wait_limit)] if wait_limit is not None else []
-    return shlex.join(["ndf", TOOL, "run", *limit, "--", command])
+    return result.command(TOOL, "run", *limit, "--", command)
 
 
-def _stopped_from(exc: slots.Stopped, again: str | None = None) -> int:
+def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
     """枠の待ちを止めた結果を出す。wait_timeout は契約どおり同じ待ち（`again`）を next に載せる。"""
     kind = _CAUSE_OF[exc.reason]
     return _stopped(

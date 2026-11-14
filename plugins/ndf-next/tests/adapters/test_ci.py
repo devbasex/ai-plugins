@@ -292,6 +292,22 @@ def test_watch_remaining_does_not_shrink_while_waiting_for_a_runner() -> None:
     assert all(left == pytest.approx(5) for _, left in queued_rounds)
 
 
+def test_watch_counts_budget_from_the_given_start() -> None:
+    # 3394-11: 前の段階で待ち始めた呼び手は始まりの時刻を渡し、同じ予算を引き継ぐ
+    clock, reads = Clock(), []
+    clock.now = 100.0
+    w = ci.Watch(_reader([RUNNING], clock, reads), 30, clock=clock, sleep=clock.sleep, started=80.0)
+    assert w.started == 80.0 and w.remaining() == pytest.approx(10)
+    done = w.run()
+    assert reads[-1] == pytest.approx(110) and done.elapsed == pytest.approx(30)
+
+
+def test_watch_start_defaults_to_construction_time() -> None:
+    clock = Clock()
+    clock.now = 42.0
+    assert ci.Watch(_reader([RUNNING], clock, []), 5, clock=clock, sleep=clock.sleep).started == 42.0
+
+
 def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> None:
     clock, reads = Clock(), []
     done = ci.Watch(_reader([QUEUED], clock, reads), 5, clock=clock, sleep=clock.sleep).run()
