@@ -16,11 +16,11 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from ndf import contracts
+from ndf import cli, contracts
 from ndf.contracts import causes, facts, limits, result, version
 
-# 道具の名前は副命令の名前（パッケージの名前）と同じ
-TOOL = __package__.rpartition(".")[2]
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = cli.tool_of(__name__)
 
 
 def _collect(errs: list[str], fn: Callable[[], Any]) -> Any:

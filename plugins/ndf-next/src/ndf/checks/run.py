@@ -17,10 +17,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from ndf import identity
+from ndf import cli, identity
 from ndf.checks import facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import exit_codes
+
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = cli.tool_of(__name__)
 
 EXIT_OK = 0
 EXIT_VIOLATION = 1
@@ -110,7 +113,7 @@ def _pr_body(event: str) -> str:
 
 
 def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
-    report = {"tool": "check", "status": status, "summary": summary, "items": items, "metrics": metrics}
+    report = {"tool": TOOL, "status": status, "summary": summary, "items": items, "metrics": metrics}
     if status == "stopped" and not items:
         report["cause"] = {"kind": "config_broken"}
     print(json.dumps(report, ensure_ascii=False))
