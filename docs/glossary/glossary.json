@@ -7345,8 +7345,14 @@
     {
       "term": "依存の更新の仕組み",
       "context": "ndf-workflow",
-      "meaning": "依存の版の遅れを知らせ、版を上げる手段。Renovate・Dependabot・自作のスクリプトのどれか（#3370 で比べる）",
-      "pending_source": "issues/issue-3370-requirements.md"
+      "meaning": "依存の版の遅れを知らせ、版を上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1）",
+      "pending_source": "issues/issue-3370-design.md"
+    },
+    {
+      "term": "依存の一覧の Issue",
+      "context": "ndf-workflow",
+      "meaning": "依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる",
+      "pending_source": "issues/issue-3370-design.md"
     }
   ]
 }
