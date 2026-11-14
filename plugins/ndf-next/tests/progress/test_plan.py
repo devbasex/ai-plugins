@@ -13,6 +13,7 @@ from ndf import cli, identity
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import lane, model, plan, store
+from ndf.progress.plan import cli as plan_cli
 
 REPO = "https://example.invalid/o/r"
 
@@ -166,7 +167,7 @@ def repo(tmp_path, monkeypatch):
 
 
 def _cli(capsys, *argv: str) -> tuple[int, dict]:
-    code = plan.main(list(argv))
+    code = plan_cli.main(list(argv))
     return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
@@ -176,7 +177,7 @@ def _plan_file(path: Path, doc: dict) -> str:
 
 
 def test_subcommand_is_in_the_table():
-    assert cli.COMMANDS[plan.TOOL] == plan.__name__
+    assert cli.COMMANDS[plan.TOOL] == plan_cli.__name__
 
 
 def test_cli_creates_starts_and_reports_the_plan(repo, capsys, tmp_path):
