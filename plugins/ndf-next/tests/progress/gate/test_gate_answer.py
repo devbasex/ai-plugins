@@ -8,10 +8,7 @@ import pytest
 
 from ndf import cli
 from ndf.contracts import result
-from ndf.progress import gate, lane, model, plan, run, store
-from plan_decls import REPO
-from plan_decls import decl as _decl
-from plan_decls import doc as _doc
+from ndf.progress import gate, lane, model, run, store
 
 BY, KEY = "service:factory", "k-1"
 
@@ -111,24 +108,14 @@ def test_drop_is_only_for_the_design_gate_inside_a_lane(st, new_table, flow):
         _give(st, tid, _waiting(st, tid), "rejected", drop=(3092,))
 
 
-def _lane_sprint(st, new_table):
-    with store.transaction(st) as conn:
-        pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[3092], [2]])), True)
-        view, _ = lane.read_plan(conn, pid)
-    tid = new_table("--parent", view.lanes["a"].table_id)
-    with store.transaction(st) as conn:
-        lane.start_row(conn, pid, "a", "r1", tid)
-    return pid, tid
-
-
 def _lane_rows(st, pid):
     with store.transaction(st) as conn:
         return lane.read_view(conn, pid)[1]["a"]
 
 
-def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, new_table, flow):
+def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, lane_sprint, flow):
     # 決定 99: 設計承認ゲートで外した課題は同じレーンの順番表の次の行へ入り、レーンは増えない
-    pid, tid = _lane_sprint(st, new_table)
+    pid, tid = lane_sprint()
     flow.turn(tid)
     out = _give(st, tid, _waiting(st, tid), drop=(3092,))
     rows = _lane_rows(st, pid)
@@ -136,9 +123,9 @@ def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, new_table, flow)
     assert len(rows) == 3
 
 
-def test_the_sprint_completion_ends_the_lane_row(st, env, new_table, flow):
+def test_the_sprint_completion_ends_the_lane_row(st, env, lane_sprint, flow):
     # 決定 17: スプリントの完了と同じトランザクションでレーンの行を終える
-    pid, tid = _lane_sprint(st, new_table)
+    pid, tid = lane_sprint()
     with_lane = gate.lane_env(env)
     flow.turn(tid, with_lane)
     _give(st, tid, _waiting(st, tid))

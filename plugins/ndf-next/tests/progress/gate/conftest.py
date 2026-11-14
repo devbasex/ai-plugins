@@ -13,7 +13,10 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.core import durable
-from ndf.progress import command, run, store
+from ndf.progress import command, lane, plan, run, store
+from plan_decls import REPO
+from plan_decls import decl as _decl
+from plan_decls import doc as _doc
 
 ISSUE = 3092
 
@@ -66,3 +69,19 @@ def new_table(capsys):
 def flow(repo, st, env):
     """`next` を打ち、起こした作業を同じプロセスで流す。`with_env` は既定の偽の作業の代わりに使う `Env`。"""
     return SimpleNamespace(turn=lambda tid, with_env=None: lanes.turn(st, tid, repo, with_env if with_env is not None else env))
+
+
+@pytest.fixture
+def lane_sprint(st, new_table):
+    """計画のレーン a の 1 行目で動くスプリントの進行表を作り、（計画の ID, 進行表の ID）を返す。"""
+
+    def make() -> tuple[str, str]:
+        with store.transaction(st) as conn:
+            pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[3092], [2]])), True)
+            view, _ = lane.read_plan(conn, pid)
+        tid = new_table("--parent", view.lanes["a"].table_id)
+        with store.transaction(st) as conn:
+            lane.start_row(conn, pid, "a", "r1", tid)
+        return pid, tid
+
+    return make

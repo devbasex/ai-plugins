@@ -51,7 +51,8 @@ from ndf import cli, identity
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import facts, result
-from ndf.progress import command, invoke, lane, model, run, store
+from ndf.progress import command, invoke, lane, model, plan, run, store
+from ndf.progress.plan import external
 
 TOOL = cli.tool_of(__name__)
 # 答えた者の形（人・conductor・サービス。サービスは `service:<主体>`）
@@ -329,6 +330,7 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             return _same(held, a, table_id)
         q = _refusal(v, a, observe)
         carried = _carry(conn, table_id, a.drop, a.reason)
+        rejected = _reject_release(conn, q, a)
         extra = {
             "gate_id": q.id,
             "gate": q.gate,
@@ -337,6 +339,7 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             "seen": {"head": a.seen.head, "material_sha256": a.seen.material},
             "dropped": list(a.drop),
             "carried_row": carried,
+            "release_request": rejected,
         }
         draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
         seqs = store.append_events(conn, table_id, [draft], v.events[-1].seq if v.events else 0)
@@ -392,8 +395,11 @@ def _still(v: run.View, answered: model.Event) -> bool:
     return m.action == run.Action.CONSUME and m.event is not None and m.event.seq == answered.seq
 
 
-def present(st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], observe: Observe) -> dict[str, Any]:
-    """`ndf progress` の結果（next・wait・work）が承認ゲート（`ndf.listen`）の待ちなら、問い・承認資料・答えごとの行き先の結果に差し替える。"""
+def present(
+    st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], observe: Observe, env: Optional[Mapping[str, str]] = None
+) -> dict[str, Any]:
+    """`ndf progress` の結果（next・wait・work）が承認ゲート（`ndf.listen`）の待ちなら、問い・承認資料・答えごとの行き先の結果に
+    差し替える。リリース承認ゲートならレーンのリリースの依頼も出す（`request_release`）。"""
     v = run.read(st, table_id)
     m = run.decide(v)
     if out["status"] != result.GATE or m.action != run.Action.GATE or m.step is None or not invoke.is_listen(m.step):
@@ -405,8 +411,135 @@ def present(st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], obse
     asked = question(v, m, repo=repo)
     path = write_material(st.root, v, asked)
     q = replace(asked, target=observe(asked))
-    metrics = out["metrics"] if isinstance(out.get("metrics"), dict) else {}
-    return command.with_warnings(gate_result(q, metrics, path), before=list(out["warnings"]) if "warnings" in out else [])
+    metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
+    warned = list(out["warnings"]) if "warnings" in out else []
+    try:
+        sent = request_release(st, v, q, env if env is not None else os.environ)
+    except (model.Refused, external.ExchangeError, OSError) as exc:
+        sent, warned = None, [*warned, f"リリースの依頼を出せなかった（人が ndf answer で答える）: {exc}"]
+    if sent is not None:
+        metrics["release_request"] = sent
+    return command.with_warnings(gate_result(q, metrics, path), before=warned)
+
+
+# --- レーンのリリースの依頼（リリース承認ゲート） --------------------------------------------------------------
+
+# 依頼の中身の kind（計画の進行表の依頼。依頼の ID の頭にも使う）
+RELEASE_KIND = "lane-release"
+# 外のオーガナイザーの答え → 承認ゲートの答え
+ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: "rejected"}
+# 依頼を出したときに見た対象の置き場（承認資料の隣）
+SEEN_SUFFIX = ".seen.json"
+
+
+def request_id(q: Question) -> str:
+    """リリースの依頼の ID（問いの id から作る。差し戻しで流し直した問いは別の依頼になる）。"""
+    return f"{RELEASE_KIND}-{q.id}"
+
+
+def _request_fields(v: run.View, q: Question, lane_name: Optional[str]) -> dict[str, Any]:
+    ctx = v.context()
+    issues = sorted(int(n) for n in ctx["issues"]) if isinstance(ctx.get("issues"), list) else []
+    return {
+        "id": request_id(q),
+        "lane": lane_name,
+        "prs": [q.pr] if q.pr is not None else [],
+        "issues": issues,
+        "sprint_state": v.table_id,
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+
+
+def _plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:
+    return next((r for r in view.requests.values() if r.body.get("kind") == RELEASE_KIND and r.body.get("id") == ident), None)
+
+
+def _seen_path(root: Path, q: Question) -> Path:
+    return material_path(root, q).with_name(q.id + SEEN_SUFFIX)
+
+
+def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str, str]) -> Optional[dict[str, Any]]:
+    """リリース承認ゲートの待ちで、レーンのリリースの依頼を出す（同じ問いには 1 回だけ）。出した先を返す。
+
+    外のオーガナイザーの下（`NDF_ORGANIZER_DIR`）なら `requests/<id>.json`（`external.write_request`）、計画の進行表の
+    レーンなら依頼の事象（`plan.open_request`）。どちらでもなければ出さない（人が `ndf answer` で答える）。
+    依頼を出したときに見た対象は承認資料の隣に残し、答えを書くときの見た対象にする。
+    """
+    if q.gate != "release":
+        return None
+    seen = _seen_path(st.root, q)
+    if not seen.exists():
+        seen.write_text(json.dumps({"head": q.target.head, "material_sha256": q.target.material}) + "\n", encoding="utf-8")
+    root = external.organizer_dir(env)
+    if root is not None:
+        version = env["NDF_VERSION"] if env.get("NDF_VERSION") else lane.ndf_version()
+        if version is None:
+            raise model.Refused("NDF の版が読めず、リリースの依頼の ndf_version を書けない")
+        body = external.request_body(_request_fields(v, q, env.get("NDF_ORGANIZER_LANE")), version)
+        return {"kind": "file", "id": request_id(q), "path": str(external.write_request(root, body))}
+    with store.transaction(st) as conn:
+        found = lane.sprint_row(conn, v.table_id)
+        if found is None:
+            return None
+        plan_id, name, _row = found
+        view, _ = lane.read_plan(conn, plan_id)
+        held = _plan_request(view, request_id(q))
+        key = held.key if held is not None else None
+        if key is None:
+            body = {**_request_fields(v, q, name), "kind": RELEASE_KIND}
+            key = plan.open_request(conn, plan_id, body, f"レーン {name} のリリースの依頼", run.ACTOR)
+    return {"kind": "plan", "id": request_id(q), "plan": plan_id, "request": key}
+
+
+def _reject_release(conn: Any, q: Question, a: Answer) -> Optional[str]:
+    """リリース承認ゲートの差し戻し（承認しない答え）で、計画の進行表に開いている依頼を差し戻しの記録で閉じる。"""
+    if q.gate != "release" or a.value not in REJECTING:
+        return None
+    found = lane.sprint_row(conn, q.table_id)
+    if found is None:
+        return None
+    view, _ = lane.read_plan(conn, found[0])
+    held = _plan_request(view, request_id(q))
+    if held is None or held.closed is not None:
+        return None
+    plan.record_release(conn, found[0], [held.key], plan.ReleaseAnswer(plan.REJECTED, a.reason))
+    return held.key
+
+
+def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Optional[dict[str, Any]]:
+    """依頼への答え（外のオーガナイザーのファイルか、計画の進行表のまとめたリリースの答え）。無ければ None。"""
+    root = external.organizer_dir(env)
+    if root is not None:
+        return external.read_answer(root, request_id(q))
+    with store.transaction(st) as conn:
+        found = lane.sprint_row(conn, q.table_id)
+        if found is None:
+            return None
+        view, _ = lane.read_plan(conn, found[0])
+    held = _plan_request(view, request_id(q))
+    return dict(held.release) if held is not None and held.release is not None else None
+
+
+def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: Observe = no_observe) -> Optional[dict[str, Any]]:
+    """リリース承認ゲートが待つ依頼に答えがあれば、承認ゲートの答え（`organizer`）として書く。書いた結果を返す。
+
+    見た対象は依頼を出したときの対象で、その後に PR の head が変わっていれば答えは断られる（今の対象との照合は `answer`）。
+    """
+    q = waiting(run.read(st, table_id))
+    if q is None or q.gate != "release":
+        return None
+    reply = _organizer_reply(st, q, env)
+    if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
+        return None
+    value = ORGANIZER_ANSWERS[str(reply["result"])]
+    if value not in q.choices:
+        return None
+    seen_file = _seen_path(st.root, q)
+    seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else {}
+    reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの答え（{reply['result']}）"
+    target = Target(seen.get("head"), seen.get("material_sha256"))
+    given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target)
+    return answer(st, table_id, given, observe)
 
 
 # --- 差し戻しの記録 ---------------------------------------------------------------------------------
@@ -720,9 +853,19 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     """`ndf progress` の工程を流す副命令。レーンの行を終える `Env` で流し、答えを読む前に対象を見直し、承認ゲートの
     待ちは問いと答えごとの行き先の結果にする。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
+    took = _took(st, a.table_id, seen)
     why = recheck(st, a.table_id, seen)
     out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
-    return command.with_warnings(present(st, a.table_id, cwd, out, seen), before=[why] if why else [])
+    return command.with_warnings(present(st, a.table_id, cwd, out, seen), before=[w for w in (took, why) if w])
+
+
+def _took(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
+    """リリースの依頼への答えを承認ゲートの答えとして書く。書けなければ理由を警告に返す（待ちは残る）。"""
+    try:
+        got = take_reply(st, table_id, os.environ, observe)
+    except (model.Refused, external.ExchangeError) as exc:
+        return f"リリースの依頼への答えを承認ゲートの答えにできなかった: {exc}"
+    return got["summary"] if got is not None else None
 
 
 def _verbs(ap: argparse.ArgumentParser) -> set[str]:
