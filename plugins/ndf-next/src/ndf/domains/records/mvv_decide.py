@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 # 判定の語は承認ゲートの判定（`ndf.progress.gate.checks`）の綴りを使う
 from ndf.progress.gate.checks import FOLLOW, NOT_FOLLOW, UNKNOWN
+
 # 覆しの種類: 「従う」を人が退けた・「反する疑い」を人が通した・「判定できない」を人が通した（覆しに数えない）
 OVERRIDE_REJECT = "override_reject"
 OVERRIDE_PASS = "override_pass"

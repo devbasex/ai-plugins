@@ -48,9 +48,7 @@ def _owners(term: str, texts: Mapping[str, str]) -> list[str]:
     return [p for p, text in texts.items() if term in text]
 
 
-def plan_glossary(
-    g: Mapping[str, Any], removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]
-) -> GlossaryPlan | None:
+def plan_glossary(g: Mapping[str, Any], removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]) -> GlossaryPlan | None:
     """消す設計（`removed`）を `pending_source` に持つ語の正本を、本文に語を含む確定仕様のファイルへ移す。
 
     `texts` は渡した確定仕様のパス → 本文。移す語が無ければ None。決められない語があれば `SourceError`（書く前に判定する）。
