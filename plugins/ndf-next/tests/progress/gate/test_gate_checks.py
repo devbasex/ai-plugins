@@ -37,7 +37,7 @@ def test_facts_that_pass_every_check_have_no_refusals():
         (gate.check_boundary, {"changed": (gate.Changed("infra/main.tf"),)}, "infra/main.tf"),
         (gate.check_boundary, {"changed": (gate.Changed("src/x.tf", previous="infra/x.tf", renamed=True),)}, "infra/x.tf → src/x.tf"),
         (gate.check_boundary, {"changed": (gate.Changed("src/y.tf", renamed=True),)}, "前のパスが分からない"),
-        (gate.check_mvv_decl, {"changed": (gate.Changed(".ndf/mvv.md"),)}, "C7"),
+        (gate.check_mvv_decl, {"changed": (gate.Changed(".ndf/mvv.json"),)}, "C7"),
         (gate.check_mvv_decl, {"changed": (gate.Changed("docs/mvv.json", previous=".ndf/mvv.json"),)}, "C7"),
     ],
 )
