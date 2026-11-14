@@ -101,7 +101,7 @@ def load_children(path: Path, rel: str) -> Children:
 def owner(module: str, children: Children) -> Optional[str]:
     """モジュール（`ndf.<…>`）の持ち主の子。`packages` が最も長く一致する子で、無ければ None。"""
     best = max(
-        ((len(p), c.name) for c in children.rows.values() for p in c.packages if module == p or module.startswith(p + ".")),
+        ((len(p), c.name) for c in children.rows.values() for p in c.packages if imports.is_under(module, p)),
         default=None,
     )
     return best[1] if best else None

@@ -14,12 +14,12 @@ from ndf.checks.model import Finding, Scope, source_imports
 
 
 def _layer(module: str, layers: list[str]) -> int | None:
-    hits = [i for i, prefix in enumerate(layers) if module == prefix or module.startswith(prefix + ".")]
+    hits = [i for i, prefix in enumerate(layers) if imports.is_under(module, prefix)]
     return hits[0] if hits else None
 
 
 def _within(module: str, prefixes: list[str]) -> bool:
-    return any(module == p or module.startswith(p + ".") for p in prefixes)
+    return any(imports.is_under(module, p) for p in prefixes)
 
 
 def _is_decide(module: str, conf: dict[str, Any]) -> bool:
