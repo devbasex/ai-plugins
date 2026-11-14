@@ -87,19 +87,24 @@ class ClaudeReply(NamedTuple):
     cost: float
     error: Optional[str] = None
 
+    @classmethod
+    def failed(cls, raw: str, error: str, cost: float = 0.0) -> "ClaudeReply":
+        """`ok` が偽で答えを持たない答え。"""
+        return cls(False, None, raw, cost, error)
+
 
 def _parse_reply(stdout: str) -> ClaudeReply:
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        return ClaudeReply(False, None, stdout, 0.0, f"claude の出力が JSON でない: {exc}")
+        return ClaudeReply.failed(stdout, f"claude の出力が JSON でない: {exc}")
     if not isinstance(payload, dict):
-        return ClaudeReply(False, None, stdout, 0.0, "claude の出力が JSON のオブジェクトでない")
+        return ClaudeReply.failed(stdout, "claude の出力が JSON のオブジェクトでない")
     spent = payload.get("total_cost_usd")
     cost = float(spent) if isinstance(spent, (int, float)) else 0.0
     text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
     if payload.get("is_error"):
-        return ClaudeReply(False, None, text, cost, f"claude が誤りで終えた: {text[:200]}")
+        return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
     if "structured_output" in payload:
         return ClaudeReply(True, payload["structured_output"], text, cost)
     try:
@@ -116,7 +121,7 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     try:
         done = subprocess.run(list(argv), input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return ClaudeReply(False, None, "", 0.0, f"claude を起動できない・期限を超えた: {exc}")
+        return ClaudeReply.failed("", f"claude を起動できない・期限を超えた: {exc}")
     if done.returncode != 0 and not done.stdout.strip():
-        return ClaudeReply(False, None, done.stderr, 0.0, f"claude が終了コード {done.returncode} で終えた: {done.stderr[:200]}")
+        return ClaudeReply.failed(done.stderr, f"claude が終了コード {done.returncode} で終えた: {done.stderr[:200]}")
     return _parse_reply(done.stdout)
