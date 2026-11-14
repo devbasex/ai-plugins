@@ -23,12 +23,22 @@ def _stage_doc(name: str, row: str, steps: list[dict], **meta) -> dict:
 
 
 def _step(name: str, kind: str, rng: str, **meta) -> dict:
-    return {name: {"call": "ndf.plan", "metadata": {"ndf": {"kind": kind, "range": rng, **meta}}, "output": {"schema": {"resource": {"endpoint": E + "report"}}}}}
+    return {
+        name: {
+            "call": "ndf.plan",
+            "metadata": {"ndf": {"kind": kind, "range": rng, **meta}},
+            "output": {"schema": {"resource": {"endpoint": E + "report"}}},
+        }
+    }
 
 
 def _mode_doc(rows: list[tuple[str, str]]) -> dict:
     do = [{row: {"run": {"workflow": {"namespace": "ndf", "name": ref, "version": "1.0.0"}}}} for row, ref in rows]
-    return {"document": {"dsl": "1.0.3", "namespace": "ndf", "name": "trial", "version": "1.0.0"}, "metadata": {"ndf": {"height": 9}}, "do": do}
+    return {
+        "document": {"dsl": "1.0.3", "namespace": "ndf", "name": "trial", "version": "1.0.0"},
+        "metadata": {"ndf": {"height": 9}},
+        "do": do,
+    }
 
 
 def _errors(mode_doc: dict, stage_docs: dict) -> list[str]:
@@ -115,7 +125,9 @@ def test_contract_reference_to_nowhere_is_refused():
 
 def test_output_that_breaks_the_contract_is_caught():
     stage = definition.load_definition("standard").stage("デプロイ")
-    assert definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"delivery": {}, "version": "1.2.3"}}) == []
+    assert (
+        definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"delivery": {}, "version": "1.2.3"}}) == []
+    )
     errs = definition.validate_stage_output(stage, {"steps": [], "outputs": {"version": 3}})
     assert any("summary" in e for e in errs)
     assert any("version" in e for e in errs)
@@ -215,4 +227,3 @@ def test_context_schema_holds_the_closed_vocabulary():
 def test_snapshot_round_trips_through_json():
     snap = definition.load_definition("documentation")
     assert model.snapshot_from(model.snapshot_dict(snap)) == snap
-

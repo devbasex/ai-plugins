@@ -32,7 +32,9 @@ def checks(monkeypatch):
 
 def _write_one(st: store.Store, name: str = "s1") -> str:
     with store.transaction(st) as conn:
-        return store.create_table(conn, ("sprint", "r", name), None, {"stages": []}, [model.EventDraft("created", "conductor", "実装", rev=1)])
+        return store.create_table(
+            conn, ("sprint", "r", name), None, {"stages": []}, [model.EventDraft("created", "conductor", "実装", rev=1)]
+        )
 
 
 def _names(path: Path) -> list[str]:

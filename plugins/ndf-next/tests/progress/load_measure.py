@@ -101,8 +101,7 @@ def main() -> None:
     (root / store.CHECKED_MARK).unlink(missing_ok=True)
     deadline = time.time() + a.seconds
     procs = [
-        mp.Process(target=_worker, args=(url, str(root), tid, deadline, a.interval, str(work / f"w{i}.json")))
-        for i, tid in enumerate(ids)
+        mp.Process(target=_worker, args=(url, str(root), tid, deadline, a.interval, str(work / f"w{i}.json"))) for i, tid in enumerate(ids)
     ]
     if a.check_every:
         procs.append(mp.Process(target=_expire_marks, args=(root, deadline, a.check_every)))

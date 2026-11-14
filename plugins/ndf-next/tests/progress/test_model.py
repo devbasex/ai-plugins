@@ -110,7 +110,19 @@ def test_lane_rows_have_their_own_states():
 
 def test_enablement_priority_is_sprint_then_project_then_definition():
     snap = definition.load_definition("standard")
-    facts = dict.fromkeys(["code_in_diff", "docs_only_diff", "behavior_docs_in_diff", "ci_declared", "prod_branch", "release_record", "retro_enabled", "design_pr"], True)
+    facts = dict.fromkeys(
+        [
+            "code_in_diff",
+            "docs_only_diff",
+            "behavior_docs_in_diff",
+            "ci_declared",
+            "prod_branch",
+            "release_record",
+            "retro_enabled",
+            "design_pr",
+        ],
+        True,
+    )
     facts["code_in_diff"] = False
     declared = {"リファクタリング": {"enabled": True, "reason": ""}, "振り返り": {"enabled": False, "reason": "プロジェクトで止めている"}}
     got = model.resolve_enabled(snap, facts, declared, {"振り返り": "このスプリントでは止める"})
@@ -124,7 +136,9 @@ def test_refactoring_suspension_is_a_declaration():
     # 受け入れ条件 3: リファクタリングの停止は .ndf/project.json の宣言で表す
     snap = definition.load_definition("standard")
     declared = {"リファクタリング": {"enabled": False, "reason": "#1142 の作り直しの間は止める"}}
-    assert model.resolve_enabled(snap, None, declared, {})["リファクタリング"] == model.Enablement(False, "#1142 の作り直しの間は止める", "project")
+    assert model.resolve_enabled(snap, None, declared, {})["リファクタリング"] == model.Enablement(
+        False, "#1142 の作り直しの間は止める", "project"
+    )
 
 
 def test_progress_table_contract_is_consistent():

@@ -83,7 +83,9 @@ def _consistency_errors(raw: dict[str, Any]) -> list[str]:
     names = _state_names(raw)
     errs = [f"表示の語が無い状態: {s}" for s in sorted(names - set(raw["labels"]))]
     errs += [f"終わりの状態の一覧に知らない状態: {s}" for s in raw["terminal"] if s not in names]
-    errs += [f"{lv}: 初めの状態 {t['initial']} が状態の一覧に無い" for lv, t in raw["table_states"].items() if t["initial"] not in t["states"]]
+    errs += [
+        f"{lv}: 初めの状態 {t['initial']} が状態の一覧に無い" for lv, t in raw["table_states"].items() if t["initial"] not in t["states"]
+    ]
     kinds = {ev["kind"] for ev in raw["events"]}
     errs += [f"理由が要る事象の一覧に知らない種類: {k}" for k in raw["reason_required"] if k not in kinds]
     return errs + _event_errors(raw, names)
@@ -346,7 +348,13 @@ def snapshot_dict(snap: Snapshot) -> dict[str, Any]:
         steps = [{k: v for k, v in vars(st).items() if k != "stage"} for st in s.steps]
         return {**{k: (list(v) if isinstance(v, tuple) else v) for k, v in vars(s).items() if k != "steps"}, "steps": steps}
 
-    return {"mode": snap.mode, "version": snap.version, "sha256": snap.sha256, "height": snap.height, "stages": [stage(s) for s in snap.stages]}
+    return {
+        "mode": snap.mode,
+        "version": snap.version,
+        "sha256": snap.sha256,
+        "height": snap.height,
+        "stages": [stage(s) for s in snap.stages],
+    }
 
 
 def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
@@ -384,7 +392,9 @@ def _after_release_errors(steps: list[StepDef]) -> list[str]:
     released: dict[str, StepDef] = {}
     for st in steps:
         if st.kind in ("review", "test") and st.range in released:
-            errs.append(f"I8a: {_where(st)} の {st.kind} が、同じ範囲 {st.range} をリリースする {_where(released[st.range])} より後ろにある")
+            errs.append(
+                f"I8a: {_where(st)} の {st.kind} が、同じ範囲 {st.range} をリリースする {_where(released[st.range])} より後ろにある"
+            )
         if st.kind == "verify" and not released:
             errs.append(f"I8b: {_where(st)} の verify より前にリリースのステップが無い")
         if st.kind == "release":

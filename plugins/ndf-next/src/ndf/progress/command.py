@@ -181,7 +181,9 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
         return [model.EventDraft(kind, ACTOR, a.stage, reason=a.reason, payload=payload, rev=rev)]
 
     seqs = _append(st, a.table_id, build)
-    return result.result(TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に {kind} を書いた", metrics={"table_id": a.table_id, "seqs": seqs})
+    return result.result(
+        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に {kind} を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+    )
 
 
 def _cmd_toggle(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -214,7 +216,9 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     with store.run_lock(st, a.table_id):
         seqs = _append(st, a.table_id, build)
     rows = len(seqs) - 1
-    return result.result(TOOL, result.OK, f"進行表 {a.table_id} を中止した（中止にした行 {rows}）", metrics={"table_id": a.table_id, "cancelled_rows": rows})
+    return result.result(
+        TOOL, result.OK, f"進行表 {a.table_id} を中止した（中止にした行 {rows}）", metrics={"table_id": a.table_id, "cancelled_rows": rows}
+    )
 
 
 def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
@@ -307,6 +311,13 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         out = _dispatch(a, Path.cwd())
-    except (model.Refused, durable.StoreStopped, contracts.ContractError, GitError, identity.IdentityError, subprocess.CalledProcessError) as exc:
+    except (
+        model.Refused,
+        durable.StoreStopped,
+        contracts.ContractError,
+        GitError,
+        identity.IdentityError,
+        subprocess.CalledProcessError,
+    ) as exc:
         out = _stopped_from(exc)
     return result.emit(out)

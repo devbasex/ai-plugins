@@ -215,9 +215,7 @@ class Store:
 
 def _sqlite_engine(path: Path) -> sa.Engine:
     """WAL と busy_timeout で開き、トランザクションを `BEGIN IMMEDIATE` で始める Engine（接続はまだしない）。"""
-    engine = sa.create_engine(
-        f"{durable.SQLITE_PREFIX}{path}", connect_args={"timeout": BUSY_TIMEOUT_SECONDS}, poolclass=sa.NullPool
-    )
+    engine = sa.create_engine(f"{durable.SQLITE_PREFIX}{path}", connect_args={"timeout": BUSY_TIMEOUT_SECONDS}, poolclass=sa.NullPool)
 
     @sa_event.listens_for(engine, "connect")
     def _pragmas(dbapi_conn: Any, _record: Any) -> None:
@@ -544,7 +542,11 @@ def append_events(
 
 
 def create_table(
-    conn: sa.Connection, key: tuple[str, str, str], parent_id: Optional[str], definition: Optional[dict[str, Any]], drafts: list[model.EventDraft]
+    conn: sa.Connection,
+    key: tuple[str, str, str],
+    parent_id: Optional[str],
+    definition: Optional[dict[str, Any]],
+    drafts: list[model.EventDraft],
 ) -> str:
     """進行表を作り、定義があれば改訂 1 と最初の事象を書く。`key` は（階層, リポジトリ, 名前）。
 

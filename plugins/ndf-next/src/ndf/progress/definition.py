@@ -151,7 +151,9 @@ def _meta_errors(where: str, meta: Any, level: str) -> list[str]:
         known = _context_keys()
         for part in ("inputs", "outputs"):
             held = meta.get(part)
-            errs += [f"{where}: {part} の {k} はスプリントの文脈の鍵に無い" for k in held if k not in known] if isinstance(held, list) else []
+            errs += (
+                [f"{where}: {part} の {k} はスプリントの文脈の鍵に無い" for k in held if k not in known] if isinstance(held, list) else []
+            )
     return errs
 
 

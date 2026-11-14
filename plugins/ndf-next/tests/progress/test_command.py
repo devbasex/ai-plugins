@@ -55,7 +55,9 @@ def test_second_table_for_the_same_sprint_is_refused_with_the_current_id(repo, c
 
 def test_disabled_rows_come_from_the_argument_and_the_project_declaration(repo, capsys):
     (repo / ".ndf").mkdir()
-    (repo / ".ndf" / "project.json").write_text(json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": False, "reason": "止めている"}}}}))
+    (repo / ".ndf" / "project.json").write_text(
+        json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": False, "reason": "止めている"}}}})
+    )
     _, out = _new(capsys, "--disable", "振り返り=今回は不要")
     reasons = {r["stage"]: r["reason"] for r in out["items"] if r["state"] == "disabled"}
     assert reasons == {"リファクタリング": "止めている", "振り返り": "今回は不要"}
@@ -83,7 +85,11 @@ def test_conductor_operations_leave_reason_and_time(repo, capsys, tmp_path):
     assert _run(capsys, "finish", tid, "計画", "--output", str(out_file), "--reason", "手で行った")[0] == 0
     _, shown = _run(capsys, "show", tid)
     history = shown["metrics"]["history"]
-    assert [(h["kind"], h["reason"]) for h in history[-3:]] == [("disabled", "外す"), ("enabled", "戻す"), ("manual_finished", "手で行った")]
+    assert [(h["kind"], h["reason"]) for h in history[-3:]] == [
+        ("disabled", "外す"),
+        ("enabled", "戻す"),
+        ("manual_finished", "手で行った"),
+    ]
     assert all(h["at"] for h in history)
     assert {r["stage"]: r["label"] for r in shown["items"]}["計画"] == "終了"
 

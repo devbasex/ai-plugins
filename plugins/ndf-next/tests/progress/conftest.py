@@ -63,7 +63,9 @@ def pg_url(pg_server):
     """テストごとに新しい DB を作った PostgreSQL の URL。"""
     bindir, base = pg_server
     name = "t" + uuid.uuid4().hex[:16]
-    subprocess.run([bindir / "createdb", "-h", "127.0.0.1", "-p", base.rsplit(":", 1)[1], "-U", "ndf", name], check=True, capture_output=True)
+    subprocess.run(
+        [bindir / "createdb", "-h", "127.0.0.1", "-p", base.rsplit(":", 1)[1], "-U", "ndf", name], check=True, capture_output=True
+    )
     return f"{base}/{name}"
 
 

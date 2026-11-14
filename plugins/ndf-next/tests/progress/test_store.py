@@ -37,7 +37,10 @@ def test_create_read_and_refuse_a_second_table(opened):
     with store.transaction(opened) as conn:
         assert store.read_table(conn, tid)["level"] == "sprint"
         assert store.read_definition(conn, tid) == (1, {"stages": []})
-        assert [(e.seq, e.draft.row_key, e.draft.state) for e in store.read_events(conn, tid)] == [(1, "設計", "pending"), (2, "実装", "pending")]
+        assert [(e.seq, e.draft.row_key, e.draft.state) for e in store.read_events(conn, tid)] == [
+            (1, "設計", "pending"),
+            (2, "実装", "pending"),
+        ]
     with pytest.raises(model.Refused) as info:
         _create(opened)
     assert info.value.current_id == tid
