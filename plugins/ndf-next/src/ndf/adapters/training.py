@@ -143,22 +143,45 @@ def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], st
     return token, ""
 
 
+def _read_over_http(
+    runtime: str,
+    auth: tuple[Optional[Mapping[str, str]], str],
+    client: httpx.Client,
+    url: str,
+    policy: str,
+    interpret: Callable[[dict], Optional[bool]],
+    source: str,
+) -> Reading:
+    """(見出し, 無いときの理由) で `url` を読み、`interpret` で学習の設定の真偽値を取り出す。例外を出さない。"""
+    headers, why = auth
+    if headers is None:
+        return _unread(runtime, why)
+    body, why = _get(client, url, headers, limits.seconds(policy))
+    if body is None:
+        return _unread(runtime, why)
+    training = interpret(body)
+    if training is None:
+        return _unread(runtime, BAD_SHAPE)
+    return Reading(runtime, training, source)
+
+
 def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
     """claude の学習の設定を読む。例外を出さない。"""
     foreign = [name for name in CLAUDE_FOREIGN_AUTH if env.get(name)]
     if foreign:
         return _unread("claude", f"OAuth 以外の接続が有効（{', '.join(foreign)}）")
     token, why = _claude_token(env, now)
-    if token is None:
-        return _unread("claude", why)
-    headers = {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
-    body, why = _get(client, CLAUDE_URL, headers, limits.seconds("claude-training.call"))
-    if body is None:
-        return _unread("claude", why)
+    headers = (
+        None if token is None else {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
+    )
+    return _read_over_http(
+        "claude", (headers, why), client, CLAUDE_URL, "claude-training.call", _grove_enabled, "oauth/account/settings.grove_enabled"
+    )
+
+
+def _grove_enabled(body: dict) -> Optional[bool]:
     grove = body.get("grove_enabled")
-    if not isinstance(grove, bool):
-        return _unread("claude", BAD_SHAPE)
-    return Reading("claude", grove, "oauth/account/settings.grove_enabled")
+    return grove if isinstance(grove, bool) else None
 
 
 def _codex_auth(env: Mapping[str, str]) -> tuple[Optional[dict[str, str]], str]:
@@ -189,16 +212,15 @@ def codex_training(settings: object) -> Optional[bool]:
 
 def read_codex(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
     """codex の学習の設定を読む。例外を出さない。"""
-    headers, why = _codex_auth(env)
-    if headers is None:
-        return _unread("codex", why)
-    body, why = _get(client, CODEX_URL, headers, limits.seconds("codex-training.call"))
-    if body is None:
-        return _unread("codex", why)
-    training = codex_training(body.get("settings"))
-    if training is None:
-        return _unread("codex", BAD_SHAPE)
-    return Reading("codex", training, "chatgpt/settings/user.training_allowed")
+    return _read_over_http(
+        "codex",
+        _codex_auth(env),
+        client,
+        CODEX_URL,
+        "codex-training.call",
+        lambda body: codex_training(body.get("settings")),
+        "chatgpt/settings/user.training_allowed",
+    )
 
 
 Reader = Callable[[Mapping[str, str], httpx.Client, float], Reading]
