@@ -301,6 +301,8 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `durable.sweep_url(root, url, now)` | DB に届かない | 消さずに `warnings` に載せて進む。片付けの失敗で実行を止めない |
 | `store.open_store(url, root)` | `quick_check` が `ok` でない | 止まった理由 `store_broken`。結果に最新の控えのパスと `ndf progress restore --from <控え>` を載せる |
 | `store.open_store(url, root)` | `database is locked` が `busy_timeout` を超えた | 止まった理由 `store_busy`（再試行の方針は止まった理由の表） |
+| `store.open_store(url, root)` | DB へ繋げない・認証に失敗する・途中で切れる、SQLite のファイルを開けない・ディスクの満杯や I/O の誤り | 止まった理由 `store_unreachable`（再試行の方針は止まった理由の表）。DB は壊れていないので控えからの戻しを案内しない。結果の接続先はパスワードを伏せる |
+| `store.sqlite_path(url)` | SQLite の URL がクエリ（`?timeout=30` など）を持つ・ファイルのパスが無い（メモリの DB） | 何も開かずに止まる（`invalid`）。接続・検査・ロック・戻しが別のファイルを指さないようにする |
 
 ## 内部のデータと定数
 
@@ -331,7 +333,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `RUN_LOCK_SPACE` | NDF が決める 32 ビットの定数 | URL のときの鍵のロック（`pg_advisory_lock` の 2 引数の形）の第 1 引数。進行表の DB の `pg_try_advisory_lock` と値の空間を分ける |
 | `CHECK_INTERVAL` | 24 時間 | `quick_check` と片付けの走査の間隔。目印 `progress.checked`・`dbos/<run_name>.checked`・`dbos/.swept` の更新時刻と比べる（決定 82・83） |
 
-止まった理由 `store_broken`・`store_busy`・`store_in_use`・`restore_unsupported`・`format_newer`・`format_mismatch` は、D1 の止まった理由の表へ足す（P1・C1+・P3 の PR が下流の読み手と同じ PR で足す。集約の表の「止まった理由の表」の行）。
+止まった理由 `store_broken`・`store_busy`・`store_unreachable`・`store_in_use`・`restore_unsupported`・`format_newer`・`format_mismatch` は、D1 の止まった理由の表へ足す（P1・C1+・P3 の PR が下流の読み手と同じ PR で足す。集約の表の「止まった理由の表」の行）。
 
 ## 並行と排他
 

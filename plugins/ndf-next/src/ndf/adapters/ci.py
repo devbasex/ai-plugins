@@ -117,9 +117,14 @@ def latest(runs: Iterable[dict]) -> list[Check]:
     return [check_of(best[name][1]) for name in sorted(best)]
 
 
+def _unprefixed(name: str) -> str:
+    """ワークフローの名前の前置き `<ワークフロー> / ` を最後の ` / ` で外した名前（空白と分割ジョブの末尾は残す）。"""
+    return name.rpartition(" / ")[2]
+
+
 def bare_name(name: str) -> str:
     """照合に使う名前。分割ジョブの末尾 `(k/n)` と、ワークフローの名前の前置き `<ワークフロー> / ` を外す。"""
-    return _SHARD.sub("", name.rpartition(" / ")[2]).strip()
+    return _SHARD.sub("", _unprefixed(name)).strip()
 
 
 def bare_names(names: Iterable[str]) -> set[str]:
@@ -127,19 +132,23 @@ def bare_names(names: Iterable[str]) -> set[str]:
     return {bare_name(n) for n in names}
 
 
+def _short_name(name: str) -> str:
+    """ワークフローの名前の前置き `<ワークフロー> / ` を外し、前後の空白を除いた名前（分割ジョブの末尾は保つ）。"""
+    return _unprefixed(name).strip()
+
+
 def required_key(name: str) -> str:
     """必須のチェックの照合の鍵。分割ジョブを名指しした（`pytest (1/2)`）ものはその分割を保ち、ほかは `bare_name`。
 
     名指しした分割を畳むと、`pytest (0/2)` だけが通った時点で `pytest (1/2)` も揃ったと読んでしまう。
     """
-    short = name.rpartition(" / ")[2].strip()
+    short = _short_name(name)
     return short if _SHARD.search(short) else bare_name(name)
 
 
 def _fulfils(check_name: str, key: str) -> bool:
     """チェックが必須の鍵（`required_key`）に当たるか。分割を名指しした鍵はその分割だけに当たる。"""
-    short = check_name.rpartition(" / ")[2].strip()
-    return short == key if _SHARD.search(key) else bare_name(check_name) == key
+    return _short_name(check_name) == key if _SHARD.search(key) else bare_name(check_name) == key
 
 
 def is_test_check(name: str, tests: Iterable[str]) -> bool:
@@ -212,23 +221,34 @@ def split_failed(names: Iterable[str], tests: Iterable[str]) -> tuple[list[str],
     return _partition(names, lambda n: n, bare_names(tests))
 
 
-def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
-    """読んだ結果の止まった理由の種類。通っていれば None。
+class Classifier(NamedTuple):
+    """読んだ結果を止まった理由の種類へ分ける前提。`tests` はテストのチェックの名前、`merge_failed` はマージの段階が
+    落ちたと読んだチェックの名前（マージの後の判定だけが渡す）。"""
 
-    `merge_failed` はマージの段階が落ちたと読んだチェックの名前（マージの後の判定だけが渡す）。マージの段階が
-    テストのチェックの落ちを読んでいれば、読み直しでまとめのチェックが終わっていなくても `test_failed` にする（#3153）。
-    マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
-    """
-    after_merge = merge_failed is not None
-    merged_tests, merged_other = split_failed(merge_failed if merge_failed is not None else [], tests)
-    if merged_tests:
-        return "test_failed"
-    verdict = reading.verdict
-    if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
-        return "check_failed"
-    if verdict == Verdict.PASSED:
-        return "not_ci" if after_merge else None
-    return _VERDICT_KINDS[verdict]
+    tests: Iterable[str]
+    merge_failed: Optional[Iterable[str]] = None
+
+    def cause(self, reading: Reading) -> Optional[str]:
+        """読んだ結果の止まった理由の種類。通っていれば None。
+
+        マージの段階がテストのチェックの落ちを読んでいれば、読み直しでまとめのチェックが終わっていなくても
+        `test_failed` にする（#3153）。マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
+        """
+        after_merge = self.merge_failed is not None
+        merged_tests, merged_other = split_failed(self.merge_failed if self.merge_failed is not None else [], self.tests)
+        if merged_tests:
+            return "test_failed"
+        verdict = reading.verdict
+        if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
+            return "check_failed"
+        if verdict == Verdict.PASSED:
+            return "not_ci" if after_merge else None
+        return _VERDICT_KINDS[verdict]
+
+
+def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
+    """読んだ結果の止まった理由の種類（`Classifier.cause`）。通っていれば None。"""
+    return Classifier(tests, merge_failed).cause(reading)
 
 
 def failed_test_nodes(log_text: str) -> list[str]:
@@ -261,7 +281,11 @@ class WatchResult:
     runner_exhausted: bool = False
 
     def cause(self, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
-        kind = cause_of(self.reading, tests, merge_failed)
+        return self.cause_by(Classifier(tests, merge_failed))
+
+    def cause_by(self, classifier: Classifier) -> Optional[str]:
+        """止まった理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
+        kind = classifier.cause(self.reading)
         return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
 
 
@@ -275,6 +299,8 @@ class Watch:
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
     - `decided` が真を返したら、結論の出ていないチェックが残っていても待たずに返す（マージの段階から引き継いだ
       失敗で止まった理由が決まっているとき、読み直しに API と待ちを使わない）
+    - 予算は `started`（`clock` の値）から数える。省けば作った時点。前の段階で待ち始めた呼び手は、その時刻を渡して
+      同じ予算を引き継ぐ。始まりの時刻は `started` で読める
     """
 
     reader: Callable[[], Reading]
@@ -283,44 +309,64 @@ class Watch:
     decided: Optional[Callable[[Reading], bool]] = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+    started: Optional[float] = None
     _queued: float = field(default=0.0, init=False)
-    _start: float = field(default=0.0, init=False)
 
     def __post_init__(self) -> None:
-        # 予算は作った時点から数える（`run` の前の API の呼び出しも `remaining` で同じ予算に入れる）
-        self._start = self.clock()
+        # 省いたら作った時点から数える（`run` の前の API の呼び出しも `remaining` で同じ予算に入れる）
+        if self.started is None:
+            self.started = self.clock()
 
     def remaining(self) -> float:
         """待ちに使える残りの秒。ランナーの割り当ての待ちは予算に数えない（API の上限の待ちの締め切りに使う）。"""
-        return self.budget - (self.clock() - self._start - self._queued)
+        return self._remaining_at(self.clock())
+
+    def _remaining_at(self, now: float) -> float:
+        """時刻 `now` での待ちに使える残りの秒（ランナーの割り当ての待ちを予算に数えない）。"""
+        return self.budget - (now - self.started - self._queued)
 
     def run(self) -> WatchResult:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
-        interval, start, rounds = float(policy.interval), self._start, 0
+        interval, rounds = float(policy.interval), 0
         while True:
-            reading = self.reader()
             rounds += 1
-            now = self.clock()
-            if self.on_round is not None:
-                self.on_round(reading, now - start)
-            if reading.verdict != Verdict.PENDING or (self.decided is not None and self.decided(reading)):
-                return WatchResult(reading, rounds, now - start, self._queued)
-            wait = self._next_wait(reading, interval, now - start, runner_cap)
+            reading, now, done = self._round(rounds)
+            if done is not None:
+                return done
+            wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
-                exhausted = reading.only_queued and self._queued >= runner_cap
-                return WatchResult(reading, rounds, now - start, self._queued, exhausted)
+                return self._exhausted_result(reading, rounds, now, runner_cap)
             self.sleep(wait)
             if reading.only_queued:
                 # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
                 self._queued += max(self.clock() - now, wait)
             interval = min(interval * float(policy.factor), float(policy.max_interval))
 
-    def _next_wait(self, reading: Reading, interval: float, elapsed: float, runner_cap: float) -> float:
-        """次に眠る秒。上限までの残りに縮める。0 以下なら上限に達した。"""
+    def _round(self, rounds: int) -> tuple[Reading, float, Optional[WatchResult]]:
+        """1 周（`rounds` 周目）: 読み、経過の秒を `on_round` へ渡し、結論が出た（か `decided` が真）なら結果を返す。
+
+        返すのは読んだ結果・読んだ時刻・待ちを終える結果（読み直すなら None）。
+        """
+        reading = self.reader()
+        now = self.clock()
+        elapsed = now - self.started
+        if self.on_round is not None:
+            self.on_round(reading, elapsed)
+        if reading.verdict != Verdict.PENDING or (self.decided is not None and self.decided(reading)):
+            return reading, now, WatchResult(reading, rounds, elapsed, self._queued)
+        return reading, now, None
+
+    def _exhausted_result(self, reading: Reading, rounds: int, now: float, runner_cap: float) -> WatchResult:
+        """待ちが上限に達したときの結果。ランナーの割り当ての待ちだけで上限を超えたら `runner_exhausted`。"""
+        exhausted = reading.only_queued and self._queued >= runner_cap
+        return WatchResult(reading, rounds, now - self.started, self._queued, exhausted)
+
+    def _next_wait(self, reading: Reading, interval: float, now: float, runner_cap: float) -> float:
+        """時刻 `now` から次に眠る秒。上限までの残りに縮める。0 以下なら上限に達した。"""
         if reading.only_queued:
             return min(interval, runner_cap - self._queued)
-        return min(interval, self.budget - (elapsed - self._queued))
+        return min(interval, self._remaining_at(now))
 
 
 def watch_head(github: GitHub, sha: str, required: list[str], tests: list[str]) -> Callable[[], Reading]:

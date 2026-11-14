@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import identity
-from ndf.contracts import causes, limits, result
+from ndf.contracts import causes, facts, limits, result
 
 ENV_RUN_ID = "NDF_RUN_ID"
 ENV_RUN_LOG = "NDF_RUN_LOG"
@@ -71,8 +71,13 @@ def _safe_name(name: str, what: str) -> str:
     return name
 
 
-def _secret_values() -> list[str]:
-    found = [v for k, v in os.environ.items() if SECRET_NAME.search(k) and len(v) >= SECRET_MIN]
+def secret_values() -> list[str]:
+    """伏せる値（名前が秘密の形の環境変数と、環境変数の表で `secret` の値）。長いものから並べ、短い値が長い値の一部を先に伏せないようにする。
+
+    表の `secret` は名前の形に当たらない秘密（進行表の DB の URL は資格情報を含みうる。B8）を拾う。
+    """
+    marked = set(facts.ids("env", secret=True))
+    found = [v for k, v in os.environ.items() if (SECRET_NAME.search(k) or k in marked) and len(v) >= SECRET_MIN]
     return sorted(found, key=len, reverse=True)
 
 
@@ -86,7 +91,7 @@ def _mask(text: str, secrets: list[str]) -> str:
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
     """文字列・配列・辞書の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。"""
-    secrets = _secret_values() if secrets is None else secrets
+    secrets = secret_values() if secrets is None else secrets
     if isinstance(value, str):
         return _mask(value, secrets)
     if isinstance(value, dict):

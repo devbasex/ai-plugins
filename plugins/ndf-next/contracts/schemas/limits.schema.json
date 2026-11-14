@@ -5,9 +5,9 @@
   "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "policies"],
+  "required": ["owner", "policies"],
   "properties": {
-    "version": {"const": 1},
+    "owner": {"type": "string", "minLength": 1, "description": "宣言を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
     "policies": {
       "type": "object",
       "minProperties": 1,
@@ -26,7 +26,8 @@
           "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
           "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
           "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
-          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"}
+          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"},
+          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本が枠から取るメモリの重み（GiB）"}
         }
       }
     }

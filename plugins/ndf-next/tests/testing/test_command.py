@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,9 +57,7 @@ def _slot_held_elsewhere(root: Path, directory: Path):
     return slots.gate(
         "fakerun .",
         root,
-        kind="whole",
-        limits=holding,
-        options=slots.GateOptions(environ={}, directory=directory, read_memory=lambda: 10**9),
+        options=slots.GateOptions(kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9),
     )
 
 
@@ -89,6 +88,13 @@ def test_run_keeps_output_and_exit_code(project, slots_dir):
         out, err = proc.communicate()
         assert (proc.returncode, out, err) == (int(code), "out\n", "err\n")
     assert [row["result"] for row in records.read_events(slots_dir)] == ["finished", "finished"]
+
+
+def test_child_killed_by_a_signal_exits_with_128_plus_the_signal(project):
+    # OOM Killer の SIGKILL もシェルと同じ 137 になる（負の値の -9 を 247 として返さない）
+    root, bin_dir, log = project
+    proc = _ndf(["run", "--", "kill -9 $$"], root, bin_dir, log)
+    assert proc.wait() == 128 + signal.SIGKILL
 
 
 def test_parallel_runs_wait_for_each_other(project):
@@ -163,16 +169,30 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert got["metrics"]["waited_seconds"] >= 1
     assert "諦めた" in got["summary"]
     # 契約の wait_timeout は同じ待ちを next に載せる
-    assert got["next"] == "ndf test-slot run --wait-limit 1 -- 'fakerun .'"
+    assert got["next"] == {"argv": ["ndf", "test-slot", "run", "--wait-limit", "1", "--", "fakerun ."]}
     assert not log.exists()
     rows = records.read_events(directory)
     assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
 
 
-def test_memory_stop_exits_apart_from_a_failed_test(capsys):
+def _gate_stopping_by_memory(command_text, cwd, *, options=None):
+    """`slots.gate` の代わり。枠を持たない実行を渡し、出るときにメモリで止めたとして `Stopped` を送る。"""
+
+    @contextmanager
+    def gate():
+        yield slots.Held()
+        raise slots.Stopped(records.MEMORY_STOPPED, 2.0, 100)
+
+    return gate()
+
+
+def test_memory_stop_exits_apart_from_a_failed_test(project, monkeypatch, capsys):
     # メモリで止めた実行は落ちたテストとして数えない（I9）。終了コードは落ちたテストの 1 と重ならない
-    code = command._stopped_from(slots.Stopped(records.MEMORY_STOPPED, 2.0, 100))
+    root, _, _ = project
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(slots, "gate", _gate_stopping_by_memory)
+    code = command.main(["run", "--", "true"])
     got = json.loads(capsys.readouterr().out)
     assert code == causes.exit_code("infra_wait") != causes.exit_code("test_failed")
     assert got["status"] == "stopped"
