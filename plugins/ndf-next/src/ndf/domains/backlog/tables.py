@@ -11,7 +11,7 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.backlog import issues_gh
 from ndf.domains.backlog import table_decide as td
 
-TOO_LONG = 422
+TOO_LONG = issues_gh.UNPROCESSABLE
 
 
 def _write_one(gh: GitHub, number: int, desc: str, ms: dict[str, Any]) -> tuple[str, Optional[int]]:

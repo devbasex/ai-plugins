@@ -24,11 +24,8 @@ def default_branch(gh: GitHub) -> str:
 
 def file_text(gh: GitHub, path: str, ref: str) -> Optional[str]:
     """基底のブランチ `ref` のファイルの中身。無ければ（HTTP 404）None。"""
-    try:
-        raw = gh.rest("GET", f"/repos/{gh.repo}/contents/{quote(path)}", params={"ref": ref})
-    except GitHubError as exc:
-        if exc.status != issues_gh.NOT_FOUND:
-            raise
+    raw = issues_gh.get_or_none(gh, f"/repos/{gh.repo}/contents/{quote(path)}", params={"ref": ref})
+    if raw is None:
         return None
     if not isinstance(raw, dict) or raw.get("encoding") != "base64":
         return ""
@@ -48,11 +45,8 @@ def pull_files(gh: GitHub, pr: int) -> dict[str, str]:
 
 
 def _merged_pull(gh: GitHub, pr: int) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    try:
-        raw = gh.rest("GET", f"/repos/{gh.repo}/pulls/{int(pr)}")
-    except GitHubError as exc:
-        if exc.status != issues_gh.NOT_FOUND:
-            raise
+    raw = issues_gh.get_or_none(gh, f"/repos/{gh.repo}/pulls/{int(pr)}")
+    if raw is None:
         return None, f"PR #{pr} が無い"
     if not raw["merged"]:
         return None, f"PR #{pr} がマージされていない"
@@ -77,11 +71,7 @@ def check_improved(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
 
 
 def check_removed(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
-    try:
-        gh.rest("GET", f"/repos/{gh.repo}/commits/{quote(ev['commit'])}")
-    except GitHubError as exc:
-        if exc.status not in (issues_gh.NOT_FOUND, 422):
-            raise
+    if issues_gh.get_or_none(gh, f"/repos/{gh.repo}/commits/{quote(ev['commit'])}", missing=(issues_gh.NOT_FOUND, issues_gh.UNPROCESSABLE)) is None:
         return f"コミット {ev['commit']} が無い"
     if file_text(gh, ev["path"], base) is not None:
         return f"基底のブランチ {base} に {ev['path']} がまだある"

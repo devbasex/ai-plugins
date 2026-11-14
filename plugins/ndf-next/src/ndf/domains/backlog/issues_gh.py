@@ -24,6 +24,17 @@ _MILESTONE_PAGE = (
     " pageInfo { hasNextPage endCursor } nodes { number title description } } } }"
 )
 NOT_FOUND = 404
+UNPROCESSABLE = 422
+
+
+def get_or_none(gh: GitHub, path: str, params: Optional[dict[str, Any]] = None, missing: tuple[int, ...] = (NOT_FOUND,)) -> Any:
+    """REST の GET の本文。HTTP の状態が `missing` なら無いとみなして None、ほかの失敗は `GitHubError` のまま投げる。"""
+    try:
+        return gh.rest("GET", path, params=params)
+    except GitHubError as exc:
+        if exc.status not in missing:
+            raise
+        return None
 
 
 def _milestone_title(ms: Any) -> Optional[str]:
@@ -149,13 +160,8 @@ def _issue_id(gh: GitHub, n: int) -> int:
 
 def parent_of(gh: GitHub, n: int) -> Optional[int]:
     """Issue の親の番号。親が無ければ（HTTP 404）None。ほかの失敗は `GitHubError` のまま投げる。"""
-    try:
-        raw = gh.rest("GET", _issue_path(gh, n, "/parent"))
-    except GitHubError as exc:
-        if exc.status != NOT_FOUND:
-            raise
-        return None
-    return int(raw["number"])
+    raw = get_or_none(gh, _issue_path(gh, n, "/parent"))
+    return None if raw is None else int(raw["number"])
 
 
 def set_parent(gh: GitHub, n: int, parent: Optional[int], current: Optional[int]) -> None:
