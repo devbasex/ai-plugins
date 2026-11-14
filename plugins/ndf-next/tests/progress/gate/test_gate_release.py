@@ -249,7 +249,9 @@ def test_current_the_organizer_reply_on_the_plan_is_none_until_the_release_is_re
     assert release._organizer_reply(st, q, {}) is None
     (req,) = _requests(st, pid)
     with store.transaction(st) as conn:
-        plan.record_release(conn, pid, [req.key], plan.ReleaseAnswer(plan.RELEASED, "出した", version="1.2.3", release="https://github.com/o/r/pull/9"))
+        plan.record_release(
+            conn, pid, [req.key], plan.ReleaseAnswer(plan.RELEASED, "出した", version="1.2.3", release="https://github.com/o/r/pull/9")
+        )
     (req,) = _requests(st, pid)
     assert req.release is not None and release._organizer_reply(st, q, {}) == dict(req.release)
 
