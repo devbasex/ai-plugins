@@ -106,4 +106,4 @@ def test_read_skips_untrusted_writers() -> None:
 
 def test_body_without_json_block_is_not_a_record() -> None:
     assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象の版: {VERSION}\n") is None
-    assert record_decide.parse_record("```json\n{\"version\": \"1.2.4\", \"release\": 1, \"included\": []}\n```") is None
+    assert record_decide.parse_record('```json\n{"version": "1.2.4", "release": 1, "included": []}\n```') is None
