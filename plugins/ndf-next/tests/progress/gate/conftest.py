@@ -1,6 +1,6 @@
 """承認ゲート（`ndf.progress.gate`）のテストが共有する部品。
 
-進行表は light のモードで作り、偽の作業（宣言した出力を持つ ok を返す）で設計承認ゲートまで流す。
+進行表は standard のモード（設計承認ゲートを持つ。#3425）で作り、偽の作業（宣言した出力を持つ ok を返す）で設計承認ゲートまで流す。
 """
 
 from __future__ import annotations
@@ -51,10 +51,10 @@ def env(repo):
 
 @pytest.fixture
 def new_table(capsys):
-    """light の進行表を作って ID を返す。`extra` は `ndf progress new` へ足す引数。"""
+    """standard の進行表を作って ID を返す。`extra` は `ndf progress new` へ足す引数。"""
 
     def make(*extra: str) -> str:
-        code = command.main(["new", "s1", "--mode", "light", "--issues", str(ISSUE), *extra])
+        code = command.main(["new", "s1", "--mode", "standard", "--issues", str(ISSUE), *extra])
         out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert code == 0, out
         return out["metrics"]["table_id"]

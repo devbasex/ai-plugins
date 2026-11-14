@@ -38,7 +38,8 @@
         "kind": {"enum": ["review", "test", "release", "verify", "merge", "work", "gate", "record"], "description": "順序の決まりの対象を決める種類。verify はリリースした版を確かめるステップで、取り込みの前の検査（review・test）と分ける"},
         "range": {"enum": ["sprint_diff", "issue_diff", "released", "lane", "none"], "description": "ステップの入力の範囲。review と test は sprint_diff か issue_diff、verify は released だけ"},
         "subject": {"enum": ["code", "docs", "design"], "description": "レビューの対象。kind が review のときだけ書く"},
-        "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate のときだけ書く。語の表示は progress.json の gates が持つ"}
+        "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate のときだけ書く。語の表示は progress.json の gates が持つ"},
+        "modes": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "ステップを流すモードの名前（modes/ の文書の名前）。無ければすべてのモードで流す。承認ゲートが掛かるモードはここで決める"}
       },
       "allOf": [
         {

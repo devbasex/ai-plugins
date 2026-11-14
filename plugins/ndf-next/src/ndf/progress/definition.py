@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -240,14 +240,31 @@ def _step_def(stage: str, name: str, body: dict[str, Any]) -> stages.StepDef:
     )
 
 
-def _stage_def(doc: Mapping[str, Any]) -> stages.StageDef:
+def _in_mode(body: Mapping[str, Any], mode: str) -> bool:
+    """ステップをモード `mode` で流すか（`metadata.ndf.modes` が無ければすべてのモード）。"""
+    meta = _ndf_meta(body)
+    return "modes" not in meta or mode in meta["modes"]
+
+
+def _mode_errors(doc: Mapping[str, Any], known: Iterable[str]) -> list[str]:
+    """ステップの `modes` が定義の無いモードを指さない。"""
+    have = set(known)
+    return [
+        f"stage {doc['document']['name']} のステップ {n}: modes の {m} は定義の無いモード"
+        for n, b in _tasks(doc)
+        for m in (_ndf_meta(b)["modes"] if "modes" in _ndf_meta(b) else [])
+        if m not in have
+    ]
+
+
+def _stage_def(doc: Mapping[str, Any], mode: str) -> stages.StageDef:
     meta = _ndf_meta(doc)
     name = meta["stage"]
     return stages.StageDef(
         id=doc["document"]["name"],
         name=name,
         phase=meta["phase"],
-        steps=tuple(_step_def(name, n, b) for n, b in _tasks(doc)),
+        steps=tuple(_step_def(name, n, b) for n, b in _tasks(doc) if _in_mode(b, mode)),
         when=tuple(meta["when"]) if "when" in meta else (),
         per_issue=bool(meta.get("per_issue")),
         inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
@@ -295,7 +312,11 @@ def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> stages.
         errs += _stage_doc_errors(row, ref, stage_docs)
     if errs:
         raise WorkflowDefError(errs)
-    defs = tuple(_stage_def(stage_docs[ref]) for _, ref in called)
+    mode = mode_doc["document"]["name"]
+    errs = [e for _, ref in called for e in _mode_errors(stage_docs[ref], [*modes(), mode])]
+    if errs:
+        raise WorkflowDefError(errs)
+    defs = tuple(_stage_def(stage_docs[ref], mode) for _, ref in called)
     errs = (
         stages.check_unique_stage_names(defs)
         + stages.check_gate_conditions(defs)

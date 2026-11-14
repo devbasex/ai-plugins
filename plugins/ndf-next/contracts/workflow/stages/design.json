@@ -83,7 +83,12 @@
           "ndf": {
             "kind": "gate",
             "range": "none",
-            "gate": "design"
+            "gate": "design",
+            "modes": [
+              "documentation",
+              "legacy-refactor",
+              "standard"
+            ]
           }
         },
         "output": {

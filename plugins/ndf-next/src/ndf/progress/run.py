@@ -987,7 +987,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str], env: Optional[Env] = None) -> int:
     """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。
 
-    `env` は外との接点（既定は工程の条件の語を宣言から読むだけの `Env`）。入口（`ndf.progress.gate`）が包んで渡す。
+    `env` は外との接点（既定は工程の条件の語を宣言から読むだけの `Env`）。エントリポイント（`ndf.progress.gate`）が包んで渡す。
     """
     if not argv or argv[0] not in COMMANDS:
         return command.main(argv)
