@@ -13,7 +13,41 @@
     "branch": {"type": "string", "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9_][A-Za-z0-9._/-]*(?<![./])$", "description": "スプリントのブランチ。作業場所の用意が書く。先頭の - と .. を断る形で確かめてから渡す（3364-7）"},
     "design_pr": {"type": "integer", "minimum": 1, "description": "設計の Pull Request の番号"},
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
-    "delivery": {"type": "object", "minProperties": 1, "description": ".ndf/project.json の delivery の 1 行。デプロイが書く"},
+    "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、鍵の型と kind・channel の取りうる値を確かめてから渡す（3364-7）"},
     "version": {"type": "string", "minLength": 1, "description": "出した版。デプロイが書く"}
+  },
+  "$defs": {
+    "delivery": {
+      "type": "object",
+      "description": "delivery の 1 行の形。鍵と型は人と解析（M7）が書く宣言（.ndf/project.json の delivery）の行に合わせ、知らない鍵は断る。省ける鍵は null も受ける",
+      "additionalProperties": false,
+      "required": ["target", "kind", "trigger", "versioned"],
+      "properties": {
+        "target": {"type": "string", "minLength": 1, "description": "届ける先"},
+        "kind": {"enum": ["auto", "manual"], "description": "マージで自動で届くか、手で届けるか"},
+        "trigger": {"type": "string", "minLength": 1, "description": "届ける契機"},
+        "channel": {"enum": ["production", "base", null], "description": "動くマージの宛先（本番のブランチ・ベースブランチ）"},
+        "branch": {"anyOf": [{"$ref": "#/properties/branch"}, {"type": "null"}], "description": "channel でないブランチで動く行のブランチ"},
+        "versioned": {"type": "boolean"},
+        "production": {"type": ["boolean", "null"]},
+        "manual_reason": {"type": ["string", "null"]},
+        "publishes_release": {"type": ["boolean", "null"]},
+        "result": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "workflow": {"type": ["string", "null"]},
+                "command": {"type": ["string", "null"]},
+                "timeout_seconds": {"anyOf": [{"type": "integer", "exclusiveMinimum": 0}, {"type": "null"}]}
+              }
+            },
+            {"type": "null"}
+          ],
+          "description": "CD の結果の読み方"
+        }
+      }
+    }
   }
 }
