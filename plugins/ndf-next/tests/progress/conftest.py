@@ -10,52 +10,21 @@ SQLite に固有の検査・控え・戻し（P1-1・P1-2・P1-5）は `test_sto
 
 from __future__ import annotations
 
-import glob
-import os
-import shutil
-import socket
 import subprocess
 import uuid
-from pathlib import Path
 
 import pytest
+from _postgres import start_postgres
 
 from ndf.core import durable
 from ndf.progress import store
 
 
-def _pg_bin() -> Path | None:
-    found = shutil.which("pg_ctl")
-    if found:
-        return Path(found).parent
-    candidates = sorted(glob.glob("/usr/lib/postgresql/*/bin/pg_ctl"))
-    return Path(candidates[-1]).parent if candidates else None
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture(scope="session")
 def pg_server(tmp_path_factory):
     """使い捨ての PostgreSQL の URL（テストごとに DB を分けるため、末尾の DB 名は付けない）。"""
-    bindir = _pg_bin()
-    missing = "PostgreSQL（pg_ctl）が無い" if bindir is None else "root では initdb を打てない" if os.geteuid() == 0 else ""
-    if missing:
-        if os.environ.get("CI"):
-            pytest.fail(f"CI で PostgreSQL を起こせない: {missing}")
-        pytest.skip(missing)
-    data = tmp_path_factory.mktemp("pgdata")
-    port = _free_port()
-    subprocess.run([bindir / "initdb", "-D", data, "-U", "ndf", "--auth=trust", "-E", "UTF8"], check=True, capture_output=True)
-    options = f"-c listen_addresses=127.0.0.1 -p {port} -k {data}"
-    subprocess.run([bindir / "pg_ctl", "-D", data, "-o", options, "-l", data / "log", "-w", "start"], check=True, capture_output=True)
-    try:
-        yield bindir, f"postgresql://ndf@127.0.0.1:{port}"
-    finally:
-        subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "immediate", "stop"], check=False, capture_output=True)
+    with start_postgres(tmp_path_factory) as server:
+        yield server
 
 
 @pytest.fixture
