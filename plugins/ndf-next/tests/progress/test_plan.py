@@ -179,6 +179,21 @@ def test_a_batched_release_closes_every_request_and_keeps_its_answer(opened):
     assert out["metrics"]["releases"] == {"released": 1, "rejected": 2}
 
 
+def test_a_lane_reads_the_answer_of_its_closed_request_from_status(opened):
+    """閉じた依頼の答え（版・リリース記録の PR）を、レーンが status の closed_requests から読める（#3128）。"""
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+        rb = plan.open_request(conn, pid, {"lane": "b", "kind": "release"}, "リリースしたい", "workflow")
+        record = "https://github.com/o/r/pull/900"
+        plan.record_release(conn, pid, [ra], plan.ReleaseAnswer(plan.RELEASED, "出した", "10.28.0", record))
+        out = plan.status(conn, pid, datetime.now(UTC))
+    assert out["metrics"]["open_requests"] == [{"request": rb, "lane": "b", "reason": "リリースしたい"}]
+    (closed,) = out["metrics"]["closed_requests"]
+    assert closed["request"] == ra and closed["lane"] == "a" and closed["closed"] == "出した"
+    assert closed["release"] == {"result": "released", "version": "10.28.0", "release": record, "batch": [ra]}
+
+
 @pytest.mark.parametrize(
     ("keys", "outcome", "version", "release"),
     [

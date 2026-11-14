@@ -290,6 +290,18 @@ def release_counts(view: lane.PlanView) -> dict[str, int]:
     return {k: got.count(k) for k in RELEASE_RESULTS}
 
 
+def closed_requests(view: lane.PlanView) -> list[dict[str, Any]]:
+    """閉じた依頼と答え（#3128）。レーンはまとめたリリースの答え（版・リリース記録の PR）をここから読み、自分で探さない。
+
+    `closed` は閉じた理由、`release` はまとめたリリースの答え（採らずに閉じた依頼は None）。
+    """
+    return [
+        {"request": r.key, "lane": r.lane, "kind": r.body.get("kind"), "closed": r.closed, "release": r.release}
+        for r in view.requests.values()
+        if r.closed is not None
+    ]
+
+
 def complete_plan(conn: sa.Connection, pid: str) -> bool:
     """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、答えていない依頼が無いときだけ書く（I16）。"""
     view, rows = lane.read_view(conn, pid)
@@ -315,7 +327,7 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
 
 
 def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
-    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。
+    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。閉じた依頼の答えも載せる（#3128）。
 
     `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
     足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。
@@ -344,6 +356,7 @@ def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[livene
         "max_plans": view.max_plans,
         "wakeable": [list(w) for w in lane.wakeable_lanes(view, rows)],
         "open_requests": [{"request": r.key, "lane": r.lane, "reason": r.reason} for r in view.open_requests()],
+        "closed_requests": closed_requests(view),
         "complete": lane.plan_complete(view, rows),
         "stalled": len(stalls),
         "releases": release_counts(view),
