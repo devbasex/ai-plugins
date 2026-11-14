@@ -133,10 +133,10 @@ def test_every_old_place_has_a_decision_and_a_reason():
     assert len(keys) == len(set(keys))
     assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
     for place in identity.OLD_STATE_PLACES:
-        assert isinstance(place.retire, bool), place.key
+        assert isinstance(place.handling, identity.Handling), place.key
         assert place.reason.strip(), place.key
-        # 退避しない行はパスを持たない（このモジュールが触らない）
-        assert place.retire or place.path is None, place.key
+        # このモジュールで退避する行だけがパスを持つ（ほかの行にこのモジュールは触らない）
+        assert (place.handling is identity.Handling.RETIRE_HERE) == (place.path is not None), place.key
 
 
 def test_prepare_leaves_places_marked_not_to_retire(ident, tmp_path, monkeypatch):

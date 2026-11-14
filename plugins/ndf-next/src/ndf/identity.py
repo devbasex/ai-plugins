@@ -29,6 +29,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -108,16 +109,24 @@ def load() -> PluginIdentity:
     return PluginIdentity(root=root, name=name, prefix=name + ":", state_dir=_state_home() / name, foreign_root=_foreign_root(root))
 
 
+class Handling(Enum):
+    """旧い置き場の扱い。"""
+
+    RETIRE_HERE = "retire_here"  # このモジュールで退避する
+    RETIRE_ELSEWHERE = "retire_elsewhere"  # ほかのモジュールが同じ規則で退避する
+    KEEP = "keep"  # 退避しない
+
+
 @dataclass(frozen=True)
 class OldPlace:
-    """旧い NDF の状態の置き場の 1 行。`retire` が退避するか、`reason` がその理由。
+    """旧い NDF の状態の置き場の 1 行。`handling` が扱い、`reason` がその理由。
 
-    `path` はこのモジュールで退避する行だけが持つ。退避しない行と、ほかのモジュールが退避する行は None。
+    `path` はこのモジュールで退避する行（`Handling.RETIRE_HERE`）だけが持つ。ほかの行は None。
     """
 
     key: str
     where: str
-    retire: bool
+    handling: Handling
     reason: str
     path: Optional[Callable[[PluginIdentity], Path]] = None
 
@@ -126,56 +135,56 @@ class OldPlace:
 # 規則は「新しい NDF が同じパスへ書く旧い置き場だけを退避する」。退避は `prepare_state_dir` が上から順に行う
 OLD_STATE_PLACES: tuple[OldPlace, ...] = (
     OldPlace(
-        "state-home",
-        "<XDG_STATE_HOME か ~/.local/state>/<名前>",
-        True,
-        "新しい状態の置き場と同じパスで、新しい NDF がそこへ書く。退避の後に作り直す",
-        lambda ident: ident.state_dir,
+        key="state-home",
+        where="<XDG_STATE_HOME か ~/.local/state>/<名前>",
+        handling=Handling.RETIRE_HERE,
+        reason="新しい状態の置き場と同じパスで、新しい NDF がそこへ書く。退避の後に作り直す",
+        path=lambda ident: ident.state_dir,
     ),
     OldPlace(
-        "config-state",
-        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/state",
-        True,
-        "旧い NDF の既定の状態の置き場。新しい NDF は同じ事実を新しい状態の置き場へ書くため、旧い記録を退避して"
+        key="config-state",
+        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/state",
+        handling=Handling.RETIRE_HERE,
+        reason="旧い NDF の既定の状態の置き場。新しい NDF は同じ事実を新しい状態の置き場へ書くため、旧い記録を退避して"
         "2 か所に持たない。作り直さない",
-        lambda ident: _config_home() / ident.name / "state",
+        path=lambda ident: _config_home() / ident.name / "state",
     ),
     OldPlace(
-        "checkout-state",
-        "<git の共通ディレクトリ>/<名前>/state",
-        True,
-        "新しい NDF の耐久の記録が同じパスへ書く。退避は `core/durable.py` の `prepare_store` が同じ規則で行う（決定 85）",
+        key="checkout-state",
+        where="<git の共通ディレクトリ>/<名前>/state",
+        handling=Handling.RETIRE_ELSEWHERE,
+        reason="新しい NDF の耐久の記録が同じパスへ書く。退避は `core/durable.py` の `prepare_store` が同じ規則で行う（決定 85）",
     ),
     OldPlace(
-        "config-accounts",
-        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts",
-        False,
-        "利用者のアカウントの設定。新しい NDF は新しい状態の置き場の `relay/accounts` を使い重ならない。移行は S2 #3304",
+        key="config-accounts",
+        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts",
+        handling=Handling.KEEP,
+        reason="利用者のアカウントの設定。新しい NDF は新しい状態の置き場の `relay/accounts` を使い重ならない。移行は S2 #3304",
     ),
     OldPlace(
-        "config-relay",
-        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/relay.py",
-        False,
-        "中継の 1 つの複製で、新しい NDF の導入（`ndf relay install`）が上書きする",
+        key="config-relay",
+        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/relay.py",
+        handling=Handling.KEEP,
+        reason="中継の 1 つの複製で、新しい NDF の導入（`ndf relay install`）が上書きする",
     ),
     OldPlace(
-        "config-locks",
-        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/locks",
-        False,
-        "動いているプロセスの排他。退避すると動いている旧い NDF の排他が外れる",
+        key="config-locks",
+        where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/locks",
+        handling=Handling.KEEP,
+        reason="動いているプロセスの排他。退避すると動いている旧い NDF の排他が外れる",
     ),
     OldPlace(
-        "cache",
-        "~/.cache/<名前>",
-        False,
-        "新しい NDF が使わない、再生成できるキャッシュ",
+        key="cache",
+        where="~/.cache/<名前>",
+        handling=Handling.KEEP,
+        reason="新しい NDF が使わない、再生成できるキャッシュ",
     ),
 )
 
 
 def old_state_places(ident: PluginIdentity) -> list[Path]:
     """`OLD_STATE_PLACES` のうち、このモジュールで退避する置き場のパス（表の順）。"""
-    return [place.path(ident) for place in OLD_STATE_PLACES if place.retire and place.path is not None]
+    return [place.path(ident) for place in OLD_STATE_PLACES if place.handling is Handling.RETIRE_HERE and place.path is not None]
 
 
 def _retire_target(place: Path, now: datetime) -> Path:
