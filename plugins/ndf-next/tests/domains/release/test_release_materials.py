@@ -72,3 +72,35 @@ def test_user_config_masks_credentials_in_sources() -> None:
     assert "u:p@" not in got["claude:marketplace:m"] and "***@" in got["claude:marketplace:m"]
     codex = user_config_decide.codex_entries({"plugins": {"kit@m": {"enabled": True}}}, {"kit@m": ["1.0.0"]})
     assert codex == {"codex:plugin:kit@m": "enabled=true versions=1.0.0"}
+
+
+def test_codex_entries_current_behavior() -> None:
+    """現状固定（codex_entries）: 取得元は宣言の順に 3 つの鍵を写し、プラグインは設定と置き場の和を名前の順に並べる。"""
+    conf = {
+        "marketplaces": {
+            "m": {"source_type": "git", "source": "https://u:p@example.invalid/r.git", "ref": "main", "extra": 1},
+            "bare": "notdict",
+            "partial": {"source": "x"},
+        },
+        "plugins": {"b@m": {"enabled": False}, "a@m": {}, "c@m": "notdict", "z@m": {"enabled": "Yes"}},
+    }
+    cached = {"a@m": ["2.0.0", "1.0.0"], "d@m": [], "e@m": ["1.0.0"]}
+    got = user_config_decide.codex_entries(conf, cached)
+    assert list(got.items()) == [
+        ("codex:marketplace:m", '{"ref": "main", "source": "https://***@example.invalid/r.git", "source_type": "git"}'),
+        ("codex:marketplace:bare", '{"ref": null, "source": null, "source_type": null}'),
+        ("codex:marketplace:partial", '{"ref": null, "source": "x", "source_type": null}'),
+        ("codex:plugin:a@m", "enabled=- versions=1.0.0,2.0.0"),
+        ("codex:plugin:b@m", "enabled=false versions="),
+        ("codex:plugin:c@m", "enabled=- versions="),
+        ("codex:plugin:d@m", "enabled=- versions="),
+        ("codex:plugin:e@m", "enabled=- versions=1.0.0"),
+        ("codex:plugin:z@m", "enabled=yes versions="),
+    ]
+
+
+def test_codex_entries_ignores_tables_of_wrong_shape() -> None:
+    """現状固定（codex_entries）: 空の設定は空、表でない marketplaces・plugins は無いものとして扱う。"""
+    assert user_config_decide.codex_entries({}, {}) == {}
+    got = user_config_decide.codex_entries({"marketplaces": [], "plugins": "x"}, {"k@m": ["1"]})
+    assert got == {"codex:plugin:k@m": "enabled=- versions=1"}
