@@ -1,4 +1,9 @@
-"""進行表の保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。"""
+"""進行表の保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。
+
+テストの条件: ローカル（conductor の手元・CI の Runner の SQLite）は `sqlite:///<置き場>/progress.sqlite` か
+`NDF_PROGRESS_DB` の SQLite の URL で、Factory は `NDF_PROGRESS_DB` に PostgreSQL の URL を渡して開く。
+fixture `progress_url` がこの 2 つの置き場にパラメータで分かれる（tests/progress/conftest.py）。
+"""
 
 from __future__ import annotations
 
