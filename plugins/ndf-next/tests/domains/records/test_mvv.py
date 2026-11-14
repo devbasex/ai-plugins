@@ -9,6 +9,7 @@ from typing import Any
 import git_sandbox
 import pytest
 
+from ndf import identity
 from ndf.domains.records import jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 
@@ -117,3 +118,33 @@ def test_vet_sprint_reuses_the_latest_follow_and_survives_broken_rows(repo: Path
     assert len(calls) == 3
     rows, broken = jsonl.read_rows(path)
     assert len(rows) == 4 and broken == 1
+
+
+# 現状固定（I-011 の前）: 記録の置き場は NDF_MVV_STATE_DIR → 状態の置き場の順。状態の置き場を解けなければ IdentityError のまま
+def test_record_path_prefers_the_env_dir_and_does_not_load_the_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
+    monkeypatch.setattr(identity, "load", _unloadable)
+    assert mvv.record_path("mvv-vet") == tmp_path / "m" / "mvv-vet.jsonl"
+    assert mvv.record_path("mvv-signals") == tmp_path / "m" / "mvv-signals.jsonl"
+
+
+@pytest.mark.parametrize("env", [None, ""])
+def test_record_path_falls_back_to_the_state_dir_when_the_env_is_unset_or_empty(env: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    if env is None:
+        monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
+    else:
+        monkeypatch.setenv("NDF_MVV_STATE_DIR", env)
+    state = identity.load().state_dir
+    assert mvv.record_path("mvv-vet") == state / "mvv-vet.jsonl"
+    assert mvv.record_path("mvv-signals") == state / "mvv-signals.jsonl"
+
+
+def _unloadable() -> identity.PluginIdentity:
+    raise identity.IdentityError("plugin.json を読めない")
+
+
+def test_record_path_raises_identity_error_without_the_env_and_the_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
+    monkeypatch.setattr(identity, "load", _unloadable)
+    with pytest.raises(identity.IdentityError):
+        mvv.record_path("mvv-vet")
