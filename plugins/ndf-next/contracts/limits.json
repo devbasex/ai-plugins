@@ -73,6 +73,8 @@
     "monitor-types.result-age-grace": {"summary": "結果ファイルを書いた後もプロセスが残るとき、完了とみなすまでの秒", "seconds": 30},
     "monitor-types.thread-join": {"summary": "監視の読み取りのスレッドの終わりを待つ上限", "seconds": 1},
     "notify.slack": {"summary": "Slack へ送る HTTP の上限", "seconds": 10},
+    "notify.send": {"summary": "送り手が通知 1 件を送る打ち直し（接続の失敗・上限の時間・429・5xx・Slack の ratelimited）。回数（最初の 1 回を含む）・最初の間隔・間隔の倍率・頭打ちの秒", "attempts": 4, "interval": 2, "factor": 2, "max_interval": 30},
+    "notify.stale": {"summary": "送信待ちに置いた通知を送らずに捨てるまでの、書いてからの秒。止まっていた送り手が古い待ちを後から知らせない", "seconds": 3600},
     "parallel-launch.up": {"summary": "一時レーンの起動とレーンの再起動の後に立ち上がりを待つ上限と、一覧を読む間隔（NDF_PARALLEL_LAUNCH_SECONDS で上限を変えられる）", "seconds": 120, "interval": 5},
     "parallel-machine.admit-lock": {"summary": "レーンの起動の判定でマシンの起動の排他を待つ上限。取れなければその見回りでは起動せず、起動の待ちに置く（#2999 の決定 4）", "seconds": 10},
     "parallel-repo.stall": {"summary": "動かないレーンを問うまでの秒（NDF_PARALLEL_STALL_MINUTES で分を変えられる）", "seconds": 3600},

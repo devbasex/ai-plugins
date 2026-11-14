@@ -72,22 +72,31 @@ def test_post_json_returns_object() -> None:
 
 
 @pytest.mark.parametrize(
-    "handler",
+    ("handler", "reason", "retryable"),
     [
-        lambda req: httpx.Response(200, json=[1, 2]),
-        lambda req: httpx.Response(500, json={"ok": True}),
-        lambda req: httpx.Response(200, content=b"not json"),
-        _raise(httpx.ConnectError),
-        _raise(httpx.ReadTimeout),
+        (lambda req: httpx.Response(200, json=[1, 2]), "応答が JSON のオブジェクトでない", False),
+        (lambda req: httpx.Response(400, json={"ok": True}), "HTTP 400", False),
+        (lambda req: httpx.Response(429), "HTTP 429", True),
+        (lambda req: httpx.Response(500, json={"ok": True}), "HTTP 500", True),
+        (lambda req: httpx.Response(200, content=b"not json"), "応答が JSON でない", False),
+        (_raise(httpx.ConnectError), "接続できない（ConnectError）", True),
+        (_raise(httpx.ReadTimeout), "5 秒を越えた", True),
     ],
-    ids=["array", "status-500", "not-json", "connect-error", "timeout"],
+    ids=["array", "status-400", "status-429", "status-500", "not-json", "connect-error", "timeout"],
 )
-def test_post_json_returns_none(handler: Handler) -> None:
-    assert notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler})) is None
+def test_post_json_tells_failures_apart(handler: Handler, reason: str, retryable: bool) -> None:
+    # 3394-10: 失敗を 1 つの値にまとめず、理由と打ち直して通りうるかを分ける
+    with pytest.raises(notify.PostError) as got:
+        notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler}))
+    assert (str(got.value), got.value.retryable) == (reason, retryable)
 
 
-def test_post_json_returns_none_for_invalid_url() -> None:
-    assert notify.post_json("::", {}, {}, 5, transport=_transport({})) is None
+@pytest.mark.parametrize(("url", "transport"), [("::", _transport({})), ("ftp://x.test/a", None)], ids=["invalid", "scheme"])
+def test_post_json_invalid_url_is_not_retryable(url: str, transport: httpx.BaseTransport | None) -> None:
+    # scheme の誤りは本物の transport が接続の前に断る（ネットワークへ出ない）
+    with pytest.raises(notify.PostError, match="^URL が不正$") as got:
+        notify.post_json(url, {}, {}, 5, transport=transport)
+    assert got.value.retryable is False
 
 
 # ---- fetch_body ----
