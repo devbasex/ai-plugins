@@ -29,7 +29,7 @@ MEMORY_STOPPED = "memory_stopped"
 INTERRUPTED = "interrupted"
 
 
-def _now_iso(now: float) -> str:
+def now_iso(now: float) -> str:
     return datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
 
 

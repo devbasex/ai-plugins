@@ -288,7 +288,7 @@ def gate(
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
     row = {
-        "at": records._now_iso(time.time()),
+        "at": records.now_iso(time.time()),
         "worktree": str(cwd),
         "kind": kind,
         "waited_seconds": round(held.waited_seconds, 1),
