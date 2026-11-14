@@ -48,14 +48,9 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
     """
     grace = limits.seconds(grace_key)
     interval = limits.value(grace_key, "interval")
-    if send_first:
-        try:
-            pgid = os.getpgid(proc.pid)
-        except ProcessLookupError:  # 外部コマンド: 既に終わっていれば止める先が無い（直接の子だけ回収する）
-            proc.poll()
-            return
-    else:
-        pgid = proc.pid
+    pgid = _target_group(proc, send_first)
+    if pgid is None:
+        return
     own_group = pgid == os.getpgrp()
 
     def send(sig: int) -> None:
@@ -81,6 +76,17 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
             _reap(proc, grace)
             return
         time.sleep(min(interval, left))
+
+
+def _target_group(proc: subprocess.Popen, send_first: bool) -> int | None:
+    """止める組の番号。`send_first` なら `proc` の今の組、偽なら組の番号＝先頭の pid。既に終わっていれば回収して None。"""
+    if not send_first:
+        return proc.pid
+    try:
+        return os.getpgid(proc.pid)
+    except ProcessLookupError:  # 外部コマンド: 既に終わっていれば止める先が無い（直接の子だけ回収する）
+        proc.poll()
+        return None
 
 
 def _reap(proc: subprocess.Popen, grace: float) -> None:
