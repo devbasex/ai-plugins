@@ -307,12 +307,14 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     tests = [str(t) for t in got["tests"]] if isinstance(got.get("tests"), list) else []
     if not tests:
         return True
-    found = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
-    if found.uncollected:
-        _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(found.uncollected)}")
+    got_collect = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
+    if got_collect.uncollected:
+        _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(got_collect.uncollected)}")
         return False
-    # 実装の前（直す前のコード）で足したテストが通ることを確かめる。通らないテストは今の振る舞いを固定していない
-    broken = verify.tests_failing(run.ws.work, verify.suites(run.ws.work), tests)
+    # 実装の前（直す前のコード）で足したテストが通ることを確かめる。通らないテストは今の振る舞いを固定していない。
+    # 鍵はファイル単位なので、起点で元から落ちていた鍵と打ち直すと通る鍵は除く（_own_failures と同じ帰属）
+    found = verify.suites(run.ws.work)
+    broken = _attribute(run, item, found, verify.tests_failing(run.ws.work, found, tests)).own
     if broken:
         _undo_item(run, item, Status.REVERTED, f"足したテストが直す前のコードで通らない: {', '.join(sorted(broken))}")
         return False
@@ -327,6 +329,11 @@ def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite]
     """項目の起点から今までに増えた失敗（#3339）。打ち直して通った鍵はフレーキーとして除き、直しの依頼へ積む。"""
     changed = list(run.work.changed_files(item["start"], "HEAD"))
     now = verify.failing(run.ws.work, found, verify.targets(run.ws.work, found, changed))
+    return _attribute(run, item, found, now)
+
+
+def _attribute(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite], now: frozenset[str]) -> verify_decide.Attributed:
+    """落ちた鍵 `now` から、項目の起点で元から落ちていた鍵を除き、打ち直して通った鍵をフレーキーとして直しの依頼へ積む。"""
     before = verify.at_commit(run.ws.reader(participants.FIXER), item["start"], found, now)
     got = verify_decide.attribute(before, now)
     if not got.own:
@@ -448,14 +455,18 @@ def _flaky_fix(run: _Run) -> None:
 
 
 def _items(run: _Run) -> None:
-    """未着手の項目を順に流す。止まった実行の途中の項目（起点の記録がある）は、起点まで戻してからやり直す。"""
+    """未着手の項目を順に流す。止まった実行の途中の項目（起点の記録がある）は、起点まで戻してからやり直す。
+
+    途中の項目は、積まれていたフレーキーの直しを取り込む前に起点へ戻す。直しの後に戻すと直しのコミットが消える。
+    起点は直しを取り込んだ後の HEAD へ置き直す（項目を取り消しても直しのコミットは残す）。
+    """
+    resumed = items_decide.next_open(run.state["items"])
+    if resumed is not None and "start" in resumed:
+        _reset(run, resumed["start"])
     _flaky_fix(run)
     while (found := items_decide.next_open(run.state["items"])) is not None:
         item = cast(dict[str, Any], found)
-        if "start" in item:
-            _reset(run, item["start"])
-        else:
-            item["start"] = run.work.rev_parse("HEAD")
+        item["start"] = run.work.rev_parse("HEAD")
         run.save()
         if _add_tests(run, item) and _implement(run, item):
             _verify(run, item)

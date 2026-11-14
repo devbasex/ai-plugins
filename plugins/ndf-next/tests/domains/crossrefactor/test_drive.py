@@ -4,7 +4,7 @@
 - #750: 読み取りの工程の担当は読み取り用ディレクトリで動き、コードを書く工程の結果ファイルは作業ディレクトリの中に置く
 - #2057: 完了した回を返すとき、持たない引数（`--reopen`）を案内しない
 - #3313: テストを足す担当が結果を出さずに終わっても止まらず、起点まで取り消して項目を見送る
-- #620: 足したテストが全体の実行に収集されなければ項目を戻す。直す前のコードで通らなければ項目を戻す
+- #620: 足したテストが全体の実行に収集されなければ項目を戻す。直す前のコードで通らなければ項目を戻す（起点で元から落ちていたファイルは除く）
 - #2680: 衝突している PR は CI を待たずに止まる
 - #3038: 最終ゲートの直しが対象範囲の外を変えたら取り込まずに止まる
 """
@@ -25,6 +25,7 @@ from ._drive_world import (
     Watched,
     World,
     commit_at,
+    commit_in,
     fake_ci,
     make_world,
     no_plan,
@@ -149,6 +150,32 @@ def test_added_test_that_fails_on_the_code_before_the_change_reverts_the_item(wo
     item = _state(world)["items"][0]
     assert item["status"] == "reverted" and "直す前のコードで通らない" in item["reason"]
     assert "implement" not in [phase for _, phase, _, _ in fake.seen]
+
+
+def test_test_file_already_failing_at_the_item_start_does_not_revert_the_added_tests(world, monkeypatch) -> None:
+    # 鍵はファイル単位なので、元から落ちるテストのファイルへ足しても、起点で落ちていた鍵は項目の失敗に数えない
+    decl = {
+        "test": {
+            "suites": [
+                {
+                    "name": "pytest",
+                    "command": "true",
+                    "scope_command": "false {paths}",
+                    "collect_command": "printf 'tests/test_geo.py::test_area\\n'",
+                    "paths": ["."],
+                }
+            ]
+        }
+    }
+    commit_in(world.main, {".ndf/project.json": json.dumps(decl), "tests/test_geo.py": "def test_broken():\n    assert False\n"}, "元から落ちるテスト")
+    sh(world.main, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(world.main, "fetch", "-q", "origin")
+    fake = FakeAgents(_acts())
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    item = _state(world)["items"][0]
+    assert "直す前のコードで通らない" not in item["reason"]
+    assert "implement" in [phase for _, phase, _, _ in fake.seen]
 
 
 def test_conflicting_pull_request_stops_without_waiting_for_ci(world, monkeypatch) -> None:

@@ -1,4 +1,7 @@
-"""副命令 `ndf refactor`（touched・tests・collected）の結果 JSON と止まり方。"""
+"""副命令 `ndf refactor`（touched・tests・collected）の結果 JSON と止まり方。
+
+- I9: テストの枠の待ちの諦めとメモリの停止は、落ちたテストと別の止まった理由で結果 JSON を出す
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,8 @@ import json
 import sys
 
 from ndf.contracts import causes, result
-from ndf.domains.crossrefactor import cli
+from ndf.domains.crossrefactor import cli, collect
+from ndf.testing import slots
 
 SOURCE = "def f():\n    return 1\n\n\ndef g():\n    return 2\n"
 FILES = {
@@ -76,6 +80,18 @@ def test_collected_without_a_declaration_is_undecided(gitwork, capsys):
     gitwork.make(FILES)
     code, got = run(capsys, "collected", "--paths", "tests/foo_helpers.py", "--work", str(gitwork.work))
     assert code == 0 and got["items"][0]["undecided"] == ["tests/foo_helpers.py"]
+
+
+def test_collected_that_gives_up_waiting_for_a_test_slot_stops_with_its_cause(gitwork, capsys, monkeypatch):
+    gitwork.make(FILES)
+
+    def gave_up(*_args, **_kw):
+        raise slots.Stopped(slots.GAVE_UP, 30.0, 100)
+
+    monkeypatch.setattr(collect, "collected", gave_up)
+    code, got = run(capsys, "collected", "--paths", "tests/test_foo.py", "--timeout", "5", "--work", str(gitwork.work))
+    cause = slots.CAUSE_OF[slots.GAVE_UP]
+    assert got["cause"]["kind"] == cause and code == causes.exit_code(cause) != causes.exit_code("test_failed")
 
 
 def test_bad_arguments_exit_with_the_invalid_code(capsys):

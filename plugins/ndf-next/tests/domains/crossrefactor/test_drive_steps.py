@@ -129,6 +129,26 @@ def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world
     assert len(comments.bodies) == 2 and "結果: 完了" in comments.bodies[1]
 
 
+def test_flaky_fix_queued_by_a_stopped_item_is_kept_when_the_item_is_redone_on_resume(world, monkeypatch) -> None:
+    # 再開では途中の項目を起点へ戻してからフレーキーの直しを取り込む。直しの後に戻すと直しのコミットが消える
+    ci = fake_ci(Watched(None))
+    tick = itertools.count(step=600)
+    slow = replace(ports(FakeAgents(_acts()), FakeHub("clean"), ci=ci), clock=lambda: float(next(tick)))
+    assert drive.drive(world.config(safety_net_minutes=5), slow).kind == "fix_limit"
+    path = store.path_of(world.root())
+    state = store.load(path)
+    assert state["items"][0]["status"] == "open" and "start" in state["items"][0]
+    state.update(flaky_requested=["flaky:src/geo.py"], flaky_request={"keys": ["flaky:src/geo.py"], "attempts": 0, "sendback": []})
+    store.save(path, state)
+    fix = commit_at({"tests/test_geo_flaky.py": "def test_x():\n    pass\n"}, "フレーキーを直す\n\nFlaky-Fix: flaky:src/geo.py")
+    again = drive.drive(world.config(safety_net_minutes=600), replace(slow, launcher=FakeAgents(_acts(propose=None, plan=None, **{"flaky-fix": fix}))))
+    assert again.kind == "ok", again.detail
+    state = _state(world)
+    assert state["items"][0]["status"] == "adopted"
+    assert [(f["key"], f["result"]) for f in state["flaky_fixes"]] == [("flaky:src/geo.py", "kept")]
+    assert "tests/test_geo_flaky.py" in sh(world.origin, "ls-tree", "-r", "--name-only", f"refs/heads/{BRANCH}")
+
+
 def test_coding_launch_that_runs_out_the_safety_net_stops_and_the_item_is_redone_on_resume(world, monkeypatch) -> None:
     # 安全網の残りで縮めた監視の上限に達した担当は、結果が無くても項目を見送らずに止める（打ち直すとやり直す）
     ci = fake_ci(Watched(None))

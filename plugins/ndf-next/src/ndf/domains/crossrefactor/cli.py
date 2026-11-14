@@ -37,6 +37,7 @@ from ndf.contracts import causes, limits, result
 from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, workspace
 from ndf.testing import limits as test_limits
+from ndf.testing import slots
 
 TOOL = cli.tool_of(__name__)
 
@@ -211,6 +212,9 @@ def main(argv: list[str]) -> int:
         return result.emit(HANDLERS[args.action](args))
     except final_gate.GateStopped as exc:
         return result.emit(result.stopped(TOOL, exc.kind, exc.detail))
+    except slots.Stopped as exc:
+        # テストの枠の待ちの諦めとメモリの停止（collected の収集の確認）。落ちたテストに数えずに止まった理由にする（I9）
+        return result.emit(result.stopped(TOOL, exc.cause, exc.summary(), items=exc.retired))
     except Exception as exc:
         kind = _stop_kind(exc)
         if kind is None:
