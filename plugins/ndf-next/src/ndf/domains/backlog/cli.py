@@ -168,30 +168,6 @@ def _previous_rows(rank: Any) -> dict[int, Any]:
     return out
 
 
-def _edges(raws: list[Any], issues: list[dict[str, Any]]) -> frozenset[tuple[int, int]]:
-    """open の課題どうしの依存の辺。見積の `depends_on`（番号の列）と、親が open の子を待つ辺（親 → 子）。
-
-    見積が子 → 親の依存を書いていれば、輪にしないため親 → 子の辺を足さない。
-    """
-    open_numbers = {i["number"] for i in issues}
-    out = set()
-    for raw in raws:
-        deps = raw["depends_on"] if isinstance(raw, dict) and isinstance(raw.get("depends_on"), list) else []
-        out |= {(raw["number"], b) for b in deps if b in open_numbers and raw["number"] in open_numbers}
-    subs = {(i["parent"], i["number"]) for i in issues if i["parent"] in open_numbers}
-    return frozenset(out | {(p, k) for p, k in subs if (k, p) not in out})
-
-
-def _sub_issues(issues: list[dict[str, Any]]) -> dict[int, list[int]]:
-    """open の親 → open の子の番号の列（大きい課題の枠が子を切り出しに当てる）。"""
-    open_numbers = {i["number"] for i in issues}
-    out: dict[int, list[int]] = {}
-    for i in issues:
-        if i["parent"] in open_numbers:
-            out.setdefault(i["parent"], []).append(i["number"])
-    return out
-
-
 def _config(a: argparse.Namespace) -> model.Config:
     try:
         decl = depth.declaration(depth.declaration_path(Path.cwd()))
@@ -220,7 +196,7 @@ def _rank_board(
     by_num = {i["number"]: i for i in issues}
     order = rank_decide.milestone_order({i["milestone"] for i in issues if i["milestone"]}, a.milestones)
     raws = [*given.values(), *(v for v in stored.values() if isinstance(v, dict))]
-    board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=_sub_issues(issues), edges=_edges(raws, issues),
+    board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=rank_decide.sub_issues_of(issues), edges=rank_decide.dependency_edges(raws, issues),
                               rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved))  # fmt: skip
     kept = {**stored, **{str(n): {**given[n], "number": n} for n in ests if n in given}}
     return board, excluded, kept, sized

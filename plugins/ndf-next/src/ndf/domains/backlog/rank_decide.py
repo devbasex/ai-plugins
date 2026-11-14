@@ -56,6 +56,30 @@ def depends_on_map(edges: Iterable[Edge]) -> dict[int, set[int]]:
     return out
 
 
+def dependency_edges(raws: list[Any], issues: list[dict[str, Any]]) -> frozenset[Edge]:
+    """open の課題どうしの依存の辺。見積の `depends_on`（番号の列）と、親が open の子を待つ辺（親 → 子）。
+
+    見積が子 → 親の依存を書いていれば、輪にしないため親 → 子の辺を足さない。
+    """
+    open_numbers = {i["number"] for i in issues}
+    out = set()
+    for raw in raws:
+        deps = raw["depends_on"] if isinstance(raw, dict) and isinstance(raw.get("depends_on"), list) else []
+        out |= {(raw["number"], b) for b in deps if b in open_numbers and raw["number"] in open_numbers}
+    subs = {(i["parent"], i["number"]) for i in issues if i["parent"] in open_numbers}
+    return frozenset(out | {(p, k) for p, k in subs if (k, p) not in out})
+
+
+def sub_issues_of(issues: list[dict[str, Any]]) -> dict[int, list[int]]:
+    """open の親 → open の子の番号の列（大きい課題の枠が子を切り出しに当てる）。"""
+    open_numbers = {i["number"] for i in issues}
+    out: dict[int, list[int]] = {}
+    for i in issues:
+        if i["parent"] in open_numbers:
+            out.setdefault(i["parent"], []).append(i["number"])
+    return out
+
+
 def topo_order(numbers: Iterable[int], edges: Iterable[Edge], key: Callable[[int], Any]) -> list[int]:
     """依存先を先に置き、同じ順にできる課題は `key` の順に並べる。輪があれば `CycleError`。"""
     nums = set(numbers)
