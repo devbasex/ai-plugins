@@ -7,7 +7,6 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 from __future__ import annotations
 
-import contextlib
 import json
 import subprocess
 from dataclasses import dataclass
@@ -17,8 +16,9 @@ from typing import Any, NamedTuple, Optional, Sequence
 from ndf import identity
 from ndf.adapters.agents import stop
 from ndf.adapters.run_log import child_process_env
+from ndf.contracts import facts
 
-CLAUDE = "claude"
+CLAUDE = facts.value("runtimes", "claude", "executable")
 # Skill を回す起動（full）で外す、入っている旧い NDF（マーケットプレイスの登録の名前）。
 # 起動のスクリプトは `ndf launch-args` の items で同じ値を読む。値を写さない
 DISABLED_PLUGINS: dict[str, bool] = {"ndf@ai-plugins": False}
@@ -115,6 +115,17 @@ def _parse_reply(stdout: str) -> ClaudeReply:
         return ClaudeReply(True, None, text, cost)
 
 
+def _close_streams(proc: subprocess.Popen) -> None:
+    """止めたプロセスの標準入出力を閉じる。閉じるときの失敗は受け流す。"""
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except OSError:  # noqa: S110 外部コマンド: 止めた claude との管が既に壊れていても閉じる試みで足りる
+            pass
+
+
 def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
     """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。
 
@@ -131,10 +142,7 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
         stdout, stderr = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         stop(proc)
-        for stream in (proc.stdin, proc.stdout, proc.stderr):
-            if stream is not None:
-                with contextlib.suppress(OSError):
-                    stream.close()
+        _close_streams(proc)
         return ClaudeReply.failed("", f"claude を起動できない・期限を超えた: {exc}")
     if proc.returncode != 0 and not stdout.strip():
         return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}")

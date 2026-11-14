@@ -190,7 +190,7 @@ def stop(proc: subprocess.Popen) -> None:
     interval = limits.value("procs.stop-tree", "interval")
     try:
         os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 既に終わっている
+    except ProcessLookupError:
         proc.poll()
         return
     deadline = time.monotonic() + grace
@@ -198,10 +198,14 @@ def stop(proc: subprocess.Popen) -> None:
         if not _group_alive(proc):
             return
         time.sleep(interval)
-    with contextlib.suppress(ProcessLookupError):
+    try:
         os.killpg(proc.pid, signal.SIGKILL)
-    with contextlib.suppress(subprocess.TimeoutExpired):
+    except ProcessLookupError:  # noqa: S110 外部コマンド: 組が猶予の間に終わった
+        pass
+    try:
         proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:  # noqa: S110 外部コマンド: SIGKILL の後も回収できなければ待たずに戻る
+        pass
 
 
 @dataclass
