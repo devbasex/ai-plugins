@@ -40,6 +40,14 @@ class Usage(NamedTuple):
         return self._asdict()
 
 
+def total_of(usages: Iterable[Usage]) -> Usage:
+    """使用量の総和（無ければ 0）。"""
+    total = Usage()
+    for u in usages:
+        total = total.plus(u)
+    return total
+
+
 def usage_of(raw: Any) -> Optional[Usage]:
     """usage の辞書を読む。辞書でなければ None。無い項目は 0。"""
     if not isinstance(raw, Mapping):
@@ -87,10 +95,7 @@ def transcript_total(
     picked = [u for at, u in responses(records).values() if within(at, since, until)]
     if not picked:
         return UNKNOWN
-    total = Usage()
-    for u in picked:
-        total = total.plus(u)
-    return total
+    return total_of(picked)
 
 
 def jst_bounds(since: date, until: date) -> tuple[datetime, datetime]:
@@ -119,12 +124,18 @@ def _row_usage(row: Mapping[str, Any]) -> Optional[Usage]:
 
 def stop_delta(prior: Iterable[Mapping[str, Any]], agent_id: str, total: Usage) -> Usage:
     """同じ `agent_id` の前までの行の合計と、今の会話の記録の合計との差（2 回目以降の停止で書く値）。"""
-    before = Usage()
-    for row in prior:
-        u = _row_usage(row)
-        if row.get("agent_id") == agent_id and u is not None:
-            before = before.plus(u)
-    return total.minus(before)
+    own = (_row_usage(row) for row in prior if row.get("agent_id") == agent_id)
+    return total.minus(total_of(u for u in own if u is not None))
+
+
+def _counted_row(
+    row: Mapping[str, Any], transcripts: Mapping[str, Usage | str], since: Optional[datetime], until: Optional[datetime]
+) -> bool:
+    """帳簿の行を数えるか。会話の記録を読めた agent の行は数えず、ほかは時刻が期間内の行を数える。"""
+    agent = row.get("agent_id")
+    if isinstance(agent, str) and isinstance(transcripts.get(agent), Usage):
+        return False
+    return within(parse_time(row.get("at")), since, until)
 
 
 def reconcile(
@@ -138,19 +149,7 @@ def reconcile(
     `transcripts` は `agent_id` → その会話の記録の期間内の合計（読めなければ `UNKNOWN`）。読めた agent は記録の
     合計を 1 回だけ数え、帳簿の行は数えない。ほかの行は時刻が期間内のものの usage を足す。
     """
-    total, unknown = Usage(), 0
-    for agent, value in transcripts.items():
-        if isinstance(value, Usage) and agent:
-            total = total.plus(value)
-    for row in rows:
-        agent = row.get("agent_id")
-        if isinstance(agent, str) and isinstance(transcripts.get(agent), Usage):
-            continue
-        if not within(parse_time(row.get("at")), since, until):
-            continue
-        u = _row_usage(row)
-        if u is None:
-            unknown += 1
-        else:
-            total = total.plus(u)
-    return total, unknown
+    read = total_of(value for agent, value in transcripts.items() if isinstance(value, Usage) and agent)
+    counted = [_row_usage(row) for row in rows if _counted_row(row, transcripts, since, until)]
+    unknown = sum(1 for u in counted if u is None)
+    return read.plus(total_of(u for u in counted if u is not None)), unknown
