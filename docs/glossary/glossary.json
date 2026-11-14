@@ -7329,6 +7329,24 @@
       "context": "ndf-workflow",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
+    },
+    {
+      "term": "本番の PR",
+      "context": "ndf-release",
+      "meaning": "リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く",
+      "pending_source": "issues/issue-3506-requirements.md"
+    },
+    {
+      "term": "管理者の迂回",
+      "context": "ndf-release",
+      "meaning": "ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ",
+      "pending_source": "issues/issue-3506-requirements.md"
+    },
+    {
+      "term": "迂回の宣言",
+      "context": "ndf-release",
+      "meaning": "本番の PR を管理者の迂回でマージすることを選ぶ、リポジトリの `.ndf/` の設定の値。無いときは迂回しない",
+      "pending_source": "issues/issue-3506-requirements.md"
     }
   ]
 }
