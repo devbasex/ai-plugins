@@ -41,6 +41,12 @@ def _failed(done: git.Completed) -> git.GitError:
     return git.GitError(f"git push が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
 
 
+def _rejected_or_raise(done: git.Completed) -> None:
+    """失敗した push が先に入った別の push による拒否でなければ（hook などほかの理由）`git.GitError` を投げる。"""
+    if not _REJECTED.search(done.stderr):
+        raise _failed(done)
+
+
 def _rebase_onto_origin(g: git.Git, head_branch: str) -> tuple[str, tuple[str, ...]]:
     """origin の先頭を取り込み、自分のコミットを載せ直す。衝突したら取り消して衝突したファイルを返す。"""
     origin_head = worktree.fetch_head(g, head_branch)
@@ -60,8 +66,7 @@ def push_fix(g: git.Git, head_branch: str, fix_commit: Optional[str]) -> PushRes
     first = _push(g, head_branch)
     if first.returncode == 0:
         return PushResult(True, False, None, head, None, ())
-    if not _REJECTED.search(first.stderr):
-        raise _failed(first)
+    _rejected_or_raise(first)
     origin_head, conflicts = _rebase_onto_origin(g, head_branch)
     if conflicts:
         return PushResult(False, False, origin_head, head, DIVERGED, conflicts)
@@ -69,6 +74,5 @@ def push_fix(g: git.Git, head_branch: str, fix_commit: Optional[str]) -> PushRes
     again = _push(g, head_branch)
     if again.returncode == 0:
         return PushResult(True, True, origin_head, head, None, ())
-    if not _REJECTED.search(again.stderr):
-        raise _failed(again)
+    _rejected_or_raise(again)
     return PushResult(False, True, origin_head, head, REJECTED_TWICE, ())
