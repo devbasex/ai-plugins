@@ -135,6 +135,21 @@ def placed_moves(metrics: Mapping[str, Any]) -> list[tuple[int, str]]:
     return placed + [(c["number"], BACKWARD) for c in _list(metrics, BACKWARD) if c["decision"] == APPROVED]
 
 
+def deferred_placements(metrics: Mapping[str, Any], plan: Mapping[str, Any], holds: set[int]) -> set[int]:
+    """表が移したものとして置く移動のうち、plan が退けたか保留にしたもの。前倒しは先頭と依存先をまとめて数える。
+
+    これらは移さないのが正しい結果で、移動の失敗ではない。表は rank を打ち直すまで書けない。
+    """
+    rejected = {(e["number"], e["direction"]) for e in (plan["rejected"] if "rejected" in plan else [])}
+    out = set(holds)
+    for c in _list(metrics, FORWARD):
+        members = {c["number"], *c["group"]}
+        if (c["number"], FORWARD) in rejected or members & holds:
+            out |= members
+    out |= {c["number"] for c in _list(metrics, BACKWARD) if (c["number"], BACKWARD) in rejected}
+    return out & {n for n, _ in placed_moves(metrics)}
+
+
 def rejected_after(current: list[dict[str, Any]], plan: Mapping[str, Any], metrics: Mapping[str, Any]) -> list[dict[str, Any]]:
     """却下の記録へ plan の却下を本人の候補の要約値で足し、rank.json の古い却下（rejected_stale）を消す。
 

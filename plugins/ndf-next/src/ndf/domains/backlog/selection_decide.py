@@ -4,9 +4,9 @@
 （`carried`）→ 経路の数の多い順 → 番号の昇順 で残す。`manual` の課題は上限を超えても残す（#2064）。見直し
 （`review`）は `manual` の後を更新の古い順に並べる。切った分は持ち越しとして記録し、次の回が `carried` で拾う（#1640）。
 
-見直しの起動の材料にする持ち越しの数（`carry`）は、見積の欠け（`unscored`）だけで入った課題を数えない。
-見積の欠けは採点で解け、見直しを起動する理由にならない（#2540）。見積の欠けだけで持ち越した課題（`unscored_only`）は
-次の回に `carried` が付いても数えない（呼び手が `weak_carry` で渡す）。
+見直しの起動の材料にする持ち越しの数（`carry`）は、見積の欠け（`unscored`）か経路 `all` だけで入った課題を数えない。
+見積の欠けは採点で解け、`all` は見直しの回に open の全件へ付くため、どちらも見直しを起動する理由にならない（#2540）。
+そうした課題だけで持ち越した課題（`unscored_only`）は次の回に `carried` が付いても数えない（呼び手が `weak_carry` で渡す）。
 """
 
 from __future__ import annotations
@@ -26,11 +26,11 @@ ROUTES = (MANUAL, COMMIT_SUBJECT, CARRIED, DIFF_PATH, DIFF_IDENTIFIER, SUB_ISSUE
 class Selection(NamedTuple):
     keep: list[int]
     deferred: list[int]
-    # 見直しの起動の材料にする持ち越しの数（見積の欠けだけで入った課題を除く）
+    # 見直しの起動の材料にする持ち越しの数（見積の欠けか経路 all だけで入った課題を除く）
     carry: int
     # manual だけで上限を超えたときの件数（超えた分も残す）
     manual_over: int
-    # 見積の欠けだけで持ち越した課題（次の回の `weak_carry`）
+    # 見積の欠けか経路 all だけで持ち越した課題（次の回の `weak_carry`）
     unscored_only: list[int]
 
 
@@ -60,8 +60,8 @@ def select(
 
 
 def _reasons(routes: set[str], weak: bool) -> set[str]:
-    """見直しの起動の材料になる経路。見積の欠けと、見積の欠けだけで持ち越した印（`weak`）の carried を除く。"""
-    return routes - {UNSCORED} - ({CARRIED} if weak else set())
+    """見直しの起動の材料になる経路。見積の欠け・経路 all と、それだけで持ち越した印（`weak`）の carried を除く。"""
+    return routes - {UNSCORED, ALL} - ({CARRIED} if weak else set())
 
 
 def by_route(found: Mapping[int, set[str]], keep: list[int]) -> dict[str, int]:

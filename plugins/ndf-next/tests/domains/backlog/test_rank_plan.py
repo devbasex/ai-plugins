@@ -309,6 +309,16 @@ def test_holds_spread_through_a_shared_dependency_until_stable():
     assert checked.errors == [] and checked.holds == {10, 20, 30}
 
 
+def test_rejected_and_held_placements_are_deferred_not_failed():
+    # 退けた自動の前倒し（#10 と依存先 #11）と、保留の先頭（#20）の依存先 #21 は、移さないのが正しい結果
+    def cand(n, decision, group):
+        return {"number": n, "to": NEAR, "group": group, "decision": decision, "move_digest": f"A{n}"}
+
+    metrics = {"forward": [cand(10, model.AUTO, [11]), cand(20, model.AUTO, [21]), cand(40, model.AUTO, [])], "backward": []}
+    plan = {"rejected": [{"number": 10, "direction": FORWARD}]}
+    assert plan_decide.deferred_placements(metrics, plan, {20}) == {10, 11, 20, 21}
+
+
 def test_tables_place_approved_moves_at_their_destination():
     board = _board([_est(1, 2), _est(2, 1), _est(9, 20)], {1: NEAR, 2: NEAR, 9: NEXT}, capacity=2, approved=frozenset({9}))
     got = rank_decide.compute(board)

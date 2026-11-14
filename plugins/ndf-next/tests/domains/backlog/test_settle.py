@@ -79,18 +79,22 @@ def test_improved_needs_the_pr_to_target_the_base_branch(repo_dir, fake, capsys,
 
 
 def test_removed_path_evidence(repo_dir, fake, capsys, last_result, tmp_path):
-    for n in (5, 6, 8):
+    for n in (5, 6, 7, 8):
         fake.issue(n)
     fake.commits.add("abc123")
     fake.off_base.add("def456")
+    # gone/old.py と still/here.py は abc123 の親にあり、abc123 で gone/old.py だけが消えた
+    fake.contents[("gone/old.py", "abc123p")] = "x"
+    fake.contents[("still/here.py", "abc123p")] = "x"
     fake.contents[("still/here.py", "develop")] = "x"
     rows = [{"issue": 5, "child": "S2", "evidence": {"kind": "removed", "path": "gone/old.py", "commit": "abc123"}},
             {"issue": 6, "child": "S2", "evidence": {"kind": "removed", "path": "still/here.py", "commit": "abc123"}},
+            {"issue": 7, "child": "S2", "evidence": {"kind": "removed", "path": "never/was.py", "commit": "abc123"}},
             {"issue": 8, "child": "S2", "evidence": {"kind": "removed", "path": "gone/old.py", "commit": "def456"}}]  # fmt: skip
     got = _settle(capsys, last_result, tmp_path, rows)
-    assert {i["issue"]: i["result"] for i in got["items"]} == {5: "closed", 6: "unverified", 8: "unverified"}
-    assert "祖先でない" in got["items"][2]["reason"]
-    assert got["status"] == "stopped" and fake.issues[6]["state"] == "open" and fake.issues[8]["state"] == "open"
+    assert {i["issue"]: i["result"] for i in got["items"]} == {5: "closed", 6: "unverified", 7: "unverified", 8: "unverified"}
+    assert "親に never/was.py が無い" in got["items"][2]["reason"] and "祖先でない" in got["items"][3]["reason"]
+    assert got["status"] == "stopped" and all(fake.issues[n]["state"] == "open" for n in (6, 7, 8))
 
 
 def test_not_reproduced_needs_exit_zero_a_base_record_and_a_past_time_after_the_merge(repo_dir, fake, capsys, last_result, tmp_path):

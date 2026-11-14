@@ -102,7 +102,8 @@ class FakeHub:
     def _compare(self, m: re.Match, b: Any, p: Any) -> httpx.Response:
         commit, base = m.group(1), m.group(2)
         if commit in self.commits and base == "develop":
-            return httpx.Response(200, json={"status": "ahead"})
+            # 比較の起点のコミットの親は、コミットに p を足した名前にする
+            return httpx.Response(200, json={"status": "ahead", "base_commit": {"sha": commit, "parents": [{"sha": f"{commit}p"}]}})
         if commit in self.commits | self.off_base:
             return httpx.Response(200, json={"status": "diverged"})
         return httpx.Response(404, json={})

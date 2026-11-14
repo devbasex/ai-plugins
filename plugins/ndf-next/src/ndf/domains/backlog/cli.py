@@ -210,17 +210,23 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     moved, move_failed = actions.reschedule(gh, plan, holds)
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
-    tables = _write_tables(gh, sd, metrics, moved) if plan.get("rank") else {}
-    again = ["--repo", repo, "--plan", str(Path(a.plan).resolve()), "--run-id", run_id, "--state-dir", str(sd)]
+    deferred = plan_decide.deferred_placements(metrics, plan, holds)
+    tables = _write_tables(gh, sd, metrics, moved, deferred) if plan.get("rank") else {}
+    # sd は <置き場>/<repo> なので、打ち直しには置き場（親）を渡す
+    again = ["--repo", repo, "--plan", str(Path(a.plan).resolve()), "--run-id", run_id, "--state-dir", str(sd.parent)]
     return _apply_outcome(repo, run_id, again, {"acted": acted, "made": made, "moved": moved, "move_failed": move_failed,
                                                 "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
 
 
-def _write_tables(gh: github.GitHub, sd: Path, metrics: dict[str, Any], moved: list[int]) -> dict[str, Any]:
-    """順位の表を書く。表は自動・承認済みの移動を済んだものとして置くため、その移動が 1 件でも済んでいなければ書かない。"""
-    unmoved = sorted({n for n, _ in plan_decide.placed_moves(metrics)} - set(moved))
+def _write_tables(gh: github.GitHub, sd: Path, metrics: dict[str, Any], moved: list[int], deferred: set[int]) -> dict[str, Any]:
+    """順位の表を書く。表は自動・承認済みの移動を済んだものとして置くため、その移動が 1 件でも済んでいなければ書かない。
+
+    plan が退けた・保留にした移動（`deferred`）は失敗に数えず、`deferred` として返す（rank の打ち直しで表へ反映する）。
+    """
+    unmoved = {n for n, _ in plan_decide.placed_moves(metrics)} - set(moved)
     if unmoved:
-        return {"written": [], "unchanged": [], "failed": [], "truncated": {}, "unmoved": unmoved}
+        return {"written": [], "unchanged": [], "failed": [], "truncated": {},
+                "unmoved": sorted(unmoved - deferred), "deferred": sorted(unmoved & deferred)}  # fmt: skip
     return tables_mod.write(gh, state.read(sd, "backlog-rank", {})["milestones"])
 
 
@@ -243,13 +249,16 @@ def _apply_summary(got: dict[str, Any]) -> str:
             f"人へ返した {len(buckets[actions_decide.RETURNED_BUCKET])} 件")  # fmt: skip
 
 
-def _next_steps(waiting: list[int], skipped: list[int], holds: list[int]) -> list[str]:
+def _next_steps(waiting: list[int], skipped: list[int], holds: list[int], unplaced: list[int]) -> list[str]:
     nxt = []
     if waiting:
         nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
     if holds:
         nxt.append("承認を待つ移動 " + " ".join(f"#{n}" for n in holds)
                    + " は、承認を得たら rank を --approved で打ち直し、その rank で plan を作り直して apply を打つ")  # fmt: skip
+    if unplaced:
+        nxt.append("退けた・保留の移動 " + " ".join(f"#{n}" for n in unplaced)
+                   + " があるため順位の表を書かなかった。rank を打ち直し、その rank で plan を作り直して apply を打つと表が書かれる")  # fmt: skip
     if skipped:
         nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
     return nxt
@@ -268,8 +277,9 @@ def _apply_outcome(repo: str, run_id: str, again_args: list[str], got: dict[str,
         raise Stop("incomplete", f"{summary}。{len(failed)} 件が失敗した（同じ plan で打ち直せば済んだものは記録で飛ぶ。"
                    f"付け直しを戻すは ndf issues revert --run {run_id}）", acted["items"], failed)  # fmt: skip
     waiting, skipped, holds = buckets[actions_decide.WAITING], buckets[actions_decide.SKIPPED], sorted(got["holds"])
-    if waiting or skipped or holds:
-        nxt = _next_steps(waiting, skipped, holds)
+    unplaced = tables["deferred"] if tables and "deferred" in tables else []
+    if waiting or skipped or holds or unplaced:
+        nxt = _next_steps(waiting, skipped, holds, unplaced)
         again = result.command(TOOL, "apply", *again_args)
         out["next_steps"] = nxt
         return result.result(TOOL, result.GATE, summary + "。" + "。".join(nxt), acted["items"], out, run_id=run_id,
@@ -350,7 +360,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--repo", help="<所有者>/<名前>（省けば origin）")
-    common.add_argument("--state-dir", help="状態の置き場（省けば NDF_UPKEEP_STATE_DIR かメインディレクトリの .ndf/backlog/state）")
+    common.add_argument("--state-dir", help="状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）")
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="課題の棚卸しと、解消する Issue を閉じる操作")
     sub = parser.add_subparsers(dest="action", required=True)
     c = sub.add_parser("candidates", parents=[common], help="候補を集める（手順 1）")

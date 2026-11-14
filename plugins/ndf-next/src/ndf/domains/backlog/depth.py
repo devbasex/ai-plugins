@@ -34,7 +34,8 @@ def declaration_path(cwd: Path) -> Path:
         top = Git(cwd).run("rev-parse", "--show-toplevel").strip()
     except (GitError, OSError) as exc:
         raise DepthError(f"リポジトリの根を解けない: {exc}") from exc
-    return Path(top) / facts.value("places", "ndf", "path") / facts.value("ndf-files", "backlog", "path")
+    place = facts.value(state.FILES, "backlog", "place")
+    return Path(top) / facts.value("places", place, "path") / facts.value(state.FILES, "backlog", "path")
 
 
 def declaration(path: Path) -> dict[str, Any]:

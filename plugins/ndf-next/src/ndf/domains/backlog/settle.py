@@ -77,16 +77,31 @@ def check_improved(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
     return None
 
 
+def _first_parent(cmp: dict[str, Any]) -> Optional[str]:
+    """比較の起点のコミット（`base_commit`）の最初の親。読めなければ None。"""
+    commit = cmp["base_commit"] if "base_commit" in cmp else None
+    parents = commit["parents"] if isinstance(commit, dict) and "parents" in commit else None
+    if not isinstance(parents, list) or not parents or not isinstance(parents[0], dict) or "sha" not in parents[0]:
+        return None
+    return text_of(parents[0]["sha"])
+
+
 def check_removed(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
-    """消した証拠を確かめる。コミットが基底のブランチの祖先で、パスが基底のブランチに無い。"""
+    """消した証拠を確かめる。コミットが基底のブランチの祖先で、パスがコミットの親にあってコミットで消え、基底のブランチに無い。"""
+    commit, path = ev["commit"], ev["path"]
     missing = (issues_gh.NOT_FOUND, issues_gh.UNPROCESSABLE)
-    cmp = issues_gh.get_or_none(gh, f"/repos/{gh.repo}/compare/{quote(ev['commit'])}...{quote(base)}", missing=missing)
+    cmp = issues_gh.get_or_none(gh, f"/repos/{gh.repo}/compare/{quote(commit)}...{quote(base)}", missing=missing)
     if cmp is None:
-        return f"コミット {ev['commit']} が無い"
+        return f"コミット {commit} が無い"
     if not isinstance(cmp, dict) or cmp.get("status") not in ("ahead", "identical"):
-        return f"コミット {ev['commit']} が基底のブランチ {base} の祖先でない"
-    if file_text(gh, ev["path"], base) is not None:
-        return f"基底のブランチ {base} に {ev['path']} がまだある"
+        return f"コミット {commit} が基底のブランチ {base} の祖先でない"
+    parent = _first_parent(cmp)
+    if parent is None or file_text(gh, path, parent) is None:
+        return f"コミット {commit} の親に {path} が無い（そのコミットで消したパスでない）"
+    if file_text(gh, path, commit) is not None:
+        return f"コミット {commit} に {path} がまだある（そのコミットで消したパスでない）"
+    if file_text(gh, path, base) is not None:
+        return f"基底のブランチ {base} に {path} がまだある"
     return None
 
 
