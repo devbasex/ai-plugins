@@ -348,22 +348,36 @@ def _cmd_wait(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
 SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait}
 
 
+def _stopped_refused(exc: Any) -> dict[str, Any]:
+    metrics = {"current_id": exc.current_id} if exc.current_id else {}
+    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
+
+
+def _stopped_store(exc: Any) -> dict[str, Any]:
+    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+
+
+def _stopped_db(exc: Exception) -> dict[str, Any]:
+    # 本文は SQL・値・接続先を含みうるので種類の名前だけを出す
+    return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
+
+
+# 止まった例外の型 → 結果を作る関数（例外の MRO を順にたどって引く。表に無ければ invalid）
+_STOPPED: dict[type, Callable[[Any], dict[str, Any]]] = {
+    model.Refused: _stopped_refused,
+    lane.FormatMismatch: lambda exc: result.stopped(TOOL, lane.FormatMismatch.kind, str(exc)),
+    durable.StoreStopped: _stopped_store,
+    sa.exc.SQLAlchemyError: _stopped_db,
+    identity.IdentityError: lambda exc: result.stopped(TOOL, "config_broken", str(exc)),
+    subprocess.CalledProcessError: lambda exc: result.stopped(
+        TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}"
+    ),
+}
+
+
 def _stopped(exc: Exception) -> dict[str, Any]:
-    if isinstance(exc, model.Refused):
-        metrics = {"current_id": exc.current_id} if exc.current_id else {}
-        return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
-    if isinstance(exc, lane.FormatMismatch):
-        return result.stopped(TOOL, lane.FormatMismatch.kind, str(exc))
-    if isinstance(exc, durable.StoreStopped):
-        return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
-    if isinstance(exc, sa.exc.SQLAlchemyError):
-        # 本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-        return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
-    if isinstance(exc, identity.IdentityError):
-        return result.stopped(TOOL, "config_broken", str(exc))
-    if isinstance(exc, subprocess.CalledProcessError):
-        return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
-    return result.stopped(TOOL, "invalid", str(exc))
+    make = next((_STOPPED[k] for k in type(exc).__mro__ if k in _STOPPED), None)
+    return make(exc) if make is not None else result.stopped(TOOL, "invalid", str(exc))
 
 
 STOPPABLE = (
