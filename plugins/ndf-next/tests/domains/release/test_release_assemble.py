@@ -23,8 +23,8 @@ def _node(number: int, title: str, conclusion: str) -> dict:
     return {"number": number, "title": title, "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}
 
 
-def _origin_with_change(tmp_path: Path, test_only: bool) -> Path:
-    """本番（main）の後に、ベースブランチ（develop）へ PR #5 をマージした origin と、その clone。"""
+def _origin_with_change(tmp_path: Path, test_only: bool, extra: tuple[str, ...] = ()) -> Path:
+    """本番（main）の後に、ベースブランチ（develop）へ PR #5 をマージした origin と、その clone。`extra` は同じ PR で足すファイル。"""
     seed = init_repo(tmp_path / "seed")
     write_json(
         seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
@@ -38,6 +38,9 @@ def _origin_with_change(tmp_path: Path, test_only: bool) -> Path:
     changed = seed / "tools" / "kit" / ("tests/test_a.py" if test_only else "a.py")
     changed.parent.mkdir(parents=True, exist_ok=True)
     changed.write_text("x = 1\n", encoding="utf-8")
+    for rel in extra:
+        (seed / rel).parent.mkdir(parents=True, exist_ok=True)
+        (seed / rel).write_text("{}\n", encoding="utf-8")
     git(seed, "add", "-A")
     git(seed, "commit", "-q", "-m", "change")
     git(seed, "switch", "-q", "develop")
@@ -112,6 +115,15 @@ def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:
     work = _origin_with_change(tmp_path, test_only=True)
     with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop に版を上げる変化が無い$"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+
+
+def test_collect_mixed_range_splits_changes_and_instructions(tmp_path: Path) -> None:
+    """現状固定（collect）: 同じ範囲のリリース対象・テスト・指示書と `.ndf/` の変化を、Facts.changes と Facts.instructions に分ける。"""
+    extra = ("tools/kit/tests/test_b.py", "AGENTS.md", ".ndf/worktree.json")
+    work = _origin_with_change(tmp_path, test_only=False, extra=extra)
+    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ("tools/kit/tests/test_b.py",)),)
+    assert facts.instructions == (".ndf/worktree.json", "AGENTS.md")
 
 
 @pytest.mark.parametrize(
