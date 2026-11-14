@@ -1,0 +1,232 @@
+"""マージの後の後片付け・退避・ブランチの追従・宣言の導入を、一時の git のリポジトリで確かめる。"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Callable, Iterable, Optional
+
+import pytest
+
+from ndf.adapters.git import Completed, Git
+from ndf.adapters.github import Pull
+from ndf.domains.worktree import create, declaration, follow, merged, setup, trash
+
+
+def _pull(number: int, branch: str, merged_: bool) -> Pull:
+    return Pull(number, "closed", merged_, "0" * 40, branch, "develop", "", "clean", "u", "MEMBER")
+
+
+class FakeHub:
+    def __init__(self, pulls: dict[int, Optional[Pull]]) -> None:
+        self.by_number = pulls
+
+    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
+        return {n: self.by_number[n] if n in self.by_number else None for n in numbers}
+
+
+def _land(main_repo: Path, run_git: Callable, branch: str) -> Path:
+    """worktree を作ってコミットし、origin の develop へマージした状態にする（メインディレクトリは取り込む前）。"""
+    wt = create.create(main_repo, branch).path
+    (wt / f"{branch.replace('/', '-')}.txt").write_text("x", encoding="utf-8")
+    run_git(wt, "add", "-A")
+    run_git(wt, "commit", "-q", "-m", branch)
+    origin = main_repo.parent / "origin.git"
+    clone = main_repo.parent / f"clone-{branch.replace('/', '-')}"
+    run_git(main_repo.parent, "clone", "-q", "-b", "develop", str(origin), str(clone))
+    run_git(clone, "fetch", "-q", str(main_repo), f"{branch}:{branch}")
+    run_git(clone, "merge", "-q", "--no-ff", "-m", f"merge {branch}", branch)
+    run_git(clone, "push", "-q", "origin", "develop")
+    run_git(main_repo, "fetch", "-q", "origin")
+    return wt
+
+
+def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: Path, run_git: Callable) -> None:
+    wt = _land(main_repo, run_git, "feat/a")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")  # 追跡していないファイルは退避してから外す
+    (wt / "__pycache__").mkdir()
+    (wt / "__pycache__" / "m.pyc").write_text("", encoding="utf-8")
+    run_git(
+        main_repo, "update-ref", "refs/remotes/origin/develop", "develop"
+    )  # 取得済みの参照を古くし、取り込みが fetch を読むことを確かめる
+
+    rec = merged.after_merge(main_repo, [7, 8, 9], FakeHub({7: _pull(7, "feat/a", True), 8: _pull(8, "feat/b", False)}))
+
+    assert not wt.exists() and not run_git(main_repo, "branch", "--list", "feat/a").strip()
+    got = {(i["kind"], i["name"]): i for i in rec.items}
+    assert got[("branch", "feat/a")]["result"] == "deleted" and got[("branch", "feat/a")]["restore"].startswith("git branch feat/a ")
+    assert got[("pr", "8")]["result"] == "kept" and got[("pr", "9")]["result"] == "kept"
+    assert got[("main_dir", str(main_repo))]["result"] == "pulled" and rec.stopped is None
+    assert (main_repo / "feat-a.txt").exists()
+    [cand] = trash.candidates(Git(main_repo), "origin/develop")
+    removed = got[("worktree", str(wt))]
+    assert cand.branch == "feat/a" and cand.released and cand.name in removed["reason"] and "__pycache__" in removed["reason"]
+    assert (trash.trash_root(Git(main_repo)) / cand.name / "notes.txt").read_text(encoding="utf-8") == "keep me"
+    # 消すのは承認した名前だけ
+    assert trash.sweep(Git(main_repo), "origin/develop", ["other"]) == []
+    assert trash.sweep(Git(main_repo), "origin/develop", [cand.name]) == [cand.name]
+    assert trash.candidates(Git(main_repo), "origin/develop") == []
+
+
+def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path, run_git: Callable) -> None:
+    wt = _land(main_repo, run_git, "feat/c")
+    (wt / "feat-c.txt").write_text("changed", encoding="utf-8")
+    run_git(main_repo, "checkout", "-q", "main")
+    rec = merged.after_merge(main_repo, [1], FakeHub({1: _pull(1, "feat/c", True)}))
+    results = {i["kind"]: i["result"] for i in rec.items}
+    assert results == {"worktree": "kept", "main_dir": "kept"} and wt.exists()
+
+
+def test_sprint_branch_uses_start_record_over_declaration(main_repo: Path, run_git: Callable) -> None:
+    """宣言（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
+    wt = _land(main_repo, run_git, "sprint/s1")
+    record = {"promotion": "selected", "production_branch": "main"}
+    rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), flow_record=record)
+    assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["kept"] and wt.exists()
+    rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}))
+    assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["deleted"] and not wt.exists()
+
+
+def test_read_flow_record(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    path.write_text(json.dumps({"promotion": "selected"}), encoding="utf-8")
+    assert merged.read_flow_record(path) == {"promotion": "selected"}
+    assert merged.read_flow_record(None) is None
+
+
+def test_follow_detaches_main_dir_to_single_worktree(make_repo: Callable, run_git: Callable) -> None:
+    main = make_repo({"version": 1, "base_branch": "develop", "follow_branch": True})
+    wt = create.create(main, "feat/f").path
+    (wt / "f.txt").write_text("f", encoding="utf-8")
+    run_git(wt, "add", "-A")
+    run_git(wt, "commit", "-q", "-m", "f")
+    text = follow.follow(main, declaration.load(main))
+    assert text is not None and "feat/f" in text
+    assert Git(main).rev_parse("HEAD") == Git(wt).rev_parse("HEAD")
+    assert follow.follow(main, declaration.load(main)) is None  # 合っていれば動かさない
+
+
+def test_follow_does_nothing_without_flag_or_with_changes(make_repo: Callable) -> None:
+    plain = make_repo({"version": 1, "base_branch": "develop"})
+    create.create(plain, "feat/g")
+    before = Git(plain).rev_parse("HEAD")
+    assert follow.follow(plain, declaration.load(plain)) is None
+    (plain / ".gitignore").write_text("changed\n", encoding="utf-8")
+    (plain / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "follow_branch": True}), encoding="utf-8")
+    assert follow.follow(plain, declaration.load(plain)) is None  # 未コミットの変更があれば動かさない
+    assert Git(plain).rev_parse("HEAD") == before
+
+
+def test_setup_init_and_state(make_repo: Callable) -> None:
+    main = make_repo(None)
+    assert setup.state(main).state == setup.ABSENT
+    got = setup.init(main)
+    assert got.written and setup.state(main).state == setup.PRESENT
+    assert (main / ".ndf" / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "worktree.local.json"
+    assert not setup.init(main).written  # 既にある宣言は上書きしない
+    (main / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
+    assert setup.state(main).state == setup.UNREADABLE
+    with pytest.raises(setup.SetupError):
+        setup.init(main)  # 読めない宣言は書き直さない
+    assert setup.init(main, force=True).written
+
+
+def test_after_merge_evacuates_meta_json_and_named_dirs_without_overwriting(main_repo: Path, run_git: Callable) -> None:
+    """利用者の meta.json は管理の台帳に上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
+    wt = _land(main_repo, run_git, "feat/m")
+    (wt / "meta.json").write_text("mine", encoding="utf-8")
+    for name in ("target", "venv"):
+        (wt / name).mkdir()
+        (wt / name / "data.txt").write_text(name, encoding="utf-8")
+    merged.after_merge(main_repo, [3], FakeHub({3: _pull(3, "feat/m", True)}))
+    assert not wt.exists()
+    [cand] = trash.candidates(Git(main_repo), "origin/develop")
+    dest = trash.trash_root(Git(main_repo)) / cand.name
+    assert (dest / "meta.json").read_text(encoding="utf-8") == "mine" and cand.branch == "feat/m"
+    assert (dest / "target" / "data.txt").is_file() and (dest / "venv" / "data.txt").is_file()
+
+
+def test_after_merge_keeps_locked_worktree_without_evacuating(main_repo: Path, run_git: Callable) -> None:
+    wt = _land(main_repo, run_git, "feat/n")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")
+    run_git(main_repo, "worktree", "lock", str(wt))
+    rec = merged.after_merge(main_repo, [4], FakeHub({4: _pull(4, "feat/n", True)}))
+    got = {(i["kind"], i["name"]): i for i in rec.items}
+    assert got[("worktree", str(wt))]["result"] == "kept" and (wt / "notes.txt").read_text(encoding="utf-8") == "keep me"
+    assert trash.candidates(Git(main_repo), "origin/develop") == []
+
+
+def test_after_merge_does_not_close_testenv_of_locked_worktree(main_repo: Path, run_git: Callable, monkeypatch: pytest.MonkeyPatch) -> None:
+    """locked の worktree は公開を閉じず、テスト環境も破棄しない（何も動かさずに残す）。"""
+    wt = _land(main_repo, run_git, "feat/l")
+    run_git(main_repo, "worktree", "lock", str(wt))
+    closed: list[Path] = []
+    monkeypatch.setattr(merged.testenv_sweep, "close_for_removal", lambda path: closed.append(path))
+    merged.after_merge(main_repo, [6], FakeHub({6: _pull(6, "feat/l", True)}))
+    assert closed == [] and wt.exists()
+
+
+def test_after_merge_evacuates_ignored_files_before_removing(main_repo: Path, run_git: Callable) -> None:
+    """`git worktree remove` は無視したファイルを黙って消すため、無視したファイルだけでも先に退避する。"""
+    wt = _land(main_repo, run_git, "feat/i")
+    (wt / ".gitignore").write_text(".env\n", encoding="utf-8")
+    run_git(wt, "add", ".gitignore")
+    run_git(wt, "commit", "-q", "-m", "ignore")
+    (wt / ".env").write_text("SECRET_NAME=1", encoding="utf-8")
+    merged.after_merge(main_repo, [5], FakeHub({5: _pull(5, "feat/i", True)}))
+    [cand] = trash.candidates(Git(main_repo), "origin/develop")
+    assert (trash.trash_root(Git(main_repo)) / cand.name / ".env").read_text(encoding="utf-8") == "SECRET_NAME=1"
+
+
+def test_after_merge_keeps_base_branch_of_release_pull(main_repo: Path, run_git: Callable) -> None:
+    run_git(main_repo, "checkout", "-q", "main")
+    rec = merged.after_merge(main_repo, [3], FakeHub({3: _pull(3, "develop", True)}))
+    got = {(i["kind"], i["name"]): i for i in rec.items}
+    assert got[("branch", "develop")]["result"] == "kept" and run_git(main_repo, "branch", "--list", "develop").strip()
+
+
+def test_after_merge_restores_evacuated_files_when_git_refuses(main_repo: Path, run_git: Callable, monkeypatch: pytest.MonkeyPatch) -> None:
+    wt = _land(main_repo, run_git, "feat/r")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")
+    real = Git.attempt
+
+    def refuse(self: Git, *args: str) -> Completed:
+        return Completed(1, "", "refused") if args[:2] == ("worktree", "remove") else real(self, *args)
+
+    monkeypatch.setattr(Git, "attempt", refuse)
+    rec = merged.after_merge(main_repo, [4], FakeHub({4: _pull(4, "feat/r", True)}))
+    item = next(i for i in rec.items if i["kind"] == "worktree")
+    assert item["result"] == "kept" and "戻した" in item["reason"]
+    assert (wt / "notes.txt").read_text(encoding="utf-8") == "keep me" and trash.candidates(Git(main_repo), "origin/develop") == []
+
+
+def test_trash_candidate_by_merge_commit_after_squash(main_repo: Path, run_git: Callable) -> None:
+    wt = create.create(main_repo, "feat/q").path
+    (wt / "q.txt").write_text("x", encoding="utf-8")
+    run_git(wt, "add", "-A")
+    run_git(wt, "commit", "-q", "-m", "q")
+    (wt / "notes.txt").write_text("n", encoding="utf-8")
+    head = run_git(wt, "rev-parse", "HEAD").strip()
+    squash = run_git(main_repo, "rev-parse", "develop").strip()  # 本番に入ったマージコミットの代わり
+    trash.evacuate(Git(main_repo), wt, "feat/q", head, squash)
+    [cand] = trash.candidates(Git(main_repo), "develop")
+    assert cand.released and not Git(main_repo).is_ancestor(head, "develop")
+
+
+def test_evacuate_moves_back_when_a_later_move_fails(main_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2 件目を移せなければ、先に移したファイルを worktree へ戻してから止める（抜けたまま残さない）。"""
+    wt = create.create(main_repo, "feat/half").path
+    (wt / "a.txt").write_text("a", encoding="utf-8")
+    (wt / "b.txt").write_text("b", encoding="utf-8")
+    real = trash.shutil.move
+
+    def move(src: str, dst: str) -> object:
+        if src.endswith("b.txt") and str(trash.trash_root(Git(main_repo))) in dst:
+            raise OSError("boom")
+        return real(src, dst)
+
+    monkeypatch.setattr(trash.shutil, "move", move)
+    with pytest.raises(trash.TrashError, match="b.txt"):
+        trash.evacuate(Git(main_repo), wt, "feat/half", "0" * 40)
+    assert (wt / "a.txt").read_text(encoding="utf-8") == "a" and (wt / "b.txt").exists()
+    assert trash.candidates(Git(main_repo), "develop") == []

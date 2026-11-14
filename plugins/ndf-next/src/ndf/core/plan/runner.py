@@ -10,7 +10,9 @@
   止めない
 - 遷移の判断が行き先を選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の置き場の `progress.jsonl` へ追記する。
   書くのは耐久ステップで、回復で判断を流し直しても同じ選択を 2 回書かない
-- ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる
+- ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる。
+  `outputs.gaps` が空でなければ、最後まで ok で流れてもプランの結果は incomplete でその欠けを持つ（レビューの欠けを
+  CI の後まで引き継ぐ）
 - 承認の答えを待つ所に来たら、待ちの目印 `waiting-<鍵の名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
   DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローは鍵のファイルに残り、次の起動が回復する。B2）
 """
@@ -36,7 +38,7 @@ from ndf.core.plan.records import PROGRESS_FILE, _add_outputs, _add_prs, recorde
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
 # 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == f"{__package__}.cli")
+TOOL = cli.tool_of(f"{__package__}.cli")
 CLI_NAME = result.ENTRY
 RUN_FILE = "run.json"
 # 状態の置き場を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
@@ -350,24 +352,49 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
-    """終わった回の結果。耐久ワークフローが例外で終わったときは unknown で止まる。"""
-    items = [_run_item(inv), *_pr_items(inv.state_dir)]
-    metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
-    outputs, warnings = recorded_outputs(inv.state_dir)
-    shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
+@dataclass(frozen=True)
+class _FinalRecords:
+    """終わった回の結果に共通の値。`outputs` はステップの outputs（gaps の判断に使う）、`shared` は結果へそのまま載せる値。"""
+
+    items: list[dict[str, Any]]
+    metrics: dict[str, Any]
+    outputs: Optional[dict[str, Any]]
+    shared: dict[str, Any]
+
+
+def _finished_result(inv: Invocation, rec: _FinalRecords) -> dict[str, Any]:
+    """ok で終わった回の結果。ステップが残した欠け（outputs の gaps）があれば incomplete で止まる。"""
+    gaps = rec.outputs.get("gaps") if rec.outputs else None
+    if gaps:
+        detail = f"{inv.plan.name} は終わったが、ステップが残した欠け {len(gaps)} 件がある"
+        return result.stopped(TOOL, "incomplete", detail, items=rec.items, metrics=rec.metrics, gaps=gaps, **rec.shared)
+    return result.result(TOOL, OK, f"{inv.plan.name} が終わった", rec.items, rec.metrics, **rec.shared)
+
+
+def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str], rec: _FinalRecords) -> dict[str, Any]:
+    """終わった回の結果を組む（状態の置き場を読まない）。耐久ワークフローが例外で終わったときは unknown で止まる。"""
+    items, metrics, shared = rec.items, rec.metrics, rec.shared
     if final is None:
         detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
         return result.stopped(TOOL, "unknown", detail, items=items, metrics=metrics, **shared)
     if final["status"] == OK:
-        return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics, **shared)
+        return _finished_result(inv, rec)
     if final["status"] == STOPPED:
-        items[0]["step"] = final["last"]
+        items = [{**items[0], "step": final["last"]}, *items[1:]]
         again = result.command(TOOL, "next", *_with_start(inv.again, final["last"])) if final["last"] else None
         return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again, **shared)
     after = inv.plan.following(final["last"])
     cont = result.command(TOOL, "next", *_with_start(inv.again, after)) if after else None
     return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None}, **shared)
+
+
+def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
+    """終わった回の結果。状態の置き場の記録（載った PR・ステップの outputs）を読み、`_result_of` で組む。"""
+    items = [_run_item(inv), *_pr_items(inv.state_dir)]
+    metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
+    outputs, warnings = recorded_outputs(inv.state_dir)
+    shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
+    return _result_of(inv, final, status, _FinalRecords(items, metrics, outputs, shared))
 
 
 def _stored(inv: Invocation) -> dict[str, Any]:
