@@ -15,7 +15,7 @@ def _edit_cause(kind: str, **changes):
 
 def test_plugin_table_rows_have_type_and_stopped_exit_code():
     table = causes.table()
-    assert len(table) == 24
+    assert len(table) == 29
     codes = exit_codes.codes("stopped")
     assert all(row.exit in codes and row.std_type for row in table.values())
 

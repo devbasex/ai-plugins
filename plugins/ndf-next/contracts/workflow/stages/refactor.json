@@ -1,0 +1,58 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "refactor",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "リファクタリング",
+      "phase": "implement",
+      "when": [
+        "code_in_diff"
+      ],
+      "inputs": [
+        "worktree",
+        "branch"
+      ]
+    }
+  },
+  "do": [
+    {
+      "refactor": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "cross-refactoring"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
