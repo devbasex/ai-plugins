@@ -251,12 +251,21 @@ def _in_worktree(workdir: Path) -> bool:
     return done.returncode == 0 and done.stdout.strip() == "true"
 
 
-def _restore(agents: Path, backup: Path, before_bak: set[str]) -> None:
-    if backup.is_dir():
-        shutil.copytree(backup, agents, dirs_exist_ok=True)
-    if agents.is_dir():
-        for p in agents.glob("*.bak"):
-            if p.name not in before_bak:
+@dataclass(frozen=True)
+class _AgentsBackup:
+    """1 回の控え。`agents` は戻す先、`backup` は控えの置き場、`before_bak` は起動の前からある `.bak` の名前。"""
+
+    agents: Path
+    backup: Path
+    before_bak: frozenset[str]
+
+
+def _restore(backed: _AgentsBackup) -> None:
+    if backed.backup.is_dir():
+        shutil.copytree(backed.backup, backed.agents, dirs_exist_ok=True)
+    if backed.agents.is_dir():
+        for p in backed.agents.glob("*.bak"):
+            if p.name not in backed.before_bak:
                 p.unlink()
 
 
@@ -265,28 +274,27 @@ def _write_launch(paths: AgentPaths, kept: dict[str, Any]) -> None:
     paths.launch.write_text(json.dumps(kept, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _guard_restore(workdir: Path, paths: AgentPaths, backup: Path, before_bak: set[str], kept: dict[str, Any]) -> None:
-    agents = workdir / KIRO_AGENTS
+def _guard_restore(paths: AgentPaths, backed: _AgentsBackup, kept: dict[str, Any]) -> None:
     try:
-        _restore(agents, backup, before_bak)
+        _restore(backed)
     except OSError as exc:
-        kept.update(restore="restore_failed", detail=str(exc), backup=str(backup))
+        kept.update(restore="restore_failed", detail=str(exc), backup=str(backed.backup))
         with open(paths.err, "a", encoding="utf-8") as err:
-            err.write(f"kiro が書き換えた {agents} を戻せない（控えは {backup}）: {exc}\n")
+            err.write(f"kiro が書き換えた {backed.agents} を戻せない（控えは {backed.backup}）: {exc}\n")
         return
-    shutil.rmtree(backup, ignore_errors=True)
+    shutil.rmtree(backed.backup, ignore_errors=True)
     kept["restore"] = "restored"
 
 
-def _backup_agents(workdir: Path, paths: AgentPaths) -> tuple[Path, set[str]]:
-    """worktree の `.amazonq/cli-agents` を控え、控えのパスと起動の前からある `.bak` の名前を返す。"""
+def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
+    """worktree の `.amazonq/cli-agents` を控える。"""
     agents = workdir / KIRO_AGENTS
     backup = paths.launch.with_name(paths.launch.stem + BACKUP_SUFFIX)
     shutil.rmtree(backup, ignore_errors=True)
-    before_bak = {p.name for p in agents.glob("*.bak")} if agents.is_dir() else set()
+    before_bak = frozenset(p.name for p in agents.glob("*.bak")) if agents.is_dir() else frozenset()
     if agents.is_dir():
         shutil.copytree(agents, backup)
-    return backup, before_bak
+    return _AgentsBackup(agents, backup, before_bak)
 
 
 @contextlib.contextmanager
@@ -304,5 +312,5 @@ def kiro_guard(workdir: Path, paths: AgentPaths) -> Iterator[dict[str, Any]]:
         yield kept
     finally:
         if backed is not None:
-            _guard_restore(workdir, paths, *backed, kept)
+            _guard_restore(paths, backed, kept)
         _write_launch(paths, kept)
