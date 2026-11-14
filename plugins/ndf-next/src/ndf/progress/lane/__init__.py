@@ -6,7 +6,8 @@
 - レーンの進行表の行はスプリント 1 つで、状態は 未着手・実行中（スプリントの進行表の ID を持つ）・完了・中止
 - レーンの進行表へ事象を書くのはこのモジュールの関数だけで、書く前に計画の決まり（触る場所の重なり I13・
   別のレーンの `after` が指す行 I18・レーンの間の課題の重なり I19・上限 I20・`after` の輪 I21・行の位置 I12a）で確かめる
-- 計画の決まりは計画の進行表の事象を畳み込んで読む（`fold_plan`）。畳み込みと判定は純粋な関数で、DB を読まない
+- 計画の決まりは計画の進行表の事象を畳み込んで読む（`fold_plan`）。畳み込み（`lane.fold`）と判定（`lane.rules`）は
+  純粋な関数で、DB を読まない。型と状態の語は `lane.types` にあり、このモジュールが同じ名前で公開する
 - 答えの事象（`row_answered`）の後に conductor が `ndf progress next` を打った印（`row_resumed`）が無い行は、
   「答えの後の next 待ち」として読める（`awaiting_next`）
 """
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
@@ -24,6 +25,8 @@ import sqlalchemy as sa
 from ndf import identity
 from ndf.core import durable
 from ndf.progress import model, store
+from ndf.progress.lane.fold import fold_lane as fold_lane
+from ndf.progress.lane.fold import fold_plan as fold_plan
 from ndf.progress.lane.rules import (
     after_met as after_met,
     change_errors as change_errors,
@@ -39,6 +42,7 @@ from ndf.progress.lane.types import (
     COMPLETED as COMPLETED,
     DONE_STATES as DONE_STATES,
     PENDING as PENDING,
+    PLAN_ROW as PLAN_ROW,
     RUNNING as RUNNING,
     WAITING_AFTER as WAITING_AFTER,
     Lanes as Lanes,
@@ -48,8 +52,6 @@ from ndf.progress.lane.types import (
     Request as Request,
 )
 
-# 計画の進行表の中の、計画そのものの行の鍵（規則・上限・形の番号を持つ）。レーン名の形に当たらない語にする
-PLAN_ROW = "@plan"
 # 行の鍵の接頭辞（r1・r2…）と、依頼の行の鍵の接頭辞
 ROW_PREFIX = "r"
 REQUEST_PREFIX = "request-"
@@ -61,110 +63,6 @@ class FormatMismatch(Exception):
     """計画が記録した形の番号と自分のものが違う。"""
 
     kind = "format_mismatch"
-
-
-# --- 畳み込み（純粋） -----------------------------------------------------------------------------
-
-
-def _spec(name: str, body: Mapping[str, Any]) -> LaneSpec:
-    return LaneSpec(
-        name=name,
-        table_id=body["table_id"],
-        kind=body["kind"],
-        plans=int(body["plans"]),
-        touches=tuple(body["touches"]),
-        after=tuple(body["after"]),
-        repo=body.get("repo"),
-    )
-
-
-def _changed_spec(spec: LaneSpec, body: Mapping[str, Any]) -> LaneSpec:
-    changes = {k: (tuple(v) if isinstance(v, list) else v) for k, v in body.items() if k in ("plans", "touches", "after")}
-    return replace(spec, **changes)
-
-
-def _plan_base(table_id: str, body: Mapping[str, Any], state: str) -> PlanView:
-    return PlanView(
-        table_id=table_id,
-        name=body["name"],
-        state=state,
-        rules=tuple(body["rules"]),
-        max_lanes=int(body["max_lanes"]),
-        max_plans=int(body["max_plans"]),
-        formats=dict(body["formats"]),
-        ndf_version=body.get("ndf_version"),
-    )
-
-
-def _plan_limits(view: PlanView, body: Mapping[str, Any]) -> PlanView:
-    changes = {k: int(v) for k, v in body.items() if k in ("max_lanes", "max_plans")}
-    return replace(view, **changes)
-
-
-def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
-    body, key = d.payload, d.row_key
-    if d.kind == "lane_added":
-        return replace(view, lanes={**view.lanes, key: _spec(key, body)})
-    if d.kind == "lane_changed" and key == PLAN_ROW:
-        return _plan_limits(view, body)
-    if d.kind == "lane_changed":
-        return replace(view, lanes={**view.lanes, key: _changed_spec(view.lanes[key], body)})
-    if d.kind == "request_opened":
-        req = Request(key, body.get("lane"), dict(body["body"]), d.reason)
-        return replace(view, requests={**view.requests, key: req})
-    if d.kind == "request_closed":
-        return replace(view, requests={**view.requests, key: replace(view.requests[key], closed=d.reason)})
-    return view
-
-
-def fold_plan(table_id: str, events: list[model.Event]) -> PlanView:
-    """計画の進行表の事象から、レーンの配列・規則・上限・依頼・計画の状態を求める。"""
-    created = [e for e in events if e.draft.kind == "created" and e.draft.row_key == PLAN_ROW]
-    if not created:
-        raise model.Refused(f"計画の進行表 {table_id} に計画の行が無い")
-    state = model.table_state("plan", events)
-    view = _plan_base(table_id, created[0].draft.payload, state)
-    for ev in events:
-        view = _fold_plan_event(view, ev.draft)
-    return view
-
-
-def _row_from(rows: dict[str, LaneRow], ev: model.Event) -> Optional[LaneRow]:
-    """1 件の事象を当てた後の行。行の位置を変えない事象だけを扱う（位置は `fold_lane` が持つ）。"""
-    d = ev.draft
-    row = rows.get(d.row_key)
-    if d.kind == "row_added":
-        return LaneRow(d.row_key, dict(d.payload["input"]), PENDING, reason=d.reason)
-    if row is None:
-        return None
-    if d.kind == "row_answered":
-        return replace(row, answered_seq=ev.seq, answered_at=ev.at)
-    if d.kind == "row_resumed":
-        return replace(row, resumed_seq=ev.seq)
-    sprint = d.payload.get("sprint_id") if d.payload else None
-    if d.state is None:
-        return row
-    return replace(row, state=d.state, sprint_id=sprint if sprint is not None else row.sprint_id, reason=d.reason)
-
-
-def _placed(order: list[str], key: str, index: Optional[int]) -> list[str]:
-    rest = [k for k in order if k != key]
-    at = len(rest) if index is None else max(0, min(index, len(rest)))
-    return [*rest[:at], key, *rest[at:]]
-
-
-def fold_lane(events: Iterable[model.Event]) -> list[LaneRow]:
-    """レーンの進行表の事象から、順番表の行を並びの順に求める。"""
-    rows: dict[str, LaneRow] = {}
-    order: list[str] = []
-    for ev in events:
-        d = ev.draft
-        if d.kind in ("row_added", "row_moved"):
-            order = _placed(order, d.row_key, d.payload.get("index"))
-        got = _row_from(rows, ev)
-        if got is not None:
-            rows[d.row_key] = got
-    return [rows[k] for k in order]
 
 
 def current_formats() -> dict[str, int]:

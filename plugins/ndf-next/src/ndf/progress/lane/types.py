@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+# 計画の進行表の中の、計画そのものの行の鍵（規則・上限・形の番号を持つ）。レーン名の形に当たらない語にする
+PLAN_ROW = "@plan"
 # 行の状態の語（契約 progress.json の row_states.lane。計画の状態 table_states.plan も同じ語）
 PENDING, RUNNING, COMPLETED, CANCELLED = "pending", "running", "completed", "cancelled"
 DONE_STATES = (COMPLETED, CANCELLED)
