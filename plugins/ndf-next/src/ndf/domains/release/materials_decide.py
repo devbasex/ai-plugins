@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple
 
-from ndf.domains.release import changes_decide, checks_decide, version_decide
+from ndf.domains.release import approval_decide, changes_decide, checks_decide, version_decide
 
 
 class PullFact(NamedTuple):
@@ -79,7 +79,7 @@ def render(facts: Facts) -> str:
     lines = [
         f"# リリースの承認資料（{facts.channel}）",
         "",
-        f"提示したコミット: `{facts.head}`",
+        f"{approval_decide.HEAD_LINE} `{facts.head}`",
         "",
         "## 版",
         *_plugins(facts.planned),

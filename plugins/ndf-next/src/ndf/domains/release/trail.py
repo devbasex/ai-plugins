@@ -1,6 +1,7 @@
 """リリースの PR の承認の証跡を読み書きし、判定を PR の先端の commit status へ付ける。
 
-- 提示（`present`）: 承認資料を、提示した先端の SHA を添えて PR へコメントする（会話のセッションが打つ）
+- 提示（`present`）: 承認資料を、提示した先端の SHA を添えて PR へコメントする（会話のセッションが打つ）。資料が対象にした
+  コミットが今の先端でなければ提示しない
 - 答え（`answer`）: 人の答えを証跡のコメントに書き、書いた後に PR を読み直して、答えが今の先端への判定として
   届いたことを確かめる。届いていなければ `TrailError`（答えたつもりで止まり続けない）
 - 確かめ（`check`）: 証跡を読んで判定し、判定を commit status `approval_decide.STATUS_CONTEXT` に付ける（workflow が打つ）
@@ -42,8 +43,16 @@ def read(hub: GitHub, number: int) -> Read:
 
 
 def present(hub: GitHub, number: int, material: str) -> str:
-    """承認資料を提示する。提示した先端の SHA を返す。"""
+    """承認資料を提示する。提示した先端の SHA を返す。
+
+    資料が対象にしたコミット（行 `approval_decide.HEAD_LINE`）が PR の今の先端でなければ、提示せずに `TrailError`
+    （資料の後に積んだ変更を含まない資料から、新しい先端を承認させない。資料を組み直してから提示する）。
+    """
     pull = hub.pull(number)
+    shown = approval_decide.material_head(material)
+    if shown != pull.head_sha:
+        target = shown[:12] if shown else "（資料に無い）"
+        raise TrailError(f"#{number} の承認資料が対象にしたコミット {target} が今の先端 {pull.head_sha[:12]} でない（資料を組み直す）")
     Publisher(hub).comment(number, approval_decide.render_request(material, pull.head_sha))
     return pull.head_sha
 

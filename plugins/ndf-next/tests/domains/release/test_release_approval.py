@@ -58,6 +58,19 @@ def test_answer_is_refused_when_head_moved_since_presented() -> None:
     assert hub.comments(7) == []
 
 
+def test_present_refuses_material_for_another_commit() -> None:
+    """資料が対象にしたコミットが今の先端でなければ提示しない。先端と同じなら提示して先端を返す。"""
+    for shown in (OTHER, None):
+        hub = FakeHub(pulls={7: pull(head=HEAD)})
+        material = "# 資料\n" if shown is None else f"{approval_decide.HEAD_LINE} `{shown}`\n"
+        with pytest.raises(trail.TrailError):
+            trail.present(hub, 7, material)
+        assert hub.comments_of == {}
+    hub = FakeHub(pulls={7: pull(head=HEAD)})
+    assert trail.present(hub, 7, f"{approval_decide.HEAD_LINE} `{HEAD}`\n") == HEAD
+    assert approval_decide.REQUEST_MARK in hub.comments_of[7][0].body
+
+
 def test_check_posts_status_on_head() -> None:
     hub = FakeHub(pulls={7: pull(head=HEAD)}, comments_of={7: [_trail("approved", HEAD)]})
     trail.check(hub, 7)
@@ -102,6 +115,19 @@ def test_issue_1983_failed_ci_stops_without_retry() -> None:
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
     done = _lander(hub, True, calls).land(7)
     assert not done.merged and done.kind == "test_failed" and calls == [1] and hub.merged == []
+
+
+def test_production_merge_rechecks_approval_after_waiting() -> None:
+    """必須のチェックを待つ間に差し戻しが足されたら、マージしない（待ちの後に証跡を読み直す）。"""
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        hub.comments_of[7].append(_trail("rejected", HEAD))
+        return ci.WatchResult(_reading(False), 1, 0.0, 0.0)
+
+    lander = _lander(hub, False, [])
+    done = land.Lander(hub, lander.base, lander.production, lander.budget, wait=wait).land(7)
+    assert not done.merged and done.kind == "refused" and hub.merged == []
 
 
 def test_production_merge_then_sync_back_to_base() -> None:

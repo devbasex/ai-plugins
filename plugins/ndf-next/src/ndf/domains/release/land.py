@@ -3,8 +3,10 @@
 1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）
 2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに止まった理由で
    返す（同じ CI の失敗を読み直し続けない。#1983）
-3. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）
-4. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
+3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の答えが承認のときだけ進む
+   （待つ間に足された差し戻しや消された承認を見落とさない）
+4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）
+5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
 """
 
@@ -16,7 +18,7 @@ from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters import ci
-from ndf.adapters.github import GitHub, GitHubError, MergeOutcome, Pull, text_of
+from ndf.adapters.github import MERGE_COMMIT, GitHub, GitHubError, MergeOutcome, Pull, text_of
 from ndf.contracts import facts
 from ndf.domains.release import approval_decide, trail, version_decide
 
@@ -24,7 +26,7 @@ from ndf.domains.release import approval_decide, trail, version_decide
 REQUIRED_RULE = "required_status_checks"
 # リリースの PR と戻す PR のマージの方式。本番ブランチとベースブランチの祖先の関係を保つため merge commit に限る
 # （squash・rebase では次のリリースの範囲に出した変更が再び入る）。許されていなければ GitHub へ送らずに止まる
-MERGE_METHOD = "merge"
+MERGE_METHOD = MERGE_COMMIT
 # GitHub が PR の作成を断る状態と、そのうち差分が無いことを表す文言（ベースブランチへ戻す差分が無い）
 UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
 NOTHING_TO_SYNC_TEXT = "No commits between"
@@ -119,10 +121,24 @@ class Lander:
         watched = self.wait(reader, self.budget) if self.wait is not None else ci.Watch(reader, self.budget).run()
         return watched.cause([])
 
+    def _refusal(self, pull: Pull) -> Landed | None:
+        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。"""
+        if pull.base_ref != self.production:
+            return None
+        got = trail.check(self.hub, pull.number)
+        if got.pull.head_sha != pull.head_sha:
+            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
+        if not got.judgment.approved:
+            return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
+        return None
+
     def _merge(self, pull: Pull) -> Landed:
         kind = self._watch(pull)
         if kind is not None:
             return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
+        refused = self._refusal(pull)
+        if refused is not None:
+            return refused
         outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
@@ -170,10 +186,9 @@ class Lander:
                 return self._sync(pull)
             return Landed(True, None, f"#{number} は既にマージされている")
         version_decide.version_of_branch(pull.head_ref)
-        if pull.base_ref == self.production:
-            got = trail.check(self.hub, number)
-            if not got.judgment.approved:
-                return Landed(False, "refused", f"#{number} は承認されていない: {got.judgment.detail}")
+        refused = self._refusal(pull)
+        if refused is not None:
+            return refused
         done = self._merge(pull)
         if not done.merged or pull.base_ref != self.production:
             return done

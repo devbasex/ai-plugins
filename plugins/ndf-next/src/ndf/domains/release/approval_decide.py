@@ -84,6 +84,12 @@ def _line_value(body: str, label: str) -> str | None:
     return None
 
 
+def material_head(material: str) -> str | None:
+    """承認資料が対象にしたコミット（行 `HEAD_LINE` の 40 桁の SHA）。無い・形が違えば None。"""
+    got = _line_value(material, HEAD_LINE)
+    return got if got is not None and _SHA.fullmatch(got) else None
+
+
 def parse(order: int, author: str, body: str) -> Trail | None:
     """コメント 1 件を証跡として読む。証跡でない・形が違えば None（提示のコメントも None）。"""
     if TRAIL_MARK not in body or REQUEST_MARK in body:
