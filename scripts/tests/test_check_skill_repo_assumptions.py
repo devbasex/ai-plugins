@@ -586,3 +586,97 @@ def test_release_scripts_have_no_whole_file_exclusion(tmp_path: Path, path: str)
     result = run_check(REPO_ROOT / "plugins/ndf/skills", rows, tmp_path)
     assert result.returncode == 1, output_of(result)
     assert path in output_of(result)
+
+
+# --- 現状固定テスト（I-003: scan_family の戻り値） ---------------------------------------------------
+
+
+def load_checker():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_skill_repo_assumptions_i003", CHECKER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+FAMILY_FILES = {
+    "manifests/claude-skills.txt": "alpha  # c\nghost\n",
+    "manifests/codex-skills.txt": "bravo\n",
+    "skills/alpha/SKILL.md": "# t\nrun `claude plugin validate` on develop\n",
+    "skills/alpha/references/r.md": "origin/main\n",
+    "skills/alpha/tests/t.md": "develop\n",
+    "skills/alpha/scripts/x.sh": '# main\ngit checkout develop\nB="main"\n',
+    "skills/alpha/scripts/y.py": "import pytest\n",
+    "skills/alpha/scripts/experimental/z.py": "pytest\n",
+    "skills/bravo/SKILL.md": "clean\n",
+    "skills/charlie/SKILL.md": "develop\n",
+    "scripts/a.py": 'B = "main"  # plugins/ndf/\n',
+    "scripts/b.sh": "for c in main master; do :; done\n",
+    "scripts/tests/t.py": "pytest\n",
+    "scripts/c.txt": "pytest\n",
+    "hooks/claude.json": '{"c":"git diff origin/develop"}\n',
+    "hooks/x.txt": "origin/develop\n",
+    "agents/ag.md": "use --base main\n",
+}
+
+
+def build_family(tmp_path: Path) -> Path:
+    """本文・Skill のスクリプト・family のスクリプト・hook・エージェントをすべて持つ family。`skills/` を返す。"""
+    family = tmp_path / "plugins" / "fx"
+    for rel, body in FAMILY_FILES.items():
+        path = family / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    return family / "skills"
+
+
+def test_characterize_scan_family_returns_scanned_hits_report_and_unscanned(tmp_path: Path) -> None:
+    mod = load_checker()
+    skills = build_family(tmp_path)
+    family = skills.parent
+    scanned, hits, report_line, unscanned = mod.scan_family(skills)
+
+    assert sorted(Path(p).relative_to(family.resolve()).as_posix() for p in scanned) == [
+        "agents/ag.md",
+        "hooks/claude.json",
+        "scripts/a.py",
+        "scripts/b.sh",
+        "skills/alpha/SKILL.md",
+        "skills/alpha/references/r.md",
+        "skills/alpha/scripts/x.sh",
+        "skills/alpha/scripts/y.py",
+        "skills/bravo/SKILL.md",
+    ]
+    # 並びも固定する（本文 → family のスクリプト → Skill のスクリプト → シェルの語 → hook → エージェント）
+    assert [(h.skills_dir.relative_to(family).as_posix(), h.rel, h.lineno, h.word_id, h.word) for h in hits] == [
+        ("skills", "alpha/SKILL.md", 2, "claude-plugin-cmd", "claude plugin "),
+        ("skills", "alpha/SKILL.md", 2, "develop-branch", "develop"),
+        ("skills", "alpha/references/r.md", 1, "origin-main", "origin/main"),
+        ("scripts", "a.py", 1, "ndf-dir", "plugins/ndf/"),
+        ("scripts", "a.py", 1, "quoted-main", '"main"'),
+        ("skills", "alpha/scripts/x.sh", 3, "quoted-main", '"main"'),
+        ("skills", "alpha/scripts/y.py", 1, "pytest", "pytest"),
+        ("scripts", "b.sh", 1, "shell-branch-word", "main"),
+        ("scripts", "b.sh", 1, "shell-branch-word", "master"),
+        ("skills", "alpha/scripts/x.sh", 2, "shell-branch-word", "develop"),
+        ("hooks", "claude.json", 1, "origin-develop", "origin/develop"),
+        ("agents", "ag.md", 1, "base-branch-name", "--base main"),
+    ]
+    assert report_line == (
+        f"{skills}: 公開する Skill 3 個 / Markdown 3 本 / スクリプト 4 本（family 2・Skill 2） / "
+        "hook 1 本 / エージェント 1 本 / ヒット 12 件"
+    )
+    assert unscanned == [skills / "ghost"]
+
+
+def test_characterize_scan_family_of_an_empty_family(tmp_path: Path) -> None:
+    mod = load_checker()
+    skills = tmp_path / "plugins" / "fx" / "skills"
+    skills.mkdir(parents=True)
+    scanned, hits, report_line, unscanned = mod.scan_family(skills)
+    assert (scanned, hits, unscanned) == (set(), [], [])
+    assert report_line == (
+        f"{skills}: 公開する Skill 0 個 / Markdown 0 本 / スクリプト 0 本（family 0・Skill 0） / "
+        "hook 0 本 / エージェント 0 本 / ヒット 0 件"
+    )
