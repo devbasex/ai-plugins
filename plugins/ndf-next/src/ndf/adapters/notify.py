@@ -60,6 +60,18 @@ class PostError(Exception):
         self.retryable = retryable
 
 
+# 失敗の理由の文（post_json と fetch_body が同じ文を返す）
+_BAD_URL = "URL が不正"
+
+
+def _timeout_reason(timeout: float) -> str:
+    return f"{timeout:g} 秒を越えた"
+
+
+def _connect_reason(e: Exception) -> str:
+    return f"接続できない（{type(e).__name__}）"
+
+
 def _status_retryable(status: int) -> bool:
     return status == httpx.codes.TOO_MANY_REQUESTS or status >= httpx.codes.INTERNAL_SERVER_ERROR
 
@@ -76,11 +88,11 @@ def post_json(
         with httpx.Client(transport=transport, timeout=timeout) as client:
             resp = client.post(url, json=body, headers=headers)
     except (httpx.InvalidURL, httpx.UnsupportedProtocol) as e:
-        raise PostError("URL が不正", retryable=False) from e
+        raise PostError(_BAD_URL, retryable=False) from e
     except httpx.TimeoutException as e:
-        raise PostError(f"{_seconds(timeout)} 秒を越えた", retryable=True) from e
+        raise PostError(_timeout_reason(timeout), retryable=True) from e
     except httpx.TransportError as e:
-        raise PostError(f"接続できない（{type(e).__name__}）", retryable=True) from e
+        raise PostError(_connect_reason(e), retryable=True) from e
     return _json_object(resp)
 
 
@@ -97,16 +109,12 @@ def _json_object(resp: httpx.Response) -> dict[str, Any]:
     return data
 
 
-def _seconds(timeout: float) -> str:
-    return f"{timeout:g}"
-
-
 # 要求ごとに新しく接続を張り、期限の監視が今の接続を必ず受け取れるようにする
 _NO_KEEPALIVE = httpx.Limits(max_keepalive_connections=0)
 
 
 def _expired(timeout: float) -> FetchError:
-    return FetchError(f"{_seconds(timeout)} 秒を越えた")
+    return FetchError(_timeout_reason(timeout))
 
 
 # 監視の対象にする接続を返す httpcore の trace の事象（前置きは "connection." や "proxy." など）
@@ -231,11 +239,11 @@ def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None =
     except httpx.TimeoutException as e:
         raise _expired(timeout) from e
     except httpx.InvalidURL as e:
-        raise FetchError("URL が不正") from e
+        raise FetchError(_BAD_URL) from e
     except httpx.RequestError as e:
         if watch.fired:
             raise _expired(timeout) from e
-        raise FetchError(f"接続できない（{type(e).__name__}）") from e
+        raise FetchError(_connect_reason(e)) from e
     finally:
         watch.stop()
 
