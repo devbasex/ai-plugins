@@ -18,7 +18,7 @@
         雛形の一覧（名前・依頼の種類・使う差し込み）
     ndf route render <依頼の種類> --out <plan.json> [--set <名前>=<値>]... [--add <名前>=<値>]...
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
-        git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもその作業ツリーの根。#2054）
+        git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
         render の後に同じプランを `ndf plan next` で流す（即時修正をテスト → PR → merge-when-green の 1 つの
         エントリポイントで流す）
@@ -300,7 +300,7 @@ def repeated(history: Sequence[str], key: str, same_cause: int) -> bool:
 
 
 def repo_root(cwd: Path) -> str:
-    """打った場所の git の作業ツリーの根（サブモジュールならその作業ツリー。共通の git ディレクトリから求めない）。"""
+    """打った場所の git のworktreeの根（サブモジュールならそのworktree。共通の git ディレクトリから求めない）。"""
     return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
 
 
@@ -364,7 +364,7 @@ def _cmd_templates(_: argparse.Namespace) -> int:
 def _read_lines(path: Path) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 記録がまだ無い（初めての止まり）
+    except FileNotFoundError:
         return []
     return [json.loads(line)["key"] for line in text.splitlines() if line.strip()]
 

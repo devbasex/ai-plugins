@@ -1,7 +1,7 @@
 {
   "template": "check",
   "purpose": "check",
-  "summary": "検査: 文書だけの差分なら全体テストと構造改善を飛ばす → 全体テスト → 構造改善 → 実装レビュー → 振る舞いの確認 → push → CI → マージの直前の振る舞いの確かめ直し → 承認ゲート → マージ",
+  "summary": "検査: 文書だけの差分なら全体テストとリファクタリングを飛ばす → 全体テスト → リファクタリング → コードレビュー → 振る舞いの確認 → push → CI → マージの直前の振る舞いの確かめ直し → 承認ゲート → マージ",
   "params": ["repo", "worktree", "branch", "base", "whole_test_command", "test_command", "worker", "refactor", "sync_command", "review", "behavior", "gate", "ci_budget", "required", "tests", "merge_method"],
   "plan": {
     "name": "check-{{branch}}",

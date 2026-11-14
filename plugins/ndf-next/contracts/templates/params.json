@@ -14,9 +14,9 @@
     "required": {"summary": "待つ必須のチェックの名前", "list": true},
     "tests": {"summary": "テストのチェックの名前（分割ジョブも数える）", "list": true, "default": []},
     "merge_method": {"summary": "gh pr merge のマージの仕方（squash・merge・rebase）", "default": "squash"},
-    "refactor": {"summary": "構造改善の起動の引数の並び", "list": true},
-    "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。構造改善が生成元に触れたときに push の前に打つ"},
-    "review": {"summary": "実装レビューの起動の引数の並び", "list": true},
+    "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
+    "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
+    "review": {"summary": "コードレビューの起動の引数の並び", "list": true},
     "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
     "gate": {"summary": "承認ゲートの資料を作って人の答えを待つ起動の引数の並び（承認ゲートの結果 JSON を返す）", "list": true}
   }
