@@ -59,6 +59,7 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
+from ndf.contracts.routing import END
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
 from ndf.testing import limits as test_limits
@@ -71,6 +72,8 @@ PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
 # 雛形のステップで共有のステップを引く鍵
 USE = "use"
+# 手元でテストを打つステップの id。CI テストの宣言（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
+LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
 # 同じ原因の続きの上限の宣言
 REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
@@ -170,11 +173,45 @@ def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in merged.items() if v is not None}
 
 
-def expanded(t: Template) -> dict[str, Any]:
-    """`use` を開いたプランの形（差し込みは埋めない）。"""
+def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
+    """`use` を開いたプランの形（差し込みは埋めない）。`local_tests` が偽なら手元のテストのステップを外す。"""
     plan = copy.deepcopy(dict(t.plan))
     plan["steps"] = [_expand_step(s) for s in plan["steps"]]
-    return plan
+    return plan if local_tests else without_steps(plan, LOCAL_TEST_STEPS)
+
+
+def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
+    """外すステップの id → 代わりの行き先（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
+    ids = [str(s["id"]) for s in found]
+    following = [*ids[1:], END]
+    plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
+    out: dict[str, str] = {}
+    for i in (x for x in ids if x in drop):
+        target = plain[i]
+        while target in drop and target != i:
+            target = plain[target]
+        out[i] = target
+    return out
+
+
+def _retarget(step: Mapping[str, Any], moved: Mapping[str, str]) -> dict[str, Any]:
+    """ステップの行き先（`next`・`on_fail`・`on_cause`・`on_answer`）のうち外したステップを代わりの行き先へ置き換える。"""
+    out = dict(step)
+    for key in ("next", "on_fail"):
+        if key in out and out[key] in moved:
+            out[key] = moved[out[key]]
+    for key in ("on_cause", "on_answer"):
+        if isinstance(out.get(key), Mapping):
+            out[key] = {k: moved[v] if v in moved else v for k, v in out[key].items()}
+    return out
+
+
+def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]:
+    """プランから `ids` のステップを外し、そこへ向かう行き先を外したステップの続きへ付け替える。"""
+    drop = frozenset(ids)
+    found = list(plan["steps"])
+    moved = _successors(found, drop)
+    return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
 
 
 def used_names(value: Any) -> set[str]:
@@ -241,11 +278,17 @@ def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) 
     return value
 
 
-def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
+def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
+    """組むプランが使う差し込みの名前（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
+    used = used_names(expanded(t, local_tests=local_tests))
+    return tuple(n for n in t.params if n in used)
+
+
+def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Value]:
     """差し込みの値を決める（与えた値 → 既定）。雛形に無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
     defs = params()
     _check_unknown(t, given)
-    found = {name: _value_of(name, given, defs) for name in t.params}
+    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests)}
     values = {name: value for name, value in found.items() if value is not None}
     missing = [name for name, value in found.items() if value is None]
     if missing:
@@ -253,9 +296,13 @@ def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
     return values
 
 
-def render(t: Template, given: Mapping[str, Value]) -> dict[str, Any]:
-    """雛形を埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。"""
-    plan = _fill(expanded(t), resolve(t, given))
+def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
+    """雛形を埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
+
+    `local_tests` が偽（CI テストの宣言 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
+    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
+    """
+    plan = _fill(expanded(t, local_tests=local_tests), resolve(t, given, local_tests=local_tests))
     try:
         model.parse(plan)
     except model.PlanError as exc:
@@ -278,8 +325,10 @@ def _param_name_errors(t: Template, used: set[str]) -> list[str]:
 
 
 def _sample_render_errors(t: Template) -> list[str]:
+    """試しの値で、手元のテストのステップを持つ形と外した形の両方を組む。"""
     try:
         render(t, _sample(t.params))
+        render(t, _sample(t.params), local_tests=False)
     except RouteError as exc:
         return [str(exc)]
     return []

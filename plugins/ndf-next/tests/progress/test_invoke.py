@@ -322,6 +322,55 @@ def test_test_command_joins_every_test_suite_in_declared_order():
     assert invoke._project_value("test_command", {"test": {"suites": suites[1:3]}}) is None
 
 
+def test_ci_only_declaration_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
+    # #3473: テストを CI に寄せる宣言（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
+    # 宣言に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
+    project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
+    repo = _sprint_repo(tmp_path, project)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
+    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
+    ids = [s["id"] for s in plan["steps"]]
+    assert not {"test", "ci-local"} & set(ids)
+    assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
+    by_id = {s["id"]: s for s in plan["steps"]}
+    assert ids[ids.index("work") + 1] == "push" and by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+
+
+def test_workflow_declaration_with_launch_and_stages_passes_the_schema(tmp_path):
+    # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ宣言はスキーマの検査を通る
+    launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
+    stages_decl = {"design": {"enabled": True}, "release": {"enabled": False, "reason": "手で出す"}}
+    project = {**PROJECT, "workflow": {"launch": launch, "stages": stages_decl}}
+    repo = _sprint_repo(tmp_path, project)
+    assert invoke._project(repo)["workflow"]["launch"] == launch
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        {"launch": {"review": []}},
+        {"launch": {"rebuild": [""]}},
+        {"launch": {"review": "ndf review"}},
+        {"launch": {"other": ["x"]}},
+        {"stages": {"release": {"enabled": False}}},
+        {"stages": {"release": {"enabled": "no", "reason": "x"}}},
+        {"other": {}},
+    ],
+)
+def test_workflow_declaration_out_of_shape_stops_as_invalid(tmp_path, workflow):
+    # #3473: workflow の形が違う宣言は、値を黙って捨てずにプランを組む前に invalid で止まる
+    repo = _sprint_repo(tmp_path, {**PROJECT, "workflow": workflow})
+    with pytest.raises(route.RouteError, match="workflow"):
+        invoke._project(repo)
+    got = invoke.invoke(_stage_run_of("design", repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid" and "workflow" in got.cause["detail"]
+
+
 def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
     # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない

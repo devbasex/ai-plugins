@@ -10,7 +10,7 @@ from ndf.contracts import causes
 from ndf.core import route
 from ndf.core.plan import model, steps
 
-from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of
+from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of, values
 
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
@@ -97,6 +97,22 @@ def test_test_steps_run_through_route_test():
     assert step_of(impl, "ci-local").run == ci_local
     whole = step_of(plan_of("check", whole_test_command="make test"), "test-all").run
     assert whole == ("ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "make test")
+
+
+def test_ci_only_plans_drop_local_test_steps_and_follow_on():
+    """#3473: CI テストの宣言のあるリポジトリのプランから test・test-all・ci-local を外し、そこへの行き先は続きへ付け替える。"""
+    for purpose in ("implement", "check", "quality_gates", "merge", "close"):
+        t = route.choose(purpose)
+        plan = route.render(t, values(purpose), local_tests=False)
+        ids = [s["id"] for s in plan["steps"]]
+        assert not set(route.LOCAL_TEST_STEPS) & set(ids)
+        model.parse(plan)
+    assert "test_command" not in route.needed(route.choose("implement"), local_tests=False)
+    impl = route.render(route.choose("implement"), {k: v for k, v in values("implement").items() if k != "test_command"}, local_tests=False)
+    by_id = {s["id"]: s for s in impl["steps"]}
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    check = route.render(route.choose("check"), values("check"), local_tests=False)
+    assert {s["id"]: s for s in check["steps"]}["fix"]["next"] == "refactor"
 
 
 def test_route_test_reads_any_non_signal_failure_as_test_failed(tmp_path, monkeypatch, capsys, last_result):
@@ -202,6 +218,15 @@ def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkey
     seen = _slots(monkeypatch, tmp_path, "exit 0")
     _failed_from(tmp_path / "no.json", tmp_path / "ci-local.json")
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+    assert not seen.exists()
+
+
+def test_route_test_takes_either_a_command_or_failed_tests(tmp_path, monkeypatch, capsys, last_result):
+    """コマンドと --failed-from は 1 つだけを渡す（両方・どちらも無しは打たずに invalid）。"""
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    for argv in (["test"], ["test", "--failed-from", str(tmp_path / "ci.json"), "--", "pytest -q"]):
+        route.main(argv)
+        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert not seen.exists()
 
 
