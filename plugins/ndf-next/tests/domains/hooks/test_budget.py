@@ -37,6 +37,23 @@ def test_component_limit_longer_than_the_deadline_is_a_violation():
     assert any("hook.ask-forward" in e and "PreToolUse" in e for e in errors)
 
 
+def test_guard_limit_errors_report_missing_budgets_and_components_and_overruns():
+    # 現状固定: 予算の行の欠落・部品の上限の欠落・締め切り − 余白の超過の文と、重複を除いて並べた順
+    broken = copy.deepcopy(tables.policies())
+    del broken["hook.budget.stop"]
+    del broken["hook.ask-forward"]
+    broken["hook.counter-lock"]["seconds"] = 99
+    assert budget.check_budget(broken, []) == [
+        "ask-forward の部品の上限 hook.ask-forward が limits.json に無い",
+        "claude の Stop の予算が limits.json に無い",
+        "codex の Stop の予算が limits.json に無い",
+        "read-repeat の部品の上限 hook.counter-lock（99 秒）が claude の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        "read-repeat の部品の上限 hook.counter-lock（99 秒）が codex の PreToolUse の締め切り − 余白（0.5 秒）を超える",
+        "turn の部品の上限 hook.counter-lock（99 秒）が claude の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
+        "turn の部品の上限 hook.counter-lock（99 秒）が codex の UserPromptSubmit の締め切り − 余白（0.5 秒）を超える",
+    ]
+
+
 def test_registration_without_timeout_or_shorter_than_the_deadline_is_a_violation():
     regs = [
         {"runtime": "claude", "event": "Stop", "timeout": None},
