@@ -63,11 +63,21 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
         seen.write_text(json.dumps(q.target.as_dict()) + "\n", encoding="utf-8")
     root = external.organizer_dir(env)
     if root is not None:
-        version = env["NDF_VERSION"] if env.get("NDF_VERSION") else lane.ndf_version()
-        if version is None:
-            raise model.Refused("NDF の版が読めず、リリースの依頼の ndf_version を書けない")
-        body = external.request_body(_request_fields(v, q, env.get("NDF_ORGANIZER_LANE")), version)
-        return {"kind": "file", "id": request_id(q), "path": str(external.write_request(root, body))}
+        return _file_request(v, q, env, root)
+    return _plan_request(st, v, q)
+
+
+def _file_request(v: run.View, q: Question, env: Mapping[str, str], root: Path) -> dict[str, Any]:
+    """外のオーガナイザーの下の依頼のファイルを書き、出した先を返す。版は `NDF_VERSION`、無ければプラグインの版。"""
+    version = env["NDF_VERSION"] if env.get("NDF_VERSION") else lane.ndf_version()
+    if version is None:
+        raise model.Refused("NDF の版が読めず、リリースの依頼の ndf_version を書けない")
+    body = external.request_body(_request_fields(v, q, env.get("NDF_ORGANIZER_LANE")), version)
+    return {"kind": "file", "id": request_id(q), "path": str(external.write_request(root, body))}
+
+
+def _plan_request(st: store.Store, v: run.View, q: Question) -> Optional[dict[str, Any]]:
+    """計画の進行表へ依頼の事象を書き（同じ問いの依頼があれば使い直す）、出した先を返す。レーンの外なら None。"""
     with store.transaction(st) as conn:
         found = release_request_of(conn, q)
         if found is None:
