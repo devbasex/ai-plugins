@@ -12,7 +12,7 @@ from typing import Any, Optional
 from ndf import cli
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Reading, Watch, bare_name, bare_names, cause_of, failed_test_nodes_of, files_of, watch_head
+from ndf.adapters.ci import Reading, Watch, cause_of, failed_test_nodes_of, files_of, is_test_check, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -53,9 +53,8 @@ def _item(name: str, outcome: str, test: bool, job: Optional[int] = None) -> dic
 def _items(reading: Reading, tests: list[str]) -> list[dict]:
     rows = [_item(c.name, c.conclusion, True, c.job) for c in reading.failed_tests]
     rows += [_item(c.name, c.conclusion, False, c.job) for c in reading.failed_other]
-    test_names = bare_names(tests)
-    rows += [_item(n, "missing", bare_name(n) in test_names) for n in reading.missing]
-    rows += [_item(n, "stale", bare_name(n) in test_names) for n in reading.stale]
+    rows += [_item(n, "missing", is_test_check(n, tests)) for n in reading.missing]
+    rows += [_item(n, "stale", is_test_check(n, tests)) for n in reading.stale]
     return rows
 
 
