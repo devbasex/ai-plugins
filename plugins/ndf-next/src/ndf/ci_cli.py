@@ -1,6 +1,7 @@
-"""副命令 `ndf ci` のエントリポイント。CI の結果を読み、止まった理由の種類で結果 JSON を返す。
+"""副命令 `ndf ci` のエントリポイント。PR の CI の結果を読み（`watch`）、PR をマージし（`merge`）、止まった理由の種類で結果 JSON を返す。
 
-読み取りと分類は外部との接続の層（`ndf.adapters.ci`）が持ち、このエントリポイントは引数と出力だけを持つ。
+読み取り・分類・マージの前段の確かめは外部との接続の層（`ndf.adapters.ci`・`ndf.adapters.github`）が持ち、
+このエントリポイントは引数と出力だけを持つ。
 """
 
 from __future__ import annotations
@@ -31,6 +32,10 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
+    m = sub.add_parser("merge", help="ブランチの開いた PR を、作業場所の先端のまま、前段の確かめ（決めていない残リスク・先端の食い違い）を通してマージする")
+    m.add_argument("--branch", required=True, help="PR の head のブランチ")
+    m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
+    m.add_argument("--method", help="マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭")
     return p
 
 
@@ -97,10 +102,33 @@ def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watche
     return result.stopped(TOOL, kind, detail, instance=pull.head_sha, items=items, metrics=metrics)
 
 
+def _merge(args: argparse.Namespace) -> dict:
+    """`--branch` の開いた PR を、作業場所の先端（HEAD）を添えて `GitHub.merge` でマージする（#2602）。
+
+    本文に決めていない「マージの前に決める」残リスクの行（`- [ ]`）が残れば、マージせずに `refused` で止まり、残った行を理由に出す。
+    """
+    repo = git.Git()
+    head = repo.rev_parse("HEAD")
+    hub = GitHub(args.repo if args.repo else repo.remote_repo(), github_mod.client())
+    opened = [p for p in hub.pulls_by_head([args.branch])[args.branch] if p.state == "open"]
+    if not opened:
+        return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
+    number = opened[0].number
+    outcome = hub.merge(number, expect_head=head, method=args.method)
+    if outcome.merged:
+        return result.result(TOOL, result.OK, outcome.detail, items=[{"kind": "pr", "number": number}])
+    kind = outcome.kind if outcome.kind is not None else "unknown"
+    return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=[{"kind": "pr", "number": number}])
+
+
+# 副命令の名前 → 結果 JSON を組む関数
+_ACTIONS = {"watch": _watch, "merge": _merge}
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
-        out = _watch(args)
+        out = _ACTIONS[args.command](args)
     except github_mod.GitHubError as exc:
         kind = "infra_wait" if exc.retry_after is not None else "unknown"
         out = result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after)

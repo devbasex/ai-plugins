@@ -288,7 +288,7 @@ def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[
         return MergeOutcome(False, "refused", f"#{number} の先端が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
     risks = premerge_risks(pull.body)
     if risks:
-        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {risks[0]}", pull.head_sha)
+        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
     return None
 
 

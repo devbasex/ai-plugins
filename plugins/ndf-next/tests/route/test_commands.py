@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 
+import httpx
+from githubkit import GitHub as Client
+
+from ndf import cli
+from ndf.adapters import github
+from ndf.contracts import causes
 from ndf.core import route
 from ndf.core.plan import model, steps
 
 from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of
+
+_REPO = "devbasex/ai-plugins"
 
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
@@ -161,18 +170,70 @@ def test_ci_local_quotes_failed_test_ids_for_the_shell(tmp_path, monkeypatch):
     assert not (tmp_path / "hit").exists()
 
 
-def test_merge_requires_checked_head_and_waits_for_merge_queue(tmp_path):
-    """マージは手元の HEAD（CI・承認の対象）との一致を --match-head-commit で強制し、MERGED になるまで済んだとしない。"""
+_RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの照合が止まっている。マージの前に決める"
+
+
+def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
+    """feat/x の開いた PR 7 番（本文 `body`・先端 `head`）を答える GitHub。送ったマージの要求の本文を返す並びへ足す。"""
+    sent: list[dict] = []
+    pull = {
+        "number": 7, "state": "open", "merged": False, "body": body, "mergeable_state": "clean",
+        "head": {"sha": head, "ref": "feat/x"}, "base": {"ref": "develop"},
+        "user": {"login": "octocat"}, "author_association": "OWNER",
+    }  # fmt: skip
+    node = {
+        "number": 7, "state": "OPEN", "merged": False, "headRefOid": head, "headRefName": "feat/x", "baseRefName": "develop",
+        "body": body, "mergeStateStatus": "CLEAN", "author": {"login": "octocat"}, "authorAssociation": "OWNER",
+    }  # fmt: skip
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/graphql":
+            aliases = re.findall(r"(a\d+): pullRequests", json.loads(request.content)["query"])
+            return httpx.Response(200, json={"data": {"repository": {a: {"nodes": [node]} for a in aliases}}})
+        if request.method == "PUT":
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"merged": True})
+        if path.endswith("/rules/branches/develop"):
+            return httpx.Response(200, json=[])
+        if path == f"/repos/{_REPO}":
+            return httpx.Response(200, json={"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True})
+        return httpx.Response(200, json=pull)
+
+    api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
+    monkeypatch.setattr(github, "client", lambda **_: api)
+    return sent
+
+
+def _merge_step(monkeypatch, tmp_path, body: str) -> tuple[int, list[dict], str]:
+    """雛形の merge のステップの run を、feat/x の作業場所で打つ（GitHub は `_serve_pull` が答える）。"""
     step = step_of(plan_of("immediate_fix", branch="feat/x", merge_method="merge"), "merge")
-    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
+    assert list(step.run[:3]) == ["ndf", "ci", "merge"]
+    repo = repo_with_base(tmp_path, {"a.py": "a = 1\n"})
+    git(repo, "remote", "add", "origin", f"https://github.com/{_REPO}.git")
     head = git(repo, "rev-parse", "HEAD").strip()
-    seen = tmp_path / "seen.txt"
-    record = f'case "$2" in merge) printf "%s\\n" "$@" > {shlex.quote(str(seen))} ;;'
-    merged = fake_bin(tmp_path / "m", "gh", f"{record} view) echo MERGED ;; esac")
-    assert run_step(step, repo, merged)["status"] == "ok"
-    assert seen.read_text().splitlines() == ["pr", "merge", "feat/x", "--merge", "--match-head-commit", head]
-    queued = fake_bin(tmp_path / "q", "gh", f"{record} view) echo OPEN ;; esac")
-    assert run_step(step, repo, queued)["kind"] == "ci_pending"
+    sent = _serve_pull(monkeypatch, head, body)
+    monkeypatch.chdir(repo)
+    code = cli.main(list(step.run[1:]))
+    return code, sent, head
+
+
+def test_merge_stops_on_an_undecided_premerge_risk_and_names_the_line(tmp_path, monkeypatch, capsys, last_result):
+    """#2602: 本文に `- [ ] …マージの前に決める…` が残る PR は、マージの要求を送らずに止まり、残った行を理由に出す。"""
+    code, sent, _ = _merge_step(monkeypatch, tmp_path, f"## 残リスク\n\n{_RISK}\n")
+    out = last_result(capsys.readouterr().out)
+    assert (out["status"], out["cause"]["kind"], code) == ("stopped", "refused", causes.exit_code("refused"))
+    assert _RISK.removeprefix("- [ ] ") in out["cause"]["detail"]
+    assert sent == []
+
+
+def test_merge_proceeds_when_the_premerge_risk_is_checked(tmp_path, monkeypatch, capsys, last_result):
+    """決めた印（`- [x]`）のある残リスクは判断の記録とみなし、手元の HEAD を添えて宣言の方式でマージする。"""
+    decided = _RISK.replace("- [ ]", "- [x]", 1) + "（続けると決めた）"
+    code, sent, head = _merge_step(monkeypatch, tmp_path, f"## 残リスク\n\n{decided}\n")
+    out = last_result(capsys.readouterr().out)
+    assert (out["status"], code) == ("ok", 0)
+    assert sent == [{"sha": head, "merge_method": "merge"}]
 
 
 def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):
