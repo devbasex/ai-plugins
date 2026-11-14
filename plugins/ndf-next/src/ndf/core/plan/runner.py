@@ -55,6 +55,14 @@ POLL = durable.POLL
 
 
 @dataclass(frozen=True)
+class RunOptions:
+    """`prepare` の選択肢。`sets` は呼び手が足す差し込みの値、`fresh` は前の回に戻らず新しい回を選ぶ（#1592）。"""
+
+    sets: Mapping[str, str] = field(default_factory=dict)
+    fresh: bool = False
+
+
+@dataclass(frozen=True)
 class Invocation:
     """1 回の呼び出しの組み立て。`again` はこの呼び出しを打ち直す引数（`ndf plan next` の後ろ）。"""
 
@@ -252,15 +260,23 @@ def _merge_values(base: dict[str, str], sets: Mapping[str, str]) -> dict[str, st
 
 
 def prepare(
-    root: Path, plan_path: Path, start: Optional[str], state_dir: Optional[str], cwd: Path, sets: Optional[Mapping[str, str]] = None
+    root: Path,
+    plan_path: Path,
+    start: Optional[str],
+    state_dir: Optional[str],
+    cwd: Path,
+    options: Optional[RunOptions] = None,
 ) -> Invocation:
     """プランを読み、状態の置き場・鍵・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。
 
-    `sets` は呼び手が足す差し込みの値（キューの `{queue_prs}` など）。決まった名前（`state_dir` など）は上書きできない。
+    `options.sets` は呼び手が足す差し込みの値（キューの `{queue_prs}` など）。決まった名前（`state_dir` など）は上書きできない。
     `{work_base}` はステップが作業ディレクトリを作る置き場。`/tmp` でなくリポジトリと同じボリューム（git の共通ディレクトリの
     中）に置き、Docker のデーモンがホストにある環境（DooD）でも compose の bind mount から見える（#2933）
+    `options.fresh` は前の回に戻らず、耐久の記録の置き場に無い番号の回を選ぶ（#1592）。打ち直しの引数（`again`）には入れず、
+    承認の答えはその回へ届く
     """
-    sets = dict(sets) if sets is not None else {}
+    opts = options if options is not None else RunOptions()
+    sets = dict(opts.sets)
     plan = model.load(plan_path)
     digest = assemble_decide.run_digest(plan.digest(), sets)
     if start is not None and start not in plan.order and start not in routing.PLAN_TARGETS:
@@ -269,7 +285,14 @@ def prepare(
     head = _head(plan)
     record = read_json(sdir / RUN_FILE)
     finished = record is not None and _finished(root, record["key"])
-    choice = assemble_decide.choose_run(record, plan.name, digest, start, head, finished)
+    choice = assemble_decide.choose_run(
+        record,
+        assemble_decide.RunPlan(plan.name, digest, start),
+        head,
+        finished,
+        fresh=opts.fresh,
+        taken=lambda key: _recorded_key(root, key),
+    )
     abs_plan = (cwd / plan_path) if not plan_path.is_absolute() else plan_path
     values = _merge_values(_base_values(plan, sdir, abs_plan, root.parent / WORK_DIR), sets)
     again = _again(abs_plan, start, state_dir, sets)
@@ -283,6 +306,13 @@ def _finished(root: Path, key: str) -> bool:
     """鍵の回が終わって退避されたか（retired/ に鍵のファイルがある）。"""
     name = durable.run_name(key)
     return any((root / durable.DBOS_DIR / durable.RETIRED_DIR).glob(f"{name}*{durable.DB_SUFFIX}"))
+
+
+def _recorded_key(root: Path, key: str) -> bool:
+    """鍵の記録（DB・ロックのファイル）が耐久の記録の置き場か retired/ にあるか。"""
+    name = durable.run_name(key)
+    dbos = root / durable.DBOS_DIR
+    return any(dbos.glob(f"{name}*")) or any((dbos / durable.RETIRED_DIR).glob(f"{name}*"))
 
 
 def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
