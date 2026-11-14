@@ -220,7 +220,7 @@ def carry_issues(conn: sa.Connection, plan_id: str, lane: str, from_row: str, is
     _, rows = _lane_rows(conn, plan_id, lane)
     src = _row(rows[lane], from_row, lane)
     index = [r.key for r in rows[lane]].index(from_row) + 1
-    inp = {"kind": "sprint", "issues": sorted(set(issues)), "args": list(src.input["args"]) if "args" in src.input else []}
+    inp = {"kind": "sprint", "issues": sorted(set(issues)), "args": src.args}
     return add_row(conn, plan_id, lane, inp, RowChange("conductor", reason, index))
 
 

@@ -41,7 +41,7 @@ def sprint_name(lane: str, row: str) -> str:
 
 def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
     """行を始めるコマンドの並び（`result.command` の形）。`--sprint` は打つ側が `new` の結果の ID で埋める。"""
-    args = [str(a) for a in row.input["args"]] if "args" in row.input else []
+    args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
     new = result.command("progress", "new", sprint_name(lane, row.key), *mode, "--issues", *issues, "--parent", lane_table, *args)

@@ -88,6 +88,11 @@ class LaneRow:
         waited = (now - self.answered_at).total_seconds() if self.answered_at else 0.0
         return waited >= grace_seconds
 
+    @property
+    def args(self) -> list[Any]:
+        """行の入力の args（無ければ空）。"""
+        return list(self.input["args"]) if "args" in self.input else []
+
     def issues(self) -> set[int]:
         return set(self.input["issues"]) if self.input.get("kind") == "sprint" else set()
 
