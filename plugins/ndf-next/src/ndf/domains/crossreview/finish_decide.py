@@ -20,6 +20,8 @@ FIXED = "fixed"
 SKIPPED = "deferred"
 UNRESOLVED = "unresolved"
 OUTCOMES = (FIXED, SKIPPED, UNRESOLVED)
+# 決めた（直した・見送った）終わり方
+DECIDED = (FIXED, SKIPPED)
 # 収束ループの終わり方
 CONVERGED = "converged"
 MAX_ROUNDS = "max_rounds"

@@ -228,7 +228,7 @@ def _enter(run: _Run, round_no: int, raised: Sequence[dict[str, Any]]) -> frozen
 def _pending(run: _Run) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
     """未解決の指摘と、まだ決めていない足すべき内容。"""
     open_ = [f for f in run.ledger.values() if f.get("outcome") == fin.UNRESOLVED]
-    handed = [h for h in run.cfg.handed if h.id not in run.ledger or run.ledger[h.id].get("outcome") not in (fin.FIXED, fin.SKIPPED)]
+    handed = [h for h in run.cfg.handed if h.id not in run.ledger or run.ledger[h.id].get("outcome") not in fin.DECIDED]
     return open_, handed
 
 
@@ -262,7 +262,7 @@ def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     """修正の結果を台帳へ取り込み、結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。"""
     found = store.read_fix_result(path, run.ref)
     handed = {h.id: h.text for h in run.cfg.handed}
-    reported = [f for f in _list(found, store.FINDINGS) if isinstance(f, dict) and f.get("outcome") in (fin.FIXED, fin.SKIPPED)]
+    reported = [f for f in _list(found, store.FINDINGS) if isinstance(f, dict) and f.get("outcome") in fin.DECIDED]
     for item in reported:
         fid = str(item.get("id"))
         reason = _text(item.get("reason"))
