@@ -122,6 +122,36 @@ def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
     assert ready.retired[1].target == moved
 
 
+def test_every_old_place_has_a_decision_and_a_reason():
+    # 3341-3: 旧い NDF の状態の置き場の全行が、退避するか・その理由を持つ
+    keys = [place.key for place in identity.OLD_STATE_PLACES]
+    assert len(keys) == len(set(keys))
+    assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
+    for place in identity.OLD_STATE_PLACES:
+        assert isinstance(place.retire, bool), place.key
+        assert place.reason.strip(), place.key
+        # 退避しない行はパスを持たない（このモジュールが触らない）
+        assert place.retire or place.path is None, place.key
+
+
+def test_prepare_leaves_places_marked_not_to_retire(ident, tmp_path, monkeypatch):
+    # 3341-3: 退避しない行（accounts・relay.py・locks・~/.cache/<名前>）は中身ごとそのまま残す
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config = tmp_path / "config" / "p"
+    kept = [config / "accounts", config / "locks", tmp_path / "home" / ".cache" / "p"]
+    for place in kept:
+        place.mkdir(parents=True)
+        (place / "x").write_text("keep")
+    (config / "relay.py").write_text("relay")
+
+    ready = identity.prepare_state_dir(ident, now=NOW)
+
+    assert ready.retired == ()
+    assert all((place / "x").read_text() == "keep" for place in kept)
+    assert (config / "relay.py").read_text() == "relay"
+    assert sorted(p.name for p in config.iterdir()) == ["accounts", "locks", "relay.py"]
+
+
 def test_prepare_does_not_retire_when_the_environment_names_another_root(ident, tmp_path, monkeypatch):
     # 3367-4: ほかのプラグインの hook の子として動いたときは、旧い置き場に触れずに止まる
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
