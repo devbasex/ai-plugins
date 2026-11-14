@@ -130,6 +130,19 @@ def test_wait_reports_the_gate_with_its_routes(repo, tmp_path):
     assert out["routes"]["approved"]["argv"][-2:] == ["--answer", "approved"]
 
 
+def test_the_gate_next_waits_on_the_given_state_dir(repo, tmp_path):
+    """--state-dir で始めた回の承認ゲートの next は、同じ置き場を wait へ渡す。"""
+    gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
+    ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "end"}}
+    plan = H.write_plan(repo, "g", [ask])
+    sdir = str(tmp_path / "elsewhere")
+    _, out = H.ndf(repo, "next", plan, "--state-dir", sdir)
+    argv = out["next"]["argv"]
+    assert argv[argv.index("--state-dir") + 1] == sdir
+    _, waited = H.ndf(repo, *argv[2:], "--timeout", "5")
+    assert waited["status"] == "gate"
+
+
 def test_two_rounds_of_one_plan_at_once_do_not_stop_each_other(repo, tmp_path):
     """同じプランの別の回を同時に打っても、後の next は先の回を待ち、先の回のステップの子を止めない（plan.lock）。"""
     plan = H.write_plan(repo, "c", [H.py_step("s", "import time; time.sleep(1.5)")])

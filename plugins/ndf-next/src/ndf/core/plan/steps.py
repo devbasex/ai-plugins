@@ -176,12 +176,23 @@ def _stopped(kind: str, summary: str) -> dict[str, Any]:
     return _plain(STOPPED, kind, summary, None)
 
 
+def _log_path(ctx: StepContext, step: Step) -> Path:
+    return ctx.state_dir / STEPS_DIR / f"{step.id}{LOG_SUFFIX}"
+
+
 def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:
     args = assemble_decide.fill(step.run, ctx.values)
-    log_path = ctx.state_dir / STEPS_DIR / f"{step.id}{LOG_SUFFIX}"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("ab") as err:
-        return subprocess.Popen(args, cwd=workdir(ctx.plan, step), stdout=subprocess.PIPE, stderr=err, text=True, start_new_session=True)
+    _log_path(ctx, step).parent.mkdir(parents=True, exist_ok=True)
+    return subprocess.Popen(
+        args, cwd=workdir(ctx.plan, step), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+
+
+def _keep_stderr(ctx: StepContext, step: Step, stderr: Optional[str]) -> None:
+    """子の標準エラーを、秘密を伏せてからステップのログへ足す（B8）。"""
+    if stderr:
+        with _log_path(ctx, step).open("a", encoding="utf-8") as log:
+            log.write(run_log.redact(stderr))
 
 
 def run(ctx: StepContext, step: Step) -> dict[str, Any]:
@@ -201,12 +212,13 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
         return _stopped("precondition", f"ステップ {step.id} を起動できない: {exc}")
     pid_path = _write_pid(ctx.state_dir, step.id, proc.pid)
     try:
-        stdout, _ = proc.communicate(timeout=timeout)
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         process_group.stop_group(proc)
-        proc.communicate()
+        _, stderr = proc.communicate()
         out = _stopped("interrupted", f"{timeout:.0f} 秒で打ち切った")
     else:
         out = outcome_of(step, proc.returncode, stdout)
     pid_path.unlink(missing_ok=True)
+    _keep_stderr(ctx, step, stderr)
     return run_log.redact(out)

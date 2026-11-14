@@ -346,7 +346,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
         items,
         {"round": inv.round_no},
         routes=marker["routes"],
-        next=result.command(TOOL, "wait", str(inv.plan_path)),
+        next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
     )
 
 

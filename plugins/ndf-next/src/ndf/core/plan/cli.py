@@ -4,8 +4,9 @@ ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--a
     回を始めるか続け、終わるか承認の答えを待つ所まで進める。答えを待つ所では承認ゲートの結果（routes）を出して抜ける
 ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--queue-dir <置き場>]
     段（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す
-ndf plan wait <plan.json>... [--timeout <秒>]
-    DBOS を開かずに回の控えと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）
+ndf plan wait <plan.json>... [--state-dir <置き場>] [--timeout <秒>]
+    DBOS を開かずに回の控えと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）。
+    `--state-dir` は `next` に渡した置き場（プラン 1 本のときだけ）
 ndf plan pending
     チェックアウトの置き場から、待ちを抱えた（PENDING・ENQUEUED・DELAYED）実行を並べる（B5）
 ndf plan check <plan.json>...
@@ -111,14 +112,14 @@ def _cmd_queue(a: argparse.Namespace) -> int:
     return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir))
 
 
-def _watched(path: Path) -> wait_decide.Watched:
+def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched:
     """1 本のプランの回の今を、DBOS を開かずに控えと目印から読む。"""
     name = path.stem
     try:
         plan = model.load(path)
     except model.PlanError as exc:
         return wait_decide.Watched(name, STOPPED, "invalid", str(exc))
-    sdir = runner.resolve_state_dir(path, None, plan, Path.cwd())
+    sdir = runner.resolve_state_dir(path, state_dir, plan, Path.cwd())
     record = files.read_json(sdir / runner.RUN_FILE)
     if record is None:
         return wait_decide.Watched(plan.name, None)
@@ -135,11 +136,14 @@ def _watched(path: Path) -> wait_decide.Watched:
 
 def _cmd_wait(a: argparse.Namespace) -> int:
     paths = [Path(p) for p in a.plans]
-    again = result.command(TOOL, "wait", *a.plans, "--timeout", str(a.timeout))
+    if a.state_dir is not None and len(paths) != 1:
+        return result.emit(result.stopped(TOOL, "invalid", "--state-dir はプラン 1 本のときだけ渡せる"))
+    given = ["--state-dir", a.state_dir] if a.state_dir is not None else []
+    again = result.command(TOOL, "wait", *a.plans, *given, "--timeout", str(a.timeout))
     interval = limits.value(WAIT_POLL, "interval")
     began = time.monotonic()
     while True:
-        found = [_watched(p) for p in paths]
+        found = [_watched(p, a.state_dir) for p in paths]
         if wait_decide.settled(found):
             return result.emit(wait_decide.attention(TOOL, found, again))
         waited = time.monotonic() - began
@@ -202,6 +206,7 @@ def _parser() -> argparse.ArgumentParser:
     qu.set_defaults(fn=_cmd_queue)
     wt = sub.add_parser("wait", help="流れている回を見回る")
     wt.add_argument("plans", nargs="+")
+    wt.add_argument("--state-dir")
     wt.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
     wt.set_defaults(fn=_cmd_wait)
     pd = sub.add_parser("pending", help="待ちを抱えた実行を並べる")

@@ -175,6 +175,15 @@ def test_run_puts_overlapping_plans_of_a_stage_into_separate_waves(tmp_path, chi
     assert fake.log == [("start", "a"), ("read", "a"), ("start", "b"), ("read", "b")]
 
 
+def test_run_puts_plans_needing_a_prior_stage_into_one_wave(tmp_path, children):
+    fake = children({"a": _ok(), "b": _ok(), "c": _ok()})
+    a = _entry(tmp_path, "a", touches=["a.py"])
+    b = _entry(tmp_path, "b", touches=["b.py"], needs=["a"])
+    c = _entry(tmp_path, "c", touches=["c.py"], needs=["a"])
+    queue_run.run([[a], [b, c]], tmp_path / "q", tmp_path, resume=False)
+    assert fake.log == [("start", "a"), ("read", "a"), ("start", "b"), ("start", "c"), ("read", "b"), ("read", "c")]
+
+
 def test_run_does_not_launch_a_stage_after_a_stopped_stage(tmp_path, children):
     fake = children({"a": _stopped("check_failed"), "b": _ok()})
     a, b = _entry(tmp_path, "a", touches=["a.py"]), _entry(tmp_path, "b", touches=["b.py"])
@@ -236,6 +245,13 @@ def test_run_reports_a_child_without_a_result_json(tmp_path, children):
     assert [(o.status, o.kind) for o in outs] == [("stopped", "bad_report"), ("stopped", "bad_report")]
     assert outs[0].detail == "a が結果 JSON を返さなかった: last line"
     assert outs[1].detail == "b が結果 JSON を返さなかった: 終了コード 5"
+
+
+def test_run_masks_secrets_in_the_stderr_of_a_child_without_a_result_json(tmp_path, children, monkeypatch):
+    monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
+    children({"a": ("", "connect failed: s3cr3t-value-123\n", 3)})
+    outs = queue_run.run([[_entry(tmp_path, "a", touches=["a.py"])]], tmp_path / "q", tmp_path, resume=False)
+    assert outs[0].detail == "a が結果 JSON を返さなかった: connect failed: [REDACTED]"
 
 
 def test_run_with_resume_keeps_finished_plans_and_reruns_the_rest(tmp_path, children):

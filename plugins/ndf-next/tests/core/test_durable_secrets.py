@@ -32,3 +32,12 @@ def test_inputs_outputs_and_errors_are_masked_in_the_records(root):
     assert any(p.suffix == durable.DB_SUFFIX for p in stored)
     leaked = [p for p in stored for s in (TOKEN, PROGRESS_URL) if s.encode() in p.read_bytes()]
     assert leaked == []
+
+
+def test_exception_attributes_and_notes_are_masked():
+    exc = RuntimeError("failed with " + TOKEN)
+    exc.url = "https://x:" + TOKEN + "@example.com"
+    exc.add_note("token " + TOKEN)
+    masked = durable._redact(exc, [TOKEN])
+    assert TOKEN not in repr((masked.args, vars(masked)))
+    assert exc.url.endswith(TOKEN + "@example.com")

@@ -89,14 +89,15 @@ def _admits(batch: Sequence[Queued], item: Queued, placed: Collection[str]) -> b
     return not any(overlaps(item.touches, other.touches) for other in batch)
 
 
-def waves(items: Sequence[Queued]) -> list[list[str]]:
+def waves(items: Sequence[Queued], before: Collection[str] = ()) -> list[list[str]]:
     """キューの並びを、同時に流してよい組の並びに分ける。
 
-    並びの順に、前提がすべて前の組にあり、組の中のどれとも重ならないものを今の組へ入れる。入らないものは次の組へ回す。
+    並びの順に、前提がすべて前の組（か `before`。前の段で流したプラン）にあり、組の中のどれとも重ならないものを今の組へ
+    入れる。入らないものは次の組へ回す。
     前提がキューに無いものは、残りがすべて置けなくなった時点で 1 本ずつの組にする（流す前に `blocked_reason` が止める）。
     """
     rest = list(items)
-    placed: set[str] = set()
+    placed: set[str] = set(before)
     out: list[list[str]] = []
     while rest:
         batch: list[Queued] = []

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.adapters import run_log
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
@@ -88,7 +89,7 @@ def _read_child(entry: Entry, proc: subprocess.Popen) -> queue_decide.Outcome:
     stdout, stderr = proc.communicate()
     out = steps.last_json(stdout)
     if out is None:
-        detail = stderr.strip().splitlines()[-1] if stderr.strip() else f"終了コード {proc.returncode}"
+        detail = run_log.redact(stderr.strip().splitlines()[-1]) if stderr.strip() else f"終了コード {proc.returncode}"
         return queue_decide.Outcome(entry.plan.name, STOPPED, "bad_report", f"{entry.plan.name} が結果 JSON を返さなかった: {detail}")
     return _outcome(entry, out)
 
@@ -132,7 +133,8 @@ class _QueueExecution:
             self.done.update({e.plan.name: queue_decide.Outcome(e.plan.name, None, None, reason) for e in stage})
             return
         current: list[queue_decide.Outcome] = []
-        for names in queue_decide.waves([queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]):
+        queued = [queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]
+        for names in queue_decide.waves(queued, {o.name for o in self.prior}):
             current += self._run_group(stage, names)
         self.prior += current
 

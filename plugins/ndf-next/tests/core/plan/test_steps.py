@@ -105,3 +105,13 @@ def test_run_interrupts_a_step_over_its_timeout(tmp_path):
     ctx = _ctx(tmp_path, run=[sys.executable, "-c", "import time; time.sleep(600)"], timeout=0.5)
     out = steps.run(ctx, ctx.plan.steps[0])
     assert (out["status"], out["kind"]) == ("stopped", "interrupted")
+
+
+def test_run_masks_secrets_in_the_step_log(tmp_path, monkeypatch):
+    """子の標準エラーはステップのログへ伏せてから書く（B8）。"""
+    monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
+    code = "import os, sys; sys.stderr.write('boom ' + os.environ['NDF_TEST_TOKEN'] + '\\n'); print('{\"status\": \"ok\", \"summary\": \"x\"}')"
+    ctx = _ctx(tmp_path, run=[sys.executable, "-c", code])
+    steps.run(ctx, ctx.plan.steps[0])
+    log = (tmp_path / "state" / steps.STEPS_DIR / f"s{steps.LOG_SUFFIX}").read_text(encoding="utf-8")
+    assert log == "boom [REDACTED]\n"

@@ -192,6 +192,8 @@ def _redact_tuple(value: tuple, secrets: list[str]) -> tuple:
 def _redact_exception(value: BaseException, secrets: list[str]) -> BaseException:
     masked = copy.copy(value)
     masked.args = _redact(value.args, secrets)
+    # pickle は `__dict__`（属性と add_note() の `__notes__`）も残すため、そこも伏せる
+    masked.__dict__.update({k: _redact(v, secrets) for k, v in vars(value).items()})
     return masked
 
 
