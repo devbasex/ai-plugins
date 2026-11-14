@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope, Source, module_name, read_json_text
+from ndf.checks.model import CheckError, Finding, Scope, Source, read_json_text, source_imports
 
 RULE = "child-deps"
 # 子の表のコピーの置き場（プラグインの根からの相対パス）
@@ -135,7 +135,7 @@ def _reach(child: str, children: Children) -> frozenset[str]:
 
 def import_findings(scope: Scope, children: Children) -> list[Finding]:
     """持ち主の無いモジュールと、IG1（閉包の外の子のモジュールを読む import）。"""
-    by_module = {module_name(scope, s): s for s in scope.code()}
+    by_module = scope.modules()
     known = set(by_module)
     reach: dict[str, frozenset[str]] = {}
     found = []
@@ -158,7 +158,7 @@ def import_findings(scope: Scope, children: Children) -> list[Finding]:
 
 def _owned_targets(src: Source, module: str, known: set[str], children: Children) -> list[tuple[int, str, str]]:
     """モジュールの import が読む、持ち主のあるモジュールと持ち主（行・モジュール・持ち主）。"""
-    imps = imports.collect(src.tree, module, src.path.name == "__init__.py")
+    imps = source_imports(src, module)
     pairs = [(imp.line, target, owner(target, children)) for imp in imps for target in imports.targets(imp, known)]
     return [(line, target, theirs) for line, target, theirs in pairs if theirs is not None]
 

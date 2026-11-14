@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ndf.checks import imports
-from ndf.checks.model import Finding, Scope, Source, module_name
+from ndf.checks.model import Finding, Scope, source_imports
 
 
 def _layer(module: str, layers: list[str]) -> int | None:
@@ -81,10 +81,8 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
         for src in scope.code_files()
         if (lines := len(src.text.splitlines())) > conf["max_lines"]
     ]
-    for src in scope.code():
-        module = module_name(scope, src)
-        imps = imports.collect(src.tree, module, src.path.name == "__init__.py")
-        found += _import_findings(src.rel, module, imps, conf)
+    for module, src in scope.modules().items():
+        found += _import_findings(src.rel, module, source_imports(src, module), conf)
         if _is_decide(module, conf):
             found += _decide_calls(src.rel, src.tree, frozenset(conf["decide_forbidden_calls"]))
     return found
@@ -143,11 +141,11 @@ class _Tarjan:
 
 def cycles(scope: Scope) -> list[Finding]:
     """`src/` の下のモジュールの import の輪（関数の中の import を含む）を、輪ごとに 1 件返す。"""
-    by_module: dict[str, Source] = {module_name(scope, s): s for s in scope.code()}
+    by_module = scope.modules()
     known = set(by_module)
     graph: dict[str, set[str]] = {m: set() for m in known}
     for module, src in by_module.items():
-        for imp in imports.collect(src.tree, module, src.path.name == "__init__.py"):
+        for imp in source_imports(src, module):
             graph[module].update(t for t in imports.targets(imp, known) if t != module)
     found = []
     for comp in _Tarjan(graph).run():

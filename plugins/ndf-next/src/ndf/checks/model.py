@@ -12,6 +12,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from ndf.checks import imports
+
 RULES_PATH = Path(__file__).with_name("rules.json")
 # スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
 SCRIPT_PREFIXES = ("bin/", "hooks/")
@@ -81,6 +83,10 @@ class Scope:
         """コードのファイル（テストを含む `.py` と `bin/`・`hooks/` のスクリプト）。行数の上限が見る。"""
         return [s for s in self.sources if s.is_python or self.plugin_rel(s).startswith(SCRIPT_PREFIXES)]
 
+    def modules(self) -> dict[str, Source]:
+        """製品のコード（`code()`）をモジュール名 → ファイルの表にする。"""
+        return {module_name(self, s): s for s in self.code()}
+
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
         return [s for s in self.sources if s.is_python]
@@ -92,6 +98,11 @@ def module_name(scope: Scope, src: Source) -> str:
     if parts[-1] == "__init__":
         parts.pop()
     return ".".join(parts)
+
+
+def source_imports(src: Source, module: str) -> list[imports.Import]:
+    """ファイルの import（`__init__.py` はパッケージとして相対の import を解く）。"""
+    return imports.collect(src.tree, module, src.path.name == "__init__.py")
 
 
 def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
