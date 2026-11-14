@@ -44,6 +44,9 @@ BACKUP_PREFIX = "progress-"
 # 残す控えの本数（8 本目を取ると最も古い 1 本を消す）
 KEEP_BACKUPS = 7
 BUSY_TIMEOUT_SECONDS = 30
+# SQLite のエラーの文言で取り合い（StoreBusy）と破損（StoreBroken）を見分ける語
+BUSY_MARKERS = ("locked", "busy")
+BROKEN_MARKERS = ("malformed", "not a database")
 # 表の版（ndf_progress_meta の schema_version）
 SCHEMA_VERSION = 1
 SCHEMA_VERSION_KEY = "schema_version"
@@ -211,11 +214,12 @@ def _translated(root: Path) -> Iterator[None]:
         yield
     except sa.exc.OperationalError as exc:
         text = str(exc.orig)
-        if "locked" in text or "busy" in text:
+        if any(m in text for m in BUSY_MARKERS):
             raise StoreBusy(f"進行表の DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
         raise
     except sa.exc.DatabaseError as exc:
-        if "malformed" in str(exc.orig) or "not a database" in str(exc.orig):
+        text = str(exc.orig)
+        if any(m in text for m in BROKEN_MARKERS):
             (root / CHECKED_MARK).unlink(missing_ok=True)
             raise durable.StoreBroken(f"進行表の DB が壊れている: {exc.orig}") from exc
         raise
