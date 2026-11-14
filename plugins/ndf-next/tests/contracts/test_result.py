@@ -133,3 +133,97 @@ def test_exit_codes_matches_compares_non_integers_by_range():
     assert exit_codes.matches("gate", 10.5)
     assert not exit_codes.matches("stopped", 3.5)
     assert not exit_codes.matches("ok", 0.5)
+
+
+# 現状固定（I-011）: `_schema_validator` の引き方（ファイル全体・`#/$defs/<名前>`・誤りの扱い・置き場を差し替えるまで読み直さない）
+_DEFS_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["whole"],
+    "$defs": {"num": {"type": "integer"}},
+}
+
+
+def test_schema_validator_reads_whole_file_and_defs_pointer(contracts_copy):
+    contracts_copy("schemas/probe.schema.json", lambda _: _DEFS_SCHEMA)
+    whole = contracts.schema_path("probe")
+    assert contracts.schema_errors({}, whole) == ["(最上位): 'whole' is a required property"]
+    assert contracts.schema_errors({"whole": 1}, whole) == []
+    part = f"{whole}#/$defs/num"
+    assert contracts.schema_errors(3, part) == []
+    assert contracts.schema_errors("x", part) == ["(最上位): 'x' is not of type 'integer'"]
+
+
+def test_schema_validator_refuses_pointer_without_defs(contracts_copy):
+    contracts_copy("schemas/probe.schema.json", lambda _: {"type": "object"})
+    rel = f"{contracts.schema_path('probe')}#/$defs/num"
+    with pytest.raises(contracts.ContractError) as exc:
+        contracts.schema_errors({}, rel)
+    assert str(exc.value) == f"スキーマ schemas/probe.schema.json に $defs が無い（{rel} を引けない）"
+
+
+def test_schema_validator_refuses_invalid_schema(contracts_copy):
+    contracts_copy("schemas/probe.schema.json", lambda _: {"type": 5})
+    rel = contracts.schema_path("probe")
+    with pytest.raises(contracts.ContractError) as exc:
+        contracts.schema_errors({}, rel)
+    assert str(exc.value).startswith(f"スキーマ {contracts_copy.root / rel} がスキーマとして誤り: ")
+
+
+def test_schema_validator_reads_once_until_use_dir(contracts_copy):
+    contracts_copy("schemas/probe.schema.json", lambda _: {"type": "object"})
+    rel = contracts.schema_path("probe")
+    assert contracts.schema_errors([], rel) == ["(最上位): [] is not of type 'object'"]
+    (contracts_copy.root / rel).write_text(json.dumps({"type": "array"}), encoding="utf-8")
+    assert contracts.schema_errors([], rel) == ["(最上位): [] is not of type 'object'"]
+    contracts.use_dir(contracts_copy.root)
+    assert contracts.schema_errors([], rel) == []
+
+
+def test_require_schema_raises_reader_error_with_label(contracts_copy):
+    class ReaderError(contracts.ContractError):
+        pass
+
+    contracts_copy("schemas/probe.schema.json", lambda _: _DEFS_SCHEMA)
+    with pytest.raises(ReaderError) as exc:
+        contracts.require_schema({}, contracts.schema_path("probe"), ReaderError, "表")
+    assert str(exc.value) == "表 の形が違う: (最上位): 'whole' is a required property"
+
+
+# 現状固定（I-012）: `use_dir` は置き場を差し替え（`None` でプラグインの置き場へ戻し）、読み手のキャッシュを捨てる
+def test_use_dir_switches_and_resets_the_place(tmp_path):
+    contracts.use_dir(tmp_path)
+    assert contracts.contracts_dir() == tmp_path
+    contracts.use_dir(str(tmp_path))
+    assert contracts.contracts_dir() == tmp_path
+    contracts.use_dir(None)
+    assert contracts.contracts_dir() == contracts.DEFAULT_DIR
+
+
+def test_use_dir_makes_cached_readers_read_again(tmp_path):
+    (tmp_path / "probe.json").write_text('{"n": 1}', encoding="utf-8")
+    contracts.use_dir(tmp_path)
+    calls = []
+
+    @contracts.cached_reader
+    def read():
+        calls.append(1)
+        return contracts.load_json("probe.json")
+
+    assert read() == {"n": 1}
+    (tmp_path / "probe.json").write_text('{"n": 2}', encoding="utf-8")
+    assert read() == {"n": 1}
+    assert len(calls) == 1
+    contracts.use_dir(tmp_path)
+    assert read() == {"n": 2}
+    assert len(calls) == 2
+
+
+def test_use_dir_changes_where_load_json_reads(tmp_path):
+    (tmp_path / "probe.json").write_text('{"n": 1}', encoding="utf-8")
+    contracts.use_dir(tmp_path)
+    assert contracts.load_json("probe.json") == {"n": 1}
+    contracts.use_dir(None)
+    with pytest.raises(contracts.ContractError) as exc:
+        contracts.load_json("probe.json")
+    assert str(exc.value).startswith(f"契約 {contracts.DEFAULT_DIR / 'probe.json'} を読めない: ")

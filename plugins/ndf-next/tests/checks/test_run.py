@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.checks import run
 from ndf.checks.model import load_rules
 from ndf.contracts import exit_codes
 
 
 def test_clean_plugin_passes(plugin, monkeypatch, capsys, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     plugin.write("src/ndf/a.py", "def f(x):\n    return x\n")
     assert cli.main(["check"]) == 0
     report = last_result(capsys.readouterr().out)
@@ -18,7 +18,7 @@ def test_clean_plugin_passes(plugin, monkeypatch, capsys, last_result):
 
 
 def test_violation_exits_1_and_lists_items(plugin, monkeypatch, capsys, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
     assert run.main([]) == exit_codes.code_of("failed")
     out = capsys.readouterr()
@@ -29,7 +29,7 @@ def test_violation_exits_1_and_lists_items(plugin, monkeypatch, capsys, last_res
 
 
 def test_syntax_error_exits_2(plugin, monkeypatch, capsys, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     plugin.write("src/ndf/a.py", "def f(:\n")
     plugin.write("src/ndf/b.py", "import ndf.a\n")
     assert run.main([]) == exit_codes.unreadable_code()
@@ -38,7 +38,7 @@ def test_syntax_error_exits_2(plugin, monkeypatch, capsys, last_result):
 
 
 def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     base = plugin.commit("base")
     old = plugin.repo / "plugins" / "ndf"
     old.mkdir()
@@ -54,7 +54,7 @@ def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
 
 
 def test_unreadable_event_stops(plugin, monkeypatch, capsys, tmp_path, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     assert run.main(["--event", str(tmp_path / "missing.json")]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)
     assert report["cause"] == {"kind": "config_broken"}
@@ -119,7 +119,7 @@ def test_emit_stopped_without_items_is_config_broken(capsys):
 
 
 def test_main_ok_report_shape(plugin, monkeypatch, capsys, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     plugin.write("src/ndf/a.py", "def f(x):\n    return x\n")
     assert run.main([]) == exit_codes.code_of("ok")
     report = last_result(capsys.readouterr().out)
@@ -130,7 +130,7 @@ def test_main_ok_report_shape(plugin, monkeypatch, capsys, last_result):
 
 
 def test_main_violation_report_shape(plugin, monkeypatch, capsys, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
     assert run.main([]) == exit_codes.code_of("failed")
     report = last_result(capsys.readouterr().out)
@@ -140,7 +140,7 @@ def test_main_violation_report_shape(plugin, monkeypatch, capsys, last_result):
 
 
 def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path, last_result):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
     missing = tmp_path / "missing.json"
     assert run.main(["--event", str(missing)]) == exit_codes.unreadable_code()
     report = last_result(capsys.readouterr().out)

@@ -34,8 +34,12 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool 
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """実行した人の状態の置き場とほかのプラグインの根を読まない。"""
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("NDF_CALLER_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("NDF_STATE_HOME", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    # エントリポイント（`ndf.cli`）が副命令の前に旧い置き場（`<CLAUDE_CONFIG_DIR>/<名前>/state` など）を退避しうるため
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
 
 
 def _pg_bin() -> Path | None:

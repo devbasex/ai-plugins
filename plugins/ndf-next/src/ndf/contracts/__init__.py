@@ -1,7 +1,7 @@
 """契約の表（`contracts/`）の置き場と、JSON とスキーマの読み込み。
 
-契約の表はプラグインのコードと一緒に配るため、置き場はこのファイルの位置だけから求める（環境変数を読まない。
-ほかのプラグインの `CLAUDE_PLUGIN_ROOT` が残っていても、そのプラグインの表を読まない）。
+契約の表はプラグインのコードと一緒に配るため、置き場はプラグインの根（`identity.ROOT`。ファイルの位置から求める
+1 通り）の下に置く（環境変数を読まない。ほかのプラグインの `CLAUDE_PLUGIN_ROOT` が残っていても、そのプラグインの表を読まない）。
 表ごとの読み手（`facts`・`causes`・`limits`・`result`・`chosen`・`version`）はここを通して読み、1 プロセスに 1 回だけ読む。
 D1 を閉じた後の契約の変更は #3284 の追補（D1+）の PR で出す（持ち主は `contracts/version.json` の `owner`）。
 """
@@ -19,13 +19,15 @@ from typing import Any, TypeVar
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-DEFAULT_DIR = Path(__file__).resolve().parents[3] / "contracts"
+from ndf.identity import ROOT
+
+DEFAULT_DIR = ROOT / "contracts"
 SCHEMAS = "schemas"
 T = TypeVar("T")
 
 _dir = DEFAULT_DIR
 # 置き場を差し替えたときに捨てる、読み手ごとのキャッシュ
-_clearers: list = []
+_clearers: list[Callable[[], None]] = []
 
 
 class ContractError(Exception):
@@ -40,20 +42,14 @@ def use_dir(path: str | Path | None) -> None:
     """契約の置き場を差し替え、読んだ表をすべて捨てる（テストが使う）。`None` でプラグインの置き場へ戻す。"""
     global _dir
     _dir = Path(path) if path is not None else DEFAULT_DIR
-    _schema_validator.cache_clear()
     for clear in _clearers:
         clear()
-
-
-def _on_reset(clear) -> None:
-    """`use_dir` のときに呼ぶキャッシュの消し方を登録する。"""
-    _clearers.append(clear)
 
 
 def cached_reader(fn: Callable[..., T]) -> Callable[..., T]:
     """`fn` を 1 プロセスに 1 回だけ読む関数にし、`use_dir` で置き場を差し替えたときに読み直させる。"""
     cached = cache(fn)
-    _on_reset(cached.cache_clear)
+    _clearers.append(cached.cache_clear)
     return cached
 
 
@@ -101,7 +97,7 @@ def load_as(rel: str, error_cls: type[ContractError]) -> Any:
         return load_json(rel)
 
 
-@cache
+@cached_reader
 def _schema_validator(rel: str) -> Draft202012Validator:
     """`rel` の検証器。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
     path, _, pointer = rel.partition("#")
