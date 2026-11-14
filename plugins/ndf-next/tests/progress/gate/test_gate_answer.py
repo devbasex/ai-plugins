@@ -142,6 +142,7 @@ def test_the_sprint_completion_ends_the_lane_row(st, env, new_table, flow):
 def test_ask_waits_for_the_plan_gate_and_the_entry_is_on_the_command_table(capsys):
     out = gate.ask("design")
     assert result.errors(out, 10) == [] and set(out["routes"]) == {"approved", "rejected"}
-    assert cli.COMMANDS["answer"] == "ndf.progress.gate"
+    assert cli.COMMANDS["answer"] == cli.COMMANDS["progress"] == "ndf.progress.gate"
+    assert gate.TOOL == "answer" and {"next", "wait", "work", "new", "show"} <= gate.progress_verbs()
     assert gate.main(["ask", "--gate", "release"]) == 10
     assert json.loads(capsys.readouterr().out)["metrics"]["gate"]["kind"] == "release"

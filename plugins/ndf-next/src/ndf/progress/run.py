@@ -926,12 +926,8 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
 # --- 副命令 ndf progress のエントリポイント ----------------------------------------------------------------
 
 
-def _env() -> Env:
-    return Env(facts=command.facts_of)
-
-
 def _cmd_next(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return advance(st, a.table_id, cwd, _env())
+    return advance(st, a.table_id, cwd, a.env)
 
 
 def _cmd_wait(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -943,11 +939,11 @@ def _cmd_answer(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_resync(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return resync(st, a.table_id, cwd, _env())
+    return resync(st, a.table_id, cwd, a.env)
 
 
 def _cmd_work(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return work(st, a.table_id, cwd, _env())
+    return work(st, a.table_id, cwd, a.env)
 
 
 def _cmd_show(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -988,12 +984,16 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    return command.with_store(cwd, COMMANDS[a.action], a)
+def main(argv: list[str], env: Optional[Env] = None) -> int:
+    """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。
 
-
-def main(argv: list[str]) -> int:
-    """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。"""
+    `env` は外との接点（既定は工程の条件の語を宣言から読むだけの `Env`）。入口（`ndf.progress.gate`）が包んで渡す。
+    """
     if not argv or argv[0] not in COMMANDS:
         return command.main(argv)
-    return command.run_main(parser(), _dispatch, argv)
+    use = env if env is not None else Env(facts=command.facts_of)
+    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, COMMANDS[a.action], _with_env(a, use)), argv)
+
+
+def _with_env(a: argparse.Namespace, env: Env) -> argparse.Namespace:
+    return argparse.Namespace(**vars(a), env=env)

@@ -482,8 +482,24 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _verbs(ap: argparse.ArgumentParser) -> set[str]:
+    return {name for act in ap._actions if isinstance(act, argparse._SubParsersAction) for name in act.choices}
+
+
+def progress_verbs() -> set[str]:
+    """`ndf progress` の副命令の名前（工程を流す副命令と、進行表を作る・直す副命令）。"""
+    return _verbs(run.parser()) | _verbs(command.parser())
+
+
 def main(argv: list[str]) -> int:
-    """副命令 `ndf answer`。`ask` はプランの中の承認ゲート、ほかは承認ゲートへの答え。"""
+    """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
+
+    - `ask` はプランの中の承認ゲート、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
+    - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
+      トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
+    """
     if argv and argv[0] == "ask":
         return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
+    if not argv or argv[0].startswith("-") or argv[0] in progress_verbs():
+        return run.main(argv, lane_env(run.Env(facts=command.facts_of)))
     return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, _cmd_give, a), argv)
