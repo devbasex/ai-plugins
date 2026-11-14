@@ -108,3 +108,103 @@ def test_stale_rejections_are_removed_by_apply():
     metrics = {**_metrics_1595(), "rejected_stale": [{"number": 5, "direction": FORWARD, "move_digest": "S"}]}
     got = plan_decide.rejected_after([{"number": 5, "direction": FORWARD, "move_digest": "S"}], {"rejected": []}, metrics)
     assert got == []
+
+
+# --- 現状固定: quality_slot（品質の枠）。リファクタリングの前の振る舞いをそのまま記録する ---
+
+QL = "quality"
+
+
+def _row(n: int, size: int = 1, cod: int = 3, harm: bool = False) -> model.Row:
+    return model.Row(n, 1, 1, 1, size, cod, float(cod) / size, False, harm, False, {})
+
+
+def _qboard(rows, capacity, quality=None, labels=None, created=None, edges=frozenset()) -> rank_decide.Board:
+    labels = labels if labels is not None else {r.number: [QL] for r in rows}
+    created = created or {}
+    issues = {
+        r.number: {"milestone": NEAR, "labels": labels.get(r.number, []), "created_at": created.get(r.number, "2026-10-01")} for r in rows
+    }
+    return rank_decide.Board(issues, {}, Config(capacity=capacity, quality=quality), [NEAR], edges=frozenset(edges))
+
+
+def _q(ratio: float = 0.5, minimum: int = 1) -> dict:
+    return {"label": QL, "ratio": ratio, "min": minimum}
+
+
+def test_quality_slot_is_none_without_declaration():
+    rows = [_row(1)]
+    assert rank_decide.quality_slot(rows, _qboard(rows, 10), None, set()) is None
+
+
+def test_quality_slot_without_capacity_takes_only_min_rows():
+    rows = [_row(1), _row(2), _row(3)]
+    got = rank_decide.quality_slot(rows, _qboard(rows, None, _q(minimum=2)), None, set())
+    assert got == {"label": QL, "ratio": 0.5, "min": 2, "budget": None, "issues": [1, 2], "size_sum": 2}
+
+
+def test_quality_slot_filters_label_piece_and_blocked():
+    rows = [_row(n) for n in (1, 2, 3, 4, 5)]
+    labels = {1: [QL], 2: ["other"], 3: [QL], 4: [QL], 5: [QL]}
+    slot = {"issue": 3, "slice": 3, "size": 1, "budget": 5, "status": model.SLOT_FIT}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=1.0), labels=labels), slot, {4})
+    assert got["issues"] == [1, 5] and got["size_sum"] == 2 and got["budget"] == 10
+
+
+def test_quality_slot_split_slot_does_not_exclude_its_issue():
+    rows = [_row(1), _row(2)]
+    slot = {"issue": 1, "slice": None, "size": 13, "budget": 5, "status": model.SLOT_SPLIT}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=1.0)), slot, set())
+    assert got["issues"] == [1, 2]
+
+
+def test_quality_slot_orders_harm_then_created_then_rank():
+    rows = [_row(1, cod=9), _row(2, cod=1), _row(3, cod=5, harm=True), _row(4, cod=7)]
+    created = {1: "2026-10-05", 2: "2026-10-02", 3: "2026-10-09", 4: "2026-10-02"}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=1.0), created=created), None, set())
+    # 届いた不具合（#3）→ 起票の古い順（#2・#4 は同日なので順位の値で #4 が先）→ #1
+    assert got["issues"] == [3, 4, 2, 1]
+
+
+def test_quality_slot_skips_rows_whose_dependency_is_not_taken():
+    rows = [_row(1), _row(2), _row(3)]
+    labels = {1: [QL], 2: [QL], 3: []}
+    # #1 は品質の枠に入らない #3 に依存し、#2 は #1 に依存する
+    board = _qboard(rows, 10, _q(ratio=1.0), labels=labels, edges={(1, 3), (2, 1)})
+    got = rank_decide.quality_slot(rows, board, None, set())
+    assert got["issues"] == [] and got["size_sum"] == 0
+
+
+def test_quality_slot_takes_a_dependency_only_when_it_comes_first():
+    rows = [_row(1), _row(2)]
+    created = {1: "2026-10-01", 2: "2026-10-02"}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=1.0), created=created, edges={(2, 1)}), None, set())
+    assert got["issues"] == [1, 2]
+    # 依存する側が先に並ぶと、依存先がまだ取られていないので飛ばされる
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=1.0), created=created, edges={(1, 2)}), None, set())
+    assert got["issues"] == [2]
+
+
+def test_quality_slot_stops_when_budget_is_exceeded_after_min():
+    rows = [_row(1, size=2), _row(2, size=3), _row(3, size=1)]
+    created = {1: "2026-10-01", 2: "2026-10-02", 3: "2026-10-03"}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 8, _q(ratio=0.5), created=created), None, set())
+    # budget=4: #1（2）を取り、#2（3）で超えて min を満たしているので打ち切る（#3 は収まっても取らない）
+    assert got == {"label": QL, "ratio": 0.5, "min": 1, "budget": 4, "issues": [1], "size_sum": 2}
+
+
+def test_quality_slot_min_uses_room_beyond_budget():
+    rows = [_row(1, size=5), _row(2, size=1)]
+    created = {1: "2026-10-01", 2: "2026-10-02"}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 8, _q(ratio=0.25), created=created), None, set())
+    # budget=2 を超えるが、min に届くまでは容量の残り（8）に収まれば取る。その後は超えて打ち切る
+    assert got["budget"] == 2 and got["issues"] == [1] and got["size_sum"] == 5
+
+
+def test_quality_slot_min_skips_rows_beyond_room_and_continues():
+    rows = [_row(1, size=8), _row(2, size=2), _row(3, size=1)]
+    created = {1: "2026-10-01", 2: "2026-10-02", 3: "2026-10-03"}
+    slot = {"issue": 9, "slice": 9, "size": 3, "budget": 5, "status": model.SLOT_FIT}
+    got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=0.1, minimum=2), created=created), slot, set())
+    # room=10-3=7: #1（8）は収まらず min に届いていないので飛ばして続ける。#2・#3 は room に収まる
+    assert got["budget"] == 1 and got["issues"] == [2, 3] and got["size_sum"] == 3
