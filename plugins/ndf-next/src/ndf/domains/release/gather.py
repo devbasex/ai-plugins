@@ -74,7 +74,12 @@ def included(repo_git: git_mod.Git, span: Range) -> list[int]:
     return included_decide.numbers(subjects.splitlines())
 
 
-def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
+def changes(repo_git: git_mod.Git, span: Range, found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
+    """プラグインごとの変化。"""
+    return changes_in(repo_git.changed_files(span.since, span.until), found, decl)
+
+
+def changes_in(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
     """範囲の変わったファイル（`paths`）のプラグインごとの変化。"""
     return changes_decide.changes(paths, {p.name: p.dir for p in found}, decl.undistributed)
 
