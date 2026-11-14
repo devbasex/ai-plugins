@@ -113,21 +113,18 @@ def main(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="action", required=True)
     st = sub.add_parser("stats", help="事象・guard ごとの所要と判定の数")
     st.add_argument("--days", type=float, default=metrics.keep_days())
-    sub.add_parser("check-budget", help="予算の順序の検査")
+    st.set_defaults(run=lambda a: _stats(a.days))
+    sub.add_parser("check-budget", help="予算の順序の検査").set_defaults(run=lambda a: _check_budget())
     cap = sub.add_parser("capture", help="本体の入力の見本を、秘密を伏せて足す（標準入力に payload）")
     cap.add_argument("runtime")
     cap.add_argument("version")
     cap.add_argument("event")
+    cap.set_defaults(run=_capture)
     ren = sub.add_parser("render", help="登録を契約表と予算から作り直す")
     ren.add_argument("--check", action="store_true", help="書かずに、作り直した結果と違えば stopped")
+    ren.set_defaults(run=lambda a: _render(a.check))
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return causes.exit_code("invalid") if exc.code else 0
-    if args.action == "stats":
-        return _stats(args.days)
-    if args.action == "check-budget":
-        return _check_budget()
-    if args.action == "render":
-        return _render(args.check)
-    return _capture(args)
+    return args.run(args)
