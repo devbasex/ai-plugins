@@ -12,7 +12,6 @@ from ndf import contracts, identity
 from ndf.adapters.git import GitError
 from ndf.core import durable
 from ndf.progress import command, definition, model, store
-from ndf.progress import backup as progress_backup
 
 
 @pytest.fixture
@@ -139,7 +138,7 @@ def test_restore_command_puts_back_a_backup(repo, capsys):
     _new(capsys)
     root = _root(repo)
     durable.release_store(root)
-    backup = progress_backup.latest_backup(root)
+    backup = store.latest_backup(root)
     code, out = _run(capsys, "restore", "--from", str(backup))
     assert code == 0 and out["items"][0]["from"] == str(backup)
 

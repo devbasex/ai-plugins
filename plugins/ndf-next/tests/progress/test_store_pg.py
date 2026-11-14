@@ -6,7 +6,6 @@ import pytest
 import sqlalchemy as sa
 
 from ndf.progress import store
-from ndf.progress import backup as progress_backup
 
 
 def test_open_issues_no_pragma_and_takes_no_backup(pg_url, root):
@@ -21,7 +20,7 @@ def test_open_issues_no_pragma_and_takes_no_backup(pg_url, root):
     finally:
         sa.event.remove(sa.Engine, "before_cursor_execute", record)
     assert sent and not [s for s in sent if "PRAGMA" in s.upper()]
-    assert not (root / progress_backup.BACKUP_DIR).exists()
+    assert not (root / store.BACKUP_DIR).exists()
     assert not (root / store.CHECKED_MARK).exists()
 
 

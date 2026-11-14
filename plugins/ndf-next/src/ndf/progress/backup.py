@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -64,7 +65,9 @@ def _write_backup(engine: sa.Engine, dest: Path) -> None:
         raw.close()
 
 
-def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) -> Optional[Path]:
+def backup(
+    engine: sa.Engine, root: Path, now: datetime, force: bool = False, write: Callable[[sa.Engine, Path], None] = _write_backup
+) -> Optional[Path]:
     """`backup/progress-<UTC の日時>.sqlite` を書き、新しい 7 本を残して古い控えを消す。
 
     最新の控えが 24 時間以内なら取らずに None（`force` なら日時に依らず取る）。書けなければ書きかけを消して
@@ -76,7 +79,7 @@ def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) ->
     dest = root / BACKUP_DIR / f"{BACKUP_PREFIX}{now:%Y%m%dT%H%M%S%fZ}{durable.DB_SUFFIX}"
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        _write_backup(engine, dest)
+        write(engine, dest)
     except (OSError, sqlite3.Error) as exc:
         dest.unlink(missing_ok=True)
         raise BackupFailed(f"進行表の DB の控えを書けない: {dest}: {exc}") from exc

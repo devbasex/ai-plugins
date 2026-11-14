@@ -29,7 +29,21 @@ import sqlalchemy as sa
 from sqlalchemy import event as sa_event
 
 from ndf.core import durable
-from ndf.progress import backup, model
+from ndf.progress import backup as _backup
+from ndf.progress import model
+
+# 控えと戻しの名前は ndf.progress.backup が持つ。呼び手（command・テスト）は store から引く
+from ndf.progress.backup import (  # noqa: F401
+    BACKUP_DIR,
+    BACKUP_PREFIX,
+    BROKEN_MARK,
+    KEEP_BACKUPS,
+    RESTORING_SUFFIX,
+    BackupFailed,
+    _write_backup,
+    backups,
+    latest_backup,
+)
 
 log = logging.getLogger(__name__)
 
@@ -246,8 +260,8 @@ def ensure_schema(store: Store, now: datetime) -> None:
 
 def _backup_or_warn(store: Store, now: datetime, force: bool) -> None:
     try:
-        backup.backup(store.engine, store.root, now, force=force)
-    except backup.BackupFailed as exc:
+        backup(store.engine, store.root, now, force=force)
+    except BackupFailed as exc:
         log.warning("進行表の DB の控えを書けなかった", extra={"root": str(store.root), "error": str(exc)})
         store.warnings.append(str(exc))
 
@@ -261,7 +275,7 @@ def _check_and_backup(store: Store, now: datetime) -> None:
             ensure_schema(store, now)
             return
         if not durable.check_file(store.path):
-            latest = backup.latest_backup(store.root)
+            latest = latest_backup(store.root)
             hint = f"。最新の控え: {latest}。ndf progress restore --from {latest} で戻せる" if latest else "。控えが無い"
             raise durable.StoreBroken(f"進行表の DB が quick_check を通らない: {store.path}{hint}", (store.path,))
         ensure_schema(store, now)
@@ -298,6 +312,11 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
 # --- 控えと戻し --------------------------------------------------------------------------
 
 
+def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) -> Optional[Path]:
+    """`ndf.progress.backup.backup` を、このモジュールの `_write_backup` で書き出して呼ぶ（差し替えはここで効く）。"""
+    return _backup.backup(engine, root, now, force, write=_write_backup)
+
+
 def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) -> Path:
     """控えから進行表の DB を戻し、退避した壊れた DB のパスを返す。自動では呼ばない（`ndf progress restore`）。
 
@@ -309,7 +328,7 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
     if path is None:
         raise RestoreUnsupported("PostgreSQL の控えと戻しは DB の運用で行う")
     with durable.store_lock(root, exclusive=True), db_lock(path, exclusive=True):
-        retired = backup.replace_db(root, path, source, now)
+        retired = _backup.replace_db(root, path, source, now)
         durable.touch_mark(root / CHECKED_MARK, now)
     return retired
 

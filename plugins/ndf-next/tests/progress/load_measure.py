@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from ndf.core import durable  # noqa: E402
-from ndf.progress import backup, model, store  # noqa: E402
+from ndf.progress import model, store  # noqa: E402
 
 
 def _counting_check(log_path: Path):
@@ -106,7 +106,7 @@ def _collect_report(work: Path, root: Path, options: argparse.Namespace) -> dict
         "wait_max_seconds": waits[-1] if waits else None,
         "quick_check_count": len(checks),
         "quick_check_seconds_max": max(checks) if checks else None,
-        "backups": len(list((root / backup.BACKUP_DIR).glob("*.sqlite"))),
+        "backups": len(list((root / store.BACKUP_DIR).glob("*.sqlite"))),
     }
 
 
