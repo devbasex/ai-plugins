@@ -59,7 +59,7 @@ _WRITE_EVENTS: dict[str, tuple[tuple[int, int | None, str], ...]] = {
     "shutil.rmtree": ((0, 1, NAME),),
 }
 # 元の値が指す場所も本物の置き場として守る環境変数（差し替える前の値を読む）
-REAL_STATE_ENV = (identity.STATE_HOME_ENV, identity.XDG_STATE_ENV,"XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
+REAL_STATE_ENV = (identity.STATE_HOME_ENV, identity.XDG_STATE_ENV, "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
 # 読み込んだ時点（conftest の読み込み・fixture より前）の値。fixture の実行時には、先に動いたほかの autouse の
 # fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の置き場を読めないため
 _ORIGINAL_ENV = {name: value for name in REAL_STATE_ENV if (value := os.environ.get(name)) is not None}
