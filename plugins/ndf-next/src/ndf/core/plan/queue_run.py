@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core.plan import files, model, queue_decide, runner, steps
+from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
 
 QUEUE_SUFFIX = ".queue"
 QUEUE_FILE = "queue.json"
@@ -189,8 +189,7 @@ def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[l
         return result.stopped(tool, kind, f"{first.name}: {first.detail}", items=items, metrics=metrics, next=resume)
     if status == GATE:
         gated = next((o for o in outcomes if o.routes), None)
-        # 答えを持たない待ち（流していないプラン）は、答えの語彙の「同じ作業を打ち直す」で打ち直す
-        routes = dict(gated.routes) if gated is not None else {"retry": resume}
+        routes = wait_decide.gate_routes(gated.routes if gated is not None else None, resume)
         where = f"routes は {gated.name} の分。" if gated is not None else ""
         summary = f"承認の答えを待つプランがある（{where}答えた後に next で続ける）"
         return result.result(tool, GATE, summary, items, metrics, routes=routes, next=resume)

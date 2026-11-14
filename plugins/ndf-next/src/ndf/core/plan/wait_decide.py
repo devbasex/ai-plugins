@@ -42,6 +42,14 @@ def settled(found: Sequence[Watched]) -> bool:
     return all(w.status is not None for w in found) or any(w.status in (GATE, STOPPED) for w in found)
 
 
+def gate_routes(head_routes: Optional[Mapping[str, Any]], again: dict[str, Any]) -> dict[str, Any]:
+    """承認ゲートの結果の routes。routes を持つ先頭の 1 本の分にする。
+
+    答えを持たない待ち（承認ゲート・流していないプラン）は、答えの語彙の「同じ作業を打ち直す」で打ち直す。
+    """
+    return dict(head_routes) if head_routes else {"retry": again}
+
+
 def attention(tool: str, found: Sequence[Watched], again: dict[str, Any]) -> dict[str, Any]:
     """見回りの結果。止まりがあれば `stopped`（先頭の止まりの種類）、承認ゲートがあれば `gate`、すべて終われば `ok`。"""
     items = [_item(w) for w in found]
@@ -54,8 +62,7 @@ def attention(tool: str, found: Sequence[Watched], again: dict[str, Any]) -> dic
         return result.result(tool, STOPPED, summary, items, metrics, cause=first, next=again)
     if gates:
         head = next((w for w in gates if w.routes), gates[0])
-        # 答えを持たない承認ゲートは、答えの語彙の「同じ作業を打ち直す」で同じ待ちを打つ
-        routes = dict(head.routes) if head.routes else {"retry": again}
+        routes = gate_routes(head.routes, again)
         summary = f"{len(gates)} 本のプランが承認ゲートで待っている（routes は {head.name} の分）"
         return result.result(tool, GATE, summary, items, metrics, routes=routes, next=again)
     return result.result(tool, OK, f"{len(found)} 本のプランが終わった", items, metrics)
