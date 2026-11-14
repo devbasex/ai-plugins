@@ -640,8 +640,8 @@
     {
       "term": "固定する理由（依存の版の）",
       "context": "ndf-workflow",
-      "meaning": "依存を最新の安定版へ上げない理由と、固定させている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。宣言の `[tool.ndf.deps.hold]` に書く",
-      "pending_source": "issues/issue-3347-design.md"
+      "meaning": "依存を上げる先へ上げずに今の版に止める理由と、止めさせている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。依存の更新の仕組み（Renovate）の依存ごとの規則に、理由の文として書く（#3370 の決定 5）",
+      "pending_source": "issues/issue-3370-design.md"
     },
     {
       "term": "安定版（依存の）",
