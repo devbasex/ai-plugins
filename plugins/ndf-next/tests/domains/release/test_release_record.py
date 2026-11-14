@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ndf.adapters.github import Authored
+from ndf.domains.release import cli as release_cli
 from ndf.domains.release import record, record_decide
 
 from ._fakes import FakeHub, pull
@@ -109,7 +110,28 @@ def test_body_without_json_block_is_not_a_record() -> None:
     assert record_decide.parse_record('```json\n{"version": "1.2.4", "release": 1, "included": []}\n```') is None
 
 
+# 印とコードブロックを持つが JSON として読めないリリース記録
+BROKEN = f"{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{\"version\": \n```\n"
+
+
 def test_marked_body_with_broken_json_is_reported_not_skipped() -> None:
-    body = f"{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{\"version\": \n```\n"
     with pytest.raises(record_decide.UnreadableRecord):
-        record_decide.parse_record(body)
+        record_decide.parse_record(BROKEN)
+
+
+def test_broken_record_by_untrusted_writer_is_skipped_and_record_is_written() -> None:
+    hub = _hub()
+    hub.comments_of[11] = [Authored("stranger", "NONE", BROKEN)]
+    made, written = record.write(hub, RELEASE, "main")
+    assert [(w.number, w.result) for w in written] == [(11, record.WRITTEN), (12, record.WRITTEN)]
+    trusted = [c.body for c in hub.comments(11) if hub.trusts(c)]
+    assert record_decide.records(trusted) == [made]
+    assert record.read(hub, 11).release == made
+
+
+def test_broken_record_by_trusted_writer_stops_as_invalid() -> None:
+    hub = _hub()
+    hub.comments_of[11] = [Authored("octocat", "OWNER", BROKEN)]
+    with pytest.raises(record_decide.UnreadableRecord) as caught:
+        record.write(hub, RELEASE, "main")
+    assert release_cli._stopped_of(caught.value)["cause"]["kind"] == "invalid"

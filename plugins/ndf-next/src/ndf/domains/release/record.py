@@ -4,8 +4,9 @@
   タグと GitHub Release だけを持ち、含めた PR の範囲を持たない
 - 含めた PR は、リリースの PR のコミットを先端から first-parent で辿った件名から、承認資料と同じ規則
   （`included_decide`）で決める（承認資料の範囲 `<前のリリース>..<ベースブランチ>` と同じ範囲）
-- 同じ版のリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは書き手を問わずに見る
-  （偽の記録で書かれなくても、閉じる側は信用する記録を読めずに課題を閉じない側へ倒れる）
+- 同じ版のリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
+  （write 以上の権限）の記録だけで見る。信用しない書き手のコメントは印があっても読み飛ばし、壊れていても止まらない。
+  信用する書き手の記録の JSON が読めなければ `record_decide.UnreadableRecord` で止める
 - リリース後テストの記録は、同じ版のリリース記録を持つ PR へだけ書く。本番ブランチ宛てのリリースの PR は
   リリース記録を持たないので、そこへは書かれない（#3128）
 - 読む側（`read`）は write 以上の権限を持つ書き手の記録だけを読む
@@ -71,6 +72,11 @@ def released(hub: GitHub, number: int, production: str) -> tuple[Pull, record_de
     return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production)))
 
 
+def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
+    """PR `number` のコメントのうち、信用する書き手（`GitHub.trusts`）の本文（古い順）。"""
+    return [c.body for c in hub.comments(number) if hub.trusts(c)]
+
+
 def write(hub: GitHub, number: int, production: str) -> tuple[record_decide.Record, list[Written]]:
     """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。"""
     _pull, made = released(hub, number, production)
@@ -78,7 +84,7 @@ def write(hub: GitHub, number: int, production: str) -> tuple[record_decide.Reco
     body = record_decide.render_record(made)
     out = []
     for n in made.included:
-        if record_decide.has_version((c.body for c in hub.comments(n)), made.version):
+        if record_decide.has_version(_trusted_bodies(hub, n), made.version):
             out.append(Written(n, KEPT))
             continue
         publisher.comment(n, body)
@@ -88,7 +94,7 @@ def write(hub: GitHub, number: int, production: str) -> tuple[record_decide.Reco
 
 def read(hub: GitHub, number: int) -> Records:
     """PR `number` の、信用する書き手のリリース記録とリリース後テストの記録。"""
-    bodies = [c.body for c in hub.comments(number) if hub.trusts(c)]
+    bodies = _trusted_bodies(hub, number)
     found = record_decide.records(bodies)
     return Records(found[-1] if found else None, tuple(record_decide.verifications(bodies)))
 
@@ -105,7 +111,7 @@ def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
     if errors:
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
-    found = record_decide.records(c.body for c in hub.comments(number) if hub.trusts(c))
+    found = record_decide.records(_trusted_bodies(hub, number))
     if not any(r.version == payload["version"] for r in found):
         raise RecordError(
             f"#{number} は版 {payload['version']} のリリース記録を持たない（持つ版: {_versions(found)}）。"
