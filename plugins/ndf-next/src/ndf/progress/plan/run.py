@@ -23,6 +23,8 @@
 - 実行中の行を持つレーンの生死を読み直しのたびに判定し（`ndf.progress.lane.liveness`。材料はラッパーの一覧と
   スプリントの待ち）、止まり（`stalled`・`ended`）を計画の進行表の依頼（中身の `kind` は `lane_stalled`）で知らせる。
   承認ゲートや問いの答えを待つ行は正常な待ちで知らせない。同じレーン・行・判定では 1 回だけ知らせる
+- 最後の行が終わったレーンのラッパーがまだ動いていれば止める（#3173）。止められなければ依頼（中身の `kind` は
+  `halt_failed`）で知らせる
 - 依頼は同じトランザクションで計画の状態を読み直してから書く。起動の最中に計画が止められたら書かない
 - レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`。同じリポジトリかの
   判定は `PlanView.lane_repo`）の置き場を解決する経路はまだ無いので、打った場所で流さずに起こせない失敗にする
@@ -55,9 +57,14 @@ WORKFLOW_SUFFIX = "-lanes"
 TOPIC_WAKE = "wake"
 POLL_ENV = "NDF_PARALLEL_POLL"
 # 起こせなかったレーン・止まったレーンの知らせ（計画の進行表の依頼の中身の kind）と、依頼を書く主体
-LAUNCH_FAILED, LANE_STALLED = run_decide.LAUNCH_FAILED, run_decide.LANE_STALLED
-# 依頼の中身で、知らせの鍵を持つ項目（知らせの kind → 項目）
-NOTICE_FIELDS = {LAUNCH_FAILED: "launch", LANE_STALLED: "stall"}
+LAUNCH_FAILED, LANE_STALLED, HALT_FAILED = run_decide.LAUNCH_FAILED, run_decide.LANE_STALLED, run_decide.HALT_FAILED
+# 依頼の中身で、知らせの鍵を持つ項目（知らせの kind → 項目）と、依頼の理由
+NOTICE_FIELDS = {LAUNCH_FAILED: "launch", LANE_STALLED: "stall", HALT_FAILED: "halt"}
+NOTICE_REASONS = {
+    LAUNCH_FAILED: "レーン {} を起こせない",
+    LANE_STALLED: "レーン {} が止まった",
+    HALT_FAILED: "終わったレーン {} のラッパーを止められない",
+}
 REPORT_ACTOR = model.WORKFLOW_ACTOR
 # 切り離した `ndf lanes run` の出力を足していく、計画の記録の置き場の中のファイル
 RUN_LOG = "run.log"
@@ -105,10 +112,13 @@ def _conn(spec: dict[str, Any]) -> Iterator[Any]:
 
 
 def probes(repo: str, plan: str) -> liveness.Probes:
-    """生死の判定の材料を、自分の副命令（`ndf relay ls`・`ndf progress wait --timeout 0`）で読む口。"""
+    """生死の判定の材料を、自分の副命令（`ndf relay ls`・`ndf progress wait --timeout 0`）で読む口。
+
+    ラッパーの一覧は 1 回の読み直しの中で 1 度だけ読む（生死の判定と終わったレーンのラッパーの判定が同じ一覧を使う）。
+    """
     return liveness.Probes(
         wrapper_name=functools.partial(launch.wrapper_name, repo, plan),
-        wrappers=launch.wrappers,
+        wrappers=functools.cache(lambda: launch.wrappers()),
         sprint=launch.sprint_wait,
     )
 
@@ -119,6 +129,22 @@ def _stalls(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: liv
         return []
     verdicts = liveness.judge_lanes(rows, found)
     return [(name, liveness.notice_key(name, v), f"レーン {name} の行 {v.row}: {v.reason}") for name, v in verdicts.items() if v.stall]
+
+
+def _halts(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: liveness.Probes | None) -> list[tuple[str, str]]:
+    """最後の行が終わった（未着手と実行中の行が無い）のに、ラッパーが動いているレーンの（レーン, 最後の行）（#3173）。
+
+    ラッパーの一覧を読めなければ空（止めるかを決めない）。
+    """
+    ended = [(name, rows[name][-1].key) for name in view.lanes if rows[name] and not any(r.live for r in rows[name])]
+    table = found.wrappers() if found is not None and ended else None
+    if table is None:
+        return []
+    return [(name, row) for name, row in ended if _wrapper_running(table.get(found.wrapper_name(name)))]
+
+
+def _wrapper_running(listed: Any) -> bool:
+    return bool(listed and listed.get("running"))
 
 
 def read_snapshot(conn: Any, plan_id: str, found: liveness.Probes | None = None) -> dict[str, Any]:
@@ -135,7 +161,7 @@ def snapshot_of(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found:
     wakeable = lane.wakeable_lanes(view, rows)
     stalls = _stalls(view, rows, found)
     snap = run_decide.snapshot(view.state, lane.plan_complete(view, rows), wakeable, running, reported, answered)
-    return run_decide.with_stalls(snap, stalls)
+    return run_decide.with_halts(run_decide.with_stalls(snap, stalls), _halts(view, rows, found))
 
 
 @durable.step
@@ -163,8 +189,13 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
 
 
 @durable.step
-def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None, resume: str | None = None) -> dict[str, Any]:
-    """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。"""
+def launch_lane(
+    spec: dict[str, Any], lane_name: str, row: str, cancel: str | None, resume: str | None = None, halt: bool = False
+) -> dict[str, Any]:
+    """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。`halt` なら起こさずに、
+    最後の行が終わったレーンのラッパーを止める（#3173）。"""
+    if halt:
+        return launch.stop(spec["repo"], spec["plan"], lane_name)
     act = Launch(lane_name, row, cancel, resume)
     try:
         with _conn(spec) as conn:
@@ -188,8 +219,7 @@ def write_report(conn: Any, plan_id: str, lane_name: str, key: str, detail: str,
     if view.state != lane.RUNNING:
         return None
     body = {"lane": lane_name, "kind": kind, NOTICE_FIELDS[kind]: key, "detail": detail}
-    reason = f"レーン {lane_name} を起こせない" if kind == LAUNCH_FAILED else f"レーン {lane_name} が止まった"
-    return table.open_request(conn, plan_id, body, reason, REPORT_ACTOR)
+    return table.open_request(conn, plan_id, body, NOTICE_REASONS[kind].format(lane_name), REPORT_ACTOR)
 
 
 @durable.step
@@ -210,7 +240,7 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
         return Done(act, observe(spec))
     if isinstance(act, Launch):
-        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel, act.resume))
+        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel, act.resume, act.halt))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
     if isinstance(act, Report):

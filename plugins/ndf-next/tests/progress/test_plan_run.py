@@ -25,9 +25,9 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=()):
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=(), halts=()):
     snap = run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
-    return run_decide.with_stalls(snap, stalls)
+    return run_decide.with_halts(run_decide.with_stalls(snap, stalls), halts)
 
 
 @pytest.fixture(autouse=True)
@@ -147,6 +147,41 @@ def test_a_stalled_lane_is_reported_once_per_notice_key():
     other = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった")
     act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[other])))
     assert act == Report("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった", run_decide.LANE_STALLED)
+
+
+def test_the_wrapper_of_a_lane_whose_last_row_ended_is_halted_once():
+    """最後の行が終わったレーンのラッパーが動いていれば止める。止めた後は同じ行で止め直さない（#3173）。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(halts=[("a", "r1")])))
+    assert act == Launch("a", "r1", halt=True) and act.key == "halt:a/r1"
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "止めた"}))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), _snap(halts=[("a", "r1")])))
+    assert act == Sleep(30.0)
+
+
+def test_wrappers_are_halted_before_the_plan_completes_and_before_the_workflow_ends():
+    """計画を完了にする前と、耐久ワークフローを終える前に、終わったレーンのラッパーを止める（#3173）。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(complete=True, halts=[("a", "r1")])))
+    assert act == Launch("a", "r1", halt=True)
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "止めた"}))
+    assert act == Complete()
+    act, state, finished = _step(RunState(), Done(Observe(), _snap(state="completed", halts=[("b", "r2")])))
+    assert act == Launch("b", "r2", halt=True) and not finished
+    _, state, finished = _step(state, Done(act, {"ok": True, "detail": "止めた"}))
+    assert finished and state.outcome == "completed"
+
+
+def test_a_wrapper_that_cannot_be_halted_is_reported_and_does_not_hold_the_end():
+    """止められないラッパーは回数が尽きたら halt_failed で知らせ、依頼を閉じた後は止め直さない（#3173）。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(halts=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "detail": "錠が空かない"}))
+    act, state, _ = _step(state, Done(Observe(), _snap(halts=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "detail": "錠が空かない"}))
+    assert act == Report("a", "halt:a/r1", "halt:a/r1: 錠が空かない", run_decide.HALT_FAILED)
+    act, state, _ = _step(state, Done(act, "request-1"))
+    # オーガナイザーが依頼を閉じた後も止め直さず（依頼を開き直さず）、計画を完了にする
+    act, state, _ = _step(state, Done(Observe(), _snap(complete=True, halts=[("a", "r1")])))
+    assert act == Complete() and state.unreported == ()
 
 
 def test_a_launched_lane_that_does_not_start_its_row_in_time_counts_as_a_failure():
@@ -330,6 +365,21 @@ def test_snapshot_lists_a_stalled_lane_but_not_a_lane_waiting_for_an_answer(open
         assert run.read_snapshot(conn, pid)["reported"] == ["stall:b/r1:ended"]
 
 
+def test_snapshot_lists_a_lane_whose_last_row_ended_while_its_wrapper_runs(opened):
+    """最後の行が終わったのにラッパーが動いているレーンを、写しの halts に載せる。一覧を読めなければ載せない（#3173）。"""
+    pid = _create(opened, _doc(_decl("a", [[1]]), _decl("b", [[2]], touches=("src/b",))))
+    with store.transaction(opened) as conn:
+        lane.end_row(conn, _start(conn, pid, "a", "r1"), "completed", "conductor")
+    running = {"w-a": {"running": True}, "w-b": {"running": True}}
+    with store.transaction(opened) as conn:
+        assert run.read_snapshot(conn, pid, _probes(running, {}))["halts"] == [["a", "r1"]]
+        assert run.read_snapshot(conn, pid, _probes({"w-a": {"running": False}}, {}))["halts"] == []
+        assert run.read_snapshot(conn, pid, _probes(None, {}))["halts"] == []
+        key = run.write_report(conn, pid, "a", "halt:a/r1", "止められない", run.HALT_FAILED)
+        view, _ = lane.read_plan(conn, pid)
+    assert view.requests[key].body["halt"] == "halt:a/r1" and "止められない" in view.requests[key].reason
+
+
 def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
     pid = _create(opened, _doc(_decl("a", [[1]])))
     with store.transaction(opened) as conn:
@@ -393,6 +443,22 @@ def test_the_workflow_runs_every_row_of_the_lane_in_order_and_completes_the_plan
     assert view.state == "completed"
     # 終わった計画で打ち直しても流し直さない
     assert run.advance(where, "p6", FAST)["outcome"] == "completed" and len(launched) == 3
+
+
+def test_the_workflow_halts_the_wrapper_of_the_lane_that_ran_its_last_row(where, monkeypatch):
+    """最後の行を終えたレーンのラッパーが残っていれば、計画を完了にする前に止める（#3173）。"""
+    with store.open_store(where.url, where.root) as st:
+        _create(st, _doc(_decl("a", [[1]])))
+    spawn, launched = _conductor(where, "completed")
+    stopped = _no_wrapper(monkeypatch)
+    name = launch.wrapper_name(REPO, "p6", "a")
+    # 起こした conductor のラッパーは、止められるまで動いて見える
+    monkeypatch.setattr(launch, "wrappers", lambda run=None: {name: {"name": name, "running": bool(launched) and len(stopped) < 2}})
+    monkeypatch.setattr(launch, "spawn", spawn)
+    final = run.advance(where, "p6", FAST)
+    assert final["outcome"] == "completed" and launched == [("a", "r1")]
+    # 1 回目は行を始める前、2 回目は最後の行を終えた後
+    assert stopped == ["a", "a"] and "halt:a/r1" in final["launched"]
 
 
 def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypatch):

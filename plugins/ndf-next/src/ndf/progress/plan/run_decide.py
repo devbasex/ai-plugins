@@ -6,7 +6,8 @@
 - `Observe`: 計画とレーンの進行表を読み直す
 - `Launch`: 止まっているレーンの conductor を起こす。`cancel` があれば、止めた計画で実行中のスプリントを
   中止させる入力で起こす。`resume` があれば、答えが載った後に next が打たれていない実行中の行（3346-5）を、
-  答えの後の `ndf progress next` を打つ入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである
+  答えの後の `ndf progress next` を打つ入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである。
+  `halt` なら起こさずに、最後の行が終わったレーンのまだ動いているラッパーを止める（#3173）
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
 - `Report`: 起こせなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`。`ndf.progress.lane.liveness`）を、
   計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
@@ -30,6 +31,10 @@
 
 止めた計画の進行表は終わっていて依頼を書けないので、中止の起動が尽きても `Report` を打たない。実行中の行の中止を
 すべて起こせなくなったら、`failed` と `errors` を載せて `cancel_failed` で終える。
+
+最後の行が終わった（未着手と実行中の行が無い）レーンのラッパーがまだ動いていれば、止める（`halt`。#3173）。計画を
+完了にする前と、耐久ワークフローを終える前にも先に止める。止める手も起動と同じに回数を数え、尽きたら（計画が動いて
+いれば）`halt_failed` の依頼で知らせ、打ち直さない（オーガナイザーが手で止めて依頼を閉じれば、計画は完了できる）。
 """
 
 from __future__ import annotations
@@ -66,9 +71,12 @@ class Launch:
     cancel: Optional[str] = None
     resume: Optional[str] = None
     seq: int = 0
+    halt: bool = False
 
     @property
     def key(self) -> str:
+        if self.halt:
+            return f"halt:{self.lane}/{self.row}"
         if self.cancel:
             return f"cancel:{self.cancel}"
         if self.resume:
@@ -81,8 +89,8 @@ class Complete:
     """計画を完了にする手。"""
 
 
-# 計画の進行表の依頼の中身の kind: 起こせなかったレーンと、止まったレーン
-LAUNCH_FAILED, LANE_STALLED = "launch_failed", "lane_stalled"
+# 計画の進行表の依頼の中身の kind: 起こせなかったレーン・止まったレーン・終わったのにラッパーを止められないレーン
+LAUNCH_FAILED, LANE_STALLED, HALT_FAILED = "launch_failed", "lane_stalled", "halt_failed"
 
 
 @dataclass(frozen=True)
@@ -171,12 +179,18 @@ def snapshot(
         "reported": list(reported),
         "answered": [list(a) for a in answered],
         "stalls": [],
+        "halts": [],
     }
 
 
 def with_stalls(snap: dict[str, Any], stalls: Sequence[tuple[str, str, str]]) -> dict[str, Any]:
     """写しへ止まったレーンの（レーン, 知らせの鍵, 理由）を載せる。"""
     return {**snap, "stalls": [list(t) for t in stalls]}
+
+
+def with_halts(snap: dict[str, Any], halts: Sequence[tuple[str, str]]) -> dict[str, Any]:
+    """写しへ、最後の行が終わったのにラッパーが動いているレーンの（レーン, 最後の行）を載せる（#3173）。"""
+    return {**snap, "halts": [list(h) for h in halts]}
 
 
 def _skip(state: RunState) -> set[str]:
@@ -190,18 +204,19 @@ def _snap(state: RunState) -> dict[str, Any]:
 
 
 def _launches(snap: dict[str, Any]) -> list[Launch]:
-    """写しから作る起動の手。起こせる行を始める手・答えの後の next を打たせる手・実行中のスプリントを中止させる手
-    （それぞれ計画の並びの順）。"""
+    """写しから作る起動の手。終わったレーンのラッパーを止める手・起こせる行を始める手・答えの後の next を打たせる手・
+    実行中のスプリントを中止させる手（それぞれ計画の並びの順）。"""
     starts = [Launch(lane, row) for lane, row in snap["wakeable"]]
     resumes = [Launch(lane, row, resume=sid, seq=seq) for lane, row, sid, seq in snap["answered"]]
-    return starts + resumes + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
+    halts = [Launch(lane, row, halt=True) for lane, row in snap["halts"]]
+    return halts + starts + resumes + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
 
 
 def _candidates(state: RunState) -> list[Launch]:
     """起こしてよいレーンの手（計画の並びの順）。止めた計画では、実行中のスプリントを中止させる手になる。"""
     snap = _snap(state)
     cancelling = snap["state"] == CANCELLED
-    acts = [a for a in _launches(snap) if (a.cancel is not None) == cancelling]
+    acts = [a for a in _launches(snap) if a.halt or (a.cancel is not None) == cancelling]
     skip = _skip(state)
     return [a for a in acts if a.key not in skip]
 
@@ -210,17 +225,27 @@ def _finish(state: RunState, outcome: str) -> loop.Next[Act, RunState]:
     return loop.Next.finish(replace(state, outcome=outcome))
 
 
+def _end_of(snap: dict[str, Any]) -> Optional[str]:
+    """写しの計画が耐久ワークフローを終える状態なら、終わりの語。"""
+    if snap["state"] == COMPLETED:
+        return OUTCOME_COMPLETED
+    if snap["state"] == CANCELLED and not snap["running"]:
+        return OUTCOME_STOPPED
+    if snap["state"] == PAUSED and not snap["running"]:
+        return OUTCOME_PAUSED
+    return None
+
+
 def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     snap = _snap(state)
-    if snap["state"] == COMPLETED:
-        return _finish(state, OUTCOME_COMPLETED)
-    if snap["state"] == CANCELLED and not snap["running"]:
-        return _finish(state, OUTCOME_STOPPED)
-    if snap["state"] == PAUSED and not snap["running"]:
-        return _finish(state, OUTCOME_PAUSED)
+    found = _candidates(state) if snap["state"] in (RUNNING, PAUSED, CANCELLED, COMPLETED) else []
+    # 終わったレーンのラッパーは、計画を完了にする前と耐久ワークフローを終える前に止める（#3173）
+    halts = [a for a in found if a.halt]
+    end = _end_of(snap)
+    if end is not None:
+        return loop.Next.step(halts[0], state) if halts else _finish(state, end)
     if snap["state"] == RUNNING and snap["complete"]:
-        return loop.Next.step(Complete(), state)
-    found = _candidates(state) if snap["state"] in (RUNNING, PAUSED, CANCELLED) else []
+        return loop.Next.step(halts[0] if halts else Complete(), state)
     if snap["state"] == RUNNING and state.unreported:
         return loop.Next.step(Report(*state.unreported[0]), state)
     if found:
@@ -254,19 +279,23 @@ def _reopen_closed(state: RunState, snap: dict[str, Any]) -> RunState:
     )
 
 
-def _fail(state: RunState, lane: str, key: str, detail: str, policy: Policy, final: bool) -> RunState:
+def _fail(state: RunState, act: Launch, detail: str, policy: Policy, final: bool) -> RunState:
     """起動の失敗を 1 回数える。回数が尽きたか打ち直しても起こせない失敗なら `failed` に残し、計画が動いていれば
     知らせる前の起動（`unreported`）に置く（止めた計画の進行表へは依頼を書けない）。"""
+    lane, key = act.lane, act.key
     count = state.count(key) + 1
     attempts = tuple((k, n) for k, n in state.attempts if k != key) + ((key, count),)
     error = f"{key}: {detail}"
     state = replace(state, attempts=attempts, errors=(*state.errors, error))
     if count < policy.attempts and not final:
         return state
-    state = replace(state, failed=(*state.failed, key), final=(*state.final, key) if final else state.final)
+    # 尽きた止める手は打ち直さない（オーガナイザーが手で止めて依頼を閉じる。閉じた後に止め直して依頼を開き直さない）
+    gave_up = final or act.halt
+    state = replace(state, failed=(*state.failed, key), final=(*state.final, key) if gave_up else state.final)
     if _snap(state)["state"] == CANCELLED:
         return state
-    return replace(state, unreported=(*state.unreported, (lane, key, error, LAUNCH_FAILED)))
+    kind = HALT_FAILED if act.halt else LAUNCH_FAILED
+    return replace(state, unreported=(*state.unreported, (lane, key, error, kind)))
 
 
 def _notice_stalls(state: RunState) -> RunState:
@@ -298,7 +327,8 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
             waits.append((key, n))
     state = replace(state, launched=tuple(kept), waits=tuple(waits))
     for act in expired:
-        state = _fail(state, act.lane, act.key, f"起こした conductor が {policy.up:g} 秒の間に行を始めない", policy, False)
+        why = "止めたラッパーが {:g} 秒たっても動いている" if act.halt else "起こした conductor が {:g} 秒の間に行を始めない"
+        state = _fail(state, act, why.format(policy.up), policy, False)
     return state
 
 
@@ -306,7 +336,7 @@ def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: P
     state = replace(state, tried=(*state.tried, act.key))
     if value["ok"]:
         return replace(state, launched=(*state.launched, act.key), started=(*state.started, act.key))
-    return _fail(state, act.lane, act.key, value["detail"], policy, bool(value.get("final")))
+    return _fail(state, act, value["detail"], policy, bool(value.get("final")))
 
 
 def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[Act, RunState]:
