@@ -157,3 +157,49 @@ def test_screen_facts():
     assert observe.auth_failed(observe.plain(b"\x1b[31mPlease run /login\x1b[0m"))
     assert observe.auth_failed("Goal cleared after an unrecoverable error (authentication failed)")
     assert not observe.auth_failed("all good")
+
+
+# 現状固定（I-001）: 書き込みはどれも親の置き場を作り、同じ置き場の一時の名前から置き換え、一時の名前を残さない
+def _no_temporary(root: Path) -> list[Path]:
+    return [p for p in root.rglob("*") if p.name.endswith(".tmp")]
+
+
+def test_relay_writes_create_the_parent_and_leave_no_temporary_file(tmp_path, monkeypatch):
+    from ndf.domains.relay import hub
+
+    monkeypatch.setattr(signals, "now_iso", lambda: "2026-11-14T00:00:00+00:00")
+    state = tmp_path / "state"
+    path = state / "a" / "b" / "sig.json"
+    assert signals.write_json(path, {"k": "日本語"}, 0.1)
+    assert path.read_text(encoding="utf-8") == '{"k": "日本語"}'
+    assert signals.write_json(path, {"k": "後", "n": 1}, 0.1, keep=("k", "x"))
+    assert json.loads(path.read_text(encoding="utf-8")) == {"k": "日本語", "n": 1}
+    accounts.use(state, "main")
+    assert accounts.pin_path(state).read_text(encoding="utf-8") == '{"account": "main"}'
+    accounts.write_usages(state, [Usage("チーム", 1.5, False)])
+    assert accounts.usage_path(state).read_text(encoding="utf-8") == '{"accounts": [{"name": "チーム", "percent": 1.5, "limited": false}]}'
+    d = registry.wrapper_dir(state, "t1")
+    registry.write_state(d, {"state": "running", "reason": "区間 1"})
+    assert (d / registry.STATE_FILE).read_text(encoding="utf-8") == (
+        '{"state": "running", "reason": "区間 1", "at": "2026-11-14T00:00:00+00:00"}'
+    )
+    hub._save_registry(state, {"t1": {"cwd": "/w/作業"}})
+    assert (hub.hub_dir(state) / hub.REGISTRY_FILE).read_text(encoding="utf-8") == '{"version": 1, "entries": {"t1": {"cwd": "/w/作業"}}}'
+    assert hub.read_registry(state) == {"t1": {"cwd": "/w/作業"}}
+    m = marks.mark(state, "s1")
+    assert m.read_text(encoding="utf-8") == '{"session_id": "s1", "at": "2026-11-14T00:00:00+00:00"}'
+    assert _no_temporary(tmp_path) == []
+
+
+def test_install_writes_set_the_mode_and_leave_no_temporary_file(tmp_path):
+    from ndf.domains.relay import install
+
+    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_BIN_HOME": str(tmp_path / "bin"), "PATH": ""}
+    got = install.install(env, tmp_path / "plugin", 9, replace_foreign=False)
+    assert got.copy.path.stat().st_mode & 0o777 == 0o755
+    assert got.entry.path.stat().st_mode & 0o777 == 0o755
+    root_file = got.copy.path.parent / install.ROOT_FILE
+    assert root_file.stat().st_mode & 0o777 == 0o644
+    assert root_file.read_text(encoding="utf-8") == f"{tmp_path / 'plugin'}\n"
+    assert got.copy.path.read_text(encoding="utf-8") == install.launcher(9)
+    assert _no_temporary(tmp_path) == []
