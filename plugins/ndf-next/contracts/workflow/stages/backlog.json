@@ -1,0 +1,54 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "backlog",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "棚卸し",
+      "phase": "close",
+      "inputs": [
+        "issues"
+      ]
+    }
+  },
+  "do": [
+    {
+      "backlog": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "backlog-refinement"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "record",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

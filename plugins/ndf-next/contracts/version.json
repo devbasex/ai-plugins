@@ -2,6 +2,7 @@
   "summary": "保存されるデータが写し持つ契約（結果 JSON・選択の記録の形・止まった理由の種類・答えの語彙）の版。表ごとに版を持たず、この 1 つだけを持つ。契約を変えた PR は版を 1 つ上げ、今の指紋の行を末尾へ足す",
   "owner": "D1+（#3284 の追補。ndf.contracts）。D1 を閉じた後の契約（contracts/ と src/ndf/contracts/）の変更は、#3284 の追補の PR（Refs #3284）で出す",
   "history": [
-    {"version": 1, "sha256": "4da2b11aa67bdcbb807185bc5a4a0d3a21df4918e62f3a4715054d221399464e"}
+    {"version": 1, "sha256": "4da2b11aa67bdcbb807185bc5a4a0d3a21df4918e62f3a4715054d221399464e"},
+    {"version": 2, "sha256": "81fb36ea10a451a206c042e7a260b17ab6949fe9c5203391617648dc641286a2"}
   ]
 }

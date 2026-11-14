@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "progress.schema.json",
+  "title": "進行表の状態と事象の表",
+  "description": "contracts/workflow/progress.json の形。状態の語が表の中で食い違わないこと（from・state が row_states にあるなど）は、読み手（ndf.progress.model）が確かめる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "summary", "row_states", "table_states", "terminal", "labels", "actors", "events", "reason_required", "gates", "branch_prefixes"],
+  "properties": {
+    "version": {"const": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "row_states": {"type": "object", "additionalProperties": {"$ref": "#/$defs/names"}},
+    "table_states": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["initial", "states"],
+        "properties": {"initial": {"type": "string"}, "states": {"$ref": "#/$defs/names"}}
+      }
+    },
+    "terminal": {"$ref": "#/$defs/names"},
+    "labels": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "actors": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "kind", "actors", "scope"],
+        "properties": {
+          "level": {"enum": ["plan", "lane", "sprint"]},
+          "kind": {"type": "string", "pattern": "^[a-z][a-z_]*$"},
+          "actors": {"$ref": "#/$defs/names"},
+          "scope": {"enum": ["row", "table", "any"], "description": "row は行の鍵が要る事象、table は進行表全体の事象、any はどちらも書ける事象"},
+          "from": {"$ref": "#/$defs/names", "description": "行の事象を書ける今の行の状態。new はまだ無い行。無ければどの状態からでも書ける"},
+          "state": {
+            "description": "事象の後の状態。配列なら、下書きがそのどれかを持つ。無ければ状態を変えない",
+            "oneOf": [{"type": "string"}, {"$ref": "#/$defs/names"}]
+          }
+        }
+      }
+    },
+    "reason_required": {"$ref": "#/$defs/names"},
+    "gates": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "branch_prefixes": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[a-z]+/$"}}
+  },
+  "$defs": {
+    "names": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  }
+}
