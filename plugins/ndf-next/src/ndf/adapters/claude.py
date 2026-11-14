@@ -23,6 +23,10 @@ CLAUDE = "claude"
 DISABLED_PLUGINS: dict[str, bool] = {"ndf@ai-plugins": False}
 # full の起動で許す Tool
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
+# 起動の頭（問いを 1 回渡し、答えを JSON で受ける）
+PRINT_JSON = ["-p", "--output-format", "json"]
+# Tool を許す起動の許可のモード
+ACCEPT_EDITS = ["--permission-mode", "acceptEdits"]
 
 
 @dataclass(frozen=True)
@@ -49,12 +53,12 @@ def plugin_args(root: Path) -> list[str]:
 
 def minimal_args(system: str) -> list[str]:
     """最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）の `claude -p` の引数。"""
-    head = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
+    head = [*PRINT_JSON, "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
     return head + ["--disable-slash-commands", "--system-prompt", system]
 
 
 def _full_args(call: ClaudeCall, root: Path) -> list[str]:
-    args = ["-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--allowed-tools", FULL_TOOLS]
+    args = [*PRINT_JSON, *ACCEPT_EDITS, "--allowed-tools", FULL_TOOLS]
     args += plugin_args(root) + ["--append-system-prompt", call.system]
     return args + (["--resume", call.resume] if call.resume else [])
 
@@ -64,7 +68,7 @@ def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[st
     if call.full:
         args = _full_args(call, root if root is not None else identity.load().root)
     elif call.tools:
-        args = minimal_args(call.system) + ["--tools", call.tools, "--allowed-tools", call.tools, "--permission-mode", "acceptEdits"]
+        args = minimal_args(call.system) + ["--tools", call.tools, "--allowed-tools", call.tools, *ACCEPT_EDITS]
     else:
         args = minimal_args(call.system) + ["--tools", ""]
     if call.json_schema is not None:
