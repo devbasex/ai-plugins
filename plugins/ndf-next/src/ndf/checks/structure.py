@@ -22,6 +22,11 @@ def _within(module: str, prefixes: list[str]) -> bool:
     return any(module == p or module.startswith(p + ".") for p in prefixes)
 
 
+def _is_decide(module: str, conf: dict[str, Any]) -> bool:
+    """判断のモジュール（最後の名前が `decide_suffix` で終わる）か。"""
+    return module.rsplit(".", 1)[-1].endswith(conf["decide_suffix"])
+
+
 def _pointed(imp: imports.Import) -> list[str]:
     """import が指す名前。`from pkg import mod` は `pkg` と `pkg.mod` の両方を指す（`mod` がモジュールでも名前でも規則を当てる）。"""
     return [imp.module, *(f"{imp.module}.{n}" for n in imp.names if n != "*")]
@@ -36,7 +41,7 @@ def _import_findings(rel: str, module: str, imps: list[imports.Import], rules: d
     found = []
     layers = rules["layers"]
     mine = _layer(module, layers)
-    is_decide = module.rsplit(".", 1)[-1].endswith(rules["decide_suffix"])
+    is_decide = _is_decide(module, rules)
 
     def above(name: str) -> bool:
         theirs = _layer(name, layers)
@@ -80,7 +85,7 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
         module = module_name(scope, src)
         imps = imports.collect(src.tree, module, src.path.name == "__init__.py")
         found += _import_findings(src.rel, module, imps, conf)
-        if module.rsplit(".", 1)[-1].endswith(conf["decide_suffix"]):
+        if _is_decide(module, conf):
             found += _decide_calls(src.rel, src.tree, frozenset(conf["decide_forbidden_calls"]))
     return found
 
