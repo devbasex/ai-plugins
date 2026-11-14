@@ -26,6 +26,8 @@ class FactUnknown(Exception):
 WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
+# 差分の語（`diff_kinds` の鍵）
+DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
 
 def _dig(node: Any, *keys: str) -> Any:
@@ -86,7 +88,7 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
-        **{w: (lambda w=w: kinds()[w]) for w in ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")},
+        **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
         "ci_declared": lambda: _dig(command.declaration(cwd, command.PROJECT_FILE), "test", "ci", "only") is True,
         "prod_branch": lambda: bool(_dig(command.declaration(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
