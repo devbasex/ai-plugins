@@ -49,6 +49,16 @@ def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path):
     assert _dbos_importers(tmp_path, tmp_path) == {"plain.py", "alias_multi.py", "from_abs.py", "from_sub.py", "nested/deep.py"}
 
 
+def test_dbos_importers_uses_explicit_base(tmp_path, monkeypatch):
+    """相対パスの基準は、大域の PLUGIN_ROOT と異なる値を明示できる。"""
+    source_root = tmp_path / "src"
+    source_root.mkdir()
+    (source_root / "module.py").write_text("import dbos\n")
+    monkeypatch.setitem(globals(), "PLUGIN_ROOT", tmp_path / "other-plugin")
+
+    assert _dbos_importers(source_root, tmp_path) == {"src/module.py"}
+
+
 def test_only_durable_imports_dbos():
     importers = _dbos_importers(PLUGIN_ROOT / "src", PLUGIN_ROOT) | _dbos_importers(PLUGIN_ROOT / "tests", PLUGIN_ROOT)
     assert importers == {"src/ndf/core/durable.py"}
