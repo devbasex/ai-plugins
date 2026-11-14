@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from ndf import slot_pool
 
 OWNER = {"pid": os.getpid()}
+SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+CHILD_SECONDS = 30
+# 枠を取って番号を出し、返さずに終わる子
+TAKE_AND_EXIT = (
+    "import os, sys; from pathlib import Path; from ndf import slot_pool; "
+    "taken = slot_pool.take(Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), {'pid': os.getpid()}); "
+    "print(taken.index)"
+)
 
 
 def test_weights_add_up_to_the_capacity(tmp_path):
@@ -38,14 +49,27 @@ def test_owner_description_keeps_the_weight(tmp_path):
     taken.release()
 
 
+def _take_in_a_gone_owner(directory: Path, capacity: int, weight: int) -> int:
+    """子プロセスで枠を取り、返さずに終わらせる（記述を残して持ち主が消えた形）。取った番号を返す。"""
+    env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
+    done = subprocess.run(
+        [sys.executable, "-c", TAKE_AND_EXIT, str(directory), str(capacity), str(weight)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=CHILD_SECONDS,  # 時間切れなら run が子を止めて TimeoutExpired を送る
+        check=True,
+    )
+    return int(done.stdout)
+
+
 def test_an_owner_whose_lock_is_free_is_not_counted(tmp_path):
-    # 持ち主のプロセスが記述を残して消えるとカーネルがロックを解く（解ける所は testing の test_slots が確かめる）
-    taken = slot_pool.take(tmp_path, 1024, 1024, OWNER)
-    taken._lock.release()
-    assert slot_pool.slot_path(tmp_path, taken.index, ".json").exists()
+    # 持ち主のプロセスが記述を残して消えるとカーネルがロックを解く
+    index = _take_in_a_gone_owner(tmp_path, 1024, 1024)
+    assert slot_pool.slot_path(tmp_path, index, ".json").exists()
     assert slot_pool.held_mib(tmp_path) == 0
     again = slot_pool.take(tmp_path, 1024, 1024, OWNER)
-    assert again is not None and again.index == taken.index
+    assert again is not None and again.index == index
     again.release()
 
 
