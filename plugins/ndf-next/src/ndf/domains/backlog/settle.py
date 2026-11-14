@@ -106,13 +106,13 @@ def settle(gh: GitHub, rows: list[Row], base: str, cwd: Path, dry_run: bool) -> 
     for row in rows:
         item = {"kind": "issue", "name": f"#{row.issue}", "issue": row.issue, "child": row.child, "evidence": row.kind}
         if issues_gh.issue_state(gh, row.issue) == "closed":
-            out.append({**item, "result": "already_closed"})
+            out.append({**item, "result": sd.ALREADY_CLOSED})
             continue
         why = check(gh, row, base, cwd)
         if why is not None:
-            out.append({**item, "result": "unverified", "reason": why})
+            out.append({**item, "result": sd.UNVERIFIED, "reason": why})
             continue
         if not dry_run:
             issues_gh.close_with_comment(gh, row.issue, sd.comment(row))
-        out.append({**item, "result": "verified" if dry_run else "closed"})
+        out.append({**item, "result": sd.VERIFIED if dry_run else sd.CLOSED})
     return out

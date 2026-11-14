@@ -388,18 +388,15 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
 def cmd_settle(a: argparse.Namespace) -> dict[str, Any]:
     try:
         rows, bad = settle_decide.parse(_read_json(a.file))
-        for row in rows:
-            if row.kind == settle_decide.IMPROVED:
-                settle_decide.test_target(row.evidence["test"])
     except ValueError as exc:
         raise Stop("invalid", str(exc)) from exc
     repo = _repo(a)
     gh = hub(repo)
     base = a.base if a.base else settle.default_branch(gh)
-    items = [{"kind": "issue", "name": f"#{b['issue']}", "result": "unverified", **b} for b in bad]
+    items = [{"kind": "issue", "name": f"#{b['issue']}", "result": settle_decide.UNVERIFIED, **b} for b in bad]
     items += settle.settle(gh, rows, base, Path.cwd(), a.dry_run)
-    left = [i for i in items if i["result"] == "unverified"]
-    done = sum(1 for i in items if i["result"] in ("closed", "verified"))
+    left = [i for i in items if i["result"] == settle_decide.UNVERIFIED]
+    done = sum(1 for i in items if i["result"] in (settle_decide.CLOSED, settle_decide.VERIFIED))
     summary = f"証拠を確かめた Issue {done} 件を{'確かめた（閉じていない）' if a.dry_run else '閉じた'}"
     if left:
         raise Stop("refused", f"{summary}。証拠を確かめられない {len(left)} 件は閉じていない（IY5）", items)

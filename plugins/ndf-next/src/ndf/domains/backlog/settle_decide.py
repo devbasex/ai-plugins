@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Any, NamedTuple, Optional
 
 IMPROVED, REMOVED, NOT_REPRODUCED = "improved", "removed", "not_reproduced"
+# 行の結果: 閉じた・確かめた（--dry-run）・確かめられない・前から閉じていた
+CLOSED, VERIFIED, UNVERIFIED, ALREADY_CLOSED = "closed", "verified", "unverified", "already_closed"
 # 種類ごとの必須の鍵と型
 SHAPES: dict[str, dict[str, type]] = {
     IMPROVED: {"pr": int, "test": str},
@@ -48,7 +50,7 @@ def _shape_error(e: Any) -> Optional[str]:
 
 
 def parse(raw: Any) -> tuple[list[Row], list[dict[str, Any]]]:
-    """入力の JSON を行と、形の違う行（番号と理由）に分ける。"""
+    """入力の JSON を行と、形の違う行（番号と理由）に分ける。改善の証拠のテストのノード ID の形が違えば `ValueError`。"""
     if not isinstance(raw, dict) or not isinstance(raw.get("settle"), list):
         raise ValueError('入力は {"settle": [...]} の形で書く')
     rows: list[Row] = []
@@ -60,6 +62,9 @@ def parse(raw: Any) -> tuple[list[Row], list[dict[str, Any]]]:
             continue
         child = e["child"] if isinstance(e.get("child"), str) else ""
         rows.append(Row(e["issue"], child, e["evidence"]["kind"], e["evidence"]))
+    for row in rows:
+        if row.kind == IMPROVED:
+            test_target(row.evidence["test"])
     return rows, bad
 
 
