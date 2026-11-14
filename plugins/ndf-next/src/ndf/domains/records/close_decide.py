@@ -4,8 +4,6 @@
   （フラグの付け忘れで不合格の課題を閉じない）
 - 後片付けの工程の記録: 課題の本文の進行の節で、工程「後片付け」の行が未チェックならチェックを付ける。記録済みなら
   打ち直さない
-- gws の認証: クライアントの設定だけがありトークンが無い状態（`credential_source` が `none` か `client_secret.json`）は
-  未認証。トークンを環境変数で渡した状態は `auth_method: none` を返しても認証済み
 """
 
 from __future__ import annotations
@@ -54,11 +52,3 @@ def mark_stage(body: str, stage: str, stamp: str) -> Optional[str]:
     if m is None or m.group(1) == "x":
         return None
     return body[: m.start()] + f"- [x] {stage} — {stamp}" + body[m.end() :]
-
-
-def gws_authenticated(status: Mapping[str, Any], token_in_env: bool) -> bool:
-    """`gws auth status` の結果から認証済みかを決める。"""
-    if token_in_env:
-        return True
-    # クライアントの設定だけでトークンの無い認証の出所（gws auth status の credential_source の値）
-    return status.get("credential_source") not in ("none", "client_secret.json")
