@@ -1,0 +1,13 @@
+{
+  "template": "worktree",
+  "purpose": "worktree",
+  "summary": "作業場所の用意: worker がスプリントのブランチと作業場所を用意し、結果の outputs に worktree と branch を返す",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "worktree",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "worktree"]}
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "template": "pr",
+  "purpose": "pull_request",
+  "summary": "Pull Request: push → PR（題と本文はコミットから。既にあれば作らずにその番号を返す）。結果の outputs に PR の番号（pr）を返す",
+  "params": ["repo", "worktree", "branch", "base", "worker"],
+  "plan": {
+    "name": "pr-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "push", "on_fail": "fix-push"},
+      {"id": "pr", "run": ["sh", "-c", "gh pr create --base \"$1\" --head \"$0\" --fill >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}", "{{base}}"], "probe": ["sh", "-c", "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}], \"outputs\": {\"pr\": %s}}\\n' \"$n\" \"$n\" \"$n\"", "{{branch}}"], "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

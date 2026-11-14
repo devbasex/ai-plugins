@@ -1,0 +1,13 @@
+{
+  "template": "merged",
+  "purpose": "merged",
+  "summary": "後片付け: ブランチのマージ済みの PR を引き、マージの後の後片付け（作業場所・ブランチ・取り込み）をリポジトリの根で打つ",
+  "params": ["repo", "branch"],
+  "plan": {
+    "name": "merged-{{branch}}",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "merged", "run": ["sh", "-c", "n=$(gh pr list --head \"$0\" --state merged --json number --jq '.[0].number // empty') || exit 2; [ -n \"$n\" ] || exit 2; ndf worktree merged \"$n\"", "{{branch}}"], "exit_cause": {"2": "precondition"}}
+    ]
+  }
+}
