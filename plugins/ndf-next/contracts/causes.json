@@ -31,6 +31,7 @@
     {"kind": "store_in_use", "meaning": "排他が要る操作（置き場の退避・進行表の DB の戻し・実行の鍵のロック）で、ほかのプロセスが置き場か DB か鍵を持っていた。何も変えていない（待ちの上限に当たったときは持ち主のホスト・pid・時刻を添える）", "std_type": "runtime", "exit": "precondition", "route": "human", "retry": null},
     {"kind": "restore_unsupported", "meaning": "PostgreSQL の URL で進行表の DB の戻しを求めた。控えと戻しは DB の運用で行う", "std_type": "configuration", "exit": "precondition", "route": "human", "retry": null},
     {"kind": "format_newer", "meaning": "置き場・進行表の表・耐久の記録の形の版が自分より新しい。何も書いていない。新しい NDF で打ち直す", "std_type": "configuration", "exit": "unreadable", "route": "human", "retry": null},
+    {"kind": "format_mismatch", "meaning": "計画が記録した形の番号（置き場・耐久の記録・進行表の表の版）が自分のものと違い、レーンを起動しなかった。計画と同じ形の NDF で打ち直す", "std_type": "configuration", "exit": "unreadable", "route": "human", "retry": null},
     {"kind": "unknown", "meaning": "種類を決められない（例外・結果 JSON を出さない外部のコマンド）", "std_type": "runtime", "exit": "failed", "route": "conductor", "retry": null}
   ]
 }

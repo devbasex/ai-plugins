@@ -61,7 +61,7 @@ def _without_userinfo(url: str) -> str:
     return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
 
 
-def _repo(cwd: Path, root: Path) -> str:
+def repo_id(cwd: Path, root: Path) -> str:
     """リポジトリの識別。origin の URL（userinfo を外す）、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
     try:
         return _without_userinfo(Git(cwd).run("remote", "get-url", "origin").strip())
@@ -308,7 +308,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     snap = definition.load_definition(a.mode)
     doc, drafts = _prepare_new(a, cwd, snap)
     with store.transaction(st) as conn:
-        tid = store.create_table(conn, ("sprint", _repo(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, events = _current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]

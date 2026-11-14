@@ -42,7 +42,7 @@ def test_sha_matches_refuses_values_that_are_not_shas(expected: str, actual: str
 def test_rev_parse_returns_full_sha() -> None:
     runner = _fake(stdout=FULL + "\n")
     assert git.Git(runner=runner).rev_parse("2bb66a6c1") == FULL
-    assert runner.calls == [["rev-parse", "--verify", "--quiet", "2bb66a6c1^{commit}"]]
+    assert runner.calls == [["rev-parse", "--verify", "--quiet", "--end-of-options", "2bb66a6c1^{commit}"]]
 
 
 def test_run_raises_with_exit_code_and_stderr() -> None:
@@ -115,6 +115,63 @@ def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda g, v: g.merge_base(v, "main"),
+        lambda g, v: g.merge_base("main", v),
+        lambda g, v: g.is_ancestor(v, "main"),
+        lambda g, v: g.rev_parse(v),
+        lambda g, v: g.changed_files(v, "main"),
+        lambda g, v: g.changed_lines(v, "main"),
+        lambda g, v: g.remote_repo(v),
+        lambda g, v: g.log_of(v, "-1", "--format=%ct"),
+        lambda g, v: g.log_of(f"{v}..HEAD", "--format=%s"),
+        lambda g, v: g.diff_between(v, "HEAD", "--no-renames", "-U0"),
+    ],
+)
+def test_ref_that_starts_with_a_dash_is_not_read_as_an_option(tmp_path: Path, call) -> None:
+    # 3364-7: git へ渡す ref は `--` か `--end-of-options` の後に置く。`--output=<パス>` は option なら書き込みが起きる
+    repo, _ = _init_repo(tmp_path, {"a.txt": "a\n"})
+    planted = tmp_path / "planted"
+    with pytest.raises(git.GitError):
+        call(git.Git(cwd=repo), f"--output={planted}")
+    assert not planted.exists()
+
+
+def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path) -> None:
+    # 3364-7: `--force` は option なら手元の変更を捨てて HEAD を外す。ref として読めば失敗し、変更も HEAD も残る
+    repo, _ = _init_repo(tmp_path, {"a.txt": "a\n"})
+    (repo / "a.txt").write_text("手元の変更\n")
+    assert git.Git(cwd=repo).checkout_detached("--force").returncode != 0
+    assert (repo / "a.txt").read_text() == "手元の変更\n"
+    assert _git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+
+
+def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
+    # 3364-7: checkout は版によって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
+    repo, base = _init_repo(tmp_path, {"a.txt": "a\n"})
+    done = git.Git(cwd=repo).checkout_detached("main")
+    assert done.returncode == 0, done.stderr
+    assert _git(repo, "rev-parse", "HEAD") == base
+
+
+def test_merge_ff_puts_the_ref_after_end_of_options() -> None:
+    runner = _fake()
+    git.Git(runner=runner).merge_ff("origin/develop")
+    assert runner.calls == [["merge", "--ff-only", "-q", "--end-of-options", "origin/develop"]]
+
+
+def test_has_ref_and_fetch_do_not_read_a_dash_value_as_an_option(tmp_path: Path) -> None:
+    # 3364-7: `--head` は option なら HEAD を見せて真になる。`--upload-pack` は option ならコマンドを打つ
+    repo, _ = _init_repo(tmp_path, {"a.txt": "a\n"})
+    planted = tmp_path / "planted"
+    g = git.Git(cwd=repo)
+    assert g.has_ref("--head") is False
+    assert g.fetch(f"--upload-pack=touch {planted}", "x").returncode != 0
+    assert not planted.exists()
+
+
 def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_path: Path) -> None:
     # #3087: リリースの PR 2 本が同じ版のファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
     repo, base = _init_repo(tmp_path, {"VERSION": "1.0.0\n"})
@@ -165,7 +222,7 @@ def test_run_failure_message_names_command_and_stderr() -> None:
 def test_rev_parse_failures() -> None:
     with pytest.raises(git.GitError) as exc:
         git.Git(runner=_fake_cwd(1)).rev_parse("x")
-    assert str(exc.value) == "git rev-parse --verify --quiet x^{commit} が失敗（終了コード 1）: "
+    assert str(exc.value) == "git rev-parse --verify --quiet --end-of-options x^{commit} が失敗（終了コード 1）: "
     with pytest.raises(git.GitError) as exc:
         git.Git(runner=_fake_cwd(stdout="abc\n")).rev_parse("x")
     assert str(exc.value) == "x をコミットへ解決できない: 'abc'"
@@ -174,7 +231,7 @@ def test_rev_parse_failures() -> None:
 def test_is_ancestor_passes_args_and_cwd_and_failure_message() -> None:
     runner = _fake_cwd(0)
     assert git.Git(Path("/w"), runner).is_ancestor("a", "b") is True
-    assert runner.calls == [(["merge-base", "--is-ancestor", "a", "b"], Path("/w"))]
+    assert runner.calls == [(["merge-base", "--is-ancestor", "--", "a", "b"], Path("/w"))]
     with pytest.raises(git.GitError) as exc:
         git.Git(runner=_fake_cwd(128, stderr="oops\n")).is_ancestor("a", "b")
     assert str(exc.value) == "祖先を確かめられない（終了コード 128）: oops"
@@ -183,20 +240,22 @@ def test_is_ancestor_passes_args_and_cwd_and_failure_message() -> None:
 def test_merge_base_strips_output() -> None:
     runner = _fake_cwd(stdout=" abc \n")
     assert git.Git(runner=runner).merge_base("a", "b") == "abc"
-    assert runner.calls == [(["merge-base", "a", "b"], None)]
+    assert runner.calls == [(["merge-base", "--", "a", "b"], None)]
 
 
 def test_changed_files_splits_on_nul() -> None:
     runner = _fake_cwd(stdout="a\0b c\0\0")
     assert git.Git(Path("/w"), runner).changed_files("b", "h") == ["a", "b c"]
-    assert runner.calls == [(["diff", "--name-only", "-z", "b...h"], Path("/w"))]
+    assert runner.calls == [(["diff", "--name-only", "-z", "--end-of-options", "b...h"], Path("/w"))]
 
 
 def test_changed_lines_with_fake_log_excludes_short_sha_case_insensitively() -> None:
     log = f"@{'a' * 40}\n\n 1 file changed, 2 insertions(+)\n@{'b' * 40}\n\n 1 file changed, 3 deletions(-)\n"
     runner = _fake_cwd(stdout=log)
     assert git.Git(runner=runner).changed_lines("b", "h", exclude=["BBBBBBB"]) == 2
-    assert runner.calls == [(["log", "--first-parent", "--diff-merges=first-parent", "--shortstat", "--format=@%H", "b..h"], None)]
+    assert runner.calls == [
+        (["log", "--first-parent", "--diff-merges=first-parent", "--shortstat", "--format=@%H", "--end-of-options", "b..h"], None)
+    ]
     assert git.Git(runner=_fake_cwd(stdout=log)).changed_lines("b", "h") == 5
 
 
@@ -213,16 +272,16 @@ def test_worktrees_reads_porcelain_z() -> None:
 def test_fetch_returns_completed_without_raising() -> None:
     runner = _fake_cwd(1, stderr="no remote")
     assert git.Git(Path("/w"), runner).fetch("origin", "a:b") == git.Completed(1, "", "no remote")
-    assert runner.calls == [(["fetch", "-q", "--no-tags", "origin", "a:b"], Path("/w"))]
+    assert runner.calls == [(["fetch", "-q", "--no-tags", "--", "origin", "a:b"], Path("/w"))]
 
 
 def test_remote_repo_passes_remote_name_and_propagates_failure() -> None:
     runner = _fake_cwd(stdout="git@github.com:o/n.git\n")
     assert git.Git(runner=runner).remote_repo("up") == "o/n"
-    assert runner.calls == [(["remote", "get-url", "up"], None)]
+    assert runner.calls == [(["remote", "get-url", "--", "up"], None)]
     with pytest.raises(git.GitError) as exc:
         git.Git(runner=_fake_cwd(2, stderr="no such remote")).remote_repo("up")
-    assert str(exc.value) == "git remote get-url up が失敗（終了コード 2）: no such remote"
+    assert str(exc.value) == "git remote get-url -- up が失敗（終了コード 2）: no such remote"
 
 
 def test_run_git_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -332,7 +391,7 @@ def test_has_ref_reads_exit_code(code: int, expected: bool) -> None:
         return git.Completed(code, "", "")
 
     assert git.Git(Path("/w"), runner).has_ref("refs/heads/x") is expected
-    assert calls == [(["show-ref", "--verify", "--quiet", "refs/heads/x"], Path("/w"))]
+    assert calls == [(["show-ref", "--verify", "--quiet", "--", "refs/heads/x"], Path("/w"))]
 
 
 def test_has_ref_raises_on_git_failure() -> None:

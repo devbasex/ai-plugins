@@ -15,7 +15,14 @@ from ndf.progress import command, invoke, model, run, store
 
 def values(cwd: Path, branch: str) -> dict:
     """偽の作業が出す文脈の値の組（工程の定義の outputs の鍵の値）。"""
-    return {"worktree": str(cwd), "branch": branch, "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}, "version": "11.0.0"}
+    return {
+        "worktree": str(cwd),
+        "branch": branch,
+        "design_pr": 7,
+        "pr": 8,
+        "delivery": {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True},
+        "version": "11.0.0",
+    }
 
 
 def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:
@@ -70,7 +77,7 @@ def lane(url: str, root: str, cwd: str, name: str, rounds: int, barrier, out) ->
     """全員がそろってから、`rounds` 回のスプリントを流し、(名前, busy の回数, 完了した数) を `out` へ置く。"""
     here = Path(cwd)
     env = _env(here)
-    repo = command._repo(here, Path(root))
+    repo = command.repo_id(here, Path(root))
     barrier.wait()
     busy = done = 0
     for i in range(rounds):

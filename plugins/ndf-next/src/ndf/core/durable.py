@@ -121,7 +121,7 @@ LOG_LEVEL = "WARNING"
 FORMAT = 1
 # 耐久ワークフローの関数（`@durable.workflow` を付けた src の関数）のソースの sha256。
 # 関数を変えたら、FORMAT を上げるか、呼び出しの順が変わらないと判断してこの値だけを書き直す
-FORMAT_SOURCE_HASH = "b6f5d4bfd2a6feaae158c86aa015f49b2372ce0c7709dabd788a6b648d9d26d3"
+FORMAT_SOURCE_HASH = "15db4cc3f838e5731ec1ac208ee114cb0666311953793bb6f45a88f92ca71034"
 # チェックアウトの置き場の `format.json` の番号（決定 85）
 STORE_FORMAT = 1
 # 鍵の名前の接頭辞。名前の形を決めるだけで、URL の片付けの絞り込みには使わない（絞るのは台帳）

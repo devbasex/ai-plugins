@@ -29,6 +29,10 @@ HEADS = "refs/heads/"
 ORIGIN = "origin"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
+# ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
+# （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
+# 前に置き、checkout は SHA へ解決してから渡し、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
+END_OF_OPTIONS = "--end-of-options"
 
 
 class GitError(Exception):
@@ -160,13 +164,13 @@ class Git:
 
     def rev_parse(self, ref: str) -> str:
         """参照（短い SHA・ブランチ・タグ）をコミットの完全な SHA へ解決する（#2041）。"""
-        sha = self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip()
+        sha = self.run("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}").strip()
         if not FULL_SHA.match(sha):
             raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
         return sha
 
     def merge_base(self, a: str, b: str) -> str:
-        return self.run("merge-base", a, b).strip()
+        return self.run("merge-base", "--", a, b).strip()
 
     def _probe(self, what: str, *args: str) -> bool:
         """真偽を終了コードで返す探り（0 は真・1 は偽）。それ以外は `GitError`（`what` を確かめられない）。"""
@@ -177,11 +181,35 @@ class Git:
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         """`ancestor` が `descendant` の祖先か。git の失敗（終了コード 1 以外）は `GitError`。"""
-        return self._probe("祖先", "merge-base", "--is-ancestor", ancestor, descendant)
+        return self._probe("祖先", "merge-base", "--is-ancestor", "--", ancestor, descendant)
 
     def has_ref(self, ref: str) -> bool:
         """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
-        return self._probe("参照", "show-ref", "--verify", "--quiet", ref)
+        return self._probe("参照", "show-ref", "--verify", "--quiet", "--", ref)
+
+    def log_of(self, rev: str, *options: str) -> str:
+        """`git log <options> <rev>` の標準出力。`rev` は ref か範囲（`a..b`）で、option として読ませない（3364-7）。"""
+        return self.run("log", *options, END_OF_OPTIONS, rev)
+
+    def diff_between(self, a: str, b: str, *options: str) -> str:
+        """`git diff <options> <a> <b>` の標準出力。`a`・`b` を option として読ませない（3364-7）。"""
+        return self.run("diff", *options, END_OF_OPTIONS, a, b)
+
+    def checkout_detached(self, ref: str) -> Completed:
+        """`ref` へ detached HEAD で移る。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
+
+        checkout は版によって `END_OF_OPTIONS` を ref の側へ残して正しい ref でも失敗する（git 2.43 の
+        parse-options）。先に `rev_parse` で完全な SHA へ解決し、16 進の SHA だけを渡す。SHA は `-` で始まらない。
+        """
+        try:
+            sha = self.rev_parse(ref)
+        except GitError as e:
+            return Completed(128, "", str(e))
+        return self.attempt("checkout", "-q", "--detach", sha)
+
+    def merge_ff(self, ref: str) -> Completed:
+        """`ref` を fast-forward だけで取り込む。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
+        return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。
@@ -189,7 +217,7 @@ class Git:
         `-z` で NUL 区切りに読む。改行区切りでは、既定の `core.quotePath` が日本語・タブ・引用符を含むパスを
         引用・エスケープした文字列のまま返し、呼び手が実際のファイルを開けない。
         """
-        return [p for p in self.run("diff", "--name-only", "-z", f"{base}...{head}").split("\0") if p]
+        return [p for p in self.run("diff", "--name-only", "-z", END_OF_OPTIONS, f"{base}...{head}").split("\0") if p]
 
     def changed_lines(self, base: str, head: str, exclude: Iterable[str] = ()) -> int:
         """`base..head` の first-parent の各コミットの変更行数の和。`exclude` のコミットの分は数えない（#3087）。
@@ -199,7 +227,13 @@ class Git:
         `exclude` は完全か短い SHA で、1 回の `git log` で数える。
         """
         log_text = self.run(
-            "log", "--first-parent", "--diff-merges=first-parent", "--shortstat", f"--format={_COMMIT_MARK}%H", f"{base}..{head}"
+            "log",
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--shortstat",
+            f"--format={_COMMIT_MARK}%H",
+            END_OF_OPTIONS,
+            f"{base}..{head}",
         )
         drop = [e.strip().lower() for e in exclude]
         per_commit = first_parent_lines(log_text)
@@ -212,7 +246,7 @@ class Git:
 
     def remote_repo(self, remote: str = ORIGIN) -> str:
         """リモートの `<所有者>/<リポジトリ>`。GitHub の URL でなければ `GitError`。"""
-        url = self.run("remote", "get-url", remote).strip()
+        url = self.run("remote", "get-url", "--", remote).strip()
         repo = repo_of_url(url)
         if repo is None:
             raise GitError(f"リモート {remote} は GitHub のリポジトリでない: {url}")
@@ -232,7 +266,7 @@ class Git:
         既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
         `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
         """
-        return self.attempt("fetch", "-q", "--no-tags", remote, *refspecs)
+        return self.attempt("fetch", "-q", "--no-tags", "--", remote, *refspecs)
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
         """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""

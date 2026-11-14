@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import cli as plan_cli
@@ -54,9 +55,41 @@ def test_resolve_inputs_refuses_values_of_the_wrong_shape(values):
         invoke.resolve_inputs(_stage("コードレビュー"), values)
 
 
-def test_delivery_must_not_be_empty():
-    assert invoke.value_errors({"delivery": {}})
-    assert not invoke.value_errors({"delivery": {"kind": "plugin"}})
+# .ndf/project.json の delivery の 1 行（このリポジトリの宣言と同じ形）
+DELIVERY = {
+    "target": "ndf プラグイン",
+    "kind": "auto",
+    "trigger": ".github/workflows/release-cd.yml",
+    "channel": "production",
+    "versioned": True,
+    "publishes_release": True,
+    "result": {"workflow": "release-cd.yml"},
+}
+
+
+def test_delivery_of_the_declared_shape_passes():
+    assert not invoke.value_errors({"delivery": DELIVERY})
+    assert not invoke.value_errors({"delivery": {**DELIVERY, "kind": "manual", "channel": None, "branch": "release/x", "result": None}})
+
+
+@pytest.mark.parametrize(
+    "delivery",
+    [
+        {},
+        {"kind": "plugin"},
+        {**DELIVERY, "kind": "plugin"},
+        {**DELIVERY, "channel": "prod"},
+        {**DELIVERY, "target": 3},
+        {**DELIVERY, "branch": "-rf"},
+        {**DELIVERY, "versioned": "yes"},
+        {**DELIVERY, "result": {"workflow": 1}},
+        {**DELIVERY, "unknown": 1},
+        {k: v for k, v in DELIVERY.items() if k != "target"},
+    ],
+)
+def test_delivery_of_the_wrong_shape_is_refused(delivery):
+    # 3364-7: デプロイの経路になる値は、空でないかだけでなく鍵の型と kind・channel の取りうる値を確かめる
+    assert invoke.value_errors({"delivery": delivery})
 
 
 def test_stage_run_refuses_an_unknown_call_and_a_missing_name():
@@ -173,6 +206,192 @@ def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch
     _plan_template(monkeypatch, params=("worktree",))
     got = invoke.invoke(_plan_run({"issues": [1]}), tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "invalid" and "worktree" in got.cause["detail"]
+
+
+def _sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
+    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先は宣言の base_branch、`project` は `.ndf/project.json`。"""
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(repo)], check=True)
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
+    if project is not None:
+        (repo / ".ndf" / "project.json").write_text(json.dumps(project))
+    return repo
+
+
+PROJECT = {
+    "test": {"suites": [{"name": "pytest", "command": "pytest -q"}, {"name": "lint", "kind": "lint", "command": "ruff check"}]},
+    "ci": {"required_checks": ["pytest", "lint"]},
+    "workflow": {"launch": {"review": ["ndf-review"], "rebuild": ["ndf-rebuild"]}},
+}
+# 雛形 → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
+STAGE_INPUTS = {"design": ("issues", "worktree"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
+
+
+def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
+    inputs = {"issues": issues, "worktree": str(repo), "mode": "light"}
+    return invoke.StageRun(invoke.PLAN, name, {k: inputs[k] for k in STAGE_INPUTS[name]}, (), "none", name)
+
+
+@pytest.mark.parametrize(
+    ("name", "missing"),
+    [
+        ("design", {"title", "body_file", "worker", "rebuild", "review", "required"}),
+        ("impl", {"title", "body_file", "test_command", "worker", "required"}),
+        ("design-merge", {"worker", "gate"}),
+    ],
+)
+def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):
+    # PR 3464 の指摘（#3092）: 雛形の必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に invalid で止まる。
+    # 出所（課題・宣言・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
+    repo = _sprint_repo(tmp_path)
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid"
+    named = {i["key"]: i["source"] for i in got.report["items"]}
+    assert set(named) >= missing and "branch" not in named
+    assert all(n in got.cause["detail"] for n in missing)
+    assert named.get("worker") == invoke.FROM_DEFAULT and named.get("title", invoke.FROM_ISSUE) == invoke.FROM_ISSUE
+
+
+@pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
+def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defaults(tmp_path, monkeypatch, name):
+    # #3092: 課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、
+    # worker と承認ゲートの起動は params.json の既定から埋め、ブランチは作業場所から決める
+    repo = _sprint_repo(tmp_path, PROJECT)
+    defaults = {"worker": ["ndf-worker"], "gate": ["ndf-gate"]}
+    held = route.params()
+    patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
+    monkeypatch.setattr(route, "params", lambda: patched)
+    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    work = tmp_path / "w"
+    work.mkdir()
+    run = _stage_run_of(name, repo, [3092])
+    argv = invoke.plan_argv(run, work, None, repo)
+    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
+    text = json.dumps(plan, ensure_ascii=False)
+    assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
+    assert "ndf-worker" in text and "{{" not in text
+    t = route.templates()[name]
+    if "title" in t.params:
+        assert "#3092 の題" in text
+        body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
+        assert body.read_text() == "#3092 の本文" and str(body) in text
+    if "test_command" in t.params:
+        assert "pytest -q" in text and "ruff check" not in text
+    if "required" in t.params:
+        assert "--required=pytest" in text and "--required=lint" in text
+    if "review" in t.params:
+        assert "ndf-review" in text and "ndf-rebuild" in text
+    if "gate" in t.params:
+        assert "ndf-gate" in text
+
+
+def test_test_command_joins_every_test_suite_in_declared_order():
+    # PR 3469（lr-flow の C3 の保留分）: テストの suite が複数あれば、宣言の順に && でつないだ 1 つのコマンドにする。
+    # テストでない suite（kind が lint）と command の無い suite は入れない
+    suites = [
+        {"name": "unit", "command": "pytest -q tests/unit"},
+        {"name": "lint", "kind": "lint", "command": "ruff check"},
+        {"name": "empty", "kind": "test"},
+        {"name": "e2e", "kind": "test", "command": "pytest -q tests/e2e"},
+    ]
+    got = invoke._project_value("test_command", {"test": {"suites": suites}})
+    assert got == "pytest -q tests/unit && pytest -q tests/e2e"
+    assert invoke._project_value("test_command", {"test": {"suites": suites[1:3]}}) is None
+
+
+def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
+    # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
+    # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda place, n: None)
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid"
+    named = {i["key"]: i["source"] for i in got.report["items"]}
+    assert named["title"] == invoke.FROM_UNTRUSTED_ISSUE and named["body_file"] == invoke.FROM_UNTRUSTED_ISSUE
+    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+
+
+def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
+    # PR 3469 の指摘: プランを描き直すたび（承認の答え・続き・打ち直し）に課題を GitHub から読み直さない。
+    # 途中で題が直されてもプランは同じで、終わっていない回へ同じ鍵で届く
+    repo = _sprint_repo(tmp_path, PROJECT)
+    reads = []
+
+    def read(place, n):
+        reads.append(n)
+        return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
+
+    monkeypatch.setattr(invoke, "issue_text", read)
+    work = tmp_path / "w"
+    work.mkdir()
+    run = _stage_run_of("impl", repo, [3092])
+    first = invoke._issue_values(run, work, repo)
+    again = invoke._issue_values(run, work, repo)
+    assert reads == [3092] and first == again and first["title"] == "#3092 の題（1 回目）"
+    assert Path(first["body_file"]).read_text() == "#3092 の本文（1 回目）"
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (github.GitHubError("上限", status=403, retry_after=60.0, quota="rest"), "transient"),
+        (github.GitHubError("5xx", status=502), "transient"),
+        (github.GitHubError("届かない", unreached=True), "transient"),
+        (github.GitHubError("認証が無い"), "precondition"),
+        (invoke.GitError("リモートが無い"), "precondition"),
+    ],
+)
+def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values(tmp_path, monkeypatch, error, kind):
+    # PR 3469 の指摘: 課題を読めない失敗を「題と本文が無い」（打ち直せない invalid）に変えず、理由を添えて
+    # 打ち直せる失敗（不達・5xx・上限）は transient、ほか（認証が無い・リモートが無い）は precondition で止める
+    repo = _sprint_repo(tmp_path, PROJECT)
+
+    def fail(place, n):
+        raise error
+
+    monkeypatch.setattr(invoke, "issue_text", fail)
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == kind
+    assert str(error) in got.cause["detail"]
+    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+
+
+def test_the_issue_text_is_withheld_unless_the_author_is_trusted(monkeypatch):
+    # #3364: 課題の題と本文は、`GitHub.trusts` が真の書き手のときだけ返す
+    authored = github.Authored("someone", "NONE", "本文")
+
+    class Hub:
+        def __init__(self, repo, client):
+            pass
+
+        def issue_text(self, number):
+            return "題", authored
+
+        def trusts(self, a):
+            return a.association == "OWNER"
+
+    monkeypatch.setattr(invoke.github, "GitHub", Hub)
+    monkeypatch.setattr(invoke.github, "client", lambda: None)
+    monkeypatch.setattr(invoke.git.Git, "remote_repo", lambda self: "o/r")
+    assert invoke.issue_text(Path("."), 1) is None
+    authored = github.Authored("owner", "OWNER", "本文")
+    assert invoke.issue_text(Path("."), 1) == ("題", "本文")
+
+
+def test_every_template_value_has_one_source():
+    # 出所の表は差し込みの定義（params.json）の名前だけを持つ
+    assert set(invoke.FILL_SOURCES) <= set(route.params())
+    assert set(invoke.PROJECT_KEYS) <= {n for n, s in invoke.FILL_SOURCES.items() if s == invoke.FROM_PROJECT}
 
 
 def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_round(tmp_path, monkeypatch):
