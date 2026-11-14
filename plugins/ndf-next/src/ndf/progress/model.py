@@ -21,6 +21,8 @@ SCHEMA = "workflow/progress.schema.json"
 NEW = "new"
 # 進行表の識別子に入れるリポジトリの短い鍵の長さ（sha256 の 16 進の桁数）
 REPO_KEY_LENGTH = 12
+# 進行表のワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors の鍵）
+WORKFLOW_ACTOR = "workflow"
 
 
 class ProgressTableError(contracts.ContractError):

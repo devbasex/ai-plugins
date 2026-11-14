@@ -141,12 +141,16 @@ def _order_graph(view: PlanView, lanes: Lanes) -> dict[tuple[str, str], set[tupl
         started = rows[0].state != PENDING
         pending = next(((name, r.key) for r in rows if r.state == PENDING), None)
         for ref in spec.after:
-            for src in _after_sources(ref, lanes, started):
-                edges.setdefault(src, set()).add(nodes[0])
+            _link(edges, _after_sources(ref, lanes, started), nodes[0])
             if started and pending is not None:
-                for src in _after_sources(ref, lanes, False):
-                    edges.setdefault(src, set()).add(pending)
+                _link(edges, _after_sources(ref, lanes, False), pending)
     return edges
+
+
+def _link(edges: dict[tuple[str, str], set[tuple[str, str]]], sources: list[tuple[str, str]], to: tuple[str, str]) -> None:
+    """起点の行のそれぞれから行 `to` へ辺を引く。"""
+    for src in sources:
+        edges.setdefault(src, set()).add(to)
 
 
 def _reach(edges: Mapping[tuple[str, str], set[tuple[str, str]]], start: tuple[str, str]) -> set[tuple[str, str]]:

@@ -201,7 +201,7 @@ def _reopen_closed(state: RunState, snap: dict[str, Any]) -> RunState:
 
     打ち直しても起こせない失敗（`final`）は戻さない。戻すと同じ失敗で依頼が開き直し、閉じるたびに起こし続ける。
     """
-    still = set(snap.get("reported", ()))
+    still = set(snap["reported"])
     closed = {k for k in state.reported if k not in still}
     if not closed:
         return state
@@ -240,7 +240,7 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
     for key in state.launched:
         if key not in waiting:
             continue
-        n = counts.get(key, 0) + 1
+        n = counts[key] + 1 if key in counts else 1
         if n * policy.poll >= policy.up:
             expired.append(waiting[key])
         else:

@@ -35,7 +35,7 @@ from typing import Any
 from ndf import identity
 from ndf.contracts import limits
 from ndf.core import durable, loop
-from ndf.progress import lane, store
+from ndf.progress import lane, model, store
 from ndf.progress import plan as table
 from ndf.progress.lane import launch
 from ndf.progress.plan import run_decide
@@ -49,7 +49,7 @@ TOPIC_WAKE = "wake"
 POLL_ENV = "NDF_PARALLEL_POLL"
 # 起こせなかったレーンの知らせ（計画の進行表の依頼の中身の kind）と、依頼を書く主体
 LAUNCH_FAILED = "launch_failed"
-REPORT_ACTOR = "workflow"
+REPORT_ACTOR = model.WORKFLOW_ACTOR
 
 
 @dataclass(frozen=True)
