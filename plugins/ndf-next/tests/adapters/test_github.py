@@ -544,6 +544,55 @@ def test_pick_merge_method(declared: str | None, allowed: list[str], chosen: str
     assert github.pick_merge_method(declared, allowed) == chosen
 
 
+def _allowed(rules: object, settings: object, branch: str = "develop") -> tuple[list[str], list[str]]:
+    """`allowed_merge_methods(branch)` の値と、読んだパス（符号化したまま）の並び。"""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode()
+        seen.append(path)
+        return httpx.Response(200, json=rules if "/rules/branches/" in path else settings)
+
+    return _hub(handler).allowed_merge_methods(branch), seen
+
+
+RULES_PATH = f"/repos/{REPO}/rules/branches/develop"
+
+
+@pytest.mark.parametrize(
+    ("settings", "methods"),
+    [
+        ({"allow_rebase_merge": True, "allow_merge_commit": True, "allow_squash_merge": True}, ["squash", "merge", "rebase"]),
+        ({"allow_squash_merge": "yes", "allow_merge_commit": 1, "allow_rebase_merge": True}, ["rebase"]),
+        ({"allow_merge_commit": True}, ["merge"]),
+        ({}, []),
+        (["allow_squash_merge"], []),
+    ],
+)  # fmt: skip
+def test_allowed_merge_methods_reads_repository_flags_in_merge_methods_order(settings: object, methods: list[str]) -> None:
+    # ruleset に指定が無ければリポジトリの設定を読む。値が True の方式だけを MERGE_METHODS の並びで返す
+    assert _allowed([], settings) == (methods, [RULES_PATH, f"/repos/{REPO}"])
+
+
+def test_allowed_merge_methods_treats_a_non_list_ruleset_body_as_no_rules() -> None:
+    assert _allowed({"message": "x"}, {"allow_merge_commit": True}) == (["merge"], [RULES_PATH, f"/repos/{REPO}"])
+
+
+@pytest.mark.parametrize(
+    ("named", "methods"),
+    [([], []), (["rebase", "squash"], ["squash", "rebase"])],
+)  # fmt: skip
+def test_allowed_merge_methods_prefers_the_ruleset_and_skips_repository_settings(named: list[str], methods: list[str]) -> None:
+    # ruleset が方式を指定していれば（空でも）リポジトリの設定を読まない
+    rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": named}}]
+    assert _allowed(rules, ALL_METHODS) == (methods, [RULES_PATH])
+
+
+def test_allowed_merge_methods_encodes_the_branch_name() -> None:
+    rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": ["merge"]}}]
+    assert _allowed(rules, ALL_METHODS, "release/v1") == (["merge"], [f"/repos/{REPO}/rules/branches/release%2Fv1"])
+
+
 def test_merge_uses_the_method_the_ruleset_allows() -> None:
     # 3378-2: 宣言が無ければ、基底のブランチの ruleset が許す方式でマージする
     rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": ["merge"]}}]
