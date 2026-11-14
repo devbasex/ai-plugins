@@ -262,6 +262,26 @@ def plan_lock(state_dir: Path) -> Iterator[Path]:
         handle.close()
 
 
+def _base_values(plan: model.Plan, state_dir: Path, absolute_plan: Path, work_base: Path) -> dict[str, str]:
+    """決まった名前の差し込みの値（呼び手の `sets` で上書きできない）。"""
+    return {
+        "state_dir": str(state_dir),
+        "repo": plan.repo if plan.repo else "",
+        "worktree": plan.worktree if plan.worktree else "",
+        "plan": str(absolute_plan),
+        "owner": assemble_decide.owner_of(plan.name, str(state_dir)),
+        "work_base": str(work_base),
+    }
+
+
+def _merge_values(base: dict[str, str], sets: Mapping[str, str]) -> dict[str, str]:
+    """決まった名前の値に呼び手の値を足す。決まった名前を上書きする値があれば `model.PlanError`。"""
+    clash = sorted(set(sets) & set(base))
+    if clash:
+        raise model.PlanError(f"差し込みの値 {', '.join(clash)} は上書きできない")
+    return {**base, **sets}
+
+
 def prepare(
     root: Path, plan_path: Path, start: Optional[str], state_dir: Optional[str], cwd: Path, sets: Optional[Mapping[str, str]] = None
 ) -> Invocation:
@@ -283,18 +303,7 @@ def prepare(
     finished = record is not None and _finished(root, record["key"])
     choice = assemble_decide.choose_run(record, plan.name, digest, start, head, finished)
     abs_plan = (cwd / plan_path) if not plan_path.is_absolute() else plan_path
-    values = {
-        "state_dir": str(sdir),
-        "repo": plan.repo if plan.repo else "",
-        "worktree": plan.worktree if plan.worktree else "",
-        "plan": str(abs_plan),
-        "owner": assemble_decide.owner_of(plan.name, str(sdir)),
-        "work_base": str(root.parent / WORK_DIR),
-    }
-    clash = sorted(set(sets) & set(values))
-    if clash:
-        raise model.PlanError(f"差し込みの値 {', '.join(clash)} は上書きできない")
-    values.update(sets)
+    values = _merge_values(_base_values(plan, sdir, abs_plan, root.parent / WORK_DIR), sets)
     again = _again(abs_plan, start, state_dir, sets)
     return Invocation(abs_plan, plan, start, _prelude(plan, start), sdir, choice.key, choice.round_no, head, values, again, digest)
 
