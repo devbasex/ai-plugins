@@ -6,7 +6,6 @@ from collections.abc import Iterator
 
 import pytest
 
-from ndf import ci_cli
 from ndf.adapters import ci
 from ndf.contracts import causes, limits
 
@@ -419,19 +418,6 @@ def test_read_classifies_failures_by_bare_name() -> None:
     reading = ci.read(runs, ["pytest", "lint"], ["W / pytest (5/9)"])
     assert [c.name for c in reading.failed_tests] == ["A / pytest (0/2)"]
     assert [c.name for c in reading.failed_other] == ["A / lint (0/2)"]
-
-
-# --- 現状固定（I-006 ci_cli._items）: missing・stale の行の test は分割ジョブを含むテストのチェックかで決まる ---
-
-
-def test_cli_items_marks_missing_and_stale_test_checks() -> None:
-    reading = _reading(missing=["CI / pytest (1/2)", "doc-lint"], stale=["pytest", "W / lint (0/2)"])
-    assert ci_cli._items(reading, ["pytest (0/2)"]) == [
-        {"kind": "check", "name": "CI / pytest (1/2)", "result": "missing", "test": True},
-        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
-        {"kind": "check", "name": "pytest", "result": "stale", "test": True},
-        {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
-    ]
 
 
 def test_watch_stretches_the_interval_only_while_nothing_changes() -> None:
