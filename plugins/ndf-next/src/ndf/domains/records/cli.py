@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 from datetime import date
@@ -131,7 +132,7 @@ def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         s = mvv.signals(root, args.base)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
-    item = {"version": s.version, "overrides": s.overrides, "unknown_pass": s.unknown_pass, "unknown": s.unknown}
+    item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revise"}
     summary = "MVV の改訂を提案する兆候がある" if s.revise else "MVV の改訂の兆候は閾値に届かない"
     return result.result(TOOL, result.OK, summary, [item], {"revise": s.revise})
 
