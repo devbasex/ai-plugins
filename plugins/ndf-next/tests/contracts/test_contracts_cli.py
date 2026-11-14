@@ -5,6 +5,7 @@ import json
 import pytest
 
 from ndf import cli
+from ndf.contracts import causes
 from ndf.contracts import cli as contracts_cli
 from ndf.contracts import exit_codes
 
@@ -34,7 +35,7 @@ def test_check_passes_on_plugin_contracts(capsys):
 
 def test_check_reports_every_broken_table(contracts_copy, capsys):
     contracts_copy("causes.json", text="{")
-    contracts_copy("limits.json", lambda d: {**d, "version": 2})
+    contracts_copy("limits.json", lambda d: {**d, "version": 1})
     code, out, _ = _run(capsys, "check")
     report = json.loads(out)
     assert code == 2
@@ -92,9 +93,32 @@ def test_emit_incomplete_with_gaps(capsys):
 
 
 def test_emit_gate_with_routes(capsys):
-    code, out, _ = _emit(capsys, "gate", "--route", "approved", "ndf go", "--route", "rejected", "-")
+    go = {"argv": ["ndf", "go"], "ask": ["comment"]}
+    code, out, _ = _emit(capsys, "gate", "--route", "approved", json.dumps(go), "--route", "rejected", "-")
     assert code == 10
-    assert json.loads(out)["routes"] == {"approved": "ndf go", "rejected": None}
+    assert json.loads(out)["routes"] == {"approved": go, "rejected": None}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--route", "approved", "ndf go"),
+        ("--route", "approved", '{"argv": ["/x/ndf/10.0.0/scripts/go.py"]}'),
+        ("--route", "maybe", '{"argv": ["ndf", "go"]}'),
+    ],
+)
+def test_emit_refuses_routes_that_cannot_be_run_as_is(capsys, args):
+    code, out, _ = _emit(capsys, "gate", *args)
+    assert code == exit_codes.code_of("unreadable")
+    assert out == ""
+
+
+def test_emit_next_outputs_and_run_id(capsys):
+    nxt = {"argv": ["ndf", "test-slot", "run", "--", "pytest"]}
+    code, out, _ = _emit(capsys, "ok", "--next", json.dumps(nxt), "--outputs", '{"pr": 12, "branch": "feat/x"}', "--run-id", "r1")
+    assert code == 0
+    got = json.loads(out)
+    assert (got["next"], got["outputs"], got["run_id"]) == (nxt, {"pr": 12, "branch": "feat/x"}, "r1")
 
 
 def test_emit_refuses_stopped_without_cause_and_writes_nothing(capsys, tmp_path):
@@ -143,12 +167,16 @@ def test_fact_value_missing_table(capsys):
 @pytest.mark.parametrize(
     ("broken", "count"),
     [
-        ("schemas/result.schema.json", 1),
+        ("schemas/result.schema.json", 2),
         ("schemas/causes.schema.json", 2),
         ("schemas/limits.schema.json", 3),
         ("schemas/release-verification.schema.json", 1),
         ("causes.json", 1),
         ("facts/exit-codes.json", 2),
+        ("facts/answers.json", 2),
+        ("schemas/route-chosen.schema.json", 2),
+        ("schemas/version.schema.json", 2),
+        ("version.json", 1),
     ],
 )
 def test_check_all_reports_one_broken_file(contracts_copy, broken, count):
@@ -215,7 +243,7 @@ def test_emit_passes_every_field(capsys):
         "--metrics",
         '{"n": 2}',
         "--next",
-        "nx",
+        '{"argv": ["ndf", "nx"]}',
         "--presentation-path",
         "p.md",
     )
@@ -228,7 +256,7 @@ def test_emit_passes_every_field(capsys):
         "metrics": {"n": 2},
         "cause": {"kind": "infra_wait", "detail": "d", "instance": "i1", "retry_after": 30.0},
         "presentation_path": "p.md",
-        "next": "nx",
+        "next": {"argv": ["ndf", "nx"]},
     }
 
 
@@ -261,9 +289,9 @@ def test_emit_unwritable_out_is_invalid(capsys, tmp_path, rel):
 
 
 @pytest.mark.parametrize("metrics", ["1", "[]", '"s"', "null"])
-def test_emit_non_object_metrics_is_invalid(capsys, metrics):
-    with pytest.raises(SystemExit) as exc:
-        _emit(capsys, "ok", "--metrics", metrics)
-    out = capsys.readouterr()
-    assert (exc.value.code, out.out) == (2, "")
-    assert "JSON のオブジェクトでない" in out.err
+def test_emit_non_object_metrics_is_invalid(capsys, last_result, metrics):
+    # 使い方の誤りは stopped/invalid の結果 JSON で終わる（#3394 の 3394-3）
+    code, out, err = _emit(capsys, "ok", "--metrics", metrics)
+    assert code == causes.exit_code("invalid")
+    assert last_result(out)["cause"]["kind"] == "invalid"
+    assert "JSON のオブジェクトでない" in err

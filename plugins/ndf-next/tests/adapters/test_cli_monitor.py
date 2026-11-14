@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import agents, cli
+from ndf.adapters import agents, claude, run_log
 from ndf.contracts import limits
 
 POLL = 0.05
 
 
-def launch(tmp_path: Path, script: str, agent: str = "codex", timeout: float = 30) -> cli.Launch:
-    return cli.Launch(agent, (sys.executable, "-c", script), tmp_path, cli.AgentPaths.at(tmp_path / "run" / agent), timeout)
+def launch(tmp_path: Path, script: str, agent: str = "codex", timeout: float = 30) -> agents.Launch:
+    return agents.Launch(agent, (sys.executable, "-c", script), tmp_path, agents.AgentPaths.at(tmp_path / "run" / agent), timeout)
 
 
 @pytest.mark.parametrize(
@@ -31,7 +31,7 @@ def launch(tmp_path: Path, script: str, agent: str = "codex", timeout: float = 3
     ],
 )
 def test_usage_limit_reads_cli_lines(text):
-    assert cli.usage_limit(f"start\n{text}\nnext") == text
+    assert agents.usage_limit(f"start\n{text}\nnext") == text
 
 
 @pytest.mark.parametrize(
@@ -45,22 +45,22 @@ def test_usage_limit_reads_cli_lines(text):
     ],
 )
 def test_usage_limit_ignores_comment_snapshots_and_quotes(text):
-    assert cli.usage_limit(f"start\n{text}\n") is None
+    assert agents.usage_limit(f"start\n{text}\n") is None
 
 
 def test_early_warnings_by_kind(tmp_path):
-    paths = cli.AgentPaths.at(tmp_path / "a")
-    assert cli.early_warnings(paths) == {}
+    paths = agents.AgentPaths.at(tmp_path / "a")
+    assert agents.early_warnings(paths) == {}
 
     paths.err.write_text("ok\nError: something broke\n")
-    assert cli.early_warnings(paths) == {"stderr": "Error: something broke"}
+    assert agents.early_warnings(paths) == {"stderr": "Error: something broke"}
 
     paths.out.write_text(json.dumps({"subtype": "success", "permission_denials": [{"tool": "Bash"}]}))
-    assert set(cli.early_warnings(paths)) == {"stderr", "denials"}
+    assert set(agents.early_warnings(paths)) == {"stderr", "denials"}
 
 
 def test_warned_reports_each_kind_once():
-    warned = cli.Warned()
+    warned = agents.Warned()
 
     assert warned.new({"stderr": "a"}) == [("stderr", "a")]
     assert warned.new({"stderr": "a", "denials": "b"}) == [("denials", "b")]
@@ -76,7 +76,7 @@ def test_denials_warning_follows_earlier_stderr_warning_once(tmp_path, capsys):
         "time.sleep(0.4)\n"
     )
 
-    status = cli.run_agent(launch(tmp_path, script, agent="claude"), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, script, agent="claude"), poll=POLL)
 
     err = capsys.readouterr().err
     assert status.state == "done" and status.exit_code == 0
@@ -88,7 +88,7 @@ def test_denials_warning_follows_earlier_stderr_warning_once(tmp_path, capsys):
 def test_usage_limit_line_stops_agent(tmp_path):
     script = "import sys, time\nprint('ERROR: quota exceeded', file=sys.stderr, flush=True)\ntime.sleep(30)\n"
 
-    status = cli.run_agent(launch(tmp_path, script), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, script), poll=POLL)
 
     assert status.state == "usage_limit" and status.detail == "ERROR: quota exceeded"
 
@@ -96,24 +96,24 @@ def test_usage_limit_line_stops_agent(tmp_path):
 def test_comment_snapshot_in_err_log_does_not_stop_agent(tmp_path):
     script = "import sys\nprint('[PR-COMMENT] [u] quota exceeded と出た', file=sys.stderr)\n"
 
-    status = cli.run_agent(launch(tmp_path, script), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, script), poll=POLL)
 
     assert status.state == "done"
 
 
 def test_timeout_and_failure(tmp_path):
-    slow = cli.run_agent(launch(tmp_path, "import time\ntime.sleep(30)\n", timeout=0.3), poll=POLL)
-    failed = cli.run_agent(launch(tmp_path, "raise SystemExit(3)\n"), poll=POLL)
+    slow = agents.run_agent(launch(tmp_path, "import time\ntime.sleep(30)\n", timeout=0.3), poll=POLL)
+    failed = agents.run_agent(launch(tmp_path, "raise SystemExit(3)\n"), poll=POLL)
 
     assert slow.state == "timeout"
     assert (failed.state, failed.exit_code) == ("failed", 3)
 
 
 def test_child_receives_run_id(tmp_path):
-    log = cli.open_run("parent", run_id="p", location="repo")
+    log = run_log.open_run("parent", run_id="p", location="repo")
     script = "import os\nprint(os.environ['NDF_RUN_ID'], os.environ['NDF_RUN_LOG'])\n"
 
-    cli.run_agent(launch(tmp_path, script), poll=POLL)
+    agents.run_agent(launch(tmp_path, script), poll=POLL)
 
     assert (tmp_path / "run" / "codex.out").read_text().split() == ["p", str(log.path)]
 
@@ -125,30 +125,30 @@ def test_progress_file_keeps_silent_claude_from_stalling(tmp_path, monkeypatch, 
     step = f"    open({str(progress)!r}, 'a').write('.')\n" if writes else ""
     script = f"import time\nfor _ in range(8):\n{step}    time.sleep(0.2)\n"
 
-    status = cli.run_agent(launch(tmp_path, script, agent="claude"), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, script, agent="claude"), poll=POLL)
 
     assert status.state == state
 
 
 def test_stall_seconds_falls_back_to_default():
-    assert cli.stall_seconds("codex") == 180
-    assert cli.stall_seconds("unknown-agent") == limits.seconds("monitor.stall-default")
+    assert agents.stall_seconds("codex") == 180
+    assert agents.stall_seconds("unknown-agent") == limits.seconds("monitor.stall-default")
 
 
 def test_stop_ends_process_group():
     proc = subprocess.Popen([sys.executable, "-c", "import time\ntime.sleep(30)\n"], start_new_session=True)
 
-    cli.stop(proc)
+    agents.stop(proc)
 
     assert proc.poll() is not None
-    cli.stop(proc)
+    agents.stop(proc)
 
 
 @pytest.mark.parametrize(("agent", "state"), [("claude", "usage_limit"), ("codex", "failed")])
 def test_claude_stdout_usage_limit_is_read_before_exit_code(tmp_path, agent, state):
     script = 'print(\'{"type":"result","is_error":true,"api_error_status":429}\')\nraise SystemExit(1)\n'
 
-    status = cli.run_agent(launch(tmp_path, script, agent=agent), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, script, agent=agent), poll=POLL)
 
     assert status.state == state
 
@@ -177,7 +177,7 @@ def test_stop_kills_descendants_that_outlive_the_cli(tmp_path):
         time.sleep(0.05)
     pid = int(pid_file.read_text())
 
-    cli.stop(proc)
+    agents.stop(proc)
 
     deadline = time.monotonic() + 5
     while _running(pid) and time.monotonic() < deadline:
@@ -201,7 +201,7 @@ def test_descendants_left_by_a_finished_cli_are_stopped(tmp_path):
         "    time.sleep(0.05)\n"
     )
 
-    status = cli.run_agent(launch(tmp_path, parent), poll=POLL)
+    status = agents.run_agent(launch(tmp_path, parent), poll=POLL)
 
     pid = int(pid_file.read_text())
     deadline = time.monotonic() + 5
@@ -211,9 +211,9 @@ def test_descendants_left_by_a_finished_cli_are_stopped(tmp_path):
 
 
 def test_start_failure_is_a_failed_status(tmp_path):
-    spec = cli.Launch("codex", (str(tmp_path / "no-such-cli"),), tmp_path, cli.AgentPaths.at(tmp_path / "run" / "codex"), 30)
+    spec = agents.Launch("codex", (str(tmp_path / "no-such-cli"),), tmp_path, agents.AgentPaths.at(tmp_path / "run" / "codex"), 30)
 
-    status = cli.run_agent(spec, poll=POLL)
+    status = agents.run_agent(spec, poll=POLL)
 
     assert (status.state, status.exit_code) == ("failed", None)
     assert status.detail.startswith("起動できない")
@@ -230,7 +230,7 @@ def test_call_claude_timeout_kills_descendants(tmp_path):
     )
     parent = f"import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', {child!r}, {str(pid_file)!r}])\ntime.sleep(60)\n"
 
-    got = cli.call_claude([sys.executable, "-c", parent], "q", 2)
+    got = claude.call_claude([sys.executable, "-c", parent], "q", 2)
 
     pid = int(pid_file.read_text())
     deadline = time.monotonic() + 5

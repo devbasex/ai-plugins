@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "route-chosen.schema.json",
+  "title": "選択の記録",
+  "description": "行き先を選ぶたびに進行表へ 1 行残す事象。選んだ主体を数える物差しはこの形でだけ読む。cause が止まった理由の表にあることは読み手（ndf.contracts.chosen）が表と照らす",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "at", "run_id", "rule", "chooser", "from", "to"],
+  "properties": {
+    "event": {"const": "route_chosen"},
+    "at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"},
+    "run_id": {"type": "string", "minLength": 1},
+    "rule": {"type": "string", "pattern": "^R[0-9]+$", "description": "AI が判断している分岐の洗い出しの一覧（R01〜R27）の番号"},
+    "chooser": {"enum": ["script", "conductor", "human"], "description": "行き先を選んだ主体"},
+    "from": {"type": "string", "minLength": 1},
+    "to": {"type": "string", "minLength": 1},
+    "cause": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+  }
+}

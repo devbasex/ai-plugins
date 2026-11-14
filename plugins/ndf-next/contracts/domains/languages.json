@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "ファイルの言語。拡張子は行をまたいで重ならず、ファイル名の末尾に当たる最も長い拡張子で 1 つの言語に決める（.blade.php は php でなく blade）。言語の計測・プロダクションコードの判定・テストの試走が読む",
   "owner": "D2（contracts/domains）",
   "columns": {

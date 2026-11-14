@@ -1,6 +1,7 @@
 """止まった理由の表（`contracts/causes.json`）の読み手と、結果 JSON の `cause` の組み立てと確かめ。
 
-種類の語彙・終了コード・既定の行き先は表だけが持ち、再試行の値は上限の宣言だけが持つ。
+種類の語彙・既定の行き先は表だけが持ち、終了コードの値は終了コードの表（`exit_codes`）だけが、再試行の値は上限の宣言だけが持つ。
+表の `exit` は終了コードの表の stopped の行の id を指し、読み手が値に引き直して `CauseRow.exit` に置く。
 コードは種類を `cause("<種類>", ...)` の引数の文字列でだけ書き、種類の定数を置かない。
 行き先を選ぶ関数は `routing` にある。
 """
@@ -10,7 +11,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
-from ndf.contracts import exit_codes, limits
+from ndf.contracts import exit_codes, facts, limits
 
 TABLE = "causes.json"
 SCHEMA = contracts.schema_path("causes")
@@ -23,13 +24,17 @@ class CausesError(contracts.ContractError):
 
 
 class CauseRow(NamedTuple):
+    """表の 1 行。`exit` は終了コードの表から引き直した値、`exit_id` は表に書いた終了コードの表の id。"""
+
     kind: str
     meaning: str
     std_type: str
     exit: int
     route: str
     retry: Optional[str]
+    exhausted: Optional[str] = None
     requires_retry_after: bool = False
+    exit_id: str = ""
 
 
 def _policy_errors(row: CauseRow) -> list[str]:
@@ -46,17 +51,19 @@ def _policy_errors(row: CauseRow) -> list[str]:
 
 
 def validate(raw: Any) -> dict[str, CauseRow]:
-    """表の形・種類の重なり・終了コードの区分・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
+    """表の形・種類の重なり・exit が終了コードの表の stopped の id を指すこと・再試行の方針の有無を確かめ、種類ごとの行を返す。"""
     contracts.require_schema(raw, SCHEMA, CausesError, f"止まった理由の表 {TABLE}")
     errs: list[str] = []
     out: dict[str, CauseRow] = {}
-    codes = exit_codes.codes(exit_codes.STOPPED)
+    stopped = {r["id"]: r["code"] for r in facts.rows(exit_codes.TABLE, status=exit_codes.STOPPED)}
     for item in raw["causes"]:
-        row = CauseRow(**item)
+        exit_id = item["exit"]
+        if exit_id not in stopped:
+            errs.append(f"{item['kind']} の exit {exit_id!r} は終了コードの表の stopped の id {sorted(stopped)} に無い")
+            continue
+        row = CauseRow(**{**item, "exit": stopped[exit_id], "exit_id": exit_id})
         if row.kind in out:
             errs.append(f"種類 {row.kind} が 2 つある")
-        if row.exit not in codes:
-            errs.append(f"{row.kind} の終了コード {row.exit} は stopped の終了コード {sorted(codes)} に無い")
         errs += _policy_errors(row)
         out[row.kind] = row
     if errs:
@@ -103,12 +110,17 @@ def kind_of(value: object) -> Optional[str]:
     return kind if isinstance(kind, str) else None
 
 
+def unknown_kind_errors(kind: str, label: str) -> list[str]:
+    """種類 `kind` が止まった理由の表に無いときの 1 行（`label` は誤りの文で種類を指す名前）。"""
+    if kind not in table():
+        return [f"{label} {kind!r} は止まった理由の表に無い"]
+    return []
+
+
 def kind_errors(value: object) -> list[str]:
     """`cause.kind` が文字列なのに止まった理由の表に無いときの 1 行。形の誤りはスキーマが報告する。"""
     kind = kind_of(value)
-    if kind is not None and kind not in table():
-        return [f"cause.kind {kind!r} は止まった理由の表に無い"]
-    return []
+    return unknown_kind_errors(kind, "cause.kind") if kind is not None else []
 
 
 def errors(value: object) -> list[str]:

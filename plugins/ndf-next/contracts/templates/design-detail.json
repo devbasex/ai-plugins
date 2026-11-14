@@ -1,0 +1,16 @@
+{
+  "template": "design-detail",
+  "purpose": "design_detail",
+  "summary": "詳細設計: worker の詳細設計 → push。push が拒まれたら worker が直して push し直す",
+  "params": ["repo", "worktree", "branch", "worker"],
+  "plan": {
+    "name": "design-detail-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "design-detail"]},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

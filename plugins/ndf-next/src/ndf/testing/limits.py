@@ -13,19 +13,24 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ndf import identity, slot_pool
 from ndf.testing import machine, weight
 
 RESOURCES_FILE = "resources.json"
 PROJECT_FILE = "project.json"
 SECTION = "test_slots"
-# 1 本の全体テストが使う CPU の数（`-n 4`）と、レーン 1 本分のメモリの見込み（決定 5）
+# 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動の枠のテストの重み
 CPUS_PER_RUN = 4
-MIB_PER_RUN = 14 * 1024
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
 FLOOR_RATIO = 0.10
 # 待ちの上限の既定（全体テストの上限と同じ）
 DEFAULT_WAIT_LIMIT_SECONDS = 1800
+
+
+def test_weight_mib() -> int:
+    """テスト 1 本の重み（`contracts/limits.json` の `launch.weight.test`）。"""
+    return slot_pool.weight_mib("test")
 
 
 class SlotConfigError(Exception):
@@ -42,6 +47,11 @@ class Limits:
     memory_floor_mib: int
     wait_limit_seconds: int
 
+    @property
+    def capacity_mib(self) -> int:
+        """重い起動の枠の容量。テスト `max_runs` 本の重みの合計で、LLM の CLI もこの中で数える（#3368）。"""
+        return self.max_runs * test_weight_mib()
+
 
 # 設定の鍵（Limits のフィールドの名前と同じ）
 _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
@@ -50,7 +60,7 @@ _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
 def default_limits(cpus: int, total_mib: int | None) -> Limits:
     """CPU の数と全体のメモリから既定の上限を決める。全体のメモリが読めなければ CPU だけで決める。"""
     by_cpu = cpus // CPUS_PER_RUN
-    by_memory = by_cpu if total_mib is None else total_mib // MIB_PER_RUN
+    by_memory = by_cpu if total_mib is None else total_mib // test_weight_mib()
     floor = FLOOR_MIN_MIB if total_mib is None else max(FLOOR_MIN_MIB, int(total_mib * FLOOR_RATIO))
     return Limits(max(1, min(by_cpu, by_memory)), floor, DEFAULT_WAIT_LIMIT_SECONDS)
 
@@ -58,7 +68,7 @@ def default_limits(cpus: int, total_mib: int | None) -> Limits:
 def find_setting(cwd: Path, name: str) -> Path | None:
     """`cwd` から根へ向かって `.ndf/<name>` を探す。"""
     for base in (cwd.resolve(), *cwd.resolve().parents):
-        candidate = base / ".ndf" / name
+        candidate = base / identity.FIXED_WORDS["declaration_dir"] / name
         if candidate.is_file():
             return candidate
     return None
@@ -68,7 +78,7 @@ def _positive(section: Mapping[str, object], key: str, path: Path, errors: list[
     if key not in section:
         return None
     value = section[key]
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if not slot_pool.is_int(value) or value < 1:
         errors.append(f"{path}: {SECTION}.{key} は 1 以上の整数にする（今の値: {value!r}）")
         return None
     return value
@@ -78,22 +88,28 @@ def load_limits(cwd: Path, *, cpus: int | None = None, total_mib: int | None = N
     """設定と既定から上限を決める。誤った値は既定へ落とさず `SlotConfigError` を送る。"""
     base = default_limits(machine.cpu_count() if cpus is None else cpus, machine.total_mib() if total_mib is None else total_mib)
     path = find_setting(cwd, RESOURCES_FILE)
-    if path is None:
+    section = None if path is None else _section(path)
+    if section is None:
         return base
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SlotConfigError(f"設定を読めない: {path}", [f"{path}: JSON として読めない（{exc}）"]) from exc
-    if isinstance(data, dict) and SECTION not in data:
-        return base
-    section = data[SECTION] if isinstance(data, dict) else None
-    if not isinstance(section, dict):
-        raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
     errors: list[str] = []
     values = {key: _positive(section, key, path, errors) for key in _LIMIT_KEYS}
     if errors:
         raise SlotConfigError(f"設定の値が誤っている: {path}", errors)
     return dataclasses.replace(base, **{key: value for key, value in values.items() if value is not None})
+
+
+def _section(path: Path) -> dict | None:
+    """設定の節 `SECTION`。節が無ければ None。読めない・形が違えば `SlotConfigError`。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SlotConfigError(f"設定を読めない: {path}", [f"{path}: JSON として読めない（{exc}）"]) from exc
+    if isinstance(data, dict) and SECTION not in data:
+        return None
+    section = data[SECTION] if isinstance(data, dict) else None
+    if not isinstance(section, dict):
+        raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
+    return section
 
 
 def load_suites(cwd: Path) -> list[dict[str, object]]:

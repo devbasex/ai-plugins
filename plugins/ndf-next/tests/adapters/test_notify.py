@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import socket
-import threading
 import time
 from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
 
-from ndf.adapters import notify
+from ndf.adapters import http as notify
+
+from . import _drip_server
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -72,22 +72,39 @@ def test_post_json_returns_object() -> None:
 
 
 @pytest.mark.parametrize(
-    "handler",
+    ("handler", "reason", "retryable"),
     [
-        lambda req: httpx.Response(200, json=[1, 2]),
-        lambda req: httpx.Response(500, json={"ok": True}),
-        lambda req: httpx.Response(200, content=b"not json"),
-        _raise(httpx.ConnectError),
-        _raise(httpx.ReadTimeout),
+        (lambda req: httpx.Response(200, json=[1, 2]), "応答が JSON のオブジェクトでない", False),
+        (lambda req: httpx.Response(400, json={"ok": True}), "HTTP 400", False),
+        (lambda req: httpx.Response(429), "HTTP 429", True),
+        (lambda req: httpx.Response(500, json={"ok": True}), "HTTP 500", True),
+        (lambda req: httpx.Response(200, content=b"not json"), "応答が JSON でない", False),
+        (_raise(httpx.ConnectError), "接続できない（ConnectError）", True),
+        (_raise(httpx.ReadTimeout), "5 秒を越えた", True),
     ],
-    ids=["array", "status-500", "not-json", "connect-error", "timeout"],
+    ids=["array", "status-400", "status-429", "status-500", "not-json", "connect-error", "timeout"],
 )
-def test_post_json_returns_none(handler: Handler) -> None:
-    assert notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler})) is None
+def test_post_json_tells_failures_apart(handler: Handler, reason: str, retryable: bool) -> None:
+    # 3394-10: 失敗を 1 つの値にまとめず、理由と打ち直して通りうるかを分ける
+    with pytest.raises(notify.PostError) as got:
+        notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler}))
+    assert (str(got.value), got.value.retryable) == (reason, retryable)
 
 
-def test_post_json_returns_none_for_invalid_url() -> None:
-    assert notify.post_json("::", {}, {}, 5, transport=_transport({})) is None
+@pytest.mark.parametrize(("header", "after"), [("30", 30.0), ("soon", None), (None, None)], ids=["seconds", "not-seconds", "absent"])
+def test_post_json_keeps_retry_after(header: str | None, after: float | None) -> None:
+    headers = {} if header is None else {"Retry-After": header}
+    with pytest.raises(notify.PostError) as got:
+        notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": lambda req: httpx.Response(429, headers=headers)}))
+    assert got.value.retry_after == after
+
+
+@pytest.mark.parametrize(("url", "transport"), [("::", _transport({})), ("ftp://x.test/a", None)], ids=["invalid", "scheme"])
+def test_post_json_invalid_url_is_not_retryable(url: str, transport: httpx.BaseTransport | None) -> None:
+    # scheme の誤りは本物の transport が接続の前に断る（ネットワークへ出ない）
+    with pytest.raises(notify.PostError, match="^URL が不正$") as got:
+        notify.post_json(url, {}, {}, 5, transport=transport)
+    assert got.value.retryable is False
 
 
 # ---- fetch_body ----
@@ -150,37 +167,13 @@ Serve = Callable[..., str]
 
 @pytest.fixture
 def serve() -> Iterator[Serve]:
-    """本物の接続のサーバーを立て、URL を返す。
-
-    要求を受けたら `head` をすぐ送り、`drip` を `every` 秒ごとに `count` 回（`None` なら止められるまで）送って黙る。
-    """
+    """本物の接続のサーバーを立て、URL を返す（振る舞いは `_drip_server.start`）。テストの終わりに止める。"""
     stops: list[Callable[[], None]] = []
 
     def start(head: bytes, drip: bytes, every: float, count: int | None = None) -> str:
-        srv = socket.create_server(("127.0.0.1", 0))
-        quit_ = threading.Event()
-
-        def run() -> None:
-            conn, _ = srv.accept()
-            with conn, contextlib.suppress(OSError):
-                conn.recv(65536)
-                conn.sendall(head)
-                sent = 0
-                while (count is None or sent < count) and not quit_.wait(every):
-                    conn.sendall(drip)
-                    sent += 1
-                quit_.wait(5)
-
-        thread = threading.Thread(target=run, daemon=True)
-        thread.start()
-
-        def stop() -> None:
-            quit_.set()
-            thread.join(5)
-            srv.close()
-
+        url, stop = _drip_server.start(head, drip, every, count)
         stops.append(stop)
-        return f"http://127.0.0.1:{srv.getsockname()[1]}/"
+        return url
 
     yield start
     for stop in stops:

@@ -85,6 +85,16 @@ def _ledger_view(main: Path, name: str) -> tuple[dict[str, str], set[str]]:
         return {}, set()
 
 
+def _ended(main: Path, name: str) -> set[str]:
+    """終わりの記録（台帳の `lane_end`）のあるレーン名。読めなければ空（#3021）。"""
+    try:
+        import parallel_ledger as plg
+
+        return plg.ended_lanes(main, name)
+    except Exception:  # noqa: BLE001  読めなくても他の欄は返す（I6）
+        return set()
+
+
 def _launch_waits(main: Path, name: str) -> dict[str, dict]:
     """チェックポイントのレーンの進行の起動の待ち（レーン → 待ち。#2999 の I14）。読めなければ空。"""
     try:
@@ -101,7 +111,7 @@ def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
     """計画のレーンごとの 1 行と、一覧にある計画の一時レーン（`<計画名>-rel…`・役割 helper）の 1 行。
     起動を待っているレーンは `waiting` に理由とマシンの合計・このレーンの本数・上限を持つ（待っていなければ None）。"""
     rows, (last, waiting) = _ls(main), _ledger_view(main, name)
-    launch_waits = _launch_waits(main, name)
+    launch_waits, ended = _launch_waits(main, name), _ended(main, name)
     out = []
     lanes = [(ln.name, ln) for ln in plan.lanes]
     helpers = sorted(n for n, r in rows.items() if n.startswith(f"{name}-rel") and r.get("role") == "helper")
@@ -111,6 +121,7 @@ def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
         out.append({
             "lane": n,
             "state": st,
+            "ended": n in ended,
             **_lap_fields(_loop(main, ln) if ln is not None else None),
             "last_at": last.get(n),
             "attach": f"python3 {RELAY} attach {n}" if asking else None,
@@ -120,9 +131,9 @@ def lane_rows(main: Path, name: str, plan: pp.ParallelPlan) -> list[dict]:
 
 
 def status_summary(rows: list[dict]) -> str:
-    count = lambda s: sum(1 for r in rows if r["state"] == s)  # noqa: E731
-    waits = sum(1 for r in rows if r.get("waiting"))
+    count = lambda s: sum(1 for r in rows if r["state"] == s and not r.get("ended"))  # noqa: E731
+    waits, ended = sum(1 for r in rows if r.get("waiting")), sum(1 for r in rows if r.get("ended"))
     return (
         f"レーン {len(rows)} 本（動いている {count('running')}・承認待ち {count('awaiting_approval')}・止まった {count('stopped')}"
-        f"・起動待ち {waits}）"
+        f"・終わった {ended}・起動待ち {waits}）"
     )

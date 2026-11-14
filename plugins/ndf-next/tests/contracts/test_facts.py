@@ -67,7 +67,7 @@ def test_lookup_errors_stop(sample, call):
 @pytest.mark.parametrize(
     "change",
     [
-        lambda t: {**t, "version": 2},
+        lambda t: {**t, "version": 1},
         lambda t: {**t, "extra": 1},
         lambda t: {**t, "rows": [{"id": "a", "flag": "yes", "size": 1}]},
         lambda t: {**t, "rows": [{"id": "a", "flag": True}]},
@@ -82,7 +82,7 @@ def test_wrong_shape_stops(contracts_copy, sample_table, change):
         facts.table("sample")
 
 
-@pytest.mark.parametrize("text", ["{", '{"version": 1, "version": 1}'])
+@pytest.mark.parametrize("text", ["{", '{"owner": "o", "owner": "o"}'])
 def test_broken_json_stops(contracts_copy, text):
     contracts_copy("facts/sample.json", text=text)
     with pytest.raises(facts.FactsError):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ndf import contracts
 from ndf.contracts import causes, exit_codes, limits
 
 
@@ -14,14 +15,22 @@ def _edit_cause(kind: str, **changes):
 
 
 def test_plugin_table_rows_have_type_and_stopped_exit_code():
+    # 行の数は決め打ちしない（表へ種類を足す PR どうしが統合で食い違う）。表の行がすべて種類ごとの行になることを見る
     table = causes.table()
-    assert len(table) == 24
+    assert len(table) == len(contracts.load_json(causes.TABLE)["causes"])
     codes = exit_codes.codes("stopped")
     assert all(row.exit in codes and row.std_type for row in table.values())
 
 
+def test_exit_code_value_lives_only_in_the_exit_codes_table():
+    # 止まった理由の表は終了コードの表の id を指し、値は終了コードの表から引く（#3367）
+    for row in causes.table().values():
+        assert row.exit == exit_codes.code_of(row.exit_id)
+
+
 @pytest.mark.parametrize(
-    ("kind", "code"), [("base_conflict", 4), ("not_applicable", 3), ("precondition", 3), ("deps_missing", 69), ("infra_wait", 75)]
+    ("kind", "code"),
+    [("base_conflict", 4), ("not_applicable", 3), ("precondition", 3), ("deps_missing", 69), ("infra_wait", 75), ("transient", 75)],
 )
 def test_exit_code(kind, code):
     assert causes.exit_code(kind) == code
@@ -41,14 +50,19 @@ def test_policy_of_reads_limits_only_for_retry_kinds():
     "fn",
     [
         _edit_cause("unknown", std_type="fatal"),
-        _edit_cause("unknown", exit=7),
-        _edit_cause("unknown", exit=10),
+        _edit_cause("unknown", exit=1),
+        _edit_cause("unknown", exit="no_such"),
+        _edit_cause("unknown", exit="gate"),
         _edit_cause("unknown", route="later"),
         _edit_cause("ci_pending", retry="cause.no-such"),
         _edit_cause("ci_pending", retry=None),
+        _edit_cause("ci_pending", exhausted=None),
+        _edit_cause("ci_pending", exhausted="retry"),
         _edit_cause("unknown", retry="cause.ci-pending"),
+        _edit_cause("unknown", exhausted="human"),
         lambda d: {**d, "causes": d["causes"] + [d["causes"][0]]},
-        lambda d: {**d, "version": 2},
+        lambda d: {k: v for k, v in d.items() if k != "owner"},
+        lambda d: {**d, "version": 1},
     ],
 )
 def test_wrong_table_stops(contracts_copy, fn):
@@ -63,9 +77,13 @@ def test_retry_policy_without_interval_needs_retry_after(contracts_copy):
         causes.table()
 
 
-def test_exit_code_range_ends_are_accepted(contracts_copy):
-    contracts_copy("causes.json", _edit_cause("unknown", exit=69))
+def test_exit_follows_the_exit_codes_table(contracts_copy):
+    contracts_copy("causes.json", _edit_cause("unknown", exit="deps_missing"))
     assert causes.exit_code("unknown") == 69
+    contracts_copy(
+        "facts/exit-codes.json", lambda t: {**t, "rows": [{**r, "code": 7} if r["id"] == "deps_missing" else r for r in t["rows"]]}
+    )
+    assert causes.exit_code("unknown") == causes.exit_code("deps_missing") == 7
 
 
 def test_cause_builds_dict():

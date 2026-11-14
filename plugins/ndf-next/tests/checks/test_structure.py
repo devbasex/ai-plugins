@@ -32,6 +32,14 @@ def test_line_limit_is_a_safety_net(plugin, rules):
     assert [f.rule for f in structure.check(plugin.scope(), rules)] == ["lines"]
 
 
+def test_line_limit_covers_tests_and_scripts(plugin, rules):
+    plugin.write("tests/x/test_big.py", "x = 1\n" * 1001)
+    plugin.write("bin/big", "#!/bin/sh\n" + ":\n" * 1000)
+    plugin.write("contracts/big.json", "[\n" + "1,\n" * 1000 + "1]\n")
+    found = structure.check(plugin.scope(), rules)
+    assert [(f.rule, f.path.rsplit("/", 1)[-1]) for f in found] == [("lines", "big"), ("lines", "test_big.py")]
+
+
 def test_lazy_import_cycle_is_one_finding(plugin):
     plugin.write("src/ndf/a.py", "from ndf import b\n")
     plugin.write("src/ndf/b.py", "def f():\n    from ndf import c\n")

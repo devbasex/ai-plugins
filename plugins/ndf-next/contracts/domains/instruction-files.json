@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "リポジトリの指示書（AI の CLI が読む運用の文書）のファイル。id はリポジトリの根からのパス。指示書の宣言（.ndf/instructions.json の files）が無いときの既定・宣言の外の指示書の検出・リポジトリの計測・MVV の材料の集め方が、それぞれの列で読む",
   "owner": "D2（contracts/domains）",
   "columns": {

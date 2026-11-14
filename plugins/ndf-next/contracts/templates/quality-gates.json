@@ -1,0 +1,19 @@
+{
+  "template": "quality-gates",
+  "purpose": "quality_gates",
+  "summary": "完了判定: 手元のテスト → worker が受け入れ条件を 1 つずつ確かめる → push。テストの落ちは同じ原因の続きを数えて worker が直す",
+  "params": ["repo", "worktree", "branch", "test_command", "worker"],
+  "plan": {
+    "name": "quality-gates-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
+      {"id": "judge", "run": ["{{worker}}", "quality-gates"]},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
+      {"use": "test-repeat"},
+      {"use": "fix-push"}
+    ]
+  }
+}

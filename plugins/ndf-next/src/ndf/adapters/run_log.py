@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import identity
-from ndf.contracts import causes, limits, result
+from ndf.contracts import causes, facts, limits, result
 
 ENV_RUN_ID = "NDF_RUN_ID"
 ENV_RUN_LOG = "NDF_RUN_LOG"
@@ -71,8 +71,13 @@ def _safe_name(name: str, what: str) -> str:
     return name
 
 
-def _secret_values() -> list[str]:
-    found = [v for k, v in os.environ.items() if SECRET_NAME.search(k) and len(v) >= SECRET_MIN]
+def secret_values() -> list[str]:
+    """伏せる値（名前が秘密の形の環境変数と、環境変数の表で `secret` の値）。長いものから並べ、短い値が長い値の一部を先に伏せないようにする。
+
+    表の `secret` は名前の形に当たらない秘密（進行表の DB の URL は資格情報を含みうる。B8）を拾う。
+    """
+    marked = set(facts.ids("env", secret=True))
+    found = [v for k, v in os.environ.items() if (SECRET_NAME.search(k) or k in marked) and len(v) >= SECRET_MIN]
     return sorted(found, key=len, reverse=True)
 
 
@@ -85,15 +90,22 @@ def _mask(text: str, secrets: list[str]) -> str:
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
-    """文字列・配列・辞書の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。"""
-    secrets = _secret_values() if secrets is None else secrets
-    if isinstance(value, str):
-        return _mask(value, secrets)
+    """値の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。
+
+    辞書は鍵も伏せる。配列・タプル・集合は配列にして中を伏せる。バイト列は UTF-8 の文字列に読んで伏せる。
+    JSON の値にならないもの（パス・例外など）は、記録へ書くときの文字列（`str`）にしてから伏せる。
+    数・真偽値・None だけをそのまま返す（秘密を持ちうる値をパススルーしない。#3394）。
+    """
+    secrets = secret_values() if secrets is None else secrets
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
     if isinstance(value, dict):
-        return {k: redact(v, secrets) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+        return {_mask(str(k), secrets): redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [redact(v, secrets) for v in value]
-    return value
+    if isinstance(value, (bytes, bytearray)):
+        return _mask(bytes(value).decode("utf-8", errors="replace"), secrets)
+    return _mask(value if isinstance(value, str) else str(value), secrets)
 
 
 def _string_slots(value: Any) -> list[tuple[Any, Any]]:
@@ -195,16 +207,23 @@ class RunLog:
         """
         self._blobs += 1
         ref = {"head": text[:HEAD_CHARS], "chars": len(text), "sha256": hashlib.sha256(text.encode()).hexdigest()}
-        if self.path is not None:
-            blob = self.path.with_name(f"{self.path.stem}.{self.run_id}.{self._blobs}.txt")
-            blob.write_text(text, encoding="utf-8")
-            return {**ref, "full_text": str(blob)}
+        stored = self._store_blob_file(text, self.path) if self.path is not None else self._emit_blob_parts(text, limit)
+        return {**ref, **stored}
+
+    def _store_blob_file(self, text: str, path: Path) -> dict[str, Any]:
+        """全文を `path` の隣の全文ファイルへ書き、参照（`full_text`）を返す。"""
+        blob = path.with_name(f"{path.stem}.{self.run_id}.{self._blobs}.txt")
+        blob.write_text(text, encoding="utf-8")
+        return {"full_text": str(blob)}
+
+    def _emit_blob_parts(self, text: str, limit: int) -> dict[str, Any]:
+        """全文を行の上限に収まる続きの行（event `text_part`）に分けて出し、参照（`blob`・`parts`）を返す。"""
         frame = {"blob": self._blobs, "part": 0, "parts": 0, "text": ""}
         size = max(1, (limit - len(self._line("text_part", frame))) // JSON_CHAR_BYTES)
         parts = [text[i : i + size] for i in range(0, len(text), size)] or [""]
         for n, part in enumerate(parts, 1):
             self._emit(self._line("text_part", {**frame, "part": n, "parts": len(parts), "text": part}))
-        return {**ref, "blob": self._blobs, "parts": len(parts)}
+        return {"blob": self._blobs, "parts": len(parts)}
 
     def _fit(self, event: str, body: dict[str, Any]) -> bytes:
         """改行を含む行全体を上限に収める。長い文字列から順に逃がし、なお超えれば `fields` 全体を逃がす（I4）。"""
@@ -263,8 +282,12 @@ def close() -> None:
 
 
 def runs_dir() -> Path:
-    """記録の置き場の根（利用者の状態の置き場の下）。"""
-    return identity.load().state_dir / RUNS_DIR
+    """記録の置き場の根（利用者の状態の置き場の下）。
+
+    状態の置き場は `identity.prepare_state_dir` を通して用意する。形の版のファイルの無いまま記録を書くと、
+    次の用意が旧い置き場と判定して、書いている途中の記録と枠のロックごと退避するため（#3394）。
+    """
+    return identity.prepare_state_dir(identity.load()).path / RUNS_DIR
 
 
 def _prune(repo_dir: Path, today: date) -> None:

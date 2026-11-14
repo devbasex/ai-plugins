@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from ndf import identity
+from ndf import cli, identity
 from ndf.adapters.agents import (
     AgentPaths,
     AgentStatus,
@@ -35,9 +35,12 @@ from ndf.adapters.claude import (
     FULL_TOOLS,
     ClaudeCall,
     ClaudeReply,
+    Failure,
+    Permission,
     call_claude,
     claude_args,
     minimal_args,
+    permission_args,
     plugin_args,
 )
 from ndf.adapters.run_log import (
@@ -63,6 +66,9 @@ from ndf.adapters.run_log import (
 )
 from ndf.contracts import result
 
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = cli.tool_of(__name__)
+
 __all__ = [
     "BACKUP_SUFFIX",
     "CLAUDE",
@@ -85,7 +91,9 @@ __all__ = [
     "AgentStatus",
     "ClaudeCall",
     "ClaudeReply",
+    "Failure",
     "Launch",
+    "Permission",
     "RunLog",
     "RunLogError",
     "Warned",
@@ -100,6 +108,7 @@ __all__ = [
     "main",
     "minimal_args",
     "open_run",
+    "permission_args",
     "plugin_args",
     "record",
     "redact",
@@ -116,6 +125,6 @@ __all__ = [
 def main(argv: list[str]) -> int:
     """`ndf launch-args`: full の起動で `claude` に足す引数（旧い NDF を外し、このプラグインを読む）を items で出す。"""
     if argv:
-        return result.emit(result.stopped("launch-args", "invalid", f"引数を受けない: {' '.join(argv)}"))
+        return result.emit(result.stopped(TOOL, "invalid", f"引数を受けない: {' '.join(argv)}"))
     args = plugin_args(identity.load().root)
-    return result.emit(result.result("launch-args", result.OK, "full の起動の claude に足す引数", items=[{"args": args}]))
+    return result.emit(result.result(TOOL, result.OK, "full の起動の claude に足す引数", items=[{"args": args}]))

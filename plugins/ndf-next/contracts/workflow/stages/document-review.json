@@ -1,0 +1,98 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "document-review",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "ドキュメントレビュー",
+      "phase": "design",
+      "inputs": [
+        "worktree",
+        "branch"
+      ]
+    }
+  },
+  "do": [
+    {
+      "docs-pr": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "pr"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
+      "docs-review": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "cross-review"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "review",
+            "range": "sprint_diff",
+            "subject": "docs"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
+      "docs-merge": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "merge"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "merge",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "retrospective",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "振り返り",
+      "phase": "close",
+      "inputs": [
+        "issues"
+      ]
+    }
+  },
+  "do": [
+    {
+      "retrospective": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "retrospective"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "record",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

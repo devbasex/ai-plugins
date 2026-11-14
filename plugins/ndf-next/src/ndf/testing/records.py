@@ -6,14 +6,12 @@
 from __future__ import annotations
 
 import json
-import os
-import threading
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from filelock import FileLock
+from ndf import slot_pool
 
 # 記録を残す期間と行数（I11）
 KEEP_DAYS = 30
@@ -31,19 +29,7 @@ MEMORY_STOPPED = "memory_stopped"
 INTERRUPTED = "interrupted"
 
 
-def _lock(path: Path) -> FileLock:
-    # ソフトロックへ落とさない（カーネルのロックでないと持ち主の消滅で解けない）。ロックのファイルは消さない
-    return FileLock(path, thread_local=False, fallback_to_soft=False, preserve_lock_file=True)
-
-
-def _replace_text(path: Path, text: str) -> None:
-    """一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def _now_iso(now: float) -> str:
+def now_iso(now: float) -> str:
     return datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
 
 
@@ -61,7 +47,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
     now = time.time() if now is None else now
     path = directory / EVENTS_FILE
     line = json.dumps(row, ensure_ascii=False)
-    with _lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+    with slot_pool.lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
@@ -72,7 +58,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
                 fh.write(line + "\n")
             return
         kept = (kept + [line])[-KEEP_ROWS:]
-        _replace_text(path, "".join(ln + "\n" for ln in kept))
+        slot_pool.replace_text(path, "".join(ln + "\n" for ln in kept))
 
 
 def _prune(lines: list[str], now: float) -> list[str]:

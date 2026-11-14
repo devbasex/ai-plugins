@@ -14,5 +14,24 @@
       ".ndf/",
       ".gitignore"
     ]
+  },
+  "branch_flow": {
+    "start": "base",
+    "integrate": "check",
+    "doc_prs": "base",
+    "promotion": "whole",
+    "reviews": {
+      "impl": {
+        "checks": [],
+        "diff": "none"
+      },
+      "sprint": {
+        "checks": [
+          "cross-refactoring",
+          "cross-review"
+        ],
+        "diff": "unchecked"
+      }
+    }
   }
 }

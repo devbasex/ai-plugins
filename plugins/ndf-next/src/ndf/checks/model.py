@@ -12,7 +12,13 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from ndf.checks import imports
+
 RULES_PATH = Path(__file__).with_name("rules.json")
+# スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
+SCRIPT_PREFIXES = ("bin/", "hooks/")
+# 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
+SRC_DIR = "src"
 
 
 class CheckError(Exception):
@@ -73,7 +79,15 @@ class Scope:
 
     def code(self) -> list[Source]:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
-        return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith("src/")]
+        return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith(SRC_DIR + "/")]
+
+    def code_files(self) -> list[Source]:
+        """コードのファイル（テストを含む `.py` と `bin/`・`hooks/` のスクリプト）。行数の上限が見る。"""
+        return [s for s in self.sources if s.is_python or self.plugin_rel(s).startswith(SCRIPT_PREFIXES)]
+
+    def modules(self) -> dict[str, Source]:
+        """製品のコード（`code()`）をモジュール名 → ファイルの表にする。"""
+        return {module_name(self, s): s for s in self.code()}
 
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
@@ -88,13 +102,38 @@ def module_name(scope: Scope, src: Source) -> str:
     return ".".join(parts)
 
 
+def module_rel(module: str, suffix: str) -> str:
+    """`ndf.identity` と `.py` → `src/ndf/identity.py`（プラグインの根からの相対パス。`module_name` の逆）。"""
+    return SRC_DIR + "/" + module.replace(".", "/") + suffix
+
+
+def source_imports(src: Source, module: str) -> list[imports.Import]:
+    """ファイルの import（`__init__.py` はパッケージとして相対の import を解く）。"""
+    return imports.collect(src.tree, module, src.path.name == "__init__.py")
+
+
+def read_json_text(path: Path | str, unreadable: str) -> tuple[str, Any]:
+    """JSON のファイルの本文と値。読めない・JSON でなければ `CheckError`（`<unreadable>: <渡したパス>: <例外>`）。"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+        return text, json.loads(text)
+    except (OSError, ValueError) as exc:
+        raise CheckError(f"{unreadable}: {path}: {exc}") from exc
+
+
+def read_json(path: Path | str, unreadable: str) -> Any:
+    """JSON のファイルの値。読めないときは `read_json_text` と同じ `CheckError`。"""
+    return read_json_text(path, unreadable)[1]
+
+
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側の鍵の参照（欠ければ `KeyError`）に任せず、ここで鍵の有無を見る。"""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"規則のデータを読めない: {path}: {exc}") from exc
-    missing = [k for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "invariants") if k not in data]
+    data = read_json(path, "規則のデータを読めない")
+    missing = [
+        k
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
+        if k not in data
+    ]
     if missing:
         raise CheckError(f"規則のデータに鍵が無い: {path}: {missing}")
     bad = [code for code, rule in data["smells"].items() if rule["mark"] not in ("none", "boundary", "boundary-or-limit")]

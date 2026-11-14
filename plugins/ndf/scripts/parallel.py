@@ -94,11 +94,6 @@ def checked_plan(main: Path, name: str, touch: bool = False) -> tuple[pp.Paralle
 
         estimates, shared, error = te.lane_estimates(main, plan.lanes)
         plan, items, metrics = pp.check_data(data, home=main, estimates=estimates, shared=shared, estimate_error=error, ended=ended)
-    if plan is not None:  # 同じマシンの他の動いている計画と合わせた本数の警告（#2999 の決定 3。終了コードは変えない）
-        import parallel_machine
-
-        extra = parallel_machine.plan_warnings(main, name, sum(ln.plans for ln in plan.lanes if ln.name not in ended))
-        items, metrics = [*items, *extra], {**metrics, "warnings": metrics["warnings"] + len(extra)}
     return plan, items, metrics
 
 

@@ -1,0 +1,37 @@
+{
+  "template": "check",
+  "purpose": "check",
+  "summary": "検査: 文書だけの差分なら全体テストとリファクタリングを飛ばす → 全体テスト → リファクタリング → コードレビュー → 振る舞いの確認 → push → CI → マージの直前の振る舞いの確かめ直し → 承認ゲート → マージ",
+  "params": ["repo", "worktree", "branch", "base", "whole_test_command", "test_command", "worker", "refactor", "sync_command", "review", "behavior", "gate", "ci_budget", "required", "tests", "merge_method"],
+  "plan": {
+    "name": "check-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {
+        "id": "assess",
+        "run": ["sh", "-c", "files=$(git diff --name-only \"origin/$0...HEAD\") || exit 2; printf '%s' \"$files\" | grep -qv '\\.md$'", "{{base}}"],
+        "exit_cause": {"1": "not_applicable", "2": "precondition"},
+        "on_cause": {"not_applicable": "review"}
+      },
+      {"use": "test", "id": "test-all", "run": ["ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "{{whole_test_command}}"], "on_cause": {"test_failed": "test-repeat"}},
+      {"id": "refactor", "run": ["{{refactor}}", "--sync-command", "{{sync_command}}"], "on_cause": {"incomplete": "review"}},
+      {"id": "review", "run": ["{{review}}"], "on_cause": {"incomplete": "behavior"}},
+      {"id": "behavior", "run": ["{{behavior}}"]},
+      {"use": "push", "on_fail": "fix-push"},
+      {"use": "conflict-check"},
+      {"use": "ci"},
+      {"id": "behavior-recheck", "run": ["{{behavior}}"]},
+      {"use": "merge-gate"},
+      {"use": "merge", "next": "end"},
+      {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},
+      {"use": "test-repeat"},
+      {"use": "repeat-check"},
+      {"use": "ci-fix"},
+      {"use": "ci-local"},
+      {"use": "fix-push"},
+      {"use": "base-sync"},
+      {"use": "fix-base"}
+    ]
+  }
+}

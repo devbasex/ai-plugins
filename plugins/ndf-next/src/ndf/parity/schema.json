@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "parity.schema.json",
+  "title": "機能の対応表（features.json）と直しの棚卸し（fixes.json）の形",
+  "description": "ファイルごとに $defs の features_file（features.json）か fixes_file（fixes.json）で確かめる",
+  "$defs": {
+    "child": {
+      "type": "string",
+      "pattern": "^[A-Z]+[0-9]+[a-z]?\\+?$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trial": {
+      "description": "試走（T2）の結果。T2 が書くまでは null",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "result"
+          ],
+          "properties": {
+            "result": {
+              "enum": [
+                "passed",
+                "failed",
+                "not_run"
+              ]
+            },
+            "reason": {
+              "$ref": "#/$defs/reason"
+            },
+            "record": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": {
+              "result": {
+                "enum": [
+                  "failed",
+                  "not_run"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "feature_row": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "feature",
+        "now",
+        "trial"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z-]+:.+$"
+        },
+        "kind": {
+          "enum": [
+            "entrypoint",
+            "hook-judgment",
+            "hook",
+            "skill",
+            "manifest",
+            "agent",
+            "contract",
+            "data",
+            "experimental",
+            "workflow",
+            "non-regression",
+            "from-issue"
+          ]
+        },
+        "feature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "now": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "$ref": "#/$defs/child"
+        },
+        "not_built": {
+          "$ref": "#/$defs/reason"
+        },
+        "trial": {
+          "$ref": "#/$defs/trial"
+        },
+        "unowned": {
+          "const": true
+        },
+        "conductor": {
+          "const": true
+        },
+        "user_command": {
+          "const": true
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "to"
+          ],
+          "not": {
+            "required": [
+              "not_built"
+            ]
+          }
+        },
+        {
+          "required": [
+            "not_built"
+          ],
+          "not": {
+            "required": [
+              "to"
+            ]
+          }
+        }
+      ]
+    },
+    "fix": {
+      "type": "object",
+      "required": [
+        "id",
+        "issue",
+        "fix",
+        "prs",
+        "commits",
+        "tests"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fix:.+$"
+        },
+        "issue": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "fix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prs": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{7,40}$"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "to": {
+          "$ref": "#/$defs/child"
+        },
+        "not_moved": {
+          "$ref": "#/$defs/reason"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "to"
+          ],
+          "not": {
+            "required": [
+              "not_moved"
+            ]
+          }
+        },
+        {
+          "required": [
+            "not_moved"
+          ],
+          "not": {
+            "required": [
+              "to"
+            ]
+          }
+        }
+      ]
+    },
+    "regression": {
+      "type": "object",
+      "required": [
+        "id",
+        "issue",
+        "test",
+        "behavior",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^regression:.+$"
+        },
+        "issue": {
+          "type": "integer"
+        },
+        "test": {
+          "type": "string",
+          "minLength": 1
+        },
+        "behavior": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "$ref": "#/$defs/child"
+        }
+      },
+      "additionalProperties": false
+    },
+    "intake": {
+      "type": "object",
+      "required": [
+        "issue",
+        "summary",
+        "row",
+        "listed"
+      ],
+      "properties": {
+        "issue": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "row": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "$ref": "#/$defs/child"
+        },
+        "not_taken": {
+          "$ref": "#/$defs/reason"
+        },
+        "listed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "to"
+          ],
+          "not": {
+            "required": [
+              "not_taken"
+            ]
+          },
+          "properties": {
+            "row": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "not_taken"
+          ],
+          "not": {
+            "required": [
+              "to"
+            ]
+          }
+        }
+      ]
+    },
+    "features_file": {
+      "type": "object",
+      "required": [
+        "version",
+        "as_of",
+        "places",
+        "rows"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date"
+        },
+        "places": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/child"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feature_row"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "fixes_file": {
+      "type": "object",
+      "required": [
+        "version",
+        "as_of",
+        "since",
+        "fixes",
+        "regressions",
+        "intake"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date"
+        },
+        "since": {
+          "type": "object",
+          "required": [
+            "pr",
+            "at"
+          ],
+          "properties": {
+            "pr": {
+              "type": "integer"
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "fixes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fix"
+          }
+        },
+        "regressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regression"
+          }
+        },
+        "intake": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/intake"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

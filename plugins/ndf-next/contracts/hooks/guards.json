@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "summary": "hook のエントリポイントが呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。エントリポイントは事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行はエントリポイントが dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
+  "ndf_commands": ["ndf"],
+  "guards": [
+    {
+      "name": "merge-production",
+      "summary": "Bash で直に打つ gh pr merge を、宛先のリポジトリの delivery で判定し、自動で本番へ届くなら止める（決定 91）",
+      "module": "ndf.domains.hooks.strict",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 0,
+      "strict": true,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": [],
+      "params": {}
+    },
+    {
+      "name": "turn",
+      "summary": "利用者の入力で数え手を数え直す。中継が送った入力（数え手の印がある）では数え直さない（決定 92）",
+      "module": "ndf.domains.hooks.guards.turn",
+      "events": ["UserPromptSubmit"],
+      "tools": [],
+      "order": 10,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.counter-lock"],
+      "params": {}
+    },
+    {
+      "name": "session",
+      "summary": "SessionStart で予算の順序を検査し、破れがあれば 1 行の案内を出す（決定 90）",
+      "module": "ndf.domains.hooks.guards.session",
+      "events": ["SessionStart"],
+      "tools": [],
+      "order": 10,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": [],
+      "params": {}
+    },
+    {
+      "name": "context-limit",
+      "summary": "文脈の量が hook.context-limit を超えたら、次の 1 手（中継の下は区間の切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
+      "module": "ndf.domains.hooks.guards.context_limit",
+      "events": ["PreToolUse"],
+      "tools": [],
+      "order": 20,
+      "strict": false,
+      "suggests": [
+        {"tool": "Write", "input": {"file_path": ".ndf/handoff/next.md", "content": "# 引き継ぎ\n"}}
+      ],
+      "deny_key": "reason",
+      "limits": [],
+      "params": {"handoff_dir": ".ndf/handoff/"}
+    },
+    {
+      "name": "sleep",
+      "summary": "前景で hook.sleep の秒を超えて待つ sleep と、sleep の後に打つ NDF のコマンドを止め、Monitor か背景の起動を勧める",
+      "module": "ndf.domains.hooks.guards.sleep",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 30,
+      "strict": false,
+      "suggests": [
+        {"tool": "Monitor", "input": {"command": "until [ -f done.json ]; do sleep 5; done", "description": "結果のファイルを待つ"}},
+        {"tool": "Bash", "input": {"command": "sleep 600", "run_in_background": true}}
+      ],
+      "deny_key": "command",
+      "limits": [],
+      "params": {}
+    },
+    {
+      "name": "script-chain",
+      "summary": "NDF のコマンドをシェルの演算子やループでつないで待つ呼び出しを止め、計画の待ちの副命令を背景で打つよう案内する（#1919）",
+      "module": "ndf.domains.hooks.guards.chain",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 40,
+      "strict": false,
+      "suggests": [
+        {"tool": "Bash", "input": {"command": "ndf plan wait p1", "run_in_background": true}}
+      ],
+      "deny_key": "command",
+      "limits": [],
+      "params": {"commands": ["ndf"]}
+    },
+    {
+      "name": "read-repeat",
+      "summary": "同じファイルの同じ範囲を hook.read-repeat の回数を超えて読むのを止め、Grep で位置を探すよう勧める",
+      "module": "ndf.domains.hooks.guards.read_repeat",
+      "events": ["PreToolUse"],
+      "tools": ["Read"],
+      "order": 50,
+      "strict": false,
+      "suggests": [
+        {"tool": "Grep", "input": {"pattern": "def main", "path": "src"}}
+      ],
+      "deny_key": "range",
+      "limits": ["hook.counter-lock"],
+      "params": {}
+    },
+    {
+      "name": "ask-forward",
+      "summary": "AskUserQuestion を中継とオーガナイザーへのシグナルファイルに書き、待ちの知らせを送信待ちへ書く。転送は待たない（決定 93・#3035）",
+      "module": "ndf.domains.hooks.guards.ask",
+      "events": ["PreToolUse"],
+      "tools": ["AskUserQuestion"],
+      "order": 60,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.ask-forward"],
+      "params": {}
+    },
+    {
+      "name": "relay-mark",
+      "summary": "中継の下で最後の応答が次の区間のブロックを持てば、背景の作業が残る間は差し戻し、無ければ中継の印を書く（#1877・#2438）",
+      "module": "ndf.domains.hooks.guards.relay_mark",
+      "events": ["Stop"],
+      "tools": [],
+      "order": 10,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": ["hook.counter-lock"],
+      "params": {"fence": "ndf-next"}
+    },
+    {
+      "name": "unattended",
+      "summary": "人のいない実行（NDF_FACTORY_RUN）で、最後の応答が区間の報告の形（params.labels の行）に合わなければ差し戻す",
+      "module": "ndf.domains.hooks.guards.unattended",
+      "events": ["Stop"],
+      "tools": [],
+      "order": 20,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": [],
+      "params": {"labels": ["作業:", "結果:", "次にすること:"]}
+    },
+    {
+      "name": "stop-wait",
+      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の答えを待つなら差し戻し、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）",
+      "module": "ndf.domains.hooks.guards.stop_wait",
+      "events": ["Stop"],
+      "tools": [],
+      "order": 30,
+      "strict": false,
+      "suggests": [
+        {"tool": "AskUserQuestion", "input": {"questions": [{"question": "進めてよいか", "header": "承認", "options": [{"label": "進める", "description": "このまま進める"}, {"label": "止める", "description": "ここで止める"}], "multiSelect": false}]}}
+      ],
+      "deny_key": "none",
+      "limits": [],
+      "params": {}
+    }
+  ]
+}

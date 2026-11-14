@@ -10,16 +10,21 @@ from collections.abc import Callable
 from typing import Any
 
 from ndf.checks import imports
-from ndf.checks.model import Finding, Scope, Source, module_name
+from ndf.checks.model import Finding, Scope, Source, source_imports
 
 
 def _layer(module: str, layers: list[str]) -> int | None:
-    hits = [i for i, prefix in enumerate(layers) if module == prefix or module.startswith(prefix + ".")]
+    hits = [i for i, prefix in enumerate(layers) if imports.is_under(module, prefix)]
     return hits[0] if hits else None
 
 
 def _within(module: str, prefixes: list[str]) -> bool:
-    return any(module == p or module.startswith(p + ".") for p in prefixes)
+    return any(imports.is_under(module, p) for p in prefixes)
+
+
+def _is_decide(module: str, conf: dict[str, Any]) -> bool:
+    """判断のモジュール（最後の名前が `decide_suffix` で終わる）か。"""
+    return module.rsplit(".", 1)[-1].endswith(conf["decide_suffix"])
 
 
 def _pointed(imp: imports.Import) -> list[str]:
@@ -36,7 +41,7 @@ def _import_findings(rel: str, module: str, imps: list[imports.Import], rules: d
     found = []
     layers = rules["layers"]
     mine = _layer(module, layers)
-    is_decide = module.rsplit(".", 1)[-1].endswith(rules["decide_suffix"])
+    is_decide = _is_decide(module, rules)
 
     def above(name: str) -> bool:
         theirs = _layer(name, layers)
@@ -69,17 +74,16 @@ def _decide_calls(rel: str, tree: ast.Module, forbidden: frozenset[str]) -> list
 
 
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    """`src/` の下のモジュールに構造の規則（輪を除く）を当てる。"""
+    """行数の上限をコードのファイルのすべてに、ほかの構造の規則（輪を除く）を `src/` の下のモジュールに当てる。"""
     conf = rules["structure"]
-    found = []
-    for src in scope.code():
-        lines = len(src.text.splitlines())
-        if lines > conf["max_lines"]:
-            found.append(Finding("lines", src.rel, 1, f"{lines} 行（安全網 {conf['max_lines']} 行）。責務で分ける"))
-        module = module_name(scope, src)
-        imps = imports.collect(src.tree, module, src.path.name == "__init__.py")
-        found += _import_findings(src.rel, module, imps, conf)
-        if module.rsplit(".", 1)[-1].endswith(conf["decide_suffix"]):
+    found = [
+        Finding("lines", src.rel, 1, f"{lines} 行（安全網 {conf['max_lines']} 行）。責務で分ける")
+        for src in scope.code_files()
+        if (lines := len(src.text.splitlines())) > conf["max_lines"]
+    ]
+    for module, src in scope.modules().items():
+        found += _import_findings(src.rel, module, source_imports(src, module), conf)
+        if _is_decide(module, conf):
             found += _decide_calls(src.rel, src.tree, frozenset(conf["decide_forbidden_calls"]))
     return found
 
@@ -135,16 +139,21 @@ class _Tarjan:
         self.comps.append(sorted(comp))
 
 
-def cycles(scope: Scope) -> list[Finding]:
-    """`src/` の下のモジュールの import の輪（関数の中の import を含む）を、輪ごとに 1 件返す。"""
-    by_module: dict[str, Source] = {module_name(scope, s): s for s in scope.code()}
+def _import_graph(by_module: dict[str, Source]) -> dict[str, set[str]]:
+    """モジュール → それが読む `by_module` の中のモジュール（自分を除く）。"""
     known = set(by_module)
     graph: dict[str, set[str]] = {m: set() for m in known}
     for module, src in by_module.items():
-        for imp in imports.collect(src.tree, module, src.path.name == "__init__.py"):
+        for imp in source_imports(src, module):
             graph[module].update(t for t in imports.targets(imp, known) if t != module)
+    return graph
+
+
+def cycles(scope: Scope) -> list[Finding]:
+    """`src/` の下のモジュールの import の輪（関数の中の import を含む）を、輪ごとに 1 件返す。"""
+    by_module = scope.modules()
     found = []
-    for comp in _Tarjan(graph).run():
+    for comp in _Tarjan(_import_graph(by_module)).run():
         if len(comp) > 1:
             paths = sorted(by_module[m].rel for m in comp)
             found.append(Finding("cycle", paths[0], 1, "import の輪: " + " → ".join(paths)))

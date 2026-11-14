@@ -12,8 +12,8 @@
 | 用語集 | `glossary` | ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | コンテキスト | `context` | 語の意味が 1 つに決まる範囲（境界づけられたコンテキスト） | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | ドメインモデルの節 | — | 設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とその持ち主・不変条件・ドメインイベントを書く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 廃止した語 | `deprecated` | 用語集で別の語へ置き換えた語。文書の追加した行と、用語集自身の意味の説明に出たら落とす | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 単独で照合する廃止した語 | `deprecated_standalone` | 前後が漢字の出現には当てない廃止した語。1 文字の語と、長い語の一部に現れる語を登録するために使う | — | — | — |
+| 廃止した語 | `deprecated` | 用語集で別の語へ置き換えた語。文書の追加した行と、用語集自身の意味の説明に出たら落とす | — | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
+| 単独で照合する廃止した語 | `deprecated_standalone` | 前後が漢字の出現には当てない廃止した語。1 文字の語と、長い語の一部に現れる語を登録するために使う | — | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | 不変条件 | — | 集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 用語集の取り込み | — | ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う | — | — | `docs/specifications/ndf-glossary-merge.md` |
@@ -28,7 +28,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
 | 用語集の設定 | `glossary_config` | `.ndf/glossary.json`。用語集の置き場・形式・チェックの対象を持つ | 用語集の宣言 | `declaration` | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 用語チェック | — | `glossary.py check`。用語集の形と意味の説明の廃止した語、文書の追加した行の語を見る | 語のチェック | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 用語チェック | — | `glossary.py check`。用語集の形と意味の説明の廃止した語、文書の追加した行の語を見る | 語のチェック | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | モデルレビュー | — | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | モデルの段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細レビュー | — | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | 詳細の段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様のコピー | — | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | 仕様の写し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -592,8 +592,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースブランチ | — | 本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 本番チャネルの宣言 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | — |
-| 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない | — | — | — |
+| 本番チャネルの宣言 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
+| 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
 | 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
@@ -638,15 +638,25 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断の関数 | — | 状態と入力を受けて次の手を返す関数。耐久ワークフロー・DBOS・プロセス・ファイルを扱わない。置き場のモジュールの名前は _decide.py で終わる | — | — | — |
 | 耐久の層 | — | 判断の関数が返した手を耐久ステップで実行し、結果を判断の関数へ返す薄い層。次の手を自分で選ばない | — | — | — |
 | 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる | — | — | — |
-| CI | — | Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー） | 継続的統合 | — | — |
-| 文字列 | — | 文字の並びとして持つ値 | 字で持（単独） | — | — |
+| CI | — | Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー） | 継続的統合 | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
+| 文字列 | — | 文字の並びとして持つ値 | 字で持（単独） | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | 取り込み方 | `promotion` | スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる | — | — | — |
 | プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別 | — | — | — |
 | 新しいプラグイン | — | 入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next` | — | — | — |
+| 文書の行き先 | — | プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）と持ち主の子と時期 | — | — | — |
+| 入れ替えの起点のコミット | — | 入れ替えの PR が分かれた develop のコミット。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う | — | — | — |
+| 非公開の参照 | — | 公開のリポジトリや公開の Issue に入っている、非公開リポジトリへの完全な参照・手元のアカウント名・個人のメール。一覧には場所と分類だけを書き、値を写さない | — | — | — |
 | プラグインの定義 | — | プラグインの `plugin.json` が持つプラグイン名と版 | — | — | — |
 | 初期構成 | — | 新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの置き場（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別 | — | — | — |
 | チェックアウトの置き場 | — | <git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、進行表の DB と実行の鍵ごとの耐久の記録と控えを置く（#1142 の作り直し） | — | — | — |
 | 形の番号 | — | チェックアウトの置き場の format.json と耐久の記録のアプリの版が持つ整数。読み書きの形が変わるときだけ上げ、NDF の版とは別に動く | — | — | — |
+| レビューの項目 | — | 設計レビューの Issue の本文（進行の節より前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し） | — | — | — |
+| 行き先の表 | — | レビューの項目ごとに、行き先の子・順番・新設か追補か・要求の行を持つ 1 つの表（#1142 の作り直し） | — | — | — |
+| 追補の単位 | — | 閉じた子へ足す作業を、元の子の名前に + を付けて別の子にしたもの（例: X1+） | — | — | — |
+| 要求の行 | — | issues/issue-1142-requirements.md の行番号か受け入れ条件の番号。レビューの項目の根拠になる | — | — | — |
+| 目的の物差し | — | 作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則 | — | — | — |
+| 選択の記録 | — | 行き先を選ぶたびに 1 行残す事象。選んだ主体（スクリプト・conductor・人）・規則の番号・行き先を持ち、目的の物差しが数える（#1142 の作り直し） | — | — | — |
+| 閉じる証拠 | — | 解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

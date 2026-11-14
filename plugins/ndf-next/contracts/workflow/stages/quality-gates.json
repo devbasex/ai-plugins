@@ -1,0 +1,56 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "quality-gates",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "完了判定",
+      "phase": "implement",
+      "inputs": [
+        "issues",
+        "worktree",
+        "branch"
+      ]
+    }
+  },
+  "do": [
+    {
+      "quality-gates": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "quality-gates"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "test",
+            "range": "sprint_diff"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

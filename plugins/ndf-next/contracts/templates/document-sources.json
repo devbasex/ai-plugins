@@ -1,0 +1,16 @@
+{
+  "template": "document-sources",
+  "purpose": "document_sources",
+  "summary": "素材の収集と出典の確定: worker が素材と出典を集める → push",
+  "params": ["repo", "worktree", "branch", "worker"],
+  "plan": {
+    "name": "document-sources-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "document-sources"]},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

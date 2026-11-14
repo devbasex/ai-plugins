@@ -1,0 +1,13 @@
+{
+  "template": "requirements",
+  "purpose": "requirements",
+  "summary": "要求と受け入れ条件: worker が課題の要求と受け入れ条件を書く。作業場所の用意より前の工程なので、リポジトリの根で打つ",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "requirements",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "requirements"]}
+    ]
+  }
+}

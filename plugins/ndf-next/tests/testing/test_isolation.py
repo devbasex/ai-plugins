@@ -220,8 +220,7 @@ def test_hook_accepts_list_args():
 def test_hook_rename_stops_at_the_first_violation(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
-    guard = isolation._Guard()
-    guard.roots = (os.path.realpath(real),)
+    guard = _guard_over(real)
     with pytest.raises(isolation.RealStateWriteError) as raised:
         guard._hook("os.rename", (str(real / "a"), str(real / "b"), None, None))
     assert guard.violations == [os.path.realpath(real / "a")]
@@ -231,8 +230,7 @@ def test_hook_rename_stops_at_the_first_violation(tmp_path):
 def test_hook_rename_into_the_root_from_outside_flags_the_destination(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
-    guard = isolation._Guard()
-    guard.roots = (os.path.realpath(real),)
+    guard = _guard_over(real)
     with pytest.raises(isolation.RealStateWriteError):
         guard._hook("os.rename", (str(tmp_path / "outside"), str(real / "b"), None, None))
     assert guard.violations == [os.path.realpath(real / "b")]
@@ -241,8 +239,7 @@ def test_hook_rename_into_the_root_from_outside_flags_the_destination(tmp_path):
 def test_hook_resolves_relative_paths_through_dir_fd(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
-    guard = isolation._Guard()
-    guard.roots = (os.path.realpath(real),)
+    guard = _guard_over(real)
     fd = os.open(real, os.O_RDONLY)
     try:
         with pytest.raises(isolation.RealStateWriteError):
@@ -256,8 +253,7 @@ def test_hook_lets_writes_under_allowed_and_outside_roots_through(tmp_path):
     real = tmp_path / "real"
     allowed = real / "pytest"
     allowed.mkdir(parents=True)
-    guard = isolation._Guard()
-    guard.roots = (os.path.realpath(real),)
+    guard = _guard_over(real)
     guard.allowed = (os.path.realpath(allowed),)
     guard._hook("open", (str(allowed / "f"), "w", 0))
     guard._hook("open", (str(tmp_path / "elsewhere"), "w", 0))
@@ -306,6 +302,15 @@ def _guard_over(real) -> isolation._Guard:
     return guard
 
 
+def test_check_rejects_bytes_paths_under_a_root(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    guard = _guard_over(real)
+    with pytest.raises(isolation.RealStateWriteError):
+        guard._check(os.fsencode(real / "ledger"), None, N)
+    assert guard.violations == [os.path.realpath(real / "ledger")]
+
+
 def test_hook_resolves_file_descriptors_to_their_paths(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
@@ -318,6 +323,19 @@ def test_hook_resolves_file_descriptors_to_their_paths(tmp_path):
     finally:
         os.close(fd)
     assert guard.violations == [os.path.realpath(real / "ledger")]
+
+
+@pytest.mark.skipif(getattr(isolation.fcntl, "F_GETPATH", None) is not None, reason="F_GETPATH の代替が読めてしまう")
+def test_fd_path_is_none_when_proc_is_unreadable_and_no_fallback(tmp_path, monkeypatch):
+    def unreadable(path):
+        raise OSError("no /proc")
+
+    monkeypatch.setattr(isolation.os, "readlink", unreadable)
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert isolation._fd_path(fd) is None
+    finally:
+        os.close(fd)
 
 
 def test_hook_rejects_moving_a_directory_that_holds_a_root(tmp_path):

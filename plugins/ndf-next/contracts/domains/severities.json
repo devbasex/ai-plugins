@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "レビューの指摘の重さ。行の並びは重い順。cross-review・pr-review・fix・cross-refactoring が同じ尺度で読む",
   "owner": "D2（contracts/domains）",
   "columns": {

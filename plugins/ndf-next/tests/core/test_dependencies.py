@@ -61,7 +61,8 @@ def test_dbos_importers_uses_explicit_base(tmp_path, monkeypatch):
 
 def test_only_durable_imports_dbos():
     importers = _dbos_importers(PLUGIN_ROOT / "src", PLUGIN_ROOT) | _dbos_importers(PLUGIN_ROOT / "tests", PLUGIN_ROOT)
-    assert importers == {"src/ndf/core/durable.py"}
+    # 見本を作るスクリプトは、前の版の DBOS だけで動かす（今の殻の API を持たない版で打つ）ため殻を通さない
+    assert importers == {"src/ndf/core/durable.py", "tests/core/_durable_old_make.py"}
 
 
 def test_loop_reads_neither_durable_nor_dbos():

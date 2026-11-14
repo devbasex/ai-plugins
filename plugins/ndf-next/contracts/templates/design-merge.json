@@ -1,0 +1,20 @@
+{
+  "template": "design-merge",
+  "purpose": "design_merge",
+  "summary": "設計 PR のマージ: 宛先との衝突を確かめ、衝突していれば宛先を取り込んで直してから push し直す → 承認ゲート → マージ",
+  "params": ["repo", "worktree", "branch", "base", "worker", "gate", "merge_method"],
+  "plan": {
+    "name": "design-merge-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "conflict-check"},
+      {"use": "merge-gate"},
+      {"use": "merge", "next": "end"},
+      {"use": "base-sync"},
+      {"use": "fix-base"},
+      {"use": "push", "on_fail": "fix-push", "next": "conflict-check"},
+      {"use": "fix-push"}
+    ]
+  }
+}

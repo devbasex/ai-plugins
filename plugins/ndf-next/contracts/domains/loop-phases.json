@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "収束ループ（cross-review と cross-refactoring）のフェーズ。行の並びはフェーズが進む順で、各フェーズの監視の上限は上限の宣言の monitor.phase.<id> が持つ",
   "owner": "D2（contracts/domains）",
   "columns": {

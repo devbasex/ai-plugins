@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "テストのファイルの見分け方。名前の行はファイル名（ディレクトリを除く）全体を fnmatch の形で大文字と小文字を分けて照らし、部分一致では見ない（latest_version.py・contest_rules.ts はテストでない）。置き場の行はパスのディレクトリの 1 段の名前と比べる。どれか 1 行に当たればテストのファイル。cross-review・cross-refactoring・試走の候補が同じ表を読む",
   "owner": "D2（contracts/domains）",
   "columns": {

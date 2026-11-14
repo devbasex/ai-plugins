@@ -794,7 +794,10 @@ def test_dependencies_collects_every_manifest_kind_as_is():
             '[tool.poetry.dev-dependencies]\nBlack = "*"\n'
             '[tool.poetry.group.docs.dependencies]\nMkDocs = "1.6"\n'
         ),
-        "requirements.txt": "# comment\nDjango==4.0\nnumpy>=1.26  # pinned\n\n",
+        "requirements.txt": (
+            "# comment\n--extra-index-url https://example.invalid/simple\n-r base.txt\n-e .\n"
+            "Django==4.0\nnumpy>=1.26  # pinned\nhttps://example.invalid/pkg.whl\nmylib @ https://example.invalid/mylib.whl\n\n"
+        ),
         "requirements-dev.txt": "Mypy==1.10\n",
     }
     assert _deps_of(files) == {
@@ -810,6 +813,7 @@ def test_dependencies_collects_every_manifest_kind_as_is():
             "mkdocs": "1.6",
             "python": ">=3.11",
             "numpy": "numpy>=1.26  # pinned",
+            "mylib": "mylib @ https://example.invalid/mylib.whl",
             "mypy": "Mypy==1.10",
         },
     }

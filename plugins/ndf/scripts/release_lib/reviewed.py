@@ -37,6 +37,20 @@ TOOL = approval.TOOL
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
 
+# 旧いプラグインを変える PR に ndf-next の検査（規則 port。#3343）が求める行。印は plugins/ndf-next/src/ndf/checks/rules.json の
+# no_port_mark。リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ
+NO_PORT_LINE = "移さない理由（ndf-next）: リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ"
+
+
+def refresh_release_pr_body(root, pr, body: Callable[[], str]):
+    """使い回す開いた開発版の PR の本文を `body()`（今の版の本文）へ書き直す。作ったばかりの PR と閉じた PR は触らない。
+    本文の印を読む検査（ndf-next の port）は edited で打ち直される。"""
+    if pr.get("new") or pr["state"] != "OPEN":
+        return
+    p = gh_parts.gh(["pr", "edit", str(pr["number"]), "--body-file", "-"], body(), cwd=root)
+    if p.returncode != 0:
+        raise StepError(f"gh pr edit #{pr['number']}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
+
 
 def dev_workflow_of(root) -> str | None:
     """開発版の workflow のファイル名（`.ndf/supervise.json` の release.dev_workflow）。無ければ None（手元でマージする）。"""
@@ -259,6 +273,7 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
             "number": ops.create_pr(root, base, branch, f"Release: {plugin} v{a.version}", ops._release_pr_body(root, a, plugin, plugins)),
             "state": "OPEN",
         }
+    refresh_release_pr_body(root, {**pr, "new": new}, lambda: ops._release_pr_body(root, a, plugin, plugins))
     n = merged = pr["number"]
     items = [{"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": base}]
     if pr["state"] == "OPEN":
