@@ -15,7 +15,10 @@ run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 # 後段の静的解析（claude plugin validate）もこの一覧で回す。
 families_out="$(python3 "$ROOT_DIR/scripts/lib/plugin_families.py" "$ROOT_DIR")"
 FAMILIES=()
-[ -z "$families_out" ] || mapfile -t FAMILIES <<< "$families_out"
+# mapfile は macOS 標準の Bash 3.2 に無いため、read で 1 行ずつ足す
+while IFS= read -r family; do
+  if [ -n "$family" ]; then FAMILIES+=("$family"); fi
+done <<< "$families_out"
 if [ "${#FAMILIES[@]}" -eq 0 ]; then
   echo "ERROR: plugin family が見つからない（plugins/<family>/manifests）" >&2
   exit 1
