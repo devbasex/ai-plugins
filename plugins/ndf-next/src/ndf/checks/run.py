@@ -20,7 +20,7 @@ from typing import Any
 from ndf import cli, identity
 from ndf.checks import facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
-from ndf.contracts import exit_codes
+from ndf.contracts import exit_codes, result
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -113,10 +113,8 @@ def _pr_body(event: str) -> str:
 
 
 def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
-    report = {"tool": TOOL, "status": status, "summary": summary, "items": items, "metrics": metrics}
-    if status == "stopped" and not items:
-        report["cause"] = {"kind": "config_broken"}
-    print(json.dumps(report, ensure_ascii=False))
+    cause = {"kind": "config_broken"} if status == result.STOPPED and not items else None
+    print(result.dumps_line(result.result(TOOL, status, summary, items=items, metrics=metrics, cause=cause)))
 
 
 def main(argv: list[str]) -> int:
@@ -132,14 +130,14 @@ def main(argv: list[str]) -> int:
         scope.sources = collect(scope.plugin_root, repo_root)
         found = check(scope, rules)
     except (CheckError, identity.IdentityError) as exc:
-        emit("stopped", str(exc), [], {})
+        emit(result.STOPPED, str(exc), [], {})
         return exit_codes.unreadable_code()
     for f in found:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics = {"files": len(scope.sources), "findings": by_rule}
     if not found:
-        emit("ok", f"{len(scope.sources)} ファイルに違反なし", [], metrics)
+        emit(result.OK, f"{len(scope.sources)} ファイルに違反なし", [], metrics)
         return EXIT_OK
-    emit("stopped", f"違反 {len(found)} 件", [f.as_item() for f in found], metrics)
+    emit(result.STOPPED, f"違反 {len(found)} 件", [f.as_item() for f in found], metrics)
     return exit_codes.unreadable_code() if "syntax" in by_rule else EXIT_VIOLATION
