@@ -192,32 +192,53 @@ def _store_files(repo: Path) -> list[Path]:
     return [p for p in (repo / ".git").rglob("*") if p.is_file()]
 
 
+def _children(sink: Path) -> list[dict[str, Any]]:
+    """子のプロセスが 1 行ずつ書いた回数の記録。"""
+    return [json.loads(line) for line in sink.read_text(encoding="utf-8").splitlines() if line.strip()] if sink.exists() else []
+
+
+def _locked_in_logs(files: list[Path], repo: Path) -> int:
+    """置き場とプランの置き場のログに出た `database is locked` の数。"""
+    logs = [p for p in files + list((repo / "plans").rglob("*")) if p.suffix == ".log"]
+    return sum(p.read_text(encoding="utf-8", errors="replace").count(LOCKED) for p in logs)
+
+
+def _call_counts(rec: Recorder) -> dict[str, Any]:
+    """呼び出しの数・副命令と status ごとの数・失敗の標準エラーの見本。"""
+    return {
+        "calls": len(rec.calls),
+        "calls_by_status": dict(sorted(Counter(f"{c['cmd']}:{c['status']}" for c in rec.calls).items())),
+        "failed_samples": [c["stderr"] for c in rec.calls if c["stderr"]][:3],
+    }
+
+
+def _file_counts(files: list[Path]) -> dict[str, int]:
+    """WAL の最大の大きさと数、鍵ごとのファイルの数。"""
+    wal = [p.stat().st_size for p in files if p.name.endswith("-wal")]
+    return {
+        "wal_max_bytes": max(wal, default=0),
+        "wal_files": len(wal),
+        "key_files": sum(1 for p in files if p.name.endswith(".sqlite")),
+    }
+
+
 def summarize(rec: Recorder, sink: Path, repo: Path, args: argparse.Namespace) -> dict[str, Any]:
-    children = [json.loads(line) for line in sink.read_text(encoding="utf-8").splitlines() if line.strip()] if sink.exists() else []
+    children = _children(sink)
     probes = [p for c in children for p in c["probes"]]
     runs = Counter(key for c in children for key in c["steps"])
     files = _store_files(repo)
-    wal = [p.stat().st_size for p in files if p.name.endswith("-wal")]
-    logs = sum(
-        p.read_text(encoding="utf-8", errors="replace").count(LOCKED)
-        for p in files + list((repo / "plans").rglob("*"))
-        if p.suffix == ".log"
-    )
+    calls = _call_counts(rec)
     return {
         "plans": args.plans,
         "wrappers": args.wrappers,
         "rounds": args.rounds,
         "steps_per_plan": STEPS_PER_PLAN,
         "store": "postgresql" if args.db_url else "sqlite",
-        "calls": len(rec.calls),
-        "calls_by_status": dict(sorted(Counter(f"{c['cmd']}:{c['status']}" for c in rec.calls).items())),
-        "failed_samples": [c["stderr"] for c in rec.calls if c["stderr"]][:3],
-        "database_is_locked": sum(c["locked"] for c in rec.calls) + logs,
+        **calls,
+        "database_is_locked": sum(c["locked"] for c in rec.calls) + _locked_in_logs(files, repo),
         "steps_run": sum(runs.values()),
         "steps_run_twice": sum(1 for n in runs.values() if n > 1),
-        "wal_max_bytes": max(wal, default=0),
-        "wal_files": len(wal),
-        "key_files": sum(1 for p in files if p.name.endswith(".sqlite")),
+        **_file_counts(files),
         "quick_check": {**_counts(probes, ("check_file",)), "asked": sum(1 for p in probes if p["fn"] == "_check_key_file")},
         "sweep": _counts(probes, ("sweep", "sweep_url")),
     }
