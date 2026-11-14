@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import time
@@ -20,6 +21,18 @@ from ndf.core import durable
 from ndf.progress import command, conditions, definition, invoke, model, records, run, stages, store, table
 
 ISSUE = 3092
+
+
+def _load_lanes():
+    """同じ置き場のレーンの部品（lanes.py。偽の作業の結果と 1 手の打ち方）。"""
+    spec = importlib.util.spec_from_file_location("lanes", Path(__file__).with_name("lanes.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+lanes = _load_lanes()
 
 
 def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
@@ -44,15 +57,12 @@ class Fake:
     """作業の偽物。`script[ステップ]` に積んだ結果を順に返し、無ければ宣言した出力を持つ ok を返す。"""
 
     def __init__(self, repo: Path) -> None:
-        self.values = {"worktree": str(repo), "branch": "sprint/s1", "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}}
-        self.values["version"] = "11.0.0"
+        self.values = lanes.values(repo, "sprint/s1")
         self.calls: list[SimpleNamespace] = []
         self.script: dict[str, list] = {}
 
     def ok(self, r: invoke.StageRun) -> invoke.StageResult:
-        outputs = {k: self.values[k] for k in r.outputs}
-        report = result.result("plan", "ok", f"{r.step} を終えた", metrics={"version": "11.0.0"}, outputs=outputs or None)
-        return invoke.finished(r, report)
+        return lanes.ok_result(r, self.values)
 
     def __call__(self, r, cwd, work_dir, answer):
         self.calls.append(SimpleNamespace(step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir))
@@ -89,14 +99,6 @@ def env(repo):
     return SimpleNamespace(env=e, fake=fake, records=recs, launched=launched, slept=slept)
 
 
-def _turn(st, tid, repo, env) -> dict:
-    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。"""
-    out = run.advance(st, tid, repo, env.env)
-    if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
-        out = run.work(st, tid, repo, env.env)
-    return out
-
-
 def _labels(st, tid) -> dict[str, str]:
     v = run.read(st, tid)
     return {s.name: (v.rows[s.name].state if s.name in v.rows else None) for s in v.snap.stages}
@@ -118,7 +120,7 @@ def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsy
 
 def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env, capsys):
     tid = _new(capsys)
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and set(out["routes"]) == {"approved", "rejected", "revise"}
     assert out["routes"]["revise"]["ask"] == ["notes", "reason"]
     assert result.code_for(out) == 10
@@ -131,12 +133,12 @@ def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env,
 
 def test_answers_carry_the_sprint_to_completion_and_the_records_follow_the_marks(repo, st, env, capsys):
     tid = _new(capsys)
-    assert _turn(st, tid, repo, env)["metrics"]["stage"] == "設計"
+    assert lanes.turn(st, tid, repo, env.env)["metrics"]["stage"] == "設計"
     _approve(st, tid, "設計")
-    gate = _turn(st, tid, repo, env)
+    gate = lanes.turn(st, tid, repo, env.env)
     assert gate["status"] == "gate" and gate["metrics"]["stage"] == "デプロイ"
     _approve(st, tid, "デプロイ")
-    done = _turn(st, tid, repo, env)
+    done = lanes.turn(st, tid, repo, env.env)
     assert done["status"] == "ok" and done["metrics"]["state"] == "completed"
     assert set(_labels(st, tid).values()) == {"finished"}
     body = env.records.bodies[ISSUE]
@@ -153,18 +155,18 @@ def test_answers_carry_the_sprint_to_completion_and_the_records_follow_the_marks
 
 def test_finished_steps_are_not_run_again_after_the_gate(repo, st, env, capsys):
     tid = _new(capsys)
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     before = len(env.fake.calls)
     _approve(st, tid, "設計")
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     assert [c.step for c in env.fake.calls[before:]][:2] == ["design-merge", "implement"]
 
 
 def test_rejected_gate_fails_the_row_and_returns_the_conductor_routes(repo, st, env, capsys):
     tid = _new(capsys)
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     _approve(st, tid, "設計", "rejected")
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "refused"
     assert set(out["routes"]) == {"retry", "finish", "cancel"}
     assert out["routes"]["finish"]["ask"] == ["output", "reason"]
@@ -173,7 +175,7 @@ def test_rejected_gate_fails_the_row_and_returns_the_conductor_routes(repo, st, 
 
 def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st, env, capsys, tmp_path):
     tid = _new(capsys)
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     with pytest.raises(model.Refused):
         _approve(st, tid, "設計", "revise")
     empty = tmp_path / "empty.md"
@@ -186,7 +188,7 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     answered = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
     assert answered.draft.payload["notes"] == "節 2 の根拠が足りない"
     before = len(env.fake.calls)
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
     rerun = env.fake.calls[before:]
     assert [c.step for c in rerun] == ["design", "design-review"] and {c.notes for c in rerun} == {"節 2 の根拠が足りない"}
@@ -197,7 +199,7 @@ def test_answer_is_refused_where_nothing_waits(repo, st, env, capsys):
     tid = _new(capsys)
     with pytest.raises(model.Refused):
         _approve(st, tid, "設計")
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     with pytest.raises(model.Refused):
         _approve(st, tid, "設計", "retry")
 
@@ -206,10 +208,10 @@ def test_plan_gate_waits_and_the_answer_is_passed_back_to_the_plan(repo, st, env
     tid = _new(capsys)
     routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
     env.fake.script["design-review"] = [lambda r: invoke.StageResult(result.result("plan", "gate", "判断を待つ", routes=routes), {})]
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["step"] == "design-review" and set(out["routes"]) == {"approved", "rejected"}
     _approve(st, tid, "設計")
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     review = [c for c in env.fake.calls if c.step == "design-review"]
     assert [c.answer for c in review] == [None, "approved"]
     assert out["metrics"]["step"] == "design-gate"
@@ -219,7 +221,7 @@ def test_retryable_causes_are_retried_here_with_the_declared_backoff(repo, st, e
     tid = _new(capsys)
     flaky = lambda r: invoke.StageResult(result.stopped("plan", "transient", "5xx"), {})  # noqa: E731
     env.fake.script["worktree"] = [flaky, flaky]
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate"
     assert env.slept == [2.0, 4.0]
 
@@ -227,21 +229,21 @@ def test_retryable_causes_are_retried_here_with_the_declared_backoff(repo, st, e
 def test_failures_that_need_a_decision_return_routes_and_the_exit_code_of_the_cause(repo, st, env, capsys):
     tid = _new(capsys)
     env.fake.script["worktree"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["cause"]["kind"] == "test_failed" and set(out["routes"]) == {"retry", "finish", "cancel"}
     assert result.code_for(out) == causes.exit_code("test_failed") != 6
     assert _labels(st, tid)["作業場所の用意"] == "failed"
     # 失敗の行は conductor が retry で戻すまで流さない。戻せば失敗したステップから流し直す
     assert run.advance(st, tid, repo, env.env)["cause"]["kind"] == "test_failed"
     _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "直した")
-    assert _turn(st, tid, repo, env)["status"] == "gate"
+    assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
 
 
 def test_stage_output_that_breaks_the_contract_gets_no_finish_mark(repo, st, env, capsys):
     # 受け入れ条件 8（出力の照合）
     tid = _new(capsys)
     env.fake.script["worktree"] = [lambda r: invoke.finished(r, result.result("plan", "ok", "出力なし"))]
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["cause"]["kind"] == "bad_report" and "worktree" in out["cause"]["detail"]
     assert _labels(st, tid)["作業場所の用意"] == "failed"
 
@@ -265,7 +267,7 @@ def test_badly_shaped_outputs_are_not_passed_on(repo, st, env, capsys):
     tid = _new(capsys)
     bad = {"worktree": str(repo), "branch": "--exec=x"}
     env.fake.script["worktree"] = [lambda r: invoke.finished(r, result.result("plan", "ok", "済んだ", outputs=bad))]
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["cause"]["kind"] == "bad_report"
     assert "branch" not in run.read(st, tid).context()
 
@@ -273,9 +275,9 @@ def test_badly_shaped_outputs_are_not_passed_on(repo, st, env, capsys):
 def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
     tid = _new(capsys, "standard")
     env.env = run.Env(**{**vars(env.env), "facts": lambda words, ctx, cwd: {w: w != "code_in_diff" for w in words}})
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     _approve(st, tid, "設計")
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     row = run.read(st, tid).rows["リファクタリング"]
     assert row.state == "disabled" and row.reason == "条件 code_in_diff が偽"
 
@@ -283,9 +285,9 @@ def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
 def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, capsys):
     tid = _new(capsys, "standard")
     env.env = run.Env(**{**vars(env.env), "facts": conditions.facts_of})
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     _approve(st, tid, "設計")
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["cause"]["kind"] == "precondition" and "code_in_diff" in out["cause"]["detail"]
     assert _labels(st, tid)["リファクタリング"] == "pending"
 
@@ -370,9 +372,9 @@ def test_next_flows_the_refactor_row_from_the_sprint_diff(repo, st, env, capsys)
     _sprint_branch(repo, "README.md")
     tid = _new(capsys, "standard")
     env.env = run.Env(**{**vars(env.env), "facts": conditions.facts_of})
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     _approve(st, tid, "設計")
-    _turn(st, tid, repo, env)
+    lanes.turn(st, tid, repo, env.env)
     row = run.read(st, tid).rows["リファクタリング"]
     assert row.state == "disabled" and row.reason == "条件 code_in_diff が偽"
 
@@ -393,7 +395,7 @@ def test_retro_enabled_needs_a_finished_retrospective_row():
 
 def test_missing_input_does_not_start_the_row(repo, st, env, capsys):
     tid = _new(capsys, "light", "--disable", "作業場所の用意=手で用意した")
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     # 設計の入力 worktree を書く工程が無効なので、設計は始まらない
     assert out["cause"]["kind"] == "input_missing" and out["items"] == [{"key": "worktree"}]
     assert out["metrics"]["stage"] == "設計" and _labels(st, tid)["設計"] == "pending"
@@ -415,7 +417,7 @@ def test_next_while_the_work_runs_returns_wait_and_show_gives_the_hand(repo, st,
 def test_records_failure_does_not_stop_the_work_and_resync_reports_it(repo, st, env, capsys):
     tid = _new(capsys)
     env.records.broken = True
-    out = _turn(st, tid, repo, env)
+    out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and any("進捗記録" in w for w in out["warnings"])
     bad = run.resync(st, tid, repo, env.env)
     assert bad["status"] == "stopped" and bad["next"]["argv"][2] == "resync"

@@ -13,9 +13,23 @@ from ndf.contracts import result
 from ndf.progress import command, invoke, model, run, store
 
 
-def _ok(r: invoke.StageRun, values: dict) -> invoke.StageResult:
+def values(cwd: Path, branch: str) -> dict:
+    """偽の作業が出す文脈の値の組（工程の定義の outputs の鍵の値）。"""
+    return {"worktree": str(cwd), "branch": branch, "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}, "version": "11.0.0"}
+
+
+def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:
+    """宣言した出力を `values` から持つ ok の結果。"""
     outputs = {k: values[k] for k in r.outputs}
     return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", metrics={"version": "11.0.0"}, outputs=outputs or None))
+
+
+def turn(st: store.Store, tid: str, cwd: Path, env: run.Env) -> dict:
+    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。"""
+    out = run.advance(st, tid, cwd, env)
+    if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
+        out = run.work(st, tid, cwd, env)
+    return out
 
 
 class _NoRecords:
@@ -27,11 +41,11 @@ class _NoRecords:
 
 
 def _env(cwd: Path) -> run.Env:
-    values = {"worktree": str(cwd), "branch": "sprint/s", "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}, "version": "11.0.0"}
+    given = values(cwd, "sprint/s")
     return run.Env(
         facts=lambda words, ctx, c: {w: True for w in words},
         launch=lambda st, tid, c: None,
-        invoker=lambda r, c, w, a: _ok(r, values),
+        invoker=lambda r, c, w, a: ok_result(r, given),
         records=lambda c: _NoRecords(),
         sleep=lambda s: None,
     )
@@ -42,9 +56,7 @@ def _sprint(st: store.Store, tid: str, cwd: Path, env: run.Env) -> int:
     busy = 0
     for _ in range(200):
         try:
-            out = run.advance(st, tid, cwd, env)
-            if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
-                out = run.work(st, tid, cwd, env)
+            out = turn(st, tid, cwd, env)
             if out["status"] == "gate":
                 run.answer(st, tid, out["metrics"]["stage"], "approved", "レーンの試験", None)
             elif out["metrics"].get("state") == "completed" or out["metrics"].get("move") == "done":
