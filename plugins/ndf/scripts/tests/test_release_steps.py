@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1562,14 +1563,22 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     monkeypatch.setattr(mod, "_merged_sync_pr", lambda r, b, base: None)
     monkeypatch.setattr(mod, "pr_view", lambda r, n, f: {"mergeStateStatus": "CLEAN"})
     monkeypatch.setattr(rv, "release_dev_by_workflow", lambda r, a, wf, n: runs.append((wf, n)) or "https://x/runs/1")
+    refreshed = []
+    monkeypatch.setattr(mod, "changelog_section", lambda r, v, p: "- 変化")
+    monkeypatch.setattr(mod, "run_checks", lambda r: [])
+    monkeypatch.setattr(
+        rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: refreshed.append((args[2], stdin)) or SimpleNamespace(returncode=0, stderr="")
+    )
     _exits(monkeypatch, rv)
-    a = argparse.Namespace(version="1.2.3-dev.1")
+    a = argparse.Namespace(version="1.2.3-dev.1", channel="dev")
     for state in ("OPEN", "MERGED"):
         monkeypatch.setattr(mod, "_reusable_release_pr", lambda r, b, base, s=state: {"number": 4, "state": s})
         with pytest.raises(SystemExit) as e:
             rv.release_dev(ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "main"), "release-dev.yml", mod)
         assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
     assert runs == [("release-dev.yml", 4)]
+    # 使い回す開いた PR だけ、本文を今の版の本文（ndf-next の port 検査の印を持つ）へ書き直す（#3343）
+    assert [n for n, _ in refreshed] == ["4"] and rv.NO_PORT_LINE in refreshed[0][1]
 
 
 @pytest.mark.parametrize("synced", [None, 6])
@@ -1588,6 +1597,8 @@ def test_release_dev_takes_a_conflicting_pr_through_the_sync_pr(monkeypatch, tmp
     monkeypatch.setattr(mod, "_merged_sync_pr", lambda r, b, base: synced)
     monkeypatch.setattr(mod, "pr_view", lambda r, n, f: {"mergeStateStatus": "DIRTY"})
     monkeypatch.setattr(rv, "release_dev_by_workflow", lambda r, a, wf, n: runs.append(n) or f"https://x/runs/{n}")
+    monkeypatch.setattr(mod, "_release_pr_body", lambda r, a, p, ps: "本文")
+    monkeypatch.setattr(rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: SimpleNamespace(returncode=0, stderr=""))
 
     def merge_sync(root, a, plugin, branch, base, release_pr, merge=None):
         syncs.append(release_pr)

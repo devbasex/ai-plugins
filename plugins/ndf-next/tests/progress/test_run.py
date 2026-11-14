@@ -582,27 +582,14 @@ def test_append_with_no_drafts_returns_nothing_without_calling_the_store(repo, s
     assert called == [] and run.read(st, tid).events[-1].seq == before
 
 
-def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, st, capsys, monkeypatch):
+def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, st, capsys, conflicts):
     tid = _new(capsys)
-    real, calls = store.append_events, {"n": 0}
-
-    def conflict_once(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise store.Conflict("ぶつかった")
-        return real(*a, **k)
-
     builds: list[run.View] = []
-    monkeypatch.setattr(store, "append_events", conflict_once)
+    calls = conflicts(1)
     seqs = run.append(st, tid, lambda v: builds.append(v) or _started(v))
     assert len(builds) == 2 and calls["n"] == 2 and run.read(st, tid).events[-1].seq == seqs[0]
 
-    def always(*a, **k):
-        calls["n"] += 1
-        raise store.Conflict("ぶつかった")
-
-    calls["n"], builds[:] = 0, []
-    monkeypatch.setattr(store, "append_events", always)
+    calls, builds[:] = conflicts(None), []
     with pytest.raises(store.Conflict):
         run.append(st, tid, lambda v: builds.append(v) or _started(v))
     assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS

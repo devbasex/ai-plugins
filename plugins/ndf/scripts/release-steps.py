@@ -567,7 +567,7 @@ def _release_pr_body(root, a, plugin, plugins):
     mark = {True: "pass", False: "fail", None: "skip"}
     return "\n".join(
         [
-            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}\n\n{reviewed.NO_PORT_LINE}",
             "",
             "## 含む PR",
             "",
@@ -583,13 +583,13 @@ def _release_pr_body(root, a, plugin, plugins):
 
 
 def _merge_release_pr(root, a, plugin, plugins, branch, base):
-    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、(照合に渡す PR, 取り込んだ PR, マージコミット)
-    を返す。衝突すれば release/v<版>-sync で取り込み（_merge_sync_pr）、照合に渡す PR は元の release/v<版> の PR のまま。"""
+    """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、(照合に渡す PR, 取り込んだ PR, マージコミット)を返す。衝突すれば release/v<版>-sync で取り込み（_merge_sync_pr）、照合に渡す PR は元の release/v<版> の PR のまま。"""
     pr = _reusable_release_pr(root, branch, base)
     if pr is None:
         body = _release_pr_body(root, a, plugin, plugins)
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{a.version}", body), "state": "OPEN", "new": True}
     n = pr["number"]
+    reviewed.refresh_release_pr_body(root, pr, lambda: _release_pr_body(root, a, plugin, plugins))
     if pr["state"] != "OPEN":
         return n, n, merge_commit_of(root, n)
     if not pr.get("new") and (synced := _merged_sync_pr(root, branch, base)):
@@ -631,7 +631,7 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
         found = find_pr(root, sync, base, states=("OPEN",))
         head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
         body = (
-            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n"
+            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{reviewed.NO_PORT_LINE}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
