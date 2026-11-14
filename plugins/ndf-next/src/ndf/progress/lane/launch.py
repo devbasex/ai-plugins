@@ -157,10 +157,15 @@ def _entry(*args: str) -> list[str]:
     return [str(entry()), *args]
 
 
-def _last_json(stdout: str) -> Optional[dict[str, Any]]:
+def _last_line(stdout: str, empty: Any) -> Any:
+    """標準出力の末尾の行を JSON として読む（行が無ければ `empty`）。読めなければ ValueError を呼び手へ伝える。"""
     lines = stdout.strip().splitlines()
+    return json.loads(lines[-1]) if lines else empty
+
+
+def _last_json(stdout: str) -> Optional[dict[str, Any]]:
     try:
-        out = json.loads(lines[-1]) if lines else None
+        out = _last_line(stdout, None)
     except ValueError:  # noqa: NDF401 外部コマンド: 結果 JSON の無い出力は読めないとして呼び手が unknown にする
         return None
     return out if isinstance(out, dict) else None
@@ -214,9 +219,8 @@ def read_spawn(stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
 
     結果 JSON が読めなければ、詳細は標準エラーの末尾（無ければ終了コード）にする。
     """
-    lines = stdout.strip().splitlines()
     try:
-        out = json.loads(lines[-1]) if lines else {}
+        out = _last_line(stdout, {})
     except ValueError:
         out = {}
     ok = out.get("status") == result.OK
