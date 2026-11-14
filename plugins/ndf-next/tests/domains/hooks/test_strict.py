@@ -152,3 +152,61 @@ def test_hook_off_switch_turns_off_the_strict_guard(tmp_path, monkeypatch):
     repo = make_repo(tmp_path / "r", delivery=AUTO)
     monkeypatch.setenv("NDF_HOOK_OFF", "merge-production")
     assert call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1")) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash <<'EOF'\ngh pr merge 1 --merge\nEOF",
+        "bash <<< 'gh pr merge 1'",
+        "echo 'gh pr merge 1' | bash",
+        "sh -s < script.txt && echo merge gh",
+    ],
+)
+def test_shells_reading_the_script_from_stdin_are_denied(tmp_path, command):
+    # 中のスクリプトを読めないシェルは止める側へ倒す（手動の宣言の作業ディレクトリでも止める）
+    repo = make_repo(tmp_path / "r", delivery=MANUAL)
+    got = _check(repo, command)
+    assert got is not None and "-c 無し" in got.reason
+
+
+def test_shell_running_a_script_file_is_not_denied_as_stdin(tmp_path):
+    repo = make_repo(tmp_path / "r", delivery=MANUAL)
+    assert _check(repo, "bash scripts/merge-when-green.sh --gh 3 2>/dev/null") is None
+
+
+@pytest.mark.parametrize("cd", ['cd "$WT"', "cd `pwd`", "cd -", "pushd /tmp", "cd -P x"])
+def test_cd_whose_target_is_not_literal_denies_the_merge(tmp_path, cd):
+    # 移った先を字句から決められなければ、元の作業ディレクトリの宣言で判定しない
+    repo = make_repo(tmp_path / "r", delivery=MANUAL)
+    got = _check(repo, f"{cd} && gh pr merge 1 --merge")
+    assert got is not None and "決められない" in got.reason
+
+
+def test_cd_to_an_absolute_path_after_an_unknown_cd_reads_that_path(tmp_path):
+    session = make_repo(tmp_path / "session", delivery=AUTO)
+    target = make_repo(tmp_path / "target", delivery=MANUAL)
+    assert _check(session, f'cd "$WT" && cd {target} && gh pr merge 1') is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "GH_REPO=other/production gh pr merge 1 --merge",
+        "env GH_REPO=github.com/other/production gh pr merge 1",
+        "export GH_REPO=other/production && gh pr merge 1",
+        "export GH_REPO=other/production\nbash -c 'gh pr merge 1'",
+    ],
+)
+def test_gh_repo_naming_another_repository_is_judged_by_that_repository(tmp_path, command):
+    # gh は GH_REPO を -R と同じ宛先として読む（https://cli.github.com/manual/gh_help_environment）
+    repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
+    got = _check(repo, command)
+    assert got is not None and "other/production" in got.reason
+
+
+def test_gh_repo_matching_the_origin_or_overridden_by_the_flag_passes(tmp_path):
+    repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
+    assert _check(repo, "GH_REPO=owner/repo gh pr merge 1") is None
+    assert _check(repo, "GH_REPO=other/production gh -R owner/repo pr merge 1") is None
+    assert _check(repo, "export GH_REPO=other/production; unset GH_REPO; gh pr merge 1") is None
