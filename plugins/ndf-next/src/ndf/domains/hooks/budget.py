@@ -58,13 +58,18 @@ def budget_for(runtime: str, event: str, limits: Optional[dict] = None) -> Optio
     return Budget(name, *(row[k] for k in BUDGET_KEYS))
 
 
-def budget_registrations() -> list[dict[str, Any]]:
-    """予算から作る登録（事象ごとに 1 行・timeout は予算の値）。登録のファイルが無いときに検査へ渡す。"""
+def budget_registrations(runtime: Optional[str] = None) -> list[dict[str, Any]]:
+    """予算から作る登録（事象ごとに 1 行・timeout は予算の値）。登録のファイルが無いときに検査へ渡す。
+
+    `runtime` を渡せばそのランタイムの行だけを作る（省略時は全部）。
+    """
     regs = []
-    for runtime, rt in tables.runtimes().items():
+    for name, rt in tables.runtimes().items():
+        if runtime is not None and name != runtime:
+            continue
         for event in rt["events"]:
-            found = budget_for(runtime, event)
-            regs.append({"runtime": runtime, "event": event, "timeout": found.timeout if found else None})
+            found = budget_for(name, event)
+            regs.append({"runtime": name, "event": event, "timeout": found.timeout if found else None})
     return regs
 
 
@@ -73,13 +78,20 @@ def registrations_of(plugin_root: Path) -> list[dict[str, Any]]:
     regs: list[dict[str, Any]] = []
     for runtime in tables.runtimes():
         path = plugin_root / "hooks" / f"{runtime}.json"
-        if not path.is_file():
-            regs += [r for r in budget_registrations() if r["runtime"] == runtime]
-            continue
-        hooks = json.loads(path.read_text(encoding="utf-8")).get("hooks")
-        for event, groups in (hooks if isinstance(hooks, dict) else {}).items():
-            regs += [{"runtime": runtime, "event": event, "timeout": h.get("timeout")} for g in groups for h in g["hooks"]]
+        regs += _file_registrations(runtime, path) if path.is_file() else budget_registrations(runtime)
     return regs
+
+
+def _file_registrations(runtime: str, path: Path) -> list[dict[str, Any]]:
+    """登録のファイル 1 つを、登録 1 つにつき 1 行へ開く。"""
+    hooks = json.loads(path.read_text(encoding="utf-8")).get("hooks")
+    groups_of = hooks if isinstance(hooks, dict) else {}
+    return [
+        {"runtime": runtime, "event": event, "timeout": h.get("timeout")}
+        for event, groups in groups_of.items()
+        for g in groups
+        for h in g["hooks"]
+    ]
 
 
 def check_budget(limits: dict, registrations: list[dict[str, Any]]) -> list[str]:
