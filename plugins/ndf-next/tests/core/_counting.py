@@ -1,7 +1,7 @@
 """手を 3 つ集めたら終わる判断の関数（耐久の有無で同じ判断を比べるテストが共有する）。
 
 手の番号は 1 から 3、手の結果を集めた状態で終わる。`_durable_crash.py` は隣のモジュールとして import し、
-pytest のテスト（`--import-mode=importlib`）はファイルの場所から読む。
+pytest のテストはパッケージの相対 import（`from ._counting import decide`）で読む。
 """
 
 from __future__ import annotations
