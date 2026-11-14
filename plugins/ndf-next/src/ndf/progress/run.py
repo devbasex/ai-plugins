@@ -984,16 +984,14 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv: list[str], env: Optional[Env] = None) -> int:
-    """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。
-
-    `env` は外との接点（既定は工程の条件の語を宣言から読むだけの `Env`）。エントリポイント（`ndf.progress.gate`）が包んで渡す。
-    """
+def main(argv: list[str]) -> int:
+    """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。"""
     if not argv or argv[0] not in COMMANDS:
         return command.main(argv)
-    use = env if env is not None else Env(facts=command.facts_of)
-    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, COMMANDS[a.action], _with_env(a, use)), argv)
+    env = Env(facts=command.facts_of)
+    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, COMMANDS[a.action], with_env(a, env)), argv)
 
 
-def _with_env(a: argparse.Namespace, env: Env) -> argparse.Namespace:
+def with_env(a: argparse.Namespace, env: Env) -> argparse.Namespace:
+    """副命令の引数に外との接点 `env` を足す（エントリポイントの `ndf.progress.gate` は包んだ `Env` を渡す）。"""
     return argparse.Namespace(**vars(a), env=env)

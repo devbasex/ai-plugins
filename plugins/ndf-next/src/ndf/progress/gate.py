@@ -41,6 +41,8 @@ from typing import Any, Optional
 import pathspec
 
 from ndf import cli
+from ndf.adapters.git import Git, GitError
+from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import facts, result
 from ndf.progress import command, invoke, lane, model, run, store
 
@@ -58,6 +60,8 @@ VERDICTS = (FOLLOW, NOT_FOLLOW, UNKNOWN)
 ID_LENGTH = 16
 # 承認しなかった答え（差し戻しの記録に数える）
 REJECTING = (run.REVISE, "rejected")
+# 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
+MATERIAL_DIR = "materials"
 
 
 # --- 問い --------------------------------------------------------------------------------------
@@ -179,6 +183,49 @@ def material_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# --- 承認資料 -------------------------------------------------------------------------------------
+
+
+def material_path(root: Path, q: Question) -> Path:
+    """問いの承認資料の置き場（`run.work_root` の下）。問いごとに 1 つで、書いた後は書き換えない。"""
+    return run.work_root(root, q.table_id) / MATERIAL_DIR / f"{q.id}.md"
+
+
+def unconfirmed(v: run.View, stage: str) -> list[str]:
+    """工程の済んだステップの結果が残した欠け（扱われずに届いたレビューの指摘など。#2444）。"""
+    out = []
+    for step, report in run.step_progress(v, stage).done.items():
+        gaps = report["gaps"] if isinstance(report, dict) and isinstance(report.get("gaps"), list) else []
+        out += [f"{step}: {g['name']}（{g['reason']}）" for g in gaps if isinstance(g, dict) and {"name", "reason"} <= set(g)]
+    return out
+
+
+def material(v: run.View, q: Question) -> str:
+    """承認資料（Markdown）。問い・見る PR と head・出した版（#2554）・未確認の点（#2444）・答えの選択肢を持つ。"""
+    ctx = v.context()
+    lines = [f"# {q.label}の承認ゲート", "", f"- 工程: {q.stage}（ステップ {q.step}）", f"- 問いの id: {q.id}"]
+    if q.pr_url or q.pr:
+        lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
+    if q.target.head:
+        lines.append(f"- 見る head: {q.target.head}")
+    if q.gate == "release" and isinstance(ctx.get("version"), str):
+        lines.append(f"- 出す版: {ctx['version']}")
+    lines += ["", "## 未確認の点", "", *([f"- {u}" for u in unconfirmed(v, q.stage)] or ["- （無し）"])]
+    lines += ["", "## 答え", "", *[f"- {c}" for c in q.choices]]
+    return "\n".join(lines) + "\n"
+
+
+def write_material(root: Path, v: run.View, q: Question) -> Path:
+    """承認資料を書く（書いてあれば書き直さない。答えた者が見た資料の sha256 を変えないため）。"""
+    path = material_path(root, q)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(material(v, q), encoding="utf-8")
+        tmp.replace(path)
+    return path
+
+
 # --- 答え ---------------------------------------------------------------------------------------
 
 
@@ -203,6 +250,28 @@ Observe = Callable[[Question], Target]
 def no_observe(q: Question) -> Target:
     """今の対象を読まない（比べない）。"""
     return Target()
+
+
+def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None) -> Observe:
+    """今の対象を読む: PR の head の SHA（GitHub）と承認資料の sha256。読めなければ答えを受けない（`model.Refused`）。"""
+    made: list[GitHub] = []
+
+    def _hub() -> GitHub:
+        if not made:
+            made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
+        return made[0]
+
+    def observe(q: Question) -> Target:
+        head = None
+        if q.pr is not None:
+            try:
+                head = _hub().pull(q.pr).head_sha
+            except (GitHubError, GitError) as exc:
+                raise model.Refused(f"PR #{q.pr} の head を読めないので、答えと対象を照らせない: {exc}") from None
+        path = material_path(root, q)
+        return Target(head, material_sha256(path) if path.exists() else None)
+
+    return observe
 
 
 def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
@@ -281,6 +350,54 @@ def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:
 def lane_env(env: run.Env) -> run.Env:
     """スプリントの完了と同じトランザクションで、スプリントを持つレーンの行を終える `Env`（決定 17。レーンの外なら何もしない）。"""
     return replace(env, ended=lambda conn, table_id: lane.end_row(conn, table_id, lane.COMPLETED, run.ACTOR))
+
+
+def recheck(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
+    """答えを読む前に、答えた者が見た対象と今の対象を比べる。違えば待ちへ戻し（問いは新しい id）、理由を返す（3364-2）。
+
+    `ndf answer` が書いた答え（問いの id と見た対象を持つ）だけを比べる。どの副命令でも、答えが読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
+    待ちの記録で、答えはその後の答えだけが読まれる（`run.StepProgress`）。
+    """
+    v = run.read(st, table_id)
+    m = run.decide(v)
+    if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
+        return None
+    p = m.event.draft.payload if m.event.draft.payload is not None else {}
+    if "gate_id" not in p:
+        return None
+    q = question(v, replace(m, action=run.Action.GATE))
+    seen = p["seen"] if isinstance(p.get("seen"), dict) else {}
+    changed = observe(q).differs(Target(seen.get("head"), seen.get("material_sha256")))
+    if not changed:
+        return None
+    why = "答えた後に対象が変わった: " + " / ".join(changed)
+    payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
+    draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
+    # 比べた後に答えが読まれていれば（同じ答えの事象が今も読む答えでなければ）書かない
+    run.append(st, table_id, lambda now: [draft] if _still(now, m.event) else [])
+    return why
+
+
+def _still(v: run.View, answered: model.Event) -> bool:
+    m = run.decide(v)
+    return m.action == run.Action.CONSUME and m.event is not None and m.event.seq == answered.seq
+
+
+def present(st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], observe: Observe) -> dict[str, Any]:
+    """`ndf progress` の結果（next・wait・work）が承認ゲート（`ndf.listen`）の待ちなら、問い・承認資料・答えごとの行き先の結果に差し替える。"""
+    v = run.read(st, table_id)
+    m = run.decide(v)
+    if out["status"] != result.GATE or m.action != run.Action.GATE or m.step is None or not invoke.is_listen(m.step):
+        return out
+    try:
+        repo: Optional[str] = Git(cwd).remote_repo()
+    except GitError:
+        repo = None
+    asked = question(v, m, repo=repo)
+    path = write_material(st.root, v, asked)
+    q = replace(asked, target=observe(asked))
+    metrics = out["metrics"] if isinstance(out.get("metrics"), dict) else {}
+    return command.with_warnings(gate_result(q, metrics, path), before=list(out["warnings"]) if "warnings" in out else [])
 
 
 # --- 差し戻しの記録 ---------------------------------------------------------------------------------
@@ -455,10 +572,10 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     return result.result(TOOL, result.GATE, f"{label}の答えを待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
-def _cmd_give(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     seen = Target(a.head, a.material_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
-    return answer(st, a.table_id, given)
+    return answer(st, a.table_id, given, github_observe(cwd, st.root))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -482,6 +599,15 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
+    """`ndf progress` の工程を流す副命令。レーンの行を終える `Env` で流し、答えを読む前に対象を見直し、承認ゲートの
+    待ちは問いと答えごとの行き先の結果にする。"""
+    seen = observe if observe is not None else github_observe(cwd, st.root)
+    why = recheck(st, a.table_id, seen)
+    out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
+    return command.with_warnings(present(st, a.table_id, cwd, out, seen), before=[why] if why else [])
+
+
 def _verbs(ap: argparse.ArgumentParser) -> set[str]:
     return {name for act in ap._actions if isinstance(act, argparse._SubParsersAction) for name in act.choices}
 
@@ -500,6 +626,8 @@ def main(argv: list[str]) -> int:
     """
     if argv and argv[0] == "ask":
         return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
+    if argv and argv[0] in run.COMMANDS:
+        return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
     if not argv or argv[0].startswith("-") or argv[0] in progress_verbs():
-        return run.main(argv, lane_env(run.Env(facts=command.facts_of)))
+        return command.main(argv)
     return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, _cmd_give, a), argv)
