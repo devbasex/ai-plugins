@@ -364,6 +364,10 @@ def test_diff_words_follow_the_docs_declaration(repo):
 def test_diff_words_without_a_base_branch_cannot_be_decided(repo):
     with pytest.raises(run.FactUnknown, match="code_in_diff"):
         run.facts_of(("code_in_diff",), {}, repo)
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "--output=x"}))
+    with pytest.raises(run.FactUnknown, match="- で始まる"):
+        run.facts_of(("code_in_diff",), {}, repo)
 
 
 def test_next_flows_the_refactor_row_from_the_sprint_diff(repo, st, env, capsys):

@@ -844,8 +844,8 @@ def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
     base = _dig(_declaration(cwd, WORKTREE_FILE), "base_branch")
-    if not isinstance(base, str) or not base:
-        raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} に base_branch が無い")
+    if not isinstance(base, str) or not base or base.startswith("-"):
+        raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
     git = Git(Path(context.get("worktree") or cwd))
     head = str(context.get("branch") or "HEAD")
     try:
