@@ -68,3 +68,12 @@ def test_the_note_shows_the_boundary_and_why_the_gate_was_not_skipped():
     # #2950: 判定の記録にレッドラインの中身が載り、承認する人が PR から読める
     text = gate.note("design", {**FOLLOW, "boundary": ["C1 の秘密に触れる"]}, ["レッドラインに当たる: C1 の秘密に触れる"])
     assert "### レッドライン\n\n- C1 の秘密に触れる" in text and "### 承認ゲートを省かない理由" in text
+
+
+def test_current_an_empty_verdict_lists_none_under_the_reasons_and_the_boundary():
+    # I-015 の現状固定: 空の箇条書きは「- （無し）」の 1 行。省かない理由が無ければ節ごと載せない
+    text = gate.note("design", {"verdict": "follow"}, [])
+    assert text == (
+        "## MVV 判定（設計 Pull Request のマージ）\n\n- 判定: follow\n\n### 理由\n\n- （無し）\n\n### レッドライン\n\n- （無し）\n"
+    )
+    assert gate.note("release", None, []).startswith("## MVV 判定（本番系へ届く操作）\n\n- 判定: 無し\n\n### 理由\n\n- （無し）\n")
