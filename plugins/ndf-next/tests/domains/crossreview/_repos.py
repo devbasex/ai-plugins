@@ -1,4 +1,4 @@
-"""cross-review のテストの補助: 一時の bare リポジトリ（origin）と clone、副命令の実行と結果 JSON の読み取り。"""
+"""cross-review のテストの補助: 一時の bare リポジトリ（origin）と clone、結果 JSON の読み取り。"""
 
 from __future__ import annotations
 
