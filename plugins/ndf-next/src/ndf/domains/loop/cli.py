@@ -232,14 +232,12 @@ def _run(a: argparse.Namespace) -> dict[str, Any]:
     a.cwd = Path(os.path.realpath(a.cwd if a.cwd is not None else Path.cwd()))
     try:
         return a.handler(a)
-    except (select_decide.CandidateError, sprint_decide.SprintError) as exc:
-        return result.stopped(TOOL, "invalid", str(exc))
-    except store.StoreError as exc:
-        return result.stopped(TOOL, "invalid", str(exc))
+    except (select_decide.CandidateError, sprint_decide.SprintError, store.StoreError) as exc:
+        return result.stopped(TOOL, ctl.INVALID, str(exc))
     except Timeout as exc:
         return result.stopped(TOOL, "store_in_use", f"開発ループの記録の排他を取れない: {exc}")
     except GitError as exc:
-        return result.stopped(TOOL, "precondition", f"git のリポジトリの中で打つ: {exc}")
+        return result.stopped(TOOL, ctl.PRECONDITION, f"git のリポジトリの中で打つ: {exc}")
     except github.GitHubError as exc:
         kind = "infra_wait" if exc.retry_after is not None else "unknown"
         return result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after)
