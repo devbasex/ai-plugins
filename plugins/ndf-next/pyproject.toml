@@ -16,7 +16,7 @@ name = "ndf-rebuild"
 version = "0"
 requires-python = ">=3.11"
 dependencies = [
-    "dbos==3.1.0",
+    "dbos==3.5.0",
     "filelock==4.0.3",
     "githubkit==0.17.1",
     "httpx==0.28.1",
