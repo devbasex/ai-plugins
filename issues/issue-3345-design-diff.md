@@ -19,6 +19,7 @@
 | 会話の記録 30 日分（2026-10-14〜11-13、uuid で重複除去。#3345 の本文の実測の表） | 実測 | Tool の呼び出し 52,497 件・拒否 601 件・Stop の差し戻し 255 回（93% が本文の待ち）・`hook.py` の p99 9.1 秒・注入の最大 8,439 字 |
 | `plugins/ndf/` の読み取り（develop 04430fda7） | 実測 | 差し戻しを数える置き場が 3 つ（`relay_lib/mark.py:163-198` ほか）。締め切り 3.5 秒より長い部品の上限（`contracts/limits.json:30-37`）。timeout の無い SessionStart の登録 3 本 |
 | Claude Code と Codex の hook の仕様（設計文書の外部の調査 HK1〜HK7） | 外部の一次情報 | 登録は並列に動き、失敗は既定で通り、会話へ入る量は 10,000 字で切られる。Codex の Stop の出力は Claude Code と形が違う |
+| 自前で作る部品の代わりになるライブラリ（設計文書の外部の調査 LIB20〜LIB29・STD20） | 外部の一次情報・実測 | 排他・構造化ログ・永続キュー・振り分けのライブラリは import だけで 18〜53 ms かかり、PreToolUse の p95 の目標 100 ms の 2〜5 割に当たる |
 | 前の設計の決定 20・I13（[issue-1142-design-libraries.md](issue-1142-design-libraries.md)・[issue-1142-design.md](issue-1142-design.md)） | 設計 | hook は用意済みの環境の python を直に起動し、環境が無ければ通す |
 | 利用者の懸念（2026-11-14。#3345 の本文の目的） | 利用者の指示 | 「hook で溢れて claude が動かなくなるのを避けたい」 |
 
@@ -28,7 +29,7 @@
 
 | 直した文書 | 直した所 |
 | --- | --- |
-| [issue-1142-design-next.md](issue-1142-design-next.md) | 人へ残す判断の案内・設計の結果・不変条件の案内・節「hook の契約（#3345）」（今の NDF の実測・形・契約の 8 項目・用語・不変条件 IH1〜IH10・受け入れ条件との対応表・外部の調査 HK1〜HK7・判断 (h)〜(m)・未確認のまま残ること）・決定 88〜96 |
+| [issue-1142-design-next.md](issue-1142-design-next.md) | 人へ残す判断の案内・設計の結果・不変条件の案内・節「hook の契約（#3345）」（今の NDF の実測・形・契約の 8 項目・用語・不変条件 IH1〜IH10・受け入れ条件との対応表・外部の調査 HK1〜HK7・LIB20〜LIB29・STD20・判断 (h)〜(m)・未確認のまま残ること）・決定 88〜96 |
 | [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) | 節「hook の基盤（#3345）」（ファイル配置・型と関数・関数の仕様・異常系・データと定数・並行と排他・単体テストの観点）・節「#3345 で子へ足す受け入れ条件」 |
 | [issue-1142-design-libraries.md](issue-1142-design-libraries.md) | 決定 20 の引き継ぎ先の帯 |
 

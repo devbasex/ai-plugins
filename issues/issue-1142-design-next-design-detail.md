@@ -312,9 +312,15 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `plugins/ndf-next/src/ndf/domains/hooks/budget.py` | 予算の読み手と順序の検査 | M3 |
 | `plugins/ndf-next/src/ndf/domains/hooks/metrics.py` | 計測の 1 行と `ndf hooks stats` | M3 |
 | `plugins/ndf-next/src/ndf/domains/hooks/outbox.py` | 送信待ちへの書き込みと、切り離した送り手の起動 | M3 |
-| `plugins/ndf-next/src/ndf/domains/hooks/env.py` | lock の hash ごとの依存の環境の用意と、使われない環境の片付け | M3 |
+| `plugins/ndf-next/src/ndf/domains/hooks/env.py` | lock の hash ごとの依存の環境の用意と、使われない環境の片付け。根の目印と最後に使った時刻の読み書き。標準ライブラリだけで書く（システムの `python3` から呼ぶ） | M3 |
+| `plugins/ndf-next/src/ndf/domains/hooks/strict.py` | `strict` の guard（本番チャネルへのマージ）。標準ライブラリだけで書く（決定 91） | M3 |
 | `plugins/ndf-next/tests/domains/hooks/samples/<ランタイム>/<版>/<事象>.json` | 本体の版ごとの入力の見本 | M3 |
-| `plugins/ndf-next/hooks/entry.py` | 入口。標準ライブラリで事象を読み、`dispatch` を呼び、どの失敗でも終了コード 0 で終わる | S1 |
+| `plugins/ndf-next/hooks/entry.py` | 環境の python の入口。標準ライブラリで事象を読み、先に `strict` を呼び、次に `dispatch` を呼び、どの失敗でも終了コード 0 で終わる | S1 |
+| `plugins/ndf-next/hooks/boot.py` | 環境が無いときの入口（システムの `python3`）。`strict` を呼び、SessionStart なら `prepare.py` を切り離して起動する。標準ライブラリだけ | S1 |
+| `plugins/ndf-next/hooks/prepare.py` | 切り離して動く環境の用意。`env.prepare` と `env.prune` を呼ぶ。標準ライブラリだけ | S1 |
+| `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>/` | 依存の環境。中の `.last-used` の更新時刻が最後に使った時刻 | `env.prepare` が作る |
+| `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>.lock`・`.failed` | 用意の排他のファイルと、用意に失敗した理由 | `prepare.py` |
+| `<キャッシュ>/<プラグイン名>/roots/<プラグインの置き場の sha256 の先頭 16 字>.json` | 根の目印。導入先 1 つが指す環境 | SessionStart の入口 |
 | `plugins/ndf-next/hooks/claude.json`・`codex.json` | 登録。事象ごとに 1 行で、`ndf hooks render` が契約表と予算から作る | S1 |
 
 ### 型と関数
@@ -326,29 +332,39 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `dispatch.py` | `run(ctx, specs, limits, counter) -> Outcome`、`render(outcome, runtime_table) -> tuple[int, str]` | 表の順に呼び、判定をまとめて出力を作る |
 | `counter.py` | `Counter.open(session_id) -> Counter`、`allow_pushback()`・`allow_deny(key)`・`reset(source)` | 利用者の入力ごとの差し戻しと同じ拒否の回数（IH5） |
 | `budget.py` | `Budget`（事象ごとの `p95_ms`・`deadline`・`margin`・`timeout`・`inject_chars`）、`check_budget(limits, registrations) -> list[str]` | 予算の順序の検査（IH3） |
-| `metrics.py` | `write_line(record)`、`stats(days) -> dict` | 計測（IH9） |
+| `metrics.py` | `write_line(record)`、`stats(days) -> dict`、`prune(days) -> int` | 計測（IH9）と古い記録の片付け |
 | `outbox.py` | `enqueue(kind, payload)`、`kick()` | 通知を送信待ちへ書き、送り手を切り離して起動する（IH7） |
-| `env.py` | `prepare(ident) -> Path`、`prune(ident, now) -> list[Path]` | 依存の環境の用意と片付け（決定 89） |
-| `hooks/entry.py` | `main(argv) -> int` | 入口（IH2・IH4） |
+| `env.py` | `prepare(ident) -> Path`、`prune(ident, now) -> list[Path]`、`mark_root(ident, plugin_root)`、`touch_used(ident)`、`kick_prepare(ident)` | 依存の環境の用意と片付け・根の目印と最後に使った時刻（決定 89） |
+| `strict.py` | `check(raw_payload, root) -> Verdict \| None` | `strict` の guard。標準ライブラリだけ（決定 91） |
+| `hooks/entry.py` | `main(argv) -> int` | 環境の python の入口（IH2・IH4） |
+| `hooks/boot.py` | `main(argv) -> int` | 環境が無いときの入口（IH2・IH4） |
 
 ### 関数の仕様（hook の基盤）
 
 | 関数 | 種類 | 入力 | 出力 | 副作用 | 前提と後条件 |
 | --- | --- | --- | --- | --- | --- |
-| `entry.main(argv)` | 外部呼び出し | `argv[1]` のランタイムと事象・標準入力の payload | 終了コード（いつも 0。止めるときも、ランタイムの契約表の形の JSON を標準出力へ出す） | 計測の 1 行・数え手の更新 | 環境の python で動く。import の失敗・例外・締め切り超えは何も出さずに 0 で終わる |
+| `entry.main(argv)` | 外部呼び出し | `argv[1]` のランタイムと事象・標準入力の payload | 終了コード（いつも 0。止めるときも、ランタイムの契約表の形の JSON を標準出力へ出す） | 計測の 1 行・数え手の更新。SessionStart のときだけ `env.mark_root`・`env.touch_used`・`metrics.prune(14)` | 環境の python で動く。`dispatch` と依存を import する前に `strict.check` を呼び、止める答えならそれを返して終わる。import の失敗・例外・締め切り超えは何も出さずに 0 で終わる |
+| `boot.main(argv)` | 外部呼び出し | `entry.main` と同じ | 終了コード（いつも 0） | SessionStart のときだけ `env.mark_root` と `env.kick_prepare`。`.failed` があれば 1 行の案内を出す | システムの `python3` で動き、標準ライブラリだけを import する。`strict.check` のほかの guard は呼ばない。版がシステムの `python3` の下限（`imports.json` の `boot.python`）より古ければ 0 で終わる |
+| `strict.check(raw_payload, root)` | 読むだけ | payload・作業ディレクトリ | 止める答えか `None` | 無し | シェルの字句は `shlex` で読む。字句を読めない・宣言（`.ndf/project.json` の `delivery`）を読めないときは止める答えを返す |
 | `dispatch.run(ctx, specs, limits, counter)` | 純粋に近い（guard が副作用を持つときは表に書く） | 文脈・表・予算・数え手 | `Outcome`（まとめた判定・guard ごとの所要と判定） | 無し（数え手は `counter` を通す） | 締め切りの残りが余白を下回ったら、残りの guard を呼ばずに通す。`deny` が上限を超えたら `advise` へ下げる。複数の判定は `deny` > `pushback` > `advise` > `pass` の順で 1 つにまとめる |
 | `dispatch.render(outcome, runtime_table)` | 純粋な関数 | 判定・契約表 | 終了コードと標準出力 | 無し | 注入の文が上限の字数を超えたら、`<状態の置き場>/hooks/notes/` へ書いたファイルのパスと先頭の要点に置き換える |
 | `counter.allow_pushback()` | 書き込み | 無し | 真偽 | 状態のファイルの回数を 1 増やす | 今の入力の後の回数が `hook.pushback` 未満なら真 |
 | `counter.reset(source)` | 書き込み | 入力の出どころ（`human`・`relay`） | 無し | 回数を 0 にする | `relay` の印があれば印を消すだけで、回数は変えない |
 | `budget.check_budget(limits, registrations)` | 純粋な関数 | 予算と登録 | 破れの一覧 | 無し | 部品の上限 ≤ 締め切り − 余白、締め切り ≤ 登録の timeout、timeout の無い登録が 0 件 |
 | `outbox.kick()` | 外部呼び出し | 無し | 無し | 送り手を `start_new_session` で起動する | 待たない。送り手が走っていれば起動しない |
-| `env.prune(ident, now)` | 書き込み | 識別子・時刻 | 消した置き場 | 環境の置き場を消す | 根の目印から指されている置き場と、7 日以内に使われた置き場は消さない |
+| `env.prune(ident, now)` | 書き込み | 識別子・時刻 | 消した置き場 | 環境の置き場と、指す先の導入先が無くなった根の目印を消す | `prepare.py` だけが呼ぶ。`roots/` の目印のうち `plugin_root` が今もある目印の `lock_hash` の置き場と、`.last-used` の更新時刻が 7 日以内の置き場は消さない。排他のファイルを持たれている置き場も消さない |
+| `env.mark_root(ident, plugin_root)` | 書き込み | 識別子・導入先 | 無し | 根の目印を書く | SessionStart の入口（`entry`・`boot`）だけが呼ぶ。中身が同じなら書かない |
+| `env.touch_used(ident)` | 書き込み | 識別子 | 無し | `.last-used` の更新時刻を今にする | SessionStart の `entry` と、用意が終わったときの `env.prepare` だけが呼ぶ。予算の経路（PreToolUse など）では呼ばない |
+| `env.kick_prepare(ident)` | 外部呼び出し | 識別子 | 無し | `prepare.py` を `start_new_session` で起動する | 待たない。排他のファイルを持たれていれば起動しない |
+| `metrics.prune(days)` | 書き込み | 日数 | 消したファイルの数 | `hooks/<日付>.jsonl` のうち `days` 日より古いものを消す | SessionStart の `entry` だけが呼ぶ |
 
 ### 異常系の処理（hook の基盤）
 
 | 場所 | 異常 | 扱い |
 | --- | --- | --- |
-| `entry.main` | 環境の python が無い・import に失敗した | 登録の command の `[ -x ] \|\| exit 0` か入口の `except` で、何も出さずに 0 で終わる |
+| 登録の command | 環境の python が無い | システムの `python3` で `boot.main` を起動する。`python3` も無ければ何もせずに 0 |
+| `entry.main` | 依存の import に失敗した | `strict.check` は import の前に済んでいる。ほかは入口の `except` で何も出さずに 0 で終わる |
+| `prepare.py` | `uv` が無い・依存を取得できない・作れない | 一時の置き場を消し、`<hash>.failed` に理由を書いて終わる。次の SessionStart の `boot.main` が 1 行の案内を出し、用意を起動し直す |
 | `entry.main` | payload が JSON でない・契約表に無い事象・知らない Tool | 何も出さずに 0。計測に `input_shape` か `unknown_event` と書く |
 | `dispatch.run` | guard が例外を投げた | `strict` でなければその guard を `pass` にし、計測に例外の種類を書く。`strict` なら `deny` と固定の理由 |
 | `dispatch.run` | 締め切りの残りが余白を下回った | 残りの guard を呼ばずに通す。計測に `deadline` と書く |
@@ -366,6 +382,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `hook.pushback` | `attempts: 2`（利用者の入力ごとの Stop の差し戻しの合計） |
 | `hook.deny-repeat` | `attempts: 2`（同じ guard・理由・対象の拒否） |
 | `hook.transcript-tail` | 会話の記録の末尾を読む大きさ（`bytes`。最後の応答と文脈の量が入る大きさ） |
+| `hook.budget.<事象>.<ランタイム>` | ランタイムで値が違う事象の予算（Codex の SessionEnd）。あれば `hook.budget.<事象>` より先に読む |
 
 **セッションの数え手**（`<状態の置き場>/hooks/sessions/<session_id>.json`）
 
@@ -376,7 +393,19 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `denies` | 辞書 | 拒否の鍵（guard・理由・対象の hash）ごとの数 |
 | `relay_mark` | 真偽 | 中継が次の入力を送る前に立てる印 |
 
-**計測の 1 行**（`<状態の置き場>/hooks/<日付>.jsonl`）: `at`・`runtime`・`event`・`tool`・`total_ms`・`guards`（名前・所要・判定の列）・`verdict`・`inject_chars`・`error`・`pushbacks`。
+**計測の 1 行**（`<状態の置き場>/hooks/<日付>.jsonl`）: `at`・`runtime`・`event`・`tool`・`path`（`entry` か `boot`）・`total_ms`・`guards`（名前・所要・判定の列）・`verdict`・`inject_chars`・`error`・`pushbacks`。14 日より古いファイルは SessionStart の `entry` が `metrics.prune(14)` で消す。
+
+**根の目印**（`<キャッシュ>/<プラグイン名>/roots/<プラグインの置き場の sha256 の先頭 16 字>.json`）
+
+| 鍵 | 型 | 中身 |
+| --- | --- | --- |
+| `plugin_root` | 文字列 | 導入先のプラグインの置き場（`CLAUDE_PLUGIN_ROOT` か入口の `__file__` から求める） |
+| `lock_hash` | 文字列 | その導入先の `uv.lock` の hash（登録が指す環境の置き場の名前） |
+| `at` | 文字列 | 書いた時刻 |
+
+書き手は SessionStart の入口（`entry`・`boot`）だけで、1 セッションに 1 回である。読み手は `env.prune` だけである。導入先ごとに 1 ファイルなので、版の違う導入先（プラグインのキャッシュに残る旧い版・`--plugin-dir` の作業ディレクトリ）が同じキャッシュを使っても、互いの目印を上書きしない。
+
+**最後に使った時刻**（`<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>/.last-used` の更新時刻）: 書き手は SessionStart の `entry` と、用意が終わったときの `env.prepare` である。読み手は `env.prune` だけである。PreToolUse などの予算の経路は書かない。根の目印から指されなくなった環境（導入先が消えた旧い版）を、7 日の間は消さずに残すために使う。
 
 ### 並行と排他（hook の基盤）
 
@@ -384,16 +413,16 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | --- | --- |
 | 同じセッションの並列の Tool の呼び出し | 数え手のファイルを `fcntl` の排他で開き、待ちは締め切りの中だけにする。取れなければ数えずに通す |
 | 計測の記録 | 1 行を 1 回の追記（`O_APPEND`）で書く |
-| 依存の環境 | 置き場は lock の hash ごとに別で、作るときは一時の置き場に作ってから名前を変える。使い中の置き場は作り直さない |
+| 依存の環境 | 置き場は lock の hash ごとに別で、作るときは置き場ごとの排他のファイル（`<hash>.lock`。`fcntl`）を取り、一時の置き場に作ってから名前を変える。排他を取れなければ用意しない。使い中の置き場は作り直さない。`env.prune` は排他を持たれている置き場を消さない |
 
 ### 単体テストの観点（hook の基盤）
 
 | 対象 | 観点 |
 | --- | --- |
 | IH1 | 1 回の事象で、payload の解析・構文木・会話の記録の読み込み・最後の応答の分類の関数がそれぞれ 1 回だけ呼ばれる。登録の各事象が 1 行 |
-| IH2 | 入口からの import の閉包が `contracts/hooks/imports.json` に収まる。環境の python を消した状態で登録の command を打つと、出力なし・0 |
+| IH2 | 入口からの import の閉包が `contracts/hooks/imports.json` に収まり、`boot.py`・`prepare.py`・`strict.py`・`env.py` からの閉包は標準ライブラリだけ。環境の python を消した状態で登録の command を打つと、`strict` の guard に当たる入力のほかは出力なし・0。環境を消した状態から SessionStart の登録を打つと、待たずに 0 で返り、用意が終わった後の登録は `entry` で動く |
 | IH3 | `check_budget` が、部品の上限が締め切りを超える表・timeout の無い登録を落とす |
-| IH4 | guard に例外を投げさせても通す。`strict` の guard だけが止める |
+| IH4 | guard に例外を投げさせても通す。`strict` の guard だけが止める。環境が無い・依存の import を落とした状態でも、本番チャネルへのマージを止める |
 | IH5 | 本文の待ちの応答で Stop を 5 回続けても差し戻しは 2 回。同じ範囲を 5 回読んでも拒否は 2 回で、3 回目から案内。利用者の入力で数え直し、中継の印のある入力では数え直さない |
 | IH6 | 全 guard の `suggests` の Tool の見本を全 guard に通して、止める判定が出ない |
 | IH7 | socket の生成を禁じた状態で、全 guard を見本の入力で通せる。`subprocess` の呼び出し先が git の許した副命令と NDF の送り手だけ |
@@ -409,20 +438,20 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | --- | --- | --- | --- |
 | M3-H1 | M3 | `domains/hooks/` の `dispatch.run` が guard の表（`contracts/hooks/guards.json`）の順に guard を呼び、payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は `HookContext` が 1 回の事象で 1 度だけ作る。テストで各解析の関数の呼び出しが 1 回であることを確かめる | 決定 88・IH1 |
 | M3-H2 | M3 | AskUserQuestion の判定と中継へのシグナルファイルの作成、Stop の待ちの知らせ・中継の印・人のいない実行の差し戻しを、同じプロセスの中の関数として呼ぶ。別のプロセスで判定し直す経路を作らない | 決定 88・IH1 |
-| M3-H3 | M3 | 入口から import でたどれるモジュールが `contracts/hooks/imports.json` に収まることを構文木で確かめるテストを置く。`bin/ndf`・依存を入れ直す処理・通信のアダプター・`core/durable.py` を含まない | 決定 89・IH2・IH7 |
+| M3-H3 | M3 | 入口から import でたどれるモジュールが `contracts/hooks/imports.json` に収まることを構文木で確かめるテストを置く。`bin/ndf`・依存を入れ直す処理・通信のアダプター・`core/durable.py` を含まない。`hooks/boot.py`・`hooks/prepare.py`・`strict.py`・`env.py` からの閉包は標準ライブラリだけであることも同じテストで確かめる | 決定 89・決定 91・IH2・IH7 |
 | M3-H4 | M3 | `limits.json` に事象ごとの予算（`hook.budget.<事象>`）を足し、`hook.ask-forward`・`hook.git-rev-parse`・`hook.git-remote` ほか部品の上限を `締め切り − 余白` 以下にする。`check_budget` を CI のテストと SessionStart で打つ | 決定 90・IH3 |
 | M3-H5 | M3 | 会話へ入れる文を事象ごとの `inject_chars` で切り、超える分はファイルへ書いてパスを入れる | 決定 90・IH8 |
-| M3-H6 | M3 | 例外・締め切り超え・知らない事象と Tool・入力の形の違いで、出力なし・終了コード 0 になる。`strict` は本番チャネルへのマージを見る guard だけで、その guard は自分の失敗で止める側の答えを返す | 決定 91・IH4 |
+| M3-H6 | M3 | 例外・締め切り超え・知らない事象と Tool・入力の形の違いで、出力なし・終了コード 0 になる。`strict` は本番チャネルへのマージを見る guard だけで、その guard は自分の失敗で止める側の答えを返す。`strict` の guard（`strict.py`）は標準ライブラリだけで書き、入口が `dispatch` と依存の import より先に呼ぶ。環境を消した状態と依存の import を落とした状態で、本番チャネルへのマージを止めることをテストで確かめる | 決定 91・IH4 |
 | M3-H7 | M3 | セッションの数え手を作る。Stop の差し戻しは理由をまたいで利用者の入力ごとに `hook.pushback`（2）回まで、同じ guard・理由・対象の拒否は `hook.deny-repeat`（2）回の後に案内へ下げる。利用者の入力で数え直し、中継が送った入力では数え直さない。今の文脈の上限の拒否と同じ範囲を読む拒否も、この規則に乗せる | 決定 92・IH5 |
 | M3-H8 | M3 | guard の表の `suggests` の Tool（sleep の guard が勧める Monitor と背景の起動を含む）の見本の呼び出しを全 guard に通すテストを置く | 決定 92・IH6 |
 | M3-H9 | M3 | 入口の処理の間に socket を作らない。通知は `outbox.enqueue` で書き、`outbox.kick` で送り手を切り離して起動する。SessionStart で `git fetch` と学習の設定の読み書きを行わない。AskUserQuestion の転送を hook の中で待たない | 決定 93・IH7 |
-| M3-H10 | M3 | 入口の起動ごとに計測の 1 行を書き、14 日より古い記録を消す。`ndf hooks stats` が事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大を返す | 決定 94・IH9 |
+| M3-H10 | M3 | 入口の起動ごとに計測の 1 行を書く。14 日より古い記録は SessionStart の入口だけが `metrics.prune(14)` で消し、ほかの事象ではディレクトリを走査しない。`ndf hooks stats` が事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大を返す | 決定 94・IH9 |
 | M3-H11 | M3 | ランタイムの契約表（`contracts/hooks/runtimes.json`）と、Claude Code 2.1.325・Codex 0.167.0 の見本を置き、すべての見本の解析と出力の形を CI で確かめる。Codex の Stop の出力は `hookSpecificOutput` を持たない。`ndf hooks capture` で見本を足せる | 決定 95・IH10 |
 | M3-H12 | M3 | guard の止め方は `NDF_HOOK_OFF` の 1 つで、D2 の環境変数の表へ 1 行を足す。閾値は `limits.json` から読み、環境変数では受けない | 決定 96 |
 | M3-H13 | M3 | 見本の入力で入口を事象ごとに 20 回起動し、p95 が予算の 3 倍を超えたら落ちる CI のテストを置く | 決定 90・決定 94 |
-| M3-H14 | M3 | 依存の環境を lock の hash ごとの置き場に作り、SessionStart は用意を切り離して起動して待たない。根の目印から指されず 7 日使われていない置き場を消す。使い中の置き場を作り直さない | 決定 89・決定 93 |
+| M3-H14 | M3 | 依存の環境を lock の hash ごとの置き場に作り、SessionStart は用意を切り離して起動して待たない。環境が無いときの用意は、システムの `python3` で動く `boot.py` から `prepare.py` を起動する。環境を消した状態から SessionStart の登録を打ち、SessionStart の timeout の中で 0 で返ること・切り離した用意が終わって環境の python ができること・その後の PreToolUse の登録が `entry` で動く（計測の `path` が `entry`）ことを、テストで確かめる（依存の取得は CI が先に温めた uv のキャッシュから `--offline` で行う）。根の目印（SessionStart の入口が書く）から指されず、`.last-used`（SessionStart の `entry` と用意の終わりが書く）が 7 日より古い置き場を消す。予算の経路では目印と `.last-used` を書かない。使い中の置き場を作り直さない | 決定 89・決定 93 |
 | S1-H1 | S1 | `hooks/claude.json` と `hooks/codex.json` は事象ごとに登録 1 行で、すべての登録に予算の timeout を付ける。登録は `ndf hooks render` が契約表と予算から作り、CI で作り直した結果と一致することを確かめる | 決定 88・決定 90・IH1・IH3 |
-| S1-H2 | S1 | 登録の command は `sh -c '[ -x "$0" ] \|\| exit 0; exec "$0" "$@"'` で環境の python を直に起動して `hooks/entry.py` を渡す。`bin/ndf` と `uv run` を通らない。環境を消した状態で全事象の登録を打ち、出力なし・0 を確かめる | 決定 89・IH2 |
+| S1-H2 | S1 | 登録の command は `sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 \|\| exit 0; exec python3 "${1%/*}/boot.py" "$@"'` で、環境の python があれば `hooks/entry.py` を直に起動し、無ければシステムの `python3` で `hooks/boot.py` を起動する。`bin/ndf` と `uv run` を通らない。環境を消した状態で全事象の登録を打ち、`strict` の guard に当たる入力のほかは出力なし・0 を確かめる。`python3` を `PATH` から外した状態でも 0 を確かめる。環境を消した状態から SessionStart の登録で用意が終わるまでを M3-H14 のテストで通す | 決定 89・決定 91・IH2 |
 | S1-H3 | S1 | Codex の登録は、契約表で Codex が持つ事象（UserPromptSubmit を含む）を並べる。Codex で働かない guard は契約表に理由を書く | 決定 95 |
 | S1-H4 | S1 | 「ndf-next だけを読む起動」のスクリプトで起動したセッションで、計測の記録に ndf-next の行だけが出て、ndf の hook が走らないことを確かめる | 決定 74・指摘 12 |
 
