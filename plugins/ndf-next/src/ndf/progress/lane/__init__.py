@@ -156,8 +156,7 @@ def checked_write(conn: sa.Connection, plan_id: str, lane: str, drafts: list[mod
     """
     lock_plan(conn, plan_id)
     view, _ = read_plan(conn, plan_id)
-    if lane not in view.lanes:
-        raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
+    _require_lane(view, lane)
     events = read_lanes(conn, view)
     last = events[lane][-1].seq if events[lane] else 0
     for draft in drafts:
@@ -184,18 +183,22 @@ def create_lane(conn: sa.Connection, key: tuple[str, str, str], plan_id: str, in
     return store.create_table(conn, ("lane", repo, lane_table_name(plan, lane)), plan_id, None, drafts)
 
 
-def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
-    view, rows = read_view(conn, plan_id)
+def _require_lane(view: PlanView, lane: str) -> None:
     if lane not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
+
+
+def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
+    view, rows = read_view(conn, plan_id)
+    _require_lane(view, lane)
     return view, rows
 
 
 def _row(rows: list[LaneRow], key: str, lane: str) -> LaneRow:
-    for r in rows:
-        if r.key == key:
-            return r
-    raise model.Refused(f"レーン {lane} に行 {key} は無い")
+    found = next((r for r in rows if r.key == key), None)
+    if found is None:
+        raise model.Refused(f"レーン {lane} に行 {key} は無い")
+    return found
 
 
 @dataclass(frozen=True)
