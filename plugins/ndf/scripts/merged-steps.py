@@ -189,7 +189,8 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
     if got is None:
         return
     branch, merge_commit = got
-    if why := repo.kept_sprint_branch(root, branch):  # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）
+    # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）
+    if why := repo.kept_sprint_branch(root, branch, repo.sprint_flow_record(root, branch)):
         add("branch", branch, "kept", why)
     elif _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
         _delete_branch(root, branch, add)

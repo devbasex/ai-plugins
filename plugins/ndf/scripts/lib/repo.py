@@ -6,6 +6,7 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -17,6 +18,9 @@ from closing import defer_closing
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 WORKTREE_DECL = Path(".ndf") / "worktree.json"
+# スプリントの目録（`supervise.py new sprint` が書く）と、目録を探すときに入らないプランの状態ディレクトリの末尾
+SPRINT_MANIFEST = "sprint.json"
+PLAN_STATE_SUFFIX = "-state"
 # 確定仕様の置き場（リポジトリの根からの相対）。確定仕様化と設計との突き合わせが同じものを読む
 SPEC_DIR = "docs/specifications"
 
@@ -176,17 +180,47 @@ def resolved_flow(root, base: str | None = None, production: str | None = None) 
     return flow.resolve(base, production)
 
 
-def kept_sprint_branch(root, branch: str | None) -> str | None:
+def sprint_flow_record(root, branch: str | None) -> dict | None:
+    """スプリントブランチ `branch` の開始時の記録（目録 `sprint.json` の `ブランチ運用`。#3310）。無ければ `None`。
+
+    メインディレクトリの `.ndf/` の下の目録のうち、`ブランチ` が `branch` のもの（`ブランチ` を持たない目録は
+    `sprint/<スプリント>`）を探し、更新の新しい目録の記録を返す。プランの状態ディレクトリ（`<プラン>-state`）の中は
+    作業の写しを持つため探さない。目録が読めなければその目録を飛ばす。"""
+    top = decl.main_dir(root) if root else None
+    if not branch or top is None:
+        return None
+    hits = []
+    for d, dirs, files in os.walk(Path(top) / ".ndf"):
+        dirs[:] = [x for x in dirs if not x.endswith(PLAN_STATE_SUFFIX)]
+        if SPRINT_MANIFEST not in files:
+            continue
+        path = Path(d) / SPRINT_MANIFEST
+        try:
+            got = json.loads(path.read_text(encoding="utf-8"))
+            mtime = path.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        if not isinstance(got, dict):
+            continue
+        own = got.get("ブランチ") or f"{branch_flow.SPRINT_PREFIX}{got.get('スプリント')}"
+        snap = got.get(branch_flow.SNAPSHOT_KEY)
+        if own == branch and isinstance(snap, dict) and snap:
+            hits.append((mtime, str(path), snap))
+    return max(hits, key=lambda h: (h[0], h[1]))[2] if hits else None
+
+
+def kept_sprint_branch(root, branch: str | None, record: dict | None = None) -> str | None:
     """後片付けでスプリントブランチを残す理由（#3121 の決定 7）。消してよければ None。
 
     選んで集める取り込み方では、スプリントブランチはリリースの単位として本番チャネルに含まれるまで要る。
-    宣言が読めなければ消さない側（残す）へ倒す。"""
+    取り込み方と本番チャネルは、そのスプリントの開始時の記録（`record`）で決め、記録の無いスプリントだけ今の宣言で決める
+    （#3308 の設計の決定 1・決定 6）。宣言か記録が読めなければ消さない側（残す）へ倒す。"""
     if not branch or not branch.startswith(branch_flow.SPRINT_PREFIX):
         return None
     try:
-        flow = resolved_flow(root)
+        flow = branch_flow.from_snapshot(record, None, production_branch(root)[0]) if record else resolved_flow(root)
     except branch_flow.FlowError as e:
-        return f"ブランチ運用の宣言を読めないため残す: {e}"
+        return f"ブランチ運用の{'開始時の記録' if record else '宣言'}を読めないため残す: {e}"
     if not flow.production_branch or proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
         return None
     ref = f"origin/{flow.production_branch}"
