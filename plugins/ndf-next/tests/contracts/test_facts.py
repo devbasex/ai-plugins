@@ -214,4 +214,7 @@ def test_ref_errors_lists_missing_values_in_column_then_row_order(contracts_copy
         "sample:a の code 'zz' が表 exit-codes に無い",
         "sample:c の code 'yy' が表 exit-codes に無い",
     ]
-    assert facts.ref_errors("sample", None) == ["sample:a の code 'zz' が表 exit-codes に無い", "sample:c の code 'yy' が表 exit-codes に無い"]
+    assert facts.ref_errors("sample", None) == [
+        "sample:a の code 'zz' が表 exit-codes に無い",
+        "sample:c の code 'yy' が表 exit-codes に無い",
+    ]
