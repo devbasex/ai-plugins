@@ -285,11 +285,21 @@ class Wrapper:
         if key == self.last_state:
             return
         self.last_state = key
-        registry.write_state(self.dir, {
-            "name": self.s.name, "version": self.s.version, "pid": os.getpid(), "cwd": str(self.s.cwd),
-            "state": state, "reason": reason, "section": sec.number if sec else None,
-            "session_id": sec.session_id if sec else None, "account": sec.account if sec else None, "starts": self.starts,
-        })
+        registry.write_state(
+            self.dir,
+            {
+                "name": self.s.name,
+                "version": self.s.version,
+                "pid": os.getpid(),
+                "cwd": str(self.s.cwd),
+                "state": state,
+                "reason": reason,
+                "section": sec.number if sec else None,
+                "session_id": sec.session_id if sec else None,
+                "account": sec.account if sec else None,
+                "starts": self.starts,
+            },
+        )
 
     def _log(self, row: Mapping[str, Any]) -> None:
         registry.append_log(self.dir, {"section": self.section.number if self.section else None, **dict(row)})

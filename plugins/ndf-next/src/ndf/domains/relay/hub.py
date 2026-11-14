@@ -270,5 +270,9 @@ def _write(path: Path, data: Mapping[str, Any]) -> None:
 
 def _log(base: Path, rid: str, got: Outcome) -> None:
     with open(base / LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"at": signals.now_iso(), "request": rid, "ok": got.ok, "summary": got.summary, "cause": got.cause}, ensure_ascii=False) + "\n")
-
+        f.write(
+            json.dumps(
+                {"at": signals.now_iso(), "request": rid, "ok": got.ok, "summary": got.summary, "cause": got.cause}, ensure_ascii=False
+            )
+            + "\n"
+        )

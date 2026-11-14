@@ -31,7 +31,11 @@ def test_next_mark_keeps_the_first_written_time(tmp_path, monkeypatch):
     monkeypatch.setattr(signals, "now_iso", lambda: "2026-11-14T00:05:00+00:00")
     assert signals.write_next(tmp_path, "s1", "/goal y", True, 0.1)
     got = signals.read_next(tmp_path)
-    assert (got["block"], got["first_written_at"], got["written_at"]) == ("/goal y", "2026-11-14T00:00:00+00:00", "2026-11-14T00:05:00+00:00")
+    assert (got["block"], got["first_written_at"], got["written_at"]) == (
+        "/goal y",
+        "2026-11-14T00:00:00+00:00",
+        "2026-11-14T00:05:00+00:00",
+    )
     assert not list(tmp_path.glob(".*.tmp"))
 
 

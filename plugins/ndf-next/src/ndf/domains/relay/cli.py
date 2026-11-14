@@ -91,7 +91,7 @@ def _install(action: str, replace_old: bool) -> int:
             return result.emit(result.stopped(TOOL, "precondition", f"旧い NDF のラッパーが動いている: {names}。止めてから置き換える"))
         got = install.install(os.environ, ident.root, code, replace_old)
     summary = f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
-    warnings = [] if got.on_path else [f"{got.entry.path.parent} が PATH に無い。export PATH=\"{got.entry.path.parent}:$PATH\" を足す"]
+    warnings = [] if got.on_path else [f'{got.entry.path.parent} が PATH に無い。export PATH="{got.entry.path.parent}:$PATH" を足す']
     if action == "install" and got.copy.state == "foreign":
         warnings.append("旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える")
     return result.emit(result.result(TOOL, result.OK, summary, items=_status_items(got), warnings=warnings))
@@ -213,7 +213,9 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="action", required=True)
     p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name != "account"}
     p["install"].add_argument("--replace-old", action="store_true", help="旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）")
-    acc = sub.add_parser("account", help=COMMANDS["account"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in ACCOUNT_COMMANDS.items()))
+    acc = sub.add_parser(
+        "account", help=COMMANDS["account"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in ACCOUNT_COMMANDS.items())
+    )
     acc_sub = acc.add_subparsers(dest="account_action", required=True)
     for name, text in ACCOUNT_COMMANDS.items():
         a = acc_sub.add_parser(name, help=text)

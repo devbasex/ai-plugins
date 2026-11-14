@@ -24,7 +24,7 @@ ROOT_FILE = "relay.root"
 MARK = "# 中継の複製（ndf relay install が置いた）"
 ENTRY_MARK = "# 中継の PATH のエントリポイント（ndf relay install が置いた）"
 
-_LAUNCHER = '''#!/usr/bin/env python3
+_LAUNCHER = """#!/usr/bin/env python3
 {mark}
 import os
 import sys
@@ -60,7 +60,7 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 class Status(NamedTuple):
@@ -93,7 +93,7 @@ def launcher(missing_code: int) -> str:
 
 
 def entry_script(copy: Path) -> str:
-    return f"#!/bin/sh\n{ENTRY_MARK}\nexec python3 {shlex.quote(str(copy))} \"$@\"\n"
+    return f'#!/bin/sh\n{ENTRY_MARK}\nexec python3 {shlex.quote(str(copy))} "$@"\n'
 
 
 def _status(path: Path, mark: str, body: str) -> Status:

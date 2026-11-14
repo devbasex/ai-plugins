@@ -44,7 +44,9 @@ def before_limit(current: Optional[str], rows: list[Usage], threshold: float) ->
     best = _best(current, rows, threshold)
     if best is None:
         return Pick("keep", current, f"{current} は {now.percent:g}% だが、閾値より空いたアカウントが無い")
-    return Pick("switch", best.name, f"{current} の使用率 {now.percent:g}% が閾値 {threshold:g}% 以上。{best.name}（{best.percent:g}%）へ替える")
+    return Pick(
+        "switch", best.name, f"{current} の使用率 {now.percent:g}% が閾値 {threshold:g}% 以上。{best.name}（{best.percent:g}%）へ替える"
+    )
 
 
 def after_limit(current: Optional[str], rows: list[Usage]) -> Pick:
@@ -58,4 +60,8 @@ def after_limit(current: Optional[str], rows: list[Usage]) -> Pick:
     best = _best(current, rows, 100.0)
     if best is None:
         return Pick("wait_reset", current, f"{current} が上限に当たり、替える先が無い。リセットの後に同じアカウントで再開する")
-    return Pick("switch", best.name, f"{current} が上限に当たった。{best.name}（{best.percent:g}%）で再開する。背景の待ちは再開した先のセッションが受け取る")
+    return Pick(
+        "switch",
+        best.name,
+        f"{current} が上限に当たった。{best.name}（{best.percent:g}%）で再開する。背景の待ちは再開した先のセッションが受け取る",
+    )

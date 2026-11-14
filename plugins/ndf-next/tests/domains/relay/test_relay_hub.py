@@ -70,12 +70,19 @@ def ctx(tmp_path):
     clock = Clock()
     tmux = FakeTmux(tmp_path / "state")
     c = hub.Context(
-        state_dir=tmp_path / "state", plugin_root=root, version=VERSION,
+        state_dir=tmp_path / "state",
+        plugin_root=root,
+        version=VERSION,
         environ={"NDF_STATE_HOME": str(tmp_path / "old"), "GIT_ASKPASS": "/vscode"},
-        tmux=tmux, max_named=2, max_starts=3,
-        started=hub.Wait(1.0, 0.1), stop_wait=hub.Wait(1.0, 0.1), hub_wait=hub.Wait(5.0, 0.1),
+        tmux=tmux,
+        max_named=2,
+        max_starts=3,
+        started=hub.Wait(1.0, 0.1),
+        stop_wait=hub.Wait(1.0, 0.1),
+        hub_wait=hub.Wait(5.0, 0.1),
         pending=lambda: {"runs": [{"id": "r1"}], "note": ""},
-        sleep=clock.sleep, monotonic=clock,
+        sleep=clock.sleep,
+        monotonic=clock,
     )
     yield c
     tmux.close()

@@ -10,8 +10,15 @@ from ndf.domains.relay import account_decide, hub_decide, switch_decide
 from ndf.domains.relay.account_decide import Pick, Usage
 
 BASE = switch_decide.SectionState(
-    question=False, next_block=None, child_alive=True, child_exit=None, starts_today=0, max_starts=3,
-    idle_seconds=10.0, quiet_seconds=5.0, stall_seconds=1800.0,
+    question=False,
+    next_block=None,
+    child_alive=True,
+    child_exit=None,
+    starts_today=0,
+    max_starts=3,
+    idle_seconds=10.0,
+    quiet_seconds=5.0,
+    stall_seconds=1800.0,
 )
 
 

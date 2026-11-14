@@ -44,8 +44,15 @@ def test_account_use_show_clear(capsys):
 
 
 def test_decide_reads_the_section_state(monkeypatch, capsys):
-    data = {"next_block": "/goal x", "question": False, "child_alive": True, "child_exit": None, "starts_today": 0, "max_starts": 3,
-            "limit_pick": {"kind": "switch", "account": "main", "reason": "上限"}}
+    data = {
+        "next_block": "/goal x",
+        "question": False,
+        "child_alive": True,
+        "child_exit": None,
+        "starts_today": 0,
+        "max_starts": 3,
+        "limit_pick": {"kind": "switch", "account": "main", "reason": "上限"},
+    }
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["decide"]) == 0
     assert _last(capsys)["items"][0]["kind"] == "account"

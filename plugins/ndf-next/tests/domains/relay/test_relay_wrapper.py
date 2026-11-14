@@ -71,9 +71,19 @@ def _clock():
 
 def _settings(tmp_path: Path, **changes) -> wrapper.Settings:
     values = dict(
-        state_dir=tmp_path / "state", version=VERSION, name="t1", cwd=tmp_path, environ={"NDF_STATE_HOME": str(tmp_path / "old")},
-        args=("--model", "x"), tick=0.0, quiet=2.0, stall=1000.0, max_starts=3, context_limit=800_000,
-        usage_threshold=90.0, transcript_bytes=4096,
+        state_dir=tmp_path / "state",
+        version=VERSION,
+        name="t1",
+        cwd=tmp_path,
+        environ={"NDF_STATE_HOME": str(tmp_path / "old")},
+        args=("--model", "x"),
+        tick=0.0,
+        quiet=2.0,
+        stall=1000.0,
+        max_starts=3,
+        context_limit=800_000,
+        usage_threshold=90.0,
+        transcript_bytes=4096,
     )
     values.update(changes)
     return wrapper.Settings(**values)
