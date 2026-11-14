@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,13 +61,9 @@ def record_answer(v: run.View, q: Question, a: Answer, where: Callable[[], Path]
 
 def rejections(events: Iterable[model.Event]) -> dict[str, int]:
     """承認しなかった答え（承認しない・差し戻し）を承認ゲートの区分ごとに数える（gate-rejections の正本は事象）。"""
-    out: dict[str, int] = {}
-    for ev in events:
-        p = run.payload_of(ev)
-        if ev.draft.kind == run.ANSWERED and p.get("answer") in REJECTING and p.get("kind") == invoke.LISTEN:
-            gate = str(p["gate"]) if p.get("gate") else "plan"
-            out[gate] = out[gate] + 1 if gate in out else 1
-    return out
+    answered = (run.payload_of(ev) for ev in events if ev.draft.kind == run.ANSWERED)
+    unapproved = (p for p in answered if p.get("answer") in REJECTING and p.get("kind") == invoke.LISTEN)
+    return dict(Counter(str(p["gate"]) if p.get("gate") else "plan" for p in unapproved))
 
 
 def answers(v: run.View) -> list[dict[str, Any]]:
