@@ -330,6 +330,23 @@ def _new_text(new: Path) -> str:
         raise WorkerError("invalid", f"新しいプランを使えない: {exc}") from None
 
 
+def _replace_plan(plan: Path, text: str, at: str) -> Path:
+    """前の中身を `<プラン>.bak-<時刻>` へ控え、一時ファイルを経てプランを `text` へ置き換える。控えのパスを返す。"""
+    backup = plan.with_name(plan.name + BACKUP_SUFFIX + re.sub(r"[^0-9A-Za-z]", "", at))
+    shutil.copy2(plan, backup)
+    tmp = plan.with_name(plan.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, plan)
+    return backup
+
+
+def _append_plan_edit(state_dir: Path, row: Mapping[str, Any]) -> None:
+    """プランの書き換えの記録を進捗記録へ 1 行足す。"""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with (state_dir / PROGRESS_FILE).open("a", encoding="utf-8") as fh:
+        fh.write(result.dumps_line(row) + "\n")
+
+
 def edit_plan(plan: Path, new: Path, reason: str, state_dir: Path, now: Optional[str] = None) -> Optional[dict[str, Any]]:
     """プランを `new` の中身へ置き換え、前の中身を控え、差分と理由と時刻を進捗記録へ 1 行足す。
 
@@ -348,15 +365,9 @@ def edit_plan(plan: Path, new: Path, reason: str, state_dir: Path, now: Optional
         diff = "".join(difflib.unified_diff(old.splitlines(True), text.splitlines(True), str(plan), str(new)))
         if not diff:
             return None
-        backup = plan.with_name(plan.name + BACKUP_SUFFIX + re.sub(r"[^0-9A-Za-z]", "", at))
-        shutil.copy2(plan, backup)
-        tmp = plan.with_name(plan.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, plan)
+        backup = _replace_plan(plan, text, at)
         row = {"event": PLAN_EDIT_EVENT, "at": at, "plan": str(plan), "reason": reason, "diff": diff, "backup": str(backup)}
-        state_dir.mkdir(parents=True, exist_ok=True)
-        with (state_dir / PROGRESS_FILE).open("a", encoding="utf-8") as fh:
-            fh.write(result.dumps_line(row) + "\n")
+        _append_plan_edit(state_dir, row)
     return row
 
 
