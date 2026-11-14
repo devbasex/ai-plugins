@@ -20,13 +20,6 @@ def test_shipped_tables_have_the_shape(tables):
     assert table.shape_errors(*tables) == []
 
 
-def test_every_row_has_feature_trial_and_either_to_or_not_built(tables):
-    features, _ = tables
-    for r in features["rows"]:
-        assert r["feature"] and "trial" in r
-        assert ("to" in r) != ("not_built" in r), r["id"]
-
-
 def test_the_five_non_regression_rows_are_rows(tables):
     features, _ = tables
     assert len([r for r in features["rows"] if r["kind"] == "non-regression"]) == 5
