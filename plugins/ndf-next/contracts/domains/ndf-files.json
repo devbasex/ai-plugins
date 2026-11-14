@@ -38,6 +38,16 @@
     {"id": "relay-hub-registry", "place": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-request", "place": "relay-hub", "path": "requests/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継の頼む側（M3）", "ends": "run"},
     {"id": "relay-hub-result", "place": "relay-hub", "path": "results/<id>.json", "kind": "exchange", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "run"},
-    {"id": "relay-hub-log", "place": "relay-hub", "path": "hub-log.jsonl", "kind": "record", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "cleanup"}
+    {"id": "relay-hub-log", "place": "relay-hub", "path": "hub-log.jsonl", "kind": "record", "tracked": false, "writer": "中継のリレーハブ（M3）", "ends": "cleanup"},
+    {"id": "relay-wrapper", "place": "relay-wrappers", "path": "<名前>/wrapper.json", "kind": "exchange", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "replaced"},
+    {"id": "relay-wrapper-lock", "place": "relay-wrappers", "path": "<名前>/relay.lock", "kind": "exchange", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "replaced"},
+    {"id": "relay-wrapper-log", "place": "relay-wrappers", "path": "<名前>/log.jsonl", "kind": "record", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "cleanup"},
+    {"id": "relay-next", "place": "relay-wrappers", "path": "<名前>/next.json", "kind": "exchange", "tracked": false, "writer": "Stop の hook（M3a）", "ends": "run"},
+    {"id": "relay-question", "place": "relay-wrappers", "path": "<名前>/question.json", "kind": "exchange", "tracked": false, "writer": "PreToolUse の hook（M3a）", "ends": "run"},
+    {"id": "relay-usage", "place": "relay-accounts", "path": "usage.json", "kind": "measured", "tracked": false, "writer": "使用率のセンサー（M3a）", "ends": "replaced", "keys": ["accounts"]},
+    {"id": "relay-pinned-account", "place": "relay-accounts", "path": "pinned.json", "kind": "declaration", "tracked": false, "writer": "人（ndf relay account use）", "ends": "replaced"},
+    {"id": "relay-mark", "place": "relay-marks", "path": "<id>.json", "kind": "exchange", "tracked": false, "writer": "中継のラッパー（M3b）", "ends": "run"},
+    {"id": "relay-copy-launcher", "place": "relay-copy", "path": "relay.py", "kind": "exchange", "tracked": false, "writer": "人（ndf relay install）", "ends": "replaced"},
+    {"id": "relay-copy-root", "place": "relay-copy", "path": "relay.root", "kind": "exchange", "tracked": false, "writer": "中継（M3b）", "ends": "replaced"}
   ]
 }
