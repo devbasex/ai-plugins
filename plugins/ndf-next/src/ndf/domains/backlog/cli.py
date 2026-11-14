@@ -263,8 +263,9 @@ def _reschedule(gh: github.GitHub, plan: dict[str, Any], holds: set[int]) -> tup
     return done, failed
 
 
-def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
-    plan = _read_json(a.plan)
+def _read_plan(path: str) -> dict[str, Any]:
+    """plan を読み、形を確かめる（オブジェクトであること・知らない鍵・actions と create の形）。"""
+    plan = _read_json(path)
     if not isinstance(plan, dict):
         raise Stop("invalid", "plan は JSON のオブジェクトで書く")
     unknown = sorted(set(plan) - PLAN_KEYS)
@@ -273,6 +274,11 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     wrong = actions_decide.plan_errors(plan)
     if wrong:
         raise Stop("invalid", "plan の誤り（1 件も書いていない）: " + " / ".join(wrong))
+    return plan
+
+
+def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
+    plan = _read_plan(a.plan)
     repo = _repo(a)
     sd = _sd(a, repo)
     reparent.entries_of(plan)
