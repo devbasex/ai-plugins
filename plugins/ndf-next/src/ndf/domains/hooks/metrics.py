@@ -14,8 +14,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from ndf.domains.hooks import tables
+
 # 判定のうち、数えるもの（stats の欄の名前）
 _COUNTED = {"deny": "denies", "pushback": "pushbacks", "limited": "limited"}
+
+
+def keep_days() -> float:
+    """計測を残す日数（`hook.metrics-keep` の秒を日へ換算）。prune と stats の窓の既定。"""
+    return float(tables.policy_value("hook.metrics-keep", "seconds")) / 86400
 
 
 def metrics_dir(state_dir: Path) -> Path:

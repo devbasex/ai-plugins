@@ -150,7 +150,7 @@ def _session_start(state_dir: Path) -> None:
     """SessionStart の entry だけが行う片付けと印。"""
     from ndf.domains.hooks import env, metrics
 
-    metrics.prune(state_dir, float(tables.policy_value("hook.metrics-keep", "seconds")) / 86400)
+    metrics.prune(state_dir, metrics.keep_days())
     ident = env.Ident.of(tables.PLUGIN_ROOT)
     env.mark_root(ident)
     env.touch_used(ident)

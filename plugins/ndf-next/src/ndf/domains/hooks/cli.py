@@ -84,7 +84,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本")
     sub = parser.add_subparsers(dest="action", required=True)
     st = sub.add_parser("stats", help="事象・guard ごとの所要と判定の数")
-    st.add_argument("--days", type=float, default=float(tables.policy_value("hook.metrics-keep", "seconds")) / 86400)
+    st.add_argument("--days", type=float, default=metrics.keep_days())
     sub.add_parser("check-budget", help="予算の順序の検査")
     cap = sub.add_parser("capture", help="本体の入力の見本を、秘密を伏せて足す（標準入力に payload）")
     cap.add_argument("runtime")
