@@ -10,6 +10,19 @@ import pytest
 from ndf.progress.lane import LaneRow, launch
 
 
+def _fake_run(stdout="", stderr="", code=0, error=None):
+    """偽の run（呼ばれた argv を calls に積み、決まった出力を返すか error を上げる）。"""
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if error is not None:
+            raise error
+        return subprocess.CompletedProcess(argv, code, stdout, stderr)
+
+    return run, calls
+
+
 def _row(args=()):
     return LaneRow(key="r2", input={"kind": "sprint", "issues": [5, 6], "args": list(args)}, state="pending")
 
@@ -64,11 +77,17 @@ def test_cancel_commands_cancel_the_running_sprint_then_end_the_lane_row():
     assert end["argv"][1:] == ["lanes", "row", "end", "s1", "--outcome", "cancelled"]
 
 
+def test_resume_commands_mark_the_next_then_run_next_on_the_sprint():
+    mark, nxt = launch.resume_commands("s1")
+    assert mark["argv"][1:] == ["lanes", "row", "resumed", "s1"]
+    assert nxt["argv"][1:] == ["progress", "next", "s1"]
+
+
 def test_stop_stops_the_wrapper_of_the_lane_and_reads_the_result():
-    run, calls = _runner(stdout=json.dumps({"status": "ok", "summary": "p6-a を止めた"}))
+    run, calls = _fake_run(stdout=json.dumps({"status": "ok", "summary": "p6-a を止めた"}))
     assert launch.stop("o/r", "p6", "a", run=run) == {"ok": True, "detail": "p6-a を止めた"}
     assert calls[0][1:] == ["relay", "stop", launch.wrapper_name("o/r", "p6", "a")]
-    run, _ = _runner(stdout=json.dumps({"status": "stopped", "summary": "終わらない"}), code=1)
+    run, _ = _fake_run(stdout=json.dumps({"status": "stopped", "summary": "終わらない"}), code=1)
     assert launch.stop("o/r", "p6", "a", run=run) == {"ok": False, "detail": "終わらない"}
 
 
@@ -78,20 +97,8 @@ def test_prompt_carries_the_commands_as_json():
     assert json.loads(text[text.index("[") :]) == cmds
 
 
-def _runner(stdout="", stderr="", code=0, error=None):
-    calls = []
-
-    def run(argv, **kwargs):
-        calls.append(argv)
-        if error is not None:
-            raise error
-        return subprocess.CompletedProcess(argv, code, stdout, stderr)
-
-    return run, calls
-
-
 def test_spawn_names_the_wrapper_after_the_plan_and_the_lane(tmp_path):
-    run, calls = _runner(stdout=json.dumps({"tool": "relay", "status": "ok", "summary": "起こした"}) + "\n")
+    run, calls = _fake_run(stdout=json.dumps({"tool": "relay", "status": "ok", "summary": "起こした"}) + "\n")
     got = launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)
     assert got == {"ok": True, "detail": "起こした"}
     argv = calls[0]
@@ -102,11 +109,11 @@ def test_spawn_names_the_wrapper_after_the_plan_and_the_lane(tmp_path):
 
 
 def test_spawn_reports_a_refusal_or_a_broken_output_as_a_failure(tmp_path):
-    run, _ = _runner(stdout=json.dumps({"status": "stopped", "summary": "p6-a は既に動いている"}), code=1)
+    run, _ = _fake_run(stdout=json.dumps({"status": "stopped", "summary": "p6-a は既に動いている"}), code=1)
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "p6-a は既に動いている"}
-    run, _ = _runner(stdout="not json", stderr="壊れた", code=2)
+    run, _ = _fake_run(stdout="not json", stderr="壊れた", code=2)
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "壊れた"}
-    run, _ = _runner(error=FileNotFoundError("ndf"))
+    run, _ = _fake_run(error=FileNotFoundError("ndf"))
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)["ok"] is False
 
 
@@ -157,17 +164,155 @@ def test_spawn_passes_the_whole_argv_and_the_run_options(tmp_path):
     ],
 )
 def test_spawn_reads_the_last_line_as_it_is_now(tmp_path, stdout, stderr, code, got):
-    run, _ = _runner(stdout=stdout, stderr=stderr, code=code)
+    run, _ = _fake_run(stdout=stdout, stderr=stderr, code=code)
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == got
 
 
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "code", "got"),
+    [
+        # 複数行は最後の行だけを JSON として読む（途中の行が JSON でも読まない）
+        (
+            json.dumps({"status": "ok", "summary": "前"}) + "\n" + json.dumps({"status": "stopped", "summary": "後"}),
+            "",
+            1,
+            {"ok": False, "detail": "後"},
+        ),
+        ("ログ\n" + json.dumps({"status": "ok", "summary": "起こした"}) + "\n\n", "", 0, {"ok": True, "detail": "起こした"}),
+        # 最後の行が壊れていれば、前の行が読めても壊れた出力と同じ扱い
+        (json.dumps({"status": "ok", "summary": "前"}) + "\n壊れた", "エラー", 1, {"ok": False, "detail": "エラー"}),
+        # 空白だけの出力は空の出力と同じ扱い
+        ("  \n\t\n", "", 4, {"ok": False, "detail": "終了コード 4"}),
+    ],
+)
+def test_read_spawn_reads_only_the_last_line_as_it_is_now(stdout, stderr, code, got):
+    assert launch.read_spawn(stdout, stderr, code) == got
+
+
+@pytest.mark.parametrize("stdout", ["[1]", "null", "3", '"ok"'])
+def test_read_spawn_raises_on_a_last_line_that_is_json_but_not_an_object_as_it_is_now(stdout):
+    """辞書でない JSON の最後の行は、今は AttributeError で落ちる（現状の記録。直すのは別の変更）。"""
+    with pytest.raises(AttributeError):
+        launch.read_spawn(stdout, "", 0)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "got"),
+    [
+        ("", None),
+        ("  \n", None),
+        ("壊れた", None),
+        ("[1]", None),
+        ("null", None),
+        ("{}", {}),
+        ('{"status": "ok"}\n壊れた', None),
+        ('壊れた\n{"status": "gate"}\n', {"status": "gate"}),
+    ],
+)
+def test_probe_reads_only_the_last_line_as_an_object_as_it_is_now(stdout, got):
+    run, calls = _fake_run(stdout=stdout)
+    assert launch.sprint_wait("s1", run=run) == got
+    assert calls[0][1:] == ["progress", "wait", "s1", "--timeout", "0"]
+
+
 def test_spawn_reports_the_os_error_in_the_detail(tmp_path):
-    run, _ = _runner(error=PermissionError("denied"))
+    run, _ = _fake_run(error=PermissionError("denied"))
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "ラッパーを起こせない: denied"}
 
 
 def test_spawn_uses_subprocess_run_when_no_runner_is_given(tmp_path, monkeypatch):
-    run, calls = _runner(stdout=json.dumps({"status": "ok", "summary": "起こした"}))
+    run, calls = _fake_run(stdout=json.dumps({"status": "ok", "summary": "起こした"}))
     monkeypatch.setattr(subprocess, "run", run)
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力") == {"ok": True, "detail": "起こした"}
     assert calls[0][-1] == "入力"
+
+
+def _version(base, name, mtime):
+    entry = base / name / "bin" / "ndf"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/bin/sh\n", encoding="utf-8")
+    entry.chmod(0o755)
+    import os
+
+    os.utime(entry, (mtime, mtime))
+    return base / name
+
+
+def test_a_removed_version_dir_launches_with_the_newest_version_and_leaves_a_line(tmp_path, monkeypatch, capsys):
+    """起こした版の置き場がプラグインの更新で消えても、同じ親の下の最も新しい版でレーンを起こし、切り替えた 1 行を
+    残す（#2583 の条件 17・18。更新を 2 回行った後を模す）。"""
+    from ndf import identity
+
+    _version(tmp_path, "11.0.1", 1_000)
+    newest = _version(tmp_path, "11.0.2", 2_000)
+    monkeypatch.setattr(identity, "ROOT", tmp_path / "11.0.0")
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "ok", "summary": "起こした"}) + "\n", "")
+
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)["ok"]
+    assert seen[0][0] == str(newest / "bin" / "ndf")
+    err = capsys.readouterr().err
+    assert "11.0.0" in err and "11.0.2" in err and len(err.strip().splitlines()) == 1
+
+
+def test_a_present_version_dir_is_used_as_it_is(tmp_path, monkeypatch, capsys):
+    from ndf import identity
+
+    own = _version(tmp_path, "11.0.0", 1_000)
+    _version(tmp_path, "11.0.2", 2_000)
+    monkeypatch.setattr(identity, "ROOT", own)
+    assert launch.entry() == own / "bin" / "ndf" and capsys.readouterr().err == ""
+
+
+# --- _probe 経由の副命令の読みの現状固定（正常・status 違い・末尾が JSON でない・打てない） ------------------
+
+_LISTED = {"name": "w", "running": True}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "got"),
+    [
+        ({"stdout": json.dumps({"status": "ok", "items": [_LISTED, {"x": 1}, "s"]})}, {"w": _LISTED}),
+        ({"stdout": json.dumps({"status": "stopped", "items": [_LISTED]}), "code": 1}, None),
+        ({"stdout": "壊れた"}, None),
+        ({"error": OSError("無い")}, None),
+    ],
+)
+def test_wrappers_reads_the_relay_list_as_it_is_now(kwargs, got):
+    run, calls = _fake_run(**kwargs)
+    assert launch.wrappers(run) == got
+    assert calls[0][1:] == ["relay", "ls"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "got"),
+    [
+        ({"stdout": json.dumps({"status": "ok"})}, True),
+        ({"stdout": json.dumps({"status": "stopped"}), "code": 1}, False),
+        ({"stdout": "壊れた"}, False),
+        ({"error": OSError("無い")}, False),
+    ],
+)
+def test_account_ok_reads_the_relay_account_as_it_is_now(kwargs, got):
+    run, calls = _fake_run(**kwargs)
+    assert launch.account_ok(run) is got
+    assert calls[0][1:] == ["relay", "account", "show"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "got"),
+    [
+        ({"stdout": json.dumps({"status": "ok", "summary": "x"})}, {"status": "ok", "summary": "x"}),
+        # status を見ずに結果 JSON をそのまま返す
+        ({"stdout": json.dumps({"status": "stopped"}), "code": 1}, {"status": "stopped"}),
+        ({"stdout": "壊れた"}, None),
+        ({"error": OSError("無い")}, None),
+    ],
+)
+def test_sprint_wait_reads_the_wait_as_it_is_now(kwargs, got):
+    run, calls = _fake_run(**kwargs)
+    assert launch.sprint_wait("s1", run) == got
+    assert calls[0][1:] == ["progress", "wait", "s1", "--timeout", "0"]

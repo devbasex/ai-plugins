@@ -7,7 +7,7 @@
   },
   "table_states": {
     "sprint": {"initial": "running", "states": ["running", "completed", "cancelled"]},
-    "plan": {"initial": "pending", "states": ["pending", "running", "completed", "cancelled"]}
+    "plan": {"initial": "pending", "states": ["pending", "running", "paused", "completed", "cancelled"]}
   },
   "terminal": ["finished", "disabled", "cancelled", "completed"],
   "labels": {
@@ -17,6 +17,7 @@
     "failed": "失敗",
     "disabled": "無効",
     "cancelled": "中止",
+    "paused": "停止",
     "completed": "完了"
   },
   "actors": {
@@ -56,8 +57,9 @@
     {"level": "plan", "kind": "lane_added", "actors": ["organizer"], "scope": "row", "from": ["new"]},
     {"level": "plan", "kind": "lane_changed", "actors": ["organizer"], "scope": "row"},
     {"level": "plan", "kind": "request_opened", "actors": ["organizer", "workflow"], "scope": "row", "from": ["new"]},
-    {"level": "plan", "kind": "request_closed", "actors": ["organizer"], "scope": "row"},
+    {"level": "plan", "kind": "request_closed", "actors": ["organizer", "workflow"], "scope": "row"},
     {"level": "plan", "kind": "plan_started", "actors": ["organizer"], "scope": "table", "state": "running"},
+    {"level": "plan", "kind": "plan_paused", "actors": ["organizer"], "scope": "table", "state": "paused"},
     {"level": "plan", "kind": "plan_completed", "actors": ["durable"], "scope": "table", "state": "completed"},
     {"level": "plan", "kind": "plan_cancelled", "actors": ["organizer"], "scope": "table", "state": "cancelled"}
   ],

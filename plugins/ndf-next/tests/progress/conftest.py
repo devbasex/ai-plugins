@@ -16,7 +16,7 @@ import uuid
 import pytest
 
 from ndf.core import durable
-from ndf.progress import command, store
+from ndf.progress import command, model, store
 
 
 @pytest.fixture(scope="session")
@@ -75,3 +75,16 @@ def progress_url(request, root):
 def opened(progress_url, root):
     with store.open_store(progress_url, root) as st:
         yield st
+
+
+@pytest.fixture
+def refused():
+    """断られる操作の理由を返す関数。トランザクションの内側で `fn(conn)` を打ち、`Refused` がトランザクションの外へ
+    伝わって（書いた分を戻して）から捕まえる。"""
+
+    def run(st, fn):
+        with pytest.raises(model.Refused) as got, store.transaction(st) as conn:
+            fn(conn)
+        return got.value.reason
+
+    return run

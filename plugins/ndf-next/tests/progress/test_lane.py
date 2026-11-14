@@ -39,12 +39,6 @@ def _start(st, pid, lane_name, key, name):
     return sid, warnings
 
 
-def _refused(st, fn):
-    with pytest.raises(model.Refused) as got, store.transaction(st) as conn:
-        fn(conn)
-    return got.value.reason
-
-
 # --- 作成と計画の決まり --------------------------------------------------------------------------
 
 
@@ -68,8 +62,8 @@ def test_plan_and_lane_tables_hold_lanes_and_the_first_order(opened):
         (_doc(_decl("a", [[1], [2]]), _decl("b", [[3]], after=("a/r1",))), "I13"),
     ],
 )
-def test_creation_that_breaks_a_cross_lane_rule_leaves_nothing(opened, doc, rule):
-    reason = _refused(opened, lambda conn: plan.create_plan(conn, REPO, doc, True))
+def test_creation_that_breaks_a_cross_lane_rule_leaves_nothing(opened, doc, rule, refused):
+    reason = refused(opened, lambda conn: plan.create_plan(conn, REPO, doc, True))
     assert rule in reason
     with store.transaction(opened) as conn:
         assert store.read_table(conn, plan.plan_id(REPO, "p6")) is None
@@ -112,17 +106,17 @@ def test_sprint_outside_a_lane_has_no_row_to_end(opened):
         assert lane.end_row(conn, sid, "completed", "workflow") is None
 
 
-def test_only_the_next_row_with_its_after_met_can_start(opened):
+def test_only_the_next_row_with_its_after_met_can_start(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1], [2]]), _decl("b", [[3]], touches=("src/b",), after=("a/r1",))))
     sid = _sprint(opened, pid, "a", "s2")
-    assert "次に始める行でない" in _refused(opened, lambda conn: lane.start_row(conn, pid, "a", "r2", sid))
-    assert "after" in _refused(opened, lambda conn: lane.start_row(conn, pid, "b", "r1", sid))
+    assert "次に始める行でない" in refused(opened, lambda conn: lane.start_row(conn, pid, "a", "r2", sid))
+    assert "after" in refused(opened, lambda conn: lane.start_row(conn, pid, "b", "r1", sid))
 
 
-def test_rows_cannot_start_before_the_plan_starts(opened):
+def test_rows_cannot_start_before_the_plan_starts(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1]])), start=False)
     sid = _sprint(opened, pid, "a", "s1")
-    assert "未着手" in _refused(opened, lambda conn: lane.start_row(conn, pid, "a", "r1", sid))
+    assert "未着手" in refused(opened, lambda conn: lane.start_row(conn, pid, "a", "r1", sid))
 
 
 # --- レーンの中の組み換え（受け入れ条件 1・3） --------------------------------------------------------
@@ -139,38 +133,38 @@ def test_dropped_issues_go_to_the_next_row_of_the_same_lane(opened):
     assert list(view.lanes) == ["a"]  # after 付きの新しいレーンを作らない
 
 
-def test_rows_are_not_placed_before_a_running_row(opened):
+def test_rows_are_not_placed_before_a_running_row(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1], [2]])))
     _start(opened, pid, "a", "r1", "s1")
     change = lane.RowChange("conductor", "前へ", 0)
-    reason = _refused(opened, lambda conn: lane.add_row(conn, pid, "a", {"kind": "sprint", "issues": [5]}, change))
+    reason = refused(opened, lambda conn: lane.add_row(conn, pid, "a", {"kind": "sprint", "issues": [5]}, change))
     assert "I12a" in reason
-    reason = _refused(opened, lambda conn: lane.move_row(conn, pid, "a", "r2", change))
+    reason = refused(opened, lambda conn: lane.move_row(conn, pid, "a", "r2", change))
     assert "I12a" in reason
 
 
-def test_running_rows_cannot_be_cancelled_by_the_order(opened):
+def test_running_rows_cannot_be_cancelled_by_the_order(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1]])))
     _start(opened, pid, "a", "r1", "s1")
-    reason = _refused(opened, lambda conn: lane.cancel_row(conn, pid, "a", "r1", lane.RowChange("conductor", "やめる")))
+    reason = refused(opened, lambda conn: lane.cancel_row(conn, pid, "a", "r1", lane.RowChange("conductor", "やめる")))
     assert "実行中" in reason
 
 
-def test_a_row_another_lane_waits_for_is_kept_in_place(opened):
+def test_a_row_another_lane_waits_for_is_kept_in_place(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1], [2], [3]]), _decl("b", [[4]], touches=("src/b",), after=("a/r2",))))
     change = lane.RowChange("conductor", "後ろへ", 2)
-    assert "I18" in _refused(opened, lambda conn: lane.move_row(conn, pid, "a", "r2", change))
-    assert "I18" in _refused(opened, lambda conn: lane.cancel_row(conn, pid, "a", "r2", lane.RowChange("conductor", "やめる")))
+    assert "I18" in refused(opened, lambda conn: lane.move_row(conn, pid, "a", "r2", change))
+    assert "I18" in refused(opened, lambda conn: lane.cancel_row(conn, pid, "a", "r2", lane.RowChange("conductor", "やめる")))
     with store.transaction(opened) as conn:
         lane.cancel_row(conn, pid, "a", "r3", lane.RowChange("conductor", "要らなくなった"))
     _, rows = _rows(opened, pid)
     assert [r.state for r in rows["a"]] == ["pending", "pending", "cancelled"]
 
 
-def test_adding_an_issue_that_another_lane_has_is_refused(opened):
+def test_adding_an_issue_that_another_lane_has_is_refused(opened, refused):
     pid = _create(opened, _doc(_decl("a", [[1]]), _decl("b", [[2]], touches=("src/b",))))
     inp = {"kind": "sprint", "issues": [2]}
-    reason = _refused(opened, lambda conn: lane.add_row(conn, pid, "a", inp, lane.RowChange("conductor", "足す")))
+    reason = refused(opened, lambda conn: lane.add_row(conn, pid, "a", inp, lane.RowChange("conductor", "足す")))
     assert "I19" in reason
 
 
