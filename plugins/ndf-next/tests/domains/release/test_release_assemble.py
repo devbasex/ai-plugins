@@ -163,3 +163,43 @@ def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
     work = _develop_ahead(tmp_path)
     with pytest.raises(assemble.AssembleError, match="origin/develop の先端でない"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+
+
+def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tuple[str, ...] = ()) -> Path:
+    """develop の版を `develop` にした origin の clone。`main` を渡せば本番ブランチの版もそれにし、`tags` のタグを origin に置く。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    manifest = work / "tools" / "kit" / ".claude-plugin" / "plugin.json"
+    write_json(manifest, {"name": "kit", "version": develop})
+    git(work, "commit", "-q", "-am", "dev bump")
+    git(work, "push", "-q", "origin", "develop")
+    if main is not None:
+        git(work, "switch", "-q", "main")
+        write_json(manifest, {"name": "kit", "version": main})
+        git(work, "commit", "-q", "-am", "released")
+        git(work, "push", "-q", "origin", "main")
+        git(work, "switch", "-q", "develop")
+    for tag in tags:
+        git(work, "tag", tag, "origin/main")
+        git(work, "push", "-q", "origin", tag)
+    return work
+
+
+def test_issue_2554_production_skips_tagged_version(tmp_path: Path) -> None:
+    """#2554: develop の版の基底（1.2.4）が既にタグにあれば、その版数で組まず次に空いている版へ繰り上げる。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
+    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.4-dev.2", "1.2.5")]
+
+
+def test_issue_2554_reversed_reservation_stays_above_production(tmp_path: Path) -> None:
+    """#2554: 低い版を予約したレーンが後に出しても（本番 1.2.5、develop 1.2.4-dev.1）、本番の版より大きい版で組む。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.1", main="1.2.5")
+    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert [p.next for p in facts.planned] == ["1.2.6"]
+
+
+def test_issue_2554_dev_channel_skips_shipped_base(tmp_path: Path) -> None:
+    """#2554: 開発版のチャネルも、出し済みの基底の接尾辞の版を組まない。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
+    facts = assemble.collect(work, _hub(), assemble.Target("dev", "patch", "develop", "main"))
+    assert [p.next for p in facts.planned] == ["1.2.5-dev.1"]
