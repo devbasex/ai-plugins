@@ -5,6 +5,7 @@ import json
 import pytest
 
 from ndf import cli
+from ndf.contracts import causes
 from ndf.contracts import cli as contracts_cli
 from ndf.contracts import exit_codes
 
@@ -288,9 +289,9 @@ def test_emit_unwritable_out_is_invalid(capsys, tmp_path, rel):
 
 
 @pytest.mark.parametrize("metrics", ["1", "[]", '"s"', "null"])
-def test_emit_non_object_metrics_is_invalid(capsys, metrics):
-    with pytest.raises(SystemExit) as exc:
-        _emit(capsys, "ok", "--metrics", metrics)
-    out = capsys.readouterr()
-    assert (exc.value.code, out.out) == (2, "")
-    assert "JSON のオブジェクトでない" in out.err
+def test_emit_non_object_metrics_is_invalid(capsys, last_result, metrics):
+    # 使い方の誤りは stopped/invalid の結果 JSON で終わる（#3394 の 3394-3）
+    code, out, err = _emit(capsys, "ok", "--metrics", metrics)
+    assert code == causes.exit_code("invalid")
+    assert last_result(out)["cause"]["kind"] == "invalid"
+    assert "JSON のオブジェクトでない" in err
