@@ -273,7 +273,7 @@ def _sqlite_url(path: Path) -> str:
     return f"{SQLITE_PREFIX}{path}"
 
 
-def _sa_url(database_url: str) -> str:
+def sa_url(database_url: str) -> str:
     """SQLAlchemy が psycopg 3 で開く形の URL にする（DBOS は `postgresql://` を受ける）。"""
     for scheme in ("postgresql://", "postgres://"):
         if database_url.startswith(scheme):
@@ -284,7 +284,7 @@ def _sa_url(database_url: str) -> str:
 @contextmanager
 def _engine(database_url: str) -> Iterator[sa.Engine]:
     """呼ぶたびに接続を溜めない Engine を作り、抜けるときに解放する。"""
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
+    engine = sa.create_engine(sa_url(database_url), poolclass=sa.NullPool)
     try:
         yield engine
     finally:
@@ -294,7 +294,7 @@ def _engine(database_url: str) -> Iterator[sa.Engine]:
 # --- ロック -----------------------------------------------------------------------------
 
 
-def _open_lock_file(path: Path) -> IO[str]:
+def open_lock_file(path: Path) -> IO[str]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         return open(path, "a")  # noqa: SIM115 - ロックを持つ間は開いたまま置く
@@ -338,7 +338,7 @@ def _store_lock_path(root: Path) -> Path:
 def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
     """置き場のロック（`state/` の隣の `state.lock`）。共有は待って取り、排他は待たずに試す（取れなければ `StoreInUse`）。"""
     path = _store_lock_path(root)
-    handle = _open_lock_file(path)
+    handle = open_lock_file(path)
     try:
         if exclusive:
             if not _try_flock(handle, fcntl.LOCK_EX):
@@ -354,7 +354,7 @@ def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
 def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
     """共有の目印の検査・控え・走査を 1 プロセスに限るロック。`wait` が偽で取れなければ None を渡す。"""
     path = root.parent / MAINT_LOCK
-    handle = _open_lock_file(path)
+    handle = open_lock_file(path)
     try:
         if not _lock(handle, fcntl.LOCK_EX, wait):
             yield None
@@ -388,7 +388,7 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
     path = _dbos_dir(root) / f"{name}{LOCK_SUFFIX}"
     while True:
-        handle = _open_lock_file(path)
+        handle = open_lock_file(path)
         if not _lock(handle, fcntl.LOCK_EX, wait):
             handle.close()
             yield None
@@ -470,7 +470,7 @@ def _retire_store(root: Path, found: int, now: datetime) -> Path:
 
 
 def _hold_shared(root: Path) -> IO[str]:
-    handle = _open_lock_file(_store_lock_path(root))
+    handle = open_lock_file(_store_lock_path(root))
     fcntl.flock(handle, fcntl.LOCK_SH)
     return handle
 
@@ -552,14 +552,14 @@ def release_store(root: Path) -> None:
 # --- 鍵ごとのファイルの検査と退避（決定 82・83） -----------------------------------------
 
 
-def _fresh(mark: Path, now: datetime) -> bool:
+def is_fresh(mark: Path, now: datetime) -> bool:
     try:
         return now.timestamp() - mark.stat().st_mtime < CHECK_INTERVAL.total_seconds()
     except FileNotFoundError:  # noqa: NDF401 ファイル: 目印が無ければ古いとして扱う
         return False
 
 
-def _touch(mark: Path, now: datetime) -> None:
+def touch_mark(mark: Path, now: datetime) -> None:
     mark.parent.mkdir(parents=True, exist_ok=True)
     mark.touch()
     os.utime(mark, (now.timestamp(), now.timestamp()))
@@ -610,10 +610,10 @@ def _drop_marks(body: Path) -> None:
 def _check_key_file(path: Path, now: datetime) -> None:
     """鍵ごとの目印が古いか無ければ `quick_check` を打つ。通らなければ broken/ へ移して `StoreBroken`（A4）。"""
     mark = path.with_suffix(CHECKED_SUFFIX)
-    if _fresh(mark, now):
+    if is_fresh(mark, now):
         return
     if check_file(path):
-        _touch(mark, now)
+        touch_mark(mark, now)
         return
     moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}{DB_SUFFIX}", now)
     raise StoreBroken(f"耐久の記録のファイルが壊れていたので退避した: {moved}", (moved,))
@@ -686,11 +686,11 @@ def _sweep_guard(root: Path, now: datetime) -> Iterator[bool]:
     """`maint_lock` を待たずに取り、目印 `dbos/.swept` を読み直して古ければ真を渡し、抜けるときに目印を更新する。"""
     with maint_lock(root, wait=False) as held:
         mark = _dbos_dir(root) / SWEPT_MARK
-        if held is None or _fresh(mark, now):
+        if held is None or is_fresh(mark, now):
             yield False
             return
         yield True
-        _touch(mark, now)
+        touch_mark(mark, now)
 
 
 def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, SweepResult], None], message: str) -> SweepResult:

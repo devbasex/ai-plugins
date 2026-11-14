@@ -134,22 +134,6 @@ def default_url(root: Path) -> str:
     return given if given else f"{durable.SQLITE_PREFIX}{root / DB_NAME}"
 
 
-def _sa_url(url: str) -> str:
-    """SQLAlchemy が psycopg 3 で開く形の URL にする。"""
-    for scheme in ("postgresql://", "postgres://"):
-        if url.startswith(scheme):
-            return "postgresql+psycopg://" + url[len(scheme) :]
-    return url
-
-
-def _open_lock(path: Path) -> IO[str]:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return open(path, "a")  # noqa: SIM115 - ロックを持つ間は開いたまま置く
-    except OSError as exc:
-        raise durable.StoreConfigBroken(f"ロックのファイルを作れない: {path}: {exc}", (path,)) from exc
-
-
 def _flock(handle: IO[str], exclusive: bool, path: Path) -> None:
     if not exclusive:
         fcntl.flock(handle, fcntl.LOCK_SH)
@@ -167,25 +151,12 @@ def db_lock(path: Path, exclusive: bool) -> Iterator[Path]:
     実ファイルが置き場の中でも外でも取る。どのチェックアウトから・どの URL の書き方で開いても同じパスに解ける（I11）。
     """
     lock = Path(f"{path}{durable.LOCK_SUFFIX}")
-    handle = _open_lock(lock)
+    handle = durable.open_lock_file(lock)
     try:
         _flock(handle, exclusive, lock)
         yield lock
     finally:
         handle.close()
-
-
-def _fresh(mark: Path, now: datetime) -> bool:
-    try:
-        return now.timestamp() - mark.stat().st_mtime < durable.CHECK_INTERVAL.total_seconds()
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 目印が無ければ古いとして扱う
-        return False
-
-
-def _touch(mark: Path, now: datetime) -> None:
-    mark.parent.mkdir(parents=True, exist_ok=True)
-    mark.touch()
-    os.utime(mark, (now.timestamp(), now.timestamp()))
 
 
 # --- 開く --------------------------------------------------------------------------------
@@ -295,7 +266,7 @@ def _check_and_backup(store: Store, now: datetime) -> None:
     mark = store.root / CHECKED_MARK
     assert store.path is not None
     with durable.maint_lock(store.root, wait=True):
-        if _fresh(mark, now):
+        if durable.is_fresh(mark, now):
             ensure_schema(store, now)
             return
         if not durable.check_file(store.path):
@@ -304,7 +275,7 @@ def _check_and_backup(store: Store, now: datetime) -> None:
             raise durable.StoreBroken(f"進行表の DB が quick_check を通らない: {store.path}{hint}", (store.path,))
         ensure_schema(store, now)
         _backup_or_warn(store, now, force=False)
-        _touch(mark, now)
+        durable.touch_mark(mark, now)
 
 
 def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
@@ -318,12 +289,12 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
     stack = ExitStack()
     try:
         if path is None:
-            store = Store(url, root, sa.create_engine(_sa_url(url), poolclass=sa.NullPool), None, stack=stack)
+            store = Store(url, root, sa.create_engine(durable.sa_url(url), poolclass=sa.NullPool), None, stack=stack)
             ensure_schema(store, now)
             return store
         stack.enter_context(db_lock(path, exclusive=False))
         store = Store(url, root, _sqlite_engine(path), path, stack=stack)
-        if _fresh(root / CHECKED_MARK, now):
+        if durable.is_fresh(root / CHECKED_MARK, now):
             ensure_schema(store, now)
         else:
             _check_and_backup(store, now)
@@ -367,7 +338,7 @@ def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) ->
     `BackupFailed` を投げ、古い控えは消さない。SQLite のときだけ呼ぶ。
     """
     latest = latest_backup(root)
-    if not force and latest is not None and _fresh(latest, now):
+    if not force and latest is not None and durable.is_fresh(latest, now):
         return None
     dest = root / BACKUP_DIR / f"{BACKUP_PREFIX}{now:%Y%m%dT%H%M%S%fZ}{durable.DB_SUFFIX}"
     try:
@@ -430,7 +401,7 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
         if left:
             raise durable.StoreBroken(f"退避の後に残ったファイルがある: {', '.join(left)}", (path,))
         os.replace(temp, path)
-        _touch(root / CHECKED_MARK, now)
+        durable.touch_mark(root / CHECKED_MARK, now)
     return retired
 
 
@@ -597,7 +568,7 @@ def _run_lock_path(path: Path, table_id: str) -> Path:
 
 @contextmanager
 def _file_run_lock(path: Path, table_id: str) -> Iterator[None]:
-    handle = _open_lock(_run_lock_path(path, table_id))
+    handle = durable.open_lock_file(_run_lock_path(path, table_id))
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
