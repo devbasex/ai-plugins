@@ -280,25 +280,36 @@ def _exclude_evidence(t: Target) -> None:
             f.write(f"{EVIDENCE}/\n")
 
 
+def _kind_values(spec: dict[str, Any], ports: dict[str, Any]) -> dict[str, str]:
+    """種類の宣言から、初期化の抑止（`skip_reset`）とエントリポイントの URL（`base_url_env`）の値を組み立てる。"""
+    skip = spec.get("skip_reset")
+    values = {str(k): str(v) for k, v in skip.items()} if isinstance(skip, dict) else {}
+    base_url = spec.get("base_url_env")
+    port = ports.get(spec["port_role"] if isinstance(spec.get("port_role"), str) else "http")
+    if isinstance(base_url, str) and port is not None:
+        values[base_url] = f"http://localhost:{port}"
+    return values
+
+
+def _prepare_evidence(t: Target, environment: str, out: Optional[Path]) -> str:
+    """証跡の置き場を決めて作り、info/exclude へ登録して実体のパスを返す。worktree の外を指せば `TestenvError`。"""
+    where = out if out is not None else t.path / EVIDENCE / f"{environment}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
+    real = os.path.realpath(where if where.is_absolute() else t.path / where)
+    if not t.contains(real):
+        raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")
+    Path(real).mkdir(parents=True, exist_ok=True)
+    _exclude_evidence(t)
+    return real
+
+
 def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) -> dict[str, str]:
     """テストのコマンドへ渡す値（初期化の抑止・エントリポイントの URL・証跡の置き場）。証跡が worktree の外を指せば `TestenvError`。"""
     spec = t.at("test_kinds", kind)
     spec = spec if isinstance(spec, dict) else {}
-    skip = spec.get("skip_reset")
-    values = {str(k): str(v) for k, v in skip.items()} if isinstance(skip, dict) else {}
-    base_url = spec.get("base_url_env")
-    port = row["ports"].get(spec["port_role"] if isinstance(spec.get("port_role"), str) else "http")
-    if isinstance(base_url, str) and port is not None:
-        values[base_url] = f"http://localhost:{port}"
+    values = _kind_values(spec, row["ports"])
     out_env = spec.get("out_env")
     if isinstance(out_env, str):
-        where = out if out is not None else t.path / EVIDENCE / f"{row['environment']}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
-        real = os.path.realpath(where if where.is_absolute() else t.path / where)
-        if not t.contains(real):
-            raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")
-        Path(real).mkdir(parents=True, exist_ok=True)
-        _exclude_evidence(t)
-        values[out_env] = real
+        values[out_env] = _prepare_evidence(t, row["environment"], out)
     return values
 
 
