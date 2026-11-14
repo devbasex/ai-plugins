@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -317,3 +318,21 @@ def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
         "cause": {"kind": "invalid", "detail": summary},
     }
     assert not log.exists()
+
+
+def test_interrupted_run_writes_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+    # 中断で終わる run でも、退避した旧い置き場の元と先を標準エラーへ残す
+    retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+
+    @contextlib.contextmanager
+    def interrupted_gate(*_args, **_kwargs):
+        raise slots.Interrupted(retired)
+        yield  # pragma: no cover
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(slots, "gate", interrupted_gate)
+
+    code = command._run("true", None)
+
+    assert code == 128 + signal.SIGINT
+    assert capsys.readouterr().err.splitlines()[-1] == command.RETIRED_LINE.format(**retired[0])

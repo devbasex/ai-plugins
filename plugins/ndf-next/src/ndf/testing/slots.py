@@ -86,6 +86,18 @@ class Stopped(Exception):
         return f"使えるメモリが下限を割ったのでテストを止めた（{memory}、待った秒: {self.waited_seconds:.0f}）"
 
 
+class Interrupted(KeyboardInterrupt):
+    """枠の置き場を用意したときに旧い状態の置き場を退避した後で、シグナルで中断された（待ちの間・子の実行中）。
+
+    `KeyboardInterrupt` として扱える。退避した置き場（結果 JSON の `items` の形）を `retired` に持ち、中断で
+    終わるときも呼び出し元が復旧先を引ける。
+    """
+
+    def __init__(self, retired: Sequence[Mapping[str, str]]):
+        self.retired = [dict(item) for item in retired]
+        super().__init__()
+
+
 # プロセスの中の待ちの帳簿（monotonic の始まりと終わり）。待ちをテストの時間に数えないために引く（I4）
 _ledger: list[tuple[float, float]] = []
 _ledger_lock = threading.Lock()
@@ -390,6 +402,7 @@ def gate(
 
     `kind` を渡すと判定を飛ばしてその種類で枠を取る（`None` なら宣言から判定する）。
     `options.interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
+    旧い状態の置き場を退避した後の中断（待ちの間・子の実行中）は、退避を持つ `Interrupted` にして送る。
     誤った設定は `limits.SlotConfigError`、待ちの諦めとメモリの停止は `Stopped` を送る。
     """
     options = GateOptions() if options is None else options
@@ -404,11 +417,16 @@ def gate(
         return
     limits = limits or limits_mod.load_limits(cwd)
     prepared = _prepare_directory(options, env)
-    if isinstance(prepared, Held):
-        yield prepared
-        return
-    directory, retired = prepared
-    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind, retired)
+    retired = prepared.retired if isinstance(prepared, Held) else prepared[1]
+    try:
+        if isinstance(prepared, Held):
+            yield prepared
+            return
+        yield from _held(SlotContext(prepared[0], cwd, limits, options.poll, options.read_memory, options.interrupted), kind, retired)
+    except KeyboardInterrupt as exc:
+        if retired:
+            raise Interrupted(retired) from exc
+        raise
 
 
 def _skip_gate(env: Mapping[str, str]) -> bool:

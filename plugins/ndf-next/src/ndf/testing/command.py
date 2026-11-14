@@ -4,7 +4,7 @@
   待ちを諦めた・メモリで止めた・引数か設定が誤っているときは、子を走らせずに（止めて）`stopped` の結果 JSON を
   標準出力へ 1 行出し、止まった理由の表の種類の終了コードで終える。枠の置き場を用意するときに旧い状態の置き場を
   退避したら、元と先を `stopped` の結果の `items` へ載せる。子を走らせたときは標準出力を子のものに保つため（I7）、
-  元と先を 1 件 1 行で標準エラーの最後へ書く（`RETIRED_LINE` の形）
+  元と先を 1 件 1 行で標準エラーの最後へ書く（`RETIRED_LINE` の形）。シグナルで中断して終わるときも同じ形で書く
 - `report [--since <7d のような期間>]`: 枠の記録を読み、結果 JSON を標準出力へ 1 行出す
 
 結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。枠の記録の結果の語（`gave_up`・`memory_stopped`）は
@@ -124,13 +124,19 @@ def _run(command: str, wait_limit: int | None) -> int:
                 code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
             return _stopped_from(exc, _again(command, wait_limit))
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as exc:
+            # 中断で終わるときも、退避した旧い状態の置き場の元と先を標準エラーへ残す（復旧先を引ける）
+            _print_retired(exc.retired if isinstance(exc, slots.Interrupted) else [])
             return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     if held.note:
         print(held.note, file=sys.stderr)
-    for item in held.retired:
-        print(RETIRED_LINE.format(**item), file=sys.stderr)
+    _print_retired(held.retired)
     return code
+
+
+def _print_retired(retired: list[dict[str, str]]) -> None:
+    for item in retired:
+        print(RETIRED_LINE.format(**item), file=sys.stderr)
 
 
 def _run_child(command: str, held: slots.Held, interrupted: list[int], started: list[subprocess.Popen]) -> int:

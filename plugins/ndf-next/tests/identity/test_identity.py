@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -179,6 +180,23 @@ def test_prepare_refuses_to_move_an_outer_place_holding_places_marked_not_to_ret
     assert (ident.state_dir / "state" / "ledger.jsonl").read_text() == "old"
     assert not (ident.state_dir / identity.FORMAT_FILE).exists()
     assert _retired_names(ident) == []
+
+
+def test_prepare_refuses_to_move_a_config_state_holding_the_new_state_dir(tmp_path, monkeypatch):
+    # XDG_STATE_HOME を config-state の下に置くと、config-state が新しい状態の置き場とロックを含む。外側ごと動かさず止める
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "config" / "p" / "state"))
+    ident = identity.load()
+    ident.state_dir.mkdir(parents=True)
+    (ident.state_dir / identity.FORMAT_FILE).write_text('{"format": 1}\n')
+    (ident.state_dir / "ledger.jsonl").write_text("new")
+
+    with pytest.raises(identity.IdentityError, match=re.escape(str(ident.state_dir))):
+        identity.prepare_state_dir(ident, now=NOW)
+
+    assert (ident.state_dir / "ledger.jsonl").read_text() == "new"
+    assert sorted(p.name for p in (tmp_path / "config" / "p").iterdir()) == ["state"]
 
 
 def test_old_state_places_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):

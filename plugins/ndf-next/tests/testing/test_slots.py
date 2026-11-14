@@ -286,3 +286,17 @@ def test_preexec_raises_the_oom_score_before_the_child_forks():
 
 def test_preexec_is_none_when_running_without_a_slot():
     assert slots.Held().preexec is None
+
+
+@pytest.mark.parametrize("in_child", [False, True])
+def test_interrupt_after_retiring_carries_the_retired_places(tmp_path, monkeypatch, in_child):
+    # 旧い状態の置き場を退避した後の中断（待ちの間・子の実行中）は、退避の元と先を持つ Interrupted で抜ける
+    retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+    monkeypatch.setattr(slots, "slots_place", lambda env: (tmp_path / "slots", retired))
+    options = slots.GateOptions(environ={}, poll=POLL, read_memory=lambda: PLENTY, interrupted=lambda: not in_child)
+
+    with pytest.raises(slots.Interrupted) as caught:
+        with slots.gate("pytest .", tmp_path, kind="whole", limits=_limits(1), options=options):
+            raise KeyboardInterrupt
+
+    assert caught.value.retired == retired

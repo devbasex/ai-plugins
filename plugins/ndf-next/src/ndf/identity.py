@@ -22,8 +22,9 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
   途中で落ちても中身の半端な `format.json` は残らない
 - 退避する置き場が別の退避する置き場の中にあれば（`XDG_STATE_HOME` と `CLAUDE_CONFIG_DIR` が同じなど）、外側の
   置き場だけを名前を変え、中の置き場は外側と一緒に動く
-- 退避する置き場が退避しない置き場（`Handling.KEEP` の行。アカウントの設定・動いているプロセスの排他など）を中に
-  持てば、外側ごと動かすとそれらまで動くため、何も変えずに `IdentityError` を投げて人へ戻す
+- 退避する置き場が退避しない置き場（`Handling.KEEP` の行。アカウントの設定・動いているプロセスの排他など）か、
+  新しい状態の置き場（`config-state` の下に `XDG_STATE_HOME` を置いたなど）を中に持てば、外側ごと動かすとそれらまで
+  動くため、何も変えずに `IdentityError` を投げて人へ戻す
 - 戻り値の `StateReady` が、退避した置き場の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）
 """
 
@@ -274,12 +275,21 @@ def _refuse_unsafe_retire(ident: PluginIdentity, old: list[Path]) -> None:
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の置き場を退避しない: "
             + ", ".join(str(p) for p in old)
         )
-    holding = _holding_kept(ident, old)
+    holding = _holding_state_dir(ident, old) + _holding_kept(ident, old)
     if holding:
         raise IdentityError(
             "退避する旧い状態の置き場が、退避しない置き場を中に持つため退避しない（外側ごと動かすとそれらも動く）: "
             + ", ".join(f"{outer} が {kept} を含む" for outer, kept in holding)
         )
+
+
+def _holding_state_dir(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
+    """新しい状態の置き場（とその隣のロック）を中に持つ、退避する置き場との組。
+
+    置き場が無くても、パスの上で中にあれば組にする（ロックを置いた時点で外側は空でなくなり、毎回旧いと判定される）。
+    """
+    state_dir = ident.state_dir.parent.resolve() / ident.state_dir.name
+    return [(outer, ident.state_dir) for outer in old if outer.resolve() in state_dir.parents]
 
 
 def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
