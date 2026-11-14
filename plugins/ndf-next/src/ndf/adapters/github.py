@@ -257,6 +257,17 @@ def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[
     return None
 
 
+def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
+    """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
+    want = method if method is not None else "（宣言なし）"
+    return MergeOutcome(
+        False,
+        "refused",
+        f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）",
+        pull.head_sha,
+    )
+
+
 def _response_body(resp: Any) -> Any:
     if not resp.content:
         return None
@@ -528,13 +539,7 @@ class GitHub:
         allowed = self.allowed_merge_methods(pull.base_ref)
         chosen = pick_merge_method(method, allowed)
         if chosen is None:
-            want = method if method is not None else "（宣言なし）"
-            return MergeOutcome(
-                False,
-                "refused",
-                f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）",
-                pull.head_sha,
-            )
+            return _method_refusal(pull, number, method, allowed)
         try:
             self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
         except GitHubError as exc:
