@@ -70,6 +70,11 @@ def test_order_not_after_needs_fails(plugin):
     assert [(p, d) for p, _, d in found] == [("children.json", "C の順番 2 が先に要る子（B）の順番より大きくない（IG2）")]
 
 
+def test_closed_child_order_is_not_checked(plugin):
+    """閉じた子は流し終えたので、後の子が足した依存を先に要るものへ書いても順番を問わない。"""
+    assert findings(plugin, {**BASE, "C": row(["ndf.c"], ["B"], 2, closed=True)}) == []
+
+
 def test_parallel_writers_of_one_table_fail(plugin):
     tables = {"contracts/limits.json": ["A", "C"]}
     assert findings(plugin, BASE, tables) == []
