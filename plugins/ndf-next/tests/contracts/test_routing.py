@@ -27,7 +27,9 @@ def test_pick_on_cause_retry_without_policy_goes_to_on_fail_or_conductor():
 def test_pick_default_retry_within_attempts_then_moves_on():
     attempts = limits.policy("cause.infra-wait").attempts
     assert routing.pick("infra_wait", retry=routing.RetryState(used=attempts - 1)).to == "retry"
-    assert routing.pick("infra_wait", on_fail="fix", retry=routing.RetryState(used=attempts)) == routing.Route("step", "fix", 0.0, "infra_wait")
+    assert routing.pick("infra_wait", on_fail="fix", retry=routing.RetryState(used=attempts)) == routing.Route(
+        "step", "fix", 0.0, "infra_wait"
+    )
     assert routing.pick("infra_wait", retry=routing.RetryState(used=attempts)).to == "conductor"
 
 
