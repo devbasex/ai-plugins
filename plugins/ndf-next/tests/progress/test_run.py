@@ -637,6 +637,25 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
 
 
+def test_append_runs_after_in_the_same_transaction_and_a_failure_rolls_the_append_back(repo, st, capsys):
+    tid = _new(capsys)
+    before = run.read(st, tid).events[-1].seq
+    seen: list[int] = []
+
+    def after_sees(conn):
+        seen.append(store.read_events(conn, tid)[-1].seq)
+
+    seqs = run.append(st, tid, _started, after=after_sees)
+    assert seen == seqs and run.read(st, tid).events[-1].seq == seqs[0]
+
+    def after_fails(_conn):
+        raise model.Refused("後で断る")
+
+    with pytest.raises(model.Refused, match="後で断る"):
+        run.append(st, tid, _started, after=after_fails)
+    assert run.read(st, tid).events[-1].seq == seqs[0] != before
+
+
 def test_append_lets_refusals_through_without_retrying(repo, st, capsys):
     tid = _new(capsys)
     calls = []
