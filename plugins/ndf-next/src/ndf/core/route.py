@@ -157,10 +157,9 @@ def used_names(value: Any) -> set[str]:
     """値の中の `{{名前}}` の名前。"""
     if isinstance(value, str):
         return set(_PARAM.findall(value))
-    if isinstance(value, Mapping):
-        return set().union(*(used_names(v) for v in value.values())) if value else set()
-    if isinstance(value, list):
-        return set().union(*(used_names(v) for v in value)) if value else set()
+    if isinstance(value, (Mapping, list)):
+        children = value.values() if isinstance(value, Mapping) else value
+        return set().union(*(used_names(v) for v in children))
     return set()
 
 
