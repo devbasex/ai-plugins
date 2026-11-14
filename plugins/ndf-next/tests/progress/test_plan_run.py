@@ -16,25 +16,13 @@ from ndf.progress import lane, plan, store
 from ndf.progress.lane import launch
 from ndf.progress.plan import run, run_decide
 from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, RunState, Sleep
+from plan_decls import REPO
+from plan_decls import decl as _decl
+from plan_decls import doc as _doc
 
-REPO = "https://example.invalid/o/r"
 POLICY = Policy(poll=30.0, attempts=2)
 # 耐久ワークフローを流すテストの読み直しの間隔（起こした後の待ちを短くする）
 FAST = Policy(poll=0.05, attempts=2)
-
-
-def _decl(name, rows, touches=("src/a",), after=()):
-    return {
-        "name": name,
-        "plans": 1,
-        "touches": list(touches),
-        "after": list(after),
-        "rows": [{"kind": "sprint", "issues": i} for i in rows],
-    }
-
-
-def _doc(*lanes):
-    return {"version": 1, "name": "p6", "rules": [], "lanes": list(lanes)}
 
 
 def _snap(state="running", complete=False, wakeable=(), running=()):

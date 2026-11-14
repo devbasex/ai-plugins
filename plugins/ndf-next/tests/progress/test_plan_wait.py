@@ -7,13 +7,11 @@ from datetime import UTC, datetime, timedelta
 from ndf.progress import lane, plan, store
 from ndf.progress.plan import wait, wait_decide
 from ndf.progress.plan.wait_decide import Seen
-
-REPO = "https://example.invalid/o/r"
+from plan_decls import REPO, decl, doc
 
 
 def _doc():
-    lanes = [{"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "sprint", "issues": [1]}]}]
-    return {"version": 1, "name": "p6", "rules": [], "lanes": lanes}
+    return doc(decl("a", [[1]]))
 
 
 def _seen(notices=(), state="running", stalls=(), last=0):

@@ -15,22 +15,12 @@ from ndf.core import durable
 from ndf.progress import lane, model, plan, store
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
-
-REPO = "https://example.invalid/o/r"
-
-
-def _decl(name, rows, touches=("src/a",), after=()):
-    return {
-        "name": name,
-        "plans": 1,
-        "touches": list(touches),
-        "after": list(after),
-        "rows": [{"kind": "sprint", "issues": i} for i in rows],
-    }
+from plan_decls import REPO, doc
+from plan_decls import decl as _decl
 
 
 def _doc(*lanes, **extra):
-    return {"version": 1, "name": "p6", "rules": ["develop へ出す"], "lanes": list(lanes), **extra}
+    return doc(*lanes, rules=["develop へ出す"], **extra)
 
 
 def _two(st):

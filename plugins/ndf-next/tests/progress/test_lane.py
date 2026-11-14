@@ -10,22 +10,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ndf.progress import lane, model, plan, store
-
-REPO = "https://example.invalid/o/r"
-
-
-def _decl(name, rows, touches=("src/a",), after=(), plans=1):
-    return {
-        "name": name,
-        "plans": plans,
-        "touches": list(touches),
-        "after": list(after),
-        "rows": [{"kind": "sprint", "issues": list(i)} for i in rows],
-    }
-
-
-def _doc(*lanes, **extra):
-    return {"version": 1, "name": "p6", "rules": [], "lanes": list(lanes), **extra}
+from plan_decls import REPO
+from plan_decls import decl as _decl
+from plan_decls import doc as _doc
 
 
 def _create(st, doc, start=True):
