@@ -9,10 +9,12 @@ import sys
 from pathlib import Path
 
 from ndf import identity
+from ndf.contracts import exit_codes
 from ndf.core import durable
 
 SRC = Path(__file__).resolve().parents[3] / "src"
 SECRET = "plan-s3cr3t-value-42"
+OK = exit_codes.code_of("ok")
 
 
 def git(cwd: Path, *args: str) -> None:

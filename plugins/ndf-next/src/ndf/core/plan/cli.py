@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, NoReturn, Optional
 
 from ndf import identity
-from ndf.adapters import run_log
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
@@ -35,8 +34,6 @@ TOOL = runner.TOOL
 # 待ちの上限の既定（秒）と、見回りの間隔の宣言
 WAIT_DEFAULT_SECONDS = 600.0
 WAIT_POLL = "durable.wait-from-poll"
-# 進行表と同じ DB を使うときの URL（無ければチェックアウトの置き場の SQLite）。値は秘密として伏せる
-ENV_DB = run_log.PROGRESS_DB_ENV
 
 
 def _root() -> Path:
@@ -44,7 +41,8 @@ def _root() -> Path:
 
 
 def _url() -> Optional[str]:
-    value = os.environ.get(ENV_DB)
+    """進行表と同じ DB を使うときの URL（`NDF_PROGRESS_DB`。無ければチェックアウトの置き場の SQLite）。値は秘密として伏せる。"""
+    value = os.environ.get("NDF_PROGRESS_DB")
     return value if value else None
 
 

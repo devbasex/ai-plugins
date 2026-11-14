@@ -60,7 +60,7 @@ def test_a_queue_started_in_a_removed_worktree_runs_the_next_stage(repo, tmp_pat
     first = H.write_plan(repo, "merge", [remove], touches=["a.py"])
     second = H.write_plan(repo, "close", [H.count_step("s", tmp_path / "close")], touches=["b.py"])
     code, out = H.ndf(wt, "queue", str(repo / first), "--then", str(repo / second))
-    assert (code, out["status"]) == (0, "ok"), out
+    assert (code, out["status"]) == (H.OK, "ok"), out
     assert not wt.exists()
     assert H.count(tmp_path / "close") == 1
 
@@ -78,5 +78,5 @@ def test_resume_skips_the_finished_plans(repo, tmp_path):
     args = out["next"]["argv"]
     assert "--resume" in args and "b=s" in args
     code, out = H.ndf(repo, *args[2:])
-    assert (code, out["status"]) == (0, "ok"), out
+    assert (code, out["status"]) == (H.OK, "ok"), out
     assert H.count(tmp_path / "a") == 1

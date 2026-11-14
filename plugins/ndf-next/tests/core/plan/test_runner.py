@@ -26,8 +26,8 @@ def test_each_plan_round_has_its_own_key_and_is_retired(repo, tmp_path):
     """実行の回ごとに 1 つの鍵で流し、終わった鍵のファイルは retired/ へ移る（B1・B7）。"""
     a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")])
     b = H.write_plan(repo, "b", [H.count_step("s", tmp_path / "b")])
-    assert H.ndf(repo, "next", a)[0] == 0
-    assert H.ndf(repo, "next", b)[0] == 0
+    assert H.ndf(repo, "next", a)[0] == H.OK
+    assert H.ndf(repo, "next", b)[0] == H.OK
     retired = sorted(p.name for p in (H.dbos_dir(repo) / durable.RETIRED_DIR).glob(f"*{durable.DB_SUFFIX}"))
     assert len(retired) == 2
     assert list(H.dbos_dir(repo).glob(f"*{durable.DB_SUFFIX}")) == []
@@ -49,7 +49,7 @@ def test_a_fixed_head_runs_a_new_round(repo, tmp_path):
     H.ndf(repo, "next", plan)
     H.git(repo, "commit", "-q", "--allow-empty", "-m", "fix")
     code, out = H.ndf(repo, "next", plan)
-    assert code == 0
+    assert code == H.OK
     assert out["metrics"]["round"] == 1
     assert H.count(tmp_path / "n") == 2
 
@@ -77,7 +77,7 @@ def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
     assert pending["metrics"]["pending"] == 1
 
     code, out = H.ndf(repo, "next", plan, "--answer", "approved")
-    assert (code, out["status"]) == (0, "ok")
+    assert (code, out["status"]) == (H.OK, "ok")
     assert (H.count(tmp_path / "before"), H.count(tmp_path / "skip"), H.count(tmp_path / "after")) == (1, 0, 1)
     assert H.ndf(repo, "pending")[1]["metrics"]["pending"] == 0
 
@@ -93,7 +93,7 @@ def test_secrets_stay_out_of_the_records(repo):
     """秘密の環境変数の値は耐久の記録と結果の控えに入らない（B8）。"""
     code_text = "import json, os; print(json.dumps({'status': 'ok', 'summary': os.environ['NDF_TEST_TOKEN']}))"
     plan = H.write_plan(repo, "x", [{"id": "s", "run": [sys.executable, "-c", code_text]}])
-    assert H.ndf(repo, "next", plan)[0] == 0
+    assert H.ndf(repo, "next", plan)[0] == H.OK
     stored = [p for p in (repo / ".git").rglob("*") if p.is_file()] + [p for p in (repo / "plans").rglob("*") if p.is_file()]
     assert stored
     assert not [p for p in stored if H.SECRET.encode() in p.read_bytes()]
@@ -143,7 +143,7 @@ def test_each_chosen_route_is_recorded_once(repo, tmp_path):
     plan = H.write_plan(repo, "r", [fail, ask])
     assert H.ndf(repo, "next", plan)[1]["status"] == "gate"
     code, out = H.ndf(repo, "next", plan, "--answer", "approved")
-    assert (code, out["status"]) == (0, "ok"), out
+    assert (code, out["status"]) == (H.OK, "ok"), out
     assert H.ndf(repo, "next", plan)[1] == out
     rows = _choices(repo)
     assert [chosen.errors(r) for r in rows] == [[], []]
@@ -162,12 +162,12 @@ def test_step_outputs_reach_the_plan_result(repo):
 
     plan = H.write_plan(repo, "o", [H.py_step("a", emit({"pr": 1, "mode": "standard"})), H.py_step("b", emit({"pr": 2}))])
     code, out = H.ndf(repo, "next", plan)
-    assert (code, out["outputs"]) == (0, {"pr": 2, "mode": "standard"})
+    assert (code, out["outputs"]) == (H.OK, {"pr": 2, "mode": "standard"})
 
 
 def test_outputs_out_of_the_contract_become_a_warning(repo):
     line = json.dumps({"tool": "t", "status": "ok", "summary": "s", "outputs": {"unknown_key": 1}})
     plan = H.write_plan(repo, "w", [H.py_step("a", f"print({line!r})")])
     code, out = H.ndf(repo, "next", plan)
-    assert code == 0 and "outputs" not in out
+    assert code == H.OK and "outputs" not in out
     assert out["warnings"] and result.errors(out) == []

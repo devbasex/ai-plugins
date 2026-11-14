@@ -2,7 +2,7 @@
 
 - 作業ディレクトリは打つたびに決める。マージで作業場所が消えた・登録が外れた後はリポジトリの根で打つ
 - 子のプロセスは自分のプロセスの組で起こし、pid とホスト名を状態の置き場の `steps/<ステップ>.pid.json` に書く。
-  打ち直しの前に、前の回の子が残っていれば止めてから打つ。別のホストの子が残っていれば打たずに止まる（B10）
+  打ち直しの前に、前の回の子が残っていれば `process_group` で止めてから打つ。別のホストの子が残っていれば打たずに止まる（B10）
 - 結果は標準出力の最後の JSON の行から読む。JSON を出さないコマンドは終了コードと `exit_cause` で種類を決める
 - 結果に載せる文は、秘密の環境変数の値とトークンの形を伏せてから返す（耐久の記録と結果 JSON へ秘密を入れない）
 - 結果 JSON の items の `{"kind": "pr", "number": <番号>}` を拾い、プランの結果とキューの `{queue_prs}` へ渡す
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import socket
 import subprocess
 import time
@@ -34,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf import process_group
 from ndf.adapters import git, run_log
 from ndf.contracts import exit_codes, limits
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
@@ -44,7 +44,6 @@ STEPS_DIR = "steps"
 PID_SUFFIX = ".pid.json"
 LOG_SUFFIX = ".log"
 RUN_STEP_LIMIT = "supervise.run-step"
-STOP_TREE = "procs.stop-tree"
 
 
 class StepRefused(Exception):
@@ -79,34 +78,6 @@ def _pid_path(state_dir: Path, step_id: str) -> Path:
     return state_dir / STEPS_DIR / f"{step_id}{PID_SUFFIX}"
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.killpg(pid, 0)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 組の成員が残っていない
-        return False
-    except PermissionError:  # noqa: NDF401 外部コマンド: 別の利用者の組は生きている
-        return True
-    return True
-
-
-def stop_group(pid: int) -> None:
-    """プロセスの組を止める。猶予の間に終わらなければ SIGKILL を送る。"""
-    grace = limits.seconds(STOP_TREE)
-    interval = limits.value(STOP_TREE, "interval")
-    try:
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 組が既に終わっている
-        return
-    deadline = time.monotonic() + grace
-    while time.monotonic() < deadline and _alive(pid):
-        time.sleep(interval)
-    if _alive(pid):
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:  # noqa: S110 外部コマンド: 組が猶予の間に終わった
-            pass
-
-
 def ensure_previous_stopped(state_dir: Path, step_id: str) -> Optional[int]:
     """前の回の子のプロセスが残っていれば止める。止めた pid を返す。別のホストの記録なら `StepRefused`。"""
     path = _pid_path(state_dir, step_id)
@@ -116,10 +87,10 @@ def ensure_previous_stopped(state_dir: Path, step_id: str) -> Optional[int]:
         return None
     if record["host"] != socket.gethostname():
         raise StepRefused(f"ステップ {step_id} の前の子（pid {record['pid']}）が別のホスト {record['host']} に残っている")
-    if not _alive(record["pid"]):
+    if not process_group.group_alive(record["pid"]):
         path.unlink(missing_ok=True)
         return None
-    stop_group(record["pid"])
+    process_group.stop_detached_group(record["pid"])
     path.unlink(missing_ok=True)
     return record["pid"]
 
@@ -235,7 +206,7 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
     try:
         stdout, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        stop_group(proc.pid)
+        process_group.stop_group(proc)
         proc.communicate()
         out = _stopped("interrupted", f"{timeout:.0f} 秒で打ち切った")
     else:
