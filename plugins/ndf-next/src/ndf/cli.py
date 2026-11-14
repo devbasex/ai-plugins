@@ -40,6 +40,7 @@ COMMANDS: dict[str, str] = {
     "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
+    "worktree": "ndf.domains.worktree.cli",
 }
 
 

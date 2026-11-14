@@ -1,0 +1,29 @@
+"""セッションを始めたときに、メインディレクトリの逸脱（追跡しているファイルの未コミットの変更）を伝える判断（純粋な関数）。
+
+worktree の中で始めたセッションと、宣言の無いリポジトリでは何も伝えない。逸脱はメインディレクトリの話である。
+変更が多いときは先頭の `MAX_LISTED` 件だけを並べ、残りは件数へ丸める（文脈を埋めない）。
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+# 並べる変更の上限
+MAX_LISTED = 20
+DIRTY = """メインディレクトリに追跡しているファイルの未コミットの変更が {count} 件あります。
+
+{paths}
+
+開発の変更であれば、worktree へ移してください（`ndf worktree create <ブランチ名>` で作った worktree へ移す）。"""
+FOLLOW_NOTE = "メインディレクトリのブランチは、変更がある間は稼働中の worktree へ追従しません。"
+
+
+def deviation(dirty: list[str], in_worktree: bool, declared: bool, follow_branch: bool = False) -> Optional[str]:
+    """伝える文。伝えることが無ければ `None`。"""
+    if in_worktree or not declared or not dirty:
+        return None
+    listed = [f"  {line}" for line in dirty[:MAX_LISTED]]
+    if len(dirty) > MAX_LISTED:
+        listed.append(f"  ... ほか {len(dirty) - MAX_LISTED} 件")
+    text = DIRTY.format(count=len(dirty), paths="\n".join(listed))
+    return f"{text}\n{FOLLOW_NOTE}" if follow_branch else text
