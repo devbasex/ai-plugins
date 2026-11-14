@@ -24,7 +24,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
-from ndf.progress.gate.asking import TOOL, Target, gate_result, question, write_material
+from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, question, write_material
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
@@ -133,7 +133,7 @@ def _cmd_head(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
 def head_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} head")
     ap.add_argument("table_id")
-    ap.add_argument("--gate", choices=sorted(model.table()["gates"]), default="release")
+    ap.add_argument("--gate", choices=sorted(model.table()["gates"]), default=RELEASE_GATE)
     return ap
 
 

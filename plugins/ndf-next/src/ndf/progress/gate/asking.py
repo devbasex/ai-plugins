@@ -19,6 +19,16 @@ from ndf.progress import lane, model, run
 # 結果 JSON の tool（副命令の表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
 
+
+def _gate(word: str) -> str:
+    """承認ゲートの区分の語（契約 `workflow/progress.json` の gates の行）。表に無ければ import の時点で `KeyError`。"""
+    model.gate_label(word)
+    return word
+
+
+# 承認ゲートの区分（設計承認ゲート・リリース承認ゲート）
+DESIGN_GATE = _gate("design")
+RELEASE_GATE = _gate("release")
 # 問いの id の長さ（sha256 の頭）
 ID_LENGTH = 16
 # 承認しなかった答え（差し戻しの記録に数える）
@@ -91,7 +101,7 @@ def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Ta
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None:
         raise model.Refused("答えを待つ工程が無い")
     ctx = v.context()
-    key = "design_pr" if m.step.gate == "design" else "pr"
+    key = "design_pr" if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
     qid = question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
     return Question(qid, v.table_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
@@ -111,7 +121,7 @@ def _asks(q: Question, answer: str) -> tuple[str, ...]:
     asks = ["reason", "by", "key"]
     if answer == run.REVISE:
         asks.insert(0, "notes")
-    if answer == run.APPROVED and q.gate == "design":
+    if answer == run.APPROVED and q.gate == DESIGN_GATE:
         asks.append("drop")
     return tuple(asks)
 
@@ -182,7 +192,7 @@ def material(v: run.View, q: Question) -> str:
         lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
     if q.target.head:
         lines.append(f"- 見る head: {q.target.head}")
-    if q.gate == "release" and isinstance(ctx.get("version"), str):
+    if q.gate == RELEASE_GATE and isinstance(ctx.get("version"), str):
         lines.append(f"- 出す版: {ctx['version']}")
     lines += ["", "## 未確認の点", "", *([f"- {u}" for u in unconfirmed(v, q.stage)] or ["- （無し）"])]
     lines += ["", "## 答え", "", *[f"- {c}" for c in q.choices]]

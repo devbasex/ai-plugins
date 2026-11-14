@@ -19,7 +19,9 @@ from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
 from ndf.progress import command, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
+    DESIGN_GATE,
     REJECTING,
+    RELEASE_GATE,
     TOOL,
     Answer,
     Question,
@@ -88,7 +90,7 @@ def _refusal(v: run.View, a: Answer, observe: Observe) -> Question:
         raise model.Refused(f"問い {a.gate_id} は今の問い {q.id}（工程 {q.stage}）と違う")
     if a.value not in q.choices:
         raise model.Refused(f"工程 {q.stage} の答えは {', '.join(q.choices)} のどれか（渡された値 {a.value}）")
-    if a.drop and not (a.value == run.APPROVED and q.gate == "design"):
+    if a.drop and not (a.value == run.APPROVED and q.gate == DESIGN_GATE):
         raise model.Refused("課題を外せるのは設計承認ゲートの承認だけ")
     changed = observe(q).differs(a.seen)
     if changed:
@@ -190,7 +192,7 @@ def git_docs_only(cwd: Path) -> DocsOnly:
 
 def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly) -> bool:
     """リリース承認ゲートで、違いが PR の head だけで、加わった範囲が文書だけか（出し直さない。#3020）。"""
-    if q.gate != "release" or (now.material is not None and now.material != seen.material):
+    if q.gate != RELEASE_GATE or (now.material is not None and now.material != seen.material):
         return False
     return seen.head is not None and now.head is not None and docs_only(seen.head, now.head)
 
@@ -239,7 +241,7 @@ def _still(v: run.View, answered: model.Event) -> bool:
 
 def _reject_release(conn: Any, q: Question, a: Answer) -> Optional[str]:
     """リリース承認ゲートの差し戻し（承認しない答え）で、計画の進行表に開いている依頼を差し戻しの記録で閉じる。"""
-    if q.gate != "release" or a.value not in REJECTING:
+    if q.gate != RELEASE_GATE or a.value not in REJECTING:
         return None
     found = lane.sprint_row(conn, q.table_id)
     if found is None:

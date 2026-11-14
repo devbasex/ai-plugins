@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
-from ndf.progress.gate.asking import RELEASE_KIND, Question, Target, material_path, plan_request, request_id, waiting
+from ndf.progress.gate.asking import RELEASE_GATE, RELEASE_KIND, Question, Target, material_path, plan_request, request_id, waiting
 from ndf.progress.plan import external
 
 # 外のオーガナイザーの答え → 承認ゲートの答え
@@ -47,7 +47,7 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
     レーンなら依頼の事象（`plan.open_request`）。どちらでもなければ出さない（人が `ndf answer` で答える）。
     依頼を出したときに見た対象は承認資料の隣に残し、答えを書くときの見た対象にする。
     """
-    if q.gate != "release":
+    if q.gate != RELEASE_GATE:
         return None
     seen = _seen_path(st.root, q)
     if not seen.exists():
@@ -105,7 +105,7 @@ def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: 
     見た対象は依頼を出したときの対象で、その後に PR の head が変わっていれば答えは断られる（今の対象との照合は `answer`）。
     """
     q = waiting(run.read(st, table_id))
-    if q is None or q.gate != "release":
+    if q is None or q.gate != RELEASE_GATE:
         return None
     reply = _organizer_reply(st, q, env)
     if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
