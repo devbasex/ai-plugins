@@ -1,6 +1,6 @@
-"""外の呼び手の入口の表（entrypoints）と見本（entrypoint-cases）を、呼び手の側から確かめる（D2+。#3390・#3341）。
+"""外の呼び手のエントリポイントの表（entrypoints）と見本（entrypoint-cases）を、呼び手の側から確かめる（D2+。#3390・#3341）。
 
-`accepts` はこのテストの中の最小の写しで、入口を持つ子（表の owner_child）が同じ規則で入口を読む。
+`accepts` はこのテストの中の最小の写しで、エントリポイントを持つ子（表の owner_child）が同じ規則でエントリポイントを読む。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _path_pattern(path: str) -> str:
 
 
 def accepts(entrypoint: str, call: str, env: list[str]) -> bool:
-    """入口が、呼び手の渡す値 `call` と環境変数 `env` を受けるか。"""
+    """エントリポイントが、呼び手の渡す値 `call` と環境変数 `env` を受けるか。"""
     ep = facts.row(EP, entrypoint)
     if not set(env) <= set(ep["env"]):
         return False

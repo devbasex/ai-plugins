@@ -1,14 +1,14 @@
 {
-  "summary": "外の呼び手（サービス Factory のランナー）が NDF を起動し、NDF とやり取りする入口（Factory の契約）。入口ごとに、呼び手が渡す引数と環境変数・やり取りの置き場と形・新しい側で入口を持つ子・呼び手と合わせる順番を持つ。引数は正規表現（全体が一致）で、Skill の名前の前置き（プラグイン名と :）は identity が決め、表は持たない。見本は entrypoint-cases にある",
+  "summary": "外の呼び手（サービス Factory のランナー）が NDF を起動し、NDF とやり取りするエントリポイント（Factory の契約）。エントリポイントごとに、呼び手が渡す引数と環境変数・やり取りの置き場と形・新しい側でエントリポイントを持つ子・呼び手と合わせる順番を持つ。引数は正規表現（全体が一致）で、Skill の名前の前置き（プラグイン名と :）は identity が決め、表は持たない。見本は entrypoint-cases にある",
   "owner": "D2（contracts/domains）",
   "columns": {
-    "kind": {"type": "string", "summary": "入口の種類。skill は Skill の起動、block は応答の末尾の ndf-next ブロック（中身は Skill の起動）、report は応答の末尾の区間の報告、hook は hook の登録の行、command は副命令の起動、file は置き場のファイルでのやり取り"},
-    "target": {"type": "string", "summary": "入口の名前。skill と block は Skill の名前（前置きを除く）、report は結果の行の項目名、hook は hook の事象、command は副命令の名前、file は置き場（domains/places の id）"},
+    "kind": {"type": "string", "summary": "エントリポイントの種類。skill は Skill の起動、block は応答の末尾の ndf-next ブロック（中身は Skill の起動）、report は応答の末尾の区間の報告、hook は hook の登録の行、command は副命令の起動、file は置き場のファイルでのやり取り"},
+    "target": {"type": "string", "summary": "エントリポイントの名前。skill と block は Skill の名前（前置きを除く）、report は結果の行の項目名、hook は hook の事象、command は副命令の名前、file は置き場（domains/places の id）"},
     "args": {"type": "array", "summary": "呼び手が渡してよい引数の形（正規表現。どれか 1 つに全体が一致する）。report は結果の行の値", "optional": true},
-    "env": {"type": "array", "summary": "呼び手が入れてよい環境変数（domains/env の id）。入口はこの表に無い名前に頼らない"},
-    "files": {"type": "array", "summary": "入口がやり取りするファイル（domains/ndf-files の id）", "optional": true},
-    "owner_child": {"type": "string", "summary": "新しい側でこの入口を持つ子（作り直しの実装計画の記号）"},
-    "order": {"type": "string", "summary": "呼び手と合わせる順番。kept は入れ替えで形を変えず呼び手は何もしない、caller-first は入れ替え（S2）の前に呼び手の側を新しい入口へ直す"},
+    "env": {"type": "array", "summary": "呼び手が入れてよい環境変数（domains/env の id）。エントリポイントはこの表に無い名前に頼らない"},
+    "files": {"type": "array", "summary": "エントリポイントがやり取りするファイル（domains/ndf-files の id）", "optional": true},
+    "owner_child": {"type": "string", "summary": "新しい側でこのエントリポイントを持つ子（作り直しの実装計画の記号）"},
+    "order": {"type": "string", "summary": "呼び手と合わせる順番。kept は入れ替えで形を変えず呼び手は何もしない、caller-first は入れ替え（S2）の前に呼び手の側を新しいエントリポイントへ直す"},
     "source": {"type": "string", "summary": "今の NDF での出所（契約のファイル・Issue）"}
   },
   "rows": [

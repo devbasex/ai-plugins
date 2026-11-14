@@ -9,7 +9,7 @@
     "writer": {"type": "string", "summary": "書き手（人か、書く子 Issue の記号）"},
     "ends": {"type": "string", "summary": "消す時点。kept は残す（人か、置き場を渡した外の呼び手が消す）、replaced は書くたびに置き換える、cleanup は後片付けの工程が消す、run は書いた実行が終わるときに消す、archived は後片付けの工程が issues/old へ移す"},
     "keys": {"type": "array", "summary": "宣言の最上位のキー（version と $schema を除く）。宣言の読み手はこの表に無いキーを読まない", "optional": true},
-    "main_keys": {"type": "array", "summary": "Pull Request の変更で動かせないよう、メインディレクトリ（既定ブランチの作業ツリー）の宣言から読むキー（認可・本番チャネル・ブランチの運用）。作業ツリーの宣言の同じキーは読まない", "optional": true},
+    "main_keys": {"type": "array", "summary": "Pull Request の変更で動かせないよう、メインディレクトリ（既定ブランチのworktree）の宣言から読むキー（認可・本番チャネル・ブランチの運用）。worktreeの宣言の同じキーは読まない", "optional": true},
     "reader": {"type": "string", "summary": "このファイルを読む外の呼び手。service はサービス（Factory）のランナー", "optional": true},
     "fields": {"type": "array", "summary": "外の呼び手が頼る項目。書き手はこの項目の名前と意味を変えない。ほかの項目は足してよい", "optional": true}
   },
