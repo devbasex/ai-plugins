@@ -158,7 +158,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     doc = {**model.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
     drafts = _new_drafts(snap, enabled, _requirements(snap, a.requirements))
     with store.transaction(st) as conn:
-        tid = store.create_table(conn, ("sprint", _repo(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_table(conn, (model.SPRINT, _repo(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, events = _current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
@@ -170,7 +170,7 @@ def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
     with store.transaction(st) as conn:
         rev, snap, events = _current(conn, a.table_id)
     rows = _rows(snap, events, rev)
-    whole = model.table_state("sprint", events)
+    whole = model.table_state(model.SPRINT, events)
     metrics = {"table_id": a.table_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
     return result.result(TOOL, result.OK, f"進行表 {a.table_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
 
