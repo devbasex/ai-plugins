@@ -562,16 +562,23 @@ def _check_key_file(path: Path, now: datetime) -> None:
     raise StoreBroken(f"耐久の記録のファイルが壊れていたので退避した: {moved}", (moved,))
 
 
+@contextmanager
+def _client(database_url: str) -> Iterator[DBOSClient]:
+    """DBOS を起こさずに記録を扱うクライアントを作り、抜けるときに破棄する。"""
+    client = DBOSClient(system_database_url=database_url)
+    try:
+        yield client
+    finally:
+        client.destroy()
+
+
 def _records(database_url: str, names: list[str] | None, statuses: list[str] | None = None) -> list[RunRecord]:
     """DBOS を起こさずに、`names`（None ならすべての鍵）の耐久ワークフローの記録を読む。
 
     DBOS の絞り込みは持ち主の無い（`application_name` が NULL の）行も返すため、`names` を渡したときは除く。
     """
-    client = DBOSClient(system_database_url=database_url)
-    try:
+    with _client(database_url) as client:
         found = client.list_workflows(application_name=names, status=statuses, load_input=False, load_output=False)
-    finally:
-        client.destroy()
     return [
         RunRecord(
             run_name=w.application_name,
@@ -792,11 +799,8 @@ def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: d
             return
         ids = [r.workflow_id for r in records]
         if ids:
-            client = DBOSClient(system_database_url=database_url)
-            try:
+            with _client(database_url) as client:
                 client.delete_workflows(ids, delete_children=False)
-            finally:
-                client.destroy()
         _forget_run(database_url, name)
         out.deleted.extend(ids)
 
@@ -887,8 +891,5 @@ def cancel_before_launch(database_url: str, workflow_id: str) -> None:
 
     `launch` の前に呼ぶ。起こした後に取り消しても、回復で流れ始めた耐久ステップは止まらない。
     """
-    client = DBOSClient(system_database_url=database_url)
-    try:
+    with _client(database_url) as client:
         client.cancel_workflow(workflow_id, cancel_children=True)
-    finally:
-        client.destroy()
