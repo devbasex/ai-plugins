@@ -329,6 +329,8 @@ PROJECT_KEYS = {
     "rebuild": ("workflow", "launch", "rebuild"),
     "refactor": ("workflow", "launch", "refactor"),
 }
+# 宣言の `workflow`（launch・stages）の形。旧いプラグインの宣言のスキーマへ足さず、読む側のここに置く（#3473）
+WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
 # 課題の本文を書き出す置き場のファイルと、題の写し（プランの実行の置き場の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
@@ -366,13 +368,19 @@ def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Valu
 
 
 def _project(place: Path) -> dict[str, Any]:
-    """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。読めなければ `route.RouteError`。"""
+    """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。
+
+    読めないか、`workflow` が形（`WORKFLOW_SCHEMA`）に合わなければ `route.RouteError`。
+    """
     try:
-        return declaration(place, PROJECT_FILE)
+        project = declaration(place, PROJECT_FILE)
+        if "workflow" in project:
+            contracts.require_schema(project["workflow"], WORKFLOW_SCHEMA, contracts.ContractError, f"{PROJECT_FILE} の workflow")
     except GitError:
         return {}
     except contracts.ContractError as exc:
         raise route.RouteError(str(exc)) from None
+    return project
 
 
 def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:

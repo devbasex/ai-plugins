@@ -291,23 +291,6 @@ class Docs(schema.Shape):
     tested: list[TestedDocs] = []
 
 
-LaunchCommand = Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
-
-
-class WorkflowLaunch(schema.Shape):
-    """工程から呼ぶプランの雛形の起動（語の並び）。雛形の差し込み `review`・`rebuild`・`refactor` の値になる（#3092・#3473）。"""
-
-    review: Optional[LaunchCommand] = None
-    rebuild: Optional[LaunchCommand] = None
-    refactor: Optional[LaunchCommand] = None
-
-
-class WorkflowSettings(schema.Shape):
-    """開発の工程の設定。"""
-
-    launch: Optional[WorkflowLaunch] = None
-
-
 class ProjectDecl(schema.Shape):
     """プロジェクトの宣言（`.ndf/project.json`）。"""
 
@@ -325,7 +308,6 @@ class ProjectDecl(schema.Shape):
     instructions: Optional[Union[Instructions, Unknown]] = None
     materials: Optional[Union[Materials, Unknown]] = None
     docs: Optional[Union[Docs, Unknown]] = None
-    workflow: Optional[WorkflowSettings] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}
