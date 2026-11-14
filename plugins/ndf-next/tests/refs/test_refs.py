@@ -46,6 +46,28 @@ def test_declared_refuses_a_broken_declaration(raw: dict) -> None:
         refs.declared(raw)
 
 
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ({"kind": "nope"}, "参照 x の kind は version・record_pr・queue_prs・plan_result・counts のどれか: {'kind': 'nope'}"),
+        ("version", "参照 x の kind は version・record_pr・queue_prs・plan_result・counts のどれか: 'version'"),
+        ({"kind": "version", "of": "", "key": 3}, "参照 x の of・key は空でない文字列にする"),
+        ({"kind": "counts", "key": "s"}, "参照 x に参照の先（of）が無い"),
+        ({"kind": "queue_prs", "when_empty": "zero"}, "参照 x の when_empty は skip だけ: 'zero'"),
+    ],
+)
+def test_declared_names_what_is_wrong_in_the_declaration(raw: object, message: str) -> None:
+    """現状固定: 宣言の誤りのメッセージ（検査の順は kind → of/key → of の有無 → when_empty）。"""
+    with pytest.raises(refs.RefError) as caught:
+        refs.declared({"refs": {"x": raw}})
+    assert str(caught.value) == message
+
+
+def test_declared_keeps_of_and_key_and_an_explicit_null_when_empty() -> None:
+    raw = {"refs": {"r": {"kind": "plan_result", "of": "p.state", "key": "out", "when_empty": None}}}
+    assert refs.declared(raw) == [refs.Ref("r", "plan_result", "p.state", "out", False)]
+
+
 def test_resolve_plan_returns_a_broken_declaration_as_invalid(tmp_path: Path) -> None:
     out = refs.resolve_plan({"refs": {"x": {"kind": "nope"}}}, _ctx(tmp_path), FakeSources())
     assert out.decision == STOPPED
