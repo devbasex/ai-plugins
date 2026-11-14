@@ -10,10 +10,6 @@ from ndf.core import route
 from ._flow import git
 
 
-def _last(capsys) -> dict:
-    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-
-
 def _fix_args(out: Path, repo: Path) -> list[str]:
     return [
         "immediate_fix", "--out", str(out), "--set", "branch=fix/x", "--set", "title=直す", "--set", "body_file=b.md",
@@ -21,16 +17,16 @@ def _fix_args(out: Path, repo: Path) -> list[str]:
     ]  # fmt: skip
 
 
-def test_templates_lists_every_template(capsys):
+def test_templates_lists_every_template(capsys, last_result):
     assert route.main(["templates"]) == 0
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     assert {i["purpose"] for i in found["items"]} >= {"immediate_fix", "implement", "check", "close", "design", "design_merge"}
 
 
-def test_render_writes_plan_and_points_to_plan_next(tmp_path, capsys):
+def test_render_writes_plan_and_points_to_plan_next(tmp_path, capsys, last_result):
     out = tmp_path / "plans" / "fix.json"
     assert route.main(["render", *_fix_args(out, tmp_path)]) == 0
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     assert found["next"]["argv"] == ["ndf", "plan", "next", str(out)]
     assert [s["id"] for s in json.loads(out.read_text())["steps"]][0] == "test"
 
@@ -46,17 +42,17 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
     assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge"]
 
 
-def test_render_refuses_missing_value_as_invalid(tmp_path, capsys):
+def test_render_refuses_missing_value_as_invalid(tmp_path, capsys, last_result):
     code = route.main(["render", "immediate_fix", "--out", str(tmp_path / "p.json"), "--set", f"repo={tmp_path}"])
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     assert found["cause"]["kind"] == "invalid"
     assert code != 0
 
 
-def test_set_and_add_same_name_is_refused(tmp_path, capsys):
+def test_set_and_add_same_name_is_refused(tmp_path, capsys, last_result):
     args = ["render", "immediate_fix", "--out", str(tmp_path / "p.json"), "--set", "required=a", "--add", "required=b"]
     route.main(args)
-    assert "両方で渡した" in _last(capsys)["cause"]["detail"]
+    assert "両方で渡した" in last_result(capsys.readouterr().out)["cause"]["detail"]
 
 
 def _stopped_ci(path: Path, nodes: list[str]) -> None:
@@ -65,7 +61,7 @@ def _stopped_ci(path: Path, nodes: list[str]) -> None:
     path.write_text(json.dumps(found) + "\n", encoding="utf-8")
 
 
-def test_repeat_stops_when_same_cause_continues(tmp_path, capsys):
+def test_repeat_stops_when_same_cause_continues(tmp_path, capsys, last_result):
     """#2844: 同じ落ちたテストの集まりで CI が続けて落ちたら、上限（supervise.step-rerun の same_cause）を超えた回で fix_limit。
 
     別の原因が挟まれば数え直す。summary の文は鍵に入れない。
@@ -76,17 +72,17 @@ def test_repeat_stops_when_same_cause_continues(tmp_path, capsys):
     assert route.main(args) == 0
     assert route.main(args) == 0
     assert route.main(args) != 0
-    assert _last(capsys)["cause"]["kind"] == "fix_limit"
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "fix_limit"
     _stopped_ci(res, ["tests/b.py::t2"])
     assert route.main(args) == 0
-    assert _last(capsys)["metrics"]["streak"] == 1
+    assert last_result(capsys.readouterr().out)["metrics"]["streak"] == 1
 
 
-def test_repeat_refuses_result_that_did_not_stop(tmp_path, capsys):
+def test_repeat_refuses_result_that_did_not_stop(tmp_path, capsys, last_result):
     res = tmp_path / "ci.json"
     res.write_text(json.dumps({"tool": "ci", "status": "ok", "summary": "", "items": [], "metrics": {}}) + "\n", encoding="utf-8")
     route.main(["repeat", "--result", str(res), "--log", str(tmp_path / "l.jsonl")])
-    assert _last(capsys)["cause"]["kind"] == "invalid"
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
 
 
 def test_cause_key_ignores_summary_and_test_order():
@@ -118,25 +114,25 @@ def test_omitted_worktree_is_under_submodule_worktree_not_git_modules(tmp_path):
 
 
 # 現状固定（I-005）: repeat が結果を読めないとき・止まった結果でないときの拒否。どちらも invalid で、記録へ書かない。
-def test_repeat_refuses_unreadable_or_not_stopped_result_without_logging(tmp_path, capsys):
+def test_repeat_refuses_unreadable_or_not_stopped_result_without_logging(tmp_path, capsys, last_result):
     log = tmp_path / "l.jsonl"
     missing = tmp_path / "none.json"
     assert route.main(["repeat", "--result", str(missing), "--log", str(log)]) == 2
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     assert (found["tool"], found["status"], found["cause"]["kind"]) == ("route", "stopped", "invalid")
     assert found["cause"]["detail"] == f"結果 {missing} を読めない: No such file or directory"
     assert found["summary"] == found["cause"]["detail"]
     empty = tmp_path / "empty.json"
     empty.write_text("", encoding="utf-8")
     assert route.main(["repeat", "--result", str(empty), "--log", str(log)]) == 2
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     assert found["cause"]["kind"] == "invalid"
     assert found["cause"]["detail"] == f"結果 {empty} は止まった結果でない"
     assert not log.exists()
 
 
 # 現状固定（I-006）: repeat の数え方の出力（ok と fix_limit の文・metrics・instance・終了コード）と、記録の書き方。
-def test_repeat_outputs_and_log_lines_are_fixed(tmp_path, capsys):
+def test_repeat_outputs_and_log_lines_are_fixed(tmp_path, capsys, last_result):
     res, log = tmp_path / "ci.json", tmp_path / "sub" / "causes.jsonl"
     args = ["repeat", "--result", str(res), "--log", str(log)]
     _stopped_ci(res, ["b", "a"])
@@ -144,12 +140,12 @@ def test_repeat_outputs_and_log_lines_are_fixed(tmp_path, capsys):
     key = json.dumps(["test_failed", ["a", "b"]], ensure_ascii=False)
     for n in range(1, limit + 1):
         assert route.main(args) == 0
-        found = _last(capsys)
+        found = last_result(capsys.readouterr().out)
         assert (found["tool"], found["status"]) == ("route", "ok")
         assert found["summary"] == f"同じ原因は {n} 回目（上限 {limit}）"
         assert found["metrics"] == {"streak": n, "same_cause": limit}
     assert route.main(args) == 1
-    found = _last(capsys)
+    found = last_result(capsys.readouterr().out)
     detail = f"同じ原因が {limit + 1} 回続いた（上限 {limit}）: {key}"
     assert (found["status"], found["summary"]) == ("stopped", detail)
     assert found["cause"] == {"kind": "fix_limit", "detail": detail, "instance": key}
