@@ -68,6 +68,11 @@ def _shaped(fn: Callable[[Any], dict[str, str]], value: Any, where: Path, bad: l
         return {}
 
 
+def _from_file(path: Path, parse: Callable[[str], Any], fn: Callable[[Any], dict[str, str]], bad: list[str]) -> dict[str, str]:
+    """ファイルを読み、形を確かめて控えにする。無い・読めない・形が違うときは空（読めない・形の違いは `bad` へ）。"""
+    return _shaped(fn, _read(path, parse, bad), path, bad)
+
+
 def snapshot() -> Snapshot:
     """利用者の設定ディレクトリの控え。"""
     return snapshot_at(*config_dirs())
@@ -76,8 +81,8 @@ def snapshot() -> Snapshot:
 def snapshot_at(claude: Path, codex: Path) -> Snapshot:
     """渡した設定ディレクトリ（Claude Code・Codex）の控え。"""
     bad: list[str] = []
-    items = _shaped(user_config_decide.claude_plugins, _read(claude / CLAUDE_INSTALLED, json.loads, bad), claude / CLAUDE_INSTALLED, bad)
-    items |= _shaped(user_config_decide.claude_marketplaces, _read(claude / CLAUDE_KNOWN, json.loads, bad), claude / CLAUDE_KNOWN, bad)
+    items = _from_file(claude / CLAUDE_INSTALLED, json.loads, user_config_decide.claude_plugins, bad)
+    items |= _from_file(claude / CLAUDE_KNOWN, json.loads, user_config_decide.claude_marketplaces, bad)
     conf = _read(codex / CODEX_CONFIG, tomllib.loads, bad)
     items |= user_config_decide.codex_entries(conf if isinstance(conf, dict) else {}, _cached(codex / CODEX_CACHE))
     return Snapshot(dict(sorted(items.items())), tuple(bad))
