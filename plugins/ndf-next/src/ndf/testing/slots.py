@@ -484,24 +484,33 @@ def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
         return None
 
 
+def _new_held(ctx: SlotContext) -> Held:
+    """メモリの監視を組み込んだ、まだ枠を持たない `Held`。"""
+    held = Held()
+    held._monitor = _MemoryMonitor(ctx.directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
+    return held
+
+
+def _record_without_slot(ctx: SlotContext, kind: str, held: Held, result: str) -> None:
+    """枠を取らずに終わった実行（中断・諦め）を、枠の番号を持たない形で記録する。"""
+    held.index = None
+    _record(ctx.directory, ctx.cwd, kind, held, result)
+
+
 def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
     directory, cwd = ctx.directory, ctx.cwd
-    held = Held()
-    monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
-    held._monitor = monitor
+    held = _new_held(ctx)
     try:
         lock = _take_slot(ctx, held)
     except KeyboardInterrupt:
         # 枠・メモリの待ちの間にシグナルで中断された（取りかけた枠は返してある）
-        held.index = None
-        _record(directory, cwd, kind, held, INTERRUPTED)
+        _record_without_slot(ctx, kind, held, INTERRUPTED)
         raise
     if lock is None:
         if held.note:
             yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
             return
-        held.index = None
-        _record(directory, cwd, kind, held, GAVE_UP)
+        _record_without_slot(ctx, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
     held.env = {HELD_ENV: str(_slot_path(directory, held.index))}
     result = INTERRUPTED
