@@ -129,6 +129,23 @@ def test_cleanup_removes_only_merged_clean_worktrees(main_repo: Path, run_git: C
     assert json.loads(json.dumps(item))["reason"] == cleanup_decide.REASONS[cleanup_decide.REMOVE]
 
 
+def test_cleanup_evacuates_ignored_files_before_removing(main_repo: Path, run_git: Callable) -> None:
+    """`git worktree remove` は無視したファイルを黙って消すため、cleanup でも先に退避する。"""
+    from ndf.domains.worktree import trash
+
+    wt = create.create(main_repo, "feat/ign").path
+    (wt / ".gitignore").write_text(".env\n", encoding="utf-8")
+    run_git(wt, "add", ".gitignore")
+    run_git(wt, "commit", "-q", "-m", "ignore")
+    run_git(main_repo, "merge", "-q", "--no-ff", "-m", "merge", "feat/ign")
+    (wt / ".env").write_text("SECRET_NAME=1", encoding="utf-8")
+    hub = FakeHub({"feat/ign": [_pull("feat/ign", "closed", True)]})
+    [got] = cleanup.cleanup(main_repo, main_repo, hub)
+    assert got.removed and not wt.exists() and got.note.startswith("退避先 ")
+    dest = Path(got.note.split(" ", 1)[1].split("。", 1)[0])
+    assert dest.parent == trash.trash_root(Git(main_repo)) and (dest / ".env").read_text(encoding="utf-8") == "SECRET_NAME=1"
+
+
 # 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
 def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
     from ndf.domains.worktree import ledger, mainlock, trash

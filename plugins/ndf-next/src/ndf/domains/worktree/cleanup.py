@@ -4,6 +4,7 @@
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
+   追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
    `git worktree remove`（`--force` を付けない）で消し、ブランチを `git branch -d` で消す
 5. 置き場の消えた worktree の管理情報を `git worktree prune` で片付ける
 
@@ -19,7 +20,7 @@ from typing import Iterable, Optional, Protocol
 
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import cleanup_decide, repo, testenv_sweep
+from ndf.domains.worktree import cleanup_decide, repo, testenv_sweep, trash
 from ndf.domains.worktree.cleanup_decide import REMOVE, Facts, PullState
 
 
@@ -31,7 +32,7 @@ class PullReader(Protocol):
 
 @dataclass(frozen=True)
 class Outcome:
-    """1 つの worktree の片付けの結果。`note` は消せなかったときの理由。"""
+    """1 つの worktree の片付けの結果。`note` は消せなかったときの理由と退避先。"""
 
     path: Path
     branch: Optional[str]
@@ -84,15 +85,22 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
     closed = testenv_sweep.close_for_removal(item.path)
     if closed is not None:
         return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {closed}")
+    evacuated = ""
+    if item.path.is_dir() and trash.leftovers(item.path):  # 無視したファイルは git worktree remove が黙って消す
+        try:
+            got = trash.evacuate(g, item.path, str(item.branch), item.head)
+        except trash.TrashError as exc:
+            return Outcome(item.path, item.branch, REMOVE, note=f"退避できないため worktree を消さなかった: {exc}")
+        evacuated = f"退避先 {got.dest}" if got.dest is not None else ""
     try:
         g.run("worktree", "remove", str(item.path))
     except GitError as exc:
-        return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消せなかった: {exc}")
+        return Outcome(item.path, item.branch, REMOVE, note="。".join(filter(None, [evacuated, f"worktree を消せなかった: {exc}"])))
     refused = repo.delete_merged_branch(g, str(item.branch))
     if refused is not None:
         note = f"ブランチは残した（git がマージ済みと認めない。{repo.MANUAL_FORCE}）: {refused}"
-        return Outcome(item.path, item.branch, REMOVE, removed=True, note=note)
-    return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True)
+        return Outcome(item.path, item.branch, REMOVE, removed=True, note="。".join(filter(None, [evacuated, note])))
+    return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True, note=evacuated)
 
 
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:

@@ -156,6 +156,16 @@ def test_after_merge_keeps_locked_worktree_without_evacuating(main_repo: Path, r
     assert trash.candidates(Git(main_repo), "origin/develop") == []
 
 
+def test_after_merge_does_not_close_testenv_of_locked_worktree(main_repo: Path, run_git: Callable, monkeypatch: pytest.MonkeyPatch) -> None:
+    """locked の worktree は公開を閉じず、テスト環境も破棄しない（何も動かさずに残す）。"""
+    wt = _land(main_repo, run_git, "feat/l")
+    run_git(main_repo, "worktree", "lock", str(wt))
+    closed: list[Path] = []
+    monkeypatch.setattr(merged.testenv_sweep, "close_for_removal", lambda path: closed.append(path))
+    merged.after_merge(main_repo, [6], FakeHub({6: _pull(6, "feat/l", True)}))
+    assert closed == [] and wt.exists()
+
+
 def test_after_merge_evacuates_ignored_files_before_removing(main_repo: Path, run_git: Callable) -> None:
     """`git worktree remove` は無視したファイルを黙って消すため、無視したファイルだけでも先に退避する。"""
     wt = _land(main_repo, run_git, "feat/i")

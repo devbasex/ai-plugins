@@ -82,12 +82,12 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
             names = ", ".join(line[3:] for line in dirty[:LISTED]) + ("…" if len(dirty) > LISTED else "")
             rec.add("worktree", str(item.path), outcomes.KEPT, f"追跡しているファイルに未コミットの変更が {len(dirty)} 件ある（{names}）")
             return False
+    if item.locked:  # 公開を閉じる・テスト環境を破棄するより先に見る（locked は何も動かさずに残す）
+        rec.add("worktree", str(item.path), outcomes.KEPT, "locked の worktree（git worktree unlock の後に片付ける）")
+        return False
     closed = testenv_sweep.close_for_removal(item.path)
     if closed is not None:
         rec.add("worktree", str(item.path), outcomes.KEPT, closed)
-        return False
-    if item.locked:
-        rec.add("worktree", str(item.path), outcomes.KEPT, "locked の worktree（git worktree unlock の後に片付ける）")
         return False
     why = ""
     if item.path.is_dir() and trash.leftovers(item.path):

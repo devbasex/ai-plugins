@@ -396,7 +396,7 @@ def test_ledger_latest_and_path_of_git(main_repo: Path) -> None:
 
 
 # 現状固定（I-020）: `testenv_sweep.expose`・`unexpose` の分岐。期待値は今の実装の出力。
-EXPOSE = {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "open-it"}
+EXPOSE = {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "open-it", "close_command": "close-it"}
 
 
 def _sweep_target(tmp_path: Path, fake: FakeShell, conf: object, make_dir: bool = True) -> testenv.Target:
@@ -420,7 +420,8 @@ def _assigned(t: testenv.Target, tag: Optional[str] = "t1") -> None:
         ({**EXPOSE, "enabled": "yes"}, "拒否: testenv.expose.enabled が有効でない"),
         ({**EXPOSE, "public_tag": ""}, "拒否: testenv.expose.public_tag と base_domain が要る"),
         ({**EXPOSE, "base_domain": None}, "拒否: testenv.expose.public_tag と base_domain が要る"),
-        ({**EXPOSE, "open_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command）"),
+        ({**EXPOSE, "open_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）"),
+        ({**EXPOSE, "close_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）"),
     ],
 )
 def test_expose_refuses_broken_config(tmp_path: Path, conf: object, message: str) -> None:
@@ -522,12 +523,16 @@ def test_unexpose_after_release_and_without_worktree_dir(tmp_path: Path) -> None
     assert fake.calls[-1][1] == tmp_path  # worktree が無ければメインディレクトリで打つ
 
 
-def test_unexpose_without_close_command_only_closes_record(tmp_path: Path) -> None:
+def test_unexpose_without_close_command_keeps_record(tmp_path: Path) -> None:
     fake = FakeShell()
     t = _sweep_target(tmp_path, fake, EXPOSE)
     _assigned(t)
     testenv_sweep.expose(t)
-    assert testenv_sweep.unexpose(t) == "https://wt0.example.test" and len(fake.calls) == 1
+    without = {k: v for k, v in EXPOSE.items() if k != "close_command"}
+    t2 = testenv.Target(t.path, t.main_dir, {"expose": without}, (), fake.shell(), t.book)
+    with pytest.raises(testenv.TestenvError, match="公開を閉じる手段が宣言されていない"):
+        testenv_sweep.unexpose(t2)
+    assert t.book.current(t.key)["expose"]["closed_at"] is None and len(fake.calls) == 1  # type: ignore[index]
 
 
 # 現状固定（I-012）: `testenv_sweep.reap` が止める行と残す行。期待値は今の実装の出力。
