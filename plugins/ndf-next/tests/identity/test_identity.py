@@ -23,11 +23,28 @@ def make_plugin(base: Path, dirname: str, name: str) -> Path:
 
 def test_load_reads_name_from_plugin_json_regardless_of_dirname(tmp_path, monkeypatch):
     root = make_plugin(tmp_path, "x", "renamed")
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setattr(identity, "ROOT", root)
 
     ident = identity.load()
 
     assert ident == identity.PluginIdentity(root=root, name="renamed", prefix="renamed:", state_dir=tmp_path / "state" / "renamed")
+
+
+def test_load_does_not_take_the_root_from_the_environment(tmp_path, monkeypatch):
+    # 3367-4: 根は自分の位置の 1 通りで求め、ほかのプラグインの CLAUDE_PLUGIN_ROOT は違うと記すだけ
+    other = make_plugin(tmp_path, "old", "ndf")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(other))
+
+    ident = identity.load()
+
+    assert ident.root == PLUGIN_ROOT
+    assert ident.foreign_root == other
+
+
+def test_load_accepts_the_environment_naming_its_own_root(monkeypatch):
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(PLUGIN_ROOT))
+
+    assert identity.load().foreign_root is None
 
 
 def test_load_without_env_uses_own_location():
@@ -39,8 +56,7 @@ def test_load_without_env_uses_own_location():
 
 
 def test_load_uses_home_when_xdg_state_home_is_unset(tmp_path, monkeypatch):
-    root = make_plugin(tmp_path, "x", "p")
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
     monkeypatch.delenv("XDG_STATE_HOME")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
@@ -53,7 +69,7 @@ def test_load_raises_when_plugin_json_is_unreadable(tmp_path, monkeypatch, conte
     (root / ".claude-plugin").mkdir(parents=True)
     if content is not None:
         (root / ".claude-plugin" / "plugin.json").write_text(content)
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setattr(identity, "ROOT", root)
 
     with pytest.raises(identity.IdentityError):
         identity.load()
@@ -61,26 +77,77 @@ def test_load_raises_when_plugin_json_is_unreadable(tmp_path, monkeypatch, conte
 
 @pytest.fixture
 def ident(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "x", "p")))
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     return identity.load()
 
 
 def test_prepare_creates_state_dir_with_format_file(ident):
-    path = identity.prepare_state_dir(ident, now=NOW)
+    ready = identity.prepare_state_dir(ident, now=NOW)
 
-    assert path == ident.state_dir
-    assert json.loads((path / "format.json").read_text()) == {"format": 1}
+    assert ready == identity.StateReady(ident.state_dir)
+    assert ready.items() == []
+    assert json.loads((ident.state_dir / "format.json").read_text()) == {"format": 1}
+    assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
 
 
 def test_prepare_retires_old_state_and_keeps_its_contents(ident):
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "ledger.jsonl").write_text("old\n")
 
-    identity.prepare_state_dir(ident, now=NOW)
+    ready = identity.prepare_state_dir(ident, now=NOW)
 
     retired = ident.state_dir.with_name("p.v10-20261113")
     assert (retired / "ledger.jsonl").read_text() == "old\n"
     assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
+    # 3394-8: 退避した元と先を返す
+    assert ready.retired == (identity.Retired(ident.state_dir, retired),)
+    assert ready.items() == [{"retired_from": str(ident.state_dir), "retired_to": str(retired)}]
+
+
+def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
+    # 3341-3: 旧い NDF の既定の状態の置き場（<設定の置き場>/<名前>/state）も同じ規則で退避し、作り直さない
+    ident.state_dir.mkdir(parents=True)
+    (ident.state_dir / "a").write_text("1")
+    config_state = tmp_path / "config" / "p" / "state"
+    config_state.mkdir(parents=True)
+    (config_state / "ledger.jsonl").write_text("2")
+
+    ready = identity.prepare_state_dir(ident, now=NOW)
+
+    moved = config_state.with_name("state.v10-20261113")
+    assert (moved / "ledger.jsonl").read_text() == "2"
+    assert not config_state.exists()
+    assert [r.source for r in ready.retired] == [ident.state_dir, config_state]
+    assert ready.retired[1].target == moved
+
+
+def test_prepare_does_not_retire_when_the_environment_names_another_root(ident, tmp_path, monkeypatch):
+    # 3367-4: ほかのプラグインの hook の子として動いたときは、旧い置き場に触れずに止まる
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
+    foreign = identity.load()
+    foreign.state_dir.mkdir(parents=True)
+    (foreign.state_dir / "ledger.jsonl").write_text("old")
+
+    with pytest.raises(identity.IdentityError, match="CLAUDE_PLUGIN_ROOT"):
+        identity.prepare_state_dir(foreign, now=NOW)
+
+    assert (foreign.state_dir / "ledger.jsonl").read_text() == "old"
+    assert not (foreign.state_dir / "format.json").exists()
+
+
+def test_prepare_with_another_root_in_the_environment_uses_a_ready_place(ident, tmp_path, monkeypatch):
+    identity.prepare_state_dir(ident, now=NOW)
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
+
+    assert identity.prepare_state_dir(identity.load(), now=NOW).path == ident.state_dir
+
+
+def test_prepare_leaves_no_temporary_format_file(ident):
+    # 3377-5: format.json は一時の名前で書いてから置き換える
+    identity.prepare_state_dir(ident, now=NOW)
+
+    assert [p.name for p in ident.state_dir.iterdir()] == ["format.json"]
 
 
 def test_prepare_does_not_retire_on_second_start(ident):
