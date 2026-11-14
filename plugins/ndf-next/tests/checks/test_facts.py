@@ -35,7 +35,7 @@ SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "facts" / facts.SCH
 
 
 def table(rows, columns) -> str:
-    return json.dumps({"version": 1, "summary": "s", "owner": "o", "columns": columns, "rows": rows})
+    return json.dumps({"summary": "s", "owner": "o", "columns": columns, "rows": rows})
 
 
 def test_fact_table_shape_and_copied_ids(plugin, rules):
@@ -52,7 +52,7 @@ def test_fact_table_is_validated_by_schema(plugin, rules):
     plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
     columns = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
     plugin.write("contracts/facts/ok.json", table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], columns))
-    plugin.write("contracts/facts/no_owner.json", json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []}))
+    plugin.write("contracts/facts/no_owner.json", json.dumps({"summary": "s", "columns": {}, "rows": []}))
     plugin.write("contracts/facts/bad_rows.json", table([{"id": "a", "rank": "1"}, {"id": "b"}, {"id": "c", "rank": 3, "x": 1}], columns))
     plugin.write("contracts/facts/bad_column.json", table([], {"Rank": {"type": "float", "summary": "r"}}))
     found = [(f.path.rsplit("/", 1)[-1], f.detail) for f in facts.check(plugin.scope(), rules)]
