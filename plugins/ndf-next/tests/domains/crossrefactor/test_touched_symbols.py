@@ -117,3 +117,42 @@ def test_explicit_symbols():
     assert got.symbols == {"lib/cli.py": frozenset({"cmd_scale", "Runner.stop"})}
     with pytest.raises(ValueError, match="<ファイル>:<名前>"):
         symbols_decide.explicit(["lib/cli.py"])
+
+
+# 現状固定: drive が状態ファイルの touched（Touched.as_json の形）から Touched を組み直す振る舞い
+def _restored(saved):
+    from types import SimpleNamespace
+
+    from ndf.domains.crossrefactor import drive
+
+    return drive._touched(SimpleNamespace(state={"touched": saved}))  # type: ignore[arg-type]
+
+
+def test_touched_restored_from_the_state_round_trips():
+    original = Touched({"lib/cli.py": frozenset({"cmd_scale", "Runner.start"}), "lib/b.py": frozenset()}, ("web/app.ts",))
+    got = _restored(original.as_json())
+    assert got == original
+    assert got.symbols == {"lib/b.py": frozenset(), "lib/cli.py": frozenset({"Runner.start", "cmd_scale"})}
+    assert isinstance(got.symbols["lib/cli.py"], frozenset)
+    assert got.whole_files == ("web/app.ts",) and isinstance(got.whole_files, tuple)
+    assert symbols_decide.in_touched({"path": "lib/cli.py", "symbol": "start"}, got)
+    assert symbols_decide.in_touched({"path": "web/app.ts", "symbol": "a"}, got)
+
+
+def test_touched_restored_from_an_empty_state():
+    got = _restored({"symbols": {}, "whole_files": []})
+    assert got == Touched({}, ())
+
+
+def test_touched_restored_keeps_the_saved_order_of_files():
+    got = _restored({"symbols": {"z.py": ["b", "a"], "a.py": ["f"]}, "whole_files": ["y.ts", "x.ts"]})
+    assert list(got.symbols) == ["z.py", "a.py"]
+    assert got.symbols["z.py"] == frozenset({"a", "b"})
+    assert got.whole_files == ("y.ts", "x.ts")
+
+
+def test_touched_restored_requires_both_keys():
+    with pytest.raises(KeyError):
+        _restored({"symbols": {}})
+    with pytest.raises(KeyError):
+        _restored({"whole_files": []})
