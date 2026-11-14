@@ -191,12 +191,12 @@ def flow_head(a) -> dict:
 
 
 def plan_sprint_branch(a, repo: str) -> dict:
-    """スプリントブランチをスプリントの起点から切り、origin へ送る。起点がベースブランチでなければ `--from` で渡す
-    （宣言を読み直さず、開始時のスナップショットで切る。#3121 の I3）。"""
+    """スプリントブランチをスプリントの起点から切り、origin へ送る。起点はベースブランチと同じときも常に `--from` で渡す
+    （作る時点の宣言を読み直さず、開始時のスナップショットで切る。#3121 の I3・#3310）。"""
     mb = sprint_branch(a)
     wt = f"{repo}/.worktrees/{mb}"
     start = sprint_flow(a).start_branch
-    frm = f" --from {shlex.quote(start)}" if start and start != a.base else ""
+    frm = f" --from {shlex.quote(start)}" if start else ""
     cmd = f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)}{frm} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
     return with_record(
         {
