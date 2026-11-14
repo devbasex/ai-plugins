@@ -393,6 +393,12 @@ def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
 # --- 順序の決まり（I8〜I10） ---------------------------------------------------------------
 
 
+# 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースした版
+CHECKED_KINDS = ("review", "test")
+DIFF_RANGES = ("sprint_diff", "issue_diff")
+RELEASED = "released"
+
+
 def _where(step: StepDef) -> str:
     return f"{step.stage}/{step.id}"
 
@@ -401,9 +407,9 @@ def _range_errors(steps: list[StepDef]) -> list[str]:
     """review・test の範囲は差分だけ、verify の範囲はリリースした版だけ（I9）。"""
     errs = []
     for st in steps:
-        if st.kind in ("review", "test") and st.range not in ("sprint_diff", "issue_diff"):
+        if st.kind in CHECKED_KINDS and st.range not in DIFF_RANGES:
             errs.append(f"I9: {_where(st)} の {st.kind} の範囲 {st.range} が差分（sprint_diff・issue_diff）でない")
-        if st.kind == "verify" and st.range != "released":
+        if st.kind == "verify" and st.range != RELEASED:
             errs.append(f"I9: {_where(st)} の verify の範囲 {st.range} がリリースした版（released）でない")
     return errs
 
@@ -413,7 +419,7 @@ def _after_release_errors(steps: list[StepDef]) -> list[str]:
     errs = []
     released: dict[str, StepDef] = {}
     for st in steps:
-        if st.kind in ("review", "test") and st.range in released:
+        if st.kind in CHECKED_KINDS and st.range in released:
             errs.append(
                 f"I8a: {_where(st)} の {st.kind} が、同じ範囲 {st.range} をリリースする {_where(released[st.range])} より後ろにある"
             )
