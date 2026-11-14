@@ -284,27 +284,39 @@ def end_group(proc: subprocess.Popen) -> None:
     _end_group(proc, proc.pid, None)
 
 
-def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
-    """`first` を送り（None なら送らない）、猶予の間にグループが終わらなければ SIGKILL を送る。"""
-    own_group = pgid == os.getpgrp()
+@dataclass(frozen=True)
+class _ProcessGroup:
+    """止める先のプロセスのグループ。`own_group`（自分と同じグループ）なら、グループでなくテストの先頭だけを扱う。"""
 
-    def send(sig: int) -> None:
+    proc: subprocess.Popen
+    pgid: int
+    own_group: bool
+
+    @classmethod
+    def of(cls, proc: subprocess.Popen, pgid: int) -> _ProcessGroup:
+        return cls(proc, pgid, pgid == os.getpgrp())
+
+    def send(self, sig: int) -> None:
         try:
-            proc.send_signal(sig) if own_group else os.killpg(pgid, sig)
+            self.proc.send_signal(sig) if self.own_group else os.killpg(self.pgid, sig)
         except ProcessLookupError:  # noqa: S110 外部コマンド: グループが既に終わっていれば送る先が無い
             pass
 
-    def alive() -> bool:
-        leader_alive = proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
-        return leader_alive if own_group else _group_alive(pgid)
+    def alive(self) -> bool:
+        leader_alive = self.proc.poll() is None  # 先頭を刈り取り、ゾンビをグループに数えない
+        return leader_alive if self.own_group else _group_alive(self.pgid)
 
+
+def _end_group(proc: subprocess.Popen, pgid: int, first: int | None) -> None:
+    """`first` を送り（None なら送らない）、猶予の間にグループが終わらなければ SIGKILL を送る。"""
+    group = _ProcessGroup.of(proc, pgid)
     if first is not None:
-        send(first)
+        group.send(first)
     deadline = time.monotonic() + KILL_GRACE_SECONDS
-    while alive():
+    while group.alive():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            send(signal.SIGKILL)
+            group.send(signal.SIGKILL)
             return
         time.sleep(min(0.1, remaining))
 
