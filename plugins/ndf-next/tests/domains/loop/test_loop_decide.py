@@ -216,3 +216,100 @@ def test_candidates_reject_bad_rows() -> None:
     with pytest.raises(sel.CandidateError):
         sel.rows_of([{"issue": 1, "waiting": "yes"}])
     assert sel.rows_of([{"issue": 2, "needs": [3]}]) == [sel.Row(2, needs=(3,))]
+
+
+# --- 現状固定: 周に付く事象の当て方（record_decide._with_lap / _lap / _apply_lap） ---
+
+
+def _two_laps() -> rec.LoopState:
+    """周 1 を締め、周 2 を開いた状態（事象を直に畳む）。"""
+    return rec.fold(
+        [
+            rec.event(rec.LAP_OPENED, 1, lap=1, issues=[1]),
+            rec.event(rec.LAP_CLOSED, 2, lap=1, outcome=rec.DONE, reason="r1"),
+            rec.event(rec.LAP_OPENED, 3, lap=2, issues=[2, 3]),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("ev", "want"),
+    [
+        (rec.event(rec.MODE_DECIDED, 5, lap=2, mode="light", basis="b"), {"mode": "light", "basis": "b"}),
+        (rec.event(rec.EXCLUDED, 5, lap=2, issue="3", reason="止まった"), {"excluded": ((3, "止まった"),), "mode": None}),
+        # 重複は記録済みの番号とだけ比べ、同じ事象の中の重複は残す（今の振る舞い）
+        (rec.event(rec.CREATED, 5, lap=2, issues=["9", 9, 8]), {"created": (9, 9, 8)}),
+        (rec.event(rec.GATED, 5, lap=2, pr="77", head="h1"), {"gates": ((77, "h1"),)}),
+        (rec.event(rec.RELEASED, 5, lap=2, version=1), {"released": ("1",)}),
+        (rec.event(rec.LAP_CLOSED, 5, lap=2, outcome=rec.FAILED, reason="ci"), {"outcome": rec.FAILED, "reason": "ci"}),
+    ],
+)
+def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str, Any]) -> None:
+    """周に付く事象は番号の周だけを変え、ほかの周と状態の鍵はそのまま残す。"""
+    before = _two_laps()
+    after = rec.apply(before, ev)
+    assert after.laps[0] == before.laps[0]
+    for key, value in want.items():
+        assert getattr(after.laps[1], key) == value
+    assert after.events == before.events + 1
+    assert (after.holder, after.lease_until, after.requested, after.stopped) == (None, 0.0, None, None)
+
+
+def test_answer_event_is_appended_with_typed_fields() -> None:
+    before = _two_laps()
+    after = rec.apply(before, rec.event(rec.ANSWERED, "6", lap="2", pr="77", answer="revise", head=None, note="n"))
+    assert after.laps[1].answers == (rec.Answer(77, "revise", None, "n", 6.0),)
+    assert after.laps[0].answers == ()
+
+
+def test_lap_events_accumulate_in_order() -> None:
+    state = _two_laps()
+    for ev in (
+        rec.event(rec.MODE_DECIDED, 5, lap=2, mode="standard", basis="b"),
+        rec.event(rec.CREATED, 5, lap=2, issues=[10]),
+        rec.event(rec.CREATED, 6, lap=2, issues=[10, 11]),
+        rec.event(rec.GATED, 7, lap=2, pr=77, head="h1"),
+        rec.event(rec.GATED, 8, lap=2, pr=77, head="h2"),
+        rec.event(rec.RELEASED, 9, lap=2, version="1.0.0"),
+        rec.event(rec.RELEASED, 9, lap=2, version="1.0.0"),
+        rec.event(rec.EXCLUDED, 10, lap=2, issue=2, reason="x"),
+    ):
+        state = rec.apply(state, ev)
+    lap = state.laps[1]
+    assert lap.created == (10, 11)
+    assert lap.gates == ((77, "h1"), (77, "h2")) and lap.gate_head(77) == "h2"
+    assert lap.released == ("1.0.0", "1.0.0")
+    assert lap.excluded == ((2, "x"),) and lap.remaining == (3,)
+    assert (lap.mode, lap.basis) == (None, None)
+
+
+def test_closed_lap_still_accepts_lap_events() -> None:
+    """締めた周への事象も断らずに当てる（今の振る舞い）。"""
+    after = rec.apply(_two_laps(), rec.event(rec.RELEASED, 5, lap=1, version="0.9"))
+    assert after.laps[0].released == ("0.9",) and after.laps[0].outcome == rec.DONE
+
+
+@pytest.mark.parametrize(
+    "ev",
+    [
+        rec.event(rec.MODE_DECIDED, 5, lap=3, mode="light", basis="b"),
+        rec.event(rec.EXCLUDED, 5, lap=3, issue=1, reason="r"),
+        rec.event(rec.CREATED, 5, lap=3, issues=[1]),
+        rec.event(rec.GATED, 5, lap=3, pr=1, head="h"),
+        rec.event(rec.ANSWERED, 5, lap=3, pr=1, answer="approved", head="h", note=""),
+        rec.event(rec.RELEASED, 5, lap=3, version="1"),
+        rec.event(rec.LAP_CLOSED, 5, lap=3, outcome=rec.DONE, reason=""),
+    ],
+)
+def test_lap_events_for_unknown_lap_raise(ev: dict[str, Any]) -> None:
+    with pytest.raises(rec.RecordError, match="記録に無い周 3 への事象"):
+        rec.apply(_two_laps(), ev)
+    with pytest.raises(rec.RecordError, match="記録に無い周 1 への事象"):
+        rec.apply(rec.LoopState(), {**ev, "lap": 1})
+
+
+def test_duplicate_lap_numbers_change_the_first_match() -> None:
+    """同じ番号の周が 2 つあるときは、先に開いた方を変える（今の振る舞い）。"""
+    state = rec.fold([rec.event(rec.LAP_OPENED, 1, lap=1, issues=[1]), rec.event(rec.LAP_OPENED, 2, lap=1, issues=[2])])
+    after = rec.apply(state, rec.event(rec.CREATED, 3, lap=1, issues=[5]))
+    assert after.laps[0].created == (5,) and after.laps[1].created == ()
