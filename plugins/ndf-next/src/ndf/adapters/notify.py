@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import threading
 import time
 from typing import Any
 
@@ -61,24 +63,72 @@ def _limit_hook(deadline: float, timeout: float):
     return hook
 
 
+class _Watchdog:
+    """期限に、本文の読み取りの待ちを止める。
+
+    httpcore は本文の読み始めに読み取りの待ちの秒数を 1 回だけ引き、以後の読み取りはその秒数で待つため、
+    待ちの秒数を後から縮めても効かない。そこで期限に別のスレッドから接続の受信を止め（`shutdown`）、
+    待っている読み取りを失敗で戻す。止めるのは本文を読み終える前だけで、読み終えた後の接続には触れない。
+    """
+
+    def __init__(self, resp: httpx.Response, seconds: float) -> None:
+        self._resp = resp
+        self._lock = threading.Lock()
+        self._done = False
+        self.fired = False
+        self._timer = threading.Timer(seconds, self._fire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _fire(self) -> None:
+        with self._lock:
+            if self._done:
+                return
+            self.fired = True
+            _shutdown(self._resp)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._done = True
+        self._timer.cancel()
+
+
+def _shutdown(resp: httpx.Response) -> None:
+    """応答の接続の受信と送信を止める。接続の無い応答（テストの transport）では何もしない。
+
+    TLS の接続でも TLS の状態を別のスレッドから変えないよう、記述子を複製して `shutdown` だけを掛ける。
+    """
+    stream = resp.extensions.get("network_stream")
+    sock = stream.get_extra_info("socket") if stream is not None else None
+    if not isinstance(sock, socket.socket):
+        return
+    try:
+        with socket.fromfd(sock.fileno(), sock.family, sock.type) as dup:
+            dup.shutdown(socket.SHUT_RDWR)
+    except OSError:  # noqa: NDF401 ネットワーク: 既に閉じた接続は止める必要が無い
+        pass
+
+
 def _read(resp: httpx.Response, deadline: float, timeout: float) -> bytes:
     """2xx の応答の本文を、期限の内で読み切る。
 
-    受信のたびに本文を受け取り（量で溜めない）、次の読み取りの待ちを期限の残りへ掛け直す。
-    httpcore は読み取りのたびに要求の `extensions["timeout"]` を引くため、同じ辞書を書き換えれば効く。
+    受信のたびに本文を受け取り（量で溜めない）、受け取るたびに期限を確かめる。受信を待っている間に
+    期限が来たら `_Watchdog` が待ちを止める。
     """
-    timeouts = resp.request.extensions.get("timeout")
+    watch = _Watchdog(resp, max(deadline - _now(), 0.0))
     parts: list[bytes] = []
-    chunks = resp.iter_bytes()
-    while True:
-        if isinstance(timeouts, dict):
-            timeouts["read"] = max(deadline - _now(), 0.0)
-        chunk = next(chunks, None)
-        if chunk is None:
-            return b"".join(parts)
-        parts.append(chunk)
-        if _now() > deadline:
-            raise FetchError(f"{_seconds(timeout)} 秒を越えた")
+    try:
+        for chunk in resp.iter_bytes():
+            parts.append(chunk)
+            if _now() > deadline:
+                raise FetchError(f"{_seconds(timeout)} 秒を越えた")
+    except httpx.TransportError as e:
+        if watch.fired:
+            raise FetchError(f"{_seconds(timeout)} 秒を越えた") from e
+        raise
+    finally:
+        watch.stop()
+    return b"".join(parts)
 
 
 def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None = None) -> bytes:

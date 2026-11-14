@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import socket
+import threading
+import time
 from collections.abc import Callable, Iterator
 
 import httpx
@@ -140,23 +143,36 @@ def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
     assert [t["read"] for t in timeouts] == [5, 3]
 
 
-def test_fetch_body_each_read_waits_only_the_remaining_time(clock: _Clock) -> None:
-    seen: list[float] = []
+@pytest.fixture
+def trickle_url() -> Iterator[str]:
+    """本物の接続で、本文の 1 バイト目をすぐ、2 バイト目を 0.8 秒後に送り、あとは黙るサーバーの URL。"""
+    srv = socket.create_server(("127.0.0.1", 0))
+    quit_ = threading.Event()
 
-    def handler(req: httpx.Request) -> httpx.Response:
-        timeouts = req.extensions["timeout"]
+    def serve() -> None:
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
+            if not quit_.wait(0.8):
+                conn.sendall(b"x")
+                quit_.wait(5)
 
-        def body() -> Iterator[bytes]:
-            for step in (1.0, 2.0):
-                seen.append(timeouts["read"])
-                clock.advance(step)
-                yield b"x"
-            seen.append(timeouts["read"])
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{srv.getsockname()[1]}/"
+    quit_.set()
+    thread.join(5)
+    srv.close()
 
-        return httpx.Response(200, content=body())
 
-    assert notify.fetch_body("https://x.test/a", 5, transport=_transport({"/a": handler})) == b"xx"
-    assert seen == [5, 4, 2]
+def test_fetch_body_stops_waiting_at_deadline_on_real_connection(trickle_url: str) -> None:
+    # httpcore は本文の読み始めの待ちの秒数（1 秒）で次の読み取りも待つため、期限で止めないと
+    # 0.8 秒の受信の後に 1 秒待って 1.8 秒まで延びる
+    started = time.monotonic()
+    with pytest.raises(notify.FetchError, match=r"^1 秒を越えた$"):
+        notify.fetch_body(trickle_url, 1)
+    assert time.monotonic() - started < 1.5
 
 
 def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:
