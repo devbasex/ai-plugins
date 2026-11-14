@@ -117,9 +117,17 @@ def test_settings_stop_at_git_top_and_use_fallback(tmp_path: Path) -> None:
     assert notify.slack_settings(repo, None, {}) is None
     plugin = tmp_path / "plugin"
     plugin.mkdir()
-    (plugin / ".env").write_text("SLACK_BOT_TOKEN=plugin\nSLACK_CHANNEL_ID=C2\nNDF_SLACK_API_BASE=https://slack.test/\n", encoding="utf-8")
-    got = notify.slack_settings(repo, plugin, {})
+    (plugin / ".env").write_text("SLACK_BOT_TOKEN=plugin\nSLACK_CHANNEL_ID=C2\n", encoding="utf-8")
+    got = notify.slack_settings(repo, plugin, {"NDF_SLACK_API_BASE": "https://slack.test/"})
     assert (got.token, got.channel, got.api_base) == ("plugin", "C2", "https://slack.test")
+
+
+def test_settings_ignore_api_base_in_env_file(tmp_path: Path) -> None:
+    # 通知の cwd の .env で、環境変数のトークンの送り先を替えさせない
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".env").write_text("SLACK_CHANNEL_ID=C\nNDF_SLACK_API_BASE=https://evil.test\n", encoding="utf-8")
+    got = notify.slack_settings(tmp_path, None, {"SLACK_BOT_TOKEN": "xoxb-env"})
+    assert (got.token, got.api_base) == ("xoxb-env", notify.SLACK_API_BASE)
 
 
 # ---- 送信待ちの 1 件 ----
@@ -209,6 +217,15 @@ def test_drain_retries_retryable_failures(outbox: Path, wall: list[float]) -> No
     deliver = _Deliver(notify.PostError("HTTP 500", True), notify.PostError("HTTP 429", True))
     out = notify.drain(outbox, deliver, sleep=slept.append)
     assert (out.sent, len(deliver.calls), slept) == (1, 3, [INTERVAL, INTERVAL * FACTOR])
+
+
+def test_drain_waits_at_least_retry_after(outbox: Path, wall: list[float]) -> None:
+    # 429 の Retry-After より早く打ち直さない
+    _write(outbox, "a")
+    slept: list[float] = []
+    deliver = _Deliver(notify.PostError("HTTP 429", True, retry_after=INTERVAL + 25))
+    out = notify.drain(outbox, deliver, sleep=slept.append)
+    assert (out.sent, slept) == (1, [INTERVAL + 25])
 
 
 def test_drain_keeps_notices_when_retries_run_out(outbox: Path, wall: list[float]) -> None:

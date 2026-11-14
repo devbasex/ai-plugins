@@ -33,11 +33,13 @@ class PostError(Exception):
 
     `retryable` が真なら、同じ要求を打ち直して通りうる（接続の失敗・上限の時間・429・5xx・Slack の `ratelimited`）。
     偽なら打ち直しても同じ失敗になる（URL の誤り・トークンの誤り・応答の形の誤り）。
+    `retry_after` は応答の `Retry-After`（秒）で、打ち直すまでに少なくとも待つ秒。無ければ `None`。
     """
 
-    def __init__(self, reason: str, retryable: bool) -> None:
+    def __init__(self, reason: str, retryable: bool, retry_after: float | None = None) -> None:
         super().__init__(reason)
         self.retryable = retryable
+        self.retry_after = retry_after
 
 
 # 失敗の理由の文（post_json と fetch_body が同じ文を返す）
@@ -54,6 +56,14 @@ def _connect_reason(e: Exception) -> str:
 
 def _status_retryable(status: int) -> bool:
     return status == httpx.codes.TOO_MANY_REQUESTS or status >= httpx.codes.INTERNAL_SERVER_ERROR
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    """`Retry-After` の秒（delay-seconds の形）を返す。無い・秒の形（0 以上の整数）でなければ `None`。"""
+    raw = resp.headers.get("Retry-After")
+    if raw is None or not raw.strip().isdigit():
+        return None
+    return float(raw.strip())
 
 
 def post_json(
@@ -79,7 +89,7 @@ def post_json(
 def _json_object(resp: httpx.Response) -> dict[str, Any]:
     """応答が 2xx で JSON のオブジェクトならその辞書を返す。ほかは `PostError`。"""
     if not resp.is_success:
-        raise PostError(f"HTTP {resp.status_code}", retryable=_status_retryable(resp.status_code))
+        raise PostError(f"HTTP {resp.status_code}", retryable=_status_retryable(resp.status_code), retry_after=_retry_after(resp))
     try:
         data = resp.json()
     except (json.JSONDecodeError, UnicodeDecodeError) as e:

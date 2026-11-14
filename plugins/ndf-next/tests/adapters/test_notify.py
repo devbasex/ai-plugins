@@ -91,6 +91,14 @@ def test_post_json_tells_failures_apart(handler: Handler, reason: str, retryable
     assert (str(got.value), got.value.retryable) == (reason, retryable)
 
 
+@pytest.mark.parametrize(("header", "after"), [("30", 30.0), ("soon", None), (None, None)], ids=["seconds", "not-seconds", "absent"])
+def test_post_json_keeps_retry_after(header: str | None, after: float | None) -> None:
+    headers = {} if header is None else {"Retry-After": header}
+    with pytest.raises(notify.PostError) as got:
+        notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": lambda req: httpx.Response(429, headers=headers)}))
+    assert got.value.retry_after == after
+
+
 @pytest.mark.parametrize(("url", "transport"), [("::", _transport({})), ("ftp://x.test/a", None)], ids=["invalid", "scheme"])
 def test_post_json_invalid_url_is_not_retryable(url: str, transport: httpx.BaseTransport | None) -> None:
     # scheme の誤りは本物の transport が接続の前に断る（ネットワークへ出ない）
