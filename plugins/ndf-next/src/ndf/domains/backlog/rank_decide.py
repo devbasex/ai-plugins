@@ -285,29 +285,39 @@ def _take(moves: _Moves, rejected: set, n: int, direction: str, digest: str, ite
         moves.backward.append(item)
 
 
-def _forward_item(board: Board, r: Row, b: Row, ctx: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    cfg, place, nearest = board.cfg, ctx["place"], ctx["nearest"]
+@dataclass(frozen=True)
+class _MoveContext:
+    """候補を組む回の固定の組。`base` は境界の要約値（move_digest の入力の共通部分）。"""
+
+    place: dict[int, Optional[str]]
+    nearest: str
+    threshold: int
+    base: dict[str, Any]
+
+
+def _forward_item(board: Board, r: Row, b: Row, ctx: _MoveContext) -> tuple[str, dict[str, Any]]:
+    cfg, place, nearest = board.cfg, ctx.place, ctx.nearest
     group = group_of(board, r.number, place, nearest)
-    digest = model.stable_digest({**ctx["base"], "number": r.number, "direction": FORWARD, "from": place.get(r.number), "to": nearest,
+    digest = model.stable_digest({**ctx.base, "number": r.number, "direction": FORWARD, "from": place.get(r.number), "to": nearest,
                                   "digest": board.estimates[r.number].digest, "group": group})  # fmt: skip
     auto = r.observed_harm and max(r.ubv, r.rr_oe) >= cfg.auto_threshold
     decision = AUTO if auto else (APPROVED if r.number in board.approved else APPROVAL)
     higher = [model.COLUMN_NAMES[c] for c in model.STEPS if getattr(r, c) > getattr(b, c)]
     return digest, {"number": r.number, "from": place.get(r.number), "to": nearest, "cod": r.cod, "boundary_cod": b.cod,
-                    "threshold": ctx["threshold"], "diff": r.cod - b.cod, "higher_columns": higher, "decision": decision,
+                    "threshold": ctx.threshold, "diff": r.cod - b.cod, "higher_columns": higher, "decision": decision,
                     "group": group, "move_digest": digest}  # fmt: skip
 
 
-def _backward(board: Board, moves: _Moves, near_rows: list[Row], ctx: dict[str, Any], rejected: set) -> None:
+def _backward(board: Board, moves: _Moves, near_rows: list[Row], ctx: _MoveContext, rejected: set) -> None:
     """前倒しの候補より CoD の低い直近の課題（ほかの直近の課題の依存先でないもの）を 1 件、次のマイルストーンへ。"""
-    place, nearest, order = ctx["place"], ctx["nearest"], board.order
+    place, nearest, order = ctx.place, ctx.nearest, board.order
     depended = {b for a, b in board.edges if place.get(a) == nearest and place.get(b) == nearest}
     free = [r for r in near_rows if r.number not in depended]
     low = min(free, key=lambda r: (r.cod, -r.value, r.number), default=None)
     if low is None or low.cod >= min(f["cod"] for f in moves.forward):
         return
     pair = sorted(f["number"] for f in moves.forward)
-    digest = model.stable_digest({**ctx["base"], "number": low.number, "direction": BACKWARD, "from": nearest, "to": order[1],
+    digest = model.stable_digest({**ctx.base, "number": low.number, "direction": BACKWARD, "from": nearest, "to": order[1],
                                   "digest": board.estimates[low.number].digest, "pair": pair})  # fmt: skip
     decision = APPROVED if low.number in board.approved else APPROVAL
     item = {"number": low.number, "from": nearest, "to": order[1], "cod": low.cod, "decision": decision, "move_digest": digest}
@@ -333,7 +343,7 @@ def moves(board: Board, rows: dict[int, Row], place: dict[int, Optional[str]]) -
         b = rows[bnd["number"]]
         threshold = board.cfg.threshold(b.cod)
         base = {"boundary": b.number, "boundary_digest": board.estimates[b.number].digest, "boundary_cod": b.cod}
-        ctx = {"place": place, "nearest": nearest, "threshold": threshold, "base": base}
+        ctx = _MoveContext(place, nearest, threshold, base)
         rejected = _rejected_keys(board)
         for n in sorted(rows, key=lambda n: (-rows[n].cod, n)):
             if place.get(n) != nearest and rows[n].cod >= threshold:
