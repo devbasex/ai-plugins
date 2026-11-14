@@ -39,6 +39,19 @@ def test_a_request_is_written_whole_under_requests_and_read_back(tmp_path):
     assert [p.name for p in path.parent.iterdir()] == [path.name]
 
 
+def test_a_request_with_the_same_id_is_not_overwritten(tmp_path):
+    """同じ ID の依頼は上書きしない。中身が同じなら何もせず既存を返し、違えば断って前の中身を残す（#3118）。"""
+    body = external.request_body(FIELDS, "11.0.0")
+    path = external.write_request(tmp_path, body)
+    assert external.write_request(tmp_path, body) == path
+    assert [p.name for p in path.parent.iterdir()] == [path.name]
+    other = external.request_body({**FIELDS, "prs": [2441]}, "11.0.0")
+    with pytest.raises(external.ExchangeError, match="上書きしない"):
+        external.write_request(tmp_path, other)
+    assert json.loads(path.read_text(encoding="utf-8")) == body
+    assert [p.name for p in path.parent.iterdir()] == [path.name]
+
+
 @pytest.mark.parametrize(
     "fields",
     [
