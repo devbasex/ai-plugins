@@ -126,7 +126,10 @@ def test_contract_reference_to_nowhere_is_refused():
 def test_output_that_breaks_the_contract_is_caught():
     stage = definition.load_definition("standard").stage("デプロイ")
     assert (
-        definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"delivery": {}, "version": "1.2.3"}}) == []
+        definition.validate_stage_output(
+            stage, {"steps": [], "summary": "出した", "outputs": {"delivery": {"kind": "plugin"}, "version": "1.2.3"}}
+        )
+        == []
     )
     errs = definition.validate_stage_output(stage, {"steps": [], "outputs": {"version": 3}})
     assert any("summary" in e for e in errs)

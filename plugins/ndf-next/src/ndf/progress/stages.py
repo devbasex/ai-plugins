@@ -232,3 +232,19 @@ def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
     """モードの工程に無い名前。"""
     known = {s.name for s in snap.stages}
     return sorted(set(names) - known)
+
+
+OUTPUTS_EVENT = "outputs_recorded"  # 工程の出力をスプリントの文脈へ書く事象
+
+
+def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:
+    """工程の出力を文脈へ書く事象の下書き。鍵は工程の定義の `outputs` に列挙したものだけ。
+
+    `actor` は書き手。工程を流した作業（`workflow`）か、手で終えた conductor（`ndf progress finish`）。
+    宣言に無い鍵は書かずに捨て、捨てた鍵を警告で返す。書く鍵が無ければ下書きは None。
+    """
+    kept = {k: v for k, v in outputs.items() if k in stage.outputs}
+    warnings = [f"工程 {stage.name} の定義の outputs に無い鍵を捨てた: {k}" for k in sorted(set(outputs) - set(kept))]
+    if not kept:
+        return None, warnings
+    return model.EventDraft(OUTPUTS_EVENT, actor, stage.name, payload={"outputs": kept}, rev=rev), warnings
