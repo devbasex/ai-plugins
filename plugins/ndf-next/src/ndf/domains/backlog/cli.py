@@ -19,7 +19,7 @@ import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 from ndf import cli as top
 from ndf.adapters import github
@@ -31,7 +31,6 @@ from ndf.domains.backlog import (
     collect,
     depth,
     due_decide,
-    estimates_decide,
     issues_gh,
     model,
     plan_decide,
@@ -43,30 +42,11 @@ from ndf.domains.backlog import (
 )
 from ndf.domains.backlog import tables as tables_mod
 from ndf.domains.backlog import selection_decide as sel
+from ndf.domains.backlog.cli_input import Stop, declaration, rank_board, read_json
 
 TOOL = top.tool_of(__name__)
 DEFAULT_LIMIT = 10
 PLAN_KEYS = {"rank", "rejected", "reschedule", "reparent", "actions", "create"}
-
-
-class Stop(Exception):
-    """副命令を止める。`kind` は止まった理由の種類。`incomplete` は失敗した行（`failed`）を欠け（gaps）として持つ。"""
-
-    def __init__(self, kind: str, detail: str, items: Optional[list] = None, failed: Optional[list] = None) -> None:
-        super().__init__(detail)
-        self.kind = kind
-        self.items = items
-        self.failed = failed if failed is not None else []
-
-    def gaps(self) -> list[dict[str, str]]:
-        return [{"kind": "write", "name": _row_name(f), "reason": str(f["error"]) if "error" in f else "失敗した"} for f in self.failed]
-
-
-def _row_name(row: dict[str, Any]) -> str:
-    for key, fmt in (("number", "#{}"), ("title", "{}"), ("milestone", "{}")):
-        if key in row and row[key] is not None:
-            return fmt.format(row[key])
-    return "?"
 
 
 def hub(repo: str) -> github.GitHub:
@@ -81,24 +61,12 @@ def numbers(text: str) -> list[int]:
         raise argparse.ArgumentTypeError(f"番号の並びはカンマ区切りの整数で書く: {text!r}") from exc
 
 
-def _read_json(path: str) -> Any:
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise Stop("invalid", f"{path} を JSON として読めない: {exc}") from exc
-
-
 def _repo(a: argparse.Namespace) -> str:
     return a.repo if a.repo else Git(Path.cwd()).remote_repo()
 
 
 def _sd(a: argparse.Namespace, repo: str) -> Path:
     return state.state_dir(Path.cwd(), repo, a.state_dir)
-
-
-def _declaration() -> dict[str, Any]:
-    """宣言（.ndf/backlog.json）。"""
-    return depth.declaration(depth.declaration_path(Path.cwd()))
 
 
 def _previous_metrics(sd: Path) -> dict[str, Any]:
@@ -153,65 +121,6 @@ def cmd_candidates(a: argparse.Namespace) -> dict[str, Any]:
 # ---------------- rank ----------------
 
 
-def _given(path: Optional[str]) -> dict[int, Any]:
-    if not path:
-        return {}
-    got = _read_json(path)
-    rows = got["issues"] if isinstance(got, dict) and "issues" in got else None
-    if not isinstance(rows, list):
-        raise Stop("invalid", f'{path} は {{"issues": [...]}} の形で書く')
-    return {r["number"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("number"), int)}
-
-
-def _sizes(path: Optional[str]) -> dict[int, Any]:
-    """見積もりの記録から決めた Size（{"issues": [{"number", "size"}]}）。"""
-    return {n: r["size"] for n, r in _given(path).items() if "size" in r}
-
-
-def _previous_rows(rank: Any) -> dict[int, Any]:
-    tables = rank["milestones"] if isinstance(rank, dict) and isinstance(rank.get("milestones"), list) else []
-    out: dict[int, Any] = {}
-    for t in tables:
-        for r in t["rows"]:
-            out.setdefault(r["number"], r)
-    return out
-
-
-def _config(a: argparse.Namespace) -> model.Config:
-    try:
-        decl = _declaration()
-    except depth.DepthError as exc:
-        raise Stop("invalid", str(exc)) from exc
-    quality = decl["quality"] if isinstance(decl.get("quality"), dict) else None
-    if quality is not None:
-        quality = {"label": "quality", "ratio": 0.2, "min": 1, **quality}
-    return model.Config(capacity=a.capacity, quality=quality)
-
-
-def _rank_board(
-    a: argparse.Namespace, sd: Path, issues: list[dict[str, Any]]
-) -> tuple[rank_decide.Board, list[dict[str, Any]], dict[str, Any], list[int]]:
-    cfg = _config(a)
-    given = _given(a.scores)
-    stored = state.read(sd, "backlog-estimates", {})
-    previous = _previous_rows(state.read(sd, "backlog-rank", None))
-    digests = {i["number"]: model.snapshot_digest(i) for i in issues}
-    review = digests if a.depth == model.REVIEW else None
-    ests, excluded = estimates_decide.estimates(list(digests), given, stored, previous, cfg, review)
-    try:
-        ests, sized = estimates_decide.overlay_sizes(ests, _sizes(a.sizes), cfg)
-    except model.EstimateError as exc:
-        raise Stop("invalid", str(exc)) from exc
-    by_num = {i["number"]: i for i in issues}
-    order = rank_decide.milestone_order({i["milestone"] for i in issues if i["milestone"]}, a.milestones)
-    raws = [*given.values(), *(v for v in stored.values() if isinstance(v, dict))]
-    board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=rank_decide.sub_issues_of(issues), edges=rank_decide.dependency_edges(raws, issues),
-                              rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved),
-                              sized=frozenset(sized))  # fmt: skip
-    kept = {**stored, **{str(n): {**given[n], "number": n} for n in ests if n in given}}
-    return board, excluded, kept, sized
-
-
 def _rank_metrics(repo: str, a: argparse.Namespace, board: rank_decide.Board, got: dict[str, Any],
                   excluded: list[dict[str, Any]], sized: list[int]) -> dict[str, Any]:  # fmt: skip
     """順位の metrics と、metrics と表を合わせた digest（plan が照らす値）。"""
@@ -230,7 +139,7 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
     issues = issues_gh.open_issues(hub(repo))
-    board, excluded, kept, sized = _rank_board(a, sd, issues)
+    board, excluded, kept, sized = rank_board(a, sd, issues)
     try:
         got = rank_decide.compute(board)
     except rank_decide.CycleError as exc:
@@ -272,7 +181,7 @@ def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
 
 def _read_plan(path: str) -> dict[str, Any]:
     """plan を読み、形を確かめる（オブジェクトであること・知らない鍵・actions と create の形）。"""
-    plan = _read_json(path)
+    plan = read_json(path)
     if not isinstance(plan, dict):
         raise Stop("invalid", "plan は JSON のオブジェクトで書く")
     unknown = sorted(set(plan) - PLAN_KEYS)
@@ -364,7 +273,7 @@ def cmd_revert(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_depth_limits(a: argparse.Namespace) -> dict[str, Any]:
-    seconds = depth.depth_seconds(_declaration(), a.depth)
+    seconds = depth.depth_seconds(declaration(), a.depth)
     return result.result(TOOL, result.OK, f"{a.depth} の 1 回の秒の上限は {seconds} 秒", metrics={"depth": a.depth, "seconds": seconds})
 
 
@@ -378,7 +287,7 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
     """見直し・大整理を起動するか。起動しなければ not_applicable で止まる（読み手は status で分ける）。"""
     repo = _repo(a)
     sd = _sd(a, repo)
-    decl = _declaration()
+    decl = declaration()
     depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
     try:
         cfg = due_decide.settings(a.depth, depth.depth_entry(decl, a.depth))
@@ -394,7 +303,7 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_settle(a: argparse.Namespace) -> dict[str, Any]:
     try:
-        rows, bad = settle_decide.parse(_read_json(a.file))
+        rows, bad = settle_decide.parse(read_json(a.file))
     except ValueError as exc:
         raise Stop("invalid", str(exc)) from exc
     repo = _repo(a)

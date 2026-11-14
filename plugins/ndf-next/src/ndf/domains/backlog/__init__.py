@@ -24,4 +24,5 @@
 | `settle.py` | 証拠を GitHub で確かめて閉じる |
 | `collect.py` | 候補の経路の収集 |
 | `cli.py` | `ndf issues` の副命令 |
+| `cli_input.py` | 副命令が読む入力（JSON・宣言・順位の算出の入力）と、副命令を止める例外 |
 """
