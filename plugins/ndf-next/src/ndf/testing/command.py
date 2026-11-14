@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
-from ndf import cli, identity
+from ndf import cli, identity, process_group
 from ndf.contracts import causes, result
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
@@ -137,7 +137,7 @@ def _run_child(command: str, held: slots.Held, interrupted: list[int], started: 
     code = _wait(proc)
     if interrupted:
         # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
-        slots.end_group(proc)
+        process_group.stop_group(proc, grace_key=slots.STOP_TEST, send_first=False)
         raise KeyboardInterrupt  # 記録に interrupted を残す
     return code
 
@@ -150,11 +150,13 @@ def _signal_group(proc: subprocess.Popen, signum: int) -> None:
 
 
 def _wait(proc: subprocess.Popen) -> int:
+    """子の終わりを待ち、終了コードを返す。シグナルで止まった子はシェルと同じ 128 + シグナルの番号にする（負の値を返さない）。"""
     while True:
         try:
-            return proc.wait()
+            code = proc.wait()
         except InterruptedError:  # noqa: S112 外部コマンド: 子の終わりを待つ間にシグナルで割り込まれたら待ち直す
             continue
+        return 128 - code if code < 0 else code
 
 
 def _report(since: str) -> int:

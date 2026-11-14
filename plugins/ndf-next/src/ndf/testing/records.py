@@ -15,6 +15,8 @@ from pathlib import Path
 
 from filelock import FileLock
 
+from ndf import slot_pool
+
 # 記録を残す期間と行数（I11）
 KEEP_DAYS = 30
 KEEP_ROWS = 10_000
@@ -32,8 +34,7 @@ INTERRUPTED = "interrupted"
 
 
 def _lock(path: Path) -> FileLock:
-    # ソフトロックへ落とさない（カーネルのロックでないと持ち主の消滅で解けない）。ロックのファイルは消さない
-    return FileLock(path, thread_local=False, fallback_to_soft=False, preserve_lock_file=True)
+    return slot_pool.lock(path)
 
 
 def _replace_text(path: Path, text: str) -> None:

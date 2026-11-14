@@ -91,6 +91,13 @@ def test_run_keeps_output_and_exit_code(project, slots_dir):
     assert [row["result"] for row in records.read_events(slots_dir)] == ["finished", "finished"]
 
 
+def test_child_killed_by_a_signal_exits_with_128_plus_the_signal(project):
+    # OOM Killer の SIGKILL もシェルと同じ 137 になる（負の値の -9 を 247 として返さない）
+    root, bin_dir, log = project
+    proc = _ndf(["run", "--", "kill -9 $$"], root, bin_dir, log)
+    assert proc.wait() == 128 + signal.SIGKILL
+
+
 def test_parallel_runs_wait_for_each_other(project):
     root, bin_dir, log = project
     procs = [_ndf(["run", "--", "fakerun ."], root, bin_dir, log) for _ in range(3)]
