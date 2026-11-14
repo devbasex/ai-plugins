@@ -218,6 +218,14 @@ def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の置き場を退避しない: "
             + ", ".join(str(p) for p in old)
         )
+    retired = _retire_all(old, now)
+    ident.state_dir.mkdir(parents=True, exist_ok=True)
+    _write_format(ident.state_dir)
+    return StateReady(ident.state_dir, retired)
+
+
+def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
+    """旧い置き場を順に退避先の名前へ変え、退避した元と先を返す。"""
     retired = []
     for place in old:
         target = _retire_target(place, now)
@@ -225,10 +233,13 @@ def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
         retired.append(Retired(place, target))
     if retired:
         log.warning("旧い状態の置き場を退避した: %s", ", ".join(f"{r.source} -> {r.target}" for r in retired))
-    ident.state_dir.mkdir(parents=True, exist_ok=True)
-    fmt = ident.state_dir / FORMAT_FILE
+    return tuple(retired)
+
+
+def _write_format(state_dir: Path) -> None:
+    """`format.json` が無ければ一時の名前で書いてから置き換える（途中で落ちても半端な中身を残さない）。"""
+    fmt = state_dir / FORMAT_FILE
     if not fmt.exists():
         tmp = fmt.with_name(f"{FORMAT_FILE}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps({"format": FORMAT_VERSION}) + "\n", encoding="utf-8")
         os.replace(tmp, fmt)
-    return StateReady(ident.state_dir, tuple(retired))
