@@ -374,10 +374,8 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
         return None
     try:
         inputs = invoke.resolve_inputs(s, v.context())
-    except invoke.StageInputMissing as exc:
-        return result.stopped(TOOL, "input_missing", str(exc), items=[{"key": k} for k in exc.keys], metrics=_metrics(v, m))
-    except invoke.StageInputInvalid as exc:
-        return result.stopped(TOOL, "invalid", str(exc), items=[{"error": e} for e in exc.errors], metrics=_metrics(v, m))
+    except invoke.StageInputError as exc:
+        return result.stopped(TOOL, exc.kind, str(exc), items=exc.items, metrics=_metrics(v, m))
     d.write(model.EventDraft("started", ACTOR, s.name, payload={"inputs": inputs}, rev=v.rev))
     return None if d.inline else _launched(d, v, m)
 
@@ -588,10 +586,8 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
     prog = step_progress(v, s.name)
     try:
         inputs = invoke.resolve_inputs(s, v.context())
-    except invoke.StageInputMissing as exc:
-        return _failed(s, step.id, v.rev, "input_missing", str(exc))
-    except invoke.StageInputInvalid as exc:
-        return _failed(s, step.id, v.rev, "invalid", str(exc))
+    except invoke.StageInputError as exc:
+        return _failed(s, step.id, v.rev, exc.kind, str(exc))
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None

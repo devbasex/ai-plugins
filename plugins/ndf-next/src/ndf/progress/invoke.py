@@ -50,20 +50,42 @@ PACKAGE = __package__.partition(".")[0]
 SRC = Path(__file__).resolve().parents[2]
 
 
-class StageInputMissing(Exception):
+class StageInputError(Exception):
+    """工程の入力を文脈から渡せない。`kind` は止まった理由の語、`items` は結果 JSON の項目。"""
+
+    kind = "invalid"
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return []
+
+
+class StageInputMissing(StageInputError):
     """工程の入力の鍵がスプリントの文脈に無い。`keys` は足りない鍵。"""
+
+    kind = "input_missing"
 
     def __init__(self, keys: Sequence[str]) -> None:
         super().__init__(f"工程の入力の鍵が文脈に無い: {', '.join(keys)}")
         self.keys = tuple(keys)
 
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return [{"key": k} for k in self.keys]
 
-class StageInputInvalid(Exception):
+
+class StageInputInvalid(StageInputError):
     """工程の入力の値が文脈のスキーマの形に合わない。`errors` は誤りの一覧。"""
+
+    kind = "invalid"
 
     def __init__(self, errors: Sequence[str]) -> None:
         super().__init__(f"工程の入力の形が合わない: {'; '.join(errors)}")
         self.errors = tuple(errors)
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return [{"error": e} for e in self.errors]
 
 
 @dataclass(frozen=True)
