@@ -161,7 +161,8 @@ grep -E '^\| ([0-9]{4}-[0-9]+|要求 [0-9]+) \|' issues/issue-3388-design-routin
 grep -oE '^### Z[0-9]+' issues/issue-3388-design-children.md | cut -c5- | sort > /tmp/3388-children.txt
 while read -r d; do
   case "$d" in
-    \#*) s=$(gh issue view "${d#\#}" --json state -q .state); [ "$s" = OPEN ] || echo "閉じた行き先: $d $s" ;;
+    \#*) if ! s=$(gh issue view "${d#\#}" --json state -q .state); then echo "状態を取れない: $d"
+         elif [ "$s" != OPEN ]; then echo "閉じた行き先: $d $s"; fi ;;
     Z*) grep -qx "$d" /tmp/3388-children.txt || echo "子の表に無い記号: $d" ;;
     作らない) ;;
     *) echo "形の違う行き先: $d" ;;
@@ -170,7 +171,7 @@ done < /tmp/3388-dest.txt
 echo "検査した行き先: $(wc -l < /tmp/3388-dest.txt)"
 ```
 
-結果: 出力は `検査した行き先: 14` の 1 行だけ（閉じた行き先 0 件・子の表に無い記号 0 件）。
+結果: 出力は `検査した行き先: 14` の 1 行だけ（状態を取れない行き先 0 件・閉じた行き先 0 件・子の表に無い記号 0 件）。
 
 **3. 行き先ごとの件数。**
 
