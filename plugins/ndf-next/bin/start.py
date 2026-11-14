@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import runpy
 import sys
@@ -25,12 +26,17 @@ STAMP = Path(sys.prefix) / ".deps-checked"
 OPTIONAL_SUFFIXES = (".pyc",)
 
 
+def recorded_files(dist) -> list[str]:
+    """RECORD に載るファイルのパス。`Distribution.files` は無いファイルを落として返すので、RECORD を直に読む。"""
+    text = dist.read_text("RECORD") or ""
+    return [row[0] for row in csv.reader(text.splitlines()) if row and not row[0].endswith(OPTIONAL_SUFFIXES)]
+
+
 def broken_distributions() -> list[str]:
     """RECORD に載るファイルが欠けたパッケージ（名前と欠けた数）。"""
     broken = []
     for dist in metadata.distributions():
-        files = [f for f in dist.files or () if not str(f).endswith(OPTIONAL_SUFFIXES)]
-        gone = sum(1 for f in files if not Path(str(dist.locate_file(f))).exists())
+        gone = sum(1 for f in recorded_files(dist) if not Path(str(dist.locate_file(f))).exists())
         if gone:
             broken.append(f"{dist.metadata['Name']}（{gone} 件）")
     return sorted(broken)

@@ -108,8 +108,10 @@ def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_pla
     assert done.returncode == 0, done.stderr
     assert json.loads(out.read_text(encoding="utf-8")) == [str(probe_root / "hooks" / "entry.py"), runtime, event]
     out.unlink()
+    # python3 の無い PATH。登録の command が中で起こす sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
     bare = tmp_path / "bare"
     bare.mkdir()
+    (bare / "sh").symlink_to(SH)
     done = _run(command, runtime, probe_root, tmp_path / "no-cache", path=str(bare))
     assert (done.returncode, done.stdout, out.exists()) == (0, "", False)
 
@@ -154,8 +156,10 @@ def test_without_the_environment_every_registered_event_passes_except_strict(tmp
 
 
 def test_without_python3_every_registered_event_does_nothing(tmp_path):
+    # python3 の無い PATH。登録の command が中で起こす sh だけを置く（sh も無い PATH はランタイムが hook を打てない）
     bare = tmp_path / "bare"
     bare.mkdir()
+    (bare / "sh").symlink_to(SH)
     for runtime, _, command in _commands():
         done = _run(command, runtime, tables.PLUGIN_ROOT, tmp_path / "no-venv", path=str(bare))
         assert (done.returncode, done.stdout) == (0, "")

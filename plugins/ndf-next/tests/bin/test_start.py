@@ -32,6 +32,9 @@ class _Dist:
     def __init__(self, base: Path, name: str, files: list[str]):
         self.base, self.metadata, self.files = base, {"Name": name}, files
 
+    def read_text(self, name):
+        return "".join(f"{f},sha256=x,1\n" for f in self.files) if name == "RECORD" else None
+
     def locate_file(self, f):
         return self.base / f
 
