@@ -14,7 +14,7 @@
 - レーンのリリースの依頼（`release`）: リリース承認ゲートの待ちで依頼を出し、依頼への答えを承認ゲートの答えにする
 - 答えの記録（`records`）: 答えを `gate-rejections.jsonl` へ写し（#3136）、conductor が読む答えの一覧（#2934・#3174）と
   承認で見た head（#2147）を返す
-- MVV 判定の前の機械の検査（`checks`）: 5 つの検査と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
+- MVV 判定の前の機械の検査（`checks`）: 6 つの検査（PR 本文の節の中身は #2853）と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
 - 副命令のエントリポイント（`entry`）: `ndf answer` と `ndf progress`
 """
 
@@ -59,6 +59,7 @@ from ndf.progress.gate.checks import (
     MvvFacts,
     check_approval_record,
     check_boundary,
+    check_claimed_sections,
     check_mode,
     check_mvv_decl,
     check_mvv_hash,
@@ -66,6 +67,7 @@ from ndf.progress.gate.checks import (
     mvv_decls,
     note,
     refusals,
+    sections,
     well_formed,
 )
 from ndf.progress.gate.entry import WORK_KINDS, _cmd_work, ask, main, present, progress_verbs, work_argv
@@ -94,6 +96,7 @@ __all__ = [
     "ask",
     "check_approval_record",
     "check_boundary",
+    "check_claimed_sections",
     "check_mode",
     "check_mvv_decl",
     "check_mvv_hash",
@@ -124,6 +127,7 @@ __all__ = [
     "request_id",
     "request_release",
     "routes",
+    "sections",
     "take_reply",
     "unconfirmed",
     "waiting",
