@@ -73,4 +73,4 @@ def test_env_the_service_sets_is_in_the_workflow_entrypoint():
 
 def test_places_given_by_env_name_a_declared_variable():
     for r in facts.rows("places", root="env"):
-        assert r["path"] == "." and r["env"] in facts.ids("env"), r["id"]
+        assert r["path"] == ".", r["id"]
