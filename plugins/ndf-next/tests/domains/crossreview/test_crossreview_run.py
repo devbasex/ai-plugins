@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
@@ -23,12 +24,15 @@ from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 PR = 41
 FAIL = "fail"
-_ROUND = re.compile(r"round(\d+)-")
 _ID = re.compile(r"^- (\S+): ", re.MULTILINE)
 
 
 class Fake:
-    """偽の相手役と修正担当。`script[相手役][ラウンド - 1]` は指摘の本文の並びか `FAIL`。"""
+    """偽の相手役と修正担当。`script[相手役][n]` は相手役の n 回目（0 から）の起動の指摘の本文の並びか `FAIL`。
+
+    相手役は毎ラウンド 1 回ずつ起動されるので、n はラウンドの番号 - 1 にあたる。台本の位置と修正の回数は偽物が
+    数える（相手役は並べて起動されるので、数える値はロックで守る）。
+    """
 
     def __init__(self, state_dir: Path, script: dict[str, list[Any]], decide: Optional[Callable[[str], Optional[dict]]] = None):
         self.state_dir = state_dir
@@ -36,15 +40,24 @@ class Fake:
         self.decide = decide if decide is not None else (lambda fid: {"outcome": fin.FIXED})
         self.after_commit: Optional[Callable[[], None]] = None
         self.calls: list[str] = []
+        self._lock = threading.Lock()
+        self._said: dict[str, int] = {}
+        self._fixes = 0
+
+    def _next_lines(self, agent: str) -> Any:
+        """相手役の台本の次の 1 回分。台本が尽きたら指摘無し。"""
+        with self._lock:
+            at = self._said.get(agent, 0)
+            self._said[agent] = at + 1
+        lines = self.script[agent]
+        return lines[at] if at < len(lines) else []
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
         self.calls.append(spec.agent)
         spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
         if spec.agent == "claude":
             return self._fix(spec)
-        round_no = int(_ROUND.search(spec.paths.out.name).group(1))
-        lines = self.script[spec.agent]
-        said = lines[round_no - 1] if round_no <= len(lines) else []
+        said = self._next_lines(spec.agent)
         if said == FAIL:
             return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
         body = {"findings": [{"text": t, "section": ""} for t in said]}
@@ -54,7 +67,8 @@ class Fake:
     def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
         prompt = spec.argv[-1]
         ids = _ID.findall(prompt)
-        n = len(list(self.state_dir.glob("round*-fix.out")))
+        n = self._fixes
+        self._fixes += 1
         sha = commit(spec.cwd, f"fix{n}.txt", "\n".join(ids), f"直す {n}")
         if self.after_commit is not None:
             self.after_commit()
