@@ -136,18 +136,7 @@ def aim(t: Target, shell: container.Shell) -> int:
 
 def changed_paths(path: Path) -> list[str]:
     """変更のパス（追跡していないものを含む）。改名と複製は変更前のパスも含める（外へ移す変更を見落とさない）。"""
-    fields = Git(path).run("status", "--porcelain", "-z", "--untracked-files=all").split("\0")
-    out, i = [], 0
-    while i < len(fields):
-        entry = fields[i]
-        i += 1
-        if len(entry) < 4:
-            continue
-        out.append(entry[3:])
-        if entry[0] in "RC" and i < len(fields):
-            out.append(fields[i])
-            i += 1
-    return out
+    return Git(path).status_paths()
 
 
 def mode(t: Target) -> tuple[localenv_decide.Verdict, list[str]]:

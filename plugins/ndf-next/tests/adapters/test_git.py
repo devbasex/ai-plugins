@@ -305,6 +305,23 @@ def test_changed_paths_parses_porcelain_z(monkeypatch: pytest.MonkeyPatch, stdou
     assert seen == [["git", "status", "--porcelain", "-z", "--untracked-files=all"]]
 
 
+@pytest.mark.parametrize(
+    ("stdout", "want"),
+    [
+        ("C  dst\0src\0M  b\0", ["dst", "src", "b"]),
+        ("R  new\0old\0", ["new", "old"]),
+        ("R  new\0", ["new", ""]),  # NOTE: 現状固定。末尾の空の項目を変更前のパスとして読む
+        ("ab\0 M c\0\0", ["c"]),
+        (" M a b\0?? 改\n行\0", ["a b", "改\n行"]),  # 空白・改行を含む名前もそのまま
+        ("", []),
+    ],
+)
+def test_status_paths_parses_porcelain_z(stdout: str, want: list[str]) -> None:
+    runner = _fake_cwd(stdout=stdout)
+    assert git.Git(Path("/w"), runner).status_paths() == want
+    assert runner.calls == [(["status", "--porcelain", "-z", "--untracked-files=all"], Path("/w"))]
+
+
 # 現状固定（I-021）: `repo.has_ref` の終了コードの読み方。期待値は今の実装の出力。
 @pytest.mark.parametrize(("code", "expected"), [(0, True), (1, False)])
 def test_has_ref_reads_exit_code(code: int, expected: bool) -> None:

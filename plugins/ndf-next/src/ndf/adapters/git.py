@@ -123,6 +123,22 @@ def parse_worktree_list(text: str) -> list[WorktreeEntry]:
     return out
 
 
+def parse_status_z(text: str) -> list[str]:
+    """`git status --porcelain -z` の出力のパス。改名と複製（状態の先頭が `R`・`C`）は続く項目の変更前のパスも並べる。"""
+    fields = text.split("\0")
+    out, i = [], 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        out.append(entry[3:])
+        if entry[0] in "RC" and i < len(fields):
+            out.append(fields[i])
+            i += 1
+    return out
+
+
 @dataclass(frozen=True)
 class Git:
     """1 つの作業場所での git の操作。"""
@@ -188,6 +204,10 @@ class Git:
         if repo is None:
             raise GitError(f"リモート {remote} は GitHub のリポジトリでない: {url}")
         return repo
+
+    def status_paths(self) -> list[str]:
+        """未コミットの変更のパス（追跡していないファイルは中まで含める）。改名と複製は変更前のパスも含める。"""
+        return parse_status_z(self.run("status", "--porcelain", "-z", "--untracked-files=all"))
 
     def worktrees(self) -> list[WorktreeEntry]:
         """このリポジトリの worktree の一覧（先頭はメインディレクトリ）。"""
