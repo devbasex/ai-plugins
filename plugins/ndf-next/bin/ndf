@@ -10,11 +10,10 @@
 #
 # uv が無いとき: 版を固定した uv（UV_VERSION）を `<キャッシュのホーム>/<プラグイン名>/uv/<版>` へ入れてから続ける。
 # 入れられない（curl が無い・ネットワークが無いなど）ときは、理由を結果 JSON（stopped・deps_missing）で出し、
-# 終了コード 69 で止まる。
+# 終了コードの表（contracts/facts/exit-codes.json）の deps_missing の終了コードで止まる。
 set -euo pipefail
 
 UV_VERSION="0.13.7"
-DEPS_MISSING_EXIT=69
 
 # このファイルの実体のパス（シンボリックリンクをたどる。bash 3.2 と macOS の readlink で動く形）
 self="${BASH_SOURCE[0]}"
@@ -33,10 +32,18 @@ fi
 cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/$name"
 
 # 依存の欠けを結果 JSON 1 行で出して止まる（Python の ndf を起こせないので、ここで組む）
+# 終了コードは終了コードの表の deps_missing の行から引き、python3 の終了コードをそのまま返す
 stop_deps_missing() {
   printf '%s\n' "$1" >&2
-  python3 -c 'import json, sys; print(json.dumps({"tool": "cli", "status": "stopped", "summary": sys.argv[1], "items": [], "metrics": {}, "cause": {"kind": "deps_missing", "detail": sys.argv[1]}}, ensure_ascii=False))' "$1"
-  exit "$DEPS_MISSING_EXIT"
+  local code=0
+  python3 -c '
+import json, sys
+detail, table = sys.argv[1], sys.argv[2]
+print(json.dumps({"tool": "cli", "status": "stopped", "summary": detail, "items": [], "metrics": {}, "cause": {"kind": "deps_missing", "detail": detail}}, ensure_ascii=False))
+with open(table, encoding="utf-8") as f:
+    sys.exit(next(row["code"] for row in json.load(f)["rows"] if row["id"] == "deps_missing"))
+' "$1" "$root/contracts/facts/exit-codes.json" || code=$?
+  exit "$code"
 }
 
 uv_bin="$(command -v uv || true)"
