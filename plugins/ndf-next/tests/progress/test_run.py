@@ -13,27 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf import identity
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
 from ndf.progress import command, conditions, definition, invoke, model, records, run, stages, store, table
 
 ISSUE = 3092
-
-
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    path = tmp_path / "work"
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
-    monkeypatch.chdir(path)
-    yield path
-    durable.release_store(_root(path))
-
-
-def _root(cwd: Path) -> Path:
-    return durable.store_root(identity.load().name, cwd)
 
 
 def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
@@ -49,7 +34,7 @@ def _new(capsys, mode: str = "light", *extra: str) -> str:
 
 @pytest.fixture
 def st(repo):
-    root = durable.prepare_store(_root(repo)).root  # 置き場を用意してから開く（`ndf progress` の副命令と同じ順）
+    root = durable.prepare_store(command.store_root_of(repo)).root  # 置き場を用意してから開く（`ndf progress` の副命令と同じ順）
     with store.open_store(store.default_url(root), root) as opened:
         yield opened
 
@@ -459,7 +444,7 @@ def test_cli_next_launches_the_work_in_another_process(repo, capsys):
         time.sleep(0.5)
     assert kinds[kinds.index("started") + 1 :]
     assert waited.get("cause", {}).get("kind") != "wait_timeout"
-    assert (run.work_root(_root(repo), tid) / "work.log").is_file()
+    assert (run.work_root(command.store_root_of(repo), tid) / "work.log").is_file()
 
 
 def test_cli_answer_needs_a_known_answer(repo, capsys):

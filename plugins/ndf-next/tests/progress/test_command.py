@@ -15,20 +15,6 @@ from ndf.core import durable
 from ndf.progress import command, definition, model, store
 
 
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    path = tmp_path / "work"
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
-    monkeypatch.chdir(path)
-    yield path
-    durable.release_store(_root(path))
-
-
-def _root(cwd: Path) -> Path:
-    return durable.store_root(identity.load().name, cwd)
-
-
 def _run(capsys, *argv: str) -> tuple[int, dict]:
     code = command.main(list(argv))
     lines = capsys.readouterr().out.strip().splitlines()
@@ -97,7 +83,7 @@ def test_conductor_operations_leave_reason_and_time(repo, capsys, tmp_path):
 
 
 def _start(tid: str, row: str) -> None:
-    root = _root(Path.cwd())
+    root = command.store_root_of(Path.cwd())
     with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
         last = store.read_events(conn, tid)[-1].seq
         store.append_events(conn, tid, [model.EventDraft("started", "workflow", row, rev=1)], last)
@@ -137,7 +123,7 @@ def test_cancel_closes_the_remaining_rows_and_the_table(repo, capsys):
 
 def test_restore_command_puts_back_a_backup(repo, capsys):
     _new(capsys)
-    root = _root(repo)
+    root = command.store_root_of(repo)
     durable.release_store(root)
     backup = store.latest_backup(root)
     code, out = _run(capsys, "restore", "--from", str(backup))
@@ -289,7 +275,7 @@ def test_requirements_is_refused_in_a_mode_without_the_requirements_stage(repo, 
 
 
 def _stored(tid: str) -> tuple[dict, dict]:
-    root = _root(Path.cwd())
+    root = command.store_root_of(Path.cwd())
     with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
         table = store.read_table(conn, tid)
         _, doc = store.read_definition(conn, tid)
