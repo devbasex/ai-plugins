@@ -107,7 +107,10 @@ def test_render_lists_present_codex_skills_and_writes_policies_for_explicit_only
     codex = json.loads((plugin / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert codex["skills"] == ["./skills/explicit", "./skills/implicit"]
     policy = plugin / "skills" / "explicit" / "agents" / "openai.yaml"
-    assert policy.read_text(encoding="utf-8") == 'policy:\n  allow_implicit_invocation: false\ninterface:\n  default_prompt: "[PR 番号] \\"x\\""\n'
+    assert (
+        policy.read_text(encoding="utf-8")
+        == 'policy:\n  allow_implicit_invocation: false\ninterface:\n  default_prompt: "[PR 番号] \\"x\\""\n'
+    )
     assert not (plugin / "skills" / "implicit" / "agents").exists()
     assert not (plugin / "skills" / "claude-only" / "agents").exists()
     assert policy in written

@@ -47,7 +47,14 @@ def stop(broken: list[str]) -> int:
     """入れ直しの手順を結果 JSON で出し、終了コードの表の deps_missing の終了コードを返す。"""
     steps = f"UV_PROJECT_ENVIRONMENT={sys.prefix} uv sync --frozen --no-dev --reinstall --project {ROOT}"
     detail = f"依存の環境 {sys.prefix} のファイルが欠けている: {', '.join(broken)}。入れ直す: {steps}"
-    report = {"tool": "cli", "status": "stopped", "summary": detail, "items": [], "metrics": {}, "cause": {"kind": "deps_missing", "detail": detail}}
+    report = {
+        "tool": "cli",
+        "status": "stopped",
+        "summary": detail,
+        "items": [],
+        "metrics": {},
+        "cause": {"kind": "deps_missing", "detail": detail},
+    }
     print(json.dumps(report, ensure_ascii=False))
     print(detail, file=sys.stderr)
     rows = json.loads((ROOT / "contracts" / "facts" / "exit-codes.json").read_text(encoding="utf-8"))["rows"]

@@ -10,14 +10,12 @@ run() {
 
 run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
-# Skill を配る plugin family を manifests/ の有無から検出する（plugins/mcp/* は別系統）。
+# Skill を配る plugin family を manifests/ の有無と marketplace.json の登録から検出する（plugins/mcp/* は別系統）。
 # 固定リストを置かないのは、family を足したときにチェック対象から漏れる経路を作らないためである。
 # 後段の静的解析（claude plugin validate）もこの一覧で回す。
+families_out="$(python3 "$ROOT_DIR/scripts/lib/plugin_families.py" "$ROOT_DIR")"
 FAMILIES=()
-for plugin_dir in "$ROOT_DIR"/plugins/*; do
-  [ -d "$plugin_dir/manifests" ] || continue
-  FAMILIES+=("$(basename "$plugin_dir")")
-done
+[ -z "$families_out" ] || mapfile -t FAMILIES <<< "$families_out"
 if [ "${#FAMILIES[@]}" -eq 0 ]; then
   echo "ERROR: plugin family が見つからない（plugins/<family>/manifests）" >&2
   exit 1

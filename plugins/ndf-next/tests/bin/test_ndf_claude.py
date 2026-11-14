@@ -120,7 +120,17 @@ def test_live_session_loads_only_this_plugin_and_its_hooks(tmp_path, monkeypatch
     else:
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", REAL_CONFIG_DIR)
     done = subprocess.run(
-        [str(SCRIPT), "-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--max-budget-usd", "0.3", "Reply OK."],
+        [
+            str(SCRIPT),
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--max-budget-usd",
+            "0.3",
+            "Reply OK.",
+        ],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -149,6 +159,9 @@ def test_launch_args_keep_a_plugin_whose_name_is_on_the_disabled_list(tmp_path):
         (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": key.split("@", 1)[0]}), encoding="utf-8")
         argv = claude.plugin_args(root)
         rest = {k: v for k, v in claude.DISABLED_PLUGINS.items() if k != key}
-        assert argv == (["--settings", json.dumps({"enabledPlugins": rest}, separators=(",", ":"))] if rest else []) + ["--plugin-dir", str(root)]
+        assert argv == (["--settings", json.dumps({"enabledPlugins": rest}, separators=(",", ":"))] if rest else []) + [
+            "--plugin-dir",
+            str(root),
+        ]
     unnamed = tmp_path / "unnamed"
     assert claude.plugin_args(unnamed)[:2] == ["--settings", json.dumps({"enabledPlugins": claude.DISABLED_PLUGINS}, separators=(",", ":"))]
