@@ -79,9 +79,9 @@ def _fetch(git: Git) -> list[str]:
 
 
 def _start_ref(git: Git, base: str) -> str:
-    if repo.has_ref(git, f"refs/remotes/{REMOTE}/{base}"):
+    if git.has_ref(f"refs/remotes/{REMOTE}/{base}"):
         return f"{REMOTE}/{base}"
-    if repo.has_ref(git, f"refs/heads/{base}"):
+    if git.has_ref(f"refs/heads/{base}"):
         return base
     raise CreateError("precondition", f"ベースブランチが origin にもローカルにも無い: {base}")
 
@@ -102,7 +102,7 @@ def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Option
     else:
         base = start
     ref = _start_ref(g, base)
-    if repo.has_ref(g, f"refs/heads/{branch}"):
+    if g.has_ref(f"refs/heads/{branch}"):
         g.run("worktree", "add", "-q", str(target), branch)
         return Created(target, branch, base, branch, False, warnings)
     g.run("worktree", "add", "-q", "--no-track", "-b", branch, str(target), ref)

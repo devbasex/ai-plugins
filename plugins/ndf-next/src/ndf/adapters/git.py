@@ -169,12 +169,20 @@ class Git:
     def merge_base(self, a: str, b: str) -> str:
         return self.run("merge-base", a, b).strip()
 
+    def _probe(self, what: str, *args: str) -> bool:
+        """真偽を終了コードで返す探り（0 は真・1 は偽）。それ以外は `GitError`（`what` を確かめられない）。"""
+        done = self.attempt(*args)
+        if done.returncode not in (0, 1):
+            raise GitError(f"{what}を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
+        return done.returncode == 0
+
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         """`ancestor` が `descendant` の祖先か。git の失敗（終了コード 1 以外）は `GitError`。"""
-        done = self.attempt("merge-base", "--is-ancestor", ancestor, descendant)
-        if done.returncode not in (0, 1):
-            raise GitError(f"祖先を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
-        return done.returncode == 0
+        return self._probe("祖先", "merge-base", "--is-ancestor", ancestor, descendant)
+
+    def has_ref(self, ref: str) -> bool:
+        """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
+        return self._probe("参照", "show-ref", "--verify", "--quiet", ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。

@@ -111,7 +111,7 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
 
 
 def _delete_branch(main: Git, branch: str, rec: Record) -> None:
-    if not repo.has_ref(main, f"refs/heads/{branch}"):
+    if not main.has_ref(f"refs/heads/{branch}"):
         rec.add("branch", branch, outcomes.ABSENT)
         return
     sha = main.rev_parse(f"refs/heads/{branch}")

@@ -322,34 +322,28 @@ def test_status_paths_parses_porcelain_z(stdout: str, want: list[str]) -> None:
     assert runner.calls == [(["status", "--porcelain", "-z", "--untracked-files=all"], Path("/w"))]
 
 
-# 現状固定（I-021）: `repo.has_ref` の終了コードの読み方。期待値は今の実装の出力。
+# 現状固定（I-021）: `Git.has_ref`（元は `repo.has_ref`）の終了コードの読み方。期待値は今の実装の出力。
 @pytest.mark.parametrize(("code", "expected"), [(0, True), (1, False)])
 def test_has_ref_reads_exit_code(code: int, expected: bool) -> None:
-    from ndf.domains.worktree import repo
-
     calls: list = []
 
     def runner(args: list[str], cwd):
         calls.append((args, cwd))
         return git.Completed(code, "", "")
 
-    assert repo.has_ref(git.Git(Path("/w"), runner), "refs/heads/x") is expected
+    assert git.Git(Path("/w"), runner).has_ref("refs/heads/x") is expected
     assert calls == [(["show-ref", "--verify", "--quiet", "refs/heads/x"], Path("/w"))]
 
 
 def test_has_ref_raises_on_git_failure() -> None:
-    from ndf.domains.worktree import repo
-
     with pytest.raises(git.GitError) as exc:
-        repo.has_ref(git.Git(runner=_fake(128, stderr="fatal: bad\n")), "refs/heads/x")
+        git.Git(runner=_fake(128, stderr="fatal: bad\n")).has_ref("refs/heads/x")
     assert str(exc.value) == "参照を確かめられない（終了コード 128）: fatal: bad"
 
 
 def test_has_ref_with_real_repository(tmp_path: Path) -> None:
-    from ndf.domains.worktree import repo
-
     path, _ = _init_repo(tmp_path, {"a": "a\n"})
     g = git.Git(cwd=path)
-    assert repo.has_ref(g, "refs/heads/main") is True
-    assert repo.has_ref(g, "refs/heads/none") is False
-    assert repo.has_ref(g, "main") is False  # 完全な参照の名前だけを見る
+    assert g.has_ref("refs/heads/main") is True
+    assert g.has_ref("refs/heads/none") is False
+    assert g.has_ref("main") is False  # 完全な参照の名前だけを見る

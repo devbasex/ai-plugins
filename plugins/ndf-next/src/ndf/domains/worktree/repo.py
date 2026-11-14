@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ndf.adapters.git import ORIGIN, Git, GitError, WorktreeEntry
+from ndf.adapters.git import ORIGIN, Git, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
 
@@ -95,11 +95,3 @@ def delete_merged_branch(git: Git, branch: str) -> Optional[str]:
     """`git branch -d` でブランチを消す（`-D` は使わない）。消せたら `None`、git が断ったらその標準エラー。"""
     done = git.attempt("branch", "-d", branch)
     return None if done.returncode == 0 else done.stderr.strip()
-
-
-def has_ref(git: Git, ref: str) -> bool:
-    """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
-    done = git.attempt("show-ref", "--verify", "--quiet", ref)
-    if done.returncode not in (0, 1):
-        raise GitError(f"参照を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
-    return done.returncode == 0

@@ -28,7 +28,7 @@ def resolve(main: Git, name: str) -> Optional[str]:
     名前をそのまま `git rev-parse` へ渡さない（`refs/remotes/origin/<名前>` は名前の解決の順に含まれない）。
     """
     for ref in (f"refs/heads/{name}", f"refs/remotes/{ORIGIN}/{name}"):
-        if repo.has_ref(main, ref):
+        if main.has_ref(ref):
             return main.rev_parse(ref)
     return None
 
