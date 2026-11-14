@@ -77,6 +77,10 @@ SWEPT_MARK = ".swept"
 PROGRESS_LOCK = "progress.sqlite.lock"
 # SQLite の本体に付いて動くファイルの接尾辞。退避では本体とそろえて移す
 SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
+# 鍵ごとのファイルの本体・検査の目印・鍵のロックの接尾辞
+DB_SUFFIX = ".sqlite"
+CHECKED_SUFFIX = ".checked"
+LOCK_SUFFIX = ".lock"
 FINISHED = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
 WAITING = ("PENDING", "ENQUEUED")
 # 置き場の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
@@ -234,7 +238,7 @@ def run_name(run_key: str) -> str:
 
 def run_url(root: Path, run_key: str) -> str:
     """SQLite のときの、鍵ごとのファイルの URL。"""
-    return f"sqlite:///{_dbos_dir(root) / (run_name(run_key) + '.sqlite')}"
+    return f"sqlite:///{_dbos_dir(root) / (run_name(run_key) + DB_SUFFIX)}"
 
 
 def _dbos_dir(root: Path) -> Path:
@@ -358,7 +362,7 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 
 @contextmanager
 def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
-    path = _dbos_dir(root) / f"{name}.lock"
+    path = _dbos_dir(root) / f"{name}{LOCK_SUFFIX}"
     while True:
         handle = _open_lock_file(path)
         if wait:
@@ -428,7 +432,7 @@ def _write_format(root: Path) -> None:
 
 def _retire_store(root: Path, found: int, now: datetime) -> Path:
     """旧い置き場の鍵のロックと進行表の DB のロックをすべて待たずに取り、名前を変えて退避する（I11）。"""
-    old_locks = sorted(_dbos_dir(root).glob("*.lock")) + [p for p in (root / PROGRESS_LOCK,) if p.exists()]
+    old_locks = sorted(_dbos_dir(root).glob(f"*{LOCK_SUFFIX}")) + [p for p in (root / PROGRESS_LOCK,) if p.exists()]
     with ExitStack() as stack:
         busy = []
         for path in old_locks:
@@ -554,20 +558,25 @@ def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Pa
             dst = target.with_name(target.name + suffix)
             src.rename(dst)
             os.utime(dst, stamp)
-    body.with_suffix(".checked").unlink(missing_ok=True)
-    body.with_suffix(".lock").unlink(missing_ok=True)
+    _drop_marks(body)
     return target
+
+
+def _drop_marks(body: Path) -> None:
+    """鍵のファイルの目印 `.checked` と、最後に `.lock` を消す。"""
+    body.with_suffix(CHECKED_SUFFIX).unlink(missing_ok=True)
+    body.with_suffix(LOCK_SUFFIX).unlink(missing_ok=True)
 
 
 def _check_key_file(path: Path, now: datetime) -> None:
     """鍵ごとの目印が古いか無ければ `quick_check` を打つ。通らなければ broken/ へ移して `StoreBroken`（A4）。"""
-    mark = path.with_suffix(".checked")
+    mark = path.with_suffix(CHECKED_SUFFIX)
     if _fresh(mark, now):
         return
     if check_file(path):
         _touch(mark, now)
         return
-    moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}.sqlite", now)
+    moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}{DB_SUFFIX}", now)
     raise StoreBroken(f"耐久の記録のファイルが壊れていたので退避した: {moved}", (moved,))
 
 
@@ -608,10 +617,9 @@ def workflows(database_url: str, run_key: str | None = None) -> list[RunRecord]:
 
 
 def _retire_name(root: Path, name: str, now: datetime) -> Path | None:
-    body = _dbos_dir(root) / f"{name}.sqlite"
+    body = _dbos_dir(root) / f"{name}{DB_SUFFIX}"
     if not body.exists():
-        body.with_suffix(".checked").unlink(missing_ok=True)
-        body.with_suffix(".lock").unlink(missing_ok=True)
+        _drop_marks(body)
         return None
     if any(r.status not in FINISHED for r in _records(_sqlite_url(body), None)):
         return None
@@ -670,7 +678,7 @@ def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
 
 def _retire_finished(root: Path, now: datetime, out: SweepResult) -> None:
     """開いているプロセスのいない鍵のファイルのうち、耐久ワークフローがすべて終わったものを retired/ へ移す。"""
-    for body in sorted(_dbos_dir(root).glob("*.sqlite")):
+    for body in sorted(_dbos_dir(root).glob(f"*{DB_SUFFIX}")):
         with _file_run_lock(root, body.stem, wait=False) as held:
             if held is None:
                 out.busy += 1
@@ -687,11 +695,11 @@ def _retire_finished(root: Path, now: datetime, out: SweepResult) -> None:
 def _drop_orphans(root: Path) -> None:
     """本体の無い `.checked` と、本体が無くだれも持たない `.lock` を消す。"""
     dbos_dir = _dbos_dir(root)
-    for mark in dbos_dir.glob("*.checked"):
-        if not mark.with_suffix(".sqlite").exists():
+    for mark in dbos_dir.glob(f"*{CHECKED_SUFFIX}"):
+        if not mark.with_suffix(DB_SUFFIX).exists():
             mark.unlink(missing_ok=True)
-    for lock in dbos_dir.glob("*.lock"):
-        if lock.with_suffix(".sqlite").exists():
+    for lock in dbos_dir.glob(f"*{LOCK_SUFFIX}"):
+        if lock.with_suffix(DB_SUFFIX).exists():
             continue
         with _file_run_lock(root, lock.stem, wait=False) as held:
             if held is not None:
@@ -820,7 +828,7 @@ def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: d
 def _pending_in(root: Path) -> list[RunRecord]:
     found: list[RunRecord] = []
     unreadable: list[str] = []
-    for body in sorted(_dbos_dir(root).glob("*.sqlite")):
+    for body in sorted(_dbos_dir(root).glob(f"*{DB_SUFFIX}")):
         try:
             records = _records(_sqlite_url(body), None, list(WAITING))
         except Exception as exc:  # noqa: BLE001 ファイル: 読めないファイルは数えず、件数をまとめてログに残して残りを集める
