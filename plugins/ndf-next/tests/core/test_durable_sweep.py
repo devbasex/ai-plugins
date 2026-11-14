@@ -261,6 +261,47 @@ def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_
     assert [_fields(r) for r in durable.pending(root)] == [(name, "wf-family-child", "PENDING", "wf-family", version)]
 
 
+def test_cancel_before_launch_cancels_the_run_and_its_waiting_child(root):
+    """現状固定: DBOS を起こさずに、親と待ちの子をまとめて取り消す。"""
+    _run(root, "cancel", "child-wait")
+    url = durable.run_url(root, "cancel")
+
+    durable.cancel_before_launch(url, "wf-cancel")
+
+    statuses = {r.workflow_id: r.status for r in durable.workflows(url, "cancel")}
+    assert statuses == {"wf-cancel": "SUCCESS", "wf-cancel-child": "CANCELLED"}
+    assert durable.pending(root) == []
+
+
+class _FailingClient:
+    """DBOSClient の代わりに、操作で落ち、destroy の回数を数える。"""
+
+    destroyed = 0
+
+    def __init__(self, system_database_url: str) -> None:
+        self.url = system_database_url
+
+    def _fail(self, *args, **kwargs):
+        raise RuntimeError(f"failed: {self.url}")
+
+    list_workflows = cancel_workflow = delete_workflows = _fail
+
+    def destroy(self) -> None:
+        type(self).destroyed += 1
+
+
+def test_client_errors_propagate_and_the_client_is_destroyed(monkeypatch):
+    """現状固定: DBOSClient の操作が落ちても destroy してから、例外をそのまま上げる。"""
+    monkeypatch.setattr(durable, "DBOSClient", _FailingClient)
+    monkeypatch.setattr(_FailingClient, "destroyed", 0)
+
+    with pytest.raises(RuntimeError, match="failed: sqlite:///x"):
+        durable.workflows("sqlite:///x")
+    with pytest.raises(RuntimeError, match="failed: sqlite:///y"):
+        durable.cancel_before_launch("sqlite:///y", "wf")
+    assert _FailingClient.destroyed == 2
+
+
 def test_check_file():
     assert durable.check_file(Path("/nonexistent/x.sqlite"))
 
