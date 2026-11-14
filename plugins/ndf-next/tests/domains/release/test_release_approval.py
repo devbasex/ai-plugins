@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 
 from ndf.adapters import ci
-from ndf.adapters.github import Authored
+from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.release import approval_decide, land, trail
 
 from ._fakes import HEAD, OTHER, FakeHub, pull
@@ -110,3 +110,59 @@ def test_production_merge_then_sync_back_to_base() -> None:
     done = _lander(hub, False, []).land(7)
     assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
     assert land.Lander(hub, "develop", "main", 1.0).required("main") == ["pytest"]
+
+
+def test_required_includes_classic_branch_protection() -> None:
+    """ruleset に加えて従来の保護（branch protection）の必須のチェックも待つ。"""
+    hub = FakeHub()
+    hub.responses[("GET", "/repos/o/r/branches/main")] = {
+        "protection": {"required_status_checks": {"contexts": ["lint"], "checks": [{"context": "build"}]}}
+    }
+    assert land.Lander(hub, "develop", "main", 1.0).required("main") == ["build", "lint"]
+
+
+def test_commit_status_counts_as_required_check() -> None:
+    """必須のチェックが外部の CI の commit status でも、通っていれば missing にしない。"""
+    readers: list[Callable[[], ci.Reading]] = []
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        readers.append(reader)
+        return ci.WatchResult(reader(), 1, 0.0, 0.0)
+
+    hub = FakeHub(pulls={8: pull(number=8, base="develop")})
+    hub.responses[("GET", "/repos/o/r/branches/develop")] = {"protection": {"required_status_checks": {"contexts": ["ext-ci"]}}}
+    hub.responses[("GET", f"/repos/o/r/commits/{HEAD}/status")] = {
+        "statuses": [{"context": "ext-ci", "state": "success", "updated_at": "t1", "created_at": "t0", "id": 3}]
+    }
+    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(8)
+    reading = readers[0]()
+    assert reading.missing == [] and reading.running == [] and done.merged and hub.merged == [8]
+
+
+def test_sync_pr_uses_production_branch_as_head() -> None:
+    """戻す PR は本番ブランチを head にして作る（リリースのブランチはマージの後に消えることがある）。"""
+    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+    _lander(hub, False, []).land(7)
+    made = [payload for method, path, payload in hub.requests if (method, path) == ("POST", "/repos/o/r/pulls")]
+    assert [(m["head"], m["base"]) for m in made] == [("main", "develop")]
+
+
+def test_merged_release_resumes_sync_with_open_pr() -> None:
+    """本番 PR がマージ済みでも、開いている戻す PR を使い直してマージを再開する。"""
+    hub = FakeHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")})
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
+    done = _lander(hub, False, []).land(7)
+    assert done.merged and done.sync_pr == 9 and hub.merged == [9]
+    assert not any((m, p) == ("POST", "/repos/o/r/pulls") for m, p, _ in hub.requests)
+
+
+def test_sync_without_diff_is_done_but_other_422_raises() -> None:
+    """差分が無い 422 だけを「戻す差分なし」とし、ほかの 422 は隠さない。"""
+    hub = FakeHub(pulls={7: pull(merged=True)})
+    hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("No commits between develop and main", 422)
+    done = _lander(hub, False, []).land(7)
+    assert done.merged and done.sync_pr is None and hub.merged == []
+    hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("Validation Failed: head invalid", 422)
+    with pytest.raises(GitHubError):
+        _lander(hub, False, []).land(7)

@@ -106,6 +106,8 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
 def cmd_merge(args: argparse.Namespace) -> dict:
     done = land.Lander(_hub(args), args.base, args.production, args.budget).land(args.pr)
     outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
+    if done.production_sha is not None:
+        outputs["production_sha"] = done.production_sha
     if done.merged and done.kind is None:
         return result.result(TOOL, result.OK, done.detail, outputs=outputs)
     return result.stopped(TOOL, done.kind if done.kind else "unknown", done.detail, outputs=outputs)
@@ -227,50 +229,35 @@ def _branch(p: argparse.ArgumentParser) -> None:
     p.add_argument("--branch", action="append", required=True)
 
 
-# 副命令の名前 → 引数を足す関数（並びは足す順。どの副命令にも先に `_common` を足す）
-ARGS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
-    "assemble": (_target_args,),
-    "materials": (_target_args, _materials_out),
-    "present": (_pr, _material),
-    "answer": (_pr, _answer_args),
-    "approval-check": (_pr, _production),
-    "merge": (_pr, _branches, _budget),
-    "publish": (_revision,),
-    "sync-base": (_main_dir, _base),
-    "config-snapshot": (_snapshot_out,),
-    "config-check": (_before,),
-    "cleanup": (_branch,),
+# 副命令のハンドラー → 引数を足す関数（並びは足す順。どの副命令にも先に `_common` を足す）
+ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
+    cmd_assemble: (_target_args,),
+    cmd_materials: (_target_args, _materials_out),
+    cmd_present: (_pr, _material),
+    cmd_answer: (_pr, _answer_args),
+    cmd_approval_check: (_pr, _production),
+    cmd_merge: (_pr, _branches, _budget),
+    cmd_publish: (_revision,),
+    cmd_sync_base: (_main_dir, _base),
+    cmd_config_snapshot: (_snapshot_out,),
+    cmd_config_check: (_before,),
+    cmd_cleanup: (_branch,),
 }
+
+# 副命令の名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない
+HANDLERS = {f.__name__.removeprefix("cmd_").replace("_", "-"): f for f in ARGS}
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ndf release-steps", description="リリース（段階ごとのモジュール）")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, adders in ARGS.items():
+    for name, handler in HANDLERS.items():
         p = sub.add_parser(name)
         _common(p)
-        for add in adders:
+        for add in ARGS[handler]:
             add(p)
     return parser
 
-
-# 副命令の名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない
-HANDLERS = {
-    f.__name__.removeprefix("cmd_").replace("_", "-"): f
-    for f in (
-        cmd_assemble,
-        cmd_materials,
-        cmd_present,
-        cmd_answer,
-        cmd_approval_check,
-        cmd_merge,
-        cmd_publish,
-        cmd_sync_base,
-        cmd_config_snapshot,
-        cmd_config_check,
-        cmd_cleanup,
-    )
-}
 
 # 止まった理由の種類（例外 → 種類）
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (

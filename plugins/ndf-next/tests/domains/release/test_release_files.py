@@ -266,5 +266,5 @@ def test_declaration_load_errors_name_the_file(tmp_path: Path) -> None:
 
 
 def test_release_steps_args_table_matches_handlers() -> None:
-    """引数の表（ARGS）とハンドラーの表（HANDLERS）は同じ副命令を同じ順に持つ。"""
-    assert list(release_cli.ARGS) == list(release_cli.HANDLERS)
+    """ハンドラーの表（HANDLERS）は引数の表（ARGS）のハンドラーを同じ順に持つ。"""
+    assert list(release_cli.HANDLERS.values()) == list(release_cli.ARGS)

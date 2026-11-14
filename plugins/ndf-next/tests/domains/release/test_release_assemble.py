@@ -140,3 +140,26 @@ def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expect
     found, decl = plugins_mod.load(work), decl_mod.load(work)
     assert gather.changes(repo_git.changed_files("origin/main", "origin/develop"), found, decl) == expected
     assert gather.changes(repo_git.changed_files("origin/develop", "origin/develop"), found, decl) == []
+
+
+def _develop_ahead(tmp_path: Path) -> Path:
+    """develop の版を 1.3.0 へ上げた origin の、main を取り出した clone。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.3.0"})
+    git(work, "commit", "-q", "-am", "bump")
+    git(work, "push", "-q", "origin", "develop")
+    return clone(tmp_path, tmp_path / "origin.git", "on-main", branch="main")
+
+
+def test_assemble_plans_from_base_tip_even_when_started_on_production(tmp_path: Path) -> None:
+    """既定ブランチ（main）で起動しても、版は範囲の先端（develop）から読んで計画する（版が逆行しない）。"""
+    work = _develop_ahead(tmp_path)
+    built = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert built.version == "1.3.1"
+
+
+def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
+    """collect はworktreeが範囲の先端でなければ止まる（ほかのブランチの版から計画しない）。"""
+    work = _develop_ahead(tmp_path)
+    with pytest.raises(assemble.AssembleError, match="origin/develop の先端でない"):
+        assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))

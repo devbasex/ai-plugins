@@ -31,6 +31,7 @@ class FakeHub:
     merged: list[int] = field(default_factory=list)
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
+    runs: list[dict] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -58,6 +59,9 @@ class FakeHub:
 
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
+
+    def check_runs(self, sha: str) -> list[dict]:
+        return list(self.runs)
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
         self.merged.append(number)

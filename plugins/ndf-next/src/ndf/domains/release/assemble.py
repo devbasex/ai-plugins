@@ -110,10 +110,9 @@ def _open_pr(hub: GitHub, branch: str, base: str, title: str, body: str) -> tupl
     return number, str(made["html_url"])
 
 
-def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
-    """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。"""
+def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> materials_decide.Facts:
+    """worktree（範囲の先端を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
     repo_git = git_mod.Git(root)
-    span = _span(repo_git, target)
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
     paths = repo_git.changed_files(span.since, span.until)
@@ -132,10 +131,25 @@ def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     )
 
 
-def assemble(root: Path, hub: GitHub, target: Target) -> Built:
-    """リリースのブランチを組み立てて PR を作る。"""
+def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
+    """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。
+
+    宣言・マーケットプレイス・今の版はworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
+    なければ `AssembleError` で止まる（ほかのブランチの版から計画すると版が逆行する）。
+    """
     repo_git = git_mod.Git(root)
-    facts = collect(root, hub, target)
+    span = _span(repo_git, target)
+    if repo_git.rev_parse("HEAD") != repo_git.rev_parse(span.until):
+        raise AssembleError(f"worktreeの HEAD が {span.until} の先端でない（ベースブランチの先端で打つ）")
+    return _facts(root, hub, target, span)
+
+
+def assemble(root: Path, hub: GitHub, target: Target) -> Built:
+    """リリースのブランチを組み立てて PR を作る。材料は範囲の先端を取り出してから読む。"""
+    repo_git = git_mod.Git(root)
+    span = _span(repo_git, target)
+    repo_git.run("switch", "--quiet", "--detach", span.until)
+    facts = _facts(root, hub, target, span)
     named = _named(facts.planned, target.plugin)
     branch = version_decide.branch_of(named.next)
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0:
