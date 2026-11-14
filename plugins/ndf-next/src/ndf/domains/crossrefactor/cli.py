@@ -74,9 +74,19 @@ def _collected(a: argparse.Namespace) -> dict[str, Any]:
 
 def _run(a: argparse.Namespace) -> dict[str, Any]:
     cfg = drive.RunConfig(
-        Path(a.work), a.pr, a.branch, a.base, tuple(a.scope), tuple(a.required), tuple(a.ci_test), tuple(a.symbols), tuple(a.participants), a.max_fix,
-        budget_minutes=a.budget_minutes, safety_net_minutes=a.safety_net_minutes,
-    )  # fmt: skip
+        Path(a.work),
+        a.pr,
+        a.branch,
+        a.base,
+        scope=tuple(a.scope),
+        required=tuple(a.required),
+        tests=tuple(a.ci_test),
+        symbols=tuple(a.symbols),
+        participants=tuple(a.participants),
+        max_fix=a.max_fix,
+        budget_minutes=a.budget_minutes,
+        safety_net_minutes=a.safety_net_minutes,
+    )
     done = drive.drive(cfg)
     if done.kind == "ok":
         return result.result(TOOL, "ok", done.detail, done.items, done.metrics)
