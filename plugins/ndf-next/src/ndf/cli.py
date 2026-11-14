@@ -61,11 +61,16 @@ def main(argv: list[str] | None = None) -> int:
         return result.emit_unchecked(TOOL, "config_broken", f"契約のファイルが読めない: {exc}")
 
 
+def _stop(tool: str, kind: str, detail: str) -> int:
+    """止まった結果 JSON を出し、その終了コードを返す。"""
+    return result.emit(result.stopped(tool, kind, detail))
+
+
 def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
     except identity.IdentityError as exc:
-        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
+        return _stop(TOOL, "config_broken", str(exc))
     if not args or args[0] in ("-h", "--help"):
         print(_usage(ident.name))
         return 0
@@ -73,7 +78,7 @@ def _run(args: list[str]) -> int:
     if module is None:
         print(f"知らない副命令: {args[0]}", file=sys.stderr)
         print(_usage(ident.name), file=sys.stderr)
-        return result.emit(result.stopped(TOOL, "invalid", f"知らない副命令: {args[0]}"))
+        return _stop(TOOL, "invalid", f"知らない副命令: {args[0]}")
     return _call(args[0], module, args[1:])
 
 
@@ -84,9 +89,9 @@ def _call(name: str, module: str, argv: list[str]) -> int:
     except SystemExit as exc:
         if exc.code != ARGPARSE_USAGE_EXIT:
             raise
-        return result.emit(result.stopped(name, "invalid", f"{name} の引数の誤り（使い方は標準エラーに出した）"))
+        return _stop(name, "invalid", f"{name} の引数の誤り（使い方は標準エラーに出した）")
     except contracts.ContractError:
         raise
     except Exception as exc:  # 副命令が捕まえない例外も結果 JSON（stopped/unknown）で終える
         log.exception("副命令が捕まえない例外で止まった: %s", name)
-        return result.emit(result.stopped(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}"))
+        return _stop(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}")
