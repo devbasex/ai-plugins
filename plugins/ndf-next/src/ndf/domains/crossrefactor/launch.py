@@ -58,7 +58,9 @@ def _limit(req: Request) -> float:
 
 def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
     if req.runtime == participants.FIXER:
-        call = claude.ClaudeCall(system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=READ_TOOLS)
+        call = claude.ClaudeCall(
+            system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=READ_TOOLS
+        )
         return agents.Launch(req.runtime, (*claude.claude_args(call), req.prompt), workdir, agents.AgentPaths.at(paths_stem), _limit(req))
     return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
 

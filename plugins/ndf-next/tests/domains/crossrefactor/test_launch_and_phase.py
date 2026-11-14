@@ -35,7 +35,9 @@ def test_coding_phases_run_in_the_writable_work_dir():
 
 
 def test_finished_guidance_without_a_reopen_flag_does_not_name_one():
-    got = finished_decide.finished((None, None), ("abc", ["--scope", "lib"]), reopen_flag=None, discard_hint="状態ファイルを消して init から")
+    got = finished_decide.finished(
+        (None, None), ("abc", ["--scope", "lib"]), reopen_flag=None, discard_hint="状態ファイルを消して init から"
+    )
     assert got.keep
     assert got.notes and all("--reopen" not in n for n in got.notes)
     assert all("状態ファイルを消して init から" in n for n in got.notes)

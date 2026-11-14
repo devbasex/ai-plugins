@@ -159,5 +159,17 @@ def fake_ci(monkeypatch: pytest.MonkeyPatch, *results: Watched) -> list[str]:
     return waited
 
 
-def ports(fake: FakeAgents, hub: FakeHub) -> drive.Ports:
-    return drive.Ports(launcher=fake, hub=lambda work: hub, sleep=lambda s: None)  # type: ignore[arg-type,return-value]
+@dataclass
+class Comments:
+    """PR へ書くコメントの代わり。書いた本文を並べる。"""
+
+    bodies: list[str] = field(default_factory=list)
+
+    def __call__(self, work: Any, pr: int, body: str) -> str:
+        self.bodies.append(body)
+        return f"https://example.com/pull/{pr}#c{len(self.bodies)}"
+
+
+def ports(fake: FakeAgents, hub: FakeHub, comments: Optional[Comments] = None) -> drive.Ports:
+    post = comments if comments is not None else Comments()
+    return drive.Ports(launcher=fake, hub=lambda work: hub, sleep=lambda s: None, comment=post)  # type: ignore[arg-type,return-value]

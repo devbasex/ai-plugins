@@ -11,7 +11,7 @@ import pytest
 from ndf.domains.crossrefactor import diff_decide, scope, symbols_decide
 from ndf.domains.crossrefactor.symbols_decide import OUT_OF_SCOPE, Touched
 
-CLI = '''import os
+CLI = """import os
 
 
 def cmd_scale(n):
@@ -28,7 +28,7 @@ class Runner:
 
     def stop(self):
         return 0
-'''
+"""
 
 
 def test_body_change_touches_only_that_function(gitwork):

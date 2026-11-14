@@ -201,7 +201,7 @@ def orphans(porcelain: str, host: str) -> list[Path]:
 def sweep_orphans(repo: git.Git, host: Optional[str] = None) -> list[Path]:
     """持ち主のいない NDF の lock を外して登録を片付け、片付けた worktree を返す。別のホスト・利用者の lock は触らない。"""
     found = orphans(repo.run("worktree", "list", "--porcelain"), host if host is not None else socket.gethostname())
-    for path in found:  # noqa: NDF201 上限: 持ち主のいない lock の数（作業場所 1 つにつき担当の数まで）
+    for path in found:
         repo.run("worktree", "unlock", str(path))
         repo.run("worktree", "remove", "--force", str(path))
     return found

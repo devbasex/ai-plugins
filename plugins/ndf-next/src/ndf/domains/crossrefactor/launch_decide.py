@@ -24,6 +24,11 @@ def read_only_phases() -> frozenset[str]:
     return frozenset(facts.ids(PHASES, skill=SKILL, coding=False))
 
 
+def coding_phases() -> frozenset[str]:
+    """コードを書く工程。表 `loop-phases` の coding が真の行（安全網はこの工程の起動の秒を数える）。"""
+    return frozenset(facts.ids(PHASES, skill=SKILL, coding=True))
+
+
 @dataclass(frozen=True)
 class ResultPlace:
     """担当が書く結果ファイル（`submit`）と、起動の側が回収する先（`collect`）。"""

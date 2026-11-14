@@ -100,7 +100,13 @@ def test_add_tests_without_a_result_skips_the_item_instead_of_stopping(world, mo
 
 
 def test_added_test_not_collected_by_the_whole_run_reverts_the_item(world, monkeypatch) -> None:
-    decl = {"test": {"suites": [{"name": "pytest", "command": "pytest", "collect_command": "printf 'tests/test_geo.py::test_area\\n'", "paths": ["."]}]}}
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "pytest", "command": "pytest", "collect_command": "printf 'tests/test_geo.py::test_area\\n'", "paths": ["."]}
+            ]
+        }
+    }
     adds = commit_at({**TESTS, "tests/geo_helpers.py": "def test_x():\n    pass\n"}, "テストを足す", {"tests": ["tests/geo_helpers.py"]})
 
     def with_decl(spec, submit):

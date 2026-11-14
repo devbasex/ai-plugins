@@ -6,9 +6,7 @@ from ndf.domains.crossrefactor import cli, range_decide, scope
 
 
 def test_scope_keeps_code_files_and_drops_documents_and_covered_items() -> None:
-    got = range_decide.compose(
-        ["src/a.py", "src/sub/b.py", "docs/guide.md"], ["tests/"], {}, ["src/sub"]
-    )
+    got = range_decide.compose(["src/a.py", "src/sub/b.py", "docs/guide.md"], ["tests/"], {}, ["src/sub"])
     assert got == ["src/a.py", "tests", "src/sub"]
 
 

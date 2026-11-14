@@ -80,7 +80,13 @@ def test_fill_paths_quotes_and_requires_the_slot():
 
 @pytest.mark.parametrize(
     ("path", "expected"),
-    [("tests/test_a.py", True), ("pkg/a_test.go", True), ("src/latest_version.py", False), ("web/contest_rules.ts", False), ("spec/x.rb", True)],
+    [
+        ("tests/test_a.py", True),
+        ("pkg/a_test.go", True),
+        ("src/latest_version.py", False),
+        ("web/contest_rules.ts", False),
+        ("spec/x.rb", True),
+    ],
 )
 def test_test_file_names_follow_the_shared_table(path, expected):
     assert tests_decide.is_test_file(path) is expected

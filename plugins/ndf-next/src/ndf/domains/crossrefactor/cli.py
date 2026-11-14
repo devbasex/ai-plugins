@@ -4,7 +4,8 @@
     ndf refactor tests --changed <ファイル>... [--work <dir>]
     ndf refactor collected --paths <ファイル>... [--timeout <秒>] [--work <dir>]
     ndf refactor run --pr <N> --branch <head> --base <起点> --scope <置き場>... --required <チェック>... [--ci-test <名前>...]
-                     [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>] [--work <dir>]
+                     [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>]
+                     [--budget-minutes <分>] [--safety-net-minutes <分>] [--work <dir>]
     ndf refactor state --pr <N> [--work <dir>]
     ndf refactor scope-args --base <起点> [--tests <置き場>...] [--scope <置き場>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
@@ -13,7 +14,9 @@
   渡せば差分から引かずにそれを使う
 - `tests`: 項目が触るファイルに対応する範囲テストのファイル（#3049）。対応を引けないソースは `unmapped` に載る
 - `collected`: 足したテストのファイルが全体の実行に収集されるか（#620）。収集されないファイルがあれば `test_failed` で止まる
-- `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける
+- `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける。
+  `--budget-minutes` は採る項目を選ぶ実装の予算、`--safety-net-minutes` はコードを書く工程の起動の秒の累計の上限
+  （無ければ実効の予算 × 宣言の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
 - `release`: 作業場所を片付ける（NDF の lock だけを外す）
@@ -71,8 +74,9 @@ def _collected(a: argparse.Namespace) -> dict[str, Any]:
 
 def _run(a: argparse.Namespace) -> dict[str, Any]:
     cfg = drive.RunConfig(
-        Path(a.work), a.pr, a.branch, a.base, tuple(a.scope), tuple(a.required), tuple(a.ci_test), tuple(a.symbols), tuple(a.participants), a.max_fix
-    )
+        Path(a.work), a.pr, a.branch, a.base, tuple(a.scope), tuple(a.required), tuple(a.ci_test), tuple(a.symbols), tuple(a.participants), a.max_fix,
+        budget_minutes=a.budget_minutes, safety_net_minutes=a.safety_net_minutes,
+    )  # fmt: skip
     done = drive.drive(cfg)
     if done.kind == "ok":
         return result.result(TOOL, "ok", done.detail, done.items, done.metrics)
@@ -88,7 +92,12 @@ def _state(a: argparse.Namespace) -> dict[str, Any]:
     data = store.load(path)
     items = data["items"] if "items" in data else []
     shown = [
-        {"kind": "state", "path": str(path), "phases": data["phases"] if "phases" in data else {}, "final": data["final"] if "final" in data else None},
+        {
+            "kind": "state",
+            "path": str(path),
+            "phases": data["phases"] if "phases" in data else {},
+            "final": data["final"] if "final" in data else None,
+        },
         *({"kind": "item", **i} for i in items),
     ]
     summary = f"状態ファイル {path}: 項目 {len(items)} 件" + ("・完了" if "done" in data else "")
@@ -106,7 +115,13 @@ def _release(a: argparse.Namespace) -> dict[str, Any]:
     kept = workspace.release(repo, ws)
     swept = worktree.sweep_orphans(repo)
     items = [{"kind": "kept", "reason": k} for k in kept]
-    return result.result(TOOL, "ok", f"作業場所を片付けた（残した {len(kept)} 件・持ち主のいない lock {len(swept)} 件）", items, {"kept": len(kept), "swept": len(swept)})
+    return result.result(
+        TOOL,
+        "ok",
+        f"作業場所を片付けた（残した {len(kept)} 件・持ち主のいない lock {len(swept)} 件）",
+        items,
+        {"kept": len(kept), "swept": len(swept)},
+    )
 
 
 HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
@@ -149,6 +164,8 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     r.add_argument("--symbols", nargs="*", default=[])
     r.add_argument("--participants", nargs="*", default=[])
     r.add_argument("--max-fix", type=int, default=2)
+    r.add_argument("--budget-minutes", type=int)
+    r.add_argument("--safety-net-minutes", type=float)
     st = sub.add_parser("state", help="状態ファイルの中身")
     rl = sub.add_parser("release", help="作業場所を片付ける")
     for each in (st, rl):

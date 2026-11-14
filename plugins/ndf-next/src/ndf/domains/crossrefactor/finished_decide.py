@@ -23,7 +23,13 @@ def _how(reopen_flag: str | None, discard_hint: str) -> str:
     return f"打ち直すなら {reopen_flag}" if reopen_flag else f"打ち直すなら {discard_hint}"
 
 
-def finished(recorded: tuple[str | None, Sequence[str] | None], current: tuple[str | None, Sequence[str]], *, reopen_flag: str | None, discard_hint: str) -> Finished:
+def finished(
+    recorded: tuple[str | None, Sequence[str] | None],
+    current: tuple[str | None, Sequence[str]],
+    *,
+    reopen_flag: str | None,
+    discard_hint: str,
+) -> Finished:
     """記録の (head, 引数) と今の (head, 引数) から決める。
 
     `reopen_flag` は drive が持つ打ち直しの引数（持たなければ None）、`discard_hint` は持たないときに案内する手順。
