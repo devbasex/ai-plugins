@@ -58,12 +58,9 @@ def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[T
 def _boot(runtime: str, event: str, payload: dict, record: dict) -> str:
     from ndf.domains.hooks import strict
 
-    off = tables.off_names(os.environ.get("NDF_HOOK_OFF"))
-    began = time.monotonic()
-    verdict = None if tables.is_off("merge-production", off) else strict.check(payload, str(payload.get("cwd") or os.getcwd()))
+    verdict, ms = strict.judge(payload, tables.off_names(os.environ.get("NDF_HOOK_OFF")))
     if verdict is not None:
-        ms = round((time.monotonic() - began) * 1000, 3)
-        record.update(verdict="deny", guards=[{"name": "merge-production", "ms": ms, "kind": "deny", "error": ""}])
+        record.update(verdict="deny", guards=[{"name": strict.GUARD_NAME, "ms": ms, "kind": "deny", "error": ""}])
         return tables.output_for(runtime, event, "deny", verdict.reason)
     if event != "SessionStart":
         return ""

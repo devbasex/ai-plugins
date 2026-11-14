@@ -24,8 +24,6 @@ from typing import Any, List, Optional, TextIO
 
 from ndf.domains.hooks import tables
 
-STRICT_GUARD = "merge-production"
-
 
 class _Deadline(BaseException):
     """締め切りの割り込み。guard の `except Exception` に捕まらないよう BaseException から作る。"""
@@ -95,14 +93,13 @@ def _entry(argv: List[str], text: str, record: dict, state_dir: Optional[Path], 
 
 def _strict(runtime: str, event: str, payload: dict, off: frozenset, record: dict) -> Optional[str]:
     """`strict` の guard。止める答えなら出力、ほかは None。"""
-    if tables.is_off(STRICT_GUARD, off):
-        return None
     from ndf.domains.hooks import strict
 
-    began = time.monotonic()
-    verdict = strict.check(payload, str(payload.get("cwd") or os.getcwd()))
+    verdict, ms = strict.judge(payload, off)
+    if ms is None:
+        return None
     kind = "deny" if verdict is not None else "pass"
-    record["guards"].append({"name": STRICT_GUARD, "ms": round((time.monotonic() - began) * 1000, 3), "kind": kind, "error": ""})
+    record["guards"].append({"name": strict.GUARD_NAME, "ms": ms, "kind": kind, "error": ""})
     if verdict is None:
         return None
     record["verdict"] = "deny"

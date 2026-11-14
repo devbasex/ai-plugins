@@ -16,10 +16,15 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import time
 from pathlib import Path
-from typing import Iterator, List, NamedTuple, Optional
+from typing import Iterator, List, NamedTuple, Optional, Tuple
 
+from ndf.domains.hooks import tables
 from ndf.domains.hooks.verdict import Verdict, deny
+
+# guard の表（hooks/guards.json）でのこの guard の名前
+GUARD_NAME = "merge-production"
 
 # シェルの字句のうち、コマンドを区切るもの
 _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "|&", ";;", "(", ")"})
@@ -33,6 +38,15 @@ class MergeCall(NamedTuple):
     """`gh pr merge` の呼び出し。`repo` は `-R`・`--repo` の値（無ければ None）。"""
 
     repo: Optional[str]
+
+
+def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[float]]:
+    """エントリポイントが呼ぶ判定と所要のミリ秒。`NDF_HOOK_OFF` で止めていれば `(None, None)`。"""
+    if tables.is_off(GUARD_NAME, off):
+        return None, None
+    began = time.monotonic()
+    verdict = check(payload, str(payload.get("cwd") or os.getcwd()))
+    return verdict, round((time.monotonic() - began) * 1000, 3)
 
 
 def check(raw_payload: object, root: str) -> Optional[Verdict]:
