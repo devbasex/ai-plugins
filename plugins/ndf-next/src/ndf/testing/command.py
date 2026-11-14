@@ -2,7 +2,9 @@
 
 - `run [--wait-limit <秒>] -- <シェルのコマンド 1 つ>`: 重い処理なら枠の下で走らせる。出力と終了コードはそのまま返す（I7）。
   待ちを諦めた・メモリで止めた・引数か設定が誤っているときは、子を走らせずに（止めて）`stopped` の結果 JSON を
-  標準出力へ 1 行出し、止まった理由の表の種類の終了コードで終える
+  標準出力へ 1 行出し、止まった理由の表の種類の終了コードで終える。枠の置き場を用意するときに旧い状態の置き場を
+  退避したら、元と先を `stopped` の結果の `items` へ載せる。子を走らせたときは標準出力を子のものに保つため（I7）、
+  元と先を 1 件 1 行で標準エラーの最後へ書く（`RETIRED_LINE` の形）。シグナルで中断して終わるときも同じ形で書く
 - `report [--since <7d のような期間>]`: 枠の記録を読み、結果 JSON を標準出力へ 1 行出す
 
 結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。枠の記録の結果の語（`gave_up`・`memory_stopped`）は
@@ -23,7 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
-from ndf import cli, identity
+from ndf import cli, identity, process_group
 from ndf.contracts import causes, result
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
@@ -33,6 +35,8 @@ TOOL = cli.tool_of(__name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+# run で子を走らせたときに、退避した旧い状態の置き場を標準エラーへ書く 1 行の形
+RETIRED_LINE = identity.RETIRED_LINE
 
 
 # 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、
@@ -74,7 +78,7 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
         interrupted.append(signum)
         proc = get_proc()
         if proc is not None and proc.poll() is None:
-            _signal_group(proc, signum)
+            process_group.signal_group(proc.pid, signum)
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED}
     try:
@@ -99,6 +103,8 @@ def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
         instance=exc.reason,
         metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
         next=again if kind == "wait_timeout" else None,
+        # 枠の置き場を用意するときに退避した旧い状態の置き場（復旧先を結果から引ける）
+        items=exc.retired,
     )
 
 
@@ -112,17 +118,25 @@ def _run(command: str, wait_limit: int | None) -> int:
     kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
     with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
-        options = slots.GateOptions(interrupted=lambda: bool(interrupted))
+        options = slots.GateOptions(kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted))
         try:
-            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, options=options) as held:
+            with slots.gate(command, cwd, options=options) as held:
                 code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
             return _stopped_from(exc, _again(command, wait_limit))
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as exc:
+            # 中断で終わるときも、退避した旧い状態の置き場の元と先を標準エラーへ残す（復旧先を引ける）
+            _print_retired(exc.retired if isinstance(exc, slots.Interrupted) else [])
             return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     if held.note:
         print(held.note, file=sys.stderr)
+    _print_retired(held.retired)
     return code
+
+
+def _print_retired(retired: list[dict[str, str]]) -> None:
+    for item in retired:
+        print(RETIRED_LINE.format(**item), file=sys.stderr)
 
 
 def _run_child(command: str, held: slots.Held, interrupted: list[int], started: list[subprocess.Popen]) -> int:
@@ -132,29 +146,24 @@ def _run_child(command: str, held: slots.Held, interrupted: list[int], started: 
     proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec)
     started.append(proc)
     if interrupted:
-        _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
+        process_group.signal_group(proc.pid, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
     held.watch(proc)
     code = _wait(proc)
     if interrupted:
         # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
-        slots.end_group(proc)
+        process_group.stop_group(proc, grace_key=slots.STOP_TEST, send_first=False)
         raise KeyboardInterrupt  # 記録に interrupted を残す
     return code
 
 
-def _signal_group(proc: subprocess.Popen, signum: int) -> None:
-    try:
-        os.killpg(proc.pid, signum)
-    except ProcessLookupError:  # noqa: S110 外部コマンド: 子のグループが既に終わっていれば送る先が無い
-        pass
-
-
 def _wait(proc: subprocess.Popen) -> int:
+    """子の終わりを待ち、終了コードを返す。シグナルで止まった子はシェルと同じ 128 + シグナルの番号にする（負の値を返さない）。"""
     while True:
         try:
-            return proc.wait()
+            code = proc.wait()
         except InterruptedError:  # noqa: S112 外部コマンド: 子の終わりを待つ間にシグナルで割り込まれたら待ち直す
             continue
+        return 128 - code if code < 0 else code
 
 
 def _report(since: str) -> int:
@@ -163,13 +172,15 @@ def _report(since: str) -> int:
     except ValueError as exc:
         return _stopped("invalid", str(exc))
     try:
-        directory = slots.slots_dir()
+        directory, retired = slots.slots_place()
     except identity.IdentityError as exc:
-        return _stopped("config_broken", str(exc))
+        # 退避の途中か後で失敗しても、それまでに退避した元と先を items に載せる
+        return _stopped("config_broken", str(exc), items=exc.items())
     # 記録が無ければ 0 件として読む
     metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"
-    return result.emit(result.result(TOOL, result.OK, summary, metrics=metrics))
+    # 置き場を用意するときに旧い状態の置き場を退避したら、元と先を items に載せる（復旧先を結果から引ける）
+    return result.emit(result.result(TOOL, result.OK, summary, items=retired, metrics=metrics))
 
 
 def _parser() -> argparse.ArgumentParser:

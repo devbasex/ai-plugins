@@ -31,7 +31,8 @@
           "deadline": {"type": "number", "minimum": 0, "description": "hook の予算: 処理を打ち切る締め切りの秒"},
           "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
           "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
-          "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"}
+          "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
+          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本が枠から取るメモリの重み（GiB）"}
         }
       }
     }

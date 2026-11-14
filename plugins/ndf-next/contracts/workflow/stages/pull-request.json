@@ -1,0 +1,79 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "pull-request",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "Pull Request",
+      "phase": "implement",
+      "inputs": [
+        "issues",
+        "branch"
+      ],
+      "outputs": [
+        "pr"
+      ]
+    }
+  },
+  "do": [
+    {
+      "pr": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "pr"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
+      "pr-merge": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "merge"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "merge",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

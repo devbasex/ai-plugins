@@ -81,6 +81,7 @@ _SCHEMA_VALUE_KEYS = (
     "margin",
     "timeout",
     "inject_chars",
+    "gib",
 )
 
 

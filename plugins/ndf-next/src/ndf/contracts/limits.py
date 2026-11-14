@@ -37,6 +37,8 @@ class Policy(NamedTuple):
     margin: Optional[float] = None
     timeout: Optional[float] = None
     inject_chars: Optional[int] = None
+    # 重い起動の枠の重み
+    gib: Optional[float] = None
 
 
 # 方針の値の名前（名前と説明を除いた Policy の項目）

@@ -1,10 +1,11 @@
 {
-  "summary": "NDF が書くファイルの置き場。リポジトリの中の置き場は根からの相対パス、状態の置き場の下の置き場は状態の置き場（identity の state_dir）からの相対パスで持つ",
+  "summary": "NDF が書くファイルの置き場。リポジトリの中の置き場は根からの相対パス、状態の置き場の下の置き場は状態の置き場（identity の state_dir）からの相対パスで持つ。外の呼び手が値を渡す置き場は環境変数で持ち、値があればその位置を置き場にする",
   "owner": "D2（contracts/domains）",
   "columns": {
-    "root": {"type": "string", "summary": "path の起点。repo はリポジトリ（worktree）の根、state は状態の置き場、config は Claude Code の設定の置き場（CLAUDE_CONFIG_DIR。無ければ ~/.claude）"},
-    "path": {"type": "string", "summary": "起点からの相対パス"},
-    "tracked": {"type": "boolean", "summary": "git が追跡する置き場。偽の置き場は .gitignore が外し、コミットに入らない"}
+    "root": {"type": "string", "summary": "path の起点。repo はリポジトリ（今の worktree）の根、main はメインディレクトリ（既定ブランチの worktree）の根で、どの worktree から読み書きしても同じ位置になる、state は状態の置き場、config は Claude Code の設定の置き場（CLAUDE_CONFIG_DIR。無ければ ~/.claude）、env は列 env の環境変数の値（値が無ければ置き場が無く、そのやり取りをしない）"},
+    "path": {"type": "string", "summary": "起点からの相対パス。. は起点そのもの（env の置き場では環境変数の値の位置がファイルのこともある）"},
+    "tracked": {"type": "boolean", "summary": "git が追跡する置き場。偽の置き場は .gitignore が外し、コミットに入らない"},
+    "env": {"type": "string", "summary": "置き場を差し替える環境変数。値があれば root と path より先にその値の位置を置き場にする", "optional": true, "ref": "domains/env"}
   },
   "rows": [
     {"id": "ndf", "root": "repo", "path": ".ndf", "tracked": true},
@@ -12,11 +13,15 @@
     {"id": "ndf-handoff", "root": "repo", "path": ".ndf/handoff", "tracked": false},
     {"id": "ndf-sprints", "root": "repo", "path": ".ndf/sprints", "tracked": false},
     {"id": "ndf-parallel", "root": "repo", "path": ".ndf/parallel", "tracked": false},
+    {"id": "ndf-loop", "root": "main", "path": ".ndf/loop", "tracked": false},
     {"id": "worktrees", "root": "repo", "path": ".worktrees", "tracked": false},
     {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
     {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
     {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false},
+    {"id": "mvv-state", "root": "state", "path": ".", "tracked": false, "env": "NDF_MVV_STATE_DIR"},
+    {"id": "organizer", "root": "env", "path": ".", "tracked": false, "env": "NDF_ORGANIZER_DIR"},
+    {"id": "issue-request", "root": "env", "path": ".", "tracked": false, "env": "NDF_ISSUE_REQUEST_FILE"},
     {"id": "relay-wrappers", "root": "state", "path": "relay/wrappers", "tracked": false},
     {"id": "relay-accounts", "root": "state", "path": "relay/accounts", "tracked": false},
     {"id": "relay-marks", "root": "state", "path": "relay/marks", "tracked": false},

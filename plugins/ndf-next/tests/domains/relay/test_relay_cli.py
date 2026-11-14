@@ -16,10 +16,6 @@ from ndf.contracts import causes
 from ndf.domains.relay import accounts, cli, marks, pending, registry
 
 
-def _last(capsys) -> dict:
-    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-
-
 def test_relay_is_a_subcommand_of_ndf():
     assert top.COMMANDS["relay"] == cli.__name__
 
@@ -36,17 +32,17 @@ def test_help_lists_every_subcommand(capsys):
     assert cli.main(["fly"]) != 0
 
 
-def test_account_use_show_clear(capsys):
+def test_account_use_show_clear(capsys, last_result):
     assert cli.main(["account", "use", "work"]) == 0
     assert accounts.pinned(identity.load().state_dir) == "work"
     assert cli.main(["account", "show"]) == 0
-    assert _last(capsys)["items"] == [{"account": "work"}]
+    assert last_result(capsys.readouterr().out)["items"] == [{"account": "work"}]
     assert cli.main(["account", "use", "a b"]) != 0
-    assert _last(capsys)["cause"]["kind"] == "invalid"
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert cli.main(["account", "clear"]) == 0
 
 
-def test_decide_reads_the_section_state(monkeypatch, capsys):
+def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
     data = {
         "next_block": "/goal x",
         "question": False,
@@ -58,7 +54,7 @@ def test_decide_reads_the_section_state(monkeypatch, capsys):
     }
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(data)))
     assert cli.main(["decide"]) == 0
-    assert _last(capsys)["items"][0]["kind"] == "account"
+    assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "account"
     monkeypatch.setattr("sys.stdin", io.StringIO('{"unknown": 1}'))
     assert cli.main(["decide"]) != 0
 
@@ -69,15 +65,15 @@ def test_mark_sets_the_relay_mark(capsys):
     assert cli.main(["mark", "../bad"]) != 0
 
 
-def test_ls_with_nothing_registered(capsys):
+def test_ls_with_nothing_registered(capsys, last_result):
     assert cli.main(["ls"]) == 0
-    assert _last(capsys)["items"] == []
+    assert last_result(capsys.readouterr().out)["items"] == []
 
 
-def test_env_override_must_be_a_positive_number(monkeypatch, capsys):
+def test_env_override_must_be_a_positive_number(monkeypatch, capsys, last_result):
     monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "many")
     assert cli.main(["ls"]) != 0
-    assert "NDF_RELAY_MAX_NAMED" in _last(capsys)["summary"]
+    assert "NDF_RELAY_MAX_NAMED" in last_result(capsys.readouterr().out)["summary"]
 
 
 class _Done:
@@ -127,31 +123,31 @@ def _expect(copy, entry, states, warnings=None) -> dict:
     return out
 
 
-def test_install_status_uninstall_report_both_places(places, monkeypatch, capsys):
+def test_install_status_uninstall_report_both_places(places, monkeypatch, capsys, last_result):
     copy, entry = places
     base = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", base)
     assert cli.main(["status"]) == 0
     hint = f'{entry.parent} が PATH に無い。export PATH="{entry.parent}:$PATH" を足す'
-    assert _last(capsys) == _expect(copy, entry, ("absent", "absent"), [hint])
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent"), [hint])
     monkeypatch.setenv("PATH", f"{entry.parent}{os.pathsep}{base}")
     assert cli.main(["install"]) == 0
-    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
     assert cli.main(["status"]) == 0
-    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
     assert cli.main(["uninstall"]) == 0
-    assert _last(capsys) == _expect(copy, entry, ("absent", "absent"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent"))
     assert not copy.exists() and not entry.exists()
 
 
-def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(places, tmp_path, monkeypatch, capsys):
+def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(places, tmp_path, monkeypatch, capsys, last_result):
     copy, entry = places
     monkeypatch.setenv("PATH", str(entry.parent))
     copy.parent.mkdir(parents=True)
     copy.write_text("old\n", encoding="utf-8")
     assert cli.main(["install"]) == 0
     warn = "旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える"
-    assert _last(capsys) == _expect(copy, entry, ("foreign", "ours"), [warn])
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("foreign", "ours"), [warn])
     old = tmp_path / "old" / "relay" / "20261113T1"
     old.mkdir(parents=True)
     fd = os.open(old / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
@@ -159,7 +155,7 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
     try:
         assert cli.main(["install", "--replace-old"]) == causes.exit_code("precondition")
         why = "旧い NDF のラッパーが動いている: 20261113T1。止めてから置き換える"
-        assert _last(capsys) == {
+        assert last_result(capsys.readouterr().out) == {
             "tool": "relay",
             "status": "stopped",
             "summary": why,
@@ -170,8 +166,8 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
         assert copy.read_text(encoding="utf-8") == "old\n"
         # --replace-old を付けなければ、旧いラッパーが動いていても断らずに旧い複製を残す
         assert cli.main(["install"]) == 0
-        assert _last(capsys)["items"][0]["state"] == "foreign"
+        assert last_result(capsys.readouterr().out)["items"][0]["state"] == "foreign"
     finally:
         os.close(fd)
     assert cli.main(["install", "--replace-old"]) == 0
-    assert _last(capsys) == _expect(copy, entry, ("ours", "ours"))
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))

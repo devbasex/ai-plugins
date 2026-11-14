@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.contracts import causes, result
 from ndf.testing import command, records, slots, waits
 from ndf.testing.limits import Limits
@@ -56,9 +59,7 @@ def _slot_held_elsewhere(root: Path, directory: Path):
     return slots.gate(
         "fakerun .",
         root,
-        kind="whole",
-        limits=holding,
-        options=slots.GateOptions(environ={}, directory=directory, read_memory=lambda: 10**9),
+        options=slots.GateOptions(kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9),
     )
 
 
@@ -89,6 +90,13 @@ def test_run_keeps_output_and_exit_code(project, slots_dir):
         out, err = proc.communicate()
         assert (proc.returncode, out, err) == (int(code), "out\n", "err\n")
     assert [row["result"] for row in records.read_events(slots_dir)] == ["finished", "finished"]
+
+
+def test_child_killed_by_a_signal_exits_with_128_plus_the_signal(project):
+    # OOM Killer の SIGKILL もシェルと同じ 137 になる（負の値の -9 を 247 として返さない）
+    root, bin_dir, log = project
+    proc = _ndf(["run", "--", "kill -9 $$"], root, bin_dir, log)
+    assert proc.wait() == 128 + signal.SIGKILL
 
 
 def test_parallel_runs_wait_for_each_other(project):
@@ -138,6 +146,60 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     assert (metrics["gave_up"], metrics["waited_runs"]) == (1, 1)
 
 
+def test_report_lists_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+    # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる（エントリポイントを通らずに呼んだとき）
+    state_home = tmp_path / "xdg-state"
+    old = state_home / identity.load().name
+    old.mkdir(parents=True)
+    (old / "ledger.jsonl").write_text("old")
+    for name, value in {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}.items():
+        monkeypatch.setenv(name, value)
+
+    assert command.main(["report", "--since", "1d"]) == 0
+
+    items = _result(capsys.readouterr().out, 0)["items"]
+    assert [item["retired_from"] for item in items] == [str(old)]
+    assert (Path(items[0]["retired_to"]) / "ledger.jsonl").read_text() == "old"
+
+
+def test_run_writes_the_old_state_places_it_retired(project, tmp_path):
+    # エントリポイント（`ndf test-slot run`）を通すと、エントリポイントが副命令の前に退避し、元と先を標準エラーへ書く。標準出力は子のもののまま（I7）
+    root, bin_dir, log = project
+    state_home = tmp_path / "xdg-state"
+    old = state_home / identity.load().name
+    old.mkdir(parents=True)
+    (old / "ledger.jsonl").write_text("old")
+    extra = {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}
+
+    proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, **extra)
+    out, err = proc.communicate()
+
+    assert (proc.returncode, out) == (0, "out\n"), err
+    (moved,) = [p for p in state_home.iterdir() if identity.RETIRED_SUFFIX in p.name]
+    assert command.RETIRED_LINE.format(retired_from=old, retired_to=moved) in err.splitlines()
+    assert (moved / "ledger.jsonl").read_text() == "old"
+
+
+def test_report_lists_the_places_retired_before_preparing_failed(monkeypatch, capsys):
+    # 退避の途中で失敗して止まるときも、先に退避した元と先を items に載せる
+    retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
+
+    def fail(environ=None):
+        raise identity.IdentityError("read-only", retired)
+
+    monkeypatch.setattr(slots, "slots_place", fail)
+    code = command._report("1d")
+    got = _result(capsys.readouterr().out, code)
+    assert got["items"] == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+
+
+def test_stopped_run_lists_the_old_state_places_it_retired(capsys):
+    retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+    code = command._stopped_from(slots.Stopped(records.GAVE_UP, 1.0, None, retired))
+    got = _result(capsys.readouterr().out, code)
+    assert got["items"] == retired
+
+
 def test_report_refuses_a_wrong_period(tmp_path):
     proc = _ndf(["report", "--since", "seven"], tmp_path)
     out, _ = proc.communicate()
@@ -170,9 +232,23 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
 
 
-def test_memory_stop_exits_apart_from_a_failed_test(capsys):
+def _gate_stopping_by_memory(command_text, cwd, *, options=None):
+    """`slots.gate` の代わり。枠を持たない実行を渡し、出るときにメモリで止めたとして `Stopped` を送る。"""
+
+    @contextmanager
+    def gate():
+        yield slots.Held()
+        raise slots.Stopped(records.MEMORY_STOPPED, 2.0, 100)
+
+    return gate()
+
+
+def test_memory_stop_exits_apart_from_a_failed_test(project, monkeypatch, capsys):
     # メモリで止めた実行は落ちたテストとして数えない（I9）。終了コードは落ちたテストの 1 と重ならない
-    code = command._stopped_from(slots.Stopped(records.MEMORY_STOPPED, 2.0, 100))
+    root, _, _ = project
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(slots, "gate", _gate_stopping_by_memory)
+    code = command.main(["run", "--", "true"])
     got = json.loads(capsys.readouterr().out)
     assert code == causes.exit_code("infra_wait") != causes.exit_code("test_failed")
     assert got["status"] == "stopped"
@@ -274,3 +350,21 @@ def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
         "cause": {"kind": "invalid", "detail": summary},
     }
     assert not log.exists()
+
+
+def test_interrupted_run_writes_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+    # 中断で終わる run でも、退避した旧い置き場の元と先を標準エラーへ残す
+    retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+
+    @contextlib.contextmanager
+    def interrupted_gate(*_args, **_kwargs):
+        raise slots.Interrupted(retired)
+        yield  # pragma: no cover
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(slots, "gate", interrupted_gate)
+
+    code = command._run("true", None)
+
+    assert code == 128 + signal.SIGINT
+    assert capsys.readouterr().err.splitlines()[-1] == command.RETIRED_LINE.format(**retired[0])
