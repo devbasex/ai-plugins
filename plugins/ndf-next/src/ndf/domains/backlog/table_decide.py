@@ -63,6 +63,19 @@ def _row_line(r: dict[str, Any]) -> str:
     return f"| {r['rank']} | {issue} | {ubv} | {r['tc']} | {rr} | {size} | {r['cod']} | {r['value']:.1f} |"
 
 
+def quality_text(q: dict[str, Any]) -> str:
+    got = " ".join(f"#{n}" for n in q["issues"]) or "なし"
+    budget = "容量なし" if q["budget"] is None else f"枠 {q['budget']}"
+    return f"{got}（ラベル {q['label']}、Size の和 {q['size_sum']} / {budget}、最低 {q['min']} 件）"
+
+
+def boundary_text(b: dict[str, Any]) -> str:
+    if b.get("empty"):
+        return f"無し（枠で容量 {b['capacity']} を使い切った）"
+    over = "。1 件で容量を超える" if b.get("over") else ""
+    return f"#{b['number']}（Size の和 {b['size_sum']} / 容量 {b['capacity']}{over}）"
+
+
 def _tail(ms: dict[str, Any], shown: int) -> list[str]:
     tail = []
     if len(ms["rows"]) > shown:
@@ -71,15 +84,9 @@ def _tail(ms: dict[str, Any], shown: int) -> list[str]:
         tail.append("大きい課題の枠: " + slot_text(ms["large_slot"]))
     q = ms["quality_slot"] if "quality_slot" in ms else None
     if q is not None:
-        got = " ".join(f"#{n}" for n in q["issues"]) or "なし"
-        budget = "容量なし" if q["budget"] is None else f"枠 {q['budget']}"
-        tail.append(f"品質の枠: {got}（ラベル {q['label']}、Size の和 {q['size_sum']} / {budget}、最低 {q['min']} 件）")
-    b = ms["boundary"]
-    if b and b.get("empty"):
-        tail.append(f"切り出しの境界: 無し（枠で容量 {b['capacity']} を使い切った）")
-    elif b:
-        over = "。1 件で容量を超える" if b.get("over") else ""
-        tail.append(f"切り出しの境界: #{b['number']}（Size の和 {b['size_sum']} / 容量 {b['capacity']}{over}）")
+        tail.append("品質の枠: " + quality_text(q))
+    if ms["boundary"]:
+        tail.append("切り出しの境界: " + boundary_text(ms["boundary"]))
     return tail
 
 
