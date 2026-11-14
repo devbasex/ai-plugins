@@ -42,7 +42,6 @@ def use_dir(path: str | Path | None) -> None:
     """契約の置き場を差し替え、読んだ表をすべて捨てる（テストが使う）。`None` でプラグインの置き場へ戻す。"""
     global _dir
     _dir = Path(path) if path is not None else DEFAULT_DIR
-    _schema_validator.cache_clear()
     for clear in _clearers:
         clear()
 
