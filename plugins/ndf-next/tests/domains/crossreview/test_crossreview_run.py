@@ -416,7 +416,8 @@ def test_run_reopens_a_fixed_finding_that_returns(wt: Path, tmp_path: Path, caps
 
 
 def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """修正担当が結果を書かなければ、注意と過程に載せて errored で止め、指摘は未解決のまま状態ファイルに残す。"""
+    """修正担当が結果を書かなければ、注意と過程に載せて errored で止め、指摘は未解決のまま状態ファイルに残す。
+    ラウンドも errored で残すので、次の起動は修正の記録の欠けで止まらず、修正担当をもう一度起動して進む（PR #3466 の指摘）。"""
 
     class NoFix(Recording):
         def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
@@ -430,5 +431,40 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["process"][-1] == {"run": "round 1 claude", "result": "結果無し（failed）"}
     state = _state(fake.state_dir)
     assert state["findings"] == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
-    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED}]
+    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
+    again = Fake(fake.state_dir, {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, again, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert "claude" in again.calls and _state(fake.state_dir)["findings"][0]["outcome"] == fin.FIXED
+
+
+def test_run_fix_result_for_another_pr_is_set_aside(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: 番号の合わない修正の結果は退避して errored で止め、次の起動は同じファイルで落ち続けない。"""
+
+    class WrongPr(Recording):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            ref = store.state_pr(self.state_dir, PR)
+            store.fix_result_path(self.state_dir, ref).write_text(json.dumps({"pr": 1, "findings": []}), encoding="utf-8")
+            return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    fake = WrongPr(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["status"] == "stopped" and "取り込めない" in got["warnings"][-1]
+    ref = store.state_pr(fake.state_dir, PR)
+    assert store.pending_fix_result(fake.state_dir, ref) is None
+    assert (fake.state_dir / f"{store.fix_result_path(fake.state_dir, ref).stem}-mismatch-round1.json").is_file()
+    again = Fake(fake.state_dir, {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, again, wt)
+    assert (code, got["status"]) == (0, "ok")
+
+
+def test_run_leftover_fix_result_for_another_pr_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: 前の起動が残した番号の合わない結果ファイルは、トレースバックでなく invalid の結果で止める。"""
+    state_dir = tmp_path / "st"
+    ref = store.state_pr(state_dir, PR)
+    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
+    store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": 1, "findings": []}), encoding="utf-8")
+    fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["cause"]["kind"] == "invalid" and fake.calls == []

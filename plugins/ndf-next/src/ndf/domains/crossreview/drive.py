@@ -201,7 +201,10 @@ def _ingest_pending(run: _Run) -> None:
     if gate.kind == fixgate_decide.STOP:
         raise DriveStopped("work_stopped", str(gate.reason))
     if gate.kind == fixgate_decide.INGEST and pending is not None:
-        last["fix"] = _take_fix(run, pending, len(rounds))
+        try:
+            last["fix"] = _take_fix(run, pending, len(rounds))
+        except store.FixResultMismatch as exc:
+            raise DriveStopped("invalid", f"前の起動が残した修正の結果を取り込めない: {exc}") from exc
         _save(run)
         _consume(pending, len(rounds))
 
@@ -324,17 +327,42 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
     )
 
 
-def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
-    """修正の結果を台帳へ取り込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
-    found = store.read_fix_result(path, run.ref)
-    reported = run.ledger.apply_fix(store.list_of(found, store.FINDINGS), run.cfg.handed, round_no)
+def _fix_record(ledger: FindingLedger, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
+    """修正の結果ファイルを読んで台帳へ取り込み、ラウンドの修正の記録（commit・reported・fixed）を返す。
+    番号が合わなければ `store.FixResultMismatch`。"""
+    found = store.read_fix_result(path, ref)
+    reported = ledger.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
-def _consume(path: Path, round_no: int) -> None:
-    """取り込んだ結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。状態ファイルへ書いた後に呼ぶ。"""
-    os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
+def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
+    """修正の結果を台帳へ取り込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
+    return _fix_record(run.ledger, run.ref, path, run.cfg.handed, round_no)
+
+
+def _consume(path: Path, round_no: int, label: str = "round") -> None:
+    """取り込んだ（または取り込めなかった）結果ファイルを `<label><ラウンド>` の名前へ移す（次の起動が残りと読み違えない）。
+    状態ファイルへ書いた後に呼ぶ。"""
+    os.replace(path, path.with_name(f"{path.stem}-{label}{round_no}.json"))
+
+
+def merge_fix(state_dir: Path, pr: int, path: Path) -> int:
+    """駆動の外で残った修正の結果ファイルを、最後のラウンドへ `run` と同じ形で取り込む（`merge-fix`。#2770）。
+    台帳へ反映して状態ファイルへ書いてから結果ファイルを移し、取り込んだラウンドの番号を返す。
+    番号が合わなければ `store.FixResultMismatch`（何も書かない）。"""
+    ref = store.state_pr(state_dir, pr)
+    data = store.read_state(ref)
+    rounds = data.setdefault(store.ROUNDS, [])
+    if not rounds:
+        rounds.append({"round": 1})
+    round_no = rounds[-1].get("round") or len(rounds)
+    ledger = FindingLedger(store.list_of(data, store.FINDINGS))
+    rounds[-1]["fix"] = _fix_record(ledger, ref, path, (), round_no)
+    data[store.FINDINGS] = list(ledger.rows.values())
+    store.write_object(ref.path, data)
+    _consume(path, round_no)
+    return round_no
 
 
 def _fix(
@@ -350,6 +378,8 @@ def _fix(
     try:
         fix = _take_fix(run, result_path, round_no)
     except store.FixResultMismatch as exc:
+        # 合わないファイルを残すと次の起動が同じファイルを取り込もうとして止まり続けるので、退避する
+        _consume(result_path, round_no, "mismatch-round")
         run.warnings.append(f"round {round_no} の修正の結果を取り込めない: {exc}")
         return None
     _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った")
@@ -366,7 +396,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
     if sent.ok:
         fix["pushed"] = sent.head
         return True
-    run.ledger.reopen(fix["fixed"])
+    run.ledger.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
@@ -438,6 +468,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     _save(run)
     fix = _fix(run, round_no, open_, handed, launch)
     if fix is None:
+        # 修正必須のまま残すと、次の起動が修正の記録の欠けで止まり続ける。errored で残し、次の起動で修正担当をもう一度起動する
+        record["verdict"] = fin.ERROR
         return fin.ERROR
     record["fix"] = fix
     _save(run)

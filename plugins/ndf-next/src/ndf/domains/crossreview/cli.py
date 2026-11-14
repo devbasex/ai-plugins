@@ -199,18 +199,13 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    ref = store.state_pr(Path(args.state_dir), args.pr)
+    """`run` と同じ取り込み（台帳へ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
     try:
-        found = store.read_fix_result(Path(args.file), ref)
+        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file))
     except store.FixResultMismatch as exc:
         return _stop("invalid", str(exc))
-    data = store.read_state(ref)
-    rounds = data.setdefault(store.ROUNDS, [{"round": 1}])
-    if not rounds:
-        rounds.append({"round": 1})
-    rounds[-1]["fix"] = found
-    store.write_object(ref.path, data)
-    return _ok(f"修正の結果を round {rounds[-1].get('round')} へ取り込んだ: {args.file}", [_ref_item(ref)])
+    ref = store.state_pr(Path(args.state_dir), args.pr)
+    return _ok(f"修正の結果を round {round_no} へ取り込んだ: {args.file}", [_ref_item(ref)])
 
 
 # --- 範囲と終わり方 ---------------------------------------------------------------------

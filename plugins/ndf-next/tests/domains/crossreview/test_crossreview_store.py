@@ -22,7 +22,8 @@ def _state(state_dir: Path, **data) -> Path:
 
 def _fix_result(state_dir: Path, name_pr: int, pr: int) -> Path:
     path = state_dir / store.FIX_RESULT_NAME.format(pr=name_pr)
-    path.write_text(json.dumps({"pr": pr, "commit": "abc1234", "fixed": ["F1"]}), encoding="utf-8")
+    body = {"pr": pr, "commit": "abc1234", "findings": [{"id": "F1", "outcome": "fixed"}]}
+    path.write_text(json.dumps(body), encoding="utf-8")
     return path
 
 
@@ -58,8 +59,10 @@ def test_broken_state_file_is_not_replaced_by_a_default(tmp_path: Path, capsys: 
 def test_issue_2770_fix_result_written_with_either_number_is_merged(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], name_pr: int, pr: int
 ) -> None:
-    """#2770 の形 3: 修正担当が今の番号で書いた結果ファイル（名前・中の pr）も、元の番号の状態へ取り込む。"""
-    _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 1, "verdict": fixgate_decide.CHANGES_REQUIRED}])
+    """#2770 の形 3: 修正担当が今の番号で書いた結果ファイル（名前・中の pr）も、元の番号の状態へ取り込む。
+    取り込みは `run` と同じ形（台帳へ反映し、修正の記録は commit・reported・fixed、結果ファイルは移す。PR #3466 の指摘）。"""
+    finding = {"id": "F1", "key": "k", "text": "直す", "round": 1, "outcome": "unresolved", "reason": None}
+    _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 1, "verdict": fixgate_decide.CHANGES_REQUIRED}], findings=[finding])
     pending = store.pending_fix_result(tmp_path, store.state_pr(tmp_path, CURRENT))
     assert pending is None
     path = _fix_result(tmp_path, name_pr, pr)
@@ -67,7 +70,10 @@ def test_issue_2770_fix_result_written_with_either_number_is_merged(
     assert store.pending_fix_result(tmp_path, ref) == path
     assert cli.main(["merge-fix", "--state-dir", str(tmp_path), "--pr", str(CURRENT), "--file", str(path)]) == 0
     capsys.readouterr()
-    assert store.read_object(ref.path)["rounds"][-1]["fix"]["pr"] == pr
+    state = store.read_object(ref.path)
+    assert state["rounds"][-1]["fix"] == {"commit": "abc1234", "reported": 1, "fixed": ["F1"]}
+    assert state["findings"][0]["outcome"] == "fixed"
+    assert store.pending_fix_result(tmp_path, ref) is None
 
 
 def test_fix_result_for_another_pr_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -76,6 +82,7 @@ def test_fix_result_for_another_pr_is_refused(tmp_path: Path, capsys: pytest.Cap
     code, got = run_cli(capsys, "merge-fix", "--state-dir", str(tmp_path), "--pr", str(ORIGIN), "--file", str(path))
     assert code != 0
     assert got["cause"]["kind"] == "invalid" and "合わない" in got["summary"]
+    assert path.is_file() and "fix" not in store.read_object(store.state_pr(tmp_path, ORIGIN).path)
 
 
 def test_issue_2770_start_after_commits_outside_the_driver_takes_in_the_remaining_result(
