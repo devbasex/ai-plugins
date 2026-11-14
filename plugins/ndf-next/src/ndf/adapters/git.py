@@ -105,24 +105,23 @@ class WorktreeEntry(NamedTuple):
     locked: bool = False
 
 
+def _short_branch(ref: Optional[str]) -> Optional[str]:
+    """branch の行の参照（`refs/heads/<名前>`）の名前。ブランチの参照でなければ `None`。"""
+    return ref[len(HEADS) :] if ref is not None and ref.startswith(HEADS) else None
+
+
+def _entry(record: str) -> Optional[WorktreeEntry]:
+    """worktree 1 件の項目（NUL 区切り）を読む。`worktree` の行が無ければ `None`。"""
+    fields = dict(f.partition(" ")[::2] for f in record.split("\0") if f)
+    if "worktree" not in fields:
+        return None
+    head = fields["HEAD"] if "HEAD" in fields else ""
+    return WorktreeEntry(Path(fields["worktree"]), head, _short_branch(fields.get("branch")), "prunable" in fields, "locked" in fields)
+
+
 def parse_worktree_list(text: str) -> list[WorktreeEntry]:
     """`git worktree list --porcelain -z` の出力を読む（項目は NUL、worktree は空の項目で区切られる）。先頭はメインディレクトリ。"""
-    out: list[WorktreeEntry] = []
-    for record in text.split("\0\0"):
-        fields = dict(f.partition(" ")[::2] for f in record.split("\0") if f)
-        if "worktree" not in fields:
-            continue
-        branch = fields.get("branch")
-        out.append(
-            WorktreeEntry(
-                Path(fields["worktree"]),
-                fields["HEAD"] if "HEAD" in fields else "",
-                branch[len(HEADS) :] if branch is not None and branch.startswith(HEADS) else None,
-                "prunable" in fields,
-                "locked" in fields,
-            )
-        )
-    return out
+    return [e for e in (_entry(record) for record in text.split("\0\0")) if e is not None]
 
 
 def parse_status_z(text: str) -> list[str]:
