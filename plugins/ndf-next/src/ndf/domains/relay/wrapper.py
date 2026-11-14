@@ -108,17 +108,14 @@ class Wrapper:
     def run(self, prompt: str) -> Ended:
         """錠を取り、版の混ざりを確かめてから区間を回す。"""
         self.dir.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.dir / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            if not signals.lock(fd, 0):
+        with signals.held(self.dir / registry.LOCK_FILE, 0) as got:
+            if not got:
                 return Ended("refused", f"{self.s.name} のラッパーは既に動いている")
             others = [r for r in registry.all_running(self.s.state_dir, self.s.environ) if r.name != self.s.name]
             mix = hub_decide.mixed(self.s.version, others)
             if mix.kind != "go":
                 return Ended("precondition", mix.reason)
             return self._loop(prompt)
-        finally:
-            os.close(fd)
 
     def _loop(self, prompt: str) -> Ended:
         self._start(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False)

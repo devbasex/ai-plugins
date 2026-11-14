@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import time
@@ -93,9 +92,8 @@ def drain(ctx: Context) -> bool:
     """排他を取れたら溜まった依頼を古い順に処理する。取れなければ偽。"""
     base = hub_dir(ctx.state_dir)
     base.mkdir(parents=True, exist_ok=True)
-    fd = os.open(base / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        if not signals.lock(fd, 0):
+    with signals.held(base / LOCK_FILE, 0) as owned:
+        if not owned:
             return False
         signals.replace_json(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
         requests = base / "requests"
@@ -105,9 +103,6 @@ def drain(ctx: Context) -> bool:
             _log(base, path.stem, got)
             path.unlink()
         return True
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:

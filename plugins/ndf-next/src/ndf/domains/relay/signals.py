@@ -22,9 +22,10 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
 
 NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
@@ -73,6 +74,20 @@ def lock(fd: int, wait: float) -> bool:
             time.sleep(0.01)
 
 
+@contextmanager
+def held(path: Path, wait: float) -> Iterator[bool]:
+    """錠のファイル `path`（無ければ 0o600 で作る）の排他を `wait` 秒まで取りにいく。取れたかを渡し、終わりに解いて閉じる。"""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    got = False
+    try:
+        got = lock(fd, wait)
+        yield got
+    finally:
+        if got:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def replace_text(path: Path, text: str, mode: Optional[int] = None) -> None:
     """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,9 +108,8 @@ def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str
     hook は書けなくても通す（偽を返すだけ）。書けない理由の `OSError` は呼び出し元へ送出する。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(f"{path}.lock", os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        if not lock(fd, wait):
+    with held(Path(f"{path}.lock"), wait) as got:
+        if not got:
             return False
         before = _read(path) if keep else None
         merged = dict(data)
@@ -104,8 +118,6 @@ def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str
                 merged[key] = before[key]
         replace_json(path, merged)
         return True
-    finally:
-        os.close(fd)
 
 
 def _read(path: Path) -> Optional[dict[str, Any]]:
