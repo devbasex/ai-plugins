@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from ndf import identity
+from ndf import contracts, identity
+from ndf.adapters.git import GitError
 from ndf.core import durable
-from ndf.progress import command, model, store
+from ndf.progress import command, definition, model, store
 
 
 @pytest.fixture
@@ -151,3 +152,50 @@ def test_restore_command_refuses_a_postgresql_url(repo, capsys, monkeypatch, tmp
 def test_show_of_an_unknown_table_is_refused(repo, capsys):
     _, out = _run(capsys, "show", "sprint:nope:s9")
     assert out["status"] == "stopped" and out["cause"]["kind"] == "refused"
+
+
+# --- 現状固定: 例外から止まった結果への対応（_stopped_from） -------------------------------------------
+
+
+def _stopped(exc: Exception) -> tuple[str, str, list, dict]:
+    out = command._stopped_from(exc)
+    assert out["tool"] == "progress" and out["status"] == "stopped"
+    return out["cause"]["kind"], out["cause"]["detail"], out["items"], out["metrics"]
+
+
+def test_stopped_from_refused_carries_the_current_id_only_when_present():
+    assert _stopped(model.Refused("断った", current_id="sprint:x:s1")) == ("refused", "断った", [], {"current_id": "sprint:x:s1"})
+    assert _stopped(model.Refused("断った")) == ("refused", "断った", [], {})
+
+
+def test_stopped_from_store_stopped_uses_the_kind_of_the_subclass_and_lists_the_paths():
+    assert _stopped(durable.StoreStopped("壊れた", (Path("/a"), Path("/b")))) == (
+        "store_broken",
+        "壊れた",
+        [{"path": "/a"}, {"path": "/b"}],
+        {},
+    )
+    assert _stopped(durable.StoreInUse("使用中"))[:3] == ("store_in_use", "使用中", [])
+    assert _stopped(store.StoreBusy("待ちすぎ"))[0] == "store_busy"
+
+
+def test_stopped_from_workflow_def_error_is_invalid_with_one_item_per_error():
+    kind, detail, items, metrics = _stopped(definition.WorkflowDefError(["a が無い", "b が無い"]))
+    assert (kind, items, metrics) == ("invalid", [{"error": "a が無い"}, {"error": "b が無い"}], {})
+    assert detail == "工程の定義が検査を通らない: a が無い; b が無い"
+
+
+def test_stopped_from_contract_and_git_errors_are_invalid_without_items():
+    assert _stopped(contracts.ContractError("形が違う")) == ("invalid", "形が違う", [], {})
+    assert _stopped(GitError("git が落ちた")) == ("invalid", "git が落ちた", [], {})
+
+
+def test_stopped_from_identity_error_is_config_broken():
+    assert _stopped(identity.IdentityError("plugin.json が無い")) == ("config_broken", "plugin.json が無い", [], {})
+
+
+def test_stopped_from_anything_else_is_a_precondition_outside_git():
+    exc = subprocess.CalledProcessError(128, ["git", "rev-parse"])
+    kind, detail, items, _ = _stopped(exc)
+    assert kind == "precondition" and items == []
+    assert detail == f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}"
