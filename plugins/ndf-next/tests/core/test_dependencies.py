@@ -21,6 +21,7 @@ def _imports_dbos(node: ast.AST) -> bool:
 
 
 def _dbos_importers(root: Path, relative_to: Path) -> set[str]:
+    """`root` の下で DBOS を読むファイル（`relative_to` からの相対パス）。"""
     found = set()
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
