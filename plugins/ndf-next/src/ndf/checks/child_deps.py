@@ -173,22 +173,40 @@ def _at(children: Children, name: str, detail: str) -> Finding:
 
 
 def plan_findings(children: Children, max_per_slot: int) -> list[Finding]:
-    """IG2（順番とレーン）と、同じ表へ並行で書く子。"""
+    """IG2（順番とレーン）と、同じ表へ並行で書く子。指摘は 順番 → 枠 → 表 の順に並べる。"""
+    return _order_findings(children) + _slot_findings(children, max_per_slot) + _table_findings(children)
+
+
+def _order_findings(children: Children) -> list[Finding]:
+    """IG2: 順番が先に要る子の順番より大きくない子。"""
     rows = children.rows
     found = []
-    slots: dict[tuple[str, int], list[str]] = defaultdict(list)
     for c in rows.values():
-        if not c.closed:
-            slots[(c.lane, c.order)].append(c.name)
         late = [n for n in c.needs if rows[n].order >= c.order]
         if late:
             found.append(_at(children, c.name, f"{c.name} の順番 {c.order} が先に要る子（{'・'.join(late)}）の順番より大きくない（IG2）"))
+    return found
+
+
+def _slot_findings(children: Children, max_per_slot: int) -> list[Finding]:
+    """IG2: 同じレーン・同じ順番に閉じていない子が `max_per_slot` 本を超える枠。"""
+    slots: dict[tuple[str, int], list[str]] = defaultdict(list)
+    for c in children.rows.values():
+        if not c.closed:
+            slots[(c.lane, c.order)].append(c.name)
+    found = []
     for (lane, order), names in sorted(slots.items()):
         if len(names) > max_per_slot:
             detail = f"レーン {lane} の順番 {order} に閉じていない子が {len(names)} 本ある（上限 {max_per_slot}。IG2）: {'・'.join(names)}"
             found.append(_at(children, names[0], detail))
+    return found
+
+
+def _table_findings(children: Children) -> list[Finding]:
+    """同じ表へ書く閉じていない子どうしで、どちらも他方の閉包に入らない組。"""
+    found = []
     for table, writers in sorted(children.tables.items()):
-        live = [w for w in writers if not rows[w].closed]
+        live = [w for w in writers if not children.rows[w].closed]
         for a, b in combinations(live, 2):
             if a not in closure(b, children) and b not in closure(a, children):
                 detail = f"表 {table} へ {a} と {b} が並行で書く。先に要るもので順序を付け、後の子が衝突を解く"
