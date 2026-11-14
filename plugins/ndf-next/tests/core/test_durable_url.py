@@ -11,6 +11,8 @@ import os
 import shutil
 import socket
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -61,13 +63,18 @@ def url_done_flow(value: str) -> str:
     return value
 
 
-def _ledger(url: str) -> set[str]:
+@contextmanager
+def _engine(url: str) -> Iterator[sa.Engine]:
     engine = sa.create_engine(url.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=sa.NullPool)
     try:
-        with engine.connect() as conn:
-            return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
+        yield engine
     finally:
         engine.dispose()
+
+
+def _ledger(url: str) -> set[str]:
+    with _engine(url) as engine, engine.connect() as conn:
+        return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
 
 
 def _ids(url: str, key: str) -> set[str]:
@@ -116,10 +123,8 @@ def test_sweep_leaves_runs_of_applications_not_in_the_ledger(pg_url, root):
     """I12: 台帳に無い `run-` で始まる `application_name` の実行は、終わって日数が過ぎても消さない。"""
     with durable.session(root, "url-other", pg_url):
         durable.start(url_done_flow, "wf-url-other", "x")
-    engine = sa.create_engine(pg_url.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=sa.NullPool)
-    with engine.begin() as conn:
+    with _engine(pg_url) as engine, engine.begin() as conn:
         conn.execute(sa.text(f"DELETE FROM {durable.RUNS_TABLE} WHERE run_name = :n"), {"n": durable.run_name("url-other")})
-    engine.dispose()
 
     _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert _ids(pg_url, "url-other") == {"wf-url-other"}
