@@ -45,10 +45,10 @@ def test_json_schema_is_passed_as_json():
     assert json.loads(argv[argv.index("--json-schema") + 1]) == {"type": "object"}
 
 
-def test_launch_args_subcommand_prints_the_same_values(capsys):
+def test_launch_args_subcommand_prints_the_same_values(capsys, last_result):
     assert cli.main([]) == 0
 
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    out = last_result(capsys.readouterr().out)
     assert out["status"] == "ok"
     assert out["items"] == [{"args": cli.plugin_args(identity.load().root)}]
 
