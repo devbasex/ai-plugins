@@ -194,15 +194,13 @@ def read_codex(env: Mapping[str, str], client: httpx.Client, now: float) -> Read
 
 
 Reader = Callable[[Mapping[str, str], httpx.Client, float], Reading]
+# 確かめる口のある担当と、その読み手
+READERS: dict[str, Reader] = {"claude": read_claude, "codex": read_codex}
 
 
 def reader(runtime: str) -> Optional[Reader]:
     """担当の学習の設定の読み手。確かめる口の無い担当（kiro・agy など）は None。"""
-    if runtime == "claude":
-        return read_claude
-    if runtime == "codex":
-        return read_codex
-    return None
+    return READERS.get(runtime)
 
 
 def checked() -> tuple[str, ...]:
@@ -288,7 +286,7 @@ def refusal(runtime: str, now: Optional[float] = None) -> Optional[str]:
 def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
     """担当ごとに確かめて控え、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
     readings = [read_setting(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
-    save([r for r in readings if reader(r.runtime) is not None], now)
+    save([r for r in readings if r.runtime in READERS], now)
     items = [r.item(_stamp(now)) for r in readings]
     unread = [f"{r.runtime}（{r.reason}）" for r in readings if r.training is None]
     used = [r.runtime for r in readings if r.training is True]
