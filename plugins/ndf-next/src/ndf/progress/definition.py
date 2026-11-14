@@ -248,10 +248,10 @@ def _stage_def(doc: Mapping[str, Any]) -> stages.StageDef:
         name=name,
         phase=meta["phase"],
         steps=tuple(_step_def(name, n, b) for n, b in _tasks(doc)),
-        when=tuple(meta.get("when", ())),
+        when=tuple(meta["when"]) if "when" in meta else (),
         per_issue=bool(meta.get("per_issue")),
-        inputs=tuple(meta.get("inputs", ())),
-        outputs=tuple(meta.get("outputs", ())),
+        inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
+        outputs=tuple(meta["outputs"]) if "outputs" in meta else (),
         input_ref=_endpoint(doc, "input"),
         output_ref=_endpoint(doc, "output"),
     )
