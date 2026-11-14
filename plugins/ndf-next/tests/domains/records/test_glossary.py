@@ -78,7 +78,7 @@ def test_layout_without_declaration_raises(tmp_path: Path) -> None:
         glossary.layout(tmp_path)
 
 
-# 現状固定（I-018 の前）: 用語集の宣言と正本を読むときの誤りと既定
+# 現状固定（I-018 の前）: 用語集の設定と正本を読むときの誤りと既定
 def _decl_only(tmp_path: Path, data: bytes) -> Path:
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "glossary.json").write_bytes(data)
