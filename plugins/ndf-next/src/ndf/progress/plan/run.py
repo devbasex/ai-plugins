@@ -42,7 +42,7 @@ import functools
 import math
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,8 +142,17 @@ class Judged:
     relaunch: list[tuple[str, str, str]]
 
 
-def _judge(rows: dict[str, list[lane.LaneRow]], state: str, found: liveness.Probes | None, moved: dict[str, str]) -> Judged:
-    """生死を判定する。計画が動いていなければ判定しない（知らせを書けない・閉じられない）。"""
+def _judge(
+    rows: dict[str, list[lane.LaneRow]],
+    state: str,
+    found: liveness.Probes | None,
+    moved: dict[str, str],
+    spent: Sequence[str] = (),
+) -> Judged:
+    """生死を判定する。計画が動いていなければ判定しない（知らせを書けない・閉じられない）。
+
+    `spent` は `/goal` の起こし直しを使い切ったスプリントの ID で、起こし直す先に数えず、それだけならアカウントを
+    確かめない（`ndf relay account show` を毎周打たない）。"""
     if found is None or state != lane.RUNNING:
         return Judged([], [], False, [])
     verdicts = liveness.judge_lanes(rows, found)
@@ -152,7 +161,9 @@ def _judge(rows: dict[str, list[lane.LaneRow]], state: str, found: liveness.Prob
         for name, v in verdicts.items()
         if v.stall
     ]
-    auth = [(name, str(v.row), str(v.sprint_id)) for name, v in verdicts.items() if v.kind == liveness.STALLED]
+    auth = [
+        (name, str(v.row), str(v.sprint_id)) for name, v in verdicts.items() if v.kind == liveness.STALLED and str(v.sprint_id) not in spent
+    ]
     relaunch = auth if auth and found.account_ok() else []
     return Judged(stalls, [name for name, v in verdicts.items() if v.kind == liveness.UNKNOWN], True, relaunch)
 
@@ -183,10 +194,10 @@ def _halts(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: live
     return [(name, row) for name, row in ended if liveness.wrapper_running(table.get(found.wrapper_name(name)))]
 
 
-def read_snapshot(conn: Any, plan_id: str, found: liveness.Probes | None = None) -> dict[str, Any]:
+def read_snapshot(conn: Any, plan_id: str, found: liveness.Probes | None = None, spent: Sequence[str] = ()) -> dict[str, Any]:
     """計画とレーンの進行表から、判断へ渡す写しを作る。`found` があればレーンの生死を判定して止まりを載せる。"""
     view, rows = lane.read_view(conn, plan_id)
-    return snapshot_of(view, rows, found, last_moved(conn, view, rows))
+    return snapshot_of(view, rows, found, last_moved(conn, view, rows), spent)
 
 
 def snapshot_of(
@@ -194,15 +205,17 @@ def snapshot_of(
     rows: dict[str, list[lane.LaneRow]],
     found: liveness.Probes | None = None,
     moved: dict[str, str] | None = None,
+    spent: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """読んだ計画とレーンの進行表から写しを作る。`moved` はレーンの最後に動いた時刻（`last_moved`）。"""
+    """読んだ計画とレーンの進行表から写しを作る。`moved` はレーンの最後に動いた時刻（`last_moved`）、`spent` は
+    `/goal` の起こし直しを使い切ったスプリントの ID（`Observe.spent`）。"""
     live = [(name, r) for name in view.lanes for r in rows[name] if r.active]
     running = [(name, r.key, r.sprint_id) for name, r in live]
     answered = [(name, r.key, r.sprint_id, r.answered_seq) for name, r in live if r.awaiting_next]
     reported = [r.body[NOTICE_FIELDS[r.body["kind"]]] for r in view.open_requests() if r.body.get("kind") in NOTICE_FIELDS]
     stall_requests = [(r.key, r.lane, r.body["stall"]) for r in view.open_requests() if r.body.get("kind") == LANE_STALLED]
     wakeable = lane.wakeable_lanes(view, rows)
-    got = _judge(rows, view.state, found, moved if moved is not None else {})
+    got = _judge(rows, view.state, found, moved if moved is not None else {}, spent)
     snap = run_decide.snapshot(view.state, lane.plan_complete(view, rows), wakeable, running, reported, answered)
     snap = run_decide.with_stalls(snap, got.stalls, got.unknown, got.judged, got.relaunch)
     snap = run_decide.with_stall_requests(snap, stall_requests)
@@ -210,12 +223,12 @@ def snapshot_of(
 
 
 @durable.step
-def observe(spec: dict[str, Any]) -> dict[str, Any]:
-    """計画とレーンの進行表を読む耐久ステップ。生死の材料は、進行表の接続を閉じてから読む。"""
+def observe(spec: dict[str, Any], spent: Sequence[str] = ()) -> dict[str, Any]:
+    """計画とレーンの進行表を読む耐久ステップ。生死の材料は、進行表の接続を閉じてから読む。`spent` は `Observe.spent`。"""
     with _conn(spec) as conn:
         view, rows = lane.read_view(conn, spec["plan_id"])
         moved = last_moved(conn, view, rows)
-    return snapshot_of(view, rows, probes(spec["repo"], spec["plan"]), moved)
+    return snapshot_of(view, rows, probes(spec["repo"], spec["plan"]), moved, spent)
 
 
 def first_input(conn: Any, plan_id: str, act: Launch) -> str:
@@ -316,7 +329,7 @@ def complete(spec: dict[str, Any]) -> bool:
 
 def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
-        return Done(act, observe(spec))
+        return Done(act, observe(spec, list(act.spent)))
     if isinstance(act, Launch):
         how = {k: v for k, v in dataclasses.asdict(act).items() if k not in ("lane", "row")}
         return Done(act, launch_lane(spec, act.lane, act.row, how))

@@ -54,7 +54,7 @@ from ndf.progress.plan import (
     read_doc,
     record_release,
     start_plan,
-    status,
+    status_of,
     stop_plan,
 )
 from ndf.progress.plan import run, wait
@@ -88,8 +88,18 @@ def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[s
     return _ok(summary, plan_id=pid, plan=view.name, state=view.state)
 
 
-def _cmd_status(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    return status(conn, _pid(conn, repo, a.plan), datetime.now(UTC), run.probes(repo, a.plan))
+def _cmd_status(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
+    """計画の状態。生死の材料（`ndf progress wait` など同じ DB を開く副命令）は、進行表を読んでトランザクションを
+    閉じてから読む（耐久ワークフローの `observe` と同じ順）。"""
+    with store.open_store(where.url, where.root) as st:
+        with store.transaction(st) as conn:
+            pid = _pid(conn, where.repo, a.plan)
+            view, rows = lane.read_view(conn, pid)
+        warnings = list(st.warnings)
+    out = status_of(pid, view, rows, datetime.now(UTC), run.probes(where.repo, a.plan))
+    if warnings:
+        out.setdefault("warnings", []).extend(warnings)
+    return out
 
 
 def _cmd_lane_add(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
@@ -217,7 +227,6 @@ _ROW_BY_SPRINT: dict[str, Callable[[argparse.Namespace, sa.Connection], dict[str
 COMMANDS: dict[str, Command] = {
     "init": _cmd_create,
     "start": _cmd_create,
-    "status": _cmd_status,
     "lane": _cmd_lane_add,
     "set": _cmd_set,
     "limits": _cmd_limits,
@@ -388,7 +397,7 @@ def _cmd_wait(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
     return result.result(TOOL, result.OK, got["summary"], items=got["items"], metrics=got["metrics"], next=got["next"])
 
 
-SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait}
+SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait, "status": _cmd_status}
 
 
 def _stopped_refused(exc: Any) -> dict[str, Any]:

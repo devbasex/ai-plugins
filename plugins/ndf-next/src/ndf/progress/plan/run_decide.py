@@ -70,7 +70,14 @@ OUTCOMES_RESTARTABLE = (OUTCOME_CANCEL_FAILED, OUTCOME_PAUSED)
 
 @dataclass(frozen=True)
 class Observe:
-    """計画とレーンの進行表を読み直す手。"""
+    """計画とレーンの進行表を読み直す手。`spent` は `/goal` の起こし直しを使い切ったスプリントの ID で、読み直しは
+    そのレーンのためにアカウントを確かめない（尽きた後も毎周 `ndf relay account show` を打たない）。"""
+
+    spent: tuple[str, ...] = ()
+
+
+# `/goal` を入れ直す起こし直しの鍵の接頭辞（鍵は `goal:<スプリントの ID>`）
+GOAL_PREFIX = "goal:"
 
 
 @dataclass(frozen=True)
@@ -91,7 +98,7 @@ class Launch:
         if self.halt:
             return f"halt:{self.lane}/{self.row}"
         if self.goal:
-            return f"goal:{self.goal}"
+            return f"{GOAL_PREFIX}{self.goal}"
         if self.cancel:
             return f"cancel:{self.cancel}"
         if self.resume:
@@ -174,7 +181,8 @@ class Snapshot:
     wakeable: list[Any]
     running: list[Any]
     reported: list[Any]
-    answered: list[Any]
+    # 答えの後の起こし直し（3346-5）より前の版が記録した写しには無いので、空で補って読む
+    answered: list[Any] = field(default_factory=list)
     stalls: list[Any] = field(default_factory=list)
     unknown: list[Any] = field(default_factory=list)
     judged: bool = False
@@ -346,12 +354,13 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     running = snap.state == RUNNING
     found = _candidates(state, policy) if snap.state in OBSERVED_STATES else []
     # 終わったレーンのラッパーは、計画を完了にする前と耐久ワークフローを終える前に止める（#3173）
-    halts = [a for a in found if a.halt]
     end = _end_of(snap)
     if end is not None:
-        return loop.Next.step(halts[0], state) if halts else _finish(state, end)
+        first = _before_end(state, snap, found, policy)
+        return first if first is not None else _finish(state, end)
     if running and snap.complete:
-        return loop.Next.step(halts[0] if halts else Complete(), state)
+        first = _before_end(state, snap, found, policy)
+        return first if first is not None else loop.Next.step(Complete(), state)
     gone = _withdrawable(snap) if running else []
     if gone:
         return loop.Next.step(gone[0], state)
@@ -362,6 +371,24 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     if snap.state == CANCELLED and _cancels_given_up(state, snap):
         return _finish(state, OUTCOME_CANCEL_FAILED)
     return loop.Next.step(Sleep(policy.poll), state)
+
+
+def _before_end(state: RunState, snap: Snapshot, found: list[Launch], policy: Policy) -> Optional[loop.Next[Act, RunState]]:
+    """計画を完了にする前・耐久ワークフローを終える前に打つ手（#3173）。無ければ None。
+
+    終わったレーンのラッパーを止める。止める手が失敗して回数が残っていれば、読み直して止め直すまで完了も終わりも
+    しない。尽きた止める手の知らせ（`halt_failed`）は、計画が動いていれば完了より先に書く（依頼が開けば完了しない）。
+    """
+    halts = [a for a in found if a.halt]
+    if halts:
+        return loop.Next.step(halts[0], state)
+    notices = [u for u in state.unreported if u.kind == HALT_FAILED] if snap.state == RUNNING else []
+    if notices:
+        return loop.Next.step(notices[0], state)
+    retrying = {a.key for a in _launches(snap) if a.halt} & set(state.tried)
+    if retrying - set(state.launched) - set(state.failed):
+        return loop.Next.step(Sleep(policy.poll), state)
+    return None
 
 
 def _withdrawable(snap: Snapshot) -> list[Withdraw]:
@@ -483,7 +510,9 @@ def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: P
     if not act.halt:
         state = replace(state, history=(*state.history, LaunchTry(act.lane, act.row, act.key, bool(value["ok"]), str(value["detail"]))))
     if value["ok"]:
-        return replace(state, launched=(*state.launched, act.key), started=(*state.started, act.key))
+        # 止める手は起こしていないので `started`（起こした起動）に数えず、止まるのを待つ印だけを残す
+        started = state.started if act.halt else (*state.started, act.key)
+        return replace(state, launched=(*state.launched, act.key), started=started)
     return _fail(state, act, value["detail"], policy, bool(value.get("final")))
 
 
@@ -499,14 +528,20 @@ def _after_withdraw(state: RunState, act: Withdraw, value: Any, policy: Policy) 
     )
     if value is None:
         # 計画が動いていないか、依頼が既に閉じていた（写しが古い）。読み直して従う
-        return loop.Next.step(Observe(), state)
+        return loop.Next.step(_observe(state, policy), state)
     return _after_observe(state, policy)
+
+
+def _observe(state: RunState, policy: Policy) -> Observe:
+    """読み直しの手。`/goal` の起こし直しを使い切ったスプリントを `spent` に載せる（アカウントを確かめ直さない）。"""
+    goals = dict.fromkeys(h.key.removeprefix(GOAL_PREFIX) for h in state.history if h.key.startswith(GOAL_PREFIX))
+    return Observe(tuple(sid for sid in goals if not _relaunchable(state, Launch("", "", goal=sid), policy)))
 
 
 def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[Act, RunState]:
     """前の手の結果を受けて次の手を返す。"""
     if done is None or isinstance(done.act, Sleep):
-        return loop.Next.step(Observe(), state)
+        return loop.Next.step(_observe(state, policy), state)
     if isinstance(done.act, Observe):
         snap = Snapshot.of(done.value)
         fresh = _expire_launched(replace(_reopen_closed(state, snap), snapshot=snap, tried=()), policy)
@@ -517,10 +552,10 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
         rest = replace(state, unreported=tuple(u for u in state.unreported if u.key != done.act.key))
         if done.value is None:
             # 計画が終わっていて依頼を書けなかった（写しが古い）。読み直して計画の状態に従う
-            return loop.Next.step(Observe(), rest)
+            return loop.Next.step(_observe(rest, policy), rest)
         return _after_observe(replace(rest, reported=(*rest.reported, done.act.key)), policy)
     if isinstance(done.act, Withdraw):
         return _after_withdraw(state, done.act, done.value, policy)
     if isinstance(done.act, Complete):
-        return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(Observe(), state)
+        return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(_observe(state, policy), state)
     raise TypeError(f"知らない手: {done.act!r}")

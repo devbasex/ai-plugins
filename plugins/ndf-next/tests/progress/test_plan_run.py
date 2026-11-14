@@ -226,7 +226,8 @@ def test_wrappers_are_halted_before_the_plan_completes_and_before_the_workflow_e
     act, state, _ = _step(RunState(), Done(Observe(), _snap(complete=True, halts=[("a", "r1")])))
     assert act == Launch("a", "r1", halt=True)
     act, state, _ = _step(state, Done(act, {"ok": True, "detail": "止めた"}))
-    assert act == Complete()
+    # 止める手は起こした起動（launched）に数えない
+    assert act == Complete() and state.as_result()["launched"] == []
     act, state, finished = _step(RunState(), Done(Observe(), _snap(state="completed", halts=[("b", "r2")])))
     assert act == Launch("b", "r2", halt=True) and not finished
     _, state, finished = _step(state, Done(act, {"ok": True, "detail": "止めた"}))
@@ -244,6 +245,43 @@ def test_a_wrapper_that_cannot_be_halted_is_reported_and_does_not_hold_the_end()
     # オーガナイザーが依頼を閉じた後も止め直さず（依頼を開き直さず）、計画を完了にする
     act, state, _ = _step(state, Done(Observe(), _snap(complete=True, halts=[("a", "r1")])))
     assert act == Complete() and state.unreported == ()
+
+
+def test_a_failed_halt_is_retried_and_reported_before_the_plan_completes_or_the_workflow_ends():
+    """止める手が失敗したら、完了・終わりより先に読み直して止め直し、尽きたら halt_failed を知らせる（#3173）。"""
+    ended = _snap(complete=True, halts=[("a", "r1")])
+    act, state, _ = _step(RunState(), Done(Observe(), ended))
+    act, state, _ = _step(state, Done(act, {"ok": False, "detail": "錠が空かない"}))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), ended))
+    assert act == Launch("a", "r1", halt=True)
+    act, state, _ = _step(state, Done(act, {"ok": False, "detail": "錠が空かない"}))
+    assert act == Report("a", "halt:a/r1", "halt:a/r1: 錠が空かない", run_decide.HALT_FAILED)
+    act, state, finished = _step(RunState(), Done(Observe(), _snap(state="completed", halts=[("b", "r2")])))
+    act, state, finished = _step(state, Done(act, {"ok": False, "detail": "錠が空かない"}))
+    assert act == Sleep(30.0) and not finished
+
+
+def test_a_snapshot_recorded_before_answers_existed_is_read_with_no_answers():
+    """答えの後の起こし直しより前に記録した写し（answered が無い）も、回復のときに読める。"""
+    old = {"state": "running", "complete": False, "wakeable": [], "running": [], "reported": []}
+    assert run_decide.Snapshot.of(old).answered == []
+    act, _, _ = _step(RunState(), Done(Observe(), old))
+    assert act == Sleep(30.0)
+
+
+def test_the_read_after_the_goal_relaunches_run_out_does_not_ask_for_the_account():
+    """/goal の起こし直しを使い切ったスプリントは、読み直しの手の spent に載る（アカウントを確かめ直さない。#3243）。"""
+    stall = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まっている", None, "r1")
+    stalled = run_decide.with_stalls(_snap(running=[("a", "r1", "s1")]), [stall], relaunch=[("a", "r1", "s1")])
+    state = RunState()
+    reads = []
+    for _ in range(POLICY.attempts):
+        act, state, _ = _step(state, Done(Observe(), stalled))
+        act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+        reads.append(_step(state, Done(Sleep(30.0)))[0])
+        act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")])))
+    assert reads == [Observe(), Observe(spent=("s1",))]
 
 
 def test_a_launched_lane_that_does_not_start_its_row_in_time_counts_as_a_failure():
@@ -459,6 +497,14 @@ def test_snapshot_relaunches_a_stalled_wrapper_only_while_the_account_is_usable(
         text = run.first_input(conn, pid, Launch("a", "r1", goal=sid))
     assert snap["relaunch"] == [["a", "r1", sid]] and [s[1] for s in snap["stalls"]] == ["stall:a/r1:stalled"]
     assert blocked["relaunch"] == [] and text.startswith("/goal ") and sid in text
+    asked = []
+    counted = liveness.Probes(
+        wrapper_name=lambda name: f"w-{name}", wrappers=lambda: auth, sprint=idle.get, account_ok=lambda: asked.append(1) or True
+    )
+    with store.transaction(opened) as conn:
+        spent = run.read_snapshot(conn, pid, counted, spent=[sid])
+    # 起こし直しを使い切ったスプリントのためにアカウントを確かめず、止まりとして知らせる
+    assert spent["relaunch"] == [] and asked == [] and [s[1] for s in spent["stalls"]] == ["stall:a/r1:stalled"]
 
 
 def test_first_input_refuses_a_lane_of_another_repository(opened):
@@ -623,7 +669,7 @@ def test_the_workflow_halts_the_wrapper_of_the_lane_that_ran_its_last_row(where,
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "completed" and launched == [("a", "r1")]
     # 1 回目は行を始める前、2 回目は最後の行を終えた後
-    assert stopped == ["a", "a"] and "halt:a/r1" in final["launched"]
+    assert stopped == ["a", "a"] and final["launched"] == ["a/r1"]
 
 
 def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypatch):

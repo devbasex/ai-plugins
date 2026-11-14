@@ -397,8 +397,22 @@ def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[livene
     `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
     足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。マシンのプランの本数の上限で起動を待つ
     レーンには `machine_wait`（マシンの合計・このレーンの本数・上限）を載せる（#2999）。
+
+    生死の材料は同じ進行表の DB を開く副命令を打つので、`probes` を渡すのはトランザクションの外で読む
+    `status_of` を使う呼び手だけにする（CLI は進行表を読んでトランザクションを閉じてから `status_of` を呼ぶ）。
     """
     view, rows = lane.read_view(conn, pid)
+    return status_of(pid, view, rows, now, probes)
+
+
+def status_of(
+    pid: str,
+    view: lane.PlanView,
+    rows: dict[str, list[lane.LaneRow]],
+    now: datetime,
+    probes: Optional[liveness.Probes] = None,
+) -> dict[str, Any]:
+    """読んだ計画とレーンの進行表から状態を作る（`status` の本体。生死とマシンの上限は `probes` で観測する）。"""
     verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
     waits = machine_waits(view, rows, probes.wrappers()) if probes is not None else {}
     items = _lane_items(view, rows, now)
