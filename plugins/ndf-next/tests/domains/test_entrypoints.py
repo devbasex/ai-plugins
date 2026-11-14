@@ -72,9 +72,15 @@ def test_env_the_service_sets_is_in_the_workflow_entrypoint():
     by_service = set(facts.ids(ENV, set_by="service"))
     assert by_service <= set(facts.value(EP, "skill-workflow", "env"))
     assert facts.value(EP, "skill-workflow", "env") == facts.value(EP, "block-next", "env")
+    assert facts.value(EP, "skill-workflow", "args") == facts.value(EP, "block-next", "args")
     assert facts.value(ENV, "NDF_PROGRESS_DB", "secret") is True
 
 
 def test_places_given_by_env_name_a_declared_variable():
     for r in facts.rows(PLACES, root="env"):
         assert r["path"] == ".", r["id"]
+
+
+def test_loop_record_is_kept_in_the_main_directory():
+    """開発ループの記録は、どの worktree から再開・監視しても同じメインディレクトリの位置にある。"""
+    assert facts.value(PLACES, facts.value(EP, "file-loop-record", "target"), "root") == "main"
