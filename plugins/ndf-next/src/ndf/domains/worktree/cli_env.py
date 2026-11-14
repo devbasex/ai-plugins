@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ndf.contracts import result
-from ndf.domains.worktree import container, deps, localenv, localenv_decide, testenv, testenv_sweep
+from ndf.domains.worktree import container, deps, localenv, localenv_decide, outcomes, testenv, testenv_sweep
 from ndf.testing.command import parse_period
 
 LOCALENV = ("setup", "verify", "healthcheck", "aim", "mode")
@@ -149,17 +149,14 @@ def _te_reap(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str
     except ValueError as exc:
         return result.stopped(tool, "invalid", f"--idle: {exc}")
     items = testenv_sweep.reap(t, idle)
-    return result.result(tool, result.OK, f"止めた: {sum(1 for i in items if i['result'] == 'stopped')} 件", items)
+    stopped = sum(1 for i in items if i["result"] == outcomes.STOPPED)
+    return result.result(tool, result.OK, f"止めた: {stopped} 件", items)
 
 
 def _te_reclaim(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     items = testenv.reclaim(t)
-    return result.result(
-        tool,
-        result.OK,
-        f"回収した: {sum(1 for i in items if i['result'] != 'kept')} 件（残した {sum(1 for i in items if i['result'] == 'kept')} 件）",
-        items,
-    )
+    kept = sum(1 for i in items if i["result"] == outcomes.KEPT)
+    return result.result(tool, result.OK, f"回収した: {len(items) - kept} 件（残した {kept} 件）", items)
 
 
 def _te_expose(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:

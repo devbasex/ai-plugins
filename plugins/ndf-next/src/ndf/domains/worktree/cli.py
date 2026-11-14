@@ -35,6 +35,7 @@ from ndf.domains.worktree import (
     guard_decide,
     localenv,
     merged,
+    outcomes,
     repo,
     session_decide,
     setup,
@@ -143,7 +144,8 @@ def _merged(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     main = Git(where.main_dir)
     hub = github_mod.GitHub(main.remote_repo(), github_mod.client())
     rec = merged.after_merge(where.main_dir, args.prs, hub, merged.read_flow_record(args.flow_record))
-    metrics = {k: rec.count(*k.split(":")) for k in ("worktree:removed", "branch:deleted", "worktree:kept", "branch:kept")}
+    counted = (("worktree", outcomes.REMOVED), ("branch", outcomes.DELETED), ("worktree", outcomes.KEPT), ("branch", outcomes.KEPT))
+    metrics = {f"{kind}:{word}": rec.count(kind, word) for kind, word in counted}
     summary = f"worktree {metrics['worktree:removed']} 件を外し、ブランチ {metrics['branch:deleted']} 件を消した（残した {metrics['worktree:kept'] + metrics['branch:kept']} 件）"
     if rec.stopped is not None:
         return result.stopped(TOOL, "refused", rec.stopped, items=rec.items)

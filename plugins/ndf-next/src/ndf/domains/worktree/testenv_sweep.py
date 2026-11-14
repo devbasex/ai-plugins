@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from filelock import FileLock, Timeout
 
-from ndf.domains.worktree import ledger, testenv
+from ndf.domains.worktree import ledger, outcomes, testenv
 from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
@@ -51,8 +51,12 @@ def _stop_idle(t: Target, row: dict[str, Any]) -> dict[str, Any]:
         with FileLock(str(testenv.inuse_lock(t, env)), timeout=0):
             rc = t.shell.docker_run("compose", "-p", env, "stop").returncode
     except Timeout:
-        return {**item, "result": "kept", "reason": "テストの実行中"}
-    return {**item, "result": "stopped" if rc == 0 else "kept", **({} if rc == 0 else {"reason": f"止められない（終了コード {rc}）"})}
+        return {**item, "result": outcomes.KEPT, "reason": "テストの実行中"}
+    return {
+        **item,
+        "result": outcomes.STOPPED if rc == 0 else outcomes.KEPT,
+        **({} if rc == 0 else {"reason": f"止められない（終了コード {rc}）"}),
+    }
 
 
 def _open_row(rows: list[dict[str, Any]], worktree: str) -> Optional[dict[str, Any]]:

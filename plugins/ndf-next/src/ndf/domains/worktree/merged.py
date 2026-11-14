@@ -23,7 +23,7 @@ from typing import Any, Iterable, Mapping, Optional, Protocol
 
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import create, declaration, mainlock, merged_decide, repo, testenv, testenv_sweep, trash
+from ndf.domains.worktree import create, declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
@@ -91,36 +91,36 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
         dirty = repo.dirty_paths(Git(item.path))
         if dirty:
             names = ", ".join(line[3:] for line in dirty[:LISTED]) + ("…" if len(dirty) > LISTED else "")
-            rec.add("worktree", str(item.path), "kept", f"追跡しているファイルに未コミットの変更が {len(dirty)} 件ある（{names}）")
+            rec.add("worktree", str(item.path), outcomes.KEPT, f"追跡しているファイルに未コミットの変更が {len(dirty)} 件ある（{names}）")
             return False
     closed = _close_testenv(item.path)
     if closed is not None:
-        rec.add("worktree", str(item.path), "kept", closed)
+        rec.add("worktree", str(item.path), outcomes.KEPT, closed)
         return False
     first = main.attempt("worktree", "remove", str(item.path))
     if first.returncode == 0:
-        rec.add("worktree", str(item.path), "removed")
+        rec.add("worktree", str(item.path), outcomes.REMOVED)
         return True
     got = trash.evacuate(main, item.path, str(item.branch), item.head)
     main.run("worktree", "remove", "--force", str(item.path))
     why = f"退避先 {got.dest}" if got.dest is not None else "退避するものは無かった"
     if got.discarded:
         why += f"（捨てた生成物: {', '.join(got.discarded)}）"
-    rec.add("worktree", str(item.path), "removed", why)
+    rec.add("worktree", str(item.path), outcomes.REMOVED, why)
     return True
 
 
 def _delete_branch(main: Git, branch: str, rec: Record) -> None:
     if not repo.has_ref(main, f"refs/heads/{branch}"):
-        rec.add("branch", branch, "absent")
+        rec.add("branch", branch, outcomes.ABSENT)
         return
     sha = main.rev_parse(f"refs/heads/{branch}")
     refused = repo.delete_merged_branch(main, branch)
     if refused is None:
-        rec.add("branch", branch, "deleted", sha=sha, restore=f"git branch {branch} {sha}")
+        rec.add("branch", branch, outcomes.DELETED, sha=sha, restore=f"git branch {branch} {sha}")
         return
     why = f"git がマージ済みと認めない（{repo.MANUAL_FORCE}）: {refused}"
-    rec.add("branch", branch, "kept", why, sha=sha)
+    rec.add("branch", branch, outcomes.KEPT, why, sha=sha)
 
 
 def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record) -> None:
@@ -129,7 +129,7 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record) -> None:
         if item.branch != branch:
             continue
         if item.path == main_dir:
-            rec.add("worktree", str(item.path), "kept", "メインディレクトリがこのブランチを checkout している")
+            rec.add("worktree", str(item.path), outcomes.KEPT, "メインディレクトリがこのブランチを checkout している")
             free = False
             continue
         free = _remove_worktree(main, item, rec) and free
@@ -139,15 +139,15 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record) -> None:
 
 def _one(main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Optional[Mapping[str, Any]], rec: Record) -> None:
     if pull is None:
-        rec.add("pr", str(number), "kept", "PR が見つからない")
+        rec.add("pr", str(number), outcomes.KEPT, "PR が見つからない")
         return
     if not pull.merged:
-        rec.add("pr", str(number), "kept", "PR がマージされていない")
+        rec.add("pr", str(number), outcomes.KEPT, "PR がマージされていない")
         return
     branch = pull.head_ref
     keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow))
     if keep is not None:
-        rec.add("branch", branch, "kept", keep)
+        rec.add("branch", branch, outcomes.KEPT, keep)
         return
     _clean_branch(main, main_dir, branch, rec)
 
@@ -156,23 +156,23 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     """メインディレクトリがベースブランチにいれば fast-forward で取り込む。失敗は `rec.stopped` に書く。"""
     skip = merged_decide.pull_skip(repo.current_branch(main), base)
     if skip is not None:
-        rec.add("main_dir", str(main.cwd), "kept", skip)
+        rec.add("main_dir", str(main.cwd), outcomes.KEPT, skip)
         return
     fetched = main.fetch_branch(create.REMOTE, base)
     if fetched.returncode != 0:
-        rec.add("main_dir", str(main.cwd), "kept", f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
+        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return
     done = main.attempt("merge", "--ff-only", "-q", f"{create.REMOTE}/{base}")
     if done.returncode == 0:
-        rec.add("main_dir", str(main.cwd), "pulled")
+        rec.add("main_dir", str(main.cwd), outcomes.PULLED)
         return
     dirty = repo.dirty_paths(main)
     if dirty:
         # 利用者の手元の変更には触れない（stash も checkout もしない）。取り込みだけを見送る
-        rec.add("main_dir", str(main.cwd), "kept", f"未コミットの変更（{len(dirty)} 件）が取り込みを塞いだため取り込まない")
+        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）が取り込みを塞いだため取り込まない")
         return
     rec.stopped = f"メインディレクトリの git merge --ff-only {create.REMOTE}/{base} が失敗: {done.stderr.strip()}"
-    rec.add("main_dir", str(main.cwd), "stopped", rec.stopped)
+    rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
 
 
 def read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]:

@@ -25,7 +25,7 @@ from typing import Any, Optional
 from filelock import FileLock, Timeout
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, ledger, localenv, repo, testenv_decide
+from ndf.domains.worktree import container, declaration, ledger, localenv, outcomes, repo, testenv_decide
 from ndf.testing import testenv as placement
 
 SECTION = declaration.TESTENV
@@ -374,18 +374,18 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
     env, wt = row["environment"], Path(row["worktree"])
     item: dict[str, Any] = {"kind": "testenv", "name": env, "worktree": str(wt)}
     if not placement.location_seen(wt, t.main_dir):
-        return {**item, "result": "kept", "reason": "worktree の置き場をここから確かめられない"}
+        return {**item, "result": outcomes.KEPT, "reason": "worktree の置き場をここから確かめられない"}
     if ledger.exposing(row):
-        return {**item, "result": "kept", "reason": "公開が開いている（unexpose で閉じてから回収する）"}
+        return {**item, "result": outcomes.KEPT, "reason": "公開が開いている（unexpose で閉じてから回収する）"}
     owner, why = placement.owner_of(_workdirs(t, env), [str(r.get("worktree")) for r in rows if r.get("environment") == env])
     if owner == placement.FOREIGN:
-        return {**item, "result": "kept", "reason": why}
+        return {**item, "result": outcomes.KEPT, "reason": why}
     if owner == placement.OWN:
         rc = t.shell.docker_run("compose", "-p", env, *_down_args(t)).returncode
         if rc != 0:
-            return {**item, "result": "kept", "reason": f"破棄に失敗した（終了コード {rc}）"}
+            return {**item, "result": outcomes.KEPT, "reason": f"破棄に失敗した（終了コード {rc}）"}
     t.book.update(str(wt), _release)
-    return {**item, "result": "reclaimed" if owner == placement.OWN else "released"}
+    return {**item, "result": outcomes.RECLAIMED if owner == placement.OWN else outcomes.RELEASED}
 
 
 def reclaim(t: Target, limit: Optional[int] = None) -> list[dict[str, Any]]:
@@ -396,6 +396,6 @@ def reclaim(t: Target, limit: Optional[int] = None) -> list[dict[str, Any]]:
         if not ledger.active(row) or Path(str(row.get("worktree"))).exists():
             continue
         items.append(_reclaim_one(t, row, rows))
-        if limit is not None and sum(1 for i in items if i["result"] != "kept") >= limit:
+        if limit is not None and sum(1 for i in items if i["result"] != outcomes.KEPT) >= limit:
             break
     return items
