@@ -8,7 +8,7 @@ import json
 import pytest
 from jsonschema import Draft202012Validator
 
-from ndf.domains.hooks import cli, tables
+from ndf.domains.hooks import boot, cli, context, tables
 from ndf.domains.hooks.verdict import KINDS
 
 from ._hooks import SAMPLES, call_entry, read_sample, records, sample_paths, stop
@@ -83,6 +83,35 @@ def test_unknown_events_and_runtimes_pass(args, tmp_path):
 def test_non_object_input_passes(text):
     assert call_entry("claude", "PreToolUse", text) is None
     assert records()[-1]["error"] == "input_shape"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", None),
+        ("   \n", None),
+        ("not json", None),
+        ("[1, 2]", None),
+        ("null", None),
+        ('"文字列"', None),
+        ("3", None),
+        ('{"a": 1', None),
+        ("{}", {}),
+        (' {"tool_name": "Bash", "n": [1]} \n', {"tool_name": "Bash", "n": [1]}),
+    ],
+)
+def test_boot_reads_the_payload_like_the_context(text, expected):
+    # 環境が無いときのエントリポイントも、オブジェクトの JSON だけを入力として読む（context の解析と同じ答え）
+    assert boot._payload(text) == expected
+    assert context.parse_payload(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "not json", "[1, 2]", "null"])
+def test_boot_passes_non_object_input_as_input_shape(text):
+    out = io.StringIO()
+    assert boot.run_boot(["boot.py", "claude", "PreToolUse"], io.StringIO(text), out) == 0
+    assert out.getvalue() == ""
+    assert records()[-1]["error"] == "input_shape" and records()[-1]["path"] == "boot"
 
 
 def test_capture_redacts_and_writes_a_sample(tmp_path):
