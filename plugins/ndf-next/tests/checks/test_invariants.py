@@ -114,7 +114,7 @@ def test_unknown_base_stops(plugin, rules, changed):
         invariants.old_plugin_diff(plugin.scope(base="no-such-ref"), rules["invariants"])
 
 
-# 現状固定（I-006）: `pythonpath_tops` と、`pyproject.toml` を読む `old_imports` の入口
+# 現状固定（I-006）: `pythonpath_tops` と、`pyproject.toml` を読む `old_imports` のエントリポイント
 def test_pythonpath_tops_lists_direct_py_stems(plugin):
     plugin.write("tests/support/_server.py", "X = 1\n")
     plugin.write("tests/support/notes.txt", "x\n")

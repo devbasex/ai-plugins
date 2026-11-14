@@ -102,12 +102,17 @@ def _definition_lines(tree: ast.Module) -> set[int]:
     return lines
 
 
-def declared_tops(plugin_root: Path) -> frozenset[str]:
-    """`pyproject.toml` が宣言した依存（グループを含む）が入れる最上位のモジュールの名前。"""
+def _pyproject(plugin_root: Path) -> dict[str, Any]:
+    """`pyproject.toml` の中身。読めなければ `CheckError`。"""
     try:
-        project = tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
+        return tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CheckError(f"pyproject.toml を読めない: {exc}") from exc
+
+
+def declared_tops(plugin_root: Path) -> frozenset[str]:
+    """`pyproject.toml` が宣言した依存（グループを含む）が入れる最上位のモジュールの名前。"""
+    project = _pyproject(plugin_root)
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
     dists = {_normalize(re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0]) for s in specs}
@@ -121,8 +126,7 @@ def pythonpath_tops(plugin_root: Path) -> frozenset[str]:
 
     テストの補助のモジュール（`tests/support/` など）は、pytest がこのディレクトリをパスへ足して読ませる。
     """
-    project = tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
-    section: Any = project
+    section: Any = _pyproject(plugin_root)
     for key in ("tool", "pytest", "ini_options", "pythonpath"):
         section = section[key] if isinstance(section, dict) and key in section else ()
     dirs = section if isinstance(section, list) else ()
