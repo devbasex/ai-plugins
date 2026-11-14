@@ -81,17 +81,21 @@ def _check_budget() -> int:
     return result.emit(result.result(TOOL, result.OK, "hook の予算の順序を守れている"))
 
 
+def _invalid(detail: str) -> int:
+    return result.emit(result.stopped(TOOL, "invalid", detail))
+
+
 def _capture(args: argparse.Namespace) -> int:
     if args.runtime not in tables.runtimes() or tables.event_spec(args.runtime, args.event) is None:
-        return result.emit(result.stopped(TOOL, "invalid", f"契約表に無いランタイムか事象: {args.runtime} {args.event}"))
+        return _invalid(f"契約表に無いランタイムか事象: {args.runtime} {args.event}")
     if not _VERSION_RE.match(args.version):
-        return result.emit(result.stopped(TOOL, "invalid", f"版の形が違う: {args.version}"))
+        return _invalid(f"版の形が違う: {args.version}")
     try:
         payload = json.loads(sys.stdin.read())
     except ValueError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"標準入力が JSON でない: {exc}"))
+        return _invalid(f"標準入力が JSON でない: {exc}")
     if not isinstance(payload, dict):
-        return result.emit(result.stopped(TOOL, "invalid", "標準入力が JSON のオブジェクトでない"))
+        return _invalid("標準入力が JSON のオブジェクトでない")
     path = capture(args.runtime, args.version, args.event, payload)
     return result.emit(result.result(TOOL, result.OK, f"見本を書いた: {path}", items=[{"path": str(path)}]))
 
