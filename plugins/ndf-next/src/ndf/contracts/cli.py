@@ -3,7 +3,7 @@
 ndf contracts check                          契約の表をすべて確かめ、結果 JSON を出す
 ndf contracts fact-ids <表> [<列>=<値>...]    条件に合う行の id を改行区切りで出す
 ndf contracts fact-value <表> <id> <列>       1 つの値を出す（配列は 1 行に 1 要素）
-ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] ...
+ndf contracts emit --tool T --status S --summary X [--cause KIND DETAIL] [--next JSON] [--route ANSWER JSON] ...
                                              結果 JSON を確かめて 1 行で出す（シェルと worker が使う）
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ndf import contracts
-from ndf.contracts import causes, facts, limits, result
+from ndf.contracts import causes, facts, limits, result, version
 
 # 道具の名前は副命令の名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -33,9 +33,9 @@ def _collect(errs: list[str], fn: Callable[[], Any]) -> Any:
 
 
 def check_all() -> list[str]:
-    """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ）の誤りを並べる。空なら通る。"""
+    """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ・契約の版）の誤りを並べる。空なら通る。"""
     errs: list[str] = []
-    for name in ("result", "causes", "limits", "release-verification"):
+    for name in ("result", "causes", "limits", "release-verification", "route-chosen", "version"):
         _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
     policies = _collect(errs, limits.table)
     policy_names = set(policies) if policies is not None else None
@@ -43,7 +43,10 @@ def check_all() -> list[str]:
         refs = _collect(errs, lambda name=name: facts.ref_errors(name, policy_names))
         if refs is not None:
             errs += refs
-    _collect(errs, causes.table)
+    if _collect(errs, causes.table) is not None:
+        found = _collect(errs, version.errors)
+        if found is not None:
+            errs += found
     return errs
 
 
@@ -91,6 +94,16 @@ def _json_object_arg(text: str) -> dict[str, Any]:
     return value
 
 
+def _route_value(text: str) -> dict[str, Any] | None:
+    """`--route` の CMD。- なら何も打たない（null）。JSON のオブジェクトでなければ `ValueError`。"""
+    if text == "-":
+        return None
+    try:
+        return _json_object_arg(text)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(f"--route の CMD: {exc}") from None
+
+
 def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
     """`emit` の引数から結果を組む（確かめない）。"""
     cause = causes.build(a.cause[0], a.cause[1], instance=a.cause_instance, retry_after=a.retry_after) if a.cause else None
@@ -101,10 +114,12 @@ def _result_from_args(a: argparse.Namespace) -> dict[str, Any]:
         items=a.item,
         metrics=a.metrics,
         cause=cause,
-        routes={k: (None if v == "-" else v) for k, v in a.route},
+        routes={k: _route_value(v) for k, v in a.route},
         gaps=[{"kind": k, "name": n, "reason": r} for k, n, r in a.gap],
         next=a.next,
         presentation_path=a.presentation_path,
+        outputs=a.outputs,
+        run_id=a.run_id,
     )
 
 
@@ -142,11 +157,20 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--cause", nargs=2, metavar=("KIND", "DETAIL"))
     p.add_argument("--cause-instance")
     p.add_argument("--retry-after", type=float)
-    p.add_argument("--route", nargs=2, action="append", default=[], metavar=("ANSWER", "CMD"), help="CMD が - なら何も打たない")
+    p.add_argument(
+        "--route",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ANSWER", "CMD"),
+        help='CMD は {"argv": ["ndf", ...]} の JSON。- なら何も打たない',
+    )
     p.add_argument("--gap", nargs=3, action="append", default=[], metavar=("KIND", "NAME", "REASON"))
     p.add_argument("--item", type=_json_arg, action="append", default=[], help="items の 1 要素（JSON のオブジェクト）")
     p.add_argument("--metrics", type=_json_object_arg, help="metrics（JSON のオブジェクト）")
-    p.add_argument("--next")
+    p.add_argument("--next", type=_json_object_arg, help='次に打つコマンド（{"argv": ["ndf", ...], "ask": [...]} の JSON）')
+    p.add_argument("--outputs", type=_json_object_arg, help="工程どうしで渡す値（JSON のオブジェクト）")
+    p.add_argument("--run-id")
     p.add_argument("--presentation-path")
     p.add_argument("--code", type=int, help="終了コード（省けば status と cause.kind から決める）")
     p.add_argument("--out", help="結果を 1 行で書くファイル（形が合うときだけ書く）")
