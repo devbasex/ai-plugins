@@ -182,15 +182,21 @@ def read_lanes(cwd: Path, plan: str, skip: Sequence[str] = ()) -> Optional[PlanL
         return PlanLanes(key, readable=False)
 
 
+def machine_plans(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]]) -> list[PlanLanes]:
+    """自分の計画（読んである）と、登録簿の計画のレーン。計画の所在で重複を除く（最初の 1 件を残し、順を保つ）。
+
+    レーンに依らないので、レーンごとに数える呼び手はこれを 1 回だけ読んで `count` へ渡す。
+    """
+    others = [read_lanes(cwd, plan, (own.key,)) for cwd, plan in discover(listed)]
+    uniq: dict[str, PlanLanes] = {}
+    for p in (own, *(p for p in others if p is not None)):
+        uniq.setdefault(p.key, p)
+    return list(uniq.values())
+
+
 def machine_count(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
     """自分の計画（読んである）と、登録簿の計画の動いているレーンを数える。"""
-    others = [read_lanes(cwd, plan, (own.key,)) for cwd, plan in discover(listed)]
-    found = [own, *(p for p in others if p is not None)]
-    # 計画の所在で重複を除く（最初の 1 件を残し、順を保つ）
-    uniq: dict[str, PlanLanes] = {}
-    for p in found:
-        uniq.setdefault(p.key, p)
-    return count(list(uniq.values()), listed, skip)
+    return count(machine_plans(own, listed), listed, skip)
 
 
 def lock_path() -> Path:

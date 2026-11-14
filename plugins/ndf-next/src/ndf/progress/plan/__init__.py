@@ -337,12 +337,13 @@ def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], list
     wakeable = lane.wakeable_lanes(view, rows)
     if not wakeable or listed is None:
         return {}
-    own = machine.lanes_of(view, rows)
+    # 他の計画のレーンはレーンに依らないので、ループの前に 1 回だけ読む
+    found = machine.machine_plans(machine.lanes_of(view, rows), listed)
     limit = machine.cap()
     out = {}
     for name, _ in wakeable:
         wrapper = launch.wrapper_name(str(view.repo), view.name, name)
-        got = machine.machine_count(own, listed, wrapper)
+        got = machine.count(found, listed, wrapper)
         plans = view.lanes[name].plans
         if not machine.admit(got.total, plans, limit):
             out[name] = machine.waiting(machine.RULE, got, plans, limit)["waiting"]

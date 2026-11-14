@@ -197,3 +197,23 @@ def test_status_shows_a_lane_waiting_for_the_machine(opened, monkeypatch):
         out = plan.status(conn, pid, datetime.now(UTC), found)
     (item,) = out["items"]
     assert item["machine_wait"] == {"reason": "machine-plans", "machine_plans": 5, "plans": 2, "max_plans": 6, "unreadable": ["/other:q1"]}
+
+
+def test_status_reads_the_other_plans_once_for_all_wakeable_lanes(opened, monkeypatch):
+    """起こせるレーンが複数あっても、登録簿の他の計画は status 1 回で 1 度だけ読む（処理の回数）。"""
+    with store.transaction(opened) as conn:
+        pid = plan.create_plan(conn, REPO, doc(decl("a", [[1]], plans=2), decl("b", [[2]], touches=("src/b",))), True)
+    listed = {f"x-{i}": _row() for i in range(5)}
+    found = liveness.Probes(wrapper_name=lambda name: f"w-{name}", wrappers=lambda: listed, sprint=lambda sid: None)
+    reads = []
+
+    def read_lanes(cwd, plan_name, skip=()):
+        reads.append((cwd, plan_name))
+        return machine.PlanLanes(f"{cwd}:{plan_name}", readable=False)
+
+    monkeypatch.setattr(machine, "read_lanes", read_lanes)
+    with store.transaction(opened) as conn:
+        out = plan.status(conn, pid, datetime.now(UTC), found)
+        wakeable = lane.wakeable_lanes(*lane.read_view(conn, pid))
+    assert len(wakeable) == len(out["items"]) == 2
+    assert len(reads) == len(machine.discover(listed)) == 1
