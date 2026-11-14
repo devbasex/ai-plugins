@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: cross-refactoring を途中で止め、対象の Pull Request の head が進んでから同じコマンドを打ち直すと、止める前の head で作った作業場所と状態ファイルをそのまま続ける。古いコードに対して提案と実装を進める（今の ndf ではスプリント PR #3480 の検査で、最後の push が non-fast-forward で断られて止まり、15〜20 分と token を使った）。ndf-next の cross-refactoring も、未完了の状態を続けるときに `work` の HEAD と PR の head を比べない
+- **今どうなっているか**: cross-refactoring を途中で止め、対象の Pull Request の head が進んでから同じコマンドを打ち直す。すると、止める前の head で作った作業場所と状態ファイルをそのまま続ける。古いコードに対して提案と実装を進める。今の ndf ではスプリント PR #3480 の検査で、最後の push が non-fast-forward で断られて止まり、15〜20 分と token を使った。ndf-next の cross-refactoring も、未完了の状態を続けるときに `work` の HEAD と PR の head を比べない
 - **誰に効くか**: 検査のプランを流し直す conductor と、cross-refactoring を単独で打ち直す利用者
 - **変えると何が成り立つか**: 未完了の状態を続ける前に、`work` の起点と PR の今の head を比べる。古い起点なら、古い作業場所と状態ファイルを消さずに退避し、空の状態で今の head から作業場所を作り直す。手での退避が要らなくなり、古い起点を理由に push が断られなくなる
 
@@ -72,6 +72,22 @@
 | 退避した作業場所 | 古い起点のために、消さずに `rf<PR>.retired-<時刻>` へ移した作業場所（`work`・`read/<ランタイム>`・`logs`）と状態ファイル。同じ PR の作業場所の片付けが、作業の残りで外すかを決める | 追加（`ndf-cross-refactoring`） |
 | 退避の途中の印 | 退避を始める前に退避した先へ置き、移し終えたら消すファイル。残っていれば、前の打ち直しの退避が途中で止まったことを表す。次の打ち直しは照合をせずに退避を続ける | 無し（この設計の中だけで使う。ファイル名は詳細設計が決める） |
 
+## 照合の規則
+
+> 未完了の状態を続ける前に、前の退避の途中の印が残っていれば、照合をせずにその退避を続ける。印が無ければ、PR の今の head が `work` の HEAD に含まれる（`git merge-base --is-ancestor <PR の head> <work の HEAD>` が 0）かを見る。含まれなければ古い起点で、古い作業場所と状態ファイルを `rf<PR>.retired-<時刻>` へ退避し、空の状態で今の head から作業場所を作り直す。状態が残るのに `work` が無ければ、比べる起点が無いため古い起点として扱う。PR の今の head を取れなければ何も変えずに止まる。最終ゲートの記録がある回と、途中の記録が無い回は照合しない。
+
+表は上から順に当て、最初に当たった行で決める。
+
+| 場合 | 扱い | 受け入れ条件 |
+| --- | --- | --- |
+| 退避の途中の印が `rf<PR>.retired-<時刻>` に残る | 照合をせずに退避を続ける（残りの移動から。head を取らない） | 3・4 |
+| 状態ファイルが空・完了の記録（`done`）を持つ | 照合しない（既存の経路。完了の比較は `_reused`） | — |
+| 状態ファイルに最終ゲートの記録（`final`）がある | 照合しない | 6 |
+| 状態ファイルはあるが `work` が無い | 古い起点として扱い、残り（`read/<ランタイム>`・`logs`・状態ファイル）を退避する。head を取らない | 2・3・4 |
+| PR の今の head を取れない | 何も変えずに種類 `transient` で止まる | 7 |
+| `--is-ancestor` が 0 | 続ける | 5 |
+| `--is-ancestor` が 0 以外 | 退避して、空の状態で今の head から始める | 2・3・4 |
+
 ## 外部の調査
 
 | 種類 | 調べるか | 理由 |
@@ -98,22 +114,6 @@
 無し。
 
 調べた量: 候補 3 件・取得の試み 3 回。
-
-## 照合の規則
-
-> 未完了の状態を続ける前に、前の退避の途中の印が残っていれば、照合をせずにその退避を続ける。印が無ければ、PR の今の head が `work` の HEAD に含まれる（`git merge-base --is-ancestor <PR の head> <work の HEAD>` が 0）かを見る。含まれなければ古い起点で、古い作業場所と状態ファイルを `rf<PR>.retired-<時刻>` へ退避し、空の状態で今の head から作業場所を作り直す。状態が残るのに `work` が無ければ、比べる起点が無いため古い起点として扱う。PR の今の head を取れなければ何も変えずに止まる。最終ゲートの記録がある回と、途中の記録が無い回は照合しない。
-
-表は上から順に当て、最初に当たった行で決める。
-
-| 場合 | 扱い | 受け入れ条件 |
-| --- | --- | --- |
-| 退避の途中の印が `rf<PR>.retired-<時刻>` に残る | 照合をせずに退避を続ける（残りの移動から。head を取らない） | 3・4 |
-| 状態ファイルが空・完了の記録（`done`）を持つ | 照合しない（既存の経路。完了の比較は `_reused`） | — |
-| 状態ファイルに最終ゲートの記録（`final`）がある | 照合しない | 6 |
-| 状態ファイルはあるが `work` が無い | 古い起点として扱い、残り（`read/<ランタイム>`・`logs`・状態ファイル）を退避する。head を取らない | 2・3・4 |
-| PR の今の head を取れない | 何も変えずに種類 `transient` で止まる | 7 |
-| `--is-ancestor` が 0 | 続ける | 5 |
-| `--is-ancestor` が 0 以外 | 退避して、空の状態で今の head から始める | 2・3・4 |
 
 ## 機能一覧
 
@@ -143,32 +143,13 @@ graph TD
 
 cross-review の駆動と、今の ndf（`plugins/ndf/`）は変えない。
 
-## 処理の流れ
-
-状態ファイル（`rf<PR>/state.json`）が実行の進みを持つ。照合は `_open` の、完了の記録を返すかの判定（`_reused`）と引数の照合（`_resume_mismatch`）の後、作業場所の用意（`workspace.prepare`）の前に行う。`prepare` は在る worktree を作り直さないため、後で照合すると古い `work` のまま用意が済む。
-
-```mermaid
-graph TD
-    A[駆動: 状態ファイルを読む] --> B{完了の記録か}
-    B -- はい --> C[駆動: 既存の _reused]
-    B -- いいえ --> R[駆動: 既存の _resume_mismatch]
-    R --> F[駆動: 印・状態・work の有無を見て、要るときだけ PR の head と祖先の判定を取る]
-    F --> J{照合の判定}
-    J -- 照合しない・続ける --> P[作業場所: prepare]
-    J -- 止まる --> X[駆動: transient で止まる]
-    J -- 退避する・退避を続ける --> M[作業場所: 印を置き worktree を移し最後に状態ファイルを移して印を消す]
-    M --> P
-```
-
-駆動は PR の head を取る前に、退避の途中の印の有無と、状態の種類・`work` の有無を見る。印が残る・状態が空か完了・最終ゲートの記録がある・状態ファイルはあるが `work` が無い、のどれかなら、PR の head を取らずに照合の判定へ渡す（判定は順に「退避を続ける」「照合しない」「照合しない」「退避する」を返す）。
-
-PR の head は既存の GitHub のアダプタの `pull(<PR>).head_sha`（REST の読み取り 1 回）で取り、`git merge-base --is-ancestor` を 1 回打つ。手元に無い head は古い起点と読む（決定 2）。`workspace.prepare` の `fetch_head` は既存のまま 1 回で、照合のための fetch は足さない。
-
-退避した後は空の状態で `prepare` へ進み、`prepare` が今の head から `work` と `read/<ランタイム>` を作る。
-
 ## 入出力の契約
 
-`ndf refactor run` の引数・結果 JSON の形・終了コードの表（`plugins/ndf-next/contracts/facts/exit-codes.json`）・止まった理由の表（`plugins/ndf-next/contracts/causes.json`）は変えない。足すのは次の 2 つである。
+足すのは次の 2 つの出力だけである。次のものは変えない。
+
+- `ndf refactor run` の引数と、結果 JSON の形
+- 終了コードの表（`plugins/ndf-next/contracts/facts/exit-codes.json`）
+- 止まった理由の表（`plugins/ndf-next/contracts/causes.json`）
 
 | 出力 | 形 | どこへ出すか |
 | --- | --- | --- |
@@ -189,6 +170,36 @@ head を取れないときの結果:
 | --- | --- |
 | `<置き場>/rf<PR>.retired-<YYYYmmddHHMMSS>` | 元の `rf<PR>` の中身（`work`・`read/<ランタイム>`・`logs`・`state.json`）をそのまま。worktree には NDF の lock を掛け直す |
 
+## 処理の流れ
+
+状態ファイル（`rf<PR>/state.json`）が実行の進みを持つ。照合は `_open` の、完了の記録を返すかの判定（`_reused`）と引数の照合（`_resume_mismatch`）の後、作業場所の用意（`workspace.prepare`）の前に行う。`prepare` は在る worktree を作り直さないため、後で照合すると古い `work` のまま用意が済む。
+
+```mermaid
+graph TD
+    A[駆動: 状態ファイルを読む] --> B{完了の記録か}
+    B -- はい --> C[駆動: 既存の _reused]
+    B -- いいえ --> R[駆動: 既存の _resume_mismatch]
+    R --> F[駆動: 印・状態・work の有無を見て、要るときだけ PR の head と祖先の判定を取る]
+    F --> J{照合の判定}
+    J -- 照合しない・続ける --> P[作業場所: prepare]
+    J -- 止まる --> X[駆動: transient で止まる]
+    J -- 退避する・退避を続ける --> M[作業場所: 印を置き worktree を移し最後に状態ファイルを移して印を消す]
+    M --> P
+```
+
+駆動は PR の head を取る前に、退避の途中の印の有無と、状態の種類・`work` の有無を見る。次のどれかに当たれば、PR の head を取らずに照合の判定へ渡す。
+
+| 場合 | 判定の答え |
+| --- | --- |
+| 退避の途中の印が残る | 退避を続ける |
+| 状態が空か完了 | 照合しない |
+| 最終ゲートの記録がある | 照合しない |
+| 状態ファイルはあるが `work` が無い | 退避する |
+
+PR の head は、既存の GitHub のアダプタの `pull(<PR>).head_sha`（REST の読み取り 1 回）で取る。続けて `git merge-base --is-ancestor` を 1 回打つ。手元に無い head は古い起点と読む（決定 2）。`workspace.prepare` の `fetch_head` は既存のまま 1 回で、照合のための fetch は足さない。
+
+退避した後は空の状態で `prepare` へ進み、`prepare` が今の head から `work` と `read/<ランタイム>` を作る。
+
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
@@ -201,7 +212,7 @@ head を取れないときの結果:
 
 ### 決定 1: 照合の分岐をテストで縛れるようにするため、判定を純粋な関数 `resume_decide` に置き、事実の取得と退避を殻に置く
 
-ndf-next の cross-refactoring は、判定を外部コマンドを打たない `*_decide.py` に、外との接続を `drive.py`・`workspace.py` に分けている（`finished_decide`・`launch_decide` ほか）。照合の規則は 7 つの場合を上から当てる表で、分岐の取り違えがそのまま古い起点の続きか、作業の要らない退避になる。判定を純粋な関数に置けば、表の 7 行を git も GitHub も使わずに単体のテストで縛れる。
+ndf-next の cross-refactoring は、判定と外との接続を分けている。判定は外部コマンドを打たない `*_decide.py`（`finished_decide`・`launch_decide` ほか）に、外との接続は `drive.py`・`workspace.py` に置く。照合の規則は 7 つの場合を上から当てる表で、分岐の取り違えがそのまま古い起点の続きか、作業の要らない退避になる。判定を純粋な関数に置けば、表の 7 行を git も GitHub も使わずに単体のテストで縛れる。
 
 駆動の中に分岐を直に書く形は採らない。表の行ごとのテストに一時の git リポジトリと偽の GitHub が要り、分岐の数だけ組み立てが増える。既存の引数の照合（`_resume_mismatch`）に足す形も採らない。引数の比べは外部コマンドを打たないが、この照合は PR の head と祖先の判定を取るため、止まる理由の種類も違う（`invalid` と `transient`）。
 
@@ -212,7 +223,7 @@ ndf-next の cross-refactoring は、判定を外部コマンドを打たない 
 
 ### 決定 2: 外部への問い合わせを増やさないため、PR の head を GitHub の REST で 1 回読み、fetch せずに `--is-ancestor` の 0 だけを「含む」と読む
 
-PR の今の head は、既存の GitHub のアダプタ（`plugins/ndf-next/src/ndf/adapters/github.py` の `GitHub.pull`。REST で PR を読み、`head_sha` を持つ）で 1 回読む（要求の前提 4）。その commit が手元に無いことがあるが、手元に無い commit は `work` の HEAD の祖先になりえないため、`--is-ancestor` が 128 を返しても古い起点と読んでよい。1 も 128 以外の誤りも同じく古い起点と読む。誤った判定で退避しても、退避は消さずに移すだけで、続く `workspace.prepare` が `git fetch` を打ち、取得の失敗はそこで既存の経路になる。逆に誤りを「含む」と読むと、古い起点のまま続く今の不具合が残る。
+PR の今の head は、既存の GitHub のアダプタで 1 回読む（要求の前提 4）。アダプタは `plugins/ndf-next/src/ndf/adapters/github.py` の `GitHub.pull` で、REST で PR を読み、`head_sha` を持つ。その commit が手元に無いことがあるが、手元に無い commit は `work` の HEAD の祖先になりえないため、`--is-ancestor` が 128 を返しても古い起点と読んでよい。1 も 128 以外の誤りも同じく古い起点と読む。誤った判定で退避しても、退避は消さずに移すだけで、続く `workspace.prepare` が `git fetch` を打ち、取得の失敗はそこで既存の経路になる。逆に誤りを「含む」と読むと、古い起点のまま続く今の不具合が残る。
 
 既存の `git.Git.is_ancestor` は終了コード 1 以外を `GitError` にするため使わず、`Git.attempt` で終了コードを読む。
 
@@ -237,9 +248,14 @@ PR の head を先に fetch してから比べる形は採らない。外部へ�
 
 ### 決定 4: 実行の終わりの片付けで退避した先が残り続けないため、退避の名前を `rf<PR>.retired-<時刻>` にし、同じ PR の作業場所の片付けへ足す
 
-ndf-next には、退避した先を名前で見つける既存の後片付けが無い。孤児の lock の片付け（`worktree.sweep_orphans`）はディレクトリが無い worktree だけを外し（`plugins/ndf-next/src/ndf/core/converge/worktree.py` の `orphans`）、`/ndf:merged` は PR のブランチを checkout した worktree だけを対象にし、locked の worktree は動かさない（`plugins/ndf-next/src/ndf/domains/worktree/merged.py` の docstring の 3）。cross-refactoring の worktree は detached で NDF の lock が掛かるため、どちらも退避した先を外さない。
+ndf-next には、退避した先を名前で見つける既存の後片付けが無い。既存の 2 つの後片付けは、どちらも退避した先を外さない。cross-refactoring の worktree は detached で、NDF の lock が掛かるためである。
 
-そこで、作業場所の片付け（`workspace.release`。実行の終わりと `ndf refactor release` が打つ既存の関数）に、同じ PR の `rf<PR>.retired-<時刻>`（印の無いもの）を足す。外すのは、`work` に PR の head へ載っていない自分のコミット（`worktree.own_commits`）が無く、未コミットの変更も無いときだけで、それ以外は理由つきで残す（要求の前提 2: 人が取り出す）。外す手段は既存の `worktree.release`（NDF の lock だけを外す）で、利用者の lock は外さない。`<時刻>` は地方時の `YYYYmmddHHMMSS` にする。
+| 既存の後片付け | 外す対象 | 出典 |
+| --- | --- | --- |
+| 孤児の lock の片付け（`worktree.sweep_orphans`） | ディレクトリが無い worktree だけ | `plugins/ndf-next/src/ndf/core/converge/worktree.py` の `orphans` |
+| `/ndf:merged` | PR のブランチを checkout した worktree だけ。locked の worktree は動かさない | `plugins/ndf-next/src/ndf/domains/worktree/merged.py` の docstring の 3 |
+
+そこで、同じ PR の `rf<PR>.retired-<時刻>`（印の無いもの）を、作業場所の片付け（`workspace.release`）の対象に足す。`workspace.release` は、実行の終わりと `ndf refactor release` が打つ既存の関数である。外すのは、`work` に PR の head へ載っていない自分のコミット（`worktree.own_commits`）が無く、未コミットの変更も無いときだけである。それ以外は理由つきで残す（要求の前提 2: 人が取り出す）。外す手段は既存の `worktree.release`（NDF の lock だけを外す）で、利用者の lock は外さない。`<時刻>` は地方時の `YYYYmmddHHMMSS` にする。
 
 `rf<PR>` の中に `work.retired-<時刻>` として置く形は採らない。新しい実行が同じ `rf<PR>` に worktree を作り、片付けが `rf<PR>` を 1 つの単位として外すため、退避した先と新しい実行の作業の区別がつかない。別の PR の退避した先まで全 PR を見て片付ける形も採らない。作業場所は GitHub を読まない層で、PR の状態を読むには層をまたぐ。別の PR の退避した先は、その PR で cross-refactoring を打ったときの片付けで外れる（要求の「含まない」）。
 
@@ -270,7 +286,7 @@ ndf-next には、退避した先を名前で見つける既存の後片付け�
 
 ### 決定 7: head を取れない止まりを既存の語彙で読ませるため、種類 `transient` で止める
 
-止まった理由の表（`plugins/ndf-next/contracts/causes.json`）で、取得の一時的な失敗（5xx・接続の切断など）に当たる種類が `transient` で、その終了コードは `infra_wait`（75。`plugins/ndf-next/contracts/facts/exit-codes.json`）である。打ち直せば通りうる止まりで、行き先も既存の再試行（`cause.transient`）になる。新しい種類を足さない。
+取得の一時的な失敗（5xx・接続の切断など）に当たる種類は、止まった理由の表（`plugins/ndf-next/contracts/causes.json`）の `transient` である。その終了コードは `infra_wait`（75。`plugins/ndf-next/contracts/facts/exit-codes.json`）である。打ち直せば通りうる止まりで、行き先も既存の再試行（`cause.transient`）になる。新しい種類を足さない。
 
 種類 `precondition` は採らない。前提（宣言・認証・対象のファイル）の欠けで人へ戻す種類で、一時的な取得の失敗に当てると再試行されずに人を待つ。
 
@@ -278,7 +294,7 @@ ndf-next には、退避した先を名前で見つける既存の後片付け�
 
 ## テスト設計
 
-テストの置き場は `plugins/ndf-next/tests/domains/crossrefactor/` で、要求の検証手段のとおり `plugins/ndf-next` で `uv run --frozen pytest tests/domains/crossrefactor -q` で集まる。
+テストの置き場は `plugins/ndf-next/tests/domains/crossrefactor/` である。要求の検証手段のとおり、`plugins/ndf-next` で `uv run --frozen pytest tests/domains/crossrefactor -q` で集まる。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |

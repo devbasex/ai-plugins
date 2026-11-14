@@ -117,7 +117,17 @@ plugins/ndf-next/
 
 `_open` は、`_resume_check` が返した状態で `workspace.prepare` へ進む。退避した後は `rf<PR>` が無いため、`prepare` が今の head から `work` と `read/<ランタイム>` を作る。
 
-`workspace.finish_retire` の移す順は、`work` → `read/<ランタイム>`（名前の順）→ `read` が空なら消す → `logs` → `state.json`（最後）→ `dest` の worktree のうち lock の無いものへ NDF の lock を掛ける → `root` が空なら消す → 印を消す、である。状態ファイルを最後に移すことが、古い状態を終わらせることに当たる（決定 3）。
+`workspace.finish_retire` の移す順は次のとおりである。
+
+1. `work` を移す
+2. `read/<ランタイム>` を名前の順に移し、`read` が空なら消す
+3. `logs` を移す
+4. `state.json` を最後に移す
+5. `dest` の worktree のうち lock の無いものへ NDF の lock を掛ける
+6. `root` が空なら消す
+7. 印を消す
+
+状態ファイルを最後に移すことが、古い状態を終わらせることに当たる（決定 3）。
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
@@ -135,7 +145,7 @@ plugins/ndf-next/
 | `workspace._release_retired` | 上のどれにも当たらない | worktree を `worktree.release` で 1 本ずつ外し、すべて外れたら `dest` を消す。外れないものがあれば残す |
 
 - 繰り返しの終わる条件: `finish_retire` と `_release_retired` は作業場所の子の数（`work`・担当ごとの読み取り用・`logs`・状態ファイル）で終わる。`pending_retire` と `release` の退避した先の一覧は、同じ PR の退避した先の数で終わる
-- 計算量の注意: 照合で増える外部への問い合わせは、未完了の状態を続ける回につき GitHub の REST の読み取り 1 回・`git rev-parse` 1 回・`git merge-base` 1 回である。`git fetch` は足さない（決定 2）。`git rev-parse` は要求の非機能の条件の数に入れていない。数える対象は PR の head の取得と祖先の判定で、`work` の HEAD の読み取りは手元の参照を読むだけのためである
+- 計算量の注意: 照合で増える外部への問い合わせは、未完了の状態を続ける回につき 3 回である。GitHub の REST の読み取り・`git rev-parse`・`git merge-base` を 1 回ずつ打つ。`git fetch` は足さない（決定 2）。`git rev-parse` は要求の非機能の条件の数に入れていない。数える対象は PR の head の取得と祖先の判定で、`work` の HEAD の読み取りは手元の参照を読むだけのためである
 
 ## 内部のデータと定数
 
