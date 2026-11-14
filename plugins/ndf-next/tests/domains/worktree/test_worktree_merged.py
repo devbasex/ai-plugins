@@ -129,3 +129,40 @@ def test_setup_init_and_state(make_repo: Callable) -> None:
     with pytest.raises(setup.SetupError):
         setup.init(main)  # 読めない宣言は書き直さない
     assert setup.init(main, force=True).written
+
+
+def test_after_merge_evacuates_meta_json_and_named_dirs_without_overwriting(main_repo: Path, run_git: Callable) -> None:
+    """利用者の meta.json は管理の台帳に上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
+    wt = _land(main_repo, run_git, "feat/m")
+    (wt / "meta.json").write_text("mine", encoding="utf-8")
+    for name in ("target", "venv"):
+        (wt / name).mkdir()
+        (wt / name / "data.txt").write_text(name, encoding="utf-8")
+    merged.after_merge(main_repo, [3], FakeHub({3: _pull(3, "feat/m", True)}))
+    assert not wt.exists()
+    [cand] = trash.candidates(Git(main_repo), "origin/develop")
+    dest = trash.trash_root(Git(main_repo)) / cand.name
+    assert (dest / "meta.json").read_text(encoding="utf-8") == "mine" and cand.branch == "feat/m"
+    assert (dest / "target" / "data.txt").is_file() and (dest / "venv" / "data.txt").is_file()
+
+
+def test_after_merge_keeps_locked_worktree_without_evacuating(main_repo: Path, run_git: Callable) -> None:
+    wt = _land(main_repo, run_git, "feat/n")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")
+    run_git(main_repo, "worktree", "lock", str(wt))
+    rec = merged.after_merge(main_repo, [4], FakeHub({4: _pull(4, "feat/n", True)}))
+    got = {(i["kind"], i["name"]): i for i in rec.items}
+    assert got[("worktree", str(wt))]["result"] == "kept" and (wt / "notes.txt").read_text(encoding="utf-8") == "keep me"
+    assert trash.candidates(Git(main_repo), "origin/develop") == []
+
+
+def test_after_merge_evacuates_ignored_files_before_removing(main_repo: Path, run_git: Callable) -> None:
+    """`git worktree remove` は無視したファイルを黙って消すため、無視したファイルだけでも先に退避する。"""
+    wt = _land(main_repo, run_git, "feat/i")
+    (wt / ".gitignore").write_text(".env\n", encoding="utf-8")
+    run_git(wt, "add", ".gitignore")
+    run_git(wt, "commit", "-q", "-m", "ignore")
+    (wt / ".env").write_text("SECRET_NAME=1", encoding="utf-8")
+    merged.after_merge(main_repo, [5], FakeHub({5: _pull(5, "feat/i", True)}))
+    [cand] = trash.candidates(Git(main_repo), "origin/develop")
+    assert (trash.trash_root(Git(main_repo)) / cand.name / ".env").read_text(encoding="utf-8") == "SECRET_NAME=1"

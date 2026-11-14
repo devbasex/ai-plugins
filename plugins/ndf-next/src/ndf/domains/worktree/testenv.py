@@ -142,10 +142,35 @@ def compose_file_args(t: Target) -> list[str]:
 
 
 def compose_values(t: Target, row: dict[str, Any]) -> dict[str, str]:
+    """`row` の環境を起動したときと同じ、compose へ渡す値（worktree は行が持つもの）。"""
     network = t.at("shared_network")
     ports = row.get("ports")
-    return testenv_decide.compose_values(row["environment"], row["slot"], t.key, network if isinstance(network, str) else "",
+    worktree = str(row["worktree"]) if row.get("worktree") else t.key
+    return testenv_decide.compose_values(row["environment"], row["slot"], worktree, network if isinstance(network, str) else "",
                                          ports if isinstance(ports, dict) else {})  # fmt: skip
+
+
+def _row_files(t: Target, base: Path) -> list[str]:
+    """ほかの worktree の行の環境へ渡す `-f <絶対パス>` の並び。`base` の外を指すもの・無いものは渡さない。"""
+    out: list[str] = []
+    root = os.path.realpath(base)
+    for rel in t.compose_files:
+        full = base / rel
+        real = os.path.realpath(full)
+        if deps.safe_relative(rel) and not full.is_symlink() and full.is_file() and real.startswith(root + os.sep):
+            out += ["-f", real]
+    return out
+
+
+def compose_row(t: Target, row: dict[str, Any], *args: str) -> int:
+    """台帳の行の環境へ `docker compose` を打つ（見回り・回収が使う）。定義・値・作業場所は起動したときに揃える。
+
+    worktree が残っていればそこの定義を、消えていればメインディレクトリの同じ定義を渡す（プロセスの現在地から探させない）。
+    """
+    recorded = row.get("worktree")
+    base = Path(recorded) if isinstance(recorded, str) and recorded and Path(recorded).is_dir() else t.main_dir
+    files = _row_files(t, base)
+    return t.shell.docker_run("compose", "-p", row["environment"], *files, *args, env=compose_values(t, row), cwd=base).returncode
 
 
 def compose(t: Target, row: dict[str, Any], *args: str) -> int:
@@ -210,31 +235,44 @@ def bake(t: Target, value: str) -> tuple[int, int]:
 # --- 起動・停止・破棄 ----------------------------------------------------------
 
 
-def _record_tag(t: Target, row: dict[str, Any], value: Optional[str]) -> None:
-    """載せる基準のタグを台帳へ書く。ボリュームが残っているかを確かめられないときは書かない（古いデータのまま公開させない）。"""
+def _tag_to_record(t: Target, row: dict[str, Any], value: Optional[str]) -> Optional[str]:
+    """起動が通ったら台帳へ書く基準のタグ。ボリュームが残っているかを確かめられないときは書かない（古いデータのまま公開させない）。"""
     if value is None:
-        return
+        return None
     if not row.get("golden_tag"):
         volumes = t.shell.docker_run("volume", "ls", "-q", "--filter", f"label={container.PROJECT_LABEL}={row['environment']}")
         if volumes.returncode != 0 or volumes.stdout.strip():
-            return
+            return None
+    return value
+
+
+def _record_tag(t: Target, row: dict[str, Any], value: Optional[str]) -> None:
+    """起動が通った後に、載せた基準のタグを台帳へ書く。"""
+    if value is None:
+        return
     if not t.book.update(t.key, lambda r: r.update(golden_tag=value)):
         raise TestenvError(f"基準のタグを台帳へ記録できない。起動していない: {row['environment']}")
 
 
 def up(t: Target, profile: Optional[str] = None, value: Optional[str] = None, wait: tuple[str, ...] = ()) -> int:
-    row = assign(t)
+    """起動する。基準のタグは起動が通ってから台帳へ書く（失敗した起動のタグで公開させない）。"""
     if not t.shell.has_docker():
         raise TestenvError("コンテナの実行系が見つからない")
-    _record_tag(t, row, value if value is not None else tag(t))
+    row = assign(t)
+    recorded = _tag_to_record(t, row, value if value is not None else tag(t))
     services = t.at("profiles", profile) if profile else None
     names = [s for s in services if isinstance(s, str)] if isinstance(services, list) else []
     t.book.update(t.key, _touch)
+    if recorded is not None and row.get("golden_tag") != recorded:
+        # 載せ替える間は前の基準のタグを公開の判定に使わせない
+        t.book.update(t.key, lambda r: r.pop("golden_tag", None))
     rc = compose(t, row, "up", "-d", *names)
-    if rc != 0 or not wait:
-        return rc
-    # 宣言のサービスと依存だけを待つ（テストに関係しないサービスの不調で止まらない）
-    return compose(t, row, "up", "-d", "--wait", *wait)
+    if rc == 0 and wait:
+        # 宣言のサービスと依存だけを待つ（テストに関係しないサービスの不調で止まらない）
+        rc = compose(t, row, "up", "-d", "--wait", *wait)
+    if rc == 0:
+        _record_tag(t, row, recorded)
+    return rc
 
 
 def stop(t: Target) -> int:
@@ -255,11 +293,16 @@ def down(t: Target, volumes: bool = False) -> int:
     row = t.book.current(t.key)
     if row is None:
         return 0
-    if t.shell.has_docker():
-        t.book.update(t.key, lambda r: r.pop("golden_tag", None))
+    if not t.shell.has_docker():
+        raise TestenvError(f"コンテナの実行系が見つからず、破棄できたか確かめられない。スロットは解放していない: {row['environment']}")
+    t.book.update(t.key, lambda r: r.pop("golden_tag", None))
+    if compose_file_args(t):
         rc = compose(t, row, *_down_args(t, volumes))
-        if rc not in (0, 2):
-            raise TestenvError(f"破棄に失敗した。スロットは解放していない: {row['environment']}")
+    else:  # 定義が無いと compose で破棄できない。コンテナが残っていないと確かめられたときだけ解放する
+        left = _workdirs(t, row["environment"])
+        rc = 0 if left == [] else 1
+    if rc != 0:
+        raise TestenvError(f"破棄に失敗した。スロットは解放していない: {row['environment']}")
     if not t.book.update(t.key, _release):
         raise TestenvError(f"スロットの解放を台帳へ記録できない。down を打ち直す: {row['environment']}")
     return 0
@@ -358,10 +401,13 @@ def run_test(t: Target, kind: str, out: Optional[Path] = None) -> int:
 # --- 回収 ----------------------------------------------------------------------
 
 
-def _workdirs(t: Target, environment: str) -> list[str]:
-    """環境のコンテナの作業ディレクトリ（compose のラベル）。"""
+def _workdirs(t: Target, environment: str) -> Optional[list[str]]:
+    """環境のコンテナ（停止済みを含む）の作業ディレクトリ（compose のラベル）。調べられなければ `None`（「無い」と区別する）。"""
     fmt = '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-    names = t.shell.containers(environment)
+    listed = t.shell.docker_run("ps", "-a", "--filter", f"label={container.PROJECT_LABEL}={environment}", "--format", "{{.Names}}")
+    if listed.returncode != 0:
+        return None
+    names = [n for n in listed.stdout.split() if n]
     if not names:
         return []
     done = t.shell.docker_run("inspect", "-f", fmt, *names)
@@ -375,11 +421,16 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
         return {**item, "result": outcomes.KEPT, "reason": "worktree の置き場をここから確かめられない"}
     if ledger.exposing(row):
         return {**item, "result": outcomes.KEPT, "reason": "公開が開いている（unexpose で閉じてから回収する）"}
-    owner, why = placement.owner_of(_workdirs(t, env), [str(r.get("worktree")) for r in rows if r.get("environment") == env])
+    if not t.shell.has_docker():
+        return {**item, "result": outcomes.KEPT, "reason": "コンテナの実行系が見つからず、破棄できたか確かめられない"}
+    workdirs = _workdirs(t, env)
+    if workdirs is None:
+        return {**item, "result": outcomes.KEPT, "reason": "コンテナを調べられない（docker ps が失敗した）"}
+    owner, why = placement.owner_of(workdirs, [str(r.get("worktree")) for r in rows if r.get("environment") == env])
     if owner == placement.FOREIGN:
         return {**item, "result": outcomes.KEPT, "reason": why}
     if owner == placement.OWN:
-        rc = t.shell.docker_run("compose", "-p", env, *_down_args(t)).returncode
+        rc = compose_row(t, row, *_down_args(t))
         if rc != 0:
             return {**item, "result": outcomes.KEPT, "reason": f"破棄に失敗した（終了コード {rc}）"}
     t.book.update(str(wt), _release)

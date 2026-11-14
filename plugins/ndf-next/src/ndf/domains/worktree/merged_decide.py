@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from ndf.adapters.git import ORIGIN
 from ndf.contracts import facts
 
 # スプリントブランチの名前の接頭辞
@@ -28,11 +27,12 @@ def _flow_row(promotion: Optional[str]) -> Optional[dict[str, Any]]:
     return rows[0] if rows else None
 
 
-def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contained: Optional[bool]) -> Optional[str]:
+def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contained: Optional[bool], remote: str) -> Optional[str]:
     """スプリントブランチを残す理由。消してよければ `None`。
 
     `flow` は開始時の記録か今の宣言の `branch_flow`（`promotion` と `production_branch` を読む）。`contained` は
-    ブランチが `origin/<本番チャネル>` に含まれるか（確かめられなければ `None`）。
+    ブランチが `<remote>/<本番チャネル>` に含まれるか（確かめられなければ `None`）。`remote` はリモートの名前（呼ぶ側が
+    git の接続から渡す。判断のモジュールは接続を読まない）。
     """
     if not branch or not branch.startswith(SPRINT_PREFIX):
         return None
@@ -44,7 +44,7 @@ def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contai
         return f"取り込み方 {promotion!r} が表 {FLOWS} に無いため残す"
     if not row["keeps_sprint"] or not flow.get("production_branch"):
         return None
-    production = f"{ORIGIN}/{flow['production_branch']}"
+    production = f"{remote}/{flow['production_branch']}"
     if contained is None:
         return f"{production} に含まれるかを確かめられないため残す"
     if contained:

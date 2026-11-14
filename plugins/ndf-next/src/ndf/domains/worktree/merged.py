@@ -5,8 +5,10 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
 1. PR を GitHub から読む（`adapters.github.GitHub.pulls`）。マージされていなければ何も消さない
 2. スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の宣言）
 3. ブランチを checkout した worktree を外す。追跡しているファイルに未コミットの変更があれば外さない。外す前に公開を閉じて
-   テスト環境を破棄する（できなければ外さない）。`git worktree remove` が
-   追跡していないファイルで断ったら、それを退避（`trash.evacuate`）してから外す
+   テスト環境を破棄する（できなければ外さない）。locked の worktree は何も動かさずに残す。追跡していないファイル
+   （無視したものを含む。`git worktree remove` は無視したファイルを黙って消す）があれば、先に退避（`trash.evacuate`）
+   してから `--force` を付けずに外す。退避できないファイルがあったとき・git が断ったときは外さずに理由を返す
+   （`--force` は戻せない削除で人の承認が要るため、この経路では使わない。C4）
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
 片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/origin/<ベースブランチ>` を
@@ -72,19 +74,6 @@ def _contained(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Opt
         return None
 
 
-def _close_testenv(path: Path) -> Optional[str]:
-    """外す前に公開を閉じてテスト環境を破棄する（定義と閉じる手段は worktree にある）。できなければ理由を返す。"""
-    t = testenv.target(path) if path.is_dir() else None
-    if t is None:
-        return None
-    try:
-        testenv_sweep.unexpose(t)
-        testenv.down(t)
-    except testenv.TestenvError as exc:
-        return f"テスト環境を閉じられない: {exc}"
-    return None
-
-
 def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
     """worktree を外す。外せたかを返す。"""
     if item.path.is_dir():
@@ -93,19 +82,28 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
             names = ", ".join(line[3:] for line in dirty[:LISTED]) + ("…" if len(dirty) > LISTED else "")
             rec.add("worktree", str(item.path), outcomes.KEPT, f"追跡しているファイルに未コミットの変更が {len(dirty)} 件ある（{names}）")
             return False
-    closed = _close_testenv(item.path)
+    closed = testenv_sweep.close_for_removal(item.path)
     if closed is not None:
         rec.add("worktree", str(item.path), outcomes.KEPT, closed)
         return False
-    first = main.attempt("worktree", "remove", str(item.path))
-    if first.returncode == 0:
-        rec.add("worktree", str(item.path), outcomes.REMOVED)
-        return True
-    got = trash.evacuate(main, item.path, str(item.branch), item.head)
-    main.run("worktree", "remove", "--force", str(item.path))
-    why = f"退避先 {got.dest}" if got.dest is not None else "退避するものは無かった"
-    if got.discarded:
-        why += f"（捨てた生成物: {', '.join(got.discarded)}）"
+    if item.locked:
+        rec.add("worktree", str(item.path), outcomes.KEPT, "locked の worktree（git worktree unlock の後に片付ける）")
+        return False
+    why = ""
+    if item.path.is_dir() and trash.leftovers(item.path):
+        try:
+            got = trash.evacuate(main, item.path, str(item.branch), item.head)
+        except trash.TrashError as exc:
+            rec.add("worktree", str(item.path), outcomes.KEPT, f"退避できないため外さない: {exc}")
+            return False
+        why = f"退避先 {got.dest}" if got.dest is not None else "退避するものは無かった"
+        if got.discarded:
+            why += f"（捨てた生成物: {', '.join(got.discarded)}）"
+    done = main.attempt("worktree", "remove", str(item.path))
+    if done.returncode != 0:
+        refused = f"git worktree remove が断った: {done.stderr.strip()}"
+        rec.add("worktree", str(item.path), outcomes.KEPT, f"{why}。{refused}" if why else refused)
+        return False
     rec.add("worktree", str(item.path), outcomes.REMOVED, why)
     return True
 
@@ -145,7 +143,7 @@ def _one(main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Opt
         rec.add("pr", str(number), outcomes.KEPT, "PR がマージされていない")
         return
     branch = pull.head_ref
-    keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow))
+    keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow), ORIGIN)
     if keep is not None:
         rec.add("branch", branch, outcomes.KEPT, keep)
         return

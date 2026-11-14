@@ -5,6 +5,8 @@
     ndf worktree testenv <env|tag|bake|up|stop|down|test|compose-env|reap|reclaim|expose|unexpose> [worktree] [オプション]
 
 宣言（か、その節）が無いリポジトリでは何もせず、`ok` と「適用外」の要約を返す。
+テスト環境の値（環境名・スロット・ポート・タグ・URL・コンテナへ渡す値）は `items` と `metrics` に置く。`outputs` は
+スプリントの文脈の閉じた語彙（`contracts/schemas/result.schema.json`）だけを持つため、ここでは使わない。
 """
 
 from __future__ import annotations
@@ -98,14 +100,14 @@ def run_localenv(tool: str, args: argparse.Namespace) -> dict[str, Any]:
 def _te_env(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     row = testenv.assign(t)
     out = {k: row[k] for k in ("environment", "slot", "worktree", "branch", "ports")}
-    return result.result(tool, result.OK, f"テスト環境 {row['environment']}（スロット {row['slot']}）", [out], outputs=out)
+    return result.result(tool, result.OK, f"テスト環境 {row['environment']}（スロット {row['slot']}）", [out], out)
 
 
 def _te_tag(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     value = testenv.tag(t)
     if value is None:
         return result.result(tool, result.OK, "golden_tag_paths が宣言されていない")
-    return result.result(tool, result.OK, f"基準のタグ: {value}", outputs={"tag": value})
+    return result.result(tool, result.OK, f"基準のタグ: {value}", metrics={"tag": value})
 
 
 def _te_bake(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
@@ -139,7 +141,7 @@ def _te_compose_env(tool: str, t: testenv.Target, args: argparse.Namespace) -> d
         result.OK,
         "割り当ては無い" if not values else f"渡す値 {len(values)} 件",
         [{"key": k, "value": v} for k, v in values.items()],
-        outputs=values,
+        {"values": len(values)},
     )
 
 
@@ -161,7 +163,7 @@ def _te_reclaim(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[
 
 def _te_expose(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     url = testenv_sweep.expose(t)
-    return result.result(tool, result.OK, f"公開した: {url}", outputs={"url": url})
+    return result.result(tool, result.OK, f"公開した: {url}", metrics={"url": url})
 
 
 def _te_unexpose(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:

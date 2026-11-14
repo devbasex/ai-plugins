@@ -4,13 +4,16 @@
   （目印を握っている）の環境は止めない
 - `expose`: 宣言の `testenv.expose`（`enabled`・`public_tag`・`base_domain`・`open_command`）に従って、載っている基準が
   公開を許す基準と同じ環境だけを公開する。公開できるのは同時に 1 本（台帳の排他の中で判定する）
-- `unexpose`: 宣言の `close_command` で閉じてから台帳を閉じる。閉じる手段が失敗したら台帳を閉じない
+- `unexpose`: 宣言の `close_command` で閉じてから台帳を閉じる。閉じる手段が無い・失敗したら台帳を閉じない
+  （口が開いたまま閉じたと記録すると、別の環境の公開とスロットの再利用が通る）
+- `close_for_removal`: worktree を外す前に公開を閉じ、テスト環境を破棄する（`merged` と `cleanup` が使う）
 """
 
 from __future__ import annotations
 
 import calendar
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from filelock import FileLock, Timeout
@@ -49,7 +52,7 @@ def _stop_idle(t: Target, row: dict[str, Any]) -> dict[str, Any]:
     item = {"kind": "testenv", "name": env, "worktree": row["worktree"]}
     try:
         with FileLock(str(testenv.inuse_lock(t, env)), timeout=0):
-            rc = t.shell.docker_run("compose", "-p", env, "stop").returncode
+            rc = testenv.compose_row(t, row, "stop")
     except Timeout:
         return {**item, "result": outcomes.KEPT, "reason": "テストの実行中"}
     return {
@@ -70,8 +73,8 @@ def _config(t: Target) -> dict[str, Any]:
         raise TestenvError("拒否: testenv.expose.enabled が有効でない")
     if not conf.get("public_tag") or not conf.get("base_domain"):
         raise TestenvError("拒否: testenv.expose.public_tag と base_domain が要る")
-    if not conf.get("open_command"):
-        raise TestenvError("公開の手段が宣言されていない（testenv.expose.open_command）")
+    if not conf.get("open_command") or not conf.get("close_command"):
+        raise TestenvError("公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）")
     return conf
 
 
@@ -132,11 +135,27 @@ def unexpose(t: Target) -> Optional[str]:
     url = str(row["expose"]["url"])
     conf = t.at("expose")
     command = conf.get("close_command") if isinstance(conf, dict) else None
-    if command:
-        values = _expose_values(url, url.split("://", 1)[-1], row)
-        where = t.path if t.path.is_dir() else t.main_dir
-        if t.shell.sh(str(command), where, values).returncode != 0:
-            raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
+    if not command:
+        raise TestenvError(
+            f"公開を閉じる手段が宣言されていない（testenv.expose.close_command）。台帳は閉じていない: {row['environment']} {url}"
+        )
+    values = _expose_values(url, url.split("://", 1)[-1], row)
+    where = t.path if t.path.is_dir() else t.main_dir
+    if t.shell.sh(str(command), where, values).returncode != 0:
+        raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
     if not t.book.update(t.key, _close, pick=ledger.exposing):
         raise TestenvError(f"台帳を閉じられない。unexpose を打ち直す: {url}")
     return url
+
+
+def close_for_removal(path: Path) -> Optional[str]:
+    """worktree を外す前に公開を閉じてテスト環境を破棄する（定義と閉じる手段は worktree にある）。できなければ理由を返す。"""
+    t = testenv.target(path) if path.is_dir() else None
+    if t is None:
+        return None
+    try:
+        unexpose(t)
+        testenv.down(t)
+    except TestenvError as exc:
+        return f"テスト環境を閉じられない: {exc}"
+    return None

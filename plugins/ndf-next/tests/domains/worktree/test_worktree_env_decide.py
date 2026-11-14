@@ -23,7 +23,7 @@ SELECTED = {"promotion": "selected", "production_branch": "main"}
     ],
 )
 def test_sprint_keep(branch: str, flow: dict | None, contained: bool | None, kept: bool) -> None:
-    assert (merged_decide.sprint_keep(branch, flow, contained) is not None) == kept
+    assert (merged_decide.sprint_keep(branch, flow, contained, "origin") is not None) == kept
 
 
 def test_pull_skip() -> None:

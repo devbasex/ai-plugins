@@ -67,6 +67,43 @@ def test_deps_fails_when_git_state_changes_or_path_escapes(main_repo: Path, run_
     assert not deps.safe_relative("../x") and not deps.safe_relative("/x") and deps.safe_relative("a/b")
 
 
+def test_deps_refuses_same_entity_in_main_dir(main_repo: Path, run_git: Callable) -> None:
+    """メインディレクトリで打つと複製元と複製先が同じ実体になる。消さずに断る。"""
+    (main_repo / ".gitignore").write_text(".worktrees/\ncfg.local\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["cfg.local"]}})
+    (main_repo / "cfg.local").write_text("c", encoding="utf-8")
+    got = deps.prepare(main_repo)
+    assert got.failed.startswith("copy_as_real[0]") and any("同じ実体" in line for line in got.tail)
+    assert (main_repo / "cfg.local").read_text(encoding="utf-8") == "c"
+
+
+def test_deps_keeps_rewritten_real_copy_directory(main_repo: Path, run_git: Callable) -> None:
+    """worktree の側で足したファイルがある実体の複製は、打ち直しても消さない。"""
+    (main_repo / ".gitignore").write_text(".worktrees/\nconf/\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["conf"]}})
+    (main_repo / "conf").mkdir()
+    (main_repo / "conf" / "a.txt").write_text("a", encoding="utf-8")
+    wt = create.create(main_repo, "feat/k").path
+    assert deps.prepare(wt).failed == ""
+    assert deps.prepare(wt).failed == ""  # 中身が同じなら作り直す
+    (wt / "conf" / "mine.txt").write_text("mine", encoding="utf-8")
+    got = deps.prepare(wt)
+    assert got.failed.startswith("copy_as_real[0]") and (wt / "conf" / "mine.txt").read_text(encoding="utf-8") == "mine"
+
+
+def test_deps_refuses_parent_symlink_out_of_worktree(main_repo: Path, run_git: Callable, tmp_path: Path) -> None:
+    (main_repo / ".gitignore").write_text(".worktrees/\nout/\nout\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["out/cfg"]}})
+    (main_repo / "out").mkdir()
+    (main_repo / "out" / "cfg").write_text("c", encoding="utf-8")
+    wt = create.create(main_repo, "feat/s").path
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (wt / "out").symlink_to(outside)
+    got = deps.prepare(wt)
+    assert got.failed.startswith("copy_as_real[0]") and not (outside / "cfg").exists()
+
+
 def test_deps_rejects_broken_section(main_repo: Path, run_git: Callable) -> None:
     _declare(main_repo, run_git, {"deps": {"run": "make"}})
     wt = create.create(main_repo, "feat/f").path
@@ -99,7 +136,8 @@ def test_localenv_not_applicable_without_compose(main_repo: Path) -> None:
 def _testenv(main_repo: Path, run_git: Callable, wt_branch: str) -> testenv.Target:
     (main_repo / "compose.yml").write_text("services: {}\n", encoding="utf-8")
     section = {"port_band": [20000, 21000], "port_roles": {"http": 1}, "test_kinds": {"e2e": {"run": "exit 3", "base_url_env": "BASE_URL"}},
-               "expose": {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "true"}}  # fmt: skip
+               "expose": {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "true",
+                          "close_command": "true"}}  # fmt: skip
     _declare(main_repo, run_git, {"localenv": {"kind": "compose", "compose_files": ["compose.yml"]}, "testenv": section})
     wt = create.create(main_repo, wt_branch).path
     t = testenv.target(wt, FakeShell().shell())
@@ -525,3 +563,68 @@ def test_open_row_reads_expose_shapes(expose: object, want: bool) -> None:
     rows = [{"worktree": "/w", "released_at": None, "expose": None}, released, {"worktree": "/x", "expose": {"closed_at": None}}]
     assert ledger.exposing(released) is want
     assert testenv_sweep._open_row(rows, "/w") == (released if want else None)
+
+
+def test_testenv_down_keeps_slot_without_container_runtime(main_repo: Path, run_git: Callable) -> None:
+    t = _testenv(main_repo, run_git, "feat/w")
+    shell = container.Shell(runner=FakeShell().runner, attached=FakeShell().attached, docker="ndf-no-such-docker")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, shell, t.book)
+    testenv.assign(t)
+    with pytest.raises(testenv.TestenvError):
+        testenv.down(t)
+    assert t.book.current(t.key) is not None
+
+
+def test_testenv_reclaim_keeps_slot_when_survey_fails(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell({"ps -a": Completed(1, "", "cannot connect")})
+    t = _testenv(main_repo, run_git, "feat/x")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    gone = str(main_repo / ".worktrees" / "feat" / "gone2")
+    t.book.acquire(gone, "feat/gone2", "env-gone2")
+    assert [(i["name"], i["result"]) for i in testenv.reclaim(t)] == [("env-gone2", "kept")]
+    assert t.book.current(gone) is not None
+
+
+def test_testenv_reclaim_passes_compose_definition(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell({"ps -a": Completed(0, "c1\n", "")})
+    t = _testenv(main_repo, run_git, "feat/y")
+    gone = str(main_repo / ".worktrees" / "feat" / "gone3")
+    fake.outputs["inspect -f"] = Completed(0, f"{gone}\n", "")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    t.book.acquire(gone, "feat/gone3", "env-gone3")
+    assert [i["result"] for i in testenv.reclaim(t)] == ["reclaimed"]
+    [(argv, cwd, env)] = [c for c in fake.calls if "down" in c[0]]
+    assert argv[argv.index("-f") + 1] == os.path.realpath(t.main_dir / "compose.yml") and cwd == t.main_dir
+    assert env == testenv.compose_values(t, t.book.rows()[0])  # 起動したときと同じ値を渡す
+
+
+def test_testenv_up_failure_does_not_record_tag(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell({"compose -p": Completed(1, "", "boom")})
+    t = _testenv(main_repo, run_git, "feat/z")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    assert testenv.up(t, value="t1") == 1
+    assert "golden_tag" not in t.book.current(t.key)
+    with pytest.raises(testenv.TestenvError):
+        testenv_sweep.expose(t)
+
+
+def test_testenv_unexpose_without_close_command_keeps_ledger(main_repo: Path, run_git: Callable) -> None:
+    t = _testenv(main_repo, run_git, "feat/q")
+    testenv.assign(t)
+    t.book.update(t.key, lambda r: r.update(golden_tag="t1"))
+    url = testenv_sweep.expose(t)
+    section = {**t.section, "expose": {k: v for k, v in t.section["expose"].items() if k != "close_command"}}
+    bare = testenv.Target(t.path, t.main_dir, section, t.compose_files, t.shell, t.book)
+    with pytest.raises(testenv.TestenvError):
+        testenv_sweep.unexpose(bare)
+    assert testenv_sweep.unexpose(t) == url
+
+
+def test_testenv_cli_values_fit_result_schema(main_repo: Path, run_git: Callable) -> None:
+    from ndf.contracts import result
+
+    t = _testenv(main_repo, run_git, "feat/o")
+    args = argparse.Namespace(golden=None)
+    for handler in (cli_env._te_env, cli_env._te_compose_env):
+        out = handler("worktree", t, args)
+        assert result.errors(out) == [] and "outputs" not in out

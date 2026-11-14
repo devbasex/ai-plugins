@@ -3,7 +3,8 @@
 1. メインディレクトリの `git worktree list` から、置き場 `.worktrees/` の下の worktree を集める
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）
-4. 消すと決めた worktree を `git worktree remove`（`--force` を付けない）で消し、ブランチを `git branch -d` で消す
+4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
+   `git worktree remove`（`--force` を付けない）で消し、ブランチを `git branch -d` で消す
 5. 置き場の消えた worktree の管理情報を `git worktree prune` で片付ける
 
 `dry_run` では 1〜3 だけを行い、何も消さない。
@@ -18,7 +19,7 @@ from typing import Iterable, Optional, Protocol
 
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import cleanup_decide, repo
+from ndf.domains.worktree import cleanup_decide, repo, testenv_sweep
 from ndf.domains.worktree.cleanup_decide import REMOVE, Facts, PullState
 
 
@@ -80,6 +81,9 @@ def survey(main_dir: Path, cwd: Path, hub: PullReader, git: Optional[Git] = None
 
 
 def _remove(g: Git, item: repo.Worktree) -> Outcome:
+    closed = testenv_sweep.close_for_removal(item.path)
+    if closed is not None:
+        return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {closed}")
     try:
         g.run("worktree", "remove", str(item.path))
     except GitError as exc:

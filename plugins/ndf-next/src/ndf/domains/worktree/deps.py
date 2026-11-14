@@ -94,10 +94,36 @@ def mark_file(worktree: Git) -> Path:
     return Path(worktree.run("rev-parse", "--absolute-git-dir").strip()) / MARK
 
 
+def _same_tree(src: Path, dest: Path) -> bool:
+    """2 つのディレクトリの中身（名前の並びとファイルの中身）が、下の階層まで同じか。"""
+    cmp = filecmp.dircmp(src, dest)
+    if cmp.left_only or cmp.right_only or cmp.funny_files:
+        return False
+    _, mismatch, errors = filecmp.cmpfiles(src, dest, cmp.common_files, shallow=False)
+    if mismatch or errors:
+        return False
+    return all(_same_tree(src / name, dest / name) for name in cmp.common_dirs)
+
+
 def _same(src: Path, dest: Path) -> bool:
     if src.is_file() and dest.is_file():
         return filecmp.cmp(src, dest, shallow=False)
-    return src.is_dir() and dest.is_dir()
+    return src.is_dir() and dest.is_dir() and _same_tree(src, dest)
+
+
+def _outside(top: Path, dest: Path) -> bool:
+    """複製先の親を実体へ解決すると worktree の外を指すか（親の symlink を通じて外へ書かない）。"""
+    root = os.path.realpath(top)
+    parent = os.path.realpath(dest.parent)
+    return parent != root and not parent.startswith(root + os.sep)
+
+
+def _same_entity(src: Path, dest: Path) -> bool:
+    """複製元と複製先が同じ実体を指すか（メインディレクトリで打つと、消すと元が失われる）。"""
+    if os.path.realpath(src) == os.path.realpath(dest):
+        return True
+    # ディレクトリはハードリンクで共有されないので、同じ実体なら同じディレクトリである（ファイルのハードリンクは複製の手段）
+    return src.is_dir() and dest.is_dir() and os.path.samefile(src, dest)
 
 
 def _copy_tree(src: Path, dest: Path, link: bool) -> None:
@@ -154,6 +180,10 @@ def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Opt
     src, dest = main_dir / rel, top / rel
     if not src.exists():
         return f"複製元が無い: {src}"
+    if _same_entity(src, dest):
+        return f"複製元と複製先が同じ実体を指す: {rel}"
+    if _outside(top, dest):
+        return f"{rel} は実体をたどると worktree の外を指す"
     existing = _existing_dest(src, dest, rel, kind, redo)
     if existing is _KEEP_DEST:
         return None
