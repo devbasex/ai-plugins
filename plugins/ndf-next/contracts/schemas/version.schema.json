@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "version.schema.json",
+  "title": "契約の版",
+  "description": "contracts/version.json の形。版が 1 つずつ上がること・末尾の指紋が今の契約と合うことは読み手（ndf.contracts.version）が確かめる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "owner", "history"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1, "description": "契約を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
+    "history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "sha256"],
+        "properties": {
+          "version": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

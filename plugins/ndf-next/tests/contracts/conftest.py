@@ -46,9 +46,9 @@ def contracts_copy(tmp_path: Path) -> ContractsCopy:
 
 @pytest.fixture
 def fact_table() -> Callable[..., dict[str, Any]]:
-    """事実の表の雛形（version・summary・owner）に列の宣言と行を入れて返す。"""
+    """事実の表の雛形（summary・owner）に列の宣言と行を入れて返す。"""
 
     def make(columns: dict[str, Any], rows: list[dict[str, Any]], *, summary: str = "s", owner: str = "o") -> dict[str, Any]:
-        return {"version": 1, "summary": summary, "owner": owner, "columns": columns, "rows": rows}
+        return {"summary": summary, "owner": owner, "columns": columns, "rows": rows}
 
     return make

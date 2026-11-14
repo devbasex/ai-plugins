@@ -15,7 +15,6 @@ import argparse
 import dataclasses
 import os
 import re
-import shlex
 import signal
 import subprocess
 import sys
@@ -30,7 +29,7 @@ from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
+TOOL = cli.tool_of(__name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
@@ -85,13 +84,13 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
             signal.signal(sig, handler)
 
 
-def _again(command: str, wait_limit: int | None) -> str:
-    """同じ待ちを打ち直すコマンド（`ndf test-slot run [--wait-limit N] -- '<コマンド>'`）。"""
+def _again(command: str, wait_limit: int | None) -> dict:
+    """同じ待ちを打ち直すコマンド（`ndf test-slot run [--wait-limit N] -- '<コマンド>'` の引数の配列）。"""
     limit = ["--wait-limit", str(wait_limit)] if wait_limit is not None else []
-    return shlex.join(["ndf", TOOL, "run", *limit, "--", command])
+    return result.command(TOOL, "run", *limit, "--", command)
 
 
-def _stopped_from(exc: slots.Stopped, again: str | None = None) -> int:
+def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
     """枠の待ちを止めた結果を出す。wait_timeout は契約どおり同じ待ち（`again`）を next に載せる。"""
     kind = _CAUSE_OF[exc.reason]
     return _stopped(
@@ -173,7 +172,7 @@ def _report(since: str) -> int:
     return result.emit(result.result(TOOL, result.OK, summary, metrics=metrics))
 
 
-def main(argv: list[str]) -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL, description="重いテストを作業マシンのテストの枠の下で走らせる")
     sub = parser.add_subparsers(dest="action", required=True)
     run = sub.add_parser("run", help="1 本のコマンドを枠の下で走らせる")
@@ -181,16 +180,28 @@ def main(argv: list[str]) -> int:
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- の後ろにシェルのコマンド 1 つ")
     rep = sub.add_parser("report", help="待った・止めた・諦めた回数と OOM Killer の増分を読む")
     rep.add_argument("--since", default="7d", help="期間（既定 7d）")
+    return parser
+
+
+def _run_words(args: argparse.Namespace) -> tuple[str, str | None]:
+    """run の引数からシェルのコマンド 1 つを取り出す。引数が誤っていれば（空のコマンドと）誤りの文を返す。"""
+    words = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if len(words) != 1 or not words[0].strip():
+        return "", "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す"
+    if args.wait_limit is not None and args.wait_limit < 1:
+        return "", "--wait-limit は 1 以上の秒にする"
+    return words[0], None
+
+
+def main(argv: list[str]) -> int:
     try:
-        args = parser.parse_args(argv)
+        args = _parser().parse_args(argv)
     except SystemExit as exc:
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     if args.action == "report":
         return _report(args.since)
-    words = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if len(words) != 1 or not words[0].strip():
-        return _stopped("invalid", "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す")
-    if args.wait_limit is not None and args.wait_limit < 1:
-        return _stopped("invalid", "--wait-limit は 1 以上の秒にする")
-    return _run(words[0], args.wait_limit)
+    command, error = _run_words(args)
+    if error is not None:
+        return _stopped("invalid", error)
+    return _run(command, args.wait_limit)

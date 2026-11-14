@@ -163,7 +163,7 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert got["metrics"]["waited_seconds"] >= 1
     assert "諦めた" in got["summary"]
     # 契約の wait_timeout は同じ待ちを next に載せる
-    assert got["next"] == "ndf test-slot run --wait-limit 1 -- 'fakerun .'"
+    assert got["next"] == {"argv": ["ndf", "test-slot", "run", "--wait-limit", "1", "--", "fakerun ."]}
     assert not log.exists()
     rows = records.read_events(directory)
     assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
