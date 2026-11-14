@@ -13,7 +13,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional
 
@@ -184,6 +185,15 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     return GitHubError(f"GitHub へ届かない: {label}: {exc}")
 
 
+@contextmanager
+def _translating(label: str, detail_body: bool = False) -> Iterator[None]:
+    """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。"""
+    try:
+        yield
+    except (RateLimitExceeded, RequestFailed, RequestError) as exc:
+        raise _translated(exc, label, detail_body) from None
+
+
 @dataclass(frozen=True)
 class GitHub:
     """1 つのリポジトリ（`<所有者>/<リポジトリ>`）への GitHub の読み書き。"""
@@ -193,22 +203,19 @@ class GitHub:
 
     def rest(self, method: str, path: str, payload: Any = None, params: Optional[dict] = None) -> Any:
         """REST の 1 回の要求の本文（JSON なら値、ほかは文字列、空なら None）。失敗は `GitHubError`。"""
-        try:
+        with _translating(f"{method} {path}", detail_body=True):
             resp = self.api.request(method, path, json=payload, params=params)
-        except (RateLimitExceeded, RequestFailed, RequestError) as exc:
-            raise _translated(exc, f"{method} {path}", detail_body=True) from None
         return _response_body(resp)
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         """GraphQL の 1 回の要求の `data`。読めない番号（`NOT_FOUND`）だけの誤りなら、読めた分を返す。"""
-        try:
-            return self.api.graphql(query, variables)
-        except GraphQLFailed as exc:
-            if _only_not_found(exc) and exc.response.data is not None:
-                return exc.response.data
-            raise GitHubError(f"GraphQL の誤り: {'; '.join(e.message for e in exc.response.errors)}") from None
-        except (RateLimitExceeded, RequestFailed, RequestError) as exc:
-            raise _translated(exc, "graphql") from None
+        with _translating("graphql"):
+            try:
+                return self.api.graphql(query, variables)
+            except GraphQLFailed as exc:
+                if _only_not_found(exc) and exc.response.data is not None:
+                    return exc.response.data
+                raise GitHubError(f"GraphQL の誤り: {'; '.join(e.message for e in exc.response.errors)}") from None
 
     def aliased(self, selections: dict[str, str]) -> dict[str, Any]:
         """名前 → `repository` の下の選択を、`github.graphql-batch` 件ずつのエイリアスのクエリで読む（A2）。
