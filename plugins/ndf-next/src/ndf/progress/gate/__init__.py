@@ -15,7 +15,7 @@
 - 答えの記録（`records`）: 答えを `gate-rejections.jsonl` へ写し（#3136）、conductor が読む答えの一覧（#2934・#3174）と
   承認で見た head（#2147）を返す
 - MVV 判定の前の機械の検査（`checks`）: 6 つの検査（PR 本文の節の中身は #2853）と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
-- 副命令のエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。入口は `progress_cli`）
+- 副命令のエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。エントリポイントは `progress_cli`）
 """
 
 from __future__ import annotations

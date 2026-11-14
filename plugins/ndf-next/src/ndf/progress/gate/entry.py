@@ -192,7 +192,7 @@ def main(argv: list[str]) -> int:
 
     `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は作業名から `ndf worker run` を打つ、
     進行表の ID で始まれば承認ゲートへの答え。`ndf progress` は `progress_main` が受ける（`work` の名前が両方にあるため、
-    入口の副命令で分ける）
+    エントリポイントの副命令で分ける）
     """
     if argv and argv[0] in ANSWER_VERBS:
         make, dispatch = ANSWER_VERBS[argv[0]]

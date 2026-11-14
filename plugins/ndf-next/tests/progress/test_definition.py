@@ -241,7 +241,7 @@ def test_gate_stage_with_a_condition_is_refused():
     assert any("承認ゲート" in e and "行" in e for e in errs)
 
 
-# --- 承認ゲートの答えの選択肢（現状固定。I-018 の前に run.choices を入口として固定する） ---------------------
+# --- 承認ゲートの答えの選択肢（現状固定。I-018 の前に run.choices をエントリポイントとして固定する） ---------------------
 
 
 def _listen_steps(mode: str) -> list[stages.StepDef]:
