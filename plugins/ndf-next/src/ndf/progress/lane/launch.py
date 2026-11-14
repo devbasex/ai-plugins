@@ -143,26 +143,13 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
 
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
     """名前つきのラッパーでレーンの conductor を起こす。結果 JSON の `status` が ok なら `ok` を真にする。"""
-    argv = [
-        str(entry()),
-        "relay",
-        "spawn",
-        "--name",
-        wrapper_name(repo, plan, lane),
-        "--cwd",
-        str(cwd),
-        "--role",
-        ROLE,
-        "--plan",
-        plan,
-        first,
-    ]
+    argv = _entry("relay", "spawn", "--name", wrapper_name(repo, plan, lane), "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first)
     return _relay(argv, run, "ラッパーを起こせない")
 
 
 def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
     """レーンのラッパーを止め、止まったのを確かめる（`ndf relay stop` は錠が空くまで待つ）。動いていなければ ok。"""
-    argv = [str(entry()), "relay", "stop", wrapper_name(repo, plan, lane)]
+    argv = _entry("relay", "stop", wrapper_name(repo, plan, lane))
     return _relay(argv, run, "ラッパーを止められない")
 
 
@@ -179,11 +166,16 @@ def _last_json(stdout: str) -> Optional[dict[str, Any]]:
     return out if isinstance(out, dict) else None
 
 
+def _run(argv: list[str], run: Optional[Any]) -> subprocess.CompletedProcess[str]:
+    """副命令を打つ（`run` が無ければ `subprocess.run`）。打てなければ OSError を呼び手へ伝える。"""
+    runner = run if run is not None else subprocess.run
+    return runner(argv, capture_output=True, text=True, check=False)
+
+
 def _probe(argv: list[str], run: Optional[Any]) -> Optional[dict[str, Any]]:
     """自分の副命令を打ち、結果 JSON（末尾の行）を返す。打てない・読めなければ None。"""
-    runner = run if run is not None else subprocess.run
     try:
-        done = runner(argv, capture_output=True, text=True, check=False)
+        done = _run(argv, run)
     except OSError:  # noqa: NDF401 外部コマンド: 打てなければ呼び手が「読めない」として生死を unknown にする
         return None
     return _last_json(done.stdout)
@@ -210,9 +202,8 @@ def sprint_wait(sprint_id: str, run: Optional[Any] = None) -> Optional[dict[str,
 
 
 def _relay(argv: list[str], run: Optional[Any], failure: str) -> dict[str, Any]:
-    runner = run if run is not None else subprocess.run
     try:
-        done = runner(argv, capture_output=True, text=True, check=False)
+        done = _run(argv, run)
     except OSError as exc:
         return {"ok": False, "detail": f"{failure}: {exc}"}
     return read_spawn(done.stdout, done.stderr, done.returncode)
