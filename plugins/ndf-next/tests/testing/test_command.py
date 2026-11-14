@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from ndf.testing import records, slots, waits
+from ndf.contracts import causes, result
+from ndf.testing import command, records, slots, waits
 from ndf.testing.limits import Limits
 
 # 子プロセスへ読ませる src（conftest の src_env と同じ求め方）
@@ -61,6 +62,13 @@ def _slot_held_elsewhere(root: Path, directory: Path):
     )
 
 
+def _result(out: str, code: int) -> dict:
+    """標準出力の 1 行の結果 JSON。契約（形と終了コードの対応）に合うことも確かめる。"""
+    obj = json.loads(out)
+    assert result.errors(obj, code) == []
+    return obj
+
+
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
     # CI（GITHUB_ACTIONS）と入れ子の印は枠を飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", slots.HELD_ENV)}
@@ -106,9 +114,11 @@ def test_wrong_setting_refuses_to_run(project):
     root, bin_dir, log = project
     (root / ".ndf" / "resources.json").write_text(json.dumps({"test_slots": {"max_runs": 0}}))
     proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log)
-    _, err = proc.communicate()
-    assert proc.returncode == 2
-    assert "max_runs" in json.loads(err)["items"][0]
+    out, _ = proc.communicate()
+    assert proc.returncode == causes.exit_code("invalid")
+    got = _result(out, proc.returncode)
+    assert got["cause"]["kind"] == "invalid"
+    assert "max_runs" in got["items"][0]["detail"]
     assert not log.exists()
 
 
@@ -122,14 +132,17 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     proc = _ndf(["report", "--since", "1d"], tmp_path)
     out, _ = proc.communicate()
     assert proc.returncode == 0
-    metrics = json.loads(out)["metrics"]
+    got = _result(out, 0)
+    assert (got["tool"], got["status"]) == ("test-slot", "ok")
+    metrics = got["metrics"]
     assert (metrics["gave_up"], metrics["waited_runs"]) == (1, 1)
 
 
 def test_report_refuses_a_wrong_period(tmp_path):
     proc = _ndf(["report", "--since", "seven"], tmp_path)
-    proc.communicate()
-    assert proc.returncode == 2
+    out, _ = proc.communicate()
+    assert proc.returncode == causes.exit_code("invalid")
+    assert _result(out, proc.returncode)["cause"]["kind"] == "invalid"
 
 
 # --- 現状固定テスト（_run の経路: 待ちの上限の上書き・諦め・置き場を使えない・シグナル・CI・入力の誤り） ---
@@ -140,18 +153,31 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     directory = slots_dir
     with _slot_held_elsewhere(root, directory):
         proc = _ndf(["run", "--wait-limit", "1", "--", "fakerun ."], root, bin_dir, log)
-        out, err = proc.communicate()
-    assert (proc.returncode, out) == (2, "")
-    result = json.loads(err)
-    assert result["status"] == "stopped"
-    assert result["cause"] == {"kind": slots.GAVE_UP}
-    assert result["metrics"]["available_mib"] is None
-    assert result["metrics"]["waited_seconds"] >= 1
-    assert "諦めた" in result["summary"]
+        out, _ = proc.communicate()
+    # 待ちの上限で諦めたのは wait_timeout（枠を持つ実行は動いている）。記録の語は instance に残す
+    assert proc.returncode == causes.exit_code("wait_timeout")
+    got = _result(out, proc.returncode)
+    assert got["status"] == "stopped"
+    assert got["cause"] == {"kind": "wait_timeout", "detail": got["summary"], "instance": slots.GAVE_UP}
+    assert got["metrics"]["available_mib"] is None
+    assert got["metrics"]["waited_seconds"] >= 1
+    assert "諦めた" in got["summary"]
+    # 契約の wait_timeout は同じ待ちを next に載せる
+    assert got["next"] == "ndf test-slot run --wait-limit 1 -- 'fakerun .'"
     assert not log.exists()
     rows = records.read_events(directory)
     assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
+
+
+def test_memory_stop_exits_apart_from_a_failed_test(capsys):
+    # メモリで止めた実行は落ちたテストとして数えない（I9）。終了コードは落ちたテストの 1 と重ならない
+    code = command._stopped_from(slots.Stopped(records.MEMORY_STOPPED, 2.0, 100))
+    got = json.loads(capsys.readouterr().out)
+    assert code == causes.exit_code("infra_wait") != causes.exit_code("test_failed")
+    assert got["status"] == "stopped"
+    assert got["cause"]["kind"] == "infra_wait" and got["cause"]["instance"] == records.MEMORY_STOPPED
+    assert "next" not in got
 
 
 def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):
@@ -237,7 +263,14 @@ def test_command_without_double_dash_is_accepted(project):
 def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
     root, bin_dir, log = project
     proc = _ndf(args, root, bin_dir, log)
-    out, err = proc.communicate()
-    assert (proc.returncode, out) == (2, "")
-    assert json.loads(err) == {"status": "stopped", "summary": summary}
+    out, _ = proc.communicate()
+    assert proc.returncode == causes.exit_code("invalid")
+    assert _result(out, proc.returncode) == {
+        "tool": "test-slot",
+        "status": "stopped",
+        "summary": summary,
+        "items": [],
+        "metrics": {},
+        "cause": {"kind": "invalid", "detail": summary},
+    }
     assert not log.exists()

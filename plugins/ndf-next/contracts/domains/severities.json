@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "summary": "レビューの指摘の重さ。行の並びは重い順。cross-review・pr-review・fix・cross-refactoring が同じ尺度で読む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "rank": {"type": "integer", "summary": "重さの順位（大きいほど重い）。指摘の組から 1 つを選び直すときに比べる"},
+    "blocking": {"type": "boolean", "summary": "直すまでマージを止める重さ。偽の重さは見送ってよい"},
+    "refactor": {"type": "boolean", "summary": "cross-refactoring の提案が名乗ってよい重さ"}
+  },
+  "rows": [
+    {"id": "critical", "rank": 3, "blocking": true, "refactor": true},
+    {"id": "major", "rank": 2, "blocking": true, "refactor": true},
+    {"id": "minor", "rank": 1, "blocking": false, "refactor": true},
+    {"id": "nit", "rank": 0, "blocking": false, "refactor": false}
+  ]
+}

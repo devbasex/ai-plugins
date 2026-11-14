@@ -12,17 +12,17 @@ import sys
 from ndf import contracts, identity
 from ndf.contracts import causes, result
 
+# 結果 JSON の tool の名前（副命令へ渡す前に止まったとき）
+TOOL = "cli"
+
 # 副命令の名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
+    "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "launch-args": "ndf.adapters.cli",
     "test-slot": "ndf.testing.command",
 }
-
-# 呼び出しの誤り・設定の壊れ（`plugin.json` が読めない）の終了コード。
-# 止まった理由の表（契約の子 D1）ができたら、`config_broken` の行の終了コードを引く形へ替える
-EXIT_UNREADABLE = 2
 
 
 def _usage(name: str) -> str:
@@ -37,14 +37,14 @@ def main(argv: list[str] | None = None) -> int:
         return _run(args)
     except contracts.ContractError as exc:
         # 契約の表（止まった理由・終了コード）そのものが読めないときは、表を使わずに config_broken を出す
-        return result.emit_unchecked("cli", "config_broken", f"契約のファイルが読めない: {exc}")
+        return result.emit_unchecked(TOOL, "config_broken", f"契約のファイルが読めない: {exc}")
 
 
 def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
     except identity.IdentityError as exc:
-        return result.emit(result.stopped("cli", "config_broken", str(exc)))
+        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
     if not args or args[0] in ("-h", "--help"):
         print(_usage(ident.name))
         return 0

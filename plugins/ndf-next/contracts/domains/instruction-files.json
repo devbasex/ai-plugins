@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "summary": "リポジトリの指示書（AI の CLI が読む運用の文書）のファイル。id はリポジトリの根からのパス。指示書の宣言（.ndf/instructions.json の files）が無いときの既定・宣言の外の指示書の検出・リポジトリの計測・MVV の材料の集め方が、それぞれの列で読む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "runtime": {"type": "string", "summary": "主に読むランタイム（runtimes の表の id）。複数のランタイムが読む共通の指示書は持たない", "ref": "domains/runtimes", "optional": true},
+    "declared_default": {"type": "boolean", "summary": "指示書の宣言が無いときに宣言したものとして扱う"},
+    "import_syntax": {"type": "boolean", "summary": "@インポート（@<パス>）を解釈する指示書。偽の指示書へ @インポートの判定を掛けない"},
+    "undeclared_check": {"type": "boolean", "summary": "宣言の外にあれば知らせる"},
+    "measure": {"type": "boolean", "summary": "リポジトリの計測（テスト・方針・デプロイの語の有無）で読む"},
+    "mvv": {"type": "boolean", "summary": "プロジェクトの MVV の材料として読む"}
+  },
+  "rows": [
+    {"id": "AGENTS.md", "declared_default": true, "import_syntax": false, "undeclared_check": true, "measure": true, "mvv": true},
+    {"id": "CLAUDE.md", "runtime": "claude", "declared_default": true, "import_syntax": true, "undeclared_check": true, "measure": true, "mvv": true},
+    {"id": "KIRO.md", "runtime": "kiro", "declared_default": true, "import_syntax": false, "undeclared_check": false, "measure": true, "mvv": false},
+    {"id": ".claude/CLAUDE.md", "runtime": "claude", "declared_default": false, "import_syntax": true, "undeclared_check": false, "measure": true, "mvv": false},
+    {"id": "GEMINI.md", "declared_default": false, "import_syntax": false, "undeclared_check": false, "measure": true, "mvv": true},
+    {"id": ".github/copilot-instructions.md", "declared_default": false, "import_syntax": false, "undeclared_check": false, "measure": false, "mvv": true}
+  ]
+}

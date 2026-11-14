@@ -3,7 +3,7 @@
     ndf check [--base <起点>] [--event <GitHub の事象の JSON>]
 
 `--base` があれば差分の検査（I2）も行う。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
-結果 JSON を標準出力の最後の 1 行に出す。終了コードは 0 合格・1 違反・2 読めない（規則のデータ・構文・git）。
+結果 JSON を標準出力の最後の 1 行に出す。終了コードは 0 合格・1 違反・読めない（規則のデータ・構文・git）は事実の表 exit-codes の unreadable の値。
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.cli import EXIT_UNREADABLE
 from ndf.checks import facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
+from ndf.contracts import exit_codes
 
 EXIT_OK = 0
 EXIT_VIOLATION = 1
@@ -130,7 +130,7 @@ def main(argv: list[str]) -> int:
         found = check(scope, rules)
     except (CheckError, identity.IdentityError) as exc:
         emit("stopped", str(exc), [], {})
-        return EXIT_UNREADABLE
+        return exit_codes.unreadable_code()
     for f in found:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
@@ -139,4 +139,4 @@ def main(argv: list[str]) -> int:
         emit("ok", f"{len(scope.sources)} ファイルに違反なし", [], metrics)
         return EXIT_OK
     emit("stopped", f"違反 {len(found)} 件", [f.as_item() for f in found], metrics)
-    return EXIT_UNREADABLE if "syntax" in by_rule else EXIT_VIOLATION
+    return exit_codes.unreadable_code() if "syntax" in by_rule else EXIT_VIOLATION
