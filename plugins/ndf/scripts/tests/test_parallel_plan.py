@@ -370,7 +370,7 @@ def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path,
 def test_ended_lanes_do_not_raise_overlaps():
     """終わりの記録があるレーンは、触る場所（I4）と課題（I19）の重なりに数えない（#3021 の残り）。"""
     d = variant(x=lambda d: d["lanes"].append(
-        {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["plugins/ndf/scripts/"]}
+        {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["plugins/ndf/scripts/"], "handoff": "sprint-lnew"}
     ))  # fmt: skip
     assert ("error", "I19") in rules_of(d)  # lfac #2400 と重なる
     plan, items, _ = pp.check_data(d, ended={"lfac", "lroot"})

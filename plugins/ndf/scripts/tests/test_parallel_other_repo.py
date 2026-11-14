@@ -262,7 +262,7 @@ def test_lane_cli_writes_plan_and_handoff(tmp_path, monkeypatch, two_repos):
         [sys.executable, str(SCRIPTS / "parallel.py"), "lane", "p3", "add", "--from", str(src)], cwd=x, capture_output=True, text=True
     )
     assert got.returncode == 0, got.stdout + got.stderr  # レーンの数は上限に数えない（#3021）
-    assert len(pp.load_plan(x, "p3")["lanes"]) == 3  # 何も書かない
+    assert [ln["name"] for ln in pp.load_plan(x, "p3")["lanes"]] == ["la", "lfactory", "lc", "ld"]
     doc = y / ".ndf" / "handoff" / "issue-5.md"
     doc.write_text("作業の状態と利用者の指示\n")
     src.write_text(json.dumps({"touches": ["c/"]}))
