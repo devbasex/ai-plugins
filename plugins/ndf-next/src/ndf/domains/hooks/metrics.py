@@ -12,7 +12,7 @@ import math
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 from ndf.domains.hooks import tables
 
@@ -69,14 +69,21 @@ def write_line(state_dir: Path, record: dict[str, Any], now: Optional[datetime] 
 
 def prune(state_dir: Path, days: float, now: Optional[datetime] = None) -> int:
     """`days` 日より古い日のファイルを消し、消した数を返す。SessionStart のエントリポイントだけが呼ぶ。"""
-    cutoff = (now or datetime.now(timezone.utc)).astimezone(timezone.utc) - timedelta(days=days)
     removed = 0
-    for path in sorted(metrics_dir(state_dir).glob("*.jsonl")):
-        day = _day_of(path)
-        if day is not None and day + timedelta(days=1) <= cutoff:
+    for path, old in _day_files(state_dir, days, now):
+        if old:
             path.unlink(missing_ok=True)
             removed += 1
     return removed
+
+
+def _day_files(state_dir: Path, days: float, now: Optional[datetime]) -> Iterator[tuple[Path, bool]]:
+    """日付の名前の計測のファイルと、`days` 日の窓の外か。日付の名前でないファイルは返さない。"""
+    cutoff = (now or datetime.now(timezone.utc)).astimezone(timezone.utc) - timedelta(days=days)
+    for path in sorted(metrics_dir(state_dir).glob("*.jsonl")):
+        day = _day_of(path)
+        if day is not None:
+            yield path, day + timedelta(days=1) <= cutoff
 
 
 def _day_of(path: Path) -> Optional[datetime]:
@@ -88,13 +95,10 @@ def _day_of(path: Path) -> Optional[datetime]:
 
 def read_records(state_dir: Path, days: float, now: Optional[datetime] = None) -> list[dict[str, Any]]:
     """`days` 日の中の記録。壊れた行は飛ばす。"""
-    cutoff = (now or datetime.now(timezone.utc)).astimezone(timezone.utc) - timedelta(days=days)
     records = []
-    for path in sorted(metrics_dir(state_dir).glob("*.jsonl")):
-        day = _day_of(path)
-        if day is None or day + timedelta(days=1) <= cutoff:
-            continue
-        records += [r for r in map(tables.json_object, path.read_text(encoding="utf-8").splitlines()) if r is not None]
+    for path, old in _day_files(state_dir, days, now):
+        if not old:
+            records += [r for r in map(tables.json_object, path.read_text(encoding="utf-8").splitlines()) if r is not None]
     return records
 
 
