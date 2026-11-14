@@ -51,9 +51,23 @@ _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、宣言が無いときに許された方式から選ぶ順
 ANCESTRY, MERGED = "ancestry", "merged"
-MERGE_METHODS = {"squash": MERGED, "merge": ANCESTRY, "rebase": MERGED}
-# リポジトリの設定の、方式ごとの許可の鍵（ruleset に許す方式の指定が無いときに読む）
-_REPO_MERGE_FLAGS = {"squash": "allow_squash_merge", "merge": "allow_merge_commit", "rebase": "allow_rebase_merge"}
+
+
+class _MergeMethod(NamedTuple):
+    """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可の鍵
+    （ruleset に許す方式の指定が無いときに読む）。"""
+
+    landing: str
+    setting: str
+
+
+# マージの方式の唯一の定義（並びは宣言が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
+_MERGE_METHOD_SPECS = {
+    "squash": _MergeMethod(MERGED, "allow_squash_merge"),
+    "merge": _MergeMethod(ANCESTRY, "allow_merge_commit"),
+    "rebase": _MergeMethod(MERGED, "allow_rebase_merge"),
+}
+MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
 # write 以上の権限を持つ書き手の author_association（#3364）。ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・
 # FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力として読み手へ渡す
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
@@ -505,7 +519,7 @@ class GitHub:
         if methods is not None:
             return methods
         settings = self.rest("GET", f"/repos/{self.repo}")
-        return [m for m, flag in _REPO_MERGE_FLAGS.items() if isinstance(settings, dict) and settings.get(flag) is True]
+        return [m for m, spec in _MERGE_METHOD_SPECS.items() if isinstance(settings, dict) and settings.get(spec.setting) is True]
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""
