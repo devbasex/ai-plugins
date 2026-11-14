@@ -28,7 +28,7 @@
     "C4": {"issue": 3293, "packages": ["ndf.core.refs"], "needs": ["C2", "AD1", "AD1+"], "order": 5, "lane": "lr-fix-a", "closed": false},
     "C5": {"issue": 3294, "packages": ["ndf.core.worker"], "needs": ["C2", "AD3", "AD3+"], "order": 5, "lane": "lr-fix-b", "closed": false},
     "P1b": {"issue": 3092, "packages": ["ndf.progress.invoke", "ndf.progress.run"], "needs": ["P1a", "C2", "AD3", "AD3+"], "order": 5, "lane": "lr-rf", "closed": false},
-    "P3": {"issue": 3097, "packages": ["ndf.progress.lane", "ndf.progress.plan"], "needs": ["P1a"], "order": 5, "lane": "lr-rf", "closed": false},
+    "P3": {"issue": 3097, "packages": ["ndf.progress.lane", "ndf.progress.plan"], "needs": ["P1a", "C1", "C1+"], "order": 5, "lane": "lr-rf", "closed": false},
     "M2": {"issue": 3296, "packages": ["ndf.domains.release"], "needs": ["P1a", "AD1", "AD1+"], "order": 5, "lane": "lr-fix-a", "closed": false},
     "M6": {"issue": 3301, "packages": ["ndf.domains.backlog"], "needs": ["P1a", "AD1", "AD1+"], "order": 5, "lane": "lr-data", "closed": false},
     "M3a": {"issue": 3297, "packages": ["ndf.domains.hooks"], "needs": ["M3b", "D2", "AD2", "AD3", "T1"], "order": 5, "lane": "lr-fix-b", "closed": false},

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "parallel-plan.schema.json",
+  "title": "開発計画の宣言",
+  "description": "ndf lanes init・start が読む計画の宣言（plan.json）と、ndf lanes lane add が読むレーンの宣言（#/$defs/lane）。宣言は入力で、計画の状態は計画の進行表とレーンの進行表が持つ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "rules", "lanes"],
+  "properties": {
+    "version": {"const": 1},
+    "name": {"$ref": "#/$defs/name"},
+    "rules": {"type": "array", "items": {"type": "string"}},
+    "max_lanes": {"type": "integer", "minimum": 1, "description": "終わっていないレーンの数の上限。省くと上限の宣言 relay.max-named の count"},
+    "max_plans": {"type": "integer", "minimum": 1, "description": "レーンごとのプランの本数の上限。省くと上限の宣言 relay.max-named の count"},
+    "lanes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/lane"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "plans", "touches"],
+      "oneOf": [{"required": ["rows"]}, {"required": ["input"]}],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "plans": {"type": "integer", "minimum": 1},
+        "touches": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "after": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "<レーン>（そのレーンの全行の後）か <レーン>/<行の鍵>（その行の後）"},
+        "repo": {"type": "string", "minLength": 1, "description": "レーンのリポジトリ。課題と触る場所の重なりは同じリポジトリのレーンの間だけで見る"},
+        "input": {"$ref": "#/$defs/input", "description": "最初の順番表が 1 行のときの書き方"},
+        "rows": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/input"}, "description": "最初の順番表（行はスプリント 1 つ）"}
+      }
+    },
+    "input": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "issues"],
+          "properties": {
+            "kind": {"const": "sprint"},
+            "issues": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+            "args": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "loop"],
+          "properties": {
+            "kind": {"const": "loop"},
+            "loop": {"type": "string", "minLength": 1},
+            "args": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    }
+  }
+}

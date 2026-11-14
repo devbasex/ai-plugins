@@ -49,6 +49,8 @@
     {"level": "lane", "kind": "row_cancelled", "actors": ["conductor", "workflow", "organizer"], "scope": "row", "from": ["pending"], "state": "cancelled"},
     {"level": "lane", "kind": "row_started", "actors": ["conductor"], "scope": "row", "from": ["pending"], "state": "running"},
     {"level": "lane", "kind": "row_ended", "actors": ["workflow", "conductor"], "scope": "row", "from": ["running"], "state": ["completed", "cancelled"]},
+    {"level": "lane", "kind": "row_answered", "actors": ["organizer"], "scope": "row", "from": ["running"]},
+    {"level": "lane", "kind": "row_resumed", "actors": ["conductor", "workflow"], "scope": "row", "from": ["running"]},
     {"level": "plan", "kind": "created", "actors": ["organizer"], "scope": "row", "from": ["new"]},
     {"level": "plan", "kind": "lane_added", "actors": ["organizer"], "scope": "row", "from": ["new"]},
     {"level": "plan", "kind": "lane_changed", "actors": ["organizer"], "scope": "row"},
