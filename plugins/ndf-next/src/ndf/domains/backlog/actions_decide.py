@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -55,15 +56,39 @@ def _list_of_str(v: Any) -> bool:
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+# 鍵 → 値の形。TEXT は文字列、TEXTS は文字列の列、タプルは取れる値の列。並びは誤りを返す順
+TEXT, TEXTS = "text", "texts"
+_SHAPE_CHECKS: dict[str, tuple[Callable[[Any], bool], str]] = {
+    TEXT: (lambda v: isinstance(v, str), "は文字列で書く"),
+    TEXTS: (_list_of_str, "は文字列の列で書く"),
+}
+CHANGE_SHAPES: dict[str, Any] = {
+    "title": TEXT, "body": TEXT, "state_reason": TEXT, "state": STATES, "add_labels": TEXTS, "remove_labels": TEXTS,
+}  # fmt: skip
+CREATE_SHAPES: dict[str, Any] = {"title": TEXT, "body": TEXT, "mvv_basis": TEXT, "mvv_verdict": TEXT, "labels": TEXTS}
+
+
+def _shape_errors(prefix: str, obj: dict[str, Any], shapes: dict[str, Any]) -> list[str]:
+    """`obj` にある鍵のうち形の違うものの誤り（`<prefix><鍵> は…`）。"""
+    errs = []
+    for key, shape in shapes.items():
+        if key not in obj:
+            continue
+        if isinstance(shape, tuple):
+            if obj[key] not in shape:
+                errs.append(f"{prefix}{key} は {' / '.join(shape)} のどれか")
+            continue
+        ok, why = _SHAPE_CHECKS[shape]
+        if not ok(obj[key]):
+            errs.append(f"{prefix}{key} {why}")
+    return errs
+
+
 def _change_errors(n: int, ch: Any) -> list[str]:
     if not isinstance(ch, dict):
         return [f"#{n} の changes はオブジェクトで書く"]
     errs = [f"#{n} の changes の知らない鍵: {k}" for k in sorted(set(ch) - set(CHANGE_KEYS))]
-    errs += [f"#{n} の changes.{k} は文字列で書く" for k in ("title", "body", "state_reason") if k in ch and not isinstance(ch[k], str)]
-    if "state" in ch and ch["state"] not in STATES:
-        errs.append(f"#{n} の changes.state は {' / '.join(STATES)} のどれか")
-    errs += [f"#{n} の changes.{k} は文字列の列で書く" for k in ("add_labels", "remove_labels") if k in ch and not _list_of_str(ch[k])]
-    return errs
+    return errs + _shape_errors(f"#{n} の changes.", ch, CHANGE_SHAPES)
 
 
 def _action_errors(k: int, act: Any) -> list[str]:
@@ -83,13 +108,7 @@ def _action_errors(k: int, act: Any) -> list[str]:
 def _create_errors(k: int, c: Any) -> list[str]:
     if not isinstance(c, dict):
         return [f"create[{k}] はオブジェクトで書く"]
-    errs = []
-    for key in ("title", "body", "mvv_basis", "mvv_verdict"):
-        if key in c and not isinstance(c[key], str):
-            errs.append(f"create[{k}].{key} は文字列で書く")
-    if "labels" in c and not _list_of_str(c["labels"]):
-        errs.append(f"create[{k}].labels は文字列の列で書く")
-    return errs
+    return _shape_errors(f"create[{k}].", c, CREATE_SHAPES)
 
 
 def _duplicate_errors(acts: list[Any]) -> list[str]:
