@@ -48,27 +48,27 @@ def _items(reading: Reading, tests: list[str]) -> list[dict]:
     return rows
 
 
-def _watch(a: argparse.Namespace) -> dict:
-    hub = GitHub(a.repo if a.repo else git.Git().remote_repo(), github_mod.client())
-    pull = hub.pull(a.pr)
-    done = Watch(watch_head(hub, pull.head_sha, a.required, a.test), a.budget, on_round=_progress).run()
-    merge_failed = a.merge_failed if a.after_merge else None
-    kind = done.cause(a.test, merge_failed)
-    metrics: dict[str, Any] = {"rounds": done.rounds, "elapsed": round(done.elapsed, 1), "queued_for": round(done.queued_for, 1)}
+def _watch(args: argparse.Namespace) -> dict:
+    hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client())
+    pull = hub.pull(args.pr)
+    watched = Watch(watch_head(hub, pull.head_sha, args.required, args.test), args.budget, on_round=_progress).run()
+    merge_failed = args.merge_failed if args.after_merge else None
+    kind = watched.cause(args.test, merge_failed)
+    metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
-        nodes = failed_test_nodes_of(hub, done.reading.failed_tests)
+        nodes = failed_test_nodes_of(hub, watched.reading.failed_tests)
         metrics.update({"failed_tests": nodes, "test_files": files_of(nodes)})
-    items = _items(done.reading, a.test)
+    items = _items(watched.reading, args.test)
     if kind is None:
-        return result.result(TOOL, result.OK, f"#{a.pr} の必須のチェックが通った", items=items, metrics=metrics)
-    detail = f"#{a.pr}（{pull.head_sha[:12]}）の CI: {done.reading.verdict}"
+        return result.result(TOOL, result.OK, f"#{args.pr} の必須のチェックが通った", items=items, metrics=metrics)
+    detail = f"#{args.pr}（{pull.head_sha[:12]}）の CI: {watched.reading.verdict}"
     return result.stopped(TOOL, kind, detail, instance=pull.head_sha, items=items, metrics=metrics)
 
 
 def main(argv: list[str]) -> int:
-    a = _parser().parse_args(argv)
+    args = _parser().parse_args(argv)
     try:
-        out = _watch(a)
+        out = _watch(args)
     except github_mod.GitHubError as exc:
         kind = "infra_wait" if exc.retry_after is not None else "unknown"
         out = result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after)
