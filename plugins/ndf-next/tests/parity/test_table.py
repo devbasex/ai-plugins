@@ -29,8 +29,8 @@ def test_the_five_non_regression_rows_are_rows(tables):
     "change",
     [
         pytest.param(lambda r: r.pop("to"), id="drop_to"),
-        pytest.param(lambda r: r.update(not_built="理由"), id="add_not_built"),
-        pytest.param(lambda r: r.update(feature=""), id="empty_feature"),
+        pytest.param(lambda r: r.update({"not_built": "理由"}), id="add_not_built"),
+        pytest.param(lambda r: r.update({"feature": ""}), id="empty_feature"),
         pytest.param(lambda r: r.pop("trial"), id="drop_trial"),
     ],
 )
