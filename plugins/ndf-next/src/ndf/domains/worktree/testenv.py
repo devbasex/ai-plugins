@@ -54,6 +54,10 @@ class Target:
     def key(self) -> str:
         return str(self.path)
 
+    def contains(self, real: str) -> bool:
+        """実体のパス `real` が worktree の配下か（worktree の根そのものは含まない）。"""
+        return real.startswith(self.key + os.sep)
+
     def at(self, *keys: str) -> Any:
         """節の入れ子の値（無ければ `None`）。"""
         value: Any = self.section
@@ -133,7 +137,7 @@ def compose_file_args(t: Target) -> list[str]:
         if full.is_symlink():
             raise TestenvError(f"compose_files の {rel} は symlink（たどらない）")
         real = os.path.realpath(full)
-        if not real.startswith(t.key + os.sep):
+        if not t.contains(real):
             raise TestenvError(f"compose_files の {rel} の実体が worktree の外（{real}）にある")
         out += ["-f", real]
     return out
@@ -290,7 +294,7 @@ def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) 
     if isinstance(out_env, str):
         where = out if out is not None else t.path / EVIDENCE / f"{row['environment']}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
         real = os.path.realpath(where if where.is_absolute() else t.path / where)
-        if not real.startswith(t.key + os.sep):
+        if not t.contains(real):
             raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")
         Path(real).mkdir(parents=True, exist_ok=True)
         _exclude_evidence(t)
