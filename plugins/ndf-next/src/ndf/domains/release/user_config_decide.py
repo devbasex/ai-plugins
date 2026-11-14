@@ -112,11 +112,16 @@ def codex_entries(conf: Mapping[str, Any], cached: Mapping[str, list[str]]) -> d
     return _codex_marketplaces(conf) | _codex_plugins(conf, cached)
 
 
+def _value(m: Mapping[str, str], key: str) -> str | None:
+    """控えの値。鍵が無ければ None。"""
+    return m[key] if key in m else None
+
+
 def diff(before: Mapping[str, str], after: Mapping[str, str]) -> list[str]:
     """前後の控えの違い（鍵ごとに `<鍵>: <前> → <後>`。無い値は `無し`）。"""
-    keys = sorted(set(before) | set(after))
-    return [
-        f"{k}: {before[k] if k in before else '無し'} → {after[k] if k in after else '無し'}"
-        for k in keys
-        if (before[k] if k in before else None) != (after[k] if k in after else None)
-    ]
+    out = []
+    for k in sorted(set(before) | set(after)):
+        old, new = _value(before, k), _value(after, k)
+        if old != new:
+            out.append(f"{k}: {old if old is not None else '無し'} → {new if new is not None else '無し'}")
+    return out
