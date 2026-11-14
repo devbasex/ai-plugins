@@ -130,6 +130,19 @@ def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, lane_sprint, flo
     assert run.read(st, tid).context()["issues"] == [5]
 
 
+def test_an_answer_sent_back_to_waiting_restores_the_dropped_issues(st, lane_sprint, flow):
+    # 答えた後に対象が変わって待ちへ戻すと、外した課題はスプリントへ戻り、入れた行は取り消され、答え直しで同じ課題を外せる
+    pid, tid = lane_sprint("--issues", "3092", "5")
+    flow.turn(tid)
+    out = _give(st, tid, _waiting(st, tid), drop=(3092,), seen=gate.Target(head="h1"))
+    assert gate.recheck(st, tid, lambda q: gate.Target(head="h2")) is not None
+    assert run.read(st, tid).context()["issues"] == [3092, 5]
+    carried = next(r for r in _lane_rows(st, pid) if r.key == out["metrics"]["carried_row"])
+    assert carried.state == lane.CANCELLED
+    again = _give(st, tid, _waiting(st, tid), drop=(3092,), key="k-2", seen=gate.Target(head="h2"))
+    assert run.read(st, tid).context()["issues"] == [5] and again["metrics"]["carried_row"] != carried.key
+
+
 def test_the_sprint_completion_ends_the_lane_row(st, env, lane_sprint, flow):
     # 決定 17: スプリントの完了と同じトランザクションでレーンの行を終える
     pid, tid = lane_sprint()

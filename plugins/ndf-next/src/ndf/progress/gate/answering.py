@@ -233,7 +233,8 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
     """答えを読む前に、答えた者が見た対象と今の対象を比べる。違えば待ちへ戻し（問いは新しい id）、理由を返す（3364-2）。
 
     `ndf answer` が書いた答え（問いの id と見た対象を持つ）だけを比べる。どの副命令でも、答えが読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
-    待ちの記録で、答えはその後の答えだけが読まれる（`run.StepProgress`）。
+    待ちの記録で、答えはその後の答えだけが読まれる（`run.StepProgress`）。答えが課題を外していれば、同じトランザクションで
+    文脈の `issues` を答えの前へ戻し、外した課題を入れたレーンの行を取り消す（答え直しで同じ課題を外せる）。
     """
     v = run.read(st, table_id)
     m = run.decide(v)
@@ -254,9 +255,45 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
     payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
     draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
     # 比べた後に答えが読まれていれば（同じ答えの事象が今も読む答えでなければ）書かない
-    answered = m.event
-    run.append(st, table_id, lambda now: [draft] if _still(now, answered) else [])
+    answered, stage = m.event, m.stage.name
+    undo: list[bool] = []
+
+    def build(now: run.View) -> list[model.EventDraft]:
+        undo.clear()
+        if not _still(now, answered):
+            return []
+        undo.append(True)
+        return [draft, *_undropped(now, stage, answered)]
+
+    def after(conn: Any) -> None:
+        if undo:
+            _uncarry(conn, table_id, p.get("carried_row"), why)
+
+    run.append(st, table_id, build, after)
     return why
+
+
+def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.EventDraft]:
+    """待ちへ戻した答えが外した課題を、今のスプリントの文脈の `issues` へ戻す事象（答えの前の値。`_dropped` の逆）。"""
+    if not run.payload_of(answered).get("dropped"):
+        return []
+    before = dict(v.doc["context"])
+    for ev in v.events:
+        if ev.seq < answered.seq and ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == v.rev:
+            before.update(run.payload_of(ev)["outputs"])
+    payload = {"outputs": {"issues": before["issues"]}}
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, stage, payload=payload, rev=v.rev)]
+
+
+def _uncarry(conn: Any, table_id: str, carried: Optional[str], reason: str) -> None:
+    """待ちへ戻した答えが外した課題を入れたレーンの行を取り消す（`_carry` の逆）。"""
+    if not carried:
+        return
+    found = lane.sprint_row(conn, table_id)
+    if found is None:
+        return
+    plan_id, name, _row = found
+    lane.cancel_row(conn, plan_id, name, carried, lane.RowChange(run.CONDUCTOR, reason))
 
 
 def _still(v: run.View, answered: model.Event) -> bool:
