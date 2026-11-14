@@ -16,7 +16,7 @@ import json
 import os
 import shlex
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -34,6 +34,8 @@ TOOL = next(name for name, module in cli.COMMANDS.items() if module == f"{__pack
 CLI_NAME = "ndf"
 RUN_FILE = "run.json"
 RESULTS_DIR = "results"
+# ステップの結果が載せた PR の番号を、回をまたいで集める記録（プランの結果の items へ載せる）
+PRS_FILE = "prs.json"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "answer"
 TOPIC_RETRY = "retry-wait"
@@ -56,6 +58,7 @@ class Invocation:
     head: Optional[str]
     values: dict[str, str] = field(default_factory=dict)
     again: tuple[str, ...] = ()
+    digest: str = ""
 
     @property
     def workflow_id(self) -> str:
@@ -80,7 +83,21 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]))
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
+    if out["prs"]:
+        _add_prs(ctx.state_dir, out["prs"])
     return out
+
+
+def _add_prs(state_dir: Path, prs: list[int]) -> None:
+    found = read_json(state_dir / PRS_FILE)
+    known = list(found["prs"]) if found is not None else []
+    write_json(state_dir / PRS_FILE, {"prs": known + [n for n in prs if n not in known]})
+
+
+def recorded_prs(state_dir: Path) -> list[int]:
+    """プランのステップが載せた PR の番号（載った順）。"""
+    found = read_json(state_dir / PRS_FILE)
+    return list(found["prs"]) if found is not None else []
 
 
 @durable.step
@@ -146,20 +163,31 @@ def read_json(path: Path) -> Optional[dict[str, Any]]:
     return found if isinstance(found, dict) else None
 
 
-def _write_json(path: Path, value: dict[str, Any]) -> None:
+def write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
 
 
-def _again(plan_path: Path, start: Optional[str], state_dir: Optional[str]) -> tuple[str, ...]:
+def _again(plan_path: Path, start: Optional[str], state_dir: Optional[str], sets: Mapping[str, str]) -> tuple[str, ...]:
     args = [str(plan_path)]
     if start is not None:
         args += ["--from", start]
     if state_dir is not None:
         args += ["--state-dir", state_dir]
+    for name in sorted(sets):
+        args += ["--set", f"{name}={sets[name]}"]
     return tuple(args)
+
+
+def _with_start(again: tuple[str, ...], start: str) -> list[str]:
+    """打ち直しの引数の開始点を `start` に置き換える（状態の置き場と差し込みの値は保つ）。"""
+    args = list(again)
+    if "--from" in args:
+        at = args.index("--from")
+        del args[at : at + 2]
+    return [args[0], "--from", start, *args[1:]]
 
 
 def _prelude(plan: model.Plan, start: Optional[str]) -> tuple[str, ...]:
@@ -168,9 +196,16 @@ def _prelude(plan: model.Plan, start: Optional[str]) -> tuple[str, ...]:
     return queue_decide.resume_prelude(plan.order, start)
 
 
-def prepare(root: Path, plan_path: Path, start: Optional[str], state_dir: Optional[str], cwd: Path) -> Invocation:
-    """プランを読み、状態の置き場・鍵・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。"""
+def prepare(
+    root: Path, plan_path: Path, start: Optional[str], state_dir: Optional[str], cwd: Path, sets: Optional[Mapping[str, str]] = None
+) -> Invocation:
+    """プランを読み、状態の置き場・鍵・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。
+
+    `sets` は呼び手が足す差し込みの値（キューの `{queue_prs}` など）。決まった名前（`state_dir` など）は上書きできない。
+    """
+    sets = dict(sets) if sets is not None else {}
     plan = model.load(plan_path)
+    digest = assemble_decide.run_digest(plan.digest(), sets)
     if start is not None and start not in plan.order and start not in routing.PLAN_TARGETS:
         raise model.PlanError(f"{plan.name} に {start} は無い")
     given = state_dir if state_dir is not None else plan.state_dir
@@ -178,17 +213,21 @@ def prepare(root: Path, plan_path: Path, start: Optional[str], state_dir: Option
     head = _head(plan)
     record = read_json(sdir / RUN_FILE)
     finished = record is not None and _finished(root, record["key"])
-    choice = assemble_decide.choose_run(record, plan.name, plan.digest(), start, head, finished)
+    choice = assemble_decide.choose_run(record, plan.name, digest, start, head, finished)
     abs_plan = (cwd / plan_path) if not plan_path.is_absolute() else plan_path
     values = {
         "state_dir": str(sdir),
         "repo": plan.repo if plan.repo else "",
         "worktree": plan.worktree if plan.worktree else "",
         "plan": str(abs_plan),
+        "owner": assemble_decide.owner_of(plan.name, str(sdir)),
     }
-    return Invocation(
-        abs_plan, plan, start, _prelude(plan, start), sdir, choice.key, choice.round_no, head, values, _again(abs_plan, start, state_dir)
-    )
+    clash = sorted(set(sets) & set(values))
+    if clash:
+        raise model.PlanError(f"差し込みの値 {', '.join(clash)} は上書きできない")
+    values.update(sets)
+    again = _again(abs_plan, start, state_dir, sets)
+    return Invocation(abs_plan, plan, start, _prelude(plan, start), sdir, choice.key, choice.round_no, head, values, again, digest)
 
 
 # --- 実行の回 -----------------------------------------------------------------------------
@@ -223,9 +262,9 @@ def _record_run(inv: Invocation, end_head: Optional[str] = None) -> None:
     record = read_json(path)
     heads = list(record["heads"]) if record is not None and record["key"] == inv.key else []
     heads += [h for h in (inv.head, end_head) if h is not None and h not in heads]
-    _write_json(
+    write_json(
         path,
-        {"key": inv.key, "name": inv.plan.name, "digest": inv.plan.digest(), "start": inv.start, "round": inv.round_no, "heads": heads},
+        {"key": inv.key, "name": inv.plan.name, "digest": inv.digest, "start": inv.start, "round": inv.round_no, "heads": heads},
     )
 
 
@@ -245,6 +284,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     """承認の答えを待つ結果。`routes` は答えごとに打つコマンド。"""
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の答えを待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}]
+    items += [{"kind": "pr", "number": n} for n in recorded_prs(inv.state_dir)]
     return result.result(
         TOOL,
         GATE,
@@ -259,15 +299,17 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
     """終わった回の結果。耐久ワークフローが例外で終わったときは unknown で止まる。"""
     items = [{"kind": "plan", "name": inv.plan.name, "run": durable.run_name(inv.key)}]
+    items += [{"kind": "pr", "number": n} for n in recorded_prs(inv.state_dir)]
     metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
     if final is None:
         return result.stopped(TOOL, "unknown", f"{inv.plan.name} の耐久ワークフローが {status} で終わった", items=items, metrics=metrics)
     if final["status"] == OK:
         return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics)
     if final["status"] == STOPPED:
-        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics)
+        again = shlex.join([CLI_NAME, TOOL, "next", *_with_start(inv.again, final["last"])]) if final["last"] else None
+        return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again)
     after = inv.plan.following(final["last"])
-    cont = shlex.join([CLI_NAME, TOOL, "next", str(inv.plan_path), "--from", after]) if after else None
+    cont = shlex.join([CLI_NAME, TOOL, "next", *_with_start(inv.again, after)]) if after else None
     return result.result(TOOL, GATE, final["detail"], items, metrics, routes={"approved": cont, "rejected": None})
 
 
@@ -283,7 +325,7 @@ def _finish(inv: Invocation) -> dict[str, Any]:
     status = durable.status(inv.workflow_id)
     final = durable.result(inv.workflow_id) if status == "SUCCESS" else None
     out = final_result(inv, final, status)
-    _write_json(inv.result_path, out)
+    write_json(inv.result_path, out)
     _record_run(inv, _head(inv.plan))
     return out
 

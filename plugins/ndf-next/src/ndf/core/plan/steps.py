@@ -5,6 +5,20 @@
   打ち直しの前に、前の回の子が残っていれば止めてから打つ。別のホストの子が残っていれば打たずに止まる（B10）
 - 結果は標準出力の最後の JSON の行から読む。JSON を出さないコマンドは終了コードと `exit_cause` で種類を決める
 - 結果に載せる文は、秘密の環境変数の値とトークンの形を伏せてから返す（耐久の記録と結果 JSON へ秘密を入れない）
+- 結果 JSON の items の `{"kind": "pr", "number": <番号>}` を拾い、プランの結果とキューの `{queue_prs}` へ渡す
+
+外部への操作（push・PR の作成・マージ・Issue を閉じる・ラベル・コメント・リリース）のステップは、`probe` に相手の状態を
+読むコマンドを持つ（B9）。`run` の前に毎回打ち、済んでいれば `run` を打たずに ok を返す。操作の直後にプロセスが落ちて
+耐久ステップの記録が残らなくても、回復で打ち直したステップは済んだ操作を繰り返さない。`probe` の答え:
+
+- 終了コード 0（結果 JSON なら `ok`）: 済んでいる。`run` を打たない
+- 終了コード 1（結果 JSON なら `not_applicable` で止まった）: まだ。`run` を打つ
+- ほか: 済んだかを確かめられない。`run` を打たずに、その種類（結果 JSON の種類か `exit_cause`、無ければ unknown）で止まる
+
+見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
+
+    {"id": "push", "run": ["git", "push", "origin", "HEAD:refs/heads/feat/x"],
+     "probe": ["sh", "-c", "test \"$(git ls-remote origin refs/heads/feat/x | cut -f1)\" = \"$(git rev-parse HEAD)\""]}
 """
 
 from __future__ import annotations
@@ -130,14 +144,20 @@ def _last_json(stdout: str) -> Optional[dict[str, Any]]:
     return found if isinstance(found, dict) and found.get("status") in STATUSES else None
 
 
+def _prs(found: dict[str, Any]) -> list[int]:
+    """結果 JSON の items の PR の番号（`{"kind": "pr", "number": <整数>}`）。"""
+    items = found.get("items") if isinstance(found.get("items"), list) else []
+    return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
+
+
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
-    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`）。"""
+    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`）。"""
     found = _last_json(stdout)
     if found is None:
         if code == 0:
-            return {"status": OK, "kind": None, "retry_after": None, "routes": None, "summary": "", "code": code}
+            return {"status": OK, "kind": None, "retry_after": None, "routes": None, "summary": "", "code": code, "prs": []}
         kind = step.exit_cause[code] if code in step.exit_cause else "unknown"
-        return {"status": STOPPED, "kind": kind, "retry_after": None, "routes": None, "summary": f"終了コード {code}", "code": code}
+        return {"status": STOPPED, "kind": kind, "retry_after": None, "routes": None, "summary": f"終了コード {code}", "code": code, "prs": []}
     cause = found.get("cause") if isinstance(found.get("cause"), dict) else None
     return {
         "status": found["status"],
@@ -146,7 +166,28 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "routes": found.get("routes") if found["status"] == GATE else None,
         "summary": str(found.get("summary")),
         "code": code,
+        "prs": _prs(found),
     }
+
+
+def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, Any]]:
+    """`probe` を打ち、済んでいれば ok の結果、確かめられなければ止まった結果、まだなら None を返す（B9）。"""
+    args = assemble_decide.fill(step.probe if step.probe is not None else (), ctx.values)
+    try:
+        done = subprocess.run(args, cwd=workdir(ctx.plan, step), capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _stopped("precondition", f"ステップ {step.id} の probe を打てない: {exc}")
+    found = outcome_of(step, done.returncode, done.stdout)
+    if found["status"] == OK:
+        return {**found, "summary": f"済んでいた（{step.id} の probe）"}
+    if found["kind"] == "not_applicable" or (found["code"] == 1 and _last_json(done.stdout) is None):
+        return None
+    kind = found["kind"] if found["kind"] is not None else "unknown"
+    return _stopped(kind, f"ステップ {step.id} の probe で済んだかを確かめられない: {found['summary']}")
+
+
+def _stopped(kind: str, summary: str) -> dict[str, Any]:
+    return {"status": STOPPED, "kind": kind, "retry_after": None, "routes": None, "summary": summary, "code": None, "prs": []}
 
 
 def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:
@@ -162,27 +203,23 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
     try:
         ensure_previous_stopped(ctx.state_dir, step.id)
     except StepRefused as exc:
-        return {"status": STOPPED, "kind": "refused", "retry_after": None, "routes": None, "summary": str(exc), "code": None}
+        return _stopped("refused", str(exc))
     timeout = step.timeout if step.timeout is not None else limits.seconds(RUN_STEP_LIMIT)
+    if step.probe is not None:
+        checked = _probe(ctx, step, timeout)
+        if checked is not None:
+            return run_log.redact(checked)
     try:
         proc = _launch(ctx, step)
     except OSError as exc:
-        summary = f"ステップ {step.id} を起動できない: {exc}"
-        return {"status": STOPPED, "kind": "precondition", "retry_after": None, "routes": None, "summary": summary, "code": None}
+        return _stopped("precondition", f"ステップ {step.id} を起動できない: {exc}")
     pid_path = _write_pid(ctx.state_dir, step.id, proc.pid)
     try:
         stdout, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         stop_group(proc.pid)
         proc.communicate()
-        out = {
-            "status": STOPPED,
-            "kind": "interrupted",
-            "retry_after": None,
-            "routes": None,
-            "summary": f"{timeout:.0f} 秒で打ち切った",
-            "code": None,
-        }
+        out = _stopped("interrupted", f"{timeout:.0f} 秒で打ち切った")
     else:
         out = outcome_of(step, proc.returncode, stdout)
     pid_path.unlink(missing_ok=True)

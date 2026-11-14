@@ -12,7 +12,7 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import NamedTuple, Optional
 
-from ndf.contracts.exit_codes import OK
+from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
 # 再開の開始点より前にあれば毎回通すステップ。ベースブランチと振り返りの範囲は前の実行の後に変わりうる
 RESUME_ALWAYS = ("base-sync", "deep-due")
@@ -106,3 +106,49 @@ def waves(items: Sequence[Queued]) -> list[list[str]]:
         placed.update(b.name for b in batch)
         rest = [r for r in rest if r not in batch]
     return out
+
+
+class Outcome(NamedTuple):
+    """キューの中の 1 本のプランの結果。`status` が None なら流していない（`detail` に理由）。"""
+
+    name: str
+    status: Optional[str]
+    kind: Optional[str] = None
+    detail: str = ""
+    routes: Optional[Mapping[str, Optional[str]]] = None
+    prs: tuple[int, ...] = ()
+    release: bool = False
+
+
+def stage_blocked(prior: Sequence[Outcome], accepts_gate: bool) -> Optional[str]:
+    """前の段の結果から、この段を流さない理由を返す。流してよければ None。
+
+    前の段がすべて `ok` なら流す。承認ゲートで待つプランがあっても、この段のプランがすべて前の段の承認ゲートを
+    人へ届ける役（`accepts_gate`）なら流す（#2876）。承認ゲートの待ちはキューの結果に残る。
+    """
+    held = [o for o in prior if o.status != OK and not (o.status == GATE and accepts_gate)]
+    if not held:
+        return None
+    return "前の段のプランが完了でない: " + "、".join(f"{o.name}（{o.status if o.status is not None else '流していない'}）" for o in held)
+
+
+def queue_prs(prior: Sequence[Outcome], accepts_gate: bool = False) -> list[int]:
+    """前の段で完了したプランの PR の番号を、重ねずに番号の順で返す。リリースのプラン（`release`）の PR は入れない。
+
+    承認ゲートを人へ届ける役（`accepts_gate`）の段には、承認ゲートで待つプランの PR も入れる（#2876）。
+    """
+    taken = (OK, GATE) if accepts_gate else (OK,)
+    return sorted({n for o in prior if o.status in taken and not o.release for n in o.prs})
+
+
+def overall(outcomes: Sequence[Outcome]) -> tuple[str, Optional[Outcome]]:
+    """キュー全体の status と、止まった（なければ承認ゲートで待つ・流していない）最初のプラン。
+
+    止まったプランがあれば stopped、承認ゲートで待つプランか流していないプランがあれば gate、すべて完了なら ok。
+    """
+    for status in (STOPPED, GATE):
+        found = [o for o in outcomes if o.status == status]
+        if found:
+            return status, found[0]
+    waiting = [o for o in outcomes if o.status is None]
+    return (GATE, waiting[0]) if waiting else (OK, None)

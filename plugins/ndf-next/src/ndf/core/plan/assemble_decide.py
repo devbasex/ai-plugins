@@ -3,11 +3,14 @@
 - 差し込み `{state_dir}` は絶対のパスで埋める。プランを相対のパスで渡しても、作業場所の中のステップが同じ置き場を指す（#2949）
 - 実行の鍵はプランの中身・開始点・作業場所の head・回の番号から作る。差し戻しの後に直した head は別の鍵になり、前の回の
   報告を返さずに流れる（#3176）。同じ引数で打ち直せば同じ鍵で、承認ゲートの待ちから続く（B2）
+- 差し込みの値を変えた打ち直しは別の回にする（#3053）。`{owner}` は回をまたいで同じ持ち主の名前（#2640）
 - マージで作業場所が消えたか登録が外れた後のステップは、リポジトリの根で打つ（#2969・#3022・#3186・#1886）
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import PurePath
 from typing import Any, NamedTuple, Optional
@@ -33,6 +36,22 @@ def run_key(name: str, digest: str, start: Optional[str], head: Optional[str], r
     """実行の回の鍵。プランの名前・中身・開始点・head・回の番号のどれかが違えば別の鍵になる（B1）。"""
     parts = [KEY_KIND, name, digest, start if start is not None else "", head if head is not None else "", str(round_no)]
     return ":".join(parts)
+
+
+def run_digest(plan_digest: str, sets: Mapping[str, str]) -> str:
+    """回を分ける中身の要約。差し込みの値（`--set`）を変えて打ち直すと別の回になり、前の回の報告を返さない（#3053）。"""
+    if not sets:
+        return plan_digest
+    body = json.dumps([plan_digest, sorted(sets.items())], ensure_ascii=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+def owner_of(name: str, state_dir: str) -> str:
+    """差し込み `{owner}`: プランと状態の置き場で決まる持ち主の名前。回・開始点・差し込みの値が変わっても同じ。
+
+    ステップが作業場所の持ち主を記録するときに使えば、打ち直して回が変わっても前の回の続きとして扱える（#2640）。
+    """
+    return f"{name}-{hashlib.sha256(state_dir.encode('utf-8')).hexdigest()[:12]}"
 
 
 class RunChoice(NamedTuple):

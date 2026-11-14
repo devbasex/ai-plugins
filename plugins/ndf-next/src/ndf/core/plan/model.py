@@ -1,7 +1,9 @@
 """プランの形（`plan.json`）。読んで実行の前に確かめ、変えられない値にする。
 
-プランは名前・ステップの並び・触るファイルの宣言（`touches`）・前提のプラン（`needs`）を持つ。ステップは打つコマンド
-（`run`）と、止まったときの行き先（`on_cause`・`on_fail`）・承認の答えの行き先（`on_answer`）を持つ。
+プランは名前・ステップの並び・触るファイルの宣言（`touches`）・前提のプラン（`needs`）を持つ。キューの中の役として、
+前の段の承認ゲートを人へ届ける役（`accepts_gate`）と、PR を `{queue_prs}` に入れないリリースのプラン（`release`）を持てる。
+ステップは打つコマンド（`run`）と、止まったときの行き先（`on_cause`・`on_fail`）・承認の答えの行き先（`on_answer`）を持つ。
+外部への操作のステップは、済んだかを相手の状態から確かめるコマンド（`probe`）を持てる（B9）。
 行き先の値はプランのステップの id か `end`・`stop`・`retry` のどれかで、`on_cause` の種類は止まった理由の表にある（IS3）。
 """
 
@@ -44,6 +46,7 @@ class Step:
     on_answer: Mapping[str, str] = field(default_factory=dict)
     timeout: Optional[float] = None
     place: str = IN_WORKTREE
+    probe: Optional[tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,8 @@ class Plan:
     touches: Optional[tuple[str, ...]] = None
     needs: tuple[str, ...] = ()
     state_dir: Optional[str] = None
+    accepts_gate: bool = False
+    release: bool = False
     raw: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
     @property
@@ -107,6 +112,9 @@ def _step(raw: Mapping[str, Any]) -> Step:
     if not isinstance(run, list) or not run or not all(isinstance(a, str) for a in run):
         raise PlanError(f"ステップ {sid} の run は空でない文字列の配列にする")
     retry = {kind: _policy(sid, kind, values) for kind, values in dict(_opt(raw, "retry", {})).items()}
+    probe = raw.get("probe")
+    if probe is not None and (not isinstance(probe, list) or not probe or not all(isinstance(a, str) for a in probe)):
+        raise PlanError(f"ステップ {sid} の probe は空でない文字列の配列にする")
     return Step(
         id=sid,
         run=tuple(run),
@@ -118,6 +126,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
         on_answer=dict(_opt(raw, "on_answer", {})),
         timeout=raw.get("timeout"),
         place=_opt(raw, "in", IN_WORKTREE),
+        probe=tuple(probe) if probe is not None else None,
     )
 
 
@@ -167,6 +176,13 @@ def _strings(raw: Mapping[str, Any], key: str) -> Optional[tuple[str, ...]]:
     return tuple(value)
 
 
+def _flag(raw: Mapping[str, Any], key: str) -> bool:
+    value = _opt(raw, key, False)
+    if not isinstance(value, bool):
+        raise PlanError(f"{key} は真偽値にする")
+    return value
+
+
 def parse(raw: Any) -> Plan:
     """JSON の値からプランを作り、形を確かめる。誤りは `PlanError`。"""
     if not isinstance(raw, Mapping) or not isinstance(raw.get("name"), str) or not raw["name"]:
@@ -185,6 +201,8 @@ def parse(raw: Any) -> Plan:
         touches=_strings(raw, "touches"),
         needs=needs if needs is not None else (),
         state_dir=raw.get("state_dir"),
+        accepts_gate=_flag(raw, "accepts_gate"),
+        release=_flag(raw, "release"),
         raw=dict(raw),
     )
     errs = errors(plan)

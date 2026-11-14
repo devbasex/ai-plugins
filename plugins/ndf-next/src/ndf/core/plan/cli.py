@@ -1,7 +1,9 @@
 """副命令 `plan`: プランの実行の回を流す・待つ・待ちの一覧を出す。
 
-ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--answer <答え>]
+ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--answer <答え>] [--set <名前>=<値>]...
     回を始めるか続け、終わるか承認の答えを待つ所まで進める。答えを待つ所では承認ゲートの結果（routes）を出して抜ける
+ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--queue-dir <置き場>]
+    段（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す
 ndf plan wait <plan.json>... [--timeout <秒>]
     DBOS を開かずに回の控えと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）
 ndf plan pending
@@ -17,6 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,7 +30,7 @@ from ndf.adapters import run_log
 from ndf.contracts import causes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
-from ndf.core.plan import assemble_decide, model, queue_decide, runner, wait_decide
+from ndf.core.plan import assemble_decide, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
 # 待ちの上限の既定（秒）と、見回りの間隔の宣言
@@ -62,12 +65,52 @@ def _exit_with(out: dict[str, Any]) -> NoReturn:
 def _cmd_next(a: argparse.Namespace) -> int:
     root = _root()
     try:
-        inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, Path.cwd())
+        inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, Path.cwd(), _pairs(a.sets, "--set"))
         return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except durable.StoreStopped as exc:
         return result.emit(_store_stopped(exc))
+
+
+def _pairs(values: Optional[list[str]], flag: str) -> dict[str, str]:
+    """`<名前>=<値>` の並びを辞書にする。形が違えば `model.PlanError`。"""
+    out: dict[str, str] = {}
+    for value in values if values is not None else []:
+        name, sep, rest = value.partition("=")
+        if not sep or not name or not rest:
+            raise model.PlanError(f"{flag} は <名前>=<値> の形にする: {value}")
+        out[name] = rest
+    return out
+
+
+def _stages(a: argparse.Namespace, cwd: Path) -> list[list[queue_run.Entry]]:
+    """引数からキューの段を作る。プランは絶対のパスにし、`--from` の開始点を付ける。"""
+    starts = _pairs(a.starts, "--from")
+    groups = [a.plans, *(a.then if a.then is not None else [])]
+    stages = [[queue_run.Entry((cwd / p).resolve(), model.load(cwd / p)) for p in group] for group in groups]
+    names = [e.plan.name for stage in stages for e in stage]
+    unknown = sorted(set(starts) - set(names))
+    if unknown:
+        raise model.PlanError(f"--from のプランがキューに無い: {', '.join(unknown)}")
+    if len(set(names)) != len(names):
+        raise model.PlanError("キューに同じ名前のプランが 2 本ある")
+    return [[queue_run.Entry(e.path, e.plan, starts.get(e.plan.name)) for e in stage] for stage in stages]
+
+
+def _cmd_queue(a: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    try:
+        stages = _stages(a, cwd)
+        qdir = queue_run.queue_dir(stages[0][0].path, a.queue_dir, cwd)
+        again = queue_run.again_args(stages, qdir)
+        stable = queue_run.move_to_stable(cwd)
+    except model.PlanError as exc:
+        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
+    except subprocess.CalledProcessError as exc:
+        return result.emit(result.stopped(TOOL, "precondition", f"チェックアウトの根を引けない: {exc}"))
+    outcomes = queue_run.run(stages, qdir, stable, a.resume)
+    return result.emit(queue_run.queue_result(TOOL, outcomes, again))
 
 
 def _watched(path: Path) -> wait_decide.Watched:
@@ -150,7 +193,15 @@ def _parser() -> argparse.ArgumentParser:
     nx.add_argument("--from", dest="start")
     nx.add_argument("--state-dir")
     nx.add_argument("--answer")
+    nx.add_argument("--set", dest="sets", action="append")
     nx.set_defaults(fn=_cmd_next)
+    qu = sub.add_parser("queue", help="段ごとにプランを並べて流す")
+    qu.add_argument("plans", nargs="+")
+    qu.add_argument("--then", action="append", nargs="+")
+    qu.add_argument("--from", dest="starts", action="append")
+    qu.add_argument("--resume", action="store_true")
+    qu.add_argument("--queue-dir")
+    qu.set_defaults(fn=_cmd_queue)
     wt = sub.add_parser("wait", help="流れている回を見回る")
     wt.add_argument("plans", nargs="+")
     wt.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
