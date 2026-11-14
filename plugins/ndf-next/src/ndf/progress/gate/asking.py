@@ -32,7 +32,7 @@ RELEASE_GATE = _gate("release")
 # 問いの id の長さ（sha256 の頭）
 ID_LENGTH = 16
 # 承認しなかった答え（差し戻しの記録に数える）
-REJECTING = (run.REVISE, "rejected")
+REJECTING = (run.REVISE, run.REJECTED)
 # 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
 MATERIAL_DIR = "materials"
 

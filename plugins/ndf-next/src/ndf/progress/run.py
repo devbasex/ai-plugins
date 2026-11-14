@@ -58,9 +58,10 @@ STEP_EVENT = _event("step_recorded")
 ANSWERED = _event("answered")
 FAILED = _event("failed")
 FINISHED = _event("finished")
-# 答えの語（承認と差し戻し）
+# 答えの語（承認・差し戻し・承認しない）
 APPROVED = invoke.APPROVED
 REVISE = _answer("revise")
+REJECTED = _answer("rejected")
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも宣言の値）

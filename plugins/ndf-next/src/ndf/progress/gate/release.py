@@ -18,7 +18,7 @@ from ndf.progress.gate.asking import RELEASE_GATE, RELEASE_KIND, Question, Targe
 from ndf.progress.plan import external
 
 # 外のオーガナイザーの答え → 承認ゲートの答え
-ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: "rejected"}
+ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # 依頼を出したときに見た対象の置き場（承認資料の隣）
 SEEN_SUFFIX = ".seen.json"
 
