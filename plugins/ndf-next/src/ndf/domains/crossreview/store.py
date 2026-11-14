@@ -85,9 +85,14 @@ def state_pr(state_dir: Path, pr: int) -> StateRef:
     return StateRef(pr, pr, own)
 
 
+def read_state(ref: StateRef) -> dict[str, Any]:
+    """状態ファイルを読む。まだ無ければ元の番号だけを持つ空の状態。"""
+    return read_object(ref.path) if ref.path.is_file() else {ORIGIN_KEY: ref.origin_pr}
+
+
 def record_current(ref: StateRef, current_pr: int) -> StateRef:
     """巻き直しの後の今の番号を状態ファイルへ書く。"""
-    data = read_object(ref.path) if ref.path.is_file() else {ORIGIN_KEY: ref.origin_pr}
+    data = read_state(ref)
     data[CURRENT_KEY] = current_pr
     write_object(ref.path, data)
     return StateRef(ref.origin_pr, current_pr, ref.path)

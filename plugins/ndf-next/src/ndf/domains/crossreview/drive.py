@@ -139,7 +139,7 @@ def _start(cfg: RunConfig) -> _Run:
         detail = f"自分の未送信のコミットが origin の先頭と衝突したので {synced.before} へ戻した: {', '.join(synced.conflicts)}"
         raise DriveStopped("precondition", detail)
     ref = store.state_pr(cfg.state_dir, cfg.pr)
-    data = store.read_object(ref.path) if ref.path.is_file() else {store.ORIGIN_KEY: ref.origin_pr}
+    data = store.read_state(ref)
     ledger = {str(f["id"]): f for f in _list(data, FINDINGS) if isinstance(f, dict) and "id" in f}
     run = _Run(cfg, g, ref, data, ledger, [], [], [])
     _ingest_pending(run)

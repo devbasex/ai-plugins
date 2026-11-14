@@ -178,7 +178,7 @@ def cmd_state(args: argparse.Namespace) -> int:
 
 
 def _last_round(ref: store.StateRef) -> dict[str, Any]:
-    data = store.read_object(ref.path) if ref.path.is_file() else {}
+    data = store.read_state(ref)
     rounds = data.get(ROUNDS)
     return rounds[-1] if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else {}
 
@@ -208,7 +208,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         found = store.read_fix_result(Path(args.file), ref)
     except store.FixResultMismatch as exc:
         return _stop("invalid", str(exc))
-    data = store.read_object(ref.path) if ref.path.is_file() else {store.ORIGIN_KEY: ref.origin_pr}
+    data = store.read_state(ref)
     rounds = data.setdefault(ROUNDS, [{"round": 1}])
     if not rounds:
         rounds.append({"round": 1})
@@ -227,7 +227,7 @@ def _every_section(purpose: str) -> bool:
 
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
-    data = store.read_object(ref.path) if ref.path.is_file() else {}
+    data = store.read_state(ref)
     rounds = data.get(ROUNDS) if isinstance(data.get(ROUNDS), list) else []
     prev = rounds[-1].get("head") if rounds and isinstance(rounds[-1], dict) else None
     reviewed = data.get(REVIEWED) if isinstance(data.get(REVIEWED), list) else []
