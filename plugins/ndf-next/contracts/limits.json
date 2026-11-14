@@ -1,6 +1,9 @@
 {
   "owner": "D1+（#3284 の追補。ndf.contracts）",
   "policies": {
+    "launch.weight.test": {"summary": "テスト 1 本（全体テストの -n 4 を含む）が重い起動の枠から取るメモリの重み。全体テストのレーン 1 本分の見込み", "gib": 14},
+    "launch.weight.llm-cli": {"summary": "LLM の CLI（claude -p・codex・kiro）1 本が重い起動の枠から取るメモリの重み。実測（2026-11-13）claude 16 本で 4.3 GiB", "gib": 0.5},
+    "launch.weight.review": {"summary": "cross-review の担当 1 本が重い起動の枠から取るメモリの重み（LLM の CLI と読む差分の分）", "gib": 1},
     "monitor.phase.review": {"summary": "レビューの工程の監視の上限", "seconds": 1200},
     "monitor.phase.critique": {"summary": "批評の工程の監視の上限", "seconds": 1200},
     "monitor.phase.propose": {"summary": "提案の工程の監視の上限", "seconds": 1200},
@@ -76,6 +79,7 @@
     "parallel-switch.long-wait": {"summary": "文脈を読めないときに長い待ちのオーガナイザーを切り替える待ちの見込みの閾値（実測で最も大きかった文脈が切り替えに変わる時点）", "seconds": 14400},
     "parallel-switch.relay-check": {"summary": "切り替えの判定でラッパーの直接の子かを確かめる relay.py is-child の上限", "seconds": 10},
     "procs.stop-tree": {"summary": "プロセスの木を止めるときの SIGTERM から SIGKILL までの猶予と、終わりを見る間隔", "seconds": 3, "interval": 0.1},
+    "procs.stop-test": {"summary": "テストの枠が止めるテストのプロセスの組の、SIGTERM から SIGKILL までの猶予と、終わりを見る間隔", "seconds": 10, "interval": 0.1},
     "refresh.http": {"summary": "トークンの更新の宛先への HTTP の上限", "seconds": 10},
     "run-core.kill-grace": {"summary": "実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予", "seconds": 5},
     "sprint-loop-record.lock": {"summary": "開発ループの記録の排他を待つ上限", "seconds": 60},

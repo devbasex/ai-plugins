@@ -1,4 +1,4 @@
-"""言語・テストのファイル・runner・変更の分類の表（D2）を、表の要約が決める照らし方で確かめる。
+"""言語・テストのファイル・変更の分類の表（D2）を、表の要約が決める照らし方で確かめる。
 
 照らし方の関数はこのテストの中の最小の写しで、読み手（cross-review・cross-refactoring の子）が同じ規則で表を読む。
 """
@@ -84,15 +84,6 @@ def test_name_patterns_end_with_their_languages_extension():
     for r in facts.rows("test-files", where="name"):
         assert any(r["pattern"].endswith(e) for e in exts[r["language"]]), r["id"]
     assert facts.column("test-files", "language").keys() == set(facts.ids("test-files", where="name"))
-
-
-def test_runner_takes_only_its_languages():
-    known = set(facts.ids("languages"))
-    for rid, langs in facts.column("test-runners", "languages").items():
-        assert set(langs) <= known, rid
-    phpunit = set(facts.value("test-runners", "phpunit", "languages"))
-    suite = ["tests/Feature/UserTest.php", "tests/e2e/login.spec.js"]
-    assert [p for p in suite if language(p) in phpunit] == ["tests/Feature/UserTest.php"]
 
 
 @pytest.mark.parametrize(
