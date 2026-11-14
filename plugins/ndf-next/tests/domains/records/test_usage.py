@@ -161,3 +161,40 @@ def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
             {"q": "repo:o/r is:issue closed:2026-11-14T00:00:00+09:00..2026-11-14T23:59:59+09:00"},
         )
     ]
+
+
+# 現状固定（I-013 の前）: transcript_usage が会話の記録を読むときの行の扱い（usage._records）
+def test_transcript_usage_returns_unknown_when_the_file_cannot_be_read(tmp_path: Path) -> None:
+    assert usage.transcript_usage(tmp_path / "none.jsonl") == ud.UNKNOWN
+    assert usage.transcript_usage(tmp_path) == ud.UNKNOWN
+
+
+def test_transcript_usage_skips_blank_broken_and_non_object_lines(tmp_path: Path) -> None:
+    lines = [
+        json.dumps(_line("m1", "2026-11-14T01:00:00Z", 4)),
+        "",
+        '["usage"]',
+        '{書きかけ "usage"',
+        '"usage"',
+        json.dumps(_line("m2", "2026-11-14T01:00:00Z", 6)),
+        json.dumps({"message": {"id": "m5"}}),
+    ]
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert usage.transcript_usage(path) == ud.Usage(2, 10, 0, 0)
+
+
+# NOTE: 現状固定。行の文字列に `"usage"` が無ければ JSON として読まない。キーをエスケープで書いた行（`"usage"`）は数えない
+def test_transcript_usage_does_not_read_lines_without_the_literal_usage_key(tmp_path: Path) -> None:
+    escaped = '{"timestamp": "2026-11-14T01:00:00Z", "message": {"id": "m3", "\\u0075sage": {"output_tokens": 100}}}'
+    assert json.loads(escaped)["message"]["usage"] == {"output_tokens": 100}
+    path = tmp_path / "t.jsonl"
+    path.write_text(json.dumps(_line("m1", "2026-11-14T01:00:00Z", 4)) + "\n" + escaped + "\n", encoding="utf-8")
+    assert usage.transcript_usage(path) == ud.Usage(1, 4, 0, 0)
+
+
+def test_transcript_usage_raises_on_bytes_that_are_not_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "bad.jsonl"
+    path.write_bytes(b'\xff\xfe "usage"\n')
+    with pytest.raises(UnicodeDecodeError):
+        usage.transcript_usage(path)
