@@ -350,3 +350,102 @@ def test_prepare_keeps_a_finished_round_with_the_same_head(in_repo):
     (retired / f"{durable.run_name('K')}{durable.DB_SUFFIX}").touch()
     inv = runner.prepare(root, Path(rel), None, None, in_repo)
     assert (inv.key, inv.round_no) == ("K", 2)
+
+
+# --- 現状固定テスト: `runner.final_result` が状態の置き場の記録（prs.json・outputs.json）から作る結果（I-026） ---
+
+
+@pytest.fixture
+def two_steps(in_repo) -> runner.Invocation:
+    """ステップ a・b の 2 つのプランの回。状態の置き場を作り、記録はまだ無い。"""
+    rel = H.write_plan(in_repo, "p", [H.py_step("a", "pass"), H.py_step("b", "pass")])
+    inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
+    inv.state_dir.mkdir(parents=True, exist_ok=True)
+    return inv
+
+
+def _write_records(inv: runner.Invocation, prs=None, outputs=None) -> None:
+    if prs is not None:
+        (inv.state_dir / records.PRS_FILE).write_text(json.dumps({"prs": prs}), encoding="utf-8")
+    if outputs is not None:
+        (inv.state_dir / records.OUTPUTS_FILE).write_text(json.dumps(outputs), encoding="utf-8")
+
+
+def _plan_item(inv: runner.Invocation, **extra) -> dict:
+    return {"kind": "plan", "name": "p", "run": inv.run_id, **extra}
+
+
+def test_final_result_of_a_workflow_without_a_result_is_unknown(two_steps):
+    out = runner.final_result(two_steps, None, "ERROR")
+    detail = "p の耐久ワークフローが ERROR で終わった"
+    assert out == {
+        "tool": runner.TOOL,
+        "status": "stopped",
+        "summary": detail,
+        "items": [_plan_item(two_steps)],
+        "metrics": {"round": 0, "steps": 0},
+        "cause": {"kind": "unknown", "detail": detail},
+        "run_id": two_steps.run_id,
+    }
+
+
+def test_final_result_ok_without_records(two_steps):
+    out = runner.final_result(two_steps, {"status": "ok", "count": 2}, "SUCCESS")
+    assert out == {
+        "tool": runner.TOOL,
+        "status": "ok",
+        "summary": "p が終わった",
+        "items": [_plan_item(two_steps)],
+        "metrics": {"round": 0, "steps": 2},
+        "run_id": two_steps.run_id,
+    }
+
+
+def test_final_result_ok_carries_the_recorded_prs_and_outputs(two_steps):
+    _write_records(two_steps, prs=[5, 7], outputs={"pr": 5, "gaps": []})
+    out = runner.final_result(two_steps, {"status": "ok", "count": 2}, "SUCCESS")
+    assert out["status"] == "ok" and out["summary"] == "p が終わった"
+    assert out["items"] == [_plan_item(two_steps), {"kind": "pr", "number": 5}, {"kind": "pr", "number": 7}]
+    assert out["outputs"] == {"pr": 5, "gaps": []}
+
+
+def test_final_result_ok_with_recorded_gaps_is_incomplete(two_steps):
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
+    _write_records(two_steps, prs=[5], outputs={"pr": 5, "gaps": [gap]})
+    out = runner.final_result(two_steps, {"status": "ok", "count": 2}, "SUCCESS")
+    detail = "p は終わったが、ステップが残した欠け 1 件がある"
+    assert (out["status"], out["summary"], out["cause"]) == ("stopped", detail, {"kind": "incomplete", "detail": detail})
+    assert out["gaps"] == [gap] and out["outputs"] == {"pr": 5, "gaps": [gap]}
+    assert out["items"] == [_plan_item(two_steps), {"kind": "pr", "number": 5}]
+    assert result.errors(out) == []
+
+
+def test_final_result_drops_outputs_out_of_the_contract_with_a_warning(two_steps):
+    _write_records(two_steps, outputs={"unknown_key": 1})
+    out = runner.final_result(two_steps, {"status": "ok", "count": 1}, "SUCCESS")
+    assert out["status"] == "ok" and "outputs" not in out
+    assert len(out["warnings"]) == 1 and out["warnings"][0].startswith("ステップの outputs が結果 JSON の形に合わず載せなかった: ")
+
+
+def test_final_result_stopped_points_next_at_the_last_step(two_steps):
+    final = {"status": "stopped", "count": 1, "last": "a", "kind": "work_stopped", "detail": "落ちた"}
+    out = runner.final_result(two_steps, final, "SUCCESS")
+    assert (out["status"], out["summary"], out["cause"]) == ("stopped", "落ちた", {"kind": "work_stopped", "detail": "落ちた"})
+    assert out["items"] == [_plan_item(two_steps, step="a")]
+    assert out["metrics"] == {"round": 0, "steps": 1}
+    assert out["next"] == {"argv": ["ndf", "plan", "next", str(two_steps.plan_path), "--from", "a"]}
+
+
+def test_final_result_stopped_without_a_last_step_has_no_next(two_steps):
+    final = {"status": "stopped", "count": 0, "last": None, "kind": "work_stopped", "detail": "落ちた"}
+    out = runner.final_result(two_steps, final, "SUCCESS")
+    assert out["items"] == [_plan_item(two_steps, step=None)]
+    assert "next" not in out
+
+
+@pytest.mark.parametrize(("last", "approved"), [("a", ["--from", "b"]), ("b", None)])
+def test_final_result_gate_routes_approval_to_the_following_step(two_steps, last, approved):
+    out = runner.final_result(two_steps, {"status": "gate", "count": 1, "last": last, "detail": "承認を待つ"}, "SUCCESS")
+    assert (out["status"], out["summary"], out["items"]) == ("gate", "承認を待つ", [_plan_item(two_steps)])
+    cont = {"argv": ["ndf", "plan", "next", str(two_steps.plan_path), *approved]} if approved else None
+    assert out["routes"] == {"approved": cont, "rejected": None}
