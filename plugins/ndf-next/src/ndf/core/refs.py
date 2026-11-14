@@ -41,7 +41,6 @@ from ndf.core.plan.runner import RUN_FILE, result_path
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
 QUEUE_PRS_KIND = QUEUE_PRS
-REF_KINDS = (VERSION, RECORD_PR, QUEUE_PRS_KIND, PLAN_RESULT, COUNTS)
 # 空に解けたら飛ばす実行条件の値（`when_empty`）。流す前の判断と再開の扱いの「流さない」も同じ語
 SKIP = "skip"
 WHEN_EMPTY_SKIP = SKIP
@@ -278,6 +277,8 @@ def _counts(ref: Ref, ctx: Context, src: Sources) -> Got:
 
 
 _RESOLVERS = {VERSION: _version, RECORD_PR: _record_pr, QUEUE_PRS_KIND: _queue_prs, PLAN_RESULT: _plan_result, COUNTS: _counts}
+# 受ける参照の種類は解決の対応表が正本（並びはエラー文の列挙の順）
+REF_KINDS = tuple(_RESOLVERS)
 
 
 def _one(ref: Ref, ctx: Context, src: Sources) -> Got:
