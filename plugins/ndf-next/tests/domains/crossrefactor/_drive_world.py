@@ -156,7 +156,7 @@ class FakeCi:
 
 
 def fake_ci(*results: Watched) -> FakeCi:
-    """最終ゲートの CI の代わりを、待った head に返す結果の並びで作る。"""
+    """最終ゲートの CI の待ちを差し替え、待った head を返す並びを渡す。"""
     return FakeCi(list(results))
 
 

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossrefactor import drive, store
+from ndf.domains.crossrefactor import drive, final_gate, store
 
 from ._drive_world import (
     BRANCH,
@@ -126,6 +126,12 @@ def test_conflicting_pull_request_stops_without_waiting_for_ci(world, monkeypatc
     got = drive.drive(world.config(), ports(FakeAgents(_acts()), FakeHub("unknown", "dirty"), ci=ci))
     assert got.kind == "base_conflict"
     assert ci.waited == []
+
+
+@pytest.mark.parametrize(("port_field", "module_function"), [("wait", "wait_ci"), ("failed_tests", "_failed_tests")])
+def test_default_ci_port_is_the_final_gate_functions(port_field, module_function) -> None:
+    # 接続を渡さないとき、最終ゲートは今までどおり final_gate の待ちと落ちたテストの取得を使う
+    assert getattr(final_gate.CiPort(), port_field) is getattr(final_gate, module_function)
 
 
 def test_final_fix_outside_the_plan_scope_is_not_taken(world, monkeypatch) -> None:
