@@ -193,6 +193,11 @@ def test_drain_window_key_is_sent_again_after_window(outbox: Path, wall: list[fl
     assert len(deliver.calls) == 2
 
 
+def test_declared_window_and_keep_are_unchanged() -> None:
+    # 宣言へ移す前の値（重ねない 60 秒・残す 7 日）。宣言を変えたら振る舞いの変更としてここで落ちる
+    assert (limits.seconds("notify.window"), limits.seconds("notify.keep")) == (60, 7 * 86400)
+
+
 def test_drain_drops_stale_and_unconfigured(outbox: Path, wall: list[float]) -> None:
     _write(outbox, "old", created_at=NOW - (STALE + 1))
     _write(outbox, "new")
