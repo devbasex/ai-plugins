@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core.plan import model, queue_decide, runner
+from ndf.core.plan import files, model, queue_decide, runner
 
 QUEUE_SUFFIX = ".queue"
 QUEUE_FILE = "queue.json"
@@ -52,14 +52,14 @@ def queue_dir(first: Path, given: Optional[str], cwd: Path) -> Path:
 
 
 def _recorded(qdir: Path) -> dict[str, dict[str, Any]]:
-    found = runner.read_json(qdir / QUEUE_FILE)
+    found = files.read_json(qdir / QUEUE_FILE)
     return dict(found["plans"]) if found is not None else {}
 
 
 def _record(qdir: Path, outcome: queue_decide.Outcome) -> None:
     plans = _recorded(qdir)
     plans[outcome.name] = {"status": outcome.status, "kind": outcome.kind, "prs": list(outcome.prs), "release": outcome.release}
-    runner.write_json(qdir / QUEUE_FILE, {"plans": plans})
+    files.write_json(qdir / QUEUE_FILE, {"plans": plans})
 
 
 def _from_record(name: str, row: dict[str, Any]) -> queue_decide.Outcome:

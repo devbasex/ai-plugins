@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import time
@@ -38,6 +37,7 @@ from ndf.adapters import git, run_log
 from ndf.contracts import exit_codes, limits
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 from ndf.core.plan import assemble_decide
+from ndf.core.plan.files import write_json
 from ndf.core.plan.model import Plan, Step
 
 STEPS_DIR = "steps"
@@ -97,10 +97,7 @@ def ensure_previous_stopped(state_dir: Path, step_id: str) -> Optional[int]:
 
 def _write_pid(state_dir: Path, step_id: str, pid: int) -> Path:
     path = _pid_path(state_dir, step_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"pid": pid, "host": socket.gethostname(), "started": time.time()}), encoding="utf-8")
-    os.replace(tmp, path)
+    write_json(path, {"pid": pid, "host": socket.gethostname(), "started": time.time()})
     return path
 
 

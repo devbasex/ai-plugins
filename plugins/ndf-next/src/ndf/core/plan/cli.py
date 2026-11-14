@@ -28,7 +28,7 @@ from ndf import identity
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
-from ndf.core.plan import assemble_decide, model, queue_decide, queue_run, runner, wait_decide
+from ndf.core.plan import assemble_decide, files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
 # 待ちの上限の既定（秒）と、見回りの間隔の宣言
@@ -119,15 +119,15 @@ def _watched(path: Path) -> wait_decide.Watched:
     except model.PlanError as exc:
         return wait_decide.Watched(name, STOPPED, "invalid", str(exc))
     sdir = Path(assemble_decide.state_dir_for(str(path), plan.state_dir, str(Path.cwd())))
-    record = runner.read_json(sdir / runner.RUN_FILE)
+    record = files.read_json(sdir / runner.RUN_FILE)
     if record is None:
         return wait_decide.Watched(plan.name, None)
     run = durable.run_name(record["key"])
-    done = runner.read_json(sdir / runner.RESULTS_DIR / f"{run}.json")
+    done = files.read_json(sdir / runner.RESULTS_DIR / f"{run}.json")
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))
-    marker = runner.read_json(sdir / f"{runner.WAITING_PREFIX}{run}.json")
+    marker = files.read_json(sdir / f"{runner.WAITING_PREFIX}{run}.json")
     if marker is not None:
         return wait_decide.Watched(plan.name, GATE, routes=marker["routes"])
     return wait_decide.Watched(plan.name, None)

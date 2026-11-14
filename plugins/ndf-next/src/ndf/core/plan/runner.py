@@ -20,7 +20,6 @@ from __future__ import annotations
 import fcntl
 import functools
 import json
-import os
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -35,6 +34,7 @@ from ndf.contracts import chosen, limits, result, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
+from ndf.core.plan.files import read_json, write_json
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
 # 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
@@ -161,11 +161,7 @@ def recorded_prs(state_dir: Path) -> list[int]:
 @durable.step
 def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]]) -> None:
     """承認の答えを待つ目印を書く（呼び手と `wait` が読む）。"""
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"step": step_id, "seq": seq, "routes": routes}, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, target)
+    write_json(Path(path), {"step": step_id, "seq": seq, "routes": routes})
 
 
 @durable.step
@@ -220,21 +216,6 @@ def _head(plan: model.Plan) -> Optional[str]:
         return git.Git(Path(where)).rev_parse("HEAD")
     except git.GitError:  # noqa: NDF401 外部コマンド: head の無い置き場は head を鍵に入れない
         return None
-
-
-def read_json(path: Path) -> Optional[dict[str, Any]]:
-    try:
-        found = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 無い・書きかけの記録は無いものとして扱う
-        return None
-    return found if isinstance(found, dict) else None
-
-
-def write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def _again(plan_path: Path, start: Optional[str], state_dir: Optional[str], sets: Mapping[str, str]) -> tuple[str, ...]:
