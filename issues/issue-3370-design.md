@@ -227,7 +227,7 @@ PyPI の取得が失敗したときの Renovate の振る舞い（Issue を書�
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 運用・保守性 | 遅れの知らせは対象のプロジェクトごとに 1 件だけで、週ごとに新しい Issue を増やさない | Renovate の依存の一覧の Issue（リポジトリに 1 件）を使い、対象を `plugins/ndf-next` に絞る | 手動の実行を 2 回打ち、Issue が 1 件のまま書き直されることを見る（リリース後テスト） |
-| セキュリティ | 選んだ仕組みが GitHub のアプリか token を要るなら、要る権限と置き場所を設計に書く。導入は設計承認と本番の承認を通す | GitHub App を作り、このリポジトリだけに入れる。権限は Contents・Pull requests・Issues の読み書きと Metadata の読み取りだけで、Workflows は与えない（対象が Python の依存だけのため）。App の ID は Actions の変数、秘密鍵は Actions の秘密に置き、ワークフローが実行ごとに短い期限の token を作る | 「人へ残す判断」の 2 行を設計承認ゲートで人が見る。導入の後、App の権限の画面と、ワークフローが秘密鍵を token の作成にだけ渡していることを見る |
+| セキュリティ | 選んだ仕組みが GitHub のアプリか token を要るなら、要る権限と置き場所を設計に書く。導入は設計承認と本番の承認を通す | GitHub App を作り、このリポジトリだけに入れる。権限は Contents・Pull requests・Issues・Commit statuses（`renovate/artifacts` を付けるため。決定 8）の読み書きと、Checks・Metadata の読み取りだけである。Renovate の文書が挙げる 10 件（`lib/modules/platform/github/readme.md` の「Running as a GitHub App」、2026-11-14）のうち、Workflows（対象が Python の依存だけのため）・Dependabot alerts（脆弱性の知らせを有効にしないため。決定 6）・Merge queues・Administration は与えない。App のクライアント ID は Actions の変数、秘密鍵は Actions の秘密に置き、ワークフローが実行ごとに短い期限の token を作る | 「人へ残す判断」の 2 行を設計承認ゲートで人が見る。導入の後、App の権限の画面と、ワークフローが秘密鍵を token の作成にだけ渡していることを見る |
 | システム環境 | 検査は GitHub Actions の `ubuntu-latest` と、リポジトリで使っている uv で動く | ワークフローは `ubuntu-latest` で動く。Renovate が lock を作り直すときの uv の版は、リポジトリの CI と同じ版に合わせる（合わせ方は詳細設計） | 更新の PR の `uv.lock` を CI の `uv lock --check` が通すことで見る |
 
 ## 決定の記録
@@ -352,8 +352,8 @@ httpx は 0.28.1 に固定するため（決定 5）、Renovate の上げる操�
 
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
-| Renovate 用の GitHub App を作り、このリポジトリへ入れる（権限: Contents・Pull requests・Issues の読み書き、Metadata の読み取り） | C2 | リポジトリへ書き込める主体が 1 つ増え、誰が何をできるかが変わる |
-| GitHub App の秘密鍵を Actions の秘密に、App の ID を Actions の変数に置く | C1 | 秘密鍵を扱う。漏れると取り消すまでリポジトリへ書き込める |
+| Renovate 用の GitHub App を作り、このリポジトリへ入れる（権限: Contents・Pull requests・Issues・Commit statuses の読み書き、Checks・Metadata の読み取り） | C2 | リポジトリへ書き込める主体が 1 つ増え、誰が何をできるかが変わる |
+| GitHub App の秘密鍵を Actions の秘密に、App のクライアント ID を Actions の変数に置く | C1 | 秘密鍵を扱う。漏れると取り消すまでリポジトリへ書き込める |
 | 承認済みの #3347 の決定 106 を 2 点で変える。上げる先にプレリリースを入れる基準を「最新の安定版の年齢」から「今の版の年齢」へ替える（決定 4）。固定の置き場を `[tool.ndf.deps.hold]` から Renovate の依存ごとの規則へ移し、「相手が制約を外したら検査が遅れとして出す」を「相手の更新の PR に見直しの文を添える」へ替える（決定 5） | 無し（承認済みの決定の変更） | 要求の受け入れ条件 2 が関係を求めるのは決定 107 だけで、決定 106 の変更は要求の外にある |
 | 受け入れ条件 7 を、設計承認の時点で一部を未確認のまま進める。「無くなれば閉じる」と「PyPI の取得が失敗したら知らせを書き換えずに失敗で終わる」は、確かめ方と満たさないときの構成を「未確認のまま残ること」に置き、実装のレーンが確かめる | 無し（受け入れ条件の扱い） | 選んだ構成が受け入れ条件を満たすかが、設計承認の時点で決まらない |
 | 受け入れ条件 9 の「上げる操作が宣言と lock を元のまま残し、失敗を返す」を、「`renovate/artifacts` が赤になり、`develop` の宣言と lock が変わらない」と読む（決定 8） | 無し（受け入れ条件の読み替え） | Renovate の上げる操作は、失敗を更新の PR の警告とチェックで知らせる（LIB8）。PR の枝の上で宣言が変わったまま残るかは未確認で、字義どおりに満たすとは言えない |
