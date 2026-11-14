@@ -125,7 +125,7 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             "gate": q.gate,
             "by": a.by,
             "key": a.key,
-            "seen": {"head": a.seen.head, "material_sha256": a.seen.material},
+            "seen": a.seen.as_dict(),
             "dropped": list(a.drop),
             "carried_row": carried,
             "release_request": rejected,
@@ -216,8 +216,7 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))
-    held = p["seen"] if isinstance(p.get("seen"), dict) else {}
-    seen, now = Target(held.get("head"), held.get("material_sha256")), observe(q)
+    seen, now = Target.from_dict(p.get("seen")), observe(q)
     changed = now.differs(seen)
     if not changed:
         return None

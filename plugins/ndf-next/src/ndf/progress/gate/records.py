@@ -15,7 +15,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import invoke, model, run
-from ndf.progress.gate.asking import REJECTING, Answer, Question, accepted_path
+from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accepted_path
 
 # --- 差し戻しの記録 ---------------------------------------------------------------------------------
 
@@ -89,7 +89,7 @@ def answers(v: run.View) -> list[dict[str, Any]]:
                 "gate_id": p.get("gate_id"),
                 "answer": p["answer"],
                 "notes": p.get("notes"),
-                "head": p["seen"].get("head") if isinstance(p.get("seen"), dict) else None,
+                "head": Target.from_dict(p.get("seen")).head,
                 "reason": ev.draft.reason,
                 "by": ev.draft.actor,
             }

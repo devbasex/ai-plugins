@@ -45,6 +45,17 @@ class Target:
                 out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
         return out
 
+    def as_dict(self) -> dict[str, Optional[str]]:
+        """見た対象を記録する形（事象の payload の `seen` と、依頼の隣の `.seen.json`）。"""
+        return {"head": self.head, "material_sha256": self.material}
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> Target:
+        """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。"""
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(raw.get("head"), raw.get("material_sha256"))
+
 
 @dataclass(frozen=True)
 class Question:

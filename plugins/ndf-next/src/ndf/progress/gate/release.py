@@ -51,7 +51,7 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
         return None
     seen = _seen_path(st.root, q)
     if not seen.exists():
-        seen.write_text(json.dumps({"head": q.target.head, "material_sha256": q.target.material}) + "\n", encoding="utf-8")
+        seen.write_text(json.dumps(q.target.as_dict()) + "\n", encoding="utf-8")
     root = external.organizer_dir(env)
     if root is not None:
         version = env["NDF_VERSION"] if env.get("NDF_VERSION") else lane.ndf_version()
@@ -114,8 +114,8 @@ def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: 
     if value not in q.choices:
         return None
     seen_file = _seen_path(st.root, q)
-    seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else {}
+    seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの答え（{reply['result']}）"
-    target = Target(seen.get("head"), seen.get("material_sha256"))
+    target = Target.from_dict(seen)
     given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target, outputs=_released(reply, value))
     return answer(st, table_id, given, observe)
