@@ -44,7 +44,6 @@ from ndf.domains.crossrefactor import (
 )
 from ndf.testing import limits as test_limits
 
-COLLECT_POLICY = "cross-refactoring.collect-check"
 Status = items_decide.Status
 
 
@@ -79,11 +78,12 @@ class Ports:
     """外との接続（テストで差し替える）。"""
 
     launcher: launch.Launcher = agents.run_agent
-    hub: Optional[Callable[[str], github.GitHub]] = None
+    hub: Optional[Callable[[git.Git], github.GitHub]] = None
     sleep: Callable[[float], None] = time.sleep
 
-    def github(self, repo: str) -> github.GitHub:
-        return self.hub(repo) if self.hub is not None else github.GitHub(repo, github.client())
+    def github(self, work: git.Git) -> github.GitHub:
+        """作業場所の origin の GitHub。"""
+        return self.hub(work) if self.hub is not None else github.GitHub(work.remote_repo(), github.client())
 
 
 @dataclass(frozen=True)
@@ -254,7 +254,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     tests = [str(t) for t in got["tests"]] if isinstance(got.get("tests"), list) else []
     if not tests:
         return True
-    found = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(COLLECT_POLICY))
+    found = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
     if found.uncollected:
         _reset(run, item["start"])
         _close(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(found.uncollected)}")
@@ -328,7 +328,7 @@ def _final(run: _Run) -> None:
         got, _ = launch.run(launch.Request("final-fix", participants.FIXER, prompt, f"r{round_no}"), run.dirs(), run.ports.launcher)
         return got is not None
 
-    hub = run.ports.github(run.work.remote_repo())
+    hub = run.ports.github(run.work)
     try:
         run.state["final"] = final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep)
     except final_gate.GateStopped as exc:

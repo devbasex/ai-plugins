@@ -20,6 +20,8 @@ from ndf.domains.crossrefactor import tests_decide
 from ndf.domains.crossrefactor.diff_decide import in_scope
 
 COLLECT_KEY = "collect_command"
+# 収集の確かめの上限（秒）の宣言
+COLLECT_POLICY = "cross-refactoring.collect-check"
 # 収集の終了コードのうち、判定に使ってよいもの（0: 収集した、5: pytest の「収集が 0 件」）
 COLLECT_OK = frozenset({0, 5})
 
