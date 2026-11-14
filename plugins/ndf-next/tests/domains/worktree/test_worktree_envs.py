@@ -143,3 +143,13 @@ def test_testenv_reclaim_and_expose(main_repo: Path, run_git: Callable) -> None:
     url = testenv_sweep.expose(t)
     assert url == f"https://wt{t.book.current(t.key)['slot']}.example.test" and testenv_sweep.expose(t) == url
     assert testenv_sweep.unexpose(t) == url and testenv_sweep.unexpose(t) is None
+
+
+def test_testenv_reach_refuses_container_without_worktree(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell({"compose exec": Completed(0, "other\n", "")})
+    t = _testenv(main_repo, run_git, "feat/r")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    testenv.assign(t)
+    with pytest.raises(testenv.TestenvError):
+        testenv.reach(t, "app")
+    assert not list((t.path / testenv.EVIDENCE).glob("reach-*"))  # 印は必ず消す

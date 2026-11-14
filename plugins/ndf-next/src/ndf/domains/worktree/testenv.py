@@ -5,7 +5,8 @@
 - `tag`: 基準のタグ（宣言の `golden_tag_paths` の内容の要約）。同じ内容なら同じ値で、焼き直しが要るかを内容で決める
 - `bake`: 基準のボリューム（宣言の `golden_volumes`）をタグ付きで作る。足りないものだけを作る
 - `up`・`stop`・`down`: compose で起動・停止・破棄する。破棄に失敗したらスロットを解放しない
-- `run_test`: 宣言の `test_kinds.<種類>.run` を、割り当ての値（エントリポイントの URL・証跡の置き場）を渡して打つ。終了コードはそのまま返す
+- `run_test`: 宣言の `test_kinds.<種類>.run` を、割り当ての値（エントリポイントの URL・証跡の置き場）を渡して打つ。終了コードはそのまま返す。
+  種類に `service` があれば、そのコンテナが worktree を見ているかを先に確かめる（`reach`）
 - `compose_env`: 割り当て済みのテスト環境をコンテナへ渡す値（割り当てを新しく取らない）
 
 宣言・`testenv` 節が無いリポジトリでは `target` が `None` を返し、どれも打たない。
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -290,6 +292,29 @@ def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) 
     return values
 
 
+def reach(t: Target, service: str) -> dict[str, str]:
+    """サービスのコンテナが worktree を見ているかを、探りの印を読ませて確かめ、コンテナへ渡す値を返す。
+
+    見ていなければ `TestenvError`（メインディレクトリのコードで走った偽の成功を出さない）。印は必ず消す。
+    """
+    if not t.shell.has_docker():
+        raise TestenvError(f"コンテナの実行系（{t.shell.docker}）が見つからない")
+    values = compose_env(t)
+    _exclude_evidence(t)
+    token = secrets.token_hex(16)
+    rel = f"{EVIDENCE}/reach-{token}"
+    mark = t.path / rel
+    mark.parent.mkdir(exist_ok=True)
+    mark.write_text(token, encoding="utf-8")
+    try:
+        done = t.shell.docker_run("compose", "exec", "-T", service, "cat", rel, env=values, cwd=t.path)
+    finally:
+        mark.unlink(missing_ok=True)
+    if done.returncode != 0 or done.stdout.strip() != token:
+        raise TestenvError(f"サービス {service} のコンテナが worktree を見ていない（{t.key}）。テストを走らせない")
+    return values
+
+
 def run_test(t: Target, kind: str, out: Optional[Path] = None) -> int:
     """宣言の種類のテストを打ち、その終了コードを返す（成否を包み隠さない）。種類の宣言が無ければ打たずに 0。"""
     command = t.at("test_kinds", kind, "run")
@@ -297,6 +322,9 @@ def run_test(t: Target, kind: str, out: Optional[Path] = None) -> int:
         return 0
     row = assign(t)
     values = test_values(t, kind, row, out)
+    service = t.at("test_kinds", kind, "service")
+    if isinstance(service, str) and service:
+        values = {**reach(t, service), **values}
     t.book.update(t.key, _touch)
     # 実行中は reap の対象から外れるよう、目印を握ったまま走らせる
     try:
