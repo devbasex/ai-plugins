@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,6 +46,11 @@ def record_issue(hub: GitHub, issue: int, stamp: str) -> dict[str, Any]:
     except GitHubError as exc:
         return {"issue": issue, "result": FAILED, "reason": str(exc)}
     return {"issue": issue, "result": RECORDED}
+
+
+def item_name(item: Mapping[str, Any]) -> str:
+    """結果の項目の名前（`#<番号>`）。課題の項目は課題の番号、閉じる課題を読めなかった PR の項目は PR の番号。"""
+    return f"#{item['issue'] if 'issue' in item else item['pr']}"
 
 
 def record_cleanup_stage(hub: GitHub, prs: Iterable[int]) -> list[dict[str, Any]]:

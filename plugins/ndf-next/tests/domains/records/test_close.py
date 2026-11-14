@@ -70,3 +70,8 @@ def test_record_cleanup_stage_records_skips_and_fails_per_issue() -> None:
     got = cleanup_stage.record_cleanup_stage(hub, [11, 10])  # type: ignore[arg-type]
     assert [(i["issue"], i["result"]) for i in got] == [(1, "recorded"), (2, "skipped"), (3, "failed")]
     assert hub.patched == [1] and "- [x] 後片付け" in hub.bodies[1]
+
+
+def test_item_name_uses_the_issue_and_falls_back_to_the_pr() -> None:
+    assert cleanup_stage.item_name({"issue": 3, "result": cleanup_stage.FAILED}) == "#3"
+    assert cleanup_stage.item_name({"pr": 10, "result": cleanup_stage.FAILED}) == "#10"

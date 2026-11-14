@@ -153,7 +153,7 @@ def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     recorded = sum(1 for i in items if i["result"] == cleanup_stage.RECORDED)
     if failed:
         detail = f"後片付けの工程の記録が {len(failed)} 件失敗した（後片付けの本体は戻さない）"
-        gaps = [{"kind": "stage_record", "name": f"#{i['issue'] if 'issue' in i else i['pr']}", "reason": i["reason"]} for i in failed]
+        gaps = [{"kind": "stage_record", "name": cleanup_stage.item_name(i), "reason": i["reason"]} for i in failed]
         return result.stopped(TOOL, "incomplete", detail, items=items, gaps=gaps)
     return result.result(TOOL, result.OK, f"後片付けの工程を {recorded} 件の課題に記録した", items)
 
