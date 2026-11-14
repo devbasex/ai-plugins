@@ -507,3 +507,21 @@ def test_reap_stops_only_unreleased_rows_idle_long_enough(tmp_path: Path) -> Non
     t = testenv.Target(tmp_path, tmp_path, {}, (), fake.shell(), book)
     assert testenv_sweep.reap(t, 3600) == [{"kind": "testenv", "name": "env-a", "worktree": "/w/a", "result": "stopped"}]
     assert [c[0] for c in fake.calls] == [["true", "compose", "-p", "env-a", "stop"]]
+
+
+# 現状固定（I-026）: 公開中の判定。expose が dict で closed_at が無いか None の行だけが公開中（解放の後も閉じるまで）。
+@pytest.mark.parametrize(
+    ("expose", "want"),
+    [
+        (None, False),
+        ("https://x", False),
+        ({}, True),  # closed_at が無ければ公開中として扱う
+        ({"url": "u", "closed_at": None}, True),
+        ({"url": "u", "closed_at": "2026-01-01T00:00:00Z"}, False),
+    ],
+)
+def test_open_row_reads_expose_shapes(expose: object, want: bool) -> None:
+    released = {"worktree": "/w", "released_at": "2026-01-01T00:00:00Z", "expose": expose}
+    rows = [{"worktree": "/w", "released_at": None, "expose": None}, released, {"worktree": "/x", "expose": {"closed_at": None}}]
+    assert ledger.exposing(released) is want
+    assert testenv_sweep._open_row(rows, "/w") == (released if want else None)
