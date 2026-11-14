@@ -21,7 +21,9 @@ from ndf.testing.waits import wait_until
 
 from ._hooks import AUTO, SRC, bash, make_repo, read_sample, records, sample, sample_paths
 
-REGISTRATION = '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'
+REGISTRATION = (
+    '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'
+)
 RUNS = 20
 
 
@@ -41,7 +43,9 @@ def scripts(tmp_path) -> Path:
 def _register(python: Path, scripts: Path, runtime: str, event: str, payload: dict, extra_env: dict | None = None, timeout: float = 30):
     """登録の command を打つ（環境の python があれば entry.py、無ければシステムの python3 で boot.py）。"""
     command = ["sh", "-c", REGISTRATION, str(python), str(scripts / "entry.py"), runtime, event]
-    return subprocess.run(command, input=json.dumps(payload), capture_output=True, text=True, timeout=timeout, env={**os.environ, **(extra_env or {})})
+    return subprocess.run(
+        command, input=json.dumps(payload), capture_output=True, text=True, timeout=timeout, env={**os.environ, **(extra_env or {})}
+    )
 
 
 @pytest.mark.parametrize("path", sample_paths(), ids=lambda p: "/".join(p.parts[-3:]))
@@ -51,7 +55,9 @@ def test_entry_p95_stays_within_three_times_the_budget(path, scripts, tmp_path):
     spent = []
     for _ in range(RUNS):
         started = time.monotonic()
-        done = subprocess.run([sys.executable, str(scripts / "entry.py"), runtime, event], input=payload, capture_output=True, text=True, timeout=60)
+        done = subprocess.run(
+            [sys.executable, str(scripts / "entry.py"), runtime, event], input=payload, capture_output=True, text=True, timeout=60
+        )
         spent.append((time.monotonic() - started) * 1000)
         assert done.returncode == 0
     limit = 3 * budget.budget_for(runtime, event).p95_ms
@@ -78,7 +84,11 @@ def test_without_python3_the_registration_does_nothing(scripts, tmp_path):
     sh = shutil.which("sh")
     done = subprocess.run(
         [sh, "-c", REGISTRATION, str(tmp_path / "none"), str(scripts / "entry.py"), "claude", "PreToolUse"],
-        input="{}", capture_output=True, text=True, timeout=30, env={**os.environ, "PATH": str(bare)},
+        input="{}",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "PATH": str(bare)},
     )
     assert (done.returncode, done.stdout) == (0, "")
 
@@ -89,7 +99,11 @@ def test_session_start_without_the_environment_prepares_it_detached(scripts, tmp
     ident = env.Ident.of(SRC.parent)
     python = env.venv_python(ident)
     assert not python.exists()
-    uv_env = {"UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never", "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")}
+    uv_env = {
+        "UV_OFFLINE": "1",
+        "UV_PYTHON_DOWNLOADS": "never",
+        "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv"),
+    }
     found = budget.budget_for("claude", "SessionStart")
     started = time.monotonic()
     done = _register(python, scripts, "claude", "SessionStart", sample("claude", "SessionStart", tmp_path), uv_env, timeout=found.timeout)

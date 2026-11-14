@@ -13,7 +13,15 @@ from ndf.domains.hooks import main, tables
 SAMPLES = Path(__file__).resolve().parent / "samples"
 SRC = tables.PLUGIN_ROOT / "src"
 # 中継・オーガナイザー・通知・止め方の変数（テストを流す人の値を読まない）
-ENV_NAMES = ("NDF_RELAY_DIR", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "NDF_FACTORY_RUN", "NDF_HOOK_OFF", "SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID")
+ENV_NAMES = (
+    "NDF_RELAY_DIR",
+    "NDF_ORGANIZER_DIR",
+    "NDF_ORGANIZER_LANE",
+    "NDF_FACTORY_RUN",
+    "NDF_HOOK_OFF",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL_ID",
+)
 
 
 def sample_paths() -> list[Path]:

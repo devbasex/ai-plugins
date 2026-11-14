@@ -97,9 +97,7 @@ def select(specs: list[GuardSpec], ctx: HookContext, off: frozenset[str]) -> lis
     rt = tables.runtimes().get(ctx.runtime)
     skipped = rt["skipped"] if rt else {}
     return [
-        s
-        for s in specs
-        if not s.strict and s.applies(ctx.event, ctx.tool) and not tables.is_off(s.name, off) and s.name not in skipped
+        s for s in specs if not s.strict and s.applies(ctx.event, ctx.tool) and not tables.is_off(s.name, off) and s.name not in skipped
     ]
 
 

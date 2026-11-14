@@ -25,7 +25,6 @@ def check(ctx, svc) -> Verdict | None:
     if count <= int(tables.policy_value("hook.read-repeat", "attempts")):
         return None
     return deny(
-        f"{path} の同じ範囲を続けて読んだ。前に読んだ中身を使うか、Grep で位置を探し、Read の offset と limit で"
-        "要る範囲だけを読む",
+        f"{path} の同じ範囲を続けて読んだ。前に読んだ中身を使うか、Grep で位置を探し、Read の offset と limit で要る範囲だけを読む",
         key=span,
     )

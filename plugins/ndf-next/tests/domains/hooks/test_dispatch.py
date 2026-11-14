@@ -17,7 +17,18 @@ from ._hooks import bash, call_entry, records, state_dir
 
 
 def _spec(name: str, module: str, **kw) -> dispatch.GuardSpec:
-    row = {"name": name, "module": module, "events": ["PreToolUse"], "tools": [], "order": 1, "strict": False, "suggests": [], "deny_key": "reason", "limits": [], "params": {}}
+    row = {
+        "name": name,
+        "module": module,
+        "events": ["PreToolUse"],
+        "tools": [],
+        "order": 1,
+        "strict": False,
+        "suggests": [],
+        "deny_key": "reason",
+        "limits": [],
+        "params": {},
+    }
     return dispatch.GuardSpec.from_row({**row, **kw})
 
 

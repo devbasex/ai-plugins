@@ -78,11 +78,7 @@ def registrations_of(plugin_root: Path) -> list[dict[str, Any]]:
             continue
         hooks = json.loads(path.read_text(encoding="utf-8")).get("hooks")
         for event, groups in (hooks if isinstance(hooks, dict) else {}).items():
-            regs += [
-                {"runtime": runtime, "event": event, "timeout": h.get("timeout")}
-                for g in groups
-                for h in g["hooks"]
-            ]
+            regs += [{"runtime": runtime, "event": event, "timeout": h.get("timeout")} for g in groups for h in g["hooks"]]
     return regs
 
 

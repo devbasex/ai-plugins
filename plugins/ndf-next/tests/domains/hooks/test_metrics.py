@@ -15,7 +15,11 @@ def test_every_entry_writes_one_line(tmp_path):
     call_entry("codex", "Stop", stop(tmp_path, "完了", runtime="codex"))
     call_entry("claude", "Nope", "{}")
     lines = records()
-    assert [(r["runtime"], r["event"], r["path"]) for r in lines] == [("claude", "PreToolUse", "entry"), ("codex", "Stop", "entry"), ("claude", "Nope", "entry")]
+    assert [(r["runtime"], r["event"], r["path"]) for r in lines] == [
+        ("claude", "PreToolUse", "entry"),
+        ("codex", "Stop", "entry"),
+        ("claude", "Nope", "entry"),
+    ]
     first = lines[0]
     assert first["verdict"] == "deny" and first["tool"] == "Bash" and first["total_ms"] >= 0
     assert {"merge-production", "sleep"} <= {g["name"] for g in first["guards"]}
@@ -53,7 +57,14 @@ def test_metrics_write_failure_does_not_change_the_verdict(tmp_path, monkeypatch
 
 def test_stats_reports_percentiles_counts_and_injection():
     recs = [
-        {"runtime": "claude", "event": "Stop", "total_ms": ms, "verdict": v, "inject_chars": c, "guards": [{"name": "stop-wait", "ms": ms / 2, "kind": v}]}
+        {
+            "runtime": "claude",
+            "event": "Stop",
+            "total_ms": ms,
+            "verdict": v,
+            "inject_chars": c,
+            "guards": [{"name": "stop-wait", "ms": ms / 2, "kind": v}],
+        }
         for ms, v, c in [(10, "pass", 0), (20, "pushback", 100), (30, "limited", 0), (40, "pass", 0)]
     ]
     got = metrics.stats(recs)

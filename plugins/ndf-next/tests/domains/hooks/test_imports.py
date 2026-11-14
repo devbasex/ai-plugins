@@ -78,7 +78,9 @@ def test_entry_closure_stays_within_the_table():
     bad = [
         n
         for n in sorted(names)
-        if _top(n) not in sys.stdlib_module_names and _top(n) not in deps and not (_top(n) == "ndf" and _allowed(n, TABLE["entry"]["modules"]))
+        if _top(n) not in sys.stdlib_module_names
+        and _top(n) not in deps
+        and not (_top(n) == "ndf" and _allowed(n, TABLE["entry"]["modules"]))
     ]
     assert bad == []
 
@@ -107,7 +109,13 @@ def test_hook_scripts_import_only_the_standard_library_and_stdlib_modules():
             continue
         names = {n for n in _imports(path, "hooks._script")}
         bad = [n for n in names if _top(n) != "ndf" and _top(n) not in sys.stdlib_module_names]
-        bad += [n for n in names if _top(n) == "ndf" and n not in TABLE["stdlib_only"] and not closure([n]) <= set(TABLE["stdlib_only"]) | set(sys.stdlib_module_names)]
+        bad += [
+            n
+            for n in names
+            if _top(n) == "ndf"
+            and n not in TABLE["stdlib_only"]
+            and not closure([n]) <= set(TABLE["stdlib_only"]) | set(sys.stdlib_module_names)
+        ]
         assert bad == [], rel
 
 

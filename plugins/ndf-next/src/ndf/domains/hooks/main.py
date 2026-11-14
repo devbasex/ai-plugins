@@ -169,5 +169,7 @@ def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
         return
     from ndf.domains.hooks import outbox
 
-    outbox.enqueue(state_dir, "wait", {"text": f"差し戻しの上限で止めずに通した: {reason or ''}", "cwd": ctx.cwd, "session_id": ctx.session_id})  # noqa: NDF501 ファイル: 理由の無い差し戻しは空
+    outbox.enqueue(
+        state_dir, "wait", {"text": f"差し戻しの上限で止めずに通した: {reason or ''}", "cwd": ctx.cwd, "session_id": ctx.session_id}
+    )  # noqa: NDF501 ファイル: 理由の無い差し戻しは空
     outbox.kick(state_dir)

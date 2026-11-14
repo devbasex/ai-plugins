@@ -64,7 +64,9 @@ def test_context_limit_denies_with_one_next_step_outside_the_relay(tmp_path):
     reason = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "ls")))
     assert reason is not None and ".ndf/handoff/" in reason
     assert records()[-1]["notes"]["under_relay"] is False
-    handoff = sample("claude", "PreToolUse", tmp_path, tool_name="Write", tool_input={"file_path": str(tmp_path / ".ndf/handoff/a.md"), "content": "x"})
+    handoff = sample(
+        "claude", "PreToolUse", tmp_path, tool_name="Write", tool_input={"file_path": str(tmp_path / ".ndf/handoff/a.md"), "content": "x"}
+    )
     assert call_entry("claude", "PreToolUse", handoff) is None
 
 

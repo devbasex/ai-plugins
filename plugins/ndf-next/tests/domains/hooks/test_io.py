@@ -60,7 +60,7 @@ def test_notifications_are_queued_and_the_sender_is_started_detached(tmp_path, m
     call_entry("claude", "PreToolUse", payload)
     files = list(outbox.outbox_dir(state_dir()).glob("*.json"))
     assert len(files) == 1 and json.loads(files[0].read_text(encoding="utf-8"))["payload"]["text"] == "進めるか"
-    (args, kwargs), = spawned
+    ((args, kwargs),) = spawned
     assert args[-2:] == [outbox.SENDER_MODULE, str(state_dir())] and kwargs["start_new_session"] is True
 
 
