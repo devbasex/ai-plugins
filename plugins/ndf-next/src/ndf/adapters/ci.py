@@ -267,11 +267,20 @@ class Watch:
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
     _queued: float = field(default=0.0, init=False)
+    _start: float = field(default=0.0, init=False)
+
+    def __post_init__(self) -> None:
+        # 予算は作った時点から数える（`run` の前の API の呼び出しも `remaining` で同じ予算に入れる）
+        self._start = self.clock()
+
+    def remaining(self) -> float:
+        """待ちに使える残りの秒。ランナーの割り当ての待ちは予算に数えない（API の上限の待ちの締め切りに使う）。"""
+        return self.budget - (self.clock() - self._start - self._queued)
 
     def run(self) -> WatchResult:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
-        interval, start, rounds = float(policy.interval), self.clock(), 0
+        interval, start, rounds = float(policy.interval), self._start, 0
         while True:
             reading = self.reader()
             rounds += 1

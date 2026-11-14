@@ -281,6 +281,17 @@ def test_watch_does_not_count_runner_wait_against_budget() -> None:
     assert done.queued_for > 5
 
 
+def test_watch_remaining_does_not_shrink_while_waiting_for_a_runner() -> None:
+    # API の上限の待ちの締め切りは Watch の予算と同じ数え方: ランナー待ちが予算の秒を越えても残りは減らない
+    clock, seen = Clock(), []
+    w = ci.Watch(_reader([QUEUED] * 6 + [RUNNING, PASSED], clock, []), 5, clock=clock, sleep=clock.sleep)
+    w.on_round = lambda r, t: seen.append((clock.now, w.remaining()))
+    w.run()
+    queued_rounds = seen[1:6]
+    assert queued_rounds[-1][0] > 5
+    assert all(left == pytest.approx(5) for _, left in queued_rounds)
+
+
 def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> None:
     clock, reads = Clock(), []
     done = ci.Watch(_reader([QUEUED], clock, reads), 5, clock=clock, sleep=clock.sleep).run()

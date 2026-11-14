@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -71,31 +70,33 @@ def token() -> str:
 
 
 class RetryWithin:
-    """githubkit の再試行の判断（既定の判断に、上限の待ちの締め切りを足す）。
+    """githubkit の再試行の判断（既定の判断に、上限の待ちの残りを足す）。
 
     githubkit の既定は上限（rate limit）の解除の時刻まで同期で眠るため、待ちの予算を持つ呼び手（CI の監視）が
-    数十分戻らない。解除が `deadline`（`clock` の時刻）を越える上限は再試行せず、`GitHubError` の `retry_after`
-    で呼び手へ返す。サーバーの誤り（5xx）の再試行は既定のまま。
+    数十分戻らない。解除が `remaining`（呼んだ時点で待ちに使える残りの秒）を越える上限は再試行せず、
+    `GitHubError` の `retry_after` で呼び手へ返す。残りは呼び手が自分の予算の数え方で返す（`Watch.remaining` は
+    ランナーの割り当ての待ちを予算に数えない）。サーバーの誤り（5xx）の再試行は既定のまま。
     """
 
-    def __init__(self, deadline: float, clock: Callable[[], float] = time.monotonic) -> None:
-        self.deadline = deadline
-        self.clock = clock
+    def __init__(self, remaining: Callable[[], float]) -> None:
+        self.remaining = remaining
 
     def __call__(self, exc: GitHubException, retry_count: int) -> RetryOption:
         option = RETRY_DEFAULT(exc, retry_count)
         if option.do_retry and isinstance(exc, RateLimitExceeded):
-            if self.clock() + exc.retry_after.total_seconds() > self.deadline:
+            if exc.retry_after.total_seconds() > self.remaining():
                 return RetryOption(False)
         return option
 
 
-def client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, deadline: Optional[float] = None) -> Client:
+def client(
+    auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, remaining: Optional[Callable[[], float]] = None
+) -> Client:
     """githubkit のクライアント（ETag の読み直しと再試行つき）。`transport` はテストが差し替える。
 
-    `deadline`（`time.monotonic` の時刻）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
+    `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
     """
-    retry: bool | RetryWithin = True if deadline is None else RetryWithin(deadline)
+    retry: bool | RetryWithin = True if remaining is None else RetryWithin(remaining)
     return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport)
 
 

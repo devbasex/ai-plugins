@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from typing import Any, Optional
 
 from ndf.adapters import git
@@ -68,12 +67,19 @@ def _failed_nodes(hub: GitHub, reading: Reading) -> dict:
     return {"failed_tests": nodes, "test_files": files_of(nodes)}
 
 
+def _unread() -> Reading:
+    raise AssertionError("Watch の読み手が差し込まれていない")
+
+
 def _watch(args: argparse.Namespace) -> dict:
-    # 上限の解除が待ちの予算を越えるなら githubkit の中で眠らず、`infra_wait` と `retry_after` で返す
-    deadline = time.monotonic() + args.budget
-    hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(deadline=deadline))
+    # 上限の解除が待ちの残りを越えるなら githubkit の中で眠らず、`infra_wait` と `retry_after` で返す。
+    # 残りは Watch と同じ数え方（ランナーの割り当ての待ちを予算に数えない）で読む
+    # 読み手は PR の先端が分かってから差し込む（PR を読む API の呼び出しも同じ予算に入れる）
+    watch = Watch(_unread, args.budget, on_round=_progress)
+    hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
-    watched = Watch(watch_head(hub, pull.head_sha, args.required, args.test), args.budget, on_round=_progress).run()
+    watch.reader = watch_head(hub, pull.head_sha, args.required, args.test)
+    watched = watch.run()
     merge_failed = args.merge_failed if args.after_merge else None
     kind = watched.cause(args.test, merge_failed)
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
