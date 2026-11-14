@@ -381,6 +381,20 @@ def _judge(run: _Run, item: dict[str, Any], own: frozenset[str]) -> judge_decide
     return judge_decide.on_answer(row)
 
 
+def _stop_reason(
+    run: _Run, item: dict[str, Any], progress: verify_decide.Progress, own: frozenset[str], fixes: int
+) -> tuple[Optional[str], bool]:
+    """修正をやめる理由（続けるなら None）と、履歴を区切るか。停滞か振動したら成立を判定させる。"""
+    if progress.gave_up:
+        move = _judge(run, item, own)
+        if move.kind != judge_decide.CONTINUE:
+            return f"{move.detail}: {progress.detail}", False
+        return None, True
+    if fixes >= run.cfg.max_fix:
+        return f"修正の回数の上限 {run.cfg.max_fix} 回に達した: {progress.detail}", False
+    return None, False
+
+
 def _verify(run: _Run, item: dict[str, Any]) -> None:
     """検証と修正を回し、項目を採るか戻す。停滞か振動したら成立を判定させ、成立するならもう一巡だけ続ける。"""
     found = verify.suites(run.ws.work)
@@ -397,16 +411,12 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
         if progress.kind == verify_decide.Kind.PASSED:
             _close(run, item, Status.ADOPTED, progress.detail)
             return
-        reason = progress.detail
-        if progress.gave_up:
-            move = _judge(run, item, got.own)
-            if move.kind != judge_decide.CONTINUE:
-                reason = f"{move.detail}: {progress.detail}"
-                break
-            history = [got.own]
-        elif fixes >= run.cfg.max_fix:
-            reason = f"修正の回数の上限 {run.cfg.max_fix} 回に達した: {progress.detail}"
+        stop, regroup = _stop_reason(run, item, progress, got.own, fixes)
+        reason = stop if stop is not None else progress.detail
+        if stop is not None:
             break
+        if regroup:
+            history = [got.own]
         if _code(run, item, "fix", _fix_prompt(item, got.own)) is None:
             return
         fixes += 1
