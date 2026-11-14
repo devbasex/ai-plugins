@@ -21,6 +21,9 @@ FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
 # 旧い置き場の退避先の名前の接尾辞（`<プラグイン名>.v10-<日付>`）
 RETIRED_SUFFIX = ".v10-"
+# 状態の置き場の根を指す環境変数（先に引くほうが先）
+STATE_HOME_ENV = "NDF_STATE_HOME"
+XDG_STATE_ENV = "XDG_STATE_HOME"
 
 
 class IdentityError(Exception):
@@ -40,7 +43,7 @@ def _state_home() -> Path:
 
     `NDF_STATE_HOME` も根として読み、プラグイン名を足す。サービスが旧い NDF と同じ値を渡しても、旧い置き場を退避しない。
     """
-    for name in ("NDF_STATE_HOME", "XDG_STATE_HOME"):
+    for name in (STATE_HOME_ENV, XDG_STATE_ENV):
         value = os.environ.get(name, "")
         if value:
             return Path(value).expanduser()
