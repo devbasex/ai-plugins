@@ -126,17 +126,25 @@ def large_slot(rows: list[Row], cfg: Config, board: Board) -> Optional[dict[str,
     by_num = {r.number: r for r in rows}
     large = [r for r in rows if r.size >= cfg.large_min_size]
     if not large:
-        return {"issue": None, "slice": None, "size": None, "budget": budget, "status": SLOT_NONE}
+        return _slot_dict(None, None, None, budget, SLOT_NONE)
     big = min(large, key=lambda r: (-r.cod, r.number))
-    kids = [k for k in _of(board.sub_issues, big.number) if k in by_num]
-    if kids:
-        fit = [k for k in topo_order(kids, board.edges, lambda n: model.row_key(by_num[n])) if by_num[k].size <= budget]
-        piece = fit[0] if fit else None
-    else:
-        piece = big.number if big.size <= budget else None
+    piece = _slice_of(big, board, by_num, budget)
     if piece is None:
-        return {"issue": big.number, "slice": None, "size": big.size, "budget": budget, "status": SLOT_SPLIT}
-    return {"issue": big.number, "slice": piece, "size": by_num[piece].size, "budget": budget, "status": SLOT_FIT}
+        return _slot_dict(big.number, None, big.size, budget, SLOT_SPLIT)
+    return _slot_dict(big.number, piece, by_num[piece].size, budget, SLOT_FIT)
+
+
+def _slice_of(big: Row, board: Board, by_num: dict[int, Row], budget: int) -> Optional[int]:
+    """枠に当てる 1 切れ。子があれば依存の順で枠に収まる最初の子、無ければ本人が収まれば本人、どちらも無ければ None。"""
+    kids = [k for k in _of(board.sub_issues, big.number) if k in by_num]
+    if not kids:
+        return big.number if big.size <= budget else None
+    fit = [k for k in topo_order(kids, board.edges, lambda n: model.row_key(by_num[n])) if by_num[k].size <= budget]
+    return fit[0] if fit else None
+
+
+def _slot_dict(issue: Optional[int], piece: Optional[int], size: Optional[int], budget: int, status: str) -> dict[str, Any]:
+    return {"issue": issue, "slice": piece, "size": size, "budget": budget, "status": status}
 
 
 def _slot_piece(slot: Optional[dict[str, Any]]) -> Optional[int]:
