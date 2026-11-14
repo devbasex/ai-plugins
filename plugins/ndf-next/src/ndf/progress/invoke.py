@@ -4,7 +4,7 @@
 
 | `call` | 種類 | 呼ぶもの |
 | --- | --- | --- |
-| `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `contracts/templates/<with.plan>.json` |
+| `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `<with.plan>`（`ndf.core.route.templates()` の鍵）を埋めたもの |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
 | `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
 | `ndf.listen` | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
@@ -13,9 +13,10 @@
 スキーマ（`contracts/workflow/context.schema.json`）で形を確かめる（3364-7）。作業の出力のうち工程の
 定義の `outputs` に無い鍵は書かずに捨て、結果の `warnings` に載せる。プランの実行は進行表を読まず、書かない。
 
-プランへの作業場所（文脈の `worktree`）は差し込みの値（`--set`）でなく、プランの作業場所（プランの `worktree`）で渡す。
-差し込みの `worktree` はプランの実行が決まった名前として持ち、上書きを断るためである。雛形の `worktree` を入力の値にした
-写しを実行の置き場へ書き、写しを流す。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
+雛形は `ndf.core.route` から引き、雛形の差し込み（`{{名前}}`）を入力の値と `ndf route render` と同じ省いた値の
+決め方（`route.derived`）で埋めたプランを実行の置き場へ書いて流す。プランへの作業場所（文脈の `worktree`）は
+差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
+実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始める。同じ引数で打ち直すと、プランは前の回の控えの結果を返すだけだからである。
 """
 
@@ -32,8 +33,9 @@ from typing import Any, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import claude
+from ndf.adapters.git import GitError
 from ndf.contracts import limits, result
-from ndf.core import durable
+from ndf.core import durable, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
@@ -47,8 +49,6 @@ LISTEN = "listen"
 CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, "ndf.listen": LISTEN}
 # 作業種別 → 呼ぶものの名前を持つ with の鍵（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
-# プランの雛形の置き場（契約の置き場の下）
-TEMPLATES = "templates"
 # script の作業へ入力を渡す環境変数
 INPUT_ENV = "NDF_STAGE_INPUT"
 NOTES_ENV = "NDF_STAGE_NOTES"
@@ -255,27 +255,32 @@ def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
 # --- 種類ごとの呼び出し ---------------------------------------------------------------------
 
 
-def template_path(name: str) -> Path:
-    """プランの雛形（契約の置き場の下の雛形の置き場）。"""
-    return contracts.contracts_dir() / TEMPLATES / f"{name}.json"
+def template(name: str) -> Optional[route.Template]:
+    """プランの雛形（`route.templates()` の鍵 `name`）。無ければ None。"""
+    found = route.templates()
+    return found[name] if name in found else None
 
 
-def plan_path(run: StageRun, work_dir: Path) -> Path:
-    """流すプラン。入力に作業場所（`worktree`）があれば、雛形の `worktree` をその値にした写しを実行の置き場へ書く。
+def _param_value(value: Any) -> route.Value:
+    """入力の値を雛形の差し込みの値（文字列か文字列の並び）にする。"""
+    if isinstance(value, list):
+        return [_set_value(v) for v in value]
+    return _set_value(value)
 
-    雛形が読めなければ `model.Refused`。
+
+def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
+    """雛形を入力の値で埋めたプランを実行の置き場へ書き、そのパスを返す。
+
+    差し込みのうち入力に無いものは `ndf route render` と同じく打った場所から決め（`route.derived`）、それでも欠ければ
+    `route.RouteError`。雛形が無ければ `model.Refused`。
     """
-    src = template_path(run.name)
-    if "worktree" not in run.inputs:
-        return src
-    try:
-        raw = json.loads(src.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise model.Refused(f"プランの雛形 {src} を読めない: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise model.Refused(f"プランの雛形 {src} がオブジェクトでない")
+    t = template(run.name)
+    if t is None:
+        raise model.Refused(f"プランの雛形 {run.name} が無い")
+    given = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    plan = route.render(t, route.derived(t, given, cwd))
     out = work_dir / f"{run.name}.json"
-    out.write_text(json.dumps({**raw, "worktree": run.inputs["worktree"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out
 
 
@@ -300,13 +305,15 @@ def _set_value(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
-def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str]) -> list[str]:
+def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -> list[str]:
     """`ndf plan next <プラン> [--from <ステップ>] --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。
 
-    作業場所（`worktree`）は `--set` に載せず、プランの作業場所で渡す（`plan_path`）。
+    作業場所（`worktree`）は `--set` に載せず、埋めたプランの作業場所で渡す（`plan_path`）。
     """
     start = plan_start(work_dir)
-    argv = ndf_command(PLAN, "next", str(plan_path(run, work_dir)), *(["--from", start] if start else []), "--state-dir", str(work_dir))
+    argv = ndf_command(
+        PLAN, "next", str(plan_path(run, work_dir, cwd)), *(["--from", start] if start else []), "--state-dir", str(work_dir)
+    )
     for key, value in run.inputs.items():
         if key != "worktree":
             argv += ["--set", f"{key}={_set_value(value)}"]
@@ -327,13 +334,15 @@ def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> Stag
 
 
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
-    if not template_path(run.name).is_file():
-        return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い（{template_path(run.name)}）"), {})
-    work_dir.mkdir(parents=True, exist_ok=True)
     try:
-        argv = plan_argv(run, work_dir, answer)
-    except model.Refused as exc:
-        return StageResult(result.stopped(PLAN, "invalid", exc.reason), {})
+        if template(run.name) is None:
+            return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い"), {})
+        work_dir.mkdir(parents=True, exist_ok=True)
+        argv = plan_argv(run, work_dir, answer, cwd)
+    except route.RouteError as exc:
+        return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}"), {})
+    except GitError as exc:
+        return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} の省いた値を決められない: {exc}"), {})
     return _from_process(run, runner(argv, cwd, run.env({})))
 
 

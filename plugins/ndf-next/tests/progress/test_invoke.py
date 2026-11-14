@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import result
+from ndf.core import route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
@@ -105,74 +106,99 @@ def test_record_outputs_writes_one_event_with_the_declared_keys_only():
     assert stages.outputs_draft(s, 1, {"pr": 9}, invoke.ACTOR)[0] is None
 
 
-def test_plan_argv_passes_inputs_and_the_answer():
-    run = _run("作業場所の用意", inputs={"issues": [1, 2]})
-    argv = invoke.plan_argv(run, Path("/tmp/w"), "approved")
-    assert argv[argv.index("plan") + 1] == "next" and argv[argv.index("next") + 1].endswith("templates/worktree.json")
-    assert argv[argv.index("--state-dir") + 1] == "/tmp/w"
+STEPS = [{"id": "a", "run": ["true"]}, {"id": "b", "run": ["true"]}]
+
+
+def _plan_template(monkeypatch, name: str = "design", params: tuple[str, ...] = ()) -> route.Template:
+    """ステップ a・b の雛形 1 本だけを `route.templates()` が返すようにする。`worktree` を受ければプランの作業場所へ差し込む。"""
+    plan = {"name": name, "steps": STEPS, **({"worktree": "{{worktree}}"} if "worktree" in params else {})}
+    t = route.Template(name, name, "試験の雛形", params, plan)
+    monkeypatch.setattr(route, "templates", lambda: {name: t})
+    return t
+
+
+def _plan_file(tmp_path: Path, name: str = "design") -> Path:
+    """プランの実行（runner）へ直に渡すプランのファイル。"""
+    path = tmp_path / f"{name}-plan.json"
+    path.write_text(json.dumps({"name": name, "steps": STEPS}))
+    return path
+
+
+def _plan_run(inputs: dict, name: str = "design") -> invoke.StageRun:
+    return invoke.StageRun(invoke.PLAN, name, inputs, (), "sprint_diff", "design")
+
+
+def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
+    _plan_template(monkeypatch)
+    argv = invoke.plan_argv(_plan_run({"issues": [1, 2]}), tmp_path, "approved", tmp_path)
+    assert argv[argv.index("plan") + 1] == "next" and argv[argv.index("next") + 1] == str(tmp_path / "design.json")
+    assert json.loads((tmp_path / "design.json").read_text()) == {"name": "design", "steps": STEPS}
+    assert argv[argv.index("--state-dir") + 1] == str(tmp_path)
     assert argv[argv.index("--set") + 1] == "issues=[1, 2]"
     assert argv[-2:] == ["--answer", "approved"]
     assert argv[1] == "-P"
 
 
-def _plan_template(tmp_path: Path, monkeypatch, name: str = "design") -> Path:
-    """ステップ a・b のプランの雛形を置き、雛形の置き場をそこへ向ける。"""
-    template = tmp_path / f"{name}.json"
-    template.write_text(json.dumps({"name": name, "steps": [{"id": "a", "run": ["true"]}, {"id": "b", "run": ["true"]}]}))
-    monkeypatch.setattr(invoke, "template_path", lambda n: template)
-    return template
-
-
-def _plan_run(inputs: dict) -> invoke.StageRun:
-    return invoke.StageRun(invoke.PLAN, "design", inputs, (), "sprint_diff", "design")
+def test_stage_plans_name_the_route_templates_where_one_fits():
+    # 工程の with.plan は C3 の雛形の名前（route.templates() の鍵）。当たる雛形の無い工程は雛形が足されるまで止まる
+    pairs = {
+        (st.id, invoke.stage_run(s, st, {}).name)
+        for mode in ("light", "standard")
+        for s in definition.load_definition(mode).stages
+        for st in s.steps
+        if st.call == "ndf.plan"
+    }
+    assert {("implement", "impl"), ("design", "design"), ("design-merge", "design-merge")} <= pairs
+    assert {"impl", "design", "design-merge"} <= set(route.templates())
 
 
 def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_path, monkeypatch):
     # PR 3464 の指摘: --set worktree=... はプランの実行が決まった名前の上書きとして断る
-    template = _plan_template(tmp_path, monkeypatch)
+    _plan_template(monkeypatch, params=("worktree",))
     work, place = tmp_path / "w", str(tmp_path / "wt")
     work.mkdir()
-    argv = invoke.plan_argv(_plan_run({"issues": [1], "worktree": place}), work, None)
+    argv = invoke.plan_argv(_plan_run({"issues": [1], "worktree": place}), work, None, tmp_path)
     sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
     assert sets == ["issues=[1]"]
     plan = Path(argv[argv.index("next") + 1])
     assert plan.parent == work and json.loads(plan.read_text())["worktree"] == place
-    assert "worktree" not in json.loads(template.read_text())
     # プランの実行は同じ引数を断らずに受け、作業場所はプランの作業場所に入る
     inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_cli._pairs(sets, "--set"))
     assert inv.plan.worktree == place and inv.values["worktree"] == place
 
 
-def test_plan_without_inputs_for_the_place_runs_the_template_itself(tmp_path, monkeypatch):
-    template = _plan_template(tmp_path, monkeypatch)
-    argv = invoke.plan_argv(_plan_run({"issues": [1]}), tmp_path / "w", None)
-    assert argv[argv.index("next") + 1] == str(template)
+def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch):
+    # 差し込み worktree を受ける雛形に、作業場所も省いた作業場所を決めるブランチも無い
+    _plan_template(monkeypatch, params=("worktree",))
+    got = invoke.invoke(_plan_run({"issues": [1]}), tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid" and "worktree" in got.cause["detail"]
 
 
 def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_round(tmp_path, monkeypatch):
     # PR 3464 の指摘: 同じ引数で呼び直すと、プランは前の回の控えの失敗を返すだけ
-    template = _plan_template(tmp_path, monkeypatch)
+    _plan_template(monkeypatch)
     work, root = tmp_path / "w", tmp_path / "root"
     work.mkdir()
     run = _plan_run({"issues": [1]})
-    assert "--from" not in invoke.plan_argv(run, work, None)
-    inv = plan_runner.prepare(root, template, None, str(work), tmp_path, {"issues": "[1]"})
+    first = invoke.plan_argv(run, work, None, tmp_path)
+    assert "--from" not in first
+    plan = Path(first[first.index("next") + 1])
+    inv = plan_runner.prepare(root, plan, None, str(work), tmp_path, {"issues": "[1]"})
     plan_runner._record_run(inv)
     final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": "b", "count": 2}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
-    again = invoke.plan_argv(run, work, None)
+    again = invoke.plan_argv(run, work, None, tmp_path)
     assert again[again.index("--from") + 1] == "b" and again.index("--from") < again.index("--state-dir")
-    retried = plan_runner.prepare(root, template, "b", str(work), tmp_path, {"issues": "[1]"})
+    retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, {"issues": "[1]"})
     assert retried.key != inv.key and retried.round_no == inv.round_no + 1
     # 新しい回が承認ゲートで待つ間（結果の控えが無い）は、答えを渡す呼び出しも同じ開始点で同じ回に届く
     plan_runner._record_run(retried)
     assert invoke.plan_start(work) == "b"
 
 
-def test_a_plan_that_finished_keeps_the_start_of_its_round(tmp_path, monkeypatch):
-    template = _plan_template(tmp_path, monkeypatch)
+def test_a_plan_that_finished_keeps_the_start_of_its_round(tmp_path):
     work = tmp_path / "w"
-    inv = plan_runner.prepare(tmp_path / "root", template, "b", str(work), tmp_path)
+    inv = plan_runner.prepare(tmp_path / "root", _plan_file(tmp_path), "b", str(work), tmp_path)
     plan_runner._record_run(inv)
     final = {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 1}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
@@ -187,11 +213,10 @@ def test_same_run_tells_a_stored_result_of_the_same_round():
     assert not invoke.same_run(bare, bare)
 
 
-def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tmp_path, monkeypatch):
+def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tmp_path):
     # PR 3464 の指摘: プランの結果は版を outputs に集め、metrics には回とステップの数だけを載せる
-    template = _plan_template(tmp_path, monkeypatch, "release")
     work = tmp_path / "w"
-    inv = plan_runner.prepare(tmp_path / "root", template, None, str(work), tmp_path)
+    inv = plan_runner.prepare(tmp_path / "root", _plan_file(tmp_path, "release"), None, str(work), tmp_path)
     plan_records._add_outputs(work, {"version": "11.0.0"})
     out = plan_runner.final_result(inv, {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 2}, "SUCCESS")
     step = next(s for s in _stage("デプロイ").steps if s.id == "release")
@@ -200,16 +225,18 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
     assert definition.validate_io(step.output_ref, result.result("plan", "ok", "出した", metrics={"version": "11.0.0"}))
 
 
-def test_plan_without_a_template_stops_as_precondition(tmp_path, monkeypatch):
-    monkeypatch.setattr(invoke, "template_path", lambda name: tmp_path / f"{name}.json")
-    got = invoke.invoke(_run("作業場所の用意", inputs={"issues": [1]}), tmp_path, tmp_path / "w")
+def test_plan_without_a_template_stops_as_precondition(tmp_path):
+    # 作業場所の用意の with.plan（worktree）に当たる雛形は C3 にまだ無い
+    run = _run("作業場所の用意", inputs={"issues": [1]})
+    assert run.name not in route.templates()
+    got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
+    assert got.cause["detail"] == f"プランの雛形 {run.name} が無い"
+    assert not (tmp_path / "w").exists()
 
 
 def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path, monkeypatch):
-    template = tmp_path / "worktree.json"
-    template.write_text("{}")
-    monkeypatch.setattr(invoke, "template_path", lambda name: template)
+    _plan_template(monkeypatch)
     seen = {}
 
     def runner(argv, cwd, env):
@@ -217,7 +244,7 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
         out = result.result("plan", "ok", "済んだ", outputs={"worktree": "/w", "branch": "sprint/s"})
         return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
 
-    run = invoke.StageRun(**{**vars(_run("作業場所の用意", inputs={"issues": [1]})), "notes": "直す所"})
+    run = invoke.StageRun(**{**vars(_plan_run({"issues": [1]})), "outputs": ("worktree", "branch"), "notes": "直す所"})
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=runner)
     assert got.outputs == {"worktree": "/w", "branch": "sprint/s"}
     assert str(invoke.SRC) in seen["env"]["PYTHONPATH"].split(os.pathsep)
@@ -226,11 +253,9 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
 
 
 def test_plan_that_prints_no_result_is_bad_report(tmp_path, monkeypatch):
-    template = tmp_path / "worktree.json"
-    template.write_text("{}")
-    monkeypatch.setattr(invoke, "template_path", lambda name: template)
+    _plan_template(monkeypatch)
     got = invoke.invoke(
-        _run("作業場所の用意", inputs={"issues": [1]}),
+        _plan_run({"issues": [1]}),
         tmp_path,
         tmp_path / "w",
         runner=lambda argv, cwd, env: subprocess.CompletedProcess(argv, 1, "落ちた\n", ""),
