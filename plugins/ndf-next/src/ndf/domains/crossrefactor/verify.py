@@ -19,6 +19,7 @@ from typing import Any
 
 from ndf.adapters import git
 from ndf.contracts import limits
+from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import scope, tests_decide, verify_decide
 from ndf.domains.crossrefactor.diff_decide import in_scope
 from ndf.testing import limits as test_limits
@@ -114,8 +115,6 @@ def at_commit(probe: Path, commit: str, found: Sequence[Suite], keys: Iterable[s
     wanted = regroup(keys)
     if not wanted:
         return frozenset()
-    g = git.Git(probe)
-    g.run("checkout", "-q", "--detach", "--force", commit)
-    g.run("clean", "-q", "-fd")
+    worktree.detach_clean(git.Git(probe), commit)
     present = {n: [f for f in fs if (probe / f).is_file()] for n, fs in wanted.items()}
     return failing(probe, found, {n: fs for n, fs in present.items() if fs})

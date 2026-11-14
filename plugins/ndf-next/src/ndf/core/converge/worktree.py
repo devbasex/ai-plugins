@@ -232,6 +232,12 @@ def release(repo: git.Git, worktree: Path) -> Release:
     return Release(True, None)
 
 
+def detach_clean(g: git.Git, commit: str) -> None:
+    """作業場所 `g` を `commit` へ切り離して合わせ、追跡されていないファイルを消す。"""
+    g.run("checkout", "-q", "--detach", "--force", commit)
+    g.run("clean", "-q", "-fd")
+
+
 def conflicted_files(g: git.Git) -> tuple[str, ...]:
     """衝突して統合できていないファイル（`-z` で区切るので空白・改行を含むパスも割らない）。"""
     return tuple(p for p in g.run("diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p)

@@ -82,9 +82,7 @@ def refresh_readers(ws: Workspace) -> str:
     """読み取り用ディレクトリを書き込み用の作業ディレクトリの HEAD へ合わせ、その HEAD を返す。"""
     head = git.Git(ws.work).rev_parse("HEAD")
     for runtime in ws.runtimes:  # noqa: NDF201 上限: 担当の数（ランタイムの表の既定の席）
-        reader = git.Git(ws.reader(runtime))
-        reader.run("checkout", "-q", "--detach", "--force", head)
-        reader.run("clean", "-q", "-fd")
+        worktree.detach_clean(git.Git(ws.reader(runtime)), head)
     return head
 
 
