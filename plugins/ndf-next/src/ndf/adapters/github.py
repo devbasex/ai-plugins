@@ -40,7 +40,6 @@ PULL_FIELDS = "number state merged headRefOid headRefName baseRefName body merge
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
 PER_PAGE = 100
-CHECK_RUNS_PER_PAGE = PER_PAGE
 # 上限に当たった枠（`GitHubError.quota`）
 REST, GRAPHQL = "rest", "graphql"
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
@@ -505,7 +504,7 @@ class GitHub:
         pages = int(limits.value("github.check-runs", "count"))
         runs: list[dict] = []
         for page in range(1, pages + 1):
-            body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": CHECK_RUNS_PER_PAGE, "page": page})
+            body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": PER_PAGE, "page": page})
             runs.extend(body["check_runs"])
             if len(runs) >= int(body["total_count"]) or not body["check_runs"]:
                 return runs
