@@ -28,6 +28,10 @@ from ndf.contracts import limits
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
 # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
 PULL_FIELDS = "number state merged headRefOid headRefName baseRefName body mergeStateStatus"
+# head のブランチごとに読む PR の件数（新しい順）
+PULLS_PER_HEAD = 5
+# チェックの一覧の 1 ページの件数（REST の上限。ページ数の上限は limits.json の github.check-runs）
+CHECK_RUNS_PER_PAGE = 100
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
@@ -226,8 +230,8 @@ class GitHub:
     def pulls_by_head(self, branches: Iterable[str]) -> dict[str, list[Pull]]:
         """head のブランチごとの PR（新しい順に 5 件まで）を 1 回のクエリ（100 件ごと）で読む。"""
         wanted = sorted(set(branches))
-        selection = "pullRequests(headRefName: {}, first: 5, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {} }} }}"
-        got = self.aliased({b: selection.format(_graphql_string(b), PULL_FIELDS) for b in wanted})
+        selection = "pullRequests(headRefName: {}, first: {}, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {} }} }}"
+        got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
     def pull(self, number: int) -> Pull:
@@ -238,7 +242,7 @@ class GitHub:
         pages = int(limits.value("github.check-runs", "count"))
         runs: list[dict] = []
         for page in range(1, pages + 1):
-            body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": 100, "page": page})
+            body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": CHECK_RUNS_PER_PAGE, "page": page})
             runs.extend(body["check_runs"])
             if len(runs) >= int(body["total_count"]) or not body["check_runs"]:
                 return runs
