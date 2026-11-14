@@ -1,5 +1,6 @@
 """GitHub のアダプターのテスト（`test_github.py`・`test_publish.py`・`test_issue_reproductions.py`）が共有する、
 ネットワークへ出ないクライアントと PR の生の辞書の作り方。"""
+# `offline_client` は `test_ci_cli.py` の `_serve` とレート制限の応答も使う。
 
 from __future__ import annotations
 
