@@ -122,6 +122,11 @@ def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
     assert ready.retired[1].target == moved
 
 
+def test_old_state_places_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
+    # 現状固定: このモジュールで退避するのは state-home と config-state の 2 つで、表の順に並ぶ
+    assert identity.old_state_places(ident) == [ident.state_dir, tmp_path / "config" / "p" / "state"]
+
+
 def test_every_old_place_has_a_decision_and_a_reason():
     # 3341-3: 旧い NDF の状態の置き場の全行が、退避するか・その理由を持つ
     keys = [place.key for place in identity.OLD_STATE_PLACES]
