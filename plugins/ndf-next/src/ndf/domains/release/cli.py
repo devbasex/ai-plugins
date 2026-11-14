@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -176,30 +177,80 @@ def _target_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--plugin", help="ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）")
 
 
+def _pr(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--pr", type=int, required=True)
+
+
+def _material(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--material", help="承認資料のファイル（省けば PR の本文）")
+
+
+def _answer_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
+    p.add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
+    p.add_argument("--by", required=True, help="答えた人")
+
+
+def _materials_out(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--out", help="承認資料を書くファイル（省けば標準出力）")
+
+
+def _production(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--production", required=True)
+
+
+def _budget(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--budget", type=float, required=True, help="必須のチェックを待つ秒")
+
+
+def _revision(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--revision", required=True)
+
+
+def _main_dir(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--main-dir", required=True)
+
+
+def _base(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--base", required=True)
+
+
+def _snapshot_out(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--out", required=True)
+
+
+def _before(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--before", required=True)
+
+
+def _branch(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--branch", action="append", required=True)
+
+
+# 副命令の名前 → 引数を足す関数（並びは足す順。どの副命令にも先に `_common` を足す）
+ARGS: dict[str, tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
+    "assemble": (_target_args,),
+    "materials": (_target_args, _materials_out),
+    "present": (_pr, _material),
+    "answer": (_pr, _answer_args),
+    "approval-check": (_pr, _production),
+    "merge": (_pr, _branches, _budget),
+    "publish": (_revision,),
+    "sync-base": (_main_dir, _base),
+    "config-snapshot": (_snapshot_out,),
+    "config-check": (_before,),
+    "cleanup": (_branch,),
+}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ndf release-steps", description="リリース（段階ごとのモジュール）")
     sub = parser.add_subparsers(dest="command", required=True)
-    specs = {name: sub.add_parser(name) for name in HANDLERS}
-    for p in specs.values():
+    for name, adders in ARGS.items():
+        p = sub.add_parser(name)
         _common(p)
-    for name in ("assemble", "materials"):
-        _target_args(specs[name])
-    specs["materials"].add_argument("--out", help="承認資料を書くファイル（省けば標準出力）")
-    for name in ("present", "answer", "approval-check", "merge"):
-        specs[name].add_argument("--pr", type=int, required=True)
-    specs["present"].add_argument("--material", help="承認資料のファイル（省けば PR の本文）")
-    specs["answer"].add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
-    specs["answer"].add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
-    specs["answer"].add_argument("--by", required=True, help="答えた人")
-    specs["approval-check"].add_argument("--production", required=True)
-    _branches(specs["merge"])
-    specs["merge"].add_argument("--budget", type=float, required=True, help="必須のチェックを待つ秒")
-    specs["publish"].add_argument("--revision", required=True)
-    specs["sync-base"].add_argument("--main-dir", required=True)
-    specs["sync-base"].add_argument("--base", required=True)
-    specs["config-snapshot"].add_argument("--out", required=True)
-    specs["config-check"].add_argument("--before", required=True)
-    specs["cleanup"].add_argument("--branch", action="append", required=True)
+        for add in adders:
+            add(p)
     return parser
 
 
