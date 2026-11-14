@@ -11,7 +11,7 @@ from typing import Callable, Mapping, Optional
 import pytest
 
 from ndf.adapters.git import Completed, Git
-from ndf.domains.worktree import cli_env, container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_sweep
+from ndf.domains.worktree import cli_env, container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_decide, testenv_sweep
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:
@@ -295,3 +295,62 @@ def test_run_localenv_does_not_catch_errors_of_mode_verify_healthcheck(monkeypat
     for action in ("mode", "verify", "healthcheck"):
         with pytest.raises(localenv.LocalenvError):
             _le_run(monkeypatch, action, **{action: _le_raise})
+
+
+# 現状固定（I-012）: `ledger.Ledger` の読み書き。期待値は今の実装の出力。
+def test_ledger_rows_tolerates_missing_and_broken_shapes(tmp_path: Path) -> None:
+    book = ledger.Ledger(tmp_path / "ndf" / "reg.json")
+    assert book.rows() == [] and book.current("/w") is None
+    book.path.parent.mkdir()
+    for text, want in [("[]", []), ('{"assignments": {}}', []), ('{"assignments": [1, {"a": 1}, "x"]}', [{"a": 1}])]:
+        book.path.write_text(text, encoding="utf-8")
+        assert book.rows() == want
+
+
+def test_ledger_acquire_current_update_and_release(tmp_path: Path) -> None:
+    book = ledger.Ledger(tmp_path / "ndf" / "reg.json")
+    row = book.acquire("/w/a", "feat/a", "env-a")
+    assert row is not None
+    keys = {"id", "worktree", "branch", "environment", "slot", "ports", "assigned_at", "last_used_at", "released_at", "expose"}
+    assert set(row) == keys
+    assert (row["worktree"], row["branch"], row["environment"], row["slot"], row["ports"], row["released_at"], row["expose"]) == (
+        "/w/a", "feat/a", "env-a", 0, {}, None, None
+    )  # fmt: skip
+    assert book.acquire("/w/a", "other", "other") == row  # 既にあればそれを返す
+    assert book.acquire("/w/b", "feat/b", "env-b")["slot"] == 1  # type: ignore[index]
+    assert book.current("/w/a") == row and book.current("/w/none") is None
+
+    assert book.update("/w/a", lambda r: r.update(ports={"http": 1})) is True
+    assert book.current("/w/a")["ports"] == {"http": 1}  # type: ignore[index]
+    assert book.update("/w/none", lambda r: r.update(x=1)) is False
+
+    assert book.update("/w/a", lambda r: r.update(released_at="t1")) is True
+    assert book.current("/w/a") is None
+    assert book.update("/w/a", lambda r: r.update(x=1)) is False  # 解放済みは既定では選ばない
+    assert book.update("/w/a", lambda r: r.update(note="n"), pick=lambda r: r.get("released_at") == "t1") is True
+
+    again = book.acquire("/w/a", "feat/a", "env-a2")
+    assert again is not None and again["slot"] == 0  # 解放したスロットを使い直す
+    assert [(r["worktree"], r["slot"], r["released_at"], r.get("note")) for r in book.rows()] == [
+        ("/w/a", 0, "t1", "n"), ("/w/b", 1, None, None), ("/w/a", 0, None, None)
+    ]  # fmt: skip  # 行は消さずに追記する
+    saved = json.loads(book.path.read_text(encoding="utf-8"))
+    assert list(saved) == ["assignments"] and saved["assignments"] == book.rows()
+    assert not list(book.path.parent.glob(f".{book.path.name}.*"))  # 一時ファイルは残らない
+
+
+def test_ledger_acquire_returns_none_when_slots_are_full(tmp_path: Path) -> None:
+    book = ledger.Ledger(tmp_path / "reg.json")
+    rows = [{"worktree": f"/w/{i}", "slot": i, "released_at": None} for i in range(testenv_decide.SLOTS)]
+    book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
+    assert book.acquire("/w/new", "b", "e") is None
+    assert len(book.rows()) == testenv_decide.SLOTS
+
+
+def test_ledger_latest_and_path_of_git(main_repo: Path) -> None:
+    rows = [{"worktree": "/w", "n": 1}, {"worktree": "/x", "n": 2}, {"worktree": "/w", "n": 3}]
+    assert ledger.latest(rows, "/w", lambda r: True) == {"worktree": "/w", "n": 3}
+    assert ledger.latest(rows, "/w", lambda r: r["n"] == 1) == {"worktree": "/w", "n": 1}
+    assert ledger.latest(rows, "/z", lambda r: True) is None
+    want = Path(os.path.realpath(main_repo)) / ".git" / "ndf" / "worktree-registry.json"
+    assert ledger.ledger_path(Git(main_repo)) == want and ledger.Ledger.of(Git(main_repo)).path == want
