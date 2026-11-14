@@ -43,7 +43,6 @@ SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを答える。"
 # 打ち直しても直らない `claude -p` の失敗 → 止まった理由（表に無い失敗は前提の欠け）
 SKILL_FAILURES = {claude.Failure.USAGE_LIMIT: "usage_limit", claude.Failure.TIMEOUT: "interrupted"}
-OUTPUTS_EVENT = stages.OUTPUTS_EVENT
 ACTOR = "workflow"
 # このプラグインの Python のパッケージの名前（`python -m` で打つ名前）
 PACKAGE = __package__.partition(".")[0]
@@ -275,8 +274,3 @@ def invoke(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str] = Non
     if run.kind == "skill":
         return _call_skill(run, cwd)
     raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
-
-
-def record_outputs(stage: stages.StageDef, rev: int, outputs: Mapping[str, Any]) -> tuple[Optional[model.EventDraft], list[str]]:
-    """工程の出力を文脈へ書く事象 `outputs_recorded` の下書き（書き手は作業 `workflow`）。形は `stages.outputs_draft`。"""
-    return stages.outputs_draft(stage, rev, outputs, ACTOR)

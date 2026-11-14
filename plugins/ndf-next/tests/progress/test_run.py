@@ -17,7 +17,7 @@ from ndf import identity
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
-from ndf.progress import command, conditions, definition, invoke, model, records, run, store, table
+from ndf.progress import command, conditions, definition, invoke, model, records, run, stages, store, table
 
 ISSUE = 3092
 
@@ -270,7 +270,7 @@ def test_finish_by_hand_writes_the_outputs_to_the_context_like_the_workflow(repo
     v = run.read(st, tid)
     assert v.rows["作業場所の用意"].state == "finished"
     assert {k: v.context()[k] for k in outputs} == outputs
-    recorded = [e for e in v.events if e.draft.kind == invoke.OUTPUTS_EVENT]
+    recorded = [e for e in v.events if e.draft.kind == stages.OUTPUTS_EVENT]
     assert [e.draft.actor for e in recorded] == ["conductor"]
 
 

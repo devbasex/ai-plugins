@@ -621,7 +621,7 @@ def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
     if errs:
         d.write(_failed(s, None, v.rev, "bad_report", f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"))
         return
-    draft, warnings = invoke.record_outputs(s, v.rev, merged)
+    draft, warnings = stages.outputs_draft(s, v.rev, merged, ACTOR)
     done = model.EventDraft("finished", ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
     d.write(*([draft] if draft is not None else []), done)
     d.warnings.extend(warnings)

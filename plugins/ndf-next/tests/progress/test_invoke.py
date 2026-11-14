@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import result
-from ndf.progress import definition, invoke, model
+from ndf.progress import definition, invoke, model, stages
 
 
 def _stage(name: str, mode: str = "light"):
@@ -94,11 +94,11 @@ def test_finished_turns_a_badly_shaped_output_into_bad_report():
 
 def test_record_outputs_writes_one_event_with_the_declared_keys_only():
     s = _stage("作業場所の用意")
-    draft, warnings = invoke.record_outputs(s, 1, {"worktree": "/w", "branch": "sprint/s", "pr": 9})
+    draft, warnings = stages.outputs_draft(s, 1, {"worktree": "/w", "branch": "sprint/s", "pr": 9}, invoke.ACTOR)
     assert draft is not None and draft.kind == "outputs_recorded" and draft.actor == "workflow"
     assert draft.payload == {"outputs": {"worktree": "/w", "branch": "sprint/s"}}
     assert warnings and "pr" in warnings[0]
-    assert invoke.record_outputs(s, 1, {"pr": 9})[0] is None
+    assert stages.outputs_draft(s, 1, {"pr": 9}, invoke.ACTOR)[0] is None
 
 
 def test_plan_argv_passes_inputs_and_the_answer():

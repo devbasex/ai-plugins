@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ndf.progress import invoke, model, stages, store
+from ndf.progress import model, stages, store
 
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
@@ -40,7 +40,7 @@ class View:
         """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
         out = dict(self.doc["context"])
         for ev in self.events:
-            if ev.draft.kind == invoke.OUTPUTS_EVENT and ev.draft.rev == self.rev:
+            if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == self.rev:
                 out.update(payload(ev)["outputs"])
         return out
 
