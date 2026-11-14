@@ -59,6 +59,11 @@ def touched(work: Path, base: str, head: str, scope: Sequence[str]) -> Touched:
         raise ScopeError(str(exc)) from exc
 
 
+def touched_or_explicit(work: Path, base: str, head: str, scope: Sequence[str], symbols: Sequence[str]) -> Touched:
+    """課題が触る関数（#622）。`symbols`（`<ファイル>:<名前>`）を渡せば差分から引かずにそれを使う。"""
+    return symbols_decide.explicit(symbols) if symbols else touched(work, base, head, scope)
+
+
 def scope_test_files(work: Path, scope: Sequence[str]) -> list[str]:
     """着手前の範囲テストへ渡す、範囲の配下のテストのファイル（ディレクトリを含まない。#2096）。"""
     return tests_decide.scope_test_files(tracked(work, scope), scope)

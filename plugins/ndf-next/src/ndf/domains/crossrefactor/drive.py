@@ -175,10 +175,7 @@ def _init(run: _Run) -> None:
     if "touched" in run.state:
         return
     cfg = run.cfg
-    if cfg.symbols:
-        touched = symbols_decide.explicit(cfg.symbols)
-    else:
-        touched = scope.touched(run.ws.work, cfg.base, "HEAD", cfg.scope)
+    touched = scope.touched_or_explicit(run.ws.work, cfg.base, "HEAD", cfg.scope, cfg.symbols)
     run.state.update(
         pr=cfg.pr, branch=cfg.branch, base=cfg.base, args=cfg.args(), target_scope=list(cfg.scope), touched=touched.as_json(), phases={}
     )

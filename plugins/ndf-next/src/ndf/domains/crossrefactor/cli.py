@@ -35,7 +35,7 @@ from ndf import cli, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, limits, result
 from ndf.core.converge import participants, place, worktree
-from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, symbols_decide, workspace
+from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, workspace
 from ndf.testing import limits as test_limits
 
 TOOL = cli.tool_of(__name__)
@@ -43,7 +43,7 @@ TOOL = cli.tool_of(__name__)
 
 def _touched(a: argparse.Namespace) -> dict[str, Any]:
     work = Path(a.work)
-    touched = symbols_decide.explicit(a.symbols) if a.symbols else scope.touched(work, a.base, a.head, a.scope)
+    touched = scope.touched_or_explicit(work, a.base, a.head, a.scope, a.symbols)
     files = scope.scope_test_files(work, a.scope)
     items = [{"kind": "touched", **touched.as_json()}, {"kind": "scope_tests", "files": files}]
     n = sum(len(s) for s in touched.symbols.values())
