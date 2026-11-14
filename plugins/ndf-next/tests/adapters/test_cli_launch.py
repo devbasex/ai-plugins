@@ -142,7 +142,8 @@ def test_agent_paths_at_names_files_next_to_stem():
 
 @pytest.fixture
 def no_run_env(monkeypatch):
-    """親の環境に印（PIN_PARENT）を置く。記録の環境変数を外す準備と後始末は conftest の _fresh_run_log が持つ。"""
+    """実行の記録を開いていない状態から始め、終わったら手放す。"""
+    # 記録の環境変数を外す準備と後始末は conftest の _fresh_run_log が持つ。ここでは親の環境に印を置く
     monkeypatch.setenv("PIN_PARENT", "kept")
 
 
