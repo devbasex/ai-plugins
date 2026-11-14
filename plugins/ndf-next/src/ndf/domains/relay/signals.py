@@ -55,7 +55,7 @@ def write_json(path: Path, data: Mapping[str, Any], wait: float) -> bool:
     except OSError:  # noqa: NDF401 ファイル: 置き場に書けなければ書かずに返る（hook は通す）
         return False
     try:
-        if not _lock(fd, wait):
+        if not lock(fd, wait):
             return False
         tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(dict(data), ensure_ascii=False), encoding="utf-8")
@@ -67,7 +67,8 @@ def write_json(path: Path, data: Mapping[str, Any], wait: float) -> bool:
         os.close(fd)
 
 
-def _lock(fd: int, wait: float) -> bool:
+def lock(fd: int, wait: float) -> bool:
+    """`flock` の排他を `wait` 秒まで取りにいく。取れたら真。"""
     deadline = time.monotonic() + wait
     while True:
         try:

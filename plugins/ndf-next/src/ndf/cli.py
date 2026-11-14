@@ -20,7 +20,9 @@ COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
+    "hooks": "ndf.domains.hooks.cli",
     "launch-args": "ndf.adapters.cli",
+    "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
 }
 

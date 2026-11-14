@@ -1,4 +1,6 @@
-"""hook が読む契約の表（`contracts/limits.json` と `contracts/hooks/*.json`）の読み込み。
+"""hook が読む契約の表（`contracts/limits.json` と `contracts/hooks/*.json`）の読み込みと、出力の組み立て。
+
+標準ライブラリだけで書く（環境が無いときの入口も `strict` の答えをここで出力の形にする）。
 
 hook の経路では `ndf.contracts`（jsonschema を読む）を import しないため、表は `json` で直に読む。表の形は CI の
 テストが確かめる。置き場はこのファイルの位置だけから求める（ほかのプラグインの `CLAUDE_PLUGIN_ROOT` を読まない）。
@@ -9,7 +11,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # このファイルから 4 つ上がプラグインの根（src/ndf/domains/hooks/tables.py）
 PLUGIN_ROOT = Path(__file__).resolve().parents[4]
@@ -51,7 +53,33 @@ def runtimes() -> dict[str, dict[str, Any]]:
     return load("hooks/runtimes.json")["runtimes"]
 
 
-def event_spec(runtime: str, event: str) -> dict[str, Any] | None:
+def event_spec(runtime: str, event: str) -> Optional[dict[str, Any]]:
     """ランタイムの事象の契約。表に無ければ None。"""
     rt = runtimes().get(runtime)
     return rt["events"].get(event) if rt else None
+
+
+def off_names(value: Optional[str]) -> frozenset:
+    """`NDF_HOOK_OFF` の値から止める guard の名前。`all` は全部。"""
+    return frozenset(n.strip() for n in (value or "").split(",") if n.strip())  # noqa: NDF501 利用者の入力: 未設定は止める guard が無い
+
+
+def is_off(name: str, off: frozenset) -> bool:
+    return "all" in off or name in off
+
+
+def _fill(template: Any, text: str) -> Any:
+    if isinstance(template, dict):
+        return {k: _fill(v, text) for k, v in template.items()}
+    if template in ("{reason}", "{context}"):
+        return text
+    return template
+
+
+def output_for(runtime: str, event: str, kind: str, text: str) -> str:
+    """契約表の形の標準出力（1 行の JSON）。形の無い判定と空の文は空。"""
+    spec = event_spec(runtime, event)
+    template = spec["outputs"].get(kind) if spec and kind != "pass" else None
+    if template is None or not text:
+        return ""
+    return json.dumps(_fill(template, text), ensure_ascii=False) + "\n"

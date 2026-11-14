@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "summary": "hook の入口が呼ぶ guard の表（#3345 の決定 88）。入口は事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行は入口が dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
+  "summary": "hook の入口が呼ぶ guard の表（#3345 の決定 88）。ndf_commands は NDF のコマンドとみなす名前（パスの最後の部分）。入口は事象と Tool が当たる行を order の昇順に呼ぶ。tools が空の行はすべての Tool に当たる。strict の行は入口が dispatch より先に呼び、自分の失敗で止める側へ倒す。suggests は guard が代わりに勧める Tool の見本の呼び出しで、ほかの guard はこれを止めない（IH6）。deny_key は同じ拒否を数える対象の作り方（none は数えない・command はコマンドの文・range は読む範囲・reason は理由だけ）。止めるのは環境変数 NDF_HOOK_OFF（名前をカンマでつなぐ・all）だけで、閾値は limits.json から読む",
+  "ndf_commands": ["ndf"],
   "guards": [
     {
       "name": "merge-production",
@@ -30,7 +31,7 @@
     },
     {
       "name": "session",
-      "summary": "SessionStart で予算の順序を検査し、破れがあれば 1 行の案内を出す。人のいない実行の消し残した印を消す（決定 90）",
+      "summary": "SessionStart で予算の順序を検査し、破れがあれば 1 行の案内を出す（決定 90）",
       "module": "ndf.domains.hooks.guards.session",
       "events": ["SessionStart"],
       "tools": [],
@@ -126,7 +127,7 @@
       "suggests": [],
       "deny_key": "none",
       "limits": ["hook.counter-lock"],
-      "params": {}
+      "params": {"fence": "ndf-next"}
     },
     {
       "name": "unattended",

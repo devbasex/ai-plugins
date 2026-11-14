@@ -9,9 +9,12 @@
   },
   "stdlib_only": [
     "ndf",
+    "ndf.identity",
     "ndf.domains",
     "ndf.domains.hooks",
+    "ndf.domains.hooks.metrics",
     "ndf.domains.hooks.verdict",
+    "ndf.domains.hooks.tables",
     "ndf.domains.hooks.strict",
     "ndf.domains.hooks.env",
     "ndf.domains.hooks.boot"

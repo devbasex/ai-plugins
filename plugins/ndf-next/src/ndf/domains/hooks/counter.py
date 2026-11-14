@@ -14,14 +14,13 @@ import fcntl
 import json
 import os
 import re
-import time
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.domains.hooks import tables
+from ndf.domains.relay import signals
 
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
-_POLL = 0.01
 
 
 def _fresh() -> dict[str, Any]:
@@ -52,7 +51,7 @@ class Counter:
             fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         except OSError:  # noqa: NDF401 ファイル: 状態の置き場に書けなければ数えずに通す
             return cls(None, _fresh(), None)
-        if not _lock(fd, limit):
+        if not signals.lock(fd, limit):
             os.close(fd)
             return cls(None, _fresh(), None)
         data = _read(fd)
@@ -123,18 +122,6 @@ def mark_relay(session_id: str, state_dir: Path) -> bool:
             return False
         counter.mark_relay()
         return True
-
-
-def _lock(fd: int, wait: float) -> bool:
-    deadline = time.monotonic() + wait
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(_POLL)
 
 
 def _read(fd: int) -> Optional[dict[str, Any]]:
