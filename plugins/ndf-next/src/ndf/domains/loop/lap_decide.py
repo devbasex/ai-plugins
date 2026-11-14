@@ -33,10 +33,22 @@ class LapFacts:
     unreadable: Optional[str] = None
 
 
+def _failure(facts: LapFacts) -> Optional[str]:
+    """手順の失敗の名前（失敗の鍵か、失敗の印）。失敗が無ければ None。"""
+    if facts.failure_key is not None:
+        return facts.failure_key
+    return "失敗の印" if facts.failed else None
+
+
+def _unreadable_note(facts: LapFacts) -> str:
+    """版の記録を読めなかったときに理由へ添える文。読めたなら空。"""
+    return f"（版の記録を読めない: {facts.unreadable}）" if facts.unreadable is not None else ""
+
+
 def lap_outcome(facts: LapFacts) -> tuple[str, str]:
     """周の結果と理由。"""
-    failure = facts.failure_key if facts.failure_key is not None else ("失敗の印" if facts.failed else None)
-    note = f"（版の記録を読めない: {facts.unreadable}）" if facts.unreadable is not None else ""
+    failure = _failure(facts)
+    note = _unreadable_note(facts)
     if facts.released:
         versions = "・".join(facts.released)
         tail = f"。手順の失敗 {failure} は結果を変えない" if failure is not None else ""
