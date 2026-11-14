@@ -37,7 +37,7 @@ def ledger_path(env: Optional[Mapping[str, str]] = None) -> Path:
         state_dir: Optional[Path] = identity.load().state_dir
     except identity.IdentityError:
         state_dir = None
-    where = ud.ledger_dir(
+    where = ud.state_place_dir(
         os.environ if env is None else env,
         facts.value("places", place, "env"),
         state_dir,

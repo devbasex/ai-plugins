@@ -36,11 +36,11 @@ def test_closed_query_uses_both_jst_ends() -> None:
     assert q == "closed:2026-11-01T00:00:00+09:00..2026-11-14T23:59:59+09:00"
 
 
-def test_ledger_dir_prefers_env_then_state_and_never_falls_back_to_tmp(tmp_path: Path) -> None:
-    assert ud.ledger_dir({"V": str(tmp_path / "x")}, "V", tmp_path, "usage") == tmp_path / "x"
-    assert ud.ledger_dir({}, "V", tmp_path, "usage") == tmp_path / "usage"
+def test_state_place_dir_prefers_env_then_state_and_never_falls_back_to_tmp(tmp_path: Path) -> None:
+    assert ud.state_place_dir({"V": str(tmp_path / "x")}, "V", tmp_path, "usage") == tmp_path / "x"
+    assert ud.state_place_dir({}, "V", tmp_path, "usage") == tmp_path / "usage"
     with pytest.raises(LookupError):
-        ud.ledger_dir({}, "V", None, "usage")
+        ud.state_place_dir({}, "V", None, "usage")
 
 
 def test_stop_delta_subtracts_the_earlier_rows_of_the_same_agent() -> None:

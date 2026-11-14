@@ -109,8 +109,11 @@ def closed_query(since: date, until: date) -> str:
     return f"closed:{a.isoformat()}..{b.isoformat()}"
 
 
-def ledger_dir(env: Mapping[str, str], var: str, state_dir: Optional[Path], sub: str) -> Path:
-    """帳簿のディレクトリ。環境変数 `var` → 状態の置き場の `sub` の順。状態の置き場も無ければ `LookupError`（/tmp へ倒さない）。"""
+def state_place_dir(env: Mapping[str, str], var: str, state_dir: Optional[Path], sub: str) -> Path:
+    """状態の置き場の下の置き場（表 places の行）。環境変数 `var` → 状態の置き場の `sub` の順。
+
+    状態の置き場も無ければ `LookupError`（/tmp へ倒さない）。
+    """
     if env.get(var):
         return Path(env[var])
     if state_dir is None:
