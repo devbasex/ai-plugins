@@ -16,6 +16,7 @@ from ndf.contracts import causes, result
 COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
     "contracts": "ndf.contracts.cli",
+    "test-slot": "ndf.testing.command",
 }
 
 # 呼び出しの誤り・設定の壊れ（`plugin.json` が読めない）の終了コード。
