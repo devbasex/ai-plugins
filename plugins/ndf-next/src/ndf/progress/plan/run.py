@@ -6,8 +6,12 @@
   計画の台帳と `plan.json` の状態は読まない
 - 判断は `run_decide.decide`（純粋な関数）が持ち、読み・起動・完了はそれぞれ耐久ステップで打つ。落ちた後の回復で
   済んだ起動を打ち直さない
-- 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンをスプリントの中止の入力で起こし、実行中の行が
-  無くなれば `stopped` で終わる
+- 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンの元のラッパーを止めてから、スプリントの中止の
+  入力で起こし、実行中の行が無くなれば `stopped` で終わる
+- 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
+  （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる
+- レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`）の置き場を解決する
+  経路はまだ無いので、打った場所で流さずに起こせない失敗にする
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from ndf.progress import lane, store
 from ndf.progress import plan as table
 from ndf.progress.lane import launch
 from ndf.progress.plan import run_decide
-from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, RunState, Sleep
+from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
 
 # 実行の鍵の接頭辞（計画の名前を後ろに付ける）と、耐久ワークフローの ID の接尾辞
 RUN_PREFIX = "lanes-"
@@ -36,6 +40,9 @@ WORKFLOW_SUFFIX = "-lanes"
 # 読み直しの待ちを早めに起こす話題（送り手はまだ無く、期限で起きる）
 TOPIC_WAKE = "wake"
 POLL_ENV = "NDF_PARALLEL_POLL"
+# 起こせなかったレーンの知らせ（計画の進行表の依頼の中身の kind）と、依頼を書く主体
+LAUNCH_FAILED = "launch_failed"
+REPORT_ACTOR = "workflow"
 
 
 @dataclass(frozen=True)
@@ -87,9 +94,13 @@ def observe(spec: dict[str, Any]) -> dict[str, Any]:
         return read_snapshot(conn, spec["plan_id"])
 
 
-def first_input(conn: Any, plan_id: str, act: Launch) -> str:
-    """起こすレーンへ渡す最初の入力。"""
+def first_input(conn: Any, plan_id: str, act: Launch, repo: str) -> str:
+    """起こすレーンへ渡す最初の入力。計画のリポジトリ `repo` と別のリポジトリのレーンや、起こす入力を組めない
+    行なら `launch.Unsupported`。"""
     view, _ = lane.read_plan(conn, plan_id)
+    declared = view.lanes[act.lane].repo
+    if declared is not None and declared != repo:
+        raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {repo}）")
     if act.cancel is not None:
         return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
@@ -101,9 +112,24 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
 def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None) -> dict[str, Any]:
     """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。"""
     act = Launch(lane_name, row, cancel)
-    with _conn(spec) as conn:
-        first = first_input(conn, spec["plan_id"], act)
+    try:
+        with _conn(spec) as conn:
+            first = first_input(conn, spec["plan_id"], act, spec["repo"])
+    except launch.Unsupported as exc:
+        return {"ok": False, "final": True, "detail": str(exc)}
+    if cancel is not None:
+        stopped = launch.stop(spec["plan"], lane_name)
+        if not stopped["ok"]:
+            return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
     return launch.spawn(spec["plan"], lane_name, Path(spec["cwd"]), first)
+
+
+@durable.step
+def report(spec: dict[str, Any], lane_name: str, key: str, detail: str) -> str:
+    """起こせなかったレーンを計画の進行表の依頼として書く耐久ステップ。開いた依頼の鍵を返す。"""
+    body = {"lane": lane_name, "kind": LAUNCH_FAILED, "launch": key, "detail": detail}
+    with _conn(spec) as conn:
+        return table.open_request(conn, spec["plan_id"], body, f"レーン {lane_name} を起こせない", REPORT_ACTOR)
 
 
 @durable.step
@@ -120,6 +146,8 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
         return Done(act, launch_lane(spec, act.lane, act.row, act.cancel))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
+    if isinstance(act, Report):
+        return Done(act, report(spec, act.lane, act.key, act.detail))
     if isinstance(act, Sleep):
         durable.recv(TOPIC_WAKE, act.seconds)
         return Done(act)
@@ -143,6 +171,7 @@ def spec_of(where: Where, plan_id: str, plan: str, pol: Policy) -> dict[str, Any
         "root": str(where.root),
         "plan_id": plan_id,
         "plan": plan,
+        "repo": where.repo,
         "cwd": str(where.cwd),
         "poll": pol.poll,
         "attempts": pol.attempts,

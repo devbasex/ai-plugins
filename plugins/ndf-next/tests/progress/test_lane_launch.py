@@ -16,7 +16,7 @@ def _row(args=()):
 
 def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
     new, start = launch.start_commands("p6", "a", "lane-id", _row())
-    assert new["argv"][1:] == ["progress", "new", "a-r2", "--mode", "standard", "--issues", "5", "6", "--parent", "lane-id"]
+    assert new["argv"][1:] == ["progress", "new", "p6-a-r2", "--mode", "standard", "--issues", "5", "6", "--parent", "lane-id"]
     assert start["argv"][1:] == ["lanes", "row", "start", "p6", "a", "r2", "--sprint"] and start["ask"] == ["sprint"]
 
 
@@ -25,9 +25,28 @@ def test_start_commands_keep_the_mode_given_by_the_row():
     assert new["argv"].count("--mode") == 1 and new["argv"][-2:] == ["--mode", "fast"]
 
 
-def test_cancel_commands_cancel_the_running_sprint():
-    (cmd,) = launch.cancel_commands("s1")
-    assert cmd["argv"][1:4] == ["progress", "cancel", "s1"]
+def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
+    assert launch.sprint_name("p6", "a", "r1") != launch.sprint_name("p7", "a", "r1")
+
+
+def test_a_loop_row_is_refused_instead_of_failing_on_missing_issues():
+    row = LaneRow(key="r1", input={"kind": "loop", "loop": "backlog"}, state="pending")
+    with pytest.raises(launch.Unsupported, match="loop"):
+        launch.start_commands("p6", "a", "lane-id", row)
+
+
+def test_cancel_commands_cancel_the_running_sprint_then_end_the_lane_row():
+    cancel, end = launch.cancel_commands("s1")
+    assert cancel["argv"][1:4] == ["progress", "cancel", "s1"]
+    assert end["argv"][1:] == ["lanes", "row", "end", "s1", "--outcome", "cancelled"]
+
+
+def test_stop_stops_the_wrapper_of_the_lane_and_reads_the_result():
+    run, calls = _runner(stdout=json.dumps({"status": "ok", "summary": "p6-a を止めた"}))
+    assert launch.stop("p6", "a", run=run) == {"ok": True, "detail": "p6-a を止めた"}
+    assert calls[0][1:] == ["relay", "stop", "p6-a"]
+    run, _ = _runner(stdout=json.dumps({"status": "stopped", "summary": "終わらない"}), code=1)
+    assert launch.stop("p6", "a", run=run) == {"ok": False, "detail": "終わらない"}
 
 
 def test_prompt_carries_the_commands_as_json():

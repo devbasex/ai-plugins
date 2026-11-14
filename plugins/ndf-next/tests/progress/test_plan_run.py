@@ -15,7 +15,7 @@ from ndf.core import loop
 from ndf.progress import lane, plan, store
 from ndf.progress.lane import launch
 from ndf.progress.plan import run, run_decide
-from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, RunState, Sleep
+from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
 from plan_decls import REPO
 from plan_decls import decl as _decl
 from plan_decls import doc as _doc
@@ -72,9 +72,20 @@ def test_a_failed_launch_is_retried_on_the_next_poll_and_given_up_after_the_atte
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
     assert act == Launch("a", "r1")
     act, state, _ = _step(state, Done(act, {"ok": False, "detail": "tmux が無い"}))
-    assert act == Sleep(30.0) and state.failed == ("a/r1",) and len(state.errors) == 2
+    # 回数が尽きたら、起こせなかったことをオーガナイザーへ知らせる
+    assert act == Report("a", "a/r1", "a/r1: tmux が無い") and state.failed == ("a/r1",) and len(state.errors) == 2
+    act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Sleep(30.0)
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
     assert act == Sleep(30.0)
+
+
+def test_a_launch_that_cannot_succeed_is_reported_without_retrying():
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(wakeable=[("a", "r1"), ("b", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "final": True, "detail": "loop の行"}))
+    assert act == Report("a", "a/r1", "a/r1: loop の行") and state.count("a/r1") == 1
+    act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Launch("b", "r1")
 
 
 def test_complete_plan_is_written_when_all_rows_are_done_and_the_run_finishes():
@@ -142,9 +153,16 @@ def test_snapshot_reads_both_tables_and_follows_after(opened):
 def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
     pid = _create(opened, _doc(_decl("a", [[1, 2]])))
     with store.transaction(opened) as conn:
-        text = run.first_input(conn, pid, Launch("a", "r1"))
+        text = run.first_input(conn, pid, Launch("a", "r1"), REPO)
         view, _ = lane.read_plan(conn, pid)
     assert "progress" in text and "--parent" in text and view.lanes["a"].table_id in text and '"start"' in text
+
+
+def test_first_input_refuses_a_lane_of_another_repository(opened):
+    """別のリポジトリを宣言したレーンを、計画のリポジトリで起こさない。"""
+    pid = _create(opened, _doc({**_decl("a", [[1]]), "repo": "https://example.invalid/o/other"}))
+    with store.transaction(opened) as conn, pytest.raises(launch.Unsupported, match="other"):
+        run.first_input(conn, pid, Launch("a", "r1"), REPO)
 
 
 # --- 耐久ワークフロー -------------------------------------------------------------------------------
@@ -194,18 +212,45 @@ def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypat
             sid = _start(conn, pid, "a", "r1")
             running = plan.stop_plan(conn, pid, "放棄")
     assert running == [sid]
-    cancelled = []
+    cancelled, stopped = [], []
+
+    def stop(plan_name, lane_name):
+        stopped.append(lane_name)
+        return {"ok": True, "detail": "止めた"}
 
     def spawn(plan_name, lane_name, cwd, first):
-        assert "cancel" in first and sid in first
+        assert "cancel" in first and sid in first and stopped == [lane_name]
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, sid, "cancelled", "conductor")
         cancelled.append(lane_name)
         return {"ok": True, "detail": "起こした"}
 
+    monkeypatch.setattr(launch, "stop", stop)
     monkeypatch.setattr(launch, "spawn", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "stopped" and cancelled == ["a"]
+
+
+def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):
+    """起こせないレーン（開発ループの行）は、計画の進行表の依頼として wait へ届く。"""
+    loop_lane = {"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "loop", "loop": "backlog"}]}
+    with store.open_store(where.url, where.root) as st:
+        pid = _create(st, _doc(loop_lane, _decl("b", [[3]], touches=("src/b",))))
+
+    def spawn(plan_name, lane_name, cwd, first):
+        # b を流した後に計画を止め、ワークフローを終わらせる
+        with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
+            lane.end_row(conn, _start(conn, pid, lane_name, "r1"), "completed", "conductor")
+            plan.stop_plan(conn, pid, "試験の終わり")
+        return {"ok": True, "detail": "起こした"}
+
+    monkeypatch.setattr(launch, "spawn", spawn)
+    final = run.advance(where, "p6", FAST)
+    assert final["outcome"] == "stopped" and final["failed"] == ["a/r1"]
+    with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
+        view, _ = lane.read_plan(conn, pid)
+    (req,) = view.open_requests()
+    assert req.lane == "a" and req.body["kind"] == run.LAUNCH_FAILED and req.body["launch"] == "a/r1"
 
 
 def test_loop_without_dbos_gives_the_same_decisions():

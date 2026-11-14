@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -57,6 +58,8 @@ ROW_PREFIX = "r"
 REQUEST_PREFIX = "request-"
 # 計画が記録する形の番号の鍵。違えばレーンを起動しない（#3344 の決定 86）
 FORMAT_KEYS = ("store_format", "format", "table_version")
+# 計画の決まりを確かめて書く操作の排他の鍵の接頭辞（store.run_lock の鍵と値を分ける）
+PLAN_LOCK_PREFIX = "plan-write:"
 
 
 class FormatMismatch(Exception):
@@ -132,12 +135,26 @@ def _with(events: list[model.Event], draft: model.EventDraft) -> list[model.Even
     return [*events, model.Event(seq, at, model.recorded("lane", draft))]
 
 
+def lock_plan(conn: sa.Connection, plan_id: str) -> None:
+    """計画の決まりを確かめて書く操作を、計画ごとにトランザクションの終わりまで直列にする。
+
+    レーンをまたぐ決まり（I13・I19 など）は全レーンを読んで確かめるが、書くのは 1 つのレーンの進行表だけである。
+    PostgreSQL では別のレーンへの同時の書き込みが互いの未確定の変更を見ずに検査を通るため、計画の鍵の
+    `pg_advisory_xact_lock` で待ち合わせる。SQLite は書き込みのトランザクションが 1 つに限られるので何もしない。
+    """
+    if conn.dialect.name != "postgresql":
+        return
+    key = int.from_bytes(hashlib.sha256(f"{PLAN_LOCK_PREFIX}{plan_id}".encode()).digest()[:4], "big", signed=True)
+    conn.execute(sa.text("SELECT pg_advisory_xact_lock(:space, :key)"), {"space": store.PG_LOCK_SPACE, "key": key})
+
+
 def checked_write(conn: sa.Connection, plan_id: str, lane: str, drafts: list[model.EventDraft]) -> list[int]:
     """レーンの進行表へ組み換えと状態の下書きを書く唯一の関数。1 件ずつ計画の決まりで確かめ、新しく当たる箇所があれば `Refused`。
 
     計画の決まりの判定は書く前の状態と比べ、書き込みで新しく生まれた違反だけを断る（前からある違反で
-    無関係の組み換えを止めない）。
+    無関係の組み換えを止めない）。読む前に計画の排他（`lock_plan`）を取る。
     """
+    lock_plan(conn, plan_id)
     view, _ = read_plan(conn, plan_id)
     if lane not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
@@ -303,6 +320,7 @@ def cancel_pending(conn: sa.Connection, view: PlanView, reason: str) -> list[str
 
     計画ごと止めるので、別のレーンの after が指す行（I18）の決まりは当てない。
     """
+    lock_plan(conn, view.table_id)
     running = []
     for name, evs in read_lanes(conn, view).items():
         rows = fold_lane(evs)

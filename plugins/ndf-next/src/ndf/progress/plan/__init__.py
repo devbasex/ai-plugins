@@ -158,6 +158,7 @@ def _check_request(conn: sa.Connection, pid: str, request: Optional[str]) -> Non
 
 def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optional[str] = None) -> str:
     """動いている計画へレーンを足す（オーガナイザー）。応えた依頼があれば同じトランザクションで閉じる。"""
+    lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
     meta = store.read_table(conn, pid)
     if decl["name"] in view.lanes:
@@ -174,6 +175,7 @@ def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optio
 
 def change_lane(conn: sa.Connection, pid: str, name: str, changes: dict[str, Any], reason: str, request: Optional[str] = None) -> None:
     """レーンの触る場所・プランの本数・after を変える（name が計画の行なら上限を変える）。決まりで新しく当たれば断る。"""
+    lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
     if name != lane.PLAN_ROW and name not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {name} は無い")

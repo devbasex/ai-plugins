@@ -379,3 +379,20 @@ def test_touch_overlap_errors_as_they_are_now(view, rows, errors):
 )
 def test_row_order_chain_as_it_is_now(view, rows, errors):
     assert lane.plan_errors(view, rows) == errors
+
+
+def test_cross_lane_writes_of_one_plan_wait_for_each_other_on_postgresql(pg_url, root):
+    """PostgreSQL では、計画の決まりを確かめて書く操作が計画の鍵で直列になる（別レーンへの同時の書き込みが互いを見る）。"""
+    import sqlalchemy as sa
+
+    with store.open_store(pg_url, root) as st, st.engine.connect() as first, st.engine.connect() as second:
+        with first.begin():
+            lane.lock_plan(first, "plan:r:p6")
+            waiting = second.begin()
+            second.execute(sa.text("SET LOCAL lock_timeout = '200ms'"))
+            with pytest.raises(sa.exc.OperationalError, match="lock timeout"):
+                lane.lock_plan(second, "plan:r:p6")
+            waiting.rollback()
+        # 先のトランザクションが終われば取れる
+        with second.begin():
+            lane.lock_plan(second, "plan:r:p6")

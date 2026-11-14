@@ -1,16 +1,18 @@
 """計画を進める耐久ワークフローの判断（#3097）。DB も DBOS も読まない純粋な関数である。
 
 耐久ワークフロー（`ndf.progress.plan.run`）は、計画とレーンの進行表を読んだ写し（`Observe` の結果）を
-この判断へ渡し、次の手を 1 つ受ける。手は 4 つある。
+この判断へ渡し、次の手を 1 つ受ける。手は 5 つある。
 
 - `Observe`: 計画とレーンの進行表を読み直す
 - `Launch`: 止まっているレーンの conductor を起こす。`cancel` があれば、止めた計画で実行中のスプリントを
   中止させる入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
+- `Report`: 起こせなかったレーンを、計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
 - `Sleep`: 次に読み直すまで待つ
 
 同じ読み直しの間に同じレーンの行を 2 回起こさない。起こしたレーンの行は、行が実行中になるか終わるまで
-起こし直さない（`launched`）。起動の失敗は読み直すたびに打ち直し、回数が尽きたら `failed` に残して知らせる。
+起こし直さない（`launched`）。起動の失敗は読み直すたびに打ち直し、回数が尽きたら（打ち直しても起こせない失敗
+`final` ならその場で）`failed` に残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける。
 """
 
 from __future__ import annotations
@@ -51,18 +53,28 @@ class Complete:
 
 
 @dataclass(frozen=True)
+class Report:
+    """起こせなかったレーン `lane` の起動 `key` を、詳細 `detail` を添えてオーガナイザーへ知らせる手。"""
+
+    lane: str
+    key: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class Sleep:
     """`seconds` 秒待つ手。"""
 
     seconds: float
 
 
-Act = Union[Observe, Launch, Complete, Sleep]
+Act = Union[Observe, Launch, Complete, Report, Sleep]
 
 
 @dataclass(frozen=True)
 class Done:
-    """手の結果。`Observe` は写し（`snapshot` の形）、`Launch` は `{"ok": 真偽, "detail": 文}`、`Complete` は真偽。"""
+    """手の結果。`Observe` は写し（`snapshot` の形）、`Launch` は `{"ok": 真偽, "detail": 文}`（打ち直しても起こせない
+    失敗は `"final": True` を持つ）、`Complete` は真偽、`Report` は開いた依頼の鍵。"""
 
     act: Act
     value: Any = None
@@ -158,7 +170,7 @@ def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: P
     count = state.count(act.key) + 1
     attempts = tuple((k, n) for k, n in state.attempts if k != act.key) + ((act.key, count),)
     error = f"{act.key}: {value['detail']}"
-    if count >= policy.attempts:
+    if count >= policy.attempts or value.get("final"):
         return replace(state, tried=tried, attempts=attempts, failed=(*state.failed, act.key), errors=(*state.errors, error))
     return replace(state, tried=tried, attempts=attempts, errors=(*state.errors, error))
 
@@ -172,7 +184,12 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
         fresh = replace(state, snapshot=snap, tried=(), launched=_live_launched(state, snap))
         return _after_observe(fresh, policy)
     if isinstance(done.act, Launch):
-        return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
+        after = _after_launch(state, done.act, done.value, policy)
+        if done.act.key in after.failed and done.act.key not in state.failed:
+            return loop.Next.step(Report(done.act.lane, done.act.key, after.errors[-1]), after)
+        return _after_observe(after, policy)
+    if isinstance(done.act, Report):
+        return _after_observe(state, policy)
     if isinstance(done.act, Complete):
         return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(Observe(), state)
     raise TypeError(f"知らない手: {done.act!r}")
