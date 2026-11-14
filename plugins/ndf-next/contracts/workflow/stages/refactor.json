@@ -21,7 +21,7 @@
   },
   "metadata": {
     "ndf": {
-      "stage": "構造改善",
+      "stage": "リファクタリング",
       "phase": "implement",
       "when": [
         "code_in_diff"

@@ -137,6 +137,7 @@
     "google-workspace.thumbnails": {"summary": "スライドのサムネイルを取るコマンドの上限", "seconds": 120},
     "cause.ci-pending": {"summary": "止まった理由 ci_pending（CI のチェックが終わっていない）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒", "attempts": 10, "interval": 60, "factor": 1.5, "max_interval": 600},
     "cause.infra-wait": {"summary": "止まった理由 infra_wait（Runner が付かない・GitHub の API の上限・作業マシンのメモリが足りない）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒", "attempts": 3, "interval": 600, "factor": 2, "max_interval": 3600},
+    "cause.store-busy": {"summary": "止まった理由 store_busy（進行表の DB の書き込みの待ちが busy_timeout を超えた）の打ち直し。回数・最初の間隔・間隔の倍率・頭打ちの秒", "attempts": 3, "interval": 30, "factor": 2, "max_interval": 120},
     "cause.usage-limit": {"summary": "止まった理由 usage_limit（LLM の利用上限）の打ち直しの回数。待つのは結果の retry_after の秒で、1 回の待ちの上限は supervise.limit-wait-max", "attempts": 1},
     "output.tail-lines": {"summary": "長い出力を読み返すときに残す末尾の行数", "count": 200},
     "record.days": {"summary": "hook が書く記録を残す期間の秒（7 日）", "seconds": 604800},

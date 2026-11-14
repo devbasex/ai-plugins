@@ -61,7 +61,7 @@
   "reason_required": ["disabled", "enabled", "retry", "manual_finished", "scope_changed", "mode_raised", "cancelled", "request_closed"],
   "gates": {
     "design": "設計 Pull Request のマージ",
-    "release": "本番の系へ届く操作"
+    "release": "本番系へ届く操作"
   },
   "branch_prefixes": {
     "sprint": "sprint/",

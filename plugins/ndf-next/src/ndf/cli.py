@@ -21,6 +21,7 @@ COMMANDS: dict[str, str] = {
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "launch-args": "ndf.adapters.cli",
+    "progress": "ndf.progress.command",
     "test-slot": "ndf.testing.command",
 }
 

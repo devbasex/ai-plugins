@@ -21,7 +21,7 @@
   },
   "metadata": {
     "ndf": {
-      "stage": "実装レビュー",
+      "stage": "コードレビュー",
       "phase": "implement",
       "inputs": [
         "worktree",
