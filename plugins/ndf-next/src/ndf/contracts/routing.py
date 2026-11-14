@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Union
 
 from ndf.contracts import causes, limits
 
@@ -63,6 +63,17 @@ def _retry_wait(row: causes.CauseRow, used: int, retry_after: Optional[float], c
     return backoff(policy, used, retry_after, cap)
 
 
+def _destination(row: causes.CauseRow, kind: str, on_cause: Optional[Mapping[str, str]]) -> Union[str, Route]:
+    """on_cause の指定（無ければ表の route）から行き先の語を決める。指定がステップの id ならその Route を返す。"""
+    target = on_cause.get(kind) if on_cause is not None else None
+    if target is None:
+        return row.route
+    if target in PLAN_TARGETS:
+        return target
+    # 指定はステップの id
+    return Route(STEP, target, 0.0, kind)
+
+
 def pick(
     kind: str,
     *,
@@ -82,14 +93,9 @@ def pick(
     if used < 0:
         raise ValueError(f"打ち直しの回数は 0 以上: {used}")
     row = causes.row(kind)
-    target = on_cause.get(kind) if on_cause is not None else None
-    if target is None:
-        to = row.route
-    elif target in PLAN_TARGETS:
-        to = target
-    else:
-        # 指定はステップの id
-        return Route(STEP, target, 0.0, kind)
+    to = _destination(row, kind, on_cause)
+    if isinstance(to, Route):
+        return to
     if to == RETRY:
         wait = _retry_wait(row, used, retry_after, cap)
         if wait is not None:
