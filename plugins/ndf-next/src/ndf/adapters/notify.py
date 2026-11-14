@@ -182,20 +182,32 @@ def _shutdown(sock: socket.socket | None) -> None:
         return
 
 
-def _limit_hook(deadline: float, timeout: float, watch: _Watchdog):
+@dataclass(frozen=True)
+class _Fetch:
+    """取得 1 回の期限。転送の前後で同じ 1 つを使う。
+
+    `deadline` は単調時計（`_now`）の絶対時刻、`timeout` は上限の秒（理由の文に使う）、`watch` はその期限の監視。
+    """
+
+    deadline: float
+    timeout: float
+    watch: _Watchdog
+
+
+def _limit_hook(fetch: _Fetch):
     """要求（転送の先を含む）ごとに、期限の残りを httpx のタイムアウトへ掛け直し、接続を監視へ渡す。"""
 
     def hook(request: httpx.Request) -> None:
-        left = deadline - _now()
+        left = fetch.deadline - _now()
         if left <= 0:
-            raise _expired(timeout)
+            raise _expired(fetch.timeout)
         request.extensions["timeout"] = httpx.Timeout(left).as_dict()
-        request.extensions["trace"] = watch.trace
+        request.extensions["trace"] = fetch.watch.trace
 
     return hook
 
 
-def _read(resp: httpx.Response, deadline: float, timeout: float, watch: _Watchdog) -> bytes:
+def _read(resp: httpx.Response, fetch: _Fetch) -> bytes:
     """最終の応答の本文を、期限の内で読み切る。2xx でなければ読まずに `FetchError`。
 
     受信のたびに本文を受け取り（量で溜めない）、受け取るたびに期限を確かめる。受信を待っている間に
@@ -206,19 +218,19 @@ def _read(resp: httpx.Response, deadline: float, timeout: float, watch: _Watchdo
     parts: list[bytes] = []
     for chunk in resp.iter_bytes():
         parts.append(chunk)
-        if _now() > deadline:
-            raise _expired(timeout)
-    if watch.fired:
-        raise _expired(timeout)
+        if _now() > fetch.deadline:
+            raise _expired(fetch.timeout)
+    if fetch.watch.fired:
+        raise _expired(fetch.timeout)
     return b"".join(parts)
 
 
-def _follow(client: httpx.Client, request: httpx.Request, deadline: float, timeout: float, watch: _Watchdog) -> bytes:
+def _follow(client: httpx.Client, request: httpx.Request, fetch: _Fetch) -> bytes:
     """転送を追い、最終の応答の本文を返す。転送の応答は本文を読まずに閉じる。"""
     for _ in range(client.max_redirects + 1):
         with contextlib.closing(client.send(request, stream=True)) as resp:
             if resp.next_request is None:
-                return _read(resp, deadline, timeout, watch)
+                return _read(resp, fetch)
             request = resp.next_request
     raise FetchError("転送が多すぎる")
 
@@ -230,22 +242,21 @@ def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None =
     上限を越えた・2xx でない・転送が多すぎる・URL が不正・接続できないときは
     `FetchError`（理由の日本語 1 行）を送出する。
     """
-    deadline = _now() + timeout
-    watch = _Watchdog(timeout)
-    hooks = {"request": [_limit_hook(deadline, timeout, watch)]}
+    fetch = _Fetch(deadline=_now() + timeout, timeout=timeout, watch=_Watchdog(timeout))
+    hooks = {"request": [_limit_hook(fetch)]}
     try:
         with httpx.Client(transport=transport, timeout=timeout, event_hooks=hooks, limits=_NO_KEEPALIVE) as client:
-            return _follow(client, client.build_request("GET", url), deadline, timeout, watch)
+            return _follow(client, client.build_request("GET", url), fetch)
     except httpx.TimeoutException as e:
         raise _expired(timeout) from e
     except httpx.InvalidURL as e:
         raise FetchError(_BAD_URL) from e
     except httpx.RequestError as e:
-        if watch.fired:
+        if fetch.watch.fired:
             raise _expired(timeout) from e
         raise FetchError(_connect_reason(e)) from e
     finally:
-        watch.stop()
+        fetch.watch.stop()
 
 
 # ---- Slack ----
