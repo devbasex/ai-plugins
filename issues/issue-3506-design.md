@@ -67,17 +67,21 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 
 作り直しの `Lander` は 2 つ目の持ち主である。作り直し（`plugins/ndf-next/`）は旧いプラグインのコードを読み込まない別のパッケージで、旧いプラグインを置き換える。`plugins/ndf-next/src` の中で旧いプラグインのパスに当たる箇所は、コメントの 2 件だけである。そのため、マージの処理を共有できない。
 
+**2 つの持ち主の正本**: 置き換えの期間に本番のマージの振る舞いの正本は、旧いプラグインの `_merge_pr` である（今の本番のリリースはこの経路を通る）。迂回の条件（I1〜I9）は、この文書の不変条件の表が 1 か所で持つ。2 つの持ち主はこの表の同じ行を、それぞれの側のテストで縛る（「テスト設計」の表で、作り直しで縛る行は「作り直し」と書き、ほかの行は旧いプラグインで縛る）。両者が食い違ったら、作り直しの側を旧いプラグインに合わせて直す。
+
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | リリースの場合 | `production_merge.admin` が JSON の `true` のときだけ迂回の宣言があるとみなす。キーが無い・`true` 以外の値・型の違いは宣言なしとして扱う | 宣言なしの場合（`cd-no-review` / `cd-review`）で進む |
-| I2 | リリースの場合 | `cd-admin` になるのは、CD があり、本番チャネルの承認数が 1 以上と読め、迂回の宣言があるときだけである。承認数が 0 か読めないときは宣言があっても `cd-no-review` にする。作り直しも同じ条件で迂回するかを決め、承認数が 0 か読めないときは宣言があっても迂回せず、記録を置かず、出力の `admin` を `false` にする | 迂回しない場合で進む |
+| I2a | リリースの場合 | 旧いプラグインで `cd-admin` になるのは、CD があり、本番チャネルの承認数が 1 以上と読め、迂回の宣言があるときだけである | 承認数が 0 か読めないときは、宣言があっても `cd-no-review` で進む |
+| I2b | リリースの場合 | 作り直しが迂回するのは、I2a と同じく、宣言があり、宛先のブランチの規則の承認数が 1 以上と読めるときだけである | 承認数が 0 か読めないときは、宣言があっても迂回せず、記録を置かず、出力の `admin` を `false` にする |
 | I3 | 本番の PR | 管理者の迂回でマージするのは `cd-admin` のときだけである。`cd-no-review`・`cd-review` は今と同じく迂回なしでマージする | — |
 | I4 | 本番の PR | `cd-admin` の迂回は、承認の証跡が本番の PR の先端と完全に一致するときだけ打つ | 承認ゲート（終了コード 10）で止まり、PR は開いたまま残る |
 | I5 | 本番の PR | `cd-admin` の迂回は、本番の PR のチェックがすべて通った後にだけ打つ | 落ちたら 1、上限までに終わらなければ 75 で止まり、迂回しない |
-| I6 | 本番の PR | 迂回のマージは、照らした先端を指定して打つ | チェックを待つ間に先端が動けば、待ちの読み直しが `head_moved` で止める。最後の読み直しの後に動けば、GitHub が断り、`_merge_pr` が PR を読み直して先端の違いを `head_moved` として返す。どちらもマージしない。`release --channel prod` は承認ゲート（10）、`promote` は既存の契約どおり 1 で止まる |
-| I7 | 承認の証跡 | 迂回でマージした本番の PR には、マージした先端と照らした証跡を指す迂回の記録が 1 件だけ残る。同じ先端の記録が既にあれば書き足さない | 書けなければ本番の完了と分けて 1 で報告し、打ち直しで書く |
+| I6a | 本番の PR | 迂回のマージは、照らした先端を指定して打つ。チェックを待つ間に先端が動いたら、マージしない | 待ちの読み直しが `head_moved` で止める。`release --channel prod` は承認ゲート（10）、`promote` は既存の契約どおり 1 で止まる |
+| I6b | 本番の PR | 最後の読み直しの後に先端が動いたら、マージしない | GitHub が断り、`_merge_pr` が PR を読み直して先端の違いを `head_moved` として返す。`release --channel prod` は承認ゲート（10）、`promote` は既存の契約どおり 1 で止まる |
+| I7 | 承認の証跡 | 迂回でマージした本番の PR には、マージした先端と照らした証跡を指す迂回の記録が 1 件だけ残る。同じ先端の記録が既にあれば書き足さない。再開のときに「迂回でマージしたか」は、マージのときと同じ入力から決め直す。入力は、場合の判定の迂回の有無（宣言と承認数から決まる）と、利用者の証跡がマージした先端と一致することの 2 つである。PR の `reviewDecision` は使わない（I2a は承認レビューがそろった PR も迂回でマージするため） | 書けなければ本番の完了と分けて 1 で報告し、打ち直しで書く |
 | I8 | 本番の PR | 迂回でマージしたとき、結果 JSON の本番の PR の行の `admin` が `true`、迂回なしなら `false` である | — |
 | I9 | 承認の証跡 | `cd-admin` の承認に数えるのは、利用者が書いた証跡（担い手が `user`）だけである。MVV 判定が書いた証跡（担い手が `mvv`）は、承認ゲートの承認に数えない。作り直しも同じく、利用者の承認だけを迂回の前提にする | 承認ゲート（10）で止まり、迂回しない |
 
@@ -87,7 +91,7 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 | --- | --- | --- | --- |
 | E1 | 本番の PR を開いた（か、開いている PR を引いた） | 本番の経路（`release --channel prod`・`promote`） | 本番のマージの処理 |
 | E2 | 迂回の宣言を読んだ | 場合の判定 | 本番のマージの処理（場合の値として受ける） |
-| E3 | 承認ゲートの利用者の承認を、本番の PR の先端と照らした | 本番のマージの処理 | 本番のマージの処理（一致しなければ承認ゲートで止まる） |
+| E3 | 承認ゲートの利用者の承認を、本番の PR の先端と照らした | 承認の照合（`reviewed.merge_on_pr_approval`。作り直しは `Lander` の証跡の読み直し） | 一致したとき: `merge-when-green` へのマージの依頼（迂回ありで頼む）。一致しないとき: 承認ゲート（10 で止め、利用者の承認を待つ） |
 | E4 | 本番の PR の必須のチェックが通った | `merge-when-green`（作り直しは `Lander._watch`） | 本番のマージの処理 |
 | E5 | 本番の PR を迂回でマージした | 本番のマージの処理 | 証跡の書き手・CD |
 | E6 | 迂回してマージしたことを記録した | 証跡の書き手 | 利用者（PR の画面）・結果 JSON の読み手 |
@@ -99,7 +103,9 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 | --- | --- | --- |
 | リリースの場合 | CD の有無・本番チャネルの承認数・迂回の宣言で決まる 4 つの場合（`cd-no-review` / `cd-review` / `cd-admin` / `no-cd`）。承認を取る場所とマージの主体を決める | 意味の変更（`ndf-release`） |
 | 迂回の記録 | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と、照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | 追加（`ndf-release`） |
-| 迂回の宣言 | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなす | 意味の変更（`ndf-release`。置き場とキーを決めた） |
+| 迂回の宣言 | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなす | 追加（`ndf-release`） |
+| 本番の PR | リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く | 追加（`ndf-release`） |
+| 管理者の迂回 | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | 追加（`ndf-release`） |
 
 ## 外部の調査
 
@@ -120,7 +126,7 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 | # | 製品 | どう解いているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | PRD1 | `gh pr merge --admin` | "Use administrator privileges to merge a pull request that does not meet requirements"。実装は手元の要件の判定とマージキューを飛ばし、通常のマージ（GraphQL の `mergePullRequest`）を呼ぶ。迂回の引数は API へ送らない | 旧いプラグインの迂回は既存の `merge-when-green` の `--admin` の経路をそのまま使う | https://cli.github.com/manual/gh_pr_merge ・ https://raw.githubusercontent.com/cli/cli/trunk/pkg/cmd/pr/merge/merge.go ・ `pkg/cmd/pr/merge/http.go`（2026-11-14） |
-| PRD2 | `gh pr merge --match-head-commit` と REST の `sha` | 指定した SHA と PR の先端が一致するときだけマージを許す | 迂回のマージにも照らした先端を添える（I6）。既存の `--expect-head` の経路が添えている | 同上・ https://docs.github.com/en/rest/pulls/pulls （2026-11-14） |
+| PRD2 | `gh pr merge --match-head-commit` と REST の `sha` | 指定した SHA と PR の先端が一致するときだけマージを許す | 迂回のマージにも照らした先端を添える（I6a・I6b）。既存の `--expect-head` の経路が添えている | 同上・ https://docs.github.com/en/rest/pulls/pulls （2026-11-14） |
 | PRD3 | REST の PR のマージ（`PUT .../pulls/{n}/merge`）と非同期のマージ（`PUT .../pulls/{n}/merge-async`） | 同期のマージに迂回の引数は無い。非同期のマージは `bypass_rules`（"Whether to bypass repository rules that the authenticated actor is permitted to bypass."、既定 `false`）を持ち、結果は後から届く | 作り直しの迂回には使わない（決定 5）。宣言の無いとき・迂回しないときは同期のマージのまま | https://docs.github.com/en/rest/pulls/pulls （2026-11-14） |
 | PRD4 | GraphQL の `mergePullRequest` | 入力の `expectedHeadOid` は "OID that the pull request head ref must match to allow merge; if omitted, no check is performed."。入力に迂回の項目は無い。PR の `viewerCanMergeAsAdmin` は "Indicates whether the viewer can bypass branch protections and merge the pull request immediately." | 作り直しの迂回は、`gh pr merge --admin` と同じ `mergePullRequest` を `expectedHeadOid` 付きで打つ（決定 5） | https://docs.github.com/en/graphql/reference/pulls （2026-11-14） |
 
@@ -149,8 +155,8 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 | --- | --- |
 | 宣言の型（`project_lib/model.py` の `ProductionMerge`・`ProjectDecl.production_merge`）とスキーマ（`project.schema.json`） | `production_merge` のキーの形を定める。値は `{"admin": <真偽>}` か `Unknown` |
 | 宣言の読み取り（`lib/project_decl.py` の `production_admin`） | I1 の判定を 1 か所で持ち、`true` のときだけ真を返す |
-| 場合の判定（`lib/release_case.py`） | 4 つ目の値 `cd-admin` と、場合の属性 `trail_approval`（証跡で承認を取る）・`admin_merge`（迂回でマージする）・`human_approval`（MVV 判定で承認ゲートを代えない）を持つ。I2 を守る |
-| 本番の PR のマージ（`merged_lib/merge.py` の `_merge_pr`） | 渡された迂回の有無で `gh pr merge` に `--admin` を付け、結果の行に `admin` を必ず書く。GitHub が断ったら PR を読み直し、先端が動いていれば `head_moved` の項目を返す（I6） |
+| 場合の判定（`lib/release_case.py`） | 4 つ目の値 `cd-admin` と、場合の属性 `trail_approval`（証跡で承認を取る）・`admin_merge`（迂回でマージする）・`human_approval`（MVV 判定で承認ゲートを代えない）を持つ。I2a を守る |
+| 本番の PR のマージ（`merged_lib/merge.py` の `_merge_pr`） | 渡された迂回の有無で `gh pr merge` に `--admin` を付け、結果の行に `admin` を必ず書く。GitHub が断ったら PR を読み直し、先端が動いていれば `head_moved` の項目を返す（I6b） |
 | 本番のマージの頼み手（`release_lib/reviewed.py` の `release_prod`・`merge_on_pr_approval`） | 場合の属性で証跡の待ちと迂回の有無を決めて `merge-when-green` へ渡し、迂回の記録を書かせる |
 | 選んで集める取り込み方の本番（`release_lib/promotion.py` の `release_selected`） | 本番の PR の結果の行に迂回の有無を書き、マージ済みからの再開で迂回の記録を書かせる。記録を書けなかったことを、戻すマージと同じく本番の完了と分けて報告する |
 | 承認の照合（`release_lib/approval.py` の `approved_on_pr`・`_approved_from_pr`） | 場合の属性で、承認を書く手順の案内を切り替える。`cd-admin` では担い手が `user` の証跡だけを承認に数える（I9） |
@@ -158,7 +164,7 @@ grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
 | 本番のプランの部品（`supervise_lib/release_cd.py` の `cd_release_wait`・`cd_prod_steps`） | `human_approval` の場合は、MVV 判定のプランでも承認ゲートで止め、証跡は利用者の承認の後に `--by user` で書く |
 | 証跡の書き手（`release_lib/approval_trail.py` の `write_admin_record`） | 迂回の記録を 1 件だけ置く（I7）。証跡の判定はこの記録を数えない |
 | 作り直しの宣言の読み取り（`ndf-next` の `domains/release/declaration.py` の `production_admin`） | 同じキーを I1 と同じ規則で読む |
-| 作り直しのマージ（`ndf-next` の `domains/release/land.py` の `Lander`・`cli.py` の `cmd_merge`） | 宣言があり、宛先のブランチの規則の承認数が 1 以上と読めるとき（I2）だけ迂回でマージし、マージの後に迂回の記録を置き、出力の `admin` を書く。マージ済みからの再開でも、記録が無ければ書く |
+| 作り直しのマージ（`ndf-next` の `domains/release/land.py` の `Lander`・`cli.py` の `cmd_merge`） | 宣言があり、宛先のブランチの規則の承認数が 1 以上と読めるとき（I2b）だけ迂回でマージし、マージの後に迂回の記録を置き、出力の `admin` を書く。マージ済みからの再開でも、記録が無ければ書く |
 | 作り直しの GitHub の接続（`ndf-next` の `adapters/github.py`） | 迂回のマージ（`mergePullRequest` を `expectedHeadOid` 付きで打つ）を持つ。断られたら、同期のマージと同じく PR を読み直して種類を決める |
 | 作り直しの証跡（`ndf-next` の `domains/release/trail.py`） | 迂回の記録の書き込み（I7）を持つ |
 | ai-plugins の宣言（`.ndf/project.json`） | `production_merge.admin: true` を持つ |
@@ -372,10 +378,10 @@ sequenceDiagram
 | --- | --- |
 | チェックの待ちは迂回の有無に依らずマージの前に走る（I5） | `merged_lib/merge.py` の `merge_when_green` は 295 行目の `watch.wait()` の後で 301 行目の `_merge_pr` を呼ぶ。迂回の有無（`no_admin`）を読むのは `_merge_pr` の 232 行目だけで、待ち（`merged_lib/checks.py` の `GreenWatch`）は読まない |
 | 待つ間に先端が動くと `head_moved` で止まる | `merged_lib/checks.py` の `_check_expected`（309〜326 行目）が `--expect-head` と読んだ先端を比べ、違えば `head_moved` の項目で止める。`release-steps.py` の `wait_and_merge`（528〜529 行目）がこの項目を `HeadMoved` にし、本番の経路が承認ゲート（10）で返す |
-| GitHub に断られたときの今の結果 | `_merge_pr`（235〜247 行目）は断られると `stopped` の項目で止め、`head_moved` を返さない。`wait_and_merge` はこれを 1 にする。この設計で、断られた後に PR を読み直して先端の違いを `head_moved` にする（I6）。作り直しの `adapters/github.py` の `merge`（619〜623 行目）と `refusal_kind`（276〜280 行目）が同じ読み直しを既に持つ |
+| GitHub に断られたときの今の結果 | `_merge_pr`（235〜247 行目）は断られると `stopped` の項目で止め、`head_moved` を返さない。`wait_and_merge` はこれを 1 にする。この設計で、断られた後に PR を読み直して先端の違いを `head_moved` にする（I6b）。作り直しの `adapters/github.py` の `merge`（619〜623 行目）と `refusal_kind`（276〜280 行目）が同じ読み直しを既に持つ |
 | `--match-head-commit` の先端が違うと GitHub が断る | PRD2 の一次情報による。NDF が打って試してはいない（「未確認のまま残ること」） |
 
-**再開の流れ**: 記録を書けずに 1 を返した後（決定 7）、打ち直しで記録だけを書く。どの経路も、本番の PR がマージ済みで、迂回する場合で、PR の `reviewDecision` が `APPROVED` でなく（承認レビューを満たさずにマージされた）、迂回の記録が無いときだけ書く。記録の書き込みは同じ先端の記録があれば置かないため、何度打ち直しても 1 件である。
+**再開の流れ**: 記録を書けずに 1 を返した後（決定 7）、打ち直しで記録だけを書く。どの経路も、本番の PR がマージ済みで、迂回する場合で、利用者の証跡がマージした先端と一致し、迂回の記録が無いときだけ書く（I7）。PR の `reviewDecision` は条件に使わない。承認レビューがそろった PR も `cd-admin` では迂回でマージするため、`APPROVED` を除くと記録を補えない PR が残る。記録の書き込みは同じ先端の記録があれば置かないため、何度打ち直しても 1 件である。
 
 | 経路 | 打ち直しで通る所 | 記録を書く所 |
 | --- | --- | --- |
@@ -387,7 +393,7 @@ sequenceDiagram
 
 | 大項目 | 条件 | 実現方式 |
 | --- | --- | --- |
-| セキュリティ | 迂回は承認の一致・チェックの通過の後にだけ打つ | 迂回の指定は `merge-when-green` の既存の待ちと先端の照合の後でだけ効く（I4〜I6）。場合の判定は宣言が `true` でなければ迂回の場合を返さない（I1・I2） |
+| セキュリティ | 迂回は承認の一致・チェックの通過の後にだけ打つ | 迂回の指定は `merge-when-green` の既存の待ちと先端の照合の後でだけ効く（I4〜I6b）。場合の判定は宣言が `true` でなければ迂回の場合を返さない（I1・I2a・I2b） |
 | セキュリティ | 宣言を読めないときは迂回しない | 下の表のとおり、宣言の値が読めないときは宣言なしとして迂回なしでマージし、ファイル自体が読めないときはマージを頼む前に 3 で止まる。どちらも迂回しない |
 | セキュリティ | PR の変更だけで迂回を選べない | 迂回の宣言は、`delivery` と同じくメインディレクトリ → 呼ばれた木の順に読む。設定の契約（`plugins/ndf/contracts/settings/project.json.json`）の `keys.production_merge.place` を `main` にする（`delivery` と同じ形。#2363 と同じ理由） |
 | 運用・保守性 | 迂回したかを結果 JSON と PR の上の両方から読める | 結果の行の `admin`（I8）と、本番の PR の迂回の記録（I7） |
@@ -412,16 +418,16 @@ sequenceDiagram
 | 受け入れ条件 1・I3・I8 | `cd-admin` で証跡が先端と一致し、チェックが通ると、`merge-when-green` へ迂回ありで頼み、結果の行が `admin: true`、終了コード 0 | 迂回なしを固定で渡す・`admin` を `false` で書くと落ちる |
 | 受け入れ条件 2・I4 | `cd-admin` で証跡が無いと、マージを頼まずに 10 で止まる | 証跡を照らさずにマージを頼むと落ちる |
 | 受け入れ条件 3・I5 | `cd-admin` でチェックが落ちると 1、上限なら 75 で止まり、マージを打たない | 迂回のときにチェックの待ちを飛ばすと落ちる |
-| 受け入れ条件 4・I6 | `cd-admin` で、待つ間に先端が動くと 10 で止まる。`gh pr merge` が断られ、読み直した先端が違うと `head_moved` の項目を返し、本番の経路は 10 で止まる。読み直した先端が同じなら今と同じく 1 | 先端を添えずに迂回する・断られた後に読み直さないと落ちる |
+| 受け入れ条件 4・I6a・I6b | `cd-admin` で、待つ間に先端が動くと 10 で止まる。`gh pr merge` が断られ、読み直した先端が違うと `head_moved` の項目を返し、本番の経路は 10 で止まる。読み直した先端が同じなら今と同じく 1 | 先端を添えずに迂回する・断られた後に読み直さないと落ちる |
 | 受け入れ条件 5 | `promote --gate-approved user` の `cd-admin` で、証跡を書いてから迂回でマージする。証跡が無い・承認と先端が違うと 10、チェックが落ちると 1、上限なら 75、先端が動くと `head_moved` の項目で 1（`promote` の既存の契約）で止まり、いずれもマージしない | `promote` が迂回なしを固定にする・証跡を書かない・止まるべきときにマージを打つと落ちる |
-| 受け入れ条件 6・I7 | 迂回でマージすると迂回の記録が 1 件置かれ、打ち直しても増えない。書けないと本番の完了と分けて 1 で報告する。3 つの経路（`release --channel prod`・`promote`・作り直しの `merge`）で、マージ済みからの打ち直しが記録の無いときだけ書く | 記録を書かない・同じ先端で 2 件置く・書けないときに 0 を返す・打ち直しで書かない経路があると落ちる |
+| 受け入れ条件 6・I7 | 迂回でマージすると迂回の記録が 1 件置かれ、打ち直しても増えない。書けないと本番の完了と分けて 1 で報告する。3 つの経路（`release --channel prod`・`promote`・作り直しの `merge`）で、マージ済みからの打ち直しが記録の無いときだけ書く。承認レビューがそろった（`reviewDecision` が `APPROVED`）PR を迂回でマージした場合も、打ち直しで書く | 記録を書かない・同じ先端で 2 件置く・書けないときに 0 を返す・打ち直しで書かない経路がある・`APPROVED` の PR を打ち直しで除くと落ちる |
 | 受け入れ条件 7・I1 | 宣言が無い・`"admin": "true"` のような型の違い・`Unknown` では、承認数 1 なら `cd-review`、迂回なしで頼む | `true` 以外の値を宣言ありとして読むと落ちる |
 | 受け入れ条件 7（ファイルが壊れている） | 迂回の宣言を書いた `.ndf/project.json` が JSON として読めないとき、`release --channel prod` と `promote` はマージを頼まずに 3 で止まる | 読めないファイルを宣言なしとして迂回なしのマージまで進める・迂回へ倒すと落ちる |
-| I2 | 承認数 0 か読めないときは、宣言があっても `cd-no-review` | 承認数を見ずに宣言だけで `cd-admin` を返すと落ちる |
-| I9 | `cd-admin` で担い手が `mvv` の証跡しか無いと、`release --channel prod` は 10 で止まる。`promote --gate-approved mvv` は証跡を書かずに 10 で止まる | 担い手を見ずに証跡を承認に数えると落ちる |
+| I2a | 承認数 0 か読めないときは、宣言があっても `cd-no-review` | 承認数を見ずに宣言だけで `cd-admin` を返すと落ちる |
+| I9 | `cd-admin` で担い手が `mvv` の証跡しか無いと、`release --channel prod` は 10 で止まる。`promote --gate-approved mvv` は証跡を書かずに 10 で止まる。作り直しの `Lander` は、利用者の証跡が無く MVV 判定の証跡だけがあると `refused` で止まり、迂回しない | 担い手を見ずに証跡を承認に数えると落ちる |
 | 受け入れ条件 8（迂回する） | 作り直しの `Lander` が、宣言があり承認数 1 のとき `mergePullRequest` を先端付きで打ち、マージの後に記録を置いて出力に `admin: true` を書く | 宣言を読まない・同期の REST のマージで打つ・先端を添えないと落ちる |
 | 受け入れ条件 8（条件 2〜4 の止まり方） | 宣言があり承認数 1 のとき、証跡が無いと `refused`、チェックが落ちると `test_failed`、待つ間に先端が動くか差し戻されると `refused` で止まり、どれもマージを打たない。宣言の無い場合の同じ止まり方は既存のテスト（`plugins/ndf-next/tests/domains/release/test_release_approval.py` の `test_production_merge_needs_approval`・`test_issue_1983_failed_ci_stops_without_retry`・`test_production_merge_rechecks_approval_after_waiting`）が縛る。宣言のある場合を同じ形で足す | 迂回のときに証跡の読み直しやチェックの待ちを飛ばすと落ちる |
-| 受け入れ条件 8（迂回しない）・I2 | 宣言が無いとき、または宣言があり承認数 0 か読めないときは、今の同期の REST のマージで打ち、記録を置かず、出力の `admin` が `false` | 承認数を見ずに記録を置く・`admin: true` を書くと落ちる |
+| 受け入れ条件 8（迂回しない）・I2b | 宣言が無いとき、または宣言があり承認数 0 か読めないときは、今の同期の REST のマージで打ち、記録を置かず、出力の `admin` が `false` | 承認数を見ずに記録を置く・`admin: true` を書くと落ちる |
 | 受け入れ条件 9 | ai-plugins の宣言を場合の判定に通すと、承認数 1 で `cd-admin` になる | 宣言のキーを書き誤ると落ちる |
 | `cd_release_wait`・`cd_prod_steps` の分岐 | MVV 判定のプランで `cd-admin` は `cd-review` と同じく承認ゲート（`gate_next`）で止まり、承認ゲートの後の `approve-pr` が `--by user` で置かれる | `cd-admin` を MVV 判定の行き先へつなぐ・`approve-pr` を `--by mvv` で置くと落ちる |
 

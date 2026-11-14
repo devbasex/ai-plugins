@@ -33,7 +33,7 @@ plugins/ndf-next/
 ├── src/ndf/domains/release/land.py                 Lander の迂回と記録
 ├── src/ndf/domains/release/trail.py                迂回の記録
 ├── src/ndf/domains/release/cli.py                  cmd_merge の出力
-├── src/ndf/adapters/github.py                      merge_as_admin・review_decision
+├── src/ndf/adapters/github.py                      merge_as_admin
 └── tests/domains/release/test_release_approval.py
 docs/specifications/ndf-release-approval-on-pr.md
 docs/glossary/glossary.json・docs/glossary.md
@@ -94,7 +94,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `merged_lib/merge.py` | モジュール | `_moved_after_refusal`・`_admin_after`（新設）・`_merge_pr`・`merge_when_green`・`promote`・`_trail_before_merge`（変更） |
 | `supervise_lib/release_cd.py` | モジュール | `cd_prod_steps`（変更）・`cd_release_wait`（条件を属性で書き直すだけ。振る舞いは変えない）・`release_cd_case`（説明だけ変更）・`RULE_RELEASE_PROD_CD`（文言を変更） |
 | `domains/release/declaration.py`（作り直し） | モジュール | `production_admin`（新設） |
-| `adapters/github.py`（作り直し） | `GitHub`・`Authored` とモジュール | `GitHub.merge_as_admin`・`GitHub.review_decision`（新設）・`_refused_by_graphql`（新設）・`Authored.url`（新設。既定は空） |
+| `adapters/github.py`（作り直し） | `GitHub`・`Authored` とモジュール | `GitHub.merge_as_admin`・`_refused_by_graphql`（新設）・`Authored.url`（新設。既定は空） |
 | `domains/release/trail.py`（作り直し） | モジュール | `render_admin_record`・`write_admin_record`（新設） |
 | `domains/release/land.py`（作り直し） | `Lander`・`Landed` | `Lander.admin`・`Landed.admin`・`Landed.admin_record`・`Landed.record_error`（新設）・`Lander.approvals`・`Lander._bypass`・`Lander._record`（新設）・`Lander._merge`・`Lander.land`（変更） |
 | `domains/release/cli.py`（作り直し） | モジュール | `cmd_merge`（変更） |
@@ -109,7 +109,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `Case.trail_approval` | `lib/release_case.py` | 新設 | `trail_approval -> bool`（プロパティ） | 承認を証跡で取る場合かを返す | 無し | `cd-no-review`・`cd-admin` で真 | 無し |
 | `Case.admin_merge` | `lib/release_case.py` | 新設 | `admin_merge -> bool`（プロパティ） | 迂回でマージする場合かを返す | 無し | `cd-admin` だけ真 | 無し |
 | `Case.human_approval` | `lib/release_case.py` | 新設 | `human_approval -> bool`（プロパティ） | MVV 判定で承認ゲートを代えない場合かを返す | 無し | `cd-review`・`cd-admin` で真 | 無し |
-| `release_case.decide_case` | `lib/release_case.py` | 変更 | `decide_case(has_cd: bool, approvals: int \| None, why: str, admin: bool = False) -> Case` | CD の有無・承認数・迂回の宣言から場合を決める | 無し | CD があり承認数が 1 以上で `admin` が真なら `cd-admin`。承認数が 0 か `None` なら `admin` に依らず `cd-no-review`（I2） | 無し |
+| `release_case.decide_case` | `lib/release_case.py` | 変更 | `decide_case(has_cd: bool, approvals: int \| None, why: str, admin: bool = False) -> Case` | CD の有無・承認数・迂回の宣言から場合を決める | 無し | CD があり承認数が 1 以上で `admin` が真なら `cd-admin`。承認数が 0 か `None` なら `admin` に依らず `cd-no-review`（I2a） | 無し |
 | `release_case.case_of` | `lib/release_case.py` | 変更 | `case_of(root) -> Case`（変わらない） | 宣言と GitHub の設定から場合を決める | 無し | 宣言の `problems` が空のときだけ `production_admin` の結果を `decide_case` へ渡す | GitHub の API を読む（既存）・宣言を読む |
 | `approval_trail.parse_by` | `release_lib/approval_trail.py` | 新設 | `parse_by(body: str) -> str \| None` | 証跡の本文の `担い手:` の行の値を返す | 本文は証跡の印を持つ | 行が無ければ `None`、あれば前後の空白を除いた値 | 無し |
 | `approval_trail.trails_of` | `release_lib/approval_trail.py` | 変更 | `trails_of(comments: list[dict]) -> list[Trail]`（変わらない） | コメントの並びから証跡を読む | 無し | 各 `Trail` が `by`（`parse_by`）と `url`（`html_url`）を持つ。迂回の記録は証跡の印を持たないため含まれない | 無し |
@@ -119,13 +119,13 @@ docs/glossary/glossary.json・docs/glossary.md
 | `approval_trail.write_admin_record` | `release_lib/approval_trail.py` | 新設 | `write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]` | 同じ先端の記録が無いときだけ迂回の記録を置く（I7） | 本番の PR はマージ済み | (置いたか, コメントの URL)。同じ先端の記録が既にあれば置かずに `(False, その URL)` | GitHub の API を読み、コメントを 1 件書く |
 | `approval.approved_on_pr` | `release_lib/approval.py` | 変更 | `approved_on_pr(repo, pr, head, case) -> Judgment`（変わらない） | PR の上の承認と先端を照らす | `case.has_cd` | `case.human_approval` かつ `case.trail_approval` なら `by="user"` で照らす（I9）。`cd-review` はレビューで照らす（変えない） | GitHub の API を読む（既存） |
 | `reviewed.admin_record_item` | `release_lib/reviewed.py` | 新設 | `admin_record_item(repo: str, pr: int, sha: str, trail_url: str) -> dict` | 迂回の記録を書き、結果の行を返す | 迂回でマージした直後か、`admin_record_on_resume` が条件を確かめた後 | `{"kind": "comment", "name": <URL か #番号>, "result": "written" \| "kept" \| "unwritten"}`。書けなければ `reason` を添えた `unwritten` を返し、例外を上げない | `approval_trail.write_admin_record` を呼ぶ |
-| `reviewed.admin_record_on_resume` | `release_lib/reviewed.py` | 新設 | `admin_record_on_resume(root, repo: str, case, pr: int) -> dict \| None` | マージ済みの本番の PR に、迂回したのに記録が無ければ記録を書く | 本番の PR はマージ済み | `case.admin_merge` が偽・レビューの判定が `APPROVED`・利用者の証跡が先端と一致しない、のどれかなら `None`。ほかは `admin_record_item` の結果の行 | `gh pr view` で判定と先端を読む・証跡を読む・コメントを書く |
+| `reviewed.admin_record_on_resume` | `release_lib/reviewed.py` | 新設 | `admin_record_on_resume(root, repo: str, case, pr: int) -> dict \| None` | マージ済みの本番の PR に、迂回したのに記録が無ければ記録を書く | 本番の PR はマージ済み | `case.admin_merge` が偽か、利用者の証跡が先端と一致しなければ `None`（PR の `reviewDecision` は読まない。I7）。ほかは `admin_record_item` の結果の行 | `gh pr view` で先端を読む・証跡を読む・コメントを書く |
 | `reviewed.admin_back` | `release_lib/reviewed.py` | 新設 | `admin_back(back=None) -> Callable[[list, dict, str], tuple[str, int, str]]` | 公開の後に、記録を書けなかったことを本番の完了と分けて報告する関数を作る（決定 7） | `back` は `promotion.merge_back_after` の形か `None` | 返す関数は先に `back` を打ち、結果の行に `unwritten` の記録があれば状態を `stopped`・終了コードを 1（`back` が既に止まっていればその終了コード）にし、要約に「迂回の記録を書けなかった（本番は出ている）」を足す | `back` が持つもの（戻すマージ） |
 | `reviewed.release_prod` | `release_lib/reviewed.py` | 変更 | `release_prod(ctx, case, ops)`（変わらない） | CD のある場合の本番を、承認の照合・マージ・記録・公開の後まで進める | `case.has_cd` | 案内の分岐が `case.trail_approval` で決まる。結果の行の `admin` が `case.admin_merge`。`ops.published` へ `admin_back()` を渡す | 既存のもの |
 | `reviewed._open_prod_pr` | `release_lib/reviewed.py` | 変更 | `_open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops, case) -> int` | 本番の PR を引くか作る。マージ済みなら記録を確かめて公開の後へ進む | 無し | マージ済みのとき、`admin_record_on_resume` の結果の行を足してから `ops.published(..., back=admin_back())` を呼ぶ | 既存のもの・`admin_record_on_resume` のもの |
 | `reviewed.merge_on_pr_approval` | `release_lib/reviewed.py` | 変更 | `merge_on_pr_approval(...)`（引数は変わらない） | 承認の照合の後に、場合に応じて迂回の有無を決めてマージを頼み、迂回したら記録を書く | `case.has_cd` | `case.trail_approval` なら証跡の commit status を待つ。`no_admin` は `not case.admin_merge`。迂回でマージしたら `admin_record_item` の結果の行を `items` へ足す | 既存のもの・コメントを書く |
 | `promotion.release_selected` | `release_lib/promotion.py` | 変更 | `release_selected(...)`（変わらない） | 選んで集める取り込み方の本番の PR をマージし、公開の後の `back` を返す | 無し | マージした行に `admin`（場合があれば `case.admin_merge`、無ければ偽）を書く。マージ済みからの再開で場合があれば `admin_record_on_resume` の結果の行を足す。返す `back` は `admin_back(merge_back_after(...))` | 既存のもの・コメントを書く |
-| `merge._moved_after_refusal` | `merged_lib/merge.py` | 新設 | `_moved_after_refusal(root, n: int, sha: str \| None) -> str \| None` | マージを断られた後に PR を読み直し、先端が動いていればその先端を返す（I6） | `gh pr merge` が 0 以外で終わった | 読み直した先端が `sha` と違えばその先端、同じか `sha` が無いか読めなければ `None` | `gh pr view` を 1 回打つ |
+| `merge._moved_after_refusal` | `merged_lib/merge.py` | 新設 | `_moved_after_refusal(root, n: int, sha: str \| None) -> str \| None` | マージを断られた後に PR を読み直し、先端が動いていればその先端を返す（I6b） | `gh pr merge` が 0 以外で終わった | 読み直した先端が `sha` と違えばその先端、同じか `sha` が無いか読めなければ `None` | `gh pr view` を 1 回打つ |
 | `merge._merge_pr` | `merged_lib/merge.py` | 変更 | `_merge_pr(root, a, n, watch, items, waits, trail_item=None)`（変わらない） | 緑を確かめた先端で `gh pr merge` を打ち、結果の行を足す | `watch.wait()` が終わっている | マージした行に `admin`（`not no_admin`）を必ず書く。断られて先端が動いていれば `head_moved` の項目で止まる（終了コード 1） | `gh pr merge` を打つ（既存）・`gh pr view` を打つ |
 | `merge.merge_when_green` | `merged_lib/merge.py` | 変更 | `merge_when_green(a, cleanup, ..., trail_item=None, after_merge=None)` | チェックを待ってマージし、結果を出す | 無し | `after_merge` を渡せば、`_merge_pr` の後と `already_merged` のときの両方で結果を出す前に呼ぶ。`after_merge` が文を返せば `stopped`（終了コード 1）で「マージした。<文>」を出す | 既存のもの・`after_merge` のもの |
 | `merge._admin_after` | `merged_lib/merge.py` | 新設 | `_admin_after(root, repo: str, case, n: int, sha: str, trail_url: str) -> Callable[[list[dict]], str \| None]` | `promote` が `merge_when_green` へ渡す、記録を書く処理を作る | `case.admin_merge` | 返す関数は、`items` にマージ済みの行があれば `admin_record_on_resume`、マージした行があれば `admin_record_item` の結果の行を `items` へ足し、`unwritten` なら報告の文を返す（ほかは `None`） | 返す関数がコメントを書く |
@@ -134,15 +134,14 @@ docs/glossary/glossary.json・docs/glossary.md
 | `release_cd.cd_prod_steps` | `supervise_lib/release_cd.py` | 変更 | `cd_prod_steps(a, v, prs, repo, approval, approval_steps, case) -> list[dict]`（変わらない） | 本番の PR の承認ゲートの後のステップを組む | `case` は CD のある場合の名前 | `approve-pr` を置くのは `case` が `TRAIL_APPROVAL` にあるとき。MVV 判定の記録の後の行き先は `case` が `HUMAN_APPROVAL` にあれば `end`、なければ `approve-pr`。`approve-pr` の担い手は MVV 判定のプランかつ `HUMAN_APPROVAL` に無いときだけ `mvv`、ほかは `user` | 無し |
 | `declaration.production_admin` | `domains/release/declaration.py` | 新設 | `production_admin(root: Path) -> bool` | 作り直しで迂回の宣言があるかを I1 の規則で返す | `root` はリポジトリの根（workflow では既定ブランチを取り出した木） | 値が JSON の `true` のときだけ真。ファイルが無い・読めない・壊れている・型の違いは偽 | `.ndf/project.json` を読む |
 | `GitHub.merge_as_admin` | `adapters/github.py` | 新設 | `merge_as_admin(number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome` | GraphQL の `mergePullRequest` を `expectedHeadOid` 付きで打つ（決定 5） | 迂回すると `Lander._bypass` が決めた | 成功なら `merged` が真。断られたら PR を読み直して `refusal_kind` の種類を返す。`merge` と同じ先の確認（`_preflight`・許されたマージの方式）を通る | GraphQL を 2 回（PR の ID・マージ）と REST を読む |
-| `GitHub.review_decision` | `adapters/github.py` | 新設 | `review_decision(number: int) -> str` | PR の `reviewDecision` を大文字で返す | 無し | 値が無ければ空の文字列 | GraphQL を 1 回読む |
 | `_refused_by_graphql` | `adapters/github.py` | 新設 | `_refused_by_graphql(exc: GitHubError) -> bool` | GraphQL の誤りが GitHub の拒否か（届かなかった・上限ではないか）を返す | 無し | `status == 0`・`unreached` が偽・`quota` が `None` のときだけ真 | 無し |
 | `trail.render_admin_record` | `domains/release/trail.py` | 新設 | `render_admin_record(sha: str, trail_url: str) -> str` | 作り直しの迂回の記録の本文を作る | `sha` は 40 桁 | 旧いプラグインと同じ印と行を持ち、証跡の印を含まない | 無し |
 | `trail.write_admin_record` | `domains/release/trail.py` | 新設 | `write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]` | 同じ先端の記録が無いときだけ、照らした証跡を指す迂回の記録を置く（I7） | 本番の PR はマージ済み | (置いたか, コメントの URL)。照らした証跡は `read` の判定の `trail.order` の位置のコメントの URL | GitHub の API を読み、コメントを 1 件書く |
 | `Lander.approvals` | `domains/release/land.py` | 新設 | `approvals(branch: str) -> int \| None` | 宛先のブランチの承認数を読む | 無し | ruleset の `pull_request` 規則があればその最大、無ければ従来の保護の承認数、保護が無ければ 0、読めなければ `None` | GitHub の API を読む |
-| `Lander._bypass` | `domains/release/land.py` | 新設 | `_bypass(pull: Pull) -> bool` | この PR を迂回でマージするかを決める（I2） | 無し | `self.admin` が真・宛先が本番ブランチ・`approvals` が 1 以上、のすべてで真 | `approvals` のもの |
+| `Lander._bypass` | `domains/release/land.py` | 新設 | `_bypass(pull: Pull) -> bool` | この PR を迂回でマージするかを決める（I2b） | 無し | `self.admin` が真・宛先が本番ブランチ・`approvals` が 1 以上、のすべてで真 | `approvals` のもの |
 | `Lander._merge` | `domains/release/land.py` | 変更 | `_merge(pull: Pull, bypass: bool = False) -> Landed` | チェックの待ち・証跡の読み直しの後にマージする | 無し | `bypass` なら `merge_as_admin`、偽なら今の `merge`。戻す PR のマージは常に偽で呼ぶ | 既存のもの |
 | `Lander._record` | `domains/release/land.py` | 新設 | `_record(pull: Pull, done: Landed) -> Landed` | 迂回でマージした結果に、迂回の記録の URL か書けなかった理由を足す | 本番の PR は迂回でマージした | `admin` が真。書けたら `admin_record` に URL、書けなければ `record_error` に理由 | `trail.write_admin_record` のもの |
-| `Lander.land` | `domains/release/land.py` | 変更 | `land(number: int) -> Landed`（変わらない） | リリースの PR をマージし、本番ブランチへ入れたら戻す PR まで進める | 無し | 迂回でマージしたら戻す PR の後に `_record` を通す。マージ済みからの再開で `_bypass` が真かつ `review_decision` が `APPROVED` でなければ `_record` を通す | 既存のもの |
+| `Lander.land` | `domains/release/land.py` | 変更 | `land(number: int) -> Landed`（変わらない） | リリースの PR をマージし、本番ブランチへ入れたら戻す PR まで進める | 無し | 迂回でマージしたら戻す PR の後に `_record` を通す。マージ済みからの再開で `_bypass` が真かつ利用者の証跡がマージした先端と一致すれば `_record` を通す（I7） | 既存のもの |
 | `cli.cmd_merge` | `domains/release/cli.py` | 変更 | `cmd_merge(args) -> dict`（変わらない） | `release-steps merge` の結果を組む | 無し | `Lander` へ `admin=declaration.production_admin(root)` を渡す。出力に `admin` と、あれば `admin_record` を書く。マージ済みで `record_error` があれば `stopped`（種類 `admin_record`）で、`production_sha` を出力に残す | 宣言を読む |
 
 ## 異常系の処理
@@ -151,7 +150,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `project_decl.production_admin` | 宣言を読めない | ファイルが壊れている・キーの型が違う | `read_project_decl` が `{}` を返す・`isinstance` の判定 | 既定値で続ける（偽。I1） | 出力しない。ファイルが壊れていれば、先に `case_of` が `problems` で止める | 無し。直して打ち直す |
 | `release_case.case_of` | 宣言のファイルが壊れている | JSON として読めない | `delivery.load_delivery` の `problems`（既存） | 止める（`CaseUnreadable` → `case_or_stop` が 3） | `stopped`・3（既存の文言）。`--admin` のマージに届かない | 宣言を直して打ち直す |
-| `release_case.case_of` | 承認数を読めない | GitHub の API の失敗 | `read_approvals` が `None`（既存） | 既定値で続ける（`cd-no-review`。I2・決定 3） | 迂回なしでマージし、レビューが本当に必須なら GitHub が断って 1 | 無し |
+| `release_case.case_of` | 承認数を読めない | GitHub の API の失敗 | `read_approvals` が `None`（既存） | 既定値で続ける（`cd-no-review`。I2a・決定 3） | 迂回なしでマージし、レビューが本当に必須なら GitHub が断って 1 | 無し |
 | `approval_trail.judge_trails_on` | 証跡を読めない | GitHub の API の失敗 | `_gh_api` | 呼び出し元へ返す（`TrailError("unreadable")`。既存） | `merge_on_pr_approval` が `stopped`・1 | 打ち直せる |
 | `approval.approved_on_pr` | 証跡かレビューを読めない | GitHub の API の失敗 | `judge_trails_on`・`read_review_commit` の `TrailError`（既存） | 呼び出し元へ返す | `merge_on_pr_approval` が `stopped`・1。担い手が `mvv` の証跡だけのときは失敗ではなく failure の判定を返し、呼び出し元が `gate`・10 | 打ち直せる |
 | `approval_trail.write_admin_record` | コメントを読めない・書けない | GitHub の API の失敗・権限の不足 | `read_comments`・`gh_rest.comment` の `ok` | 呼び出し元へ返す（`TrailError("unreadable")`） | 呼び出し元が `unwritten` の行にする | 打ち直すと、同じ先端の記録が無ければ書く |
@@ -160,7 +159,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `reviewed.admin_back` | 戻すマージと記録の両方で止まった | `back` が `stopped` を返し、記録も `unwritten` | 返す関数の中 | 止める（`back` の終了コードを使い、要約に両方を書く） | `stopped`・`back` の終了コード | 打ち直すと本番のマージと公開を飛ばし、戻すマージと記録だけをやり直す |
 | `reviewed.release_prod` | 承認が先端と一致しない・担い手が `mvv` だけ | 証跡が無い・古い・MVV 判定の証跡 | `merge_on_pr_approval` の `judged.state` | 止める（承認ゲート） | `gate`・10（I4・I9） | 承認を書いて打ち直す |
 | `reviewed._open_prod_pr` | マージ済みの PR の記録を書けない | `admin_record_on_resume` が `unwritten` | 結果の行 | 既定値で続ける（公開の後へ進み、`admin_back` が報告する） | `stopped`・1 | 打ち直せる |
-| `reviewed.merge_on_pr_approval` | チェックが落ちた・上限・先端が動いた | CI の失敗・待ちの上限・承認の後の push | `wait_and_merge` の `StepError`・`HeadMoved`（既存） | 止める | 落ちたら 1、上限なら 75、先端が動いたら `gate`・10（I5・I6） | 直して打ち直す。PR は開いたまま |
+| `reviewed.merge_on_pr_approval` | チェックが落ちた・上限・先端が動いた | CI の失敗・待ちの上限・承認の後の push | `wait_and_merge` の `StepError`・`HeadMoved`（既存） | 止める | 落ちたら 1、上限なら 75、先端が動いたら `gate`・10（I5・I6a） | 直して打ち直す。PR は開いたまま |
 | `promotion.release_selected` | マージ済みの PR の記録を書けない | `admin_record_on_resume` が `unwritten` | 結果の行 | 既定値で続ける（`admin_back` が報告する） | `stopped`・1 | 打ち直せる |
 | `merge._moved_after_refusal` | 読み直せない | `gh pr view` の失敗 | `pr_state` の `StepError` | 既定値で続ける（`None`。今の `stopped` のまま） | `_merge_pr` の今の `stopped`・1 | 打ち直せる |
 | `merge._merge_pr` | GitHub が断った | 先端が動いた・権限の不足・規則を満たさない | `gh pr merge` の終了コード | 止める。先端が動いていれば `head_moved` の項目、衝突なら既存の 4、ほかは既存の `stopped` | `head_moved` は `stopped`・1（`release-steps.py` の `wait_and_merge` が `HeadMoved` にし、本番の経路は 10） | マージしない。承認を取り直して打ち直す |
@@ -172,9 +171,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | `declaration.production_admin` | 宣言を読めない | ファイルが無い・壊れている | `OSError`・`json.JSONDecodeError` | 既定値で続ける（偽。迂回しない） | 出力の `admin` が `false` | 無し |
 | `GitHub.merge_as_admin` | GitHub が断った | 先端が動いた・迂回の権限が無い・規則を満たさない | GraphQL の誤り（`_refused_by_graphql`） | 呼び出し元へ返す（PR を読み直し、`refusal_kind` の種類の `MergeOutcome`） | `cmd_merge` が `stopped`（種類 `refused` など） | マージしない。記録を置かない。直して打ち直す |
 | `GitHub.merge_as_admin` | 届かない・上限 | ネットワーク・GraphQL の枠 | `_refused_by_graphql` が偽 | 呼び出し元へ返す（`GitHubError` を投げ直す） | workflow の `merge` が失敗 | 打ち直せる |
-| `GitHub.review_decision` | 読めない | GitHub の API の失敗 | `graphql` の `GitHubError` | 呼び出し元へ返す | `Lander.land` が `_record` へ進まず、例外として workflow が失敗 | 打ち直せる |
 | `trail.write_admin_record` | コメントを読めない・書けない | GitHub の API の失敗 | `GitHubError` | 呼び出し元へ返す（`TrailError`） | `_record` が `record_error` に入れる | 打ち直せる |
-| `Lander.approvals` | 承認数を読めない | GitHub の API の失敗（404 以外） | `GitHubError` | 既定値で続ける（`None`。迂回しない。I2） | 出力の `admin` が `false` | 無し |
+| `Lander.approvals` | 承認数を読めない | GitHub の API の失敗（404 以外） | `GitHubError` | 既定値で続ける（`None`。迂回しない。I2b） | 出力の `admin` が `false` | 無し |
 | `Lander._bypass` | 承認数を読めない | `approvals` が `None` | 戻り値 | 既定値で続ける（偽） | 同上 | 無し |
 | `Lander._merge` | チェックが落ちた・証跡が無い・先端が動いた | CI・承認・push | `_watch`・`_refusal`（既存） | 呼び出し元へ返す（`test_failed`・`refused`） | `stopped`。マージしない | 直して打ち直す |
 | `Lander._record` | 記録を書けない | `TrailError` | `trail.write_admin_record` | 既定値で続ける（`record_error`） | `cmd_merge` が `stopped`（種類 `admin_record`） | 打ち直すと再開の経路で記録だけを書く |
@@ -193,9 +191,8 @@ docs/glossary/glossary.json・docs/glossary.md
 | `approval.approved_on_pr` | `cd-no-review` | 担い手を問わずに証跡で照らす（変えない） |
 | `approval.approved_on_pr` | `cd-admin` | 担い手が `user` の証跡だけで照らす |
 | `reviewed.admin_record_on_resume` | `case.admin_merge` が偽 | `None`（何もしない） |
-| `reviewed.admin_record_on_resume` | 迂回する場合で、レビューの判定が `APPROVED` | `None`（承認レビューを満たしてマージされた） |
-| `reviewed.admin_record_on_resume` | 迂回する場合で、判定が `APPROVED` でなく、利用者の証跡が先端と一致する | `admin_record_item`（同じ先端の記録があれば `kept`） |
-| `reviewed.admin_record_on_resume` | 迂回する場合で、判定が `APPROVED` でなく、利用者の証跡が先端と一致しない | `None`（NDF の迂回でマージしたと言えないため記録しない） |
+| `reviewed.admin_record_on_resume` | 迂回する場合で、利用者の証跡が先端と一致する（レビューの判定は見ない） | `admin_record_item`（同じ先端の記録があれば `kept`） |
+| `reviewed.admin_record_on_resume` | 迂回する場合で、利用者の証跡が先端と一致しない | `None`（NDF の迂回でマージしたと言えないため記録しない） |
 | `merge._merge_pr` | 成功 | マージした行（`admin` は `not no_admin`） |
 | `merge._merge_pr` | 断られ、衝突 | 既存の `stop_conflict`（4） |
 | `merge._merge_pr` | 断られ、`_moved_after_refusal` が先端を返した | `head_moved` の項目で `stopped`（1） |
@@ -209,9 +206,9 @@ docs/glossary/glossary.json・docs/glossary.md
 | `release_cd.cd_prod_steps` | MVV 判定でないプラン | `approval-post` → `end`。`TRAIL_APPROVAL` の場合だけ `approve-pr --by user` を置く（`cd-admin` は `cd-no-review` と同じ形） |
 | `Lander._bypass` | 宣言が無い | 偽（今のマージ） |
 | `Lander._bypass` | 宣言があり、宛先が本番ブランチでない（戻す PR） | 偽 |
-| `Lander._bypass` | 宣言があり、本番ブランチ宛て、承認数が 0 か `None` | 偽（記録を置かず `admin` は `false`。I2） |
+| `Lander._bypass` | 宣言があり、本番ブランチ宛て、承認数が 0 か `None` | 偽（記録を置かず `admin` は `false`。I2b） |
 | `Lander._bypass` | 宣言があり、本番ブランチ宛て、承認数が 1 以上 | 真 |
-| `Lander.land` | マージ済みの本番の PR・`_bypass` が真・`review_decision` が `APPROVED` でない | 戻す PR の後に `_record`（同じ先端の記録があれば置かない） |
+| `Lander.land` | マージ済みの本番の PR・`_bypass` が真・利用者の証跡がマージした先端と一致する | 戻す PR の後に `_record`（同じ先端の記録があれば置かない） |
 | `Lander.land` | マージ済みの本番の PR・それ以外 | 今のまま戻す PR へ進む |
 
 - 繰り返しの終わる条件: 新しい繰り返しは足さない。チェックの待ちは既存の `GreenWatch`（旧いプラグイン）と `ci.Watch`（作り直し）の上限で終わる
@@ -235,7 +232,7 @@ docs/glossary/glossary.json・docs/glossary.md
 | `ADMIN_TRAIL_LINE` | 定数 | `release_lib/approval_trail.py` | `"照らした承認の証跡:"` |
 | `ADMIN_MARK`（作り直し） | 定数 | `domains/release/trail.py` | 旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため、同じ値を別に持つ。2 つが揃っていることは両方のテストが同じ本文の形で縛る |
 | `GRAPHQL_MERGE_METHODS` | 定数 | `adapters/github.py` | `{"merge": "MERGE", "squash": "SQUASH", "rebase": "REBASE"}` |
-| `_PULL_ID` / `_ADMIN_MERGE` / `_REVIEW_DECISION` | 定数（GraphQL の文） | `adapters/github.py` | PR の ID の読み取り・`mergePullRequest(input: {pullRequestId, expectedHeadOid, mergeMethod})`・`reviewDecision` の読み取り |
+| `_PULL_ID` / `_ADMIN_MERGE` | 定数（GraphQL の文） | `adapters/github.py` | PR の ID の読み取り・`mergePullRequest(input: {pullRequestId, expectedHeadOid, mergeMethod})` |
 | `Lander.admin` | 型 | `domains/release/land.py` | `False`（既存の呼び出しとテストの作り方を壊さない） |
 | `Landed.admin` / `Landed.admin_record` / `Landed.record_error` | 型 | `domains/release/land.py` | `False` / `None` / `None` |
 | `Authored.url` | 型 | `adapters/github.py` | `""`。`from_rest` が `html_url` を入れる |
@@ -245,7 +242,7 @@ docs/glossary/glossary.json・docs/glossary.md
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 本番のマージ（`release --channel prod`・`promote`）と、証跡のチェックの workflow（`release-approval.yml` の `approval-check`） | 本番の PR の先端・`ndf/release-approval` の commit status | 取らない（既存）。迂回の記録は証跡の印を持たないため、記録のコメントは workflow を起こさない | マージは `--match-head-commit` で先端を固定する（I6） |
+| 本番のマージ（`release --channel prod`・`promote`）と、証跡のチェックの workflow（`release-approval.yml` の `approval-check`） | 本番の PR の先端・`ndf/release-approval` の commit status | 取らない（既存）。迂回の記録は証跡の印を持たないため、記録のコメントは workflow を起こさない | マージは `--match-head-commit` で先端を固定する（I6b） |
 | 迂回のマージの直後に、同じ本番の PR へ打ち直しが走る | 本番の PR のコメント | 取らない。同じ先端の記録があれば書かない（読んでから書く） | 打ち直しは何度でも 1 件になる。2 つの打ち直しが同時に読んで同時に書くと 2 件になりうる（下の残リスク） |
 | 作り直しの `release-steps merge` の workflow の起動が重なる | 本番の PR・戻す PR・コメント | workflow の `concurrency` の group（既存）が同じリリースの起動を 1 本ずつにする | `Lander.land` はマージ済みからの再開で記録を書く |
 | 本番のマージの途中の中断（プロセスの停止） | 本番の PR | 無し | マージの前に止まれば PR は開いたまま。マージの後・記録の前に止まれば、再開の経路（`admin_record_on_resume`・`Lander.land`）が記録を書く |
@@ -279,13 +276,12 @@ docs/glossary/glossary.json・docs/glossary.md
 | `approval_trail.render_admin_record` | `approval_trail.render_trail` | `grep -n "def render_" plugins/ndf/scripts/release_lib/approval_trail.py` | 使えない: 証跡の印を持ち、証跡の判定に数えられる。印を分けた別の本文が要る |
 | `approval_trail.write_admin_record` | `approval_trail.write_trail`（同じ人・同じ SHA があれば置かない） | 同上 `grep -n "def write_trail"` | 使う部品: `read_comments`・`gh_rest.comment`・`TrailError` を使う。照合の対象（証跡の判定・先端の読み直し）が違うため関数は分ける |
 | `reviewed.admin_record_item` | `merge._trail_before_merge` の結果の行の形（`kind: comment`） | `grep -n '"kind": "comment"' plugins/ndf/scripts/merged_lib/merge.py` | 使う: 同じ行の形を使う |
-| `reviewed.admin_record_on_resume` | `release-steps.py` の `pr_view`・`reviewed.gh_json` | `grep -n "def pr_view\|gh_json" plugins/ndf/scripts/release-steps.py plugins/ndf/scripts/release_lib/reviewed.py` | 使う: `gh_json` で `gh pr view --json reviewDecision,headRefOid` を読む（`release_lib/` から `release-steps.py` を読み込まない） |
+| `reviewed.admin_record_on_resume` | `release-steps.py` の `pr_view`・`reviewed.gh_json` | `grep -n "def pr_view\|gh_json" plugins/ndf/scripts/release-steps.py plugins/ndf/scripts/release_lib/reviewed.py` | 使う: `gh_json` で `gh pr view --json headRefOid` を読む（`release_lib/` から `release-steps.py` を読み込まない） |
 | `reviewed.admin_back` | `promotion.merge_back_after`（本番の完了と分けて報告する `back`） | `grep -n "def merge_back_after" -A16 plugins/ndf/scripts/release_lib/promotion.py` | 使う: 同じ `back` の形（`(状態, 終了コード, 要約)`）に合わせ、`merge_back_after` の `back` を包む |
 | `merge._moved_after_refusal` | `merge._conflicted`（断られた後の読み直し）・`pr_state` | `grep -n "def _conflicted" -A8 plugins/ndf/scripts/merged_lib/merge.py` | 使う: `pr_state` で読み直す。`_conflicted` と同じ読みを 2 回打たないよう、`_merge_pr` は読み直しの結果を 1 回だけ取る |
 | `merge._admin_after` | `merge_when_green` の `trail_item`（`promote` から渡す項目） | `grep -n "trail_item" plugins/ndf/scripts/merged_lib/merge.py` | 使えない: 項目はマージの前に決まる。記録はマージの後に書くため、項目ではなく処理を渡す |
 | `declaration.production_admin` | 作り直しの `domains/hooks/strict.py` の `.ndf/project.json` の読み取り | `grep -n "_PROJECT_FILE" -A12 plugins/ndf-next/src/ndf/domains/hooks/strict.py` | 使えない: hook の判定の層に置かれ、リリースの層から読むと層の向きが逆になる。置き場の語（`identity.FIXED_WORDS["declaration_dir"]`）だけを使う |
 | `GitHub.merge_as_admin` | `GitHub.merge`（`_preflight`・`allowed_merge_methods`・`pick_merge_method`・`refusal_kind`） | `grep -n "def merge\|def _preflight\|def refusal_kind" plugins/ndf-next/src/ndf/adapters/github.py` | 使う: 先の確認と断られた後の種類の決め方を共有し、要求だけを `mergePullRequest` にする |
-| `GitHub.review_decision` | `GitHub.repository`（`repository(owner, name)` の下を読む） | `grep -n "def repository" plugins/ndf-next/src/ndf/adapters/github.py` | 使う |
 | `_refused_by_graphql` | `GitHubError` の `status`・`unreached`・`quota` | `grep -n "class GitHubError" -A14 plugins/ndf-next/src/ndf/adapters/github.py` | 使う: 既存の属性だけで判定する |
 | `trail.render_admin_record` | `approval_decide.render_trail` | `grep -n "def render_" plugins/ndf-next/src/ndf/domains/release/approval_decide.py` | 使えない: 証跡の印を持つ。別の本文が要る |
 | `trail.write_admin_record` | `adapters/publish.py` の `Publisher.comment`・`trail.read` | `grep -n "def comment" -A4 plugins/ndf-next/src/ndf/adapters/publish.py` | 使う: 書き込みは `Publisher.comment`（URL を返す）、照らした証跡は `read` の判定から引く |
@@ -298,13 +294,13 @@ docs/glossary/glossary.json・docs/glossary.md
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `project_decl.production_admin` | `{"production_merge": {"admin": true}}` で真 | キーが無い・`{"admin": false}`・`{"admin": "true"}`・`{"unknown": "…"}` で偽 | ファイルが壊れていると偽（`case_of` が先に 3 で止めることは `case_of` の行で縛る） |
-| `release_case.decide_case` | CD あり・承認数 1・宣言ありで `cd-admin` | 承認数 0・`None` で宣言があっても `cd-no-review`（I2）。宣言なし・承認数 1 で `cd-review` | 無し |
+| `release_case.decide_case` | CD あり・承認数 1・宣言ありで `cd-admin` | 承認数 0・`None` で宣言があっても `cd-no-review`（I2a）。宣言なし・承認数 1 で `cd-review` | 無し |
 | `release_case.case_of` | ai-plugins の宣言（受け入れ条件 9）で承認数 1 のとき `cd-admin` | 承認数を読めないとき `cd-no-review` | 壊れた `.ndf/project.json` で `CaseUnreadable` |
 | `approval_trail.judge` | `by="user"` で利用者の証跡が先端と一致すれば success と URL | `by` を渡さなければ担い手を問わない（今と同じ） | 担い手が `mvv` の証跡だけなら failure |
 | `approval_trail.write_admin_record` | 記録が無ければ 1 件書く | 同じ先端の記録があれば書かない。別の先端の記録があれば書く | コメントを書けなければ `TrailError` |
 | `reviewed.merge_on_pr_approval` | `cd-admin` で証跡が先端と一致し、チェックが通ると迂回ありで頼み、記録の行が足される | `cd-no-review`・`cd-review` では `no_admin` が真のまま（I3） | 証跡が無い・担い手が `mvv` だけで 10。チェックが落ちて 1、上限で 75、先端が動いて 10 |
 | `reviewed.release_prod` | 結果の行の `admin` が `true`・終了コード 0 | 迂回なしの場合は `admin` が `false` | 記録を書けないと `stopped`・1、要約に「本番は出ている」 |
-| `reviewed.admin_record_on_resume` | マージ済み・判定が `APPROVED` でない・記録が無いとき書く | 判定が `APPROVED`・記録が既にあるときは書かない | 判定を読めないと `unwritten` |
+| `reviewed.admin_record_on_resume` | マージ済み・証跡が先端と一致し・記録が無いとき書く。承認レビューがそろった（`APPROVED`）PR でも書く | 証跡が先端と一致しない・記録が既にあるときは書かない | PR を読めないと `unwritten` |
 | `reviewed.admin_back` | 記録が書けていれば `back` の結果のまま | `back` が `None` | 戻すマージと記録の両方で止まると `back` の終了コードで両方を書く |
 | `promotion.release_selected` | 選んで集める取り込み方の `cd-admin` で、行の `admin` が `true` | 場合が無い（`no-cd`）とき `admin` が `false` | マージ済みからの再開で記録を書けないと 1 |
 | `merge._merge_pr` | 迂回のとき `admin: true` を書く | 迂回なしのとき `admin: false` | 断られて先端が違えば `head_moved`、同じなら今の `stopped`、衝突なら 4 |
