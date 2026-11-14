@@ -16,6 +16,7 @@ import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
@@ -129,8 +130,18 @@ class Launch:
     env: Optional[dict[str, str]] = None
 
 
+class AgentState(StrEnum):
+    """監視の結果の終わり方。値は文字列のまま比べ・書き出せる。"""
+
+    DONE = "done"
+    FAILED = "failed"
+    USAGE_LIMIT = "usage_limit"
+    STALLED = "stalled"
+    TIMEOUT = "timeout"
+
+
 class AgentStatus(NamedTuple):
-    """監視の結果。`state` は done・failed・usage_limit・stalled・timeout。"""
+    """監視の結果。`state` は `AgentState`、`restore` は kiro の控えの結果（`RestoreState`。kiro 以外は None）。"""
 
     agent: str
     state: str
@@ -187,14 +198,14 @@ def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, 
     """終わり方を決める。まだ続くなら None。"""
     hit = usage_limit(tail(w.spec.paths.err))
     if hit:
-        return "usage_limit", hit
+        return AgentState.USAGE_LIMIT, hit
     if code is not None:
-        return ("done" if code == 0 else "failed"), f"終了コード {code}"
+        return (AgentState.DONE if code == 0 else AgentState.FAILED), f"終了コード {code}"
     w.progressed(now)
     if now - w.last_change > stall_seconds(w.spec.agent):
-        return "stalled", f"{now - w.last_change:.0f} 秒出力が増えない"
+        return AgentState.STALLED, f"{now - w.last_change:.0f} 秒出力が増えない"
     if now - w.started > w.spec.timeout:
-        return "timeout", f"監視の上限 {w.spec.timeout:.0f} 秒を超えた"
+        return AgentState.TIMEOUT, f"監視の上限 {w.spec.timeout:.0f} 秒を超えた"
     return None
 
 
@@ -240,6 +251,14 @@ KIRO_AGENTS = Path(".amazonq") / "cli-agents"
 BACKUP_SUFFIX = "-amazonq"
 
 
+class RestoreState(StrEnum):
+    """kiro の控えの結果。起動の記録（`paths.launch`）の `restore` にも同じ値を書く。"""
+
+    RESTORED = "restored"
+    SKIPPED = "restore_skipped"
+    FAILED = "restore_failed"
+
+
 def _in_worktree(workdir: Path) -> bool:
     try:
         done = subprocess.run(
@@ -277,12 +296,12 @@ def _guard_restore(paths: AgentPaths, backed: _AgentsBackup, kept: dict[str, Any
     try:
         _restore(backed)
     except OSError as exc:
-        kept.update(restore="restore_failed", detail=str(exc), backup=str(backed.backup))
+        kept.update(restore=RestoreState.FAILED, detail=str(exc), backup=str(backed.backup))
         with open(paths.err, "a", encoding="utf-8") as err:
             err.write(f"kiro が書き換えた {backed.agents} を戻せない（控えは {backed.backup}）: {exc}\n")
         return
     shutil.rmtree(backed.backup, ignore_errors=True)
-    kept["restore"] = "restored"
+    kept["restore"] = RestoreState.RESTORED
 
 
 def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
@@ -300,13 +319,13 @@ def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
 def kiro_guard(workdir: Path, paths: AgentPaths) -> Iterator[dict[str, Any]]:
     """kiro の起動の前にworktree の `.amazonq/cli-agents` を控え、終わった後に戻して増えた `.bak` を消す。
 
-    worktree でなければ控えずに起動し、`restore_skipped` を残す。戻せなければ控えを残し `restore_failed` を残す。
+    worktree でなければ控えずに起動し、`RestoreState.SKIPPED` を残す。戻せなければ控えを残し `RestoreState.FAILED` を残す。
     結果（`restore`）は起動の記録（`paths.launch`）にも書く。
     """
     kept: dict[str, Any] = {"agent": "kiro", "restore": None}
     backed = _backup_agents(workdir, paths) if _in_worktree(workdir) else None
     if backed is None:
-        kept["restore"] = "restore_skipped"
+        kept["restore"] = RestoreState.SKIPPED
     try:
         yield kept
     finally:
