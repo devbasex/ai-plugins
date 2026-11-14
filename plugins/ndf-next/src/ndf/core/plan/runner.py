@@ -352,6 +352,17 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _finished_result(
+    inv: Invocation, items: list[dict[str, Any]], metrics: dict[str, Any], outputs: Optional[dict[str, Any]], shared: dict[str, Any]
+) -> dict[str, Any]:
+    """ok で終わった回の結果。ステップが残した欠け（outputs の gaps）があれば incomplete で止まる。"""
+    gaps = outputs.get("gaps") if outputs else None
+    if gaps:
+        detail = f"{inv.plan.name} は終わったが、ステップが残した欠け {len(gaps)} 件がある"
+        return result.stopped(TOOL, "incomplete", detail, items=items, metrics=metrics, gaps=gaps, **shared)
+    return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics, **shared)
+
+
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
     """終わった回の結果。耐久ワークフローが例外で終わったときは unknown で止まる。"""
     items = [_run_item(inv), *_pr_items(inv.state_dir)]
@@ -362,11 +373,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
         detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
         return result.stopped(TOOL, "unknown", detail, items=items, metrics=metrics, **shared)
     if final["status"] == OK:
-        gaps = outputs.get("gaps") if outputs else None
-        if gaps:
-            detail = f"{inv.plan.name} は終わったが、ステップが残した欠け {len(gaps)} 件がある"
-            return result.stopped(TOOL, "incomplete", detail, items=items, metrics=metrics, gaps=gaps, **shared)
-        return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics, **shared)
+        return _finished_result(inv, items, metrics, outputs, shared)
     if final["status"] == STOPPED:
         items[0]["step"] = final["last"]
         again = result.command(TOOL, "next", *_with_start(inv.again, final["last"])) if final["last"] else None
