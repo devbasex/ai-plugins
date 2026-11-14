@@ -155,7 +155,7 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
     with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, plan_id)
     if view.state == run_decide.COMPLETED:
-        return {"outcome": run_decide.OUTCOME_COMPLETED, "launched": [], "failed": [], "errors": []}
+        return RunState(outcome=run_decide.OUTCOME_COMPLETED).as_result()
     wid = workflow_id(plan)
     with durable.session(where.root, run_key(plan)):
         if durable.status(wid) is None:
