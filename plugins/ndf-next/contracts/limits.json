@@ -64,6 +64,8 @@
     "jev.probe": {"summary": "JEV に届くかの確かめの上限", "seconds": 10},
     "locks.append": {"summary": "排他つきで 1 行足すときの錠の待ちの上限", "seconds": 5},
     "lease.lock": {"summary": "持ち主の鍵の排他を待つ上限。読んで書くだけの短い区間なので、超えるのは錠の持ち主が止まったとき", "seconds": 10},
+    "run-log.line": {"summary": "実行の記録の 1 行の上限（バイト。改行を含む）。超える行は長い文字列から順に全文ファイル（stderr は続きの行）へ逃がす", "count": 32000},
+    "run-log.keep": {"summary": "実行の記録の日付のディレクトリを残す秒（30 日）。起点の実行が超えたものを消す", "seconds": 2592000},
     "monitor-types.poll": {"summary": "監視の見回りの間隔（MONITOR_POLL で上書きできる）", "interval": 15},
     "monitor-types.result-age-grace": {"summary": "結果ファイルを書いた後もプロセスが残るとき、完了とみなすまでの秒", "seconds": 30},
     "monitor-types.thread-join": {"summary": "監視の読み取りのスレッドの終わりを待つ上限", "seconds": 1},
