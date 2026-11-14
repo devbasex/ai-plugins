@@ -24,6 +24,14 @@ from typing import NamedTuple, Optional
 from ndf.adapters.github import GitHub, text_of
 from ndf.contracts import limits
 
+# チェックの状態（`Check.state`）
+DONE = "done"
+QUEUED = "queued"
+RUNNING = "running"
+STALE = "stale"  # 終わった時刻があるのに結論が無い
+# 読んだ結果（`Reading.verdict`）のうち、まだ結論が出ていない・必須のチェックがすべて通った
+PENDING = "pending"
+PASSED = "passed"
 # 通過として読む結論（SKIPPED・NEUTRAL を通す）。ほかの結論で終わったチェックは落ちたと数える
 PASSING = ("success", "neutral", "skipped")
 # ランナーの割り当てを待つ状態（ランナーの待ちは呼ぶ側の待ちの予算に数えない。#2719）
@@ -52,7 +60,7 @@ class Check(NamedTuple):
 
     @property
     def failed(self) -> bool:
-        return self.state == "done" and self.conclusion not in PASSING
+        return self.state == DONE and self.conclusion not in PASSING
 
 
 def check_of(run: dict) -> Check:
@@ -63,14 +71,14 @@ def check_of(run: dict) -> Check:
     """
     status, conclusion, completed = text_of(run["status"]).lower(), text_of(run["conclusion"]).lower(), text_of(run["completed_at"])
     if status == "completed" or (completed and conclusion):
-        state = "done"
+        state = DONE
     elif completed:
-        state = "stale"
+        state = STALE
     elif status in QUEUED_STATES:
-        state = "queued"
+        state = QUEUED
     else:
-        state = "running"
-    return Check(text_of(run["name"]), state, conclusion if state == "done" else "", int(run["id"]))
+        state = RUNNING
+    return Check(text_of(run["name"]), state, conclusion if state == DONE else "", int(run["id"]))
 
 
 def _newness(run: dict, index: int) -> tuple:
@@ -116,11 +124,11 @@ class Reading(NamedTuple):
         order = [
             ("test_failed", self.failed_tests),
             ("check_failed", self.failed_other),
-            ("pending", self.running or self.queued or (self.missing and not self.settled)),
+            (PENDING, self.running or self.queued or (self.missing and not self.settled)),
             ("missing", self.missing),
             ("stale", self.stale),
         ]
-        return next((name for name, hit in order if hit), "passed")
+        return next((name for name, hit in order if hit), PASSED)
 
     @property
     def only_queued(self) -> bool:
@@ -141,11 +149,11 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
     return Reading(
         failed_tests=[c for c in mine if c.failed and is_test_check(c.name, tests)],
         failed_other=[c for c in mine if c.failed and not is_test_check(c.name, tests)],
-        running=[c.name for c in mine if c.state == "running"],
-        queued=[c.name for c in mine if c.state == "queued"],
-        stale=[c.name for c in mine if c.state == "stale"],
+        running=[c.name for c in mine if c.state == RUNNING],
+        queued=[c.name for c in mine if c.state == QUEUED],
+        stale=[c.name for c in mine if c.state == STALE],
         missing=sorted(wanted - present),
-        settled=bool(checks) and all(c.state in ("done", "stale") for c in checks),
+        settled=bool(checks) and all(c.state in (DONE, STALE) for c in checks),
     )
 
 
@@ -168,9 +176,9 @@ def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iter
     if merged_tests:
         return "test_failed"
     verdict = reading.verdict
-    if merged_other and verdict in ("pending", "passed"):
+    if merged_other and verdict in (PENDING, PASSED):
         return "check_failed"
-    if verdict == "passed":
+    if verdict == PASSED:
         return "not_ci" if after_merge else None
     return _VERDICT_KINDS[verdict]
 
@@ -236,7 +244,7 @@ class Watch:
             now = self.clock()
             if self.on_round is not None:
                 self.on_round(reading, now - start)
-            if reading.verdict != "pending":
+            if reading.verdict != PENDING:
                 return WatchResult(reading, rounds, now - start, self._queued)
             wait = self._next_wait(reading, interval, now - start, runner_cap)
             if wait <= 0:
