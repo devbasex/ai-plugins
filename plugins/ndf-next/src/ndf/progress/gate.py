@@ -27,6 +27,7 @@
                [--drop <課題の番号>...]
     ndf answer ask [--gate design|release]   # プランの中の承認ゲート（雛形の {{gate}}）。答えを待つ結果 JSON を返す
     ndf answer list <進行表>                 # 書いた答え（選択肢・指摘・理由・答えた者・時刻）を古い順に返す
+    ndf answer head <進行表> [--gate release] # 承認で見た PR の head（マージの側が --expect-head へ渡して照らす。#2147）
     ndf answer work --state-dir <置き場> [--cwd <作業場所>] <作業名>
                                              # 雛形の {{worker}} の既定。作業名を ndf worker run の必須の引数へ合わせて打つ
 """
@@ -363,7 +364,39 @@ def lane_env(env: run.Env) -> run.Env:
     return replace(env, ended=lambda conn, table_id: lane.end_row(conn, table_id, lane.COMPLETED, run.ACTOR))
 
 
-def recheck(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
+# 承認の後に加わった範囲（見た head → 今の head）が文書だけか。分からなければ False（出し直す側に倒す）
+DocsOnly = Callable[[str, str], bool]
+
+
+def never_docs_only(seen: str, now: str) -> bool:
+    return False
+
+
+def git_docs_only(cwd: Path) -> DocsOnly:
+    """承認の後に加わった範囲が文書だけか（差分の分け方は `command.range_diff_kinds`。#3020）。
+
+    見た head が今の head の祖先でない（履歴の書き換え）か、git が読めなければ文書だけと見なさない。振る舞いを決める
+    文書（Skill の本文・エージェント定義）が加わったときも文書だけではない。
+    """
+
+    def docs_only(seen: str, now: str) -> bool:
+        git = Git(cwd)
+        try:
+            return git.is_ancestor(seen, now) and command.range_diff_kinds(git, f"{seen}..{now}", cwd)["docs_only_diff"]
+        except GitError:  # noqa: NDF401 外部コマンド: 範囲を読めなければ出し直す側に倒す
+            return False
+
+    return docs_only
+
+
+def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly) -> bool:
+    """リリース承認ゲートで、違いが PR の head だけで、加わった範囲が文書だけか（出し直さない。#3020）。"""
+    if q.gate != "release" or (now.material is not None and now.material != seen.material):
+        return False
+    return seen.head is not None and now.head is not None and docs_only(seen.head, now.head)
+
+
+def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:
     """答えを読む前に、答えた者が見た対象と今の対象を比べる。違えば待ちへ戻し（問いは新しい id）、理由を返す（3364-2）。
 
     `ndf answer` が書いた答え（問いの id と見た対象を持つ）だけを比べる。どの副命令でも、答えが読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
@@ -377,10 +410,13 @@ def recheck(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))
-    seen = p["seen"] if isinstance(p.get("seen"), dict) else {}
-    changed = observe(q).differs(Target(seen.get("head"), seen.get("material_sha256")))
+    held = p["seen"] if isinstance(p.get("seen"), dict) else {}
+    seen, now = Target(held.get("head"), held.get("material_sha256")), observe(q)
+    changed = now.differs(seen)
     if not changed:
         return None
+    if _docs_only_after(q, seen, now, docs_only):
+        return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
     why = "答えた後に対象が変わった: " + " / ".join(changed)
     payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
     draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
@@ -825,11 +861,37 @@ def answers(v: run.View) -> list[dict[str, Any]]:
                 "gate_id": p.get("gate_id"),
                 "answer": p["answer"],
                 "notes": p.get("notes"),
+                "head": p["seen"].get("head") if isinstance(p.get("seen"), dict) else None,
                 "reason": ev.draft.reason,
                 "by": ev.draft.actor,
             }
         )
     return out
+
+
+def approved_head(v: run.View, kind: str) -> Optional[str]:
+    """区分 `kind` の承認ゲートで、最後に承認した答えが見た PR の head（無ければ None）。
+
+    マージの側は、これを `--expect-head` へ渡し、承認の後に進んだ head をマージしない（#2147）。差し戻しの後の承認だけを読む。
+    """
+    got = [a for a in answers(v) if a["gate"] == kind]
+    last = got[-1] if got else None
+    return last["head"] if last is not None and last["answer"] == run.APPROVED else None
+
+
+def _cmd_head(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+    head = approved_head(run.read(st, a.table_id), a.gate)
+    if head is None:
+        raise model.Refused(f"進行表 {a.table_id} に、{model.gate_label(a.gate)}で head を見て承認した答えが無い")
+    summary = f"{model.gate_label(a.gate)}で承認した head は {head}"
+    return result.result(TOOL, result.OK, summary, metrics={"table_id": a.table_id, "gate": a.gate, "head": head})
+
+
+def head_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} head")
+    ap.add_argument("table_id")
+    ap.add_argument("--gate", choices=sorted(model.table()["gates"]), default="release")
+    return ap
 
 
 def _cmd_list(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -854,7 +916,7 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     待ちは問いと答えごとの行き先の結果にする。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
     took = _took(st, a.table_id, seen)
-    why = recheck(st, a.table_id, seen)
+    why = recheck(st, a.table_id, seen, git_docs_only(cwd))
     out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
     return command.with_warnings(present(st, a.table_id, cwd, out, seen), before=[w for w in (took, why) if w])
 
@@ -880,7 +942,7 @@ def progress_verbs() -> set[str]:
 def main(argv: list[str]) -> int:
     """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
 
-    - `ask` はプランの中の承認ゲート、`list` は書いた答え、`work` は雛形の `{{worker}}` の既定、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
+    - `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は雛形の `{{worker}}` の既定、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
     - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
       トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
     """
@@ -888,6 +950,8 @@ def main(argv: list[str]) -> int:
         return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
     if argv and argv[0] == "work":
         return _cmd_work(argv[1:])
+    if argv and argv[0] == "head":
+        return command.run_main(head_parser(), lambda a, cwd: command.with_store(cwd, _cmd_head, a), argv[1:])
     if argv and argv[0] == "list":
         return command.run_main(list_parser(), lambda a, cwd: command.with_store(cwd, _cmd_list, a), argv[1:])
     if argv and argv[0] in run.COMMANDS:
