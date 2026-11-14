@@ -52,13 +52,13 @@ class Found:
 
 def ref_time(git: Git, ref: str) -> str:
     """起点のコミットの時刻（UTC の ISO 8601。GitHub の時刻と文字列で比べられる形）。"""
-    stamp = git.run("log", "-1", "--format=%ct", ref).strip()
+    stamp = git.log_of(ref, "-1", "--format=%ct").strip()
     return datetime.fromtimestamp(int(stamp), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def commit_refs(git: Git, since_ref: str) -> set[int]:
     """起点から HEAD までのコミットの件名が指す番号。"""
-    subjects = git.run("log", "--format=%s", f"{since_ref}..HEAD")
+    subjects = git.log_of(f"{since_ref}..HEAD", "--format=%s")
     return {int(m) for m in _ISSUE_REF.findall(subjects)}
 
 
@@ -100,7 +100,7 @@ def mentions(text: str, term: str) -> bool:
 
 def identifier_mentions(git: Git, issues: list[dict[str, Any]], since_ref: str) -> set[int]:
     """起点から HEAD までに消え、HEAD に残らない識別子を題か本文に持つ課題。"""
-    terms = removed_identifiers(git.run("diff", "--no-renames", "-U0", since_ref, "HEAD"))
+    terms = removed_identifiers(git.diff_between(since_ref, "HEAD", "--no-renames", "-U0"))
     hits = {t: [i["number"] for i in issues if mentions(f"{i['title']}\n{i['body']}", t)] for t in sorted(terms)}
     return {n for t, ns in hits.items() if ns and not _still_present(git, t) for n in ns}
 
