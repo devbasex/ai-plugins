@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import NamedTuple
 
 from ndf.contracts import facts
@@ -41,12 +41,20 @@ class Tally(NamedTuple):
         return f"{text}（スキップ {self.skipped}）" if self.skipped else text
 
 
-def outcome_of(conclusion: str) -> str:
-    """結論（小文字。空はまだ終わっていない）の区分（`passed`・`failed`・`cancelled`・`pending`）。知らない結論は失敗。"""
+def _outcomes() -> dict[str, str]:
+    """事実の表の結論の id → 区分。"""
+    return {r["id"]: r["outcome"] for r in facts.rows(OUTCOMES)}
+
+
+def _kind(conclusion: str, known: Mapping[str, str]) -> str:
     if not conclusion:
         return "pending"
-    known = {r["id"]: r["outcome"] for r in facts.rows(OUTCOMES)}
     return known[conclusion] if conclusion in known else "failed"
+
+
+def outcome_of(conclusion: str) -> str:
+    """結論（小文字。空はまだ終わっていない）の区分（`passed`・`failed`・`cancelled`・`pending`）。知らない結論は失敗。"""
+    return _kind(conclusion, _outcomes())
 
 
 def tally(checks: Iterable[tuple[str, str]]) -> Tally:
@@ -54,8 +62,9 @@ def tally(checks: Iterable[tuple[str, str]]) -> Tally:
     passed = skipped = 0
     failed: list[str] = []
     pending: list[str] = []
+    known = _outcomes()
     for name, conclusion in checks:
-        kind = outcome_of(conclusion)
+        kind = _kind(conclusion, known)
         if conclusion == "skipped":  # 実行されなかった（分母に入れず内訳へ。#3169）
             skipped += 1
         elif kind == "passed":
