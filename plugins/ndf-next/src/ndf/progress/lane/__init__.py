@@ -311,6 +311,15 @@ def touch_hit(x: str, y: str) -> bool:
     return fnmatch.fnmatch(px, py) or fnmatch.fnmatch(py, px)
 
 
+def _after_source(ref: str, lanes: Lanes) -> Optional[tuple[str, str]]:
+    """`after` の 1 つが指す起点の行（行の指定ならその行、レーンならその末尾の行）。レーンに行が無ければ None。"""
+    lane, row = _target(ref)
+    if row is not None:
+        return lane, row
+    keys = [r.key for r in _rows_of(lanes, lane)]
+    return (lane, keys[-1]) if keys else None
+
+
 def _order_graph(view: PlanView, lanes: Lanes) -> dict[tuple[str, str], set[tuple[str, str]]]:
     """行の前後の鎖（レーンの中の並びと after）。辺は前の行 → 後の行。"""
     edges: dict[tuple[str, str], set[tuple[str, str]]] = {}
@@ -321,11 +330,10 @@ def _order_graph(view: PlanView, lanes: Lanes) -> dict[tuple[str, str], set[tupl
         spec = view.lanes.get(name)
         if not nodes or spec is None:
             continue
-        for lane, row in map(_target, spec.after):
-            keys = [r.key for r in _rows_of(lanes, lane)]
-            src = row if row is not None else (keys[-1] if keys else None)
+        for ref in spec.after:
+            src = _after_source(ref, lanes)
             if src is not None:
-                edges.setdefault((lane, src), set()).add(nodes[0])
+                edges.setdefault(src, set()).add(nodes[0])
     return edges
 
 
