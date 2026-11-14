@@ -185,15 +185,29 @@ def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[l
     stopped_at = {o.name: o.step for o in outcomes if o.status == STOPPED and o.step is not None}
     resume = result.command(*again_args(stages, qdir, stopped_at), "--resume")
     if status == STOPPED and first is not None:
-        kind = first.kind if first.kind is not None else "unknown"
-        return result.stopped(tool, kind, f"{first.name}: {first.detail}", items=items, metrics=metrics, next=resume)
+        return _stopped_result(tool, first, items, metrics, resume)
     if status == GATE:
-        gated = next((o for o in outcomes if o.routes), None)
-        routes = wait_decide.gate_routes(gated.routes if gated is not None else None, resume)
-        where = f"routes は {gated.name} の分。" if gated is not None else ""
-        summary = f"承認の答えを待つプランがある（{where}答えた後に next で続ける）"
-        return result.result(tool, GATE, summary, items, metrics, routes=routes, next=resume)
+        return _gate_result(tool, outcomes, items, metrics, resume)
     return result.result(tool, OK, f"{len(outcomes)} 本のプランが終わった", items, metrics)
+
+
+def _stopped_result(
+    tool: str, first: queue_decide.Outcome, items: list[dict[str, Any]], metrics: dict[str, int], resume: dict[str, Any]
+) -> dict[str, Any]:
+    """先頭の止まったプランの種類で止まった結果。"""
+    kind = first.kind if first.kind is not None else "unknown"
+    return result.stopped(tool, kind, f"{first.name}: {first.detail}", items=items, metrics=metrics, next=resume)
+
+
+def _gate_result(
+    tool: str, outcomes: list[queue_decide.Outcome], items: list[dict[str, Any]], metrics: dict[str, int], resume: dict[str, Any]
+) -> dict[str, Any]:
+    """承認の答えを待つ結果。routes は routes を持つ先頭の 1 本の分。"""
+    gated = next((o for o in outcomes if o.routes), None)
+    routes = wait_decide.gate_routes(gated.routes if gated is not None else None, resume)
+    where = f"routes は {gated.name} の分。" if gated is not None else ""
+    summary = f"承認の答えを待つプランがある（{where}答えた後に next で続ける）"
+    return result.result(tool, GATE, summary, items, metrics, routes=routes, next=resume)
 
 
 def _item(o: queue_decide.Outcome) -> dict[str, Any]:
