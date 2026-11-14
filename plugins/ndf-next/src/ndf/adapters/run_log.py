@@ -305,9 +305,11 @@ def open_run(
 def diag(text: str, short: Optional[str] = None, **fields: Any) -> None:
     """診断を標準エラー（`short` があれば `short`）と実行の記録（全文）の両方へ出す。
 
+    標準エラーへ出す文も、記録の行と同じく秘密を伏せてから出す（出力先が stderr のときに
+    生の文が伏せた行と並んで流れないように）。
     記録を開いていなくても、親の実行の識別子を受けていれば子の実行として開いてから書く。
     """
-    shown = short if short is not None else text
+    shown = redact(short if short is not None else text)
     sys.stderr.write(shown if shown.endswith("\n") else shown + "\n")
     log = current()
     if log is None and _inherited_run_id():

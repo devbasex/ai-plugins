@@ -93,14 +93,18 @@ def test_diag_writes_same_text_to_stderr_and_record(capsys):
     assert diags == [{"text": "全文の診断", "display": None}, {"text": "長い全文", "display": "短い文", "kind": "stderr"}]
 
 
-def test_diag_hides_secret_env_values(monkeypatch):
+def test_diag_hides_secret_env_values(monkeypatch, capsys):
     monkeypatch.setenv("GH_TOKEN", "ghp_secretvalue123")
     log = cli.open_run("entry", location="repo")
 
     cli.diag("token は ghp_secretvalue123 だった")
+    cli.diag("全文", short="短い文の ghp_secretvalue123")
 
     assert "ghp_secretvalue123" not in log.path.read_text()
     assert cli.MASK in log.path.read_text()
+    err = capsys.readouterr().err
+    assert "ghp_secretvalue123" not in err
+    assert cli.MASK in err
 
 
 def test_diag_opens_child_run_when_parent_id_is_inherited(monkeypatch, capsys):
