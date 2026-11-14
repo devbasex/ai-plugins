@@ -70,10 +70,13 @@ def path_of(root: Path) -> Path:
     return root / facts.value("places", place, "path") / facts.value("ndf-files", "release", "path")
 
 
+def _value(raw: dict, key: str, default: object) -> object:
+    """鍵があれば値、無ければ `default`。"""
+    return raw[key] if key in raw else default
+
+
 def _strings(raw: dict, key: str, default: Sequence[str]) -> tuple[str, ...]:
-    if key not in raw:
-        return tuple(default)
-    value = raw[key]
+    value = _value(raw, key, list(default))
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise DeclarationError(f"{key} は文字列の配列")
     return tuple(value)
@@ -87,7 +90,7 @@ def _step(raw: object) -> Step:
         raise DeclarationError(f"steps の行の name か stage（{', '.join(STAGES)}）が違う: {raw!r}")
     if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
         raise DeclarationError(f"steps の {name} の command は空でない文字列の配列")
-    timeout = raw["timeout_seconds"] if "timeout_seconds" in raw else DEFAULT_TIMEOUT
+    timeout = _value(raw, "timeout_seconds", DEFAULT_TIMEOUT)
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise DeclarationError(f"steps の {name} の timeout_seconds は正の数")
     return Step(name, stage, tuple(command), _strings(raw, "writes", ()), float(timeout))
@@ -96,11 +99,11 @@ def _step(raw: object) -> Step:
 def _parse(raw: dict) -> Declaration:
     if raw.get("version") != READABLE_VERSION:
         raise DeclarationError(f"宣言の version が {READABLE_VERSION} でない: {raw.get('version')!r}")
-    steps = raw["steps"] if "steps" in raw else []
+    steps = _value(raw, "steps", [])
     if not isinstance(steps, list):
         raise DeclarationError("steps は配列")
-    flag = raw["bump_undistributed"] if "bump_undistributed" in raw else False
-    changelog = raw["changelog"] if "changelog" in raw else Declaration.changelog
+    flag = _value(raw, "bump_undistributed", False)
+    changelog = _value(raw, "changelog", Declaration.changelog)
     if not isinstance(flag, bool) or not isinstance(changelog, str):
         raise DeclarationError("bump_undistributed は真偽、changelog は文字列")
     return Declaration(
