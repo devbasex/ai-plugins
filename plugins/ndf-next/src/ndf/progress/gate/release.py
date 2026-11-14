@@ -60,6 +60,7 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
         return None
     seen = _seen_path(st.root, q)
     if not seen.exists():
+        seen.parent.mkdir(parents=True, exist_ok=True)
         seen.write_text(json.dumps(q.target.as_dict()) + "\n", encoding="utf-8")
     root = external.organizer_dir(env)
     if root is not None:

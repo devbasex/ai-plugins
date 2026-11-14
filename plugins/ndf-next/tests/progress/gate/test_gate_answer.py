@@ -48,7 +48,15 @@ def test_the_answer_keeps_who_answered_the_key_and_what_was_seen_and_is_idempote
     assert first["status"] == "ok" and first["next"]["argv"] == ["ndf", "progress", "next", tid]
     ev = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
     p = ev.draft.payload
-    assert ev.draft.actor == BY and p["key"] == KEY and p["gate_id"] == q.id and p["seen"]["head"] == "abc" and p["gate"] == "design"
+    # 事象の書き手は答えを書いた conductor で、答えた者は payload の by に残る（run.answer_draft）
+    assert (
+        ev.draft.actor == run.CONDUCTOR
+        and p["by"] == BY
+        and p["key"] == KEY
+        and p["gate_id"] == q.id
+        and p["seen"]["head"] == "abc"
+        and p["gate"] == "design"
+    )
     again = _give(st, tid, q)
     assert again["metrics"]["replayed"] is True and again["metrics"]["seqs"] == first["metrics"]["seqs"]
     with pytest.raises(model.Refused, match="別の答え"):

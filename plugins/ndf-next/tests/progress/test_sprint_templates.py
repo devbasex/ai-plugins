@@ -17,7 +17,7 @@ import pytest
 
 from ndf.contracts import result
 from ndf.core import durable, route
-from ndf.progress import command, definition, invoke, run, store
+from ndf.progress import command, definition, gate, invoke, run, store
 
 ISSUE = 3474
 BRANCH = "sprint/s1"
@@ -91,11 +91,20 @@ def _new(capsys, mode: str) -> str:
 
 
 def _turn(st, tid: str, repo: Path, env: run.Env) -> dict:
-    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。承認ゲートには承認で答える。"""
+    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。承認ゲートには承認で答える。
+
+    承認ゲート（`ndf.listen`）への答えは、問いの id を持つ `ndf answer` だけが受ける（3364-2）。"""
     out = run.advance(st, tid, repo, env)
     if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
         out = run.work(st, tid, repo, env)
-    if out["status"] == "gate":
+    if out["status"] != "gate":
+        return out
+    v = run.read(st, tid)
+    m = run.decide(v)
+    if m.step is not None and invoke.is_listen(m.step):
+        q = gate.question(v, m)
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "人が答えた", "human:test", f"test-{q.id}"))
+    else:
         run.answer(st, tid, out["metrics"]["stage"], "approved", "人が答えた", None)
     return out
 

@@ -236,10 +236,13 @@ def carry_issues(conn: sa.Connection, plan_id: str, lane: str, from_row: str, is
     """設計承認ゲートで外した課題を、同じレーンの順番表の次の行（外した行のすぐ後ろ）へ足す（受け入れ条件 3）。
 
     after 付きの新しいレーンを作らない。承認ゲートの答えからこの関数を呼ぶのは承認ゲートの子（#3295）である。
+    すぐ後ろに終わった行（待ちへ戻した答えが取り消した行など）があれば、その後ろへ足す（I12a は終わった行より前を断る）。
     """
     _, rows = _lane_rows(conn, plan_id, lane)
     src = _row(rows[lane], from_row, lane)
     index = [r.key for r in rows[lane]].index(from_row) + 1
+    while index < len(rows[lane]) and rows[lane][index].state != PENDING:
+        index += 1
     inp = {"kind": "sprint", "issues": sorted(set(issues)), "args": src.args}
     return add_row(conn, plan_id, lane, inp, RowChange("conductor", reason, index))
 

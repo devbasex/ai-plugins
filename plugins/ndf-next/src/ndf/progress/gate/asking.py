@@ -194,12 +194,19 @@ def material_path(root: Path, q: Question) -> Path:
 
 
 def unconfirmed(v: run.View, stage: str) -> list[str]:
-    """工程の済んだステップの結果が残した欠け（扱われずに届いたレビューの指摘など。#2444）。"""
+    """工程の済んだステップの結果が残した欠け（扱われずに届いたレビューの指摘など。#2444）。
+
+    終わった（ok の）結果は欠けを `outputs.gaps` に持つ（結果の契約は、上の段の `gaps` を incomplete にだけ許す）。
+    """
     out = []
     for step, report in run.step_progress(v, stage).done.items():
-        gaps = report["gaps"] if isinstance(report, dict) and isinstance(report.get("gaps"), list) else []
+        gaps = [*_gaps_of(report), *_gaps_of(report.get("outputs") if isinstance(report, dict) else None)]
         out += [f"{step}: {g['name']}（{g['reason']}）" for g in gaps if isinstance(g, dict) and {"name", "reason"} <= set(g)]
     return out
+
+
+def _gaps_of(part: Any) -> list[Any]:
+    return part["gaps"] if isinstance(part, dict) and isinstance(part.get("gaps"), list) else []
 
 
 def bullets(items: Iterable[str]) -> list[str]:

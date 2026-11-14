@@ -32,7 +32,8 @@ def rejection_row(v: run.View, q: Question, a: Answer) -> dict[str, Any]:
     """`gate-rejections.jsonl` の 1 行（答えた時刻・区分・答え・理由・範囲・答えた者）。"""
     ctx = v.context()
     issues = sprint_issues(v)
-    prs = sorted({n for n in (ctx.get("design_pr"), ctx.get("pr")) if isinstance(n, int)})
+    # 設計承認の PR は工程の終わりまで文脈に無いので、問いが持つ PR（待っている工程の済んだステップの出力）も載せる
+    prs = sorted({n for n in (ctx.get("design_pr"), ctx.get("pr"), q.pr) if isinstance(n, int)})
     return {
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
         "gate": q.gate if q.gate else "plan",

@@ -103,7 +103,9 @@ def test_stage_run_refuses_an_unknown_call_and_a_missing_name():
 
 
 def test_listen_step_is_not_invoked():
-    run = _run("設計", 2)
+    # 設計承認ゲート（listen）は standard の設計の 3 つめのステップ（light の設計はゲートを持たない。#3425）
+    s = definition.load_definition("standard").stage("設計")
+    run = invoke.stage_run(s, s.steps[2], {})
     assert run.kind == invoke.LISTEN
     with pytest.raises(model.Refused):
         invoke.invoke(run, Path("/"), Path("/tmp"))

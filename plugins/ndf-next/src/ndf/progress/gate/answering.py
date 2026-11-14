@@ -17,7 +17,7 @@ from typing import Any, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
-from ndf.progress import command, lane, model, plan, run, stages, store
+from ndf.progress import command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     DESIGN_GATE,
     REJECTING,
@@ -166,14 +166,26 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
     return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
 
 
+# 承認ゲートの答えだけが文脈へ書く鍵（工程の定義の outputs には置かない）。まとめたリリースのリリース記録の PR は
+# オーガナイザーの答えだけが運び、デプロイの作業は返さない。工程の outputs に置くと、工程の終わりの照合が
+# 作業の出力にこの鍵を求め、人が答えたデプロイが必ず止まる（#2783）
+ANSWER_OUTPUTS = {RELEASE_GATE: ("release_pr",)}
+
+
 def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
-    """答えが運ぶ値（`Answer.outputs`）を、承認ゲートの工程の出力として文脈へ書く事象。宣言に無い鍵は断る。"""
+    """答えが運ぶ値（`Answer.outputs`）を、承認ゲートの工程の出力として文脈へ書く事象。工程の定義の outputs と
+    `ANSWER_OUTPUTS` に無い鍵と、文脈のスキーマに合わない値は断る。"""
     if not a.outputs:
         return []
-    draft, dropped = stages.outputs_draft(v.snap.stage(q.stage), v.rev, a.outputs, run.ACTOR)
+    extra = ANSWER_OUTPUTS[q.gate] if q.gate in ANSWER_OUTPUTS else ()
+    allowed = (*v.snap.stage(q.stage).outputs, *extra)
+    kept, dropped = stages.keep_declared(allowed, a.outputs)
     if dropped:
         raise model.Refused(f"工程 {q.stage} の定義の outputs に無い鍵は答えから書けない: {'; '.join(dropped)}")
-    return [draft] if draft is not None else []
+    errs = invoke.value_errors(kept)
+    if errs:
+        raise model.Refused(f"工程 {q.stage} への答えが運ぶ値が文脈の形に合わない: {'; '.join(errs)}")
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload={"outputs": kept}, rev=v.rev)]
 
 
 def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:

@@ -226,7 +226,7 @@ def test_order_rules_are_checked_one_by_one():
 
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
-    assert keys == {"issues", "mode", "pace", "worktree", "branch", "design_pr", "pr", "delivery", "version"}
+    assert keys == {"issues", "mode", "pace", "worktree", "branch", "design_pr", "pr", "delivery", "version", "release_pr"}
     assert set(contracts.load_json(definition.CONTEXT)["properties"]["mode"]["enum"]) == set(definition.modes())
 
 

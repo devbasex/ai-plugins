@@ -20,12 +20,12 @@ def _asked(st, repo, tid, observe):
 
 
 def _with_gaps(env):
-    """design-review の結果に扱われなかった指摘（欠け）を載せる `Env`。"""
+    """design-review の結果に扱われなかった指摘（欠け）を載せる `Env`。ok の結果は欠けを outputs.gaps に持つ（結果の契約）。"""
 
     def invoker(r, cwd, work_dir, answer):
         if r.step == "design-review":
             gaps = [{"kind": "unhandled_finding", "name": "f-1", "reason": "直したとも見送ったとも決めていない"}]
-            return invoke.finished(r, result.result("plan", "ok", "レビューを終えた", gaps=gaps))
+            return invoke.finished(r, result.result("plan", "ok", "レビューを終えた", outputs={"gaps": gaps}))
         return env.invoker(r, cwd, work_dir, answer)
 
     return run.Env(**{**vars(env), "invoker": invoker})
