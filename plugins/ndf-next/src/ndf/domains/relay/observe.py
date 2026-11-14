@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 from ndf.adapters import agents
+from ndf.domains.relay import signals
 
 # 認証の失敗で子が入力待ちに戻った印（Claude Code の画面の文言。#3243 の画面の写し）
 AUTH_FAILED = re.compile(r"authentication failed|Please run /login|API Error: 40[13]\b", re.IGNORECASE)
@@ -36,10 +37,8 @@ def auth_failed(screen: str) -> bool:
 
 
 def transcript_path(environ: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    base = environ.get("CLAUDE_CONFIG_DIR")
-    root = Path(base) if base else Path.home() / ".claude"
     key = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
-    return root / "projects" / key / f"{session_id}.jsonl"
+    return signals.claude_config_root(environ) / "projects" / key / f"{session_id}.jsonl"
 
 
 def context_tokens(path: Path, size: int) -> Optional[int]:

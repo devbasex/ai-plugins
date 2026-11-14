@@ -57,6 +57,12 @@ def organizer_question_path(env: Mapping[str, str]) -> Optional[Path]:
     return Path(root) / "questions" / f"{lane}.json"
 
 
+def claude_config_root(environ: Mapping[str, str]) -> Path:
+    """Claude Code の設定の置き場。`CLAUDE_CONFIG_DIR` があればそれ、無ければ `~/.claude`。"""
+    value = environ.get("CLAUDE_CONFIG_DIR")
+    return Path(value) if value else Path.home() / ".claude"
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 

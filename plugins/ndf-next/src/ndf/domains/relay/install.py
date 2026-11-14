@@ -81,8 +81,7 @@ class Installed(NamedTuple):
 
 
 def config_dir(environ: Mapping[str, str]) -> Path:
-    value = environ.get("CLAUDE_CONFIG_DIR")
-    return (Path(value) if value else Path.home() / ".claude") / "ndf"
+    return signals.claude_config_root(environ) / "ndf"
 
 
 def bin_dir(environ: Mapping[str, str]) -> Path:
