@@ -24,10 +24,10 @@
     },
     "report": {"$ref": "../schemas/result.schema.json", "description": "統一 JSON レポート。ステップの出力の共通の形"},
     "gate-answer": {
-      "description": "承認ゲートのステップの出力。答え（approved・rejected）を持つ統一 JSON レポート",
+      "description": "承認ゲートのステップの出力。答え（approved・rejected・revise）を持つ統一 JSON レポート。答えの選択肢は ndf progress answer がこの enum から引く",
       "allOf": [
         {"$ref": "#/$defs/report"},
-        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["answer"], "properties": {"answer": {"enum": ["approved", "rejected"]}}}}}
+        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["answer"], "properties": {"answer": {"enum": ["approved", "rejected", "revise"]}}}}}
       ]
     },
     "release-result": {

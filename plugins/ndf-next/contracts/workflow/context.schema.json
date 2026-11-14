@@ -9,11 +9,11 @@
     "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。進行表の作成が書く"},
     "mode": {"enum": ["light", "operation", "legacy-refactor", "standard", "documentation"], "description": "モード。モード判定が書く"},
     "pace": {"enum": ["normal", "fast", "auto"], "description": "進め方。モード判定が書く"},
-    "worktree": {"type": "string", "minLength": 1, "description": "作業場所のパス。作業場所の用意が書く"},
-    "branch": {"type": "string", "minLength": 1, "description": "スプリントのブランチ。作業場所の用意が書く"},
+    "worktree": {"type": "string", "pattern": "^/[^\\u0000]*$", "description": "作業場所の絶対パス。作業場所の用意が書く。git と作業へ渡す前にこの形で確かめる（3364-7）"},
+    "branch": {"type": "string", "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9_][A-Za-z0-9._/-]*(?<![./])$", "description": "スプリントのブランチ。作業場所の用意が書く。先頭の - と .. を断る形で確かめてから渡す（3364-7）"},
     "design_pr": {"type": "integer", "minimum": 1, "description": "設計の Pull Request の番号"},
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
-    "delivery": {"type": "object", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く"},
+    "delivery": {"type": "object", "minProperties": 1, "description": ".ndf/project.json の delivery の 1 行。デプロイが書く"},
     "version": {"type": "string", "minLength": 1, "description": "出した版。デプロイが書く"}
   }
 }
