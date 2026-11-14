@@ -31,6 +31,14 @@ def test_pick_default_retry_within_attempts_then_moves_on():
     assert routing.pick("infra_wait", used=attempts).to == "conductor"
 
 
+def test_pick_prefers_the_policy_the_caller_resolved_over_the_kind_default():
+    # 宣言（プロジェクトの causes・ステップの retry）の上書きは既定の方針より優先する
+    declared = limits.Policy(name="cause.infra-wait", summary="s", attempts=1, interval=5)
+    assert limits.policy("cause.infra-wait").attempts > 1
+    assert routing.pick("infra_wait", used=0, policy=declared) == routing.Route("retry", None, 5.0, "infra_wait")
+    assert routing.pick("infra_wait", used=1, policy=declared).to == "conductor"
+
+
 def test_pick_transient_retries_with_backoff_and_is_not_a_human_stop():
     # 一時的な失敗は人を待たずに打ち直す（#3346）
     policy = limits.policy("cause.transient")

@@ -53,9 +53,19 @@ def _to(dest: str, kind: str, on_fail: Optional[str]) -> Route:
     return _to_step(kind, on_fail) if dest == STEP else Route(dest, None, 0.0, kind)
 
 
-def _retry_wait(row: causes.CauseRow, used: int, retry_after: Optional[float], cap: Optional[float]) -> Optional[float]:
-    """打ち直せるなら次の待ちの秒。方針が無い・回数の上限に当たった・待つべき retry_after が無ければ None。"""
-    policy = causes.policy_of(row.kind)
+def _retry_wait(
+    row: causes.CauseRow,
+    policy: Optional[limits.Policy],
+    used: int,
+    retry_after: Optional[float],
+    cap: Optional[float],
+) -> Optional[float]:
+    """打ち直せるなら次の待ちの秒。方針が無い・回数の上限に当たった・待つべき retry_after が無ければ None。
+
+    `policy` は呼び手が宣言（プロジェクトの causes・ステップの retry）から解決した方針で、無ければ種類の既定（causes.policy_of）。
+    """
+    if policy is None:
+        policy = causes.policy_of(row.kind)
     if policy is None or policy.attempts is None or used >= policy.attempts:
         return None
     if row.requires_retry_after and retry_after is None:
@@ -80,12 +90,13 @@ def pick(
     on_cause: Optional[Mapping[str, str]] = None,
     on_fail: Optional[str] = None,
     used: int = 0,
+    policy: Optional[limits.Policy] = None,
     retry_after: Optional[float] = None,
     cap: Optional[float] = None,
 ) -> Route:
     """行き先を 1 つ選ぶ: on_cause → 種類の既定の行き先（表の route）→ 打ち直さないときの行き先（表の exhausted）。
 
-    - `used` はこれまでに打ち直した回数、`retry_after` は結果の `cause.retry_after`、`cap` は待ちの頭打ちの秒
+    - `used` はこれまでに打ち直した回数、`policy` は呼び手が宣言から解決した再試行の方針（無ければ種類の既定）、`retry_after` は結果の `cause.retry_after`、`cap` は待ちの頭打ちの秒
     - 打ち直す（待ち 0 秒も打ち直す）のは、方針の回数が残り、retry_after を待つ種類なら retry_after があるとき
     - step は on_fail のステップ、無ければ conductor。既定が conductor・human の種類は on_fail を見ない
     - 文（summary・detail）を受けない
@@ -97,7 +108,7 @@ def pick(
     if isinstance(to, Route):
         return to
     if to == RETRY:
-        wait = _retry_wait(row, used, retry_after, cap)
+        wait = _retry_wait(row, policy, used, retry_after, cap)
         if wait is not None:
             return Route(RETRY, None, wait, kind)
         # 表の exhausted が無い種類（on_cause で retry を指定した種類）は step と同じく on_fail へ
