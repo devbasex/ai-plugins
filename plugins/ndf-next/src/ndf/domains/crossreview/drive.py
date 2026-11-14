@@ -83,7 +83,7 @@ class _Run:
     g: git.Git
     ref: store.StateRef
     data: dict[str, Any]
-    ledger: dict[str, dict[str, Any]]
+    ledger: FindingLedger
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
@@ -112,6 +112,86 @@ def _list(data: Mapping[str, Any], key: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+# --- 台帳 -------------------------------------------------------------------------------
+
+
+def _ledger_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
+    """台帳の 1 行（未解決で始まる）。"""
+    return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
+
+
+class FindingLedger:
+    """指摘の台帳（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
+
+    指摘は鍵で重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。
+    """
+
+    def __init__(self, rows: Sequence[Any] = ()):
+        self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
+
+    def _next_id(self, round_no: int) -> str:
+        """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
+        return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
+
+    def enter(self, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
+        """指摘を台帳へ入れ、このラウンドで出た鍵を返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
+        by_key = {f.get("key"): f for f in self.rows.values()}
+        keys: set[str] = set()
+        for item in raised:
+            text = item.get("text")
+            text = text.strip() if isinstance(text, str) else ""
+            if not text:
+                continue
+            key = oscillation.finding_key(text)
+            if key in keys:
+                continue
+            keys.add(key)
+            known = by_key.get(key)
+            if known is None:
+                fid = self._next_id(round_no)
+                self.rows[fid] = _ledger_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
+            elif known.get("outcome") == fin.FIXED:
+                known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
+        return frozenset(keys)
+
+    def skipped_texts(self) -> list[str]:
+        """見送り済みの指摘の本文。"""
+        return [f["text"] for f in self.rows.values() if f.get("outcome") == fin.SKIPPED]
+
+    def pending(self, handed: Sequence[fin.Handed]) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
+        """未解決の指摘と、まだ決めていない足すべき内容。"""
+        open_ = [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED]
+        undecided = [h for h in handed if h.id not in self.rows or self.rows[h.id].get("outcome") not in fin.DECIDED]
+        return open_, undecided
+
+    def apply_fix(self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int) -> list[dict[str, Any]]:
+        """修正の結果の指摘ごとの終わり方を取り込み、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。"""
+        texts = {h.id: h.text for h in handed}
+        reported = [f for f in items if isinstance(f, dict) and f.get("outcome") in fin.DECIDED]
+        for item in reported:
+            fid = str(item.get("id"))
+            reason = _text(item.get("reason"))
+            if fid in self.rows:
+                self.rows[fid] |= {"outcome": item["outcome"], "reason": reason}
+            elif fid in texts:
+                self.rows[fid] = _ledger_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
+        return reported
+
+    def reopen(self, fids: Sequence[str]) -> None:
+        """直したとした指摘を未解決へ戻す（修正が PR に届かなかった）。"""
+        for fid in fids:
+            if fid in self.rows:
+                self.rows[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
+
+    def findings(self) -> tuple[fin.Finding, ...]:
+        """要約に載せる指摘（終わり方を知っている行）。"""
+        return tuple(
+            fin.Finding(f["id"], f["text"] if isinstance(f.get("text"), str) else "", f["outcome"], _text(f.get("reason")))
+            for f in self.rows.values()
+            if f.get("outcome") in fin.OUTCOMES
+        )
+
+
 # --- 始め ------------------------------------------------------------------------------
 
 
@@ -135,8 +215,7 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    ledger = {str(f["id"]): f for f in _list(data, store.FINDINGS) if isinstance(f, dict) and "id" in f}
-    run = _Run(cfg, g, ref, data, ledger, [], [], [])
+    run = _Run(cfg, g, ref, data, FindingLedger(_list(data, store.FINDINGS)), [], [], [])
     _ingest_pending(run)
     return run
 
@@ -152,7 +231,7 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path) -> str:
-    decided = [f["text"] for f in run.ledger.values() if f.get("outcome") == fin.SKIPPED]
+    decided = run.ledger.skipped_texts()
     handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
@@ -200,45 +279,6 @@ def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[li
     return raised, answered
 
 
-def _ledger_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
-    """台帳の 1 行（未解決で始まる）。"""
-    return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
-
-
-def _next_id(run: _Run, round_no: int) -> str:
-    """ラウンド `round_no` で新しく出た指摘の id（`r<ラウンド>-<そのラウンドの通し番号>`）。"""
-    return f"r{round_no}-{sum(1 for f in run.ledger.values() if f.get('round') == round_no) + 1}"
-
-
-def _enter(run: _Run, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
-    """指摘を台帳へ入れ、このラウンドで出た鍵を返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
-    by_key = {f.get("key"): f for f in run.ledger.values()}
-    keys: set[str] = set()
-    for item in raised:
-        text = item.get("text")
-        text = text.strip() if isinstance(text, str) else ""
-        if not text:
-            continue
-        key = oscillation.finding_key(text)
-        if key in keys:
-            continue
-        keys.add(key)
-        known = by_key.get(key)
-        if known is None:
-            fid = _next_id(run, round_no)
-            run.ledger[fid] = _ledger_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
-        elif known.get("outcome") == fin.FIXED:
-            known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
-    return frozenset(keys)
-
-
-def _pending(run: _Run) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
-    """未解決の指摘と、まだ決めていない足すべき内容。"""
-    open_ = [f for f in run.ledger.values() if f.get("outcome") == fin.UNRESOLVED]
-    handed = [h for h in run.cfg.handed if h.id not in run.ledger or run.ledger[h.id].get("outcome") not in fin.DECIDED]
-    return open_, handed
-
-
 # --- 修正担当 ---------------------------------------------------------------------------
 
 
@@ -268,15 +308,7 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     """修正の結果を台帳へ取り込み、結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。"""
     found = store.read_fix_result(path, run.ref)
-    handed = {h.id: h.text for h in run.cfg.handed}
-    reported = [f for f in _list(found, store.FINDINGS) if isinstance(f, dict) and f.get("outcome") in fin.DECIDED]
-    for item in reported:
-        fid = str(item.get("id"))
-        reason = _text(item.get("reason"))
-        if fid in run.ledger:
-            run.ledger[fid] |= {"outcome": item["outcome"], "reason": reason}
-        elif fid in handed:
-            run.ledger[fid] = _ledger_row(fid, round_no, handed[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
+    reported = run.ledger.apply_fix(_list(found, store.FINDINGS), run.cfg.handed, round_no)
     os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
@@ -311,9 +343,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> 
     if sent.ok:
         fix["pushed"] = sent.head
         return True
-    for fid in fix["fixed"]:
-        if fid in run.ledger:
-            run.ledger[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
+    run.ledger.reopen(fix["fixed"])
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
@@ -323,16 +353,12 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> 
 
 
 def _save(run: _Run) -> None:
-    run.data[store.FINDINGS] = list(run.ledger.values())
+    run.data[store.FINDINGS] = list(run.ledger.rows.values())
     store.write_object(run.ref.path, run.data)
 
 
 def _summary(run: _Run, final: str, rounds: int) -> Outcome:
-    findings = tuple(
-        fin.Finding(f["id"], f["text"] if isinstance(f.get("text"), str) else "", f["outcome"], _text(f.get("reason")))
-        for f in run.ledger.values()
-        if f.get("outcome") in fin.OUTCOMES
-    )
+    findings = run.ledger.findings()
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -377,12 +403,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     raised, answered = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
     if answered == 0:
         return fin.ERROR
-    run.history.append(_enter(run, round_no, raised))
+    run.history.append(run.ledger.enter(round_no, raised))
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
     record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
     rounds.append(record)
-    open_, handed = _pending(run)
+    open_, handed = run.ledger.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]
