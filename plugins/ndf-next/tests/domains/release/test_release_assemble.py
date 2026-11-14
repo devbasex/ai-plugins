@@ -9,6 +9,7 @@ import pytest
 
 from ndf.adapters import git as git_mod
 from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
+from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
@@ -203,3 +204,35 @@ def test_issue_2554_dev_channel_skips_shipped_base(tmp_path: Path) -> None:
     work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
     facts = assemble.collect(work, _hub(), assemble.Target("dev", "patch", "develop", "main"))
     assert [p.next for p in facts.planned] == ["1.2.5-dev.1"]
+
+
+def _open_pulls(hub: FakeHub, *heads: tuple[int, str]) -> FakeHub:
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": n, "head": {"ref": ref}} for n, ref in heads]
+    return hub
+
+
+@pytest.mark.parametrize("head", ["release/v9.9.9", "develop"])
+def test_issue_2441_production_waits_while_another_release_is_open(tmp_path: Path, head: str) -> None:
+    """#2441: 本番ブランチ宛ての別のリリースの PR が開いている間は、ブランチも PR も作らずに止まる。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    hub = _open_pulls(_hub(), (41, head))
+    with pytest.raises(assemble.ReleaseOpen, match="#41"):
+        assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    assert not [r for r in hub.requests if r[0] == "POST"]
+    assert git(work, "ls-remote", "--heads", "origin", "release/v1.2.4") == ""
+
+
+def test_issue_2441_builds_once_the_other_release_is_closed(tmp_path: Path) -> None:
+    """#2441: 本番ブランチ宛ての PR がリリースでなければ（閉じた後の観測）組む。開発版のチャネルは待たない。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    built = assemble.assemble(work, _open_pulls(_hub(), (42, "feat/y")), assemble.Target("production", "patch", "develop", "main"))
+    assert built.branch == "release/v1.2.4"
+    other = _origin_with_change(tmp_path / "dev", test_only=False)
+    dev = assemble.assemble(other, _open_pulls(_hub(), (41, "release/v9.9.9")), assemble.Target("dev", "patch", "develop", "main"))
+    assert dev.version == "1.2.4-dev.1"
+
+
+def test_issue_2441_cli_reports_refused() -> None:
+    """#2441: 待ちは止まった理由の種類 refused で返す（呼び手は閉じた後に打ち直す）。"""
+    exc = assemble.ReleaseOpen("main 宛てのリリースの PR #41 が開いている")
+    assert release_cli._stopped_of(exc)["cause"]["kind"] == "refused"
