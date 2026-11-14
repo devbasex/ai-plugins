@@ -97,7 +97,7 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
     if closed is not None:
         rec.add("worktree", str(item.path), "kept", closed)
         return False
-    first = main.runner(["worktree", "remove", str(item.path)], main.cwd)
+    first = main.attempt("worktree", "remove", str(item.path))
     if first.returncode == 0:
         rec.add("worktree", str(item.path), "removed")
         return True
@@ -162,7 +162,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), "kept", f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return
-    done = main.runner(["merge", "--ff-only", "-q", f"{create.REMOTE}/{base}"], main.cwd)
+    done = main.attempt("merge", "--ff-only", "-q", f"{create.REMOTE}/{base}")
     if done.returncode == 0:
         rec.add("main_dir", str(main.cwd), "pulled")
         return

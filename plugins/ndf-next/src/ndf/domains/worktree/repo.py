@@ -85,13 +85,13 @@ def dirty_paths(git: Git, untracked: bool = False) -> list[str]:
 
 def delete_merged_branch(git: Git, branch: str) -> Optional[str]:
     """`git branch -d` でブランチを消す（`-D` は使わない）。消せたら `None`、git が断ったらその標準エラー。"""
-    done = git.runner(["branch", "-d", branch], git.cwd)
+    done = git.attempt("branch", "-d", branch)
     return None if done.returncode == 0 else done.stderr.strip()
 
 
 def has_ref(git: Git, ref: str) -> bool:
     """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
-    done = git.runner(["show-ref", "--verify", "--quiet", ref], git.cwd)
+    done = git.attempt("show-ref", "--verify", "--quiet", ref)
     if done.returncode not in (0, 1):
         raise GitError(f"参照を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
     return done.returncode == 0

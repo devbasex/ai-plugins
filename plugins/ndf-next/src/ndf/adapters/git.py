@@ -146,9 +146,13 @@ class Git:
     cwd: Optional[Path] = None
     runner: Runner = run_git
 
+    def attempt(self, *args: str) -> Completed:
+        """git を起動して結果をそのまま返す（失敗でも例外にしない。成否を読むのは呼び手）。"""
+        return self.runner(list(args), self.cwd)
+
     def run(self, *args: str) -> str:
         """git を起動して標準出力を返す。終了コードが 0 でなければ `GitError`。"""
-        done = self.runner(list(args), self.cwd)
+        done = self.attempt(*args)
         if done.returncode != 0:
             raise GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
         return done.stdout
@@ -165,7 +169,7 @@ class Git:
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         """`ancestor` が `descendant` の祖先か。git の失敗（終了コード 1 以外）は `GitError`。"""
-        done = self.runner(["merge-base", "--is-ancestor", ancestor, descendant], self.cwd)
+        done = self.attempt("merge-base", "--is-ancestor", ancestor, descendant)
         if done.returncode not in (0, 1):
             raise GitError(f"祖先を確かめられない（終了コード {done.returncode}）: {done.stderr.strip()}")
         return done.returncode == 0
@@ -219,7 +223,7 @@ class Git:
         既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
         `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
         """
-        return self.runner(["fetch", "-q", "--no-tags", remote, *refspecs], self.cwd)
+        return self.attempt("fetch", "-q", "--no-tags", remote, *refspecs)
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
         """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""

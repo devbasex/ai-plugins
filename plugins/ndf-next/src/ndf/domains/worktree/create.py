@@ -44,7 +44,7 @@ class Created:
 
 def default_branch(git: Git) -> Optional[str]:
     """origin の既定ブランチ（取得済みの `refs/remotes/origin/HEAD`）。無ければ `None`。"""
-    done = git.runner(["symbolic-ref", "--quiet", "--short", f"refs/remotes/{REMOTE}/HEAD"], git.cwd)
+    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{REMOTE}/HEAD")
     name = done.stdout.strip() if done.returncode == 0 else ""
     return name[len(REMOTE) + 1 :] if name.startswith(REMOTE + "/") else None
 
@@ -66,14 +66,14 @@ def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
 
 
 def _check_name(git: Git, branch: str) -> None:
-    done = git.runner(["check-ref-format", "--branch", branch], git.cwd)
+    done = git.attempt("check-ref-format", "--branch", branch)
     if done.returncode != 0 or branch.startswith("-"):
         raise CreateError("invalid", f"ブランチ名として使えない: {branch}")
 
 
 def _check_place(git: Git, main_dir: Path, target: Path) -> None:
     rel = repo.worktrees_dir(main_dir).relative_to(main_dir).as_posix()
-    ignored = git.runner(["check-ignore", "-q", f"{rel}/"], git.cwd)
+    ignored = git.attempt("check-ignore", "-q", f"{rel}/")
     if ignored.returncode != 0:
         raise CreateError("precondition", f"{rel}/ が .gitignore に無い。作る前に登録する")
     if target.exists():
@@ -81,7 +81,7 @@ def _check_place(git: Git, main_dir: Path, target: Path) -> None:
 
 
 def _fetch(git: Git) -> list[str]:
-    done = git.runner(["fetch", "-q", REMOTE], git.cwd)
+    done = git.attempt("fetch", "-q", REMOTE)
     return [] if done.returncode == 0 else [f"git fetch {REMOTE} が失敗した（取得済みの参照で続けた）: {done.stderr.strip()}"]
 
 

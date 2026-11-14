@@ -67,7 +67,7 @@ def follow(main_dir: Path, decl: Optional[declaration.Declaration]) -> Optional[
         return None
     try:
         with mainlock.held(main, timeout=LOCK_WAIT):
-            done = main.runner(["checkout", "-q", "--detach", wanted], main.cwd)
+            done = main.attempt("checkout", "-q", "--detach", wanted)
     except Timeout:
         return f"メインディレクトリを {label} へ合わせられなかった（排他を取れない）。作業は続けられる。"
     if done.returncode != 0:
