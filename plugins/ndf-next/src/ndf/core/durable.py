@@ -648,8 +648,13 @@ def sweep(root: Path, now: datetime | None = None) -> SweepResult:
 
 
 def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
-    dbos_dir = _dbos_dir(root)
-    for body in sorted(dbos_dir.glob("*.sqlite")):
+    _retire_finished(root, now, out)
+    _drop_orphans(root)
+
+
+def _retire_finished(root: Path, now: datetime, out: SweepResult) -> None:
+    """開いているプロセスのいない鍵のファイルのうち、耐久ワークフローがすべて終わったものを retired/ へ移す。"""
+    for body in sorted(_dbos_dir(root).glob("*.sqlite")):
         with _file_run_lock(root, body.stem, wait=False) as held:
             if held is None:
                 out.busy += 1
@@ -661,6 +666,11 @@ def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
                 continue
             if moved is not None:
                 out.retired.append(moved)
+
+
+def _drop_orphans(root: Path) -> None:
+    """本体の無い `.checked` と、本体が無くだれも持たない `.lock` を消す。"""
+    dbos_dir = _dbos_dir(root)
     for mark in dbos_dir.glob("*.checked"):
         if not mark.with_suffix(".sqlite").exists():
             mark.unlink(missing_ok=True)
