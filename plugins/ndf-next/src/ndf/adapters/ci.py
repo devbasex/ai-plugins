@@ -259,11 +259,14 @@ class Watch:
     - 最後の眠りは上限までの残りに縮め、上限の時刻に最後の 1 回を読む（上限より前に打ち切らない。#2224）
     - 終わっていないチェックがすべてランナーの割り当てを待つ間は `budget` に数えず、`ci.runner-wait` で別に数える（#2719）
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
+    - `decided` が真を返したら、結論の出ていないチェックが残っていても待たずに返す（マージの段階から引き継いだ
+      失敗で止まった理由が決まっているとき、読み直しに API と待ちを使わない）
     """
 
     reader: Callable[[], Reading]
     budget: float
     on_round: Optional[Callable[[Reading, float], None]] = None
+    decided: Optional[Callable[[Reading], bool]] = None
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
     _queued: float = field(default=0.0, init=False)
@@ -287,7 +290,7 @@ class Watch:
             now = self.clock()
             if self.on_round is not None:
                 self.on_round(reading, now - start)
-            if reading.verdict != PENDING:
+            if reading.verdict != PENDING or (self.decided is not None and self.decided(reading)):
                 return WatchResult(reading, rounds, now - start, self._queued)
             wait = self._next_wait(reading, interval, now - start, runner_cap)
             if wait <= 0:

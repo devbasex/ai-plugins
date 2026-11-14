@@ -302,9 +302,11 @@ def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> Non
 # --- 副命令 `ndf ci watch` ---
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log_status: int = 200) -> None:
+def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log_status: int = 200, calls: list[str] | None = None) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if calls is not None:
+            calls.append(path)
         if path.endswith("/pulls/7"):
             pull = {
                 "number": 7,
@@ -366,6 +368,18 @@ def test_cli_watch_after_merge_with_failed_shard(monkeypatch: pytest.MonkeyPatch
     _serve(monkeypatch, [run("pytest", rid=1), run("doc-lint", rid=2)])
     assert ci_cli.main([*ARGS, "--after-merge", "--merge-failed", "pytest (1/2)"]) == causes.exit_code("test_failed")
     assert _out(capsys)["cause"]["kind"] == "test_failed"
+
+
+def test_cli_watch_after_merge_with_failed_test_does_not_wait_for_pending(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # マージの段階がテストの落ちを読んでいれば、まとめのチェックが終わっていなくても読み直さずに返す
+    calls: list[str] = []
+    _serve(monkeypatch, [run("pytest", status="in_progress", rid=1), run("doc-lint", rid=2)], calls=calls)
+    assert ci_cli.main([*ARGS, "--after-merge", "--merge-failed", "pytest (1/2)"]) == causes.exit_code("test_failed")
+    out = _out(capsys)
+    assert (out["cause"]["kind"], out["metrics"]["rounds"]) == ("test_failed", 1)
+    assert sum(p.endswith("/check-runs") for p in calls) == 1
 
 
 def test_cli_watch_after_merge_without_failures_is_not_ci(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

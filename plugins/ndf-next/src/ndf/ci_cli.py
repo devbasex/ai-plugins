@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Reading, Watch, bare_name, bare_names, failed_test_nodes_of, files_of, watch_head
+from ndf.adapters.ci import Reading, Watch, bare_name, bare_names, cause_of, failed_test_nodes_of, files_of, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -75,12 +75,13 @@ def _watch(args: argparse.Namespace) -> dict:
     # 上限の解除が待ちの残りを越えるなら githubkit の中で眠らず、`infra_wait` と `retry_after` で返す。
     # 残りは Watch と同じ数え方（ランナーの割り当ての待ちを予算に数えない）で読む
     # 読み手は PR の先端が分かってから差し込む（PR を読む API の呼び出しも同じ予算に入れる）
-    watch = Watch(_unread, args.budget, on_round=_progress)
+    # マージの段階がテストのチェックの落ちを読んでいれば、読み直しが pending でも理由は `test_failed` に決まるので待たない
+    merge_failed = args.merge_failed if args.after_merge else None
+    watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: cause_of(r, args.test, merge_failed) == "test_failed")
     hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
     watch.reader = watch_head(hub, pull.head_sha, args.required, args.test)
     watched = watch.run()
-    merge_failed = args.merge_failed if args.after_merge else None
     kind = watched.cause(args.test, merge_failed)
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
