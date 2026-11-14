@@ -287,7 +287,7 @@ def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bo
     """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。"""
     sha = ac.parse_sha(sha)
     for c in read_comments(repo, pr):
-        body = c.get("body") or "" if isinstance(c, dict) else ""
+        body = str(c.get("body") or "") if isinstance(c, dict) else ""
         if ADMIN_MARK in body and sha in [x.lower() for x in _line_shas(body, ADMIN_SHA_LINE)]:
             return False, str(c.get("html_url") or "")
     a = gh_rest.comment(repo, pr, render_admin_record(sha, trail_url))

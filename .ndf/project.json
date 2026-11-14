@@ -1066,6 +1066,9 @@
       }
     ]
   },
+  "production_merge": {
+    "admin": true
+  },
   "analysis": {
     "analyzer": 3,
     "at": "2026-11-10T15:17:12+00:00",

@@ -1249,6 +1249,7 @@ def _case(name):
         "no-cd": rc.decide_case(False, None, ""),
         "cd-no-review": rc.decide_case(True, 0, ""),
         "cd-review": rc.decide_case(True, 1, ""),
+        "cd-admin": rc.decide_case(True, 1, "", admin=True),
     }[name]
 
 
@@ -1263,8 +1264,9 @@ def _exits(monkeypatch, target):
     return seen
 
 
-def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
-    """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。"""
+def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merge=None, record=None, backs=None):
+    """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。
+    `record` は迂回の記録の書き込みの差し替え（呼ばれた引数を足す並びか、投げる例外）。`backs` は公開の後の (items, back) を足す。"""
     import argparse
 
     from release_lib import reviewed as rv
@@ -1277,7 +1279,24 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
     monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
-    monkeypatch.setattr(rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由"))
+    monkeypatch.setattr(
+        rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由", url="https://t/1")
+    )
+
+    def write_admin_record(repo, n, sha, url):
+        if isinstance(record, Exception):
+            raise record
+        (record if record is not None else []).append((n, sha, url))
+        return True, "https://r/1"
+
+    monkeypatch.setattr(rv.approval_trail, "write_admin_record", write_admin_record)
+
+    def published_(r, a, plugin, prod, main_pr, merge, items, metrics, back=None):
+        published.append(main_pr)
+        if backs is not None:
+            backs.append((items, back))
+        raise SystemExit({"items": items})
+
     monkeypatch.setattr(rv, "wait_ci_except", lambda *a: ci.append(a[2]))
     monkeypatch.setattr(rv, "wait_trail_status", lambda *a: None)
     ops = rv.ProdOps(
@@ -1285,8 +1304,8 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None):
         create_pr=lambda *a: 9,
         merge_commit_of=lambda r, n: "m",
         merge_release_pr=lambda *a: (7, 7, "c"),
-        published=lambda r, a, plugin, prod, main_pr, *rest: published.append(main_pr) or (_ for _ in ()).throw(SystemExit({})),
-        wait_and_merge=lambda r, n, **kw: merged.append(kw) or "m",
+        published=published_,
+        wait_and_merge=wait_and_merge or (lambda r, n, **kw: merged.append(kw) or "m"),
         pr_check_buckets=lambda r, n: [],
     )
     codes = _exits(monkeypatch, rv)
@@ -1311,6 +1330,144 @@ def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, 
     """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
     _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found={"number": 9, "state": "OPEN"})
     assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}] and published == [9]
+
+
+def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatch, tmp_path):
+    """#3506 の受け入れ条件 1・6・I3・I8: cd-admin で証跡が先端と一致すれば、先端に固定して迂回でマージし、
+    結果の行の admin が true になり、照らした証跡を指す迂回の記録を 1 件書く。"""
+    record, backs = [], []
+    out, _, merged, published, _ = _reviewed_prod(
+        monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, record=record, backs=backs
+    )
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": False}] and published == [9]
+    assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": True} in out["items"]
+    assert record == [(9, HEAD, "https://t/1")]
+    assert {"kind": "comment", "name": "https://r/1", "result": "written", "record": "admin_merge"} in out["items"]
+    items, back = backs[0]
+    assert back(items, {}, "done") == ("ok", None, "done")
+
+
+@pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
+def test_reviewed_prod_without_the_declaration_writes_admin_false_and_no_record(monkeypatch, tmp_path, case):
+    """#3506 の受け入れ条件 7: 宣言の無い場合は迂回なしで、結果の行の admin が false、迂回の記録を書かない。"""
+    record = []
+    out, *_ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found={"number": 9, "state": "OPEN"}, record=record)
+    assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": False} in out["items"] and record == []
+
+
+def test_reviewed_prod_cd_admin_stops_at_the_gate_without_the_approval(monkeypatch, tmp_path):
+    """#3506 の受け入れ条件 2・I4: cd-admin で承認が無ければマージせず 10 で止まり、証跡を書く手順を案内する。"""
+    out, code, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "failure")
+    assert code == 10 and out["status"] == "gate" and merged == [] and published == []
+    assert "approve --pr 9" in out["next"] and "--by user" in out["next"]
+
+
+def test_reviewed_prod_cd_admin_stops_at_the_gate_when_the_head_moves(monkeypatch, tmp_path):
+    """#3506 の受け入れ条件 4・I6a・I6b: 迂回の前に先端が動けば（merge-when-green の head_moved）マージせず 10 で止まる。"""
+    from release_lib.approval import HeadMoved
+
+    def moved(r, n, **kw):
+        raise HeadMoved("先端が動いた")
+
+    record = []
+    out, code, _, published, _ = _reviewed_prod(
+        monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, wait_and_merge=moved, record=record
+    )
+    assert code == 10 and out["status"] == "gate" and published == [] and record == []
+
+
+@pytest.mark.parametrize("code", [1, 75])
+def test_reviewed_prod_cd_admin_does_not_merge_when_the_checks_fail(monkeypatch, tmp_path, code):
+    """#3506 の受け入れ条件 3・I5: チェックが落ちたら 1、上限なら 75 で止まり、迂回の記録を書かない。"""
+    from step_result import StepError
+
+    def failed(r, n, **kw):
+        raise StepError("PR #9 をマージできない: チェックが落ちた", code)
+
+    record = []
+    with pytest.raises(StepError) as e:
+        _reviewed_prod(
+            monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, wait_and_merge=failed, record=record
+        )
+    assert e.value.code == code and record == []
+
+
+def test_reviewed_prod_reports_an_unwritten_record_apart_from_the_release(monkeypatch, tmp_path):
+    """#3506 の決定 7: 記録を書けなければ本番の完了と分けて 1 で報告する。"""
+    from release_lib import approval_trail
+
+    backs = []
+    out, *_ = _reviewed_prod(
+        monkeypatch,
+        tmp_path,
+        "cd-admin",
+        "success",
+        found={"number": 9, "state": "OPEN"},
+        record=approval_trail.TrailError("unreadable", "書けない"),
+        backs=backs,
+    )
+    assert any(i.get("record") == "admin_merge" and i["result"] == "unwritten" for i in out["items"])
+    items, back = backs[0]
+    status, code, done = back(items, {}, "done")
+    assert (status, code) == ("stopped", 1) and "迂回の記録を書けなかった（本番は出ている）" in done
+
+
+@pytest.mark.parametrize("review", ["APPROVED", "REVIEW_REQUIRED"])
+def test_reviewed_prod_resume_writes_the_missing_admin_record(monkeypatch, tmp_path, review):
+    """#3506 の I7: マージ済みの本番の PR に、利用者の証跡が先端と一致し記録が無ければ、打ち直しで書く。
+    PR のレビューの判定（承認がそろっていても）は条件に使わない。"""
+    from release_lib import reviewed as rv
+
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"headRefOid": HEAD, "reviewDecision": review})
+    bys = []
+
+    def judge(repo, n, head, by=None):
+        bys.append(by)
+        return rv.approval_trail.Judgment("success", "承認", url="https://t/2")
+
+    monkeypatch.setattr(rv.approval_trail, "judge_trails_on", judge)
+    record = []
+    out, _, merged, published, _ = _reviewed_prod(
+        monkeypatch, tmp_path, "cd-admin", "failure", found={"number": 9, "state": "MERGED"}, record=record
+    )
+    assert merged == [] and published == [9] and record == [(9, HEAD, "https://t/2")] and bys == ["user"]
+
+
+def test_admin_record_on_resume_skips_without_a_matching_user_trail(monkeypatch):
+    from release_lib import reviewed as rv
+
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"headRefOid": HEAD})
+    monkeypatch.setattr(rv.approval_trail, "judge_trails_on", lambda *a: rv.approval_trail.Judgment("failure", "無い"))
+    assert rv.admin_record_on_resume(".", "o/r", _case("cd-admin"), 9) is None
+    assert rv.admin_record_on_resume(".", "o/r", _case("cd-review"), 9) is None
+
+
+def test_admin_back_keeps_the_merge_back_code():
+    from release_lib import reviewed as rv
+
+    items = [{"kind": "comment", "name": "#9", "result": "unwritten", "record": "admin_merge"}]
+    status, code, done = rv.admin_back(lambda i, m, d: ("stopped", 4, d + "。戻すマージで止まった"))(items, {}, "done")
+    assert (status, code) == ("stopped", 4) and "戻すマージ" in done and "迂回の記録" in done
+    assert rv.admin_back()([], {}, "done") == ("ok", None, "done")
+
+
+def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_path):
+    """#3506 の I8: 選んで集める取り込み方でも、本番の PR の行に迂回の有無を書く。"""
+    import argparse
+
+    from release_lib import promotion
+    from release_lib.context import ReleaseCtx
+
+    monkeypatch.setattr(
+        promotion, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "m\n", "")
+    )
+    monkeypatch.setattr(promotion, "_merge_exact", lambda *a: "m")
+    ops = argparse.Namespace(find_pr=lambda r, head, base, states: None, create_pr=lambda *a: 9)
+    a = argparse.Namespace(version="1.2.3", channel="prod", promotion="select", ci_wait=60.0)
+    ctx = ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3", "develop", "main")
+    for case, admin in (("cd-admin", True), ("cd-no-review", False)):
+        _, _, items, _, back = promotion.release_selected(ctx, None, ops, _case(case))
+        assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": admin} in items and callable(back)
 
 
 def test_reviewed_prod_resumes_after_the_merge(monkeypatch, tmp_path):

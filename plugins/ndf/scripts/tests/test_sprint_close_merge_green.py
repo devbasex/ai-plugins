@@ -1353,3 +1353,107 @@ def test_approved_on_pr_review_case_matches_latest_valid_approval(monkeypatch, r
     got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*REVIEW))
     assert tuple(got) == expected
     assert seen["perms"] == asked
+
+
+# --- #3506: 迂回の宣言（cd-admin）の promote と、断られた後の先端の読み直し ------------------------
+
+
+def _promote_admin(repo, gh, tmp_path, *args, **state):
+    """迂回の宣言を置き、承認数 1 の本番チャネルへの promote を打つ（リリースの場合は cd-admin）。"""
+    declare(repo, *TRYGROUP)
+    p = repo / ".ndf" / "project.json"
+    p.write_text(json.dumps({**json.loads(p.read_text(encoding="utf-8")), "production_merge": {"admin": True}}), encoding="utf-8")
+    return _promote_cd(repo, gh, tmp_path, *args, **{"rules": REVIEW_RULES, **state})
+
+
+def _user_trail(sha=X):
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval_trail
+
+    body = approval_trail.render_trail(sha, "user")
+    return {
+        "id": 5,
+        "body": body,
+        "user": {"login": "me"},
+        "created_at": "t",
+        "updated_at": "t",
+        "html_url": "https://github.com/o/r/pull/9#c5",
+    }
+
+
+def test_promote_admin_case_writes_trail_then_merges_with_the_bypass_and_records_it(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 5・6: cd-admin の promote --gate-approved user は、証跡を書いてから先端に固定して迂回でマージし、
+    結果の行の admin が true になり、照らした証跡を指す迂回の記録を置く。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path)
+    assert code == 0 and out["status"] == "ok", (out, err)
+    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+    assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is True
+    trail, record = gh.get()["comments"]
+    assert "ndf:release-approval" in trail and "担い手: user" in trail
+    assert "<!-- ndf:admin-merge -->" in record and X in record and "https://github.com/o/r/pull/9#c1" in record
+    assert "ndf:release-approval" not in record
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c1", "result": "written", "record": "admin_merge"} in out["items"]
+
+
+def test_promote_admin_case_does_not_let_mvv_replace_the_user_approval(repo, gh, tmp_path):
+    """#3506 の I9: cd-admin で --gate-approved mvv なら、証跡を書かずに承認ゲート（10）で止まり、マージしない。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path, "--gate-approved", "mvv")
+    assert code == 10 and out["status"] == "gate", (out, err)
+    assert merges(gh) == [] and not gh.get().get("comments")
+
+
+def test_promote_admin_case_stops_when_the_head_moved(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 4・5: 承認の後に先端が動いていれば、証跡を書かず head_moved の 1 で止まり、迂回しない。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [dict(to("main", Y), headRefName="develop")] * 3})
+    assert code == 1 and out["items"][-1]["result"] == "head_moved", (out, err)
+    assert merges(gh) == [] and not gh.get().get("comments")
+
+
+def test_promote_admin_case_does_not_merge_when_the_checks_fail(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 3・5: チェックが落ちていれば迂回でマージせずに 1 で止まる。"""
+    failed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("t", "FAILURE")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [failed] * 3})
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert merges(gh) == []
+
+
+def test_promote_admin_case_resume_writes_the_missing_record(repo, gh, tmp_path):
+    """#3506 の I7: マージ済みの本番の PR を打ち直すと、利用者の証跡が先端と一致し記録が無ければ記録だけを書く。"""
+    merged = dict(to("main", X), headRefName="develop", state="MERGED")
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [merged] * 3}, issue_comments=[_user_trail()], perms={"me": "admin"})
+    assert code == 0, (out, err)
+    assert merges(gh) == []
+    (record,) = gh.get()["comments"]
+    assert "<!-- ndf:admin-merge -->" in record and "https://github.com/o/r/pull/9#c5" in record
+
+
+def test_promote_admin_case_keeps_an_existing_record(repo, gh, tmp_path):
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval_trail
+
+    merged = dict(to("main", X), headRefName="develop", state="MERGED")
+    old = {"id": 6, "body": approval_trail.render_admin_record(X, "u"), "html_url": "https://github.com/o/r/pull/9#c6"}
+    comments = [_user_trail(), old]
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [merged] * 3}, issue_comments=comments, perms={"me": "admin"})
+    assert code == 0, (out, err)
+    assert not gh.get().get("comments")
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c6", "result": "kept", "record": "admin_merge"} in out["items"]
+
+
+def test_merge_when_green_writes_admin_true_with_the_bypass(repo, gh):
+    """#3506 の I8: 迂回でマージした行にも admin を必ず書く。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), passed_pr()]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is True
+
+
+@pytest.mark.parametrize("head, result", [("b", "head_moved"), ("a", "stopped")])
+def test_merge_when_green_rereads_the_head_after_a_refusal(repo, gh, head, result):
+    """#3506 の I6b: gh pr merge が断られたら PR を読み直し、先端が動いていれば head_moved で止める。同じなら今の stopped。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), passed_pr(head)]}, merge_code=1, merge_err="Head branch was modified")
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert out["items"][-1]["result"] == result
+    if result == "head_moved":
+        assert out["items"][-1] == {"kind": "pr", "name": "#5", "result": "head_moved", "head": "b", "expected": "a"}
