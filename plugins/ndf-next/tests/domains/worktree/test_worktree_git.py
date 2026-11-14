@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -125,3 +126,29 @@ def test_cleanup_removes_only_merged_clean_worktrees(main_repo: Path, run_git: C
     assert dirty.exists() and opened.exists()
     item = got["feat/squashed"].item()
     assert json.loads(json.dumps(item))["reason"] == cleanup_decide.REASONS[cleanup_decide.REMOVE]
+
+
+# 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
+def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
+    from ndf.domains.worktree import ledger, mainlock, trash
+
+    wt = create.create(main_repo, "feat/state").path
+    link = tmp_path / "link"
+    link.symlink_to(main_repo)
+    common = Path(os.path.realpath(main_repo / ".git"))
+    for where in (main_repo, wt, link):
+        g = Git(where)
+        assert mainlock.lock_file(g) == common / "ndf-main.lock"
+        assert ledger.ledger_path(g) == common / "ndf" / "worktree-registry.json"
+        assert trash.trash_root(g) == common / "ndf" / "worktree-trash"
+
+
+def test_state_files_propagate_git_failure(tmp_path: Path) -> None:
+    from ndf.adapters.git import GitError
+    from ndf.domains.worktree import ledger, mainlock, trash
+
+    outside = tmp_path / "not-a-repo"
+    outside.mkdir()
+    for find in (mainlock.lock_file, ledger.ledger_path, trash.trash_root):
+        with pytest.raises(GitError):
+            find(Git(outside))
