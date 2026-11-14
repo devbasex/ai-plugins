@@ -13,16 +13,21 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.records import jsonl
 from ndf.domains.records import usage_decide as ud
 
+if TYPE_CHECKING:
+    from ndf.adapters.github import GitHub
+
 # 書き手の区分（帳簿の行の caller）
 SUBAGENT = "subagent"
 CLAUDE_CLI = "claude-p"
+# 閉じた課題を数える GitHub の検索（GraphQL）
+_SEARCH = "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }"
 
 
 def ledger_path(env: Optional[Mapping[str, str]] = None) -> Path:
@@ -125,3 +130,9 @@ def report(path: Path, since: date, until: date, closed: Callable[[str], int]) -
         "broken_rows": broken,
         "closed_issues": closed(ud.closed_query(since, until)),
     }
+
+
+def closed_count(hub: GitHub, condition: str) -> int:
+    """閉じた課題（PR を除く）の数。条件は `usage_decide.closed_query` の JST の両端。"""
+    data = hub.graphql(_SEARCH, {"q": f"repo:{hub.repo} is:issue {condition}"})
+    return int(data["search"]["issueCount"])

@@ -109,15 +109,6 @@ def _handoff(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, "引継ぎ文書は通った", items, metrics)
 
 
-_SEARCH = "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }"
-
-
-def _closed_count(hub: github_mod.GitHub, condition: str) -> int:
-    """閉じた課題（PR を除く）の数。条件は `usage_decide.closed_query` の JST の両端。"""
-    data = hub.graphql(_SEARCH, {"q": f"repo:{hub.repo} is:issue {condition}"})
-    return int(data["search"]["issueCount"])
-
-
 def _usage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     if args.action == "stop":
         payload = _stdin_json()
@@ -129,7 +120,7 @@ def _usage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     except LookupError as exc:
         return result.stopped(TOOL, "precondition", str(exc))
     hub = _hub(root)
-    got = usage.report(path, args.since, args.until, lambda q: _closed_count(hub, q))
+    got = usage.report(path, args.since, args.until, lambda q: usage.closed_count(hub, q))
     return result.result(TOOL, result.OK, f"使用量: {got['since']}..{got['until']}", [got])
 
 
