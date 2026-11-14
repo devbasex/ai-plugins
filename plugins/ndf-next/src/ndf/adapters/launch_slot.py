@@ -119,7 +119,7 @@ def held(
         return
     try:
         lim = test_limits.load_limits(cwd if cwd is not None else Path.cwd())
-        directory = slots.slots_dir(env)
+        directory, _retired = slots.slots_place(env)
         directory.mkdir(parents=True, exist_ok=True)
     except (test_limits.SlotConfigError, identity.IdentityError, OSError) as exc:
         raise NoSlot(f"重い起動の枠を用意できない: {exc}") from exc
