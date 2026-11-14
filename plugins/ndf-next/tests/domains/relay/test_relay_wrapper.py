@@ -8,6 +8,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 from ndf.domains.relay import accounts, marks, registry, signals, wrapper
@@ -193,3 +194,20 @@ def test_broken_next_mark_stops_with_the_reason(tmp_path):
 
     ended, spawn, _ = _run(tmp_path, [FakeChild([], None)], prepare)
     assert ended.cause == "config_broken" and spawn.made[0].alive is False
+
+
+# 現状固定（I-004）: その日の起動回数は日付が変わると 0 回から数え直し、状態に今日の日付で書く
+def test_starts_from_another_day_are_counted_from_zero(tmp_path):
+    s = _settings(tmp_path, max_starts=2)
+    spawn = Spawner([FakeChild([], 1), FakeChild([], 1), FakeChild([], 1)])
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    assert w.starts == {"date": date.today().isoformat(), "count": 0}
+    w.starts = {"date": "2000-01-01", "count": 5}
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    assert ended.cause == "work_stopped"
+    assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
+    assert registry.read_state(w.dir)["starts"] == {"date": date.today().isoformat(), "count": 2}

@@ -6,7 +6,9 @@ tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計
 from __future__ import annotations
 
 import fcntl
+import json
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -191,3 +193,44 @@ def test_tmux_runner_failures_are_reported():
     t = Tmux({"NDF_RELAY_TMUX": "/x/tmux"}, 1.0, runner=boom)
     assert t.start("t1", Path("/w"), ["ndf"], {}) == Done(False, "tmux を打てない: no tmux")
     assert not t.has("t1")
+
+
+# 現状固定（I-004）: 起こし直しの回数は登録簿の starts が今日の日付のときだけ数え、ほかは 0 回から数える
+def _register(ctx, starts):
+    path = hub.hub_dir(ctx.state_dir) / hub.REGISTRY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": 1, "entries": {"t1": {"cwd": None, "args": [], "starts": starts}}}), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("starts", "count"),
+    [
+        ({"date": "2000-01-01", "count": 9}, 1),
+        ("壊れた値", 1),
+        (None, 1),
+        ({"date": "TODAY"}, 1),
+        ({"date": "TODAY", "count": "2"}, 3),
+    ],
+)
+def test_restart_counts_only_todays_starts(ctx, starts, count):
+    today = date.today().isoformat()
+    if isinstance(starts, dict):
+        starts = {k: (today if v == "TODAY" else v) for k, v in starts.items()}
+    _register(ctx, starts)
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert got.ok, got.summary
+    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": today, "count": count}
+
+
+def test_restart_refuses_when_todays_starts_reach_the_limit(ctx):
+    today = date.today().isoformat()
+    _register(ctx, {"date": today, "count": 3})
+    got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "refused") and "3 回" in got.summary
+    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": today, "count": 3}
+    assert ctx.tmux.started == []
+
+
+def test_spawn_registers_zero_starts_for_today(ctx):
+    assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
+    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
