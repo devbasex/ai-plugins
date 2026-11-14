@@ -67,11 +67,16 @@
     "contracts_dir": "contracts"
   },
   "words": {
-    "glossary_config": ".ndf/glossary.json",
+    "glossary_config": "glossary.json",
     "skip_files": ["uv.lock"]
+  },
+  "child_deps": {
+    "max_per_slot": 2
   },
   "invariants": {
     "old_plugin": "plugins/ndf",
-    "immediate_fix_mark": "即時修正（plugins/ndf）:"
+    "immediate_fix_mark": "即時修正（plugins/ndf）:",
+    "port_mark": "移す先（ndf-next）:",
+    "no_port_mark": "移さない理由（ndf-next）:"
   }
 }

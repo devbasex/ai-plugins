@@ -11,6 +11,8 @@ import pytest
 import sqlalchemy as sa
 
 from ndf.core import durable
+from ndf.core import durable_ledger as ledger
+from ndf.core import durable_locks as locks
 
 STARTED = datetime(2026, 11, 1, 9, 30, tzinfo=UTC)
 
@@ -33,7 +35,7 @@ def disposed(monkeypatch):
         engine.dispose = dispose
         return engine
 
-    monkeypatch.setattr(durable.sa, "create_engine", create_engine)
+    monkeypatch.setattr(locks.sa, "create_engine", create_engine)
     return counts
 
 
@@ -42,29 +44,29 @@ def _url(tmp_path) -> str:
 
 
 def test_ledger_is_empty_without_the_table(tmp_path, disposed):
-    assert durable._ledger(_url(tmp_path)) == []
+    assert ledger._ledger(_url(tmp_path)) == []
     assert disposed == {"created": 1, "disposed": 1}
 
 
 def test_register_writes_a_key_once_and_forget_removes_it(tmp_path, disposed):
     url = _url(tmp_path)
-    durable._register_run(url, "run-a", "key-a", STARTED)
-    durable._register_run(url, "run-a", "key-a", datetime(2026, 11, 2, tzinfo=UTC))
-    durable._register_run(url, "run-b", "key-b", STARTED)
+    ledger._register_run(url, "run-a", "key-a", STARTED)
+    ledger._register_run(url, "run-a", "key-a", datetime(2026, 11, 2, tzinfo=UTC))
+    ledger._register_run(url, "run-b", "key-b", STARTED)
 
-    rows = durable._ledger(url)
+    rows = ledger._ledger(url)
     assert sorted((r.run_name, r.run_key) for r in rows) == [("run-a", "key-a"), ("run-b", "key-b")]
     assert {r.started_at.replace(tzinfo=None) for r in rows} == {STARTED.replace(tzinfo=None)}
 
-    durable._forget_run(url, "run-a")
-    assert [r.run_name for r in durable._ledger(url)] == ["run-b"]
+    ledger._forget_run(url, "run-a")
+    assert [r.run_name for r in ledger._ledger(url)] == ["run-b"]
     assert disposed["created"] == disposed["disposed"] == 6
 
 
 def test_register_that_cannot_write_raises_store_broken_and_disposes(tmp_path, disposed):
     (tmp_path / "ledger.sqlite").mkdir()
-    with pytest.raises(durable.StoreBroken) as err:
-        durable._register_run(_url(tmp_path), "run-a", "key-a", STARTED)
+    with pytest.raises(locks.StoreBroken) as err:
+        ledger._register_run(_url(tmp_path), "run-a", "key-a", STARTED)
     assert err.value.kind == "store_broken"
     assert str(err.value).startswith(f"台帳 {durable.RUNS_TABLE} に鍵を書けない: ")
     assert isinstance(err.value.__cause__, sa.exc.SQLAlchemyError)
@@ -74,8 +76,8 @@ def test_register_that_cannot_write_raises_store_broken_and_disposes(tmp_path, d
 def test_register_with_an_unknown_scheme_raises_the_engine_error_as_is(disposed):
     """Engine を作れないときは StoreBroken に変えず、SQLAlchemy の例外のまま上げる。"""
     with pytest.raises(sa.exc.SQLAlchemyError) as err:
-        durable._register_run("nosuchdialect://x/y", "run-a", "key-a", STARTED)
-    assert not isinstance(err.value, durable.StoreStopped)
+        ledger._register_run("nosuchdialect://x/y", "run-a", "key-a", STARTED)
+    assert not isinstance(err.value, locks.StoreStopped)
     assert disposed == {"created": 0, "disposed": 0}
 
 
@@ -83,8 +85,8 @@ def test_forget_and_ledger_errors_propagate_and_dispose(tmp_path, disposed):
     (tmp_path / "ledger.sqlite").mkdir()
     url = _url(tmp_path)
     with pytest.raises(sa.exc.SQLAlchemyError) as forget_err:
-        durable._forget_run(url, "run-a")
-    assert not isinstance(forget_err.value, durable.StoreStopped)
+        ledger._forget_run(url, "run-a")
+    assert not isinstance(forget_err.value, locks.StoreStopped)
     with pytest.raises(sa.exc.SQLAlchemyError):
-        durable._ledger(url)
+        ledger._ledger(url)
     assert disposed == {"created": 2, "disposed": 2}

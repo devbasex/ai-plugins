@@ -8,7 +8,9 @@
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"},
     {"name": "ndf-next-tests", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）のテスト。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
-    {"name": "ndf-next-checks", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）の lock と定義の検査。paths で絞って回し、入れ替え（S2）でワークフローごと消す"}
+    {"name": "ndf-next-checks", "reason": "作り直しの NDF（plugins/ndf-next/。#1142）の lock と定義の検査。paths で絞って回し、入れ替え（S2）でワークフローごと消す"},
+    {"name": "ndf-next-scope", "reason": "ndf-next-tests と ndf-next-copy を打つかの判定だけで、結果は後のジョブが返す。入れ替え（S2）でワークフローごと消す"},
+    {"name": "ndf-next-copy", "reason": "作り直しの NDF を入れ替えの後の名前にした一時コピーの検査とテスト（#3347 の決定 101・IG3）。paths で絞って回し、入れ替え（S2）でワークフローごと消す"}
   ],
   "awaiting": [
     {"name": "repo-secrets-check", "reason": "秘密・.env・インフラの定義の検査（#2169 の境界の検査から #2646 で factory/ に依存しない種類を残したもの）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},

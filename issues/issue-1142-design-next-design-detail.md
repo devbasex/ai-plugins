@@ -154,7 +154,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | 2 | `git rm -r plugins/ndf` の後に `git mv plugins/ndf-next plugins/ndf` を打つ | — |
 | 3 | `plugin.json` 2 本の `name` を `ndf`、版を `11.0.0` にする | `claude plugin validate .` |
 | 4 | `.ndf/project.json` の suite のパスと `scripts/*-allow/` の許可ファイルを新しい中身に合わせて作り直す（旧い許可は消す） | 既存の検査のスクリプト |
-| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す | 既存の CI のジョブ |
+| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す。検査（`src/ndf/checks/`）から、子の表のコピー `children.json` と規則 `child-deps`（#3347 の決定 97）、旧いプラグインのディレクトリを見る規則 `I2`・`port`（#3343）を消す | 既存の CI のジョブ |
 | 6 | `CHANGELOG.md` に入れ替えを書き、手順 2〜6 を 1 本の PR にする | — |
 | 7 | `claude --plugin-dir plugins/ndf` で主要な Skill を 1 回ずつ起動する | 振る舞いの確認 |
 | 8 | develop へ入れて開発版としてデプロイし、リリース承認ゲートを通して main へ出す | リリース後テスト |
@@ -589,16 +589,16 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | A14 | C1+ | 片付けの走査は、`maint_lock` を待たずに取れ、取った後に読み直した目印 `dbos/.swept` が 24 時間より古いときだけ行う（SQLite と URL の両方） | 決定 83 |
 | B1 | C2 | プランの実行は、実行の回ごとに 1 つの実行の鍵で `durable.launch` を呼ぶ。同じプランの別の回・別のプランと鍵を共有しない | 決定 81・I5 |
 | B2 | C2 | 承認ゲートの `recv` で待つ間にプロセスが `os._exit` しても、次の `next` が同じ鍵で起動して回復する | 決定 81・I6 |
-| B3 | C2 | 20 本のプランの実行と 14 本のラッパー（`next` と `wait` を打ち続けるプロセス）を同時に 30 分流し、`database is locked` が 0 回、1 ステップあたりの上乗せが 1 秒以内であることを測り、値を PR に貼ってからマージする | 決定 81・82 |
+| B3 | C2 | 20 本のプランの実行と 14 本のラッパー（`next` と `wait` を打ち続けるプロセス）を全員そろえてから同時に走らせ、決めた回数（各プラン 5 ステップを 3 周）を回すテストで、`database is locked` が 0 回であることを確かめる。CI で流し、値を PR に貼ってからマージする。所要時間は合格の条件にしない（マシンのスペックと同時に動かす本数で決まり、合否がコードの良し悪しを表さない。条件ごとの実測は #3423） | 決定 81・82 |
 | B4 | C2 | 終わった鍵で打ち直すと、`retired/` の結果を返して流さない | 決定 83 |
 | B5 | C2 | 待ちを抱えた実行の一覧を出す副命令 `ndf plan pending` を持つ（`durable.pending` を呼ぶ） | 決定 86 |
-| B6 | C2 | B3 の負荷の中で、鍵のファイルの `quick_check` と片付けの走査の 1 回あたりの所要時間と、30 分の間に打った回数を測り、値を PR に貼る。目印が効いて、回数が呼び出しの回数に比例しないこと | 決定 82・83 |
+| B6 | C2 | B3 のテストを回し終えた後に、WAL の大きさが上限以下であることと、鍵のファイルの `quick_check` と片付けの走査が働いた回数を数で確かめ、値を PR に貼る。目印が効いて、回数が呼び出しの回数に比例しないこと。1 回あたりの所要時間は記録するが合格の条件にしない（B3 と同じ理由） | 決定 82・83 |
 | P1-1 | P1 #3092 | 進行表の DB は DBOS の表を持たず、SQLite なら WAL・`busy_timeout` 30 秒で開き、目印 `progress.checked` が 24 時間より古いか無いときに `quick_check` を打つ。通らなければ書かずに `store_broken` で止まる | 決定 81・82・I9 |
 | P1-2 | P1 #3092 | SQLite のとき、表の版を上げる前とその日の最初の検査の直後に、backup API で控えを取り、新しい 7 本を残す。`ndf progress restore --from <控え>` で戻せる | 決定 82 |
-| P1-3 | P1 #3092 | 34 本のプロセスが進行の事象を同時に書く負荷で、`database is locked` が 0 回、書き込みの待ちの 95 パーセンタイルが 1 秒以内であることを測り、値を PR に貼ってからマージする。超えたらマージせずに設計へ戻す | 決定 82 |
+| P1-3 | P1 #3092 | 6 本のレーンが `ndf progress next` で進行表の DB へ同時に書くテスト（全員そろえてから走らせ、決めた回数を回す）で、`database is locked` が 0 回であることを確かめる。CI で流す。所要時間は合格の条件にしない（B3 と同じ理由） | 決定 82 |
 | P1-4 | P1 #3092 | PostgreSQL の URL を渡したとき、`open_store` は `PRAGMA`・`quick_check`・控えを行わず、`pg_try_advisory_lock` で書き手を 1 つにする。`restore` は何もせず `restore_unsupported` で止まる | 決定 82 |
 | P1-5 | P1 #3092 | `restore` は `open_store` と同じ URL から `sqlite_path` で解いた実ファイルを対象にし、`state.lock` と実ファイルの `<実ファイル>.lock`（置き場の中のファイルでも）を排他で取れたときだけ動き、控えを一時名へ写して `quick_check` を通してから、本体と `-wal`・`-shm`・`-journal` をそろえて退避し、一時名を本体の名前にする。WAL にフレームを残したまま `restore` して、戻した中身が控えと一致することと、`NDF_PROGRESS_DB` に置き場の外のファイルを渡すとそのファイルが戻ること、置き場の中の既定の DB を別のチェックアウトが開いている間は `store_in_use` で止まることをテストで確かめる | 決定 82・I11 |
-| P1-6 | P1 #3092 | 進行表の DB の検査は `maint_lock` を待って取り、目印を読み直してから打つ。P1-3 の負荷の中で、進行表の DB の `quick_check` の所要時間と 30 分の間に打った回数を測り、値を PR に貼る。目印と `maint_lock` が効いて、回数がプロセスの数に比例しないこと | 決定 82 |
+| P1-6 | P1 #3092 | 進行表の DB の検査は `maint_lock` を待って取り、目印を読み直してから打つ。プロセスの数を変えて P1-3 のテストを回し、進行表の DB の `quick_check` を打った回数を数え、目印と `maint_lock` が効いて回数がプロセスの数に比例しないことを確かめる | 決定 82 |
 | P3-1 | P3 #3097 | レーンの起動は、計画が記録した形の番号（`STORE_FORMAT`・`FORMAT`・表の版）と自分のものを比べ、違えば `format_mismatch` で止まる。NDF の版だけが違えば止まらず、レーンの行の事象と `warnings` に残す | 決定 86 |
 | M3-1 | M3 #3297 | プラグインの更新を反映する再起動の前に、`ndf plan pending` の一覧を結果に載せる | 決定 86 |
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 
 # 読める宣言の版
@@ -30,7 +31,7 @@ LOCAL_SILENT = ("version", "$schema")
 # guard の許可パスの既定（宣言に guard.allow_paths の配列が無いとき）。知識と設定の置き場
 # git の無視の設定のファイルの名前
 GITIGNORE = ".gitignore"
-DEFAULT_ALLOW_PATHS = ("issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/", GITIGNORE)
+DEFAULT_ALLOW_PATHS = ("issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", identity.FIXED_WORDS["declaration_dir"] + "/", GITIGNORE)
 # branch_flow.start が取れる値（宣言の base_branch・production_branch のどちらを起点にするか）
 START_CHANNELS = ("base", "production")
 

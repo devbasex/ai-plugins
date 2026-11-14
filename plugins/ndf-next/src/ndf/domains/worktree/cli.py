@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
@@ -52,7 +52,7 @@ COMMANDS = {
     "guard": "書き込み先がメインディレクトリかを判断し、案内の文を出す",
     "merged": "マージ済みの PR のブランチの worktree とブランチを外し、メインディレクトリを取り込む",
     "trash": "本番に出たブランチの退避先を挙げる。承認した名前だけを消す",
-    "init": "宣言（.ndf/worktree.json）を作る",
+    "init": f"宣言（{identity.FIXED_WORDS['declaration_dir']}/worktree.json）を作る",
     "check": "宣言の状態とベースブランチ・本番チャネルを出す",
 }
 

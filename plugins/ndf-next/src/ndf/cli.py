@@ -36,10 +36,12 @@ COMMANDS: dict[str, str] = {
     "hooks": "ndf.domains.hooks.cli",
     "launch-args": "ndf.adapters.cli",
     "notify": "ndf.adapters.notify",
+    "plan": "ndf.core.plan.cli",
     "progress": "ndf.progress.command",
     "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
+    "worker": "ndf.core.worker",
     "worktree": "ndf.domains.worktree.cli",
 }
 
@@ -94,6 +96,14 @@ def _run(args: list[str]) -> int:
         print(f"知らない副命令: {args[0]}", file=sys.stderr)
         print(_usage(ident.name), file=sys.stderr)
         return _stop(TOOL, "invalid", f"知らない副命令: {args[0]}")
+    stopped = _prepare_state(ident)
+    if stopped is not None:
+        return stopped
+    return _call(args[0], module, args[1:])
+
+
+def _prepare_state(ident: identity.PluginIdentity) -> int | None:
+    """状態の置き場を用意し、退避した元と先を標準エラーへ書く。用意できれば None、できなければ止まった終了コード。"""
     try:
         ready = identity.prepare_state_dir(ident)
     except (OSError, identity.IdentityError) as exc:
@@ -102,7 +112,7 @@ def _run(args: list[str]) -> int:
         _print_retired(retired)
         return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
     _print_retired(ready.items())
-    return _call(args[0], module, args[1:])
+    return None
 
 
 def _call(name: str, module: str, argv: list[str]) -> int:

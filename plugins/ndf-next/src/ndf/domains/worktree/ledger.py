@@ -17,11 +17,12 @@ from typing import Any, Callable, Iterator, Optional
 
 from filelock import FileLock
 
+from ndf import identity
 from ndf.adapters.git import Git
 from ndf.domains.worktree import atomic, testenv_decide
 
-# 台帳の置き場（git の共通ディレクトリの下）と、排他を待つ上限の秒
-LEDGER = Path("ndf") / "worktree-registry.json"
+# 台帳のファイル名（git の共通ディレクトリの下の、プラグイン名の置き場に置く）と、排他を待つ上限の秒
+LEDGER = "worktree-registry.json"
 LOCK_WAIT = 30
 Row = dict[str, Any]
 # 台帳の時刻の書式（書く側の `now` と、読む側の `testenv_sweep` が同じ書式を使う）
@@ -45,7 +46,7 @@ def now() -> str:
 
 
 def ledger_path(git: Git) -> Path:
-    return git.common_dir() / LEDGER
+    return git.common_dir() / identity.load().name / LEDGER
 
 
 class Ledger:

@@ -9,6 +9,7 @@ from typing import Callable, Iterable
 
 import pytest
 
+from ndf import identity
 from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import cleanup, cleanup_decide, create, repo
@@ -139,8 +140,8 @@ def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo:
     for where in (main_repo, wt, link):
         g = Git(where)
         assert mainlock.lock_file(g) == common / "ndf-main.lock"
-        assert ledger.ledger_path(g) == common / "ndf" / "worktree-registry.json"
-        assert trash.trash_root(g) == common / "ndf" / "worktree-trash"
+        assert ledger.ledger_path(g) == common / identity.load().name / "worktree-registry.json"
+        assert trash.trash_root(g) == common / identity.load().name / "worktree-trash"
 
 
 def test_state_files_propagate_git_failure(tmp_path: Path) -> None:

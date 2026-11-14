@@ -17,19 +17,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from ndf import identity
 from ndf.adapters.git import Git, GitError
 
 # 作り直せる生成物（退避せずに捨てる。パスのどこかのディレクトリがこの名前なら、その下ごと当たる）
 REGENERABLE = frozenset({".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 # 名前だけでは生成物と決められないディレクトリと、同じ階層にあれば生成物とみなす作り直しの設定
 MANIFEST_REGENERABLE = {"target": ("Cargo.toml", "pom.xml", "dbt_project.yml")}
-# 退避先の置き場（git の共通ディレクトリの下）
-TRASH_DIR = Path("ndf") / "worktree-trash"
+# 退避先の置き場の名前（git の共通ディレクトリの下の、プラグイン名の置き場に置く）
+TRASH_DIR = "worktree-trash"
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def trash_root(git: Git) -> Path:
-    return git.common_dir() / TRASH_DIR
+    return git.common_dir() / identity.load().name / TRASH_DIR
 
 
 def _others(git: Git) -> list[str]:

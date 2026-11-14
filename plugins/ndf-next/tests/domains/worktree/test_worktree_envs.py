@@ -10,6 +10,7 @@ from typing import Callable, Mapping, Optional
 
 import pytest
 
+from ndf import identity
 from ndf.adapters.git import Completed, Git
 from ndf.domains.worktree import cli_env, container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_decide, testenv_sweep
 
@@ -390,7 +391,7 @@ def test_ledger_latest_and_path_of_git(main_repo: Path) -> None:
     assert ledger.latest(rows, "/w", lambda r: True) == {"worktree": "/w", "n": 3}
     assert ledger.latest(rows, "/w", lambda r: r["n"] == 1) == {"worktree": "/w", "n": 1}
     assert ledger.latest(rows, "/z", lambda r: True) is None
-    want = Path(os.path.realpath(main_repo)) / ".git" / "ndf" / "worktree-registry.json"
+    want = Path(os.path.realpath(main_repo)) / ".git" / identity.load().name / "worktree-registry.json"
     assert ledger.ledger_path(Git(main_repo)) == want and ledger.Ledger.of(Git(main_repo)).path == want
 
 

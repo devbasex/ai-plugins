@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from ndf import identity
 from ndf.adapters.git import ORIGIN, Git, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
@@ -58,7 +59,7 @@ Worktree = WorktreeEntry
 def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
     """置き場 `.worktrees/` の下（その下の `.ndf/` の作業用を除く）の worktree。"""
     root = os.path.realpath(worktrees_dir(main_dir))
-    scratch = os.path.join(root, facts.value("places", "ndf", "path"))
+    scratch = os.path.join(root, identity.FIXED_WORDS["declaration_dir"])
     picked = []
     for item in items:
         path = os.path.realpath(item.path)

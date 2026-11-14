@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any, Optional, TextIO
 
-from ndf import contracts
+from ndf import contracts, identity
 from ndf.contracts import causes, exit_codes, facts
 
 # 結果の status の語彙は exit_codes が持ち、ここから result.OK などとしても引ける
@@ -27,7 +27,7 @@ _OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next", "outputs",
 # routes のキーの語彙を持つ事実の表
 ANSWERS = "answers"
 # エントリポイントの短い名前（next・routes のコマンドの先頭。パスと版を含めない）
-ENTRY = "ndf"
+ENTRY = identity.FIXED_WORDS["entrypoint"]
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:

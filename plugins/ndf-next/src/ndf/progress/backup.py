@@ -19,7 +19,8 @@ import sqlalchemy as sa
 
 from ndf.core import durable
 
-BACKUP_DIR = "backup"
+# 控えの置き場の名前は耐久の記録の控えと同じ
+BACKUP_DIR = durable.BACKUP_DIR
 BACKUP_PREFIX = "progress-"
 # 残す控えの本数（8 本目を取ると最も古い 1 本を消す）
 KEEP_BACKUPS = 7
