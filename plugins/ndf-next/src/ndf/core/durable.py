@@ -489,13 +489,8 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
     busy: tuple[Path, ...] = (_store_lock_path(root),)
     attempt = 0
     while True:
-        shared = _hold_shared(root)
-        found = _read_format(root)
-        if found == STORE_FORMAT:
-            _held_stores[root] = shared
+        if _hold_if_current(root):
             return StoreReady(root, retired_to, pending_count)
-        shared.close()
-        _refuse_newer(root, found)
         if attempt >= PREPARE_ATTEMPTS:
             raise StoreInUse(f"置き場の形の番号をそろえられない（ほかのプロセスが使っている）: {root}", busy)
         attempt += 1
@@ -507,8 +502,26 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
             continue
         if moved is not None:
             retired_to = moved
-            pending_count = len(_pending_in(moved))
-            log.warning("旧い置き場を退避した", extra={"from": str(root), "to": str(moved), "pending": pending_count})
+            pending_count = _report_retired(root, moved)
+
+
+def _hold_if_current(root: Path) -> bool:
+    """置き場のロックを共有で取り、番号が自分と同じなら持ったまま真を返す。違えば放し、新しすぎれば `StoreFormatNewer`。"""
+    shared = _hold_shared(root)
+    found = _read_format(root)
+    if found == STORE_FORMAT:
+        _held_stores[root] = shared
+        return True
+    shared.close()
+    _refuse_newer(root, found)
+    return False
+
+
+def _report_retired(root: Path, moved: Path) -> int:
+    """退避した置き場で待ちを抱えていた実行を数え、ログに残して数を返す。"""
+    pending_count = len(_pending_in(moved))
+    log.warning("旧い置き場を退避した", extra={"from": str(root), "to": str(moved), "pending": pending_count})
+    return pending_count
 
 
 def release_store(root: Path) -> None:
