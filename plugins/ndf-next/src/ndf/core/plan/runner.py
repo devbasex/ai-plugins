@@ -47,7 +47,7 @@ RESULTS_DIR = "results"
 # 差し込み `{work_base}` の置き場（状態の置き場の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
-TOPIC_ANSWER = "answer"
+TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
 # 承認の答えを 1 回に待つ秒。期限で答えが無ければ待ち直す（答えの来ない承認ゲートを打ち切らない）
 ANSWER_WAIT_SECONDS = 86400.0

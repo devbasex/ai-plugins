@@ -154,14 +154,19 @@ def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
     return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
 
 
-def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """スプリントの差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。"""
+def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
+    """範囲 `rng` の差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。git が読めなければ `GitError`。"""
     project = declaration(cwd, PROJECT_FILE)
+    files = _diff_names(git, rng, [])
+    docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
+    return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+
+
+def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """スプリントの差分を分ける（`range_diff_kinds`）。"""
     try:
         git, rng = _sprint_range(context, cwd)
-        files = _diff_names(git, rng, [])
-        docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
-        return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+        return range_diff_kinds(git, rng, cwd)
     except GitError as exc:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 

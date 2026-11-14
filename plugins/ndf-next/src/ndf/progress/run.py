@@ -8,9 +8,9 @@
 - `work` は排他を持ったまま工程のステップを順に呼ぶ（`invoke`）。打ち直しで直る止まり（止まった理由の表の
   行き先が `retry`）はここで方針どおりに打ち直し、conductor へ返すのは人か conductor の判断が要る止まりだけで、
   `routes` を持つ（SF8）。終了コードは止まった理由の種類から引く
-- 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と
-  答えごとの `routes` を返す。答えは `answer` が事象 `answered` で残す。差し戻し（`revise`）には指摘ファイルが
-  要り、指摘の本文も事象に残る（3365-4）
+- 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と `routes` を返す。
+  答えは `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。差し戻しには指摘ファイルが要る（3365-4）
+- スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了の印を付ける。合わなければ印を付けず失敗にする（受け入れ条件 8）
 - 課題の工程表とスプリント PR の「通した工程」は終了の印から作る（受け入れ条件 6）。書けなくても工程は進め、
   `resync` で何度でも同じ結果へ揃え直せる（3377-9）
@@ -125,14 +125,18 @@ def read(st: store.Store, table_id: str) -> View:
         return view(conn, table_id)
 
 
-def append(st: store.Store, table_id: str, build: Callable[[View], list[model.EventDraft]]) -> list[int]:
-    """今の進行表を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。下書きが空なら書かない。"""
+def append(
+    st: store.Store, table_id: str, build: Callable[[View], list[model.EventDraft]], after: Callable[[Any], Any] = lambda _conn: None
+) -> list[int]:
+    """`build` が今の進行表から作った下書きを追記する（ぶつかれば作り直す。空なら書かない）。`after` は同じトランザクションで打つ。"""
     for attempt in range(1, APPEND_ATTEMPTS + 1):
         try:
             with store.transaction(st) as conn:
                 v = view(conn, table_id)
                 drafts = build(v)
-                return store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+                seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+                after(conn)
+                return seqs
         except store.Conflict:
             if attempt == APPEND_ATTEMPTS:
                 raise
@@ -510,6 +514,7 @@ class Env:
     invoker: Invoker = _invoke
     records: Callable[[Path], Records] = github_records
     sleep: Callable[[float], None] = time.sleep
+    ended: Callable[[Any, str], Any] = lambda _conn, _table_id: None  # スプリントの完了と同じトランザクションで打つ
 
 
 def work_root(root: Path, table_id: str) -> Path:
@@ -636,7 +641,8 @@ def _consume(d: Drive, v: View, m: Move) -> None:
 
 
 def _complete(d: Drive, v: View) -> dict[str, Any]:
-    d.write(model.EventDraft("completed", ACTOR, None, rev=v.rev))
+    done = model.EventDraft("completed", ACTOR, None, rev=v.rev)
+    append(d.st, d.table_id, lambda _v: [done], after=lambda conn: d.env.ended(conn, d.table_id))
     d.synced()
     done = read(d.st, d.table_id)
     return result.result(TOOL, result.OK, f"進行表 {d.table_id} を完了にした", metrics=_metrics(done, Move(Action.DONE)))
@@ -656,17 +662,12 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     return None
 
 
-def _start_move(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
-    assert m.stage is not None
-    return _start(d, v, m.stage)
-
-
 Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
 # 副作用を持つ手 → 打つ関数（表に無い手は副作用の無い結果 `report` を返す）
 _HANDS: dict[Action, Hand] = {
     Action.COMPLETE: lambda d, v, _m: _complete(d, v),
     Action.CONSUME: _consume,
-    Action.START: _start_move,
+    Action.START: lambda d, v, m: _start(d, v, m.stage) if m.stage is not None else None,
     Action.RESUME: _resume,
 }
 
@@ -753,7 +754,7 @@ def wait(
 # --- answer --------------------------------------------------------------------------------
 
 
-def _notes(value: str, path: Optional[Path]) -> Optional[str]:
+def notes_text(value: str, path: Optional[Path]) -> Optional[str]:
     """差し戻しの指摘の本文。差し戻しには空でない指摘ファイルが要る（3365-4）。"""
     if value != REVISE:
         return None
@@ -768,23 +769,26 @@ def _notes(value: str, path: Optional[Path]) -> Optional[str]:
     return text
 
 
+def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[str], extra: Mapping[str, Any]) -> model.EventDraft:
+    """待っているステップへの答えの事象。待っていない行・選択肢に無い答え・承認ゲートへの問いの id（`gate_id`）を持たない
+    答え（3364-2）は断る。`extra` は payload へ足す（`by` は書き手）。"""
+    m = decide(v)
+    if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
+        raise model.Refused(f"工程 {stage} は答えを待っていない")
+    if invoke.is_listen(m.step) and "gate_id" not in extra:
+        raise model.Refused(f"工程 {stage} は承認ゲートで、答えは ndf answer で問いの id と見た対象を添える（next の routes）")
+    allowed = choices(m)
+    if value not in allowed:
+        raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")
+    payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text, **extra}
+    by = str(extra["by"]) if "by" in extra else "conductor"
+    return model.EventDraft(ANSWERED, by, stage, reason=reason, payload=payload, rev=v.rev)
+
+
 def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, notes: Optional[Path]) -> dict[str, Any]:
-    """待っているステップへの答えを事象 `answered` で残す。待っていない行・選択肢に無い答えは断る。"""
-    text = _notes(value, notes)
-
-    def build(v: View) -> list[model.EventDraft]:
-        m = decide(v)
-        if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
-            raise model.Refused(f"工程 {stage} は答えを待っていない")
-        allowed = choices(m)
-        if value not in allowed:
-            raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")
-        payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text}
-        if notes is not None:
-            payload["notes_path"] = str(notes)
-        return [model.EventDraft(ANSWERED, "conductor", stage, reason=reason, payload=payload, rev=v.rev)]
-
-    seqs = append(st, table_id, build)
+    """待っているステップへの答えを事象 `answered` で残す（`answer_draft`）。"""
+    text, extra = notes_text(value, notes), ({"notes_path": str(notes)} if notes is not None else {})
+    seqs = append(st, table_id, lambda v: [answer_draft(v, stage, value, reason, text, extra)])
     summary = f"工程 {stage} へ答え {value} を書いた。続きは next で流す"
     return result.result(TOOL, result.OK, summary, metrics={"table_id": table_id, "seqs": seqs}, next=_cmd("next", table_id))
 
@@ -925,12 +929,8 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
 # --- 副命令 ndf progress のエントリポイント ----------------------------------------------------------------
 
 
-def _env() -> Env:
-    return Env(facts=command.facts_of)
-
-
 def _cmd_next(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return advance(st, a.table_id, cwd, _env())
+    return advance(st, a.table_id, cwd, a.env)
 
 
 def _cmd_wait(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -942,11 +942,11 @@ def _cmd_answer(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_resync(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return resync(st, a.table_id, cwd, _env())
+    return resync(st, a.table_id, cwd, a.env)
 
 
 def _cmd_work(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return work(st, a.table_id, cwd, _env())
+    return work(st, a.table_id, cwd, a.env)
 
 
 def _cmd_show(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -987,12 +987,14 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    return command.with_store(cwd, COMMANDS[a.action], a)
-
-
 def main(argv: list[str]) -> int:
     """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。"""
     if not argv or argv[0] not in COMMANDS:
         return command.main(argv)
-    return command.run_main(parser(), _dispatch, argv)
+    env = Env(facts=command.facts_of)
+    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, COMMANDS[a.action], with_env(a, env)), argv)
+
+
+def with_env(a: argparse.Namespace, env: Env) -> argparse.Namespace:
+    """副命令の引数に外との接点 `env` を足す（エントリポイントの `ndf.progress.gate` は包んだ `Env` を渡す）。"""
+    return argparse.Namespace(**vars(a), env=env)

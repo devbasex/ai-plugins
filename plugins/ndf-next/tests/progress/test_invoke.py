@@ -238,13 +238,15 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
     [
         ("design", {"title", "body_file", "worker", "rebuild", "review", "required"}),
         ("impl", {"title", "body_file", "test_command", "worker", "required"}),
-        ("design-merge", {"worker", "gate"}),
+        ("design-merge", {"worker"}),
     ],
 )
 def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):
     # PR 3464 の指摘（#3092）: 雛形の必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に invalid で止まる。
-    # 出所（課題・宣言・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
+    # 出所（課題・宣言・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる。worker の既定は空けて試す
     repo = _sprint_repo(tmp_path)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=None) if n == "worker" else p for n, p in held.items()})
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
