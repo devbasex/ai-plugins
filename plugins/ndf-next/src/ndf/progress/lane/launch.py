@@ -81,10 +81,18 @@ def spawn(plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None
         done = runner(argv, capture_output=True, text=True, check=False)
     except OSError as exc:
         return {"ok": False, "detail": f"ラッパーを起こせない: {exc}"}
-    lines = done.stdout.strip().splitlines()
+    return read_spawn(done.stdout, done.stderr, done.returncode)
+
+
+def read_spawn(stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
+    """ラッパーの出力を読む。標準出力の末尾の行の結果 JSON の `status` が ok なら `ok` を真にする。
+
+    結果 JSON が読めなければ、詳細は標準エラーの末尾（無ければ終了コード）にする。
+    """
+    lines = stdout.strip().splitlines()
     try:
         out = json.loads(lines[-1]) if lines else {}
     except ValueError:
         out = {}
     ok = out.get("status") == result.OK
-    return {"ok": ok, "detail": out.get("summary") if out else (done.stderr.strip()[-300:] or f"終了コード {done.returncode}")}
+    return {"ok": ok, "detail": out.get("summary") if out else (stderr.strip()[-300:] or f"終了コード {returncode}")}
