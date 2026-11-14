@@ -87,7 +87,7 @@ def test_create_warns_when_fetch_fails(main_repo: Path, run_git: Callable) -> No
 
 def test_list_only_dev_worktrees(main_repo: Path) -> None:
     create.create(main_repo, "feat/a")
-    items = repo.dev_worktrees(main_repo.resolve(), repo.worktrees(Git(main_repo)))
+    items = repo.dev_worktrees(main_repo.resolve(), Git(main_repo).worktrees())
     assert [w.branch for w in items] == ["feat/a"]
 
 

@@ -99,7 +99,7 @@ def _create(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 
 
 def _list(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
-    items = repo.dev_worktrees(where.main_dir, repo.worktrees(Git(where.main_dir)))
+    items = repo.dev_worktrees(where.main_dir, Git(where.main_dir).worktrees())
     rows = [{"path": str(w.path), "branch": w.branch, "head": w.head, "prunable": w.prunable, "locked": w.locked} for w in items]
     return result.result(TOOL, result.OK, f"worktree は {len(rows)} 件", rows, {"count": len(rows)})
 

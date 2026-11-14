@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters.git import parse_worktree_list
 from ndf.domains.worktree import cleanup_decide as cd
 from ndf.domains.worktree import declaration, guard_decide, repo, session_decide
 
@@ -92,7 +93,7 @@ def test_parse_porcelain() -> None:
         "worktree /r/main/.worktrees/x\0HEAD bbb\0detached\0locked\0\0"
         "worktree /r/main/.worktrees/y\0HEAD ccc\0branch refs/heads/feat/y\0prunable gone\0\0"
     )
-    got = repo.parse_porcelain(text)
+    got = parse_worktree_list(text)
     assert [(w.path, w.branch, w.locked, w.prunable) for w in got] == [
         (Path("/r/main"), "develop", False, False),
         (Path("/r/main/.worktrees/x"), None, True, False),

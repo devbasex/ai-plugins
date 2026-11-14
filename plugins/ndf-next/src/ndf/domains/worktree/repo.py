@@ -1,7 +1,7 @@
 """リポジトリの中の位置と worktree の一覧（git は `adapters.git.Git` を通して読む）。
 
 - `locate`: メインディレクトリと、今の位置が worktree の中か。サブモジュールの中は通常のリポジトリとして扱う
-- `worktrees`: `git worktree list` の一覧（読み方は `adapters.git.Git.worktrees`）。`dev_worktrees` は置き場 `.worktrees/` の下だけに絞る
+- `dev_worktrees`: `git worktree list` の一覧（`adapters.git.Git.worktrees`）を置き場 `.worktrees/` の下だけに絞る
   （置き場の名前は事実の表 `places` の `worktrees` から引く）
 """
 
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ndf.adapters.git import Git, GitError, WorktreeEntry, parse_worktree_list
+from ndf.adapters.git import Git, GitError, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
 
@@ -53,13 +53,8 @@ def locate(git: Git) -> Location:
     return Location(main, top_dir)
 
 
-# `git worktree list` の 1 件と、その読み手（読み方は git のアダプターが持つ）
+# `git worktree list` の 1 件（一覧は `Git.worktrees`。読み方は git のアダプターが持つ）
 Worktree = WorktreeEntry
-parse_porcelain = parse_worktree_list
-
-
-def worktrees(git: Git) -> list[Worktree]:
-    return git.worktrees()
 
 
 def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:

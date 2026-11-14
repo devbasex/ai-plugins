@@ -72,7 +72,7 @@ def _with_pulls(facts: Facts, pulls: Iterable[Pull]) -> Facts:
 def survey(main_dir: Path, cwd: Path, hub: PullReader, git: Optional[Git] = None) -> list[tuple[repo.Worktree, Facts]]:
     """片付けの対象の worktree と、判断に要る事実。PR を読むのは git の事実で残すと決まらないものだけ。"""
     g = git if git is not None else Git(main_dir)
-    items = repo.dev_worktrees(main_dir, repo.worktrees(g))
+    items = repo.dev_worktrees(main_dir, g.worktrees())
     local = [(item, _local_facts(item, cwd)) for item in items]
     asked = sorted({f.branch for _, f in local if f.branch is not None and cleanup_decide.decide(f) == cleanup_decide.KEEP_NO_PR})
     pulls = hub.pulls_by_head(asked) if asked else {}
