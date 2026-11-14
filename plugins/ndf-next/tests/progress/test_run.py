@@ -17,7 +17,7 @@ from ndf import identity
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
-from ndf.progress import command, definition, invoke, model, run, store, table
+from ndf.progress import command, conditions, definition, invoke, model, run, store, table
 
 ISSUE = 3092
 
@@ -296,7 +296,7 @@ def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
 
 def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, capsys):
     tid = _new(capsys, "standard")
-    env.env = run.Env(**{**vars(env.env), "facts": run.facts_of})
+    env.env = run.Env(**{**vars(env.env), "facts": conditions.facts_of})
     _turn(st, tid, repo, env)
     _approve(st, tid, "設計")
     out = _turn(st, tid, repo, env)
@@ -306,11 +306,11 @@ def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, ca
 
 def test_facts_of_reads_the_declarations_and_the_context(repo):
     words = ("ci_declared", "design_pr", "prod_branch", "release_record")
-    assert run.facts_of(words, {}, repo) == dict.fromkeys(words, False)
+    assert conditions.facts_of(words, {}, repo) == dict.fromkeys(words, False)
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}))
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
-    assert run.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+    assert conditions.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -345,35 +345,35 @@ def test_diff_words_split_the_sprint_diff_into_code_and_docs(repo, changed, kind
     _sprint_branch(repo, *changed)
     words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
     ctx = {"worktree": str(repo), "branch": "sprint/s1"}
-    assert tuple(run.facts_of(words, ctx, repo)[w] for w in words) == kinds
+    assert tuple(conditions.facts_of(words, ctx, repo)[w] for w in words) == kinds
 
 
 def test_diff_words_follow_the_docs_declaration(repo):
     _sprint_branch(repo, "a.txt", "rules/b.txt")
     words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
     ctx = {"worktree": str(repo), "branch": "sprint/s1"}
-    assert run.facts_of(words, ctx, repo) == {"code_in_diff": True, "docs_only_diff": False, "behavior_docs_in_diff": False}
+    assert conditions.facts_of(words, ctx, repo) == {"code_in_diff": True, "docs_only_diff": False, "behavior_docs_in_diff": False}
     docs = {"files": ["**/*.md", "**/*.txt"], "behavior": ["rules/*.txt"]}
     (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
-    assert run.facts_of(words, ctx, repo) == {"code_in_diff": False, "docs_only_diff": False, "behavior_docs_in_diff": True}
+    assert conditions.facts_of(words, ctx, repo) == {"code_in_diff": False, "docs_only_diff": False, "behavior_docs_in_diff": True}
     docs["files"] = ["**/*.txt", "!rules/**"]
     (repo / ".ndf" / "project.json").write_text(json.dumps({"docs": docs}))
-    assert run.facts_of(words, ctx, repo)["code_in_diff"] is True
+    assert conditions.facts_of(words, ctx, repo)["code_in_diff"] is True
 
 
 def test_diff_words_without_a_base_branch_cannot_be_decided(repo):
-    with pytest.raises(run.FactUnknown, match="code_in_diff"):
-        run.facts_of(("code_in_diff",), {}, repo)
+    with pytest.raises(conditions.FactUnknown, match="code_in_diff"):
+        conditions.facts_of(("code_in_diff",), {}, repo)
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "--output=x"}))
-    with pytest.raises(run.FactUnknown, match="- で始まる"):
-        run.facts_of(("code_in_diff",), {}, repo)
+    with pytest.raises(conditions.FactUnknown, match="- で始まる"):
+        conditions.facts_of(("code_in_diff",), {}, repo)
 
 
 def test_next_flows_the_refactor_row_from_the_sprint_diff(repo, st, env, capsys):
     _sprint_branch(repo, "README.md")
     tid = _new(capsys, "standard")
-    env.env = run.Env(**{**vars(env.env), "facts": run.facts_of})
+    env.env = run.Env(**{**vars(env.env), "facts": conditions.facts_of})
     _turn(st, tid, repo, env)
     _approve(st, tid, "設計")
     _turn(st, tid, repo, env)
