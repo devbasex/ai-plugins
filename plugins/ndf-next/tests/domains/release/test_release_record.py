@@ -111,7 +111,7 @@ def test_body_without_json_block_is_not_a_record() -> None:
 
 
 # 印とコードブロックを持つが JSON として読めないリリース記録
-BROKEN = f"{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{\"version\": \n```\n"
+BROKEN = f'{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{"version": \n```\n'
 
 
 def test_marked_body_with_broken_json_is_reported_not_skipped() -> None:
