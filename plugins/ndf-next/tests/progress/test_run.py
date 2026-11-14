@@ -65,9 +65,9 @@ class Fake:
         return lanes.ok_result(r, self.values)
 
     def __call__(self, r, cwd, work_dir, answer):
-        self.calls.append(SimpleNamespace(
-            step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir, retries=r.retries, again=r.again
-        ))
+        self.calls.append(
+            SimpleNamespace(step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir, retries=r.retries, again=r.again)
+        )
         queued = self.script.get(r.step)
         return queued.pop(0)(r) if queued else self.ok(r)
 
