@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from ndf.progress.lane import LaneRow, launch
 
 
@@ -62,3 +64,66 @@ def test_spawn_reports_a_refusal_or_a_broken_output_as_a_failure(tmp_path):
     assert launch.spawn("p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "壊れた"}
     run, _ = _runner(error=FileNotFoundError("ndf"))
     assert launch.spawn("p6", "a", tmp_path, "入力", run=run)["ok"] is False
+
+
+# --- spawn の現状固定（リファクタリングの前に今の出力を記録する） ----------------------------------------
+
+
+def test_spawn_passes_the_whole_argv_and_the_run_options(tmp_path):
+    from ndf import identity
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "ログ\n" + json.dumps({"status": "ok", "summary": "起こした"}) + "\n", "")
+
+    assert launch.spawn("p6", "a", tmp_path, "入力", run=run) == {"ok": True, "detail": "起こした"}
+    argv, kwargs = calls[0]
+    assert argv == [
+        str(identity.entrypoint(identity.ROOT)),
+        "relay",
+        "spawn",
+        "--name",
+        "p6-a",
+        "--cwd",
+        str(tmp_path),
+        "--role",
+        "conductor",
+        "--plan",
+        "p6",
+        "入力",
+    ]
+    assert kwargs == {"capture_output": True, "text": True, "check": False}
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "code", "got"),
+    [
+        # 出力が空で stderr も空なら終了コードを書く
+        ("", "", 0, {"ok": False, "detail": "終了コード 0"}),
+        ("", "", 3, {"ok": False, "detail": "終了コード 3"}),
+        # 最後の行の JSON だけを読む。summary が無ければ detail は None
+        (json.dumps({"status": "ok"}), "", 0, {"ok": True, "detail": None}),
+        (json.dumps({"status": "stopped"}), "エラー", 1, {"ok": False, "detail": None}),
+        # 空の JSON は壊れた出力と同じ扱い（stderr か終了コード）
+        (json.dumps({}), "", 0, {"ok": False, "detail": "終了コード 0"}),
+        # stderr は末尾の 300 文字だけを残す
+        ("not json", "x" * 100 + "e" * 300, 1, {"ok": False, "detail": "e" * 300}),
+    ],
+)
+def test_spawn_reads_the_last_line_as_it_is_now(tmp_path, stdout, stderr, code, got):
+    run, _ = _runner(stdout=stdout, stderr=stderr, code=code)
+    assert launch.spawn("p6", "a", tmp_path, "入力", run=run) == got
+
+
+def test_spawn_reports_the_os_error_in_the_detail(tmp_path):
+    run, _ = _runner(error=PermissionError("denied"))
+    assert launch.spawn("p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "ラッパーを起こせない: denied"}
+
+
+def test_spawn_uses_subprocess_run_when_no_runner_is_given(tmp_path, monkeypatch):
+    run, calls = _runner(stdout=json.dumps({"status": "ok", "summary": "起こした"}))
+    monkeypatch.setattr(subprocess, "run", run)
+    assert launch.spawn("p6", "a", tmp_path, "入力") == {"ok": True, "detail": "起こした"}
+    assert calls[0][-1] == "入力"
