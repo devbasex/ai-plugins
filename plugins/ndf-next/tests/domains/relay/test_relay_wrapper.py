@@ -8,6 +8,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -211,3 +212,59 @@ def test_starts_from_another_day_are_counted_from_zero(tmp_path):
     assert ended.cause == "work_stopped"
     assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
     assert registry.read_state(w.dir)["starts"] == {"date": date.today().isoformat(), "count": 2}
+
+
+# 現状固定（I-013）: ラッパーが自分で読む事実（プロセスの番号・壁時計・使用率のキャッシュの時刻）
+LIMIT_LINE = b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"
+
+
+def test_state_file_records_the_wrapper_and_the_section(tmp_path):
+    ended, spawn, w = _run(tmp_path, [FakeChild([], 0)])
+    (argv, env) = spawn.calls[0]
+    got = registry.read_state(w.dir)
+    assert got["at"] and isinstance(got["at"], str)
+    del got["at"]
+    assert got == {
+        "name": "t1",
+        "version": VERSION,
+        "pid": os.getpid(),
+        "cwd": str(tmp_path),
+        "state": "stopped",
+        "reason": ended.reason,
+        "section": 1,
+        "session_id": argv[2],
+        "account": None,
+        "starts": {"date": date.today().isoformat(), "count": 0},
+    }
+    assert "NDF_CLAUDE_ACCOUNT" not in env
+    rows = _log(w)
+    assert [r["kind"] for r in rows] == ["section", "finish", "end"]
+    assert rows[0] == {"at": rows[0]["at"], "section": 1, "kind": "section", "session_id": argv[2], "account": None, "resume": False}
+    assert rows[-1] == {"at": rows[-1]["at"], "section": 1, "kind": "end", "cause": "", "reason": ended.reason}
+
+
+def _limited_run(tmp_path, mtime_offset):
+    def prepare(d, state):
+        accounts.write_usages(state, [Usage("team", 50.0, False), Usage("main", 5.0, False)])
+        accounts.use(state, "team")
+        at = time.time() + mtime_offset
+        os.utime(accounts.usage_path(state), (at, at))
+
+    return _run(tmp_path, [FakeChild([LIMIT_LINE], None), FakeChild([], 0)], prepare)
+
+
+def test_usage_measured_before_the_limit_line_does_not_free_the_current_account(tmp_path):
+    ended, spawn, w = _limited_run(tmp_path, -3600)
+    (first, _), (second, env) = spawn.calls
+    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+    assert env["NDF_CLAUDE_ACCOUNT"] == "main" and ended.cause == ""
+    assert registry.read_state(w.dir)["starts"]["count"] == 1
+
+
+def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_path):
+    ended, spawn, w = _limited_run(tmp_path, 3600)
+    (first, _), (second, env) = spawn.calls
+    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+    assert env["NDF_CLAUDE_ACCOUNT"] == "team" and ended.cause == ""
+    reasons = [r["reason"] for r in _log(w) if r["kind"] == "account"]
+    assert reasons == ["team の上限が解けた。同じアカウントで再開する"]
