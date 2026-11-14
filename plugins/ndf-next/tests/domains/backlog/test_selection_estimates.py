@@ -1,0 +1,77 @@
+"""候補を上限で切る並びと見積の採り方（#2064・#1640・#2540）。"""
+
+from __future__ import annotations
+
+from ndf.domains.backlog import estimates_decide, model
+from ndf.domains.backlog import selection_decide as sel
+from ndf.domains.backlog.model import Config
+
+
+def test_manual_issues_are_never_cut_by_the_limit():
+    # #2064 の表: --add の 33 件と diff-path の 38 件で --limit 45 のとき、--add の 33 件がすべて残る
+    found = {n: {sel.DIFF_PATH} for n in range(1, 39)}
+    found |= {n: {sel.MANUAL} for n in range(1600, 1633)}
+    got = sel.select(found, 45, model.DIFF, {})
+    assert set(range(1600, 1633)) <= set(got.keep)
+    assert len(got.keep) == 45 and len(got.deferred) == 26
+
+
+def test_manual_beyond_the_limit_is_kept_and_counted():
+    found = {n: {sel.MANUAL} for n in range(1, 6)}
+    got = sel.select(found, 3, model.DIFF, {})
+    assert got.keep == [1, 2, 3, 4, 5] and got.manual_over == 2
+
+
+def test_carried_issues_come_before_other_routes():
+    # #1640: 前回の持ち越しは経路の多い課題より先に残る
+    found = {1: {sel.DIFF_PATH, sel.NO_MILESTONE}, 2: {sel.DIFF_PATH, sel.NO_MILESTONE}, 50: {sel.CARRIED}}
+    got = sel.select(found, 1, model.DIFF, {})
+    assert got.keep == [50] and got.deferred == [1, 2]
+
+
+def test_review_keeps_manual_first_then_oldest():
+    found = {1: {sel.ALL}, 2: {sel.ALL}, 3: {sel.ALL, sel.MANUAL}}
+    got = sel.select(found, 2, model.REVIEW, {1: "2026-11-02", 2: "2026-10-01", 3: "2026-11-09"})
+    assert got.keep == [3, 2]
+
+
+def test_carry_does_not_count_issues_deferred_only_for_missing_estimates():
+    # #2540: 見積の欠けだけで入った課題は、見直しの起動の材料（carry）に数えない
+    found = {1: {sel.MANUAL}, **{n: {sel.UNSCORED} for n in range(10, 20)}, 30: {sel.DIFF_PATH, sel.UNSCORED}}
+    got = sel.select(found, 1, model.DIFF, {})
+    assert len(got.deferred) == 11 and got.carry == 1
+
+
+def _raw(n: int, digest: str | None = None) -> dict:
+    return {"number": n, "ubv": 3, "tc": 2, "rr_oe": 1, "size": 2, "digest": digest}
+
+
+def test_review_excludes_stale_and_restored_estimates():
+    # #2540: 見直しの回に、要約値の違う記録と前回の表から戻した見積を excluded で返す
+    stored = {"1": _raw(1, "now1"), "2": _raw(2, "old2")}
+    previous = {3: {"number": 3, "ubv": 3, "tc": 2, "rr_oe": 1, "size": 2}}
+    digests = {1: "now1", 2: "now2", 3: "now3", 4: "now4"}
+    ests, excluded = estimates_decide.estimates([1, 2, 3, 4], {}, stored, previous, Config(), digests)
+    assert list(ests) == [1]
+    assert {e["number"]: e["reason"] for e in excluded} == {
+        2: estimates_decide.STALE, 3: estimates_decide.STALE, 4: estimates_decide.MISSING,
+    }  # fmt: skip
+
+
+def test_diff_depth_takes_stored_and_previous_estimates():
+    stored = {"2": _raw(2, "old2")}
+    previous = {3: {"number": 3, "ubv": 3, "tc": 2, "rr_oe": 1, "size": 2}}
+    ests, excluded = estimates_decide.estimates([2, 3], {}, stored, previous, Config())
+    assert sorted(ests) == [2, 3] and excluded == []
+
+
+def test_given_estimates_need_a_digest_and_a_scale_value():
+    given = {1: {"ubv": 3, "tc": 2, "rr_oe": 1, "size": 2}, 2: {**_raw(2, "x"), "ubv": 4}}
+    ests, excluded = estimates_decide.estimates([1, 2], given, {}, {}, Config())
+    assert ests == {} and excluded[0]["reason"] == estimates_decide.NO_DIGEST and "UBV" in excluded[1]["reason"]
+
+
+def test_unscored_matches_the_review_rule():
+    stored = {"1": _raw(1, "a"), "2": _raw(2, "old")}
+    assert estimates_decide.unscored([1, 2, 3], stored, {1: "a", 2: "new", 3: "c"}) == [2, 3]
+    assert estimates_decide.unscored([1], {}, {1: "a"}) == []
