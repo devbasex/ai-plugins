@@ -202,3 +202,26 @@ def test_current_rejections_count_the_unapproved_listen_answers_per_gate_in_firs
     assert counted == {"release": 2, "plan": 2, "design": 1}
     assert list(counted) == ["release", "plan", "design"] and type(counted) is dict
     assert gate.rejections([]) == {}
+
+
+# --- 現状固定: gate.main の ndf answer の副命令（I-017。ask・list・head の振り分け） ------------------------
+
+
+def _last_json(capsys):
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_current_main_routes_ask_list_and_head_to_their_own_parsers(repo, st, new_table, capsys):
+    # 不具合の目印: ask の結果は routes が結果 JSON の契約に合わず、形の誤り（終了コード 2）で止まる（現状の値を固定する）
+    assert gate.main(["ask", "--gate", "release"]) == 2
+    assert "結果の形の誤り" in capsys.readouterr().err
+    assert gate.main(["ask", "--gate", "nope"]) == 2
+    assert "ndf answer ask: error" in capsys.readouterr().err
+    tid = new_table()
+    assert gate.main(["list", tid]) == 0
+    listed = _last_json(capsys)
+    assert listed["items"] == [] and listed["metrics"] == {"table_id": tid}
+    assert gate.main(["head", tid]) != 0
+    assert _last_json(capsys)["status"] == "stopped"
+    assert gate.main(["head"]) == 2
+    assert "ndf answer head: error" in capsys.readouterr().err
