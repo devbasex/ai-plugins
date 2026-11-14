@@ -27,6 +27,11 @@ def _restored(row: Mapping[str, Any]) -> dict[str, Any]:
     return {k: row[k] for k in ("number", *model.STEPS, "size", "waiting_decision") if k in row}
 
 
+def _fresh(raw: Any, digest: str) -> bool:
+    """記録の見積が今の課題に合うか（辞書で、要約値が今の要約値と同じ）。"""
+    return isinstance(raw, dict) and raw.get("digest") == digest
+
+
 def _pick(
     n: int, given: Mapping[int, Any], stored: Mapping[str, Any], previous: Mapping[int, Any], digests: Optional[Mapping[int, str]]
 ) -> tuple[Any, Optional[str]]:
@@ -36,7 +41,7 @@ def _pick(
         return (raw, None) if isinstance(raw, dict) and raw.get("digest") else (None, NO_DIGEST)
     if str(n) in stored:
         raw = stored[str(n)]
-        if digests is not None and (not isinstance(raw, dict) or raw.get("digest") != digests[n]):
+        if digests is not None and not _fresh(raw, digests[n]):
             return None, STALE
         return raw, None
     if n in previous:
@@ -71,7 +76,7 @@ def unscored(numbers: list[int], stored: Mapping[str, Any], digests: Mapping[int
     """記録の見積が無い課題と、見積を付けた後に要約値が変わった課題。記録が空（rank を打っていない）なら空。"""
     if not stored:
         return []
-    return [n for n in numbers if not isinstance(stored.get(str(n)), dict) or stored[str(n)].get("digest") != digests[n]]
+    return [n for n in numbers if not _fresh(stored.get(str(n)), digests[n])]
 
 
 def overlay_sizes(ests: Mapping[int, Estimate], sizes: Mapping[int, Any], cfg: Config) -> tuple[dict[int, Estimate], list[int]]:
