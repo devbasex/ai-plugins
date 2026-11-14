@@ -23,6 +23,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, signals
 
@@ -128,7 +129,8 @@ def legacy_root(environ: Mapping[str, str]) -> Path:
     if explicit:
         return Path(explicit) / "relay"
     xdg = environ.get("XDG_STATE_HOME")
-    return (Path(xdg) / "ndf" if xdg else Path.home() / ".local" / "state" / "ndf") / "relay"
+    legacy = identity.FINAL_NAME  # 旧い NDF のプラグイン名は入れ替えの後の名前と同じ（#1142 の決定 73）
+    return (Path(xdg) / legacy if xdg else Path.home() / ".local" / "state" / legacy) / "relay"
 
 
 def legacy_running(environ: Mapping[str, str]) -> list[hub_decide.Running]:

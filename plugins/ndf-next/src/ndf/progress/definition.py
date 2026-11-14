@@ -18,7 +18,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from ndf import contracts
+from ndf import contracts, identity
 from ndf.progress import stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
@@ -30,7 +30,7 @@ STAGES_DIR = "workflow/stages"
 SCHEMA_DIRS = ("workflow", contracts.SCHEMAS)
 # 入出力の規約の参照の接頭辞（この後ろが contracts からのパス）
 URI_ROOT = "file:///"
-NAMESPACE = "ndf"
+NAMESPACE = identity.FIXED_WORDS["workflow_namespace"]
 # 文書の種類ごとに使える要素（モードは工程の文書を呼ぶだけ、工程はステップを呼ぶだけ）
 TASKS = {"mode": frozenset({"run"}), "stage": frozenset({"call"})}
 

@@ -67,7 +67,7 @@
     "contracts_dir": "contracts"
   },
   "words": {
-    "glossary_config": ".ndf/glossary.json",
+    "glossary_config": "glossary.json",
     "skip_files": ["uv.lock"]
   },
   "invariants": {

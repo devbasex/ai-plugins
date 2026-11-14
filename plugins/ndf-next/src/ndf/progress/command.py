@@ -36,7 +36,7 @@ TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
-PROJECT_FILE = ".ndf/project.json"
+PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由

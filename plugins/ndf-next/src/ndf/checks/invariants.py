@@ -18,11 +18,17 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from ndf import identity
 from ndf.checks.model import CheckError, Finding, Scope, Source
 
 OWN_PACKAGE = __name__.split(".")[0]
 LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
 CODE_DIRS = ("bin/", "hooks/")
+# I1 が定義の行を通す `identity` のファイル（プラグインの根からの相対パス）と、通す名前
+IDENTITY_FILE = "src/" + identity.__name__.replace(".", "/") + ".py"
+DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
+# Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
+PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
 
 
 def _name_pattern(names: set[str]) -> re.Pattern[str]:
@@ -48,14 +54,20 @@ def _shell_lines(src: Source) -> list[tuple[int, str]]:
 
 
 def own_name(scope: Scope) -> list[Finding]:
-    """I1: コードが自分の名前を文字で持つ箇所。"""
-    names = {scope.plugin_name, scope.plugin_root.name}
-    pattern = _name_pattern(names)
+    """I1: コードが自分の名前を文字で持つ箇所（#3347 の決定 101）。
+
+    名前の文字列そのものは今の名前と入れ替えの後の名前（`identity.FINAL_NAME`）で、パスと前置きはそれに
+    ディレクトリ名を足して照合する。Python のパッケージの形（`src/ndf/`・`ndf.` で始まるモジュール名）は照合しない。
+    `identity` の固定の語の表（`FIXED_WORDS`）と `FINAL_NAME` の定義の行だけは通す。
+    """
+    exact = {scope.plugin_name, identity.FINAL_NAME, *identity.FIXED_WORDS.values()}
+    pattern = _name_pattern(exact | {scope.plugin_root.name})
     found = []
     for src in scope.sources:
         rel = scope.plugin_rel(src)
         if src.is_python and rel.startswith("src/"):
-            texts = _strings(src.tree)
+            skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
+            texts = [(no, text) for no, text in _strings(src.tree) if no not in skip]
         elif rel.startswith(CODE_DIRS):
             texts = _shell_lines(src)
         else:
@@ -63,9 +75,19 @@ def own_name(scope: Scope) -> list[Finding]:
         found += [
             Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
             for no, text in texts
-            if text in names or pattern.search(text)
+            if text in exact or pattern.search(PACKAGE_FORM.sub("", text))
         ]
     return found
+
+
+def _definition_lines(tree: ast.Module) -> set[int]:
+    """`identity` の最上位で `DEFINITION_NAMES` に代入する文の行。"""
+    lines: set[int] = set()
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id in DEFINITION_NAMES for t in targets):
+            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
 
 
 def declared_tops(plugin_root: Path) -> frozenset[str]:
