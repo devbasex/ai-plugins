@@ -15,6 +15,7 @@ import argparse
 import dataclasses
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -84,12 +85,21 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
             signal.signal(sig, handler)
 
 
-def _stopped_from(exc: slots.Stopped) -> int:
+def _again(command: str, wait_limit: int | None) -> str:
+    """同じ待ちを打ち直すコマンド（`ndf test-slot run [--wait-limit N] -- '<コマンド>'`）。"""
+    limit = ["--wait-limit", str(wait_limit)] if wait_limit is not None else []
+    return shlex.join(["ndf", TOOL, "run", *limit, "--", command])
+
+
+def _stopped_from(exc: slots.Stopped, again: str | None = None) -> int:
+    """枠の待ちを止めた結果を出す。wait_timeout は契約どおり同じ待ち（`again`）を next に載せる。"""
+    kind = _CAUSE_OF[exc.reason]
     return _stopped(
-        _CAUSE_OF[exc.reason],
+        kind,
         exc.summary(),
         instance=exc.reason,
         metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
+        next=again if kind == "wait_timeout" else None,
     )
 
 
@@ -108,7 +118,7 @@ def _run(command: str, wait_limit: int | None) -> int:
             with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, options=options) as held:
                 code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
-            return _stopped_from(exc)
+            return _stopped_from(exc, _again(command, wait_limit))
         except KeyboardInterrupt:
             return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     if held.note:
