@@ -625,6 +625,17 @@ def _guard_restore(workdir: Path, paths: AgentPaths, backup: Path, before_bak: s
     kept["restore"] = "restored"
 
 
+def _backup_agents(workdir: Path, paths: AgentPaths) -> tuple[Path, set[str]]:
+    """worktree の `.amazonq/cli-agents` を控え、控えのパスと起動の前からある `.bak` の名前を返す。"""
+    agents = workdir / KIRO_AGENTS
+    backup = paths.launch.with_name(paths.launch.stem + BACKUP_SUFFIX)
+    shutil.rmtree(backup, ignore_errors=True)
+    before_bak = {p.name for p in agents.glob("*.bak")} if agents.is_dir() else set()
+    if agents.is_dir():
+        shutil.copytree(agents, backup)
+    return backup, before_bak
+
+
 @contextlib.contextmanager
 def kiro_guard(workdir: Path, paths: AgentPaths) -> Iterator[dict[str, Any]]:
     """kiro の起動の前にworktree の `.amazonq/cli-agents` を控え、終わった後に戻して増えた `.bak` を消す。
@@ -633,23 +644,14 @@ def kiro_guard(workdir: Path, paths: AgentPaths) -> Iterator[dict[str, Any]]:
     結果（`restore`）は起動の記録（`paths.launch`）にも書く。
     """
     kept: dict[str, Any] = {"agent": "kiro", "restore": None}
-    if not _in_worktree(workdir):
+    backed = _backup_agents(workdir, paths) if _in_worktree(workdir) else None
+    if backed is None:
         kept["restore"] = "restore_skipped"
-        try:
-            yield kept
-        finally:
-            _write_launch(paths, kept)
-        return
-    agents = workdir / KIRO_AGENTS
-    backup = paths.launch.with_name(paths.launch.stem + BACKUP_SUFFIX)
-    shutil.rmtree(backup, ignore_errors=True)
-    before_bak = {p.name for p in agents.glob("*.bak")} if agents.is_dir() else set()
-    if agents.is_dir():
-        shutil.copytree(agents, backup)
     try:
         yield kept
     finally:
-        _guard_restore(workdir, paths, backup, before_bak, kept)
+        if backed is not None:
+            _guard_restore(workdir, paths, *backed, kept)
         _write_launch(paths, kept)
 
 
