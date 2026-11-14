@@ -117,18 +117,20 @@ def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
     return [f"{part}: 文脈の鍵 {k} が無い" for k in keys if k not in have]
 
 
+def _validate_stage(stage: model.StageDef, obj: Any, ref: str | None, keys: tuple[str, ...], part: str, what: str) -> list[str]:
+    if ref is None:
+        return [f"工程 {stage.name} に{what}の規約が無い"]
+    return validate_io(ref, obj) + _missing_keys(obj, part, keys)
+
+
 def validate_stage_output(stage: model.StageDef, obj: Any) -> list[str]:
     """工程の出力を、工程の出力の規約と、工程が書く文脈の鍵（`outputs`）で確かめる。"""
-    if stage.output_ref is None:
-        return [f"工程 {stage.name} に出力の規約が無い"]
-    return validate_io(stage.output_ref, obj) + _missing_keys(obj, "outputs", stage.outputs)
+    return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
 
 
 def validate_stage_input(stage: model.StageDef, obj: Any) -> list[str]:
     """工程の入力を、工程の入力の規約と、工程が読む文脈の鍵（`inputs`）で確かめる。"""
-    if stage.input_ref is None:
-        return [f"工程 {stage.name} に入力の規約が無い"]
-    return validate_io(stage.input_ref, obj) + _missing_keys(obj, "context", stage.inputs)
+    return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")
 
 
 # --- 文書の検査 --------------------------------------------------------------------------
