@@ -36,7 +36,7 @@ TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
-PROJECT_FILE = ".ndf/project.json"
+PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
@@ -354,30 +354,49 @@ STOPPABLE = (
     subprocess.CalledProcessError,
     sa.exc.SQLAlchemyError,
 )
-# 付加情報を持たず、止まった理由の語だけが決まる例外の種類（前から引く）
-_CAUSES: tuple[tuple[type[Exception], str], ...] = (
-    (contracts.ContractError, "invalid"),
-    (GitError, "invalid"),
-    (identity.IdentityError, "config_broken"),
+
+
+def _db_unusable(exc: Exception) -> dict[str, Any]:
+    # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
+    return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
+
+
+def _refused(exc: model.Refused) -> dict[str, Any]:
+    metrics = {"current_id": exc.current_id} if exc.current_id else {}
+    return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
+
+
+def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
+    return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+
+
+def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
+    return result.stopped(TOOL, "invalid", str(exc), items=[{"error": e} for e in exc.errors])
+
+
+def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
+    """付加情報を持たず、止まった理由の語だけが決まる例外の変換。"""
+    return lambda exc: result.stopped(TOOL, cause, str(exc))
+
+
+# 例外の種類 → 止まった結果への変換（前から引く）
+_STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ...] = (
+    (sa.exc.SQLAlchemyError, _db_unusable),
+    (model.Refused, _refused),
+    (durable.StoreStopped, _store_stopped),
+    # WorkflowDefError は ContractError の子なので、理由の語だけの行より前で受ける
+    (definition.WorkflowDefError, _workflow_def_error),
+    (contracts.ContractError, _cause_only("invalid")),
+    (GitError, _cause_only("invalid")),
+    (identity.IdentityError, _cause_only("config_broken")),
 )
 
 
 def _stopped_from(exc: Exception) -> dict[str, Any]:
-    """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。最後の分岐は CalledProcessError。"""
-    if isinstance(exc, sa.exc.SQLAlchemyError):
-        # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-        return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
-    if isinstance(exc, model.Refused):
-        metrics = {"current_id": exc.current_id} if exc.current_id else {}
-        return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
-    if isinstance(exc, durable.StoreStopped):
-        return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
-    # WorkflowDefError は ContractError の子なので、理由の語だけの表より前で受ける
-    if isinstance(exc, definition.WorkflowDefError):
-        return result.stopped(TOOL, "invalid", str(exc), items=[{"error": e} for e in exc.errors])
-    for kind, cause in _CAUSES:
+    """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。表に無い種類は CalledProcessError。"""
+    for kind, convert in _STOPPED_FROM:
         if isinstance(exc, kind):
-            return result.stopped(TOOL, cause, str(exc))
+            return convert(exc)
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
 
 

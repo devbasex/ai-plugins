@@ -29,18 +29,6 @@ def _read_lane_json(src: str) -> object:
     return json.loads(text)
 
 
-def cap_hint_items(items: list[dict], lanes: int) -> list[dict]:
-    """レーンの数が上限を超えた誤り（I2）があれば、上限の変え方の 1 行を足す（受け入れ条件 8）。"""
-    if not any(it.get("rule") == "I2" and "レーンの数" in str(it.get("message")) for it in items):
-        return items
-    relay = Path(__file__).resolve().parent.parent / "relay.py"
-    line = f"python3 {relay} cap --named {lanes}"
-    return [
-        *items,
-        {"level": "info", "rule": "limit", "message": f"レーン数の上限を変えるには、人の指示を受けてから {line} を打つ", "next": line},
-    ]
-
-
 def relaunch_items(main: Path, plan: pp.ParallelPlan, lane_name: str, body: dict) -> list[dict]:
     """`set` で入力（ループの名前）か引継ぎ文書の名を変えたら、レーンを新しい最初の入力で起こし直す 1 行を返す。
     `relay.py restart` は登録簿の前の入力を使い直し、古いループ・古い引継ぎ文書から再開するため使わない。"""
@@ -163,10 +151,8 @@ def cmd_lane(a) -> None:
     new, lane_name, err = updated(raw, a.action, a.lane, body)
     if err:
         emit_reply("stopped", err, code=1)
-    ended = plg.ended_lanes(main, a.name)
-    plan, items, metrics = pp.check_data(new, home=main, ended=ended)
+    plan, items, metrics = pp.check_data(new, home=main, ended=plg.ended_lanes(main, a.name))
     if plan is None:
-        items = cap_hint_items(items, sum(1 for x in new.get("lanes") or [] if isinstance(x, dict) and x.get("name") not in ended))
         emit_reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
     try:
         written = write_lane(main, plan, new, lane_name, a.action)

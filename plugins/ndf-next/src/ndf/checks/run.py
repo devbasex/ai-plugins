@@ -1,15 +1,16 @@
 """検査 1 本のエントリポイント（副命令 `check`）。見るファイルを集め、構文木を 1 回ずつ作り、すべての規則を当てる。
 
-    ndf check [--base <起点>] [--event <GitHub の事象の JSON>]
+    ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]...
 
-`--base` があれば差分の検査（I2）も行う。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
-結果 JSON を標準出力の最後の 1 行に出す。終了コードは事実の表 exit-codes の値で、合格は ok・違反は failed・読めない（規則のデータ・構文・git）は unreadable。
+`--base` があれば差分の検査（I2）も行う。`--only` があれば、その規則の指摘だけを違反にする（新しいプラグインを
+変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。規則が差分の
+規則（port・I2）だけなら、プラグインのファイルを読まずに差分と PR 本文だけを見る。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
+結果 JSON（結果の契約 `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は止まった理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git・事象の JSON）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -18,16 +19,15 @@ from pathlib import Path
 from typing import Any
 
 from ndf import commands, identity
-from ndf.checks import facts, invariants, lint, marks, smells, structure, words
-from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
-from ndf.contracts import exit_codes, result
+from ndf.checks import child_deps, facts, invariants, lint, marks, smells, structure, words
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, read_json
+from ndf.contracts import result
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
 TOOL = commands.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
-SCRIPT_DIRS = ("bin", "hooks")
 
 
 def _walk(plugin_root: Path) -> list[Path]:
@@ -44,7 +44,7 @@ def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
-        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.parts[0] in SCRIPT_DIRS):
+        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
@@ -87,7 +87,22 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
+    found += child_deps.apply(scope, rules)
     return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
+
+
+def select(scope: Scope, rules: dict[str, Any], only: list[str] | None) -> list[Finding]:
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。
+
+    `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る
+    （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。
+    """
+    if only and set(only) <= invariants.DIFF_RULES:
+        found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=lambda f: (f.path, f.line, f.rule, f.detail))
+    else:
+        scope.sources = collect(scope.plugin_root, scope.repo_root)
+        found = check(scope, rules)
+    return [f for f in found if not only or f.rule in only]
 
 
 def _repo_root(plugin_root: Path) -> Path:
@@ -102,40 +117,40 @@ def _pr_body(event: str) -> str:
     """GitHub の事象の JSON から PR 本文を読む。事象が無い・PR でないときは空。"""
     if not event:
         return ""
-    try:
-        data = json.loads(Path(event).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"事象の JSON を読めない: {event}: {exc}") from exc
+    data = read_json(event, "事象の JSON を読めない")
     pull = data["pull_request"] if "pull_request" in data else {}
     return pull["body"] if isinstance(pull.get("body"), str) else ""
 
 
-def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
-    cause = {"kind": "config_broken"} if status == result.STOPPED and not items else None
-    print(result.dumps_line(result.result(TOOL, status, summary, items=items, metrics=metrics, cause=cause)))
+def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None) -> int:
+    """結果 JSON を結果の契約（`ndf.contracts.result`）で確かめて 1 行で出し、終了コードを返す。
+
+    `kind` が無ければ合格（ok）、あれば止まった理由の種類を `cause` に持つ stopped にする。
+    """
+    if kind is None:
+        return result.emit(result.result(TOOL, result.OK, summary, items=items, metrics=metrics))
+    return result.emit(result.stopped(TOOL, kind, summary, items=items, metrics=metrics))
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="新しいプラグインだけを見る検査")
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
     parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""), help="PR 本文を読む GitHub の事象の JSON")
+    parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
     args = parser.parse_args(argv)
     try:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event))
-        scope.sources = collect(scope.plugin_root, repo_root)
-        found = check(scope, rules)
+        found = select(scope, rules, args.only)
     except (CheckError, identity.IdentityError) as exc:
-        emit(result.STOPPED, str(exc), [], {})
-        return exit_codes.unreadable_code()
+        return emit(str(exc), [], {}, "config_broken")
     for f in found:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics = {"files": len(scope.sources), "findings": by_rule}
     if not found:
-        emit(result.OK, f"{len(scope.sources)} ファイルに違反なし", [], metrics)
-        return exit_codes.code_of("ok")
-    emit(result.STOPPED, f"違反 {len(found)} 件", [f.as_item() for f in found], metrics)
-    return exit_codes.unreadable_code() if "syntax" in by_rule else exit_codes.code_of("failed")
+        return emit(f"{len(scope.sources)} ファイルに違反なし", [], metrics)
+    kind = "invalid" if "syntax" in by_rule else "check_failed"
+    return emit(f"違反 {len(found)} 件", [f.as_item() for f in found], metrics, kind)

@@ -12,6 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from ndf import identity
+from ndf.contracts.exit_codes import OK
+
 
 class Pending(NamedTuple):
     """`runs` は待ちを抱えた実行（読めなければ None）、`note` は読めなかった理由。"""
@@ -22,13 +25,13 @@ class Pending(NamedTuple):
 
 def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pending:
     """`ndf plan pending` を打って一覧を読む。"""
-    command = [str(plugin_root / "bin" / "ndf"), "plan", "pending"]
+    command = [str(identity.entrypoint(plugin_root)), "plan", "pending"]
     try:
         done = runner(command, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return Pending(None, f"ndf plan pending を打てない: {exc}")
     last = _last_json(done.stdout)
-    if last is None or last.get("status") != "ok":
+    if last is None or last.get("status") != OK:
         return Pending(None, _failure_note(last, done))
     items = last.get("items")
     return Pending(items if isinstance(items, list) else [], "")
