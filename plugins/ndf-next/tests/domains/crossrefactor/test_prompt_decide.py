@@ -14,7 +14,8 @@ TAIL = '最後の行に JSON {"proposals": [{"path": "<ファイル>", "symbol":
 
 def _prompt(pr: int, touched: Touched) -> str:
     # drive は状態ファイルの touched（as_json の形。ファイルは名前の順）から組み直して渡す
-    return prompt_decide.propose(pr, Touched.from_json(touched.as_json()))
+    state = {"touched": touched.as_json()}
+    return prompt_decide.propose(pr, Touched.from_json(state["touched"]))
 
 
 def test_propose_prompt_lists_each_file_with_sorted_names():
