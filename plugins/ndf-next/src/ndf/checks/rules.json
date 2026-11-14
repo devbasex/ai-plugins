@@ -70,6 +70,9 @@
     "glossary_config": "glossary.json",
     "skip_files": ["uv.lock"]
   },
+  "child_deps": {
+    "max_per_slot": 2
+  },
   "invariants": {
     "old_plugin": "plugins/ndf",
     "immediate_fix_mark": "即時修正（plugins/ndf）:"

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import facts, invariants, lint, marks, smells, structure, words
+from ndf.checks import child_deps, facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
@@ -87,6 +87,7 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
+    found += child_deps.apply(scope, rules)
     return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
