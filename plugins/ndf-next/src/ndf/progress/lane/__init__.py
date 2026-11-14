@@ -54,9 +54,8 @@ from ndf.progress.lane.types import (
     Request as Request,
 )
 
-# 行の鍵の接頭辞（r1・r2…）と、依頼の行の鍵の接頭辞
+# 行の鍵の接頭辞（r1・r2…）
 ROW_PREFIX = "r"
-REQUEST_PREFIX = "request-"
 # 計画が記録する形の番号の鍵。違えばレーンを起動しない（#3344 の決定 86）
 FORMAT_KEYS = ("store_format", "format", "table_version")
 # 計画の決まりを確かめて書く操作の排他の鍵の接頭辞（store.run_lock の鍵と値を分ける）

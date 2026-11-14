@@ -38,6 +38,8 @@ LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"
 LIMIT_POLICY = machine.CAP_POLICY
 # 答えが載ってから conductor が next を打たないまま、止まりとして知らせるまでの秒
 ANSWER_NEXT_GRACE_SECONDS = 600
+# 依頼の行の鍵の接頭辞（request-1・request-2…）
+REQUEST_PREFIX = "request-"
 
 
 class PlanInputError(contracts.ContractError):
@@ -237,7 +239,7 @@ def stop_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
 def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: str, actor: str) -> str:
     """計画の進行表へ依頼を開く（`request_opened`）。依頼の鍵を返す。"""
     view, _ = lane.read_plan(conn, pid)
-    key = f"{lane.REQUEST_PREFIX}{len(view.requests) + 1}"
+    key = f"{REQUEST_PREFIX}{len(view.requests) + 1}"
     payload = {"lane": body.get("lane"), "body": body}
     _append(conn, pid, [model.EventDraft("request_opened", actor, key, reason=reason, payload=payload)])
     return key
