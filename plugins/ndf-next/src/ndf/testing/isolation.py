@@ -1,12 +1,8 @@
-"""本物の状態の置き場からテストを隔離する pytest の前提（#2776）。
+"""本物の状態の置き場への書き込みを拒む部品（#2776）。pytest に依らない。
 
-`forbid_real_state` は、テストの間、状態の置き場を指す環境変数をすべてテストの一時ディレクトリへ向け、
-本物の置き場（実行した人のホームの下）を開いて書くと落とす。使うには conftest で autouse の fixture として受ける:
-
-    from ndf.testing.isolation import forbid_real_state  # noqa: F401
-
-    @pytest.fixture(autouse=True)
-    def _isolated(forbid_real_state): ...
+テストの前提（pytest の fixture `forbid_real_state`）はテストの側（`tests/testing/_real_state.py`）が持ち、ここの部品を
+組み合わせる: 状態の置き場を指す環境変数（`REDIRECTED_ENV`）を一時ディレクトリへ向け、`REMOVED_ENV` を外し、
+`guarding` の間は本物の置き場（`protected_roots`。実行した人のホームの下など）を開いて書くと `RealStateWriteError` を送る。
 
 監視は Python の監査フック（`sys.addaudithook`）で、このプロセスの中の書き込みだけを見る。子プロセスは環境変数の
 差し替えで一時ディレクトリへ向く。
@@ -23,9 +19,8 @@ try:
 except ImportError:  # Windows
     fcntl = None  # type: ignore[assignment]
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
-
-import pytest
 
 from ndf.testing import slots
 from ndf.testing.testenv import within
@@ -138,7 +133,7 @@ class _Guard:
 
     中身を書き換える先は参照先まで、名前を作る・消す・移す先はリンクの置かれたパスまで解決し、参照先まで解決した
     守る根と比べる。名前を消す・移す先が守る根を下に含むとき（`~/.local` の移動など）も拒む。テストの一時ディレクトリ
-    （pytest の一時領域。`allowed`）の下だけは、守る根の下にあっても書ける。
+    （`allowed`）の下だけは、守る根の下にあっても書ける。
     """
 
     def __init__(self) -> None:
@@ -184,24 +179,27 @@ def real_roots(home: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(under_home + from_env))
 
 
-@pytest.fixture
-def forbid_real_state(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """状態の置き場を一時ディレクトリへ向け、本物の置き場への書き込みを落とす。一時ディレクトリの根を返す。"""
-    # 読み込んだ時点の値と今の値の両方が指す場所を守る（今の値が一時領域なら、下の allowed が書き込みを通す）
-    roots = tuple(dict.fromkeys(real_roots(_ORIGINAL_HOME, _ORIGINAL_ENV) + real_roots(Path.home(), os.environ)))
-    base = tmp_path_factory.mktemp("ndf-state")
-    for name, sub in REDIRECTED_ENV.items():
-        monkeypatch.setenv(name, str(base / sub))
-    for name in REMOVED_ENV:
-        monkeypatch.delenv(name, raising=False)
-    # テストの一時領域が本物の置き場の下にあっても、書けるのはその一時領域だけで、守る根は残す
+def protected_roots() -> tuple[str, ...]:
+    """守る根。読み込んだ時点の値と今の値の両方が指す場所（今の値が一時領域なら、`guarding` の allowed が書き込みを通す）。
+
+    差し替えの前に呼ぶ。"""
+    return tuple(dict.fromkeys(real_roots(_ORIGINAL_HOME, _ORIGINAL_ENV) + real_roots(Path.home(), os.environ)))
+
+
+@contextmanager
+def guarding(roots: tuple[str, ...], allowed: tuple[str, ...]) -> Iterator[list[str]]:
+    """間の書き込みのうち、`roots` の下（`allowed` の下は除く）への書き込みを `RealStateWriteError` で拒む。
+
+    渡す一覧は、抜けたときに拒んだ書き込みのパスで埋まる（テストが例外を握りつぶしても、呼び手が落とせる）。
+    `allowed` が守る根の下にあっても、書けるのはその下だけで、守る根は残る。
+    """
+    found: list[str] = []
     _guard.install()
     _guard.roots = roots
-    _guard.allowed = (os.path.realpath(tmp_path_factory.getbasetemp()),)
+    _guard.allowed = tuple(os.path.realpath(path) for path in allowed)
     _guard.violations = []
     try:
-        yield base
+        yield found
     finally:
-        found, _guard.roots, _guard.allowed, _guard.violations = list(_guard.violations), (), (), []
-    if found:
-        pytest.fail("テストが本物の状態の置き場へ書こうとした: " + ", ".join(sorted(set(found))), pytrace=False)
+        found += _guard.violations
+        _guard.roots, _guard.allowed, _guard.violations = (), (), []

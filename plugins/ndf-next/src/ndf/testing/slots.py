@@ -67,7 +67,7 @@ ReadMemory = Callable[[], "int | None"]
 
 
 class Stopped(Exception):
-    """待ちを諦めたか、メモリで止めた。落ちたテストとして数えない（終了コード 2。I9）。"""
+    """待ちを諦めたか、メモリで止めた。落ちたテストとして数えない（終了コードは `command` が止まった理由の表の種類から引く。I9）。"""
 
     def __init__(self, reason: str, waited_seconds: float, available_mib: int | None):
         self.reason = reason

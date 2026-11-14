@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -73,11 +74,13 @@ def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, src_env, base
     (home / ".claude" / "kept").write_text("kept")
     (home / ".local" / "state").mkdir(parents=True)
     (tmp_path / "test_inner.py").write_text(INNER)
-    env = {**src_env, "HOME": str(home)}
+    # 前提（forbid_real_state）を持つこのディレクトリを子へ読ませる
+    here = str(Path(__file__).resolve().parent)
+    env = {**src_env, "HOME": str(home), "PYTHONPATH": os.pathsep.join([here, src_env["PYTHONPATH"]])}
     # 一時ディレクトリを本物の置き場の下に置いても、その外の本物の置き場は守られたまま
     basetemp = ["--basetemp", str(home / ".local" / "state" / "pytest")] if basetemp_under_real_state else []
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        [sys.executable, "-m", "pytest", "-p", "_real_state", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -380,7 +383,7 @@ def test_original_state_variable_stays_protected_after_an_earlier_fixture_rewrit
     env = {**src_env, "HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(original), "ORIGINAL_STATE": str(original)}
     basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        [sys.executable, "-m", "pytest", "-p", "_real_state", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
         cwd=inner,
         env=env,
         capture_output=True,
@@ -428,7 +431,7 @@ def test_original_home_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_
     env = {**src_env, "HOME": str(home), "ORIGINAL_HOME": str(home)}
     basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        [sys.executable, "-m", "pytest", "-p", "_real_state", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
         cwd=inner,
         env=env,
         capture_output=True,

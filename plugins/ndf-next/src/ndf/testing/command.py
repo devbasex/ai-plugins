@@ -1,15 +1,18 @@
 """副命令 `test-slot`（#2711 の契約「`test-slot.py run`」「`test-slot.py report`」）。
 
 - `run [--wait-limit <秒>] -- <シェルのコマンド 1 つ>`: 重い処理なら枠の下で走らせる。出力と終了コードはそのまま返す（I7）。
-  待ちを諦めた・メモリで止めた・設定が誤っているときは、標準エラーへ結果の JSON を出して終了コード 2
-- `report [--since <7d のような期間>]`: 枠の記録を読み、結果の JSON を標準出力へ 1 行出す
+  待ちを諦めた・メモリで止めた・引数か設定が誤っているときは、子を走らせずに（止めて）`stopped` の結果 JSON を
+  標準出力へ 1 行出し、止まった理由の表の種類の終了コードで終える
+- `report [--since <7d のような期間>]`: 枠の記録を読み、結果 JSON を標準出力へ 1 行出す
+
+結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。枠の記録の結果の語（`gave_up`・`memory_stopped`）は
+`_CAUSE_OF` で止まった理由の表の種類へ写す。
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
 import os
 import re
 import signal
@@ -20,19 +23,26 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
-from ndf import identity
+from ndf import cli, identity
+from ndf.contracts import causes, result
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
-EXIT_STOPPED = 2
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
-def _stopped(summary: str, **extra: object) -> int:
-    print(json.dumps({"status": "stopped", "summary": summary, **extra}, ensure_ascii=False), file=sys.stderr)
-    return EXIT_STOPPED
+# 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、
+# メモリの見張りで止めたは interrupted
+_CAUSE_OF = {records.GAVE_UP: "wait_timeout", records.MEMORY_STOPPED: "interrupted"}
+
+
+def _stopped(kind: str, detail: str, **extra: object) -> int:
+    """`stopped` の結果 JSON を標準出力へ 1 行出し、種類の終了コードを返す。"""
+    return result.emit(result.stopped(TOOL, kind, detail, **extra))
 
 
 def parse_period(text: str) -> float:
@@ -76,9 +86,10 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
 
 def _stopped_from(exc: slots.Stopped) -> int:
     return _stopped(
+        _CAUSE_OF[exc.reason],
         exc.summary(),
+        instance=exc.reason,
         metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
-        cause={"kind": exc.reason},
     )
 
 
@@ -87,7 +98,7 @@ def _run(command: str, wait_limit: int | None) -> int:
     try:
         limits = _load_limits(cwd, wait_limit)
     except limits_mod.SlotConfigError as exc:
-        return _stopped(str(exc), items=exc.items)
+        return _stopped("invalid", str(exc), items=[{"detail": item} for item in exc.items])
     # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
     kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
@@ -141,21 +152,19 @@ def _report(since: str) -> int:
     try:
         seconds = parse_period(since)
     except ValueError as exc:
-        return _stopped(str(exc))
+        return _stopped("invalid", str(exc))
     try:
         directory = slots.slots_dir()
     except identity.IdentityError as exc:
-        return _stopped(str(exc), cause={"kind": "config_broken"})
+        return _stopped("config_broken", str(exc))
     # 記録が無ければ 0 件として読む
     metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"
-    result = {"status": "ok", "summary": summary, "metrics": metrics}
-    print(json.dumps(result, ensure_ascii=False))
-    return 0
+    return result.emit(result.result(TOOL, result.OK, summary, metrics=metrics))
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="test-slot", description="重いテストを作業マシンのテストの枠の下で走らせる")
+    parser = argparse.ArgumentParser(prog=TOOL, description="重いテストを作業マシンのテストの枠の下で走らせる")
     sub = parser.add_subparsers(dest="action", required=True)
     run = sub.add_parser("run", help="1 本のコマンドを枠の下で走らせる")
     run.add_argument("--wait-limit", type=int, help="枠とメモリを待つ上限の秒（既定は設定の値）")
@@ -165,12 +174,13 @@ def main(argv: list[str]) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return EXIT_STOPPED if exc.code else 0
+        # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
+        return causes.exit_code("invalid") if exc.code else 0
     if args.action == "report":
         return _report(args.since)
     words = args.command[1:] if args.command[:1] == ["--"] else args.command
     if len(words) != 1 or not words[0].strip():
-        return _stopped("run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す")
+        return _stopped("invalid", "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す")
     if args.wait_limit is not None and args.wait_limit < 1:
-        return _stopped("--wait-limit は 1 以上の秒にする")
+        return _stopped("invalid", "--wait-limit は 1 以上の秒にする")
     return _run(words[0], args.wait_limit)
