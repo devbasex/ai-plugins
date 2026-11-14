@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from ndf import slot_pool
 
 OWNER = {"pid": os.getpid()}
@@ -49,3 +51,25 @@ def test_an_owner_whose_lock_is_free_is_not_counted(tmp_path):
 
 def test_weights_come_from_the_limits_declaration():
     assert slot_pool.weight_mib("llm-cli") < slot_pool.weight_mib("test")
+
+
+def test_write_json_writes_one_line_of_unicode(tmp_path):
+    # 現状固定: 日本語を逃がさず 1 行で書き、末尾に改行を 1 つ置く。一時ファイルは残らない
+    path = tmp_path / "owner.json"
+    slot_pool.write_json(path, {"worktree": "作業"})
+    assert path.read_bytes() == '{"worktree": "作業"}\n'.encode()
+    assert [p.name for p in tmp_path.iterdir()] == ["owner.json"]
+
+
+def test_a_failed_replace_keeps_the_old_file_and_raises(tmp_path, monkeypatch):
+    # 現状固定: 置き換えに失敗すると例外をそのまま送り、元のファイルは書き換えない
+    path = tmp_path / "events.jsonl"
+    path.write_text("old\n", encoding="utf-8")
+
+    def refuse(src, dst):
+        raise OSError("置き換えられない")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError, match="置き換えられない"):
+        slot_pool.replace_text(path, "new\n")
+    assert path.read_text(encoding="utf-8") == "old\n"
