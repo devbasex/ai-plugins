@@ -117,16 +117,22 @@ def _keychain_oauth() -> Optional[dict]:
     return entry if isinstance(entry, dict) else None
 
 
-def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], str]:
-    """(トークン, 無いときの理由)。`CLAUDE_CODE_OAUTH_TOKEN` → 認証ファイル（→ macOS のキーチェーン）。"""
-    if env.get(CLAUDE_TOKEN_ENV):
-        return env[CLAUDE_TOKEN_ENV], ""
+def _claude_oauth_entry(env: Mapping[str, str]) -> Optional[dict]:
+    """認証ファイル（→ `CLAUDE_CONFIG_DIR` が無い macOS ではキーチェーン）の `claudeAiOauth`。無ければ None。"""
     conf = env.get("CLAUDE_CONFIG_DIR")
     credentials = _read_json(Path(conf or Path.home() / ".claude") / CLAUDE_CREDENTIALS)
     entry = credentials.get("claudeAiOauth") if credentials is not None else None
     if not isinstance(entry, dict) and not conf and sys.platform == "darwin":
         entry = _keychain_oauth()
-    token = entry.get("accessToken") if isinstance(entry, dict) else None
+    return entry if isinstance(entry, dict) else None
+
+
+def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], str]:
+    """(トークン, 無いときの理由)。`CLAUDE_CODE_OAUTH_TOKEN` → 認証ファイル（→ macOS のキーチェーン）。"""
+    if env.get(CLAUDE_TOKEN_ENV):
+        return env[CLAUDE_TOKEN_ENV], ""
+    entry = _claude_oauth_entry(env)
+    token = entry.get("accessToken") if entry is not None else None
     if not (isinstance(token, str) and token):
         return None, f"claude の OAuth の{NO_TOKEN}（{CLAUDE_TOKEN_ENV}・{CLAUDE_CREDENTIALS}）"
     expires = entry.get("expiresAt")
