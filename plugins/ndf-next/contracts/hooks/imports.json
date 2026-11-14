@@ -16,6 +16,7 @@
     "ndf.domains.hooks.verdict",
     "ndf.domains.hooks.tables",
     "ndf.domains.hooks.strict",
+    "ndf.domains.hooks.strict_shell",
     "ndf.domains.hooks.env",
     "ndf.domains.hooks.boot"
   ],

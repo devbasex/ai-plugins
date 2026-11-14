@@ -15,19 +15,16 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import time
 from pathlib import Path
-from typing import Iterator, List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"
 
-# シェルの字句のうち、コマンドを区切るもの
-_SEPARATORS = frozenset({";", "&&", "||", "|", "&", "|&", ";;", "(", ")"})
 # 前に付いても後ろのコマンドを打つ語
 _WRAPPERS = frozenset({"command", "env", "exec", "nohup", "time", "sudo"})
 
@@ -55,7 +52,7 @@ def check(raw_payload: object, root: str) -> Optional[Verdict]:
     if text is None or not _mentions_merge(text):
         return None
     try:
-        segments = list(_segments(text))
+        segments = list(strict_shell.segments(text))
     except ValueError:
         return deny(f"シェルの字句を読めず、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
     return _first_denial(segments, Path(root))
@@ -89,44 +86,6 @@ def _command_text(raw: object) -> Optional[str]:
     tool_input = raw.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     return command if isinstance(command, str) else None
-
-
-def _segments(text: str) -> Iterator[List[str]]:
-    """区切りで分けたコマンドの語の並び。引用の中の改行は次の行とつなぐ。閉じない引用は ValueError。"""
-    buffer = ""
-    for line in text.split("\n"):
-        buffer = f"{buffer}\n{line}" if buffer else line
-        if buffer.endswith("\\"):
-            buffer = buffer[:-1]
-            continue
-        try:
-            tokens = _tokens(buffer)
-        except ValueError:  # noqa: S112 利用者の入力: 引用が次の行へ続くので、次の行とつないで読み直す
-            continue
-        buffer = ""
-        yield from _split(tokens)
-    if buffer:
-        raise ValueError("閉じない引用")
-
-
-def _tokens(line: str) -> List[str]:
-    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    lex.commenters = "#"
-    return list(lex)
-
-
-def _split(tokens: List[str]) -> Iterator[List[str]]:
-    words: List[str] = []
-    for token in tokens:
-        if token in _SEPARATORS:
-            if words:
-                yield words
-            words = []
-        else:
-            words.append(token)
-    if words:
-        yield words
 
 
 def _cd(here: Path, words: List[str]) -> Path:
