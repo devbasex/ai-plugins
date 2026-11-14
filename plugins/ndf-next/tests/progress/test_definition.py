@@ -290,3 +290,36 @@ def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report()
     assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
     prog = run.StepProgress(waiting={"report": {}})
     assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
+
+
+# --- 現状固定: スキーマの木から性質の enum を探す（I-018。入れ子・配列・候補が複数・enum の無い節・空の enum） -----
+
+_find_enum = run._find_enum
+
+
+def test_current_find_enum_reads_the_own_property_before_the_children():
+    tree = {"properties": {"answer": {"enum": ["a"]}, "inner": {"properties": {"answer": {"enum": ["b"]}}}}}
+    assert _find_enum(tree, "answer") == ["a"]
+
+
+def test_current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first():
+    tree = {
+        "allOf": [
+            {"properties": {"other": {"enum": ["x"]}}},
+            {"properties": {"metrics": {"properties": {"answer": {"enum": ["first", "second"]}}}}},
+        ],
+        "$defs": {"later": {"properties": {"answer": {"enum": ["later"]}}}},
+    }
+    assert _find_enum(tree, "answer") == ["first", "second"]
+
+
+def test_current_find_enum_without_the_property_or_its_enum_is_none():
+    assert _find_enum({"properties": {"answer": {"type": "string"}}}, "answer") is None
+    assert _find_enum({"properties": {"answer": "not a node"}, "items": [1, "s", None]}, "answer") is None
+    assert _find_enum({"properties": ["answer"]}, "answer") is None
+    assert _find_enum(None, "answer") is None and _find_enum([], "answer") is None
+
+
+def test_current_find_enum_keeps_an_empty_enum_and_stops_there():
+    tree = {"items": [{"properties": {"answer": {"enum": []}}}, {"properties": {"answer": {"enum": ["later"]}}}]}
+    assert _find_enum(tree, "answer") == []
