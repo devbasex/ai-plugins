@@ -44,6 +44,13 @@ def test_assess_detects_docs_only_diff(tmp_path):
     assert run_step(step, code)["status"] == "ok"
 
 
+def test_assess_stops_as_precondition_when_base_is_not_fetched(tmp_path):
+    """差分を取れない（`origin/<base>` が無い）ときは文書だけと読まず precondition で止まる（全体テストを黙って飛ばさない）。"""
+    step = step_of(plan_of("check", base="main"), "assess")
+    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
+    assert run_step(step, repo)["kind"] == "precondition"
+
+
 def _ci_result(path, nodes):
     found = {"tool": "ci", "status": "stopped", "summary": "落ちた", "items": [], "metrics": {"failed_tests": nodes}}
     path.write_text("CI を待っている\n" + json.dumps(found) + "\n", encoding="utf-8")
@@ -98,6 +105,8 @@ def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):
     assert step.probe is not None
     probe = model.Step(id="pr-probe", run=step.probe)
     assert run_step(probe, tmp_path, gh)["prs"] == [7]
+    open_only = fake_bin(tmp_path, "gh", 'case "$*" in *"--state open"*) echo 7 ;; esac')
+    assert run_step(probe, tmp_path, open_only)["prs"] == [7]
     none = fake_bin(tmp_path, "gh", "true")
     found = run_step(probe, tmp_path, none)
     assert (found["status"], found["code"], found["prs"]) == ("stopped", 1, [])

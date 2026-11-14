@@ -13,7 +13,8 @@ from ._flow import git
 def _fix_args(out: Path, repo: Path) -> list[str]:
     return [
         "immediate_fix", "--out", str(out), "--set", "branch=fix/x", "--set", "title=直す", "--set", "body_file=b.md",
-        "--set", "test_command=pytest -q", "--add", "required=test", "--set", f"repo={repo}", "--set", f"worktree={repo}",
+        "--set", "test_command=pytest -q", "--add", "required=test", "--set", "base=develop",
+        "--set", f"repo={repo}", "--set", f"worktree={repo}",
     ]  # fmt: skip
 
 
@@ -162,7 +163,7 @@ def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch,
     monkeypatch.chdir(repo)
     out = tmp_path / "fix.json"
     args = _fix_args(out, repo)[:-4]  # repo と worktree を省く
-    assert route.main(["render", *args, "--set", "base=main"]) == 2
+    assert route.main(["render", *args]) == 2
     found = last_result(capsys.readouterr().out)
     assert found["cause"]["kind"] == "invalid"
     assert str(repo / ".worktrees" / "fix" / "x") in found["cause"]["detail"]

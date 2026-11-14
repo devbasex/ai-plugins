@@ -10,8 +10,8 @@
     "steps": [
       {
         "id": "assess",
-        "run": ["sh", "-c", "git diff --name-only \"origin/$0...HEAD\" | grep -qv '\\.md$'", "{{base}}"],
-        "exit_cause": {"1": "not_applicable"},
+        "run": ["sh", "-c", "files=$(git diff --name-only \"origin/$0...HEAD\") || exit 2; printf '%s' \"$files\" | grep -qv '\\.md$'", "{{base}}"],
+        "exit_cause": {"1": "not_applicable", "2": "precondition"},
         "on_cause": {"not_applicable": "review"}
       },
       {"use": "test", "id": "test-all", "run": ["ndf", "test-slot", "run", "--", "{{whole_test_command}}"], "on_cause": {"test_failed": "fix"}},

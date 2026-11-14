@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from ndf import cli, contracts
+from ndf import cli, contracts, identity
 from ndf.adapters import git
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
@@ -61,7 +61,7 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
 WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
-BRANCH_DECLARATION = ".ndf/worktree.json"
+BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 

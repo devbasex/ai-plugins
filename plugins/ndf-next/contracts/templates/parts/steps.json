@@ -27,7 +27,7 @@
       ],
       "probe": [
         "sh", "-c",
-        "n=$(gh pr list --head \"$0\" --state all --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
         "{{branch}}"
       ]
     },

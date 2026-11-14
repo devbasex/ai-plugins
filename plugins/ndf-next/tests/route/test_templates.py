@@ -49,7 +49,7 @@ def test_base_has_no_fixed_default():
     t = route.choose("immediate_fix")
     given = values("immediate_fix")
     del given["base"]
-    with pytest.raises(route.RouteError, match="無い差し込み: base"):
+    with pytest.raises(route.RouteError, match="差し込みの値が無い: base"):
         route.render(t, given)
 
 
