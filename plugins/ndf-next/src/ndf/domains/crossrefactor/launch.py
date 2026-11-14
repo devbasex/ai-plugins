@@ -52,8 +52,13 @@ def place_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
     return launch_decide.result_place(req.phase, req.runtime, req.stem, (dirs.read_root, dirs.work, dirs.logs))
 
 
+def phase_limit(phase: str) -> float:
+    """工程の監視の上限の秒（宣言 `monitor.phase.<工程>`）。"""
+    return limits.seconds(f"monitor.phase.{phase}")
+
+
 def _limit(req: Request) -> float:
-    return req.timeout if req.timeout is not None else limits.seconds(f"monitor.phase.{req.phase}")
+    return req.timeout if req.timeout is not None else phase_limit(req.phase)
 
 
 def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:

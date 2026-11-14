@@ -209,7 +209,7 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
         net = _net(run)
         if net.halted:
             raise DriveStopped("fix_limit", net.reason())
-        req = replace(req, timeout=min(limits.seconds(f"monitor.phase.{req.phase}"), net.remaining_seconds))
+        req = replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds))
     began = run.ports.clock()
     got, _ = launch.run(req, run.dirs(), run.ports.launcher)
     spent = run.ports.clock() - began
