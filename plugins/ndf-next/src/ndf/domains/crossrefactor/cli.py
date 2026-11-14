@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.adapters import git, github
@@ -187,6 +187,21 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     return r, st, rl, sa
 
 
+# 例外 → 止まった理由の種類。上から見て最初に当たった行を採る（ValueError の派生を先に置くため、並びを保つ）
+STOP_KINDS: tuple[tuple[tuple[type[Exception], ...], str], ...] = (
+    ((scope.ScopeError,), "invalid"),
+    ((store.StateBroken,), "store_broken"),
+    ((collect.CollectError, worktree.WorktreeUnregistered, worktree.LockFailed, worktree.SyncRefused, git.GitError), "precondition"),
+    ((github.GitHubError,), "transient"),
+    ((ValueError,), "invalid"),
+)
+
+
+def _stop_kind(exc: Exception) -> Optional[str]:
+    """例外に当たる止まった理由の種類。表に無ければ None。"""
+    return next((kind for types, kind in STOP_KINDS if isinstance(exc, types)), None)
+
+
 def main(argv: list[str]) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -194,15 +209,10 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return result.emit(HANDLERS[args.action](args))
-    except scope.ScopeError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
-    except store.StateBroken as exc:
-        return result.emit(result.stopped(TOOL, "store_broken", str(exc)))
-    except (collect.CollectError, worktree.WorktreeUnregistered, worktree.LockFailed, worktree.SyncRefused, git.GitError) as exc:
-        return result.emit(result.stopped(TOOL, "precondition", str(exc)))
     except final_gate.GateStopped as exc:
         return result.emit(result.stopped(TOOL, exc.kind, exc.detail))
-    except github.GitHubError as exc:
-        return result.emit(result.stopped(TOOL, "transient", str(exc)))
-    except ValueError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
+    except Exception as exc:
+        kind = _stop_kind(exc)
+        if kind is None:
+            raise
+        return result.emit(result.stopped(TOOL, kind, str(exc)))
