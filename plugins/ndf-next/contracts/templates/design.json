@@ -1,0 +1,17 @@
+{
+  "template": "design",
+  "purpose": "design",
+  "summary": "設計: worker の設計 → push → PR。worker が承認ゲートを返せば、プランを承認ゲートで終えて人の判断を待つ",
+  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "worker"],
+  "plan": {
+    "name": "design-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "worker", "id": "design", "run": ["{{worker}}", "design"]},
+      {"use": "push", "on_fail": "fix-push"},
+      {"use": "pr", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

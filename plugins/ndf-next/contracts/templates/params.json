@@ -1,0 +1,23 @@
+{
+  "summary": "雛形の差し込み（{{名前}}）の定義。雛形は使う名前を params に並べ、意味と既定はここだけが持つ。list が真の名前は文字列の並びを受け、引数の要素ごとに展開する（要素がその名前だけなら並びを差し込み、ほかの字を含めば値ごとに要素を作る）",
+  "params": {
+    "repo": {"summary": "リポジトリの根。省けば ndf route が打った場所の git の根（git rev-parse --show-toplevel）"},
+    "worktree": {"summary": "作業場所。省けばリポジトリの根の .worktrees/<branch>"},
+    "branch": {"summary": "作業のブランチ"},
+    "base": {"summary": "PR の宛先のブランチ", "default": "develop"},
+    "title": {"summary": "PR の題"},
+    "body_file": {"summary": "PR の本文のファイル"},
+    "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちを確かめるときは後ろに落ちたテストの node id を足して打つ"},
+    "whole_test_command": {"summary": "全体テストのシェルのコマンド 1 つ"},
+    "worker": {"summary": "worker の起動の引数の並び。最後に作業の名前（impl・fix・ci-fix・fix-base・fix-push・design・plan-to-spec）を足して打つ", "list": true},
+    "ci_budget": {"summary": "CI の待ちの合計の秒（ndf ci watch --budget）", "default": "3600"},
+    "required": {"summary": "待つ必須のチェックの名前", "list": true},
+    "tests": {"summary": "テストのチェックの名前（分割ジョブも数える）", "list": true, "default": []},
+    "merge_method": {"summary": "gh pr merge のマージの仕方（squash・merge・rebase）", "default": "squash"},
+    "refactor": {"summary": "構造改善の起動の引数の並び", "list": true},
+    "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。構造改善が生成元に触れたときに push の前に打つ"},
+    "review": {"summary": "実装レビューの起動の引数の並び", "list": true},
+    "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
+    "gate": {"summary": "承認ゲートの資料を作って人の答えを待つ起動の引数の並び（承認ゲートの結果 JSON を返す）", "list": true}
+  }
+}

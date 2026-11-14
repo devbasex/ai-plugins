@@ -39,6 +39,7 @@ COMMANDS: dict[str, str] = {
     "plan": "ndf.core.plan.cli",
     "progress": "ndf.progress.command",
     "relay": "ndf.domains.relay.cli",
+    "route": "ndf.core.route",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
 }
