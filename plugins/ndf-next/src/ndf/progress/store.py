@@ -18,8 +18,6 @@ import fcntl
 import hashlib
 import logging
 import os
-import shutil
-import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, fields
@@ -31,7 +29,7 @@ import sqlalchemy as sa
 from sqlalchemy import event as sa_event
 
 from ndf.core import durable
-from ndf.progress import model
+from ndf.progress import backup, model
 
 log = logging.getLogger(__name__)
 
@@ -39,10 +37,6 @@ log = logging.getLogger(__name__)
 DB_NAME = "progress.sqlite"
 # 進行表の DB の検査の目印（置き場の中）
 CHECKED_MARK = "progress.checked"
-BACKUP_DIR = "backup"
-BACKUP_PREFIX = "progress-"
-# 残す控えの本数（8 本目を取ると最も古い 1 本を消す）
-KEEP_BACKUPS = 7
 BUSY_TIMEOUT_SECONDS = 30
 # SQLite のエラーの文言で取り合い（StoreBusy）と破損（StoreBroken）を見分ける語
 BUSY_MARKERS = ("locked", "busy")
@@ -55,9 +49,6 @@ SCHEMA_VERSION_KEY = "schema_version"
 PG_LOCK_SPACE = 0x4E444650
 # 表を作るときに PostgreSQL のプロセスどうしを直列にする第 2 引数
 PG_SCHEMA_KEY = 0
-# 戻すときの一時名の接尾辞と、退避の名前の印
-RESTORING_SUFFIX = ".restoring"
-BROKEN_MARK = ".broken-"
 
 META = sa.MetaData()
 TABLES = sa.Table(
@@ -115,10 +106,6 @@ class RestoreUnsupported(durable.StoreStopped):
 
 class Conflict(Exception):
     """事象の番号がぶつかった（同時の追記。I2）。読み直して判定し直す。"""
-
-
-class BackupFailed(Exception):
-    """控えを書けなかった（容量不足など）。書きかけの控えは消してある。"""
 
 
 # --- 接続先とロック ------------------------------------------------------------------------
@@ -259,8 +246,8 @@ def ensure_schema(store: Store, now: datetime) -> None:
 
 def _backup_or_warn(store: Store, now: datetime, force: bool) -> None:
     try:
-        backup(store.engine, store.root, now, force=force)
-    except BackupFailed as exc:
+        backup.backup(store.engine, store.root, now, force=force)
+    except backup.BackupFailed as exc:
         log.warning("進行表の DB の控えを書けなかった", extra={"root": str(store.root), "error": str(exc)})
         store.warnings.append(str(exc))
 
@@ -274,7 +261,7 @@ def _check_and_backup(store: Store, now: datetime) -> None:
             ensure_schema(store, now)
             return
         if not durable.check_file(store.path):
-            latest = latest_backup(store.root)
+            latest = backup.latest_backup(store.root)
             hint = f"。最新の控え: {latest}。ndf progress restore --from {latest} で戻せる" if latest else "。控えが無い"
             raise durable.StoreBroken(f"進行表の DB が quick_check を通らない: {store.path}{hint}", (store.path,))
         ensure_schema(store, now)
@@ -311,79 +298,6 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
 # --- 控えと戻し --------------------------------------------------------------------------
 
 
-def backups(root: Path) -> list[Path]:
-    """控えを古い順に（名前は UTC の日時を持つため、名前の順が時刻の順）。"""
-    return sorted((root / BACKUP_DIR).glob(f"{BACKUP_PREFIX}*{durable.DB_SUFFIX}"))
-
-
-def latest_backup(root: Path) -> Optional[Path]:
-    found = backups(root)
-    return found[-1] if found else None
-
-
-def _write_backup(engine: sa.Engine, dest: Path) -> None:
-    """SQLite の backup API で写し、写しを WAL でない形にする（戻した後に -wal・-shm を残さない）。"""
-    raw = engine.raw_connection()
-    try:
-        target = sqlite3.connect(dest)
-        try:
-            raw.driver_connection.backup(target)
-            target.execute("PRAGMA journal_mode=DELETE")
-        finally:
-            target.close()
-    finally:
-        raw.close()
-
-
-def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) -> Optional[Path]:
-    """`backup/progress-<UTC の日時>.sqlite` を書き、新しい 7 本を残して古い控えを消す。
-
-    最新の控えが 24 時間以内なら取らずに None（`force` なら日時に依らず取る）。書けなければ書きかけを消して
-    `BackupFailed` を投げ、古い控えは消さない。SQLite のときだけ呼ぶ。
-    """
-    latest = latest_backup(root)
-    if not force and latest is not None and durable.is_fresh(latest, now):
-        return None
-    dest = root / BACKUP_DIR / f"{BACKUP_PREFIX}{now:%Y%m%dT%H%M%S%fZ}{durable.DB_SUFFIX}"
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        _write_backup(engine, dest)
-    except (OSError, sqlite3.Error) as exc:
-        dest.unlink(missing_ok=True)
-        raise BackupFailed(f"進行表の DB の控えを書けない: {dest}: {exc}") from exc
-    os.utime(dest, (now.timestamp(), now.timestamp()))
-    for old in backups(root)[:-KEEP_BACKUPS]:
-        old.unlink(missing_ok=True)
-    return dest
-
-
-def _with_suffixes(path: Path) -> list[tuple[str, Path]]:
-    return [(s, Path(f"{path}{s}")) for s in ("", *durable.SIDE_SUFFIXES)]
-
-
-def _broken_name(path: Path, now: datetime) -> Path:
-    base = path.with_name(f"{path.name}{BROKEN_MARK}{now:%Y%m%dT%H%M%SZ}")
-    candidate, n = base, 1
-    while any(p.exists() for _, p in _with_suffixes(candidate)):
-        candidate = base.with_name(f"{base.name}-{n}")
-        n += 1
-    return candidate
-
-
-def _retire_db(path: Path, now: datetime) -> Path:
-    """本体と -wal・-shm・-journal をそろえて `<実ファイル>.broken-<日時>`（と同じ接尾辞）へ移す。"""
-    target = _broken_name(path, now)
-    for suffix, src in _with_suffixes(path):
-        if src.exists():
-            os.replace(src, Path(f"{target}{suffix}"))
-    return target
-
-
-def _next_backup(root: Path, source: Path) -> Optional[Path]:
-    older = [p for p in backups(root) if p.resolve() != source.resolve()]
-    return older[-1] if older else None
-
-
 def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) -> Path:
     """控えから進行表の DB を戻し、退避した壊れた DB のパスを返す。自動では呼ばない（`ndf progress restore`）。
 
@@ -395,29 +309,9 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
     if path is None:
         raise RestoreUnsupported("PostgreSQL の控えと戻しは DB の運用で行う")
     with durable.store_lock(root, exclusive=True), db_lock(path, exclusive=True):
-        temp = _stage_backup(root, source, path)
-        retired = _retire_db(path, now)
-        _assert_retired(path)
-        os.replace(temp, path)
+        retired = backup.replace_db(root, path, source, now)
         durable.touch_mark(root / CHECKED_MARK, now)
     return retired
-
-
-def _stage_backup(root: Path, source: Path, path: Path) -> Path:
-    """控えを一時名へ写し、`quick_check` を通した一時名を返す。通らなければ一時名を消して `StoreBroken`。"""
-    temp = path.with_name(f".{path.name}{RESTORING_SUFFIX}")
-    shutil.copyfile(source, temp)
-    if not durable.check_file(temp):
-        temp.unlink(missing_ok=True)
-        raise durable.StoreBroken(f"控え {source} が quick_check を通らない。次に新しい控え: {_next_backup(root, source)}", (source,))
-    return temp
-
-
-def _assert_retired(path: Path) -> None:
-    """退避の後に -wal・-shm・-journal が残っていれば `StoreBroken`。"""
-    left = [str(p) for s, p in _with_suffixes(path) if s and p.exists()]
-    if left:
-        raise durable.StoreBroken(f"退避の後に残ったファイルがある: {', '.join(left)}", (path,))
 
 
 # --- 読み書き ----------------------------------------------------------------------------
