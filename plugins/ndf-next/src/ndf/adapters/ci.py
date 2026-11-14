@@ -194,6 +194,13 @@ class Reading(NamedTuple):
         return bool(self.queued) and not self.running
 
 
+def _match_required(checks: list[Check], wanted: set[str]) -> tuple[list[Check], set[str]]:
+    """(必須の鍵のどれかに当たるチェック, 当たるチェックのあった必須の鍵)。照合は `_fulfils`。"""
+    mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
+    present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
+    return mine, present
+
+
 def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) -> Reading:
     """必須のチェック（分割ジョブを含む）の今の状態を読む。
 
@@ -202,8 +209,7 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
     """
     checks, test_names = latest(runs), bare_names(tests)
     wanted = {required_key(r) for r in required}
-    mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
-    present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
+    mine, present = _match_required(checks, wanted)
     failed_tests, failed_other = _partition((c for c in mine if c.failed), lambda c: c.name, test_names)
     return Reading(
         failed_tests=failed_tests,
