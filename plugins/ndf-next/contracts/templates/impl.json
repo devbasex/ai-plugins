@@ -1,0 +1,32 @@
+{
+  "template": "impl",
+  "purpose": "implement",
+  "summary": "実装: 取り込み済みなら流さずに終える → worker の実装 → 手元のテスト → push → PR → CI。CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "test_command", "worker", "ci_budget", "required", "tests"],
+  "plan": {
+    "name": "impl-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {
+        "id": "done-check",
+        "run": ["sh", "-c", "test \"$(gh pr list --head \"$0\" --state all --json state --jq '.[0].state // empty')\" != MERGED", "{{branch}}"],
+        "exit_cause": {"1": "not_applicable"},
+        "on_cause": {"not_applicable": "end"}
+      },
+      {"use": "worker"},
+      {"use": "test", "on_cause": {"test_failed": "fix"}},
+      {"use": "push", "on_fail": "fix-push"},
+      {"use": "pr"},
+      {"use": "conflict-check"},
+      {"use": "ci", "next": "end"},
+      {"use": "worker", "id": "fix", "run": ["{{worker}}", "fix"], "next": "test"},
+      {"use": "repeat-check"},
+      {"use": "ci-fix"},
+      {"use": "ci-local"},
+      {"use": "fix-push"},
+      {"use": "base-sync"},
+      {"use": "fix-base"}
+    ]
+  }
+}

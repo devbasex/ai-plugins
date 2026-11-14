@@ -1,0 +1,85 @@
+{
+  "summary": "雛形どうしで共有するステップ。雛形のステップは {\"use\": \"<名前>\"} で 1 つを引き、並べた鍵で上書きする（上書きは鍵ごとに置き換える）",
+  "steps": {
+    "test": {
+      "id": "test",
+      "run": ["ndf", "test-slot", "run", "--", "{{test_command}}"],
+      "exit_cause": {"1": "test_failed"}
+    },
+    "worker": {
+      "id": "work",
+      "run": ["{{worker}}", "impl"]
+    },
+    "push": {
+      "id": "push",
+      "run": ["git", "push", "origin", "HEAD:refs/heads/{{branch}}"],
+      "probe": ["sh", "-c", "test \"$(git ls-remote origin \"refs/heads/$0\" | cut -f1)\" = \"$(git rev-parse HEAD)\"", "{{branch}}"],
+      "exit_cause": {"1": "push_rejected"},
+      "on_cause": {"push_rejected": "retry"},
+      "retry": {"push_rejected": {"attempts": 1, "interval": 30}}
+    },
+    "pr": {
+      "id": "pr",
+      "run": ["gh", "pr", "create", "--base", "{{base}}", "--head", "{{branch}}", "--title", "{{title}}", "--body-file", "{{body_file}}"],
+      "probe": ["sh", "-c", "test -n \"$(gh pr list --head \"$0\" --state all --json number --jq '.[0].number // empty')\"", "{{branch}}"]
+    },
+    "conflict-check": {
+      "id": "conflict-check",
+      "run": ["sh", "-c", "test \"$(gh pr view \"$0\" --json mergeStateStatus --jq .mergeStateStatus)\" != DIRTY", "{{branch}}"],
+      "exit_cause": {"1": "base_conflict"},
+      "on_cause": {"base_conflict": "base-sync"}
+    },
+    "ci": {
+      "id": "ci",
+      "run": [
+        "bash", "-c",
+        "set -o pipefail; pr=$(gh pr view \"$1\" --json number --jq .number) || exit 1; out=$2; shift 2; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
+        "ci", "{{branch}}", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
+      ],
+      "on_cause": {"test_failed": "repeat-check", "base_conflict": "base-sync"}
+    },
+    "repeat-check": {
+      "id": "repeat-check",
+      "run": ["ndf", "route", "repeat", "--result", "{state_dir}/ci.json", "--log", "{state_dir}/ci-causes.jsonl"],
+      "next": "ci-fix"
+    },
+    "ci-fix": {
+      "id": "ci-fix",
+      "run": ["{{worker}}", "ci-fix"],
+      "next": "ci-local"
+    },
+    "ci-local": {
+      "id": "ci-local",
+      "run": [
+        "bash", "-c",
+        "nodes=$(python3 -c 'import json, sys; d = json.loads(open(sys.argv[1]).read().strip().splitlines()[-1]); print(\" \".join(d.get(\"metrics\", {}).get(\"failed_tests\", [])))' \"$1\") || exit 2; ndf test-slot run -- \"$2${nodes:+ $nodes}\"",
+        "ci-local", "{state_dir}/ci.json", "{{test_command}}"
+      ],
+      "exit_cause": {"1": "test_failed", "2": "invalid"},
+      "on_cause": {"test_failed": "ci-fix"},
+      "next": "push"
+    },
+    "base-sync": {
+      "id": "base-sync",
+      "run": ["git", "pull", "--no-rebase", "--no-edit", "origin", "{{base}}"],
+      "exit_cause": {"1": "base_conflict"},
+      "on_cause": {"base_conflict": "fix-base"},
+      "next": "push"
+    },
+    "fix-base": {
+      "id": "fix-base",
+      "run": ["{{worker}}", "fix-base"],
+      "next": "push"
+    },
+    "fix-push": {
+      "id": "fix-push",
+      "run": ["{{worker}}", "fix-push"],
+      "next": "push"
+    },
+    "merge": {
+      "id": "merge",
+      "run": ["gh", "pr", "merge", "{{branch}}", "--{{merge_method}}"],
+      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"]
+    }
+  }
+}
