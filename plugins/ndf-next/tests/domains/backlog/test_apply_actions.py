@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ndf.domains.backlog import cli, model, table_decide
+from ndf.adapters.github import GitHubError
+from ndf.domains.backlog import actions, cli, model, table_decide
 
 UPDATED = "2026-11-01T00:00:00Z"
 
@@ -144,3 +145,82 @@ def test_sizes_from_estimate_records_replace_the_size(repo_dir, fake, capsys, la
     assert rows[1]["sources"]["size"] == "llm" and got["metrics"]["sized"] == [3, 4]
     sizes.write_text(json.dumps({"issues": [{"number": 3, "size": 7}]}))
     assert _rank(capsys, last_result, tmp_path, "--sizes", str(sizes))["cause"]["kind"] == "invalid"
+
+
+# --- 現状固定: actions._write（書き込みの順と、途中で落ちたときに書けた分だけを記録へ残す振る舞い） ---
+
+
+class StubRest:
+    """`repo` と `rest` だけを持つ偽物。1 件の課題を持ち、書き込みを順に記録する。`fail_at` 番目の書き込みで落ちる。"""
+
+    repo = "acme/widgets"
+
+    def __init__(self, labels: list[str], fail_at: int | None = None) -> None:
+        self.cur = {"title": "題", "body": "元", "state": "open", "labels": list(labels), "updated_at": UPDATED}
+        self.fail_at = fail_at
+        self.writes: list[tuple[str, str, object]] = []
+
+    def rest(self, method: str, path: str, body: object = None) -> dict:
+        if method == "GET":
+            return {**self.cur, "labels": [{"name": lb} for lb in self.cur["labels"]]}
+        if self.fail_at is not None and len(self.writes) + 1 == self.fail_at:
+            self.fail_at = None
+            raise GitHubError(f"落ちた: {method} {path}", 500)
+        self.writes.append((method, path.removeprefix("/repos/acme/widgets/issues/9"), body))
+        if method == "PATCH":
+            self.cur.update({k: v for k, v in body.items() if k in ("title", "body", "state")})
+        elif method == "POST":
+            self.cur["labels"] += [lb for lb in body["labels"] if lb not in self.cur["labels"]]
+        else:
+            self.cur["labels"].remove(path.rsplit("/", 1)[1])
+        return {}
+
+
+def _stub_plan(gh: StubRest) -> dict:
+    changes = {"body": "新", "add_labels": ["bug"], "remove_labels": ["old", "stale"]}
+    act = {"number": 9, "verdict": "追記が要る", "updated_at": UPDATED, "digest": model.snapshot_digest(gh.cur), "changes": changes}
+    return {"actions": [act]}
+
+
+def _ledger_rows(tmp_path: Path) -> list[dict]:
+    return list(actions.Ledger(tmp_path).rows.values())
+
+
+def test_write_order_and_applied_record(tmp_path):
+    gh = StubRest(["old", "stale", "keep"])
+    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    assert gh.writes == [("PATCH", "", {"body": "新"}), ("POST", "/labels", {"labels": ["bug"]}),
+                         ("DELETE", "/labels/old", None), ("DELETE", "/labels/stale", None)]  # fmt: skip
+    assert got["buckets"]["applied"] == [9] and got["items"][0]["reason"] == "body, +bug, -old, -stale"
+    digest = model.snapshot_digest({"title": "題", "body": "新"})
+    assert _ledger_rows(tmp_path) == [
+        {"result": "applied", "fields": ["body"], "add_labels": ["bug"], "remove_labels": ["old", "stale"], "digest": digest}
+    ]
+
+
+def test_write_failing_first_leaves_no_record(tmp_path):
+    gh = StubRest(["old", "stale"], fail_at=1)
+    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    assert got["buckets"]["failed"] == [9] and got["failed"] == [{"number": 9, "error": "落ちた: PATCH /repos/acme/widgets/issues/9"}]
+    assert gh.writes == [] and _ledger_rows(tmp_path) == []
+
+
+def test_write_failing_midway_records_partial_digest_and_resumes(tmp_path):
+    gh = StubRest(["old", "stale"], fail_at=4)
+    plan = _stub_plan(gh)
+    got = actions.apply_actions(gh, actions.Ledger(tmp_path), plan)
+    # 本文・ラベルの追加・1 つ目の外しまで書けて、2 つ目の外しで落ちる
+    assert got["buckets"]["failed"] == [9] and [w[0] for w in gh.writes] == ["PATCH", "POST", "DELETE"]
+    assert _ledger_rows(tmp_path) == [{"result": "partial", "digest": model.snapshot_digest({"title": "題", "body": "新"})}]
+    # 打ち直しは自分の書き込みを並行の更新と取り違えず、残りだけを書く
+    again = actions.apply_actions(gh, actions.Ledger(tmp_path), plan)
+    assert again["buckets"]["applied"] == [9] and again["items"][0]["reason"] == "-stale"
+    assert gh.writes[3:] == [("DELETE", "/labels/stale", None)] and gh.cur["labels"] == ["bug"]
+    assert _ledger_rows(tmp_path)[0]["result"] == "applied" and _ledger_rows(tmp_path)[0]["remove_labels"] == ["stale"]
+
+
+def test_write_failing_after_patch_records_partial(tmp_path):
+    gh = StubRest(["old"], fail_at=2)
+    got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
+    assert got["buckets"]["failed"] == [9] and gh.writes == [("PATCH", "", {"body": "新"})]
+    assert _ledger_rows(tmp_path) == [{"result": "partial", "digest": model.snapshot_digest({"title": "題", "body": "新"})}]
