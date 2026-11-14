@@ -27,7 +27,8 @@ def test_budget_skips_a_large_item_and_still_takes_the_smaller_ones_after_it() -
 
 def test_budget_extends_up_to_the_factor_when_high_items_exceed_it() -> None:
     got = budget_decide.select([_item(1, "high", 10, 25), _item(2, "high", 0, 10)], 30, factor=2.0)
-    assert got.budget.extended_to == 45 and [i["id"] for i in got.adopted] == ["I-001", "I-002"]
+    # 順位が同じなら見積りの合計の昇順（旧い refactor_lib/budget.py の rank_key と同じ）
+    assert got.budget.extended_to == 45 and [i["id"] for i in got.adopted] == ["I-002", "I-001"]
     beyond = budget_decide.select([_item(1, "high", 50, 50)], 30, factor=2.0)
     assert beyond.budget.extended_to is None and beyond.adopted == []
 
