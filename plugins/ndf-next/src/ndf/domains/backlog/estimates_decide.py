@@ -3,11 +3,15 @@
 見積は この回の入力（`--scores`）→ 記録（estimates.json）→ 前回の順位の表 の順に採る。見直しの回は今の課題の
 要約値（`digests`）を渡し、要約値の違う記録と前回の表から戻した見積（要約値を持たない）を `excluded` に入れて
 採点し直しを求める。候補の収集が「見積の欠け」と数える基準と同じにし、欠けを残したまま見直しを終えない（#2540）。
+
+見積もりの記録から決めた Size（`--sizes`。実績に照らした段階か尺度を超える印）があれば、その課題の Size を置き換える
+（`overlay_sizes`）。置き換えた値は記録（estimates.json）へ写さず、毎回の入力から重ねる。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, Optional
 
 from ndf.domains.backlog import model
@@ -68,3 +72,16 @@ def unscored(numbers: list[int], stored: Mapping[str, Any], digests: Mapping[int
     if not stored:
         return []
     return [n for n in numbers if not isinstance(stored.get(str(n)), dict) or stored[str(n)].get("digest") != digests[n]]
+
+
+def overlay_sizes(ests: Mapping[int, Estimate], sizes: Mapping[int, Any], cfg: Config) -> tuple[dict[int, Estimate], list[int]]:
+    """見積もりの記録から決めた Size を重ねた見積と、重ねた課題の番号。尺度にも印にも無い値は `EstimateError`。"""
+    out = dict(ests)
+    sized = []
+    for n in sorted(set(sizes) & set(ests)):
+        size = sizes[n]
+        if size != model.OVER_SCALE and size not in cfg.scale:
+            raise EstimateError(f"--sizes の #{n} の Size が尺度 {list(cfg.scale)} か {model.OVER_SCALE!r} でない: {size!r}")
+        out[n] = replace(ests[n], size=size)
+        sized.append(n)
+    return out, sized

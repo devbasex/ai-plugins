@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from urllib.parse import quote
 
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, text_of
 from ndf.contracts import limits
@@ -19,7 +20,7 @@ _CLOSED_PAGE = (
 _MILESTONE_PAGE = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {"
     f" milestones(first: {PER_PAGE}, after: $after, states: [OPEN, CLOSED]) {{"
-    " pageInfo { hasNextPage endCursor } nodes { number title } } } }"
+    " pageInfo { hasNextPage endCursor } nodes { number title description } } } }"
 )
 NOT_FOUND = 404
 
@@ -63,22 +64,63 @@ def closed_since(gh: GitHub, since: str) -> list[dict[str, Any]]:
     raise GitHubError(f"閉じた Issue の一覧が {pages} ページを超えた（github.list-pages）")
 
 
-def milestones(gh: GitHub) -> dict[str, int]:
-    """マイルストーンの題 → 番号（open と closed）。`github.list-pages` ページを超えたら `GitHubError`。"""
+def milestone_rows(gh: GitHub) -> dict[str, dict[str, Any]]:
+    """マイルストーンの題 → {number, description}（open と closed）。`github.list-pages` ページを超えたら `GitHubError`。"""
     pages = int(limits.value("github.list-pages", "count"))
-    out: dict[str, int] = {}
+    out: dict[str, dict[str, Any]] = {}
     after: Optional[str] = None
     for _ in range(pages):
         conn = gh.repository(_MILESTONE_PAGE, {"after": after})["milestones"]
-        out.update({text_of(m["title"]): int(m["number"]) for m in conn["nodes"]})
+        out.update({text_of(m["title"]): {"number": int(m["number"]), "description": text_of(m.get("description"))} for m in conn["nodes"]})
         if not conn["pageInfo"]["hasNextPage"]:
             return out
         after = conn["pageInfo"]["endCursor"]
     raise GitHubError(f"マイルストーンの一覧が {pages} ページを超えた（github.list-pages）")
 
 
+def milestones(gh: GitHub) -> dict[str, int]:
+    """マイルストーンの題 → 番号（open と closed）。"""
+    return {title: row["number"] for title, row in milestone_rows(gh).items()}
+
+
+def set_milestone_description(gh: GitHub, number: int, description: str) -> None:
+    gh.rest("PATCH", f"/repos/{gh.repo}/milestones/{int(number)}", {"description": description})
+
+
 def set_milestone(gh: GitHub, n: int, number: Optional[int]) -> None:
     gh.rest("PATCH", f"/repos/{gh.repo}/issues/{int(n)}", {"milestone": number})
+
+
+def issue(gh: GitHub, n: int) -> dict[str, Any]:
+    """Issue の今の題・本文・状態・ラベル・更新の時刻（REST）。"""
+    raw = gh.rest("GET", f"/repos/{gh.repo}/issues/{int(n)}")
+    labels = raw["labels"] if isinstance(raw.get("labels"), list) else []
+    return {
+        "number": int(n),
+        "title": text_of(raw.get("title")),
+        "body": text_of(raw.get("body")),
+        "state": text_of(raw.get("state")).lower(),
+        "labels": [text_of(lb["name"]) if isinstance(lb, dict) else text_of(lb) for lb in labels],
+        "updated_at": text_of(raw.get("updated_at")),
+    }
+
+
+def patch_issue(gh: GitHub, n: int, patch: dict[str, Any]) -> None:
+    gh.rest("PATCH", f"/repos/{gh.repo}/issues/{int(n)}", patch)
+
+
+def add_labels(gh: GitHub, n: int, labels: list[str]) -> None:
+    gh.rest("POST", f"/repos/{gh.repo}/issues/{int(n)}/labels", {"labels": labels})
+
+
+def remove_label(gh: GitHub, n: int, label: str) -> None:
+    """ラベルを外す。名前の `/` を別のパスにしないため、パスの 1 区切りとして符号化する。"""
+    gh.rest("DELETE", f"/repos/{gh.repo}/issues/{int(n)}/labels/{quote(label, safe='')}")
+
+
+def create_issue(gh: GitHub, title: str, body: str, labels: list[str]) -> int:
+    """Issue を起票し、番号を返す。"""
+    return int(gh.rest("POST", f"/repos/{gh.repo}/issues", {"title": title, "body": body, "labels": labels})["number"])
 
 
 def issue_state(gh: GitHub, n: int) -> str:

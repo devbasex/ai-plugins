@@ -70,7 +70,8 @@ def test_rank_counts_an_open_child_as_released_by_its_open_parent(repo_dir, fake
 def test_child_depending_on_its_parent_does_not_make_a_cycle(repo_dir, fake, capsys, last_result, tmp_path):
     fake.issue(10, milestone="01")
     fake.issue(11, milestone="01", parent=10)
-    rows = [{"number": 10, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1}, {"number": 11, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "depends_on": [10]}]
+    rows = [{"number": 10, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d10"},
+            {"number": 11, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d11", "depends_on": [10]}]  # fmt: skip
     scores = tmp_path / "s.json"
     scores.write_text(json.dumps({"issues": rows}))
     assert _run(capsys, last_result, "rank", "--repo", "acme/widgets", "--scores", str(scores))["status"] == "ok"

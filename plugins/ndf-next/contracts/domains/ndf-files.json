@@ -33,6 +33,7 @@
     {"id": "backlog-estimates", "place": "backlog-state", "path": "<repo>/estimates.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "backlog-before", "place": "backlog-state", "path": "<repo>/before-<id>.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "backlog-depths", "place": "backlog-state", "path": "<repo>/depths.jsonl", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
+    {"id": "backlog-ledger", "place": "backlog-state", "path": "<repo>/ledger.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "runtime-policy", "place": "ndf", "path": "runtimes.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["allowed", "review_seats"], "main_keys": ["allowed", "review_seats"]},
     {"id": "ask", "place": "ndf", "path": "ask.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["mode", "allow", "cost", "extra"]},
     {"id": "context", "place": "ndf", "path": "context.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["policy", "trial", "margin"]},

@@ -30,6 +30,10 @@ class FakeHub:
         self.contents: dict[tuple[str, str], str] = {}
         self.commits: set[str] = set()
         self.writes: list[tuple[str, str, Any]] = []
+        self.descriptions: dict[int, str] = {}
+        # 説明の長さの上限（超えたら 422）。None なら上限なし
+        self.max_description: int | None = None
+        self.next_number = 500
 
     def issue(self, n: int, title: str = "", body: str = "", milestone: str | None = None, labels: tuple[str, ...] = (),
               updated: str = "2026-11-01T00:00:00Z", state: str = "open", parent: int | None = None,
@@ -49,7 +53,7 @@ class FakeHub:
 
     def graphql(self, query: str) -> dict[str, Any]:
         if "milestones(" in query:
-            nodes = [{"number": v, "title": k} for k, v in self.milestones.items()]
+            nodes = [{"number": v, "title": k, "description": self.descriptions.get(v, "")} for k, v in self.milestones.items()]
             return {"repository": {"milestones": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
         if "filterBy" in query:
             nodes = [{"number": n, "closedAt": i["closed_at"], "milestone": {"title": i["milestone"]} if i["milestone"] else None}
@@ -80,6 +84,10 @@ class FakeHub:
             (r"GET /issues/(\d+)/parent", self._parent),
             (r"GET /issues/(\d+)", lambda m, b, p: self._issue_rest(int(m.group(1)))),
             (r"PATCH /issues/(\d+)", self._patch),
+            (r"POST /issues", self._create),
+            (r"POST /issues/(\d+)/labels", self._add_labels),
+            (r"DELETE /issues/(\d+)/labels/(.+)", self._remove_label),
+            (r"PATCH /milestones/(\d+)", self._milestone),
             (r"POST /issues/(\d+)/comments", lambda m, b, p: httpx.Response(201, json={"id": 1})),
             (r"POST /issues/(\d+)/sub_issues", self._add_sub),
             (r"DELETE /issues/(\d+)/sub_issue", self._remove_sub),
@@ -91,7 +99,10 @@ class FakeHub:
 
     def _issue_rest(self, n: int) -> httpx.Response:
         i = self.issues.get(n)
-        return httpx.Response(200, json={"number": n, "id": i["id"], "state": i["state"]}) if i else httpx.Response(404, json={})
+        if not i:
+            return httpx.Response(404, json={})
+        return httpx.Response(200, json={"number": n, "id": i["id"], "state": i["state"], "title": i["title"], "body": i["body"],
+                                         "labels": [{"name": lb} for lb in i["labels"]], "updated_at": i["updated"]})  # fmt: skip
 
     def _parent(self, m: re.Match, body: Any, params: Any) -> httpx.Response:
         parent = self.issues[int(m.group(1))]["parent"]
@@ -101,10 +112,34 @@ class FakeHub:
 
     def _patch(self, m: re.Match, body: dict, params: Any) -> httpx.Response:
         i = self.issues[int(m.group(1))]
-        if "state" in body:
-            i["state"] = body["state"]
+        for key in ("state", "title", "body"):
+            if key in body:
+                i[key] = body[key]
         if "milestone" in body:
             i["milestone"] = next((t for t, v in self.milestones.items() if v == body["milestone"]), None)
+        return httpx.Response(200, json={})
+
+    def _create(self, m: re.Match, body: dict, params: Any) -> httpx.Response:
+        n = self.next_number
+        self.next_number += 1
+        self.issue(n, title=body["title"], body=body["body"], labels=tuple(body["labels"]))
+        return httpx.Response(201, json={"number": n})
+
+    def _add_labels(self, m: re.Match, body: dict, params: Any) -> httpx.Response:
+        i = self.issues[int(m.group(1))]
+        i["labels"] += [lb for lb in body["labels"] if lb not in i["labels"]]
+        return httpx.Response(200, json=[])
+
+    def _remove_label(self, m: re.Match, body: Any, params: Any) -> httpx.Response:
+        from urllib.parse import unquote
+
+        self.issues[int(m.group(1))]["labels"].remove(unquote(m.group(2)))
+        return httpx.Response(200, json=[])
+
+    def _milestone(self, m: re.Match, body: dict, params: Any) -> httpx.Response:
+        if self.max_description is not None and len(body["description"]) > self.max_description:
+            return httpx.Response(422, json={"message": "Validation Failed"})
+        self.descriptions[int(m.group(1))] = body["description"]
         return httpx.Response(200, json={})
 
     def _by_id(self, sub_id: int) -> dict[str, Any]:
