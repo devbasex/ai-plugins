@@ -28,7 +28,8 @@ from ndf import cli
 from ndf.adapters import git
 from ndf.contracts import result
 from ndf.core import route
-from ndf.domains.crossreview import fixgate_decide, push, repo, scope_decide, store, worktree
+from ndf.core.converge import worktree
+from ndf.domains.crossreview import fixgate_decide, push, repo, scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)

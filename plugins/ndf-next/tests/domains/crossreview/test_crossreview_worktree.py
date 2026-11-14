@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.crossreview import cli, worktree
+from ndf.core.converge import worktree
+from ndf.domains.crossreview import cli
 
 from ._repos import BRANCH, Repos, last_result, sh
 

@@ -12,7 +12,7 @@ import re
 from typing import NamedTuple, Optional
 
 from ndf.adapters import git
-from ndf.domains.crossreview import worktree
+from ndf.core.converge import worktree
 
 # 先に別の push が入ったときの git の拒否の印
 _REJECTED = re.compile(r"\[rejected\]|non-fast-forward|fetch first|\(stale info\)")
