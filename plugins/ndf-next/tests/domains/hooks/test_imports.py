@@ -31,13 +31,17 @@ def _imports(path: Path, module: str) -> set[str]:
         if isinstance(node, ast.Import):
             found |= {a.name for a in node.names}
         elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            if node.level:
-                parts = package.split(".")[: len(package.split(".")) - node.level + 1]
-                base = ".".join([*parts, base] if base else parts)
-            found.add(base)
-            found |= {f"{base}.{a.name}" for a in node.names if _module_file(f"{base}.{a.name}")}
+            found |= _from_names(node, package)
     return {n for n in found if n and n != "__future__"}
+
+
+def _from_names(node: ast.ImportFrom, package: str) -> set[str]:
+    """`from a import b` の 1 節が読む絶対の名前（相対の基点は `package` から求める）。"""
+    base = node.module or ""
+    if node.level:
+        parts = package.split(".")[: len(package.split(".")) - node.level + 1]
+        base = ".".join([*parts, base] if base else parts)
+    return {base} | {f"{base}.{a.name}" for a in node.names if _module_file(f"{base}.{a.name}")}
 
 
 def _with_parents(name: str) -> list[str]:
