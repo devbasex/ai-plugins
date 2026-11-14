@@ -22,6 +22,7 @@ ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの cond
 from __future__ import annotations
 
 import argparse
+import functools
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -204,24 +205,51 @@ COMMANDS: dict[str, Command] = {
 }
 
 
+ArgMaker = Callable[[argparse.ArgumentParser], Any]
+
+
+def _arg_row(p: argparse.ArgumentParser) -> Any:
+    return p.add_argument("row", help="行の鍵（r1 など）")
+
+
+def _arg_issues(p: argparse.ArgumentParser) -> Any:
+    return p.add_argument("--issues", type=int, nargs="+", required=True)
+
+
+def _arg_index(p: argparse.ArgumentParser, required: bool) -> Any:
+    return p.add_argument("--index", type=int, required=required, help="並びの位置（0 が先頭）")
+
+
+def _arg_args(p: argparse.ArgumentParser) -> Any:
+    return p.add_argument("--args", nargs="*", default=[])
+
+
+def _arg_reason(p: argparse.ArgumentParser) -> Any:
+    return p.add_argument("--reason", required=True)
+
+
+def _arg_sprint(p: argparse.ArgumentParser) -> Any:
+    return p.add_argument("--sprint", required=True, help="スプリントの進行表の ID")
+
+
+# row の副命令ごとの、plan と lane の後に足す引数（足す順）
+_ROW_ARGS: dict[str, tuple[ArgMaker, ...]] = {
+    "add": (_arg_issues, functools.partial(_arg_index, required=False), _arg_args, _arg_reason),
+    "move": (_arg_row, functools.partial(_arg_index, required=True), _arg_reason),
+    "cancel": (_arg_row, _arg_reason),
+    "carry": (_arg_row, _arg_issues, _arg_reason),
+    "start": (_arg_row, _arg_sprint),
+}
+
+
 def _row_parser(sub: Any) -> None:
     row = sub.add_parser("row", help="レーンの進行表を書く（レーンの conductor）").add_subparsers(dest="row_action", required=True)
-    for name in ("add", "move", "cancel", "carry", "start"):
+    for name, makers in _ROW_ARGS.items():
         p = row.add_parser(name)
         p.add_argument("plan")
         p.add_argument("lane")
-        if name != "add":
-            p.add_argument("row", help="行の鍵（r1 など）")
-        if name in ("add", "carry"):
-            p.add_argument("--issues", type=int, nargs="+", required=True)
-        if name in ("add", "move"):
-            p.add_argument("--index", type=int, required=name == "move", help="並びの位置（0 が先頭）")
-        if name == "add":
-            p.add_argument("--args", nargs="*", default=[])
-        if name == "start":
-            p.add_argument("--sprint", required=True, help="スプリントの進行表の ID")
-        else:
-            p.add_argument("--reason", required=True)
+        for make in makers:
+            make(p)
     end = row.add_parser("end")
     end.add_argument("sprint_id")
     end.add_argument("--outcome", choices=lane.DONE_STATES, required=True)
