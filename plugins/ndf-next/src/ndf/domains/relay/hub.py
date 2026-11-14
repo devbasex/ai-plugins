@@ -158,8 +158,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     name = str(req.get("name") or _next_name(names | set(entries)))
     if name in names or ctx.tmux.has(name):
         return Outcome(False, f"{name} は既に動いている", "refused")
-    own = [r for r in running if r.version is not None]
-    lanes = hub_decide.Lanes(len(own), ctx.max_named, False, 0, ctx.max_starts)
+    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, False, 0, ctx.max_starts)
     ok = hub_decide.spawn(lanes)
     if ok.kind != "go":
         return Outcome(False, ok.reason, "refused")
@@ -185,7 +184,7 @@ def restart(ctx: Context, name: str) -> Outcome:
         return Outcome(False, mix.reason, "precondition")
     starts = _starts_today(entry)
     target = any(r.name == name for r in running)
-    lanes = hub_decide.Lanes(len([r for r in running if r.version is not None]), ctx.max_named, target, starts, ctx.max_starts)
+    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts, ctx.max_starts)
     ok = hub_decide.restart(lanes)
     if ok.kind != "go":
         return Outcome(False, ok.reason, "refused")
@@ -198,8 +197,21 @@ def restart(ctx: Context, name: str) -> Outcome:
     got = _launch(ctx, name, entry)
     entries[name] = entry
     _save_registry(ctx.state_dir, entries)
+    return _with_pending(got, pending)
+
+
+def _own_count(running: list[hub_decide.Running]) -> int:
+    """動いているラッパーのうち、この NDF のもの（版を持つもの）の数。"""
+    return len([r for r in running if r.version is not None])
+
+
+def _with_pending(got: Outcome, pending: Mapping[str, Any]) -> Outcome:
+    """起こし直しの結果へ、待ちを抱えた実行の件数（読めなければその理由）と一覧を足す。"""
     note = pending.get("note")
-    summary = got.summary + (f"。待ちの一覧を読めない: {note}" if note else f"。待ちを抱えた実行 {len(pending.get('runs') or [])} 件")  # noqa: NDF501 外部コマンド: 読めなかった一覧は空
+    if note:
+        summary = f"{got.summary}。待ちの一覧を読めない: {note}"
+    else:
+        summary = f"{got.summary}。待ちを抱えた実行 {len(pending.get('runs') or [])} 件"  # noqa: NDF501 外部コマンド: 読めなかった一覧は空
     return Outcome(got.ok, summary, got.cause, [*got.items, {"pending": pending.get("runs")}])
 
 
