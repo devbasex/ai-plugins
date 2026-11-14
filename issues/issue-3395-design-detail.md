@@ -102,6 +102,8 @@
 | `process_group.alive` | 送る権限の無い成員が残る | 別の利用者の権限で動く子孫 | `os.killpg(pgid, 0)` の `PermissionError` | 生きているとみなす | 無し | `stop_group` が SIGKILL を送る（送れなければ猶予の後に戻る） |
 | `pytest_sessionfinish` | 予算の鍵が無い | 鍵の書き損じ | `limits.seconds` | テストの結果を失敗にする | `session.exitstatus` を 1 にし、鍵の名前を 1 行出す | 鍵を直して打ち直す |
 | `settle.load_input` | 読めない・JSON でない・必須の鍵が欠ける・種類が知らない値 | 入力の書き損じ | 読み込みと形の確かめ | 止める（1 行も閉じない） | `stopped`・`invalid`、終了コード 2。`items` に行の位置と欠けた鍵 | 入力を直して打ち直す |
+| `GitHub.merges` | GitHub を読めない | ネットワーク・API の上限・認証が無い・GraphQL の誤り | `GitHub.nodes`（`GitHub.aliased`・`GitHub.graphql`）が投げる `GitHubError` | 捕まえずに呼び出し元へ返す（`GitHub.pulls` と同じ） | 呼び出し元の `settle.verify` がその行を確かめられない行にする | 何も書かない。打ち直せる |
+| `GitHub.merges` | 番号が PR でない・無い | 入力の番号の書き損じ | `GitHub.nodes` が空の辞書を返す | その番号の値を `None` にする（例外にしない） | `settle.verify` が「PR が未マージ」の条件で通らない行にする | 何も書かない。入力を直して打ち直す |
 | `settle.verify` | GitHub か git を読めない | ネットワーク・API の上限・`origin/<base>` が無い | `GitHubError`・`GitError` | その行を確かめられない行にする | その行を `items` へ理由とともに載せ、結果は `stopped`・`incomplete`、終了コード 6 | 閉じない。打ち直せる |
 | `settle.verify` | 証拠が通らない | テストが基底のブランチに無い・PR が未マージ・PR がテストの関数を足していない・パスが残る・記録が無い | 「処理の手順」の判定 | その行を閉じない | 同上。`reason` に通らなかった条件 | 閉じない。証拠を直して打ち直す |
 | `settle.close` | コメントは書けたが閉じられない | ネットワーク・権限 | REST の `GitHubError` | その行を閉じられなかった行にする | 同上 | 打ち直すと、印のあるコメントを見つけて書き直さずに閉じるだけを行う |
@@ -200,6 +202,7 @@
 | `process_group.alive` | 同上の `_group_alive`（2 つ） | 同上 | まとめる。`PermissionError` を生きているとみなす `slots.py` の扱いに揃える |
 | `pytest_sessionfinish` | pytest の hook `pytest_sessionfinish`・pytest-xdist | pytest の hook の一覧・`plugins/ndf-next/uv.lock` | 使う。xdist の子の側では総所要を持たないため、`session.config.workerinput` がある側では何もしない |
 | `settle.load_input` | `contracts` の `require_schema` | `git show origin/develop:plugins/ndf-next/src/ndf/contracts/__init__.py` の 126 行 | 使う。形を手で確かめない |
+| `GitHub.merges` | `GitHub.pulls`・`GitHub.nodes`（`pullRequest` の節点・100 件ごとのまとめ） | `…/adapters/github.py` の 263・271 行 | `GitHub.nodes` を使い、`pullRequest` の節点から `number merged baseRefName mergeCommit { oid } mergedAt` を読む。`GitHub.pulls` は使えない（取得の項目 `PULL_FIELDS` と `Pull` にマージのコミットとマージの日時が無い）。`PULL_FIELDS` と `Pull` へ項目を足すと既存の呼び出し元すべての取得が増えるため、足さずに別の関数にする |
 | `settle.verify` | `GitHub.pulls`・`GitHub.nodes`・`Git.run`・`Git.is_ancestor` | `…/adapters/github.py` の 32・263・271 行・`…/adapters/git.py` の `Git` | `GitHub.pulls` は使えない。共通の取得の項目 `PULL_FIELDS`（`number state merged headRefOid headRefName baseRefName body mergeStateStatus`）はマージのコミットとマージの日時を取らず、`Pull` にも項目が無い。`GitHub.nodes` の上に `GitHub.merges` を足して使う（「クラスと関数の構造」の `adapters/github.py` の行）。変更ファイルは GitHub の `files`（ページ送りの接続）を読まず、マージのコミットの差分 `git diff --name-only <merge>^1 <merge>` で求める。`Git.run`・`Git.is_ancestor` は使う |
 | `settle.close` | `GitHub.rest`・`GitHub.nodes`（`issue` の `state` とコメント） | `…/adapters/github.py` の 231・263 行 | 使う |
 | `settle.main` | `contracts/result.py` の `result`・`stopped`・`emit` | `git show origin/develop:plugins/ndf-next/src/ndf/contracts/result.py` | 使う |
