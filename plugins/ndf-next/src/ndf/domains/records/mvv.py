@@ -20,6 +20,7 @@ from ndf.contracts import facts, limits
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
+from ndf.domains.records import usage_decide as ud
 from ndf.progress.gate.checks import Changed, MvvFacts
 
 # LLM の判定の関数: 照合の入力を受け、判定の語と費用・秒の実測値を返す
@@ -32,9 +33,9 @@ class MvvError(ValueError):
 
 def _state_dir() -> Path:
     var = facts.value("places", "mvv-state", "env")
-    if os.environ.get(var):
-        return Path(os.environ[var])
-    return identity.load().state_dir / facts.value("places", "mvv-state", "path")
+    # 環境変数があれば identity を読まない。状態の置き場を解けなければ IdentityError のまま
+    state = None if os.environ.get(var) else identity.load().state_dir
+    return ud.state_place_dir(os.environ, var, state, facts.value("places", "mvv-state", "path"))
 
 
 def record_path(file_id: str) -> Path:
