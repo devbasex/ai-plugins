@@ -52,23 +52,35 @@ def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[fl
 def check(raw_payload: object, root: str) -> Optional[Verdict]:
     """止める答えか None。Bash の PreToolUse 以外は None。"""
     text = _command_text(raw_payload)
-    if text is None or "gh" not in text or "merge" not in text:
+    if text is None or not _mentions_merge(text):
         return None
     try:
         segments = list(_segments(text))
     except ValueError:
         return deny(f"シェルの字句を読めず、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
-    here = Path(root)
+    return _first_denial(segments, Path(root))
+
+
+def _mentions_merge(text: str) -> bool:
+    """字句を読む前の粗い絞り込み（`gh` と `merge` を含むか）。"""
+    return "gh" in text and "merge" in text
+
+
+def _first_denial(segments: List[List[str]], here: Path) -> Optional[Verdict]:
+    """`cd` で作業ディレクトリを移しながら、最初に止める `gh pr merge` の判定。無ければ None。"""
     for words in segments:
         if words[:1] == ["cd"]:
             here = _cd(here, words)
             continue
-        call = _merge_call(words)
-        if call is not None:
-            verdict = _judge(here, call)
-            if verdict is not None:
-                return verdict
+        verdict = _call_verdict(here, words)
+        if verdict is not None:
+            return verdict
     return None
+
+
+def _call_verdict(here: Path, words: List[str]) -> Optional[Verdict]:
+    call = _merge_call(words)
+    return None if call is None else _judge(here, call)
 
 
 def _command_text(raw: object) -> Optional[str]:
