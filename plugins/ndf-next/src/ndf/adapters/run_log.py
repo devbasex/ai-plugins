@@ -167,12 +167,22 @@ def _prune(repo_dir: Path, today: date) -> None:
                 diag(f"古い実行の記録を消せない（続ける）: {day}: {exc}")
 
 
-def _root_path(run_id: str, location: Optional[str], now: datetime) -> Path:
-    repo_dir = runs_dir() / (location or Path.cwd().name)
-    day_dir = repo_dir / now.strftime("%Y-%m-%d")
+@dataclass(frozen=True)
+class RunTarget:
+    """記録の置き場を決める値。`location` は置き場のリポジトリの名前（None なら作業ディレクトリの名前）。"""
+
+    run_id: str
+    parent_id: Optional[str]
+    location: Optional[str]
+    now: datetime
+
+
+def _root_path(target: RunTarget) -> Path:
+    repo_dir = runs_dir() / (target.location or Path.cwd().name)
+    day_dir = repo_dir / target.now.strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
-    _prune(repo_dir, now.date())
-    return day_dir / f"{run_id}.jsonl"
+    _prune(repo_dir, target.now.date())
+    return day_dir / f"{target.run_id}.jsonl"
 
 
 def _sink() -> str:
@@ -182,13 +192,13 @@ def _sink() -> str:
     return sink
 
 
-def _log_path(run_id: str, parent_id: Optional[str], location: Optional[str], now: datetime) -> Optional[Path]:
+def _log_path(target: RunTarget) -> Optional[Path]:
     if _sink() != "file":
         return None
     inherited = os.environ.get(ENV_RUN_LOG, "")
-    if parent_id and inherited:
+    if target.parent_id and inherited:
         return Path(inherited)
-    return _root_path(run_id, location, now)
+    return _root_path(target)
 
 
 def _inherited_run_id() -> Optional[str]:
@@ -214,7 +224,7 @@ def open_run(
     parent = parent_id or _inherited_run_id()
     rid = run_id or uuid.uuid4().hex
     try:
-        path = _log_path(rid, parent, location, now or datetime.now(timezone.utc))
+        path = _log_path(RunTarget(rid, parent, location, now or datetime.now(timezone.utc)))
     except OSError as exc:
         raise RunLogError(f"実行の記録の置き場を作れない: {exc}") from exc
     log = RunLog(run_id=rid, parent_id=parent, entry=entry, path=path)
