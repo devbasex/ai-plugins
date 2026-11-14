@@ -110,12 +110,17 @@ def kind_of(value: object) -> Optional[str]:
     return kind if isinstance(kind, str) else None
 
 
+def unknown_kind_errors(kind: str, label: str) -> list[str]:
+    """種類 `kind` が止まった理由の表に無いときの 1 行（`label` は誤りの文で種類を指す名前）。"""
+    if kind not in table():
+        return [f"{label} {kind!r} は止まった理由の表に無い"]
+    return []
+
+
 def kind_errors(value: object) -> list[str]:
     """`cause.kind` が文字列なのに止まった理由の表に無いときの 1 行。形の誤りはスキーマが報告する。"""
     kind = kind_of(value)
-    if kind is not None and kind not in table():
-        return [f"cause.kind {kind!r} は止まった理由の表に無い"]
-    return []
+    return unknown_kind_errors(kind, "cause.kind") if kind is not None else []
 
 
 def errors(value: object) -> list[str]:

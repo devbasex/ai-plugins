@@ -44,8 +44,8 @@ def chooser(suggested: Optional[dict[str, Any]], taken: Sequence[str], *, answer
 def errors(obj: Any) -> list[str]:
     """選択の記録の誤りを並べる。空なら正しい。形はスキーマ、cause の有無は止まった理由の表と照らす。"""
     errs = contracts.schema_errors(obj, SCHEMA)
-    if isinstance(obj, dict) and isinstance(obj.get("cause"), str) and obj["cause"] not in causes.table():
-        errs.append(f"cause {obj['cause']!r} は止まった理由の表に無い")
+    if isinstance(obj, dict) and isinstance(obj.get("cause"), str):
+        errs += causes.unknown_kind_errors(obj["cause"], "cause")
     return errs
 
 
