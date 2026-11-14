@@ -136,6 +136,12 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, record: dic
     _, out = dispatch.render(outcome, runtime, event, found, state_dir / "hooks" / "notes")
     if outcome.limited:
         _notify_wait(state_dir, ctx, outcome.notes.get("limited_reason"))
+    _record_outcome(record, outcome)
+    return out
+
+
+def _record_outcome(record: dict, outcome: Any) -> None:
+    """dispatch の結果を計測の 1 行へ写す（strict の guard の記録の後ろに足す）。"""
     record["guards"] += [asdict(r) for r in outcome.runs]
     record.update(
         verdict="limited" if outcome.limited else outcome.verdict.kind,
@@ -143,7 +149,6 @@ def _guards(runtime: str, event: str, payload: dict, off: frozenset, record: dic
         notes=outcome.notes,
         error=record["error"] or outcome.stopped,
     )
-    return out
 
 
 def _session_start(state_dir: Path) -> None:
