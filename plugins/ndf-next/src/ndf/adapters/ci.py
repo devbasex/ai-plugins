@@ -56,20 +56,13 @@ QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_pr
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
 # pytest の落ちた行（ログの各行の先頭の時刻を除いた後）。`FAILED <パス>::<名前> - <理由>`・`ERROR <パス>`
 _PYTEST_FAILED = re.compile(r"(?:^|\s)(?:FAILED|ERROR) (?P<node>[^\s:]+\.py(?:::[^\s]+)?)")
-# 止まった理由の種類（値は contracts/causes.json の kind）
-TEST_FAILED_KIND = "test_failed"
-CHECK_FAILED_KIND = "check_failed"
-CI_PENDING_KIND = "ci_pending"
-PRECONDITION_KIND = "precondition"
-INFRA_WAIT_KIND = "infra_wait"
-NOT_CI_KIND = "not_ci"
 # 読んだ結果（`Reading.verdict`）→ 止まった理由の種類。`passed` は通常 None、マージの後なら `not_ci`
 _VERDICT_KINDS = {
-    Verdict.TEST_FAILED: TEST_FAILED_KIND,
-    Verdict.CHECK_FAILED: CHECK_FAILED_KIND,
-    Verdict.PENDING: CI_PENDING_KIND,
-    Verdict.MISSING: PRECONDITION_KIND,
-    Verdict.STALE: INFRA_WAIT_KIND,
+    Verdict.TEST_FAILED: "test_failed",
+    Verdict.CHECK_FAILED: "check_failed",
+    Verdict.PENDING: "ci_pending",
+    Verdict.MISSING: "precondition",
+    Verdict.STALE: "infra_wait",
 }
 
 
@@ -250,12 +243,12 @@ class Classifier(NamedTuple):
         after_merge = self.merge_failed is not None
         merged_tests, merged_other = split_failed(self.merge_failed if self.merge_failed is not None else [], self.tests)
         if merged_tests:
-            return TEST_FAILED_KIND
+            return "test_failed"
         verdict = reading.verdict
         if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
-            return CHECK_FAILED_KIND
+            return "check_failed"
         if verdict == Verdict.PASSED:
-            return NOT_CI_KIND if after_merge else None
+            return "not_ci" if after_merge else None
         return _VERDICT_KINDS[verdict]
 
 
@@ -299,14 +292,19 @@ class WatchResult:
     def cause_by(self, classifier: Classifier) -> Optional[str]:
         """止まった理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
         kind = classifier.cause(self.reading)
-        return INFRA_WAIT_KIND if kind == CI_PENDING_KIND and self.runner_exhausted else kind
+        return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
 
 
 def _next_interval(previous: Optional[Reading], reading: Reading, interval: float, policy: limits.Policy) -> float:
-    """この周の眠りの間隔。最初の周と、読んだ結果が変わった（チェックが動いた）周は最初の値へ戻し、
-    変化が無い間だけ前の間隔に倍率をかけて伸ばす（頭打ちは `max_interval`。不足 g）。"""
-    if previous is None or reading != previous:
+    """この周の眠りの間隔。最初の周は最初の値、変化が無い間は前の間隔に倍率をかけて伸ばす（頭打ちは `max_interval`）。
+
+    読んだ結果が変わった（チェックが動いた）周は、倍率 1 段だけ縮める（最初の値より短くしない。不足 g）。
+    最初の値まで戻すと、チェックが順に終わる CI では変化のたびに 10 秒へ戻って伸びず、読み取りの回数が増える。
+    """
+    if previous is None:
         return float(policy.interval)
+    if reading != previous:
+        return max(float(policy.interval), interval / float(policy.factor))
     return min(interval * float(policy.factor), float(policy.max_interval))
 
 

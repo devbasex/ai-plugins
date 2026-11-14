@@ -156,7 +156,7 @@ def test_cli_items_marks_missing_and_stale_test_checks(
 ) -> None:
     # 現状固定: missing・stale の行の test は、分割ジョブを含むテストのチェック（--test "pytest (0/2)"）かで決まる。
     # 以前は Reading（missing=["CI / pytest (1/2)", "doc-lint"]・stale=["pytest", "W / lint (0/2)"]）を作って
-    # ci_cli._items を直接呼んでいた。公開の入口では missing の名前は必須の照合の鍵（前置きを外した名前）で、
+    # ci_cli._items を直接呼んでいた。公開のエントリポイントでは missing の名前は必須の照合の鍵（前置きを外した名前）で、
     # missing も stale も名前の順（大文字が先）に並ぶ
     done_at = "2026-11-12T13:33:00Z"
     runs = [

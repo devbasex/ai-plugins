@@ -104,6 +104,28 @@ def test_publisher_writes_private_targets_with_only_secrets_masked() -> None:
     assert len(fake.queries) == 1
 
 
+def test_publisher_scrubs_a_target_of_unknown_visibility_like_a_public_one() -> None:
+    # 書き先の公開範囲を読めないときも、公開の書き先と同じ検査をかけて未検査の本文を送らない
+    fake = FakeGitHub(PUBLIC_REPO, {PRIVATE_REPO: "PRIVATE"})
+    out = publish.Publisher(fake.hub, ACCOUNTS).comment(4, BODY)
+    body = fake.writes[0][2]["body"]
+    assert PRIVATE_REPO not in body and "/home/alice-local" not in body and "alice@example.co.jp" not in body
+    assert out.dropped == {"secret": 1, "private_ref": 2, "home": 2, "email": 1, "account": 1}
+    origin = publish.Publisher(FakeGitHub(PUBLIC_REPO, {PRIVATE_REPO: "PRIVATE"}).hub, ACCOUNTS).origin("issue #12", PRIVATE_REPO)
+    assert origin == "issue（非公開のリポジトリの課題）"
+
+
+@pytest.mark.parametrize(
+    ("email", "kept"),
+    [("git@github.com", True), ("noreply@github.com", True), ("1+bot@users.noreply.github.com", True),
+     ("git@gitlab.corp.example.co.jp", False), ("noreply@corp.example.co.jp", False), ("x@evil-users.noreply.github.com.example", False)],
+)  # fmt: skip
+def test_only_confirmed_public_emails_stay_on_a_public_target(email: str, kept: bool) -> None:
+    # ローカル部（git・noreply）だけでは許さず、公開してよいと確かめた宛先だけを残す
+    got = publish.scrub(f"宛先 {email} へ", True)
+    assert (email in got.text) is kept
+
+
 def test_publisher_origin_hides_a_private_source_on_a_public_target() -> None:
     # 3391-2: 別のリポジトリへの起票で、非公開の由来の参照を公開側へ書かない
     fake = FakeGitHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", PRIVATE_REPO: "PRIVATE"})

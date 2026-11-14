@@ -5,10 +5,11 @@ Issue・コメント・本文を書く操作は、このエントリポイント
 | 書き先 | 本文から落とすもの |
 | --- | --- |
 | すべて | 秘密（秘密の環境変数の値とトークンの形。`run_log.redact`） |
-| 公開（`PUBLIC`） | 上に加えて、公開でないリポジトリへの参照・`/home/<人>` と `/Users/<人>`・メール・手元のアカウント名 |
+| 公開（`PUBLIC`）と、公開範囲を読めない（`UNKNOWN`） | 上に加えて、公開でないリポジトリへの参照・`/home/<人>` と `/Users/<人>`・メール・手元のアカウント名 |
 
 落とした所は固定の文に置き換え、種類ごとの件数を `Published.dropped` で返す。参照の公開範囲は本文に出る
 リポジトリをまとめて 1 回のクエリで読み、読めないリポジトリは公開でないとして扱う（伏せる側へ倒す）。
+書き先の公開範囲を読めないときも、公開の書き先と同じ検査をかける（未検査の本文を送らない）。
 """
 
 from __future__ import annotations
@@ -23,16 +24,20 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from ndf.adapters import run_log
-from ndf.adapters.github import PUBLIC, GitHub, same_repo
+from ndf.adapters.github import PUBLIC, UNKNOWN, GitHub, same_repo
 
 # 落とした所の固定の文
 PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
 HOME_TEXT = "（利用者のホーム）"
 EMAIL_TEXT = "（メール）"
 ACCOUNT_TEXT = "（アカウント名）"
-# 公開のリポジトリへ書いてよいメール（GitHub が公開用に発行する宛先・git の SSH の利用者）
-PUBLIC_EMAIL_LOCALS = frozenset({"noreply", "git"})
+# 公開のリポジトリへ書いてよいメール。公開してよいと確かめた宛先だけを完全な形で並べる（GitHub の SSH の利用者・
+# GitHub と Claude の送信専用の宛先）。ローカル部だけでは許さない（`git@<社内のホスト>` は社内の情報を出す）
+PUBLIC_EMAILS = frozenset({"git@github.com", "noreply@github.com", "noreply@anthropic.com"})
+# GitHub が公開用に発行する宛先のドメイン（`<番号>+<login>@users.noreply.github.com`）
 PUBLIC_EMAIL_DOMAIN = "users.noreply.github.com"
+# 公開の書き先と同じ検査をかける書き先の公開範囲（読めない書き先は公開と同じに扱う）
+SCRUBBED_VISIBILITIES = frozenset({PUBLIC, UNKNOWN})
 # 手元のアカウント名として扱わない短い名前（3 字未満は語の一部と区別できない）
 MIN_ACCOUNT_CHARS = 3
 # リポジトリへの参照（`https://github.com/<所有者>/<リポジトリ>...` と `<所有者>/<リポジトリ>#<番号>`）
@@ -130,7 +135,8 @@ def _drop_emails(text: str) -> tuple[str, int]:
 
     def repl(m: re.Match[str]) -> str:
         nonlocal count
-        if m["local"].lower() in PUBLIC_EMAIL_LOCALS or m["domain"].lower().endswith(PUBLIC_EMAIL_DOMAIN):
+        domain = m["domain"].lower()
+        if m[0].lower() in PUBLIC_EMAILS or domain == PUBLIC_EMAIL_DOMAIN or domain.endswith("." + PUBLIC_EMAIL_DOMAIN):
             return m[0]
         count += 1
         return EMAIL_TEXT
@@ -181,9 +187,13 @@ class Publisher:
             self._visibility = self.hub.visibilities([self.hub.repo])[self.hub.repo]
         return self._visibility
 
+    def exposed(self) -> bool:
+        """書き先へ公開の書き先と同じ検査をかけるか。公開か、公開範囲を読めない（`UNKNOWN`）なら真。"""
+        return self.visibility() in SCRUBBED_VISIBILITIES
+
     def _private_refs(self, texts: Sequence[str]) -> set[str]:
-        """公開の書き先のとき、本文に出る他のリポジトリのうち公開でないもの。公開でなければ・参照が無ければ読まずに空。"""
-        if self.visibility() != PUBLIC:
+        """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。"""
+        if not self.exposed():
             return set()
         refs = {r for t in texts for r in repo_refs(t) if not same_repo(r, self.hub.repo)}
         seen = self.hub.visibilities(refs) if refs else {}
@@ -191,21 +201,21 @@ class Publisher:
 
     def guarded(self, *texts: str) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。"""
-        public = self.visibility() == PUBLIC
+        exposed = self.exposed()
         private = self._private_refs(texts)
-        got = [scrub(text, public, private, self.accounts) for text in texts]
+        got = [scrub(text, exposed, private, self.accounts) for text in texts]
         return [g.text for g in got], dict(sum((Counter(g.dropped) for g in got), Counter()))
 
     def origin(self, origin: str, source_repo: str) -> str:
         """由来の参照（`issue #12`）を、書き先の画面でも同じ課題を指す形にする（#3077）。
 
-        書き先が公開で由来が公開でなければ、参照を伏せた固定の文にする（3391-2）。完全な参照は呼び手が
-        手元の引継ぎ文書だけに置く。
+        書き先が公開（か公開範囲を読めない）で由来が公開でなければ、参照を伏せた固定の文にする（3391-2）。
+        完全な参照は呼び手が手元の引継ぎ文書だけに置く。
         """
         if same_repo(source_repo, self.hub.repo):
             return origin
         seen = self.hub.visibilities([source_repo])
-        seen[self.hub.repo] = self.visibility()
+        seen[self.hub.repo] = PUBLIC if self.exposed() else self.visibility()
         return qualified_ref(origin, source_repo, self.hub.repo, seen)
 
     def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> Published:

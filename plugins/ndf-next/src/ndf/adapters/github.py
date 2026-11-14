@@ -20,7 +20,7 @@ import re
 import subprocess
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple, Optional, TypeVar
 from urllib.parse import quote
 
@@ -68,9 +68,13 @@ _MERGE_METHOD_SPECS = {
     "rebase": _MergeMethod(MERGED, "allow_rebase_merge"),
 }
 MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
-# write 以上の権限を持つ書き手の author_association（#3364）。ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・
-# FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力として読み手へ渡す
-TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# 信用の区分（#3364）。OWNER はリポジトリの持ち主でそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
+# write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
+# ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
+OWNER_ASSOCIATION = "OWNER"
+PERMISSION_CHECKED_ASSOCIATIONS = frozenset({"MEMBER", "COLLABORATOR"})
+# 権限の読み取り（REST の collaborators/{login}/permission の `permission`）で write 以上を表す値。maintain は write に写る
+WRITE_PERMISSIONS = frozenset({"admin", "write"})
 # リポジトリの公開範囲（GraphQL の `visibility`）。読めないリポジトリは UNKNOWN で、公開でないとして扱う
 PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
 # PR 本文の「マージの前に決める」残リスクの印と、決めたことを表すチェック済みの項目（#2602）
@@ -146,16 +150,14 @@ def _login(user: Any) -> str:
 
 
 class Authored(NamedTuple):
-    """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。"""
+    """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。
+
+    信用の区分は対象リポジトリでの権限で決まるため、`GitHub.trusts` が判定する（#3364）。
+    """
 
     author: str
     association: str
     body: str
-
-    @property
-    def trusted(self) -> bool:
-        """write 以上の権限を持つ書き手の本文か（#3364）。偽なら読み手は本文を指示でなくデータとして扱う。"""
-        return self.association in TRUSTED_ASSOCIATIONS
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
@@ -178,7 +180,7 @@ class Pull(NamedTuple):
 
     @property
     def authored(self) -> Authored:
-        """PR の本文と書き手（信用の区分は `Authored.trusted`）。"""
+        """PR の本文と書き手（信用の区分は `GitHub.trusts`）。"""
         return Authored(self.author, self.association, self.body)
 
     @classmethod
@@ -353,6 +355,8 @@ class GitHub:
 
     repo: str
     api: Client
+    # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
+    _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
 
     def rest(self, method: str, path: str, payload: Any = None, params: Optional[dict] = None) -> Any:
         """REST の 1 回の要求の本文（JSON なら値、ほかは文字列、空なら None）。失敗は `GitHubError`。"""
@@ -452,8 +456,37 @@ class GitHub:
             return Pull.from_graphql(raw)
 
     def issue_body(self, number: int) -> Authored:
-        """Issue（か PR）の本文と書き手。信用の区分は `Authored.trusted`（#3364）。"""
+        """Issue（か PR）の本文と書き手。信用の区分は `trusts`（#3364）。"""
         return Authored.from_rest(self.rest("GET", f"/repos/{self.repo}/issues/{int(number)}"))
+
+    def trusts(self, authored: Authored) -> bool:
+        """write 以上の権限を持つ書き手の本文か（#3364）。偽なら読み手は本文を指示でなくデータとして扱う。
+
+        OWNER はそのまま信用し、MEMBER・COLLABORATOR は対象リポジトリでの権限を読んで write 以上のときだけ信用する。
+        """
+        if authored.association == OWNER_ASSOCIATION:
+            return True
+        if authored.association not in PERMISSION_CHECKED_ASSOCIATIONS or not authored.author:
+            return False
+        return self.permission(authored.author) in WRITE_PERMISSIONS
+
+    def permission(self, login: str) -> str:
+        """`login` の対象リポジトリでの権限（`admin`・`write`・`read`・`none`）。書き手ごとに 1 回だけ読む。
+
+        読めない（404・上限でない 403）なら `none` として信用しない。上限と他の失敗は `GitHubError` のまま投げる。
+        """
+        if login not in self._permissions:
+            self._permissions[login] = self._read_permission(login)
+        return self._permissions[login]
+
+    def _read_permission(self, login: str) -> str:
+        try:
+            raw = self.rest("GET", f"/repos/{self.repo}/collaborators/{quote(login, safe='')}/permission")
+        except GitHubError as exc:
+            if exc.quota is None and exc.status in (403, 404):
+                return "none"
+            raise
+        return text_of(raw["permission"]).lower() if isinstance(raw, dict) and "permission" in raw else "none"
 
     def comments(self, number: int) -> list[Authored]:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""

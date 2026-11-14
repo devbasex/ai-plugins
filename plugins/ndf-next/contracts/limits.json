@@ -28,7 +28,7 @@
     "supervise.worktree-lock": {"summary": ".git/config の lock で落ちた worktree の作成の打ち直し", "seconds": 5, "attempts": 6, "interval": 1, "same_cause": 6},
     "supervise.step-rerun": {"summary": "判定役が返すステップの打ち直しの同じ原因の上限", "same_cause": 2},
     "supervise.ci-fix": {"summary": "CI テストの宣言のあるリポジトリで、CI の結果の監視（ci-watch.py peek）が CI の失敗の改修を起こす回数の上限。数えるのは落ちた head の数", "attempts": 3},
-    "test-triage.check-wait": {"summary": "CI のチェックの結論の待ちの間隔。合計の秒は呼ぶ側が予算から渡す", "interval": 10, "factor": 1.5, "max_interval": 120},
+    "test-triage.check-wait": {"summary": "CI のチェックの結論の待ちの間隔。変化が無い間は倍率で伸ばし、読んだ結果が変わったら倍率 1 段だけ縮める（最初の値まで戻すと、チェックが順に終わる CI で伸びず読み取りが増えるため）。合計の秒は呼ぶ側が予算から渡す", "interval": 10, "factor": 1.5, "max_interval": 120},
     "ci.runner-wait": {"summary": "CI の待ちで、必須のチェックがランナーの割り当てを待つ（queued）だけの間の上限の秒。この間は呼ぶ側が渡す待ちの予算に数えず、超えたら infra_wait で止まる", "seconds": 1800},
     "github.check-runs": {"summary": "head の 1 つのコミットのチェックを読むページの上限（1 ページ 100 件）", "count": 10},
     "github.graphql-batch": {"summary": "番号ごとの読み取りを GraphQL のエイリアスで 1 回のクエリへまとめる件数", "count": 100},
