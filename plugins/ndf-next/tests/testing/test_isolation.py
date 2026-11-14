@@ -325,6 +325,19 @@ def test_hook_resolves_file_descriptors_to_their_paths(tmp_path):
     assert guard.violations == [os.path.realpath(real / "ledger")]
 
 
+@pytest.mark.skipif(getattr(isolation.fcntl, "F_GETPATH", None) is not None, reason="F_GETPATH の代替が読めてしまう")
+def test_fd_path_is_none_when_proc_is_unreadable_and_no_fallback(tmp_path, monkeypatch):
+    def unreadable(path):
+        raise OSError("no /proc")
+
+    monkeypatch.setattr(isolation.os, "readlink", unreadable)
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        assert isolation._fd_path(fd) is None
+    finally:
+        os.close(fd)
+
+
 def test_hook_rejects_moving_a_directory_that_holds_a_root(tmp_path):
     real = tmp_path / "home" / ".local" / "state"
     real.mkdir(parents=True)
