@@ -32,9 +32,10 @@ class FakeHub:
         self.writes: list[tuple[str, str, Any]] = []
 
     def issue(self, n: int, title: str = "", body: str = "", milestone: str | None = None, labels: tuple[str, ...] = (),
-              updated: str = "2026-11-01T00:00:00Z", state: str = "open", parent: int | None = None) -> None:  # fmt: skip
+              updated: str = "2026-11-01T00:00:00Z", state: str = "open", parent: int | None = None,
+              closed_at: str | None = None) -> None:  # fmt: skip
         self.issues[n] = {"number": n, "title": title or f"課題 {n}", "body": body, "milestone": milestone, "labels": list(labels),
-                          "updated": updated, "state": state, "parent": parent, "id": 1000 + n}  # fmt: skip
+                          "updated": updated, "state": state, "parent": parent, "id": 1000 + n, "closed_at": closed_at}  # fmt: skip
 
     # ---- GraphQL ----
     def _node(self, n: int) -> dict[str, Any] | None:
@@ -43,12 +44,17 @@ class FakeHub:
             return None
         return {"number": n, "title": i["title"], "body": i["body"], "createdAt": "2026-10-01T00:00:00Z", "updatedAt": i["updated"],
                 "milestone": {"title": i["milestone"]} if i["milestone"] else None,
-                "labels": {"nodes": [{"name": lb} for lb in i["labels"]]}}  # fmt: skip
+                "labels": {"nodes": [{"name": lb} for lb in i["labels"]]},
+                "parent": {"number": i["parent"]} if i["parent"] else None}  # fmt: skip
 
     def graphql(self, query: str) -> dict[str, Any]:
         if "milestones(" in query:
             nodes = [{"number": v, "title": k} for k, v in self.milestones.items()]
             return {"repository": {"milestones": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
+        if "filterBy" in query:
+            nodes = [{"number": n, "closedAt": i["closed_at"], "milestone": {"title": i["milestone"]} if i["milestone"] else None}
+                     for n, i in sorted(self.issues.items()) if i["state"] == "closed"]  # fmt: skip
+            return {"repository": {"issues": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
         if "issues(labels" in query:
             nodes = [{"number": n} for n, i in sorted(self.issues.items()) if i["state"] == "open"]
             return {

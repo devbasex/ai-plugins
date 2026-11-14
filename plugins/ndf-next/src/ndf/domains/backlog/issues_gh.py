@@ -10,7 +10,12 @@ from typing import Any, Optional
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, text_of
 from ndf.contracts import limits
 
-ISSUE_FIELDS = "number title body createdAt updatedAt milestone { title } labels(first: 50) { nodes { name } }"
+ISSUE_FIELDS = "number title body createdAt updatedAt milestone { title } labels(first: 50) { nodes { name } } parent { number }"
+_CLOSED_PAGE = (
+    "query($owner: String!, $name: String!, $since: DateTime!, $after: String) { repository(owner: $owner, name: $name) {"
+    f" issues(states: [CLOSED], filterBy: {{since: $since}}, first: {PER_PAGE}, after: $after) {{"
+    " pageInfo { hasNextPage endCursor } nodes { number closedAt milestone { title } } } } }"
+)
 _MILESTONE_PAGE = (
     "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {"
     f" milestones(first: {PER_PAGE}, after: $after, states: [OPEN, CLOSED]) {{"
@@ -21,6 +26,7 @@ NOT_FOUND = 404
 
 def _issue(raw: dict[str, Any]) -> dict[str, Any]:
     ms = raw["milestone"]
+    parent = raw["parent"] if "parent" in raw else None
     return {
         "number": int(raw["number"]),
         "title": text_of(raw["title"]),
@@ -29,6 +35,7 @@ def _issue(raw: dict[str, Any]) -> dict[str, Any]:
         "labels": [text_of(n["name"]) for n in raw["labels"]["nodes"]],
         "created_at": text_of(raw["createdAt"]),
         "updated_at": text_of(raw["updatedAt"]),
+        "parent": int(parent["number"]) if isinstance(parent, dict) else None,
     }
 
 
@@ -37,6 +44,23 @@ def open_issues(gh: GitHub) -> list[dict[str, Any]]:
     numbers = gh.issue_numbers(state="OPEN")
     got = gh.nodes(numbers, "issue", ISSUE_FIELDS)
     return [_issue(raw) for _, raw in sorted(got.items()) if raw]
+
+
+def closed_since(gh: GitHub, since: str) -> list[dict[str, Any]]:
+    """`since`（ISO 8601）より後に閉じた Issue の番号とマイルストーンの題。`github.list-pages` ページを超えたら `GitHubError`。"""
+    pages = int(limits.value("github.list-pages", "count"))
+    out: list[dict[str, Any]] = []
+    after: Optional[str] = None
+    for _ in range(pages):
+        conn = gh.repository(_CLOSED_PAGE, {"since": since, "after": after})["issues"]
+        for raw in conn["nodes"]:
+            if text_of(raw["closedAt"]) >= since:
+                ms = raw["milestone"]
+                out.append({"number": int(raw["number"]), "milestone": text_of(ms["title"]) if isinstance(ms, dict) else None})
+        if not conn["pageInfo"]["hasNextPage"]:
+            return out
+        after = conn["pageInfo"]["endCursor"]
+    raise GitHubError(f"閉じた Issue の一覧が {pages} ページを超えた（github.list-pages）")
 
 
 def milestones(gh: GitHub) -> dict[str, int]:

@@ -101,10 +101,12 @@ def cmd_candidates(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
     carried = _carried(sd)
-    issues = issues_gh.open_issues(hub(repo))
+    gh = hub(repo)
+    issues = issues_gh.open_issues(gh)
     by_num = {i["number"]: i for i in issues}
     stored = state.read(sd, "backlog-estimates", {})
-    found = collect.collect(issues, Path.cwd(), collect.Ask(a.since_ref, a.add, carried, a.depth), stored)
+    closed = tuple(issues_gh.closed_since(gh, collect.ref_time(Git(Path.cwd()), a.since_ref))) if a.since_ref else ()
+    found = collect.collect(issues, Path.cwd(), collect.Ask(a.since_ref, a.add, carried, a.depth, closed), stored)
     picked = sel.select(found.routes, a.limit, a.depth, {n: i["updated_at"] for n, i in by_num.items()})
     items = [_candidate_item(by_num[n], found.routes[n]) for n in picked.keep]
     counts = sel.by_route(found.routes, picked.keep)
@@ -143,13 +145,28 @@ def _previous_rows(rank: Any) -> dict[int, Any]:
     return out
 
 
-def _edges(raws: list[Any], open_numbers: set[int]) -> frozenset[tuple[int, int]]:
-    """見積の `depends_on`（番号の列）から、open の課題どうしの依存の辺。"""
+def _edges(raws: list[Any], issues: list[dict[str, Any]]) -> frozenset[tuple[int, int]]:
+    """open の課題どうしの依存の辺。見積の `depends_on`（番号の列）と、親が open の子を待つ辺（親 → 子）。
+
+    見積が子 → 親の依存を書いていれば、輪にしないため親 → 子の辺を足さない。
+    """
+    open_numbers = {i["number"] for i in issues}
     out = set()
     for raw in raws:
         deps = raw["depends_on"] if isinstance(raw, dict) and isinstance(raw.get("depends_on"), list) else []
         out |= {(raw["number"], b) for b in deps if b in open_numbers and raw["number"] in open_numbers}
-    return frozenset(out)
+    subs = {(i["parent"], i["number"]) for i in issues if i["parent"] in open_numbers}
+    return frozenset(out | {(p, k) for p, k in subs if (k, p) not in out})
+
+
+def _sub_issues(issues: list[dict[str, Any]]) -> dict[int, list[int]]:
+    """open の親 → open の子の番号の列（大きい課題の枠が子を切り出しに当てる）。"""
+    open_numbers = {i["number"] for i in issues}
+    out: dict[int, list[int]] = {}
+    for i in issues:
+        if i["parent"] in open_numbers:
+            out.setdefault(i["parent"], []).append(i["number"])
+    return out
 
 
 def _config(a: argparse.Namespace) -> model.Config:
@@ -176,7 +193,7 @@ def _rank_board(
     by_num = {i["number"]: i for i in issues}
     order = rank_decide.milestone_order({i["milestone"] for i in issues if i["milestone"]}, a.milestones)
     raws = [*given.values(), *(v for v in stored.values() if isinstance(v, dict))]
-    board = rank_decide.Board(by_num, ests, cfg, order, edges=_edges(raws, set(by_num)),
+    board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=_sub_issues(issues), edges=_edges(raws, issues),
                               rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved))  # fmt: skip
     kept = {**stored, **{str(n): {**given[n], "number": n} for n in ests if n in given}}
     return board, excluded, kept

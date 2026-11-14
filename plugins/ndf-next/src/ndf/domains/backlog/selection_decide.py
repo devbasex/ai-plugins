@@ -17,8 +17,9 @@ from ndf.domains.backlog.model import REVIEW
 
 MANUAL, COMMIT_SUBJECT, CARRIED, UNSCORED = "manual", "commit-subject", "carried", "unscored"
 DIFF_PATH, NO_MILESTONE, ALL = "diff-path", "no-milestone", "all"
+DIFF_IDENTIFIER, SUB_ISSUE, CLOSED_MILESTONE = "diff-identifier", "sub-issue", "closed-milestone"
 # 経路の並び（結果の routes の並びと、経路ごとの件数の並び）
-ROUTES = (MANUAL, COMMIT_SUBJECT, CARRIED, DIFF_PATH, NO_MILESTONE, UNSCORED, ALL)
+ROUTES = (MANUAL, COMMIT_SUBJECT, CARRIED, DIFF_PATH, DIFF_IDENTIFIER, SUB_ISSUE, NO_MILESTONE, CLOSED_MILESTONE, UNSCORED, ALL)
 
 
 class Selection(NamedTuple):
