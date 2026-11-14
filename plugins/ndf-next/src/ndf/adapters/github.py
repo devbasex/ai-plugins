@@ -406,10 +406,14 @@ class GitHub:
             return {n: self._rest_pull_or_none(n) for n in wanted}
         return {n: Pull.from_graphql(v) if v else None for n, v in raw.items()}
 
+    def _rest_pull(self, number: int) -> Pull:
+        """REST で読んだ PR。失敗は `GitHubError`。"""
+        return Pull.from_rest(self.rest("GET", f"/repos/{self.repo}/pulls/{int(number)}"))
+
     def _rest_pull_or_none(self, number: int) -> Optional[Pull]:
         """REST で読んだ PR。無い番号（404）は None。"""
         try:
-            return Pull.from_rest(self.rest("GET", f"/repos/{self.repo}/pulls/{int(number)}"))
+            return self._rest_pull(number)
         except GitHubError as exc:
             if exc.status != 404:
                 raise
@@ -425,7 +429,7 @@ class GitHub:
     def pull(self, number: int) -> Pull:
         """PR を REST で読む。REST の枠が上限なら GraphQL の枠で読み替える（不足 g）。"""
         try:
-            return Pull.from_rest(self.rest("GET", f"/repos/{self.repo}/pulls/{int(number)}"))
+            return self._rest_pull(number)
         except GitHubError as exc:
             if exc.quota != REST:
                 raise
