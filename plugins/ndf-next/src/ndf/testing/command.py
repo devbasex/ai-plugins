@@ -25,13 +25,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
-from ndf import cli, identity, process_group
+from ndf import commands, identity, process_group
 from ndf.contracts import causes, result
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = cli.tool_of(__name__)
+# 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
+TOOL = commands.tool_of(__name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)

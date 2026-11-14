@@ -23,13 +23,13 @@ import tty
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from ndf import cli, identity
+from ndf import commands, identity
 from ndf.contracts import causes, limits, result
 from ndf.domains.relay import account_decide, accounts, hub, install, marks, pending, registry, switch_decide, wrapper
 from ndf.domains.relay.tmux import Tmux
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
+# 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
+TOOL = next(name for name, module in commands.COMMANDS.items() if module == __name__)
 COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
     "uninstall": "置いた複製と PATH のエントリポイントを消す",

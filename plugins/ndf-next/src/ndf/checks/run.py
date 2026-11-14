@@ -17,13 +17,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from ndf import cli, identity
+from ndf import commands, identity
 from ndf.checks import facts, invariants, lint, marks, smells, structure, words
 from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import exit_codes, result
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = cli.tool_of(__name__)
+# 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
+TOOL = commands.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})

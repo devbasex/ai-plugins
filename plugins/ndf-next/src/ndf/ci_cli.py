@@ -9,15 +9,15 @@ import argparse
 import sys
 from typing import Any, Optional
 
-from ndf import cli
+from ndf import commands
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
 from ndf.adapters.ci import Classifier, Reading, Watch, WatchResult, failed_test_nodes_of, files_of, is_test_check, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = cli.tool_of(__name__)
+# 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
+TOOL = commands.tool_of(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:

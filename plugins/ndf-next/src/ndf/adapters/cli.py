@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from ndf import cli, identity
+from ndf import commands, identity
 from ndf.adapters.agents import (
     AgentPaths,
     AgentStatus,
@@ -66,8 +66,8 @@ from ndf.adapters.run_log import (
 )
 from ndf.contracts import result
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = cli.tool_of(__name__)
+# 結果 JSON の tool の名前は副命令の名前（正本は `commands.COMMANDS`）
+TOOL = commands.tool_of(__name__)
 
 __all__ = [
     "BACKUP_SUFFIX",

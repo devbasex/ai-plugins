@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import cli, identity
+from ndf import commands, identity
 from ndf.adapters import claude, git
 from ndf.contracts import causes, exit_codes, result
 from ndf.contracts.exit_codes import OK
@@ -56,7 +56,7 @@ from ndf.core.plan.records import PROGRESS_FILE
 
 log = logging.getLogger(__name__)
 
-TOOL = cli.tool_of(__name__)
+TOOL = commands.tool_of(__name__)
 
 # 止まった理由の種類（contracts の causes.json の kind）
 INVALID = "invalid"

@@ -28,11 +28,11 @@ import tenacity
 from dotenv import dotenv_values
 from filelock import FileLock, Timeout
 
-from ndf import cli, contracts, identity
+from ndf import commands, contracts, identity
 from ndf.adapters.http import PostError, post_json
 from ndf.contracts import limits, result
 
-TOOL = cli.tool_of(__name__)
+TOOL = commands.tool_of(__name__)
 
 # 壁時計（送信待ちの 1 件の書いた時刻と比べる）。テストが差し替える
 _wall = time.time
