@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from .test_durable_url import pg_url
+from ._postgres_helpers import pg_url
 
 
 @pytest.fixture
