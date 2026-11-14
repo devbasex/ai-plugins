@@ -96,13 +96,23 @@ def _sd(a: argparse.Namespace, repo: str) -> Path:
     return state.state_dir(Path.cwd(), repo, a.state_dir)
 
 
+def _declaration() -> dict[str, Any]:
+    """宣言（.ndf/backlog.json）。"""
+    return depth.declaration(depth.declaration_path(Path.cwd()))
+
+
+def _previous_metrics(sd: Path) -> dict[str, Any]:
+    """前回の候補の収集の metrics（形が違えば空）。"""
+    prev = state.read(sd, "backlog-candidates", {})
+    return prev["metrics"] if isinstance(prev, dict) and isinstance(prev.get("metrics"), dict) else {}
+
+
 # ---------------- candidates ----------------
 
 
 def _carried(sd: Path) -> list[int]:
     """前回の候補の収集の持ち越しと、前回の深さの打ち切りの残り。"""
-    prev = state.read(sd, "backlog-candidates", {})
-    metrics = prev["metrics"] if isinstance(prev, dict) and isinstance(prev.get("metrics"), dict) else {}
+    metrics = _previous_metrics(sd)
     deferred = metrics["deferred"] if isinstance(metrics.get("deferred"), list) else []
     return sorted({n for n in deferred if isinstance(n, int)} | set(depth.left_over(sd)))
 
@@ -169,7 +179,7 @@ def _previous_rows(rank: Any) -> dict[int, Any]:
 
 def _config(a: argparse.Namespace) -> model.Config:
     try:
-        decl = depth.declaration(depth.declaration_path(Path.cwd()))
+        decl = _declaration()
     except depth.DepthError as exc:
         raise Stop("invalid", str(exc)) from exc
     quality = decl["quality"] if isinstance(decl.get("quality"), dict) else None
@@ -346,7 +356,7 @@ def cmd_revert(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_depth_limits(a: argparse.Namespace) -> dict[str, Any]:
-    seconds = depth.depth_seconds(depth.declaration(depth.declaration_path(Path.cwd())), a.depth)
+    seconds = depth.depth_seconds(_declaration(), a.depth)
     return result.result(TOOL, result.OK, f"{a.depth} の 1 回の秒の上限は {seconds} 秒", metrics={"depth": a.depth, "seconds": seconds})
 
 
@@ -360,15 +370,14 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
     """見直し・大整理を起動するか。起動しなければ not_applicable で止まる（読み手は status で分ける）。"""
     repo = _repo(a)
     sd = _sd(a, repo)
-    decl = depth.declaration(depth.declaration_path(Path.cwd()))
+    decl = _declaration()
     depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
     depths = decl["depths"] if "depths" in decl else {}
     try:
         cfg = due_decide.settings(a.depth, depths[a.depth] if a.depth in depths else {})
     except ValueError as exc:
         raise Stop("invalid", str(exc)) from exc
-    prev = state.read(sd, "backlog-candidates", {})
-    metrics = prev["metrics"] if isinstance(prev, dict) and isinstance(prev.get("metrics"), dict) else {}
+    metrics = _previous_metrics(sd)
     trig, values = due_decide.due(a.depth, state.read_lines(sd, "backlog-depths"), metrics, cfg, a.manual)
     out = {"depth": a.depth, "trigger": trig, "values": values}
     if not trig:
