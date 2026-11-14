@@ -170,6 +170,59 @@ def test_broken_key_file_is_moved_to_broken_and_stops(root):
     assert _key_files(root, "bad") == []
 
 
+# --- 現状固定: 鍵ごとのファイルの走査（_sweep_live） --------------------------------------
+
+
+def test_sweep_retires_finished_keys_in_name_order_and_reports_unreadable_files(root):
+    """現状固定: 読めない鍵のファイルは warnings に載せて残し、ほかの終わった鍵は名前の順に移す。"""
+    _finish_without_retire(root, "b-done")
+    _finish_without_retire(root, "a-done")
+    bad = root / "dbos" / "run-unreadable.sqlite"
+    bad.write_bytes(b"this is not a database" * 100)
+
+    result = durable.sweep(root, _later(hours=25))
+
+    assert not result.skipped and result.busy == 0 and result.deleted == []
+    names = sorted([durable.run_name("a-done"), durable.run_name("b-done")])
+    assert [p.name for p in result.retired] == [f"{n}.sqlite" for n in names]
+    assert all(p.parent == root / "dbos" / "retired" for p in result.retired)
+    assert len(result.warnings) == 1 and result.warnings[0].startswith(f"{bad}: ")
+    assert bad.read_bytes() == b"this is not a database" * 100
+    # 読めないファイルの鍵は、走査が取った `.lock` が残る
+    assert (root / "dbos" / "run-unreadable.lock").exists()
+    assert _key_files(root, "a-done") == [] and _key_files(root, "b-done") == []
+
+
+def test_sweep_removes_marks_and_locks_left_without_a_key_file(root):
+    """現状固定: 本体の無い `.checked` と、だれも持たない `.lock` を消し、本体のある鍵の目印とロックは残す。"""
+    _run(root, "waits", "wait")
+    dbos = root / "dbos"
+    name = durable.run_name("waits")
+    (dbos / f"{name}.checked").touch()
+    orphan_mark = dbos / "run-gone.checked"
+    orphan_lock = dbos / "run-gone.lock"
+    orphan_mark.touch()
+    orphan_lock.touch()
+
+    result = durable.sweep(root, _later(hours=25))
+
+    assert result.retired == [] and result.warnings == [] and result.busy == 0
+    assert not orphan_mark.exists() and not orphan_lock.exists()
+    assert (dbos / f"{name}.checked").exists() and (dbos / f"{name}.lock").exists()
+    assert (dbos / f"{name}.sqlite").exists()
+
+
+def test_sweep_keeps_a_lock_without_a_key_file_while_it_is_held(root):
+    """現状固定: 本体の無い `.lock` でも、`run_lock` を持つプロセスがいる間は消さず、busy にも数えない。"""
+    root.mkdir(parents=True)
+    with durable.run_lock(root, "holding"):
+        lock = root / "dbos" / f"{durable.run_name('holding')}.lock"
+        assert lock.exists()
+        result = durable.sweep(root, _later(hours=25))
+        assert result.busy == 0 and result.retired == [] and result.warnings == []
+        assert lock.exists()
+
+
 def test_check_file():
     assert durable.check_file(Path("/nonexistent/x.sqlite"))
 
