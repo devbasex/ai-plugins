@@ -41,6 +41,7 @@ COMMANDS: dict[str, str] = {
     "notify": "ndf.adapters.notify",
     "plan": "ndf.core.plan.cli",
     "progress": "ndf.progress.run",
+    "refactor": "ndf.domains.crossrefactor.cli",
     "relay": "ndf.domains.relay.cli",
     "route": "ndf.core.route",
     "test-slot": "ndf.testing.command",
