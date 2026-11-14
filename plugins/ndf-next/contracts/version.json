@@ -3,6 +3,7 @@
   "owner": "D1+（#3284 の追補。ndf.contracts）。D1 を閉じた後の契約（contracts/ と src/ndf/contracts/）の変更は、#3284 の追補の PR（Refs #3284）で出す",
   "history": [
     {"version": 1, "sha256": "4da2b11aa67bdcbb807185bc5a4a0d3a21df4918e62f3a4715054d221399464e"},
-    {"version": 2, "sha256": "81fb36ea10a451a206c042e7a260b17ab6949fe9c5203391617648dc641286a2"}
+    {"version": 2, "sha256": "81fb36ea10a451a206c042e7a260b17ab6949fe9c5203391617648dc641286a2"},
+    {"version": 3, "sha256": "fbde6bd01e60134465b4a4feeaaf833daeb9d16ddb62ac60d78904c0282ebcd1"}
   ]
 }
