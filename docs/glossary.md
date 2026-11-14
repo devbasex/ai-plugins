@@ -661,6 +661,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 公開する面 | — | 外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る | — | — | — |
 | 内部の面 | — | NDF の中だけで使い、形を約束しない面。公開する面の表に載らない | — | — | — |
 | 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | — |
+| 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | — |
+| 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

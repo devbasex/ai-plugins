@@ -7359,6 +7359,18 @@
       "context": "ndf-workflow",
       "meaning": "`bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの",
       "pending_source": "issues/issue-3518-requirements.md"
+    },
+    {
+      "term": "配る Skill の表",
+      "context": "ndf-workflow",
+      "meaning": "ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`）",
+      "pending_source": "issues/issue-3518-requirements.md"
+    },
+    {
+      "term": "起動スクリプト",
+      "context": "ndf-workflow",
+      "meaning": "利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`）",
+      "pending_source": "issues/issue-3518-requirements.md"
     }
   ]
 }
