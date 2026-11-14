@@ -243,4 +243,3 @@ def test_repo_sources_read_the_newest_design_pr() -> None:
     pulls = [graphql_pull(12, False, "open", "b" * 40, "design/issue-9"), graphql_pull(8, False, "closed", "a" * 40, "design/issue-9")]
     src = refs.RepoSources(graphql_hub(lambda node, args: {"nodes": pulls}))
     assert src.design_pr("design/issue-9") == refs.DesignPr(12, False, "open", "b" * 40, "design/issue-9")
-
