@@ -23,20 +23,19 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
 
-from ndf import identity
 from ndf.testing import slots
 from ndf.testing.testenv import within
 
 # 一時ディレクトリへ向ける環境変数（値は一時ディレクトリの下の名前）
 REDIRECTED_ENV = {
-    identity.XDG_STATE_ENV: "state",
+    "XDG_STATE_HOME": "state",
     "XDG_CACHE_HOME": "cache",
     "XDG_CONFIG_HOME": "config",
     "XDG_DATA_HOME": "data",
     slots.SLOTS_DIR_ENV: "test-slots",
 }
 # テストの間は外す環境変数（ほかのプラグインの根・状態の置き場の根の指定・実行中の工程の識別子）
-REMOVED_ENV = (identity.PLUGIN_ROOT_ENV, identity.STATE_HOME_ENV, slots.HELD_ENV)
+REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", "NDF_STATE_HOME", slots.HELD_ENV)
 # ホームの下の本物の置き場
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 
@@ -70,7 +69,7 @@ _WRITE_EVENTS: dict[str, tuple[WriteTarget, ...]] = {
     "shutil.rmtree": (WriteTarget(0, 1, NAME),),
 }
 # 元の値が指す場所も本物の置き場として守る環境変数（差し替える前の値を読む）
-REAL_STATE_ENV = (identity.STATE_HOME_ENV, identity.XDG_STATE_ENV, "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
+REAL_STATE_ENV = ("NDF_STATE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
 # 読み込んだ時点（conftest の読み込み・fixture より前）の値。fixture の実行時には、先に動いたほかの autouse の
 # fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の置き場を読めないため
 _ORIGINAL_ENV = {name: value for name in REAL_STATE_ENV if (value := os.environ.get(name)) is not None}
@@ -135,7 +134,9 @@ def _write_targets(event: str, args: tuple) -> list[WriteTarget]:
         writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
         return [WriteTarget(path, None, CONTENT)] if writing else []
     targets: list[WriteTarget] = []
-    for at, fd_at, kind in _WRITE_EVENTS.get(event, ()):
+    if event not in _WRITE_EVENTS:
+        return []
+    for at, fd_at, kind in _WRITE_EVENTS[event]:
         if at >= len(args):
             continue
         targets.append(WriteTarget(args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))

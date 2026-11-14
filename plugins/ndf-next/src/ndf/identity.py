@@ -21,11 +21,6 @@ FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
 # 旧い置き場の退避先の名前の接尾辞（`<プラグイン名>.v10-<日付>`）
 RETIRED_SUFFIX = ".v10-"
-# 自分の根を指す環境変数
-PLUGIN_ROOT_ENV = "CLAUDE_PLUGIN_ROOT"
-# 状態の置き場の根を指す環境変数（先に引くほうが先）
-STATE_HOME_ENV = "NDF_STATE_HOME"
-XDG_STATE_ENV = "XDG_STATE_HOME"
 
 
 class IdentityError(Exception):
@@ -45,7 +40,7 @@ def _state_home() -> Path:
 
     `NDF_STATE_HOME` も根として読み、プラグイン名を足す。サービスが旧い NDF と同じ値を渡しても、旧い置き場を退避しない。
     """
-    for name in (STATE_HOME_ENV, XDG_STATE_ENV):
+    for name in ("NDF_STATE_HOME", "XDG_STATE_HOME"):  # 先に引くほうが先
         value = os.environ.get(name, "")
         if value:
             return Path(value).expanduser()
@@ -54,7 +49,7 @@ def _state_home() -> Path:
 
 def load() -> PluginIdentity:
     """`CLAUDE_PLUGIN_ROOT`（無ければこのファイルから 3 つ上）の `plugin.json` から自分を求める。"""
-    env_root = os.environ.get(PLUGIN_ROOT_ENV, "")
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
     root = Path(env_root) if env_root else Path(__file__).resolve().parents[2]
     manifest = root / ".claude-plugin" / "plugin.json"
     try:
