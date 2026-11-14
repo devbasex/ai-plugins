@@ -29,10 +29,20 @@ def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
     unknown = set(decl) - KEYS
     if unknown:
         raise FlowError(f"知らないキー: {sorted(unknown)}")
+    row = _row_for(decl, default)
+    return {"row": row["id"], **_picked(decl, row)}
+
+
+def _row_for(decl: dict[str, Any], default: dict[str, Any]) -> dict[str, Any]:
+    """宣言の取り込み方（無ければ既定の行の取り込み方）の表の行。表に無ければ止める。"""
     rows = facts.rows(FLOWS, promotion=decl.get("promotion", default["promotion"]))
     if not rows:
         raise FlowError(f"取り込み方が表に無い: {decl.get('promotion')!r}")
-    row = rows[0]
+    return rows[0]
+
+
+def _picked(decl: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    """行に対して選んだ値（無ければ行の各列の先頭）。行が許さない値・書けないレビューの単位なら止める。"""
     picked = {c: decl.get(c, row[c][0]) for c in CHOICES}
     bad = [c for c in CHOICES if picked[c] not in row[c]]
     if bad:
@@ -40,7 +50,7 @@ def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
     kinds = set(decl.get("reviews", {})) - set(row["review_kinds"])
     if kinds:
         raise FlowError(f"{row['promotion']} で書けないレビューの単位: {sorted(kinds)}")
-    return {"row": row["id"], **picked}
+    return picked
 
 
 def test_one_default_row_and_values_come_from_the_table():
