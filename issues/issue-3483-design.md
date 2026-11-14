@@ -154,7 +154,7 @@ cross-review の駆動と、今の ndf（`plugins/ndf/`）は変えない。
 | 出力 | 形 | どこへ出すか |
 | --- | --- | --- |
 | 標準エラー（1 行） | `↻ 古い起点のため退避し、今の head から始め直す: <退避した先>（作業の起点 <7 字>・PR の head <7 字>）` | 退避した直後に 1 度 |
-| 結果 JSON の `items` の末尾（1 件） | `{"kind": "retired", "path": "<退避した先>", "work_head": "<作業の起点>", "pr_head": "<PR の head>", "reason": "古い起点のため退避した（作業の起点 <7 字>・PR の head <7 字>）"}` | `Finish.items` の末尾。完了・止まりのどちらでも足す（決定 5） |
+| 結果 JSON の `items` の末尾（1 件） | `{"kind": "retired", "path": "<退避した先>", "work_head": "<作業の起点>", "pr_head": "<PR の head>", "reason": "古い起点のため退避した（作業の起点 <7 字>・PR の head <7 字>）"}` | `Finish.items` の末尾。完了・止まりのどちらでも足す（決定 6） |
 
 head を取れないときの結果:
 
