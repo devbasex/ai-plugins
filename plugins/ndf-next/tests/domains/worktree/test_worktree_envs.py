@@ -571,7 +571,7 @@ def test_expose_and_unexpose_wait_for_the_other(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(testenv_sweep, "EXPOSE_LOCK_WAIT", 0)
     with FileLock(str(tmp_path / testenv_sweep.EXPOSE_LOCK)):
         for op in (testenv_sweep.expose, testenv_sweep.unexpose):
-            with pytest.raises(testenv.TestenvError, match="別の公開の操作"):
+            with pytest.raises(testenv.TestenvError, match="別の公開操作"):
                 op(t)
     assert testenv_sweep.expose(t) == "https://wt0.example.test"
 

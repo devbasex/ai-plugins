@@ -117,7 +117,7 @@ def _exposing_lock(t: Target) -> Iterator[None]:
         with FileLock(str(t.book.path.parent / EXPOSE_LOCK), timeout=EXPOSE_LOCK_WAIT):
             yield
     except Timeout as exc:
-        raise TestenvError(f"拒否: 別の公開の操作が {EXPOSE_LOCK_WAIT} 秒を過ぎても終わらない") from exc
+        raise TestenvError(f"拒否: 別の公開操作が {EXPOSE_LOCK_WAIT} 秒を過ぎても終わらない") from exc
 
 
 def expose(t: Target) -> str:
