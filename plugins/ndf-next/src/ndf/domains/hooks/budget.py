@@ -136,10 +136,8 @@ def _registration_errors(limits: dict, reg: dict[str, Any]) -> list[str]:
     errors = []
     if found.deadline > timeout:
         errors.append(f"{where}の timeout {timeout} 秒が締め切り {found.deadline} 秒より短い")
-    spec = tables.event_spec(runtime, event)
-    cap = tables.runtimes()[runtime]["timeout_max"]
-    if spec is not None and "timeout_max" in spec:
-        cap = spec["timeout_max"]
+    # found があれば事象の契約もある（budget_for は契約の無い事象に None を返す）
+    cap = tables.event_spec(runtime, event).get("timeout_max", tables.runtimes()[runtime]["timeout_max"])
     if timeout > cap:
         errors.append(f"{where}の timeout {timeout} 秒がランタイムの上限 {cap} 秒を超える")
     return errors
