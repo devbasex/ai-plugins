@@ -387,34 +387,48 @@ def _take_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
 
 
 def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
-    directory, cwd = ctx.directory, ctx.cwd
     held = Held()
-    monitor = _MemoryMonitor(directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory)
+    monitor = _MemoryMonitor(ctx.directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory)
     held._monitor = monitor
-    try:
-        taken = _take_slot(ctx, held)
-    except KeyboardInterrupt:
-        # 枠・メモリの待ちの間にシグナルで中断された（取りかけた枠は返してある）
-        _record(directory, cwd, kind, held, INTERRUPTED)
-        raise
+    taken = _acquire_or_stop(ctx, held, kind)
     if taken is None:
-        if held.note:
-            yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
-            return
-        _record(directory, cwd, kind, held, GAVE_UP)
-        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
-    held.env = {HELD_ENV: str(slot_pool.slot_path(directory, taken.index))}
+        yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
+        return
+    held.env = {HELD_ENV: str(slot_pool.slot_path(ctx.directory, taken.index))}
     result = INTERRUPTED
     try:
         yield held
         result = FINISHED
     finally:
-        held._finish()
-        if held.memory_stopped:
-            result = MEMORY_STOPPED
-        else:
-            held.available_mib = ctx.options.read_memory()
-        taken.release()
-        _record(directory, cwd, kind, held, result)
+        result = _settle(ctx, held, kind, taken, result)
     if result == MEMORY_STOPPED:
         raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib)
+
+
+def _acquire_or_stop(ctx: SlotContext, held: Held, kind: str) -> slot_pool.Taken | None:
+    """枠を取る。中断されたら記録して送り直し、諦めたら記録して `Stopped` を送る。
+
+    None を返すのは置き場へ書けず、枠を取らずに走らせる形（`held.note` に理由がある）のときだけ。
+    """
+    try:
+        taken = _take_slot(ctx, held)
+    except KeyboardInterrupt:
+        # 枠・メモリの待ちの間にシグナルで中断された（取りかけた枠は返してある）
+        _record(ctx.directory, ctx.cwd, kind, held, INTERRUPTED)
+        raise
+    if taken is None and not held.note:
+        _record(ctx.directory, ctx.cwd, kind, held, GAVE_UP)
+        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
+    return taken
+
+
+def _settle(ctx: SlotContext, held: Held, kind: str, taken: slot_pool.Taken, result: str) -> str:
+    """実行の後始末。監視を止め、メモリを読み直し、枠を返して記録を足す。記録した結果を返す。"""
+    held._finish()
+    if held.memory_stopped:
+        result = MEMORY_STOPPED
+    else:
+        held.available_mib = ctx.options.read_memory()
+    taken.release()
+    _record(ctx.directory, ctx.cwd, kind, held, result)
+    return result
