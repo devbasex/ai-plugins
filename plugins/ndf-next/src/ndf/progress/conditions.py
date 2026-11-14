@@ -28,13 +28,6 @@ DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたと
 BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
 
 
-def _declaration(cwd: Path, name: str) -> dict[str, Any]:
-    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。"""
-    path = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
-    raw = command.read_json(path, "を読めない") if path.exists() else {}
-    return raw if isinstance(raw, dict) else {}
-
-
 def _dig(node: Any, *keys: str) -> Any:
     for key in keys:
         node = node.get(key) if isinstance(node, dict) else None
@@ -60,7 +53,7 @@ def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
-    base = _dig(_declaration(cwd, WORKTREE_FILE), "base_branch")
+    base = _dig(command.declaration(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base or base.startswith("-"):
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
     git = Git(Path(context.get("worktree") or cwd))
@@ -79,7 +72,7 @@ def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
 
 def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
     """スプリントの差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。"""
-    project = _declaration(cwd, command.PROJECT_FILE)
+    project = command.declaration(cwd, command.PROJECT_FILE)
     try:
         git, rng = _sprint_range(context, cwd)
         files = _diff_names(git, rng, [])
@@ -94,8 +87,8 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")},
-        "ci_declared": lambda: _dig(_declaration(cwd, command.PROJECT_FILE), "test", "ci", "only") is True,
-        "prod_branch": lambda: bool(_dig(_declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "ci_declared": lambda: _dig(command.declaration(cwd, command.PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(_dig(command.declaration(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }

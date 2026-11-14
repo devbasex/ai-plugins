@@ -75,14 +75,26 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
         raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
 
 
+def declaration_path(cwd: Path, name: str) -> Path:
+    """リポジトリの根の宣言のファイルのパス。"""
+    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
+
+
+def _read_declaration(path: Path) -> dict[str, Any]:
+    raw = read_json(path, "を読めない") if path.exists() else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def declaration(cwd: Path, name: str) -> dict[str, Any]:
+    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
+    return _read_declaration(declaration_path(cwd, name))
+
+
 def _declared(cwd: Path) -> dict[str, Any]:
     """`.ndf/project.json` の `workflow.stages`（工程の名前 → 有効と理由）。ファイルか項目が無ければ空。"""
-    top = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
-    path = top / PROJECT_FILE
-    if not path.exists():
-        return {}
-    raw = read_json(path, "を読めない")
-    workflow = raw.get("workflow") if isinstance(raw, dict) else None
+    path = declaration_path(cwd, PROJECT_FILE)
+    raw = _read_declaration(path)
+    workflow = raw.get("workflow")
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     if not isinstance(declared, dict):
         return {}
