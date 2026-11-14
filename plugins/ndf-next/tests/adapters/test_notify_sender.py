@@ -386,27 +386,25 @@ def test_unsent_older_than_keep_days_is_removed(outbox: Path, wall: list[float])
 # ---- slack_deliver ----
 
 
-def test_slack_deliver_posts_message_with_mention(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
-    for name, value in {
+def test_slack_deliver_posts_message_with_mention(outbox: Path, wall: list[float]) -> None:
+    environ = {
         "SLACK_BOT_TOKEN": "t",
         "SLACK_CHANNEL_ID": "C1",
         "SLACK_USER_MENTION": "<@U1>",
         "NDF_SLACK_API_BASE": "https://slack.test",
-    }.items():
-        monkeypatch.setenv(name, value)
+    }
     seen: list[httpx.Request] = []
     _write(outbox, "a", kind="done", text="終えた")
-    out = notify.drain(outbox, notify.slack_deliver(None, _slack({"ok": True}, seen)))
+    out = notify.drain(outbox, notify.slack_deliver(None, _slack({"ok": True}, seen), environ))
     assert out.sent == 1
     assert json.loads(seen[0].content) == {"channel": "C1", "text": "<@U1> 完了: 終えた"}
 
 
-def test_slack_deliver_without_settings_sends_nothing(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+def test_slack_deliver_without_settings_sends_nothing(outbox: Path, wall: list[float]) -> None:
     (outbox / ".git").mkdir(parents=True)
     _write(outbox, "a")
     seen: list[httpx.Request] = []
-    assert notify.drain(outbox, notify.slack_deliver(None, _slack({"ok": True}, seen))).unconfigured == 1
+    assert notify.drain(outbox, notify.slack_deliver(None, _slack({"ok": True}, seen), {})).unconfigured == 1
     assert seen == []
 
 

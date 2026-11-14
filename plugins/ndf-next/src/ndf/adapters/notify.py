@@ -23,7 +23,7 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -524,11 +524,18 @@ def drain(outbox: Path, deliver: Deliver, sleep: Callable[[float], None] = time.
     return out
 
 
-def slack_deliver(fallback: Path | None, transport: httpx.BaseTransport | None = None) -> Deliver:
-    """送信待ちの 1 件を Slack へ 1 回送る `Deliver`。設定は 1 件ごとに、その `cwd` の `.env` と環境変数から読む。"""
+def slack_deliver(
+    fallback: Path | None,
+    transport: httpx.BaseTransport | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Deliver:
+    """送信待ちの 1 件を Slack へ 1 回送る `Deliver`。設定は 1 件ごとに、その `cwd` の `.env` と環境変数から読む。
+
+    環境変数は `environ`（`None` なら `os.environ`）から読む。
+    """
 
     def deliver(notice: Notice) -> bool:
-        settings = slack_settings(notice.cwd, fallback, dict(os.environ))
+        settings = slack_settings(notice.cwd, fallback, dict(os.environ if environ is None else environ))
         if settings is None:
             return False
         payload = {"channel": settings.channel, "text": notice.message(settings.mention)}
