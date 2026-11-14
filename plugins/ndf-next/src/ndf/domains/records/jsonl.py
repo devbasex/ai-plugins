@@ -7,12 +7,18 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from filelock import FileLock
 
 from ndf.contracts import limits
+
+
+def now() -> str:
+    """記録の行の時刻（UTC・秒まで・ISO 8601。行の `at`）。"""
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def read_rows(path: Path) -> tuple[list[dict[str, Any]], int]:

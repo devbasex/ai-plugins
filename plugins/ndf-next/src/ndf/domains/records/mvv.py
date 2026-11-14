@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any, Optional
@@ -58,10 +57,6 @@ def repo_key(root: Path) -> str:
     return str(entries[0].path)
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
 def decl_path() -> str:
     """MVV の宣言のパス（根からの相対）。"""
     return files.relpath("mvv")
@@ -91,7 +86,7 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     kind = md.override_kind(answer.get("verdict"), bool(answer.get("approved")))
     if kind is None:
         return None
-    row = {"at": _now(), "kind": kind, "version": version, "repo": repo_key(root)}
+    row = {"at": jsonl.now(), "kind": kind, "version": version, "repo": repo_key(root)}
     row |= {k: answer[k] for k in ("state", "gate", "pr") if k in answer}
     jsonl.append_locked(record_path("mvv-signals"), row)
     return row
@@ -109,10 +104,10 @@ def vet_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool 
     rows, _ = jsonl.read_rows(path)
     origin = md.reusable(rows, key) if reuse else None
     if origin is not None:
-        row = md.reuse_row(origin, _now(), repo)
+        row = md.reuse_row(origin, jsonl.now(), repo)
     else:
         verdict, cost = judge(inputs)
-        row = md.judged_row(key, verdict, _now(), repo, cost)
+        row = md.judged_row(key, verdict, jsonl.now(), repo, cost)
     jsonl.append_locked(path, row)
     return row
 

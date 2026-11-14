@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Mapping
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -69,10 +69,6 @@ def transcript_usage(path: Path, since: Optional[datetime] = None, until: Option
     return ud.transcript_total(records, since, until)
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
 def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
     """終わったサブエージェント 1 回を帳簿へ 1 行書き、書いた行を返す（書けなければ None）。
 
@@ -89,7 +85,7 @@ def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]]
             total = transcript_usage(Path(transcript))
             prior, _ = jsonl.read_rows(path)
             usage: Any = ud.stop_delta(prior, agent, total).as_dict() if isinstance(total, ud.Usage) else ud.UNKNOWN
-            row = {"at": _now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}
+            row = {"at": jsonl.now(), "caller": SUBAGENT, "agent_id": agent, "transcript": transcript, "usage": usage}
             jsonl.append(path, row)
     except (LookupError, OSError) as exc:
         print(f"使用量の帳簿へ書けない: {exc}", file=sys.stderr)
@@ -100,7 +96,7 @@ def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]]
 def record_cli(usage: Mapping[str, Any], meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
     """`claude -p` の 1 回を、サブエージェントと同じ帳簿へ 1 行書く。書けなければ None。"""
     u = ud.usage_of(usage)
-    row = {"at": _now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
+    row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
         jsonl.append_locked(ledger_path(env), row)
     except (LookupError, OSError) as exc:
