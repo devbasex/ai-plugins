@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf.domains.backlog import model
@@ -36,6 +37,18 @@ APPLIED, UNCHANGED, ALREADY, SKIPPED, WAITING, RETURNED_BUCKET, FAILED = (
 )  # fmt: skip
 BUCKETS = (APPLIED, UNCHANGED, ALREADY, SKIPPED, WAITING, RETURNED_BUCKET, FAILED)
 PARTIAL = "partial"
+
+
+@dataclass
+class Diff:
+    """課題へ書く差分（PATCH の中身・足すラベル・外すラベル）。書けた分の実績も同じ形で持つ。"""
+
+    patch: dict[str, Any] = field(default_factory=dict)
+    add: list[str] = field(default_factory=list)
+    remove: list[str] = field(default_factory=list)
+
+    def empty(self) -> bool:
+        return not (self.patch or self.add or self.remove)
 
 
 def _list_of_str(v: Any) -> bool:
@@ -125,7 +138,7 @@ def changed_since_plan(act: dict[str, Any], cur: dict[str, Any], rec: Optional[d
     return cur["updated_at"] != act["updated_at"] and now != act["digest"] and not own
 
 
-def diff(cur: dict[str, Any], ch: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+def diff(cur: dict[str, Any], ch: dict[str, Any]) -> Diff:
     """今の課題と比べて、書き込みが要る (PATCH の中身, 足すラベル, 外すラベル)。"""
     patch = {k: ch[k] for k in ("title", "body") if k in ch and ch[k] != cur[k]}
     if "state" in ch and ch["state"] != cur["state"]:
@@ -135,13 +148,13 @@ def diff(cur: dict[str, Any], ch: dict[str, Any]) -> tuple[dict[str, Any], list[
     have = set(cur["labels"])
     add = [lb for lb in (ch["add_labels"] if "add_labels" in ch else []) if lb not in have]
     remove = [lb for lb in (ch["remove_labels"] if "remove_labels" in ch else []) if lb in have]
-    return patch, add, remove
+    return Diff(patch, add, remove)
 
 
-def after_write(cur: dict[str, Any], patch: dict[str, Any], add: list[str], remove: list[str]) -> dict[str, Any]:
+def after_write(cur: dict[str, Any], d: Diff) -> dict[str, Any]:
     """書いた後の課題（要約値を記録して、打ち直しで自分の書き込みを並行の更新と取り違えない）。"""
-    labels = [lb for lb in cur["labels"] if lb not in remove] + [lb for lb in add if lb not in cur["labels"]]
-    return {**cur, **{k: v for k, v in patch.items() if k in ("title", "body", "state")}, "labels": labels}
+    labels = [lb for lb in cur["labels"] if lb not in d.remove] + [lb for lb in d.add if lb not in cur["labels"]]
+    return {**cur, **{k: v for k, v in d.patch.items() if k in ("title", "body", "state")}, "labels": labels}
 
 
 def create_reason(c: dict[str, Any]) -> Optional[str]:

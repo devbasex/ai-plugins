@@ -32,17 +32,17 @@ class Ledger:
         state.write(self.sd, "backlog-ledger", self.rows)
 
 
-def _write(gh: GitHub, n: int, patch: dict[str, Any], add: list[str], remove: list[str], done: dict[str, Any]) -> None:
+def _write(gh: GitHub, n: int, d: ad.Diff, done: ad.Diff) -> None:
     """書き込む。書けた分を `done` に足していき、途中で失敗したら書けた分までを残して `GitHubError` を投げる。"""
-    if patch:
-        issues_gh.patch_issue(gh, n, patch)
-        done["patch"] = patch
-    if add:
-        issues_gh.add_labels(gh, n, add)
-        done["add"] = add
-    for lb in remove:
+    if d.patch:
+        issues_gh.patch_issue(gh, n, d.patch)
+        done.patch = d.patch
+    if d.add:
+        issues_gh.add_labels(gh, n, d.add)
+        done.add = d.add
+    for lb in d.remove:
         issues_gh.remove_label(gh, n, lb)
-        done["remove"].append(lb)
+        done.remove.append(lb)
 
 
 def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str, str]:
@@ -55,22 +55,21 @@ def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str
     cur = issues_gh.issue(gh, n)
     if ad.changed_since_plan(act, cur, rec):
         return ad.SKIPPED, f"plan の後に書き換わった（updated_at {act['updated_at']} → {cur['updated_at']}）"
-    patch, add, remove = ad.diff(cur, ad.changes_of(act))
-    if not (patch or add or remove):
+    d = ad.diff(cur, ad.changes_of(act))
+    if d.empty():
         ledger.put(key, {"result": ad.UNCHANGED})
         return ad.UNCHANGED, "変える内容が無い"
-    done: dict[str, Any] = {"patch": {}, "add": [], "remove": []}
+    done = ad.Diff()
     try:
-        _write(gh, n, patch, add, remove, done)
+        _write(gh, n, d, done)
     except GitHubError:
-        if done["patch"] or done["add"] or done["remove"]:
+        if not done.empty():
             # 書けた分までの要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
-            partial = ad.after_write(cur, done["patch"], done["add"], done["remove"])
-            ledger.put(key, {"result": ad.PARTIAL, "digest": model.snapshot_digest(partial)})
+            ledger.put(key, {"result": ad.PARTIAL, "digest": model.snapshot_digest(ad.after_write(cur, done))})
         raise
-    ledger.put(key, {"result": ad.APPLIED, "fields": sorted(patch), "add_labels": add, "remove_labels": remove,
-                     "digest": model.snapshot_digest(ad.after_write(cur, patch, add, remove))})  # fmt: skip
-    return ad.APPLIED, ", ".join([*sorted(patch), *(f"+{x}" for x in add), *(f"-{x}" for x in remove)])
+    ledger.put(key, {"result": ad.APPLIED, "fields": sorted(d.patch), "add_labels": d.add, "remove_labels": d.remove,
+                     "digest": model.snapshot_digest(ad.after_write(cur, d))})  # fmt: skip
+    return ad.APPLIED, ", ".join([*sorted(d.patch), *(f"+{x}" for x in d.add), *(f"-{x}" for x in d.remove)])
 
 
 def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
