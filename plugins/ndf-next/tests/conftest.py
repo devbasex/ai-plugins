@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from ndf import identity
-
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,9 +23,9 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool 
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """実行した人の状態の置き場とほかのプラグインの根を読まない。"""
-    monkeypatch.delenv(identity.PLUGIN_ROOT_ENV, raising=False)
-    monkeypatch.delenv(identity.STATE_HOME_ENV, raising=False)
-    monkeypatch.setenv(identity.XDG_STATE_ENV, str(tmp_path / "state"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("NDF_STATE_HOME", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
 
