@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,9 +25,14 @@ def read_rows(path: Path) -> tuple[list[dict[str, Any]], int]:
     """行と、読めなかった行の数。ファイルが無ければ空。"""
     if not path.is_file():
         return [], 0
+    return parse_lines(path.read_text(encoding="utf-8").splitlines())
+
+
+def parse_lines(lines: Iterable[str]) -> tuple[list[dict[str, Any]], int]:
+    """JSONL の行を読む: 辞書の行と、読めなかった行（壊れた JSON・辞書でない）の数。空の行は数えない。"""
     rows: list[dict[str, Any]] = []
     broken = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in lines:
         if not line.strip():
             continue
         try:

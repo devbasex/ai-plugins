@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from collections.abc import Callable, Mapping
@@ -47,17 +46,9 @@ def ledger_path(env: Optional[Mapping[str, str]] = None) -> Path:
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
-    out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if '"usage"' not in line:
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:  # noqa: S112 ファイル: 書きかけの行は応答として数えない
-            continue
-        if isinstance(rec, dict):
-            out.append(rec)
-    return out
+    # usage を持たない行は JSON として読まない。書きかけ・辞書でない行は応答として数えない
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if '"usage"' in line]
+    return jsonl.parse_lines(lines)[0]
 
 
 def transcript_usage(path: Path, since: Optional[datetime] = None, until: Optional[datetime] = None) -> ud.Usage | str:
