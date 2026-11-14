@@ -34,6 +34,8 @@ ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
 PROJECT_FILE = ".ndf/project.json"
+# 副命令 disable・enable が書く事象の種類
+TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
 DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
 
@@ -187,8 +189,7 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
 
 
 def _cmd_toggle(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    # 副命令 disable・enable は事象 disabled・enabled を書く
-    return _changed(a, st, f"{a.action}d", None)
+    return _changed(a, st, TOGGLE_KINDS[a.action], None)
 
 
 def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
