@@ -150,11 +150,13 @@ def _signal_group(proc: subprocess.Popen, signum: int) -> None:
 
 
 def _wait(proc: subprocess.Popen) -> int:
+    """子の終わりを待ち、終了コードを返す。シグナルで止まった子はシェルと同じ 128 + シグナルの番号にする（負の値を返さない）。"""
     while True:
         try:
-            return proc.wait()
+            code = proc.wait()
         except InterruptedError:  # noqa: S112 外部コマンド: 子の終わりを待つ間にシグナルで割り込まれたら待ち直す
             continue
+        return 128 - code if code < 0 else code
 
 
 def _report(since: str) -> int:
