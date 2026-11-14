@@ -187,6 +187,12 @@ def _log_path(run_id: str, parent_id: Optional[str], location: Optional[str], no
     return _root_path(run_id, location, now)
 
 
+def _inherited_run_id() -> Optional[str]:
+    """親から受けた実行の識別子（環境変数 `NDF_RUN_ID`）。無いか空なら None。"""
+    inherited = os.environ.get(ENV_RUN_ID, "")
+    return inherited if inherited else None
+
+
 def open_run(
     entry: str,
     run_id: Optional[str] = None,
@@ -201,8 +207,7 @@ def open_run(
     """
     if _CURRENT:
         raise RunLogError(f"このプロセスは実行の記録を既に開いている: {_CURRENT[0].run_id}")
-    inherited = os.environ.get(ENV_RUN_ID, "")
-    parent = parent_id if parent_id else (inherited if inherited else None)
+    parent = parent_id or _inherited_run_id()
     rid = run_id or uuid.uuid4().hex
     try:
         path = _log_path(rid, parent, location, now or datetime.now(timezone.utc))
@@ -224,7 +229,7 @@ def diag(text: str, short: Optional[str] = None, **fields: Any) -> None:
     shown = short if short is not None else text
     sys.stderr.write(shown if shown.endswith("\n") else shown + "\n")
     log = current()
-    if log is None and os.environ.get(ENV_RUN_ID, ""):
+    if log is None and _inherited_run_id():
         try:
             log = open_run("diag")
         except RunLogError as exc:
