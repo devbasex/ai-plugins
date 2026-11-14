@@ -71,6 +71,11 @@ class Release(NamedTuple):
     reason: Optional[str]
 
 
+def conflict_detail(synced: SyncResult) -> str:
+    """同期で衝突したときの説明（前の HEAD へ戻したことと衝突したファイル）。"""
+    return f"自分の未送信のコミットが origin の先頭と衝突したので {synced.before} へ戻した: {', '.join(synced.conflicts)}"
+
+
 def lock_reason(tool: str, pr: int) -> str:
     return LOCK_REASON.format(tool=tool, pr=pr)
 

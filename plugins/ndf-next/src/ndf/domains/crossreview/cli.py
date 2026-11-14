@@ -138,8 +138,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return _stop("precondition", str(exc))
     item = {"kind": "sync", **got._asdict(), "conflicts": list(got.conflicts)}
     if got.conflicts:
-        detail = f"自分の未送信のコミットが origin の先頭と衝突したので {got.before} へ戻した: {', '.join(got.conflicts)}"
-        return _stop("precondition", detail, items=[item])
+        return _stop("precondition", worktree.conflict_detail(got), items=[item])
     return _ok(f"origin の先頭 {got.after} へ合わせ、自分のコミット {got.replayed} 件を載せ直した", [item])
 
 
