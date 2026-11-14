@@ -18,7 +18,7 @@ from ndf import identity
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, GitHubError
 from ndf.contracts import facts, limits
-from ndf.domains.records import jsonl
+from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import Changed, MvvFacts
@@ -64,8 +64,7 @@ def _now() -> str:
 
 def decl_path() -> str:
     """MVV の宣言のパス（根からの相対）。"""
-    place = facts.value("ndf-files", "mvv", "place")
-    return f"{facts.value('places', place, 'path')}/{facts.value('ndf-files', 'mvv', 'path')}"
+    return files.relpath("mvv")
 
 
 def decl_at(root: Path, ref: str) -> dict[str, Any]:

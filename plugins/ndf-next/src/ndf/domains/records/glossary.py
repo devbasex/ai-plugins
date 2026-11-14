@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts import facts
+from ndf.domains.records import files
 from ndf.domains.records import glossary_decide as gd
 
 # 宣言に max_lines が無いときの 1 ファイルの上限の行数（document_dir が無ければ索引のパスから拡張子を除いたディレクトリ）
@@ -19,11 +19,6 @@ DEFAULT_MAX_LINES = 500
 
 class GlossaryError(ValueError):
     """宣言か正本が読めない。"""
-
-
-def _decl_path(root: Path) -> Path:
-    place = facts.value("places", facts.value("ndf-files", "glossary", "place"), "path")
-    return root / place / facts.value("ndf-files", "glossary", "path")
 
 
 def _read_json(path: Path) -> Any:
@@ -35,7 +30,7 @@ def _read_json(path: Path) -> Any:
 
 def layout(root: Path) -> gd.Layout:
     """宣言から置き場を求める。宣言が無い・source か document が無ければ `GlossaryError`。"""
-    raw = _read_json(_decl_path(root))
+    raw = _read_json(files.path(root, "glossary"))
     if not isinstance(raw, dict) or not isinstance(raw.get("source"), str) or not isinstance(raw.get("document"), str):
         raise GlossaryError("用語集の設定に source と document が無い")
     document = raw["document"]

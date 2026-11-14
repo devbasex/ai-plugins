@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.contracts import causes, facts, limits, result
+from ndf.domains.records import files
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import preflight_decide as pd
 
@@ -41,14 +42,9 @@ def run_entry(args: list[str], cwd: Path) -> Mapping[str, Any]:
     return got
 
 
-def _ndf_dir(root: Path, file_id: str) -> Path:
-    place = facts.value("ndf-files", file_id, "place")
-    return root / facts.value("places", place, "path") / facts.value("ndf-files", file_id, "path")
-
-
 def declaration_checked(root: Path) -> pd.Checked:
     """`.ndf/project.json` を確かめる。無ければ通す（既定で動く）。読めない・object でなければ止まる。"""
-    path = _ndf_dir(root, "project")
+    path = files.path(root, "project")
     if not path.is_file():
         return pd.Checked(pd.DECLARATION, result.result(TOOL, result.OK, "プロジェクトの宣言が無い（既定で動く）"))
     try:
@@ -72,7 +68,7 @@ def _sha256(path: Path) -> Optional[str]:
 
 def mvv_state(root: Path) -> str:
     """MVV の状態（absent・unapproved・approved・mismatch・unreadable）。"""
-    path = _ndf_dir(root, "mvv")
+    path = files.path(root, "mvv")
     if not path.is_file():
         return md.status(None, None)
     try:
