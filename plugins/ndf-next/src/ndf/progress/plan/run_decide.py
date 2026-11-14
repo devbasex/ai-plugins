@@ -412,6 +412,15 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
     """起こした印のうち、まだ起こしたまま待っている行（まだ起こせる行に残っているもの）だけを残し、読み直しの回数を
     1 つ進める。期限（`Policy.up`）までに行が実行中にならなかった起動は、起動の失敗の 1 回として数える。"""
     waiting = {a.key: a for a in _launches(_snap(state))}
+    kept, waits, expired = _tick_waits(state, waiting, policy)
+    state = replace(state, launched=tuple(kept), waits=tuple(waits))
+    for act in expired:
+        state = _fail(state, act, _expiry_reason(act, policy), policy, False)
+    return state
+
+
+def _tick_waits(state: RunState, waiting: dict[str, Launch], policy: Policy) -> tuple[list[str], list[tuple[str, int]], list[Launch]]:
+    """起こした印のうち、まだ起こせる行に残るものの読み直しの回数を 1 つ進め、待ち続ける印（と回数）と期限切れに分ける。"""
     counts = dict(state.waits)
     kept: list[str] = []
     waits: list[tuple[str, int]] = []
@@ -425,11 +434,13 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
         else:
             kept.append(key)
             waits.append((key, n))
-    state = replace(state, launched=tuple(kept), waits=tuple(waits))
-    for act in expired:
-        why = "止めたラッパーが {:g} 秒たっても動いている" if act.halt else "起こした conductor が {:g} 秒の間に行を始めない"
-        state = _fail(state, act, why.format(policy.up), policy, False)
-    return state
+    return kept, waits, expired
+
+
+def _expiry_reason(act: Launch, policy: Policy) -> str:
+    """期限までに行が実行中にならなかった（止める手なら、ラッパーが止まらなかった）起動の失敗の文面。"""
+    why = "止めたラッパーが {:g} 秒たっても動いている" if act.halt else "起こした conductor が {:g} 秒の間に行を始めない"
+    return why.format(policy.up)
 
 
 def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: Policy) -> RunState:
