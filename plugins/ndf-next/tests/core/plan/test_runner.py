@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -350,6 +351,38 @@ def test_prepare_keeps_a_finished_round_with_the_same_head(in_repo):
     (retired / f"{durable.run_name('K')}{durable.DB_SUFFIX}").touch()
     inv = runner.prepare(root, Path(rel), None, None, in_repo)
     assert (inv.key, inv.round_no) == ("K", 2)
+
+
+def test_fresh_after_removing_the_state_dir_runs_a_new_round_from_the_top(repo, tmp_path):
+    """#1592 の再現: 状態の置き場を消して打ち直すと前の回の鍵に戻り流れない。`--fresh` は別の鍵で先頭から流す。"""
+    plan = H.write_plan(repo, "p", [H.count_step("s", tmp_path / "n")])
+    sdir = repo / "plans" / "p.state"
+    assert H.ndf(repo, "next", plan)[0] == H.OK
+    first_key = json.loads((sdir / runner.RUN_FILE).read_text(encoding="utf-8"))["key"]
+    shutil.rmtree(sdir)
+    H.ndf(repo, "next", plan)
+    assert H.count(tmp_path / "n") == 1
+    shutil.rmtree(sdir)
+    code, out = H.ndf(repo, "next", plan, "--fresh")
+    assert code == H.OK, out
+    assert json.loads((sdir / runner.RUN_FILE).read_text(encoding="utf-8"))["key"] != first_key
+    assert H.count(tmp_path / "n") == 2
+
+
+def test_prepare_fresh_skips_a_recorded_round(in_repo):
+    """`fresh` は終わっていない回を続けず、置き場に鍵の記録が無い番号の回を選ぶ。無ければ今の振る舞いのまま。"""
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    digest = model.load(in_repo / rel).digest()
+    root = _root(in_repo)
+    head = _head_of(in_repo)
+    _write_record(in_repo / "plans" / "p.state", key="K", name="p", digest=digest, start=None, round=3, heads=[head])
+    dbos = root / durable.DBOS_DIR
+    dbos.mkdir(parents=True)
+    (dbos / f"{durable.run_name(assemble_decide.run_key('p', digest, None, head, 4))}{durable.DB_SUFFIX}").touch()
+    assert runner.prepare(root, Path(rel), None, None, in_repo).key == "K"
+    inv = runner.prepare(root, Path(rel), None, None, in_repo, fresh=True)
+    assert (inv.key, inv.round_no) == (assemble_decide.run_key("p", digest, None, head, 5), 5)
+    assert "--fresh" not in inv.again
 
 
 # --- 現状固定テスト: `runner.final_result` が状態の置き場の記録（prs.json・outputs.json）から作る結果（I-026） ---

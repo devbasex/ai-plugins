@@ -77,3 +77,19 @@ def test_fill_replaces_known_names_only():
 def test_workdir_falls_back_to_the_repo_root(place, worktree, repo, usable, expected):
     """マージで作業場所が消えた後のステップはリポジトリの根で打つ（#2969・#3022・#3186）。"""
     assert workdir_for(place, worktree, repo, usable) == expected
+
+
+def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():
+    """`--fresh` は終わっていない回も続けず、耐久の記録の置き場に無い番号を選ぶ（#1592）。"""
+    taken = {run_key("p", "d", None, "h1", 1)}
+    assert choose_run(_record(), "p", "d", None, "h1", finished=False, fresh=True, taken=taken.__contains__) == (
+        run_key("p", "d", None, "h1", 2),
+        2,
+    )
+
+
+def test_choose_run_fresh_without_a_record_does_not_return_to_the_old_key():
+    """状態の置き場を消して `record` が無くても、記録の残る番号 0 の鍵に戻らない（#1592）。"""
+    taken = {run_key("p", "d", None, "h1", 0)}
+    choice = choose_run(None, "p", "d", None, "h1", finished=False, fresh=True, taken=taken.__contains__)
+    assert choice == (run_key("p", "d", None, "h1", 1), 1)

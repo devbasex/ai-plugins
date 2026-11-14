@@ -5,13 +5,15 @@
   報告を返さずに流れる（#3176）。同じ引数で打ち直せば同じ鍵で、承認ゲートの待ちから続く（B2）
 - 差し込みの値を変えた打ち直しは別の回にする（#3053）。`{owner}` は回をまたいで同じ持ち主の名前（#2640）
 - マージで作業場所が消えたか登録が外れた後のステップは、リポジトリの根で打つ（#2969・#3022・#3186・#1886）
+- `--fresh` は前の回に戻らず、耐久の記録の置き場に無い番号の回で先頭から流す。状態の置き場を消した後も前の鍵に戻らない（#1592）
 """
 
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import PurePath
 from typing import Any, NamedTuple, Optional
 
@@ -65,19 +67,37 @@ def _same_plan(record: Mapping[str, Any], name: str, digest: str, start: Optiona
     return record.get("name") == name and record.get("digest") == digest and record.get("start") == start
 
 
+def _never_taken(_key: str) -> bool:
+    return False
+
+
 def choose_run(
-    record: Optional[Mapping[str, Any]], name: str, digest: str, start: Optional[str], head: Optional[str], finished: bool
+    record: Optional[Mapping[str, Any]],
+    name: str,
+    digest: str,
+    start: Optional[str],
+    head: Optional[str],
+    finished: bool,
+    *,
+    fresh: bool = False,
+    taken: Callable[[str], bool] = _never_taken,
 ) -> RunChoice:
     """前の回の記録 `record`（`run.json`）から、今回の実行の鍵を選ぶ。
 
     同じプラン・開始点の回が終わっていなければ同じ鍵で続ける（承認ゲートの待ちから回復する。B2）。終わっていても、
     head が回の初めか終わりの head と同じなら同じ鍵（終わった結果を返す。B4）。head が違えば次の回の鍵（#3176）。
     プランか開始点が違えば次の回の鍵にする。
+
+    `fresh` なら前の回を続けず、次の番号から数えて `taken`（耐久の記録の置き場に鍵の記録があるか）が偽になる最初の
+    番号の鍵を選ぶ。`record` が無くても（状態の置き場を消した後でも）前の回の鍵に戻らない（#1592）。
     """
-    if record is not None and _same_plan(record, name, digest, start):
+    if not fresh and record is not None and _same_plan(record, name, digest, start):
         if not finished or head is None or head in record["heads"]:
             return RunChoice(record["key"], record["round"])
-    round_no = record["round"] + 1 if record is not None else 0
+    first = record["round"] + 1 if record is not None else 0
+    if not fresh:
+        return RunChoice(run_key(name, digest, start, head, first), first)
+    round_no = next(n for n in itertools.count(first) if not taken(run_key(name, digest, start, head, n)))
     return RunChoice(run_key(name, digest, start, head, round_no), round_no)
 
 
