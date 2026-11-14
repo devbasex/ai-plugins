@@ -359,6 +359,12 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def _kind_changed(src: Path, dst: Path) -> bool:
+    """控え `src` と戻す先 `dst` で種類が違うか。リンクは控えの側でも戻す先でも作り直すので、違うとみなす
+    （写しはリンクのある場所へ書けない）。"""
+    return dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir()
+
+
 def _clear_replaced(backup: Path, agents: Path) -> None:
     """戻す先で、起動の間に種類が変わったもの（リンクへの置き換え・ファイルとディレクトリの入れ替え）を消す。
 
@@ -369,10 +375,10 @@ def _clear_replaced(backup: Path, agents: Path) -> None:
         src, dst = pairs.pop()
         if not (dst.is_symlink() or dst.exists()):
             continue
-        # リンクは控えの側でも戻す先でも作り直す（写しはリンクのある場所へ書けない）
-        if dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir():
+        if _kind_changed(src, dst):
             _remove(dst)
-        elif src.is_dir():
+            continue
+        if src.is_dir():
             pairs.extend((child, dst / child.name) for child in src.iterdir())
 
 
