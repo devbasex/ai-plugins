@@ -26,14 +26,28 @@ _MILESTONE_PAGE = (
 NOT_FOUND = 404
 
 
+def _milestone_title(ms: Any) -> Optional[str]:
+    """マイルストーンの題（無ければ None）。"""
+    return text_of(ms["title"]) if isinstance(ms, dict) else None
+
+
+def _issue_path(gh: GitHub, n: int, tail: str = "") -> str:
+    """課題の REST のパス（`tail` は `/labels` などの続き）。"""
+    return f"/repos/{gh.repo}/issues/{int(n)}{tail}"
+
+
+def _issue_raw(gh: GitHub, n: int) -> dict[str, Any]:
+    """課題の REST の GET の応答。"""
+    return gh.rest("GET", _issue_path(gh, n))
+
+
 def _issue(raw: dict[str, Any]) -> dict[str, Any]:
-    ms = raw["milestone"]
     parent = raw["parent"] if "parent" in raw else None
     return {
         "number": int(raw["number"]),
         "title": text_of(raw["title"]),
         "body": text_of(raw["body"]),
-        "milestone": text_of(ms["title"]) if isinstance(ms, dict) else None,
+        "milestone": _milestone_title(raw["milestone"]),
         "labels": [text_of(n["name"]) for n in raw["labels"]["nodes"]],
         "created_at": text_of(raw["createdAt"]),
         "updated_at": text_of(raw["updatedAt"]),
@@ -67,8 +81,7 @@ def closed_since(gh: GitHub, since: str) -> list[dict[str, Any]]:
     for nodes in _graphql_pages(gh, _CLOSED_PAGE, {"since": since}, "issues", "閉じた Issue の一覧"):
         for raw in nodes:
             if text_of(raw["closedAt"]) >= since:
-                ms = raw["milestone"]
-                out.append({"number": int(raw["number"]), "milestone": text_of(ms["title"]) if isinstance(ms, dict) else None})
+                out.append({"number": int(raw["number"]), "milestone": _milestone_title(raw["milestone"])})
     return out
 
 
@@ -90,12 +103,12 @@ def set_milestone_description(gh: GitHub, number: int, description: str) -> None
 
 
 def set_milestone(gh: GitHub, n: int, number: Optional[int]) -> None:
-    gh.rest("PATCH", f"/repos/{gh.repo}/issues/{int(n)}", {"milestone": number})
+    gh.rest("PATCH", _issue_path(gh, n), {"milestone": number})
 
 
 def issue(gh: GitHub, n: int) -> dict[str, Any]:
     """Issue の今の題・本文・状態・ラベル・更新の時刻（REST）。"""
-    raw = gh.rest("GET", f"/repos/{gh.repo}/issues/{int(n)}")
+    raw = _issue_raw(gh, n)
     labels = raw["labels"] if isinstance(raw.get("labels"), list) else []
     return {
         "number": int(n),
@@ -108,16 +121,16 @@ def issue(gh: GitHub, n: int) -> dict[str, Any]:
 
 
 def patch_issue(gh: GitHub, n: int, patch: dict[str, Any]) -> None:
-    gh.rest("PATCH", f"/repos/{gh.repo}/issues/{int(n)}", patch)
+    gh.rest("PATCH", _issue_path(gh, n), patch)
 
 
 def add_labels(gh: GitHub, n: int, labels: list[str]) -> None:
-    gh.rest("POST", f"/repos/{gh.repo}/issues/{int(n)}/labels", {"labels": labels})
+    gh.rest("POST", _issue_path(gh, n, "/labels"), {"labels": labels})
 
 
 def remove_label(gh: GitHub, n: int, label: str) -> None:
     """ラベルを外す。名前の `/` を別のパスにしないため、パスの 1 区切りとして符号化する。"""
-    gh.rest("DELETE", f"/repos/{gh.repo}/issues/{int(n)}/labels/{quote(label, safe='')}")
+    gh.rest("DELETE", _issue_path(gh, n, f"/labels/{quote(label, safe='')}"))
 
 
 def create_issue(gh: GitHub, title: str, body: str, labels: list[str]) -> int:
@@ -127,17 +140,17 @@ def create_issue(gh: GitHub, title: str, body: str, labels: list[str]) -> int:
 
 def issue_state(gh: GitHub, n: int) -> str:
     """Issue の状態（`open`・`closed`）。"""
-    return text_of(gh.rest("GET", f"/repos/{gh.repo}/issues/{int(n)}")["state"]).lower()
+    return text_of(_issue_raw(gh, n)["state"]).lower()
 
 
 def _issue_id(gh: GitHub, n: int) -> int:
-    return int(gh.rest("GET", f"/repos/{gh.repo}/issues/{int(n)}")["id"])
+    return int(_issue_raw(gh, n)["id"])
 
 
 def parent_of(gh: GitHub, n: int) -> Optional[int]:
     """Issue の親の番号。親が無ければ（HTTP 404）None。ほかの失敗は `GitHubError` のまま投げる。"""
     try:
-        raw = gh.rest("GET", f"/repos/{gh.repo}/issues/{int(n)}/parent")
+        raw = gh.rest("GET", _issue_path(gh, n, "/parent"))
     except GitHubError as exc:
         if exc.status != NOT_FOUND:
             raise
@@ -151,12 +164,12 @@ def set_parent(gh: GitHub, n: int, parent: Optional[int], current: Optional[int]
         return
     sub_id = _issue_id(gh, n)
     if parent is None:
-        gh.rest("DELETE", f"/repos/{gh.repo}/issues/{int(current)}/sub_issue", {"sub_issue_id": sub_id})
+        gh.rest("DELETE", _issue_path(gh, current, "/sub_issue"), {"sub_issue_id": sub_id})
         return
-    gh.rest("POST", f"/repos/{gh.repo}/issues/{int(parent)}/sub_issues", {"sub_issue_id": sub_id, "replace_parent": True})
+    gh.rest("POST", _issue_path(gh, parent, "/sub_issues"), {"sub_issue_id": sub_id, "replace_parent": True})
 
 
 def close_with_comment(gh: GitHub, n: int, body: str) -> None:
     """証拠をコメントに書いてから Issue を閉じる。"""
-    gh.rest("POST", f"/repos/{gh.repo}/issues/{int(n)}/comments", {"body": body})
-    gh.rest("PATCH", f"/repos/{gh.repo}/issues/{int(n)}", {"state": "closed", "state_reason": "completed"})
+    gh.rest("POST", _issue_path(gh, n, "/comments"), {"body": body})
+    gh.rest("PATCH", _issue_path(gh, n), {"state": "closed", "state_reason": "completed"})
