@@ -52,8 +52,7 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
     （シグナルを組へ転送した後に呼ぶ形。先頭が回収された後でも、組の番号＝先頭の pid で残りを見る）。
     猶予の間に終わったかは組全体で見る（SIGTERM を無視する子孫が残れば SIGKILL を送る）。
     """
-    grace = limits.seconds(grace_key)
-    interval = limits.value(grace_key, "interval")
+    grace, interval = _grace(grace_key)
     pgid = _target_group(proc, send_first)
     if pgid is None:
         return
@@ -85,9 +84,19 @@ def stop_detached_group(pgid: int, *, grace_key: str = STOP_TREE) -> None:
     if not group_alive(pgid):
         return
     signal_group(pgid, signal.SIGTERM)
+    grace, interval = _grace(grace_key)
     _wait_or_kill(
-        pgid, lambda: group_alive(pgid), lambda sig: signal_group(pgid, sig), limits.seconds(grace_key), limits.value(grace_key, "interval")
+        pgid,
+        lambda: group_alive(pgid),
+        lambda sig: signal_group(pgid, sig),
+        grace,
+        interval,
     )
+
+
+def _grace(grace_key: str) -> tuple[float, float]:
+    """上限の表の `grace_key` の猶予の秒と、終わったかを見る間隔。"""
+    return limits.seconds(grace_key), limits.value(grace_key, "interval")
 
 
 def _wait_or_kill(pgid: int, remaining: Callable[[], bool], send: Callable[[int], None], grace: float, interval: float) -> bool:
