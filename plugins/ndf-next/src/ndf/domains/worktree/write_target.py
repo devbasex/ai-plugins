@@ -231,16 +231,9 @@ class _Scan:
             if r.type == "heredoc_redirect":
                 self.redirects([c for c in r.named_children if c.type == "file_redirect"], st)
                 continue
-            if r.type != "file_redirect":
-                continue
-            op = next((c.type for c in r.children if not c.is_named), "")
-            dest = r.child_by_field_name("destination")
-            if dest is None or op not in WRITE_OPS:
-                continue
-            value = _unquote(dest)
-            if op == ">&" and (value == "-" or value.isdigit()):
-                continue
-            self.emit(value, st)
+            value = _redirect_target(r) if r.type == "file_redirect" else None
+            if value is not None:
+                self.emit(value, st)
 
     def substitutions(self, n: Any, st: _Place) -> None:
         """語の中のコマンド置換とプロセス置換を、部分シェルとして読む。語そのものが置換（`echo $(…)`）でも読む。"""
@@ -270,6 +263,18 @@ class _Scan:
             st.cwd = None
         if name == "cd" and st.base is not None:
             _apply_cd(st, words[1:])
+
+
+def _redirect_target(r: Any) -> Optional[str]:
+    """`file_redirect` 1 個が書き込む先の字面。書き込む向きでない・ファイル記述子の複製（`>&2`・`>&-`）なら `None`。"""
+    op = next((c.type for c in r.children if not c.is_named), "")
+    dest = r.child_by_field_name("destination")
+    if dest is None or op not in WRITE_OPS:
+        return None
+    value = _unquote(dest)
+    if op == ">&" and (value == "-" or value.isdigit()):
+        return None
+    return value
 
 
 def _last_statement(n: Any) -> Any:
