@@ -16,6 +16,7 @@ from ndf.contracts import causes, result
 COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
     "contracts": "ndf.contracts.cli",
+    "launch-args": "ndf.adapters.cli",
     "test-slot": "ndf.testing.command",
 }
 
