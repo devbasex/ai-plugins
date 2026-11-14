@@ -172,7 +172,7 @@ def _report(since: str) -> int:
     return result.emit(result.result(TOOL, result.OK, summary, metrics=metrics))
 
 
-def main(argv: list[str]) -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL, description="重いテストを作業マシンのテストの枠の下で走らせる")
     sub = parser.add_subparsers(dest="action", required=True)
     run = sub.add_parser("run", help="1 本のコマンドを枠の下で走らせる")
@@ -180,16 +180,28 @@ def main(argv: list[str]) -> int:
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- の後ろにシェルのコマンド 1 つ")
     rep = sub.add_parser("report", help="待った・止めた・諦めた回数と OOM Killer の増分を読む")
     rep.add_argument("--since", default="7d", help="期間（既定 7d）")
+    return parser
+
+
+def _run_words(args: argparse.Namespace) -> tuple[str, str | None]:
+    """run の引数からシェルのコマンド 1 つを取り出す。引数が誤っていれば（空のコマンドと）誤りの文を返す。"""
+    words = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if len(words) != 1 or not words[0].strip():
+        return "", "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す"
+    if args.wait_limit is not None and args.wait_limit < 1:
+        return "", "--wait-limit は 1 以上の秒にする"
+    return words[0], None
+
+
+def main(argv: list[str]) -> int:
     try:
-        args = parser.parse_args(argv)
+        args = _parser().parse_args(argv)
     except SystemExit as exc:
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     if args.action == "report":
         return _report(args.since)
-    words = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if len(words) != 1 or not words[0].strip():
-        return _stopped("invalid", "run には -- の後ろにシェルのコマンドを 1 つ（引用して）渡す")
-    if args.wait_limit is not None and args.wait_limit < 1:
-        return _stopped("invalid", "--wait-limit は 1 以上の秒にする")
-    return _run(words[0], args.wait_limit)
+    command, error = _run_words(args)
+    if error is not None:
+        return _stopped("invalid", error)
+    return _run(command, args.wait_limit)
