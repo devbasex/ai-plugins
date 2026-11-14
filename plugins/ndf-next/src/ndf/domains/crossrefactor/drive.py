@@ -284,8 +284,8 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[
     if got is not None:
         return got
     # 振り替える担当は無い（コードを書くのは修正担当だけ）。項目は採らないので、起点の記録の有無に依らず項目の起点まで戻す
-    reason = phase_decide.on_no_result(run.state["phases"][phase])
-    _undo_item(run, item, Status.DEFERRED, f"{phase}: {reason}")
+    after = phase_decide.on_no_result(run.state["phases"][phase], run.work.rev_parse("HEAD"), spare=False)
+    _undo_item(run, item, Status.DEFERRED, f"{phase}: {after.reason}")
     return None
 
 

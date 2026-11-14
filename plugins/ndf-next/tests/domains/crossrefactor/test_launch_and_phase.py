@@ -61,10 +61,12 @@ def test_phase_start_records_the_origin_before_launch():
 
 def test_no_result_without_an_origin_skips_the_item_instead_of_stopping():
     # #3313 の形: 記録 phases.add-tests に base_sha が無い
-    assert phase_decide.on_no_result({}) == "工程の起点が記録されておらず範囲を確定できないため、変更を採らずに項目を見送る"
-    assert phase_decide.on_no_result(None) == phase_decide.on_no_result({})
+    got = phase_decide.on_no_result({}, "beef", spare=True)
+    assert got.kind == phase_decide.SKIP and got.undo is None
 
 
-def test_no_result_with_an_origin_undoes_to_the_origin_and_skips_the_item():
-    got = phase_decide.on_no_result({"base_sha": "c0ffee"})
-    assert got == "担当が結果を出さずに終わり、振り替える担当が残っていないため、起点まで取り消して項目を見送る"
+def test_no_result_with_an_origin_undoes_and_reassigns():
+    got = phase_decide.on_no_result({"base_sha": "c0ffee"}, "beef", spare=True)
+    assert (got.kind, got.undo) == (phase_decide.REASSIGN, ("c0ffee", "beef"))
+    nothing_written = phase_decide.on_no_result({"base_sha": "c0ffee"}, "c0ffee", spare=False)
+    assert (nothing_written.kind, nothing_written.undo) == (phase_decide.SKIP, None)
