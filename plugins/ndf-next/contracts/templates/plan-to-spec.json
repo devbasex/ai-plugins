@@ -1,0 +1,13 @@
+{
+  "template": "plan-to-spec",
+  "purpose": "plan_to_spec",
+  "summary": "確定仕様化: worker がマージした PR（入力の pr）の設計を確定仕様へ移す",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "plan-to-spec",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "plan-to-spec"]}
+    ]
+  }
+}

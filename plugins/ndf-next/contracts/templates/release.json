@@ -1,0 +1,14 @@
+{
+  "template": "release",
+  "purpose": "release",
+  "summary": "デプロイ: worker が承認済みの PR（入力の pr）を本番へ出し、結果の outputs に delivery と version を返す",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "release",
+    "repo": "{{repo}}",
+    "release": true,
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "release"]}
+    ]
+  }
+}

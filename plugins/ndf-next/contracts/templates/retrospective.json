@@ -1,0 +1,13 @@
+{
+  "template": "retrospective",
+  "purpose": "retrospective",
+  "summary": "振り返り: worker がスプリントの判断の理由と採らなかった案を振り返りに残す",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "retrospective",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "retrospective"]}
+    ]
+  }
+}
