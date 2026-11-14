@@ -47,10 +47,11 @@ def test_prune_removes_days_older_than_the_window(tmp_path):
     assert left == ["2026-10-31.jsonl", "2026-11-01.jsonl", "2026-11-14.jsonl", "other.jsonl"]
 
 
-def test_metrics_write_failure_does_not_change_the_verdict(tmp_path, monkeypatch):
-    blocker = tmp_path / "blocker"
-    blocker.write_text("ファイルの下には書けない", encoding="utf-8")
-    monkeypatch.setattr(metrics, "_day_file", lambda state, now: blocker / "x.jsonl")
+def test_metrics_write_failure_does_not_change_the_verdict(tmp_path):
+    # 当日（UTC）の計測のファイルの名前をディレクトリで塞ぐ。日付の境界をまたいでも塞がるよう翌日の名前も塞ぐ
+    today = datetime.now(timezone.utc)
+    for day in (today, today + timedelta(days=1)):
+        (state_dir() / "hooks" / f"{day.strftime('%Y-%m-%d')}.jsonl").mkdir(parents=True)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999"))) is not None
     assert metrics.write_line(state_dir(), {"x": 1}) is False
 
