@@ -17,6 +17,9 @@ import jsonschema
 HERE = Path(__file__).resolve().parent
 # ファイルの名前 → スキーマ（schema.json）の $defs の名前
 SHAPES = {"features": "features_file", "fixes": "fixes_file"}
+# fixes.json の部のうち、id を持つ部と、行き先（to）を持ちうる部
+ID_PARTS = ("fixes", "regressions")
+DESTINATION_PARTS = (*ID_PARTS, "intake")
 
 
 def load(name: str) -> dict[str, Any]:
@@ -67,9 +70,9 @@ def _reference_errors(features: Mapping[str, Any], fixes: Mapping[str, Any]) -> 
     rows = features["rows"]
     ids = [r["id"] for r in rows]
     errs = [f"features: id が重なる: {i}" for i in _duplicates(ids)]
-    errs += [f"fixes: id が重なる: {i}" for i in _duplicates([f["id"] for f in fixes["fixes"] + fixes["regressions"]])]
+    errs += [f"fixes: id が重なる: {i}" for i in _duplicates([f["id"] for part in ID_PARTS for f in fixes[part]])]
     errs += _unknown_children("features", rows, places)
-    for part in ("fixes", "regressions", "intake"):
+    for part in DESTINATION_PARTS:
         errs += _unknown_children(part, fixes[part], places)
     return errs + _missing_rows(fixes["intake"], set(ids))
 
