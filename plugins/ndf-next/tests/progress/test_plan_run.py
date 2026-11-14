@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -324,6 +325,71 @@ def test_policy_reads_the_poll_from_the_environment(monkeypatch):
     assert run.policy().poll == 5.0 and run.policy().up > 5.0
     monkeypatch.delenv(run.POLL_ENV)
     assert run.policy().poll > 5.0
+
+
+# --- 写しの形（現状固定。I-021） --------------------------------------------------------------------
+
+
+def test_snapshot_without_reported_and_answered_has_empty_lists_and_no_judgement():
+    snap = run_decide.snapshot("pending", False, [], [])
+    assert snap == {
+        "state": "pending",
+        "complete": False,
+        "wakeable": [],
+        "running": [],
+        "reported": [],
+        "answered": [],
+        "stalls": [],
+        "unknown": [],
+        "judged": False,
+        "relaunch": [],
+        "stall_requests": [],
+        "halts": [],
+    }
+    assert list(snap) == [
+        "state",
+        "complete",
+        "wakeable",
+        "running",
+        "reported",
+        "answered",
+        "stalls",
+        "unknown",
+        "judged",
+        "relaunch",
+        "stall_requests",
+        "halts",
+    ]
+
+
+def test_snapshot_turns_tuples_into_lists_so_the_record_round_trips_through_json():
+    snap = run_decide.snapshot(
+        "running",
+        True,
+        [("a", "r1"), ("b", "r2")],
+        [("c", "r3", "s1")],
+        ("a/r1", "b/r2"),
+        (("c", "r3", "s1", 7),),
+    )
+    assert snap["state"] == "running" and snap["complete"] is True
+    assert snap["wakeable"] == [["a", "r1"], ["b", "r2"]]
+    assert snap["running"] == [["c", "r3", "s1"]]
+    assert snap["reported"] == ["a/r1", "b/r2"]
+    assert snap["answered"] == [["c", "r3", "s1", 7]]
+    assert json.loads(json.dumps(snap)) == snap
+
+
+def test_snapshot_takes_reported_and_answered_by_keyword_and_copies_every_input():
+    wakeable = [("a", "r1")]
+    running = [("b", "r2", "s1")]
+    reported = ["a/r1"]
+    answered = [("b", "r2", "s1", 3)]
+    snap = run_decide.snapshot("paused", False, wakeable, running, answered=answered, reported=reported)
+    assert snap["reported"] == ["a/r1"] and snap["answered"] == [["b", "r2", "s1", 3]]
+    reported.append("x/y")
+    wakeable.append(("x", "y"))
+    assert snap["reported"] == ["a/r1"] and snap["wakeable"] == [["a", "r1"]]
+    assert snap["reported"] is not reported and snap["wakeable"] is not wakeable
 
 
 # --- 進行表からの写し ------------------------------------------------------------------------------
