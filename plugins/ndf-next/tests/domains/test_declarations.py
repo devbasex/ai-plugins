@@ -96,4 +96,7 @@ def test_main_keys_are_declared_keys_and_guard_authorization():
 def test_each_declaration_has_one_file():
     paths = [r["path"] for r in facts.rows(FILES, kind="declaration")]
     assert len(paths) == len(set(paths))
-    assert all(r["place"] == "ndf" for r in facts.rows(FILES, kind="declaration"))
+    # リポジトリへ載る宣言は `.ndf` に置く。手元だけの宣言（中継のアカウントの指定など）は追跡しない置き場に置く
+    tracked = facts.column("places", "tracked")
+    for r in facts.rows(FILES, kind="declaration"):
+        assert r["place"] == "ndf" or not tracked[r["place"]], r["id"]
