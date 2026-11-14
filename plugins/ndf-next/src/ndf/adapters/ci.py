@@ -127,19 +127,23 @@ def bare_names(names: Iterable[str]) -> set[str]:
     return {bare_name(n) for n in names}
 
 
+def _short_name(name: str) -> str:
+    """ワークフローの名前の前置き `<ワークフロー> / ` を外し、前後の空白を除いた名前（分割ジョブの末尾は保つ）。"""
+    return name.rpartition(" / ")[2].strip()
+
+
 def required_key(name: str) -> str:
     """必須のチェックの照合の鍵。分割ジョブを名指しした（`pytest (1/2)`）ものはその分割を保ち、ほかは `bare_name`。
 
     名指しした分割を畳むと、`pytest (0/2)` だけが通った時点で `pytest (1/2)` も揃ったと読んでしまう。
     """
-    short = name.rpartition(" / ")[2].strip()
+    short = _short_name(name)
     return short if _SHARD.search(short) else bare_name(name)
 
 
 def _fulfils(check_name: str, key: str) -> bool:
     """チェックが必須の鍵（`required_key`）に当たるか。分割を名指しした鍵はその分割だけに当たる。"""
-    short = check_name.rpartition(" / ")[2].strip()
-    return short == key if _SHARD.search(key) else bare_name(check_name) == key
+    return _short_name(check_name) == key if _SHARD.search(key) else bare_name(check_name) == key
 
 
 def is_test_check(name: str, tests: Iterable[str]) -> bool:
