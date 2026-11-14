@@ -497,6 +497,13 @@ def _settle(ctx: SlotContext, held: Held, kind: str, taken: slot_pool.Taken, res
     return result
 
 
+def _close_streams(proc: subprocess.Popen[str]) -> None:
+    """止めた子の出力の管を閉じる。"""
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
+
+
 def run_command(
     command: str, cwd: Path, timeout: float, *, suites: Sequence[Mapping[str, object]] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -517,8 +524,6 @@ def run_command(
         except BaseException:
             # 自分の組で起こした子は端末の中断を受けないため、止めずに枠だけ返すと別の検証と並んで動き続ける
             process_group.stop_group(proc, grace_key=STOP_TEST)
-            for stream in (proc.stdout, proc.stderr):
-                if stream is not None:
-                    stream.close()
+            _close_streams(proc)
             raise
     return subprocess.CompletedProcess(command, proc.returncode, out, err)

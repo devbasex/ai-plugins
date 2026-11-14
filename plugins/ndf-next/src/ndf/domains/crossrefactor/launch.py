@@ -92,7 +92,7 @@ def _answer_text(req: Request, out: Path) -> str:
     raw = out.read_text(encoding="utf-8", errors="replace")
     try:
         payload = json.loads(raw)
-    except ValueError:  # noqa: NDF401 ファイル: 外側が JSON でなければ（途中で切れた出力）そのまま探す
+    except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
         return raw
     body = payload.get("result") if isinstance(payload, dict) else None
     return body if isinstance(body, str) else raw
