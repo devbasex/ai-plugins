@@ -149,6 +149,10 @@ def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
 Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
 
 
+# Skill を回す `claude -p` を打つ関数（argv・問い・上限の秒・作業ディレクトリ → 答え）。テストが差し替える
+SkillCaller = Callable[[Sequence[str], str, float, Optional[Path]], claude.ClaudeReply]
+
+
 def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, check=False)
 
@@ -290,10 +294,10 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
     return SKILL_FAILURES[failure] if failure in SKILL_FAILURES else "precondition"
 
 
-def _call_skill(run: StageRun, cwd: Path) -> StageResult:
+def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
     schema = contracts.load_json(contracts.schema_path("result"))
     call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema)
-    reply = claude.call_claude(claude.claude_args(call), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
+    reply = call_claude(claude.claude_args(call), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         return StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
@@ -302,12 +306,23 @@ def _call_skill(run: StageRun, cwd: Path) -> StageResult:
     return finished(run, reply.answer)
 
 
-def invoke(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str] = None, runner: Runner = run_command) -> StageResult:
-    """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の置き場、`answer` はプランの承認ゲートの答え。"""
+def invoke(
+    run: StageRun,
+    cwd: Path,
+    work_dir: Path,
+    answer: Optional[str] = None,
+    runner: Runner = run_command,
+    *,
+    call_claude: SkillCaller = claude.call_claude,
+) -> StageResult:
+    """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の置き場、`answer` はプランの承認ゲートの答え。
+
+    `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。
+    """
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind == SCRIPT:
         return _call_script(run, cwd, runner)
     if run.kind == SKILL:
-        return _call_skill(run, cwd)
+        return _call_skill(run, cwd, call_claude)
     raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")

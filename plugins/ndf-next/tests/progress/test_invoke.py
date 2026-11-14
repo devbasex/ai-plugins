@@ -178,7 +178,7 @@ def test_skill_failures_map_to_causes(failure, kind):
     assert invoke._skill_cause(claude.Failure(failure) if failure else None) == kind
 
 
-# --- 現状固定: _call_skill（I-025。`claude -p` の呼び出しと、答えから結果への写し） ---------------------
+# --- 現状固定: _call_skill（I-025。`invoke` の call_claude で差し替えた `claude -p` の呼び出しと、答えから結果への写し） ---------------------
 
 
 def _skill_run() -> invoke.StageRun:
@@ -192,10 +192,8 @@ def _reply(**kw):
 
 
 @pytest.fixture
-def calls(monkeypatch):
-    """`claude.call_claude` を差し替え、受けた引数を残す。答えは `calls.reply` に置く。"""
-    from ndf.adapters import claude
-
+def calls():
+    """`invoke` の `call_claude` へ渡す偽物と、受けた引数。答えは `box["reply"]` に置く。"""
     seen: list[dict] = []
     box = {"reply": _reply()}
 
@@ -203,8 +201,7 @@ def calls(monkeypatch):
         seen.append({"argv": list(argv), "prompt": prompt, "timeout": timeout, "cwd": cwd})
         return box["reply"]
 
-    monkeypatch.setattr(claude, "call_claude", fake)
-    return box, seen
+    return box, seen, fake
 
 
 def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls):
@@ -212,10 +209,10 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     from ndf.adapters import claude
     from ndf.contracts import limits
 
-    box, seen = calls
+    box, seen, fake = calls
     run = _skill_run()
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
-    got = invoke.invoke(run, tmp_path, tmp_path / "w")
+    got = invoke.invoke(run, tmp_path, tmp_path / "w", call_claude=fake)
     schema = contracts.load_json(contracts.schema_path("result"))
     want = claude.claude_args(claude.ClaudeCall(system=invoke.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
     assert seen == [{"argv": want, "prompt": invoke.skill_prompt(run), "timeout": limits.seconds(invoke.SKILL_LIMIT), "cwd": tmp_path}]
@@ -231,9 +228,9 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
 def test_skill_that_cannot_answer_stops_with_the_cause_of_the_failure(tmp_path, calls, failure, kind):
     from ndf.adapters import claude
 
-    box, _ = calls
+    box, _, fake = calls
     box["reply"] = _reply(ok=False, error="落ちた", failure=claude.Failure(failure) if failure else None)
-    got = invoke.invoke(_skill_run(), tmp_path, tmp_path)
+    got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     assert got.status == "stopped" and got.outputs == {}
     assert got.report["tool"] == "skill"
     assert got.cause == {"kind": kind, "detail": "Skill design を回せない: 落ちた"}
@@ -241,15 +238,15 @@ def test_skill_that_cannot_answer_stops_with_the_cause_of_the_failure(tmp_path, 
 
 @pytest.mark.parametrize("answer", [None, "文字列", [1], {"status": "ok"}])
 def test_skill_answer_that_is_not_a_result_is_bad_report(tmp_path, calls, answer):
-    box, _ = calls
+    box, _, fake = calls
     box["reply"] = _reply(answer=answer)
-    got = invoke.invoke(_skill_run(), tmp_path, tmp_path)
+    got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     assert got.status == "stopped" and got.cause["kind"] == "bad_report" and got.outputs == {}
     assert got.cause["detail"] == "作業 skill design が結果 JSON を返さない: 答えが結果 JSON の形に合わない"
 
 
 def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
-    box, _ = calls
+    box, _, fake = calls
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3, "extra": 1}))
-    got = invoke.invoke(_skill_run(), tmp_path, tmp_path)
+    got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     assert got.outputs == {"pr": 3} and got.warnings and "extra" in got.warnings[0]
