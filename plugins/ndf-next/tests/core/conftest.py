@@ -13,10 +13,3 @@ def root(tmp_path):
     path = tmp_path / "ndf" / "state"
     yield path
     durable.release_store(path)
-
-
-@pytest.fixture(scope="module")
-def pg_url(tmp_path_factory, start_postgres):
-    """使い捨ての PostgreSQL の URL（末尾の DB 名は postgres）。"""
-    with start_postgres(tmp_path_factory) as (_, base):
-        yield base + "/postgres"

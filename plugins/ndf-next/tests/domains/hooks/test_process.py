@@ -1,4 +1,8 @@
-"""エントリポイントを別のプロセスで起動する: 所要の退行（M3-H13）と、環境が無い状態からの用意（M3-H14・IH2）。
+"""エントリポイントを別のプロセスで起動する: 起動の重さの退行（M3-H13）と、環境が無い状態からの用意（M3-H14・IH2）。
+
+M3-H13 は所要時間で合否を決めない（マシンのスペックと混み具合で決まり、コードの良し悪しを表さない。#3436）。
+エントリポイントが起動する子のプロセスの数・読み込むモジュールの数・ディレクトリの走査を数え、決めた値と比べる。
+所要時間（p50・p95）は `ndf hooks stats` に記録するだけである。
 
 登録の command は S1 が `hooks/claude.json` に置く形（決定 89）をそのまま打つ。`hooks/entry.py` と `hooks/boot.py` は
 S1 が置くため、ここでは同じ働きの薄いスクリプト（本体の `run_entry`・`run_boot` を呼ぶだけ）を一時の置き場に置く。
@@ -11,20 +15,77 @@ import os
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.hooks import budget, env, metrics
+from ndf.domains.hooks import budget, env
 from ndf.testing.waits import wait_until
 
-from ._hooks import AUTO, SRC, bash, make_repo, read_sample, records, sample, sample_paths
+from ._hooks import AUTO, SRC, bash, make_repo, read_sample, records, sample, sample_paths, state_dir
 
 REGISTRATION = (
     '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'
 )
-RUNS = 20
+# エントリポイント 1 回の重さの上限（M3-H13）。モジュールは 2026-11-14 の実測（PreToolUse 83・Stop 146・SessionStart 70・
+# UserPromptSubmit 61・PostToolUse と SessionEnd 58）へ約 2 割を足した値。子のプロセスはどの事象も起動しない。
+# ディレクトリの走査は SessionStart の掃除（状態ディレクトリの hooks の下）だけが行う
+MAX_MODULES = {
+    "PreToolUse": 100,
+    "PermissionRequest": 100,
+    "PostToolUse": 70,
+    "UserPromptSubmit": 75,
+    "SessionEnd": 70,
+    "SessionStart": 85,
+    "Stop": 175,
+}
+MAX_CHILDREN = 0
+SCANNING_EVENTS = frozenset({"SessionStart"})
+
+# 対象のスクリプトを同じプロセスで走らせ、子のプロセス・新しく読んだモジュール・ディレクトリの走査を数えて書き出す
+PROBE = textwrap.dedent(
+    """
+    import json, os, runpy, subprocess, sys
+    out, target = sys.argv[1], sys.argv[2]
+    sys.argv = [target, *sys.argv[3:]]
+    seen = {"children": 0, "scans": []}
+    inside = [0]  # Popen の中の os.posix_spawn などを 2 度数えない
+    _popen = subprocess.Popen.__init__
+    def popen(self, *a, **k):
+        seen["children"] += 1
+        inside[0] += 1
+        try:
+            return _popen(self, *a, **k)
+        finally:
+            inside[0] -= 1
+    subprocess.Popen.__init__ = popen
+    for name in ("system", "fork", "posix_spawn", "posix_spawnp"):
+        if hasattr(os, name):
+            def child(*a, _o=getattr(os, name), **k):
+                if not inside[0]:
+                    seen["children"] += 1
+                return _o(*a, **k)
+            setattr(os, name, child)
+    for name in ("scandir", "listdir", "walk"):
+        def scan(*a, _o=getattr(os, name), _n=name, **k):
+            seen["scans"].append(str(a[0]) if a else ".")
+            return _o(*a, **k)
+        setattr(os, name, scan)
+    before = set(sys.modules)
+    code = 0
+    try:
+        runpy.run_path(target, run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code or 0
+    finally:
+        seen["modules"] = len(set(sys.modules) - before)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(seen, f)
+    sys.exit(code)
+    """
+)
 
 
 @pytest.fixture
@@ -48,20 +109,46 @@ def _register(python: Path, scripts: Path, runtime: str, event: str, payload: di
     )
 
 
+def _footprint(tmp_path: Path, target: Path, args: list[str], payload: str = "", cwd: Path | None = None) -> tuple[int, dict]:
+    probe = tmp_path / "probe.py"
+    probe.write_text(PROBE, encoding="utf-8")
+    out = tmp_path / "footprint.json"
+    done = subprocess.run(
+        [sys.executable, str(probe), str(out), str(target), *args], input=payload, capture_output=True, text=True, timeout=60, cwd=cwd
+    )
+    return done.returncode, json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_the_probe_counts_children_modules_and_scans(tmp_path):
+    # 数え漏らすと上限の検査が素通りするため、数える側を先に確かめる
+    target = tmp_path / "heavy.py"
+    target.write_text(
+        "import pathlib, subprocess, sys, xml.dom.minidom\n"
+        "subprocess.run([sys.executable, '-c', '0'])\n"
+        "list(pathlib.Path('.').glob('*'))\n"
+        "list(pathlib.Path('.').iterdir())\n",
+        encoding="utf-8",
+    )
+    code, seen = _footprint(tmp_path, target, [], cwd=tmp_path)
+    assert code == 0
+    assert seen["children"] == 1 and len(seen["scans"]) >= 2 and seen["modules"] >= 1
+
+
 @pytest.mark.parametrize("path", sample_paths(), ids=lambda p: "/".join(p.parts[-3:]))
-def test_entry_p95_stays_within_three_times_the_budget(path, scripts, tmp_path):
+def test_entry_stays_within_the_footprint(path, scripts, tmp_path):
     runtime, event = path.parts[-3], path.stem
-    payload = json.dumps(read_sample(path, tmp_path))
-    spent = []
-    for _ in range(RUNS):
-        started = time.monotonic()
-        done = subprocess.run(
-            [sys.executable, str(scripts / "entry.py"), runtime, event], input=payload, capture_output=True, text=True, timeout=60
-        )
-        spent.append((time.monotonic() - started) * 1000)
-        assert done.returncode == 0
-    limit = 3 * budget.budget_for(runtime, event).p95_ms
-    assert metrics.percentile(spent, 95) <= limit, f"p95 {metrics.percentile(spent, 95):.0f} ms > {limit:.0f} ms"
+    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    payload = json.dumps(read_sample(path, repo))
+    code, seen = _footprint(tmp_path, scripts / "entry.py", [runtime, event], payload, cwd=repo)
+    assert code == 0
+    assert records()[-1]["path"] == "entry" and not records()[-1].get("error"), records()[-1]
+    assert seen["children"] <= MAX_CHILDREN, seen
+    assert seen["modules"] <= MAX_MODULES[event], f"{event}: モジュール {seen['modules']} > {MAX_MODULES[event]}"
+    if event in SCANNING_EVENTS:
+        hooks_dir = str(state_dir() / "hooks")
+        assert all(p.startswith(hooks_dir) for p in seen["scans"]), seen["scans"]
+    else:
+        assert seen["scans"] == [], seen["scans"]
 
 
 def test_without_the_environment_every_event_passes_except_strict(scripts, tmp_path):

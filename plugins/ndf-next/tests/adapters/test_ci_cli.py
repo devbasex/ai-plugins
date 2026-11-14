@@ -13,6 +13,7 @@ from ndf.adapters import github
 from ndf.contracts import causes
 
 from ._ci_helpers import LOG, run
+from ._github_helpers import offline_client
 
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
 REPO = "devbasex/ai-plugins"
@@ -46,7 +47,7 @@ def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log
         respond = next((r for tail, r in responses.items() if path.endswith(tail)), None)
         return respond() if respond else httpx.Response(404, json={"message": "not found"})
 
-    api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
+    api = offline_client(handler)
     monkeypatch.setattr(github, "client", lambda **_: api)
 
 
@@ -120,7 +121,7 @@ def test_cli_watch_rate_limit_is_infra_wait(
     def limited(**_) -> Client:
         headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "9999999999"}
         handler = lambda request: httpx.Response(403, json={"message": "rate"}, headers=headers)  # noqa: E731
-        return Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
+        return offline_client(handler)
 
     monkeypatch.setattr(github, "client", limited)
     assert ci_cli.main(ARGS) == causes.exit_code("infra_wait")

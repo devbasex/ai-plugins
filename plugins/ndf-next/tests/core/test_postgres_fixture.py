@@ -58,7 +58,7 @@ def test_pg_url_keeps_database_start_options_and_shutdown(monkeypatch, tmp_path_
     options = f"-c listen_addresses=127.0.0.1 -p {port} -k {data}"
     outcome = pytest.raises(RuntimeError) if abort else contextlib.nullcontext()
     with outcome, postgres.start_postgres(tmp_path_factory) as (_, base):
-        # pg_url（core/conftest.py）は末尾に DB 名 /postgres を足す
+        # pg_url（core/_postgres_helpers.py）は末尾に DB 名 /postgres を足す
         assert base + "/postgres" == f"postgresql://ndf@127.0.0.1:{port}/postgres"
         assert calls == [
             ([bindir / "initdb", "-D", data, "-U", "ndf", "--auth=trust", "-E", "UTF8"], {"check": True, "capture_output": True}),

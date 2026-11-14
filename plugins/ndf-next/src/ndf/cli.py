@@ -34,6 +34,7 @@ COMMANDS: dict[str, str] = {
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "hooks": "ndf.domains.hooks.cli",
+    "issues": "ndf.domains.backlog.cli",
     "launch-args": "ndf.adapters.cli",
     "notify": "ndf.adapters.notify",
     "plan": "ndf.core.plan.cli",
@@ -42,6 +43,7 @@ COMMANDS: dict[str, str] = {
     "route": "ndf.core.route",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
+    "worker": "ndf.core.worker",
 }
 # モジュールのパス → 副命令の名前（`tool_of` の引き）
 _TOOL_OF: dict[str, str] = {path: name for name, path in COMMANDS.items()}

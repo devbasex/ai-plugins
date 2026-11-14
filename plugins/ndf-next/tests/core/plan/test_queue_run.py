@@ -13,11 +13,6 @@ from ndf.core.plan import model, queue_run
 from . import _plan_helpers as H
 
 
-@pytest.fixture
-def repo(tmp_path) -> Path:
-    return H.make_repo(tmp_path / "repo")
-
-
 _WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
 
 
