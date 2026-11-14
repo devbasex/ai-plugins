@@ -30,6 +30,16 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"
 COMPACT_STAMP = "%Y%m%dT%H%M%SZ"
 
 
+def active(row: Row) -> bool:
+    """未解放の割り当てか（`released_at` が無い）。"""
+    return row.get("released_at") is None
+
+
+def exposing(row: Row) -> bool:
+    """公開が開いているか（解放の後も閉じるまで開いている）。"""
+    return isinstance(row.get("expose"), dict) and row["expose"].get("closed_at") is None
+
+
 def now() -> str:
     return time.strftime(STAMP, time.gmtime())
 
@@ -68,15 +78,15 @@ class Ledger:
 
     def current(self, worktree: str) -> Optional[Row]:
         """worktree の今の割り当て（未解放の最後の 1 件）。"""
-        return latest(self.rows(), worktree, lambda r: r.get("released_at") is None)
+        return latest(self.rows(), worktree, active)
 
     def acquire(self, worktree: str, branch: str, environment: str) -> Optional[Row]:
         """割り当てを取る。既にあればそれを返す。空きが無ければ `None`。"""
         with self.editing() as rows:
-            got = latest(rows, worktree, lambda r: r.get("released_at") is None)
+            got = latest(rows, worktree, active)
             if got is not None:
                 return got
-            slot = testenv_decide.free_slot(r["slot"] for r in rows if r.get("released_at") is None)
+            slot = testenv_decide.free_slot(r["slot"] for r in rows if active(r))
             if slot is None:
                 return None
             row = {"id": f"{time.strftime(COMPACT_STAMP, time.gmtime())}-{os.getpid()}", "worktree": worktree, "branch": branch,
@@ -88,7 +98,7 @@ class Ledger:
     def update(self, worktree: str, change: Callable[[Row], None], pick: Optional[Callable[[Row], bool]] = None) -> bool:
         """worktree の今の割り当て（か `pick` に合う最後の 1 件）を `change` で書き換える。無ければ偽。"""
         with self.editing() as rows:
-            row = latest(rows, worktree, pick if pick is not None else (lambda r: r.get("released_at") is None))
+            row = latest(rows, worktree, pick if pick is not None else active)
             if row is None:
                 return False
             change(row)

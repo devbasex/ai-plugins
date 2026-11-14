@@ -38,7 +38,7 @@ def reap(t: Target, idle: float) -> list[dict[str, Any]]:
     items = []
     for row in t.book.rows():
         age = _age(row.get("last_used_at"))
-        if row.get("released_at") is not None or age is None or age < idle:
+        if not ledger.active(row) or age is None or age < idle:
             continue
         items.append(_stop_idle(t, row))
     return items
@@ -57,7 +57,7 @@ def _stop_idle(t: Target, row: dict[str, Any]) -> dict[str, Any]:
 
 def _open_row(rows: list[dict[str, Any]], worktree: str) -> Optional[dict[str, Any]]:
     """worktree の、開いている公開を持つ最後の割り当て（解放の後も閉じるまで残る）。"""
-    return ledger.latest(rows, worktree, lambda r: isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None)
+    return ledger.latest(rows, worktree, ledger.exposing)
 
 
 def _config(t: Target) -> dict[str, Any]:
@@ -74,9 +74,9 @@ def _config(t: Target) -> dict[str, Any]:
 def _claim(t: Target, url: str, ttl: str) -> bool:
     """公開の記録を置く。ほかの worktree が公開中なら置かずに偽（同時に開けるのは 1 本）。"""
     with t.book.editing() as rows:
-        if any(isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None and r.get("worktree") != t.key for r in rows):
+        if any(ledger.exposing(r) and r.get("worktree") != t.key for r in rows):
             return False
-        row = ledger.latest(rows, t.key, lambda r: r.get("released_at") is None)
+        row = ledger.latest(rows, t.key, ledger.active)
         if row is None:
             return False
         row["expose"] = {"url": url, "ttl": ttl, "opened_at": ledger.now(), "closed_at": None}
@@ -129,6 +129,6 @@ def unexpose(t: Target) -> Optional[str]:
         where = t.path if t.path.is_dir() else t.main_dir
         if t.shell.sh(str(command), where, values).returncode != 0:
             raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
-    if not t.book.update(t.key, _close, pick=lambda r: isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None):
+    if not t.book.update(t.key, _close, pick=ledger.exposing):
         raise TestenvError(f"台帳を閉じられない。unexpose を打ち直す: {url}")
     return url

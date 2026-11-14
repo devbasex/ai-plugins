@@ -489,3 +489,21 @@ def test_unexpose_without_close_command_only_closes_record(tmp_path: Path) -> No
     _assigned(t)
     testenv_sweep.expose(t)
     assert testenv_sweep.unexpose(t) == "https://wt0.example.test" and len(fake.calls) == 1
+
+
+# 現状固定（I-012）: `testenv_sweep.reap` が止める行と残す行。期待値は今の実装の出力。
+def test_reap_stops_only_unreleased_rows_idle_long_enough(tmp_path: Path) -> None:
+    old, new = "2000-01-01T00:00:00Z", ledger.now()
+    rows = [
+        {"worktree": "/w/a", "environment": "env-a", "slot": 0, "last_used_at": old, "released_at": None},
+        {"worktree": "/w/b", "environment": "env-b", "slot": 1, "last_used_at": old, "released_at": old},  # 解放済み
+        {"worktree": "/w/c", "environment": "env-c", "slot": 2, "last_used_at": new, "released_at": None},  # 新しい
+        {"worktree": "/w/d", "environment": "env-d", "slot": 3, "last_used_at": "broken", "released_at": None},  # 読めない
+        {"worktree": "/w/e", "environment": "env-e", "slot": 4, "released_at": None},  # 時刻が無い
+    ]
+    book = ledger.Ledger(tmp_path / "reg.json")
+    book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
+    fake = FakeShell({"compose -p": Completed(0, "", "")})
+    t = testenv.Target(tmp_path, tmp_path, {}, (), fake.shell(), book)
+    assert testenv_sweep.reap(t, 3600) == [{"kind": "testenv", "name": "env-a", "worktree": "/w/a", "result": "stopped"}]
+    assert [c[0] for c in fake.calls] == [["true", "compose", "-p", "env-a", "stop"]]

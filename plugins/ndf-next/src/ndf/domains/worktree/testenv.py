@@ -375,8 +375,7 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
     item: dict[str, Any] = {"kind": "testenv", "name": env, "worktree": str(wt)}
     if not placement.location_seen(wt, t.main_dir):
         return {**item, "result": "kept", "reason": "worktree の置き場をここから確かめられない"}
-    opened = row.get("expose")
-    if isinstance(opened, dict) and opened.get("closed_at") is None:
+    if ledger.exposing(row):
         return {**item, "result": "kept", "reason": "公開が開いている（unexpose で閉じてから回収する）"}
     owner, why = placement.owner_of(_workdirs(t, env), [str(r.get("worktree")) for r in rows if r.get("environment") == env])
     if owner == placement.FOREIGN:
@@ -394,7 +393,7 @@ def reclaim(t: Target, limit: Optional[int] = None) -> list[dict[str, Any]]:
     rows = t.book.rows()
     items: list[dict[str, Any]] = []
     for row in rows:
-        if row.get("released_at") is not None or Path(str(row.get("worktree"))).exists():
+        if not ledger.active(row) or Path(str(row.get("worktree"))).exists():
             continue
         items.append(_reclaim_one(t, row, rows))
         if limit is not None and sum(1 for i in items if i["result"] != "kept") >= limit:
