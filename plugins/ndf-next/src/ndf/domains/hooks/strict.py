@@ -135,9 +135,12 @@ def _moved(
 
 
 def _in_own_shell(parts: List[Union[List[str], str]], i: int) -> bool:
-    """`i` 番目の文が別のシェルで走るか（パイプラインの一部か、`&` で裏で走る）。"""
-    before = parts[i - 1] if i > 0 else None
-    after = parts[i + 1] if i + 1 < len(parts) else None
+    """`i` 番目の文が別のシェルで走るか（パイプラインの一部か、`&` で裏で走る）。
+
+    改行で並んだ文は区切りの字句を挟まずに続くので、前後が語の並び（list）のときは区切りではない。
+    """
+    before = parts[i - 1] if i > 0 and isinstance(parts[i - 1], str) else None
+    after = parts[i + 1] if i + 1 < len(parts) and isinstance(parts[i + 1], str) else None
     return before in strict_shell.PIPES or after in strict_shell.PIPES or after == strict_shell.BACKGROUND
 
 

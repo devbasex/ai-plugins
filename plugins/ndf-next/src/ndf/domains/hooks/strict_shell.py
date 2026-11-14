@@ -13,6 +13,9 @@ _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "|&", ";;", "(", ")"})
 # 前後のコマンドを別のシェル（サブシェル）で走らせる区切り（パイプライン・裏で走らせる `&`）
 PIPES = frozenset({"|", "|&"})
 BACKGROUND = "&"
+# 区切りでない演算子の字句（リダイレクト）。続けて書かれた演算子を分けるときに区切りと並べて長い順に当てる
+_REDIRECTIONS = frozenset({"<", ">", "<<", ">>", "<<<", "<&", ">&", "&>", "&>>", ">|", "<>"})
+_OPERATORS = sorted(_SEPARATORS | _REDIRECTIONS, key=len, reverse=True)
 
 
 def parts(text: str) -> Iterator[Union[List[str], str]]:
@@ -46,7 +49,20 @@ def _tokens(line: str) -> List[str]:
     lex = shlex.shlex(line, posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = "#"
-    return list(lex)
+    return [piece for token in lex for piece in _operators(token)]
+
+
+def _operators(token: str) -> List[str]:
+    """`shlex` が 1 つにまとめた続きの演算子（`);`・`&&(` など）を、演算子ごとに分ける。演算子でない語はそのまま。"""
+    if not token or token in _OPERATORS or not set(token) <= set("();<>|&"):
+        return [token]
+    pieces: List[str] = []
+    rest = token
+    while rest:
+        head = next((op for op in _OPERATORS if rest.startswith(op)), rest[0])
+        pieces.append(head)
+        rest = rest[len(head) :]
+    return pieces
 
 
 def _heredoc_delimiters(tokens: List[str]) -> List[str]:
