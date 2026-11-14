@@ -317,12 +317,8 @@ def _parser() -> argparse.ArgumentParser:
     rl = add("release")
     rl.add_argument("worktree")
     rl.add_argument("--repo-dir", required=True)
-    for name in ("sync", "push-fix"):
-        s = add(name)
-        s.add_argument("worktree")
-        s.add_argument("--branch", required=True)
-        if name == "push-fix":
-            s.add_argument("--commit")
+    _with_branch(add("sync"))
+    _with_branch(add("push-fix")).add_argument("--commit")
     _state_parsers(add)
     f = add("finish")
     f.add_argument("--summary", required=True)
@@ -344,19 +340,29 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--findings")
 
 
+def _with_branch(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """worktree と PR のブランチを受ける副命令の共通の引数を足す。"""
+    parser.add_argument("worktree")
+    parser.add_argument("--branch", required=True)
+    return parser
+
+
+def _with_state(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """状態ファイルを読む副命令の共通の引数（--state-dir・--pr）を足す。"""
+    parser.add_argument("--state-dir", required=True)
+    parser.add_argument("--pr", type=int, required=True)
+    return parser
+
+
 def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
-    for name in ("state-file", "fix-gate", "merge-fix", "review-scope"):
-        s = add(name)
-        if name == "review-scope":
-            s.add_argument("worktree")
-            s.add_argument("--purpose", required=True)
-            s.add_argument("--base", required=True)
-        s.add_argument("--state-dir", required=True)
-        s.add_argument("--pr", type=int, required=True)
-        if name == "state-file":
-            s.add_argument("--current", type=int)
-        if name == "merge-fix":
-            s.add_argument("--file", required=True)
+    _with_state(add("state-file")).add_argument("--current", type=int)
+    _with_state(add("fix-gate"))
+    _with_state(add("merge-fix")).add_argument("--file", required=True)
+    scope = add("review-scope")
+    scope.add_argument("worktree")
+    scope.add_argument("--purpose", required=True)
+    scope.add_argument("--base", required=True)
+    _with_state(scope)
 
 
 HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
