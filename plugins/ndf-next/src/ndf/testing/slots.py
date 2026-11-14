@@ -49,6 +49,8 @@ log = logging.getLogger(__name__)
 
 # 枠を持つ実行の子孫が受け継ぐ環境変数（入れ子の実行は枠を取らず待たない。I3）
 HELD_ENV = "NDF_TEST_SLOT_HELD"
+# CI で動いていることを示す環境変数。CI では枠を取らない（決定 12）
+CI_ENV = "GITHUB_ACTIONS"
 # 枠の置き場を別の開発コンテナと共有するときの環境変数（決定 8）
 SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
@@ -68,10 +70,12 @@ ReadMemory = Callable[[], "int | None"]
 class Stopped(Exception):
     """待ちを諦めたか、メモリで止めた。落ちたテストとして数えない（終了コードは `command` が止まった理由の表の種類から引く。I9）。"""
 
-    def __init__(self, reason: str, waited_seconds: float, available_mib: int | None):
+    def __init__(self, reason: str, waited_seconds: float, available_mib: int | None, retired: Sequence[Mapping[str, str]] = ()):
         self.reason = reason
         self.waited_seconds = waited_seconds
         self.available_mib = available_mib
+        # 枠の置き場を用意したときに退避した旧い状態の置き場（結果 JSON の `items` の形）
+        self.retired = [dict(item) for item in retired]
         super().__init__(self.summary())
 
     def summary(self) -> str:
@@ -79,6 +83,18 @@ class Stopped(Exception):
         if self.reason == GAVE_UP:
             return f"テストの枠を {self.waited_seconds:.0f} 秒待って諦めた（使えるメモリ: {memory}）"
         return f"使えるメモリが下限を割ったのでテストを止めた（{memory}、待った秒: {self.waited_seconds:.0f}）"
+
+
+class Interrupted(KeyboardInterrupt):
+    """枠の置き場を用意したときに旧い状態の置き場を退避した後で、シグナルで中断された（待ちの間・子の実行中）。
+
+    `KeyboardInterrupt` として扱える。退避した置き場（結果 JSON の `items` の形）を `retired` に持ち、中断で
+    終わるときも呼び出し元が復旧先を引ける。
+    """
+
+    def __init__(self, retired: Sequence[Mapping[str, str]]):
+        self.retired = [dict(item) for item in retired]
+        super().__init__()
 
 
 # プロセスの中の待ちの帳簿（monotonic の始まりと終わり）。待ちをテストの時間に数えないために引く（I4）
@@ -97,12 +113,18 @@ def waited_since(started: float) -> float:
         return sum(max(0.0, end - max(start, started)) for start, end in _ledger if end > started)
 
 
-def slots_dir(environ: Mapping[str, str] | None = None) -> Path:
-    """枠の置き場。`NDF_TEST_SLOTS_DIR` があればそこ、無ければ状態の置き場の下。"""
+def slots_place(environ: Mapping[str, str] | None = None) -> tuple[Path, list[dict[str, str]]]:
+    """枠の置き場と、そのために状態の置き場を用意したときに退避した旧い置き場（結果 JSON の `items` の形）。
+
+    `NDF_TEST_SLOTS_DIR` があればそこで、状態の置き場に触れない（退避は空）。無ければ状態の置き場の下。
+    エントリポイント（`ndf.cli`）も副命令の前に同じ用意をするが、ここでも用意する。`slots.gate` はエントリポイントを通らずにも呼べ、
+    用意の済んだ置き場（`format.json` がある）では 2 度目の用意は何も退避しない。
+    """
     env = os.environ if environ is None else environ
     if env.get(SLOTS_DIR_ENV):
-        return Path(env[SLOTS_DIR_ENV])
-    return identity.prepare_state_dir(identity.load()) / SLOTS_DIR_NAME
+        return Path(env[SLOTS_DIR_ENV]), []
+    ready = identity.prepare_state_dir(identity.load())
+    return ready.path / SLOTS_DIR_NAME, ready.items()
 
 
 @dataclass
@@ -180,6 +202,8 @@ class Held:
     memory_stopped: bool = False
     available_mib: int | None = None
     started_at: float = 0.0
+    # 枠の置き場を用意したときに退避した旧い状態の置き場（結果 JSON の `items` の形）
+    retired: list[dict[str, str]] = field(default_factory=list)
     _monitor: _MemoryMonitor | None = None
 
     @property
@@ -255,12 +279,13 @@ def gate(
 
     `options.kind` を渡すと判定を飛ばしてその種類で枠を取る（None なら宣言から判定する）。
     `options.interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
+    旧い状態の置き場を退避した後の中断（待ちの間・子の実行中）は、退避を持つ `Interrupted` にして送る。
     誤った設定は `limits.SlotConfigError`、待ちの諦めとメモリの停止は `Stopped` を送る。
     """
     options = GateOptions() if options is None else options
     env = os.environ if options.environ is None else options.environ
-    if env.get(HELD_ENV) or env.get("GITHUB_ACTIONS"):
-        yield Held()  # 入れ子（I3）と CI（決定 12）
+    if _skip_gate(env):
+        yield Held()
         return
     cwd = Path(cwd)
     suites = options.suites
@@ -269,15 +294,45 @@ def gate(
         yield Held()
         return
     limits = options.limits or limits_mod.load_limits(cwd)
+    prepared = _prepare_directory(options, env)
+    retired = prepared.retired if isinstance(prepared, Held) else prepared[1]
     try:
-        directory = options.directory or slots_dir(env)
+        if isinstance(prepared, Held):
+            yield prepared
+            return
+        yield from _held(SlotContext(prepared[0], cwd, limits, options), kind, retired)
+    except KeyboardInterrupt as exc:
+        if retired:
+            raise Interrupted(retired) from exc
+        raise
+
+
+def _skip_gate(env: Mapping[str, str]) -> bool:
+    """枠を取らない実行なら真。入れ子（I3）と CI（決定 12）。"""
+    return bool(env.get(HELD_ENV) or env.get(CI_ENV))
+
+
+def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> tuple[Path, list[dict[str, str]]] | Held:
+    """枠の置き場と、用意したときに退避した旧い状態の置き場を返す。
+
+    使えなければ、理由を `note` に書いた枠を取らない形の `Held` を返す（I8）。退避の後に使えなくなっても、
+    退避した置き場はその `Held` の `retired` に残す（復旧先を呼び出し元が引ける）。
+    """
+    retired: list[dict[str, str]] = []
+    try:
+        if options.directory is None:
+            directory, retired = slots_place(env)
+        else:
+            directory = options.directory
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
+        if isinstance(exc, identity.IdentityError):
+            # 退避の途中か後で失敗しても、それまでに退避した置き場を残す
+            retired = exc.items()
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
-        yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
-        return
-    yield from _held(SlotContext(directory, cwd, limits, options), kind)
+        return Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}", retired=retired)
+    return directory, retired
 
 
 def _record(directory: Path, cwd: Path, kind: str, held: Held, result: str) -> None:
@@ -384,8 +439,8 @@ def _take_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
         return None
 
 
-def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
-    held = Held()
+def _held(ctx: SlotContext, kind: str, retired: list[dict[str, str]]) -> Iterator[Held]:
+    held = Held(retired=retired)
     monitor = _MemoryMonitor(
         ctx.directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory
     )
@@ -402,7 +457,7 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
     finally:
         result = _settle(ctx, held, kind, taken, result)
     if result == MEMORY_STOPPED:
-        raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib)
+        raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib, held.retired)
 
 
 def _acquire_or_stop(ctx: SlotContext, held: Held, kind: str) -> slot_pool.Taken | None:
@@ -418,7 +473,7 @@ def _acquire_or_stop(ctx: SlotContext, held: Held, kind: str) -> slot_pool.Taken
         raise
     if taken is None and not held.note:
         _record(ctx.directory, ctx.cwd, kind, held, GAVE_UP)
-        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
+        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib, held.retired)
     return taken
 
 
