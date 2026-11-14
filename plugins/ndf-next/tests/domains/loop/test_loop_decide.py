@@ -313,3 +313,89 @@ def test_duplicate_lap_numbers_change_the_first_match() -> None:
     state = rec.fold([rec.event(rec.LAP_OPENED, 1, lap=1, issues=[1]), rec.event(rec.LAP_OPENED, 2, lap=1, issues=[2])])
     after = rec.apply(state, rec.event(rec.CREATED, 3, lap=1, issues=[5]))
     assert after.laps[0].created == (5,) and after.laps[1].created == ()
+
+
+# --- 現状固定: 周を締める（control_decide.close_lap） ---
+
+
+def _kinds(d: ctl.Decision) -> list[str]:
+    return [ev["kind"] for ev in d.events]
+
+
+def test_close_lap_events_order_and_fields() -> None:
+    """出した版（記録に無いものだけ・重複なし）→ 締め → 鍵の延長の順に、今の時刻で事象を並べる。"""
+    state = _running((1,))
+    state = _apply(state, ctl.released(state, _ctx(), "1.0"))
+    d = ctl.close_lap(state, _ctx(now=40.0), lap_decide.LapFacts(released=("1.0", "2.0", "2.0", "3.0")), TTL)
+    assert not d.refused
+    assert _kinds(d) == [rec.RELEASED, rec.RELEASED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
+    assert [ev.get("version") for ev in d.events[:2]] == ["2.0", "3.0"]
+    assert all(ev["at"] == 40.0 for ev in d.events)
+    assert all(ev["lap"] == 1 for ev in d.events[:3])
+    closed = d.events[2]
+    assert closed["outcome"] == rec.DONE and closed["reason"] == "版をリリースした（1.0・2.0・3.0）"
+    assert d.events[3]["session"] == "s1" and d.events[3]["until"] == 40.0 + TTL
+    assert d.summary == "周 1 を完了で締めた: 版をリリースした（1.0・2.0・3.0）"
+    assert d.metrics == {"lap": 1, "outcome": rec.DONE, "streak": 0}
+    assert _argv(d.next) == ("loop", "select") and d.next is not None and d.next.session
+    after = _apply(state, d)
+    assert after.laps[-1].released == ("1.0", "2.0", "3.0")
+
+
+def test_close_lap_uses_recorded_versions_when_facts_have_none() -> None:
+    state = _running((1,))
+    state = _apply(state, ctl.released(state, _ctx(), "1.0"))
+    d = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(failure_key="ci"), TTL)
+    assert _kinds(d) == [rec.LAP_CLOSED, rec.LEASE_TAKEN]
+    assert d.metrics["outcome"] == rec.DONE
+    assert d.events[0]["reason"] == "版をリリースした（1.0）。手順の失敗 ci は結果を変えない"
+
+
+def test_close_lap_failure_counts_the_streak() -> None:
+    state = _running((1,))
+    d1 = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(failure_key="ci"), TTL)
+    assert d1.metrics == {"lap": 1, "outcome": rec.FAILED, "streak": 1}
+    assert d1.summary == "周 1 を失敗で締めた: ci"
+    state = _apply(state, d1)
+    state = _apply(state, ctl.open_lap(state, _ctx(), (2,)))
+    d2 = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(failed=True), TTL)
+    assert d2.metrics == {"lap": 2, "outcome": rec.FAILED, "streak": 2}
+    assert d2.events[0]["reason"] == "失敗の印"
+
+
+def test_close_lap_with_stop_request_closes_then_halts() -> None:
+    """止める要求があれば、締めた後に鍵を延ばさず、止めて鍵を返す。"""
+    state = _running((1,))
+    state = _apply(state, ctl.stop(state, _ctx(None), "human", "終わり", False))
+    d = ctl.close_lap(state, _ctx(now=30.0), lap_decide.LapFacts(released=("1.0",)), TTL)
+    assert _kinds(d) == [rec.RELEASED, rec.LAP_CLOSED, rec.STOPPED, rec.LEASE_RELEASED]
+    assert d.events[2]["by"] == "human" and d.events[2]["reason"] == rec.USER_STOP
+    assert d.events[3]["session"] == "s1"
+    assert d.next is None
+    assert d.metrics == {"lap": 1, "outcome": rec.DONE, "streak": 0}
+
+
+def test_close_lap_without_open_lap() -> None:
+    """締めていない周が無ければ、止める要求があれば止め、無ければ前提の断りで選定へ向ける。"""
+    state = _apply(_running((1,)), ctl.close_lap(_running((1,)), _ctx(), lap_decide.LapFacts(), TTL))
+    d = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(), TTL)
+    assert d.kind == ctl.PRECONDITION and d.summary == "締めていない周が無い" and not d.events
+    assert _argv(d.next) == ("loop", "select")
+    stopping = _apply(state, ctl.stop(state, _ctx(None), "organizer", "", False))
+    s = ctl.close_lap(stopping, _ctx(), lap_decide.LapFacts(released=("9.9",)), TTL)
+    assert not s.refused
+    assert _kinds(s) == [rec.STOPPED, rec.LEASE_RELEASED]
+    assert s.summary == "止める要求があり、ループ demo を止めた"
+    assert s.next is None and s.metrics == {}
+
+
+def test_close_lap_refusals() -> None:
+    """鍵を持たないセッションと、止めたループの締めは断る。"""
+    state = _running((1,))
+    no_key = ctl.close_lap(state, _ctx("s2"), lap_decide.LapFacts(), TTL)
+    assert no_key.kind == ctl.REFUSED and not no_key.events and _argv(no_key.next) == ("loop", "get")
+    fresh = ctl.close_lap(rec.LoopState(), _ctx(), lap_decide.LapFacts(), TTL)
+    assert fresh.kind == ctl.PRECONDITION and _argv(fresh.next) == ("loop", "start")
+    halted = _apply(state, ctl.stop(state, _ctx(None), "human", "", True))
+    h = ctl.close_lap(halted, _ctx(), lap_decide.LapFacts(), TTL)
+    assert h.kind == ctl.REFUSED and h.next is None and not h.events
