@@ -27,6 +27,14 @@ def good(decision="fix"):
     return {"decision": decision, "reason": "テストが落ちた", "basis": ["test_failed"]}
 
 
+@pytest.fixture
+def int_schema(tmp_path) -> dict:
+    """整数 n を必須にするスキーマのファイルを書き、answer_schema で読んだもの。"""
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}}))
+    return llm.answer_schema(schema=str(path))
+
+
 def test_answer_schema_fills_choices_into_decision_enum():
     schema = llm.answer_schema(choices=["fix", "stop"])
 
@@ -44,14 +52,9 @@ def test_answer_schema_needs_exactly_one_mode(kwargs):
         llm.answer_schema(**kwargs)
 
 
-def test_answer_schema_reads_schema_file(tmp_path):
-    path = tmp_path / "s.json"
-    path.write_text(json.dumps({"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}}))
-
-    schema = llm.answer_schema(schema=str(path))
-
-    assert llm.check_answer({"n": 1}, schema) == []
-    assert llm.check_answer({"decision": "fix"}, schema) != []
+def test_answer_schema_reads_schema_file(int_schema):
+    assert llm.check_answer({"n": 1}, int_schema) == []
+    assert llm.check_answer({"decision": "fix"}, int_schema) != []
 
 
 def test_answer_schema_refuses_unreadable_or_invalid_schema(tmp_path):
@@ -104,13 +107,9 @@ def test_ask_returns_needs_human_after_two_misses_without_picking_words():
     assert "fix にするのがよい" in got.cause["detail"] and "claude を起動できない" in got.cause["detail"]
 
 
-def test_ask_in_json_mode_does_not_require_decision(tmp_path):
-    path = tmp_path / "s.json"
-    path.write_text(json.dumps({"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}}))
-    schema = llm.answer_schema(schema=str(path))
-
-    assert llm.ask("q", "m", schema, 30, call=FakeClaude(reply({"n": 3}))).answer == {"n": 3}
-    missed = llm.ask("q", "m", schema, 30, call=FakeClaude(reply({"x": 1}), reply({"n": "a"})))
+def test_ask_in_json_mode_does_not_require_decision(int_schema):
+    assert llm.ask("q", "m", int_schema, 30, call=FakeClaude(reply({"n": 3}))).answer == {"n": 3}
+    missed = llm.ask("q", "m", int_schema, 30, call=FakeClaude(reply({"x": 1}), reply({"n": "a"})))
     assert missed.cause["kind"] == "needs_human"
 
 
