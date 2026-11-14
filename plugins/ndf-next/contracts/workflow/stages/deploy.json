@@ -1,0 +1,77 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "deploy",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "デプロイ",
+      "phase": "release",
+      "inputs": [
+        "pr"
+      ],
+      "outputs": [
+        "delivery",
+        "version"
+      ]
+    }
+  },
+  "do": [
+    {
+      "release-gate": {
+        "call": "ndf.listen",
+        "metadata": {
+          "ndf": {
+            "kind": "gate",
+            "range": "none",
+            "gate": "release"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/gate-answer"
+            }
+          }
+        }
+      }
+    },
+    {
+      "release": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "release"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "release",
+            "range": "sprint_diff"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/release-result"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

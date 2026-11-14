@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "stage-io.schema.json",
+  "title": "工程とステップの入出力の規約",
+  "description": "工程の文書の input.schema・output.schema と、ステップの output.schema が参照する規約。工程の入力が要る文脈の鍵と、工程の出力が書く文脈の鍵は、工程の文書の metadata.ndf の inputs・outputs が持ち、読み手（ndf.progress.definition）がここの規約に重ねて確かめる",
+  "$defs": {
+    "stage-in": {
+      "type": "object",
+      "required": ["context"],
+      "properties": {
+        "context": {"$ref": "context.schema.json"},
+        "base": {"type": "string", "minLength": 1, "description": "入力の範囲の起点のコミット"},
+        "head": {"type": "string", "minLength": 1, "description": "入力の範囲の終点のコミット"}
+      }
+    },
+    "stage-out": {
+      "type": "object",
+      "required": ["steps", "summary"],
+      "properties": {
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/report"}, "description": "ステップの出力の並び"},
+        "summary": {"type": "string", "minLength": 1, "description": "工程の要約"},
+        "outputs": {"$ref": "context.schema.json", "description": "工程が文脈へ書く鍵と値"}
+      }
+    },
+    "report": {"$ref": "../schemas/result.schema.json", "description": "統一 JSON レポート。ステップの出力の共通の形"},
+    "gate-answer": {
+      "description": "承認ゲートのステップの出力。答え（approved・rejected）を持つ統一 JSON レポート",
+      "allOf": [
+        {"$ref": "#/$defs/report"},
+        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["answer"], "properties": {"answer": {"enum": ["approved", "rejected"]}}}}}
+      ]
+    },
+    "release-result": {
+      "description": "リリースのステップの出力。出した版を持つ統一 JSON レポート",
+      "allOf": [
+        {"$ref": "#/$defs/report"},
+        {"type": "object", "required": ["metrics"], "properties": {"metrics": {"type": "object", "required": ["version"], "properties": {"version": {"type": "string", "minLength": 1}}}}}
+      ]
+    }
+  }
+}

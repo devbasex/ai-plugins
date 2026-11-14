@@ -1,0 +1,54 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "release-verification",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "リリース後テスト",
+      "phase": "close",
+      "inputs": [
+        "version"
+      ]
+    }
+  },
+  "do": [
+    {
+      "release-verification": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "release-verification"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "verify",
+            "range": "released"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

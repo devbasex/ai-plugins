@@ -1,0 +1,55 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "plan-to-spec",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "確定仕様化",
+      "phase": "close",
+      "inputs": [
+        "issues",
+        "pr"
+      ]
+    }
+  },
+  "do": [
+    {
+      "plan-to-spec": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "plan-to-spec"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
