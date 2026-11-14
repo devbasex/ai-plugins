@@ -3,7 +3,7 @@
     ndf check [--base <起点>] [--event <GitHub の事象の JSON>]
 
 `--base` があれば差分の検査（I2）も行う。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
-結果 JSON を標準出力の最後の 1 行に出す。終了コードは 0 合格・1 違反・読めない（規則のデータ・構文・git）は事実の表 exit-codes の unreadable の値。
+結果 JSON を標準出力の最後の 1 行に出す。終了コードは事実の表 exit-codes の値で、合格は ok・違反は failed・読めない（規則のデータ・構文・git）は unreadable。
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ from ndf.contracts import exit_codes, result
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
-EXIT_OK = 0
-EXIT_VIOLATION = 1
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
 SCRIPT_DIRS = ("bin", "hooks")
@@ -138,6 +136,6 @@ def main(argv: list[str]) -> int:
     metrics = {"files": len(scope.sources), "findings": by_rule}
     if not found:
         emit(result.OK, f"{len(scope.sources)} ファイルに違反なし", [], metrics)
-        return EXIT_OK
+        return exit_codes.code_of("ok")
     emit(result.STOPPED, f"違反 {len(found)} 件", [f.as_item() for f in found], metrics)
-    return exit_codes.unreadable_code() if "syntax" in by_rule else EXIT_VIOLATION
+    return exit_codes.unreadable_code() if "syntax" in by_rule else exit_codes.code_of("failed")

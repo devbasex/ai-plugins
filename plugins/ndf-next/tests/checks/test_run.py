@@ -25,7 +25,7 @@ def test_clean_plugin_passes(plugin, monkeypatch, capsys):
 def test_violation_exits_1_and_lists_items(plugin, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
     plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
-    assert run.main([]) == run.EXIT_VIOLATION
+    assert run.main([]) == exit_codes.code_of("failed")
     report, err = last_json(capsys)
     assert report["status"] == "stopped"
     assert [i["rule"] for i in report["items"]] == ["NDF502"]
@@ -53,7 +53,7 @@ def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
     event.write_text(json.dumps({"pull_request": {"body": f"{mark} 直す"}}, ensure_ascii=False))
     assert run.main(["--base", base, "--event", str(event)]) == 0
     event.write_text(json.dumps({"pull_request": {"body": None}}))
-    assert run.main(["--base", base, "--event", str(event)]) == run.EXIT_VIOLATION
+    assert run.main(["--base", base, "--event", str(event)]) == exit_codes.code_of("failed")
     capsys.readouterr()
 
 
@@ -125,7 +125,7 @@ def test_emit_stopped_without_items_is_config_broken(capsys):
 def test_main_ok_report_shape(plugin, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
     plugin.write("src/ndf/a.py", "def f(x):\n    return x\n")
-    assert run.main([]) == run.EXIT_OK
+    assert run.main([]) == exit_codes.code_of("ok")
     report, _ = last_json(capsys)
     assert set(report) == {"tool", "status", "summary", "items", "metrics"}
     assert report["tool"] == run.TOOL
@@ -136,7 +136,7 @@ def test_main_ok_report_shape(plugin, monkeypatch, capsys):
 def test_main_violation_report_shape(plugin, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
     plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
-    assert run.main([]) == run.EXIT_VIOLATION
+    assert run.main([]) == exit_codes.code_of("failed")
     report, _ = last_json(capsys)
     assert set(report) == {"tool", "status", "summary", "items", "metrics"}
     assert report["summary"] == "違反 1 件"
