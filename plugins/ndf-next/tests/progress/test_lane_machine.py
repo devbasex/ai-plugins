@@ -53,6 +53,25 @@ def test_an_unreadable_plan_counts_each_running_wrapper_once_and_is_named():
     assert got.total == 2 and got.unreadable == ("/other:q1",)
 
 
+# --- count の現状固定（リファクタリングの前に今の出力を記録する） ----------------------------------------
+
+
+def test_count_takes_the_first_declaration_of_a_wrapper_named_in_two_plans_as_it_is_now():
+    first = machine.PlanLanes("plan:1", (("dup", 3, True), ("p1", 1, False)))
+    second = machine.PlanLanes("plan:2", (("dup", 5, True), ("p2", 2, True)))
+    listed = {"p1": _row(), "dup": _row()}
+    assert machine.count([first, second], listed, "") == machine.Count(6, ("dup", "p1", "p2"), ())
+    assert machine.count([second, first], listed, "") == machine.Count(8, ("dup", "p1", "p2"), ())
+
+
+def test_count_does_not_count_the_lanes_of_an_unreadable_plan_that_names_them_as_it_is_now():
+    """読めない計画の宣言に載ったラッパーは、宣言からも宣言にないラッパーとしても数えない（今の出力）。"""
+    broken = machine.PlanLanes("/other:q1", (("z", 4, True),), readable=False)
+    listed = {"z": _row(), "x": _row()}
+    assert machine.count([broken], listed, "") == machine.Count(1, ("x",), ("/other:q1",))
+    assert machine.count([broken], listed, "x") == machine.Count(0, (), ("/other:q1",))
+
+
 def test_discover_lists_each_plan_of_the_conductor_wrappers_once():
     listed = {"a": _row(), "b": _row(), "c": _row(plan_name="q2"), "d": {"running": True, "role": "organizer", "plan": "q3", "cwd": "/x"}}
     assert [(str(c), p) for c, p in machine.discover(listed)] == [("/other", "q1"), ("/other", "q2")]
