@@ -40,7 +40,7 @@ def closable(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], re
 
 
 def _stage_line(stage: str) -> re.Pattern[str]:
-    return re.compile(rf"^- \[( |x)\] {re.escape(stage)}(?:\s.*)?$", re.MULTILINE)
+    return re.compile(rf"^- \[( |x)\] {re.escape(stage)}(?:[^\S\n].*)?$", re.MULTILINE)
 
 
 def mark_stage(body: str, stage: str, stamp: str) -> Optional[str]:

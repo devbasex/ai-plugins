@@ -48,10 +48,10 @@ def test_trim_file_writes_history_first_and_check_file_resolves_from_root(tmp_pa
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "a.md").write_text("x", encoding="utf-8")
     doc = tmp_path / "handoff.md"
-    doc.write_text(BODY + "\n## 前の会話の進み\n\n- 済み\n", encoding="utf-8")
+    doc.write_text(BODY + "\n## 前の会話の進み\n\n- 退避する行\n", encoding="utf-8")
     history = tmp_path / "hist" / "handoff-history.md"
     assert handoff.trim_file(doc, history) == ["## 前の会話の進み"]
-    assert "済み" in history.read_text(encoding="utf-8") and "済み" not in doc.read_text(encoding="utf-8")
+    assert "退避する行" in history.read_text(encoding="utf-8") and "退避する行" not in doc.read_text(encoding="utf-8")
     assert handoff.trim_file(doc, history) == []
     assert handoff.check_file(doc, tmp_path, handoff.body_limits()).passed
 

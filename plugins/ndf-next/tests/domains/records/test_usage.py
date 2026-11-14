@@ -67,7 +67,7 @@ def test_subagent_and_cli_rows_share_one_ledger_and_second_stop_writes_the_delta
     assert first is not None and first["usage"]["output_tokens"] == 4
     _transcript(tr, [_line("m1", "2026-11-14T01:00:00Z", 4), _line("m2", "2026-11-14T01:05:00Z", 6)])
     second = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
-    assert second is not None and second["usage"]["output_tokens"] == 6 and second["usage"]["input_tokens"] == 0
+    assert second is not None and second["usage"]["output_tokens"] == 6 and second["usage"]["input_tokens"] == 1
     assert usage.record_cli({"output_tokens": 2}, {"run": "x"}, env) is not None
     rows, broken = jsonl.read_rows(usage.ledger_path(env))
     assert [r["caller"] for r in rows] == [usage.SUBAGENT, usage.SUBAGENT, usage.CLAUDE_CLI] and broken == 0
