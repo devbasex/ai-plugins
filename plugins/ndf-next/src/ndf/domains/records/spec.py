@@ -1,0 +1,51 @@
+"""確定仕様化の口: 設計を確定仕様へ溶かした後の用語集の付け替え・文書の作り直し・設計の削除（N8a・#1715）。
+
+正本を決められない語があれば、何も書かずに `spec_decide.SourceError` で止まる（書く前に判定する）。
+コミットに入れるパスは、渡した確定仕様のすべて・用語集の正本と書き直した文書・消した設計である。
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+from ndf.domains.records import glossary
+from ndf.domains.records import glossary_decide as gd
+from ndf.domains.records import spec_decide as sd
+
+
+class SpecError(ValueError):
+    """渡した確定仕様か設計が読めない。"""
+
+
+def _texts(root: Path, specs: Sequence[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for p in specs:
+        try:
+            out[p] = (root / p).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SpecError(f"確定仕様 {p} を読めない: {exc}") from exc
+    return out
+
+
+def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides: Mapping[str, str]) -> list[str]:
+    """用語集の正本を付け替え、文書を作り直し、設計を消して、コミットに入れるパスを返す。"""
+    if not specs:
+        raise SpecError("確定仕様（--spec）が 1 つも無い")
+    texts = _texts(root, specs)
+    missing = [p for p in removed if not (root / p).is_file()]
+    if missing:
+        raise SpecError("消す設計が無い: " + "、".join(missing))
+    lay = glossary.layout(root)
+    g = glossary.load(root, lay)
+    plan = sd.plan_glossary(g, set(removed), texts, overrides)
+    applied = sd.apply_plan(g, plan) if plan is not None else g
+    # 上限を超えるコンテキストがあれば、正本を書く前に止まる
+    gd.render_files(applied, lay)
+    if plan is not None:
+        (root / lay.source).write_text(json.dumps(applied, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    written = [row["path"] for row in glossary.render(root, check=False)]
+    for p in removed:
+        (root / p).unlink()
+    return sd.commit_paths(specs, [lay.source, *written], removed)
