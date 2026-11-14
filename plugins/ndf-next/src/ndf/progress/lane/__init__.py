@@ -267,7 +267,7 @@ def start_row(conn: sa.Connection, plan_id: str, lane: str, key: str, sprint_id:
     return warnings
 
 
-def _sprint_row(conn: sa.Connection, sprint_id: str) -> Optional[tuple[str, str, LaneRow]]:
+def sprint_row(conn: sa.Connection, sprint_id: str) -> Optional[tuple[str, str, LaneRow]]:
     """スプリントの進行表を指すレーンの行（計画の ID, レーン, 行）。レーンの外のスプリントなら None。"""
     sprint = store.read_table(conn, sprint_id)
     parent = store.read_table(conn, sprint["parent_id"]) if sprint and sprint["parent_id"] else None
@@ -286,7 +286,7 @@ def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Op
     スプリントの進行表の `completed` か `cancelled` を書いたのと同じトランザクションの中で呼ぶ。
     レーンの行が無ければ None。同じスプリントの行が既に終わっていれば書かずに同じ結果を返す（冪等）。
     """
-    found = _sprint_row(conn, sprint_id)
+    found = sprint_row(conn, sprint_id)
     if found is None:
         return None
     plan_id, lane, row = found
@@ -298,7 +298,7 @@ def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Op
 
 
 def _mark(conn: sa.Connection, sprint_id: str, build: Callable[[LaneRow], model.EventDraft]) -> Optional[int]:
-    found = _sprint_row(conn, sprint_id)
+    found = sprint_row(conn, sprint_id)
     if found is None:
         return None
     plan_id, lane, row = found

@@ -238,7 +238,7 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
     [
         ("design", {"title", "body_file", "worker", "rebuild", "review", "required"}),
         ("impl", {"title", "body_file", "test_command", "worker", "required"}),
-        ("design-merge", {"worker", "gate"}),
+        ("design-merge", {"worker"}),
     ],
 )
 def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):

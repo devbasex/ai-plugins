@@ -30,6 +30,7 @@ TOOL = "cli"
 
 # 副命令の名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
+    "answer": "ndf.progress.gate",
     "check": "ndf.checks.run",
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
