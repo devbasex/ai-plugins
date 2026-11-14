@@ -88,10 +88,8 @@ def _conductor(row: Mapping[str, Any]) -> bool:
     return row.get("role") == launch.ROLE and bool(row.get("plan")) and bool(row.get("cwd"))
 
 
-def count(plans: Sequence[PlanLanes], listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
-    """動いているレーンのプランの本数を数える。`listed` はラッパーの一覧（名前 → 行）、`skip` は起こそうとしている
-    レーンのラッパー（数えない）。"""
-    running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
+def _declared_total(plans: Sequence[PlanLanes], running: set[str], skip: str) -> tuple[int, set[str]]:
+    """読めた計画の宣言から、動いているレーンの `plans` を重み付きで数える（計画の順に、同じラッパーは最初の宣言だけ）。"""
     seen: set[str] = set()
     total = 0
     for p in plans:
@@ -99,6 +97,14 @@ def count(plans: Sequence[PlanLanes], listed: Mapping[str, Mapping[str, Any]], s
             if name != skip and name not in seen and (live or name in running):
                 seen.add(name)
                 total += n
+    return total, seen
+
+
+def count(plans: Sequence[PlanLanes], listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
+    """動いているレーンのプランの本数を数える。`listed` はラッパーの一覧（名前 → 行）、`skip` は起こそうとしている
+    レーンのラッパー（数えない）。"""
+    running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
+    total, seen = _declared_total(plans, running, skip)
     declared = {name for p in plans for name, _, _ in p.lanes}
     unreadable = tuple(sorted({p.key for p in plans if not p.readable}))
     for name, row in listed.items():
