@@ -121,6 +121,11 @@ def _names(checks: Sequence[ci.Check]) -> list[str]:
     return [c.name for c in checks]
 
 
+def _record(status: str, round_no: int, sha: str) -> dict[str, Any]:
+    """最終ゲートの記録（状態・回った回数・送った head）。"""
+    return {"status": status, "rounds": round_no, "head": sha}
+
+
 def run_gate(
     g: git.Git,
     hub: github.GitHub,
@@ -137,17 +142,13 @@ def run_gate(
         watched = port.wait(hub, sha, cfg)
         kind = watched.cause(cfg.tests)
         if kind is None:
-            return {"status": "passed", "rounds": round_no, "head": sha}
+            return _record("passed", round_no, sha)
         if kind != "test_failed" or round_no == cfg.max_fix:
-            raise GateStopped(
-                kind, f"最終ゲートの CI が通らない（{watched.reading.verdict}）", {"status": kind, "rounds": round_no, "head": sha}
-            )
+            raise GateStopped(kind, f"最終ゲートの CI が通らない（{watched.reading.verdict}）", _record(kind, round_no, sha))
         nodes = port.failed_tests(hub, watched)
         failed = nodes if nodes else _names(watched.reading.failed_tests)
         before = g.rev_parse("HEAD")
         if not fix(failed, round_no + 1):
-            raise GateStopped(
-                "work_stopped", "最後の修正担当が結果を出さずに終わった", {"status": "work_stopped", "rounds": round_no, "head": sha}
-            )
+            raise GateStopped("work_stopped", "最後の修正担当が結果を出さずに終わった", _record("work_stopped", round_no, sha))
         _check_fix(g, before, failed, cfg)
     raise AssertionError("最終ゲートの回数の上限の後に戻った")
