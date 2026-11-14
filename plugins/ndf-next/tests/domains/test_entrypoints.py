@@ -13,6 +13,9 @@ from ndf.contracts import facts
 
 EP = "entrypoints"
 CASES = "entrypoint-cases"
+FILES = "ndf-files"
+ENV = "env"
+PLACES = "places"
 ARG_KINDS = {"skill", "block", "report", "command"}
 
 
@@ -30,7 +33,7 @@ def accepts(entrypoint: str, call: str, env: list[str]) -> bool:
         return any(re.fullmatch(arg, call) for arg in ep["args"])
     if ep["kind"] == "hook":
         return call == ep["target"]
-    paths = [facts.value("ndf-files", f, "path") for f in ep["files"]]
+    paths = [facts.value(FILES, f, "path") for f in ep["files"]]
     return any(re.fullmatch(_path_pattern(p), call) for p in paths)
 
 
@@ -48,8 +51,8 @@ def test_every_entrypoint_has_an_accepted_case_and_new_loop_resume_are_shown():
 
 
 def test_entrypoints_refer_to_declared_env_files_and_places():
-    env = set(facts.ids("env"))
-    files = set(facts.ids("ndf-files"))
+    env = set(facts.ids(ENV))
+    files = set(facts.ids(FILES))
     for r in facts.rows(EP):
         assert set(r["env"]) <= env, r["id"]
         assert set(r.get("files", [])) <= files, r["id"]
@@ -57,20 +60,20 @@ def test_entrypoints_refer_to_declared_env_files_and_places():
         assert re.fullmatch(r"[A-Z][0-9]+[a-z]?\+?", r["owner_child"]), r["id"]
         assert ("args" in r) is (r["kind"] in ARG_KINDS), r["id"]
     for r in facts.rows(EP, kind="file"):
-        assert {facts.value("ndf-files", f, "place") for f in r["files"]} == {r["target"]}, r["id"]
+        assert {facts.value(FILES, f, "place") for f in r["files"]} == {r["target"]}, r["id"]
 
 
 def test_files_the_service_reads_have_an_entrypoint():
     served = {f for r in facts.rows(EP, kind="file") for f in r["files"]}
-    assert set(facts.ids("ndf-files", reader="service")) <= served
+    assert set(facts.ids(FILES, reader="service")) <= served
 
 
 def test_env_the_service_sets_is_in_the_workflow_entrypoint():
-    by_service = set(facts.ids("env", set_by="service"))
+    by_service = set(facts.ids(ENV, set_by="service"))
     assert by_service <= set(facts.value(EP, "skill-workflow", "env"))
     assert facts.value(EP, "skill-workflow", "env") == facts.value(EP, "block-next", "env")
 
 
 def test_places_given_by_env_name_a_declared_variable():
-    for r in facts.rows("places", root="env"):
+    for r in facts.rows(PLACES, root="env"):
         assert r["path"] == ".", r["id"]
