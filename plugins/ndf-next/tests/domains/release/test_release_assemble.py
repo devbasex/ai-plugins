@@ -236,3 +236,30 @@ def test_issue_2441_cli_reports_refused() -> None:
     """#2441: 待ちは止まった理由の種類 refused で返す（呼び手は閉じた後に打ち直す）。"""
     exc = assemble.ReleaseOpen("main 宛てのリリースの PR #41 が開いている")
     assert release_cli._stopped_of(exc)["cause"]["kind"] == "refused"
+
+
+@pytest.mark.parametrize("synced", [False, True])
+def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remains(tmp_path: Path, synced: bool) -> None:
+    """#3172: 出した後にマージされずに閉じた PR しか無ければ（ベースブランチに新しい変化が無い）、何度打っても空のリリースを組まない。
+
+    組み立ては依頼の PR ではなく範囲（本番ブランチ...ベースブランチ）から読むため、閉じた PR は入らない。戻す PR を
+    マージする前（`synced` が偽）と後のどちらでも同じ。
+    """
+    work = _origin_with_change(tmp_path, test_only=False)
+    git(work, "switch", "-q", "-c", "release/v1.2.4")
+    write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.4"})
+    git(work, "commit", "-q", "-am", "Release: kit v1.2.4")
+    git(work, "switch", "-q", "main")
+    git(work, "merge", "-q", "--no-ff", "release/v1.2.4", "-m", "Merge pull request #9 from o/release/v1.2.4")
+    git(work, "push", "-q", "origin", "main")
+    git(work, "tag", "kit--v1.2.4")
+    git(work, "push", "-q", "origin", "kit--v1.2.4")
+    git(work, "switch", "-q", "develop")
+    if synced:
+        git(work, "merge", "-q", "--no-ff", "main", "-m", "Merge pull request #10 from o/main")
+        git(work, "push", "-q", "origin", "develop")
+    for _ in range(2):
+        hub = _hub()
+        with pytest.raises(assemble.NothingToRelease):
+            assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+        assert hub.requests == []
