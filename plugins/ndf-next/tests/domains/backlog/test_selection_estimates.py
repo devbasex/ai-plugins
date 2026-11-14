@@ -75,3 +75,15 @@ def test_unscored_matches_the_review_rule():
     stored = {"1": _raw(1, "a"), "2": _raw(2, "old")}
     assert estimates_decide.unscored([1, 2, 3], stored, {1: "a", 2: "new", 3: "c"}) == [2, 3]
     assert estimates_decide.unscored([1], {}, {1: "a"}) == []
+
+
+# --- 現状固定: 記録の鮮度（_pick の記録の枝と unscored）。辞書でない記録と digest の欠けた記録の扱いを記録する ---
+
+
+def test_review_treats_non_dict_and_digestless_records_as_stale():
+    stored = {"1": "壊れた記録", "2": {"number": 2, "ubv": 3, "tc": 2, "rr_oe": 1, "size": 2}, "3": _raw(3, "now3")}
+    digests = {1: "now1", 2: "now2", 3: "now3"}
+    ests, excluded = estimates_decide.estimates([1, 2, 3], {}, stored, {}, Config(), digests)
+    assert list(ests) == [3]
+    assert [(e["number"], e["reason"]) for e in excluded] == [(1, estimates_decide.STALE), (2, estimates_decide.STALE)]
+    assert estimates_decide.unscored([3, 2, 1, 4], stored, {**digests, 4: "now4"}) == [2, 1, 4]
