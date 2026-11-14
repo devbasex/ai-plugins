@@ -36,8 +36,15 @@ class PluginIdentity:
 
 
 def _state_home() -> Path:
-    xdg = os.environ.get("XDG_STATE_HOME", "")
-    return Path(xdg) if xdg else Path.home() / ".local" / "state"
+    """状態の置き場の根（置き場は `<根>/<プラグイン名>`）。`NDF_STATE_HOME`・`XDG_STATE_HOME`・`~/.local/state` の順に引く。
+
+    `NDF_STATE_HOME` も根として読み、プラグイン名を足す。サービスが旧い NDF と同じ値を渡しても、旧い置き場を退避しない。
+    """
+    for name in ("NDF_STATE_HOME", "XDG_STATE_HOME"):  # 先に引くほうが先
+        value = os.environ.get(name, "")
+        if value:
+            return Path(value).expanduser()
+    return Path.home() / ".local" / "state"
 
 
 def load() -> PluginIdentity:
