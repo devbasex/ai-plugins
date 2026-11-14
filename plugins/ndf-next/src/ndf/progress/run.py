@@ -207,16 +207,25 @@ def _find_enum(node: Any, key: str) -> Optional[list[str]]:
     return next((found for child in _children(node) if (found := _find_enum(child, key)) is not None), None)
 
 
+def _listen_choices(step: stages.StepDef) -> list[str]:
+    """承認ゲートの答えの語（出力の規約の `answer` の enum）。"""
+    listed = _find_enum(definition.ref_target(step.output_ref), "answer") if step.output_ref else None
+    return listed if listed is not None else []
+
+
+def _route_choices(prog: StepProgress) -> list[str]:
+    """プランの承認ゲートの答えの語（待っているステップの結果の routes）。"""
+    waiting = prog.waiting if prog.waiting is not None else {}
+    routes = waiting["report"]["routes"] if isinstance(waiting["report"].get("routes"), dict) else {}
+    return list(routes)
+
+
 def choices(m: Move) -> list[str]:
     """待っているステップへの答えの選択肢。承認ゲートは出力の規約の答えの語、プランの承認ゲートはプランの routes。"""
     assert m.step is not None and m.progress is not None
     known = facts.ids(result.ANSWERS)
-    if invoke.is_listen(m.step):
-        listed = _find_enum(definition.ref_target(m.step.output_ref), "answer") if m.step.output_ref else None
-        return [a for a in (listed if listed is not None else []) if a in known]
-    waiting = m.progress.waiting if m.progress.waiting is not None else {}
-    routes = waiting["report"]["routes"] if isinstance(waiting["report"].get("routes"), dict) else {}
-    return [a for a in routes if a in known]
+    listed = _listen_choices(m.step) if invoke.is_listen(m.step) else _route_choices(m.progress)
+    return [a for a in listed if a in known]
 
 
 def _gate_routes(table_id: str, m: Move) -> dict[str, Any]:
