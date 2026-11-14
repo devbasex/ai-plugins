@@ -176,7 +176,9 @@ def _add_writes(sub: Any) -> None:
     s.add_argument("--candidates", type=Path, required=True, help="候補の行の JSON の配列のファイル")
     s.add_argument("--first", type=int, nargs="*", default=[], help="先頭に選ぶ課題（直して出し直すと答えた課題）")
     s.add_argument("--size", type=int, default=1, help="周に入れる課題の数")
-    m = _named(sub, "sprint", "周のモードを根拠つきで決める", lambda s, c, a: ctl.decide_mode(s, c, a.mode, a.basis, definition.modes()), True)
+    m = _named(
+        sub, "sprint", "周のモードを根拠つきで決める", lambda s, c, a: ctl.decide_mode(s, c, a.mode, a.basis, definition.modes()), True
+    )
     m.add_argument("--mode", required=True)
     m.add_argument("--basis", required=True, help="モードの判定の根拠")
     x = _named(sub, "exclude", "周の途中で課題を外す", lambda s, c, a: ctl.exclude(s, c, a.issue, a.reason), True)

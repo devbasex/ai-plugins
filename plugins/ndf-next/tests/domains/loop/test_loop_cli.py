@@ -103,5 +103,17 @@ def test_close_plan_and_review_args(loop: Callable[..., dict]) -> None:
     plan = loop("close-plan", "--pace", "normal", "--route", "merged-by-check", "--mvv", "--record-pr", "0")
     assert plan["metrics"] == {"record_pr": "0", "verify": False, "pace": "normal"}
     review = loop("review-args", "--purpose", "code", "--pr", "12", "--state-dir", "/s", "--base", "develop")
-    assert review["items"][0]["review"] == [result.ENTRY, "cross-review", "run", "--pr", "12", "--state-dir", "/s", "--base", "develop", "--purpose", "code"]
+    assert review["items"][0]["review"] == [
+        result.ENTRY,
+        "cross-review",
+        "run",
+        "--pr",
+        "12",
+        "--state-dir",
+        "/s",
+        "--base",
+        "develop",
+        "--purpose",
+        "code",
+    ]
     assert loop("close-plan", "--pace", "slow", "--route", "none")["cause"]["kind"] == "invalid"
