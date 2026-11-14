@@ -56,10 +56,13 @@ def _code(value: Any) -> str:
     return "、".join(f"`{v}`" for v in items)
 
 
+def _listed(term: Mapping[str, Any], key: str) -> list[str]:
+    """語の項目の一覧（`deprecated` など）。無ければ空。"""
+    return list(term[key]) if key in term else []
+
+
 def _deprecated(term: Mapping[str, Any]) -> list[str]:
-    plain = list(term["deprecated"]) if "deprecated" in term else []
-    alone = [f"{w}（単独）" for w in term["deprecated_standalone"]] if "deprecated_standalone" in term else []
-    return plain + alone
+    return _listed(term, "deprecated") + [f"{w}（単独）" for w in _listed(term, "deprecated_standalone")]
 
 
 def _row(term: Mapping[str, Any]) -> str:
@@ -158,8 +161,8 @@ def deprecated_in_meanings(g: Mapping[str, Any]) -> list[dict[str, str]]:
     今の語（ほかの語の `term`）の中に現れる廃止した語は数えない。行内のコードの中も見ない。
     """
     live = _live(g)
-    words = [(w, False) for t in g["terms"] for w in (t["deprecated"] if "deprecated" in t else [])]
-    words += [(w, True) for t in g["terms"] for w in (t["deprecated_standalone"] if "deprecated_standalone" in t else [])]
+    words = [(w, False) for t in g["terms"] for w in _listed(t, "deprecated")]
+    words += [(w, True) for t in g["terms"] for w in _listed(t, "deprecated_standalone")]
     found: list[dict[str, str]] = []
     for t in g["terms"]:
         text = _masked(str(t["meaning"]), live)
