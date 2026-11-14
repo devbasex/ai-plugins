@@ -242,6 +242,35 @@
 | #3303・#3290 | 根拠の原文への参照（`.ndf/handoff/lrebuild-note-rebuild-1142-label.md`）を [issue-3347-source-note.md](issue-3347-source-note.md) の節「ndf-next を試す起動の手順」へ向ける |
 | #1142 | 「本文の取り消し線」の 8 か所。設計レビューの表の G の行に設計 PR を添える |
 
+## ファイル配置
+
+触るファイルは設計文書の「設計の結果」の行と同じである。子の PR ごとの分け方は「#3347 で子へ足す受け入れ条件」にある。
+
+| パス | 種類 | 役割 1 文 | 作る子 |
+| --- | --- | --- | --- |
+| `scripts/plugin-deps.py` | 新設 | 副命令 `outdated` と `bump`（決定 107） | X2 |
+| `scripts/tests/test_plugin_deps.py` | 新設 | `plugin-deps.py` の単体テスト（PyPI の応答は記録した JSON） | X2 |
+| `.github/workflows/plugin-deps.yml` | 新設 | 週 1 回 `outdated` を打ち、遅れの Issue を 1 件だけ作るか書き直す | X2 |
+| `.github/workflows/ndf-next.yml` | 変更 | 一時コピーの検査（X1+）と `uv lock --check`（X2）のジョブを足す | X1+・X2 |
+| `plugins/ndf-next/pyproject.toml` | 変更 | 上げる先の版と `[tool.ndf.deps.hold]` | X2 |
+| `plugins/ndf-next/uv.lock` | 変更 | `pyproject.toml` から `uv lock` で作り直す | X2 |
+| `plugins/ndf-next/.claude-plugin/plugin.json` | 変更 | `name` を `ndf11` にする（決定 100） | X1+ |
+| `plugins/ndf-next/.codex-plugin/plugin.json` | 変更 | 同上 | X1+ |
+| `plugins/ndf-next/src/ndf/identity.py` | 変更 | 表 `FIXED_WORDS` を置く（決定 101） | X1+ |
+| `plugins/ndf-next/src/ndf/checks/invariants.py` | 変更 | I1 の名前の集合を広げる（決定 101） | X1+ |
+| `plugins/ndf-next/src/ndf/checks/children.json` | 新設 | 子の表の写し（決定 97） | X1+ |
+| `plugins/ndf-next/src/ndf/checks/child_deps.py` | 新設 | 規則 `child-deps`（IG1・IG2） | X1+ |
+| `plugins/ndf-next/tests/checks/test_child_deps.py` | 新設 | `child_deps` の単体テスト | X1+ |
+| `plugins/ndf-next/tests/checks/test_invariants.py` | 変更 | I1 の名前の集合の単体テスト | X1+ |
+
+## クラスと関数の構造
+
+| 置き場 | モジュール | 最上位の関数 |
+| --- | --- | --- |
+| `scripts/plugin-deps.py` | `plugin-deps` | `target`・`fetch`・`outdated`・`bump`（新設） |
+| `plugins/ndf-next/src/ndf/checks/child_deps.py` | `checks.child_deps` | `load_children`・`owner`・`closure`・`check`（新設） |
+| `plugins/ndf-next/src/ndf/checks/invariants.py` | `checks.invariants` | I1 の照合の名前の集合（変更） |
+
 ## 関数の仕様
 
 ### `scripts/plugin-deps.py`（X2）
@@ -266,11 +295,64 @@
 
 | 関数 | 異常 | 扱い |
 | --- | --- | --- |
-| `plugin-deps.py outdated` | PyPI に届かない | その行を `unknown` にし、`warnings` に載せる。週 1 回のジョブは Issue を書かずに終える |
-| `plugin-deps.py bump` | `uv lock` が解決できない | 宣言と lock を元へ戻し、終了コード 1。結果に固定させている相手を載せる |
+| `fetch(name)` | PyPI に届かない | その行を `unknown` にし、`warnings` に載せる。週 1 回のジョブは Issue を書かずに終える |
+| `bump(project, names)` | `uv lock` が解決できない | 宣言と lock を元へ戻し、終了コード 1。結果に固定させている相手を載せる |
 | 週 1 回のジョブ | 印を持つ Issue が 2 件以上ある | 最も古い 1 件を書き直し、ほかを閉じる |
 | 一時コピーのジョブ | I1 の指摘の集合が元と違う | 差分（元だけ・コピーだけ）を出して落ちる |
 | `child-deps` | `children.json` が無い・形が違う | 検査を止める（止まった理由 `config_broken`） |
+
+## 処理の手順
+
+| 関数 | 条件の組み合わせ | 結果 |
+| --- | --- | --- |
+| `target(releases, now)` | 最新の安定版が 365 日以内（ちょうど 365 日を含む） | 最新の安定版 |
+| `target(releases, now)` | 最新の安定版が 365 日より前で、より新しいプレリリースがある | 最新（プレリリースを含む） |
+| `target(releases, now)` | 最新の安定版が 365 日より前で、より新しいプレリリースが無い | 最新の安定版 |
+| `target(releases, now)` | 安定版が 1 つも無い | 最新 |
+| `outdated(project, now)` | `[tool.ndf.deps.hold]` に名前があり、固定させている相手の制約がまだある | `held` |
+| `outdated(project, now)` | 今の版が上げる先と同じ | `latest` |
+| `outdated(project, now)` | 今の版が上げる先より古い | `behind` |
+| `outdated(project, now)` | `fetch` が失敗した | `unknown` |
+
+- 繰り返しの終わる条件: 宣言の行を 1 回ずつ読み終えたとき
+- 計算量の注意: PyPI の JSON API を宣言の行の数（今は 24 本）だけ読む。週 1 回のジョブだけが打つ
+
+## 内部のデータと定数
+
+| 名前 | 種類 | 置き場 | 既定値 |
+| --- | --- | --- | --- |
+| `STALE_DAYS` | 定数 | `scripts/plugin-deps.py` | `365`（決定 106・判断 (r)） |
+| `state` | 型（文字列の列挙） | `scripts/plugin-deps.py` の結果 JSON | `latest`・`behind`・`held`・`unknown` |
+| `[tool.ndf.deps.hold]` | 設定値 | `plugins/ndf-next/pyproject.toml` | `httpx = "githubkit 0.17.1 の httpx<1.0.0"`（決定 106） |
+| Issue の印 | 定数 | `.github/workflows/plugin-deps.yml` | `<!-- plugin-deps:<dir> -->`（決定 107） |
+| 子の表の写し | 型 | `plugins/ndf-next/src/ndf/checks/children.json` | 子ごとに `packages`・`needs`・`order`・`lane` |
+| `FIXED_WORDS` | 定数 | `plugins/ndf-next/src/ndf/identity.py` | `.ndf` の 1 語（決定 101） |
+
+## 並行と排他
+
+| 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
+| --- | --- | --- | --- |
+| 週 1 回のジョブの 2 回の実行 | 印を持つ遅れの Issue | 印で 1 件を探して書き直す。2 件以上あれば最も古い 1 件を残す（「異常系の処理」） | 同じ遅れなら同じ本文になる。途中で止まっても次の実行が書き直す |
+| X2 の PR と C1+ の PR | `pyproject.toml`・`uv.lock` | 衝突した `uv.lock` を手で解かず、取り込んだ宣言から `uv lock` で作り直す（決定 108） | `uv lock` は同じ宣言から同じ lock を作る |
+| `bump` と動いている子の PR | 上げた版で直す既存のファイル | 直す箇所が子の PR の触るファイルに当たるときは、その PR のマージの後に取り込み直してから入れる（決定 108） | `bump` は解決できなければ宣言と lock を元へ戻す |
+
+## ログと記録の出力
+
+| 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
+| --- | --- | --- | --- |
+| `outdated(project, now)` | 行ごとの `state` と上げる先、取得できなかった行の `warnings` | 結果 JSON を標準出力へ 1 行 | 秘密（PyPI は認証なしで読む） |
+| `bump(project, names)` | 上げた行と、戻した行の固定させている相手 | 結果 JSON を標準出力へ 1 行 | `uv` の出力の全文（相手の名前だけを載せる） |
+| 週 1 回のジョブ | 遅れの一覧 | 印を持つ Issue の本文 | `GITHUB_TOKEN` |
+| `check(scope, children)` | `child-deps` の指摘 | 検査（`ndf check`）の `Finding` | 無し |
+
+## 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| `target(releases, now)` | `packaging.version.Version.is_prerelease`（STD20） | PEP 440 と packaging の文書 | 使う。安定版の判定を自分で書かない |
+| `outdated(project, now)` | `uv tree --outdated`（LIB21）・Dependabot（PRD20） | 外部の調査（決定 107） | 使えない。安定版が古い依存を遅れとして出さない |
+| `bump(project, names)` | `uv lock` | 外部の調査（LIB21） | 使う。lock を自分で書かない |
+| `check(scope, children)` | 検査（X1 の `ndf check`）の構文木 | `plugins/ndf-next/src/ndf/checks/` | 使う。構文木を作り直さない（決定 97） |
 
 ## 足した帯
 

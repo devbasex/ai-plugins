@@ -634,6 +634,30 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "系統（決定番号の）",
+      "context": "ndf-workflow",
+      "meaning": "決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "固定する理由（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "依存を最新の安定版へ上げない理由と、固定させている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。宣言の `[tool.ndf.deps.hold]` に書く",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "安定版（依存の）",
+      "context": "ndf-workflow",
+      "meaning": "依存のパッケージの版のうち、PEP 440 の pre-release でも developmental release でもない版。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "一時コピーの検査",
+      "context": "ndf-workflow",
+      "meaning": "新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
       "term": "即時修正",
       "context": "ndf-workflow",
       "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
