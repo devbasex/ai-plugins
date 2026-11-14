@@ -64,7 +64,7 @@
   },
   "facts": {
     "min_str": 4,
-    "tables_dir": "contracts/facts"
+    "contracts_dir": "contracts"
   },
   "words": {
     "glossary_config": ".ndf/glossary.json",

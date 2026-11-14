@@ -1,5 +1,7 @@
 # 1142: モジュールの分け方
 
+> **#3347:** 記号（X1・S1・C1〜C5・D1・D2 など）は前の企画（スプリント 1〜2c）のもので、作り直しの子（[issue-3347-design-detail.md](issue-3347-design-detail.md) の「実装計画」の X1 #3283 ほか）とは別である（#3347 の決定 102）。
+
 [issue-1142-design.md](issue-1142-design.md) の続きである。移行の後のパッケージとモジュールの構成と、500 行を超えるファイルを分ける先を、関数とクラスの単位で持つ。
 移行ステップ（[issue-1142-design-migration.md](issue-1142-design-migration.md) ）は、この表のとおりに移した。
 

@@ -75,6 +75,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 宣言を探す木 | — | supervise.py new が .ndf/ の宣言を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く | — | — | — |
 | ベースブランチ | — | Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。宣言の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の置き場は `experimental/` | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 系統（決定番号の） | — | 決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く | — | — | — |
+| 固定する理由（依存の版の） | — | 依存を最新の安定版へ上げない理由と、固定させている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。宣言の `[tool.ndf.deps.hold]` に書く | — | — | — |
+| 安定版（依存の） | — | 依存のパッケージの版のうち、PEP 440 の pre-release でも developmental release でもない版。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う | — | — | — |
+| 一時コピーの検査 | — | 新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと | — | — | — |
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 棚卸し | — | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある | 手入れ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを照合するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
@@ -605,7 +609,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | アクティビティ | — | 工程の中の実行の単位。DBOS のステップ 1 つで流し、入力の範囲と出力の規約を持つ。プラン 1 本の実行・承認ゲートの答えの待ち・記録の 3 種類がある。プランのステップとは別 | — | — | — |
 | 進行表のワークフロー | — | スプリントの進行表 1 つを、登録した工程の定義に沿って流す DBOS のワークフロー。実行のたびに ID が替わり、進行表の ID は変わらない | — | — | — |
 | 進行の事象 | — | 進行表への変更 1 件の記録。誰が・いつ・何を・理由と変更後の状態を持ち、追記だけで残す。行の今の状態は最新の事象から引く | — | — | — |
-| 進行表の DB | — | 進行表と DBOS の記録を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL | — | — | — |
+| 進行表の DB | — | 計画・レーン・スプリントの進行表と進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行の鍵ごとのファイルに分け、置かない（#1142 の決定 81） | — | — | — |
 | 定義の改訂 | — | スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別 | — | — | — |
 | レビューの単位 | — | PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の `reviews` に書く | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | PR の種類 | — | NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
@@ -641,6 +645,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 新しいプラグイン | — | 入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next` | — | — | — |
 | プラグインの定義 | — | プラグインの `plugin.json` が持つプラグイン名と版 | — | — | — |
 | 初期構成 | — | 新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの置き場（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別 | — | — | — |
+| チェックアウトの置き場 | — | <git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、進行表の DB と実行の鍵ごとの耐久の記録と控えを置く（#1142 の作り直し） | — | — | — |
+| 形の番号 | — | チェックアウトの置き場の format.json と耐久の記録のアプリの版が持つ整数。読み書きの形が変わるときだけ上げ、NDF の版とは別に動く | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

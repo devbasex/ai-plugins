@@ -634,6 +634,30 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "系統（決定番号の）",
+      "context": "ndf-workflow",
+      "meaning": "決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "固定する理由（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "依存を最新の安定版へ上げない理由と、固定させている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。宣言の `[tool.ndf.deps.hold]` に書く",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "安定版（依存の）",
+      "context": "ndf-workflow",
+      "meaning": "依存のパッケージの版のうち、PEP 440 の pre-release でも developmental release でもない版。NDF の変更の経路を分ける「安定版と実験版」の安定版とは別の語で、「最新の安定版」の形でだけ使う",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
+      "term": "一時コピーの検査",
+      "context": "ndf-workflow",
+      "meaning": "新しいプラグインを、名前とディレクトリを入れ替えの後の形（`ndf`）にした一時ディレクトリへコピーし、検査とテストを打つこと",
+      "pending_source": "issues/issue-3347-design.md"
+    },
+    {
       "term": "即時修正",
       "context": "ndf-workflow",
       "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
@@ -6916,8 +6940,8 @@
     {
       "term": "進行表の DB",
       "context": "ndf-workflow",
-      "meaning": "進行表と DBOS の記録を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL",
-      "pending_source": "issues/issue-3092-design.md"
+      "meaning": "計画・レーン・スプリントの進行表と進行の事象を置く 1 つのデータベース。URL で指し、ローカルは SQLite、Factory は PostgreSQL。DBOS の記録はローカルでは実行の鍵ごとのファイルに分け、置かない（#1142 の決定 81）",
+      "pending_source": "issues/issue-1142-design-next.md"
     },
     {
       "term": "定義の改訂",
@@ -7236,6 +7260,18 @@
       "term": "初期構成",
       "context": "ndf-workflow",
       "meaning": "新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの置き場（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別",
+      "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "チェックアウトの置き場",
+      "context": "ndf-workflow",
+      "meaning": "<git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、進行表の DB と実行の鍵ごとの耐久の記録と控えを置く（#1142 の作り直し）",
+      "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "形の番号",
+      "context": "ndf-workflow",
+      "meaning": "チェックアウトの置き場の format.json と耐久の記録のアプリの版が持つ整数。読み書きの形が変わるときだけ上げ、NDF の版とは別に動く",
       "pending_source": "issues/issue-1142-design-next.md"
     }
   ]

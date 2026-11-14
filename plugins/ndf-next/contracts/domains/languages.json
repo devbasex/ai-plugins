@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "summary": "ファイルの言語。拡張子は行をまたいで重ならず、ファイル名の末尾に当たる最も長い拡張子で 1 つの言語に決める（.blade.php は php でなく blade）。言語の計測・プロダクションコードの判定・テストの試走が読む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "label": {"type": "string", "summary": "人へ見せる名前"},
+    "extensions": {"type": "array", "summary": "この言語のファイルの拡張子（先頭の . を含む。小文字で比べる）"},
+    "code": {"type": "boolean", "summary": "プロダクションコードに数える。リファクタリングを飛ばしてよいか（プロダクションコードの差分が無いか）の判定が読む"}
+  },
+  "rows": [
+    {"id": "python", "label": "Python", "extensions": [".py"], "code": true},
+    {"id": "shell", "label": "Shell", "extensions": [".sh", ".bash"], "code": true},
+    {"id": "javascript", "label": "JavaScript", "extensions": [".js", ".mjs", ".cjs", ".jsx"], "code": true},
+    {"id": "typescript", "label": "TypeScript", "extensions": [".ts", ".mts", ".cts", ".tsx"], "code": true},
+    {"id": "vue", "label": "Vue", "extensions": [".vue"], "code": true},
+    {"id": "svelte", "label": "Svelte", "extensions": [".svelte"], "code": true},
+    {"id": "php", "label": "PHP", "extensions": [".php"], "code": true},
+    {"id": "blade", "label": "Blade", "extensions": [".blade.php"], "code": true},
+    {"id": "ruby", "label": "Ruby", "extensions": [".rb"], "code": true},
+    {"id": "go", "label": "Go", "extensions": [".go"], "code": true},
+    {"id": "rust", "label": "Rust", "extensions": [".rs"], "code": true},
+    {"id": "java", "label": "Java", "extensions": [".java"], "code": true},
+    {"id": "kotlin", "label": "Kotlin", "extensions": [".kt", ".kts"], "code": true},
+    {"id": "swift", "label": "Swift", "extensions": [".swift"], "code": true},
+    {"id": "c", "label": "C", "extensions": [".c", ".h"], "code": true},
+    {"id": "cpp", "label": "C++", "extensions": [".cc", ".cpp", ".cxx", ".hpp"], "code": true},
+    {"id": "csharp", "label": "C#", "extensions": [".cs"], "code": true},
+    {"id": "sql", "label": "SQL", "extensions": [".sql"], "code": true},
+    {"id": "css", "label": "CSS", "extensions": [".css", ".scss", ".sass", ".less"], "code": false},
+    {"id": "html", "label": "HTML", "extensions": [".html", ".htm"], "code": false},
+    {"id": "markdown", "label": "Markdown", "extensions": [".md"], "code": false}
+  ]
+}

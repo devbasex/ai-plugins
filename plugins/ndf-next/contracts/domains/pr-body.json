@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "summary": "NDF が書く Pull Request の本文の部品（節の見出し・1 行の印・末尾の署名）と並び。書き手は部品を order の昇順に並べて本文を組み、どの書き手が先に書いても同じ本文になる。節は見出しから次の節の見出し・行の印・署名の前までで、行の印は節の中身に入らない（モードの行は「決めたこと」の節の前に置く）",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "kind": {"type": "string", "summary": "部品の種類。section は H2 の見出しで始まる節、line は 1 行の印（text はその頭）、trailer は末尾の署名（text はその頭）"},
+    "text": {"type": "string", "summary": "見出し・印の頭・署名の頭の文字"},
+    "order": {"type": "integer", "summary": "本文の中の並び（小さいほど前）。部品をまたいで重ならない"},
+    "reader": {"type": "string", "summary": "部品を読む工程"}
+  },
+  "rows": [
+    {"id": "changes", "kind": "section", "text": "## 利用者向けの変化", "order": 10, "reader": "デプロイの説明文と CHANGELOG の版の節（M2）"},
+    {"id": "migration", "kind": "section", "text": "## 移行の手順", "order": 20, "reader": "CHANGELOG の版の節の「移行の手順」と承認資料（M2）"},
+    {"id": "consent", "kind": "section", "text": "## 同意を求めること", "order": 30, "reader": "リリースの承認資料（M2）"},
+    {"id": "others", "kind": "section", "text": "## 版を上げる他のプラグイン", "order": 40, "reader": "リリースの版の上げ（M2）"},
+    {"id": "mode", "kind": "line", "text": "モード: ", "order": 50, "reader": "工程の記録（P1）"},
+    {"id": "decisions", "kind": "section", "text": "## 決めたこと", "order": 60, "reader": "設計の PR の決定の突き合わせ（P2）"},
+    {"id": "review-language", "kind": "trailer", "text": "<!-- I want to review in Japanese. -->", "order": 80, "reader": "レビューの言語の指定（M5）"},
+    {"id": "generated", "kind": "trailer", "text": "🤖 Generated with", "order": 90, "reader": "生成の署名"}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "summary": "NDF が書くファイルの置き場。リポジトリの中の置き場は根からの相対パス、状態の置き場の下の置き場は状態の置き場（identity の state_dir）からの相対パスで持つ",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "root": {"type": "string", "summary": "path の起点。repo はリポジトリ（worktree）の根、state は状態の置き場"},
+    "path": {"type": "string", "summary": "起点からの相対パス"},
+    "tracked": {"type": "boolean", "summary": "git が追跡する置き場。偽の置き場は .gitignore が外し、コミットに入らない"}
+  },
+  "rows": [
+    {"id": "ndf", "root": "repo", "path": ".ndf", "tracked": true},
+    {"id": "ndf-tmp", "root": "repo", "path": ".ndf/tmp", "tracked": false},
+    {"id": "ndf-handoff", "root": "repo", "path": ".ndf/handoff", "tracked": false},
+    {"id": "ndf-sprints", "root": "repo", "path": ".ndf/sprints", "tracked": false},
+    {"id": "ndf-parallel", "root": "repo", "path": ".ndf/parallel", "tracked": false},
+    {"id": "worktrees", "root": "repo", "path": ".worktrees", "tracked": false},
+    {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
+    {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
+    {"id": "measured", "root": "state", "path": "measured", "tracked": false},
+    {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false}
+  ]
+}

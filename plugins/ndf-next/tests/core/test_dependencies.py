@@ -20,16 +20,17 @@ def _imports_dbos(node: ast.AST) -> bool:
     return any(name.split(".")[0] == "dbos" for name in names)
 
 
-def _dbos_importers(root: Path) -> set[str]:
+def _dbos_importers(root: Path, relative_to: Path) -> set[str]:
+    """`root` の下で DBOS を読むファイル（`relative_to` からの相対パス）。"""
     found = set()
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
         if any(_imports_dbos(node) for node in ast.walk(tree)):
-            found.add(path.relative_to(PLUGIN_ROOT).as_posix())
+            found.add(path.relative_to(relative_to).as_posix())
     return found
 
 
-def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path, monkeypatch):
+def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path):
     """現状固定: import の構文ごとに、DBOS を読むファイルとして数えるかどうか。"""
     sources = {
         "plain.py": "import dbos\n",
@@ -45,12 +46,21 @@ def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path, monkeypatch):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-    monkeypatch.setitem(_dbos_importers.__globals__, "PLUGIN_ROOT", tmp_path)
-    assert _dbos_importers(tmp_path) == {"plain.py", "alias_multi.py", "from_abs.py", "from_sub.py", "nested/deep.py"}
+    assert _dbos_importers(tmp_path, tmp_path) == {"plain.py", "alias_multi.py", "from_abs.py", "from_sub.py", "nested/deep.py"}
+
+
+def test_dbos_importers_uses_explicit_base(tmp_path, monkeypatch):
+    """明示した基準が大域の基準と異なっても、同じ相対パスを返す。"""
+    source_root = tmp_path / "src"
+    source_root.mkdir()
+    (source_root / "module.py").write_text("import dbos\n")
+    monkeypatch.setitem(globals(), "PLUGIN_ROOT", tmp_path / "other-plugin")
+
+    assert _dbos_importers(source_root, tmp_path) == {"src/module.py"}
 
 
 def test_only_durable_imports_dbos():
-    importers = _dbos_importers(PLUGIN_ROOT / "src") | _dbos_importers(PLUGIN_ROOT / "tests")
+    importers = _dbos_importers(PLUGIN_ROOT / "src", PLUGIN_ROOT) | _dbos_importers(PLUGIN_ROOT / "tests", PLUGIN_ROOT)
     assert importers == {"src/ndf/core/durable.py"}
 
 

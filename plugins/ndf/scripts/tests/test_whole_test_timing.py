@@ -251,7 +251,9 @@ def test_peak_measures_each_count_of_runs(monkeypatch, tmp_path, capsys):
     assert [i["runs"] for i in out["items"]] == [1, 2]
     assert out["items"][0]["peak_used_mib"] >= 300 and out["items"][0]["peak_swap_used_mib"] == 60
     assert all(i["exits"] == [0] * i["runs"] and i["seconds"] >= 0.3 for i in out["items"])
-    assert (tmp_path / "started").read_text().split() == ["0", "0", "1"]
+    # 2 本の回は同時に始まるので、書き込みの順は決まらない
+    started = (tmp_path / "started").read_text().split()
+    assert started[0] == "0" and sorted(started[1:]) == ["0", "1"]
     m = out["metrics"]
     assert m["mem_total_mib"] == 1000 and m["before_used_mib"] == 100 and m["before_swap_used_mib"] == 60
     assert m["ndf_version"] and m["cpus"] >= 1 and m["floor_mib"] == 500
