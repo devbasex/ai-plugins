@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.release import assemble
+from ndf.domains.release import assemble, changes_decide, checks_decide, materials_decide, version_decide
 
 from ._fakes import FakeHub, git, init_repo, write_json
 
@@ -79,3 +79,38 @@ def test_issue_2217_tests_only_change_is_not_released(tmp_path: Path) -> None:
     with pytest.raises(assemble.NothingToRelease):
         assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
     assert hub.requests == []
+
+
+def test_collect_current_behavior(tmp_path: Path) -> None:
+    """現状固定（collect）: 範囲の変化から版上げの計画と承認資料の材料を返し、ブランチも PR も作らない。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    hub = _hub()
+    planned, facts = assemble.collect(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    expected = [version_decide.Planned("kit", "1.2.3", "1.2.4")]
+    assert planned == expected
+    assert facts == materials_decide.Facts(
+        "production",
+        tuple(expected),
+        (materials_decide.PullFact(5, "直した", checks_decide.Tally(2, 1, (), ())),),
+        (changes_decide.Change("kit", ("tools/kit/a.py",), ()),),
+        (),
+        git(work, "rev-parse", "origin/develop").strip(),
+    )
+    assert hub.requests == []
+    assert git(work, "branch", "--list").strip() == "* develop"
+    assert git(work, "status", "--porcelain") == ""
+
+
+def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
+    """現状固定（collect）: 開発版のチャネルは接尾辞の付いた次の版を計画する。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    planned, facts = assemble.collect(work, _hub(), assemble.Target("dev", "minor", "develop", "main"))
+    assert planned == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")]
+    assert facts.channel == "dev" and facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ()),)
+
+
+def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:
+    """現状固定（collect）: 上げるものが無ければ範囲を書いた `NothingToRelease`。"""
+    work = _origin_with_change(tmp_path, test_only=True)
+    with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop に版を上げる変化が無い$"):
+        assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
