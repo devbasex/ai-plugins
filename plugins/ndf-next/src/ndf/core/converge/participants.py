@@ -29,13 +29,18 @@ class UnknownParticipant(ValueError):
     """名指した相手役がランタイムの表に無いか、読むだけの起動の引数を持たない。"""
 
 
+def _check_requested(requested: Sequence[str], able: Sequence[str]) -> None:
+    """名指した相手役が読むだけの起動を持つかを確かめる。持たないものがあれば `UnknownParticipant`。"""
+    bad = [r for r in requested if r not in able]
+    if bad:
+        raise UnknownParticipant(f"相手役 {'・'.join(bad)} はランタイムの表に無いか、読むだけの起動を持たない（{'・'.join(able)}）")
+
+
 def assign(requested: Sequence[str] = (), fixer: str = FIXER) -> tuple[str, ...]:
     """相手役を決める。`requested` が空なら表の既定の席から、読むだけの起動を持つものを修正担当を除いて並べる。"""
     able = [r["id"] for r in facts.rows(RUNTIMES) if REVIEW_ARGS in r]
     if requested:
-        bad = [r for r in requested if r not in able]
-        if bad:
-            raise UnknownParticipant(f"相手役 {'・'.join(bad)} はランタイムの表に無いか、読むだけの起動を持たない（{'・'.join(able)}）")
+        _check_requested(requested, able)
         return tuple(dict.fromkeys(r for r in requested if r != fixer))
     seats = set(facts.ids(RUNTIMES, default_seat=True))
     return tuple(r for r in able if r in seats and r != fixer)
