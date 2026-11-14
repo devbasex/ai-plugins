@@ -32,7 +32,7 @@ from typing import Any, Optional, cast
 
 from ndf.adapters import agents, git, github, publish
 from ndf.contracts import limits
-from ndf.core.converge import participants, place, worktree
+from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import (
     budget_decide,
     collect,
@@ -513,7 +513,7 @@ def _publish(run: _Run, finish: Finish) -> Finish:
 
 
 def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish]]:
-    root = place.work_root(git.Git(cfg.repo), f"rf{cfg.pr}")
+    root = workspace.root_of(git.Git(cfg.repo), cfg.pr)
     path = store.path_of(root)
     state = store.load(path)
     reused = _reused(cfg, state, path)

@@ -42,6 +42,11 @@ class Workspace:
         return (self.work, *(self.reader(r) for r in self.runtimes))
 
 
+def root_of(repo: git.Git, pr: int) -> Path:
+    """PR の作業場所の根（<置き場>/rf<PR>）。"""
+    return place.work_root(repo, f"rf{pr}")
+
+
 def layout(root: Path, runtimes: Sequence[str]) -> Workspace:
     return Workspace(root, root / "work", root / "read", root / "logs", tuple(runtimes))
 
@@ -67,7 +72,7 @@ def _add(repo: git.Git, path: Path, commit: str, pr: int) -> None:
 def prepare(repo: git.Git, pr: int, branch: str, runtimes: Sequence[str]) -> Workspace:
     """作業場所を用意する（再開なら登録を確かめて使う）。`repo` はリポジトリのどこかの作業場所の git。"""
     worktree.sweep_orphans(repo)
-    ws = layout(place.work_root(repo, f"rf{pr}"), runtimes)
+    ws = layout(root_of(repo, pr), runtimes)
     head = worktree.fetch_head(repo, branch)
     _add(repo, ws.work, head, pr)
     work_head = git.Git(ws.work).rev_parse("HEAD")

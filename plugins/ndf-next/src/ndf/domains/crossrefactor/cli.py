@@ -34,7 +34,7 @@ from typing import Any
 from ndf import cli, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, limits, result
-from ndf.core.converge import participants, place, worktree
+from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, workspace
 from ndf.testing import limits as test_limits
 
@@ -94,7 +94,7 @@ def _run(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def _root(a: argparse.Namespace) -> Path:
-    return place.work_root(git.Git(Path(a.work)), f"rf{a.pr}")
+    return workspace.root_of(git.Git(Path(a.work)), a.pr)
 
 
 def _state(a: argparse.Namespace) -> dict[str, Any]:
