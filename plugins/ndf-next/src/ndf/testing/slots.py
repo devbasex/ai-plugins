@@ -367,8 +367,8 @@ def gate(
     """
     options = GateOptions() if options is None else options
     env = os.environ if options.environ is None else options.environ
-    if env.get(HELD_ENV) or env.get(CI_ENV):
-        yield Held()  # 入れ子（I3）と CI（決定 12）
+    if _skip_gate(env):
+        yield Held()
         return
     cwd = Path(cwd)
     kind = kind or weight.classify(command, limits_mod.load_suites(cwd) if suites is None else suites)
@@ -376,15 +376,28 @@ def gate(
         yield Held()
         return
     limits = limits or limits_mod.load_limits(cwd)
+    directory = _prepare_directory(options, env)
+    if isinstance(directory, Held):
+        yield directory
+        return
+    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind)
+
+
+def _skip_gate(env: Mapping[str, str]) -> bool:
+    """枠を取らない実行なら真。入れ子（I3）と CI（決定 12）。"""
+    return bool(env.get(HELD_ENV) or env.get(CI_ENV))
+
+
+def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> Path | Held:
+    """枠の置き場を用意して返す。使えなければ、理由を `note` に書いた枠を取らない形の `Held` を返す（I8）。"""
     try:
         directory = options.directory or slots_dir(env)
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
-        yield Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
-        return
-    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind)
+        return Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
+    return directory
 
 
 def _record(ctx: SlotContext, kind: str, held: Held, result: str) -> None:
