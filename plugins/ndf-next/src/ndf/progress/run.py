@@ -28,7 +28,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -544,9 +544,7 @@ def _drive(d: Drive) -> dict[str, Any]:
         v = read(d.st, d.table_id)
         out = _step(d, v, decide(v))
         if out is not None:
-            if d.warnings:
-                out["warnings"] = [*d.warnings, *(out["warnings"] if "warnings" in out else [])]
-            return out
+            return command.with_warnings(out, before=d.warnings)
     raise AssertionError("手の数が行とステップの数を超えた")
 
 
@@ -900,27 +898,11 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    root = command._root(cwd)
-    url = store.default_url(root)
-    store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
-    ready = durable.prepare_store(root, datetime.now(UTC))
-    with store.open_store(url, ready.root) as st:
-        out = COMMANDS[a.action](a, cwd, st)
-        if st.warnings:
-            out["warnings"] = [*(out["warnings"] if "warnings" in out else []), *st.warnings]
-        return out
+    return command.with_store(cwd, COMMANDS[a.action], a)
 
 
 def main(argv: list[str]) -> int:
     """副命令 `ndf progress`。工程を流す副命令はここで受け、ほか（new・disable など）は `command` へ渡す。"""
     if not argv or argv[0] not in COMMANDS:
         return command.main(argv)
-    try:
-        a = parser().parse_args(argv)
-    except SystemExit as exc:
-        return causes.exit_code("invalid") if exc.code else 0
-    try:
-        out = _dispatch(a, Path.cwd())
-    except command.STOPPABLE as exc:
-        out = command._stopped_from(exc)
-    return result.emit(out)
+    return command.run_main(parser(), _dispatch, argv)

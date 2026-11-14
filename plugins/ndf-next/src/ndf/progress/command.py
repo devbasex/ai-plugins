@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -330,18 +330,27 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    if a.action == "restore":
-        return _cmd_restore(a, cwd)
+def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequence[str] = ()) -> dict[str, Any]:
+    """結果の `warnings` の前に `before`、後ろに `after` を足す。足すものが無ければ結果に触れない。"""
+    if before or after:
+        out["warnings"] = [*before, *(out["warnings"] if "warnings" in out else []), *after]
+    return out
+
+
+def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
+    """チェックアウトの置き場の進行表の DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
     root = _root(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
-        out = COMMANDS[a.action](a, cwd, st)
-        if st.warnings:
-            out["warnings"] = list(st.warnings)
-        return out
+        return with_warnings(handler(a, cwd, st), after=st.warnings)
+
+
+def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    if a.action == "restore":
+        return _cmd_restore(a, cwd)
+    return with_store(cwd, COMMANDS[a.action], a)
 
 
 # 止まった理由へ変換する例外の種類（main が受け、_stopped_from が理由へ変える）
@@ -400,14 +409,19 @@ def _stopped_from(exc: Exception) -> dict[str, Any]:
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
 
 
-def main(argv: list[str]) -> int:
+def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
+    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は止まった理由にする。"""
     try:
-        a = parser().parse_args(argv)
+        a = ap.parse_args(argv)
     except SystemExit as exc:
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     try:
-        out = _dispatch(a, Path.cwd())
+        out = dispatch(a, Path.cwd())
     except STOPPABLE as exc:
         out = _stopped_from(exc)
     return result.emit(out)
+
+
+def main(argv: list[str]) -> int:
+    return run_main(parser(), _dispatch, argv)
