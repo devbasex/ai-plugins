@@ -25,9 +25,9 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=(), halts=()):
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=(), halts=(), judged=True):
     snap = run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
-    return run_decide.with_halts(run_decide.with_stalls(snap, stalls), halts)
+    return run_decide.with_halts(run_decide.with_stalls(snap, stalls, judged=judged), halts)
 
 
 @pytest.fixture(autouse=True)
@@ -347,15 +347,15 @@ def _start(conn, pid, lane_name, key):
 
 
 def test_snapshot_reads_both_tables_and_follows_after(opened):
-    """計画の状態は計画とレーンの進行表から読める（受け入れ条件 4）。b は a の行 r1 の後に起こせる。"""
+    """計画の状態は計画とレーンの進行表から読める（受け入れ条件 4）。b は a の行 r1 の後に起こせる。生死の材料（found）を渡さない読みは判定しない（judged が偽）。"""
     pid = _create(opened, _doc(_decl("a", [[1], [2]]), _decl("b", [[3]], touches=("src/b",), after=("a/r1",))))
-    assert _snapshot(opened, pid) == _snap(wakeable=[("a", "r1")])
+    assert _snapshot(opened, pid) == _snap(wakeable=[("a", "r1")], judged=False)
     with store.transaction(opened) as conn:
         sid = _start(conn, pid, "a", "r1")
-    assert _snapshot(opened, pid) == _snap(running=[("a", "r1", sid)])
+    assert _snapshot(opened, pid) == _snap(running=[("a", "r1", sid)], judged=False)
     with store.transaction(opened) as conn:
         lane.end_row(conn, sid, "completed", "conductor")
-    assert _snapshot(opened, pid) == _snap(wakeable=[("a", "r2"), ("b", "r1")])
+    assert _snapshot(opened, pid) == _snap(wakeable=[("a", "r2"), ("b", "r1")], judged=False)
 
 
 def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
