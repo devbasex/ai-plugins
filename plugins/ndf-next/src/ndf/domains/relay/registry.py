@@ -102,9 +102,7 @@ def write_state(directory: Path, data: Mapping[str, Any]) -> None:
 
 
 def append_log(directory: Path, row: Mapping[str, Any]) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    with open(directory / LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"at": signals.now_iso(), **dict(row)}, ensure_ascii=False) + "\n")
+    signals.append_jsonl(directory / LOG_FILE, row)
 
 
 def _busy_dirs(root: Path) -> list[Path]:

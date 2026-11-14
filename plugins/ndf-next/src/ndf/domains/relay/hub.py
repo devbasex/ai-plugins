@@ -268,10 +268,4 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
 
 
 def _log(base: Path, rid: str, got: Outcome) -> None:
-    with open(base / LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(
-            json.dumps(
-                {"at": signals.now_iso(), "request": rid, "ok": got.ok, "summary": got.summary, "cause": got.cause}, ensure_ascii=False
-            )
-            + "\n"
-        )
+    signals.append_jsonl(base / LOG_FILE, {"request": rid, "ok": got.ok, "summary": got.summary, "cause": got.cause})

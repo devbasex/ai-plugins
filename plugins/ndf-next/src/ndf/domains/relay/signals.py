@@ -102,6 +102,13 @@ def replace_json(path: Path, data: Mapping[str, Any]) -> None:
     replace_text(path, json.dumps(dict(data), ensure_ascii=False))
 
 
+def append_jsonl(path: Path, row: Mapping[str, Any]) -> None:
+    """親の置き場を作り、先頭に時刻 `at` を付けた 1 行の JSON を追記する。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"at": now_iso(), **dict(row)}, ensure_ascii=False) + "\n")
+
+
 def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str, ...] = ()) -> bool:
     """排他（`<path>.lock`）を `wait` 秒まで待って書く。`keep` の項目は前の中身の値を保つ。取れなければ偽。
 
