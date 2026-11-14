@@ -52,9 +52,8 @@ dev = [
 package = false
 
 # テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
-# テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）。
-# tests 直下の共通部品（_postgres.py）は tests をパスへ足して読む
+# テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests"]
+pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"

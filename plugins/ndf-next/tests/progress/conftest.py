@@ -14,14 +14,13 @@ import subprocess
 import uuid
 
 import pytest
-from _postgres import start_postgres
 
 from ndf.core import durable
 from ndf.progress import store
 
 
 @pytest.fixture(scope="session")
-def pg_server(tmp_path_factory):
+def pg_server(tmp_path_factory, start_postgres):
     """使い捨ての PostgreSQL の URL（テストごとに DB を分けるため、末尾の DB 名は付けない）。"""
     with start_postgres(tmp_path_factory) as server:
         yield server

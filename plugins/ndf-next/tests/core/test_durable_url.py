@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from _postgres import start_postgres
 
 from ndf.core import durable
 
@@ -21,7 +20,7 @@ from ._durable_helpers import run_key_process as _run
 
 
 @pytest.fixture(scope="module")
-def pg_url(tmp_path_factory):
+def pg_url(tmp_path_factory, start_postgres):
     with start_postgres(tmp_path_factory) as (_, base):
         yield f"{base}/postgres"
 
