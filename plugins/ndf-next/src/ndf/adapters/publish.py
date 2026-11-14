@@ -42,12 +42,16 @@ SCRUBBED_VISIBILITIES = frozenset({PUBLIC, UNKNOWN})
 MIN_ACCOUNT_CHARS = 3
 # リポジトリへの参照。URL の形は `https://github.com/<所有者>/<リポジトリ>...`・scheme の無い `github.com/...`・
 # SSH の clone の URL（`git@github.com:<所有者>/<リポジトリ>.git`・`ssh://git@github.com/...`）・
-# API の URL（`https://api.github.com/repos/<所有者>/<リポジトリ>...`）。番号の形は `<所有者>/<リポジトリ>#<番号>`
+# API の URL（`https://api.github.com/repos/<所有者>/<リポジトリ>...`）。番号の形は `<所有者>/<リポジトリ>#<番号>`。
+# リポジトリ名はリポジトリ名に使えない文字の手前で切り（日本語の句読点・全角の括弧・`,` に接しても一致する）、
+# 境界の `\w` は `re.ASCII` で ASCII に限る（`参照はacme/x#12` のように日本語の文字に接した参照も拾う）。
+# URL の続き（`/issues/1` など）は `/#?` で始まるときだけ、ASCII の区切りでない文字まで含める
 _REPO_URL = re.compile(
     r"(?<![\w.@-])(?:(?:https?|ssh|git)://)?(?:git@github\.com:|(?:git@)?(?:api\.github\.com/repos/|(?:www\.)?github\.com/))"
-    r"(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?=[/#?\s)\]>\"'`]|$)[^\s)\]>\"'`]*"
+    r"(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?![A-Za-z0-9._-])(?:[/#?][^\s)\]>\"'`\u0080-\U0010ffff]*)?",
+    re.ASCII,
 )
-_REPO_REF = re.compile(r"(?<![\w./-])(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+)#\d+")
+_REPO_REF = re.compile(r"(?<![\w./-])(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+)#\d+", re.ASCII)
 # リポジトリへの参照の形（URL を先に置き換えてから番号の形を見る）
 _REPO_PATTERNS = (_REPO_URL, _REPO_REF)
 _HOME = re.compile(r"/(?:home|Users)/[^/\s)\]>\"'`]+")
@@ -160,14 +164,18 @@ def _drop_accounts(text: str, accounts: Iterable[str]) -> tuple[str, int]:
 def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: Iterable[str] = ()) -> Scrubbed:
     """書く本文から、書き先に出してはいけないものを落とす（上の表）。`public` は書き先が公開か。"""
     dropped: dict[str, int] = {}
+    # 非公開の参照は秘密の伏せ字より先に原文から落とす。伏せ字を先にかけると `ssh://git@github.com/...` が
+    # `ssh://[REDACTED]@github.com/...` に変わり、参照の形に一致しなくなってリポジトリ名が残る
+    if public:
+        text, n = _drop_private_refs(text, set(private_repos))
+        if n:
+            dropped[DropKind.PRIVATE_REF] = n
     masked = run_log.redact(text)
     if masked != text:
         dropped[DropKind.SECRET] = 1
     text = masked
     if public:
         steps = (
-            (DropKind.PRIVATE_REF, lambda t: _drop_private_refs(t, set(private_repos))),
-            (DropKind.HOME, lambda t: _HOME.subn(HOME_TEXT, t)),
             (DropKind.EMAIL, _drop_emails),
             (DropKind.ACCOUNT, lambda t: _drop_accounts(t, accounts)),
         )

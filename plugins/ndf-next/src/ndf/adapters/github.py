@@ -552,17 +552,19 @@ class GitHub:
     def allowed_merge_methods(self, branch: str) -> list[str]:
         """基底のブランチ `branch` で許されたマージの方式（`MERGE_METHODS` の並び。3378-2）。
 
-        ruleset の PR の規則の `allowed_merge_methods` を先に読み、指定が無ければリポジトリの設定を読む。
+        ruleset の PR の規則の `allowed_merge_methods` とリポジトリの設定の両方を読み、両方が許す方式だけを返す
+        （ruleset は方式を絞るだけで、リポジトリの設定で無効にした方式を有効にしない）。ruleset に指定が無ければ設定だけで決める。
         設定の項目（`allow_squash_merge` など）は権限の足りないトークンでは応答に無い。無い項目の方式は許すかが
         不明なので候補に残し、要求を送って GitHub の拒否（405）に判定を任せる。項目があれば値が True の方式だけを許す。
         """
         rules = self.rest("GET", f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}")
-        methods = ruleset_merge_methods(rules if isinstance(rules, list) else [])
-        if methods is not None:
-            return methods
+        named = ruleset_merge_methods(rules if isinstance(rules, list) else [])
+        if named == []:
+            return []
         raw = self.rest("GET", f"/repos/{self.repo}")
         settings = raw if isinstance(raw, dict) else {}
-        return [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
+        allowed = [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
+        return allowed if named is None else [m for m in allowed if m in named]
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""

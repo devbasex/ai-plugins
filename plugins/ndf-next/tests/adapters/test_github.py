@@ -593,19 +593,33 @@ def test_allowed_merge_methods_treats_a_non_list_ruleset_body_as_no_rules() -> N
     assert _allowed({"message": "x"}, {"allow_merge_commit": True}) == (["merge"], [RULES_PATH, f"/repos/{REPO}"])
 
 
+def test_allowed_merge_methods_skips_repository_settings_when_the_ruleset_allows_none() -> None:
+    # ruleset が空の並びを指定していれば、どの方式も許されないのでリポジトリの設定を読まない
+    rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": []}}]
+    assert _allowed(rules, ALL_METHODS) == ([], [RULES_PATH])
+
+
 @pytest.mark.parametrize(
-    ("named", "methods"),
-    [([], []), (["rebase", "squash"], ["squash", "rebase"])],
+    ("named", "settings", "methods"),
+    [
+        (["rebase", "squash"], ALL_METHODS, ["squash", "rebase"]),
+        # ruleset が許してもリポジトリの設定で無効な方式は選ばない（squash を無効にした構成では rebase へ進む）
+        (["rebase", "squash"], {"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": True}, ["rebase"]),
+        (["squash"], {"allow_squash_merge": False}, []),
+        # 設定の項目が無い方式は不明として ruleset の候補に残す
+        (["rebase", "squash"], {"allow_squash_merge": False}, ["rebase"]),
+    ],
 )  # fmt: skip
-def test_allowed_merge_methods_prefers_the_ruleset_and_skips_repository_settings(named: list[str], methods: list[str]) -> None:
-    # ruleset が方式を指定していれば（空でも）リポジトリの設定を読まない
+def test_allowed_merge_methods_intersects_the_ruleset_with_repository_settings(
+    named: list[str], settings: object, methods: list[str]
+) -> None:
     rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": named}}]
-    assert _allowed(rules, ALL_METHODS) == (methods, [RULES_PATH])
+    assert _allowed(rules, settings) == (methods, [RULES_PATH, f"/repos/{REPO}"])
 
 
 def test_allowed_merge_methods_encodes_the_branch_name() -> None:
     rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": ["merge"]}}]
-    assert _allowed(rules, ALL_METHODS, "release/v1") == (["merge"], [f"/repos/{REPO}/rules/branches/release%2Fv1"])
+    assert _allowed(rules, ALL_METHODS, "release/v1") == (["merge"], [f"/repos/{REPO}/rules/branches/release%2Fv1", f"/repos/{REPO}"])
 
 
 def test_merge_uses_the_method_the_ruleset_allows() -> None:
@@ -618,6 +632,19 @@ def test_merge_uses_the_method_the_ruleset_allows() -> None:
     })  # fmt: skip
     out = _hub(server).merge(7)
     assert out.merged and json.loads(server.sent("PUT")[0].content)["merge_method"] == "merge"
+
+
+def test_merge_skips_a_ruleset_method_the_repository_disables() -> None:
+    # ruleset が squash と rebase を許し、リポジトリが squash を無効にしていれば、方式を省いたマージは rebase を選ぶ
+    rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": ["squash", "rebase"]}}]
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=rules)],
+        ("GET", f"/repos/{REPO}"): [httpx.Response(200, json={"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": True})],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(200, json={"merged": True})],
+    })  # fmt: skip
+    assert _hub(server).merge(7).merged
+    assert json.loads(server.sent("PUT")[0].content)["merge_method"] == "rebase"
 
 
 def test_merge_reads_repository_settings_when_the_ruleset_names_no_method() -> None:

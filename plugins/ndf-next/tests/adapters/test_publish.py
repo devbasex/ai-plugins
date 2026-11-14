@@ -88,6 +88,33 @@ def test_private_refs_in_ssh_bare_and_api_urls_are_found_and_dropped(ref: str) -
     assert got.text == f"見た: {publish.PRIVATE_REF_TEXT} の件" and got.dropped == {"private_ref": 1}
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"（https://github.com/{PRIVATE_REPO}）", f"（{publish.PRIVATE_REF_TEXT}）"),
+        (f"https://github.com/{PRIVATE_REPO}、次", f"{publish.PRIVATE_REF_TEXT}、次"),
+        (f"https://github.com/{PRIVATE_REPO}, next", f"{publish.PRIVATE_REF_TEXT}, next"),
+        (f"https://github.com/{PRIVATE_REPO}/issues/3を見た", f"{publish.PRIVATE_REF_TEXT}を見た"),
+        (f"参照は{PRIVATE_REPO}#12", f"参照は{publish.PRIVATE_REF_TEXT}"),
+    ],
+)  # fmt: skip
+def test_private_refs_next_to_japanese_text_and_punctuation_are_dropped(text: str, expected: str) -> None:
+    # 日本語の文字・全角の括弧・句読点・`,` に接した参照も伏せる。URL の後ろの日本語の文は残す
+    got = publish.scrub(text, True, {PRIVATE_REPO})
+    assert (got.text, got.dropped) == (expected, {"private_ref": 1})
+
+
+def test_a_longer_repo_name_is_not_taken_for_its_prefix() -> None:
+    assert publish.repo_refs(f"https://github.com/{PRIVATE_REPO}.github を見た") == {f"{PRIVATE_REPO}.github"}
+
+
+def test_private_refs_are_dropped_before_secrets_are_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 秘密の伏せ字が URL の利用者の部分を書き換えても、非公開の参照は原文から先に落ちている
+    monkeypatch.setattr(publish.run_log, "redact", lambda t: t.replace("git@", "[REDACTED]@"))
+    got = publish.scrub(f"ssh://git@github.com/{PRIVATE_REPO}.git を見た", True, {PRIVATE_REPO})
+    assert got.text == f"{publish.PRIVATE_REF_TEXT} を見た" and got.dropped == {"private_ref": 1}
+
+
 def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:
     assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
 
