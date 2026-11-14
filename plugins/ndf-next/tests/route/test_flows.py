@@ -192,11 +192,20 @@ def test_design_plan_ci_failure_is_fixed_then_pushed_and_rechecked(kind):
 
 
 def test_design_plan_stops_before_review_when_pr_head_lags():
-    """#2932（#2721 の形）: PR の作成の後、手元のコミットが PR の head に入っていなければ、レビューへ進まずに止まる。"""
-    visited, state = walk(plan_of("design"), {"head-check": [stopped("precondition")]})
-    assert visited[-2:] == ["pr", "head-check"]
+    """#2932（#2721 の形）: PR の作成の後、手元のコミットが PR の head に入っていなければ、間を置いて 3 回まで読み直し、
+    それでも違えばレビューへ進まずに止まる。"""
+    visited, state = walk(plan_of("design"), {"head-check": [stopped("precondition")] * 4})
+    assert visited[-5:] == ["pr", "head-check", "head-check", "head-check", "head-check"]
     assert "review" not in visited
     assert (state.status, state.kind) == (STOPPED, "precondition")
+
+
+def test_design_plan_rereads_pr_head_until_github_catches_up():
+    """#3292: 既存の PR へ push した直後は GitHub の PR の head の更新が遅れる。読み直して揃えばレビューへ進む。"""
+    visited, state = walk(plan_of("design"), {"head-check": [stopped("precondition")]})
+    i = visited.index("head-check")
+    assert visited[i : i + 3] == ["head-check", "head-check", "review"]
+    assert state.status == OK
 
 
 def test_design_review_gets_rebuild_findings():

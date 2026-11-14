@@ -1,7 +1,7 @@
 {
   "template": "design",
   "purpose": "design",
-  "summary": "設計: worker の設計 → 組み直し → push → PR → PR の head が手元の HEAD と同じかの確かめ → レビュー（組み直しの「足すべき内容」を渡す）→ push → 衝突の確かめ → CI。worker が承認ゲートを返せば、プランを承認ゲートで終えて人の判断を待つ。PR が既にあれば作り直さず、本文を書き換えない。CI の合格は push の後の CI の待ちが確かめる",
+  "summary": "設計: worker の設計 → 組み直し → push → PR → PR の head が手元の HEAD と同じかの確かめ（GitHub の反映の遅れを 5 秒おきに 3 回まで読み直す）→ レビュー（組み直しの「足すべき内容」を渡す）→ push → 衝突の確かめ → CI。worker が承認ゲートを返せば、プランを承認ゲートで終えて人の判断を待つ。PR が既にあれば作り直さず、本文を書き換えない。CI の合格は push の後の CI の待ちが確かめる",
   "params": ["repo", "worktree", "branch", "base", "title", "body_file", "worker", "rebuild", "review", "ci_budget", "required", "tests"],
   "plan": {
     "name": "design-{{branch}}",
@@ -15,7 +15,9 @@
       {
         "id": "head-check",
         "run": ["sh", "-c", "h=$(gh pr view \"$0\" --json headRefOid --jq .headRefOid) || exit 2; [ -n \"$h\" ] || exit 2; test \"$h\" = \"$(git rev-parse HEAD)\"", "{{branch}}"],
-        "exit_cause": {"1": "precondition", "2": "precondition"}
+        "exit_cause": {"1": "precondition", "2": "precondition"},
+        "on_cause": {"precondition": "retry"},
+        "retry": {"precondition": {"attempts": 3, "interval": 5}}
       },
       {"id": "review", "run": ["{{review}}", "--findings", "{state_dir}/rebuild.json"], "on_cause": {"incomplete": "push-reviewed"}},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push-reviewed"},
