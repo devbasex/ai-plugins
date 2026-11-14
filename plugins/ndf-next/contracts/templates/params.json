@@ -16,7 +16,8 @@
     "merge_method": {"summary": "gh pr merge のマージの仕方（squash・merge・rebase）。省けば ndf route が base のブランチで許された方式（ruleset とリポジトリの設定）の先頭にする"},
     "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
     "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
-    "review": {"summary": "コードレビューの起動の引数の並び", "list": true},
+    "review": {"summary": "レビューの起動の引数の並び。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る", "list": true},
+    "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す", "list": true},
     "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
     "gate": {"summary": "承認ゲートの資料を作って人の答えを待つ起動の引数の並び（承認ゲートの結果 JSON を返す）", "list": true}
   }
