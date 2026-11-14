@@ -86,12 +86,10 @@ def run_localenv(tool: str, args: argparse.Namespace) -> dict[str, Any]:
     if args.action == "verify":
         return _verdict(tool, localenv.verify(t, shell), [])
     verdict, rc = localenv.healthcheck(t, shell)
-    if verdict.result != localenv_decide.MATCH or rc is None:
-        return (
-            _verdict(tool, verdict, [])
-            if verdict.result != localenv_decide.MATCH
-            else result.result(tool, result.OK, "動作確認のコマンドが宣言されていない")
-        )
+    if verdict.result != localenv_decide.MATCH:
+        return _verdict(tool, verdict, [])
+    if rc is None:
+        return result.result(tool, result.OK, "動作確認のコマンドが宣言されていない")
     if rc != 0:
         return result.stopped(tool, "check_failed", f"動作確認のコマンドが失敗した（終了コード {rc}）")
     return result.result(tool, result.OK, "動作確認が通った")
