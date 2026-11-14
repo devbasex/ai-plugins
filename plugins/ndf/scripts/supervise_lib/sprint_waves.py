@@ -12,6 +12,7 @@ from pathlib import Path
 
 import branch_flow
 import legacy_names
+from repo import SPRINT_MANIFEST
 from gate_answer import DESIGN_GATE
 
 from supervise_lib.decl import decl_fields, sprint_flow
@@ -178,7 +179,7 @@ def pin_flow(a) -> None:
     """スプリントの目録（`sprint.json`）に開始時に書いたブランチ運用があれば、`a.flow` をそれにする。`new sprint` を同じ
     スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
     try:
-        got = json.loads((sprint_out(a) / "sprint.json").read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
+        got = json.loads((sprint_out(a) / SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
     except (OSError, ValueError, AttributeError):
         return
     if isinstance(got, dict) and got:
@@ -223,7 +224,7 @@ def design_read(a) -> list[int]:
 def plan_design_results(a, repo: str) -> dict:
     """設計の結果のステージ（設計承認ゲートの直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
     `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
-    manifest = sprint_out(a).resolve() / "sprint.json"
+    manifest = sprint_out(a).resolve() / SPRINT_MANIFEST
     cmd = (
         f"python3 {shlex.quote(str(SELF))} design-results --manifest {shlex.quote(str(manifest))} "
         f"--base {shlex.quote(sprint_flow(a).doc_target(sprint_branch(a)))} --root {shlex.quote(repo)} --design {' '.join(map(str, design_read(a)))}"
