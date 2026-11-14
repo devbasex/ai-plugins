@@ -7,7 +7,16 @@ from ndf.domains.crossreview import finish_decide as fin
 
 
 def _row(fid: str, text: str, round_no: int, outcome: str = fin.UNRESOLVED, reason=None, by="codex", section=None) -> dict:
-    return {"id": fid, "key": text.lower(), "text": text, "section": section, "round": round_no, "outcome": outcome, "reason": reason, "by": by}
+    return {
+        "id": fid,
+        "key": text.lower(),
+        "text": text,
+        "section": section,
+        "round": round_no,
+        "outcome": outcome,
+        "reason": reason,
+        "by": by,
+    }
 
 
 def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks() -> None:
@@ -56,7 +65,16 @@ def test_apply_fix_takes_decided_outcomes_and_ignores_unknown_ids() -> None:
     assert list(ledger.rows.values()) == [
         _row("r1-1", "a", 1, fin.FIXED),
         _row("r1-2", "b", 1),
-        {"id": "rebuild-1", "key": None, "text": "足す", "section": None, "round": 2, "outcome": fin.SKIPPED, "reason": "後で", "by": "rebuild"},
+        {
+            "id": "rebuild-1",
+            "key": None,
+            "text": "足す",
+            "section": None,
+            "round": 2,
+            "outcome": fin.SKIPPED,
+            "reason": "後で",
+            "by": "rebuild",
+        },
     ]
 
 
