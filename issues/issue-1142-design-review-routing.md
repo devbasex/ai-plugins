@@ -10,7 +10,7 @@
 
 | 列 | 何を書くか |
 | --- | --- |
-| 項目 | `<Issue 番号>-<連番>`。連番は、その Issue の本文（`## 進行` より前）にある取り消し線の無いチェックボックスの行を、上から数えた順である。#3395 だけは本文が要求に書き直されたため、「依頼（原文）」の引用の中の 10 行を数える |
+| 項目 | `<Issue 番号>-<連番>`。連番は 2026-11-14 に、その Issue の本文（`## 進行` より前）にある取り消し線の無いチェックボックスの行を、上から数えた順で振った。以後は番号を引き継ぐ。項目の同一性は本文の行の文の sha256（`text_sha`。`children.json` の `review_items` が持つ）で決め、取り消し線を引いた項目の番号は欠番にして使い直さず、新しい項目にはその Issue の既存の最大の連番 + 1 を振る。#3395 だけは本文が要求に書き直されたため、「依頼（原文）」の引用の中の 10 行を数える |
 | 行き先の子 | 項目を解く子の記号。2 つ以上を `・` で並べたときは、先頭の子が項目を閉じる持ち主である。範囲の外は `#3388`、この設計の差分で解くものは `#3395 の設計`、承認済みの設計の差分で解いたものは `済み（PR <番号>）` と書く |
 | 順番 | 行き先の子の流す順番（先に要るものの順番の最大 + 1）。`0` はこの設計の差分か承認済みの設計の差分で解き、子を流さないことを表す。`—` は範囲の外。数の直後に全角の括弧で注記を添えてよい（例: `2（比較の結論まで着手しない）`）。注記は人が読むためのもので、規則 `review-items` は数だけを読む |
 | 新設か追補か | `新設`（この設計で足す・分ける子）・`追補`（閉じた子への追補の単位）・`既存`（開いている子の受け入れ条件へ足す。分類 D・E・G は承認済みの設計で既に足した）・`#3395 の設計`・`済み`・`範囲の外` のどれか |
@@ -29,25 +29,35 @@
 
 ## 抜き出しのコマンドと突き合わせ
 
-入力の 24 本から項目の番号を抜き出し、表の 1 列目と比べる。
+入力の 24 本から項目の文を抜き出して `text_sha` を求め、項目の番号へ対応させてから表の 1 列目と比べる。番号は、`develop` の `children.json` に `review_items` があればその `text_sha` の一致で引き、一致しない項目は `<Issue 番号>-new:<text_sha>` として差分に出す（表に無い新しい項目）。`review_items` がまだ無い間（X1+ の最初の生成の前）は、本文の順の連番を番号とする。この間は 2026-11-14 の番号と本文の順が一致するよう、項目の取り消し（本文の取り消し線）を X1+ の最初の生成の後まで行わない（[issue-3395-design.md](issue-3395-design.md) の「表とコピーを直す時と書き手」）。
 
 ```bash
 for n in 3341 3342 3343 3344 3345 3346 3347 3364 3365 3366 3367 3368 3377 3378 3379 3380 3381 3382 3390 3391 3392 3393 3394 3395; do
   gh issue view "$n" --json body -q .body | N="$n" python3 -c '
-import os, re, sys
+import hashlib, os, re, sys
 n = os.environ["N"]
 body = sys.stdin.read()
 if n == "3395":
     lines = [l[2:] for l in body.split("\n") if re.match(r"^> [-*] \[[ xX]\] ", l)]
 else:
     lines = [l for l in body.split("\n## 進行")[0].split("\n") if re.match(r"^[ \t]*[-*] \[[ xX]\] ", l)]
-k = 0
 for l in lines:
     if not re.match(r"^[ \t]*[-*] \[[ xX]\] ~~", l):
-        k += 1
-        print(f"{n}-{k}")
+        text = re.sub(r"^[ \t]*[-*] \[[ xX]\] ", "", l)
+        print(n, hashlib.sha256(text.encode()).hexdigest()[:12])
 '
-done | sort > /tmp/review-items.txt
+done > /tmp/review-items-sha.txt
+python3 - /tmp/review-items-sha.txt <<'EOF' | sort > /tmp/review-items.txt
+import json, subprocess, sys
+shown = subprocess.run(["git", "show", "origin/develop:plugins/ndf-next/src/ndf/checks/children.json"], capture_output=True, text=True)
+copy = json.loads(shown.stdout).get("review_items", {}).get("items", {}) if shown.returncode == 0 else {}
+by_sha = {v["text_sha"]: k for k, v in copy.items()}
+seen = {}
+for line in open(sys.argv[1]):
+    n, sha = line.split()
+    seen[n] = seen.get(n, 0) + 1
+    print(by_sha.get(sha, f"{n}-new:{sha}") if copy else f"{n}-{seen[n]}")
+EOF
 grep -oE '^\| [0-9]{4}-[0-9]+ ' issues/issue-1142-design-review-routing.md | tr -d '| ' | sort | diff - /tmp/review-items.txt && wc -l < /tmp/review-items.txt
 ```
 
