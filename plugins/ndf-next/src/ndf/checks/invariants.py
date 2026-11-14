@@ -65,22 +65,26 @@ def own_name(scope: Scope) -> list[Finding]:
     """
     exact = {scope.plugin_name, identity.FINAL_NAME, *identity.FIXED_WORDS.values()}
     pattern = _name_pattern(exact | {scope.plugin_root.name})
-    found = []
-    for src in scope.sources:
-        rel = scope.plugin_rel(src)
-        if src.is_python and rel.startswith("src/"):
-            skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
-            texts = [(no, text) for no, text in _strings(src.tree) if no not in skip]
-        elif rel.startswith(SCRIPT_PREFIXES):
-            texts = _shell_lines(src)
-        else:
-            continue
-        found += [
-            Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
-            for no, text in texts
-            if text in exact or pattern.search(PACKAGE_FORM.sub("", text))
-        ]
-    return found
+    return [
+        Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
+        for src in scope.sources
+        for no, text in _own_name_texts(scope, src)
+        if text in exact or pattern.search(PACKAGE_FORM.sub("", text))
+    ]
+
+
+def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
+    """I1 が照合する行と文字。製品の Python は文字列の定数（`identity` の定義の行を除く）、スクリプトはコメントを除いた行。
+
+    ほかのファイルは照合しない（空）。
+    """
+    rel = scope.plugin_rel(src)
+    if src.is_python and rel.startswith("src/"):
+        skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
+        return [(no, text) for no, text in _strings(src.tree) if no not in skip]
+    if rel.startswith(SCRIPT_PREFIXES):
+        return _shell_lines(src)
+    return []
 
 
 def _definition_lines(tree: ast.Module) -> set[int]:
