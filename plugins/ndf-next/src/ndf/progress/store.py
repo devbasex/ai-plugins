@@ -391,18 +391,29 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
     if path is None:
         raise RestoreUnsupported("PostgreSQL の控えと戻しは DB の運用で行う")
     with durable.store_lock(root, exclusive=True), db_lock(path, exclusive=True):
-        temp = path.with_name(f".{path.name}{RESTORING_SUFFIX}")
-        shutil.copyfile(source, temp)
-        if not durable.check_file(temp):
-            temp.unlink(missing_ok=True)
-            raise durable.StoreBroken(f"控え {source} が quick_check を通らない。次に新しい控え: {_next_backup(root, source)}", (source,))
+        temp = _stage_backup(root, source, path)
         retired = _retire_db(path, now)
-        left = [str(p) for s, p in _with_suffixes(path) if s and p.exists()]
-        if left:
-            raise durable.StoreBroken(f"退避の後に残ったファイルがある: {', '.join(left)}", (path,))
+        _assert_retired(path)
         os.replace(temp, path)
         durable.touch_mark(root / CHECKED_MARK, now)
     return retired
+
+
+def _stage_backup(root: Path, source: Path, path: Path) -> Path:
+    """控えを一時名へ写し、`quick_check` を通した一時名を返す。通らなければ一時名を消して `StoreBroken`。"""
+    temp = path.with_name(f".{path.name}{RESTORING_SUFFIX}")
+    shutil.copyfile(source, temp)
+    if not durable.check_file(temp):
+        temp.unlink(missing_ok=True)
+        raise durable.StoreBroken(f"控え {source} が quick_check を通らない。次に新しい控え: {_next_backup(root, source)}", (source,))
+    return temp
+
+
+def _assert_retired(path: Path) -> None:
+    """退避の後に -wal・-shm・-journal が残っていれば `StoreBroken`。"""
+    left = [str(p) for s, p in _with_suffixes(path) if s and p.exists()]
+    if left:
+        raise durable.StoreBroken(f"退避の後に残ったファイルがある: {', '.join(left)}", (path,))
 
 
 # --- 読み書き ----------------------------------------------------------------------------
