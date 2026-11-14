@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan.transition_decide import Outcome
 
@@ -179,9 +181,11 @@ def test_design_plan_checks_ci_after_push():
     assert state.status == OK
 
 
-def test_design_plan_ci_failure_is_fixed_then_pushed_and_rechecked():
-    """#2932: 設計の CI が落ちたら同じ原因の数えを通って worker が直し、push してから CI を待ち直す（止まらない）。"""
-    visited, state = walk(plan_of("design"), {"ci": [stopped("test_failed")]})
+@pytest.mark.parametrize("kind", ["test_failed", "check_failed"])
+def test_design_plan_ci_failure_is_fixed_then_pushed_and_rechecked(kind):
+    """#2932: 設計の CI が落ちたら（テストでも、設計文書の検査・静的解析などテスト以外のチェックでも）同じ原因の数えを
+    通って worker が直し、push してから CI を待ち直す（止まらない）。"""
+    visited, state = walk(plan_of("design"), {"ci": [stopped(kind)]})
     i = visited.index("ci")
     assert visited[i + 1 :] == ["repeat-check", "ci-fix", "push-reviewed", "conflict-check", "ci"]
     assert state.status == OK

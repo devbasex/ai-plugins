@@ -191,7 +191,7 @@ def test_design_pr_step_keeps_existing_pr_body(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{gh}:{os.environ['PATH']}")
     plan = _design_step(tmp_path, "pr")
     out = steps.run(steps.StepContext(plan, tmp_path / "state", {"state_dir": str(tmp_path / "state")}), plan.steps[0])
-    assert out["status"] == "ok" and out["items"] == [{"kind": "pr", "number": 7}]
+    assert out["status"] == "ok" and out["prs"] == [7]
     assert [line.split()[:2] for line in calls.read_text(encoding="utf-8").splitlines()] == [["pr", "list"]]
     design = plan_of("design")
     assert not any("pr edit" in " ".join(s["run"]) or "--body" in " ".join(s["run"]) for s in design["steps"] if s["id"] != "pr")

@@ -20,7 +20,7 @@
       {"id": "review", "run": ["{{review}}", "--findings", "{state_dir}/rebuild.json"], "on_cause": {"incomplete": "push-reviewed"}},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push-reviewed"},
       {"use": "conflict-check"},
-      {"use": "ci", "next": "end"},
+      {"use": "ci", "next": "end", "on_cause": {"test_failed": "repeat-check", "check_failed": "repeat-check", "base_conflict": "base-sync"}},
       {"use": "repeat-check"},
       {"use": "ci-fix", "next": "push-reviewed"},
       {"use": "fix-push"},
