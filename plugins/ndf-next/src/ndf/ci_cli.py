@@ -32,7 +32,9 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
-    m = sub.add_parser("merge", help="ブランチの開いた PR を、作業場所の先端のまま、前段の確かめ（決めていない残リスク・先端の食い違い）を通してマージする")
+    m = sub.add_parser(
+        "merge", help="ブランチの開いた PR を、作業場所の先端のまま、前段の確かめ（決めていない残リスク・先端の食い違い）を通してマージする"
+    )
     m.add_argument("--branch", required=True, help="PR の head のブランチ")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
     m.add_argument("--method", help="マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭")
