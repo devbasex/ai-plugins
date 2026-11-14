@@ -433,58 +433,67 @@ def _retrying(sleep: Callable[[float], None]) -> tenacity.Retrying:
     )
 
 
-def _deliver(
-    notice: Notice, outbox: Path, sent: dict[str, float], deliver: Deliver, sleep: Callable[[float], None], out: Drained
-) -> PostError | None:
+@dataclass
+class _Run:
+    """1 回の送り手の文脈。`sent` は送ったキーと送った時刻の記録で、送るたびに書き足す。"""
+
+    outbox: Path
+    deliver: Deliver
+    sleep: Callable[[float], None]
+    sent: dict[str, float]
+    out: Drained
+
+
+def _deliver(notice: Notice, run: _Run) -> PostError | None:
     """1 件を打ち直し付きで送り、送った・設定が無いを数える。打ち直しても送れなければ、その失敗を返す。"""
     try:
-        delivered = _retrying(sleep)(deliver, notice)
+        delivered = _retrying(run.sleep)(run.deliver, notice)
     except PostError as e:
         return e
     if not delivered:
-        out.unconfigured += 1
+        run.out.unconfigured += 1
         return None
-    out.sent += 1
-    sent[notice.key] = _wall()
-    _save_sent(outbox, sent)
+    run.out.sent += 1
+    run.sent[notice.key] = _wall()
+    _save_sent(run.outbox, run.sent)
     return None
 
 
-def _send_one(path: Path, outbox: Path, sent: dict[str, float], deliver: Deliver, sleep: Callable[[float], None], out: Drained) -> bool:
+def _send_one(path: Path, run: _Run) -> bool:
     """1 件を扱う。打ち直しても送れず、送信待ちに残したら偽（この回の送り手を終える）。"""
     now = _wall()
     try:
         notice = read_notice(path)
     except NoticeError as e:
-        _move_unsent(path, outbox, f"{path.name}: {e}", out)
+        _move_unsent(path, run, f"{path.name}: {e}")
         return True
     if now - notice.created_at > limits.seconds("notify.stale"):
-        out.stale += 1
-    elif _duplicate(notice, sent, now):
-        out.duplicate += 1
-    elif failure := _deliver(notice, outbox, sent, deliver, sleep, out):
+        run.out.stale += 1
+    elif _duplicate(notice, run.sent, now):
+        run.out.duplicate += 1
+    elif failure := _deliver(notice, run):
         if failure.retryable:
-            out.left = len(pending(outbox))
+            run.out.left = len(pending(run.outbox))
             return False
-        _move_unsent(path, outbox, f"{path.name}: {failure}", out)
+        _move_unsent(path, run, f"{path.name}: {failure}")
         return True
     path.unlink(missing_ok=True)
     return True
 
 
-def _move_unsent(path: Path, outbox: Path, reason: str, out: Drained) -> None:
-    (outbox / _UNSENT).mkdir(exist_ok=True)
-    path.replace(outbox / _UNSENT / path.name)
-    out.failed.append(reason)
+def _move_unsent(path: Path, run: _Run, reason: str) -> None:
+    (run.outbox / _UNSENT).mkdir(exist_ok=True)
+    path.replace(run.outbox / _UNSENT / path.name)
+    run.out.failed.append(reason)
 
 
 def _drain_locked(outbox: Path, deliver: Deliver, sleep: Callable[[float], None], out: Drained) -> bool:
     """排他を持ったまま、送信待ちが空になるまで送る。打ち直しても送れない 1 件で止めたら偽。"""
     _prune_unsent(outbox, _wall())
-    sent = _load_sent(outbox, _wall())
+    run = _Run(outbox=outbox, deliver=deliver, sleep=sleep, sent=_load_sent(outbox, _wall()), out=out)
     while paths := pending(outbox):
         for path in paths:
-            if not _send_one(path, outbox, sent, deliver, sleep, out):
+            if not _send_one(path, run):
                 return False
     return True
 
