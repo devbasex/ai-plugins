@@ -24,9 +24,11 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
 from __future__ import annotations
 
 import fcntl
+import itertools
 import json
 import logging
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -191,17 +193,19 @@ def old_state_places(ident: PluginIdentity) -> list[Path]:
     return [place.path(ident) for place in OLD_STATE_PLACES if place.handling is Handling.RETIRE_HERE and place.path is not None]
 
 
-def _retire_target(place: Path, now: datetime) -> Path:
-    """退避先のパス。日付の名前が既にあれば時刻を足し、それもあれば番号を足す。消さない。"""
+def _retire_candidates(place: Path, now: datetime) -> Iterator[Path]:
+    """退避先の候補を順に出す。日付の名前、時刻を足した名前、その後に番号を足した名前。"""
     base = place.with_name(place.name + RETIRED_SUFFIX + now.strftime("%Y%m%d"))
-    if not base.exists():
-        return base
+    yield base
     stamped = base.with_name(base.name + now.strftime("T%H%M%S"))
-    candidate, n = stamped, 1
-    while candidate.exists():
-        candidate = stamped.with_name(f"{stamped.name}-{n}")
-        n += 1
-    return candidate
+    yield stamped
+    for n in itertools.count(1):
+        yield stamped.with_name(f"{stamped.name}-{n}")
+
+
+def _retire_target(place: Path, now: datetime) -> Path:
+    """退避先のパス。候補のうち最初にまだ無い名前。消さない。"""
+    return next(candidate for candidate in _retire_candidates(place, now) if not candidate.exists())
 
 
 def lock_path(ident: PluginIdentity) -> Path:
