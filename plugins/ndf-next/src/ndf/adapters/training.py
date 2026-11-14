@@ -248,10 +248,10 @@ def _cached_refusal(runtime: str, entry: object, now: float) -> Optional[str]:
     if not isinstance(entry, dict):
         return _ask_check(runtime, "控えが無い")
     try:
-        checked = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
+        checked_at = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
     except ValueError:
         return _ask_check(runtime, "控えの時刻が読めない")
-    if now - checked > limits.seconds(VALID_POLICY):
+    if now - checked_at > limits.seconds(VALID_POLICY):
         return _ask_check(runtime, f"控えの期限切れ（{entry.get('checked_at')} に確かめた）")
     training = entry.get("training")
     if training is True:
