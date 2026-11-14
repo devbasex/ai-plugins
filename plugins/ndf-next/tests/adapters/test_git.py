@@ -136,3 +136,111 @@ def test_changed_files_returns_real_names_of_quoted_paths(tmp_path: Path) -> Non
     changed = git.Git(cwd=repo).changed_files(base, "main")
     assert sorted(changed) == sorted(names)
     assert all((repo / name).exists() for name in changed)
+
+
+# 現状固定（I-002）: `Git` の各操作が git へ渡す引数・作業場所と、失敗の扱い。期待値は今の実装の出力。
+def _fake_cwd(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def runner(args: list[str], cwd):
+        calls.append((args, cwd))
+        return git.Completed(returncode, stdout, stderr)
+
+    runner.calls = calls  # type: ignore[attr-defined]
+    return runner
+
+
+def test_run_returns_stdout_as_is() -> None:
+    runner = _fake_cwd(stdout="x\n")
+    assert git.Git(Path("/w"), runner).run("status") == "x\n"
+    assert runner.calls == [(["status"], Path("/w"))]
+
+
+def test_run_failure_message_names_command_and_stderr() -> None:
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(128, stderr="bad\n")).run("status", "-s")
+    assert str(exc.value) == "git status -s が失敗（終了コード 128）: bad"
+
+
+def test_rev_parse_failures() -> None:
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(1)).rev_parse("x")
+    assert str(exc.value) == "git rev-parse --verify --quiet x^{commit} が失敗（終了コード 1）: "
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(stdout="abc\n")).rev_parse("x")
+    assert str(exc.value) == "x をコミットへ解決できない: 'abc'"
+
+
+def test_is_ancestor_passes_args_and_cwd_and_failure_message() -> None:
+    runner = _fake_cwd(0)
+    assert git.Git(Path("/w"), runner).is_ancestor("a", "b") is True
+    assert runner.calls == [(["merge-base", "--is-ancestor", "a", "b"], Path("/w"))]
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(128, stderr="oops\n")).is_ancestor("a", "b")
+    assert str(exc.value) == "祖先を確かめられない（終了コード 128）: oops"
+
+
+def test_merge_base_strips_output() -> None:
+    runner = _fake_cwd(stdout=" abc \n")
+    assert git.Git(runner=runner).merge_base("a", "b") == "abc"
+    assert runner.calls == [(["merge-base", "a", "b"], None)]
+
+
+def test_changed_files_splits_on_nul() -> None:
+    runner = _fake_cwd(stdout="a\0b c\0\0")
+    assert git.Git(Path("/w"), runner).changed_files("b", "h") == ["a", "b c"]
+    assert runner.calls == [(["diff", "--name-only", "-z", "b...h"], Path("/w"))]
+
+
+def test_changed_lines_with_fake_log_excludes_short_sha_case_insensitively() -> None:
+    log = f"@{'a' * 40}\n\n 1 file changed, 2 insertions(+)\n@{'b' * 40}\n\n 1 file changed, 3 deletions(-)\n"
+    runner = _fake_cwd(stdout=log)
+    assert git.Git(runner=runner).changed_lines("b", "h", exclude=["BBBBBBB"]) == 2
+    assert runner.calls == [(["log", "--first-parent", "--diff-merges=first-parent", "--shortstat", "--format=@%H", "b..h"], None)]
+    assert git.Git(runner=_fake_cwd(stdout=log)).changed_lines("b", "h") == 5
+
+
+def test_worktrees_reads_porcelain_z() -> None:
+    text = f"worktree /m\0HEAD {'a' * 40}\0branch refs/heads/develop\0\0worktree /m/.worktrees/x\0HEAD {'b' * 40}\0detached\0prunable gone\0locked\0\0"
+    runner = _fake_cwd(stdout=text)
+    assert git.Git(runner=runner).worktrees() == [
+        git.WorktreeEntry(Path("/m"), "a" * 40, "develop", False, False),
+        git.WorktreeEntry(Path("/m/.worktrees/x"), "b" * 40, None, True, True),
+    ]
+    assert runner.calls == [(["worktree", "list", "--porcelain", "-z"], None)]
+
+
+def test_fetch_returns_completed_without_raising() -> None:
+    runner = _fake_cwd(1, stderr="no remote")
+    assert git.Git(Path("/w"), runner).fetch("origin", "a:b") == git.Completed(1, "", "no remote")
+    assert runner.calls == [(["fetch", "-q", "--no-tags", "origin", "a:b"], Path("/w"))]
+
+
+def test_remote_repo_passes_remote_name_and_propagates_failure() -> None:
+    runner = _fake_cwd(stdout="git@github.com:o/n.git\n")
+    assert git.Git(runner=runner).remote_repo("up") == "o/n"
+    assert runner.calls == [(["remote", "get-url", "up"], None)]
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(2, stderr="no such remote")).remote_repo("up")
+    assert str(exc.value) == "git remote get-url up が失敗（終了コード 2）: no such remote"
+
+
+def test_run_git_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs, cmd=cmd)
+        return subprocess.CompletedProcess(cmd, 3, "o", "e")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.run_git(["status"], Path("/w")) == git.Completed(3, "o", "e")
+    assert seen["cmd"] == ["git", "status"] and seen["cwd"] == Path("/w") and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("no git")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(git.GitError, match="git を起動できない"):
+        git.run_git(["status"], None)
