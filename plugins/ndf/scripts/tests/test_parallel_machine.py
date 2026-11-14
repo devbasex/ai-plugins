@@ -78,60 +78,17 @@ def repos(tmp_path):
 # ---- 検査と開始（受け入れ条件 1〜3・9、I5・I6・I13） ----
 
 
-def test_check_warns_about_the_machine_total_and_keeps_the_exit_code(repos):
-    x, y = repos
+def test_check_does_not_count_declared_plans_of_the_machine(repos):
+    """検査は宣言の合計を数えない。同時に動く数は起動のたびに数える（#3021）。"""
+    _, y = repos
     code, res = _cli(y, "check", "p1")
-    assert code == 0, res
-    got = _machine(res["items"])
-    assert len(got) == 1 and got[0]["level"] == "warning"
-    w = got[0]
-    assert (w["machine_plans"], w["own_plans"], w["max_plans"]) == (8, 4, 6)
-    assert w["plans"] == [{"plan": f"{x}:c1", "plans": 4}]
-    assert "8" in w["message"] and "6" in w["message"] and f"{x}:c1" in w["message"]
-    assert res["metrics"]["warnings"] == sum(1 for i in res["items"] if i["level"] == "warning")
-
-
-def test_no_warning_when_the_total_fits_or_the_other_plan_has_finished(repos):
-    x, y = repos
-    (pp.plan_dir(x, "c1") / "plan.json").write_text(json.dumps(_draft("c1", [1, 1], "cx")))  # 2 + 4 = 6 は上限ちょうど
-    assert _machine(_cli(y, "check", "p1")[1]["items"]) == []
-    (pp.plan_dir(x, "c1") / "plan.json").write_text(json.dumps(_draft("c1", [2, 2], "cx")))
-    (pp.plan_dir(x, "c1") / "run.done").write_text("SUCCESS")  # 終わった計画は数えない
-    assert _machine(_cli(y, "check", "p1")[1]["items"]) == []
+    assert code == 0 and _machine(res["items"]) == []
 
 
 def test_a_single_plan_over_the_cap_is_still_refused_with_i2(tmp_path):
     y = _git(tmp_path / "y")
-    code, res = _cli(y, "init", "p1", stdin=json.dumps(_draft("p1", [4, 3], "py")))
+    code, res = _cli(y, "init", "p1", stdin=json.dumps(_draft("p1", [7, 3], "py")))
     assert code == 1 and any(i["rule"] == "I2" and i["level"] == "error" for i in res["items"])
-
-
-def test_start_carries_the_same_warning_and_starts(repos, monkeypatch):
-    import parallel as cli
-    import parallel_cli as pcli
-    import parallel_lane as pl
-    import parallel_run as pr_run
-
-    _, y = repos
-    out, spawned = {}, []
-    monkeypatch.setattr(pr_run, "mark_organizer", lambda m, n, clear=False: True)
-    monkeypatch.setattr(pr_run, "environment_report", lambda m, p: ({}, []))
-    monkeypatch.setattr(pl, "live_run_pid", lambda m, n: None)
-    monkeypatch.setattr(pl, "run_status", lambda m, n: "PENDING")
-    monkeypatch.setattr(pcli.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or type("P", (), {"pid": 4321})())
-
-    class Done(Exception):
-        pass
-
-    def reply(status, summary, items=None, code=None, **metrics):
-        out.update(status=status, items=items or [])
-        raise Done
-
-    with pytest.raises(Done):
-        pcli.start_plan(type("A", (), {"name": "p1"})(), reply, y, cli.checked_plan, SCRIPTS / "parallel.py")
-    assert out["status"] == "ok" and spawned
-    got = _machine(out["items"])
-    assert len(got) == 1 and got[0]["machine_plans"] == 8
 
 
 def test_unreadable_plans_are_counted_or_listed(tmp_path):
@@ -148,8 +105,6 @@ def test_unreadable_plans_are_counted_or_listed(tmp_path):
     got = pm.declared_plans(y, "p1", status)
     assert got["plans"] == [{"plan": f"{x}:c1", "plans": 3, "state": "unreadable"}]  # 状態を読めない計画は動いているものとして数える
     assert got["unreadable"] == [f"{x}:c2"]  # 宣言を読めない計画は 0 本として置き場を載せる
-    w = pm.plan_warnings(y, "p1", 4, status)[0]
-    assert w["machine_plans"] == 7 and w["unreadable"] == [f"{x}:c2"] and "状態を読めない" in w["message"]
 
 
 # ---- 上限の出所（受け入れ条件 8、I1〜I3） ----

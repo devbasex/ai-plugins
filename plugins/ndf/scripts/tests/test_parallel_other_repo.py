@@ -226,16 +226,15 @@ def test_release_mapping_skips_other_repo_lane(two_repos):
 # ---- レーンの追加と書き換え（受け入れ条件 7・8・I13） ----
 
 
-def test_lane_add_over_limit_suggests_cap(monkeypatch, two_repos):
+def test_lane_add_does_not_count_lanes_toward_the_cap(monkeypatch, two_repos):
+    """レーンを足しても、計画のレーンの数は上限に数えない。同時に動く数は起動のたびに数える（#3021）。"""
     x, _y = two_repos
-    monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "1")
     raw = pp.load_plan(x, "p3")
     new, name, err = plc.updated(raw, "add", None, _lane("lc", [3]))
     assert err is None and name == "lc"
     plan, items, _ = pp.check_data({**new, "lanes": [*new["lanes"], _lane("ld", [4])]}, home=x)
-    assert plan is None
-    hint = plc.cap_hint_items(items, 4)
-    assert any("cap --named 4" in (it.get("next") or "") for it in hint)
+    assert plan is not None and not [it for it in items if it["level"] == "error"]
 
 
 def test_lane_set_refuses_name_and_repo(two_repos):
@@ -262,8 +261,8 @@ def test_lane_cli_writes_plan_and_handoff(tmp_path, monkeypatch, two_repos):
     got = subprocess.run(
         [sys.executable, str(SCRIPTS / "parallel.py"), "lane", "p3", "add", "--from", str(src)], cwd=x, capture_output=True, text=True
     )
-    assert got.returncode == 1 and "cap --named 4" in got.stdout
-    assert len(pp.load_plan(x, "p3")["lanes"]) == 3  # 何も書かない
+    assert got.returncode == 0, got.stdout + got.stderr  # レーンの数は上限に数えない（#3021）
+    assert [ln["name"] for ln in pp.load_plan(x, "p3")["lanes"]] == ["la", "lfactory", "lc", "ld"]
     doc = y / ".ndf" / "handoff" / "issue-5.md"
     doc.write_text("作業の状態と利用者の指示\n")
     src.write_text(json.dumps({"touches": ["c/"]}))
