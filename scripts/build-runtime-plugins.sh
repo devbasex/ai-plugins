@@ -41,9 +41,6 @@ sync_codex_skill_policies() {
 FAMILIES="$(python3 "$ROOT_DIR/scripts/lib/plugin_families.py" "$ROOT_DIR")"
 while IFS= read -r family; do
   [ -n "$family" ] || continue
-  case "$family" in
-    *-shared|*-claude|*-codex) continue ;;
-  esac
   sync_codex_skill_policies "$family"
 done <<< "$FAMILIES"
 
