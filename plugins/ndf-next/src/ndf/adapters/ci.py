@@ -56,13 +56,20 @@ QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_pr
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
 # pytest の落ちた行（ログの各行の先頭の時刻を除いた後）。`FAILED <パス>::<名前> - <理由>`・`ERROR <パス>`
 _PYTEST_FAILED = re.compile(r"(?:^|\s)(?:FAILED|ERROR) (?P<node>[^\s:]+\.py(?:::[^\s]+)?)")
+# 止まった理由の種類（値は contracts/causes.json の kind）
+TEST_FAILED_KIND = "test_failed"
+CHECK_FAILED_KIND = "check_failed"
+CI_PENDING_KIND = "ci_pending"
+PRECONDITION_KIND = "precondition"
+INFRA_WAIT_KIND = "infra_wait"
+NOT_CI_KIND = "not_ci"
 # 読んだ結果（`Reading.verdict`）→ 止まった理由の種類。`passed` は通常 None、マージの後なら `not_ci`
 _VERDICT_KINDS = {
-    Verdict.TEST_FAILED: "test_failed",
-    Verdict.CHECK_FAILED: "check_failed",
-    Verdict.PENDING: "ci_pending",
-    Verdict.MISSING: "precondition",
-    Verdict.STALE: "infra_wait",
+    Verdict.TEST_FAILED: TEST_FAILED_KIND,
+    Verdict.CHECK_FAILED: CHECK_FAILED_KIND,
+    Verdict.PENDING: CI_PENDING_KIND,
+    Verdict.MISSING: PRECONDITION_KIND,
+    Verdict.STALE: INFRA_WAIT_KIND,
 }
 
 
@@ -243,12 +250,12 @@ class Classifier(NamedTuple):
         after_merge = self.merge_failed is not None
         merged_tests, merged_other = split_failed(self.merge_failed if self.merge_failed is not None else [], self.tests)
         if merged_tests:
-            return "test_failed"
+            return TEST_FAILED_KIND
         verdict = reading.verdict
         if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
-            return "check_failed"
+            return CHECK_FAILED_KIND
         if verdict == Verdict.PASSED:
-            return "not_ci" if after_merge else None
+            return NOT_CI_KIND if after_merge else None
         return _VERDICT_KINDS[verdict]
 
 
@@ -292,7 +299,7 @@ class WatchResult:
     def cause_by(self, classifier: Classifier) -> Optional[str]:
         """止まった理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
         kind = classifier.cause(self.reading)
-        return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
+        return INFRA_WAIT_KIND if kind == CI_PENDING_KIND and self.runner_exhausted else kind
 
 
 @dataclass
