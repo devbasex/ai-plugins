@@ -353,31 +353,41 @@ class Enablement:
     source: str
 
 
+def _plain(value: Any) -> Any:
+    """tuple を JSON の配列にする。"""
+    return list(value) if isinstance(value, tuple) else value
+
+
+def _frozen(value: Any) -> Any:
+    """JSON の配列を tuple にする（`_plain` の逆）。"""
+    return tuple(value) if isinstance(value, list) else value
+
+
+def _stage_dict(s: StageDef) -> dict[str, Any]:
+    steps = [{k: v for k, v in vars(st).items() if k != "stage"} for st in s.steps]
+    return {**{k: _plain(v) for k, v in vars(s).items() if k != "steps"}, "steps": steps}
+
+
+def _stage_from(raw: Mapping[str, Any]) -> StageDef:
+    steps = tuple(StepDef(stage=raw["name"], **st) for st in raw["steps"])
+    rest = {k: _frozen(v) for k, v in raw.items() if k != "steps"}
+    return StageDef(steps=steps, **rest)
+
+
 def snapshot_dict(snap: Snapshot) -> dict[str, Any]:
     """スナップショットを JSON の形にする（定義の改訂に書く）。"""
-
-    def stage(s: StageDef) -> dict[str, Any]:
-        steps = [{k: v for k, v in vars(st).items() if k != "stage"} for st in s.steps]
-        return {**{k: (list(v) if isinstance(v, tuple) else v) for k, v in vars(s).items() if k != "steps"}, "steps": steps}
-
     return {
         "mode": snap.mode,
         "version": snap.version,
         "sha256": snap.sha256,
         "height": snap.height,
-        "stages": [stage(s) for s in snap.stages],
+        "stages": [_stage_dict(s) for s in snap.stages],
     }
 
 
 def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
     """`snapshot_dict` の逆。"""
-
-    def stage(s: Mapping[str, Any]) -> StageDef:
-        steps = tuple(StepDef(stage=s["name"], **st) for st in s["steps"])
-        rest = {k: (tuple(v) if isinstance(v, list) else v) for k, v in s.items() if k != "steps"}
-        return StageDef(steps=steps, **rest)
-
-    return Snapshot(raw["mode"], raw["version"], raw["sha256"], raw["height"], tuple(stage(s) for s in raw["stages"]))
+    return Snapshot(raw["mode"], raw["version"], raw["sha256"], raw["height"], tuple(_stage_from(s) for s in raw["stages"]))
 
 
 # --- 順序の決まり（I8〜I10） ---------------------------------------------------------------
