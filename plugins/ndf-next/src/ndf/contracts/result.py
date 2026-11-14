@@ -96,11 +96,6 @@ def answer_errors(routes: object) -> list[str]:
     return [f"routes のキー {key!r} は答えの語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
 
 
-def code_matches(status: str, code: int) -> bool:
-    """status と終了コードが事実の表 exit-codes の区分で食い違わないか。"""
-    return exit_codes.matches(status, code)
-
-
 def code_for(obj: Any) -> Optional[int]:
     """既定の終了コード。ok は 0、gate は承認ゲートの最初の値、stopped は cause.kind の終了コード。決められなければ None。"""
     if not isinstance(obj, dict):
@@ -126,7 +121,7 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     if "routes" in obj:
         errs += answer_errors(obj["routes"])
     if code is not None and obj.get("status") in STATUSES:
-        if not code_matches(obj["status"], code):
+        if not exit_codes.matches(obj["status"], code):
             errs.append(f"status {obj['status']} と終了コード {code} が合わない")
         expected = code_for(obj)
         if obj["status"] == STOPPED and expected is not None and code != expected:
