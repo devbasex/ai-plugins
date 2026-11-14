@@ -122,12 +122,12 @@ def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     span = _span(repo_git, target)
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
-    change_list = gather.changes(repo_git, span, found, decl)
+    paths = repo_git.changed_files(span.since, span.until)
+    change_list = gather.changes(paths, found, decl)
     planned = gather.plan_bumps(root, found, change_list, decl, target.level, target.channel)
     if not planned:
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
     pulls = gather.pull_facts(hub, gather.included(repo_git, span))
-    paths = repo_git.changed_files(span.since, span.until)
     return materials_decide.Facts(
         target.channel,
         tuple(planned),

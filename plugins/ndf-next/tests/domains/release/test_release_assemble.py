@@ -138,5 +138,5 @@ def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expect
     work = _origin_with_change(tmp_path, test_only=test_only)
     repo_git = git_mod.Git(work)
     found, decl = plugins_mod.load(work), decl_mod.load(work)
-    assert gather.changes(repo_git, gather.Range("origin/main", "origin/develop"), found, decl) == expected
-    assert gather.changes(repo_git, gather.Range("origin/develop", "origin/develop"), found, decl) == []
+    assert gather.changes(repo_git.changed_files("origin/main", "origin/develop"), found, decl) == expected
+    assert gather.changes(repo_git.changed_files("origin/develop", "origin/develop"), found, decl) == []
