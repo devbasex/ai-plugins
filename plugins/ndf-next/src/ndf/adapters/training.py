@@ -34,6 +34,8 @@ from ndf.adapters.training_cache import (
     CACHE_FILE as CACHE_FILE,
     CHECK_COMMAND,
     CHECKED_RUNTIMES,
+    CLAUDE_FOREIGN_AUTH as CLAUDE_FOREIGN_AUTH,
+    CLAUDE_TOKEN_ENV as CLAUDE_TOKEN_ENV,
     REFUSED as REFUSED,
     UNSUPPORTED,
     VALID_POLICY as VALID_POLICY,
@@ -48,17 +50,8 @@ from ndf.contracts import facts, limits, result
 
 TOOL = cli.tool_of(__name__)
 CLAUDE_URL = "https://api.anthropic.com/api/oauth/account/settings"
-CLAUDE_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 CLAUDE_CREDENTIALS = ".credentials.json"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
-# OAuth より優先される認証の変数（値は出さず、名前だけを理由に載せる）
-CLAUDE_FOREIGN_AUTH = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-)
 CODEX_URL = "https://chatgpt.com/backend-api/settings/user"
 CODEX_KEYS = ("training_allowed", "codex_training_allowed", "codex_training_allowed_v2")
 # Python の既定の User-Agent では 403 が返る（2026-10-02 の実測。#1597）
@@ -236,7 +229,7 @@ def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now
 def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
     """担当ごとに確かめて控え、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
     readings = [read_setting(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
-    save([r for r in readings if r.runtime in READERS], now)
+    save([r for r in readings if r.runtime in READERS], now, env)
     items = [r.item(_stamp(now)) for r in readings]
     unread = [f"{r.runtime}（{r.reason}）" for r in readings if r.training is None]
     used = [r.runtime for r in readings if r.training is True]

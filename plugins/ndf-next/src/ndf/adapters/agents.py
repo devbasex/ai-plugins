@@ -16,7 +16,7 @@ import shutil
 import signal
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
@@ -304,8 +304,8 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     `AgentState.NO_SLOT` を返す。
     """
     try:
-        with launch_slot.gate(spec.agent, cwd=spec.cwd):
-            return _guarded_run(spec, poll)
+        with launch_slot.gate(spec.agent, cwd=spec.cwd, env=child_process_env(spec.env)) as slot_env:
+            return _guarded_run(replace(spec, env={**(spec.env or {}), **slot_env}), poll)
     except launch_slot.NotLaunched as exc:
         return _not_started(spec, AgentState(exc.kind), exc.detail)
 

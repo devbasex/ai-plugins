@@ -7,6 +7,9 @@
 持ち主のプロセスが消えるとカーネルがロックを解くので、ロックの取れる記述は数えない。取る判定は置き場の
 `pool.lock` の中で行い、2 つの起動が同じ空きを数えない。
 
+枠を持つ起動（LLM の CLI）の子孫は、環境変数 `NDF_LAUNCH_SLOT_PARENT` で親の枠を受け継ぐ。子孫が取る枠（CLI が
+動かすテスト）は親の重みを自分の重みに含めて数え、親の持つ分で自分を待たない（`take` の `absorbed`）。
+
     taken = slot_pool.take(directory, capacity_mib, slot_pool.weight_mib("llm-cli"), {"pid": os.getpid()})
     if taken is not None:          # 空きが無ければ None（呼び手が待つ）
         try: ...                   # 起動して終わりを待つ
@@ -33,6 +36,8 @@ WEIGHT_KEY = "weight_mib"
 WEIGHT_POLICY = "launch.weight."
 # 取る判定の排他を待つ上限の秒
 POOL_LOCK_SECONDS = 10.0
+# 枠を持つ起動の子孫が受け継ぐ環境変数。値は親の枠のパスの頭（`slot-<番号>`）
+PARENT_ENV = "NDF_LAUNCH_SLOT_PARENT"
 
 
 def weight_mib(kind: str) -> int:
@@ -99,6 +104,24 @@ def read_field(path: Path, key: str) -> object:
     return None if data is None else data.get(key)
 
 
+def parent_env(directory: Path, index: int) -> dict[str, str]:
+    """番号 `index` の枠を持つ起動の子孫へ渡す環境変数。"""
+    return {PARENT_ENV: str(slot_path(directory, index))}
+
+
+def parent_index(directory: Path, environ: Mapping[str, str]) -> int | None:
+    """`environ` が受け継いだ親の枠のうち、置き場 `directory` にあるものの番号。無い・別の置き場なら None。"""
+    value = environ.get(PARENT_ENV)
+    if not value:
+        return None
+    path = Path(value)
+    try:
+        same = path.parent.resolve() == directory.resolve()
+    except OSError:  # noqa: NDF401 ファイル: パスを解けなければ親の枠として扱わない
+        return None
+    return slot_index(path) if same else None
+
+
 def is_int(value: object) -> bool:
     """`value` が整数か（真偽値は整数に数えない）。"""
     return isinstance(value, int) and not isinstance(value, bool)
@@ -151,15 +174,18 @@ def held_mib(directory: Path) -> int:
     return _live_weights(directory)[0]
 
 
-def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object]) -> Taken | None:
+def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object], *, absorbed: int | None = None) -> Taken | None:
     """重み `weight`（MiB）の枠を取る。生きた持ち主の重みと足して容量を超えれば None。
 
-    持ち主が 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。
+    持ち主が 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親の枠の番号で、
+    その重みは数えない（子孫の重みが親の分を含む。親の持つ分で子孫が自分を待たない）。
     排他を待ちきれないときは `filelock.Timeout`、置き場へ書けないときは `OSError` を送る。
     """
     with lock(directory / POOL_LOCK).acquire(timeout=POOL_LOCK_SECONDS):
         total, alive = _live_weights(directory)
-        if alive and total + weight > capacity_mib:
+        if absorbed in alive:
+            total -= _weight_of(directory, absorbed)
+        if alive - {absorbed} and total + weight > capacity_mib:
             return None
         index, held = _lock_free_index(directory, alive)
         taken = Taken(directory, index, weight, held)

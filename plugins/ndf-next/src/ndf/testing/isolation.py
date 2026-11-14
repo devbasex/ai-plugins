@@ -22,6 +22,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from ndf import slot_pool
 from ndf.testing import slots
 from ndf.testing.testenv import within
 
@@ -34,7 +35,7 @@ REDIRECTED_ENV = {
     slots.SLOTS_DIR_ENV: "test-slots",
 }
 # テストの間は外す環境変数（ほかのプラグインの根・実行中の工程の識別子）
-REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", slots.HELD_ENV)
+REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", slots.HELD_ENV, slot_pool.PARENT_ENV)
 # ホームの下の本物の置き場
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 

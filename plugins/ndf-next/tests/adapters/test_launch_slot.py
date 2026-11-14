@@ -94,3 +94,15 @@ def test_call_claude_and_run_agent_stop_without_slot(pool, marker_launch, monkey
     assert reply.failure is claude.Failure.NO_SLOT
     assert status.state == agents.AgentState.NO_SLOT
     assert not marker.exists()
+
+
+def test_test_slot_under_a_cli_counts_the_cli_weight_as_its_own(pool, tmp_path):
+    lim = test_limits.load_limits(tmp_path)
+    options = dict(kind="whole", limits=lim, directory=pool, poll=0.01, read_memory=lambda: PLENTY_MIB)
+    with launch_slot.held("claude", read_memory=lambda: PLENTY_MIB) as slot_env:
+        assert slot_pool.PARENT_ENV in slot_env
+        with slots.gate("pytest .", tmp_path, options=slots.GateOptions(environ=slot_env, **options)) as held:
+            assert held.index is not None
+        stranger = slots.GateOptions(environ={}, **{**options, "limits": test_limits.Limits(1, 1, 0)})
+        with pytest.raises(slots.Stopped), slots.gate("pytest .", tmp_path, options=stranger):
+            pytest.fail("CLI の外のテストが CLI の枠を数えずに取った")

@@ -135,8 +135,36 @@ def test_check_saves_readings_and_is_ok_only_when_all_off(tmp_path):
     saved = json.loads(training.cache_path().read_text(encoding="utf-8"))
     assert saved["claude"]["training"] is False and saved["codex"]["training"] is True
     assert TOKEN not in training.cache_path().read_text(encoding="utf-8") + json.dumps(got)
-    assert training.refusal("claude", NOW) is None
-    assert "学習に使う" in training.refusal("codex", NOW)
+    assert training.refusal("claude", NOW, env) is None
+    assert "学習に使う" in training.refusal("codex", NOW, env)
+
+
+def _switch_codex_account(env: dict[str, str]) -> dict[str, str]:
+    auth_file = Path(env["CODEX_HOME"]) / "auth.json"
+    auth = json.loads(auth_file.read_text(encoding="utf-8"))
+    auth["tokens"]["account_id"] = "acct-2"
+    auth_file.write_text(json.dumps(auth), encoding="utf-8")
+    return env
+
+
+@pytest.mark.parametrize(
+    ("runtime", "make_env", "switch"),
+    [
+        ("claude", claude_env, lambda env: {**env, "CLAUDE_CONFIG_DIR": env["CLAUDE_CONFIG_DIR"] + "-b"}),
+        ("claude", claude_env, lambda env: {**env, training.CLAUDE_TOKEN_ENV: "other-account-token"}),
+        ("codex", codex_env, _switch_codex_account),
+    ],
+)
+def test_refusal_rechecks_after_auth_context_changes(tmp_path, runtime, make_env, switch):
+    env = make_env(tmp_path)
+    off = {"grove_enabled": False} if runtime == "claude" else {"settings": {"training_allowed": False}}
+    training.check([runtime], env, client_for(answering(off)), NOW)
+    assert training.refusal(runtime, NOW, env) is None
+
+    why = training.refusal(runtime, NOW, switch(env))
+
+    assert "認証の文脈" in why and training.CHECK_COMMAND in why
+    assert "other-account-token" not in training.cache_path().read_text(encoding="utf-8")
 
 
 def test_check_reports_unread_as_precondition(tmp_path):

@@ -194,17 +194,17 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     （claude が動かした Tool の子孫を残さない）。
     """
     try:
-        with launch_slot.gate("claude", cwd=cwd):
-            return _run_claude(argv, prompt, timeout, cwd)
+        with launch_slot.gate("claude", cwd=cwd, env=child_process_env()) as slot_env:
+            return _run_claude(argv, prompt, timeout, cwd, slot_env)
     except launch_slot.NotLaunched as exc:
         return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
 
 
-def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
+def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], slot_env: dict[str, str]) -> ClaudeReply:
     pipe = subprocess.PIPE
     try:
         proc = subprocess.Popen(
-            list(argv), stdin=pipe, stdout=pipe, stderr=pipe, text=True, cwd=cwd, env=child_process_env(), start_new_session=True
+            list(argv), stdin=pipe, stdout=pipe, stderr=pipe, text=True, cwd=cwd, env=child_process_env(slot_env), start_new_session=True
         )
     except OSError as exc:
         return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
