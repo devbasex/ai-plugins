@@ -105,14 +105,17 @@ def _refuse_if(errs: list[str]) -> None:
         raise model.Refused("; ".join(errs))
 
 
+def _plan_errors(conn: sa.Connection, pid: str) -> list[str]:
+    view, rows = lane.read_view(conn, pid)
+    return lane.plan_errors(view, rows)
+
+
 def _new_errors(conn: sa.Connection, pid: str, before: set[str]) -> list[str]:
-    view, _ = lane.read_plan(conn, pid)
-    return [e for e in lane.plan_errors(view, lane.folded(lane.read_lanes(conn, view))) if e not in before]
+    return [e for e in _plan_errors(conn, pid) if e not in before]
 
 
 def _errors_now(conn: sa.Connection, pid: str) -> set[str]:
-    view, _ = lane.read_plan(conn, pid)
-    return set(lane.plan_errors(view, lane.folded(lane.read_lanes(conn, view))))
+    return set(_plan_errors(conn, pid))
 
 
 def create_plan(conn: sa.Connection, repo: str, doc: dict[str, Any], start: bool) -> str:
@@ -186,8 +189,7 @@ def change_lane(conn: sa.Connection, pid: str, name: str, changes: dict[str, Any
 def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, reason: str) -> str:
     """課題の行を別のレーンへ移す（オーガナイザー）。移す先へはレーンの進行表の関数で行を足す。足した行の鍵を返す。"""
     from_lane, key = src
-    view, _ = lane.read_plan(conn, pid)
-    rows = lane.folded(lane.read_lanes(conn, view))
+    view, rows = lane.read_view(conn, pid)
     if from_lane not in rows or dest not in rows:
         raise model.Refused(f"計画 {view.name} にレーン {from_lane} か {dest} は無い")
     row = next((r for r in rows[from_lane] if r.key == key), None)
@@ -227,8 +229,8 @@ def close_request(conn: sa.Connection, pid: str, key: str, reason: str) -> None:
 
 def complete_plan(conn: sa.Connection, pid: str) -> bool:
     """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、答えていない依頼が無いときだけ書く（I16）。"""
-    view, _ = lane.read_plan(conn, pid)
-    if view.state != lane.RUNNING or not lane.plan_complete(view, lane.folded(lane.read_lanes(conn, view))):
+    view, rows = lane.read_view(conn, pid)
+    if view.state != lane.RUNNING or not lane.plan_complete(view, rows):
         return False
     _append(conn, pid, [model.EventDraft("plan_completed", "durable")])
     return True
@@ -251,8 +253,7 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
 
 def status(conn: sa.Connection, pid: str, now: datetime) -> dict[str, Any]:
     """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。"""
-    view, _ = lane.read_plan(conn, pid)
-    rows = lane.folded(lane.read_lanes(conn, view))
+    view, rows = lane.read_view(conn, pid)
     items = []
     for name, spec in view.lanes.items():
         lane_rows = [_row_item(r, now) for r in rows[name]]

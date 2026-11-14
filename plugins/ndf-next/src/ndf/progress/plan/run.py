@@ -70,8 +70,7 @@ def _spec_where(spec: dict[str, Any]) -> tuple[str, Path]:
 
 def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
     """計画とレーンの進行表から、判断へ渡す写しを作る。"""
-    view, _ = lane.read_plan(conn, plan_id)
-    rows = lane.folded(lane.read_lanes(conn, view))
+    view, rows = lane.read_view(conn, plan_id)
     running = [(name, r.key, r.sprint_id) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
     return run_decide.snapshot(view.state, lane.plan_complete(view, rows), lane.wakeable_lanes(view, rows), running)
 

@@ -35,8 +35,7 @@ def _create(st, doc, start=True):
 
 def _rows(st, pid):
     with store.transaction(st) as conn:
-        view, _ = lane.read_plan(conn, pid)
-        return view, lane.folded(lane.read_lanes(conn, view))
+        return lane.read_view(conn, pid)
 
 
 def _sprint(st, pid, lane_name, name):

@@ -488,6 +488,12 @@ def folded(events: Mapping[str, list[model.Event]]) -> dict[str, list[LaneRow]]:
     return {name: fold_lane(evs) for name, evs in events.items()}
 
 
+def read_view(conn: sa.Connection, plan_id: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
+    """計画の進行表の畳み込みと、レーンごとの順番表の行。"""
+    view, _ = read_plan(conn, plan_id)
+    return view, folded(read_lanes(conn, view))
+
+
 def _new_key(events: list[model.Event], drafts: Iterable[model.EventDraft]) -> str:
     added = [e.draft for e in events if e.draft.kind == "row_added"] + [d for d in drafts if d.kind == "row_added"]
     return f"{ROW_PREFIX}{len(added) + 1}"
@@ -536,12 +542,11 @@ def create_lane(conn: sa.Connection, key: tuple[str, str, str], plan_id: str, in
     return store.create_table(conn, ("lane", repo, lane_table_name(plan, lane)), plan_id, None, drafts)
 
 
-def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]], list[model.Event]]:
-    view, _ = read_plan(conn, plan_id)
+def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
+    view, rows = read_view(conn, plan_id)
     if lane not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
-    events = read_lanes(conn, view)
-    return view, folded(events), events[lane]
+    return view, rows
 
 
 def _row(rows: list[LaneRow], key: str, lane: str) -> LaneRow:
@@ -562,22 +567,22 @@ class RowChange:
 
 def add_row(conn: sa.Connection, plan_id: str, lane: str, inp: dict[str, Any], change: RowChange) -> str:
     """順番表へ行を足す（未着手）。足した行の鍵を返す。"""
-    _, _, events = _lane_rows(conn, plan_id, lane)
-    key = _new_key(events, [])
+    view, _ = _lane_rows(conn, plan_id, lane)
+    key = _new_key(store.read_events(conn, view.lanes[lane].table_id), [])
     payload = {"input": inp, "index": change.index}
     checked_write(conn, plan_id, lane, [model.EventDraft("row_added", change.actor, key, reason=change.reason, payload=payload)])
     return key
 
 
 def move_row(conn: sa.Connection, plan_id: str, lane: str, key: str, change: RowChange) -> None:
-    _, rows, _ = _lane_rows(conn, plan_id, lane)
+    _, rows = _lane_rows(conn, plan_id, lane)
     _row(rows[lane], key, lane)
     draft = model.EventDraft("row_moved", change.actor, key, reason=change.reason, payload={"index": change.index})
     checked_write(conn, plan_id, lane, [draft])
 
 
 def cancel_row(conn: sa.Connection, plan_id: str, lane: str, key: str, change: RowChange) -> None:
-    _, rows, _ = _lane_rows(conn, plan_id, lane)
+    _, rows = _lane_rows(conn, plan_id, lane)
     _row(rows[lane], key, lane)
     checked_write(conn, plan_id, lane, [model.EventDraft("row_cancelled", change.actor, key, reason=change.reason)])
 
@@ -587,7 +592,7 @@ def carry_issues(conn: sa.Connection, plan_id: str, lane: str, from_row: str, is
 
     after 付きの新しいレーンを作らない。承認ゲートの答えからこの関数を呼ぶのは承認ゲートの子（#3295）である。
     """
-    _, rows, _ = _lane_rows(conn, plan_id, lane)
+    _, rows = _lane_rows(conn, plan_id, lane)
     src = _row(rows[lane], from_row, lane)
     index = [r.key for r in rows[lane]].index(from_row) + 1
     inp = {"kind": "sprint", "issues": sorted(set(issues)), "args": list(src.input["args"]) if "args" in src.input else []}
@@ -600,7 +605,7 @@ def start_row(conn: sa.Connection, plan_id: str, lane: str, key: str, sprint_id:
     計画が記録した形の番号と自分のものを比べ、違えば `FormatMismatch`。NDF の版だけが違えば止めずに、
     行の事象（`row_started` の `ndf_version_mismatch`）に残し、警告の文を返す（P3-1）。
     """
-    view, rows, _ = _lane_rows(conn, plan_id, lane)
+    view, rows = _lane_rows(conn, plan_id, lane)
     if view.state != RUNNING:
         raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、スプリントを始められない")
     nxt = next_row(view, rows, lane)
@@ -643,7 +648,7 @@ def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Op
     if row.state == RUNNING:
         draft = model.EventDraft("row_ended", actor, row.key, state=outcome, payload={"sprint_id": sprint_id})
         checked_write(conn, plan_id, lane, [draft])
-    view, rows, _ = _lane_rows(conn, plan_id, lane)
+    view, rows = _lane_rows(conn, plan_id, lane)
     return next_row(view, rows, lane)
 
 
