@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from ndf import cli
 from ndf.contracts import result
-from ndf.progress import gate, lane, model, run, store
+from ndf.progress import gate, invoke, lane, model, run, store
 
 BY, KEY = "service:factory", "k-1"
 
@@ -176,3 +177,28 @@ def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, fl
     (got,) = gate.answers(run.read(st, tid))
     assert got["answer"] == "revise" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が答えた"
     assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"
+
+
+# --- 現状固定: gate.rejections（I-014。承認しなかった承認ゲートの答えを区分ごとに数える） -------------------
+
+
+def _event(seq, event_kind, **payload):
+    at = datetime(2026, 11, 14, tzinfo=UTC)
+    return model.Event(seq, at, model.EventDraft(event_kind, "conductor", "設計", payload=payload))
+
+
+def test_current_rejections_count_the_unapproved_listen_answers_per_gate_in_first_seen_order():
+    events = [
+        _event(1, run.ANSWERED, answer=run.REVISE, kind=invoke.LISTEN, gate="release"),
+        _event(2, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN),
+        _event(3, run.ANSWERED, answer=run.REVISE, kind=invoke.LISTEN, gate="release"),
+        _event(4, run.ANSWERED, answer=run.APPROVED, kind=invoke.LISTEN, gate="design"),
+        _event(5, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate=None),
+        _event(6, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),
+        _event(7, run.ANSWERED, answer=run.REVISE, kind="plan", gate="release"),  # プランの中の承認ゲートの答えは数えない
+        _event(8, run.STARTED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),  # 答えの事象でなければ数えない
+    ]
+    counted = gate.rejections(events)
+    assert counted == {"release": 2, "plan": 2, "design": 1}
+    assert list(counted) == ["release", "plan", "design"] and type(counted) is dict
+    assert gate.rejections([]) == {}
