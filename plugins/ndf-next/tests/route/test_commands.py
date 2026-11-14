@@ -99,7 +99,7 @@ def test_test_steps_run_through_route_test():
 
 def test_ci_only_plans_drop_local_test_steps_and_follow_on():
     """#3473: CI テストの宣言のあるリポジトリのプランから test・test-all・ci-local を外し、そこへの行き先は続きへ付け替える。"""
-    for purpose in ("implement", "check", "quality-gates", "merge", "close"):
+    for purpose in ("implement", "check", "quality_gates", "merge", "close"):
         t = route.choose(purpose)
         plan = route.render(t, values(purpose), local_tests=False)
         ids = [s["id"] for s in plan["steps"]]
