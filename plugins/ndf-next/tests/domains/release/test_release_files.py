@@ -185,3 +185,81 @@ def test_release_steps_parser_parses_and_requires_a_command() -> None:
     assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"]}
     args = parser.parse_args(["merge", "--pr", "3", "--base", "develop", "--production", "main", "--budget", "1.5"])
     assert (args.pr, args.budget, args.base, args.production) == (3, 1.5, "develop", "main")
+
+
+def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
+    """現状固定（_parse）: すべての鍵を読み、空の配列は既定でなく空のまま。生の宣言を `raw` に持つ。"""
+    raw = {
+        "version": 1,
+        "steps": [{"name": "a", "stage": "verify", "command": ["echo", "{version}"], "writes": ["x"], "timeout_seconds": 5}],
+        "undistributed": ["docs/"],
+        "bump_undistributed": True,
+        "version_files": ["README.md"],
+        "changelog": "docs/CL.md",
+    }
+    write_json(decl_mod.path_of(tmp_path), raw)
+    got = decl_mod.load(tmp_path)
+    assert got == decl_mod.Declaration(
+        (decl_mod.Step("a", "verify", ("echo", "{version}"), ("x",), 5.0),), ("docs/",), True, ("README.md",), "docs/CL.md"
+    )
+    assert got.raw == raw
+    write_json(decl_mod.path_of(tmp_path), {"version": 1, "undistributed": []})
+    assert decl_mod.load(tmp_path) == decl_mod.Declaration(undistributed=())
+    write_json(decl_mod.path_of(tmp_path), {"version": 1})
+    assert decl_mod.load(tmp_path) == decl_mod.Declaration()
+
+
+# NOTE: 現状固定。timeout_seconds に真偽の true を書くと 1 秒として通る（bool は int の一種）。直すなら別の変更で行う。
+def test_declaration_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> None:
+    write_json(
+        decl_mod.path_of(tmp_path), {"version": 1, "steps": [{"name": "a", "stage": "dev", "command": ["t"], "timeout_seconds": True}]}
+    )
+    assert decl_mod.load(tmp_path).steps == (decl_mod.Step("a", "dev", ("t",), (), 1.0),)
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ({"version": 2}, "宣言の version が 1 でない: 2"),
+        ({}, "宣言の version が 1 でない: None"),
+        ({"version": "1"}, "宣言の version が 1 でない: '1'"),
+        ({"version": 1, "steps": {}}, "steps は配列"),
+        ({"version": 1, "bump_undistributed": "yes"}, "bump_undistributed は真偽、changelog は文字列"),
+        ({"version": 1, "bump_undistributed": None}, "bump_undistributed は真偽、changelog は文字列"),
+        ({"version": 1, "changelog": 3}, "bump_undistributed は真偽、changelog は文字列"),
+        ({"version": 1, "undistributed": "x"}, "undistributed は文字列の配列"),
+        ({"version": 1, "version_files": [1]}, "version_files は文字列の配列"),
+        ({"version": 1, "steps": [1]}, "steps の行がオブジェクトでない: 1"),
+        (
+            {"version": 1, "steps": [{"name": "a", "stage": "x", "command": ["t"]}]},
+            "steps の行の name か stage（production, dev, verify）が違う: {'name': 'a', 'stage': 'x', 'command': ['t']}",
+        ),
+        ({"version": 1, "steps": [{"name": "a", "stage": "dev", "command": []}]}, "steps の a の command は空でない文字列の配列"),
+        (
+            {"version": 1, "steps": [{"name": "a", "stage": "dev", "command": ["t"], "timeout_seconds": 0}]},
+            "steps の a の timeout_seconds は正の数",
+        ),
+        ({"version": 1, "steps": [{"name": "a", "stage": "dev", "command": ["t"], "writes": "x"}]}, "writes は文字列の配列"),
+    ],
+)
+def test_declaration_parse_errors(tmp_path: Path, raw: dict, message: str) -> None:
+    """現状固定（_parse）: 形の違う宣言は、鍵ごとの文言の `DeclarationError`。"""
+    write_json(decl_mod.path_of(tmp_path), raw)
+    with pytest.raises(decl_mod.DeclarationError) as caught:
+        decl_mod.load(tmp_path)
+    assert str(caught.value) == message
+
+
+def test_declaration_load_errors_name_the_file(tmp_path: Path) -> None:
+    """現状固定（load）: 読めない・オブジェクトでない宣言はファイルのパスを書いた `DeclarationError`。"""
+    path = decl_mod.path_of(tmp_path)
+    assert path == tmp_path / ".ndf" / "release.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[1]", encoding="utf-8")
+    with pytest.raises(decl_mod.DeclarationError) as caught:
+        decl_mod.load(tmp_path)
+    assert str(caught.value) == f"{path} が JSON のオブジェクトでない"
+    path.write_text("{bad", encoding="utf-8")
+    with pytest.raises(decl_mod.DeclarationError) as caught:
+        decl_mod.load(tmp_path)
+    assert str(caught.value).startswith(f"{path} を読めない: ")
