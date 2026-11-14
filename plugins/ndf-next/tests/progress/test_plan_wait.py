@@ -74,3 +74,52 @@ def test_read_seen_finds_the_request_and_the_answer_without_next(opened):
     assert [n["row_key"] for n in seen.notices] == [key] and seen.stalls == ("a/r1",)
     out = wait.report("p6", seen, [])
     assert out["metrics"]["new_stalls"] == ["a/r1"] and out["next"]["argv"][-1] == "a/r1"
+
+
+# --- read_seen の現状固定（リファクタリングの前に今の出力を記録する） ------------------------------------
+
+
+def _plan_and_after(conn):
+    pid = plan.create_plan(conn, REPO, _doc(), True)
+    _, events = lane.read_plan(conn, pid)
+    return pid, events[-1].seq
+
+
+def test_read_seen_with_nothing_after_the_number_keeps_the_number(opened):
+    with store.transaction(opened) as conn:
+        pid, after = _plan_and_after(conn)
+        seen = wait.read_seen(conn, pid, after, datetime.now(UTC))
+    assert seen == Seen(state="running", ended=False, notices=(), last_seq=after, stalls=())
+
+
+def test_read_seen_returns_every_request_and_the_last_number(opened):
+    with store.transaction(opened) as conn:
+        pid, after = _plan_and_after(conn)
+        k1 = plan.open_request(conn, pid, {"lane": "a", "kind": "lane_add"}, "1 つめ", "organizer")
+        k2 = plan.open_request(conn, pid, {"lane": None, "kind": "lane_add"}, "2 つめ", "workflow")
+        _, events = lane.read_plan(conn, pid)
+        seen = wait.read_seen(conn, pid, after, datetime.now(UTC))
+        first_only = wait.read_seen(conn, pid, seen.notices[0]["seq"], datetime.now(UTC))
+    assert [(n["kind"], n["row_key"]) for n in seen.notices] == [("request_opened", k1), ("request_opened", k2)]
+    assert seen.notices == tuple(e.as_dict() for e in events[-2:])
+    assert seen.last_seq == events[-1].seq and seen.state == "running" and seen.ended is False
+    assert [n["row_key"] for n in first_only.notices] == [k2] and first_only.last_seq == events[-1].seq
+
+
+def test_read_seen_does_not_count_an_answer_within_the_grace_as_a_stall(opened):
+    with store.transaction(opened) as conn:
+        pid, after = _plan_and_after(conn)
+        view, _ = lane.read_plan(conn, pid)
+        sid = store.create_table(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].table_id, None, [])
+        lane.start_row(conn, pid, "a", "r1", sid)
+        lane.record_answer(conn, sid, {"choice": "approved"})
+        seen = wait.read_seen(conn, pid, after, datetime.now(UTC))
+    assert seen == Seen(state="running", ended=False, notices=(), last_seq=after, stalls=())
+
+
+def test_read_seen_of_a_stopped_plan_is_ended_without_a_notice(opened):
+    with store.transaction(opened) as conn:
+        pid, after = _plan_and_after(conn)
+        plan.stop_plan(conn, pid, "やめる")
+        seen = wait.read_seen(conn, pid, after, datetime.now(UTC))
+    assert seen == Seen(state="cancelled", ended=True, notices=(), last_seq=after, stalls=())
