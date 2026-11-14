@@ -144,7 +144,7 @@ def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
 
 
 def test_session_waits_for_running_steps_before_it_releases_the_key(tmp_path):
-    """裏で走る耐久ステップが終わるまで、session は DBOS を閉じ終えず、鍵のロックを放さない。"""
+    """裏で走る耐久ステップが結果を記録し終えるまで、session は DBOS を閉じず、鍵のロックを放さない。"""
     root = tmp_path / "state"
     slow_started.clear()
     slow_finished.clear()
@@ -152,4 +152,7 @@ def test_session_waits_for_running_steps_before_it_releases_the_key(tmp_path):
         durable.spawn(slow_flow, "wf-slow")
         assert slow_started.wait(30)
     assert slow_finished == ["done"]
+    retired = root / "dbos" / "retired" / f"{durable.run_name('slow-key')}.sqlite"
+    records = durable.workflows(f"sqlite:///{retired}")
+    assert {(r.workflow_id, r.status) for r in records} == {("wf-slow", "SUCCESS")}
     durable.release_store(root)

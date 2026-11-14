@@ -72,6 +72,8 @@ MAINT_LOCK = "maint.lock"
 RUN_LOCK_SPACE = 0x4E444652
 # quick_check と片付けの走査の間隔（決定 82・83）
 CHECK_INTERVAL = timedelta(hours=24)
+# DBOS を閉じる前に、走っている耐久ワークフローが記録を終えたかを見る間隔（秒）
+SHUTDOWN_POLL_SECONDS = 0.05
 
 DBOS_DIR = "dbos"
 RETIRED_DIR = "retired"
@@ -927,23 +929,28 @@ def launch(database_url: str, run_key: str) -> None:
 
 
 def shutdown() -> None:
-    """DBOS を止め、走っていた耐久ワークフローと耐久ステップのスレッドが終わるまで待つ。定義は残す。
+    """DBOS を止め、走っていた耐久ワークフローが結果を記録し終えてから閉じる。定義は残す。
 
     `DBOS.destroy` は走っているスレッドを待たない（`workflow_completion_timeout_sec` の既定は 0 で、
-    executor を `wait=False` で閉じる）。待たずに戻ると、呼び手が鍵のロックを放した後も spawn した子や
-    例外で残ったステップが外部の処理を続け、同じ鍵の次のプロセスの回復と同じ副作用が並んで走る。
+    executor を `wait=False` で閉じ、記録の DB の口 `_sys_db_field` を None にする）。先に閉じると、
+    spawn した子や例外で残ったステップは副作用を終えても結果を記録できず、次の回復で同じ副作用を流し直す。
+    そこで、キューの取り出しと回復の裏のスレッドを止めて新しい実行を始めさせず、走っている耐久ワークフローが
+    すべて記録を終える（DBOS の走っている一覧から外れる）まで待ってから閉じる。閉じた後も executor の
+    スレッドを join し、呼び手が鍵のロックを放す前に、一覧へ載る前だったスレッドも終わらせる。
     待つ時間は、待たなくてもプロセスの終わりで executor のスレッドを join する時間と同じである。
+    `workflow_completion_timeout_sec` は秒の上限で 1 秒ごとに見るため使わない（上限を越えると先に閉じ、
+    走っていなくても 1 秒待つ）。DBOS 3.4.0 は executor と走っている一覧の公開の取り出し口を持たない。
     """
-    executor = _running_executor()
+    instance = getattr(_dbos_runtime, "_dbos_global_instance", None)
+    executor: ThreadPoolExecutor | None = getattr(instance, "_executor_field", None)
+    if instance is not None:
+        for event in instance.background_thread_stop_events:
+            event.set()
+        while instance._active_workflows_set.activeList():
+            time.sleep(SHUTDOWN_POLL_SECONDS)
     DBOS.destroy(destroy_registry=False)
     if executor is not None:
         executor.shutdown(wait=True)
-
-
-def _running_executor() -> ThreadPoolExecutor | None:
-    """起動中の DBOS が耐久ワークフローを流す executor を返す。DBOS 3.4.0 は公開の取り出し口を持たない。"""
-    instance = getattr(_dbos_runtime, "_dbos_global_instance", None)
-    return getattr(instance, "_executor_field", None)
 
 
 @contextmanager
