@@ -265,7 +265,7 @@ def stop(ctx: Context, name: str) -> Outcome:
 
 
 def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
-    ndf = ctx.plugin_root / "bin" / identity.FIXED_WORDS["entrypoint"]
+    ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")

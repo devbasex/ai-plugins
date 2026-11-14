@@ -25,7 +25,7 @@ class Pending(NamedTuple):
 
 def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pending:
     """`ndf plan pending` を打って一覧を読む。"""
-    command = [str(plugin_root / "bin" / identity.FIXED_WORDS["entrypoint"]), "plan", "pending"]
+    command = [str(identity.entrypoint(plugin_root)), "plan", "pending"]
     try:
         done = runner(command, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:

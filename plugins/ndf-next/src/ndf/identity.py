@@ -117,6 +117,11 @@ def _retired_items(retired: tuple[Retired, ...]) -> list[dict[str, str]]:
     return [{"retired_from": str(r.source), "retired_to": str(r.target)} for r in retired]
 
 
+def entrypoint(root: Path) -> Path:
+    """プラグインの根 `root` の下のエントリポイント（`bin/ndf`）。"""
+    return root / "bin" / FIXED_WORDS["entrypoint"]
+
+
 def _env_dir(var: str, *default: str) -> Path:
     """環境変数 `var` が空でなければそのパス、空か無ければ HOME の下の `default`。"""
     value = os.environ.get(var, "")
