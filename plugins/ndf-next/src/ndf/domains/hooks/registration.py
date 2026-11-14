@@ -65,20 +65,25 @@ def text(runtime: str, plugin_root: Path = tables.PLUGIN_ROOT) -> str:
     return json.dumps(render(runtime, plugin_root), ensure_ascii=False, indent=2) + "\n"
 
 
+def _wanted(plugin_root: Path) -> dict[Path, str]:
+    """登録のファイル → 書く文字（ランタイムの契約表の並び）。"""
+    return {path_of(runtime, plugin_root): text(runtime, plugin_root) for runtime in tables.runtimes()}
+
+
+def _differ(want: dict[Path, str]) -> list[Path]:
+    return [path for path, body in want.items() if not path.is_file() or path.read_text(encoding="utf-8") != body]
+
+
 def stale(plugin_root: Path = tables.PLUGIN_ROOT) -> list[Path]:
     """作り直した結果と違う（か無い）登録のファイル。"""
-    found = []
-    for runtime in tables.runtimes():
-        path = path_of(runtime, plugin_root)
-        if not path.is_file() or path.read_text(encoding="utf-8") != text(runtime, plugin_root):
-            found.append(path)
-    return found
+    return _differ(_wanted(plugin_root))
 
 
 def write(plugin_root: Path = tables.PLUGIN_ROOT) -> list[Path]:
     """違う登録のファイルを作り直し、書いたファイルを返す。"""
-    written = stale(plugin_root)
+    want = _wanted(plugin_root)
+    written = _differ(want)
     for path in written:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text(path.stem, plugin_root), encoding="utf-8")
+        path.write_text(want[path], encoding="utf-8")
     return written
