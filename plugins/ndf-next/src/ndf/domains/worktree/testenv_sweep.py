@@ -87,9 +87,14 @@ def _claim(t: Target, url: str, ttl: str) -> bool:
         return True
 
 
-def _expose_values(url: str, host: str, environment: Any, slot: str) -> dict[str, Any]:
+def _expose_values(url: str, host: str, row: dict[str, Any]) -> dict[str, str]:
     """公開の手段（宣言の `open_command`・`close_command`）へ渡す値。開く側と閉じる側が同じ名前で渡す。"""
-    return {"NDF_EXPOSE_URL": url, "NDF_EXPOSE_HOST": host, "NDF_EXPOSE_ENVIRONMENT": environment, "NDF_EXPOSE_SLOT": slot}
+    return {
+        "NDF_EXPOSE_URL": url,
+        "NDF_EXPOSE_HOST": host,
+        "NDF_EXPOSE_ENVIRONMENT": str(row["environment"]),
+        "NDF_EXPOSE_SLOT": str(row["slot"]),
+    }
 
 
 def _close(row: dict[str, Any]) -> None:
@@ -111,7 +116,7 @@ def expose(t: Target) -> str:
     url = f"https://{host}"
     if not _claim(t, url, str(conf["ttl"]) if conf.get("ttl") else DEFAULT_TTL):
         raise TestenvError("拒否: 別のテスト環境が公開中（同時に開けるのは 1 本）")
-    values = _expose_values(url, host, row["environment"], str(row["slot"]))
+    values = _expose_values(url, host, row)
     if t.shell.sh(str(conf["open_command"]), t.path, values).returncode != 0:
         # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す
         t.book.update(t.key, _close, pick=lambda r: r.get("expose") is not None and r["expose"].get("closed_at") is None)
@@ -128,7 +133,7 @@ def unexpose(t: Target) -> Optional[str]:
     conf = t.at("expose")
     command = conf.get("close_command") if isinstance(conf, dict) else None
     if command:
-        values = _expose_values(url, url.split("://", 1)[-1], str(row["environment"]), str(row["slot"]))
+        values = _expose_values(url, url.split("://", 1)[-1], row)
         where = t.path if t.path.is_dir() else t.main_dir
         if t.shell.sh(str(command), where, values).returncode != 0:
             raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
