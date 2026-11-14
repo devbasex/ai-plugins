@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import dataclasses
 import pathlib
 import re
 import sys
@@ -389,6 +390,67 @@ def hits_outside(all_hits: list[Hit], declared: dict[tuple[str, str], int], coun
     return [h for h in all_hits if counts[h.key] > declared.get(h.key, 0)]
 
 
+@dataclasses.dataclass
+class ScanResult:
+    """全 family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill をまとめる。"""
+
+    scanned: set[str] = dataclasses.field(default_factory=set)
+    hits: list[Hit] = dataclasses.field(default_factory=list)
+    report_lines: list[str] = dataclasses.field(default_factory=list)
+    unscanned: list[pathlib.Path] = dataclasses.field(default_factory=list)
+
+
+def scan_all(skills_dirs: list[pathlib.Path]) -> ScanResult:
+    """family ごとに走査し、結果を 1 つにまとめる。"""
+    result = ScanResult()
+    for skills_dir in skills_dirs:
+        family_scanned, hits, report_line, family_unscanned = scan_family(skills_dir)
+        result.scanned |= family_scanned
+        result.hits.extend(hits)
+        result.report_lines.append(report_line)
+        result.unscanned.extend(family_unscanned)
+    return result
+
+
+def judge(
+    rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool
+) -> tuple[list[str], list[Hit]]:
+    """例外リストと走査の結果を突き合わせ、(例外リストが成立しない理由, 宣言の外のヒット) を返す。
+
+    理由があるときは宣言の外のヒットを判定しない（空で返す）。"""
+    counts = collections.Counter(h.key for h in result.hits)
+    problems = validate_allow(rows, counts, result.scanned, skills_dirs, exhaustive=exhaustive)
+    if problems:
+        return problems, []
+    declared = {(canon(r["path"]), r["name"]): r["count"] for r in rows}
+    return [], hits_outside(result.hits, declared, counts)
+
+
+def print_unscanned(unscanned: list[pathlib.Path]) -> None:
+    print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
+    for path in unscanned:
+        print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
+    print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
+
+
+def print_problems(problems: list[str]) -> None:
+    print("[check-skill-repo-assumptions] 例外リストが成立していない:", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+
+
+def print_outside(outside: list[Hit]) -> None:
+    print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
+    for h in outside:
+        print(f"  {h}", file=sys.stderr)
+    print(
+        "\n値は .ndf/ の宣言か引数で受ける。対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
+        "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。"
+        "\n数を超えた組は、どの行が新しいかを決められないので組の当たりをすべて出している。",
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -410,24 +472,12 @@ def main() -> int:
             print(f"[check-skill-repo-assumptions] ディレクトリがない: {d}", file=sys.stderr)
             return 2
 
-    scanned: set[str] = set()
-    all_hits: list[Hit] = []
-    report_lines: list[str] = []
-    unscanned: list[pathlib.Path] = []
-    for skills_dir in skills_dirs:
-        family_scanned, hits, report_line, family_unscanned = scan_family(skills_dir)
-        scanned |= family_scanned
-        all_hits.extend(hits)
-        report_lines.append(report_line)
-        unscanned.extend(family_unscanned)
+    result = scan_all(skills_dirs)
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
     # 例外リストより先に見る。範囲が欠けていると、項目の実在の判定も当てにならない。
-    if unscanned:
-        print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
-        for path in unscanned:
-            print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
-        print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
+    if result.unscanned:
+        print_unscanned(result.unscanned)
         return 2
 
     try:
@@ -436,33 +486,19 @@ def main() -> int:
         print(f"[check-skill-repo-assumptions] {e}", file=sys.stderr)
         return 2
 
-    counts = collections.Counter(h.key for h in all_hits)
-    problems = validate_allow(rows, counts, scanned, skills_dirs, exhaustive=args.skills_dir is None)
+    problems, outside = judge(rows, result, skills_dirs, exhaustive=args.skills_dir is None)
     if problems:
-        print("[check-skill-repo-assumptions] 例外リストが成立していない:", file=sys.stderr)
-        for p in problems:
-            print(f"  - {p}", file=sys.stderr)
+        print_problems(problems)
         return 2
-
-    declared = {(canon(r["path"]), r["name"]): r["count"] for r in rows}
-    outside = hits_outside(all_hits, declared, counts)
 
     # `--report` は出力を足すだけで、判定は変えない。走査の範囲と例外リストの誤り
     # （rc=2）はこの手前で落としており、ヒットだけを 0 で返すと同じ実行の中で終了
     # コードの意味が 2 通りになる。README はこのコマンドをチェックの一覧として載せる。
     if args.report:
-        print_report(report_lines, rows, all_hits, outside)
+        print_report(result.report_lines, rows, result.hits, outside)
 
     if outside:
-        print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
-        for h in outside:
-            print(f"  {h}", file=sys.stderr)
-        print(
-            "\n値は .ndf/ の宣言か引数で受ける。対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
-            "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。"
-            "\n数を超えた組は、どの行が新しいかを決められないので組の当たりをすべて出している。",
-            file=sys.stderr,
-        )
+        print_outside(outside)
         return 1
 
     return 0
