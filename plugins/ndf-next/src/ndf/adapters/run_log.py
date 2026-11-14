@@ -202,16 +202,23 @@ class RunLog:
         """
         self._blobs += 1
         ref = {"head": text[:HEAD_CHARS], "chars": len(text), "sha256": hashlib.sha256(text.encode()).hexdigest()}
-        if self.path is not None:
-            blob = self.path.with_name(f"{self.path.stem}.{self.run_id}.{self._blobs}.txt")
-            blob.write_text(text, encoding="utf-8")
-            return {**ref, "full_text": str(blob)}
+        stored = self._store_blob_file(text, self.path) if self.path is not None else self._emit_blob_parts(text, limit)
+        return {**ref, **stored}
+
+    def _store_blob_file(self, text: str, path: Path) -> dict[str, Any]:
+        """全文を `path` の隣の全文ファイルへ書き、参照（`full_text`）を返す。"""
+        blob = path.with_name(f"{path.stem}.{self.run_id}.{self._blobs}.txt")
+        blob.write_text(text, encoding="utf-8")
+        return {"full_text": str(blob)}
+
+    def _emit_blob_parts(self, text: str, limit: int) -> dict[str, Any]:
+        """全文を行の上限に収まる続きの行（event `text_part`）に分けて出し、参照（`blob`・`parts`）を返す。"""
         frame = {"blob": self._blobs, "part": 0, "parts": 0, "text": ""}
         size = max(1, (limit - len(self._line("text_part", frame))) // JSON_CHAR_BYTES)
         parts = [text[i : i + size] for i in range(0, len(text), size)] or [""]
         for n, part in enumerate(parts, 1):
             self._emit(self._line("text_part", {**frame, "part": n, "parts": len(parts), "text": part}))
-        return {**ref, "blob": self._blobs, "parts": len(parts)}
+        return {"blob": self._blobs, "parts": len(parts)}
 
     def _fit(self, event: str, body: dict[str, Any]) -> bytes:
         """改行を含む行全体を上限に収める。長い文字列から順に逃がし、なお超えれば `fields` 全体を逃がす（I4）。"""
