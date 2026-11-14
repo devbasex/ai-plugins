@@ -120,8 +120,12 @@ class Git:
         return done.returncode == 0
 
     def changed_files(self, base: str, head: str) -> list[str]:
-        """`base...head`（分岐点から head まで）で変わったファイルのパス。"""
-        return [p for p in self.run("diff", "--name-only", f"{base}...{head}").splitlines() if p]
+        """`base...head`（分岐点から head まで）で変わったファイルのパス。
+
+        `-z` で NUL 区切りに読む。改行区切りでは、既定の `core.quotePath` が日本語・タブ・引用符を含むパスを
+        引用・エスケープした文字列のまま返し、呼び手が実際のファイルを開けない。
+        """
+        return [p for p in self.run("diff", "--name-only", "-z", f"{base}...{head}").split("\0") if p]
 
     def changed_lines(self, base: str, head: str, exclude: Iterable[str] = ()) -> int:
         """`base..head` の first-parent の各コミットの変更行数の和。`exclude` のコミットの分は数えない（#3087）。

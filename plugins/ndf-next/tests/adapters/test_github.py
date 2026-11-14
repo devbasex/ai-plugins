@@ -288,7 +288,7 @@ def test_token_without_any_source_raises(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 # 現状固定（I-002）: `GitHub.rest` と `GitHub.graphql` の失敗の写し方。期待値は今の実装の出力である
-def _rate_limited(request: httpx.Request) -> httpx.Response:
+def _rate_limited_response(request: httpx.Request) -> httpx.Response:
     return httpx.Response(403, json={"message": "rate"}, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "9999999999"})
 
 
@@ -303,7 +303,7 @@ def _unreachable(request: httpx.Request) -> httpx.Response:
 @pytest.mark.parametrize(
     ("handler", "rest_detail", "graphql_detail", "status", "has_retry"),
     [
-        (_rate_limited, "GitHub の上限: GET /x", "GitHub の上限: graphql", 403, True),
+        (_rate_limited_response, "GitHub の上限: GET /x", "GitHub の上限: graphql", 403, True),
         (_server_error, 'GitHub が断った（500）: GET /x: {"message":"boom"}', "GitHub が断った（500）: graphql", 500, False),
         (_unreachable, "GitHub へ届かない: GET /x: down", "GitHub へ届かない: graphql: down", 0, False),
     ],

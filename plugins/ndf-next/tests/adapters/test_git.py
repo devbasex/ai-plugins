@@ -119,3 +119,20 @@ def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_p
     g = git.Git(cwd=repo)
     assert g.changed_lines(base, "main", exclude=[first, second[:9]]) == 19
     assert g.changed_lines(base, "main") == 19 + 2 + 2
+
+
+def test_changed_files_returns_real_names_of_quoted_paths(tmp_path: Path) -> None:
+    # 既定の core.quotePath では日本語・タブ・引用符を含むパスが引用されるが、実際のファイル名を返す
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "base.txt").write_text("base\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    names = ["設計.md", "a\tb.txt", 'q"uote.txt']
+    _merge_branch(repo, "feature", {name: "x\n" for name in names})
+
+    changed = git.Git(cwd=repo).changed_files(base, "main")
+    assert sorted(changed) == sorted(names)
+    assert all((repo / name).exists() for name in changed)
