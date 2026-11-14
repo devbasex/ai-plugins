@@ -31,7 +31,7 @@ BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behav
 def _declaration(cwd: Path, name: str) -> dict[str, Any]:
     """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。"""
     path = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
-    raw = command._read_json(path, "を読めない") if path.exists() else {}
+    raw = command.read_json(path, "を読めない") if path.exists() else {}
     return raw if isinstance(raw, dict) else {}
 
 

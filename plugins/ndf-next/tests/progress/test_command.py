@@ -155,11 +155,11 @@ def test_show_of_an_unknown_table_is_refused(repo, capsys):
     assert out["status"] == "stopped" and out["cause"]["kind"] == "refused"
 
 
-# --- 現状固定: 例外から止まった結果への対応（_stopped_from） -------------------------------------------
+# --- 現状固定: 例外から止まった結果への対応（stopped_from） -------------------------------------------
 
 
 def _stopped(exc: Exception) -> tuple[str, str, list, dict]:
-    out = command._stopped_from(exc)
+    out = command.stopped_from(exc)
     assert out["tool"] == "progress" and out["status"] == "stopped"
     return out["cause"]["kind"], out["cause"]["detail"], out["items"], out["metrics"]
 

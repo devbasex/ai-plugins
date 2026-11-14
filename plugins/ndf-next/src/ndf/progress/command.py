@@ -45,7 +45,7 @@ REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了
 # --- 置き場とリポジトリ ------------------------------------------------------------------
 
 
-def _root(cwd: Path) -> Path:
+def store_root_of(cwd: Path) -> Path:
     return durable.store_root(identity.load().name, cwd)
 
 
@@ -67,7 +67,7 @@ def _repo(cwd: Path, root: Path) -> str:
         return str(root.parents[2])
 
 
-def _read_json(path: Path, failure: str = "を JSON として読めない") -> Any:
+def read_json(path: Path, failure: str = "を JSON として読めない") -> Any:
     """`path` の JSON。読めなければ `"{path} {failure}: 理由"` の `ContractError`。"""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -81,7 +81,7 @@ def _declared(cwd: Path) -> dict[str, Any]:
     path = top / PROJECT_FILE
     if not path.exists():
         return {}
-    raw = _read_json(path, "を読めない")
+    raw = read_json(path, "を読めない")
     workflow = raw.get("workflow") if isinstance(raw, dict) else None
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     if not isinstance(declared, dict):
@@ -162,7 +162,7 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     if not found:
         raise definition.WorkflowDefError([f"--requirements: モード {snap.mode} に要求と受け入れ条件の工程が無い"])
     stage = found[0]
-    errs = definition.validate_stage_output(stage, _read_json(Path(path)))
+    errs = definition.validate_stage_output(stage, read_json(Path(path)))
     if errs:
         raise definition.WorkflowDefError([f"{stage.name} の出力が規約に合わない: {e}" for e in errs])
     return [(stage.name, path)]
@@ -227,7 +227,7 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 
 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    output = _read_json(Path(a.output))
+    output = read_json(Path(a.output))
     with store.transaction(st) as conn:
         _, snap, _ = _current(conn, a.table_id)
     stage = snap.stage(a.stage)
@@ -265,7 +265,7 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    root = _root(cwd)
+    root = store_root_of(cwd)
     url = store.default_url(root)
     retired = store.restore(url, root, Path(a.source))
     items = [{"restored": str(store.sqlite_path(url)), "from": a.source, "retired": str(retired)}]
@@ -339,7 +339,7 @@ def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequen
 
 def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
     """チェックアウトの置き場の進行表の DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
-    root = _root(cwd)
+    root = store_root_of(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
@@ -353,7 +353,7 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return with_store(cwd, COMMANDS[a.action], a)
 
 
-# 止まった理由へ変換する例外の種類（main が受け、_stopped_from が理由へ変える）
+# 止まった理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
 STOPPABLE = (
     model.Refused,
     durable.StoreStopped,
@@ -401,7 +401,7 @@ _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ..
 )
 
 
-def _stopped_from(exc: Exception) -> dict[str, Any]:
+def stopped_from(exc: Exception) -> dict[str, Any]:
     """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。表に無い種類は CalledProcessError。"""
     for kind, convert in _STOPPED_FROM:
         if isinstance(exc, kind):
@@ -419,7 +419,7 @@ def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace
     try:
         out = dispatch(a, Path.cwd())
     except STOPPABLE as exc:
-        out = _stopped_from(exc)
+        out = stopped_from(exc)
     return result.emit(out)
 
 
