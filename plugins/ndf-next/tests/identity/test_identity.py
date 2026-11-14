@@ -47,6 +47,21 @@ def test_load_uses_home_when_xdg_state_home_is_unset(tmp_path, monkeypatch):
     assert identity.load().state_dir == tmp_path / "home" / ".local" / "state" / "p"
 
 
+def test_ndf_state_home_is_the_root_before_xdg(tmp_path, monkeypatch):
+    root = make_plugin(tmp_path, "x", "p")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setenv("NDF_STATE_HOME", str(tmp_path / "service"))
+
+    # サービスが渡した根の下にプラグイン名の置き場を作り、根そのもの（旧い NDF の置き場）を退避しない
+    old = tmp_path / "service" / "old.json"
+    old.parent.mkdir()
+    old.write_text("{}")
+    ident = identity.load()
+    assert ident.state_dir == tmp_path / "service" / "p"
+    identity.prepare_state_dir(ident)
+    assert old.exists()
+
+
 @pytest.mark.parametrize("content", [None, "{", "[]", '{"version": "1"}', '{"name": ""}'])
 def test_load_raises_when_plugin_json_is_unreadable(tmp_path, monkeypatch, content):
     root = tmp_path / "broken"
