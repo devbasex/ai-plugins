@@ -296,7 +296,11 @@ def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> stages.
     if errs:
         raise WorkflowDefError(errs)
     defs = tuple(_stage_def(stage_docs[ref]) for _, ref in called)
-    errs = stages.check_unique_stage_names(defs) + stages.check_order([st for s in defs for st in s.steps])
+    errs = (
+        stages.check_unique_stage_names(defs)
+        + stages.check_gate_conditions(defs)
+        + stages.check_order([st for s in defs for st in s.steps])
+    )
     if errs:
         raise WorkflowDefError(errs)
     doc = mode_doc["document"]

@@ -425,3 +425,32 @@ def test_new_refuses_requirements_that_break_the_output_contract_or_are_not_json
     assert code == 2 and out["cause"]["detail"].startswith(f"{broken} を JSON として読めない: ")
     _, made = _new(capsys)
     assert made["status"] == "ok"
+
+
+# --- 承認ゲートの工程は無効にできない（3364-2） ---------------------------------------------------
+
+
+@pytest.mark.parametrize("stage", ["設計", "デプロイ"])
+def test_gate_stage_cannot_be_disabled_by_the_argument(repo, capsys, stage):
+    code, out = _new(capsys, "--disable", f"{stage}=外したい")
+    assert out["cause"]["kind"] == "refused" and "承認ゲート" in out["cause"]["detail"] and stage in out["cause"]["detail"]
+    assert code != 0
+
+
+def test_gate_stage_cannot_be_disabled_by_the_project_declaration(repo, capsys):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text(
+        json.dumps({"workflow": {"stages": {"デプロイ": {"enabled": False, "reason": "止めている"}}}})
+    )
+    code, out = _new(capsys)
+    assert out["cause"]["kind"] == "refused" and "デプロイ" in out["cause"]["detail"]
+    assert code != 0
+
+
+def test_gate_stage_cannot_be_disabled_by_the_conductor(repo, capsys):
+    _, made = _new(capsys)
+    tid = made["metrics"]["table_id"]
+    _, out = _run(capsys, "disable", tid, "設計", "--reason", "外したい")
+    assert out["cause"]["kind"] == "refused" and "承認ゲート" in out["cause"]["detail"]
+    # ほかの工程は今のまま外せる
+    assert _run(capsys, "disable", tid, "振り返り", "--reason", "外す")[0] == 0

@@ -48,6 +48,11 @@ class StageDef:
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
 
+    @property
+    def gates(self) -> tuple[str, ...]:
+        """工程が持つ承認ゲートの種類。1 つでもあれば工程を無効にできない（3364-2）。"""
+        return tuple(st.gate for st in self.steps if st.gate)
+
 
 @dataclass(frozen=True)
 class Snapshot:
@@ -173,6 +178,17 @@ def check_unique_stage_names(stages: Iterable[StageDef]) -> list[str]:
     return [f"工程の名前 {n} を 2 つの工程が受け持つ" for n in contracts.duplicates(s.name for s in stages)]
 
 
+def gate_refusal(stage: StageDef) -> str:
+    """承認ゲートの工程を無効にしようとしたときの断りの理由。"""
+    kinds = "・".join(model.gate_label(g) for g in stage.gates)
+    return f"{stage.name} は承認ゲート（{kinds}）を持つので無効にできない"
+
+
+def check_gate_conditions(stages: Iterable[StageDef]) -> list[str]:
+    """承認ゲートの工程は定義の条件（when）を持たない。条件が偽になると工程が無効になるため。"""
+    return [f"{gate_refusal(s)}: 定義の条件 when を外す" for s in stages if s.gates and s.when]
+
+
 # --- 有効と無効（決定 8） -------------------------------------------------------------------
 
 
@@ -198,6 +214,9 @@ def resolve_enabled(
     """
     out = {}
     for stage in snap.stages:
+        off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
+        if stage.gates and (stage.name in disables or off_by_project):
+            raise model.Refused(gate_refusal(stage))
         if stage.name in disables:
             out[stage.name] = Enablement(False, disables[stage.name], "sprint")
         elif stage.name in declared:
