@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 import pytest
 
-from ndf.core import worker
+from ndf.core import durable_locks, worker
 
 
 def _plan(path, *ids):
@@ -113,3 +114,46 @@ def test_missing_plan_is_invalid(tmp_path):
         worker.edit_plan(plan, _plan(tmp_path / "new.json", "a"), "理由", state)
     assert err.value.kind == "invalid" and str(plan) in err.value.detail
     assert not state.exists() and not list(tmp_path.glob("plan.json.bak-*"))
+
+
+def test_lock_in_use_writes_nothing(tmp_path, monkeypatch):
+    plan, state = _plan(tmp_path / "plan.json", "a", "b"), tmp_path / "state"
+    old = plan.read_text(encoding="utf-8")
+
+    @contextlib.contextmanager
+    def busy(path):
+        raise durable_locks.StoreInUse("使用中", (path,))
+        yield path
+
+    monkeypatch.setattr(worker.durable_locks, "exclusive_lock", busy)
+    with pytest.raises(durable_locks.StoreInUse):
+        worker.edit_plan(plan, _plan(tmp_path / "new.json", "a"), "理由", state)
+    assert plan.read_text(encoding="utf-8") == old
+    assert not state.exists() and not list(tmp_path.glob("plan.json.bak-*"))
+
+
+def test_replace_failure_keeps_backup_and_tmp(tmp_path, monkeypatch):
+    plan, new, state = _plan(tmp_path / "plan.json", "a", "b"), _plan(tmp_path / "new.json", "a"), tmp_path / "state"
+    old = plan.read_text(encoding="utf-8")
+
+    def broken(src, dst):
+        raise OSError("置換できない")
+
+    monkeypatch.setattr(worker.os, "replace", broken)
+    with pytest.raises(OSError, match="置換できない"):
+        worker.edit_plan(plan, new, "理由", state, now="2026-11-14T01:00:00+00:00")
+    assert plan.read_text(encoding="utf-8") == old
+    assert (tmp_path / "plan.json.bak-20261114T0100000000").read_text(encoding="utf-8") == old
+    assert (tmp_path / "plan.json.tmp").read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
+    assert not state.exists()
+
+
+def test_progress_append_failure_leaves_plan_replaced(tmp_path):
+    plan, new, state = _plan(tmp_path / "plan.json", "a", "b"), _plan(tmp_path / "new.json", "a"), tmp_path / "state"
+    old = plan.read_text(encoding="utf-8")
+    state.write_text("ファイル", encoding="utf-8")
+    with pytest.raises(OSError):
+        worker.edit_plan(plan, new, "理由", state, now="2026-11-14T01:00:00+00:00")
+    assert plan.read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
+    assert (tmp_path / "plan.json.bak-20261114T0100000000").read_text(encoding="utf-8") == old
+    assert not (tmp_path / "plan.json.tmp").exists()
