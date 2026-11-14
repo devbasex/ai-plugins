@@ -224,6 +224,17 @@ def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
 
 
 @contextmanager
+def exclusive_lock(path: Path) -> Iterator[Path]:
+    """ファイル `path` の排他のロック。上限まで待ち、取れなければ持ち主を添えて `StoreInUse`。抜けるときに閉じる。"""
+    handle = open_lock_file(path)
+    try:
+        lock(handle, fcntl.LOCK_EX, True, path)
+        yield path
+    finally:
+        handle.close()
+
+
+@contextmanager
 def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
     """共有の目印の検査・控え・走査を 1 プロセスに限るロック。`wait` が偽で取れなければ None を渡す。
 

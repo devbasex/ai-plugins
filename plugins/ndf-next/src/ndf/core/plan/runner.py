@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import functools
 import json
 import time
@@ -274,13 +273,8 @@ def state_dir_of(plan_path: Path, state_dir: Optional[str], cwd: Path) -> Path:
 @contextmanager
 def plan_lock(state_dir: Path) -> Iterator[Path]:
     """状態の置き場のロック。上限まで待ち、取れなければ持ち主（ホスト・pid・時刻）を添えて `durable.StoreInUse`（B11）。"""
-    path = state_dir / PLAN_LOCK
-    handle = durable_locks.open_lock_file(path)
-    try:
-        durable_locks.lock(handle, fcntl.LOCK_EX, True, path)
+    with durable_locks.exclusive_lock(state_dir / PLAN_LOCK) as path:
         yield path
-    finally:
-        handle.close()
 
 
 def _base_values(plan: model.Plan, state_dir: Path, absolute_plan: Path, work_base: Path) -> dict[str, str]:
