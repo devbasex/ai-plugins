@@ -225,10 +225,17 @@ def test_table_hits_reports_sets_and_strings_per_table():
         facts.Const("a.py", 4, "SHORT", "ok"),
         facts.Const("a.py", 5, "NUM", 3),
     ]
-    found = [(f.rule, f.path, f.line, f.detail) for f in facts.table_hits(all_consts, {"stages": ["deploy", "verify", "ok"], "codes": ["x", "ok"]}, 3)]
+    found = [
+        (f.rule, f.path, f.line, f.detail)
+        for f in facts.table_hits(all_consts, {"stages": ["deploy", "verify", "ok"], "codes": ["x", "ok"]}, 3)
+    ]
     assert found == [
         ("const-fact", "a.py", 1, "table-set: BOTH が表 stages の id を写す"),
         ("const-fact", "a.py", 3, "table-str: STAGE が表 stages の id を写す"),
     ]
     found = [f.detail for f in facts.table_hits(all_consts, {"codes": ["x", "ok", "deploy"]}, 2)]
-    assert found == ["table-set: BOTH が表 codes の id を写す", "table-set: ONE が表 codes の id を写す", "table-str: SHORT が表 codes の id を写す"]
+    assert found == [
+        "table-set: BOTH が表 codes の id を写す",
+        "table-set: ONE が表 codes の id を写す",
+        "table-str: SHORT が表 codes の id を写す",
+    ]
