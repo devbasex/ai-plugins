@@ -104,15 +104,16 @@ def check_budget(limits: dict, registrations: list[dict[str, Any]]) -> list[str]
 
 def _guard_limit_errors(limits: dict) -> list[str]:
     pairs = [(g, rt, ev) for g in tables.guards() for rt in tables.runtimes() for ev in g["events"]]
-    errors = []
-    for guard, runtime, event in pairs:
-        found = budget_for(runtime, event, limits)
-        if found is None:
-            if tables.event_spec(runtime, event) is not None:
-                errors.append(f"{runtime} の {event} の予算が limits.json に無い")
-            continue
-        errors += [_component_error(guard["name"], name, limits, found, f"{runtime} の {event}") for name in guard["limits"]]
+    errors = [e for guard, runtime, event in pairs for e in _pair_errors(guard, runtime, event, limits)]
     return sorted({e for e in errors if e})
+
+
+def _pair_errors(guard: dict[str, Any], runtime: str, event: str, limits: dict) -> list[str]:
+    """1 組（guard・ランタイム・事象）の破れの文。予算の行が無ければその文、あれば部品ごとの文（守れていれば空）。"""
+    found = budget_for(runtime, event, limits)
+    if found is None:
+        return [f"{runtime} の {event} の予算が limits.json に無い"] if tables.event_spec(runtime, event) is not None else []
+    return [_component_error(guard["name"], name, limits, found, f"{runtime} の {event}") for name in guard["limits"]]
 
 
 def _component_error(guard: str, name: str, limits: dict, found: Budget, where: str) -> str:
