@@ -108,6 +108,16 @@ class _Place:
         return _Place(self.base, self.cwd, self.cds, set(self.moving))
 
 
+@dataclass(frozen=True)
+class _AndOr:
+    """`&&`・`||` の並びを読んだ結果。"""
+
+    cd_count: int  # 数えた cd の数
+    ends_with_cd: bool  # 最後が cd か
+    crossed_or: bool  # `||` を跨いだか
+    conditional_cd: bool  # 条件つきの cd があったか
+
+
 class _Scan:
     """構文木を bash の実行の順に読み、書き込み先を `out` へ積む。"""
 
@@ -178,7 +188,7 @@ class _Scan:
             st.moving.add(_text(name))
 
     def andor(self, n: Any, st: _Place) -> None:
-        if self._andor(n, st)[3]:
+        if self._andor(n, st).conditional_cd:
             # 条件つきの cd（`cmd && cd x`）の後は、cd が走ったかを字面から決められない
             st.cwd = None
 
@@ -187,28 +197,28 @@ class _Scan:
         self.node(n, st)
         return st.cds - before
 
-    def _andor(self, n: Any, st: _Place) -> tuple[int, bool, bool, bool]:
-        """(数えた cd の数, 最後が cd か, `||` を跨いだか, 条件つきの cd があったか)。"""
+    def _andor(self, n: Any, st: _Place) -> _AndOr:
         kids = [c for c in n.children if c.type != "comment"]
         left, op, right = kids[0], kids[1].type, kids[-1]
         entry = st.cwd
         if left.type == "list":
-            c1, last1, or1, cond1 = self._andor(left, st)
+            first = self._andor(left, st)
         else:
-            c1, last1, or1, cond1 = self._side(left, st), _is_cd(left), False, False
+            first = _AndOr(self._side(left, st), _is_cd(left), False, False)
+        c1 = first.cd_count
         if op == "&&":
             c2 = self._side(right, st)
-            return c1 + c2, _is_cd(right), or1, cond1 or bool(c2 and not last1)
+            return _AndOr(c1 + c2, _is_cd(right), first.crossed_or, first.conditional_cd or bool(c2 and not first.ends_with_cd))
         fail = st.copy()
-        fail.cwd = entry if c1 == 1 and last1 else (None if c1 else fail.cwd)
-        if not or1 and _noncontinuing(right):
+        fail.cwd = entry if c1 == 1 and first.ends_with_cd else (None if c1 else fail.cwd)
+        if not first.crossed_or and _noncontinuing(right):
             self.node(right, fail)  # `|| exit` を過ぎたなら左辺は成功している
-            return 0, False, False, False
+            return _AndOr(0, False, False, False)
         st.cwd = fail.cwd
         c2 = self._side(right, st)
         if c1 + c2:
             st.cwd = None
-        return c1 + c2, _is_cd(right), True, cond1
+        return _AndOr(c1 + c2, _is_cd(right), True, first.conditional_cd)
 
     def redirected(self, n: Any, st: _Place) -> None:
         body = n.child_by_field_name("body")
