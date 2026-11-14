@@ -78,15 +78,19 @@ class StateReady:
         return [{"retired_from": str(r.source), "retired_to": str(r.target)} for r in self.retired]
 
 
+def _env_dir(var: str, *default: str) -> Path:
+    """環境変数 `var` が空でなければそのパス、空か無ければ HOME の下の `default`。"""
+    value = os.environ.get(var, "")
+    return Path(value) if value else Path.home().joinpath(*default)
+
+
 def _state_home() -> Path:
-    xdg = os.environ.get("XDG_STATE_HOME", "")
-    return Path(xdg) if xdg else Path.home() / ".local" / "state"
+    return _env_dir("XDG_STATE_HOME", ".local", "state")
 
 
 def _config_home() -> Path:
     """Claude Code の設定の置き場（`CLAUDE_CONFIG_DIR`、無ければ `~/.claude`）。"""
-    value = os.environ.get("CLAUDE_CONFIG_DIR", "")
-    return Path(value) if value else Path.home() / ".claude"
+    return _env_dir("CLAUDE_CONFIG_DIR", ".claude")
 
 
 def _foreign_root(root: Path) -> Optional[Path]:
