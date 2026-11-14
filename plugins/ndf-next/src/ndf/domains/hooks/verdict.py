@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 # 判定の種類。強い順（まとめるときは強いものを 1 つ残す）
 KINDS = ("deny", "pushback", "advise", "pass")
+# 理由（reason）を持つ判定の種類。ほかは案内の文（context）を持つ
+REASON_KINDS = ("deny", "pushback")
 
 
 @dataclass(frozen=True)
@@ -33,7 +35,7 @@ class Verdict:
     @property
     def text(self) -> str:
         """会話へ入る文。"""
-        return self.reason if self.kind in ("deny", "pushback") else self.context
+        return self.reason if self.kind in REASON_KINDS else self.context
 
 
 PASS = Verdict("pass")

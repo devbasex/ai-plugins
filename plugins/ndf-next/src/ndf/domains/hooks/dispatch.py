@@ -21,7 +21,7 @@ from ndf.domains.hooks import tables
 from ndf.domains.hooks.budget import Budget
 from ndf.domains.hooks.context import HookContext
 from ndf.domains.hooks.counter import Counter
-from ndf.domains.hooks.verdict import PASS, Verdict, advise, strength
+from ndf.domains.hooks.verdict import PASS, REASON_KINDS, Verdict, advise, strength
 
 _DOWNGRADED = "（同じ拒否が続いたため、止めずに案内した）"
 
@@ -157,7 +157,7 @@ def combine(verdicts: list[Verdict]) -> Verdict:
         return PASS
     texts = [v.text for v in verdicts if v.kind == kind and v.text]
     joined = "\n\n".join(texts)
-    return Verdict(kind, reason=joined) if kind in ("deny", "pushback") else advise(joined)
+    return Verdict(kind, reason=joined) if kind in REASON_KINDS else advise(joined)
 
 
 def clip(text: str, limit: int, notes_dir: Path) -> str:
