@@ -115,3 +115,21 @@ def test_omitted_worktree_is_under_submodule_worktree_not_git_modules(tmp_path):
     assert Path(got["repo"]).resolve() == inner.resolve()
     assert Path(got["worktree"]).resolve() == (inner / ".worktrees" / "fix" / "x").resolve()
     assert ".git/modules" not in str(got["worktree"])
+
+
+# 現状固定（I-005）: repeat が結果を読めないとき・止まった結果でないときの拒否。どちらも invalid で、記録へ書かない。
+def test_repeat_refuses_unreadable_or_not_stopped_result_without_logging(tmp_path, capsys):
+    log = tmp_path / "l.jsonl"
+    missing = tmp_path / "none.json"
+    assert route.main(["repeat", "--result", str(missing), "--log", str(log)]) == 2
+    found = _last(capsys)
+    assert (found["tool"], found["status"], found["cause"]["kind"]) == ("route", "stopped", "invalid")
+    assert found["cause"]["detail"] == f"結果 {missing} を読めない: No such file or directory"
+    assert found["summary"] == found["cause"]["detail"]
+    empty = tmp_path / "empty.json"
+    empty.write_text("", encoding="utf-8")
+    assert route.main(["repeat", "--result", str(empty), "--log", str(log)]) == 2
+    found = _last(capsys)
+    assert found["cause"]["kind"] == "invalid"
+    assert found["cause"]["detail"] == f"結果 {empty} は止まった結果でない"
+    assert not log.exists()
