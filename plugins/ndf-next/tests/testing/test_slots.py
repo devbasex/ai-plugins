@@ -88,7 +88,7 @@ def test_runs_with_different_limits_share_the_numbered_slots(tmp_path):
     assert counter.peak["one"] <= 1
 
 
-@pytest.mark.parametrize("environ", [{slots.HELD_ENV: "x"}, {slots.CI_ENV: "true"}])
+@pytest.mark.parametrize("environ", [{slots.HELD_ENV: "x"}, {"GITHUB_ACTIONS": "true"}])
 def test_nested_and_ci_runs_take_no_slot(tmp_path, environ):
     with _gate(tmp_path, _limits(1)) as outer:
         with _gate(tmp_path, _limits(1, wait=1), environ={**environ, **outer.env}) as inner:
