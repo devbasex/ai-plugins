@@ -25,7 +25,7 @@ from typing import Any, Optional
 from filelock import FileLock, Timeout
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, ledger, localenv, outcomes, repo, testenv_decide
+from ndf.domains.worktree import container, declaration, deps, ledger, localenv, outcomes, repo, testenv_decide
 from ndf.testing import testenv as placement
 
 SECTION = declaration.TESTENV
@@ -131,7 +131,7 @@ def compose_file_args(t: Target) -> list[str]:
     """`docker compose` へ渡す `-f <絶対パス>` の並び。worktree の外（字面・symlink・実体）を指せば `TestenvError`。"""
     out: list[str] = []
     for rel in t.compose_files:
-        if not localenv.deps.safe_relative(rel):
+        if not deps.safe_relative(rel):
             raise TestenvError(f"compose_files の {rel} は worktree の外を指す")
         full = t.path / rel
         if full.is_symlink():
