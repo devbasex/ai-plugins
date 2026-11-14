@@ -97,9 +97,14 @@ def entrypoints(features: Mapping[str, Any], *, conductor_only: bool = False) ->
     for r in features["rows"]:
         if r["kind"] != "entrypoint" or (conductor_only and not r.get("conductor")):
             continue
-        to = r.get("to")
-        found.append(Entrypoint(r["now"], to, tuple(places[to]) if to else (), bool(r.get("conductor"))))
+        found.append(Entrypoint(r["now"], r.get("to"), _destination(places, r), bool(r.get("conductor"))))
     return found
+
+
+def _destination(places: Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, ...]:
+    """行の行き先の子の置き場。行き先（`to`）の無い行は空。"""
+    to = row.get("to")
+    return tuple(places[to]) if to else ()
 
 
 def _under(module: str, place: str) -> bool:
@@ -121,8 +126,7 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
     for r in features["rows"]:
         if not r.get("user_command"):
             continue
-        places = by_child[r["to"]] if "to" in r else []
-        found[r["now"]] = _commands_under(commands, places)
+        found[r["now"]] = _commands_under(commands, _destination(by_child, r))
     return found
 
 
