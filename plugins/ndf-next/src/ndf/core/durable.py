@@ -251,6 +251,10 @@ def _sqlite_path(database_url: str) -> Path | None:
     return Path(database_url[len(prefix) :]) if database_url.startswith(prefix) else None
 
 
+def _is_sqlite(database_url: str) -> bool:
+    return _sqlite_path(database_url) is not None
+
+
 def _sqlite_url(path: Path) -> str:
     return f"sqlite:///{path}"
 
@@ -358,7 +362,7 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
     `wait` が偽で取れなければ None を渡す。呼び手は DBOS を起こす前に取り、閉じて退避するまで持つ（I6・I13）。
     """
     name = run_name(run_key)
-    if database_url is not None and _sqlite_path(database_url) is None:
+    if database_url is not None and not _is_sqlite(database_url):
         with _pg_run_lock(database_url, name, wait) as held:
             yield held
     else:
@@ -909,14 +913,15 @@ def session(root: Path, run_key: str, database_url: str | None = None) -> Iterat
     """
     prepare_store(root)
     url = database_url or run_url(root, run_key)
+    sqlite = _is_sqlite(url)
     with run_lock(root, run_key, database_url) as _held:
-        swept = sweep(root) if _sqlite_path(url) is not None else sweep_url(url, None, root)
+        swept = sweep(root) if sqlite else sweep_url(url, None, root)
         launch(url, run_key)
         try:
             yield swept
         finally:
             shutdown()
-        if _sqlite_path(url) is not None:
+        if sqlite:
             retire(root, run_key)
 
 
