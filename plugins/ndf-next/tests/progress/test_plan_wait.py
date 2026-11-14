@@ -20,13 +20,23 @@ def _seen(notices=(), state="running", stalls=(), last=0):
 
 def test_notices_return_every_event_after_the_number_not_only_the_latest():
     events = [
-        {"seq": 1, "kind": "created"},
-        {"seq": 2, "kind": "request_opened"},
-        {"seq": 3, "kind": "lane_added"},
-        {"seq": 4, "kind": "request_opened"},
+        {"seq": 1, "kind": "created", "row_key": "@plan"},
+        {"seq": 2, "kind": "request_opened", "row_key": "request-1"},
+        {"seq": 3, "kind": "lane_added", "row_key": "a"},
+        {"seq": 4, "kind": "request_opened", "row_key": "request-2"},
     ]
     assert [e["seq"] for e in wait_decide.notices(events, 1)] == [2, 4]
     assert wait_decide.notices(events, 4) == []
+
+
+def test_a_request_closed_after_it_opened_is_not_returned():
+    """止まりを知らせた後にレーンが動き出して閉じた依頼は、wait に出ない（#2585 の受け入れ条件 2）。"""
+    events = [
+        {"seq": 2, "kind": "request_opened", "row_key": "request-1"},
+        {"seq": 3, "kind": "request_opened", "row_key": "request-2"},
+        {"seq": 4, "kind": "request_closed", "row_key": "request-1"},
+    ]
+    assert [e["row_key"] for e in wait_decide.notices(events, 0)] == ["request-2"]
 
 
 def test_wait_ends_on_a_notice_an_ended_plan_or_a_new_stall():

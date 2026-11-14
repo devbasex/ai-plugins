@@ -11,6 +11,7 @@
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
 - `Report`: 起こせなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`。`ndf.progress.lane.liveness`）を、
   計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
+- `Withdraw`: 止まりを知らせた依頼のうち、レーンが動き出した（判定が止まりでなくなった）ものを閉じる（#2585）
 - `Sleep`: 次に読み直すまで待つ
 
 答えの後の起こし直しの鍵は答えの事象の番号を含む。同じ答えでは 1 回だけ起こし、次の答えが載れば新しい鍵で起こす。
@@ -24,7 +25,10 @@
 戻す。`final` の失敗は打ち直しても同じ失敗になるので `failed` に残し、行が動くか中止されるまで起こさない。
 
 止まりの知らせの鍵はレーン・行・判定の種類から作り（`liveness.notice_key`）、同じ鍵では 1 回だけ知らせる（`noticed`）。
-承認ゲートや問いの答えを待つ行は判定が止まりにならないので知らせない。
+承認ゲートや問いの答えを待つ行は判定が止まりにならないので知らせない。止まりの知らせには、最後に動いた時刻と、
+その行の起動の試みの回数と最後の結果（`history`）を載せる（#2585）。止まりは経過の秒でなく状態で決めるので、
+起こし直しが失敗していた時間を数えない。知らせた後にレーンが動き出せば（判定を読めた読み直しで、その鍵の止まりが
+消えたら）依頼を閉じ（`Withdraw`）、同じ鍵がまた止まりになれば知らせ直す。
 
 区切りで止めた計画（`paused`）では次の行を起こさない。実行中の行は終わりまで流すので、答えの後の起こし直しは
 続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。
@@ -101,6 +105,17 @@ class Report:
     key: str
     detail: str
     kind: str = LAUNCH_FAILED
+    # 依頼の中身へ足す項目（止まりの知らせの最後に動いた時刻・起動の試みの回数と最後の結果。#2585）
+    facts: tuple[tuple[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class Withdraw:
+    """止まりを知らせた依頼 `request`（知らせの鍵 `key`）を、レーン `lane` が動き出したので閉じる手（#2585）。"""
+
+    lane: str
+    request: str
+    key: str
 
 
 @dataclass(frozen=True)
@@ -110,13 +125,14 @@ class Sleep:
     seconds: float
 
 
-Act = Union[Observe, Launch, Complete, Report, Sleep]
+Act = Union[Observe, Launch, Complete, Report, Withdraw, Sleep]
 
 
 @dataclass(frozen=True)
 class Done:
     """手の結果。`Observe` は写し（`snapshot` の形）、`Launch` は `{"ok": 真偽, "detail": 文}`（打ち直しても起こせない
-    失敗は `"final": True` を持つ）、`Complete` は真偽、`Report` は開いた依頼の鍵（計画が終わっていて書けなければ None）。"""
+    失敗は `"final": True` を持つ）、`Complete` は真偽、`Report` は開いた依頼の鍵（計画が終わっていて書けなければ None）、
+    `Withdraw` は閉じたら真（計画が動いていないか依頼が既に閉じていれば None）。"""
 
     act: Act
     value: Any = None
@@ -136,8 +152,9 @@ class Policy:
 class RunState:
     """判断の状態。`launched` は起こして行の始まりを待つ起動、`waits` は起こしてから読み直した回数、
     `started` は起こせた起動のすべて、`tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数、
-    `final` は打ち直しても起こせない失敗、`unreported` はまだ知らせていない失敗（レーン, 起動, 詳細）、
-    `reported` は依頼で知らせた起動、`noticed` は知らせると決めた止まりの鍵。"""
+    `final` は打ち直しても起こせない失敗、`unreported` はまだ知らせていない知らせ、
+    `reported` は依頼で知らせた起動、`noticed` は知らせると決めた止まりの鍵、`history` は打った起動の
+    （レーン, 行, 起動の鍵, 起こせたか, 詳細）の並び（止まりの知らせに試みの回数と最後の結果を載せる）。"""
 
     snapshot: Optional[dict[str, Any]] = None
     launched: tuple[str, ...] = ()
@@ -147,9 +164,10 @@ class RunState:
     attempts: tuple[tuple[str, int], ...] = ()
     failed: tuple[str, ...] = ()
     final: tuple[str, ...] = ()
-    unreported: tuple[tuple[str, str, str, str], ...] = ()
+    unreported: tuple[Report, ...] = ()
     reported: tuple[str, ...] = ()
     noticed: tuple[str, ...] = ()
+    history: tuple[tuple[str, str, str, bool, str], ...] = ()
     outcome: Optional[str] = None
     errors: tuple[str, ...] = field(default=())
 
@@ -170,7 +188,8 @@ def snapshot(
 ) -> dict[str, Any]:
     """`Observe` の結果の形（耐久の記録へ書くので JSON にできる値だけにする）。`running` は（レーン, 行, スプリントの ID）、
     `reported` は計画の進行表に開いている、起こせなかった知らせの依頼の起動の鍵、`answered` は答えが載った後に next が
-    打たれていない実行中の行の（レーン, 行, スプリントの ID, 答えの事象の番号）。止まったレーンは空で、`with_stalls` が載せる。"""
+    打たれていない実行中の行の（レーン, 行, スプリントの ID, 答えの事象の番号）。止まったレーンは空で、`with_stalls` が、
+    開いている止まりの知らせの依頼は `with_stall_requests` が載せる。"""
     return {
         "state": state,
         "complete": complete,
@@ -179,13 +198,22 @@ def snapshot(
         "reported": list(reported),
         "answered": [list(a) for a in answered],
         "stalls": [],
+        "unknown": [],
+        "judged": False,
+        "stall_requests": [],
         "halts": [],
     }
 
 
-def with_stalls(snap: dict[str, Any], stalls: Sequence[tuple[str, str, str]]) -> dict[str, Any]:
-    """写しへ止まったレーンの（レーン, 知らせの鍵, 理由）を載せる。"""
-    return {**snap, "stalls": [list(t) for t in stalls]}
+def with_stalls(snap: dict[str, Any], stalls: Sequence[Sequence[Any]], unknown: Sequence[str] = (), judged: bool = True) -> dict[str, Any]:
+    """写しへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせの鍵, 理由, 最後に動いた時刻, 行）、
+    `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければ依頼を閉じない）。"""
+    return {**snap, "stalls": [list(t) for t in stalls], "unknown": list(unknown), "judged": judged}
+
+
+def with_stall_requests(snap: dict[str, Any], requests: Sequence[tuple[str, str, str]]) -> dict[str, Any]:
+    """写しへ、開いている止まりの知らせの依頼の（依頼の鍵, レーン, 知らせの鍵）を載せる（#2585）。"""
+    return {**snap, "stall_requests": [list(r) for r in requests]}
 
 
 def with_halts(snap: dict[str, Any], halts: Sequence[tuple[str, str]]) -> dict[str, Any]:
@@ -246,13 +274,25 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
         return loop.Next.step(halts[0], state) if halts else _finish(state, end)
     if snap["state"] == RUNNING and snap["complete"]:
         return loop.Next.step(halts[0] if halts else Complete(), state)
+    gone = _withdrawable(snap) if snap["state"] == RUNNING else []
+    if gone:
+        return loop.Next.step(gone[0], state)
     if snap["state"] == RUNNING and state.unreported:
-        return loop.Next.step(Report(*state.unreported[0]), state)
+        return loop.Next.step(state.unreported[0], state)
     if found:
         return loop.Next.step(found[0], state)
     if snap["state"] == CANCELLED and _cancels_given_up(state, snap):
         return _finish(state, OUTCOME_CANCEL_FAILED)
     return loop.Next.step(Sleep(policy.poll), state)
+
+
+def _withdrawable(snap: dict[str, Any]) -> list[Withdraw]:
+    """開いている止まりの知らせのうち、判定を読めた読み直しでその鍵の止まりが消えたもの（レーンが動き出した）。"""
+    if not snap["judged"]:
+        return []
+    now = {s[1] for s in snap["stalls"]}
+    unknown = set(snap["unknown"])
+    return [Withdraw(lane, req, key) for req, lane, key in snap["stall_requests"] if key not in now and lane not in unknown]
 
 
 def _cancels_given_up(state: RunState, snap: dict[str, Any]) -> bool:
@@ -295,17 +335,25 @@ def _fail(state: RunState, act: Launch, detail: str, policy: Policy, final: bool
     if _snap(state)["state"] == CANCELLED:
         return state
     kind = HALT_FAILED if act.halt else LAUNCH_FAILED
-    return replace(state, unreported=(*state.unreported, (lane, key, error, kind)))
+    return replace(state, unreported=(*state.unreported, Report(lane, key, error, kind)))
+
+
+def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Optional[str], row: str) -> Report:
+    """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。"""
+    tries = [h for h in state.history if h[0] == lane and h[1] == row]
+    last = None if not tries else ("起こせた" if tries[-1][3] else f"起こせなかった: {tries[-1][4]}")
+    detail = f"{reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
+    return Report(lane, key, detail, LANE_STALLED, (("moved", moved), ("launches", len(tries)), ("last_launch", last)))
 
 
 def _notice_stalls(state: RunState) -> RunState:
-    """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の起動（`unreported`）に置く。"""
+    """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の知らせ（`unreported`）に置く。"""
     snap = _snap(state)
-    fresh = [(lane, key, reason) for lane, key, reason in snap["stalls"] if key not in state.noticed]
+    fresh = [s for s in snap["stalls"] if s[1] not in state.noticed]
     if not fresh:
         return state
-    queued = tuple((lane, key, reason, LANE_STALLED) for lane, key, reason in fresh)
-    return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(k for _, k, _ in fresh)))
+    queued = tuple(_stall_report(state, *s) for s in fresh)
+    return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(s[1] for s in fresh)))
 
 
 def _expire_launched(state: RunState, policy: Policy) -> RunState:
@@ -334,9 +382,27 @@ def _expire_launched(state: RunState, policy: Policy) -> RunState:
 
 def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: Policy) -> RunState:
     state = replace(state, tried=(*state.tried, act.key))
+    if not act.halt:
+        state = replace(state, history=(*state.history, (act.lane, act.row, act.key, bool(value["ok"]), str(value["detail"]))))
     if value["ok"]:
         return replace(state, launched=(*state.launched, act.key), started=(*state.started, act.key))
     return _fail(state, act, value["detail"], policy, bool(value.get("final")))
+
+
+def _after_withdraw(state: RunState, act: Withdraw, value: Any, policy: Policy) -> loop.Next[Act, RunState]:
+    """閉じた止まりの知らせを写しと印から外す。同じ鍵がまた止まりになれば知らせ直す。"""
+    snap = _snap(state)
+    left = [r for r in snap["stall_requests"] if r[0] != act.request]
+    state = replace(
+        state,
+        snapshot={**snap, "stall_requests": left},
+        noticed=tuple(k for k in state.noticed if k != act.key),
+        reported=tuple(k for k in state.reported if k != act.key),
+    )
+    if value is None:
+        # 計画が動いていないか、依頼が既に閉じていた（写しが古い）。読み直して従う
+        return loop.Next.step(Observe(), state)
+    return _after_observe(state, policy)
 
 
 def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[Act, RunState]:
@@ -350,11 +416,13 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
     if isinstance(done.act, Launch):
         return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
     if isinstance(done.act, Report):
-        rest = replace(state, unreported=tuple(u for u in state.unreported if u[1] != done.act.key))
+        rest = replace(state, unreported=tuple(u for u in state.unreported if u.key != done.act.key))
         if done.value is None:
             # 計画が終わっていて依頼を書けなかった（写しが古い）。読み直して計画の状態に従う
             return loop.Next.step(Observe(), rest)
         return _after_observe(replace(rest, reported=(*rest.reported, done.act.key)), policy)
+    if isinstance(done.act, Withdraw):
+        return _after_withdraw(state, done.act, done.value, policy)
     if isinstance(done.act, Complete):
         return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(Observe(), state)
     raise TypeError(f"知らない手: {done.act!r}")

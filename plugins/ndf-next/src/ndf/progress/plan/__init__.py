@@ -243,10 +243,10 @@ def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: st
     return key
 
 
-def close_request(conn: sa.Connection, pid: str, key: str, reason: str) -> None:
-    """答えていない依頼を採らずに閉じる（オーガナイザー）。"""
+def close_request(conn: sa.Connection, pid: str, key: str, reason: str, actor: str = "organizer") -> None:
+    """答えていない依頼を採らずに閉じる（オーガナイザー。止まりの知らせはレーンが動き出したら耐久ワークフローが閉じる）。"""
     _check_request(conn, pid, key)
-    _append(conn, pid, [model.EventDraft("request_closed", "organizer", key, reason=reason)])
+    _append(conn, pid, [model.EventDraft("request_closed", actor, key, reason=reason)])
 
 
 # まとめたリリースの答え

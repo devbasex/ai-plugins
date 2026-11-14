@@ -134,9 +134,9 @@ def test_a_launch_that_cannot_succeed_stays_failed_after_the_request_is_closed()
 
 def test_a_stalled_lane_is_reported_once_per_notice_key():
     """止まったレーンは依頼で 1 回だけ知らせ、依頼を閉じても同じ鍵では知らせ直さない。行か判定が変われば知らせる。"""
-    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった")
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", None, "r1")
     act, state, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
-    assert act == Report("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", run_decide.LANE_STALLED)
+    assert isinstance(act, Report) and (act.lane, act.key, act.kind) == ("a", "stall:a/r1:ended", run_decide.LANE_STALLED)
     act, state, _ = _step(state, Done(act, "request-1"))
     assert act == Sleep(30.0)
     act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], reported=["stall:a/r1:ended"], stalls=[stall])))
@@ -144,9 +144,47 @@ def test_a_stalled_lane_is_reported_once_per_notice_key():
     # 依頼を閉じても、同じ止まりは知らせ直さない
     act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
     assert act == Sleep(30.0) and state.unreported == ()
-    other = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった")
+    other = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった", None, "r1")
     act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[other])))
-    assert act == Report("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった", run_decide.LANE_STALLED)
+    assert isinstance(act, Report) and act.key == "stall:a/r1:stalled" and act.kind == run_decide.LANE_STALLED
+
+
+def test_a_stall_names_the_last_move_and_the_launch_attempts_of_the_row():
+    """止まりの知らせに、最後に動いた時刻と、その行の起動の試みの回数と最後の結果が載る（#2585 の受け入れ条件 1）。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "detail": "tmux が無い"}))
+    act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", "2026-11-05T12:56:00+00:00", "r1")
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert isinstance(act, Report) and act.kind == run_decide.LANE_STALLED
+    assert "2026-11-05T12:56:00+00:00" in act.detail and "2 回" in act.detail and "起こせた" in act.detail
+    assert dict(act.facts) == {"moved": "2026-11-05T12:56:00+00:00", "launches": 2, "last_launch": "起こせた"}
+
+
+def test_a_stall_request_is_withdrawn_once_the_lane_moves_and_noticed_again_if_it_stalls_again():
+    """止まりを知らせた後にレーンが動き出したら依頼を閉じ、また止まれば知らせ直す（#2585 の受け入れ条件 2）。"""
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", None, "r1")
+    running = [("a", "r1", "s1")]
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(running=running, stalls=[stall])))
+    act, state, _ = _step(state, Done(act, "request-1"))
+    asked = run_decide.with_stall_requests(_snap(running=running, reported=["stall:a/r1:ended"]), [("request-1", "a", "stall:a/r1:ended")])
+    # 判定を読めない回（unknown）は動き出したと読まない
+    act, state, _ = _step(state, Done(Observe(), run_decide.with_stalls(asked, [], ["a"])))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), asked))
+    assert act == run_decide.Withdraw("a", "request-1", "stall:a/r1:ended")
+    act, state, _ = _step(state, Done(act, True))
+    assert act == Sleep(30.0) and state.noticed == () and state.reported == ()
+    act, state, _ = _step(state, Done(Observe(), _snap(running=running, stalls=[stall])))
+    assert isinstance(act, Report) and act.key == "stall:a/r1:ended"
+
+
+def test_a_stall_request_is_not_withdrawn_from_a_read_that_did_not_judge():
+    """生死を判定していない写し（計画が動いていない・材料の口が無い）では、止まりの依頼を閉じない。"""
+    asked = run_decide.with_stall_requests(_snap(running=[("a", "r1", "s1")]), [("request-1", "a", "stall:a/r1:ended")])
+    act, _, _ = _step(RunState(), Done(Observe(), run_decide.with_stalls(asked, [], judged=False)))
+    assert act == Sleep(30.0)
 
 
 def test_the_wrapper_of_a_lane_whose_last_row_ended_is_halted_once():
@@ -359,10 +397,32 @@ def test_snapshot_lists_a_stalled_lane_but_not_a_lane_waiting_for_an_answer(open
         snap = run.read_snapshot(conn, pid, _probes({}, {sa_: gate, sb: idle}))
     assert [s[:2] for s in snap["stalls"]] == [["b", "stall:b/r1:ended"]]
     with store.transaction(opened) as conn:
-        key = run.write_report(conn, pid, "b", "stall:b/r1:ended", "止まった", run.LANE_STALLED)
+        key = run.write_report(conn, pid, Report("b", "stall:b/r1:ended", "止まった", run.LANE_STALLED, (("moved", "t"),)))
     assert key is not None
     with store.transaction(opened) as conn:
-        assert run.read_snapshot(conn, pid)["reported"] == ["stall:b/r1:ended"]
+        snap = run.read_snapshot(conn, pid)
+        view, _ = lane.read_plan(conn, pid)
+    assert snap["reported"] == ["stall:b/r1:ended"] and snap["stall_requests"] == [[key, "b", "stall:b/r1:ended"]]
+    assert view.requests[key].body["moved"] == "t"
+    # レーンが動き出したら耐久ワークフローが依頼を閉じる。閉じた依頼は二度閉じない
+    with store.transaction(opened) as conn:
+        assert run.withdraw_report(conn, pid, key, "b") is True
+        assert run.withdraw_report(conn, pid, key, "b") is None
+        view, _ = lane.read_plan(conn, pid)
+    assert view.open_requests() == [] and view.requests[key].closed == "レーン b が動き出した"
+
+
+def test_snapshot_reads_the_last_move_of_a_stalled_lane_from_the_lane_and_sprint_tables(opened):
+    """止まったレーンの最後に動いた時刻は、その行の事象とスプリントの進行表の事象の最後の時刻（#2585）。"""
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        sid = _start(conn, pid, "a", "r1")
+        view, _ = lane.read_plan(conn, pid)
+        last = store.read_events(conn, view.lanes["a"].table_id)[-1].at
+        snap = run.read_snapshot(conn, pid, _probes({}, {sid: {"status": "ok"}}))
+    (stall,) = snap["stalls"]
+    assert stall[:2] == ["a", "stall:a/r1:ended"] and stall[3] == last.isoformat() and stall[4] == "r1"
+    assert snap["judged"] is True and snap["unknown"] == []
 
 
 def test_snapshot_lists_a_lane_whose_last_row_ended_while_its_wrapper_runs(opened):
@@ -375,7 +435,7 @@ def test_snapshot_lists_a_lane_whose_last_row_ended_while_its_wrapper_runs(opene
         assert run.read_snapshot(conn, pid, _probes(running, {}))["halts"] == [["a", "r1"]]
         assert run.read_snapshot(conn, pid, _probes({"w-a": {"running": False}}, {}))["halts"] == []
         assert run.read_snapshot(conn, pid, _probes(None, {}))["halts"] == []
-        key = run.write_report(conn, pid, "a", "halt:a/r1", "止められない", run.HALT_FAILED)
+        key = run.write_report(conn, pid, Report("a", "halt:a/r1", "止められない", run.HALT_FAILED))
         view, _ = lane.read_plan(conn, pid)
     assert view.requests[key].body["halt"] == "halt:a/r1" and "止められない" in view.requests[key].reason
 
@@ -384,7 +444,7 @@ def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
     pid = _create(opened, _doc(_decl("a", [[1]])))
     with store.transaction(opened) as conn:
         plan.stop_plan(conn, pid, "放棄")
-        assert run.write_report(conn, pid, "a", "a/r1", "x") is None
+        assert run.write_report(conn, pid, Report("a", "a/r1", "x")) is None
 
 
 # --- 耐久ワークフロー -------------------------------------------------------------------------------
