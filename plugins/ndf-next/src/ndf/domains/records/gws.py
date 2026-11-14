@@ -15,6 +15,9 @@ from typing import Any, Optional
 
 from ndf.contracts import limits
 
+# トークンを渡す環境変数（表 env の行）。値は読まず、あるかだけを見る
+TOKEN_ENV = "GOOGLE_WORKSPACE_CLI_TOKEN"
+
 
 class GwsError(RuntimeError):
     """gws を打てない・結果を読めない。"""
@@ -45,5 +48,4 @@ def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
 def authenticated(status: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> bool:
     """認証済みか。トークンを環境変数で渡していれば認証済み。"""
     where = os.environ if env is None else env
-    # トークンを渡す環境変数（表 env の行）。値は読まず、あるかだけを見る
-    return decide(status, bool(where.get("GOOGLE_WORKSPACE_CLI_TOKEN")))
+    return decide(status, bool(where.get(TOKEN_ENV)))
