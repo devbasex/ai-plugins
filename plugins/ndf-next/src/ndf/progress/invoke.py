@@ -369,17 +369,16 @@ def _project(place: Path) -> dict[str, Any]:
 
 
 def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
-    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。読めなければ空。
+    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。課題が 1 つでなければ空。
 
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
+    読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
+    失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
     """
     issues = run.inputs["issues"] if "issues" in run.inputs else None
     if not isinstance(issues, list) or len(issues) != 1:
         return {}
-    try:
-        found = issue_text(place, int(issues[0]))
-    except (GitError, github.GitHubError):
-        return {}
+    found = issue_text(place, int(issues[0]))
     if found is None:
         return None
     title, body = found
@@ -559,6 +558,16 @@ def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> Stag
     return finished(run, report)
 
 
+def _github_kind(exc: github.GitHubError) -> str:
+    """GitHub の失敗の止まった理由。打ち直せば通りうるもの（不達・5xx・上限）は transient、ほかは precondition。
+
+    分け方は課題の参照の読み手（`ndf.core.refs` の `_unreadable`）と同じ。状態が 0 でも届いて断られた失敗（GraphQL の誤り・
+    認証が無い）は precondition。
+    """
+    passing = exc.unreached or exc.status >= 500 or exc.retry_after is not None or exc.status == 429
+    return "transient" if passing else "precondition"
+
+
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
         if template(run.name) is None:
@@ -574,6 +583,9 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}"), {})
     except GitError as exc:
         return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} の省いた値を決められない: {exc}"), {})
+    except github.GitHubError as exc:
+        detail = f"プランの雛形 {run.name} の差し込みを GitHub から読めない: {exc}"
+        return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})
     return _from_process(run, runner(argv, cwd, run.env({})))
 
 

@@ -272,6 +272,34 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
 
 
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (github.GitHubError("上限", status=403, retry_after=60.0, quota="rest"), "transient"),
+        (github.GitHubError("5xx", status=502), "transient"),
+        (github.GitHubError("届かない", unreached=True), "transient"),
+        (github.GitHubError("認証が無い"), "precondition"),
+        (invoke.GitError("リモートが無い"), "precondition"),
+    ],
+)
+def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values(tmp_path, monkeypatch, error, kind):
+    # PR 3469 の指摘: 課題を読めない失敗を「題と本文が無い」（打ち直せない invalid）に変えず、理由を添えて
+    # 打ち直せる失敗（不達・5xx・上限）は transient、ほか（認証が無い・リモートが無い）は precondition で止める
+    repo = _sprint_repo(tmp_path, PROJECT)
+
+    def fail(place, n):
+        raise error
+
+    monkeypatch.setattr(invoke, "issue_text", fail)
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == kind
+    assert str(error) in got.cause["detail"]
+    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+
+
 def test_the_issue_text_is_withheld_unless_the_author_is_trusted(monkeypatch):
     # #3364: 課題の題と本文は、`GitHub.trusts` が真の書き手のときだけ返す
     authored = github.Authored("someone", "NONE", "本文")
