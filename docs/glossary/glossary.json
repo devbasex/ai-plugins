@@ -6837,15 +6837,13 @@
       "term": "本番チャネルの宣言",
       "context": "ndf-workflow",
       "meaning": "本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む",
-      "source": "",
-      "pending_source": "issues/issue-3308-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-declaration.md"
     },
     {
       "term": "開始時の記録",
       "context": "ndf-workflow",
       "meaning": "スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない",
-      "source": "",
-      "pending_source": "issues/issue-3308-requirements.md"
+      "source": "docs/specifications/ndf-branch-flow-declaration.md"
     },
     {
       "term": "文書の Pull Request の宛先",

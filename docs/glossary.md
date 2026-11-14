@@ -592,8 +592,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースブランチ | — | 本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 本番チャネルの宣言 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | — |
-| 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない | — | — | — |
+| 本番チャネルの宣言 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
+| 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
 | 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の宣言が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースの単位 | — | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
