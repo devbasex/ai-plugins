@@ -465,6 +465,17 @@ def _cmd_run(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, summary, items, metrics))
 
 
+def _closing_items(hits: Sequence[ClosingHit]) -> list[dict[str, Any]]:
+    return [{"kind": "closing_commit", "sha": h.sha, "subject": h.subject, "words": list(h.words)} for h in hits]
+
+
+def _closing_detail(hits: Sequence[ClosingHit]) -> str:
+    return (
+        f"closing keywords を持つコミットが {len(hits)} 件ある（push しない）。件名と本文の語を `… （#番号）` の参照の形へ"
+        f"直してから打ち直す: " + "; ".join(f"{h.sha[:12]} {h.subject!r} → {', '.join(h.words)}" for h in hits)
+    )
+
+
 def _cmd_closing(a: argparse.Namespace) -> int:
     try:
         hits = closing_commits(git.Git(Path(a.cwd)), a.base)
@@ -472,12 +483,7 @@ def _cmd_closing(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, INVALID, f"コミットを読めない: {exc}"))
     if not hits:
         return result.emit(result.result(TOOL, OK, f"{a.base}..HEAD のコミットに closing keywords は無い"))
-    items = [{"kind": "closing_commit", "sha": h.sha, "subject": h.subject, "words": list(h.words)} for h in hits]
-    detail = (
-        f"closing keywords を持つコミットが {len(hits)} 件ある（push しない）。件名と本文の語を `… （#番号）` の参照の形へ"
-        f"直してから打ち直す: " + "; ".join(f"{h.sha[:12]} {h.subject!r} → {', '.join(h.words)}" for h in hits)
-    )
-    return result.emit(result.stopped(TOOL, REFUSED, detail, items=items))
+    return result.emit(result.stopped(TOOL, REFUSED, _closing_detail(hits), items=_closing_items(hits)))
 
 
 def _plan_unusable(exc: model.PlanError) -> int:
