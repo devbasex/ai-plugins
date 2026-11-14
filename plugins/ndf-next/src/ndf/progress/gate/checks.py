@@ -17,6 +17,7 @@ import pathspec
 
 from ndf.contracts import facts
 from ndf.progress import model
+from ndf.progress.gate.asking import bullets
 
 # 承認ゲートを省かないモード（MVV 判定の前の検査 3）
 EXCLUDED_MODES = ("operation", "documentation")
@@ -194,8 +195,8 @@ def note(gate: str, verdict: Any, why: Sequence[str]) -> str:
     reasons = [str(r) for r in v["reasons"]] if isinstance(v.get("reasons"), list) else []
     boundary = [str(b) for b in v["boundary"]] if isinstance(v.get("boundary"), list) else []
     lines = [f"## MVV 判定（{model.gate_label(gate)}）", "", f"- 判定: {v['verdict'] if 'verdict' in v else '無し'}"]
-    lines += ["", "### 理由", "", *([f"- {r}" for r in reasons] or ["- （無し）"])]
-    lines += ["", "### レッドライン", "", *([f"- {b}" for b in boundary] or ["- （無し）"])]
+    lines += ["", "### 理由", "", *bullets(reasons)]
+    lines += ["", "### レッドライン", "", *bullets(boundary)]
     if why:
         lines += ["", "### 承認ゲートを省かない理由", "", *[f"- {w}" for w in why]]
     return "\n".join(lines) + "\n"

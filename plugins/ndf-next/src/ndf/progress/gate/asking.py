@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Optional
 
@@ -184,6 +184,11 @@ def unconfirmed(v: run.View, stage: str) -> list[str]:
     return out
 
 
+def bullets(items: Iterable[str]) -> list[str]:
+    """Markdown の箇条書きの行。空なら「- （無し）」の 1 行（承認資料と MVV 判定の記録で空の表し方を揃える）。"""
+    return [f"- {x}" for x in items] or ["- （無し）"]
+
+
 def material(v: run.View, q: Question) -> str:
     """承認資料（Markdown）。問い・見る PR と head・出した版（#2554）・未確認の点（#2444）・答えの選択肢を持つ。"""
     ctx = v.context()
@@ -194,7 +199,7 @@ def material(v: run.View, q: Question) -> str:
         lines.append(f"- 見る head: {q.target.head}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("version"), str):
         lines.append(f"- 出す版: {ctx['version']}")
-    lines += ["", "## 未確認の点", "", *([f"- {u}" for u in unconfirmed(v, q.stage)] or ["- （無し）"])]
+    lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
     lines += ["", "## 答え", "", *[f"- {c}" for c in q.choices]]
     return "\n".join(lines) + "\n"
 
