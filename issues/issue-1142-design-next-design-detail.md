@@ -152,11 +152,11 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | ---: | --- | --- |
 | 1 | 今の NDF で動いているスプリントとプランが無いことを確かめる。あれば終わるのを待つ | `parallel.py status`・`supervise.py` の状態 |
 | 2 | `git rm -r plugins/ndf` の後に `git mv plugins/ndf-next plugins/ndf` を打つ | — |
-| 3 | `plugin.json` 2 本の `name` を `ndf`、版を `11.0.0` にする | `claude plugin validate .` |
+| 3 | `plugin.json` 2 本の `name` を `ndf`、版を `11.0.0` にし、`plugin.json` の `description` の版も直す。hook の登録（`hooks/claude.json`・`codex.json`）は名前から作る生成物なので、`bin/ndf hooks render` で作り直す | `claude plugin validate .`・`bin/ndf hooks render --check` |
 | 4 | `.ndf/project.json` の suite のパスと `scripts/*-allow/` の許可ファイルを新しい中身に合わせて作り直す（旧い許可は消す） | 既存の検査のスクリプト |
-| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す。検査（`src/ndf/checks/`）から、子の表のコピー `children.json` と規則 `child-deps`（#3347 の決定 97）、旧いプラグインのディレクトリを見る規則 `I2`・`port`（#3343）を消す | 既存の CI のジョブ |
+| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す。根の `scripts/` のうち `manifests/<ランタイム>-skills.txt` を読むもの（`build-runtime-plugins.sh`・`lib/validate_manifests.py`・`check-skill-frontmatter.py`・`check-skill-repo-assumptions.py`・`check-doc-staleness.py`）を、配る Skill の表 `manifests/skills.json` を読む形へ寄せる。検査（`src/ndf/checks/`）から、子の表のコピー `children.json` と規則 `child-deps`（#3347 の決定 97）、旧いプラグインのディレクトリを見る規則 `I2`・`port`（#3343）を消す | 既存の CI のジョブ |
 | 6 | `CHANGELOG.md` に入れ替えを書き、手順 2〜6 を 1 本の PR にする | — |
-| 7 | `claude --plugin-dir plugins/ndf` で主要な Skill を 1 回ずつ起動する | 振る舞いの確認 |
+| 7 | 起動のスクリプト `plugins/ndf/bin/ndf-claude` で主要な Skill を 1 回ずつ起動する。外す設定は自分と同じ名前の行を除くので、入れ替えた自分は外れない | 振る舞いの確認。起動の init の `plugins` に `ndf` が 1 つだけあり、その `path` が `plugins/ndf` であること（`tests/bin/test_ndf_claude.py` の確かめを `NDF_LAUNCH_LIVE=1` で打つ） |
 | 8 | develop へ入れて開発版としてデプロイし、リリース承認ゲートを通して main へ出す | リリース後テスト |
 | 9 | ラベル `rebuild-1142` の開いている Issue が S2 自身を除いて 0 件であることを確かめる。残れば理由を添えて閉じるか、オーガナイザーへ送る | `gh issue list --label rebuild-1142 --state open` |
 
@@ -219,8 +219,10 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `plugins/ndf-next/tests/` | テスト（子ごとに `tests/<パッケージ>/`）。置き場は X0 が作り、`tests/<パッケージ>/` の中身はそのパッケージを作る子が書く | X0（置き場）・各子（中身） |
 | `plugins/ndf-next/skills/` | Skill 本文 | S1 |
 | `plugins/ndf-next/agents/` | エージェント定義 | S1 |
-| `plugins/ndf-next/hooks/` | hook のエントリポイント | S1 |
-| `plugins/ndf-next/manifests/` | 配る Skill の表 | S1 |
+| `plugins/ndf-next/hooks/` | hook のエントリポイント（`entry.py`・`boot.py`）と、`ndf hooks render` が作る登録（`claude.json`・`codex.json`） | S1b |
+| `plugins/ndf-next/manifests/` | 配る Skill の表（`skills.json`）。`ndf manifests render` が表から Codex の定義の `skills` と Skill ごとの `agents/openai.yaml` を作る | S1b |
+| `plugins/ndf-next/bin/ndf-claude` | このプラグインだけを読む claude の起動（決定 74） | S1b |
+| `plugins/ndf-next/bin/start.py` | エントリポイントが依存の環境の python で起こすスクリプト。依存の環境の欠けを確かめてから副命令を呼ぶ（#2447） | S1b |
 | `.github/workflows/ndf-next.yml` | 新しいディレクトリのテストと検査 | X0 |
 
 ## クラスと関数の構造
@@ -396,13 +398,12 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `plugins/ndf-next/src/ndf/domains/hooks/env.py` | lock の hash ごとの依存の環境の用意と、使われない環境の片付け。根の目印と最後に使った時刻の読み書き。標準ライブラリだけで書く（システムの `python3` から呼ぶ） | M3 |
 | `plugins/ndf-next/src/ndf/domains/hooks/strict.py` | `strict` の guard（本番チャネルへのマージ）。標準ライブラリだけで書く（決定 91） | M3 |
 | `plugins/ndf-next/tests/domains/hooks/samples/<ランタイム>/<版>/<事象>.json` | 本体の版ごとの入力の見本 | M3 |
-| `plugins/ndf-next/hooks/entry.py` | 環境の python の入口。標準ライブラリで事象を読み、先に `strict` を呼び、次に `dispatch` を呼び、どの失敗でも終了コード 0 で終わる | S1 |
-| `plugins/ndf-next/hooks/boot.py` | 環境が無いときの入口（システムの `python3`）。`strict` を呼び、SessionStart なら `prepare.py` を切り離して起動する。標準ライブラリだけ | S1 |
-| `plugins/ndf-next/hooks/prepare.py` | 切り離して動く環境の用意。`env.prepare` と `env.prune` を呼ぶ。標準ライブラリだけ | S1 |
+| `plugins/ndf-next/hooks/entry.py` | 環境の python のエントリポイント。`src/` をパスへ足して `main.run_entry` を呼ぶ（先に `strict`、次に `dispatch`）。本体を読めないときも含め、どの失敗でも終了コード 0 で終わる | S1b |
+| `plugins/ndf-next/hooks/boot.py` | 環境が無いときのエントリポイント（システムの `python3`）。`boot.run_boot` を呼ぶ（`strict` を呼び、SessionStart なら環境の用意 `python3 -m ndf.domains.hooks.env prepare` を切り離して起動する）。標準ライブラリだけ | S1b |
 | `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>/` | 依存の環境。中の `.last-used` の更新時刻が最後に使った時刻 | `env.prepare` が作る |
 | `<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>.lock`・`.failed` | 用意の排他のファイルと、用意に失敗した理由 | `prepare.py` |
 | `<キャッシュ>/<プラグイン名>/roots/<プラグインの置き場の sha256 の先頭 16 字>.json` | 根の目印。導入先 1 つが指す環境 | SessionStart の入口 |
-| `plugins/ndf-next/hooks/claude.json`・`codex.json` | 登録。事象ごとに 1 行で、`ndf hooks render` が契約表と予算から作る | S1 |
+| `plugins/ndf-next/hooks/claude.json`・`codex.json` | 登録。事象ごとに 1 行で、`ndf hooks render` が契約表と予算から作る（`registration.py`）。環境の python のパスはプラグイン名と `uv.lock` の hash を持つので、名前か lock を変えたら作り直す | S1b |
 
 ### 型と関数
 

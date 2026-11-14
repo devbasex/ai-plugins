@@ -37,13 +37,26 @@ def test_done_check_skips_only_when_head_is_merged(tmp_path):
     assert run_step(step, repo, broken)["kind"] == "precondition"
 
 
-def test_changes_check_finds_no_changes(tmp_path):
-    """#3039: 宛先から変更の無いブランチは not_applicable（PR を作らない）。変更があれば ok。"""
-    step = step_of(plan_of("close", base="develop"), "changes-check")
-    same = repo_with_base(tmp_path / "a", {})
-    assert run_step(step, same)["kind"] == "not_applicable"
-    changed = repo_with_base(tmp_path / "b", {"x.py": "x = 1\n"})
-    assert run_step(step, changed)["status"] == "ok"
+def test_changes_check_finds_no_changes_since_work_start(tmp_path):
+    """#3039・#3474: worker を打つ前の HEAD から変更が無ければ not_applicable（PR を作らない）。変更があれば ok。
+
+    宛先へまだ取り込まれていない（取得し直していない）ブランチの差分は数えない。記録した起点は打ち直しでも上書きしない。起点を読めなければ precondition（変更なしと読まない）。
+    """
+    for purpose in ("close", "plan_to_spec"):
+        plan = plan_of(purpose, base="develop")
+        start, check = step_of(plan, "work-start"), step_of(plan, "changes-check")
+        repo = repo_with_base(tmp_path / purpose, {"merged.py": "m = 1\n"})
+        fill = {"state_dir": str(tmp_path / purpose / "state")}
+        (tmp_path / purpose / "state").mkdir()
+        assert run_step(start, repo, fill=fill)["status"] == "ok"
+        assert run_step(check, repo, fill=fill)["kind"] == "not_applicable"
+        (repo / "spec.md").write_text("# spec\n", encoding="utf-8")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "spec")
+        assert run_step(start, repo, fill=fill)["status"] == "ok"
+        assert run_step(check, repo, fill=fill)["status"] == "ok"
+    missing = run_step(check, repo, fill={"state_dir": str(tmp_path / "none")})
+    assert missing["kind"] == "precondition"
 
 
 def test_assess_detects_docs_only_diff(tmp_path):

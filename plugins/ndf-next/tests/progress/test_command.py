@@ -445,24 +445,12 @@ def test_gate_stage_cannot_be_disabled_by_the_conductor(repo, capsys):
 # --- 現状固定: command._append（I-014。番号のぶつかりで読み直して作り直し、回数が尽きれば投げる） ---------
 
 
-def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, capsys, monkeypatch):
+def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, capsys, conflicts):
     _, made = _new(capsys)
     tid = made["metrics"]["table_id"]
-    real, calls = store.append_events, {"n": 0}
-
-    def conflict_once(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise store.Conflict("ぶつかった")
-        return real(*a, **k)
-
-    monkeypatch.setattr(store, "append_events", conflict_once)
+    calls = conflicts(1)
     code, out = _run(capsys, "disable", tid, "実装", "--reason", "外す")
     assert code == 0 and calls["n"] == 2 and len(out["metrics"]["seqs"]) == 1
-
-    def always(*a, **k):
-        calls["n"] += 1
-        raise store.Conflict("ぶつかった")
 
     builds: list[int] = []
 
@@ -470,8 +458,7 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
         builds.append(rev)
         return [model.EventDraft("enabled", command.ACTOR, "実装", reason="戻す", rev=rev)]
 
-    calls["n"] = 0
-    monkeypatch.setattr(store, "append_events", always)
+    calls = conflicts(None)
     root = command.store_root_of(repo)
     with store.open_store(store.default_url(root), root) as st, pytest.raises(store.Conflict):
         command._append(st, tid, build)

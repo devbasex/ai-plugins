@@ -1,0 +1,16 @@
+{
+  "template": "cross-refactoring",
+  "purpose": "refactor",
+  "summary": "リファクタリング: リファクタリングの起動 → push。終わり切らなくても（incomplete）push まで進める",
+  "params": ["repo", "worktree", "branch", "refactor", "worker"],
+  "plan": {
+    "name": "cross-refactoring-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "refactor", "run": ["{{refactor}}"], "on_cause": {"incomplete": "push"}},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

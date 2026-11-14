@@ -3,11 +3,14 @@
 - 変わったファイルと含む PR は `<前のリリース>..<ベースブランチ>` の範囲から読む（前のリリースは本番ブランチの先端）
 - 含む PR の題と CI の結論は、GraphQL のエイリアスで 1 回のクエリにまとめて読む（PR ごとに 1 回ずつ呼ばない）。
   CI の結論は各 PR の最後のコミットの `statusCheckRollup` で、手元の検査の状態やレーンの記録を読まない（#2655）
+- 出し済みの版は、本番ブランチの先端のプラグインの定義の版と、origin のタグの版から読む（ベースブランチの定義の版を
+  そのまま出す版にしない。#2554）
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -74,6 +77,34 @@ def included(repo_git: git_mod.Git, span: Range, production: str) -> list[int]:
     return included_decide.numbers(subjects.splitlines(), (production,))
 
 
+def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, production_ref: str) -> list[str]:
+    """本番ブランチの先端のプラグインの定義（先頭）の版。本番ブランチにまだ定義が無ければ空。"""
+    path = f"{plugin.dir}/{plugins_mod.MANIFESTS[0].as_posix()}"
+    if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, production_ref, path).strip():
+        return []
+    try:
+        value = json.loads(repo_git.run("show", git_mod.END_OF_OPTIONS, f"{production_ref}:{path}")).get("version")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise plugins_mod.PluginsError(f"{production_ref} の {path} を読めない: {exc}") from None
+    return [value] if isinstance(value, str) else []
+
+
+def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], production_ref: str) -> dict[str, str]:
+    """プラグインごとの出し済みの版（本番ブランチの版とタグの版のうち基底が最も大きいもの。無いプラグインは入れない）。
+
+    タグは origin から 1 回で読む（手元に取り込んだタグに限らない）。
+    """
+    refs = repo_git.run("ls-remote", "--tags", "--refs", git_mod.ORIGIN).splitlines()
+    tags = [line.partition("\t")[2].removeprefix("refs/tags/") for line in refs]
+    out = {}
+    for p in found:
+        tagged = [v for v in (version_decide.version_of_tag(p.name, t) for t in tags) if v is not None]
+        top = version_decide.highest([*_production_version(repo_git, p, production_ref), *tagged])
+        if top is not None:
+            out[p.name] = top
+    return out
+
+
 def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
     """範囲の変わったファイル（`paths`）のプラグインごとの変化。"""
     return changes_decide.changes(paths, {p.name: p.dir for p in found}, decl.undistributed)
@@ -95,3 +126,10 @@ def plan_bumps(
             current = plugins_mod.version(root, p)
             out.append(version_decide.Planned(p.name, current, version_decide.next_version(current, level, channel)))
     return out
+
+
+def clear_shipped(
+    planned: Sequence[version_decide.Planned], released: Mapping[str, str], level: str, channel: str
+) -> list[version_decide.Planned]:
+    """次の版を、出し済みの版 `released`（プラグインの名前 → 版）より大きくなるよう繰り上げる（#2554）。"""
+    return [p._replace(next=version_decide.clear_of(p.next, released.get(p.plugin), level, channel)) for p in planned]

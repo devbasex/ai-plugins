@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# エントリポイント。uv.lock が固定する依存の仮想環境を用意して `python -m ndf` を呼ぶ。
+# エントリポイント。uv.lock が固定する依存の仮想環境を用意し、`bin/start.py` で欠けを確かめてから `python -m ndf` を呼ぶ。
 # 仮想環境はプラグインの外（`<キャッシュのホーム>/<プラグイン名>/venv/<版>`）に置き、版ごとに分ける。
 # プラグインの根はこのファイルの実体の位置から求め、子へ CLAUDE_PLUGIN_ROOT で渡す（ほかのプラグインの値を引き継がない）。
 #
@@ -40,18 +40,17 @@ fi
 { read -r name; read -r version; } <<<"$meta"
 cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/$name"
 
-# 依存の欠けを結果 JSON 1 行で出して止まる（Python の ndf を起こせないので、ここで組む）
-# 終了コードは終了コードの表の deps_missing の行から引き、python3 の終了コードをそのまま返す
+# 依存の欠けを結果 JSON 1 行で出して止まる（Python の ndf を起こせないので、標準ライブラリだけで読める start.py の
+# emit_deps_missing で組む）。終了コードは終了コードの表の deps_missing の行から引き、python3 の終了コードをそのまま返す
 stop_deps_missing() {
-  printf '%s\n' "$1" >&2
   local code=0
   python3 -c '
-import json, sys
-detail, table = sys.argv[1], sys.argv[2]
-print(json.dumps({"tool": "cli", "status": "stopped", "summary": detail, "items": [], "metrics": {}, "cause": {"kind": "deps_missing", "detail": detail}}, ensure_ascii=False))
-with open(table, encoding="utf-8") as f:
-    sys.exit(next(row["code"] for row in json.load(f)["rows"] if row["id"] == "deps_missing"))
-' "$1" "$root/contracts/facts/exit-codes.json" || code=$?
+import sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+import start
+sys.exit(start.emit_deps_missing(sys.argv[2]))
+' "$root/bin" "$1" || code=$?
   exit "$code"
 }
 
@@ -88,5 +87,6 @@ export NDF_CALLER_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 export CLAUDE_PLUGIN_ROOT="$root"
 export UV_PROJECT_ENVIRONMENT="$cache_home/venv/$version"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
-# -P: 呼び出し元のディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）
-exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P -m ndf "$@"
+# -P: 呼び出し元のディレクトリとこのディレクトリを import の探索先に入れない（利用先の ndf.py・json.py を読まない）。
+# start.py は依存の環境の欠けを確かめてから `python -m ndf` と同じに呼ぶ（欠けていれば入れ直しの手順で止まる。#2447）
+exec "$uv_bin" run --frozen --no-dev --quiet --project "$root" python -P "$root/bin/start.py" "$@"

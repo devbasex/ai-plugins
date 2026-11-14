@@ -263,6 +263,7 @@ def _parser() -> argparse.ArgumentParser:
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
     (assemble.AssembleError, "precondition"),
+    (assemble.ReleaseOpen, "refused"),
     (trail.TrailError, "refused"),
     (decl_mod.DeclarationError, "precondition"),
     (decl_mod.StepFailed, "check_failed"),

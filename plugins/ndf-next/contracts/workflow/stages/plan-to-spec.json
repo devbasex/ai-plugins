@@ -25,6 +25,8 @@
       "phase": "close",
       "inputs": [
         "issues",
+        "worktree",
+        "branch",
         "pr"
       ]
     }

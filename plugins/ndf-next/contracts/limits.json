@@ -110,6 +110,7 @@
     "refresh.http": {"summary": "トークンの更新の宛先への HTTP の上限", "seconds": 10},
     "run-core.kill-grace": {"summary": "実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予", "seconds": 5},
     "sprint-loop-record.lock": {"summary": "開発ループの記録の排他を待つ上限", "seconds": 60},
+    "loop.lease": {"summary": "開発ループの持ち主の鍵の期限。周の境ごとに延ばし、持ち主が止まったまま期限が切れたら、ほかのセッションが鍵を取れる（#2820）", "seconds": 21600},
     "usage-aggregate.gh": {"summary": "使用量の集計の gh の上限", "seconds": 60},
     "usage-ledger.git": {"summary": "使用量の台帳がリポジトリの URL を読む git の上限", "seconds": 10},
     "merged.main-lock": {"summary": "メインディレクトリの排他を待つ上限。後片付け 1 件と pull は数十秒で終わる", "seconds": 600},

@@ -9,6 +9,7 @@ import pytest
 
 from ndf.adapters import git as git_mod
 from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
+from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
@@ -163,3 +164,102 @@ def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
     work = _develop_ahead(tmp_path)
     with pytest.raises(assemble.AssembleError, match="origin/develop の先端でない"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+
+
+def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tuple[str, ...] = ()) -> Path:
+    """develop の版を `develop` にした origin の clone。`main` を渡せば本番ブランチの版もそれにし、`tags` のタグを origin に置く。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    manifest = work / "tools" / "kit" / ".claude-plugin" / "plugin.json"
+    write_json(manifest, {"name": "kit", "version": develop})
+    git(work, "commit", "-q", "-am", "dev bump")
+    git(work, "push", "-q", "origin", "develop")
+    if main is not None:
+        git(work, "switch", "-q", "main")
+        write_json(manifest, {"name": "kit", "version": main})
+        git(work, "commit", "-q", "-am", "released")
+        git(work, "push", "-q", "origin", "main")
+        git(work, "switch", "-q", "develop")
+    for tag in tags:
+        git(work, "tag", tag, "origin/main")
+        git(work, "push", "-q", "origin", tag)
+    return work
+
+
+def test_issue_2554_production_skips_tagged_version(tmp_path: Path) -> None:
+    """#2554: develop の版の基底（1.2.4）が既にタグにあれば、その版数で組まず次に空いている版へ繰り上げる。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
+    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.4-dev.2", "1.2.5")]
+
+
+def test_issue_2554_reversed_reservation_stays_above_production(tmp_path: Path) -> None:
+    """#2554: 低い版を予約したレーンが後に出しても（本番 1.2.5、develop 1.2.4-dev.1）、本番の版より大きい版で組む。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.1", main="1.2.5")
+    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert [p.next for p in facts.planned] == ["1.2.6"]
+
+
+def test_issue_2554_dev_channel_skips_shipped_base(tmp_path: Path) -> None:
+    """#2554: 開発版のチャネルも、出し済みの基底の接尾辞の版を組まない。"""
+    work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
+    facts = assemble.collect(work, _hub(), assemble.Target("dev", "patch", "develop", "main"))
+    assert [p.next for p in facts.planned] == ["1.2.5-dev.1"]
+
+
+def _open_pulls(hub: FakeHub, *heads: tuple[int, str]) -> FakeHub:
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": n, "head": {"ref": ref}} for n, ref in heads]
+    return hub
+
+
+@pytest.mark.parametrize("head", ["release/v9.9.9", "develop"])
+def test_issue_2441_production_waits_while_another_release_is_open(tmp_path: Path, head: str) -> None:
+    """#2441: 本番ブランチ宛ての別のリリースの PR が開いている間は、ブランチも PR も作らずに止まる。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    hub = _open_pulls(_hub(), (41, head))
+    with pytest.raises(assemble.ReleaseOpen, match="#41"):
+        assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    assert not [r for r in hub.requests if r[0] == "POST"]
+    assert git(work, "ls-remote", "--heads", "origin", "release/v1.2.4") == ""
+
+
+def test_issue_2441_builds_once_the_other_release_is_closed(tmp_path: Path) -> None:
+    """#2441: 本番ブランチ宛ての PR がリリースでなければ（閉じた後の観測）組む。開発版のチャネルは待たない。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    built = assemble.assemble(work, _open_pulls(_hub(), (42, "feat/y")), assemble.Target("production", "patch", "develop", "main"))
+    assert built.branch == "release/v1.2.4"
+    other = _origin_with_change(tmp_path / "dev", test_only=False)
+    dev = assemble.assemble(other, _open_pulls(_hub(), (41, "release/v9.9.9")), assemble.Target("dev", "patch", "develop", "main"))
+    assert dev.version == "1.2.4-dev.1"
+
+
+def test_issue_2441_cli_reports_refused() -> None:
+    """#2441: 待ちは止まった理由の種類 refused で返す（呼び手は閉じた後に打ち直す）。"""
+    exc = assemble.ReleaseOpen("main 宛てのリリースの PR #41 が開いている")
+    assert release_cli._stopped_of(exc)["cause"]["kind"] == "refused"
+
+
+@pytest.mark.parametrize("synced", [False, True])
+def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remains(tmp_path: Path, synced: bool) -> None:
+    """#3172: 出した後にマージされずに閉じた PR しか無ければ（ベースブランチに新しい変化が無い）、何度打っても空のリリースを組まない。
+
+    組み立ては依頼の PR ではなく範囲（本番ブランチ...ベースブランチ）から読むため、閉じた PR は入らない。戻す PR を
+    マージする前（`synced` が偽）と後のどちらでも同じ。
+    """
+    work = _origin_with_change(tmp_path, test_only=False)
+    git(work, "switch", "-q", "-c", "release/v1.2.4")
+    write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.4"})
+    git(work, "commit", "-q", "-am", "Release: kit v1.2.4")
+    git(work, "switch", "-q", "main")
+    git(work, "merge", "-q", "--no-ff", "release/v1.2.4", "-m", "Merge pull request #9 from o/release/v1.2.4")
+    git(work, "push", "-q", "origin", "main")
+    git(work, "tag", "kit--v1.2.4")
+    git(work, "push", "-q", "origin", "kit--v1.2.4")
+    git(work, "switch", "-q", "develop")
+    if synced:
+        git(work, "merge", "-q", "--no-ff", "main", "-m", "Merge pull request #10 from o/main")
+        git(work, "push", "-q", "origin", "develop")
+    for _ in range(2):
+        hub = _hub()
+        with pytest.raises(assemble.NothingToRelease):
+            assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+        assert hub.requests == []

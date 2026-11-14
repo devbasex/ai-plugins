@@ -1,0 +1,16 @@
+{
+  "template": "implementation-plan",
+  "purpose": "implementation_plan",
+  "summary": "計画: worker の実装計画 → push",
+  "params": ["repo", "worktree", "branch", "worker"],
+  "plan": {
+    "name": "implementation-plan-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "implementation-plan"]},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push"}
+    ]
+  }
+}

@@ -59,6 +59,8 @@ FIXED_WORDS = {
     # 工程の定義の文書の名前空間（`metadata.ndf`・`document.namespace`）
     "workflow_namespace": "ndf",
 }
+# プラグインの根からの自分の定義（`plugin.json`）の置き場
+MANIFEST_REL = Path(".claude-plugin") / "plugin.json"
 # 状態の置き場の先頭に置く形の版のファイル。無い置き場は旧い実装のものとみなす
 FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
@@ -160,7 +162,7 @@ def _foreign_root(root: Path) -> Optional[Path]:
 def load() -> PluginIdentity:
     """自分の根（`ROOT`）の `plugin.json` から自分を求める。"""
     root = ROOT
-    manifest = root / ".claude-plugin" / "plugin.json"
+    manifest = root / MANIFEST_REL
     try:
         name = json.loads(manifest.read_text(encoding="utf-8"))["name"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -168,6 +170,16 @@ def load() -> PluginIdentity:
     if not isinstance(name, str) or not name:
         raise IdentityError(f"plugin.json の name が文字列でない: {manifest}")
     return PluginIdentity(root=root, name=name, prefix=name + ":", state_dir=_state_home() / name, foreign_root=_foreign_root(root))
+
+
+def name_of(root: Path) -> Optional[str]:
+    """任意のプラグインの根 `root` の `plugin.json` の名前。読めなければ None。"""
+    try:
+        data = json.loads((root / MANIFEST_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 名前を読めないプラグインの根は None で呼ぶ側へ返す
+        return None
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) else None
 
 
 class Handling(Enum):
