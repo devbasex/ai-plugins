@@ -3,6 +3,7 @@
 - 監視: 利用上限の語は CLI が出す行の形（行頭）だけを読み、コメントの写しの中の語を拾わない（#1411）。
   早期の警告は種類ごとに 1 回ずつ出す（#2059）
 - kiro: 起動の前後でworktree の `.amazonq/cli-agents` を写して戻し、起動の間に増えた `.bak` を消す（#2448）
+- 起動の前: 学習に使わない設定の控えを読み（`training.refusal`。#3391）、重い起動の枠を取る（`launch_slot.held`。#3368）。2 つは `launch_slot.gate` の 1 か所が持つ
 """
 
 from __future__ import annotations
@@ -15,11 +16,12 @@ import shutil
 import signal
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
+from ndf.adapters import launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
 
@@ -152,6 +154,10 @@ class AgentState(StrEnum):
     USAGE_LIMIT = "usage_limit"
     STALLED = "stalled"
     TIMEOUT = "timeout"
+    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）
+    REFUSED = "refused"
+    # 起動しなかった: 重い起動の枠が待ちの上限までに空かなかった
+    NO_SLOT = "no_slot"
 
 
 class AgentStatus(NamedTuple):
@@ -286,8 +292,25 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     return watch(proc, spec, poll)
 
 
+def _not_started(spec: Launch, state: AgentState, detail: str) -> AgentStatus:
+    record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
+    return AgentStatus(spec.agent, state, None, detail, ())
+
+
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
-    """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。"""
+    """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。
+
+    学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動の枠が空かなければ
+    `AgentState.NO_SLOT` を返す。
+    """
+    try:
+        with launch_slot.gate(spec.agent, cwd=spec.cwd, env=child_process_env(spec.env)) as slot_env:
+            return _guarded_run(replace(spec, env=dict(slot_env) if spec.env is None else {**spec.env, **slot_env}), poll)
+    except launch_slot.NotLaunched as exc:
+        return _not_started(spec, AgentState(exc.kind), exc.detail)
+
+
+def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)
@@ -336,6 +359,12 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def _kind_changed(src: Path, dst: Path) -> bool:
+    """控え `src` と戻す先 `dst` で種類が違うか。リンクは控えの側でも戻す先でも作り直すので、違うとみなす
+    （写しはリンクのある場所へ書けない）。"""
+    return dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir()
+
+
 def _clear_replaced(backup: Path, agents: Path) -> None:
     """戻す先で、起動の間に種類が変わったもの（リンクへの置き換え・ファイルとディレクトリの入れ替え）を消す。
 
@@ -346,10 +375,10 @@ def _clear_replaced(backup: Path, agents: Path) -> None:
         src, dst = pairs.pop()
         if not (dst.is_symlink() or dst.exists()):
             continue
-        # リンクは控えの側でも戻す先でも作り直す（写しはリンクのある場所へ書けない）
-        if dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir():
+        if _kind_changed(src, dst):
             _remove(dst)
-        elif src.is_dir():
+            continue
+        if src.is_dir():
             pairs.extend((child, dst / child.name) for child in src.iterdir())
 
 

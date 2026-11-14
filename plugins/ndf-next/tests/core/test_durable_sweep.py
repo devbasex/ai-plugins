@@ -256,7 +256,7 @@ class _FailingClient:
 
     destroyed = 0
 
-    def __init__(self, system_database_url: str, retry_connection_errors: bool = True) -> None:
+    def __init__(self, system_database_url: str, retry_connection_errors: bool = True, serializer: object = None) -> None:
         self.url = system_database_url
 
     def _fail(self, *args, **kwargs):
