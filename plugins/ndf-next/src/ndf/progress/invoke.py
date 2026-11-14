@@ -343,13 +343,18 @@ def _strings(value: Any) -> Optional[list[str]]:
     return list(value) if ok else None
 
 
+def _test_command(project: Mapping[str, Any]) -> Optional[str]:
+    """宣言の `test.suites` のうちテストの suite の command を、宣言の順に ` && ` でつなぐ。無ければ None。"""
+    suites = definition.dig(project, "test", "suites")
+    found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
+    cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
+    return " && ".join(cmds) if cmds else None
+
+
 def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Value]:
     """宣言から読む差し込みの値。宣言に無いか形が違えば None。"""
     if name == "test_command":
-        suites = definition.dig(project, "test", "suites")
-        found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
-        cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
-        return " && ".join(cmds) if cmds else None
+        return _test_command(project)
     return _strings(definition.dig(project, *PROJECT_KEYS[name]))
 
 
