@@ -135,6 +135,37 @@ def test_split_failed() -> None:
     assert ci.split_failed(["pytest (0/2)", "doc-lint"], ["pytest"]) == (["pytest (0/2)"], ["doc-lint"])
 
 
+@pytest.mark.parametrize(
+    ("names", "tests", "expected"),
+    [
+        ([], ["pytest"], ([], [])),
+        (["pytest", "doc-lint"], [], ([], ["pytest", "doc-lint"])),
+        (
+            ["doc-lint", "pytest", "W / pytest (1/2)", "doc-lint", "pytest"],
+            ["CI / pytest (0/3)"],
+            (["pytest", "W / pytest (1/2)", "pytest"], ["doc-lint", "doc-lint"]),
+        ),
+    ],
+)
+def test_split_failed_keeps_order_and_duplicates(names: list[str], tests: list[str], expected: tuple) -> None:
+    """現状固定: 空の入力・重なった名前・ワークフローの前置き・分割ジョブの分け方と並び。"""
+    assert ci.split_failed(names, tests) == expected
+
+
+def test_split_failed_and_read_accept_generators() -> None:
+    """現状固定: 名前とテストのチェックをジェネレーターで渡しても、1 度だけ読んで同じに分ける。"""
+    names = (n for n in ["pytest (0/2)", "lint", "pytest"])
+    assert ci.split_failed(names, (t for t in ["pytest"])) == (["pytest (0/2)", "pytest"], ["lint"])
+    runs = [
+        run("pytest (0/2)", conclusion="failure", rid=1),
+        run("lint", conclusion="failure", rid=2),
+        run("pytest", conclusion="failure", rid=3),
+    ]
+    reading = ci.read(iter(runs), iter(["pytest", "lint"]), (t for t in ["W / pytest"]))
+    assert [c.name for c in reading.failed_tests] == ["pytest", "pytest (0/2)"]
+    assert [c.name for c in reading.failed_other] == ["lint"]
+
+
 # --- 落ちたテストの拾い出し（#3188） ---
 
 LOG = """2026-11-12T13:33:01.1Z ============ short test summary info ============
