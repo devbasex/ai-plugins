@@ -9,14 +9,14 @@
 | 受け入れ条件（#3347） | 解き方 | 置き場 |
 | --- | --- | --- |
 | P1 #3092 が P3・P4・S1 の中身を抱え、順番 4 で満たせない。旧い名前が残る | 設計の決定 98（P1a・P1b に分け、13〜17 を P3、18〜21 を P4、11・22 を S1 へ返す）・子の受け入れ条件（P1a・P1b） | 「P1 の本文の分け方」 |
-| 書かれていない依存（C2・M3 → T1、M3・M7 → AD2、M1 → C3・C5） | 設計の決定 97（依存を import の持ち主から引く）・不変条件 IG1・子の受け入れ条件（X1+ の `child-deps`） | 「実装計画」の「足した依存」の列 |
+| 書かれていない依存（C2・M3 → T1、M3・M7 → AD2、M1 → C3・C5 の 6 組） | 設計の決定 97（先に要るものを import の持ち主から引く。引き直すと 6 組を含めて 10 組）・不変条件 IG1・子の受け入れ条件（X1+ の `child-deps`） | 「実装計画」の「足した依存」の列 |
 | T1・C4・C5・AD2 を先に要るものとして名指す子が無い | 決定 97 で引き直した表（T1: AD1・AD2・AD3・C2・M3・M4・M5、C4: M1、C5: M1・S1、AD2: M3・M7） | 「実装計画」 |
 | クリティカルパスが直列で偏る（lr-rf の P1〜P4、lrebuild の順番 3〜7 の空き） | 設計の決定 99（P3 を P2 の前へ・P4 を lrebuild へ・lrebuild の空きに A・B と X1+・X2）・不変条件 IG2 | 「クリティカルパス」「レーンの割り当て」 |
 | プラグイン名 `ndf-next` が中継の `ndf-next` ブロックと同じ語 | 設計の決定 100（`ndf11`。判断 (n)）・子の受け入れ条件（X1+） | 「#3347 で子へ足す受け入れ条件」 |
 | I1 の当たり方が入れ替えの前後で逆転 | 設計の決定 101（照合の 2 つの集合・`FIXED_WORDS`・名前を `ndf` にした一時コピーで検査とテスト）・不変条件 IG3 | 同上 |
 | 決定番号 73〜75 が 2 系統。子の記号も文書間で重なる | 設計の決定 102（系統の名前空間・新しい番号は最大の次）・不変条件 IG6・帯 | 「足した帯」 |
 | 捨てた決定 27・28 が材料に生きている。3 文書が置き換わった「実装計画」を指す | 設計の決定 103（帯） | 「足した帯」 |
-| 根拠の原文が git の外 | 設計の決定 104（[issue-3347-source-note.md](issue-3347-source-note.md) へ写し、`design-next.md` の根拠の行を向ける） | 「足した帯」「承認の後に直す Issue の本文」 |
+| 根拠の原文が git の外 | 設計の決定 104（[issue-3347-source-note.md](issue-3347-source-note.md) へコピーし、`design-next.md` の根拠の行を向ける） | 「足した帯」「承認の後に直す Issue の本文」 |
 | 要求と設計の食い違い（`requirements.md:316`・`:361`・`:362`・E6） | 設計の決定 105（#1142 の本文に取り消し線。承認の後） | 「本文の取り消し線」 |
 | 依存ライブラリが最新の安定版より古い（14 本） | 設計の決定 106・107・108・不変条件 IG4・IG5・子の受け入れ条件（X2） | 「#3347 で子へ足す受け入れ条件」 |
 
@@ -75,18 +75,33 @@
 
 ## クリティカルパス
 
-先に要るものの鎖で最も長いのは、C1+ から S2 までの 7 段（X0・C1 を含めて 9 段）で、次の 2 本がある。
+**最も長い鎖は、閉じていない子で数えて 7 段（C1+ から S2 まで。閉じた X0・C1 を含めると 9 段）で、閉じていない子の並びとしては下の 9 本である。** 「実装計画」の先に要るものを、順番が最大の先に要るものへ辿って数えた（2026-11-14）。辿ると 13 本になり、残りの 4 本は 6〜9 の C1+ の代わりに閉じた D2 から P1a へ入る形で、閉じていない子の並びは 6〜9 の後ろ 6 段と同じである。
 
-| 鎖 | 段とレーン |
-| --- | --- |
-| 1 | C1+（lr-flow）→ C2（lr-flow）→ P1b（lr-rf）→ P2（lr-rf）→ M7（lr-fix-b）→ S1（lrebuild）→ S2（lrebuild） |
-| 2 | C1+（lr-flow）→ C2（lr-flow）→ C3（lr-flow）→ M1（lr-fix-a）→ P4（lrebuild）→ S1（lrebuild）→ S2（lrebuild） |
+| # | 鎖（括弧はレーン） |
+| ---: | --- |
+| 1 | C1+（lr-flow）→ C2（lr-flow）→ P1b（lr-rf）→ P2（lr-rf）→ M7（lr-fix-b）→ S1 → S2（lrebuild） |
+| 2 | C1+（lr-flow）→ C2（lr-flow）→ P1b（lr-rf）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 3 | C1+（lr-flow）→ C2（lr-flow）→ C3（lr-flow）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 4 | C1+（lr-flow）→ C2（lr-flow）→ C4（lr-fix-a）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 5 | C1+（lr-flow）→ C2（lr-flow）→ C5（lr-fix-b）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 6 | C1+（lr-flow）→ P1a（lr-rf）→ P1b（lr-rf）→ P2（lr-rf）→ M7（lr-fix-b）→ S1 → S2（lrebuild） |
+| 7 | C1+（lr-flow）→ P1a（lr-rf）→ P1b（lr-rf）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 8 | C1+（lr-flow）→ P1a（lr-rf）→ M2（lr-fix-a）→ M1（lr-fix-a）→ P4 → S1 → S2（lrebuild） |
+| 9 | C1+（lr-flow）→ P1a（lr-rf）→ P3（lr-rf）→ P2（lr-rf）→ M7（lr-fix-b）→ S1 → S2（lrebuild） |
 
-**どちらの鎖でも、1 つのレーンが続けて持つ段は 2 つまでである**（lr-flow の C1+ → C2 → C3 は 3 段だが、C3 の後は lr-fix-a へ渡る）。前の表では lr-rf が P1 → P2 → P3 → P4 の 4 段を続けて持っていた。
+**1 つのレーンが続けて持つ段は 3 つまでである。** #1142 の詳細設計の前の表（[issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md)）では、lr-rf が P1 → P2 → P3 → P4 の 4 段を続けて持っていた。3 段が続くのは次の 3 か所で、どれも理由がある。
+
+| レーン | 続く 3 段 | 短くしない理由 |
+| --- | --- | --- |
+| lrebuild | P4 → S1 → S2 | S1 は M1〜M7・P4 のすべての後、S2 は S1 の後で、どのレーンに置いても直列に並ぶ |
+| lr-rf | P1a → P1b → P2・P1a → P3 → P2 | P1a・P1b・P2 は同じ進行表の型を読み書きし、別のレーンへ渡すと引継ぎの読み直しが毎回要る |
+| lr-flow | C1+ → C2 → C3 | 同じ（DBOS の殻とプランの実行と雛形） |
+
+**前の表で空いていた順番と、この表で持つもの**:
 
 | レーン | 前の表で空いていた順番 | この表で持つもの |
 | --- | --- | --- |
-| lrebuild | 3〜7 | 2: X2、3: X1+、4〜6: 設計レビューの A #3341・B #3342 の設計の差分、7: P4、8: S1、9: S2 |
+| lrebuild | 3〜7 | 2: X2、3: X1+、4〜6: 設計レビューの分類 A #3341・B #3342 の設計の差分（子ではない）、7: P4、8: S1、9: S2 |
 | lr-rf | 1〜3 | 4: P1a、5: P1b・P3、6: P2 |
 
 ## レーンの割り当て
@@ -100,7 +115,7 @@
 | lr-fix-a | AD1・C4・M2・M1 | 無し |
 | lr-fix-b | T1・AD3・M3・C5・M7 | 無し |
 
-**1 つのレーンが同じ順番に持つ子は 2 本以下である**（IG2。lr-rf の順番 5 の P1b・P3、lr-fix-a の順番 5 の C4・M2 が 2 本）。レーンの定義の書き直し（P4 を lrebuild へ・P1a を lr-rf へ足す）は、承認の後にオーガナイザーが `parallel.py lane p6 set` で当てる。
+**1 つのレーンが同じ順番に持つ子は 2 本以下である**（IG2。lr-rf の順番 5 の P1b・P3、lr-fix-a の順番 5 の C4・M2 が 2 本）。レーンの定義の書き直し（P4 を lrebuild へ・P1a を lr-rf へ足す）は、承認の後にオーガナイザーが `parallel.py lane p6 set`（p6 は #1142 の 6 本のレーンを持つ並列の計画の名前） で当てる。
 
 ## P1 の本文の分け方
 
@@ -154,7 +169,7 @@
 - ラベル: `rebuild-1142`。#1142 の sub-issue に結ぶ
 - 作るファイル: `plugins/ndf-next/contracts/workflow/`・`src/ndf/progress/model.py`・`src/ndf/progress/store.py`・`tests/progress/`
 - 先に要るもの: D1 #3284・D2 #3287・C1+（#3285 の追補）・T1 #3286。順番 4。レーン lr-rf
-- 受け入れ条件: 上の表で P1a へ行く条件（#3092 から写し、旧い名前を直す）と、作り直しで足した条件
+- 受け入れ条件: 上の表で P1a へ行く条件（#3092 からコピーし、旧い名前を直す）と、作り直しで足した条件
 - 材料: #3092 の設計 4 本の文書と、#3344 の詳細設計の `progress/store.py` の関数の仕様
 
 ## #3347 で子へ足す受け入れ条件
@@ -162,8 +177,9 @@
 ### X1+（#3283 の追補。lrebuild。PR は `Refs #3283 #3347`）
 
 - [ ] `plugin.json` 2 本の `name` を `ndf11` にする（決定 100）。ディレクトリ `plugins/ndf-next/` は動かさない
-- [ ] I1 の照合を 2 つに分ける。完全一致は `plugin.json` の `name` と入れ替えの後の名前 `ndf`、パスと前置き（`/<名前>`・`<名前>/`・`<名前>:`）は前の 2 つとディレクトリ名（決定 101）
+- [ ] I1 の照合を 2 つに分ける。完全一致は `plugin.json` の `name` と入れ替えの後の名前 `ndf`、パスとプレフィックス（`/<名前>`・`<名前>/`・`<名前>:`）は前の 2 つとディレクトリ名（決定 101）
 - [ ] 入れ替えの後の名前 `ndf` は `identity.py` の定数 `FINAL_NAME` に置き、I1 はそこから読む。宣言の置き場 `.ndf` は `identity.py` の表 `FIXED_WORDS` に置き、I1 はこの表の定義の行だけを通す
+- [ ] Python のパッケージ名 `ndf` の形（`src/ndf/` と、`ndf.` で始まるモジュール名）は照合から外す（決定 101）。パッケージ名はプラグイン名から切り離した固定の名前である
 - [ ] `src/` の中で `.ndf/` を文字で書いている箇所を `identity` の表から引く形へ直す（直す前の件数と場所を PR 本文に書く）
 - [ ] `.github/workflows/ndf-next.yml` に一時コピーのジョブを足す。`plugins/ndf-next/` を一時ディレクトリの `plugins/ndf/` へ写し、`plugin.json` の `name` を `ndf` にして、X1 の検査とテストを打つ。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、テストが通ることを確かめる
 - [ ] 詳細設計の「実装計画」を `src/ndf/checks/children.json` に写す（子ごとに `packages`（持つサブパッケージ）・`needs`・`order`・`lane`）。S2 の手順に「`children.json` と規則 `child-deps` を消す」を足す
@@ -173,12 +189,12 @@
 ### X2（承認の後に起票。lrebuild。PR は `Closes #3347`）
 
 - 題: `#1142 X2: ndf-next の依存を最新の安定版へ上げ、遅れを知らせる検査と上げる操作のスクリプトを置く`
-- [ ] `plugins/ndf-next/pyproject.toml` の 13 本（DBOS を除く。設計の「14 本の最新の版」の表）を上げる先の版にし、`uv lock` で `uv.lock` を作り直す
-- [ ] httpx は 0.28.1 に止め、`[tool.ndf.deps.hold]` に `httpx = "githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める"` を書く（判断 (o) の推奨。承認で 1.0.dev6 が選ばれたら、`override-dependencies` で入れ、`plugins/ndf-next/src/ndf/adapters/` の httpx の呼び出しと githubkit を通る呼び出しのテストを通し、1.0 の変更点を PR 本文に挙げる）
+- [ ] `plugins/ndf-next/pyproject.toml` の DBOS を除く 13 本（設計の「14 本の最新の版」の表）を上げる先の版にし（httpx は固定するため、版が変わるのは 12 本）、`uv lock` で `uv.lock` を作り直す
+- [ ] httpx は 0.28.1 に固定し、`[tool.ndf.deps.hold]` に `httpx = "githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める"` を書く（判断 (o) の推奨。承認で 1.0.dev6 が選ばれたら、`override-dependencies` で入れ、`plugins/ndf-next/src/ndf/adapters/` の httpx の呼び出しと githubkit を通る呼び出しのテストを通し、1.0 の変更点を PR 本文に挙げる）
 - [ ] `scripts/plugin-deps.py` に副命令 `outdated` と `bump` を作る（下の「関数の仕様」）。結果は統一の結果 JSON で 1 行を標準出力へ出す
 - [ ] `.github/workflows/plugin-deps.yml` を足す。週 1 回（と手動）で `outdated --project plugins/ndf-next` を打ち、遅れがあれば印 `<!-- plugin-deps:plugins/ndf-next -->` を持つ Issue を 1 件だけ作るか本文を書き直し、遅れが無くなれば閉じる。PR では走らせない
 - [ ] `.github/workflows/ndf-next.yml` に `uv lock --check --project plugins/ndf-next` を足す（IG5）
-- [ ] 上げた版で落ちる既存のコードとテストは、この PR で直す（決定 108）。直した箇所と理由を PR 本文に書く
+- [ ] 上げた版で落ちる既存のコードとテストは、この PR で直す（決定 108）。直した箇所と理由を PR 本文に書く。直す箇所が動いている子の PR の触るファイルに当たるときは、その PR のマージの後に取り込み直してから入れる
 - [ ] `pyproject.toml` の頭の注記に「版の選び方は #3347 の決定 106。上げるのは `scripts/plugin-deps.py bump`」を書く
 - [ ] S2 の手順に「`plugin-deps.yml` の `--project` を `plugins/ndf` へ替える」を足す
 
@@ -197,9 +213,11 @@
 
 ## 本文の取り消し線
 
-**承認の後、#1142 の本文の次の 8 か所を直す（6 か所に取り消し線を引いて置き換えの文を添え、2 か所に文を足す）。** `issues/issue-1142-requirements.md` は本文を直した後に `spec-copy.py write 1142 issues/issue-1142-requirements.md` で作り直す（行番号は 2026-11-14 の写しのもの。本文では同じ文が 4 行前にある。写しは設計レビューの節より前に作られ、最後の 2 行の文を持たない）。
+**承認の後、#1142 の本文の次の 8 か所を直す（6 か所に取り消し線を引いて置き換えの文を添え、2 か所に文を足す）。** `issues/issue-1142-requirements.md` は本文を直した後に `spec-copy.py write 1142 issues/issue-1142-requirements.md` で作り直す**直すのは #1142 の本文である。** 下の表の行番号は、文を探す目印としてコピー（`issues/issue-1142-requirements.md`。2026-11-14）の行番号を書いた。本文の行番号はこれより 4 小さい。コピーは設計レビューの節より前に作られたため、最後の 2 行の文はコピーに無く、本文の行番号を書いた。
 
-| 写しの行 | 本文の節 | 取り消す文 | 置き換えの文 |
+表の「前提 1」は #1142 の前提 1（エントリポイント・プランの JSON・状態ファイルを変えない。2026-11-13 に「後方互換を意識しない」へ改めた）で、決定 73〜79 は系統 `next` の決定である。
+
+| コピーの行 | 本文の節 | 取り消す文 | 置き換えの文 |
 | ---: | --- | --- | --- |
 | 316 | 受け入れ条件 | 「エントリポイントを起動する形（`python3 <パス>`）は変わらず」 | 「エントリポイントは `bin/ndf` の 1 本で、副命令で呼び分ける（作り直しの決定 76・X0）」 |
 | 361 | 影響の「公開インタフェース」 | 「エントリポイントは変えない（前提 1）。変えるエントリポイントは設計が挙げ、移行の間は古い形も動く」 | 「エントリポイントは `bin/ndf` の副命令へ変え、古い形は残さない（前提 1 を 2026-11-13 に改めた・決定 76）」 |
@@ -210,7 +228,7 @@
 | —（本文 552） | 設計レビューの表の G の行 | （取り消さない） | 「設計 PR <この PR の番号> で解いた」を足す |
 | —（本文 554） | 依存ライブラリの方針 | （取り消さない） | 「規則と例外は #3347 の決定 106」を足す |
 
-**#3092 の本文**: 非機能の「システム環境」の「DBOS は 3.1.0 の系列のまま据え置く（前提 7）」に取り消し線を引く（置き換えの文は「受け入れ条件の行き先」の表の最後の行）。
+**#3092 の本文**: 非機能の「システム環境」の「DBOS は 3.1.0 の系列のまま据え置く（前提 7）」に取り消し線を引く（前提 7 は #3092 の、今の DBOS の版と依存のまま作る前提）（置き換えの文は「受け入れ条件の行き先」の表の最後の行）。
 
 ## 承認の後に直す Issue の本文
 
@@ -232,8 +250,8 @@
 | --- | --- | --- | --- | --- | --- |
 | `target(releases, now)` | 純粋な関数 | 版 → 最初のアップロードの日時の辞書・今の時刻 | 上げる先の版の文字列 | 無し | 決定 106 の表の上 4 行。`STALE_DAYS = 365`。ファイルの無い版と PEP 440 で読めない版は数えない |
 | `fetch(name)` | 外部呼び出し | パッケージ名 | `releases` の辞書 | PyPI の JSON API を 1 回読む | 失敗は `warnings` に載せ、その行を「分からない」にする |
-| `outdated(project, now)` | 外部呼び出し | プロジェクトのディレクトリ | 行ごとに `name`・`current`・`target`・`state`（`latest`・`behind`・`held`・`unknown`）・`hold_reason` | 無し | `held` は `[tool.ndf.deps.hold]` に名前がある行。止めている相手の制約を外した版で `uv lock --dry-run` が解決できたら `behind` にする |
-| `bump(project, names)` | 書き込み | プロジェクト・名前の列（空なら `behind` のすべて） | 上げた行と、解決できずに戻した行 | `pyproject.toml` の `==` の版を書き換え、`uv lock` を打つ | `uv lock` が失敗したら `pyproject.toml` と `uv.lock` を元へ戻し、`uv` の出力から止めている相手を結果に載せる |
+| `outdated(project, now)` | 外部呼び出し | プロジェクトのディレクトリ | 行ごとに `name`・`current`・`target`・`state`（`latest`・`behind`・`held`・`unknown`）・`hold_reason` | 無し | `held` は `[tool.ndf.deps.hold]` に名前がある行。固定させている相手の制約を外した版で `uv lock --dry-run` が解決できたら `behind` にする |
+| `bump(project, names)` | 書き込み | プロジェクト・名前の列（空なら `behind` のすべて） | 上げた行と、解決できずに戻した行 | `pyproject.toml` の `==` の版を書き換え、`uv lock` を打つ | `uv lock` が失敗したら `pyproject.toml` と `uv.lock` を元へ戻し、`uv` の出力から固定させている相手を結果に載せる |
 
 ### `checks/child_deps.py`（X1+）
 
@@ -242,14 +260,14 @@
 | `load_children(path)` | 読み取り | `children.json` | 子の表 | 無し | 形が違えば `CheckError` |
 | `owner(module, children)` | 純粋な関数 | `ndf.<…>` のモジュール名 | 持ち主の子か `None` | 無し | 最も長く一致した `packages` の子 |
 | `closure(child, children)` | 純粋な関数 | 子 | `needs` の推移の閉包 | 無し | 輪があれば `CheckError` |
-| `check(scope, children)` | 純粋な関数 | X1 の構文木の集まり | `Finding` の列 | 無し | IG1（import の向き）・IG2（順番とレーン）・持ち主の無いサブパッケージ |
+| `check(scope, children)` | 純粋な関数 | 検査（`ndf check`）が作る構文木の集まり | `Finding` の列 | 無し | IG1（import の向き）・IG2（順番とレーン）・持ち主の無いサブパッケージ |
 
 ## 異常系の処理
 
 | 関数 | 異常 | 扱い |
 | --- | --- | --- |
 | `plugin-deps.py outdated` | PyPI に届かない | その行を `unknown` にし、`warnings` に載せる。週 1 回のジョブは Issue を書かずに終える |
-| `plugin-deps.py bump` | `uv lock` が解決できない | 宣言と lock を元へ戻し、終了コード 1。結果に止めている相手を載せる |
+| `plugin-deps.py bump` | `uv lock` が解決できない | 宣言と lock を元へ戻し、終了コード 1。結果に固定させている相手を載せる |
 | 週 1 回のジョブ | 印を持つ Issue が 2 件以上ある | 最も古い 1 件を書き直し、ほかを閉じる |
 | 一時コピーのジョブ | I1 の指摘の集合が元と違う | 差分（元だけ・コピーだけ）を出して落ちる |
 | `child-deps` | `children.json` が無い・形が違う | 検査を止める（止まった理由 `config_broken`） |
@@ -278,8 +296,8 @@
 
 | 対象 | 観点 |
 | --- | --- |
-| `plugin-deps.target` | 5 つの場合（安定版が新しい・古くてプレリリースあり・古くてプレリリースなし・安定版なし・365 日ちょうど）で上げる先が決まる |
-| `plugin-deps.outdated` | `hold` の行が `held` になり、止めている相手の制約が外れた記録の応答では `behind` になる |
+| `plugin-deps.target` | 上げる先の 4 つの場合（安定版が新しい・古くてプレリリースあり・古くてプレリリースなし・安定版なし）と境界の 365 日ちょうど（「以内」に入る）で上げる先が決まる |
+| `plugin-deps.outdated` | `hold` の行が `held` になり、固定させている相手の制約が外れた記録の応答では `behind` になる |
 | `plugin-deps.bump` | 解決できない上げ方で `pyproject.toml` と `uv.lock` が元のまま残る |
 | `child_deps.check` | 閉包の外の import・持ち主の無いサブパッケージ・同じレーンと順番に 3 本・順番の逆転を、それぞれ指摘する。閉包の中の推移の import は指摘しない |
 | I1 | 名前を `ndf11` にした後、`"ndf-next"` の文字列は落ちず、`".ndf/"`・`"/ndf:"`・`"ndf11"` は落ちる。`FIXED_WORDS` の定義の行だけは落ちない |
