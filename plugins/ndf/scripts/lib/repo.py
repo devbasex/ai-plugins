@@ -6,12 +6,15 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import branch_flow
 import decl
+import limits
 import proc
 from closing import defer_closing
 
@@ -165,6 +168,54 @@ def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
     if _branch_value(wt.get("production_branch")) or root is None:
         return production_of(wt, None)
     return production_of(wt, default_branch(root))
+
+
+# 本番チャネルを取り込み直す上限（秒）。応答の無い origin でプランの組み立てを止め続けないため（#3308）
+PRODUCTION_FETCH_TIMEOUT = limits.seconds("repo.production-fetch")
+
+
+def _fetch_tracking(root, name: str) -> bool:
+    """origin の `refs/heads/<name>` を `refs/remotes/origin/<name>` へ取り込み直す。成否を返す。
+
+    `main` 宛の検査（`scripts/check-pr-base.sh`）と同じ refspec を使う。失敗しても手元の追跡ブランチは変わらない。"""
+    try:
+        p = proc.run(
+            ["git", "-C", str(root), "fetch", "-q", "origin", f"refs/heads/{name}:refs/remotes/origin/{name}"],
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=PRODUCTION_FETCH_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0
+
+
+def production_decl(root, production: str | None) -> tuple[dict | None, str]:
+    """本番チャネルの宣言（`origin/<本番チャネル>` の先頭の `.ndf/worktree.json`）。#3308 の前提 1。
+
+    読めたら `(宣言, 読んだ場所)`、読めなければ `(None, 読めない理由)`。取り込み直しに失敗しても手元の追跡ブランチを読む
+    （前提 4）。読めないときの扱いは `main` 宛の検査と同じく、呼び手が宣言の無いリポジトリとして組む（決定 3）。"""
+    if not production:
+        return None, "本番チャネルの名前が決まらない"
+    if root is None:
+        return None, "宣言を探す木に git の木が無い"
+    _fetch_tracking(root, production)
+    ref = f"origin/{production}"
+    if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}") is None:
+        return None, f"{ref} が無い"
+    text = proc.git_out(root, "show", f"refs/remotes/{ref}:{WORKTREE_DECL.as_posix()}")
+    if text is None:
+        return None, f"{ref} に {WORKTREE_DECL.as_posix()} が無い"
+    where = f"{ref} の {WORKTREE_DECL.as_posix()}"
+    try:
+        wt = json.loads(text)
+    except ValueError:
+        wt = None
+    if not isinstance(wt, dict):
+        return None, f"{where} を JSON のオブジェクトとして読めない"
+    if wt.get("version") != 1:
+        return None, f"{where} の version が 1 でない"
+    return wt, where
 
 
 def resolved_flow(root, base: str | None = None, production: str | None = None) -> branch_flow.ResolvedFlow:
