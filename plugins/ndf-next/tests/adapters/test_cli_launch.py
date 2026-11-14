@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import agents, claude, cli
+from ndf.adapters import agents, cli
 
 MINIMAL_HEAD = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
 
@@ -58,23 +58,40 @@ def test_launch_args_refuses_arguments(capsys):
     assert json.loads(capsys.readouterr().out)["cause"]["kind"] == "invalid"
 
 
-def test_call_claude_reads_structured_output(tmp_path):
+def fake_claude(tmp_path: Path, stdout: str) -> Path:
+    """問いを読み捨て、`stdout` をそのまま標準出力へ書く偽の claude。"""
+    out = tmp_path / "claude.stdout"
+    out.write_text(stdout)
     fake = tmp_path / "claude"
-    payload = {"result": "", "structured_output": {"decision": "fix"}, "total_cost_usd": 0.25}
-    fake.write_text(f"#!/bin/sh\ncat > /dev/null\necho '{json.dumps(payload)}'\n")
+    fake.write_text(f"#!/bin/sh\ncat > /dev/null\ncat '{out}'\n")
     fake.chmod(0o755)
+    return fake
+
+
+def test_call_claude_reads_structured_output(tmp_path):
+    payload = {"result": "", "structured_output": {"decision": "fix"}, "total_cost_usd": 0.25}
+    fake = fake_claude(tmp_path, json.dumps(payload))
 
     got = cli.call_claude([str(fake)], "問い", 30)
 
     assert got == cli.ClaudeReply(True, {"decision": "fix"}, "", 0.25)
 
 
-def test_call_claude_failures_are_not_ok(tmp_path):
+def test_call_claude_missing_command_is_not_ok(tmp_path):
     assert not cli.call_claude([str(tmp_path / "missing")], "問い", 30).ok
-    assert not claude._parse_reply("not json").ok
-    assert not claude._parse_reply(json.dumps({"is_error": True, "result": "boom"})).ok
-    assert claude._parse_reply(json.dumps({"result": '{"a": 1}'})).answer == {"a": 1}
-    assert claude._parse_reply(json.dumps({"result": "fix です"})).answer is None
+
+
+@pytest.mark.parametrize("stdout", ["not json", json.dumps({"is_error": True, "result": "boom"})])
+def test_call_claude_failures_are_not_ok(tmp_path, stdout):
+    assert not cli.call_claude([str(fake_claude(tmp_path, stdout))], "問い", 30).ok
+
+
+@pytest.mark.parametrize(
+    ("stdout", "answer"),
+    [(json.dumps({"result": '{"a": 1}'}), {"a": 1}), (json.dumps({"result": "fix です"}), None)],
+)
+def test_call_claude_reads_json_in_result_text(tmp_path, stdout, answer):
+    assert cli.call_claude([str(fake_claude(tmp_path, stdout))], "問い", 30).answer == answer
 
 
 def test_agent_paths_at_names_files_next_to_stem():
