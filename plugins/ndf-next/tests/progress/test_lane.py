@@ -339,3 +339,57 @@ def _lane_rows(*states):
 )
 def test_touch_overlap_errors_as_they_are_now(view, rows, errors):
     assert lane.plan_errors(view, rows) == errors
+
+
+# --- 行の前後の鎖（レーンの中の並びと after）の現状固定 ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("view", "rows", "errors"),
+    [
+        # 鎖は after をたどって伝わる（c は b の後、b は a/r1 の後）。a/r2 は c と同時に動き得る
+        (
+            _view(_spec("a"), _spec("b", ("src/b",), after=("a/r1",)), _spec("c", after=("b",))),
+            {"a": _lane_rows("pending", "pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
+            ["同時に動き得る行 a/r2・c/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # レーンを指す after はそのレーンの最後の行の後につなぐ
+        (
+            _view(_spec("a"), _spec("b", ("src/b",), after=("a",)), _spec("c", after=("b",))),
+            {"a": _lane_rows("pending", "pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
+            [],
+        ),
+        # 間のレーンに行が無いと、鎖はそこで切れる（現状の振る舞い。間のレーンの後の行は前のレーンと同時に動き得ると読む）
+        (
+            _view(_spec("a"), _spec("b", ("src/b",), after=("a",)), _spec("c", after=("b",))),
+            {"a": _lane_rows("pending"), "b": [], "c": _lane_rows("pending")},
+            ["同時に動き得る行 a/r1・c/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # 間のレーンの行が渡されないときも同じ
+        (
+            _view(_spec("a"), _spec("b", ("src/b",), after=("a",)), _spec("c", after=("b",))),
+            {"a": _lane_rows("pending"), "c": _lane_rows("pending")},
+            ["同時に動き得る行 a/r1・c/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # after を複数持つレーンは、それぞれの後につなぐ
+        (
+            _view(_spec("a"), _spec("b", ("src/b",)), _spec("c", after=("a", "b"))),
+            {"a": _lane_rows("pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
+            [],
+        ),
+        # 終わった行も鎖の節になる（a/r1 は完了でも b はその後で、a/r2 とは同時に動き得る）
+        (
+            _view(_spec("a"), _spec("b", after=("a/r1",))),
+            {"a": _lane_rows("completed", "pending"), "b": _lane_rows("pending")},
+            ["同時に動き得る行 a/r2・b/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # 計画に無いレーンの行は鎖に入っても組には入らない
+        (
+            _view(_spec("a"), _spec("b")),
+            {"a": _lane_rows("pending"), "b": _lane_rows("pending"), "z": _lane_rows("pending")},
+            ["同時に動き得る行 a/r1・b/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+    ],
+)
+def test_row_order_chain_as_it_is_now(view, rows, errors):
+    assert lane.plan_errors(view, rows) == errors
