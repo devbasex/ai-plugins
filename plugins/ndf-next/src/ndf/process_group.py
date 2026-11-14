@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 
 from ndf.contracts import limits
 
@@ -22,6 +23,11 @@ STOP_TREE = "procs.stop-tree"
 def alive(proc: subprocess.Popen, pgid: int) -> bool:
     """組 `pgid` に生きた成員が残るか。直接の子は先に回収し、終わった子（ゾンビ）を成員に数えない。"""
     proc.poll()
+    return group_alive(pgid)
+
+
+def group_alive(pgid: int) -> bool:
+    """組 `pgid` に成員が残るか（自分の子でない組にも使う。回収されていない終わった成員も数える）。"""
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:  # noqa: NDF401 外部コマンド: 組の成員が残っていない
@@ -46,8 +52,7 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
     （シグナルを組へ転送した後に呼ぶ形。先頭が回収された後でも、組の番号＝先頭の pid で残りを見る）。
     猶予の間に終わったかは組全体で見る（SIGTERM を無視する子孫が残れば SIGKILL を送る）。
     """
-    grace = limits.seconds(grace_key)
-    interval = limits.value(grace_key, "interval")
+    grace, interval = _grace(grace_key)
     pgid = _target_group(proc, send_first)
     if pgid is None:
         return
@@ -67,15 +72,44 @@ def stop_group(proc: subprocess.Popen, *, grace_key: str = STOP_TREE, send_first
 
     if send_first:
         send(signal.SIGTERM)
+    if _wait_or_kill(pgid, remaining_members, send, grace, interval):
+        _reap(proc, grace)
+
+
+def stop_detached_group(pgid: int, *, grace_key: str = STOP_TREE) -> None:
+    """自分の子でない組（前の回の親が落ちて残した組）を、`stop_group` と同じ SIGTERM から SIGKILL までの手順で止める。
+
+    先頭は自分の子でないので回収しない（回収は引き取った親が行う）。組が既に終わっていれば何もしない。
+    """
+    if not group_alive(pgid):
+        return
+    signal_group(pgid, signal.SIGTERM)
+    grace, interval = _grace(grace_key)
+    _wait_or_kill(
+        pgid,
+        lambda: group_alive(pgid),
+        lambda sig: signal_group(pgid, sig),
+        grace,
+        interval,
+    )
+
+
+def _grace(grace_key: str) -> tuple[float, float]:
+    """上限の表の `grace_key` の猶予の秒と、終わったかを見る間隔。"""
+    return limits.seconds(grace_key), limits.value(grace_key, "interval")
+
+
+def _wait_or_kill(pgid: int, remaining: Callable[[], bool], send: Callable[[int], None], grace: float, interval: float) -> bool:
+    """猶予の間 `remaining` が偽になるのを待ち、残れば SIGKILL を送る。SIGKILL を送ったかを返す。"""
     deadline = time.monotonic() + grace
-    while remaining_members():
+    while remaining():
         left = deadline - time.monotonic()
         if left <= 0:
             log.warning("猶予の間に終わらないプロセスの組へ SIGKILL を送る", extra={"pgid": pgid, "grace_seconds": grace})
             send(signal.SIGKILL)
-            _reap(proc, grace)
-            return
+            return True
         time.sleep(min(interval, left))
+    return False
 
 
 def _target_group(proc: subprocess.Popen, send_first: bool) -> int | None:

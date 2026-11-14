@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import socket
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -15,6 +17,7 @@ import pytest
 import sqlalchemy as sa
 
 from ndf.core import durable
+from ndf.core import durable_locks as locks
 
 from ._durable_helpers import run_key_process as _run
 
@@ -128,3 +131,20 @@ def test_url_sweep_runs_once_a_day(pg_url, root):
     assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=1)).skipped
     with durable.maint_lock(root, wait=True):
         assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=25)).skipped
+
+
+def test_waiting_run_lock_times_out_with_the_owner(pg_url, root, monkeypatch):
+    """待つ鍵のロックは上限で止まり、持ち主（接続の application_name のホストと pid）を添える（B11）。"""
+    monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.3)
+    with durable.run_lock(root, "busy", pg_url):
+        with pytest.raises(durable.StoreInUse) as err, durable.run_lock(root, "busy", pg_url):
+            pass
+    assert f"ndf-lock {socket.gethostname()} {os.getpid()}" in str(err.value)
+
+
+def test_ndf_connections_carry_keepalive_and_idle_session_timeout(pg_url):
+    with locks.open_engine(pg_url) as engine, engine.connect() as conn:
+        idle = conn.execute(sa.text("SHOW idle_session_timeout")).scalar()
+        keepalive = conn.connection.dbapi_connection.info.get_parameters()
+    assert idle == f"{locks.PG_IDLE_SESSION_MS // 60000}min"
+    assert keepalive["keepalives_idle"] == str(locks.PG_KEEPALIVE["keepalives_idle"])

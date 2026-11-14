@@ -100,3 +100,20 @@ def test_alive_counts_members_without_permission(monkeypatch):
 
     monkeypatch.setattr(os, "killpg", refuse)
     assert process_group.alive(proc, 12345)
+
+
+def test_a_detached_group_is_stopped_by_pid_alone(short_grace):
+    """自分の子でない組（前の回の親が残した組）も、組の番号だけで SIGTERM から SIGKILL まで止める（B10）。"""
+    proc = _start(STUBBORN)
+    try:
+        process_group.stop_detached_group(proc.pid)
+        waits.wait_until(lambda: not process_group.alive(proc, proc.pid), what="組全体の終了")
+    finally:
+        _cleanup(proc)
+
+
+def test_stopping_a_finished_detached_group_does_nothing():
+    proc = subprocess.Popen(["true"], start_new_session=True)
+    proc.wait()
+    process_group.stop_detached_group(proc.pid)
+    assert not process_group.group_alive(proc.pid)
