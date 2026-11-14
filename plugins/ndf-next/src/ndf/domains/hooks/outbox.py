@@ -14,12 +14,17 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from ndf.domains.hooks import tables
 
 SENDER_MODULE = "ndf.domains.hooks.sender"
 PID_FILE = ".sender.pid"
+
+
+def notify_configured(env: Mapping[str, str]) -> bool:
+    """通知の宛先がそろっているか（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）。"""
+    return bool(env.get("SLACK_BOT_TOKEN") and env.get("SLACK_CHANNEL_ID"))
 
 
 def outbox_dir(state_dir: Path) -> Path:

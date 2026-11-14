@@ -27,7 +27,7 @@ def check(ctx, svc) -> Verdict:
     lane = signals.organizer_question_path(ctx.env)
     if lane is not None and signals.write_question(lane, ctx.session_id, ctx.payload, wait):
         forwarded.append("organizer")
-    if ctx.env.get("SLACK_BOT_TOKEN") and ctx.env.get("SLACK_CHANNEL_ID"):
+    if outbox.notify_configured(ctx.env):
         outbox.enqueue(svc.state_dir, "question", {"text": _first_question(ctx.tool_input), "cwd": ctx.cwd, "session_id": ctx.session_id})
         outbox.kick(svc.state_dir)
         forwarded.append("notify")

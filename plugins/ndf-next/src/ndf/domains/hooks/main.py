@@ -156,16 +156,12 @@ def _session_start(state_dir: Path) -> None:
     env.touch_used(ident)
 
 
-def notify_configured() -> bool:
-    return bool(os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_CHANNEL_ID"))
-
-
 def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
     """差し戻しの上限で通した Stop の待ちの知らせを送信待ちへ書く（決定 92）。"""
-    if not notify_configured():
-        return
     from ndf.domains.hooks import outbox
 
+    if not outbox.notify_configured(os.environ):
+        return
     shown = reason or ""  # noqa: NDF501 ファイル: 理由の無い差し戻しは空
     text = f"差し戻しの上限で止めずに通した: {shown}"
     outbox.enqueue(state_dir, "wait", {"text": text, "cwd": ctx.cwd, "session_id": ctx.session_id})
