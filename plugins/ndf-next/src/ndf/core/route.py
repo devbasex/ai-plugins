@@ -202,23 +202,28 @@ def _fill(value: Any, values: Mapping[str, Value]) -> Any:
     return value
 
 
-def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
-    """差し込みの値を決める（与えた値 → 既定）。雛形に無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
-    defs = params()
+def _check_unknown(t: Template, given: Mapping[str, Value]) -> None:
     unknown = sorted(set(given) - set(t.params))
     if unknown:
         raise RouteError(f"雛形 {t.name} に無い差し込み: {', '.join(unknown)}")
-    values: dict[str, Value] = {}
-    missing = []
-    for name in t.params:
-        p = defs[name]
-        value = given[name] if name in given else p.default
-        if value is None:
-            missing.append(name)
-        elif isinstance(value, list) != p.is_list:
-            raise RouteError(f"差し込み {name} は{'並び' if p.is_list else '文字列'}で渡す")
-        else:
-            values[name] = value
+
+
+def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) -> Optional[Value]:
+    """差し込み 1 つの値（与えた値 → 既定）。欠けていれば None、並びかの食い違いは `RouteError`。"""
+    p = defs[name]
+    value = given[name] if name in given else p.default
+    if value is not None and isinstance(value, list) != p.is_list:
+        raise RouteError(f"差し込み {name} は{'並び' if p.is_list else '文字列'}で渡す")
+    return value
+
+
+def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
+    """差し込みの値を決める（与えた値 → 既定）。雛形に無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
+    defs = params()
+    _check_unknown(t, given)
+    found = {name: _value_of(name, given, defs) for name in t.params}
+    values = {name: value for name, value in found.items() if value is not None}
+    missing = [name for name, value in found.items() if value is None]
     if missing:
         raise RouteError(f"雛形 {t.name} の差し込みの値が無い: {', '.join(missing)}")
     return values
