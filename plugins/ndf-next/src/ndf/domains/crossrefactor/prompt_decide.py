@@ -20,6 +20,9 @@ from typing import Any
 from ndf.domains.crossrefactor import flaky_decide
 from ndf.domains.crossrefactor.symbols_decide import Touched
 
+# コードを書く工程の結果の形の指示（前置きの改行・空白は呼び出し側が付ける）
+COMMIT_RESULT = '結果は {"commit": "<最後のコミット>"}。'
+
 
 def item_text(item: Mapping[str, Any]) -> str:
     return f"{item['id']}（{item['path']} の {item['symbol']}）: {item['title']}"
@@ -53,10 +56,7 @@ def add_tests(item: Mapping[str, Any]) -> str:
 
 
 def implement(item: Mapping[str, Any]) -> str:
-    return (
-        f"{item_text(item)} を、振る舞いを変えずに直してコミットする（push しない）。ほかの関数は変えない。"
-        ' 結果は {"commit": "<最後のコミット>"}。'
-    )
+    return f"{item_text(item)} を、振る舞いを変えずに直してコミットする（push しない）。ほかの関数は変えない。 " + COMMIT_RESULT
 
 
 def fix(item: Mapping[str, Any], own: Iterable[str]) -> str:
@@ -66,7 +66,8 @@ def fix(item: Mapping[str, Any], own: Iterable[str]) -> str:
         f"{item_text(item)} の変更で、次の検査かテストが落ちた（<suite>:<ファイル>）。この項目の変更の中で直してコミットする。\n"
         + "\n".join(f"- {k}" for k in sorted(own))
         + hint
-        + '\n結果は {"commit": "<最後のコミット>"}。'
+        + "\n"
+        + COMMIT_RESULT
     )
 
 
@@ -85,12 +86,13 @@ def flaky(pending: Mapping[str, Any]) -> str:
         f"鍵ごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <鍵>` を付ける（push しない）。\n"
         + "\n".join(f"- {k}" for k in pending["keys"])
         + back
-        + '\n結果は {"commit": "<最後のコミット>"}。'
+        + "\n"
+        + COMMIT_RESULT
     )
 
 
 def final_fix(pr: int, scope: Sequence[str], failed: Sequence[str]) -> str:
     return (
         f"PR #{pr} の CI で次のテストが落ちた。リファクタリング計画の対象範囲（{', '.join(scope)}）の中だけを変えて直し、"
-        "コミットする（push しない）。\n" + "\n".join(f"- {f}" for f in failed) + '\n結果は {"commit": "<最後のコミット>"}。'
+        "コミットする（push しない）。\n" + "\n".join(f"- {f}" for f in failed) + "\n" + COMMIT_RESULT
     )
