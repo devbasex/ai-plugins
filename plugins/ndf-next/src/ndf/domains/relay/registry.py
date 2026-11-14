@@ -115,15 +115,14 @@ def _busy_dirs(root: Path) -> list[Path]:
 
 def running(state_dir: Path) -> list[hub_decide.Running]:
     """この NDF のラッパーのうち動いているもの。"""
-    root = wrappers_dir(state_dir)
-    dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
-    out = []
-    for d in dirs:
-        if lock_busy(d / LOCK_FILE):
-            state = read_state(d)
-            version = state.get("version") if state else None
-            out.append(hub_decide.Running(d.name, version if isinstance(version, str) else None))
-    return out
+    return [hub_decide.Running(d.name, _version(d)) for d in _busy_dirs(wrappers_dir(state_dir))]
+
+
+def _version(directory: Path) -> Optional[str]:
+    """ラッパーの状態に書かれた版。状態が無いか版が文字でなければ None。"""
+    state = read_state(directory)
+    version = state.get("version") if state else None
+    return version if isinstance(version, str) else None
 
 
 def legacy_root(environ: Mapping[str, str]) -> Path:
