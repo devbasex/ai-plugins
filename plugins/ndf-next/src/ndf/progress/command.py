@@ -288,18 +288,26 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
         return out
 
 
+# 付加情報を持たず、止まった理由の語だけが決まる例外の種類（前から引く）
+_CAUSES: tuple[tuple[type[Exception], str], ...] = (
+    (contracts.ContractError, "invalid"),
+    (GitError, "invalid"),
+    (identity.IdentityError, "config_broken"),
+)
+
+
 def _stopped_from(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, model.Refused):
         metrics = {"current_id": exc.current_id} if exc.current_id else {}
         return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
     if isinstance(exc, durable.StoreStopped):
         return result.stopped(TOOL, exc.kind, str(exc), items=[{"path": str(p)} for p in exc.paths])
+    # WorkflowDefError は ContractError の子なので、理由の語だけの表より前で受ける
     if isinstance(exc, definition.WorkflowDefError):
         return result.stopped(TOOL, "invalid", str(exc), items=[{"error": e} for e in exc.errors])
-    if isinstance(exc, contracts.ContractError | GitError):
-        return result.stopped(TOOL, "invalid", str(exc))
-    if isinstance(exc, identity.IdentityError):
-        return result.stopped(TOOL, "config_broken", str(exc))
+    for kind, cause in _CAUSES:
+        if isinstance(exc, kind):
+            return result.stopped(TOOL, cause, str(exc))
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
 
 
