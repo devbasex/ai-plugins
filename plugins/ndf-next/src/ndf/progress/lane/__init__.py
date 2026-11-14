@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -123,8 +123,8 @@ def read_view(conn: sa.Connection, plan_id: str) -> tuple[PlanView, dict[str, li
     return view, folded(read_lanes(conn, view))
 
 
-def _new_key(events: list[model.Event], drafts: Iterable[model.EventDraft]) -> str:
-    added = [e.draft for e in events if e.draft.kind == "row_added"] + [d for d in drafts if d.kind == "row_added"]
+def _new_key(events: list[model.Event]) -> str:
+    added = [e.draft for e in events if e.draft.kind == "row_added"]
     return f"{ROW_PREFIX}{len(added) + 1}"
 
 
@@ -211,7 +211,7 @@ class RowChange:
 def add_row(conn: sa.Connection, plan_id: str, lane: str, inp: dict[str, Any], change: RowChange) -> str:
     """順番表へ行を足す（未着手）。足した行の鍵を返す。"""
     view, _ = _lane_rows(conn, plan_id, lane)
-    key = _new_key(store.read_events(conn, view.lanes[lane].table_id), [])
+    key = _new_key(store.read_events(conn, view.lanes[lane].table_id))
     payload = {"input": inp, "index": change.index}
     checked_write(conn, plan_id, lane, [model.EventDraft("row_added", change.actor, key, reason=change.reason, payload=payload)])
     return key
