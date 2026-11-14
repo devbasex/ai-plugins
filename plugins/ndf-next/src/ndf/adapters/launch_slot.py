@@ -137,9 +137,16 @@ def gate(agent: str, *, cwd: Optional[Path] = None, env: Optional[Mapping[str, s
     """起動の前置き: 学習に使わない設定の控えを読み、重い起動の枠を取る。起動しないときは `NotLaunched`。
 
     `env` は起動先へ渡す環境（既定は今の環境）で、控えを確かめた認証の文脈と照らす。子へ足す環境変数を渡す。
+    控えは枠を待つ前と、取った後の起動の直前に読む（待つ間に控えが期限を過ぎるか、拒否へ変わることがある）。
+    取った後に拒否へ変われば、枠を返して `NotLaunched` を送る。
     """
+    _refuse_if_needed(agent, env)
+    with held(agent, cwd=cwd, environ=env) as slot_env:
+        _refuse_if_needed(agent, env)
+        yield slot_env
+
+
+def _refuse_if_needed(agent: str, env: Optional[Mapping[str, str]]) -> None:
     why = training_cache.refusal(agent, env=env)
     if why is not None:
         raise NotLaunched(why)
-    with held(agent, cwd=cwd, environ=env) as slot_env:
-        yield slot_env

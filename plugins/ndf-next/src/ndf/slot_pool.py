@@ -8,7 +8,7 @@
 `pool.lock` の中で行い、2 つの起動が同じ空きを数えない。
 
 枠を持つ起動（LLM の CLI）の子孫は、環境変数 `NDF_LAUNCH_SLOT_PARENT` で親の枠を受け継ぐ。子孫が取る枠（CLI が
-動かすテスト）は親の重みを自分の重みに含めて数え、親の持つ分で自分を待たない（`take` の `absorbed`）。
+動かすテスト）は親の重みを自分の重みに含めて数え、親とほかの CLI の持つ分で待たない（`take` の `absorbed`）。
 
     taken = slot_pool.take(directory, capacity_mib, slot_pool.weight_mib("llm-cli"), {"pid": os.getpid()})
     if taken is not None:          # 空きが無ければ None（呼び手が待つ）
@@ -151,43 +151,58 @@ class Taken:
             self._lock.release()
 
 
-def _live_weights(directory: Path) -> tuple[int, set[int]]:
-    """生きた持ち主の重みの合計と、生きた持ち主の番号。重みの無い記述（書きかけ）は 0 と数える。"""
-    total, alive = 0, set()
+def _live_owners(directory: Path) -> dict[int, dict[str, object]]:
+    """生きた持ち主の番号と記述。記述が無い・書きかけなら空の記述とする。"""
+    owners: dict[int, dict[str, object]] = {}
     for path in directory.glob(f"{SLOT_PREFIX}*.lock"):
         index = slot_index(path)
         if index is None or not is_owned(directory, index):
             continue
-        alive.add(index)
-        total += _weight_of(directory, index)
-    return total, alive
+        owners[index] = read_json(slot_path(directory, index, ".json")) or {}
+    return owners
 
 
-def _weight_of(directory: Path, index: int) -> int:
-    """番号 `index` の記述の重み（MiB）。記述か重みが無い・整数でない（真偽値を含む）なら 0。"""
-    value = read_field(slot_path(directory, index, ".json"), WEIGHT_KEY)
+def _weight(description: Mapping[str, object]) -> int:
+    """記述の重み（MiB）。重みが無い・整数でない（真偽値を含む）なら 0（書きかけ）。"""
+    value = description.get(WEIGHT_KEY)
     return value if is_int(value) else 0
+
+
+def _counted(owners: Mapping[int, Mapping[str, object]], absorbed: int | None) -> dict[int, Mapping[str, object]]:
+    """取る判定で数える持ち主。親の枠 `absorbed` と、親と同じ種類（`kind`）のほかの持ち主は数えない。
+
+    子孫の重みは親の分を含み、ほかの同じ種類の起動（ほかの LLM の CLI）は配下のテストの重みで数えられる。
+    親の分やほかの CLI の分で待つと、CLI どうしが互いの配下のテストを待ち合って止まる。
+    """
+    if absorbed not in owners:
+        return dict(owners)
+    kind = owners[absorbed].get("kind")
+    return {
+        index: description
+        for index, description in owners.items()
+        if index != absorbed and (kind is None or description.get("kind") != kind)
+    }
 
 
 def held_mib(directory: Path) -> int:
     """置き場の生きた持ち主の重みの合計（MiB）。"""
-    return _live_weights(directory)[0]
+    return sum(_weight(description) for description in _live_owners(directory).values())
 
 
 def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object], *, absorbed: int | None = None) -> Taken | None:
     """重み `weight`（MiB）の枠を取る。生きた持ち主の重みと足して容量を超えれば None。
 
     持ち主が 1 つも無ければ容量を超える重みでも取る（重い起動 1 本が永く待たない）。`absorbed` は親の枠の番号で、
-    その重みは数えない（子孫の重みが親の分を含む。親の持つ分で子孫が自分を待たない）。
+    その重みと、親と同じ種類（`kind`）のほかの持ち主の重みは数えない（子孫の重みが親の分を含む。親やほかの CLI の
+    持つ分で子孫が待たない）。「持ち主が無ければ取る」も数える持ち主だけで見る。
     排他を待ちきれないときは `filelock.Timeout`、置き場へ書けないときは `OSError` を送る。
     """
     with lock(directory / POOL_LOCK).acquire(timeout=POOL_LOCK_SECONDS):
-        total, alive = _live_weights(directory)
-        if absorbed in alive:
-            total -= _weight_of(directory, absorbed)
-        if alive - {absorbed} and total + weight > capacity_mib:
+        owners = _live_owners(directory)
+        counted = _counted(owners, absorbed)
+        if counted and sum(_weight(description) for description in counted.values()) + weight > capacity_mib:
             return None
-        index, held = _lock_free_index(directory, alive)
+        index, held = _lock_free_index(directory, set(owners))
         taken = Taken(directory, index, weight, held)
         try:
             taken.describe(owner)

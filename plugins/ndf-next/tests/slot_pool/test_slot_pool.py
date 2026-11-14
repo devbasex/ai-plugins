@@ -42,6 +42,19 @@ def test_an_empty_pool_takes_a_launch_heavier_than_the_capacity(tmp_path):
     taken.release()
 
 
+def test_a_child_of_a_cli_does_not_wait_for_other_clis(tmp_path):
+    """CLI A・B が並んでも、A の配下のテストは B の重みで待たない（互いの配下のテストを待ち合わない）。"""
+    cli = {**OWNER, "kind": "llm-cli"}
+    a = slot_pool.take(tmp_path, 1024, 64, cli)
+    b = slot_pool.take(tmp_path, 1024, 64, cli)
+    assert a is not None and b is not None
+    child = slot_pool.take(tmp_path, 1024, 1024, OWNER, absorbed=a.index)
+    assert child is not None
+    assert slot_pool.take(tmp_path, 1024, 1024, OWNER, absorbed=b.index) is None  # テストの重みを持つ持ち主では待つ
+    for taken in (child, b, a):
+        taken.release()
+
+
 def test_owner_description_keeps_the_weight(tmp_path):
     taken = slot_pool.take(tmp_path, 1024, 256, OWNER)
     taken.describe({"started_at": 1.0})

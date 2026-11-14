@@ -106,3 +106,13 @@ def test_test_slot_under_a_cli_counts_the_cli_weight_as_its_own(pool, tmp_path):
         stranger = slots.GateOptions(environ={}, **{**options, "limits": test_limits.Limits(1, 1, 0)})
         with pytest.raises(slots.Stopped), slots.gate("pytest .", tmp_path, options=stranger):
             pytest.fail("CLI の外のテストが CLI の枠を数えずに取った")
+
+
+def test_gate_rechecks_the_cache_after_taking_the_slot(pool, monkeypatch):
+    """枠を待つ間に控えが拒否へ変われば、枠を返して起動しない。"""
+    answers = iter([None, "学習に使う設定へ変わった"])
+    monkeypatch.setattr(launch_slot.training_cache, "refusal", lambda agent, env=None: next(answers))
+    monkeypatch.setattr(launch_slot.machine, "available_mib", lambda: PLENTY_MIB)
+    with pytest.raises(launch_slot.NotLaunched, match="学習に使う"), launch_slot.gate("codex"):
+        pytest.fail("拒否へ変わった後に起動した")
+    assert slot_pool.held_mib(pool) == 0
