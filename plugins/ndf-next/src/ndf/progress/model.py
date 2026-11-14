@@ -415,7 +415,7 @@ def check_order(steps: list[StepDef]) -> list[str]:
     return _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps)
 
 
-def check_same_range(stages: Iterable[StageDef]) -> list[str]:
+def check_unique_stage_names(stages: Iterable[StageDef]) -> list[str]:
     """同じ工程の名前を 2 つの工程が受け持たない（工程の定義の登録の決まり）。"""
     return [f"工程の名前 {n} を 2 つの工程が受け持つ" for n in contracts.duplicates(s.name for s in stages)]
 

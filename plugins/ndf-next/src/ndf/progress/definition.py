@@ -285,7 +285,7 @@ def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> model.S
     if errs:
         raise WorkflowDefError(errs)
     stages = tuple(_stage_def(stage_docs[ref]) for _, ref in called)
-    errs = model.check_same_range(stages) + model.check_order([st for s in stages for st in s.steps])
+    errs = model.check_unique_stage_names(stages) + model.check_order([st for s in stages for st in s.steps])
     if errs:
         raise WorkflowDefError(errs)
     doc = mode_doc["document"]
