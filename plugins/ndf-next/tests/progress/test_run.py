@@ -17,7 +17,7 @@ from ndf import identity
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
-from ndf.progress import command, definition, invoke, model, run, store
+from ndf.progress import command, definition, invoke, model, run, store, table
 
 ISSUE = 3092
 
@@ -535,7 +535,7 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     monkeypatch.setattr(store, "append_events", always)
     with pytest.raises(store.Conflict):
         run.append(st, tid, lambda v: builds.append(v) or _started(v))
-    assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
+    assert calls["n"] == table.APPEND_ATTEMPTS and len(builds) == table.APPEND_ATTEMPTS
 
 
 def test_append_lets_refusals_through_without_retrying(repo, st, capsys):

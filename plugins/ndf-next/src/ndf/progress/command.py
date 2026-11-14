@@ -29,13 +29,11 @@ from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import durable
-from ndf.progress import definition, model, stages, store
+from ndf.progress import definition, model, stages, store, table
 
 # 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
-# 番号のぶつかり（同時の追記）で読み直して書き直す回数
-APPEND_ATTEMPTS = 3
 PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
@@ -110,26 +108,15 @@ def _declaration_errors(value: Any) -> list[str]:
 
 
 def _current(conn: Any, table_id: str) -> tuple[int, stages.Snapshot, list[model.Event]]:
-    if store.read_table(conn, table_id) is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    rev, raw = store.read_definition(conn, table_id)
-    return rev, stages.snapshot_from(raw), store.read_events(conn, table_id)
+    v = table.view(conn, table_id)
+    return v.rev, v.snap, v.events
 
 
 def _append(
     st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
 ) -> list[int]:
-    """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
-    for attempt in range(1, APPEND_ATTEMPTS + 1):
-        try:
-            with store.transaction(st) as conn:
-                rev, snap, events = _current(conn, table_id)
-                drafts = build(rev, snap, events)
-                return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
-        except store.Conflict:
-            if attempt == APPEND_ATTEMPTS:
-                raise
-    raise AssertionError("到達しない")
+    """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す（`table.append`）。"""
+    return table.append(st, table_id, lambda v: build(v.rev, v.snap, v.events))
 
 
 def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
