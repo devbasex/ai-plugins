@@ -7329,6 +7329,24 @@
       "context": "ndf-workflow",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
+    },
+    {
+      "term": "マシンに依らない条件",
+      "context": "ndf-workflow",
+      "meaning": "同じ入力なら、どのマシンで実行しても同じ合否になる受け入れ条件。正しさ・回数と計算量・同じマシンの上で測った基準との相対の 3 つの形（非機能の条件の書き方）",
+      "pending_source": "issues/issue-3436-requirements.md"
+    },
+    {
+      "term": "時間で区切った負荷試験",
+      "context": "ndf-workflow",
+      "meaning": "「N 分流す」のように、流す時間と同時に動かす本数を決めて所要や失敗を測る試験。結果がマシンのスペックで変わるため、受け入れ条件に置かない",
+      "pending_source": "issues/issue-3436-requirements.md"
+    },
+    {
+      "term": "測る場所",
+      "context": "ndf-workflow",
+      "meaning": "秒数の上限を測るマシン。CI のランナーのように、スペックが設定で固定された場所に限る。共有の開発機は当たらない",
+      "pending_source": "issues/issue-3436-requirements.md"
     }
   ]
 }
