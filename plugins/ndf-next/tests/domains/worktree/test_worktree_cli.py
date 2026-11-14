@@ -59,3 +59,22 @@ def test_broken_declaration_is_precondition(main_repo: Path, capsys: pytest.Capt
     (main_repo / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "session")
     assert out["cause"]["kind"] == "precondition"
+
+
+def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
+    main = make_repo(None)
+    code, out = _run(capsys, last_result, "--cwd", str(main), "check")
+    assert code == 0 and out["metrics"] == {"present": False}
+    code, out = _run(capsys, last_result, "--cwd", str(main), "init")
+    assert code == 0 and out["outputs"]["declaration"].endswith("worktree.json")
+    # 節の無い宣言では環境の副命令は何もしない
+    for argv in (("deps", str(main)), ("localenv", "mode"), ("testenv", "compose-env")):
+        code, out = _run(capsys, last_result, "--cwd", str(main), *argv)
+        assert code == 0 and out["status"] == result.OK
+
+
+def test_trash_requires_approved_names(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
+    code, out = _run(capsys, last_result, "--cwd", str(main_repo), "trash", "--ref", "develop", "--yes")
+    assert code != 0 and out["cause"]["kind"] == "invalid"
+    code, out = _run(capsys, last_result, "--cwd", str(main_repo), "trash", "--ref", "develop")
+    assert code == 0 and out["metrics"] == {"removed": 0, "candidates": 0}

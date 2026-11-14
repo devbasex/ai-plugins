@@ -1,0 +1,145 @@
+"""worktree の依存の用意・ローカルの動作検証・テスト環境を、一時の git のリポジトリと差し替えた実行系で確かめる。"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Callable, Mapping, Optional
+
+import pytest
+
+from ndf.adapters.git import Completed, Git
+from ndf.domains.worktree import container, create, deps, localenv, localenv_decide, testenv, testenv_sweep
+
+
+def _declare(main: Path, run_git: Callable, extra: dict) -> None:
+    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", **extra}
+    (main / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+    run_git(main, "add", "-A")
+    run_git(main, "commit", "-q", "-m", "declare")
+
+
+class FakeShell:
+    """コマンドを起動せずに記録し、決めた出力を返す（`docker ps` はコンテナの名前、`readlink` はリンク先）。"""
+
+    def __init__(self, outputs: Optional[dict[str, Completed]] = None) -> None:
+        self.calls: list[tuple[list[str], Optional[Path], dict]] = []
+        self.outputs = outputs if outputs is not None else {}
+
+    def runner(self, argv: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str]]) -> Completed:
+        self.calls.append((argv, cwd, dict(env) if env else {}))
+        key = " ".join(argv[1:3])
+        return self.outputs[key] if key in self.outputs else Completed(0, "", "")
+
+    def attached(self, argv: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str]]) -> int:
+        self.calls.append((argv, cwd, dict(env) if env else {}))
+        return 3
+
+    def shell(self) -> container.Shell:
+        return container.Shell(runner=self.runner, attached=self.attached, docker="true")
+
+
+def test_deps_prepares_copies_and_runs_then_marks(main_repo: Path, run_git: Callable) -> None:
+    (main_repo / ".gitignore").write_text(".worktrees/\nvendor/\ncfg.local\nbuilt\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_from_main": ["vendor"], "copy_as_real": ["cfg.local"], "run": ["echo ok > built"]}})
+    (main_repo / "vendor").mkdir()
+    (main_repo / "vendor" / "lib.txt").write_text("v", encoding="utf-8")
+    (main_repo / "cfg.local").write_text("c", encoding="utf-8")
+    wt = create.create(main_repo, "feat/d").path
+
+    got = deps.prepare(wt)
+    assert (got.failed, got.steps) == ("", 3)
+    assert (wt / "vendor" / "lib.txt").stat().st_ino == (main_repo / "vendor" / "lib.txt").stat().st_ino  # ハードリンク
+    assert (wt / "cfg.local").stat().st_ino != (main_repo / "cfg.local").stat().st_ino  # 実体
+    assert (wt / "built").read_text(encoding="utf-8") == "ok\n"
+    assert deps.prepare(wt, if_unprepared=True).skipped
+
+
+def test_deps_fails_when_git_state_changes_or_path_escapes(main_repo: Path, run_git: Callable) -> None:
+    _declare(main_repo, run_git, {"deps": {"run": ["echo x > tracked-by-mistake.txt"]}})
+    wt = create.create(main_repo, "feat/e").path
+    got = deps.prepare(wt)
+    assert got.failed == "git の状態" and any("tracked-by-mistake.txt" in line for line in got.tail)
+    assert not deps.mark_file(Git(wt)).exists()
+    assert not deps.safe_relative("../x") and not deps.safe_relative("/x") and deps.safe_relative("a/b")
+
+
+def test_deps_rejects_broken_section(main_repo: Path, run_git: Callable) -> None:
+    _declare(main_repo, run_git, {"deps": {"run": "make"}})
+    wt = create.create(main_repo, "feat/f").path
+    with pytest.raises(deps.DepsError):
+        deps.prepare(wt)
+
+
+def test_localenv_verify_mode_and_aim(main_repo: Path, run_git: Callable) -> None:
+    local = {"kind": "compose", "branch_probe": "cat loaded", "layout": "indirect", "src_target": "/app", "isolate_when": ["db/*"],
+             "app_service": "web", "reload_signal": {"process": "php-fpm", "signal": "USR2"}}  # fmt: skip
+    _declare(main_repo, run_git, {"localenv": local})
+    wt = create.create(main_repo, "feat/l").path
+    t = localenv.target(wt)
+    assert t is not None
+    fake = FakeShell({"-c cat loaded": Completed(0, "feat/l\n", ""), "ps --filter": Completed(0, "c1\n", ""),
+                      "exec c1": Completed(0, f"{t.main_dir}\n", "")})  # fmt: skip
+    assert localenv.verify(t, fake.shell()).result == localenv_decide.MATCH
+    (wt / "db").mkdir()
+    (wt / "db" / "m.sql").write_text("", encoding="utf-8")
+    verdict, hits = localenv.mode(t)
+    assert verdict.result == localenv_decide.ISOLATE and hits == ["db/m.sql（db/*）"]
+    assert localenv.aim(t, fake.shell()) == 1
+    assert ["true", "exec", "-u", "root", "c1", "ln", "-sfn", "--", str(t.path), "/app"] in [c[0] for c in fake.calls]
+
+
+def test_localenv_not_applicable_without_compose(main_repo: Path) -> None:
+    assert localenv.target(main_repo) is None
+
+
+def _testenv(main_repo: Path, run_git: Callable, wt_branch: str) -> testenv.Target:
+    (main_repo / "compose.yml").write_text("services: {}\n", encoding="utf-8")
+    section = {"port_band": [20000, 21000], "port_roles": {"http": 1}, "test_kinds": {"e2e": {"run": "exit 3", "base_url_env": "BASE_URL"}},
+               "expose": {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "true"}}  # fmt: skip
+    _declare(main_repo, run_git, {"localenv": {"kind": "compose", "compose_files": ["compose.yml"]}, "testenv": section})
+    wt = create.create(main_repo, wt_branch).path
+    t = testenv.target(wt, FakeShell().shell())
+    assert t is not None
+    return t
+
+
+def test_testenv_assign_compose_and_down(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell()
+    t = _testenv(main_repo, run_git, "feat/t")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    row = testenv.assign(t)
+    assert (row["slot"], row["ports"]) == (0, {"http": 20001}) and testenv.assign(t)["slot"] == 0
+    values = testenv.compose_env(t)
+    assert values["NDF_PORT_HTTP"] == "20001" and values["COMPOSE_FILE"] == str(t.path / "compose.yml")
+    assert testenv.run_test(t, "e2e") == 3  # 終了コードをそのまま返す
+    assert fake.calls[-1][2]["BASE_URL"] == "http://localhost:20001"
+    assert testenv.up(t) == 0
+    assert testenv.down(t) == 0 and t.book.current(t.key) is None
+    downs = [c[0] for c in fake.calls if "down" in c[0]]
+    assert downs and "--volumes" in downs[-1]  # 宣言が無ければボリュームも消す
+
+
+def test_testenv_down_keeps_slot_when_discard_fails(main_repo: Path, run_git: Callable) -> None:
+    fake = FakeShell({"compose -p": Completed(1, "", "boom")})
+    t = _testenv(main_repo, run_git, "feat/u")
+    t = testenv.Target(t.path, t.main_dir, t.section, t.compose_files, fake.shell(), t.book)
+    testenv.assign(t)
+    with pytest.raises(testenv.TestenvError):
+        testenv.down(t)
+    assert t.book.current(t.key) is not None
+
+
+def test_testenv_reclaim_and_expose(main_repo: Path, run_git: Callable) -> None:
+    t = _testenv(main_repo, run_git, "feat/v")
+    gone = str(main_repo / ".worktrees" / "feat" / "gone")
+    t.book.acquire(gone, "feat/gone", "env-gone")
+    testenv.assign(t)
+    items = testenv.reclaim(t)
+    assert [(i["name"], i["result"]) for i in items] == [("env-gone", "released")]  # コンテナが無ければ解放だけ
+    with pytest.raises(testenv.TestenvError):
+        testenv_sweep.expose(t)  # 載っている基準が公開を許す基準と違う
+    t.book.update(t.key, lambda r: r.update(golden_tag="t1"))
+    url = testenv_sweep.expose(t)
+    assert url == f"https://wt{t.book.current(t.key)['slot']}.example.test" and testenv_sweep.expose(t) == url
+    assert testenv_sweep.unexpose(t) == url and testenv_sweep.unexpose(t) is None

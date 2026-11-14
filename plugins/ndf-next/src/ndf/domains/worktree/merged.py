@@ -8,8 +8,9 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
    追跡していないファイルで断ったら、それを退避（`trash.evacuate`）してから外す
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
-最後に `git worktree prune` を打ち、メインディレクトリがベースブランチにいれば、`git fetch` で
-`refs/remotes/origin/<ベースブランチ>` を更新してから `git merge --ff-only origin/<ベースブランチ>` で取り込む。
+片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/origin/<ベースブランチ>` を
+更新してから `git merge --ff-only origin/<ベースブランチ>` で取り込む（`git branch -d` は HEAD に含まれたブランチだけを消す）。
+最後に `git worktree prune` を打つ。
 `git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、取り込みが止まる。#3317）。
 """
 
@@ -170,11 +171,12 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     flow = flow_record if flow_record is not None else declared_flow(decl)
     pulls = hub.pulls(numbers)
     rec = Record()
+    base = decl.base_branch if decl is not None and decl.base_branch else create.default_branch(main)
+    # 先に取り込む: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
+    with mainlock.held(main):
+        sync_main(main, base, rec)
     for n in numbers:
         with mainlock.held(main):
             _one(main, main_dir, pulls.get(n), n, flow, rec)
     main.run("worktree", "prune")
-    base = decl.base_branch if decl is not None and decl.base_branch else create.default_branch(main)
-    with mainlock.held(main):
-        sync_main(main, base, rec)
     return rec
