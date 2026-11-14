@@ -82,6 +82,25 @@ def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
     assert H.ndf(repo, "pending")[1]["metrics"]["pending"] == 0
 
 
+def test_the_gate_marker_holds_the_step_seq_and_routes(repo):
+    """現状固定: 承認ゲートで抜けた後の待ちの目印は、ステップ・何度目の待ちか・答えごとのコマンドを持ち、一時ファイルを残さない。"""
+    gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
+    ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "end", "rejected": "stop"}}
+    plan = H.write_plan(repo, "m", [ask])
+
+    code, out = H.ndf(repo, "next", plan)
+    assert out["status"] == "gate"
+    sdir = repo / "plans" / "m.state"
+    markers = sorted(sdir.glob(f"{runner.WAITING_PREFIX}*.json"))
+    assert len(markers) == 1
+    marker = json.loads(markers[0].read_text(encoding="utf-8"))
+    assert sorted(marker) == ["routes", "seq", "step"]
+    assert (marker["step"], marker["seq"]) == ("ask", 1)
+    assert marker["routes"] == out["routes"]
+    assert sorted(marker["routes"]) == ["approved", "rejected"]
+    assert list(sdir.rglob("*.tmp")) == []
+
+
 def test_a_stopped_plan_returns_the_kind(repo):
     plan = H.write_plan(repo, "s", [{"id": "s", "run": [sys.executable, "-c", "raise SystemExit(1)"], "exit_cause": {"1": "check_failed"}}])
     code, out = H.ndf(repo, "next", plan)
