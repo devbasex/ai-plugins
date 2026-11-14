@@ -1,10 +1,11 @@
-"""判定の反映（plan の `actions`）と起票（plan の `create`）。決まりは `actions_decide` が持つ。
+"""判定の反映（plan の `actions`）・起票（plan の `create`）・マイルストーンの移動（plan の `reschedule`）。決まりは `actions_decide` が持つ。
 
 済んだ反映と起票は記録（ledger.json）へ 1 件ずつ書き、打ち直しで 2 度書かない。1 件の失敗で残りを止めない。
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,6 +31,40 @@ class Ledger:
     def put(self, key: str, row: dict[str, Any]) -> None:
         self.rows[key] = row
         state.write(self.sd, "backlog-ledger", self.rows)
+
+
+def each_number(
+    items: Iterable[dict[str, Any]], write: Callable[[dict[str, Any]], Optional[str]]
+) -> tuple[list[int], list[dict[str, Any]]]:
+    """1 件ずつ書き、(書けた番号, 失敗の {number, error}) を返す。`write` は書けない理由か None を返す。1 件の失敗で残りを止めない。"""
+    done: list[int] = []
+    failed: list[dict[str, Any]] = []
+    for e in items:
+        try:
+            why = write(e)
+        except GitHubError as exc:
+            why = str(exc)
+        if why is not None:
+            failed.append({"number": e["number"], "error": why})
+            continue
+        done.append(e["number"])
+    return done, failed
+
+
+def reschedule(gh: GitHub, plan: dict[str, Any], holds: set[int]) -> tuple[list[int], list[dict[str, Any]]]:
+    """plan の `reschedule` のうち保留でない課題のマイルストーンを移す。(移した番号, 失敗の {number, error})。"""
+    moves = [e for e in plan["reschedule"] if e["number"] not in holds] if "reschedule" in plan else []
+    if not moves:
+        return [], []
+    titles = issues_gh.milestones(gh)
+
+    def write(e: dict[str, Any]) -> Optional[str]:
+        if e["milestone"] not in titles:
+            return f"マイルストーン {e['milestone']!r} が無い"
+        issues_gh.set_milestone(gh, e["number"], titles[e["milestone"]])
+        return None
+
+    return each_number(moves, write)
 
 
 def _write(gh: GitHub, n: int, d: ad.Diff, done: ad.Diff) -> None:

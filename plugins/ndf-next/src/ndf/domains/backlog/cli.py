@@ -270,26 +270,6 @@ def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
     return _CheckedRank(metrics, checked.holds if metrics else set())
 
 
-def _reschedule(gh: github.GitHub, plan: dict[str, Any], holds: set[int]) -> tuple[list[int], list[dict[str, Any]]]:
-    moves = [e for e in plan["reschedule"] if e["number"] not in holds] if "reschedule" in plan else []
-    if not moves:
-        return [], []
-    titles = issues_gh.milestones(gh)
-    done: list[int] = []
-    failed: list[dict[str, Any]] = []
-    for e in moves:
-        if e["milestone"] not in titles:
-            failed.append({"number": e["number"], "error": f"マイルストーン {e['milestone']!r} が無い"})
-            continue
-        try:
-            issues_gh.set_milestone(gh, e["number"], titles[e["milestone"]])
-        except github.GitHubError as exc:
-            failed.append({"number": e["number"], "error": str(exc)})
-            continue
-        done.append(e["number"])
-    return done, failed
-
-
 def _read_plan(path: str) -> dict[str, Any]:
     """plan を読み、形を確かめる（オブジェクトであること・知らない鍵・actions と create の形）。"""
     plan = _read_json(path)
@@ -316,7 +296,7 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     gh = hub(repo)
     acted = actions.apply_actions(gh, ledger, plan)
     made = actions.create(gh, ledger, plan)
-    moved, move_failed = _reschedule(gh, plan, holds)
+    moved, move_failed = actions.reschedule(gh, plan, holds)
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
     tables = tables_mod.write(gh, state.read(sd, "backlog-rank", {})["milestones"]) if plan.get("rank") else {}

@@ -9,8 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.adapters.github import GitHub, GitHubError
-from ndf.domains.backlog import issues_gh, state
+from ndf.adapters.github import GitHub
+from ndf.domains.backlog import actions, issues_gh, state
 
 
 class ReparentError(Exception):
@@ -32,16 +32,7 @@ def entries_of(plan: dict[str, Any]) -> list[tuple[int, Optional[int]]]:
 
 def _move_all(gh: GitHub, moves: list[dict[str, Any]], key_to: str, key_from: str) -> tuple[list[int], list[dict[str, Any]]]:
     """`key_from` の親から `key_to` の親へ付け直す。失敗は貯めて返す（1 件の失敗で残りを止めない）。"""
-    done: list[int] = []
-    failed: list[dict[str, Any]] = []
-    for m in moves:
-        try:
-            issues_gh.set_parent(gh, m["number"], m[key_to], m[key_from])
-        except GitHubError as exc:
-            failed.append({"number": m["number"], "error": str(exc)})
-            continue
-        done.append(m["number"])
-    return done, failed
+    return actions.each_number(moves, lambda m: issues_gh.set_parent(gh, m["number"], m[key_to], m[key_from]))
 
 
 def apply(gh: GitHub, sd: Path, plan: dict[str, Any], run_id: str) -> dict[str, Any]:
