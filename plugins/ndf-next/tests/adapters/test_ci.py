@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from ndf import ci_cli
 from ndf.adapters import ci
 from ndf.contracts import causes, limits
 
@@ -270,8 +271,164 @@ def test_watch_remaining_does_not_shrink_while_waiting_for_a_runner() -> None:
     assert all(left == pytest.approx(5) for _, left in queued_rounds)
 
 
+def test_watch_counts_budget_from_the_given_start() -> None:
+    # 3394-11: 前の段階で待ち始めた呼び手は始まりの時刻を渡し、同じ予算を引き継ぐ
+    clock, reads = Clock(), []
+    clock.now = 100.0
+    w = ci.Watch(_reader([RUNNING], clock, reads), 30, clock=clock, sleep=clock.sleep, started=80.0)
+    assert w.started == 80.0 and w.remaining() == pytest.approx(10)
+    done = w.run()
+    assert reads[-1] == pytest.approx(110) and done.elapsed == pytest.approx(30)
+
+
+def test_watch_start_defaults_to_construction_time() -> None:
+    clock = Clock()
+    clock.now = 42.0
+    assert ci.Watch(_reader([RUNNING], clock, []), 5, clock=clock, sleep=clock.sleep).started == 42.0
+
+
 def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> None:
     clock, reads = Clock(), []
     done = ci.Watch(_reader([QUEUED], clock, reads), 5, clock=clock, sleep=clock.sleep).run()
     assert done.runner_exhausted and done.cause(["pytest"]) == "infra_wait"
     assert done.queued_for == pytest.approx(limits.seconds("ci.runner-wait"))
+
+
+# --- 現状固定（I-008 required_key）: 必須のチェックの照合の鍵と、鍵に当たるチェック ---
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)", "pytest (1/2)"),
+        ("A / B / pytest (1/2)", "pytest (1/2)"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest   (10/12)"),
+        ("pytest(1/2)", "pytest(1/2)"),
+        ("pytest (1/2) (0/2)", "pytest (1/2) (0/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_required_key_current_values(name: str, key: str) -> None:
+    """現状固定: 分割を名指しした名前は分割を保ち（前置きだけ外す）、ほかは bare_name と同じ。"""
+    assert ci.required_key(name) == key
+
+
+def test_required_key_matches_named_shard_only_and_bare_name_any_shard() -> None:
+    """現状固定: 分割を名指しした鍵は、前置きの有無によらずその分割だけに当たる。名指ししない鍵は全分割とまとめに当たる。"""
+    runs = [run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", conclusion="failure", rid=2), run("W / pytest", rid=3)]
+    named = ci.read(runs, ["X / pytest (0/2)"], ["pytest"])
+    assert (named.verdict, named.missing, named.failed_tests) == ("passed", [], [])
+    bare = ci.read(runs, ["pytest"], ["pytest"])
+    assert bare.verdict == "test_failed"
+    assert [c.name for c in bare.failed_tests] == ["pytest (1/2)"]
+    other = ci.read(runs, ["pytest (2/2)"], ["pytest"])
+    assert (other.verdict, other.missing) == ("missing", ["pytest (2/2)"])
+
+
+def test_required_key_dedupes_required_names_by_key() -> None:
+    """現状固定: 前置きや分割の違う必須の名前は、同じ鍵に畳まれて 1 つだけ欠けたと挙がる。"""
+    reading = ci.read([run("other", rid=1)], ["pytest", "CI / pytest", "pytest (0/2)", "W / pytest (0/2)"], ["pytest"])
+    assert reading.missing == ["pytest", "pytest (0/2)"]
+
+
+# --- 現状固定（I-009 bare_name）: 照合に使う名前（前置きと分割の末尾を外す） ---
+
+
+@pytest.mark.parametrize(
+    ("name", "bare"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest"),
+        ("CI / pytest (1/2)", "pytest"),
+        ("A / B / pytest (1/2)", "pytest"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest"),
+        ("pytest(1/2)", "pytest"),
+        ("pytest (1/2) (0/2)", "pytest (1/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_bare_name_current_values(name: str, bare: str) -> None:
+    """現状固定: 最後の ` / ` より後ろを取り、末尾の分割 `(k/n)` を 1 つだけ外して前後の空白を除く。"""
+    assert ci.bare_name(name) == bare
+
+
+@pytest.mark.parametrize(
+    ("name", "bare", "key"),
+    [
+        # 末尾の空白の後の分割は外さない（空白を除くのは分割を外した後）。現状の値として固定する
+        ("pytest (0/2) ", "pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)\t", "pytest (1/2)", "pytest (1/2)"),
+        ("A / B /  pytest  ", "pytest", "pytest"),
+        ("CI / W / pytest (1/2)", "pytest", "pytest (1/2)"),
+    ],
+)
+def test_bare_name_and_required_key_strip_after_removing_prefix(name: str, bare: str, key: str) -> None:
+    """現状固定（I-009）: 前置きを最後の ` / ` で外し、bare_name は分割を外してから、required_key は分割を見る前に空白を除く。"""
+    assert (ci.bare_name(name), ci.required_key(name)) == (bare, key)
+
+
+def test_read_matches_required_with_multiple_prefixes_and_spaces() -> None:
+    """現状固定（I-009）: 複数の前置きと前後の空白のある必須の名前も、前置きを外した鍵でチェックに当たる。"""
+    runs = [run("A / B / pytest (0/2)", rid=1), run("lint ", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["X / Y / pytest (0/2) ", " lint"], ["pytest"])
+    assert (reading.verdict, reading.missing, [c.name for c in reading.failed_other]) == ("check_failed", [], ["lint "])
+
+
+def test_bare_names_is_the_set_of_bare_names() -> None:
+    """現状固定: 集合で返し、同じ照合の名前は 1 つに畳む。ジェネレーターも受ける。"""
+    assert ci.bare_names(["CI / pytest (0/2)", "pytest", "W / lint"]) == {"pytest", "lint"}
+    assert ci.bare_names(n for n in ["pytest (1/2)"]) == {"pytest"}
+    assert ci.bare_names([]) == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "tests", "is_test"),
+    [
+        ("W / pytest (1/2)", ["CI / pytest (0/3)"], True),
+        ("pytest", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2)", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2) (5/9)", ["pytest (1/2) (0/2)"], True),
+        ("CI/pytest", ["pytest"], False),
+        ("pytest", [], False),
+    ],
+)
+def test_is_test_check_compares_bare_names_on_both_sides(name: str, tests: list[str], is_test: bool) -> None:
+    """現状固定: チェックの名前とテストのチェックの名前の両方を bare_name で揃えてから比べる。"""
+    assert ci.is_test_check(name, tests) is is_test
+
+
+def test_read_classifies_failures_by_bare_name() -> None:
+    """現状固定: 落ちたチェックをテストかどうかで分けるときも、両側を bare_name で揃える。"""
+    runs = [run("A / pytest (0/2)", conclusion="failure", rid=1), run("A / lint (0/2)", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["pytest", "lint"], ["W / pytest (5/9)"])
+    assert [c.name for c in reading.failed_tests] == ["A / pytest (0/2)"]
+    assert [c.name for c in reading.failed_other] == ["A / lint (0/2)"]
+
+
+# --- 現状固定（I-006 ci_cli._items）: missing・stale の行の test は分割ジョブを含むテストのチェックかで決まる ---
+
+
+def test_cli_items_marks_missing_and_stale_test_checks() -> None:
+    reading = _reading(missing=["CI / pytest (1/2)", "doc-lint"], stale=["pytest", "W / lint (0/2)"])
+    assert ci_cli._items(reading, ["pytest (0/2)"]) == [
+        {"kind": "check", "name": "CI / pytest (1/2)", "result": "missing", "test": True},
+        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
+        {"kind": "check", "name": "pytest", "result": "stale", "test": True},
+        {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
+    ]

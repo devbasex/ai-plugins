@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "NDF が起動し、席に着け、使用量を測るランタイム（AI の CLI）。行の並びは輪番の順で、担当の割り当てを実行ごとに同じにする",
   "owner": "D2（contracts/domains）",
   "columns": {

@@ -35,7 +35,7 @@ SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "facts" / facts.SCH
 
 
 def table(rows, columns) -> str:
-    return json.dumps({"version": 1, "summary": "s", "owner": "o", "columns": columns, "rows": rows})
+    return json.dumps({"summary": "s", "owner": "o", "columns": columns, "rows": rows})
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_fact_table_in_the_schema_has_no_findings(with_schema, rules):
 
 
 def test_fact_table_without_owner_is_an_error(with_schema, rules):
-    no_owner = json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []})
+    no_owner = json.dumps({"summary": "s", "columns": {}, "rows": []})
     found = _schema_findings(with_schema, rules, "contracts/facts/no_owner.json", no_owner)
     assert any(name == "no_owner.json" and "'owner'" in d for name, d in found)
 

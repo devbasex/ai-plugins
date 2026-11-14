@@ -12,7 +12,7 @@ import sys
 from typing import Any, Optional, TextIO
 
 from ndf import contracts
-from ndf.contracts import causes, exit_codes
+from ndf.contracts import causes, exit_codes, facts
 
 # 結果の status の語彙は exit_codes が持ち、ここから result.OK などとしても引ける
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
@@ -23,7 +23,11 @@ SCHEMA = contracts.schema_path("result")
 # 任意の項目のうち配列のもの（置くときは写しの list にする）
 _LISTS = ("gaps", "process", "decisions", "warnings")
 # 任意の項目（渡した順でなく、この順に置く）
-_OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next")
+_OPTIONAL = (*_LISTS, "cause", "routes", "presentation_path", "next", "outputs", "run_id")
+# routes のキーの語彙を持つ事実の表
+ANSWERS = "answers"
+# エントリポイントの短い名前（next・routes のコマンドの先頭。パスと版を含めない）
+ENTRY = "ndf"
 
 
 def _put_present(out: dict[str, Any], **optional: Any) -> None:
@@ -41,7 +45,8 @@ def result(
     metrics: Optional[dict] = None,
     **optional: Any,
 ) -> dict[str, Any]:
-    """結果を組む。任意の項目（`_OPTIONAL`: cause・routes・gaps・process・decisions・warnings・presentation_path・next）は
+    """結果を組む。任意の項目（`_OPTIONAL`: cause・routes・gaps・process・decisions・warnings・presentation_path・next・
+    outputs・run_id）は
     渡したときだけ置く（空の配列は置かない）。知らない項目は `TypeError`。形は `errors` が確かめる。"""
     unknown = sorted(set(optional) - set(_OPTIONAL))
     if unknown:
@@ -75,9 +80,20 @@ def stopped(
     return result(tool, STOPPED, summary if summary is not None else detail, cause=c, **extra)
 
 
-def code_matches(status: str, code: int) -> bool:
-    """status と終了コードが事実の表 exit-codes の区分で食い違わないか。"""
-    return exit_codes.matches(status, code)
+def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
+    """`next`・`routes` の値（そのまま打てるコマンド）を組む。`args` はエントリポイントの名前の後ろの引数、`ask` は打つ側が埋める鍵。"""
+    out: dict[str, Any] = {"argv": [ENTRY, *args]}
+    if ask:
+        out["ask"] = list(ask)
+    return out
+
+
+def answer_errors(routes: object) -> list[str]:
+    """routes のキーのうち、答えの語彙（事実の表 answers）に無いもの。形の誤りはスキーマが報告する。"""
+    if not isinstance(routes, dict):
+        return []
+    known = set(facts.ids(ANSWERS))
+    return [f"routes のキー {key!r} は答えの語彙（facts/{ANSWERS}.json）に無い" for key in sorted(set(routes) - known)]
 
 
 def code_for(obj: Any) -> Optional[int]:
@@ -102,12 +118,21 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     if "cause" in obj:
         # cause の形はスキーマ（$defs/cause）が上で確かめた。表と照らす種類の有無だけを足す
         errs += causes.kind_errors(obj["cause"])
+    if "routes" in obj:
+        errs += answer_errors(obj["routes"])
     if code is not None and obj.get("status") in STATUSES:
-        if not code_matches(obj["status"], code):
-            errs.append(f"status {obj['status']} と終了コード {code} が合わない")
-        expected = code_for(obj)
-        if obj["status"] == STOPPED and expected is not None and code != expected:
-            errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
+        errs += _code_errors(obj, code)
+    return errs
+
+
+def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
+    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。"""
+    errs: list[str] = []
+    if not exit_codes.matches(obj["status"], code):
+        errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+    expected = code_for(obj)
+    if obj["status"] == STOPPED and expected is not None and code != expected:
+        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
     return errs
 
 
