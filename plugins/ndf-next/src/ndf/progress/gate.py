@@ -27,6 +27,8 @@
                [--drop <課題の番号>...]
     ndf answer ask [--gate design|release]   # プランの中の承認ゲート（雛形の {{gate}}）。答えを待つ結果 JSON を返す
     ndf answer list <進行表>                 # 書いた答え（選択肢・指摘・理由・答えた者・時刻）を古い順に返す
+    ndf answer work --state-dir <置き場> [--cwd <作業場所>] <作業名>
+                                             # 雛形の {{worker}} の既定。作業名を ndf worker run の必須の引数へ合わせて打つ
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -616,6 +619,38 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     return result.result(TOOL, result.GATE, f"{label}の答えを待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
+# 雛形の `{{worker}}` の既定が渡す作業名（雛形の `["{{worker}}", "<作業名>"]` の末尾）
+WORK_KINDS = ("impl", "fix", "ci-fix", "fix-base", "fix-push", "design", "plan-to-spec")
+
+
+def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
+    """作業名を `ndf worker run` の必須の引数へ合わせる。プロンプトは `<置き場>/<作業名>-prompt.md`（conductor が書く）、
+    結果は `<置き場>/<作業名>-result.json` に置く。"""
+    if kind not in WORK_KINDS:
+        raise model.Refused(f"作業名 {kind} は雛形の作業名（{', '.join(WORK_KINDS)}）のどれでもない")
+    files = ("--prompt-file", str(state_dir / f"{kind}-prompt.md"), "--result-file", str(state_dir / f"{kind}-result.json"))
+    return ["run", "--kind", kind, *files, "--cwd", str(cwd), "--state-dir", str(state_dir)]
+
+
+def work_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} work")
+    ap.add_argument("--state-dir", required=True, help="プランの状態の置き場（雛形の {state_dir}）")
+    ap.add_argument("--cwd", default=".", help="worker が動く作業場所")
+    ap.add_argument("kind", help="作業名（" + "・".join(WORK_KINDS) + "）")
+    return ap
+
+
+def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv) -> int:
+    """`ndf worker run` を同じプロセスの置き換えで打つ（worker の層は読まず、副命令の契約だけを使う。IG1）。"""
+    a = work_parser().parse_args(argv)
+    try:
+        args = work_argv(a.kind, Path(a.state_dir), Path(a.cwd))
+    except model.Refused as exc:
+        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
+    exec_(sys.executable, [sys.executable, "-m", __name__.split(".")[0], "worker", *args])
+    return 0
+
+
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     seen = Target(a.head, a.material_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
@@ -702,12 +737,14 @@ def progress_verbs() -> set[str]:
 def main(argv: list[str]) -> int:
     """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
 
-    - `ask` はプランの中の承認ゲート、`list` は書いた答え、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
+    - `ask` はプランの中の承認ゲート、`list` は書いた答え、`work` は雛形の `{{worker}}` の既定、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
     - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
       トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
     """
     if argv and argv[0] == "ask":
         return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
+    if argv and argv[0] == "work":
+        return _cmd_work(argv[1:])
     if argv and argv[0] == "list":
         return command.run_main(list_parser(), lambda a, cwd: command.with_store(cwd, _cmd_list, a), argv[1:])
     if argv and argv[0] in run.COMMANDS:

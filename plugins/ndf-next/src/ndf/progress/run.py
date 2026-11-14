@@ -776,7 +776,9 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
     if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
         raise model.Refused(f"工程 {stage} は答えを待っていない")
     if invoke.is_listen(m.step) and "gate_id" not in extra:
-        raise model.Refused(f"工程 {stage} は承認ゲートで、答えは ndf answer で問いの id と見た対象を添えて書く（ndf progress next の routes）")
+        raise model.Refused(
+            f"工程 {stage} は承認ゲートで、答えは ndf answer で問いの id と見た対象を添えて書く（ndf progress next の routes）"
+        )
     allowed = choices(m)
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")

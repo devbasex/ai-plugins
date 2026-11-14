@@ -9,7 +9,7 @@
     "body_file": {"summary": "PR の本文のファイル"},
     "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちを確かめるときは後ろに落ちたテストの node id を足して打つ"},
     "whole_test_command": {"summary": "全体テストのシェルのコマンド 1 つ"},
-    "worker": {"summary": "worker の起動の引数の並び。最後に作業の名前（impl・fix・ci-fix・fix-base・fix-push・design・plan-to-spec）を足して打つ", "list": true},
+    "worker": {"summary": "worker の起動の引数の並び。最後に作業の名前（impl・fix・ci-fix・fix-base・fix-push・design・plan-to-spec）を足して打つ。既定は ndf answer work で、作業名を ndf worker run の必須の引数（プロンプトは {state_dir}/<作業名>-prompt.md）へ合わせる", "list": true, "default": ["ndf", "answer", "work", "--state-dir", "{state_dir}"]},
     "ci_budget": {"summary": "CI の待ちの合計の秒（ndf ci watch --budget）", "default": "3600"},
     "required": {"summary": "待つ必須のチェックの名前", "list": true},
     "tests": {"summary": "テストのチェックの名前（分割ジョブも数える）", "list": true, "default": []},
