@@ -71,7 +71,7 @@ def values(out: Path) -> dict:
         "design.起点": design["起点"],
         "design.pr.base": step(design, "pr")["base"],
         "design.glossary": "--diff origin/" + step(design, "glossary-check")["cmd"].split("--diff origin/")[1].split()[0],
-        "branch.from": "--from" in step(branch, "sprint-branch")["cmd"],
+        "branch.from": "--from " + step(branch, "sprint-branch")["cmd"].split("--from ")[1].split()[0],
         "check.pr.base": step(check, "pr")["base"],
         "check.sync": " ".join(step(check, "base-sync")["cmd"].split(" base-sync ")[1].split()[:2]),
         "check.merge.guard": "gh pr list --base" in step(check, "merge")["cmd"],
@@ -82,7 +82,7 @@ BASELINE = {
     "design.起点": "origin/develop",
     "design.pr.base": "develop",
     "design.glossary": "--diff origin/develop",
-    "branch.from": False,
+    "branch.from": "--from develop",
     "check.pr.base": "develop",
     "check.sync": "--pr {pr}",
     "check.merge.guard": False,
@@ -110,12 +110,11 @@ def test_selected_flow_starts_from_production_and_sends_design_prs_to_the_sprint
         "design.起点": "origin/sprint/s1",
         "design.pr.base": "sprint/s1",
         "design.glossary": "--diff origin/sprint/s1",
-        "branch.from": True,
+        "branch.from": "--from main",
         "check.pr.base": "develop",
         "check.sync": "--base main",
         "check.merge.guard": True,
     }
-    assert "--from main" in step(plans(out)["sprint-branch"], "sprint-branch")["cmd"]
     manifest = json.loads((out / "sprint.json").read_text())
     assert manifest["ステージ"][0]["name"] == "スプリントブランチ"
     snap = manifest[branch_flow.SNAPSHOT_KEY]

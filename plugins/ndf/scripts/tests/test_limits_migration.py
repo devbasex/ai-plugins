@@ -89,6 +89,7 @@ BEFORE = {
     "usage-ledger.git": {"seconds": 10},
     "merged.main-lock": {"seconds": 600},
     "project.git": {"seconds": 60},
+    "repo.production-fetch": {"seconds": 60},  # #3308 で足した本番チャネルの取り込み
     "relay.bedrock": {"seconds": 60},
     "relay.handover-prepare": {"seconds": 600},
     "relay.hub-poll": {"interval": 0.5},

@@ -567,6 +567,29 @@ def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):
         mod.pr_titles(tmp_path, [5])
 
 
+@pytest.mark.parametrize("current, pushed", [("release/v1.0.1", 1), ("develop", 0)])
+def test_create_pr_restores_head_deleted_after_merge(monkeypatch, tmp_path, current, pushed):
+    """開発版の PR のマージの後に origin が遅れて head を消したら、作業ツリーのブランチに限って push し直して作り直す。"""
+    mod = _release_steps_module(monkeypatch)
+    tries, restored = [], []
+    gone = "pull request create failed: GraphQL: Head sha can't be blank, Head ref must be a branch (createPullRequest)"
+
+    def gh(args, cwd=None):
+        tries.append(args)
+        ok = len(restored) > 0
+        return subprocess.CompletedProcess(args, 0 if ok else 1, "https://github.com/o/r/pull/7\n" if ok else "", "" if ok else gone)
+
+    monkeypatch.setattr(mod.gh_parts, "gh", gh)
+    monkeypatch.setattr(mod, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 0, current + "\n", ""))
+    monkeypatch.setattr(mod.repo_lib, "restore_branch", lambda r, b, run_git=None: restored.append(b) or True)
+    if pushed:
+        assert mod.create_pr(tmp_path, "main", "release/v1.0.1", "t", "b") == 7
+    else:
+        with pytest.raises(mod.StepError, match="Head ref must be a branch"):
+            mod.create_pr(tmp_path, "main", "release/v1.0.1", "t", "b")
+    assert (len(restored), len(tries)) == (pushed, 1 + pushed)
+
+
 def bump_repo(root: Path, base_version: str, work_version: str) -> None:
     f = root / "plugins" / "ndf" / ".claude-plugin" / "plugin.json"
     f.parent.mkdir(parents=True)

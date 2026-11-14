@@ -263,7 +263,7 @@
 | `hook.git-remote` | seconds 5 | 起票の guard と issue-file.py create が今のリポジトリを調べる git remote get-url の上限 | `plugins/ndf/scripts/lib/issue_items.py:origin_repo` |
 | `hook.git-rev-parse` | seconds 5 | hook が worktree を調べる git rev-parse の上限 | `plugins/ndf/scripts/hook_lib/worktree.py:_git_lines` |
 | `hook.unattended-mark` | seconds 604800 | 人のいない実行の印のうち、SessionEnd で消し残したものを次の unattended-start が消すまでの秒（7 日） | `plugins/ndf/scripts/hook_lib/unattended.py:mark_session` |
-| `hook.unattended-pushback` | attempts 2 | 人のいない実行（NDF_FACTORY_RUN）で、区間の報告の形に合わない Stop が続く間に差し戻す回数の上限。形に合った Stop で数え直す（#3242 の決定 4） | `plugins/ndf/scripts/hook_lib/unattended.py:review_stop` |
+| `hook.unattended-pushback` | attempts 2 | 人のいない実行（NDF_FACTORY_RUN）で、区間の報告の形に合わない Stop が続く間に差し戻す回数の上限。形に合った Stop で数え直す（#3242 の決定 4） | `plugins/ndf/scripts/hook_lib/unattended.py:_pushback_limit` |
 | `hook.wait-notify-lock` | seconds 5 | 待ちの知らせの記録の排他を待つ上限 | `plugins/ndf/scripts/hook_lib/wait_notify.py:claim` |
 | `jev.ask` | seconds 20 | JEV への問い合わせの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
 | `jev.probe` | seconds 10 | JEV に届くかの確かめの上限 | `plugins/ndf/scripts/lib/jev.py:<module>` |
@@ -317,6 +317,7 @@
 | `release-verification-steps.env-i` | seconds 600 | リリース後テストの素の環境のコマンドの上限 | `plugins/ndf/scripts/release-verification-steps.py:run_env_i` |
 | `release.cd-poll` | interval 15 | CD の結果の照会の間隔（#2623。GitHub の実行の状態は秒単位で変わらない） | `plugins/ndf/scripts/release_lib/cd_result.py:<module>` |
 | `release.declared-step` | seconds 600 | 宣言したリリースの手順のコマンドの上限の既定 | `plugins/ndf/scripts/release_lib/declared_steps.py:<module>` |
+| `repo.production-fetch` | seconds 60 | 本番チャネルを origin から取り込み直す上限。応答の無い origin でリリースのプランの組み立てを止め続けないため | `plugins/ndf/scripts/lib/repo.py:<module>` |
 | `run-core.kill-grace` | seconds 5 | 実行の核が子を止めるときの SIGTERM から SIGKILL までの猶予 | `plugins/ndf/scripts/lib/run_core.py:<module>` |
 | `sprint-close.issue-lock` | seconds 30 | 課題ごとの錠の待ち（body-lock の既定と同じ） | `plugins/ndf/scripts/sprint-close.py:<module>` |
 | `sprint-loop-record.lock` | seconds 60 | 開発ループの記録の排他を待つ上限 | `plugins/ndf/scripts/lib/sprint_loop_record.py:locked` |

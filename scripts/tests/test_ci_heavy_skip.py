@@ -189,6 +189,51 @@ def test_skill_body_skips_pytest_but_not_runtime_smoke(mod, repo):
     assert not skip and "SKILL.md" in reason
 
 
+# --- 1c. 自分の CI で確かめる作り直しのディレクトリ（plugins/ndf-next/）と文書だけの差分 ------------
+
+
+@pytest.mark.parametrize("workflow", ["pytest.yml", "runtime-plugin-smoke.yml"])
+def test_ndf_next_only_diff_skips_heavy_jobs(mod, repo, workflow):
+    """#1142: plugins/ndf-next/ は ndf-next.yml のジョブで確かめるため、古い ndf の重いジョブを省く。"""
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/checks/rules.py", "X = 1\n")
+    write(repo, "plugins/ndf-next/skills/a/SKILL.md", "---\nname: a\n---\n")
+    write(repo, ".github/workflows/ndf-next.yml", "on: pull_request\n")
+    write(repo, "issues/issue-1-design.md", "# 設計\n")
+    head = commit(repo, "ndf-next")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", workflow, api=none_passed)
+    assert d.skip and d.docs_tests == (), d.reason
+
+
+def test_ndf_next_with_tested_docs_returns_their_tests(mod, repo):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    write(repo, "docs/glossary.md", "changed\n")
+    head = commit(repo, "ndf-next and glossary")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", "pytest.yml", api=none_passed)
+    assert d.skip and d.docs_tests == ("scripts/tests/test_x.py",), d.reason
+
+
+@pytest.mark.parametrize(
+    "rel", ["plugins/ndf/scripts/tool.py", ".github/workflows/pytest.yml", "plugins/ndf-nextx/a.py", "scripts/tests/test_x.py"]
+)
+def test_ndf_next_with_other_code_still_runs(mod, repo, rel):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    write(repo, rel, "changed\n")
+    head = commit(repo, "ndf-next and more")
+    skip, reason = decide(mod, repo, base, head)
+    assert not skip, reason
+
+
+def test_ndf_next_diff_does_not_skip_when_docs_decl_is_unreadable(mod, repo):
+    write(repo, ".ndf/project.json", '{"version": 1, "docs": {"files": "x"}}')
+    base = commit(repo, "broken decl")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    head = commit(repo, "ndf-next")
+    assert not decide(mod, repo, base, head)[0]
+
+
 def test_unreadable_docs_decl_does_not_skip(mod, repo):
     """#2925 AC5: 分け方の宣言が読めなければ省かない。"""
     write(repo, ".ndf/project.json", '{"version": 1, "docs": {"files": "x"}}')

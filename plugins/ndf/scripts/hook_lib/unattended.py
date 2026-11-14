@@ -1,10 +1,14 @@
 """人のいない実行（`NDF_FACTORY_RUN`）の conductor の hook（#3242）。
 
     UserPromptSubmit（`hook.py unattended-start`）: プロンプトの 1 行目が `/ndf:development-workflow`（前に `/goal ` を許す）なら
-        印を作り、人のいない実行の決まりの案内を返す。worker・レビューの `claude -p` には印を付けない
-    Stop（`hook.py unattended-stop`）: 印のあるセッションで、最後の応答が区間の報告の形に合わなければ差し戻す。
+        印を作り、人のいない実行の決まりの案内に契約から作った形の説明を添えて返す。worker・レビューの `claude -p` には印を付けない
+    Stop（`hook.py unattended-stop`）: 印のあるセッションで、最後の応答が区間の報告の形に合わないか、
+        `次のコマンド:` にコマンドを載せたまま結果が `判断が要る` でも `完了` でもなく、区分が `ndf-ask:human-action`
+        でもなければ差し戻す。
         背景の作業か予定が残る Stop は差し戻さない。形に合わない Stop が続く間の差し戻しは上限の宣言
-        （`hook.unattended-pushback`）の回数までで、形に合った Stop で数え直す
+        （`hook.unattended-pushback`）の回数までで、形に合った Stop で数え直す。差し戻しの文は誤りの一覧に形の説明を添える
+        （#3329。conductor が契約のファイルを Read できない権限でも書き直せる）。上限の後の形に合わない Stop は通し、
+        誤りの一覧を標準エラーへ 1 行残す
     SessionEnd（`hook.py unattended-end`）: 印を消す。消し残した印は次の `unattended-start` が `hook.unattended-mark` の秒を過ぎたものから消す
 
 `NDF_FACTORY_RUN` が空の実行では、登録の行（`hooks/claude.json`）の sh が Python を起動せずに終える。
@@ -27,9 +31,23 @@ from state_home import container_home
 TARGET_RE = re.compile(r"^(?:/goal\s+)?/ndf:development-workflow(?:\s|$)")
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 MARK_DIR_NAME = "unattended"
+# 警告の行に載せる副命令の名前（hook.py の UNATTENDED と同じ値）
+START_COMMAND = "unattended-start"
+STOP_COMMAND = "unattended-stop"
 PUSHBACK_POLICY = "hook.unattended-pushback"
 MARK_POLICY = "hook.unattended-mark"
 FORM_REL = "${CLAUDE_PLUGIN_ROOT}/contracts/forms/unattended-report.json"
+# 判定結果の `次のコマンド:` の行（前に `- ` を許す）。値が空か `無し` で始まればコマンドが無い
+NEXT_COMMAND_RE = re.compile(r"^[ \t]*(?:-[ \t]*)?次のコマンド:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+# `次のコマンド:` を打たずに区間を終えてよい結果の値（承認ゲート・区分の問いと、工程を通し切ったとき）
+STOP_RESULTS = ("判断が要る", "完了")
+# `次のコマンド:` を残して区間を終えてよい区分（人の操作待ちは契約で認めた停止）
+HUMAN_ACTION = "ndf-ask:human-action"
+ERR_NEXT_COMMAND = (
+    "`次のコマンド:` にコマンドが載ったまま区間を終えようとしている。止まる理由（承認ゲート・区分のある問い・人の操作・"
+    "続けられない理由）に当たらなければ、区間を終えずにそのコマンドを打って続ける。"
+    "打って失敗したなら、失敗を理由に書き、最後の応答に `次のコマンド:` の行を残さない"
+)
 RULE_REF = "development-workflow の references/asking.md の「人のいない実行」"
 
 GUIDE = (
@@ -76,9 +94,14 @@ def read_mark(path: Path) -> Mark | None:
     if data is None:
         return None
     sid, started, count = data.get("session_id"), data.get("started_at"), data.get("pushbacks")
-    if not isinstance(sid, str) or not isinstance(started, str) or isinstance(count, bool) or not isinstance(count, int) or count < 0:
+    if not isinstance(sid, str) or not isinstance(started, str) or not _is_pushbacks(count):
         return None
     return Mark(session_id=sid, started_at=started, pushbacks=count)
+
+
+def _is_pushbacks(value: object) -> bool:
+    """回数として読める値か（JSON の 0 以上の整数。`type(...) is int` で int の派生の bool を拒む）。"""
+    return type(value) is int and value >= 0
 
 
 def write_mark(path: Path, mark: Mark) -> None:
@@ -99,26 +122,54 @@ def prune_marks(directory: Path, now: float, max_age: float) -> int:
     return removed
 
 
-def next_count(errors: list[str], pushbacks: int, limit: int, busy: bool) -> tuple[bool, int]:
-    """差し戻すかと、次の回数。"""
+@dataclass(frozen=True)
+class Verdict:
+    """Stop の判定。差し戻すか（`block`）・次の回数（`count`）・上限に達したため形に合わないまま通すか（`over_limit`）。"""
+
+    block: bool
+    count: int
+    over_limit: bool = False
+
+
+def next_count(errors: list[str], pushbacks: int, limit: int, busy: bool) -> Verdict:
+    """忙しい → 通す・誤り無し → 数え直す・上限前 → 差し戻す・上限後 → 通す、の判定。"""
     if busy:
-        return False, pushbacks
+        return Verdict(block=False, count=pushbacks)
     if not errors:
-        return False, 0
+        return Verdict(block=False, count=0)
     if pushbacks < limit:
-        return True, pushbacks + 1
-    return False, pushbacks
+        return Verdict(block=True, count=pushbacks + 1)
+    return Verdict(block=False, count=pushbacks, over_limit=True)
 
 
-def pushback_reason(errors: list[str], remaining: int) -> str:
-    """差し戻しの文（誤りの一覧・契約のファイルのパス・残りの差し戻しの回数）。"""
+def pending_command_errors(text: object) -> list[str]:
+    """`次のコマンド:` にコマンドが載ったまま、結果が `STOP_RESULTS` のどれでもなく区分が `HUMAN_ACTION` でもなければ誤りを 1 つ返す。"""
+    if not isinstance(text, str):
+        return []
+    values = (v.strip("` \t") for v in NEXT_COMMAND_RE.findall(text))
+    commands = [v for v in values if v and not v.startswith(ur.NONE_VALUE)]
+    if not commands or ur.result_value(text) in STOP_RESULTS or ur.report_items(text).get("区分") == HUMAN_ACTION:
+        return []
+    return [ERR_NEXT_COMMAND]
+
+
+def pushback_reason(errors: list[str], remaining: int, form: ur.ReportForm) -> str:
+    """差し戻しの文（誤りの一覧・契約のファイルのパス・残りの差し戻しの回数・形の説明）。"""
     lines = "\n".join(f"- {e}" for e in errors)
     return (
         "NDF: 人のいない実行では、最後の応答の末尾に区間の報告を置いて区間を終える。今の応答は形に合わない。\n"
         f"{lines}\n"
-        f"形は {FORM_REL}、決まりは {RULE_REF} にある。区間の報告を足して応答を終え直す"
-        f"（この後の差し戻しは残り {remaining} 回）。"
+        f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせて区間の報告を書き、応答を終え直す"
+        f"（この後の差し戻しは残り {remaining} 回）。\n\n"
+        f"{ur.describe_form(form)}"
     )
+
+
+def start_guide(form: ur.ReportForm | None) -> str:
+    """区間の始めの案内の文。契約を読めていれば `GUIDE` の後ろに形の説明を続ける。"""
+    if form is None:
+        return GUIDE
+    return f"{GUIDE}\n\n{ur.describe_form(form)}"
 
 
 def _utc_now() -> str:
@@ -134,14 +185,14 @@ def mark_session(hook_input: dict, now: float) -> str | None:
     try:
         prune_marks(mark_dir(), now, limits.seconds(MARK_POLICY))
     except limits.LimitsError as e:
-        _stderr_warn("unattended-start", str(e))
+        _stderr_warn(START_COMMAND, str(e))
     if not isinstance(hook_input, dict) or not is_target(hook_input.get("prompt")):
         return None
     path = mark_path(hook_input.get("session_id"))
     if path is None:
         return None
     write_mark(path, Mark(session_id=path.stem, started_at=_utc_now(), pushbacks=0))
-    return GUIDE
+    return start_guide(_read_report_form(START_COMMAND))
 
 
 def review_stop(hook_input: dict) -> dict | None:
@@ -152,31 +203,45 @@ def review_stop(hook_input: dict) -> dict | None:
     mark = read_mark(path) if path else None
     if mark is None:
         return None
-    form = _read_report_form()
+    form = _read_report_form(STOP_COMMAND)
     if form is None:
         return None
-    try:
-        limit = int(limits.value(PUSHBACK_POLICY, "attempts"))
-    except limits.LimitsError as e:
-        _stderr_warn("unattended-stop", str(e))
+    limit = _pushback_limit()
+    if limit is None:
         return None
-    busy = bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
-    errors = ur.report_errors(hook_input.get("last_assistant_message"), form)
-    block, count = next_count(errors, mark.pushbacks, limit, busy)
-    if count != mark.pushbacks:
-        _save_count(path, mark, count)
-    if not block:
+    text = hook_input.get("last_assistant_message")
+    errors = ur.report_errors(text, form) + pending_command_errors(text)
+    verdict = next_count(errors, mark.pushbacks, limit, _is_busy(hook_input))
+    if verdict.count != mark.pushbacks:
+        _save_count(path, mark, verdict.count)
+    if verdict.over_limit:
+        _stderr_warn(STOP_COMMAND, f"差し戻しの上限（{limit} 回）に達したため通す: {' / '.join(errors)}")
+    if not verdict.block:
         return None
-    return {"decision": "block", "reason": pushback_reason(errors, limit - count)}
+    return {"decision": "block", "reason": pushback_reason(errors, limit - verdict.count, form)}
 
 
-def _read_report_form() -> ur.ReportForm | None:
-    """区間の報告の契約を読む。読めなければ警告して None。"""
+def _read_report_form(command: str) -> ur.ReportForm | None:
+    """区間の報告の契約を読む。読めなければ副命令 `command` の名前で警告して None。"""
     try:
         return ur.load_form()
     except ur.FormError as e:
-        _stderr_warn("unattended-stop", f"区間の報告の契約を読めない: {e}")
+        _stderr_warn(command, f"区間の報告の契約を読めない: {e}")
         return None
+
+
+def _pushback_limit() -> int | None:
+    """差し戻しの上限の回数を読む。読めなければ警告して None。"""
+    try:
+        return int(limits.value(PUSHBACK_POLICY, "attempts"))
+    except limits.LimitsError as e:
+        _stderr_warn(STOP_COMMAND, str(e))
+        return None
+
+
+def _is_busy(hook_input: dict) -> bool:
+    """背景の作業か予定が残る Stop か。"""
+    return bool(hook_input.get("background_tasks")) or bool(hook_input.get("session_crons"))
 
 
 def _save_count(path: Path, mark: Mark, count: int) -> None:
@@ -184,7 +249,7 @@ def _save_count(path: Path, mark: Mark, count: int) -> None:
     try:
         write_mark(path, replace(mark, pushbacks=count))
     except OSError as e:
-        _stderr_warn("unattended-stop", f"回数を書けない: {e.strerror or type(e).__name__}")
+        _stderr_warn(STOP_COMMAND, f"回数を書けない: {e.strerror or type(e).__name__}")
 
 
 def clear_mark(hook_input: dict) -> None:

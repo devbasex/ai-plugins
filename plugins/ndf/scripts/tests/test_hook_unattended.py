@@ -24,6 +24,8 @@ from hook_lib import unattended as un  # noqa: E402
 SID = "sess-1"
 NO_REPORT = "## 確認したいこと\n\n「進めて」と返してもらえれば続けます。\n"
 DONE = "## 区間の報告\n\n- 結果: 完了\n- 課題: #12\n"
+# Claude Code が文脈へそのまま入れる上限（10,000 文字）の半分
+MAX_TEXT_CHARS = 5000
 
 
 @pytest.fixture
@@ -99,6 +101,54 @@ def test_read_mark_is_none_for_missing_or_broken_marks(home: Path, body):
     assert un.read_mark(path) is None
 
 
+def _mark_body(**over) -> dict:
+    body = {"session_id": SID, "started_at": "t", "pushbacks": 1}
+    body.update(over)
+    return body
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [],
+        "s",
+        1,
+        {},
+        _mark_body(session_id=None),
+        _mark_body(session_id=1),
+        _mark_body(started_at=None),
+        _mark_body(started_at=0),
+        _mark_body(pushbacks=None),
+        _mark_body(pushbacks=True),
+        _mark_body(pushbacks=False),
+        _mark_body(pushbacks=-1),
+        _mark_body(pushbacks=1.0),
+        {"session_id": SID, "started_at": "t"},
+    ],
+)
+def test_read_mark_refuses_each_field_of_the_wrong_shape(home: Path, data):
+    path = home / f"{SID}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert un.read_mark(path) is None
+
+
+@pytest.mark.parametrize(
+    ("data", "want"),
+    [
+        (_mark_body(pushbacks=0), un.Mark(SID, "t", 0)),
+        (_mark_body(pushbacks=7), un.Mark(SID, "t", 7)),
+        (_mark_body(session_id="", started_at=""), un.Mark("", "", 1)),
+        ({**_mark_body(), "extra": [1]}, un.Mark(SID, "t", 1)),
+    ],
+)
+def test_read_mark_accepts_the_shape_and_ignores_other_keys(home: Path, data, want):
+    path = home / f"{SID}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert un.read_mark(path) == want
+
+
 def test_write_mark_raises_and_leaves_no_temp_file(tmp_path: Path):
     blocker = tmp_path / "file"
     blocker.write_text("x", encoding="utf-8")
@@ -122,28 +172,119 @@ def test_prune_marks_removes_only_marks_past_the_age(tmp_path: Path):
 @pytest.mark.parametrize(
     ("errors", "count", "busy", "want"),
     [
-        ([], 2, False, (False, 0)),
-        (["e"], 0, False, (True, 1)),
-        (["e"], 1, False, (True, 2)),
-        (["e"], 2, False, (False, 2)),
-        (["e"], 1, True, (False, 1)),
+        ([], 2, False, un.Verdict(block=False, count=0)),
+        (["e"], 0, False, un.Verdict(block=True, count=1)),
+        (["e"], 1, False, un.Verdict(block=True, count=2)),
+        (["e"], 2, False, un.Verdict(block=False, count=2, over_limit=True)),
+        (["e"], 1, True, un.Verdict(block=False, count=1)),
     ],
 )
 def test_next_count(errors, count, busy, want):
     assert un.next_count(errors, count, 2, busy) == want
 
 
-def test_pushback_reason_names_the_errors_the_contract_and_the_rest():
-    text = un.pushback_reason(["結果の行が無い"], 0)
-    assert "結果の行が無い" in text and un.FORM_REL in text and "0" in text
+def test_pushback_reason_names_the_errors_the_contract_the_rest_and_the_form():
+    form = ur.load_form()
+    text = un.pushback_reason([ur.ERR_NO_RESULT], 0, form)
+    assert ur.ERR_NO_RESULT in text and un.FORM_REL in text and "残り 0 回" in text
+    assert ur.describe_form(form) in text
+
+
+# 誤りの種類ごとの応答（結果の行が無い・値が契約の外・要る項目の欠け・材料の誤り・`次のコマンド:` の残り）
+WRONG_TEXTS = {
+    "no-result": NO_REPORT,
+    "bad-value": "## 区間の報告\n\n- 結果: 続けられない\n- 理由: Bash が拒まれた\n",
+    "missing": "## 区間の報告\n\n- 結果: できなかった\n- 理由: 無し\n",
+    "material": "## 区間の報告\n\n- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 呼んでよいか\n- 材料: /tmp/x.md\n",
+    "next-command": "次のコマンド: python3 run.py\n\n## 区間の報告\n\n- 結果: できなかった\n- 理由: 途中で止めた\n",
+}
+
+
+@pytest.mark.parametrize("kind", sorted(WRONG_TEXTS))
+def test_every_kind_of_pushback_carries_the_form(home: Path, kind):
+    """誤りの種類に関わらず、差し戻しの文は契約の値・意味・要る項目・条件・材料の書き方を載せる（I1）。"""
+    _start()
+    got = _stop(WRONG_TEXTS[kind])
+    assert got is not None and got["decision"] == "block"
+    # 説明の文が契約の語を 1 つ残らず載せることは test_unattended_report.py の
+    # test_describe_form_carries_every_declared_word_and_the_examples が確かめる
+    assert ur.describe_form(ur.load_form()) in got["reason"]
+
+
+def test_a_report_copied_from_the_pushback_fits_the_contract(home: Path):
+    """差し戻しの文の例だけから書いた区間の報告が判定で誤り 0 件になり、差し戻されない（受け入れ条件 3）。"""
+    _start()
+    reason = _stop()["reason"]
+    blocks = reason.split("```markdown\n")[1:]
+    form = ur.load_form()
+    assert len(blocks) == len(form.values)
+    for block in blocks:
+        example = block.split("```")[0]
+        assert ur.result_value(example) in form.values
+        assert ur.report_errors(example, form) == []
+        assert _stop(example) is None
+
+
+def test_a_pushback_with_every_kind_of_error_stays_short():
+    errors = [
+        ur.ERR_NO_RESULT,
+        ur.ERR_BAD_VALUE.format(values="判断が要る / 完了 / できなかった", value="続けられない"),
+        ur.ERR_MISSING.format(item="理由", value="できなかった"),
+        ur.ERR_BAD_MATERIAL.format(item="材料", body="本文", url_prefix="https://", value="/tmp/x.md"),
+        un.ERR_NEXT_COMMAND,
+    ]
+    assert len(un.pushback_reason(errors, 2, ur.load_form())) <= MAX_TEXT_CHARS
+
+
+def test_start_guide_adds_the_form_and_stays_short():
+    form = ur.load_form()
+    guide = un.start_guide(form)
+    assert guide.startswith(un.GUIDE) and ur.describe_form(form) in guide
+    assert len(guide) <= MAX_TEXT_CHARS
+    assert un.start_guide(None) == un.GUIDE
 
 
 # --- start / stop / end ---
 
 
 def test_start_marks_the_conductor_and_returns_the_guide(home: Path):
+    assert _start() == un.start_guide(ur.load_form())
+    assert _count(home) == 0
+
+
+@pytest.fixture
+def break_form(monkeypatch):
+    """呼ぶと契約を読めなくする（`un.ur.load_form` が `FormError` を投げる）関数を返す。"""
+
+    def broken():
+        raise ur.FormError("壊れている")
+
+    return lambda: monkeypatch.setattr(un.ur, "load_form", broken)
+
+
+def test_start_returns_the_plain_guide_when_the_contract_cannot_be_read(home: Path, break_form, capsys):
+    break_form()
     assert _start() == un.GUIDE
     assert _count(home) == 0
+    assert "ndf: unattended-start: 区間の報告の契約を読めない" in capsys.readouterr().err
+
+
+def _count_loads(monkeypatch) -> list[int]:
+    calls = [0]
+    real = ur.load_form
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(un.ur, "load_form", counted)
+    return calls
+
+
+def test_start_reads_no_contract_for_other_prompts(home: Path, monkeypatch):
+    calls = _count_loads(monkeypatch)
+    assert _start("/ndf:design #1") is None
+    assert calls == [0]
 
 
 def test_start_removes_marks_past_the_age_and_keeps_the_new_one(home: Path):
@@ -172,6 +313,38 @@ def test_stop_pushes_back_twice_in_a_row_then_lets_the_third_through(home: Path)
     assert _count(home) == 2 and (home / f"{SID}.json").exists()
 
 
+def test_a_pushback_reads_the_contract_once_and_uses_it(home: Path, monkeypatch):
+    _start()
+    calls = _count_loads(monkeypatch)
+    got = _stop()
+    assert calls == [1]
+    form = ur.load_form()
+    assert got == {"decision": "block", "reason": un.pushback_reason(ur.report_errors(NO_REPORT, form), 1, form)}
+
+
+def test_after_the_limit_a_bad_value_passes_and_leaves_one_stderr_line(home: Path, capsys):
+    """上限まで差し戻した後の契約の外の値は通り、回数は上限のまま、誤りの一覧が標準エラーに 1 行残る（I5）。"""
+    _start()
+    limit = int(limits.value(un.PUSHBACK_POLICY, "attempts"))
+    for _ in range(limit):
+        assert _stop() is not None
+    capsys.readouterr()
+    assert _stop(WRONG_TEXTS["bad-value"]) is None
+    assert _count(home) == limit
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1
+    assert err[0].startswith(f"ndf: unattended-stop: 差し戻しの上限（{limit} 回）に達したため通す: ")
+    assert "続けられない" in err[0]
+
+
+@pytest.mark.parametrize("extra", [{"text": DONE}, {"background_tasks": [{"id": "b1"}]}])
+def test_passing_stops_leave_no_limit_line(home: Path, capsys, extra):
+    _start()
+    text = extra.pop("text", NO_REPORT)
+    assert _stop(text, **extra) is None
+    assert "上限" not in capsys.readouterr().err
+
+
 def test_a_fitting_stop_resets_the_count_and_keeps_the_mark(home: Path):
     _start()
     _stop()
@@ -179,6 +352,48 @@ def test_a_fitting_stop_resets_the_count_and_keeps_the_mark(home: Path):
     assert _stop(DONE) is None
     assert _count(home) == 0
     assert _stop() is not None and _count(home) == 1
+
+
+STALLED = (
+    "mode: standard\n根拠: 本番の振る舞いを変える\n"
+    '次のコマンド: python3 "$SCRIPTS/supervise.py" new sprint --name m6 --worktree /repo\n'
+    "  --issue 12 --design 12 --out /work/sprint-m6\n\n"
+    "## 区間の報告\n\n- 結果: できなかった\n- 課題: #12\n- 理由: スプリントのプランはまだ書き出していない\n"
+)
+
+
+def test_a_stop_that_leaves_the_next_command_unrun_is_pushed_back(home: Path):
+    _start()
+    got = _stop(STALLED)
+    assert got is not None and got["decision"] == "block" and un.ERR_NEXT_COMMAND in got["reason"]
+    assert _count(home) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        STALLED.replace("できなかった", "完了"),
+        "## 判断の材料\n\n要点。\n\n"
+        + STALLED.replace("- 結果: できなかった", "- 結果: 判断が要る\n- 区分: ndf-ask:cost\n- 問い: 有料の API を呼ぶか\n- 材料: 本文"),
+        STALLED.replace("次のコマンド: python3", "次のコマンド: 無し（supervisor で回す: 設計）\n# python3"),
+        STALLED.replace("次のコマンド:", "前に打ったコマンド:"),
+        STALLED.replace("- 理由:", "- 区分: ndf-ask:human-action\n- 人に頼むこと: 試しの系へ対話でログインする\n- 理由:"),
+    ],
+)
+def test_the_next_command_rule_lets_other_stops_through(home: Path, text):
+    _start()
+    assert _stop(text) is None
+    assert _count(home) == 0
+
+
+def test_pending_command_errors_reads_only_a_line_with_a_command():
+    assert un.pending_command_errors(STALLED) == [un.ERR_NEXT_COMMAND]
+    assert un.pending_command_errors("- 次のコマンド: `/ndf:release`\n- 結果: できなかった\n") == [un.ERR_NEXT_COMMAND]
+    assert un.pending_command_errors("次のコマンド:\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("- 次のコマンド: `無し（supervisor で回す: 設計）`\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("- 次のコマンド: ``\n- 結果: できなかった\n") == []
+    assert un.pending_command_errors("次のコマンド: /ndf:release\n- 結果: 完了\n") == []
+    assert un.pending_command_errors(None) == []
 
 
 @pytest.mark.parametrize("extra", [{"background_tasks": [{"id": "b1"}]}, {"session_crons": [{"id": "c1"}]}])
@@ -194,13 +409,9 @@ def test_stop_without_a_mark_does_nothing(home: Path):
     assert not home.exists()
 
 
-def test_stop_lets_through_when_the_contract_cannot_be_read(home: Path, monkeypatch, capsys):
+def test_stop_lets_through_when_the_contract_cannot_be_read(home: Path, break_form, capsys):
     _start()
-
-    def broken():
-        raise ur.FormError("壊れている")
-
-    monkeypatch.setattr(un.ur, "load_form", broken)
+    break_form()
     assert _stop() is None
     assert _count(home) == 0
     assert "ndf: unattended-stop: 区間の報告の契約を読めない" in capsys.readouterr().err
@@ -257,7 +468,8 @@ def test_the_subcommands_run_without_site_packages(tmp_path: Path):
     env = _env(tmp_path)
     got = _hook("unattended-start", {"session_id": SID, "prompt": "/ndf:development-workflow #1"}, env, "-S")
     assert got.returncode == 0
-    assert json.loads(got.stdout)["hookSpecificOutput"] == {"hookEventName": "UserPromptSubmit", "additionalContext": un.GUIDE}
+    want = un.start_guide(ur.load_form())
+    assert json.loads(got.stdout)["hookSpecificOutput"] == {"hookEventName": "UserPromptSubmit", "additionalContext": want}
     stop = _hook("unattended-stop", {"session_id": SID, "last_assistant_message": NO_REPORT}, env, "-S")
     assert stop.returncode == 0 and json.loads(stop.stdout)["decision"] == "block"
     end = _hook("unattended-end", {"session_id": SID}, env, "-S")
@@ -316,5 +528,5 @@ def test_the_registered_line_marks_without_the_hook_environment(tmp_path: Path):
     payload = json.dumps({"session_id": SID, "prompt": "/goal /ndf:development-workflow #1"})
     got = subprocess.run(_registered()["UserPromptSubmit"], shell=True, input=payload, capture_output=True, text=True, env=env, timeout=30)
     assert got.returncode == 0
-    assert json.loads(got.stdout)["hookSpecificOutput"]["additionalContext"] == un.GUIDE
+    assert json.loads(got.stdout)["hookSpecificOutput"]["additionalContext"] == un.start_guide(ur.load_form())
     assert (tmp_path / "state" / un.MARK_DIR_NAME / f"{SID}.json").exists()

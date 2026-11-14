@@ -87,22 +87,27 @@ def read_decl(roots, name: str) -> dict:
     """
     for r in roots:
         f = Path(r) / ".ndf" / name
-        if not f.is_file():
-            continue
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except ValueError as e:
-            raise DeclError(f"{f}: JSON として読めない: {e}") from e
-        try:
-            schema.load_shape(Decl, d, str(f))
-        except schema.ShapeError as e:
-            raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
-        if name in setting_decl.places():
-            d, why = setting_decl.overlay_keys(r, name, d, f)
-            if why:
-                raise DeclError(why)
-        return d
+        if f.is_file():
+            return _load_decl_file(r, name, f)
     return {}
+
+
+def _load_decl_file(root, name: str, f: Path) -> dict:
+    """見つけた宣言 `f` を読み、形を確かめ、契約が別の置き場を宣言したキーを読み直す。読めないか形が違えば DeclError。"""
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise DeclError(f"{f}: JSON として読めない: {e}") from e
+    try:
+        schema.load_shape(Decl, d, str(f))
+    except schema.ShapeError as e:
+        raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
+    if name not in setting_decl.places():
+        return d
+    d, why = setting_decl.overlay_keys(root, name, d, f)
+    if why:
+        raise DeclError(why)
+    return d
 
 
 def decl_roots(worktree: str, repo: str | None = None) -> list[Path]:
@@ -177,16 +182,23 @@ class QueueDecl(schema.Shape):
     shared: list[SharedList] = []
 
 
+def _with_default_resources(raw):
+    """queue の宣言の resources を既定へ重ねる（宣言したタグを項目ごとに）。resources が dict でなければ `raw` をそのまま返す。"""
+    if not isinstance(raw, dict):
+        return raw
+    declared = raw.get("resources") or {}
+    if not isinstance(declared, dict):
+        return raw
+    merged = {**QUEUE_RESOURCES, **declared}
+    return {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
+
+
 def queue_decl(decl: dict) -> dict:
     """supervise.json の queue を既定と合わせて `{"resources": {タグ: {limit, types, commands}}, "shared": [{path, touched_by}]}` で返す。
 
     無ければ既定（graphql の枠 2 本・共有の一覧は無し）。形が違えば DeclError。"""
-    raw = decl.get("queue") or {}
+    raw = _with_default_resources(decl.get("queue") or {})
     hint = '（queue は {"resources": {タグ: {"limit", "types", "commands"}}, "shared": [{"path", "touched_by"}]} で書く）'
-    declared = (raw.get("resources") or {}) if isinstance(raw, dict) else None
-    if isinstance(declared, dict):  # 既定へ、宣言したタグを項目ごとに重ねる
-        merged = {**QUEUE_RESOURCES, **declared}
-        raw = {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
     try:
         shape = schema.load_shape(QueueDecl, raw, "supervise.json: queue")
     except schema.ShapeError as e:
@@ -254,7 +266,8 @@ def apply_decls(a) -> None:
       宣言の形は引数があっても見る（#1916 の決定 5）
 
     - ブランチ運用（a.flow）: worktree.json の branch_flow をブランチ名まで解いたスナップショット（`flow_snapshot`）。
-      宣言が壊れていれば既定値へ倒さずに DeclError（#3121 の I1）
+      宣言が壊れていれば既定値へ倒さずに DeclError（#3121 の I1）。種別リリース（スプリントに属さないリリース）は
+      `main` 宛の検査と同じ本番チャネルの宣言（`production_flow_decl`）から作り、読めなければ既定値の行で組む（#3308）
 
     リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
     """
@@ -265,7 +278,10 @@ def apply_decls(a) -> None:
     if not a.production_branch and roots and a.kind in USES_PRODUCTION:
         # 既定ブランチは、まだ作っていない worktree ではなく存在する木から解く（#2097 の決定 1）
         a.production_branch = repo.production_branch(repo.first_git_tree(roots), wt)[0]
-    a.flow = flow_snapshot(a, wt)
+    if a.kind == "release" and _pinned_flow(a) is None:
+        a.flow = flow_snapshot(a, *production_flow_decl(a, roots))
+    else:
+        a.flow = flow_snapshot(a, wt)
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:
@@ -276,17 +292,42 @@ def apply_decls(a) -> None:
 FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
 
 
-def flow_snapshot(a, wt: dict) -> dict:
+def _pinned_flow(a) -> dict | None:
+    """引数に既にあるブランチ運用のスナップショット（空でない dict）。無ければ `None`。"""
+    flow = getattr(a, "flow", None)
+    return flow if isinstance(flow, dict) and flow else None
+
+
+def flow_snapshot(a, wt: dict, where: str = FLOW_SOURCE, why: str | None = None) -> dict:
     """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあればそれを使う。
-    スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。"""
-    if isinstance(getattr(a, "flow", None), dict) and a.flow:
-        return a.flow
-    try:
-        flow = branch_flow.of_decl(wt)
-    except branch_flow.FlowError as e:
-        raise DeclError(str(e)) from e
-    source = FLOW_SOURCE if flow.declared else f"既定値（{FLOW_SOURCE} が無い）"
+    スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。
+
+    `where` は読んだ宣言の場所（出所の欄と DeclError の文言に載せる）。`why` があれば宣言を読めなかった理由で、
+    既定値の行で組む（#3308 の I2）。"""
+    pinned = _pinned_flow(a)
+    if pinned is not None:
+        return pinned
+    if why:
+        flow, source = branch_flow.of_decl({}), f"既定値（{why}）"
+    else:
+        try:
+            flow = branch_flow.of_decl(wt)
+        except branch_flow.FlowError as e:
+            raise DeclError(str(e) if where == FLOW_SOURCE else f"{where}: {e}") from e
+        source = where if flow.declared else f"既定値（{where} が無い）"
     return flow.resolve(a.base, getattr(a, "production_branch", None)).as_snapshot(source)
+
+
+def production_flow_decl(a, roots: list[Path]) -> tuple[dict, str, str | None]:
+    """スプリントに属さないリリースのプランが branch_flow を読む宣言・読んだ場所・読めない理由（#3308 の決定 1・I1）。
+
+    読むのは `main` 宛の検査と同じ本番チャネルの宣言。本番チャネルの名前は今の宣言から解き終えたもの（I5）。"""
+    production = getattr(a, "production_branch", None)
+    wt, note = repo.production_decl(repo.first_git_tree(roots), production)
+    where = f"origin/{production} の .ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
+    if wt is None:
+        return {}, where, note
+    return wt, where, None
 
 
 def sprint_flow(a) -> branch_flow.ResolvedFlow:

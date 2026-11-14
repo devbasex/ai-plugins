@@ -53,7 +53,12 @@ pytest_plugins = ["pytester", "pytest_child_cleanup"]
 # `plugins/<family>/skills/` にあり、そちらを収集する。両方をたどると同じテストが 2 度
 # 数えられ、件数が実際の 2 倍近くになる（agy を配布先へ加えた時点で 1569 件が 2974 件へ
 # 増えた）。**生成物は収集の対象から外す。**
-collect_ignore_glob = ["plugins/*/dev.agy"]
+#
+# `plugins/ndf-next/` は自分の設定（plugins/ndf-next/pyproject.toml の importlib 読み込み）と
+# 自分の workflow（ndf-next.yml）で確かめる（scripts/ci-heavy-skip.py の `SELF_TESTED`）。
+# 根から収集すると、`tests/__init__.py` を持つ束どうし（playwright-kit-ops）の conftest が
+# 同じ `tests.conftest` になって収集が止まる。入れ替え（#1142 の S2）で `SELF_TESTED` と一緒に消す。
+collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf-next"]
 
 # 束ごとに要る外部コマンド（前提のコマンドの一覧）。**束によって前提が違う**ため、一覧は
 # 1 か所に置きつつ収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。
