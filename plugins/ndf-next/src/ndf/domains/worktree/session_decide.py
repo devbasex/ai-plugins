@@ -27,3 +27,23 @@ def deviation(dirty: list[str], in_worktree: bool, declared: bool, follow_branch
         listed.append(f"  ... ほか {len(dirty) - MAX_LISTED} 件")
     text = DIRTY.format(count=len(dirty), paths="\n".join(listed))
     return f"{text}\n{FOLLOW_NOTE}" if follow_branch else text
+
+
+# ブランチの追従の判断の結果
+FOLLOW_SKIP = "skip"
+FOLLOW_DETACH = "detach"
+FOLLOW_BASE = "to_base"
+
+
+def follow_target(dirty: bool, branches: list[Optional[str]]) -> tuple[str, Optional[str]]:
+    """メインディレクトリをどこへ合わせるか（宣言の `follow_branch: true` のときだけ判断する）。
+
+    未コミットの変更があれば動かさない（`skip`）。ブランチを持つ開発 worktree がちょうど 1 つならそのブランチの
+    コミットへ detached HEAD で合わせ（`detach`）、0 か 2 つ以上ならベースブランチへ合わせる（`base`）。
+    """
+    if dirty:
+        return FOLLOW_SKIP, None
+    named = [b for b in branches if b]
+    if len(named) == 1:
+        return FOLLOW_DETACH, named[0]
+    return FOLLOW_BASE, None

@@ -1,7 +1,7 @@
 """リポジトリの中の位置と worktree の一覧（git は `adapters.git.Git` を通して読む）。
 
 - `locate`: メインディレクトリと、今の位置が worktree の中か。サブモジュールの中は通常のリポジトリとして扱う
-- `worktrees`: `git worktree list --porcelain -z` の一覧。`dev_worktrees` は置き場 `.worktrees/` の下だけに絞る
+- `worktrees`: `git worktree list` の一覧（読み方は `adapters.git.Git.worktrees`）。`dev_worktrees` は置き場 `.worktrees/` の下だけに絞る
   （置き場の名前は事実の表 `places` の `worktrees` から引く）
 """
 
@@ -12,11 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import Git, GitError, WorktreeEntry, parse_worktree_list
 from ndf.contracts import facts
-
-# ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
-HEADS = "refs/heads/"
 
 
 def worktrees_dir(main_dir: Path) -> Path:
@@ -50,44 +47,13 @@ def locate(git: Git) -> Location:
     return Location(main, top_dir)
 
 
-@dataclass(frozen=True)
-class Worktree:
-    """`git worktree list` の 1 件。`branch` は detached HEAD なら `None`。"""
-
-    path: Path
-    head: str
-    branch: Optional[str]
-    prunable: bool = False
-    locked: bool = False
-
-
-def parse_porcelain(text: str) -> list[Worktree]:
-    """`git worktree list --porcelain -z` の出力を読む（項目は NUL、worktree は空の項目で区切られる）。"""
-    out: list[Worktree] = []
-    for record in text.split("\0\0"):
-        fields = dict(_field(f) for f in record.split("\0") if f)
-        if "worktree" not in fields:
-            continue
-        branch = fields.get("branch")
-        out.append(
-            Worktree(
-                Path(fields["worktree"]),
-                fields["HEAD"] if "HEAD" in fields else "",
-                branch[len(HEADS) :] if branch is not None and branch.startswith(HEADS) else None,
-                "prunable" in fields,
-                "locked" in fields,
-            )
-        )
-    return out
-
-
-def _field(item: str) -> tuple[str, str]:
-    name, _, value = item.partition(" ")
-    return name, value
+# `git worktree list` の 1 件と、その読み手（読み方は git のアダプターが持つ）
+Worktree = WorktreeEntry
+parse_porcelain = parse_worktree_list
 
 
 def worktrees(git: Git) -> list[Worktree]:
-    return parse_porcelain(git.run("worktree", "list", "--porcelain", "-z"))
+    return git.worktrees()
 
 
 def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:

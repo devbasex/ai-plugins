@@ -20,11 +20,17 @@ from ndf.contracts import facts
 # 読める宣言の版
 VERSION = 1
 # 個人設定から重ねる項目と、その値の型
-LOCAL_KEYS: dict[str, type] = {"follow_branch": bool, "localenv": dict, "testenv": dict}
+# 節の名前（依存の用意・ローカルの動作検証・テスト環境）
+DEPS = "deps"
+LOCALENV = "localenv"
+TESTENV = "testenv"
+LOCAL_KEYS: dict[str, type] = {"follow_branch": bool, LOCALENV: dict, TESTENV: dict}
 # 個人設定で反映しない項目のうち、報告もしないもの
 LOCAL_SILENT = ("version", "$schema")
 # guard の許可パスの既定（宣言に guard.allow_paths の配列が無いとき）。知識と設定の置き場
-DEFAULT_ALLOW_PATHS = ("issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/", ".gitignore")
+# git の無視の設定のファイルの名前
+GITIGNORE = ".gitignore"
+DEFAULT_ALLOW_PATHS = ("issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/", GITIGNORE)
 # branch_flow.start が取れる値（宣言の base_branch・production_branch のどちらを起点にするか）
 START_CHANNELS = ("base", "production")
 
@@ -90,7 +96,7 @@ class Declaration:
         return self.raw.get("follow_branch") is True
 
 
-def _read_object(path: Path) -> dict[str, Any]:
+def read_object(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -105,7 +111,7 @@ def _local_overrides(path: Path) -> tuple[dict[str, Any], tuple[str, ...]]:
     if not path.exists():
         return {}, ()
     try:
-        data = _read_object(path)
+        data = read_object(path)
     except DeclarationError as exc:
         return {}, (f"{path.name}: {exc}",)
     keep: dict[str, Any] = {}
@@ -135,7 +141,7 @@ def load(main_dir: Path) -> Optional[Declaration]:
     shared = shared_file(main_dir)
     if not shared.exists():
         return None
-    data = _read_object(shared)
+    data = read_object(shared)
     if data.get("version") != VERSION:
         raise DeclarationError(f"{shared} の version が {VERSION} でない: {data.get('version')!r}")
     over, ignored = _local_overrides(local_file(main_dir))
