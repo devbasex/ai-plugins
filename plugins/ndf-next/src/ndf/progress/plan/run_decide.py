@@ -21,6 +21,9 @@
 その依頼を閉じたら（写しの `reported` から消えたら）、打ち直せば起こせる失敗は `failed` と回数から外して起動の候補へ
 戻す。`final` の失敗は打ち直しても同じ失敗になるので `failed` に残し、行が動くか中止されるまで起こさない。
 
+区切りで止めた計画（`paused`）では次の行を起こさない。実行中の行は終わりまで流すので、答えの後の起こし直しは
+続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。
+
 止めた計画の進行表は終わっていて依頼を書けないので、中止の起動が尽きても `Report` を打たない。実行中の行の中止を
 すべて起こせなくなったら、`failed` と `errors` を載せて `cancel_failed` で終える。
 """
@@ -34,10 +37,14 @@ from typing import Any, Optional, Union
 from ndf.core import loop
 
 # 計画の状態（契約 progress.json の table_states.plan）は、レーンの行の状態と同じ語の定数を使う
-from ndf.progress.lane.types import CANCELLED, COMPLETED, RUNNING
+from ndf.progress.lane.types import CANCELLED, COMPLETED, PAUSED, RUNNING
 
 # 耐久ワークフローの終わりの語
 OUTCOME_COMPLETED, OUTCOME_STOPPED, OUTCOME_CANCEL_FAILED = "completed", "stopped", "cancel_failed"
+# 区切りで止めた計画の終わりは、計画の状態と同じ語にする
+OUTCOME_PAUSED = PAUSED
+# 終えた後に同じ計画で打ち直したら、次の番号の ID で新しく始める終わり（中止を試し直す・再開した計画を続ける）
+OUTCOMES_RESTARTABLE = (OUTCOME_CANCEL_FAILED, OUTCOME_PAUSED)
 
 
 @dataclass(frozen=True)
@@ -193,9 +200,11 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
         return _finish(state, OUTCOME_COMPLETED)
     if snap["state"] == CANCELLED and not snap["running"]:
         return _finish(state, OUTCOME_STOPPED)
+    if snap["state"] == PAUSED and not snap["running"]:
+        return _finish(state, OUTCOME_PAUSED)
     if snap["state"] == RUNNING and snap["complete"]:
         return loop.Next.step(Complete(), state)
-    found = _candidates(state) if snap["state"] in (RUNNING, CANCELLED) else []
+    found = _candidates(state) if snap["state"] in (RUNNING, PAUSED, CANCELLED) else []
     if snap["state"] == RUNNING and state.unreported:
         return loop.Next.step(Report(*state.unreported[0]), state)
     if found:

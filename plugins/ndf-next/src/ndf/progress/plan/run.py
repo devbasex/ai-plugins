@@ -14,6 +14,8 @@
   無くなれば `stopped` で終わる。中止をすべて起こせなくなったら `cancel_failed` で終わる（終わった計画の進行表へは
   依頼を書けない）。`cancel_failed` で終えた耐久ワークフローの ID は再び使わず、`ndf lanes run` を打ち直すと
   次の番号の ID で新しく始めて中止を試し直す
+- 区切りで止めた計画（`ndf lanes stop` の既定）では次の行を起こさず、実行中の行が無くなれば `paused` で終わる。
+  `ndf lanes start` で再開すると、次の番号の ID で新しく始めて止めた所から続ける
 - 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
   （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる。オーガナイザーが
   依頼を閉じたら、打ち直せば起こせる失敗のレーンを起こし直す。起こしたのに期限（`parallel-run.launch` の秒）までに
@@ -228,8 +230,9 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
             if durable.status(wid) is None:
                 return durable.start(lanes_workflow, wid, spec_of(where, plan_id, plan, pol))
             done = durable.result(wid)
-            # 中止を起こせずに終えた 1 本は記録した結果を返すだけになるので、打ち直したら次の ID で中止を試し直す
-            if done["outcome"] != run_decide.OUTCOME_CANCEL_FAILED:
+            # 中止を起こせずに終えた 1 本と区切りで止めて終えた 1 本は記録した結果を返すだけになるので、打ち直したら
+            # 次の ID で中止を試し直す・再開した計画を続ける
+            if done["outcome"] not in run_decide.OUTCOMES_RESTARTABLE:
                 return done
             attempt += 1
 

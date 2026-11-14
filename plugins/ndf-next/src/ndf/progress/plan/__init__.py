@@ -139,8 +139,9 @@ def create_plan(conn: sa.Connection, repo: str, doc: dict[str, Any], start: bool
 
 
 def start_plan(conn: sa.Connection, pid: str) -> None:
+    """計画を始める（オーガナイザー）。区切りで止めた計画は、同じ名前のまま止めた所から再開する。"""
     view, _ = lane.read_plan(conn, pid)
-    if view.state != lane.PENDING:
+    if view.state not in (lane.PENDING, lane.PAUSED):
         raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、始められない", current_id=pid)
     _append(conn, pid, [model.EventDraft("plan_started", "organizer")])
 
@@ -201,6 +202,19 @@ def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, rea
         raise model.Refused(f"レーン {from_lane} に行 {key} は無い")
     lane.cancel_row(conn, pid, from_lane, key, lane.RowChange("organizer", f"レーン {dest} へ移す: {reason}"))
     return lane.add_row(conn, pid, dest, row.input, lane.RowChange("organizer", f"レーン {from_lane} の行 {key} から移した: {reason}"))
+
+
+def pause_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
+    """計画を区切りで止める（オーガナイザー）。実行中の行のスプリントの ID を返す。
+
+    実行中の行は終わりまで流し、耐久ワークフローは次の行を起こさない。行は中止にせず順番表に残すので、
+    `ndf lanes start` を打ち直せば同じ名前の計画が止めた所から続く。動いている計画だけを止められる。
+    """
+    view, rows = lane.read_view(conn, pid)
+    if view.state != lane.RUNNING:
+        raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、区切りで止められない（すぐ止めるのは --now）")
+    _append(conn, pid, [model.EventDraft("plan_paused", "organizer", reason=reason)])
+    return [r.sprint_id for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
 
 
 def stop_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:

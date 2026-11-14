@@ -182,6 +182,17 @@ def test_a_stopped_plan_whose_cancel_cannot_be_launched_ends_as_cancel_failed_wi
     assert finished and state.outcome == "cancel_failed" and state.failed == ("cancel:s1", "cancel:s2")
 
 
+def test_a_paused_plan_wakes_only_answered_rows_and_ends_as_paused_once_nothing_runs():
+    """区切りで止めた計画は次の行を起こさず、実行中の行の答えの後の起こし直しは続け、行が無くなれば paused で終える。"""
+    snap = _snap(state="paused", running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 4)])
+    act, state, _ = _step(RunState(), Done(Observe(), snap))
+    assert act == Launch("a", "r1", resume="s1", seq=4)
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    assert act == Sleep(30.0)
+    _, state, finished = _step(state, Done(Observe(), _snap(state="paused")))
+    assert finished and state.outcome == "paused"
+
+
 def test_a_plan_not_yet_started_is_only_watched():
     act, _, _ = _step(RunState(), Done(Observe(), _snap(state="pending", wakeable=[("a", "r1")])))
     assert act == Sleep(30.0)
@@ -383,6 +394,22 @@ def test_a_rerun_after_cancel_failed_starts_a_new_workflow_and_retries_the_cance
     monkeypatch.setattr(launch, "spawn", spawn)
     assert run.advance(where, "p6", FAST)["outcome"] == "stopped"
     assert run.workflow_id("p6", 2) != run.workflow_id("p6")
+
+
+def test_a_paused_plan_ends_its_workflow_and_a_resumed_plan_continues_with_a_new_one(where, monkeypatch):
+    """区切りで止めた計画の耐久ワークフローは paused で終わり、同じ名前で再開すると次の ID で残りの行を流す。"""
+    with store.open_store(where.url, where.root) as st:
+        pid = _create(st, _doc(_decl("a", [[1], [2]])))
+        with store.transaction(st) as conn:
+            plan.pause_plan(conn, pid, "区切りで止める")
+    spawn, launched = _conductor(where, "completed")
+    _no_wrapper(monkeypatch)
+    monkeypatch.setattr(launch, "spawn", spawn)
+    assert run.advance(where, "p6", FAST)["outcome"] == "paused" and launched == []
+    with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
+        plan.start_plan(conn, pid)
+    assert run.advance(where, "p6", FAST)["outcome"] == "completed"
+    assert launched == [("a", "r1"), ("a", "r2")]
 
 
 def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):
