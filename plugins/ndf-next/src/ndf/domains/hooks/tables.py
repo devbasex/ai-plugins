@@ -58,6 +58,11 @@ def guards() -> list[dict[str, Any]]:
     return load("hooks/guards.json")["guards"]
 
 
+def ndf_commands() -> list[str]:
+    """NDF のコマンドとみなす名前（パスの最後の部分）。"""
+    return load("hooks/guards.json")["ndf_commands"]
+
+
 def runtimes() -> dict[str, dict[str, Any]]:
     return load("hooks/runtimes.json")["runtimes"]
 

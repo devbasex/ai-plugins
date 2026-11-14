@@ -10,7 +10,7 @@ from ndf.domains.hooks.context import ShellCommand
 
 def is_ndf(command: ShellCommand) -> bool:
     """NDF のコマンド（guard の表の `ndf_commands` の名前）を打つか。"""
-    names = tables.load("hooks/guards.json")["ndf_commands"]
+    names = tables.ndf_commands()
     return bool(command.argv) and os.path.basename(command.argv[0]) in names
 
 
