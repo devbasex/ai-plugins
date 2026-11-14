@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: NDF を使うすべてのリポジトリで、本番の経路（`release-steps.py release --channel prod`・選んで集める取り込み方の `release`・`merged-steps.py promote`）と、作り直し（`plugins/ndf-next/`）のリリースのマージで働く。迂回するのは宣言を置いたリポジトリだけである
+- **働く範囲**: NDF を使うすべてのリポジトリの、本番の経路と、作り直し（`plugins/ndf-next/`）のリリースのマージで働く。本番の経路は `release-steps.py release --channel prod`・選んで集める取り込み方の `release`・`merged-steps.py promote` である。迂回するのは宣言を置いたリポジトリだけである
 - **プロジェクトごとに違うもの**: 迂回するかは `.ndf/project.json` の `production_merge.admin` で受ける。引数では受けない（リポジトリの決まりであり、打つたびに変わるものではない）
 - **当たるモード**: `standard`
 
@@ -22,7 +22,12 @@
 | STD1 | 外部の一次情報 | 迂回は ruleset ごとに人へ許す仕組みで、規則ごとに迂回の範囲を分けられない。必須のチェックの通過は NDF が迂回の前に確かめる必要がある |
 | 2026-11-15 の本番の PR #3505 が `reviewDecision` の `REVIEW_REQUIRED` で止まり、人の手でマージした | 実測 | 今の形では承認ゲートの後に人の操作が 1 回要る |
 
-要求と受け入れ条件は #3506 の本文にある（コピーは [issues/issue-3506-requirements.md](issue-3506-requirements.md) ）。この文書は「どう作るか」だけを扱う。
+要求と受け入れ条件は #3506 の本文にある（コピーは [issues/issue-3506-requirements.md](issue-3506-requirements.md) ）。この文書は「どう作るか」だけを扱う。分けた文書は次のとおりである。
+
+| 文書 | 中身 |
+| --- | --- |
+| [issue-3506-design-decisions.md](issue-3506-design-decisions.md) | 決定 1〜8 |
+| [issue-3506-design-detail.md](issue-3506-design-detail.md) | 詳細設計 |
 
 ## ドメインモデル
 
@@ -52,9 +57,15 @@
 | 選んで集める取り込み方の `release` | `release_lib/promotion.py` の `release_selected` → `_merge_exact`（158 行目）→ `merge_on_pr_approval` → 以降は上と同じ |
 | `merged-steps.py promote` | `merged_lib/merge.py` の `promote` → `merge_when_green` → `_merge_pr` |
 
-要求の「調べた事実」は `promotion.py` の 158 行目を `promote` の経路として挙げている。実際は選んで集める取り込み方の経路である（`grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py` で、`_merge_exact` を呼ぶのは `promotion.py` の 120 行目の `release_selected` だけ、`release_selected` を呼ぶのは `release-steps.py` の 682 行目だけ）。`promote` は `merge_on_pr_approval` を通らず、`merge_when_green` を同じプロセスで呼ぶ。`promotion.py` は場合を `merge_on_pr_approval` へ渡し、マージの後の結果の行と、マージ済みからの再開を自分で持つ。そのため、結果の行の `admin`（I8）と、再開で迂回の記録を書かせる呼び出し（I7）だけを足す。
+要求の「調べた事実」は `promotion.py` の 158 行目を `promote` の経路として挙げている。実際は選んで集める取り込み方の経路である。次の検索で、`_merge_exact` を呼ぶのは `promotion.py` の 120 行目の `release_selected` だけだった。`release_selected` を呼ぶのは `release-steps.py` の 682 行目だけだった。
 
-作り直しの `Lander` は 2 つ目の持ち主である。作り直し（`plugins/ndf-next/`）は旧いプラグインのコードを読み込まない別のパッケージで（`plugins/ndf-next/src` の中で旧いプラグインのパスに当たる箇所は、コメントの 2 件だけ）、旧いプラグインを置き換える。そのため、マージの処理を共有できない。
+```bash
+grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py
+```
+
+`promote` は `merge_on_pr_approval` を通らず、`merge_when_green` を同じプロセスで呼ぶ。`promotion.py` は場合を `merge_on_pr_approval` へ渡し、マージの後の結果の行と、マージ済みからの再開を自分で持つ。そのため、結果の行の `admin`（I8）と、再開で迂回の記録を書かせる呼び出し（I7）だけを足す。
+
+作り直しの `Lander` は 2 つ目の持ち主である。作り直し（`plugins/ndf-next/`）は旧いプラグインのコードを読み込まない別のパッケージで、旧いプラグインを置き換える。`plugins/ndf-next/src` の中で旧いプラグインのパスに当たる箇所は、コメントの 2 件だけである。そのため、マージの処理を共有できない。
 
 ### 不変条件
 
@@ -155,7 +166,7 @@
 | 手順書（`skills/release/SKILL.md`・`skills/release/references/release-steps.md`・`skills/development-workflow/references/production-merge.md`・`skills/merged/SKILL.md`）と `lib/README.md` | リリースの場合の表に `cd-admin` の行を足す |
 | 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`） | リリースの場合・迂回の宣言・迂回の記録の意味を持つ |
 
-**リリースの場合の値で分かれる既存の規則のうち、`cd-admin` に当てはまらないもの**（集合の名前と値の名前で `plugins/ndf` を検索し、`cd-admin` が通る `release --channel prod` と `promote` の手順を読んで集めた）。
+**リリースの場合の値で分かれる既存の規則のうち、`cd-admin` に当てはまらないものを次に挙げる。** 集合の名前と値の名前で `plugins/ndf` を検索し、`cd-admin` が通る `release --channel prod` と `promote` の手順を読んで集めた。
 
 | 規則の置き場 | 今の規則 | `cd-admin` で要る形 |
 | --- | --- | --- |
@@ -173,7 +184,14 @@
 | `lib/release_case.py` の冒頭の表と `release_cd_case` の説明 | 3 つの場合を並べる | 4 つの場合を並べる |
 | 手順書 4 本と確定仕様の場合の表・I7 | 2 つの CD のある場合を並べ、迂回なしを定める | `cd-admin` の行と、宣言のあるときの迂回を書く |
 
-当てはまる規則（`approval.approved_on_pr` の `cd-review` 以外は証跡で照らす分岐、`reviewed.approval_check` の `cd-review` だけ付けない分岐、`supervise_lib/release_cd.py` の `cd_prod_steps` と `supervise_lib/sprint_routes.py` の `normal_cd_gate_2` の `cd-review` だけ証跡を書かない分岐）は変えない。`release_lib/promotion.py` の `_merge_exact` は場合を `merge_on_pr_approval` へ渡すだけで、場合の値で分かれる規則を持たないため変えない。
+当てはまる規則は変えない。次の 4 つである。
+
+- `approval.approved_on_pr` の、`cd-review` 以外は証跡で照らす分岐
+- `reviewed.approval_check` の、`cd-review` だけ付けない分岐
+- `supervise_lib/release_cd.py` の `cd_prod_steps` の、`cd-review` だけ証跡を書かない分岐
+- `supervise_lib/sprint_routes.py` の `normal_cd_gate_2` の、`cd-review` だけ証跡を書かない分岐
+
+`release_lib/promotion.py` の `_merge_exact` も変えない。場合を `merge_on_pr_approval` へ渡すだけで、場合の値で分かれる規則を持たないためである。
 
 ```mermaid
 graph TB
@@ -336,7 +354,15 @@ sequenceDiagram
   M-->>S: 結果の行（admin: true）
 ```
 
-図に含めない要素: 宣言の型とスキーマ・宣言の読み取り（場合の判定の中で働く）、承認の照合の文言（承認したコミットの引数を受けたときだけ働く）、本番のプランの部品（プランを組む時点で働く）、ai-plugins の宣言・確定仕様・手順書・用語集（文書と設定）、作り直しの要素（次の段落）。選んで集める取り込み方の `release` は、本番の経路として同じ本番のマージの処理を呼ぶ。
+図に含めない要素は次のとおりである。
+
+- 宣言の型とスキーマ・宣言の読み取り（場合の判定の中で働く）
+- 承認の照合の文言（承認したコミットの引数を受けたときだけ働く）
+- 本番のプランの部品（プランを組む時点で働く）
+- ai-plugins の宣言・確定仕様・手順書・用語集（文書と設定）
+- 作り直しの要素（次の段落）
+
+選んで集める取り込み方の `release` は、本番の経路として同じ本番のマージの処理を呼ぶ。
 
 `promote` は、証跡を書いてから（`_trail_before_merge`）同じ `merge_when_green` を同じプロセスで呼び、迂回の有無を `_merge_pr` へ渡す。迂回の記録は、`merge_when_green` が結果を出す前に、`promote` から渡された処理で置く。`promote` は `head_moved` を 1 で返し、プランの handoff がリリース承認ゲートへ戻す（既存の契約。`merged_lib/merge.py` の 75 行目の説明）。作り直しは `Lander` が既存の順（チェックの待ち → 証跡の読み直し → 先端を添えたマージ）で進め、迂回のときはマージを `mergePullRequest` で打ち、マージの後に記録を置く。
 
@@ -377,83 +403,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-### 決定 1: 宣言の読み手を 1 つにするため、迂回の宣言を `.ndf/project.json` の最上位のキー `production_merge.admin` に置く
-
-旧いプラグインと作り直しの両方が既に読む宣言は `.ndf/project.json` である（作り直しの hook が `delivery` を読む）。`delivery` の行は CD の届け先ごとの並びで、本番チャネルのマージの方式は届け先に依らず 1 つに決まるため、行の属性にすると行どうしで値が食い違いうる。値は真偽を持つオブジェクトにし、`ndf_policies` と同じく `Unknown` を受けられる形にする。
-
-`.ndf/worktree.json` はブランチの起点の宣言で、作り直しが読まない。`.ndf/supervise.json` の `release` は旧いプラグインの進め方の宣言で、作り直しが読まない。どちらに置いても、作り直しへ同じ値を渡す 2 つ目の読み手が要る。
-
-根拠: Value 4 / Value 11（MVV 版 7）
-
-### 決定 2: 承認数を変えずに承認を証跡で取れるようにするため、リリースの場合に 4 つ目の値 `cd-admin` を足し、分岐を場合の属性で書く
-
-宣言のあるリポジトリでは、承認を PR のレビューで取れない（作者本人のレビューは付かない）。承認を取る場所が証跡になり、マージの主体の権限の使い方が変わるため、場合そのものが変わる。値を足し、`trail_approval` と `admin_merge` の 2 つの属性を値から導く。値どうしの比較を属性に置き換えると、次に値を足すときも分岐の書き換えが 1 か所で済む。
-
-`cd-review` のまま迂回だけを許すと、承認を照らす相手（レビュー）が存在しないため承認ゲートを抜けられない。`cd-no-review` に寄せると、場合の理由（承認数 0）と事実が食い違い、`release-case` の出力を読む人が承認数を誤る。
-
-根拠: Value 3 / Value 9 / Value 11（MVV 版 7）
-
-### 決定 3: 迂回を必要なときだけに限るため、承認数が 0 か読めないときは宣言があっても迂回しない
-
-承認数が 0 なら迂回なしでマージでき、迂回は要らない。承認数が読めないときに迂回へ倒すと、本当は必須の規則を NDF が見ないまま通す側へ誤る（要求の前提 3 と同じ向き）。読めないときは今と同じく `cd-no-review` で迂回なしに打ち、レビューが本当に必須なら GitHub が断って止まる。
-
-根拠: Value 1 / C2（MVV 版 7）
-
-### 決定 4: 迂回の前の待ちと先端の照合を作り直さないため、旧いプラグインの迂回は既存の `merge-when-green` の `--admin` の経路を使う
-
-`merge-when-green` は既定で `--admin` を付け、`--expect-head` で先端を照らし、チェックの通過を待ってから `--match-head-commit` 付きでマージする（根拠の位置は「処理の流れ」の図の判定の根拠の表）。`cd-admin` では `no_admin` を偽で渡すだけで、I4・I5 と、待つ間に先端が動いた場合の I6 が既存の照合と待ちで成り立つ。最後の読み直しの後に先端が動いて GitHub が断った場合だけは今の `_merge_pr` が 1 を返すため、断られた後に PR を読み直して `head_moved` を返す処理を `_merge_pr` に足す。この読み直しは迂回の有無に依らず働き、宣言の無いリポジトリでも、同じ場合に止まる理由が「マージの失敗（1）」から「先端が動いた（本番の経路は 10）」に変わる。マージしないことは変わらない。
-
-迂回の指定を GitHub の API で直に打つ形は採らない。待ちと先端の照合を 2 つ目に持つことになる。
-
-- 作り方: ライブラリやサービスを使う
-- 比べた候補: PRD1 / PRD2 / PRD3
-
-根拠: Value 3 / Value 11（MVV 版 7）
-
-### 決定 5: 作り直しの迂回を旧いプラグインと同じ根拠で通すため、作り直しは迂回するときだけ `gh pr merge --admin` と同じ GraphQL の `mergePullRequest` を先端付きで打つ
-
-旧いプラグインの迂回は `gh pr merge --admin` で、その実装は迂回の引数を送らずに GraphQL の `mergePullRequest` を呼ぶ（PRD1）。`gh` の文書はこの呼び出しで要件を満たさない PR をマージできると書いており、迂回を許された人がこの呼び出しを打てば GitHub が迂回を認める、という根拠がある。作り直しの同期の REST のマージ（PRD3）は、同じく迂回を認めるかが文書に無い（「確かめられなかったこと」）。そこで作り直しは、迂回するとき（宣言があり、承認数が 1 以上と読めるとき。I2）だけ、`mergePullRequest` を `expectedHeadOid`（PRD4）に照らした先端を添えて打つ。迂回しないときは今の同期の REST のマージのまま変えない。
-
-作り直しの `Lander` は既に、チェックの待ち・証跡の読み直し・先端を添えたマージの順を持ち、I4〜I6 を満たす。`mergePullRequest` が断られたときは、同期のマージと同じく PR を読み直して止まった理由の種類を決める（`adapters/github.py` の `refusal_kind`）。迂回したときは、マージの後に迂回の記録を置き、出力に `admin: true` を書く。
-
-採らない手段と理由:
-
-- 同期の REST のマージのまま迂回を見込む形: 迂回が通るかを確かめられず、通らなかったときに受け入れ条件 8 を満たす経路が残らない
-- 非同期のマージ（`bypass_rules`、PRD3）: 結果が後から届くため、マージの完了を待つ処理が新しく要り、先端を添えたマージの結果を同じ呼び出しで受けられない
-- 作り直しから `gh pr merge --admin` を呼ぶ形: 作り直しは GitHub の操作を `adapters/github.py` の HTTP の接続に集めており、外部のコマンドを足すと接続が 2 つになる
-
-- 作り方: ライブラリやサービスを使う
-- 比べた候補: PRD1 / PRD3 / PRD4
-
-根拠: Value 3 / Value 4 / Value 9（MVV 版 7）
-
-### 決定 6: 迂回したことを承認と同じ場所で読めるよう、迂回の記録を本番の PR のコメントとして承認の証跡の書き手が置く
-
-承認の証跡は本番の PR の上にあり、迂回の記録が同じ PR にあれば、誰がどの先端を承認し、それをどう通したかを 1 つの画面で読める。記録は証跡と別の印を持ち、証跡の判定に数えない。リリース記録（公開の後の `record` の手順）は打たれる時点と打つ担い手が本番のマージと別で、迂回の有無を受け渡す経路が新しく要るため、置き場にしない。
-
-根拠: Value 13 / Value 14（MVV 版 7）
-
-### 決定 7: マージ済みの本番を巻き戻さないため、記録を書けなければ本番の完了と分けて 1 で報告し、打ち直しで書く
-
-記録はマージの後に書くため、書けない時点で本番は出ている。公開の後の手順（タグと GitHub Release の確認）は止めずに進め、結果の要約で「本番は出した・迂回の記録を書けなかった」と分けて 1 を返す。戻すマージの失敗の報告（`promotion.merge_back_after`）と同じ形である。打ち直しは再開の流れで記録だけを書く。
-
-記録を書けないときにマージを止める形は採らない。記録はマージした事実を書くため、マージの前には書けない。
-
-根拠: Value 13（MVV 版 7）
-
-### 決定 8: ruleset が求める人の承認を人が見ないまま迂回で通さないため、`cd-admin` は MVV 判定で承認ゲートを代えず、`cd-review` と同じく利用者の承認を要る
-
-`cd-admin` は、ruleset が人の承認レビューを 1 件以上求める本番チャネルを、承認ゲートの承認（証跡）で代えて迂回する場合である。要求はこの承認を「承認ゲートの利用者の承認」と定めている（目的・E3・受け入れ条件 1）。MVV 判定の証跡で迂回まで通すと、ruleset が求める人の承認を、人が一度も見ないまま通すことになる。これは「誰の承認でマージできるか」を変える操作（C2）を AI の判定で通すことに当たり、共通原則は C の操作を AI の解釈で緩めない。
-
-`cd-no-review` は ruleset が人の承認を求めない（承認数 0）ため、MVV 判定で承認ゲートを代えても ruleset の求めを外さない。`cd-admin` はこの根拠を共有しないため、`cd-no-review` とそろえず、場合の属性 `human_approval` を `cd-review` と `cd-admin` で真にする。
-
-- MVV 判定のプランは、`cd-admin` でも MVV 判定の記録を置いたところで承認ゲートとして終える（`cd_release_wait` が `gate_next` を返し、`cd_prod_steps` は承認ゲートの後に `approve-pr` を `--by user` で置く）
-- 利用者の承認の後に `run <計画> --from approve-pr` で証跡を書き、マージまで進む
-- 証跡の照合も、`cd-admin` では担い手が `user` の証跡だけを承認に数える（I9）。手順を外れて `approve --pr --by mvv` や `promote --gate-approved mvv` を打っても、迂回に届かない
-
-宣言を置いたリポジトリの利用者が手で操作するのは、承認ゲートでの承認の 1 回だけである。承認の後にマージを手で打つ操作は無くなる（目的）。
-
-根拠: Value 1 / C2（MVV 版 7）
+決定 1〜8 は [issue-3506-design-decisions.md](issue-3506-design-decisions.md) にある。
 
 ## テスト設計
 

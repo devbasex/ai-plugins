@@ -1,6 +1,6 @@
 # #3506 の詳細設計: 本番の PR を宣言に従って管理者の迂回でマージする
 
-設計文書 [issues/issue-3506-design.md](issue-3506-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。不変条件（I1〜I9）・決定（決定 1〜8）・リリースの場合の値（`cd-no-review` / `cd-review` / `cd-admin` / `no-cd`）は設計文書の番号と名前で指す。
+設計文書 [issues/issue-3506-design.md](issue-3506-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。不変条件（I1〜I9）と決定（決定 1〜8）は設計文書の番号で指し、リリースの場合の値（`cd-no-review` / `cd-review` / `cd-admin` / `no-cd`）は名前で指す。決定の本文は [issue-3506-design-decisions.md](issue-3506-design-decisions.md) にある。
 
 この文書では、旧いプラグインを `plugins/ndf/scripts/` からの相対パスで、作り直しを `plugins/ndf-next/src/ndf/` からの相対パスで書く。表で関数を指すときは「モジュール名.関数名」か「クラス名.メソッド名」で書く。
 
@@ -39,7 +39,11 @@ docs/specifications/ndf-release-approval-on-pr.md
 docs/glossary/glossary.json・docs/glossary.md
 ```
 
-依存の向きは今のまま一方向である。旧いプラグインでは `lib/release_case.py` が `lib/project_decl.py` を読み、`release_lib/` と `merged_lib/` と `supervise_lib/` が `lib/release_case.py` を読む。`merged_lib/merge.py` は既に `release_lib/reviewed.py` と `release_lib/approval_trail.py` を読んでおり、`release_lib/` から `merged_lib/` への読み込みは足さない（`release_lib/reviewed.py` は `merge-when-green` を子のプロセスで呼ぶ）。作り直しでは `domains/release/land.py` が `adapters/github.py` と `domains/release/trail.py` を読み、`domains/release/cli.py` が `declaration.py` と `land.py` を読む。作り直しは旧いプラグインを読み込まない。
+依存の向きは今のまま一方向である。
+
+- 旧いプラグインでは `lib/release_case.py` が `lib/project_decl.py` を読む。`release_lib/`・`merged_lib/`・`supervise_lib/` は `lib/release_case.py` を読む
+- `merged_lib/merge.py` は既に `release_lib/reviewed.py` と `release_lib/approval_trail.py` を読んでいる。`release_lib/` から `merged_lib/` への読み込みは足さない（`release_lib/reviewed.py` は `merge-when-green` を子のプロセスで呼ぶ）
+- 作り直しでは `domains/release/land.py` が `adapters/github.py` と `domains/release/trail.py` を読む。`domains/release/cli.py` は `declaration.py` と `land.py` を読む。作り直しは旧いプラグインを読み込まない
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -97,7 +101,7 @@ docs/glossary/glossary.json・docs/glossary.md
 
 ## 関数の仕様
 
-旧いプラグインと作り直しで同じ名前の関数は、モジュール名を付けて区別する（`approval_trail.write_admin_record` は旧いプラグイン、`trail.write_admin_record` は作り直し）。
+旧いプラグインと作り直しで同じ名前の関数は、モジュール名を付けて区別する。`approval_trail.write_admin_record` は旧いプラグイン、`trail.write_admin_record` は作り直しの関数である。
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
