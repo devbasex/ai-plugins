@@ -35,7 +35,8 @@ def test_scaled_follows_long_measurements():
 @pytest.mark.parametrize(
     "change",
     [
-        lambda d: {**d, "version": 2},
+        lambda d: {**d, "version": 1},
+        lambda d: {k: v for k, v in d.items() if k != "owner"},
         lambda d: {**d, "policies": {}},
         lambda d: {**d, "policies": {"a.b": {"summary": "x"}}},
         lambda d: {**d, "policies": {"a.b": {"summary": "x", "seconds": -1}}},
@@ -53,7 +54,7 @@ def test_wrong_shape_stops(contracts_copy, change):
 
 def test_duplicate_policy_names_stop(contracts_copy):
     contracts_copy(
-        "limits.json", text='{"version": 1, "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}'
+        "limits.json", text='{"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1}, "a.b": {"summary": "y", "seconds": 2}}}'
     )
     with pytest.raises(limits.LimitsError, match="a.b"):
         limits.table()
@@ -92,6 +93,6 @@ def test_value_rejects_non_value_keys(key):
 
 
 def test_validate_builds_policies_with_name_and_absent_values_as_none():
-    got = limits.validate({"version": 1, "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}}})
+    got = limits.validate({"owner": "o", "policies": {"a.b": {"summary": "x", "seconds": 1.5, "attempts": 2}}})
     assert got == {"a.b": limits.Policy(name="a.b", summary="x", seconds=1.5, attempts=2)}
     assert got["a.b"].interval is None

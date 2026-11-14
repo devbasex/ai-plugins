@@ -76,3 +76,17 @@ def test_entrypoint_does_not_import_from_callers_directory(tmp_path):
 
     assert "HIJACKED" not in done.stdout
     assert done.returncode == 0
+
+
+def test_every_subcommand_reports_its_table_name_as_tool():
+    # 3394-11: 結果 JSON の tool は副命令の表の名前を 1 つの求め方で引く
+    import importlib
+
+    for name, module in cli.COMMANDS.items():
+        assert cli.tool_of(module) == name
+        assert importlib.import_module(module).TOOL == name
+
+
+def test_tool_of_rejects_a_module_outside_the_table():
+    with pytest.raises(LookupError):
+        cli.tool_of("ndf.no_such_command")

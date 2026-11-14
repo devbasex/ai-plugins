@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import socket
-import threading
 import time
 from collections.abc import Callable, Iterator
 
@@ -14,6 +12,8 @@ import httpx
 import pytest
 
 from ndf.adapters import notify
+
+from . import _drip_server
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -150,37 +150,13 @@ Serve = Callable[..., str]
 
 @pytest.fixture
 def serve() -> Iterator[Serve]:
-    """本物の接続のサーバーを立て、URL を返す。
-
-    要求を受けたら `head` をすぐ送り、`drip` を `every` 秒ごとに `count` 回（`None` なら止められるまで）送って黙る。
-    """
+    """本物の接続のサーバーを立て、URL を返す（振る舞いは `_drip_server.start`）。テストの終わりに止める。"""
     stops: list[Callable[[], None]] = []
 
     def start(head: bytes, drip: bytes, every: float, count: int | None = None) -> str:
-        srv = socket.create_server(("127.0.0.1", 0))
-        quit_ = threading.Event()
-
-        def run() -> None:
-            conn, _ = srv.accept()
-            with conn, contextlib.suppress(OSError):
-                conn.recv(65536)
-                conn.sendall(head)
-                sent = 0
-                while (count is None or sent < count) and not quit_.wait(every):
-                    conn.sendall(drip)
-                    sent += 1
-                quit_.wait(5)
-
-        thread = threading.Thread(target=run, daemon=True)
-        thread.start()
-
-        def stop() -> None:
-            quit_.set()
-            thread.join(5)
-            srv.close()
-
+        url, stop = _drip_server.start(head, drip, every, count)
         stops.append(stop)
-        return f"http://127.0.0.1:{srv.getsockname()[1]}/"
+        return url
 
     yield start
     for stop in stops:

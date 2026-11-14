@@ -10,6 +10,7 @@ PostgreSQL を入れてある（サービスは止まっている）。手元に
 from __future__ import annotations
 
 import glob
+import json
 import os
 import shutil
 import socket
@@ -76,3 +77,12 @@ def _start_postgres(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[
 def start_postgres() -> Callable[[pytest.TempPathFactory], AbstractContextManager[tuple[Path, str]]]:
     """PostgreSQL を起こす contextmanager。fixture の scope は使う側が決める。"""
     return _start_postgres
+def _last_result(stdout: str) -> dict:
+    """標準出力の最後の 1 行（前後の空白を除いた後）を結果 JSON として読む。"""
+    return json.loads(stdout.strip().splitlines()[-1])
+
+
+@pytest.fixture
+def last_result():
+    """標準出力の最後の 1 行を結果 JSON として読む関数（`last_result(stdout)`）。"""
+    return _last_result

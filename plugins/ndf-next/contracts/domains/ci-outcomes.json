@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "summary": "CI のチェックの結論と状態（GitHub の CheckRun の conclusion・status と StatusContext の state を小文字にした値）を、NDF が数える結果へ写す。失敗と数える集合はこの 1 か所だけが持ち、PR の情報・merge-fix・merge-when-green・試走が同じ表を読む",
   "owner": "D2（contracts/domains）",
   "columns": {
