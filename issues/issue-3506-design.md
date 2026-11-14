@@ -52,7 +52,7 @@
 | 選んで集める取り込み方の `release` | `release_lib/promotion.py` の `release_selected` → `_merge_exact`（158 行目）→ `merge_on_pr_approval` → 以降は上と同じ |
 | `merged-steps.py promote` | `merged_lib/merge.py` の `promote` → `merge_when_green` → `_merge_pr` |
 
-要求の「調べた事実」は `promotion.py` の 158 行目を `promote` の経路として挙げている。実際は選んで集める取り込み方の経路である（`grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py` で、`_merge_exact` を呼ぶのは `promotion.py` の 120 行目の `release_selected` だけ、`release_selected` を呼ぶのは `release-steps.py` の 682 行目だけ）。`promote` は `merge_on_pr_approval` を通らず、`merge_when_green` を同じプロセスで呼ぶ。`promotion.py` は場合を `merge_on_pr_approval` へ渡すだけなので、この設計では変えない。
+要求の「調べた事実」は `promotion.py` の 158 行目を `promote` の経路として挙げている。実際は選んで集める取り込み方の経路である（`grep -rn "_merge_exact\|promotion\." plugins/ndf/scripts --include=*.py` で、`_merge_exact` を呼ぶのは `promotion.py` の 120 行目の `release_selected` だけ、`release_selected` を呼ぶのは `release-steps.py` の 682 行目だけ）。`promote` は `merge_on_pr_approval` を通らず、`merge_when_green` を同じプロセスで呼ぶ。`promotion.py` は場合を `merge_on_pr_approval` へ渡し、マージの後の結果の行と、マージ済みからの再開を自分で持つ。そのため、結果の行の `admin`（I8）と、再開で迂回の記録を書かせる呼び出し（I7）だけを足す。
 
 作り直しの `Lander` は 2 つ目の持ち主である。作り直し（`plugins/ndf-next/`）は旧いプラグインのコードを読み込まない別のパッケージで（`plugins/ndf-next/src` の中で旧いプラグインのパスに当たる箇所は、コメントの 2 件だけ）、旧いプラグインを置き換える。そのため、マージの処理を共有できない。
 
@@ -136,11 +136,12 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 宣言の型（`project_lib/model.py` の `ProductionMerge`・`Project.production_merge`）とスキーマ（`project.schema.json`） | `production_merge` のキーの形を定める。値は `{"admin": <真偽>}` か `Unknown` |
+| 宣言の型（`project_lib/model.py` の `ProductionMerge`・`ProjectDecl.production_merge`）とスキーマ（`project.schema.json`） | `production_merge` のキーの形を定める。値は `{"admin": <真偽>}` か `Unknown` |
 | 宣言の読み取り（`lib/project_decl.py` の `production_admin`） | I1 の判定を 1 か所で持ち、`true` のときだけ真を返す |
 | 場合の判定（`lib/release_case.py`） | 4 つ目の値 `cd-admin` と、場合の属性 `trail_approval`（証跡で承認を取る）・`admin_merge`（迂回でマージする）・`human_approval`（MVV 判定で承認ゲートを代えない）を持つ。I2 を守る |
 | 本番の PR のマージ（`merged_lib/merge.py` の `_merge_pr`） | 渡された迂回の有無で `gh pr merge` に `--admin` を付け、結果の行に `admin` を必ず書く。GitHub が断ったら PR を読み直し、先端が動いていれば `head_moved` の項目を返す（I6） |
 | 本番のマージの頼み手（`release_lib/reviewed.py` の `release_prod`・`merge_on_pr_approval`） | 場合の属性で証跡の待ちと迂回の有無を決めて `merge-when-green` へ渡し、迂回の記録を書かせる |
+| 選んで集める取り込み方の本番（`release_lib/promotion.py` の `release_selected`） | 本番の PR の結果の行に迂回の有無を書き、マージ済みからの再開で迂回の記録を書かせる。記録を書けなかったことを、戻すマージと同じく本番の完了と分けて報告する |
 | 承認の照合（`release_lib/approval.py` の `approved_on_pr`・`_approved_from_pr`） | 場合の属性で、承認を書く手順の案内を切り替える。`cd-admin` では担い手が `user` の証跡だけを承認に数える（I9） |
 | `promote`（`merged_lib/merge.py` の `promote`・`_trail_before_merge`） | `cd-admin` で証跡を書き、迂回の有無を `_merge_pr` へ渡し、迂回の記録を書かせる。`cd-admin` で `--gate-approved mvv` を受けたら、証跡を書かずに承認ゲート（10）で止まる（I9） |
 | 本番のプランの部品（`supervise_lib/release_cd.py` の `cd_release_wait`・`cd_prod_steps`） | `human_approval` の場合は、MVV 判定のプランでも承認ゲートで止め、証跡は利用者の承認の後に `--by user` で書く |
@@ -161,6 +162,7 @@
 | `release_lib/reviewed.py` の `release_prod` の `waiting` | `cd-no-review` だけ証跡を書く手順を案内する | `trail_approval` で証跡の案内を出す |
 | `release_lib/reviewed.py` の `merge_on_pr_approval` | `cd-no-review` だけ証跡の commit status を待ち、迂回なしを固定で渡す | `trail_approval` で待ち、`admin_merge` で迂回を渡す |
 | `release_lib/reviewed.py` の `release_prod` の結果の行 | `admin: False` を固定で書く | 迂回の有無を書く |
+| `release_lib/promotion.py` の `release_selected` の結果の行とマージ済みからの再開 | 結果の行に `admin` を書かない。再開では証跡も記録も見ない | 結果の行に迂回の有無を書く。再開で迂回の記録を書かせる |
 | `release_lib/approval.py` の `_approved_from_pr` | `cd-no-review` だけ証跡の案内を出す | `trail_approval` で案内を出す |
 | `release_lib/approval.py` の `approved_on_pr` | 証跡の担い手を問わない | `human_approval` かつ `trail_approval` のとき、担い手が `user` の証跡だけを数える（I9） |
 | `merged_lib/merge.py` の `promote` | CD のある場合は迂回なしを固定にする | `admin_merge` のときだけ迂回を使う |
@@ -171,7 +173,7 @@
 | `lib/release_case.py` の冒頭の表と `release_cd_case` の説明 | 3 つの場合を並べる | 4 つの場合を並べる |
 | 手順書 4 本と確定仕様の場合の表・I7 | 2 つの CD のある場合を並べ、迂回なしを定める | `cd-admin` の行と、宣言のあるときの迂回を書く |
 
-当てはまる規則（`approval.approved_on_pr` の `cd-review` 以外は証跡で照らす分岐、`reviewed.approval_check` の `cd-review` だけ付けない分岐、`supervise_lib/release_cd.py` の `cd_prod_steps` と `supervise_lib/sprint_routes.py` の `normal_cd_gate_2` の `cd-review` だけ証跡を書かない分岐）は変えない。`release_lib/promotion.py` は場合を `merge_on_pr_approval` へ渡すだけで、場合の値で分かれる規則を持たないため変えない。
+当てはまる規則（`approval.approved_on_pr` の `cd-review` 以外は証跡で照らす分岐、`reviewed.approval_check` の `cd-review` だけ付けない分岐、`supervise_lib/release_cd.py` の `cd_prod_steps` と `supervise_lib/sprint_routes.py` の `normal_cd_gate_2` の `cd-review` だけ証跡を書かない分岐）は変えない。`release_lib/promotion.py` の `_merge_exact` は場合を `merge_on_pr_approval` へ渡すだけで、場合の値で分かれる規則を持たないため変えない。
 
 ```mermaid
 graph TB
@@ -269,7 +271,7 @@ classDiagram
 | `production_merge` | オブジェクトか `Unknown`（`{"unknown": "<理由>"}`） | 無し | 本番の PR のマージの方式 |
 | `production_merge.admin` | 真偽 | 無し（偽と同じ） | 真なら、本番チャネルが承認レビューを必須にするとき、本番の PR を管理者の迂回でマージする |
 
-スキーマ（`project.schema.json`）は型から作る既存の手順で作り直す。解析（`project_lib`）はこのキーを書かず、利用者が書いた値を残す（`ndf_policies` と同じ扱い）。
+スキーマ（`project.schema.json`）は型から作る既存の手順で作り直す。解析（`project_lib`）はこのキーを書かず、利用者が書いた値を残す（`docs` と同じ扱い。解析が書くキーの一覧 `ITEM_KEYS` に入れない）。
 
 ### リリースの場合（`release-steps.py release-case` の `metrics`）
 
@@ -362,6 +364,7 @@ sequenceDiagram
 | セキュリティ | 迂回は承認の一致・チェックの通過の後にだけ打つ | 迂回の指定は `merge-when-green` の既存の待ちと先端の照合の後でだけ効く（I4〜I6）。場合の判定は宣言が `true` でなければ迂回の場合を返さない（I1・I2） |
 | セキュリティ | 宣言を読めないときは迂回しない | 下の表のとおり、宣言の値が読めないときは宣言なしとして迂回なしでマージし、ファイル自体が読めないときはマージを頼む前に 3 で止まる。どちらも迂回しない |
 | セキュリティ | PR の変更だけで迂回を選べない | 迂回の宣言は、`delivery` と同じくメインディレクトリ → 呼ばれた木の順に読む。設定の契約（`plugins/ndf/contracts/settings/project.json.json`）の `keys.production_merge.place` を `main` にする（`delivery` と同じ形。#2363 と同じ理由） |
+| 運用・保守性 | 迂回したかを結果 JSON と PR の上の両方から読める | 結果の行の `admin`（I8）と、本番の PR の迂回の記録（I7） |
 
 **受け入れ条件 7 の「宣言が読めない」の読み方**:
 
@@ -371,7 +374,6 @@ sequenceDiagram
 | `.ndf/project.json` 自体が壊れている（JSON として読めない） | `lib/delivery.py` の `load_delivery`（247〜249 行目）が読めない理由を `problems` に書き、`lib/release_case.py` の `case_of`（98〜100 行目）が `CaseUnreadable` にし、`case_or_stop`（63〜68 行目）が 3 で止める。マージを頼まない | 変えない。迂回の宣言を足しても、ファイルが壊れていれば同じ所で 3 で止まり、`--admin` を付けたマージに届かない |
 
 ファイルが壊れているときにマージまで進めると、CD の宣言（`delivery`）も読めないまま本番へ入れることになる。そのため、受け入れ条件 7 の「迂回なしでマージし」は宣言の値が読めない場合に当て、ファイルが壊れている場合は「迂回しない」（前提 3）を、今の 3 での停止で満たす。
-| 運用・保守性 | 迂回したかを結果 JSON と PR の上の両方から読める | 結果の行の `admin`（I8）と、本番の PR の迂回の記録（I7） |
 
 ## 決定の記録
 
@@ -479,7 +481,7 @@ GitHub の操作は差し替えた操作の層で確かめる。実際の迂回�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3506 | 実装する | — | `plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/settings/project.json.json`、`plugins/ndf/scripts/lib/project_decl.py`、`plugins/ndf/scripts/lib/release_case.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/release_lib/reviewed.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/release_lib/approval_trail.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/release_cd.py`、`plugins/ndf/scripts/tests/test_release_case.py`、`plugins/ndf/scripts/tests/test_release_steps.py`、`plugins/ndf/scripts/tests/test_release_cd.py`、`plugins/ndf/scripts/tests/test_sprint_close_merge_green.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/adapters/github.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`.ndf/project.json`、`docs/specifications/ndf-release-approval-on-pr.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/development-workflow/references/production-merge.md`、`plugins/ndf/skills/merged/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #3506 | 実装する | — | `plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/settings/project.json.json`、`plugins/ndf/scripts/lib/project_decl.py`、`plugins/ndf/scripts/lib/release_case.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/release_lib/reviewed.py`、`plugins/ndf/scripts/release_lib/promotion.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/release_lib/approval_trail.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/release_cd.py`、`plugins/ndf/scripts/tests/test_release_case.py`、`plugins/ndf/scripts/tests/test_release_steps.py`、`plugins/ndf/scripts/tests/test_release_cd.py`、`plugins/ndf/scripts/tests/test_sprint_close_merge_green.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/adapters/github.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`.ndf/project.json`、`docs/specifications/ndf-release-approval-on-pr.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/development-workflow/references/production-merge.md`、`plugins/ndf/skills/merged/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 人へ残す判断
 
