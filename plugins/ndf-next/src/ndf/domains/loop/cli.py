@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -55,12 +56,12 @@ def _command(step: Optional[ctl.Step], session: Optional[str]) -> Optional[dict[
     return result.command(*args, ask=step.ask)
 
 
-def _outcome(d: ctl.Decision, session: Optional[str], items: Optional[list] = None) -> dict[str, Any]:
+def _outcome(d: ctl.Decision, session: Optional[str]) -> dict[str, Any]:
     nxt = _command(d.next, session)
     if d.refused:
         assert d.kind is not None
         return result.stopped(TOOL, d.kind, d.summary, next=nxt, metrics=dict(d.metrics))
-    return result.result(TOOL, result.OK, d.summary, items, dict(d.metrics), next=nxt)
+    return result.result(TOOL, result.OK, d.summary, list(d.items) or None, dict(d.metrics), next=nxt)
 
 
 def _lap_dict(lap: rec.Lap) -> dict[str, Any]:
@@ -102,10 +103,10 @@ def _candidates(path: Path) -> list[select_decide.Row]:
     return select_decide.rows_of(raw)
 
 
-def _select(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> tuple[ctl.Decision, Optional[list]]:
+def _select(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decision:
     rows = _candidates(a.candidates)
     chosen = select_decide.select(rows, select_decide.facts_of(state, a.first, a.size))
-    return ctl.open_lap(state, c, chosen.chosen), chosen.items()
+    return replace(ctl.open_lap(state, c, chosen.chosen), items=tuple(chosen.items()))
 
 
 def _lap(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decision:
@@ -118,8 +119,8 @@ def _answer(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Deci
     return ctl.answer(state, c, a.pr, a.answer, head_of(a.cwd, a.pr), a.note)
 
 
-# 書き込む副命令の判断の呼び出し（記録を畳んだ状態・文脈・引数 → 判断。選定は選んだ行も返す）
-Write = Callable[[rec.LoopState, ctl.Ctx, argparse.Namespace], "ctl.Decision | tuple[ctl.Decision, Optional[list]]"]
+# 書き込む副命令の判断の呼び出し（記録を畳んだ状態・文脈・引数 → 判断。選定は選んだ行を判断の items に持つ）
+Write = Callable[[rec.LoopState, ctl.Ctx, argparse.Namespace], ctl.Decision]
 
 
 def _write(a: argparse.Namespace) -> dict[str, Any]:
@@ -127,11 +128,10 @@ def _write(a: argparse.Namespace) -> dict[str, Any]:
     session = a.session if "session" in a else None
     with loop.locked():
         state = rec.fold(loop.read())
-        got = a.write(state, ctl.Ctx(a.name, session, time.time()), a)
-        decision, items = got if isinstance(got, tuple) else (got, None)
+        decision = a.write(state, ctl.Ctx(a.name, session, time.time()), a)
         if not decision.refused:
             loop.append(decision.events)
-    return _outcome(decision, session, items)
+    return _outcome(decision, session)
 
 
 def _get(a: argparse.Namespace) -> dict[str, Any]:

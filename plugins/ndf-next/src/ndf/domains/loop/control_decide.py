@@ -38,13 +38,14 @@ class Step:
 
 @dataclass(frozen=True)
 class Decision:
-    """副命令の判断。`kind` が None なら `events` を書いて成功、ほかは断り（何も書かない）。"""
+    """副命令の判断。`kind` が None なら `events` を書いて成功、ほかは断り（何も書かない）。`items` は結果の行（選定の行）。"""
 
     summary: str
     events: tuple[dict[str, Any], ...] = ()
     kind: Optional[str] = None
     next: Optional[Step] = None
     metrics: dict[str, Any] = field(default_factory=dict)
+    items: tuple[dict[str, Any], ...] = ()
 
     @property
     def refused(self) -> bool:
