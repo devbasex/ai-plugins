@@ -4,7 +4,7 @@
 - #750: 読み取りの工程の担当は読み取り用ディレクトリで動き、コードを書く工程の結果ファイルは作業ディレクトリの中に置く
 - #2057: 完了した回を返すとき、持たない引数（`--reopen`）を案内しない
 - #3313: テストを足す担当が結果を出さずに終わっても止まらず、起点まで取り消して項目を見送る
-- #620: 足したテストが全体の実行に収集されなければ項目を戻す
+- #620: 足したテストが全体の実行に収集されなければ項目を戻す。直す前のコードで通らなければ項目を戻す
 - #2680: 衝突している PR は CI を待たずに止まる
 - #3038: 最終ゲートの直しが対象範囲の外を変えたら取り込まずに止まる
 """
@@ -121,6 +121,36 @@ def test_added_test_not_collected_by_the_whole_run_reverts_the_item(world, monke
     assert item["status"] == "reverted" and "tests/geo_helpers.py" in item["reason"]
 
 
+def test_added_test_that_fails_on_the_code_before_the_change_reverts_the_item(world, monkeypatch) -> None:
+    # 足したテストが直す前のコードで通らなければ、今の振る舞いを固定していないので実装へ進まない
+    decl = {
+        "test": {
+            "suites": [
+                {
+                    "name": "pytest",
+                    "command": "pytest",
+                    "scope_command": "false {paths}",
+                    "collect_command": "printf 'tests/test_geo.py::test_area\\n'",
+                    "paths": ["."],
+                }
+            ]
+        }
+    }
+    adds = commit_at(TESTS, "テストを足す", {"tests": ["tests/test_geo.py"]})
+
+    def with_decl(spec, submit):
+        (spec.cwd / ".ndf").mkdir(exist_ok=True)
+        (spec.cwd / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+        return adds(spec, submit)
+
+    fake = FakeAgents(_acts(**{"add-tests": with_decl}))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    item = _state(world)["items"][0]
+    assert item["status"] == "reverted" and "直す前のコードで通らない" in item["reason"]
+    assert "implement" not in [phase for _, phase, _, _ in fake.seen]
+
+
 def test_conflicting_pull_request_stops_without_waiting_for_ci(world, monkeypatch) -> None:
     ci = fake_ci(Watched(None))
     got = drive.drive(world.config(), ports(FakeAgents(_acts()), FakeHub("unknown", "dirty"), ci=ci))
@@ -143,4 +173,19 @@ def test_final_fix_outside_the_plan_scope_is_not_taken(world, monkeypatch) -> No
     assert final["outside_failures"]["outside_files"] == ["docs/a.md"]
     assert final["outside_failures"]["failed_tests"] == ["tests/test_geo.py::test_area"]
     work = world.root() / "work"
+    assert sh(work, "show", "HEAD:docs/a.md") == "# a"
+
+
+def test_final_fix_without_a_result_is_undone_and_not_pushed_on_resume(world, monkeypatch) -> None:
+    # 結果を出さずに終わった最後の修正のコミットを残すと、再開の送信が検査せずに PR へ送る
+    ci = fake_ci(Watched("test_failed", ("pytest",)))
+
+    def outside_without_result(spec, submit):
+        commit_at({"docs/a.md": "# 直した\n"}, "範囲の外を直す")(spec, submit)
+        return None
+
+    got = drive.drive(world.config(), ports(FakeAgents(_acts(**{"final-fix": outside_without_result})), FakeHub("clean"), ci=ci))
+    assert got.kind == "work_stopped"
+    work = world.root() / "work"
+    assert sh(work, "rev-parse", "HEAD") == _state(world)["final"]["head"]
     assert sh(work, "show", "HEAD:docs/a.md") == "# a"

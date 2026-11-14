@@ -117,6 +117,21 @@ class CiPort:
     failed_tests: Callable[[github.GitHub, ci.WatchResult], Optional[list[str]]] = _failed_tests
 
 
+def _fix_or_undo(g: git.Git, before: str, fix: Callable[[], bool], record: dict[str, Any]) -> None:
+    """最後の修正担当を起動する。結果を出さずに終わるか途中で止まれば、検査していない変更を `before` へ戻す。
+
+    戻さないと、同じコマンドの再開の送信が範囲外の変更を検査せずに PR へ送る。
+    """
+    done = False
+    try:
+        done = fix()
+    finally:
+        if not done:
+            g.run("reset", "-q", "--hard", before)
+    if not done:
+        raise GateStopped("work_stopped", "最後の修正担当が結果を出さずに終わった（変更は起動の前へ戻した）", record)
+
+
 def _names(checks: Sequence[ci.Check]) -> list[str]:
     return [c.name for c in checks]
 
@@ -148,7 +163,6 @@ def run_gate(
         nodes = port.failed_tests(hub, watched)
         failed = nodes if nodes else _names(watched.reading.failed_tests)
         before = g.rev_parse("HEAD")
-        if not fix(failed, round_no + 1):
-            raise GateStopped("work_stopped", "最後の修正担当が結果を出さずに終わった", _record("work_stopped", round_no, sha))
+        _fix_or_undo(g, before, lambda: fix(failed, round_no + 1), _record("work_stopped", round_no, sha))
         _check_fix(g, before, failed, cfg)
     raise AssertionError("最終ゲートの回数の上限の後に戻った")

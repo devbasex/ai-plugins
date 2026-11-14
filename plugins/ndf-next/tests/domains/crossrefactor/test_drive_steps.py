@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters import agents
 from ndf.domains.crossrefactor import budget_decide, drive, report_decide, store
 
 from ._drive_world import (
@@ -126,6 +127,26 @@ def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world
     assert again.kind == "ok", again.detail
     assert _state(world)["items"][0]["status"] == "adopted"
     assert len(comments.bodies) == 2 and "結果: 完了" in comments.bodies[1]
+
+
+def test_coding_launch_that_runs_out_the_safety_net_stops_and_the_item_is_redone_on_resume(world, monkeypatch) -> None:
+    # 安全網の残りで縮めた監視の上限に達した担当は、結果が無くても項目を見送らずに止める（打ち直すとやり直す）
+    ci = fake_ci(Watched(None))
+    fake = FakeAgents(_acts(**{"add-tests": no_plan}))
+
+    def timed_out(spec: agents.Launch) -> agents.AgentStatus:
+        status = fake(spec)
+        if "-add-tests-" not in spec.paths.out.name:
+            return status
+        return agents.AgentStatus(spec.agent, agents.AgentState.TIMEOUT, None, "監視の上限を超えた", ())
+
+    got = drive.drive(world.config(safety_net_minutes=5), replace(ports(fake, FakeHub("clean"), ci=ci), launcher=timed_out))
+    assert got.kind == "fix_limit" and "--safety-net-minutes" in got.detail
+    state = _state(world)
+    assert state["items"][0]["status"] == "open" and "add-tests" in state["phase_seconds"]
+    again = drive.drive(world.config(safety_net_minutes=60), ports(FakeAgents(_acts(propose=None, plan=None)), FakeHub("clean"), ci=ci))
+    assert again.kind == "ok", again.detail
+    assert _state(world)["items"][0]["status"] == "adopted"
 
 
 def test_stalled_fix_is_judged_by_another_runtime_and_an_infeasible_item_is_reverted(world, monkeypatch) -> None:

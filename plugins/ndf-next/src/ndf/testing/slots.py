@@ -63,6 +63,9 @@ STOP_TEST = "procs.stop-test"
 STOP_FILE = "stop.json"
 
 DIRECT = "direct"
+# 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、
+# メモリの見張りで止めたは作業マシンの資源の待ちとして infra_wait（終了コードが落ちたテストの 1 と重ならない。I9）
+CAUSE_OF = {GAVE_UP: "wait_timeout", MEMORY_STOPPED: "infra_wait"}
 
 ReadMemory = Callable[[], "int | None"]
 
@@ -77,6 +80,11 @@ class Stopped(Exception):
         # 枠の置き場を用意したときに退避した旧い状態の置き場（結果 JSON の `items` の形）
         self.retired = [dict(item) for item in retired]
         super().__init__(self.summary())
+
+    @property
+    def cause(self) -> str:
+        """止まった理由の表の種類（`CAUSE_OF`）。"""
+        return CAUSE_OF[self.reason]
 
     def summary(self) -> str:
         memory = "測れない" if self.available_mib is None else f"{self.available_mib} MiB"
@@ -487,3 +495,28 @@ def _settle(ctx: SlotContext, held: Held, kind: str, taken: slot_pool.Taken, res
     taken.release()
     _record(ctx.directory, ctx.cwd, kind, held, result)
     return result
+
+
+def run_command(
+    command: str, cwd: Path, timeout: float, *, suites: Sequence[Mapping[str, object]] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """シェルのコマンド 1 つを、重ければ枠の下で、自分のプロセスの組で起こして終わりを待つ（出力は捕まえる）。
+
+    上限 `timeout` を超えたら組ごと（子孫まで）止めて回収し、`subprocess.TimeoutExpired` を送る。待ちの諦めと
+    メモリの停止は `Stopped` を送る（落ちたコマンドとして数えない）。`suites` は重さの判定に使う宣言（省けば `cwd` から読む）。
+    """
+    with gate(command, cwd, options=GateOptions(suites=suites)) as held:
+        proc = subprocess.Popen(
+            command, shell=True, cwd=cwd, env={**os.environ, **held.env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True, preexec_fn=held.preexec,
+        )  # fmt: skip
+        held.watch(proc)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process_group.stop_group(proc, grace_key=STOP_TEST)
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+            raise
+    return subprocess.CompletedProcess(command, proc.returncode, out, err)

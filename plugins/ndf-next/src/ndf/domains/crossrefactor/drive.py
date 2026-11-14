@@ -7,7 +7,8 @@
 - 担当の結果ファイルの置き場は `launch` が決める（#750）
 - コードを書く工程は、担当を起動する前に起点を工程の記録へ書く。担当が結果を出さずに終われば、起点まで取り消して
   項目を見送る（#3313。`phase_decide`）
-- テストを足した項目は、足したテストが全体の実行に収集されるかを確かめ、されなければ項目を戻す（#620。`collect`）
+- テストを足した項目は、足したテストが全体の実行に収集されるかと、直す前のコードで通るかを確かめ、どちらかが
+  成り立たなければ項目を戻す（#620。`collect`・`verify.tests_failing`）
 - 検証は項目が触るモジュールに対応するテストと検査だけを打ち（#3049）、項目の起点から在った失敗をその項目の失敗に
   数えない（#3339。`verify_decide.attribute`）
 - 最終ゲートは `final_gate` が回す（衝突は待たずに止める #2680・対象範囲の外の直しは取り込まない #3038）
@@ -55,6 +56,7 @@ from ndf.domains.crossrefactor import (
     workspace,
 )
 from ndf.testing import limits as test_limits
+from ndf.testing import slots
 
 Status = items_decide.Status
 
@@ -207,15 +209,21 @@ def _net(run: _Run) -> budget_decide.SafetyNet:
 
 
 def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
-    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を足す。コーディングの工程は安全網に当たっていれば起動しない。"""
+    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を足す。コーディングの工程は安全網に当たっていれば起動しない。
+
+    安全網の残りで監視の上限を縮めた起動が上限に達したら、所要を保存してから項目を取り消さずに止める（安全網を
+    大きくして打ち直すと、起点の記録からその項目をやり直す）。
+    """
     coding = req.phase in launch_decide.coding_phases()
+    capped = False
     if coding:
         net = _net(run)
         if net.halted:
             raise DriveStopped("fix_limit", net.reason())
+        capped = net.remaining_seconds < launch.phase_limit(req.phase)
         req = replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds))
     began = run.ports.clock()
-    got, _ = launch.run(req, run.dirs(), run.ports.launcher)
+    got, status = launch.run(req, run.dirs(), run.ports.launcher)
     spent = run.ports.clock() - began
     seconds = dict(run.state_get("phase_seconds", {}))
     seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
@@ -223,6 +231,8 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     if coding:
         run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
     run.save()
+    if capped and status.state == agents.AgentState.TIMEOUT:
+        raise DriveStopped("fix_limit", _net(run).reason())
     return got
 
 
@@ -301,6 +311,11 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     if found.uncollected:
         _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(found.uncollected)}")
         return False
+    # 実装の前（直す前のコード）で足したテストが通ることを確かめる。通らないテストは今の振る舞いを固定していない
+    broken = verify.tests_failing(run.ws.work, verify.suites(run.ws.work), tests)
+    if broken:
+        _undo_item(run, item, Status.REVERTED, f"足したテストが直す前のコードで通らない: {', '.join(sorted(broken))}")
+        return False
     return True
 
 
@@ -332,6 +347,8 @@ def _judge(run: _Run, item: dict[str, Any], own: frozenset[str]) -> judge_decide
     move = judge_decide.after_stall(item, judges)
     if move.kind != judge_decide.JUDGE:
         return move
+    # 判定の担当は読み取り用ディレクトリで読む。検証中の HEAD（足したテスト・実装・修正）へ合わせてから起動する
+    workspace.refresh_readers(run.ws)
     got = _launch(run, launch.Request("judge", judges[0], prompt_decide.judge(item, own), item["id"], "items"))
     row = judge_decide.answer_of(got, item["id"])
     item["feasibility"] = [*(item["feasibility"] if "feasibility" in item else []), judge_decide.record(judges[0], row, _now())]
@@ -400,7 +417,12 @@ def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_d
     kind = flaky_decide.NONE
     for _ in range(flaky_decide.MAX_ATTEMPTS):
         base = _record_phase(run, "flaky-fix")
-        _launch(run, launch.Request("flaky-fix", participants.FIXER, prompt_decide.flaky(pending), "flaky"))
+        try:
+            _launch(run, launch.Request("flaky-fix", participants.FIXER, prompt_decide.flaky(pending), "flaky"))
+        except DriveStopped:
+            # 止まった起動の途中のコミットを検査せずに残さない（打ち直すと起点から直しをやり直す）
+            _reset(run, base)
+            raise
         commits = flaky_decide.parse_log(run.work.run("log", "--reverse", "--name-only", flaky_decide.LOG_FORMAT, f"{base}..HEAD"))
         found = flaky_decide.violations(commits, pending["keys"], tests_decide.is_test_file)
         pending["attempts"] += 1
@@ -552,9 +574,11 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
         _plan(run)
         _items(run)
         _final(run)
-    except DriveStopped as exc:
+    except (DriveStopped, slots.Stopped) as exc:
+        # テストの枠の待ちの諦めとメモリの停止は、落ちたテストに数えずに止まった理由にする（状態ファイルは残す）
+        kind, detail = (exc.kind, exc.detail) if isinstance(exc, DriveStopped) else (exc.cause, exc.summary())
         counts = items_decide.counts(run.state["items"]) if "items" in run.state else {}
-        return _publish(run, Finish(exc.kind, exc.detail, metrics={**counts, **_step_metrics(run)}))
+        return _publish(run, Finish(kind, detail, metrics={**counts, **_step_metrics(run)}))
     finish = _publish(run, _summary(run))
     run.state["done"] = {"head": run.work.rev_parse("HEAD"), "args": cfg.args(), "result": finish.as_json()}
     run.save()

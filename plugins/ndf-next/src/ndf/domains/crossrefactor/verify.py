@@ -5,6 +5,7 @@
   対応するテストのファイル（`tests_decide.tests_for_change`）へ当てる
 - テストを CI に寄せる宣言（`test.ci.only` が真）のリポジトリでは、手元ではテストの suite を打たない
 - suite ごとにまとめて 1 回打ち、落ちたときだけファイルごとに打ち直して落ちたファイルを決める
+- コマンドはテストの枠の下で、自分のプロセスの組で起こす（`slots.run_command`。上限で子孫まで止める）
 - 項目の起点の鍵は、落ちた鍵だけを起点のコミットの別の作業場所で打ち直して決める（`verify_decide.attribute`）
 """
 
@@ -23,7 +24,7 @@ from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import scope, tests_decide, verify_decide
 from ndf.domains.crossrefactor.diff_decide import in_scope
 from ndf.testing import limits as test_limits
-from ndf.testing import weight
+from ndf.testing import slots, weight
 
 RUN_POLICY = "test-run.test"
 SCOPE_KEY = "scope_command"
@@ -81,8 +82,9 @@ def targets(work: Path, found: Sequence[Suite], changed: Sequence[str]) -> dict[
 
 
 def _passes(work: Path, command: str, timeout: float) -> bool:
+    """`command` を枠の下で打って通ったか（`slots.run_command`。上限を超えたら子孫まで止めて落ちたとして数える）。"""
     try:
-        done = subprocess.run(command, shell=True, cwd=work, capture_output=True, text=True, timeout=timeout, check=False)
+        done = slots.run_command(command, work, timeout)
     except subprocess.TimeoutExpired:  # noqa: NDF401 外部コマンド: 上限を超えた検査は落ちたとして数える
         return False
     return done.returncode == 0
@@ -99,6 +101,12 @@ def failing(work: Path, found: Sequence[Suite], picked: Mapping[str, Sequence[st
             continue
         keys.update(verify_decide.failure_key(name, f) for f in files if not _passes(work, tests_decide.fill_paths(template, [f]), timeout))
     return frozenset(keys)
+
+
+def tests_failing(work: Path, found: Sequence[Suite], tests: Sequence[str]) -> frozenset[str]:
+    """足したテストのファイル `tests` をテストの suite で打ち、落ちた鍵を返す（どの suite にも当たらないファイルは打たない）。"""
+    picked = {s.name: [t for t in tests if in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
+    return failing(work, found, {n: fs for n, fs in picked.items() if fs})
 
 
 def regroup(keys: Iterable[str]) -> dict[str, list[str]]:

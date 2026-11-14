@@ -29,7 +29,10 @@ def item_text(item: Mapping[str, Any]) -> str:
 
 
 def propose(pr: int, touched: Touched) -> str:
-    symbols = "\n".join(f"- {p}: {', '.join(sorted(n))}" for p, n in touched.symbols.items())
+    lines = [f"- {p}: {', '.join(sorted(n))}" for p, n in touched.symbols.items()]
+    # 構文木の読み手の無い言語のファイルは、ファイル単位で提案を通す（`symbols_decide.in_touched`）
+    lines += [f"- {p}: （ファイル全体。関数の範囲を読めないため、ファイルの中のどの関数・クラスも提案できる）" for p in touched.whole_files]
+    symbols = "\n".join(lines)
     return (
         f"PR #{pr} が触る次の関数・クラスについて、振る舞いを変えないリファクタリングを提案する。ほかの関数は提案しない。\n"
         f"{symbols}\n"

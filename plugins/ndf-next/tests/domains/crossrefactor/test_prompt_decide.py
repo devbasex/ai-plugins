@@ -1,6 +1,6 @@
 """現状固定: 工程の担当へ渡す指示文（`prompt_decide`。drive から移す前の文面と一字一句同じ）。
 
-触る関数はファイルごとに 1 行で、名前は昇順。ファイル単位で扱うファイル（whole_files）は指示文に入らない。
+触る関数はファイルごとに 1 行で、名前は昇順。ファイル単位で扱うファイル（whole_files）は、その後にファイル全体として並ぶ。
 """
 
 from __future__ import annotations
@@ -28,11 +28,19 @@ def test_propose_prompt_with_no_symbols_leaves_an_empty_line():
     assert _prompt(12, Touched({})) == HEAD.format(pr=12) + "\n" + TAIL
 
 
-def test_propose_prompt_keeps_a_file_without_names_and_ignores_whole_files():
+WHOLE = "（ファイル全体。関数の範囲を読めないため、ファイルの中のどの関数・クラスも提案できる）"
+
+
+def test_propose_prompt_keeps_a_file_without_names_and_lists_whole_files_after_it():
     touched = Touched({"lib/cli.py": frozenset()}, ("web/app.ts",))
     got = _prompt(3, touched)
-    assert got == HEAD.format(pr=3) + "- lib/cli.py: \n" + TAIL
-    assert "web/app.ts" not in got
+    assert got == HEAD.format(pr=3) + "- lib/cli.py: \n- web/app.ts: " + WHOLE + "\n" + TAIL
+
+
+def test_propose_prompt_for_a_pr_without_python_lists_its_files_as_whole():
+    # Python 以外の変更はすべて whole_files に入る。対象が空の指示文にしない
+    got = _prompt(5, Touched({}, ("web/app.ts", "cmd/main.go")))
+    assert got == HEAD.format(pr=5) + "- web/app.ts: " + WHOLE + "\n- cmd/main.go: " + WHOLE + "\n" + TAIL
 
 
 ITEM = {"id": "I-002", "path": "src/b.py", "symbol": "g", "title": "t2"}

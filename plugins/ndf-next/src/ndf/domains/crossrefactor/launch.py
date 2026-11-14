@@ -2,7 +2,8 @@
 
 - 読み取りの工程（表 `loop-phases` の coding が偽）の担当は、読み取り用ディレクトリで読むだけの起動をする。ファイルを
   書けないため、結果は標準出力の最後の JSON（`{<鍵>: [...]}`）で返し、起動の側がそれを回収先へ書く。claude は
-  読む Tool だけを許した起動、ほかはランタイムの表の `review_args` の起動である
+  読む Tool だけを許した起動で、`--output-format json` の外側の JSON の `result` の本文から結果を探す。ほかは
+  ランタイムの表の `review_args` の起動である
 - コードを書く工程の担当（claude）は書き込み用の作業ディレクトリで動き、結果ファイルを作業ディレクトリの
   `.cross_refactoring/` へ書く。起動の側が終わった後に回収先へ移す。担当は作業ディレクトリの外を書かない
 - 担当が結果を出さずに終わったら None を返す（続け方は `phase_decide.on_no_result` が決める）
@@ -76,8 +77,22 @@ def _coding(req: Request, workdir: Path, paths_stem: Path, submit: Path) -> agen
     return agents.Launch(req.runtime, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(paths_stem), _limit(req))
 
 
-def _collect_stdout(out: Path, key: str, collect: Path) -> Optional[dict[str, Any]]:
-    found = participants.listed_of(agents.tail(out), key) if out.is_file() else None
+def _answer_text(req: Request, out: Path) -> str:
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にする。"""
+    if req.runtime != participants.FIXER:
+        return agents.tail(out)
+    raw = out.read_text(encoding="utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except ValueError:  # noqa: NDF401 ファイル: 外側が JSON でなければ（途中で切れた出力）そのまま探す
+        return raw
+    body = payload.get("result") if isinstance(payload, dict) else None
+    return body if isinstance(body, str) else raw
+
+
+def _collect_stdout(req: Request, out: Path, collect: Path) -> Optional[dict[str, Any]]:
+    key = req.key
+    found = participants.listed_of(_answer_text(req, out), key) if out.is_file() else None
     if found is None:
         return None
     got = {key: found}
@@ -108,5 +123,5 @@ def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tupl
         spec = _coding(req, Path(where.workdir), stem, Path(where.submit))
     status = launcher(spec)
     if read_only:
-        return _collect_stdout(spec.paths.out, req.key, Path(where.collect)), status
+        return _collect_stdout(req, spec.paths.out, Path(where.collect)), status
     return _collect_file(Path(where.submit), Path(where.collect)), status

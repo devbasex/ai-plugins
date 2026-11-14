@@ -18,6 +18,7 @@ from typing import Any
 
 from ndf.domains.crossrefactor import tests_decide
 from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.testing import slots
 
 COLLECT_KEY = "collect_command"
 # 収集の確かめの上限（秒）の宣言
@@ -56,7 +57,7 @@ def _group(paths: Sequence[str], suites: Sequence[Mapping[str, Any]]) -> tuple[d
 
 def _collect(work: Path, name: str, command: str, timeout: float) -> frozenset[str]:
     try:
-        proc = subprocess.run(command, shell=True, cwd=work, capture_output=True, text=True, timeout=timeout, check=False)
+        proc = slots.run_command(command, work, timeout)
     except subprocess.TimeoutExpired as exc:
         raise CollectError(name, command, f"{timeout:g} 秒の上限を超えた") from exc
     except OSError as exc:
