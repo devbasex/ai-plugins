@@ -212,6 +212,20 @@ def _rank_board(
     return board, excluded, kept, sized
 
 
+def _rank_metrics(repo: str, a: argparse.Namespace, board: rank_decide.Board, got: dict[str, Any],
+                  excluded: list[dict[str, Any]], sized: list[int]) -> dict[str, Any]:  # fmt: skip
+    """順位の metrics と、metrics と表を合わせた digest（plan が照らす値）。"""
+    metrics = {"repo": repo, "depth": a.depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
+               "dropped": got["dropped"], "rejected_stale": got["rejected_stale"], "excluded": excluded, "sized": sized}  # fmt: skip
+    metrics["digest"] = model.stable_digest({"metrics": metrics, "milestones": got["milestones"]})
+    return metrics
+
+
+def _save_rank(sd: Path, metrics: dict[str, Any], milestones: list[dict[str, Any]], kept: dict[str, Any]) -> None:
+    state.write(sd, "backlog-rank", {"metrics": metrics, "milestones": milestones})
+    state.write(sd, "backlog-estimates", kept)
+
+
 def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
@@ -221,11 +235,8 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
         got = rank_decide.compute(board)
     except rank_decide.CycleError as exc:
         raise Stop("invalid", str(exc), [{"number": n} for n in exc.numbers]) from exc
-    metrics = {"repo": repo, "depth": a.depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
-               "dropped": got["dropped"], "rejected_stale": got["rejected_stale"], "excluded": excluded, "sized": sized}  # fmt: skip
-    metrics["digest"] = model.stable_digest({"metrics": metrics, "milestones": got["milestones"]})
-    state.write(sd, "backlog-rank", {"metrics": metrics, "milestones": got["milestones"]})
-    state.write(sd, "backlog-estimates", kept)
+    metrics = _rank_metrics(repo, a, board, got, excluded, sized)
+    _save_rank(sd, metrics, got["milestones"], kept)
     summary = f"順位を {len(board.estimates)} 件で算出した: 前倒し {len(got['forward'])} 件・後ろ倒し {len(got['backward'])} 件・外した {len(excluded)} 件"
     if a.depth == model.REVIEW and excluded:
         gaps = [{"kind": "estimate", "name": f"#{e['number']}", "reason": e["reason"]} for e in excluded]
