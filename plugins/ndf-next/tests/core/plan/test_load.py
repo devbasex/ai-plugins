@@ -2,7 +2,7 @@
 
 1 本のテストで B3 と B6 をまとめて確かめる（`-n auto` でも 1 つのワーカーで 1 回だけ流れ、`xdist_group` で
 `--dist loadgroup` のときも負荷の組を 1 つのワーカーへ寄せる）。合格の条件は他のテストとの CPU の取り合いに左右されない
-（詰まりの回数・ステップの回数・WAL の大きさ・働いた回数だけを見て、所要の秒は見ない）。測った値は JSON にして
+（詰まりの回数・ステップの回数・WAL の大きさ・働いた回数だけを数え、所要の秒は数えない）。数えた値は JSON にして
 警告 `LoadReport` で出す。警告は xdist のワーカーからも pytest の終わりの要約へ届き、通ったときも CI のログに残る
 （PR に貼る値）。本数は `NDF_PLAN_LOAD_PLANS`・`NDF_PLAN_LOAD_WRAPPERS` で減らせる（手元で小さく流すとき）。
 """
@@ -24,7 +24,7 @@ ROUNDS = 3
 
 
 class LoadReport(UserWarning):
-    """負荷の測定の値（PR に貼る）。"""
+    """負荷のテストで数えた値（PR に貼る）。"""
 
 
 @pytest.mark.xdist_group("plan-load")
@@ -38,7 +38,7 @@ def test_plans_and_wrappers_run_rounds_without_lock_errors(tmp_path: Path) -> No
     assert out["calls_by_status"].get("next:ok", 0) >= PLANS * ROUNDS, text
     assert out["steps_run"] == PLANS * ROUNDS * L.STEPS_PER_PLAN, text
     assert out["steps_run_twice"] == 0, text
-    # B3: 詰まりが無い。1 ステップあたりの上乗せ（`overhead_per_step_seconds`）はマシンの性能で決まるので出すだけにする
+    # B3: 詰まりが無い
     assert out["database_is_locked"] == 0, text
     # B6: WAL が上限以下。quick_check は鍵のファイルごとに高々 1 回働き、片付けの走査は目印で 1 回だけ働く
     assert out["wal_max_bytes"] <= L.WAL_LIMIT_BYTES, text
