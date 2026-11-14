@@ -117,14 +117,14 @@ class Taken:
             self._lock.release()
 
 
-def _live_weights(directory: Path, own: set[int]) -> tuple[int, set[int]]:
+def _live_weights(directory: Path) -> tuple[int, set[int]]:
     """生きた持ち主の重みの合計と、生きた持ち主の番号。重みの無い記述（書きかけ）は 0 と数える。"""
     total, alive = 0, set()
     for path in directory.glob(f"{SLOT_PREFIX}*.lock"):
         index = slot_index(path)
         if index is None:
             continue
-        if index not in own and not is_owned(directory, index):
+        if not is_owned(directory, index):
             continue
         alive.add(index)
         data = read_json(slot_path(directory, index, ".json"))
@@ -135,7 +135,7 @@ def _live_weights(directory: Path, own: set[int]) -> tuple[int, set[int]]:
 
 def held_mib(directory: Path) -> int:
     """置き場の生きた持ち主の重みの合計（MiB）。"""
-    return _live_weights(directory, set())[0]
+    return _live_weights(directory)[0]
 
 
 def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, object]) -> Taken | None:
@@ -145,7 +145,7 @@ def take(directory: Path, capacity_mib: int, weight: int, owner: Mapping[str, ob
     排他を待ちきれないときは `filelock.Timeout`、置き場へ書けないときは `OSError` を送る。
     """
     with lock(directory / POOL_LOCK).acquire(timeout=POOL_LOCK_SECONDS):
-        total, alive = _live_weights(directory, set())
+        total, alive = _live_weights(directory)
         if alive and total + weight > capacity_mib:
             return None
         index = 0
