@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import socket
 import threading
@@ -143,36 +144,69 @@ def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
     assert [t["read"] for t in timeouts] == [5, 3]
 
 
-@pytest.fixture
-def trickle_url() -> Iterator[str]:
-    """本物の接続で、本文の 1 バイト目をすぐ、2 バイト目を 0.8 秒後に送り、あとは黙るサーバーの URL。"""
-    srv = socket.create_server(("127.0.0.1", 0))
-    quit_ = threading.Event()
+Serve = Callable[..., str]
 
-    def serve() -> None:
-        conn, _ = srv.accept()
-        with conn:
-            conn.recv(65536)
-            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
-            if not quit_.wait(0.8):
-                conn.sendall(b"x")
+
+@pytest.fixture
+def serve() -> Iterator[Serve]:
+    """本物の接続のサーバーを立て、URL を返す。
+
+    要求を受けたら `head` をすぐ送り、`drip` を `every` 秒ごとに `count` 回（`None` なら止められるまで）送って黙る。
+    """
+    stops: list[Callable[[], None]] = []
+
+    def start(head: bytes, drip: bytes, every: float, count: int | None = None) -> str:
+        srv = socket.create_server(("127.0.0.1", 0))
+        quit_ = threading.Event()
+
+        def run() -> None:
+            conn, _ = srv.accept()
+            with conn, contextlib.suppress(OSError):
+                conn.recv(65536)
+                conn.sendall(head)
+                sent = 0
+                while (count is None or sent < count) and not quit_.wait(every):
+                    conn.sendall(drip)
+                    sent += 1
                 quit_.wait(5)
 
-    thread = threading.Thread(target=serve, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{srv.getsockname()[1]}/"
-    quit_.set()
-    thread.join(5)
-    srv.close()
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+        def stop() -> None:
+            quit_.set()
+            thread.join(5)
+            srv.close()
+
+        stops.append(stop)
+        return f"http://127.0.0.1:{srv.getsockname()[1]}/"
+
+    yield start
+    for stop in stops:
+        stop()
 
 
-def test_fetch_body_stops_waiting_at_deadline_on_real_connection(trickle_url: str) -> None:
-    # httpcore は本文の読み始めの待ちの秒数（1 秒）で次の読み取りも待つため、期限で止めないと
-    # 0.8 秒の受信の後に 1 秒待って 1.8 秒まで延びる
+def _fails_at_deadline(url: str) -> None:
     started = time.monotonic()
     with pytest.raises(notify.FetchError, match=r"^1 秒を越えた$"):
-        notify.fetch_body(trickle_url, 1)
+        notify.fetch_body(url, 1)
     assert time.monotonic() - started < 1.5
+
+
+def test_fetch_body_stops_waiting_at_deadline_on_real_connection(serve: Serve) -> None:
+    # httpcore は本文の読み始めの待ちの秒数（1 秒）で次の読み取りも待つため、期限で止めないと
+    # 0.8 秒の受信の後に 1 秒待って 1.8 秒まで延びる
+    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx", b"x", 0.8, count=1))
+
+
+def test_fetch_body_unsized_body_cut_at_deadline_is_not_success(serve: Serve) -> None:
+    # 長さの無い応答では、期限で止めた受信の終わりが本文の正常な終わりと読まれる
+    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nx", b"x", 0.3))
+
+
+def test_fetch_body_deadline_covers_trickling_headers(serve: Serve) -> None:
+    # 応答の頭が受信の待ちの秒数より短い間隔で届き続けても、上限で止める
+    _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\n", b"X-A: b\r\n", 0.3))
 
 
 def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:
