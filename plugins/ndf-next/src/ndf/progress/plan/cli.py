@@ -312,6 +312,15 @@ def _where(cwd: Path) -> run.Where:
         return run.Where(root=ready.root, url=url, repo=command._repo(cwd, st.root), cwd=cwd)
 
 
+def _detach_run(out: dict[str, Any], cwd: Path) -> None:
+    """計画を始めた後に、計画を進める耐久ワークフローを切り離して起こし、pid を結果へ載せる。"""
+    out["metrics"]["run_pid"] = run.detach(out["metrics"]["plan"], cwd)
+
+
+# トランザクションと置き場を閉じた後に打つ、副命令ごとの後処理
+_AFTER: dict[str, Callable[[dict[str, Any], Path], None]] = {"start": _detach_run}
+
+
 def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     if a.action in SESSIONS:
         return SESSIONS[a.action](a, _where(cwd))
@@ -321,8 +330,9 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
             out = COMMANDS[a.action](a, conn, where.repo)
         if st.warnings:
             out.setdefault("warnings", []).extend(st.warnings)
-    if a.action == "start":
-        out["metrics"]["run_pid"] = run.detach(out["metrics"]["plan"], cwd)
+    after = _AFTER.get(a.action)
+    if after is not None:
+        after(out, cwd)
     return out
 
 
