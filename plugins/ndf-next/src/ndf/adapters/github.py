@@ -460,7 +460,7 @@ class GitHub:
             "query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!]) {"
             " repository(owner: $owner, name: $name) { issues(labels: $labels, states: $states) { totalCount } } }"
         )
-        repo = self.repository(query, {"labels": list(labels) if labels else None, "states": [state]})
+        repo = self.repository(query, _issue_filter(labels, state))
         return int(repo["issues"]["totalCount"])
 
     def issue_numbers(self, labels: Sequence[str] = (), state: str = "OPEN") -> list[int]:
@@ -469,7 +469,7 @@ class GitHub:
         読んだ件数が `totalCount` と合わなければ `GitHubError`。`github.list-pages` ページを超えたら途中で切らずに止まる。
         """
         pages = _page_cap("github.list-pages")
-        variables: dict[str, Any] = {"labels": list(labels) if labels else None, "states": [state], "after": None}
+        variables: dict[str, Any] = {**_issue_filter(labels, state), "after": None}
         numbers: list[int] = []
         for _ in range(pages):
             conn = self.repository(_ISSUE_PAGE, variables)["issues"]
@@ -554,6 +554,11 @@ class GitHub:
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} でマージした", pull.head_sha)
+
+
+def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:
+    """Issue の絞り込みの変数（`count_issues`・`issue_numbers`）。ラベルが無ければ null で渡し、絞り込まない。"""
+    return {"labels": list(labels) if labels else None, "states": [state]}
 
 
 # Issue の番号の 1 ページ（`GitHub.issue_numbers`）
