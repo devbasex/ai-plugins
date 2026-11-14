@@ -21,6 +21,8 @@ from ndf import contracts
 
 TABLE = "workflow/progress.json"
 SCHEMA = "workflow/progress.schema.json"
+# スプリントの進行表の階層（progress.json の level の語）
+SPRINT = "sprint"
 # 行の事象の from に書く「まだ無い行」の印
 NEW = "new"
 # 進行表の識別子に入れるリポジトリの短い鍵の長さ（sha256 の 16 進の桁数）
@@ -209,7 +211,7 @@ def recorded(level: str, draft: EventDraft) -> EventDraft:
 
 def rows_for(level: str, events: Iterable[Event], draft: EventDraft) -> dict[str, RowState]:
     """下書きを確かめる行の今の状態。スプリントの行は下書きの定義の改訂の事象だけで畳む。"""
-    return fold(events, draft.rev if level == "sprint" else None)
+    return fold(events, draft.rev if level == SPRINT else None)
 
 
 def fold(events: Iterable[Event], rev: Optional[int] = None) -> dict[str, RowState]:
@@ -251,7 +253,7 @@ def check_writer(level: str, kind: str, actor: str) -> EventRule:
 def _check_fields(level: str, rule: EventRule, draft: EventDraft) -> None:
     if draft.kind in table()["reason_required"] and (draft.reason is None or not draft.reason.strip()):
         raise Refused(f"事象 {draft.kind} には理由が要る")
-    if level == "sprint" and draft.rev is None:
+    if level == SPRINT and draft.rev is None:
         raise Refused(f"スプリントの事象 {draft.kind} に定義の改訂が無い")
     if rule.scope == "row" and draft.row_key is None:
         raise Refused(f"事象 {draft.kind} には行の鍵が要る")
