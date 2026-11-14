@@ -475,3 +475,79 @@ def test_other_actions_go_to_the_table_commands(repo, capsys):
     assert code == 0 and out["status"] == "ok"
     _, shown = _main(capsys, run.main, "show", tid)
     assert shown["next"]["argv"] == ["ndf", "progress", "next", tid]
+
+
+# --- 現状固定: run.append（I-002。下書きの追記と、番号のぶつかりの打ち直し） ----------------------------
+
+
+def _started(v: run.View) -> list[model.EventDraft]:
+    """未着手の最初の行を始める下書き（作業が書く事象）。"""
+    name = next(s.name for s in v.snap.stages if s.name in v.rows and v.rows[s.name].state == "pending")
+    return [model.EventDraft("started", run.ACTOR, name, payload={"inputs": {}}, rev=v.rev)]
+
+
+def test_append_writes_the_drafts_built_from_the_current_view(repo, st, capsys):
+    tid = _new(capsys)
+    before = run.read(st, tid)
+    seen: list[run.View] = []
+
+    def build(v):
+        seen.append(v)
+        return _started(v)
+
+    seqs = run.append(st, tid, build)
+    assert seqs == [before.events[-1].seq + 1]
+    assert len(seen) == 1 and seen[0].table_id == tid and seen[0].rev == before.rev
+    assert [e.seq for e in seen[0].events] == [e.seq for e in before.events]
+    after = run.read(st, tid)
+    assert after.events[-1].seq == seqs[0] and after.events[-1].draft.kind == "started"
+
+
+def test_append_with_no_drafts_returns_nothing_without_calling_the_store(repo, st, capsys, monkeypatch):
+    tid = _new(capsys)
+    before = run.read(st, tid).events[-1].seq
+    called = []
+    monkeypatch.setattr(store, "append_events", lambda *a, **k: called.append(a) or [99])
+    assert run.append(st, tid, lambda v: []) == []
+    assert called == [] and run.read(st, tid).events[-1].seq == before
+
+
+def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, st, capsys, monkeypatch):
+    tid = _new(capsys)
+    real, calls = store.append_events, {"n": 0}
+
+    def conflict_once(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise store.Conflict("ぶつかった")
+        return real(*a, **k)
+
+    builds: list[run.View] = []
+    monkeypatch.setattr(store, "append_events", conflict_once)
+    seqs = run.append(st, tid, lambda v: builds.append(v) or _started(v))
+    assert len(builds) == 2 and calls["n"] == 2 and run.read(st, tid).events[-1].seq == seqs[0]
+
+    def always(*a, **k):
+        calls["n"] += 1
+        raise store.Conflict("ぶつかった")
+
+    calls["n"], builds[:] = 0, []
+    monkeypatch.setattr(store, "append_events", always)
+    with pytest.raises(store.Conflict):
+        run.append(st, tid, lambda v: builds.append(v) or _started(v))
+    assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
+
+
+def test_append_lets_refusals_through_without_retrying(repo, st, capsys):
+    tid = _new(capsys)
+    calls = []
+
+    def refuse(v):
+        calls.append(v)
+        raise model.Refused("断る")
+
+    with pytest.raises(model.Refused, match="断る"):
+        run.append(st, tid, refuse)
+    assert len(calls) == 1
+    with pytest.raises(model.Refused, match="無い"):
+        run.append(st, "no-such-table", lambda v: [])
