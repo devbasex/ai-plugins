@@ -71,6 +71,17 @@ class RealStateWriteError(PermissionError):
     """テストが本物の状態の置き場へ書こうとした。"""
 
 
+def _fd_path_by_fcntl(fd: int) -> str | None:
+    """`/proc` を読めないとき（macOS）の代替。fcntl か F_GETPATH が無いか、読めなければ None。"""
+    get_path = getattr(fcntl, "F_GETPATH", None) if fcntl is not None else None
+    if get_path is None:
+        return None
+    try:
+        return os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
+    except OSError:  # noqa: NDF401 ファイル: 記述子の指す場所を読めなければパスを持たないとして扱う
+        return None
+
+
 def _fd_path(fd: object) -> str | None:
     """記述子が指す場所の絶対パス。記述子でないか、読めないか、パイプなどパスを持たなければ None。"""
     if not isinstance(fd, int) or isinstance(fd, bool) or fd < 0:
@@ -78,14 +89,8 @@ def _fd_path(fd: object) -> str | None:
     try:
         found = os.readlink(f"/proc/self/fd/{fd}")
     except OSError:
-        get_path = getattr(fcntl, "F_GETPATH", None) if fcntl is not None else None
-        if get_path is None:
-            return None
-        try:
-            found = os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
-        except OSError:  # noqa: NDF401 ファイル: 記述子の指す場所を読めなければパスを持たないとして扱う
-            return None
-    return found if os.path.isabs(found) else None
+        found = _fd_path_by_fcntl(fd)
+    return found if found is not None and os.path.isabs(found) else None
 
 
 def _resolve(path: object, dir_fd: object, kind: str) -> str | None:
