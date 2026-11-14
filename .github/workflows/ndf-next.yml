@@ -3,7 +3,7 @@ name: ndf-next
 # 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
 # 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）。
 # plugins/ndf/** の PR でも検査を打つ（規則 port: 移す先の Issue か移さない理由を本文に持つ。#3343）。
-# そのときテストと一時コピーは ndf-next-scope が飛ばす
+# そのときテストと一時コピーは ndf-next-scope が飛ばし、検査は port だけを当てる（新しいプラグインの側に残る違反で落とさない）
 # edited: 検査の I2 と port は PR 本文の印を読むため、本文を直したときも打ち直す
 on:
   pull_request:
@@ -22,6 +22,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next-scope と ndf-next-checks が読む
+  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml
 
 concurrency:
   # 本文の編集（edited）は検査だけを打ち直すため、push の実行（テストを含む）を取り消さないよう別の組にする
@@ -48,7 +52,7 @@ jobs:
         working-directory: .
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ] \
-            || git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- plugins/ndf-next .github/workflows/ndf-next.yml | grep -q .; then
+            || git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- $NEXT_PATHS | grep -q .; then
             echo next=true >> "$GITHUB_OUTPUT"
           else
             echo next=false >> "$GITHUB_OUTPUT"
@@ -91,10 +95,15 @@ jobs:
       - run: bash -n bin/ndf
       # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
       # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
-      # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない
+      # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない。
+      # 新しいプラグインを変えていない PR（plugins/ndf だけ）は port だけを当てる。本文の編集（edited）でも
+      # 判定が要るので、ndf-next-scope の出力（edited では飛ぶ）を読まずにここで NEXT_PATHS の差分を見る
       - run: |
           if [ -n "${GITHUB_BASE_REF:-}" ] && [ "$GITHUB_BASE_REF" != main ]; then
-            bin/ndf check --base "origin/$GITHUB_BASE_REF"
+            only=()
+            # shellcheck disable=SC2086 # NEXT_PATHS はパスを空白で区切った一覧
+            git -C "$GITHUB_WORKSPACE" diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- $NEXT_PATHS | grep -q . || only=(--only port)
+            bin/ndf check --base "origin/$GITHUB_BASE_REF" "${only[@]}"
           else
             bin/ndf check
           fi

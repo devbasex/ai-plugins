@@ -1,8 +1,9 @@
 """検査 1 本のエントリポイント（副命令 `check`）。見るファイルを集め、構文木を 1 回ずつ作り、すべての規則を当てる。
 
-    ndf check [--base <起点>] [--event <GitHub の事象の JSON>]
+    ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]...
 
-`--base` があれば差分の検査（I2）も行う。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
+`--base` があれば差分の検査（I2）も行う。`--only` があれば、その規則の指摘だけを違反にする（新しいプラグインを
+変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
 結果 JSON（結果の契約 `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は止まった理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git・事象の JSON）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
@@ -120,6 +121,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="新しいプラグインだけを見る検査")
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
     parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""), help="PR 本文を読む GitHub の事象の JSON")
+    parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
     args = parser.parse_args(argv)
     try:
         ident = identity.load()
@@ -128,6 +130,8 @@ def main(argv: list[str]) -> int:
         scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event))
         scope.sources = collect(scope.plugin_root, repo_root)
         found = check(scope, rules)
+        if args.only:
+            found = [f for f in found if f.rule in args.only]
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
     for f in found:

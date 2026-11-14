@@ -55,6 +55,24 @@ def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
     capsys.readouterr()
 
 
+def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, tmp_path, last_result):
+    monkeypatch.setattr(identity, "ROOT", plugin.root)
+    plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
+    base = plugin.commit("base")
+    old = plugin.repo / "plugins" / "ndf"
+    old.mkdir()
+    (old / "x.py").write_text("x = 1\n")
+    plugin.commit("old")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"body": ""}}))
+    assert run.main(["--base", base, "--event", str(event), "--only", "port"]) == exit_codes.code_of("failed")
+    assert [i["rule"] for i in last_result(capsys.readouterr().out)["items"]] == ["port"]
+    conf = load_rules()["invariants"]
+    event.write_text(json.dumps({"pull_request": {"body": f"{conf['port_mark']} #1"}}, ensure_ascii=False))
+    assert run.main(["--base", base, "--event", str(event), "--only", "port"]) == 0
+    capsys.readouterr()
+
+
 def test_unreadable_event_stops(plugin, monkeypatch, capsys, tmp_path, last_result):
     monkeypatch.setattr(identity, "ROOT", plugin.root)
     assert run.main(["--event", str(tmp_path / "missing.json")]) == exit_codes.unreadable_code()
