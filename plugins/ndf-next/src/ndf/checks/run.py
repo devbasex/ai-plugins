@@ -19,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.checks import child_deps, facts, invariants, lint, marks, smells, structure, words
-from ndf.checks.model import CheckError, Finding, Scope, Source, load_rules
+from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules
 from ndf.contracts import result
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -27,7 +27,6 @@ TOOL = cli.tool_of(__name__)
 
 SKIP_DIRS = frozenset({"__pycache__", ".venv", ".pytest_cache", ".git", ".ruff_cache"})
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".sh", ".toml", ".yml", ".yaml", ".txt"})
-SCRIPT_DIRS = ("bin", "hooks")
 
 
 def _walk(plugin_root: Path) -> list[Path]:
@@ -44,7 +43,7 @@ def collect(plugin_root: Path, repo_root: Path) -> list[Source]:
     found = []
     for path in sorted(_walk(plugin_root)):
         rel = path.relative_to(plugin_root)
-        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.parts[0] in SCRIPT_DIRS):
+        if path.is_file() and (path.suffix in TEXT_SUFFIXES or rel.as_posix().startswith(SCRIPT_PREFIXES)):
             found.append(Source(path, path.relative_to(repo_root).as_posix()))
     return found
 
