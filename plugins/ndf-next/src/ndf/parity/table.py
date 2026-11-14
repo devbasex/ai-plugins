@@ -23,11 +23,16 @@ def load(name: str) -> dict[str, Any]:
     """`<name>.json`（`features` か `fixes`）を読む。"""
     if name not in SHAPES:
         raise ValueError(f"知らない表: {name}")
+    return _read(name)
+
+
+def _read(name: str) -> Any:
+    """同じディレクトリの `<name>.json` を読む。"""
     return json.loads((HERE / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def _schema_errors(name: str, doc: Any) -> list[str]:
-    schema = json.loads((HERE / "schema.json").read_text(encoding="utf-8"))
+    schema = _read("schema")
     schema["$ref"] = f"#/$defs/{SHAPES[name]}"
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     found = sorted(("/".join(str(p) for p in e.absolute_path) or "(最上位)", e.message) for e in validator.iter_errors(doc))
