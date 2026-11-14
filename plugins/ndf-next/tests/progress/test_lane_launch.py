@@ -177,3 +177,43 @@ def test_spawn_uses_subprocess_run_when_no_runner_is_given(tmp_path, monkeypatch
     monkeypatch.setattr(subprocess, "run", run)
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力") == {"ok": True, "detail": "起こした"}
     assert calls[0][-1] == "入力"
+
+
+def _version(base, name, mtime):
+    entry = base / name / "bin" / "ndf"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/bin/sh\n", encoding="utf-8")
+    entry.chmod(0o755)
+    import os
+
+    os.utime(entry, (mtime, mtime))
+    return base / name
+
+
+def test_a_removed_version_dir_launches_with_the_newest_version_and_leaves_a_line(tmp_path, monkeypatch, capsys):
+    """起こした版の置き場がプラグインの更新で消えても、同じ親の下の最も新しい版でレーンを起こし、切り替えた 1 行を
+    残す（#2583 の条件 17・18。更新を 2 回行った後を模す）。"""
+    from ndf import identity
+
+    _version(tmp_path, "11.0.1", 1_000)
+    newest = _version(tmp_path, "11.0.2", 2_000)
+    monkeypatch.setattr(identity, "ROOT", tmp_path / "11.0.0")
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "ok", "summary": "起こした"}) + "\n", "")
+
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)["ok"]
+    assert seen[0][0] == str(newest / "bin" / "ndf")
+    err = capsys.readouterr().err
+    assert "11.0.0" in err and "11.0.2" in err and len(err.strip().splitlines()) == 1
+
+
+def test_a_present_version_dir_is_used_as_it_is(tmp_path, monkeypatch, capsys):
+    from ndf import identity
+
+    own = _version(tmp_path, "11.0.0", 1_000)
+    _version(tmp_path, "11.0.2", 2_000)
+    monkeypatch.setattr(identity, "ROOT", own)
+    assert launch.entry() == own / "bin" / "ndf" and capsys.readouterr().err == ""

@@ -40,7 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ndf import identity
 from ndf.contracts import facts, limits
 from ndf.core import durable, loop
 from ndf.progress import command, lane, model, store
@@ -284,7 +283,7 @@ def detach(plan: str, cwd: Path) -> int:
     where.mkdir(parents=True, exist_ok=True)
     with (where / RUN_LOG).open("ab") as log:
         proc = subprocess.Popen(
-            [str(identity.entrypoint(identity.ROOT)), "lanes", "run", plan],
+            [str(launch.entry()), "lanes", "run", plan],
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,

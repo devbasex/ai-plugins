@@ -19,13 +19,19 @@
 計画名・レーン名を使っても、名前の区切りが曖昧な組（`a-b` と `a` / `b-c` など）でも重ならない。
 ラッパーは子の conductor が終わるまで動き続けるので、起こす前に（行を始めるときも中止のときも）同じ名前の
 ラッパーを `ndf relay stop` で止め、止まったのを確かめてから起こす（`stop`）。
+
+打つ副命令のエントリポイントは打つたびに求める（`entry`）。耐久ワークフローを起こした版の置き場がプラグインの更新の
+片付けで消えていれば、同じ親の下の最も新しい版の置き場のものを使い、切り替えた 1 行を標準エラー（切り離した
+`ndf lanes run` の `run.log`）へ残す（#2583）。規則は中継の複製（`ndf.domains.relay.install`）と同じである。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,6 +49,27 @@ STOP_REASON = "計画を止めた"
 # ラッパーの名前の長さの上限（中継の名前の形 `relay.signals.NAME_RE`）と、末尾に付ける要約の桁数
 WRAPPER_NAME_MAX = 64
 WRAPPER_DIGEST_LENGTH = 12
+
+
+def _usable(root: Path) -> bool:
+    return os.access(identity.entrypoint(root), os.X_OK)
+
+
+def entry() -> Path:
+    """打つ副命令のエントリポイント。自分の版の置き場が消えていれば、同じ親の下の最も新しい版の置き場のものにする。
+
+    切り替えたら 1 行を標準エラーへ書く。使える置き場が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。
+    """
+    own = identity.ROOT
+    if _usable(own):
+        return identity.entrypoint(own)
+    parent = own.parent
+    found = [p for p in parent.iterdir() if _usable(p)] if parent.is_dir() else []
+    if not found:
+        return identity.entrypoint(own)
+    newest = max(found, key=lambda p: identity.entrypoint(p).stat().st_mtime)
+    print(f"ndf lanes: 版の置き場 {own} が無いので {newest} の版で打つ", file=sys.stderr)
+    return identity.entrypoint(newest)
 
 
 def _digest(*parts: str) -> str:
@@ -105,7 +132,7 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
     """名前つきのラッパーでレーンの conductor を起こす。結果 JSON の `status` が ok なら `ok` を真にする。"""
     argv = [
-        str(identity.entrypoint(identity.ROOT)),
+        str(entry()),
         "relay",
         "spawn",
         "--name",
@@ -123,12 +150,12 @@ def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[
 
 def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
     """レーンのラッパーを止め、止まったのを確かめる（`ndf relay stop` は錠が空くまで待つ）。動いていなければ ok。"""
-    argv = [str(identity.entrypoint(identity.ROOT)), "relay", "stop", wrapper_name(repo, plan, lane)]
+    argv = [str(entry()), "relay", "stop", wrapper_name(repo, plan, lane)]
     return _relay(argv, run, "ラッパーを止められない")
 
 
 def _entry(*args: str) -> list[str]:
-    return [str(identity.entrypoint(identity.ROOT)), *args]
+    return [str(entry()), *args]
 
 
 def _last_json(stdout: str) -> Optional[dict[str, Any]]:
