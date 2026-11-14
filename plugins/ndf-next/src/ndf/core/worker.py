@@ -480,13 +480,18 @@ def _cmd_closing(a: argparse.Namespace) -> int:
     return result.emit(result.stopped(TOOL, REFUSED, detail, items=items))
 
 
+def _plan_unusable(exc: model.PlanError) -> int:
+    """プランの形を通らないことを invalid の結果 JSON にする。"""
+    return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
+
+
 def _cmd_plan_edit(a: argparse.Namespace) -> int:
     plan = Path(a.plan)
     try:
         state_dir = _plan_state_dir(plan, a.state_dir)
         row = edit_plan(plan, Path(a.new), a.reason, state_dir)
     except model.PlanError as exc:
-        return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
+        return _plan_unusable(exc)
     except durable_locks.StoreInUse as exc:
         return result.emit(result.stopped(TOOL, exc.kind, f"プラン {plan} をほかの書き換えが持っている: {exc}"))
     if row is None:
@@ -499,7 +504,7 @@ def _cmd_plan_edits(a: argparse.Namespace) -> int:
     try:
         files = [_plan_state_dir(Path(p), a.state_dir) / PROGRESS_FILE for p in a.plans]
     except model.PlanError as exc:
-        return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
+        return _plan_unusable(exc)
     edits = list_edits(files)
     items = [{"kind": PLAN_EDIT_EVENT, **{k: r.get(k) for k in ("plan", "at", "reason", "diff")}} for r in edits]
     return result.emit(result.result(TOOL, OK, f"プランの書き換えが {len(items)} 件ある", items, {"edits": len(items)}))
