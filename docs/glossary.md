@@ -833,6 +833,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 差し戻し | — | 改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 落ちたテストの材料 | — | 落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 判定の担い手 | — | 成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
+| 古い起点 | — | 中断した cross-refactoring を続けるとき、Pull Request の今の head が、書き込み用のレビュー worktree の HEAD と同じでもその祖先でもないこと。続けずに退避して今の head から始め直す | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 

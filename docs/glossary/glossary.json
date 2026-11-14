@@ -6273,6 +6273,13 @@
       "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
+      "term": "古い起点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "中断した cross-refactoring を続けるとき、Pull Request の今の head が、書き込み用のレビュー worktree の HEAD と同じでもその祖先でもないこと。続けずに退避して今の head から始め直す",
+      "source": "",
+      "pending_source": "issues/issue-3483-requirements.md"
+    },
+    {
       "term": "文書のファイル",
       "context": "ndf-workflow",
       "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
