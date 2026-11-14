@@ -2,6 +2,10 @@
 
 - 作った直後に `git worktree lock` を掛ける。lock は git の管理情報のファイルで、`/tmp` を共有しない別の環境の
   `git worktree prune` も lock した登録は消さない。lock を掛けられなければ worktree を外して止める
+- lock の理由は作業の鍵（`ndf <tool> pr<N>`）に、掛けたホストと時刻（`host=<名前> at=<ISO 8601>`）を足したもの。
+  `lock_of` は鍵を返し、`holder_of` がホストと時刻を返す
+- 持ち主のいない lock（NDF の lock で、掛けたホストがこのホストで、作業場所のディレクトリが無いもの）は
+  `sweep_orphans` が外して登録を片付ける。別のホストの lock は、そのホストの作業場所が見えないだけなので触らない
 - 打つ前に、worktree の `.git` が指す管理情報（`HEAD`・`commondir`）があるかを確かめ、無ければ
   `WorktreeUnregistered`（worktree のパスと `.git` が指す先）で止める。「リポジトリを決められない」とは書かない
 - 流し直しの初めに、worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す。衝突したら
@@ -17,6 +21,8 @@
 from __future__ import annotations
 
 import re
+import socket
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -27,6 +33,8 @@ from ndf.adapters import git
 LOCK_PREFIX = f"{identity.FIXED_WORDS['entrypoint']} "
 # lock の理由（例: `ndf cross-review pr3101`）
 LOCK_REASON = LOCK_PREFIX + "{tool} pr{pr}"
+# lock の理由の末尾の持ち主（掛けたホストと時刻）
+_HOLDER = re.compile(r" host=(?P<host>\S+) at=(?P<at>\S+)$")
 # worktree の `.git` ファイルの 1 行
 _GITDIR = re.compile(r"^gitdir:\s*(?P<path>.+?)\s*$", re.MULTILINE)
 # 管理情報にあるはずのファイル（消えた登録は `ndf/state` などの残りだけになる。#3109）
@@ -79,8 +87,32 @@ def conflict_detail(synced: SyncResult) -> str:
     return f"自分の未送信のコミットが origin の先頭と衝突したので {synced.before} へ戻した: {', '.join(synced.conflicts)}"
 
 
+class Holder(NamedTuple):
+    """lock の理由を分けたもの。`key` は作業の鍵、`host`・`at` は掛けたホストと時刻（持ち主の無い旧い形では None）。"""
+
+    key: str
+    host: Optional[str]
+    at: Optional[str]
+
+
 def lock_reason(tool: str, pr: int) -> str:
+    """作業の鍵（lock の理由から持ち主を除いたもの）。"""
     return LOCK_REASON.format(tool=tool, pr=pr)
+
+
+def held_reason(tool: str, pr: int, host: Optional[str] = None, at: Optional[str] = None) -> str:
+    """lock に書く理由。鍵の後ろに、掛けたホスト（既定はこのホスト）と時刻（既定は今の UTC）を足す。"""
+    who = host if host is not None else socket.gethostname()
+    when = at if at is not None else datetime.now(UTC).isoformat(timespec="seconds")
+    return f"{lock_reason(tool, pr)} host={who} at={when}"
+
+
+def parse_holder(text: str) -> Holder:
+    """lock の理由を鍵と持ち主へ分ける。持ち主の無い理由は、全体を鍵にしてホストと時刻を None にする。"""
+    m = _HOLDER.search(text)
+    if m is None:
+        return Holder(text, None, None)
+    return Holder(text[: m.start()], m.group("host"), m.group("at"))
 
 
 def _gitdir_of(worktree: Path, dotgit: Path) -> Optional[Path]:
@@ -110,7 +142,7 @@ def lock_review_worktree(repo: git.Git, worktree: Path, tool: str, pr: int) -> s
     """作ったばかりの worktree に lock を掛け、理由を返す。掛けられなければ worktree を外して `LockFailed`。"""
     reason = lock_reason(tool, pr)
     try:
-        repo.run("worktree", "lock", "--reason", reason, str(worktree))
+        repo.run("worktree", "lock", "--reason", held_reason(tool, pr), str(worktree))
     except git.GitError as exc:
         try:
             repo.run("worktree", "remove", "--force", str(worktree))
@@ -133,13 +165,54 @@ def _blocks(porcelain: str) -> list[dict[str, str]]:
     return out
 
 
-def lock_of(repo: git.Git, worktree: Path) -> Optional[str]:
-    """worktree の lock の理由。lock されていなければ None、理由の無い lock は空の文字列。登録に無ければ None。"""
+def _raw_lock(repo: git.Git, worktree: Path) -> Optional[str]:
+    """worktree の lock の理由をそのまま。lock されていなければ None、理由の無い lock は空の文字列。"""
     target = worktree.resolve()
     for entry in _blocks(repo.run("worktree", "list", "--porcelain")):
         if "worktree" in entry and Path(entry["worktree"]).resolve() == target:
-            return entry.get("locked")
+            return entry["locked"] if "locked" in entry else None
     return None
+
+
+def lock_of(repo: git.Git, worktree: Path) -> Optional[str]:
+    """worktree の lock の鍵（理由から持ち主を除いたもの）。lock されていなければ None、理由の無い lock は空の文字列。"""
+    raw = _raw_lock(repo, worktree)
+    return parse_holder(raw).key if raw is not None else None
+
+
+def holder_of(repo: git.Git, worktree: Path) -> Optional[Holder]:
+    """worktree の lock の鍵と持ち主。lock されていなければ None。"""
+    raw = _raw_lock(repo, worktree)
+    return parse_holder(raw) if raw is not None else None
+
+
+def orphans(porcelain: str, host: str) -> list[Path]:
+    """`git worktree list --porcelain` から、持ち主のいない NDF の lock の worktree（このホストが掛け、ディレクトリが無い）。"""
+    found: list[Path] = []
+    for entry in _blocks(porcelain):
+        if "worktree" not in entry or "locked" not in entry:
+            continue
+        held = parse_holder(entry["locked"])
+        if held.key.startswith(LOCK_PREFIX) and held.host == host and not Path(entry["worktree"]).exists():
+            found.append(Path(entry["worktree"]))
+    return found
+
+
+def sweep_orphans(repo: git.Git, host: Optional[str] = None) -> list[Path]:
+    """持ち主のいない NDF の lock を外して登録を片付け、片付けた worktree を返す。別のホスト・利用者の lock は触らない。"""
+    found = orphans(repo.run("worktree", "list", "--porcelain"), host if host is not None else socket.gethostname())
+    for path in found:
+        repo.run("worktree", "unlock", str(path))
+        repo.run("worktree", "remove", "--force", str(path))
+    return found
+
+
+def resumable(worktree: Path) -> bool:
+    """再開の前の確かめ。作業場所のディレクトリが無ければ偽（作り直す）。在って登録が消えていれば `WorktreeUnregistered`。"""
+    if not worktree.exists():
+        return False
+    registration(worktree)
+    return True
 
 
 def release(repo: git.Git, worktree: Path) -> Release:
@@ -157,6 +230,12 @@ def release(repo: git.Git, worktree: Path) -> Release:
     repo.run("worktree", "unlock", str(worktree))
     repo.run("worktree", "remove", "--force", str(worktree))
     return Release(True, None)
+
+
+def detach_clean(g: git.Git, commit: str) -> None:
+    """作業場所 `g` を `commit` へ切り離して合わせ、追跡されていないファイルを消す。"""
+    g.run("checkout", "-q", "--detach", "--force", commit)
+    g.run("clean", "-q", "-fd")
 
 
 def conflicted_files(g: git.Git) -> tuple[str, ...]:
@@ -181,13 +260,19 @@ def _untracked_in_the_way(g: git.Git, remote: str) -> list[str]:
     if not untracked:
         return []
     files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", remote).split("\0") if p}
-    dirs = {"/".join(parts[:i]) for parts in (f.split("/") for f in files) for i in range(1, len(parts))}
+    dirs = {d for f in files for d in _parents(f)}
+    return [p for p in untracked if _clashes(p, files, dirs)]
 
-    def clashes(path: str) -> bool:
-        parts = path.split("/")
-        return path in files or path in dirs or any("/".join(parts[:i]) in files for i in range(1, len(parts)))
 
-    return [p for p in untracked if clashes(p)]
+def _parents(path: str) -> list[str]:
+    """`path` の親のディレクトリ（根に近い順。`a/b/c` なら `a` と `a/b`）。"""
+    parts = path.split("/")
+    return ["/".join(parts[:i]) for i in range(1, len(parts))]
+
+
+def _clashes(path: str, files: set[str], dirs: set[str]) -> bool:
+    """`path` が追跡されるファイルかディレクトリと同じか、追跡されるファイルを親に持つか。"""
+    return path in files or path in dirs or any(p in files for p in _parents(path))
 
 
 def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:

@@ -149,7 +149,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return
-    done = main.attempt("merge", "--ff-only", "-q", f"{ORIGIN}/{base}")
+    done = main.merge_ff(f"{ORIGIN}/{base}")
     if done.returncode == 0:
         rec.add("main_dir", str(main.cwd), outcomes.PULLED)
         return

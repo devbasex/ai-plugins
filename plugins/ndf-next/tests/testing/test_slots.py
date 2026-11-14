@@ -300,3 +300,27 @@ def test_gate_keeps_the_places_retired_before_preparing_failed(tmp_path, monkeyp
 
     assert held.index is None
     assert held.retired == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+
+
+def _alive(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return state != "Z"
+
+
+def test_interrupted_run_command_stops_its_process_group_before_releasing(tmp_path, monkeypatch):
+    # 利用者が検証中に Ctrl+C で止めても、起動した組（孫まで）を止めてから抜ける
+    pidfile = tmp_path / "pid"
+
+    def interrupted(self, *a, **k):
+        waits.wait_until(lambda: pidfile.exists() and pidfile.read_text().strip(), timeout=10, interval=POLL)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        slots.run_command(f"sleep 30 & echo $! > {pidfile}; wait", tmp_path, 60, suites=[])
+    monkeypatch.undo()
+    pid = int(pidfile.read_text())
+    waits.wait_until(lambda: not _alive(pid), timeout=10, interval=POLL, what="孫のプロセスが止まる")
