@@ -2,6 +2,8 @@
 
 **ラベル `rebuild-1142` の開いている Issue 283 件それぞれについて、どの子 Issue の変更で閉じるかを決めた表である。** #1142 の受け入れ条件「ラベルの Issue が #1142 の改善ですべて閉じる」（2026-11-13 利用者）を、子 Issue の範囲へ下ろすために置く。子 Issue の中身と流す順序は頭の詳細設計 [issue-1142-design-detail.md](issue-1142-design-detail.md) の「実装計画」にある。ラベルの残りを受け持つ新しい子 Issue（N1〜N12）の設計は [issue-1142-design-fixes.md](issue-1142-design-fixes.md) と [issue-1142-design-fixes-design-detail.md](issue-1142-design-fixes-design-detail.md) にある。
 
+> **#3347:** この文書が指す頭の詳細設計の「実装計画」は置き換わった。子 Issue の範囲・先に要るもの・流す順番は [issue-3347-design-detail.md](issue-3347-design-detail.md) の「実装計画」にある。
+
 ## 決め方
 
 | 区分 | 件数 | 決め方 |

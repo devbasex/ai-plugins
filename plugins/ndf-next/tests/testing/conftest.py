@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.testing.isolation import forbid_real_state  # noqa: F401  （fixture として受ける）
+from ._real_state import forbid_real_state  # noqa: F401  （fixture として受ける）
 
 
 @pytest.fixture(autouse=True)

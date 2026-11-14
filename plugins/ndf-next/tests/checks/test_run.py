@@ -5,6 +5,7 @@ import json
 from ndf import cli
 from ndf.checks import run
 from ndf.checks.model import load_rules
+from ndf.contracts import exit_codes
 
 
 def last_json(capsys) -> tuple[dict, str]:
@@ -35,7 +36,7 @@ def test_syntax_error_exits_2(plugin, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
     plugin.write("src/ndf/a.py", "def f(:\n")
     plugin.write("src/ndf/b.py", "import ndf.a\n")
-    assert run.main([]) == run.EXIT_UNREADABLE
+    assert run.main([]) == exit_codes.unreadable_code()
     report, _ = last_json(capsys)
     assert [i["rule"] for i in report["items"]] == ["syntax"]
 
@@ -58,7 +59,7 @@ def test_pr_body_is_read_from_event(plugin, monkeypatch, capsys, tmp_path):
 
 def test_unreadable_event_stops(plugin, monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
-    assert run.main(["--event", str(tmp_path / "missing.json")]) == run.EXIT_UNREADABLE
+    assert run.main(["--event", str(tmp_path / "missing.json")]) == exit_codes.unreadable_code()
     report, _ = last_json(capsys)
     assert report["cause"] == {"kind": "config_broken"}
 

@@ -5,7 +5,7 @@
     {"kind": "check_failed", "meaning": "テスト以外のチェック（静的解析・文書の検査・PR の本文の検査）が落ちた", "std_type": "validation", "exit": 1, "route": "step", "retry": null},
     {"kind": "push_rejected", "meaning": "push 前の検査（pre-push の hook）が push を断った", "std_type": "validation", "exit": 1, "route": "step", "retry": null},
     {"kind": "ci_pending", "meaning": "CI のチェックが終わっていない", "std_type": "timeout", "exit": 1, "route": "retry", "retry": "cause.ci-pending"},
-    {"kind": "infra_wait", "meaning": "基盤の待ち（Runner が付かない・GitHub の API の上限）", "std_type": "communication", "exit": 75, "route": "retry", "retry": "cause.infra-wait"},
+    {"kind": "infra_wait", "meaning": "基盤の待ち（Runner が付かない・GitHub の API の上限・作業マシンのメモリが足りずテストを止めた）", "std_type": "communication", "exit": 75, "route": "retry", "retry": "cause.infra-wait"},
     {"kind": "usage_limit", "meaning": "LLM の利用上限。retry_after があれば打ち直し、無ければ人へ戻す", "std_type": "communication", "exit": 1, "route": "retry", "retry": "cause.usage-limit", "requires_retry_after": true},
     {"kind": "base_conflict", "meaning": "ベースブランチと衝突", "std_type": "runtime", "exit": 4, "route": "step", "retry": null},
     {"kind": "fix_limit", "meaning": "改修・収束の回数の上限", "std_type": "runtime", "exit": 1, "route": "human", "retry": null},

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,14 @@ from ndf.testing import isolation
 
 C = isolation.CONTENT
 N = isolation.NAME
+# 前提（forbid_real_state を持つ `_real_state`）の置き場。`-p _real_state` で読ませる子の pytest へ渡す
+HERE = str(Path(__file__).resolve().parent)
+
+
+def _child_env(src_env: dict[str, str], **extra: str) -> dict[str, str]:
+    """子の pytest の環境。src に加えて前提の置き場を PYTHONPATH へ足す。"""
+    return {**src_env, **extra, "PYTHONPATH": os.pathsep.join([HERE, src_env["PYTHONPATH"]])}
+
 
 INNER = textwrap.dedent(
     """
@@ -66,6 +75,26 @@ FLAGGED = {
 }
 
 
+def _run_inner_pytest(cwd: Path, env: dict[str, str], basetemp: list[str]) -> subprocess.CompletedProcess[str]:
+    """隔離のプラグインを読ませた別プロセスの pytest で `cwd` の test_inner.py を流し、出力を捕まえる。"""
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "_real_state", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _inner_dir(tmp_path: Path, conftest: str, test_source: str) -> Path:
+    """内側の pytest を流すディレクトリ（conftest.py と test_inner.py を置く）。"""
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    (inner / "conftest.py").write_text(conftest)
+    (inner / "test_inner.py").write_text(test_source)
+    return inner
+
+
 @pytest.mark.parametrize("basetemp_under_real_state", [False, True])
 def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, src_env, basetemp_under_real_state):
     home = tmp_path / "home"
@@ -73,16 +102,10 @@ def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, src_env, base
     (home / ".claude" / "kept").write_text("kept")
     (home / ".local" / "state").mkdir(parents=True)
     (tmp_path / "test_inner.py").write_text(INNER)
-    env = {**src_env, "HOME": str(home)}
+    env = _child_env(src_env, HOME=str(home))
     # 一時ディレクトリを本物の置き場の下に置いても、その外の本物の置き場は守られたまま
     basetemp = ["--basetemp", str(home / ".local" / "state" / "pytest")] if basetemp_under_real_state else []
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    proc = _run_inner_pytest(tmp_path, env, basetemp)
     flagged = {line.split("::")[1].split()[0] for line in proc.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))}
     assert flagged == FLAGGED, proc.stdout
     assert not (home / ".local" / "state" / "ndf").exists()
@@ -373,19 +396,10 @@ ORIGINAL_STATE_INNER = textwrap.dedent(
 def test_original_state_variable_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_path, src_env):
     original = tmp_path / "original-state"
     original.mkdir()
-    inner = tmp_path / "inner"
-    inner.mkdir()
-    (inner / "conftest.py").write_text(EARLIER_CONFTEST)
-    (inner / "test_inner.py").write_text(ORIGINAL_STATE_INNER)
-    env = {**src_env, "HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(original), "ORIGINAL_STATE": str(original)}
+    inner = _inner_dir(tmp_path, EARLIER_CONFTEST, ORIGINAL_STATE_INNER)
+    env = _child_env(src_env, HOME=str(tmp_path / "home"), XDG_STATE_HOME=str(original), ORIGINAL_STATE=str(original))
     basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
-        cwd=inner,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    proc = _run_inner_pytest(inner, env, basetemp)
     assert proc.returncode != 0, proc.stdout
     assert "本物の状態の置き場へ書こうとした" in proc.stdout
     assert not (original / "ledger.jsonl").exists()
@@ -421,19 +435,10 @@ ORIGINAL_HOME_INNER = textwrap.dedent(
 def test_original_home_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_path, src_env):
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
-    inner = tmp_path / "inner"
-    inner.mkdir()
-    (inner / "conftest.py").write_text(EARLIER_HOME_CONFTEST)
-    (inner / "test_inner.py").write_text(ORIGINAL_HOME_INNER)
-    env = {**src_env, "HOME": str(home), "ORIGINAL_HOME": str(home)}
+    inner = _inner_dir(tmp_path, EARLIER_HOME_CONFTEST, ORIGINAL_HOME_INNER)
+    env = _child_env(src_env, HOME=str(home), ORIGINAL_HOME=str(home))
     basetemp = ["--basetemp", str(tmp_path / "inner-tmp")]
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "ndf.testing.isolation", "-q", "-rfE", "-p", "no:cacheprovider", *basetemp, "test_inner.py"],
-        cwd=inner,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    proc = _run_inner_pytest(inner, env, basetemp)
     assert proc.returncode != 0, proc.stdout
     assert "本物の状態の置き場へ書こうとした" in proc.stdout
     assert not (home / ".claude" / "ledger.jsonl").exists()

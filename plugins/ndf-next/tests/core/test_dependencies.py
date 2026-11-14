@@ -21,6 +21,7 @@ def _imports_dbos(node: ast.AST) -> bool:
 
 
 def _dbos_importers(root: Path, relative_to: Path) -> set[str]:
+    """`root` の下で DBOS を読むファイル（`relative_to` からの相対パス）。"""
     found = set()
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
@@ -48,8 +49,8 @@ def test_dbos_importers_finds_only_absolute_dbos_imports(tmp_path):
     assert _dbos_importers(tmp_path, tmp_path) == {"plain.py", "alias_multi.py", "from_abs.py", "from_sub.py", "nested/deep.py"}
 
 
-def test_dbos_importers_uses_explicit_relative_to(tmp_path, monkeypatch):
-    """相対パスの起点は、大域の PLUGIN_ROOT ではなく渡した値を使う。"""
+def test_dbos_importers_uses_explicit_base(tmp_path, monkeypatch):
+    """明示した基準が大域の基準と異なっても、同じ相対パスを返す。"""
     source_root = tmp_path / "src"
     source_root.mkdir()
     (source_root / "module.py").write_text("import dbos\n")
