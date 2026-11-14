@@ -490,6 +490,28 @@ def test_bare_name_current_values(name: str, bare: str) -> None:
     assert ci.bare_name(name) == bare
 
 
+@pytest.mark.parametrize(
+    ("name", "bare", "key"),
+    [
+        # 末尾の空白の後の分割は外さない（空白を除くのは分割を外した後）。現状の値として固定する
+        ("pytest (0/2) ", "pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)\t", "pytest (1/2)", "pytest (1/2)"),
+        ("A / B /  pytest  ", "pytest", "pytest"),
+        ("CI / W / pytest (1/2)", "pytest", "pytest (1/2)"),
+    ],
+)
+def test_bare_name_and_required_key_strip_after_removing_prefix(name: str, bare: str, key: str) -> None:
+    """現状固定（I-009）: 前置きを最後の ` / ` で外し、bare_name は分割を外してから、required_key は分割を見る前に空白を除く。"""
+    assert (ci.bare_name(name), ci.required_key(name)) == (bare, key)
+
+
+def test_read_matches_required_with_multiple_prefixes_and_spaces() -> None:
+    """現状固定（I-009）: 複数の前置きと前後の空白のある必須の名前も、前置きを外した鍵でチェックに当たる。"""
+    runs = [run("A / B / pytest (0/2)", rid=1), run("lint ", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["X / Y / pytest (0/2) ", " lint"], ["pytest"])
+    assert (reading.verdict, reading.missing, [c.name for c in reading.failed_other]) == ("check_failed", [], ["lint "])
+
+
 def test_bare_names_is_the_set_of_bare_names() -> None:
     """現状固定: 集合で返し、同じ照合の名前は 1 つに畳む。ジェネレーターも受ける。"""
     assert ci.bare_names(["CI / pytest (0/2)", "pytest", "W / lint"]) == {"pytest", "lint"}
