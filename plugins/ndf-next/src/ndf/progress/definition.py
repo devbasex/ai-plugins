@@ -145,15 +145,21 @@ def _context_keys() -> set[str]:
     return set(contracts.load_json(CONTEXT)["properties"])
 
 
+def _context_key_errors(where: str, meta: dict[str, Any]) -> list[str]:
+    """工程の inputs・outputs（配列のときだけ）の鍵が、スプリントの文脈の鍵にあるかを確かめる。"""
+    known = _context_keys()
+    errs = []
+    for part in ("inputs", "outputs"):
+        held = meta.get(part)
+        if isinstance(held, list):
+            errs += [f"{where}: {part} の {k} はスプリントの文脈の鍵に無い" for k in held if k not in known]
+    return errs
+
+
 def _meta_errors(where: str, meta: Any, level: str) -> list[str]:
     errs = [f"{where}: metadata.ndf {e}" for e in contracts.schema_errors(meta, f"{NDF_SCHEMA}#/$defs/{level}")]
     if level == "stage" and isinstance(meta, dict):
-        known = _context_keys()
-        for part in ("inputs", "outputs"):
-            held = meta.get(part)
-            errs += (
-                [f"{where}: {part} の {k} はスプリントの文脈の鍵に無い" for k in held if k not in known] if isinstance(held, list) else []
-            )
+        errs += _context_key_errors(where, meta)
     return errs
 
 
@@ -235,10 +241,10 @@ def _stage_def(doc: Mapping[str, Any]) -> model.StageDef:
         name=name,
         phase=meta["phase"],
         steps=tuple(_step_def(name, n, b) for n, b in _tasks(doc)),
-        when=tuple(meta["when"]) if "when" in meta else (),
+        when=tuple(meta.get("when", ())),
         per_issue=bool(meta.get("per_issue")),
-        inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
-        outputs=tuple(meta["outputs"]) if "outputs" in meta else (),
+        inputs=tuple(meta.get("inputs", ())),
+        outputs=tuple(meta.get("outputs", ())),
         input_ref=_endpoint(doc, "input"),
         output_ref=_endpoint(doc, "output"),
     )
