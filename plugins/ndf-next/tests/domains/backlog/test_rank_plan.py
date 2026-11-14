@@ -67,6 +67,16 @@ def test_rejection_of_a_direction_that_was_built_but_not_matched_is_stale():
     assert got["rejected_stale"] == [{"number": 9, "direction": FORWARD, "move_digest": "old"}]
 
 
+# --- 現状固定: moves の候補（_forward_item・_backward）の中身と move_digest。リファクタリングの前の値をそのまま記録する ---
+
+
+def test_forward_and_backward_candidates_keep_their_fields_and_digests():
+    got = rank_decide.compute(_forward_board())
+    assert got["forward"] == [{"number": 9, "from": NEXT, "to": NEAR, "cod": 22, "boundary_cod": 3, "threshold": 5, "diff": 19,
+                               "higher_columns": ["UBV"], "decision": APPROVAL, "group": [], "move_digest": "05261e671baf378c"}]  # fmt: skip
+    assert got["backward"] == [{"number": 2, "from": NEAR, "to": NEXT, "cod": 3, "decision": APPROVAL, "move_digest": "931844708947504f"}]
+
+
 def _metrics_1595() -> dict:
     """#1595 の最小の形: #23（group に 21・33・36）・#33・#36・#21 がこの順に並ぶ。"""
 
