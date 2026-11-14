@@ -19,13 +19,6 @@ OPEN_SCRIPT = Path(__file__).with_name("_durable_store_open.py")
 NOW = datetime(2026, 11, 14, 12, 0, tzinfo=UTC)
 
 
-@pytest.fixture
-def root(tmp_path):
-    path = tmp_path / "ndf" / "state"
-    yield path
-    durable.release_store(path)
-
-
 def _format(root: Path) -> int:
     return json.loads((root / "format.json").read_text())["format"]
 

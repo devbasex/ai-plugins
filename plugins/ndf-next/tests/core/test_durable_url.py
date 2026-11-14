@@ -56,13 +56,6 @@ def pg_url(tmp_path_factory):
         subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "immediate", "stop"], check=False, capture_output=True)
 
 
-@pytest.fixture
-def root(tmp_path):
-    path = tmp_path / "ndf" / "state"
-    yield path
-    durable.release_store(path)
-
-
 @durable.workflow
 def url_done_flow(value: str) -> str:
     return value

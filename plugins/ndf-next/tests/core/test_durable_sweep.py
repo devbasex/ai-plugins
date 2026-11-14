@@ -24,13 +24,6 @@ def sweep_done_flow(value: str) -> str:
     return value
 
 
-@pytest.fixture
-def root(tmp_path):
-    path = tmp_path / "ndf" / "state"
-    yield path
-    durable.release_store(path)
-
-
 def _later(hours: float = 0, days: float = 0) -> datetime:
     return datetime.now(UTC) + timedelta(hours=hours, days=days)
 
