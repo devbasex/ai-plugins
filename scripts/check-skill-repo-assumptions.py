@@ -266,6 +266,12 @@ def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Patte
     return hits
 
 
+def scan_scripts(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], list[Hit]]:
+    """スクリプトを走査し、(SCRIPT の語のヒット, `.sh` だけに SHELL の語を掛けたヒット) を返す。"""
+    shells = [r for r in rels if r.endswith(SHELL_SUFFIX)]
+    return scan(base, rels, SCRIPT_MATCHERS), scan(base, shells, SHELL_MATCHERS, skip_comments=True)
+
+
 def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path | None:
     """項目のパスがどの family に属するかを Skill ディレクトリで返す。属さなければ None。"""
     for d in skills_dirs:
@@ -358,11 +364,10 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     scanned.update(canon(agents_dir / rel) for rel in agents)
     scanned.update(canon(scripts_dir / rel) for rel in scripts)
     scanned.update(canon(hooks_dir / rel) for rel in hooks)
+    family_script_hits, family_shell_hits = scan_scripts(scripts_dir, scripts)
+    skill_script_hits, skill_shell_hits = scan_scripts(skills_dir, skill_scripts)
     hits = scan(skills_dir, docs, DOC_MATCHERS)
-    hits += scan(scripts_dir, scripts, SCRIPT_MATCHERS)
-    hits += scan(skills_dir, skill_scripts, SCRIPT_MATCHERS)
-    hits += scan(scripts_dir, [r for r in scripts if r.endswith(SHELL_SUFFIX)], SHELL_MATCHERS, skip_comments=True)
-    hits += scan(skills_dir, [r for r in skill_scripts if r.endswith(SHELL_SUFFIX)], SHELL_MATCHERS, skip_comments=True)
+    hits += family_script_hits + skill_script_hits + family_shell_hits + skill_shell_hits
     hits += scan(hooks_dir, hooks, SCRIPT_MATCHERS)
     hits += scan(agents_dir, agents, DOC_MATCHERS)
     report_line = (
