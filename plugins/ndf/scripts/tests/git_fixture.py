@@ -26,3 +26,25 @@ def init_with_origin(tmp_path: Path, branch: str = "develop") -> Path:
     _git(root, "config", "commit.gpgsign", "false")
     _git(root, "remote", "add", "origin", str(origin))
     return root
+
+
+def git(cwd: Path, *args: str) -> str:
+    """`git -C <cwd> <args>` を作者 t で打ち、標準出力の前後の空白を除いて返す。失敗すれば AssertionError。"""
+    p = subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args], capture_output=True, text=True)
+    assert p.returncode == 0, (args, p.stderr)
+    return p.stdout.strip()
+
+
+def main_and_develop(repo: Path, write_main, write_develop=None, main_msg: str = "main") -> None:
+    """`.ndf/` を持つ `repo` を `main` で始め、`write_main(repo)` の内容を `main` にコミットし、`develop` を切って
+    `write_develop(repo)`（省けば何も書かない）の内容で 1 コミット進める。`develop` を checkout したまま返す。origin は作らない。"""
+    (repo / ".ndf").mkdir(parents=True)
+    git(repo.parent, "init", "-q", "-b", "main", str(repo))
+    write_main(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", main_msg)
+    git(repo, "checkout", "-q", "-b", "develop")
+    if write_develop is not None:
+        write_develop(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "develop")  # 両方の内容が同じでもブランチを分ける

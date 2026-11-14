@@ -19,6 +19,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 import inproc  # noqa: E402
+from git_fixture import git, main_and_develop  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import branch_flow  # noqa: E402
 import repo as repo_mod  # noqa: E402
@@ -27,13 +28,6 @@ SUPERVISE = SCRIPTS / "supervise.py"
 SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
 
 pytestmark = pytest.mark.usefixtures("issue_bodies")
-
-
-def git(cwd: Path, *args: str) -> str:
-    p = subprocess.run(
-        ["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args], capture_output=True, text=True, check=True
-    )
-    return p.stdout.strip()
 
 
 def write_flow(repo: Path, flow) -> None:
@@ -48,17 +42,15 @@ def make_repo(tmp_path: Path, flow=None) -> Path:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     repo = tmp_path / "repo"
-    (repo / ".ndf").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    write_flow(repo, flow)
-    (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
-    (repo / ".gitignore").write_text(".worktrees/\n.ndf/sprint-*/\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-qm", "init")
+
+    def write_main(tree: Path) -> None:
+        write_flow(tree, flow)
+        (tree / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
+        (tree / ".gitignore").write_text(".worktrees/\n.ndf/sprint-*/\n")
+
+    main_and_develop(repo, write_main, main_msg="init")
     git(repo, "remote", "add", "origin", str(origin))
     git(repo, "push", "-q", "origin", "main")
-    git(repo, "checkout", "-q", "-b", "develop")
-    git(repo, "commit", "-q", "--allow-empty", "-m", "develop")
     git(repo, "push", "-q", "origin", "develop")
     return repo
 

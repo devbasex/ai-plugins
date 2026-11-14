@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +20,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 import inproc  # noqa: E402
+from git_fixture import git, main_and_develop  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import branch_flow  # noqa: E402
 import parallel_release  # noqa: E402
@@ -43,12 +43,6 @@ REVIEWS = {
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
-def git(cwd: Path, *args: str) -> str:
-    p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, capture_output=True, text=True)
-    assert p.returncode == 0, (args, p.stderr)
-    return p.stdout.strip()
-
-
 def decl(flow=None, **extra) -> dict:
     return {"version": 1, "base_branch": "develop", "production_branch": "main", **extra, **({"branch_flow": flow} if flow else {})}
 
@@ -64,18 +58,14 @@ def write_decl(tree: Path, value) -> None:
 def make_repo(tmp_path: Path, main_decl=None, develop_decl=None, with_main: bool = True) -> Path:
     """bare の origin に `main`（`main_decl`）と `develop`（`develop_decl`）を置き、`develop` のメインディレクトリを返す。"""
     seed = tmp_path / "seed"
-    (seed / ".ndf").mkdir(parents=True)
-    git(tmp_path, "init", "-q", "-b", "main", str(seed))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}, "release": RELEASE}))
-    (seed / "plugins" / "ndf" / ".claude-plugin").mkdir(parents=True)
-    (seed / "plugins" / "ndf" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": "1.0.0"}))
-    write_decl(seed, decl() if main_decl is None else main_decl)
-    git(seed, "add", "-A")
-    git(seed, "commit", "-qm", "main")
-    git(seed, "checkout", "-q", "-b", "develop")
-    write_decl(seed, decl(SELECTED) if develop_decl is None else develop_decl)
-    git(seed, "add", "-A")
-    git(seed, "commit", "-q", "--allow-empty", "-m", "develop")  # 両方の宣言が同じでもブランチを分ける
+
+    def write_main(tree: Path) -> None:
+        (tree / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}, "release": RELEASE}))
+        (tree / "plugins" / "ndf" / ".claude-plugin").mkdir(parents=True)
+        (tree / "plugins" / "ndf" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": "1.0.0"}))
+        write_decl(tree, decl() if main_decl is None else main_decl)
+
+    main_and_develop(seed, write_main, lambda tree: write_decl(tree, decl(SELECTED) if develop_decl is None else develop_decl))
     if not with_main:
         git(seed, "branch", "-q", "-D", "main")
     origin = tmp_path / "origin.git"
