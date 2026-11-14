@@ -44,6 +44,7 @@ from ndf.domains.crossrefactor import (
     launch,
     launch_decide,
     phase_decide,
+    prompt_decide,
     report_decide,
     scope,
     store,
@@ -224,19 +225,10 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     return got
 
 
-def _propose_prompt(run: _Run) -> str:
-    symbols = "\n".join(f"- {p}: {', '.join(sorted(n))}" for p, n in _touched(run).symbols.items())
-    return (
-        f"PR #{run.cfg.pr} が触る次の関数・クラスについて、振る舞いを変えないリファクタリングを提案する。ほかの関数は提案しない。\n"
-        f"{symbols}\n"
-        '最後の行に JSON {"proposals": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>"}]} を出す。'
-    )
-
-
 def _propose(run: _Run) -> list[dict[str, Any]]:
     """提案の担当を順に起動し、提案をまとめる。結果を出さない担当は数えずに続ける。"""
     workspace.refresh_readers(run.ws)
-    prompt = _propose_prompt(run)
+    prompt = prompt_decide.propose(run.cfg.pr, _touched(run))
     by_runtime: dict[str, list[dict[str, Any]]] = {}
     for runtime in run.ws.runtimes:
         got = _launch(run, launch.Request("propose", runtime, prompt, f"pr{run.cfg.pr}", "proposals"))
@@ -247,17 +239,6 @@ def _propose(run: _Run) -> list[dict[str, Any]]:
     return merged
 
 
-def _plan_prompt(run: _Run, proposals: Sequence[Mapping[str, Any]]) -> str:
-    lines = [f"- {p['path']} {p['symbol']}: {p['title']}（{p['reason']}）" for p in proposals]
-    return (
-        f"PR #{run.cfg.pr} のリファクタリングの提案から、採る項目を選んで並べる（重なるものは 1 つにする）。\n"
-        + "\n".join(lines)
-        + "\n項目ごとにグレード（tier: high・medium・low）と見積り（estimate: テストの追加と実装の分）を付ける。"
-        + '\n最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
-        + ' "tier": "<グレード>", "estimate": {"test": <分>, "implement": <分>}}]} を出す。'
-    )
-
-
 def _plan(run: _Run) -> None:
     """提案から項目を組む（済んでいれば何もしない）。計画の担当が結果を出さなければ提案をそのまま項目にする。"""
     if "items" in run.state:
@@ -266,7 +247,7 @@ def _plan(run: _Run) -> None:
     _record_phase(run, "plan")
     planned = None
     if proposals:
-        req = launch.Request("plan", participants.FIXER, _plan_prompt(run, proposals), f"pr{run.cfg.pr}", "items")
+        req = launch.Request("plan", participants.FIXER, prompt_decide.plan(run.cfg.pr, proposals), f"pr{run.cfg.pr}", "items")
         got = _launch(run, req)
         planned = got["items"] if got is not None else None
     items, skipped = items_decide.plan_items(planned if planned is not None else proposals, _touched(run))
@@ -302,17 +283,9 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[
     return None
 
 
-def _item_text(item: Mapping[str, Any]) -> str:
-    return f"{item['id']}（{item['path']} の {item['symbol']}）: {item['title']}"
-
-
 def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     """振る舞いを固定するテストを足す。足したテストが全体の実行に収集されなければ項目を戻す（#620）。"""
-    prompt = (
-        f"{_item_text(item)} を直す前に、今の振る舞いを固定するテストを足してコミットする（push しない）。"
-        ' 結果は {"tests": ["<足したテストのファイル>"]}。'
-    )
-    got = _code(run, item, "add-tests", prompt)
+    got = _code(run, item, "add-tests", prompt_decide.add_tests(item))
     if got is None:
         return False
     tests = [str(t) for t in got["tests"]] if isinstance(got.get("tests"), list) else []
@@ -327,11 +300,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
 
 
 def _implement(run: _Run, item: dict[str, Any]) -> bool:
-    prompt = (
-        f"{_item_text(item)} を、振る舞いを変えずに直してコミットする（push しない）。ほかの関数は変えない。"
-        ' 結果は {"commit": "<最後のコミット>"}。'
-    )
-    return _code(run, item, "implement", prompt) is not None
+    return _code(run, item, "implement", prompt_decide.implement(item)) is not None
 
 
 def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite]) -> verify_decide.Attributed:
@@ -348,17 +317,6 @@ def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite]
     return verify_decide.Attributed(stable, got.inherited)
 
 
-def _fix_prompt(item: Mapping[str, Any], own: frozenset[str]) -> str:
-    judged = item["feasibility"] if "feasibility" in item else []
-    hint = "".join(f"\n成立の判定（{j['by']}）: {j['reason']} {j['evidence']}" for j in judged if j["feasible"])
-    return (
-        f"{_item_text(item)} の変更で、次の検査かテストが落ちた（<suite>:<ファイル>）。この項目の変更の中で直してコミットする。\n"
-        + "\n".join(f"- {k}" for k in sorted(own))
-        + hint
-        + '\n結果は {"commit": "<最後のコミット>"}。'
-    )
-
-
 def _judges(run: _Run) -> list[str]:
     return [r for r in run.ws.runtimes if r != participants.FIXER]
 
@@ -369,12 +327,7 @@ def _judge(run: _Run, item: dict[str, Any], own: frozenset[str]) -> judge_decide
     move = judge_decide.after_stall(item, judges)
     if move.kind != judge_decide.JUDGE:
         return move
-    prompt = (
-        f"{_item_text(item)} の修正が停滞か振動した。次の失敗を、項目の変更（振る舞いを変えないリファクタリング）の中で"
-        "直せるかを判定する。\n" + "\n".join(f"- {k}" for k in sorted(own))
-        + '\n最後の行に JSON {"items": [{"item": "' + item["id"] + '", "feasible": <true|false>, "reason": "<理由>", "evidence": "<根拠>"}]} を出す。'
-    )  # fmt: skip
-    got = _launch(run, launch.Request("judge", judges[0], prompt, item["id"], "items"))
+    got = _launch(run, launch.Request("judge", judges[0], prompt_decide.judge(item, own), item["id"], "items"))
     row = judge_decide.answer_of(got, item["id"])
     item["feasibility"] = [*(item["feasibility"] if "feasibility" in item else []), judge_decide.record(judges[0], row, _now())]
     run.save()
@@ -417,7 +370,7 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
             break
         if regroup:
             history = [got.own]
-        if _code(run, item, "fix", _fix_prompt(item, got.own)) is None:
+        if _code(run, item, "fix", prompt_decide.fix(item, got.own)) is None:
             return
         fixes += 1
     _reset(run, item["start"])
@@ -437,17 +390,6 @@ def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
     run.save()
 
 
-def _flaky_prompt(pending: Mapping[str, Any]) -> str:
-    back = "".join(f"\n前回の違反: {v['commit']} {v['detail']}" for v in pending["sendback"])
-    return (
-        "次のテストは打ち直すと通るフレーキーなテストである（<suite>:<ファイル>）。テストのファイルだけを直し、"
-        f"鍵ごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <鍵>` を付ける（push しない）。\n"
-        + "\n".join(f"- {k}" for k in pending["keys"])
-        + back
-        + '\n結果は {"commit": "<最後のコミット>"}。'
-    )
-
-
 def _flaky_fix(run: _Run) -> None:
     """積んだフレーキーなテストの直しを依頼して取り込む。違反は起点まで取り消して 1 度だけ差し戻す。項目には触れない。"""
     if "flaky_request" not in run.state or not run.state["flaky_request"]:
@@ -457,7 +399,7 @@ def _flaky_fix(run: _Run) -> None:
     kind = flaky_decide.NONE
     for _ in range(flaky_decide.MAX_ATTEMPTS):
         base = _record_phase(run, "flaky-fix")
-        _launch(run, launch.Request("flaky-fix", participants.FIXER, _flaky_prompt(pending), "flaky"))
+        _launch(run, launch.Request("flaky-fix", participants.FIXER, prompt_decide.flaky(pending), "flaky"))
         commits = flaky_decide.parse_log(run.work.run("log", "--reverse", "--name-only", flaky_decide.LOG_FORMAT, f"{base}..HEAD"))
         found = flaky_decide.violations(commits, pending["keys"], tests_decide.is_test_file)
         pending["attempts"] += 1
@@ -497,10 +439,7 @@ def _final(run: _Run) -> None:
 
     def fix(failed: Sequence[str], round_no: int) -> bool:
         _record_phase(run, "final-fix")
-        prompt = (
-            f"PR #{cfg.pr} の CI で次のテストが落ちた。リファクタリング計画の対象範囲（{', '.join(cfg.scope)}）の中だけを変えて直し、"
-            "コミットする（push しない）。\n" + "\n".join(f"- {f}" for f in failed) + '\n結果は {"commit": "<最後のコミット>"}。'
-        )
+        prompt = prompt_decide.final_fix(cfg.pr, cfg.scope, failed)
         return _launch(run, launch.Request("final-fix", participants.FIXER, prompt, f"r{round_no}")) is not None
 
     hub = run.ports.github(run.work)
