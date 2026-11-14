@@ -81,6 +81,11 @@ def post_json(
         raise PostError(f"{_seconds(timeout)} 秒を越えた", retryable=True) from e
     except httpx.TransportError as e:
         raise PostError(f"接続できない（{type(e).__name__}）", retryable=True) from e
+    return _json_object(resp)
+
+
+def _json_object(resp: httpx.Response) -> dict[str, Any]:
+    """応答が 2xx で JSON のオブジェクトならその辞書を返す。ほかは `PostError`。"""
     if not resp.is_success:
         raise PostError(f"HTTP {resp.status_code}", retryable=_status_retryable(resp.status_code))
     try:
