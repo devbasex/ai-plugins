@@ -7,9 +7,10 @@ import re
 
 import httpx
 import pytest
-from githubkit import GitHub as Client
 
-from ndf.adapters import github, publish
+from ndf.adapters import publish
+
+from ._github_helpers import hub
 
 PUBLIC_REPO = "example-owner/public-repo"
 PRIVATE_REPO = "example-owner/private-repo"
@@ -24,8 +25,7 @@ class FakeGitHub:
         self.visibility = visibility
         self.queries: list[str] = []
         self.writes: list[tuple[str, str, dict]] = []
-        api = Client("t", transport=httpx.MockTransport(self), http_cache=False, auto_retry=False)
-        self.hub = github.GitHub(repo, api)
+        self.hub = hub(repo, self)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/graphql":

@@ -11,11 +11,12 @@ from pathlib import Path
 
 import httpx
 import pytest
-from githubkit import GitHub as Client
 from githubkit.exception import RateLimitExceeded, RequestFailed
 from githubkit.response import Response
 
 from ndf.adapters import git, github
+
+from ._github_helpers import hub, pull_json
 
 REPO = "devbasex/ai-plugins"
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
@@ -28,16 +29,11 @@ MERGE_SETTINGS = {
 
 
 def _hub(handler: Callable[[httpx.Request], httpx.Response]) -> github.GitHub:
-    api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
-    return github.GitHub(REPO, api)
+    return hub(REPO, handler)
 
 
 def _pull(head: str = HEAD, body: str = "", merged: bool = False, mergeable_state: str = "clean") -> dict:
-    return {
-        "number": 7, "state": "open", "merged": merged, "body": body, "mergeable_state": mergeable_state,
-        "head": {"sha": head, "ref": "feat/x"}, "base": {"ref": "develop"},
-        "user": {"login": "octocat"}, "author_association": "OWNER",
-    }  # fmt: skip
+    return pull_json(head, body, merged, mergeable_state)
 
 
 class Server:

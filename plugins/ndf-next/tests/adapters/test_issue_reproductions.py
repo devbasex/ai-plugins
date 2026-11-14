@@ -13,26 +13,15 @@ from pathlib import Path
 
 import httpx
 import pytest
-from githubkit import GitHub as Client
 
 from ndf import ci_cli
 from ndf.adapters import github, publish
 from ndf.contracts import causes
 
 from ._ci_helpers import run
+from ._github_helpers import hub, offline_client, pull_json
 
 REPO = "devbasex/ai-plugins"
-
-
-def _api(handler: Callable[[httpx.Request], httpx.Response]) -> Client:
-    return Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
-
-
-def _pull(head: str) -> dict:
-    return {
-        "number": 7, "state": "open", "merged": False, "body": "", "mergeable_state": "clean",
-        "head": {"sha": head, "ref": "feat/x"}, "base": {"ref": "develop"}, "user": {"login": "octocat"}, "author_association": "OWNER",
-    }  # fmt: skip
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -55,9 +44,9 @@ def test_issue_2041_merge_with_the_short_sha_git_prints_for_the_same_head_merges
             return httpx.Response(200, json=[])
         if path == f"/repos/{REPO}":
             return httpx.Response(200, json={"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True})
-        return httpx.Response(200, json=_pull(full))
+        return httpx.Response(200, json=pull_json(full))
 
-    out = github.GitHub(REPO, _api(handler)).merge(7, expect_head=short)
+    out = hub(REPO, handler).merge(7, expect_head=short)
     assert len(short) < len(full)
     assert (out.merged, out.kind) == (True, None)
     assert sent[0]["sha"] == full
@@ -70,9 +59,9 @@ def _serve_checks(monkeypatch: pytest.MonkeyPatch, runs: list[dict], calls: list
         calls.append(request.url.path)
         if request.url.path.endswith("/check-runs"):
             return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
-        return httpx.Response(200, json=_pull(head))
+        return httpx.Response(200, json=pull_json(head))
 
-    monkeypatch.setattr(github, "client", lambda **_: _api(handler))
+    monkeypatch.setattr(github, "client", lambda **_: offline_client(handler))
 
 
 def test_issue_2317_watch_stops_naming_a_required_check_the_pr_removed(
@@ -109,7 +98,7 @@ def test_issue_3077_cross_repo_origin_points_at_the_issue_of_the_source_repo() -
         written.append(json.loads(request.content))
         return httpx.Response(201, json={"number": 1, "html_url": f"https://github.com/{target}/issues/1"})
 
-    writer = publish.Publisher(github.GitHub(target, _api(handler)), frozenset())
+    writer = publish.Publisher(hub(target, handler), frozenset())
     line = writer.origin("issue #12", source)
     writer.create_issue("試し", f"## 由来\n\n{line}\n", ["enhancement"])
     assert line == f"issue {source}#12"
