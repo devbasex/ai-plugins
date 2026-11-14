@@ -189,6 +189,11 @@ def declared(plan_raw: Mapping[str, Any]) -> list[Ref]:
 Got = Union[str, Unresolved, _Empty]
 
 
+def _canonical_json(value: Any) -> str:
+    """文字列でない値を参照の値にするときの JSON（日本語をそのまま、鍵は昇順）。"""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def _is_placeholder(value: Any) -> bool:
     return value is None or str(value).strip().lower() in _PLACEHOLDERS
 
@@ -236,7 +241,7 @@ def _plan_result(ref: Ref, ctx: Context, src: Sources) -> Got:
     got = _output(ref, ctx, src, ref.key)
     if isinstance(got, (Unresolved, _Empty)):
         return got
-    return got if isinstance(got, str) else json.dumps(got, ensure_ascii=False, sort_keys=True)
+    return got if isinstance(got, str) else _canonical_json(got)
 
 
 def queue_prs_of(prior: Sequence[queue_decide.Outcome], closing: Sequence[int], accepts_gate: bool = False) -> list[int]:
@@ -275,8 +280,8 @@ def _counts(ref: Ref, ctx: Context, src: Sources) -> Got:
     if ref.key is not None:
         if ref.key not in found:
             return _Empty(f"{where} の進捗記録にステップ {ref.key} の件数が無い")
-        return json.dumps(found[ref.key], ensure_ascii=False, sort_keys=True)
-    return json.dumps(found, ensure_ascii=False, sort_keys=True)
+        return _canonical_json(found[ref.key])
+    return _canonical_json(found)
 
 
 _RESOLVERS = {VERSION: _version, RECORD_PR: _record_pr, QUEUE_PRS_KIND: _queue_prs, PLAN_RESULT: _plan_result, COUNTS: _counts}
