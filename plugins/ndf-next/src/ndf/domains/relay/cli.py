@@ -77,24 +77,32 @@ def _status_items(got: install.Installed) -> list[dict[str, Any]]:
     return [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry)]
 
 
-def _install(action: str, replace_old: bool) -> int:
-    ident = identity.load()
-    code = causes.exit_code("precondition")
-    if action == "status":
-        got = install.status(os.environ, code)
-    elif action == "uninstall":
-        got = install.uninstall(os.environ, code)
-    else:
-        old = registry.legacy_running(os.environ)
-        if replace_old and old:
-            names = "・".join(r.name for r in old)
-            return result.emit(result.stopped(TOOL, "precondition", f"旧い NDF のラッパーが動いている: {names}。止めてから置き換える"))
-        got = install.install(os.environ, ident.root, code, replace_old)
+def _missing_code() -> int:
+    """複製がプラグインを見つけられないときの終了コード。"""
+    return causes.exit_code("precondition")
+
+
+def _do_install(replace_old: bool, code: int) -> install.Installed | int:
+    """複製とエントリポイントを置く。`--replace-old` で旧いラッパーが動いていれば、断った結果を出して終了コードを返す。"""
+    old = registry.legacy_running(os.environ)
+    if replace_old and old:
+        names = "・".join(r.name for r in old)
+        return result.emit(result.stopped(TOOL, "precondition", f"旧い NDF のラッパーが動いている: {names}。止めてから置き換える"))
+    return install.install(os.environ, identity.load().root, code, replace_old)
+
+
+def _emit_installed(got: install.Installed, foreign_warning: bool) -> int:
+    """置き場の状態の結果を出す。`foreign_warning` が真なら、旧い NDF の複製が残ったことも警告する。"""
     summary = f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
     warnings = [] if got.on_path else [f'{got.entry.path.parent} が PATH に無い。export PATH="{got.entry.path.parent}:$PATH" を足す']
-    if action == "install" and got.copy.state == "foreign":
+    if foreign_warning and got.copy.state == "foreign":
         warnings.append("旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える")
     return result.emit(result.result(TOOL, result.OK, summary, items=_status_items(got), warnings=warnings))
+
+
+def _install_run(args: argparse.Namespace) -> int:
+    got = _do_install(args.replace_old, _missing_code())
+    return got if isinstance(got, int) else _emit_installed(got, foreign_warning=True)
 
 
 def _account(args: argparse.Namespace) -> int:
@@ -246,9 +254,9 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 
 HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
-    "install": lambda a: _install("install", a.replace_old),
-    "uninstall": lambda a: _install("uninstall", False),
-    "status": lambda a: _install("status", False),
+    "install": _install_run,
+    "uninstall": lambda a: _emit_installed(install.uninstall(os.environ, _missing_code()), foreign_warning=False),
+    "status": lambda a: _emit_installed(install.status(os.environ, _missing_code()), foreign_warning=False),
     "account": _account,
     "run": _run,
     "spawn": _hub,
