@@ -4,13 +4,13 @@ import json
 
 import pytest
 
-from ndf.adapters import cli, llm
+from ndf.adapters import claude, llm, run_log
 
 
 class FakeClaude:
     """答えを順に返す偽の呼び出し。受けた引数と問いを残す。"""
 
-    def __init__(self, *replies: cli.ClaudeReply) -> None:
+    def __init__(self, *replies: claude.ClaudeReply) -> None:
         self.replies = list(replies)
         self.calls: list[tuple[list[str], str, float]] = []
 
@@ -20,7 +20,7 @@ class FakeClaude:
 
 
 def reply(answer, cost=0.5):
-    return cli.ClaudeReply(True, answer, json.dumps(answer, ensure_ascii=False), cost)
+    return claude.ClaudeReply(True, answer, json.dumps(answer, ensure_ascii=False), cost)
 
 
 def good(decision="fix"):
@@ -97,8 +97,8 @@ def test_ask_retries_once_and_tells_the_errors():
 
 def test_ask_returns_needs_human_after_two_misses_without_picking_words():
     schema = llm.answer_schema(choices=["fix", "stop"])
-    text = cli.ClaudeReply(True, None, "fix にするのがよい", 0.1)
-    fake = FakeClaude(text, cli.ClaudeReply(False, None, "", 0.0, "claude を起動できない"))
+    text = claude.ClaudeReply(True, None, "fix にするのがよい", 0.1)
+    fake = FakeClaude(text, claude.ClaudeReply(False, None, "", 0.0, "claude を起動できない"))
 
     got = llm.ask("どうするか", "材料", schema, 30, call=fake)
 
@@ -114,7 +114,7 @@ def test_ask_in_json_mode_does_not_require_decision(int_schema):
 
 
 def test_ask_records_attempts_and_validity_in_run_log(tmp_path):
-    log = cli.open_run("judge-test", location="repo")
+    log = run_log.open_run("judge-test", location="repo")
     llm.ask("q", "m", llm.answer_schema(choices=["fix"]), 30, call=FakeClaude(reply(good("x")), reply(good())))
 
     lines = [json.loads(line) for line in log.path.read_text().splitlines()]
@@ -133,11 +133,11 @@ def test_ask_launches_with_judge_permission_and_no_tools():
 
 @pytest.mark.parametrize(
     ("failure", "kind"),
-    [(cli.Failure.LAUNCH, "precondition"), (cli.Failure.TIMEOUT, "interrupted"), (cli.Failure.USAGE_LIMIT, "usage_limit")],
+    [(claude.Failure.LAUNCH, "precondition"), (claude.Failure.TIMEOUT, "interrupted"), (claude.Failure.USAGE_LIMIT, "usage_limit")],
 )
 def test_ask_stops_at_once_on_failures_retrying_cannot_fix(failure, kind):
     """起動できない・期限切れ・利用上限は needs_human にまとめず、打ち直さない（#3394）。"""
-    fake = FakeClaude(cli.ClaudeReply.failed("", "claude の失敗", 0.2, failure), reply(good()))
+    fake = FakeClaude(claude.ClaudeReply.failed("", "claude の失敗", 0.2, failure), reply(good()))
 
     got = llm.ask("q", "m", llm.answer_schema(choices=["fix"]), 30, call=fake)
 

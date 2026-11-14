@@ -163,7 +163,7 @@ def test_finish_writes_end_and_stops_when_record_failed(capsys):
 
 def test_parallel_children_write_whole_lines():
     parent = run_log.open_run("parent", run_id="p", location="repo")
-    script = "from ndf.adapters import cli\nlog = cli.open_run('child')\nfor i in range(100):\n    log.write('n', i=i)\n"
+    script = "from ndf.adapters import run_log\nlog = run_log.open_run('child')\nfor i in range(100):\n    log.write('n', i=i)\n"
     env = {**os.environ, **parent.child_env(), "PYTHONPATH": str(SRC)}
 
     procs = [subprocess.Popen([sys.executable, "-c", script], env=env) for _ in range(4)]
