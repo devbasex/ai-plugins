@@ -20,12 +20,9 @@ COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
+    "launch-args": "ndf.adapters.cli",
     "test-slot": "ndf.testing.command",
 }
-
-# 呼び出しの誤り・設定の壊れ（`plugin.json` が読めない）の終了コード。
-# 止まった理由の表（契約の子 D1）ができたら、`config_broken` の行の終了コードを引く形へ替える
-EXIT_UNREADABLE = 2
 
 
 def _usage(name: str) -> str:

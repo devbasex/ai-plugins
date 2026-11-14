@@ -12,6 +12,7 @@ from pathlib import Path
 
 import branch_flow
 import legacy_names
+from repo import SPRINT_MANIFEST
 from gate_answer import DESIGN_GATE
 
 from supervise_lib.decl import decl_fields, sprint_flow
@@ -178,7 +179,7 @@ def pin_flow(a) -> None:
     """スプリントの目録（`sprint.json`）に開始時に書いたブランチ運用があれば、`a.flow` をそれにする。`new sprint` を同じ
     スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
     try:
-        got = json.loads((sprint_out(a) / "sprint.json").read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
+        got = json.loads((sprint_out(a) / SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_flow.SNAPSHOT_KEY)
     except (OSError, ValueError, AttributeError):
         return
     if isinstance(got, dict) and got:
@@ -191,12 +192,12 @@ def flow_head(a) -> dict:
 
 
 def plan_sprint_branch(a, repo: str) -> dict:
-    """スプリントブランチをスプリントの起点から切り、origin へ送る。起点がベースブランチでなければ `--from` で渡す
-    （宣言を読み直さず、開始時のスナップショットで切る。#3121 の I3）。"""
+    """スプリントブランチをスプリントの起点から切り、origin へ送る。起点はベースブランチと同じときも常に `--from` で渡す
+    （作る時点の宣言を読み直さず、開始時のスナップショットで切る。#3121 の I3・#3310）。"""
     mb = sprint_branch(a)
     wt = f"{repo}/.worktrees/{mb}"
     start = sprint_flow(a).start_branch
-    frm = f" --from {shlex.quote(start)}" if start and start != a.base else ""
+    frm = f" --from {shlex.quote(start)}" if start else ""
     cmd = f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)}{frm} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
     return with_record(
         {
@@ -223,7 +224,7 @@ def design_read(a) -> list[int]:
 def plan_design_results(a, repo: str) -> dict:
     """設計の結果のステージ（設計承認ゲートの直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
     `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
-    manifest = sprint_out(a).resolve() / "sprint.json"
+    manifest = sprint_out(a).resolve() / SPRINT_MANIFEST
     cmd = (
         f"python3 {shlex.quote(str(SELF))} design-results --manifest {shlex.quote(str(manifest))} "
         f"--base {shlex.quote(sprint_flow(a).doc_target(sprint_branch(a)))} --root {shlex.quote(repo)} --design {' '.join(map(str, design_read(a)))}"
@@ -337,26 +338,33 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
     version = version or (a.version if channel == "dev" else None)
-    wt, branch = release_names(version)
     ns = argparse.Namespace(
-        **decl_fields(a),
-        version=version,
-        level=getattr(a, "level", None),
-        series=DEV_SERIES if channel == "prod" else None,
+        **_release_fields(a, repo, version, channel),
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
-        channel=channel,
-        repo=repo,
-        prev_tag=None,
-        worktree=f"{repo}/{wt}",
-        branch=branch,
-        issue=a.issue,
-        mode=a.mode,
         advise=a.state if advise else None,  # 承認資料を組むプランだけが読む（CD の無い本番は組まない）
         state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
-        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     return plan_release(ns)
+
+
+def _release_fields(a, repo: str, version: str | None, channel: str) -> dict:
+    """スプリントのリリースのプラン（通常・MVV）が共通に渡す引数。PR の選び方と承認の読み方は呼び手が足す。"""
+    wt, branch = release_names(version)
+    return {
+        **decl_fields(a),
+        "version": version,
+        "level": getattr(a, "level", None),
+        "series": DEV_SERIES if channel == "prod" else None,
+        "channel": channel,
+        "repo": repo,
+        "prev_tag": None,
+        "worktree": f"{repo}/{wt}",
+        "branch": branch,
+        "issue": a.issue,
+        "mode": a.mode,
+        "units": [sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
+    }
 
 
 def advise_design_steps(a) -> list[dict]:
@@ -476,23 +484,11 @@ def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition:
     """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップがリリース承認ゲートを判定する。
     prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
     `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
-    wt, branch = release_names(version)
     ns = argparse.Namespace(
-        **decl_fields(a),
-        version=version,
-        level=getattr(a, "level", None),
-        series=DEV_SERIES if channel == "prod" else None,
+        **_release_fields(a, repo, version, channel),
         prs=prs or [],
         prs_from_queue=prs is None,
-        channel=channel,
-        repo=repo,
-        prev_tag=None,
-        worktree=f"{repo}/{wt}",
-        branch=branch,
-        issue=a.issue,
-        mode=a.mode,
         mvv=a.state,
-        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     plan = plan_release(ns)
     if condition:

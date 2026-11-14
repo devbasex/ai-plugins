@@ -107,7 +107,7 @@ supervisor の定義を [docs/ndf-parallel-model.md](../ndf-parallel-model.md) �
 | 起動の判定（`lib/parallel_guard.py`） | 計画の外のセッションの判定（`judge_entry`・`entry_check`）・例外の起動の記録・止めたときの統一 JSON レポート。呼ぶのは `sprint-state.py loop start`（`lib/sprint_loop_cli.py`）と `supervise.py new sprint` |
 | レーンの追加と書き換え（`lib/parallel_lane_cli.py`、`parallel.py lane`） | 宣言を検査に通して書き、`plan.md` と引継ぎ文書を書き直し、`lanes_changed` を送る。上限を超えたら `relay.py cap` の 1 行を、入力か引継ぎ文書の名を変えたら起こし直しの 1 行を出す |
 | マシンの上限（`lib/relay_limit.py`、`relay.py cap`） | マシンの設定の読み書き（レーン数の上限の `named_cap`・プランの本数の上限の `plans_cap`・`write_limit`） |
-| 用語集の検査（`lib/glossary_words.py` の `word_pattern`） | カタカナだけの廃止語は、前後がカタカナ（長音符を含む）のときに一致させない。漢字の廃止語は部分一致のまま拾う |
+| 用語集の検査（`lib/glossary_words.py` の `word_pattern`） | カタカナだけの廃止語は、前後がカタカナ（長音符を含む）のときに一致させない。漢字の廃止語は部分一致のまま拾う。単独で照合する廃止した語（`standalone`）は、前後が漢字の出現に一致させない |
 
 ```mermaid
 classDiagram

@@ -495,7 +495,7 @@ def find_pr(root, head, base, states=("OPEN",)):
 
 
 def create_pr(root, base, head, title, body):
-    p = gh_parts.gh(["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body], cwd=root)
+    p = repo_lib.pr_create_restoring_head(root, gh_parts.gh, base, head, title, body, run_git=git)  # head が消えていれば push し直す
     if p.returncode != 0:
         raise StepError(f"gh pr create（{head} → {base}）が失敗: {p.stderr.strip()[:300]}")
     m = re.search(r"/pull/(\d+)", p.stdout)

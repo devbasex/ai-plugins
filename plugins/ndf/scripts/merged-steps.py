@@ -56,6 +56,7 @@ import deps  # noqa: E402
 deps.require("waits", "durable", "md", "mdtable", "procs", "locks", "schema", "versions")
 from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
+import branch_flow  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 import run_state  # noqa: E402
@@ -65,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.cleanup_context import CleanupContext  # noqa: E402
 from merged_lib.cleanup_metrics import cleanup_metrics as _cleanup_metrics  # noqa: E402
 from merged_lib.main_lock import main_dir_lock  # noqa: E402
 from merged_lib.pr_info import merged_pr_info  # noqa: E402
@@ -150,10 +152,11 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
+def _remove_pr_tmp_worktrees(ctx: CleanupContext, n):
     """PR の一時作業ツリー（wt_base/slug/pr<n> と rf<n> の中の worktree）を、`--force` を使わずに外す（#2229・#1680）。
 
     作業（変更・未追跡・未 push のコミット）を持つものと、持ち主の実行が動いているものは外さず kept にする。"""
+    root, wt_dir, add = ctx.main_dir, ctx.wt_base / ctx.slug, ctx.add
     state = None
     for name, remove in ((f"pr{n}", run_state.remove_pr_dir), (f"rf{n}", run_state.remove_run_dir)):
         path = wt_dir / name
@@ -167,35 +170,36 @@ def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
             add(it["kind"], it["name"], it["result"], it.get("reason"))
 
 
-def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+def _remove_pr_worktrees(ctx: CleanupContext, branch, merge_commit):
     """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
     branch_free = True
-    for wt in list_worktrees(root):
+    for wt in list_worktrees(ctx.main_dir):
         if wt["branch"] != branch:
             continue
-        if wt["path"] == main_dir:
-            add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
+        if wt["path"] == ctx.main_dir:
+            ctx.add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
             branch_free = False
             continue
-        ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
-        add("worktree", wt["path"], "removed" if ok else "kept", why)
+        ok, why = remove_worktree(ctx.main_dir, wt["path"], branch, merge_commit)
+        ctx.add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
     return branch_free
 
 
-def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
+def _cleanup_pr(ctx: CleanupContext, n):
     """PR 1 件分の作業ツリーとブランチを片付ける。"""
-    got = merged_pr_info(root, n, add)
-    if got is None:
+    if (got := merged_pr_info(ctx.main_dir, n, ctx.add)) is None:
         return
     branch, merge_commit = got
-    if why := repo.kept_sprint_branch(root, branch):  # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）
-        add("branch", branch, "kept", why)
-    elif _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
-        _delete_branch(root, branch, add)
-
-    if slug:
-        _remove_pr_tmp_worktrees(root, wt_base / slug, n, add)
+    # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）。
+    # 記録は .ndf/ の目録を全部読むため、スプリントブランチのときだけ探す
+    record = repo.sprint_flow_record(ctx.main_dir, branch) if (branch or "").startswith(branch_flow.SPRINT_PREFIX) else None
+    if why := repo.kept_sprint_branch(ctx.main_dir, branch, record):
+        ctx.add("branch", branch, "kept", why)
+    elif _remove_pr_worktrees(ctx, branch, merge_commit):
+        _delete_branch(ctx.main_dir, branch, ctx.add)
+    if ctx.slug:
+        _remove_pr_tmp_worktrees(ctx, n)
 
 
 def _update_main_dir(main_dir, add):
@@ -212,8 +216,7 @@ def _update_main_dir(main_dir, add):
         add("main_dir", main_dir, "kept", f"主ディレクトリが {base} でなく {cur or 'detached'} のため pull しない")
         return None
     pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
-    same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
-    if same:
+    if same := (same_untracked(main_dir, pull) if pull.returncode != 0 else []):
         # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
         for rel in same:
             (Path(main_dir) / rel).unlink()
@@ -271,16 +274,15 @@ def cleanup(root, prs):
     main_dir = wts[0]["path"] if wts else str(root)
     # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
     root = main_dir
-    slug = repo_slug(root)
-    wt_base = worktree_base.worktree_parent(main_dir)
+    ctx = CleanupContext(main_dir=main_dir, slug=repo_slug(root), wt_base=worktree_base.worktree_parent(main_dir), add=add)
 
     for n in prs:
         with main_dir_lock(main_dir):
-            _cleanup_pr(root, main_dir, slug, wt_base, n, add)
+            _cleanup_pr(ctx, n)
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
     # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
-    done = [wt_base / slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if slug else []
+    done = [ctx.wt_base / ctx.slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if ctx.slug else []
     swept = run_state.sweep_states(root, skip=done)
     items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
@@ -405,6 +407,21 @@ def probe_one(root, n, act, items):
     return cls, action
 
 
+def pick_class(found: list[tuple]) -> tuple[str, str]:
+    """PR ごとの (番号, クラス, 処置) から、最も優先するクラスとその処置を返す。無ければ ("none", "judge")。"""
+    if not found:
+        return "none", "judge"
+    _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
+    return cls, action
+
+
+def probe_summary(cls: str, action: str, items: list[dict], queued_runs: int) -> str:
+    """クラスと処置に応じた要約の文。チェックの名前（置き換えられたものを除く）とランナー待ちの数を埋める。"""
+    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
+    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
+    return template.format(names=names, queued_runs=queued_runs)
+
+
 def cmd_probe(a):
     """開いた PR のチェックを読み、取り残し・ランナー待ち・失敗・実行中に分ける（一次の調査）。"""
     if not a.pr and not a.head:
@@ -415,15 +432,10 @@ def cmd_probe(a):
         got = probe_one(root, n, a.act, items)
         if got:
             found.append((int(n), *got))
-    if not found:
-        cls, action = "none", "judge"
-    else:
-        _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
+    cls, action = pick_class(found)
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
-    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
-    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
-    summary = template.format(names=names, queued_runs=queued_runs)
+    summary = probe_summary(cls, action, items, queued_runs)
     pr_text = " ".join(f"#{n}" for n in prs)
     emit(
         result(TOOL, "ok", f"{pr_text} {summary}".strip(), items, {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}),

@@ -6,19 +6,28 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import branch_flow
 import decl
+import limits
 import proc
 from closing import defer_closing
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 WORKTREE_DECL = Path(".ndf") / "worktree.json"
+# スプリントの目録（`supervise.py new sprint` が書く）と、目録を探すときに入らないプランの状態ディレクトリの末尾
+SPRINT_MANIFEST = "sprint.json"
+PLAN_STATE_SUFFIX = "-state"
 # 確定仕様の置き場（リポジトリの根からの相対）。確定仕様化と設計との突き合わせが同じものを読む
 SPEC_DIR = "docs/specifications"
+# 既定ブランチの候補を理由の文言に載せる形（「 / 」区切りと「・」区切り）
+_CANDIDATES_TEXT = " / ".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
+_CANDIDATES_LIST = "・".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
 
 
 # メインディレクトリの決め方の正本は decl.main_dir（サブモジュールは core.worktree。#2054）
@@ -103,6 +112,19 @@ def _ref_exists(root, ref: str) -> bool:
     return proc.git_out(root, "show-ref", "--verify", "--quiet", ref) is not None
 
 
+def _git_quiet(root, *args, timeout: float | None = None) -> subprocess.CompletedProcess | None:
+    """`git -C <root> <args>` を対話のプロンプトを止めて起動する（GIT_TERMINAL_PROMPT=0）。起動できないか時間切れなら `None`。"""
+    try:
+        return proc.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _remote_has_branch(root, remote: str, name: str) -> bool:
     """`git ls-remote --heads` の行の参照名が `refs/heads/<name>` と完全に一致するか。
 
@@ -110,15 +132,8 @@ def _remote_has_branch(root, remote: str, name: str) -> bool:
     別のブランチでも行が返る。問い合わせの成功ではなく、返った行の参照名そのものを照合する。
     """
     want = f"refs/heads/{name}"
-    try:
-        p = proc.run(
-            ["git", "-C", str(root), "ls-remote", "--heads", remote, want],
-            check=False,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except OSError:
-        return False
-    if p.returncode != 0:
+    p = _git_quiet(root, "ls-remote", "--heads", remote, want)
+    if p is None or p.returncode != 0:
         return False
     return any(line.split("\t", 1)[-1].strip() == want for line in p.stdout.splitlines() if "\t" in line)
 
@@ -139,7 +154,7 @@ def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]
     d = default_branch(root)
     if d:
         return d, "既定ブランチ"
-    return None, f"宣言も {remote} の HEAD も main / master も無い"
+    return None, f"宣言も {remote} の HEAD も {_CANDIDATES_TEXT} も無い"
 
 
 def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
@@ -148,8 +163,8 @@ def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
     if v:
         return v, f"{WORKTREE_DECL} の production_branch"
     if default:
-        return default, "既定ブランチ（origin/HEAD → ローカルの main / master）"
-    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"
+        return default, f"既定ブランチ（origin/HEAD → ローカルの {_CANDIDATES_TEXT}）"
+    return None, f"production_branch も既定ブランチ（origin/HEAD・{_CANDIDATES_LIST}）も無い"
 
 
 def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
@@ -167,26 +182,103 @@ def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
     return production_of(wt, default_branch(root))
 
 
+# 本番チャネルを取り込み直す上限（秒）。応答の無い origin でプランの組み立てを止め続けないため（#3308）
+PRODUCTION_FETCH_TIMEOUT = limits.seconds("repo.production-fetch")
+
+
+def _fetch_tracking(root, name: str) -> bool:
+    """origin の `refs/heads/<name>` を `refs/remotes/origin/<name>` へ取り込み直す。成否を返す。
+
+    `main` 宛の検査（`scripts/check-pr-base.sh`）と同じ refspec を使う。失敗しても手元の追跡ブランチは変わらない。"""
+    p = _git_quiet(root, "fetch", "-q", "origin", f"refs/heads/{name}:refs/remotes/origin/{name}", timeout=PRODUCTION_FETCH_TIMEOUT)
+    return p is not None and p.returncode == 0
+
+
+def production_decl(root, production: str | None) -> tuple[dict | None, str]:
+    """本番チャネルの宣言（`origin/<本番チャネル>` の先頭の `.ndf/worktree.json`）。#3308 の前提 1。
+
+    読めたら `(宣言, 読んだ場所)`、読めなければ `(None, 読めない理由)`。取り込み直しに失敗しても手元の追跡ブランチを読む
+    （前提 4）。読めないときの扱いは `main` 宛の検査と同じく、呼び手が宣言の無いリポジトリとして組む（決定 3）。"""
+    if not production:
+        return None, "本番チャネルの名前が決まらない"
+    if root is None:
+        return None, "宣言を探す木に git の木が無い"
+    _fetch_tracking(root, production)
+    ref = f"origin/{production}"
+    if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}") is None:
+        return None, f"{ref} が無い"
+    text = proc.git_out(root, "show", f"refs/remotes/{ref}:{WORKTREE_DECL.as_posix()}")
+    if text is None:
+        return None, f"{ref} に {WORKTREE_DECL.as_posix()} が無い"
+    where = f"{ref} の {WORKTREE_DECL.as_posix()}"
+    try:
+        wt = json.loads(text)
+    except ValueError:
+        wt = None
+    if not isinstance(wt, dict):
+        return None, f"{where} を JSON のオブジェクトとして読めない"
+    if wt.get("version") != 1:
+        return None, f"{where} の version が 1 でない"
+    return wt, where
+
+
 def resolved_flow(root, base: str | None = None, production: str | None = None) -> branch_flow.ResolvedFlow:
     """ブランチ運用の宣言をブランチ名まで解く（`base`・`production` を渡せばそれを使う）。宣言が壊れていれば `branch_flow.FlowError`。"""
     wt = read_worktree_decl(root)[0] if root else {}
     flow = branch_flow.of_decl(wt)
-    base = base or declared_base(root) or default_branch(root)
+    base = base or base_branch(root)
     production = production or production_branch(root, wt)[0]
     return flow.resolve(base, production)
 
 
-def kept_sprint_branch(root, branch: str | None) -> str | None:
+def sprint_flow_record(root, branch: str | None) -> dict | None:
+    """スプリントブランチ `branch` の開始時の記録（目録 `sprint.json` の `ブランチ運用`。#3310）。無ければ `None`。
+
+    メインディレクトリの `.ndf/` の下の目録のうち、`ブランチ` が `branch` のもの（`ブランチ` を持たない目録は
+    `sprint/<スプリント>`）を探し、更新の新しい目録の記録を返す。プランの状態ディレクトリ（`<プラン>-state`）の中は
+    作業の写しを持つため探さない。目録が読めなければその目録を飛ばす。"""
+    top = decl.main_dir(root) if root else None
+    if not branch or top is None:
+        return None
+    hits = []
+    for d, dirs, files in os.walk(Path(top) / ".ndf"):
+        dirs[:] = [x for x in dirs if not x.endswith(PLAN_STATE_SUFFIX)]
+        if SPRINT_MANIFEST not in files:
+            continue
+        hit = _sprint_record_candidate(Path(d) / SPRINT_MANIFEST, branch)
+        if hit is not None:
+            hits.append(hit)
+    return max(hits, key=lambda h: (h[0], h[1]))[2] if hits else None
+
+
+def _sprint_record_candidate(path: Path, branch: str) -> tuple[float, str, dict] | None:
+    """目録 `path` が `branch` の開始時の記録を持てば (更新時刻, パス, 記録) を返す。読めないか対象外なら `None`。"""
+    try:
+        got = json.loads(path.read_text(encoding="utf-8"))
+        mtime = path.stat().st_mtime
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict):
+        return None
+    own = got.get("ブランチ") or f"{branch_flow.SPRINT_PREFIX}{got.get('スプリント')}"
+    snap = got.get(branch_flow.SNAPSHOT_KEY)
+    if own == branch and isinstance(snap, dict) and snap:
+        return mtime, str(path), snap
+    return None
+
+
+def kept_sprint_branch(root, branch: str | None, record: dict | None = None) -> str | None:
     """後片付けでスプリントブランチを残す理由（#3121 の決定 7）。消してよければ None。
 
     選んで集める取り込み方では、スプリントブランチはリリースの単位として本番チャネルに含まれるまで要る。
-    宣言が読めなければ消さない側（残す）へ倒す。"""
+    取り込み方と本番チャネルは、そのスプリントの開始時の記録（`record`）で決め、記録の無いスプリントだけ今の宣言で決める
+    （#3308 の設計の決定 1・決定 6）。宣言か記録が読めなければ消さない側（残す）へ倒す。"""
     if not branch or not branch.startswith(branch_flow.SPRINT_PREFIX):
         return None
     try:
-        flow = resolved_flow(root)
+        flow = branch_flow.from_snapshot(record, None, production_branch(root)[0]) if record else resolved_flow(root)
     except branch_flow.FlowError as e:
-        return f"ブランチ運用の宣言を読めないため残す: {e}"
+        return f"ブランチ運用の{'開始時の記録' if record else '宣言'}を読めないため残す: {e}"
     if not flow.production_branch or proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
         return None
     ref = f"origin/{flow.production_branch}"
@@ -206,6 +298,22 @@ def restore_branch(root, branch: str, ref: str = "HEAD", run_git=None) -> bool:
         return False
     g(root, "push", "-q", "origin", f"{ref}:refs/heads/{branch}")
     return True
+
+
+HEAD_GONE = "Head ref must be a branch"  # gh pr create が、origin に head のブランチが無いときに返す語
+
+
+def pr_create_restoring_head(root, gh, base: str, head: str, title: str, body: str, run_git=None):
+    """`gh pr create` を `gh`（`gh_parts.gh` の形）で打ち、結果を返す。origin に head が無いと落ち、head が作業ツリーの
+    ブランチなら、`restore_branch` で push し直して 1 回だけ打ち直す。開発版の PR のマージの後に `delete_branch_on_merge`
+    が遅れて head を消し、`restore_branch` の確かめとすれ違った場合に効く（v10.27.63 の release）。"""
+    g = run_git or proc.git
+    args = ["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body]
+    p = gh(args, cwd=root)
+    if p.returncode != 0 and HEAD_GONE in p.stderr and g(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == head:
+        if restore_branch(root, head, run_git=g):
+            p = gh(args, cwd=root)
+    return p
 
 
 def first_git_tree(roots) -> Path | None:

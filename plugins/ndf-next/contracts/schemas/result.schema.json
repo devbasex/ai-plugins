@@ -19,6 +19,10 @@
     "presentation_path": {"type": "string", "minLength": 1},
     "next": {"type": "string", "minLength": 1},
     "run_id": {"type": "string", "minLength": 1},
+    "original_result": {
+      "description": "実行の記録に書けずに stopped へ置き換えた結果の、本体の元の結果 JSON（#2338 の決定 3）。本体が例外で終わったときは null",
+      "type": ["object", "null"]
+    },
     "cause": {"$ref": "#/$defs/cause"},
     "routes": {
       "description": "答えごとに次に打つコマンド。値が null なら何も打たない",

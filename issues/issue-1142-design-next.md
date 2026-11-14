@@ -19,7 +19,7 @@
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| 利用者の決定（2026-11-13 23:1x JST。原文は `.ndf/handoff/lrebuild-note-rebuild-1142-label.md` の「作り直しの置き場の決め直し」） | 指示 | 同じリポジトリの別のディレクトリで 0 から作り、できたら `ndf` と入れ替える。今の NDF は壊さない |
+| 利用者の決定（2026-11-13 23:1x JST。原文は [issue-3347-source-note.md](issue-3347-source-note.md) の「作り直しの置き場の決め直し」（git の外の `.ndf/handoff/lrebuild-note-rebuild-1142-label.md` の写し。#3347 の決定 104）） | 指示 | 同じリポジトリの別のディレクトリで 0 から作り、できたら `ndf` と入れ替える。今の NDF は壊さない |
 | PR #3247 を閉じたときのコメント（https://github.com/devbasex/ai-plugins/pull/3247 ） | 実測 | 段階的な置き換えで、設計の欠け 6 件と新しい経路が通らない指摘 19 件が残った |
 | `docs/versioning-and-distribution.md` の「ランタイムごとの取得と導入」 | 仕様 | 導入の鍵は取得元の名前とプラグイン名で、リポジトリの中のディレクトリは含まない |
 | 承認済みの設計（#1142 の設計と詳細設計・PR #3191・PR #3250） | 設計 | 新しい実装の材料。ここで決め直すのは置き場・順番・食い違いだけ |
@@ -31,6 +31,8 @@
 **詳細設計は [issue-1142-design-next-design-detail.md](issue-1142-design-next-design-detail.md) にある。** ファイル配置・子 Issue の表・流す順番・レーンの割り当て・ラベルの付け替えを持つ。
 
 ## 人へ残す判断
+
+**#3345（hook の基盤の契約）で足した判断 (h)〜(m) は、節「hook の契約（#3345）」の「#3345 で足した判断」にある。** どれもレッドラインに当たらない。
 
 **承認する人が答えるのは、次の 5 つである。** (a)〜(c) はレッドラインに当たる。レッドラインの番号（P1・C3）は `.ndf/mvv.md` と共通原則の番号で、新しい子の P1・C3 とは別である。
 
@@ -61,6 +63,8 @@
 **置き場は `plugins/ndf-next/`。** 開発の間のプラグイン名は `ndf-next`、版は `11.0.0-dev.N` とし、入れ替えの PR で名前を `ndf` に、版を `11.0.0` にする。
 
 **子 Issue は 26 本・9 の順番に組み直す。** 72 本の旧い子は、20 本を新しい子へそのまま引き継ぎ、13 本を形を変えて引き継ぎ、18 本を他の子へまとめ、21 本を要らなくする（表は詳細設計の「旧い子の行き先」）。#3092・#3097・#3098 は新しい子 P1・P3・P4 としてそのまま使う。
+
+**hook は 1 事象 1 入口・予算・失敗は通す・差し戻しと拒否の上限・計測の契約の上に作る（#3345）。** 契約と #3345 の受け入れ条件との対応は節「hook の契約（#3345）」に、決定は 88〜96 にある。子の M3 #3297 と S1 #3303 へ足す受け入れ条件は、詳細設計の「#3345 で子へ足す受け入れ条件」にある。
 
 **レーンは 6 本のまま使う**（lrebuild・lr-flow・lr-data・lr-rf・lr-fix-a・lr-fix-b。各プラン 2 本）。after から lflow・lbr2・lsw を外す。新しいディレクトリは今の NDF のファイルと重ならないためである。
 
@@ -108,6 +112,8 @@
 プラン・プランの実行・止まった理由の表の中身（エンティティの形と不変条件 IS1〜IS12）は scripted-flow の設計のまま使う。この表が決めるのは、新しいディレクトリでの持ち主の子だけである。
 
 ### 不変条件
+
+hook の基盤の不変条件 IH1〜IH10 は、節「hook の契約（#3345）」にある。
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
@@ -240,6 +246,173 @@ graph LR
     NEW -->|取得元・名前はそのまま| USER[利用者の plugin update]
 ```
 
+## hook の契約（#3345）
+
+**新しいプラグインの hook は、増えても Claude Code を遅くせず、止め続けず、会話を埋めない基盤の上に作る。** 今の NDF の hook は、登録と起動の形・失敗の扱い・回数の数え方が guard ごとに別々で、止められ続けて作業が進まない状態がすでに起きている。新しいプラグインの hook（M3 #3297 の判定と S1 #3303 の入口と登録）は、この節の契約に従う。個々の guard が何を止めるかは、この節では決めない。
+
+### 今の NDF で起きていること
+
+2026-10-14〜11-13 の会話の記録（uuid で重複を除いた）と、`plugins/ndf/`（develop 04430fda7）を読んで確かめた。
+
+| 項目 | 実測・場所 |
+| --- | --- |
+| Tool の呼び出し | 52,497 件 |
+| PreToolUse の拒否 | 601 件（1.1%）。Monitor の拒否 24 件を含む。develop の登録には Monitor に当たる guard が無い（`plugins/ndf/hooks/claude.json:5` の matcher）ため、30 日のうち旧い版の記録である |
+| Stop の差し戻し | 4,681 回のうち 255 回（5.4%）。93% が本文の待ち（AskUserQuestion を呼ばずに本文で待った）。1 セッションで 35 分に 12 回、連続 6 回が 3 度 |
+| 差し戻しの数え方 | 3 か所で別々に数える。本文の待ちは区間ごとの `wait-held.json`（`plugins/ndf/scripts/relay_lib/mark.py:163-198`。通す Stop で `held` を先に偽へ書くため、1 回おきに差し戻せる）、背景の作業が残る Stop は区間ごとの `mark-held.json`（`mark.py:92-100`）、人のいない実行はセッションごとの印の `pushbacks`（`plugins/ndf/scripts/hook_lib/unattended.py:134-142`）。`/goal` の評価役は Claude Code の側にある |
+| 同じ拒否の繰り返し | 文脈の上限の拒否は、ラッパーの下では上限を超えている限り止め続ける（`plugins/ndf/scripts/hook_lib/token_guard.py:405`）。同じ範囲を読む拒否は 3 回目から、ファイルが変わるまで毎回返す（`token_guard.py:198-202`） |
+| hook の所要 | `hook.py` は記録で p50 84 ms・p99 9.1 s・最大 701 s、手元で 52〜113 ms。前の設計の決定 20 の基準（`worktree-guard.sh` の 30〜32 ms）を目標として置いた所も、所要を常に測る仕組みも無い |
+| Stop の hook の合計 | p50 331 ms・p95 2.2 s・最大 35 s。打ち切り 51 件 |
+| 締め切りと部品の上限 | 締め切り 3.5 秒（`plugins/ndf/contracts/limits.json:31`）より、AskUserQuestion の転送の待ち 8 秒（`:30`）と git の上限 5 秒（`:34`・`:37`）が長い。新しいプラグインの `plugins/ndf-next/contracts/limits.json:30-37` は同じ値を写している |
+| timeout の無い登録 | Claude Code の登録 19 本のうち SessionStart の 3 本（`plugins/ndf/hooks/claude.json:98`・`:105`・`:112`）。そのうち `worktree-session.sh` は `git fetch`（`plugins/ndf/scripts/worktree-session.sh:203`）と、`uv sync` を打つ環境の用意（`plugins/ndf/scripts/hook-env.py:95`）を含む |
+| 会話へ入れる量 | 拒否の文が最大 8,439 字（文脈の上限の拒否）、SessionStart が最大 3,712 字。字数の上限は無い（`hook.py:78-81` は各 guard の文をつなぐだけ） |
+| 同じ入力の解析の重なり | AskUserQuestion を `hook.py` の guard（`plugins/ndf/scripts/hook_lib/ask_guard.py:161-166`）と別プロセスの `relay.py question open`（`mark.py:292-303`）が判定し直す。Stop で `hook.py`（`plugins/ndf/scripts/hook_lib/wait_notify.py:196`）・`relay.py mark`（`mark.py:186`）・人のいない実行の判定の 3 プロセスが同じ応答を読み直す。文脈の guard は会話の記録の末尾 200 行を 1 回の判定で 2 度開く（`token_guard.py:231-258`） |
+| hook の中の通信 | Slack への送信（切り離した子プロセス。`wait_notify.py:223-231`）・SessionStart の `git fetch`（上限なし）・学習の設定の読み書き（`plugins/ndf/scripts/training-optout.py:102-120`。HTTP） |
+| 起動の形と既定 | 起動の形が 3 通り（環境の python・システムの `python3`・シェル）。失敗の既定が 2 通り（`hook.py:288-295` は通し、`relay.py question open` は排他を取れないと止める。`mark.py:331-350`） |
+| Codex の登録 | `plugins/ndf/hooks/codex.json` は 4 事象（PreToolUse・SessionStart・Stop・PermissionRequest）。Stop で「JSON validation failed」が 3 件 |
+| 止める環境変数 | guard ごとに別の名前（`NDF_SLEEP_GUARD`・`NDF_READ_REPEAT_GUARD`・`NDF_CONTEXT_GUARD`・`NDF_SUPERVISOR_CUT_GUARD`・`NDF_WORKER_SKILLS_GUARD`・`NDF_SUPERVISOR_DOCS_GUARD` ほか閾値と通知の変数）。worktree・起票・手元のテスト・問い合わせの guard は止める変数を持たない |
+| 依存の環境 | `~/.cache/ndf/venv` に版ごとの環境が 48〜49 個・1.4 GB 残る。消す処理が無い |
+
+### 形
+
+**ランタイムの事象 1 つにつき、登録 1 行・プロセス 1 本で、guard を表の順に呼ぶ。** 入力の解析は事象ごとに 1 回で、guard は解析の結果を受け取るだけにする。
+
+```mermaid
+graph LR
+    RT[Claude Code / Codex の事象] -->|登録 1 行・timeout 付き| ENT[軽い入口<br>環境が無ければ strict と用意の起動だけ]
+    ENT --> CTX[入力の解析 1 回<br>payload・構文木・会話の記録の末尾・最後の応答の分類]
+    CTX --> G[guard の表の順に呼ぶ<br>締め切りまで]
+    CNT[(セッションの数え手<br>差し戻しと拒否)] <--> G
+    G --> OUT[判定を 1 つにまとめる<br>注入の字数を切る]
+    OUT -->|契約表の形| RT
+    OUT --> LOG[(計測の 1 行)]
+    G -.->|通信は送信待ちへ書くだけ| BOX[(送信待ち)]
+```
+
+**契約の 8 項目と、それぞれを決めた所**:
+
+| # | 契約（#3345 のあるべき姿） | 決定 | 不変条件 |
+| --- | --- | --- | --- |
+| 1 | 1 事象 1 入口。guard は表で並べ、入力の解析は 1 回 | 決定 88 | IH1 |
+| 2 | 起動の形。`bin/ndf` を通らない軽い入口から始め、環境が無ければ終了コード 0 で通す | 決定 89 | IH2（前の設計の決定 20・I13 を引き継ぐ） |
+| 3 | 予算。事象ごとの所要と注入の字数を `limits.json` に置き、上限の順序を検査し、すべての登録に timeout を付ける | 決定 90 | IH3・IH8 |
+| 4 | 失敗の規則。既定は通し、止める側に倒すのは宣言した guard だけ | 決定 91 | IH4 |
+| 5 | 上限。Stop の差し戻しはセッション共通の数え手で利用者の入力ごとに 2 回まで、同じ理由の拒否は 2 回の後に案内へ下げる | 決定 92 | IH5・IH6 |
+| 6 | I/O。同期の経路で通信しない。外部コマンドは git のローカルの副命令だけ | 決定 93 | IH7 |
+| 7 | 計測。hook の起動ごとに所要・判定・注入の字数を 1 行で記録する | 決定 94 | IH9 |
+| 8 | ランタイムの契約表。Claude Code と Codex の入出力の表と、本体の版ごとの入力の見本で CI を回す | 決定 95 | IH10 |
+
+guard の止め方は `NDF_HOOK_OFF` の 1 つにする（決定 96）。
+
+### 用語（hook の基盤）
+
+| 用語 | 意味 | 用語集への反映 |
+| --- | --- | --- |
+| hook の入口 | ランタイムの事象ごとの登録 1 行が起動するスクリプト。用意済みの環境の python で動き guard の表を順に呼ぶ `hooks/entry.py` と、環境が無いときにシステムの `python3` で動き `strict` の guard と環境の用意の起動だけを行う `hooks/boot.py` の 2 つ | 追加（`ndf-workflow`） |
+| guard の表 | hook の入口が呼ぶ guard を並べた表（`contracts/hooks/guards.json`）。guard ごとに、当たる事象と Tool・順序・`strict` の有無・代わりに勧める Tool を持つ | 追加（`ndf-workflow`） |
+| hook の予算 | 事象ごとの所要の目標（p95）・締め切り・余白・登録の timeout・注入の上限の字数。`limits.json` の `hook.budget.<事象>` に置く。開発ループの予算・cross-refactoring の実装の予算とは別 | 追加（`ndf-workflow`） |
+| 注入 | hook が会話へ入れる文。拒否の理由・差し戻しの理由・追加の文脈・SessionStart の出力を指す | 追加（`ndf-workflow`） |
+| セッションの数え手 | セッションごとの状態のファイル 1 つで、利用者の入力ごとの Stop の差し戻しと同じ拒否の回数を持つもの。利用者の入力で数え直し、中継が送った入力では数え直さない | 追加（`ndf-workflow`） |
+| 送信待ち | hook が通信の代わりに通知を書いておく置き場。NDF 自身の送り手が切り離して送る。投稿キューとは別 | 追加（`ndf-workflow`） |
+| `strict` の guard | guard の表で、自分の判定の失敗を止める側に倒すと宣言した guard。同じ拒否の上限で案内へ下げない | 追加（`ndf-workflow`） |
+
+用語集へは、承認の後に反映する（ドメインイベント E2 と同じ扱い）。
+
+### 不変条件（hook の基盤）
+
+番号の頭を `IH` にする。ドメインモデルの I1〜I4（と #3344 の I5〜I10）とも、前の設計の I1〜I17 とも別の番号である。
+
+| # | 集約 | 条件 | 破れたときの扱い |
+| --- | --- | --- | --- |
+| IH1 | hook の登録 | ランタイムの事象 1 つにつき登録は 1 行で、1 回の事象で起動するプロセスは 1 本。payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、1 回の事象で 1 度だけ作る（決定 88） | 登録の検査と、解析の関数の呼び出し回数を数えるテストが落とす（S1-H1・M3-H1） |
+| IH2 | hook の入口 | 入口から import でたどれるモジュールは、標準ライブラリと許した依存の表のものだけで、`bin/ndf` を通らず、依存を入れ直す処理（前の設計の `deps.require()` にあたるもの）を呼ばない。用意済みの環境の python を直に起動する。環境が無いときは、システムの `python3` で標準ライブラリだけの入口（`hooks/boot.py`）を動かし、`strict` の guard の判定と、SessionStart なら環境の用意の切り離した起動だけを行う。ほかは出力なし・終了コード 0 で終わる。`python3` も無ければ何もせずに 0 で終わる。`hooks/boot.py` が受け取る引数は `hooks/entry.py` と同じ位置（`argv[1]` がランタイム、`argv[2]` が事象）にある（前の設計の決定 20・I13 を引き継ぐ。決定 89・決定 91） | import の閉包を構文木でたどるテスト（`boot.py` からの閉包は標準ライブラリだけ）と、環境を消した状態で全事象を起動するテストと、環境を消した状態から SessionStart で用意が終わるまでを通すテストと、環境が無い経路で `boot.py` が受け取る引数を確かめるテストが落とす（M3-H3・M3-H14・S1-H2・S1-H5） |
+| IH3 | 予算 | 事象ごとに「部品の上限 ≤ 締め切り − 余白」「締め切り ≤ 登録の timeout」が成り立ち、すべての登録に timeout がある（決定 90） | 予算の検査（`check_budget`）が SessionStart で案内を出し、CI で落ちる（M3-H4・S1-H1） |
+| IH4 | 判定 | 例外・締め切り超え・環境が無い・知らない事象と Tool・入力の形の違いは、出力なし・終了コード 0 で通す。止める側に倒すのは、guard の表で `strict` と宣言した guard だけ。`strict` の guard は標準ライブラリだけで書き、入口がほかの guard と依存の import より先に呼ぶ。環境が無いときもシステムの `python3` の経路で呼ぶ（決定 91） | guard に例外を投げさせるテストで止めたら落ちる。環境を消した状態・依存の import を落とした状態で、本番チャネルへのマージを止めなければ落ちる（M3-H6） |
+| IH5 | セッションの数え手 | 利用者の 1 回の入力の後に NDF が Stop を差し戻すのは、理由をまたいで合計 `hook.pushback` 回まで。同じ guard・同じ理由・同じ対象の拒否は `hook.deny-repeat` 回の後は案内に下げる（`strict` の guard を除く）。数え直すのは利用者の入力だけ（決定 92） | 本文の待ちで Stop を続けるテストと、同じ範囲を続けて読むテストが、上限を超えて止めたら落ちる（M3-H7） |
+| IH6 | guard の表 | guard が代わりに勧める Tool（表の `suggests`）を、ほかの guard が止めない（決定 92） | 勧める Tool の見本の呼び出しを全 guard に通すテストが落とす（M3-H8） |
+| IH7 | hook の入口 | 同期の経路で通信しない。起動する外部コマンドは、git のローカルの副命令（表に載るもの）と、NDF 自身の切り離した処理（送信待ちの送り手・環境の用意）の起動だけで、後者は待たない（決定 93） | 入口の処理の間 socket を作れなくしたテストと、`subprocess` の呼び出し先の検査が落とす（M3-H9） |
+| IH8 | 予算 | 会話へ入れる文（拒否の理由・差し戻しの理由・追加の文脈・SessionStart の出力）は、事象ごとの注入の上限の字数以下。超える分はファイルへ書き、パスだけを入れる（決定 90） | 上限を超える文を返す guard のテストが落とす（M3-H5） |
+| IH9 | 計測 | 入口は起動ごとに計測の 1 行を書く。書けなくても判定は変えない（決定 94） | 計測の書き込みを失敗させたテストで判定が変わったら落ちる（M3-H10） |
+| IH10 | ランタイムの契約表 | 入口が返す出力は、ランタイムの契約表にあるその事象の形だけ。契約表に無い事象と、見本で確かめていない版の入力の形の違いは、IH4 のとおり通す（決定 95） | 見本の全件を解析し、出力を契約表の形で確かめる CI が落とす（M3-H11） |
+
+### #3345 の受け入れ条件と、解いた所の対応
+
+子の受け入れ条件の文は、詳細設計の「#3345 で子へ足す受け入れ条件」にある。
+
+| # | 受け入れ条件（指摘） | 設計の決定 | 不変条件 | 子の受け入れ条件 |
+| ---: | --- | --- | --- | --- |
+| 1 | 新しい設計に hook の契約が無い。決定 20・I13 を引き継がない。子の受け入れ条件に所要・失敗・上限が無い | この節・決定 88〜96 | IH1〜IH10（IH2 が決定 20・I13 を引き継ぐ） | M3-H1〜M3-H14・S1-H1〜S1-H5 |
+| 2 | Stop の差し戻しに上限が無い。差し戻す主体が別々に数える | 決定 92 | IH5 | M3-H7 |
+| 3 | 同じ拒否を状態が変わるまで返し続ける。sleep の guard が勧める Monitor を止める | 決定 92 | IH5・IH6 | M3-H7・M3-H8 |
+| 4 | 締め切りより長い部品の上限。timeout の無い登録 | 決定 90 | IH3 | M3-H4・S1-H1 |
+| 5 | 所要の目標を守っておらず、新しい側に測る条件が無い | 決定 90・決定 94 | IH3・IH9 | M3-H10・M3-H13 |
+| 6 | 注入の量に上限が無い | 決定 90 | IH8 | M3-H5 |
+| 7 | 責務の重なり（AskUserQuestion・Stop の分類・会話の記録の末尾） | 決定 88 | IH1 | M3-H1・M3-H2 |
+| 8 | hook の中の通信（Slack・`git fetch`・学習の設定） | 決定 93 | IH7 | M3-H9・M3-H14 |
+| 9 | Codex の登録が 4 事象だけで、本体の仕様の変化への備えが無い | 決定 95 | IH10 | M3-H11・S1-H3 |
+| 10 | 通すか止めるかの規則と起動の形が 2 通り。古い依存の環境が消えない | 決定 89・決定 91 | IH2・IH4 | M3-H3・M3-H6・M3-H14・S1-H2 |
+| 11 | 止める環境変数が 10 個以上ばらばら | 決定 96 | — | M3-H12 |
+| 12 | 開発の間 `--plugin-dir` で ndf と ndf-next の hook が二重に走る | 決定 74（S1 の「ndf-next だけを読む起動」の受け入れ条件。2026-11-14 に足した） | — | S1-H4 |
+
+### 外部の調査（hook）
+
+**ランタイムの hook の仕様と、自前で作る部品の代わりになるライブラリを調べた。** 予算・失敗の扱い・出力の形は、ランタイムが hook をどう起動し、何を会話へ入れ、失敗をどう扱うかで決まるためである。ランタイムの仕様の番号の頭は `HK` にする。ライブラリと標準は `LIB20`・`STD20` から振る（#3344 の `STD10`〜・`LIB10`〜 と分ける）。
+
+**主要な製品は調べない。** hook を起動する製品（Claude Code・Codex）の形は HK1〜HK7 で調べた。guard の振り分け・数え手・送信待ちの形は、この 2 つのランタイムの契約とプロジェクトの中の取り決めで決まるためである。
+
+| # | 仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| HK1 | Claude Code の hook の timeout | 単位は秒。command の既定は 600 秒（UserPromptSubmit は 30 秒）。同じ事象に当たる登録は並列に動き、プラグインが持つ同じ command はまとめない | 既定の 600 秒に任せず、すべての登録に予算の timeout を書く（決定 90）。登録が 2 行あると 2 プロセスが同時に走るため、事象ごとに 1 行にする（決定 88） | https://code.claude.com/docs/en/hooks （2026-11-14） |
+| HK2 | Claude Code の失敗の扱い | 時間切れ・終了コード 0 と 2 以外・壊れた JSON は、どれも操作を止めない。`onFailure: "block"`（2.1.295 以降）を付けた登録だけが止まる | 既定の向きと IH4 が一致する。`onFailure: "block"` は登録 1 行の全 guard に効くため付けず、`strict` の guard は自分の処理の中で止める側に倒す（決定 91） | 同上 |
+| HK3 | Claude Code の会話へ入る量 | `additionalContext`・`systemMessage`・平文の標準出力は各 10,000 字まで。超えるとファイルに保存され、Claude にはパスと先頭 2,000 字が渡る | 注入の上限をこの値より小さく置き、超える分は NDF がファイルへ書いてパスを渡す（決定 90・IH8） | 同上 |
+| HK4 | Claude Code の Stop の続き | `stop_hook_active` は Stop の hook の結果で続いているとき真。続きの上限は連続 8 回（`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`）で、Tool を呼ぶと数え直す | ランタイムの上限 8 回より小さい、利用者の入力ごとに 2 回を NDF の上限にする（決定 92） | 同上 |
+| HK5 | Codex CLI の hook | 14 事象（PreToolUse・PermissionRequest・PostToolUse・UserPromptSubmit・Stop・SubagentStop・SessionStart・SessionEnd ほか）。timeout は秒で既定 600、SessionEnd は既定 1 秒・上限 3 秒。プラグインの `hooks/hooks.json` を読む | 契約表に Codex が持つ事象を並べる。今の 4 事象の登録より広く、UserPromptSubmit で数え直しができる（決定 92・決定 95） | https://learn.chatgpt.com/docs/hooks （2026-11-14）・`codex features list`（codex-cli 0.167.0） |
+| HK6 | Codex CLI の Stop の出力 | 終了コード 0 のとき標準出力は JSON に限る。出力のスキーマは `additionalProperties: false` で、許すキーは `continue`・`decision`（`block` だけ）・`reason`・`stopReason`・`suppressOutput`・`systemMessage`。`hookSpecificOutput` は許さない | Claude Code の形をそのまま Codex へ返さない。出力の形を契約表がランタイムごとに持ち、見本で確かめる（決定 95・IH10） | 同上・codex-cli 0.167.0 のバイナリの中のスキーマ `stop.command.output` |
+| HK7 | 版ごとの入力の変化 | Claude Code は文書と更新履歴に版の条件つきの項目がある（例: `onFailure` は 2.1.295、SessionStart の `agent_id` は 2.1.323）。Codex の変化の記録の置き場は見つからなかった | 版ごとの入力の見本を持ち、新しい版の見本を足して CI で確かめる（決定 95） | https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md （2.1.318 まで読んだ。2026-11-14） |
+
+**確かめられなかったこと**: 同じ hook を持つプラグインを `--plugin-dir` で 2 つ読んだときの振る舞い（文書に記述が無い）と、Codex で「JSON validation failed」と出る条件（バイナリの中の文言は `hook returned invalid stop hook JSON output`）。前者は S1-H4 の起動の確かめで、後者は M3-H11 の Codex の見本で確かめる。
+
+**ライブラリと標準**（PyPI の JSON API・2026-11-14。import の所要は手元の Python 3.13.18 で `python -X importtime -c "import <名前>"` の先頭のモジュールの累計を 5 回測った中央値）
+
+| # | 候補 | 版・ライセンス・最後のリリース | 何ができるか | import の所要 | 設計への反映 | 出典 |
+| --- | --- | --- | --- | ---: | --- | --- |
+| LIB20 | pluggy | 1.7.0・MIT・2026-10-15 | 名前で登録した呼び先を集めて呼ぶ | 18.5 ms | 採らない。表の順・`strict`・`suggests`・締め切りは自前で持つことになる（決定 88） | https://pypi.org/pypi/pluggy/json |
+| LIB21 | filelock | 4.2.10・MIT・2026-11-09 | ファイルの排他 | 33.9 ms | 採らない（決定 92） | https://pypi.org/pypi/filelock/json |
+| LIB22 | portalocker | 4.4.2・BSD-3-Clause・2026-10-28 | ファイルの排他 | 45.4 ms | 採らない（決定 92） | https://pypi.org/pypi/portalocker/json |
+| LIB23 | `fcntl`（標準ライブラリ） | Python に同梱 | `flock` によるファイルの排他（POSIX） | 0.06 ms | 採る（決定 92） | https://docs.python.org/3/library/fcntl.html |
+| LIB24 | structlog | 26.1.0・MIT OR Apache-2.0・2026-06-06 | 構造化ログ | 52.9 ms | 採らない（決定 94） | https://pypi.org/pypi/structlog/json |
+| LIB25 | python-json-logger | 4.2.0・BSD-2-Clause・2026-08-15 | `logging` の JSON の書式 | 25.0 ms | 採らない（決定 94） | https://pypi.org/pypi/python-json-logger/json |
+| LIB26 | jsonschema | 4.26.0・MIT・2026-01-07 | JSON Schema の検証 | 64.2 ms | 採る。CI のテストと契約の検査だけで使い、hook の経路では import しない（決定 90・決定 95） | https://pypi.org/pypi/jsonschema/json |
+| LIB27 | fastjsonschema | 2.22.3・BSD-3-Clause・2026-11-01 | JSON Schema の検証（コードを生成する） | 14.6 ms | 採らない。依存が 1 つ増える（決定 95） | https://pypi.org/pypi/fastjsonschema/json |
+| LIB28 | persist-queue | 1.1.0・BSD・2025-10-25 | ファイルと SQLite の永続キュー | 46.7 ms | 採らない（決定 93） | https://pypi.org/pypi/persist-queue/json |
+| LIB29 | uv | 0.13.8・MIT OR Apache-2.0・2026-11-12（手元 0.13.7） | `uv sync --frozen` で lock どおりの環境を作る。`uv cache prune` の対象は uv のキャッシュの置き場（help の文「Prune dangling cache entries and cached environments」） | — | 環境を作るのに使う。片付けは自前（決定 89） | https://pypi.org/pypi/uv/json・`uv cache prune --help`（uv 0.13.7） |
+| STD20 | JSON Lines | — | 1 行に 1 つの JSON の値。UTF-8 | — | 計測の記録の形（決定 94） | https://jsonlines.org/ （2026-11-14） |
+
+参考: 同じ機械で `python -c pass` の起動は中央値 11.2 ms である。
+
+調べた量: 仕様の文書 5 件（HK の 3 件・JSON Lines・Python の `fcntl`）・手元のバイナリ 2 件・ライブラリ 9 件（PyPI）。
+
+### #3345 で足した判断
+
+**どれもレッドラインに当たらない。** 値と範囲の選び方で、設計者が推奨を決めて決定の記録に書いた。差し戻すかは承認で決める。
+
+| # | 判断 | 推奨（採った形） | 比べた候補 | 書いた所 |
+| --- | --- | --- | --- | --- |
+| (h) | 差し戻しと同じ拒否の上限 N | どちらも 2 回（`hook.pushback`・`hook.deny-repeat`） | 1 回 / 3 回（今の同じ範囲を読む guard の値） | 決定 92 |
+| (i) | 止める側に倒す guard | 本番チャネルへのマージを見る guard の 1 本だけ | 0 本 / 問い合わせの転送も加える | 決定 91 |
+| (j) | 事象ごとの予算の値 | PreToolUse 系は p95 100 ms・締め切り 1 秒・timeout 3 秒。Stop と SessionStart は p95 300 ms・締め切り 3.5 秒・timeout 6 秒。Codex の SessionEnd は締め切り 2 秒・timeout 3 秒 | 前の設計の 30〜32 ms をそのまま目標にする / 予算を置かず計測だけにする | 決定 90 |
+| (k) | 通知の送信と環境の用意の起動 | 入口が NDF 自身の送り手を切り離して起動する（待たない） | 中継のプロセスだけが送る（中継の外では知らせが届かない） | 決定 93 |
+| (l) | 止める環境変数 | `NDF_HOOK_OFF` の 1 つ。今の名前は読まない | 今の名前を読み替える | 決定 96 |
+| (m) | CI で所要の退行を落とす幅 | 見本の入力で入口を 20 回起動し、p95 が予算の 3 倍を超えたら落とす | 計測の記録を見るだけで CI では落とさない | 決定 94 |
+
+### 未確認のまま残ること（hook）
+
+| 項目 | 内容 |
+| --- | --- |
+| `/goal` の評価役の続き | `/goal` の評価役は Claude Code の側にあり、NDF の数え手では数えない。`stop_hook_active` は `/goal` の続きでも真になる（`mark.py:167`）ため、それで見分けない。評価役の続きで差し戻しが重なるかは M3 の計測で見る |
+| Bash 1 回の解析の回数 | 今の NDF で 1 回の Bash の PreToolUse がシェルの構文木を何回作るかは数えていない。新しい側は IH1 で 1 回に縛る |
+| 予算の値の当てはまり | (j) の値は今の記録と前の設計の実測から決めた。M3 の計測（決定 94）で 2 週間分を集めて見直す |
+
 ## 工程から作業を呼ぶ層
 
 **PR #3247 の指摘の大半は、進行表の行から実際の作業（プラン・Skill・スクリプト）を呼ぶ決まりが無かったことに集まる。** #3092 の設計は、この層を「`supervise.py new` を呼ぶ」で済ませていた。新しい実装では、工程の定義がこの層の規約を持つ。
@@ -311,6 +484,8 @@ graph TD
 - 採らない案 1: `plugins/ndf-next/` を残し、マーケットプレイスの `source` だけを差し替える。外側の参照を 600 箇所近く向け直すことになり、漏れると検査が空のディレクトリを見て 0 件で通る
 - 採らない案 2: `ndf-next` の名前のまま配る。利用者が再導入し、Skill の前置き `ndf:` が変わる
 - 作り方: ライブラリやサービスを使う
+
+> **#3347:** 決定 73〜75 は系統 `next` の番号で、[issue-1142-design-fixes.md](issue-1142-design-fixes.md) の決定 73〜75（系統 `fixes`）とは別である。別の系統から指すときは `決定 73（next）` と書く。開発の間のプラグイン名は決定 100 で `ndf11` に、I1 の照合は決定 101 で入れ替えの後の名前を含む形に変えた（[issue-3347-design.md](issue-3347-design.md)）。
 
 ### 決定 74: 開発の間は `ndf-next` をマーケットプレイスへ載せない
 
@@ -478,6 +653,172 @@ DBOS の殻は、チェックアウトの置き場を使う前に `format.json` 
 - 比べた候補: LIB10 / LIB11
 
 根拠: Value 12 / Value 9（MVV 版 7）
+
+### 決定 88: hook が増えても所要と解析が増えないよう、事象 1 つにつき登録 1 行・プロセス 1 本にし、guard を表で並べて入力を 1 回だけ解析する
+
+ランタイムの登録は、事象ごとに 1 行の command だけにする。その command が起動する入口は、guard の表（`contracts/hooks/guards.json`）を上から順に呼ぶ。表は guard ごとに、当たる事象と Tool・順序・`strict` の有無・代わりに勧める Tool（`suggests`）を持つ。
+
+入力の解析は、入口が作る 1 つの文脈（`HookContext`）が持つ。payload・シェルの構文木・会話の記録の末尾・最後の応答の分類は、最初に要った guard のときに 1 度だけ作り、ほかの guard は同じものを使う。会話の記録は、行数ではなく末尾の決まった大きさ（`hook.transcript-tail`）を 1 度だけ読む。
+
+今の NDF で別のプロセスが受け持つ判定は、同じプロセスの中の関数にする。
+
+- AskUserQuestion: 問い合わせの判定と、中継へのシグナルファイルの作成
+- Stop: 待ちの知らせ・中継の印・人のいない実行の差し戻し
+
+こうすると、判定の重なりと payload の読み直しが無くなる。
+
+- 採らない案: 今の登録の分け方（事象ごとに 1〜3 行）のまま、解析の結果をファイルで渡す。Claude Code は同じ事象の登録を並列に起動する（外部の調査 HK1）ため、渡す順序が決まらず、プロセスの起動の分の所要も残る
+- 採らない案: guard の振り分けに pluggy（LIB20）を使う。pluggy は呼び先を名前で集めて呼ぶだけで、事象と Tool の当たり・順序・`strict`・`suggests`・締め切りの打ち切りは表の読み手として自前で書くことになる。import に 18.5 ms かかり、PreToolUse の p95 の目標 100 ms の 2 割に当たる
+- 作り方: 自前で作る
+- 比べた候補: LIB20
+
+### 決定 89: 環境が無くても Tool の呼び出しを止めないよう、hook は `bin/ndf` を通らない軽い入口から始め、前の設計の決定 20 と I13 を不変条件 IH2 として引き継ぐ
+
+登録の command は、前の設計の決定 20 の形（用意済みの環境の python を直に起動する）を引き継ぎ、入口のスクリプト（`hooks/entry.py`）を渡す。環境が無いときの経路は下に書く。`bin/ndf`（依存の環境を用意して `python -m ndf` を呼ぶ）と `uv run` は通らない。入口から import でたどれるモジュールは、標準ライブラリと許した依存（シェルの字句解析の tree-sitter-bash ほか、表に載せたもの）だけにする。
+
+依存の環境は、lock の hash ごとの置き場（`<キャッシュ>/<プラグイン名>/venv/<uv.lock の hash>`）に作る。初めて導入したときと lock が変わった直後は、登録が指す置き場に環境が無い。
+
+**環境が無いときの経路は、環境の python に依らない。** 登録の command は `sh -c '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'` にする（引数は環境の python・`hooks/entry.py`・ランタイム・事象）。環境の python があれば `entry.py` を直に起動する。無ければシステムの `python3` で `hooks/boot.py` を起動し、`python3` も無ければ 0 で終わる。boot の経路は `entry.py` のパスから `boot.py` のパスを作って退避し、`shift` で `entry.py` のパスを引数から外してから渡す。どちらの経路でも、起動されたスクリプトの `argv[1]` がランタイム、`argv[2]` が事象になり、`boot.main` は `entry.main` と同じ位置で引数を読む。`entry.py` のパスを残したまま渡すと、`boot.py` の `argv[1]` が `entry.py` のパスになり、ランタイムと事象が 1 つずれる。`boot.py` は標準ライブラリだけで書き、次の 2 つだけを行う。
+
+- `strict` の guard の判定（決定 91）
+- SessionStart のとき、環境の用意（`hooks/prepare.py`）を `start_new_session` で切り離して起動する。待たない
+
+用意する処理（`prepare.py`。標準ライブラリだけ）は、置き場ごとの排他のファイルを取ってから `uv sync --frozen` で一時の置き場に環境を作り、名前を変えて置く。排他を取れなければ、ほかの用意が走っているので何もせずに終わる。用意ができるまでの hook は、IH2 のとおり `strict` の guard のほかは何もせずに通す。用意が終わった後の最初の hook から、登録は環境の python で `entry.py` を起動する。
+
+用意する処理は、用意の後に、どの根の目印からも指されず、7 日使われていない環境を消す。根の目印と最後に使った時刻の置き場・書き手・読み手は詳細設計の「データと定数（hook の基盤）」にある。どちらも SessionStart の入口と用意の処理だけが書き、予算の経路（PreToolUse など）は書かない。使い中の環境を作り直さず、lock が変われば別の置き場に作る。走っているプロセスの最中に環境が作り直されて import が落ちる問題（#3105）も、この形で起きなくなる。
+
+- 採らない案: hook も `bin/ndf` から起動する。依存の用意の確かめと起動し直しが毎回の所要に入る（前の設計の決定 20 の実測で `uv run` は 2 回目以降も 13〜26 ms）
+- 採らない案: 環境が無いときの経路を置かず、SessionStart の入口（環境の python）から用意を起動する。初めての導入と lock が変わった直後に入口が起動できず、環境が一度も用意されない
+- 採らない案: 古い環境の片付けを `uv cache prune` に任せる。対象は uv のキャッシュの置き場で（LIB29）、NDF が lock の hash ごとに置いた環境は対象に入らない
+
+環境は uv で作り、置き場の決め方・根の目印・片付けは自前で書く。
+
+- 作り方: ライブラリやサービスを使う・自前で作る
+- 比べた候補: LIB29
+
+### 決定 90: 遅い hook と長い注入を CI で見つけるよう、事象ごとの予算を `limits.json` に置き、上限の順序を検査し、すべての登録に timeout を付ける
+
+`limits.json` に事象ごとの予算を置く。項目は所要の目標（p95）・締め切り・余白・登録の timeout・注入の上限の字数である。推奨の値は次の表で、判断 (j) に並べた。
+
+| 事象 | p95 の目標 | 締め切り | 余白 | 登録の timeout | 注入の上限 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PreToolUse・PermissionRequest・PostToolUse・UserPromptSubmit | 100 ms | 1 秒 | 0.5 秒 | 3 秒 | 600 字 |
+| Stop・SubagentStop | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 800 字 |
+| SessionStart | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 1,500 字 |
+| SessionEnd・Notification・StopFailure（Claude Code） | 300 ms | 3.5 秒 | 1.5 秒 | 6 秒 | 0 字 |
+| SessionEnd（Codex） | 300 ms | 2 秒 | 0.5 秒 | 3 秒 | 0 字 |
+
+Codex の SessionEnd は timeout の上限が 3 秒である（外部の調査 HK5）ため、別の行に分けて締め切りと余白を 3 秒の中に収める。ランタイムで値が違う事象は、`limits.json` に `hook.budget.<事象>.<ランタイム>` の鍵を足し、あればそちらを読む。
+
+部品の上限（git の副命令の上限・排他の待ちなど）は、`締め切り − 余白` 以下にする。今の AskUserQuestion の転送の待ち 8 秒は、転送を中継へ任せて待たない形に変える（決定 93）。
+
+検査（`check_budget`）は CI のテストと SessionStart で打つ。SessionStart で破れを見つけたら、1 行の案内を出して続ける（止めない）。
+
+注入の上限は Claude Code が会話へ入れる上限 10,000 字（外部の調査 HK3）より十分小さく置く。超える分は NDF がファイルへ書き、文にはパスと要点だけを入れる。
+
+`limits.json` の形（鍵と型）は、契約の検査が jsonschema（LIB26）で確かめる。`部品の上限 ≤ 締め切り − 余白` のように鍵をまたぐ順序は JSON Schema で書けないため、`check_budget` を自前で書く。
+
+- 作り方: 自前で作る・ライブラリやサービスを使う
+- 比べた候補: LIB26・LIB27
+
+### 決定 91: hook の不具合で作業が止まらないよう、失敗は通す側に倒し、止める側に倒すのは guard の表で `strict` と宣言した guard だけにする
+
+例外・締め切り超え・環境が無い・知らない事象と Tool・入力の形の違いは、出力なし・終了コード 0 で通す。ランタイムの既定もこの向きである（外部の調査 HK2）。
+
+`strict` の guard は、自分の判定の中で失敗したときに止める側の答えを返す。登録に `onFailure: "block"` は付けない。登録 1 行の全 guard が止める側に倒れるためである。
+
+**`strict` の guard は標準ライブラリだけで書き、入口の最初に呼ぶ。** 環境の無いとき・依存の import に失敗したとき・ほかの guard が遅いときにも、本番チャネルへのマージを通さないためである。
+
+- 実装は `domains/hooks/strict.py` に置き、import の閉包は標準ライブラリだけにする（IH2 の検査で縛る）。シェルの字句は `shlex` で読み、読めなければ止める側の答えを返す
+- 環境の python の入口（`entry.py`）は、`dispatch` と依存を import する前に `strict.py` を呼ぶ。止める答えが出たら、ほかの guard を呼ばずにその答えを返して終わる。入口のプロセスの時間切れで答えが消えるのは、`strict` の guard 自身が遅いときだけになる
+- 環境が無いときは、システムの `python3` が `boot.py` から同じ `strict.py` を呼ぶ（決定 89）
+- システムの `python3` も無い環境では、環境の用意も起きないため、`strict` の guard も動かない。この経路は IH4 のとおり通す
+
+`strict` にするのは本番チャネルへのマージを見る guard（今の `plugins/ndf/scripts/hook.py:277` の判定）だけで、判断 (i) に並べた。承認の無い本番へのマージは戻せないためである。
+
+- 採らない案: 環境が無い経路にだけ `strict` の判定を別に書き、環境の python の経路は表の順のまま呼ぶ。同じ guard の実装が 2 つになり、依存の import の失敗とほかの guard の遅さでは、環境の python の経路の `strict` の guard が動かないまま残る
+- 作り方: 標準に倣う
+- 比べた候補: HK2
+
+### 決定 92: 止められ続けて進まない状態を作らないよう、差し戻しと拒否をセッション共通の数え手で数え、利用者の入力ごとの上限を超えたら案内へ下げる
+
+数え手はセッションごとの状態のファイル 1 つで、差し戻しと拒否の回数を利用者の入力ごとに持つ。数え直すのは、利用者の入力（UserPromptSubmit）を受けたときである。
+
+- 中継が送った入力（区間の切り替えの文など）では数え直さない。中継は、送る前に数え手へ印を書く
+- 数え手の排他を締め切りまでに取れないときは、数えずに通す（IH4）
+
+**Stop の差し戻しは、理由をまたいで利用者の入力ごとに 2 回まで**（`hook.pushback`）。理由は本文の待ち・背景の作業が残る・人のいない実行の報告の形などである。上限に達した後の Stop は差し戻さずに通し、計測の 1 行に「上限で通した」と書き、待ちの知らせを送信待ちへ書く。
+
+`/goal` の評価役の続きは Claude Code の側の差し戻しで、NDF の数え手は数えない。Claude Code の続きの上限（連続 8 回。外部の調査 HK4）が別に掛かる。
+
+**同じ guard・同じ理由・同じ対象の拒否は、利用者の入力ごとに 2 回の後は案内へ下げる**（`hook.deny-repeat`）。案内へ下げるとは、通して追加の文脈に理由を入れることである。対象は guard が決める鍵で、例えば読む範囲や打つコマンドの hash である。`strict` の guard は下げない。
+
+guard が代わりに勧める Tool（表の `suggests`）は、ほかの guard に止めさせない（IH6）。勧めた Tool の見本の呼び出しを全 guard に通すテストで縛る。
+
+- 採らない案: 理由ごとに上限を持つ。今の NDF は 3 か所で別々に数えており、合計で 6 回続く差し戻しが 3 度起きた
+- 採らない案: 数え手の排他に filelock（LIB21）か portalocker（LIB22）を使う。import が 34 ms・45 ms で、PreToolUse の p95 の目標 100 ms の 3〜4 割に当たる。標準ライブラリの `fcntl`（LIB23。0.06 ms）で足りる
+- 作り方: 自前で作る
+- 比べた候補: LIB21・LIB22・LIB23
+
+### 決定 93: hook の所要を通信の具合に左右させないよう、同期の経路では通信せず、外部コマンドは git のローカルの副命令だけにする
+
+入口の処理の中では socket を開かない。外部コマンドは、表に載せた git のローカルの副命令（`rev-parse`・`status`・`worktree list` など）だけを打つ。
+
+通信の要る処理は、次のとおり hook の外へ出す。
+
+- **通知（Slack）**: 入口は送信待ちのファイルへ書く。NDF 自身の送り手を切り離して起動し、待たない（判断 (k)）
+- **SessionStart の `git fetch`**: 外す。起点の解決は取得済みの参照だけで行い、解けなければ案内を出す。取得は worktree を作る副命令（hook ではない）が行う
+- **学習の設定の読み書き**: hook から外し、NDF の設定の副命令と中継の起動のときに行う
+- **AskUserQuestion の転送**: 入口は中継へのシグナルファイルを書いて返る。転送を待つのは中継である
+
+送信待ちは、通知 1 件を 1 ファイルとして一時の名前で書いて名前を変える形で、標準ライブラリだけで書く。
+
+- 採らない案: 送信待ちに persist-queue（LIB28）を使う。import に 47 ms かかり、入口が書くのは 1 回の起動で 1 件までである
+- 作り方: 自前で作る
+- 比べた候補: LIB28
+
+### 決定 94: 予算を守れているかを後から測れるよう、hook の起動ごとに所要・判定・注入の字数を 1 行で記録する
+
+入口は起動ごとに、状態の置き場の `hooks/<日付>.jsonl` へ 1 行を足す。項目は時刻・事象・Tool・guard ごとの所要・判定・注入の字数・失敗の種類・数え手の値で、判定は「通した」「案内した」「止めた」「差し戻した」「上限で通した」のどれかである。14 日より古いファイルは SessionStart の入口だけが消す（`metrics.prune(days)`）。PreToolUse などの予算の経路ではディレクトリを走査しない。書き込みに失敗しても判定は変えない（IH9）。
+
+`ndf hooks stats` は、この記録から事象・guard ごとの p50 と p95・拒否と差し戻しの数・注入の最大を返す。
+
+CI は 2 つで退行を落とす。
+
+- import の閉包の検査（決まった結果になる）
+- 見本の入力で入口を 20 回ずつ起動し、p95 が予算の 3 倍を超えたら落とすテスト（判断 (m)。CI の機械の揺れを見込んだ幅）
+
+記録の形は JSON Lines（STD20）に倣い、`json` と追記（`O_APPEND`）で書く。
+
+- 採らない案: 構造化ログのライブラリ structlog（LIB24）か python-json-logger（LIB25）を使う。import が 53 ms・25 ms で、PreToolUse の p95 の目標 100 ms の 2.5〜5 割に当たる。書くのは 1 回の起動で 1 行だけである
+- 作り方: 自前で作る・標準に倣う
+- 比べた候補: STD20・LIB24・LIB25
+
+### 決定 95: ランタイムの仕様の変化で hook が壊れたことに気づけるよう、Claude Code と Codex の入出力の契約表と、本体の版ごとの入力の見本で CI を回す
+
+契約表（`contracts/hooks/runtimes.json`）は、ランタイムごとに次を持つ。
+
+- 持つ事象
+- NDF が読む入力の鍵
+- 判定（通す・案内・止める・差し戻す）ごとの出力の形
+- timeout の上限
+
+Codex の Stop は `hookSpecificOutput` を許さない（外部の調査 HK6）。そのため、出力の形はランタイムごとに分けて持つ。
+
+見本は、本体の版ごとの実際の入力（`tests/domains/hooks/samples/<ランタイム>/<版>/<事象>.json`）で、Claude Code 2.1.325 と Codex 0.167.0 から始める。CI はすべての見本を入口に通し、解析が落ちないことと、出力が契約表の形に合うことを確かめる。本体の版が上がったら、`ndf hooks capture`（利用者が明示して打つ。秘密を伏せて書く）で見本を足す。見本に無い鍵の欠けは、IH4 のとおり通して計測に `input_shape` と書く。
+
+契約表の形と、見本の出力が契約表の形に合うかは、jsonschema（LIB26）で確かめる。新しいプラグインはすでに jsonschema に依存しており（決定 77）、確かめるのは CI のテストだけで hook の経路では import しない。fastjsonschema（LIB27）は依存を 1 つ増やすため採らない。
+
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB26・LIB27
+
+### 決定 96: guard の止め方を 1 つで覚えられるよう、止める環境変数を `NDF_HOOK_OFF` の 1 つにする
+
+`NDF_HOOK_OFF` には、止める guard の名前をカンマでつないで渡す。`all` で全部を止める。
+
+- 閾値（sleep の許す秒・同じ範囲を読む回数・文脈の上限など）は `limits.json` に置き、環境変数では受けない
+- guard ではない働き（通知・学習の設定・環境の用意）は、D2 の環境変数の表に載せる
+- 今の NDF の変数名（`NDF_SLEEP_GUARD` など）は読まない。後方互換を置かない方針（決定 76）による（判断 (l)）
 
 ## テスト設計
 
