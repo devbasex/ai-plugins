@@ -19,7 +19,7 @@ import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import cli as top
 from ndf.adapters import github
@@ -228,10 +228,17 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
 # ---------------- apply / revert ----------------
 
 
-def _checked_rank(sd: Path, plan: dict[str, Any]) -> dict[str, Any]:
-    """plan が照らす rank.json の metrics。順位（rank）・却下・移動を持つ plan は rank.json と同じ digest を要る。"""
+class _CheckedRank(NamedTuple):
+    """plan が照らす rank.json の metrics と、照合で保留にした番号（移動を承認待ちで止める課題）。"""
+
+    metrics: dict[str, Any]
+    holds: set[int]
+
+
+def _checked_rank(sd: Path, plan: dict[str, Any]) -> _CheckedRank:
+    """plan が照らす rank.json の metrics と保留。順位（rank）・却下・移動を持つ plan は rank.json と同じ digest を要る。"""
     if not (plan.get("rank") or plan.get("rejected") or plan.get("reschedule")):
-        return {}
+        return _CheckedRank({}, set())
     rank = state.read(sd, "backlog-rank", None)
     if not isinstance(rank, dict) or not isinstance(rank.get("metrics"), dict):
         raise Stop("precondition", "rank.json が無い（rank を打ってから plan を作る）")
@@ -240,7 +247,8 @@ def _checked_rank(sd: Path, plan: dict[str, Any]) -> dict[str, Any]:
     checked = plan_decide.check(plan, rank["metrics"])
     if checked.errors:
         raise Stop("invalid", "plan の誤り（1 件も書いていない）: " + " / ".join(checked.errors))
-    return rank["metrics"]
+    metrics = rank["metrics"]
+    return _CheckedRank(metrics, checked.holds if metrics else set())
 
 
 def _reschedule(gh: github.GitHub, plan: dict[str, Any], holds: set[int]) -> tuple[list[int], list[dict[str, Any]]]:
@@ -282,8 +290,7 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
     reparent.entries_of(plan)
-    metrics = _checked_rank(sd, plan)
-    holds = plan_decide.check(plan, metrics).holds if metrics else set()
+    metrics, holds = _checked_rank(sd, plan)
     ledger = actions.Ledger(sd)
     if metrics:
         state.write(sd, "backlog-rejected", plan_decide.rejected_after(state.read(sd, "backlog-rejected", []), plan, metrics))
