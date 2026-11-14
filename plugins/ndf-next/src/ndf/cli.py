@@ -2,16 +2,29 @@
 
 副命令を足す子 Issue は、`COMMANDS` へ 1 行（副命令の名前 → `main(argv: list[str]) -> int` を持つモジュール）を足す。
 モジュールは呼ぶときだけ読む（ほかの副命令の依存を起動のたびに読まない）。
+
+副命令を呼ぶ前に、状態の置き場を 1 回用意する（`identity.prepare_state_dir`。副命令の書き手が `format.json` の無い
+置き場を作り、後の用意がそれを旧い置き場と見なして退避するのを防ぐ）。旧い置き場を退避したら、元と先を 1 件 1 行で
+標準エラーへ書く。用意に失敗したら副命令を呼ばず、`stopped`（種類 `config_broken`）の結果 JSON で止める。
+使い方の表示（副命令なし・`--help`）と知らない副命令は置き場に触れない。
+
+どの副命令も結果 JSON を 1 行出して終わる。副命令が捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
+（argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
 """
 
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 
 from ndf import contracts, identity
-from ndf.contracts import causes, result
+from ndf.contracts import result
 
+log = logging.getLogger(__name__)
+
+# argparse が使い方の誤りで終わるときの終了コード
+ARGPARSE_USAGE_EXIT = 2
 # 結果 JSON の tool の名前（副命令へ渡す前に止まったとき）
 TOOL = "cli"
 
@@ -54,11 +67,21 @@ def main(argv: list[str] | None = None) -> int:
         return result.emit_unchecked(TOOL, "config_broken", f"契約のファイルが読めない: {exc}")
 
 
+def _stop(tool: str, kind: str, detail: str, items: list[dict[str, str]] | None = None) -> int:
+    """止まった結果 JSON を出し、その終了コードを返す。"""
+    return result.emit(result.stopped(tool, kind, detail, items=items))
+
+
+def _print_retired(items: list[dict[str, str]]) -> None:
+    for item in items:
+        print(identity.RETIRED_LINE.format(**item), file=sys.stderr)
+
+
 def _run(args: list[str]) -> int:
     try:
         ident = identity.load()
     except identity.IdentityError as exc:
-        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
+        return _stop(TOOL, "config_broken", str(exc))
     if not args or args[0] in ("-h", "--help"):
         print(_usage(ident.name))
         return 0
@@ -66,5 +89,28 @@ def _run(args: list[str]) -> int:
     if module is None:
         print(f"知らない副命令: {args[0]}", file=sys.stderr)
         print(_usage(ident.name), file=sys.stderr)
-        return causes.exit_code("invalid")
-    return importlib.import_module(module).main(args[1:])
+        return _stop(TOOL, "invalid", f"知らない副命令: {args[0]}")
+    try:
+        ready = identity.prepare_state_dir(ident)
+    except (OSError, identity.IdentityError) as exc:
+        # 退避の途中か後で失敗しても、それまでに退避した元と先を残す（標準エラーと items の両方）
+        retired = exc.items() if isinstance(exc, identity.IdentityError) else []
+        _print_retired(retired)
+        return _stop(TOOL, "config_broken", f"状態の置き場を用意できない: {exc}", items=retired)
+    _print_retired(ready.items())
+    return _call(args[0], module, args[1:])
+
+
+def _call(name: str, module: str, argv: list[str]) -> int:
+    """副命令の `main` を呼ぶ。結果 JSON を出さずに抜けた例外と使い方の誤りも、結果 JSON にして返す。"""
+    try:
+        return importlib.import_module(module).main(argv)
+    except SystemExit as exc:
+        if exc.code != ARGPARSE_USAGE_EXIT:
+            raise
+        return _stop(name, "invalid", f"{name} の引数の誤り（使い方は標準エラーに出した）")
+    except contracts.ContractError:
+        raise
+    except Exception as exc:  # 副命令が捕まえない例外も結果 JSON（stopped/unknown）で終える
+        log.exception("副命令が捕まえない例外で止まった: %s", name)
+        return _stop(name, "unknown", f"{name} が捕まえない例外で止まった: {type(exc).__name__}: {exc}")
