@@ -27,7 +27,7 @@ from typing import NamedTuple, Optional
 
 import httpx
 
-from ndf import commands
+from ndf import cli
 
 # 控えと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
 from ndf.adapters.training_cache import (
@@ -48,7 +48,7 @@ from ndf.adapters.training_cache import (
 )
 from ndf.contracts import facts, limits, result
 
-TOOL = commands.tool_of(__name__)
+TOOL = cli.tool_of(__name__)
 CLAUDE_URL = "https://api.anthropic.com/api/oauth/account/settings"
 CLAUDE_CREDENTIALS = ".credentials.json"
 KEYCHAIN_SERVICE = "Claude Code-credentials"

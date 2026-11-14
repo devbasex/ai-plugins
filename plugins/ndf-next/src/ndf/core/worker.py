@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import commands, identity
+from ndf import cli, identity
 from ndf.adapters import claude, git
 from ndf.contracts import causes, exit_codes, result
 from ndf.contracts.exit_codes import OK
@@ -57,7 +57,7 @@ from ndf.core.plan.records import PROGRESS_FILE
 
 log = logging.getLogger(__name__)
 
-TOOL = commands.tool_of(__name__)
+TOOL = cli.tool_of(__name__)
 
 # 結果ファイルを書かずに応答を終えた worker を、同じ会話で起こし直す回数の上限
 RESUMES = 3

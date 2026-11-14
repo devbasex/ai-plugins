@@ -1,7 +1,7 @@
 """副命令の表から各パッケージの `main` を呼ぶ。
 
-副命令の表（`COMMANDS`）は `ndf.commands` が持ち、ここから再公開する。モジュールは呼ぶときだけ読む（ほかの副命令の
-依存を起動のたびに読まない）。
+副命令を足す子 Issue は、`COMMANDS` へ 1 行（副命令の名前 → `main(argv: list[str]) -> int` を持つモジュール）を足す。
+モジュールは呼ぶときだけ読む（ほかの副命令の依存を起動のたびに読まない）。
 
 副命令を呼ぶ前に、状態の置き場を 1 回用意する（`identity.prepare_state_dir`。副命令の書き手が `format.json` の無い
 置き場を作り、後の用意がそれを旧い置き場と見なして退避するのを防ぐ）。旧い置き場を退避したら、元と先を 1 件 1 行で
@@ -19,7 +19,6 @@ import logging
 import sys
 
 from ndf import contracts, identity
-from ndf.commands import COMMANDS, tool_of  # noqa: F401  tool_of は再公開（既存の cli.tool_of の呼び出しを保つ）
 from ndf.contracts import result
 
 log = logging.getLogger(__name__)
@@ -28,6 +27,34 @@ log = logging.getLogger(__name__)
 ARGPARSE_USAGE_EXIT = 2
 # 結果 JSON の tool の名前（副命令へ渡す前に止まったとき）
 TOOL = "cli"
+
+# 副命令の名前 → モジュールのパス
+COMMANDS: dict[str, str] = {
+    "check": "ndf.checks.run",
+    "ci": "ndf.ci_cli",
+    "contracts": "ndf.contracts.cli",
+    "hooks": "ndf.domains.hooks.cli",
+    "launch-args": "ndf.adapters.cli",
+    "notify": "ndf.adapters.notify",
+    "plan": "ndf.core.plan.cli",
+    "progress": "ndf.progress.command",
+    "relay": "ndf.domains.relay.cli",
+    "test-slot": "ndf.testing.command",
+    "training": "ndf.adapters.training",
+    "worker": "ndf.core.worker",
+}
+
+
+def tool_of(module: str) -> str:
+    """モジュールのパス（副命令のモジュールの `__name__`）から副命令の名前を求める。
+
+    副命令の結果 JSON の `tool` はこの名前にする（各副命令は `TOOL = cli.tool_of(__name__)` で引き、名前を写さない）。
+    表に無いモジュールは `LookupError`。
+    """
+    for name, path in COMMANDS.items():
+        if path == module:
+            return name
+    raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
 
 
 def _usage(name: str) -> str:

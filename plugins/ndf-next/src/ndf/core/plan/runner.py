@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf import commands
+from ndf import cli
 from ndf.adapters import git
 from ndf.contracts import chosen, limits, result, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
@@ -36,7 +36,7 @@ from ndf.core.plan.records import PROGRESS_FILE, _add_outputs, _add_prs, recorde
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
 # 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
-TOOL = next(name for name, module in commands.COMMANDS.items() if module == f"{__package__}.cli")
+TOOL = next(name for name, module in cli.COMMANDS.items() if module == f"{__package__}.cli")
 CLI_NAME = result.ENTRY
 RUN_FILE = "run.json"
 # 状態の置き場を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
