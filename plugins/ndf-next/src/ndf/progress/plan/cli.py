@@ -130,7 +130,7 @@ def _pause(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, A
     running = pause_plan(conn, _pid(conn, repo, a.plan), a.reason)
     out = _ok(f"計画 {a.plan} を区切りで止めた（終わりまで流す実行中のスプリント {len(running)}）", running=running)
     out["items"] = [{"sprint_id": s} for s in running]
-    out["next"] = result.command(TOOL, "start", ask=("plan_file",))
+    out["next"] = result.command(TOOL, "start", ask=("plan-file",))
     return out
 
 

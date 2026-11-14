@@ -86,7 +86,11 @@ def test_the_detached_run_writes_its_output_under_the_plan_record_dir(tmp_path, 
     class _Proc:
         pid = 4242
 
+    real = run.subprocess.Popen
+
     def popen(argv, **kw):
+        if not hasattr(kw.get("stdout"), "name"):
+            return real(argv, **kw)
         seen["argv"], seen["log"] = argv, kw["stdout"].name
         return _Proc()
 
