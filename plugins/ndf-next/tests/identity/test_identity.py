@@ -70,11 +70,11 @@ def test_load_checks_the_callers_root_that_the_entrypoint_kept(monkeypatch, tmp_
     # bin/ndf は CLAUDE_PLUGIN_ROOT を自分の根で上書きする。写した呼び出し元の値（NDF_CALLER_PLUGIN_ROOT）で確かめる
     other = make_plugin(tmp_path, "old", "ndf")
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(PLUGIN_ROOT))
-    monkeypatch.setenv(identity.CALLER_ROOT_ENV, str(other))
+    monkeypatch.setenv("NDF_CALLER_PLUGIN_ROOT", str(other))
 
     assert identity.load().foreign_root == other
 
-    monkeypatch.setenv(identity.CALLER_ROOT_ENV, "")
+    monkeypatch.setenv("NDF_CALLER_PLUGIN_ROOT", "")
     assert identity.load().foreign_root is None
 
 

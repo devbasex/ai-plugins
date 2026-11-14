@@ -55,8 +55,6 @@ FORMAT_VERSION = 1
 RETIRED_SUFFIX = ".v10-"
 # 退避した旧い置き場を標準エラーへ書くときの 1 行（エントリポイントと test-slot が使う。`items` の 1 件で埋める）
 RETIRED_LINE = "旧い状態の置き場を退避した: {retired_from} -> {retired_to}"
-# `bin/ndf` が子へ自分の根を渡す前に写した、呼び出し元の `CLAUDE_PLUGIN_ROOT`
-CALLER_ROOT_ENV = "NDF_CALLER_PLUGIN_ROOT"
 
 
 class IdentityError(Exception):
@@ -132,8 +130,12 @@ def _config_home() -> Path:
 
 
 def _foreign_root(root: Path) -> Optional[Path]:
+    # `bin/ndf` が子へ自分の根を渡す前に写した呼び出し元の値（空でも）が、`CLAUDE_PLUGIN_ROOT` より先に効く
     env = os.environ
-    env_root = env[CALLER_ROOT_ENV] if CALLER_ROOT_ENV in env else env.get("CLAUDE_PLUGIN_ROOT", "")
+    names = [name for name in ("NDF_CALLER_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT") if name in env]
+    if not names:
+        return None
+    env_root = env[names[0]]
     if not env_root or Path(env_root).resolve() == root.resolve():
         return None
     return Path(env_root)

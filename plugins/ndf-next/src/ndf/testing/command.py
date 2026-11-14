@@ -104,7 +104,7 @@ def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
         metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
         next=again if kind == "wait_timeout" else None,
         # 枠の置き場を用意するときに退避した旧い状態の置き場（復旧先を結果から引ける）
-        items=exc.retired or None,
+        items=exc.retired,
     )
 
 
@@ -175,7 +175,7 @@ def _report(since: str) -> int:
         directory, retired = slots.slots_place()
     except identity.IdentityError as exc:
         # 退避の途中か後で失敗しても、それまでに退避した元と先を items に載せる
-        return _stopped("config_broken", str(exc), items=exc.items() or None)
+        return _stopped("config_broken", str(exc), items=exc.items())
     # 記録が無ければ 0 件として読む
     metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"

@@ -74,7 +74,7 @@ def test_entry_stops_without_calling_the_subcommand_when_preparing_fails(state_h
     # 用意できなければ（ほかのプラグインの根から呼ばれ、旧い置き場を退避してよいと確かめられない）副命令を呼ばずに止まる
     state_home.mkdir(parents=True)
     (state_home / "ledger.jsonl").write_text("old")
-    monkeypatch.setenv(identity.CALLER_ROOT_ENV, str(state_home.parent / "other-plugin"))
+    monkeypatch.setenv("NDF_CALLER_PLUGIN_ROOT", str(state_home.parent / "other-plugin"))
     calls = []
     _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 0)
 
