@@ -223,6 +223,44 @@ def test_sweep_keeps_a_lock_without_a_key_file_while_it_is_held(root):
         assert lock.exists()
 
 
+# --- 現状固定: 記録の読み出し（_records） ---------------------------------------------------
+
+
+def _fields(record: durable.RunRecord) -> tuple:
+    return (record.run_name, record.workflow_id, record.status, record.parent_workflow_id, record.app_version)
+
+
+def test_workflows_reads_records_of_the_key_with_their_fields(root):
+    """現状固定: `workflows` は鍵の名前・状態・親・アプリの版と、UTC の更新時刻を持つ記録を返す。"""
+    _finish_without_retire(root, "fields")
+    url = durable.run_url(root, "fields")
+    name = durable.run_name("fields")
+    version = f"format-{durable.FORMAT}"
+
+    every = durable.workflows(url)
+    by_key = durable.workflows(url, "fields")
+
+    assert [_fields(r) for r in every] == [(name, "wf-fields", "SUCCESS", None, version)]
+    assert [_fields(r) for r in by_key] == [_fields(r) for r in every]
+    assert all(r.updated_at is not None and r.updated_at.tzinfo == UTC for r in every)
+    assert durable.workflows(url, "another") == []
+
+
+def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_child(root):
+    """現状固定: 子の記録は親の ID を持つ。`pending` は終わった親を除き、待ちの子だけを返す。"""
+    _run(root, "family", "child-wait")
+    url = durable.run_url(root, "family")
+    name = durable.run_name("family")
+    version = f"format-{durable.FORMAT}"
+
+    records = sorted(durable.workflows(url, "family"), key=lambda r: r.workflow_id)
+    assert [_fields(r) for r in records] == [
+        (name, "wf-family", "SUCCESS", None, version),
+        (name, "wf-family-child", "PENDING", "wf-family", version),
+    ]
+    assert [_fields(r) for r in durable.pending(root)] == [(name, "wf-family-child", "PENDING", "wf-family", version)]
+
+
 def test_check_file():
     assert durable.check_file(Path("/nonexistent/x.sqlite"))
 
