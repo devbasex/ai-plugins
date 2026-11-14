@@ -177,7 +177,9 @@ def test_issue_2444_rebuild_items_are_each_fixed_or_deferred(wt: Path, tmp_path:
     """#2444 の残り: 組み直しの「足すべき内容」は、相手役の指摘が無くても修正担当へ渡り、1 件ずつ「直した」
     「見送った（理由）」として結果の decisions に載る。"""
     rebuild = tmp_path / "rebuild.json"
-    rebuild.write_text(json.dumps(result.result("rebuild", "ok", "s", [{"id": "R1", "text": "出すコミット"}, {"id": "R2", "text": "対応"}])))
+    rebuild.write_text(
+        json.dumps(result.result("rebuild", "ok", "s", [{"id": "R1", "text": "出すコミット"}, {"id": "R2", "text": "対応"}]))
+    )
     decide = {"R1": {"outcome": fin.FIXED}, "R2": {"outcome": fin.SKIPPED, "reason": "別の設計で決める"}}
     fake = Fake(tmp_path / "st", {"codex": [[], []], "kiro": [[], []]}, decide=decide.get)
     code, got = _run(capsys, monkeypatch, fake, wt, "--findings", str(rebuild))
@@ -191,7 +193,9 @@ def test_issue_2444_rebuild_item_never_decided_is_a_gap(wt: Path, tmp_path: Path
     fake = Fake(tmp_path / "st", {"codex": [[], []], "kiro": [[], []]}, decide=lambda fid: None)
     code, got = _run(capsys, monkeypatch, fake, wt, "--findings", str(rebuild), "--max-rounds", "2")
     assert got["cause"]["kind"] == "incomplete"
-    assert got["gaps"] == [{"kind": fin.GAP_UNHANDLED, "name": "rebuild-1", "reason": "レビューで直したとも見送ったとも決めていない: 記録の行のキー"}]
+    assert got["gaps"] == [
+        {"kind": fin.GAP_UNHANDLED, "name": "rebuild-1", "reason": "レビューで直したとも見送ったとも決めていない: 記録の行のキー"}
+    ]
 
 
 def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -200,7 +204,9 @@ def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_pat
     ref = store.state_pr(state_dir, PR)
     finding = {"id": "r1-1", "key": "k", "text": "直す", "section": None, "round": 1, "outcome": fin.UNRESOLVED, "reason": None}
     head = sh(wt, "rev-parse", "HEAD").strip()
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": [finding]})
+    store.write_object(
+        ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": [finding]}
+    )
     store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": PR, "findings": [{"id": "r1-1", "outcome": fin.FIXED}]}))
     fake = Fake(state_dir, {"codex": [[], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)

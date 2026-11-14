@@ -162,7 +162,9 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
         lines += ["理由を添えて見送り済みの指摘（出し直さない）:", *(f"- {t}" for t in decided)]
-    lines.append('最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。')
+    lines.append(
+        '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "section": "<パス#見出し か 空>"}]} だけを出す。指摘が無ければ空の配列。'
+    )
     return "\n".join(lines)
 
 
@@ -179,9 +181,7 @@ def _reviewer_findings(status: agents.AgentStatus, out: Path) -> Optional[list[d
 def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], int]:
     """相手役を並べて起動し、指摘と、答えた相手役の数を返す。答えなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
-    specs = [
-        participants.review_launch(a, cfg.worktree, prompt, cfg.state_dir / f"round{round_no}-{a}") for a in cfg.reviewers
-    ]
+    specs = [participants.review_launch(a, cfg.worktree, prompt, cfg.state_dir / f"round{round_no}-{a}") for a in cfg.reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
         statuses = list(pool.map(launch, specs))
     raised: list[dict[str, Any]] = []
@@ -232,10 +232,16 @@ def _pending(run: _Run) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
 
 
 def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], result_path: Path) -> str:
-    lines = [f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"]
+    lines = [
+        f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"
+    ]
     lines += [f"- {f['id']}: {f['text']}" + (f"（{f['section']}）" if f.get("section") else "") for f in open_]
     lines += [f"- {h.id}: 足すべき内容 {h.text}" for h in handed]
-    shape = '{"pr": ' + str(run.ref.origin_pr) + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
+    shape = (
+        '{"pr": '
+        + str(run.ref.origin_pr)
+        + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
+    )
     lines.append(f"終えたら {result_path} へ JSON {shape} を書く。すべての id を載せる。")
     return "\n".join(lines)
 
@@ -243,7 +249,9 @@ def _fix_prompt(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin
 def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
     call = claude.ClaudeCall(system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS)
     paths = agents.AgentPaths.at(run.cfg.state_dir / f"round{round_no}-fix")
-    return agents.Launch(run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT))
+    return agents.Launch(
+        run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)
+    )
 
 
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
@@ -264,7 +272,9 @@ def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
-def _fix(run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher) -> Optional[dict[str, Any]]:
+def _fix(
+    run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher
+) -> Optional[dict[str, Any]]:
     """修正担当を起動して結果を取り込む。答えが無ければ注意に載せて None。"""
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
     status = launch(_fixer_launch(run, round_no, _fix_prompt(run, open_, handed, result_path)))
