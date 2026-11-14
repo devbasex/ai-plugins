@@ -34,6 +34,7 @@ def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pen
         last = None
     if not isinstance(last, dict) or last.get("status") != "ok":
         summary = last.get("summary") if isinstance(last, dict) else (done.stderr.strip()[-200:] or "出力が無い")
-        return Pending(None, f"ndf plan pending の一覧を読めない（終了コード {done.returncode}）: {summary}")
+        one_line = " ".join(str(summary).split())[:200]
+        return Pending(None, f"ndf plan pending の一覧を読めない（終了コード {done.returncode}）: {one_line}")
     items = last.get("items")
     return Pending(items if isinstance(items, list) else [], "")

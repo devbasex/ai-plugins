@@ -89,8 +89,8 @@ def make_repo(root: Path, slug: str = "owner/repo", delivery: Any = None, worktr
     return root
 
 
-AUTO = [{"target": "配布物", "kind": "auto", "channel": "production"}]
-MANUAL = [{"target": "配布物", "kind": "manual", "channel": "production"}]
+AUTO = [{"target": "リリース対象", "kind": "auto", "channel": "production"}]
+MANUAL = [{"target": "リリース対象", "kind": "manual", "channel": "production"}]
 
 
 def deny_reason(out: Any) -> str | None:
