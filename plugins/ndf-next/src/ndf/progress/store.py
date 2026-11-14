@@ -585,12 +585,19 @@ def run_lock(store: Store, table_id: str) -> Iterator[None]:
 
     SQLite: `<実ファイル>.<進行表の鍵>.lock` の flock。PostgreSQL: 専用の接続の `pg_try_advisory_lock`（I14）。
     """
-    if store.path is None:
-        with _pg_run_lock(store, table_id):
-            yield
-        return
-    lock = Path(f"{store.path}.{hashlib.sha256(table_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
-    handle = _open_lock(lock)
+    lock = _pg_run_lock(store, table_id) if store.path is None else _file_run_lock(store.path, table_id)
+    with lock:
+        yield
+
+
+def _run_lock_path(path: Path, table_id: str) -> Path:
+    """`<実ファイル>.<進行表の鍵>.lock`。"""
+    return Path(f"{path}.{hashlib.sha256(table_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
+
+
+@contextmanager
+def _file_run_lock(path: Path, table_id: str) -> Iterator[None]:
+    handle = _open_lock(_run_lock_path(path, table_id))
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
