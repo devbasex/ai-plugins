@@ -27,7 +27,7 @@ import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import causes, result
+from ndf.contracts import causes, facts, result
 from ndf.core import durable
 from ndf.progress import definition, model, stages, store
 
@@ -41,7 +41,7 @@ PROJECT_FILE = ".ndf/project.json"
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
 DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
-REQUIREMENTS_STAGE = "requirements"  # `--requirements` が終了の印を付ける工程の文書の名前
+REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了の印を付ける工程（工程表の行名）
 
 
 # --- 置き場とリポジトリ ------------------------------------------------------------------
@@ -171,7 +171,7 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     その工程を持たないモードでは別の工程へ印を付けず、引数の誤りとして断る。"""
     if path is None:
         return []
-    found = [s for s in snap.stages if s.id == REQUIREMENTS_STAGE]
+    found = [s for s in snap.stages if s.name == REQUIREMENTS_STAGE]
     if not found:
         raise definition.WorkflowDefError([f"--requirements: モード {snap.mode} に要求と受け入れ条件の工程が無い"])
     stage = found[0]
@@ -270,14 +270,25 @@ def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"進行表の DB を控え {a.source} から戻した", items=items)
 
 
-COMMANDS: dict[str, Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]] = {
+Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
+
+
+def _answer_commands(handlers: tuple[Command, ...]) -> dict[str, Command]:
+    """止まった後に conductor が選ぶ手の副命令。名前は答えの語彙（表 answers）の行で、`_cmd_<答え>` が受ける。"""
+    out = {a: h for h in handlers for a in facts.ids(result.ANSWERS) if h.__name__ == f"_cmd_{a}"}
+    if len(out) != len(handlers):
+        raise LookupError(
+            f"表 {result.ANSWERS} に無い答えの副命令: {sorted({h.__name__ for h in handlers} - {h.__name__ for h in out.values()})}"
+        )
+    return out
+
+
+COMMANDS: dict[str, Command] = {
     "new": _cmd_new,
     "show": _cmd_show,
     "disable": _cmd_toggle,
     "enable": _cmd_toggle,
-    "retry": _cmd_retry,
-    "finish": _cmd_finish,
-    "cancel": _cmd_cancel,
+    **_answer_commands((_cmd_retry, _cmd_finish, _cmd_cancel)),
 }
 
 
