@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol, Union
@@ -216,32 +216,43 @@ def _output(ref: Ref, ctx: Context, src: Sources, default_key: str) -> Union[Any
     return record.outputs[key]
 
 
-def _version(ref: Ref, ctx: Context, src: Sources) -> Got:
-    got = _output(ref, ctx, src, VERSION)
+def _checked(ref: Ref, ctx: Context, src: Sources, default_key: str, check: Callable[[Any], Union[str, Unresolved]]) -> Got:
+    """参照の先の outputs の値を読み、読めて空でなければ `check` で参照の値（か解けない理由）にする。"""
+    got = _output(ref, ctx, src, default_key)
     if isinstance(got, (Unresolved, _Empty)):
         return got
+    return check(got)
+
+
+def _version_text(got: Any) -> Union[str, Unresolved]:
     if not _SEMVER.match(str(got)):
         return Unresolved("input_missing", f"版の形でない: {got!r}")
     return str(got)
 
 
-def _record_pr(ref: Ref, ctx: Context, src: Sources) -> Got:
-    got = _output(ref, ctx, src, RECORD_PR)
-    if isinstance(got, (Unresolved, _Empty)):
-        return got
+def _pr_number_text(got: Any) -> Union[str, Unresolved]:
     text = str(got).lstrip("#")
     if not text.isdigit():
         return Unresolved("input_missing", f"記録の PR の番号でない: {got!r}")
     return text
 
 
+def _result_text(got: Any) -> str:
+    return got if isinstance(got, str) else _canonical_json(got)
+
+
+def _version(ref: Ref, ctx: Context, src: Sources) -> Got:
+    return _checked(ref, ctx, src, VERSION, _version_text)
+
+
+def _record_pr(ref: Ref, ctx: Context, src: Sources) -> Got:
+    return _checked(ref, ctx, src, RECORD_PR, _pr_number_text)
+
+
 def _plan_result(ref: Ref, ctx: Context, src: Sources) -> Got:
     if ref.key is None:
         return Unresolved("invalid", f"参照 {ref.name} に読む outputs の鍵（key）が無い")
-    got = _output(ref, ctx, src, ref.key)
-    if isinstance(got, (Unresolved, _Empty)):
-        return got
-    return got if isinstance(got, str) else _canonical_json(got)
+    return _checked(ref, ctx, src, ref.key, _result_text)
 
 
 def queue_prs_of(prior: Sequence[queue_decide.Outcome], closing: Sequence[int], accepts_gate: bool = False) -> list[int]:
