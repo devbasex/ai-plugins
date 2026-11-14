@@ -488,14 +488,14 @@ def _deduped(conn: sa.Connection, key: Optional[str]) -> Optional[int]:
     return conn.execute(sa.select(EVENTS.c.seq).where(EVENTS.c.dedupe_key == key)).scalar()
 
 
-def _insert(conn: sa.Connection, table_id: str, seq: int, draft: model.EventDraft, state: Optional[str], at: datetime) -> None:
+def _insert(conn: sa.Connection, table_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
     values = {
         "table_id": table_id,
         "seq": seq,
         "rev": draft.rev,
         "row_key": draft.row_key,
         "kind": draft.kind,
-        "state": state,
+        "state": draft.state,
         "actor": draft.actor,
         "reason": draft.reason,
         "payload": draft.payload,
@@ -530,12 +530,11 @@ def append_events(
         if known is not None:
             written.append(known)
             continue
-        rows = model.fold(events, draft.rev if level == "sprint" else None)
-        model.check_event(level, rows, whole, draft)
-        state = model.resulting_state(level, draft)
+        model.check_event(level, model.rows_for(level, events, draft), whole, draft)
+        written_draft = model.recorded(level, draft)
         last += 1
-        _insert(conn, table_id, last, draft, state, at)
-        events.append(model.Event(last, at, model.EventDraft(**{**vars(draft), "state": state})))
+        _insert(conn, table_id, last, written_draft, at)
+        events.append(model.Event(last, at, written_draft))
         whole = model.table_state(level, events)
         written.append(last)
     return written

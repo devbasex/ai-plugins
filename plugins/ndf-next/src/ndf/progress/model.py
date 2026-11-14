@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Optional
 
@@ -200,6 +200,16 @@ def resulting_state(level: str, draft: EventDraft) -> Optional[str]:
     """事象の後の状態。決まりが 1 つの状態を持てばそれ、複数なら下書きの値、無ければ None。"""
     rule = rules()[(level, draft.kind)]
     return rule.state if isinstance(rule.state, str) else draft.state
+
+
+def recorded(level: str, draft: EventDraft) -> EventDraft:
+    """書く事象。状態は決まりで定まる値（`resulting_state`）にする。"""
+    return replace(draft, state=resulting_state(level, draft))
+
+
+def rows_for(level: str, events: Iterable[Event], draft: EventDraft) -> dict[str, RowState]:
+    """下書きを確かめる行の今の状態。スプリントの行は下書きの定義の改訂の事象だけで畳む。"""
+    return fold(events, draft.rev if level == "sprint" else None)
 
 
 def fold(events: Iterable[Event], rev: Optional[int] = None) -> dict[str, RowState]:
