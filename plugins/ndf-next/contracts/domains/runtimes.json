@@ -12,7 +12,8 @@
     "host_env": {"type": "array", "summary": "ホスト（NDF を動かしているランタイム）を推定する環境変数の名前。値は見ず、あるかだけで決める。空はホストを推定しない（agy は子へ環境変数を渡すかを確かめていない）"},
     "auth_probe": {"type": "array", "summary": "認証を確かめる引数（実行ファイルの後ろ）"},
     "model_probe": {"type": "array", "summary": "最小の呼び出しでモデルが答えるかを確かめる引数（実行ファイルの後ろ。{workdir} は確かめるディレクトリに置き換える）。無いランタイムは認証の確かめだけで担当に入る", "optional": true},
-    "model_args": {"type": "array", "summary": "既定のモデルで起動し直す引数（利用者の設定ファイルを書き換えない）。無いランタイムは自ら既定のモデルで答える", "optional": true}
+    "model_args": {"type": "array", "summary": "既定のモデルで起動し直す引数（利用者の設定ファイルを書き換えない）。無いランタイムは自ら既定のモデルで答える", "optional": true},
+    "review_args": {"type": "array", "summary": "cross 系の相手役として、読むだけで 1 回答える起動の引数（実行ファイルの後ろ。{workdir} は worktree に置き換え、問いを後ろに 1 つ足す）。無いランタイムは相手役に入らない", "optional": true}
   },
   "rows": [
     {
@@ -41,7 +42,8 @@
       "host_env": ["CODEX_PLUGIN_ROOT", "CODEX_HOME"],
       "auth_probe": ["login", "status"],
       "model_probe": ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "project_doc_max_bytes=0", "-C", "{workdir}"],
-      "model_args": ["--ignore-user-config"]
+      "model_args": ["--ignore-user-config"],
+      "review_args": ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "{workdir}"]
     },
     {
       "id": "agy",
@@ -66,7 +68,8 @@
       "training_check": false,
       "host_env": ["KIRO_PLUGIN_ROOT", "KIRO_AGENT"],
       "auth_probe": ["whoami"],
-      "model_probe": ["chat", "--no-interactive"]
+      "model_probe": ["chat", "--no-interactive"],
+      "review_args": ["chat", "--no-interactive", "--trust-tools=fs_read"]
     }
   ]
 }
