@@ -20,12 +20,13 @@
 ## リリースの場合ごとの承認の場所とマージの主体
 
 **本番チャネルへのマージのリリース承認を取る場所とマージする主体は、リリースの場合で決まる**（判定は `release-steps.py release-case`。
-3 つの場合の意味は `release` の Skill の「リリースの場合」）。
+4 つの場合の意味は `release` の Skill の「リリースの場合」）。
 
 | 場合 | リリース承認を取る場所 | マージする主体 | NDF が打つもの |
 | --- | --- | --- | --- |
 | CD があり、レビューなしでマージできる（`cd-no-review`） | マージの前。リリースの PR へ承認資料と承認の証跡をコメントで置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡を確かめる | `release --channel prod`（承認の前は 10）→ `approval-post` → 承認 → `approve --pr` → `release --channel prod`。リリースの Pull Request の経路は `promote --gate-approved` がマージの前に証跡を書く |
 | CD があり、レビューが必須（`cd-review`） | リリースの PR のレビューの承認 | 利用者のアカウントで NDF が `--admin` なしにマージする | 証跡を書かない。承認のレビューのコミットが先端と一致したときだけマージする |
+| CD があり、レビューが必須で、迂回の宣言がある（`cd-admin`） | マージの前。リリースの PR へ承認資料と利用者の承認の証跡（`--by user`）をコメントで置く | 利用者のアカウントで NDF が管理者の迂回（`--admin`）でマージする | `cd-no-review` と同じ並び。MVV 判定のプランでも承認ゲートで止まる。マージの後に迂回の記録を置く |
 | CD が無い（`no-cd`） | 手元の承認資料 | NDF（下の「宛先ごとの判定」のとおり） | 今の `release` の工程 |
 
 CD のある場合のマージの後は、CD の workflow がタグと GitHub Release を作り、NDF は `cd-result` で結果を読んでリリース記録へ残す。

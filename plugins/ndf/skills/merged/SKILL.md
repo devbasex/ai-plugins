@@ -158,7 +158,9 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release --channel prod`・`promote`）と
   開発版の workflow が付ける（`release` の Skill の「リリースの場合」）。`promote --gate-approved` は CD のある場合、マージの前に
   承認したコミットの証跡をリリースの Pull Request へ書き（cd-no-review）か承認のレビューのコミットと先端を照らし（cd-review。
-  違えば `gate`（10））、自分で `--no-admin` を付けてマージする
+  違えば `gate`（10））、自分で `--no-admin` を付けてマージする。迂回の宣言のある場合（cd-admin）は、`--gate-approved user` の
+  ときだけ証跡を書いて迂回でマージし、迂回の記録を置く（`--gate-approved mvv` なら証跡を書かずに `gate`（10））。マージの行には
+  迂回の有無が `admin` で必ず残る。`gh pr merge` が断られた後に先端が動いていれば `head_moved` の項目で `stopped`（1）
   `status` の読み方は上の表と同じ
 - 上限の時間を過ぎてもチェックが終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
 - 実行が終わった（`completed`）のにチェックが pending のまま `--stale-after` 秒続けば、GitHub 側で
