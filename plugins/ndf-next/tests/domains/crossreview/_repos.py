@@ -1,4 +1,4 @@
-"""cross-review のテストの補助: 一時の bare リポジトリ（origin）と clone、結果 JSON の読み取り。"""
+"""cross-review のテストの補助: 一時の bare リポジトリ（origin）と clone、副命令の実行と結果 JSON の読み取り。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+from ndf.domains.crossreview import cli
 
 BRANCH = "feat/x"
 
@@ -63,3 +65,9 @@ def make_repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:
 def last_result(out: str) -> dict:
     """標準出力の最後の行の結果 JSON。"""
     return json.loads(out.strip().splitlines()[-1])
+
+
+def run_cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
+    """副命令 `cross-review` を打ち、終了コードと結果 JSON を返す。"""
+    code = cli.main(list(argv))
+    return code, last_result(capsys.readouterr().out)

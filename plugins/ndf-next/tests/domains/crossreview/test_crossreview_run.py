@@ -19,7 +19,7 @@ from ndf.contracts import result
 from ndf.domains.crossreview import cli, drive, store
 from ndf.domains.crossreview import finish_decide as fin
 
-from ._repos import BRANCH, Repos, commit, last_result, sh
+from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 PR = 41
 FAIL = "fail"
@@ -78,8 +78,7 @@ def _run(capsys, monkeypatch, fake: Fake, wt: Path, *extra: str) -> tuple[int, d
     monkeypatch.setattr(cli, "LAUNCH", fake)
     argv = ["run", "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "origin/main", "--worktree", str(wt)]
     argv += ["--branch", BRANCH, "--reviewer", "codex", "--reviewer", "kiro", *extra]
-    code = cli.main(argv)
-    got = last_result(capsys.readouterr().out)
+    code, got = run_cli(capsys, *argv)
     assert result.errors(got, code) == []
     return code, got
 
@@ -238,8 +237,9 @@ def test_issue_3109_unregistered_worktree_stops_with_the_path(wt: Path, tmp_path
 def test_unknown_reviewer_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     monkeypatch.setattr(cli, "LAUNCH", Fake(tmp_path / "st", {}))
     argv = ["run", "--pr", "1", "--state-dir", str(tmp_path / "st"), "--base", "origin/main", "--worktree", str(wt), "--reviewer", "nobody"]
-    assert cli.main(argv) != 0
-    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+    code, got = run_cli(capsys, *argv)
+    assert code != 0
+    assert got["cause"]["kind"] == "invalid"
 
 
 # --- 現状固定テスト: 1 回の起動に重ねる値（drive._Run の台帳・過程・注意・状態ファイル・要約。I-014） ---

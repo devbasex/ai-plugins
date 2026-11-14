@@ -8,9 +8,9 @@ import pytest
 
 from ndf.adapters import git
 from ndf.core.converge import worktree
-from ndf.domains.crossreview import cli, push
+from ndf.domains.crossreview import push
 
-from ._repos import BRANCH, Repos, commit, last_result, sh
+from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 SHA = "a" * 40
 
@@ -53,8 +53,7 @@ def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
     fix = commit(wt, "doc.md", "# 設計\n\n## 節 A\n\n直した本文\n", "修正")
     commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n別の本文\n", "別の push")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    code = cli.main(["push-fix", str(wt), "--branch", BRANCH, "--commit", fix])
-    got = last_result(capsys.readouterr().out)
+    code, got = run_cli(capsys, "push-fix", str(wt), "--branch", BRANCH, "--commit", fix)
     assert code != 0
     assert got["items"][0]["reason"] == push.DIVERGED and got["items"][0]["conflicts"] == ["doc.md"]
     assert got["next"]["argv"][1:4] == ["cross-review", "sync", str(wt)]
@@ -142,8 +141,7 @@ def test_sync_conflict_returns_to_the_previous_head(repos: Repos, tmp_path: Path
     before = commit(wt, "doc.md", "# 設計\n\n## 節 A\n\n直した\n", "修正")
     commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n別\n", "別の push")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    code = cli.main(["sync", str(wt), "--branch", BRANCH])
-    got = last_result(capsys.readouterr().out)
+    code, got = run_cli(capsys, "sync", str(wt), "--branch", BRANCH)
     assert code != 0 and got["items"][0]["conflicts"] == ["doc.md"] and before in got["summary"]
     assert sh(wt, "rev-parse", "HEAD").strip() == before
     assert sh(wt, "status", "--porcelain") == ""

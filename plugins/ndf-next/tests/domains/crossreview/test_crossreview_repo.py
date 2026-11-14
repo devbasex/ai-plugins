@@ -9,7 +9,7 @@ import pytest
 
 from ndf.domains.crossreview import cli, repo, store
 
-from ._repos import Repos, last_result, sh
+from ._repos import Repos, run_cli, sh
 
 
 def test_issue_1707_outside_a_git_repository_the_reason_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -18,8 +18,8 @@ def test_issue_1707_outside_a_git_repository_the_reason_says_so(tmp_path: Path, 
     skill_dir.mkdir(parents=True)
     monkeypatch.chdir(skill_dir)
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
-    assert cli.main(["target-repo"]) != 0
-    got = last_result(capsys.readouterr().out)
+    code, got = run_cli(capsys, "target-repo")
+    assert code != 0
     assert got["cause"]["kind"] == "precondition"
     assert "git リポジトリでない" in got["summary"] and "--repo" in got["summary"]
 
@@ -28,15 +28,17 @@ def test_issue_1707_origin_of_the_target_repository_is_used(repos: Repos, monkey
     """#1707: 対象のリポジトリの中で打てば、cwd の origin から決まる。"""
     sh(repos.main, "remote", "set-url", "origin", "git@github.com:acme/app.git")
     monkeypatch.chdir(repos.main)
-    assert cli.main(["target-repo"]) == 0
-    assert last_result(capsys.readouterr().out)["items"][0] == {"kind": "repo", "slug": "acme/app", "source": repo.ORIGIN}
+    code, got = run_cli(capsys, "target-repo")
+    assert code == 0
+    assert got["items"][0] == {"kind": "repo", "slug": "acme/app", "source": repo.ORIGIN}
 
 
 def test_arg_and_state_come_before_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
     store.write_object(tmp_path / store.STATE_NAME.format(pr=5), {store.ORIGIN_KEY: 5, store.REPO_KEY: "acme/state"})
-    assert cli.main(["target-repo", "--state-dir", str(tmp_path), "--pr", "5"]) == 0
-    assert last_result(capsys.readouterr().out)["items"][0]["source"] == repo.STATE
+    code, got = run_cli(capsys, "target-repo", "--state-dir", str(tmp_path), "--pr", "5")
+    assert code == 0
+    assert got["items"][0]["source"] == repo.STATE
     assert repo.resolve_target_repo("acme/arg", "acme/state", tmp_path) == repo.RepoTarget("acme/arg", repo.ARG)
     with pytest.raises(repo.RepoUnresolved, match="形"):
         repo.resolve_target_repo("acme", None, tmp_path)
@@ -51,8 +53,8 @@ def test_issue_2447_broken_dependency_environment_is_reported_as_deps_missing(mo
     """#2447: 依存の仮想環境が欠けていれば、「PR の head を取得できない」でなく依存の欠け（deps_missing）で止まる。"""
     monkeypatch.delitem(sys.modules, cli.GITHUB_MODULE, raising=False)
     monkeypatch.setitem(sys.modules, "githubkit", None)
-    assert cli.main(["head", "--pr", "364", "--repo", "acme/app"]) != 0
-    got = last_result(capsys.readouterr().out)
+    code, got = run_cli(capsys, "head", "--pr", "364", "--repo", "acme/app")
+    assert code != 0
     assert got["cause"]["kind"] == "deps_missing"
     assert "githubkit" in got["summary"] and "head は読んでいない" in got["summary"]
 
@@ -78,7 +80,9 @@ def test_head_reads_the_pull_request_through_the_adapter(monkeypatch: pytest.Mon
     fake = type(sys)("fake_github")
     fake.GitHub, fake.GitHubError, fake.client = FakeHub, FakeGitHubError, lambda: None
     monkeypatch.setattr(cli, "load_github", lambda: fake)
-    assert cli.main(["head", "--pr", "1", "--repo", "acme/app"]) == 0
-    assert last_result(capsys.readouterr().out)["items"][0]["head"] == _Pull.head_sha
-    assert cli.main(["head", "--pr", "2", "--repo", "acme/app"]) != 0
-    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "transient"
+    code, got = run_cli(capsys, "head", "--pr", "1", "--repo", "acme/app")
+    assert code == 0
+    assert got["items"][0]["head"] == _Pull.head_sha
+    code, got = run_cli(capsys, "head", "--pr", "2", "--repo", "acme/app")
+    assert code != 0
+    assert got["cause"]["kind"] == "transient"

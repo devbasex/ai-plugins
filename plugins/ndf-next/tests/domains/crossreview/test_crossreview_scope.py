@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossreview import cli, scope_decide, store
+from ndf.domains.crossreview import scope_decide, store
 
-from ._repos import Repos, commit, last_result
+from ._repos import Repos, commit, run_cli
 
 A, B = "issues/d.md#節 A", "issues/d.md#節 B"
 
@@ -42,11 +42,13 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
         {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], store.REVIEWED: ["issues/d.md#設計", A]},
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
-    assert cli.main([*base, "--purpose", "design"]) == 0
-    item = last_result(capsys.readouterr().out)["items"][0]
+    code, got = run_cli(capsys, *base, "--purpose", "design")
+    assert code == 0
+    item = got["items"][0]
     assert (item["scope"], item["unreviewed"]) == (scope_decide.FULL, [B])
-    assert cli.main([*base, "--purpose", "check"]) == 0
-    assert last_result(capsys.readouterr().out)["items"][0]["scope"] == scope_decide.SINCE
+    code, got = run_cli(capsys, *base, "--purpose", "check")
+    assert code == 0
+    assert got["items"][0]["scope"] == scope_decide.SINCE
 
 
 # --- 現状固定テスト: `review-scope`（cli.cmd_scope）が状態ファイルから読む範囲（I-006） ---
@@ -67,8 +69,9 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     def run(purpose: str, data) -> tuple[int, dict]:
         if data is not None:
             store.write_object(path, data)
-        code = cli.main(["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--purpose", purpose, "--base", "origin/main"])
-        return code, last_result(capsys.readouterr().out)
+        return run_cli(
+            capsys, "review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--purpose", purpose, "--base", "origin/main"
+        )
 
     return run
 
