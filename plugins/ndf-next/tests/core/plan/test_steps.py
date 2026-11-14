@@ -32,7 +32,9 @@ def _step(**kw) -> model.Step:
 
 
 def test_outcome_reads_the_last_result_line():
-    line = json.dumps({"tool": "t", "status": "stopped", "summary": "x", "cause": {"kind": "usage_limit", "detail": "d", "retry_after": 30}})
+    line = json.dumps(
+        {"tool": "t", "status": "stopped", "summary": "x", "cause": {"kind": "usage_limit", "detail": "d", "retry_after": 30}}
+    )
     out = steps.outcome_of(_step(), 1, "log\n" + line + "\n")
     assert (out["status"], out["kind"], out["retry_after"]) == ("stopped", "usage_limit", 30)
 

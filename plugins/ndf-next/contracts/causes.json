@@ -24,6 +24,9 @@
     {"kind": "config_broken", "meaning": "プラグインの定義（plugin.json）か契約のファイルが読めず、起動できない", "std_type": "configuration", "exit": 2, "route": "human", "retry": null},
     {"kind": "input_missing", "meaning": "工程の入力の鍵がスプリントの文脈に無く、工程を始めなかった", "std_type": "configuration", "exit": 3, "route": "human", "retry": null},
     {"kind": "bad_report", "meaning": "呼んだ作業が結果 JSON を返さなかった・形が違った", "std_type": "validation", "exit": 2, "route": "human", "retry": null},
+    {"kind": "store_in_use", "meaning": "状態の置き場か実行の鍵のロックをほかのプロセスが持っていて、何も変えずに止まった（待ちの上限に当たったときは持ち主のホスト・pid・時刻を添える）", "std_type": "runtime", "exit": 1, "route": "human", "retry": null},
+    {"kind": "store_broken", "meaning": "状態の置き場の記録のファイルが壊れていた・台帳に書けなかった。壊れたファイルは broken/ へ移した", "std_type": "runtime", "exit": 1, "route": "human", "retry": null},
+    {"kind": "format_newer", "meaning": "状態の置き場か耐久の記録の形の番号が自分より新しく、何も書かずに止まった（新しい版の NDF で打つ）", "std_type": "configuration", "exit": 3, "route": "human", "retry": null},
     {"kind": "unknown", "meaning": "種類を決められない（例外・結果 JSON を出さない外部のコマンド）", "std_type": "runtime", "exit": 1, "route": "human", "retry": null}
   ]
 }

@@ -34,7 +34,9 @@ def repo(tmp_path) -> Path:
 def _ndf(repo: Path, *args: str) -> tuple[int, dict]:
     env = {**os.environ, "PYTHONPATH": str(SRC), "NDF_TEST_TOKEN": SECRET}
     env.pop("NDF_PROGRESS_DB", None)
-    done = subprocess.run([sys.executable, "-m", "ndf", "plan", *args], cwd=repo, env=env, capture_output=True, text=True, timeout=180, check=False)
+    done = subprocess.run(
+        [sys.executable, "-m", "ndf", "plan", *args], cwd=repo, env=env, capture_output=True, text=True, timeout=180, check=False
+    )
     lines = [line for line in done.stdout.splitlines() if line.strip()]
     assert lines, done.stderr
     return done.returncode, json.loads(lines[-1])
@@ -96,7 +98,11 @@ def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
     """承認の答えを待つ間にプロセスが抜けても、次の next が同じ鍵で回復して続ける（B2）。待ちは pending に出る（B5）。"""
     gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
     ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "after", "rejected": "stop"}}
-    plan = _write_plan(repo, "g", [_count_step("before", tmp_path / "before"), ask, _count_step("skip", tmp_path / "skip"), _count_step("after", tmp_path / "after")])
+    plan = _write_plan(
+        repo,
+        "g",
+        [_count_step("before", tmp_path / "before"), ask, _count_step("skip", tmp_path / "skip"), _count_step("after", tmp_path / "after")],
+    )
 
     code, out = _ndf(repo, "next", plan)
     assert code == result.code_for({"status": "gate"})

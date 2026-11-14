@@ -17,7 +17,19 @@ def test_state_dir_is_absolute_for_a_relative_plan_path():
 def test_run_key_differs_for_each_part():
     """実行の回ごとに鍵を分ける（B1）。head が違えば直した head を流す（#3176）。"""
     base = run_key("p", "d", None, "h1")
-    assert len({base, run_key("q", "d", None, "h1"), run_key("p", "e", None, "h1"), run_key("p", "d", "s", "h1"), run_key("p", "d", None, "h2"), run_key("p", "d", None, "h1", 1)}) == 6
+    assert (
+        len(
+            {
+                base,
+                run_key("q", "d", None, "h1"),
+                run_key("p", "e", None, "h1"),
+                run_key("p", "d", "s", "h1"),
+                run_key("p", "d", None, "h2"),
+                run_key("p", "d", None, "h1", 1),
+            }
+        )
+        == 6
+    )
     assert run_key("p", "d", None, "h1") == base
 
 

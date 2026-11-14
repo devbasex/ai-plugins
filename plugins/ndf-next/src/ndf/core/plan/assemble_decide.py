@@ -46,7 +46,9 @@ def _same_plan(record: Mapping[str, Any], name: str, digest: str, start: Optiona
     return record.get("name") == name and record.get("digest") == digest and record.get("start") == start
 
 
-def choose_run(record: Optional[Mapping[str, Any]], name: str, digest: str, start: Optional[str], head: Optional[str], finished: bool) -> RunChoice:
+def choose_run(
+    record: Optional[Mapping[str, Any]], name: str, digest: str, start: Optional[str], head: Optional[str], finished: bool
+) -> RunChoice:
     """前の回の記録 `record`（`run.json`）から、今回の実行の鍵を選ぶ。
 
     同じプラン・開始点の回が終わっていなければ同じ鍵で続ける（承認ゲートの待ちから回復する。B2）。終わっていても、

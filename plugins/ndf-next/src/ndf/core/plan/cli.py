@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, NoReturn, Optional
 
 from ndf import identity
+from ndf.adapters import run_log
 from ndf.contracts import causes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
@@ -32,8 +33,8 @@ TOOL = runner.TOOL
 # 待ちの上限の既定（秒）と、見回りの間隔の宣言
 WAIT_DEFAULT_SECONDS = 600.0
 WAIT_POLL = "durable.wait-from-poll"
-# 進行表と同じ DB を使うときの URL（無ければチェックアウトの置き場の SQLite）
-ENV_DB = "NDF_PROGRESS_DB"
+# 進行表と同じ DB を使うときの URL（無ければチェックアウトの置き場の SQLite）。値は秘密として伏せる
+ENV_DB = run_log.PROGRESS_DB_ENV
 
 
 def _root() -> Path:
@@ -46,9 +47,8 @@ def _url() -> Optional[str]:
 
 
 def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    """置き場の止まり。種類が止まった理由の表に無ければ precondition で返し、殻の語を instance に載せる。"""
-    kind = exc.kind if exc.kind in causes.table() else "precondition"
-    return result.stopped(TOOL, kind, str(exc), instance=exc.kind, items=[{"kind": "path", "path": str(p)} for p in exc.paths])
+    """置き場の止まり。種類は殻の語（止まった理由の表の `store_in_use`・`store_broken`・`format_newer`・`config_broken`）。"""
+    return result.stopped(TOOL, exc.kind, str(exc), items=[{"kind": "path", "path": str(p)} for p in exc.paths])
 
 
 def _exit_with(out: dict[str, Any]) -> NoReturn:
@@ -114,7 +114,13 @@ def _cmd_pending(_: argparse.Namespace) -> int:
     except durable.StoreStopped as exc:
         return result.emit(_store_stopped(exc))
     items = [
-        {"kind": "run", "run": r.run_name, "workflow": r.workflow_id, "status": r.status, "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+        {
+            "kind": "run",
+            "run": r.run_name,
+            "workflow": r.workflow_id,
+            "status": r.status,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
         for r in found
     ]
     return result.emit(result.result(TOOL, OK, f"待ちを抱えた実行が {len(items)} 件ある", items, {"pending": len(items)}))
@@ -131,7 +137,9 @@ def _cmd_check(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "invalid", f"プランの誤りが {len(errs)} 件ある", items=errs))
     waves = queue_decide.waves([queue_decide.Queued(p.name, p.touches, p.needs) for p in plans])
     items = [{"kind": "wave", "plans": w} for w in waves]
-    return result.emit(result.result(TOOL, OK, f"{len(plans)} 本のプランを {len(waves)} 組で流せる", items, {"plans": len(plans), "waves": len(waves)}))
+    return result.emit(
+        result.result(TOOL, OK, f"{len(plans)} 本のプランを {len(waves)} 組で流せる", items, {"plans": len(plans), "waves": len(waves)})
+    )
 
 
 def _parser() -> argparse.ArgumentParser:

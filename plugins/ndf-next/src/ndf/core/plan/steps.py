@@ -154,9 +154,7 @@ def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:
     log_path = ctx.state_dir / STEPS_DIR / f"{step.id}{LOG_SUFFIX}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("ab") as err:
-        return subprocess.Popen(
-            args, cwd=workdir(ctx.plan, step), stdout=subprocess.PIPE, stderr=err, text=True, start_new_session=True
-        )
+        return subprocess.Popen(args, cwd=workdir(ctx.plan, step), stdout=subprocess.PIPE, stderr=err, text=True, start_new_session=True)
 
 
 def run(ctx: StepContext, step: Step) -> dict[str, Any]:
@@ -177,7 +175,14 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
     except subprocess.TimeoutExpired:
         stop_group(proc.pid)
         proc.communicate()
-        out = {"status": STOPPED, "kind": "interrupted", "retry_after": None, "routes": None, "summary": f"{timeout:.0f} 秒で打ち切った", "code": None}
+        out = {
+            "status": STOPPED,
+            "kind": "interrupted",
+            "retry_after": None,
+            "routes": None,
+            "summary": f"{timeout:.0f} 秒で打ち切った",
+            "code": None,
+        }
     else:
         out = outcome_of(step, proc.returncode, stdout)
     pid_path.unlink(missing_ok=True)

@@ -180,8 +180,15 @@ def prepare(root: Path, plan_path: Path, start: Optional[str], state_dir: Option
     finished = record is not None and _finished(root, record["key"])
     choice = assemble_decide.choose_run(record, plan.name, plan.digest(), start, head, finished)
     abs_plan = (cwd / plan_path) if not plan_path.is_absolute() else plan_path
-    values = {"state_dir": str(sdir), "repo": plan.repo if plan.repo else "", "worktree": plan.worktree if plan.worktree else "", "plan": str(abs_plan)}
-    return Invocation(abs_plan, plan, start, _prelude(plan, start), sdir, choice.key, choice.round_no, head, values, _again(abs_plan, start, state_dir))
+    values = {
+        "state_dir": str(sdir),
+        "repo": plan.repo if plan.repo else "",
+        "worktree": plan.worktree if plan.worktree else "",
+        "plan": str(abs_plan),
+    }
+    return Invocation(
+        abs_plan, plan, start, _prelude(plan, start), sdir, choice.key, choice.round_no, head, values, _again(abs_plan, start, state_dir)
+    )
 
 
 # --- 実行の回 -----------------------------------------------------------------------------
@@ -216,7 +223,10 @@ def _record_run(inv: Invocation, end_head: Optional[str] = None) -> None:
     record = read_json(path)
     heads = list(record["heads"]) if record is not None and record["key"] == inv.key else []
     heads += [h for h in (inv.head, end_head) if h is not None and h not in heads]
-    _write_json(path, {"key": inv.key, "name": inv.plan.name, "digest": inv.plan.digest(), "start": inv.start, "round": inv.round_no, "heads": heads})
+    _write_json(
+        path,
+        {"key": inv.key, "name": inv.plan.name, "digest": inv.plan.digest(), "start": inv.start, "round": inv.round_no, "heads": heads},
+    )
 
 
 def _watch(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, Optional[dict[str, Any]]]:
@@ -235,7 +245,15 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     """承認の答えを待つ結果。`routes` は答えごとに打つコマンド。"""
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の答えを待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}]
-    return result.result(TOOL, GATE, summary, items, {"round": inv.round_no}, routes=marker["routes"], next=shlex.join([CLI_NAME, TOOL, "wait", str(inv.plan_path)]))
+    return result.result(
+        TOOL,
+        GATE,
+        summary,
+        items,
+        {"round": inv.round_no},
+        routes=marker["routes"],
+        next=shlex.join([CLI_NAME, TOOL, "wait", str(inv.plan_path)]),
+    )
 
 
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
@@ -270,7 +288,9 @@ def _finish(inv: Invocation) -> dict[str, Any]:
     return out
 
 
-def advance(root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None) -> dict[str, Any]:
+def advance(
+    root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None
+) -> dict[str, Any]:
     """回を始めるか続け、終わるか承認の答えを待つ所まで進める。
 
     待つ所に来たら `on_gate(結果)` を DBOS を開いたまま呼ぶ。`on_gate` は結果を出してプロセスを抜ける（戻らない）。

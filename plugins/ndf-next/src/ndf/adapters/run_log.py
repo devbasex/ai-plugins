@@ -35,6 +35,9 @@ RUNS_DIR = "runs"
 # 名前がこの形の環境変数の値は、記録へ書く前に伏せる
 SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY", re.IGNORECASE)
 SECRET_MIN = 8
+# 名前の形に当たらなくても値を秘密として伏せる環境変数。進行表の DB の URL は資格情報を含みうる（B8）
+PROGRESS_DB_ENV = "NDF_PROGRESS_DB"
+SECRET_ENVS = frozenset({PROGRESS_DB_ENV})
 MASK = "[REDACTED]"
 # 環境変数に無い秘密も、トークンの形で伏せる（I5）。規則は plugins/ndf/scripts/lib/secret_redact.py の _PATTERNS と同じ
 # （ndf-next は ndf のスクリプトを読み込めないため写す）
@@ -71,8 +74,9 @@ def _safe_name(name: str, what: str) -> str:
     return name
 
 
-def _secret_values() -> list[str]:
-    found = [v for k, v in os.environ.items() if SECRET_NAME.search(k) and len(v) >= SECRET_MIN]
+def secret_values() -> list[str]:
+    """伏せる値（名前が秘密の形の環境変数と `SECRET_ENVS` の値）。長いものから並べ、短い値が長い値の一部を先に伏せないようにする。"""
+    found = [v for k, v in os.environ.items() if (SECRET_NAME.search(k) or k in SECRET_ENVS) and len(v) >= SECRET_MIN]
     return sorted(found, key=len, reverse=True)
 
 
@@ -86,7 +90,7 @@ def _mask(text: str, secrets: list[str]) -> str:
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
     """文字列・配列・辞書の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。"""
-    secrets = _secret_values() if secrets is None else secrets
+    secrets = secret_values() if secrets is None else secrets
     if isinstance(value, str):
         return _mask(value, secrets)
     if isinstance(value, dict):
