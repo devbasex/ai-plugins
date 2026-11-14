@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import cli, run_log
+from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.contracts import result as results
 
@@ -23,40 +23,40 @@ def lines(path: Path) -> list[dict]:
 
 
 def test_root_run_writes_start_line_under_repo_and_utc_date():
-    log = cli.open_run("entry", run_id="r1", location="repo", now=NOW)
+    log = run_log.open_run("entry", run_id="r1", location="repo", now=NOW)
 
-    assert log.path == cli.runs_dir() / "repo" / "2026-11-14" / "r1.jsonl"
+    assert log.path == run_log.runs_dir() / "repo" / "2026-11-14" / "r1.jsonl"
     start = lines(log.path)[0]
     assert (start["run_id"], start["parent_id"], start["entry"], start["event"]) == ("r1", None, "entry", "start")
-    assert cli.current() is log
-    assert log.child_env() == {cli.ENV_RUN_ID: "r1", cli.ENV_RUN_LOG: str(log.path)}
+    assert run_log.current() is log
+    assert log.child_env() == {run_log.ENV_RUN_ID: "r1", run_log.ENV_RUN_LOG: str(log.path)}
 
 
 def test_child_writes_to_parent_file_with_parent_id(monkeypatch):
-    parent = cli.open_run("parent", run_id="p", location="repo", now=NOW)
-    cli.close()
+    parent = run_log.open_run("parent", run_id="p", location="repo", now=NOW)
+    run_log.close()
     for key, val in parent.child_env().items():
         monkeypatch.setenv(key, val)
 
-    child = cli.open_run("child", run_id="c")
+    child = run_log.open_run("child", run_id="c")
 
     assert child.path == parent.path
     assert [(row["run_id"], row["parent_id"]) for row in lines(parent.path)] == [("p", None), ("c", "p")]
 
 
 def test_open_twice_in_one_process_is_refused():
-    cli.open_run("a", location="repo")
+    run_log.open_run("a", location="repo")
 
-    with pytest.raises(cli.RunLogError):
-        cli.open_run("b", location="repo")
+    with pytest.raises(run_log.RunLogError):
+        run_log.open_run("b", location="repo")
 
 
 def test_root_run_prunes_dirs_older_than_keep_days():
-    repo = cli.runs_dir() / "repo"
+    repo = run_log.runs_dir() / "repo"
     for name in ("2026-10-14", "2026-10-15", "notes"):
         (repo / name).mkdir(parents=True)
 
-    cli.open_run("entry", location="repo", now=NOW)
+    run_log.open_run("entry", location="repo", now=NOW)
 
     assert not (repo / "2026-10-14").exists()
     assert (repo / "2026-10-15").is_dir() and (repo / "notes").is_dir()
@@ -66,29 +66,29 @@ def test_unwritable_place_and_unknown_sink_are_refused(tmp_path, monkeypatch, ca
     blocker = tmp_path / "file"
     blocker.write_text("")
     monkeypatch.setenv("XDG_STATE_HOME", str(blocker))
-    with pytest.raises(cli.RunLogError):
-        cli.open_run("entry", location="repo")
+    with pytest.raises(run_log.RunLogError):
+        run_log.open_run("entry", location="repo")
 
-    monkeypatch.setenv(cli.ENV_RUN_LOG_SINK, "nowhere")
-    with pytest.raises(cli.RunLogError):
-        cli.open_run("entry", location="repo")
-    assert cli.current() is None
+    monkeypatch.setenv(run_log.ENV_RUN_LOG_SINK, "nowhere")
+    with pytest.raises(run_log.RunLogError):
+        run_log.open_run("entry", location="repo")
+    assert run_log.current() is None
 
 
 def test_stderr_sink_writes_lines_to_stderr(monkeypatch, capsys):
-    monkeypatch.setenv(cli.ENV_RUN_LOG_SINK, "stderr")
+    monkeypatch.setenv(run_log.ENV_RUN_LOG_SINK, "stderr")
 
-    log = cli.open_run("entry", run_id="s")
+    log = run_log.open_run("entry", run_id="s")
 
-    assert log.path is None and cli.ENV_RUN_LOG not in log.child_env()
+    assert log.path is None and run_log.ENV_RUN_LOG not in log.child_env()
     assert json.loads(capsys.readouterr().err)["event"] == "start"
 
 
 def test_diag_writes_same_text_to_stderr_and_record(capsys):
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
 
-    cli.diag("全文の診断")
-    cli.diag("長い全文", short="短い文", kind="stderr")
+    run_log.diag("全文の診断")
+    run_log.diag("長い全文", short="短い文", kind="stderr")
 
     assert capsys.readouterr().err == "全文の診断\n短い文\n"
     diags = [row["fields"] for row in lines(log.path) if row["event"] == "diag"]
@@ -97,48 +97,48 @@ def test_diag_writes_same_text_to_stderr_and_record(capsys):
 
 def test_diag_hides_secret_env_values(monkeypatch, capsys):
     monkeypatch.setenv("GH_TOKEN", "ghp_secretvalue123")
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
 
-    cli.diag("token は ghp_secretvalue123 だった")
-    cli.diag("全文", short="短い文の ghp_secretvalue123")
+    run_log.diag("token は ghp_secretvalue123 だった")
+    run_log.diag("全文", short="短い文の ghp_secretvalue123")
 
     assert "ghp_secretvalue123" not in log.path.read_text()
-    assert cli.MASK in log.path.read_text()
+    assert run_log.MASK in log.path.read_text()
     err = capsys.readouterr().err
     assert "ghp_secretvalue123" not in err
-    assert cli.MASK in err
+    assert run_log.MASK in err
 
 
 def test_diag_opens_child_run_when_parent_id_is_inherited(monkeypatch, capsys):
-    parent = cli.open_run("parent", run_id="p", location="repo")
-    cli.close()
+    parent = run_log.open_run("parent", run_id="p", location="repo")
+    run_log.close()
     for key, val in parent.child_env().items():
         monkeypatch.setenv(key, val)
 
-    cli.diag("子の診断")
+    run_log.diag("子の診断")
 
     rows = lines(parent.path)
     assert rows[-1]["event"] == "diag" and rows[-1]["parent_id"] == "p"
 
 
 def test_clip_keeps_full_text_only_when_cut():
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
 
-    assert cli.clip("abc", 3, "what") == "abc"
+    assert run_log.clip("abc", 3, "what") == "abc"
     assert [row["event"] for row in lines(log.path)] == ["start"]
-    assert cli.clip("abcd", 3, "what") == "abc"
+    assert run_log.clip("abcd", 3, "what") == "abc"
     last = lines(log.path)[-1]
     assert last["event"] == "clip" and last["fields"] == {"what": "what", "full": "abcd", "shown": "abc"}
     with pytest.raises(ValueError):
-        cli.clip("x", 0, "what")
+        run_log.clip("x", 0, "what")
 
 
 def test_clip_without_record_only_cuts():
-    assert cli.clip("abcd", 2, "what") == "ab"
+    assert run_log.clip("abcd", 2, "what") == "ab"
 
 
 def test_long_strings_go_to_full_text_file():
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
     text = "x" * 40000
 
     log.write("big", body=text)
@@ -148,7 +148,7 @@ def test_long_strings_go_to_full_text_file():
 
 
 def test_finish_writes_end_and_stops_when_record_failed(capsys):
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
     obj = {"tool": "entry", "status": "ok", "summary": "", "items": [], "metrics": {}}
 
     assert log.finish(obj, 0) == (obj, 0)
@@ -162,8 +162,8 @@ def test_finish_writes_end_and_stops_when_record_failed(capsys):
 
 
 def test_parallel_children_write_whole_lines():
-    parent = cli.open_run("parent", run_id="p", location="repo")
-    script = "from ndf.adapters import cli\nlog = cli.open_run('child')\nfor i in range(100):\n    log.write('n', i=i)\n"
+    parent = run_log.open_run("parent", run_id="p", location="repo")
+    script = "from ndf.adapters import run_log\nlog = run_log.open_run('child')\nfor i in range(100):\n    log.write('n', i=i)\n"
     env = {**os.environ, **parent.child_env(), "PYTHONPATH": str(SRC)}
 
     procs = [subprocess.Popen([sys.executable, "-c", script], env=env) for _ in range(4)]
@@ -184,7 +184,7 @@ def test_half_written_line_is_closed_before_next(tmp_path):
 
 
 def test_token_shapes_are_hidden_without_secret_env():
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
 
     log.write(
         "fail",
@@ -201,10 +201,10 @@ def test_location_outside_runs_is_refused_before_touching_dirs(tmp_path, locatio
     old = run_log.runs_dir().parent / "outside" / "2000-01-01"
     old.mkdir(parents=True)
 
-    with pytest.raises(cli.RunLogError):
-        cli.open_run("entry", location=location, now=NOW)
+    with pytest.raises(run_log.RunLogError):
+        run_log.open_run("entry", location=location, now=NOW)
 
-    assert old.is_dir() and cli.current() is None
+    assert old.is_dir() and run_log.current() is None
 
 
 @pytest.mark.parametrize("run_id", ["../outside", "/abs/outside", "..", "a/b"])
@@ -213,25 +213,25 @@ def test_run_id_outside_day_dir_is_refused_before_writing(run_id):
     victim.parent.mkdir(parents=True, exist_ok=True)
     victim.write_text("利用者のファイル\n")
 
-    with pytest.raises(cli.RunLogError):
-        cli.open_run("entry", run_id=run_id, location="repo", now=NOW)
+    with pytest.raises(run_log.RunLogError):
+        run_log.open_run("entry", run_id=run_id, location="repo", now=NOW)
 
-    assert victim.read_text() == "利用者のファイル\n" and cli.current() is None
+    assert victim.read_text() == "利用者のファイル\n" and run_log.current() is None
 
 
 def test_lines_go_through_dedicated_logger_handler():
-    log = cli.open_run("entry", run_id="h", location="repo", now=NOW)
+    log = run_log.open_run("entry", run_id="h", location="repo", now=NOW)
     logger = logging.getLogger(run_log.LOGGER_NAME)
 
     assert logger.handlers == [log.sink] and logger.propagate is False
     assert isinstance(log.sink, logging.Handler)
-    cli.close()
+    run_log.close()
     assert logger.handlers == []
 
 
 def test_stderr_sink_keeps_full_text_in_part_lines(monkeypatch, capsys):
-    monkeypatch.setenv(cli.ENV_RUN_LOG_SINK, "stderr")
-    log = cli.open_run("entry", run_id="s")
+    monkeypatch.setenv(run_log.ENV_RUN_LOG_SINK, "stderr")
+    log = run_log.open_run("entry", run_id="s")
     capsys.readouterr()
     text = ('あ\x01"x' * 20000) + "末尾"
 
@@ -248,7 +248,7 @@ def test_stderr_sink_keeps_full_text_in_part_lines(monkeypatch, capsys):
 
 
 def test_whole_line_fits_limit_with_nested_strings():
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
     a, b = "a" * 20000, "b" * 20000
 
     log.write("end", result={"summary": a, "items": [{"text": b}]}, exit=0)
@@ -263,7 +263,7 @@ def test_whole_line_fits_limit_with_nested_strings():
 
 
 def test_whole_fields_move_when_many_short_strings_overflow():
-    log = cli.open_run("entry", location="repo")
+    log = run_log.open_run("entry", location="repo")
     many = ["z" * 150 for _ in range(400)]
 
     log.write("end", result=many)
