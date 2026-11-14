@@ -212,20 +212,34 @@ def resolve_enabled(
     `facts` が None なら定義の条件はまだ見ない（進行表の作成の時点。条件は工程を流すときに見る）。
     `declared` は `.ndf/project.json` の `workflow.stages`（工程の名前 → `{"enabled": 真偽, "reason": 理由}`）。
     """
-    out = {}
-    for stage in snap.stages:
-        off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
-        if stage.gates and (stage.name in disables or off_by_project):
-            raise model.Refused(gate_refusal(stage))
-        if stage.name in disables:
-            out[stage.name] = Enablement(False, disables[stage.name], "sprint")
-        elif stage.name in declared:
-            decl = declared[stage.name]
-            enabled = bool(decl["enabled"])
-            out[stage.name] = Enablement(enabled, None if enabled else str(decl["reason"]), "project")
-        else:
-            out[stage.name] = _by_definition(stage, facts)
-    return out
+    return {stage.name: _enablement(stage, facts, declared, disables) for stage in snap.stages}
+
+
+def _refuse_disabled_gate(stage: StageDef, declared: Mapping[str, Mapping[str, Any]], disables: Mapping[str, str]) -> None:
+    """承認ゲートの工程を、スプリントの引数かプロジェクトの宣言で無効にしようとしていれば断る。"""
+    off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
+    if stage.gates and (stage.name in disables or off_by_project):
+        raise model.Refused(gate_refusal(stage))
+
+
+def _by_project(decl: Mapping[str, Any]) -> Enablement:
+    enabled = bool(decl["enabled"])
+    return Enablement(enabled, None if enabled else str(decl["reason"]), "project")
+
+
+def _enablement(
+    stage: StageDef,
+    facts: Optional[Mapping[str, bool]],
+    declared: Mapping[str, Mapping[str, Any]],
+    disables: Mapping[str, str],
+) -> Enablement:
+    """工程 1 つの有効と理由（スプリントの引数 > プロジェクトの宣言 > 定義の条件）。"""
+    _refuse_disabled_gate(stage, declared, disables)
+    if stage.name in disables:
+        return Enablement(False, disables[stage.name], "sprint")
+    if stage.name in declared:
+        return _by_project(declared[stage.name])
+    return _by_definition(stage, facts)
 
 
 def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
