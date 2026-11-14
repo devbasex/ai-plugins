@@ -76,6 +76,22 @@ def test_repo_refs_finds_urls_and_short_refs_but_not_anchors() -> None:
     assert publish.repo_refs(text) == {PRIVATE_REPO, PUBLIC_REPO, "tools/app"}
 
 
+@pytest.mark.parametrize(
+    "ref",
+    [f"git@github.com:{PRIVATE_REPO}.git", f"ssh://git@github.com/{PRIVATE_REPO}.git", f"github.com/{PRIVATE_REPO}/pull/1",
+     f"https://api.github.com/repos/{PRIVATE_REPO}/issues/1", f"https://www.github.com/{PRIVATE_REPO}"],
+)  # fmt: skip
+def test_private_refs_in_ssh_bare_and_api_urls_are_found_and_dropped(ref: str) -> None:
+    # SSH の clone の URL・scheme の無い URL・API の URL も、公開の書き先へは伏せる
+    assert publish.repo_refs(f"見た: {ref} の件") == {PRIVATE_REPO}
+    got = publish.scrub(f"見た: {ref} の件", True, {PRIVATE_REPO})
+    assert got.text == f"見た: {publish.PRIVATE_REF_TEXT} の件" and got.dropped == {"private_ref": 1}
+
+
+def test_bare_ssh_user_and_other_hosts_are_not_repo_refs() -> None:
+    assert publish.repo_refs("git@github.com と https://api.github.com/user と pages.github.com/a/b") == set()
+
+
 def test_publisher_reads_visibilities_once_and_drops_private_refs_on_a_public_target() -> None:
     fake = FakeGitHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", PRIVATE_REPO: "PRIVATE"})
     out = publish.Publisher(fake.hub, ACCOUNTS).create_issue(f"{PRIVATE_REPO}#3 の続き", BODY, ["bug"])

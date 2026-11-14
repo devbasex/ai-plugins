@@ -134,9 +134,16 @@ def client(
     """githubkit のクライアント（ETag の読み直しと再試行つき）。`transport` はテストが差し替える。
 
     `remaining`（待ちに使える残りの秒を返す関数）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
+    省くと上限（rate limit）は待たずに `GitHubError` で返す（残りを 0 秒とみなす）。githubkit の既定は解除の時刻まで
+    （一次上限なら最大 1 時間）眠るため、そのままでは枠の読み替え（`GitHub.pulls`・`GitHub.pull`。不足 g）の前に止まる。
     """
-    retry: bool | RetryWithin = True if remaining is None else RetryWithin(remaining)
-    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport)
+    budget = remaining if remaining is not None else _no_wait
+    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=RetryWithin(budget), transport=transport)
+
+
+def _no_wait() -> float:
+    """上限の待ちに使える残りの秒（0。上限を再試行しない）。"""
+    return 0.0
 
 
 def text_of(value: Any) -> str:
@@ -546,13 +553,16 @@ class GitHub:
         """基底のブランチ `branch` で許されたマージの方式（`MERGE_METHODS` の並び。3378-2）。
 
         ruleset の PR の規則の `allowed_merge_methods` を先に読み、指定が無ければリポジトリの設定を読む。
+        設定の項目（`allow_squash_merge` など）は権限の足りないトークンでは応答に無い。無い項目の方式は許すかが
+        不明なので候補に残し、要求を送って GitHub の拒否（405）に判定を任せる。項目があれば値が True の方式だけを許す。
         """
         rules = self.rest("GET", f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}")
         methods = ruleset_merge_methods(rules if isinstance(rules, list) else [])
         if methods is not None:
             return methods
-        settings = self.rest("GET", f"/repos/{self.repo}")
-        return [m for m, spec in _MERGE_METHOD_SPECS.items() if isinstance(settings, dict) and settings.get(spec.setting) is True]
+        raw = self.rest("GET", f"/repos/{self.repo}")
+        settings = raw if isinstance(raw, dict) else {}
+        return [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""

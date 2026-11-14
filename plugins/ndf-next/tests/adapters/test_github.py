@@ -465,6 +465,18 @@ def test_pulls_read_through_rest_when_the_graphql_quota_is_exhausted() -> None:
     assert got[7] is not None and got[7].head_sha == HEAD and got[2] is None
 
 
+def test_default_client_falls_back_without_waiting_for_the_rate_limit_reset() -> None:
+    # 既定のクライアント（remaining を省く）は上限の解除（9999999999 秒後）まで眠らず、すぐに REST の枠へ読み替える
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/graphql":
+            return _limited(request)
+        return httpx.Response(200, json=_pull())
+
+    api = github.client(auth="t", transport=httpx.MockTransport(handler))
+    got = github.GitHub(REPO, api).pulls([7])
+    assert got[7] is not None and got[7].head_sha == HEAD
+
+
 def test_pulls_do_not_fall_back_past_the_rest_fallback_limit() -> None:
     seen: list[str] = []
 
@@ -550,15 +562,31 @@ RULES_PATH = f"/repos/{REPO}/rules/branches/develop"
     [
         ({"allow_rebase_merge": True, "allow_merge_commit": True, "allow_squash_merge": True}, ["squash", "merge", "rebase"]),
         ({"allow_squash_merge": "yes", "allow_merge_commit": 1, "allow_rebase_merge": True}, ["rebase"]),
-        ({"allow_merge_commit": True}, ["merge"]),
-        ({"allow_rebase_merge": True, "allow_squash_merge": True}, ["squash", "rebase"]),
-        ({}, []),
-        (["allow_squash_merge"], []),
+        ({"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": False}, ["merge"]),
+        ({"allow_rebase_merge": True, "allow_squash_merge": True, "allow_merge_commit": False}, ["squash", "rebase"]),
+        ({"allow_squash_merge": False, "allow_merge_commit": False, "allow_rebase_merge": False}, []),
+        # 項目が無い（権限の足りないトークン）方式は不明として候補に残す
+        ({"allow_merge_commit": False}, ["squash", "rebase"]),
+        ({}, ["squash", "merge", "rebase"]),
+        (["allow_squash_merge"], ["squash", "merge", "rebase"]),
     ],
 )  # fmt: skip
 def test_allowed_merge_methods_reads_repository_flags_in_merge_methods_order(settings: object, methods: list[str]) -> None:
-    # ruleset に指定が無ければリポジトリの設定を読む。値が True の方式だけを MERGE_METHODS の並びで返す
+    # ruleset に指定が無ければリポジトリの設定を読む。値が True か項目の無い方式を MERGE_METHODS の並びで返す
     assert _allowed([], settings) == (methods, [RULES_PATH, f"/repos/{REPO}"])
+
+
+def test_merge_sends_the_request_when_repository_flags_are_missing() -> None:
+    # 設定の項目が読めなくても断らずに要求を送り、GitHub の拒否（405）で判定する
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull()), httpx.Response(200, json=_pull())],
+        ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=[])],
+        ("GET", f"/repos/{REPO}"): [httpx.Response(200, json={"name": "x"})],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "Rebase merges are not allowed"})],
+    })  # fmt: skip
+    out = _hub(server).merge(7, method="rebase")
+    assert json.loads(server.sent("PUT")[0].content)["merge_method"] == "rebase"
+    assert not out.merged and "405" in out.detail
 
 
 def test_allowed_merge_methods_treats_a_non_list_ruleset_body_as_no_rules() -> None:

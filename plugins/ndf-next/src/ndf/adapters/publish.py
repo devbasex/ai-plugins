@@ -40,8 +40,13 @@ PUBLIC_EMAIL_DOMAIN = "users.noreply.github.com"
 SCRUBBED_VISIBILITIES = frozenset({PUBLIC, UNKNOWN})
 # 手元のアカウント名として扱わない短い名前（3 字未満は語の一部と区別できない）
 MIN_ACCOUNT_CHARS = 3
-# リポジトリへの参照（`https://github.com/<所有者>/<リポジトリ>...` と `<所有者>/<リポジトリ>#<番号>`）
-_REPO_URL = re.compile(r"https?://github\.com/(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?=[/#?\s)\]>\"'`]|$)[^\s)\]>\"'`]*")
+# リポジトリへの参照。URL の形は `https://github.com/<所有者>/<リポジトリ>...`・scheme の無い `github.com/...`・
+# SSH の clone の URL（`git@github.com:<所有者>/<リポジトリ>.git`・`ssh://git@github.com/...`）・
+# API の URL（`https://api.github.com/repos/<所有者>/<リポジトリ>...`）。番号の形は `<所有者>/<リポジトリ>#<番号>`
+_REPO_URL = re.compile(
+    r"(?<![\w.@-])(?:(?:https?|ssh|git)://)?(?:git@github\.com:|(?:git@)?(?:api\.github\.com/repos/|(?:www\.)?github\.com/))"
+    r"(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?=[/#?\s)\]>\"'`]|$)[^\s)\]>\"'`]*"
+)
 _REPO_REF = re.compile(r"(?<![\w./-])(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+)#\d+")
 # リポジトリへの参照の形（URL を先に置き換えてから番号の形を見る）
 _REPO_PATTERNS = (_REPO_URL, _REPO_REF)
