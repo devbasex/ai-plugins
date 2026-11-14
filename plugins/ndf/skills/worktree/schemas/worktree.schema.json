@@ -292,10 +292,6 @@
           "type": "string",
           "description": "コンテナ内でコードが置かれる位置。layout が indirect のとき必須"
         },
-        "compose_project": {
-          "type": "string",
-          "description": "aim が張り替えるコンテナの compose のプロジェクト名。既定はメインディレクトリの名前から作る"
-        },
         "copy_from_main": {
           "type": "array",
           "description": "作業ツリーへ複製する、追跡されないパス",

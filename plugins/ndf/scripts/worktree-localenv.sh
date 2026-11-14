@@ -128,8 +128,7 @@ do_aim() {
   layout=$(wt_declaration_get "$DECLARATION" '.localenv.layout // empty')
   service=$(wt_declaration_get "$DECLARATION" '.localenv.app_service // empty')
   src_target=$(wt_declaration_get "$DECLARATION" '.localenv.src_target // empty')
-  project=$(wt_declaration_get "$DECLARATION" '.localenv.compose_project // empty')
-  project=$(wt_compose_project "${project:-$(basename "$MAIN_DIR")}") || {
+  project=$(wt_compose_project "$(basename "$MAIN_DIR")") || {
     printf '%s\n' "コンテナのプロジェクト名を決められません" >&2
     return 1
   }

@@ -273,7 +273,6 @@ worktree が 1 つならそのブランチのコミットへ、0 個または複
 | `kind` | `compose` 以外は未対応。書かなければ `localenv` の仕組みは動かない |
 | `layout` | コンテナ内のコードの置かれ方。[`local-environment.md`](local-environment.md) の「型を見分ける」で判定する |
 | `src_target` | コンテナ内でコードが置かれる位置。`layout` が `indirect` のとき要る |
-| `compose_project` | 切り替えるコンテナの compose のプロジェクト名。`-p` や `COMPOSE_PROJECT_NAME`・定義の `name:` で名前を決めて起動するときに書く。書かなければメインディレクトリの名前から作る |
 | `copy_from_main` | 追跡されないが動作に要るもの。依存物・ビルド成果物・環境ファイル |
 | `copy_as_real` | `copy_from_main` の中で、実行中に書き換えられるもの。ハードリンクだとメインディレクトリ側も変わる |
 | `branch_probe` | ローカル環境に載っているブランチ名を**標準出力へ 1 行で**返すコマンド。応答ヘッダやログへブランチ名を出す仕掛けを入れて読む |
