@@ -8,6 +8,8 @@ hook のエントリポイントは通信しない。通知は 1 件を 1 ファ
   秘密そのものは書かない。別のプロジェクトの接続で起動した送り手は、ほかの宛先の通知を読まない
 - 送り手は置き場の錠（`LOCK_FILE`）の排他を取ってから送り、取れなければ送らずに終わる。`kick` は錠が
   持たれていれば起動しない。送り手は錠を離した後に一覧を読み直し、残りがあれば取り直して送る
+- 通知は問いの本文と作業のパスを持つので、置き場は所有者だけが開ける権限（0700）、ファイルは作る時から
+  所有者だけが読める権限（0600）にする
 """
 
 from __future__ import annotations
@@ -43,18 +45,27 @@ def outbox_dir(state_dir: Path, env: Mapping[str, str]) -> Path:
 def enqueue(state_dir: Path, kind: str, payload: dict[str, Any], env: Mapping[str, str]) -> Path:
     """通知を 1 件、宛先の置き場へ書き、置いたパスを返す。"""
     box = outbox_dir(state_dir, env)
-    box.mkdir(parents=True, exist_ok=True)
+    _private_dir(box)
     name = f"{time.time_ns()}-{os.getpid()}-{uuid.uuid4().hex[:8]}.json"
     tmp = box / f".{name}.tmp"
-    tmp.write_text(json.dumps({"kind": kind, "payload": payload}, ensure_ascii=False), encoding="utf-8")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"kind": kind, "payload": payload}, ensure_ascii=False))
     final = box / name
     os.replace(tmp, final)
     return final
 
 
+def _private_dir(box: Path) -> None:
+    """宛先の置き場を所有者だけが開ける権限（0700）で用意する（umask によらず、前からあった置き場も直す）。"""
+    box.parent.mkdir(parents=True, exist_ok=True)
+    box.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(box, 0o700)
+
+
 def try_lock(box: Path) -> Optional[int]:
     """送り手の錠を待たずに取る。取れたら fd、持たれていれば None。"""
-    box.mkdir(parents=True, exist_ok=True)
+    _private_dir(box)
     fd = os.open(box / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

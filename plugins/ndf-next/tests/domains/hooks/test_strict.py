@@ -170,9 +170,50 @@ def test_shells_reading_the_script_from_stdin_are_denied(tmp_path, command):
     assert got is not None and "-c 無し" in got.reason
 
 
-def test_shell_running_a_script_file_is_not_denied_as_stdin(tmp_path):
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<'EOF' > /tmp/m.sh\ngh pr merge 1 --merge\nEOF\nbash /tmp/m.sh",
+        "source /tmp/m.sh # gh pr merge",
+        ". /tmp/m.sh # gh pr merge",
+    ],
+)
+def test_scripts_read_from_a_file_are_denied(tmp_path, command):
+    # スクリプトのファイルの中は読めないので、全文が gh と merge を含めば止める側へ倒す
     repo = make_repo(tmp_path / "r", delivery=MANUAL)
-    assert _check(repo, "bash scripts/merge-when-green.sh --gh 3 2>/dev/null") is None
+    got = _check(repo, command)
+    assert got is not None and "ファイル" in got.reason
+
+
+def test_shell_without_merge_in_the_command_passes(tmp_path):
+    repo = make_repo(tmp_path / "r", delivery=MANUAL)
+    assert _check(repo, "bash scripts/build.sh 2>/dev/null") is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(cd {manual} && git status); gh pr merge 1 --merge",
+        "(cd {manual}); gh pr merge 1 --merge",
+        "cd {manual} | true; gh pr merge 1 --merge",
+        "cd {manual} & gh pr merge 1 --merge",
+        "(export GH_REPO=x/y; cd {manual}); gh pr merge 1",
+    ],
+)
+def test_cd_in_a_subshell_does_not_move_the_outer_statements(tmp_path, command):
+    # サブシェル・パイプライン・裏の `&` の cd は外の文の作業ディレクトリを変えない（Bash の Command Grouping）
+    session = make_repo(tmp_path / "session", slug="owner/session", delivery=AUTO)
+    manual = make_repo(tmp_path / "manual", slug="owner/manual", delivery=MANUAL)
+    got = _check(session, command.format(manual=manual))
+    assert got is not None and "自動で本番へ届く" in got.reason
+
+
+def test_cd_inside_a_subshell_applies_to_its_own_merge(tmp_path):
+    session = make_repo(tmp_path / "session", slug="owner/session", delivery=AUTO)
+    manual = make_repo(tmp_path / "manual", slug="owner/manual", delivery=MANUAL)
+    assert _check(session, f"(cd {manual} && gh pr merge 1 --merge)") is None
+    got = _check(session, f"cd {manual}; ) gh pr merge 1")
+    assert got is not None and "決められない" in got.reason
 
 
 @pytest.mark.parametrize("cd", ['cd "$WT"', "cd `pwd`", "cd -", "pushd /tmp", "cd -P x"])
@@ -210,3 +251,12 @@ def test_gh_repo_matching_the_origin_or_overridden_by_the_flag_passes(tmp_path):
     assert _check(repo, "GH_REPO=owner/repo gh pr merge 1") is None
     assert _check(repo, "GH_REPO=other/production gh -R owner/repo pr merge 1") is None
     assert _check(repo, "export GH_REPO=other/production; unset GH_REPO; gh pr merge 1") is None
+
+
+def test_gh_repo_in_the_hook_environment_is_the_initial_target(tmp_path, monkeypatch):
+    # セッションの前に export した GH_REPO も、gh は -R と同じ宛先として読む
+    repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
+    monkeypatch.setenv("GH_REPO", "other/production")
+    got = deny_reason(call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1 --merge")))
+    assert got is not None and "other/production" in got
+    assert call_entry("claude", "PreToolUse", bash(repo, "unset GH_REPO; gh pr merge 1 --merge")) is None

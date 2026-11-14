@@ -6,14 +6,20 @@
 from __future__ import annotations
 
 import shlex
-from typing import Iterator, List
+from typing import Iterator, List, Union
 
 # シェルの字句のうち、コマンドを区切るもの
 _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "|&", ";;", "(", ")"})
+# 前後のコマンドを別のシェル（サブシェル）で走らせる区切り（パイプライン・裏で走らせる `&`）
+PIPES = frozenset({"|", "|&"})
+BACKGROUND = "&"
 
 
-def segments(text: str) -> Iterator[List[str]]:
-    """区切りで分けたコマンドの語の並び。引用の中の改行は次の行とつなぐ。ヒアドキュメントの本文は読まない。閉じない引用は ValueError。"""
+def parts(text: str) -> Iterator[Union[List[str], str]]:
+    """コマンドの語の並びと区切りの字句（`(`・`)`・`|` など、str）を現れた順に。
+
+    引用の中の改行は次の行とつなぐ。ヒアドキュメントの本文は読まない。閉じない引用は ValueError。
+    """
     buffer = ""
     heredocs: List[str] = []
     for line in text.split("\n"):
@@ -48,13 +54,14 @@ def _heredoc_delimiters(tokens: List[str]) -> List[str]:
     return [tokens[i + 1].lstrip("-") for i, token in enumerate(tokens[:-1]) if token == "<<"]
 
 
-def _split(tokens: List[str]) -> Iterator[List[str]]:
+def _split(tokens: List[str]) -> Iterator[Union[List[str], str]]:
     words: List[str] = []
     for token in tokens:
         if token in _SEPARATORS:
             if words:
                 yield words
             words = []
+            yield token
         else:
             words.append(token)
     if words:

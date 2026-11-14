@@ -7,11 +7,14 @@ Pull Request の宛先のブランチを確かめられない。
 - 宛先のリポジトリは、`cd` で移った先の作業ディレクトリと `-R`・`--repo`・環境変数 `GH_REPO` で決める（#2446・#2838）。
   宛先が作業ディレクトリの `origin` と違えば、宛先の宣言を読めないので止め、宛先の clone へ `cd` して打つよう案内する
 - `cd` の先が展開（`$`・`` ` ``）や `-` を含むとき、`pushd`・`popd` のときは、移った先を決められないので後のマージを止める
+- サブシェル（`(`…`)`）の中の `cd`・`export` は閉じた後に戻し、パイプラインと裏で走らせる（`&`）コマンドの `cd`・`export` は
+  後の文へ持ち越さない（どれも別のシェルで走る）。対にならない `)` の後は作業ディレクトリを決められないので止める
+- 宛先の初期値は hook の起動時の環境変数 `GH_REPO`（Bash の Tool と同じセッションの環境）
 - シェルの字句は `shlex` で読む。読めない・宣言を読めないときは止める（自分の失敗で止める側へ倒す）
 - 宛先は Pull Request の URL（`gh pr merge https://github.com/<owner>/<repo>/pull/<番号>`）からも決める
 - 制御構文の語（`if` / `then` / `do` など）と包む語（`env -i`・`sudo -u x`・`xargs` など）の後ろのコマンドも読み、
   `bash -c` / `sh -c` / `eval` の引数とコマンド置換（`$(...)`・`` `...` ``）は中のスクリプトとして読み直す
-- `-c` 無しで起動したシェル（標準入力・ヒアドキュメント・ファイルからスクリプトを読む）は中を読めないので止める
+- `-c` 無しで起動したシェル（標準入力・ヒアドキュメント・ファイルからスクリプトを読む）と `source`・`.` は中を読めないので止める
 
 標準ライブラリだけで書く。環境が無いときのエントリポイント（システムの `python3`）も、依存の import より先にこれを呼ぶ。
 """
@@ -23,7 +26,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple, Union
 
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
@@ -44,6 +47,8 @@ _URL_RE = re.compile(r"^https?://[^/]+/([^/]+/[^/]+)/pull/\d+")
 _GH_REPO = "GH_REPO"
 # 作業ディレクトリを移す語のうち、移った先を字句から決められないもの
 _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
+# ファイルのスクリプトを今のシェルで読む語
+_SOURCES = frozenset({"source", "."})
 
 _MERGE_HELP = "NDF のマージの手順（宛先を確かめ、本番なら承認を求めてからマージする）で打つ"
 
@@ -59,16 +64,16 @@ def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[fl
     if tables.is_off(GUARD_NAME, off):
         return None, None
     began = time.monotonic()
-    verdict = check(payload, str(payload.get("cwd") or os.getcwd()))
+    verdict = check(payload, str(payload.get("cwd") or os.getcwd()), os.environ.get(_GH_REPO) or None)
     return verdict, round((time.monotonic() - began) * 1000, 3)
 
 
-def check(raw_payload: object, root: str) -> Optional[Verdict]:
-    """止める答えか None。Bash の PreToolUse 以外は None。"""
+def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Optional[Verdict]:
+    """止める答えか None。Bash の PreToolUse 以外は None。`gh_repo` は hook の起動時の環境変数 `GH_REPO`。"""
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
-    return _script_denial(text, Path(root), 0)
+    return _script_denial(text, Path(root), 0, gh_repo)
 
 
 def _script_denial(text: str, here: Optional[Path], depth: int, gh_repo: Optional[str] = None) -> Optional[Verdict]:
@@ -76,10 +81,10 @@ def _script_denial(text: str, here: Optional[Path], depth: int, gh_repo: Optiona
     if depth > _MAX_DEPTH:
         return deny(f"入れ子のスクリプトが深く、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
     try:
-        segments = list(strict_shell.segments(text))
+        parts = list(strict_shell.parts(text))
     except ValueError:
         return deny(f"シェルの字句を読めず、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
-    return _first_denial(segments, here, depth, gh_repo)
+    return _first_denial(parts, here, depth, gh_repo)
 
 
 def _mentions_merge(text: str) -> bool:
@@ -87,25 +92,55 @@ def _mentions_merge(text: str) -> bool:
     return "gh" in text and "merge" in text
 
 
-def _first_denial(segments: List[List[str]], here: Optional[Path], depth: int = 0, gh_repo: Optional[str] = None) -> Optional[Verdict]:
-    """`cd` で作業ディレクトリを、`export GH_REPO=...` で宛先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。"""
-    for raw in segments:
+def _first_denial(
+    parts: List[Union[List[str], str]], here: Optional[Path], depth: int = 0, gh_repo: Optional[str] = None
+) -> Optional[Verdict]:
+    """`cd` で作業ディレクトリを、`export GH_REPO=...` で宛先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。
+
+    サブシェルの `(` で今の値を退避して `)` で戻す。パイプラインと `&` のコマンドの移動は後の文へ持ち越さない。
+    """
+    saved: List[Tuple[Optional[Path], Optional[str]]] = []
+    for i, raw in enumerate(parts):
+        if isinstance(raw, str):
+            if raw == "(":
+                saved.append((here, gh_repo))
+            elif raw == ")":
+                here, gh_repo = saved.pop() if saved else (None, gh_repo)
+            continue
         words = _command_words(raw)
-        head = words[:1]
-        if head == ["cd"] or head and head[0] in _UNKNOWN_DIR_COMMANDS:
-            here = _cd(here, words)
-            continue
-        if not words or head == ["export"]:
-            gh_repo = _assigned_gh_repo(raw, gh_repo)
-            continue
-        if head == ["unset"] and _GH_REPO in words[1:]:
-            gh_repo = None
+        moved = _moved(here, gh_repo, raw, words)
+        if moved is not None:
+            if not _in_own_shell(parts, i):
+                here, gh_repo = moved
             continue
         env_repo = _assigned_gh_repo(raw[: len(raw) - len(words)], gh_repo)
-        verdict = _stdin_shell_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
+        verdict = (
+            _unreadable_script_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
+        )
         if verdict is not None:
             return verdict
     return None
+
+
+def _moved(
+    here: Optional[Path], gh_repo: Optional[str], raw: List[str], words: List[str]
+) -> Optional[Tuple[Optional[Path], Optional[str]]]:
+    """作業ディレクトリか宛先を移す文（`cd`・`pushd`・`popd`・代入だけ・`export`・`unset GH_REPO`）なら移った後の値。ほかは None。"""
+    head = words[:1]
+    if head == ["cd"] or head and head[0] in _UNKNOWN_DIR_COMMANDS:
+        return _cd(here, words), gh_repo
+    if not words or head == ["export"]:
+        return here, _assigned_gh_repo(raw, gh_repo)
+    if head == ["unset"] and _GH_REPO in words[1:]:
+        return here, None
+    return None
+
+
+def _in_own_shell(parts: List[Union[List[str], str]], i: int) -> bool:
+    """`i` 番目の文が別のシェルで走るか（パイプラインの一部か、`&` で裏で走る）。"""
+    before = parts[i - 1] if i > 0 else None
+    after = parts[i + 1] if i + 1 < len(parts) else None
+    return before in strict_shell.PIPES or after in strict_shell.PIPES or after == strict_shell.BACKGROUND
 
 
 def _assigned_gh_repo(words: List[str], current: Optional[str]) -> Optional[str]:
@@ -116,15 +151,17 @@ def _assigned_gh_repo(words: List[str], current: Optional[str]) -> Optional[str]
     return current
 
 
-def _stdin_shell_denial(words: List[str]) -> Optional[Verdict]:
-    """標準入力からスクリプトを読むシェル（`-c` もスクリプトのファイルも無い・`-s`）なら止める。中を読めないため。"""
-    if not words or os.path.basename(words[0]) not in _SHELLS or _shell_script(words) is not None:
-        return None
-    if not _reads_stdin(words):
+def _unreadable_script_denial(words: List[str]) -> Optional[Verdict]:
+    """中を読めないスクリプトを走らせる文（`-c` 無しのシェル・`source`・`.`）なら止める。"""
+    name = os.path.basename(words[0]) if words else ""
+    if name in _SOURCES:
+        where = f"{name} がファイル"
+    elif name in _SHELLS and _shell_script(words) is None:
+        where = f"{name} が -c 無しで" + ("標準入力・ヒアドキュメント" if _reads_stdin(words) else "スクリプトのファイル")
+    else:
         return None
     return deny(
-        f"{os.path.basename(words[0])} が -c 無しで標準入力・ヒアドキュメントからスクリプトを読み、"
-        f"中の gh pr merge が本番チャネルへのマージかを確かめられない。`bash -c '...'` で渡すか、{_MERGE_HELP}"
+        f"{where}からスクリプトを読み、中の gh pr merge が本番チャネルへのマージかを確かめられない。`bash -c '...'` で渡すか、{_MERGE_HELP}"
     )
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import stat
 import subprocess
 
 import pytest
@@ -134,3 +136,14 @@ def test_sender_reads_the_queue_again_after_releasing_the_lock(tmp_path, monkeyp
 
     monkeypatch.setattr(sender.notify, "post_json", post)
     assert sender.run(tmp_path, DEST) == 2 and ["first" in sent[0], "second" in sent[1]] == [True, True]
+
+
+def test_queued_notices_are_readable_only_by_the_owner(tmp_path):
+    # 問いの本文を持つので、umask によらず置き場は 0700・ファイルは 0600
+    old = os.umask(0o022)
+    try:
+        path = outbox.enqueue(tmp_path, "question", {"text": "q"}, DEST)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
