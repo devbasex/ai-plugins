@@ -36,14 +36,10 @@ docker network connect my-network container-b
 
 ## Q: docker.sockへのアクセス権限がない
 
-**解決策**:
-```bash
-# docker グループに追加（要再ログイン）
-sudo usermod -aG docker $USER
+**解決策**: 権限を自分で付けず、人へ戻す。Dockerソケットへのアクセスはホスト上のroot相当の操作を許す（DooDではホストのソケットそのものに効く）ため、認可の変更として人の承認が要る。
 
-# または一時的に権限付与
-sudo chmod 666 /var/run/docker.sock
-```
+- ソケットのパーミッションを広げる（`chmod 666` など）手順は案内しない。アクセスできる全プロセスへroot相当の操作を許してしまう
+- 承認を得たうえで付けるなら、対象の利用者だけに限る（例: その利用者を `docker` グループへ加える `sudo usermod -aG docker <利用者>`。再ログインが要る）
 
 ---
 

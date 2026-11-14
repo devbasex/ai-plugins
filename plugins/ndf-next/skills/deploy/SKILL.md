@@ -107,13 +107,20 @@ fi
 feature ブランチへ切り替えようとすると拒否される。
 
 ```bash
-git fetch origin "$dev_base"
-git checkout -b "$DEPLOY_BRANCH"
+git fetch origin "$dev_base" || exit 1
+# 作れなければ（同名のdeployブランチが既にある等）featureブランチの上で続けず、ここで止まる
+git checkout -b "$DEPLOY_BRANCH" || {
+  echo "❌ deployブランチ $DEPLOY_BRANCH を作れません。既存のブランチを確かめてください" >&2
+  exit 1
+}
 git merge "origin/$dev_base" --no-edit || {
   echo "❌ 起点ブランチとのmerge conflict。手動解決が必要です"
   git merge --abort
-  git checkout "$FEATURE_BRANCH"
-  git branch -D "$DEPLOY_BRANCH"
+  git checkout "$FEATURE_BRANCH" || exit 1
+  # 作ったばかりのdeployブランチはfeatureブランチと同じ位置にあるため -d で消せる。
+  # 消せなければ強制削除（-D）はせず、理由を添えて人へ戻す
+  git branch -d "$DEPLOY_BRANCH" ||
+    echo "⚠️ $DEPLOY_BRANCH を消せませんでした。強制削除はしないので、中身を確かめて人が判断してください" >&2
   exit 1
 }
 ```
