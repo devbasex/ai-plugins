@@ -89,7 +89,7 @@ def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
 
     辞書は鍵も伏せる。配列・タプル・集合は配列にして中を伏せる。バイト列は UTF-8 の文字列に読んで伏せる。
     JSON の値にならないもの（パス・例外など）は、記録へ書くときの文字列（`str`）にしてから伏せる。
-    数・真偽値・None だけをそのまま返す（秘密を持ちうる値を素通しさせない。#3394）。
+    数・真偽値・None だけをそのまま返す（秘密を持ちうる値をパススルーしない。#3394）。
     """
     secrets = _secret_values() if secrets is None else secrets
     if value is None or isinstance(value, (bool, int, float)):
