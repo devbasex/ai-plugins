@@ -44,13 +44,17 @@ def _secret_values() -> list[str]:
     return sorted(found, key=len, reverse=True)
 
 
+def _mask(text: str, secrets: list[str]) -> str:
+    for s in secrets:
+        text = text.replace(s, MASK)
+    return text
+
+
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
     """文字列・配列・辞書の中の秘密の環境変数の値を伏せる。"""
     secrets = _secret_values() if secrets is None else secrets
     if isinstance(value, str):
-        for s in secrets:
-            value = value.replace(s, MASK)
-        return value
+        return _mask(value, secrets)
     if isinstance(value, dict):
         return {k: redact(v, secrets) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
