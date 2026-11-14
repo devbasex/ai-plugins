@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
-from ndf.progress.gate.asking import RELEASE_GATE, RELEASE_KIND, Question, Target, material_path, plan_request, request_id, waiting
+from ndf.progress.gate.asking import RELEASE_GATE, RELEASE_KIND, Question, Target, material_path, release_request_of, request_id, waiting
 from ndf.progress.plan import external
 
 # 外のオーガナイザーの答え → 承認ゲートの答え
@@ -60,12 +60,10 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
         body = external.request_body(_request_fields(v, q, env.get("NDF_ORGANIZER_LANE")), version)
         return {"kind": "file", "id": request_id(q), "path": str(external.write_request(root, body))}
     with store.transaction(st) as conn:
-        found = lane.sprint_row(conn, v.table_id)
+        found = release_request_of(conn, q)
         if found is None:
             return None
-        plan_id, name, _row = found
-        view, _ = lane.read_plan(conn, plan_id)
-        held = plan_request(view, request_id(q))
+        plan_id, name, held = found
         key = held.key if held is not None else None
         if key is None:
             body = {**_request_fields(v, q, name), "kind": RELEASE_KIND}
@@ -79,11 +77,10 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
     if root is not None:
         return external.read_answer(root, request_id(q))
     with store.transaction(st) as conn:
-        found = lane.sprint_row(conn, q.table_id)
-        if found is None:
-            return None
-        view, _ = lane.read_plan(conn, found[0])
-    held = plan_request(view, request_id(q))
+        found = release_request_of(conn, q)
+    if found is None:
+        return None
+    held = found[2]
     return dict(held.release) if held is not None and held.release is not None else None
 
 

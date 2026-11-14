@@ -231,6 +231,16 @@ def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:
     return next((r for r in view.requests.values() if r.body.get("kind") == RELEASE_KIND and r.body.get("id") == ident), None)
 
 
+def release_request_of(conn: Any, q: Question) -> Optional[tuple[str, str, Optional[lane.Request]]]:
+    """スプリントを持つレーンの行の（計画の ID, レーン）と、問いのリリースの依頼（無ければ None）。レーンの外なら None。"""
+    found = lane.sprint_row(conn, q.table_id)
+    if found is None:
+        return None
+    plan_id, name, _row = found
+    view, _ = lane.read_plan(conn, plan_id)
+    return plan_id, name, plan_request(view, request_id(q))
+
+
 @dataclass(frozen=True)
 class Answer:
     """`ndf answer` が受ける答え。`by` は答えた者（`service:<主体>` など）、`key` は冪等の鍵、`seen` は見た対象。

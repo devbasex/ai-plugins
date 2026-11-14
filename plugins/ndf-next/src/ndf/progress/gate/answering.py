@@ -29,9 +29,8 @@ from ndf.progress.gate.asking import (
     accepted_path,
     material_path,
     material_sha256,
-    plan_request,
     question,
-    request_id,
+    release_request_of,
     waiting,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
@@ -243,12 +242,11 @@ def _reject_release(conn: Any, q: Question, a: Answer) -> Optional[str]:
     """リリース承認ゲートの差し戻し（承認しない答え）で、計画の進行表に開いている依頼を差し戻しの記録で閉じる。"""
     if q.gate != RELEASE_GATE or a.value not in REJECTING:
         return None
-    found = lane.sprint_row(conn, q.table_id)
+    found = release_request_of(conn, q)
     if found is None:
         return None
-    view, _ = lane.read_plan(conn, found[0])
-    held = plan_request(view, request_id(q))
+    plan_id, _name, held = found
     if held is None or held.closed is not None:
         return None
-    plan.record_release(conn, found[0], [held.key], plan.ReleaseAnswer(plan.REJECTED, a.reason))
+    plan.record_release(conn, plan_id, [held.key], plan.ReleaseAnswer(plan.REJECTED, a.reason))
     return held.key
