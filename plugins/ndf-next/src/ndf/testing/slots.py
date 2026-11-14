@@ -118,6 +118,8 @@ def slots_place(environ: Mapping[str, str] | None = None) -> tuple[Path, list[di
     """枠の置き場と、そのために状態の置き場を用意したときに退避した旧い置き場（結果 JSON の `items` の形）。
 
     `NDF_TEST_SLOTS_DIR` があればそこで、状態の置き場に触れない（退避は空）。無ければ状態の置き場の下。
+    エントリポイント（`ndf.cli`）も副命令の前に同じ用意をするが、ここでも用意する。`slots.gate` はエントリポイントを通らずにも呼べ、
+    用意の済んだ置き場（`format.json` がある）では 2 度目の用意は何も退避しない。
     """
     env = os.environ if environ is None else environ
     if env.get(SLOTS_DIR_ENV):

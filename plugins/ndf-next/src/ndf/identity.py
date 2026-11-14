@@ -53,6 +53,8 @@ FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1
 # 旧い置き場の退避先の名前の接尾辞（`<置き場の名前>.v10-<日付>`）
 RETIRED_SUFFIX = ".v10-"
+# 退避した旧い置き場を標準エラーへ書くときの 1 行（エントリポイントと test-slot が使う。`items` の 1 件で埋める）
+RETIRED_LINE = "旧い状態の置き場を退避した: {retired_from} -> {retired_to}"
 # `bin/ndf` が子へ自分の根を渡す前に写した、呼び出し元の `CLAUDE_PLUGIN_ROOT`
 CALLER_ROOT_ENV = "NDF_CALLER_PLUGIN_ROOT"
 

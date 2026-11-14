@@ -36,7 +36,7 @@ _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 # run で子を走らせたときに、退避した旧い状態の置き場を標準エラーへ書く 1 行の形
-RETIRED_LINE = "旧い状態の置き場を退避した: {retired_from} -> {retired_to}"
+RETIRED_LINE = identity.RETIRED_LINE
 
 
 # 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、

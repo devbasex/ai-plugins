@@ -13,6 +13,8 @@ import pytest
 
 from ndf import cli, identity
 from ndf.contracts import causes
+from ndf.domains.relay import accounts
+from ndf.testing import isolation
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,6 +26,88 @@ def broken_root(tmp_path, monkeypatch):
     (root / ".claude-plugin" / "plugin.json").write_text("{")
     monkeypatch.setattr(identity, "ROOT", root)
     return root
+
+
+@pytest.fixture
+def state_home(tmp_path_factory, monkeypatch):
+    """状態の置き場を一時ディレクトリへ向け、本物の置き場への書き込みを落とす（`ndf.testing.isolation`）。新しい状態の置き場を返す。"""
+    roots = isolation.protected_roots()
+    base = tmp_path_factory.mktemp("ndf-state")
+    for name, sub in isolation.REDIRECTED_ENV.items():
+        monkeypatch.setenv(name, str(base / sub))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(base / "claude"))
+    for name in isolation.REMOVED_ENV:
+        monkeypatch.delenv(name, raising=False)
+    with isolation.guarding(roots, (str(tmp_path_factory.getbasetemp()),)) as found:
+        yield identity.load().state_dir
+    assert not found, f"テストが本物の状態の置き場へ書こうとした: {found}"
+
+
+def test_writer_through_the_entry_leaves_a_prepared_state_dir(state_home, last_result, capsys):
+    # #3432 のレビュー: 状態の置き場へ書く副命令をエントリポイントから打った後も、置き場は用意済み（format.json がある）で、
+    # 続けて用意しても新しい記録を旧い置き場と見なして退避しない
+    assert cli.main(["relay", "account", "use", "work"]) == 0
+    assert last_result(capsys.readouterr().out)["status"] == "ok"
+
+    assert (state_home / identity.FORMAT_FILE).exists()
+    assert identity.prepare_state_dir(identity.load()).retired == ()
+    assert accounts.pinned(state_home) == "work"
+
+
+def test_entry_writes_the_retired_places_to_stderr(state_home, monkeypatch, capsys):
+    # 旧い置き場を退避したら、元と先を標準エラーへ 1 行ずつ書き、副命令はそのまま呼ぶ
+    state_home.mkdir(parents=True)
+    (state_home / "ledger.jsonl").write_text("old")
+    calls = []
+    _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 0)
+
+    assert cli.main(["fake"]) == 0
+
+    assert calls == [[]]
+    [moved] = [p for p in state_home.parent.iterdir() if p.name.startswith(state_home.name + identity.RETIRED_SUFFIX)]
+    assert (moved / "ledger.jsonl").read_text() == "old"
+    line = identity.RETIRED_LINE.format(retired_from=state_home, retired_to=moved)
+    assert line in capsys.readouterr().err.splitlines()
+
+
+def test_entry_stops_without_calling_the_subcommand_when_preparing_fails(state_home, monkeypatch, capsys, last_result):
+    # 用意できなければ（ほかのプラグインの根から呼ばれ、旧い置き場を退避してよいと確かめられない）副命令を呼ばずに止まる
+    state_home.mkdir(parents=True)
+    (state_home / "ledger.jsonl").write_text("old")
+    monkeypatch.setenv(identity.CALLER_ROOT_ENV, str(state_home.parent / "other-plugin"))
+    calls = []
+    _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 0)
+
+    assert cli.main(["fake"]) == causes.exit_code("config_broken")
+
+    assert calls == []
+    report = last_result(capsys.readouterr().out)
+    assert (report["tool"], report["status"], report["cause"]["kind"]) == (cli.TOOL, "stopped", "config_broken")
+    assert (state_home / "ledger.jsonl").read_text() == "old"
+
+
+def test_entry_keeps_the_places_retired_before_preparing_failed(monkeypatch, capsys, last_result):
+    # 退避の途中か後で失敗しても、それまでに退避した元と先を標準エラーと items に残す
+    retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
+
+    def fail(ident):
+        raise identity.IdentityError("read-only", retired)
+
+    monkeypatch.setattr(identity, "prepare_state_dir", fail)
+    _fake_subcommand(monkeypatch, lambda argv: pytest.fail("副命令を呼んだ"))
+
+    assert cli.main(["fake"]) == causes.exit_code("config_broken")
+
+    out = capsys.readouterr()
+    assert last_result(out.out)["items"] == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+    assert identity.RETIRED_LINE.format(retired_from="/s/p", retired_to="/s/p.v10-20261114") in out.err.splitlines()
+
+
+def test_usage_and_unknown_subcommand_do_not_touch_the_state_dir(state_home, capsys):
+    assert cli.main([]) == 0
+    assert cli.main(["--help"]) == 0
+    assert cli.main(["no-such-command"]) == causes.exit_code("invalid")
+    assert not state_home.parent.exists()
 
 
 def test_no_args_prints_usage(capsys):

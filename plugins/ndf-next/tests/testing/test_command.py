@@ -140,25 +140,24 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     assert (metrics["gave_up"], metrics["waited_runs"]) == (1, 1)
 
 
-def test_report_lists_the_old_state_places_it_retired(tmp_path):
-    # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる
+def test_report_lists_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+    # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる（エントリポイントを通らずに呼んだとき）
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
     old.mkdir(parents=True)
     (old / "ledger.jsonl").write_text("old")
-    extra = {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}
+    for name, value in {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}.items():
+        monkeypatch.setenv(name, value)
 
-    proc = _ndf(["report", "--since", "1d"], tmp_path, **extra)
-    out, err = proc.communicate()
+    assert command.main(["report", "--since", "1d"]) == 0
 
-    assert proc.returncode == 0, err
-    items = _result(out, 0)["items"]
+    items = _result(capsys.readouterr().out, 0)["items"]
     assert [item["retired_from"] for item in items] == [str(old)]
     assert (Path(items[0]["retired_to"]) / "ledger.jsonl").read_text() == "old"
 
 
-def test_run_writes_the_old_state_places_it_retired_after_the_output(project, tmp_path):
-    # run の経路でも、枠の置き場のために退避した旧い置き場の元と先を残す。標準出力は子のもののまま（I7）
+def test_run_writes_the_old_state_places_it_retired(project, tmp_path):
+    # エントリポイント（`ndf test-slot run`）を通すと、エントリポイントが副命令の前に退避し、元と先を標準エラーへ書く。標準出力は子のもののまま（I7）
     root, bin_dir, log = project
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
@@ -171,7 +170,7 @@ def test_run_writes_the_old_state_places_it_retired_after_the_output(project, tm
 
     assert (proc.returncode, out) == (0, "out\n"), err
     (moved,) = [p for p in state_home.iterdir() if identity.RETIRED_SUFFIX in p.name]
-    assert err.splitlines()[-1] == command.RETIRED_LINE.format(retired_from=old, retired_to=moved)
+    assert command.RETIRED_LINE.format(retired_from=old, retired_to=moved) in err.splitlines()
     assert (moved / "ledger.jsonl").read_text() == "old"
 
 
