@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from ndf.adapters.git import ORIGIN
 from ndf.contracts import facts
 
 # スプリントブランチの名前の接頭辞
@@ -43,7 +44,7 @@ def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contai
         return f"取り込み方 {promotion!r} が表 {FLOWS} に無いため残す"
     if not row["keeps_sprint"] or not flow.get("production_branch"):
         return None
-    production = f"origin/{flow['production_branch']}"
+    production = f"{ORIGIN}/{flow['production_branch']}"
     if contained is None:
         return f"{production} に含まれるかを確かめられないため残す"
     if contained:

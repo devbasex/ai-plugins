@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Protocol
 
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import ORIGIN, Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import create, declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
+from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
@@ -67,7 +67,7 @@ def _contained(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Opt
     if not production:
         return None
     try:
-        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{create.REMOTE}/{production}")
+        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{ORIGIN}/{production}")
     except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番チャネル）なら確かめられないとして残す側へ倒す
         return None
 
@@ -158,11 +158,11 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     if skip is not None:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, skip)
         return
-    fetched = main.fetch_branch(create.REMOTE, base)
+    fetched = main.fetch_branch(ORIGIN, base)
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return
-    done = main.attempt("merge", "--ff-only", "-q", f"{create.REMOTE}/{base}")
+    done = main.attempt("merge", "--ff-only", "-q", f"{ORIGIN}/{base}")
     if done.returncode == 0:
         rec.add("main_dir", str(main.cwd), outcomes.PULLED)
         return
@@ -171,7 +171,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
         # 利用者の手元の変更には触れない（stash も checkout もしない）。取り込みだけを見送る
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）が取り込みを塞いだため取り込まない")
         return
-    rec.stopped = f"メインディレクトリの git merge --ff-only {create.REMOTE}/{base} が失敗: {done.stderr.strip()}"
+    rec.stopped = f"メインディレクトリの git merge --ff-only {ORIGIN}/{base} が失敗: {done.stderr.strip()}"
     rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
 
 

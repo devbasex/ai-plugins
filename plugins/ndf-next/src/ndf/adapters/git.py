@@ -25,6 +25,8 @@ _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
+# 取得と照合に使うリモートの名前
+ORIGIN = "origin"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 
@@ -201,7 +203,7 @@ class Git:
         common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
         return Path(os.path.realpath(common))
 
-    def remote_repo(self, remote: str = "origin") -> str:
+    def remote_repo(self, remote: str = ORIGIN) -> str:
         """リモートの `<所有者>/<リポジトリ>`。GitHub の URL でなければ `GitError`。"""
         url = self.run("remote", "get-url", remote).strip()
         repo = repo_of_url(url)

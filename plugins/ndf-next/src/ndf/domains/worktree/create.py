@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from ndf.adapters.git import Git
+from ndf.adapters.git import ORIGIN, Git
 from ndf.domains.worktree import declaration, repo
 
 # 取得するリモート
-REMOTE = repo.REMOTE
+REMOTE = ORIGIN
 
 
 class CreateError(Exception):

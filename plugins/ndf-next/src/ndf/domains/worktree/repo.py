@@ -12,12 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ndf.adapters.git import Git, GitError, WorktreeEntry
+from ndf.adapters.git import ORIGIN, Git, GitError, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
 
-# 取得するリモート
-REMOTE = "origin"
 # マージ済みと認められなかったブランチを残すときに添える文（`-D` は NDF が打たず、人が確かめて打つ。C4）
 MANUAL_FORCE = "消すなら人が確かめて -D で消す"
 
@@ -71,9 +69,9 @@ def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
 
 def default_branch(git: Git) -> Optional[str]:
     """origin の既定ブランチ（取得済みの `refs/remotes/origin/HEAD`）。無ければ `None`。"""
-    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{REMOTE}/HEAD")
+    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{ORIGIN}/HEAD")
     name = done.stdout.strip() if done.returncode == 0 else ""
-    return name[len(REMOTE) + 1 :] if name.startswith(REMOTE + "/") else None
+    return name[len(ORIGIN) + 1 :] if name.startswith(ORIGIN + "/") else None
 
 
 def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:

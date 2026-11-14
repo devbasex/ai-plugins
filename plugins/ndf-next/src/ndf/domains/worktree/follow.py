@@ -15,8 +15,8 @@ from typing import Optional
 
 from filelock import Timeout
 
-from ndf.adapters.git import Git
-from ndf.domains.worktree import create, declaration, mainlock, repo, session_decide
+from ndf.adapters.git import ORIGIN, Git
+from ndf.domains.worktree import declaration, mainlock, repo, session_decide
 
 # セッションの開始で排他を待つ秒（開始を長く止めない）
 LOCK_WAIT = 60
@@ -27,7 +27,7 @@ def resolve(main: Git, name: str) -> Optional[str]:
 
     名前をそのまま `git rev-parse` へ渡さない（`refs/remotes/origin/<名前>` は名前の解決の順に含まれない）。
     """
-    for ref in (f"refs/heads/{name}", f"refs/remotes/{create.REMOTE}/{name}"):
+    for ref in (f"refs/heads/{name}", f"refs/remotes/{ORIGIN}/{name}"):
         if repo.has_ref(main, ref):
             return main.rev_parse(ref)
     return None
@@ -37,7 +37,7 @@ def _resolve_base(main: Git, name: str) -> Optional[str]:
     found = resolve(main, name)
     if found is not None:
         return found
-    if main.fetch_branch(create.REMOTE, name).returncode != 0:
+    if main.fetch_branch(ORIGIN, name).returncode != 0:
         return None
     return resolve(main, name)
 
