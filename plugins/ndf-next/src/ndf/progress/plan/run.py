@@ -15,7 +15,7 @@
   依頼を書けない）。`cancel_failed` で終えた耐久ワークフローの ID は再び使わず、`ndf lanes run` を打ち直すと
   次の番号の ID で新しく始めて中止を試し直す
 - 区切りで止めた計画（`ndf lanes stop` の既定）では次の行を起こさず、実行中の行が無くなれば `paused` で終わる。
-  `ndf lanes start` で再開すると、次の番号の ID で新しく始めて止めた所から続ける
+  実行中の行の止まりは止める前と同じに判定して知らせる。`ndf lanes start` で再開すると、次の番号の ID で新しく始めて止めた所から続ける
 - 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
   （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる。オーガナイザーが
   依頼を閉じたら、打ち直せば起こせる失敗のレーンを起こし直す。起こしたのに期限（`parallel-run.launch` の秒）までに
@@ -149,11 +149,11 @@ def _judge(
     moved: dict[str, str],
     spent: Sequence[str] = (),
 ) -> Judged:
-    """生死を判定する。計画が動いていなければ判定しない（知らせを書けない・閉じられない）。
+    """生死を判定する。計画が動いていない・区切りで止めた計画でなければ判定しない（知らせを書けない・閉じられない）。
 
     `spent` は `/goal` の起こし直しを使い切ったスプリントの ID で、起こし直す先に数えず、それだけならアカウントを
     確かめない（`ndf relay account show` を毎周打たない）。"""
-    if found is None or state != lane.RUNNING:
+    if found is None or state not in run_decide.WATCHED_STATES:
         return Judged([], [], False, [])
     verdicts = liveness.judge_lanes(rows, found)
     stalls = [
@@ -284,10 +284,10 @@ def write_report(conn: Any, plan_id: str, notice: Report) -> str | None:
     開いた依頼の鍵を返す。`notice.facts` は依頼の中身へ足す。
 
     判断が使った写しは起動の前のもので、その間に計画が止められていることがある。同じトランザクションで計画の状態を
-    読み直し、動いていなければ（終わった計画の進行表へは事象を書けない）書かずに None を返す。
+    読み直し、動いていない・区切りで止めた計画でなければ（終わった計画の進行表へは事象を書けない）書かずに None を返す。
     """
     view, _ = lane.read_plan(conn, plan_id)
-    if view.state != lane.RUNNING:
+    if view.state not in run_decide.WATCHED_STATES:
         return None
     facts = {str(k): v for k, v in notice.facts}
     body = {**facts, "lane": notice.lane, "kind": notice.kind, NOTICE_FIELDS[notice.kind]: notice.key, "detail": notice.detail}
@@ -303,11 +303,11 @@ def report(spec: dict[str, Any], notice: dict[str, Any]) -> str | None:
 
 
 def withdraw_report(conn: Any, plan_id: str, request: str, lane_name: str) -> bool | None:
-    """止まりの知らせの依頼を、レーンが動き出したので閉じる（#2585）。計画が動いていない・依頼が既に閉じていれば
-    書かずに None を返す。"""
+    """止まりの知らせの依頼を、レーンが動き出したので閉じる（#2585）。計画が動いていない・区切りで止めた計画でない・
+    依頼が既に閉じていれば書かずに None を返す。"""
     view, _ = lane.read_plan(conn, plan_id)
     found = view.requests.get(request)
-    if view.state != lane.RUNNING or found is None or found.closed is not None:
+    if view.state not in run_decide.WATCHED_STATES or found is None or found.closed is not None:
         return None
     table.close_request(conn, plan_id, request, f"レーン {lane_name} が動き出した", REPORT_ACTOR)
     return True

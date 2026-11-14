@@ -39,7 +39,9 @@
 尽きたら（または起こし直しの起動が尽きたら）止まりとして知らせる。アカウントが使えなければ写しに載らず、知らせる。
 
 区切りで止めた計画（`paused`）では次の行を起こさない。実行中の行は終わりまで流すので、答えの後の起こし直しは
-続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。
+続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。実行中の行の
+生死は止める前と同じに判定し、止まり（`lane_stalled`）は止めた計画でも知らせ、動き出したら閉じる（`WATCHED_STATES`。
+知らせないと実行中の行が残り続け、`paused` で終われない）。
 
 止めた計画の進行表は終わっていて依頼を書けないので、中止の起動が尽きても `Report` を打たない。実行中の行の中止を
 すべて起こせなくなったら、`failed` と `errors` を載せて `cancel_failed` で終える。
@@ -336,6 +338,8 @@ def _finish(state: RunState, outcome: str) -> loop.Next[Act, RunState]:
 
 # 起動の候補を探す計画の状態
 OBSERVED_STATES = (RUNNING, PAUSED, CANCELLED, COMPLETED)
+# 実行中の行の生死を判定し、止まりの知らせを書いて閉じる計画の状態（区切りで止めた計画も実行中の行を流す）
+WATCHED_STATES = (RUNNING, PAUSED)
 
 
 def _end_of(snap: Snapshot) -> Optional[str]:
@@ -361,11 +365,12 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     if running and snap.complete:
         first = _before_end(state, snap, found, policy)
         return first if first is not None else loop.Next.step(Complete(), state)
-    gone = _withdrawable(snap) if running else []
+    gone = _withdrawable(snap) if snap.state in WATCHED_STATES else []
     if gone:
         return loop.Next.step(gone[0], state)
-    if running and state.unreported:
-        return loop.Next.step(state.unreported[0], state)
+    notices = _reportable(state, snap)
+    if notices:
+        return loop.Next.step(notices[0], state)
     if found:
         return loop.Next.step(found[0], state)
     if snap.state == CANCELLED and _cancels_given_up(state, snap):
@@ -389,6 +394,15 @@ def _before_end(state: RunState, snap: Snapshot, found: list[Launch], policy: Po
     if retrying - set(state.launched) - set(state.failed):
         return loop.Next.step(Sleep(policy.poll), state)
     return None
+
+
+def _reportable(state: RunState, snap: Snapshot) -> list[Report]:
+    """いま書く知らせ。動いている計画ではすべて、区切りで止めた計画では止まりだけ（起こせなかった起動は再開してから）。"""
+    if snap.state == RUNNING:
+        return list(state.unreported)
+    if snap.state == PAUSED:
+        return [u for u in state.unreported if u.kind == LANE_STALLED]
+    return []
 
 
 def _withdrawable(snap: Snapshot) -> list[Withdraw]:

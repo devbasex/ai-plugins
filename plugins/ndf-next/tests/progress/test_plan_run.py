@@ -16,7 +16,7 @@ from ndf.core import durable, loop
 from ndf.progress import lane, plan, store
 from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import run, run_decide
-from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
+from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep, Withdraw
 from plan_decls import REPO
 from plan_decls import decl as _decl
 from plan_decls import doc as _doc
@@ -353,6 +353,21 @@ def test_a_paused_plan_wakes_only_answered_rows_and_ends_as_paused_once_nothing_
     assert finished and state.outcome == "paused"
 
 
+def test_a_paused_plan_reports_a_stalled_running_row_but_holds_launch_failures_until_resumed():
+    """区切りで止めた計画でも、実行中の行の止まりは知らせ、動き出したら閉じる。起こせなかった起動は再開まで知らせない。"""
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", None, "r1")
+    held = Report("b", "b/r1", "起こせない")
+    act, state, _ = _step(RunState(unreported=(held,)), Done(Observe(), _snap(state="paused", running=[("a", "r1", "s1")], stalls=[stall])))
+    assert isinstance(act, Report) and (act.key, act.kind) == ("stall:a/r1:ended", run_decide.LANE_STALLED)
+    act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Sleep(30.0) and state.unreported == (held,)
+    moved = run_decide.with_stall_requests(
+        _snap(state="paused", running=[("a", "r1", "s1")], reported=["stall:a/r1:ended"]), [("request-1", "a", "stall:a/r1:ended")]
+    )
+    act, _, _ = _step(state, Done(Observe(), moved))
+    assert act == Withdraw("a", "request-1", "stall:a/r1:ended")
+
+
 def test_a_plan_not_yet_started_is_only_watched():
     act, _, _ = _step(RunState(), Done(Observe(), _snap(state="pending", wakeable=[("a", "r1")])))
     assert act == Sleep(30.0)
@@ -589,6 +604,20 @@ def test_snapshot_lists_a_lane_whose_last_row_ended_while_its_wrapper_runs(opene
         key = run.write_report(conn, pid, Report("a", "halt:a/r1", "止められない", run.HALT_FAILED))
         view, _ = lane.read_plan(conn, pid)
     assert view.requests[key].body["halt"] == "halt:a/r1" and "止められない" in view.requests[key].reason
+
+
+def test_a_paused_plan_judges_its_running_rows_and_takes_a_stall_report(opened):
+    """区切りで止めた計画は終わりの状態でないので、実行中の行の生死を判定し、止まりの依頼を書いて閉じられる。"""
+    pid = _create(opened, _doc(_decl("a", [[1], [2]])))
+    with store.transaction(opened) as conn:
+        sid = _start(conn, pid, "a", "r1")
+        plan.pause_plan(conn, pid, "区切り")
+    with store.transaction(opened) as conn:
+        snap = run.read_snapshot(conn, pid, _probes({}, {sid: {"status": "ok"}}))
+    assert snap["judged"] and [s[1] for s in snap["stalls"]] == ["stall:a/r1:ended"]
+    with store.transaction(opened) as conn:
+        key = run.write_report(conn, pid, Report("a", "stall:a/r1:ended", "止まった", run.LANE_STALLED))
+        assert key is not None and run.withdraw_report(conn, pid, key, "a") is True
 
 
 def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
