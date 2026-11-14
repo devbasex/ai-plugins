@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import pytest
 
-from ndf.adapters import ci
-from ndf.adapters.github import Authored, GitHubError
-from ndf.domains.release import approval_decide, land, trail
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
-from ._fakes import HEAD, OTHER, FakeHub, pull
+from ndf.adapters import ci
+from ndf.adapters.github import Authored, GitHub, GitHubError, MergeOutcome, Pull
+from ndf.domains.release import approval_decide, declaration, land, trail
+
+from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
 
 
 def _trail(answer: str, sha: str, author: str = "octocat") -> Authored:
@@ -194,3 +199,179 @@ def test_sync_without_diff_is_done_but_other_422_raises() -> None:
     hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("Validation Failed: head invalid", 422)
     with pytest.raises(GitHubError):
         _lander(hub, False, []).land(7)
+
+
+# --- #3506: 迂回の宣言（production_merge.admin）のある本番のマージ ------------------------------------
+
+REVIEW_RULE = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
+
+
+@dataclass
+class AdminHub(FakeHub):
+    """迂回のマージ（`merge_as_admin`）を数える偽物。`fail_record` なら迂回の記録のコメントを断る。"""
+
+    admin_merged: list[int] = field(default_factory=list)
+    fail_record: bool = False
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
+        if self.fail_record and method == "POST" and path.endswith("/comments") and trail.ADMIN_MARK in payload["body"]:
+            raise GitHubError("書けない", 403)
+        return super().rest(method, path, payload, params)
+
+    def merge_as_admin(self, number: int, expect_head: str, method: str | None = None) -> MergeOutcome:
+        self.admin_merged.append(number)
+        self.merge_methods.append(method)
+        return MergeOutcome(True, None, f"#{number} を迂回でマージした", self.pulls[number].head_sha)
+
+
+def _admin_lander(hub: FakeHub, admin: bool = True, approvals: int = 1, failed: bool = False, wait: Any = None) -> land.Lander:
+    base = _lander(hub, failed, [])
+    rules = hub.responses[("GET", "/repos/o/r/rules/branches/main")]
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [*rules, *([REVIEW_RULE] if approvals else [])]
+    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+    return land.Lander(hub, base.base, base.production, base.budget, wait=wait if wait is not None else base.wait, admin=admin)
+
+
+def _mvv_trail(sha: str = HEAD) -> Authored:
+    return Authored("octocat", "OWNER", approval_decide.render_trail("approved", sha, trail.MVV_BY))
+
+
+def _records(hub: FakeHub, number: int = 7) -> list[str]:
+    return [c.body for c in hub.comments_of.get(number, []) if trail.ADMIN_MARK in c.body]
+
+
+def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
+    """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
+    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    done = _admin_lander(hub).land(7)
+    assert done.merged and done.admin and done.admin_record == "https://example.invalid/7" and done.record_error is None
+    assert hub.admin_merged == [7] and hub.merged == [8] and hub.merge_methods == ["merge", "merge"]
+    (record,) = _records(hub)
+    assert HEAD in record and approval_decide.TRAIL_MARK not in record
+
+
+def test_admin_declaration_stops_like_the_plain_merge_without_merging() -> None:
+    """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に差し戻されたら止まり、迂回しない。"""
+    hub = AdminHub(pulls={7: pull()})
+    done = _admin_lander(hub).land(7)
+    assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and not done.admin
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    done = _admin_lander(hub, failed=True).land(7)
+    assert not done.merged and done.kind == "test_failed" and hub.admin_merged == []
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        hub.comments_of[7].append(_trail("rejected", HEAD))
+        return ci.WatchResult(_reading(False), 1, 0.0, 0.0)
+
+    done = _admin_lander(hub, wait=wait).land(7)
+    assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and _records(hub) == []
+
+
+def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
+    """I9: 利用者の証跡が無く MVV 判定の証跡だけなら refused で止まり、迂回しない。"""
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [_mvv_trail()]})
+    done = _admin_lander(hub).land(7)
+    assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
+
+
+@pytest.mark.parametrize("admin, approvals", [(False, 1), (True, 0)])
+def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool, approvals: int) -> None:
+    """受け入れ条件 8（迂回しない）・I2b: 宣言が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
+    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    done = _admin_lander(hub, admin=admin, approvals=approvals).land(7)
+    assert done.merged and not done.admin and done.admin_record is None
+    assert hub.admin_merged == [] and hub.merged == [7, 8] and _records(hub) == []
+
+
+def test_approvals_reads_rules_then_protection_and_none_when_unreadable() -> None:
+    hub = FakeHub()
+    lander = land.Lander(hub, "develop", "main", 1.0, admin=True)
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [REVIEW_RULE]
+    assert lander.approvals("main") == 1
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = []
+    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = {"required_approving_review_count": 2}
+    assert lander.approvals("main") == 2
+    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
+    assert lander.approvals("main") == 0
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = GitHubError("壊れた", 500)
+    assert lander.approvals("main") is None and not lander._bypass(pull())
+
+
+def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
+    """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした先端と一致し記録が無いときだけ書く。何度打っても 1 件。"""
+    hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
+    first = _admin_lander(hub).land(7)
+    second = _admin_lander(hub).land(7)
+    assert first.admin and first.admin_record and second.admin and len(_records(hub)) == 1 and hub.admin_merged == []
+    hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [_trail("approved", OTHER)]})
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
+    done = _admin_lander(hub).land(7)
+    assert not done.admin and _records(hub) == []
+
+
+def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
+    """決定 7: 記録を書けなければ、マージは済んだまま record_error に理由を残す。"""
+    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]}, fail_record=True)
+    done = _admin_lander(hub).land(7)
+    assert done.merged and done.admin and done.admin_record is None and done.record_error and hub.admin_merged == [7]
+
+
+@pytest.mark.parametrize(
+    "body, admin",
+    [
+        ({"production_merge": {"admin": True}}, True),
+        ({"production_merge": {"admin": "true"}}, False),
+        ({"production_merge": {"unknown": "未定"}}, False),
+        ({}, False),
+        (None, False),
+        ("{", False),
+    ],
+)
+def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin: bool) -> None:
+    path = tmp_path / declaration.PROJECT_FILE
+    if body is not None:
+        path.parent.mkdir(parents=True)
+        path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+    assert declaration.production_admin(tmp_path) is admin
+
+
+@dataclass(frozen=True)
+class _GraphQLHub(GitHub):
+    """`merge_as_admin` の GraphQL の要求を残す偽物（ネットワークへ出ない）。"""
+
+    sent: list = field(default_factory=list)
+    refuse: GitHubError | None = None
+    after: Pull | None = None
+
+    def pull(self, number: int) -> Pull:
+        return self.after if self.after is not None and self.sent else pull(number)
+
+    def allowed_merge_methods(self, branch: str) -> list[str]:
+        return ["merge"]
+
+    def repository(self, query: str, variables: Any = None) -> dict[str, Any]:
+        return {"pullRequest": {"id": "PR_1"}}
+
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        self.sent.append(variables)
+        if self.refuse is not None:
+            raise self.refuse
+        return {}
+
+
+def test_merge_as_admin_sends_merge_pull_request_with_the_head() -> None:
+    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。先端が違えば送らない。断られたら読み直して種類を返す。"""
+    hub = _GraphQLHub("o/r", None)  # type: ignore[arg-type]
+    got = hub.merge_as_admin(7, HEAD, "merge")
+    assert got.merged and hub.sent == [{"id": "PR_1", "head": HEAD, "method": "MERGE"}]
+    hub = _GraphQLHub("o/r", None)  # type: ignore[arg-type]
+    assert not hub.merge_as_admin(7, OTHER).merged and hub.sent == []
+    hub = _GraphQLHub("o/r", None, refuse=GitHubError("GraphQL の誤り: Head branch was modified"), after=pull(head=OTHER))  # type: ignore[arg-type]
+    got = hub.merge_as_admin(7, HEAD)
+    assert not got.merged and got.kind == "refused"
+    hub = _GraphQLHub("o/r", None, refuse=GitHubError("届かない", unreached=True))  # type: ignore[arg-type]
+    with pytest.raises(GitHubError):
+        hub.merge_as_admin(7, HEAD)
