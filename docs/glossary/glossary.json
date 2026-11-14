@@ -7273,6 +7273,36 @@
       "context": "ndf-workflow",
       "meaning": "チェックアウトの置き場の format.json と耐久の記録のアプリの版が持つ整数。読み書きの形が変わるときだけ上げ、NDF の版とは別に動く",
       "pending_source": "issues/issue-1142-design-next.md"
+    },
+    {
+      "term": "レビューの項目",
+      "context": "ndf-workflow",
+      "meaning": "設計レビューの Issue の本文（進行の節より前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し）",
+      "pending_source": "issues/issue-3395-requirements.md"
+    },
+    {
+      "term": "行き先の表",
+      "context": "ndf-workflow",
+      "meaning": "レビューの項目ごとに、行き先の子・順番・新設か追補か・要求の行を持つ 1 つの表（#1142 の作り直し）",
+      "pending_source": "issues/issue-3395-requirements.md"
+    },
+    {
+      "term": "追補の単位",
+      "context": "ndf-workflow",
+      "meaning": "閉じた子へ足す作業を、元の子の名前に + を付けて別の子にしたもの（例: X1+）",
+      "pending_source": "issues/issue-3395-requirements.md"
+    },
+    {
+      "term": "要求の行",
+      "context": "ndf-workflow",
+      "meaning": "issues/issue-1142-requirements.md の行番号か受け入れ条件の番号。レビューの項目の根拠になる",
+      "pending_source": "issues/issue-3395-requirements.md"
+    },
+    {
+      "term": "目的の物差し",
+      "context": "ndf-workflow",
+      "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。行き先を選んだ主体の事象で数える",
+      "pending_source": "issues/issue-3395-requirements.md"
     }
   ]
 }
