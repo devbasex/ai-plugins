@@ -102,8 +102,17 @@ def validate_io(ref: str, obj: Any) -> list[str]:
     return _errors(_io_validator(ref), obj)
 
 
+def _dig(node: Any, *keys: str) -> Any:
+    """入れ子の dict を鍵の順にたどる。途中で dict でないか鍵が無ければ None。"""
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
 def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
-    held = obj.get(part) if isinstance(obj, dict) else None
+    held = _dig(obj, part)
     have = held if isinstance(held, dict) else {}
     return [f"{part}: 文脈の鍵 {k} が無い" for k in keys if k not in have]
 
@@ -137,8 +146,7 @@ def _tasks(doc: Mapping[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
 
 
 def _ndf_meta(node: Mapping[str, Any]) -> Any:
-    meta = node.get("metadata")
-    return meta.get("ndf") if isinstance(meta, dict) else None
+    return _dig(node, "metadata", NAMESPACE)
 
 
 def _context_keys() -> set[str]:
@@ -175,7 +183,7 @@ def _task_errors(where: str, name: str, body: dict[str, Any], level: str) -> lis
 
 
 def _document(doc: Mapping[str, Any]) -> dict[str, Any]:
-    held = doc.get("document")
+    held = _dig(doc, "document")
     return held if isinstance(held, dict) else {}
 
 
@@ -192,10 +200,7 @@ def check_vocabulary(doc: Mapping[str, Any], level: str) -> list[str]:
 
 
 def _endpoint(node: Mapping[str, Any], part: str) -> Any:
-    held = node.get(part)
-    schema = held.get("schema") if isinstance(held, dict) else None
-    resource = schema.get("resource") if isinstance(schema, dict) else None
-    return resource.get("endpoint") if isinstance(resource, dict) else None
+    return _dig(node, part, "schema", "resource", "endpoint")
 
 
 def _ref_errors(where: str, ref: Any, what: str) -> list[str]:
@@ -254,9 +259,7 @@ def _called(mode_doc: Mapping[str, Any]) -> list[tuple[str, str]]:
     """モードの文書が呼ぶ（工程表の行名, 工程の文書の名前）の並び。"""
     out = []
     for name, body in _tasks(mode_doc):
-        run = body.get("run")
-        workflow = run.get("workflow") if isinstance(run, dict) else None
-        out.append((name, workflow.get("name") if isinstance(workflow, dict) else None))
+        out.append((name, _dig(body, "run", "workflow", "name")))
     return out
 
 
