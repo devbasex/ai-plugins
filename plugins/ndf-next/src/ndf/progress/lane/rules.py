@@ -84,11 +84,27 @@ def _issue_errors(view: PlanView, lanes: Lanes) -> list[str]:
     return errs
 
 
+_GLOB_CHARS = "*?["
+
+
+def _literal_prefix(pattern: str) -> Optional[str]:
+    """glob の最初の特殊文字より前の部分。glob でなければ None。"""
+    cut = [pattern.index(c) for c in _GLOB_CHARS if c in pattern]
+    return pattern[: min(cut)] if cut else None
+
+
 def touch_hit(x: str, y: str) -> bool:
-    """触る場所の 2 つが重なるか。接頭辞か glob が当たれば重なる。"""
+    """触る場所の 2 つが重なるか。接頭辞か glob が当たれば重なる。
+
+    両方が glob なら、一致するパスの共通部分を正確には求めず、特殊文字より前の部分が一方の接頭辞であれば
+    重なるとみなす（安全側。`src/*/foo.py` と `src/bar/*.py` は `src/bar/foo.py` を共に含む）。
+    """
     px, py = x.rstrip("/"), y.rstrip("/")
     if px == py or px.startswith(py + "/") or py.startswith(px + "/"):
         return True
+    lx, ly = _literal_prefix(px), _literal_prefix(py)
+    if lx is not None and ly is not None:
+        return lx.startswith(ly) or ly.startswith(lx)
     return fnmatch.fnmatch(px, py) or fnmatch.fnmatch(py, px)
 
 

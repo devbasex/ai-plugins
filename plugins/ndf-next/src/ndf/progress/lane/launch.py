@@ -5,7 +5,8 @@
 - 行を始める: `ndf progress new <スプリント名> --mode <モード> --issues <課題>... --parent <レーンの進行表の ID>` で
   スプリントの進行表を作り、返った ID で `ndf lanes row start <計画> <レーン> <行> --sprint <ID>` を打つ。
   `row start` は計画が記録した形の番号と自分のものを比べ、違えば `format_mismatch` で止まる（P3-1）。
-  スプリント名は `<計画>-<レーン>-<行>` にし、別の計画が同じレーン名を使っても重ならない
+  スプリント名は `<計画>-<レーン>-<行>-<要約>` にし、別の計画が同じレーン名を使っても、名前の区切りが曖昧な組
+  （計画 `dev-api`／レーン `tests` と計画 `dev`／レーン `api-tests` など）でも重ならない
 - 起こせるのはスプリントの行（`kind: sprint`）だけで、開発ループの行（`kind: loop`）は起こす入力を組めないので
   `Unsupported` で断る（ndf-next に開発ループを始めるコマンドがまだ無い）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
@@ -42,9 +43,14 @@ WRAPPER_NAME_MAX = 64
 WRAPPER_DIGEST_LENGTH = 12
 
 
+def _digest(*parts: str) -> str:
+    """区切りが曖昧にならないよう、値の並びを JSON にしてから要約する。"""
+    return hashlib.sha256(json.dumps(list(parts)).encode()).hexdigest()[:WRAPPER_DIGEST_LENGTH]
+
+
 def wrapper_name(repo: str, plan: str, lane: str) -> str:
     """レーンのラッパーの名前。読める部分（`<計画>-<レーン>`）に、リポジトリ・計画・レーンの要約を付ける。"""
-    digest = hashlib.sha256(json.dumps([repo, plan, lane]).encode()).hexdigest()[:WRAPPER_DIGEST_LENGTH]
+    digest = _digest(repo, plan, lane)
     readable = f"{plan}-{lane}"[: WRAPPER_NAME_MAX - WRAPPER_DIGEST_LENGTH - 1]
     return f"{readable}-{digest}"
 
@@ -54,8 +60,8 @@ class Unsupported(Exception):
 
 
 def sprint_name(plan: str, lane: str, row: str) -> str:
-    """行のスプリント名。同じリポジトリの別の計画が同じレーン名を使っても重ならないよう、計画の名前を含める。"""
-    return f"{plan}-{lane}-{row}"
+    """行のスプリント名。読める部分（`<計画>-<レーン>-<行>`）に計画・レーン・行の要約を付け、区切りが曖昧な組でも重ならない。"""
+    return f"{plan}-{lane}-{row}-{_digest(plan, lane, row)}"
 
 
 def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:

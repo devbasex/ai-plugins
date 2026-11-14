@@ -16,7 +16,18 @@ def _row(args=()):
 
 def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
     new, start = launch.start_commands("p6", "a", "lane-id", _row())
-    assert new["argv"][1:] == ["progress", "new", "p6-a-r2", "--mode", "standard", "--issues", "5", "6", "--parent", "lane-id"]
+    assert new["argv"][1:] == [
+        "progress",
+        "new",
+        launch.sprint_name("p6", "a", "r2"),
+        "--mode",
+        "standard",
+        "--issues",
+        "5",
+        "6",
+        "--parent",
+        "lane-id",
+    ]
     assert start["argv"][1:] == ["lanes", "row", "start", "p6", "a", "r2", "--sprint"] and start["ask"] == ["sprint"]
 
 
@@ -27,6 +38,8 @@ def test_start_commands_keep_the_mode_given_by_the_row():
 
 def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
     assert launch.sprint_name("p6", "a", "r1") != launch.sprint_name("p7", "a", "r1")
+    assert launch.sprint_name("dev-api", "tests", "r1") != launch.sprint_name("dev", "api-tests", "r1")
+    assert launch.sprint_name("p6", "a", "r1").startswith("p6-a-r1-")
 
 
 def test_a_loop_row_is_refused_instead_of_failing_on_missing_issues():

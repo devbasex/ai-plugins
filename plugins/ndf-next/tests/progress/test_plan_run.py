@@ -328,6 +328,27 @@ def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypat
     assert final["outcome"] == "stopped" and cancelled == ["a"]
 
 
+def test_a_rerun_after_cancel_failed_starts_a_new_workflow_and_retries_the_cancel(where, monkeypatch):
+    """中止を起こせずに `cancel_failed` で終えた計画は、打ち直すと新しいワークフローで中止を試し直す。"""
+    with store.open_store(where.url, where.root) as st:
+        pid = _create(st, _doc(_decl("a", [[1], [2]])))
+        with store.transaction(st) as conn:
+            sid = _start(conn, pid, "a", "r1")
+            plan.stop_plan(conn, pid, "放棄")
+    _no_wrapper(monkeypatch)
+    monkeypatch.setattr(launch, "spawn", lambda repo, plan_name, lane_name, cwd, first: {"ok": False, "detail": "上限"})
+    assert run.advance(where, "p6", FAST)["outcome"] == "cancel_failed"
+
+    def spawn(repo, plan_name, lane_name, cwd, first):
+        with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
+            lane.end_row(conn, sid, "cancelled", "conductor")
+        return {"ok": True, "detail": "起こした"}
+
+    monkeypatch.setattr(launch, "spawn", spawn)
+    assert run.advance(where, "p6", FAST)["outcome"] == "stopped"
+    assert run.workflow_id("p6", 2) != run.workflow_id("p6")
+
+
 def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):
     """起こせないレーン（開発ループの行）は、計画の進行表の依頼として wait へ届く。"""
     loop_lane = {"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "loop", "loop": "backlog"}]}

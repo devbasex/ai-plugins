@@ -258,7 +258,14 @@ def test_answer_just_recorded_is_not_yet_a_stall(opened):
 
 @pytest.mark.parametrize(
     ("x", "y", "hit"),
-    [("src/a", "src/a/b.py", True), ("src/a/", "src/a", True), ("src/*.py", "src/x.py", True), ("src/a", "src/ab", False)],
+    [
+        ("src/a", "src/a/b.py", True),
+        ("src/a/", "src/a", True),
+        ("src/*.py", "src/x.py", True),
+        ("src/a", "src/ab", False),
+        ("src/*/foo.py", "src/bar/*.py", True),
+        ("docs/*.md", "src/*.py", False),
+    ],
 )
 def test_touch_hit(x, y, hit):
     assert lane.touch_hit(x, y) is hit
