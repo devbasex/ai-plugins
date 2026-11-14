@@ -9,7 +9,7 @@ from ndf.parity import table
 
 @pytest.fixture
 def tables():
-    return copy.deepcopy(table.load("features")), copy.deepcopy(table.load("fixes"))
+    return table.load("features"), table.load("fixes")
 
 
 def _row(features, kind="entrypoint"):
