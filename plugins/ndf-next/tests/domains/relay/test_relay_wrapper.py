@@ -49,14 +49,20 @@ class FakeChild:
 
 
 class Spawner:
-    def __init__(self, children):
+    """`marks` は起動の順番 → その子のセッションが Stop の hook で書く次の区間のブロック。"""
+
+    def __init__(self, children, marks=None):
         self.children = list(children)
+        self.marks = dict(marks or {})
         self.calls: list[tuple[list[str], dict]] = []
         self.made: list[FakeChild] = []
 
     def __call__(self, argv, env, cwd):
         self.calls.append((argv, dict(env)))
         child = self.children.pop(0)
+        block = self.marks.get(len(self.made))
+        if block is not None:
+            signals.write_next(Path(env["NDF_RELAY_DIR"]), argv[2], block, True, 0.1)
         self.made.append(child)
         return child
 
@@ -91,10 +97,10 @@ def _settings(tmp_path: Path, **changes) -> wrapper.Settings:
     return wrapper.Settings(**values)
 
 
-def _run(tmp_path, children, prepare=None, **changes):
+def _run(tmp_path, children, prepare=None, marks=None, wall=None, **changes):
     s = _settings(tmp_path, **changes)
-    spawn = Spawner(children)
-    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    spawn = Spawner(children, marks)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), wall=wall)
     if prepare:
         prepare(w.dir, s.state_dir)
     try:
@@ -111,12 +117,10 @@ def _log(w) -> list[dict]:
 
 def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
     def prepare(d, state):
-        d.mkdir(parents=True)
-        signals.write_next(d, "s1", "/goal 次の区間", True, 0.1)
         accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
         accounts.use(state, "team")
 
-    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare)
+    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, marks={0: "/goal 次の区間"})
     assert ended.cause == "" and "書かずに終わった" in ended.reason
     (first, first_env), (second, second_env) = spawn.calls
     assert first[:2] == [wrapper.CLAUDE, "--session-id"] and first[3:] == ["--model", "x", "最初の 1 行"]
@@ -268,3 +272,55 @@ def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_pat
     assert env["NDF_CLAUDE_ACCOUNT"] == "team" and ended.cause == ""
     reasons = [r["reason"] for r in _log(w) if r["kind"] == "account"]
     assert reasons == ["team の上限が解けた。同じアカウントで再開する"]
+
+
+def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):
+    # 前の実行の印（セッションが違う）で、新しい子を終わらせて置き換えない
+    def prepare(d, state):
+        d.mkdir(parents=True)
+        signals.write_next(d, "old-session", "/goal 古い区間", True, 0.1)
+
+    ended, spawn, w = _run(tmp_path, [FakeChild([], 0)], prepare)
+    assert len(spawn.calls) == 1 and ended.cause == "" and "書かずに終わった" in ended.reason
+    assert signals.read_next(w.dir) is None
+    assert "stale_next" in [row["kind"] for row in _log(w)]
+
+
+def test_next_mark_switches_once_its_quiet_time_has_passed_even_while_output_continues(tmp_path):
+    # /goal の未達の応答が続いて画面が静かにならなくても、印を最初に書いてから静かな時間が過ぎれば切り替える（#2438）
+    chatty = FakeChild([b"goal not met\r\n"] * 50, None)
+    later = wrapper.WallClock(now=lambda: time.time() + 60.0)
+    ended, spawn, _ = _run(tmp_path, [chatty, FakeChild([], 0)], marks={0: "/goal 次"}, wall=later, quiet=30.0)
+    assert len(spawn.calls) == 2 and spawn.calls[1][0][-1] == "/goal 次"
+    assert chatty.outputs and ended.cause == ""
+
+
+class EndedPty(FakeChild):
+    """終わった擬似端末: 読むと EIO を返し、select には読める状態を返し続ける。"""
+
+    def __init__(self):
+        super().__init__([], 1)
+        os.write(self.write_fd, b"x")
+
+
+def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
+    # 子が終わった後の待ち（上限のリセットなど）で、終わった擬似端末を読み続けない
+    child = EndedPty()
+    reads = []
+    real_read = os.read
+
+    def read(fd, size):
+        if fd == child.fd:
+            reads.append(fd)
+            raise OSError(5, "EIO")
+        return real_read(fd, size)
+
+    monkeypatch.setattr(wrapper.os, "read", read)
+    w = wrapper.Wrapper(_settings(tmp_path), spawn=Spawner([child]), clock=_clock())
+    try:
+        w._start(wrapper.Launch(1, "s", None, "", resume=False))
+        for _ in range(5):
+            w._pump(0.0)
+    finally:
+        child.close()
+    assert len(reads) == 1 and w.section.eof is True

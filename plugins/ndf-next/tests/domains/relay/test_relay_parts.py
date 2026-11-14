@@ -81,6 +81,9 @@ def test_child_env_drops_editor_git_auth_and_sets_relay_values(tmp_path):
     parent = {"PATH": "/bin", "GIT_ASKPASS": "/vscode/askpass.sh", "VSCODE_GIT_IPC_HANDLE": "/tmp/x.sock", "VSCODE_GIT_ASKPASS_MAIN": "m"}
     got = session_env.child_env(parent, tmp_path)
     assert got["PATH"] == "/bin" and not set(facts.ids("env", child="drop")) & set(got)  # #2985
+    # Claude Code の中から起動しても、入れ子の起動の印と親のセッションの ID を子へ残さない
+    nested = session_env.child_env({**parent, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent"}, tmp_path)
+    assert "CLAUDECODE" not in nested and "CLAUDE_CODE_SESSION_ID" not in nested
     assert got["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"  # #2504
     assert "NDF_CLAUDE_ACCOUNT" not in got
     accounts.use(tmp_path, "work")

@@ -60,6 +60,14 @@ def test_limit_pick_switches_account_with_resume_prompt():
     got = switch_decide.decide(state(limit_pick=pick, next_block="/goal x"))
     assert (got.kind, got.account, got.prompt) == ("account", "main", switch_decide.RESUME_PROMPT)
     assert switch_decide.decide(state(limit_pick=Pick("wait_reset", "team", "替える先が無い"))).kind == "wait_reset"
+    # 替えて起こし直すのも今日の起動の上限に数える
+    assert switch_decide.decide(state(limit_pick=pick, starts_today=3)).kind == "stop"
+
+
+def test_next_block_waits_from_the_first_mark_not_only_from_the_last_output():
+    # /goal の未達の応答で画面が静かにならなくても、印を最初に書いてから静かな時間が過ぎれば切り替える（#2438）
+    assert switch_decide.decide(state(next_block="/goal 次", idle_seconds=1.0, next_age_seconds=4.0)).kind == "wait"
+    assert switch_decide.decide(state(next_block="/goal 次", idle_seconds=1.0, next_age_seconds=5.0)).kind == "switch"
 
 
 @pytest.mark.parametrize(

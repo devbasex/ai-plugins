@@ -109,11 +109,22 @@ def drain(ctx: Context) -> bool:
         signals.replace_json(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
         requests = base / "requests"
         for path in sorted(requests.glob("*.json")) if requests.is_dir() else []:
-            got = handle(ctx, json.loads(path.read_text(encoding="utf-8")))
+            got = _handle_file(ctx, path)
             signals.replace_json(base / "results" / path.name, got._asdict())
             _log(base, path.stem, got)
             path.unlink()
         return True
+
+
+def _handle_file(ctx: Context, path: Path) -> Outcome:
+    """依頼のファイル 1 本を処理する。読めない依頼・処理が送出した例外も結果にして返す（後ろの依頼を止めない）。"""
+    try:
+        req = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(req, dict):
+            return Outcome(False, f"依頼の形が違う（{path.name}）", "invalid")
+        return handle(ctx, req)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return Outcome(False, f"依頼を処理できない（{path.name}）: {type(exc).__name__}: {exc}", "invalid")
 
 
 def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
@@ -135,7 +146,10 @@ def read_registry(state_dir: Path) -> dict[str, dict[str, Any]]:
     path = hub_dir(state_dir) / REGISTRY_FILE
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise registry.RegistryError(f"登録簿を読めない（{path}）: {exc}") from exc
     entries = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(entries, dict):
         raise registry.RegistryError(f"登録簿の形が違う（{path}）")
@@ -162,6 +176,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
         return refused
     names = {r.name for r in running}
     name = str(req.get("name") or _next_name(names | set(entries)))
+    registry.wrapper_dir(ctx.state_dir, name)  # 名前の形を tmux を起動する前に確かめる（違えば RegistryError）
     if name in names or ctx.tmux.has(name):
         return Outcome(False, f"{name} は既に動いている", "refused")
     lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, False, 0, ctx.max_starts)

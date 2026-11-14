@@ -20,7 +20,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optional
 
@@ -67,7 +67,10 @@ class Launch:
 
 @dataclass
 class Section:
-    """今の区間。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。"""
+    """今の区間。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
+
+    `eof` は擬似端末が終わりを返した印（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
+    """
 
     number: int
     session_id: str
@@ -77,6 +80,7 @@ class Section:
     last_output: float = 0.0
     handover_asked: bool = False
     limit_at: Optional[float] = None
+    eof: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,7 +159,7 @@ class Wrapper:
 
     def _state(self) -> switch_decide.SectionState:
         sec = self._current()
-        nxt = signals.read_next(self.dir)
+        nxt = self._next_mark(sec)
         alive = sec.child.isalive()
         screen = observe.plain(bytes(sec.screen))
         transcript = observe.transcript_path(self.s.environ, self.s.cwd, sec.session_id)
@@ -167,6 +171,7 @@ class Wrapper:
             starts_today=self._starts_today(),
             max_starts=self.s.max_starts,
             idle_seconds=self.clock() - sec.last_output,
+            next_age_seconds=self._age(nxt["first_written_at"]) if nxt else 0.0,
             quiet_seconds=self.s.quiet,
             stall_seconds=self.s.stall,
             context_tokens=observe.context_tokens(transcript, self.s.transcript_bytes),
@@ -175,6 +180,22 @@ class Wrapper:
             limit_pick=self._limit_pick(sec, screen),
             auth_failed=observe.auth_failed(screen),
         )
+
+    def _next_mark(self, sec: Section) -> Optional[dict[str, Any]]:
+        """今の区間のセッションが書いた次の区間の印。前の実行の印（セッションが違う）は消して読まない。"""
+        nxt = signals.read_next(self.dir)
+        if nxt is not None and nxt.get("session_id") != sec.session_id:
+            signals.drop(self.dir, signals.NEXT_FILE)
+            self._log({"kind": "stale_next", "reason": f"セッション {nxt.get('session_id')} の印は今の区間のものでない"})
+            return None
+        return nxt
+
+    def _age(self, written_at: str) -> float:
+        """ISO の時刻から今（壁時計）までの秒。読めない時刻は `SignalError`（今の時刻へ倒さない）。"""
+        try:
+            return max(0.0, self.wall.now() - datetime.fromisoformat(written_at).timestamp())
+        except ValueError as exc:
+            raise signals.SignalError(f"次の区間の印の first_written_at を読めない: {written_at}") from exc
 
     def _limit_pick(self, sec: Section, screen: str) -> Optional[account_decide.Pick]:
         if observe.limit_line(screen) is None:
@@ -272,7 +293,8 @@ class Wrapper:
     def _pump(self, timeout: float) -> None:
         """子の画面を端末へ写し、端末の入力を子へ渡す。どちらも無ければ `timeout` 秒で返る。"""
         sec = self._current()
-        fds = [sec.child.fd] + ([self.stdin_fd] if self.stdin_fd is not None else [])
+        child_fds = [] if sec.eof else [sec.child.fd]
+        fds = child_fds + ([self.stdin_fd] if self.stdin_fd is not None else [])
         ready, _, _ = select.select(fds, [], [], timeout)
         if sec.child.fd in ready:
             self._from_child(sec)
@@ -289,6 +311,7 @@ class Wrapper:
         except OSError:  # 子が終わると擬似端末は EIO を返す。生き死には isalive で読む
             data = b""
         if not data:
+            sec.eof = True  # 読める状態が続くので、次の見回りからは `tick` 秒を眠って待つ
             return
         if self.out is not None:
             self.out.write(data)

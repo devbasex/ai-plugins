@@ -227,3 +227,31 @@ def test_restart_refuses_when_todays_starts_reach_the_limit(ctx):
 def test_spawn_registers_zero_starts_for_today(ctx):
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
     assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
+
+
+def test_a_broken_registry_answers_invalid_and_does_not_block_later_requests(ctx):
+    # 依頼 1 本の例外で、後ろの依頼が答えを待ち切れなくならない
+    path = hub.hub_dir(ctx.state_dir) / hub.REGISTRY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{壊れた", encoding="utf-8")
+    got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
+    assert (got.ok, got.cause) == (False, "invalid") and "登録簿を読めない" in got.summary
+    assert not list((hub.hub_dir(ctx.state_dir) / "requests").glob("*.json"))
+    path.unlink()
+    assert hub.submit(ctx, {"kind": "stop", "name": "t1"}).ok
+
+
+def test_an_unreadable_request_file_gets_an_invalid_result(ctx):
+    requests = hub.hub_dir(ctx.state_dir) / "requests"
+    requests.mkdir(parents=True)
+    (requests / "0-bad.json").write_text("[1", encoding="utf-8")
+    assert hub.drain(ctx)
+    result = json.loads((hub.hub_dir(ctx.state_dir) / "results" / "0-bad.json").read_text(encoding="utf-8"))
+    assert (result["ok"], result["cause"]) == (False, "invalid") and not (requests / "0-bad.json").exists()
+
+
+@pytest.mark.parametrize("name", ["a b", "x" * 65])
+def test_spawn_with_a_malformed_name_starts_no_tmux_session(ctx, name):
+    # 名前の形を tmux を起動する前に確かめ、止める手段の無いセッションを残さない
+    got = hub.submit(ctx, {"kind": "spawn", "name": name})
+    assert (got.ok, got.cause) == (False, "invalid") and ctx.tmux.started == []

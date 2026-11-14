@@ -24,6 +24,8 @@ class SectionState:
 
     - `question`: AskUserQuestion の hook が書いた問いがまだ回されていないか
     - `next_block`: Stop の hook が書いた次の区間のブロック（無ければ None）。`/goal` が未達でも同じ（#2438）
+    - `next_age_seconds`: 次の区間の印を最初に書いてからの秒（`first_written_at` から。`/goal` の未達の応答が
+      続いて画面が静かにならなくても、印から数えて静かな時間が過ぎれば切り替える。#2438）
     - `child_alive`・`child_exit`: 子のプロセスが生きているか・終わったときの終了コード
     - `starts_today`・`max_starts`: 今日起動し直した回数と上限
     - `idle_seconds`・`quiet_seconds`・`stall_seconds`: 子の出力が止まってからの秒・切り替えに要る静かな秒・止まりとみなす秒
@@ -39,6 +41,7 @@ class SectionState:
     starts_today: int
     max_starts: int
     idle_seconds: float = 0.0
+    next_age_seconds: float = 0.0
     quiet_seconds: float = 0.0
     stall_seconds: float = 0.0
     context_tokens: Optional[int] = None
@@ -69,7 +72,7 @@ def decide(state: SectionState) -> Step:
         return first
     quiet = state.idle_seconds >= state.quiet_seconds
     if state.next_block is not None:
-        if state.child_alive and not quiet:
+        if state.child_alive and not quiet and state.next_age_seconds < state.quiet_seconds:
             return Step("wait", f"次の区間の印がある。静かな時間 {state.quiet_seconds:g} 秒を待つ")
         return Step("switch", "最後の応答が次の区間のブロックを持つ（/goal が未達でも切り替える）", prompt=state.next_block)
     if not state.child_alive:
@@ -80,6 +83,9 @@ def decide(state: SectionState) -> Step:
 def _limit_or_auth(state: SectionState) -> Optional[Step]:
     pick = state.limit_pick
     if pick is not None and pick.kind == "switch":
+        # 替えて起こし直すのも起動の 1 回に数える（古い使用率で同じ先を選び続けても、日の上限で止まる）
+        if state.starts_today >= state.max_starts:
+            return Step("stop", f"{pick.reason}。今日起動し直した回数が上限（{state.max_starts} 回）に当たった")
         return Step("account", pick.reason, prompt=RESUME_PROMPT, account=pick.account)
     if pick is not None:
         return Step("wait_reset", pick.reason)
