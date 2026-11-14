@@ -14,8 +14,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
 
-from ndf.domains.release import version_decide
-
 # リリース記録なし（閉じの引数の 0）
 RECORD_NONE = "0"
 # 閉じが本番の記録から番号を引く印（明示の番号が無く、届ける経路があるとき）
@@ -83,11 +81,6 @@ def closing_pace(pace: str) -> str:
 def verify_needed(pace: str, mvv: bool, promote: bool, merge: bool) -> bool:
     """導入の確認の段を置くか。進め方が fast・auto で、MVV の判定があり、本番かマージの経路があるときだけ（#2967）。"""
     return pace in MVV_PACES and mvv and (promote or merge)
-
-
-def prod_version(version: Optional[str]) -> Optional[str]:
-    """明示の開発版から本番の版（開発版の印を外したもの）。開発版が無ければ None（本番は版の記録から読む）。"""
-    return version_decide.base_of(version) if version else None
 
 
 def close_plan(facts: CloseFacts, paces: Sequence[str]) -> ClosePlan:
