@@ -145,8 +145,8 @@ LOG = """2026-11-12T13:33:01.1Z ============ short test summary info ===========
 """
 
 
-def test_failed_tests_and_files_from_log() -> None:
-    nodes = ci.failed_tests(LOG)
+def test_failed_test_nodes_and_files_from_log() -> None:
+    nodes = ci.failed_test_nodes(LOG)
     assert nodes == ["tests/test_other.py", "tests/test_stage_check.py::test_names", "tests/test_stage_check.py::test_order[standard]"]
     assert ci.files_of(nodes) == ["tests/test_other.py", "tests/test_stage_check.py"]
 
@@ -160,11 +160,11 @@ class _Logs:
         return f"FAILED tests/test_{job}.py::t - x\n"
 
 
-def test_failed_tests_of_reads_at_most_the_declared_number_of_jobs() -> None:
+def test_failed_test_nodes_of_reads_at_most_the_declared_number_of_jobs() -> None:
     cap = int(limits.value("github.failed-logs", "count"))
     checks = [ci.Check(f"pytest ({i}/9)", "done", "failure", i) for i in range(cap + 3)]
     logs = _Logs()
-    nodes = ci.failed_tests_of(logs, checks)  # type: ignore[arg-type]
+    nodes = ci.failed_test_nodes_of(logs, checks)  # type: ignore[arg-type]
     assert logs.jobs == list(range(cap))
     assert nodes == sorted(f"tests/test_{i}.py::t" for i in range(cap))
 

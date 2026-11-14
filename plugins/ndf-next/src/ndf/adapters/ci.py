@@ -175,7 +175,7 @@ def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iter
     return _VERDICT_KINDS[verdict]
 
 
-def failed_tests(log_text: str) -> list[str]:
+def failed_test_nodes(log_text: str) -> list[str]:
     """CI のジョブのログから、pytest が落とした（`FAILED`・`ERROR`）テストの node id を並べる（重ねない・昇順）。"""
     return sorted({m.group("node") for m in _PYTEST_FAILED.finditer(log_text)})
 
@@ -185,12 +185,12 @@ def files_of(nodes: Iterable[str]) -> list[str]:
     return sorted({n.partition("::")[0] for n in nodes})
 
 
-def failed_tests_of(github: GitHub, checks: Iterable[Check]) -> list[str]:
+def failed_test_nodes_of(github: GitHub, checks: Iterable[Check]) -> list[str]:
     """落ちたテストのチェックのジョブのログから、落ちたテストの node id を集める（`github.failed-logs` ジョブまで）。"""
     cap = int(limits.value("github.failed-logs", "count"))
     found: set[str] = set()
     for check in list(checks)[:cap]:  # noqa: NDF201 上限: ジョブ github.failed-logs 件まで（limits.json）
-        found.update(failed_tests(github.job_log(check.job)))
+        found.update(failed_test_nodes(github.job_log(check.job)))
     return sorted(found)
 
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Reading, Watch, failed_tests_of, files_of, is_test_check, watch_head
+from ndf.adapters.ci import Reading, Watch, failed_test_nodes_of, files_of, is_test_check, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -56,7 +56,7 @@ def _watch(a: argparse.Namespace) -> dict:
     kind = done.cause(a.test, merge_failed)
     metrics: dict[str, Any] = {"rounds": done.rounds, "elapsed": round(done.elapsed, 1), "queued_for": round(done.queued_for, 1)}
     if kind == "test_failed":
-        nodes = failed_tests_of(hub, done.reading.failed_tests)
+        nodes = failed_test_nodes_of(hub, done.reading.failed_tests)
         metrics.update({"failed_tests": nodes, "test_files": files_of(nodes)})
     items = _items(done.reading, a.test)
     if kind is None:
