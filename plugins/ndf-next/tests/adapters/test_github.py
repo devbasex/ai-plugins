@@ -590,7 +590,8 @@ def test_merge_sends_the_request_when_repository_flags_are_missing() -> None:
 
 
 def test_allowed_merge_methods_treats_a_non_list_ruleset_body_as_no_rules() -> None:
-    assert _allowed({"message": "x"}, {"allow_merge_commit": True}) == (["merge"], [RULES_PATH, f"/repos/{REPO}"])
+    settings = {"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": False}
+    assert _allowed({"message": "x"}, settings) == (["merge"], [RULES_PATH, f"/repos/{REPO}"])
 
 
 def test_allowed_merge_methods_skips_repository_settings_when_the_ruleset_allows_none() -> None:

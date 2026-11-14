@@ -176,6 +176,7 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
     text = masked
     if public:
         steps = (
+            (DropKind.HOME, lambda t: _HOME.subn(HOME_TEXT, t)),
             (DropKind.EMAIL, _drop_emails),
             (DropKind.ACCOUNT, lambda t: _drop_accounts(t, accounts)),
         )
