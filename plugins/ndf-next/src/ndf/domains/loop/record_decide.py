@@ -186,26 +186,25 @@ def check(ev: Mapping[str, Any]) -> None:
         raise RecordError(f"周の結果 {ev['outcome']!r} は {'・'.join(OUTCOMES)} のどれでもない")
 
 
+def _lap_index(state: LoopState, number: int) -> int:
+    """番号の周の添字（同じ番号が複数あれば先頭）。無ければ `RecordError`。"""
+    for i, lap in enumerate(state.laps):
+        if lap.number == number:
+            return i
+    raise RecordError(f"記録に無い周 {number} への事象")
+
+
 def _with_lap(state: LoopState, number: int, **change: Any) -> LoopState:
+    i = _lap_index(state, number)
     laps = list(state.laps)
-    for i, lap in enumerate(laps):
-        if lap.number == number:
-            laps[i] = replace(lap, **change)
-            return replace(state, laps=tuple(laps))
-    raise RecordError(f"記録に無い周 {number} への事象")
-
-
-def _lap(state: LoopState, number: int) -> Lap:
-    for lap in state.laps:
-        if lap.number == number:
-            return lap
-    raise RecordError(f"記録に無い周 {number} への事象")
+    laps[i] = replace(laps[i], **change)
+    return replace(state, laps=tuple(laps))
 
 
 def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     """周に付く事象を当てる。"""
     kind, n = ev["kind"], int(ev["lap"])
-    lap = _lap(state, n)
+    lap = state.laps[_lap_index(state, n)]
     if kind == MODE_DECIDED:
         return _with_lap(state, n, mode=ev["mode"], basis=ev["basis"])
     if kind == EXCLUDED:
