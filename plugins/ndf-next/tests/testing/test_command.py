@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import causes, result
-from ndf.testing import records, slots, waits
+from ndf.testing import command, records, slots, waits
 from ndf.testing.limits import Limits
 
 # 子プロセスへ読ませる src（conftest の src_env と同じ求め方）
@@ -166,6 +166,15 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     rows = records.read_events(directory)
     assert [row["result"] for row in rows] == [slots.GAVE_UP, slots.FINISHED]
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
+
+
+def test_memory_stop_exits_apart_from_a_failed_test(capsys):
+    # メモリで止めた実行は落ちたテストとして数えない（I9）。終了コードは落ちたテストの 1 と重ならない
+    code = command._stopped_from(slots.Stopped(records.MEMORY_STOPPED, 2.0, 100))
+    got = json.loads(capsys.readouterr().out)
+    assert code == causes.exit_code("infra_wait") != causes.exit_code("test_failed")
+    assert got["status"] == "stopped"
+    assert got["cause"]["kind"] == "infra_wait" and got["cause"]["instance"] == records.MEMORY_STOPPED
 
 
 def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):

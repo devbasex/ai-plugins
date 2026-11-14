@@ -36,8 +36,8 @@ _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
 # 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、
-# メモリの見張りで止めたは interrupted
-_CAUSE_OF = {records.GAVE_UP: "wait_timeout", records.MEMORY_STOPPED: "interrupted"}
+# メモリの見張りで止めたは作業マシンの資源の待ちとして infra_wait（終了コードが落ちたテストの 1 と重ならない。I9）
+_CAUSE_OF = {records.GAVE_UP: "wait_timeout", records.MEMORY_STOPPED: "infra_wait"}
 
 
 def _stopped(kind: str, detail: str, **extra: object) -> int:
