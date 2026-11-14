@@ -59,6 +59,44 @@ def test_registration_files_are_read_when_present(tmp_path):
     assert any(r["runtime"] == "codex" for r in regs)
 
 
+def _write_registration(root, runtime: str, data) -> None:
+    (root / "hooks").mkdir(exist_ok=True)
+    (root / "hooks" / f"{runtime}.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_registrations_without_files_are_built_from_the_budget(tmp_path):
+    assert budget.registrations_of(tmp_path) == budget.budget_registrations()
+    # ファイルでないもの（ディレクトリ）も無いものとして扱う
+    (tmp_path / "hooks" / "claude.json").mkdir(parents=True)
+    assert budget.registrations_of(tmp_path) == budget.budget_registrations()
+
+
+def test_registration_files_keep_every_hook_in_order(tmp_path):
+    claude = {
+        "hooks": {
+            "Stop": [{"hooks": [{"timeout": 6}, {"command": "x"}]}, {"hooks": [{"timeout": 2}]}],
+            "PreToolUse": [{"hooks": [{"timeout": 3}]}],
+            "SessionEnd": [],
+        }
+    }
+    _write_registration(tmp_path, "claude", claude)
+    _write_registration(tmp_path, "codex", {"hooks": {"Stop": [{"hooks": [{"timeout": 9}]}]}})
+    assert budget.registrations_of(tmp_path) == [
+        {"runtime": "claude", "event": "Stop", "timeout": 6},
+        {"runtime": "claude", "event": "Stop", "timeout": None},
+        {"runtime": "claude", "event": "Stop", "timeout": 2},
+        {"runtime": "claude", "event": "PreToolUse", "timeout": 3},
+        {"runtime": "codex", "event": "Stop", "timeout": 9},
+    ]
+
+
+def test_registration_file_without_a_hooks_object_has_no_rows(tmp_path):
+    others = [r for r in budget.budget_registrations() if r["runtime"] != "claude"]
+    for data in ({}, {"hooks": [1]}, {"hooks": None}):
+        _write_registration(tmp_path, "claude", data)
+        assert budget.registrations_of(tmp_path) == others
+
+
 def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
     broken = copy.deepcopy(tables.policies())
     broken["hook.counter-lock"]["seconds"] = 30
