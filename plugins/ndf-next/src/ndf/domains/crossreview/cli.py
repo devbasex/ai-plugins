@@ -84,7 +84,9 @@ def cmd_head(args: argparse.Namespace) -> int:
         pull = gh.GitHub(slug, gh.client()).pull(args.pr)
     except gh.GitHubError as exc:
         return _stop("transient" if exc.unreached else "precondition", f"PR #{args.pr} の head を読めない: {exc}")
-    return _ok(f"PR #{args.pr} の head {pull.head_sha}", [{"kind": "pr", "number": args.pr, "head": pull.head_sha, "branch": pull.head_ref}])
+    return _ok(
+        f"PR #{args.pr} の head {pull.head_sha}", [{"kind": "pr", "number": args.pr, "head": pull.head_sha, "branch": pull.head_ref}]
+    )
 
 
 # --- worktree --------------------------------------------------------------------------
@@ -164,7 +166,10 @@ def cmd_state(args: argparse.Namespace) -> int:
     if args.current is not None:
         ref = store.record_current(ref, args.current)
     fix = store.fix_result_path(Path(args.state_dir), ref)
-    return _ok(f"状態ファイル {ref.path.name}（元の番号 {ref.origin_pr}・今の番号 {ref.current_pr}）", [_ref_item(ref), {"kind": "fix_result", "path": str(fix)}])
+    return _ok(
+        f"状態ファイル {ref.path.name}（元の番号 {ref.origin_pr}・今の番号 {ref.current_pr}）",
+        [_ref_item(ref), {"kind": "fix_result", "path": str(fix)}],
+    )
 
 
 def _last_round(ref: store.StateRef) -> dict[str, Any]:
@@ -184,7 +189,11 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
         return _stop("work_stopped", str(gate.reason), items=[_ref_item(ref)])
     if gate.kind == fixgate_decide.INGEST:
         again = result.command(TOOL, "merge-fix", "--state-dir", args.state_dir, "--pr", str(args.pr), "--file", str(gate.pending))
-        return _ok(f"修正の記録は無いが結果ファイルが残っている: {gate.pending}", [_ref_item(ref), {"kind": "ingest", "path": gate.pending}], next=again)
+        return _ok(
+            f"修正の記録は無いが結果ファイルが残っている: {gate.pending}",
+            [_ref_item(ref), {"kind": "ingest", "path": gate.pending}],
+            next=again,
+        )
     return _ok("次のラウンドへ進める", [_ref_item(ref)])
 
 

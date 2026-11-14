@@ -25,9 +25,7 @@ class FixGate(NamedTuple):
     reason: Optional[str]
 
 
-def require_fix_for_changes(
-    round_no: int, verdict: Optional[str], fix: Optional[Mapping[str, Any]], pending: Optional[str]
-) -> FixGate:
+def require_fix_for_changes(round_no: int, verdict: Optional[str], fix: Optional[Mapping[str, Any]], pending: Optional[str]) -> FixGate:
     """`round_no` は前のラウンドの番号、`verdict` はその判定、`fix` は修正の記録、`pending` は残った結果ファイルのパス。"""
     if verdict != CHANGES_REQUIRED or fix:
         return FixGate(OK, None, None)

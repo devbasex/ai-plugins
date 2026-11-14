@@ -39,9 +39,7 @@ def sections_of(path: str, text: str) -> list[str]:
     return out
 
 
-def review_scope(
-    every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]
-) -> Scope:
+def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:
     """ラウンド `round_no`（1 から）の範囲。`every_section`（設計の PR）なら、`reviewed`（前のラウンドまでに詳細レビューを
     通った節）に無い節が残る間は全差分を見る。"""
     unreviewed = tuple(s for s in sections if s not in reviewed) if every_section else ()
