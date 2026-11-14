@@ -71,6 +71,8 @@ from ndf.core.durable_ledger import (
 )
 from ndf.core.durable_locks import (
     MAINT_LOCK as MAINT_LOCK,
+    RUN_LOCK_SPACE as RUN_LOCK_SPACE,
+    SQLITE_PREFIX as SQLITE_PREFIX,
     STORE_LOCK as STORE_LOCK,
     StoreBroken,
     StoreConfigBroken as StoreConfigBroken,
@@ -78,7 +80,9 @@ from ndf.core.durable_locks import (
     StoreInUse,
     StoreStopped as StoreStopped,
     maint_lock as maint_lock,
+    open_lock_file as open_lock_file,
     sa as sa,
+    sa_url as sa_url,
     store_lock as store_lock,
 )
 
@@ -571,14 +575,14 @@ def release_store(root: Path) -> None:
 # --- 鍵ごとのファイルの検査と退避（決定 82・83） -----------------------------------------
 
 
-def _fresh(mark: Path, now: datetime) -> bool:
+def is_fresh(mark: Path, now: datetime) -> bool:
     try:
         return now.timestamp() - mark.stat().st_mtime < CHECK_INTERVAL.total_seconds()
     except FileNotFoundError:  # noqa: NDF401 ファイル: 目印が無ければ古いとして扱う
         return False
 
 
-def _touch(mark: Path, now: datetime) -> None:
+def touch_mark(mark: Path, now: datetime) -> None:
     mark.parent.mkdir(parents=True, exist_ok=True)
     mark.touch()
     os.utime(mark, (now.timestamp(), now.timestamp()))
@@ -629,10 +633,10 @@ def _drop_marks(body: Path) -> None:
 def _check_key_file(path: Path, now: datetime) -> None:
     """鍵ごとの目印が古いか無ければ `quick_check` を打つ。通らなければ broken/ へ移して `StoreBroken`（A4）。"""
     mark = path.with_suffix(CHECKED_SUFFIX)
-    if _fresh(mark, now):
+    if is_fresh(mark, now):
         return
     if check_file(path):
-        _touch(mark, now)
+        touch_mark(mark, now)
         return
     moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}{DB_SUFFIX}", now)
     raise StoreBroken(f"耐久の記録のファイルが壊れていたので退避した: {moved}", (moved,))
@@ -744,11 +748,11 @@ def _sweep_guard(root: Path, now: datetime) -> Iterator[bool]:
     """`maint_lock` を待たずに取り、目印 `dbos/.swept` を読み直して古ければ真を渡し、抜けるときに目印を更新する。"""
     with maint_lock(root, wait=False) as held:
         mark = _dbos_dir(root) / SWEPT_MARK
-        if held is None or _fresh(mark, now):
+        if held is None or is_fresh(mark, now):
             yield False
             return
         yield True
-        _touch(mark, now)
+        touch_mark(mark, now)
 
 
 def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, SweepResult], None], message: str) -> SweepResult:

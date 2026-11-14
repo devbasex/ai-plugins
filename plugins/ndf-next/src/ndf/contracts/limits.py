@@ -31,6 +31,7 @@ class Policy(NamedTuple):
     attempts: Optional[int] = None
     same_cause: Optional[int] = None
     count: Optional[int] = None
+    gib: Optional[float] = None
 
 
 # 方針の値の名前（名前と説明を除いた Policy の項目）
