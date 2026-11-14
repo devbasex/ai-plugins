@@ -313,30 +313,47 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
                                          "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
 
 
+def _apply_failures(got: dict[str, Any]) -> list[dict[str, Any]]:
+    """移動・付け直し・判定・起票・表の失敗を 1 つの列にする。"""
+    tables = got["tables"]
+    return [*got["move_failed"], *got["parents"]["failed"], *got["acted"]["failed"],
+            *({"title": f["title"], "error": f["reason"]} for f in got["made"]["failed"]),
+            *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else []))]  # fmt: skip
+
+
+def _apply_summary(got: dict[str, Any]) -> str:
+    acted, made, parents = got["acted"], got["made"], got["parents"]
+    buckets = acted["buckets"]
+    return (f"反映した: 判定の反映 {len(buckets[actions_decide.APPLIED])} 件（閉じた {len(acted['closed'])} 件）・"
+            f"起票 {len(made['created'])} 件・移動 {len(got['moved'])} 件・保留 {len(got['holds'])} 件・"
+            f"付け直し {len(parents['applied'])} 件・承認待ち {len(buckets[actions_decide.WAITING])} 件・"
+            f"人へ返した {len(buckets[actions_decide.RETURNED_BUCKET])} 件")  # fmt: skip
+
+
+def _next_steps(waiting: list[int], skipped: list[int]) -> list[str]:
+    nxt = []
+    if waiting:
+        nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
+    if skipped:
+        nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
+    return nxt
+
+
 def _apply_outcome(repo: str, run_id: str, plan_path: str, got: dict[str, Any]) -> dict[str, Any]:
     """反映の結果から status・要約・metrics を作る。失敗は止め、承認待ちと照合で飛ばした課題は gate で返す。"""
     acted, made, parents, tables = got["acted"], got["made"], got["parents"], got["tables"]
     buckets = acted["buckets"]
-    failed = [*got["move_failed"], *parents["failed"], *acted["failed"],
-              *({"title": f["title"], "error": f["reason"]} for f in made["failed"]),
-              *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else []))]  # fmt: skip
+    failed = _apply_failures(got)
     out = {"repo": repo, **buckets, "closed": acted["closed"], "created": made["created"], "create_rejected": made["rejected"],
            "moved": got["moved"], "held": sorted(got["holds"]), "reparented": parents["applied"], "failed": failed,
            "before": parents["before"], "tables": tables}  # fmt: skip
-    summary = (f"反映した: 判定の反映 {len(buckets[actions_decide.APPLIED])} 件（閉じた {len(acted['closed'])} 件）・"
-               f"起票 {len(made['created'])} 件・移動 {len(got['moved'])} 件・保留 {len(got['holds'])} 件・"
-               f"付け直し {len(parents['applied'])} 件・承認待ち {len(buckets[actions_decide.WAITING])} 件・"
-               f"人へ返した {len(buckets[actions_decide.RETURNED_BUCKET])} 件")  # fmt: skip
+    summary = _apply_summary(got)
     if failed:
         raise Stop("incomplete", f"{summary}。{len(failed)} 件が失敗した（同じ plan で打ち直せば済んだものは記録で飛ぶ。"
                    f"付け直しを戻すは ndf issues revert --run {run_id}）", acted["items"], failed)  # fmt: skip
     waiting, skipped = buckets[actions_decide.WAITING], buckets[actions_decide.SKIPPED]
     if waiting or skipped:
-        nxt = []
-        if waiting:
-            nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
-        if skipped:
-            nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
+        nxt = _next_steps(waiting, skipped)
         again = result.command(TOOL, "apply", "--repo", repo, "--plan", plan_path, "--run-id", run_id)
         out["next_steps"] = nxt
         return result.result(TOOL, result.GATE, summary + "。" + "。".join(nxt), acted["items"], out, run_id=run_id,
