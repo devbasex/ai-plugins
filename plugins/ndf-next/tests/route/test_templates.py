@@ -86,3 +86,19 @@ def test_unknown_shared_step_is_refused():
     t = route.Template("x", "x_purpose", "見本", (), {"name": "x", "steps": [{"use": "no-such"}]})
     with pytest.raises(route.RouteError, match="共有のステップに no-such が無い"):
         route.expanded(t)
+
+
+# 現状固定（I-008）: worker を起こすステップの展開結果（差し込みは埋めない）。
+@pytest.mark.parametrize(
+    ("template", "step", "expected"),
+    [
+        ("impl", "fix", {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test"}),
+        ("check", "fix", {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"}),
+        ("design", "design", {"id": "design", "run": ["{{worker}}", "design"]}),
+        ("close", "spec", {"id": "spec", "run": ["{{worker}}", "plan-to-spec"]}),
+        ("impl", "work", {"id": "work", "run": ["{{worker}}", "impl"]}),
+    ],
+)
+def test_worker_steps_expand_to_fixed_shape(template, step, expected):
+    found = [s for s in route.expanded(route.templates()[template])["steps"] if s["id"] == step]
+    assert found == [expected]
