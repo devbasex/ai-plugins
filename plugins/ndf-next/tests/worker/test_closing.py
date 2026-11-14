@@ -24,7 +24,7 @@ def repo(tmp_path):
     return tmp_path
 
 
-@pytest.mark.parametrize("text", ["Fix: #12 直す", "closes #3", "Resolved owner/repo#9", "fixes  #1"])
+@pytest.mark.parametrize("text", ["Fix: #12 直す", "closes #3", "Resolved owner/repo#9", "fixes  #1", "Fix:#12", "Fixes https://github.com/o/r/issues/12"])
 def test_closing_words_hit(text):
     assert worker.closing_words(text)
 
