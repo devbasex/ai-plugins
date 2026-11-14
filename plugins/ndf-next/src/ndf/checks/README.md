@@ -104,3 +104,5 @@ I1 は Skill 本文（`skills/`）とエージェント定義（`agents/`）を�
 ```
 
 ラベルでなく本文の印にしたのは、理由を同じ所に残せるためである。PR 本文は GitHub の事象の JSON（`--event`。既定は環境変数 `GITHUB_EVENT_PATH`）から読む。本文を書き直した後は CI を打ち直す。
+
+CI（`.github/workflows/ndf-next.yml`）は main へのリリースの PR に `--base` を渡さない。リリースの PR は develop で I2 を通った差分を束ねるだけで、旧いプラグインの変更を必ず含むためである。
