@@ -259,6 +259,31 @@ def test_new_stops_as_invalid_when_the_project_file_is_not_json(repo, capsys):
     assert "project.json を読めない" in out["cause"]["detail"]
 
 
+@pytest.mark.parametrize(
+    "decl",
+    [
+        "止めている",
+        {"reason": "enabled が無い"},
+        {"enabled": "false", "reason": "真偽でない"},
+        {"enabled": False},
+        {"enabled": False, "reason": ""},
+    ],
+)
+def test_new_stops_as_invalid_when_a_stage_declaration_has_the_wrong_shape(repo, capsys, decl):
+    _declare(repo, json.dumps({"workflow": {"stages": {"リファクタリング": decl}}}))
+    code, out = _new(capsys)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and code == 2
+    assert "workflow.stages.リファクタリング" in out["cause"]["detail"]
+
+
+def test_requirements_is_refused_in_a_mode_without_the_requirements_stage(repo, capsys, tmp_path):
+    good = tmp_path / "req.json"
+    good.write_text(json.dumps({"steps": [], "summary": "要求を書いた"}))
+    code, out = _run(capsys, "new", "s1", "--mode", "legacy-refactor", "--issues", "3369", "--requirements", str(good))
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and code == 2
+    assert "要求と受け入れ条件の工程が無い" in out["cause"]["detail"]
+
+
 # --- 現状固定: 進行表の作成（_cmd_new） ------------------------------------------------------------
 
 

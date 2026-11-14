@@ -24,7 +24,8 @@
       "stage": "リファクタリング",
       "phase": "implement",
       "when": [
-        "code_in_diff"
+        "code_in_diff",
+        "ci_declared"
       ],
       "inputs": [
         "worktree",

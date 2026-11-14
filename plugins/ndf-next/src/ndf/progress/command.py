@@ -38,6 +38,7 @@ PROJECT_FILE = ".ndf/project.json"
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
 DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
+REQUIREMENTS_STAGE = "requirements"  # `--requirements` が終了の印を付ける工程の文書の名前
 
 
 # --- 置き場とリポジトリ ------------------------------------------------------------------
@@ -73,7 +74,24 @@ def _declared(cwd: Path) -> dict[str, Any]:
     raw = _read_json(path, "を読めない")
     workflow = raw.get("workflow") if isinstance(raw, dict) else None
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
-    return declared if isinstance(declared, dict) else {}
+    if not isinstance(declared, dict):
+        return {}
+    errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _declaration_errors(value)]
+    if errs:
+        raise contracts.ContractError(f"{path} の宣言が形に合わない: {'; '.join(errs)}")
+    return declared
+
+
+def _declaration_errors(value: Any) -> list[str]:
+    """工程の宣言 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
+    if not isinstance(value, dict):
+        return ['{"enabled": 真偽, "reason": 理由} の形でない']
+    if not isinstance(value.get("enabled"), bool):
+        return ["enabled が真偽でない"]
+    reason = value.get("reason")
+    if not value["enabled"] and not (isinstance(reason, str) and reason):
+        return ["無効にするときの reason が空か文字列でない"]
+    return []
 
 
 # --- 進行表の読み書き ---------------------------------------------------------------------
@@ -136,10 +154,15 @@ def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], fi
 
 
 def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, str]]:
-    """`--requirements` の出力を最初の工程の出力の規約で確かめ、終了の印を付ける工程の一覧にする。"""
+    """`--requirements` の出力を要求と受け入れ条件の工程の出力の規約で確かめ、終了の印を付ける工程の一覧にする。
+
+    その工程を持たないモードでは別の工程へ印を付けず、引数の誤りとして断る。"""
     if path is None:
         return []
-    stage = snap.stages[0]
+    found = [s for s in snap.stages if s.id == REQUIREMENTS_STAGE]
+    if not found:
+        raise definition.WorkflowDefError([f"--requirements: モード {snap.mode} に要求と受け入れ条件の工程が無い"])
+    stage = found[0]
     errs = definition.validate_stage_output(stage, _read_json(Path(path)))
     if errs:
         raise definition.WorkflowDefError([f"{stage.name} の出力が規約に合わない: {e}" for e in errs])

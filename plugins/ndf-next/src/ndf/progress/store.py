@@ -250,7 +250,9 @@ def ensure_schema(store: Store, now: datetime) -> None:
     with _translated(store.root):
         found = _read_version(store.engine)
         if found is not None and found > SCHEMA_VERSION:
-            raise durable.StoreFormatNewer(f"進行表の表の版 {found} が自分の {SCHEMA_VERSION} より新しい: {store.url}")
+            # 接続 URL のパスワードを結果 JSON・ログへ出さない
+            shown = store.engine.url.render_as_string(hide_password=True)
+            raise durable.StoreFormatNewer(f"進行表の表の版 {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
         if found == SCHEMA_VERSION:
             return
         if found is not None and store.path is not None:
