@@ -55,6 +55,15 @@ def try_lock(path: Path) -> FileLock | None:
     return held
 
 
+def is_owned(directory: Path, index: int) -> bool:
+    """番号 `index` の枠の持ち主が生きているか（ロックを待たずに取れなければ真。取れたらすぐ返す）。"""
+    probe = try_lock(slot_path(directory, index, ".lock"))
+    if probe is None:
+        return True
+    probe.release()  # 持ち主がいない
+    return False
+
+
 def slot_path(directory: Path, index: int, suffix: str = "") -> Path:
     return directory / f"{SLOT_PREFIX}{index}{suffix}"
 
@@ -110,11 +119,8 @@ def _live_weights(directory: Path, own: set[int]) -> tuple[int, set[int]]:
         index = slot_index(path)
         if index is None:
             continue
-        if index not in own:
-            probe = try_lock(path)
-            if probe is not None:
-                probe.release()  # 持ち主がいない
-                continue
+        if index not in own and not is_owned(directory, index):
+            continue
         alive.add(index)
         data = read_json(slot_path(directory, index, ".json"))
         value = None if data is None else data.get(WEIGHT_KEY)

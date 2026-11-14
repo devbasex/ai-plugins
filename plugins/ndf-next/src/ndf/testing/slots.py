@@ -52,8 +52,6 @@ HELD_ENV = "NDF_TEST_SLOT_HELD"
 # 枠の置き場を別の開発コンテナと共有するときの環境変数（決定 8）
 SLOTS_DIR_ENV = "NDF_TEST_SLOTS_DIR"
 SLOTS_DIR_NAME = "test-slots"
-# 枠のファイルの名前の頭（`slot-<番号>.lock`・`slot-<番号>.json`）
-SLOT_PREFIX = slot_pool.SLOT_PREFIX
 # 枠とメモリを確かめる間隔
 POLL_SECONDS = 2.0
 # 1 回の下限割れで止めた後、次に止めるまで空ける秒（I6）
@@ -146,17 +144,15 @@ class _MemoryMonitor:
     def _is_last_started(self, own_index: int, started_at: float) -> bool:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
         mine = (started_at, own_index)
-        for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
+        for path in self.directory.glob(f"{slot_pool.SLOT_PREFIX}*.json"):
             index = slot_pool.slot_index(path)
             if index is None or index == own_index:
                 continue
             started = _owner_value(path, "started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
-            probe = slot_pool.try_lock(slot_pool.slot_path(self.directory, index, ".lock"))
-            if probe is None:
+            if slot_pool.is_owned(self.directory, index):
                 return False  # 後に始めた実行が生きている
-            probe.release()
         return True
 
     def _claim_stop(self, index: int) -> bool:
