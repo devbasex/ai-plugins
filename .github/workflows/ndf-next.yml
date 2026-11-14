@@ -115,7 +115,8 @@ jobs:
           copy="$RUNNER_TEMP/copy/plugins/ndf"
           mkdir -p "$(dirname "$copy")"
           cp -R . "$copy"
-          uv run --frozen --project . python - "$copy" <<'EOF'
+          # src/ndf はパッケージとして入れない（pyproject.toml の tool.uv）ので、src をパスへ足して読む
+          PYTHONPATH=src uv run --frozen --project . python - "$copy" <<'EOF'
           import json, pathlib, sys
           from ndf import identity
           for rel in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"):
