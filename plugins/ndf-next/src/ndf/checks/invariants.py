@@ -28,9 +28,9 @@ LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
 # I1 が定義の行を通す `identity` のファイル（プラグインの根からの相対パス）と、通す名前
 IDENTITY_FILE = "src/" + identity.__name__.replace(".", "/") + ".py"
 DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
-# Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
 # 移す先の行が持つ Issue の参照
 ISSUE_REF = re.compile(r"#\d+")
+# Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
 
 
