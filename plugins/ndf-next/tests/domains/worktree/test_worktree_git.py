@@ -166,6 +166,40 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
     assert (wt / "notes.txt").read_text(encoding="utf-8") == "keep me" and trash.candidates(Git(main_repo), "develop") == []
 
 
+def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
+    """選んで集める取り込み方のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
+    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"promotion": "selected"}}
+    (main_repo / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+    run_git(main_repo, "add", "-A")
+    run_git(main_repo, "commit", "-q", "-m", "declare")
+    wt = create.create(main_repo, "sprint/s9").path
+    (wt / "s.txt").write_text("s", encoding="utf-8")
+    run_git(wt, "add", "s.txt")
+    run_git(wt, "commit", "-q", "-m", "s")
+    run_git(main_repo, "merge", "-q", "--no-ff", "-m", "merge", "sprint/s9")
+    hub = FakeHub({"sprint/s9": [_pull("sprint/s9", "closed", True)]})
+    [got] = cleanup.cleanup(main_repo, main_repo, hub)
+    assert got.verdict == cleanup_decide.KEEP_SPRINT and not got.removed and wt.exists() and got.note
+    assert run_git(main_repo, "branch", "--list", "sprint/s9").strip()
+
+
+def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_git: Callable) -> None:
+    """squash のマージでは先端が本番に入らないため、退避の台帳へ PR のマージコミットも書く（回収の候補になる）。"""
+    from ndf.domains.worktree import trash
+
+    wt = create.create(main_repo, "feat/sq").path
+    (wt / ".gitignore").write_text(".env\n", encoding="utf-8")
+    run_git(wt, "add", ".gitignore")
+    run_git(wt, "commit", "-q", "-m", "ignore")
+    run_git(main_repo, "merge", "-q", "--no-ff", "-m", "merge", "feat/sq")
+    merge = run_git(main_repo, "rev-parse", "HEAD").strip()
+    (wt / ".env").write_text("A=1", encoding="utf-8")
+    pull = _pull("feat/sq", "closed", True)._replace(merge_sha=merge)
+    [got] = cleanup.cleanup(main_repo, main_repo, FakeHub({"feat/sq": [pull]}))
+    dest = Path(got.note.split(" ", 1)[1].split("。", 1)[0])
+    assert json.loads(trash.ledger_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
+
+
 # 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
 def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
     from ndf.domains.worktree import ledger, mainlock, trash

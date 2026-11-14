@@ -126,6 +126,11 @@ def _same_entity(src: Path, dest: Path) -> bool:
     return src.is_dir() and dest.is_dir() and os.path.samefile(src, dest)
 
 
+def _same_link(src: Path, dest: Path) -> bool:
+    """複製元と複製先がどちらも symlink で、同じ先を指すか（前の用意で複製し終えたもの）。"""
+    return src.is_symlink() and dest.is_symlink() and os.readlink(src) == os.readlink(dest)
+
+
 def _copy_tree(src: Path, dest: Path, link: bool) -> None:
     try:
         shutil.copytree(src, dest, symlinks=True, copy_function=os.link if link else shutil.copy2)
@@ -163,6 +168,7 @@ def _existing_dest(src: Path, dest: Path, rel: str, kind: str, redo: bool) -> ob
     """既にある宛先の扱い。`None` は複製へ進む（実体の複製は古い宛先を消してから）、文字列は失敗の理由、`_KEEP_DEST` はそのまま使う。
 
     宛先そのものが symlink なら複製しない（複製はリンクをたどって、リンクが指す worktree の外のファイルへ書く）。
+    複製元と同じ先を指す symlink（前の用意の複製）は、呼ぶ側の `copy_step` が先に済みとして扱う。
     """
     if dest.is_symlink():
         return f"複製先が symlink を指す（たどって書かない）: {rel}"
@@ -185,10 +191,12 @@ def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Opt
     src, dest = main_dir / rel, top / rel
     if not src.exists():
         return f"複製元が無い: {src}"
-    if _same_entity(src, dest):
-        return f"複製元と複製先が同じ実体を指す: {rel}"
     if _outside(top, dest):
         return f"{rel} は実体をたどると worktree の外を指す"
+    if _same_link(src, dest):  # 前の用意で複製した symlink（複製は symlink を symlink のまま写す）
+        return None
+    if _same_entity(src, dest):
+        return f"複製元と複製先が同じ実体を指す: {rel}"
     existing = _existing_dest(src, dest, rel, kind, redo)
     if existing is _KEEP_DEST:
         return None
@@ -247,9 +255,13 @@ def _verify(wt: Git, top: Path, steps: dict[str, list[str]], before: str, since:
 
 
 def prepare(worktree: Path, if_unprepared: bool = False, shell: Optional[container.Shell] = None) -> Prepared:
-    """依存を用意する。宣言・`deps` 節が無ければ何もしない。形が違えば `DepsError`、git の失敗は `GitError`。"""
+    """依存を用意する。宣言・`deps` 節が無ければ何もしない。形が違えば `DepsError`、git の失敗は `GitError`。
+
+    `worktree` が worktree の下のディレクトリでも、worktree の根へ複製する。
+    """
+    loc = repo.locate(Git(worktree))
+    worktree, main_dir = loc.top, loc.main_dir
     wt = Git(worktree)
-    main_dir = repo.locate(wt).main_dir
     started = time.monotonic()
     marker, key = mark_file(wt), mark_key(wt, main_dir)
     previous = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None

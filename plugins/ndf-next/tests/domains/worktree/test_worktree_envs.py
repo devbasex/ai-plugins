@@ -117,6 +117,40 @@ def test_deps_refuses_dest_symlink(main_repo: Path, run_git: Callable, tmp_path:
     assert got.failed.startswith("copy_as_real[0]") and outside.read_text(encoding="utf-8") == "mine"
 
 
+def test_deps_accepts_symlink_copied_before(main_repo: Path, run_git: Callable) -> None:
+    """複製元が symlink なら複製も symlink になる。印が効かない再実行でも、同じ先を指す複製は済みとして通す。"""
+    (main_repo / ".gitignore").write_text(".worktrees/\nlnk\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["lnk"]}})
+    (main_repo / "lnk").symlink_to(".gitignore")
+    wt = create.create(main_repo, "feat/ln").path
+    assert deps.prepare(wt).failed == ""
+    assert (wt / "lnk").is_symlink() and os.readlink(wt / "lnk") == ".gitignore"
+    assert deps.prepare(wt).failed == ""
+    os.unlink(wt / "lnk")
+    (wt / "lnk").symlink_to("other")
+    assert deps.prepare(wt).failed.startswith("copy_as_real[0]")  # 別の先を指す symlink は拒む
+
+
+def test_deps_from_subdirectory_copies_to_worktree_root(main_repo: Path, run_git: Callable) -> None:
+    (main_repo / ".gitignore").write_text(".worktrees/\ncfg.local\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["cfg.local"]}})
+    (main_repo / "cfg.local").write_text("c", encoding="utf-8")
+    wt = create.create(main_repo, "feat/sub").path
+    (wt / "src").mkdir()
+    assert deps.prepare(wt / "src").failed == ""
+    assert (wt / "cfg.local").read_text(encoding="utf-8") == "c" and not (wt / "src" / "cfg.local").exists()
+
+
+def test_env_targets_normalize_to_worktree_root(main_repo: Path, run_git: Callable) -> None:
+    (main_repo / "compose.yml").write_text("services: {}\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"localenv": {"kind": "compose", "compose_files": ["compose.yml"]}, "testenv": {}})
+    wt = create.create(main_repo, "feat/root").path
+    (wt / "src").mkdir()
+    lt, tt = localenv.target(wt / "src"), testenv.target(wt / "src", FakeShell().shell())
+    assert lt is not None and tt is not None
+    assert lt.path == tt.path == Path(os.path.realpath(wt))
+
+
 def test_deps_rejects_broken_section(main_repo: Path, run_git: Callable) -> None:
     _declare(main_repo, run_git, {"deps": {"run": "make"}})
     wt = create.create(main_repo, "feat/f").path
@@ -140,6 +174,17 @@ def test_localenv_verify_mode_and_aim(main_repo: Path, run_git: Callable) -> Non
     assert verdict.result == localenv_decide.ISOLATE and hits == ["db/m.sql（db/*）"]
     assert localenv.aim(t, fake.shell()) == 1
     assert ["true", "exec", "-u", "root", "c1", "ln", "-sfn", "--", str(t.path), "/app"] in [c[0] for c in fake.calls]
+
+
+def test_localenv_aim_uses_declared_compose_project(main_repo: Path, run_git: Callable) -> None:
+    local = {"kind": "compose", "layout": "indirect", "src_target": "/app", "compose_project": "MyApp"}
+    _declare(main_repo, run_git, {"localenv": local})
+    t = localenv.target(create.create(main_repo, "feat/p").path)
+    assert t is not None
+    fake = FakeShell({"ps --filter": Completed(0, "", "")})
+    assert localenv.aim(t, fake.shell()) == 0
+    [ps] = [c[0] for c in fake.calls if c[0][1:2] == ["ps"]]
+    assert f"label={container.PROJECT_LABEL}=myapp" in ps
 
 
 def test_localenv_not_applicable_without_compose(main_repo: Path) -> None:
@@ -515,6 +560,20 @@ def test_expose_keeps_record_when_open_and_close_fail(tmp_path: Path) -> None:
     with pytest.raises(testenv.TestenvError, match="^公開の手段が失敗した。閉じたかを確かめられないため公開中の記録を残した"):
         testenv_sweep.expose(t)
     assert t.book.current(t.key)["expose"]["closed_at"] is None  # type: ignore[index]
+
+
+def test_expose_and_unexpose_wait_for_the_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """開く・閉じる操作は共通の排他の中で行う（開く途中に閉じる側が記録を閉じない）。"""
+    from filelock import FileLock
+
+    t = _sweep_target(tmp_path, FakeShell(), EXPOSE)
+    _assigned(t)
+    monkeypatch.setattr(testenv_sweep, "EXPOSE_LOCK_WAIT", 0)
+    with FileLock(str(tmp_path / testenv_sweep.EXPOSE_LOCK)):
+        for op in (testenv_sweep.expose, testenv_sweep.unexpose):
+            with pytest.raises(testenv.TestenvError, match="別の公開の操作"):
+                op(t)
+    assert testenv_sweep.expose(t) == "https://wt0.example.test"
 
 
 def test_unexpose_runs_close_command_and_closes(tmp_path: Path) -> None:

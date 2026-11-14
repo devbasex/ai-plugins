@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Protocol
 
-from ndf.adapters.git import ORIGIN, Git, GitError
+from ndf.adapters.git import ORIGIN, Git
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
@@ -54,26 +54,6 @@ class Record:
 
     def count(self, kind: str, result: str) -> int:
         return sum(1 for i in self.items if i["kind"] == kind and i["result"] == result)
-
-
-def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str, Any]]:
-    """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
-    if decl is None:
-        return None
-    flow = decl.branch_flow
-    out: dict[str, Any] = dict(flow) if flow is not None else {}
-    out["production_branch"] = decl.production_branch
-    return out
-
-
-def _contained(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Optional[bool]:
-    production = flow.get("production_branch") if flow is not None else None
-    if not production:
-        return None
-    try:
-        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{ORIGIN}/{production}")
-    except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番チャネル）なら確かめられないとして残す側へ倒す
-        return None
 
 
 def _remove_worktree(main: Git, item: repo.Worktree, rec: Record, merge: str = "") -> bool:
@@ -152,7 +132,7 @@ def _one(main: Git, main_dir: Path, pull: Pull, flow: Optional[Mapping[str, Any]
     production = flow.get("production_branch") if flow is not None else None
     keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
     if keep is None:
-        keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow), ORIGIN)
+        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow), ORIGIN)
     if keep is not None:
         rec.add("branch", branch, outcomes.KEPT, keep)
         return
@@ -193,7 +173,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     """マージの後の後片付けを行い、記録を返す。"""
     main = Git(main_dir)
     decl = declaration.load(main_dir)
-    flow = flow_record if flow_record is not None else declared_flow(decl)
+    flow = flow_record if flow_record is not None else repo.declared_flow(decl)
     pulls = hub.pulls(numbers)
     rec = Record()
     base = repo.base_branch(main, decl)

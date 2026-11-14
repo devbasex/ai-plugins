@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from ndf import identity
-from ndf.adapters.git import ORIGIN, Git, WorktreeEntry
+from ndf.adapters.git import ORIGIN, Git, GitError, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
 
@@ -78,6 +78,27 @@ def default_branch(git: Git) -> Optional[str]:
 def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:
     """ベースブランチ: 宣言の `base_branch`、無ければ origin の既定ブランチ。"""
     return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
+
+
+def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str, Any]]:
+    """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
+    if decl is None:
+        return None
+    flow = decl.branch_flow
+    out: dict[str, Any] = dict(flow) if flow is not None else {}
+    out["production_branch"] = decl.production_branch
+    return out
+
+
+def contained_in_production(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Optional[bool]:
+    """ブランチが `<origin>/<本番チャネル>` に含まれるか（`flow` の `production_branch`）。確かめられなければ `None`。"""
+    production = flow.get("production_branch") if flow is not None else None
+    if not production:
+        return None
+    try:
+        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{ORIGIN}/{production}")
+    except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番チャネル）なら確かめられないとして残す側へ倒す
+        return None
 
 
 def current_branch(git: Git) -> Optional[str]:

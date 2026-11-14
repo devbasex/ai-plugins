@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import calendar
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from filelock import FileLock, Timeout
 
@@ -24,6 +25,9 @@ from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
 DEFAULT_TTL = "8h"
+# 公開を開く・閉じる操作の排他（台帳の隣の置き場）と、その待ちの上限（秒。開く手段の所要を含む）
+EXPOSE_LOCK = "expose.lock"
+EXPOSE_LOCK_WAIT = 300
 
 
 def _age(stamp: Any) -> Optional[float]:
@@ -105,8 +109,24 @@ def _close(row: dict[str, Any]) -> None:
     row["expose"]["closed_at"] = ledger.now()
 
 
+@contextmanager
+def _exposing_lock(t: Target) -> Iterator[None]:
+    """公開を開く・閉じる操作の排他（記録の取得から手段の完了まで。開く途中に閉じる側が記録を閉じないように）。"""
+    t.book.path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with FileLock(str(t.book.path.parent / EXPOSE_LOCK), timeout=EXPOSE_LOCK_WAIT):
+            yield
+    except Timeout as exc:
+        raise TestenvError(f"拒否: 別の公開の操作が {EXPOSE_LOCK_WAIT} 秒を過ぎても終わらない") from exc
+
+
 def expose(t: Target) -> str:
     """公開して URL を返す。既に開いていればその URL。拒むときは `TestenvError`。"""
+    with _exposing_lock(t):
+        return _expose(t)
+
+
+def _expose(t: Target) -> str:
     conf = _config(t)
     row = t.book.current(t.key)
     if row is None:
@@ -124,7 +144,7 @@ def expose(t: Target) -> str:
     if t.shell.sh(str(conf["open_command"]), t.path, values).returncode != 0:
         # 開く手段が口を作った後で失敗したかもしれない。閉じる手段で閉じられたときだけ記録を閉じる
         try:
-            unexpose(t)
+            _unexpose(t)
         except TestenvError as exc:
             raise TestenvError(f"公開の手段が失敗した。閉じたかを確かめられないため公開中の記録を残した: {exc}") from exc
         raise TestenvError("公開の手段が失敗した。閉じる手段で閉じて記録を戻した")
@@ -133,6 +153,11 @@ def expose(t: Target) -> str:
 
 def unexpose(t: Target) -> Optional[str]:
     """公開を閉じ、閉じた URL を返す（開いていなければ `None`）。"""
+    with _exposing_lock(t):
+        return _unexpose(t)
+
+
+def _unexpose(t: Target) -> Optional[str]:
     row = _open_row(t.book.rows(), t.key)
     if row is None:
         return None

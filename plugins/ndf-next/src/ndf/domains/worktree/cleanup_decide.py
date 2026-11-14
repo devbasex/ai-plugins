@@ -23,6 +23,7 @@ KEEP_DIRTY = "uncommitted"
 KEEP_NO_PR = "no_pr"
 KEEP_OPEN = "open_pr"
 KEEP_UNMERGED = "closed_unmerged"
+KEEP_SPRINT = "sprint_unreleased"
 # 理由の説明（結果の items に載せる）
 REASONS = {
     REMOVE: "PR がマージ済みで、変更が残っていない",
@@ -33,15 +34,20 @@ REASONS = {
     KEEP_NO_PR: "ブランチの PR が無い",
     KEEP_OPEN: "開いた PR がある",
     KEEP_UNMERGED: "PR がマージされずに閉じた（消すかは人が決める）",
+    KEEP_SPRINT: "選んで集める取り込み方のスプリントブランチで、本番チャネルに含まれるまで残す（merged_decide.sprint_keep）",
 }
 
 
 @dataclass(frozen=True)
 class PullState:
-    """判断に要る PR の状態（`adapters.github.Pull` の `state`・`merged` と同じ語）。"""
+    """判断に要る PR の状態（`adapters.github.Pull` の `state`・`merged`・`merge_sha` と同じ語）。
+
+    `merge_sha` は判断には使わず、消すときに退避の台帳へ書く（squash のマージでは先端と別）。
+    """
 
     state: str
     merged: bool
+    merge_sha: str = ""
 
 
 @dataclass(frozen=True)

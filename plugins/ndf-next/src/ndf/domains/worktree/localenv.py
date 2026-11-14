@@ -44,13 +44,14 @@ class Target:
 
 
 def target(path: Path) -> Optional[Target]:
-    """対象。適用外なら `None`。"""
-    main_dir = repo.locate(Git(path)).main_dir
+    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。適用外なら `None`。"""
+    loc = repo.locate(Git(path))
+    main_dir = loc.main_dir
     decl = declaration.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if section is None or section.get("kind") != KIND:
         return None
-    return Target(path, main_dir, section)
+    return Target(loc.top, main_dir, section)
 
 
 def compose_files(decl: declaration.Declaration) -> tuple[str, ...]:
@@ -130,9 +131,10 @@ def aim(t: Target, shell: container.Shell) -> int:
         raise LocalenvError("localenv.layout が indirect・direct・host のどれでもない")
     if src_target is None:
         raise LocalenvError("localenv.src_target が要る")
-    project = container.compose_project(t.main_dir.name)
+    # 宣言の `compose_project`（名前を決めて起動するプロジェクト）。無ければメインディレクトリの名前から作る
+    project = container.compose_project(t.text("compose_project") or t.main_dir.name)
     if project is None:
-        raise LocalenvError("コンテナのプロジェクト名を決められない")
+        raise LocalenvError("コンテナのプロジェクト名を決められない（localenv.compose_project を書く）")
     if not shell.has_docker():
         raise LocalenvError("コンテナの実行系が見つからない")
     _build(t, shell)

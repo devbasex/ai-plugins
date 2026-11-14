@@ -211,3 +211,22 @@ def test_trash_candidate_by_merge_commit_after_squash(main_repo: Path, run_git: 
     trash.evacuate(Git(main_repo), wt, "feat/q", head, squash)
     [cand] = trash.candidates(Git(main_repo), "develop")
     assert cand.released and not Git(main_repo).is_ancestor(head, "develop")
+
+
+def test_evacuate_moves_back_when_a_later_move_fails(main_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2 件目を移せなければ、先に移したファイルを worktree へ戻してから止める（抜けたまま残さない）。"""
+    wt = create.create(main_repo, "feat/half").path
+    (wt / "a.txt").write_text("a", encoding="utf-8")
+    (wt / "b.txt").write_text("b", encoding="utf-8")
+    real = trash.shutil.move
+
+    def move(src: str, dst: str) -> object:
+        if src.endswith("b.txt") and str(trash.trash_root(Git(main_repo))) in dst:
+            raise OSError("boom")
+        return real(src, dst)
+
+    monkeypatch.setattr(trash.shutil, "move", move)
+    with pytest.raises(trash.TrashError, match="b.txt"):
+        trash.evacuate(Git(main_repo), wt, "feat/half", "0" * 40)
+    assert (wt / "a.txt").read_text(encoding="utf-8") == "a" and (wt / "b.txt").exists()
+    assert trash.candidates(Git(main_repo), "develop") == []

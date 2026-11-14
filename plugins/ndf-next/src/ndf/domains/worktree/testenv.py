@@ -67,12 +67,14 @@ class Target:
 
 
 def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Target]:
-    main_dir = repo.locate(Git(path)).main_dir
+    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。宣言・節が無ければ `None`。"""
+    loc = repo.locate(Git(path))
+    main_dir = loc.main_dir
     decl = declaration.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if decl is None or section is None:
         return None
-    return Target(Path(os.path.realpath(path)), main_dir, section, localenv.compose_files(decl),
+    return Target(loc.top, main_dir, section, localenv.compose_files(decl),
                   shell if shell is not None else container.Shell.from_env(), ledger.Ledger.of(Git(main_dir)))  # fmt: skip
 
 

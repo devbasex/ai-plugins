@@ -2,7 +2,8 @@
 
 1. メインディレクトリの `git worktree list` から、置き場 `.worktrees/` の下の worktree を集める
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
-3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）
+3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）。消すと決まっても、
+   選んで集める取り込み方のスプリントブランチは本番チャネルに含まれるまで残す（`merged_decide.sprint_keep`。今の宣言で決める）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
    追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
    `git worktree remove`（`--force` を付けない）で消し（断られたら退避したファイルを戻す。`trash.restore`）、ブランチを `git branch -d` で消す
@@ -18,10 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
 
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import ORIGIN, Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import cleanup_decide, repo, testenv_sweep, trash
-from ndf.domains.worktree.cleanup_decide import REMOVE, Facts, PullState
+from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, repo, testenv_sweep, trash
+from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
 
 
 class PullReader(Protocol):
@@ -67,7 +68,7 @@ def _local_facts(item: repo.Worktree, cwd: Path) -> Facts:
 
 
 def _with_pulls(facts: Facts, pulls: Iterable[Pull]) -> Facts:
-    states = tuple(PullState(p.state, p.merged) for p in pulls)
+    states = tuple(PullState(p.state, p.merged, p.merge_sha) for p in pulls)
     return Facts(facts.branch, facts.locked, facts.current, facts.dirty, states)
 
 
@@ -81,7 +82,12 @@ def survey(main_dir: Path, cwd: Path, hub: PullReader, git: Optional[Git] = None
     return [(item, _with_pulls(f, pulls[f.branch]) if f.branch in pulls else f) for item, f in local]
 
 
-def _remove(g: Git, item: repo.Worktree) -> Outcome:
+def _merge_commit(facts: Facts) -> str:
+    """マージ済みの PR のマージコミット（退避の台帳へ書く。分からなければ空）。"""
+    return next((p.merge_sha for p in facts.pulls if p.merged and p.merge_sha), "")
+
+
+def _remove(g: Git, item: repo.Worktree, merge: str = "") -> Outcome:
     closed = testenv_sweep.close_for_removal(item.path)
     if closed is not None:
         return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {closed}")
@@ -89,7 +95,7 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
     got: Optional[trash.Evacuated] = None
     if item.path.is_dir() and trash.leftovers(item.path):  # 無視したファイルは git worktree remove が黙って消す
         try:
-            got = trash.evacuate(g, item.path, str(item.branch), item.head)
+            got = trash.evacuate(g, item.path, str(item.branch), item.head, merge)
         except trash.TrashError as exc:
             return Outcome(item.path, item.branch, REMOVE, note=f"退避できないため worktree を消さなかった: {exc}")
         evacuated = f"退避先 {got.dest}" if got.dest is not None else ""
@@ -110,14 +116,26 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
     return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True, note=evacuated)
 
 
+def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict]) -> Optional[str]:
+    """`merged` が残したスプリントブランチを、本番チャネルに含まれる前に消さない（残す理由。消してよければ `None`）。"""
+    branch = str(item.branch)
+    if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ本番チャネルを読まない
+        return None
+    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow), ORIGIN)
+
+
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
+    flow = repo.declared_flow(declaration.load(main_dir))
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):
         verdict = cleanup_decide.decide(facts)
-        if verdict == REMOVE and not dry_run:
-            out.append(_remove(g, item))
+        keep = _sprint_keep(g, item, flow) if verdict == REMOVE else None
+        if keep is not None:
+            out.append(Outcome(item.path, item.branch, KEEP_SPRINT, note=keep))
+        elif verdict == REMOVE and not dry_run:
+            out.append(_remove(g, item, _merge_commit(facts)))
         else:
             out.append(Outcome(item.path, item.branch, verdict))
     if not dry_run:

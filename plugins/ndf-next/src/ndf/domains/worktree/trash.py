@@ -99,12 +99,14 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "")
         **({"merge_commit": merge} if merge else {}),
     }
     ledger_of(dest).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-    for rel in moved:
+    for i, rel in enumerate(moved):
         try:
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(worktree / rel), str(dest / rel))
-        except (OSError, shutil.Error) as exc:  # 1 件でも移せなければ残りを移さず、worktree を外させない
-            raise TrashError(f"{rel} を退避先 {dest} へ移せない: {exc}") from exc
+        except (OSError, shutil.Error) as exc:  # 1 件でも移せなければ残りを移さず、移した分を戻して worktree を外させない
+            back = restore(worktree, Evacuated(dest, moved[:i], discarded))
+            kept = f"（移した分を戻せない: {back}）" if back is not None else ""
+            raise TrashError(f"{rel} を退避先 {dest} へ移せない: {exc}{kept}") from exc
     return Evacuated(dest, moved, discarded)
 
 
