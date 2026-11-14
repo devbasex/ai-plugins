@@ -25,7 +25,7 @@
 
 ## 前提
 
-- 前提 1: 迂回のマージは利用者のアカウントで打つ。`GITHUB_TOKEN` では本番チャネルへの push が CD を起動しない（確定仕様 [docs/specifications/ndf-release-approval-on-pr.md](docs/specifications/ndf-release-approval-on-pr.md) の 42 行目）。利用者のアカウントは ruleset の迂回を許された役割（リポジトリの役割 admin）を持つ
+- 前提 1: 迂回のマージは利用者のアカウントで打つ。`GITHUB_TOKEN` では本番チャネルへの push が CD を起動しない（確定仕様 [docs/specifications/ndf-release-approval-on-pr.md](../docs/specifications/ndf-release-approval-on-pr.md) の 42 行目）。利用者のアカウントは ruleset の迂回を許された役割（リポジトリの役割 admin）を持つ
 - 前提 2: 宣言があるときは、承認ゲートの承認を PR のレビューでは確かめない（作者本人のレビューは付けられないため）。承認は、NDF が先端と照らせる形で PR の上に残す。形（`cd-no-review` と同じ証跡のコメントに寄せるか、別の記録か）は設計が決める
 - 前提 3: 宣言が読めない（ファイルが壊れている・値の型が違う）ときは、宣言が無いときと同じく迂回しない。迂回へ倒すと、承認なしのマージが通る側へ誤るため
 - 前提 4: 迂回のマージは、本番の PR の先端を指定して打つ。指定した先端と GitHub の上の先端が違えば、GitHub がマージを拒む
@@ -38,7 +38,7 @@
 - 迂回してマージしたことの記録
 - 作り直し（`plugins/ndf-next/`）のリリースのマージ（`plugins/ndf-next/src/ndf/domains/release/land.py`）が、同じ宣言を読むこと
 - ai-plugins の宣言にこの値を書くこと
-- 確定仕様（[docs/specifications/ndf-release-approval-on-pr.md](docs/specifications/ndf-release-approval-on-pr.md)）の不変条件 I7（迂回なしでマージする）を、宣言の有無で分けて書き直すこと
+- 確定仕様（[docs/specifications/ndf-release-approval-on-pr.md](../docs/specifications/ndf-release-approval-on-pr.md)）の不変条件 I7（迂回なしでマージする）を、宣言の有無で分けて書き直すこと
 
 含まない:
 - ruleset そのものの変更（承認数を 0 にする、迂回を許す役割を変える など）
@@ -105,8 +105,8 @@
 
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
-| プロジェクト構造 | 宣言は `.ndf/` に置き、スキーマは `plugins/ndf/skills/development-workflow/schemas/` に置く。NDF のスクリプトに ai-plugins 固有の値を書かない（[AGENTS.md](AGENTS.md) の「安定版と実験版」、#3119） |
-| コーディング規約 | [AGENTS.md](AGENTS.md) の「最小限のコード実装」。`.md` の文言を照合するテストは書かない |
+| プロジェクト構造 | 宣言は `.ndf/` に置き、スキーマは `plugins/ndf/skills/development-workflow/schemas/` に置く。NDF のスクリプトに ai-plugins 固有の値を書かない（[AGENTS.md](../AGENTS.md) の「安定版と実験版」、#3119） |
+| コーディング規約 | [AGENTS.md](../AGENTS.md) の「最小限のコード実装」。`.md` の文言を照合するテストは書かない |
 | テスト戦略 | 判定（宣言の有無・承認・先端・チェックの組み合わせ）は単体テストで、GitHub の操作は差し替えた操作の層で確かめる。実際の迂回のマージはリリース後テストで確かめる |
 
 ## 境界
