@@ -69,14 +69,11 @@ class Target:
 def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Target]:
     main_dir = repo.locate(Git(path)).main_dir
     decl = declaration.load(main_dir)
-    section = decl.raw.get(SECTION) if decl is not None else None
-    if decl is None or not isinstance(section, dict):
+    section = decl.section(SECTION) if decl is not None else None
+    if decl is None or section is None:
         return None
-    local = decl.raw.get(localenv.SECTION)
-    files = local.get("compose_files") if isinstance(local, dict) else None
-    names = tuple(f for f in files if isinstance(f, str) and f) if isinstance(files, list) else ()
-    return Target(Path(os.path.realpath(path)), main_dir, section, names, shell if shell is not None else container.Shell.from_env(),
-                  ledger.Ledger.of(Git(main_dir)))  # fmt: skip
+    return Target(Path(os.path.realpath(path)), main_dir, section, localenv.compose_files(decl),
+                  shell if shell is not None else container.Shell.from_env(), ledger.Ledger.of(Git(main_dir)))  # fmt: skip
 
 
 # --- 割り当て ------------------------------------------------------------------

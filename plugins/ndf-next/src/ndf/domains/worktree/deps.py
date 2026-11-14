@@ -70,8 +70,8 @@ def read_steps(decl: Optional[declaration.Declaration]) -> dict[str, list[str]]:
     """`deps` 節の手順。宣言・節が無ければ空。形が違えば `DepsError`。"""
     if decl is None or SECTION not in decl.raw:
         return {}
-    section = decl.raw[SECTION]
-    if not isinstance(section, dict):
+    section = decl.section(SECTION)
+    if section is None:
         raise DepsError(f"{SECTION} が object でない")
     out: dict[str, list[str]] = {}
     for key in STEPS:

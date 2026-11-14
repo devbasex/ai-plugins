@@ -63,6 +63,16 @@ class Declaration:
         value = self.raw.get(key)
         return value if isinstance(value, str) and value else None
 
+    def section(self, name: str) -> Optional[dict[str, Any]]:
+        """節（`deps`・`localenv`・`testenv` など）の値。無い・オブジェクトでなければ `None`。"""
+        value = self.raw.get(name)
+        return value if isinstance(value, dict) else None
+
+    @property
+    def branch_flow(self) -> Optional[dict[str, Any]]:
+        """取り込み方の節（`branch_flow`）。無い・オブジェクトでなければ `None`。"""
+        return self.section("branch_flow")
+
     @property
     def base_branch(self) -> Optional[str]:
         return self._text("base_branch")
@@ -74,8 +84,8 @@ class Declaration:
     @property
     def start_channel(self) -> str:
         """スプリントの起点のチャネル（`branch_flow.start`。無ければ `base`）。"""
-        flow = self.raw.get("branch_flow")
-        start = flow.get("start") if isinstance(flow, dict) else None
+        flow = self.branch_flow
+        start = flow.get("start") if flow is not None else None
         if start is None:
             return START_CHANNELS[0]
         if start not in START_CHANNELS:

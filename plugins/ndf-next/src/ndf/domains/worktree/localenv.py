@@ -47,10 +47,17 @@ def target(path: Path) -> Optional[Target]:
     """対象。適用外なら `None`。"""
     main_dir = repo.locate(Git(path)).main_dir
     decl = declaration.load(main_dir)
-    section = decl.raw.get(SECTION) if decl is not None else None
-    if not isinstance(section, dict) or section.get("kind") != KIND:
+    section = decl.section(SECTION) if decl is not None else None
+    if section is None or section.get("kind") != KIND:
         return None
     return Target(path, main_dir, section)
+
+
+def compose_files(decl: declaration.Declaration) -> tuple[str, ...]:
+    """`localenv.compose_files` の起動の定義（空でない文字列だけ）。節・配列が無ければ空。"""
+    local = decl.section(SECTION)
+    files = local.get("compose_files") if local is not None else None
+    return tuple(f for f in files if isinstance(f, str) and f) if isinstance(files, list) else ()
 
 
 def setup(t: Target) -> int:

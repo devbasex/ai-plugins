@@ -56,8 +56,8 @@ def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str,
     """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
     if decl is None:
         return None
-    flow = decl.raw.get("branch_flow")
-    out: dict[str, Any] = dict(flow) if isinstance(flow, dict) else {}
+    flow = decl.branch_flow
+    out: dict[str, Any] = dict(flow) if flow is not None else {}
     out["production_branch"] = decl.production_branch
     return out
 
