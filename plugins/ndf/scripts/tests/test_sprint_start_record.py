@@ -65,7 +65,7 @@ def make_repo(tmp_path: Path, flow=None) -> Path:
 def change_flow(repo: Path, flow) -> None:
     """宣言を書き換えてコミットし、`develop` を origin へ送る（再現手順 2）。"""
     write_flow(repo, flow)
-    git(repo, "commit", "-qam", "decl")
+    git(repo, "commit", "-q", "--allow-empty", "-am", "decl")  # 同じ宣言へ書き直しても通す
     git(repo, "push", "-q", "origin", "develop")
 
 
