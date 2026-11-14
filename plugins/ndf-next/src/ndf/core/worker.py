@@ -151,7 +151,7 @@ def quote_source(source: Source) -> str:
 
 def skill_paths(kind: str, skills_dir: Path) -> list[Path]:
     """作業種別に届ける手順の Skill の SKILL.md のパス。表に無い種類は空。"""
-    names = PAUSE_SKILLS[kind] if kind in PAUSE_SKILLS else ()
+    names = PAUSE_SKILLS.get(kind, ())
     return [skills_dir / name / SKILL_FILE for name in names]
 
 
