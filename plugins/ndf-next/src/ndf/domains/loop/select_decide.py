@@ -6,18 +6,18 @@
 - 外す理由のある行は枠を使わない。枠を数えるのは選んだ行だけである（#2746）
 - 開いている子の課題を持つ親の課題は選ばない（#2788）
 
-外す理由の優先の順は `ORDER` の並びで、上ほど先に当たる。
+外す理由の優先の順は `RULES` の並びで、上ほど先に当たる。
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from ndf.domains.loop import record_decide as rec
 
-# 外す理由（鍵 → 文）。並びが優先の順で、先頭に選ぶ課題（KEEP）より前の理由だけがその課題を外す
+# 外す理由の鍵
 PRIOR = "prior-loop-wait"
 KEEP = "pick-first"
 WAITING = "backlog-wait"
@@ -28,18 +28,6 @@ NEEDS = "unmet-prerequisite"
 PARENT = "open-sub-issues"
 CREATED = "created-in-lap"
 CAPACITY = "lap-full"
-ORDER = (PRIOR, KEEP, WAITING, PENDING, BLOCKED, EXCLUDED, NEEDS, PARENT, CREATED)
-REASONS = {
-    PRIOR: "前のループの判断待ち",
-    WAITING: "棚卸しの判断待ち",
-    PENDING: "保留した周の課題",
-    BLOCKED: "未回答・差し戻し・マージ待ち",
-    EXCLUDED: "同じループで外した",
-    NEEDS: "前提の課題が閉じていない",
-    PARENT: "開いている子の課題を持つ親の課題",
-    CREATED: "周の中で起票した",
-    CAPACITY: "枠を使い切った",
-}
 
 
 class CandidateError(ValueError):
@@ -82,25 +70,27 @@ class Selection:
         return out
 
 
-def _hits(row: Row, facts: ExclusionFacts) -> dict[str, bool]:
-    return {
-        PRIOR: row.prior,
-        KEEP: row.issue in facts.first,
-        WAITING: row.waiting,
-        PENDING: row.issue in facts.pending,
-        BLOCKED: row.blocked is not None,
-        EXCLUDED: row.issue in facts.excluded,
-        NEEDS: bool(row.needs),
-        PARENT: row.parent,
-        CREATED: row.issue in facts.created,
-    }
+# 外す理由の表（鍵・文・当たる条件）。並びが優先の順で、先頭に選ぶ課題（KEEP。文なし）より前の理由だけが
+# その課題を外す。枠（CAPACITY）は行の条件でなく選んだ数で当たるので表の外に置く
+RULES: tuple[tuple[str, Optional[str], Callable[[Row, ExclusionFacts], bool]], ...] = (
+    (PRIOR, "前のループの判断待ち", lambda row, facts: row.prior),
+    (KEEP, None, lambda row, facts: row.issue in facts.first),
+    (WAITING, "棚卸しの判断待ち", lambda row, facts: row.waiting),
+    (PENDING, "保留した周の課題", lambda row, facts: row.issue in facts.pending),
+    (BLOCKED, "未回答・差し戻し・マージ待ち", lambda row, facts: row.blocked is not None),
+    (EXCLUDED, "同じループで外した", lambda row, facts: row.issue in facts.excluded),
+    (NEEDS, "前提の課題が閉じていない", lambda row, facts: bool(row.needs)),
+    (PARENT, "開いている子の課題を持つ親の課題", lambda row, facts: row.parent),
+    (CREATED, "周の中で起票した", lambda row, facts: row.issue in facts.created),
+)
+ORDER = tuple(key for key, _, _ in RULES)
+REASONS = {**{key: text for key, text, _ in RULES if text is not None}, CAPACITY: "枠を使い切った"}
 
 
 def exclusion(row: Row, facts: ExclusionFacts) -> Optional[str]:
     """選定から外す理由の鍵を優先の順で 1 つ。外さないなら None（先頭に選ぶ課題はそこで残す）。"""
-    hits = _hits(row, facts)
-    for key in ORDER:
-        if hits[key]:
+    for key, _, hits in RULES:
+        if hits(row, facts):
             return None if key == KEEP else key
     return None
 
