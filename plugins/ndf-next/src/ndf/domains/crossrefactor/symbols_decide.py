@@ -15,7 +15,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ndf.domains.crossrefactor.diff_decide import FileChange, in_scope
+from ndf.domains.crossrefactor.diff_decide import FileChange
+from ndf.testing.scoped import in_scope
 
 # 見送りの理由（提案が課題の触る関数の外を指す）
 OUT_OF_SCOPE = "out_of_scope"

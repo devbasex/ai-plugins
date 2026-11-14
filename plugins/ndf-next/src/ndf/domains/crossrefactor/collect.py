@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ndf.domains.crossrefactor import tests_decide
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.testing.scoped import in_scope
+from ndf.testing import scoped
 from ndf.testing import slots
 
 COLLECT_KEY = "collect_command"
@@ -73,7 +74,7 @@ def collected(work: Path, paths: Sequence[str], suites: Sequence[Mapping[str, An
     got: dict[str, frozenset[str] | None] = {}
     for name, files in by_suite.items():
         template = str(decl[name][COLLECT_KEY])
-        command = tests_decide.fill_paths(template, files) if tests_decide.PATHS_SLOT in template else template
+        command = scoped.fill_paths(template, files) if scoped.PATHS_SLOT in template else template
         found = _collect(work, name, command, timeout)
         got.update({f: found for f in files})
     return tests_decide.collect_verdict(paths, got)
