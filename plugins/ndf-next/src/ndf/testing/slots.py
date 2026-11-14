@@ -228,11 +228,15 @@ class SlotContext:
 
 @dataclass(frozen=True)
 class GateOptions:
-    """`gate` の周りの値（環境変数・置き場・確かめる間隔・メモリの読み取り・中断の知らせ）。テストが差し替える。
+    """`gate` の周りの値（種類・宣言・上限・環境変数・置き場・確かめる間隔・メモリの読み取り・中断の知らせ）。テストが差し替える。
 
-    `environ` と `directory` は None なら今の環境変数とそこから決まる置き場を使う。
+    `kind` を渡すと判定を飛ばしてその種類で枠を取る（None なら宣言から判定する）。`suites` と `limits` は None なら
+    作業場所の宣言から読む。`environ` と `directory` は None なら今の環境変数とそこから決まる置き場を使う。
     """
 
+    kind: str | None = None
+    suites: Sequence[Mapping[str, object]] | None = None
+    limits: limits_mod.Limits | None = None
     environ: Mapping[str, str] | None = None
     directory: Path | None = None
     poll: float = POLL_SECONDS
@@ -245,14 +249,11 @@ def gate(
     command: str | Sequence[str],
     cwd: Path,
     *,
-    kind: str | None = None,
-    suites: Sequence[Mapping[str, object]] | None = None,
-    limits: limits_mod.Limits | None = None,
     options: GateOptions | None = None,
 ) -> Iterator[Held]:
     """重い処理なら枠とメモリを待って取り、出るときに返して記録を足す。
 
-    `kind` を渡すと判定を飛ばしてその種類で枠を取る（`None` なら宣言から判定する）。
+    `options.kind` を渡すと判定を飛ばしてその種類で枠を取る（None なら宣言から判定する）。
     `options.interrupted` が真を返したら、枠・メモリの待ちを抜けて `KeyboardInterrupt` を送る（記録は interrupted）。
     誤った設定は `limits.SlotConfigError`、待ちの諦めとメモリの停止は `Stopped` を送る。
     """
@@ -262,11 +263,12 @@ def gate(
         yield Held()  # 入れ子（I3）と CI（決定 12）
         return
     cwd = Path(cwd)
-    kind = kind or weight.classify(command, limits_mod.load_suites(cwd) if suites is None else suites)
+    suites = options.suites
+    kind = options.kind or weight.classify(command, limits_mod.load_suites(cwd) if suites is None else suites)
     if kind is None:
         yield Held()
         return
-    limits = limits or limits_mod.load_limits(cwd)
+    limits = options.limits or limits_mod.load_limits(cwd)
     try:
         directory = options.directory or slots_dir(env)
         directory.mkdir(parents=True, exist_ok=True)
@@ -382,7 +384,9 @@ def _take_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
 
 def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
     held = Held()
-    monitor = _MemoryMonitor(ctx.directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory)
+    monitor = _MemoryMonitor(
+        ctx.directory, ctx.limits.memory_floor_mib, ctx.options.poll, ctx.options.read_memory, on_stop=held._stopped_by_memory
+    )
     held._monitor = monitor
     taken = _acquire_or_stop(ctx, held, kind)
     if taken is None:

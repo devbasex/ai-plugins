@@ -112,9 +112,9 @@ def _run(command: str, wait_limit: int | None) -> int:
     kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
     with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
-        options = slots.GateOptions(interrupted=lambda: bool(interrupted))
+        options = slots.GateOptions(kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted))
         try:
-            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, options=options) as held:
+            with slots.gate(command, cwd, options=options) as held:
                 code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
             return _stopped_from(exc, _again(command, wait_limit))

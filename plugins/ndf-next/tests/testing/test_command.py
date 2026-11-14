@@ -56,9 +56,7 @@ def _slot_held_elsewhere(root: Path, directory: Path):
     return slots.gate(
         "fakerun .",
         root,
-        kind="whole",
-        limits=holding,
-        options=slots.GateOptions(environ={}, directory=directory, read_memory=lambda: 10**9),
+        options=slots.GateOptions(kind="whole", limits=holding, environ={}, directory=directory, read_memory=lambda: 10**9),
     )
 
 

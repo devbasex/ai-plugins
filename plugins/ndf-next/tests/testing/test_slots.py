@@ -28,9 +28,9 @@ def _gate(directory: Path, limits: Limits, read_memory=lambda: PLENTY, environ=N
     return slots.gate(
         "pytest .",
         directory,
-        kind="whole",
-        limits=limits,
-        options=slots.GateOptions(environ=environ or {}, directory=directory, poll=POLL, read_memory=read_memory),
+        options=slots.GateOptions(
+            kind="whole", limits=limits, environ=environ or {}, directory=directory, poll=POLL, read_memory=read_memory
+        ),
     )
 
 
@@ -100,9 +100,9 @@ def test_light_command_takes_no_slot(tmp_path):
         with slots.gate(
             "pytest a.py",
             tmp_path,
-            suites=[{"runner": "pytest", "command": "pytest ."}],
-            limits=_limits(1, wait=1),
-            options=slots.GateOptions(environ={}, directory=tmp_path),
+            options=slots.GateOptions(
+                suites=[{"runner": "pytest", "command": "pytest ."}], limits=_limits(1, wait=1), environ={}, directory=tmp_path
+            ),
         ) as held:
             assert held.index is None
 
@@ -158,7 +158,7 @@ def test_unusable_directory_still_runs(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("")
     with slots.gate(
-        "pytest .", tmp_path, kind="whole", limits=_limits(1), options=slots.GateOptions(environ={}, directory=blocker / "slots")
+        "pytest .", tmp_path, options=slots.GateOptions(kind="whole", limits=_limits(1), environ={}, directory=blocker / "slots")
     ) as held:
         assert held.index is None and held.note
 
@@ -170,7 +170,7 @@ HOLDER = textwrap.dedent(
     from ndf.testing import slots
     from ndf.testing.limits import Limits
     d = Path(sys.argv[1])
-    with slots.gate("pytest .", d, kind="whole", limits=Limits(1, 1, 60), options=slots.GateOptions(environ={}, directory=d, poll=0.01, read_memory=lambda: 10**9)):
+    with slots.gate("pytest .", d, options=slots.GateOptions(kind="whole", limits=Limits(1, 1, 60), environ={}, directory=d, poll=0.01, read_memory=lambda: 10**9)):
         (d / "holding").write_text("")
         time.sleep(600)
     """
