@@ -235,10 +235,7 @@ def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:
 
 
 def _review(path: str) -> fin.Review:
-    data = store.read_object(Path(path))
-    findings = data.get(store.FINDINGS) if isinstance(data.get(store.FINDINGS), list) else []
-    rounds = data.get(store.ROUNDS)
-    return fin.Review(str(data.get("final")), rounds if type(rounds) is int else 0, fin.as_findings(findings))
+    return fin.as_review(store.read_object(Path(path)))
 
 
 def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:

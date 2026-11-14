@@ -10,10 +10,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.contracts.exit_codes import OK, STOPPED
+from ndf.domains.crossreview import store
 
 # 指摘の終わり方
 FIXED = "fixed"
@@ -150,6 +151,18 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         text = str(item["text"]) if "text" in item else ""
         out.append(Finding(name, text, item["outcome"], reason if reason else None))
     return tuple(out)
+
+
+def as_review(data: Mapping[str, Any]) -> Review:
+    """要約（`summary_of` の形）を読む。指摘の形が違えば `ValueError`、ラウンドの数が整数でなければ 0。"""
+    findings = data.get(store.FINDINGS) if isinstance(data.get(store.FINDINGS), list) else []
+    rounds = data.get(store.ROUNDS)
+    return Review(str(data.get("final")), rounds if type(rounds) is int else 0, as_findings(findings))
+
+
+def summary_of(review: Review, pr: int) -> dict[str, Any]:
+    """要約の形（終わり方・ラウンドの数・指摘・元の PR 番号）。`as_review` が読む。"""
+    return {"final": review.final, store.ROUNDS: review.rounds, store.FINDINGS: [dict(f._asdict()) for f in review.findings], "pr": pr}
 
 
 def as_handed(items: Sequence[Any]) -> tuple[Handed, ...]:

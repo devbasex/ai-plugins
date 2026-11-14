@@ -334,9 +334,9 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
         if f.get("outcome") in fin.OUTCOMES
     )
     path = run.cfg.state_dir / SUMMARY_NAME
-    rows = [dict(f._asdict()) for f in findings]
-    store.write_object(path, {"final": final, store.ROUNDS: rounds, store.FINDINGS: rows, "pr": run.ref.origin_pr})
-    return Outcome(fin.Review(final, rounds, findings), path, tuple(run.warnings), tuple(run.process))
+    review = fin.Review(final, rounds, findings)
+    store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process))
 
 
 class _Prepared(NamedTuple):
