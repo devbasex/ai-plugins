@@ -57,6 +57,12 @@ def _claude_row(row: Mapping[str, Any]) -> str | None:
     return f"{scope}{where}:{_text(row, 'version')}" + ("" if sha == "-" else f"@{sha[:8]}")
 
 
+def _claude_rows(rows: list[Any]) -> list[str]:
+    """1 つのプラグインの導入の行の控え（表の行だけを読み、管理の設定から入る行を落とす）。"""
+    kept = (_claude_row(row) for row in rows if isinstance(row, dict))
+    return [r for r in kept if r is not None]
+
+
 def claude_plugins(installed: Any) -> dict[str, str]:
     """Claude Code の導入一覧（`installed_plugins.json`）の控え。管理の行だけのプラグインは鍵ごと入れない。"""
     plugins = installed["plugins"] if isinstance(installed, dict) and "plugins" in installed else None
@@ -64,7 +70,7 @@ def claude_plugins(installed: Any) -> dict[str, str]:
         raise ShapeError("installed_plugins.json の plugins の形が違う")
     out = {}
     for name, rows in plugins.items():
-        kept = [r for r in (_claude_row(row) for row in rows if isinstance(row, dict)) if r is not None]
+        kept = _claude_rows(rows)
         if kept:
             out[f"{CLAUDE_PLUGIN}{name}"] = " ".join(kept)
     return out
