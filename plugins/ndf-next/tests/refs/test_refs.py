@@ -9,7 +9,7 @@ import pytest
 
 from ndf.contracts import causes
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import refs
+from ndf.core import refs, resume
 from ndf.core.plan.queue_decide import Outcome
 
 from ._refs_helpers import FakeSources, failing_hub, graphql_hub, graphql_pull, write_progress, write_result
@@ -195,8 +195,8 @@ def test_counts_of_a_single_step_by_key(tmp_path: Path) -> None:
 
 def test_match_plan_does_not_match_a_different_file_with_the_same_tail(tmp_path: Path) -> None:
     plans = {"impl": tmp_path / "x" / "impl.json", "impl2": tmp_path / "y" / "ximpl.json"}
-    assert refs.match_plan(plans, "impl.json", tmp_path) == ["impl"]
-    assert refs.match_plan(plans, "nothing", tmp_path) == []
+    assert resume.match_plan(plans, "impl.json", tmp_path) == ["impl"]
+    assert resume.match_plan(plans, "nothing", tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -211,13 +211,13 @@ def test_match_plan_does_not_match_a_different_file_with_the_same_tail(tmp_path:
     ],
 )
 def test_resume_target(recorded: dict | None, start: str | None, action: str) -> None:
-    got = refs.resume_target("p", "d", recorded, start)
+    got = resume.resume_target("p", "d", recorded, start)
     assert (got.action, got.start) == (action, start)
 
 
 def test_question_target_ignores_done_and_plain_held_laps() -> None:
-    laps = [refs.Lap("l1", "done", ("a.json",)), refs.Lap("l2", "held", ("a.json",))]
-    assert refs.question_target(laps, "a.json") is None
+    laps = [resume.Lap("l1", "done", ("a.json",)), resume.Lap("l2", "held", ("a.json",))]
+    assert resume.question_target(laps, "a.json") is None
 
 
 # --- 読み手 -------------------------------------------------------------------------------

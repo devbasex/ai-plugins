@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import refs
+from ndf.core import refs, resume
 from ndf.core.plan.queue_decide import Outcome
 
 from ._refs_helpers import graphql_hub, graphql_pull, write_progress, write_result
@@ -62,7 +62,7 @@ def test_issue_2489_redesign_starts_from_the_latest_head_of_the_design_pr() -> N
     head = "c0ffee" + "0" * 34
     pulls = [graphql_pull(2489, False, "open", head, "design/issue-2489")]
     pr = refs.RepoSources(graphql_hub(lambda node, args: {"nodes": pulls})).design_pr("design/issue-2489")
-    start = refs.design_start(pr)
+    start = resume.design_start(pr)
     assert (start.skip, start.commit) == (False, head)
 
 
@@ -70,7 +70,7 @@ def test_issue_2528_a_design_merged_in_the_previous_lap_is_not_redone() -> None:
     # #2528: 前のループの 1 回でマージ済みの設計を、次のループの 1 回が設計からやり直した
     pulls = [graphql_pull(2530, True, "merged", "a" * 40, "design/issue-2528")]
     pr = refs.RepoSources(graphql_hub(lambda node, args: {"nodes": pulls})).design_pr("design/issue-2528")
-    assert refs.design_start(pr).skip is True
+    assert resume.design_start(pr).skip is True
 
 
 def test_issue_2568_a_release_only_lap_fills_queue_prs_from_the_prs_that_close_the_issues(tmp_path: Path) -> None:
@@ -98,8 +98,8 @@ def test_issue_2569_rerunning_the_check_plan_from_the_middle_keeps_the_review_co
 
 def test_issue_2638_a_question_during_reclosing_a_held_lap_finds_its_lap() -> None:
     # #2638: 保留のループの 1 回を締め直す途中の問いを進行中のループの 1 回が無いとして断った
-    laps = [refs.Lap("lap-3", "held", ("/r/.ndf/lap-3/close.json",), closing=True)]
-    found = refs.question_target(laps, "/r/.ndf/lap-3/./close.json")
+    laps = [resume.Lap("lap-3", "held", ("/r/.ndf/lap-3/close.json",), closing=True)]
+    found = resume.question_target(laps, "/r/.ndf/lap-3/./close.json")
     assert found is not None and found.name == "lap-3"
 
 
@@ -142,10 +142,10 @@ def test_issue_2663_insert_values_and_counts_come_from_outside_the_current_run(t
 
 def test_issue_2664_question_target_and_resume_position_come_from_outside_the_current_lap(tmp_path: Path) -> None:
     # #2664: 問いの当て先と再開の位置を、今のループの 1 回の外から参照で解く
-    laps = [refs.Lap("lap-1", "done", ("a.json",)), refs.Lap("lap-2", "running", ("b.json",))]
-    assert refs.question_target(laps, "b.json") == laps[1]
-    done = refs.resume_target("b", "d1", {"status": OK, "digest": "d1"}, None)
-    changed = refs.resume_target("b", "d2", {"status": OK, "digest": "d1"}, None)
+    laps = [resume.Lap("lap-1", "done", ("a.json",)), resume.Lap("lap-2", "running", ("b.json",))]
+    assert resume.question_target(laps, "b.json") == laps[1]
+    done = resume.resume_target("b", "d1", {"status": OK, "digest": "d1"}, None)
+    changed = resume.resume_target("b", "d2", {"status": OK, "digest": "d1"}, None)
     assert (done.action, changed.action) == (refs.SKIP, GATE)
 
 
@@ -162,14 +162,14 @@ def test_issue_2665_the_next_lap_design_starts_from_the_design_pr_state() -> Non
         return {"nodes": states[branch]}
 
     src = refs.RepoSources(graphql_hub(answer))
-    got = {b: refs.design_start(src.design_pr(b)) for b in states}
+    got = {b: resume.design_start(src.design_pr(b)) for b in states}
     assert [(s.skip, s.commit) for s in got.values()] == [(True, None), (False, None), (False, None)]
 
 
 def test_issue_2806_resume_from_accepts_the_path_of_the_plan(tmp_path: Path) -> None:
     # #2806: queue --resume の --from が計画のパスを受け付けず「前の起動の一覧に無い」と断った
     plans = {"impl-2806": tmp_path / ".ndf" / "plans" / "impl-2806.json", "pr-2806": tmp_path / ".ndf" / "plans" / "pr.json"}
-    assert refs.match_plan(plans, str(plans["impl-2806"]), tmp_path / "sub") == ["impl-2806"]
-    assert refs.match_plan(plans, ".ndf/plans/pr.json", tmp_path) == ["pr-2806"]
-    assert refs.match_plan(plans, "plans/impl-2806.json", tmp_path / "other") == ["impl-2806"]
-    assert refs.match_plan(plans, "impl-2806", tmp_path) == ["impl-2806"]
+    assert resume.match_plan(plans, str(plans["impl-2806"]), tmp_path / "sub") == ["impl-2806"]
+    assert resume.match_plan(plans, ".ndf/plans/pr.json", tmp_path) == ["pr-2806"]
+    assert resume.match_plan(plans, "plans/impl-2806.json", tmp_path / "other") == ["impl-2806"]
+    assert resume.match_plan(plans, "impl-2806", tmp_path) == ["impl-2806"]

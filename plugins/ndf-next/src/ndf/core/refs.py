@@ -38,20 +38,7 @@ from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
 
-# 再開・設計の起点・問いの当て先は resume が持つ。呼び手の import を保つためにここからも読める
-from ndf.core.resume import (  # noqa: F401
-    LAP_HELD,
-    LAP_RUNNING,
-    SKIP,
-    DesignPr,
-    DesignStart,
-    Lap,
-    ResumeTarget,
-    design_start,
-    match_plan,
-    question_target,
-    resume_target,
-)
+from ndf.core.resume import SKIP, DesignPr
 
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
