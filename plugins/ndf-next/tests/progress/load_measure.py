@@ -86,6 +86,30 @@ def _expire_marks(root: Path, deadline: float, every: float) -> None:
         (root / store.CHECKED_MARK).unlink(missing_ok=True)
 
 
+def _collect_report(work: Path, root: Path, options: argparse.Namespace) -> dict:
+    """子プロセスが書いた結果（`w<i>.json`・`w<i>.checks`）を読み、1 行の JSON に出す値を組み立てる。"""
+    rows = [json.loads((work / f"w{i}.json").read_text()) for i in range(options.processes)]
+    waits = sorted(w for r in rows for w in r["waits"])
+    logs = [work / f"w{i}.checks" for i in range(options.processes)]
+    checks = [float(x) for log in logs if log.exists() for x in log.read_text().split()]
+    return {
+        "at": datetime.now(UTC).isoformat(),
+        "processes": options.processes,
+        "seconds": options.seconds,
+        "interval": options.interval,
+        "check_every": options.check_every,
+        "writes": len(waits),
+        "database_is_locked": sum(r["busy"] for r in rows),
+        "other_errors": sum(r["other_count"] for r in rows),
+        "other_samples": [s for r in rows for s in r["other"]][:5],
+        "wait_p95_seconds": waits[int(0.95 * (len(waits) - 1))] if waits else None,
+        "wait_max_seconds": waits[-1] if waits else None,
+        "quick_check_count": len(checks),
+        "quick_check_seconds_max": max(checks) if checks else None,
+        "backups": len(list((root / store.BACKUP_DIR).glob("*.sqlite"))),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--processes", type=int, default=34)
@@ -109,26 +133,7 @@ def main() -> None:
         p.start()
     for p in procs:
         p.join()
-    rows = [json.loads((work / f"w{i}.json").read_text()) for i in range(a.processes)]
-    waits = sorted(w for r in rows for w in r["waits"])
-    logs = [work / f"w{i}.checks" for i in range(a.processes)]
-    checks = [float(x) for log in logs if log.exists() for x in log.read_text().split()]
-    report = {
-        "at": datetime.now(UTC).isoformat(),
-        "processes": a.processes,
-        "seconds": a.seconds,
-        "interval": a.interval,
-        "check_every": a.check_every,
-        "writes": len(waits),
-        "database_is_locked": sum(r["busy"] for r in rows),
-        "other_errors": sum(r["other_count"] for r in rows),
-        "other_samples": [s for r in rows for s in r["other"]][:5],
-        "wait_p95_seconds": waits[int(0.95 * (len(waits) - 1))] if waits else None,
-        "wait_max_seconds": waits[-1] if waits else None,
-        "quick_check_count": len(checks),
-        "quick_check_seconds_max": max(checks) if checks else None,
-        "backups": len(list((root / store.BACKUP_DIR).glob("*.sqlite"))),
-    }
+    report = _collect_report(work, root, a)
     print(json.dumps(report, ensure_ascii=False))
 
 
