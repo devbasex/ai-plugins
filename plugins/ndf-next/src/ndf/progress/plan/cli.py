@@ -32,7 +32,7 @@ import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters.git import GitError
-from ndf.contracts import causes, result
+from ndf.contracts import causes, limits, result
 from ndf.core import durable
 from ndf.progress import command, lane, model, store
 from ndf.progress.plan import (
@@ -50,6 +50,7 @@ from ndf.progress.plan import (
     status,
     stop_plan,
 )
+from ndf.progress.plan import run, wait
 
 Command = Callable[[argparse.Namespace, sa.Connection, str], dict[str, Any]]
 
@@ -76,7 +77,8 @@ def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[s
     else:
         raise model.Refused(f"計画 {doc['name']} の進行表は既にある", current_id=existing["id"])
     view, _ = lane.read_plan(conn, pid)
-    return _ok(f"計画 {view.name} の進行表を作った（{model.label(view.state)}・レーン {len(view.lanes)}）", plan_id=pid, state=view.state)
+    summary = f"計画 {view.name} の進行表を作った（{model.label(view.state)}・レーン {len(view.lanes)}）"
+    return _ok(summary, plan_id=pid, plan=view.name, state=view.state)
 
 
 def _cmd_status(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
@@ -232,6 +234,11 @@ def parser() -> argparse.ArgumentParser:
     for name in ("init", "start"):
         sub.add_parser(name).add_argument("plan_file")
     sub.add_parser("status").add_argument("plan")
+    sub.add_parser("run").add_argument("plan")
+    wt = sub.add_parser("wait")
+    wt.add_argument("plan")
+    wt.add_argument("--after", type=int, default=0, help="計画の進行表の事象の番号（前の wait の next が渡す）")
+    wt.add_argument("--known-stalls", nargs="*", default=[], help="知らせ済みの止まり（<レーン>/<行>）")
     add = sub.add_parser("lane").add_subparsers(dest="lane_action", required=True).add_parser("add")
     add.add_argument("plan")
     add.add_argument("lane_file")
@@ -267,18 +274,50 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+def _where(cwd: Path) -> run.Where:
+    """計画の置き場を求め、チェックアウトの置き場を用意する。"""
     root = command._root(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
-        repo = command._repo(cwd, st.root)
+        return run.Where(root=ready.root, url=url, repo=command._repo(cwd, st.root), cwd=cwd)
+
+
+def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    if a.action in SESSIONS:
+        return SESSIONS[a.action](a, _where(cwd))
+    where = _where(cwd)
+    with store.open_store(where.url, where.root) as st:
         with store.transaction(st) as conn:
-            out = COMMANDS[a.action](a, conn, repo)
+            out = COMMANDS[a.action](a, conn, where.repo)
         if st.warnings:
             out.setdefault("warnings", []).extend(st.warnings)
-        return out
+    if a.action == "start":
+        out["metrics"]["run_pid"] = run.detach(out["metrics"]["plan"], cwd)
+    return out
+
+
+def _cmd_run(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
+    final = run.advance(where, a.plan, run.policy())
+    summary = f"計画 {a.plan} の耐久ワークフローが終わった（{final['outcome']}・起こした {len(final['launched'])}・起こせなかった {len(final['failed'])}）"
+    return result.result(TOOL, result.OK, summary, metrics=final, warnings=final["errors"])
+
+
+def _cmd_wait(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
+    with store.open_store(where.url, where.root) as st:
+        pid = plan_id(where.repo, a.plan)
+
+        def read() -> wait.Seen:
+            with store.transaction(st) as conn:
+                return wait.read_seen(conn, pid, a.after, wait.now())
+
+        seen = wait.wait(read, a.known_stalls, limits.seconds(wait.POLL))
+    got = wait.report(a.plan, seen, a.known_stalls)
+    return result.result(TOOL, result.OK, got["summary"], items=got["items"], metrics=got["metrics"], next=got["next"])
+
+
+SESSIONS: dict[str, Callable[[argparse.Namespace, run.Where], dict[str, Any]]] = {"run": _cmd_run, "wait": _cmd_wait}
 
 
 def _stopped(exc: Exception) -> dict[str, Any]:
