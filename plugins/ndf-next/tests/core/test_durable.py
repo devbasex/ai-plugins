@@ -103,7 +103,7 @@ def _crash_run(root: Path, log: Path, crash_at: int, plugin: Path) -> subprocess
 
 
 def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
-    """I7: アプリの版は形の番号だけで決まり、plugin.json の版を上げて起動し直しても途中の実行が回復する。"""
+    """I7: アプリの版は形の番号と鍵の名前だけで決まり、plugin.json の版を上げて起動し直しても途中の実行が回復する。"""
     root = tmp_path / "state"
     plugin = tmp_path / "plugin"
     log = tmp_path / "acts.log"
@@ -122,4 +122,4 @@ def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
 
     retired = root / "dbos" / "retired" / f"{durable.run_name('crash-key')}.sqlite"
     records = durable.workflows(f"sqlite:///{retired}")
-    assert {r.app_version for r in records} == {f"format-{durable.FORMAT}"}
+    assert {r.app_version for r in records} == {durable.app_version("crash-key")}

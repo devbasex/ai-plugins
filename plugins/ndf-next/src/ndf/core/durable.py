@@ -11,7 +11,8 @@
   1 つに限る。URL（PostgreSQL）では 1 つの DB に置き、`application_name` で鍵ごとに分け、起こした鍵を台帳 `ndf_runs` に書く
 - `executor_id` と `application_name` はどちらも鍵の名前（`run_name`）にする。DBOS のキューの取り出しは
   `application_name` で絞られるため、別の鍵のプロセスがよそのキューを流さない
-- アプリの版は形の番号 `format-<FORMAT>` に固定し、NDF の版が上がっても途中の実行を回復する
+- アプリの版は形の番号と鍵の名前 `format-<FORMAT>-<鍵の名前>` に固定し、NDF の版が上がっても途中の実行を回復する。
+  DBOS の版名は DB 全体で一意のため、1 つの DB を鍵ごとに分ける URL でも衝突しないよう鍵の名前を入れる
 - 終わった鍵のファイルは `dbos/retired/` へ、壊れたファイルは `dbos/broken/` へ移し、移してから `KEEP_DAYS` で消す。
   URL では、台帳の鍵の実行がすべて終わって `KEEP_DAYS` を過ぎたときだけ消す（`sweep`・`sweep_url`）
 
@@ -49,7 +50,7 @@ log = logging.getLogger(__name__)
 # DBOS の記録に載せるログの下限。標準出力は結果 JSON の 1 行に使うため、DBOS の INFO を出さない
 LOG_LEVEL = "WARNING"
 
-# 耐久ワークフローの中の DBOS の呼び出しの順の番号。アプリの版は `format-<FORMAT>`（決定 84）
+# 耐久ワークフローの中の DBOS の呼び出しの順の番号。アプリの版は `format-<FORMAT>-<鍵の名前>`（決定 84）
 FORMAT = 1
 # 耐久ワークフローの関数（`@durable.workflow` を付けた src の関数）のソースの sha256。
 # 関数を変えたら、FORMAT を上げるか、呼び出しの順が変わらないと判断してこの値だけを書き直す
@@ -236,6 +237,14 @@ def recv(topic: str, timeout_seconds: float) -> Any:
 def run_name(run_key: str) -> str:
     """実行の鍵から記録の名前を求める。DBOS のアプリ名の規則（英小文字・数字・`-`）に収まり、同じ鍵には同じ名前。"""
     return RUN_PREFIX + hashlib.sha256(run_key.encode()).hexdigest()[:32]
+
+
+def app_version(run_key: str) -> str:
+    """実行の鍵のアプリの版。鍵ごとに 1 つで、NDF の版を上げても変わらない（決定 84）。
+
+    DBOS の `application_versions.version_name` は DB 全体で一意なので、鍵の名前を入れて 1 つの DB の鍵どうしで分ける。
+    """
+    return f"format-{FORMAT}-{run_name(run_key)}"
 
 
 def run_url(root: Path, run_key: str) -> str:
@@ -553,11 +562,14 @@ def _touch(mark: Path, now: datetime) -> None:
 
 
 def check_file(path: Path) -> bool:
-    """SQLite のファイルに `PRAGMA quick_check` を打ち、1 行の `ok` が返れば真。ファイルが無ければ真。"""
+    """SQLite のファイルに `PRAGMA quick_check` を打ち、1 行の `ok` が返れば真。ファイルが無ければ真。
+
+    読み取り専用で開く。書ける接続で開いて閉じると、SQLite が壊れたファイルの `-wal` を消し、退避する証拠が欠ける。
+    """
     if not path.exists():
         return True
     try:
-        conn = sqlite3.connect(path, timeout=30)
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
         try:
             return conn.execute("PRAGMA quick_check").fetchall() == [("ok",)]
         finally:
@@ -904,7 +916,7 @@ def launch(database_url: str, run_key: str) -> None:
         "name": name,
         "system_database_url": database_url,
         "executor_id": name,
-        "application_version": f"format-{FORMAT}",
+        "application_version": app_version(run_key),
         "log_level": LOG_LEVEL,
     }
     DBOS(config=config)

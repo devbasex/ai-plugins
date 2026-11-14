@@ -213,7 +213,7 @@ def test_workflows_reads_records_of_the_key_with_their_fields(root):
     _finish_without_retire(root, "fields")
     url = durable.run_url(root, "fields")
     name = durable.run_name("fields")
-    version = f"format-{durable.FORMAT}"
+    version = durable.app_version("fields")
 
     every = durable.workflows(url)
     by_key = durable.workflows(url, "fields")
@@ -229,7 +229,7 @@ def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_
     _run(root, "family", "child-wait")
     url = durable.run_url(root, "family")
     name = durable.run_name("family")
-    version = f"format-{durable.FORMAT}"
+    version = durable.app_version("family")
 
     records = sorted(durable.workflows(url, "family"), key=lambda r: r.workflow_id)
     assert [_fields(r) for r in records] == [
@@ -256,7 +256,7 @@ class _FailingClient:
 
     destroyed = 0
 
-    def __init__(self, system_database_url: str) -> None:
+    def __init__(self, system_database_url: str, retry_connection_errors: bool = True) -> None:
         self.url = system_database_url
 
     def _fail(self, *args, **kwargs):
