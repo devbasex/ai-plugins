@@ -113,6 +113,19 @@ def declared_tops(plugin_root: Path) -> frozenset[str]:
     return frozenset(installed | {d.replace("-", "_") for d in dists})
 
 
+def pythonpath_tops(plugin_root: Path) -> frozenset[str]:
+    """pytest の `pythonpath`（`[tool.pytest.ini_options]`）のディレクトリにある `.py` のモジュールの名前。
+
+    テストの補助のモジュール（`tests/support/` など）は、pytest がこのディレクトリをパスへ足して読ませる。
+    """
+    project = tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
+    section: Any = project
+    for key in ("tool", "pytest", "ini_options", "pythonpath"):
+        section = section[key] if isinstance(section, dict) and key in section else ()
+    dirs = section if isinstance(section, list) else ()
+    return frozenset(f.stem for d in dirs for f in (plugin_root / d).glob("*.py"))
+
+
 def _normalize(dist: str) -> str:
     return re.sub(r"[-_.]+", "-", dist).lower()
 
@@ -120,9 +133,10 @@ def _normalize(dist: str) -> str:
 def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
     """I3: 自分のパッケージ・標準ライブラリ・宣言した依存の外の import と、旧いプラグインのパスの文字。
 
-    同じディレクトリの隣の `.py`（テストの補助のモジュール）は自分のものとして許す。
+    同じディレクトリの隣の `.py` と、pytest の `pythonpath` にある `.py`（テストの補助のモジュール）は自分のものとして許す。
     """
-    allowed = LOCAL_TOPS | frozenset(sys.stdlib_module_names) | declared_tops(scope.plugin_root)
+    root = scope.plugin_root
+    allowed = LOCAL_TOPS | frozenset(sys.stdlib_module_names) | declared_tops(root) | pythonpath_tops(root)
     path_pattern = re.compile(rf"(?<![\w-]){re.escape(old_plugin)}(?=/|$)")
     siblings: dict[Path, set[str]] = defaultdict(set)
     for src in scope.python():

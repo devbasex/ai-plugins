@@ -20,11 +20,6 @@ from . import _plan_helpers as H
 _FAIL_ONCE = "import pathlib, sys; m = pathlib.Path(sys.argv[1]); first = not m.exists(); m.touch(); sys.exit(1 if first else 0)"
 
 
-@pytest.fixture
-def repo(tmp_path) -> Path:
-    return H.make_repo(tmp_path / "repo")
-
-
 def _fail_once(sid: str, mark: Path) -> dict:
     return {"id": sid, "run": [sys.executable, "-c", _FAIL_ONCE, str(mark)], "exit_cause": {"1": "check_failed"}}
 

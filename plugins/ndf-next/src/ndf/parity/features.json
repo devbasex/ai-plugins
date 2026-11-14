@@ -17,7 +17,7 @@
     "C1+": ["src/ndf/core/durable.py"],
     "C2": ["src/ndf/core/plan/"],
     "C3": ["src/ndf/core/route.py", "contracts/templates/"],
-    "C4": ["src/ndf/core/refs.py"],
+    "C4": ["src/ndf/core/refs/"],
     "C5": ["src/ndf/core/worker.py"],
     "P1a": ["contracts/workflow/", "src/ndf/progress/model.py", "src/ndf/progress/store.py"],
     "P1b": ["src/ndf/progress/run.py", "src/ndf/progress/invoke.py"],

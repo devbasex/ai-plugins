@@ -36,7 +36,9 @@ T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
 # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-PULL_FIELDS = "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation"
+PULL_FIELDS = (
+    "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
+)
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
@@ -84,13 +86,17 @@ _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 
 class GitHubError(Exception):
     """GitHub の要求が失敗した。`status` は HTTP の状態（届かなければ 0）、`retry_after` は上限の回復までの秒、
-    `quota` は上限に当たった枠（`rest`・`graphql`。上限でなければ None）。"""
+    `quota` は上限に当たった枠（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかった印で、
+    状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。"""
 
-    def __init__(self, detail: str, status: int = 0, retry_after: Optional[float] = None, quota: Optional[str] = None) -> None:
+    def __init__(
+        self, detail: str, status: int = 0, retry_after: Optional[float] = None, quota: Optional[str] = None, unreached: bool = False
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.retry_after = retry_after
         self.quota = quota
+        self.unreached = unreached
 
 
 def token() -> str:
@@ -184,6 +190,8 @@ class Pull(NamedTuple):
     merge_state: str
     author: str
     association: str
+    # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
+    merge_sha: str = ""
 
     @property
     def authored(self) -> Authored:
@@ -197,6 +205,7 @@ class Pull(NamedTuple):
             int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
             text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
             _login(raw["user"]), text_of(raw["author_association"]).upper(),
+            text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
         )  # fmt: skip
 
     @classmethod
@@ -206,6 +215,7 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
+            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
         )  # fmt: skip
 
 
@@ -334,7 +344,7 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
         status = exc.response.status_code
         body = f": {exc.response.text[:300]}" if detail_body else ""
         return GitHubError(f"GitHub が断った（{status}）: {label}{body}", status)
-    return GitHubError(f"GitHub へ届かない: {label}: {exc}")
+    return GitHubError(f"GitHub へ届かない: {label}: {exc}", unreached=True)
 
 
 def _page_cap(name: str) -> int:
