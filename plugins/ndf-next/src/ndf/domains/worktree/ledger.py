@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterator, Optional
 from filelock import FileLock
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import testenv_decide
+from ndf.domains.worktree import atomic, testenv_decide
 
 # 台帳の置き場（git の共通ディレクトリの下）と、排他を待つ上限の秒
 LEDGER = Path("ndf") / "worktree-registry.json"
@@ -72,9 +72,7 @@ class Ledger:
         with FileLock(str(self.path) + ".lock", timeout=LOCK_WAIT):
             rows = self.rows()
             yield rows
-            tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}")
-            tmp.write_text(json.dumps({"assignments": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
-            tmp.replace(self.path)
+            atomic.write_text(self.path, json.dumps({"assignments": rows}, ensure_ascii=False, indent=1))
 
     def current(self, worktree: str) -> Optional[Row]:
         """worktree の今の割り当て（未解放の最後の 1 件）。"""

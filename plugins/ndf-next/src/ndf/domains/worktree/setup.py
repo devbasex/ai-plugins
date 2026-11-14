@@ -11,12 +11,11 @@ worktree の運用の仕組みは、リポジトリに宣言（`.ndf/worktree.js
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ndf.domains.worktree import declaration
+from ndf.domains.worktree import atomic, declaration
 
 # 宣言の状態
 PRESENT = "present"
@@ -45,12 +44,6 @@ def state(main_dir: Path) -> State:
     return State(ABSENT) if decl is None else State(PRESENT, decl=decl)
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(f".{path.name}.{os.getpid()}")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
-
-
 @dataclass(frozen=True)
 class Initialized:
     path: Path
@@ -71,13 +64,13 @@ def init(main_dir: Path, force: bool = False) -> Initialized:
         if p.is_symlink():
             raise SetupError(f"{p} が symlink（たどらずに終わる）")
     shared.parent.mkdir(parents=True, exist_ok=True)
-    _write_atomic(shared, json.dumps({"version": declaration.VERSION}, indent=2) + "\n")
+    atomic.write_text(shared, json.dumps({"version": declaration.VERSION}, indent=2) + "\n")
     declaration.load(main_dir)
     ignore = shared.parent / IGNORE_FILE
     if ignore.exists() or ignore.is_symlink():
         return Initialized(shared, True)
     try:
-        _write_atomic(ignore, f"# 個人設定。各自の機械の値を書き、コミットしない\n{declaration.local_file(main_dir).name}\n")
+        atomic.write_text(ignore, f"# 個人設定。各自の機械の値を書き、コミットしない\n{declaration.local_file(main_dir).name}\n")
     except OSError as exc:  # 宣言は作れている。気づけるよう警告だけを返す
         return Initialized(shared, True, (f"{ignore} を書けない（個人設定を使うなら手で登録する）: {exc}",))
     return Initialized(shared, True)

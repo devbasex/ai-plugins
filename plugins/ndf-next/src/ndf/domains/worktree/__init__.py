@@ -21,6 +21,7 @@
 - `follow`: セッションを始めたときのブランチの追従（宣言の `follow_branch: true` のとき）
 - `deps`・`localenv`・`testenv`（`ledger`・`testenv_sweep`）: 宣言の各節に従う worktree の環境
 - `container`: 宣言のコマンドとコンテナの実行系の起動（差し替えられる）
+- `atomic`: 半端なファイルを残さない書き込み（一時ファイルから付け替える）
 - `outcomes`: 後片付けと回収の結果の語（`items` の `result`）
 - `write_target`: シェルのコマンドとパッチから書き込み先を推定する（guard の判断が使う）
 - `setup`: 宣言の導入（`init`・`check`）
