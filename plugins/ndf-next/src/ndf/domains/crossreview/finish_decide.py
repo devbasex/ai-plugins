@@ -4,7 +4,7 @@
   （設計のプランの `--findings`）も指摘の候補として同じ 3 つで扱い、どれにもならなかった件は欠け（gaps）に載せる
 - 未解決・扱わなかった足すべき内容・理由の無い見送りが 1 件でもあれば `incomplete`（gaps つき）で止まる。
   プランは `incomplete` の行き先へ進み、gaps は承認資料の「未確認の点」になる
-- 上限（`max_rounds`）や途中の誤り（`error`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
+- 上限（`max_rounds`）・振動（`oscillating`）・途中の誤り（`errored`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
 """
 
@@ -23,8 +23,10 @@ OUTCOMES = (FIXED, SKIPPED, UNRESOLVED)
 # 収束ループの終わり方
 CONVERGED = "converged"
 MAX_ROUNDS = "max_rounds"
+# 前々ラウンドの指摘が前ラウンドで消えて戻った（`ndf.core.converge.oscillation`）
+OSCILLATING = "oscillating"
 ERROR = "errored"
-FINALS = (CONVERGED, MAX_ROUNDS, ERROR)
+FINALS = (CONVERGED, MAX_ROUNDS, OSCILLATING, ERROR)
 # 欠けの種類
 GAP_UNRESOLVED = "unresolved_finding"
 GAP_UNHANDLED = "unhandled_finding"
@@ -71,14 +73,14 @@ def _gap(kind: str, name: str, reason: str) -> dict[str, str]:
 
 
 def _finding_gaps(findings: Sequence[Finding]) -> list[dict[str, str]]:
-    gaps = [_gap(GAP_UNRESOLVED, f.id, f.text) for f in findings if f.outcome == UNRESOLVED]
+    gaps = [_gap(GAP_UNRESOLVED, f.id, f.text or f"指摘 {f.id} の本文が無い") for f in findings if f.outcome == UNRESOLVED]
     gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {f.text}") for f in findings if f.outcome == SKIPPED and not f.reason]
     return gaps
 
 
 def _handed_decision(h: Handed, found: Finding) -> dict[str, str]:
     said = "直した" if found.outcome == FIXED else f"見送った（理由: {found.reason}）"
-    return {"decision": f"足すべき内容 {h.id} を{said}", "basis": h.text}
+    return {"decision": f"足すべき内容 {h.id} を{said}", "basis": h.text or h.id}
 
 
 def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
@@ -88,7 +90,7 @@ def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list
     for h in handed:
         found = by_id.get(h.id)
         if found is None:
-            gaps.append(_gap(GAP_UNHANDLED, h.id, f"レビューで直したとも見送ったとも決めていない: {h.text}"))
+            gaps.append(_gap(GAP_UNHANDLED, h.id, f"レビューで直したとも見送ったとも決めていない: {h.text or h.id}"))
         elif found.outcome != UNRESOLVED and (found.outcome == FIXED or found.reason):
             decisions.append(_handed_decision(h, found))
     return decisions, gaps

@@ -12,6 +12,8 @@
     ndf cross-review merge-fix --state-dir D --pr N --file F       # 修正の結果を状態ファイルへ取り込む（#2770）
     ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
+    ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
+        [--reviewer R ...] [--max-rounds 3] [--findings F]         # 収束ループを 1 回の起動で回して終わり方から結果
 
 状態ファイルの形: `{"pr": 元の番号, "current_pr": 今の番号, "target_repo": "<所有者>/<リポジトリ>",
 "rounds": [{"round": n, "verdict": ..., "head": <SHA>, "fix": {...}}], "reviewed_sections": [...]}`。
@@ -25,11 +27,11 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ndf import cli
-from ndf.adapters import git
+from ndf.adapters import agents, git
 from ndf.contracts import result
 from ndf.core import route
-from ndf.core.converge import worktree
-from ndf.domains.crossreview import fixgate_decide, push, repo, scope_decide, store
+from ndf.core.converge import participants, worktree
+from ndf.domains.crossreview import drive, fixgate_decide, push, repo, scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 
 TOOL = cli.tool_of(__name__)
@@ -37,8 +39,10 @@ TOOL = cli.tool_of(__name__)
 CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
-ROUNDS = "rounds"
-REVIEWED = "reviewed_sections"
+ROUNDS = drive.ROUNDS
+REVIEWED = drive.REVIEWED
+# 相手役と修正担当の起動（テストは偽物に差し替える）
+LAUNCH: drive.Launcher = agents.run_agent
 
 
 def _ok(summary: str, items: Optional[list[dict[str, Any]]] = None, **optional: Any) -> int:
@@ -216,15 +220,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 # --- 範囲と終わり方 ---------------------------------------------------------------------
 
 
-def _sections(g: git.Git, base: str, root: Path) -> list[str]:
-    out: list[str] = []
-    for path in g.changed_files(base, "HEAD"):
-        target = root / path
-        if path.endswith(".md") and target.is_file():
-            out += scope_decide.sections_of(path, target.read_text(encoding="utf-8"))
-    return out
-
-
 def _every_section(purpose: str) -> bool:
     """節を詳細レビューへ必ず通す PR か（設計のプランの雛形の purpose。#3181）。"""
     return purpose == route.templates()["design"].purpose
@@ -237,7 +232,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     prev = rounds[-1].get("head") if rounds and isinstance(rounds[-1], dict) else None
     reviewed = data.get(REVIEWED) if isinstance(data.get(REVIEWED), list) else []
     wt = Path(args.worktree)
-    sections = _sections(git.Git(wt), args.base, wt)
+    sections = drive.changed_sections(git.Git(wt), args.base, wt)
     got = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, set(reviewed))
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らない節 {len(got.unreviewed)} 件）", [item])
@@ -257,15 +252,61 @@ def _review(path: str) -> fin.Review:
     return fin.Review(str(data.get("final")), rounds if type(rounds) is int else 0, fin.as_findings(findings))
 
 
+def _emit_verdict(verdict: fin.Verdict, **extra: Any) -> int:
+    """終わり方の結果を出す。outputs の gaps は欠けを後のステップ（CI）の後まで引き継ぐ（空なら前の欠けを消す）。"""
+    warnings = [*extra.pop("warnings", ()), *verdict.warnings]
+    shared = {"decisions": list(verdict.decisions), "warnings": warnings, "outputs": {"gaps": list(verdict.gaps)}, **extra}
+    if verdict.status == fin.OK:
+        return _ok(verdict.summary, **shared)
+    return _stop(str(verdict.kind), verdict.summary, gaps=list(verdict.gaps), **shared)
+
+
 def cmd_finish(args: argparse.Namespace) -> int:
     try:
         verdict = fin.finish(_review(args.summary), _handed(args.findings))
     except ValueError as exc:
         return _stop("invalid", str(exc))
-    shared = {"gaps": list(verdict.gaps), "decisions": list(verdict.decisions), "warnings": list(verdict.warnings)}
-    if verdict.status == fin.OK:
-        return _ok(verdict.summary, **shared)
-    return _stop(str(verdict.kind), verdict.summary, **shared)
+    return _emit_verdict(verdict)
+
+
+def _branch_of(wt: Path) -> str:
+    return git.Git(wt).run("rev-parse", "--abbrev-ref", "HEAD").strip()
+
+
+def _run_config(args: argparse.Namespace) -> drive.RunConfig:
+    wt = Path(args.worktree) if args.worktree else Path.cwd()
+    return drive.RunConfig(
+        worktree=wt,
+        branch=args.branch or _branch_of(wt),
+        base=args.base,
+        pr=args.pr,
+        state_dir=Path(args.state_dir),
+        every_section=_every_section(args.purpose),
+        reviewers=participants.assign(args.reviewer if args.reviewer else ()),
+        max_rounds=args.max_rounds,
+        handed=_handed(args.findings),
+    )
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。"""
+    try:
+        cfg = _run_config(args)
+    except ValueError as exc:
+        # 相手役の名指しの誤り（participants.UnknownParticipant）と、足すべき内容の形の誤り
+        return _stop("invalid", str(exc))
+    try:
+        got = drive.drive(cfg, LAUNCH)
+    except worktree.WorktreeUnregistered as exc:
+        return _stop("precondition", str(exc), items=[{"kind": "worktree", "path": str(exc.worktree), "points_to": str(exc.points_to)}])
+    except worktree.SyncRefused as exc:
+        return _stop("precondition", str(exc))
+    except drive.DriveStopped as exc:
+        return _stop(exc.kind, str(exc))
+    verdict = fin.finish(got.review, cfg.handed)
+    items = [{"kind": "finding", "id": f.id, "outcome": f.outcome} for f in got.review.findings]
+    metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
+    return _emit_verdict(verdict, items=items, metrics=metrics, warnings=got.warnings, process=list(got.process))
 
 
 # --- 引数 --------------------------------------------------------------------------------
@@ -300,7 +341,21 @@ def _parser() -> argparse.ArgumentParser:
     f = add("finish")
     f.add_argument("--summary", required=True)
     f.add_argument("--findings")
+    _run_parser(add)
     return p
+
+
+def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
+    r = add("run")
+    r.add_argument("--pr", type=int, required=True)
+    r.add_argument("--state-dir", required=True)
+    r.add_argument("--base", required=True)
+    r.add_argument("--worktree")
+    r.add_argument("--branch")
+    r.add_argument("--purpose", default=TOOL)
+    r.add_argument("--reviewer", action="append")
+    r.add_argument("--max-rounds", type=int, default=drive.DEFAULT_MAX_ROUNDS)
+    r.add_argument("--findings")
 
 
 def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
@@ -331,6 +386,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "merge-fix": cmd_ingest,
     "review-scope": cmd_scope,
     "finish": cmd_finish,
+    "run": cmd_run,
 }
 
 

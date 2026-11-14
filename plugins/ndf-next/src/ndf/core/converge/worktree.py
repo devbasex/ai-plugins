@@ -8,7 +8,7 @@
   前の HEAD へ戻す（コミットを失わない）
 - 片付けは、lock の理由が NDF の作業のものだけを unlock してから外す。利用者の lock は外さない
 
-関数は作業の名前（`tool`。`cross-review`・`cross-refactoring`）を受け、cross-refactoring も同じ部品を使う。
+関数は作業の名前（`tool`。`cross-review`・`cross-refactoring`）を受け、cross 系の作業が同じ部品を使う。
 """
 
 from __future__ import annotations
