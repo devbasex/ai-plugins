@@ -179,6 +179,47 @@ def _preflight(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return preflight.check(root)
 
 
+def _add_spec(sub: Any) -> None:
+    s = sub.add_parser("spec").add_subparsers(dest="action", required=True).add_parser("finalize")
+    s.add_argument("--spec", action="append", default=[], required=True, help="溶かした先の確定仕様（複数可）")
+    s.add_argument("--remove", action="append", default=[], help="消す設計（複数可）")
+    s.add_argument("--source-of", action="append", default=[], help="<語>=<ファイル> で語の正本を明示する")
+    s.add_argument("-m", "--message", default=None, help="コミットの件名。無ければコミットせずパスだけを出す")
+    sub.choices["spec"].set_defaults(handler=_spec)
+
+
+def _add_handoff(sub: Any) -> None:
+    h = sub.add_parser("handoff").add_subparsers(dest="action", required=True).add_parser("check")
+    h.add_argument("path", type=Path)
+    h.add_argument("--trim", action="store_true", help="雛形に無い節を退避先へ移してから確かめる")
+    h.add_argument("--history", type=Path, default=None, help="退避先（--trim のとき要る）")
+    sub.choices["handoff"].set_defaults(handler=_handoff)
+
+
+def _add_usage(sub: Any) -> None:
+    u = sub.add_parser("usage").add_subparsers(dest="action", required=True)
+    u.add_parser("stop")
+    r = u.add_parser("report")
+    r.add_argument("--since", type=date.fromisoformat, required=True)
+    r.add_argument("--until", type=date.fromisoformat, required=True)
+    sub.choices["usage"].set_defaults(handler=_usage)
+
+
+def _add_mvv(sub: Any) -> None:
+    m = sub.add_parser("mvv").add_subparsers(dest="action", required=True)
+    m.add_parser("signals").add_argument("--base", required=True, help="ベースブランチ")
+    m.add_parser("answer").add_argument("--version", type=int, default=None, help="答えたときの MVV の版")
+    sub.choices["mvv"].set_defaults(handler=_mvv)
+
+
+def _add_close_check(sub: Any) -> None:
+    k = sub.add_parser("close-check")
+    k.add_argument("issue", type=int)
+    k.add_argument("--verification", type=Path, default=None, help="リリース後テストの記録（行の配列の JSON）")
+    k.add_argument("--require", action="store_true", help="記録が無ければ閉じない")
+    k.set_defaults(handler=_close_check)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}")
     p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
@@ -186,32 +227,15 @@ def _parser() -> argparse.ArgumentParser:
     g = sub.add_parser("glossary").add_subparsers(dest="action", required=True)
     g.add_parser("render").add_argument("--check", action="store_true", help="書かずに、今と違うファイルを出す")
     g.add_parser("meanings")
-    s = sub.add_parser("spec").add_subparsers(dest="action", required=True).add_parser("finalize")
-    s.add_argument("--spec", action="append", default=[], required=True, help="溶かした先の確定仕様（複数可）")
-    s.add_argument("--remove", action="append", default=[], help="消す設計（複数可）")
-    s.add_argument("--source-of", action="append", default=[], help="<語>=<ファイル> で語の正本を明示する")
-    s.add_argument("-m", "--message", default=None, help="コミットの件名。無ければコミットせずパスだけを出す")
-    h = sub.add_parser("handoff").add_subparsers(dest="action", required=True).add_parser("check")
-    h.add_argument("path", type=Path)
-    h.add_argument("--trim", action="store_true", help="雛形に無い節を退避先へ移してから確かめる")
-    h.add_argument("--history", type=Path, default=None, help="退避先（--trim のとき要る）")
-    u = sub.add_parser("usage").add_subparsers(dest="action", required=True)
-    u.add_parser("stop")
-    r = u.add_parser("report")
-    r.add_argument("--since", type=date.fromisoformat, required=True)
-    r.add_argument("--until", type=date.fromisoformat, required=True)
-    m = sub.add_parser("mvv").add_subparsers(dest="action", required=True)
-    m.add_parser("signals").add_argument("--base", required=True, help="ベースブランチ")
-    m.add_parser("answer").add_argument("--version", type=int, default=None, help="答えたときの MVV の版")
+    sub.choices["glossary"].set_defaults(handler=_glossary)
+    _add_spec(sub)
+    _add_handoff(sub)
+    _add_usage(sub)
+    _add_mvv(sub)
     c = sub.add_parser("cleanup-stage")
     c.add_argument("prs", nargs="+", type=int, metavar="PR番号")
-    k = sub.add_parser("close-check")
-    k.add_argument("issue", type=int)
-    k.add_argument("--verification", type=Path, default=None, help="リリース後テストの記録（行の配列の JSON）")
-    k.add_argument("--require", action="store_true", help="記録が無ければ閉じない")
-    for name, handler in (("glossary", _glossary), ("spec", _spec), ("handoff", _handoff), ("usage", _usage), ("mvv", _mvv),
-                          ("cleanup-stage", _cleanup_stage), ("close-check", _close_check)):  # fmt: skip
-        sub.choices[name].set_defaults(handler=handler)
+    c.set_defaults(handler=_cleanup_stage)
+    _add_close_check(sub)
     sub.add_parser("preflight").set_defaults(handler=_preflight)
     sub.add_parser("gws-check").set_defaults(handler=_gws_check)
     return p
