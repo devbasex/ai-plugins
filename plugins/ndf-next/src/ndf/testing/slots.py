@@ -135,6 +135,17 @@ def _owner_value(path: Path, key: str) -> object:
     return None if data is None else data.get(key)
 
 
+def _owners(directory: Path) -> Iterator[tuple[int, float]]:
+    """置き場の持ち主の記述を読み、始めた時刻を持つ枠の (番号, started_at) を出す。"""
+    for path in directory.glob(f"{SLOT_PREFIX}*.json"):
+        index = _slot_index(path)
+        if index is None:
+            continue
+        started = _owner_value(path, "started_at")
+        if isinstance(started, (int, float)):
+            yield index, started
+
+
 @dataclass
 class _MemoryMonitor:
     """枠を持つ実行のメモリの監視。下限を割ったら、最後に始めた実行だけを前の停止から 30 秒空けて止める。"""
@@ -168,12 +179,8 @@ class _MemoryMonitor:
     def _is_last_started(self, own_index: int, started_at: float) -> bool:
         """置き場の全ての持ち主の記述を読み、自分より後に始めた生きた実行が無ければ真（決定 6・決定 14）。"""
         mine = (started_at, own_index)
-        for path in self.directory.glob(f"{SLOT_PREFIX}*.json"):
-            index = _slot_index(path)
-            if index is None or index == own_index:
-                continue
-            started = _owner_value(path, "started_at")
-            if not isinstance(started, (int, float)) or (started, index) <= mine:
+        for index, started in _owners(self.directory):
+            if index == own_index or (started, index) <= mine:
                 continue
             probe = _try_lock(_lock_file(self.directory, index))
             if probe is None:
