@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from pathlib import Path
 from typing import NamedTuple
 
@@ -17,6 +18,9 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.release import changelog_decide, version_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
+
+# GET で対象が無いときの状態
+NOT_FOUND = HTTPStatus.NOT_FOUND
 
 
 class Made(NamedTuple):
@@ -35,7 +39,7 @@ def _missing(hub: GitHub, path: str) -> bool:
     try:
         hub.rest("GET", path)
     except GitHubError as exc:
-        if exc.status != 404:
+        if exc.status != NOT_FOUND:
             raise
         return True
     return False

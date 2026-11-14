@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters import ci
@@ -20,6 +21,8 @@ from ndf.domains.release import approval_decide, trail, version_decide
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
+# GitHub が差分の無い PR の作成を断る状態（ベースブランチへ戻す差分が無い）
+NOTHING_TO_SYNC_STATUS = HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 class Landed(NamedTuple):
@@ -74,7 +77,7 @@ class Lander:
                 {"title": f"Sync: {pull.head_ref} を {self.base} へ戻す", "head": pull.head_ref, "base": self.base, "body": ""},
             )
         except GitHubError as exc:
-            if exc.status != 422:
+            if exc.status != NOTHING_TO_SYNC_STATUS:
                 raise
             return Landed(True, None, f"#{pull.number} をマージした（{self.base} へ戻す差分は無い）")
         synced = self._merge(self.hub.pull(int(made["number"])))
