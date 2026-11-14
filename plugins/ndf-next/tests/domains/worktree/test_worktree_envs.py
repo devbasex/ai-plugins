@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Mapping, Optional
 
 import pytest
 
 from ndf.adapters.git import Completed, Git
-from ndf.domains.worktree import container, create, deps, localenv, localenv_decide, testenv, testenv_sweep
+from ndf.domains.worktree import container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_sweep
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:
@@ -154,3 +155,59 @@ def test_testenv_reach_refuses_container_without_worktree(main_repo: Path, run_g
     with pytest.raises(testenv.TestenvError):
         testenv.reach(t, "app")
     assert not list((t.path / testenv.EVIDENCE).glob("reach-*"))  # 印は必ず消す
+
+
+# 現状固定（I-008）: `testenv.test_values` の各分岐。期待値は今の実装の出力。
+def _values_target(main_repo: Path, kinds: dict) -> testenv.Target:
+    path = Path(os.path.realpath(main_repo))
+    return testenv.Target(path, path, {"test_kinds": kinds}, (), FakeShell().shell(), ledger.Ledger(path / "unused.json"))
+
+
+ROW = {"environment": "env-a", "ports": {"http": 20001, "api": 20002}}
+
+
+@pytest.mark.parametrize(
+    ("kinds", "want"),
+    [
+        ({}, {}),  # 種類の宣言が無い
+        ({"e2e": "not a dict"}, {}),
+        ({"e2e": {"skip_reset": {"A": 1, 2: True}}}, {"A": "1", "2": "True"}),
+        ({"e2e": {"skip_reset": ["A"]}}, {}),
+        ({"e2e": {"base_url_env": "BASE_URL"}}, {"BASE_URL": "http://localhost:20001"}),  # 既定の役割は http
+        ({"e2e": {"base_url_env": "BASE_URL", "port_role": "api"}}, {"BASE_URL": "http://localhost:20002"}),
+        ({"e2e": {"base_url_env": "BASE_URL", "port_role": 7}}, {"BASE_URL": "http://localhost:20001"}),
+        ({"e2e": {"base_url_env": "BASE_URL", "port_role": "none"}}, {}),  # ポートが無ければ渡さない
+        ({"e2e": {"base_url_env": 1}}, {}),
+        ({"e2e": {"out_env": 1}}, {}),
+    ],
+)
+def test_test_values_without_evidence(main_repo: Path, kinds: dict, want: dict) -> None:
+    t = _values_target(main_repo, kinds)
+    assert testenv.test_values(t, "e2e", ROW, None) == want
+    assert not (t.path / testenv.EVIDENCE).exists()
+
+
+def test_test_values_evidence_default_place_and_exclude(main_repo: Path) -> None:
+    t = _values_target(main_repo, {"e2e": {"out_env": "OUT", "skip_reset": {"S": "1"}}})
+    got = testenv.test_values(t, "e2e", ROW, None)
+    out = Path(got.pop("OUT"))
+    assert got == {"S": "1"}
+    assert out.parent == t.path / testenv.EVIDENCE and out.name.startswith("env-a-") and out.is_dir()
+    exclude = t.path / ".git" / "info" / "exclude"
+    assert exclude.read_text(encoding="utf-8").splitlines().count(f"{testenv.EVIDENCE}/") == 1
+    testenv.test_values(t, "e2e", ROW, None)
+    assert exclude.read_text(encoding="utf-8").splitlines().count(f"{testenv.EVIDENCE}/") == 1  # 2 度目は足さない
+
+
+def test_test_values_evidence_given_relative_and_absolute(main_repo: Path) -> None:
+    t = _values_target(main_repo, {"e2e": {"out_env": "OUT"}})
+    assert testenv.test_values(t, "e2e", ROW, Path("ev/x")) == {"OUT": str(t.path / "ev" / "x")}
+    assert (t.path / "ev" / "x").is_dir()
+    assert testenv.test_values(t, "e2e", ROW, t.path / "abs") == {"OUT": str(t.path / "abs")}
+
+
+@pytest.mark.parametrize("out", [Path("../outside"), Path("/tmp"), Path(".")])
+def test_test_values_refuses_evidence_outside_worktree(main_repo: Path, out: Path) -> None:
+    t = _values_target(main_repo, {"e2e": {"out_env": "OUT"}})
+    with pytest.raises(testenv.TestenvError, match="証跡の置き場が worktree の外を指す"):
+        testenv.test_values(t, "e2e", ROW, out)
