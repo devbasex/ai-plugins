@@ -25,18 +25,18 @@ def test_the_five_non_regression_rows_are_rows(tables):
     assert len([r for r in features["rows"] if r["kind"] == "non-regression"]) == 5
 
 
-@pytest.mark.parametrize("change", ["drop_to", "add_not_built", "empty_feature", "drop_trial"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda r: r.pop("to"), id="drop_to"),
+        pytest.param(lambda r: r.update(not_built="理由"), id="add_not_built"),
+        pytest.param(lambda r: r.update(feature=""), id="empty_feature"),
+        pytest.param(lambda r: r.pop("trial"), id="drop_trial"),
+    ],
+)
 def test_a_row_without_one_of_the_four_keys_is_an_error(tables, change):
     features, fixes = tables
-    r = _row(features)
-    if change == "drop_to":
-        del r["to"]
-    elif change == "add_not_built":
-        r["not_built"] = "理由"
-    elif change == "empty_feature":
-        r["feature"] = ""
-    else:
-        del r["trial"]
+    change(_row(features))
     assert table.shape_errors(features, fixes)
 
 
