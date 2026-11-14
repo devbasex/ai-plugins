@@ -4,9 +4,9 @@
 
 | 種類 | 鍵 | 確かめ方（`settle.py` が GitHub から読む） |
 | --- | --- | --- |
-| `improved`（改善の証拠） | `pr`・`test`（テストのノード ID） | PR がマージ済みで、PR の変更ファイルにテストのファイルがあり、PR の差分でテストの関数の定義が足され、基底のブランチのそのファイルに関数がある |
-| `removed`（消えたコードのパス） | `path`・`commit` | コミットがあり、指したパスが基底のブランチに無い |
-| `not_reproduced`（再現しない記録） | `command`・`exit`・`record`・`at`・`after_pr` | 記録のファイルがあり、`after_pr` がマージ済みで、`at` がそのマージの後 |
+| `improved`（改善の証拠） | `pr`・`test`（テストのノード ID） | PR がマージ済みで宛先が基底のブランチで、PR の変更ファイルにテストのファイルがあり、PR の差分でテストの関数の定義が足され、基底のブランチのそのファイルに関数がある |
+| `removed`（消えたコードのパス） | `path`・`commit` | コミットが基底のブランチの祖先で、指したパスが基底のブランチに無い |
+| `not_reproduced`（再現しない記録） | `command`・`exit`・`record`・`at`・`after_pr` | `exit` が 0 で、記録のファイルが基底のブランチにあり、`after_pr` がマージ済みで、`at` がそのマージの後で今より前 |
 """
 
 from __future__ import annotations

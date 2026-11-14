@@ -66,15 +66,17 @@ def previous_rows(rank: Any) -> dict[int, Any]:
     return out
 
 
+def _given_number(key: str, given: dict[int, Any]) -> bool:
+    """記録の鍵（番号の文字列）が今回の入力にある課題か。"""
+    return key.isdigit() and int(key) in given
+
+
 def config(a: argparse.Namespace) -> model.Config:
     try:
         decl = declaration()
-    except depth.DepthError as exc:
+        return model.config_from(decl, a.capacity)
+    except (depth.DepthError, model.ConfigError) as exc:
         raise Stop("invalid", str(exc)) from exc
-    quality = decl["quality"] if isinstance(decl.get("quality"), dict) else None
-    if quality is not None:
-        quality = {"label": "quality", "ratio": 0.2, "min": 1, **quality}
-    return model.Config(capacity=a.capacity, quality=quality)
 
 
 def rank_board(
@@ -93,7 +95,8 @@ def rank_board(
         raise Stop("invalid", str(exc)) from exc
     by_num = {i["number"]: i for i in issues}
     order = rank_decide.milestone_order({i["milestone"] for i in issues if i["milestone"]}, a.milestones)
-    raws = [*given.values(), *(v for v in stored.values() if isinstance(v, dict))]
+    # 依存の辺も見積と同じく、課題ごとに今回の入力を優先する（置き換えた記録の depends_on を混ぜない）
+    raws = [*given.values(), *(v for k, v in stored.items() if isinstance(v, dict) and not _given_number(k, given))]
     board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=rank_decide.sub_issues_of(issues), edges=rank_decide.dependency_edges(raws, issues),
                               rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved),
                               sized=frozenset(sized))  # fmt: skip

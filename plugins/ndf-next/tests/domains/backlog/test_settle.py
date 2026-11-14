@@ -71,28 +71,43 @@ def test_improved_needs_the_test_on_the_base_branch(repo_dir, fake, capsys, last
     assert got["status"] == "stopped" and "基底のブランチ" in got["items"][0]["reason"]
 
 
+def test_improved_needs_the_pr_to_target_the_base_branch(repo_dir, fake, capsys, last_result, tmp_path):
+    _with_test(fake)
+    fake.pulls[7]["base"] = {"ref": "feature/x"}
+    got = _settle(capsys, last_result, tmp_path, [_improved()])
+    assert got["status"] == "stopped" and "宛先" in got["items"][0]["reason"] and fake.writes == []
+
+
 def test_removed_path_evidence(repo_dir, fake, capsys, last_result, tmp_path):
-    fake.issue(5)
-    fake.issue(6)
+    for n in (5, 6, 8):
+        fake.issue(n)
     fake.commits.add("abc123")
+    fake.off_base.add("def456")
     fake.contents[("still/here.py", "develop")] = "x"
     rows = [{"issue": 5, "child": "S2", "evidence": {"kind": "removed", "path": "gone/old.py", "commit": "abc123"}},
-            {"issue": 6, "child": "S2", "evidence": {"kind": "removed", "path": "still/here.py", "commit": "abc123"}}]  # fmt: skip
+            {"issue": 6, "child": "S2", "evidence": {"kind": "removed", "path": "still/here.py", "commit": "abc123"}},
+            {"issue": 8, "child": "S2", "evidence": {"kind": "removed", "path": "gone/old.py", "commit": "def456"}}]  # fmt: skip
     got = _settle(capsys, last_result, tmp_path, rows)
-    assert {i["issue"]: i["result"] for i in got["items"]} == {5: "closed", 6: "unverified"}
-    assert got["status"] == "stopped" and fake.issues[6]["state"] == "open"
+    assert {i["issue"]: i["result"] for i in got["items"]} == {5: "closed", 6: "unverified", 8: "unverified"}
+    assert "祖先でない" in got["items"][2]["reason"]
+    assert got["status"] == "stopped" and fake.issues[6]["state"] == "open" and fake.issues[8]["state"] == "open"
 
 
-def test_not_reproduced_record_must_be_after_the_merge(repo_dir, fake, capsys, last_result, tmp_path):
-    fake.issue(2690)
-    fake.issue(2719)
-    fake.pulls[7] = _pull(merged_at="2026-11-14T00:00:00Z")
-    (repo_dir / "trial.log").write_text("ok\n")
-    ev = {"kind": "not_reproduced", "command": "ndf ci wait", "exit": 0, "record": "trial.log", "after_pr": 7}
-    rows = [{"issue": 2690, "child": "T2", "evidence": {**ev, "at": "2026-11-15T00:00:00Z"}},
-            {"issue": 2719, "child": "T2", "evidence": {**ev, "at": "2026-11-13T00:00:00+09:00"}}]  # fmt: skip
+def test_not_reproduced_needs_exit_zero_a_base_record_and_a_past_time_after_the_merge(repo_dir, fake, capsys, last_result, tmp_path):
+    for n in (2690, 2719, 2720, 2721, 2722):
+        fake.issue(n)
+    fake.pulls[7] = _pull(merged_at="2026-11-10T00:00:00Z")
+    fake.contents[("trial.log", "develop")] = "ok\n"
+    (repo_dir / "local.log").write_text("ok\n")
+    ev = {"kind": "not_reproduced", "command": "ndf ci wait", "exit": 0, "record": "trial.log", "after_pr": 7, "at": "2026-11-11T00:00:00Z"}
+    rows = [{"issue": 2690, "child": "T2", "evidence": ev},
+            {"issue": 2719, "child": "T2", "evidence": {**ev, "at": "2026-11-10T00:00:00+09:00"}},
+            {"issue": 2720, "child": "T2", "evidence": {**ev, "exit": 1}},
+            {"issue": 2721, "child": "T2", "evidence": {**ev, "record": "local.log"}},
+            {"issue": 2722, "child": "T2", "evidence": {**ev, "at": "2999-01-01T00:00:00Z"}}]  # fmt: skip
     got = _settle(capsys, last_result, tmp_path, rows)
-    assert {i["issue"]: i["result"] for i in got["items"]} == {2690: "closed", 2719: "unverified"}
+    assert {i["issue"]: i["result"] for i in got["items"]} == {2690: "closed", 2719: "unverified", 2720: "unverified",
+                                                               2721: "unverified", 2722: "unverified"}  # fmt: skip
 
 
 def test_already_closed_issue_is_left_alone(repo_dir, fake, capsys, last_result, tmp_path):

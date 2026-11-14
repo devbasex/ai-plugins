@@ -78,11 +78,13 @@ def _previous_metrics(sd: Path) -> dict[str, Any]:
 # ---------------- candidates ----------------
 
 
-def _carried(sd: Path) -> list[int]:
-    """前回の候補の収集の持ち越しと、前回の深さの打ち切りの残り。"""
+def _carried(sd: Path) -> tuple[list[int], frozenset[int]]:
+    """前回の候補の収集の持ち越しと、前回の深さの打ち切りの残り。と、そのうち見積の欠けだけで持ち越した課題。"""
     metrics = _previous_metrics(sd)
     deferred = metrics["deferred"] if isinstance(metrics.get("deferred"), list) else []
-    return sorted({n for n in deferred if isinstance(n, int)} | set(depth.left_over(sd)))
+    weak = metrics["deferred_unscored"] if isinstance(metrics.get("deferred_unscored"), list) else []
+    left = set(depth.left_over(sd))
+    return sorted({n for n in deferred if isinstance(n, int)} | left), frozenset(n for n in weak if isinstance(n, int) and n not in left)
 
 
 def _candidate_item(issue: dict[str, Any], routes: set[str]) -> dict[str, Any]:
@@ -95,21 +97,21 @@ def _candidate_item(issue: dict[str, Any], routes: set[str]) -> dict[str, Any]:
 def cmd_candidates(a: argparse.Namespace) -> dict[str, Any]:
     repo = _repo(a)
     sd = _sd(a, repo)
-    carried = _carried(sd)
+    carried, weak_carry = _carried(sd)
     gh = hub(repo)
     issues = issues_gh.open_issues(gh)
     by_num = {i["number"]: i for i in issues}
     stored = state.read(sd, "backlog-estimates", {})
     closed = tuple(issues_gh.closed_since(gh, collect.ref_time(Git(Path.cwd()), a.since_ref))) if a.since_ref else ()
     found = collect.collect(issues, Path.cwd(), collect.Ask(a.since_ref, a.add, carried, a.depth, closed), stored)
-    picked = sel.select(found.routes, a.limit, a.depth, {n: i["updated_at"] for n, i in by_num.items()})
+    picked = sel.select(found.routes, a.limit, a.depth, {n: i["updated_at"] for n, i in by_num.items()}, weak_carry)
     items = [_candidate_item(by_num[n], found.routes[n]) for n in picked.keep]
     counts = sel.by_route(found.routes, picked.keep)
     notes = found.notes + (
         [f"--add の {picked.manual_over} 件が上限 {a.limit} 件を超えたが、すべて候補に残した"] if picked.manual_over else []
     )
     metrics = {"repo": repo, "open": len(issues), "candidates": len(picked.keep), "limit": a.limit, "depth": a.depth,
-               "since_ref": a.since_ref, "deferred": picked.deferred, "carry": picked.carry,
+               "since_ref": a.since_ref, "deferred": picked.deferred, "carry": picked.carry, "deferred_unscored": picked.unscored_only,
                "carried": sorted(set(carried) & set(by_num)), "by_route": counts, "notes": notes}  # fmt: skip
     state.write(sd, "backlog-candidates", {"metrics": metrics, "items": items})
     summary = f"候補 {len(picked.keep)} 件（open {len(issues)} 件中）: " + "・".join(f"{r} {c}" for r, c in counts.items() if c)
@@ -208,9 +210,18 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     moved, move_failed = actions.reschedule(gh, plan, holds)
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
-    tables = tables_mod.write(gh, state.read(sd, "backlog-rank", {})["milestones"]) if plan.get("rank") else {}
-    return _apply_outcome(repo, run_id, str(Path(a.plan).resolve()), {"acted": acted, "made": made, "moved": moved, "move_failed": move_failed,
-                                         "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
+    tables = _write_tables(gh, sd, metrics, moved) if plan.get("rank") else {}
+    again = ["--repo", repo, "--plan", str(Path(a.plan).resolve()), "--run-id", run_id, "--state-dir", str(sd)]
+    return _apply_outcome(repo, run_id, again, {"acted": acted, "made": made, "moved": moved, "move_failed": move_failed,
+                                                "holds": holds, "parents": parents, "tables": tables})  # fmt: skip
+
+
+def _write_tables(gh: github.GitHub, sd: Path, metrics: dict[str, Any], moved: list[int]) -> dict[str, Any]:
+    """順位の表を書く。表は自動・承認済みの移動を済んだものとして置くため、その移動が 1 件でも済んでいなければ書かない。"""
+    unmoved = sorted({n for n, _ in plan_decide.placed_moves(metrics)} - set(moved))
+    if unmoved:
+        return {"written": [], "unchanged": [], "failed": [], "truncated": {}, "unmoved": unmoved}
+    return tables_mod.write(gh, state.read(sd, "backlog-rank", {})["milestones"])
 
 
 def _apply_failures(got: dict[str, Any]) -> list[dict[str, Any]]:
@@ -218,7 +229,9 @@ def _apply_failures(got: dict[str, Any]) -> list[dict[str, Any]]:
     tables = got["tables"]
     return [*got["move_failed"], *got["parents"]["failed"], *got["acted"]["failed"],
             *({"title": f["title"], "error": f["reason"]} for f in got["made"]["failed"]),
-            *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else []))]  # fmt: skip
+            *({"milestone": t, "error": "順位の表を書けない"} for t in (tables["failed"] if tables else [])),
+            *({"number": n, "error": "表が移したものとして置く移動が済んでいないため、順位の表を書かなかった"}
+              for n in (tables["unmoved"] if tables and "unmoved" in tables else []))]  # fmt: skip
 
 
 def _apply_summary(got: dict[str, Any]) -> str:
@@ -230,16 +243,19 @@ def _apply_summary(got: dict[str, Any]) -> str:
             f"人へ返した {len(buckets[actions_decide.RETURNED_BUCKET])} 件")  # fmt: skip
 
 
-def _next_steps(waiting: list[int], skipped: list[int]) -> list[str]:
+def _next_steps(waiting: list[int], skipped: list[int], holds: list[int]) -> list[str]:
     nxt = []
     if waiting:
         nxt.append('承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す')
+    if holds:
+        nxt.append("承認を待つ移動 " + " ".join(f"#{n}" for n in holds)
+                   + " は、承認を得たら rank を --approved で打ち直し、その rank で plan を作り直して apply を打つ")  # fmt: skip
     if skipped:
         nxt.append("plan の後に書き換わった " + " ".join(f"#{n}" for n in skipped) + " を判定し直す")
     return nxt
 
 
-def _apply_outcome(repo: str, run_id: str, plan_path: str, got: dict[str, Any]) -> dict[str, Any]:
+def _apply_outcome(repo: str, run_id: str, again_args: list[str], got: dict[str, Any]) -> dict[str, Any]:
     """反映の結果から status・要約・metrics を作る。失敗は止め、承認待ちと照合で飛ばした課題は gate で返す。"""
     acted, made, parents, tables = got["acted"], got["made"], got["parents"], got["tables"]
     buckets = acted["buckets"]
@@ -251,10 +267,10 @@ def _apply_outcome(repo: str, run_id: str, plan_path: str, got: dict[str, Any]) 
     if failed:
         raise Stop("incomplete", f"{summary}。{len(failed)} 件が失敗した（同じ plan で打ち直せば済んだものは記録で飛ぶ。"
                    f"付け直しを戻すは ndf issues revert --run {run_id}）", acted["items"], failed)  # fmt: skip
-    waiting, skipped = buckets[actions_decide.WAITING], buckets[actions_decide.SKIPPED]
-    if waiting or skipped:
-        nxt = _next_steps(waiting, skipped)
-        again = result.command(TOOL, "apply", "--repo", repo, "--plan", plan_path, "--run-id", run_id)
+    waiting, skipped, holds = buckets[actions_decide.WAITING], buckets[actions_decide.SKIPPED], sorted(got["holds"])
+    if waiting or skipped or holds:
+        nxt = _next_steps(waiting, skipped, holds)
+        again = result.command(TOOL, "apply", *again_args)
         out["next_steps"] = nxt
         return result.result(TOOL, result.GATE, summary + "。" + "。".join(nxt), acted["items"], out, run_id=run_id,
                              routes={"approved": again, "finish": None})  # fmt: skip
@@ -310,7 +326,7 @@ def cmd_settle(a: argparse.Namespace) -> dict[str, Any]:
     gh = hub(repo)
     base = a.base if a.base else settle.default_branch(gh)
     items = [{"kind": "issue", "name": f"#{b['issue']}", "result": settle_decide.UNVERIFIED, **b} for b in bad]
-    items += settle.settle(gh, rows, base, Path.cwd(), a.dry_run)
+    items += settle.settle(gh, rows, base, a.dry_run)
     left = [i for i in items if i["result"] == settle_decide.UNVERIFIED]
     done = sum(1 for i in items if i["result"] in (settle_decide.CLOSED, settle_decide.VERIFIED))
     summary = f"証拠を確かめた Issue {done} 件を{'確かめた（閉じていない）' if a.dry_run else '閉じた'}"

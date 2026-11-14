@@ -219,3 +219,14 @@ def test_write_failing_after_patch_records_partial(tmp_path):
     got = actions.apply_actions(gh, actions.Ledger(tmp_path), _stub_plan(gh))
     assert got["buckets"]["failed"] == [9] and gh.writes == [("PATCH", "", {"body": "新"})]
     assert _ledger_rows(tmp_path) == [{"result": "partial", "digest": model.snapshot_digest({"title": "題", "body": "新"})}]
+
+
+def test_apply_adds_the_rank_section_to_a_description_without_one(repo_dir, fake, run_issues, tmp_path):
+    for n in range(1, 9):
+        fake.issue(n, milestone="01")
+    fake.milestones = {"01": 1}
+    fake.descriptions = {1: "目的"}
+    ranked = _rank(run_issues, tmp_path)
+    got = _apply(run_issues, tmp_path, {"rank": ranked["metrics"]["digest"]})
+    assert got["status"] == "ok" and got["metrics"]["tables"]["written"] == ["01"]
+    assert fake.descriptions[1].startswith("目的\n\n### 順位\n\n| 順位 |")

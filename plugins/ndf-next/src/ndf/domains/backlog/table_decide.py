@@ -36,9 +36,12 @@ def replace_section(desc: str, table: str) -> str:
 
 
 def outside(desc: str) -> str:
-    """節の外の文字（節を除いた説明）。書く前後でこれが同じことを確かめる。"""
+    """節の外の文字（節を除いた説明）。書く前後でこれが同じことを確かめる。
+
+    節の手前の末尾の空白は比べない。節を末尾へ足すときに置く区切りの改行で、外の文字ではない。
+    """
     span = _section_span(desc)
-    return desc if span is None else desc[: span[0]] + desc[span[1] :]
+    return desc.rstrip() if span is None else desc[: span[0]].rstrip() + desc[span[1] :]
 
 
 def has_section(desc: str) -> bool:

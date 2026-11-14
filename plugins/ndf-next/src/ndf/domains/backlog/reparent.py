@@ -35,14 +35,24 @@ def _move_all(gh: GitHub, moves: list[dict[str, Any]], key_to: str, key_from: st
     return actions.each_number(moves, lambda m: issues_gh.set_parent(gh, m["number"], m[key_to], m[key_from]))
 
 
+def _kept_before(gh: GitHub, sd: Path, run_id: str) -> dict[int, Optional[int]]:
+    """同じ実行の前の状態に残る変更前の親。打ち直しで今の親（付け直した後の親）に上書きしない。"""
+    saved = state.read(sd, "backlog-before", None, id=run_id)
+    if not isinstance(saved, dict) or saved.get("repo") != gh.repo or not isinstance(saved.get("moves"), list):
+        return {}
+    return {m["number"]: m["before"] for m in saved["moves"] if isinstance(m, dict) and isinstance(m.get("number"), int) and "before" in m}
+
+
 def apply(gh: GitHub, sd: Path, plan: dict[str, Any], run_id: str) -> dict[str, Any]:
     """plan の付け直しを反映する。前の状態のパスと、付け直した・失敗した課題を返す。"""
     entries = entries_of(plan)
     if not entries:
         return {"applied": [], "failed": [], "before": None}
-    moves = [{"number": n, "before": issues_gh.parent_of(gh, n), "after": parent} for n, parent in entries]
-    path = state.write(sd, "backlog-before", {"repo": gh.repo, "run": run_id, "moves": moves}, id=run_id)
-    done, failed = _move_all(gh, moves, "after", "before")
+    kept = _kept_before(gh, sd, run_id)
+    moves = [{"number": n, "now": issues_gh.parent_of(gh, n), "after": parent} for n, parent in entries]
+    record = [{"number": m["number"], "before": kept[m["number"]] if m["number"] in kept else m["now"], "after": m["after"]} for m in moves]
+    path = state.write(sd, "backlog-before", {"repo": gh.repo, "run": run_id, "moves": record}, id=run_id)
+    done, failed = _move_all(gh, moves, "after", "now")
     return {"applied": done, "failed": failed, "before": str(path)}
 
 

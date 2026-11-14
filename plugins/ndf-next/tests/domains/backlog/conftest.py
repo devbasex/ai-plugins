@@ -28,7 +28,9 @@ class FakeHub:
         self.pulls: dict[int, dict[str, Any]] = {}
         self.pull_files: dict[int, list[dict[str, Any]]] = {}
         self.contents: dict[tuple[str, str], str] = {}
+        # 基底のブランチ（develop）の祖先のコミットと、基底に無い（別のブランチの）コミット
         self.commits: set[str] = set()
+        self.off_base: set[str] = set()
         self.writes: list[tuple[str, str, Any]] = []
         self.descriptions: dict[int, str] = {}
         # 説明の長さの上限（超えたら 422）。None なら上限なし
@@ -94,8 +96,16 @@ class FakeHub:
             (r"GET /pulls/(\d+)/files", self._files),
             (r"GET /pulls/(\d+)", self._pull),
             (r"GET /contents/(.+)", self._content),
-            (r"GET /commits/(\w+)", lambda m, b, p: httpx.Response(200 if m.group(1) in self.commits else 404, json={})),
+            (r"GET /compare/(\w+)\.\.\.(.+)", self._compare),
         ]
+
+    def _compare(self, m: re.Match, b: Any, p: Any) -> httpx.Response:
+        commit, base = m.group(1), m.group(2)
+        if commit in self.commits and base == "develop":
+            return httpx.Response(200, json={"status": "ahead"})
+        if commit in self.commits | self.off_base:
+            return httpx.Response(200, json={"status": "diverged"})
+        return httpx.Response(404, json={})
 
     def _issue_rest(self, n: int) -> httpx.Response:
         i = self.issues.get(n)

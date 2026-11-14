@@ -38,7 +38,10 @@ def _pick(
     """採る見積の生の値と、採れないときの理由。"""
     if n in given:
         raw = given[n]
-        return (raw, None) if isinstance(raw, dict) and raw.get("digest") else (None, NO_DIGEST)
+        if not isinstance(raw, dict) or not raw.get("digest"):
+            return None, NO_DIGEST
+        # 見直しは、この回の入力も今の課題と照らす（候補の収集の後に本文が書き換わった古い見積で終えない）
+        return (None, STALE) if digests is not None and not _fresh(raw, digests[n]) else (raw, None)
     if str(n) in stored:
         raw = stored[str(n)]
         if digests is not None and not _fresh(raw, digests[n]):

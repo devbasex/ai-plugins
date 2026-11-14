@@ -66,7 +66,8 @@ def _reachable(starts: Iterable[int], adjacency: dict[int, set[int]]) -> set[int
     seen = set(starts)
     stack, out = list(seen), set()
     while stack:
-        for b in adjacency.get(stack.pop(), ()):
+        a = stack.pop()
+        for b in adjacency[a] if a in adjacency else ():
             if b not in seen:
                 seen.add(b)
                 stack.append(b)
@@ -241,9 +242,12 @@ def held_back(rows: list[Row], edges: Iterable[Edge]) -> set[int]:
 
 
 def slots(board: Board, ranked: list[Row]) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
-    """大きい課題の枠・品質の枠・切り出しの境界。候補と表で同じ決め方を使う。"""
-    slot = large_slot(ranked, board.cfg, board)
+    """大きい課題の枠・品質の枠・切り出しの境界。候補と表で同じ決め方を使う。
+
+    境界に入れない課題（`held_back`）は、どの枠にも当てず容量も使わない。
+    """
     blocked = held_back(ranked, board.edges)
+    slot = large_slot([r for r in ranked if r.number not in blocked], board.cfg, board)
     quality = quality_slot(ranked, board, slot, blocked)
     return slot, quality, boundary([r for r in ranked if r.number not in blocked], board.cfg.capacity, slot, quality)
 
@@ -396,6 +400,22 @@ def compute(board: Board) -> dict[str, Any]:
         if n in board.issues
     }
     place = {n: board.issues[n]["milestone"] for n in rows}
-    tables = [_milestone_out(board, rows, place, t, i) for i, t in enumerate(board.order)]
     got = moves(board, rows, place) if board.order else {"forward": [], "backward": [], "dropped": [], "rejected_stale": []}
+    after = placed_after(place, got)
+    tables = [_milestone_out(board, rows, after, t, i) for i, t in enumerate(board.order)]
     return {"milestones": tables, **got}
+
+
+def placed_after(place: dict[int, Optional[str]], got: dict[str, Any]) -> dict[int, Optional[str]]:
+    """表が置く所属。前倒しの自動・承認済み（依存先も一緒）と後ろ倒しの承認済みは、移す先に置く。
+
+    apply はこれらの移動がすべて済んだときだけ表を書く（済まなければ表は移動前の所属と食い違う）。
+    """
+    after = dict(place)
+    for c in got["forward"]:
+        if c["decision"] in (AUTO, APPROVED):
+            after.update({n: c["to"] for n in [c["number"], *c["group"]] if n in after})
+    for c in got["backward"]:
+        if c["decision"] == APPROVED:
+            after[c["number"]] = c["to"]
+    return after

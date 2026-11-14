@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ndf.domains.backlog import model, plan_decide, rank_decide
 from ndf.domains.backlog.model import APPROVAL, BACKWARD, FORWARD, Config, Estimate
 
@@ -285,3 +287,44 @@ def test_large_slot_needs_split_when_no_child_fits():
 def test_large_slot_children_outside_rows_fall_back_to_the_issue_itself():
     rows = [_row(10, size=13)]
     assert _large(rows, _lboard(rows, 40, {10: [11, 12]})) == _slot(10, 10, 13, 20, model.SLOT_FIT)
+
+
+def test_large_slot_skips_rows_held_back_and_does_not_use_their_size():
+    # 判断待ちの Size 13 を枠に当てない。境界は容量 40 を残りの課題に使う
+    waiting = model.Row(1, 1, 1, 1, 13, 9, 9 / 13, True, False, False, {})
+    rows = [waiting, _row(2, size=8)]
+    slot, _, bnd = rank_decide.slots(_lboard(rows, 40), rows)
+    assert slot == _slot(None, None, None, 20, model.SLOT_NONE)
+    assert bnd["number"] == 2 and bnd["size_sum"] == 8
+
+
+def test_holds_spread_through_a_shared_dependency_until_stable():
+    # A（自動）と B（承認待ち）が依存先 X を共有し A が先に並ぶ。B から X、X から A へ伝わる
+    def cand(n, decision):
+        return {"number": n, "to": NEAR, "group": [30], "decision": decision, "move_digest": f"A{n}"}
+
+    metrics = {"forward": [cand(10, model.AUTO), cand(20, APPROVAL)], "backward": []}
+    plan = {"reschedule": [{"number": n, "direction": FORWARD, "milestone": NEAR} for n in (10, 30, 20)]}
+    checked = plan_decide.check(plan, metrics)
+    assert checked.errors == [] and checked.holds == {10, 20, 30}
+
+
+def test_tables_place_approved_moves_at_their_destination():
+    board = _board([_est(1, 2), _est(2, 1), _est(9, 20)], {1: NEAR, 2: NEAR, 9: NEXT}, capacity=2, approved=frozenset({9}))
+    got = rank_decide.compute(board)
+    assert got["forward"][0]["decision"] == model.APPROVED
+    near, nxt = got["milestones"]
+    assert 9 in [r["number"] for r in near["rows"]] and 9 not in [r["number"] for r in nxt["rows"]]
+    assert plan_decide.placed_moves(got) == [(9, FORWARD)]
+
+
+def test_config_reads_the_declaration_and_the_argument_overrides_capacity():
+    cfg = model.config_from({"capacity": 40, "label_floor": {"bug": 8}, "quality": {"ratio": 0.3}}, None)
+    assert cfg.capacity == 40 and cfg.label_floor == {"bug": 8} and cfg.quality == {"label": "quality", "ratio": 0.3, "min": 1}
+    assert model.config_from({"capacity": 40}, 10).capacity == 10
+    assert model.config_from({}, None) == Config()
+
+
+def test_config_rejects_a_label_floor_outside_the_scale():
+    with pytest.raises(model.ConfigError):
+        model.config_from({"label_floor": {"bug": 7}}, None)

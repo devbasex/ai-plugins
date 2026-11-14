@@ -87,3 +87,19 @@ def test_review_treats_non_dict_and_digestless_records_as_stale():
     assert list(ests) == [3]
     assert [(e["number"], e["reason"]) for e in excluded] == [(1, estimates_decide.STALE), (2, estimates_decide.STALE)]
     assert estimates_decide.unscored([3, 2, 1, 4], stored, {**digests, 4: "now4"}) == [2, 1, 4]
+
+
+def test_review_checks_the_given_scores_against_the_current_issue():
+    # 候補の収集の後に本文が書き換わった課題の古い scores で見直しを終えない
+    given = {1: _raw(1, "now1"), 2: _raw(2, "old2")}
+    ests, excluded = estimates_decide.estimates([1, 2], given, {}, {}, Config(), {1: "now1", 2: "now2"})
+    assert list(ests) == [1] and excluded == [{"number": 2, "reason": estimates_decide.STALE}]
+
+
+def test_issues_deferred_only_for_missing_estimates_stay_out_of_carry_when_carried():
+    # 見積の欠けだけで持ち越した課題は、次の回に carried が付いても carry に数えない
+    first = sel.select({1: {sel.MANUAL}, 10: {sel.UNSCORED}, 30: {sel.DIFF_PATH}}, 1, model.DIFF, {})
+    assert first.unscored_only == [10] and first.carry == 1
+    found = {1: {sel.MANUAL}, 10: {sel.CARRIED, sel.UNSCORED}, 30: {sel.CARRIED, sel.DIFF_PATH}}
+    again = sel.select(found, 1, model.DIFF, {}, frozenset(first.unscored_only))
+    assert sorted(again.deferred) == [10, 30] and again.carry == 1 and again.unscored_only == [10]

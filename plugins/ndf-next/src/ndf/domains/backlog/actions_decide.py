@@ -125,9 +125,10 @@ def plan_errors(plan: dict[str, Any]) -> list[str]:
             errs.append(f"{key} は列で書く")
     if errs:
         return errs
-    acts = plan.get("actions", [])
+    acts = plan["actions"] if "actions" in plan else []
+    creates = plan["create"] if "create" in plan else []
     errs += [e for k, act in enumerate(acts) for e in _action_errors(k, act)]
-    errs += [e for k, c in enumerate(plan.get("create", [])) for e in _create_errors(k, c)]
+    errs += [e for k, c in enumerate(creates) for e in _create_errors(k, c)]
     return errs + _duplicate_errors(acts)
 
 

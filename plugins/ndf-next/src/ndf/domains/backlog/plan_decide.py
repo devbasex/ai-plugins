@@ -97,16 +97,24 @@ def _check_dependency_move(metrics: Mapping[str, Any], n: Any, d: Any, to: Any, 
 
 
 def _holds(metrics: Mapping[str, Any], moves: list[dict[str, Any]]) -> set[int]:
-    """承認を待つ移動。依存先が保留に入った前倒しの先頭も、先頭が保留の依存先も保留にする。"""
+    """承認を待つ移動。依存先が保留に入った前倒しの先頭も、先頭が保留の依存先も保留にする。
+
+    依存先を共有する候補へも伝わるよう、保留の集まりが変わらなくなるまで繰り返す。
+    """
     holds = set()
     for e in moves:
         c = own_candidate(metrics, e["number"], e["direction"])
         if c is not None and c["decision"] == APPROVAL:
             holds.add(e["number"])
-    for c in _list(metrics, FORWARD):
-        members = {c["number"], *c["group"]}
-        if members & holds:
-            holds |= members & {e["number"] for e in moves}
+    planned = {e["number"] for e in moves}
+    groups = [{c["number"], *c["group"]} & planned for c in _list(metrics, FORWARD)]
+    grew = True
+    while grew:
+        grew = False
+        for members in groups:
+            if members & holds and not members <= holds:
+                holds |= members
+                grew = True
     return holds
 
 

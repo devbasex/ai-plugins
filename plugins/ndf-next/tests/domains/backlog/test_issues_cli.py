@@ -161,3 +161,60 @@ def test_reparent_with_an_issue_without_parent_and_revert(repo_dir, fake, run_is
 def test_revert_without_a_before_state_stops(repo_dir, fake, run_issues):
     got = run_issues("revert", "--repo", "acme/widgets", "--run", "nope")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+
+
+def test_reparent_rerun_keeps_the_first_before_state(repo_dir, fake, run_issues, tmp_path):
+    # 同じ実行を打ち直しても、付け直した後の親で前の状態を上書きしない（戻すと元の親へ戻る）
+    fake.issue(10)
+    fake.issue(12)
+    fake.issue(20, parent=12)
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"reparent": [{"number": 20, "parent": 10}]}))
+    for _ in range(2):
+        assert run_issues("apply", "--repo", "acme/widgets", "--plan", str(plan), "--run-id", "r2")["status"] == "ok"
+    before = json.loads((_sd(repo_dir) / "before-r2.json").read_text())
+    assert before["moves"] == [{"number": 20, "before": 12, "after": 10}]
+    assert run_issues("revert", "--repo", "acme/widgets", "--run", "r2")["status"] == "ok" and fake.issues[20]["parent"] == 12
+
+
+def test_held_moves_return_a_gate_whose_route_keeps_the_state_dir(repo_dir, fake, run_issues, tmp_path):
+    sd = tmp_path / "state"
+    fake.issue(1, milestone="01 直近")
+    fake.issue(2, milestone="01 直近")
+    fake.issue(9, milestone="02 次")
+    fake.milestones = {"01 直近": 1, "02 次": 2}
+    rows = [{"number": n, "ubv": u, "tc": 1, "rr_oe": 1, "size": 1, "digest": f"d{n}"} for n, u in ((1, 2), (2, 1), (9, 20))]
+    ranked = run_issues("rank", "--repo", "acme/widgets", "--state-dir", str(sd), "--scores", _scores(tmp_path / "s.json", rows),
+                        "--capacity", "2")  # fmt: skip
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps({"rank": ranked["metrics"]["digest"], "reschedule": [{"number": 9, "direction": FORWARD, "milestone": "01 直近"}]})
+    )
+    got = run_issues("apply", "--repo", "acme/widgets", "--state-dir", str(sd), "--plan", str(plan))
+    assert got["status"] == "gate" and got["metrics"]["held"] == [9] and fake.issues[9]["milestone"] == "02 次"
+    argv = got["routes"]["approved"]["argv"]
+    assert argv[argv.index("--state-dir") + 1] == str(sd)
+
+
+def test_rescoring_without_a_dependency_drops_the_stored_edge(repo_dir, fake, run_issues, tmp_path):
+    # 依存の辺も今回の入力を優先する: #1 の依存（#2）を外して採点し直すと、#1 が先に並ぶ
+    fake.issue(1, milestone="01")
+    fake.issue(2, milestone="01")
+    rows = [{"number": 1, "ubv": 5, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d1", "depends_on": [2]},
+            {"number": 2, "ubv": 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": "d2"}]  # fmt: skip
+    first = run_issues("rank", "--repo", "acme/widgets", "--scores", _scores(tmp_path / "s.json", rows))
+    assert [r["number"] for r in first["items"][0]["rows"]] == [2, 1]
+    rows[0] = {k: v for k, v in rows[0].items() if k != "depends_on"}
+    again = run_issues("rank", "--repo", "acme/widgets", "--scores", _scores(tmp_path / "s.json", rows))
+    assert [r["number"] for r in again["items"][0]["rows"]] == [1, 2]
+
+
+def test_rank_reads_capacity_and_label_floor_from_the_declaration(repo_dir, fake, run_issues, tmp_path):
+    (repo_dir / ".ndf").mkdir(exist_ok=True)
+    (repo_dir / ".ndf" / "backlog.json").write_text(json.dumps({"capacity": 1, "label_floor": {"bug": 13}}))
+    fake.issue(1, milestone="01")
+    fake.issue(2, milestone="01", labels=("bug",))
+    rows = [{"number": n, "ubv": 5 if n == 1 else 1, "tc": 1, "rr_oe": 1, "size": 1, "digest": f"d{n}"} for n in (1, 2)]
+    got = run_issues("rank", "--repo", "acme/widgets", "--scores", _scores(tmp_path / "s.json", rows))
+    table = got["items"][0]
+    assert [r["number"] for r in table["rows"]] == [2, 1] and table["boundary"]["capacity"] == 1
