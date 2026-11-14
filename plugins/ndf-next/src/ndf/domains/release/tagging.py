@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from http import HTTPStatus
 from pathlib import Path
 from typing import NamedTuple
@@ -62,18 +63,23 @@ def _release(hub: GitHub, tag: str, title: str, notes: str) -> Made:
     return Made(RELEASE, tag, CREATED)
 
 
+def _released(root: Path, revision: str) -> Iterator[tuple[plugins_mod.Plugin, str]]:
+    """そのコミットで定義が変わり（版を上げた）、版に接尾辞が無いプラグインと版（登録の順。1 件ずつ読む）。"""
+    changed = set(git_mod.Git(root).changed_files(f"{revision}^1", revision))
+    for plugin in plugins_mod.load(root):
+        ver = plugins_mod.version(root, plugin)
+        bumped = any(m.relative_to(root).as_posix() in changed for m in plugin.manifests(root))
+        if bumped and not version_decide.is_dev(ver):
+            yield plugin, ver
+
+
 def publish(root: Path, hub: GitHub, revision: str) -> list[Made]:
     """足りないタグと GitHub Release を作り、1 件ずつの結果を返す。"""
     decl = decl_mod.load(root)
     log_path = root / decl.changelog
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
-    changed = set(git_mod.Git(root).changed_files(f"{revision}^1", revision))
     out: list[Made] = []
-    for plugin in plugins_mod.load(root):
-        ver = plugins_mod.version(root, plugin)
-        bumped = any(m.relative_to(root).as_posix() in changed for m in plugin.manifests(root))
-        if not bumped or version_decide.is_dev(ver):
-            continue
+    for plugin, ver in _released(root, revision):
         tag = version_decide.tag_of(plugin.name, ver)
         title = f"{plugin.name} v{ver}"
         notes = changelog_decide.notes(log_text, plugin.name, ver)
