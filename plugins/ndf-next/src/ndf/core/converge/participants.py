@@ -64,20 +64,28 @@ def _decode_at(decoder: json.JSONDecoder, text: str, at: int) -> Any:
     return found
 
 
-def _findings_in(found: Any) -> Optional[list[dict[str, Any]]]:
-    """`{"findings": [...]}` の形なら辞書の指摘だけを返す。ほかは None。"""
-    if isinstance(found, dict) and isinstance(found.get("findings"), list):
-        return [f for f in found["findings"] if isinstance(f, dict)]
+def _listed_in(found: Any, key: str) -> Optional[list[dict[str, Any]]]:
+    """`{key: [...]}` の形なら辞書の要素だけを返す。ほかは None。"""
+    if isinstance(found, dict) and isinstance(found.get(key), list):
+        return [f for f in found[key] if isinstance(f, dict)]
+    return None
+
+
+def listed_of(text: str, key: str) -> Optional[list[dict[str, Any]]]:
+    """担当の出力の最後の `{key: [...]}` の要素。見つからなければ None（空の並びと分ける）。
+
+    読むだけの起動の担当はファイルを書けないため、結果を標準出力の最後の JSON で返す（cross-refactoring の提案も同じ形）。
+    """
+    decoder = json.JSONDecoder()
+    at = text.rfind("{")
+    while at >= 0:
+        found = _listed_in(_decode_at(decoder, text, at), key)
+        if found is not None:
+            return found
+        at = text.rfind("{", 0, at)
     return None
 
 
 def findings_of(text: str) -> Optional[list[dict[str, Any]]]:
     """相手役の出力の最後の `{"findings": [...]}` の指摘。見つからなければ None（空の指摘と分ける）。"""
-    decoder = json.JSONDecoder()
-    at = text.rfind("{")
-    while at >= 0:
-        found = _findings_in(_decode_at(decoder, text, at))
-        if found is not None:
-            return found
-        at = text.rfind("{", 0, at)
-    return None
+    return listed_of(text, "findings")

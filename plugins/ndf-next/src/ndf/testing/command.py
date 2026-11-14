@@ -8,7 +8,7 @@
 - `report [--since <7d のような期間>]`: 枠の記録を読み、結果 JSON を標準出力へ 1 行出す
 
 結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。枠の記録の結果の語（`gave_up`・`memory_stopped`）は
-`_CAUSE_OF` で止まった理由の表の種類へ写す。
+`slots.CAUSE_OF` で止まった理由の表の種類へ写す。
 """
 
 from __future__ import annotations
@@ -37,11 +37,6 @@ _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 # run で子を走らせたときに、退避した旧い状態の置き場を標準エラーへ書く 1 行の形
 RETIRED_LINE = identity.RETIRED_LINE
-
-
-# 枠の記録の結果の語 → 止まった理由の表の種類。待ちの上限で諦めた（枠を持つ実行は動いている）は wait_timeout、
-# メモリの見張りで止めたは作業マシンの資源の待ちとして infra_wait（終了コードが落ちたテストの 1 と重ならない。I9）
-_CAUSE_OF = {records.GAVE_UP: "wait_timeout", records.MEMORY_STOPPED: "infra_wait"}
 
 
 def _stopped(kind: str, detail: str, **extra: object) -> int:
@@ -96,7 +91,7 @@ def _again(command: str, wait_limit: int | None) -> dict:
 
 def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
     """枠の待ちを止めた結果を出す。wait_timeout は契約どおり同じ待ち（`again`）を next に載せる。"""
-    kind = _CAUSE_OF[exc.reason]
+    kind = exc.cause
     return _stopped(
         kind,
         exc.summary(),

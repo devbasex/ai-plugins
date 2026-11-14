@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ndf import contracts
 from ndf.contracts import causes, exit_codes, limits
 
 
@@ -14,8 +15,9 @@ def _edit_cause(kind: str, **changes):
 
 
 def test_plugin_table_rows_have_type_and_stopped_exit_code():
+    # 行の数は決め打ちしない（表へ種類を足す PR どうしが統合で食い違う）。表の行がすべて種類ごとの行になることを見る
     table = causes.table()
-    assert len(table) == 31
+    assert len(table) == len(contracts.load_json(causes.TABLE)["causes"])
     codes = exit_codes.codes("stopped")
     assert all(row.exit in codes and row.std_type for row in table.values())
 
