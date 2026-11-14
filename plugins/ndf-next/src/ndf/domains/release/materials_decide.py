@@ -50,8 +50,13 @@ def _pull_line(p: PullFact) -> str:
     return f"- #{p.number} {p.title}（{p.tally.label()}{tail}）"
 
 
+def _ordered(pulls: Sequence[PullFact]) -> list[PullFact]:
+    """含む PR を番号の順に並べる（承認資料と機械が読む項目で同じ順）。"""
+    return sorted(pulls, key=lambda p: p.number)
+
+
 def _pulls(pulls: Sequence[PullFact]) -> list[str]:
-    return [_pull_line(p) for p in sorted(pulls, key=lambda p: p.number)] if pulls else ["- 含む PR は無い"]
+    return [_pull_line(p) for p in _ordered(pulls)] if pulls else ["- 含む PR は無い"]
 
 
 def _distribution(changes: Sequence[changes_decide.Change]) -> list[str]:
@@ -105,5 +110,5 @@ def items(facts: Facts) -> list[dict]:
             "checks_skipped": p.tally.skipped,
             "failed": list(p.tally.failed),
         }
-        for p in sorted(facts.pulls, key=lambda p: p.number)
+        for p in _ordered(facts.pulls)
     ]
