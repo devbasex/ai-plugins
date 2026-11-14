@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 
 import pytest
 
 from ndf import contracts
-from ndf.progress import definition, model, stages
+from ndf.progress import definition, invoke, model, run, stages
 
 E = "file:///workflow/stage-io.schema.json#/$defs/"
 # .ndf/project.json の delivery の 1 行の形
@@ -238,3 +239,54 @@ def test_gate_stage_with_a_condition_is_refused():
     gated = _stage_doc("g", "行", [_step("gate", "gate", "none", gate="design")], when=["code_in_diff"])
     errs = _errors(_mode_doc([("行", "g")]), {"g": gated})
     assert any("承認ゲート" in e and "行" in e for e in errs)
+
+
+# --- 承認ゲートの答えの選択肢（現状固定。I-018 の前に run.choices を入口として固定する） ---------------------
+
+
+def _listen_steps(mode: str) -> list[stages.StepDef]:
+    return [st for st in definition.load_definition(mode).steps() if st.call in invoke.CALLS and invoke.is_listen(st)]
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
+def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mode):
+    # 現状固定: 承認ゲートのステップの選択肢は出力の規約（gate-answer）の metrics.answer の enum の順
+    listen = _listen_steps(mode)
+    assert listen
+    for st in listen:
+        assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == ["approved", "rejected", "revise"]
+
+
+def test_current_standard_has_listen_steps_for_both_gates():
+    gates = {st.gate for st in _listen_steps("standard")}
+    assert gates == {"design", "release"}
+
+
+def test_current_listen_step_without_output_contract_offers_nothing():
+    st = dataclasses.replace(_listen_steps("standard")[0], output_ref=None)
+    assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == []
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        E + "release-result",  # answer の enum を持たない規約
+        E + "no-such-def",  # 指す先が無い参照
+        "https://example.invalid/x.json#/a",  # 規約の外の参照
+    ],
+)
+def test_current_listen_step_whose_contract_has_no_answer_enum_offers_nothing(ref):
+    st = dataclasses.replace(_listen_steps("standard")[0], output_ref=ref)
+    assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == []
+
+
+def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report():
+    # 現状固定: プランの承認ゲートは待っている結果の routes の鍵のうち、答えの語彙にあるものを鍵の順に返す
+    st = next(s for s in definition.load_definition("standard").steps() if s.call in invoke.CALLS and not invoke.is_listen(s))
+    routes = {"revise": {}, "bogus": {}, "approved": {}}
+    prog = run.StepProgress(waiting={"report": {"routes": routes}})
+    assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == ["revise", "approved"]
+    prog = run.StepProgress(waiting={"report": {"routes": ["approved"]}})
+    assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
+    prog = run.StepProgress(waiting={"report": {}})
+    assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
