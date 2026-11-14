@@ -121,11 +121,18 @@ def errors(obj: Any, code: Optional[int] = None) -> list[str]:
     if "routes" in obj:
         errs += answer_errors(obj["routes"])
     if code is not None and obj.get("status") in STATUSES:
-        if not exit_codes.matches(obj["status"], code):
-            errs.append(f"status {obj['status']} と終了コード {code} が合わない")
-        expected = code_for(obj)
-        if obj["status"] == STOPPED and expected is not None and code != expected:
-            errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
+        errs += _code_errors(obj, code)
+    return errs
+
+
+def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
+    """終了コードが status の区分と、stopped なら cause.kind の終了コードと合うか。"""
+    errs: list[str] = []
+    if not exit_codes.matches(obj["status"], code):
+        errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+    expected = code_for(obj)
+    if obj["status"] == STOPPED and expected is not None and code != expected:
+        errs.append(f"cause.kind {obj['cause']['kind']} の終了コードは {expected}（渡された値 {code}）")
     return errs
 
 
