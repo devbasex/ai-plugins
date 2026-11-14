@@ -45,6 +45,11 @@ def policy(fields: dict) -> Optional[str]:
 
 def expected(plugin_root: Path) -> dict[Path, str]:
     """作るファイル → 中身。表に無い Skill の置き場があれば `RenderError`。"""
+    return _expected(plugin_root)[1]
+
+
+def _expected(plugin_root: Path) -> tuple[table.Table, dict[Path, str]]:
+    """読んだ表と、作るファイル → 中身。"""
     found = table.load(plugin_root)
     have = present(plugin_root)
     unlisted = sorted(have - {s.name for s in found.skills})
@@ -58,7 +63,7 @@ def expected(plugin_root: Path) -> dict[Path, str]:
             out[path] = _definition(path, names)
         if runtime.policy is not None:
             out.update(_policies(plugin_root, names, runtime.policy))
-    return out
+    return found, out
 
 
 def _definition(path: Path, names: list[str]) -> str:
@@ -80,31 +85,31 @@ def _policies(plugin_root: Path, names: list[str], rel: str) -> dict[Path, str]:
     return out
 
 
-def _extra(plugin_root: Path, want: dict[Path, str]) -> list[Path]:
+def _extra(plugin_root: Path, found_table: table.Table, want: dict[Path, str]) -> list[Path]:
     """作るものに無い policy のファイル（配らなくなった・明示の指示だけでなくなった Skill のもの）。"""
     base = plugin_root / SKILLS_DIR
-    rels = {r.policy for r in table.load(plugin_root).runtimes if r.policy is not None}
+    rels = {r.policy for r in found_table.runtimes if r.policy is not None}
     found = [p for rel in sorted(rels) for p in base.glob(f"*/{rel}")] if base.is_dir() else []
     return sorted(p for p in found if p not in want)
 
 
 def stale(plugin_root: Path) -> list[Path]:
     """作り直した結果と違う・無い・余ったファイル。"""
-    want = expected(plugin_root)
+    found, want = _expected(plugin_root)
     differ = [p for p, text in want.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
-    return sorted(differ + _extra(plugin_root, want))
+    return sorted(differ + _extra(plugin_root, found, want))
 
 
 def write(plugin_root: Path) -> list[Path]:
     """違うファイルを作り直し、余ったファイルを消す。書いた・消したファイルを返す。"""
-    want = expected(plugin_root)
+    found, want = _expected(plugin_root)
     changed = []
     for path, text in want.items():
         if not path.is_file() or path.read_text(encoding="utf-8") != text:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
             changed.append(path)
-    for path in _extra(plugin_root, want):
+    for path in _extra(plugin_root, found, want):
         path.unlink()
         if not any(path.parent.iterdir()):
             path.parent.rmdir()
