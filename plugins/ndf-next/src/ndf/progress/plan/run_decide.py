@@ -174,6 +174,16 @@ class LaunchTry(NamedTuple):
     detail: str
 
 
+class Stall(NamedTuple):
+    """写しの止まり 1 つ（レーン, 知らせの鍵, 理由, 最後に動いた時刻, 行）。写しでは JSON の list のまま持ち、読む所で包む。"""
+
+    lane: str
+    key: str
+    reason: str
+    moved: Optional[str]
+    row: str
+
+
 @dataclass(frozen=True)
 class RunState:
     """判断の状態。`launched` は起こして行の始まりを待つ起動、`waits` は起こしてから読み直した回数、
@@ -337,7 +347,7 @@ def _withdrawable(snap: dict[str, Any]) -> list[Withdraw]:
     """開いている止まりの知らせのうち、判定を読めた読み直しでその鍵の止まりが消えたもの（レーンが動き出した）。"""
     if not snap["judged"]:
         return []
-    now = {s[1] for s in snap["stalls"]}
+    now = {Stall(*s).key for s in snap["stalls"]}
     unknown = set(snap["unknown"])
     return [Withdraw(lane, req, key) for req, lane, key in snap["stall_requests"] if key not in now and lane not in unknown]
 
@@ -401,11 +411,12 @@ def _notice_stalls(state: RunState, policy: Policy) -> RunState:
     snap = _snap(state)
     goals = (Launch(lane, row, goal=sid) for lane, row, sid in snap["relaunch"])
     relaunching = {a.lane for a in goals if _relaunchable(state, a, policy)}
-    fresh = [s for s in snap["stalls"] if s[1] not in state.noticed and s[0] not in relaunching]
+    stalls = [Stall(*s) for s in snap["stalls"]]
+    fresh = [s for s in stalls if s.key not in state.noticed and s.lane not in relaunching]
     if not fresh:
         return state
     queued = tuple(_stall_report(state, *s) for s in fresh)
-    return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(s[1] for s in fresh)))
+    return replace(state, unreported=(*state.unreported, *queued), noticed=(*state.noticed, *(s.key for s in fresh)))
 
 
 def _expire_launched(state: RunState, policy: Policy) -> RunState:
