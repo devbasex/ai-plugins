@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import cli
+from ndf.adapters import claude, cli
 
 MINIMAL_HEAD = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
 
@@ -71,10 +71,10 @@ def test_call_claude_reads_structured_output(tmp_path):
 
 def test_call_claude_failures_are_not_ok(tmp_path):
     assert not cli.call_claude([str(tmp_path / "missing")], "問い", 30).ok
-    assert not cli._parse_reply("not json").ok
-    assert not cli._parse_reply(json.dumps({"is_error": True, "result": "boom"})).ok
-    assert cli._parse_reply(json.dumps({"result": '{"a": 1}'})).answer == {"a": 1}
-    assert cli._parse_reply(json.dumps({"result": "fix です"})).answer is None
+    assert not claude._parse_reply("not json").ok
+    assert not claude._parse_reply(json.dumps({"is_error": True, "result": "boom"})).ok
+    assert claude._parse_reply(json.dumps({"result": '{"a": 1}'})).answer == {"a": 1}
+    assert claude._parse_reply(json.dumps({"result": "fix です"})).answer is None
 
 
 def test_agent_paths_at_names_files_next_to_stem():

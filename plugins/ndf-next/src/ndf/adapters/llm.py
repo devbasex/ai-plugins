@@ -17,7 +17,7 @@ from typing import Any, Callable, NamedTuple, Optional, Sequence
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from ndf.adapters import cli
+from ndf.adapters import claude, run_log
 from ndf.contracts import causes
 
 # 打つ回数（最初の 1 回を含む）。上限の宣言ではなく決定 60 で固定した回数
@@ -40,7 +40,7 @@ JUDGE_ANSWER: dict[str, Any] = {
 }
 
 # 1 回の呼び出し: (起動の引数, 問い, 上限の秒) -> 答え。テストは偽の呼び出しへ差し替える
-Caller = Callable[[Sequence[str], str, float], cli.ClaudeReply]
+Caller = Callable[[Sequence[str], str, float], claude.ClaudeReply]
 
 
 class AnswerSchemaError(Exception):
@@ -88,7 +88,7 @@ def _prompt(question: str, material: str, errors: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def _head(reply: cli.ClaudeReply) -> str:
+def _head(reply: claude.ClaudeReply) -> str:
     shown = json.dumps(reply.answer, ensure_ascii=False) if reply.answer is not None else reply.raw
     return shown[:ANSWER_HEAD]
 
@@ -99,8 +99,8 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
     `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の答えの先頭を
     `detail` に持つ。claude の失敗も 1 回の外れと数える。
     """
-    run = call if call is not None else cli.call_claude
-    argv = cli.claude_args(cli.ClaudeCall(system=SYSTEM, json_schema=schema))
+    run = call if call is not None else claude.call_claude
+    argv = claude.claude_args(claude.ClaudeCall(system=SYSTEM, json_schema=schema))
     errors: list[str] = []
     heads: list[str] = []
     cost = 0.0
@@ -109,9 +109,9 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
         cost += reply.cost
         errors = [reply.error] if reply.error else check_answer(reply.answer, schema)
         if not errors:
-            cli.record("judge", attempts=attempt, valid=True, cost=cost)
+            run_log.record("judge", attempts=attempt, valid=True, cost=cost)
             return JudgeAnswer(True, reply.answer, None, attempt, cost)
         heads.append(f"{attempt} 回目: {_head(reply)}（{'; '.join(errors)}）")
-    cli.record("judge", attempts=ATTEMPTS, valid=False, cost=cost)
+    run_log.record("judge", attempts=ATTEMPTS, valid=False, cost=cost)
     detail = f"判断の答えが {ATTEMPTS} 回とも形に合わなかった。" + " / ".join(heads)
     return JudgeAnswer(False, None, causes.cause("needs_human", detail), ATTEMPTS, cost)
