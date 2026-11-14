@@ -172,6 +172,7 @@
     "backlog-refinement.depth-review": {"summary": "見直しの 1 回の秒の上限の既定（.ndf/backlog.json の depths.review.seconds で上書きする）", "seconds": 1800},
     "backlog-refinement.depth-overhaul": {"summary": "大整理の 1 回の秒の上限の既定（.ndf/backlog.json の depths.overhaul.seconds で上書きする）", "seconds": 5400},
     "cross-refactoring.template-probe": {"summary": "範囲テストのテンプレートの試走の上限の下限。着手前のテストが上限の近くで通っても、試走はこの秒を使える（#2158）", "seconds": 120},
+    "cross-refactoring.collect-check": {"summary": "足したテストが全体の実行に収集されるかの確かめ（suite の collect_command）の上限（#620）", "seconds": 120},
     "cross-refactoring.kill-grace": {"summary": "プロセスグループを止めるときの SIGTERM から SIGKILL までの猶予", "seconds": 5},
     "cross-refactoring.default-budget": {"summary": "実装の予算の既定（分で引数に出す）。採る項目の見積り（テストの追加と実装の和）の合計の上限で、選定にだけ使う", "seconds": 3600},
     "cross-refactoring.budget-extension": {"summary": "グレード high の候補の見積りの和が予算を超えたとき、予算を延ばしてよい倍率", "factor": 2},
