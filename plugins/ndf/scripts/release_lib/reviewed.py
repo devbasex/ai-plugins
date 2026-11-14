@@ -6,7 +6,7 @@ approval-check・approval-post・release-case から分けた）。
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
 本番の `ops` は `ProdOps`、開発版の `ops` は `release-steps.py`（find_pr・create_pr・merge_commit_of・_reusable_release_pr・
-_release_pr_body）。出す（emit）のはここで、終了コードは `step_result` の値を使う。
+_release_pr_body・_refresh_release_pr_body）。出す（emit）のはここで、終了コードは `step_result` の値を使う。
 """
 
 from __future__ import annotations
@@ -259,6 +259,8 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
             "number": ops.create_pr(root, base, branch, f"Release: {plugin} v{a.version}", ops._release_pr_body(root, a, plugin, plugins)),
             "state": "OPEN",
         }
+    elif pr["state"] == "OPEN":  # 使い回す PR の本文を今の版の本文へ（本文の印を読む検査が edited で打ち直される）
+        ops._refresh_release_pr_body(root, pr["number"], ops._release_pr_body(root, a, plugin, plugins))
     n = merged = pr["number"]
     items = [{"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": base}]
     if pr["state"] == "OPEN":

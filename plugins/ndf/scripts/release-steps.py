@@ -560,6 +560,11 @@ def _reusable_release_pr(root, branch, base):
     return pr
 
 
+# 旧いプラグインを変える PR に ndf-next の検査（規則 port。#3343）が求める行。印は plugins/ndf-next/src/ndf/checks/rules.json の
+# no_port_mark。リリースの PR は版数・CHANGELOG・取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ
+NO_PORT_LINE = "移さない理由（ndf-next）: リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ"
+
+
 def _release_pr_body(root, a, plugin, plugins):
     """CHANGELOG.md の節とチェックの結果から開発版の PR の本文を組む。"""
     ver = a.version
@@ -568,6 +573,8 @@ def _release_pr_body(root, a, plugin, plugins):
     return "\n".join(
         [
             f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            "",
+            NO_PORT_LINE,
             "",
             "## 含む PR",
             "",
@@ -582,6 +589,13 @@ def _release_pr_body(root, a, plugin, plugins):
     )
 
 
+def _refresh_release_pr_body(root, n, body):
+    """使い回す開発版の PR の本文を今の版の本文へ書き直す。本文の印を読む検査（ndf-next の port）は edited で打ち直される。"""
+    p = gh_parts.gh(["pr", "edit", str(n), "--body-file", "-"], body, cwd=root)
+    if p.returncode != 0:
+        raise StepError(f"gh pr edit #{n}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
+
+
 def _merge_release_pr(root, a, plugin, plugins, branch, base):
     """開発版の PR（release/v<版> → ベースブランチ）を使い回すか作ってマージし、(照合に渡す PR, 取り込んだ PR, マージコミット)
     を返す。衝突すれば release/v<版>-sync で取り込み（_merge_sync_pr）、照合に渡す PR は元の release/v<版> の PR のまま。"""
@@ -592,6 +606,8 @@ def _merge_release_pr(root, a, plugin, plugins, branch, base):
     n = pr["number"]
     if pr["state"] != "OPEN":
         return n, n, merge_commit_of(root, n)
+    if not pr.get("new"):
+        _refresh_release_pr_body(root, n, _release_pr_body(root, a, plugin, plugins))
     if not pr.get("new") and (synced := _merged_sync_pr(root, branch, base)):
         return n, synced, merge_commit_of(root, synced)  # 再開: 前の回が -sync で取り込み済み
     try:
@@ -631,7 +647,7 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
         found = find_pr(root, sync, base, states=("OPEN",))
         head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
         body = (
-            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n"
+            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{NO_PORT_LINE}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
