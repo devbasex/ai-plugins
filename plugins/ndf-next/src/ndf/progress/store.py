@@ -22,7 +22,7 @@ import shutil
 import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, Optional
@@ -435,16 +435,7 @@ def _utc(value: datetime) -> datetime:
 
 
 def _event(row: Any) -> model.Event:
-    draft = model.EventDraft(
-        kind=row.kind,
-        actor=row.actor,
-        row_key=row.row_key,
-        state=row.state,
-        reason=row.reason,
-        payload=row.payload,
-        dedupe_key=row.dedupe_key,
-        rev=row.rev,
-    )
+    draft = model.EventDraft(**{f.name: getattr(row, f.name) for f in fields(model.EventDraft)})
     return model.Event(row.seq, _utc(row.at), draft)
 
 
@@ -475,19 +466,7 @@ def _deduped(conn: sa.Connection, key: Optional[str]) -> Optional[int]:
 
 
 def _insert(conn: sa.Connection, table_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
-    values = {
-        "table_id": table_id,
-        "seq": seq,
-        "rev": draft.rev,
-        "row_key": draft.row_key,
-        "kind": draft.kind,
-        "state": draft.state,
-        "actor": draft.actor,
-        "reason": draft.reason,
-        "payload": draft.payload,
-        "dedupe_key": draft.dedupe_key,
-        "at": at,
-    }
+    values = {"table_id": table_id, "seq": seq, "at": at, **asdict(draft)}
     try:
         conn.execute(sa.insert(EVENTS).values(**values))
     except sa.exc.IntegrityError as exc:
