@@ -19,6 +19,10 @@
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回の鍵を変える。同じ引数で
 打ち直すと、プランは前の回の控えの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
+
+工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
+テストのコマンド・必須のチェック・レビューと組み直しの起動は `.ndf/project.json` の宣言から読み、worker と承認ゲートの
+起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import claude
+from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.contracts import facts, limits, result
 from ndf.core import durable, route
@@ -41,6 +45,8 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
+from ndf.progress.command import PROJECT_FILE, declaration
+from ndf.testing import weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
 PLAN = plan_cli.TOOL
@@ -106,6 +112,19 @@ class StageInputInvalid(StageInputError):
     @property
     def items(self) -> list[dict[str, str]]:
         return [{"error": e} for e in self.errors]
+
+
+class TemplateValuesMissing(route.RouteError):
+    """雛形の差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所。"""
+
+    def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
+        listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
+        super().__init__(f"雛形 {template_name} の差し込みの値が無い: {listed}")
+        self.missing = dict(missing)
+
+    @property
+    def items(self) -> list[dict[str, str]]:
+        return [{"key": n, "source": s} for n, s in self.missing.items()]
 
 
 @dataclass(frozen=True)
@@ -277,17 +296,137 @@ def _param_value(value: Any) -> route.Value:
     return _set_value(value)
 
 
+# 雛形の差し込みのうち、工程の入力に無い値の出所（差し込みの名前 → 出所。#3092）。表に無い名前は工程の入力・
+# 打った場所（`route.derived`）・`params.json` の既定で決まる
+FROM_ISSUE = "課題の題と本文"
+FROM_PROJECT = f"{PROJECT_FILE} の宣言"
+FROM_DEFAULT = "params.json の既定"
+FROM_WORKTREE = "作業場所のブランチ"
+FROM_INPUT = "工程の入力か打った場所"
+FILL_SOURCES = {
+    "title": FROM_ISSUE,
+    "body_file": FROM_ISSUE,
+    "test_command": FROM_PROJECT,
+    "required": FROM_PROJECT,
+    "review": FROM_PROJECT,
+    "rebuild": FROM_PROJECT,
+    "worker": FROM_DEFAULT,
+    "gate": FROM_DEFAULT,
+    "branch": FROM_WORKTREE,
+}
+# `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite 1 つの command）
+PROJECT_KEYS = {
+    "required": ("ci", "required_checks"),
+    "review": ("workflow", "launch", "review"),
+    "rebuild": ("workflow", "launch", "rebuild"),
+}
+# 課題の本文を書き出す置き場のファイル（プランの実行の置き場の下）
+ISSUE_BODY_FILE = "issue-{number}-body.md"
+
+
+def issue_text(place: Path, number: int) -> tuple[str, str]:
+    """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。"""
+    hub = github.GitHub(git.Git(place).remote_repo(), github.client())
+    title, authored = hub.issue_text(number)
+    return title, authored.body
+
+
+def _strings(value: Any) -> Optional[list[str]]:
+    """空でない文字列の並びならその並び、ほかは None。"""
+    ok = isinstance(value, list) and value and all(isinstance(v, str) and v for v in value)
+    return list(value) if ok else None
+
+
+def _dig(node: Any, *keys: str) -> Any:
+    for key in keys:
+        node = node[key] if isinstance(node, dict) and key in node else None
+    return node
+
+
+def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Value]:
+    """宣言から読む差し込みの値。宣言に無いか形が違えば None。"""
+    if name == "test_command":
+        suites = _dig(project, "test", "suites")
+        found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
+        cmd = found[0].get("command") if len(found) == 1 else None
+        return cmd if isinstance(cmd, str) and cmd else None
+    return _strings(_dig(project, *PROJECT_KEYS[name]))
+
+
+def _project(place: Path) -> dict[str, Any]:
+    """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。読めなければ `route.RouteError`。"""
+    try:
+        return declaration(place, PROJECT_FILE)
+    except GitError:
+        return {}
+    except contracts.ContractError as exc:
+        raise route.RouteError(str(exc)) from None
+
+
+def _issue_values(run: StageRun, work_dir: Path, place: Path) -> dict[str, route.Value]:
+    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。読めなければ空。"""
+    issues = run.inputs["issues"] if "issues" in run.inputs else None
+    if not isinstance(issues, list) or len(issues) != 1:
+        return {}
+    try:
+        title, body = issue_text(place, int(issues[0]))
+    except (GitError, github.GitHubError):
+        return {}
+    out = work_dir / ISSUE_BODY_FILE.format(number=int(issues[0]))
+    out.write_text(body, encoding="utf-8")
+    return {"title": title, "body_file": str(out)}
+
+
+def _branch_of(run: StageRun) -> Optional[str]:
+    """入力の作業場所が今いるブランチ。作業場所が入力に無いか、ブランチに居なければ None。"""
+    held = run.inputs["worktree"] if "worktree" in run.inputs else None
+    if not isinstance(held, str) or not Path(held).is_dir():
+        return None
+    try:
+        branch = git.Git(Path(held)).run("symbolic-ref", "--short", "HEAD").strip()
+    except GitError:  # noqa: NDF401 外部コマンド: ブランチに居ない作業場所は、足りない値として名前を挙げる
+        return None
+    return branch if branch else None
+
+
+def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path) -> dict[str, route.Value]:
+    """雛形の差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
+
+    既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。
+    """
+    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
+    place = work_place(run, cwd)
+    if FROM_ISSUE in wanted.values():
+        values.update({k: v for k, v in _issue_values(run, work_dir, place).items() if k in wanted})
+    if FROM_PROJECT in wanted.values():
+        project = _project(place)
+        for name in (n for n, s in wanted.items() if s == FROM_PROJECT):
+            found = _project_value(name, project)
+            if found is not None:
+                values[name] = found
+    if "branch" in wanted:
+        branch = _branch_of(run)
+        if branch is not None:
+            values["branch"] = branch
+    values = route.derived(t, values, cwd)
+    defs = route.params()
+    missing = {n: (FILL_SOURCES[n] if n in FILL_SOURCES else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
+    if missing:
+        raise TemplateValuesMissing(t.name, missing)
+    return values
+
+
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     """雛形を入力の値で埋めたプランを実行の置き場へ書き、そのパスを返す。
 
-    差し込みのうち入力に無いものは `ndf route render` と同じく打った場所から決め（`route.derived`）、それでも欠ければ
-    `route.RouteError`。雛形が無ければ `model.Refused`。
+    差し込みのうち入力に無いものは出所の表（`FILL_SOURCES`）と、`ndf route render` と同じく打った場所から決め
+    （`template_values`）、それでも欠ければ `TemplateValuesMissing`（`route.RouteError`）。雛形が無ければ `model.Refused`。
     """
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランの雛形 {run.name} が無い")
-    given = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
-    plan = route.render(t, route.derived(t, given, cwd))
+    plan = route.render(t, template_values(t, run, work_dir, cwd))
     out = work_dir / f"{run.name}.json"
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out
@@ -413,6 +552,8 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         if ended is not None:
             return ended
         argv = plan_argv(run, work_dir, answer, cwd)
+    except TemplateValuesMissing as exc:
+        return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}", items=exc.items), {})
     except route.RouteError as exc:
         return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}"), {})
     except GitError as exc:
