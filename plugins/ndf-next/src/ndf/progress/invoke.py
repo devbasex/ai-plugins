@@ -30,9 +30,14 @@ from ndf.adapters import claude
 from ndf.contracts import limits, result
 from ndf.progress import definition, model, stages
 
-# 工程の定義の call → 作業種別
-CALLS = {"ndf.plan": "plan", "ndf.skill": "skill", "ndf.script": "script", "ndf.listen": "listen"}
+# 作業種別と、工程の定義の call → 作業種別
+PLAN = "plan"
+SKILL = "skill"
+SCRIPT = "script"
 LISTEN = "listen"
+CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, "ndf.listen": LISTEN}
+# 作業種別 → 呼ぶものの名前を持つ with の鍵（listen は作業を呼ばないので無い）
+NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # プランの雛形の置き場（契約の置き場の下）
 TEMPLATES = "templates"
 # script の作業へ入力を渡す環境変数
@@ -188,11 +193,11 @@ def stage_run(stage: stages.StageDef, step: stages.StepDef, inputs: Mapping[str,
 
 
 def _named(kind: str, args: Mapping[str, Any]) -> str:
-    key = {"plan": "plan", "skill": "skill", "script": "argv", LISTEN: None}[kind]
-    if key is None:
+    if kind == LISTEN:
         return LISTEN
+    key = NAME_ARG[kind]
     value = args[key] if key in args else None
-    if kind == "script":
+    if kind == SCRIPT:
         value = value[0] if isinstance(value, list) and value else None
     if not isinstance(value, str) or not value:
         raise model.Refused(f"作業種別 {kind} の with.{key} が無い")
@@ -262,7 +267,7 @@ def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> Stag
 
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     if not template_path(run.name).is_file():
-        return StageResult(result.stopped("plan", "precondition", f"プランの雛形 {run.name} が無い（{template_path(run.name)}）"), {})
+        return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い（{template_path(run.name)}）"), {})
     work_dir.mkdir(parents=True, exist_ok=True)
     return _from_process(run, runner(plan_argv(run, work_dir, answer), cwd, run.env({})))
 
@@ -291,7 +296,7 @@ def _call_skill(run: StageRun, cwd: Path) -> StageResult:
     reply = claude.call_claude(claude.claude_args(call), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
-        return StageResult(result.stopped("skill", kind, f"Skill {run.name} を回せない: {reply.error}"), {})
+        return StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
     if not isinstance(reply.answer, dict) or result.errors(reply.answer):
         return bad_report(run, "答えが結果 JSON の形に合わない")
     return finished(run, reply.answer)
@@ -299,10 +304,10 @@ def _call_skill(run: StageRun, cwd: Path) -> StageResult:
 
 def invoke(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str] = None, runner: Runner = run_command) -> StageResult:
     """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の置き場、`answer` はプランの承認ゲートの答え。"""
-    if run.kind == "plan":
+    if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
-    if run.kind == "script":
+    if run.kind == SCRIPT:
         return _call_script(run, cwd, runner)
-    if run.kind == "skill":
+    if run.kind == SKILL:
         return _call_skill(run, cwd)
     raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
