@@ -16,7 +16,7 @@ from githubkit.response import Response
 
 from ndf.adapters import git, github
 
-from ._github_helpers import hub, pull_json
+from ._github_helpers import graphql_pull_node, hub, pull_json
 
 REPO = "devbasex/ai-plugins"
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
@@ -175,11 +175,7 @@ def test_check_runs_refuses_more_pages_than_the_limit() -> None:
 
 
 def _pr_node(number: int) -> dict:
-    return {
-        "number": number, "state": "OPEN", "merged": False, "headRefOid": HEAD, "headRefName": f"b{number}",
-        "baseRefName": "develop", "body": None, "mergeStateStatus": "CLEAN",
-        "author": {"login": "octocat"}, "authorAssociation": "OWNER",
-    }  # fmt: skip
+    return graphql_pull_node(number, "OPEN", False, HEAD, f"b{number}", None)
 
 
 def _hub_graphql(answer: Callable[[str], dict]) -> tuple[github.GitHub, list[str]]:

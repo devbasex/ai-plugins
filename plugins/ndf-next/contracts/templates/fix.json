@@ -1,0 +1,19 @@
+{
+  "template": "fix",
+  "purpose": "immediate_fix",
+  "summary": "即時修正: 手元のテスト → PR → merge-when-green（衝突の確かめ・CI の待ち・マージ）を 1 本で流す",
+  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "test_command", "ci_budget", "required", "tests", "merge_method"],
+  "plan": {
+    "name": "fix-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "test"},
+      {"use": "push", "on_fail": null},
+      {"use": "pr"},
+      {"use": "conflict-check", "on_cause": {}},
+      {"use": "ci", "on_cause": {}},
+      {"use": "merge", "next": "end"}
+    ]
+  }
+}

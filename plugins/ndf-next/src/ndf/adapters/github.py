@@ -86,13 +86,17 @@ _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 
 class GitHubError(Exception):
     """GitHub の要求が失敗した。`status` は HTTP の状態（届かなければ 0）、`retry_after` は上限の回復までの秒、
-    `quota` は上限に当たった枠（`rest`・`graphql`。上限でなければ None）。"""
+    `quota` は上限に当たった枠（`rest`・`graphql`。上限でなければ None）。`unreached` は要求が GitHub へ届かなかった印で、
+    状態が 0 でも届いて断られた失敗（GraphQL の誤り・repository が null・ページの上限・認証が無い）は False。"""
 
-    def __init__(self, detail: str, status: int = 0, retry_after: Optional[float] = None, quota: Optional[str] = None) -> None:
+    def __init__(
+        self, detail: str, status: int = 0, retry_after: Optional[float] = None, quota: Optional[str] = None, unreached: bool = False
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.retry_after = retry_after
         self.quota = quota
+        self.unreached = unreached
 
 
 def token() -> str:
@@ -340,7 +344,7 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
         status = exc.response.status_code
         body = f": {exc.response.text[:300]}" if detail_body else ""
         return GitHubError(f"GitHub が断った（{status}）: {label}{body}", status)
-    return GitHubError(f"GitHub へ届かない: {label}: {exc}")
+    return GitHubError(f"GitHub へ届かない: {label}: {exc}", unreached=True)
 
 
 def _page_cap(name: str) -> int:

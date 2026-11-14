@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -102,10 +101,10 @@ def test_stats_reports_percentiles_counts_and_injection():
     assert stop_row["inject_max"] == 100 and got["guards"]["stop-wait"]["p95_ms"] == 20
 
 
-def test_stats_command_reads_the_records(tmp_path, capsys):
+def test_stats_command_reads_the_records(tmp_path, capsys, last_result):
     call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999"))
     assert cli.main(["stats", "--days", "1"]) == 0
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    out = last_result(capsys.readouterr().out)
     assert out["status"] == "ok" and out["items"][0]["events"]["claude:PreToolUse"]["denies"] == 1
 
 
