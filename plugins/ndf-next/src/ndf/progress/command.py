@@ -216,11 +216,12 @@ def _declaration_errors(value: Any) -> list[str]:
 # --- 進行表の読み書き ---------------------------------------------------------------------
 
 
-def _current(conn: Any, table_id: str) -> tuple[int, stages.Snapshot, list[model.Event]]:
+def read_current(conn: Any, table_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
+    """進行表の最新の改訂・定義の文書・定義・事象。進行表が無ければ `model.Refused`。"""
     if store.read_table(conn, table_id) is None:
         raise model.Refused(f"進行表 {table_id} は無い")
     rev, raw = store.read_definition(conn, table_id)
-    return rev, stages.snapshot_from(raw), store.read_events(conn, table_id)
+    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, table_id)
 
 
 def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
@@ -241,7 +242,7 @@ def _append(
     """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
 
     def write(conn: Any) -> list[int]:
-        rev, snap, events = _current(conn, table_id)
+        rev, _, snap, events = read_current(conn, table_id)
         drafts = build(rev, snap, events)
         return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
 
@@ -317,7 +318,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     doc, drafts = _prepare_new(a, cwd, snap)
     with store.transaction(st) as conn:
         tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
-        rev, _, events = _current(conn, tid)
+        rev, _, _, events = read_current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
     summary = f"進行表 {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
@@ -326,7 +327,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
 
 def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     with store.transaction(st) as conn:
-        rev, snap, events = _current(conn, a.table_id)
+        rev, _, snap, events = read_current(conn, a.table_id)
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
     metrics = {"table_id": a.table_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
@@ -358,7 +359,7 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
-        _, snap, _ = _current(conn, a.table_id)
+        _, _, snap, _ = read_current(conn, a.table_id)
     stage = snap.stage(a.stage)
     errs = definition.validate_stage_output(stage, output)
     if errs:

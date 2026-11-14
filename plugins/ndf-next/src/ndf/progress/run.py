@@ -112,10 +112,8 @@ def payload_of(ev: model.Event) -> dict[str, Any]:
 
 
 def view(conn: Any, table_id: str) -> View:
-    if store.read_table(conn, table_id) is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    rev, raw = store.read_definition(conn, table_id)
-    return View(table_id, rev, stages.snapshot_from(raw), raw, store.read_events(conn, table_id))
+    rev, raw, snap, events = command.read_current(conn, table_id)
+    return View(table_id, rev, snap, raw, events)
 
 
 def read(st: store.Store, table_id: str) -> View:
