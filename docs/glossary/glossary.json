@@ -7329,6 +7329,36 @@
       "context": "ndf-workflow",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
+    },
+    {
+      "term": "振り分け表",
+      "context": "ndf-workflow",
+      "meaning": "#1142 の設計レビューの全項目と要求の行について、行き先の子と版（11.0.0 か 11.x）を持つ文書 issues/issue-1142-design-review-routing.md。行き先の表と要求の受け入れ条件の持ち主の表から成る",
+      "pending_source": "issues/issue-3388-requirements.md"
+    },
+    {
+      "term": "11.x の行",
+      "context": "ndf-workflow",
+      "meaning": "振り分け表で版の列が 11.x の行。11.0.0 を出した後に解く（#1142 の作り直し）",
+      "pending_source": "issues/issue-3388-requirements.md"
+    },
+    {
+      "term": "閉じた子",
+      "context": "ndf-workflow",
+      "meaning": "行き先の子のうち、設計を書く時点で GitHub の Issue の状態が CLOSED のもの。子の表のコピーの closed では判定しない（#3388）",
+      "pending_source": "issues/issue-3388-requirements.md"
+    },
+    {
+      "term": "多観点レビュー",
+      "context": "ndf-workflow",
+      "meaning": "観点ごとに独立したレビュー役を並列に立て、設計の抜けを探すレビュー。ラウンドを重ねて磨く cross-review とは別の場（#3388）",
+      "pending_source": "issues/issue-3388-requirements.md"
+    },
+    {
+      "term": "起票の前に人へ見せる場",
+      "context": "ndf-workflow",
+      "meaning": "多観点レビューの指摘を分類し、分類ごとのあるべき姿と受け入れ条件の案を人へ示してから起票する場（利用者の決定、2026-11-14。#3388）",
+      "pending_source": "issues/issue-3388-requirements.md"
     }
   ]
 }
