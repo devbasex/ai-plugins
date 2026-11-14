@@ -21,13 +21,16 @@ PROJECT_FILE = "project.json"
 SECTION = "test_slots"
 # 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動の枠のテストの重み
 CPUS_PER_RUN = 4
-# テスト 1 本の重みの種類（`contracts/limits.json` の `launch.weight.test`）
-TEST_WEIGHT = "test"
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
 FLOOR_RATIO = 0.10
 # 待ちの上限の既定（全体テストの上限と同じ）
 DEFAULT_WAIT_LIMIT_SECONDS = 1800
+
+
+def test_weight_mib() -> int:
+    """テスト 1 本の重み（`contracts/limits.json` の `launch.weight.test`）。"""
+    return slot_pool.weight_mib("test")
 
 
 class SlotConfigError(Exception):
@@ -47,7 +50,7 @@ class Limits:
     @property
     def capacity_mib(self) -> int:
         """重い起動の枠の容量。テスト `max_runs` 本の重みの合計で、LLM の CLI もこの中で数える（#3368）。"""
-        return self.max_runs * slot_pool.weight_mib(TEST_WEIGHT)
+        return self.max_runs * test_weight_mib()
 
 
 # 設定の鍵（Limits のフィールドの名前と同じ）
@@ -57,7 +60,7 @@ _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
 def default_limits(cpus: int, total_mib: int | None) -> Limits:
     """CPU の数と全体のメモリから既定の上限を決める。全体のメモリが読めなければ CPU だけで決める。"""
     by_cpu = cpus // CPUS_PER_RUN
-    by_memory = by_cpu if total_mib is None else total_mib // slot_pool.weight_mib(TEST_WEIGHT)
+    by_memory = by_cpu if total_mib is None else total_mib // test_weight_mib()
     floor = FLOOR_MIN_MIB if total_mib is None else max(FLOOR_MIN_MIB, int(total_mib * FLOOR_RATIO))
     return Limits(max(1, min(by_cpu, by_memory)), floor, DEFAULT_WAIT_LIMIT_SECONDS)
 

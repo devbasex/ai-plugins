@@ -342,7 +342,7 @@ def _give_back(taken: slot_pool.Taken | None, *, quiet: bool = False) -> None:
 def _take_free_slot(ctx: SlotContext, held: Held) -> slot_pool.Taken | None:
     """テスト 1 本の重みで枠を取り、持ち主を仮に書く。空きが無い・判定の排他を待ちきれなければ None。"""
     try:
-        taken = slot_pool.take(ctx.directory, ctx.limits.capacity_mib, slot_pool.weight_mib(limits_mod.TEST_WEIGHT), _owner(None, ctx.cwd))
+        taken = slot_pool.take(ctx.directory, ctx.limits.capacity_mib, limits_mod.test_weight_mib(), _owner(None, ctx.cwd))
     except Timeout:  # noqa: NDF401 ファイル: ほかの起動が判定の排他を持ち続けている間は空いていないとして待つ
         return None
     if taken is not None:
