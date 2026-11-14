@@ -295,7 +295,11 @@ class Watch:
 
     def remaining(self) -> float:
         """待ちに使える残りの秒。ランナーの割り当ての待ちは予算に数えない（API の上限の待ちの締め切りに使う）。"""
-        return self.budget - (self.clock() - self.started - self._queued)
+        return self._remaining_at(self.clock())
+
+    def _remaining_at(self, now: float) -> float:
+        """時刻 `now` での待ちに使える残りの秒（ランナーの割り当ての待ちを予算に数えない）。"""
+        return self.budget - (now - self.started - self._queued)
 
     def run(self) -> WatchResult:
         policy = limits.policy("test-triage.check-wait")
@@ -305,25 +309,26 @@ class Watch:
             reading = self.reader()
             rounds += 1
             now = self.clock()
+            elapsed = now - start
             if self.on_round is not None:
-                self.on_round(reading, now - start)
+                self.on_round(reading, elapsed)
             if reading.verdict != Verdict.PENDING or (self.decided is not None and self.decided(reading)):
-                return WatchResult(reading, rounds, now - start, self._queued)
-            wait = self._next_wait(reading, interval, now - start, runner_cap)
+                return WatchResult(reading, rounds, elapsed, self._queued)
+            wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
                 exhausted = reading.only_queued and self._queued >= runner_cap
-                return WatchResult(reading, rounds, now - start, self._queued, exhausted)
+                return WatchResult(reading, rounds, elapsed, self._queued, exhausted)
             self.sleep(wait)
             if reading.only_queued:
                 # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
                 self._queued += max(self.clock() - now, wait)
             interval = min(interval * float(policy.factor), float(policy.max_interval))
 
-    def _next_wait(self, reading: Reading, interval: float, elapsed: float, runner_cap: float) -> float:
-        """次に眠る秒。上限までの残りに縮める。0 以下なら上限に達した。"""
+    def _next_wait(self, reading: Reading, interval: float, now: float, runner_cap: float) -> float:
+        """時刻 `now` から次に眠る秒。上限までの残りに縮める。0 以下なら上限に達した。"""
         if reading.only_queued:
             return min(interval, runner_cap - self._queued)
-        return min(interval, self.budget - (elapsed - self._queued))
+        return min(interval, self._remaining_at(now))
 
 
 def watch_head(github: GitHub, sha: str, required: list[str], tests: list[str]) -> Callable[[], Reading]:
