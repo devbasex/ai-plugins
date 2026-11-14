@@ -13,6 +13,9 @@
   `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
+- 認証の失敗で `/goal` が外れたレーンを起こし直す: 入力の先頭に `/goal` を置き、`ndf progress next <スプリントの ID>` で
+  止まった所から続ける（`goal_prompt`。#3243）。アカウントが使えるかは `account_ok` が自分の副命令
+  （`ndf relay account show`）で読む
 
 ラッパーの名前は `<計画>-<レーン>-<要約>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
 要約はリポジトリ・計画・レーンの 3 つから作る。ラッパーの登録簿は利用者単位で共通なので、別のリポジトリが同じ
@@ -123,6 +126,15 @@ def resume_commands(sprint_id: str) -> list[dict[str, Any]]:
     return [mark, nxt]
 
 
+# 起こし直しの入力の先頭に置く、claude の目標を入れる命令（#3243）
+GOAL = "/goal"
+
+
+def goal_prompt(plan: str, lane: str, sprint_id: str) -> str:
+    """認証の失敗で `/goal` が外れたレーンを起こし直す入力。目標を入れ直し、スプリントを止まった所から続ける。"""
+    return f"{GOAL} {prompt(plan, lane, [result.command('progress', 'next', sprint_id)])}"
+
+
 def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
     """conductor へ渡す最初の入力。コマンドの並びを JSON で持つ。"""
     body = json.dumps(commands, ensure_ascii=False)
@@ -183,6 +195,13 @@ def wrappers(run: Optional[Any] = None) -> Optional[dict[str, dict[str, Any]]]:
     if out is None or out.get("status") != result.OK or not isinstance(out.get("items"), list):
         return None
     return {str(r["name"]): r for r in out["items"] if isinstance(r, dict) and "name" in r}
+
+
+def account_ok(run: Optional[Any] = None) -> bool:
+    """子を起動するアカウントが使えるか（`ndf relay account show` が ok を返すか。指定が壊れていれば使えない）。
+    打てない・読めなければ偽（起こし直さずに止まりとして知らせる）。"""
+    out = _probe(_entry("relay", "account", "show"), run)
+    return out is not None and out.get("status") == result.OK
 
 
 def sprint_wait(sprint_id: str, run: Optional[Any] = None) -> Optional[dict[str, Any]]:

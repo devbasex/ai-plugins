@@ -122,30 +122,35 @@ def probes(repo: str, plan: str) -> liveness.Probes:
         wrapper_name=functools.partial(launch.wrapper_name, repo, plan),
         wrappers=functools.cache(lambda: launch.wrappers()),
         sprint=launch.sprint_wait,
+        account_ok=lambda: launch.account_ok(),
     )
 
 
 @dataclass(frozen=True)
 class Judged:
     """読み直し 1 回の生死の判定。`stalls` は止まったレーンの（レーン, 知らせの鍵, 理由, 最後に動いた時刻, 行）、
-    `unknown` は判定が unknown のレーン、`judged` は判定したか（計画が動いていない・材料の口が無ければ偽）。"""
+    `unknown` は判定が unknown のレーン、`judged` は判定したか（計画が動いていない・材料の口が無ければ偽）、
+    `relaunch` は `/goal` を入れ直して起こし直せる（アカウントが使える）`stalled` のレーンの（レーン, 行, スプリントの ID）。"""
 
     stalls: list[tuple[str, str, str, str | None, str]]
     unknown: list[str]
     judged: bool
+    relaunch: list[tuple[str, str, str]]
 
 
 def _judge(rows: dict[str, list[lane.LaneRow]], state: str, found: liveness.Probes | None, moved: dict[str, str]) -> Judged:
     """生死を判定する。計画が動いていなければ判定しない（知らせを書けない・閉じられない）。"""
     if found is None or state != lane.RUNNING:
-        return Judged([], [], False)
+        return Judged([], [], False, [])
     verdicts = liveness.judge_lanes(rows, found)
     stalls = [
         (name, liveness.notice_key(name, v), f"レーン {name} の行 {v.row}: {v.reason}", moved.get(name), str(v.row))
         for name, v in verdicts.items()
         if v.stall
     ]
-    return Judged(stalls, [name for name, v in verdicts.items() if v.kind == liveness.UNKNOWN], True)
+    auth = [(name, str(v.row), str(v.sprint_id)) for name, v in verdicts.items() if v.kind == liveness.STALLED]
+    relaunch = auth if auth and found.account_ok() else []
+    return Judged(stalls, [name for name, v in verdicts.items() if v.kind == liveness.UNKNOWN], True, relaunch)
 
 
 def last_moved(conn: Any, view: lane.PlanView, rows: dict[str, list[lane.LaneRow]]) -> dict[str, str]:
@@ -199,7 +204,8 @@ def snapshot_of(
     wakeable = lane.wakeable_lanes(view, rows)
     got = _judge(rows, view.state, found, moved if moved is not None else {})
     snap = run_decide.snapshot(view.state, lane.plan_complete(view, rows), wakeable, running, reported, answered)
-    snap = run_decide.with_stall_requests(run_decide.with_stalls(snap, got.stalls, got.unknown, got.judged), stall_requests)
+    snap = run_decide.with_stalls(snap, got.stalls, got.unknown, got.judged, got.relaunch)
+    snap = run_decide.with_stall_requests(snap, stall_requests)
     return run_decide.with_halts(snap, _halts(view, rows, found))
 
 
@@ -223,20 +229,20 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
         return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
     if act.resume is not None:
         return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume))
+    if act.goal is not None:
+        return launch.goal_prompt(view.name, act.lane, act.goal)
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
     row = next(r for r in rows if r.key == act.row)
     return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].table_id, row))
 
 
 @durable.step
-def launch_lane(
-    spec: dict[str, Any], lane_name: str, row: str, cancel: str | None, resume: str | None = None, halt: bool = False
-) -> dict[str, Any]:
-    """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。`halt` なら起こさずに、
-    最後の行が終わったレーンのラッパーを止める（#3173）。"""
-    if halt:
+def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, Any]) -> dict[str, Any]:
+    """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。`how` は `Launch` の
+    cancel・resume・seq・halt・goal。`halt` なら起こさずに、最後の行が終わったレーンのラッパーを止める（#3173）。"""
+    act = Launch(lane_name, row, **how)
+    if act.halt:
         return launch.stop(spec["repo"], spec["plan"], lane_name)
-    act = Launch(lane_name, row, cancel, resume)
     try:
         with _conn(spec) as conn:
             first = first_input(conn, spec["plan_id"], act)
@@ -301,7 +307,8 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
         return Done(act, observe(spec))
     if isinstance(act, Launch):
-        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel, act.resume, act.halt))
+        how = {"cancel": act.cancel, "resume": act.resume, "seq": act.seq, "halt": act.halt, "goal": act.goal}
+        return Done(act, launch_lane(spec, act.lane, act.row, how))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
     if isinstance(act, Report):

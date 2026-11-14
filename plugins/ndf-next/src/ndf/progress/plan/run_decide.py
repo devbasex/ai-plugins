@@ -7,7 +7,8 @@
 - `Launch`: 止まっているレーンの conductor を起こす。`cancel` があれば、止めた計画で実行中のスプリントを
   中止させる入力で起こす。`resume` があれば、答えが載った後に next が打たれていない実行中の行（3346-5）を、
   答えの後の `ndf progress next` を打つ入力で起こす。耐久ワークフローは conductor へメッセージを送らず、起こすだけである。
-  `halt` なら起こさずに、最後の行が終わったレーンのまだ動いているラッパーを止める（#3173）
+  `halt` なら起こさずに、最後の行が終わったレーンのまだ動いているラッパーを止める（#3173）。`goal` があれば、認証の
+  失敗で `/goal` が外れた（判定が `stalled`）レーンを、`/goal` を入れ直してそのスプリントを続ける入力で起こし直す（#3243）
 - `Complete`: 全レーンの行が終わり、答えていない依頼が無いので計画を完了にする（I16）
 - `Report`: 起こせなかったレーンと、止まったレーン（生死の判定が `stalled`・`ended`。`ndf.progress.lane.liveness`）を、
   計画の進行表の依頼（`request_opened`）としてオーガナイザーへ知らせる
@@ -29,6 +30,10 @@
 その行の起動の試みの回数と最後の結果（`history`）を載せる（#2585）。止まりは経過の秒でなく状態で決めるので、
 起こし直しが失敗していた時間を数えない。知らせた後にレーンが動き出せば（判定を読めた読み直しで、その鍵の止まりが
 消えたら）依頼を閉じ（`Withdraw`）、同じ鍵がまた止まりになれば知らせ直す。
+
+認証の失敗で `/goal` が外れたレーン（`stalled`）は、子を起動するアカウントが使えれば（写しの `relaunch`）止まりとして
+知らせずに `/goal` を入れ直して起こし直す（#3243）。同じスプリントで起こし直せるのは `Policy.attempts` 回までで、
+尽きたら（または起こし直しの起動が尽きたら）止まりとして知らせる。アカウントが使えなければ写しに載らず、知らせる。
 
 区切りで止めた計画（`paused`）では次の行を起こさない。実行中の行は終わりまで流すので、答えの後の起こし直しは
 続ける。実行中の行が無くなれば `paused` で終える。起こせなかった起動は、計画が再開してから知らせる。
@@ -76,11 +81,14 @@ class Launch:
     resume: Optional[str] = None
     seq: int = 0
     halt: bool = False
+    goal: Optional[str] = None
 
     @property
     def key(self) -> str:
         if self.halt:
             return f"halt:{self.lane}/{self.row}"
+        if self.goal:
+            return f"goal:{self.goal}"
         if self.cancel:
             return f"cancel:{self.cancel}"
         if self.resume:
@@ -200,15 +208,24 @@ def snapshot(
         "stalls": [],
         "unknown": [],
         "judged": False,
+        "relaunch": [],
         "stall_requests": [],
         "halts": [],
     }
 
 
-def with_stalls(snap: dict[str, Any], stalls: Sequence[Sequence[Any]], unknown: Sequence[str] = (), judged: bool = True) -> dict[str, Any]:
+def with_stalls(
+    snap: dict[str, Any],
+    stalls: Sequence[Sequence[Any]],
+    unknown: Sequence[str] = (),
+    judged: bool = True,
+    relaunch: Sequence[tuple[str, str, str]] = (),
+) -> dict[str, Any]:
     """写しへ生死の判定を載せる。`stalls` は止まったレーンの（レーン, 知らせの鍵, 理由, 最後に動いた時刻, 行）、
-    `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければ依頼を閉じない）。"""
-    return {**snap, "stalls": [list(t) for t in stalls], "unknown": list(unknown), "judged": judged}
+    `unknown` は判定が unknown のレーン、`judged` はこの読み直しで判定したか（判定しなければ依頼を閉じない）、
+    `relaunch` は `/goal` を入れ直して起こし直せる（アカウントが使える）止まったレーンの（レーン, 行, スプリントの ID）。"""
+    judged_part = {"unknown": list(unknown), "judged": judged, "relaunch": [list(r) for r in relaunch]}
+    return {**snap, "stalls": [list(t) for t in stalls], **judged_part}
 
 
 def with_stall_requests(snap: dict[str, Any], requests: Sequence[tuple[str, str, str]]) -> dict[str, Any]:
@@ -237,16 +254,23 @@ def _launches(snap: dict[str, Any]) -> list[Launch]:
     starts = [Launch(lane, row) for lane, row in snap["wakeable"]]
     resumes = [Launch(lane, row, resume=sid, seq=seq) for lane, row, sid, seq in snap["answered"]]
     halts = [Launch(lane, row, halt=True) for lane, row in snap["halts"]]
-    return halts + starts + resumes + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
+    goals = [Launch(lane, row, goal=sid) for lane, row, sid in snap["relaunch"]]
+    return halts + starts + resumes + goals + [Launch(lane, row, cancel=sid) for lane, row, sid in snap["running"]]
 
 
-def _candidates(state: RunState) -> list[Launch]:
+def _relaunchable(state: RunState, act: Launch, policy: Policy) -> bool:
+    """`/goal` を入れ直す起こし直しが、まだ打てるか（同じスプリントで起こせた回数が `Policy.attempts` 未満で、尽きていない）。"""
+    done = sum(1 for h in state.history if h[2] == act.key and h[3])
+    return act.key not in state.failed and done < policy.attempts
+
+
+def _candidates(state: RunState, policy: Policy) -> list[Launch]:
     """起こしてよいレーンの手（計画の並びの順）。止めた計画では、実行中のスプリントを中止させる手になる。"""
     snap = _snap(state)
     cancelling = snap["state"] == CANCELLED
     acts = [a for a in _launches(snap) if a.halt or (a.cancel is not None) == cancelling]
     skip = _skip(state)
-    return [a for a in acts if a.key not in skip]
+    return [a for a in acts if a.key not in skip and (a.goal is None or _relaunchable(state, a, policy))]
 
 
 def _finish(state: RunState, outcome: str) -> loop.Next[Act, RunState]:
@@ -266,7 +290,7 @@ def _end_of(snap: dict[str, Any]) -> Optional[str]:
 
 def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     snap = _snap(state)
-    found = _candidates(state) if snap["state"] in (RUNNING, PAUSED, CANCELLED, COMPLETED) else []
+    found = _candidates(state, policy) if snap["state"] in (RUNNING, PAUSED, CANCELLED, COMPLETED) else []
     # 終わったレーンのラッパーは、計画を完了にする前と耐久ワークフローを終える前に止める（#3173）
     halts = [a for a in found if a.halt]
     end = _end_of(snap)
@@ -346,10 +370,15 @@ def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Opti
     return Report(lane, key, detail, LANE_STALLED, (("moved", moved), ("launches", len(tries)), ("last_launch", last)))
 
 
-def _notice_stalls(state: RunState) -> RunState:
-    """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の知らせ（`unreported`）に置く。"""
+def _notice_stalls(state: RunState, policy: Policy) -> RunState:
+    """写しの止まりのうち、まだ知らせると決めていないものを知らせる前の知らせ（`unreported`）に置く。
+
+    `/goal` を入れ直して起こし直せるレーン（#3243）は、起こし直しが尽きるまで知らせない。
+    """
     snap = _snap(state)
-    fresh = [s for s in snap["stalls"] if s[1] not in state.noticed]
+    goals = (Launch(lane, row, goal=sid) for lane, row, sid in snap["relaunch"])
+    relaunching = {a.lane for a in goals if _relaunchable(state, a, policy)}
+    fresh = [s for s in snap["stalls"] if s[1] not in state.noticed and s[0] not in relaunching]
     if not fresh:
         return state
     queued = tuple(_stall_report(state, *s) for s in fresh)
@@ -412,7 +441,7 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
     if isinstance(done.act, Observe):
         snap = done.value
         fresh = _expire_launched(replace(_reopen_closed(state, snap), snapshot=snap, tried=()), policy)
-        return _after_observe(_notice_stalls(fresh), policy)
+        return _after_observe(_notice_stalls(fresh, policy), policy)
     if isinstance(done.act, Launch):
         return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
     if isinstance(done.act, Report):

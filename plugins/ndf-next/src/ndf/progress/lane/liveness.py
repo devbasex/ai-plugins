@@ -20,6 +20,9 @@ DB もプロセスも読まない純粋な関数である。材料は 3 つで�
 8. ほか（ラッパーが一覧に無い・止まっていて、スプリントは conductor の手を待つ） → `ended`
 
 止まりとして知らせるのは `stalled` と `ended` だけである（`STALL_KINDS`）。
+
+`stalled`（認証の失敗で `/goal` が外れた）のレーンは、子を起動するアカウントが使える（`Probes.account_ok`）なら、
+耐久ワークフローが `/goal` を入れた入力で起こし直す（#3243）。使えなければ止まりとして知らせる。
 """
 
 from __future__ import annotations
@@ -116,11 +119,13 @@ def running_row(rows: list[LaneRow]) -> Optional[LaneRow]:
 @dataclass(frozen=True)
 class Probes:
     """判定の材料を読む口。`wrapper_name` はレーン名からラッパーの名前、`wrappers` はラッパーの一覧（読めなければ None）、
-    `sprint` はスプリントの ID から `ndf progress wait --timeout 0` の結果（読めなければ None）。"""
+    `sprint` はスプリントの ID から `ndf progress wait --timeout 0` の結果（読めなければ None）、`account_ok` は
+    子を起動するアカウントが使えるか（`stalled` のレーンを起こし直すか。#3243）。"""
 
     wrapper_name: Callable[[str], str]
     wrappers: Callable[[], Optional[Mapping[str, Mapping[str, Any]]]]
     sprint: Callable[[str], Optional[Mapping[str, Any]]]
+    account_ok: Callable[[], bool] = lambda: False
 
 
 def judge_lanes(lanes: Mapping[str, list[LaneRow]], probes: Probes) -> dict[str, Liveness]:

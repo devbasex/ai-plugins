@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import UTC, datetime
 
 import pytest
@@ -85,6 +87,24 @@ def test_a_row_awaiting_next_after_an_answer_is_resuming_not_a_stall():
 def test_a_stalled_wrapper_carries_its_reason():
     verdict = liveness.judge(RUNNING_ROW, liveness.SPRINT_IDLE, AUTH, True)
     assert "認証の失敗" in verdict.reason and verdict.row == "r1" and verdict.sprint_id == "s1"
+
+
+@pytest.mark.parametrize(("status", "usable"), [("ok", True), ("stopped", False), (None, False)])
+def test_account_ok_asks_the_relay_for_the_chosen_account(status, usable):
+    """認証で止まったレーンを起こし直すのは、子を起動するアカウントを中継が出せるときだけ（#3243）。"""
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(argv)
+        out = json.dumps({"tool": "relay", "status": status, "summary": "x"}) + "\n" if status else "壊れた出力\n"
+        return subprocess.CompletedProcess(argv, 0 if status == "ok" else 1, out, "")
+
+    assert launch.account_ok(run=run) is usable and seen[0][1:] == ["relay", "account", "show"]
+
+
+def test_goal_prompt_puts_the_goal_first_and_continues_the_sprint():
+    text = launch.goal_prompt("p6", "a", "s1")
+    assert text.startswith("/goal ") and '"next"' in text and "s1" in text
 
 
 def test_notice_key_changes_with_the_row_and_the_kind():

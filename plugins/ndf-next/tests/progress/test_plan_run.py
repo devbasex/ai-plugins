@@ -180,6 +180,29 @@ def test_a_stall_request_is_withdrawn_once_the_lane_moves_and_noticed_again_if_i
     assert isinstance(act, Report) and act.key == "stall:a/r1:ended"
 
 
+def test_a_lane_whose_goal_was_cleared_is_relaunched_with_the_goal_while_the_account_is_usable():
+    """認証の失敗で /goal が外れたレーンは、アカウントが使えれば知らせずに /goal を入れ直して起こし直す。同じスプリントで
+    起こし直せるのは回数まで、尽きたら止まりとして知らせる（#3243）。"""
+    stall = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まっている", None, "r1")
+    stalled = run_decide.with_stalls(_snap(running=[("a", "r1", "s1")]), [stall], relaunch=[("a", "r1", "s1")])
+    moving = _snap(running=[("a", "r1", "s1")])
+    state = RunState()
+    for _ in range(POLICY.attempts):
+        act, state, _ = _step(state, Done(Observe(), stalled))
+        assert act == Launch("a", "r1", goal="s1") and act.key == "goal:s1" and state.unreported == ()
+        act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+        assert act == Sleep(30.0)
+        act, state, _ = _step(state, Done(Observe(), moving))
+    act, state, _ = _step(state, Done(Observe(), stalled))
+    assert isinstance(act, Report) and act.key == "stall:a/r1:stalled" and "2 回" in act.detail
+
+
+def test_a_lane_whose_goal_was_cleared_is_reported_when_the_account_is_not_usable():
+    stall = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まっている", None, "r1")
+    act, _, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert isinstance(act, Report) and act.key == "stall:a/r1:stalled"
+
+
 def test_a_stall_request_is_not_withdrawn_from_a_read_that_did_not_judge():
     """生死を判定していない写し（計画が動いていない・材料の口が無い）では、止まりの依頼を閉じない。"""
     asked = run_decide.with_stall_requests(_snap(running=[("a", "r1", "s1")]), [("request-1", "a", "stall:a/r1:ended")])
@@ -354,6 +377,22 @@ def test_snapshot_lists_a_running_row_whose_answer_has_no_next_and_drops_it_afte
         lane.record_resumed(conn, sid, "conductor")
     assert '"resumed"' in text and '"next"' in text and sid in text
     assert _snapshot(opened, pid)["answered"] == []
+
+
+def test_snapshot_relaunches_a_stalled_wrapper_only_while_the_account_is_usable(opened):
+    """ラッパーが認証で止まったレーンを、アカウントが使えるときだけ写しの relaunch に載せ、入力は /goal で始まる（#3243）。"""
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        sid = _start(conn, pid, "a", "r1")
+    auth = {"w-a": {"running": True, "state": "stalled", "reason": "認証の失敗で /goal が外れた"}}
+    idle = {sid: {"status": "ok"}}
+    usable = liveness.Probes(wrapper_name=lambda name: f"w-{name}", wrappers=lambda: auth, sprint=idle.get, account_ok=lambda: True)
+    with store.transaction(opened) as conn:
+        snap = run.read_snapshot(conn, pid, usable)
+        blocked = run.read_snapshot(conn, pid, _probes(auth, idle))
+        text = run.first_input(conn, pid, Launch("a", "r1", goal=sid))
+    assert snap["relaunch"] == [["a", "r1", sid]] and [s[1] for s in snap["stalls"]] == ["stall:a/r1:stalled"]
+    assert blocked["relaunch"] == [] and text.startswith("/goal ") and sid in text
 
 
 def test_first_input_refuses_a_lane_of_another_repository(opened):
