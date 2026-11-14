@@ -1,7 +1,7 @@
 {
   "template": "merge",
   "purpose": "merge",
-  "summary": "マージ: 衝突の確かめ → CI → マージ（merge-when-green）。CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push し直す",
+  "summary": "マージ: 衝突の確かめ → CI → マージ（merge-when-green）。CI の落ちは同じ原因の続きを数え、落ちたテストは手元で通してから push し直す。テスト以外のチェック（静的解析・本文の検査）の落ちは直してそのまま push し直す",
   "params": ["repo", "worktree", "branch", "base", "test_command", "worker", "ci_budget", "required", "tests", "merge_method"],
   "plan": {
     "name": "merge-{{branch}}",
@@ -9,12 +9,14 @@
     "worktree": "{{worktree}}",
     "steps": [
       {"use": "conflict-check"},
-      {"use": "ci"},
+      {"use": "ci", "on_cause": {"test_failed": "repeat-check", "check_failed": "check-repeat", "base_conflict": "base-sync"}},
       {"use": "merge", "next": "end"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},
       {"use": "ci-local"},
       {"use": "push", "on_fail": "fix-push", "next": "conflict-check"},
+      {"use": "repeat-check", "id": "check-repeat", "next": "check-fix"},
+      {"use": "ci-fix", "id": "check-fix", "next": "push"},
       {"use": "fix-push"},
       {"use": "base-sync"},
       {"use": "fix-base"}

@@ -86,6 +86,23 @@ def test_close_plan_ends_without_pr_when_nothing_changed():
     assert state.status == OK
 
 
+def test_merge_plan_fixes_non_test_check_failures_and_pushes():
+    """#3474: マージのプランは、テスト以外のチェックの落ち（check_failed）でも止まらず、直して push し直してからマージする。
+
+    落ちたテストが無いので、手元のテスト（ci-local）を打たずに push する。
+    """
+    visited, state = walk(plan_of("merge"), {"ci": [stopped("check_failed")]})
+    assert visited == ["conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "merge"]
+    assert state.status == OK
+
+
+def test_plan_to_spec_plan_delivers_the_spec_through_pr_and_merge():
+    """#3474: 確定仕様化のプランは、書いた確定仕様を作業場所から push → PR → CI → マージで宛先へ届ける。"""
+    visited, state = walk(plan_of("plan_to_spec"), {})
+    assert visited == ["work", "changes-check", "push", "pr", "conflict-check", "ci", "merge"]
+    assert state.status == OK
+
+
 def test_docs_only_check_skips_whole_tests():
     """#3023: 文書だけの PR の検査は、全体テストとリファクタリングを打たずにコードレビューへ進む。"""
     visited, state = walk(plan_of("check"), {"assess": [stopped("not_applicable")], "merge-gate": [gate()]}, answers=["approved"])
