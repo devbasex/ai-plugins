@@ -28,8 +28,12 @@ import time
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple, Union
 
+from ndf import identity
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
+
+# 宛先のリポジトリの宣言（delivery を読む）
+_PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
 
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"
@@ -350,7 +354,7 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
             )
     rows = _delivery(repo_root)
     if rows is None:
-        return deny(f"{repo_root} の .ndf/project.json の delivery を読めず、本番へ届くかを決められない。{_MERGE_HELP}")
+        return deny(f"{repo_root} の {_PROJECT_FILE} の delivery を読めず、本番へ届くかを決められない。{_MERGE_HELP}")
     if not any(_automatic_production(row) for row in rows):
         return None
     return deny(
@@ -417,7 +421,7 @@ def slug_of_url(url: str) -> Optional[str]:
 
 def _delivery(repo_root: Path) -> Optional[list]:
     try:
-        data = json.loads((repo_root / ".ndf" / "project.json").read_text(encoding="utf-8"))
+        data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
         return None
     rows = data.get("delivery") if isinstance(data, dict) else None

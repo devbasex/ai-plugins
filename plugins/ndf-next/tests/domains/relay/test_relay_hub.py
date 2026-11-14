@@ -105,7 +105,7 @@ def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
     ctx.tmux.boots = False
     got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
     assert not got.ok and "立ち上がらなかった" in got.summary
-    assert hub.read_registry(ctx.state_dir) == {}
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir)) == {}
 
 
 def test_missing_wrapper_place_says_how_to_recover(ctx):
@@ -122,7 +122,7 @@ def test_restart_at_the_limit_goes_through_and_lists_pending_runs(ctx):
     assert hub.submit(ctx, {"kind": "spawn", "name": "t3"}).cause == "refused"
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
     assert got.ok and {"pending": [{"id": "r1"}]} in got.items and "1 件" in got.summary
-    assert hub.read_registry(ctx.state_dir)["t1"]["starts"]["count"] == 1
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"]["count"] == 1
 
 
 def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
@@ -190,7 +190,7 @@ def test_tmux_runner_failures_are_reported():
 
 # 現状固定（I-004）: 起こし直しの回数は登録簿の starts が今日の日付のときだけ数え、ほかは 0 回から数える
 def _register(ctx, starts):
-    path = hub.hub_dir(ctx.state_dir) / hub.REGISTRY_FILE
+    path = hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"version": 1, "entries": {"t1": {"cwd": None, "args": [], "starts": starts}}}), encoding="utf-8")
 
@@ -212,7 +212,7 @@ def test_restart_counts_only_todays_starts(ctx, starts, count):
     _register(ctx, starts)
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
     assert got.ok, got.summary
-    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": today, "count": count}
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": today, "count": count}
 
 
 def test_restart_refuses_when_todays_starts_reach_the_limit(ctx):
@@ -220,18 +220,18 @@ def test_restart_refuses_when_todays_starts_reach_the_limit(ctx):
     _register(ctx, {"date": today, "count": 3})
     got = hub.submit(ctx, {"kind": "restart", "name": "t1"})
     assert (got.ok, got.cause) == (False, "refused") and "3 回" in got.summary
-    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": today, "count": 3}
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": today, "count": 3}
     assert ctx.tmux.started == []
 
 
 def test_spawn_registers_zero_starts_for_today(ctx):
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
-    assert hub.read_registry(ctx.state_dir)["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
+    assert registry.read_registry(hub.hub_dir(ctx.state_dir))["t1"]["starts"] == {"date": date.today().isoformat(), "count": 0}
 
 
 def test_a_broken_registry_answers_invalid_and_does_not_block_later_requests(ctx):
     # 依頼 1 本の例外で、後ろの依頼が答えを待ち切れなくならない
-    path = hub.hub_dir(ctx.state_dir) / hub.REGISTRY_FILE
+    path = hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた", encoding="utf-8")
     got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})

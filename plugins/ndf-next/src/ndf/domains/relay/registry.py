@@ -23,6 +23,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, signals
 
@@ -30,6 +31,8 @@ NAME_RE = signals.NAME_RE
 LOCK_FILE = "relay.lock"
 STATE_FILE = "wrapper.json"
 LOG_FILE = "log.jsonl"
+# リレーハブの置き場（`hub.hub_dir`）の下の登録簿
+REGISTRY_FILE = "registry.json"
 
 
 class RegistryError(ValueError):
@@ -105,6 +108,25 @@ def append_log(directory: Path, row: Mapping[str, Any]) -> None:
     signals.append_jsonl(directory / LOG_FILE, row)
 
 
+def read_registry(hub: Path) -> dict[str, dict[str, Any]]:
+    """リレーハブの置き場 `hub` の登録簿の行。無ければ空、読めない・形が違えば `RegistryError`。"""
+    path = hub / REGISTRY_FILE
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise RegistryError(f"登録簿を読めない（{path}）: {exc}") from exc
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, dict):
+        raise RegistryError(f"登録簿の形が違う（{path}）")
+    return entries
+
+
+def save_registry(hub: Path, entries: Mapping[str, Any]) -> None:
+    signals.replace_json(hub / REGISTRY_FILE, {"version": 1, "entries": dict(entries)})
+
+
 def _busy_dirs(root: Path) -> list[Path]:
     """`root` の直下のディレクトリのうち、錠が持たれているもの（名前順）。`root` が無ければ空。"""
     dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
@@ -128,7 +150,8 @@ def legacy_root(environ: Mapping[str, str]) -> Path:
     if explicit:
         return Path(explicit) / "relay"
     xdg = environ.get("XDG_STATE_HOME")
-    return (Path(xdg) / "ndf" if xdg else Path.home() / ".local" / "state" / "ndf") / "relay"
+    legacy = identity.FINAL_NAME  # 旧い NDF のプラグイン名は入れ替えの後の名前と同じ（#1142 の決定 73）
+    return (Path(xdg) / legacy if xdg else Path.home() / ".local" / "state" / legacy) / "relay"
 
 
 def legacy_running(environ: Mapping[str, str]) -> list[hub_decide.Running]:
