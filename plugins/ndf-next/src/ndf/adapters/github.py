@@ -21,7 +21,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, TypeVar
 from urllib.parse import quote
 
 import httpx
@@ -32,6 +32,7 @@ from githubkit.retry import RETRY_DEFAULT, RetryOption
 from ndf.adapters import git
 from ndf.contracts import limits
 
+T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
 # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
@@ -288,6 +289,18 @@ def _response_body(resp: Any) -> Any:
     return resp.text
 
 
+def _alias(i: int) -> str:
+    """1 回のクエリの中の `i` 番目のエイリアスの名前（`a0`・`a1`…）。"""
+    return f"a{i}"
+
+
+def _batches(items: Sequence[T]) -> Iterator[Sequence[T]]:
+    """`items` を `github.graphql-batch` 件ずつに切る（1 つが 1 回のエイリアスのクエリ）。"""
+    size = int(limits.value("github.graphql-batch", "count"))
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
 def _aliased_query(aliases: dict[str, str]) -> str:
     body = " ".join(f"{alias}: {selection}" for alias, selection in aliases.items())
     return f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {body} }} }}"
@@ -374,13 +387,11 @@ class GitHub:
         返す辞書は `selections` のすべての名前を鍵に持ち、読めなかった名前の値は None。途中で失敗したら
         `GitHubError` で、一部だけの結果を返さない。リポジトリが null なら `GitHubError`（3394-6）。
         """
-        size = int(limits.value("github.graphql-batch", "count"))
-        keys = list(selections)
         out: dict[str, Any] = {}
-        for start in range(0, len(keys), size):
-            chunk = {f"a{i}": selections[k] for i, k in enumerate(keys[start : start + size])}
+        for keys in _batches(list(selections)):
+            chunk = {_alias(i): selections[k] for i, k in enumerate(keys)}
             data = self.repository(_aliased_query(chunk))
-            out.update({k: data[alias] if alias in data else None for alias, k in zip(chunk, keys[start : start + size])})
+            out.update({k: data[alias] if alias in data else None for alias, k in zip(chunk, keys)})
         return out
 
     def nodes(self, numbers: Iterable[int], node: str, fields: str) -> dict[int, dict]:
@@ -491,13 +502,11 @@ class GitHub:
         読めない（無い・権限が無い）リポジトリは `UNKNOWN` で、公開でないとして扱う。`github.graphql-batch` 件ごとに 1 回。
         """
         wanted = sorted({r for r in repos if "/" in r})
-        size = int(limits.value("github.graphql-batch", "count"))
         out: dict[str, str] = {}
-        for start in range(0, len(wanted), size):
-            chunk = wanted[start : start + size]
+        for chunk in _batches(wanted):
             data = self.graphql(_visibility_query(chunk), {})
             for i, repo in enumerate(chunk):
-                node = data[f"a{i}"] if isinstance(data, dict) and f"a{i}" in data else None
+                node = data[_alias(i)] if isinstance(data, dict) and _alias(i) in data else None
                 out[repo] = text_of(node["visibility"]).upper() if isinstance(node, dict) else UNKNOWN
         return out
 
@@ -578,7 +587,7 @@ def _visibility_query(repos: Sequence[str]) -> str:
     parts = []
     for i, repo in enumerate(repos):
         owner, name = repo.split("/", 1)
-        parts.append(f"a{i}: repository(owner: {_graphql_string(owner)}, name: {_graphql_string(name)}) {{ visibility }}")
+        parts.append(f"{_alias(i)}: repository(owner: {_graphql_string(owner)}, name: {_graphql_string(name)}) {{ visibility }}")
     return "query { " + " ".join(parts) + " }"
 
 
