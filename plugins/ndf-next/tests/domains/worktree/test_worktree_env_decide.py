@@ -114,3 +114,43 @@ def test_shell_targets_without_base_and_patch() -> None:
     assert write_target.shell_targets("cd x; echo > ../f") == ["../f"]
     assert write_target.normalize_path("/r/a/../../outside", "/") == "/outside"
     assert write_target.patch_targets("*** Update File: a.py\n*** Move to: b.py\n+x") == ["a.py", "b.py"]
+
+
+# 現状固定（I-001）: `_Scan.redirects` を通る経路。期待値は今の実装の出力。
+@pytest.mark.parametrize(
+    ("command", "want"),
+    [
+        ("echo a >> o1", ["/r/o1"]),
+        ("echo a &> o2", ["/r/o2"]),
+        ("echo a &>> o3", ["/r/o3"]),
+        ("echo a >| o4", ["/r/o4"]),
+        ("cat <> o5", []),  # NOTE: 現状固定。`<>` は書き込み先に出ない
+        ("echo a >&2", []),
+        ("echo a >& -", []),
+        ("echo a >&2 >& - >& f", ["/r/f"]),
+        ("echo a 2> err < in", ["/r/err"]),
+        ("echo a > /dev/stderr", []),
+        ('echo a > "$X"', []),
+        ("echo a > 'lit'", ["/r/lit"]),
+        ("echo a > ~u/h", []),
+        ("{ echo a; } > grp", ["/r/grp"]),
+        ("while true; do echo; done > loop", ["/r/loop"]),
+        ("{ echo a; echo b; } 2> e > o", ["/r/e", "/r/o"]),
+        ("{ cd s; echo; } > o", ["/r/o"]),  # 複合コマンドのリダイレクトは入る前の位置で開く
+        ("cat <<EOF 2> e > o\nhi\nEOF", ["/r/e", "/r/o"]),
+        ("cd s; cat <<EOF > o\nhi\nEOF", ["/r/s/o"]),
+        ("cat <<EOF | tee t\nhi\nEOF", []),  # NOTE: 現状固定。ヒアドキュメントの後のパイプは読み切れない
+        ("echo a; echo b > c", ["/r/c"]),
+        ('echo a > "q $(cd z; echo > in) r"', ["/r/z/in"]),
+        ("echo a > <(cat > ps)", ["/r/ps", "/r/<(cat > ps)"]),  # NOTE: 現状固定。置換の字面も出る
+    ],
+)
+def test_shell_targets_redirects_characterization(command: str, want: list[str]) -> None:
+    assert write_target.shell_targets(command, "/r") == want
+
+
+def test_shell_targets_redirects_home_and_no_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", "/home/h")
+    assert write_target.shell_targets("echo a > ~/h", "/r") == ["/home/h/h"]
+    assert write_target.shell_targets("cat <<EOF 2> e > o\nhi\nEOF") == ["e", "o"]
+    assert write_target.shell_targets("{ cd s; echo; } > o") == ["o"]
