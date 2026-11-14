@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notice.schema.json",
+  "title": "送信待ちに置いた通知 1 件",
+  "description": "状態の置き場の hooks/outbox/ に置く通知 1 件のファイルの形。書くのは hook、読んで送るのは送り手（ndf.adapters.notify）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "key", "window", "text", "cwd", "created_at"],
+  "properties": {
+    "kind": {"enum": ["question", "approval", "done"], "description": "知らせる事象。question は回答待ち・approval は承認待ち・done は完了"},
+    "key": {"type": "string", "minLength": 1, "description": "待ちのキー。同じキーの通知は重ねて送らない"},
+    "window": {"type": "boolean", "description": "真なら同じキーを重ねないのは送ってから上限の宣言の notify.window の秒の内だけ（利用者が応じると変わる値が取れないとき）"},
+    "text": {"type": "string", "minLength": 1, "description": "本文。見出し（事象）とメンションは送り手が付ける"},
+    "cwd": {"type": "string", "minLength": 1, "description": "作業ディレクトリ。送り手はここから上へ .env を探す"},
+    "created_at": {"type": "number", "description": "書いた時刻（UNIX 時刻の秒）。上限の宣言の notify.stale を越えた通知は送らずに捨てる"}
+  }
+}
