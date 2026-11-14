@@ -55,7 +55,7 @@ def transcript_usage(path: Path, since: Optional[datetime] = None, until: Option
     """会話の記録 1 本の使用量。読めなければ `UNKNOWN`（帳簿の行は unknown になる。hook を落とさない）。"""
     try:
         records = _records(path)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return ud.UNKNOWN
     return ud.transcript_total(records, since, until)
 

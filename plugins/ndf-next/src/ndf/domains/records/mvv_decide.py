@@ -43,6 +43,12 @@ def override_kind(verdict: Optional[str], approved: bool) -> Optional[str]:
     return None
 
 
+def signal_kinds(verdict: Optional[str], approved: bool) -> list[str]:
+    """承認ゲートの答え 1 件から書く兆候の種類。「判定できない」は人の答えによらず `unknown` を数える。"""
+    kind = override_kind(verdict, approved)
+    return ([UNKNOWN] if verdict == UNKNOWN else []) + ([kind] if kind is not None else [])
+
+
 @dataclass(frozen=True)
 class Signals:
     """改訂の兆候。`overrides` は覆し、`unknown_pass` は「判定できない」を人が通した数（覆しに数えない）。"""

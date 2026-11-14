@@ -195,8 +195,7 @@ def test_transcript_usage_does_not_read_lines_without_the_literal_usage_key(tmp_
     assert usage.transcript_usage(path) == ud.Usage(1, 4, 0, 0)
 
 
-def test_transcript_usage_raises_on_bytes_that_are_not_utf8(tmp_path: Path) -> None:
+def test_transcript_usage_is_unknown_on_bytes_that_are_not_utf8(tmp_path: Path) -> None:
     path = tmp_path / "bad.jsonl"
     path.write_bytes(b'\xff\xfe "usage"\n')
-    with pytest.raises(UnicodeDecodeError):
-        usage.transcript_usage(path)
+    assert usage.transcript_usage(path) == ud.UNKNOWN

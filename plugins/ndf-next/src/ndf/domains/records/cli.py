@@ -146,10 +146,11 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         answer = _stdin_json()
         if not isinstance(answer, dict):
             return result.stopped(TOOL, "invalid", "承認ゲートの答え（標準入力の JSON object）が無い")
-        row = mvv.record_answer(root, answer, args.version)
+        rows = mvv.record_answer(root, answer, args.version)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
-    return result.result(TOOL, result.OK, f"覆しの記録: {row['kind']}" if row else "覆しではないので書かなかった", [row] if row else [])
+    kinds = "・".join(r["kind"] for r in rows)
+    return result.result(TOOL, result.OK, f"覆しの記録: {kinds}" if rows else "覆しではないので書かなかった", rows)
 
 
 def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -227,7 +228,7 @@ def _add_mvv(sub: Any) -> None:
     signals.add_argument("--base", required=True, help="ベースブランチ")
     signals.set_defaults(handler=_mvv_signals)
     answer = m.add_parser("answer")
-    answer.add_argument("--version", type=int, default=None, help="答えたときの MVV の版")
+    answer.add_argument("--version", type=int, default=None, help="答えたときの MVV の版（無ければ作業ツリーの宣言の現行の版）")
     answer.set_defaults(handler=_mvv_answer)
 
 
