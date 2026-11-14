@@ -146,16 +146,26 @@ def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
         siblings[src.path.parent].add(src.path.stem)
     found = []
     for src in scope.python():
-        own = allowed | siblings[src.path.parent]
-        for node in ast.walk(src.tree):
-            tops = _import_tops(node)
-            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in tops if t not in own]
-        found += [
-            Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
-            for no, text in _strings(src.tree)
-            if path_pattern.search(text)
-        ]
+        found += _undeclared_imports(src, allowed | siblings[src.path.parent])
+        found += _old_paths(src, path_pattern)
     return found
+
+
+def _undeclared_imports(src: Source, own: frozenset[str]) -> list[Finding]:
+    """`own` の外の最上位のモジュールを読む import。"""
+    found = []
+    for node in ast.walk(src.tree):
+        found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in _import_tops(node) if t not in own]
+    return found
+
+
+def _old_paths(src: Source, path_pattern: re.Pattern[str]) -> list[Finding]:
+    """旧いプラグインのパスを持つ文字列。"""
+    return [
+        Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
+        for no, text in _strings(src.tree)
+        if path_pattern.search(text)
+    ]
 
 
 def _import_tops(node: ast.AST) -> list[str]:
