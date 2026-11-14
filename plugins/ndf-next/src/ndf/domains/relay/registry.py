@@ -18,6 +18,8 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -32,6 +34,28 @@ LOG_FILE = "log.jsonl"
 
 class RegistryError(ValueError):
     """ラッパーの名前の形が違う・状態のファイルが壊れている。"""
+
+
+@dataclass(frozen=True)
+class Starts:
+    """今日起動し直した回数。JSON では `{"date": ISO 日付, "count": 回数}` で持つ。"""
+
+    date: str
+    count: int
+
+    @classmethod
+    def today(cls, raw: Any) -> "Starts":
+        """`raw` が今日の日付の回数ならその回数、形が違うか日付が今日でなければ 0 回。"""
+        today = date.today().isoformat()
+        if isinstance(raw, dict) and raw.get("date") == today:
+            return cls(today, int(raw.get("count", 0)))  # noqa: NDF502 ファイル: 回数が無ければ 0 回
+        return cls(today, 0)
+
+    def bumped(self) -> "Starts":
+        return Starts(self.date, self.count + 1)
+
+    def as_json(self) -> dict[str, Any]:
+        return {"date": self.date, "count": self.count}
 
 
 def wrappers_dir(state_dir: Path) -> Path:

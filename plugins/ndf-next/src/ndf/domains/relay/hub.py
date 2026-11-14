@@ -163,7 +163,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     if ok.kind != "go":
         return Outcome(False, ok.reason, "refused")
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
-    entry["starts"] = {"date": date.today().isoformat(), "count": 0}
+    entry["starts"] = registry.Starts(date.today().isoformat(), 0).as_json()
     got = _launch(ctx, name, entry)
     if got.ok:
         entries[name] = {**entry, "version": ctx.version}
@@ -182,9 +182,9 @@ def restart(ctx: Context, name: str) -> Outcome:
     mix = hub_decide.mixed(ctx.version, others)
     if mix.kind != "go":
         return Outcome(False, mix.reason, "precondition")
-    starts = _starts_today(entry)
+    starts = registry.Starts.today(entry.get("starts"))
     target = any(r.name == name for r in running)
-    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts, ctx.max_starts)
+    lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts.count, ctx.max_starts)
     ok = hub_decide.restart(lanes)
     if ok.kind != "go":
         return Outcome(False, ok.reason, "refused")
@@ -193,7 +193,7 @@ def restart(ctx: Context, name: str) -> Outcome:
         stopped = stop(ctx, name)
         if not stopped.ok:
             return stopped
-    entry = {**entry, "starts": {"date": date.today().isoformat(), "count": starts + 1}, "version": ctx.version}
+    entry = {**entry, "starts": starts.bumped().as_json(), "version": ctx.version}
     got = _launch(ctx, name, entry)
     entries[name] = entry
     _save_registry(ctx.state_dir, entries)
@@ -213,13 +213,6 @@ def _with_pending(got: Outcome, pending: Mapping[str, Any]) -> Outcome:
     else:
         summary = f"{got.summary}。待ちを抱えた実行 {len(pending.get('runs') or [])} 件"  # noqa: NDF501 外部コマンド: 読めなかった一覧は空
     return Outcome(got.ok, summary, got.cause, [*got.items, {"pending": pending.get("runs")}])
-
-
-def _starts_today(entry: Mapping[str, Any]) -> int:
-    starts = entry.get("starts")
-    if isinstance(starts, dict) and starts.get("date") == date.today().isoformat():
-        return int(starts.get("count", 0))  # noqa: NDF502 ファイル: 回数が無ければ 0 回
-    return 0
 
 
 def stop(ctx: Context, name: str) -> Outcome:

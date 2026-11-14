@@ -20,7 +20,6 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, NamedTuple, Optional
 
@@ -102,7 +101,7 @@ class Wrapper:
         self.out = out
         self.stdin_fd = stdin_fd
         self.section: Optional[Section] = None
-        self.starts = {"date": date.today().isoformat(), "count": 0}
+        self.starts = registry.Starts.today(None).as_json()
         self.last_reason: Optional[str] = None
         self.last_state: Optional[tuple[str, str, int]] = None
 
@@ -266,13 +265,12 @@ class Wrapper:
             self.last_reason = step.reason
 
     def _starts_today(self) -> int:
-        today = date.today().isoformat()
-        if self.starts["date"] != today:
-            self.starts = {"date": today, "count": 0}
-        return int(self.starts["count"])
+        starts = registry.Starts.today(self.starts)
+        self.starts = starts.as_json()
+        return starts.count
 
     def _count_start(self) -> None:
-        self.starts = {"date": date.today().isoformat(), "count": self._starts_today() + 1}
+        self.starts = registry.Starts.today(self.starts).bumped().as_json()
 
     def _current(self) -> Section:
         if self.section is None:
