@@ -31,12 +31,14 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO, Any, TypeVar
 
+import dbos._dbos as _dbos_runtime
 import sqlalchemy as sa
 from dbos import DBOS, DBOSClient, DBOSConfig, SetEnqueueOptions, SetWorkflowID
 
@@ -581,7 +583,9 @@ def check_file(path: Path) -> bool:
 def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Path:
     """鍵のファイルの本体と `-wal`・`-shm`・`-journal` をそろえて移し、目印 `.checked` と最後に `.lock` を消す。
 
-    移した時刻を更新時刻にし、`KEEP_DAYS` を移した時から数える。`.lock` を消すのは呼び手が `run_lock` を持つときだけ。
+    移した時刻を更新時刻にし、`KEEP_DAYS` を移した時から数える。時刻は移す前に付ける。移した後に付けると、
+    その間は元の古い時刻で退避先に見え、別の鍵の `sweep` が退避したばかりのファイルを消せる。
+    `.lock` を消すのは呼び手が `run_lock` を持つときだけ。
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = _free_name(dest_dir / target_name, now)
@@ -589,9 +593,8 @@ def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Pa
     for suffix in ("", *SIDE_SUFFIXES):
         src = body.with_name(body.name + suffix)
         if src.exists():
-            dst = target.with_name(target.name + suffix)
-            src.rename(dst)
-            os.utime(dst, stamp)
+            os.utime(src, stamp)
+            src.rename(target.with_name(target.name + suffix))
     _drop_marks(body)
     return target
 
@@ -924,8 +927,23 @@ def launch(database_url: str, run_key: str) -> None:
 
 
 def shutdown() -> None:
-    """DBOS を止める。耐久ワークフローと耐久ステップの定義は残す。"""
+    """DBOS を止め、走っていた耐久ワークフローと耐久ステップのスレッドが終わるまで待つ。定義は残す。
+
+    `DBOS.destroy` は走っているスレッドを待たない（`workflow_completion_timeout_sec` の既定は 0 で、
+    executor を `wait=False` で閉じる）。待たずに戻ると、呼び手が鍵のロックを放した後も spawn した子や
+    例外で残ったステップが外部の処理を続け、同じ鍵の次のプロセスの回復と同じ副作用が並んで走る。
+    待つ時間は、待たなくてもプロセスの終わりで executor のスレッドを join する時間と同じである。
+    """
+    executor = _running_executor()
     DBOS.destroy(destroy_registry=False)
+    if executor is not None:
+        executor.shutdown(wait=True)
+
+
+def _running_executor() -> ThreadPoolExecutor | None:
+    """起動中の DBOS が耐久ワークフローを流す executor を返す。DBOS 3.4.0 は公開の取り出し口を持たない。"""
+    instance = getattr(_dbos_runtime, "_dbos_global_instance", None)
+    return getattr(instance, "_executor_field", None)
 
 
 @contextmanager

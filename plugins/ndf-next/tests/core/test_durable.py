@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,22 @@ def perform(act: int) -> int:
 def flow(start: list[int]) -> list[int]:
     assert durable.current_id() is not None
     return loop.run(decide, perform, start)
+
+
+slow_started = threading.Event()
+slow_finished: list[str] = []
+
+
+@durable.step
+def slow_step() -> None:
+    slow_started.set()
+    time.sleep(0.5)
+    slow_finished.append("done")
+
+
+@durable.workflow
+def slow_flow() -> None:
+    slow_step()
 
 
 @pytest.fixture
@@ -123,3 +141,15 @@ def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
     retired = root / "dbos" / "retired" / f"{durable.run_name('crash-key')}.sqlite"
     records = durable.workflows(f"sqlite:///{retired}")
     assert {r.app_version for r in records} == {durable.app_version("crash-key")}
+
+
+def test_session_waits_for_running_steps_before_it_releases_the_key(tmp_path):
+    """裏で走る耐久ステップが終わるまで、session は DBOS を閉じ終えず、鍵のロックを放さない。"""
+    root = tmp_path / "state"
+    slow_started.clear()
+    slow_finished.clear()
+    with durable.session(root, "slow-key"):
+        durable.spawn(slow_flow, "wf-slow")
+        assert slow_started.wait(30)
+    assert slow_finished == ["done"]
+    durable.release_store(root)

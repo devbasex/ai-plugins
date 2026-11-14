@@ -185,8 +185,9 @@
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB10 | DBOS Transact（Python） | 3.5.0 | MIT | 2026-11-10 | 無し | 満たす。キューの取り出しは `executor_id` で絞らないため、鍵ごとに記録を分ける（決定 81）。`application_version` を設定で固定できる（決定 84） | `uvx --from pip pip download dbos==3.5.0 --no-deps` の wheel（`dbos/_sys_db.py`・`_sys_db_sqlite.py`・`_dbos.py`・`_core.py`・`_queue.py`）・https://pypi.org/pypi/dbos/json （2026-11-14） |
-| LIB11 | DBOS Transact（Python） | 3.1.0（今の `plugins/ndf-next/pyproject.toml` の固定） | MIT | 2026-09-24 | 無し | 取り出しの条件は 3.5.0 と同じ。最新の安定版ではないため採らない（決定 87） | 同じ手順の 3.1.0 の wheel（2026-11-14） |
+| LIB10 | DBOS Transact（Python） | 3.5.0 | MIT | 2026-11-10 | 無し | 満たす。キューの取り出しは `executor_id` で絞らないため、鍵ごとに記録を分ける（決定 81）。`application_version` を設定で固定できる（決定 84）。公開から 7 日の待ち（2026-11-18 まで）に当たるため、C1+ では採らず 11-18 以降に上げる（決定 87） | `uvx --from pip pip download dbos==3.5.0 --no-deps` の wheel（`dbos/_sys_db.py`・`_sys_db_sqlite.py`・`_dbos.py`・`_core.py`・`_queue.py`）・https://pypi.org/pypi/dbos/json （2026-11-14） |
+| LIB10a | DBOS Transact（Python） | 3.4.0 | MIT | — | 無し | 満たす。C1+ はこの版で出す。取り出しの条件と `application_versions.version_name` の一意は 3.5.0 と同じ（下の「DBOS 3.4.0 の wheel で確かめたこと」。決定 87） | `uv.lock` の 3.4.0 の wheel（`dbos/_sys_db.py`・`_schemas/system_database.py`。2026-11-14） |
+| LIB11 | DBOS Transact（Python） | 3.1.0（C1 の `plugins/ndf-next/pyproject.toml` の固定） | MIT | 2026-09-24 | 無し | 取り出しの条件は 3.5.0 と同じ。最新の安定版ではないため採らない（決定 87） | 同じ手順の 3.1.0 の wheel（2026-11-14） |
 | LIB12 | filelock | 4.2.10 | MIT | 2026-11-09 | 無し | 満たすが採らない。使うのは Linux と macOS の `flock` の共有と排他だけで、今の NDF も標準の `fcntl.flock` で同じロックを取っている（`plugins/ndf/scripts/lib/state_home.py` の `_flock_free`）。依存を増やす理由が無い（決定 85） | https://pypi.org/pypi/filelock/json （2026-11-14） |
 | LIB13 | portalocker | 4.4.2 | BSD-3-Clause | 2026-10-28 | 無し | 満たすが採らない。LIB12 と同じ理由に加え、Redis のロックなどの要らない機能を持つ（決定 85） | https://pypi.org/pypi/portalocker/json （2026-11-14） |
 | LIB14 | Alembic | 1.20.1 | MIT | 2026-10-22 | 無し | 当たらない。DB の表の版を移す道具で、置き場の形（ディレクトリとファイルの並び）の番号は DB の外にある。進行表の表の版は P1 が #3092 の設計のまま持つ（決定 85・86） | https://pypi.org/pypi/alembic/json （2026-11-14） |
@@ -297,7 +298,7 @@ graph TD
 | 2 | 詰まりと壊れたときの影響範囲 | 決定 81（ロックと破損が 1 つの実行に閉じる）・決定 82（WAL・`quick_check`・控え） | I9・I11 | C1 の追補 A4・A13・A14・P1 の P1-1〜P1-6・C2 の B3・B6（20 プランと 14 ラッパー相当の負荷と、検査と走査の所要時間） |
 | 3 | 膨らみ続ける | 決定 83（実行ごとの退避・14 日・URL でも NDF の台帳の鍵だけを消す） | I8・I12・I13 | C1 の追補 A5・A6・A12・A13・A14・C2 の B4 |
 | 4 | 11.0.0-dev.N のたびに途中の実行が取り消される | 決定 84（アプリの版を形の番号に）・決定 85（`format.json`）・決定 86（レーンの起動の確かめ・待ちの一覧） | I7・I10・I11 | C1 の追補 A7〜A9・A11・C2 の B2・B5・P3 の P3-1・M3 の M3-1 |
-| 5 | DBOS が 3.1.0 のまま | 決定 87（3.5.0 で作る） | — | C1 の追補 A10 |
+| 5 | DBOS が 3.1.0 のまま | 決定 87（3.4.0 で出し、11-18 以降に 3.5.0 へ上げる） | — | C1 の追補 A10 |
 
 ## 決定の記録
 
@@ -463,9 +464,13 @@ DBOS の殻は、チェックアウトの置き場を使う前に `format.json` 
 
 根拠: Value 1 / Value 5（MVV 版 7）
 
-### 決定 87: キューまわりの直しを取り込むため、DBOS は 3.5.0 で作り、殻の直しを C2 の前の 1 本の PR にする
+### 決定 87: キューまわりの直しを取り込むため、DBOS は 3.4.0 で出して 3.5.0 へ上げ、殻の直しを C2 の前の 1 本の PR にする
 
-`plugins/ndf-next/pyproject.toml` の `dbos==3.1.0` を `dbos==3.5.0` へ上げる。3.1.0 からの差のうち、この設計が当たるのは「アプリの版の MD5 にアプリ名が入った」「`application_version` を明示して版を 1 つに保つ」の 2 つで、どちらも決定 84 の固定の値で効かなくなる。シャードした DB・自動の版上げは Enterprise の機能で、使わない（LIB10 の表）。
+`plugins/ndf-next/pyproject.toml` の `dbos==3.1.0` を、C1+ では `dbos==3.4.0` へ上げ、2026-11-18 以降に `dbos==3.5.0` へ上げる。3.5.0 は 2026-11-10 の公開で、依存を入れる前に公開から 7 日を待つ決まり（2026-11-18 01:19 JST まで）に当たるため、C1+ は 3.4.0 で出す（オーガナイザー経由の利用者の決定、2026-11-14。コミット 1200b0488）。3.5.0 へは 11-18 以降に X2 の週 1 回の流れで上げる。
+
+3.4.0 でも決定 81 の前提は成り立つ。3.4.0 の wheel で、キューの取り出し（`start_queued_workflows`）の `select` はキュー名・状態 `ENQUEUED`・アプリの版・`application_name`（一致か `NULL`）だけを条件にし、`executor_id` で絞らない（`_sys_db.py:5121-5141`。取り出した行へ自分の `executor_id` を書くのは `:5194`）。`application_versions.version_name` は DB 全体で一意である（`_schemas/system_database.py:231` の `unique=True`）ため、版名に鍵の名前を入れる決定 84 の形も 3.5.0 と同じく要る。
+
+3.1.0 からの差のうち、この設計が当たるのは「アプリの版の MD5 にアプリ名が入った」「`application_version` を明示して版を 1 つに保つ」の 2 つで、どちらも決定 84 の固定の値で効かなくなる。シャードした DB・自動の版上げは Enterprise の機能で、使わない（LIB10 の表）。
 
 決定 81〜85 の殻の直し（`core/durable.py`）と版の引き上げは、C1 #3285 の追補として lr-flow が C2 の前に 1 本の PR で出す。C1 は閉じているため、開き直さずに PR から `Refs #3285 #3344` で指す。C2 に混ぜると、殻の直しだけを revert できない。依存の方針そのもの（ほかのライブラリを最新の安定版へ上げる）は #3347 が持つ。
 

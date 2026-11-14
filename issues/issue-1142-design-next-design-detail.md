@@ -14,7 +14,7 @@
 | X1 | #3283 | 検査 1 本（兆候 0 件・構造の規則・輪・事実の重複・禁止語・ループの中の外部呼び出し・I1〜I3） | A0・A2（規則）・DC2・RF2・RF3・W8 | X0 | 2 | lrebuild |
 | D1 | #3284 | 契約と読み手（事実の表・止まった理由の表・結果 JSON で `cause` を必須・上限の宣言） | DC1・SF1a・SF1b・DC5 | X0 | 2 | lr-data |
 | C1 | #3285 | 判断のループ・判断の関数の型・DBOS の殻 | RF1 | X0 | 2 | lr-flow |
-| C1+ | #3285 の追補（#3344） | DBOS の殻の直し（鍵ごとの記録・形の番号・退避・待ちの一覧・DBOS 3.5.0。設計の決定 81〜87） | 無し | C1 | 2 | lr-flow |
+| C1+ | #3285 の追補（#3344） | DBOS の殻の直し（鍵ごとの記録・形の番号・退避・待ちの一覧・DBOS 3.4.0。設計の決定 81〜87） | 無し | C1 | 2 | lr-flow |
 | T1 | #3286 | テスト基盤（隔離・揺れない待ち・同時実行の枠） | N9・N12 | X0 | 2 | lr-fix-b |
 | D2 | #3287 | 領域の表（ランタイム・収束ループ・宣言・環境変数・PR の見出し・指示書） | DC3・DC4・DC6 | D1 | 3 | lr-data |
 | AD1 | #3288 | GitHub・git のアダプターと CI の結果の監視・落ちたチェックの分類 | A2（クエリ）・SF3（#3153）・SF4 | D1 | 3 | lr-fix-a |
@@ -168,7 +168,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | --- | --- | --- |
 | `plugins/ndf-next/.claude-plugin/plugin.json` | Claude Code 用の定義。名前 `ndf-next`・版 `11.0.0-dev.N` | X0 |
 | `plugins/ndf-next/.codex-plugin/plugin.json` | Codex 用の定義（同じ名前と版） | X0 |
-| `plugins/ndf-next/pyproject.toml` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択）。DBOS の版は C1+ が 3.5.0 へ上げる | X0・C1+ |
+| `plugins/ndf-next/pyproject.toml` | 依存の宣言（DBOS・jsonschema・httpx ほか。前の企画の libraries の選択）。DBOS の版は C1+ が 3.4.0 へ上げ、11-18 以降に 3.5.0 へ上げる（決定 87） | X0・C1+ |
 | `plugins/ndf-next/uv.lock` | 依存の lock | X0・C1+ |
 | `plugins/ndf-next/bin/ndf` | エントリポイント 1 本。依存の仮想環境を用意して `python -m ndf` を呼ぶ | X0 |
 | `plugins/ndf-next/src/ndf/__main__.py` | `cli.main` を呼ぶだけ | X0 |
@@ -415,7 +415,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | A7 | C1+ | `application_version` は `format-<FORMAT>-<鍵の名前>`（`app_version(run_key)`）で、`plugin.json` の版を上げて起動し直しても途中の実行が回復することをテストで確かめる。`FORMAT_SOURCE_HASH` の比べ合いのテストを置く | 決定 84・I7 |
 | A8 | C1+ | チェックアウトの置き場の `format.json` を決定 85 の表のとおりに扱う。番号が自分より大きい置き場には書かない | 決定 85・I10 |
 | A9 | C1+ | `durable.pending` が置き場か URL から待ちを抱えた実行を集める | 決定 86 |
-| A10 | C1+ | `plugins/ndf-next/pyproject.toml` と `uv.lock` の DBOS を 3.5.0 にし、`plugins/ndf-next/tests/` がすべて通る | 決定 87 |
+| A10 | C1+ | `plugins/ndf-next/pyproject.toml` と `uv.lock` の DBOS を 3.4.0 にし（3.5.0 へは 11-18 以降。決定 87）、`plugins/ndf-next/tests/` がすべて通る | 決定 87 |
 | A11 | C1+ | 置き場を使うプロセスは `state.lock` を共有で持つ。置き場ごとの退避は、共有で番号を読み、共有を放して排他を待たずに取り、排他の下で番号を読み直し、`state.lock` と旧い置き場の `dbos/*.lock`・`progress.sqlite.lock` をすべて排他で取れたときだけ行い、共有で取り直して番号をもう一度確かめる。取れなければ何も変えずに `store_in_use` で止まること、2 つのプロセスが同時に開いても退避が 1 回だけであることをテストで確かめる | 決定 85・I11 |
 | A12 | C1+ | URL のとき `durable.launch` は DB 側の鍵のロックを取ってから台帳 `ndf_runs` へ鍵を書いて DBOS を起動し、片付けは台帳に無い `application_name` の実行を消さないことと、鍵のロックを持つ起動がいる鍵を消さないことをテストで確かめる | 決定 83・I12・I13 |
 | A13 | C1+ | 鍵のファイルを `retired/`・`broken/` へ移すときは、本体と `-wal`・`-shm`・`-journal` をそろえて移し、鍵ごとの `.checked` を消し、`.lock` は `run_lock` を持ったまま最後に消す。退避の後に生きている置き場へ鍵のファイルが 1 つも残らないことをテストで確かめる | 決定 82・83・I6 |
