@@ -8,10 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-import sqlalchemy as sa
 
 from ndf.core import durable_locks as locks
-from ndf.core.durable_locks import StoreBroken
+from ndf.core.durable_locks import StoreBroken, sa
 
 # URL のとき、NDF が起こした鍵を書く台帳の表。進行表と同じ DB に置き、DBOS の表ではない（I12）
 RUNS_TABLE = "ndf_runs"

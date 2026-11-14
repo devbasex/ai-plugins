@@ -59,8 +59,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, TypeVar
 
-import sqlalchemy as sa
-
 from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.core import durable_locks as locks
@@ -80,6 +78,7 @@ from ndf.core.durable_locks import (
     StoreInUse,
     StoreStopped as StoreStopped,
     maint_lock as maint_lock,
+    sa as sa,
     store_lock as store_lock,
 )
 

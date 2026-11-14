@@ -12,21 +12,47 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import importlib.util
 import json
 import logging
 import os
 import socket
+import sys
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Any
-
-import sqlalchemy as sa
+from types import ModuleType
+from typing import IO, TYPE_CHECKING, Any
 
 log = logging.getLogger(__name__)
+
+
+def _lazy(name: str) -> ModuleType:
+    """属性を初めて読むときに import するモジュール（標準の `importlib.util.LazyLoader`）。読み込み済みならそれを返す。
+
+    SQLAlchemy の import は約 0.1 秒の CPU を使い、SQLite で DBOS を開かない呼び出し（`plan wait` など）には要らない（B3）。
+    """
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.find_spec(name)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(name)
+    loader = importlib.util.LazyLoader(spec.loader)
+    spec.loader = loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    loader.exec_module(module)
+    return module
+
+
+if TYPE_CHECKING:
+    import sqlalchemy as sa
+else:
+    # 殻のモジュール（durable・durable_ledger）もこれを使う
+    sa = _lazy("sqlalchemy")
 
 # 置き場のロックと、共有の目印の検査・走査のロック。どちらも state/ の親に置き、退避で動かない（I11）
 STORE_LOCK = "state.lock"
