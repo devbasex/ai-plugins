@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -164,3 +165,133 @@ def test_cleanup_passes_the_start_record_to_the_keep_decision(tmp_path, monkeypa
     ms._cleanup_pr(str(repo), str(repo), None, tmp_path / "wt", 5, lambda *i: items.append(i))
     assert [i[:3] for i in items] == [("branch", "sprint/s1", "kept")]
     assert git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/sprint/s1")
+
+
+# --- 現状固定テスト（I-002: sprint_flow_record の分岐） ---------------------------------------------
+
+
+def plain_repo(tmp_path: Path) -> Path:
+    """origin を持たない、`.ndf/` だけの git リポジトリ（記録の探索だけを見る）。"""
+    repo = tmp_path / "plain"
+    (repo / ".ndf").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    return repo
+
+
+def put_manifest(repo: Path, rel: str, body, mtime: float | None = None) -> Path:
+    d = repo / ".ndf" / rel
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "sprint.json"
+    path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
+@pytest.mark.parametrize("branch", [None, ""], ids=["none", "empty"])
+def test_characterize_record_without_branch_is_none(tmp_path, branch):
+    repo = plain_repo(tmp_path)
+    put_manifest(repo, "sprint-a", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"promotion": "selected"}})
+    assert repo_mod.sprint_flow_record(repo, branch) is None
+
+
+@pytest.mark.parametrize("root", [None, ""], ids=["none", "empty"])
+def test_characterize_record_without_root_is_none(root):
+    assert repo_mod.sprint_flow_record(root, "sprint/a") is None
+
+
+def test_characterize_record_outside_git_is_none(tmp_path):
+    d = tmp_path / "nogit"
+    (d / ".ndf" / "sprint-a").mkdir(parents=True)
+    (d / ".ndf" / "sprint-a" / "sprint.json").write_text(
+        json.dumps({"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"promotion": "selected"}})
+    )
+    assert repo_mod.sprint_flow_record(d, "sprint/a") is None
+
+
+def test_characterize_record_without_ndf_dir_is_none(tmp_path):
+    repo = tmp_path / "no-ndf"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") is None
+
+
+def test_characterize_record_matches_explicit_branch_key_over_sprint_name(tmp_path):
+    """`ブランチ` を持つ目録は `ブランチ` で照合し、`sprint/<スプリント>` では照合しない。"""
+    repo = plain_repo(tmp_path)
+    snap = {"promotion": "selected"}
+    put_manifest(repo, "sprint-a", {"スプリント": "a", "ブランチ": "feature/x", branch_flow.SNAPSHOT_KEY: snap})
+    assert repo_mod.sprint_flow_record(repo, "feature/x") == snap
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") is None
+
+
+def test_characterize_record_falls_back_to_sprint_name_when_branch_key_is_empty(tmp_path):
+    repo = plain_repo(tmp_path)
+    snap = {"promotion": "selected"}
+    put_manifest(repo, "sprint-a", {"スプリント": "a", "ブランチ": "", branch_flow.SNAPSHOT_KEY: snap})
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") == snap
+
+
+def test_characterize_record_without_sprint_name_matches_sprint_none(tmp_path):
+    """`ブランチ` も `スプリント` も無い目録は `sprint/None` として照合される（現状の振る舞い）。"""
+    repo = plain_repo(tmp_path)
+    snap = {"promotion": "selected"}
+    put_manifest(repo, "sprint-a", {branch_flow.SNAPSHOT_KEY: snap})
+    assert repo_mod.sprint_flow_record(repo, "sprint/None") == snap
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "{not json",
+        json.dumps(["list"]),
+        json.dumps({"スプリント": "a"}),
+        json.dumps({"スプリント": "a", branch_flow.SNAPSHOT_KEY: {}}),
+        json.dumps({"スプリント": "a", branch_flow.SNAPSHOT_KEY: "selected"}),
+        json.dumps({"スプリント": "a", branch_flow.SNAPSHOT_KEY: None}),
+    ],
+    ids=["broken-json", "not-dict", "no-snapshot", "empty-snapshot", "str-snapshot", "null-snapshot"],
+)
+def test_characterize_record_skips_unusable_manifests(tmp_path, body):
+    """読めない目録・辞書でない目録・記録の無い（空・辞書でない）目録は飛ばし、残りの目録の記録を返す。"""
+    repo = plain_repo(tmp_path)
+    put_manifest(repo, "sprint-bad", body, mtime=2_000_000_000)
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") is None
+    good = {"promotion": "selected"}
+    put_manifest(repo, "sprint-good", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: good}, mtime=1_000_000_000)
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") == good
+
+
+def test_characterize_record_picks_the_newest_manifest(tmp_path):
+    repo = plain_repo(tmp_path)
+    put_manifest(repo, "sprint-z", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"p": "old"}}, mtime=1_000_000_000)
+    put_manifest(repo, "sprint-b", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"p": "new"}}, mtime=1_500_000_000)
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") == {"p": "new"}
+
+
+def test_characterize_record_breaks_mtime_ties_by_the_larger_path(tmp_path):
+    repo = plain_repo(tmp_path)
+    put_manifest(repo, "sprint-a", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"p": "a"}}, mtime=1_000_000_000)
+    put_manifest(repo, "sprint-b", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: {"p": "b"}}, mtime=1_000_000_000)
+    assert repo_mod.sprint_flow_record(repo, "sprint/a") == {"p": "b"}
+
+
+def test_characterize_record_finds_manifest_at_ndf_top_and_nested(tmp_path):
+    """`.ndf/sprint.json` 自体と、`-state` で終わらない深い階層の目録も探す。"""
+    repo = plain_repo(tmp_path)
+    (repo / ".ndf" / "sprint.json").write_text(json.dumps({"スプリント": "top", branch_flow.SNAPSHOT_KEY: {"p": 1}}))
+    put_manifest(repo, "x/y/z", {"スプリント": "deep", branch_flow.SNAPSHOT_KEY: {"p": 2}})
+    put_manifest(repo, "x/statefull", {"スプリント": "st", branch_flow.SNAPSHOT_KEY: {"p": 3}})
+    assert repo_mod.sprint_flow_record(repo, "sprint/top") == {"p": 1}
+    assert repo_mod.sprint_flow_record(repo, "sprint/deep") == {"p": 2}
+    assert repo_mod.sprint_flow_record(repo, "sprint/st") == {"p": 3}
+
+
+def test_characterize_record_from_a_worktree_reads_the_main_directory(tmp_path):
+    """worktree から呼んでも、メインディレクトリの `.ndf/` を探す。"""
+    repo = plain_repo(tmp_path)
+    git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    snap = {"promotion": "selected"}
+    put_manifest(repo, "sprint-a", {"スプリント": "a", branch_flow.SNAPSHOT_KEY: snap})
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", "-b", "w", str(wt))
+    assert repo_mod.sprint_flow_record(wt, "sprint/a") == snap
