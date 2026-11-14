@@ -6,11 +6,6 @@
 
 from __future__ import annotations
 
-import glob
-import os
-import shutil
-import socket
-import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -24,38 +19,10 @@ from ndf.core import durable
 from ._durable_helpers import run_key_process as _run
 
 
-def _pg_bin() -> Path | None:
-    found = shutil.which("pg_ctl")
-    if found:
-        return Path(found).parent
-    candidates = sorted(glob.glob("/usr/lib/postgresql/*/bin/pg_ctl"))
-    return Path(candidates[-1]).parent if candidates else None
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture(scope="module")
-def pg_url(tmp_path_factory):
-    bindir = _pg_bin()
-    # initdb は root では動かない
-    missing = "PostgreSQL（pg_ctl）が無い" if bindir is None else "root では initdb を打てない" if os.geteuid() == 0 else ""
-    if missing:
-        if os.environ.get("CI"):
-            pytest.fail(f"CI で PostgreSQL を起こせない: {missing}")
-        pytest.skip(missing)
-    data = tmp_path_factory.mktemp("pgdata")
-    port = _free_port()
-    subprocess.run([bindir / "initdb", "-D", data, "-U", "ndf", "--auth=trust", "-E", "UTF8"], check=True, capture_output=True)
-    options = f"-c listen_addresses=127.0.0.1 -p {port} -k {data}"
-    subprocess.run([bindir / "pg_ctl", "-D", data, "-o", options, "-l", data / "log", "-w", "start"], check=True, capture_output=True)
-    try:
-        yield f"postgresql://ndf@127.0.0.1:{port}/postgres"
-    finally:
-        subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "immediate", "stop"], check=False, capture_output=True)
+def pg_url(tmp_path_factory, start_postgres):
+    with start_postgres(tmp_path_factory) as (_, server):
+        yield f"{server}/postgres"
 
 
 @durable.workflow
