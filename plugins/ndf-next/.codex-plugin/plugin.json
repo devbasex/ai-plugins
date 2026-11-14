@@ -7,7 +7,6 @@
     "./skills/chrome-cdp",
     "./skills/deploy",
     "./skills/docker-container-access",
-    "./skills/document-style",
     "./skills/document-systems",
     "./skills/investigation-rules",
     "./skills/logging-guidelines",
