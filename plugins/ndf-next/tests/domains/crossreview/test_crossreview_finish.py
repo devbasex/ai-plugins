@@ -80,6 +80,7 @@ def test_pr_3462_incomplete_review_keeps_gaps_in_its_result_json(tmp_path: Path,
     code, got = _run(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, [open_one])))
     assert result.errors(got, code) == []
     assert got["gaps"][0]["name"] == "F3"
+    assert got["outputs"] == {"gaps": got["gaps"]}
 
 
 def test_error_before_any_round_is_work_stopped() -> None:

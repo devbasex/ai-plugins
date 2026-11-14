@@ -260,7 +260,8 @@ def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
             run.ledger[fid] = {"id": fid, "key": None, "text": handed[fid], "section": None, "round": round_no}
             run.ledger[fid] |= {"outcome": item["outcome"], "reason": reason, "by": "rebuild"}
     os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
-    return {"commit": found.get("commit"), "reported": len(reported)}
+    fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
+    return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
 def _fix(run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher) -> Optional[dict[str, Any]]:
@@ -281,7 +282,8 @@ def _fix(run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequ
 
 
 def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> bool:
-    """修正のコミットを送る。コミットが無ければ送らない。送れなければ注意に載せて False。"""
+    """修正のコミットを送る。コミットが無ければ送らない。送れなければ、このラウンドで直したとした指摘を未解決へ戻し
+    （PR に届いていない）、注意に載せて False。"""
     if run.g.rev_parse("HEAD") == reviewed_head:
         return True
     commit = fix.get("commit") if isinstance(fix.get("commit"), str) else None
@@ -289,6 +291,9 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> 
     if sent.ok:
         fix["pushed"] = sent.head
         return True
+    for fid in fix["fixed"]:
+        if fid in run.ledger:
+            run.ledger[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     run.warnings.append(f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     run.process.append({"run": f"round {round_no} push", "result": f"送れない（{sent.reason}）"})
