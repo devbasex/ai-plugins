@@ -193,7 +193,8 @@ def _reply(**kw):
 
 @pytest.fixture
 def calls():
-    """`invoke` の `call_claude` へ渡す偽物と、受けた引数。答えは `box["reply"]` に置く。"""
+    """`claude.call_claude` を差し替え、受けた引数を残す。答えは `calls.reply` に置く。"""
+    # 差し替えは `invoke` の `call_claude` へ偽物を渡して行う。答えは `box["reply"]` に置く
     seen: list[dict] = []
     box = {"reply": _reply()}
 
@@ -202,6 +203,14 @@ def calls():
         return box["reply"]
 
     return box, seen, fake
+
+
+def test_skill_calls_claude_call_claude_by_default():
+    import inspect
+
+    from ndf.adapters import claude
+
+    assert inspect.signature(invoke.invoke).parameters["call_claude"].default is claude.call_claude
 
 
 def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls):
