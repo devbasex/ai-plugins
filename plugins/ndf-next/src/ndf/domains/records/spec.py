@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -30,10 +31,29 @@ def _texts(root: Path, specs: Sequence[str]) -> dict[str, str]:
     return out
 
 
+def _rel(root: Path, p: str) -> str:
+    """渡したパスをリポジトリの根からの相対パス（`/` 区切り）にそろえる。根の外なら `SpecError`。
+
+    `./issues/d.md` と `issues/d.md` を同じ設計として用語集の `pending_source` と照合するためにそろえる。
+    """
+    base = os.path.normpath(os.path.abspath(root))
+    target = os.path.normpath(os.path.join(base, os.path.expanduser(p)))
+    rel = os.path.relpath(target, base)
+    if rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        raise SpecError(f"リポジトリの中のファイルでない: {p}")
+    return Path(rel).as_posix()
+
+
 def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides: Mapping[str, str]) -> list[str]:
-    """用語集の正本を付け替え、文書を作り直し、設計を消して、コミットに入れるパスを返す。"""
+    """用語集の正本を付け替え、文書を作り直し、設計を消して、コミットに入れるパスを返す。
+
+    渡したパス（確定仕様・消す設計・`overrides` のファイル）は、リポジトリの根からの相対パスにそろえてから使う。
+    """
     if not specs:
         raise SpecError("確定仕様（--spec）が 1 つも無い")
+    specs = list(dict.fromkeys(_rel(root, p) for p in specs))
+    removed = list(dict.fromkeys(_rel(root, p) for p in removed))
+    overrides = {term: _rel(root, p) for term, p in overrides.items()}
     texts = _texts(root, specs)
     missing = [p for p in removed if not (root / p).is_file()]
     if missing:

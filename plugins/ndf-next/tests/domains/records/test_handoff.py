@@ -33,13 +33,18 @@ def test_check_body_reports_lines_and_bytes_over_the_limits() -> None:
 
 
 def test_path_candidates_skip_urls_commands_and_placeholders() -> None:
-    text = "`https://x/y.md` `--resume` `<id>.json` `plugins/ndf-next/src` `README.md` `a b`"
+    text = "`https://x/y.md` `--resume` `<id>.json` `plugins/ndf-next/src` `README.md` `a b` を作成済み"
     assert hd.path_candidates(text) == ["plugins/ndf-next/src", "README.md"]
+
+
+def test_path_candidates_come_only_from_lines_that_say_created() -> None:
+    text = "版は `10.17.x`（`ndf--v10.17.51`）。`origin/develop` の `facts.value` と `result.OK` を読む\n`docs/b.md` を作成した\n"
+    assert hd.path_candidates(text) == ["docs/b.md"]
 
 
 def test_absolute_paths_are_candidates_and_missing_ones_fail(tmp_path: Path) -> None:
     gone = tmp_path / "none.md"
-    assert hd.path_candidates(f"`{gone}` `/`") == [str(gone)]
+    assert hd.path_candidates(f"`{gone}` `/` を作成済み") == [str(gone)]
     report = handoff.check_file(_write(tmp_path / "h.md", f"## 現在地\n\n`{gone}` を作成済み。\n"), tmp_path, LIMITS)
     assert report.missing_paths == [str(gone)]
 
@@ -66,6 +71,17 @@ def test_trim_file_writes_history_first_and_check_file_resolves_from_root(tmp_pa
     assert "退避する行" in history.read_text(encoding="utf-8") and "退避する行" not in doc.read_text(encoding="utf-8")
     assert handoff.trim_file(doc, history) == []
     assert handoff.check_file(doc, tmp_path, handoff.body_limits()).passed
+
+
+def test_trim_file_refuses_a_history_that_is_the_body_itself(tmp_path: Path) -> None:
+    doc = tmp_path / "handoff.md"
+    text = BODY + "\n## 前の会話の進み\n\n- 済み\n"
+    doc.write_text(text, encoding="utf-8")
+    (tmp_path / "link.md").symlink_to(doc)
+    for same in (doc, tmp_path / "." / "handoff.md", tmp_path / "link.md"):
+        with pytest.raises(OSError):
+            handoff.trim_file(doc, same)
+    assert doc.read_text(encoding="utf-8") == text
 
 
 def test_trim_file_keeps_the_body_when_history_cannot_be_written(tmp_path: Path) -> None:

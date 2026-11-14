@@ -83,13 +83,13 @@ def signals(root: Path, base_branch: str) -> md.Signals:
 
 
 def worktree_version(root: Path) -> Optional[int]:
-    """作業ツリーの MVV の宣言の現行の版。宣言を読めなければ `MvvError`。"""
+    """worktree の MVV の宣言の現行の版。宣言を読めなければ `MvvError`。"""
     try:
         raw = json.loads((root / decl_path()).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise MvvError(f"作業ツリーの MVV の宣言を読めない: {exc}") from exc
+        raise MvvError(f"worktree の MVV の宣言を読めない: {exc}") from exc
     if not isinstance(raw, dict):
-        raise MvvError("作業ツリーの MVV の宣言が object でない")
+        raise MvvError("worktree の MVV の宣言が object でない")
     return md.current_version(raw)
 
 
@@ -97,7 +97,7 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     """承認ゲートの答え（`verdict`・`approved`・`state`・`gate`・`pr`）を改訂の兆候の記録へ写し、書いた行を返す。
 
     「判定できない」なら人の答えによらず `unknown` の行を書き、覆し（と「判定できない」を人が通したもの）なら
-    その種類の行を書く。どちらでもなければ書かない。`version` が無ければ作業ツリーの宣言の現行の版で埋める
+    その種類の行を書く。どちらでもなければ書かない。`version` が無ければ worktree の宣言の現行の版で埋める
     （版の無い行は兆候に数えられないため）。
     """
     kinds = md.signal_kinds(answer.get("verdict"), bool(answer.get("approved")))

@@ -76,6 +76,20 @@ def test_finalize_moves_the_source_renders_and_removes_the_design(tmp_path: Path
     assert g["terms"][0]["source"] == "docs/a.md"
 
 
+def test_finalize_matches_the_design_written_another_way(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    paths = spec.finalize(root, ["./docs/a.md", str(root / "docs" / "b.md")], ["./issues/d.md"], {})
+    assert paths[:2] == ["docs/a.md", "docs/b.md"] and "issues/d.md" in paths
+    g = json.loads((root / "glossary.json").read_text(encoding="utf-8"))
+    assert g["terms"][0]["source"] == "docs/a.md" and "pending_source" not in g["terms"][0]
+
+
+def test_finalize_refuses_a_path_outside_the_repo(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    with pytest.raises(spec.SpecError):
+        spec.finalize(root, ["docs/a.md"], ["../d.md"], {})
+
+
 def test_finalize_writes_nothing_when_the_source_is_ambiguous(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "docs" / "b.md").write_text("帳簿も", encoding="utf-8")

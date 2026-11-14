@@ -21,7 +21,10 @@ TEMPLATE_SECTIONS = (
     "運用の知見",
     "次に実行するコマンド",
 )
-# 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換える印を含まない）
+# 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換える印を含まない）。
+# 候補はファイルを作ったと書いた行（_CREATED のどれかを含む行）からだけ取る。ほかの行の版数（`10.17.x`）・
+# ブランチ（`origin/develop`）・属性（`facts.value`）はパスでないため数えない
+_CREATED = ("作成済み", "作成した")
 _CODE_SPAN = re.compile(r"`([^`\s]+)`")
 _PATH_LIKE = re.compile(r"^[\w.~/-][\w./~-]*(?:/[\w.-]+|\.[A-Za-z0-9]{1,5})$")
 _NOT_PATH = re.compile(r"://|[<>*?{}$|]|^-|^\.\.?$")
@@ -66,12 +69,15 @@ def sections(text: str) -> list[tuple[str | None, list[str]]]:
 
 
 def path_candidates(text: str) -> list[str]:
-    """本文の行内のコードから、パスの候補を出た順に重ねずに取り出す。"""
+    """ファイルを作ったと書いた行の行内のコードから、パスの候補を出た順に重ねずに取り出す。"""
     seen: dict[str, None] = {}
-    for m in _CODE_SPAN.finditer(text):
-        token = m.group(1).rstrip(".,、。")
-        if _PATH_LIKE.match(token) and not _NOT_PATH.search(token):
-            seen.setdefault(token, None)
+    for line in text.splitlines():
+        if not any(word in line for word in _CREATED):
+            continue
+        for m in _CODE_SPAN.finditer(line):
+            token = m.group(1).rstrip(".,、。")
+            if _PATH_LIKE.match(token) and not _NOT_PATH.search(token):
+                seen.setdefault(token, None)
     return list(seen)
 
 
