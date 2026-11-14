@@ -37,7 +37,7 @@ class ContractsCopy:
 
 @pytest.fixture
 def contracts_copy(tmp_path: Path) -> ContractsCopy:
-    """プラグインの契約を一時の置き場へ写して読み先にし、`contracts_copy(rel, fn)` で 1 ファイルを書き換える。"""
+    """プラグインの契約を一時の置き場へ写して読み先にし、`edit(rel, fn)` で 1 ファイルを書き換える。"""
     root = tmp_path / "contracts"
     shutil.copytree(contracts.DEFAULT_DIR, root)
     contracts.use_dir(root)
