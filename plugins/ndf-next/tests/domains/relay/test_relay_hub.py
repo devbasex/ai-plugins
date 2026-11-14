@@ -250,6 +250,25 @@ def test_an_unreadable_request_file_gets_an_invalid_result(ctx):
     assert (result["ok"], result["cause"]) == (False, "invalid") and not (requests / "0-bad.json").exists()
 
 
+def test_a_request_removed_by_its_timed_out_submitter_is_skipped(ctx, monkeypatch):
+    # 頼む側が期限切れで消した依頼に結果を書かず、後ろの依頼も処理する
+    requests = hub.hub_dir(ctx.state_dir) / "requests"
+    requests.mkdir(parents=True)
+    for rid in ("0-a", "1-gone", "2-c"):
+        (requests / f"{rid}.json").write_text(json.dumps({"kind": "stop", "name": "t1"}), encoding="utf-8")
+    real = hub.handle
+
+    def removing(c, req):
+        (requests / "1-gone.json").unlink(missing_ok=True)
+        return real(c, req)
+
+    monkeypatch.setattr(hub, "handle", removing)
+    assert hub.drain(ctx)
+    results = hub.hub_dir(ctx.state_dir) / "results"
+    assert sorted(p.name for p in results.glob("*.json")) == ["0-a.json", "2-c.json"]
+    assert not list(requests.glob("*.json"))
+
+
 @pytest.mark.parametrize("name", ["a b", "x" * 65])
 def test_spawn_with_a_malformed_name_starts_no_tmux_session(ctx, name):
     # 名前の形を tmux を起動する前に確かめ、止める手段の無いセッションを残さない

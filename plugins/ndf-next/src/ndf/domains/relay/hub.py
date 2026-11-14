@@ -110,16 +110,27 @@ def drain(ctx: Context) -> bool:
         requests = base / "requests"
         for path in sorted(requests.glob("*.json")) if requests.is_dir() else []:
             got = _handle_file(ctx, path)
-            signals.replace_json(base / "results" / path.name, got._asdict())
+            if got is None:
+                continue
             _log(base, path.stem, got)
-            path.unlink()
+            if not path.is_file():
+                continue  # 処理の間に頼む側が期限切れで消した。誰も読まない結果を書かない
+            signals.replace_json(base / "results" / path.name, got._asdict())
+            path.unlink(missing_ok=True)
         return True
 
 
-def _handle_file(ctx: Context, path: Path) -> Outcome:
-    """依頼のファイル 1 本を処理する。読めない依頼・処理が送出した例外も結果にして返す（後ろの依頼を止めない）。"""
+def _handle_file(ctx: Context, path: Path) -> Optional[Outcome]:
+    """依頼のファイル 1 本を処理する。読めない依頼・処理が送出した例外も結果にして返す（後ろの依頼を止めない）。
+
+    依頼のファイルが既に無い（頼む側が submit の期限切れで消した）ときは None を返す。
+    """
     try:
-        req = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        req = json.loads(text)
         if not isinstance(req, dict):
             return Outcome(False, f"依頼の形が違う（{path.name}）", "invalid")
         return handle(ctx, req)
