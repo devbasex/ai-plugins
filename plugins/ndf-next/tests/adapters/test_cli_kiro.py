@@ -28,7 +28,9 @@ def _fresh(monkeypatch):
 
 
 def git(cwd: Path, *args: str) -> str:
-    done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd, capture_output=True, text=True, check=True)
+    done = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd, capture_output=True, text=True, check=True
+    )
     return done.stdout
 
 

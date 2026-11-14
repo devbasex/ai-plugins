@@ -568,7 +568,9 @@ def _start(spec: Launch) -> subprocess.Popen:
     env = {**os.environ, **(spec.env if spec.env else {}), **(log.child_env() if log else {})}
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
-        return subprocess.Popen(list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
+        return subprocess.Popen(
+            list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True
+        )
 
 
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
@@ -588,7 +590,9 @@ BACKUP_SUFFIX = "-amazonq"
 
 def _in_worktree(workdir: Path) -> bool:
     try:
-        done = subprocess.run(["git", "-C", str(workdir), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
+        done = subprocess.run(
+            ["git", "-C", str(workdir), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False
+        )
     except OSError:  # noqa: NDF401 外部コマンド: git が無ければworktree として扱わない
         return False
     return done.returncode == 0 and done.stdout.strip() == "true"
