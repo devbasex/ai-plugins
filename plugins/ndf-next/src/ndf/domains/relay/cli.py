@@ -55,8 +55,8 @@ class EnvError(ValueError):
     """上限を替える環境変数の値の形が違う。"""
 
 
-def _env_number(name: str, policy: str, key: str) -> float:
-    raw = os.environ.get(name)
+def _env_number(environ: Mapping[str, str], name: str, policy: str, key: str) -> float:
+    raw = environ.get(name)
     if not raw:
         return limits.value(policy, key)
     try:
@@ -144,11 +144,15 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         version=plugin_version(ident.root),
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
-        max_named=int(_env_number("NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
-        max_starts=int(_env_number("NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_named=int(_env_number(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
+        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
-        stop_wait=hub.Wait(_env_number("NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")),
-        hub_wait=hub.Wait(_env_number("NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")),
+        stop_wait=hub.Wait(
+            _env_number(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
+        ),
+        hub_wait=hub.Wait(
+            _env_number(environ, "NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")
+        ),
         pending=lambda: _pending_read(ident.root)._asdict(),
     )
 
@@ -174,17 +178,18 @@ def _hub(args: argparse.Namespace) -> int:
 
 def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
     ident = identity.load()
+    environ = dict(os.environ)
     return wrapper.Settings(
         state_dir=ident.state_dir,
         version=plugin_version(ident.root),
         name=name,
         cwd=Path.cwd(),
-        environ=dict(os.environ),
+        environ=environ,
         args=tuple(rest),
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        max_starts=int(_env_number("NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         context_limit=int(limits.value("relay.context", "count")),
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
