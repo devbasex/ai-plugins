@@ -22,7 +22,7 @@
       {"use": "conflict-check"},
       {"use": "ci"},
       {"id": "behavior-recheck", "run": ["{{behavior}}"]},
-      {"id": "merge-gate", "run": ["{{gate}}"], "on_answer": {"approved": "merge", "rejected": "end"}},
+      {"use": "merge-gate"},
       {"use": "merge", "next": "end"},
       {"use": "worker", "id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},
       {"use": "repeat-check"},

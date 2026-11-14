@@ -9,7 +9,7 @@
     "worktree": "{{worktree}}",
     "steps": [
       {"use": "conflict-check"},
-      {"id": "merge-gate", "run": ["{{gate}}"], "on_answer": {"approved": "merge", "rejected": "end"}},
+      {"use": "merge-gate"},
       {"use": "merge", "next": "end"},
       {"use": "base-sync"},
       {"use": "fix-base"},

@@ -76,6 +76,11 @@
       "run": ["{{worker}}", "fix-push"],
       "next": "push"
     },
+    "merge-gate": {
+      "id": "merge-gate",
+      "run": ["{{gate}}"],
+      "on_answer": {"approved": "merge", "rejected": "end"}
+    },
     "merge": {
       "id": "merge",
       "run": ["gh", "pr", "merge", "{{branch}}", "--{{merge_method}}"],
