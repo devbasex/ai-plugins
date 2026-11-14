@@ -129,6 +129,24 @@ def _copy(src: Path, dest: Path, link: bool) -> None:
         _copy_file(src, dest, link)
 
 
+# 既にある宛先をそのまま使う（複製しない）ことを表す `_existing_dest` の戻り値
+_KEEP_DEST = object()
+
+
+def _existing_dest(src: Path, dest: Path, rel: str, kind: str, redo: bool) -> object:
+    """既にある宛先の扱い。`None` は複製へ進む（実体の複製は古い宛先を消してから）、文字列は失敗の理由、`_KEEP_DEST` はそのまま使う。"""
+    if not dest.exists() or dest.is_symlink():
+        return None
+    if redo:
+        return _KEEP_DEST
+    if not _same(src, dest):
+        return f"worktree の側で書き換えられている: {rel}"
+    if kind == LINK_STEP:
+        return _KEEP_DEST
+    shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
+    return None
+
+
 def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Optional[str]:
     """複製の 1 件。失敗の理由（成功なら `None`）。"""
     if not safe_relative(rel):
@@ -136,14 +154,11 @@ def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Opt
     src, dest = main_dir / rel, top / rel
     if not src.exists():
         return f"複製元が無い: {src}"
-    if dest.exists() and not dest.is_symlink():
-        if redo:
-            return None
-        if not _same(src, dest):
-            return f"worktree の側で書き換えられている: {rel}"
-        if kind == LINK_STEP:
-            return None
-        shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
+    existing = _existing_dest(src, dest, rel, kind, redo)
+    if existing is _KEEP_DEST:
+        return None
+    if isinstance(existing, str):
+        return existing
     try:
         _copy(src, dest, link=kind == LINK_STEP)
     except (OSError, shutil.Error) as exc:  # 複製の失敗は手順の失敗として返す
