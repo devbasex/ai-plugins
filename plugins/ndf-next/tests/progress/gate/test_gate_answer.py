@@ -146,3 +146,25 @@ def test_ask_waits_for_the_plan_gate_and_the_entry_is_on_the_command_table(capsy
     assert gate.TOOL == "answer" and {"next", "wait", "work", "new", "show"} <= gate.progress_verbs()
     assert gate.main(["ask", "--gate", "release"]) == 10
     assert json.loads(capsys.readouterr().out)["metrics"]["gate"]["kind"] == "release"
+
+
+def test_answers_are_copied_to_the_gate_rejections_file_for_the_service(st, new_table, flow, tmp_path, monkeypatch):
+    # #3136: 正本は事象 answered で、サービスが読む gate-rejections.jsonl へ写す
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv"))
+    tid = new_table()
+    flow.turn(tid)
+    q = _waiting(st, tid)
+    _give(st, tid, q, "rejected")
+    rows = [json.loads(line) for line in (tmp_path / "mvv" / "gate-rejections.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["gate"] == "design" and rows[0]["outcome"] == "rejected" and rows[0]["gate_id"] == q.id
+    assert rows[0]["sprint"] == tid and rows[0]["issues"] == [3092] and rows[0]["by"] == BY and rows[0]["prs"] == [7]
+
+
+def test_an_unwritable_gate_rejections_file_is_a_warning_and_the_answer_stays(st, new_table, flow, tmp_path, monkeypatch):
+    (tmp_path / "file").write_text("")
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "file"))
+    tid = new_table()
+    flow.turn(tid)
+    out = _give(st, tid, _waiting(st, tid))
+    assert out["status"] == "ok" and any("gate-rejections" in w for w in out["warnings"])
+    assert run.decide(run.read(st, tid)).action == run.Action.CONSUME

@@ -15,7 +15,7 @@
   （`lane.carry_issues`。#3097 の条件 3 の後半・決定 99）
 - スプリントの完了: `lane_env` の `Env` で流すと、完了と同じトランザクションでレーンの行を終える（`lane.end_row`。決定 17）
 - 差し戻しの記録（`rejections`）: 承認しない・差し戻しの答えを承認ゲートの区分ごとに数える。正本は事象 `answered` で、
-  別の置き場へ写さない
+  サービスが読む `gate-rejections.jsonl`（表 ndf-files）は答えを書いた後にそこから写す（`record_answer`。#3136）
 - MVV 判定の前の機械の検査（`refusals`）: 承認済み MVV のハッシュ・承認の記録・モード・レッドラインのパス・MVV の宣言を
   変えない、の 5 つ。1 つでも外れれば LLM の判定を読まずに承認ゲートで人へ戻す。判定が「従う」でも、レッドライン
   （判定の `boundary` か機械の検査の当たり）があれば省かない（`may_skip`。#3017）
@@ -32,15 +32,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import pathspec
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import facts, result
@@ -335,7 +338,8 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
         seqs = store.append_events(conn, table_id, [draft], v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ答え {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"table_id": table_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
-    return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", table_id))
+    out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", table_id))
+    return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
 
 
 def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:
@@ -401,6 +405,44 @@ def present(st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], obse
 
 
 # --- 差し戻しの記録 ---------------------------------------------------------------------------------
+
+
+def rejections_path() -> Path:
+    """`gate-rejections.jsonl` の置き場（表 places の mvv-state。環境変数があればその位置、無ければ状態の置き場）。"""
+    var = facts.value("places", "mvv-state", "env")
+    base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("places", "mvv-state", "path")
+    return base / facts.value("ndf-files", "gate-rejections", "path")
+
+
+def rejection_row(v: run.View, q: Question, a: Answer) -> dict[str, Any]:
+    """`gate-rejections.jsonl` の 1 行（答えた時刻・区分・答え・理由・範囲・答えた者）。"""
+    ctx = v.context()
+    issues = sorted(int(n) for n in ctx["issues"]) if isinstance(ctx.get("issues"), list) else []
+    prs = sorted({n for n in (ctx.get("design_pr"), ctx.get("pr")) if isinstance(n, int)})
+    return {
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "gate": q.gate if q.gate else "plan",
+        "gate_id": q.id,
+        "what": a.reason,
+        "sprint": v.table_id,
+        "issues": issues,
+        "prs": prs,
+        "by": a.by,
+        "outcome": "rejected" if a.value in REJECTING else a.value,
+        "answer": a.value,
+    }
+
+
+def record_answer(v: run.View, q: Question, a: Answer, where: Callable[[], Path]) -> list[str]:
+    """答えを `gate-rejections.jsonl` へ写す（承認も差し戻しも）。写せなければ警告を返す（答えの正本は事象に書いてある）。"""
+    try:
+        path = where()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rejection_row(v, q, a), ensure_ascii=False) + "\n")
+    except (OSError, identity.IdentityError) as exc:
+        return [f"答えを gate-rejections へ写せなかった（答えは進行表に書いた）: {exc}"]
+    return []
 
 
 def rejections(events: Iterable[model.Event]) -> dict[str, int]:
