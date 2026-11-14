@@ -7,7 +7,7 @@
 なお合わなければ `needs_human` で人へ戻す（決定 60）。答えの文から近い選択肢を拾わない。
 起動は判断の権限（`claude.Permission.JUDGE`。Tool を使わせない）で行う（#3364）。
 
-claude を起動できない・期限を超えた・利用上限は、打ち直しても直らないので打ち直さず、それぞれの止まった理由
+claude を起動できない・期限を超えた・利用上限・学習の設定の控えが無い・重い起動の枠が空かないは、打ち直しても直らないので打ち直さず、それぞれの止まった理由
 （`FAILURE_CAUSES`）で返す（#3394）。どの理由で止まるかと答えの形はこのモジュールが決め、呼び手の LLM に決めさせない。
 """
 
@@ -33,6 +33,8 @@ FAILURE_CAUSES: dict[claude.Failure, str] = {
     claude.Failure.LAUNCH: "precondition",
     claude.Failure.TIMEOUT: "interrupted",
     claude.Failure.USAGE_LIMIT: "usage_limit",
+    claude.Failure.REFUSED: "precondition",
+    claude.Failure.NO_SLOT: "infra_wait",
 }
 SYSTEM = "あなたは判断の呼び出しに答える。渡したスキーマに合う JSON だけを返す。前置きや説明の文を足さない。"
 

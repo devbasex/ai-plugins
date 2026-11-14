@@ -3,6 +3,7 @@
 - 監視: 利用上限の語は CLI が出す行の形（行頭）だけを読み、コメントの写しの中の語を拾わない（#1411）。
   早期の警告は種類ごとに 1 回ずつ出す（#2059）
 - kiro: 起動の前後でworktree の `.amazonq/cli-agents` を写して戻し、起動の間に増えた `.bak` を消す（#2448）
+- 起動の前: 学習に使わない設定の控えを読み（`training.refusal`。#3391）、重い起動の枠を取る（`launch_slot.held`。#3368）
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
+from ndf.adapters import launch_slot, training
 from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
 
@@ -152,6 +154,10 @@ class AgentState(StrEnum):
     USAGE_LIMIT = "usage_limit"
     STALLED = "stalled"
     TIMEOUT = "timeout"
+    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）
+    REFUSED = "refused"
+    # 起動しなかった: 重い起動の枠が待ちの上限までに空かなかった
+    NO_SLOT = "no_slot"
 
 
 class AgentStatus(NamedTuple):
@@ -286,8 +292,28 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     return watch(proc, spec, poll)
 
 
+def _not_started(spec: Launch, state: AgentState, detail: str) -> AgentStatus:
+    record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
+    return AgentStatus(spec.agent, state, None, detail, ())
+
+
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
-    """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。"""
+    """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。
+
+    学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動の枠が空かなければ
+    `AgentState.NO_SLOT` を返す。
+    """
+    why = training.refusal(spec.agent)
+    if why is not None:
+        return _not_started(spec, AgentState.REFUSED, why)
+    try:
+        with launch_slot.held(spec.agent, cwd=spec.cwd):
+            return _guarded_run(spec, poll)
+    except launch_slot.NoSlot as exc:
+        return _not_started(spec, AgentState.NO_SLOT, str(exc))
+
+
+def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)

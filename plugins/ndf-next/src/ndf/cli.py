@@ -24,6 +24,7 @@ COMMANDS: dict[str, str] = {
     "progress": "ndf.progress.command",
     "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
+    "training": "ndf.adapters.training",
 }
 
 

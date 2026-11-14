@@ -7,6 +7,8 @@
 Skill を回す `full` の起動は、入っている旧い NDF を `--settings` の `enabledPlugins` で外し、`--plugin-dir` で
 このプラグインを読む（`plugin_args`）。外す設定は `DISABLED_PLUGINS` の 1 か所だけが持ち、起動のスクリプトは
 副命令 `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
+
+起動の前に、学習に使わない設定の控え（`training.refusal`）を読み、重い起動の枠（`launch_slot.held`）を取る（#3391・#3368）。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence
 
 from ndf import identity
+from ndf.adapters import launch_slot, training
 from ndf.adapters.agents import stop, usage_limit
 from ndf.adapters.run_log import child_process_env
 from ndf.contracts import facts
@@ -54,6 +57,10 @@ class Failure(StrEnum):
     LAUNCH = "launch"
     TIMEOUT = "timeout"
     USAGE_LIMIT = "usage_limit"
+    # 学習に使わない設定と確かめられていないので起動しなかった（`ndf training check` で直る）
+    REFUSED = "refused"
+    # 重い起動の枠が待ちの上限までに空かなかった
+    NO_SLOT = "no_slot"
 
 
 @dataclass(frozen=True)
@@ -182,8 +189,21 @@ def _close_streams(proc: subprocess.Popen) -> None:
 def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
     """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。
 
-    専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する（claude が動かした Tool の子孫を残さない）。
+    学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動の枠が空かなければ
+    `Failure.NO_SLOT` を返す。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
+    （claude が動かした Tool の子孫を残さない）。
     """
+    why = training.refusal("claude")
+    if why is not None:
+        return ClaudeReply.failed("", why, failure=Failure.REFUSED)
+    try:
+        with launch_slot.held("claude", cwd=cwd):
+            return _run_claude(argv, prompt, timeout, cwd)
+    except launch_slot.NoSlot as exc:
+        return ClaudeReply.failed("", str(exc), failure=Failure.NO_SLOT)
+
+
+def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
     pipe = subprocess.PIPE
     try:
         proc = subprocess.Popen(
