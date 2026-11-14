@@ -13,7 +13,7 @@ import pytest
 
 from ndf.core import durable, loop
 from ndf.progress import lane, plan, store
-from ndf.progress.lane import launch
+from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import run, run_decide
 from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
 from plan_decls import REPO
@@ -25,8 +25,16 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=(), reported=()):
-    return run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported))
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=(), answered=(), stalls=()):
+    snap = run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported), list(answered))
+    return run_decide.with_stalls(snap, stalls)
+
+
+@pytest.fixture(autouse=True)
+def _no_liveness_probes(monkeypatch):
+    """生死の判定の材料（`ndf relay ls`・`ndf progress wait`）を打たない。読めない材料は判定を unknown にし、止まりにしない。"""
+    monkeypatch.setattr(launch, "wrappers", lambda run=None: None)
+    monkeypatch.setattr(launch, "sprint_wait", lambda sprint_id, run=None: None)
 
 
 def _step(state, done):
@@ -62,6 +70,26 @@ def test_the_next_row_of_the_same_lane_is_launched_after_the_row_ends():
     state = RunState(launched=("a/r1",))
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r2")])))
     assert act == Launch("a", "r2") and state.launched == ()
+
+
+def test_a_row_with_an_answer_but_no_next_wakes_its_conductor_once_per_answer():
+    """答えが載った後に next が打たれていない行は、猶予を待たずに conductor を起こす。同じ答えでは 1 回だけ（3346-5）。"""
+    answered = [("a", "r1", "s1", 7)]
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=answered)))
+    assert act == Launch("a", "r1", resume="s1", seq=7) and act.key == "next:s1:7"
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=answered)))
+    assert act == Sleep(30.0)
+    # 次の答えが載れば、新しい鍵で起こし直す
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 9)])))
+    assert act == Launch("a", "r1", resume="s1", seq=9)
+
+
+def test_a_stopped_plan_does_not_wake_a_row_for_its_answer():
+    snap = _snap(state="cancelled", running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 7)])
+    act, _, _ = _step(RunState(), Done(Observe(), snap))
+    assert act == Launch("a", "r1", cancel="s1")
 
 
 def test_a_failed_launch_is_retried_on_the_next_poll_and_given_up_after_the_attempts():
@@ -102,6 +130,23 @@ def test_a_launch_that_cannot_succeed_stays_failed_after_the_request_is_closed()
     # 行が動けば（鍵が変われば）その行は起こす
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r2")])))
     assert act == Launch("a", "r2")
+
+
+def test_a_stalled_lane_is_reported_once_per_notice_key():
+    """止まったレーンは依頼で 1 回だけ知らせ、依頼を閉じても同じ鍵では知らせ直さない。行か判定が変われば知らせる。"""
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった")
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert act == Report("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", run_decide.LANE_STALLED)
+    act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Sleep(30.0)
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], reported=["stall:a/r1:ended"], stalls=[stall])))
+    assert act == Sleep(30.0)
+    # 依頼を閉じても、同じ止まりは知らせ直さない
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
+    assert act == Sleep(30.0) and state.unreported == ()
+    other = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった")
+    act, state, _ = _step(state, Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[other])))
+    assert act == Report("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まった", run_decide.LANE_STALLED)
 
 
 def test_a_launched_lane_that_does_not_start_its_row_in_time_counts_as_a_failure():
@@ -162,6 +207,17 @@ def test_a_stopped_plan_whose_cancel_cannot_be_launched_ends_as_cancel_failed_wi
     assert finished and state.outcome == "cancel_failed" and state.failed == ("cancel:s1", "cancel:s2")
 
 
+def test_a_paused_plan_wakes_only_answered_rows_and_ends_as_paused_once_nothing_runs():
+    """区切りで止めた計画は次の行を起こさず、実行中の行の答えの後の起こし直しは続け、行が無くなれば paused で終える。"""
+    snap = _snap(state="paused", running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 4)])
+    act, state, _ = _step(RunState(), Done(Observe(), snap))
+    assert act == Launch("a", "r1", resume="s1", seq=4)
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    assert act == Sleep(30.0)
+    _, state, finished = _step(state, Done(Observe(), _snap(state="paused")))
+    assert finished and state.outcome == "paused"
+
+
 def test_a_plan_not_yet_started_is_only_watched():
     act, _, _ = _step(RunState(), Done(Observe(), _snap(state="pending", wakeable=[("a", "r1")])))
     assert act == Sleep(30.0)
@@ -214,6 +270,19 @@ def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
     assert "progress" in text and "--parent" in text and view.lanes["a"].table_id in text and '"start"' in text
 
 
+def test_snapshot_lists_a_running_row_whose_answer_has_no_next_and_drops_it_after_the_mark(opened):
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        sid = _start(conn, pid, "a", "r1")
+        seq = lane.record_answer(conn, sid, {"answer": "approved"})
+    assert _snapshot(opened, pid)["answered"] == [["a", "r1", sid, seq]]
+    with store.transaction(opened) as conn:
+        text = run.first_input(conn, pid, Launch("a", "r1", resume=sid, seq=seq))
+        lane.record_resumed(conn, sid, "conductor")
+    assert '"resumed"' in text and '"next"' in text and sid in text
+    assert _snapshot(opened, pid)["answered"] == []
+
+
 def test_first_input_refuses_a_lane_of_another_repository(opened):
     """別のリポジトリを宣言したレーンを、計画のリポジトリで起こさない。"""
     pid = _create(opened, _doc({**_decl("a", [[1]]), "repo": "https://example.invalid/o/other"}))
@@ -238,6 +307,27 @@ def test_snapshot_lists_the_launches_with_an_open_launch_failed_request(opened):
     with store.transaction(opened) as conn:
         plan.close_request(conn, pid, key, "直した")
     assert _snapshot(opened, pid)["reported"] == []
+
+
+def _probes(wrappers, sprints):
+    return liveness.Probes(wrapper_name=lambda name: f"w-{name}", wrappers=lambda: wrappers, sprint=sprints.get)
+
+
+def test_snapshot_lists_a_stalled_lane_but_not_a_lane_waiting_for_an_answer(opened):
+    """承認ゲートの答えを待つレーンは正常な待ちで、conductor が落ちたレーンだけを止まりとして写しへ載せる。"""
+    pid = _create(opened, _doc(_decl("a", [[1]]), _decl("b", [[2]], touches=("src/b",))))
+    with store.transaction(opened) as conn:
+        sa_, sb = _start(conn, pid, "a", "r1"), _start(conn, pid, "b", "r1")
+    gate = {"status": "gate", "summary": "承認ゲート"}
+    idle = {"status": "ok", "summary": "次の手"}
+    with store.transaction(opened) as conn:
+        snap = run.read_snapshot(conn, pid, _probes({}, {sa_: gate, sb: idle}))
+    assert [s[:2] for s in snap["stalls"]] == [["b", "stall:b/r1:ended"]]
+    with store.transaction(opened) as conn:
+        key = run.write_report(conn, pid, "b", "stall:b/r1:ended", "止まった", run.LANE_STALLED)
+    assert key is not None
+    with store.transaction(opened) as conn:
+        assert run.read_snapshot(conn, pid)["reported"] == ["stall:b/r1:ended"]
 
 
 def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
@@ -350,6 +440,22 @@ def test_a_rerun_after_cancel_failed_starts_a_new_workflow_and_retries_the_cance
     monkeypatch.setattr(launch, "spawn", spawn)
     assert run.advance(where, "p6", FAST)["outcome"] == "stopped"
     assert run.workflow_id("p6", 2) != run.workflow_id("p6")
+
+
+def test_a_paused_plan_ends_its_workflow_and_a_resumed_plan_continues_with_a_new_one(where, monkeypatch):
+    """区切りで止めた計画の耐久ワークフローは paused で終わり、同じ名前で再開すると次の ID で残りの行を流す。"""
+    with store.open_store(where.url, where.root) as st:
+        pid = _create(st, _doc(_decl("a", [[1], [2]])))
+        with store.transaction(st) as conn:
+            plan.pause_plan(conn, pid, "区切りで止める")
+    spawn, launched = _conductor(where, "completed")
+    _no_wrapper(monkeypatch)
+    monkeypatch.setattr(launch, "spawn", spawn)
+    assert run.advance(where, "p6", FAST)["outcome"] == "paused" and launched == []
+    with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
+        plan.start_plan(conn, pid)
+    assert run.advance(where, "p6", FAST)["outcome"] == "completed"
+    assert launched == [("a", "r1"), ("a", "r2")]
 
 
 def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):

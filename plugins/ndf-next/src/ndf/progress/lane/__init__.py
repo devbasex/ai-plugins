@@ -42,6 +42,7 @@ from ndf.progress.lane.types import (
     CANCELLED as CANCELLED,
     COMPLETED as COMPLETED,
     DONE_STATES as DONE_STATES,
+    PAUSED as PAUSED,
     PENDING as PENDING,
     PLAN_ROW as PLAN_ROW,
     RUNNING as RUNNING,

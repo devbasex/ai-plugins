@@ -7,14 +7,22 @@
 - 判断は `run_decide.decide`（純粋な関数）が持ち、読み・起動・完了はそれぞれ耐久ステップで打つ。落ちた後の回復で
   済んだ起動を打ち直さない
 - レーンを起こす前に、同じ名前の元のラッパー（前の行を終えた conductor など）を止めてから起こす
+- 答えが載った後に conductor が next を打っていない実行中の行（3346-5）は、そのレーンの conductor を答えの後の
+  `ndf progress next` を打つ入力で起こす。契機は答えの事象（`row_answered`）がレーンの進行表に載った後の最初の
+  読み直しで、猶予（止まりの知らせ）を待たない。同じ答えでは 1 回だけ起こす
 - 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンをスプリントの中止の入力で起こし、実行中の行が
   無くなれば `stopped` で終わる。中止をすべて起こせなくなったら `cancel_failed` で終わる（終わった計画の進行表へは
   依頼を書けない）。`cancel_failed` で終えた耐久ワークフローの ID は再び使わず、`ndf lanes run` を打ち直すと
   次の番号の ID で新しく始めて中止を試し直す
+- 区切りで止めた計画（`ndf lanes stop` の既定）では次の行を起こさず、実行中の行が無くなれば `paused` で終わる。
+  `ndf lanes start` で再開すると、次の番号の ID で新しく始めて止めた所から続ける
 - 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
   （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる。オーガナイザーが
   依頼を閉じたら、打ち直せば起こせる失敗のレーンを起こし直す。起こしたのに期限（`parallel-run.launch` の秒）までに
   行が実行中にならないレーンも、起動の失敗の 1 回として数える
+- 実行中の行を持つレーンの生死を読み直しのたびに判定し（`ndf.progress.lane.liveness`。材料はラッパーの一覧と
+  スプリントの待ち）、止まり（`stalled`・`ended`）を計画の進行表の依頼（中身の `kind` は `lane_stalled`）で知らせる。
+  承認ゲートや問いの答えを待つ行は正常な待ちで知らせない。同じレーン・行・判定では 1 回だけ知らせる
 - 依頼は同じトランザクションで計画の状態を読み直してから書く。起動の最中に計画が止められたら書かない
 - レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`。同じリポジトリかの
   判定は `PlanView.lane_repo`）の置き場を解決する経路はまだ無いので、打った場所で流さずに起こせない失敗にする
@@ -33,11 +41,11 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 from ndf.core import durable, loop
-from ndf.progress import lane, model, store
+from ndf.progress import command, lane, model, store
 from ndf.progress import plan as table
-from ndf.progress.lane import launch
+from ndf.progress.lane import launch, liveness
 from ndf.progress.plan import run_decide
 from ndf.progress.plan.run_decide import Complete, Done, Launch, Observe, Policy, Report, RunState, Sleep
 
@@ -47,9 +55,13 @@ WORKFLOW_SUFFIX = "-lanes"
 # 読み直しの待ちを早めに起こす話題（送り手はまだ無く、期限で起きる）
 TOPIC_WAKE = "wake"
 POLL_ENV = "NDF_PARALLEL_POLL"
-# 起こせなかったレーンの知らせ（計画の進行表の依頼の中身の kind）と、依頼を書く主体
-LAUNCH_FAILED = "launch_failed"
+# 起こせなかったレーン・止まったレーンの知らせ（計画の進行表の依頼の中身の kind）と、依頼を書く主体
+LAUNCH_FAILED, LANE_STALLED = run_decide.LAUNCH_FAILED, run_decide.LANE_STALLED
+# 依頼の中身で、知らせの鍵を持つ項目（知らせの kind → 項目）
+NOTICE_FIELDS = {LAUNCH_FAILED: "launch", LANE_STALLED: "stall"}
 REPORT_ACTOR = model.WORKFLOW_ACTOR
+# 切り離した `ndf lanes run` の出力を足していく、計画の記録の置き場の中のファイル
+RUN_LOG = "run.log"
 
 
 @dataclass(frozen=True)
@@ -93,19 +105,46 @@ def _conn(spec: dict[str, Any]) -> Iterator[Any]:
         yield conn
 
 
-def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
-    """計画とレーンの進行表から、判断へ渡す写しを作る。"""
-    view, rows = lane.read_view(conn, plan_id)
-    running = [(name, r.key, r.sprint_id) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
-    reported = [r.body["launch"] for r in view.open_requests() if r.body.get("kind") == LAUNCH_FAILED]
-    return run_decide.snapshot(view.state, lane.plan_complete(view, rows), lane.wakeable_lanes(view, rows), running, reported)
+def probes(repo: str, plan: str) -> liveness.Probes:
+    """生死の判定の材料を、自分の副命令（`ndf relay ls`・`ndf progress wait --timeout 0`）で読む口。"""
+    return liveness.Probes(
+        wrapper_name=functools.partial(launch.wrapper_name, repo, plan),
+        wrappers=launch.wrappers,
+        sprint=launch.sprint_wait,
+    )
+
+
+def _stalls(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: liveness.Probes | None) -> list[tuple[str, str, str]]:
+    """止まったレーンの（レーン, 知らせの鍵, 理由）。計画が動いていなければ判定しない（知らせを書けない）。"""
+    if found is None or view.state != lane.RUNNING:
+        return []
+    verdicts = liveness.judge_lanes(rows, found)
+    return [(name, liveness.notice_key(name, v), f"レーン {name} の行 {v.row}: {v.reason}") for name, v in verdicts.items() if v.stall]
+
+
+def read_snapshot(conn: Any, plan_id: str, found: liveness.Probes | None = None) -> dict[str, Any]:
+    """計画とレーンの進行表から、判断へ渡す写しを作る。`found` があればレーンの生死を判定して止まりを載せる。"""
+    return snapshot_of(*lane.read_view(conn, plan_id), found)
+
+
+def snapshot_of(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: liveness.Probes | None = None) -> dict[str, Any]:
+    """読んだ計画とレーンの進行表から写しを作る。"""
+    live = [(name, r) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+    running = [(name, r.key, r.sprint_id) for name, r in live]
+    answered = [(name, r.key, r.sprint_id, r.answered_seq) for name, r in live if r.awaiting_next]
+    reported = [r.body[NOTICE_FIELDS[r.body["kind"]]] for r in view.open_requests() if r.body.get("kind") in NOTICE_FIELDS]
+    wakeable = lane.wakeable_lanes(view, rows)
+    stalls = _stalls(view, rows, found)
+    snap = run_decide.snapshot(view.state, lane.plan_complete(view, rows), wakeable, running, reported, answered)
+    return run_decide.with_stalls(snap, stalls)
 
 
 @durable.step
 def observe(spec: dict[str, Any]) -> dict[str, Any]:
-    """計画とレーンの進行表を読む耐久ステップ。"""
+    """計画とレーンの進行表を読む耐久ステップ。生死の材料は、進行表の接続を閉じてから読む。"""
     with _conn(spec) as conn:
-        return read_snapshot(conn, spec["plan_id"])
+        view, rows = lane.read_view(conn, spec["plan_id"])
+    return snapshot_of(view, rows, probes(spec["repo"], spec["plan"]))
 
 
 def first_input(conn: Any, plan_id: str, act: Launch) -> str:
@@ -117,15 +156,17 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
         raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {view.repo}）")
     if act.cancel is not None:
         return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
+    if act.resume is not None:
+        return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume))
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
     row = next(r for r in rows if r.key == act.row)
     return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].table_id, row))
 
 
 @durable.step
-def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None) -> dict[str, Any]:
+def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | None, resume: str | None = None) -> dict[str, Any]:
     """レーンの conductor を起こす耐久ステップ。済んだ起動は回復のときに打ち直さない。"""
-    act = Launch(lane_name, row, cancel)
+    act = Launch(lane_name, row, cancel, resume)
     try:
         with _conn(spec) as conn:
             first = first_input(conn, spec["plan_id"], act)
@@ -138,8 +179,8 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | No
     return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
 
 
-def write_report(conn: Any, plan_id: str, lane_name: str, key: str, detail: str) -> str | None:
-    """起こせなかったレーンを計画の進行表の依頼として書き、開いた依頼の鍵を返す。
+def write_report(conn: Any, plan_id: str, lane_name: str, key: str, detail: str, kind: str = LAUNCH_FAILED) -> str | None:
+    """起こせなかったレーン・止まったレーン（`kind`）を計画の進行表の依頼として書き、開いた依頼の鍵を返す。
 
     判断が使った写しは起動の前のもので、その間に計画が止められていることがある。同じトランザクションで計画の状態を
     読み直し、動いていなければ（終わった計画の進行表へは事象を書けない）書かずに None を返す。
@@ -147,15 +188,16 @@ def write_report(conn: Any, plan_id: str, lane_name: str, key: str, detail: str)
     view, _ = lane.read_plan(conn, plan_id)
     if view.state != lane.RUNNING:
         return None
-    body = {"lane": lane_name, "kind": LAUNCH_FAILED, "launch": key, "detail": detail}
-    return table.open_request(conn, plan_id, body, f"レーン {lane_name} を起こせない", REPORT_ACTOR)
+    body = {"lane": lane_name, "kind": kind, NOTICE_FIELDS[kind]: key, "detail": detail}
+    reason = f"レーン {lane_name} を起こせない" if kind == LAUNCH_FAILED else f"レーン {lane_name} が止まった"
+    return table.open_request(conn, plan_id, body, reason, REPORT_ACTOR)
 
 
 @durable.step
-def report(spec: dict[str, Any], lane_name: str, key: str, detail: str) -> str | None:
-    """起こせなかったレーンを計画の進行表の依頼として書く耐久ステップ（`write_report`）。"""
+def report(spec: dict[str, Any], lane_name: str, key: str, detail: str, kind: str = LAUNCH_FAILED) -> str | None:
+    """レーンの知らせを計画の進行表の依頼として書く耐久ステップ（`write_report`）。"""
     with _conn(spec) as conn:
-        return write_report(conn, spec["plan_id"], lane_name, key, detail)
+        return write_report(conn, spec["plan_id"], lane_name, key, detail, kind)
 
 
 @durable.step
@@ -169,11 +211,11 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
     if isinstance(act, Observe):
         return Done(act, observe(spec))
     if isinstance(act, Launch):
-        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel))
+        return Done(act, launch_lane(spec, act.lane, act.row, act.cancel, act.resume))
     if isinstance(act, Complete):
         return Done(act, complete(spec))
     if isinstance(act, Report):
-        return Done(act, report(spec, act.lane, act.key, act.detail))
+        return Done(act, report(spec, act.lane, act.key, act.detail, act.kind))
     if isinstance(act, Sleep):
         durable.recv(TOPIC_WAKE, act.seconds)
         return Done(act)
@@ -220,21 +262,34 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
             if durable.status(wid) is None:
                 return durable.start(lanes_workflow, wid, spec_of(where, plan_id, plan, pol))
             done = durable.result(wid)
-            # 中止を起こせずに終えた 1 本は記録した結果を返すだけになるので、打ち直したら次の ID で中止を試し直す
-            if done["outcome"] != run_decide.OUTCOME_CANCEL_FAILED:
+            # 中止を起こせずに終えた 1 本と区切りで止めて終えた 1 本は記録した結果を返すだけになるので、打ち直したら
+            # 次の ID で中止を試し直す・再開した計画を続ける
+            if done["outcome"] not in run_decide.OUTCOMES_RESTARTABLE:
                 return done
             attempt += 1
 
 
+def record_dir(cwd: Path, plan: str) -> Path:
+    """計画の記録の置き場（`places` の `ndf-parallel` の下の、`ndf-files` の `parallel` の `<id>` を計画の名前にしたもの）。"""
+    base = command.declaration_path(cwd, facts.value("places", "ndf-parallel", "path"))
+    return base / facts.value("ndf-files", "parallel", "path").replace("<id>", plan)
+
+
 def detach(plan: str, cwd: Path) -> int:
-    """`ndf lanes run <計画>` を切り離して起こし、pid を返す。結果は進行表と耐久の記録に残る。"""
-    proc = subprocess.Popen(
-        [str(identity.entrypoint(identity.ROOT)), "lanes", "run", plan],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        cwd=str(cwd),
-        env=dict(os.environ),
-    )
+    """`ndf lanes run <計画>` を切り離して起こし、pid を返す。結果は進行表と耐久の記録に残る。
+
+    切り離した実行の標準出力と標準エラーは、計画の記録の置き場の `RUN_LOG` へ足していく（落ちた理由を後から読める）。
+    """
+    where = record_dir(cwd, plan)
+    where.mkdir(parents=True, exist_ok=True)
+    with (where / RUN_LOG).open("ab") as log:
+        proc = subprocess.Popen(
+            [str(identity.entrypoint(identity.ROOT)), "lanes", "run", plan],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=str(cwd),
+            env=dict(os.environ),
+        )
     return proc.pid

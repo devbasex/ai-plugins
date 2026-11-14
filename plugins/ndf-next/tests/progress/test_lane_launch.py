@@ -64,6 +64,12 @@ def test_cancel_commands_cancel_the_running_sprint_then_end_the_lane_row():
     assert end["argv"][1:] == ["lanes", "row", "end", "s1", "--outcome", "cancelled"]
 
 
+def test_resume_commands_mark_the_next_then_run_next_on_the_sprint():
+    mark, nxt = launch.resume_commands("s1")
+    assert mark["argv"][1:] == ["lanes", "row", "resumed", "s1"]
+    assert nxt["argv"][1:] == ["progress", "next", "s1"]
+
+
 def test_stop_stops_the_wrapper_of_the_lane_and_reads_the_result():
     run, calls = _runner(stdout=json.dumps({"status": "ok", "summary": "p6-a を止めた"}))
     assert launch.stop("o/r", "p6", "a", run=run) == {"ok": True, "detail": "p6-a を止めた"}

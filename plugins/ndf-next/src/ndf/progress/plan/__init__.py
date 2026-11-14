@@ -8,11 +8,14 @@
 - `plan.json` は入力として読むだけで、計画の状態は書かない
 - 副命令 `ndf lanes` は `ndf.progress.plan.cli`、計画を進める耐久ワークフローは `ndf.progress.plan.run`、
   オーガナイザーが計画の知らせを待つ `wait` は `ndf.progress.plan.wait` にある
+- 外のオーガナイザー（`NDF_ORGANIZER_DIR`）とのファイルのやり取りは `ndf.progress.plan.external`、
+  計画の記録の置き場（`.ndf/parallel/<計画>/`）は `ndf.progress.plan.run.record_dir` が決める
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +26,7 @@ from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import limits, result
 from ndf.progress import lane, model, store
+from ndf.progress.lane import liveness
 
 # 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
 # 副モジュール `ndf.progress.plan.cli` を読む前の `from ndf.progress.plan import cli` が `ndf.cli` を返す
@@ -139,8 +143,9 @@ def create_plan(conn: sa.Connection, repo: str, doc: dict[str, Any], start: bool
 
 
 def start_plan(conn: sa.Connection, pid: str) -> None:
+    """計画を始める（オーガナイザー）。区切りで止めた計画は、同じ名前のまま止めた所から再開する。"""
     view, _ = lane.read_plan(conn, pid)
-    if view.state != lane.PENDING:
+    if view.state not in (lane.PENDING, lane.PAUSED):
         raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、始められない", current_id=pid)
     _append(conn, pid, [model.EventDraft("plan_started", "organizer")])
 
@@ -203,6 +208,19 @@ def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, rea
     return lane.add_row(conn, pid, dest, row.input, lane.RowChange("organizer", f"レーン {from_lane} の行 {key} から移した: {reason}"))
 
 
+def pause_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
+    """計画を区切りで止める（オーガナイザー）。実行中の行のスプリントの ID を返す。
+
+    実行中の行は終わりまで流し、耐久ワークフローは次の行を起こさない。行は中止にせず順番表に残すので、
+    `ndf lanes start` を打ち直せば同じ名前の計画が止めた所から続く。動いている計画だけを止められる。
+    """
+    view, rows = lane.read_view(conn, pid)
+    if view.state != lane.RUNNING:
+        raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、区切りで止められない（すぐ止めるのは --now）")
+    _append(conn, pid, [model.EventDraft("plan_paused", "organizer", reason=reason)])
+    return [r.sprint_id for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+
+
 def stop_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
     """計画を中止する（オーガナイザー）。未着手の行を中止にし、実行中の行のスプリントの ID を返す。
 
@@ -231,6 +249,47 @@ def close_request(conn: sa.Connection, pid: str, key: str, reason: str) -> None:
     _append(conn, pid, [model.EventDraft("request_closed", "organizer", key, reason=reason)])
 
 
+# まとめたリリースの答え
+RELEASED, REJECTED = "released", "rejected"
+RELEASE_RESULTS = (RELEASED, REJECTED)
+
+
+@dataclass(frozen=True)
+class ReleaseAnswer:
+    """まとめたリリースの答え。`result` は released か rejected、`version` と `release` は出した版とリリース記録の PR。"""
+
+    result: str
+    reason: str
+    version: Optional[str] = None
+    release: Optional[str] = None
+
+
+def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: ReleaseAnswer) -> None:
+    """まとめたリリースの答えを計画の進行表へ記録する（オーガナイザー）。
+
+    まとめた依頼 `keys` を同じトランザクションで閉じ、閉じる事象に答え（released か rejected・版・リリース記録の PR・
+    まとめた依頼の鍵）を載せる。各スプリントのリリース記録と差し戻しの数はこの記録から読む
+    （差し戻しを承認ゲートの記録 gate-rejections へ写すのは承認ゲート P2 #3295）。
+    """
+    if answer.result not in RELEASE_RESULTS:
+        raise model.Refused(f"まとめたリリースの答え {answer.result} は {' / '.join(RELEASE_RESULTS)} のどれでもない")
+    if not keys or len(set(keys)) != len(keys):
+        raise model.Refused("まとめたリリースの依頼が無いか、同じ依頼が重なっている")
+    if answer.result == RELEASED and not (answer.version and answer.release):
+        raise model.Refused("リリースした答えには版とリリース記録の PR が要る")
+    for key in keys:
+        _check_request(conn, pid, key)
+    done = {"result": answer.result, "version": answer.version, "release": answer.release, "batch": list(keys)}
+    drafts = [model.EventDraft("request_closed", "organizer", key, reason=answer.reason, payload={"release": done}) for key in keys]
+    _append(conn, pid, drafts)
+
+
+def release_counts(view: lane.PlanView) -> dict[str, int]:
+    """まとめたリリースの答えの数（依頼ごと。released・rejected）。"""
+    got = [r.release["result"] for r in view.requests.values() if r.release]
+    return {k: got.count(k) for k in RELEASE_RESULTS}
+
+
 def complete_plan(conn: sa.Connection, pid: str) -> bool:
     """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、答えていない依頼が無いときだけ書く（I16）。"""
     view, rows = lane.read_view(conn, pid)
@@ -255,19 +314,28 @@ def _row_item(row: lane.LaneRow, now: datetime) -> dict[str, Any]:
     return item
 
 
-def status(conn: sa.Connection, pid: str, now: datetime) -> dict[str, Any]:
-    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。"""
+def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[liveness.Probes] = None) -> dict[str, Any]:
+    """計画の状態を、計画の進行表とレーンの進行表の 2 つから作る（受け入れ条件 4）。
+
+    `probes` があれば、実行中の行を持つレーンの生死（`liveness`）を載せ、止まり（`stalled`・`ended`）を `warnings` に
+    足す。承認ゲートや問いの答えを待つ行は正常な待ちで、止まりにしない。
+    """
     view, rows = lane.read_view(conn, pid)
+    verdicts = liveness.judge_lanes(rows, probes) if probes is not None else {}
     items = []
     for name, spec in view.lanes.items():
         lane_rows = [_row_item(r, now) for r in rows[name]]
-        items.append({"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows})
+        item = {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": lane_rows}
+        if name in verdicts:
+            item["liveness"] = verdicts[name].as_dict()
+        items.append(item)
     stalls = [
         f"レーン {i['lane']} の行 {r['row']}: 答えが載った後に conductor が next を打っていない（{r['awaiting_next']['since']} から）"
         for i in items
         for r in i["rows"]
         if "awaiting_next" in r and r["awaiting_next"]["stalled"]
     ]
+    stalls += [f"レーン {name} の行 {v.row}: {v.reason}" for name, v in verdicts.items() if v.stall]
     metrics = {
         "plan_id": pid,
         "plan": view.name,
@@ -278,6 +346,7 @@ def status(conn: sa.Connection, pid: str, now: datetime) -> dict[str, Any]:
         "open_requests": [{"request": r.key, "lane": r.lane, "reason": r.reason} for r in view.open_requests()],
         "complete": lane.plan_complete(view, rows),
         "stalled": len(stalls),
+        "releases": release_counts(view),
     }
     summary = f"計画 {view.name} は{model.label(view.state)}（レーン {len(items)}・止まり {len(stalls)}）"
     return result.result(TOOL, result.OK, summary, items=items, metrics=metrics, warnings=stalls)
