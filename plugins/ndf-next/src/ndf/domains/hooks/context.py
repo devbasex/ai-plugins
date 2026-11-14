@@ -169,12 +169,6 @@ class HookContext:
     tail_bytes: int = 262144
     env: dict[str, str] = field(default_factory=lambda: dict(os.environ))
 
-    @classmethod
-    def from_text(cls, runtime: str, event: str, text: str, **kw: Any) -> Optional["HookContext"]:
-        """標準入力の文から作る。JSON のオブジェクトでなければ None。"""
-        payload = parse_payload(text)
-        return None if payload is None else cls(runtime, event, payload, **kw)
-
     def _str(self, key: str) -> str:
         value = self.payload.get(key)
         return value if isinstance(value, str) else ""
