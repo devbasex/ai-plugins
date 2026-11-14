@@ -396,6 +396,21 @@ def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly
     return seen.head is not None and now.head is not None and docs_only(seen.head, now.head)
 
 
+# 承認の後に文書だけが加わって出し直さなかった head の置き場（承認資料の隣）
+ACCEPTED_SUFFIX = ".accepted.json"
+
+
+def _accepted_path(root: Path, table_id: str, gate_id: str) -> Path:
+    return run.work_root(root, table_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
+
+
+def _accept(root: Path, q: Question, now: Target) -> None:
+    """出し直さずに進めた今の head を残す（マージの側が照らす head。`approved_head`）。"""
+    path = _accepted_path(root, q.table_id, q.id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"head": now.head}) + "\n", encoding="utf-8")
+
+
 def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:
     """答えを読む前に、答えた者が見た対象と今の対象を比べる。違えば待ちへ戻し（問いは新しい id）、理由を返す（3364-2）。
 
@@ -416,6 +431,7 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
     if not changed:
         return None
     if _docs_only_after(q, seen, now, docs_only):
+        _accept(st.root, q, now)
         return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
     why = "答えた後に対象が変わった: " + " / ".join(changed)
     payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
@@ -869,18 +885,24 @@ def answers(v: run.View) -> list[dict[str, Any]]:
     return out
 
 
-def approved_head(v: run.View, kind: str) -> Optional[str]:
+def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Optional[str]:
     """区分 `kind` の承認ゲートで、最後に承認した答えが見た PR の head（無ければ None）。
 
     マージの側は、これを `--expect-head` へ渡し、承認の後に進んだ head をマージしない（#2147）。差し戻しの後の承認だけを読む。
+    承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の置き場）。
     """
     got = [a for a in answers(v) if a["gate"] == kind]
     last = got[-1] if got else None
-    return last["head"] if last is not None and last["answer"] == run.APPROVED else None
+    if last is None or last["answer"] != run.APPROVED:
+        return None
+    accepted = _accepted_path(root, v.table_id, str(last["gate_id"])) if root is not None and last["gate_id"] else None
+    if accepted is not None and accepted.exists():
+        return str(json.loads(accepted.read_text(encoding="utf-8"))["head"])
+    return str(last["head"]) if last["head"] else None
 
 
 def _cmd_head(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    head = approved_head(run.read(st, a.table_id), a.gate)
+    head = approved_head(run.read(st, a.table_id), a.gate, st.root)
     if head is None:
         raise model.Refused(f"進行表 {a.table_id} に、{model.gate_label(a.gate)}で head を見て承認した答えが無い")
     summary = f"{model.gate_label(a.gate)}で承認した head は {head}"

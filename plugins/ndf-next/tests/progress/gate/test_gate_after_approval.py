@@ -31,6 +31,9 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
     assert why is not None and "文書だけ" in why
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
+    # マージの側が照らす head は、出し直さずに進めた今の head
+    assert gate.approved_head(run.read(st, tid), "release", st.root) == "h2"
+    assert gate.approved_head(run.read(st, tid), "release") == "h1"
 
 
 def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, flow):
