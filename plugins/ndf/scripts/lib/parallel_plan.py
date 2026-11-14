@@ -174,13 +174,13 @@ class ParallelPlan(BaseModel):
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
 
     def _check_limits(self, ctx: dict) -> None:
-        """レーン数とプラン本数の合計の上限（I2）。終わりの記録のあるレーン（`ended`）は同時に動かないので数えない（#3021）。"""
-        live, cap = live_lanes(self.lanes, ctx.get("ended")), int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
-        if len(live) > cap:
-            raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(live), "cap": cap})
-        total, limit = sum(ln.plans for ln in live), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
-        if total > limit:
-            raise PydanticCustomError("I2", "プランの本数の合計 {n} が上限 {cap} を超える", {"n": total, "cap": limit})
+        """1 本で上限を超えるレーン（I2）。同時に動く数は起動のたびに耐久ワークフローが数えるため、宣言の合計は数えない（#3021）。"""
+        limit = int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
+        for ln in self.lanes:
+            if ln.plans > limit:
+                raise PydanticCustomError(
+                    "I2", "レーン {lane} のプランの本数 {n} が上限 {cap} を超える", {"lane": ln.name, "n": ln.plans, "cap": limit}
+                )
 
     def _check_deps(self) -> None:
         """依存先の存在と循環（I3）。"""
