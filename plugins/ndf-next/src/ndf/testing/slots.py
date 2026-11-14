@@ -399,7 +399,24 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
     待ちの途中で例外（シグナルの中断・置き場へ書けない）が出たら、取った枠を返してから送り直す。
     """
     start = time.monotonic()
-    deadline = start + ctx.limits.wait_limit_seconds
+    try:
+        lock, ready = _wait_for_slot(ctx, held, start + ctx.limits.wait_limit_seconds)
+        if ready:
+            return lock
+        if lock is not None:
+            _release(ctx.directory, held, lock)  # 期限まで待ってもメモリが足りなかった
+        return None
+    finally:
+        end = time.monotonic()
+        held.waited_seconds = end - start
+        _note_wait(start, end)
+
+
+def _wait_for_slot(ctx: SlotContext, held: Held, deadline: float) -> tuple[FileLock | None, bool]:
+    """期限まで枠とメモリを待ち、取った枠（無ければ None）と走らせてよいかを返す。
+
+    待ちの途中で例外が出たら、取った枠を返してから送り直す。
+    """
     lock: FileLock | None = None
     try:
         while True:
@@ -408,22 +425,15 @@ def _acquire(ctx: SlotContext, held: Held) -> FileLock | None:
             if lock is None:
                 lock = _take_free_slot(ctx.directory, ctx.cwd, ctx.limits.max_runs, held)
             if lock is not None and _memory_ready(held, ctx.read_memory, ctx.limits.memory_floor_mib):
-                return lock
+                return lock, True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                break
+                return lock, False
             time.sleep(min(ctx.poll, remaining))
-        if lock is not None:
-            _release(ctx.directory, held, lock)
-        return None
     except BaseException:
         if lock is not None:
             _release(ctx.directory, held, lock, quiet=True)
         raise
-    finally:
-        end = time.monotonic()
-        held.waited_seconds = end - start
-        _note_wait(start, end)
 
 
 def _take_free_slot(directory: Path, cwd: Path, max_runs: int, held: Held) -> FileLock | None:
