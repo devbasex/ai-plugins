@@ -221,23 +221,34 @@ def split_failed(names: Iterable[str], tests: Iterable[str]) -> tuple[list[str],
     return _partition(names, lambda n: n, bare_names(tests))
 
 
-def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
-    """読んだ結果の止まった理由の種類。通っていれば None。
+class Classifier(NamedTuple):
+    """読んだ結果を止まった理由の種類へ分ける前提。`tests` はテストのチェックの名前、`merge_failed` はマージの段階が
+    落ちたと読んだチェックの名前（マージの後の判定だけが渡す）。"""
 
-    `merge_failed` はマージの段階が落ちたと読んだチェックの名前（マージの後の判定だけが渡す）。マージの段階が
-    テストのチェックの落ちを読んでいれば、読み直しでまとめのチェックが終わっていなくても `test_failed` にする（#3153）。
-    マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
-    """
-    after_merge = merge_failed is not None
-    merged_tests, merged_other = split_failed(merge_failed if merge_failed is not None else [], tests)
-    if merged_tests:
-        return "test_failed"
-    verdict = reading.verdict
-    if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
-        return "check_failed"
-    if verdict == Verdict.PASSED:
-        return "not_ci" if after_merge else None
-    return _VERDICT_KINDS[verdict]
+    tests: Iterable[str]
+    merge_failed: Optional[Iterable[str]] = None
+
+    def cause(self, reading: Reading) -> Optional[str]:
+        """読んだ結果の止まった理由の種類。通っていれば None。
+
+        マージの段階がテストのチェックの落ちを読んでいれば、読み直しでまとめのチェックが終わっていなくても
+        `test_failed` にする（#3153）。マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
+        """
+        after_merge = self.merge_failed is not None
+        merged_tests, merged_other = split_failed(self.merge_failed if self.merge_failed is not None else [], self.tests)
+        if merged_tests:
+            return "test_failed"
+        verdict = reading.verdict
+        if merged_other and verdict in (Verdict.PENDING, Verdict.PASSED):
+            return "check_failed"
+        if verdict == Verdict.PASSED:
+            return "not_ci" if after_merge else None
+        return _VERDICT_KINDS[verdict]
+
+
+def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
+    """読んだ結果の止まった理由の種類（`Classifier.cause`）。通っていれば None。"""
+    return Classifier(tests, merge_failed).cause(reading)
 
 
 def failed_test_nodes(log_text: str) -> list[str]:
@@ -270,7 +281,11 @@ class WatchResult:
     runner_exhausted: bool = False
 
     def cause(self, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
-        kind = cause_of(self.reading, tests, merge_failed)
+        return self.cause_by(Classifier(tests, merge_failed))
+
+    def cause_by(self, classifier: Classifier) -> Optional[str]:
+        """止まった理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
+        kind = classifier.cause(self.reading)
         return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
 
 

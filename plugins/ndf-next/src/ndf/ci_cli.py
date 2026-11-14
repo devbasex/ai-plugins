@@ -12,7 +12,7 @@ from typing import Any, Optional
 from ndf import cli
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Reading, Watch, WatchResult, cause_of, failed_test_nodes_of, files_of, is_test_check, watch_head
+from ndf.adapters.ci import Classifier, Reading, Watch, WatchResult, failed_test_nodes_of, files_of, is_test_check, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -76,13 +76,13 @@ def _watch(args: argparse.Namespace) -> dict:
     # 残りは Watch と同じ数え方（ランナーの割り当ての待ちを予算に数えない）で読む
     # 読み手は PR の先端が分かってから差し込む（PR を読む API の呼び出しも同じ予算に入れる）
     # マージの段階がテストのチェックの落ちを読んでいれば、読み直しが pending でも理由は `test_failed` に決まるので待たない
-    merge_failed = args.merge_failed if args.after_merge else None
-    watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: cause_of(r, args.test, merge_failed) == "test_failed")
+    classifier = Classifier(args.test, args.merge_failed if args.after_merge else None)
+    watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: classifier.cause(r) == "test_failed")
     hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
     watch.reader = watch_head(hub, pull.head_sha, args.required, args.test)
     watched = watch.run()
-    return _report(args, pull, hub, watched, watched.cause(args.test, merge_failed))
+    return _report(args, pull, hub, watched, watched.cause_by(classifier))
 
 
 def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
