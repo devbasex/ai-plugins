@@ -139,13 +139,13 @@ def reusable(rows: Iterable[Mapping[str, Any]], key: str) -> Optional[Mapping[st
 
     `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない）は呼び手が除く。
     """
-    latest: Optional[Mapping[str, Any]] = None
+    last_vet: Optional[Mapping[str, Any]] = None
     for r in rows:
         if r.get("kind") == VET_SPRINT and r.get("key") == key:
-            latest = r
-    if latest is None or latest.get("verdict") != FOLLOW:
+            last_vet = r
+    if last_vet is None or last_vet.get("verdict") != FOLLOW:
         return None
-    return latest
+    return last_vet
 
 
 def reuse_row(origin: Mapping[str, Any], at: str, repo: str) -> dict[str, Any]:
