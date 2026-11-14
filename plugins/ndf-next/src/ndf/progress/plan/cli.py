@@ -11,6 +11,8 @@ ndf lanes limits <計画> [--max-lanes <数>] [--max-plans <本数>] --reason <�
 ndf lanes move <計画> <元のレーン> <行> <先のレーン> --reason <理由>
 ndf lanes stop <計画> [--now] --reason <理由>       区切りで止める（--now はすぐ中止する）。再開は start を打ち直す
 ndf lanes request close <計画> <依頼> --reason <理由>
+ndf lanes release <計画> <依頼>... --result released|rejected --reason <理由> [--version <版>] [--release <PR>]
+                                                 まとめたリリースの答えを記録し、まとめた依頼を閉じる
 ndf lanes answered <スプリントの進行表の ID> --answer <答え>
 ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの conductor が打つ。レーンの進行表）
 
@@ -39,7 +41,9 @@ from ndf.progress import command, lane, model, store
 from ndf.progress.plan import (
     LANE_SCHEMA,
     PLAN_SCHEMA,
+    RELEASE_RESULTS,
     TOOL,
+    ReleaseAnswer,
     add_lane,
     change_lane,
     close_request,
@@ -48,6 +52,7 @@ from ndf.progress.plan import (
     pause_plan,
     plan_id,
     read_doc,
+    record_release,
     start_plan,
     status,
     stop_plan,
@@ -134,6 +139,11 @@ def _cmd_request_close(a: argparse.Namespace, conn: sa.Connection, repo: str) ->
     return _ok(f"計画 {a.plan} の依頼 {a.request} を閉じた", request=a.request)
 
 
+def _cmd_release(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
+    record_release(conn, _pid(conn, repo, a.plan), a.requests, ReleaseAnswer(a.result, a.reason, a.version, a.release))
+    return _ok(f"計画 {a.plan} のまとめたリリースの答え（{a.result}）を依頼 {len(a.requests)} 件へ記録した", requests=a.requests, result=a.result)
+
+
 def _cmd_answered(a: argparse.Namespace, conn: sa.Connection, _repo: str) -> dict[str, Any]:
     seq = lane.record_answer(conn, a.sprint_id, {"answer": a.answer})
     if seq is None:
@@ -212,6 +222,7 @@ COMMANDS: dict[str, Command] = {
     "move": _cmd_move,
     "stop": _cmd_stop,
     "request": _cmd_request_close,
+    "release": _cmd_release,
     "answered": _cmd_answered,
     "row": _cmd_row,
 }
@@ -308,6 +319,13 @@ def parser() -> argparse.ArgumentParser:
     for arg in ("plan", "request"):
         req.add_argument(arg)
     req.add_argument("--reason", required=True)
+    rel = sub.add_parser("release")
+    rel.add_argument("plan")
+    rel.add_argument("requests", nargs="+")
+    rel.add_argument("--result", required=True, choices=RELEASE_RESULTS)
+    rel.add_argument("--reason", required=True)
+    rel.add_argument("--version")
+    rel.add_argument("--release")
     ans = sub.add_parser("answered")
     ans.add_argument("sprint_id")
     ans.add_argument("--answer", required=True)

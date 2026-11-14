@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -246,6 +247,47 @@ def close_request(conn: sa.Connection, pid: str, key: str, reason: str) -> None:
     _append(conn, pid, [model.EventDraft("request_closed", "organizer", key, reason=reason)])
 
 
+# まとめたリリースの答え
+RELEASED, REJECTED = "released", "rejected"
+RELEASE_RESULTS = (RELEASED, REJECTED)
+
+
+@dataclass(frozen=True)
+class ReleaseAnswer:
+    """まとめたリリースの答え。`result` は released か rejected、`version` と `release` は出した版とリリース記録の PR。"""
+
+    result: str
+    reason: str
+    version: Optional[str] = None
+    release: Optional[str] = None
+
+
+def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: ReleaseAnswer) -> None:
+    """まとめたリリースの答えを計画の進行表へ記録する（オーガナイザー）。
+
+    まとめた依頼 `keys` を同じトランザクションで閉じ、閉じる事象に答え（released か rejected・版・リリース記録の PR・
+    まとめた依頼の鍵）を載せる。各スプリントのリリース記録と差し戻しの数はこの記録から読む
+    （差し戻しを承認ゲートの記録 gate-rejections へ写すのは承認ゲート P2 #3295）。
+    """
+    if answer.result not in RELEASE_RESULTS:
+        raise model.Refused(f"まとめたリリースの答え {answer.result} は {' / '.join(RELEASE_RESULTS)} のどれでもない")
+    if not keys or len(set(keys)) != len(keys):
+        raise model.Refused("まとめたリリースの依頼が無いか、同じ依頼が重なっている")
+    if answer.result == RELEASED and not (answer.version and answer.release):
+        raise model.Refused("リリースした答えには版とリリース記録の PR が要る")
+    for key in keys:
+        _check_request(conn, pid, key)
+    done = {"result": answer.result, "version": answer.version, "release": answer.release, "batch": list(keys)}
+    drafts = [model.EventDraft("request_closed", "organizer", key, reason=answer.reason, payload={"release": done}) for key in keys]
+    _append(conn, pid, drafts)
+
+
+def release_counts(view: lane.PlanView) -> dict[str, int]:
+    """まとめたリリースの答えの数（依頼ごと。released・rejected）。"""
+    got = [r.release["result"] for r in view.requests.values() if r.release]
+    return {k: got.count(k) for k in RELEASE_RESULTS}
+
+
 def complete_plan(conn: sa.Connection, pid: str) -> bool:
     """計画を完了にする（耐久ワークフロー）。全レーンの行が終わり、答えていない依頼が無いときだけ書く（I16）。"""
     view, rows = lane.read_view(conn, pid)
@@ -302,6 +344,7 @@ def status(conn: sa.Connection, pid: str, now: datetime, probes: Optional[livene
         "open_requests": [{"request": r.key, "lane": r.lane, "reason": r.reason} for r in view.open_requests()],
         "complete": lane.plan_complete(view, rows),
         "stalled": len(stalls),
+        "releases": release_counts(view),
     }
     summary = f"計画 {view.name} は{model.label(view.state)}（レーン {len(items)}・止まり {len(stalls)}）"
     return result.result(TOOL, result.OK, summary, items=items, metrics=metrics, warnings=stalls)

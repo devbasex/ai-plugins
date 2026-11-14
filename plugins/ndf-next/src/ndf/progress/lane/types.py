@@ -40,6 +40,8 @@ class Request:
     body: dict[str, Any]
     reason: Optional[str]
     closed: Optional[str] = None
+    # まとめたリリースの答えで閉じた依頼の答え（result・version・release・batch）。採らずに閉じた依頼は None
+    release: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)

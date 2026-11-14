@@ -162,6 +162,41 @@ def test_plan_completes_only_when_every_row_ended_and_no_request_is_open(opened)
     assert view.state == "completed"
 
 
+def test_a_batched_release_closes_every_request_and_keeps_its_answer(opened):
+    """まとめたリリースの答えは、まとめた依頼をすべて閉じ、各依頼に答え（版・リリース記録の PR）を残す（#2783・#3128・#3136）。"""
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+        rb = plan.open_request(conn, pid, {"lane": "b", "kind": "release"}, "リリースしたい", "workflow")
+        plan.record_release(conn, pid, [ra, rb], plan.ReleaseAnswer(plan.REJECTED, "範囲を直してから"))
+        rc = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "出し直す", "workflow")
+        plan.record_release(conn, pid, [rc], plan.ReleaseAnswer(plan.RELEASED, "出した", "10.28.0", "https://github.com/o/r/pull/900"))
+        out = plan.status(conn, pid, datetime.now(UTC))
+    view, _ = _view(opened, pid)
+    assert view.open_requests() == []
+    assert view.requests[ra].release == {"result": "rejected", "version": None, "release": None, "batch": [ra, rb]}
+    assert view.requests[rc].release["release"] == "https://github.com/o/r/pull/900"
+    assert out["metrics"]["releases"] == {"released": 1, "rejected": 2}
+
+
+@pytest.mark.parametrize(
+    ("keys", "outcome", "version", "release"),
+    [
+        ([], "rejected", None, None),
+        (["request-1", "request-1"], "rejected", None, None),
+        (["request-1"], "failed", None, None),
+        (["request-1"], "released", None, None),
+        (["request-9"], "rejected", None, None),
+    ],
+)
+def test_a_batched_release_refuses_a_bad_answer(opened, keys, outcome, version, release):
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+    with store.transaction(opened) as conn, pytest.raises(model.Refused):
+        plan.record_release(conn, pid, keys, plan.ReleaseAnswer(outcome, "理由", version, release))
+
+
 def test_status_is_built_from_the_two_tables(opened):
     pid = _two(opened)
     _run_sprint(opened, pid, "a", "r1", "s1")
