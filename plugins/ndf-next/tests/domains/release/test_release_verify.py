@@ -113,3 +113,28 @@ def test_config_dirs_fall_back_to_home(tmp_path: Path, monkeypatch: pytest.Monke
     assert verify.config_dirs() == (tmp_path / ".claude", tmp_path / ".codex")
     monkeypatch.setenv(verify.CLAUDE_DIR_ENV, "")
     assert verify.config_dirs() == (tmp_path / ".claude", tmp_path / ".codex")
+
+
+def test_snapshot_records_unreadable_files_in_read_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """現状固定（snapshot）: 読めない・形の違うファイルは控えに入れず、読んだ順に `<パス>: <理由>` で残す。"""
+    claude, codex = _config_dirs(tmp_path, monkeypatch)
+    installed, known, config = (
+        claude / "plugins" / "installed_plugins.json",
+        claude / "plugins" / "known_marketplaces.json",
+        codex / "config.toml",
+    )
+    installed.write_text("{bad", encoding="utf-8")
+    known.write_text("[]", encoding="utf-8")
+    config.write_text("= bad", encoding="utf-8")
+    got = verify.snapshot()
+    assert got.items == {"codex:plugin:kit@m": "enabled=- versions=0.9.0,1.0.0"}
+    assert len(got.unreadable) == 3
+    assert got.unreadable[0].startswith(f"{installed}: Expecting property name")
+    assert got.unreadable[1] == f"{known}: known_marketplaces.json が表でない"
+    assert got.unreadable[2].startswith(f"{config}: ")
+    installed.write_text(json.dumps({"plugins": []}), encoding="utf-8")
+    known.write_text("{}", encoding="utf-8")
+    config.write_text("", encoding="utf-8")
+    assert verify.snapshot() == verify.Snapshot(
+        {"codex:plugin:kit@m": "enabled=- versions=0.9.0,1.0.0"}, (f"{installed}: installed_plugins.json の plugins の形が違う",)
+    )
