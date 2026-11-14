@@ -48,18 +48,10 @@ def _owners(term: str, texts: Mapping[str, str]) -> list[str]:
     return [p for p, text in texts.items() if term in text]
 
 
-def plan_glossary(g: Mapping[str, Any], removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]) -> GlossaryPlan | None:
-    """消す設計（`removed`）を `pending_source` に持つ語の正本を、本文に語を含む確定仕様のファイルへ移す。
-
-    `texts` は渡した確定仕様のパス → 本文。移す語が無ければ None。決められない語があれば `SourceError`（書く前に判定する）。
-    `overrides` の語は、本文に含むかを問わず指定のファイルにする（指定のファイルは渡した確定仕様のどれか）。
-    """
-    moving = [t for t in g["terms"] if "pending_source" in t and t["pending_source"] in removed]
-    if not moving:
-        return None
-    unknown = sorted(p for p in overrides.values() if p not in texts)
-    if unknown:
-        raise ValueError("--source-of のファイルが渡した確定仕様に無い: " + "、".join(unknown))
+def _assign(
+    moving: Iterable[Mapping[str, Any]], texts: Mapping[str, str], overrides: Mapping[str, str]
+) -> tuple[dict[tuple[str, str], str], list[str], dict[str, list[str]]]:
+    """語ごとの正本の振り分け（1 つ → 正本・複数 → ambiguous・無し → missing）。"""
     sources: dict[tuple[str, str], str] = {}
     missing: list[str] = []
     ambiguous: dict[str, list[str]] = {}
@@ -72,6 +64,22 @@ def plan_glossary(g: Mapping[str, Any], removed: set[str], texts: Mapping[str, s
             ambiguous[term] = owners
         else:
             missing.append(term)
+    return sources, missing, ambiguous
+
+
+def plan_glossary(g: Mapping[str, Any], removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]) -> GlossaryPlan | None:
+    """消す設計（`removed`）を `pending_source` に持つ語の正本を、本文に語を含む確定仕様のファイルへ移す。
+
+    `texts` は渡した確定仕様のパス → 本文。移す語が無ければ None。決められない語があれば `SourceError`（書く前に判定する）。
+    `overrides` の語は、本文に含むかを問わず指定のファイルにする（指定のファイルは渡した確定仕様のどれか）。
+    """
+    moving = [t for t in g["terms"] if "pending_source" in t and t["pending_source"] in removed]
+    if not moving:
+        return None
+    unknown = sorted(p for p in overrides.values() if p not in texts)
+    if unknown:
+        raise ValueError("--source-of のファイルが渡した確定仕様に無い: " + "、".join(unknown))
+    sources, missing, ambiguous = _assign(moving, texts, overrides)
     if missing or ambiguous:
         raise SourceError(missing, ambiguous)
     return GlossaryPlan(sources)
