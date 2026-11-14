@@ -81,6 +81,8 @@ SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
 DB_SUFFIX = ".sqlite"
 CHECKED_SUFFIX = ".checked"
 LOCK_SUFFIX = ".lock"
+# SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
+SQLITE_PREFIX = "sqlite:///"
 FINISHED = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
 WAITING = ("PENDING", "ENQUEUED")
 # 置き場の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
@@ -238,7 +240,7 @@ def run_name(run_key: str) -> str:
 
 def run_url(root: Path, run_key: str) -> str:
     """SQLite のときの、鍵ごとのファイルの URL。"""
-    return f"sqlite:///{_dbos_dir(root) / (run_name(run_key) + DB_SUFFIX)}"
+    return _sqlite_url(_dbos_dir(root) / f"{run_name(run_key)}{DB_SUFFIX}")
 
 
 def _dbos_dir(root: Path) -> Path:
@@ -247,8 +249,7 @@ def _dbos_dir(root: Path) -> Path:
 
 def _sqlite_path(database_url: str) -> Path | None:
     """SQLite の URL ならファイルのパス、そうでなければ None。"""
-    prefix = "sqlite:///"
-    return Path(database_url[len(prefix) :]) if database_url.startswith(prefix) else None
+    return Path(database_url[len(SQLITE_PREFIX) :]) if database_url.startswith(SQLITE_PREFIX) else None
 
 
 def _is_sqlite(database_url: str) -> bool:
@@ -256,7 +257,7 @@ def _is_sqlite(database_url: str) -> bool:
 
 
 def _sqlite_url(path: Path) -> str:
-    return f"sqlite:///{path}"
+    return f"{SQLITE_PREFIX}{path}"
 
 
 def _sa_url(database_url: str) -> str:
