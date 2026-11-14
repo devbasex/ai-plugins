@@ -390,11 +390,8 @@ def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
     run.save()
 
 
-def _flaky_fix(run: _Run) -> None:
-    """積んだフレーキーなテストの直しを依頼して取り込む。違反は起点まで取り消して 1 度だけ差し戻す。項目には触れない。"""
-    if "flaky_request" not in run.state or not run.state["flaky_request"]:
-        return
-    pending = run.state["flaky_request"]
+def _attempt_flaky_fix(run: _Run, pending: dict[str, Any]) -> tuple[list[flaky_decide.Commit], str]:
+    """直しを起動し、違反があれば起点まで取り消して差し戻す（上限まで）。最後の起動のコミットと結果の種類を返す。"""
     commits: list[flaky_decide.Commit] = []
     kind = flaky_decide.NONE
     for _ in range(flaky_decide.MAX_ATTEMPTS):
@@ -410,6 +407,15 @@ def _flaky_fix(run: _Run) -> None:
             break
         pending["sendback"] = found
         run.save()
+    return commits, kind
+
+
+def _flaky_fix(run: _Run) -> None:
+    """積んだフレーキーなテストの直しを依頼して取り込む。違反は起点まで取り消して 1 度だけ差し戻す。項目には触れない。"""
+    if "flaky_request" not in run.state or not run.state["flaky_request"]:
+        return
+    pending = run.state["flaky_request"]
+    commits, kind = _attempt_flaky_fix(run, pending)
     done = flaky_decide.results(pending["keys"], commits, kind)
     run.state.update(flaky_request=None, flaky_fixes=[*(run.state["flaky_fixes"] if "flaky_fixes" in run.state else []), *done])
     run.save()
