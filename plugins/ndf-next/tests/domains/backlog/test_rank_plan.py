@@ -208,3 +208,70 @@ def test_quality_slot_min_skips_rows_beyond_room_and_continues():
     got = rank_decide.quality_slot(rows, _qboard(rows, 10, _q(ratio=0.1, minimum=2), created=created), slot, set())
     # room=10-3=7: #1（8）は収まらず min に届いていないので飛ばして続ける。#2・#3 は room に収まる
     assert got["budget"] == 1 and got["issues"] == [2, 3] and got["size_sum"] == 3
+
+
+# --- 現状固定: large_slot（大きい課題の枠）。既定の large_slot_ratio=0.5・large_min_size=13 で記録する ---
+
+
+def _lboard(rows, capacity, sub_issues=None, edges=frozenset()) -> rank_decide.Board:
+    issues = {r.number: {"milestone": NEAR, "labels": [], "created_at": "2026-10-01"} for r in rows}
+    return rank_decide.Board(issues, {}, Config(capacity=capacity), [NEAR], sub_issues=sub_issues or {}, edges=frozenset(edges))
+
+
+def _large(rows, board) -> dict | None:
+    return rank_decide.large_slot(rows, board.cfg, board)
+
+
+def _slot(issue, piece, size, budget, status) -> dict:
+    return {"issue": issue, "slice": piece, "size": size, "budget": budget, "status": status}
+
+
+def test_large_slot_is_none_without_capacity_or_budget():
+    rows = [_row(1, size=13)]
+    assert _large(rows, _lboard(rows, None)) is None
+    # capacity=1 → budget=floor(0.5)=0
+    assert _large(rows, _lboard(rows, 1)) is None
+
+
+def test_large_slot_without_large_rows():
+    rows = [_row(1, size=8), _row(2, size=5)]
+    assert _large(rows, _lboard(rows, 20)) == _slot(None, None, None, 10, model.SLOT_NONE)
+
+
+def test_large_slot_without_children_fits_or_needs_split():
+    rows = [_row(1, size=13)]
+    assert _large(rows, _lboard(rows, 40)) == _slot(1, 1, 13, 20, model.SLOT_FIT)
+    assert _large(rows, _lboard(rows, 20)) == _slot(1, None, 13, 10, model.SLOT_SPLIT)
+
+
+def test_large_slot_picks_highest_cod_then_lowest_number():
+    rows = [_row(1, size=13, cod=5), _row(2, size=20, cod=9), _row(3, size=13, cod=9)]
+    assert _large(rows, _lboard(rows, 60)) == _slot(2, 2, 20, 30, model.SLOT_FIT)
+
+
+def test_large_slot_takes_first_fitting_child_in_dependency_order():
+    # #11 は #12 に依存するので #12 が先。#13 は rows に無いので数えない
+    rows = [_row(10, size=13), _row(11, size=3), _row(12, size=5)]
+    board = _lboard(rows, 20, {10: [11, 12, 13]}, {(11, 12)})
+    assert _large(rows, board) == _slot(10, 12, 5, 10, model.SLOT_FIT)
+
+
+def test_large_slot_skips_children_over_budget():
+    rows = [_row(10, size=13), _row(11, size=3), _row(12, size=20)]
+    board = _lboard(rows, 20, {10: [11, 12]}, {(11, 12)})
+    assert _large(rows, board) == _slot(10, 11, 3, 10, model.SLOT_FIT)
+
+
+def test_large_slot_children_without_dependency_follow_rank():
+    rows = [_row(10, size=13), _row(11, size=3), _row(12, size=5)]
+    assert _large(rows, _lboard(rows, 20, {10: [12, 11]})) == _slot(10, 11, 3, 10, model.SLOT_FIT)
+
+
+def test_large_slot_needs_split_when_no_child_fits():
+    rows = [_row(10, size=13), _row(11, size=13), _row(12, size=20)]
+    assert _large(rows, _lboard(rows, 20, {10: [11, 12]})) == _slot(10, None, 13, 10, model.SLOT_SPLIT)
+
+
+def test_large_slot_children_outside_rows_fall_back_to_the_issue_itself():
+    rows = [_row(10, size=13)]
+    assert _large(rows, _lboard(rows, 40, {10: [11, 12]})) == _slot(10, 10, 13, 20, model.SLOT_FIT)
