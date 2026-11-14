@@ -13,6 +13,8 @@ from ndf.testing import waits
 
 # 先頭の bash は SIGTERM で終わるが、SIGTERM を無視する子孫が残る組
 STUBBORN = "(trap '' TERM; sleep 600) & echo started; wait"
+# SIGTERM で 7 を返して終わる組
+ENDS_ON_SIGTERM = "trap 'exit 7' TERM; echo started; while :; do sleep 0.05; done"
 GRACE = 0.5
 
 
@@ -35,7 +37,7 @@ def _cleanup(proc: subprocess.Popen) -> None:
 
 
 def test_group_that_ends_on_sigterm_gets_no_sigkill(short_grace):
-    proc = _start("trap 'exit 7' TERM; echo started; while :; do sleep 0.05; done")
+    proc = _start(ENDS_ON_SIGTERM)
     try:
         process_group.stop_group(proc)
         assert proc.wait() == 7  # SIGKILL なら -9
@@ -59,7 +61,7 @@ def test_descendants_ignoring_sigterm_are_killed_after_the_grace(short_grace, se
 
 
 def test_without_send_first_no_sigterm_is_sent(short_grace):
-    proc = _start("trap 'exit 7' TERM; echo started; while :; do sleep 0.05; done")
+    proc = _start(ENDS_ON_SIGTERM)
     try:
         process_group.stop_group(proc, send_first=False)
         assert proc.wait() == -signal.SIGKILL  # SIGTERM を受けていれば 7
