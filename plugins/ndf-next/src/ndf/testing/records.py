@@ -6,8 +6,6 @@
 from __future__ import annotations
 
 import json
-import os
-import threading
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
@@ -35,13 +33,6 @@ INTERRUPTED = "interrupted"
 
 def _lock(path: Path) -> FileLock:
     return slot_pool.lock(path)
-
-
-def _replace_text(path: Path, text: str) -> None:
-    """一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def _now_iso(now: float) -> str:
@@ -73,7 +64,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
                 fh.write(line + "\n")
             return
         kept = (kept + [line])[-KEEP_ROWS:]
-        _replace_text(path, "".join(ln + "\n" for ln in kept))
+        slot_pool.replace_text(path, "".join(ln + "\n" for ln in kept))
 
 
 def _prune(lines: list[str], now: float) -> list[str]:

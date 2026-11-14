@@ -73,11 +73,16 @@ def slot_index(path: Path) -> int | None:
     return int(digits) if digits.isdigit() else None
 
 
-def write_json(path: Path, data: Mapping[str, object]) -> None:
+def replace_text(path: Path, text: str) -> None:
     """一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
-    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def write_json(path: Path, data: Mapping[str, object]) -> None:
+    """JSON のオブジェクトを 1 行で、一時ファイルへ書いてから置き換える（読む側が書きかけを見ない）。"""
+    replace_text(path, json.dumps(data, ensure_ascii=False) + "\n")
 
 
 def read_json(path: Path) -> dict[str, object] | None:
