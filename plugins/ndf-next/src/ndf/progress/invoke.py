@@ -7,7 +7,7 @@
 | `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `<with.plan>`（`ndf.core.route.templates()` の鍵）を埋めたもの |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
 | `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
-| `ndf.listen` | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
+| `ndf.listen`（工程の定義の `listen` の要素） | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
 
 作業へ渡す引数は工程の定義の `metadata.ndf.inputs` の鍵だけで、値は渡す前にスプリントの文脈の
 スキーマ（`contracts/workflow/context.schema.json`）で形を確かめる（3364-7）。作業の出力のうち工程の
@@ -53,7 +53,7 @@ PLAN = plan_cli.TOOL
 SKILL = "skill"
 SCRIPT = "script"
 LISTEN = "listen"
-CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, "ndf.listen": LISTEN}
+CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.LISTEN_CALL: LISTEN}
 # 作業種別 → 呼ぶものの名前を持つ with の鍵（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数

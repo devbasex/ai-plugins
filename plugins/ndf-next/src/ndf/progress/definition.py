@@ -1,12 +1,20 @@
 """工程の定義（`contracts/workflow/`）の読み込みと検査。
 
 モードの文書（`modes/<モード>.json`）は工程の文書（`stages/<工程>.json`）を順に呼ぶだけで、工程の文書が
-ステップ（`call`）を持つ（決定 4）。どちらも Serverless Workflow 1.0.3 の書式で書き、公式のスキーマ
+ステップを持つ（決定 4）。ステップは作業を呼ぶ `call` か、承認ゲートの答えを待つ `listen` である。どちらも Serverless Workflow 1.0.3 の書式で書き、公式のスキーマ
 （`dsl/workflow-1.0.3.json`）で検査する（決定 3）。NDF に固有の条件と属性は `metadata.ndf` に置き、
 閉じた語彙（`ndf.schema.json`）で検査する（決定 5）。
 
 入出力の規約の参照は `file:///<contracts からのパス>#<JSON Pointer>` の形で書く。規約のファイルどうしの
 `$ref`（`context.schema.json`・`../schemas/result.schema.json`）は、規約のファイルを 1 つの束へ入れて解く。
+
+承認ゲートの待ち方（#3092 の決定 7・決定 77）は `listen` の要素で書く:
+
+    {"design-gate": {"listen": {"to": {"one": {"with": {"type": "answered"}}}}, "metadata": {"ndf": {"kind": "gate", ...}}}}
+
+- recv: `ndf progress next`（`work`）は `listen` のステップで行を実行中のまま抜け、答えを待つ（`gate` の結果を返す）
+- answer: 待つ事象は `to.one.with.type` に書いた進行の事象（`answered`。`ndf answer` が書く。表 `workflow/progress.json`）
+- next: 答えが書かれた後の `ndf progress next` が答えを読み、次のステップへ進む
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from ndf import contracts, identity
-from ndf.progress import stages
+from ndf.progress import model, stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
 NDF_SCHEMA = "workflow/ndf.schema.json"
@@ -32,7 +40,11 @@ SCHEMA_DIRS = ("workflow", contracts.SCHEMAS)
 URI_ROOT = "file:///"
 NAMESPACE = identity.FIXED_WORDS["workflow_namespace"]
 # 文書の種類ごとに使える要素（モードは工程の文書を呼ぶだけ、工程はステップを呼ぶだけ）
-TASKS = {"mode": frozenset({"run"}), "stage": frozenset({"call"})}
+TASKS = {"mode": frozenset({"run"}), "stage": frozenset({"call", "listen"})}
+# `listen` の要素のステップの call（呼ぶものの表 `invoke.CALLS` の承認ゲートの行）
+LISTEN_CALL = "ndf.listen"
+# `listen` の要素が待つ進行の事象（`ndf answer` が書く答え。表 `workflow/progress.json` のスプリントの行。無ければ import の時点で `KeyError`）
+LISTENED_EVENT = model.rules()[("sprint", "answered")].kind
 
 
 class WorkflowDefError(contracts.ContractError):
@@ -181,7 +193,17 @@ def _task_errors(where: str, name: str, body: dict[str, Any], level: str) -> lis
     errs += [f"{where}/{name}: 要素 {k} は使わない（使えるのは {', '.join(sorted(TASKS[level]))}）" for k in sorted(kinds - TASKS[level])]
     if level == "stage":
         errs += _meta_errors(f"{where}/{name}", _ndf_meta(body), "step")
+    if "listen" in body:
+        errs += _listen_errors(f"{where}/{name}", body["listen"])
     return errs
+
+
+def _listen_errors(where: str, listen: Any) -> list[str]:
+    """`listen` の要素は 1 つの事象（`to.one`）を待ち、その種類は答えの事象（`LISTENED_EVENT`）である。"""
+    kind = _dig(listen, "to", "one", "with", "type")
+    if kind != LISTENED_EVENT:
+        return [f"{where}: listen が待つのは事象 {LISTENED_EVENT} の 1 つ（to.one.with.type。渡された値 {kind}）"]
+    return []
 
 
 def _document(doc: Mapping[str, Any]) -> dict[str, Any]:
@@ -230,7 +252,7 @@ def _step_def(stage: str, name: str, body: dict[str, Any]) -> stages.StepDef:
     return stages.StepDef(
         id=name,
         stage=stage,
-        call=body["call"],
+        call=body["call"] if "call" in body else LISTEN_CALL,
         kind=meta["kind"],
         range=meta["range"],
         subject=meta.get("subject"),
