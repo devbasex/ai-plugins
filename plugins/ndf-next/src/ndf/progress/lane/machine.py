@@ -37,7 +37,7 @@ from ndf.contracts import limits
 from ndf.core import durable
 from ndf.core import durable_locks as locks
 from ndf.progress import command, model, store
-from ndf.progress.lane import PlanView, launch, read_view
+from ndf.progress.lane import PlanView, launch, liveness, read_view
 from ndf.progress.lane.types import LaneRow, RUNNING
 
 # マシンの上限の宣言（計画の上限の既定と同じ。`ndf.progress.plan.LIMIT_POLICY`）と、起動の排他を待つ上限の宣言
@@ -91,7 +91,7 @@ def _conductor(row: Mapping[str, Any]) -> bool:
 def count(plans: Sequence[PlanLanes], listed: Mapping[str, Mapping[str, Any]], skip: str) -> Count:
     """動いているレーンのプランの本数を数える。`listed` はラッパーの一覧（名前 → 行）、`skip` は起こそうとしている
     レーンのラッパー（数えない）。"""
-    running = {name for name, row in listed.items() if row.get("running")}
+    running = {name for name, row in listed.items() if liveness.wrapper_running(row)}
     seen: set[str] = set()
     total = 0
     for p in plans:

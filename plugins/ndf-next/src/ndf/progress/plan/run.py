@@ -179,11 +179,7 @@ def _halts(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], found: live
     table = found.wrappers() if found is not None and ended else None
     if table is None:
         return []
-    return [(name, row) for name, row in ended if _wrapper_running(table.get(found.wrapper_name(name)))]
-
-
-def _wrapper_running(listed: Any) -> bool:
-    return bool(listed and listed.get("running"))
+    return [(name, row) for name, row in ended if liveness.wrapper_running(table.get(found.wrapper_name(name)))]
 
 
 def read_snapshot(conn: Any, plan_id: str, found: liveness.Probes | None = None) -> dict[str, Any]:

@@ -84,6 +84,11 @@ def sprint_wait(out: Optional[Mapping[str, Any]]) -> str:
     return SPRINT_IDLE if status in (result.OK, result.STOPPED) else SPRINT_UNKNOWN
 
 
+def wrapper_running(row: Optional[Mapping[str, Any]]) -> bool:
+    """ラッパーの一覧（`ndf relay ls`）の行が動いているか（一覧に無ければ None で、動いていない）。"""
+    return bool(row and row.get("running"))
+
+
 def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, Any]], listed: bool) -> Liveness:
     """1 本のレーンの生死を決める。`row` はレーンの実行中の行（無ければ None）、`sprint` は `sprint_wait` の値、
     `wrapper` はラッパーの一覧の行（一覧に無ければ None）、`listed` は一覧を読めたか。"""
@@ -96,7 +101,7 @@ def judge(row: Optional[LaneRow], sprint: str, wrapper: Optional[Mapping[str, An
         return Liveness(WAITING_ANSWER, "スプリントが承認ゲートか問いの答えを待っている", key, sid)
     if not listed or sprint == SPRINT_UNKNOWN:
         return Liveness(UNKNOWN, "ラッパーの一覧かスプリントの待ちを読めない", key, sid)
-    running = bool(wrapper and wrapper.get("running"))
+    running = wrapper_running(wrapper)
     if running and wrapper is not None and wrapper.get("state") == WRAPPER_STALLED:
         return Liveness(STALLED, f"conductor のラッパーが止まっている: {wrapper.get('reason') or '理由の記録が無い'}", key, sid)
     if running:
