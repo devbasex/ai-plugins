@@ -1,4 +1,4 @@
-"""雛形の `{{worker}}` の既定（`ndf answer work`）: 作業名を `ndf worker run` の必須の引数へ合わせる（#3295）。"""
+"""`ndf answer work`: 作業名を `ndf worker run` の必須の引数へ合わせる（#3295）。"""
 
 from __future__ import annotations
 
@@ -33,9 +33,10 @@ def test_ndf_answer_work_hands_the_arguments_to_worker_run():
     assert code == 0 and got[0][1:5] == ["-P", "-m", "ndf", "worker"] and got[0][5:] == gate.work_argv("fix", Path("/s"), Path("/w"))
 
 
-def test_the_template_default_of_worker_is_ndf_answer_work():
-    default = route.params()["worker"].default
-    assert default[:3] == ["ndf", "answer", "work"] and "{state_dir}" in default
+def test_the_template_worker_has_no_default_until_prompts_are_written():
+    # PR 3496 の指摘: `<置き場>/<作業名>-prompt.md` を書く処理が無いまま既定にすると worker のステップが必ず落ちる。
+    # 既定を持たず、決まらなければ実行の前に TemplateValuesMissing で止まる
+    assert route.params()["worker"].default is None
     assert set(gate.WORK_KINDS) >= {"impl", "fix", "design", "plan-to-spec"}
 
 

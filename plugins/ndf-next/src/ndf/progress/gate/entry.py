@@ -7,7 +7,7 @@ ndf answer ask [--gate design|release]   # プランの中の承認ゲート（�
 ndf answer list <進行表>                 # 書いた答え（選択肢・指摘・理由・答えた者・時刻）を古い順に返す
 ndf answer head <進行表> [--gate release] # 承認で見た PR の head（マージの側が --expect-head へ渡して照らす。#2147）
 ndf answer work --state-dir <置き場> [--cwd <作業場所>] <作業名>
-                                         # 雛形の {{worker}} の既定。作業名を ndf worker run の必須の引数へ合わせて打つ
+                                         # 作業名を ndf worker run の必須の引数へ合わせて打つ（プロンプトは呼ぶ側が先に書く）
 """
 
 from __future__ import annotations
@@ -72,12 +72,13 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     return result.result(TOOL, result.GATE, f"{label}の答えを待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
-# 雛形の `{{worker}}` の既定が渡す作業名（雛形の `["{{worker}}", "<作業名>"]` の末尾）
+# `ndf answer work` が受ける作業名（雛形の `["{{worker}}", "<作業名>"]` の末尾）。雛形の `{{worker}}` の既定にはしない
+# （`<置き場>/<作業名>-prompt.md` を書く処理がまだ無く、既定にすると worker のステップが必ず落ちる。PR 3496 の指摘）
 WORK_KINDS = ("impl", "fix", "ci-fix", "fix-base", "fix-push", "design", "plan-to-spec")
 
 
 def work_argv(kind: str, state_dir: Path, cwd: Path) -> list[str]:
-    """作業名を `ndf worker run` の必須の引数へ合わせる。プロンプトは `<置き場>/<作業名>-prompt.md`（conductor が書く）、
+    """作業名を `ndf worker run` の必須の引数へ合わせる。プロンプトは `<置き場>/<作業名>-prompt.md`（呼ぶ側が先に書く）、
     結果は `<置き場>/<作業名>-result.json` に置く。"""
     if kind not in WORK_KINDS:
         raise model.Refused(f"作業名 {kind} は雛形の作業名（{', '.join(WORK_KINDS)}）のどれでもない")
@@ -189,7 +190,7 @@ ANSWER_VERBS: dict[str, tuple[Callable[[], argparse.ArgumentParser], Dispatch]] 
 def main(argv: list[str]) -> int:
     """副命令 `ndf answer`（副命令の表の `answer` の行がこのパッケージを指す）。
 
-    `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は雛形の `{{worker}}` の既定、
+    `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は作業名から `ndf worker run` を打つ、
     進行表の ID で始まれば承認ゲートへの答え。`ndf progress` は `progress_main` が受ける（`work` の名前が両方にあるため、
     入口の副命令で分ける）
     """
