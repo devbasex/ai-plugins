@@ -263,8 +263,11 @@ def delegate(
     """
     out = Delivery(session=session or str(uuid.uuid4()))
     handoff.result_file.unlink(missing_ok=True)
-    first = claude.ClaudeCall(system, claude.Permission.FULL)
-    argv = claude.claude_args(first, root) + ["--session-id", out.session]
+
+    def args_for(resume: Optional[str]) -> list[str]:
+        return claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=resume), root)
+
+    argv = args_for(None) + ["--session-id", out.session]
     prompt = handoff.prompt
     for attempt in range(RESUMES + 1):
         reply = call(argv, prompt, handoff.timeout, handoff.cwd)
@@ -272,7 +275,7 @@ def delegate(
         out.replies.append(reply.raw[:200])
         if _written(handoff.result_file) or _reply_failed(reply, out):
             return out
-        argv = claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=out.session), root)
+        argv = args_for(out.session)
         prompt = RESUME_PROMPT
     out.cause = "work_stopped"
     out.detail = f"作業 {handoff.kind} の worker が {RESUMES} 回起こし直しても結果ファイル {handoff.result_file} を書かなかった"
