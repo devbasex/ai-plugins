@@ -188,3 +188,42 @@ def test_require_schema_raises_reader_error_with_label(contracts_copy):
     with pytest.raises(ReaderError) as exc:
         contracts.require_schema({}, contracts.schema_path("probe"), ReaderError, "表")
     assert str(exc.value) == "表 の形が違う: (最上位): 'whole' is a required property"
+
+
+# 現状固定（I-012）: `use_dir` は置き場を差し替え（`None` でプラグインの置き場へ戻し）、読み手のキャッシュを捨てる
+def test_use_dir_switches_and_resets_the_place(tmp_path):
+    contracts.use_dir(tmp_path)
+    assert contracts.contracts_dir() == tmp_path
+    contracts.use_dir(str(tmp_path))
+    assert contracts.contracts_dir() == tmp_path
+    contracts.use_dir(None)
+    assert contracts.contracts_dir() == contracts.DEFAULT_DIR
+
+
+def test_use_dir_makes_cached_readers_read_again(tmp_path):
+    (tmp_path / "probe.json").write_text('{"n": 1}', encoding="utf-8")
+    contracts.use_dir(tmp_path)
+    calls = []
+
+    @contracts.cached_reader
+    def read():
+        calls.append(1)
+        return contracts.load_json("probe.json")
+
+    assert read() == {"n": 1}
+    (tmp_path / "probe.json").write_text('{"n": 2}', encoding="utf-8")
+    assert read() == {"n": 1}
+    assert len(calls) == 1
+    contracts.use_dir(tmp_path)
+    assert read() == {"n": 2}
+    assert len(calls) == 2
+
+
+def test_use_dir_changes_where_load_json_reads(tmp_path):
+    (tmp_path / "probe.json").write_text('{"n": 1}', encoding="utf-8")
+    contracts.use_dir(tmp_path)
+    assert contracts.load_json("probe.json") == {"n": 1}
+    contracts.use_dir(None)
+    with pytest.raises(contracts.ContractError) as exc:
+        contracts.load_json("probe.json")
+    assert str(exc.value).startswith(f"契約 {contracts.DEFAULT_DIR / 'probe.json'} を読めない: ")
