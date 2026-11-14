@@ -200,3 +200,7 @@ class Git:
         `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
         """
         return self.runner(["fetch", "-q", "--no-tags", remote, *refspecs], self.cwd)
+
+    def fetch_branch(self, remote: str, name: str) -> Completed:
+        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
+        return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")

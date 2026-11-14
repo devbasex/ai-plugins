@@ -158,7 +158,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     if skip is not None:
         rec.add("main_dir", str(main.cwd), "kept", skip)
         return
-    fetched = main.fetch(create.REMOTE, f"+refs/heads/{base}:refs/remotes/{create.REMOTE}/{base}")
+    fetched = main.fetch_branch(create.REMOTE, base)
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), "kept", f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return

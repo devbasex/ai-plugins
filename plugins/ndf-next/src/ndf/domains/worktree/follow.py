@@ -37,7 +37,7 @@ def _resolve_base(main: Git, name: str) -> Optional[str]:
     found = resolve(main, name)
     if found is not None:
         return found
-    if main.fetch(create.REMOTE, f"+refs/heads/{name}:refs/remotes/{create.REMOTE}/{name}").returncode != 0:
+    if main.fetch_branch(create.REMOTE, name).returncode != 0:
         return None
     return resolve(main, name)
 
