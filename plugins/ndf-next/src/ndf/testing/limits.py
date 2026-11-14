@@ -75,7 +75,7 @@ def _positive(section: Mapping[str, object], key: str, path: Path, errors: list[
     if key not in section:
         return None
     value = section[key]
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if not slot_pool.is_int(value) or value < 1:
         errors.append(f"{path}: {SECTION}.{key} は 1 以上の整数にする（今の値: {value!r}）")
         return None
     return value

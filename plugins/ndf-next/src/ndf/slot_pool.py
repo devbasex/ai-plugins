@@ -93,6 +93,17 @@ def read_json(path: Path) -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
+def read_field(path: Path, key: str) -> object:
+    """記述のファイル（JSON のオブジェクト）の `key` の値。ファイルか鍵が無ければ None。"""
+    data = read_json(path)
+    return None if data is None else data.get(key)
+
+
+def is_int(value: object) -> bool:
+    """`value` が整数か（真偽値は整数に数えない）。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 @dataclass
 class Taken:
     """取った枠。`release` で記述を消してロックを返す。"""
@@ -131,9 +142,8 @@ def _live_weights(directory: Path) -> tuple[int, set[int]]:
 
 def _weight_of(directory: Path, index: int) -> int:
     """番号 `index` の記述の重み（MiB）。記述か重みが無い・整数でない（真偽値を含む）なら 0。"""
-    data = read_json(slot_path(directory, index, ".json"))
-    value = None if data is None else data.get(WEIGHT_KEY)
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+    value = read_field(slot_path(directory, index, ".json"), WEIGHT_KEY)
+    return value if is_int(value) else 0
 
 
 def held_mib(directory: Path) -> int:

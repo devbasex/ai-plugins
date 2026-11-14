@@ -105,12 +105,6 @@ def slots_dir(environ: Mapping[str, str] | None = None) -> Path:
     return identity.prepare_state_dir(identity.load()) / SLOTS_DIR_NAME
 
 
-def _owner_value(path: Path, key: str) -> object:
-    """記述のファイル（JSON のオブジェクト）の `key` の値。ファイルか鍵が無ければ None。"""
-    data = slot_pool.read_json(path)
-    return None if data is None else data.get(key)
-
-
 @dataclass
 class _MemoryMonitor:
     """枠を持つ実行のメモリの監視。下限を割ったら、最後に始めた実行だけを前の停止から 30 秒空けて止める。"""
@@ -148,7 +142,7 @@ class _MemoryMonitor:
             index = slot_pool.slot_index(path)
             if index is None or index == own_index:
                 continue
-            started = _owner_value(path, "started_at")
+            started = slot_pool.read_field(path, "started_at")
             if not isinstance(started, (int, float)) or (started, index) <= mine:
                 continue
             if slot_pool.is_owned(self.directory, index):
@@ -159,7 +153,7 @@ class _MemoryMonitor:
         """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
         try:
             with slot_pool.lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
-                last = _owner_value(self.directory / STOP_FILE, "at")
+                last = slot_pool.read_field(self.directory / STOP_FILE, "at")
                 now = time.time()
                 if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:
                     return False
