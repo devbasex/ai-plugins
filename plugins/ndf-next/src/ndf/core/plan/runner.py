@@ -78,16 +78,21 @@ class Invocation:
     digest: str = ""
 
     @property
+    def run_id(self) -> str:
+        """回の鍵の名前（`durable.run_name`）。"""
+        return durable.run_name(self.key)
+
+    @property
     def workflow_id(self) -> str:
-        return f"{durable.run_name(self.key)}-plan"
+        return f"{self.run_id}-plan"
 
     @property
     def waiting_path(self) -> Path:
-        return waiting_path(self.state_dir, durable.run_name(self.key))
+        return waiting_path(self.state_dir, self.run_id)
 
     @property
     def result_path(self) -> Path:
-        return result_path(self.state_dir, durable.run_name(self.key))
+        return result_path(self.state_dir, self.run_id)
 
 
 def waiting_path(state_dir: Path, run: str) -> Path:
@@ -342,7 +347,7 @@ def _spec(inv: Invocation) -> dict[str, Any]:
         "waiting": str(inv.waiting_path),
         "routes": _routes(inv),
         "progress": str(inv.state_dir / PROGRESS_FILE),
-        "run_id": durable.run_name(inv.key),
+        "run_id": inv.run_id,
     }
 
 
@@ -369,11 +374,20 @@ def _watch(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, Op
         time.sleep(interval)
 
 
+def _pr_items(state_dir: Path) -> list[dict[str, Any]]:
+    """プランのステップが載せた PR の、結果の items の行（載った順）。"""
+    return [{"kind": "pr", "number": n} for n in recorded_prs(state_dir)]
+
+
+def _run_item(inv: Invocation) -> dict[str, Any]:
+    """終わった回の、結果の items の先頭の行。"""
+    return {"kind": "plan", "name": inv.plan.name, "run": inv.run_id}
+
+
 def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     """承認の答えを待つ結果。`routes` は答えごとに打つコマンド。"""
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の答えを待っている"
-    items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}]
-    items += [{"kind": "pr", "number": n} for n in recorded_prs(inv.state_dir)]
+    items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}, *_pr_items(inv.state_dir)]
     return result.result(
         TOOL,
         GATE,
@@ -387,11 +401,10 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
 
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
     """終わった回の結果。耐久ワークフローが例外で終わったときは unknown で止まる。"""
-    items = [{"kind": "plan", "name": inv.plan.name, "run": durable.run_name(inv.key)}]
-    items += [{"kind": "pr", "number": n} for n in recorded_prs(inv.state_dir)]
+    items = [_run_item(inv), *_pr_items(inv.state_dir)]
     metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
     outputs, warnings = recorded_outputs(inv.state_dir)
-    shared = {"outputs": outputs, "warnings": warnings, "run_id": durable.run_name(inv.key)}
+    shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
     if final is None:
         detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
         return result.stopped(TOOL, "unknown", detail, items=items, metrics=metrics, **shared)
@@ -410,7 +423,7 @@ def _stored(inv: Invocation) -> dict[str, Any]:
     found = read_json(inv.result_path)
     if found is not None:
         return found
-    items = [{"kind": "plan", "name": inv.plan.name, "run": durable.run_name(inv.key)}]
+    items = [_run_item(inv)]
     return result.result(TOOL, OK, f"{inv.plan.name} の回は終わっている（結果の控えが無い）", items, {"round": inv.round_no})
 
 
