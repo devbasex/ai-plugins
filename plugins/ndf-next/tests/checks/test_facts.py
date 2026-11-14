@@ -38,29 +38,51 @@ def table(rows, columns) -> str:
     return json.dumps({"version": 1, "summary": "s", "owner": "o", "columns": columns, "rows": rows})
 
 
-def test_fact_table_shape_and_copied_ids(plugin, rules):
+@pytest.fixture
+def with_schema(plugin):
+    """表の共通の形（fact.schema.json）を表の隣に置いた plugin。"""
+    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
+    return plugin
+
+
+def test_fact_table_shape_and_copied_ids(with_schema, rules):
+    plugin = with_schema
     plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}, {"id": "verify"}], {}))
     plugin.write("contracts/facts/dup.json", table([{"id": "a"}, {"id": "a"}], {}))
-    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
     plugin.write("src/ndf/a.py", 'STAGES = ("deploy", "verify")\nONE = "verify"\n')
     found = facts.check(plugin.scope(), rules)
     assert sorted(f.rule for f in found) == ["const-fact", "const-fact", "fact-table"]
     assert kinds(f for f in found if f.rule == "const-fact") == ["table-set", "table-str"]
 
 
-def test_fact_table_is_validated_by_schema(plugin, rules):
-    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
-    columns = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
-    plugin.write("contracts/facts/ok.json", table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], columns))
-    plugin.write("contracts/facts/no_owner.json", json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []}))
-    plugin.write("contracts/facts/bad_rows.json", table([{"id": "a", "rank": "1"}, {"id": "b"}, {"id": "c", "rank": 3, "x": 1}], columns))
-    plugin.write("contracts/facts/bad_column.json", table([], {"Rank": {"type": "float", "summary": "r"}}))
-    found = [(f.path.rsplit("/", 1)[-1], f.detail) for f in facts.check(plugin.scope(), rules)]
-    assert all(name != "ok.json" for name, _ in found)
-    assert any(name == "no_owner.json" and "'owner'" in d for name, d in found)
-    bad_rows = sorted(d for name, d in found if name == "bad_rows.json")
-    assert len(bad_rows) == 3 and all(d.startswith("表の形: $.rows[") for d in bad_rows)
-    assert len([d for name, d in found if name == "bad_column.json"]) == 2
+COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
+
+
+def _schema_findings(plugin, rules, name: str, text: str) -> list[str]:
+    """`contracts/facts/<name>` に表を書き、その表について出た指摘の詳細を並べる。"""
+    plugin.write(f"contracts/facts/{name}", text)
+    return [f.detail for f in facts.check(plugin.scope(), rules) if f.path.rsplit("/", 1)[-1] == name]
+
+
+def test_fact_table_in_the_schema_has_no_findings(with_schema, rules):
+    ok = table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], COLUMNS)
+    assert _schema_findings(with_schema, rules, "ok.json", ok) == []
+
+
+def test_fact_table_without_owner_is_an_error(with_schema, rules):
+    no_owner = json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []})
+    assert any("'owner'" in d for d in _schema_findings(with_schema, rules, "no_owner.json", no_owner))
+
+
+def test_fact_table_rows_out_of_the_declared_columns_are_errors(with_schema, rules):
+    bad_rows = table([{"id": "a", "rank": "1"}, {"id": "b"}, {"id": "c", "rank": 3, "x": 1}], COLUMNS)
+    found = _schema_findings(with_schema, rules, "bad_rows.json", bad_rows)
+    assert len(found) == 3 and all(d.startswith("表の形: $.rows[") for d in found)
+
+
+def test_fact_table_column_out_of_the_schema_is_an_error(with_schema, rules):
+    bad_column = table([], {"Rank": {"type": "float", "summary": "r"}})
+    assert len(_schema_findings(with_schema, rules, "bad_column.json", bad_column)) == 2
 
 
 def test_table_without_schema_beside_it_stops(plugin, rules):
@@ -69,8 +91,8 @@ def test_table_without_schema_beside_it_stops(plugin, rules):
         facts.check(plugin.scope(), rules)
 
 
-def test_domain_tables_are_checked_and_names_do_not_repeat(plugin, rules):
-    plugin.write("contracts/facts/fact.schema.json", SCHEMA.read_text(encoding="utf-8"))
+def test_domain_tables_are_checked_and_names_do_not_repeat(with_schema, rules):
+    plugin = with_schema
     plugin.write("contracts/facts/stages.json", table([{"id": "deploy"}], {}))
     plugin.write("contracts/domains/stages.json", table([{"id": "verify"}], {}))
     plugin.write("contracts/domains/seats.json", table([{"id": "a"}, {"id": "a"}], {}))
