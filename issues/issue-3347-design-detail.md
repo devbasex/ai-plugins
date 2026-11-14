@@ -190,7 +190,8 @@
 
 - 題: `#1142 X2: ndf-next の依存を最新の安定版へ上げ、遅れを知らせる検査と上げる操作のスクリプトを置く`
 - [ ] `plugins/ndf-next/pyproject.toml` の DBOS を除く 13 本（設計の「14 本の最新の版」の表）を上げる先の版にし（httpx は固定するため、版が変わるのは 12 本）、`uv lock` で `uv.lock` を作り直す
-- [ ] httpx は 0.28.1 に固定し、`[tool.ndf.deps.hold]` に `httpx = "githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める"` を書く（判断 (o) の推奨。承認で 1.0.dev6 が選ばれたら、`override-dependencies` で入れ、`plugins/ndf-next/src/ndf/adapters/` の httpx の呼び出しと githubkit を通る呼び出しのテストを通し、1.0 の変更点を PR 本文に挙げる）
+- [ ] 上げる先は公開から 7 日たった版に限る（決定 106）。`plugins/ndf-next/pyproject.toml` の `[tool.uv]` に `exclude-newer = "7 days"` を置き、`uv.lock` の `[options]` に `exclude-newer-span = "P7D"` が残ること、引数なしの `uv lock --check` が通ることを確かめる。`plugin-deps.py` の `target` は最初のアップロードが 7 日に満たない版を候補から外す（公開から 6 日の版と 7 日の版の 2 つの単体テスト）
+- [ ] httpx は 0.28.1 に固定し、`[tool.ndf.deps.hold]` に `httpx = "githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める"` を書く（判断 (o)。利用者が 2026-11-14 に受け入れた）
 - [ ] `scripts/plugin-deps.py` に副命令 `outdated` と `bump` を作る（下の「関数の仕様」）。結果は統一の結果 JSON で 1 行を標準出力へ出す
 - [ ] `.github/workflows/plugin-deps.yml` を足す。週 1 回（と手動）で `outdated --project plugins/ndf-next` を打ち、遅れがあれば印 `<!-- plugin-deps:plugins/ndf-next -->` を持つ Issue を 1 件だけ作るか本文を書き直し、遅れが無くなれば閉じる。PR では走らせない
 - [ ] `.github/workflows/ndf-next.yml` に `uv lock --check --project plugins/ndf-next` を足す（IG5）
@@ -277,7 +278,7 @@
 
 | 関数 | 種類 | 入力 | 出力 | 副作用 | 前提と後条件 |
 | --- | --- | --- | --- | --- | --- |
-| `target(releases, now)` | 純粋な関数 | 版 → 最初のアップロードの日時の辞書・今の時刻 | 上げる先の版の文字列 | 無し | 決定 106 の表の上 4 行。`STALE_DAYS = 365`。ファイルの無い版と PEP 440 で読めない版は数えない |
+| `target(releases, now)` | 純粋な関数 | 版 → 最初のアップロードの日時の辞書・今の時刻 | 上げる先の版の文字列 | 無し | 決定 106 の表の上 4 行。`STALE_DAYS = 365`。最初のアップロードが `now` から `COOLDOWN_DAYS = 7` 日に満たない版・ファイルの無い版・PEP 440 で読めない版は数えない |
 | `fetch(name)` | 外部呼び出し | パッケージ名 | `releases` の辞書 | PyPI の JSON API を 1 回読む | 失敗は `warnings` に載せ、その行を「分からない」にする |
 | `outdated(project, now)` | 外部呼び出し | プロジェクトのディレクトリ | 行ごとに `name`・`current`・`target`・`state`（`latest`・`behind`・`held`・`unknown`）・`hold_reason` | 無し | `held` は `[tool.ndf.deps.hold]` に名前がある行。固定させている相手の制約を外した版で `uv lock --dry-run` が解決できたら `behind` にする |
 | `bump(project, names)` | 書き込み | プロジェクト・名前の列（空なら `behind` のすべて） | 上げた行と、解決できずに戻した行 | `pyproject.toml` の `==` の版を書き換え、`uv lock` を打つ | `uv lock` が失敗したら `pyproject.toml` と `uv.lock` を元へ戻し、`uv` の出力から固定させている相手を結果に載せる |
@@ -322,6 +323,8 @@
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
 | `STALE_DAYS` | 定数 | `scripts/plugin-deps.py` | `365`（決定 106・判断 (r)） |
+| `COOLDOWN_DAYS` | 定数 | `scripts/plugin-deps.py` | `7`（決定 106。利用者の決定 2026-11-14） |
+| `[tool.uv] exclude-newer` | 設定値 | `plugins/ndf-next/pyproject.toml` | `"7 days"`（決定 106。`COOLDOWN_DAYS` と同じ値） |
 | `state` | 型（文字列の列挙） | `scripts/plugin-deps.py` の結果 JSON | `latest`・`behind`・`held`・`unknown` |
 | `[tool.ndf.deps.hold]` | 設定値 | `plugins/ndf-next/pyproject.toml` | `httpx = "githubkit 0.17.1 の httpx<1.0.0"`（決定 106） |
 | Issue の印 | 定数 | `.github/workflows/plugin-deps.yml` | `<!-- plugin-deps:<dir> -->`（決定 107） |

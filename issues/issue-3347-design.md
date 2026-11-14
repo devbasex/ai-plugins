@@ -327,6 +327,8 @@ CI に一時コピーのジョブを足す。`plugins/ndf-next/` を一時ディ
 
 「安定版」は PEP 440 の pre-release でも developmental release でもない版である（STD20）。365 日は利用者の挙げた例（httpx 0.28.1 は約 23 か月）を「古すぎる」に含め、毎年出る安定版を含めない値である（判断 (r)）。宣言 24 本のうち、安定版が 365 日より古いのは httpx・ptyprocess・pytest-xdist・tree-sitter-bash の 4 本で、新しいプレリリースを持つのは httpx だけである（LIB20）。
 
+**どの場合も、上げる先の候補は公開から 7 日たった版に限る**（利用者の決定 2026-11-14。供給網の守り）。公開の日時はその版の最初のアップロードの日時で、7 日に満たない版は無いものとして上の表を当てる。2 か所で同じ値を使う。`pyproject.toml` の `[tool.uv]` に `exclude-newer = "7 days"` を置き、推移的な依存を含めて `uv lock` が 7 日以内の版を選ばないようにする。`scripts/plugin-deps.py` は同じ 7 日（`COOLDOWN_DAYS`）で候補を絞り、`bump` で入れられない版を遅れとして出さない。uv 0.13.7 で、相対の期間は `uv.lock` の `[options]` に `exclude-newer-span = "P7D"` として残り、引数なしの `uv lock --check` が通ることを確かめた（CLI の `--exclude-newer <日時>` だけで作った lock は、引数なしの `uv lock --check` で落ちる）。
+
 `[tool.ndf.deps.hold]` に書いた依存は、遅れとして数えず「固定している」として出す。固定させている相手が制約を外したら（例: githubkit の新しい版が `httpx>=1` を許す）、検査は遅れとして出す。
 
 - 採らない案: プレリリースを常に採る。DBOS の 3.6.0a8 のように、安定版が新しい依存まで不安定な版になる
