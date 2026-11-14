@@ -26,36 +26,36 @@ def test_pick_on_cause_retry_without_policy_goes_to_on_fail_or_conductor():
 
 def test_pick_default_retry_within_attempts_then_moves_on():
     attempts = limits.policy("cause.infra-wait").attempts
-    assert routing.pick("infra_wait", used=attempts - 1).to == "retry"
-    assert routing.pick("infra_wait", used=attempts, on_fail="fix") == routing.Route("step", "fix", 0.0, "infra_wait")
-    assert routing.pick("infra_wait", used=attempts).to == "conductor"
+    assert routing.pick("infra_wait", retry=routing.RetryState(used=attempts - 1)).to == "retry"
+    assert routing.pick("infra_wait", on_fail="fix", retry=routing.RetryState(used=attempts)) == routing.Route("step", "fix", 0.0, "infra_wait")
+    assert routing.pick("infra_wait", retry=routing.RetryState(used=attempts)).to == "conductor"
 
 
 def test_pick_prefers_the_policy_the_caller_resolved_over_the_kind_default():
     # 宣言（プロジェクトの causes・ステップの retry）の上書きは既定の方針より優先する
     declared = limits.Policy(name="cause.infra-wait", summary="s", attempts=1, interval=5)
     assert limits.policy("cause.infra-wait").attempts > 1
-    assert routing.pick("infra_wait", used=0, policy=declared) == routing.Route("retry", None, 5.0, "infra_wait")
-    assert routing.pick("infra_wait", used=1, policy=declared).to == "conductor"
+    assert routing.pick("infra_wait", retry=routing.RetryState(used=0, policy=declared)) == routing.Route("retry", None, 5.0, "infra_wait")
+    assert routing.pick("infra_wait", retry=routing.RetryState(used=1, policy=declared)).to == "conductor"
 
 
 def test_pick_transient_retries_with_backoff_and_is_not_a_human_stop():
     # 一時的な失敗は人を待たずに打ち直す（#3346）
     policy = limits.policy("cause.transient")
-    waits = [routing.pick("transient", used=n).wait for n in range(policy.attempts)]
+    waits = [routing.pick("transient", retry=routing.RetryState(used=n)).wait for n in range(policy.attempts)]
     assert waits == [routing.backoff(policy, n, None, None) for n in range(policy.attempts)]
     assert waits == sorted(waits) and waits[0] < waits[-1]
-    assert routing.pick("transient", used=policy.attempts).to == "conductor"
+    assert routing.pick("transient", retry=routing.RetryState(used=policy.attempts)).to == "conductor"
 
 
 def test_pick_usage_limit_without_retry_after_goes_to_human_as_the_table_says():
     # 表は「retry_after が無ければ人へ戻す」。on_fail があっても進めない（#3394）
-    assert routing.pick("usage_limit", retry_after=120).wait == 120
-    assert routing.pick("usage_limit", retry_after=0) == routing.Route("retry", None, 0.0, "usage_limit")
+    assert routing.pick("usage_limit", retry=routing.RetryState(retry_after=120)).wait == 120
+    assert routing.pick("usage_limit", retry=routing.RetryState(retry_after=0)) == routing.Route("retry", None, 0.0, "usage_limit")
     assert routing.pick("usage_limit", on_fail="x") == routing.Route("human", None, 0.0, "usage_limit")
     assert routing.pick("usage_limit").to == "human"
     used_up = limits.policy("cause.usage-limit").attempts
-    assert routing.pick("usage_limit", used=used_up, retry_after=5, on_fail="x").to == "human"
+    assert routing.pick("usage_limit", on_fail="x", retry=routing.RetryState(used=used_up, retry_after=5)).to == "human"
 
 
 @pytest.mark.parametrize("kind", ["fix_limit", "needs_human", "precondition", "not_ci"])
@@ -88,7 +88,7 @@ def test_pick_does_not_take_text():
 
 def test_pick_refuses_negative_count():
     with pytest.raises(ValueError):
-        routing.pick("unknown", used=-1)
+        routing.pick("unknown", retry=routing.RetryState(used=-1))
 
 
 def test_backoff_grows_and_is_capped():
@@ -109,7 +109,7 @@ def test_pick_reads_requires_retry_after_and_exhausted_from_the_table(contracts_
     )
     assert routing.pick("infra_wait") == routing.Route("conductor", None, 0.0, "infra_wait")
     assert routing.pick("infra_wait", on_fail="f") == routing.Route("step", "f", 0.0, "infra_wait")
-    assert routing.pick("infra_wait", retry_after=7.0) == routing.Route("retry", None, 7.0, "infra_wait")
+    assert routing.pick("infra_wait", retry=routing.RetryState(retry_after=7.0)) == routing.Route("retry", None, 7.0, "infra_wait")
     contracts_copy(
         "causes.json",
         lambda d: {**d, "causes": [{**c, "exhausted": "human"} if c["kind"] == "infra_wait" else c for c in d["causes"]]},
