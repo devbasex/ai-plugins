@@ -14,21 +14,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
 from typing import List, Optional, TextIO
 
 from ndf.domains.hooks import tables
-
-
-def _payload(text: str) -> Optional[dict]:
-    try:
-        data = json.loads(text) if text.strip() else None
-    except ValueError:  # noqa: NDF401 利用者の入力: JSON でない入力は通す
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
@@ -41,7 +32,7 @@ def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[T
             return 0
         runtime, event = argv[1], argv[2]
         record.update(runtime=runtime, event=event)
-        payload = _payload((stdin or sys.stdin).read())
+        payload = tables.json_object((stdin or sys.stdin).read())
         if payload is None or tables.event_spec(runtime, event) is None:
             record["error"] = "input_shape" if payload is None else "unknown_event"
             return 0

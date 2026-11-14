@@ -79,16 +79,8 @@ def read_records(state_dir: Path, days: float, now: Optional[datetime] = None) -
         day = _day_of(path)
         if day is None or day + timedelta(days=1) <= cutoff:
             continue
-        records += [r for r in map(_parse, path.read_text(encoding="utf-8").splitlines()) if r is not None]
+        records += [r for r in map(tables.json_object, path.read_text(encoding="utf-8").splitlines()) if r is not None]
     return records
-
-
-def _parse(line: str) -> Optional[dict[str, Any]]:
-    try:
-        rec = json.loads(line)
-    except ValueError:  # noqa: NDF401 ファイル: 書きかけの行は数えない
-        return None
-    return rec if isinstance(rec, dict) else None
 
 
 def percentile(values: Iterable[float], q: float) -> Optional[float]:

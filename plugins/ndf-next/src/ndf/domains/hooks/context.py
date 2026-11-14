@@ -7,13 +7,14 @@ payload・シェルの構文木・会話の記録の末尾・最後の応答の�
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
+
+from ndf.domains.hooks import tables
 
 # シェルの構文木で、ループとして数える節
 _LOOP_NODES = frozenset({"while_statement", "until_statement", "for_statement", "c_style_for_statement"})
@@ -48,11 +49,7 @@ class ShellScript(NamedTuple):
 
 def parse_payload(text: str) -> Optional[dict[str, Any]]:
     """標準入力の JSON。オブジェクトでなければ None。"""
-    try:
-        data = json.loads(text) if text.strip() else None
-    except ValueError:  # noqa: NDF401 利用者の入力: JSON でない入力は形の違いとして通す
-        return None
-    return data if isinstance(data, dict) else None
+    return tables.json_object(text)
 
 
 @lru_cache(maxsize=1)
@@ -137,21 +134,12 @@ def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
     return "report"
 
 
-def _line_json(line: str) -> Optional[dict[str, Any]]:
-    """会話の記録の 1 行。オブジェクトでなければ None（payload の解析とは別に数える）。"""
-    try:
-        data = json.loads(line)
-    except ValueError:  # noqa: NDF401 ファイル: 書きかけの行は読まない
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def context_tokens(tail: str) -> Optional[int]:
     """会話の記録の末尾から、最後の応答の文脈の量（入力の token と cache の token の和）。無ければ None。"""
     for line in reversed(tail.splitlines()):
         if '"usage"' not in line:
             continue
-        rec = _line_json(line)
+        rec = tables.json_object(line)
         usage = ((rec or {}).get("message") or {}).get("usage") if rec else None  # noqa: NDF501 ファイル: 応答でない行は usage を持たない
         if isinstance(usage, dict):
             keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -240,7 +228,7 @@ class HookContext:
 
 def _last_assistant_text(tail: str) -> str:
     for line in reversed(tail.splitlines()):
-        rec = _line_json(line) if '"assistant"' in line else None
+        rec = tables.json_object(line) if '"assistant"' in line else None
         text = _record_text(rec) if rec else None
         if text is not None:
             return text

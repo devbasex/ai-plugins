@@ -102,7 +102,7 @@ def test_non_object_input_passes(text):
 )
 def test_boot_reads_the_payload_like_the_context(text, expected):
     # 環境が無いときのエントリポイントも、オブジェクトの JSON だけを入力として読む（context の解析と同じ答え）
-    assert boot._payload(text) == expected
+    assert tables.json_object(text) == expected
     assert context.parse_payload(text) == expected
 
 

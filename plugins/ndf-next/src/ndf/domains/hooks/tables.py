@@ -32,6 +32,15 @@ def load(rel: str) -> Any:
         raise TableError(f"契約の表を読めない: {path}: {exc}") from exc
 
 
+def json_object(text: str) -> Optional[dict[str, Any]]:
+    """JSON のオブジェクトを読む。空白だけ・JSON でない・オブジェクトでなければ None。"""
+    try:
+        data = json.loads(text) if text.strip() else None
+    except ValueError:  # noqa: NDF401 利用者の入力: JSON でない入力・書きかけの行は形の違いとして通す
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def policies() -> dict[str, dict[str, Any]]:
     """上限の宣言の方針の表（名前 → 値）。"""
     return load("limits.json")["policies"]
