@@ -134,15 +134,14 @@
       "context": "project-glossary",
       "meaning": "用語集で別の語へ置き換えた語。文書の追加した行と、用語集自身の意味の説明に出たら落とす",
       "code": "deprecated",
-      "source": "docs/specifications/ndf-ubiquitous-language.md",
-      "pending_source": "issues/issue-3190-design.md"
+      "source": "docs/specifications/ndf-glossary-deprecated-meaning.md"
     },
     {
       "term": "単独で照合する廃止した語",
       "context": "project-glossary",
       "meaning": "前後が漢字の出現には当てない廃止した語。1 文字の語と、長い語の一部に現れる語を登録するために使う",
       "code": "deprecated_standalone",
-      "pending_source": "issues/issue-3190-design.md"
+      "source": "docs/specifications/ndf-glossary-deprecated-meaning.md"
     },
     {
       "term": "不変条件",
@@ -189,8 +188,7 @@
       "deprecated": [
         "語のチェック"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-3190-design.md"
+      "source": "docs/specifications/ndf-glossary-deprecated-meaning.md"
     },
     {
       "term": "モデルレビュー",
@@ -7211,19 +7209,19 @@
       "term": "CI",
       "context": "ndf-workflow",
       "meaning": "Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー）",
-      "pending_source": "issues/issue-3190-design.md",
       "deprecated": [
         "継続的統合"
-      ]
+      ],
+      "source": "docs/specifications/ndf-glossary-deprecated-meaning.md"
     },
     {
       "term": "文字列",
       "context": "ndf-workflow",
       "meaning": "文字の並びとして持つ値",
-      "pending_source": "issues/issue-3190-design.md",
       "deprecated_standalone": [
         "字で持"
-      ]
+      ],
+      "source": "docs/specifications/ndf-glossary-deprecated-meaning.md"
     },
     {
       "term": "取り込み方",
