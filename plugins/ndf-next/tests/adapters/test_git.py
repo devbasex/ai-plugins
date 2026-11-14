@@ -148,15 +148,18 @@ def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path)
     assert _git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
 
 
-def test_checkout_detached_and_merge_ff_put_the_ref_after_end_of_options() -> None:
+def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
+    # 3364-7: checkout は版によって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
+    repo, base = _init_repo(tmp_path, {"a.txt": "a\n"})
+    done = git.Git(cwd=repo).checkout_detached("main")
+    assert done.returncode == 0, done.stderr
+    assert _git(repo, "rev-parse", "HEAD") == base
+
+
+def test_merge_ff_puts_the_ref_after_end_of_options() -> None:
     runner = _fake()
-    g = git.Git(runner=runner)
-    g.checkout_detached("abc")
-    g.merge_ff("origin/develop")
-    assert runner.calls == [
-        ["checkout", "-q", "--detach", "--end-of-options", "abc"],
-        ["merge", "--ff-only", "-q", "--end-of-options", "origin/develop"],
-    ]
+    git.Git(runner=runner).merge_ff("origin/develop")
+    assert runner.calls == [["merge", "--ff-only", "-q", "--end-of-options", "origin/develop"]]
 
 
 def test_has_ref_and_fetch_do_not_read_a_dash_value_as_an_option(tmp_path: Path) -> None:
