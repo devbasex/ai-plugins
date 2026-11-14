@@ -37,6 +37,8 @@ TOOL = cli.tool_of(__name__)
 CHECK_COMMAND = "ndf training check"
 # 確かめる口の無い担当（kiro・agy など）の記録の値
 UNSUPPORTED = "unsupported"
+# 控えを読んで起動を断ったときの記録の値
+REFUSED = "refused"
 CACHE_FILE = "training.json"
 # 控えの期限の方針（contracts/limits.json）
 VALID_POLICY = "training.check-valid"
@@ -282,7 +284,7 @@ def refusal(runtime: str, now: Optional[float] = None) -> Optional[str]:
         return _ask_check(runtime, "控えが読めない")
     why = _cached_refusal(runtime, cache.get(runtime), time.time() if now is None else now)
     if why is not None:
-        record("training", runtime=runtime, state="refused")
+        record("training", runtime=runtime, state=REFUSED)
     return why
 
 
