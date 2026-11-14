@@ -52,10 +52,8 @@ def extract_result(message, received, stderr_tail):
 
 
 def wait_for_hooks_list(lines, reader_done, stderr_tail, *, clock=time.monotonic, sleep=time.sleep):
-    """hooks/list への応答を待ち、result を返す。応答前の終了と時間切れは fail で終える。
-
-    clock は期限を測る時計、sleep は行を待つ間の待ち（既定は time.monotonic と time.sleep）。
-    """
+    """hooks/list への応答を待ち、result を返す。応答前の終了と時間切れは fail で終える。"""
+    # clock は期限を測る時計、sleep は行を待つ間の待ち（既定は time.monotonic と time.sleep）
     deadline = clock() + TIMEOUT_SECONDS
     received = []
     while True:
