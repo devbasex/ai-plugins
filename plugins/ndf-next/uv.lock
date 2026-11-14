@@ -109,7 +109,7 @@ wheels = [
 
 [[package]]
 name = "githubkit"
-version = "0.16.1"
+version = "0.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -119,9 +119,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/a8/ebfcbddccb3e813837600f4cdb79fc462fd284c1db03abc1ad31072d0757/githubkit-0.16.1.tar.gz", hash = "sha256:f56ea4e796f169773d114c7f39089790f99443f1d05871d594d6bdca7928945c", size = 36999, upload-time = "2026-08-14T07:46:05.363Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/00/c6bdf4f48a71255232a742a1b473cba9c129a5a21b0ad3e88621aa15edbd/githubkit-0.17.1.tar.gz", hash = "sha256:ea15afe3992d54478dca2906701d34a5f5caa4e5b0d5aebb8224da609ee75a9e", size = 40501, upload-time = "2026-11-06T06:09:16.972Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/eb/ee6424e6d257433a8a62e86016cdbce6efdbd26d7db5735c5c099da85e44/githubkit-0.16.1-py3-none-any.whl", hash = "sha256:a791e0eb57ec80824a711321376c5816aa1cd204e6982e4ad5ddce6c87490863", size = 42935, upload-time = "2026-08-14T07:46:04.167Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/ef/29208aa0a927eb5c6918ac46f2b364e40cbd3559abe12446d8744f286817/githubkit-0.17.1-py3-none-any.whl", hash = "sha256:d341a048e8c15cd594cbedc9f8e9a62e14bd2c33c248006de2a911ce47009bf9", size = 43922, upload-time = "2026-11-06T06:09:15.86Z" },
 ]
 
 [[package]]
@@ -237,15 +237,15 @@ wheels = [
 
 [[package]]
 name = "hishel"
-version = "2.0.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/83/e8c4e482b6f5e9c2f9d1c7a1503137eed81b689d358ae0df6ac50d79f172/hishel-2.0.0.tar.gz", hash = "sha256:f043c88acf9b476fdbf203986253cd4e27e2468a3319b43c3946a641e1cb7696", size = 902409, upload-time = "2026-11-05T14:10:42.119Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/ff/efba29288e1d304359491fa3aab83174c3ef24a63819e6acad6873d8c0a9/hishel-1.4.0.tar.gz", hash = "sha256:e406b052c658ce28629fc31423b9914b637d47d7c923f5fe9e288ec47e4823d1", size = 813499, upload-time = "2026-09-16T15:38:54.085Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/9e/3657bc96268326f911952e2b6d67494344ef0c49220db342f1d625cb2cf3/hishel-2.0.0-py3-none-any.whl", hash = "sha256:3e96613d05a13d08d4ee22621dff3aebcdffbe41472efc2b5d4d01d6bd254983", size = 81878, upload-time = "2026-11-05T14:10:40.115Z" },
+    { url = "https://files.pythonhosted.org/packages/da/c5/2cf7b80da9833de6ae5099111b64cf541830ccb4ef26605ae86f23ed5604/hishel-1.4.0-py3-none-any.whl", hash = "sha256:38cb62d7d38fb437dc086f789c26d0cab41310d12497ec3f56dcead4b08571f0", size = 80795, upload-time = "2026-09-16T15:38:52.545Z" },
 ]
 
 [package.optional-dependencies]
@@ -492,7 +492,7 @@ dev = [
 requires-dist = [
     { name = "dbos", specifier = "==3.1.0" },
     { name = "filelock", specifier = "==4.0.3" },
-    { name = "githubkit", specifier = "==0.16.1" },
+    { name = "githubkit", specifier = "==0.17.1" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "jsonschema", specifier = "==4.26.0" },
     { name = "markdown-it-py", specifier = "==4.2.0" },

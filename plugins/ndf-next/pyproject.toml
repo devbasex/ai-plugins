@@ -18,7 +18,7 @@ requires-python = ">=3.11"
 dependencies = [
     "dbos==3.1.0",
     "filelock==4.0.3",
-    "githubkit==0.16.1",
+    "githubkit==0.17.1",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
     "markdown-it-py==4.2.0",
