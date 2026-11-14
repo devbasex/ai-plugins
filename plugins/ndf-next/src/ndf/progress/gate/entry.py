@@ -101,7 +101,7 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         args = work_argv(a.kind, Path(a.state_dir), Path(a.cwd))
     except model.Refused as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
-    argv = invoke.ndf_command("worker", *args)  # -P: 作業場所の ndf.py・ndf/ を配布したパッケージより先に読まない
+    argv = invoke.ndf_command("worker", *args)  # -P: 作業場所の ndf.py・ndf/ をインストールしたパッケージより先に読まない
     exec_(argv[0], argv)
     return 0
 
