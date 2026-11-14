@@ -12,7 +12,7 @@ from typing import Any, Optional
 from ndf import cli
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Reading, Watch, cause_of, failed_test_nodes_of, files_of, is_test_check, watch_head
+from ndf.adapters.ci import Reading, Watch, WatchResult, cause_of, failed_test_nodes_of, files_of, is_test_check, watch_head
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -82,7 +82,11 @@ def _watch(args: argparse.Namespace) -> dict:
     pull = hub.pull(args.pr)
     watch.reader = watch_head(hub, pull.head_sha, args.required, args.test)
     watched = watch.run()
-    kind = watched.cause(args.test, merge_failed)
+    return _report(args, pull, hub, watched, watched.cause(args.test, merge_failed))
+
+
+def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
+    """待ちの結果と止まった理由の種類（通っていれば None）から結果 JSON を組む。"""
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
         metrics.update(_failed_nodes(hub, watched.reading))
