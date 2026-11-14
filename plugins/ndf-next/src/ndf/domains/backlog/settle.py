@@ -71,7 +71,8 @@ def check_improved(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
 
 
 def check_removed(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
-    if issues_gh.get_or_none(gh, f"/repos/{gh.repo}/commits/{quote(ev['commit'])}", missing=(issues_gh.NOT_FOUND, issues_gh.UNPROCESSABLE)) is None:
+    missing = (issues_gh.NOT_FOUND, issues_gh.UNPROCESSABLE)
+    if issues_gh.get_or_none(gh, f"/repos/{gh.repo}/commits/{quote(ev['commit'])}", missing=missing) is None:
         return f"コミット {ev['commit']} が無い"
     if file_text(gh, ev["path"], base) is not None:
         return f"基底のブランチ {base} に {ev['path']} がまだある"
