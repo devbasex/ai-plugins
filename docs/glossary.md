@@ -663,6 +663,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | — |
 | 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | — |
 | 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | — |
+| 契約のページ | — | ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない | — | — | — |
+| Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | — |
+| 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
