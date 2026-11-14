@@ -71,10 +71,12 @@ ReadMemory = Callable[[], "int | None"]
 class Stopped(Exception):
     """待ちを諦めたか、メモリで止めた。落ちたテストとして数えない（終了コードは `command` が止まった理由の表の種類から引く。I9）。"""
 
-    def __init__(self, reason: str, waited_seconds: float, available_mib: int | None):
+    def __init__(self, reason: str, waited_seconds: float, available_mib: int | None, retired: Sequence[Mapping[str, str]] = ()):
         self.reason = reason
         self.waited_seconds = waited_seconds
         self.available_mib = available_mib
+        # 枠の置き場を用意したときに退避した旧い状態の置き場（結果 JSON の `items` の形）
+        self.retired = [dict(item) for item in retired]
         super().__init__(self.summary())
 
     def summary(self) -> str:
@@ -223,6 +225,8 @@ class Held:
     memory_stopped: bool = False
     available_mib: int | None = None
     started_at: float = 0.0
+    # 枠の置き場を用意したときに退避した旧い状態の置き場（結果 JSON の `items` の形）
+    retired: list[dict[str, str]] = field(default_factory=list)
     _monitor: _MemoryMonitor | None = None
 
     @property
@@ -399,11 +403,12 @@ def gate(
         yield Held()
         return
     limits = limits or limits_mod.load_limits(cwd)
-    directory = _prepare_directory(options, env)
-    if isinstance(directory, Held):
-        yield directory
+    prepared = _prepare_directory(options, env)
+    if isinstance(prepared, Held):
+        yield prepared
         return
-    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind)
+    directory, retired = prepared
+    yield from _held(SlotContext(directory, cwd, limits, options.poll, options.read_memory, options.interrupted), kind, retired)
 
 
 def _skip_gate(env: Mapping[str, str]) -> bool:
@@ -411,17 +416,24 @@ def _skip_gate(env: Mapping[str, str]) -> bool:
     return bool(env.get(HELD_ENV) or env.get(CI_ENV))
 
 
-def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> Path | Held:
-    """枠の置き場を用意して返す。使えなければ、理由を `note` に書いた枠を取らない形の `Held` を返す（I8）。"""
+def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> tuple[Path, list[dict[str, str]]] | Held:
+    """枠の置き場と、用意したときに退避した旧い状態の置き場を返す。
+
+    使えなければ、理由を `note` に書いた枠を取らない形の `Held` を返す（I8）。退避の後に使えなくなっても、
+    退避した置き場はその `Held` の `retired` に残す（復旧先を呼び出し元が引ける）。
+    """
+    retired: list[dict[str, str]] = []
     try:
-        # 退避した旧い置き場は identity が警告のログへ書く。テストの結果は変えないので結果へは載せない
-        directory = options.directory or slots_place(env)[0]
+        if options.directory is None:
+            directory, retired = slots_place(env)
+        else:
+            directory = options.directory
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
-        return Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}")
-    return directory
+        return Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}", retired=retired)
+    return directory, retired
 
 
 def _record(ctx: SlotContext, kind: str, held: Held, result: str) -> None:
@@ -543,9 +555,9 @@ def _take_slot(ctx: SlotContext, held: Held) -> FileLock | None:
         return None
 
 
-def _new_held(ctx: SlotContext) -> Held:
+def _new_held(ctx: SlotContext, retired: list[dict[str, str]]) -> Held:
     """メモリの監視を組み込んだ、まだ枠を持たない `Held`。"""
-    held = Held()
+    held = Held(retired=retired)
     held._monitor = _MemoryMonitor(ctx.directory, ctx.limits.memory_floor_mib, ctx.poll, ctx.read_memory, on_stop=held._stopped_by_memory)
     return held
 
@@ -556,8 +568,8 @@ def _record_without_slot(ctx: SlotContext, kind: str, held: Held, result: str) -
     _record(ctx, kind, held, result)
 
 
-def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
-    held = _new_held(ctx)
+def _held(ctx: SlotContext, kind: str, retired: list[dict[str, str]]) -> Iterator[Held]:
+    held = _new_held(ctx, retired)
     try:
         lock = _take_slot(ctx, held)
     except KeyboardInterrupt:
@@ -569,7 +581,7 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
             yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
             return
         _record_without_slot(ctx, kind, held, GAVE_UP)
-        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
+        raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib, held.retired)
     held.env = {HELD_ENV: str(_slot_path(ctx.directory, held.index))}
     result = INTERRUPTED
     try:
@@ -584,4 +596,4 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
         _release(ctx.directory, held, lock)
         _record(ctx, kind, held, result)
     if result == MEMORY_STOPPED:
-        raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib)
+        raise Stopped(MEMORY_STOPPED, held.waited_seconds, held.available_mib, held.retired)

@@ -22,6 +22,8 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
   途中で落ちても中身の半端な `format.json` は残らない
 - 退避する置き場が別の退避する置き場の中にあれば（`XDG_STATE_HOME` と `CLAUDE_CONFIG_DIR` が同じなど）、外側の
   置き場だけを名前を変え、中の置き場は外側と一緒に動く
+- 退避する置き場が退避しない置き場（`Handling.KEEP` の行。アカウントの設定・動いているプロセスの排他など）を中に
+  持てば、外側ごと動かすとそれらまで動くため、何も変えずに `IdentityError` を投げて人へ戻す
 - 戻り値の `StateReady` が、退避した置き場の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）
 """
 
@@ -134,7 +136,9 @@ class Handling(Enum):
 class OldPlace:
     """旧い NDF の状態の置き場の 1 行。`handling` が扱い、`reason` がその理由。
 
-    `path` はこのモジュールで退避する行（`Handling.RETIRE_HERE`）だけが持つ。ほかの行は None。
+    `path` は置き場のパス。このモジュールで退避する行（`Handling.RETIRE_HERE`）と、退避しない行（`Handling.KEEP`）が
+    持つ。退避しない行のパスは、退避する置き場の中に入っていないかを確かめるためだけに使い、触らない。
+    ほかのモジュールが退避する行（`Handling.RETIRE_ELSEWHERE`）は None。
     """
 
     key: str
@@ -173,31 +177,44 @@ OLD_STATE_PLACES: tuple[OldPlace, ...] = (
         where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts",
         handling=Handling.KEEP,
         reason="利用者のアカウントの設定。新しい NDF は新しい状態の置き場の `relay/accounts` を使い重ならない。移行は S2 #3304",
+        path=lambda ident: _config_home() / ident.name / "accounts",
     ),
     OldPlace(
         key="config-relay",
         where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/relay.py",
         handling=Handling.KEEP,
         reason="中継の 1 つの複製で、新しい NDF の導入（`ndf relay install`）が上書きする",
+        path=lambda ident: _config_home() / ident.name / "relay.py",
     ),
     OldPlace(
         key="config-locks",
         where="<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/locks",
         handling=Handling.KEEP,
         reason="動いているプロセスの排他。退避すると動いている旧い NDF の排他が外れる",
+        path=lambda ident: _config_home() / ident.name / "locks",
     ),
     OldPlace(
         key="cache",
         where="~/.cache/<名前>",
         handling=Handling.KEEP,
         reason="新しい NDF が使わない、再生成できるキャッシュ",
+        path=lambda ident: Path.home() / ".cache" / ident.name,
     ),
 )
 
 
 def old_state_places(ident: PluginIdentity) -> list[Path]:
     """`OLD_STATE_PLACES` のうち、このモジュールで退避する置き場のパス（表の順）。"""
-    return [place.path(ident) for place in OLD_STATE_PLACES if place.handling is Handling.RETIRE_HERE and place.path is not None]
+    return _places(ident, Handling.RETIRE_HERE)
+
+
+def kept_places(ident: PluginIdentity) -> list[Path]:
+    """`OLD_STATE_PLACES` のうち、退避しない置き場のパス（表の順）。"""
+    return _places(ident, Handling.KEEP)
+
+
+def _places(ident: PluginIdentity, handling: Handling) -> list[Path]:
+    return [place.path(ident) for place in OLD_STATE_PLACES if place.handling is handling and place.path is not None]
 
 
 def _retire_candidates(place: Path, now: datetime) -> Iterator[Path]:
@@ -243,15 +260,33 @@ def _outermost(places: list[Path]) -> list[Path]:
 
 def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
     old = _outermost([p for p in old_state_places(ident) if _is_old(p)])
+    _refuse_unsafe_retire(ident, old)
+    retired = _retire_all(old, now)
+    ident.state_dir.mkdir(parents=True, exist_ok=True)
+    _write_format(ident.state_dir)
+    return StateReady(ident.state_dir, retired)
+
+
+def _refuse_unsafe_retire(ident: PluginIdentity, old: list[Path]) -> None:
+    """退避してよいと確かめられなければ、何も変えずに `IdentityError` を投げる（ほかの根・退避しない置き場を含む）。"""
     if old and ident.foreign_root is not None:
         raise IdentityError(
             f"CLAUDE_PLUGIN_ROOT（{ident.foreign_root}）が自分の根（{ident.root}）と違うため、旧い状態の置き場を退避しない: "
             + ", ".join(str(p) for p in old)
         )
-    retired = _retire_all(old, now)
-    ident.state_dir.mkdir(parents=True, exist_ok=True)
-    _write_format(ident.state_dir)
-    return StateReady(ident.state_dir, retired)
+    holding = _holding_kept(ident, old)
+    if holding:
+        raise IdentityError(
+            "退避する旧い状態の置き場が、退避しない置き場を中に持つため退避しない（外側ごと動かすとそれらも動く）: "
+            + ", ".join(f"{outer} が {kept} を含む" for outer, kept in holding)
+        )
+
+
+def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
+    """退避する置き場と、その中にある（あれば）退避しない置き場の組。"""
+    # 置き場そのものがリンクでも、置かれている場所で比べる（リンクの先へたどらない）
+    kept = [(k, k.parent.resolve() / k.name) for k in kept_places(ident) if os.path.lexists(k)]
+    return [(outer, k) for outer in old for k, resolved in kept if outer.resolve() in resolved.parents]
 
 
 def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:

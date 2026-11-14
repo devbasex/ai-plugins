@@ -161,6 +161,26 @@ def test_prepare_moves_a_place_inside_another_only_with_the_outer_one(tmp_path, 
     assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
 
 
+def test_prepare_refuses_to_move_an_outer_place_holding_places_marked_not_to_retire(tmp_path, monkeypatch):
+    # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと state-home が accounts・locks を含む。外側ごと動かさず止める
+    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "same"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "same"))
+    ident = identity.load()
+    (ident.state_dir / "state").mkdir(parents=True)
+    (ident.state_dir / "state" / "ledger.jsonl").write_text("old")
+    (ident.state_dir / "locks").mkdir()
+    (ident.state_dir / "locks" / "x.lock").write_text("held")
+
+    with pytest.raises(identity.IdentityError, match="退避しない置き場"):
+        identity.prepare_state_dir(ident, now=NOW)
+
+    assert (ident.state_dir / "locks" / "x.lock").read_text() == "held"
+    assert (ident.state_dir / "state" / "ledger.jsonl").read_text() == "old"
+    assert not (ident.state_dir / identity.FORMAT_FILE).exists()
+    assert _retired_names(ident) == []
+
+
 def test_old_state_places_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
     # 現状固定: このモジュールで退避するのは state-home と config-state の 2 つで、表の順に並ぶ
     assert identity.old_state_places(ident) == [ident.state_dir, tmp_path / "config" / "p" / "state"]
@@ -174,8 +194,8 @@ def test_every_old_place_has_a_decision_and_a_reason():
     for place in identity.OLD_STATE_PLACES:
         assert isinstance(place.handling, identity.Handling), place.key
         assert place.reason.strip(), place.key
-        # このモジュールで退避する行だけがパスを持つ（ほかの行にこのモジュールは触らない）
-        assert (place.handling is identity.Handling.RETIRE_HERE) == (place.path is not None), place.key
+        # ほかのモジュールが退避する行だけがパスを持たない（退避しない行のパスは中に入っていないかの確かめだけに使う）
+        assert (place.handling is identity.Handling.RETIRE_ELSEWHERE) == (place.path is None), place.key
 
 
 def test_prepare_leaves_places_marked_not_to_retire(ident, tmp_path, monkeypatch):
