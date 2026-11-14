@@ -305,6 +305,11 @@ FROM_PROJECT = f"{PROJECT_FILE} の宣言"
 FROM_DEFAULT = "params.json の既定"
 FROM_WORKTREE = "作業場所のブランチ"
 FROM_INPUT = "工程の入力か打った場所"
+FROM_STAGE = "工程の承認ゲート（モードが置く listen のステップ）"
+# 工程から呼ぶプランの中の承認ゲート（雛形の `{{gate}}`）に入れる起動。承認の要否と答えは工程の側（モードが置く
+# listen のステップ）が持つため、プランの中では待たずに通す（終了コード 0 で結果 JSON を出さない手は ok）。
+# `params.json` の既定（`ndf answer ask`）は工程の外で雛形を使うときの値で、工程から使うと承認待ちを足してしまう
+STAGE_GATE = ["true"]
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,
@@ -313,7 +318,7 @@ FILL_SOURCES = {
     "review": FROM_PROJECT,
     "rebuild": FROM_PROJECT,
     "worker": FROM_DEFAULT,
-    "gate": FROM_DEFAULT,
+    "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
 # `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite の command を宣言の順に ` && ` でつなぐ）
@@ -417,7 +422,7 @@ def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path)
     wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
     place = work_place(run, cwd)
     issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
-    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted)}
+    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
     missing = _missing(t, values, {**FILL_SOURCES, **untrusted})
     if missing:
@@ -450,6 +455,11 @@ def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Va
     """ブランチの出所の差し込みの値（決まらなければ含めない）。"""
     branch = _branch_of(run) if "branch" in wanted else None
     return {"branch": branch} if branch is not None else {}
+
+
+def _fill_gate(wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """承認ゲートの差し込みの値（工程の承認ゲートが決めるので、プランの中では待たずに通す）。"""
+    return {"gate": list(STAGE_GATE)} if "gate" in wanted else {}
 
 
 def _missing(t: route.Template, values: Mapping[str, route.Value], sources: Mapping[str, str]) -> dict[str, str]:

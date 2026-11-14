@@ -76,6 +76,16 @@ def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st,
     assert new is not None and new.id != old.id and new.stage == "設計"
 
 
+def test_the_design_gate_asks_about_the_design_pr_of_the_finished_step(st, repo, new_table, flow):
+    # 設計 PR は工程の途中ではステップの記録にしか無い（工程の出力は工程が終わる時に書く）
+    tid = new_table()
+    flow.turn(tid)
+    v = run.read(st, tid)
+    assert "design_pr" not in v.context()
+    q = gate.waiting(v, repo="o/r")
+    assert q is not None and q.pr == 7 and q.pr_url == "https://github.com/o/r/pull/7"
+
+
 def test_github_observe_reads_the_head_and_refuses_when_it_cannot(st, repo, new_table, flow):
     tid = new_table()
     flow.turn(tid)
