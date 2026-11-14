@@ -39,7 +39,8 @@ def _shape_error(e: Any) -> Optional[str]:
         return f"evidence.kind は {' / '.join(SHAPES)} のどれか"
     for key, typ in SHAPES[ev["kind"]].items():
         val = ev.get(key)
-        if not isinstance(val, typ) or isinstance(val, bool) or val in ("", 0):
+        # 終了コード（exit）は 0 が正しい値。空を断るのは文字列と PR の番号だけ
+        if not isinstance(val, typ) or isinstance(val, bool) or val == "" or (key != "exit" and val == 0):
             return f"evidence.{key} が無いか形が違う（{typ.__name__}）"
     if ev["kind"] == NOT_REPRODUCED and parse_time(ev["at"]) is None:
         return f"evidence.at が ISO 8601 の日時でない: {ev['at']!r}"
