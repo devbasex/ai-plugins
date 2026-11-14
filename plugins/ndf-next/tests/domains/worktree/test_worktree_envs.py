@@ -354,3 +354,138 @@ def test_ledger_latest_and_path_of_git(main_repo: Path) -> None:
     assert ledger.latest(rows, "/z", lambda r: True) is None
     want = Path(os.path.realpath(main_repo)) / ".git" / "ndf" / "worktree-registry.json"
     assert ledger.ledger_path(Git(main_repo)) == want and ledger.Ledger.of(Git(main_repo)).path == want
+
+
+# 現状固定（I-020）: `testenv_sweep.expose`・`unexpose` の分岐。期待値は今の実装の出力。
+EXPOSE = {"enabled": True, "public_tag": "t1", "base_domain": "example.test", "open_command": "open-it"}
+
+
+def _sweep_target(tmp_path: Path, fake: FakeShell, conf: object, make_dir: bool = True) -> testenv.Target:
+    wt = tmp_path / "wt"
+    if make_dir:
+        wt.mkdir()
+    return testenv.Target(wt, tmp_path, {"expose": conf}, (), fake.shell(), ledger.Ledger(tmp_path / "reg.json"))
+
+
+def _assigned(t: testenv.Target, tag: Optional[str] = "t1") -> None:
+    t.book.acquire(t.key, "feat/x", "env-x")
+    t.book.acquire("/other", "feat/o", "env-o")  # 別の worktree の割り当て（スロット 1）
+    if tag is not None:
+        t.book.update(t.key, lambda r: r.update(golden_tag=tag))
+
+
+@pytest.mark.parametrize(
+    ("conf", "message"),
+    [
+        (None, "拒否: testenv.expose.enabled が有効でない"),
+        ({**EXPOSE, "enabled": "yes"}, "拒否: testenv.expose.enabled が有効でない"),
+        ({**EXPOSE, "public_tag": ""}, "拒否: testenv.expose.public_tag と base_domain が要る"),
+        ({**EXPOSE, "base_domain": None}, "拒否: testenv.expose.public_tag と base_domain が要る"),
+        ({**EXPOSE, "open_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command）"),
+    ],
+)
+def test_expose_refuses_broken_config(tmp_path: Path, conf: object, message: str) -> None:
+    t = _sweep_target(tmp_path, FakeShell(), conf)
+    _assigned(t)
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.expose(t)
+    assert str(exc.value) == message
+
+
+def test_expose_refuses_without_assignment_or_with_other_tag(tmp_path: Path) -> None:
+    t = _sweep_target(tmp_path, FakeShell(), EXPOSE)
+    with pytest.raises(testenv.TestenvError, match="^拒否: 割り当てが無い$"):
+        testenv_sweep.expose(t)
+    _assigned(t, tag=None)
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.expose(t)
+    assert str(exc.value) == "拒否: 載っている基準（なし）が公開を許す基準（t1）と違う"
+    t.book.update(t.key, lambda r: r.update(golden_tag="t0"))
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.expose(t)
+    assert str(exc.value) == "拒否: 載っている基準（t0）が公開を許す基準（t1）と違う"
+
+
+def test_expose_opens_once_and_passes_values(tmp_path: Path) -> None:
+    fake = FakeShell()
+    t = _sweep_target(tmp_path, fake, EXPOSE)
+    _assigned(t)
+    assert testenv_sweep.expose(t) == "https://wt0.example.test"
+    values = {"NDF_EXPOSE_URL": "https://wt0.example.test", "NDF_EXPOSE_HOST": "wt0.example.test", "NDF_EXPOSE_ENVIRONMENT": "env-x",
+              "NDF_EXPOSE_SLOT": "0"}  # fmt: skip
+    assert fake.calls == [(["sh", "-c", "open-it"], t.path, values)]
+    opened = t.book.current(t.key)["expose"]  # type: ignore[index]
+    assert (opened["url"], opened["ttl"], opened["closed_at"]) == ("https://wt0.example.test", testenv_sweep.DEFAULT_TTL, None)
+    assert testenv_sweep.expose(t) == "https://wt0.example.test" and len(fake.calls) == 1  # 開いていれば打たない
+
+
+def test_expose_uses_declared_ttl(tmp_path: Path) -> None:
+    t = _sweep_target(tmp_path, FakeShell(), {**EXPOSE, "ttl": 2})
+    _assigned(t)
+    testenv_sweep.expose(t)
+    assert t.book.current(t.key)["expose"]["ttl"] == "2"  # type: ignore[index]
+
+
+def test_expose_refuses_while_other_worktree_is_open(tmp_path: Path) -> None:
+    fake = FakeShell()
+    t = _sweep_target(tmp_path, fake, EXPOSE)
+    _assigned(t)
+    t.book.update("/other", lambda r: r.update(expose={"url": "u", "closed_at": None}))
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.expose(t)
+    assert str(exc.value) == "拒否: 別のテスト環境が公開中（同時に開けるのは 1 本）" and fake.calls == []
+
+
+def test_expose_rolls_back_record_when_open_command_fails(tmp_path: Path) -> None:
+    fake = FakeShell({"-c open-it": Completed(1, "", "")})
+    t = _sweep_target(tmp_path, fake, EXPOSE)
+    _assigned(t)
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.expose(t)
+    assert str(exc.value) == "公開の手段が失敗した。記録を戻した"
+    opened = t.book.current(t.key)["expose"]  # type: ignore[index]
+    assert opened["closed_at"] is not None
+    assert testenv_sweep.unexpose(t) is None  # 閉じた記録は開いている公開として読まない
+
+
+def test_unexpose_runs_close_command_and_closes(tmp_path: Path) -> None:
+    fake = FakeShell()
+    t = _sweep_target(tmp_path, fake, {**EXPOSE, "close_command": "close-it"})
+    _assigned(t)
+    assert testenv_sweep.unexpose(t) is None
+    testenv_sweep.expose(t)
+    assert testenv_sweep.unexpose(t) == "https://wt0.example.test"
+    values = {"NDF_EXPOSE_URL": "https://wt0.example.test", "NDF_EXPOSE_HOST": "wt0.example.test", "NDF_EXPOSE_ENVIRONMENT": "env-x",
+              "NDF_EXPOSE_SLOT": "0"}  # fmt: skip
+    assert fake.calls[-1] == (["sh", "-c", "close-it"], t.path, values)
+    assert t.book.current(t.key)["expose"]["closed_at"] is not None  # type: ignore[index]
+    assert testenv_sweep.unexpose(t) is None
+
+
+def test_unexpose_keeps_record_when_close_command_fails(tmp_path: Path) -> None:
+    fake = FakeShell({"-c close-it": Completed(2, "", "")})
+    t = _sweep_target(tmp_path, fake, {**EXPOSE, "close_command": "close-it"})
+    _assigned(t)
+    testenv_sweep.expose(t)
+    with pytest.raises(testenv.TestenvError) as exc:
+        testenv_sweep.unexpose(t)
+    assert str(exc.value) == "公開を閉じる手段が失敗した。台帳は閉じていない: env-x https://wt0.example.test"
+    assert t.book.current(t.key)["expose"]["closed_at"] is None  # type: ignore[index]
+
+
+def test_unexpose_after_release_and_without_worktree_dir(tmp_path: Path) -> None:
+    fake = FakeShell()
+    t = _sweep_target(tmp_path, fake, {**EXPOSE, "close_command": "close-it"}, make_dir=False)
+    _assigned(t)
+    testenv_sweep.expose(t)
+    t.book.update(t.key, lambda r: r.update(released_at="t"))  # 解放の後も閉じるまで残る
+    assert testenv_sweep.unexpose(t) == "https://wt0.example.test"
+    assert fake.calls[-1][1] == tmp_path  # worktree が無ければメインディレクトリで打つ
+
+
+def test_unexpose_without_close_command_only_closes_record(tmp_path: Path) -> None:
+    fake = FakeShell()
+    t = _sweep_target(tmp_path, fake, EXPOSE)
+    _assigned(t)
+    testenv_sweep.expose(t)
+    assert testenv_sweep.unexpose(t) == "https://wt0.example.test" and len(fake.calls) == 1
