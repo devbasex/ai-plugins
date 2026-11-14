@@ -106,6 +106,8 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
             raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+        if case is not None and (row := reviewed.admin_record_on_resume(root, repo_lib.owner_repo(root), case, main_pr)):
+            items.append(row)  # 再開: 迂回でマージしたのに記録が無ければ書く（#3506 の I7）
     else:
         if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
             raise StepError(f"タグ {tag} は既にある")
@@ -122,10 +124,11 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
             merge, verdict = _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops)
             metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
             items += approval.tolerated_items(verdict)
-        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
+        admin = case is not None and case.admin_merge
+        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": admin})
         git(root, "fetch", "-q", "origin")
         merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-    return main_pr, merge, items, metrics, merge_back_after(root, a, plugin, branches, main_pr, ops)
+    return main_pr, merge, items, metrics, reviewed.admin_back(merge_back_after(root, a, plugin, branches, main_pr, ops))
 
 
 def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops):
@@ -144,7 +147,7 @@ def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, 
 
 
 def _merge_exact(root, a, plugin, refs, main_pr, case, items, metrics, ops):
-    """CD のある場合（#2773 の決定 7）: 本番の PR の先端が PR の上の承認と完全に一致するときだけ、迂回なしで 1 回だけマージする。
+    """CD のある場合（#2773 の決定 7）: 本番の PR の先端が PR の上の承認と完全に一致するときだけ、1 回だけマージする（迂回は `cd-admin` だけ。#3506）。
     承認の後のコミットの追加・組み直しで先端が動けば承認ゲート（10）で止め、入れ直さない。`refs` は (リリースブランチ, 本番チャネル)。"""
     branch, prod = refs
     redo = f"release-steps.py release-branch で組み直したら承認資料を作り直し、本番の PR #{main_pr} の新しい先端で承認を取り直して打ち直す"

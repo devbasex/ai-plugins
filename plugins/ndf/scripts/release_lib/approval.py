@@ -77,7 +77,7 @@ def _approved_from_pr(case, sha, material) -> None:
             f"リリースの場合 {case.case} では --approved-sha も --approval も渡さない（承認はリリースの PR の"
             + (
                 "証跡のコメント。release-steps.py approve --pr <本番の PR> --approved-sha <先端> --by user で書く）"
-                if case.case == release_case.CD_NO_REVIEW
+                if case.trail_approval
                 else "レビューの承認）"
             ),
             EXIT_PRECONDITION,
@@ -330,6 +330,7 @@ def approve(root, a) -> dict:
 
 def approved_on_pr(repo: str, pr: int, head: str, case) -> "trail.Judgment":
     """場合 1（cd-no-review）は証跡、場合 2（cd-review）は有効な人の最新の承認のレビューのコミットで先端を照らす（#2773 の決定 7）。
+    `cd-admin` は利用者が書いた証跡（担い手が user）だけで照らす（#3506 の I9）。
     許可リストの許容を使わず、完全な一致だけを success にする。読めなければ TrailError。"""
     if case.case == release_case.CD_REVIEW:
         got = trail.read_review_commit(repo, pr)
@@ -338,7 +339,7 @@ def approved_on_pr(repo: str, pr: int, head: str, case) -> "trail.Judgment":
         if got != head.lower():
             return trail.Judgment("failure", f"承認のレビュー {got[:7]} ≠ 先端 {head[:7]}")
         return trail.Judgment("success", f"承認のレビュー {got[:7]}")
-    return trail.judge_trails_on(repo, pr, head)
+    return trail.judge_trails_on(repo, pr, head, "user" if case.human_approval and case.trail_approval else None)
 
 
 def _sha_on_pr(root, a) -> tuple[str, dict]:
