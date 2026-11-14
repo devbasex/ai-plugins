@@ -79,26 +79,26 @@ def test_broken_file_stops_without_writing(root, checks):
 def test_backup_after_the_first_check_of_the_day_only(root):
     url = store.default_url(root)
     store.open_store(url, root, T0).close()
-    assert len(store._backups(root)) == 1
+    assert len(store.backups(root)) == 1
     (root / store.CHECKED_MARK).unlink()
     store.open_store(url, root, T0 + timedelta(hours=2)).close()
-    assert len(store._backups(root)) == 1
+    assert len(store.backups(root)) == 1
     (root / store.CHECKED_MARK).unlink()
     store.open_store(url, root, T0 + timedelta(hours=25)).close()
-    assert len(store._backups(root)) == 2
+    assert len(store.backups(root)) == 2
 
 
 def test_eighth_backup_drops_the_oldest(root):
     with store.open_store(store.default_url(root), root, T0) as st:
         taken = [store.backup(st.engine, root, T0 + timedelta(days=i), force=True) for i in range(1, 9)]
-    kept = store._backups(root)
+    kept = store.backups(root)
     assert len(kept) == store.KEEP_BACKUPS
-    assert taken[-1] in kept and store._backups(root)[0] == taken[1]
+    assert taken[-1] in kept and store.backups(root)[0] == taken[1]
 
 
 def test_failed_backup_leaves_no_partial_file_and_keeps_old_ones(root, monkeypatch):
     with store.open_store(store.default_url(root), root, T0) as st:
-        old = store._backups(root)
+        old = store.backups(root)
 
         def broken(engine, dest):
             dest.write_bytes(b"partial")
@@ -107,16 +107,16 @@ def test_failed_backup_leaves_no_partial_file_and_keeps_old_ones(root, monkeypat
         monkeypatch.setattr(store, "_write_backup", broken)
         with pytest.raises(store.BackupFailed):
             store.backup(st.engine, root, T0 + timedelta(days=2), force=True)
-    assert store._backups(root) == old
+    assert store.backups(root) == old
 
 
 def test_table_version_bump_takes_a_backup_first(root):
     url = store.default_url(root)
     with store.open_store(url, root, T0) as st, store.transaction(st) as conn:
         conn.execute(store.VERSIONS.update().values(value=0))
-    before = len(store._backups(root))
+    before = len(store.backups(root))
     store.open_store(url, root, T0 + timedelta(hours=1)).close()
-    assert len(store._backups(root)) == before + 1
+    assert len(store.backups(root)) == before + 1
 
 
 def _write_and_crash(url: str, root: str) -> None:
@@ -224,4 +224,4 @@ def test_concurrent_openers_check_and_back_up_once(root, tmp_path):
         p.join()
     assert all(p.exitcode == 0 for p in procs)
     assert log.read_text().count("1") == 1
-    assert len(store._backups(root)) == 1
+    assert len(store.backups(root)) == 1

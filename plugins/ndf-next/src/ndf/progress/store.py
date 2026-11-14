@@ -307,13 +307,13 @@ def open_store(url: str, root: Path, now: Optional[datetime] = None) -> Store:
 # --- 控えと戻し --------------------------------------------------------------------------
 
 
-def _backups(root: Path) -> list[Path]:
+def backups(root: Path) -> list[Path]:
     """控えを古い順に（名前は UTC の日時を持つため、名前の順が時刻の順）。"""
     return sorted((root / BACKUP_DIR).glob(f"{BACKUP_PREFIX}*{durable.DB_SUFFIX}"))
 
 
 def latest_backup(root: Path) -> Optional[Path]:
-    found = _backups(root)
+    found = backups(root)
     return found[-1] if found else None
 
 
@@ -348,7 +348,7 @@ def backup(engine: sa.Engine, root: Path, now: datetime, force: bool = False) ->
         dest.unlink(missing_ok=True)
         raise BackupFailed(f"進行表の DB の控えを書けない: {dest}: {exc}") from exc
     os.utime(dest, (now.timestamp(), now.timestamp()))
-    for old in _backups(root)[:-KEEP_BACKUPS]:
+    for old in backups(root)[:-KEEP_BACKUPS]:
         old.unlink(missing_ok=True)
     return dest
 
@@ -376,7 +376,7 @@ def _retire_db(path: Path, now: datetime) -> Path:
 
 
 def _next_backup(root: Path, source: Path) -> Optional[Path]:
-    older = [p for p in _backups(root) if p.resolve() != source.resolve()]
+    older = [p for p in backups(root) if p.resolve() != source.resolve()]
     return older[-1] if older else None
 
 
