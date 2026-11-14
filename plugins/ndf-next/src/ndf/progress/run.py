@@ -174,24 +174,30 @@ class StepProgress:
 
     def see(self, ev: model.Event) -> None:
         """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの revise）なら世代を上げてステップを初めから流し直す。"""
-        kind, p = ev.draft.kind, payload_of(ev)
-        if kind == ANSWERED:
-            self._answered(ev, p)
-        elif kind == STARTED:
-            self.anchor, self.answer, self.waiting = ev.seq, None, None
-            if self.failed:
-                self.retries += 1
-                self.done = {} if self.redo else self.done
-                self.failed = self.redo = False
-        elif kind == FAILED:
-            self.failed = True
-            self.redo = "step" in p and p["step"] is None
-        elif kind == STEP_EVENT:
-            if p["status"] == FINISHED:
-                self.done[p["step"]], self.waiting = p["report"], None
-            else:
-                self.waiting = p
-            self.anchor, self.answer = ev.seq, None
+        handle = _SEES.get(ev.draft.kind)
+        if handle is not None:
+            handle(self, ev, payload_of(ev))
+
+    def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
+        """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
+        self.anchor, self.answer, self.waiting = ev.seq, None, None
+        if self.failed:
+            self.retries += 1
+            self.done = {} if self.redo else self.done
+            self.failed = self.redo = False
+
+    def _failed(self, _ev: model.Event, p: dict[str, Any]) -> None:
+        """行の失敗。止まったステップが無い（工程全体の出力が規約に合わない）なら、次の開始で初めから流し直す。"""
+        self.failed = True
+        self.redo = "step" in p and p["step"] is None
+
+    def _recorded(self, ev: model.Event, p: dict[str, Any]) -> None:
+        """ステップの記録。終わったなら結果を残し、ほかは待ちにする。数え始めをここへ移す。"""
+        if p["status"] == FINISHED:
+            self.done[p["step"]], self.waiting = p["report"], None
+        else:
+            self.waiting = p
+        self.anchor, self.answer = ev.seq, None
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """答え。承認ゲートの差し戻しなら世代を上げて初めから流し直し、ほかは数え始めの後の答えだけを残す。"""
@@ -201,6 +207,15 @@ class StepProgress:
             self.notes = p["notes"]
         elif ev.seq > self.anchor:
             self.answer = ev
+
+
+# 事象の種類 → 進みを書き換える StepProgress のメソッド（表に無い種類は進みを変えない）
+_SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = {
+    ANSWERED: StepProgress._answered,
+    STARTED: StepProgress._started,
+    FAILED: StepProgress._failed,
+    STEP_EVENT: StepProgress._recorded,
+}
 
 
 def step_progress(v: View, stage: str) -> StepProgress:
