@@ -225,7 +225,7 @@ def resolved_flow(root, base: str | None = None, production: str | None = None) 
     """ブランチ運用の宣言をブランチ名まで解く（`base`・`production` を渡せばそれを使う）。宣言が壊れていれば `branch_flow.FlowError`。"""
     wt = read_worktree_decl(root)[0] if root else {}
     flow = branch_flow.of_decl(wt)
-    base = base or declared_base(root) or default_branch(root)
+    base = base or base_branch(root)
     production = production or production_branch(root, wt)[0]
     return flow.resolve(base, production)
 
