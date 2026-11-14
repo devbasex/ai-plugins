@@ -8,7 +8,7 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 このプラグインを読む（`plugin_args`）。外す設定は `DISABLED_PLUGINS` の 1 か所だけが持ち、起動のスクリプトは
 副命令 `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
 
-起動の前に、学習に使わない設定の控え（`training.refusal`）を読み、重い起動の枠（`launch_slot.held`）を取る（#3391・#3368）。
+起動の前に、学習に使わない設定の控え（`training.refusal`）を読み、重い起動の枠（`launch_slot.held`）を取る（#3391・#3368。前置きは `launch_slot.gate` が持つ）。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence
 
 from ndf import identity
-from ndf.adapters import launch_slot, training
+from ndf.adapters import launch_slot
 from ndf.adapters.agents import stop, usage_limit
 from ndf.adapters.run_log import child_process_env
 from ndf.contracts import facts
@@ -193,14 +193,11 @@ def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[
     `Failure.NO_SLOT` を返す。専用のプロセスの組で起動し、期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。
     """
-    why = training.refusal("claude")
-    if why is not None:
-        return ClaudeReply.failed("", why, failure=Failure.REFUSED)
     try:
-        with launch_slot.held("claude", cwd=cwd):
+        with launch_slot.gate("claude", cwd=cwd):
             return _run_claude(argv, prompt, timeout, cwd)
-    except launch_slot.NoSlot as exc:
-        return ClaudeReply.failed("", str(exc), failure=Failure.NO_SLOT)
+    except launch_slot.NotLaunched as exc:
+        return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
 
 
 def _run_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path]) -> ClaudeReply:
