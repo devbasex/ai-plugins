@@ -28,8 +28,7 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def trash_root(git: Git) -> Path:
-    common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-    return Path(os.path.realpath(common)) / TRASH_DIR
+    return git.common_dir() / TRASH_DIR
 
 
 def _others(git: Git) -> list[str]:

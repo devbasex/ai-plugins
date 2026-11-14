@@ -7,7 +7,6 @@ git の共通ディレクトリの `ndf-main.lock` で、`flock` で取る（シ
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
@@ -25,8 +24,7 @@ POLICY = "merged.main-lock"
 
 def lock_file(git: Git) -> Path:
     """排他のファイルの置き場（`<git の共通ディレクトリ>/ndf-main.lock`）。"""
-    common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-    return Path(os.path.realpath(common)) / LOCK_NAME
+    return git.common_dir() / LOCK_NAME
 
 
 @contextmanager

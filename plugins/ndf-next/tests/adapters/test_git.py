@@ -246,6 +246,22 @@ def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -
         git.run_git(["status"], None)
 
 
+def test_common_dir_is_real_main_git_dir_from_main_and_linked_worktree(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    _git(path, "worktree", "add", "-q", "-b", "side", str(tmp_path / "side"))
+    link = tmp_path / "link"
+    link.symlink_to(path)
+    want = Path(os.path.realpath(path / ".git"))
+    assert git.Git(cwd=path).common_dir() == want
+    assert git.Git(cwd=tmp_path / "side").common_dir() == want
+    assert git.Git(cwd=link).common_dir() == want
+
+
+def test_common_dir_propagates_git_failure() -> None:
+    with pytest.raises(git.GitError):
+        git.Git(runner=_fake(128, stderr="fatal: not a git repository\n")).common_dir()
+
+
 # 現状固定（I-009）: `localenv.changed_paths` が `git status --porcelain -z` を読む形。期待値は今の実装の出力。
 def test_changed_paths_reads_status_with_renames_and_untracked(tmp_path: Path) -> None:
     from ndf.domains.worktree import localenv

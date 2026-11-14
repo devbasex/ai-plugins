@@ -176,6 +176,11 @@ class Git:
         per_commit = first_parent_lines(log_text)
         return sum(n for sha, n in per_commit.items() if not any(sha_matches(d, sha) for d in drop))
 
+    def common_dir(self) -> Path:
+        """git の共通ディレクトリ（linked worktree からでもメインの `.git`）の実体の絶対パス。"""
+        common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        return Path(os.path.realpath(common))
+
     def remote_repo(self, remote: str = "origin") -> str:
         """リモートの `<所有者>/<リポジトリ>`。GitHub の URL でなければ `GitError`。"""
         url = self.run("remote", "get-url", remote).strip()

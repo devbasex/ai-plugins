@@ -263,8 +263,7 @@ def down(t: Target, volumes: bool = False) -> int:
 
 def _exclude_evidence(t: Target) -> None:
     """証跡の置き場を、共通の git ディレクトリの info/exclude へ登録する（worktree 固有の exclude は git が読まない）。"""
-    common = Git(t.path).run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-    exclude = Path(common) / "info" / "exclude"
+    exclude = Git(t.path).common_dir() / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
     lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
     if f"{EVIDENCE}/" not in lines:

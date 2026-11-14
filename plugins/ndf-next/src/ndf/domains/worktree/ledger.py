@@ -31,8 +31,7 @@ def now() -> str:
 
 
 def ledger_path(git: Git) -> Path:
-    common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-    return Path(os.path.realpath(common)) / LEDGER
+    return git.common_dir() / LEDGER
 
 
 class Ledger:
