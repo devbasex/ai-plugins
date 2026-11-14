@@ -154,3 +154,38 @@ def test_shell_targets_redirects_home_and_no_base(monkeypatch: pytest.MonkeyPatc
     assert write_target.shell_targets("echo a > ~/h", "/r") == ["/home/h/h"]
     assert write_target.shell_targets("cat <<EOF 2> e > o\nhi\nEOF") == ["e", "o"]
     assert write_target.shell_targets("{ cd s; echo; } > o") == ["o"]
+
+
+# 現状固定（I-013）: `_Scan._andor` を通る `&&`・`||` の組み合わせ。期待値は今の実装の出力。
+@pytest.mark.parametrize(
+    ("command", "want"),
+    [
+        ("cd a && echo > f", ["/r/a/f"]),
+        ("cd a && cd b && echo > f", ["/r/a/b/f"]),
+        ("true && cd a; echo > f", []),  # 条件つきの cd
+        ("cd a && true; echo > f", ["/r/a/f"]),
+        ("cd a || exit; echo > f", ["/r/a/f"]),
+        ("cd a || return 1; echo > f", ["/r/a/f"]),
+        ("cd a || break; echo > f", ["/r/a/f"]),
+        ("cd a || continue; echo > f", ["/r/a/f"]),
+        ("cd a || { echo no; exit 1; }; echo > f", ["/r/a/f"]),
+        ("cd a || { echo no; }; echo > f", []),
+        ("cd a && cd b || exit; echo > f", ["/r/a/b/f"]),
+        ("cd a || cd b; echo > f", []),
+        ("true || cd b; echo > f", []),
+        ("true || true; echo > f", ["/r/f"]),
+        ("true || exit; echo > f", ["/r/f"]),
+        ("cd a || echo > g", ["/r/g"]),  # 右辺は cd の前の位置で走る
+        ("cd a && echo > g || echo > h", ["/r/a/g"]),
+        ("cd a || exit || true; echo > f", ["/r/a/f"]),
+        ("cd a || exit 1 && echo > f", ["/r/a/f"]),
+        ("a && b || cd c; echo > f", []),
+        ("cd a > o || exit; echo > f", ["/r/o", "/r/a/f"]),
+        ("cd /x && echo > f", ["/x/f"]),
+        ("cd a && echo > f && cd b && echo > g", ["/r/a/f", "/r/a/b/g"]),
+        ("f1 && f2; echo > f", ["/r/f"]),
+        ("cd a && (cd b) ; echo > f", ["/r/a/f"]),
+    ],
+)
+def test_shell_targets_andor_characterization(command: str, want: list[str]) -> None:
+    assert write_target.shell_targets(command, "/r") == want
