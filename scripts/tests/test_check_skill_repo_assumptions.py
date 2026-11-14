@@ -596,6 +596,8 @@ def load_checker():
 
     spec = importlib.util.spec_from_file_location("check_skill_repo_assumptions_i003", CHECKER)
     mod = importlib.util.module_from_spec(spec)
+    # dataclass は遅延評価の型注釈を解くときに sys.modules から自分のモジュールを引く
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 

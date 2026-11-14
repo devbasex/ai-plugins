@@ -56,6 +56,7 @@ import deps  # noqa: E402
 deps.require("waits", "durable", "md", "mdtable", "procs", "locks", "schema", "versions")
 from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
+import branch_flow  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 import run_state  # noqa: E402
@@ -192,7 +193,9 @@ def _cleanup_pr(ctx: CleanupContext, n):
         return
     branch, merge_commit = got
     # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）
-    if why := repo.kept_sprint_branch(ctx.main_dir, branch, repo.sprint_flow_record(ctx.main_dir, branch)):
+    # 開始時の記録は .ndf/ の目録を全部読むため、スプリントブランチのときだけ探す
+    record = repo.sprint_flow_record(ctx.main_dir, branch) if (branch or "").startswith(branch_flow.SPRINT_PREFIX) else None
+    if why := repo.kept_sprint_branch(ctx.main_dir, branch, record):
         ctx.add("branch", branch, "kept", why)
     elif _remove_pr_worktrees(ctx, branch, merge_commit):
         _delete_branch(ctx.main_dir, branch, ctx.add)
