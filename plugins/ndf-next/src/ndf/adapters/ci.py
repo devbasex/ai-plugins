@@ -191,7 +191,7 @@ def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iter
     マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
     """
     after_merge = merge_failed is not None
-    merged_tests, merged_other = split_failed(merge_failed or (), tests)
+    merged_tests, merged_other = split_failed(merge_failed if merge_failed is not None else [], tests)
     if merged_tests:
         return "test_failed"
     verdict = reading.verdict
