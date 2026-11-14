@@ -21,40 +21,120 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
+from datetime import timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
+from ndf import identity
+from ndf.adapters.git import Git, GitError
+from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
-from ndf.progress import command, conditions, definition, invoke, model, stages, store
-from ndf.progress.records import Records, github_records, sync_records
-from ndf.progress.table import FINISHED, View, append, read
-from ndf.progress.table import payload as _payload
+from ndf.progress import command, definition, invoke, model, stages, store
 
 TOOL = __package__.rpartition(".")[2]
 ACTOR = invoke.ACTOR
-# 事象の種類
-STARTED = "started"
-STEP_EVENT = "step_recorded"
-ANSWERED = "answered"
-FAILED = "failed"
+
+
+def _event(kind: str) -> str:
+    """進行の事象の種類（契約 `workflow/progress.json` のスプリントの行）。表に無ければ import の時点で `KeyError`。"""
+    return model.rules()[("sprint", kind)].kind
+
+
+def _answer(word: str) -> str:
+    """答えの語（表 answers の行）。表に無ければ import の時点で `FactsError`。"""
+    return str(facts.row(result.ANSWERS, word)["id"])
+
+
+# 事象の種類。行を終える事象の種類は、終えた行の状態とステップの記録の status にも使う
+STARTED = _event("started")
+STEP_EVENT = _event("step_recorded")
+ANSWERED = _event("answered")
+FAILED = _event("failed")
+FINISHED = _event("finished")
 # 答えの語（承認と差し戻し）
-APPROVED = "approved"
-REVISE = "revise"
+APPROVED = _answer("approved")
+REVISE = _answer("revise")
+# 番号のぶつかり（同時の追記）で読み直して書き直す回数
+APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも宣言の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
 WAIT_DEFAULT_SECONDS = plan_cli.WAIT_DEFAULT_SECONDS
 # 作業の置き場（チェックアウトの置き場の下）
 WORK_DIR = "progress-work"
+
+
 # --- 進行表の読み書き ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class View:
+    """1 つのトランザクションで読んだ進行表（最新の改訂・定義・事象）。"""
+
+    table_id: str
+    rev: int
+    snap: stages.Snapshot
+    doc: dict[str, Any]
+    events: list[model.Event]
+
+    @property
+    def rows(self) -> dict[str, model.RowState]:
+        return model.fold(self.events, self.rev)
+
+    @property
+    def whole(self) -> Optional[str]:
+        return model.table_state("sprint", self.events)
+
+    def row_events(self, stage: str) -> list[model.Event]:
+        return [e for e in self.events if e.draft.row_key == stage and e.draft.rev == self.rev]
+
+    def context(self) -> dict[str, Any]:
+        """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
+        out = dict(self.doc["context"])
+        for ev in self.events:
+            if ev.draft.kind == stages.OUTPUTS_EVENT and ev.draft.rev == self.rev:
+                out.update(_payload(ev)["outputs"])
+        return out
+
+
+def _payload(ev: model.Event) -> dict[str, Any]:
+    """事象の payload。無ければ空。"""
+    return ev.draft.payload if ev.draft.payload is not None else {}
+
+
+def view(conn: Any, table_id: str) -> View:
+    if store.read_table(conn, table_id) is None:
+        raise model.Refused(f"進行表 {table_id} は無い")
+    rev, raw = store.read_definition(conn, table_id)
+    return View(table_id, rev, stages.snapshot_from(raw), raw, store.read_events(conn, table_id))
+
+
+def read(st: store.Store, table_id: str) -> View:
+    with store.transaction(st) as conn:
+        return view(conn, table_id)
+
+
+def append(st: store.Store, table_id: str, build: Callable[[View], list[model.EventDraft]]) -> list[int]:
+    """今の進行表を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。下書きが空なら書かない。"""
+    for attempt in range(1, APPEND_ATTEMPTS + 1):
+        try:
+            with store.transaction(st) as conn:
+                v = view(conn, table_id)
+                drafts = build(v)
+                return store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+        except store.Conflict:
+            if attempt == APPEND_ATTEMPTS:
+                raise
+    raise AssertionError("到達しない")
 
 
 def _write(st: store.Store, table_id: str, *drafts: model.EventDraft) -> list[int]:
@@ -90,7 +170,9 @@ class StepProgress:
     def see(self, ev: model.Event) -> None:
         """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの revise）なら世代を上げてステップを初めから流し直す。"""
         kind, p = ev.draft.kind, _payload(ev)
-        if kind == STARTED:
+        if kind == ANSWERED:
+            self._answered(ev, p)
+        elif kind == STARTED:
             self.anchor, self.answer, self.waiting = ev.seq, None, None
         elif kind == STEP_EVENT:
             if p["status"] == FINISHED:
@@ -98,11 +180,14 @@ class StepProgress:
             else:
                 self.waiting = p
             self.anchor, self.answer = ev.seq, None
-        elif kind == ANSWERED and p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
+
+    def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
+        """答え。承認ゲートの差し戻しなら世代を上げて初めから流し直し、ほかは数え始めの後の答えだけを残す。"""
+        if p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
             self.notes = p["notes"]
-        elif kind == ANSWERED and ev.seq > self.anchor:
+        elif ev.seq > self.anchor:
             self.answer = ev
 
 
@@ -281,6 +366,101 @@ def report(v: View, m: Move) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", v.table_id))
 
 
+# --- 進捗記録（受け入れ条件 6・3377-9）: 課題の工程表とスプリント PR の「通した工程」を終了の印から書き直す ---
+# 本文の節（見出しから終わりの印まで）だけを書き直すので、何度打っても同じ本文になる。
+
+# 進捗記録の節の見出しと終わりの印、時刻の表示の時間帯（JST）
+ISSUE_SECTION = "## 進行"
+PR_SECTION = "## 通した工程"
+SECTION_END = f"<!-- {identity.FINAL_NAME}:section-end -->"
+JST = timezone(timedelta(hours=9))
+
+
+class Records(Protocol):
+    """課題と PR の本文の読み書き。"""
+
+    def read(self, number: int) -> str: ...
+
+    def write(self, number: int, body: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class GitHubRecords:
+    hub: GitHub
+
+    def read(self, number: int) -> str:
+        return self.hub.issue_body(number).body
+
+    def write(self, number: int, body: str) -> None:
+        self.hub.rest("PATCH", f"/repos/{self.hub.repo}/issues/{int(number)}", {"body": body})
+
+
+def github_records(cwd: Path) -> Records:
+    return GitHubRecords(GitHub(Git(cwd).remote_repo(), client()))
+
+
+def _record_line(name: str, row: Optional[model.RowState]) -> str:
+    if row is not None and row.state == FINISHED and row.at is not None:
+        return f"- [x] {name} — {row.at.astimezone(JST):%Y-%m-%d %H:%M}"
+    if row is not None and row.state in ("disabled", "cancelled"):
+        why = f"（{row.reason}）" if row.reason else ""
+        return f"- [ ] {name} — {model.label(row.state)}{why}"
+    return f"- [ ] {name}"
+
+
+def issue_section(v: View) -> str:
+    """課題の工程表（節「進行」の中身）。全工程を並べ、終了の印が付いた行だけに印と時刻を付ける。"""
+    rows = v.rows
+    lines = [f"モード: {v.snap.mode}", ""] + [_record_line(s.name, rows.get(s.name)) for s in v.snap.stages]
+    return "\n".join(lines)
+
+
+def pr_section(v: View) -> str:
+    """スプリント PR の「通した工程」。終了の印が付いた行だけを並べる。"""
+    rows = v.rows
+    done = [_record_line(s.name, rows[s.name]) for s in v.snap.stages if s.name in rows and rows[s.name].state == FINISHED]
+    return "\n".join(line.replace("- [x] ", "- ", 1) for line in done)
+
+
+def replace_section(body: str, heading: str, content: str) -> str:
+    """本文の節（見出しから終わりの印まで）を書き直す。無ければ末尾へ足す。何度打っても同じ本文になる。"""
+    block = f"{heading}\n\n{content}\n{SECTION_END}\n"
+    pattern = re.compile(rf"^{re.escape(heading)}\n.*?^{re.escape(SECTION_END)}\n?", re.MULTILINE | re.DOTALL)
+    if pattern.search(body):
+        return pattern.sub(lambda _m: block, body, count=1)
+    return f"{body.rstrip(chr(10))}\n\n{block}" if body.strip() else block
+
+
+def _targets(v: View) -> list[tuple[str, int, str, str]]:
+    ctx = v.context()
+    out = [("issue", int(n), ISSUE_SECTION, issue_section(v)) for n in ctx["issues"]]
+    if "pr" in ctx:
+        out.append(("pr", int(ctx["pr"]), PR_SECTION, pr_section(v)))
+    return out
+
+
+def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[list[dict[str, Any]], list[str]]:
+    """課題と PR の本文の進捗の節を、進行表の終了の印から書き直す。書けなかった置き場は誤りに載せる。
+
+    `make` は置き場を作る（`run.Env.records`）。
+    """
+    try:
+        records = make(cwd)
+    except (GitError, GitHubError) as exc:
+        return [], [f"進捗記録を書けない: {exc}"]
+    items, errors = [], []
+    for kind, number, heading, content in _targets(v):
+        try:
+            body = records.read(number)
+            new = replace_section(body, heading, content)
+            if new != body:
+                records.write(number, new)
+            items.append({"kind": kind, "number": number, "changed": new != body})
+        except GitHubError as exc:
+            errors.append(f"{kind} #{number} の進捗記録を書けない: {exc}")
+    return items, errors
+
+
 # --- 依存（テストが差し替える） ------------------------------------------------------------
 
 
@@ -374,7 +554,7 @@ TABLE_FACTS: dict[str, Callable[[View], bool]] = {"retro_enabled": _retro_enable
 
 
 def _when_off(d: Drive, v: View, s: stages.StageDef) -> Optional[str]:
-    """定義の条件のうち最初の偽の語。すべて真か、conductor が戻した行なら None。求められなければ `FactUnknown`。"""
+    """定義の条件のうち最初の偽の語。すべて真か、conductor が戻した行なら None。求められなければ `command.FactUnknown`。"""
     if not s.when or _forced(v, s.name):
         return None
     outer = tuple(w for w in s.when if w not in TABLE_FACTS)
@@ -388,7 +568,7 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
     m = Move(Action.START, s)
     try:
         off = _when_off(d, v, s)
-    except conditions.FactUnknown as exc:
+    except command.FactUnknown as exc:
         detail = f"工程 {s.name} の{exc}（流すなら disable の後に enable、外すなら disable を打つ）"
         return result.stopped(TOOL, "precondition", detail, metrics=_metrics(v, m))
     if off is not None:
@@ -692,7 +872,7 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
 
 
 def _env() -> Env:
-    return Env(facts=conditions.facts_of)
+    return Env(facts=command.facts_of)
 
 
 def _cmd_next(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:

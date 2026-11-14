@@ -28,10 +28,11 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.adapters import claude
 from ndf.contracts import limits, result
+from ndf.core.plan import cli as plan_cli
 from ndf.progress import definition, model, stages
 
-# 作業種別と、工程の定義の call → 作業種別
-PLAN = "plan"
+# 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
+PLAN = plan_cli.TOOL
 SKILL = "skill"
 SCRIPT = "script"
 LISTEN = "listen"
@@ -256,7 +257,7 @@ def _set_value(value: Any) -> str:
 
 def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str]) -> list[str]:
     """`ndf plan next <雛形> --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。"""
-    argv = ndf_command("plan", "next", str(template_path(run.name)), "--state-dir", str(work_dir))
+    argv = ndf_command(PLAN, "next", str(template_path(run.name)), "--state-dir", str(work_dir))
     for key, value in run.inputs.items():
         argv += ["--set", f"{key}={_set_value(value)}"]
     return argv + (["--answer", answer] if answer else [])

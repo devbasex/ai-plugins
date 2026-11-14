@@ -12,7 +12,7 @@ from ndf import contracts, identity
 from ndf.adapters.git import GitError
 from ndf.contracts import causes
 from ndf.core import durable
-from ndf.progress import command, definition, model, store, table
+from ndf.progress import command, definition, model, store
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -475,4 +475,4 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     root = command.store_root_of(repo)
     with store.open_store(store.default_url(root), root) as st, pytest.raises(store.Conflict):
         command._append(st, tid, build)
-    assert calls["n"] == table.APPEND_ATTEMPTS and len(builds) == table.APPEND_ATTEMPTS
+    assert calls["n"] == command.APPEND_ATTEMPTS and len(builds) == command.APPEND_ATTEMPTS
