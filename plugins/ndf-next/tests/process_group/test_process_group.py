@@ -11,8 +11,9 @@ from ndf import process_group
 from ndf.contracts import ContractError, limits
 from ndf.testing import waits
 
-# 先頭の bash は SIGTERM で終わるが、SIGTERM を無視する子孫が残る組
-STUBBORN = "(trap '' TERM; sleep 600) & echo started; wait"
+# 先頭の bash は SIGTERM で終わるが、SIGTERM を無視する子孫が残る組。started は子孫が SIGTERM を無視してから出す
+# （先に出すと、trap の前に届いた SIGTERM で子孫も終わり、組が残らない）
+STUBBORN = "(trap '' TERM; echo started; sleep 600) & wait"
 # SIGTERM で 7 を返して終わる組
 ENDS_ON_SIGTERM = "trap 'exit 7' TERM; echo started; while :; do sleep 0.05; done"
 GRACE = 0.5
