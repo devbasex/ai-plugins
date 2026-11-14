@@ -177,16 +177,23 @@ class QueueDecl(schema.Shape):
     shared: list[SharedList] = []
 
 
+def _with_default_resources(raw):
+    """queue の宣言の resources を既定へ重ねる（宣言したタグを項目ごとに）。resources が dict でなければ `raw` をそのまま返す。"""
+    if not isinstance(raw, dict):
+        return raw
+    declared = raw.get("resources") or {}
+    if not isinstance(declared, dict):
+        return raw
+    merged = {**QUEUE_RESOURCES, **declared}
+    return {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
+
+
 def queue_decl(decl: dict) -> dict:
     """supervise.json の queue を既定と合わせて `{"resources": {タグ: {limit, types, commands}}, "shared": [{path, touched_by}]}` で返す。
 
     無ければ既定（graphql の枠 2 本・共有の一覧は無し）。形が違えば DeclError。"""
-    raw = decl.get("queue") or {}
+    raw = _with_default_resources(decl.get("queue") or {})
     hint = '（queue は {"resources": {タグ: {"limit", "types", "commands"}}, "shared": [{"path", "touched_by"}]} で書く）'
-    declared = (raw.get("resources") or {}) if isinstance(raw, dict) else None
-    if isinstance(declared, dict):  # 既定へ、宣言したタグを項目ごとに重ねる
-        merged = {**QUEUE_RESOURCES, **declared}
-        raw = {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
     try:
         shape = schema.load_shape(QueueDecl, raw, "supervise.json: queue")
     except schema.ShapeError as e:
