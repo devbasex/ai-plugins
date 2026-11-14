@@ -43,8 +43,7 @@ def sections_of(path: str, text: str) -> list[str]:
 
 def reviewed_of(state: Mapping[str, Any]) -> set[str]:
     """状態ファイルの中身から、前のラウンドまでに詳細レビューを通った節（並びでなければ無し）。"""
-    value = state.get(store.REVIEWED)
-    return set(value) if isinstance(value, list) else set()
+    return set(store.list_of(state, store.REVIEWED))
 
 
 def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str]) -> Scope:

@@ -219,7 +219,7 @@ def _every_section(purpose: str) -> bool:
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     data = store.read_state(ref)
-    rounds = data.get(store.ROUNDS) if isinstance(data.get(store.ROUNDS), list) else []
+    rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
     sections = drive.changed_sections(git.Git(wt), args.base, wt)
     got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections)
@@ -230,8 +230,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
 def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:
     if path is None:
         return ()
-    items = store.read_object(Path(path)).get("items")
-    return fin.as_handed(items if isinstance(items, list) else [])
+    return fin.as_handed(store.list_of(store.read_object(Path(path)), "items"))
 
 
 def _review(path: str) -> fin.Review:

@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,11 +107,6 @@ def _text(value: object) -> Optional[str]:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _list(data: Mapping[str, Any], key: str) -> list[Any]:
-    value = data.get(key)
-    return value if isinstance(value, list) else []
-
-
 # --- 台帳 -------------------------------------------------------------------------------
 
 
@@ -197,7 +192,7 @@ class FindingLedger:
 
 def _ingest_pending(run: _Run) -> None:
     """前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ取り込む（#2770）。"""
-    rounds = _list(run.data, store.ROUNDS)
+    rounds = store.list_of(run.data, store.ROUNDS)
     last = store.last_round(run.data)
     pending = store.pending_fix_result(run.cfg.state_dir, run.ref)
     gate = fixgate_decide.require_fix_for_changes(len(rounds), last.get("verdict"), last.get("fix"), str(pending) if pending else None)
@@ -215,7 +210,7 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingLedger(_list(data, store.FINDINGS)), [], [], [])
+    run = _Run(cfg, g, ref, data, FindingLedger(store.list_of(data, store.FINDINGS)), [], [], [])
     _ingest_pending(run)
     return run
 
@@ -313,7 +308,7 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     """修正の結果を台帳へ取り込み、結果ファイルをラウンドの名前へ移す（次の起動が残りと読み違えない）。"""
     found = store.read_fix_result(path, run.ref)
-    reported = run.ledger.apply_fix(_list(found, store.FINDINGS), run.cfg.handed, round_no)
+    reported = run.ledger.apply_fix(store.list_of(found, store.FINDINGS), run.cfg.handed, round_no)
     os.replace(path, path.with_name(f"{path.stem}-round{round_no}.json"))
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
@@ -430,10 +425,10 @@ def drive(cfg: RunConfig, launch: Launcher = agents.run_agent) -> Outcome:
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     run = _start(cfg)
     final, done = fin.MAX_ROUNDS, 0
-    first = len(_list(run.data, store.ROUNDS)) + 1
+    first = len(store.list_of(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):
         ended = _round(run, round_no, launch)
-        done = len(_list(run.data, store.ROUNDS)) - first + 1
+        done = len(store.list_of(run.data, store.ROUNDS)) - first + 1
         _save(run)
         if ended is not None:
             final = ended

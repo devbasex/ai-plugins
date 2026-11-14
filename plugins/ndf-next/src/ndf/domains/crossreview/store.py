@@ -94,10 +94,16 @@ def read_state(ref: StateRef) -> dict[str, Any]:
     return read_object(ref.path) if ref.path.is_file() else {ORIGIN_KEY: ref.origin_pr}
 
 
+def list_of(data: Mapping[str, Any], key: str) -> list[Any]:
+    """鍵の値が並びならその並びそのもの、ほかは空の並び。"""
+    value = data.get(key)
+    return value if isinstance(value, list) else []
+
+
 def last_round(data: Mapping[str, Any]) -> dict[str, Any]:
     """状態の最後のラウンドの記録（rounds が並びで末尾が辞書ならその辞書そのもの、ほかは空の辞書）。"""
-    rounds = data.get(ROUNDS)
-    return rounds[-1] if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else {}
+    rounds = list_of(data, ROUNDS)
+    return rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
 
 
 def record_current(ref: StateRef, current_pr: int) -> StateRef:

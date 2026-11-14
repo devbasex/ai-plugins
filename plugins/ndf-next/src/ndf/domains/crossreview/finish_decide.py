@@ -160,7 +160,7 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
 
 def as_review(data: Mapping[str, Any]) -> Review:
     """要約（`summary_of` の形）を読む。指摘の形が違えば `ValueError`、ラウンドの数が整数でなければ 0。"""
-    findings = data.get(store.FINDINGS) if isinstance(data.get(store.FINDINGS), list) else []
+    findings = store.list_of(data, store.FINDINGS)
     rounds = data.get(store.ROUNDS)
     return Review(str(data.get("final")), rounds if type(rounds) is int else 0, as_findings(findings))
 
