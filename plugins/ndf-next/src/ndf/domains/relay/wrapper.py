@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Mapping, NamedTuple, Optional
+from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optional
 
 from ptyprocess import PtyProcess
 
@@ -189,33 +189,51 @@ class Wrapper:
         return account_decide.after_limit(sec.account, rows)
 
     def _act(self, step: switch_decide.Step) -> Optional[Ended]:
+        """手の種類に応じた動きを打つ。表に無い種類（`wait`）は何もしない。終わるときは `Ended` を返す。"""
         sec = self._current()
-        if step.kind in ("forward", "wait_reset", "stalled"):
-            if step.kind == "forward":
-                signals.drop(self.dir, signals.QUESTION_FILE)
-            self._write_state("stalled" if step.kind == "stalled" else "waiting", step.reason)
-            return None
-        if step.kind == "switch":
-            account = self._account_for_next(sec.account)
-            signals.drop(self.dir, signals.NEXT_FILE)
-            self._replace(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
-            return None
-        if step.kind in ("account", "restart"):
-            self._count_start()
-            self._replace(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
-            return None
-        if step.kind == "handover":
-            self._send(step.prompt)
-            sec.handover_asked = True
-            return None
-        return self._final(step)
+        action = self._ACTIONS.get(step.kind)
+        return action(self, step, sec) if action is not None else None
 
-    def _final(self, step: switch_decide.Step) -> Optional[Ended]:
-        if step.kind == "finish":
-            return Ended("", step.reason)
-        if step.kind == "stop":
-            return Ended("work_stopped", step.reason)
+    def _on_wait_like(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        if step.kind == "forward":
+            signals.drop(self.dir, signals.QUESTION_FILE)
+        self._write_state("stalled" if step.kind == "stalled" else "waiting", step.reason)
         return None
+
+    def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        account = self._account_for_next(sec.account)
+        signals.drop(self.dir, signals.NEXT_FILE)
+        self._replace(Launch(sec.number + 1, str(uuid.uuid4()), account, step.prompt, resume=False))
+        return None
+
+    def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        self._count_start()
+        self._replace(Launch(sec.number, sec.session_id, step.account or sec.account, step.prompt, resume=True))
+        return None
+
+    def _on_handover(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        self._send(step.prompt)
+        sec.handover_asked = True
+        return None
+
+    def _on_finish(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        return Ended("", step.reason)
+
+    def _on_stop(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        return Ended("work_stopped", step.reason)
+
+    # 手の種類 → 動き（`switch_decide.Step` の kind。`wait` は載せない）
+    _ACTIONS: ClassVar[dict[str, Callable[[Wrapper, switch_decide.Step, Section], Optional[Ended]]]] = {
+        "forward": _on_wait_like,
+        "wait_reset": _on_wait_like,
+        "stalled": _on_wait_like,
+        "switch": _on_switch,
+        "account": _on_resume,
+        "restart": _on_resume,
+        "handover": _on_handover,
+        "finish": _on_finish,
+        "stop": _on_stop,
+    }
 
     def _account_for_next(self, current: Optional[str]) -> Optional[str]:
         """カットポイントで使用率を見て、次の区間のアカウントを決める（#3336）。"""
