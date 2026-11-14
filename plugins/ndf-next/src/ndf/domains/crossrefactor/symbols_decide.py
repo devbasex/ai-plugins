@@ -47,6 +47,11 @@ class Touched:
     def as_json(self) -> dict[str, Any]:
         return {"symbols": {p: sorted(s) for p, s in sorted(self.symbols.items())}, "whole_files": list(self.whole_files)}
 
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> Touched:
+        """`as_json` の形から組み直す（ファイルの並びは保つ）。"""
+        return cls({p: frozenset(n) for p, n in data["symbols"].items()}, tuple(data["whole_files"]))
+
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 

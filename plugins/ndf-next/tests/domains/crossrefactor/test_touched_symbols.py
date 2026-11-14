@@ -156,3 +156,8 @@ def test_touched_restored_requires_both_keys():
         _restored({"symbols": {}})
     with pytest.raises(KeyError):
         _restored({"whole_files": []})
+
+
+def test_touched_from_json_round_trips_as_json():
+    original = Touched({"lib/cli.py": frozenset({"cmd_scale", "Runner.start"}), "lib/b.py": frozenset()}, ("web/app.ts",))
+    assert Touched.from_json(original.as_json()) == original

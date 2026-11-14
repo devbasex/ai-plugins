@@ -184,8 +184,7 @@ def _init(run: _Run) -> None:
 
 
 def _touched(run: _Run) -> symbols_decide.Touched:
-    t = run.state["touched"]
-    return symbols_decide.Touched({p: frozenset(n) for p, n in t["symbols"].items()}, tuple(t["whole_files"]))
+    return symbols_decide.Touched.from_json(run.state["touched"])
 
 
 def _record_phase(run: _Run, phase: str) -> str:
