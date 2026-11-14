@@ -376,3 +376,16 @@ def test_ended_lanes_do_not_count_toward_caps(monkeypatch):
     assert ("error", "I2") in rules_of(BASE)
     plan, items, _ = pp.check_data(BASE, ended={"lroot"})
     assert plan is not None and not [it for it in items if it["level"] == "error"]
+
+
+def test_ended_lanes_do_not_raise_overlaps():
+    """終わりの記録があるレーンは、触る場所（I4）と課題（I19）の重なりに数えない（#3021 の残り）。"""
+    d = variant(x=lambda d: d["lanes"].append(
+        {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["plugins/ndf/scripts/"]}
+    ))  # fmt: skip
+    assert ("error", "I19") in rules_of(d)  # lfac #2400 と重なる
+    plan, items, _ = pp.check_data(d, ended={"lfac", "lroot"})
+    assert plan is not None
+    assert not [it for it in items if it["rule"] in ("I4", "I19")]
+    plan, items, _ = pp.check_data(d, ended={"lfac"})
+    assert [it["lanes"] for it in items if it["rule"] == "I4"] == [["lroot", "lnew"]]
