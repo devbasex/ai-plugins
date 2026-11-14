@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import subprocess
-import sys
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -16,21 +14,14 @@ import pytest
 
 from ndf.core import durable
 
-SRC = Path(__file__).resolve().parents[2] / "src"
-RUN_SCRIPT = Path(__file__).with_name("_durable_run.py")
+from ._durable_helpers import run_key_process as _run
+
 KEY_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".lock", ".checked")
 
 
 @durable.workflow
 def sweep_done_flow(value: str) -> str:
     return value
-
-
-@pytest.fixture
-def root(tmp_path):
-    path = tmp_path / "ndf" / "state"
-    yield path
-    durable.release_store(path)
 
 
 def _later(hours: float = 0, days: float = 0) -> datetime:
@@ -40,19 +31,6 @@ def _later(hours: float = 0, days: float = 0) -> datetime:
 def _key_files(root: Path, key: str) -> list[str]:
     name = durable.run_name(key)
     return sorted(p.name for p in (root / "dbos").glob(f"{name}*") if p.is_file())
-
-
-def _run(root: Path, key: str, mode: str) -> None:
-    env = {**os.environ, "PYTHONPATH": str(SRC)}
-    done = subprocess.run(
-        [sys.executable, str(RUN_SCRIPT), str(root), key, mode],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
 
 
 def _finish_without_retire(root: Path, key: str) -> None:
@@ -168,6 +146,138 @@ def test_broken_key_file_is_moved_to_broken_and_stops(root):
     assert moved.name.startswith(durable.run_name("bad") + "-")
     assert moved.with_name(moved.name + "-wal").read_bytes() == b"wal"
     assert _key_files(root, "bad") == []
+
+
+# --- 現状固定: 鍵ごとのファイルの走査（_sweep_live） --------------------------------------
+
+
+def test_sweep_retires_finished_keys_in_name_order_and_reports_unreadable_files(root):
+    """現状固定: 読めない鍵のファイルは warnings に載せて残し、ほかの終わった鍵は名前の順に移す。"""
+    _finish_without_retire(root, "b-done")
+    _finish_without_retire(root, "a-done")
+    bad = root / "dbos" / "run-unreadable.sqlite"
+    bad.write_bytes(b"this is not a database" * 100)
+
+    result = durable.sweep(root, _later(hours=25))
+
+    assert not result.skipped and result.busy == 0 and result.deleted == []
+    names = sorted([durable.run_name("a-done"), durable.run_name("b-done")])
+    assert [p.name for p in result.retired] == [f"{n}.sqlite" for n in names]
+    assert all(p.parent == root / "dbos" / "retired" for p in result.retired)
+    assert len(result.warnings) == 1 and result.warnings[0].startswith(f"{bad}: ")
+    assert bad.read_bytes() == b"this is not a database" * 100
+    # 読めないファイルの鍵は、走査が取った `.lock` が残る
+    assert (root / "dbos" / "run-unreadable.lock").exists()
+    assert _key_files(root, "a-done") == [] and _key_files(root, "b-done") == []
+
+
+def test_sweep_removes_marks_and_locks_left_without_a_key_file(root):
+    """現状固定: 本体の無い `.checked` と、だれも持たない `.lock` を消し、本体のある鍵の目印とロックは残す。"""
+    _run(root, "waits", "wait")
+    dbos = root / "dbos"
+    name = durable.run_name("waits")
+    (dbos / f"{name}.checked").touch()
+    orphan_mark = dbos / "run-gone.checked"
+    orphan_lock = dbos / "run-gone.lock"
+    orphan_mark.touch()
+    orphan_lock.touch()
+
+    result = durable.sweep(root, _later(hours=25))
+
+    assert result.retired == [] and result.warnings == [] and result.busy == 0
+    assert not orphan_mark.exists() and not orphan_lock.exists()
+    assert (dbos / f"{name}.checked").exists() and (dbos / f"{name}.lock").exists()
+    assert (dbos / f"{name}.sqlite").exists()
+
+
+def test_sweep_keeps_a_lock_without_a_key_file_while_it_is_held(root):
+    """現状固定: 本体の無い `.lock` でも、`run_lock` を持つプロセスがいる間は消さず、busy にも数えない。"""
+    root.mkdir(parents=True)
+    with durable.run_lock(root, "holding"):
+        lock = root / "dbos" / f"{durable.run_name('holding')}.lock"
+        assert lock.exists()
+        result = durable.sweep(root, _later(hours=25))
+        assert result.busy == 0 and result.retired == [] and result.warnings == []
+        assert lock.exists()
+
+
+# --- 現状固定: 記録の読み出し（_records） ---------------------------------------------------
+
+
+def _fields(record: durable.RunRecord) -> tuple:
+    return (record.run_name, record.workflow_id, record.status, record.parent_workflow_id, record.app_version)
+
+
+def test_workflows_reads_records_of_the_key_with_their_fields(root):
+    """現状固定: `workflows` は鍵の名前・状態・親・アプリの版と、UTC の更新時刻を持つ記録を返す。"""
+    _finish_without_retire(root, "fields")
+    url = durable.run_url(root, "fields")
+    name = durable.run_name("fields")
+    version = f"format-{durable.FORMAT}"
+
+    every = durable.workflows(url)
+    by_key = durable.workflows(url, "fields")
+
+    assert [_fields(r) for r in every] == [(name, "wf-fields", "SUCCESS", None, version)]
+    assert [_fields(r) for r in by_key] == [_fields(r) for r in every]
+    assert all(r.updated_at is not None and r.updated_at.tzinfo == UTC for r in every)
+    assert durable.workflows(url, "another") == []
+
+
+def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_child(root):
+    """現状固定: 子の記録は親の ID を持つ。`pending` は終わった親を除き、待ちの子だけを返す。"""
+    _run(root, "family", "child-wait")
+    url = durable.run_url(root, "family")
+    name = durable.run_name("family")
+    version = f"format-{durable.FORMAT}"
+
+    records = sorted(durable.workflows(url, "family"), key=lambda r: r.workflow_id)
+    assert [_fields(r) for r in records] == [
+        (name, "wf-family", "SUCCESS", None, version),
+        (name, "wf-family-child", "PENDING", "wf-family", version),
+    ]
+    assert [_fields(r) for r in durable.pending(root)] == [(name, "wf-family-child", "PENDING", "wf-family", version)]
+
+
+def test_cancel_before_launch_cancels_the_run_and_its_waiting_child(root):
+    """現状固定: DBOS を起こさずに、親と待ちの子をまとめて取り消す。"""
+    _run(root, "cancel", "child-wait")
+    url = durable.run_url(root, "cancel")
+
+    durable.cancel_before_launch(url, "wf-cancel")
+
+    statuses = {r.workflow_id: r.status for r in durable.workflows(url, "cancel")}
+    assert statuses == {"wf-cancel": "SUCCESS", "wf-cancel-child": "CANCELLED"}
+    assert durable.pending(root) == []
+
+
+class _FailingClient:
+    """DBOSClient の代わりに、操作で落ち、destroy の回数を数える。"""
+
+    destroyed = 0
+
+    def __init__(self, system_database_url: str) -> None:
+        self.url = system_database_url
+
+    def _fail(self, *args, **kwargs):
+        raise RuntimeError(f"failed: {self.url}")
+
+    list_workflows = cancel_workflow = delete_workflows = _fail
+
+    def destroy(self) -> None:
+        type(self).destroyed += 1
+
+
+def test_client_errors_propagate_and_the_client_is_destroyed(monkeypatch):
+    """現状固定: DBOSClient の操作が落ちても destroy してから、例外をそのまま上げる。"""
+    monkeypatch.setattr(durable, "DBOSClient", _FailingClient)
+    monkeypatch.setattr(_FailingClient, "destroyed", 0)
+
+    with pytest.raises(RuntimeError, match="failed: sqlite:///x"):
+        durable.workflows("sqlite:///x")
+    with pytest.raises(RuntimeError, match="failed: sqlite:///y"):
+        durable.cancel_before_launch("sqlite:///y", "wf")
+    assert _FailingClient.destroyed == 2
 
 
 def test_check_file():

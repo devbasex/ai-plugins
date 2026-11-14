@@ -77,6 +77,12 @@ SWEPT_MARK = ".swept"
 PROGRESS_LOCK = "progress.sqlite.lock"
 # SQLite の本体に付いて動くファイルの接尾辞。退避では本体とそろえて移す
 SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
+# 鍵ごとのファイルの本体・検査の目印・鍵のロックの接尾辞
+DB_SUFFIX = ".sqlite"
+CHECKED_SUFFIX = ".checked"
+LOCK_SUFFIX = ".lock"
+# SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
+SQLITE_PREFIX = "sqlite:///"
 FINISHED = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
 WAITING = ("PENDING", "ENQUEUED")
 # 置き場の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
@@ -147,6 +153,15 @@ class RunRecord:
     updated_at: datetime | None
     parent_workflow_id: str | None = None
     app_version: str | None = None
+
+
+@dataclass(frozen=True)
+class LedgerRow:
+    """台帳 `ndf_runs` の 1 行。鍵の名前・実行の鍵・起こした時刻。"""
+
+    run_name: str
+    run_key: str
+    started_at: datetime
 
 
 # 置き場のロックを共有で持ち続けるファイル（プロセスが終わるまで放さない）
@@ -225,7 +240,7 @@ def run_name(run_key: str) -> str:
 
 def run_url(root: Path, run_key: str) -> str:
     """SQLite のときの、鍵ごとのファイルの URL。"""
-    return f"sqlite:///{_dbos_dir(root) / (run_name(run_key) + '.sqlite')}"
+    return _sqlite_url(_dbos_dir(root) / f"{run_name(run_key)}{DB_SUFFIX}")
 
 
 def _dbos_dir(root: Path) -> Path:
@@ -234,12 +249,15 @@ def _dbos_dir(root: Path) -> Path:
 
 def _sqlite_path(database_url: str) -> Path | None:
     """SQLite の URL ならファイルのパス、そうでなければ None。"""
-    prefix = "sqlite:///"
-    return Path(database_url[len(prefix) :]) if database_url.startswith(prefix) else None
+    return Path(database_url[len(SQLITE_PREFIX) :]) if database_url.startswith(SQLITE_PREFIX) else None
+
+
+def _is_sqlite(database_url: str) -> bool:
+    return _sqlite_path(database_url) is not None
 
 
 def _sqlite_url(path: Path) -> str:
-    return f"sqlite:///{path}"
+    return f"{SQLITE_PREFIX}{path}"
 
 
 def _sa_url(database_url: str) -> str:
@@ -248,6 +266,16 @@ def _sa_url(database_url: str) -> str:
         if database_url.startswith(scheme):
             return "postgresql+psycopg://" + database_url[len(scheme) :]
     return database_url
+
+
+@contextmanager
+def _engine(database_url: str) -> Iterator[sa.Engine]:
+    """呼ぶたびに接続を溜めない Engine を作り、抜けるときに解放する。"""
+    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 # --- ロック -----------------------------------------------------------------------------
@@ -267,6 +295,14 @@ def _try_flock(handle: IO[str], mode: int) -> bool:
     except BlockingIOError:  # noqa: NDF401 ファイル: ほかのプロセスがロックを持っていれば取れなかったと返す
         return False
     return True
+
+
+def _lock(handle: IO[str], mode: int, wait: bool) -> bool:
+    """`wait` なら取れるまで待って真、そうでなければ待たずに試して取れたかを返す。"""
+    if wait:
+        fcntl.flock(handle, mode)
+        return True
+    return _try_flock(handle, mode)
 
 
 def store_root(name: str, cwd: Path) -> Path:
@@ -307,9 +343,7 @@ def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
     path = root.parent / MAINT_LOCK
     handle = _open_lock_file(path)
     try:
-        if wait:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        elif not _try_flock(handle, fcntl.LOCK_EX):
+        if not _lock(handle, fcntl.LOCK_EX, wait):
             yield None
             return
         yield path
@@ -329,7 +363,7 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
     `wait` が偽で取れなければ None を渡す。呼び手は DBOS を起こす前に取り、閉じて退避するまで持つ（I6・I13）。
     """
     name = run_name(run_key)
-    if database_url is not None and _sqlite_path(database_url) is None:
+    if database_url is not None and not _is_sqlite(database_url):
         with _pg_run_lock(database_url, name, wait) as held:
             yield held
     else:
@@ -339,12 +373,10 @@ def run_lock(root: Path, run_key: str, database_url: str | None = None, wait: bo
 
 @contextmanager
 def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
-    path = _dbos_dir(root) / f"{name}.lock"
+    path = _dbos_dir(root) / f"{name}{LOCK_SUFFIX}"
     while True:
         handle = _open_lock_file(path)
-        if wait:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        elif not _try_flock(handle, fcntl.LOCK_EX):
+        if not _lock(handle, fcntl.LOCK_EX, wait):
             handle.close()
             yield None
             return
@@ -364,21 +396,17 @@ def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
 
 @contextmanager
 def _pg_run_lock(database_url: str, name: str, wait: bool) -> Iterator[str | None]:
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
-    try:
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            params = {"space": RUN_LOCK_SPACE, "key": _lock_key(name)}
-            if wait:
-                conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
-            elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
-                yield None
-                return
-            try:
-                yield name
-            finally:
-                conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        params = {"space": RUN_LOCK_SPACE, "key": _lock_key(name)}
+        if wait:
+            conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
+        elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
+            yield None
+            return
+        try:
+            yield name
+        finally:
+            conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
 
 
 # --- チェックアウトの置き場（決定 85） ---------------------------------------------------
@@ -413,7 +441,7 @@ def _write_format(root: Path) -> None:
 
 def _retire_store(root: Path, found: int, now: datetime) -> Path:
     """旧い置き場の鍵のロックと進行表の DB のロックをすべて待たずに取り、名前を変えて退避する（I11）。"""
-    old_locks = sorted(_dbos_dir(root).glob("*.lock")) + [p for p in (root / PROGRESS_LOCK,) if p.exists()]
+    old_locks = sorted(_dbos_dir(root).glob(f"*{LOCK_SUFFIX}")) + [p for p in (root / PROGRESS_LOCK,) if p.exists()]
     with ExitStack() as stack:
         busy = []
         for path in old_locks:
@@ -466,13 +494,8 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
     busy: tuple[Path, ...] = (_store_lock_path(root),)
     attempt = 0
     while True:
-        shared = _hold_shared(root)
-        found = _read_format(root)
-        if found == STORE_FORMAT:
-            _held_stores[root] = shared
+        if _hold_if_current(root):
             return StoreReady(root, retired_to, pending_count)
-        shared.close()
-        _refuse_newer(root, found)
         if attempt >= PREPARE_ATTEMPTS:
             raise StoreInUse(f"置き場の形の番号をそろえられない（ほかのプロセスが使っている）: {root}", busy)
         attempt += 1
@@ -484,8 +507,26 @@ def prepare_store(root: Path, now: datetime | None = None) -> StoreReady:
             continue
         if moved is not None:
             retired_to = moved
-            pending_count = len(_pending_in(moved))
-            log.warning("旧い置き場を退避した", extra={"from": str(root), "to": str(moved), "pending": pending_count})
+            pending_count = _report_retired(root, moved)
+
+
+def _hold_if_current(root: Path) -> bool:
+    """置き場のロックを共有で取り、番号が自分と同じなら持ったまま真を返す。違えば放し、新しすぎれば `StoreFormatNewer`。"""
+    shared = _hold_shared(root)
+    found = _read_format(root)
+    if found == STORE_FORMAT:
+        _held_stores[root] = shared
+        return True
+    shared.close()
+    _refuse_newer(root, found)
+    return False
+
+
+def _report_retired(root: Path, moved: Path) -> int:
+    """退避した置き場で待ちを抱えていた実行を数え、ログに残して数を返す。"""
+    pending_count = len(_pending_in(moved))
+    log.warning("旧い置き場を退避した", extra={"from": str(root), "to": str(moved), "pending": pending_count})
+    return pending_count
 
 
 def release_store(root: Path) -> None:
@@ -539,21 +580,36 @@ def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Pa
             dst = target.with_name(target.name + suffix)
             src.rename(dst)
             os.utime(dst, stamp)
-    body.with_suffix(".checked").unlink(missing_ok=True)
-    body.with_suffix(".lock").unlink(missing_ok=True)
+    _drop_marks(body)
     return target
+
+
+def _drop_marks(body: Path) -> None:
+    """鍵のファイルの目印 `.checked` と、最後に `.lock` を消す。"""
+    body.with_suffix(CHECKED_SUFFIX).unlink(missing_ok=True)
+    body.with_suffix(LOCK_SUFFIX).unlink(missing_ok=True)
 
 
 def _check_key_file(path: Path, now: datetime) -> None:
     """鍵ごとの目印が古いか無ければ `quick_check` を打つ。通らなければ broken/ へ移して `StoreBroken`（A4）。"""
-    mark = path.with_suffix(".checked")
+    mark = path.with_suffix(CHECKED_SUFFIX)
     if _fresh(mark, now):
         return
     if check_file(path):
         _touch(mark, now)
         return
-    moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}.sqlite", now)
+    moved = _move_out(path, path.parent / BROKEN_DIR, f"{path.stem}-{now:%Y%m%dT%H%M%S}{DB_SUFFIX}", now)
     raise StoreBroken(f"耐久の記録のファイルが壊れていたので退避した: {moved}", (moved,))
+
+
+@contextmanager
+def _client(database_url: str) -> Iterator[DBOSClient]:
+    """DBOS を起こさずに記録を扱うクライアントを作り、抜けるときに破棄する。"""
+    client = DBOSClient(system_database_url=database_url)
+    try:
+        yield client
+    finally:
+        client.destroy()
 
 
 def _records(database_url: str, names: list[str] | None, statuses: list[str] | None = None) -> list[RunRecord]:
@@ -561,11 +617,8 @@ def _records(database_url: str, names: list[str] | None, statuses: list[str] | N
 
     DBOS の絞り込みは持ち主の無い（`application_name` が NULL の）行も返すため、`names` を渡したときは除く。
     """
-    client = DBOSClient(system_database_url=database_url)
-    try:
+    with _client(database_url) as client:
         found = client.list_workflows(application_name=names, status=statuses, load_input=False, load_output=False)
-    finally:
-        client.destroy()
     return [
         RunRecord(
             run_name=w.application_name,
@@ -586,10 +639,9 @@ def workflows(database_url: str, run_key: str | None = None) -> list[RunRecord]:
 
 
 def _retire_name(root: Path, name: str, now: datetime) -> Path | None:
-    body = _dbos_dir(root) / f"{name}.sqlite"
+    body = _dbos_dir(root) / f"{name}{DB_SUFFIX}"
     if not body.exists():
-        body.with_suffix(".checked").unlink(missing_ok=True)
-        body.with_suffix(".lock").unlink(missing_ok=True)
+        _drop_marks(body)
         return None
     if any(r.status not in FINISHED for r in _records(_sqlite_url(body), None)):
         return None
@@ -621,29 +673,43 @@ def _sweep_guard(root: Path, now: datetime) -> Iterator[bool]:
         _touch(mark, now)
 
 
-def sweep(root: Path, now: datetime | None = None) -> SweepResult:
-    """終わった鍵のファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
-
-    24 時間に 1 回だけ走査する。開いているプロセスがいる鍵（`run_lock` を待たずに取れない鍵）は触らない。
-    """
+def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, SweepResult], None], message: str) -> SweepResult:
+    """`_sweep_guard` が走査を許したときだけ `body` を流し、読めなかったものを `message` でログに残す。"""
     now = now or datetime.now(UTC)
     out = SweepResult()
     with _sweep_guard(root, now) as go:
         if not go:
             out.skipped = True
             return out
+        body(now, out)
+    if out.warnings:
+        log.warning(message, extra={"count": len(out.warnings), "sample": out.warnings[:10]})
+    return out
+
+
+def sweep(root: Path, now: datetime | None = None) -> SweepResult:
+    """終わった鍵のファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
+
+    24 時間に 1 回だけ走査する。開いているプロセスがいる鍵（`run_lock` を待たずに取れない鍵）は触らない。
+    """
+
+    def body(now: datetime, out: SweepResult) -> None:
         dbos_dir = _dbos_dir(root)
         if dbos_dir.is_dir():
             _sweep_live(root, now, out)
             _sweep_kept(dbos_dir, now, out)
-    if out.warnings:
-        log.warning("片付けで読めないファイルがあった", extra={"count": len(out.warnings), "sample": out.warnings[:10]})
-    return out
+
+    return _guarded_sweep(root, now, body, "片付けで読めないファイルがあった")
 
 
 def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
-    dbos_dir = _dbos_dir(root)
-    for body in sorted(dbos_dir.glob("*.sqlite")):
+    _retire_finished(root, now, out)
+    _drop_orphans(root)
+
+
+def _retire_finished(root: Path, now: datetime, out: SweepResult) -> None:
+    """開いているプロセスのいない鍵のファイルのうち、耐久ワークフローがすべて終わったものを retired/ へ移す。"""
+    for body in sorted(_dbos_dir(root).glob(f"*{DB_SUFFIX}")):
         with _file_run_lock(root, body.stem, wait=False) as held:
             if held is None:
                 out.busy += 1
@@ -655,11 +721,16 @@ def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
                 continue
             if moved is not None:
                 out.retired.append(moved)
-    for mark in dbos_dir.glob("*.checked"):
-        if not mark.with_suffix(".sqlite").exists():
+
+
+def _drop_orphans(root: Path) -> None:
+    """本体の無い `.checked` と、本体が無くだれも持たない `.lock` を消す。"""
+    dbos_dir = _dbos_dir(root)
+    for mark in dbos_dir.glob(f"*{CHECKED_SUFFIX}"):
+        if not mark.with_suffix(DB_SUFFIX).exists():
             mark.unlink(missing_ok=True)
-    for lock in dbos_dir.glob("*.lock"):
-        if lock.with_suffix(".sqlite").exists():
+    for lock in dbos_dir.glob(f"*{LOCK_SUFFIX}"):
+        if lock.with_suffix(DB_SUFFIX).exists():
             continue
         with _file_run_lock(root, lock.stem, wait=False) as held:
             if held is not None:
@@ -703,41 +774,31 @@ def _ensure_runs_table(engine: sa.Engine, table: sa.Table) -> None:
 
 def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> None:
     """台帳 `ndf_runs` へ鍵を 1 行書く（既にあれば書かない）。書けなければ `StoreBroken`。"""
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
-    table = _runs_table(sa.MetaData())
-    try:
-        _ensure_runs_table(engine, table)
-        with engine.begin() as conn:
-            exists = conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first()
-            if exists is None:
-                conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
-    except sa.exc.SQLAlchemyError as exc:
-        raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine:
+        table = _runs_table(sa.MetaData())
+        try:
+            _ensure_runs_table(engine, table)
+            with engine.begin() as conn:
+                exists = conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first()
+                if exists is None:
+                    conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
+        except sa.exc.SQLAlchemyError as exc:
+            raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
 
 
-def _ledger(database_url: str) -> list[tuple[str, str, datetime]]:
+def _ledger(database_url: str) -> list[LedgerRow]:
     """台帳の行（鍵の名前・実行の鍵・起こした時刻）。表が無ければ空。"""
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
     table = _runs_table(sa.MetaData())
-    try:
-        with engine.connect() as conn:
-            if not sa.inspect(conn).has_table(RUNS_TABLE):
-                return []
-            return [tuple(row) for row in conn.execute(sa.select(table))]  # type: ignore[misc]
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.connect() as conn:
+        if not sa.inspect(conn).has_table(RUNS_TABLE):
+            return []
+        return [LedgerRow(*row) for row in conn.execute(sa.select(table))]
 
 
 def _forget_run(database_url: str, name: str) -> None:
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
     table = _runs_table(sa.MetaData())
-    try:
-        with engine.begin() as conn:
-            conn.execute(table.delete().where(table.c.run_name == name))
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.begin() as conn:
+        conn.execute(table.delete().where(table.c.run_name == name))
 
 
 def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -> bool:
@@ -747,32 +808,27 @@ def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -
     return all(r.status in FINISHED and r.updated_at is not None and r.updated_at < cutoff for r in records)
 
 
-def sweep_url(database_url: str, now: datetime | None, root: Path) -> SweepResult:
+def sweep_url(root: Path, database_url: str, now: datetime | None = None) -> SweepResult:
     """台帳の鍵のうち、実行（子を含む）がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す（A6・A12）。
 
     目印と排他は `sweep` と同じ。鍵ごとに DB 側の鍵のロックを待たずに試し、取れない鍵は触らない（I13）。
     消すときは集めた ID をすべて並べて `delete_workflows` を呼び、`delete_children` には頼らない（I8）。
     """
-    now = now or datetime.now(UTC)
-    out = SweepResult()
-    with _sweep_guard(root, now) as go:
-        if not go:
-            out.skipped = True
-            return out
+
+    def body(now: datetime, out: SweepResult) -> None:
         try:
             rows = _ledger(database_url)
         except sa.exc.SQLAlchemyError as exc:
             out.warnings.append(f"台帳を読めない: {exc}")
             rows = []
         cutoff = now - timedelta(days=KEEP_DAYS)
-        for name, _run_key, started_at in rows:
+        for row in rows:
             try:
-                _sweep_url_run(database_url, name, started_at, cutoff, out)
+                _sweep_url_run(database_url, row.run_name, row.started_at, cutoff, out)
             except Exception as exc:  # noqa: BLE001 ネットワーク: 1 つの鍵を片付けられなくても止めず、warnings に載せる
-                out.warnings.append(f"{name}: {exc}")
-    if out.warnings:
-        log.warning("URL の片付けで読めない鍵があった", extra={"count": len(out.warnings), "sample": out.warnings[:10]})
-    return out
+                out.warnings.append(f"{row.run_name}: {exc}")
+
+    return _guarded_sweep(root, now, body, "URL の片付けで読めない鍵があった")
 
 
 def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: datetime, out: SweepResult) -> None:
@@ -786,11 +842,8 @@ def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: d
             return
         ids = [r.workflow_id for r in records]
         if ids:
-            client = DBOSClient(system_database_url=database_url)
-            try:
+            with _client(database_url) as client:
                 client.delete_workflows(ids, delete_children=False)
-            finally:
-                client.destroy()
         _forget_run(database_url, name)
         out.deleted.extend(ids)
 
@@ -801,7 +854,7 @@ def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: d
 def _pending_in(root: Path) -> list[RunRecord]:
     found: list[RunRecord] = []
     unreadable: list[str] = []
-    for body in sorted(_dbos_dir(root).glob("*.sqlite")):
+    for body in sorted(_dbos_dir(root).glob(f"*{DB_SUFFIX}")):
         try:
             records = _records(_sqlite_url(body), None, list(WAITING))
         except Exception as exc:  # noqa: BLE001 ファイル: 読めないファイルは数えず、件数をまとめてログに残して残りを集める
@@ -817,7 +870,7 @@ def pending(root_or_url: Path | str) -> list[RunRecord]:
     """待ちを抱えた（`PENDING`・`ENQUEUED`）実行を集める。置き場なら鍵ごとのファイル、URL なら台帳の鍵から。"""
     if isinstance(root_or_url, Path):
         return _pending_in(root_or_url)
-    names = [row[0] for row in _ledger(root_or_url)]
+    names = [row.run_name for row in _ledger(root_or_url)]
     return _records(root_or_url, names, list(WAITING)) if names else []
 
 
@@ -865,14 +918,15 @@ def session(root: Path, run_key: str, database_url: str | None = None) -> Iterat
     """
     prepare_store(root)
     url = database_url or run_url(root, run_key)
+    sqlite = _is_sqlite(url)
     with run_lock(root, run_key, database_url) as _held:
-        swept = sweep(root) if _sqlite_path(url) is not None else sweep_url(url, None, root)
+        swept = sweep(root) if sqlite else sweep_url(root, url)
         launch(url, run_key)
         try:
             yield swept
         finally:
             shutdown()
-        if _sqlite_path(url) is not None:
+        if sqlite:
             retire(root, run_key)
 
 
@@ -881,8 +935,5 @@ def cancel_before_launch(database_url: str, workflow_id: str) -> None:
 
     `launch` の前に呼ぶ。起こした後に取り消しても、回復で流れ始めた耐久ステップは止まらない。
     """
-    client = DBOSClient(system_database_url=database_url)
-    try:
+    with _client(database_url) as client:
         client.cancel_workflow(workflow_id, cancel_children=True)
-    finally:
-        client.destroy()

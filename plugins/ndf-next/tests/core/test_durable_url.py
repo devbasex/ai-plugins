@@ -11,7 +11,8 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -20,8 +21,7 @@ import sqlalchemy as sa
 
 from ndf.core import durable
 
-SRC = Path(__file__).resolve().parents[2] / "src"
-RUN_SCRIPT = Path(__file__).with_name("_durable_run.py")
+from ._durable_helpers import run_key_process as _run
 
 
 def _pg_bin() -> Path | None:
@@ -58,38 +58,23 @@ def pg_url(tmp_path_factory):
         subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "immediate", "stop"], check=False, capture_output=True)
 
 
-@pytest.fixture
-def root(tmp_path):
-    path = tmp_path / "ndf" / "state"
-    yield path
-    durable.release_store(path)
-
-
 @durable.workflow
 def url_done_flow(value: str) -> str:
     return value
 
 
-def _run(root: Path, key: str, mode: str, url: str) -> None:
-    env = {**os.environ, "PYTHONPATH": str(SRC)}
-    done = subprocess.run(
-        [sys.executable, str(RUN_SCRIPT), str(root), key, mode, url],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
+@contextmanager
+def _engine(url: str) -> Iterator[sa.Engine]:
+    engine = sa.create_engine(url.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=sa.NullPool)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 def _ledger(url: str) -> set[str]:
-    engine = sa.create_engine(url.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=sa.NullPool)
-    try:
-        with engine.connect() as conn:
-            return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
-    finally:
-        engine.dispose()
+    with _engine(url) as engine, engine.connect() as conn:
+        return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
 
 
 def _ids(url: str, key: str) -> set[str]:
@@ -103,7 +88,7 @@ def _later(days: float) -> datetime:
 def _sweep(url: str, root: Path, days: float) -> durable.SweepResult:
     """走査の目印を消してから、`days` 日後の時刻で片付ける（目印の 24 時間に依らず走査させる）。"""
     (root / "dbos" / durable.SWEPT_MARK).unlink(missing_ok=True)
-    return durable.sweep_url(url, _later(days), root)
+    return durable.sweep_url(root, url, _later(days))
 
 
 def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_days(pg_url, root):
@@ -138,10 +123,8 @@ def test_sweep_leaves_runs_of_applications_not_in_the_ledger(pg_url, root):
     """I12: 台帳に無い `run-` で始まる `application_name` の実行は、終わって日数が過ぎても消さない。"""
     with durable.session(root, "url-other", pg_url):
         durable.start(url_done_flow, "wf-url-other", "x")
-    engine = sa.create_engine(pg_url.replace("postgresql://", "postgresql+psycopg://", 1), poolclass=sa.NullPool)
-    with engine.begin() as conn:
+    with _engine(pg_url) as engine, engine.begin() as conn:
         conn.execute(sa.text(f"DELETE FROM {durable.RUNS_TABLE} WHERE run_name = :n"), {"n": durable.run_name("url-other")})
-    engine.dispose()
 
     _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert _ids(pg_url, "url-other") == {"wf-url-other"}
@@ -174,7 +157,7 @@ def test_run_lock_without_wait_yields_none_while_another_connection_holds_it(pg_
 
 def test_url_sweep_runs_once_a_day(pg_url, root):
     root.mkdir(parents=True)
-    assert not durable.sweep_url(pg_url, datetime.now(UTC), root).skipped
-    assert durable.sweep_url(pg_url, datetime.now(UTC) + timedelta(hours=1), root).skipped
+    assert not durable.sweep_url(root, pg_url, datetime.now(UTC)).skipped
+    assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=1)).skipped
     with durable.maint_lock(root, wait=True):
-        assert durable.sweep_url(pg_url, datetime.now(UTC) + timedelta(hours=25), root).skipped
+        assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=25)).skipped
