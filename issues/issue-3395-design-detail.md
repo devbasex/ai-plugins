@@ -54,7 +54,7 @@
 | `scripts/measure/usage_ledger.py`（リポジトリの根。M7。新設） | 帳簿の読み手 | `plugins/ndf/scripts/lib/usage_ledger.py` の読み取りの関数（`read_usage_ledger`・`cache_writes`・`ledger_dir`・`repo_key`）を移す |
 | `scripts/token-usage.py`（リポジトリの根。M7。変更） | 使用量の集計 | `usage_ledger` を `scripts/measure/` から読む（`plugins/ndf/scripts/lib` を import の道から外す） |
 
-`scripts/measure/ai-branching.py` は今も `plugins/ndf` を import しない（`grep -nE "plugins/ndf|scripts/lib|sys\.path" scripts/measure/*.py` の結果は `claude-p-usage.py` の 44 行だけで、`token-usage.py` を読み込む行である）。入れ替えで切れるのは `scripts/token-usage.py` の 43・50 行（`plugins/ndf/scripts/lib/usage_ledger.py` を読む）で、移すのはこの読み手だけである。
+`scripts/measure/ai-branching.py` は今も `plugins/ndf` を import しない。`grep -nE "plugins/ndf|scripts/lib|sys\.path" scripts/measure/*.py` の結果は `claude-p-usage.py` の 44 行だけで、`token-usage.py` を読み込む行である。入れ替えで切れるのは `scripts/token-usage.py` の 43・50 行（`plugins/ndf/scripts/lib/usage_ledger.py` を読む）で、移すのはこの読み手だけである。
 
 ## 関数の仕様
 
