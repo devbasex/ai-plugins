@@ -4,6 +4,8 @@
 - `## 受け入れ条件の確認` の表で区分の無い条件があれば止める（#2357）
 - 取り込んだ課題の受け入れ条件が取り込み先の本文から落ちていれば止める（#2274）
 - 承認済みの課題の設計の結果を読めない・PR の単位が 2 つ以上なら止める（#2596・#2539）。実装を外したまま進めない
+- 設計の結果の触るファイルのセルが、パスを挙げずに別の設計文書へのリンクで委ねていれば止める（#2453）。リンク先は
+  たどらない（分割した文書の節に書式の定めが無い）。触るファイルは先頭の表のセルへ直に挙げる
 - テストの照合は、サブディレクトリからの相対のパスで書いた名前も実在として扱う（#2553・#1811）
 """
 
@@ -19,6 +21,8 @@ CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 _FENCE = re.compile(r"^(```|~~~)")
+_CODE = re.compile(r"`([^`]+)`")
+_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 
 
 class DesignResult(NamedTuple):
@@ -27,6 +31,17 @@ class DesignResult(NamedTuple):
     issue: int
     files: tuple[str, ...]
     units: tuple[str, ...] = ()
+    delegated: tuple[str, ...] = ()
+
+
+def files_cell(cell: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """触るファイルのセルから、バッククォートで囲んだパスと、触るファイルを委ねたリンク先の文書（`.md`）を返す。
+
+    リンクの外のバッククォートだけをパスとして拾う。委ねた文書が 1 つでもあれば、`design_gaps` が止める（#2453）。
+    """
+    links = tuple(dict.fromkeys(_LINK.findall(cell)))
+    files = tuple(dict.fromkeys(_CODE.findall(_LINK.sub("", cell))))
+    return files, links
 
 
 def _section(body: str, heading: str) -> Optional[list[str]]:
@@ -104,12 +119,14 @@ def absorbed_missing(target_body: str, absorbed: Mapping[int, str]) -> dict[int,
 
 
 def design_gaps(approved: Sequence[int], results: Mapping[int, Optional[DesignResult]]) -> list[str]:
-    """承認済みの課題の設計の結果から、実装のプランを組めない理由を並べる（#2596・#2539）。"""
+    """承認済みの課題の設計の結果から、実装のプランを組めない理由を並べる（#2596・#2539・#2453）。"""
     reasons = []
     for issue in approved:
         found = results[issue] if issue in results else None
         if found is None:
             reasons.append(f"#{issue} の設計の結果を読めない（実装を外したまま進めない）")
+        elif found.delegated:
+            reasons.append(f"#{issue} の触るファイルを {'、'.join(found.delegated)} へ委ねている（設計の結果の表のセルへ直に挙げる）")
         elif len(set(found.units)) > 1:
             reasons.append(f"#{issue} の設計が PR を {len(set(found.units))} つに分けている（課題ごとに 1 本のプランで組めない）")
     return reasons

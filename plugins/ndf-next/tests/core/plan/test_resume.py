@@ -107,3 +107,22 @@ def test_an_external_operation_runs_once_after_a_crash(repo, tmp_path, with_prob
     code, out = H.ndf(repo, "next", plan)
     assert (code, out["status"]) == (0, "ok"), out
     assert (H.count(counter), H.count(tmp_path / "after")) == (times, 1)
+
+
+def test_from_retro_still_runs_deep_due_and_base_sync(repo, tmp_path):
+    """#3047・#3114 の再現: 開始点より前の base-sync と deep-due は `--from` でも毎回通し、間のステップは飛ばす。"""
+    names = ["base-sync", "release-verify", "deep-due", "retro", "refine"]
+    plan = H.write_plan(repo, "close", [H.count_step(n, tmp_path / n) for n in names])
+    code, out = H.ndf(repo, "next", plan, "--from", "retro")
+    assert (code, out["status"]) == (0, "ok"), out
+    assert [H.count(tmp_path / n) for n in names] == [1, 0, 1, 1, 1]
+
+
+def test_work_base_is_on_the_repository_volume(repo, tmp_path):
+    """#2933 の再現: 差し込み `{work_base}`（作業ディレクトリの置き場）は /tmp でなく、リポジトリの git の共通ディレクトリの中。"""
+    seen = tmp_path / "seen"
+    write = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])"
+    plan = H.write_plan(repo, "w", [{"id": "s", "run": [sys.executable, "-c", write, str(seen), "{work_base}"]}])
+    assert H.ndf(repo, "next", plan)[0] == 0
+    base = Path(seen.read_text())
+    assert base.is_relative_to((repo / ".git").resolve())

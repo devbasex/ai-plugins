@@ -3,7 +3,8 @@
 - 前提のプランがすべて `ok` で終わっていなければ流さない（`blocked_reason`）
 - 再開の開始点より前にある `RESUME_ALWAYS` のステップは毎回通す（`resume_prelude`。#3114・#3047）
 - 触るファイルの宣言（`touches`）の無いプランは、すべてのプランと重なるものとして直列にする（#2165）
-- 宣言の値は、リポジトリの根からの相対のパス。`/` で終わる値はディレクトリで、その下のファイルすべてと重なる
+- 宣言の値は、リポジトリの根からの相対のパス。重なるのは同じファイルの宣言どうしだけである。`/` で終わる値（ディレクトリ）は
+  重なりに数えない。テストのディレクトリのような多くのプランが触る置き場で、別のファイルを触るプランを直列にしない（#1811）
 """
 
 from __future__ import annotations
@@ -58,14 +59,16 @@ def _norm(path: str) -> str:
     return "" if body in (".", "/") else body.removeprefix("./") + tail
 
 
+def declares_dir(path: str) -> bool:
+    """宣言の値がディレクトリ（`/` で終わるか、根そのもの）か。"""
+    return path.strip().endswith("/") or not _norm(path)
+
+
 def contains(a: str, b: str) -> bool:
-    """宣言 `a` と `b` が同じファイルを指しうるか（同じパスか、一方のディレクトリの下に他方がある）。"""
-    a, b = _norm(a), _norm(b)
-    if not a or not b:
-        return True
-    if a.rstrip("/") == b.rstrip("/"):
-        return True
-    return (a.endswith("/") and b.startswith(a)) or (b.endswith("/") and a.startswith(b))
+    """宣言 `a` と `b` が同じファイルを指すか。ディレクトリの宣言はどれとも重ならない（#1811）。"""
+    if declares_dir(a) or declares_dir(b):
+        return False
+    return _norm(a) == _norm(b)
 
 
 def shared_hits(a: Sequence[str], b: Sequence[str]) -> list[str]:
@@ -109,7 +112,7 @@ def waves(items: Sequence[Queued]) -> list[list[str]]:
 
 
 class Outcome(NamedTuple):
-    """キューの中の 1 本のプランの結果。`status` が None なら流していない（`detail` に理由）。"""
+    """キューの中の 1 本のプランの結果。`status` が None なら流していない（`detail` に理由）。`step` は止まったステップ。"""
 
     name: str
     status: Optional[str]
@@ -118,6 +121,7 @@ class Outcome(NamedTuple):
     routes: Optional[Mapping[str, Optional[str]]] = None
     prs: tuple[int, ...] = ()
     release: bool = False
+    step: Optional[str] = None
 
 
 def stage_blocked(prior: Sequence[Outcome], accepts_gate: bool) -> Optional[str]:

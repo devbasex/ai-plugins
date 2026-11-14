@@ -46,14 +46,23 @@ def test_a_plan_without_touches_overlaps_every_plan():
     ("a", "b", "hit"),
     [
         ("src/a.py", "./src/a.py", True),
-        ("src/", "src/a.py", True),
-        ("src/a.py", "src/", True),
+        ("src/", "src/a.py", False),
+        ("src/a.py", "src/", False),
+        ("src/", "src/", False),
         ("src/a.py", "src/ab.py", False),
-        ("tests/plan/", "tests/planner/x.py", False),
     ],
 )
-def test_contains_matches_files_under_a_directory(a, b, hit):
+def test_contains_matches_the_same_file_only(a, b, hit):
+    """重なるのは同じファイルの宣言どうしだけで、ディレクトリの宣言は数えない（#1811）。"""
     assert contains(a, b) is hit
+
+
+def test_a_test_directory_does_not_serialize_plans_touching_other_files():
+    """#1811 の再現の手順の 3 つの組: ディレクトリの宣言では直列にせず、同じファイルの宣言だけ直列にする。"""
+    a = Queued("a", ("plugins/x/tests/", "a.py"))
+    assert waves([a, Queued("b", ("plugins/x/tests/test_b.py", "b.py"))]) == [["a", "b"]]
+    assert waves([a, Queued("b", ("plugins/x/tests/", "b.py"))]) == [["a", "b"]]
+    assert waves([Queued("a", ("lib/x.py", "lib/")), Queued("b", ("lib/x.py",))]) == [["a"], ["b"]]
 
 
 def test_waves_put_disjoint_plans_together_and_respect_needs():

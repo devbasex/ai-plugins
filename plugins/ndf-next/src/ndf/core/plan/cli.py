@@ -64,9 +64,11 @@ def _exit_with(out: dict[str, Any]) -> NoReturn:
 
 def _cmd_next(a: argparse.Namespace) -> int:
     root = _root()
+    cwd = Path.cwd()
     try:
-        inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, Path.cwd(), _pairs(a.sets, "--set"))
-        return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
+        with runner.plan_lock(runner.state_dir_of(Path(a.plan), a.state_dir, cwd)):
+            inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, _pairs(a.sets, "--set"))
+            return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except durable.StoreStopped as exc:
@@ -103,14 +105,13 @@ def _cmd_queue(a: argparse.Namespace) -> int:
     try:
         stages = _stages(a, cwd)
         qdir = queue_run.queue_dir(stages[0][0].path, a.queue_dir, cwd)
-        again = queue_run.again_args(stages, qdir)
         stable = queue_run.move_to_stable(cwd)
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except subprocess.CalledProcessError as exc:
         return result.emit(result.stopped(TOOL, "precondition", f"チェックアウトの根を引けない: {exc}"))
     outcomes = queue_run.run(stages, qdir, stable, a.resume)
-    return result.emit(queue_run.queue_result(TOOL, outcomes, again))
+    return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir))
 
 
 def _watched(path: Path) -> wait_decide.Watched:

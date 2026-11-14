@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -101,3 +103,18 @@ def test_wait_reports_the_gate_with_its_routes(repo, tmp_path):
     assert out["status"] == "gate"
     assert out["next"].startswith("ndf plan wait")
     assert "--answer approved" in out["routes"]["approved"]
+
+
+def test_two_rounds_of_one_plan_at_once_do_not_stop_each_other(repo, tmp_path):
+    """同じプランの別の回を同時に打っても、後の next は先の回を待ち、先の回のステップの子を止めない（plan.lock）。"""
+    plan = H.write_plan(repo, "c", [H.py_step("s", "import time; time.sleep(1.5)")])
+    env = {**os.environ, "PYTHONPATH": str(H.SRC)}
+    env.pop("NDF_PROGRESS_DB", None)
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-m", "ndf", "plan", "next", plan, "--set", f"round={n}"], cwd=repo, env=env, stdout=subprocess.PIPE, text=True
+        )
+        for n in (1, 2)
+    ]
+    outs = [json.loads(p.communicate(timeout=180)[0].splitlines()[-1]) for p in procs]
+    assert [o["status"] for o in outs] == ["ok", "ok"], outs

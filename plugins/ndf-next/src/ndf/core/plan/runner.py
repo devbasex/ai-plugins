@@ -5,18 +5,23 @@
   （差し戻しの後に直した）次の回の鍵で流す（#3176）
 - 耐久ワークフロー `plan_workflow` は遷移の判断（`transition_decide.decide`）と手の実行を判断のループで回す。
   ステップは耐久ステップで打ち、打ち直しの待ちと承認の答えの待ちは耐久の `recv` で待つ
+- `next` は状態の置き場のロック（`plan.lock`）を持って回を選び、流す。同じプランの別の回を同時に打つと、後の `next` は
+  先の回が終わるか承認ゲートで抜けるまで上限まで待つ。ステップの打ち直しが、別の回の流れている子を前の回の残りとして
+  止めない
 - 承認の答えを待つ所に来たら、待ちの目印 `waiting-<鍵の名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
   DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローは鍵のファイルに残り、次の起動が回復する。B2）
 """
 
 from __future__ import annotations
 
+import fcntl
 import functools
 import json
 import os
 import shlex
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -25,7 +30,7 @@ from ndf import cli
 from ndf.adapters import git
 from ndf.contracts import limits, result, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import durable, loop
+from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
@@ -33,7 +38,11 @@ from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcom
 TOOL = next(name for name, module in cli.COMMANDS.items() if module == f"{__package__}.cli")
 CLI_NAME = "ndf"
 RUN_FILE = "run.json"
+# 状態の置き場を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
+PLAN_LOCK = "plan.lock"
 RESULTS_DIR = "results"
+# 差し込み `{work_base}` の置き場（状態の置き場の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
+WORK_DIR = "work"
 # ステップの結果が載せた PR の番号を、回をまたいで集める記録（プランの結果の items へ載せる）
 PRS_FILE = "prs.json"
 WAITING_PREFIX = "waiting-"
@@ -196,12 +205,32 @@ def _prelude(plan: model.Plan, start: Optional[str]) -> tuple[str, ...]:
     return queue_decide.resume_prelude(plan.order, start)
 
 
+def state_dir_of(plan_path: Path, state_dir: Optional[str], cwd: Path) -> Path:
+    """プランの状態の置き場（`prepare` と同じ決め方）。プランを読めなければ `model.PlanError`。"""
+    given = state_dir if state_dir is not None else model.load(plan_path).state_dir
+    return Path(assemble_decide.state_dir_for(str(plan_path), given, str(cwd)))
+
+
+@contextmanager
+def plan_lock(state_dir: Path) -> Iterator[Path]:
+    """状態の置き場のロック。上限まで待ち、取れなければ持ち主（ホスト・pid・時刻）を添えて `durable.StoreInUse`（B11）。"""
+    path = state_dir / PLAN_LOCK
+    handle = durable_locks.open_lock_file(path)
+    try:
+        durable_locks.lock(handle, fcntl.LOCK_EX, True, path)
+        yield path
+    finally:
+        handle.close()
+
+
 def prepare(
     root: Path, plan_path: Path, start: Optional[str], state_dir: Optional[str], cwd: Path, sets: Optional[Mapping[str, str]] = None
 ) -> Invocation:
     """プランを読み、状態の置き場・鍵・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。
 
     `sets` は呼び手が足す差し込みの値（キューの `{queue_prs}` など）。決まった名前（`state_dir` など）は上書きできない。
+    `{work_base}` はステップが作業ディレクトリを作る置き場。`/tmp` でなくリポジトリと同じボリューム（git の共通ディレクトリの
+    中）に置き、Docker のデーモンがホストにある環境（DooD）でも compose の bind mount から見える（#2933）
     """
     sets = dict(sets) if sets is not None else {}
     plan = model.load(plan_path)
@@ -221,6 +250,7 @@ def prepare(
         "worktree": plan.worktree if plan.worktree else "",
         "plan": str(abs_plan),
         "owner": assemble_decide.owner_of(plan.name, str(sdir)),
+        "work_base": str(root.parent / WORK_DIR),
     }
     clash = sorted(set(sets) & set(values))
     if clash:
@@ -306,6 +336,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
     if final["status"] == OK:
         return result.result(TOOL, OK, f"{inv.plan.name} が終わった", items, metrics)
     if final["status"] == STOPPED:
+        items[0]["step"] = final["last"]
         again = shlex.join([CLI_NAME, TOOL, "next", *_with_start(inv.again, final["last"])]) if final["last"] else None
         return result.stopped(TOOL, final["kind"], final["detail"], items=items, metrics=metrics, next=again)
     after = inv.plan.following(final["last"])

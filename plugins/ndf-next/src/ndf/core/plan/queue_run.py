@@ -68,8 +68,9 @@ def _from_record(name: str, row: dict[str, Any]) -> queue_decide.Outcome:
 def _outcome(entry: Entry, out: dict[str, Any]) -> queue_decide.Outcome:
     cause = out["cause"] if isinstance(out.get("cause"), dict) else {}
     prs = tuple(i["number"] for i in out["items"] if isinstance(i, dict) and i.get("kind") == "pr")
+    step = next((i.get("step") for i in out["items"] if isinstance(i, dict) and i.get("kind") == "plan"), None)
     return queue_decide.Outcome(
-        entry.plan.name, out["status"], cause.get("kind"), str(out["summary"]), out.get("routes"), prs, entry.plan.release
+        entry.plan.name, out["status"], cause.get("kind"), str(out["summary"]), out.get("routes"), prs, entry.plan.release, step
     )
 
 
@@ -87,7 +88,7 @@ def _read_child(entry: Entry, proc: subprocess.Popen) -> queue_decide.Outcome:
     lines = [line for line in stdout.splitlines() if line.strip()]
     try:
         out = json.loads(lines[-1]) if lines else None
-    except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 結果 JSON でない最後の行は結果が無いとして扱う
+    except json.JSONDecodeError:
         out = None
     if not isinstance(out, dict) or out.get("status") not in (OK, GATE, STOPPED):
         detail = stderr.strip().splitlines()[-1] if stderr.strip() else f"終了コード {proc.returncode}"
@@ -114,7 +115,7 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
 def _run_wave(wave: list[Entry], prior: list[queue_decide.Outcome], cwd: Path, order: list[str], done: dict[str, queue_decide.Outcome]) -> list[queue_decide.Outcome]:
     """組のプランを並べて流し、結果を組の並びで返す。"""
     started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
-    for entry in wave:
+    for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
         sets, refused = _sets(entry, prior)
         refused = refused if refused is not None else _needs_blocked(entry, order, done)
         if refused is not None:
@@ -156,12 +157,16 @@ def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:
     return row is not None and row["status"] == OK and entry.start is None
 
 
-def queue_result(tool: str, outcomes: list[queue_decide.Outcome], again: list[str]) -> dict[str, Any]:
-    """キューの結果。承認ゲートで待つプランの routes は `<プラン>:<答え>` の鍵で並べ、next は `--resume` の打ち直し。"""
+def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path) -> dict[str, Any]:
+    """キューの結果。承認ゲートで待つプランの routes は `<プラン>:<答え>` の鍵で並べ、next は `--resume` の打ち直し。
+
+    止まったプランは、打ち直しの `--from` を止まったステップにする。同じ回の報告を返さずに、止まった所から続く。
+    """
     status, first = queue_decide.overall(outcomes)
     items = [{"kind": "plan", "name": o.name, "status": o.status, "detail": o.detail} for o in outcomes]
     metrics = {"plans": len(outcomes), "ok": sum(o.status == OK for o in outcomes)}
-    resume = shlex.join([*again, "--resume"]) if "--resume" not in again else shlex.join(again)
+    stopped_at = {o.name: o.step for o in outcomes if o.status == STOPPED and o.step is not None}
+    resume = shlex.join([*again_args(stages, qdir, stopped_at), "--resume"])
     if status == STOPPED and first is not None:
         kind = first.kind if first.kind is not None else "unknown"
         return result.stopped(tool, kind, f"{first.name}: {first.detail}", items=items, metrics=metrics, next=resume)
@@ -172,13 +177,16 @@ def queue_result(tool: str, outcomes: list[queue_decide.Outcome], again: list[st
     return result.result(tool, OK, f"{len(outcomes)} 本のプランが終わった", items, metrics)
 
 
-def again_args(stages: list[list[Entry]], qdir: Path) -> list[str]:
-    """このキューを打ち直す引数（絶対のパス。作業場所の外から打っても同じキューを指す）。"""
+def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None) -> list[str]:
+    """このキューを打ち直す引数（絶対のパス。作業場所の外から打っても同じキューを指す）。`starts` は開始点の上書き。"""
+    starts = starts if starts is not None else {}
     args = [runner.CLI_NAME, runner.TOOL, "queue", *(str(e.path) for e in stages[0])]
     for stage in stages[1:]:
         args += ["--then", *(str(e.path) for e in stage)]
-    for e in (e for stage in stages for e in stage if e.start is not None):
-        args += ["--from", f"{e.plan.name}={e.start}"]
+    for e in (e for stage in stages for e in stage):
+        start = starts[e.plan.name] if e.plan.name in starts else e.start
+        if start is not None:
+            args += ["--from", f"{e.plan.name}={start}"]
     return [*args, "--queue-dir", str(qdir)]
 
 

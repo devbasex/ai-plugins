@@ -7,6 +7,7 @@ from ndf.core.plan.inputs_decide import (
     absorbed_missing,
     criteria,
     design_gaps,
+    files_cell,
     kinds_lack,
     merged_files,
     path_present,
@@ -78,3 +79,13 @@ def test_path_present_accepts_a_path_relative_to_a_subdirectory():
     assert path_present("./tests/test_a.py", files)
     assert path_present("plugins/x/tests/test_a.py", files)
     assert not path_present("tests/test_b.py", files, "plugins/x")
+
+
+def test_a_cell_delegating_files_to_a_split_document_stops():
+    """#2453 の再現: 触るファイルのセルが分割した設計文書へのリンクで委ねていれば、拾ったパスだけで組まずに止まる。"""
+    cell = "`a.py`。ループの側の触るファイルは [issue-1-design-lane-loop.md](issue-1-design-lane-loop.md) にある"
+    files, delegated = files_cell(cell)
+    assert (files, delegated) == (("a.py",), ("issue-1-design-lane-loop.md",))
+    gaps = design_gaps([1], {1: DesignResult(1, files, delegated=delegated)})
+    assert len(gaps) == 1 and "issue-1-design-lane-loop.md" in gaps[0]
+    assert files_cell("`a.py`、`b.py`") == (("a.py", "b.py"), ())
