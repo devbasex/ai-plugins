@@ -82,7 +82,9 @@ def test_spawn_names_the_wrapper_after_the_plan_and_the_lane(tmp_path):
     got = launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)
     assert got == {"ok": True, "detail": "起こした"}
     argv = calls[0]
-    assert argv[1:3] == ["relay", "spawn"] and argv[argv.index("--name") + 1] == launch.wrapper_name("o/r", "p6", "a") and argv[-1] == "入力"
+    assert (
+        argv[1:3] == ["relay", "spawn"] and argv[argv.index("--name") + 1] == launch.wrapper_name("o/r", "p6", "a") and argv[-1] == "入力"
+    )
     assert argv[argv.index("--role") + 1] == "conductor" and argv[argv.index("--cwd") + 1] == str(tmp_path)
 
 
