@@ -57,21 +57,32 @@ def wait_policy() -> tuple[float, float]:
     return limits.seconds(WAIT_POLICY), limits.value(WAIT_POLICY, "interval")
 
 
+def _take_once(directory: Path, lim: test_limits.Limits, owner: Mapping[str, object], read_memory: ReadMemory) -> Optional[slot_pool.Taken]:
+    """使えるメモリが下限を割っていなければ枠を 1 度取りに行く。取れなければ None。"""
+    if not _memory_ok(read_memory, lim.memory_floor_mib):
+        return None
+    return _try_take(directory, lim.capacity_mib, owner)
+
+
+def _no_slot_reason(agent: str, waited: float, read_memory: ReadMemory) -> str:
+    available = read_memory()
+    memory = "測れない" if available is None else f"{available} MiB"
+    return f"重い起動の枠を {waited:.0f} 秒待っても {agent} の起動に空かなかった（使えるメモリ: {memory}）"
+
+
 def _wait_for(agent: str, directory: Path, lim: test_limits.Limits, read_memory: ReadMemory) -> slot_pool.Taken:
     limit, poll = wait_policy()
     owner = {"pid": os.getpid(), "kind": KIND, "agent": agent}
     started = time.monotonic()
     while True:
-        taken = _try_take(directory, lim.capacity_mib, owner) if _memory_ok(read_memory, lim.memory_floor_mib) else None
+        taken = _take_once(directory, lim, owner, read_memory)
         waited = time.monotonic() - started
         if taken is not None:
             if waited >= poll:
                 record("launch_slot", agent=agent, waited_seconds=round(waited, 1))
             return taken
         if waited >= limit:
-            available = read_memory()
-            memory = "測れない" if available is None else f"{available} MiB"
-            raise NoSlot(f"重い起動の枠を {waited:.0f} 秒待っても {agent} の起動に空かなかった（使えるメモリ: {memory}）")
+            raise NoSlot(_no_slot_reason(agent, waited, read_memory))
         time.sleep(poll)
 
 
