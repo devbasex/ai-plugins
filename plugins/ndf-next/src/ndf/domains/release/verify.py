@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from ndf.adapters import git as git_mod
-from ndf.domains.release import sync_decide, user_config_decide
+from ndf.domains.release import gather, sync_decide, user_config_decide
 
 # 利用者の設定ディレクトリの環境変数と既定
 CLAUDE_DIR_ENV, CODEX_DIR_ENV = "CLAUDE_CONFIG_DIR", "CODEX_HOME"
@@ -100,9 +100,7 @@ def _landed(repo_git: git_mod.Git, paths: list[str], remote_ref: str) -> list[st
 def sync_base(main_dir: Path, base: str) -> sync_decide.Plan:
     """メインディレクトリのベースブランチを origin へそろえる。止めたときは手 `stop` と、重なったパスを返す。"""
     repo_git = git_mod.Git(main_dir)
-    done = repo_git.fetch_branch(git_mod.ORIGIN, base)
-    if done.returncode != 0:
-        raise git_mod.GitError(f"origin の {base} を取り込めない: {done.stderr.strip()}")
+    gather.fetch(repo_git, base)
     remote_ref = f"{git_mod.ORIGIN}/{base}"
     dirty = repo_git.status_paths()
     incoming = repo_git.changed_files("HEAD", remote_ref)

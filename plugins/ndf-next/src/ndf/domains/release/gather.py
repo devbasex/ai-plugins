@@ -31,6 +31,13 @@ class Range(NamedTuple):
     until: str
 
 
+def fetch(repo_git: git_mod.Git, name: str) -> None:
+    """origin のブランチを取り込む。取り込めなければ `GitError`。"""
+    done = repo_git.fetch_branch(git_mod.ORIGIN, name)
+    if done.returncode != 0:
+        raise git_mod.GitError(f"origin の {name} を取り込めない: {done.stderr.strip()}")
+
+
 def _context(node: dict) -> tuple[str, str]:
     """チェックの 1 件を (名前, 結論) にする。check run が終わっていなければ結論は空。
 

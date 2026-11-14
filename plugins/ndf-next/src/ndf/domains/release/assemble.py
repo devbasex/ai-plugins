@@ -59,9 +59,7 @@ class Built:
 
 def _span(repo_git: git_mod.Git, target: Target) -> gather.Range:
     for name in (target.base, target.production):
-        done = repo_git.fetch_branch(git_mod.ORIGIN, name)
-        if done.returncode != 0:
-            raise git_mod.GitError(f"origin の {name} を取り込めない: {done.stderr.strip()}")
+        gather.fetch(repo_git, name)
     return gather.Range(f"{git_mod.ORIGIN}/{target.production}", f"{git_mod.ORIGIN}/{target.base}")
 
 
