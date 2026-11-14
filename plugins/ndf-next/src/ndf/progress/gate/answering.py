@@ -91,10 +91,35 @@ def _refusal(v: run.View, a: Answer, observe: Observe) -> Question:
         raise model.Refused(f"工程 {q.stage} の答えは {', '.join(q.choices)} のどれか（渡された値 {a.value}）")
     if a.drop and not (a.value == run.APPROVED and q.gate == DESIGN_GATE):
         raise model.Refused("課題を外せるのは設計承認ゲートの承認だけ")
+    if a.drop:
+        _kept(v, a.drop)
     changed = observe(q).differs(a.seen)
     if changed:
         raise model.Refused(f"答えた後に対象が変わった。待ちへ戻すので、今の対象を見て答え直す: {' / '.join(changed)}")
     return q
+
+
+def _kept(v: run.View, drop: Sequence[int]) -> list[int]:
+    """外した後に今のスプリントに残る課題（文脈の `issues` の順）。スプリントに無い課題と、すべてを外す答えは断る。"""
+    current = [int(n) for n in v.context()["issues"]]
+    unknown = sorted(set(drop) - set(current))
+    if unknown:
+        raise model.Refused(f"外す課題 {', '.join(map(str, unknown))} はこのスプリントの課題（{', '.join(map(str, current))}）に無い")
+    kept = [n for n in current if n not in set(drop)]
+    if not kept:
+        raise model.Refused("課題をすべて外す答えは受けない（スプリントを止めるなら却下 rejected で答える）")
+    return kept
+
+
+def _dropped(v: run.View, q: Question, drop: Sequence[int]) -> list[model.EventDraft]:
+    """外した課題を今のスプリントの文脈の `issues` から除く事象。後の工程は残った課題だけを読む（`View.context`）。
+
+    答えた工程の宣言の outputs に `issues` は無いが、課題を外すのは設計承認ゲートの答えだけが持つ決まり（決定 99）で、
+    答えと同じトランザクションで conductor が書く。"""
+    if not drop:
+        return []
+    payload = {"outputs": {"issues": _kept(v, drop)}}
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, q.stage, payload=payload, rev=v.rev)]
 
 
 def _carry(conn: Any, table_id: str, issues: Sequence[int], reason: str) -> Optional[str]:
@@ -109,7 +134,8 @@ def _carry(conn: Any, table_id: str, issues: Sequence[int], reason: str) -> Opti
 
 
 def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_observe) -> dict[str, Any]:
-    """答えを事象 `answered` に残す（外した課題の行も同じトランザクション）。同じ冪等の鍵は書かずに同じ結果を返す。"""
+    """答えを事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
+    同じ冪等の鍵は書かずに同じ結果を返す。"""
     if not ACTORS.match(a.by):
         raise model.Refused(f"答えた者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）")
     text = run.notes_text(a.value, a.notes)
@@ -132,7 +158,7 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             "release_request": rejected,
         }
         draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
-        drafts = [draft, *_outputs(v, q, a)]
+        drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
         seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ答え {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"table_id": table_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}

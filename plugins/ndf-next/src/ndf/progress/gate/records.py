@@ -88,7 +88,7 @@ def answers(v: run.View) -> list[dict[str, Any]]:
                 "notes": p.get("notes"),
                 "head": Target.from_dict(p.get("seen")).head,
                 "reason": ev.draft.reason,
-                "by": ev.draft.actor,
+                "by": p["by"] if "by" in p else ev.draft.actor,
             }
         )
     return out

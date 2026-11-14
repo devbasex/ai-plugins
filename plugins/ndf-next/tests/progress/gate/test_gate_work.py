@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import causes
+from ndf.contracts import causes, result
 from ndf.core import route, worker
 from ndf.progress import gate, model
+from ndf.progress.gate import entry
 
 
 def test_the_work_name_becomes_the_required_arguments_of_worker_run(tmp_path):
@@ -36,3 +37,17 @@ def test_the_template_default_of_worker_is_ndf_answer_work():
     default = route.params()["worker"].default
     assert default[:3] == ["ndf", "answer", "work"] and "{state_dir}" in default
     assert set(gate.WORK_KINDS) >= {"impl", "fix", "design", "plan-to-spec"}
+
+
+def test_ndf_progress_work_runs_the_stage_work_and_not_ndf_answer_work(repo, st, new_table, monkeypatch):
+    # next が起こす `ndf progress work <進行表>` は工程を流す作業で、`ndf answer work`（--state-dir が要る）へ入らない
+    tid = new_table()
+    seen: list[tuple[str, str]] = []
+
+    def fake(a, cwd, st_):
+        seen.append((a.action, a.table_id))
+        return result.result("progress", result.OK, "流した")
+
+    monkeypatch.setattr(entry, "_progress", fake)
+    assert gate.progress_main(["work", tid]) == 0
+    assert seen == [("work", tid)]

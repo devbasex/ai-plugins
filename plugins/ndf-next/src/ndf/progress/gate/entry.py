@@ -1,4 +1,4 @@
-"""副命令 `ndf answer` と `ndf progress` のエントリポイント（`ndf.progress.gate` の部品）。
+"""副命令 `ndf answer`（`main`）と `ndf progress`（`progress_main`）のエントリポイント（`ndf.progress.gate` の部品）。
 
 ndf answer <進行表> --gate <問いの id> --result <答え> --reason <理由> --by <答えた者> --key <冪等の鍵>
            [--notes <指摘ファイル>] [--head <見た head の SHA>] [--material-sha256 <見た承認資料の sha256>]
@@ -61,13 +61,15 @@ def present(
 
 
 def ask(gate: Optional[str]) -> dict[str, Any]:
-    """プランの中の承認ゲート（雛形の `{{gate}}`）: 答えを待つ結果 JSON。答えはプランの行き先が受ける。"""
+    """プランの中の承認ゲート（雛形の `{{gate}}`）: 答えを待つ結果 JSON。答えはプランの行き先が受ける。
+
+    答えの語（routes の鍵）だけを返し、値は null（このステップは何も打たない）にする。このステップは進行表と工程を
+    知らず、答えを書くコマンドはプランの実行（`ndf plan next ... --answer`）と工程の流れ（`ndf progress answer
+    <進行表> <工程>`）がそれぞれ自分の routes で組むためである。"""
     if gate is not None and gate not in model.table()["gates"]:
         raise model.Refused(f"承認ゲートの区分 {gate} は無い（{', '.join(model.table()['gates'])}）")
     label = model.gate_label(gate) if gate else "プランの中の承認ゲート"
-    out = {
-        a: result.command("progress", "answer", "--answer", a, ask=("table_id", "stage", "reason")) for a in (run.APPROVED, run.REJECTED)
-    }
+    out: dict[str, Any] = {a: None for a in (run.APPROVED, run.REJECTED)}
     return result.result(TOOL, result.GATE, f"{label}の答えを待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
@@ -175,15 +177,6 @@ def _took(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
     return got["summary"] if got is not None else None
 
 
-def _verbs(ap: argparse.ArgumentParser) -> set[str]:
-    return {name for act in ap._actions if isinstance(act, argparse._SubParsersAction) for name in act.choices}
-
-
-def progress_verbs() -> set[str]:
-    """`ndf progress` の副命令の名前（工程を流す副命令と、進行表を作る・直す副命令）。"""
-    return _verbs(run.parser()) | _verbs(command.parser())
-
-
 Dispatch = Callable[[argparse.Namespace, Path], dict[str, Any]]
 # `ndf answer` の副命令の名前 → （引数の解析器を作る関数, 受ける関数）。`work` は exec するので表の外で受ける
 ANSWER_VERBS: dict[str, tuple[Callable[[], argparse.ArgumentParser], Dispatch]] = {
@@ -194,19 +187,26 @@ ANSWER_VERBS: dict[str, tuple[Callable[[], argparse.ArgumentParser], Dispatch]] 
 
 
 def main(argv: list[str]) -> int:
-    """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
+    """副命令 `ndf answer`（副命令の表の `answer` の行がこのパッケージを指す）。
 
-    - `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は雛形の `{{worker}}` の既定、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
-    - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
-      トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
+    `ask` はプランの中の承認ゲート、`list` は書いた答え、`head` は承認で見た head、`work` は雛形の `{{worker}}` の既定、
+    進行表の ID で始まれば承認ゲートへの答え。`ndf progress` は `progress_main` が受ける（`work` の名前が両方にあるため、
+    入口の副命令で分ける）
     """
     if argv and argv[0] in ANSWER_VERBS:
         make, dispatch = ANSWER_VERBS[argv[0]]
         return command.run_main(make(), dispatch, argv[1:])
     if argv and argv[0] == "work":
         return _cmd_work(argv[1:])
+    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, _cmd_give, a), argv)
+
+
+def progress_main(argv: list[str]) -> int:
+    """副命令 `ndf progress`（副命令の表の `progress` の行が `ndf.progress.gate.progress_cli` を指す）。
+
+    工程を流す副命令（next・wait・answer・resync・work・show）は、スプリントの完了と同じトランザクションでレーンの行を
+    終える `Env`（`lane_env`。決定 17）で流す。ほか（new・disable など）は `command` へ渡す。P1b（`run`）はレーンを読まない
+    """
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
-    if not argv or argv[0].startswith("-") or argv[0] in progress_verbs():
-        return command.main(argv)
-    return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, _cmd_give, a), argv)
+    return command.main(argv)

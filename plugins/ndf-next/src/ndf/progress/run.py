@@ -40,6 +40,8 @@ from ndf.progress.records import Records, github_records, sync_records
 
 TOOL = __package__.rpartition(".")[2]
 ACTOR = invoke.ACTOR
+# 答えの事象を書く書き手（progress.json の actors の鍵。答えた者は payload の by に分けて残す）
+CONDUCTOR, ORGANIZER = "conductor", "organizer"
 
 
 def _event(kind: str) -> str:
@@ -659,7 +661,10 @@ def notes_text(value: str, path: Optional[Path]) -> Optional[str]:
 
 def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[str], extra: Mapping[str, Any]) -> model.EventDraft:
     """待っているステップへの答えの事象。待っていない行・選択肢に無い答え・承認ゲートへの問いの id（`gate_id`）を持たない
-    答え（3364-2）は断る。`extra` は payload へ足す（`by` は書き手）。"""
+    答え（3364-2）は断る。`extra` は payload へ足す（`by` は答えた者で、payload に残す）。
+
+    事象の書き手は答えた者と分ける: 答えた者（`human:<名前>`・`service:<主体>` など）は事象 `answered` の書き手の表に無く、
+    答えを書くのは `ndf progress` / `ndf answer` を打つ conductor だからである（organizer が答えたときだけ organizer）。"""
     m = decide(v)
     if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
         raise model.Refused(f"工程 {stage} は答えを待っていない")
@@ -669,8 +674,8 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")
     payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text, **extra}
-    by = str(extra["by"]) if "by" in extra else "conductor"
-    return model.EventDraft(ANSWERED, by, stage, reason=reason, payload=payload, rev=v.rev)
+    writer = ORGANIZER if "by" in extra and extra["by"] == ORGANIZER else CONDUCTOR
+    return model.EventDraft(ANSWERED, writer, stage, reason=reason, payload=payload, rev=v.rev)
 
 
 def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, notes: Optional[Path]) -> dict[str, Any]:

@@ -101,12 +101,16 @@ def test_a_revised_stage_asks_a_new_question_and_the_rejections_are_counted(st, 
 
 
 def test_drop_is_only_for_the_design_gate_inside_a_lane(st, new_table, flow):
-    tid = new_table()
+    tid = new_table("--issues", "3092", "5")
     flow.turn(tid)
     with pytest.raises(model.Refused, match="レーンの行が無く"):
         _give(st, tid, _waiting(st, tid), drop=(3092,))
     with pytest.raises(model.Refused, match="設計承認ゲートの承認だけ"):
         _give(st, tid, _waiting(st, tid), "rejected", drop=(3092,))
+    with pytest.raises(model.Refused, match="このスプリントの課題"):
+        _give(st, tid, _waiting(st, tid), drop=(9,))
+    with pytest.raises(model.Refused, match="すべて外す"):
+        _give(st, tid, _waiting(st, tid), drop=(3092, 5))
 
 
 def _lane_rows(st, pid):
@@ -116,12 +120,14 @@ def _lane_rows(st, pid):
 
 def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, lane_sprint, flow):
     # 決定 99: 設計承認ゲートで外した課題は同じレーンの順番表の次の行へ入り、レーンは増えない
-    pid, tid = lane_sprint()
+    pid, tid = lane_sprint("--issues", "3092", "5")
     flow.turn(tid)
     out = _give(st, tid, _waiting(st, tid), drop=(3092,))
     rows = _lane_rows(st, pid)
     assert [r.key for r in rows][1] == out["metrics"]["carried_row"] and sorted(rows[1].issues()) == [3092]
     assert len(rows) == 3
+    # 外した課題は今のスプリントの課題から除かれ、後の工程は残った課題だけを読む
+    assert run.read(st, tid).context()["issues"] == [5]
 
 
 def test_the_sprint_completion_ends_the_lane_row(st, env, lane_sprint, flow):
@@ -138,9 +144,9 @@ def test_the_sprint_completion_ends_the_lane_row(st, env, lane_sprint, flow):
 
 def test_ask_waits_for_the_plan_gate_and_the_entry_is_on_the_command_table(capsys):
     out = gate.ask("design")
-    assert result.errors(out, 10) == [] and set(out["routes"]) == {"approved", "rejected"}
-    assert cli.COMMANDS["answer"] == cli.COMMANDS["progress"] == "ndf.progress.gate"
-    assert gate.TOOL == "answer" and {"next", "wait", "work", "new", "show"} <= gate.progress_verbs()
+    assert result.errors(out, 10) == [] and out["routes"] == {"approved": None, "rejected": None}
+    assert cli.COMMANDS["answer"] == "ndf.progress.gate" and cli.COMMANDS["progress"] == "ndf.progress.gate.progress_cli"
+    assert gate.TOOL == "answer" and cli.tool_of(cli.COMMANDS["progress"]) == "progress"
     assert gate.main(["ask", "--gate", "release"]) == 10
     assert json.loads(capsys.readouterr().out)["metrics"]["gate"]["kind"] == "release"
 
@@ -212,9 +218,8 @@ def _last_json(capsys):
 
 
 def test_current_main_routes_ask_list_and_head_to_their_own_parsers(repo, st, new_table, capsys):
-    # 不具合の目印: ask の結果は routes が結果 JSON の契約に合わず、形の誤り（終了コード 2）で止まる（現状の値を固定する）
-    assert gate.main(["ask", "--gate", "release"]) == 2
-    assert "結果の形の誤り" in capsys.readouterr().err
+    assert gate.main(["ask", "--gate", "release"]) == 10
+    assert _last_json(capsys)["status"] == "gate"
     assert gate.main(["ask", "--gate", "nope"]) == 2
     assert "ndf answer ask: error" in capsys.readouterr().err
     tid = new_table()

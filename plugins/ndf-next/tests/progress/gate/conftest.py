@@ -65,13 +65,13 @@ def flow(repo, st, env):
 
 @pytest.fixture
 def lane_sprint(st, new_table):
-    """計画のレーン a の 1 行目で動くスプリントの進行表を作り、（計画の ID, 進行表の ID）を返す。"""
+    """計画のレーン a の 1 行目で動くスプリントの進行表を作り、（計画の ID, 進行表の ID）を返す。`extra` は `ndf progress new` へ足す引数。"""
 
-    def make() -> tuple[str, str]:
+    def make(*extra: str) -> tuple[str, str]:
         with store.transaction(st) as conn:
             pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[3092], [2]])), True)
             view, _ = lane.read_plan(conn, pid)
-        tid = new_table("--parent", view.lanes["a"].table_id)
+        tid = new_table("--parent", view.lanes["a"].table_id, *extra)
         with store.transaction(st) as conn:
             lane.start_row(conn, pid, "a", "r1", tid)
         return pid, tid

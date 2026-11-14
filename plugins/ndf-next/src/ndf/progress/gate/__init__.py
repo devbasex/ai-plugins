@@ -1,7 +1,7 @@
 """承認ゲート（#3295）: 問いの区分・答えごとの行き先・答えの証拠・MVV 判定の前の機械の検査。
 
 承認ゲートは工程のステップ（`ndf.listen`）で、`ndf progress next` が待ちに入った行を `gate` で返す（#3092 の決定 7）。
-このパッケージはその問いと答えの形を持ち、公開の名前はここから引く（副命令の表の `answer`・`progress` もここを指す）。
+このパッケージはその問いと答えの形を持ち、公開の名前はここから引く（副命令の表の `answer` はここを、`progress` は `progress_cli` を指す）。
 
 - 問い・答えごとの行き先・承認資料（`asking`）: 問い（`Question`）は区分（設計・リリース。表 `workflow/progress.json` の
   `gates`）・進行表と工程・問いの記録の id・見る対象（PR の URL と head の SHA・承認資料の sha256）を持つ。行き先（`routes`）は
@@ -15,7 +15,7 @@
 - 答えの記録（`records`）: 答えを `gate-rejections.jsonl` へ写し（#3136）、conductor が読む答えの一覧（#2934・#3174）と
   承認で見た head（#2147）を返す
 - MVV 判定の前の機械の検査（`checks`）: 6 つの検査（PR 本文の節の中身は #2853）と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
-- 副命令のエントリポイント（`entry`）: `ndf answer` と `ndf progress`
+- 副命令のエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。入口は `progress_cli`）
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from ndf.progress.gate.checks import (
     sections,
     well_formed,
 )
-from ndf.progress.gate.entry import WORK_KINDS, _cmd_work, ask, main, present, progress_verbs, work_argv
+from ndf.progress.gate.entry import WORK_KINDS, _cmd_work, ask, main, present, progress_main, work_argv
 from ndf.progress.gate.records import answers, approved_head, record_answer, rejection_row, rejections, rejections_path
 from ndf.progress.gate.release import request_release, take_reply
 
@@ -115,7 +115,7 @@ __all__ = [
     "no_observe",
     "note",
     "present",
-    "progress_verbs",
+    "progress_main",
     "question",
     "question_id",
     "recheck",
