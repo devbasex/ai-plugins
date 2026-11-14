@@ -73,10 +73,18 @@ def lock(fd: int, wait: float) -> bool:
             time.sleep(0.01)
 
 
-def _replace(path: Path, data: Mapping[str, Any]) -> None:
+def replace_text(path: Path, text: str, mode: Optional[int] = None) -> None:
+    """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(dict(data), ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
+    if mode is not None:
+        tmp.chmod(mode)
     os.replace(tmp, path)
+
+
+def replace_json(path: Path, data: Mapping[str, Any]) -> None:
+    replace_text(path, json.dumps(dict(data), ensure_ascii=False))
 
 
 def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str, ...] = ()) -> bool:
@@ -94,7 +102,7 @@ def write_json(path: Path, data: Mapping[str, Any], wait: float, keep: tuple[str
         for key in keep:
             if before and key in before:
                 merged[key] = before[key]
-        _replace(path, merged)
+        replace_json(path, merged)
         return True
     finally:
         os.close(fd)

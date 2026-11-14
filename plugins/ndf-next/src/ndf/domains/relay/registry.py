@@ -73,11 +73,7 @@ def read_state(directory: Path) -> Optional[dict[str, Any]]:
 
 
 def write_state(directory: Path, data: Mapping[str, Any]) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / STATE_FILE
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps({**dict(data), "at": signals.now_iso()}, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    signals.replace_json(directory / STATE_FILE, {**dict(data), "at": signals.now_iso()})
 
 
 def append_log(directory: Path, row: Mapping[str, Any]) -> None:

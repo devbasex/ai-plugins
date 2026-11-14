@@ -12,7 +12,6 @@ API を呼ばない）。
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -56,7 +55,7 @@ def use(state_dir: Path, name: str) -> None:
     """指定を書く。"""
     if not NAME_RE.match(name):
         raise AccountError(f"アカウントの名前の形が違う: {name}")
-    _write_json(pin_path(state_dir), {"account": name})
+    signals.replace_json(pin_path(state_dir), {"account": name})
 
 
 def clear(state_dir: Path) -> bool:
@@ -103,11 +102,4 @@ def _usage(row: Any, path: Path) -> account_decide.Usage:
 
 def write_usages(state_dir: Path, rows: list[account_decide.Usage]) -> None:
     """使用率のキャッシュを書く（センサーとテストが使う）。"""
-    _write_json(usage_path(state_dir), {"accounts": [r._asdict() for r in rows]})
-
-
-def _write_json(path: Path, data: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(dict(data), ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    signals.replace_json(usage_path(state_dir), {"accounts": [r._asdict() for r in rows]})

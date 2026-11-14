@@ -18,6 +18,8 @@ import shlex
 from pathlib import Path
 from typing import Mapping, NamedTuple
 
+from ndf.domains.relay import signals
+
 ENTRY_NAME = "ndf-relay"
 COPY_NAME = "relay.py"
 ROOT_FILE = "relay.root"
@@ -126,12 +128,12 @@ def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, re
     now = status(environ, missing_code)
     copy = now.copy
     if copy.state != "foreign" or replace_foreign:
-        _write(copy.path, launcher(missing_code), 0o755)
-        _write(copy.path.parent / ROOT_FILE, f"{plugin_root}\n", 0o644)
+        signals.replace_text(copy.path, launcher(missing_code), 0o755)
+        signals.replace_text(copy.path.parent / ROOT_FILE, f"{plugin_root}\n", 0o644)
         copy = Status(copy.path, "ours")
     entry = now.entry
     if entry.state in ("absent", "stale"):
-        _write(entry.path, entry_script(copy.path), 0o755)
+        signals.replace_text(entry.path, entry_script(copy.path), 0o755)
         entry = Status(entry.path, "ours")
     return Installed(copy, entry, now.on_path)
 
@@ -148,11 +150,3 @@ def uninstall(environ: Mapping[str, str], missing_code: int) -> Installed:
     if out[0].state == "absent":
         (out[0].path.parent / ROOT_FILE).unlink(missing_ok=True)
     return Installed(out[0], out[1], now.on_path)
-
-
-def _write(path: Path, text: str, mode: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.chmod(mode)
-    os.replace(tmp, path)

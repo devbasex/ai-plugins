@@ -8,8 +8,6 @@ hook のセッションの数え手は、利用者の入力で数え直し、中
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from pathlib import Path
 
@@ -31,10 +29,7 @@ def mark_path(state_dir: Path, session_id: str) -> Path:
 def mark(state_dir: Path, session_id: str) -> Path:
     """印を立てる。立てた印のパスを返す。"""
     path = mark_path(state_dir, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps({"session_id": session_id, "at": signals.now_iso()}), encoding="utf-8")
-    os.replace(tmp, path)
+    signals.replace_json(path, {"session_id": session_id, "at": signals.now_iso()})
     return path
 
 

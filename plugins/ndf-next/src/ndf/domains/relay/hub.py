@@ -73,7 +73,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     """依頼を書き、結果が出るまで待つ（排他が空けば自分で処理する）。"""
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
-    _write(base / "requests" / f"{rid}.json", dict(request))
+    signals.replace_json(base / "requests" / f"{rid}.json", dict(request))
     deadline = ctx.monotonic() + ctx.hub_wait.seconds
     result = base / "results" / f"{rid}.json"
     while True:
@@ -96,11 +96,11 @@ def drain(ctx: Context) -> bool:
     try:
         if not signals.lock(fd, 0):
             return False
-        _write(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
+        signals.replace_json(base / STATE_FILE, {"pid": os.getpid(), "version": ctx.version, "at": signals.now_iso()})
         requests = base / "requests"
         for path in sorted(requests.glob("*.json")) if requests.is_dir() else []:
             got = handle(ctx, json.loads(path.read_text(encoding="utf-8")))
-            _write(base / "results" / path.name, got._asdict())
+            signals.replace_json(base / "results" / path.name, got._asdict())
             _log(base, path.stem, got)
             path.unlink()
         return True
@@ -136,7 +136,7 @@ def read_registry(state_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _save_registry(state_dir: Path, entries: Mapping[str, Any]) -> None:
-    _write(hub_dir(state_dir) / REGISTRY_FILE, {"version": 1, "entries": dict(entries)})
+    signals.replace_json(hub_dir(state_dir) / REGISTRY_FILE, {"version": 1, "entries": dict(entries)})
 
 
 def _next_name(taken: set[str]) -> str:
@@ -259,13 +259,6 @@ def listing(ctx: Context) -> list[dict[str, Any]]:
         status = (state or {}).get("state") if name in running else "stopped"  # noqa: NDF501 ファイル: 状態が無ければ起動の途中
         out.append({"name": name, "running": name in running, "state": status, "reason": (state or {}).get("reason"), **entry})  # noqa: NDF501 ファイル: 状態が無ければ理由も無い
     return out
-
-
-def _write(path: Path, data: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(dict(data), ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def _log(base: Path, rid: str, got: Outcome) -> None:
