@@ -32,6 +32,7 @@
     {"level": "sprint", "kind": "finished", "actors": ["workflow"], "scope": "row", "from": ["running"], "state": "finished"},
     {"level": "sprint", "kind": "failed", "actors": ["workflow"], "scope": "row", "from": ["running"], "state": "failed"},
     {"level": "sprint", "kind": "skipped", "actors": ["workflow"], "scope": "row", "from": ["pending"], "state": "disabled"},
+    {"level": "sprint", "kind": "step_recorded", "actors": ["workflow"], "scope": "row", "from": ["running"]},
     {"level": "sprint", "kind": "outputs_recorded", "actors": ["workflow"], "scope": "row", "from": ["running", "finished"]},
     {"level": "sprint", "kind": "disabled", "actors": ["conductor"], "scope": "row", "from": ["pending", "failed"], "state": "disabled"},
     {"level": "sprint", "kind": "enabled", "actors": ["conductor"], "scope": "row", "from": ["disabled"], "state": "pending"},
