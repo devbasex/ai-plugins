@@ -16,7 +16,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import invoke, model, run
-from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accepted_path
+from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accepted_path, sprint_issues
 
 # --- 差し戻しの記録 ---------------------------------------------------------------------------------
 
@@ -31,7 +31,7 @@ def rejections_path() -> Path:
 def rejection_row(v: run.View, q: Question, a: Answer) -> dict[str, Any]:
     """`gate-rejections.jsonl` の 1 行（答えた時刻・区分・答え・理由・範囲・答えた者）。"""
     ctx = v.context()
-    issues = sorted(int(n) for n in ctx["issues"]) if isinstance(ctx.get("issues"), list) else []
+    issues = sprint_issues(v)
     prs = sorted({n for n in (ctx.get("design_pr"), ctx.get("pr")) if isinstance(n, int)})
     return {
         "at": datetime.now(UTC).isoformat(timespec="seconds"),

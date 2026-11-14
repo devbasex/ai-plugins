@@ -92,6 +92,12 @@ def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> 
     return hashlib.sha256(text.encode()).hexdigest()[:ID_LENGTH]
 
 
+def sprint_issues(v: run.View) -> list[int]:
+    """スプリントの文脈の課題の番号（整数の昇順）。文脈に並びが無ければ空。"""
+    ctx = v.context()
+    return sorted(int(n) for n in ctx["issues"]) if isinstance(ctx.get("issues"), list) else []
+
+
 def pr_url(repo: Optional[str], number: Optional[int]) -> Optional[str]:
     return f"https://github.com/{repo}/pull/{number}" if repo and number else None
 

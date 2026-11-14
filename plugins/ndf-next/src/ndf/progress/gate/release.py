@@ -14,7 +14,17 @@ from typing import Any, Optional
 
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
-from ndf.progress.gate.asking import RELEASE_GATE, RELEASE_KIND, Question, Target, material_path, release_request_of, request_id, waiting
+from ndf.progress.gate.asking import (
+    RELEASE_GATE,
+    RELEASE_KIND,
+    Question,
+    Target,
+    material_path,
+    release_request_of,
+    request_id,
+    sprint_issues,
+    waiting,
+)
 from ndf.progress.plan import external
 
 # 外のオーガナイザーの答え → 承認ゲートの答え
@@ -24,8 +34,7 @@ SEEN_SUFFIX = ".seen.json"
 
 
 def _request_fields(v: run.View, q: Question, lane_name: Optional[str]) -> dict[str, Any]:
-    ctx = v.context()
-    issues = sorted(int(n) for n in ctx["issues"]) if isinstance(ctx.get("issues"), list) else []
+    issues = sprint_issues(v)
     return {
         "id": request_id(q),
         "lane": lane_name,
