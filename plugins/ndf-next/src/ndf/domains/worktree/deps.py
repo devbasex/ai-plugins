@@ -30,7 +30,11 @@ from ndf.domains.worktree import container, declaration, repo
 
 # 宣言の節と、その中の手順の名前（行う順）
 SECTION = declaration.DEPS
-STEPS = ("copy_from_main", "copy_as_real", "run")
+# 複製の手順（ハードリンクで複製する `LINK_STEP` と、実体を複製する手順）と、コマンドを打つ手順
+LINK_STEP = "copy_from_main"
+COPY_STEPS = (LINK_STEP, "copy_as_real")
+RUN_STEP = "run"
+STEPS = (*COPY_STEPS, RUN_STEP)
 # 印のファイルの名前（worktree の git ディレクトリの下）
 MARK = "ndf-deps"
 # 失敗の後に返す出力の末尾の行数
@@ -129,11 +133,11 @@ def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Opt
             return None
         if not _same(src, dest):
             return f"worktree の側で書き換えられている: {rel}"
-        if kind == "copy_from_main":
+        if kind == LINK_STEP:
             return None
         shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
     try:
-        _copy(src, dest, link=kind == "copy_from_main")
+        _copy(src, dest, link=kind == LINK_STEP)
     except (OSError, shutil.Error) as exc:  # 複製の失敗は手順の失敗として返す
         return f"複製できない: {rel}: {exc}"
     return None
@@ -156,20 +160,20 @@ def _run_step(shell: container.Shell, top: Path, command: str, out: Prepared) ->
 
 
 def _do_steps(main_dir: Path, top: Path, steps: dict[str, list[str]], redo: bool, out: Prepared, shell: container.Shell) -> None:
-    for kind in STEPS[:2]:
+    for kind in COPY_STEPS:
         for i, rel in enumerate(steps[kind]):
             why = copy_step(main_dir, top, rel, kind, redo)
             if why is not None:
                 out.failed, out.log = f"{kind}[{i}] {rel}", [*out.log, why]
                 return
-    for i, command in enumerate(steps["run"]):
+    for i, command in enumerate(steps[RUN_STEP]):
         if not _run_step(shell, top, command, out):
-            out.failed = f"run[{i}] {command}"
+            out.failed = f"{RUN_STEP}[{i}] {command}"
             return
 
 
 def _verify(wt: Git, top: Path, steps: dict[str, list[str]], before: str, since: float, out: Prepared) -> None:
-    rewritten = _rewritten(top, steps["copy_from_main"], since)
+    rewritten = _rewritten(top, steps[LINK_STEP], since)
     if rewritten:
         out.failed = "copy_from_main の書き換え"
         out.log += ["ハードリンクで複製したファイルが用意の中で書き換えられた（メインディレクトリの同じファイルも変わった）。"

@@ -56,7 +56,7 @@ def target(path: Path) -> Optional[Target]:
 def setup(t: Target) -> int:
     """複製し、複製した件数を返す。失敗は `LocalenvError`。"""
     count = 0
-    for kind in deps.STEPS[:2]:
+    for kind in deps.COPY_STEPS:
         for rel in t.strings(kind):
             why = deps.copy_step(t.main_dir, t.path, rel, kind, redo=False)
             if why is not None:
