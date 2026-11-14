@@ -116,9 +116,16 @@ git log --oneline "origin/$dev_base"..HEAD
 ブランチはその作業ディレクトリで作られ、push した後に削除する。
 
 ```bash
-git fetch origin <base-branch>
-git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
+git fetch origin <base-branch> || exit 1
+# 作れなければ（未マージの同名ブランチが残っている等）元のブランチの上で取り込みと
+# cherry-pick を続けず、ここで止まる
+git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch> || {
+  echo "❌ 短命ブランチ <current-branch>-for-<base-short-name> を作れません。既存のブランチを確かめてください" >&2
+  exit 1
+}
 ```
+
+作れずに止まったら、同名のブランチ（ローカルと `origin`）と、それを head にする開いた PR を確かめて報告する。既存のブランチは消さない。
 
 - `<base-short-name>`: 環境ブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
