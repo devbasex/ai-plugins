@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from datetime import timedelta, timezone
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -128,11 +129,23 @@ def step_progress(v: View, stage: str) -> StepProgress:
 # --- 次の 1 手（純粋な判断） ----------------------------------------------------------------
 
 
+class Action(StrEnum):
+    """次の 1 手の種類（値は結果 JSON の `metrics.move` に載る）。"""
+
+    DONE = "done"
+    COMPLETE = "complete"
+    START = "start"
+    RESUME = "resume"
+    GATE = "gate"
+    CONSUME = "consume"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class Move:
-    """次の 1 手。`action` は done・complete・start・resume・gate・consume・failed のどれか。"""
+    """次の 1 手。"""
 
-    action: str
+    action: Action
     stage: Optional[stages.StageDef] = None
     step: Optional[stages.StepDef] = None
     progress: Optional[StepProgress] = None
@@ -151,29 +164,29 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     prog = step_progress(v, s.name)
     step = prog.next_step(s)
     if step is None:
-        return Move("resume", s, None, prog)
+        return Move(Action.RESUME, s, None, prog)
     listen = invoke.CALLS[step.call] == invoke.LISTEN
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     if waiting and prog.answer is None:
-        return Move("gate", s, step, prog)
-    return Move("consume" if listen else "resume", s, step, prog, prog.answer)
+        return Move(Action.GATE, s, step, prog)
+    return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
 
 
 def decide(v: View) -> Move:
     """事象を畳み込んだ表だけから次の 1 手を決める。終わった行（終了・無効・中止）は飛ばす。"""
     if model.is_terminal(v.whole):
-        return Move("done")
+        return Move(Action.DONE)
     rows = v.rows
     for s in v.snap.stages:
         state = rows[s.name].state if s.name in rows else None
         if model.is_terminal(state):
             continue
         if state == "failed":
-            return Move("failed", s, event=_last(v.row_events(s.name), "failed"))
+            return Move(Action.FAILED, s, event=_last(v.row_events(s.name), "failed"))
         if state == "running":
             return _running_move(v, s)
-        return Move("start", s)
-    return Move("complete")
+        return Move(Action.START, s)
+    return Move(Action.COMPLETE)
 
 
 # --- 結果 JSON ------------------------------------------------------------------------------
@@ -253,12 +266,12 @@ def _failed_report(v: View, m: Move) -> dict[str, Any]:
 
 def report(v: View, m: Move) -> dict[str, Any]:
     """副作用の無い 1 手の結果（`wait`・`show` と、`next` が流せない手）。"""
-    if m.action == "done":
+    if m.action == Action.DONE:
         return result.result(TOOL, result.OK, f"進行表 {v.table_id} は{model.label(v.whole)}", metrics=_metrics(v, m))
-    if m.action == "failed":
+    if m.action == Action.FAILED:
         return _failed_report(v, m)
     assert m.stage is not None
-    if m.action == "gate":
+    if m.action == Action.GATE:
         assert m.step is not None
         summary = f"工程 {m.stage.name} のステップ {m.step.id} が答えを待っている"
         return result.result(TOOL, result.GATE, summary, metrics=_metrics(v, m), routes=_gate_routes(v.table_id, m))
@@ -455,7 +468,7 @@ def _when_off(d: Drive, v: View, s: stages.StageDef) -> Optional[str]:
 
 def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
     """未着手の行を始める。条件が偽なら無効として飛ばし、入力が欠けるか形が違えば始めずに止まる。"""
-    m = Move("start", s)
+    m = Move(Action.START, s)
     try:
         off = _when_off(d, v, s)
     except FactUnknown as exc:
@@ -505,7 +518,7 @@ def _complete(d: Drive, v: View) -> dict[str, Any]:
     d.write(model.EventDraft("completed", ACTOR, None, rev=v.rev))
     d.synced()
     done = read(d.st, d.table_id)
-    return result.result(TOOL, result.OK, f"進行表 {d.table_id} を完了にした", metrics=_metrics(done, Move("done")))
+    return result.result(TOOL, result.OK, f"進行表 {d.table_id} を完了にした", metrics=_metrics(done, Move(Action.DONE)))
 
 
 def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
@@ -524,15 +537,15 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
 def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """1 手を打つ。続けて次の手を決めるなら None。"""
-    if m.action == "complete":
+    if m.action == Action.COMPLETE:
         return _complete(d, v)
-    if m.action == "consume":
+    if m.action == Action.CONSUME:
         _consume(d, v, m)
         return None
-    if m.action == "start":
+    if m.action == Action.START:
         assert m.stage is not None
         return _start(d, v, m.stage)
-    if m.action == "resume":
+    if m.action == Action.RESUME:
         return _resume(d, v, m)
     return report(v, m)
 
@@ -614,7 +627,7 @@ def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, 
 
     def build(v: View) -> list[model.EventDraft]:
         m = decide(v)
-        if m.action != "gate" or m.stage is None or m.stage.name != stage or m.step is None:
+        if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
             raise model.Refused(f"工程 {stage} は答えを待っていない")
         allowed = choices(m)
         if value not in allowed:
