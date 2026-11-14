@@ -77,10 +77,12 @@ class Policy:
 
 @dataclass(frozen=True)
 class RunState:
-    """判断の状態。`tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数。"""
+    """判断の状態。`launched` は起こして行の始まりを待つ起動、`started` は起こせた起動のすべて、
+    `tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数。"""
 
     snapshot: Optional[dict[str, Any]] = None
     launched: tuple[str, ...] = ()
+    started: tuple[str, ...] = ()
     tried: tuple[str, ...] = ()
     attempts: tuple[tuple[str, int], ...] = ()
     failed: tuple[str, ...] = ()
@@ -91,7 +93,7 @@ class RunState:
         return next((n for k, n in self.attempts if k == key), 0)
 
     def as_result(self) -> dict[str, Any]:
-        return {"outcome": self.outcome, "launched": list(self.launched), "failed": list(self.failed), "errors": list(self.errors)}
+        return {"outcome": self.outcome, "launched": list(self.started), "failed": list(self.failed), "errors": list(self.errors)}
 
 
 def snapshot(state: str, complete: bool, wakeable: list[tuple[str, str]], running: list[tuple[str, str, str]]) -> dict[str, Any]:
@@ -147,7 +149,7 @@ def _live_launched(state: RunState, snap: dict[str, Any]) -> tuple[str, ...]:
 def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: Policy) -> RunState:
     tried = (*state.tried, act.key)
     if value["ok"]:
-        return replace(state, tried=tried, launched=(*state.launched, act.key))
+        return replace(state, tried=tried, launched=(*state.launched, act.key), started=(*state.started, act.key))
     count = state.count(act.key) + 1
     attempts = tuple((k, n) for k, n in state.attempts if k != act.key) + ((act.key, count),)
     error = f"{act.key}: {value['detail']}"

@@ -14,6 +14,7 @@ from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import lane, model, plan, store
 from ndf.progress.plan import cli as plan_cli
+from ndf.progress.plan import run as plan_run
 
 REPO = "https://example.invalid/o/r"
 
@@ -157,7 +158,15 @@ def test_status_is_built_from_the_two_tables(opened):
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
+def detached(monkeypatch):
+    """`start` が切り離して起こす `lanes run` の呼び出し（起こさずに記録する）。"""
+    calls = []
+    monkeypatch.setattr(plan_run, "detach", lambda name, cwd: calls.append((name, cwd)) or 4242)
+    return calls
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch, detached):
     path = tmp_path / "work"
     path.mkdir()
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -180,14 +189,16 @@ def test_subcommand_is_in_the_table():
     assert cli.COMMANDS[plan.TOOL] == plan_cli.__name__
 
 
-def test_cli_creates_starts_and_reports_the_plan(repo, capsys, tmp_path):
+def test_cli_creates_starts_and_reports_the_plan(repo, capsys, tmp_path, detached):
     path = _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1, 2]])))
     code, out = _cli(capsys, "init", path)
     assert code == 0 and out["metrics"]["state"] == "pending"
     code, out = _cli(capsys, "init", path)
     assert out["cause"]["kind"] == "refused" and out["metrics"]["current_id"]
+    assert detached == []
     code, out = _cli(capsys, "start", path)
     assert code == 0 and out["metrics"]["state"] == "running"
+    assert detached == [("p6", repo)] and out["metrics"]["run_pid"] == 4242
     code, out = _cli(capsys, "status", "p6")
     assert code == 0 and out["items"][0]["rows"][0]["input"]["issues"] == [1, 2]
 
