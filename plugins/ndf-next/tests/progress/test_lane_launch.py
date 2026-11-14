@@ -167,6 +167,53 @@ def test_spawn_reads_the_last_line_as_it_is_now(tmp_path, stdout, stderr, code, 
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == got
 
 
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "code", "got"),
+    [
+        # 複数行は最後の行だけを JSON として読む（途中の行が JSON でも読まない）
+        (
+            json.dumps({"status": "ok", "summary": "前"}) + "\n" + json.dumps({"status": "stopped", "summary": "後"}),
+            "",
+            1,
+            {"ok": False, "detail": "後"},
+        ),
+        ("ログ\n" + json.dumps({"status": "ok", "summary": "起こした"}) + "\n\n", "", 0, {"ok": True, "detail": "起こした"}),
+        # 最後の行が壊れていれば、前の行が読めても壊れた出力と同じ扱い
+        (json.dumps({"status": "ok", "summary": "前"}) + "\n壊れた", "エラー", 1, {"ok": False, "detail": "エラー"}),
+        # 空白だけの出力は空の出力と同じ扱い
+        ("  \n\t\n", "", 4, {"ok": False, "detail": "終了コード 4"}),
+    ],
+)
+def test_read_spawn_reads_only_the_last_line_as_it_is_now(stdout, stderr, code, got):
+    assert launch.read_spawn(stdout, stderr, code) == got
+
+
+@pytest.mark.parametrize("stdout", ["[1]", "null", "3", '"ok"'])
+def test_read_spawn_raises_on_a_last_line_that_is_json_but_not_an_object_as_it_is_now(stdout):
+    """辞書でない JSON の最後の行は、今は AttributeError で落ちる（現状の記録。直すのは別の変更）。"""
+    with pytest.raises(AttributeError):
+        launch.read_spawn(stdout, "", 0)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "got"),
+    [
+        ("", None),
+        ("  \n", None),
+        ("壊れた", None),
+        ("[1]", None),
+        ("null", None),
+        ("{}", {}),
+        ('{"status": "ok"}\n壊れた', None),
+        ('壊れた\n{"status": "gate"}\n', {"status": "gate"}),
+    ],
+)
+def test_probe_reads_only_the_last_line_as_an_object_as_it_is_now(stdout, got):
+    run, calls = _runner(stdout=stdout)
+    assert launch.sprint_wait("s1", run=run) == got
+    assert calls[0][1:] == ["progress", "wait", "s1", "--timeout", "0"]
+
+
 def test_spawn_reports_the_os_error_in_the_detail(tmp_path):
     run, _ = _runner(error=PermissionError("denied"))
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "ラッパーを起こせない: denied"}
