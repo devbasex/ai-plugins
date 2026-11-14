@@ -102,12 +102,12 @@ def entrypoints(features: Mapping[str, Any], *, conductor_only: bool = False) ->
     return found
 
 
-def _under(module: str, head: str) -> bool:
+def _under(module: str, place: str) -> bool:
     """モジュール（`a.b.c`）が置き場（`src/a/b/` のディレクトリか `src/a/b/c.py` のファイル）にあるか。"""
     path = "src/" + module.replace(".", "/")
-    if head.endswith("/"):
-        return (path + "/").startswith(head)
-    return path == head.removesuffix(".py")
+    if place.endswith("/"):
+        return (path + "/").startswith(place)
+    return path == place.removesuffix(".py")
 
 
 def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> dict[str, list[str]]:
@@ -116,16 +116,16 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
     `commands` は副命令の表（`cli.COMMANDS`）。副命令の名前は表に写さず、行き先の子の置き場にモジュールがある
     副命令をこの表から引く。
     """
-    places = features["places"]
+    by_child = features["places"]
     found: dict[str, list[str]] = {}
     for r in features["rows"]:
         if not r.get("user_command"):
             continue
-        heads = places[r["to"]] if "to" in r else []
-        found[r["now"]] = _commands_under(commands, heads)
+        places = by_child[r["to"]] if "to" in r else []
+        found[r["now"]] = _commands_under(commands, places)
     return found
 
 
-def _commands_under(commands: Mapping[str, str], heads: Sequence[str]) -> list[str]:
+def _commands_under(commands: Mapping[str, str], places: Sequence[str]) -> list[str]:
     """副命令の表から、モジュールがいずれかの置き場の下にある副命令の名前を並べる。"""
-    return sorted(cmd for cmd, module in commands.items() if any(_under(module, h) for h in heads))
+    return sorted(cmd for cmd, module in commands.items() if any(_under(module, p) for p in places))
