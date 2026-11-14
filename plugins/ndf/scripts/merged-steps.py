@@ -188,18 +188,16 @@ def _remove_pr_worktrees(ctx: CleanupContext, branch, merge_commit):
 
 def _cleanup_pr(ctx: CleanupContext, n):
     """PR 1 件分の作業ツリーとブランチを片付ける。"""
-    got = merged_pr_info(ctx.main_dir, n, ctx.add)
-    if got is None:
+    if (got := merged_pr_info(ctx.main_dir, n, ctx.add)) is None:
         return
     branch, merge_commit = got
-    # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）
-    # 開始時の記録は .ndf/ の目録を全部読むため、スプリントブランチのときだけ探す
+    # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）。
+    # 記録は .ndf/ の目録を全部読むため、スプリントブランチのときだけ探す
     record = repo.sprint_flow_record(ctx.main_dir, branch) if (branch or "").startswith(branch_flow.SPRINT_PREFIX) else None
     if why := repo.kept_sprint_branch(ctx.main_dir, branch, record):
         ctx.add("branch", branch, "kept", why)
     elif _remove_pr_worktrees(ctx, branch, merge_commit):
         _delete_branch(ctx.main_dir, branch, ctx.add)
-
     if ctx.slug:
         _remove_pr_tmp_worktrees(ctx, n)
 
@@ -218,8 +216,7 @@ def _update_main_dir(main_dir, add):
         add("main_dir", main_dir, "kept", f"主ディレクトリが {base} でなく {cur or 'detached'} のため pull しない")
         return None
     pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
-    same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
-    if same:
+    if same := (same_untracked(main_dir, pull) if pull.returncode != 0 else []):
         # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
         for rel in same:
             (Path(main_dir) / rel).unlink()
