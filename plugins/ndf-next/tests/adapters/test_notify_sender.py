@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -228,6 +229,56 @@ def test_only_one_sender_runs(outbox: Path, wall: list[float]) -> None:
 def test_drain_does_not_read_temporary_names(outbox: Path, wall: list[float]) -> None:
     _write(outbox, ".writing")
     assert notify.drain(outbox, _Deliver()).sent == 0
+
+
+# ---- 送ったキーの記録と、送れなかった 1 件の保持 ----
+
+KEEP = NOW - notify.KEEP_DAYS * 86400
+
+
+def _sent_record(outbox: Path) -> object:
+    return json.loads((outbox / ".sent.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("record", ["{壊れた", "[1, 2]", '"a"'], ids=["broken", "list", "string"])
+def test_unreadable_sent_record_counts_from_empty(outbox: Path, wall: list[float], record: str) -> None:
+    _write(outbox, "a")
+    (outbox / ".sent.json").write_text(record, encoding="utf-8")
+    out = notify.drain(outbox, _Deliver())
+    assert (out.sent, out.duplicate) == (1, 0)
+    assert _sent_record(outbox) == {"a": NOW}
+
+
+def test_sent_record_keeps_only_numbers_within_keep_days(outbox: Path, wall: list[float]) -> None:
+    outbox.mkdir(parents=True)
+    record = {"keep": KEEP, "old": KEEP - 1, "text": "x", "none": None}
+    (outbox / ".sent.json").write_text(json.dumps(record), encoding="utf-8")
+    _write(outbox, "1", key="keep")
+    _write(outbox, "2", key="old")
+    _write(outbox, "3", key="text")
+    deliver = _Deliver()
+    out = notify.drain(outbox, deliver)
+    assert [n.key for n in deliver.calls] == ["old", "text"]
+    assert (out.sent, out.duplicate) == (2, 1)
+    assert _sent_record(outbox) == {"keep": KEEP, "old": NOW, "text": NOW}
+
+
+def test_sent_record_is_not_written_when_nothing_is_sent(outbox: Path, wall: list[float]) -> None:
+    _write(outbox, "a", created_at=NOW - 3601)
+    notify.drain(outbox, _Deliver())
+    assert not (outbox / ".sent.json").exists()
+
+
+def test_unsent_older_than_keep_days_is_removed(outbox: Path, wall: list[float]) -> None:
+    unsent = outbox / "unsent"
+    unsent.mkdir(parents=True)
+    for name, mtime in {"old.json": KEEP - 1, "edge.json": KEEP, "new.json": KEEP + 1}.items():
+        (unsent / name).write_text("{}", encoding="utf-8")
+        os.utime(unsent / name, (mtime, mtime))
+    (unsent / "old.txt").write_text("", encoding="utf-8")
+    os.utime(unsent / "old.txt", (KEEP - 1, KEEP - 1))
+    notify.drain(outbox, _Deliver())
+    assert sorted(p.name for p in unsent.iterdir()) == ["edge.json", "new.json", "old.txt"]
 
 
 # ---- slack_deliver ----
