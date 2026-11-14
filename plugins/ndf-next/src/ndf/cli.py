@@ -7,19 +7,21 @@
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 
-from ndf import identity
+from ndf import contracts, identity
+from ndf.contracts import causes, result
+
+# 結果 JSON の tool の名前（副命令へ渡す前に止まったとき）
+TOOL = "cli"
 
 # 副命令の名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
+    "ci": "ndf.ci_cli",
+    "contracts": "ndf.contracts.cli",
+    "test-slot": "ndf.testing.command",
 }
-
-# 呼び出しの誤り・設定の壊れ（`plugin.json` が読めない）の終了コード。
-# 止まった理由の表（契約の子 D1）ができたら、`config_broken` の行の終了コードを引く形へ替える
-EXIT_UNREADABLE = 2
 
 
 def _usage(name: str) -> str:
@@ -31,11 +33,17 @@ def _usage(name: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     try:
+        return _run(args)
+    except contracts.ContractError as exc:
+        # 契約の表（止まった理由・終了コード）そのものが読めないときは、表を使わずに config_broken を出す
+        return result.emit_unchecked(TOOL, "config_broken", f"契約のファイルが読めない: {exc}")
+
+
+def _run(args: list[str]) -> int:
+    try:
         ident = identity.load()
     except identity.IdentityError as exc:
-        report = {"status": "stopped", "summary": str(exc), "cause": {"kind": "config_broken"}}
-        print(json.dumps(report, ensure_ascii=False))
-        return EXIT_UNREADABLE
+        return result.emit(result.stopped(TOOL, "config_broken", str(exc)))
     if not args or args[0] in ("-h", "--help"):
         print(_usage(ident.name))
         return 0
@@ -43,5 +51,5 @@ def main(argv: list[str] | None = None) -> int:
     if module is None:
         print(f"知らない副命令: {args[0]}", file=sys.stderr)
         print(_usage(ident.name), file=sys.stderr)
-        return EXIT_UNREADABLE
+        return causes.exit_code("invalid")
     return importlib.import_module(module).main(args[1:])

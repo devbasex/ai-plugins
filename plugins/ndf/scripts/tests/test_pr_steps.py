@@ -19,7 +19,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
-from git_fixture import init_with_origin  # noqa: E402
+from develop_repo import seed_develop_repo  # noqa: E402
 
 PY = sys.executable
 EXIT_PRECONDITION = 3
@@ -106,12 +106,9 @@ def env(tmp_path):
 @pytest.fixture
 def repo(tmp_path):
     """develop を起点に feature/x で 1 コミット進めた作業ツリー。origin は bare。"""
-    root = init_with_origin(tmp_path)
-    write(root, ".ndf/worktree.json", json.dumps({"base_branch": "develop", "production_branch": "main"}))
-    write(root, "keep.txt", "head\n")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "init")
-    git(root, "push", "-q", "-u", "origin", "develop")
+    root = seed_develop_repo(
+        tmp_path, {".ndf/worktree.json": json.dumps({"base_branch": "develop", "production_branch": "main"}), "keep.txt": "head\n"}
+    )
     git(root, "checkout", "-q", "-b", "feature/x")
     write(root, "a.txt", "a\n")
     git(root, "add", "-A")

@@ -114,13 +114,13 @@ class FakeReview:
         args = cmd[2:]
         self.calls.append((name, *args))
         if name == "state.py":
-            return self._state_response(args)
+            return self._state_command(args)
         if name == "rotate-pr.sh" and args[0] == "execute":
             return 0, "NEW_PR=9\nNEW_PR_URL=https://x/9\nNEW_BRANCH=feat/x\n"
         return 0, ""
 
-    def _state_response(self, args):
-        """state.py の副命令の応答。状態を変える副命令はその時点で保存する。知らない副命令は (0, "")。"""
+    def _state_command(self, args):
+        """state.py の副命令を模す。状態を変える副命令は保存してから終了コードを返す。知らない副命令は成功の空出力。"""
         sub = args[0]
         if sub == "init":
             return 0, f"PR=5\nTMP_DIR={self.tmp}\nWORKTREE={self.tmp / 'wt'}\n"

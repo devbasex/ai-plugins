@@ -2,6 +2,8 @@
 
 設計文書 [issue-1142-design-fixes.md](issue-1142-design-fixes.md) の子 Issue（N1〜N12）を、ファイルと関数の粒度へ下ろした文書である。書き方は `plugins/ndf/skills/design/references/detailed-design.md` にある。流す順序と、子 Issue ごとの先に要るもの・消す古いテストは頭の詳細設計 [issue-1142-design-detail.md](issue-1142-design-detail.md) の「実装計画」が持つ。
 
+> **#3347:** この文書が指す頭の詳細設計の「実装計画」は置き換わった。子 Issue の範囲・先に要るもの・流す順番は [issue-3347-design-detail.md](issue-3347-design-detail.md) の「実装計画」にある。
+
 **表の行は子 Issue の名前を括弧に持つ。** 2 本の子 Issue が同じファイルを触る行は、名前を両方書いた。書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのどれかを変える関数だけで、子 Issue ごとに大事なものから 8 個までに絞った。N12 の関数は #2711 の設計文書（ブランチ `design/issue-2711`）の「構成要素」にあり、ここでは描き直さない。
 
 | 子 Issue | 主題 | 解消する Issue |
