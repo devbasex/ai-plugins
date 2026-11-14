@@ -15,6 +15,11 @@ from ndf.adapters import notify
 from ndf.contracts import limits
 
 NOW = 1_800_000_000.0
+# 上限の宣言の値。境と回数を宣言から引き、宣言を変えても境を試し続ける
+STALE = limits.seconds("notify.stale")
+ATTEMPTS = int(limits.value("notify.send", "attempts"))
+INTERVAL = limits.value("notify.send", "interval")
+FACTOR = limits.value("notify.send", "factor")
 
 
 @pytest.fixture
@@ -164,7 +169,7 @@ def test_drain_does_not_send_the_same_key_twice(outbox: Path, wall: list[float])
     _write(outbox, "a")
     deliver = _Deliver()
     notify.drain(outbox, deliver)
-    wall[0] += 3600 - 1
+    wall[0] += STALE - 1
     _write(outbox, "b", key="a", created_at=wall[0])
     out = notify.drain(outbox, deliver)
     assert (len(deliver.calls), out.duplicate) == (1, 1)
@@ -184,7 +189,7 @@ def test_drain_window_key_is_sent_again_after_window(outbox: Path, wall: list[fl
 
 
 def test_drain_drops_stale_and_unconfigured(outbox: Path, wall: list[float]) -> None:
-    _write(outbox, "old", created_at=NOW - 3601)
+    _write(outbox, "old", created_at=NOW - (STALE + 1))
     _write(outbox, "new")
     deliver = _Deliver(configured=False)
     out = notify.drain(outbox, deliver)
@@ -198,15 +203,15 @@ def test_drain_retries_retryable_failures(outbox: Path, wall: list[float]) -> No
     slept: list[float] = []
     deliver = _Deliver(notify.PostError("HTTP 500", True), notify.PostError("HTTP 429", True))
     out = notify.drain(outbox, deliver, sleep=slept.append)
-    assert (out.sent, len(deliver.calls), slept) == (1, 3, [2, 4])
+    assert (out.sent, len(deliver.calls), slept) == (1, 3, [INTERVAL, INTERVAL * FACTOR])
 
 
 def test_drain_keeps_notices_when_retries_run_out(outbox: Path, wall: list[float]) -> None:
     _write(outbox, "a")
     _write(outbox, "b")
-    deliver = _Deliver(*[notify.PostError("接続できない（ConnectError）", True)] * 4)
+    deliver = _Deliver(*[notify.PostError("接続できない（ConnectError）", True)] * ATTEMPTS)
     out = notify.drain(outbox, deliver, sleep=lambda s: None)
-    assert (out.left, out.sent, len(deliver.calls)) == (2, 0, 4)
+    assert (out.left, out.sent, len(deliver.calls)) == (2, 0, ATTEMPTS)
     assert [p.name for p in notify.pending(outbox)] == ["a.json", "b.json"]
     again = notify.drain(outbox, _Deliver())
     assert (again.sent, notify.pending(outbox)) == (2, [])
@@ -309,7 +314,7 @@ def test_drain_does_not_retake_lock_after_retries_run_out(outbox: Path, wall: li
     _write(outbox, "a")
     lock = _Lock(["ok", "ok"])
     monkeypatch.setattr(notify, "FileLock", lock)
-    out = notify.drain(outbox, _Deliver(*[notify.PostError("HTTP 503", True)] * 4), sleep=lambda s: None)
+    out = notify.drain(outbox, _Deliver(*[notify.PostError("HTTP 503", True)] * ATTEMPTS), sleep=lambda s: None)
     assert (out.left, out.busy, lock.acquired) == (1, False, 1)
     assert [p.name for p in notify.pending(outbox)] == ["a.json"]
 
@@ -361,7 +366,7 @@ def test_sent_record_keeps_only_numbers_within_keep_days(outbox: Path, wall: lis
 
 
 def test_sent_record_is_not_written_when_nothing_is_sent(outbox: Path, wall: list[float]) -> None:
-    _write(outbox, "a", created_at=NOW - 3601)
+    _write(outbox, "a", created_at=NOW - (STALE + 1))
     notify.drain(outbox, _Deliver())
     assert not (outbox / ".sent.json").exists()
 
