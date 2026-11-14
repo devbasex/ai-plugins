@@ -72,6 +72,7 @@ def test_env_the_service_sets_is_in_the_workflow_entrypoint():
     by_service = set(facts.ids(ENV, set_by="service"))
     assert by_service <= set(facts.value(EP, "skill-workflow", "env"))
     assert facts.value(EP, "skill-workflow", "env") == facts.value(EP, "block-next", "env")
+    assert facts.value(ENV, "NDF_PROGRESS_DB", "secret") is True
 
 
 def test_places_given_by_env_name_a_declared_variable():
