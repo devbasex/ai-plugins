@@ -43,6 +43,7 @@ COMMANDS: dict[str, str] = {
     "progress": "ndf.progress.run",
     "refactor": "ndf.domains.crossrefactor.cli",
     "relay": "ndf.domains.relay.cli",
+    "release-steps": "ndf.domains.release.cli",
     "route": "ndf.core.route",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",

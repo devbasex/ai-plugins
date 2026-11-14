@@ -53,6 +53,8 @@ _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、宣言が無いときに許された方式から選ぶ順
 ANCESTRY, MERGED = "ancestry", "merged"
+# merge commit の方式の名前（祖先の関係を保つ方式。呼び出し側が方式を固定するときに参照する）
+MERGE_COMMIT = "merge"
 
 
 class _MergeMethod(NamedTuple):
@@ -66,7 +68,7 @@ class _MergeMethod(NamedTuple):
 # マージの方式の唯一の定義（並びは宣言が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
 _MERGE_METHOD_SPECS = {
     "squash": _MergeMethod(MERGED, "allow_squash_merge"),
-    "merge": _MergeMethod(ANCESTRY, "allow_merge_commit"),
+    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit"),
     "rebase": _MergeMethod(MERGED, "allow_rebase_merge"),
 }
 MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
