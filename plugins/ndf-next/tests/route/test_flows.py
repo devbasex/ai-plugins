@@ -124,3 +124,41 @@ def test_same_ci_failure_streak_stops_to_human():
     visited, state = walk(plan_of("implement"), {"ci": [stopped("test_failed")], "repeat-check": [stopped("fix_limit")]})
     assert visited[-2:] == ["ci", "repeat-check"]
     assert (state.status, state.kind) == (STOPPED, "fix_limit")
+
+
+# 現状固定（I-001）: 検査と設計 PR のマージの雛形が同じ形で持つマージの承認ゲートとマージ。
+# 部品へまとめても、埋めたプランのステップと遷移が変わらないことを確かめる。
+_MERGE_GATE_AND_MERGE = [
+    {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "merge", "rejected": "end"}},
+    {
+        "id": "merge",
+        "run": ["gh", "pr", "merge", "<branch>", "--<merge_method>"],
+        "probe": ["sh", "-c", 'test "$(gh pr view "$0" --json state --jq .state)" = MERGED', "<branch>"],
+        "next": "end",
+    },
+]
+
+
+def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
+    """現状固定: check と design_merge の merge-gate と merge は、埋めた後に同じステップになる。"""
+    for purpose in ("check", "design_merge"):
+        found = [s for s in plan_of(purpose)["steps"] if s["id"] in ("merge-gate", "merge")]
+        assert found == _MERGE_GATE_AND_MERGE, purpose
+
+
+def test_merge_gate_rejected_ends_without_merge():
+    """現状固定: マージの承認ゲートで rejected と答えると、merge を打たずに ok で終わる。"""
+    expected_tail = {"check": ["ci", "behavior-recheck", "merge-gate"], "design_merge": ["conflict-check", "merge-gate"]}
+    for purpose, tail in expected_tail.items():
+        visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["rejected"])
+        assert visited[-len(tail) :] == tail, purpose
+        assert "merge" not in visited, purpose
+        assert state.status == OK, purpose
+
+
+def test_merge_gate_approved_merges_then_ends():
+    """現状固定: マージの承認ゲートで approved と答えると、merge を打って終わる。"""
+    for purpose in ("check", "design_merge"):
+        visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["approved"])
+        assert visited[-2:] == ["merge-gate", "merge"], purpose
+        assert state.status == OK, purpose
