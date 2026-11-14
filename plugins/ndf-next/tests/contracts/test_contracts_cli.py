@@ -242,7 +242,7 @@ def test_emit_passes_every_field(capsys):
         "--metrics",
         '{"n": 2}',
         "--next",
-        "nx",
+        '{"argv": ["ndf", "nx"]}',
         "--presentation-path",
         "p.md",
     )
@@ -255,7 +255,7 @@ def test_emit_passes_every_field(capsys):
         "metrics": {"n": 2},
         "cause": {"kind": "infra_wait", "detail": "d", "instance": "i1", "retry_after": 30.0},
         "presentation_path": "p.md",
-        "next": "nx",
+        "next": {"argv": ["ndf", "nx"]},
     }
 
 
