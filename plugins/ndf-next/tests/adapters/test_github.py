@@ -509,6 +509,11 @@ def test_pick_merge_method(declared: str | None, allowed: list[str], chosen: str
     assert github.pick_merge_method(declared, allowed) == chosen
 
 
+def test_merge_methods_keep_their_order_and_landing_checks() -> None:
+    # 現状固定: 宣言が無いときに選ぶ順と、方式ごとの「基底に含まれたか」の確かめ方
+    assert list(github.MERGE_METHODS.items()) == [("squash", github.MERGED), ("merge", github.ANCESTRY), ("rebase", github.MERGED)]
+
+
 def _allowed(rules: object, settings: object, branch: str = "develop") -> tuple[list[str], list[str]]:
     """`allowed_merge_methods(branch)` の値と、読んだパス（符号化したまま）の並び。"""
     seen: list[str] = []
@@ -530,6 +535,7 @@ RULES_PATH = f"/repos/{REPO}/rules/branches/develop"
         ({"allow_rebase_merge": True, "allow_merge_commit": True, "allow_squash_merge": True}, ["squash", "merge", "rebase"]),
         ({"allow_squash_merge": "yes", "allow_merge_commit": 1, "allow_rebase_merge": True}, ["rebase"]),
         ({"allow_merge_commit": True}, ["merge"]),
+        ({"allow_rebase_merge": True, "allow_squash_merge": True}, ["squash", "rebase"]),
         ({}, []),
         (["allow_squash_merge"], []),
     ],
