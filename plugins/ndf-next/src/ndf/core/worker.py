@@ -522,32 +522,49 @@ def _cmd_attention(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"注意の要る報告が {len(items)} 件ある", items, {"attention": len(items)}))
 
 
-def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog=TOOL, description="worker の規則文と受け渡し")
-    sub = p.add_subparsers(dest="cmd", required=True)
+def _add_run(sub: Any) -> None:
     rn = sub.add_parser("run", help="worker を起動し、結果ファイルが書かれるまで起こし直す")
     for name in ("--kind", "--prompt-file", "--result-file", "--cwd", "--state-dir"):
         rn.add_argument(name, required=True)
     rn.add_argument("--sources")
     rn.add_argument("--timeout", type=float, default=WORK_TIMEOUT)
     rn.set_defaults(fn=_cmd_run)
+
+
+def _add_closing(sub: Any) -> None:
     ck = sub.add_parser("closing-check", help="closing keywords を持つコミットがあれば止める")
     ck.add_argument("--base", required=True)
     ck.add_argument("--cwd", default=".")
     ck.set_defaults(fn=_cmd_closing)
+
+
+def _add_plan_edit(sub: Any) -> None:
     pe = sub.add_parser("plan-edit", help="プランを書き換え、控え・差分・理由を残す")
     pe.add_argument("plan")
     pe.add_argument("--new", required=True)
     pe.add_argument("--reason", required=True)
     pe.add_argument("--state-dir")
     pe.set_defaults(fn=_cmd_plan_edit)
+
+
+def _add_plan_edits(sub: Any) -> None:
     pl = sub.add_parser("plan-edits", help="プランの書き換えの記録を並べる")
     pl.add_argument("plans", nargs="+")
     pl.add_argument("--state-dir")
     pl.set_defaults(fn=_cmd_plan_edits)
+
+
+def _add_attention(sub: Any) -> None:
     at = sub.add_parser("attention", help="進捗ログのうち注意の要る行を並べる")
     at.add_argument("progress")
     at.set_defaults(fn=_cmd_attention)
+
+
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog=TOOL, description="worker の規則文と受け渡し")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for add in (_add_run, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention):
+        add(sub)
     return p
 
 
