@@ -72,7 +72,7 @@
     },
     "ci-local": {
       "id": "ci-local",
-      "run": ["ndf", "route", "test", "--nodes-from", "{state_dir}/ci.json", "--", "{{test_command}}"],
+      "run": ["ndf", "route", "test", "--failed-from", "{state_dir}/ci.json", "--result", "{state_dir}/ci-local.json"],
       "on_cause": {"test_failed": "repeat-check"},
       "next": "push"
     },
