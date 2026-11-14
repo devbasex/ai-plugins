@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 
 from ndf.progress import gate, lane, model, plan, run, store
+from ndf.progress.gate import answering, release
 
 BY = "human:reviewer"
 
@@ -232,3 +233,44 @@ def test_current_a_file_request_without_a_lane_name_is_refused_by_the_exchange(s
     env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_VERSION": "11.0.0"}
     with pytest.raises(external.ExchangeError, match="lane"):
         gate.request_release(st, run.read(st, tid), q, env)
+
+
+# --- 現状固定: 計画の依頼を引く 3 手（I-009。release._organizer_reply・answering._reject_release） -------------
+
+
+def _rejection(q):
+    return gate.Answer(q.id, run.REJECTED, "出さない", WRITER, "k-reject")
+
+
+def test_current_the_organizer_reply_on_the_plan_is_none_until_the_release_is_recorded(st, lane_sprint, flow):
+    pid, tid = lane_sprint()
+    q = _now_at_release(st, tid, flow)
+    gate.request_release(st, run.read(st, tid), q, {})
+    assert release._organizer_reply(st, q, {}) is None
+    (req,) = _requests(st, pid)
+    with store.transaction(st) as conn:
+        plan.record_release(conn, pid, [req.key], plan.ReleaseAnswer(plan.RELEASED, "出した", version="1.2.3", release="https://github.com/o/r/pull/9"))
+    (req,) = _requests(st, pid)
+    assert req.release is not None and release._organizer_reply(st, q, {}) == dict(req.release)
+
+
+def test_current_outside_a_lane_there_is_no_organizer_reply_and_no_request_to_close(st, new_table, flow):
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    assert release._organizer_reply(st, q, {}) is None
+    with store.transaction(st) as conn:
+        assert answering._reject_release(conn, q, _rejection(q)) is None
+
+
+def test_current_a_rejection_closes_the_open_plan_request_once(st, lane_sprint, flow):
+    pid, tid = lane_sprint()
+    q = _now_at_release(st, tid, flow)
+    with store.transaction(st) as conn:
+        assert answering._reject_release(conn, q, _rejection(q)) is None  # 依頼がまだ無い
+    gate.request_release(st, run.read(st, tid), q, {})
+    with store.transaction(st) as conn:
+        key = answering._reject_release(conn, q, _rejection(q))
+    (req,) = _requests(st, pid)
+    assert key == req.key and req.closed is not None
+    with store.transaction(st) as conn:
+        assert answering._reject_release(conn, q, _rejection(q)) is None  # 閉じた依頼は閉じ直さない
