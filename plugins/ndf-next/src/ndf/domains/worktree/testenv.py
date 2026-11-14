@@ -82,8 +82,8 @@ def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Targ
 # --- 割り当て ------------------------------------------------------------------
 
 
-def environment_name(t: Target) -> str:
-    branch = repo.current_branch(Git(t.path))
+def environment_name(t: Target, branch: Optional[str]) -> str:
+    """環境名。`branch` は今のブランチ（detached HEAD なら `None`）。"""
     if branch is not None:
         return testenv_decide.env_name(t.main_dir.name, branch)
     return testenv_decide.env_name(t.main_dir.name, f"detached-{t.path.name}", t.key)
@@ -92,12 +92,13 @@ def environment_name(t: Target) -> str:
 def assign(t: Target) -> dict[str, Any]:
     """今の割り当て（無ければ取る）。空きが無い・ポートを決められなければ `TestenvError`。"""
     branch = repo.current_branch(Git(t.path))
-    name = environment_name(t)
+    name = environment_name(t, branch)
+    recorded = branch if branch is not None else ""
     had = t.book.current(t.key) is not None
-    row = t.book.acquire(t.key, branch if branch is not None else "", name)
+    row = t.book.acquire(t.key, recorded, name)
     if row is None:
         reclaim(t, limit=1)
-        row = t.book.acquire(t.key, branch if branch is not None else "", name)
+        row = t.book.acquire(t.key, recorded, name)
     if row is None:
         raise TestenvError(f"空きスロットが無い（上限 {testenv_decide.SLOTS}）")
     roles = t.at("port_roles")
