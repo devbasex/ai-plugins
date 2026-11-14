@@ -27,14 +27,27 @@ def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pen
         done = runner(command, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return Pending(None, f"ndf plan pending を打てない: {exc}")
-    lines = [line for line in done.stdout.splitlines() if line.strip()]
-    try:
-        last = json.loads(lines[-1]) if lines else None
-    except ValueError:
-        last = None
-    if not isinstance(last, dict) or last.get("status") != "ok":
-        summary = last.get("summary") if isinstance(last, dict) else (done.stderr.strip()[-200:] or "出力が無い")
-        one_line = " ".join(str(summary).split())[:200]
-        return Pending(None, f"ndf plan pending の一覧を読めない（終了コード {done.returncode}）: {one_line}")
+    last = _last_json(done.stdout)
+    if last is None or last.get("status") != "ok":
+        return Pending(None, _failure_note(last, done))
     items = last.get("items")
     return Pending(items if isinstance(items, list) else [], "")
+
+
+def _last_json(stdout: str) -> Optional[dict[str, Any]]:
+    """空でない最後の行を JSON として読む。行が無い・JSON でない・オブジェクトでなければ None。"""
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        last = json.loads(lines[-1])
+    except ValueError:  # noqa: NDF401 外部コマンド: JSON でない行は読めない理由へ回す
+        return None
+    return last if isinstance(last, dict) else None
+
+
+def _failure_note(last: Optional[dict[str, Any]], done: Any) -> str:
+    """読めなかった理由。結果の要約（無ければ標準エラーの末尾）を 1 行・200 字に詰める。"""
+    summary = last.get("summary") if last is not None else (done.stderr.strip()[-200:] or "出力が無い")
+    one_line = " ".join(str(summary).split())[:200]
+    return f"ndf plan pending の一覧を読めない（終了コード {done.returncode}）: {one_line}"
