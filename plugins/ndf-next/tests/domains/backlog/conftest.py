@@ -205,6 +205,17 @@ def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
+def run_issues(capsys: pytest.CaptureFixture[str], last_result):
+    """`ndf issues` を打ち、標準出力の最後の結果 JSON を返す関数（`run_issues(*argv)`）。"""
+
+    def run(*argv: str) -> dict:
+        cli.main(list(argv))
+        return last_result(capsys.readouterr().out)
+
+    return run
+
+
+@pytest.fixture
 def git_in():
     """`git` を作業ディレクトリで打つ関数。"""
     return _git
