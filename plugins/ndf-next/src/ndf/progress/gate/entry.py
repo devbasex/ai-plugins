@@ -65,7 +65,9 @@ def ask(gate: Optional[str]) -> dict[str, Any]:
     if gate is not None and gate not in model.table()["gates"]:
         raise model.Refused(f"承認ゲートの区分 {gate} は無い（{', '.join(model.table()['gates'])}）")
     label = model.gate_label(gate) if gate else "プランの中の承認ゲート"
-    out = {a: result.command("progress", "answer", "--answer", a, ask=("table_id", "stage", "reason")) for a in (run.APPROVED, run.REJECTED)}
+    out = {
+        a: result.command("progress", "answer", "--answer", a, ask=("table_id", "stage", "reason")) for a in (run.APPROVED, run.REJECTED)
+    }
     return result.result(TOOL, result.GATE, f"{label}の答えを待つ", metrics={"gate": {"kind": gate, "label": label}}, routes=out)
 
 
