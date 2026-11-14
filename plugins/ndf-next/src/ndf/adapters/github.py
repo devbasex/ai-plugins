@@ -152,6 +152,21 @@ def _only_not_found(exc: GraphQLFailed) -> bool:
     return bool(errors) and all(e.type == "NOT_FOUND" for e in errors)
 
 
+def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool = False) -> GitHubError:
+    """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。
+
+    上限（`RateLimitExceeded`。`RequestFailed` の下位なので先に見る）は回復までの秒を、HTTP の拒否は状態を添える。
+    `detail_body` なら拒否の文へ応答の本文の先頭 300 字を足す。
+    """
+    if isinstance(exc, RateLimitExceeded):
+        return GitHubError(f"GitHub の上限: {label}", exc.response.status_code, exc.retry_after.total_seconds())
+    if isinstance(exc, RequestFailed):
+        status = exc.response.status_code
+        body = f": {exc.response.text[:300]}" if detail_body else ""
+        return GitHubError(f"GitHub が断った（{status}）: {label}{body}", status)
+    return GitHubError(f"GitHub へ届かない: {label}: {exc}")
+
+
 @dataclass(frozen=True)
 class GitHub:
     """1 つのリポジトリ（`<所有者>/<リポジトリ>`）への GitHub の読み書き。"""
@@ -163,14 +178,8 @@ class GitHub:
         """REST の 1 回の要求の本文（JSON なら値、ほかは文字列、空なら None）。失敗は `GitHubError`。"""
         try:
             resp = self.api.request(method, path, json=payload, params=params)
-        except RateLimitExceeded as exc:
-            status = exc.response.status_code
-            raise GitHubError(f"GitHub の上限: {method} {path}", status, exc.retry_after.total_seconds()) from None
-        except RequestFailed as exc:
-            status = exc.response.status_code
-            raise GitHubError(f"GitHub が断った（{status}）: {method} {path}: {exc.response.text[:300]}", status) from None
-        except RequestError as exc:
-            raise GitHubError(f"GitHub へ届かない: {method} {path}: {exc}") from None
+        except (RateLimitExceeded, RequestFailed, RequestError) as exc:
+            raise _translated(exc, f"{method} {path}", detail_body=True) from None
         return _response_body(resp)
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -181,12 +190,8 @@ class GitHub:
             if _only_not_found(exc) and exc.response.data is not None:
                 return exc.response.data
             raise GitHubError(f"GraphQL の誤り: {'; '.join(e.message for e in exc.response.errors)}") from None
-        except RateLimitExceeded as exc:
-            raise GitHubError("GitHub の上限: graphql", exc.response.status_code, exc.retry_after.total_seconds()) from None
-        except RequestFailed as exc:
-            raise GitHubError(f"GitHub が断った（{exc.response.status_code}）: graphql", exc.response.status_code) from None
-        except RequestError as exc:
-            raise GitHubError(f"GitHub へ届かない: graphql: {exc}") from None
+        except (RateLimitExceeded, RequestFailed, RequestError) as exc:
+            raise _translated(exc, "graphql") from None
 
     def aliased(self, selections: dict[str, str]) -> dict[str, Any]:
         """名前 → `repository` の下の選択を、`github.graphql-batch` 件ずつのエイリアスのクエリで読む（A2）。
