@@ -19,14 +19,14 @@ import sys
 import time
 from typing import List, Optional, TextIO
 
-from ndf.domains.hooks import tables
+from ndf.domains.hooks import metrics, tables
 
 
 def run_boot(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
     """環境が無いときのエントリポイント。いつも 0。"""
     started = time.monotonic()
     out = stdout or sys.stdout
-    record: dict = {"runtime": None, "event": None, "tool": None, "path": "boot", "guards": [], "verdict": "pass", "error": ""}
+    record = metrics.new_record("boot")
     try:
         if sys.version_info[:2] < tuple(tables.load("hooks/imports.json")["boot"]["python"]):
             return 0
@@ -73,11 +73,6 @@ def _session_start(runtime: str, event: str) -> str:
 
 
 def _write_metrics(record: dict) -> None:
-    from ndf import identity
-    from ndf.domains.hooks import metrics
-
-    try:
-        state_dir = identity.load().state_dir
-    except identity.IdentityError:  # noqa: NDF401 ファイル: plugin.json を読めなければ計測を書かない
-        return
-    metrics.write_line(state_dir, record)
+    state_dir = metrics.state_dir_or_none()
+    if state_dir is not None:
+        metrics.write_line(state_dir, record)

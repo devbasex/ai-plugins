@@ -25,6 +25,21 @@ def keep_days() -> float:
     return float(tables.policy_value("hook.metrics-keep", "seconds")) / 86400
 
 
+def new_record(path: str) -> dict[str, Any]:
+    """計測の 1 行の雛形。`path` はエントリポイント（`entry`・`boot`）。"""
+    return {"runtime": None, "event": None, "tool": None, "path": path, "guards": [], "verdict": "pass", "error": ""}
+
+
+def state_dir_or_none() -> Optional[Path]:
+    """計測を書く状態の置き場。plugin.json を読めなければ None（計測を書かない）。"""
+    from ndf import identity
+
+    try:
+        return identity.load().state_dir
+    except identity.IdentityError:  # noqa: NDF401 ファイル: plugin.json を読めなければ状態を書かずに通す
+        return None
+
+
 def metrics_dir(state_dir: Path) -> Path:
     return state_dir / "hooks"
 

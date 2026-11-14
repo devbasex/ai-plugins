@@ -35,8 +35,10 @@ def _on_alarm(signum: int, frame: Any) -> None:
 
 def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
     """環境の python のエントリポイント。いつも 0。"""
+    from ndf.domains.hooks import metrics
+
     started = time.monotonic()
-    record: dict = {"runtime": None, "event": None, "tool": None, "path": "entry", "guards": [], "verdict": "pass", "error": ""}
+    record = metrics.new_record("entry")
     out = ""
     state_dir = _state_dir()
     try:
@@ -56,12 +58,9 @@ def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[
 
 
 def _state_dir() -> Optional[Path]:
-    from ndf import identity
+    from ndf.domains.hooks import metrics
 
-    try:
-        return identity.load().state_dir
-    except identity.IdentityError:  # noqa: NDF401 ファイル: plugin.json を読めなければ状態を書かずに通す
-        return None
+    return metrics.state_dir_or_none()
 
 
 def _write_metrics(state_dir: Path, record: dict) -> None:
