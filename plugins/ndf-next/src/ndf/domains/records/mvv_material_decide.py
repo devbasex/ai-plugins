@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from ndf.progress.gate.checks import Changed, MvvFacts, sections
@@ -62,7 +62,7 @@ def test_rows(steps: Sequence[Mapping[str, Any]]) -> list[StepRow]:
         row = StepRow(str(step["name"]), int(step["exit"]), status, note, _tail(step.get("output")))
         target = str(step["rechecks"]) if "rechecks" in step and step["rechecks"] in rows else row.name
         if target != row.name:
-            row = StepRow(row.name, row.exit, row.status, f"{target} を打ち直した結果", row.output)
+            row = replace(row, note=f"{target} を打ち直した結果")
         rows[target] = row
     return list(rows.values())
 
@@ -93,17 +93,7 @@ def claimed_sections(body: Optional[str]) -> tuple[str, ...]:
 
 def facts_from_pr(base: MvvFacts, body: Optional[str], changed: Iterable[Changed]) -> MvvFacts:
     """機械の検査の事実に、PR の本文・対応表が書く節・変えたファイルを埋める（検査 6 の呼び手）。"""
-    return MvvFacts(
-        status=base.status,
-        current=base.current,
-        approved=base.approved,
-        referenced=base.referenced,
-        mode=base.mode,
-        changed=tuple(changed),
-        boundary_paths=base.boundary_paths,
-        body=body,
-        claimed=claimed_sections(body),
-    )
+    return replace(base, changed=tuple(changed), body=body, claimed=claimed_sections(body))
 
 
 SYSTEM = """あなたは開発の承認ゲートの判定者である。利用者はプロジェクト MVV かスプリントの MVV（Mission / Vision / Value）を承認済みで、
