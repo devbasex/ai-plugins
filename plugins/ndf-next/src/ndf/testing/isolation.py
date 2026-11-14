@@ -21,6 +21,7 @@ except ImportError:  # Windows
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 from ndf import identity
 from ndf.testing import slots
@@ -44,19 +45,29 @@ _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 # 中身を書き換える操作（リンクの参照先まで辿って判定する）
 NAME = "name"
 CONTENT = "content"
-# 書き込みの監査イベントと、引数のうち（パスの位置, そのパスを解決する dir_fd の位置, 判定の種類）の組
-_WRITE_EVENTS: dict[str, tuple[tuple[int, int | None, str], ...]] = {
-    "os.mkdir": ((0, 2, NAME),),
-    "os.remove": ((0, 1, NAME),),
-    "os.rmdir": ((0, 1, NAME),),
-    "os.rename": ((0, 2, NAME), (1, 3, NAME)),
+
+
+class WriteTarget(NamedTuple):
+    """書き込みの対象。表では引数の位置を、`_write_targets` の戻りでは引数の値を持つ。"""
+
+    path: object  # パス（表ではその引数の位置）
+    dir_fd: object  # パスを解決する dir_fd（表ではその引数の位置。無ければ None）
+    kind: str  # 判定の種類（NAME / CONTENT）
+
+
+# 書き込みの監査イベントと、引数のうち書き込む対象の位置
+_WRITE_EVENTS: dict[str, tuple[WriteTarget, ...]] = {
+    "os.mkdir": (WriteTarget(0, 2, NAME),),
+    "os.remove": (WriteTarget(0, 1, NAME),),
+    "os.rmdir": (WriteTarget(0, 1, NAME),),
+    "os.rename": (WriteTarget(0, 2, NAME), WriteTarget(1, 3, NAME)),
     # 本物の置き場のファイルへのハードリンクは、別名への書き込みで本物を書き換えられるのでリンク元も見る
-    "os.link": ((0, 2, CONTENT), (1, 3, NAME)),
+    "os.link": (WriteTarget(0, 2, CONTENT), WriteTarget(1, 3, NAME)),
     # リンクの作成先だけを見る（参照先への書き込みは、書くときに参照先で判定する）
-    "os.symlink": ((1, 2, NAME),),
-    "os.truncate": ((0, None, CONTENT),),
-    "os.chmod": ((0, 2, CONTENT),),
-    "shutil.rmtree": ((0, 1, NAME),),
+    "os.symlink": (WriteTarget(1, 2, NAME),),
+    "os.truncate": (WriteTarget(0, None, CONTENT),),
+    "os.chmod": (WriteTarget(0, 2, CONTENT),),
+    "shutil.rmtree": (WriteTarget(0, 1, NAME),),
 }
 # 元の値が指す場所も本物の置き場として守る環境変数（差し替える前の値を読む）
 REAL_STATE_ENV = (identity.STATE_HOME_ENV, identity.XDG_STATE_ENV, "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
@@ -117,17 +128,17 @@ def _within_any(path: str, roots: tuple[str, ...]) -> bool:
     return any(within(path, root) for root in roots)
 
 
-def _write_targets(event: str, args: tuple) -> list[tuple[object, object, str]]:
-    """監査イベントが書き込む対象の（パス, そのパスを解決する dir_fd, 判定の種類）の並び。書き込みでなければ空。"""
+def _write_targets(event: str, args: tuple) -> list[WriteTarget]:
+    """監査イベントが書き込む対象の並び。書き込みでなければ空。"""
     if event == "open":
         path, mode, flags = (tuple(args) + (None, None, None))[:3]
         writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
-        return [(path, None, CONTENT)] if writing else []
-    targets: list[tuple[object, object, str]] = []
+        return [WriteTarget(path, None, CONTENT)] if writing else []
+    targets: list[WriteTarget] = []
     for at, fd_at, kind in _WRITE_EVENTS.get(event, ()):
         if at >= len(args):
             continue
-        targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
+        targets.append(WriteTarget(args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
     return targets
 
 
