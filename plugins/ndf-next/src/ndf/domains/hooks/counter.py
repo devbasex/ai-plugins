@@ -40,25 +40,30 @@ class Counter:
         return self._fd is not None
 
     @classmethod
+    def unusable(cls) -> "Counter":
+        """数えない数え手（排他も状態のファイルも持たない）。"""
+        return cls(None, _fresh(), None)
+
+    @classmethod
     def open(cls, session_id: object, state_dir: Path, wait: Optional[float] = None) -> "Counter":
         """セッションの数え手を開く。識別子が形に合わない・排他を取れないときは数えない数え手を返す。"""
         if not isinstance(session_id, str) or not SESSION_RE.match(session_id):
-            return cls(None, _fresh(), None)
+            return cls.unusable()
         path = state_dir / "hooks" / "sessions" / f"{session_id}.json"
         limit = tables.policy_value("hook.counter-lock", "seconds") if wait is None else wait
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         except OSError:  # 状態の置き場に書けなければ数えずに通す
-            return cls(None, _fresh(), None)
+            return cls.unusable()
         if not signals.lock(fd, limit):
             os.close(fd)
-            return cls(None, _fresh(), None)
+            return cls.unusable()
         data = _read(fd)
         if data is None:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-            return cls(None, _fresh(), None)
+            return cls.unusable()
         return cls(path, data, fd)
 
     def close(self) -> None:
