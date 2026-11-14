@@ -7303,6 +7303,18 @@
       "context": "ndf-workflow",
       "meaning": "作り直しの目的（AI の判断をスクリプトへ移す・使用量を減らす）を測るスクリプトと規則。行き先を選んだ主体の事象で数える",
       "pending_source": "issues/issue-3395-requirements.md"
+    },
+    {
+      "term": "選択の記録",
+      "context": "ndf-workflow",
+      "meaning": "行き先を選ぶたびに 1 行残す事象。選んだ主体（スクリプト・conductor・人）・規則の番号・行き先を持ち、目的の物差しが数える（#1142 の作り直し）",
+      "pending_source": "issues/issue-3395-design.md"
+    },
+    {
+      "term": "閉じる証拠",
+      "context": "ndf-workflow",
+      "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
+      "pending_source": "issues/issue-3395-design.md"
     }
   ]
 }
