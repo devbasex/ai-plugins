@@ -6,6 +6,7 @@
 - 隔離と揺れない待ち: `isolation`（本物の状態の置き場への書き込みを拒む部品。pytest に依らず、テストの前提 `forbid_real_state` は `tests/testing/_real_state.py` が持つ）・`waits`（条件を待つ）・
   `cmd_match`（コマンドを語の並びで比べる）
 - テスト環境の回収の判定: `testenv`
+- 落ちたテストだけの打ち直し: `rerun`（宣言の suite の `scope_command` から組む）
 - 振る舞いの確認の起動: `behavior`
 - 障害の注入（落としたい時点で子の組を SIGKILL で落とす）: `faults`
 """
