@@ -112,6 +112,19 @@ def _ref_exists(root, ref: str) -> bool:
     return proc.git_out(root, "show-ref", "--verify", "--quiet", ref) is not None
 
 
+def _git_quiet(root, *args, timeout: float | None = None) -> subprocess.CompletedProcess | None:
+    """`git -C <root> <args>` を対話のプロンプトを止めて起動する（GIT_TERMINAL_PROMPT=0）。起動できないか時間切れなら `None`。"""
+    try:
+        return proc.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _remote_has_branch(root, remote: str, name: str) -> bool:
     """`git ls-remote --heads` の行の参照名が `refs/heads/<name>` と完全に一致するか。
 
@@ -119,15 +132,8 @@ def _remote_has_branch(root, remote: str, name: str) -> bool:
     別のブランチでも行が返る。問い合わせの成功ではなく、返った行の参照名そのものを照合する。
     """
     want = f"refs/heads/{name}"
-    try:
-        p = proc.run(
-            ["git", "-C", str(root), "ls-remote", "--heads", remote, want],
-            check=False,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except OSError:
-        return False
-    if p.returncode != 0:
+    p = _git_quiet(root, "ls-remote", "--heads", remote, want)
+    if p is None or p.returncode != 0:
         return False
     return any(line.split("\t", 1)[-1].strip() == want for line in p.stdout.splitlines() if "\t" in line)
 
@@ -184,16 +190,8 @@ def _fetch_tracking(root, name: str) -> bool:
     """origin の `refs/heads/<name>` を `refs/remotes/origin/<name>` へ取り込み直す。成否を返す。
 
     `main` 宛の検査（`scripts/check-pr-base.sh`）と同じ refspec を使う。失敗しても手元の追跡ブランチは変わらない。"""
-    try:
-        p = proc.run(
-            ["git", "-C", str(root), "fetch", "-q", "origin", f"refs/heads/{name}:refs/remotes/origin/{name}"],
-            check=False,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-            timeout=PRODUCTION_FETCH_TIMEOUT,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return p.returncode == 0
+    p = _git_quiet(root, "fetch", "-q", "origin", f"refs/heads/{name}:refs/remotes/origin/{name}", timeout=PRODUCTION_FETCH_TIMEOUT)
+    return p is not None and p.returncode == 0
 
 
 def production_decl(root, production: str | None) -> tuple[dict | None, str]:
