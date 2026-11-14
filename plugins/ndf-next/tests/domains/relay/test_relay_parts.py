@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -50,9 +49,8 @@ def test_broken_next_mark_is_an_error_not_the_current_time(tmp_path):
     assert signals.read_next(tmp_path) is None
 
 
-def test_signal_write_gives_up_when_the_lock_is_held(tmp_path):
-    fd = os.open(tmp_path / f"{signals.NEXT_FILE}.lock", os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+def test_signal_write_gives_up_when_the_lock_is_held(tmp_path, hold_lock):
+    fd = hold_lock(tmp_path / f"{signals.NEXT_FILE}.lock")
     try:
         assert not signals.write_next(tmp_path, "s1", "/goal x", False, 0.05)
     finally:
@@ -113,20 +111,13 @@ def test_usage_cache_round_trip(tmp_path):
         accounts.usages(tmp_path)
 
 
-def _hold(path: Path) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    return fd
-
-
-def test_running_wrappers_and_old_ndf_wrappers_are_told_apart(tmp_path):
+def test_running_wrappers_and_old_ndf_wrappers_are_told_apart(tmp_path, hold_lock):
     state = tmp_path / "state"
     env = {"NDF_STATE_HOME": str(tmp_path / "old")}
     d = registry.wrapper_dir(state, "t1")
     registry.write_state(d, {"version": "11.0.0-dev.4"})
     registry.wrapper_dir(state, "t2").mkdir(parents=True)
-    held = [_hold(d / registry.LOCK_FILE), _hold(tmp_path / "old" / "relay" / "20261113T1" / registry.LOCK_FILE)]
+    held = [hold_lock(d / registry.LOCK_FILE), hold_lock(tmp_path / "old" / "relay" / "20261113T1" / registry.LOCK_FILE)]
     try:
         got = registry.all_running(state, env)
     finally:

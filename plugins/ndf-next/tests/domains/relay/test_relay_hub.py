@@ -5,7 +5,6 @@ tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from datetime import date
@@ -22,8 +21,9 @@ VERSION = "11.0.0-dev.4"
 class FakeTmux:
     """セッションを作ると、ラッパーの代わりに錠を持ち状態を書く（`boots` が偽なら何もしない）。"""
 
-    def __init__(self, state_dir: Path, boots: bool = True):
+    def __init__(self, state_dir: Path, hold, boots: bool = True):
         self.state_dir = state_dir
+        self.hold = hold
         self.boots = boots
         self.sessions: dict[str, int] = {}
         self.started: list[tuple[str, dict]] = []
@@ -35,9 +35,7 @@ class FakeTmux:
         self.started.append((name, dict(env)))
         if self.boots:
             d = registry.wrapper_dir(self.state_dir, name)
-            d.mkdir(parents=True, exist_ok=True)
-            fd = os.open(d / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            fd = self.hold(d / registry.LOCK_FILE)
             registry.write_state(d, {"version": VERSION, "state": "running", "reason": "区間 1 を始めた"})
             self.sessions[name] = fd
         return Done(True, "")
@@ -65,12 +63,12 @@ class Clock:
 
 
 @pytest.fixture
-def ctx(tmp_path):
+def ctx(tmp_path, hold_lock):
     root = tmp_path / "plugin"
     (root / "bin").mkdir(parents=True)
     (root / "bin" / "ndf").write_text("#!/bin/sh\n", encoding="utf-8")
     clock = Clock()
-    tmux = FakeTmux(tmp_path / "state")
+    tmux = FakeTmux(tmp_path / "state", hold_lock)
     c = hub.Context(
         state_dir=tmp_path / "state",
         plugin_root=root,
@@ -135,13 +133,10 @@ def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
     assert ctx.tmux.has("t1") and [r.name for r in registry.running(ctx.state_dir)] == ["t1"]
 
 
-def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path):
+def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path, hold_lock):
     # 旧い版のラッパーが動いていれば、新しい版で起動しない（3341-2）
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
-    old = tmp_path / "old" / "relay" / "20261113T1"
-    old.mkdir(parents=True)
-    fd = os.open(old / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    fd = hold_lock(tmp_path / "old" / "relay" / "20261113T1" / registry.LOCK_FILE)
     try:
         spawn = hub.submit(ctx, {"kind": "spawn", "name": "t2"})
         restart = hub.submit(ctx, {"kind": "restart", "name": "t1"})
@@ -159,11 +154,9 @@ def test_stop_and_unknown_requests(ctx):
     assert hub.submit(ctx, {"kind": "fly"}).cause == "invalid"
 
 
-def test_busy_hub_times_out_without_leaving_the_request(ctx):
+def test_busy_hub_times_out_without_leaving_the_request(ctx, hold_lock):
     base = hub.hub_dir(ctx.state_dir)
-    base.mkdir(parents=True)
-    fd = os.open(base / hub.LOCK_FILE, os.O_RDWR | os.O_CREAT)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    fd = hold_lock(base / hub.LOCK_FILE)
     try:
         got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
     finally:
