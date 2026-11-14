@@ -53,21 +53,24 @@ def shape_errors(features: Any, fixes: Any) -> list[str]:
     受け付けた不具合が指す対応表の行が無いことを数える。
     """
     errs = _schema_errors("features", features) + _schema_errors("fixes", fixes)
-    if errs:
-        return errs
+    return errs or _reference_errors(features, fixes)
+
+
+def _reference_errors(features: Mapping[str, Any], fixes: Mapping[str, Any]) -> list[str]:
+    """スキーマで表せない参照の誤り（id の重なり・`places` に無い行き先・対応表に無い行を指す受け付け）。"""
     places = features["places"]
     rows = features["rows"]
     ids = [r["id"] for r in rows]
-    errs += [f"features: id が重なる: {i}" for i in _duplicates(ids)]
+    errs = [f"features: id が重なる: {i}" for i in _duplicates(ids)]
     errs += [f"fixes: id が重なる: {i}" for i in _duplicates([f["id"] for f in fixes["fixes"] + fixes["regressions"]])]
     errs += _unknown_children("features", rows, places)
     for part in ("fixes", "regressions", "intake"):
         errs += _unknown_children(part, fixes[part], places)
-    known = set(ids)
-    errs += [
-        f"intake: #{i['issue']} の行 {i['row']} が対応表に無い" for i in fixes["intake"] if i["row"] is not None and i["row"] not in known
-    ]
-    return errs
+    return errs + _missing_rows(fixes["intake"], set(ids))
+
+
+def _missing_rows(intake: list[dict[str, Any]], known: set[str]) -> list[str]:
+    return [f"intake: #{i['issue']} の行 {i['row']} が対応表に無い" for i in intake if i["row"] is not None and i["row"] not in known]
 
 
 class Entrypoint(NamedTuple):
