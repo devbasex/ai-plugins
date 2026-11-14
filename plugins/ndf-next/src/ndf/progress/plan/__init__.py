@@ -218,7 +218,7 @@ def pause_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
     if view.state != lane.RUNNING:
         raise model.Refused(f"計画 {view.name} は{model.label(view.state)}で、区切りで止められない（すぐ止めるのは --now）")
     _append(conn, pid, [model.EventDraft("plan_paused", "organizer", reason=reason)])
-    return [r.sprint_id for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+    return [r.sprint_id for name in view.lanes for r in rows[name] if r.active]
 
 
 def stop_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:

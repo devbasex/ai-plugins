@@ -199,7 +199,7 @@ def snapshot_of(
     moved: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """読んだ計画とレーンの進行表から写しを作る。`moved` はレーンの最後に動いた時刻（`last_moved`）。"""
-    live = [(name, r) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
+    live = [(name, r) for name in view.lanes for r in rows[name] if r.active]
     running = [(name, r.key, r.sprint_id) for name, r in live]
     answered = [(name, r.key, r.sprint_id, r.answered_seq) for name, r in live if r.awaiting_next]
     reported = [r.body[NOTICE_FIELDS[r.body["kind"]]] for r in view.open_requests() if r.body.get("kind") in NOTICE_FIELDS]

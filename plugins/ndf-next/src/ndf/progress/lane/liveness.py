@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ndf.contracts import causes, result
-from ndf.progress.lane.types import RUNNING, LaneRow
+from ndf.progress.lane.types import LaneRow
 
 # 判定の種類
 IDLE, RESUMING, WAITING_ANSWER, UNKNOWN, STALLED, ALIVE, WORKING, ENDED = (
@@ -113,7 +113,7 @@ def notice_key(lane: str, verdict: Liveness) -> str:
 
 def running_row(rows: list[LaneRow]) -> Optional[LaneRow]:
     """レーンの実行中の行（スプリントの ID が付いたもの）。無ければ None。"""
-    return next((r for r in rows if r.state == RUNNING and r.sprint_id), None)
+    return next((r for r in rows if r.active), None)
 
 
 @dataclass(frozen=True)

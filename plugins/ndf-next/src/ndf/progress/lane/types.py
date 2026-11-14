@@ -90,6 +90,11 @@ class LaneRow:
         return self.state in (PENDING, RUNNING)
 
     @property
+    def active(self) -> bool:
+        """スプリントの ID が付いた実行中の行か（動いているスプリントとみなす行）。"""
+        return self.state == RUNNING and bool(self.sprint_id)
+
+    @property
     def awaiting_next(self) -> bool:
         """答えが載った後に conductor がまだ `ndf progress next` を打っていない実行中の行か。"""
         return self.state == RUNNING and self.answered_seq > self.resumed_seq

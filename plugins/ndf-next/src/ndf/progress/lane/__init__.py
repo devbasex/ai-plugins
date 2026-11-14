@@ -326,7 +326,7 @@ def cancel_pending(conn: sa.Connection, view: PlanView, reason: str) -> list[str
     for name, evs in read_lanes(conn, view).items():
         rows = fold_lane(evs)
         drafts = [model.EventDraft("row_cancelled", "organizer", r.key, reason=reason) for r in rows if r.state == PENDING]
-        running += [r.sprint_id for r in rows if r.state == RUNNING and r.sprint_id]
+        running += [r.sprint_id for r in rows if r.active]
         if drafts:
             store.append_events(conn, view.lanes[name].table_id, drafts, evs[-1].seq)
     return running
