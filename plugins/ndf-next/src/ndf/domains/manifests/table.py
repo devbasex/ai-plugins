@@ -47,21 +47,31 @@ class Table(NamedTuple):
 
 def load(plugin_root: Path) -> Table:
     """表。形が違えば `TableError`。"""
-    path = plugin_root / TABLE_REL
+    data = _read(plugin_root / TABLE_REL)
+    runtimes = tuple(_runtime(name, row) for name, row in data["runtimes"].items())
+    reads_all = {r.name for r in runtimes if r.definition is None}
+    skills = tuple(_skill(row, {r.name for r in runtimes}, reads_all) for row in data["skills"])
+    _reject_duplicates(skills)
+    return Table(runtimes, skills)
+
+
+def _read(path: Path) -> dict:
+    """表の JSON。読めない・最上位の形（runtimes・skills）が違えば `TableError`。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise TableError(f"配る Skill の表を読めない: {path}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("runtimes"), dict) or not isinstance(data.get("skills"), list):
         raise TableError(f"配る Skill の表の形が違う（runtimes・skills）: {path}")
-    runtimes = tuple(_runtime(name, row) for name, row in data["runtimes"].items())
-    reads_all = {r.name for r in runtimes if r.definition is None}
-    skills = tuple(_skill(row, {r.name for r in runtimes}, reads_all) for row in data["skills"])
+    return data
+
+
+def _reject_duplicates(skills: tuple[Skill, ...]) -> None:
+    """同じ名前の行が 2 回以上あれば `TableError`。"""
     names = [s.name for s in skills]
     twice = sorted({n for n in names if names.count(n) > 1})
     if twice:
         raise TableError(f"配る Skill の表に同じ名前が 2 回ある: {', '.join(twice)}")
-    return Table(runtimes, skills)
 
 
 def _runtime(name: str, row: Any) -> Runtime:
