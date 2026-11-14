@@ -98,6 +98,11 @@ class Launch:
             return f"next:{self.resume}:{self.seq}"
         return f"{self.lane}/{self.row}"
 
+    @property
+    def continues(self) -> bool:
+        """動いているレーンの続き（中止・答えの後の next・/goal の入れ直し）か。行を始める起動ではない。"""
+        return any((self.cancel, self.resume, self.goal))
+
 
 @dataclass(frozen=True)
 class Complete:

@@ -261,7 +261,7 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, how: dict[str, A
             return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
         return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
 
-    if any((act.cancel, act.resume, act.goal)):
+    if act.continues:
         # 動いているレーンの続き（中止・答えの後の next・/goal の入れ直し）は、上限で待たせない
         return go()
     wrapper = launch.wrapper_name(spec["repo"], spec["plan"], lane_name)
