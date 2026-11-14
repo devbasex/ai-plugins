@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from ndf.contracts import chosen, result
+from ndf.contracts import chosen, result, routing
 from ndf.core import durable
-from ndf.core.plan import runner
+from ndf.core.plan import assemble_decide, model, runner
 
 from . import _plan_helpers as H
 
@@ -171,3 +171,129 @@ def test_outputs_out_of_the_contract_become_a_warning(repo):
     code, out = H.ndf(repo, "next", plan)
     assert code == H.OK and "outputs" not in out
     assert out["warnings"] and result.errors(out) == []
+
+
+# --- 現状固定テスト: `runner.prepare` を同じプロセスで呼ぶ（DBOS を開かない） ---
+
+
+@pytest.fixture
+def in_repo(repo, monkeypatch) -> Path:
+    """相対のプランのパスはプロセスの cwd で読まれる（`model.load`）ため、リポジトリへ移る。"""
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def _head_of(repo: Path) -> str:
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _root(repo: Path) -> Path:
+    return repo / ".git" / "ndf" / "state"
+
+
+def test_prepare_a_fresh_plan(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    root = _root(in_repo)
+    inv = runner.prepare(root, Path(rel), None, None, in_repo)
+    plan = model.load(in_repo / rel)
+    head = _head_of(in_repo)
+    sdir = in_repo / "plans" / "p.state"
+    assert inv.plan_path == in_repo / rel
+    assert inv.plan == plan
+    assert (inv.start, inv.prelude, inv.state_dir, inv.head) == (None, (), sdir, head)
+    assert inv.digest == plan.digest()
+    assert (inv.key, inv.round_no) == (assemble_decide.run_key("p", plan.digest(), None, head, 0), 0)
+    assert inv.values == {
+        "state_dir": str(sdir),
+        "repo": str(in_repo),
+        "worktree": "",
+        "plan": str(in_repo / rel),
+        "owner": assemble_decide.owner_of("p", str(sdir)),
+        "work_base": str(root.parent / runner.WORK_DIR),
+    }
+    assert inv.again == (str(in_repo / rel),)
+
+
+def test_prepare_with_start_state_dir_and_sets(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("a", "pass"), H.py_step("b", "pass")])
+    inv = runner.prepare(_root(in_repo), Path(rel), "b", "st", in_repo, {"b": "2", "a": "1"})
+    plan = model.load(in_repo / rel)
+    assert inv.state_dir == in_repo / "st"
+    assert inv.digest == assemble_decide.run_digest(plan.digest(), {"a": "1", "b": "2"})
+    assert inv.digest != plan.digest()
+    assert (inv.values["a"], inv.values["b"]) == ("1", "2")
+    assert inv.again == (str(in_repo / rel), "--from", "b", "--state-dir", "st", "--set", "a=1", "--set", "b=2")
+    assert inv.key == assemble_decide.run_key("p", inv.digest, "b", _head_of(in_repo), 0)
+
+
+def test_prepare_uses_the_state_dir_of_the_plan(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")], state_dir="from-plan")
+    inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
+    assert inv.state_dir == in_repo / "from-plan"
+    assert inv.again == (str(in_repo / rel),)
+
+
+def test_prepare_keeps_an_absolute_plan_path_and_a_plan_without_a_place(in_repo, tmp_path):
+    path = tmp_path / "loose.json"
+    path.write_text(json.dumps({"name": "loose", "steps": [H.py_step("s", "pass")]}), encoding="utf-8")
+    inv = runner.prepare(_root(in_repo), path, None, None, in_repo)
+    assert inv.plan_path == path
+    assert inv.head is None
+    assert (inv.values["repo"], inv.values["worktree"], inv.values["plan"]) == ("", "", str(path))
+    assert inv.state_dir == tmp_path / "loose.state"
+
+
+def test_prepare_keeps_the_resume_prelude_before_the_start(in_repo):
+    ids = ["base-sync", "x", "deep-due", "y"]
+    rel = H.write_plan(in_repo, "p", [H.py_step(i, "pass") for i in ids])
+    assert runner.prepare(_root(in_repo), Path(rel), "y", None, in_repo).prelude == ("base-sync", "deep-due")
+    assert runner.prepare(_root(in_repo), Path(rel), routing.END, None, in_repo).prelude == ()
+
+
+def test_prepare_refuses_an_unknown_start(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    with pytest.raises(model.PlanError, match="^p に nope は無い$"):
+        runner.prepare(_root(in_repo), Path(rel), "nope", None, in_repo)
+
+
+def test_prepare_refuses_sets_that_override_fixed_values(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    with pytest.raises(model.PlanError, match="^差し込みの値 plan, repo は上書きできない$"):
+        runner.prepare(_root(in_repo), Path(rel), None, None, in_repo, {"repo": "x", "plan": "y", "ok": "z"})
+
+
+def _write_record(sdir: Path, **record) -> None:
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / runner.RUN_FILE).write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_prepare_continues_the_recorded_round_that_has_not_finished(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    digest = model.load(in_repo / rel).digest()
+    _write_record(in_repo / "plans" / "p.state", key="K", name="p", digest=digest, start=None, round=3, heads=["other"])
+    inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
+    assert (inv.key, inv.round_no) == ("K", 3)
+
+
+def test_prepare_starts_the_next_round_when_a_finished_round_had_another_head(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    digest = model.load(in_repo / rel).digest()
+    root = _root(in_repo)
+    _write_record(in_repo / "plans" / "p.state", key="K", name="p", digest=digest, start=None, round=3, heads=["other"])
+    retired = root / durable.DBOS_DIR / durable.RETIRED_DIR
+    retired.mkdir(parents=True)
+    (retired / f"{durable.run_name('K')}-1{durable.DB_SUFFIX}").touch()
+    inv = runner.prepare(root, Path(rel), None, None, in_repo)
+    assert (inv.key, inv.round_no) == (assemble_decide.run_key("p", digest, None, _head_of(in_repo), 4), 4)
+
+
+def test_prepare_keeps_a_finished_round_with_the_same_head(in_repo):
+    rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
+    digest = model.load(in_repo / rel).digest()
+    root = _root(in_repo)
+    _write_record(in_repo / "plans" / "p.state", key="K", name="p", digest=digest, start=None, round=2, heads=[_head_of(in_repo)])
+    retired = root / durable.DBOS_DIR / durable.RETIRED_DIR
+    retired.mkdir(parents=True)
+    (retired / f"{durable.run_name('K')}{durable.DB_SUFFIX}").touch()
+    inv = runner.prepare(root, Path(rel), None, None, in_repo)
+    assert (inv.key, inv.round_no) == ("K", 2)
