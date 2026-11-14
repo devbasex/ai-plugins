@@ -85,9 +85,7 @@ def _argv(node: Any) -> tuple[str, ...]:
 
 
 def _unquote(text: str, kind: str) -> str:
-    if kind == "string" and len(text) >= 2:
-        return text[1:-1]
-    if kind == "raw_string" and len(text) >= 2:
+    if kind in ("string", "raw_string") and len(text) >= 2:
         return text[1:-1]
     return text
 
