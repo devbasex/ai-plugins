@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 
 from ndf.core import route
-from ndf.core.plan import model
+from ndf.core.plan import model, steps
 
 from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of
 
@@ -174,3 +175,37 @@ def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):
     none = fake_bin(tmp_path, "gh", "true")
     found = run_step(probe, tmp_path, none)
     assert (found["status"], found["code"], found["prs"]) == ("stopped", 1, [])
+
+
+def _design_step(tmp_path, step_id):
+    raw = plan_of("design", branch="feat/x", base="develop", title="t", body_file=str(tmp_path / "body.md"))
+    found = next(s for s in raw["steps"] if s["id"] == step_id)
+    return model.parse({"name": "p", "worktree": str(tmp_path), "steps": [found]})
+
+
+def test_design_pr_step_keeps_existing_pr_body(tmp_path, monkeypatch):
+    """#2853: 設計の出し直しで PR が既にあれば、pr のステップは PR を作り直さず本文を書き換えない
+    （worker が本文の節に足した行が次のループの 1 回で消えない）。設計のプランに本文を組み直すステップは無い。"""
+    calls = tmp_path / "gh.log"
+    gh = fake_bin(tmp_path, "gh", f'echo "$@" >> {shlex.quote(str(calls))}\ncase "$2" in list) echo 7 ;; *) exit 1 ;; esac')
+    monkeypatch.setenv("PATH", f"{gh}:{os.environ['PATH']}")
+    plan = _design_step(tmp_path, "pr")
+    out = steps.run(steps.StepContext(plan, tmp_path / "state", {"state_dir": str(tmp_path / "state")}), plan.steps[0])
+    assert out["status"] == "ok" and out["items"] == [{"kind": "pr", "number": 7}]
+    assert [line.split()[:2] for line in calls.read_text(encoding="utf-8").splitlines()] == [["pr", "list"]]
+    design = plan_of("design")
+    assert not any("pr edit" in " ".join(s["run"]) or "--body" in " ".join(s["run"]) for s in design["steps"] if s["id"] != "pr")
+
+
+def test_design_head_check_compares_pr_head_with_local_head(tmp_path):
+    """#2932（#2721 の形）: PR の head が手元の HEAD と同じなら ok、違えば（push されていないコミットがある）
+    precondition で止まる。gh を読めなくても precondition（レビューへ進まない）。"""
+    repo = repo_with_base(tmp_path / "a", {"a.md": "# a\n"})
+    head = git(repo, "rev-parse", "HEAD").strip()
+    step = step_of(plan_of("design", branch="feat/x"), "head-check")
+    same = fake_bin(tmp_path / "s", "gh", f"echo {head}")
+    assert run_step(step, repo, same)["status"] == "ok"
+    behind = fake_bin(tmp_path / "b", "gh", "echo 0000")
+    assert run_step(step, repo, behind)["kind"] == "precondition"
+    broken = fake_bin(tmp_path / "x", "gh", "exit 1")
+    assert run_step(step, repo, broken)["kind"] == "precondition"

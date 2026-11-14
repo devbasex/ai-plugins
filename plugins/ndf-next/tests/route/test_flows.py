@@ -169,3 +169,42 @@ def test_same_local_test_failure_streak_stops_to_human():
         i = visited.index(test_id)
         assert visited[i:] == [test_id, "test-repeat", "fix", test_id, "test-repeat"], purpose
         assert (state.status, state.kind) == (STOPPED, "fix_limit"), purpose
+
+
+def test_design_plan_checks_ci_after_push():
+    """#2932（#2741 の形）: 設計のプランは push の後に CI を待つ。CI の合格は push の前の worker（design）でなく、
+    push → PR → レビュー → push の後の CI の待ちが確かめる。"""
+    visited, state = walk(plan_of("design"), {})
+    assert visited == ["design", "rebuild", "push", "pr", "head-check", "review", "push-reviewed", "conflict-check", "ci"]
+    assert state.status == OK
+
+
+def test_design_plan_ci_failure_is_fixed_then_pushed_and_rechecked():
+    """#2932: 設計の CI が落ちたら同じ原因の数えを通って worker が直し、push してから CI を待ち直す（止まらない）。"""
+    visited, state = walk(plan_of("design"), {"ci": [stopped("test_failed")]})
+    i = visited.index("ci")
+    assert visited[i + 1 :] == ["repeat-check", "ci-fix", "push-reviewed", "conflict-check", "ci"]
+    assert state.status == OK
+
+
+def test_design_plan_stops_before_review_when_pr_head_lags():
+    """#2932（#2721 の形）: PR の作成の後、手元のコミットが PR の head に入っていなければ、レビューへ進まずに止まる。"""
+    visited, state = walk(plan_of("design"), {"head-check": [stopped("precondition")]})
+    assert visited[-2:] == ["pr", "head-check"]
+    assert "review" not in visited
+    assert (state.status, state.kind) == (STOPPED, "precondition")
+
+
+def test_design_review_gets_rebuild_findings():
+    """#2444: 組み直しが残した「足すべき内容」（rebuild の --out のファイル）を、後のレビューの --findings へ渡す。
+
+    レビューが欠けを残して終わっても（incomplete）設計のプランを落とさずに push と CI へ進む。
+    """
+    plan = plan_of("design", rebuild=["ndf-rebuild"], review=["ndf-review"])
+    rebuild, review = step_of(plan, "rebuild"), step_of(plan, "review")
+    out = rebuild.run[rebuild.run.index("--out") + 1]
+    assert review.run[review.run.index("--findings") + 1] == out
+    visited, state = walk(plan, {"review": [stopped("incomplete")]})
+    assert visited.index("rebuild") < visited.index("review")
+    assert visited[visited.index("review") + 1] == "push-reviewed"
+    assert state.status == OK
