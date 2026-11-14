@@ -82,3 +82,7 @@ def test_declarations_outside_the_table_stop(decl):
 def test_release_reviews_only_where_units_are_selected():
     for r in facts.rows(FLOWS):
         assert ("release" in r["review_kinds"]) is r["release_units"], r["id"]
+
+
+def test_branch_flow_is_read_from_the_main_directory():
+    assert "branch_flow" in facts.value("ndf-files", "worktree", "main_keys")
