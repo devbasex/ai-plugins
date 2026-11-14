@@ -27,15 +27,6 @@ def good(decision="fix"):
     return {"decision": decision, "reason": "テストが落ちた", "basis": ["test_failed"]}
 
 
-@pytest.fixture(autouse=True)
-def _no_run_log(monkeypatch):
-    for name in (cli.ENV_RUN_ID, cli.ENV_RUN_LOG, cli.ENV_RUN_LOG_SINK):
-        monkeypatch.delenv(name, raising=False)
-    cli.close()
-    yield
-    cli.close()
-
-
 def test_answer_schema_fills_choices_into_decision_enum():
     schema = llm.answer_schema(choices=["fix", "stop"])
 

@@ -12,15 +12,6 @@ from ndf.adapters import cli
 POLL = 0.05
 
 
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    for name in (cli.ENV_RUN_ID, cli.ENV_RUN_LOG, cli.ENV_RUN_LOG_SINK):
-        monkeypatch.delenv(name, raising=False)
-    cli.close()
-    yield
-    cli.close()
-
-
 def launch(tmp_path: Path, script: str, agent: str = "codex", timeout: float = 30) -> cli.Launch:
     return cli.Launch(agent, (sys.executable, "-c", script), tmp_path, cli.AgentPaths.at(tmp_path / "run" / agent), timeout)
 

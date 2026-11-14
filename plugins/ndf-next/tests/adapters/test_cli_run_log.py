@@ -15,15 +15,6 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
 
 
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    for name in (cli.ENV_RUN_ID, cli.ENV_RUN_LOG, cli.ENV_RUN_LOG_SINK):
-        monkeypatch.delenv(name, raising=False)
-    cli.close()
-    yield
-    cli.close()
-
-
 def lines(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 

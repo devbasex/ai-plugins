@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from ndf.adapters import cli
 
 # 偽の kiro-cli: cli-agents の x.json を書き換え、x.json.bak を残す
@@ -16,15 +14,6 @@ FAKE_KIRO = (
     "(d / 'x.json.bak').write_text((d / 'x.json').read_text())\n"
     "(d / 'x.json').write_text('{\"rewritten\": true}')\n"
 )
-
-
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    for name in (cli.ENV_RUN_ID, cli.ENV_RUN_LOG, cli.ENV_RUN_LOG_SINK):
-        monkeypatch.delenv(name, raising=False)
-    cli.close()
-    yield
-    cli.close()
 
 
 def git(cwd: Path, *args: str) -> str:
