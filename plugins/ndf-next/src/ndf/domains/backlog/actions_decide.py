@@ -92,6 +92,12 @@ def _create_errors(k: int, c: Any) -> list[str]:
     return errs
 
 
+def _duplicate_errors(acts: list[Any]) -> list[str]:
+    """同じ番号の action が 2 つ以上ある誤り。"""
+    seen = [act["number"] for act in acts if isinstance(act, dict) and isinstance(act.get("number"), int)]
+    return [f"#{n} の action が 2 つある" for n in sorted({n for n in seen if seen.count(n) > 1})]
+
+
 def plan_errors(plan: dict[str, Any]) -> list[str]:
     """`actions` と `create` の形の誤り。1 つでもあれば 1 件も書かない。"""
     errs = []
@@ -100,12 +106,10 @@ def plan_errors(plan: dict[str, Any]) -> list[str]:
             errs.append(f"{key} は列で書く")
     if errs:
         return errs
-    acts = plan["actions"] if "actions" in plan else []
+    acts = plan.get("actions", [])
     errs += [e for k, act in enumerate(acts) for e in _action_errors(k, act)]
-    errs += [e for k, c in enumerate(plan["create"] if "create" in plan else []) for e in _create_errors(k, c)]
-    seen = [act["number"] for act in acts if isinstance(act, dict) and isinstance(act.get("number"), int)]
-    errs += [f"#{n} の action が 2 つある" for n in sorted({n for n in seen if seen.count(n) > 1})]
-    return errs
+    errs += [e for k, c in enumerate(plan.get("create", [])) for e in _create_errors(k, c)]
+    return errs + _duplicate_errors(acts)
 
 
 def changes_of(act: dict[str, Any]) -> dict[str, Any]:
