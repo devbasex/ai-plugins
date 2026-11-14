@@ -148,8 +148,8 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     return [(stage.name, path)]
 
 
-def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    snap = definition.load_definition(a.mode)
+def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tuple[dict[str, Any], list[model.EventDraft]]:
+    """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。"""
     disables = dict(item.split("=", 1) for item in a.disable)
     unknown = stages.unknown_stages(snap, disables)
     if unknown:
@@ -160,7 +160,12 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
     enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
     doc = {**stages.snapshot_dict(snap), "context": context, "enablement": {k: vars(v) for k, v in enabled.items()}}
-    drafts = _new_drafts(snap, enabled, _requirements(snap, a.requirements))
+    return doc, _new_drafts(snap, enabled, _requirements(snap, a.requirements))
+
+
+def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    snap = definition.load_definition(a.mode)
+    doc, drafts = _prepare_new(a, cwd, snap)
     with store.transaction(st) as conn:
         tid = store.create_table(conn, (model.SPRINT, _repo(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, events = _current(conn, tid)
