@@ -5,7 +5,7 @@ description: "Write Notion pages in Notion-flavored Markdown: XML tables with fi
 
 # Notion のページを書く
 
-Notion のページ本文は**標準 Markdown ではない**。テーブルの記法が違い、空行が消え、ある
+Notion のページ本文は**標準 Markdown と記法が異なる**。テーブルの記法が違い、空行が消え、ある
 タグを落とすと**子ページが削除される**。いずれも知らなければ必ず踏む。
 
 **この Skill が扱うのは「どう出力するか」である。** 何を書くか（第三者が読める文章、識別子を
@@ -29,7 +29,7 @@ notion-fetch  notion://docs/enhanced-markdown-spec
 | インデント | タブ |
 | セル内の改行 | `<br>`。生の改行は別ブロックへ割れる |
 | セル内の内容 | リッチテキストのみ。見出し・リスト・画像は入らない |
-| セル内の強調 | `**` を使う。`<strong>` ではない |
+| セル内の強調 | `**` を使う。`<strong>` は使わない |
 | 複数行の引用 | `<br>` でつないで 1 ブロックにする |
 | 意図した空行 | `<empty-block/>`。素の空行は削除される |
 
@@ -38,7 +38,7 @@ notion-fetch  notion://docs/enhanced-markdown-spec
 
 ## 2. テーブルの列幅を決める
 
-**`fit-page-width="true"` は幅の指定ではない。** これだけでは列幅が内容依存で決まり、
+**`fit-page-width="true"` は列幅を決めない。** これだけでは列幅が内容依存で決まり、
 右端が揃わない。列幅は `<colgroup>` と `<col width="...">` で明示する。
 
 **合計を Notion 標準ページ幅の 708px に揃える。** ページ幅ちょうどに収まる。
@@ -65,7 +65,7 @@ notion-fetch  notion://docs/enhanced-markdown-spec
 | やりたいこと | 使うもの | 誤ると |
 | --- | --- | --- |
 | 子ページとして配置する | `<page url=...>` | 既存ページの URL を書くと**そのページが移動する** |
-| 他のページを参照するだけ | `<mention-page url=...>` | `<page>` を使うと参照ではなく移動になる |
+| 他のページを参照するだけ | `<mention-page url=...>` | `<page>` を使うとページが移動する |
 | ページ本文を書き換える | `replace_content` | `<page>` タグを含め忘れると**子ページが削除される** |
 
 - **`allow_deleting_content` は既定の `false` のままにする。** 削除を伴う編集がエラーで止まり、
