@@ -6280,6 +6280,13 @@
       "pending_source": "issues/issue-3483-requirements.md"
     },
     {
+      "term": "退避したレビュー worktree",
+      "context": "ndf-cross-refactoring",
+      "meaning": "古い起点のために、消さずに rf<PR>.retired-<時刻> へ移したレビュー worktree と状態ファイル。開始の片付けと merged が、持ち主・Pull Request の状態・作業の残りで外すかを決める",
+      "source": "",
+      "pending_source": "issues/issue-3483-design.md"
+    },
+    {
       "term": "文書のファイル",
       "context": "ndf-workflow",
       "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",

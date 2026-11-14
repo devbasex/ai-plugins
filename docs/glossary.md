@@ -834,6 +834,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 落ちたテストの材料 | — | 落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 判定の担い手 | — | 成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 古い起点 | — | 中断した cross-refactoring を続けるとき、Pull Request の今の head が、書き込み用のレビュー worktree の HEAD と同じでもその祖先でもないこと。続けずに退避して今の head から始め直す | — | — | — |
+| 退避したレビュー worktree | — | 古い起点のために、消さずに rf<PR>.retired-<時刻> へ移したレビュー worktree と状態ファイル。開始の片付けと merged が、持ち主・Pull Request の状態・作業の残りで外すかを決める | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
