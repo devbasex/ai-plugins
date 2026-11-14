@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from ndf.domains.hooks.verdict import Verdict, pushback
+from ndf.domains.hooks.verdict import Verdict, passing, pushback
 
 
 def check(ctx, svc) -> Verdict:
@@ -16,4 +16,4 @@ def check(ctx, svc) -> Verdict:
             "本文で人の答えを待って終えた。人に問うときは AskUserQuestion を使う（中継とオーガナイザーへ問いが届き、"
             "待ちの知らせも送られる）。問わずに進められるなら続ける"
         )
-    return Verdict("pass", notes={"reply": kind})
+    return passing(reply=kind)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ndf.domains.hooks import outbox, tables
 from ndf.domains.relay import signals
-from ndf.domains.hooks.verdict import Verdict
+from ndf.domains.hooks.verdict import Verdict, passing
 
 
 def _first_question(tool_input: dict) -> str:
@@ -31,4 +31,4 @@ def check(ctx, svc) -> Verdict:
         outbox.enqueue(svc.state_dir, "question", {"text": _first_question(ctx.tool_input), "cwd": ctx.cwd, "session_id": ctx.session_id})
         outbox.kick(svc.state_dir)
         forwarded.append("notify")
-    return Verdict("pass", notes={"forwarded": forwarded})
+    return passing(forwarded=forwarded)

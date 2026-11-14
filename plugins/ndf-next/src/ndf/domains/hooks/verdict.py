@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 # 判定の種類。強い順（まとめるときは強いものを 1 つ残す）
 KINDS = ("deny", "pushback", "advise", "pass")
@@ -41,8 +42,13 @@ class Verdict:
 PASS = Verdict("pass")
 
 
-def deny(reason: str, key: str = "") -> Verdict:
-    return Verdict("deny", reason=reason, key=key)
+def passing(**notes: object) -> Verdict:
+    """何もしない判定。`notes` は計測に残す印。"""
+    return Verdict("pass", notes=notes)
+
+
+def deny(reason: str, key: str = "", notes: Optional[dict] = None) -> Verdict:
+    return Verdict("deny", reason=reason, key=key, notes=notes if notes is not None else {})
 
 
 def pushback(reason: str) -> Verdict:

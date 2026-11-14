@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ndf.domains.hooks.verdict import Verdict
+from ndf.domains.hooks.verdict import Verdict, passing
 
 
 def check(ctx, svc) -> Verdict:
     source = svc.counter.reset()
-    return Verdict("pass", notes={"turn_source": source})
+    return passing(turn_source=source)

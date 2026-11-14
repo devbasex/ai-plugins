@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ndf.domains.hooks import tables
 from ndf.domains.relay import blocks, signals
-from ndf.domains.hooks.verdict import Verdict, pushback
+from ndf.domains.hooks.verdict import Verdict, passing, pushback
 
 
 def check(ctx, svc) -> Verdict | None:
@@ -26,4 +26,4 @@ def check(ctx, svc) -> Verdict | None:
         )
     wait = float(tables.policy_value("hook.counter-lock", "seconds"))
     written = signals.write_next(directory, ctx.session_id, block, ctx.stop_hook_active, wait)
-    return Verdict("pass", notes={"relay_next": written, "goal_active": ctx.stop_hook_active})
+    return passing(relay_next=written, goal_active=ctx.stop_hook_active)
