@@ -12,7 +12,7 @@ import pytest
 
 from ndf.core import durable, loop
 
-from ._counting import decide
+from ._counting_loader import _load_counting
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 SRC = PLUGIN_ROOT / "src"
@@ -21,6 +21,8 @@ CRASH_SCRIPT = Path(__file__).with_name("_durable_crash.py")
 CRASH_EXIT_CODE = 9
 
 performed: list[int] = []
+
+decide = _load_counting().decide
 
 
 @durable.step
