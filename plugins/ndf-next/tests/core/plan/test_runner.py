@@ -449,3 +449,33 @@ def test_final_result_gate_routes_approval_to_the_following_step(two_steps, last
     assert (out["status"], out["summary"], out["items"]) == ("gate", "承認を待つ", [_plan_item(two_steps)])
     cont = {"argv": ["ndf", "plan", "next", str(two_steps.plan_path), *approved]} if approved else None
     assert out["routes"] == {"approved": cont, "rejected": None}
+
+
+# --- `runner._result_of`: 状態の置き場を読まずに、渡した記録から結果を組む（I-026） ---
+
+
+def _records(inv: runner.Invocation, steps: int, outputs=None) -> "runner._FinalRecords":
+    items = [_plan_item(inv), {"kind": "pr", "number": 9}]
+    return runner._FinalRecords(items, {"round": 0, "steps": steps}, outputs, {"outputs": outputs, "warnings": [], "run_id": inv.run_id})
+
+
+def test_result_of_builds_from_the_given_records_without_reading_the_state_dir(two_steps):
+    _write_records(two_steps, prs=[5], outputs={"pr": 5, "gaps": [{"kind": "k", "name": "n", "reason": "r"}]})
+    out = runner._result_of(two_steps, {"status": "ok", "count": 2}, "SUCCESS", _records(two_steps, 2))
+    assert (out["status"], out["summary"]) == ("ok", "p が終わった")
+    assert out["items"] == [_plan_item(two_steps), {"kind": "pr", "number": 9}]
+    assert "outputs" not in out
+
+
+def test_result_of_keeps_the_given_items_when_it_stops_at_a_step(two_steps):
+    rec = _records(two_steps, 1)
+    final = {"status": "stopped", "count": 1, "last": "a", "kind": "work_stopped", "detail": "落ちた"}
+    out = runner._result_of(two_steps, final, "SUCCESS", rec)
+    assert out["items"] == [_plan_item(two_steps, step="a"), {"kind": "pr", "number": 9}]
+    assert rec.items[0] == _plan_item(two_steps)
+
+
+def test_result_of_with_gaps_in_the_given_outputs_is_incomplete(two_steps):
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
+    out = runner._result_of(two_steps, {"status": "ok", "count": 2}, "SUCCESS", _records(two_steps, 2, {"gaps": [gap]}))
+    assert (out["status"], out["cause"]["kind"], out["gaps"]) == ("stopped", "incomplete", [gap])
