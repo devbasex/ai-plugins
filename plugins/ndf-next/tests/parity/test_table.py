@@ -18,6 +18,10 @@ def _row(features, kind="entrypoint"):
 
 def test_shipped_tables_have_the_shape(tables):
     assert table.shape_errors(*tables) == []
+    features, _ = tables
+    for r in features["rows"]:
+        assert r["feature"] and "trial" in r
+        assert ("to" in r) != ("not_built" in r), r["id"]
 
 
 def test_the_five_non_regression_rows_are_rows(tables):
