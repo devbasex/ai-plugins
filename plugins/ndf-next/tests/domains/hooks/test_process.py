@@ -51,15 +51,21 @@ PROBE = textwrap.dedent(
     out, target = sys.argv[1], sys.argv[2]
     sys.argv = [target, *sys.argv[3:]]
     seen = {"children": 0, "scans": []}
+    inside = [0]  # Popen の中の os.posix_spawn などを 2 度数えない
     _popen = subprocess.Popen.__init__
     def popen(self, *a, **k):
         seen["children"] += 1
-        return _popen(self, *a, **k)
+        inside[0] += 1
+        try:
+            return _popen(self, *a, **k)
+        finally:
+            inside[0] -= 1
     subprocess.Popen.__init__ = popen
     for name in ("system", "fork", "posix_spawn", "posix_spawnp"):
         if hasattr(os, name):
             def child(*a, _o=getattr(os, name), **k):
-                seen["children"] += 1
+                if not inside[0]:
+                    seen["children"] += 1
                 return _o(*a, **k)
             setattr(os, name, child)
     for name in ("scandir", "listdir", "walk"):
