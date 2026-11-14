@@ -94,3 +94,31 @@ def test_test_file_names_follow_the_shared_table(path, expected):
 
 def test_module_names_of_a_package():
     assert tests_decide.module_names("src/ndf/domains/x/__init__.py") == frozenset({"src.ndf.domains.x", "ndf.domains.x", "domains.x", "x"})
+
+
+# 現状固定: imports_of の各分岐（import / from / 相対 / 入れ子 / 構文の誤り）
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("", frozenset()),
+        ("x = 1\n", frozenset()),
+        ("import os\n", frozenset({"os"})),
+        ("import os.path as p, sys\n", frozenset({"os.path", "sys"})),
+        ("from lib import foo, bar as b\n", frozenset({"lib", "lib.foo", "lib.bar"})),
+        ("from a.b import c\n", frozenset({"a.b", "a.b.c"})),
+        ("from . import sib\n", frozenset({"sib"})),
+        ("from .pkg import mod\n", frozenset({"pkg", "pkg.mod"})),
+        ("from lib import *\n", frozenset({"lib", "lib.*"})),
+        (
+            "def f():\n    import inner\n    if True:\n        from deep.x import y\n",
+            frozenset({"inner", "deep.x", "deep.x.y"}),
+        ),
+    ],
+)
+def test_imports_of_current_behavior(source, expected):
+    assert tests_decide.imports_of(source) == expected
+
+
+def test_imports_of_raises_syntax_error():
+    with pytest.raises(SyntaxError):
+        tests_decide.imports_of("def broken(:\n")
