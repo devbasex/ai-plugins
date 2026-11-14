@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -175,9 +176,23 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert rows[0]["kind"] == slots.DIRECT and rows[1]["kind"] == "whole"
 
 
-def test_memory_stop_exits_apart_from_a_failed_test(capsys):
+def _gate_stopping_by_memory(command_text, cwd, *, options=None):
+    """`slots.gate` の代わり。枠を持たない実行を渡し、出るときにメモリで止めたとして `Stopped` を送る。"""
+
+    @contextmanager
+    def gate():
+        yield slots.Held()
+        raise slots.Stopped(records.MEMORY_STOPPED, 2.0, 100)
+
+    return gate()
+
+
+def test_memory_stop_exits_apart_from_a_failed_test(project, monkeypatch, capsys):
     # メモリで止めた実行は落ちたテストとして数えない（I9）。終了コードは落ちたテストの 1 と重ならない
-    code = command._stopped_from(slots.Stopped(records.MEMORY_STOPPED, 2.0, 100))
+    root, _, _ = project
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(slots, "gate", _gate_stopping_by_memory)
+    code = command.main(["run", "--", "true"])
     got = json.loads(capsys.readouterr().out)
     assert code == causes.exit_code("infra_wait") != causes.exit_code("test_failed")
     assert got["status"] == "stopped"
