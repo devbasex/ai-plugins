@@ -18,7 +18,7 @@ from typing import Any
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import facts, limits
 from ndf.domains.backlog import state
-from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT
+from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT, is_positive_int
 
 DEPTHS = (REVIEW, OVERHAUL)
 EVENTS = (TIMED_OUT, RAN)
@@ -50,15 +50,20 @@ def declaration(path: Path) -> dict[str, Any]:
     return got
 
 
-def depth_seconds(decl: dict[str, Any], depth: str) -> int:
-    """深さの 1 回の秒の上限。宣言の `depths.<深さ>.seconds` は正の整数で書く。"""
+def depth_entry(decl: dict[str, Any], depth: str) -> Any:
+    """宣言の `depths.<深さ>`（無ければ空）。深さが違う・`depths` がオブジェクトでなければ `DepthError`。"""
     if depth not in DEPTHS:
         raise DepthError(f"深さは {' / '.join(DEPTHS)} のどれか: {depth!r}")
     depths = decl["depths"] if "depths" in decl else {}
     if not isinstance(depths, dict):
         raise DepthError("depths はオブジェクトで書く")
-    entry = depths[depth] if depth in depths else {}
-    if not isinstance(entry, dict) or ("seconds" in entry and (type(entry["seconds"]) is not int or entry["seconds"] <= 0)):
+    return depths[depth] if depth in depths else {}
+
+
+def depth_seconds(decl: dict[str, Any], depth: str) -> int:
+    """深さの 1 回の秒の上限。宣言の `depths.<深さ>.seconds` は正の整数で書く。"""
+    entry = depth_entry(decl, depth)
+    if not isinstance(entry, dict) or ("seconds" in entry and not is_positive_int(entry["seconds"])):
         raise DepthError(f"depths.{depth}.seconds は正の整数で書く")
     if "seconds" in entry:
         return entry["seconds"]

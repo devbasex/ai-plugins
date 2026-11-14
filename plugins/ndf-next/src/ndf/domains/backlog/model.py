@@ -29,6 +29,11 @@ DIGEST_CHARS = 16
 SOURCE_LLM, SOURCE_LABEL, SOURCE_DEPENDENTS, SOURCE_RECORDS = "llm", "label", "dependents", "records"
 
 
+def is_positive_int(v: Any) -> bool:
+    """宣言の値が正の整数か（真偽値は整数と見なさない）。"""
+    return type(v) is int and v > 0
+
+
 class EstimateError(ValueError):
     """見積の形が違う。"""
 

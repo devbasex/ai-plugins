@@ -372,9 +372,8 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
     sd = _sd(a, repo)
     decl = _declaration()
     depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
-    depths = decl["depths"] if "depths" in decl else {}
     try:
-        cfg = due_decide.settings(a.depth, depths[a.depth] if a.depth in depths else {})
+        cfg = due_decide.settings(a.depth, depth.depth_entry(decl, a.depth))
     except ValueError as exc:
         raise Stop("invalid", str(exc)) from exc
     metrics = _previous_metrics(sd)

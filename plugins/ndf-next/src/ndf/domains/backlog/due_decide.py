@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
-from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT
+from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT, is_positive_int
 
 DEFAULTS: dict[str, dict[str, int]] = {REVIEW: {"carry_factor": 10}, OVERHAUL: {"every": 4}}
 
@@ -27,7 +27,7 @@ def settings(depth: str, declared: Mapping[str, Any]) -> dict[str, int]:
     for key in out:
         if key in declared:
             v = declared[key]
-            if type(v) is not int or v <= 0:
+            if not is_positive_int(v):
                 raise ValueError(f"depths.{depth}.{key} は正の整数で書く")
             out[key] = v
     return out
