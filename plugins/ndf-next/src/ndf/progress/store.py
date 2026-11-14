@@ -493,22 +493,28 @@ def append_events(
     last = events[-1].seq if events else 0
     if last != expect_seq:
         raise Conflict(f"進行表 {table_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
-    whole = model.table_state(level, events)
-    at = now or datetime.now(UTC)
+    return _write_drafts(conn, table_id, level, events, drafts, now or datetime.now(UTC))
+
+
+def _write_drafts(
+    conn: sa.Connection, table_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
+) -> list[int]:
+    """下書きを順に書き、番号を返す。重複の鍵が既にある下書きは書かずに今の番号を返す。`events` へ書いた事象を足す。"""
     written = []
     for draft in drafts:
         known = _deduped(conn, draft.dedupe_key)
-        if known is not None:
-            written.append(known)
-            continue
-        model.check_event(level, model.rows_for(level, events, draft), whole, draft)
-        written_draft = model.recorded(level, draft)
-        last += 1
-        _insert(conn, table_id, last, written_draft, at)
-        events.append(model.Event(last, at, written_draft))
-        whole = model.table_state(level, events)
-        written.append(last)
+        written.append(known if known is not None else _write_draft(conn, table_id, level, events, draft, at))
     return written
+
+
+def _write_draft(conn: sa.Connection, table_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
+    """1 件を確かめて次の番号で書き、`events` へ足して番号を返す。"""
+    model.check_event(level, model.rows_for(level, events, draft), model.table_state(level, events), draft)
+    written_draft = model.recorded(level, draft)
+    seq = (events[-1].seq if events else 0) + 1
+    _insert(conn, table_id, seq, written_draft, at)
+    events.append(model.Event(seq, at, written_draft))
+    return seq
 
 
 def create_table(
