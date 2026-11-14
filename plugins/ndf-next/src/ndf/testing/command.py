@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
 
-from ndf import cli, identity
+from ndf import cli, identity, process_group
 from ndf.contracts import causes, result
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
@@ -74,7 +74,7 @@ def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iter
         interrupted.append(signum)
         proc = get_proc()
         if proc is not None and proc.poll() is None:
-            _signal_group(proc, signum)
+            process_group.signal_group(proc.pid, signum)
 
     previous = {sig: signal.signal(sig, forward) for sig in _FORWARDED}
     try:
@@ -112,9 +112,9 @@ def _run(command: str, wait_limit: int | None) -> int:
     kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
     with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
-        options = slots.GateOptions(interrupted=lambda: bool(interrupted))
+        options = slots.GateOptions(kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted))
         try:
-            with slots.gate(command, cwd, kind=kind, suites=[], limits=limits, options=options) as held:
+            with slots.gate(command, cwd, options=options) as held:
                 code = _run_child(command, held, interrupted, started)
         except slots.Stopped as exc:
             return _stopped_from(exc, _again(command, wait_limit))
@@ -132,29 +132,24 @@ def _run_child(command: str, held: slots.Held, interrupted: list[int], started: 
     proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec)
     started.append(proc)
     if interrupted:
-        _signal_group(proc, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
+        process_group.signal_group(proc.pid, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
     held.watch(proc)
     code = _wait(proc)
     if interrupted:
         # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
-        slots.end_group(proc)
+        process_group.stop_group(proc, grace_key=slots.STOP_TEST, send_first=False)
         raise KeyboardInterrupt  # 記録に interrupted を残す
     return code
 
 
-def _signal_group(proc: subprocess.Popen, signum: int) -> None:
-    try:
-        os.killpg(proc.pid, signum)
-    except ProcessLookupError:  # noqa: S110 外部コマンド: 子のグループが既に終わっていれば送る先が無い
-        pass
-
-
 def _wait(proc: subprocess.Popen) -> int:
+    """子の終わりを待ち、終了コードを返す。シグナルで止まった子はシェルと同じ 128 + シグナルの番号にする（負の値を返さない）。"""
     while True:
         try:
-            return proc.wait()
+            code = proc.wait()
         except InterruptedError:  # noqa: S112 外部コマンド: 子の終わりを待つ間にシグナルで割り込まれたら待ち直す
             continue
+        return 128 - code if code < 0 else code
 
 
 def _report(since: str) -> int:
