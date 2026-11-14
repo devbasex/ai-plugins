@@ -25,6 +25,7 @@ def isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def sh(cwd: Path, *args: str, strip: bool = False) -> str:
-    """git を打って標準出力を返す（テストの準備だけに使う）。`strip` なら前後の空白を除く。"""
+    """git を打って標準出力を返す（テストの準備だけに使う）。"""
+    # strip なら前後の空白を除く（_drive_world の sh だけが除いていた）
     out = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
     return out.strip() if strip else out
