@@ -35,13 +35,13 @@ def drain(state_dir: Path, token: str, channel: str) -> int:
     done = 0
     timeout = limits.seconds("notify.slack")
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    for path in sorted(box.glob("*.json")):
+    for path in sorted(box.glob("*.json")):  # noqa: NDF201 上限: 送信待ちは hook の起動 1 回につき 1 件までしか増えない
         try:
             item = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):  # noqa: S112 ファイル: 読めない通知は次の起動で読み直す
             continue
         if token and channel:
-            sent = notify.post_json(SLACK_URL, {"channel": channel, "text": message(item)}, headers, timeout)  # noqa: NDF201 上限: 送信待ちは hook の起動 1 回につき 1 件までしか増えない
+            sent = notify.post_json(SLACK_URL, {"channel": channel, "text": message(item)}, headers, timeout)
             if sent is None or not sent.get("ok"):
                 continue
         path.unlink(missing_ok=True)

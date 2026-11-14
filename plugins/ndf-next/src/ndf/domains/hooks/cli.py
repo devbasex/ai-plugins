@@ -16,11 +16,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ndf import identity
+from ndf import cli, identity
 from ndf.contracts import causes, result
 from ndf.domains.hooks import budget, metrics, tables
 
-TOOL = "hooks"
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
 SAMPLES = tables.PLUGIN_ROOT / "tests" / "domains" / "hooks" / "samples"
 # 見本で中身を残す鍵（ほかの文字列は伏せる）
 _KEEP = frozenset({"hook_event_name", "tool_name", "source", "reason", "permission_mode", "model", "matcher"})

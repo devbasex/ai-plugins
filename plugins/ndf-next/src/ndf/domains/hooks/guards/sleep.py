@@ -13,18 +13,18 @@ from ndf.domains.hooks.guards.shell import background_call, is_ndf
 from ndf.domains.hooks.verdict import Verdict, deny
 
 _DURATION = re.compile(r"^(\d+(?:\.\d+)?)([smhd]?)$")
-_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 _HELP = "条件で待つなら Monitor を、終わりを待つなら Bash の run_in_background を使う"
 
 
 def seconds(args: tuple) -> float:
     """sleep の引数の合計の秒。読めない引数は無限とみなす。"""
+    unit = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
     total = 0.0
     for arg in args:
         m = _DURATION.match(arg)
         if m is None:
             return float("inf")
-        total += float(m.group(1)) * _UNIT[m.group(2)]
+        total += float(m.group(1)) * unit[m.group(2)]
     return total
 
 

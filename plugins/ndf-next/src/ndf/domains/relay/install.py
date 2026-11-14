@@ -37,7 +37,7 @@ def status(plugin_root: Path, environ: Mapping[str, str]) -> Status:
     path = bin_dir(environ) / ENTRY_NAME
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:  # noqa: NDF401 ファイル: 読めない入口は無いものとして扱う
+    except OSError:  # 読めない入口は無いものとして扱う
         return Status(path, "absent")
     if MARK not in text:
         return Status(path, "foreign")

@@ -17,12 +17,13 @@ import os
 import sys
 from typing import Callable
 
-from ndf import identity
+from ndf import cli, identity
 from ndf.contracts import causes, limits, result
 from ndf.domains.hooks import counter
 from ndf.domains.relay import accounts, install, pending, switch_decide
 
-TOOL = "relay"
+# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
 ACCOUNT_COMMANDS = {
     "use": "子の claude を起動するアカウントを指定する",
     "show": "今選ばれるアカウント（環境変数 → 指定）を出す",

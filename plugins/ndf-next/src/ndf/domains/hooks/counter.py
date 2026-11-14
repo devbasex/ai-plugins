@@ -49,7 +49,7 @@ class Counter:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-        except OSError:  # noqa: NDF401 ファイル: 状態の置き場に書けなければ数えずに通す
+        except OSError:  # 状態の置き場に書けなければ数えずに通す
             return cls(None, _fresh(), None)
         if not signals.lock(fd, limit):
             os.close(fd)

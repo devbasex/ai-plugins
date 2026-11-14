@@ -137,12 +137,21 @@ def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
     return "report"
 
 
+def _line_json(line: str) -> Optional[dict[str, Any]]:
+    """会話の記録の 1 行。オブジェクトでなければ None（payload の解析とは別に数える）。"""
+    try:
+        data = json.loads(line)
+    except ValueError:  # noqa: NDF401 ファイル: 書きかけの行は読まない
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def context_tokens(tail: str) -> Optional[int]:
     """会話の記録の末尾から、最後の応答の文脈の量（入力の token と cache の token の和）。無ければ None。"""
     for line in reversed(tail.splitlines()):
         if '"usage"' not in line:
             continue
-        rec = parse_payload(line)
+        rec = _line_json(line)
         usage = ((rec or {}).get("message") or {}).get("usage") if rec else None  # noqa: NDF501 ファイル: 応答でない行は usage を持たない
         if isinstance(usage, dict):
             keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -237,7 +246,7 @@ class HookContext:
 
 def _last_assistant_text(tail: str) -> str:
     for line in reversed(tail.splitlines()):
-        rec = parse_payload(line) if '"assistant"' in line else None
+        rec = _line_json(line) if '"assistant"' in line else None
         message = rec.get("message") if rec else None
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
