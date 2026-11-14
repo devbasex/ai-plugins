@@ -492,9 +492,7 @@ class GitHub:
         out: dict[str, str] = {}
         for chunk in _batches(wanted):
             data = self.graphql(_visibility_query(chunk), {})
-            for i, repo in enumerate(chunk):
-                node = data[_alias(i)] if isinstance(data, dict) and _alias(i) in data else None
-                out[repo] = text_of(node["visibility"]).upper() if isinstance(node, dict) else UNKNOWN
+            out.update({repo: _visibility_of(data, i) for i, repo in enumerate(chunk)})
         return out
 
     def allowed_merge_methods(self, branch: str) -> list[str]:
@@ -570,6 +568,12 @@ def _visibility_query(repos: Sequence[str]) -> str:
         owner, name = repo.split("/", 1)
         parts.append(f"{_alias(i)}: repository(owner: {_graphql_string(owner)}, name: {_graphql_string(name)}) {{ visibility }}")
     return "query { " + " ".join(parts) + " }"
+
+
+def _visibility_of(data: Any, i: int) -> str:
+    """`_visibility_query` の応答の `i` 番目のリポジトリの公開範囲（大文字）。読めなければ `UNKNOWN`。"""
+    node = data[_alias(i)] if isinstance(data, dict) and _alias(i) in data else None
+    return text_of(node["visibility"]).upper() if isinstance(node, dict) else UNKNOWN
 
 
 def _graphql_string(value: str) -> str:
