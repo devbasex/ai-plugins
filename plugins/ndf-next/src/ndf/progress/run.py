@@ -564,15 +564,20 @@ def _retrying(call: Callable[[], invoke.StageResult], sleep: Callable[[float], N
     return res
 
 
+def _failed_with(s: stages.StageDef, step: Optional[str], rev: int, cause: dict[str, Any]) -> model.EventDraft:
+    """行を失敗にする事象の下書き（止まった理由と、止まったステップ）。"""
+    return model.EventDraft("failed", ACTOR, s.name, payload={"cause": cause, "step": step}, rev=rev)
+
+
 def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail: str) -> model.EventDraft:
-    return model.EventDraft("failed", ACTOR, s.name, payload={"cause": causes.cause(kind, detail), "step": step}, rev=rev)
+    return _failed_with(s, step, rev, causes.cause(kind, detail))
 
 
 def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> model.EventDraft:
     """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。"""
     if res.status == result.STOPPED:
         cause = res.cause if res.cause is not None else causes.cause("unknown", "作業が理由なく止まった")
-        return model.EventDraft("failed", ACTOR, s.name, payload={"cause": cause, "step": step.id}, rev=v.rev)
+        return _failed_with(s, step.id, v.rev, cause)
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref else []
     if errs:
         return _failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
