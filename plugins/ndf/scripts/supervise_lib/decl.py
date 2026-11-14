@@ -87,22 +87,27 @@ def read_decl(roots, name: str) -> dict:
     """
     for r in roots:
         f = Path(r) / ".ndf" / name
-        if not f.is_file():
-            continue
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except ValueError as e:
-            raise DeclError(f"{f}: JSON として読めない: {e}") from e
-        try:
-            schema.load_shape(Decl, d, str(f))
-        except schema.ShapeError as e:
-            raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
-        if name in setting_decl.places():
-            d, why = setting_decl.overlay_keys(r, name, d, f)
-            if why:
-                raise DeclError(why)
-        return d
+        if f.is_file():
+            return _load_decl_file(r, name, f)
     return {}
+
+
+def _load_decl_file(root, name: str, f: Path) -> dict:
+    """見つけた宣言 `f` を読み、形を確かめ、契約が別の置き場を宣言したキーを読み直す。読めないか形が違えば DeclError。"""
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise DeclError(f"{f}: JSON として読めない: {e}") from e
+    try:
+        schema.load_shape(Decl, d, str(f))
+    except schema.ShapeError as e:
+        raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
+    if name not in setting_decl.places():
+        return d
+    d, why = setting_decl.overlay_keys(root, name, d, f)
+    if why:
+        raise DeclError(why)
+    return d
 
 
 def decl_roots(worktree: str, repo: str | None = None) -> list[Path]:
