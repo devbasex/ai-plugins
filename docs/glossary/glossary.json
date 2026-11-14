@@ -7354,6 +7354,18 @@
       "context": "ndf-release",
       "meaning": "本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない",
       "pending_source": "issues/issue-3506-design.md"
+    },
+    {
+      "term": "環境ブランチ",
+      "context": "ndf-workflow",
+      "meaning": "検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request の宛先になる",
+      "pending_source": "issues/issue-3503-requirements.md"
+    },
+    {
+      "term": "短命ブランチ",
+      "context": "ndf-workflow",
+      "meaning": "環境ブランチの先端から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す",
+      "pending_source": "issues/issue-3503-requirements.md"
     }
   ]
 }
