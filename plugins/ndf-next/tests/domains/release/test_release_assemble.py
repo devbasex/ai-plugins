@@ -83,9 +83,9 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
     """現状固定（collect）: 範囲の変化から版上げの計画と承認資料の材料を返し、ブランチも PR も作らない。"""
     work = _origin_with_change(tmp_path, test_only=False)
     hub = _hub()
-    planned, facts = assemble.collect(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    facts = assemble.collect(work, hub, assemble.Target("production", "patch", "develop", "main"))
     expected = [version_decide.Planned("kit", "1.2.3", "1.2.4")]
-    assert planned == expected
+    assert list(facts.planned) == expected
     assert facts == materials_decide.Facts(
         "production",
         tuple(expected),
@@ -102,8 +102,8 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
 def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
     """現状固定（collect）: 開発版のチャネルは接尾辞の付いた次の版を計画する。"""
     work = _origin_with_change(tmp_path, test_only=False)
-    planned, facts = assemble.collect(work, _hub(), assemble.Target("dev", "minor", "develop", "main"))
-    assert planned == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")]
+    facts = assemble.collect(work, _hub(), assemble.Target("dev", "minor", "develop", "main"))
+    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")]
     assert facts.channel == "dev" and facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ()),)
 
 

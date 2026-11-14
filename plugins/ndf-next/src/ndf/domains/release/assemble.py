@@ -116,8 +116,8 @@ def _open_pr(hub: GitHub, branch: str, base: str, title: str, body: str) -> tupl
     return number, str(made["html_url"])
 
 
-def collect(root: Path, hub: GitHub, target: Target) -> tuple[list[version_decide.Planned], materials_decide.Facts]:
-    """版上げの計画と承認資料の材料（ブランチは作らない）。上げるものが無ければ `NothingToRelease`。"""
+def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
+    """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。"""
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)
     decl = decl_mod.load(root)
@@ -128,7 +128,7 @@ def collect(root: Path, hub: GitHub, target: Target) -> tuple[list[version_decid
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
     pulls = gather.pull_facts(hub, gather.included(repo_git, span))
     paths = repo_git.changed_files(span.since, span.until)
-    facts = materials_decide.Facts(
+    return materials_decide.Facts(
         target.channel,
         tuple(planned),
         tuple(pulls),
@@ -136,19 +136,18 @@ def collect(root: Path, hub: GitHub, target: Target) -> tuple[list[version_decid
         tuple(changes_decide.instruction_changes(paths)),
         repo_git.rev_parse(span.until),
     )
-    return planned, facts
 
 
 def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     """リリースのブランチを組み立てて PR を作る。"""
     repo_git = git_mod.Git(root)
-    planned, facts = collect(root, hub, target)
-    named = _named(planned, target.plugin)
+    facts = collect(root, hub, target)
+    named = _named(facts.planned, target.plugin)
     branch = version_decide.branch_of(named.next)
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0:
         raise AssembleError(f"origin に {branch} が既にある（前の組み立ての PR を先に片付ける）")
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, planned, decl_mod.load(root), facts.pulls, target.channel)
+    _write(root, facts.planned, decl_mod.load(root), facts.pulls, target.channel)
     title = f"Release: {named.plugin} v{named.next}"
     head = _commit_and_push(repo_git, branch, title)
     facts = facts._replace(head=head)

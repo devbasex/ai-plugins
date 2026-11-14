@@ -64,7 +64,7 @@ def cmd_assemble(args: argparse.Namespace) -> dict:
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
-    _planned, facts = assemble.collect(Path(args.root), _hub(args), _target(args))
+    facts = assemble.collect(Path(args.root), _hub(args), _target(args))
     text = materials_decide.render(facts)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
