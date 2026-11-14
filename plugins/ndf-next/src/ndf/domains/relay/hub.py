@@ -75,18 +75,28 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     signals.replace_json(base / "requests" / f"{rid}.json", dict(request))
-    deadline = ctx.monotonic() + ctx.hub_wait.seconds
     result = base / "results" / f"{rid}.json"
-    while True:
+
+    def answered() -> bool:
         drain(ctx)
-        if result.is_file():
-            data = json.loads(result.read_text(encoding="utf-8"))
-            result.unlink()
-            return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
+        return result.is_file()
+
+    if not _wait_until(ctx, ctx.hub_wait, answered):
+        (base / "requests" / f"{rid}.json").unlink(missing_ok=True)
+        return Outcome(False, f"リレーハブの答えを {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
+    data = json.loads(result.read_text(encoding="utf-8"))
+    result.unlink()
+    return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
+
+
+def _wait_until(ctx: Context, wait: Wait, done: Callable[[], bool]) -> bool:
+    """`done` が真になれば真、`wait.seconds` 秒を過ぎれば偽。各回の判定の後に期限を見てから `wait.interval` 秒眠る。"""
+    deadline = ctx.monotonic() + wait.seconds
+    while not done():
         if ctx.monotonic() >= deadline:
-            (base / "requests" / f"{rid}.json").unlink(missing_ok=True)
-            return Outcome(False, f"リレーハブの答えを {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
-        ctx.sleep(ctx.hub_wait.interval)
+            return False
+        ctx.sleep(wait.interval)
+    return True
 
 
 def drain(ctx: Context) -> bool:
@@ -222,11 +232,8 @@ def stop(ctx: Context, name: str) -> Outcome:
     if not registry.lock_busy(lock) and not ctx.tmux.has(name):
         return Outcome(True, f"{name} は動いていない")
     killed = ctx.tmux.kill(name)
-    deadline = ctx.monotonic() + ctx.stop_wait.seconds
-    while registry.lock_busy(lock):
-        if ctx.monotonic() >= deadline:
-            return Outcome(False, f"{name} が {ctx.stop_wait.seconds:g} 秒で終わらない（tmux: {killed.detail}）", "wait_timeout")
-        ctx.sleep(ctx.stop_wait.interval)
+    if not _wait_until(ctx, ctx.stop_wait, lambda: not registry.lock_busy(lock)):
+        return Outcome(False, f"{name} が {ctx.stop_wait.seconds:g} 秒で終わらない（tmux: {killed.detail}）", "wait_timeout")
     return Outcome(True, f"{name} を止めた")
 
 
@@ -249,9 +256,7 @@ def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
 def _confirm(ctx: Context, name: str) -> Outcome:
     """ラッパーが錠を取り、tmux のセッションが残るまで待つ。"""
     lock = registry.wrapper_dir(ctx.state_dir, name) / registry.LOCK_FILE
-    deadline = ctx.monotonic() + ctx.started.seconds
-    while not registry.lock_busy(lock) and ctx.monotonic() < deadline:
-        ctx.sleep(ctx.started.interval)
+    _wait_until(ctx, ctx.started, lambda: registry.lock_busy(lock))
     facts = hub_decide.Started(True, ctx.tmux.has(name), registry.lock_busy(lock))
     got = hub_decide.started(facts, name)
     return Outcome(got.ok, got.reason, "" if got.ok else "precondition", [{"name": name}])
