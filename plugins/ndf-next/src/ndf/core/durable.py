@@ -174,21 +174,34 @@ _held_stores: dict[Path, IO[str]] = {}
 
 
 def _redact(value: Any, secrets: list[str]) -> Any:
-    """入れ子の文字列・辞書・配列・タプル・例外の引数の中の秘密を伏せる。型（タプル・名前つきタプル・例外）は保つ。"""
-    if isinstance(value, str):
-        return run_log.redact(value, secrets)
-    if isinstance(value, dict):
-        return {k: _redact(v, secrets) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact(v, secrets) for v in value]
-    if isinstance(value, tuple):
-        items = [_redact(v, secrets) for v in value]
-        return type(value)(*items) if hasattr(value, "_fields") else tuple(items)
-    if isinstance(value, BaseException):
-        masked = copy.copy(value)
-        masked.args = _redact(value.args, secrets)
-        return masked
+    """入れ子の文字列・辞書・配列・タプル・例外の引数の中の秘密を伏せる。型（タプル・名前つきタプル・例外）は保つ。
+
+    型ごとの伏せ方は `_REDACTORS` の並びの順に isinstance で引く（子の型も親の型の伏せ方で伏せる）。どれにも当たらなければそのまま。
+    """
+    for kind, redact in _REDACTORS:
+        if isinstance(value, kind):
+            return redact(value, secrets)
     return value
+
+
+def _redact_tuple(value: tuple, secrets: list[str]) -> tuple:
+    items = [_redact(v, secrets) for v in value]
+    return type(value)(*items) if hasattr(value, "_fields") else tuple(items)
+
+
+def _redact_exception(value: BaseException, secrets: list[str]) -> BaseException:
+    masked = copy.copy(value)
+    masked.args = _redact(value.args, secrets)
+    return masked
+
+
+_REDACTORS: tuple[tuple[type, Callable[[Any, list[str]], Any]], ...] = (
+    (str, run_log.redact),
+    (dict, lambda value, secrets: {k: _redact(v, secrets) for k, v in value.items()}),
+    (list, lambda value, secrets: [_redact(v, secrets) for v in value]),
+    (tuple, _redact_tuple),
+    (BaseException, _redact_exception),
+)
 
 
 def _serializer_class(base: type) -> type:
