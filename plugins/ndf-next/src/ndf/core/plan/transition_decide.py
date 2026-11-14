@@ -131,9 +131,14 @@ def _policy(step: Step, kind: str) -> Optional[limits.Policy]:
     return step.retry[kind] if kind in step.retry else causes.policy_of(kind)
 
 
+def _used(state: StepState, step_id: str, kind: str) -> int:
+    """ステップ `step_id` を種類 `kind` で打ち直した回数。"""
+    key = _retry_key(step_id, kind)
+    return state.retries[key] if key in state.retries else 0
+
+
 def _retry_state(step: Step, state: StepState, done: Outcome) -> routing.RetryState:
-    key = _retry_key(step.id, done.kind)
-    used = state.retries[key] if key in state.retries else 0
+    used = _used(state, step.id, done.kind)
     cap = limits.seconds(USAGE_WAIT_MAX) if done.kind == USAGE_LIMIT else None
     return routing.RetryState(used, _policy(step, done.kind), done.retry_after, cap)
 
@@ -161,8 +166,7 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
     state = _chose(state, Choice(rule, chosen.SCRIPT, step.id, _taken(route, bool(state.prelude)), kind))
     detail = f"ステップ {step.id} が {kind} で止まった"
     if route.to == routing.RETRY:
-        key = _retry_key(step.id, kind)
-        retries = {**state.retries, key: (state.retries[key] if key in state.retries else 0) + 1}
+        retries = {**state.retries, _retry_key(step.id, kind): _used(state, step.id, kind) + 1}
         return Next.step(Sleep(step.id, route.wait), replace(state, retries=retries, kind=kind))
     if route.to == routing.END:
         return _finish(state, OK, None, None)
