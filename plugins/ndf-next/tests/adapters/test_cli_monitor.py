@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters import cli
+from ndf.contracts import limits
 
 POLL = 0.05
 
@@ -118,7 +119,7 @@ def test_child_receives_run_id(tmp_path):
 
 def test_stall_seconds_falls_back_to_default():
     assert cli.stall_seconds("codex") == 180
-    assert cli.stall_seconds("unknown-agent") == cli.limits.seconds("monitor.stall-default")
+    assert cli.stall_seconds("unknown-agent") == limits.seconds("monitor.stall-default")
 
 
 def test_stop_ends_process_group():

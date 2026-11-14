@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ndf.adapters import cli
+from ndf.adapters import agents, cli
 
 # 偽の kiro-cli: cli-agents の x.json を書き換え、x.json.bak を残す
 FAKE_KIRO = (
@@ -72,7 +72,7 @@ def test_restore_failure_keeps_backup_and_reports(tmp_path, monkeypatch):
     def broken(*_args):
         raise OSError("書けない")
 
-    monkeypatch.setattr(cli, "_restore", broken)
+    monkeypatch.setattr(agents, "_restore", broken)
     status = cli.run_agent(kiro(work, tmp_path), poll=0.05)
 
     assert status.restore == "restore_failed"
