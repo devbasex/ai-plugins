@@ -702,7 +702,7 @@ def test_merge_when_green_readies_draft_before_merge(repo, gh):
     assert code == 0, (out, err)
     assert [i for i in out["items"] if i["kind"] == "pr"] == [
         {"kind": "pr", "name": "#5", "result": "ready"},
-        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge", "head": "a"},
+        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge", "head": "a", "admin": True},
     ]
     calls = [c[:2] for c in gh.get()["calls"] if c[0] == "pr" and c[1] in ("ready", "merge")]
     assert calls == [["pr", "ready"], ["pr", "merge"]]
