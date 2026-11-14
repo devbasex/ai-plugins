@@ -61,7 +61,33 @@ env:
   CHECK_BUDGET: "3600"
 
 jobs:
+  branches:
+    # 宣言 .ndf/worktree.json のベースブランチと本番ブランチを 1 か所で読み、後のジョブへ渡す。
+    # 起動するのは後のジョブのどれかが動く出来事だけ（証跡の判定の条件はここが持つ）。読む宣言は、組み立ては起動した
+    # コミット、マージと証跡の判定は既定ブランチのもの
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && vars.NDF_RELEASE_RUNNER == 'ndf-next' &&
+       github.event.issue.pull_request &&
+       (contains(github.event.comment.body, ':release-approval -->') ||
+        contains(github.event.changes.body.from, ':release-approval -->')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.read.outputs.base }}
+      production: ${{ steps.read.outputs.production }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ (inputs.step == 'assemble' && github.sha) || github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: read
+        run: |
+          echo "base=$(jq -r '.base_branch // "develop"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
+          echo "production=$(jq -r '.production_branch // "main"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
+
   assemble:
+    needs: branches
     if: github.event_name == 'workflow_dispatch' && inputs.step == 'assemble'
     runs-on: ubuntu-latest
     timeout-minutes: 80
@@ -79,10 +105,6 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: plugins/ndf-next/uv.lock
-      - id: branches
-        run: |
-          echo "base=$(jq -r '.base_branch // "develop"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
-          echo "production=$(jq -r '.production_branch // "main"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
       - id: build
         name: Assemble the release branch and the pull request
         env:
@@ -93,8 +115,8 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           CHANNEL: ${{ inputs.channel }}
           LEVEL: ${{ inputs.level }}
-          BASE: ${{ steps.branches.outputs.base }}
-          PRODUCTION: ${{ steps.branches.outputs.production }}
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: |
           set -o pipefail
           "$NDF" release-steps assemble --root . --channel "$CHANNEL" --level "$LEVEL" \
@@ -105,11 +127,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.build.outputs.pr }}
-          BASE: ${{ steps.branches.outputs.base }}
-          PRODUCTION: ${{ steps.branches.outputs.production }}
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: '"$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION"'
 
   merge:
+    needs: branches
     if: github.event_name == 'workflow_dispatch' && inputs.step == 'merge'
     runs-on: ubuntu-latest
     timeout-minutes: 80
@@ -132,20 +155,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr }}
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: |
           case "$PR" in ''|*[!0-9]*) echo "PR の番号でない: $PR"; exit 2;; esac
-          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" \
-            --base "$(jq -r '.base_branch // "develop"' .ndf/worktree.json)" \
-            --production "$(jq -r '.production_branch // "main"' .ndf/worktree.json)"
+          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION"
 
   approval:
     # 証跡の印を含むコメントの作成・編集・削除だけで起動する。編集は前の本文も見る（印を消した編集でも判定し直す）。
-    # 判定とマージは既定ブランチの定義と中身で動き、PR のコードは取り出さない
-    if: >-
-      github.event_name == 'issue_comment' && vars.NDF_RELEASE_RUNNER == 'ndf-next' &&
-      github.event.issue.pull_request &&
-      (contains(github.event.comment.body, ':release-approval -->') ||
-       contains(github.event.changes.body.from, ':release-approval -->'))
+    # 判定とマージは既定ブランチの定義と中身で動き、PR のコードは取り出さない。印・変数・PR の条件は branches が持つ
+    needs: branches
+    if: github.event_name == 'issue_comment'
     runs-on: ubuntu-latest
     timeout-minutes: 80
     permissions:
@@ -168,19 +188,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.issue.number }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: |
-          production=$(jq -r '.production_branch // "main"' .ndf/worktree.json)
-          "$NDF" release-steps approval-check --root . --pr "$PR" --production "$production" | tee "$RUNNER_TEMP/check.json" || true
+          "$NDF" release-steps approval-check --root . --pr "$PR" --production "$PRODUCTION" | tee "$RUNNER_TEMP/check.json" || true
           echo "state=$(tail -n 1 "$RUNNER_TEMP/check.json" | jq -r '.outputs.state // ""')" >> "$GITHUB_OUTPUT"
       - name: Merge the approved release
         if: steps.check.outputs.state == 'approved'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.issue.number }}
-        run: |
-          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" \
-            --base "$(jq -r '.base_branch // "develop"' .ndf/worktree.json)" \
-            --production "$(jq -r '.production_branch // "main"' .ndf/worktree.json)"
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: '"$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION"'
 
   publish:
     if: github.event_name == 'push' && vars.NDF_RELEASE_RUNNER == 'ndf-next'
