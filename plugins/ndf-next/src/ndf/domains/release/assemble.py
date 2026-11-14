@@ -10,6 +10,10 @@
    PR の本文に書く
 
 ブランチの名前の版は、版を上げるプラグインのうち `--plugin` で渡したもの（省けば登録の順の先頭）の版である。
+
+本番のリリースは、本番ブランチ宛ての別のリリースの PR（head が `release/v` で始まるかベースブランチ）が開いている
+間は組まずに `ReleaseOpen` で止まる（同じリポジトリの別の組み立てと版数・ブランチがぶつからない。閉じた後に打ち直せば
+組む。#2441）。
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from datetime import date
 from pathlib import Path
 
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import GitHub
+from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import changelog_decide, changes_decide, gather, materials_decide, version_decide
 from ndf.domains.release import declaration as decl_mod
@@ -29,6 +33,10 @@ from ndf.domains.release import plugins as plugins_mod
 
 class NothingToRelease(Exception):
     """版を上げるプラグインが無い。"""
+
+
+class ReleaseOpen(Exception):
+    """本番ブランチ宛ての別のリリースの PR が開いている（閉じるまで組まない）。"""
 
 
 class AssembleError(Exception):
@@ -82,6 +90,19 @@ def _named(planned: Sequence[version_decide.Planned], plugin: str | None) -> ver
     return hit[0]
 
 
+def open_releases(hub: GitHub, target: Target) -> list[int]:
+    """本番ブランチ宛ての開いているリリースの PR（head が `release/v` で始まるかベースブランチ）の番号。
+
+    1 ページ（`PER_PAGE` 件）で読み切れなければ、確かめられないとして `AssembleError`。
+    """
+    rows = hub.rest("GET", f"/repos/{hub.repo}/pulls", params={"state": "open", "base": target.production, "per_page": PER_PAGE})
+    found = rows if isinstance(rows, list) else []
+    if len(found) >= PER_PAGE:
+        raise AssembleError(f"{target.production} 宛ての開いている PR が {PER_PAGE} 件以上あり、リリースの PR の有無を確かめられない")
+    heads = [(int(r["number"]), text_of(r["head"]["ref"])) for r in found if isinstance(r, dict)]
+    return sorted(n for n, ref in heads if ref.startswith(version_decide.BRANCH_PREFIX) or ref == target.base)
+
+
 def _write(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts) -> None:
     """版・CHANGELOG を書き換え、宣言の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
@@ -117,7 +138,12 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
     found = plugins_mod.load(root)
     paths = repo_git.changed_files(span.since, span.until)
     change_list = gather.changes(paths, found, decl)
-    planned = gather.plan_bumps(root, found, change_list, decl, target.level, target.channel)
+    planned = gather.clear_shipped(
+        gather.plan_bumps(root, found, change_list, decl, target.level, target.channel),
+        gather.shipped(repo_git, found, span.since),
+        target.level,
+        target.channel,
+    )
     if not planned:
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
     pulls = gather.pull_facts(hub, gather.included(repo_git, span, target.production))
@@ -150,6 +176,11 @@ def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     span = _span(repo_git, target)
     repo_git.run("switch", "--quiet", "--detach", span.until)
     facts = _facts(root, hub, target, span)
+    if target.is_production:
+        opened = open_releases(hub, target)
+        if opened:
+            listed = ", ".join(f"#{n}" for n in opened)
+            raise ReleaseOpen(f"{target.production} 宛てのリリースの PR {listed} が開いている（閉じた後に打ち直す）")
     named = _named(facts.planned, target.plugin)
     branch = version_decide.branch_of(named.next)
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0:
