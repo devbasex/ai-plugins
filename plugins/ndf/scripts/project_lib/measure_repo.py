@@ -240,12 +240,16 @@ def _pyproject_tool_deps(c: dict) -> dict[str, str]:
 
 
 def _requirements_deps(tree: Tree) -> dict[str, str]:
-    """requirements*.txt の依存。同じ名前は先に出た行を採る。"""
+    """requirements*.txt の依存。同じ名前は先に出た行を採る。
+
+    オプションの行（`-r`・`-e`・`--extra-index-url` など `-` で始まる行）と URL の行はライブラリの名前を持たないので読まない。"""
     out: dict[str, str] = {}
     for f in tree.shallow("requirements*.txt"):
         for line in (tree.read(f) or "").splitlines():
+            if line.lstrip().startswith("-"):
+                continue
             name = re.split(r"[\s<>=!~\[;#]", line.strip(), 1)[0].lower()
-            if name:
+            if name and "://" not in name:
                 out.setdefault(name, line.strip())
     return out
 
