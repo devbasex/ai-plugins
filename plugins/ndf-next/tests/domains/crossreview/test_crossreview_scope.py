@@ -41,7 +41,7 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
         state / store.STATE_NAME.format(pr=8),
         {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], cli.REVIEWED: ["issues/d.md#設計", A]},
     )
-    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "main"]
+    base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     assert cli.main([*base, "--purpose", "design"]) == 0
     item = last_result(capsys.readouterr().out)["items"][0]
     assert (item["scope"], item["unreviewed"]) == (scope_decide.FULL, [B])

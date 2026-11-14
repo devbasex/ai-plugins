@@ -34,7 +34,7 @@ class Repos:
     other: Path
 
     def add_worktree(self, path: Path) -> Path:
-        sh(self.main, "worktree", "add", "-q", "-B", BRANCH, str(path), f"origin/{BRANCH}")
+        sh(self.main, "worktree", "add", "-q", "-B", f"review/{path.name}", str(path), f"origin/{BRANCH}")
         return path
 
 
