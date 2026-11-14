@@ -66,7 +66,7 @@ def _cmd_next(a: argparse.Namespace) -> int:
     cwd = Path.cwd()
     try:
         with runner.plan_lock(runner.state_dir_of(Path(a.plan), a.state_dir, cwd)):
-            inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, _pairs(a.sets, "--set"), a.fresh)
+            inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, runner.RunOptions(_pairs(a.sets, "--set"), a.fresh))
             return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

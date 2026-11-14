@@ -63,8 +63,20 @@ class RunChoice(NamedTuple):
     round_no: int
 
 
-def _same_plan(record: Mapping[str, Any], name: str, digest: str, start: Optional[str]) -> bool:
-    return record.get("name") == name and record.get("digest") == digest and record.get("start") == start
+class RunPlan(NamedTuple):
+    """回を分けるプランの側の値: プランの名前・中身の要約・開始点。"""
+
+    name: str
+    digest: str
+    start: Optional[str]
+
+    def key(self, head: Optional[str], round_no: int) -> str:
+        """head と回の番号を添えた実行の回の鍵（`run_key`）。"""
+        return run_key(self.name, self.digest, self.start, head, round_no)
+
+
+def _same_plan(record: Mapping[str, Any], plan: RunPlan) -> bool:
+    return record.get("name") == plan.name and record.get("digest") == plan.digest and record.get("start") == plan.start
 
 
 def _never_taken(_key: str) -> bool:
@@ -73,16 +85,14 @@ def _never_taken(_key: str) -> bool:
 
 def choose_run(
     record: Optional[Mapping[str, Any]],
-    name: str,
-    digest: str,
-    start: Optional[str],
+    plan: RunPlan,
     head: Optional[str],
     finished: bool,
     *,
     fresh: bool = False,
     taken: Callable[[str], bool] = _never_taken,
 ) -> RunChoice:
-    """前の回の記録 `record`（`run.json`）から、今回の実行の鍵を選ぶ。
+    """前の回の記録 `record`（`run.json`）から、`plan`（名前・中身・開始点）の今回の実行の鍵を選ぶ。
 
     同じプラン・開始点の回が終わっていなければ同じ鍵で続ける（承認ゲートの待ちから回復する。B2）。終わっていても、
     head が回の初めか終わりの head と同じなら同じ鍵（終わった結果を返す。B4）。head が違えば次の回の鍵（#3176）。
@@ -91,14 +101,14 @@ def choose_run(
     `fresh` なら前の回を続けず、次の番号から数えて `taken`（耐久の記録の置き場に鍵の記録があるか）が偽になる最初の
     番号の鍵を選ぶ。`record` が無くても（状態の置き場を消した後でも）前の回の鍵に戻らない（#1592）。
     """
-    if not fresh and record is not None and _same_plan(record, name, digest, start):
+    if not fresh and record is not None and _same_plan(record, plan):
         if not finished or head is None or head in record["heads"]:
             return RunChoice(record["key"], record["round"])
     first = record["round"] + 1 if record is not None else 0
     if not fresh:
-        return RunChoice(run_key(name, digest, start, head, first), first)
-    round_no = next(n for n in itertools.count(first) if not taken(run_key(name, digest, start, head, n)))
-    return RunChoice(run_key(name, digest, start, head, round_no), round_no)
+        return RunChoice(plan.key(head, first), first)
+    round_no = next(n for n in itertools.count(first) if not taken(plan.key(head, n)))
+    return RunChoice(plan.key(head, round_no), round_no)
 
 
 def fill(args: Sequence[str], values: Mapping[str, str]) -> list[str]:

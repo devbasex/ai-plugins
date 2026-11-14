@@ -270,7 +270,7 @@ def test_prepare_a_fresh_plan(in_repo):
 
 def test_prepare_with_start_state_dir_and_sets(in_repo):
     rel = H.write_plan(in_repo, "p", [H.py_step("a", "pass"), H.py_step("b", "pass")])
-    inv = runner.prepare(_root(in_repo), Path(rel), "b", "st", in_repo, {"b": "2", "a": "1"})
+    inv = runner.prepare(_root(in_repo), Path(rel), "b", "st", in_repo, runner.RunOptions({"b": "2", "a": "1"}))
     plan = model.load(in_repo / rel)
     assert inv.state_dir == in_repo / "st"
     assert inv.digest == assemble_decide.run_digest(plan.digest(), {"a": "1", "b": "2"})
@@ -313,7 +313,7 @@ def test_prepare_refuses_an_unknown_start(in_repo):
 def test_prepare_refuses_sets_that_override_fixed_values(in_repo):
     rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
     with pytest.raises(model.PlanError, match="^差し込みの値 plan, repo は上書きできない$"):
-        runner.prepare(_root(in_repo), Path(rel), None, None, in_repo, {"repo": "x", "plan": "y", "ok": "z"})
+        runner.prepare(_root(in_repo), Path(rel), None, None, in_repo, runner.RunOptions({"repo": "x", "plan": "y", "ok": "z"}))
 
 
 def _write_record(sdir: Path, **record) -> None:
@@ -380,7 +380,7 @@ def test_prepare_fresh_skips_a_recorded_round(in_repo):
     dbos.mkdir(parents=True)
     (dbos / f"{durable.run_name(assemble_decide.run_key('p', digest, None, head, 4))}{durable.DB_SUFFIX}").touch()
     assert runner.prepare(root, Path(rel), None, None, in_repo).key == "K"
-    inv = runner.prepare(root, Path(rel), None, None, in_repo, fresh=True)
+    inv = runner.prepare(root, Path(rel), None, None, in_repo, runner.RunOptions(fresh=True))
     assert (inv.key, inv.round_no) == (assemble_decide.run_key("p", digest, None, head, 5), 5)
     assert "--fresh" not in inv.again
 

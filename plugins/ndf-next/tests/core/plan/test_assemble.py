@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.core.plan.assemble_decide import choose_run, fill, run_key, state_dir_for, workdir_for
+from ndf.core.plan.assemble_decide import RunPlan, choose_run, fill, run_key, state_dir_for, workdir_for
 
 
 def test_state_dir_is_absolute_for_a_relative_plan_path():
@@ -41,21 +41,21 @@ def _record(**kw):
 
 def test_choose_run_keeps_the_key_while_the_round_is_running():
     """承認ゲートで待つ回は、head が動いても同じ鍵で続ける（B2）。"""
-    assert choose_run(_record(), "p", "d", None, "h9", finished=False) == ("K", 0)
+    assert choose_run(_record(), RunPlan("p", "d", None), "h9", finished=False) == ("K", 0)
 
 
 def test_choose_run_keeps_a_finished_key_for_the_same_head():
     """終わった回を同じ head で打ち直すと同じ鍵（retired/ の結果を返す。B4）。"""
-    assert choose_run(_record(heads=["h1", "h2"]), "p", "d", None, "h2", finished=True) == ("K", 0)
+    assert choose_run(_record(heads=["h1", "h2"]), RunPlan("p", "d", None), "h2", finished=True) == ("K", 0)
 
 
 def test_choose_run_starts_a_new_round_for_a_fixed_head():
-    choice = choose_run(_record(), "p", "d", None, "h9", finished=True)
+    choice = choose_run(_record(), RunPlan("p", "d", None), "h9", finished=True)
     assert choice == (run_key("p", "d", None, "h9", 1), 1)
 
 
 def test_choose_run_starts_a_new_round_for_another_start():
-    choice = choose_run(_record(), "p", "d", "pr", "h1", finished=False)
+    choice = choose_run(_record(), RunPlan("p", "d", "pr"), "h1", finished=False)
     assert choice.round_no == 1
     assert choice.key != "K"
 
@@ -82,7 +82,7 @@ def test_workdir_falls_back_to_the_repo_root(place, worktree, repo, usable, expe
 def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():
     """`--fresh` は終わっていない回も続けず、耐久の記録の置き場に無い番号を選ぶ（#1592）。"""
     taken = {run_key("p", "d", None, "h1", 1)}
-    assert choose_run(_record(), "p", "d", None, "h1", finished=False, fresh=True, taken=taken.__contains__) == (
+    assert choose_run(_record(), RunPlan("p", "d", None), "h1", finished=False, fresh=True, taken=taken.__contains__) == (
         run_key("p", "d", None, "h1", 2),
         2,
     )
@@ -91,5 +91,5 @@ def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():
 def test_choose_run_fresh_without_a_record_does_not_return_to_the_old_key():
     """状態の置き場を消して `record` が無くても、記録の残る番号 0 の鍵に戻らない（#1592）。"""
     taken = {run_key("p", "d", None, "h1", 0)}
-    choice = choose_run(None, "p", "d", None, "h1", finished=False, fresh=True, taken=taken.__contains__)
+    choice = choose_run(None, RunPlan("p", "d", None), "h1", finished=False, fresh=True, taken=taken.__contains__)
     assert choice == (run_key("p", "d", None, "h1", 1), 1)
