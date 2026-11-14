@@ -165,40 +165,6 @@ def _local_tests_route(request, monkeypatch):
         monkeypatch.setattr(module, "ci_only", lambda a: False)
 
 
-_OWN_WORKTREE_DECL = Path(__file__).resolve().parents[4] / ".ndf" / "worktree.json"
-
-
-@pytest.fixture(autouse=True)
-def _own_branch_flow_off(monkeypatch):
-    """このリポジトリのブランチ運用の宣言（`.ndf/worktree.json` の `branch_flow`）を、宣言を持たない仮のリポジトリの
-    テストへ漏らさない（#3119）。
-
-    宣言の探し先（`decl.decl_roots`）は最後に作業ディレクトリを読み、テストはこのリポジトリの根で動くため、仮のリポジトリに
-    宣言が無いとこのリポジトリの宣言を拾う。読んだ宣言がこのリポジトリのものと一致するときだけ、宣言が無いものとして読む。
-    仮のリポジトリに書いた宣言は一致しないので、そのまま読む。子プロセスで起こした supervise には効かない。"""
-    try:
-        own = json.loads(_OWN_WORKTREE_DECL.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return
-    scripts = Path(__file__).resolve().parents[1]
-    for p in (str(scripts), str(scripts / "lib")):
-        if p not in sys.path:
-            monkeypatch.syspath_prepend(p)
-    import importlib
-
-    flow = importlib.import_module("branch_flow")
-    if flow.DECL_KEY not in own:
-        return
-    original = flow.of_decl
-
-    def of_decl(wt):
-        if wt == own:
-            wt = {k: v for k, v in wt.items() if k != flow.DECL_KEY}
-        return original(wt)
-
-    monkeypatch.setattr(flow, "of_decl", of_decl)
-
-
 @pytest.fixture(autouse=True)
 def _isolated_whole_runs(tmp_path_factory, monkeypatch):
     """全体テストの実測の記録（#1631）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""

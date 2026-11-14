@@ -213,15 +213,14 @@ uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto
    ```bash
    rm -rf plugins/{plugin-name}
    ```
-3. `main` から切った作業ブランチでコミットし、スプリントブランチ（`sprint/<名前>`）宛の Pull Request を作成
-   （`main` / `develop` へ直接 push しない。規則は [AGENTS.md](../AGENTS.md) の「Git運用ルール」）
+3. 作業ブランチでコミットし、`develop` 宛の Pull Request を作成（`main` / `develop` へ直接
+   push しない。規則は [AGENTS.md](../AGENTS.md) の「Git運用ルール」）
    ```bash
-   git fetch origin
-   git checkout -b feature/remove-{plugin-name} origin/main
+   git checkout -b feature/remove-{plugin-name}
    git add .claude-plugin/marketplace.json plugins/{plugin-name}
    git commit -m "Update: {plugin-name} をマーケットプレイスから外す"
    git push origin feature/remove-{plugin-name}
-   gh pr create --base sprint/<名前>
+   gh pr create --base develop
    ```
 
 ## 検証とテスト

@@ -32,13 +32,6 @@ def sprint_args(tmp_path: Path, pace: str = "normal", issues=("11", "12"), desig
     args += ["--version", "10.18.0-dev.1", "--out", str(tmp_path / "m")]
     if pace != "normal":
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
-    if pace == "fast":
-        # このリポジトリの宣言は fast と組めない取り込み方（selected）を持つ。子プロセスには conftest の fixture が効かない
-        # ため、作業場所に branch_flow を除いた宣言を置いて先に読ませる
-        own = json.loads((REPO / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
-        own.pop("branch_flow", None)
-        (tmp_path / ".ndf").mkdir(exist_ok=True)
-        (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(own), encoding="utf-8")
     return args, (repo if pace != "fast" else REPO)
 
 

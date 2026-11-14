@@ -39,9 +39,8 @@ cd ai-plugins
 
 **規則の本体は [AGENTS.md](./AGENTS.md) の「Git運用ルール」にあります。** 要点だけを挙げます。
 
-- ブランチは `main` から切ります。Pull Request の宛先は、保守者が課題に示すスプリントブランチ（`sprint/<名前>`）です。
-  既定ブランチが `main` のため、`gh pr create` には `--base sprint/<名前>` を付けます。`develop` は正式版へ流れないため、
-  `develop` 宛の変更は正式版に届きません
+- Pull Request の宛先は `develop` です。既定ブランチが `main` のため、`gh pr create` には
+  `--base develop` を付けます
 - `main` と `develop` へ直接コミットしません
 - ブランチ名は `feature/<名前>` / `fix/<名前>` / `docs/<名前>` の形にします
 - 変更は `.worktrees/<ブランチ名>` の worktree の中で行います。clone したディレクトリを
@@ -51,7 +50,7 @@ worktree の用意は次のコマンドで行えます。
 
 ```bash
 git fetch origin
-git worktree add -b feature/<名前> .worktrees/feature/<名前> origin/main
+git worktree add -b feature/<名前> .worktrees/feature/<名前> origin/develop
 cd .worktrees/feature/<名前>
 ```
 
@@ -125,13 +124,13 @@ git -c blame.ignoreRevsFile= blame <ファイル>
 
 ### 一括の整形の前から続くブランチを取り込む
 
-そのまま `main` を取り込むと、触ったファイルが整形の差で衝突します。次の順で取り込むと、衝突は
+そのまま `develop` を取り込むと、触ったファイルが整形の差で衝突します。次の順で取り込むと、衝突は
 自分の変更だけに残ります。
 
 ```bash
 git fetch origin
-AUTOFIX=$(git show origin/main:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 1p)
-FORMAT=$(git show origin/main:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 2p)
+AUTOFIX=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 1p)
+FORMAT=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 2p)
 
 # 1. 一括の自動修正の直前まで取り込む（検査の設定と scripts/check-lint.sh が入る）
 git merge "$AUTOFIX^"
@@ -143,14 +142,14 @@ git commit -am "Refactor: 一括の整形（#1323）に合わせて整形する"
 # 3. 一括の整形を取り込む。両側とも同じツールの出力なので、衝突は自分の側を採る
 git merge -X ours "$FORMAT"
 
-# 4. 残りの main をふつうに取り込む（ここで出る衝突は、ふつうの衝突として解く）
-git merge origin/main
+# 4. 残りの develop をふつうに取り込む（ここで出る衝突は、ふつうの衝突として解く）
+git merge origin/develop
 
 # 5. 自分の変更に残る違反を直して、0 で終わるまで繰り返す
 bash scripts/check-lint.sh
 ```
 
-**`-X ours` は 3 の 1 回だけに使います。** 4 で使うと、一括の整形の後に `main` へ入った手の修正を、
+**`-X ours` は 3 の 1 回だけに使います。** 4 で使うと、一括の整形の後に `develop` へ入った手の修正を、
 衝突した箇所で捨てます。
 
 ## コミットメッセージ
@@ -190,7 +189,7 @@ Skill 執筆規約の「上限値」にあります。
 ## Pull Request を出す
 
 1. 手元での検証の 5 つを通します
-2. `--base sprint/<名前>` を付けて Pull Request を作ります。名前は課題に示されたものです
+2. `--base develop` を付けて Pull Request を作ります
 3. 本文に、変更の要約・関連する issue・検証した手段と結果・影響するランタイムを書きます
 4. 継続的統合の結果を確かめます
 
