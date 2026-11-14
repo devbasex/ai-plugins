@@ -266,7 +266,7 @@ def apply_decls(a) -> None:
     if not a.production_branch and roots and a.kind in USES_PRODUCTION:
         # 既定ブランチは、まだ作っていない worktree ではなく存在する木から解く（#2097 の決定 1）
         a.production_branch = repo.production_branch(repo.first_git_tree(roots), wt)[0]
-    if a.kind == "release" and not (isinstance(getattr(a, "flow", None), dict) and a.flow):
+    if a.kind == "release" and _pinned_flow(a) is None:
         a.flow = flow_snapshot(a, *production_flow_decl(a, roots))
     else:
         a.flow = flow_snapshot(a, wt)
@@ -280,14 +280,21 @@ def apply_decls(a) -> None:
 FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
 
 
+def _pinned_flow(a) -> dict | None:
+    """引数に既にあるブランチ運用のスナップショット（空でない dict）。無ければ `None`。"""
+    flow = getattr(a, "flow", None)
+    return flow if isinstance(flow, dict) and flow else None
+
+
 def flow_snapshot(a, wt: dict, where: str = FLOW_SOURCE, why: str | None = None) -> dict:
     """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあればそれを使う。
     スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。
 
     `where` は読んだ宣言の場所（出所の欄と DeclError の文言に載せる）。`why` があれば宣言を読めなかった理由で、
     既定値の行で組む（#3308 の I2）。"""
-    if isinstance(getattr(a, "flow", None), dict) and a.flow:
-        return a.flow
+    pinned = _pinned_flow(a)
+    if pinned is not None:
+        return pinned
     if why:
         flow, source = branch_flow.of_decl({}), f"既定値（{why}）"
     else:
