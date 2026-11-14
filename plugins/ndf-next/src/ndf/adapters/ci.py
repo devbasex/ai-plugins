@@ -313,25 +313,39 @@ class Watch:
     def run(self) -> WatchResult:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
-        interval, start, rounds = float(policy.interval), self.started, 0
+        interval, rounds = float(policy.interval), 0
         while True:
-            reading = self.reader()
             rounds += 1
-            now = self.clock()
-            elapsed = now - start
-            if self.on_round is not None:
-                self.on_round(reading, elapsed)
-            if reading.verdict != Verdict.PENDING or (self.decided is not None and self.decided(reading)):
-                return WatchResult(reading, rounds, elapsed, self._queued)
+            reading, now, done = self._round(rounds)
+            if done is not None:
+                return done
             wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
-                exhausted = reading.only_queued and self._queued >= runner_cap
-                return WatchResult(reading, rounds, elapsed, self._queued, exhausted)
+                return self._exhausted_result(reading, rounds, now, runner_cap)
             self.sleep(wait)
             if reading.only_queued:
                 # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
                 self._queued += max(self.clock() - now, wait)
             interval = min(interval * float(policy.factor), float(policy.max_interval))
+
+    def _round(self, rounds: int) -> tuple[Reading, float, Optional[WatchResult]]:
+        """1 周（`rounds` 周目）: 読み、経過の秒を `on_round` へ渡し、結論が出た（か `decided` が真）なら結果を返す。
+
+        返すのは読んだ結果・読んだ時刻・待ちを終える結果（読み直すなら None）。
+        """
+        reading = self.reader()
+        now = self.clock()
+        elapsed = now - self.started
+        if self.on_round is not None:
+            self.on_round(reading, elapsed)
+        if reading.verdict != Verdict.PENDING or (self.decided is not None and self.decided(reading)):
+            return reading, now, WatchResult(reading, rounds, elapsed, self._queued)
+        return reading, now, None
+
+    def _exhausted_result(self, reading: Reading, rounds: int, now: float, runner_cap: float) -> WatchResult:
+        """待ちが上限に達したときの結果。ランナーの割り当ての待ちだけで上限を超えたら `runner_exhausted`。"""
+        exhausted = reading.only_queued and self._queued >= runner_cap
+        return WatchResult(reading, rounds, now - self.started, self._queued, exhausted)
 
     def _next_wait(self, reading: Reading, interval: float, now: float, runner_cap: float) -> float:
         """時刻 `now` から次に眠る秒。上限までの残りに縮める。0 以下なら上限に達した。"""
