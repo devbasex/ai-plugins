@@ -33,7 +33,10 @@ class CycleError(ValueError):
 
 @dataclass(frozen=True)
 class Board:
-    """1 回の算出の入力。`issues` は open の課題 {番号: {"milestone": 題名 | None, "labels": [...], "created_at": ...}}。"""
+    """1 回の算出の入力。`issues` は open の課題 {番号: {"milestone": 題名 | None, "labels": [...], "created_at": ...}}。
+
+    `sized` は見積もりの記録から Size を決めた課題（表の行の Size の出どころ）。
+    """
 
     issues: dict[int, dict[str, Any]]
     estimates: dict[int, model.Estimate]
@@ -43,6 +46,7 @@ class Board:
     edges: frozenset[Edge] = frozenset()
     rejected: tuple[dict[str, Any], ...] = ()
     approved: frozenset[int] = frozenset()
+    sized: frozenset[int] = frozenset()
 
 
 def _of(table: dict[int, Any], n: int) -> list[int]:
@@ -366,7 +370,7 @@ def _milestone_out(board: Board, rows: dict[int, Row], place: dict[int, Optional
             "cod": r.cod,
             "value": r.value,
             "waiting_decision": r.waiting_decision,
-            "sources": r.sources,
+            "sources": {**r.sources, "size": model.SOURCE_RECORDS if r.number in board.sized else model.SOURCE_LLM},
             **({"quality_slot": r.number in marked} if quality is not None else {}),
         }  # fmt: skip
         for k, r in enumerate(ranked, 1)

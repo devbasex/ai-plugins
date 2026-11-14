@@ -40,7 +40,6 @@ from ndf.domains.backlog import (
     settle,
     settle_decide,
     state,
-    table_decide,
 )
 from ndf.domains.backlog import tables as tables_mod
 from ndf.domains.backlog import selection_decide as sel
@@ -197,7 +196,8 @@ def _rank_board(
     order = rank_decide.milestone_order({i["milestone"] for i in issues if i["milestone"]}, a.milestones)
     raws = [*given.values(), *(v for v in stored.values() if isinstance(v, dict))]
     board = rank_decide.Board(by_num, ests, cfg, order, sub_issues=rank_decide.sub_issues_of(issues), edges=rank_decide.dependency_edges(raws, issues),
-                              rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved))  # fmt: skip
+                              rejected=tuple(state.read(sd, "backlog-rejected", [])), approved=frozenset(a.approved),
+                              sized=frozenset(sized))  # fmt: skip
     kept = {**stored, **{str(n): {**given[n], "number": n} for n in ests if n in given}}
     return board, excluded, kept, sized
 
@@ -211,8 +211,6 @@ def cmd_rank(a: argparse.Namespace) -> dict[str, Any]:
         got = rank_decide.compute(board)
     except rank_decide.CycleError as exc:
         raise Stop("invalid", str(exc), [{"number": n} for n in exc.numbers]) from exc
-    for row in (r for t in got["milestones"] for r in t["rows"]):
-        row["sources"]["size"] = table_decide.SIZE_ESTIMATE if row["number"] in sized else "llm"
     metrics = {"repo": repo, "depth": a.depth, "order": board.order, "forward": got["forward"], "backward": got["backward"],
                "dropped": got["dropped"], "rejected_stale": got["rejected_stale"], "excluded": excluded, "sized": sized}  # fmt: skip
     metrics["digest"] = model.stable_digest({"metrics": metrics, "milestones": got["milestones"]})

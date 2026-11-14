@@ -25,6 +25,8 @@ OVER_SCALE = "over"
 STEPS = ("ubv", "tc", "rr_oe")
 COLUMN_NAMES = {"ubv": "UBV", "tc": "TC", "rr_oe": "RR/OE", "size": "Size"}
 DIGEST_CHARS = 16
+# 行の段階の出どころ（Row.sources の値）: 見積・ラベルの下限・被依存の数・見積もりの記録
+SOURCE_LLM, SOURCE_LABEL, SOURCE_DEPENDENTS, SOURCE_RECORDS = "llm", "label", "dependents", "records"
 
 
 class EstimateError(ValueError):
@@ -147,14 +149,14 @@ class Row:
 
 def score(est: Estimate, labels: list[str], released: int, cfg: Config) -> Row:
     """実効の段階・CoD・順位の値。ラベルの下限と被依存の対応表は上げる向きにだけ効く。"""
-    ubv, ubv_src = est.ubv, "llm"
+    ubv, ubv_src = est.ubv, SOURCE_LLM
     floor = cfg.label_step(labels)
     if floor is not None and floor > ubv:
-        ubv, ubv_src = floor, "label"
-    rr, rr_src = est.rr_oe, "llm"
+        ubv, ubv_src = floor, SOURCE_LABEL
+    rr, rr_src = est.rr_oe, SOURCE_LLM
     by_deps = cfg.dependents_step(released)
     if by_deps > rr:
-        rr, rr_src = by_deps, "dependents"
+        rr, rr_src = by_deps, SOURCE_DEPENDENTS
     size = cfg.scale[-1] if est.over else int(est.size)
     cod = ubv + est.tc + rr
     value = round(cod / math.pow(size, cfg.size_exponent), 9)

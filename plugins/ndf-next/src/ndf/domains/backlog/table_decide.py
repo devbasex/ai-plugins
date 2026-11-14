@@ -9,11 +9,10 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from ndf.domains.backlog.model import SLOT_NONE, SLOT_SPLIT
+from ndf.domains.backlog.model import SLOT_NONE, SLOT_SPLIT, SOURCE_DEPENDENTS, SOURCE_LABEL, SOURCE_RECORDS
 
 HEADING = "### 順位"
 _UPPER_HEADING = re.compile(r"^#{1,3} ", re.MULTILINE)
-SIZE_ESTIMATE = "records"
 
 
 def _section_span(desc: str) -> Optional[tuple[int, int]]:
@@ -58,9 +57,9 @@ def slot_text(slot: dict[str, Any]) -> str:
 
 def _row_line(r: dict[str, Any]) -> str:
     issue = f"#{r['number']}" + ("（判断待ち）" if r["waiting_decision"] else "")
-    ubv = f"{r['ubv']}" + ("（ラベル）" if r["sources"]["ubv"] == "label" else "")
-    rr = f"{r['rr_oe']}" + ("（被依存）" if r["sources"]["rr_oe"] == "dependents" else "")
-    size = f"{r['size']}" + ("（見積もり）" if r["sources"].get("size") == SIZE_ESTIMATE else "")
+    ubv = f"{r['ubv']}" + ("（ラベル）" if r["sources"]["ubv"] == SOURCE_LABEL else "")
+    rr = f"{r['rr_oe']}" + ("（被依存）" if r["sources"]["rr_oe"] == SOURCE_DEPENDENTS else "")
+    size = f"{r['size']}" + ("（見積もり）" if r["sources"].get("size") == SOURCE_RECORDS else "")
     return f"| {r['rank']} | {issue} | {ubv} | {r['tc']} | {rr} | {size} | {r['cod']} | {r['value']:.1f} |"
 
 
