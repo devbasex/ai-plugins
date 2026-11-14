@@ -125,6 +125,9 @@ def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
         lambda g, v: g.changed_files(v, "main"),
         lambda g, v: g.changed_lines(v, "main"),
         lambda g, v: g.remote_repo(v),
+        lambda g, v: g.log_of(v, "-1", "--format=%ct"),
+        lambda g, v: g.log_of(f"{v}..HEAD", "--format=%s"),
+        lambda g, v: g.diff_between(v, "HEAD", "--no-renames", "-U0"),
     ],
 )
 def test_ref_that_starts_with_a_dash_is_not_read_as_an_option(tmp_path: Path, call) -> None:
@@ -134,6 +137,26 @@ def test_ref_that_starts_with_a_dash_is_not_read_as_an_option(tmp_path: Path, ca
     with pytest.raises(git.GitError):
         call(git.Git(cwd=repo), f"--output={planted}")
     assert not planted.exists()
+
+
+def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path) -> None:
+    # 3364-7: `--force` は option なら手元の変更を捨てて HEAD を外す。ref として読めば失敗し、変更も HEAD も残る
+    repo, _ = _init_repo(tmp_path, {"a.txt": "a\n"})
+    (repo / "a.txt").write_text("手元の変更\n")
+    assert git.Git(cwd=repo).checkout_detached("--force").returncode != 0
+    assert (repo / "a.txt").read_text() == "手元の変更\n"
+    assert _git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+
+
+def test_checkout_detached_and_merge_ff_put_the_ref_after_end_of_options() -> None:
+    runner = _fake()
+    g = git.Git(runner=runner)
+    g.checkout_detached("abc")
+    g.merge_ff("origin/develop")
+    assert runner.calls == [
+        ["checkout", "-q", "--detach", "--end-of-options", "abc"],
+        ["merge", "--ff-only", "-q", "--end-of-options", "origin/develop"],
+    ]
 
 
 def test_has_ref_and_fetch_do_not_read_a_dash_value_as_an_option(tmp_path: Path) -> None:

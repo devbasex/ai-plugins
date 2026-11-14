@@ -30,8 +30,8 @@ ORIGIN = "origin"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
-# （diff・log・rev-parse）は `END_OF_OPTIONS`（git 2.24 以降）を ref の前に置き、ならないもの（merge-base・
-# show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
+# （diff・log・rev-parse・checkout）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
+# 前に置き、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
 END_OF_OPTIONS = "--end-of-options"
 
 
@@ -186,6 +186,22 @@ class Git:
     def has_ref(self, ref: str) -> bool:
         """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
         return self._probe("参照", "show-ref", "--verify", "--quiet", "--", ref)
+
+    def log_of(self, rev: str, *options: str) -> str:
+        """`git log <options> <rev>` の標準出力。`rev` は ref か範囲（`a..b`）で、option として読ませない（3364-7）。"""
+        return self.run("log", *options, END_OF_OPTIONS, rev)
+
+    def diff_between(self, a: str, b: str, *options: str) -> str:
+        """`git diff <options> <a> <b>` の標準出力。`a`・`b` を option として読ませない（3364-7）。"""
+        return self.run("diff", *options, END_OF_OPTIONS, a, b)
+
+    def checkout_detached(self, ref: str) -> Completed:
+        """`ref` へ detached HEAD で移る。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
+        return self.attempt("checkout", "-q", "--detach", END_OF_OPTIONS, ref)
+
+    def merge_ff(self, ref: str) -> Completed:
+        """`ref` を fast-forward だけで取り込む。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
+        return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。
