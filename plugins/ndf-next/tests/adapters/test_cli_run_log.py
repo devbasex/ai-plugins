@@ -12,6 +12,7 @@ import pytest
 
 from ndf.adapters import cli, run_log
 from ndf.contracts import limits
+from ndf.contracts import result as results
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
@@ -156,6 +157,7 @@ def test_finish_writes_end_and_stops_when_record_failed(capsys):
     log.sink.path = log.path.parent / "gone" / "x.jsonl"
     stopped, code = log.finish(obj, 0)
     assert stopped["status"] == "stopped" and code != 0
+    assert stopped["original_result"] == obj and results.errors(stopped, code) == []
     assert "実行の記録に書けない" in capsys.readouterr().err
 
 

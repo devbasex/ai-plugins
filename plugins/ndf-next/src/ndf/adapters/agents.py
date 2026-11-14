@@ -257,7 +257,8 @@ def watch(proc: subprocess.Popen, spec: Launch, poll: Optional[float] = None) ->
         if verdict is not None:
             break
         time.sleep(interval)
-    if code is None:
+    # CLI が自力で終えても、組に残った子孫（SIGTERM を無視する Tool・常駐の子）は後続の工程と並ばないよう止める
+    if code is None or _group_alive(proc):
         stop(proc)
     state, detail = verdict
     return AgentStatus(spec.agent, state, proc.poll(), detail, tuple(sorted(w.warned.kinds)))
@@ -272,11 +273,20 @@ def _start(spec: Launch) -> subprocess.Popen:
         )
 
 
+def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
+    """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。"""
+    try:
+        proc = _start(spec)
+    except OSError as exc:
+        return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", ())
+    return watch(proc, spec, poll)
+
+
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。"""
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
-        status = watch(_start(spec), spec, poll)
+        status = _start_and_watch(spec, poll)
     record("agent", agent=spec.agent, state=status.state, exit=status.exit_code, warnings=list(status.warnings))
     return status._replace(restore=kept.get("restore"))
 
@@ -314,9 +324,35 @@ class _AgentsBackup:
     before_bak: frozenset[str]
 
 
+def _remove(path: Path) -> None:
+    """リンクは辿らずにリンクだけを消し、ディレクトリは中身ごと消す。"""
+    if path.is_symlink() or not path.is_dir():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
+def _clear_replaced(backup: Path, agents: Path) -> None:
+    """戻す先で、起動の間に種類が変わったもの（リンクへの置き換え・ファイルとディレクトリの入れ替え）を消す。
+
+    消さずに写すと、写しがリンクを辿ってリンク先（worktree の外の利用者のファイル）を控えの中身で上書きする。
+    """
+    pairs = [(backup, agents)]
+    while pairs:
+        src, dst = pairs.pop()
+        if not (dst.is_symlink() or dst.exists()):
+            continue
+        # リンクは控えの側でも戻す先でも作り直す（写しはリンクのある場所へ書けない）
+        if dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir():
+            _remove(dst)
+        elif src.is_dir():
+            pairs.extend((child, dst / child.name) for child in src.iterdir())
+
+
 def _restore(backed: _AgentsBackup) -> None:
     if backed.backup.is_dir():
-        shutil.copytree(backed.backup, backed.agents, dirs_exist_ok=True)
+        _clear_replaced(backed.backup, backed.agents)
+        shutil.copytree(backed.backup, backed.agents, symlinks=True, dirs_exist_ok=True)
     if backed.agents.is_dir():
         for p in backed.agents.glob("*.bak"):
             if p.name not in backed.before_bak:
@@ -356,7 +392,7 @@ def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
     _keep_unrestored(backup)
     before_bak = frozenset(p.name for p in agents.glob("*.bak")) if agents.is_dir() else frozenset()
     if agents.is_dir():
-        shutil.copytree(agents, backup)
+        shutil.copytree(agents, backup, symlinks=True)
     return _AgentsBackup(agents, backup, before_bak)
 
 

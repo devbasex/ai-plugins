@@ -235,11 +235,16 @@ class RunLog:
             print(reason, file=sys.stderr)
 
     def finish(self, obj: dict[str, Any], code: int) -> tuple[dict[str, Any], int]:
-        """終わりの行に結果の全体と終了コードを書く。記録に書けなかった実行は結果を stopped にする。"""
+        """終わりの行に結果の全体と終了コードを書く。記録に書けなかった実行は結果を stopped にする。
+
+        置き換えた結果は本体の元の結果を `original_result` に持つ（#2338 の決定 3）。操作済みの PR の番号などを
+        呼ぶ側が読めるようにし、操作のやり直しによる二重の作成を防ぐ。
+        """
         self.write("end", result=obj, exit=code)
         if self.failed is None:
             return obj, code
         stopped = result.stopped(self.entry, "precondition", self.failed)
+        stopped["original_result"] = obj
         return stopped, causes.exit_code("precondition")
 
 

@@ -101,3 +101,18 @@ def test_other_agents_are_not_guarded(tmp_path):
 
     assert status.restore is None
     assert (work / ".amazonq" / "cli-agents" / "x.json.bak").exists()
+
+
+def test_restore_does_not_follow_links_kiro_swapped_in(tmp_path):
+    work = worktree(tmp_path)
+    outside = tmp_path / "user-file.json"
+    outside.write_text("利用者のファイル")
+    swap = f"from pathlib import Path\np = Path('.amazonq/cli-agents/x.json')\np.unlink()\np.symlink_to({str(outside)!r})\n"
+    spec = cli.Launch("kiro", (sys.executable, "-c", swap), work, cli.AgentPaths.at(tmp_path / "run" / "kiro"), 30)
+
+    status = cli.run_agent(spec, poll=0.05)
+
+    x = work / ".amazonq" / "cli-agents" / "x.json"
+    assert status.restore == "restored"
+    assert outside.read_text() == "利用者のファイル"
+    assert not x.is_symlink() and x.read_text() == '{"original": true}'

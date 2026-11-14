@@ -185,6 +185,40 @@ def test_stop_kills_descendants_that_outlive_the_cli(tmp_path):
     assert proc.poll() is not None and not _running(pid)
 
 
+def test_descendants_left_by_a_finished_cli_are_stopped(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = (
+        "import os, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+        "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+        "time.sleep(60)\n"
+    )
+    parent = (
+        "import os, subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, {str(pid_file)!r}])\n"
+        f"while not os.path.exists({str(pid_file)!r}):\n"
+        "    time.sleep(0.05)\n"
+    )
+
+    status = cli.run_agent(launch(tmp_path, parent), poll=POLL)
+
+    pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while _running(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert status.state == "done" and not _running(pid)
+
+
+def test_start_failure_is_a_failed_status(tmp_path):
+    spec = cli.Launch("codex", (str(tmp_path / "no-such-cli"),), tmp_path, cli.AgentPaths.at(tmp_path / "run" / "codex"), 30)
+
+    status = cli.run_agent(spec, poll=POLL)
+
+    assert (status.state, status.exit_code) == ("failed", None)
+    assert status.detail.startswith("起動できない")
+
+
 def test_call_claude_timeout_kills_descendants(tmp_path):
     pid_file = tmp_path / "pid"
     child = (
