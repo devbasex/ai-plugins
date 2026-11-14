@@ -126,3 +126,26 @@ def test_cli_watch_rate_limit_is_infra_wait(
     assert ci_cli.main(ARGS) == causes.exit_code("infra_wait")
     out = last_result(capsys.readouterr().out)
     assert out["cause"]["kind"] == "infra_wait" and out["cause"]["retry_after"] > 0
+
+
+def test_cli_watch_lists_missing_and_stale_checks_with_test_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    # 現れない必須のチェック（missing）と、結論の無いまま終わったチェック（stale）を、テストのチェックかどうかとともに items へ並べる
+    done_at = "2026-11-12T13:33:00Z"
+    runs = [
+        run("CI / pytest (0/2)", status="in_progress", completed_at=done_at, rid=1),
+        run("W / lint", status="in_progress", completed_at=done_at, rid=2),
+    ]
+    _serve(monkeypatch, runs)
+    argv = ["watch", "--pr", "7", "--repo", REPO, "--test", "pytest", "--budget", "60"]
+    argv += [a for name in ("pytest", "lint", "pytest (1/2)", "doc-lint") for a in ("--required", name)]
+    code = ci_cli.main(argv)
+    out = last_result(capsys.readouterr().out)
+    assert (code, out["status"], out["cause"]["kind"]) == (causes.exit_code("precondition"), "stopped", "precondition")
+    assert out["items"] == [
+        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
+        {"kind": "check", "name": "pytest (1/2)", "result": "missing", "test": True},
+        {"kind": "check", "name": "CI / pytest (0/2)", "result": "stale", "test": True},
+        {"kind": "check", "name": "W / lint", "result": "stale", "test": False},
+    ]
