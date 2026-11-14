@@ -109,45 +109,61 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
     return None if reason is None else queue_decide.Outcome(entry.plan.name, STOPPED, "precondition", reason)
 
 
-def _run_wave(
-    wave: list[Entry], prior: list[queue_decide.Outcome], cwd: Path, order: list[str], done: dict[str, queue_decide.Outcome]
-) -> list[queue_decide.Outcome]:
-    """組のプランを並べて流し、結果を組の並びで返す。"""
-    started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
-    for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
-        sets, refused = _sets(entry, prior)
-        refused = refused if refused is not None else _needs_blocked(entry, order, done)
-        if refused is not None:
-            started.append((entry, None, refused))
-            continue
-        proc = subprocess.Popen(_child_args(entry, sets), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        started.append((entry, proc, None))
-    return [early if proc is None else _read_child(entry, proc) for entry, proc, early in started]
+class _QueueExecution:
+    """1 回のキューの実行の状態。`done` は流した・止めたプランの結果、`prior` は前の段までの結果（段を流し終えてから足す）。"""
+
+    def __init__(self, stages: list[list[Entry]], qdir: Path, cwd: Path, resume: bool) -> None:
+        self.qdir = qdir
+        self.cwd = cwd
+        self.recorded = _recorded(qdir) if resume else {}
+        self.order = [e.plan.name for stage in stages for e in stage]
+        self.done: dict[str, queue_decide.Outcome] = {}
+        self.prior: list[queue_decide.Outcome] = []
+
+    def run(self, stages: list[list[Entry]]) -> list[queue_decide.Outcome]:
+        for stage in stages:
+            self._run_stage(stage)
+        return [self.done[name] for name in self.order]
+
+    def _run_stage(self, stage: list[Entry]) -> None:
+        """段を組ごとに流す。前の段が止まっていれば流さずに、段のプランを status が None の結果にする。"""
+        reason = queue_decide.stage_blocked(self.prior, all(e.plan.accepts_gate for e in stage)) if self.prior else None
+        if reason is not None:
+            self.done.update({e.plan.name: queue_decide.Outcome(e.plan.name, None, None, reason) for e in stage})
+            return
+        current: list[queue_decide.Outcome] = []
+        for names in queue_decide.waves([queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]):
+            current += self._run_group(stage, names)
+        self.prior += current
+
+    def _run_group(self, stage: list[Entry], names: list[str]) -> list[queue_decide.Outcome]:
+        """組を流し、各結果を `queue.json` へ書いてから `done` に載せる。結果を組の並びで返す。"""
+        wave = [e for e in stage if e.plan.name in names]
+        kept = {e.plan.name: _from_record(e.plan.name, self.recorded[e.plan.name]) for e in wave if _finished(self.recorded, e)}
+        todo = [e for e in wave if e.plan.name not in kept]
+        outs = dict(kept) | {o.name: o for o in self._launch(todo)}
+        for name in names:
+            _record(self.qdir, outs[name])
+            self.done[name] = outs[name]
+        return [outs[name] for name in names]
+
+    def _launch(self, wave: list[Entry]) -> list[queue_decide.Outcome]:
+        """組のプランを並べて流し、すべて起動してから結果を組の並びで回収する。"""
+        started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
+        for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
+            sets, refused = _sets(entry, self.prior)
+            refused = refused if refused is not None else _needs_blocked(entry, self.order, self.done)
+            if refused is not None:
+                started.append((entry, None, refused))
+                continue
+            proc = subprocess.Popen(_child_args(entry, sets), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            started.append((entry, proc, None))
+        return [early if proc is None else _read_child(entry, proc) for entry, proc, early in started]
 
 
 def run(stages: list[list[Entry]], qdir: Path, cwd: Path, resume: bool) -> list[queue_decide.Outcome]:
     """段ごとに流し、すべてのプランの結果をキューの並びで返す。流さなかったプランは status が None。"""
-    recorded = _recorded(qdir) if resume else {}
-    order = [e.plan.name for stage in stages for e in stage]
-    done: dict[str, queue_decide.Outcome] = {}
-    prior: list[queue_decide.Outcome] = []
-    for stage in stages:
-        reason = queue_decide.stage_blocked(prior, all(e.plan.accepts_gate for e in stage)) if prior else None
-        if reason is not None:
-            done.update({e.plan.name: queue_decide.Outcome(e.plan.name, None, None, reason) for e in stage})
-            continue
-        current: list[queue_decide.Outcome] = []
-        for names in queue_decide.waves([queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]):
-            wave = [e for e in stage if e.plan.name in names]
-            kept = {e.plan.name: _from_record(e.plan.name, recorded[e.plan.name]) for e in wave if _finished(recorded, e)}
-            todo = [e for e in wave if e.plan.name not in kept]
-            outs = dict(kept) | {o.name: o for o in _run_wave(todo, prior, cwd, order, done)}
-            for name in names:
-                _record(qdir, outs[name])
-                done[name] = outs[name]
-                current.append(outs[name])
-        prior += current
-    return [done[name] for name in order]
+    return _QueueExecution(stages, qdir, cwd, resume).run(stages)
 
 
 def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:
