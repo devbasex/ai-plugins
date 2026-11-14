@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 from ndf.domains.hooks import cli, metrics
@@ -45,6 +46,34 @@ def test_prune_removes_days_older_than_the_window(tmp_path):
     assert metrics.prune(tmp_path, 14, now) == 2
     left = sorted(p.name for p in (tmp_path / "hooks").glob("*.jsonl"))
     assert left == ["2026-10-31.jsonl", "2026-11-01.jsonl", "2026-11-14.jsonl", "other.jsonl"]
+
+
+def test_prune_state_removes_old_notes_sessions_and_queued_notices(tmp_path):
+    hooks = tmp_path / "hooks"
+    old, fresh = 0.0, 100 * 86400.0
+    paths = {
+        "note": hooks / "notes" / "a.md",
+        "session": hooks / "sessions" / "s-1.json",
+        "queued": hooks / "outbox" / "0" / "1.json",
+        "lock": hooks / "outbox" / "0" / ".sender.lock",
+        "new_note": hooks / "notes" / "b.md",
+    }
+    for name, path in paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        at = fresh if name == "new_note" else old
+        os.utime(path, (at, at))
+    assert metrics.prune_state(tmp_path, 14, now=fresh) == 3
+    assert [n for n, p in paths.items() if p.exists()] == ["lock", "new_note"]
+
+
+def test_session_start_prunes_the_state_files(tmp_path, monkeypatch):
+    pruned = []
+    monkeypatch.setattr(metrics, "prune_state", lambda *a, **k: pruned.append(a) or 0)
+    call_entry("claude", "Stop", stop(tmp_path, "完了"))
+    assert pruned == []
+    call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
+    assert len(pruned) == 1 and pruned[0][1] == 14
 
 
 def test_metrics_write_failure_does_not_change_the_verdict(tmp_path, monkeypatch):

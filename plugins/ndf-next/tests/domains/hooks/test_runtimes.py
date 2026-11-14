@@ -121,7 +121,8 @@ def test_capture_redacts_and_writes_a_sample(tmp_path):
         "transcript_path": "/home/me/.claude/x.jsonl",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "export TOKEN=abc && gh pr merge 1"},
+        "tool_input": {"command": "export TOKEN=abc && gh pr merge 1", "reason": "secret-reason", "source": "secret-src"},
+        "tool_response": [{"model": "user text", "session_id": "ab12"}],
     }
     path = cli.capture("claude", "9.9.9", "PreToolUse", raw, root=tmp_path)
     got = json.loads(path.read_text(encoding="utf-8"))
@@ -129,6 +130,9 @@ def test_capture_redacts_and_writes_a_sample(tmp_path):
     assert got["session_id"] == "00000000-0000-0000-0000-000000000000"
     assert got["cwd"] == "<cwd>" and got["transcript_path"] == "<transcript>"
     assert got["tool_input"]["command"] == "<text>" and got["tool_name"] == "Bash"
+    # 入れ子の中の同名の鍵は伏せる（原文を残すのはトップレベルの既知のメタデータだけ）
+    assert got["tool_input"]["reason"] == "<text>" and got["tool_input"]["source"] == "<text>"
+    assert got["tool_response"] == [{"model": "<text>", "session_id": "<text>"}]
 
 
 def test_capture_command_refuses_unknown_events(monkeypatch, capsys):

@@ -22,6 +22,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,8 @@ from typing import List, Mapping, Optional
 from ndf.domains.hooks import tables
 
 LAST_USED = ".last-used"
+# 環境の置き場の名前（`lock_hash` の形）
+_HASH_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 @dataclass(frozen=True)
@@ -192,9 +195,12 @@ def _kept_hashes(ident: Ident) -> set:
     return kept
 
 
-def _last_used(path: Path) -> float:
-    stamp = path / LAST_USED
-    return (stamp if stamp.exists() else path).stat().st_mtime
+def _managed(path: Path) -> bool:
+    """この仕組みが作った環境か（名前が lock の hash の形で、`.last-used` の目印を持つ）。
+
+    `bin/ndf` が同じ親の下に作る版の名前の環境は、目印も排他も無いので消さない。
+    """
+    return path.is_dir() and _HASH_RE.match(path.name) is not None and (path / LAST_USED).is_file()
 
 
 def prune(ident: Ident, now: float) -> List[Path]:
@@ -206,7 +212,7 @@ def prune(ident: Ident, now: float) -> List[Path]:
     candidates = [
         d
         for d in sorted(ident.venv_root.iterdir())
-        if d.is_dir() and not d.name.startswith(".") and d.name not in kept and now - _last_used(d) > keep_seconds
+        if _managed(d) and d.name not in kept and now - (d / LAST_USED).stat().st_mtime > keep_seconds
     ]
     removed = []
     for path in candidates:

@@ -81,6 +81,42 @@ def test_multiline_quoted_text_does_not_split_the_command(tmp_path):
     assert _check(repo, 'echo "a\nb" && gh pr merge 3') is not None
 
 
+def test_pull_request_url_naming_another_repository_is_judged_by_that_repository(tmp_path):
+    # 手動の宣言の作業ディレクトリから、URL で別のリポジトリの本番マージを打っても通さない
+    repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
+    got = _check(repo, "gh pr merge https://github.com/other/production/pull/1 --merge")
+    assert got is not None and "other/production" in got.reason
+    assert _check(repo, "gh pr merge https://github.com/owner/repo/pull/1 --merge") is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if true; then gh pr merge 1 --merge; fi",
+        "for i in 1; do gh pr merge $i; done",
+        "bash -c 'gh pr merge 1'",
+        "sh -lc 'cd . && gh pr merge 1'",
+        "eval 'gh pr merge 1'",
+        "echo 1 | xargs gh pr merge",
+        "env -i gh pr merge 1",
+        "sudo -u x gh pr merge 1",
+        'echo "$(gh pr merge 1)"',
+        "echo `gh pr merge 1`",
+    ],
+)
+def test_merges_inside_control_words_wrappers_and_inner_scripts_are_denied(tmp_path, command):
+    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    got = _check(repo, command)
+    assert got is not None and got.kind == "deny"
+
+
+def test_heredoc_bodies_are_not_read_as_commands(tmp_path):
+    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    message = "git commit -m \"$(cat <<'EOF'\nfix: `gh pr merge` を止める\ndon't\nEOF\n)\""
+    assert _check(repo, message) is None
+    assert _check(repo, "cat <<'EOF'\nx\nEOF\ngh pr merge 3") is not None
+
+
 def test_other_tools_and_events_are_not_judged(tmp_path):
     repo = make_repo(tmp_path / "r", delivery=AUTO)
     payload = bash(repo, "gh pr merge 1")

@@ -58,7 +58,7 @@ def test_notifications_are_queued_and_the_sender_is_started_detached(tmp_path, m
     monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
     payload = sample("claude", "PreToolUse", tmp_path, tool_name="AskUserQuestion", tool_input={"questions": [{"question": "進めるか"}]})
     call_entry("claude", "PreToolUse", payload)
-    files = list(outbox.outbox_dir(state_dir()).glob("*.json"))
+    files = list(outbox.outbox_dir(state_dir(), {"SLACK_BOT_TOKEN": "x", "SLACK_CHANNEL_ID": "C1"}).glob("*.json"))
     assert len(files) == 1 and json.loads(files[0].read_text(encoding="utf-8"))["payload"]["text"] == "進めるか"
     ((args, kwargs),) = spawned
     assert args[-2:] == [outbox.SENDER_MODULE, str(state_dir())] and kwargs["start_new_session"] is True
@@ -69,27 +69,68 @@ def test_pushback_limit_queues_a_wait_notice(tmp_path, monkeypatch, spawned):
     monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
     for _ in range(3):
         call_entry("claude", "Stop", stop(tmp_path, "どちらにしますか？"))
-    items = [json.loads(p.read_text(encoding="utf-8")) for p in outbox.outbox_dir(state_dir()).glob("*.json")]
+    box = outbox.outbox_dir(state_dir(), {"SLACK_BOT_TOKEN": "x", "SLACK_CHANNEL_ID": "C1"})
+    items = [json.loads(p.read_text(encoding="utf-8")) for p in box.glob("*.json")]
     assert [i["kind"] for i in items] == ["wait"]
 
 
-def test_kick_does_not_start_a_second_sender(tmp_path, spawned):
-    box = outbox.outbox_dir(tmp_path)
-    box.mkdir(parents=True)
-    import os
+DEST = {"SLACK_BOT_TOKEN": "t", "SLACK_CHANNEL_ID": "C"}
 
-    (box / outbox.PID_FILE).write_text(str(os.getpid()), encoding="utf-8")
-    assert outbox.kick(tmp_path) is False and spawned == []
-    (box / outbox.PID_FILE).write_text("999999999", encoding="utf-8")
-    assert outbox.kick(tmp_path) is True and len(spawned) == 1
+
+def test_kick_does_not_start_a_second_sender(tmp_path, spawned):
+    box = outbox.outbox_dir(tmp_path, DEST)
+    fd = outbox.try_lock(box)
+    assert fd is not None
+    try:
+        assert outbox.kick(tmp_path, DEST) is False and spawned == []
+    finally:
+        outbox.release(fd)
+    assert outbox.kick(tmp_path, DEST) is True and len(spawned) == 1
 
 
 def test_sender_drops_without_slack_and_keeps_failed_sends(tmp_path, monkeypatch):
-    outbox.enqueue(tmp_path, "wait", {"text": "a"})
-    assert sender.drain(tmp_path, "", "") == 1 and not list(outbox.outbox_dir(tmp_path).glob("*.json"))
-    outbox.enqueue(tmp_path, "wait", {"text": "b"})
+    bare = outbox.outbox_dir(tmp_path, {})
+    outbox.enqueue(tmp_path, "wait", {"text": "a"}, {})
+    assert sender.drain(bare, "", "") == 1 and not list(bare.glob("*.json"))
+    box = outbox.outbox_dir(tmp_path, DEST)
+    outbox.enqueue(tmp_path, "wait", {"text": "b"}, DEST)
     monkeypatch.setattr(sender.notify, "post_json", lambda *a, **k: None)
-    assert sender.drain(tmp_path, "t", "C") == 0 and len(list(outbox.outbox_dir(tmp_path).glob("*.json"))) == 1
+    assert sender.drain(box, "t", "C") == 0 and len(list(box.glob("*.json"))) == 1
     sent = []
     monkeypatch.setattr(sender.notify, "post_json", lambda url, body, headers, timeout: sent.append(body) or {"ok": True})
-    assert sender.drain(tmp_path, "t", "C") == 1 and sent[0]["channel"] == "C" and "b" in sent[0]["text"]
+    assert sender.drain(box, "t", "C") == 1 and sent[0]["channel"] == "C" and "b" in sent[0]["text"]
+
+
+def test_queues_are_kept_per_destination(tmp_path, monkeypatch):
+    # プロジェクト A の宛先で残った通知を、プロジェクト B の接続で起動した送り手が送らない
+    other = {"SLACK_BOT_TOKEN": "t-b", "SLACK_CHANNEL_ID": "C-B"}
+    outbox.enqueue(tmp_path, "question", {"text": "A の問い"}, DEST)
+    sent = []
+    monkeypatch.setattr(sender.notify, "post_json", lambda url, body, headers, timeout: sent.append((headers, body)) or {"ok": True})
+    assert sender.run(tmp_path, other) == 0 and sent == []
+    assert sender.run(tmp_path, DEST) == 1 and sent[0][1]["channel"] == "C" and sent[0][0]["Authorization"] == "Bearer t"
+
+
+def test_sender_does_not_send_while_another_holds_the_lock(tmp_path, monkeypatch):
+    outbox.enqueue(tmp_path, "wait", {"text": "a"}, DEST)
+    monkeypatch.setattr(sender.notify, "post_json", lambda *a, **k: pytest.fail("錠を持たない送り手が送った"))
+    fd = outbox.try_lock(outbox.outbox_dir(tmp_path, DEST))
+    try:
+        assert sender.run(tmp_path, DEST) == 0
+    finally:
+        outbox.release(fd)
+
+
+def test_sender_reads_the_queue_again_after_releasing_the_lock(tmp_path, monkeypatch):
+    # 送っている間に届いた通知（その kick は走っている送り手を見て起動しない）も、同じ送り手が送る
+    outbox.enqueue(tmp_path, "wait", {"text": "first"}, DEST)
+    sent = []
+
+    def post(url, body, headers, timeout):
+        sent.append(body["text"])
+        if len(sent) == 1:
+            outbox.enqueue(tmp_path, "wait", {"text": "second"}, DEST)
+        return {"ok": True}
+
+    monkeypatch.setattr(sender.notify, "post_json", post)
+    assert sender.run(tmp_path, DEST) == 2 and ["first" in sent[0], "second" in sent[1]] == [True, True]

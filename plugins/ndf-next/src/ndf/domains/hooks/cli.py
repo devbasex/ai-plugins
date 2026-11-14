@@ -23,24 +23,39 @@ from ndf.domains.hooks import budget, metrics, tables
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 SAMPLES = tables.PLUGIN_ROOT / "tests" / "domains" / "hooks" / "samples"
-# 見本で中身を残す鍵（ほかの文字列は伏せる）
+# 見本で中身を残すトップレベルの鍵（ほかの文字列と、入れ子の中の同名の鍵は伏せる）
 _KEEP = frozenset({"hook_event_name", "tool_name", "source", "reason", "permission_mode", "model", "matcher"})
 _ID_KEYS = frozenset({"session_id", "turn_id", "tool_use_id", "prompt_id"})
 _PLACEHOLDER = {"cwd": "<cwd>", "transcript_path": "<transcript>"}
 _VERSION_RE = re.compile(r"^\d+(\.\d+){1,3}$")
 
 
-def redact(value: Any, key: str = "") -> Any:
-    """見本に書く形。識別子は 0 に、作業ディレクトリと会話の記録のパスは置き換え、ほかの文字列は伏せる。"""
-    if isinstance(value, dict):
-        return {k: redact(v, k) for k, v in value.items()}
-    if isinstance(value, list):
-        return [redact(v, key) for v in value]
-    if not isinstance(value, str) or key in _KEEP:
+def redact(payload: Any) -> Any:
+    """見本に書く形。トップレベルの識別子は 0 に、作業ディレクトリと会話の記録のパスは置き換え、既知のメタデータだけを残す。
+
+    `tool_input`・`tool_response` などの入れ子の中は、鍵の名前によらず文字列をすべて伏せる。
+    """
+    if not isinstance(payload, dict):
+        return _hide(payload)
+    return {k: _top(k, v) for k, v in payload.items()}
+
+
+def _top(key: str, value: Any) -> Any:
+    if not isinstance(value, str):
+        return _hide(value)
+    if key in _KEEP:
         return value
     if key in _ID_KEYS:
         return re.sub(r"[0-9a-fA-F]", "0", value)
-    return _PLACEHOLDER[key] if key in _PLACEHOLDER else "<text>"
+    return _PLACEHOLDER.get(key, "<text>")
+
+
+def _hide(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _hide(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_hide(v) for v in value]
+    return "<text>" if isinstance(value, str) else value
 
 
 def capture(runtime: str, version: str, event: str, payload: dict, root: Path = SAMPLES) -> Path:

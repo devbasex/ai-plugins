@@ -9,7 +9,7 @@
 4. 計測の 1 行を書く（書けなくても判定は変えない）
 
 例外・締め切り超え・知らない事象・入力の形の違いは、出力なし・終了コード 0 で通す。SessionStart のときだけ、
-古い計測の記録を消し（`metrics.prune`）、根の目印と環境の最後に使った時刻を書く。
+古い計測の記録と状態のファイルを消し（`metrics.prune`・`metrics.prune_state`）、根の目印と環境の最後に使った時刻を書く。
 """
 
 from __future__ import annotations
@@ -166,6 +166,7 @@ def _session_start(state_dir: Path) -> None:
     from ndf.domains.hooks import env, metrics
 
     metrics.prune(state_dir, metrics.keep_days())
+    metrics.prune_state(state_dir, metrics.keep_days())
     ident = env.Ident.of(tables.PLUGIN_ROOT)
     env.mark_root(ident)
     env.touch_used(ident)
@@ -179,5 +180,5 @@ def _notify_wait(state_dir: Path, ctx: Any, reason: Optional[str]) -> None:
         return
     shown = reason or ""  # noqa: NDF501 ファイル: 理由の無い差し戻しは空
     text = f"差し戻しの上限で止めずに通した: {shown}"
-    outbox.enqueue(state_dir, "wait", {"text": text, "cwd": ctx.cwd, "session_id": ctx.session_id})
-    outbox.kick(state_dir)
+    outbox.enqueue(state_dir, "wait", {"text": text, "cwd": ctx.cwd, "session_id": ctx.session_id}, os.environ)
+    outbox.kick(state_dir, os.environ)

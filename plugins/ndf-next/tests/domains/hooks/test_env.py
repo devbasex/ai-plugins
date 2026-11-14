@@ -52,10 +52,10 @@ def test_prune_keeps_marked_recent_and_locked_places(tmp_path):
     ident = _ident(tmp_path)
     env.mark_root(ident)
     marked = _venv(ident, env.lock_hash(ident.plugin_root), 0)
-    recent = _venv(ident, "recent", now - keep + DAY)
-    old = _venv(ident, "old", now - keep - DAY)
-    locked = _venv(ident, "locked", 0)
-    fd = os.open(ident.venv_root / "locked.lock", os.O_RDWR | os.O_CREAT)
+    recent = _venv(ident, "1" * 16, now - keep + DAY)
+    old = _venv(ident, "2" * 16, now - keep - DAY)
+    locked = _venv(ident, "3" * 16, 0)
+    fd = os.open(ident.venv_root / f"{'3' * 16}.lock", os.O_RDWR | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
         removed = env.prune(ident, now)
@@ -113,3 +113,14 @@ def test_touch_used_only_marks_an_existing_place(tmp_path):
     env.venv_dir(ident).mkdir(parents=True)
     env.touch_used(ident)
     assert (env.venv_dir(ident) / env.LAST_USED).exists()
+
+
+def test_prune_leaves_environments_it_did_not_make(tmp_path):
+    # bin/ndf が同じ親の下に作る版の名前の環境と、目印の無い置き場は古くても消さない
+    ident = _ident(tmp_path)
+    versioned = _venv(ident, "10.26.3", 0)
+    bare = ident.venv_root / ("4" * 16)
+    (bare / "bin").mkdir(parents=True)
+    os.utime(bare, (0, 0))
+    assert env.prune(ident, 100 * DAY) == []
+    assert versioned.exists() and bare.exists()

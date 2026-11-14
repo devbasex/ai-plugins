@@ -2,7 +2,8 @@
 
 エントリポイントは起動ごとに `<状態の置き場>/hooks/<日付>.jsonl` へ 1 行を 1 回の追記（`O_APPEND`）で書く。書けなくても
 判定は変えない。古い日のファイルを消すのは SessionStart のエントリポイントだけ（`prune`）で、ほかの事象ではディレクトリを
-走査しない。`stats` は記録から事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大を返す。
+走査しない。注入の控え・セッションの数え手・送信待ちの古いファイルも同じ時に消す（`prune_state`）。
+`stats` は記録から事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大を返す。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
@@ -74,6 +76,28 @@ def prune(state_dir: Path, days: float, now: Optional[datetime] = None) -> int:
         if old:
             path.unlink(missing_ok=True)
             removed += 1
+    return removed
+
+
+# 状態の置き場のうち、SessionStart で古いファイルを消す置き場（注入の控え・セッションの数え手・送信待ち）と名前の形
+_AGED = (("notes", "*.md"), ("sessions", "*.json"), ("outbox", "*/*.json"))
+
+
+def prune_state(state_dir: Path, days: float, now: Optional[float] = None) -> int:
+    """注入の控え・セッションの数え手・送信待ちのうち、`days` 日より前から更新の無いファイルを消し、消した数を返す。
+
+    SessionStart のエントリポイントだけが呼ぶ。錠のファイル（`.` で始まる名前）は消さない。
+    """
+    cutoff = (time.time() if now is None else now) - days * 86400
+    removed = 0
+    for sub, pattern in _AGED:
+        for path in sorted((tables.hooks_dir(state_dir) / sub).glob(pattern)):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:  # noqa: S112 ファイル: 別の起動が先に消した・読めないファイルは次の SessionStart で見る
+                continue
     return removed
 
 
