@@ -244,19 +244,26 @@ def sprint_flow_record(root, branch: str | None) -> dict | None:
         dirs[:] = [x for x in dirs if not x.endswith(PLAN_STATE_SUFFIX)]
         if SPRINT_MANIFEST not in files:
             continue
-        path = Path(d) / SPRINT_MANIFEST
-        try:
-            got = json.loads(path.read_text(encoding="utf-8"))
-            mtime = path.stat().st_mtime
-        except (OSError, ValueError):
-            continue
-        if not isinstance(got, dict):
-            continue
-        own = got.get("ブランチ") or f"{branch_flow.SPRINT_PREFIX}{got.get('スプリント')}"
-        snap = got.get(branch_flow.SNAPSHOT_KEY)
-        if own == branch and isinstance(snap, dict) and snap:
-            hits.append((mtime, str(path), snap))
+        hit = _sprint_record_candidate(Path(d) / SPRINT_MANIFEST, branch)
+        if hit is not None:
+            hits.append(hit)
     return max(hits, key=lambda h: (h[0], h[1]))[2] if hits else None
+
+
+def _sprint_record_candidate(path: Path, branch: str) -> tuple[float, str, dict] | None:
+    """目録 `path` が `branch` の開始時の記録を持てば (更新時刻, パス, 記録) を返す。読めないか対象外なら `None`。"""
+    try:
+        got = json.loads(path.read_text(encoding="utf-8"))
+        mtime = path.stat().st_mtime
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict):
+        return None
+    own = got.get("ブランチ") or f"{branch_flow.SPRINT_PREFIX}{got.get('スプリント')}"
+    snap = got.get(branch_flow.SNAPSHOT_KEY)
+    if own == branch and isinstance(snap, dict) and snap:
+        return mtime, str(path), snap
+    return None
 
 
 def kept_sprint_branch(root, branch: str | None, record: dict | None = None) -> str | None:
