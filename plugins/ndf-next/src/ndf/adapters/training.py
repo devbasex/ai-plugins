@@ -23,7 +23,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import httpx
 
@@ -121,26 +121,28 @@ def _claude_token(env: Mapping[str, str], now: float) -> tuple[Optional[str], st
     return token, ""
 
 
-def _read_over_http(
-    runtime: str,
-    auth: tuple[Optional[Mapping[str, str]], str],
-    client: httpx.Client,
-    url: str,
-    policy: str,
-    interpret: Callable[[dict], Optional[bool]],
-    source: str,
-) -> Reading:
-    """(見出し, 無いときの理由) で `url` を読み、`interpret` で学習の設定の真偽値を取り出す。例外を出さない。"""
+class Endpoint(NamedTuple):
+    """学習の設定を読む口。`url` を `policy`（`contracts/limits.json`）の時間で読み、`interpret` で真偽値を取り出す。
+    `source` は読めたときの理由に載せる設定の在りか。"""
+
+    url: str
+    policy: str
+    interpret: Callable[[dict], Optional[bool]]
+    source: str
+
+
+def _read_over_http(runtime: str, auth: tuple[Optional[Mapping[str, str]], str], client: httpx.Client, endpoint: Endpoint) -> Reading:
+    """(見出し, 無いときの理由) で `endpoint` を読み、学習の設定の真偽値を取り出す。例外を出さない。"""
     headers, why = auth
     if headers is None:
         return _unread(runtime, why)
-    body, why = _get(client, url, headers, limits.seconds(policy))
+    body, why = _get(client, endpoint.url, headers, limits.seconds(endpoint.policy))
     if body is None:
         return _unread(runtime, why)
-    training = interpret(body)
+    training = endpoint.interpret(body)
     if training is None:
         return _unread(runtime, BAD_SHAPE)
-    return Reading(runtime, training, source)
+    return Reading(runtime, training, endpoint.source)
 
 
 def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
@@ -152,9 +154,8 @@ def read_claude(env: Mapping[str, str], client: httpx.Client, now: float) -> Rea
     headers = (
         None if token is None else {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
     )
-    return _read_over_http(
-        "claude", (headers, why), client, CLAUDE_URL, "claude-training.call", _grove_enabled, "oauth/account/settings.grove_enabled"
-    )
+    endpoint = Endpoint(CLAUDE_URL, "claude-training.call", _grove_enabled, "oauth/account/settings.grove_enabled")
+    return _read_over_http("claude", (headers, why), client, endpoint)
 
 
 def _grove_enabled(body: dict) -> Optional[bool]:
@@ -190,27 +191,27 @@ def codex_training(settings: object) -> Optional[bool]:
 
 def read_codex(env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
     """codex の学習の設定を読む。例外を出さない。"""
-    return _read_over_http(
-        "codex",
-        _codex_auth(env),
-        client,
-        CODEX_URL,
-        "codex-training.call",
-        lambda body: codex_training(body.get("settings")),
-        "chatgpt/settings/user.training_allowed",
+    endpoint = Endpoint(
+        CODEX_URL, "codex-training.call", lambda body: codex_training(body.get("settings")), "chatgpt/settings/user.training_allowed"
     )
+    return _read_over_http("codex", _codex_auth(env), client, endpoint)
 
 
 Reader = Callable[[Mapping[str, str], httpx.Client, float], Reading]
-# 確かめる口のある担当と、その読み手
-READERS: dict[str, Reader] = {"claude": read_claude, "codex": read_codex}
-if set(READERS) != CHECKED_RUNTIMES:
-    raise ImportError(f"読み手の担当 {sorted(READERS)} が控えの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
+
+
+def _readers() -> dict[str, Reader]:
+    """確かめる口のある担当（表 runtimes の training_check）と、その読み手。"""
+    return {"claude": read_claude, "codex": read_codex}
+
+
+if set(_readers()) != CHECKED_RUNTIMES:
+    raise ImportError(f"読み手の担当 {sorted(_readers())} が控えの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
 
 
 def reader(runtime: str) -> Optional[Reader]:
     """担当の学習の設定の読み手。確かめる口の無い担当（kiro・agy など）は None。"""
-    return READERS.get(runtime)
+    return _readers().get(runtime)
 
 
 def checked() -> tuple[str, ...]:
@@ -229,7 +230,7 @@ def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now
 def check(runtimes: list[str], env: Mapping[str, str], client: httpx.Client, now: float) -> dict[str, object]:
     """担当ごとに確かめて控え、結果 JSON を組む。すべて学習に使わない設定のときだけ ok。"""
     readings = [read_setting(rt, env, client, now) for rt in dict.fromkeys(runtimes)]
-    save([r for r in readings if r.runtime in READERS], now, env)
+    save([r for r in readings if r.runtime in CHECKED_RUNTIMES], now, env)
     items = [r.item(_stamp(now)) for r in readings]
     unread = [f"{r.runtime}（{r.reason}）" for r in readings if r.training is None]
     used = [r.runtime for r in readings if r.training is True]

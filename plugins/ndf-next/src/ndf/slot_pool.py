@@ -158,7 +158,7 @@ def _live_owners(directory: Path) -> dict[int, dict[str, object]]:
         index = slot_index(path)
         if index is None or not is_owned(directory, index):
             continue
-        owners[index] = read_json(slot_path(directory, index, ".json")) or {}
+        owners[index] = read_json(slot_path(directory, index, ".json")) or {}  # noqa: NDF501 ファイル: 記述が無い・書きかけなら空の記述
     return owners
 
 

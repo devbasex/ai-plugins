@@ -24,7 +24,7 @@ from typing import NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters.run_log import record
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 
 CHECK_COMMAND = "ndf training check"
 # 確かめる口の無い担当（kiro・agy など）の記録の値
@@ -34,8 +34,8 @@ REFUSED = "refused"
 CACHE_FILE = "training.json"
 # 控えの期限の方針（contracts/limits.json）
 VALID_POLICY = "training.check-valid"
-# 確かめる口のある担当（読み手は `training.READERS`。ほかの担当は確かめず起動を通す）
-CHECKED_RUNTIMES = frozenset({"claude", "codex"})
+# 確かめる口のある担当（表 runtimes の training_check。読み手は `training.reader`。ほかの担当は確かめず起動を通す）
+CHECKED_RUNTIMES = frozenset(facts.ids("runtimes", training_check=True))
 CLAUDE_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 # OAuth より優先される認証の変数（値は出さず、名前だけを理由に載せる）
 CLAUDE_FOREIGN_AUTH = (
@@ -49,8 +49,6 @@ CLAUDE_FOREIGN_AUTH = (
 CLAUDE_STATE = ".claude.json"
 # codex のログインの置き換えになる変数
 CODEX_FOREIGN_AUTH = ("OPENAI_API_KEY", "CODEX_API_KEY")
-# 控えの鍵: 確かめたときの認証の文脈のハッシュ
-CONTEXT_KEY = "context"
 
 
 class Reading(NamedTuple):
@@ -82,7 +80,7 @@ def _home(env: Mapping[str, str]) -> Path:
 
 def _claude_context(env: Mapping[str, str]) -> dict[str, object]:
     conf = env.get("CLAUDE_CONFIG_DIR")
-    state = _read_json(Path(conf) / CLAUDE_STATE if conf else _home(env) / CLAUDE_STATE) or {}
+    state = _read_json(Path(conf) / CLAUDE_STATE if conf else _home(env) / CLAUDE_STATE) or {}  # noqa: NDF501 ファイル: 無いか壊れていればアカウントは無い
     account = state.get("oauthAccount")
     return {
         "config_dir": conf or str(_home(env) / ".claude"),
@@ -93,7 +91,7 @@ def _claude_context(env: Mapping[str, str]) -> dict[str, object]:
 
 def _codex_context(env: Mapping[str, str]) -> dict[str, object]:
     home = env.get("CODEX_HOME") or str(_home(env) / ".codex")
-    auth = _read_json(Path(home) / "auth.json") or {}
+    auth = _read_json(Path(home) / "auth.json") or {}  # noqa: NDF501 ファイル: 無いか壊れていればログインは無い
     tokens = auth.get("tokens") if isinstance(auth.get("tokens"), dict) else {}
     return {
         "codex_home": home,
@@ -132,7 +130,7 @@ def save(readings: list[Reading], now: float, env: Optional[Mapping[str, str]] =
     kept = _read_json(path)
     if kept is None:
         kept = {}
-    kept.update({r.runtime: {**r.item(_stamp(now)), CONTEXT_KEY: context(r.runtime, env)} for r in readings})
+    kept.update({r.runtime: {**r.item(_stamp(now)), "context": context(r.runtime, env)} for r in readings})
     tmp = path.with_name(f".{path.name}.{os.getpid()}")
     tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -157,7 +155,7 @@ def _cached_refusal(runtime: str, entry: object, now: float, expected: str) -> O
         return f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
     if training is not False:
         return _ask_check(runtime, f"確かめられなかった: {entry.get('reason')}")
-    if entry.get(CONTEXT_KEY) != expected:
+    if entry.get("context") != expected:
         return _ask_check(runtime, "確かめた後に認証の文脈（アカウント・設定の置き場・認証の環境変数）が変わった")
     return None
 

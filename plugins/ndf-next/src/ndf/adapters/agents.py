@@ -305,7 +305,7 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     """
     try:
         with launch_slot.gate(spec.agent, cwd=spec.cwd, env=child_process_env(spec.env)) as slot_env:
-            return _guarded_run(replace(spec, env={**(spec.env or {}), **slot_env}), poll)
+            return _guarded_run(replace(spec, env=dict(slot_env) if spec.env is None else {**spec.env, **slot_env}), poll)
     except launch_slot.NotLaunched as exc:
         return _not_started(spec, AgentState(exc.kind), exc.detail)
 
