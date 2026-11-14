@@ -62,7 +62,7 @@ def _untried(box: Path, tried: Set[Path]) -> bool:
 def run(state_dir: Path, environ: Any) -> int:
     """錠を取って送り、離した後に残りがあれば取り直す。送った件数を返す。"""
     box = outbox.outbox_dir(state_dir, environ)
-    token, channel = environ.get("SLACK_BOT_TOKEN", ""), environ.get("SLACK_CHANNEL_ID", "")
+    token, channel = environ.get("SLACK_BOT_TOKEN", ""), environ.get("SLACK_CHANNEL_ID", "")  # noqa: NDF502 利用者の入力: 未設定は空
     tried: Set[Path] = set()
     done = 0
     while True:

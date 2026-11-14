@@ -138,7 +138,7 @@ def _registration_errors(limits: dict, reg: dict[str, Any]) -> list[str]:
     if found.deadline > timeout:
         errors.append(f"{where}の timeout {timeout} 秒が締め切り {found.deadline} 秒より短い")
     # found があれば事象の契約もある（budget_for は契約の無い事象に None を返す）
-    cap = tables.event_spec(runtime, event).get("timeout_max", tables.runtimes()[runtime]["timeout_max"])
+    cap = tables.event_spec(runtime, event).get("timeout_max", tables.runtimes()[runtime]["timeout_max"])  # noqa: NDF502 ファイル: 事象の契約に timeout_max が無ければランタイムの上限
     if timeout > cap:
         errors.append(f"{where}の timeout {timeout} 秒がランタイムの上限 {cap} 秒を超える")
     return errors

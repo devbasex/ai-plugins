@@ -6,7 +6,7 @@ hook のエントリポイントは通信しない。通知は 1 件を 1 ファ
 
 - 送信待ちは宛先（Slack の接続とチャンネル）ごとの置き場に分ける。置き場の名前は宛先の sha256 の先頭で、
   秘密そのものは書かない。別のプロジェクトの接続で起動した送り手は、ほかの宛先の通知を読まない
-- 送り手は置き場の錠（`LOCK_FILE`）の排他を取ってから送り、取れなければ送らずに終わる。`kick` は錠が
+- 送り手は置き場の錠（`lock_path`）の排他を取ってから送り、取れなければ送らずに終わる。`kick` は錠が
   持たれていれば起動しない。送り手は錠を離した後に一覧を読み直し、残りがあれば取り直して送る
 - 通知は問いの本文と作業のパスを持つので、置き場は所有者だけが開ける権限（0700）、ファイルは作る時から
   所有者だけが読める権限（0600）にする
@@ -28,7 +28,6 @@ from typing import Any, Mapping, Optional
 from ndf.domains.hooks import tables
 
 SENDER_MODULE = "ndf.domains.hooks.sender"
-LOCK_FILE = ".sender.lock"
 
 
 def notify_configured(env: Mapping[str, str]) -> bool:
@@ -38,7 +37,7 @@ def notify_configured(env: Mapping[str, str]) -> bool:
 
 def outbox_dir(state_dir: Path, env: Mapping[str, str]) -> Path:
     """宛先（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）ごとの送信待ちの置き場。"""
-    dest = f"{env.get('SLACK_BOT_TOKEN', '')}\n{env.get('SLACK_CHANNEL_ID', '')}"
+    dest = f"{env.get('SLACK_BOT_TOKEN', '')}\n{env.get('SLACK_CHANNEL_ID', '')}"  # noqa: NDF502 利用者の入力: 未設定の宛先は空として名前を作る
     return tables.hooks_dir(state_dir) / "outbox" / hashlib.sha256(dest.encode("utf-8")).hexdigest()[:16]
 
 
@@ -63,13 +62,18 @@ def _private_dir(box: Path) -> None:
     os.chmod(box, 0o700)
 
 
+def lock_path(box: Path) -> Path:
+    """宛先の置き場の送り手の錠のファイル。"""
+    return box / ".sender.lock"
+
+
 def try_lock(box: Path) -> Optional[int]:
     """送り手の錠を待たずに取る。取れたら fd、持たれていれば None。"""
     _private_dir(box)
-    fd = os.open(box / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(lock_path(box), os.O_RDWR | os.O_CREAT, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:  # noqa: NDF401 ファイル: 錠が持たれていれば送り手が走っている
+    except BlockingIOError:
         os.close(fd)
         return None
     return fd

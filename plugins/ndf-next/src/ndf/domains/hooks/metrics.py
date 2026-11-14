@@ -18,9 +18,6 @@ from typing import Any, Iterable, Iterator, Optional
 
 from ndf.domains.hooks import tables
 
-# 判定のうち、数えるもの（stats の欄の名前）
-_COUNTED = {"deny": "denies", "pushback": "pushbacks", "limited": "limited"}
-
 
 def keep_days() -> float:
     """計測を残す日数（`hook.metrics-keep` の秒を日へ換算）。prune と stats の窓の既定。"""
@@ -90,15 +87,20 @@ def prune_state(state_dir: Path, days: float, now: Optional[float] = None) -> in
     """
     cutoff = (time.time() if now is None else now) - days * 86400
     removed = 0
-    for sub, pattern in _AGED:
-        for path in sorted((tables.hooks_dir(state_dir) / sub).glob(pattern)):
-            try:
-                if path.stat().st_mtime < cutoff:
-                    path.unlink()
-                    removed += 1
-            except OSError:  # noqa: S112 ファイル: 別の起動が先に消した・読めないファイルは次の SessionStart で見る
-                continue
+    for path in _aged_files(state_dir):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:  # noqa: S112 ファイル: 別の起動が先に消した・読めないファイルは次の SessionStart で見る
+            continue
     return removed
+
+
+def _aged_files(state_dir: Path) -> Iterator[Path]:
+    """`_AGED` の置き場ごとの、名前の形に合うファイル。"""
+    for sub, pattern in _AGED:
+        yield from sorted((tables.hooks_dir(state_dir) / sub).glob(pattern))
 
 
 def _day_files(state_dir: Path, days: float, now: Optional[datetime]) -> Iterator[tuple[Path, bool]]:
@@ -149,10 +151,15 @@ def stats(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _counted() -> dict[str, str]:
+    """判定のうち数えるものと、stats の欄の名前。"""
+    return {"deny": "denies", "pushback": "pushbacks", "limited": "limited"}
+
+
 def _summary(rows: list[dict[str, Any]], inject: bool) -> dict[str, Any]:
     times = [float(r["total_ms"]) for r in rows if isinstance(r.get("total_ms"), (int, float))]
     out: dict[str, Any] = {"count": len(rows), "p50_ms": percentile(times, 50), "p95_ms": percentile(times, 95)}
-    for kind, col in _COUNTED.items():
+    for kind, col in _counted().items():
         out[col] = sum(1 for r in rows if r.get("verdict") == kind)
     if inject:
         out["inject_max"] = max((int(r.get("inject_chars") or 0) for r in rows), default=0)  # noqa: NDF501 ファイル: 注入の無い行は 0

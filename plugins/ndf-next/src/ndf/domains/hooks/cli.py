@@ -47,7 +47,7 @@ def _top(key: str, value: Any) -> Any:
         return value
     if key in _ID_KEYS:
         return re.sub(r"[0-9a-fA-F]", "0", value)
-    return _PLACEHOLDER.get(key, "<text>")
+    return _PLACEHOLDER.get(key, "<text>")  # noqa: NDF502 外部コマンド: ランタイムが渡したほかの鍵の文字列は伏せる
 
 
 def _hide(value: Any) -> Any:

@@ -34,8 +34,6 @@ from ndf.domains.hooks.verdict import Verdict, deny
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"
 
-# 前に付いても後ろのコマンドを打つ語（後ろの語のうち gh・シェル・eval から読み直す）
-_WRAPPERS = frozenset({"command", "env", "exec", "nohup", "time", "sudo", "doas", "xargs", "timeout", "nice", "ionice", "stdbuf", "setsid"})
 # 後ろにコマンドが続く制御構文の語
 _KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}"})
 # `-c` の引数をスクリプトとして読むシェル
@@ -64,7 +62,7 @@ def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[fl
     if tables.is_off(GUARD_NAME, off):
         return None, None
     began = time.monotonic()
-    verdict = check(payload, str(payload.get("cwd") or os.getcwd()), os.environ.get(_GH_REPO) or None)
+    verdict = check(payload, str(payload.get("cwd") or os.getcwd()), os.environ.get(_GH_REPO) or None)  # noqa: NDF501 利用者の入力: 空の GH_REPO は未設定と同じ
     return verdict, round((time.monotonic() - began) * 1000, 3)
 
 
@@ -147,7 +145,7 @@ def _assigned_gh_repo(words: List[str], current: Optional[str]) -> Optional[str]
     """語の並びの中の `GH_REPO=<値>` の最後の値（無ければ `current`）。"""
     for word in words:
         if word.startswith(f"{_GH_REPO}="):
-            current = word[len(_GH_REPO) + 1 :] or None
+            current = word[len(_GH_REPO) + 1 :] or None  # noqa: NDF501 利用者の入力: 空の GH_REPO= は宛先を外す
     return current
 
 
@@ -274,11 +272,30 @@ def _command_words(words: List[str]) -> List[str]:
         word = words[i]
         if word in _KEYWORDS or "=" in word.split("/")[0] and not word.startswith("-"):
             i += 1
-        elif os.path.basename(word) in _WRAPPERS:
+        elif _is_wrapper(word):
             i = _after_wrapper(words, i + 1)
         else:
             break
     return words[i:]
+
+
+def _is_wrapper(word: str) -> bool:
+    """前に付いても後ろのコマンドを打つ語か（後ろの語のうち gh・シェル・eval から読み直す）。"""
+    return os.path.basename(word) in {
+        "command",
+        "env",
+        "exec",
+        "nohup",
+        "time",
+        "sudo",
+        "doas",
+        "xargs",
+        "timeout",
+        "nice",
+        "ionice",
+        "stdbuf",
+        "setsid",
+    }
 
 
 def _after_wrapper(words: List[str], start: int) -> int:
