@@ -101,7 +101,7 @@ def _write_pid(state_dir: Path, step_id: str, pid: int) -> Path:
     return path
 
 
-def _last_json(stdout: str) -> Optional[dict[str, Any]]:
+def last_json(stdout: str) -> Optional[dict[str, Any]]:
     """標準出力の最後の空でない行が結果 JSON（`status` を持つ辞書）なら返す。"""
     lines = [line for line in stdout.splitlines() if line.strip()]
     if not lines:
@@ -135,7 +135,7 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
 
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
     """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`）。"""
-    found = _last_json(stdout)
+    found = last_json(stdout)
     if found is None:
         if code == exit_codes.code_of("ok"):
             return _plain(OK, None, "", code)
@@ -165,7 +165,7 @@ def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, A
     found = outcome_of(step, done.returncode, done.stdout)
     if found["status"] == OK:
         return {**found, "summary": f"済んでいた（{step.id} の probe）"}
-    not_yet = found["code"] == exit_codes.code_of("failed") and _last_json(done.stdout) is None
+    not_yet = found["code"] == exit_codes.code_of("failed") and last_json(done.stdout) is None
     if found["kind"] == "not_applicable" or not_yet:
         return None
     kind = found["kind"] if found["kind"] is not None else "unknown"

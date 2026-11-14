@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core.plan import files, model, queue_decide, runner
+from ndf.core.plan import files, model, queue_decide, runner, steps
 
 QUEUE_SUFFIX = ".queue"
 QUEUE_FILE = "queue.json"
@@ -86,12 +86,8 @@ def _child_args(entry: Entry, sets: dict[str, str]) -> list[str]:
 
 def _read_child(entry: Entry, proc: subprocess.Popen) -> queue_decide.Outcome:
     stdout, stderr = proc.communicate()
-    lines = [line for line in stdout.splitlines() if line.strip()]
-    try:
-        out = json.loads(lines[-1]) if lines else None
-    except json.JSONDecodeError:
-        out = None
-    if not isinstance(out, dict) or out.get("status") not in (OK, GATE, STOPPED):
+    out = steps.last_json(stdout)
+    if out is None:
         detail = stderr.strip().splitlines()[-1] if stderr.strip() else f"終了コード {proc.returncode}"
         return queue_decide.Outcome(entry.plan.name, STOPPED, "bad_report", f"{entry.plan.name} が結果 JSON を返さなかった: {detail}")
     return _outcome(entry, out)
