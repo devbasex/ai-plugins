@@ -1,1 +1,0 @@
-{"items": [{"item_id": "I-011", "status": "fixed", "reason": "削除前の prod_version・import・既存テストをそのまま復元し、失われた2つの検証を回復。対象2ファイルは f126e5fe2^ と完全一致。ruff・AST解析・git diff --check は exit=0。指定テストコマンドなし、test.ci.only=true のため pytest は未実行。"}]}

@@ -47,21 +47,30 @@ LEASE_POLICY = "loop.lease"
 GATE_ANSWERS = (APPROVED, run.REVISE, REJECTED)
 
 
-def _command(step: Optional[ctl.Step], session: Optional[str]) -> Optional[dict[str, Any]]:
+def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Optional[dict[str, Any]]:
+    """次の 1 手のコマンド。打った記録と同じリポジトリ（`--cwd`）を引き継ぐ。
+
+    セッションの要る 1 手で打ったセッションを知らない（get・stop など）ときは、`session` を打つ側が埋める鍵にする。
+    """
     if step is None:
         return None
-    args = list(step.args)
-    if step.session and session is not None:
-        args += ["--session", session]
-    return result.command(*args, ask=step.ask)
+    args = [TOOL, "--cwd", str(cwd), *step.args]
+    ask = step.ask
+    if step.session:
+        if session is not None:
+            args += ["--session", session]
+        else:
+            ask += ("session",)
+    return result.command(*args, ask=ask)
 
 
-def _outcome(d: ctl.Decision, session: Optional[str]) -> dict[str, Any]:
-    nxt = _command(d.next, session)
+def _outcome(d: ctl.Decision, session: Optional[str], cwd: Path) -> dict[str, Any]:
+    nxt = _command(d.next, session, cwd)
     if d.refused:
         assert d.kind is not None
         return result.stopped(TOOL, d.kind, d.summary, next=nxt, metrics=dict(d.metrics))
-    return result.result(TOOL, result.OK, d.summary, list(d.items) or None, dict(d.metrics), next=nxt)
+    items = list(d.items) if d.items else None
+    return result.result(TOOL, result.OK, d.summary, items, dict(d.metrics), next=nxt)
 
 
 def _lap_dict(lap: rec.Lap) -> dict[str, Any]:
@@ -131,7 +140,7 @@ def _write(a: argparse.Namespace) -> dict[str, Any]:
         decision = a.write(state, ctl.Ctx(a.name, session, time.time()), a)
         if not decision.refused:
             loop.append(decision.events)
-    return _outcome(decision, session)
+    return _outcome(decision, session, a.cwd)
 
 
 def _get(a: argparse.Namespace) -> dict[str, Any]:
@@ -139,7 +148,9 @@ def _get(a: argparse.Namespace) -> dict[str, Any]:
     values = view(state)
     shown = {a.field: values[a.field]} if a.field is not None else values
     summary = f"ループ {a.name}: {state.status}（周 {len(state.laps)} 回）"
-    return result.result(TOOL, result.OK, summary, [shown], {"status": state.status}, next=_command(ctl.next_step(state, a.name), None))
+    return result.result(
+        TOOL, result.OK, summary, [shown], {"status": state.status}, next=_command(ctl.next_step(state, a.name), None, a.cwd)
+    )
 
 
 def _close_plan(a: argparse.Namespace) -> dict[str, Any]:

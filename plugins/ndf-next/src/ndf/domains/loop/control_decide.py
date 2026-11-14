@@ -25,13 +25,14 @@ from ndf.domains.loop import record_decide as rec
 STOP_BY = ("human", "organizer")
 # 断りの種類（止まった理由の表の種類）
 REFUSED, PRECONDITION, INVALID = "refused", "precondition", "invalid"
-# 次の 1 手の副命令の名前
-LOOP = "loop"
 
 
 @dataclass(frozen=True)
 class Step:
-    """次の 1 手: エントリポイントの後ろの引数と、打つ側が埋める鍵。`session` なら打つ側のセッションを添える。"""
+    """次の 1 手: 副命令 `loop` の後ろの引数（動詞から）と、打つ側が埋める鍵。`session` なら打つ側のセッションを添える。
+
+    副命令の名前と対象のリポジトリ（`--cwd`）は、結果へ組む側（`cli`）が前に付ける。
+    """
 
     args: tuple[str, ...]
     ask: tuple[str, ...] = ()
@@ -68,8 +69,8 @@ def refuse(kind: str, summary: str, nxt: Optional[Step] = None) -> Decision:
 
 
 def _step(verb: str, name: str, *rest: str, ask: tuple[str, ...] = (), session: bool = False) -> Step:
-    """`loop <動詞> <名前> ...` の次の 1 手。"""
-    return Step((LOOP, verb, name, *rest), ask=ask, session=session)
+    """`<動詞> <名前> ...` の次の 1 手。"""
+    return Step((verb, name, *rest), ask=ask, session=session)
 
 
 def get_step(name: str) -> Step:

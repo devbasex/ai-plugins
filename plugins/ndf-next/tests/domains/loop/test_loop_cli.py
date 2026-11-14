@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -37,11 +38,16 @@ def _candidates(tmp_path: Path, rows: list[dict]) -> str:
     return str(path)
 
 
+def _loop_argv(repo: Path, *args: str) -> list[str]:
+    """次の 1 手の argv: 対象のリポジトリ（解決済みの `--cwd`）を引き継ぐ。"""
+    return [result.ENTRY, "loop", "--cwd", os.path.realpath(repo), *args]
+
+
 def test_lap_lifecycle_writes_events_and_next(loop: Callable[..., dict], tmp_path: Path, repo: Path) -> None:
-    assert loop("start", "demo", "--session", "s1")["next"]["argv"][1:3] == ["loop", "select"]
+    assert loop("start", "demo", "--session", "s1")["next"]["argv"] == _loop_argv(repo, "select", "demo", "--session", "s1")
     got = loop("select", "demo", "--session", "s1", "--candidates", _candidates(tmp_path, [{"issue": 4}, {"issue": 5}]), "--size", "1")
     assert got["status"] == "ok" and [i["issue"] for i in got["items"] if i["chosen"]] == [4]
-    assert got["next"] == {"argv": [result.ENTRY, "loop", "sprint", "demo", "--session", "s1"], "ask": ["mode", "basis"]}
+    assert got["next"] == {"argv": _loop_argv(repo, "sprint", "demo", "--session", "s1"), "ask": ["mode", "basis"]}
     assert loop("sprint", "demo", "--session", "s1", "--mode", "standard", "--basis", "API を変える")["status"] == "ok"
     assert loop("created", "demo", "40")["status"] == "ok"
     closed = loop("lap", "demo", "--session", "s1", "--failed", "--version", "1.0.0")
@@ -52,14 +58,33 @@ def test_lap_lifecycle_writes_events_and_next(loop: Callable[..., dict], tmp_pat
     assert [e["kind"] for e in events][-3:] == [rec.VERSION_SHIPPED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
 
 
-def test_refusal_is_stopped_with_kind_and_next(loop: Callable[..., dict]) -> None:
+def test_refusal_is_stopped_with_kind_and_next(loop: Callable[..., dict], repo: Path) -> None:
     """断りは stopped の結果 JSON で、種類と次の 1 手を持つ（SF11）。"""
     loop("start", "demo", "--session", "s1")
     got = loop("start", "demo", "--session", "s2")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "refused"
-    assert got["next"]["argv"] == [result.ENTRY, "loop", "get", "demo"]
+    assert got["next"]["argv"] == _loop_argv(repo, "get", "demo")
     nolap = loop("sprint", "demo", "--session", "s1", "--mode", "standard", "--basis", "x")
-    assert nolap["cause"]["kind"] == "precondition" and nolap["next"]["argv"][2] == "select"
+    assert nolap["cause"]["kind"] == "precondition" and nolap["next"]["argv"][4] == "select"
+
+
+def test_next_of_get_targets_the_repo_and_asks_for_the_session(
+    loop: Callable[..., dict], tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """get は打ったセッションを知らないので、セッションの要る次の 1 手は session を打つ側に埋めさせる。
+
+    次の 1 手は対象のリポジトリを --cwd で持ち、別のリポジトリで打っても対象の記録だけを書く。
+    """
+    loop("start", "demo", "--session", "s1")
+    got = loop("get", "demo")
+    assert got["next"] == {"argv": _loop_argv(repo, "select", "demo"), "ask": ["candidates", "session"]}
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    monkeypatch.chdir(other)
+    filled = [*got["next"]["argv"][1:], "--candidates", _candidates(tmp_path, [{"issue": 7}]), "--session", "s1"]
+    assert loop_cli.main(filled) == 0
+    assert store.open_store("demo", repo).read()[-1]["kind"] == rec.LAP_OPENED
+    assert store.open_store("demo", other).read() == []
 
 
 def test_issue_2714_answer_reads_the_head_once(loop: Callable[..., dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
