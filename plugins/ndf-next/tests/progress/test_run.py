@@ -107,7 +107,7 @@ def _labels(st, tid) -> dict[str, str]:
 
 
 def _approve(st, tid, stage, value="approved", notes=None):
-    return run.answer(st, tid, stage, value, "人が答えた", notes)
+    return lanes.answer(st, tid, stage, value, "人が答えた", notes)
 
 
 def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsys):

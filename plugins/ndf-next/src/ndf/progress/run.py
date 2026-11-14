@@ -770,10 +770,13 @@ def notes_text(value: str, path: Optional[Path]) -> Optional[str]:
 
 
 def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[str], extra: Mapping[str, Any]) -> model.EventDraft:
-    """待っているステップへの答えの事象。待っていない行・選択肢に無い答えは断る。`extra` は payload へ足す（`by` は書き手）。"""
+    """待っているステップへの答えの事象。待っていない行・選択肢に無い答え・承認ゲートへの問いの id（`gate_id`）を持たない
+    答え（3364-2）は断る。`extra` は payload へ足す（`by` は書き手）。"""
     m = decide(v)
     if m.action != Action.GATE or m.stage is None or m.stage.name != stage or m.step is None:
         raise model.Refused(f"工程 {stage} は答えを待っていない")
+    if invoke.is_listen(m.step) and "gate_id" not in extra:
+        raise model.Refused(f"工程 {stage} は承認ゲートで、答えは ndf answer で問いの id と見た対象を添えて書く（ndf progress next の routes）")
     allowed = choices(m)
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")

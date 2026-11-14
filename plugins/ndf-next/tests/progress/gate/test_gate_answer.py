@@ -68,6 +68,15 @@ def test_answers_before_the_gate_or_to_another_question_are_refused(st, new_tabl
         gate.answer(st, tid, gate.Answer(_waiting(st, tid).id, "approved", "誰か", "someone", KEY))
 
 
+def test_an_answer_without_the_question_id_is_refused_at_the_gate(st, new_table, flow):
+    tid = new_table()
+    flow.turn(tid)
+    q = _waiting(st, tid)
+    with pytest.raises(model.Refused, match="ndf answer"):
+        run.answer(st, tid, q.stage, "approved", "問いの id が無い", None)
+    assert gate.waiting(run.read(st, tid)) == q
+
+
 def test_an_answer_to_a_changed_target_is_refused_and_the_row_keeps_waiting(st, new_table, flow):
     tid = new_table()
     flow.turn(tid)
