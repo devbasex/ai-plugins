@@ -1,14 +1,15 @@
 """配る Skill の表から、ランタイムの定義を作り、置かれたものと照らす。
 
-    作るもの                                       中身
-    .codex-plugin/plugin.json の skills              Codex へ配り、skills/ に実体がある Skill（表の並び）
-    skills/<名前>/agents/openai.yaml                  Codex へ配る Skill のうち、明示の指示でだけ起動するもの
-                                                    （frontmatter の disable-model-invocation が真）の暗黙の起動を止める policy と、
-                                                    argument-hint があれば明示の起動の既定の文
+ランタイムごとに、表の `runtimes` の行が次を決める。
 
-Claude Code は `skills/` をすべて読むので、`.claude-plugin/plugin.json` に並びを書かない。`skills/` にまだ無い Skill
-（作り直しで移す前のもの）は配らない。表に無い Skill の置き場と、配らなくなった Skill の `agents/openai.yaml` は
-照合で違いとして出し、作り直しで消す。
+- `definition` があるランタイム: その定義（`plugin.json`）の `skills` に、そのランタイムへ配り `skills/` に実体がある
+  Skill を表の並びで書く。null のランタイム（`skills/` をすべて読む）の定義は書かない
+- `policy` があるランタイム: そのランタイムへ配る Skill のうち、明示の指示でだけ起動するもの（frontmatter の
+  `disable-model-invocation` が真）の置き場に、暗黙の起動を止める policy と、`argument-hint` があれば明示の起動の
+  既定の文を書く
+
+`skills/` にまだ無い Skill（作り直しで移す前のもの）は配らない。表に無い Skill の置き場は誤りにし、要らなくなった
+policy のファイルは照合で違いとして出し、作り直しで消す。
 """
 
 from __future__ import annotations
@@ -17,12 +18,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from ndf.core.worker import SKILL_FILE, SKILLS_DIR
 from ndf.domains.manifests import front_matter, table
-
-CODEX = "codex"
-CODEX_MANIFEST = Path(".codex-plugin") / "plugin.json"
-SKILLS_DIR = "skills"
-POLICY_REL = Path("agents") / "openai.yaml"
 
 
 class RenderError(Exception):
@@ -32,11 +29,11 @@ class RenderError(Exception):
 def present(plugin_root: Path) -> set[str]:
     """`skills/` に実体（`SKILL.md`）がある Skill の名前。"""
     base = plugin_root / SKILLS_DIR
-    return {p.parent.name for p in base.glob("*/SKILL.md")} if base.is_dir() else set()
+    return {p.parent.name for p in base.glob(f"*/{SKILL_FILE}")} if base.is_dir() else set()
 
 
 def policy(fields: dict) -> Optional[str]:
-    """Skill の frontmatter から `agents/openai.yaml` の中身。明示の指示でだけ起動する Skill でなければ None。"""
+    """Skill の frontmatter から policy のファイルの中身。明示の指示でだけ起動する Skill でなければ None。"""
     if fields.get("disable-model-invocation") is not True:
         return None
     data: dict = {"policy": {"allow_implicit_invocation": False}}
@@ -48,35 +45,46 @@ def policy(fields: dict) -> Optional[str]:
 
 def expected(plugin_root: Path) -> dict[Path, str]:
     """作るファイル → 中身。表に無い Skill の置き場があれば `RenderError`。"""
-    rows = table.load(plugin_root)
+    found = table.load(plugin_root)
     have = present(plugin_root)
-    unlisted = sorted(have - {r.name for r in rows})
+    unlisted = sorted(have - {s.name for s in found.skills})
     if unlisted:
         raise RenderError(f"配る Skill の表（{table.TABLE_REL}）に無い Skill の置き場がある: {', '.join(unlisted)}")
-    codex = [n for n in table.for_runtime(rows, CODEX) if n in have]
-    out = {plugin_root / CODEX_MANIFEST: _codex_manifest(plugin_root, codex)}
-    for name in codex:
-        skill_md = plugin_root / SKILLS_DIR / name / "SKILL.md"
-        text = policy(front_matter.read(skill_md.read_text(encoding="utf-8"), str(skill_md)))
-        if text is not None:
-            out[plugin_root / SKILLS_DIR / name / POLICY_REL] = text
+    out: dict[Path, str] = {}
+    for runtime in found.runtimes:
+        names = [n for n in found.for_runtime(runtime.name) if n in have]
+        if runtime.definition is not None:
+            path = plugin_root / runtime.definition
+            out[path] = _definition(path, names)
+        if runtime.policy is not None:
+            out.update(_policies(plugin_root, names, runtime.policy))
     return out
 
 
-def _codex_manifest(plugin_root: Path, names: list[str]) -> str:
-    path = plugin_root / CODEX_MANIFEST
+def _definition(path: Path, names: list[str]) -> str:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise RenderError(f"Codex の定義を読めない: {path}: {exc}") from exc
+        raise RenderError(f"ランタイムの定義を読めない: {path}: {exc}") from exc
     data["skills"] = [f"./{SKILLS_DIR}/{n}" for n in names]
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
+def _policies(plugin_root: Path, names: list[str], rel: str) -> dict[Path, str]:
+    out = {}
+    for name in names:
+        skill_md = plugin_root / SKILLS_DIR / name / SKILL_FILE
+        text = policy(front_matter.read(skill_md.read_text(encoding="utf-8"), str(skill_md)))
+        if text is not None:
+            out[plugin_root / SKILLS_DIR / name / rel] = text
+    return out
+
+
 def _extra(plugin_root: Path, want: dict[Path, str]) -> list[Path]:
-    """作るものに無い `agents/openai.yaml`（配らなくなった・明示の指示だけでなくなった Skill のもの）。"""
+    """作るものに無い policy のファイル（配らなくなった・明示の指示だけでなくなった Skill のもの）。"""
     base = plugin_root / SKILLS_DIR
-    found = base.glob(f"*/{POLICY_REL.as_posix()}") if base.is_dir() else []
+    rels = {r.policy for r in table.load(plugin_root).runtimes if r.policy is not None}
+    found = [p for rel in sorted(rels) for p in base.glob(f"*/{rel}")] if base.is_dir() else []
     return sorted(p for p in found if p not in want)
 
 

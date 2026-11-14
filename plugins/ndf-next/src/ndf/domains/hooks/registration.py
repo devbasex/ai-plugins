@@ -24,7 +24,7 @@ from ndf.domains.hooks import budget, env, tables
 
 # 登録の command が `sh -c` で打つ文。$0 が環境の python、$1 が hooks/entry.py、その後ろがランタイムと事象
 SCRIPT = '[ -x "$0" ] && exec "$0" "$@"; command -v python3 >/dev/null 2>&1 || exit 0; b="${1%/*}/boot.py"; shift; exec python3 "$b" "$@"'
-# 環境の python の入口（プラグインの根から）
+# 環境の python のエントリポイント（プラグインの根から）
 ENTRY = "hooks/entry.py"
 # キャッシュの根（env.Ident の cache_home と同じ決め方を、起動の時点のシェルが展開する）
 CACHE_HOME_WORD = "${XDG_CACHE_HOME:-$HOME/.cache}"

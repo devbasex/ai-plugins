@@ -1,4 +1,4 @@
-"""`bin/ndf` の入口（`bin/start.py`）が、依存の環境の欠けを確かめて止まる（#2447 の残り）。"""
+"""エントリポイントが起こす `bin/start.py` が、依存の環境の欠けを確かめて止まる（#2447 の残り）。"""
 
 from __future__ import annotations
 

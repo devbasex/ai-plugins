@@ -86,19 +86,20 @@ def test_the_script_refuses_an_answer_it_cannot_read(copied, tmp_path):
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv が要る（CI は setup-uv で入れる）")
 def test_the_script_disables_the_installed_ndf_and_loads_this_plugin_without_writing_user_settings(tmp_path):
-    home = tmp_path / "home"
-    settings = home / ".claude" / "settings.json"
-    settings.parent.mkdir(parents=True)
-    settings.write_text('{"enabledPlugins": {"ndf@ai-plugins": true}}\n', encoding="utf-8")
-
+    # 利用者の設定（Claude Code の設定の置き場の settings.json）は読ませるだけで、書き換えない
+    settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    before = '{"enabledPlugins": {"ndf@ai-plugins": true}}\n'
+    settings.write_text(before, encoding="utf-8")
     uv_cache = os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")
-    done = _run(SCRIPT, tmp_path, "-p", "x", env={"HOME": str(home), "UV_CACHE_DIR": uv_cache})
+
+    done = _run(SCRIPT, tmp_path, "-p", "x", env={"UV_CACHE_DIR": uv_cache})
 
     assert done.returncode == 0, done.stderr
     got = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))
     assert got == [*claude.plugin_args(ROOT), "-p", "x"]
     assert got[got.index("--plugin-dir") + 1] == str(ROOT)
-    assert settings.read_text(encoding="utf-8") == '{"enabledPlugins": {"ndf@ai-plugins": true}}\n'
+    assert settings.read_text(encoding="utf-8") == before
 
 
 def test_launch_args_disable_every_old_plugin_but_never_this_one():

@@ -37,27 +37,36 @@ def plugin(tmp_path) -> Path:
     return root
 
 
-def _write_table(root: Path, skills: list, runtimes=("claude", "codex")) -> None:
-    (root / table.TABLE_REL).write_text(json.dumps({"runtimes": list(runtimes), "skills": skills}), encoding="utf-8")
+# 一時の表のランタイム（claude は skills/ をすべて読み、codex は定義と policy を書く）
+RUNTIMES = {
+    "claude": {"definition": None, "policy": None},
+    "codex": {"definition": ".codex-plugin/plugin.json", "policy": "agents/openai.yaml"},
+}
+
+
+def _write_table(root: Path, skills: list, runtimes: dict = RUNTIMES) -> None:
+    (root / table.TABLE_REL).write_text(json.dumps({"runtimes": runtimes, "skills": skills}), encoding="utf-8")
 
 
 def test_the_table_lists_the_skills_s1a_moves():
     # 配る Skill の表は、S1a で移す Skill の名前の一覧（機能の対応表の Skill の行）から作った
     moved = {r["id"].split(":", 1)[1] for r in parity.load("features")["rows"] if r["kind"] == "skill" and r["to"] == "S1a"}
-    assert {r.name for r in table.load(ROOT)} == moved
+    assert {s.name for s in table.load(ROOT).skills} == moved
 
 
 def test_skills_not_sent_to_every_runtime_say_why():
-    rows = table.load(ROOT)
-    partial = [r for r in rows if set(r.runtimes) != {"claude", "codex"}]
-    assert partial and all(r.why for r in partial)
-    assert set(table.for_runtime(rows, "codex")) == {r.name for r in rows} - {r.name for r in partial}
+    found = table.load(ROOT)
+    every = {r.name for r in found.runtimes}
+    partial = [s for s in found.skills if set(s.runtimes) != every]
+    assert partial and all(s.why for s in partial)
+    reads_all = [r.name for r in found.runtimes if r.definition is None]
+    assert reads_all and all(set(reads_all) <= set(s.runtimes) for s in found.skills)
 
 
 @pytest.mark.parametrize(
     ("skills", "word"),
     [
-        ([{"name": "a", "runtimes": ["codex"], "why": "x"}], "claude"),
+        ([{"name": "a", "runtimes": ["codex"], "why": "x"}], "すべて読む"),
         ([{"name": "a", "runtimes": ["claude"]}], "why"),
         ([{"name": "a", "runtimes": ["claude", "codex"], "why": "x"}], "why"),
         ([{"name": "a", "runtimes": ["claude", "kiro"], "why": "x"}], "runtimes"),
@@ -69,6 +78,13 @@ def test_skills_not_sent_to_every_runtime_say_why():
 def test_a_broken_table_is_refused(plugin, skills, word):
     _write_table(plugin, skills)
     with pytest.raises(table.TableError, match=word):
+        table.load(plugin)
+
+
+@pytest.mark.parametrize("runtimes", [{"claude": {"definition": None}}, {"claude": {"definition": 1, "policy": None}}, []])
+def test_a_broken_runtime_row_is_refused(plugin, runtimes):
+    _write_table(plugin, [], runtimes)
+    with pytest.raises(table.TableError):
         table.load(plugin)
 
 

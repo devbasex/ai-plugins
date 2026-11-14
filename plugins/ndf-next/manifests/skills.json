@@ -1,6 +1,9 @@
 {
-  "summary": "配る Skill の表（#3409）。行ごとに Skill の名前（skills/<名前>/SKILL.md）・配るランタイム・すべてのランタイムへは配らない理由（why）を持つ。ndf manifests render がこの表と skills/ の実体から .codex-plugin/plugin.json の skills と Codex の Skill ごとの agents/openai.yaml を作る。まだ skills/ に無い Skill は配らない",
-  "runtimes": ["claude", "codex"],
+  "summary": "配る Skill の表（#3409）。runtimes はランタイムごとに、Skill の並びを書く定義（プラグインの根から。null は skills/ をすべて読み、並びを書かない）と、明示の指示でだけ起動する Skill の置き場に書く、暗黙の起動を止める policy のファイル（Skill の置き場から。null は書かない）を持つ。skills は行ごとに Skill の名前（skills/<名前>/SKILL.md）・配るランタイム・すべてのランタイムへは配らない理由（why）を持つ。ndf manifests render がこの表と skills/ の実体から定義と policy を作る。まだ skills/ に無い Skill は配らない",
+  "runtimes": {
+    "claude": {"definition": null, "policy": null},
+    "codex": {"definition": ".codex-plugin/plugin.json", "policy": "agents/openai.yaml"}
+  },
   "skills": [
     {"name": "backlog-refinement", "runtimes": ["claude", "codex"]},
     {"name": "cherry-pick-pr", "runtimes": ["claude", "codex"]},

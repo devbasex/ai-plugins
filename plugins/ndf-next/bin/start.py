@@ -1,7 +1,8 @@
-"""`bin/ndf` が依存の環境の python で起こす入口。依存の環境の欠けを確かめてから `python -m ndf` と同じに呼ぶ（#2447）。
+"""エントリポイント（隣のシェルのスクリプト）が依存の環境の python で起こすスクリプト。依存の環境の欠けを確かめてから、
+自分のパッケージを `python -m` と同じに呼ぶ（#2447）。
 
 依存の環境の中身が欠けていると（入れる途中で止まった・ファイルが消えた）、依存の import が副命令の途中で落ち、実際と違う
-理由で止まる。ここで、環境に入っている配布物の RECORD に載るファイルがすべてあるかを確かめ、欠けていれば入れ直しの
+理由で止まる。ここで、環境に入っているパッケージの RECORD に載るファイルがすべてあるかを確かめ、欠けていれば入れ直しの
 手順を結果 JSON（stopped・deps_missing）で出して止まる。
 
 確かめるのは、確かめた印（環境の中の `.deps-checked`）が無いか、`uv.lock` より古いときだけにする（ふだんの起動は印の
@@ -17,13 +18,15 @@ from importlib import metadata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# 呼ぶパッケージ（src/ の下。プラグイン名から切り離した固定の名前）
+PACKAGE = "ndf"
 STAMP = Path(sys.prefix) / ".deps-checked"
 # 入れる手段によって作られないことがあるファイル（RECORD に載っても欠けを数えない）
 OPTIONAL_SUFFIXES = (".pyc",)
 
 
 def broken_distributions() -> list[str]:
-    """RECORD に載るファイルが欠けた配布物（名前と欠けた数）。"""
+    """RECORD に載るファイルが欠けたパッケージ（名前と欠けた数）。"""
     broken = []
     for dist in metadata.distributions():
         files = [f for f in dist.files or () if not str(f).endswith(OPTIONAL_SUFFIXES)]
@@ -60,7 +63,7 @@ def main() -> int:
             STAMP.touch()
         except OSError:  # noqa: NDF401 ファイル: 印を書けない環境は、次の起動でも確かめる
             pass
-    runpy.run_module("ndf", run_name="__main__", alter_sys=True)
+    runpy.run_module(PACKAGE, run_name="__main__", alter_sys=True)
     return 0
 
 

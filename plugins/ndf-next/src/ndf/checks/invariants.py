@@ -33,8 +33,6 @@ DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
 ISSUE_REF = re.compile(r"#\d+")
 # Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
-# `bin/`・`hooks/` の下で、I1 が照合しない生成物（hook の登録）の拡張子
-GENERATED_SUFFIX = ".json"
 # `old_plugin_diff` が出す規則。差分と PR 本文だけで決まり、プラグインのファイルを読まない
 DIFF_RULES = frozenset({"port", "I2"})
 
@@ -89,7 +87,7 @@ def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
     if src.is_python and rel.startswith(SRC_DIR + "/"):
         skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
         return [(no, text) for no, text in _strings(src.tree) if no not in skip]
-    if rel.startswith(SCRIPT_PREFIXES) and not rel.endswith(GENERATED_SUFFIX):
+    if rel.startswith(SCRIPT_PREFIXES) and src.path.suffix != ".json":
         return _shell_lines(src)
     return []
 

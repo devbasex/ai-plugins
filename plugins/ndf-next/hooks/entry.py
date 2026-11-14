@@ -2,7 +2,7 @@
 
 登録の command（`hooks/<ランタイム>.json`。`ndf hooks render` が作る）が、用意済みの環境の python でこのファイルを起動する。
 `argv[1]` がランタイム、`argv[2]` が事象、標準入力が payload で、本体は `ndf.domains.hooks.main.run_entry` にある。
-`bin/ndf` と `uv run` は通らない。本体を読めないときも、出力なし・終了コード 0 で通す。
+エントリポイントのシェルのスクリプトと `uv run` は通らない。本体を読めないときも、出力なし・終了コード 0 で通す。
 """
 
 from __future__ import annotations
