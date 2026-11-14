@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+import git_sandbox
 import pytest
 
 from ndf.adapters import agents, ci, github
@@ -20,7 +20,7 @@ SOURCE = "def area(w, h):\n    return w * h\n\n\ndef untouched():\n    return 0\
 
 
 def sh(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return git_sandbox.sh(cwd, *args, strip=True)
 
 
 def commit_in(cwd: Path, files: dict[str, str], message: str) -> str:
@@ -48,15 +48,7 @@ class World:
 
 
 def make_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
-    for key, value in {
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
-    }.items():
-        monkeypatch.setenv(key, value)
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
     origin = tmp_path / "origin.git"
     sh(tmp_path, "init", "-q", "--bare", "--initial-branch=main", str(origin))

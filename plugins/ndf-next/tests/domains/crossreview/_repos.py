@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import git_sandbox
 import pytest
+from git_sandbox import sh
 
 from ndf.domains.crossreview import cli
 
 BRANCH = "feat/x"
-
-
-def sh(cwd: Path, *args: str) -> str:
-    """git を打って標準出力を返す（テストの準備だけに使う）。"""
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
 def commit(cwd: Path, name: str, text: str, message: str) -> str:
@@ -41,15 +37,7 @@ class Repos:
 
 
 def make_repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:
-    for key, value in {
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
-    }.items():
-        monkeypatch.setenv(key, value)
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
     origin = tmp_path / "origin.git"
     sh(tmp_path, "init", "-q", "--bare", "--initial-branch=main", str(origin))
     main = tmp_path / "main"

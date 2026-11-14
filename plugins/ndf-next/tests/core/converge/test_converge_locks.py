@@ -7,31 +7,20 @@ lock を掛けた作業場所が消えると lock が残り続け、誰が掛け
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
+import git_sandbox
 import pytest
+from git_sandbox import sh as _sh
 
 from ndf import identity
 from ndf.adapters import git
 from ndf.core.converge import place, worktree
 
 
-def _sh(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
-
-
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    for key, value in {
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
-    }.items():
-        monkeypatch.setenv(key, value)
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
     main = tmp_path / "main"
     main.mkdir()
     _sh(main, "init", "-q", "-b", "main")
