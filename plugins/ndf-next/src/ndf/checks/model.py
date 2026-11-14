@@ -19,10 +19,6 @@ RULES_PATH = Path(__file__).with_name("rules.json")
 SCRIPT_PREFIXES = ("bin/", "hooks/")
 # 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
 SRC_DIR = "src"
-# 規則のデータが持つべき鍵
-REQUIRED_KEYS = ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
-# 兆候の規則の `mark` が取る値
-MARKS = ("none", "boundary", "boundary-or-limit")
 
 
 class CheckError(Exception):
@@ -133,10 +129,14 @@ def read_json(path: Path | str, unreadable: str) -> Any:
 def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     """規則のデータを読む。形の確かめは使う側の鍵の参照（欠ければ `KeyError`）に任せず、ここで鍵の有無を見る。"""
     data = read_json(path, "規則のデータを読めない")
-    missing = [k for k in REQUIRED_KEYS if k not in data]
+    missing = [
+        k
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
+        if k not in data
+    ]
     if missing:
         raise CheckError(f"規則のデータに鍵が無い: {path}: {missing}")
-    bad = [code for code, rule in data["smells"].items() if rule["mark"] not in MARKS]
+    bad = [code for code, rule in data["smells"].items() if rule["mark"] not in ("none", "boundary", "boundary-or-limit")]
     if bad:
         raise CheckError(f"規則のデータの mark が知らない値: {bad}")
     return data
