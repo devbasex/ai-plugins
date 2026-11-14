@@ -276,3 +276,12 @@ def test_run_without_resume_ignores_the_record(tmp_path, children):
     fake = children({"a": _ok()})
     queue_run.run([[_entry(tmp_path, "a", touches=["a.py"])]], qdir, tmp_path, resume=False)
     assert fake.log == [("start", "a"), ("read", "a")]
+
+
+def test_run_with_fresh_passes_fresh_to_each_child(tmp_path, children):
+    """`queue --fresh` は子の `ndf plan next` へ `--fresh` を渡す。無ければ渡さない（#1592）。"""
+    fake = children({"a": _ok()})
+    queue_run.run([[_entry(tmp_path, "a", touches=["a.py"])]], tmp_path / "q", tmp_path, resume=False, fresh=True)
+    assert fake.args["a"][-1] == "--fresh"
+    queue_run.run([[_entry(tmp_path, "a", touches=["a.py"])]], tmp_path / "q2", tmp_path, resume=False)
+    assert "--fresh" not in fake.args["a"]
