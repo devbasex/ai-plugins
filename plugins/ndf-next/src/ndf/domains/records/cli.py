@@ -52,12 +52,14 @@ def _stdin_json() -> Any:
         return None
 
 
-def _glossary(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    if args.action == "meanings":
-        found = glossary.check_meanings(root)
-        if found:
-            return result.stopped(TOOL, "check_failed", f"意味の説明に廃止した語が {len(found)} 件ある", items=found)
-        return result.result(TOOL, result.OK, "意味の説明に廃止した語は無い")
+def _glossary_meanings(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    found = glossary.check_meanings(root)
+    if found:
+        return result.stopped(TOOL, "check_failed", f"意味の説明に廃止した語が {len(found)} 件ある", items=found)
+    return result.result(TOOL, result.OK, "意味の説明に廃止した語は無い")
+
+
+def _glossary_render(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
         differ = glossary.render(root, args.check)
     except gd.RenderError as exc:
@@ -107,12 +109,14 @@ def _handoff(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, "引継ぎ文書は通った", items, metrics)
 
 
-def _usage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    if args.action == "stop":
-        payload = _stdin_json()
-        row = usage.record_subagent(payload if isinstance(payload, dict) else {})
-        # hook を落とさない（書けなかった理由は標準エラーへ出した）
-        return result.result(TOOL, result.OK, "使用量の帳簿へ書いた" if row else "使用量の帳簿へ書かなかった", [row] if row else [])
+def _usage_stop(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    payload = _stdin_json()
+    row = usage.record_subagent(payload if isinstance(payload, dict) else {})
+    # hook を落とさない（書けなかった理由は標準エラーへ出した）
+    return result.result(TOOL, result.OK, "使用量の帳簿へ書いた" if row else "使用量の帳簿へ書かなかった", [row] if row else [])
+
+
+def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
         path = usage.ledger_path()
     except LookupError as exc:
@@ -122,13 +126,18 @@ def _usage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"使用量: {got['since']}..{got['until']}", [got])
 
 
-def _mvv(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
-        if args.action == "signals":
-            s = mvv.signals(root, args.base)
-            item = {"version": s.version, "overrides": s.overrides, "unknown_pass": s.unknown_pass, "unknown": s.unknown}
-            summary = "MVV の改訂を提案する兆候がある" if s.revise else "MVV の改訂の兆候は閾値に届かない"
-            return result.result(TOOL, result.OK, summary, [item], {"revise": s.revise})
+        s = mvv.signals(root, args.base)
+    except (mvv.MvvError, OSError) as exc:
+        return result.stopped(TOOL, "precondition", str(exc))
+    item = {"version": s.version, "overrides": s.overrides, "unknown_pass": s.unknown_pass, "unknown": s.unknown}
+    summary = "MVV の改訂を提案する兆候がある" if s.revise else "MVV の改訂の兆候は閾値に届かない"
+    return result.result(TOOL, result.OK, summary, [item], {"revise": s.revise})
+
+
+def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    try:
         answer = _stdin_json()
         if not isinstance(answer, dict):
             return result.stopped(TOOL, "invalid", "承認ゲートの答え（標準入力の JSON object）が無い")
@@ -198,18 +207,21 @@ def _add_handoff(sub: Any) -> None:
 
 def _add_usage(sub: Any) -> None:
     u = sub.add_parser("usage").add_subparsers(dest="action", required=True)
-    u.add_parser("stop")
+    u.add_parser("stop").set_defaults(handler=_usage_stop)
     r = u.add_parser("report")
     r.add_argument("--since", type=date.fromisoformat, required=True)
     r.add_argument("--until", type=date.fromisoformat, required=True)
-    sub.choices["usage"].set_defaults(handler=_usage)
+    r.set_defaults(handler=_usage_report)
 
 
 def _add_mvv(sub: Any) -> None:
     m = sub.add_parser("mvv").add_subparsers(dest="action", required=True)
-    m.add_parser("signals").add_argument("--base", required=True, help="ベースブランチ")
-    m.add_parser("answer").add_argument("--version", type=int, default=None, help="答えたときの MVV の版")
-    sub.choices["mvv"].set_defaults(handler=_mvv)
+    signals = m.add_parser("signals")
+    signals.add_argument("--base", required=True, help="ベースブランチ")
+    signals.set_defaults(handler=_mvv_signals)
+    answer = m.add_parser("answer")
+    answer.add_argument("--version", type=int, default=None, help="答えたときの MVV の版")
+    answer.set_defaults(handler=_mvv_answer)
 
 
 def _add_close_check(sub: Any) -> None:
@@ -225,9 +237,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--cwd", type=Path, default=None, help="対象のリポジトリの中の位置（既定はカレントディレクトリ）")
     sub = p.add_subparsers(dest="command", required=True)
     g = sub.add_parser("glossary").add_subparsers(dest="action", required=True)
-    g.add_parser("render").add_argument("--check", action="store_true", help="書かずに、今と違うファイルを出す")
-    g.add_parser("meanings")
-    sub.choices["glossary"].set_defaults(handler=_glossary)
+    render = g.add_parser("render")
+    render.add_argument("--check", action="store_true", help="書かずに、今と違うファイルを出す")
+    render.set_defaults(handler=_glossary_render)
+    g.add_parser("meanings").set_defaults(handler=_glossary_meanings)
     _add_spec(sub)
     _add_handoff(sub)
     _add_usage(sub)
