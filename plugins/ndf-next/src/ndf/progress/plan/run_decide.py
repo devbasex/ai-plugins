@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 from ndf.core import loop
 
@@ -164,6 +164,16 @@ class Policy:
     up: float = float("inf")
 
 
+class LaunchTry(NamedTuple):
+    """打った起動の 1 回（レーン, 行, 起動の鍵, 起こせたか, 詳細）。タプルのまま持つ。"""
+
+    lane: str
+    row: str
+    key: str
+    ok: bool
+    detail: str
+
+
 @dataclass(frozen=True)
 class RunState:
     """判断の状態。`launched` は起こして行の始まりを待つ起動、`waits` は起こしてから読み直した回数、
@@ -183,7 +193,7 @@ class RunState:
     unreported: tuple[Report, ...] = ()
     reported: tuple[str, ...] = ()
     noticed: tuple[str, ...] = ()
-    history: tuple[tuple[str, str, str, bool, str], ...] = ()
+    history: tuple[LaunchTry, ...] = ()
     outcome: Optional[str] = None
     errors: tuple[str, ...] = field(default=())
 
@@ -268,7 +278,7 @@ def _launches(snap: dict[str, Any]) -> list[Launch]:
 
 def _relaunchable(state: RunState, act: Launch, policy: Policy) -> bool:
     """`/goal` を入れ直す起こし直しが、まだ打てるか（同じスプリントで起こせた回数が `Policy.attempts` 未満で、尽きていない）。"""
-    done = sum(1 for h in state.history if h[2] == act.key and h[3])
+    done = sum(1 for h in state.history if h.key == act.key and h.ok)
     return act.key not in state.failed and done < policy.attempts
 
 
@@ -377,8 +387,8 @@ def _fail(state: RunState, act: Launch, detail: str, policy: Policy, final: bool
 
 def _stall_report(state: RunState, lane: str, key: str, reason: str, moved: Optional[str], row: str) -> Report:
     """止まりの知らせ。最後に動いた時刻と、その行の起動の試みの回数と最後の結果を本文と中身に載せる（#2585）。"""
-    tries = [h for h in state.history if h[0] == lane and h[1] == row]
-    last = None if not tries else ("起こせた" if tries[-1][3] else f"起こせなかった: {tries[-1][4]}")
+    tries = [h for h in state.history if h.lane == lane and h.row == row]
+    last = None if not tries else ("起こせた" if tries[-1].ok else f"起こせなかった: {tries[-1].detail}")
     detail = f"{reason}（最後に動いた時刻 {moved or '不明'}・起動の試み {len(tries)} 回・最後の結果 {last or '無し'}）"
     return Report(lane, key, detail, LANE_STALLED, (("moved", moved), ("launches", len(tries)), ("last_launch", last)))
 
@@ -428,7 +438,7 @@ def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: P
         # マシンの上限で待たされた起動は失敗でも起動でもない（次の読み直しで数え直す）
         return state
     if not act.halt:
-        state = replace(state, history=(*state.history, (act.lane, act.row, act.key, bool(value["ok"]), str(value["detail"]))))
+        state = replace(state, history=(*state.history, LaunchTry(act.lane, act.row, act.key, bool(value["ok"]), str(value["detail"]))))
     if value["ok"]:
         return replace(state, launched=(*state.launched, act.key), started=(*state.started, act.key))
     return _fail(state, act, value["detail"], policy, bool(value.get("final")))
