@@ -81,7 +81,7 @@ def test_next_of_get_targets_the_repo_and_asks_for_the_session(
     other = tmp_path / "other"
     subprocess.run(["git", "init", "-q", str(other)], check=True)
     monkeypatch.chdir(other)
-    filled = [*got["next"]["argv"][1:], "--candidates", _candidates(tmp_path, [{"issue": 7}]), "--session", "s1"]
+    filled = [*got["next"]["argv"][2:], "--candidates", _candidates(tmp_path, [{"issue": 7}]), "--session", "s1"]
     assert loop_cli.main(filled) == 0
     assert store.open_store("demo", repo).read()[-1]["kind"] == rec.LAP_OPENED
     assert store.open_store("demo", other).read() == []
