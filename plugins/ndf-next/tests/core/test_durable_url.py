@@ -88,7 +88,7 @@ def _later(days: float) -> datetime:
 def _sweep(url: str, root: Path, days: float) -> durable.SweepResult:
     """走査の目印を消してから、`days` 日後の時刻で片付ける（目印の 24 時間に依らず走査させる）。"""
     (root / "dbos" / durable.SWEPT_MARK).unlink(missing_ok=True)
-    return durable.sweep_url(url, _later(days), root)
+    return durable.sweep_url(root, url, _later(days))
 
 
 def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_days(pg_url, root):
@@ -159,7 +159,7 @@ def test_run_lock_without_wait_yields_none_while_another_connection_holds_it(pg_
 
 def test_url_sweep_runs_once_a_day(pg_url, root):
     root.mkdir(parents=True)
-    assert not durable.sweep_url(pg_url, datetime.now(UTC), root).skipped
-    assert durable.sweep_url(pg_url, datetime.now(UTC) + timedelta(hours=1), root).skipped
+    assert not durable.sweep_url(root, pg_url, datetime.now(UTC)).skipped
+    assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=1)).skipped
     with durable.maint_lock(root, wait=True):
-        assert durable.sweep_url(pg_url, datetime.now(UTC) + timedelta(hours=25), root).skipped
+        assert durable.sweep_url(root, pg_url, datetime.now(UTC) + timedelta(hours=25)).skipped

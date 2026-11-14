@@ -807,7 +807,7 @@ def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -
     return all(r.status in FINISHED and r.updated_at is not None and r.updated_at < cutoff for r in records)
 
 
-def sweep_url(database_url: str, now: datetime | None, root: Path) -> SweepResult:
+def sweep_url(root: Path, database_url: str, now: datetime | None = None) -> SweepResult:
     """台帳の鍵のうち、実行（子を含む）がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す（A6・A12）。
 
     目印と排他は `sweep` と同じ。鍵ごとに DB 側の鍵のロックを待たずに試し、取れない鍵は触らない（I13）。
@@ -919,7 +919,7 @@ def session(root: Path, run_key: str, database_url: str | None = None) -> Iterat
     url = database_url or run_url(root, run_key)
     sqlite = _is_sqlite(url)
     with run_lock(root, run_key, database_url) as _held:
-        swept = sweep(root) if sqlite else sweep_url(url, None, root)
+        swept = sweep(root) if sqlite else sweep_url(root, url)
         launch(url, run_key)
         try:
             yield swept

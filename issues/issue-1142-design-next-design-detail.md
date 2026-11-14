@@ -256,7 +256,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `durable.check_file(path)` | 読み取り | SQLite のファイル | `bool` | 無し | `PRAGMA quick_check` が 1 行の `ok` を返せば真。ファイルが無ければ真 |
 | `durable.retire(root, run_key)` | 書き込み | 置き場・実行の鍵 | 移した先のパス | 鍵のファイルの本体・`-wal`・`-shm`・`-journal` をそろえて `dbos/retired/` へ移し、鍵ごとの目印 `dbos/<run_name>.checked` を消し、最後に `dbos/<run_name>.lock` を消す | 呼び手が `run_lock` を持ち、DBOS を閉じた後に呼ぶ（起動したプロセスが終わるときと、`sweep` が `wait=False` で取れた鍵）。耐久ワークフローがすべて `SUCCESS`・`ERROR`・`CANCELLED` のときだけ移す。待ちがあれば何も移さず消さない。移す前に `PRAGMA wal_checkpoint(TRUNCATE)` で WAL を本体へ書き戻す。`.lock` はロックを持ったまま消し、消した後に同じ鍵を待っていたプロセスは `run_lock` の inode の確かめで開き直す |
 | `durable.sweep(root, now)` | 書き込み | 置き場・時刻 | `SweepResult`（`retired`・`deleted`・`skipped`・`busy`） | 終わったファイルを移し、`retired/`・`broken/` の `KEEP_DAYS` より古いファイルを消す（本体と `-wal`・`-shm`・`-journal` をそろえて） | `maint_lock(root, wait=False)` を取り、取れなければ何もせず `skipped` を真にして返す。取れたら目印 `dbos/.swept` を読み直し、`CHECK_INTERVAL` より新しければ何もせず `skipped` を真にして返す。生きている置き場の鍵ごとに `run_lock(root, run_key, wait=False)` を試し、取れた鍵だけ状態を読んで `retire` を呼ぶ。取れない鍵（開いているプロセスがいる）は移さず `busy` に数える。本体の無い `.checked` は消し、本体の無い `.lock` は `run_lock` を試して取れたときだけ消す。走査したら目印の時刻を今にしてから `maint_lock` を放す。待ちを抱えたファイルは消さない（I8） |
-| `durable.sweep_url(url, now, root)` | 外部呼び出し | URL・時刻・置き場 | `SweepResult` | 台帳 `ndf_runs` に載った鍵のうち、実行がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す | 目印と排他は `sweep` と同じ（`root` の `maint_lock` と `dbos/.swept`）。台帳の鍵ごとに `run_lock(root, run_key, url, wait=False)`（DB 側の鍵のロック）を試し、取れない鍵は `busy` に数えて触らない。取れた鍵は、ロックを持ったまま `DBOSClient.list_workflows(application_name=<鍵の名前>)` で実行（子を含む）を集め、1 つでも `PENDING`・`ENQUEUED` か、`updated_at` が `now - KEEP_DAYS` より新しいものがあれば消さない。すべて条件を満たせば集めた ID をすべて並べて `delete_workflows(ids)` を呼び（`delete_children` は使わない）、台帳の行を消してからロックを放す（I8・I12・I13） |
+| `durable.sweep_url(root, url, now)` | 外部呼び出し | 置き場・URL・時刻 | `SweepResult` | 台帳 `ndf_runs` に載った鍵のうち、実行がすべて終わって `KEEP_DAYS` を過ぎた鍵の実行と台帳の行を消す | 目印と排他は `sweep` と同じ（`root` の `maint_lock` と `dbos/.swept`）。台帳の鍵ごとに `run_lock(root, run_key, url, wait=False)`（DB 側の鍵のロック）を試し、取れない鍵は `busy` に数えて触らない。取れた鍵は、ロックを持ったまま `DBOSClient.list_workflows(application_name=<鍵の名前>)` で実行（子を含む）を集め、1 つでも `PENDING`・`ENQUEUED` か、`updated_at` が `now - KEEP_DAYS` より新しいものがあれば消さない。すべて条件を満たせば集めた ID をすべて並べて `delete_workflows(ids)` を呼び（`delete_children` は使わない）、台帳の行を消してからロックを放す（I8・I12・I13） |
 | `durable.pending(root_or_url)` | 読み取り | 置き場か URL | `list[PendingRun]`（`run_name`・`workflow_id`・`status`・`updated_at`） | 無し | `PENDING`・`ENQUEUED` の実行を集める |
 | `store.sqlite_path(url)` | 純粋な関数 | URL | 実ファイルのパスか `None` | 無し | SQLite の URL なら `os.path.realpath` で解いた実ファイルのパスを返し、PostgreSQL の URL なら `None`。`open_store` と `restore` は同じこの関数で対象のファイルを決める。URL は #3092 の設計のまま `NDF_PROGRESS_DB` か、無ければ `sqlite:///<root>/progress.sqlite` |
 | `store.db_lock(path, exclusive)` | 書き込み | 実ファイル・排他か | 文脈マネージャ | 実ファイルが置き場の中でも外でも、`<実ファイル>.lock` を `fcntl.flock` で取る（`exclusive` なら `LOCK_EX \| LOCK_NB`、でなければ `LOCK_SH`） | 同じ実ファイルは、どのチェックアウトから・どちらの URL の書き方で開いても `sqlite_path` で同じパスに解け、同じ `<実ファイル>.lock` を取る。`state.lock` はチェックアウトごとに分かれるため、それだけでは接続が無いことを確かめられない。置き場の中のファイルだけ省くと、チェックアウト A の既定の DB を B が `NDF_PROGRESS_DB` で開いている間に、A の `restore` が通る（I11） |
@@ -290,13 +290,13 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | `durable.prepare_store(root, now)` | 共有で取り直した後の番号が自分と違う（退避の間に別の退避が割り込んだ） | (1) からやり直す。3 回で合わなければ何も変えずに止まった理由 `store_in_use` |
 | `durable.retire(root, run_key)` | 移す先に同じ名前がある | 日時を足した名前で移す。消さない |
 | `durable.sweep(root, now)` | 1 つのファイルの状態を読めない（壊れている・ロック中） | そのファイルは移さず消さず、`warnings` に載せて次のファイルへ進む。片付けの失敗で実行を止めない |
-| `durable.sweep(root, now)`・`sweep_url(url, now, root)` | 鍵の `run_lock` を `wait=False` で取れない（同じ鍵を開いたプロセスがいる） | その鍵は移さず消さず、`busy` に数えて次の鍵へ進む。目印は更新し、次の走査で見る |
-| `durable.sweep(root, now)`・`sweep_url(url, now, root)` | `maint_lock` を取れない（ほかのプロセスが検査か走査をしている） | 何もせず `skipped` を真にして返す |
+| `durable.sweep(root, now)`・`sweep_url(root, url, now)` | 鍵の `run_lock` を `wait=False` で取れない（同じ鍵を開いたプロセスがいる） | その鍵は移さず消さず、`busy` に数えて次の鍵へ進む。目印は更新し、次の走査で見る |
+| `durable.sweep(root, now)`・`sweep_url(root, url, now)` | `maint_lock` を取れない（ほかのプロセスが検査か走査をしている） | 何もせず `skipped` を真にして返す |
 | `store.backup(engine, root, now)` | 控えの書き込みに失敗する（容量不足など） | 書きかけの控えを消し、`warnings` に載せて進む。古い控えは消さない |
 | `store.restore(url, root, backup)` | 控えが `quick_check` を通らない | 何も移さずに止まる（`store_broken`）。一時名の写しを消す。結果に次に新しい控えのパスを載せる |
 | `store.restore(url, root, backup)` | 置き場のロックか、実ファイルの `<実ファイル>.lock` を排他で取れない（進行表の DB を開いたプロセスがいる。別のチェックアウトのプロセスも含む） | 何も移さずに止まる（`store_in_use`） |
 | `store.restore(url, root, backup)` | URL（PostgreSQL）を渡した | 何も移さずに止まる（`restore_unsupported`）。結果に「PostgreSQL の控えと戻しは DB の運用で行う」を載せる |
-| `durable.sweep_url(url, now, root)` | DB に届かない | 消さずに `warnings` に載せて進む。片付けの失敗で実行を止めない |
+| `durable.sweep_url(root, url, now)` | DB に届かない | 消さずに `warnings` に載せて進む。片付けの失敗で実行を止めない |
 | `store.open_store(url, root)` | `quick_check` が `ok` でない | 止まった理由 `store_broken`。結果に最新の控えのパスと `ndf progress restore --from <控え>` を載せる |
 | `store.open_store(url, root)` | `database is locked` が `busy_timeout` を超えた | 止まった理由 `store_busy`（再試行の方針は止まった理由の表） |
 
