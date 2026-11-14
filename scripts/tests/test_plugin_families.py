@@ -6,9 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "plugin_families", Path(__file__).resolve().parents[1] / "lib/plugin_families.py"
-)
+_SPEC = importlib.util.spec_from_file_location("plugin_families", Path(__file__).resolve().parents[1] / "lib/plugin_families.py")
 assert _SPEC and _SPEC.loader
 plugin_families = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(plugin_families)

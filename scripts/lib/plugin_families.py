@@ -16,11 +16,7 @@ def distributed_families(root: Path) -> list[str]:
     """配る family の名前を辞書順で返す。"""
     marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
     registered = {Path(p["source"]).as_posix().removeprefix("./") for p in marketplace["plugins"]}
-    return sorted(
-        d.name
-        for d in (root / "plugins").iterdir()
-        if (d / "manifests").is_dir() and f"plugins/{d.name}" in registered
-    )
+    return sorted(d.name for d in (root / "plugins").iterdir() if (d / "manifests").is_dir() and f"plugins/{d.name}" in registered)
 
 
 if __name__ == "__main__":
