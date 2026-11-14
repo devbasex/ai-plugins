@@ -25,6 +25,8 @@ from ndf.contracts import limits
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
 
+# claude が標準出力へ出す結果の JSON の利用上限（`api_error_status: 429`）
+CLAUDE_USAGE_LIMIT_JSON = re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE)
 # 利用上限の行。CLI が出す行の形（行頭。codex の `ERROR:` の前置きだけを許す）に限り、コメントの写し
 # （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない
 USAGE_LIMIT_LINES = (
@@ -32,7 +34,7 @@ USAGE_LIMIT_LINES = (
     re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?Monthly request limit reached", re.MULTILINE),
-    re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE),
+    CLAUDE_USAGE_LIMIT_JSON,
     re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
 )
 # 早期の警告（致命ではない）の行
@@ -160,19 +162,34 @@ def stall_seconds(agent: str) -> float:
         return limits.seconds("monitor.stall-default")
 
 
+def _group_alive(proc: subprocess.Popen) -> bool:
+    """プロセスの組に生きた成員が残るか。直接の子は先に回収し、終わった子だけで残っているとみなさない。"""
+    proc.poll()
+    try:
+        os.killpg(proc.pid, 0)
+    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 組の成員が残っていない
+        return False
+    return True
+
+
 def stop(proc: subprocess.Popen) -> None:
-    """プロセスの組を止める。猶予の後も残れば SIGKILL を送る。"""
+    """プロセスの組を止める。直接の子が終わっても組に子孫が残れば、猶予の後に組へ SIGKILL を送る。"""
     grace = limits.seconds("procs.stop-tree")
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:  # noqa: NDF401 外部コマンド: 既に終わっている
+    interval = limits.value("procs.stop-tree", "interval")
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:  # noqa: NDF401 外部コマンド: 既に終わっている
+        proc.poll()
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not _group_alive(proc):
             return
-        try:
-            proc.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:  # noqa: S112 外部コマンド: 猶予を超えたら次の信号を送る
-            continue
+        time.sleep(interval)
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=grace)
 
 
 @dataclass
@@ -194,9 +211,16 @@ def _report_warnings(w: _Watch) -> None:
         diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
 
 
+def _out_usage_limit(spec: Launch) -> Optional[str]:
+    """claude の標準出力の結果の JSON に利用上限があれば、その旨の文を返す（他の CLI の標準出力は読まない）。"""
+    if spec.agent != "claude" or not CLAUDE_USAGE_LIMIT_JSON.search(tail(spec.paths.out)):
+        return None
+    return "標準出力の結果の JSON に api_error_status 429"
+
+
 def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, str]]:
-    """終わり方を決める。まだ続くなら None。"""
-    hit = usage_limit(tail(w.spec.paths.err))
+    """終わり方を決める。まだ続くなら None。利用上限は終了コードより先に見る。"""
+    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec)
     if hit:
         return AgentState.USAGE_LIMIT, hit
     if code is not None:

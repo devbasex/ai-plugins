@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters import cli, run_log
+from ndf.contracts import limits
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
@@ -173,3 +174,72 @@ def test_half_written_line_is_closed_before_next(tmp_path):
     run_log._append_line(path, b'{"a": 1}\n')
 
     assert path.read_bytes().splitlines()[-1] == b'{"a": 1}'
+
+
+def test_token_shapes_are_hidden_without_secret_env():
+    log = cli.open_run("entry", location="repo")
+
+    log.write(
+        "fail",
+        out="push https://user:pa55word@github.com/o/r.git で ghp_abcdefgh12345678 を使った",
+        headers=["Authorization: Bearer abc.def.ghi"],
+    )
+
+    text = log.path.read_text()
+    assert "pa55word" not in text and "ghp_abcdefgh12345678" not in text and "abc.def.ghi" not in text
+
+
+@pytest.mark.parametrize("location", ["../outside", "/abs/outside", "..", "a/b"])
+def test_location_outside_runs_is_refused_before_touching_dirs(tmp_path, location):
+    old = run_log.runs_dir().parent / "outside" / "2000-01-01"
+    old.mkdir(parents=True)
+
+    with pytest.raises(cli.RunLogError):
+        cli.open_run("entry", location=location, now=NOW)
+
+    assert old.is_dir() and cli.current() is None
+
+
+def test_stderr_sink_keeps_full_text_in_part_lines(monkeypatch, capsys):
+    monkeypatch.setenv(cli.ENV_RUN_LOG_SINK, "stderr")
+    log = cli.open_run("entry", run_id="s")
+    capsys.readouterr()
+    text = ('あ\x01"x' * 20000) + "末尾"
+
+    log.write("big", body=text)
+
+    raw = capsys.readouterr().err.splitlines()
+    limit = int(limits.value("run-log.line", "count"))
+    assert all(len(line.encode()) + 1 <= limit for line in raw)
+    rows = [json.loads(line) for line in raw]
+    parts = [r["fields"] for r in rows if r["event"] == "text_part"]
+    body = rows[-1]["fields"]["body"]
+    assert "".join(p["text"] for p in sorted(parts, key=lambda p: p["part"])) == text
+    assert body["parts"] == len(parts) and body["head"] == text[:200] and body["chars"] == len(text)
+
+
+def test_whole_line_fits_limit_with_nested_strings():
+    log = cli.open_run("entry", location="repo")
+    a, b = "a" * 20000, "b" * 20000
+
+    log.write("end", result={"summary": a, "items": [{"text": b}]}, exit=0)
+
+    raw = log.path.read_bytes().splitlines()[-1]
+    assert len(raw) + 1 <= 32000
+    result = json.loads(raw)["fields"]["result"]
+    values = (result["summary"], result["items"][0]["text"])
+    moved = [v for v in values if isinstance(v, dict)]
+    kept = [v for v in values if isinstance(v, str)]
+    assert len(moved) == 1 and {Path(moved[0]["full_text"]).read_text(), *kept} == {a, b}
+
+
+def test_whole_fields_move_when_many_short_strings_overflow():
+    log = cli.open_run("entry", location="repo")
+    many = ["z" * 150 for _ in range(400)]
+
+    log.write("end", result=many)
+
+    raw = log.path.read_bytes().splitlines()[-1]
+    assert len(raw) + 1 <= 32000
+    moved = json.loads(raw)["fields"]["fields_json"]
+    assert json.loads(Path(moved["full_text"]).read_text()) == {"result": many}

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -31,12 +32,28 @@ RUNS_DIR = "runs"
 SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY", re.IGNORECASE)
 SECRET_MIN = 8
 MASK = "[REDACTED]"
+# 環境変数に無い秘密も、トークンの形で伏せる（I5）。規則は plugins/ndf/scripts/lib/secret_redact.py の _PATTERNS と同じ
+# （ndf-next は ndf のスクリプトを読み込めないため写す）
+SECRET_SHAPES = (
+    # URL の資格情報（`https://user:pass@host`・`https://<トークン>@host`）
+    (re.compile(r"(?<=://)[^\s/@]+@"), MASK + "@"),
+    # GitHub のトークンの形
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"), MASK),
+    # `x-access-token:<値>` が URL の外に現れたとき
+    (re.compile(r"(?<=x-access-token:)[^\s@]+"), MASK),
+    # 認証ヘッダー（`Authorization: Bearer <値>`・`Proxy-Authorization: ...`）は値ごと伏せる
+    (re.compile(r"(?i)\b((?:proxy-)?authorization\s*[:=]\s*)[^\r\n]+"), r"\1" + MASK),
+)
 # 全文ファイルへ逃がした値の、行に残す先頭の字数
 HEAD_CHARS = 200
+# JSON に書いた 1 字の最大のバイト数（制御文字の `\u00XX`）。stderr の続きの行の 1 行に入る字数を決める
+JSON_CHAR_BYTES = 6
+# 置き場のリポジトリの名前に使えない値（runs の下の 1 階層だけを許す）
+UNSAFE_LOCATION = re.compile(r"[/\\\x00]")
 
 
 class RunLogError(Exception):
-    """記録を開けない（置き場に書けない・知らない出力先・既に開いている）。"""
+    """記録を開けない（置き場に書けない・知らない出力先・既に開いている・置き場の名前が使えない）。"""
 
 
 def _secret_values() -> list[str]:
@@ -47,11 +64,13 @@ def _secret_values() -> list[str]:
 def _mask(text: str, secrets: list[str]) -> str:
     for s in secrets:
         text = text.replace(s, MASK)
+    for pattern, repl in SECRET_SHAPES:
+        text = pattern.sub(repl, text)
     return text
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
-    """文字列・配列・辞書の中の秘密の環境変数の値を伏せる。"""
+    """文字列・配列・辞書の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。"""
     secrets = _secret_values() if secrets is None else secrets
     if isinstance(value, str):
         return _mask(value, secrets)
@@ -60,6 +79,20 @@ def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact(v, secrets) for v in value]
     return value
+
+
+def _string_slots(value: Any) -> list[tuple[Any, Any]]:
+    """入れ子の辞書・配列の中の文字列の置き場（入れ物と鍵）を並べる。"""
+    if isinstance(value, dict):
+        items: Any = value.items()
+    elif isinstance(value, list):
+        items = enumerate(value)
+    else:
+        return []
+    slots: list[tuple[Any, Any]] = []
+    for key, item in items:
+        slots.extend([(value, key)] if isinstance(item, str) else _string_slots(item))
+    return slots
 
 
 def _append_line(path: Path, data: bytes) -> None:
@@ -93,30 +126,56 @@ class RunLog:
             env[ENV_RUN_LOG] = str(self.path)
         return env
 
-    def _blob(self, text: str) -> dict[str, Any]:
-        """行の上限を超える文字列を全文ファイルへ逃がし、行には置き場と先頭だけを残す。"""
-        if self.path is None:
-            return {"head": text[:HEAD_CHARS], "bytes": len(text.encode())}
-        self._blobs += 1
-        blob = self.path.with_name(f"{self.path.stem}.{self.run_id}.{self._blobs}.txt")
-        blob.write_text(text, encoding="utf-8")
-        return {"full_text": str(blob), "head": text[:HEAD_CHARS]}
+    def _line(self, event: str, body: Any) -> bytes:
+        line = {"at": datetime.now(timezone.utc).isoformat(), "run_id": self.run_id, "parent_id": self.parent_id}
+        line.update(entry=self.entry, event=event, fields=body)
+        return (json.dumps(line, ensure_ascii=False, default=str) + "\n").encode()
 
-    def _fit(self, fields: dict[str, Any]) -> dict[str, Any]:
+    def _emit(self, data: bytes) -> None:
+        if self.path is None:
+            sys.stderr.write(data.decode())
+        else:
+            _append_line(self.path, data)
+
+    def _blob(self, text: str, limit: int) -> dict[str, Any]:
+        """文字列を切らずに全文で逃がし、行には参照と先頭だけを残す（I4）。
+
+        file は全文ファイル（`full_text`）へ、stderr は全文を分けた続きの行（event `text_part`。`blob` の番号と
+        `part`/`parts` で並べ直せる）として先に出す。
+        """
+        self._blobs += 1
+        ref = {"head": text[:HEAD_CHARS], "chars": len(text), "sha256": hashlib.sha256(text.encode()).hexdigest()}
+        if self.path is not None:
+            blob = self.path.with_name(f"{self.path.stem}.{self.run_id}.{self._blobs}.txt")
+            blob.write_text(text, encoding="utf-8")
+            return {**ref, "full_text": str(blob)}
+        frame = {"blob": self._blobs, "part": 0, "parts": 0, "text": ""}
+        size = max(1, (limit - len(self._line("text_part", frame))) // JSON_CHAR_BYTES)
+        parts = [text[i : i + size] for i in range(0, len(text), size)] or [""]
+        for n, part in enumerate(parts, 1):
+            self._emit(self._line("text_part", {**frame, "part": n, "parts": len(parts), "text": part}))
+        return {**ref, "blob": self._blobs, "parts": len(parts)}
+
+    def _fit(self, event: str, body: dict[str, Any]) -> bytes:
+        """改行を含む行全体を上限に収める。長い文字列から順に逃がし、なお超えれば `fields` 全体を逃がす（I4）。"""
         limit = int(limits.value("run-log.line", "count"))
-        return {k: self._blob(v) if isinstance(v, str) and len(v.encode()) > limit else v for k, v in fields.items()}
+        data = self._line(event, body)
+        if len(data) <= limit:
+            return data
+        for holder, key in sorted(_string_slots(body), key=lambda s: len(s[0][s[1]].encode()), reverse=True):
+            if len(holder[key]) <= HEAD_CHARS:
+                break
+            holder[key] = self._blob(holder[key], limit)
+            data = self._line(event, body)
+            if len(data) <= limit:
+                return data
+        whole = json.dumps(body, ensure_ascii=False, default=str)
+        return self._line(event, {"fields_json": self._blob(whole, limit)})
 
     def write(self, event: str, **fields: Any) -> None:
         """1 行を書く。書けなければ例外を投げず `failed` に理由を持ち、標準エラーへ理由を 1 回だけ出す。"""
         try:
-            body = self._fit(redact(fields))
-            line = {"at": datetime.now(timezone.utc).isoformat(), "run_id": self.run_id, "parent_id": self.parent_id}
-            line.update(entry=self.entry, event=event, fields=body)
-            data = (json.dumps(line, ensure_ascii=False, default=str) + "\n").encode()
-            if self.path is None:
-                sys.stderr.write(data.decode())
-            else:
-                _append_line(self.path, data)
+            self._emit(self._fit(event, redact(fields)))
         except OSError as exc:
             self._fail(f"実行の記録に書けない: {exc}")
 
@@ -177,8 +236,16 @@ class RunTarget:
     now: datetime
 
 
+def _repo_dir(target: RunTarget) -> Path:
+    """置き場のリポジトリのディレクトリ。runs の下の 1 階層でなければ、作る・消すの前に `RunLogError`。"""
+    name = target.location or Path.cwd().name
+    if name in ("", ".", "..") or UNSAFE_LOCATION.search(name):
+        raise RunLogError(f"記録の置き場のリポジトリの名前に使えない: {name!r}（{RUNS_DIR} の下の 1 階層の名前だけ）")
+    return runs_dir() / name
+
+
 def _root_path(target: RunTarget) -> Path:
-    repo_dir = runs_dir() / (target.location or Path.cwd().name)
+    repo_dir = _repo_dir(target)
     day_dir = repo_dir / target.now.strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
     _prune(repo_dir, target.now.date())

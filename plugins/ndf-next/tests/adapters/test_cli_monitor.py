@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,44 @@ def test_stop_ends_process_group():
 
     assert proc.poll() is not None
     cli.stop(proc)
+
+
+@pytest.mark.parametrize(("agent", "state"), [("claude", "usage_limit"), ("codex", "failed")])
+def test_claude_stdout_usage_limit_is_read_before_exit_code(tmp_path, agent, state):
+    script = 'print(\'{"type":"result","is_error":true,"api_error_status":429}\')\nraise SystemExit(1)\n'
+
+    status = cli.run_agent(launch(tmp_path, script, agent=agent), poll=POLL)
+
+    assert status.state == state
+
+
+def _running(pid: int) -> bool:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def test_stop_kills_descendants_that_outlive_the_cli(tmp_path):
+    pid_file = tmp_path / "pid"
+    child = (
+        "import os, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+        "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+        "time.sleep(60)\n"
+    )
+    parent = f"import subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', {child!r}, {str(pid_file)!r}])\ntime.sleep(60)\n"
+    proc = subprocess.Popen([sys.executable, "-c", parent], start_new_session=True)
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    pid = int(pid_file.read_text())
+
+    cli.stop(proc)
+
+    deadline = time.monotonic() + 5
+    while _running(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert proc.poll() is not None and not _running(pid)
