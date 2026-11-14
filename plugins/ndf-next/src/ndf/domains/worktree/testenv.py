@@ -242,6 +242,12 @@ def stop(t: Target) -> int:
     return compose(t, row, "stop")
 
 
+def _down_args(t: Target, volumes: bool = False) -> list[str]:
+    """破棄の `compose` の引数。ボリュームを消すのは求められたときか、宣言の `discard_volumes` が許すときだけ（消すと戻せない）。"""
+    drop = volumes or testenv_decide.discards_volumes(t.at("discard_volumes"))
+    return ["down", *(["--volumes"] if drop else [])]
+
+
 def down(t: Target, volumes: bool = False) -> int:
     """破棄してスロットを解放する。破棄に失敗したら解放しない（コンテナとポートが残ったまま番号を渡さない）。"""
     row = t.book.current(t.key)
@@ -249,8 +255,7 @@ def down(t: Target, volumes: bool = False) -> int:
         return 0
     if t.shell.has_docker():
         t.book.update(t.key, lambda r: r.pop("golden_tag", None))
-        drop = volumes or testenv_decide.discards_volumes(t.at("discard_volumes"))
-        rc = compose(t, row, "down", *(["--volumes"] if drop else []))
+        rc = compose(t, row, *_down_args(t, volumes))
         if rc not in (0, 2):
             raise TestenvError(f"破棄に失敗した。スロットは解放していない: {row['environment']}")
     if not t.book.update(t.key, _release):
@@ -362,8 +367,7 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
     if owner == placement.FOREIGN:
         return {**item, "result": "kept", "reason": why}
     if owner == placement.OWN:
-        drop = testenv_decide.discards_volumes(t.at("discard_volumes"))
-        rc = t.shell.docker_run("compose", "-p", env, "down", *(["--volumes"] if drop else [])).returncode
+        rc = t.shell.docker_run("compose", "-p", env, *_down_args(t)).returncode
         if rc != 0:
             return {**item, "result": "kept", "reason": f"破棄に失敗した（終了コード {rc}）"}
     t.book.update(str(wt), _release)
