@@ -13,8 +13,7 @@
     "./skills/ml-model-structure",
     "./skills/ndf-policies",
     "./skills/notion-writing",
-    "./skills/pr-tests",
-    "./skills/problem-solving"
+    "./skills/pr-tests"
   ],
   "hooks": "./hooks/codex.json"
 }
