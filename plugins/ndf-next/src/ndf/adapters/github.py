@@ -314,6 +314,16 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     return GitHubError(f"GitHub へ届かない: {label}: {exc}")
 
 
+def _page_cap(name: str) -> int:
+    """一覧を読むページ数の上限（limits.json の `name` の `count`）。"""
+    return int(limits.value(name, "count"))
+
+
+def _too_many_pages(what: str, pages: int, name: str) -> GitHubError:
+    """一覧が上限 `name` の `pages` ページを超えたときの失敗（途中で切らずに止まる）。`what` は主語と助詞まで。"""
+    return GitHubError(f"{what} {pages} ページを超える（上限 {name}）")
+
+
 @contextmanager
 def _translating(label: str, detail_body: bool = False) -> Iterator[None]:
     """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。"""
@@ -435,14 +445,14 @@ class GitHub:
 
     def _pages(self, path: str) -> list[dict]:
         """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
-        pages = int(limits.value("github.list-pages", "count"))
+        pages = _page_cap("github.list-pages")
         rows: list[dict] = []
         for page in range(1, pages + 1):
             body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
             rows.extend(body)
             if len(body) < PER_PAGE:
                 return rows
-        raise GitHubError(f"{path} が {pages} ページを超える（上限 github.list-pages）")
+        raise _too_many_pages(f"{path} が", pages, "github.list-pages")
 
     def count_issues(self, labels: Sequence[str] = (), state: str = "OPEN") -> int:
         """ラベルと状態の Issue（PR を除く）の件数を `totalCount` で数える。既定の件数の上限で切れない（#3393）。"""
@@ -458,7 +468,7 @@ class GitHub:
 
         読んだ件数が `totalCount` と合わなければ `GitHubError`。`github.list-pages` ページを超えたら途中で切らずに止まる。
         """
-        pages = int(limits.value("github.list-pages", "count"))
+        pages = _page_cap("github.list-pages")
         variables: dict[str, Any] = {"labels": list(labels) if labels else None, "states": [state], "after": None}
         numbers: list[int] = []
         for _ in range(pages):
@@ -469,7 +479,7 @@ class GitHub:
                     raise GitHubError(f"Issue の番号を {len(numbers)} 件読んだが、totalCount は {conn['totalCount']} 件")
                 return numbers
             variables["after"] = conn["pageInfo"]["endCursor"]
-        raise GitHubError(f"Issue の一覧が {pages} ページを超える（上限 github.list-pages）")
+        raise _too_many_pages("Issue の一覧が", pages, "github.list-pages")
 
     def visibilities(self, repos: Iterable[str]) -> dict[str, str]:
         """リポジトリ（`<所有者>/<リポジトリ>`）ごとの公開範囲（`PUBLIC`・`PRIVATE`・`INTERNAL`）を 1 回のクエリで読む（3391-1）。
@@ -501,14 +511,14 @@ class GitHub:
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""
-        pages = int(limits.value("github.check-runs", "count"))
+        pages = _page_cap("github.check-runs")
         runs: list[dict] = []
         for page in range(1, pages + 1):
             body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": PER_PAGE, "page": page})
             runs.extend(body["check_runs"])
             if len(runs) >= int(body["total_count"]) or not body["check_runs"]:
                 return runs
-        raise GitHubError(f"{sha} のチェックが {pages} ページを超える（上限 github.check-runs）")
+        raise _too_many_pages(f"{sha} のチェックが", pages, "github.check-runs")
 
     def job_log(self, job_id: int) -> str:
         """Actions のジョブのログの本文。"""
