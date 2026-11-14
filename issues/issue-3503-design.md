@@ -21,7 +21,7 @@
 | 使い捨ての git リポジトリで再現手順 1 の状態を作り、書き直す手順の形を打った結果（下の「処理の流れ」の実測） | 実測 | 宛先の先端から切った短命ブランチへ 1 件ずつ cherry-pick すると、差分は選んだコミットだけになる。空になったコミットは飛ばせる。push の直前の rebase で、宛先の新しい先端を含む |
 | 「環境ブランチへ届くのは、選んだコミットだけになる。CI が最新の起点を求めるリポジトリでも、環境に入っていない別の機能は入らない」（#3503 の期待する結果） | 起票者の文 | 利用者の指示の原文ではない。PR #3502 の cross-review の指摘を起票者が本文へ書いたもの |
 
-要求と受け入れ条件は #3503 の本文にある（コピーは [issues/issue-3503-requirements.md](issue-3503-requirements.md) ）。この文書は「どう作るか」だけを扱う。詳細設計（手順ごとのコマンドの全文と異常系）は後のステップが `issues/issue-3503-design-detail.md` に書く。
+要求と受け入れ条件は #3503 の本文にある（コピーは [issues/issue-3503-requirements.md](issue-3503-requirements.md) ）。この文書は「どう作るか」だけを扱う。詳細設計（手順ごとのコマンドの全文と異常系）は [issues/issue-3503-design-detail.md](issue-3503-design-detail.md) にある。
 
 ## ドメインモデル
 
@@ -36,7 +36,7 @@
 
 | 上流（正本） | 下流（合わせる側） | 関係 | 何を合わせるか |
 | --- | --- | --- | --- |
-| 環境ブランチへ届ける手順（`cherry-pick-pr` の手順 3〜8） | ブランチ全体を環境へ届ける手順（`deploy` の「cherry-pick-pr との使い分け」の表） | 順応者（下流が上流の振る舞いをそのまま書き写す） | 表の cherry-pick-pr の列。表の持ち主は `deploy` で、cherry-pick-pr の列は `cherry-pick-pr` の手順が変わったときに `deploy` の側が合わせる（決定 5）。deploy の列と処理フローは `deploy` だけが決める |
+| 環境ブランチへ届ける手順（`cherry-pick-pr` の手順 3〜8） | ブランチ全体を環境へ届ける手順（`deploy` の「cherry-pick-pr との使い分け」の表） | 順応者（conformist。下流が上流の振る舞いをそのまま書き写す） | 表の cherry-pick-pr の列。表の持ち主は `deploy` で、cherry-pick-pr の列は `cherry-pick-pr` の手順が変わったときに `deploy` の側が合わせる（決定 5）。deploy の列と処理フローは `deploy` だけが決める |
 
 ### 集約
 
@@ -144,13 +144,7 @@
 
 変えない要素は、手順 1・2・4・7・8 のコマンドと、原則 1・2・4・5 の文である（受け入れ条件 8）。
 
-**原則 3 か手順 5 を引いてベースブランチの取り込みを書くほかの本文**（要求の対象範囲の 4 つ目）は、`deploy` の使い分けの表の 1 セルだけである。検索の結果（2026-11-14、この設計の起点のコミット）:
-
-| 検索 | 当たった箇所 | 判定 |
-| --- | --- | --- |
-| `grep -rnE "原則 ?3\|ブランチ運用の原則" --include=*.md plugins/ docs/ README.md AGENTS.md CLAUDE.md`（`docs/development-history/` と `docs/changelog/` を除く） | `cherry-pick-pr` の 2 か所（35 行目の表の前置き・原則 5 を引く行）と `ndf-policies` の見出し（`plugins/ndf/` と `plugins/ndf-next/` の両方）、`docs/specifications/cross-refactoring-verify-and-final-gate.md:31` | `cherry-pick-pr` と `ndf-policies` は構成要素の表に載る。`cross-refactoring-verify-and-final-gate.md` の「原則 3」は #1932 の原則で、ブランチ運用の原則ではない |
-| `grep -rnE "ベースブランチ(を\|の)?(最新(を\|の)?)?取り込" --include=*.md plugins/ docs/` | `cherry-pick-pr` の表と手順 5、`ndf-policies` の原則 3、`deploy` の 13・28・102（作り直しは 117）・131・150・157 行目、`merged`・`pr`・`release`・`development-workflow` と `docs/specifications/` の 6 文書 | `deploy` の 28 行目の cherry-pick-pr の列だけが cherry-pick-pr の振る舞いを述べる（構成要素の表に載る）。`deploy` の残りは deploy 自身の振る舞いである。`merged`・`pr`・`release`・`development-workflow`・`docs/specifications/` は、作業中のブランチや実装のプランへの取り込みを述べ、cherry-pick-pr を引かない |
-| `cherry-pick-pr` を含む `.md` の各行のうち、取り込み・merge・手順 5・ベースブランチを含む行（`plugins/`・`docs/`・`README.md`） | `issue-plan-strategy` の 386 行目、`merged` の 332 行目、`problem-solving` の 177 行目 | いずれも「環境ブランチを feature に merge しない」「ベースブランチを汚染しない」を述べ、書き直した手順と食い違わない |
+### 構成要素図
 
 ```mermaid
 graph TB
@@ -181,9 +175,21 @@ graph LR
   O2 -->|手順 7 gh pr create| GH["GitHub の Pull Request<br/>（宛先は環境ブランチ）"]
 ```
 
+### 原則 3 と手順 5 を引くほかの本文
+
+**原則 3 か手順 5 を引いてベースブランチの取り込みを書くほかの本文**（要求の対象範囲の 4 つ目）は、`deploy` の使い分けの表の 1 セルだけである。検索の結果（2026-11-14、この設計の起点のコミット）:
+
+| 検索 | 当たった箇所 | 判定 |
+| --- | --- | --- |
+| `grep -rnE "原則 ?3\|ブランチ運用の原則" --include=*.md plugins/ docs/ README.md AGENTS.md CLAUDE.md`（`docs/development-history/` と `docs/changelog/` を除く） | `cherry-pick-pr` の 2 か所（35 行目の表の前置き・原則 5 を引く行）と `ndf-policies` の見出し（`plugins/ndf/` と `plugins/ndf-next/` の両方）、`docs/specifications/cross-refactoring-verify-and-final-gate.md:31` | `cherry-pick-pr` と `ndf-policies` は構成要素の表に載る。`cross-refactoring-verify-and-final-gate.md` の「原則 3」は #1932 の原則で、ブランチ運用の原則ではない |
+| `grep -rnE "ベースブランチ(を\|の)?(最新(を\|の)?)?取り込" --include=*.md plugins/ docs/` | `cherry-pick-pr` の表と手順 5、`ndf-policies` の原則 3、`deploy` の 13・28・102（作り直しは 117）・131・150・157 行目、`merged`・`pr`・`release`・`development-workflow` と `docs/specifications/` の 6 文書 | `deploy` の 28 行目の cherry-pick-pr の列だけが cherry-pick-pr の振る舞いを述べる（構成要素の表に載る）。`deploy` の残りは deploy 自身の振る舞いである。`merged`・`pr`・`release`・`development-workflow`・`docs/specifications/` は、作業中のブランチや実装のプランへの取り込みを述べ、cherry-pick-pr を引かない |
+| `cherry-pick-pr` を含む `.md` の各行のうち、取り込み・merge・手順 5・ベースブランチを含む行（`plugins/`・`docs/`・`README.md`） | `issue-plan-strategy` の 386 行目、`merged` の 332 行目、`problem-solving` の 177 行目 | いずれも「環境ブランチを feature に merge しない」「ベースブランチを汚染しない」を述べ、書き直した手順と食い違わない |
+
 ## 処理の流れ
 
 手順 5 の merge を除き、cherry-pick を手順 5 に、宛先の最新の取り込みを手順 6 に置く。手順 2・4・7・8 の番号とコマンドは変わらない。
+
+### 手順 3〜8 の順序
 
 図は実行のときに動く手順 3〜8 だけを描く。核心ルールの表・原則 3・`deploy` の使い分けの表は、読まれる文書で実行されないため描かない。
 
@@ -226,9 +232,11 @@ sequenceDiagram
   S->>G: 手順 8 元のブランチへ戻る（E7）
 ```
 
-手順 6 の衝突は、手順 5 の衝突と扱いを分ける。手順 5 は利用者が選んだ差分を当てる場面で、今の扱い（解消して続け、報告に書く）を変えない（要求の前提 2）。手順 6 は手順 4 の後に宛先へ入った別のコミットとの衝突で、push せずに止まる（要求の E5）。
+手順 6 の衝突は、手順 5 の衝突と扱いを分ける。手順 5 は利用者が選んだ差分を当てる場面で、今の扱い（解消して続け、報告に書く）を変えない（要求の前提 2）。手順 6 は手順 4 の後に宛先へ入った別のコミットとの衝突で、push せずに止まる（要求のドメインイベント E5 の失敗時の扱い）。
 
-**形の実測**（使い捨てのリポジトリ。`develop` に機能 A と修正 B を `--no-ff` の merge でマージし、`qa/staging` はどちらも持たない。git 2.53.0、2026-11-14）:
+### 形の実測
+
+使い捨てのリポジトリで形を確かめた（`develop` に機能 A と修正 B を `--no-ff` の merge でマージし、`qa/staging` はどちらも持たない。git 2.53.0、2026-11-14）。
 
 | 確かめたこと | 打った形 | 結果 |
 | --- | --- | --- |
@@ -259,7 +267,7 @@ sequenceDiagram
 
 merge で取り込むと、宛先が手順 4 の後に進んだとき、短命ブランチに merge のコミットが載り、宛先へ足すコミットが選んだものだけでなくなる。rebase は短命ブランチ自身のコミット（push 前で、ほかの人がまだ持たない）だけを付け直すため、共有の履歴を書き換えない。強制 push も要らない。rebase は上流にすでにある変更を既定で落とす（STD2）ので、足すコミットが 0 件になったら push しない（I5）。
 
-rebase が一部のコミットだけを落とす場合もある（手順 4 の後に、選んだコミットと同じ変更が宛先へ入ったとき）。落ちたコミットも飛ばしたコミットの列に載せる（I4）。rebase の前と後で `git log --format=%B origin/<環境ブランチ>..HEAD` から `-x` の行のハッシュを抜き、前にあって後に無いハッシュを列に足す。`-x` の行は元のコミットのハッシュで、rebase の前後で変わらない（I3、実測の 7 行目）。rebase の出力の `skipped previously applied commit` は短命ブランチ側のハッシュで、元のコミットのハッシュではないため使わない。
+rebase が一部のコミットだけを落とす場合もある（手順 4 の後に、選んだコミットと同じ変更が宛先へ入ったとき）。落ちたコミットも飛ばしたコミットの列に載せる（I4）。rebase の前と後で `git log --format=%B origin/<環境ブランチ>..HEAD` から `-x` の行のハッシュを抜き、前にあって後に無いハッシュを列に足す。`-x` の行は元のコミットのハッシュで、rebase の前後で変わらない（I3、「形の実測」の表の 7 行目）。rebase の出力の `skipped previously applied commit` は短命ブランチ側のハッシュで、元のコミットのハッシュではないため使わない。
 
 置き場所は push の直前（手順 6）にする。手順 4 で作った直後に取り込んでも、cherry-pick と利用者の衝突の解消の間に宛先が進む。
 
@@ -320,7 +328,7 @@ rebase が一部のコミットだけを落とす場合もある（手順 4 の�
 | 受け入れ条件 2・I3 | 同じ状態で、修正 B の cherry-pick が空にならず、`git log -1 --format=%B` に元のハッシュの行がある | `-x` を外すと行が消える。merge を戻すと空になって止まる |
 | 受け入れ条件 3・I6 | 修正 B のブランチで 1 つ目の一覧が空のとき、2 つ目の一覧に修正 B が出る。2 つとも空の状態では、ハッシュを求めて手順 4 へ進まない | 2 つ目の一覧を除くと候補が 0 件のまま手順 4 へ進む |
 | 受け入れ条件 4・I2 | 手順 4 の後に環境ブランチへ別のコミットを入れても、push した短命ブランチで `git merge-base --is-ancestor origin/<環境ブランチ> <短命ブランチ>` が 0 になる | 手順 6 の取得し直しを外すと 1 になる |
-| 手順 6 の衝突（要求の E5） | 宛先へ入ったコミットと衝突すると、rebase を中止し、push せずに衝突したファイルを報告する | 中止を外すと、rebase の途中の状態で push に進む |
+| 手順 6 の衝突（要求のドメインイベント E5 の失敗時の扱い） | 宛先へ入ったコミットと衝突すると、rebase を中止し、push せずに衝突したファイルを報告する | 中止を外すと、rebase の途中の状態で push に進む |
 | 受け入れ条件 5・I4（手順 5 で空） | 選んだコミットのうち手順 4 の時点で環境ブランチにあるものは、cherry-pick で空になって飛ばされ、元のハッシュが報告の列に並ぶ。空のコミットはできない | 空の判定を外すと空で止まったままになる |
 | 受け入れ条件 5・I4（手順 6 で落ちる） | 修正 B と修正 C を選び、手順 5 の後に環境ブランチへ修正 B の cherry-pick を入れると、rebase の後の差分は修正 C の 1 件になり、修正 B の元のハッシュが報告の列に並ぶ | 前後の照らし合わせを外すと、修正 B が列に載らない |
 | 受け入れ条件 5・I5 | 選んだコミットがすべて飛ばされるか落ちると、push と Pull Request を作らず、列を報告して元のブランチへ戻る | 0 件の判定を外すと、差分の無いブランチを push する |
