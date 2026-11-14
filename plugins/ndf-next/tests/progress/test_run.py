@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
@@ -296,6 +297,16 @@ def test_facts_of_reads_the_declarations_and_the_context(repo):
     (repo / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}))
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
     assert conditions.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
+
+
+def test_facts_of_reads_a_declaration_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
+    # 現状固定（I-018）: 宣言の読み方は command._declared と同じ（オブジェクトでなければ空、読めなければ ContractError）
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text("[1]")
+    assert conditions.facts_of(("ci_declared",), {}, repo) == {"ci_declared": False}
+    (repo / ".ndf" / "project.json").write_text("{")
+    with pytest.raises(contracts.ContractError, match="を読めない"):
+        conditions.facts_of(("ci_declared",), {}, repo)
 
 
 def _git(repo: Path, *args: str) -> None:
