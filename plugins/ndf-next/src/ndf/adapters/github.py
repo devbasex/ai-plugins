@@ -476,6 +476,11 @@ class GitHub:
         """Issue（か PR）の本文と書き手。信用の区分は `trusts`（#3364）。"""
         return Authored.from_rest(self.rest("GET", f"/repos/{self.repo}/issues/{int(number)}"))
 
+    def issue_text(self, number: int) -> tuple[str, Authored]:
+        """Issue（か PR）の題と、書き手の付いた本文（信用の区分は `trusts`）。"""
+        raw = self.rest("GET", f"/repos/{self.repo}/issues/{int(number)}")
+        return text_of(raw["title"]), Authored.from_rest(raw)
+
     def trusts(self, authored: Authored) -> bool:
         """write 以上の権限を持つ書き手の本文か（#3364）。偽なら読み手は本文を指示でなくデータとして扱う。
 

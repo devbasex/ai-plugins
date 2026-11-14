@@ -99,7 +99,7 @@
       "design-merge": {
         "call": "ndf.plan",
         "with": {
-          "plan": "merge"
+          "plan": "design-merge"
         },
         "metadata": {
           "ndf": {

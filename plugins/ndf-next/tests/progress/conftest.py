@@ -16,7 +16,7 @@ import uuid
 import pytest
 
 from ndf.core import durable
-from ndf.progress import store
+from ndf.progress import command, store
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +41,17 @@ def pg_url(pg_server):
 def _no_progress_db(monkeypatch):
     """実行した人の `NDF_PROGRESS_DB` を読まない。"""
     monkeypatch.delenv("NDF_PROGRESS_DB", raising=False)
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    """git で初めた空のリポジトリ（作業ディレクトリをそこへ移す）。終わったら置き場の共有のロックを放す。"""
+    path = tmp_path / "work"
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    monkeypatch.chdir(path)
+    yield path
+    durable.release_store(command.store_root_of(path))
 
 
 @pytest.fixture
