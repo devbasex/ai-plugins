@@ -6,7 +6,6 @@ from collections.abc import Iterator
 
 import pytest
 
-from ndf import ci_cli
 from ndf.adapters import ci
 from ndf.contracts import causes, limits
 
@@ -421,14 +420,23 @@ def test_read_classifies_failures_by_bare_name() -> None:
     assert [c.name for c in reading.failed_other] == ["A / lint (0/2)"]
 
 
-# --- 現状固定（I-006 ci_cli._items）: missing・stale の行の test は分割ジョブを含むテストのチェックかで決まる ---
+def test_watch_stretches_the_interval_only_while_nothing_changes() -> None:
+    # 不足 g: 変化が無い間は間隔を伸ばし、読んだ結果が変わったら倍率 1 段だけ縮める（最初の値より短くしない）
+    policy = limits.policy("test-triage.check-wait")
+    first, factor = float(policy.interval), float(policy.factor)
+    other = _reading(running=["pytest", "doc-lint"])
+    clock, reads = Clock(), []
+    readings = [RUNNING, RUNNING, other, other, PASSED]
+    ci.Watch(_reader(readings, clock, reads), 3600, clock=clock, sleep=clock.sleep).run()
+    assert clock.sleeps == [first, first * factor, first, first * factor]
 
 
-def test_cli_items_marks_missing_and_stale_test_checks() -> None:
-    reading = _reading(missing=["CI / pytest (1/2)", "doc-lint"], stale=["pytest", "W / lint (0/2)"])
-    assert ci_cli._items(reading, ["pytest (0/2)"]) == [
-        {"kind": "check", "name": "CI / pytest (1/2)", "result": "missing", "test": True},
-        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
-        {"kind": "check", "name": "pytest", "result": "stale", "test": True},
-        {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
-    ]
+def test_watch_steps_the_interval_back_one_factor_on_a_change() -> None:
+    # 変化のたびに最初の値まで戻さない。チェックが順に終わる CI でも間隔が伸び、読み取りの回数を抑える
+    policy = limits.policy("test-triage.check-wait")
+    first, factor = float(policy.interval), float(policy.factor)
+    other = _reading(running=["pytest", "doc-lint"])
+    clock, reads = Clock(), []
+    readings = [RUNNING, RUNNING, RUNNING, other, PASSED]
+    ci.Watch(_reader(readings, clock, reads), 3600, clock=clock, sleep=clock.sleep).run()
+    assert clock.sleeps == [first, first * factor, first * factor**2, first * factor]

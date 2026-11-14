@@ -194,6 +194,13 @@ class Reading(NamedTuple):
         return bool(self.queued) and not self.running
 
 
+def _match_required(checks: list[Check], wanted: set[str]) -> tuple[list[Check], set[str]]:
+    """(必須の鍵のどれかに当たるチェック, 当たるチェックのあった必須の鍵)。照合は `_fulfils`。"""
+    mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
+    present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
+    return mine, present
+
+
 def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) -> Reading:
     """必須のチェック（分割ジョブを含む）の今の状態を読む。
 
@@ -202,8 +209,7 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
     """
     checks, test_names = latest(runs), bare_names(tests)
     wanted = {required_key(r) for r in required}
-    mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
-    present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
+    mine, present = _match_required(checks, wanted)
     failed_tests, failed_other = _partition((c for c in mine if c.failed), lambda c: c.name, test_names)
     return Reading(
         failed_tests=failed_tests,
@@ -289,11 +295,25 @@ class WatchResult:
         return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
 
 
+def _next_interval(previous: Optional[Reading], reading: Reading, interval: float, policy: limits.Policy) -> float:
+    """この周の眠りの間隔。最初の周は最初の値、変化が無い間は前の間隔に倍率をかけて伸ばす（頭打ちは `max_interval`）。
+
+    読んだ結果が変わった（チェックが動いた）周は、倍率 1 段だけ縮める（最初の値より短くしない。不足 g）。
+    最初の値まで戻すと、チェックが順に終わる CI では変化のたびに 10 秒へ戻って伸びず、読み取りの回数が増える。
+    """
+    if previous is None:
+        return float(policy.interval)
+    if reading != previous:
+        return max(float(policy.interval), interval / float(policy.factor))
+    return min(interval * float(policy.factor), float(policy.max_interval))
+
+
 @dataclass
 class Watch:
     """必須のチェックの結論が出るまで読み直す。
 
-    - 間隔は方針 `test-triage.check-wait`（最初の間隔・倍率・頭打ち）。待ちの合計は呼ぶ側が `budget` で渡す
+    - 間隔は方針 `test-triage.check-wait`（最初の間隔・倍率・頭打ち）。読んだ結果が変わらない間は伸ばし、変われば
+      最初の間隔へ戻す（不足 g）。待ちの合計は呼ぶ側が `budget` で渡す
     - 最後の眠りは上限までの残りに縮め、上限の時刻に最後の 1 回を読む（上限より前に打ち切らない。#2224）
     - 終わっていないチェックがすべてランナーの割り当てを待つ間は `budget` に数えず、`ci.runner-wait` で別に数える（#2719）
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
@@ -329,11 +349,14 @@ class Watch:
         policy = limits.policy("test-triage.check-wait")
         runner_cap = limits.seconds("ci.runner-wait")
         interval, rounds = float(policy.interval), 0
+        previous: Optional[Reading] = None
         while True:
             rounds += 1
             reading, now, done = self._round(rounds)
             if done is not None:
                 return done
+            interval = _next_interval(previous, reading, interval, policy)
+            previous = reading
             wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
                 return self._exhausted_result(reading, rounds, now, runner_cap)
@@ -341,7 +364,6 @@ class Watch:
             if reading.only_queued:
                 # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
                 self._queued += max(self.clock() - now, wait)
-            interval = min(interval * float(policy.factor), float(policy.max_interval))
 
     def _round(self, rounds: int) -> tuple[Reading, float, Optional[WatchResult]]:
         """1 周（`rounds` 周目）: 読み、経過の秒を `on_round` へ渡し、結論が出た（か `decided` が真）なら結果を返す。

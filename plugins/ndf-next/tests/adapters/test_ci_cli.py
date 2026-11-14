@@ -26,6 +26,8 @@ PULL = {
     "mergeable_state": "clean",
     "head": {"sha": HEAD, "ref": "x"},
     "base": {"ref": "develop"},
+    "user": {"login": "octocat"},
+    "author_association": "OWNER",
 }
 
 
@@ -124,3 +126,52 @@ def test_cli_watch_rate_limit_is_infra_wait(
     assert ci_cli.main(ARGS) == causes.exit_code("infra_wait")
     out = last_result(capsys.readouterr().out)
     assert out["cause"]["kind"] == "infra_wait" and out["cause"]["retry_after"] > 0
+
+
+def test_cli_watch_lists_missing_and_stale_checks_with_test_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    # 現れない必須のチェック（missing）と、結論の無いまま終わったチェック（stale）を、テストのチェックかどうかとともに items へ並べる
+    done_at = "2026-11-12T13:33:00Z"
+    runs = [
+        run("CI / pytest (0/2)", status="in_progress", completed_at=done_at, rid=1),
+        run("W / lint", status="in_progress", completed_at=done_at, rid=2),
+    ]
+    _serve(monkeypatch, runs)
+    argv = ["watch", "--pr", "7", "--repo", REPO, "--test", "pytest", "--budget", "60"]
+    argv += [a for name in ("pytest", "lint", "pytest (1/2)", "doc-lint") for a in ("--required", name)]
+    code = ci_cli.main(argv)
+    out = last_result(capsys.readouterr().out)
+    assert (code, out["status"], out["cause"]["kind"]) == (causes.exit_code("precondition"), "stopped", "precondition")
+    assert out["items"] == [
+        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
+        {"kind": "check", "name": "pytest (1/2)", "result": "missing", "test": True},
+        {"kind": "check", "name": "CI / pytest (0/2)", "result": "stale", "test": True},
+        {"kind": "check", "name": "W / lint", "result": "stale", "test": False},
+    ]
+
+
+def test_cli_items_marks_missing_and_stale_test_checks(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    # 現状固定: missing・stale の行の test は、分割ジョブを含むテストのチェック（--test "pytest (0/2)"）かで決まる。
+    # 以前は Reading（missing=["CI / pytest (1/2)", "doc-lint"]・stale=["pytest", "W / lint (0/2)"]）を作って
+    # ci_cli._items を直接呼んでいた。公開のエントリポイントでは missing の名前は必須の照合の鍵（前置きを外した名前）で、
+    # missing も stale も名前の順（大文字が先）に並ぶ
+    done_at = "2026-11-12T13:33:00Z"
+    runs = [
+        run("pytest", status="in_progress", completed_at=done_at, rid=1),
+        run("W / lint (0/2)", status="in_progress", completed_at=done_at, rid=2),
+    ]
+    _serve(monkeypatch, runs)
+    argv = ["watch", "--pr", "7", "--repo", REPO, "--test", "pytest (0/2)", "--budget", "60"]
+    argv += [a for name in ("CI / pytest (1/2)", "doc-lint", "pytest", "W / lint (0/2)") for a in ("--required", name)]
+    code = ci_cli.main(argv)
+    out = last_result(capsys.readouterr().out)
+    assert (code, out["cause"]["kind"]) == (causes.exit_code("precondition"), "precondition")
+    assert out["items"] == [
+        {"kind": "check", "name": "doc-lint", "result": "missing", "test": False},
+        {"kind": "check", "name": "pytest (1/2)", "result": "missing", "test": True},
+        {"kind": "check", "name": "W / lint (0/2)", "result": "stale", "test": False},
+        {"kind": "check", "name": "pytest", "result": "stale", "test": True},
+    ]
