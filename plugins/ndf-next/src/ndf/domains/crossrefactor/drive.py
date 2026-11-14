@@ -267,6 +267,12 @@ def _close(run: _Run, item: dict[str, Any], status: Status, reason: str) -> None
     run.save()
 
 
+def _undo_item(run: _Run, item: dict[str, Any], status: Status, reason: str) -> None:
+    """項目の起点まで取り消してから、状態と理由を書いて閉じる。"""
+    _reset(run, item["start"])
+    _close(run, item, status, reason)
+
+
 def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[dict[str, Any]]:
     """コードを書く工程を 1 回流す。結果が無ければ起点まで取り消して項目を見送り、None を返す（#3313）。"""
     _record_phase(run, phase)
@@ -275,8 +281,7 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[
         return got
     # 振り替える担当は無い（コードを書くのは修正担当だけ）。項目は採らないので、起点の記録の有無に依らず項目の起点まで戻す
     reason = phase_decide.on_no_result(run.state["phases"][phase])
-    _reset(run, item["start"])
-    _close(run, item, Status.DEFERRED, f"{phase}: {reason}")
+    _undo_item(run, item, Status.DEFERRED, f"{phase}: {reason}")
     return None
 
 
@@ -290,8 +295,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
         return True
     found = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
     if found.uncollected:
-        _reset(run, item["start"])
-        _close(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(found.uncollected)}")
+        _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(found.uncollected)}")
         return False
     return True
 
@@ -370,8 +374,7 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
         if _code(run, item, "fix", prompt_decide.fix(item, got.own)) is None:
             return
         fixes += 1
-    _reset(run, item["start"])
-    _close(run, item, Status.REVERTED, f"検証が通らない: {reason}")
+    _undo_item(run, item, Status.REVERTED, f"検証が通らない: {reason}")
 
 
 def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
