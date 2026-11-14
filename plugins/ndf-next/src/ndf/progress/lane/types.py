@@ -54,9 +54,18 @@ class PlanView:
     ndf_version: Optional[str]
     lanes: dict[str, LaneSpec] = field(default_factory=dict)
     requests: dict[str, Request] = field(default_factory=dict)
+    repo: Optional[str] = None
 
     def open_requests(self) -> list[Request]:
         return [r for r in self.requests.values() if r.closed is None]
+
+    def lane_repo(self, name: str) -> Optional[str]:
+        """レーンが動くリポジトリ。`repo` を宣言しないレーンは計画のリポジトリ（`repo`）で動く。
+
+        同じリポジトリかの判定（計画の決まりの検査と起動）はこの値どうしを比べる唯一の規則である。
+        """
+        declared = self.lanes[name].repo
+        return declared if declared is not None else self.repo
 
 
 @dataclass(frozen=True)

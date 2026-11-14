@@ -64,13 +64,13 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
     return view
 
 
-def fold_plan(table_id: str, events: list[model.Event]) -> PlanView:
-    """計画の進行表の事象から、レーンの配列・規則・上限・依頼・計画の状態を求める。"""
+def fold_plan(table_id: str, events: list[model.Event], repo: Optional[str] = None) -> PlanView:
+    """計画の進行表の事象から、レーンの配列・規則・上限・依頼・計画の状態を求める。`repo` は計画のリポジトリ。"""
     created = [e for e in events if e.draft.kind == "created" and e.draft.row_key == PLAN_ROW]
     if not created:
         raise model.Refused(f"計画の進行表 {table_id} に計画の行が無い")
     state = model.table_state("plan", events)
-    view = _plan_base(table_id, created[0].draft.payload, state)
+    view = replace(_plan_base(table_id, created[0].draft.payload, state), repo=repo)
     for ev in events:
         view = _fold_plan_event(view, ev.draft)
     return view

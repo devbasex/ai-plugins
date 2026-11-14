@@ -25,8 +25,8 @@ POLICY = Policy(poll=30.0, attempts=2)
 FAST = Policy(poll=0.05, attempts=2)
 
 
-def _snap(state="running", complete=False, wakeable=(), running=()):
-    return run_decide.snapshot(state, complete, list(wakeable), list(running))
+def _snap(state="running", complete=False, wakeable=(), running=(), reported=()):
+    return run_decide.snapshot(state, complete, list(wakeable), list(running), list(reported))
 
 
 def _step(state, done):
@@ -75,9 +75,13 @@ def test_a_failed_launch_is_retried_on_the_next_poll_and_given_up_after_the_atte
     # 回数が尽きたら、起こせなかったことをオーガナイザーへ知らせる
     assert act == Report("a", "a/r1", "a/r1: tmux が無い") and state.failed == ("a/r1",) and len(state.errors) == 2
     act, state, _ = _step(state, Done(act, "request-1"))
+    assert act == Sleep(30.0) and state.reported == ("a/r1",)
+    # 依頼が開いている間は起こし直さない
+    act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")], reported=["a/r1"])))
     assert act == Sleep(30.0)
+    # オーガナイザーが依頼を閉じたら、回数を戻して起こし直す
     act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
-    assert act == Sleep(30.0)
+    assert act == Launch("a", "r1") and state.failed == () and state.count("a/r1") == 0 and state.reported == ()
 
 
 def test_a_launch_that_cannot_succeed_is_reported_without_retrying():
@@ -104,6 +108,17 @@ def test_a_stopped_plan_cancels_running_sprints_then_ends_as_stopped():
     assert act == Sleep(30.0)
     _, state, finished = _step(state, Done(Observe(), _snap(state="cancelled")))
     assert finished and state.outcome == "stopped"
+
+
+def test_a_stopped_plan_whose_cancel_cannot_be_launched_ends_as_cancel_failed_without_a_report():
+    """止めた計画の進行表へは依頼を書けないので、中止の起動が尽きたら Report を打たずに結果へ載せて終える。"""
+    running = [("a", "r1", "s1"), ("b", "r1", "s2")]
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(state="cancelled", running=running)))
+    act, state, _ = _step(state, Done(act, {"ok": False, "final": True, "detail": "止められない"}))
+    # 尽きた中止があっても、ほかの実行中の行の中止は起こす
+    assert act == Launch("b", "r1", cancel="s2") and state.failed == ("cancel:s1",)
+    act, state, finished = _step(state, Done(act, {"ok": False, "final": True, "detail": "止められない"}))
+    assert finished and state.outcome == "cancel_failed" and state.failed == ("cancel:s1", "cancel:s2")
 
 
 def test_a_plan_not_yet_started_is_only_watched():
@@ -153,7 +168,7 @@ def test_snapshot_reads_both_tables_and_follows_after(opened):
 def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
     pid = _create(opened, _doc(_decl("a", [[1, 2]])))
     with store.transaction(opened) as conn:
-        text = run.first_input(conn, pid, Launch("a", "r1"), REPO)
+        text = run.first_input(conn, pid, Launch("a", "r1"))
         view, _ = lane.read_plan(conn, pid)
     assert "progress" in text and "--parent" in text and view.lanes["a"].table_id in text and '"start"' in text
 
@@ -162,7 +177,26 @@ def test_first_input_refuses_a_lane_of_another_repository(opened):
     """別のリポジトリを宣言したレーンを、計画のリポジトリで起こさない。"""
     pid = _create(opened, _doc({**_decl("a", [[1]]), "repo": "https://example.invalid/o/other"}))
     with store.transaction(opened) as conn, pytest.raises(launch.Unsupported, match="other"):
-        run.first_input(conn, pid, Launch("a", "r1"), REPO)
+        run.first_input(conn, pid, Launch("a", "r1"))
+
+
+def test_first_input_treats_a_lane_naming_the_plan_repository_as_the_same_repository(opened):
+    """repo に計画のリポジトリを書いたレーンは、書かないレーンと同じリポジトリとして起こす（検査と同じ規則）。"""
+    pid = _create(opened, _doc({**_decl("a", [[1]]), "repo": REPO}))
+    with store.transaction(opened) as conn:
+        assert "progress" in run.first_input(conn, pid, Launch("a", "r1"))
+
+
+def test_snapshot_lists_the_launches_with_an_open_launch_failed_request(opened):
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        key = plan.open_request(
+            conn, pid, {"lane": "a", "kind": run.LAUNCH_FAILED, "launch": "a/r1", "detail": "x"}, "起こせない", "workflow"
+        )
+    assert _snapshot(opened, pid)["reported"] == ["a/r1"]
+    with store.transaction(opened) as conn:
+        plan.close_request(conn, pid, key, "直した")
+    assert _snapshot(opened, pid)["reported"] == []
 
 
 # --- 耐久ワークフロー -------------------------------------------------------------------------------
@@ -171,6 +205,18 @@ def test_first_input_refuses_a_lane_of_another_repository(opened):
 @pytest.fixture
 def where(progress_url, root, tmp_path):
     return run.Where(root=root, url=progress_url, repo=REPO, cwd=tmp_path)
+
+
+def _no_wrapper(monkeypatch):
+    """起こす前に止めるラッパーは無い（止めた名前を記録する）。"""
+    stopped = []
+
+    def stop(plan_name, lane_name):
+        stopped.append(lane_name)
+        return {"ok": True, "detail": "動いていない"}
+
+    monkeypatch.setattr(launch, "stop", stop)
+    return stopped
 
 
 def _conductor(where, outcome):
@@ -194,10 +240,13 @@ def test_the_workflow_runs_every_row_of_the_lane_in_order_and_completes_the_plan
     with store.open_store(where.url, where.root) as st:
         pid = _create(st, _doc(_decl("a", [[1], [2]]), _decl("b", [[3]], touches=("src/b",), after=("a",))))
     spawn, launched = _conductor(where, "completed")
+    stopped = _no_wrapper(monkeypatch)
     monkeypatch.setattr(launch, "spawn", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "completed" and final["failed"] == []
     assert launched == [("a", "r1"), ("a", "r2"), ("b", "r1")]
+    # 前の行を終えた conductor のラッパーが残っても起こせるよう、行を始める前にも同じ名前のラッパーを止める
+    assert stopped == ["a", "a", "b"]
     with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
     assert view.state == "completed"
@@ -244,6 +293,7 @@ def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, m
             plan.stop_plan(conn, pid, "試験の終わり")
         return {"ok": True, "detail": "起こした"}
 
+    _no_wrapper(monkeypatch)
     monkeypatch.setattr(launch, "spawn", spawn)
     final = run.advance(where, "p6", FAST)
     assert final["outcome"] == "stopped" and final["failed"] == ["a/r1"]

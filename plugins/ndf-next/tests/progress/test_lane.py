@@ -271,10 +271,10 @@ def _spec(name, touches=("src/a",), after=(), repo=None):
     return lane.LaneSpec(name=name, table_id=f"t-{name}", kind="sprint", plans=1, touches=tuple(touches), after=tuple(after), repo=repo)
 
 
-def _view(*specs):
+def _view(*specs, repo=None):
     lanes = {s.name: s for s in specs}
     return lane.PlanView(
-        table_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes
+        table_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes, repo=repo
     )
 
 
@@ -293,6 +293,12 @@ def _lane_rows(*states):
         ),
         # 別のリポジトリのレーンどうしは重ならない
         (_view(_spec("a"), _spec("b", repo="x")), {"a": _lane_rows("pending"), "b": _lane_rows("pending")}, []),
+        # repo を書かないレーンは計画のリポジトリで動くので、計画のリポジトリを書いたレーンと重なる
+        (
+            _view(_spec("a"), _spec("b", repo="x"), repo="x"),
+            {"a": _lane_rows("pending"), "b": _lane_rows("pending")},
+            ["同時に動き得る行 a/r1・b/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
         # 触る場所が重ならない
         (_view(_spec("a"), _spec("b", ("src/b",))), {"a": _lane_rows("pending"), "b": _lane_rows("pending")}, []),
         # 終わった行は組に入らない

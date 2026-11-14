@@ -6,12 +6,15 @@
   計画の台帳と `plan.json` の状態は読まない
 - 判断は `run_decide.decide`（純粋な関数）が持ち、読み・起動・完了はそれぞれ耐久ステップで打つ。落ちた後の回復で
   済んだ起動を打ち直さない
-- 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンの元のラッパーを止めてから、スプリントの中止の
-  入力で起こし、実行中の行が無くなれば `stopped` で終わる
+- レーンを起こす前に、同じ名前の元のラッパー（前の行を終えた conductor など）を止めてから起こす
+- 止めた計画（`ndf lanes stop`）では、実行中の行が残るレーンをスプリントの中止の入力で起こし、実行中の行が
+  無くなれば `stopped` で終わる。中止をすべて起こせなくなったら `cancel_failed` で終わる（終わった計画の進行表へは
+  依頼を書けない）
 - 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
-  （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる
-- レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`）の置き場を解決する
-  経路はまだ無いので、打った場所で流さずに起こせない失敗にする
+  （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる。オーガナイザーが
+  依頼を閉じたら、そのレーンを起こし直す
+- レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`。同じリポジトリかの
+  判定は `PlanView.lane_repo`）の置き場を解決する経路はまだ無いので、打った場所で流さずに起こせない失敗にする
 """
 
 from __future__ import annotations
@@ -84,7 +87,8 @@ def read_snapshot(conn: Any, plan_id: str) -> dict[str, Any]:
     """計画とレーンの進行表から、判断へ渡す写しを作る。"""
     view, rows = lane.read_view(conn, plan_id)
     running = [(name, r.key, r.sprint_id) for name in view.lanes for r in rows[name] if r.state == lane.RUNNING and r.sprint_id]
-    return run_decide.snapshot(view.state, lane.plan_complete(view, rows), lane.wakeable_lanes(view, rows), running)
+    reported = [r.body["launch"] for r in view.open_requests() if r.body.get("kind") == LAUNCH_FAILED]
+    return run_decide.snapshot(view.state, lane.plan_complete(view, rows), lane.wakeable_lanes(view, rows), running, reported)
 
 
 @durable.step
@@ -94,13 +98,13 @@ def observe(spec: dict[str, Any]) -> dict[str, Any]:
         return read_snapshot(conn, spec["plan_id"])
 
 
-def first_input(conn: Any, plan_id: str, act: Launch, repo: str) -> str:
-    """起こすレーンへ渡す最初の入力。計画のリポジトリ `repo` と別のリポジトリのレーンや、起こす入力を組めない
+def first_input(conn: Any, plan_id: str, act: Launch) -> str:
+    """起こすレーンへ渡す最初の入力。計画のリポジトリと別のリポジトリのレーンや、起こす入力を組めない
     行なら `launch.Unsupported`。"""
     view, _ = lane.read_plan(conn, plan_id)
-    declared = view.lanes[act.lane].repo
-    if declared is not None and declared != repo:
-        raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {repo}）")
+    declared = view.lane_repo(act.lane)
+    if declared != view.repo:
+        raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {view.repo}）")
     if act.cancel is not None:
         return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
@@ -114,13 +118,13 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | No
     act = Launch(lane_name, row, cancel)
     try:
         with _conn(spec) as conn:
-            first = first_input(conn, spec["plan_id"], act, spec["repo"])
+            first = first_input(conn, spec["plan_id"], act)
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
-    if cancel is not None:
-        stopped = launch.stop(spec["plan"], lane_name)
-        if not stopped["ok"]:
-            return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
+    # 前の行を終えた conductor のラッパーも同じ名前で残るので、行を始めるときも中止のときも先に止める
+    stopped = launch.stop(spec["plan"], lane_name)
+    if not stopped["ok"]:
+        return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
     return launch.spawn(spec["plan"], lane_name, Path(spec["cwd"]), first)
 
 

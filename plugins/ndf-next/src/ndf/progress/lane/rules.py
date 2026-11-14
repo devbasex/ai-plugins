@@ -68,14 +68,15 @@ def _limit_errors(view: PlanView, lanes: Lanes) -> list[str]:
     ]
 
 
-def _same_repo(a: LaneSpec, b: LaneSpec) -> bool:
-    return a.repo == b.repo
+def _same_repo(view: PlanView, a: str, b: str) -> bool:
+    """2 つのレーンが同じリポジトリで動くか（`repo` を宣言しないレーンは計画のリポジトリ。規則は `PlanView.lane_repo`）。"""
+    return view.lane_repo(a) == view.lane_repo(b)
 
 
 def _issue_errors(view: PlanView, lanes: Lanes) -> list[str]:
     errs = []
     for a, b in itertools.combinations(_live_lanes(view, lanes), 2):
-        if not _same_repo(view.lanes[a], view.lanes[b]):
+        if not _same_repo(view, a, b):
             continue
         hit = set().union(*(r.issues() for r in lanes[a] if r.live)) & set().union(*(r.issues() for r in lanes[b] if r.live))
         if hit:
@@ -151,7 +152,7 @@ def _touch_errors(view: PlanView, lanes: Lanes) -> list[str]:
     for a, b in itertools.combinations(_live_lanes(view, lanes), 2):
         la, lb = view.lanes[a], view.lanes[b]
         hits = _touch_hits(la, lb)
-        if not hits or not _same_repo(la, lb):
+        if not hits or not _same_repo(view, a, b):
             continue
         pairs = _concurrent_pairs(edges, lanes, a, b)
         if pairs:

@@ -104,7 +104,7 @@ def read_plan(conn: sa.Connection, plan_id: str) -> tuple[PlanView, list[model.E
     if meta is None or meta["level"] != "plan":
         raise model.Refused(f"計画の進行表 {plan_id} は無い")
     events = store.read_events(conn, plan_id)
-    return fold_plan(plan_id, events), events
+    return fold_plan(plan_id, events, meta["repo"]), events
 
 
 def read_lanes(conn: sa.Connection, view: PlanView) -> dict[str, list[model.Event]]:

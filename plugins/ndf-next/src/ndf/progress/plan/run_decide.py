@@ -12,11 +12,16 @@
 
 同じ読み直しの間に同じレーンの行を 2 回起こさない。起こしたレーンの行は、行が実行中になるか終わるまで
 起こし直さない（`launched`）。起動の失敗は読み直すたびに打ち直し、回数が尽きたら（打ち直しても起こせない失敗
-`final` ならその場で）`failed` に残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける。
+`final` ならその場で）`failed` に残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける。オーガナイザーが
+その依頼を閉じたら（写しの `reported` から消えたら）、`failed` と回数から外して起動の候補へ戻す。
+
+止めた計画の進行表は終わっていて依頼を書けないので、中止の起動が尽きても `Report` を打たない。実行中の行の中止を
+すべて起こせなくなったら、`failed` と `errors` を載せて `cancel_failed` で終える。
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Union
 
@@ -26,7 +31,7 @@ from ndf.core import loop
 from ndf.progress.lane.types import CANCELLED, COMPLETED, RUNNING
 
 # 耐久ワークフローの終わりの語
-OUTCOME_COMPLETED, OUTCOME_STOPPED = "completed", "stopped"
+OUTCOME_COMPLETED, OUTCOME_STOPPED, OUTCOME_CANCEL_FAILED = "completed", "stopped", "cancel_failed"
 
 
 @dataclass(frozen=True)
@@ -91,7 +96,7 @@ class Policy:
 @dataclass(frozen=True)
 class RunState:
     """判断の状態。`launched` は起こして行の始まりを待つ起動、`started` は起こせた起動のすべて、
-    `tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数。"""
+    `tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数、`reported` は依頼で知らせた起動。"""
 
     snapshot: Optional[dict[str, Any]] = None
     launched: tuple[str, ...] = ()
@@ -99,6 +104,7 @@ class RunState:
     tried: tuple[str, ...] = ()
     attempts: tuple[tuple[str, int], ...] = ()
     failed: tuple[str, ...] = ()
+    reported: tuple[str, ...] = ()
     outcome: Optional[str] = None
     errors: tuple[str, ...] = field(default=())
 
@@ -109,9 +115,22 @@ class RunState:
         return {"outcome": self.outcome, "launched": list(self.started), "failed": list(self.failed), "errors": list(self.errors)}
 
 
-def snapshot(state: str, complete: bool, wakeable: list[tuple[str, str]], running: list[tuple[str, str, str]]) -> dict[str, Any]:
-    """`Observe` の結果の形（耐久の記録へ書くので JSON にできる値だけにする）。`running` は（レーン, 行, スプリントの ID）。"""
-    return {"state": state, "complete": complete, "wakeable": [list(w) for w in wakeable], "running": [list(r) for r in running]}
+def snapshot(
+    state: str,
+    complete: bool,
+    wakeable: list[tuple[str, str]],
+    running: list[tuple[str, str, str]],
+    reported: Sequence[str] = (),
+) -> dict[str, Any]:
+    """`Observe` の結果の形（耐久の記録へ書くので JSON にできる値だけにする）。`running` は（レーン, 行, スプリントの ID）、
+    `reported` は計画の進行表に開いている、起こせなかった知らせの依頼の起動の鍵。"""
+    return {
+        "state": state,
+        "complete": complete,
+        "wakeable": [list(w) for w in wakeable],
+        "running": [list(r) for r in running],
+        "reported": list(reported),
+    }
 
 
 def _skip(state: RunState) -> set[str]:
@@ -154,7 +173,29 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     found = _candidates(state) if snap["state"] in (RUNNING, CANCELLED) else []
     if found:
         return loop.Next.step(found[0], state)
+    if snap["state"] == CANCELLED and _cancels_given_up(state, snap):
+        return _finish(state, OUTCOME_CANCEL_FAILED)
     return loop.Next.step(Sleep(policy.poll), state)
+
+
+def _cancels_given_up(state: RunState, snap: dict[str, Any]) -> bool:
+    """止めた計画で、実行中の行の中止の起動がすべて尽きたか（もう起こせる中止が無い）。"""
+    keys = {a.key for a in _launches(snap) if a.cancel is not None}
+    return bool(keys) and keys <= set(state.failed)
+
+
+def _reopen_closed(state: RunState, snap: dict[str, Any]) -> RunState:
+    """知らせた依頼をオーガナイザーが閉じた起動を、`failed` と回数から外して起動の候補へ戻す。"""
+    still = set(snap.get("reported", ()))
+    closed = {k for k in state.reported if k not in still}
+    if not closed:
+        return state
+    return replace(
+        state,
+        failed=tuple(k for k in state.failed if k not in closed),
+        attempts=tuple((k, n) for k, n in state.attempts if k not in closed),
+        reported=tuple(k for k in state.reported if k not in closed),
+    )
 
 
 def _live_launched(state: RunState, snap: dict[str, Any]) -> tuple[str, ...]:
@@ -181,15 +222,16 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
         return loop.Next.step(Observe(), state)
     if isinstance(done.act, Observe):
         snap = done.value
-        fresh = replace(state, snapshot=snap, tried=(), launched=_live_launched(state, snap))
+        fresh = replace(_reopen_closed(state, snap), snapshot=snap, tried=(), launched=_live_launched(state, snap))
         return _after_observe(fresh, policy)
     if isinstance(done.act, Launch):
         after = _after_launch(state, done.act, done.value, policy)
-        if done.act.key in after.failed and done.act.key not in state.failed:
+        # 止めた計画の進行表は終わっていて依頼を書けない（尽きた中止は _after_observe が結果に載せて終える）
+        if done.act.key in after.failed and done.act.key not in state.failed and _snap(state)["state"] != CANCELLED:
             return loop.Next.step(Report(done.act.lane, done.act.key, after.errors[-1]), after)
         return _after_observe(after, policy)
     if isinstance(done.act, Report):
-        return _after_observe(state, policy)
+        return _after_observe(replace(state, reported=(*state.reported, done.act.key)), policy)
     if isinstance(done.act, Complete):
         return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(Observe(), state)
     raise TypeError(f"知らない手: {done.act!r}")

@@ -12,7 +12,8 @@
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
 
 ラッパーの名前は `<計画>-<レーン>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
-中止の入力で起こすときは、先に同じ名前のラッパーを `ndf relay stop` で止め、止まったのを確かめてから起こす（`stop`）。
+ラッパーは子の conductor が終わるまで動き続けるので、起こす前に（行を始めるときも中止のときも）同じ名前の
+ラッパーを `ndf relay stop` で止め、止まったのを確かめてから起こす（`stop`）。
 """
 
 from __future__ import annotations
