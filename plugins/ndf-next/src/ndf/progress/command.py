@@ -56,26 +56,24 @@ def _repo(cwd: Path, root: Path) -> str:
         return str(root.parents[2])
 
 
+def _read_json(path: Path, failure: str = "を JSON として読めない") -> Any:
+    """`path` の JSON。読めなければ `"{path} {failure}: 理由"` の `ContractError`。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
+
+
 def _declared(cwd: Path) -> dict[str, Any]:
     """`.ndf/project.json` の `workflow.stages`（工程の名前 → 有効と理由）。ファイルか項目が無ければ空。"""
     top = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
     path = top / PROJECT_FILE
     if not path.exists():
         return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise contracts.ContractError(f"{path} を読めない: {exc}") from exc
+    raw = _read_json(path, "を読めない")
     workflow = raw.get("workflow") if isinstance(raw, dict) else None
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     return declared if isinstance(declared, dict) else {}
-
-
-def _read_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise contracts.ContractError(f"{path} を JSON として読めない: {exc}") from exc
 
 
 # --- 進行表の読み書き ---------------------------------------------------------------------
