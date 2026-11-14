@@ -20,6 +20,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, NamedTuple, Optional
 
@@ -67,6 +68,14 @@ class Section:
     limit_at: Optional[float] = None
 
 
+@dataclass(frozen=True)
+class WallClock:
+    """ラッパーが読む日付（今日起動し直した回数の日の境）と壁時計（使用率のキャッシュの時刻と比べる）。"""
+
+    today: Callable[[], date] = date.today
+    now: Callable[[], float] = time.time
+
+
 class Ended(NamedTuple):
     """ラッパーの終わり。`cause` は止まった理由の種類（済んだときは空）。"""
 
@@ -84,7 +93,7 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path) -> PtyProcess:
 
 
 class Wrapper:
-    """`spawn`・`clock`・`out`・`stdin_fd` はテストで差し替える。"""
+    """`spawn`・`clock`・`out`・`stdin_fd`・`wall`（日付と壁時計）はテストで差し替える。"""
 
     def __init__(
         self,
@@ -93,6 +102,7 @@ class Wrapper:
         clock: Callable[[], float] = time.monotonic,
         out: Optional[BinaryIO] = None,
         stdin_fd: Optional[int] = None,
+        wall: Optional[WallClock] = None,
     ):
         self.s = settings
         self.dir = registry.wrapper_dir(settings.state_dir, settings.name)
@@ -100,8 +110,9 @@ class Wrapper:
         self.clock = clock
         self.out = out
         self.stdin_fd = stdin_fd
+        self.wall = wall or WallClock()
         self.section: Optional[Section] = None
-        self.starts = registry.Starts.today(None).as_json()
+        self.starts = registry.Starts.today(None, self.wall.today).as_json()
         self.last_reason: Optional[str] = None
         self.last_state: Optional[tuple[str, str, int]] = None
 
@@ -158,7 +169,7 @@ class Wrapper:
         if observe.limit_line(screen) is None:
             return None
         if sec.limit_at is None:
-            sec.limit_at = time.time()
+            sec.limit_at = self.wall.now()
         rows = accounts.usages(self.s.state_dir)
         cache = accounts.usage_path(self.s.state_dir)
         if not cache.is_file() or cache.stat().st_mtime < sec.limit_at:
@@ -262,12 +273,12 @@ class Wrapper:
             self.last_reason = step.reason
 
     def _starts_today(self) -> int:
-        starts = registry.Starts.today(self.starts)
+        starts = registry.Starts.today(self.starts, self.wall.today)
         self.starts = starts.as_json()
         return starts.count
 
     def _count_start(self) -> None:
-        self.starts = registry.Starts.today(self.starts).bumped().as_json()
+        self.starts = registry.Starts.today(self.starts, self.wall.today).bumped().as_json()
 
     def _current(self) -> Section:
         if self.section is None:

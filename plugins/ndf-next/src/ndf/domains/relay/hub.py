@@ -48,7 +48,7 @@ class Wait(NamedTuple):
 
 @dataclass
 class Context:
-    """リレーハブが読む事実と部品。時計と眠りはテストで差し替える。"""
+    """リレーハブが読む事実と部品。時計・眠り・日付はテストで差し替える。"""
 
     state_dir: Path
     plugin_root: Path
@@ -63,6 +63,7 @@ class Context:
     pending: Callable[[], Mapping[str, Any]] = field(default=lambda: {"runs": [], "note": ""})
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
+    today: Callable[[], date] = date.today
 
 
 def hub_dir(state_dir: Path) -> Path:
@@ -158,7 +159,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
     if refused is not None:
         return refused
     entry = {k: req.get(k) for k in ("cwd", "args", "role", "plan")}
-    entry["starts"] = registry.Starts(date.today().isoformat(), 0).as_json()
+    entry["starts"] = registry.Starts(ctx.today().isoformat(), 0).as_json()
     got = _launch(ctx, name, entry)
     if got.ok:
         entries[name] = {**entry, "version": ctx.version}
@@ -177,7 +178,7 @@ def restart(ctx: Context, name: str) -> Outcome:
     refused = _refused(hub_decide.mixed(ctx.version, others), "precondition")
     if refused is not None:
         return refused
-    starts = registry.Starts.today(entry.get("starts"))
+    starts = registry.Starts.today(entry.get("starts"), ctx.today)
     target = any(r.name == name for r in running)
     lanes = hub_decide.Lanes(_own_count(running), ctx.max_named, target, starts.count, ctx.max_starts)
     refused = _refused(hub_decide.restart(lanes), "refused")

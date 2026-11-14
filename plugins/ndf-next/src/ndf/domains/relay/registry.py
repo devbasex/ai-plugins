@@ -21,7 +21,7 @@ import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, signals
@@ -44,12 +44,12 @@ class Starts:
     count: int
 
     @classmethod
-    def today(cls, raw: Any) -> "Starts":
-        """`raw` が今日の日付の回数ならその回数、形が違うか日付が今日でなければ 0 回。"""
-        today = date.today().isoformat()
-        if isinstance(raw, dict) and raw.get("date") == today:
-            return cls(today, int(raw.get("count", 0)))  # noqa: NDF502 ファイル: 回数が無ければ 0 回
-        return cls(today, 0)
+    def today(cls, raw: Any, today: Callable[[], date] = date.today) -> "Starts":
+        """`raw` が今日（`today` が返す日付）の回数ならその回数、形が違うか日付が今日でなければ 0 回。"""
+        day = today().isoformat()
+        if isinstance(raw, dict) and raw.get("date") == day:
+            return cls(day, int(raw.get("count", 0)))  # noqa: NDF502 ファイル: 回数が無ければ 0 回
+        return cls(day, 0)
 
     def bumped(self) -> "Starts":
         return Starts(self.date, self.count + 1)
