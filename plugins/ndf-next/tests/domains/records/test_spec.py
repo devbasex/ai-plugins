@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
+from ndf import cli
+from ndf.contracts import causes
 from ndf.domains.records import spec
 from ndf.domains.records import spec_decide as sd
 
@@ -81,3 +84,65 @@ def test_finalize_writes_nothing_when_the_source_is_ambiguous(tmp_path: Path) ->
     with pytest.raises(sd.SourceError):
         spec.finalize(root, ["docs/a.md", "docs/b.md"], ["issues/d.md"], {})
     assert (root / "glossary.json").read_text(encoding="utf-8") == before and (root / "issues" / "d.md").exists()
+
+
+# 現状固定（I-010 の前）: `ndf records spec finalize`（cli._spec）の結果 JSON
+@pytest.fixture
+def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    git_sandbox.sh(tmp_path, "init", "-q", str(tmp_path / "r"))
+    root = _repo(tmp_path / "r")
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
+    return root
+
+
+def _finalize(root: Path, capsys: pytest.CaptureFixture[str], last_result, *argv: str) -> tuple[int, dict]:
+    code = cli.main(["records", "--cwd", str(root), "spec", "finalize", *argv])
+    return code, last_result(capsys.readouterr().out)
+
+
+def test_cli_finalize_lists_the_paths_without_committing(git_repo: Path, capsys, last_result) -> None:
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--spec", "docs/b.md", "--remove", "issues/d.md")
+    assert code == 0 and got["status"] == "ok" and got["summary"] == "確定仕様化: コミットに入れるパス 6 件"
+    assert got["items"] == [
+        {"path": "docs/a.md"},
+        {"path": "docs/b.md"},
+        {"path": "glossary.json"},
+        {"path": "docs/glossary.md"},
+        {"path": "docs/glossary/c.md"},
+        {"path": "issues/d.md"},
+    ]
+    assert git_sandbox.sh(git_repo, "log", "-1", "--format=%s", strip=True) == "init"
+
+
+def test_cli_finalize_reports_ambiguous_and_missing_terms_as_items(git_repo: Path, capsys, last_result) -> None:
+    (git_repo / "docs" / "b.md").write_text("帳簿も", encoding="utf-8")
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--spec", "docs/b.md", "--remove", "issues/d.md")
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+    assert got["items"] == [{"term": "帳簿", "reason": "ambiguous", "files": ["docs/a.md", "docs/b.md"]}]
+    (git_repo / "docs" / "b.md").write_text("別", encoding="utf-8")
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/b.md", "--remove", "issues/d.md")
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+    assert got["summary"] == "どの確定仕様にも無い語: 帳簿。--source-of <語>=<ファイル> で正本を明示する"
+    assert got["items"] == [{"term": "帳簿", "reason": "missing"}]
+
+
+def test_cli_finalize_stops_on_a_bad_override_or_an_unreadable_spec(git_repo: Path, capsys, last_result) -> None:
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--source-of", "帳簿")
+    assert code == 3 and got["cause"]["kind"] == "precondition" and got["items"] == []
+    assert got["summary"] == "--source-of の形が違う（<語>=<ファイル>）: 帳簿"
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/none.md")
+    assert code == 3 and got["cause"]["kind"] == "precondition" and got["items"] == []
+    assert got["summary"].startswith("確定仕様 docs/none.md を読めない: ")
+
+
+# NOTE: 現状固定。-m でコミットした後の結果が outputs.commit を持ち、結果の形の検査に落ちる不具合を含む
+#       （コミットは作られるが、標準出力は空で終了コードは invalid）。修正は別の変更で行う。
+def test_cli_finalize_with_message_commits_but_the_result_fails_the_shape_check(git_repo: Path, capsys) -> None:
+    code = cli.main(["records", "--cwd", str(git_repo), "spec", "finalize", "--spec", "docs/a.md", "--spec", "docs/b.md",
+                     "--remove", "issues/d.md", "-m", "確定仕様化"])  # fmt: skip
+    out = capsys.readouterr()
+    assert code == causes.exit_code("invalid") and out.out == "" and "'commit' was unexpected" in out.err
+    assert git_sandbox.sh(git_repo, "log", "-1", "--format=%s", strip=True) == "確定仕様化"
+    assert git_sandbox.sh(git_repo, "status", "--porcelain") == ""
