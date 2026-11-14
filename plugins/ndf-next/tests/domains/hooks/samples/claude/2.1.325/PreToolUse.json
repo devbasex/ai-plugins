@@ -1,0 +1,17 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "<text>"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "<text>",
+    "description": "<text>"
+  },
+  "tool_use_id": "toolu_00000RH0000S0K0NNvqixTWM"
+}

@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "summary": "ランタイムの hook の入出力の契約表（#3345 の決定 95）。ランタイムごとに持つ事象・予算の鍵（limits.json の hook.budget.<budget>）・NDF が読む入力の鍵（reads は無ければ input_shape として通す・optional は無くてよい）・判定ごとの出力の形・timeout の上限を持つ。出力の形の {reason} と {context} は判定の文に置き換わる。形の無い判定は何も出さない。skipped はそのランタイムで働かない guard と理由",
+  "runtimes": {
+    "claude": {
+      "summary": "Claude Code（https://code.claude.com/docs/en/hooks）",
+      "samples": ["2.1.325"],
+      "timeout_max": 600,
+      "skipped": {},
+      "events": {
+        "PreToolUse": {
+          "budget": "pre-tool-use",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path", "tool_use_id"],
+          "outputs": {
+            "deny": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "{reason}"}},
+            "advise": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "{context}"}}
+          }
+        },
+        "PermissionRequest": {
+          "budget": "permission-request",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path"],
+          "outputs": {
+            "deny": {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "{reason}"}}}
+          }
+        },
+        "PostToolUse": {
+          "budget": "post-tool-use",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path", "tool_response"],
+          "outputs": {
+            "advise": {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "{context}"}}
+          }
+        },
+        "UserPromptSubmit": {
+          "budget": "user-prompt-submit",
+          "reads": ["session_id", "cwd", "hook_event_name", "prompt"],
+          "optional": ["transcript_path"],
+          "outputs": {
+            "deny": {"decision": "block", "reason": "{reason}"},
+            "advise": {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "{context}"}}
+          }
+        },
+        "Stop": {
+          "budget": "stop",
+          "reads": ["session_id", "cwd", "hook_event_name", "stop_hook_active"],
+          "optional": ["transcript_path", "last_assistant_message", "background_tasks"],
+          "outputs": {
+            "pushback": {"decision": "block", "reason": "{reason}"},
+            "advise": {"systemMessage": "{context}"}
+          }
+        },
+        "SubagentStop": {
+          "budget": "subagent-stop",
+          "reads": ["session_id", "cwd", "hook_event_name"],
+          "optional": ["transcript_path", "stop_hook_active", "last_assistant_message"],
+          "outputs": {}
+        },
+        "SessionStart": {
+          "budget": "session-start",
+          "reads": ["session_id", "cwd", "hook_event_name", "source"],
+          "optional": ["transcript_path"],
+          "outputs": {
+            "advise": {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "{context}"}}
+          }
+        },
+        "SessionEnd": {"budget": "session-end", "reads": ["session_id", "hook_event_name"], "optional": ["cwd", "reason"], "outputs": {}},
+        "Notification": {"budget": "notification", "reads": ["session_id", "hook_event_name"], "optional": ["cwd", "message"], "outputs": {}},
+        "StopFailure": {"budget": "stop-failure", "reads": ["session_id", "hook_event_name"], "optional": ["cwd"], "outputs": {}}
+      }
+    },
+    "codex": {
+      "summary": "Codex CLI（https://learn.chatgpt.com/docs/hooks）。Stop の出力は hookSpecificOutput を許さない",
+      "samples": ["0.167.0"],
+      "timeout_max": 600,
+      "skipped": {
+        "read-repeat": "Codex には Read の Tool が無く、ファイルはシェルで読む",
+        "ask-forward": "Codex には AskUserQuestion の Tool が無い",
+        "context-limit": "Codex の会話の記録は文脈の量（usage）を同じ形で持たない"
+      },
+      "events": {
+        "PreToolUse": {
+          "budget": "pre-tool-use",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path", "turn_id", "tool_use_id"],
+          "outputs": {
+            "deny": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "{reason}"}},
+            "advise": {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "{context}"}}
+          }
+        },
+        "PermissionRequest": {
+          "budget": "permission-request",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path", "turn_id"],
+          "outputs": {
+            "deny": {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "{reason}"}}}
+          }
+        },
+        "PostToolUse": {
+          "budget": "post-tool-use",
+          "reads": ["session_id", "cwd", "hook_event_name", "tool_name", "tool_input"],
+          "optional": ["transcript_path", "turn_id", "tool_response"],
+          "outputs": {}
+        },
+        "UserPromptSubmit": {
+          "budget": "user-prompt-submit",
+          "reads": ["session_id", "cwd", "hook_event_name", "prompt"],
+          "optional": ["transcript_path", "turn_id"],
+          "outputs": {
+            "deny": {"decision": "block", "reason": "{reason}"},
+            "advise": {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "{context}"}}
+          }
+        },
+        "Stop": {
+          "budget": "stop",
+          "reads": ["session_id", "cwd", "hook_event_name", "stop_hook_active"],
+          "optional": ["transcript_path", "turn_id", "last_assistant_message"],
+          "outputs": {
+            "pushback": {"decision": "block", "reason": "{reason}"},
+            "advise": {"systemMessage": "{context}"}
+          }
+        },
+        "SessionStart": {
+          "budget": "session-start",
+          "reads": ["session_id", "cwd", "hook_event_name", "source"],
+          "optional": ["transcript_path"],
+          "outputs": {
+            "advise": {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "{context}"}}
+          }
+        },
+        "SessionEnd": {"budget": "session-end", "timeout_max": 3, "reads": ["session_id", "hook_event_name"], "optional": ["cwd", "reason"], "outputs": {}}
+      }
+    }
+  }
+}
