@@ -19,6 +19,7 @@ from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, run, stages, store
+from ndf.progress import records as progress_records
 
 ISSUE = 3092
 
@@ -529,10 +530,10 @@ def test_records_failure_does_not_stop_the_work_and_resync_reports_it(repo, st, 
 
 def test_replace_section_is_idempotent_and_keeps_the_rest():
     body = "前\n\n## 進行\n\n古い\n<!-- ndf:section-end -->\n\n## 後\n"
-    once = run.replace_section(body, run.ISSUE_SECTION, "新しい")
+    once = progress_records.replace_section(body, progress_records.ISSUE_SECTION, "新しい")
     assert once == "前\n\n## 進行\n\n新しい\n<!-- ndf:section-end -->\n\n## 後\n"
-    assert run.replace_section(once, run.ISSUE_SECTION, "新しい") == once
-    assert run.replace_section("", run.PR_SECTION, "x") == "## 通した工程\n\nx\n<!-- ndf:section-end -->\n"
+    assert progress_records.replace_section(once, progress_records.ISSUE_SECTION, "新しい") == once
+    assert progress_records.replace_section("", progress_records.PR_SECTION, "x") == "## 通した工程\n\nx\n<!-- ndf:section-end -->\n"
 
 
 def test_retry_delay_follows_the_cause_table():
