@@ -63,6 +63,17 @@ class Check(NamedTuple):
         return self.state == DONE and self.conclusion not in PASSING
 
 
+def _state_of(status: str, conclusion: str, completed: str) -> str:
+    """check run の `status`・`conclusion`・`completed_at`（小文字・空文字に揃えた値）から `Check.state` を決める。"""
+    if status == "completed" or (completed and conclusion):
+        return DONE
+    if completed:
+        return STALE
+    if status in QUEUED_STATES:
+        return QUEUED
+    return RUNNING
+
+
 def check_of(run: dict) -> Check:
     """REST の check run 1 件を読む。
 
@@ -70,14 +81,7 @@ def check_of(run: dict) -> Check:
     終わった時刻があり結論の無いものは `stale` にし、待ち続けない。
     """
     status, conclusion, completed = text_of(run["status"]).lower(), text_of(run["conclusion"]).lower(), text_of(run["completed_at"])
-    if status == "completed" or (completed and conclusion):
-        state = DONE
-    elif completed:
-        state = STALE
-    elif status in QUEUED_STATES:
-        state = QUEUED
-    else:
-        state = RUNNING
+    state = _state_of(status, conclusion, completed)
     return Check(text_of(run["name"]), state, conclusion if state == DONE else "", int(run["id"]))
 
 
