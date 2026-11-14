@@ -117,7 +117,7 @@ def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
     paths = repo_git.changed_files(span.since, span.until)
-    change_list = gather.changes_in(paths, found, decl)
+    change_list = gather.changes(paths, found, decl)
     planned = gather.plan_bumps(root, found, change_list, decl, target.level, target.channel)
     if not planned:
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
