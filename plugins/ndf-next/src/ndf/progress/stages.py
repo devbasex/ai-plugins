@@ -212,23 +212,66 @@ def resolve_enabled(
     `facts` が None なら定義の条件はまだ見ない（進行表の作成の時点。条件は工程を流すときに見る）。
     `declared` は `.ndf/project.json` の `workflow.stages`（工程の名前 → `{"enabled": 真偽, "reason": 理由}`）。
     """
-    out = {}
-    for stage in snap.stages:
-        off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
-        if stage.gates and (stage.name in disables or off_by_project):
-            raise model.Refused(gate_refusal(stage))
-        if stage.name in disables:
-            out[stage.name] = Enablement(False, disables[stage.name], "sprint")
-        elif stage.name in declared:
-            decl = declared[stage.name]
-            enabled = bool(decl["enabled"])
-            out[stage.name] = Enablement(enabled, None if enabled else str(decl["reason"]), "project")
-        else:
-            out[stage.name] = _by_definition(stage, facts)
-    return out
+    return {stage.name: _enablement(stage, facts, declared, disables) for stage in snap.stages}
+
+
+def _refuse_disabled_gate(stage: StageDef, declared: Mapping[str, Mapping[str, Any]], disables: Mapping[str, str]) -> None:
+    """承認ゲートの工程を、スプリントの引数かプロジェクトの宣言で無効にしようとしていれば断る。"""
+    off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
+    if stage.gates and (stage.name in disables or off_by_project):
+        raise model.Refused(gate_refusal(stage))
+
+
+def _by_project(decl: Mapping[str, Any]) -> Enablement:
+    enabled = bool(decl["enabled"])
+    return Enablement(enabled, None if enabled else str(decl["reason"]), "project")
+
+
+def _enablement(
+    stage: StageDef,
+    facts: Optional[Mapping[str, bool]],
+    declared: Mapping[str, Mapping[str, Any]],
+    disables: Mapping[str, str],
+) -> Enablement:
+    """工程 1 つの有効と理由（スプリントの引数 > プロジェクトの宣言 > 定義の条件）。"""
+    _refuse_disabled_gate(stage, declared, disables)
+    if stage.name in disables:
+        return Enablement(False, disables[stage.name], "sprint")
+    if stage.name in declared:
+        return _by_project(declared[stage.name])
+    return _by_definition(stage, facts)
+
+
+def enabled_by_project(saved: Mapping[str, Mapping[str, Any]], stage: str) -> bool:
+    """作成の時点で保存した enablement で、プロジェクトの宣言が工程を有効にしていたか（宣言 > 定義の条件）。"""
+    en = saved.get(stage)
+    return en is not None and en["source"] == "project" and en["enabled"] is True
 
 
 def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
     """モードの工程に無い名前。"""
     known = {s.name for s in snap.stages}
     return sorted(set(names) - known)
+
+
+OUTPUTS_EVENT = "outputs_recorded"  # 工程の出力をスプリントの文脈へ書く事象
+
+
+def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """出力のうち宣言した鍵だけを残した辞書と、宣言に無い鍵（並べ替えたもの）。`outputs` は書き換えない。"""
+    names = set(declared)
+    kept = {k: v for k, v in outputs.items() if k in names}
+    return kept, sorted(set(outputs) - set(kept))
+
+
+def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:
+    """工程の出力を文脈へ書く事象の下書き。鍵は工程の定義の `outputs` に列挙したものだけ。
+
+    `actor` は書き手。工程を流した作業（`workflow`）か、手で終えた conductor（`ndf progress finish`）。
+    宣言に無い鍵は書かずに捨て、捨てた鍵を警告で返す。書く鍵が無ければ下書きは None。
+    """
+    kept, dropped = keep_declared(stage.outputs, outputs)
+    warnings = [f"工程 {stage.name} の定義の outputs に無い鍵を捨てた: {k}" for k in dropped]
+    if not kept:
+        return None, warnings
+    return model.EventDraft(OUTPUTS_EVENT, actor, stage.name, payload={"outputs": kept}, rev=rev), warnings

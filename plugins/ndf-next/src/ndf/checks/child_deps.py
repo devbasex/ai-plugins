@@ -184,15 +184,16 @@ def plan_findings(children: Children, max_per_slot: int) -> list[Finding]:
 
 
 def _order_findings(children: Children) -> list[Finding]:
-    """IG2: 順番が先に要る子の順番より大きくない、閉じていない子。
+    """IG2: 順番が閉じていない先に要る子の順番より大きくない、閉じていない子。
 
     閉じた子は流し終えたので順番がもう流す順を決めない。後の子がそのモジュールへ足した依存を先に要るものへ
-    書き足しても（C2 が C1 の durable へ足した D1・AD3 など）、順番を付け直さない。
+    書き足しても（C2 が C1 の durable へ足した D1・AD3 など）、順番を付け直さない。先に要る子の側が
+    閉じていても同じで、閉じた子は後の子の順を縛らない（P1b が閉じた C3 を needs に足すなど）。
     """
     rows = children.rows
     found = []
     for c in (c for c in rows.values() if not c.closed):
-        late = [n for n in c.needs if rows[n].order >= c.order]
+        late = [n for n in c.needs if not rows[n].closed and rows[n].order >= c.order]
         if late:
             found.append(_at(children, c.name, f"{c.name} の順番 {c.order} が先に要る子（{'・'.join(late)}）の順番より大きくない（IG2）"))
     return found
