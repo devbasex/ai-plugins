@@ -65,9 +65,10 @@ jobs:
           sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
       - run: bash -n bin/ndf
       # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
-      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む
+      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
+      # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない
       - run: |
-          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+          if [ -n "${GITHUB_BASE_REF:-}" ] && [ "$GITHUB_BASE_REF" != main ]; then
             bin/ndf check --base "origin/$GITHUB_BASE_REF"
           else
             bin/ndf check
