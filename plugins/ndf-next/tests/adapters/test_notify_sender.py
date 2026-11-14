@@ -10,6 +10,7 @@ import httpx
 import pytest
 from filelock import FileLock
 
+from ndf import contracts
 from ndf.adapters import notify
 
 NOW = 1_800_000_000.0
@@ -128,6 +129,22 @@ def test_message_puts_mention_and_label_first(outbox: Path) -> None:
     notice = notify.read_notice(_write(outbox, "a", kind="approval", text="PR を見る"))
     assert notice.message("<@U1>") == "<@U1> 承認待ち: PR を見る"
     assert notice.message("") == "承認待ち: PR を見る"
+
+
+@pytest.mark.parametrize(
+    ("kind", "label"),
+    [("question", "回答待ち"), ("approval", "承認待ち"), ("done", "完了")],
+)
+def test_each_kind_has_its_label(outbox: Path, kind: str, label: str) -> None:
+    notice = notify.read_notice(_write(outbox, "a", kind=kind, text="本文"))
+    assert notice.message("") == f"{label}: 本文"
+
+
+def test_every_kind_the_schema_accepts_can_be_messaged(outbox: Path) -> None:
+    kinds = contracts.load_json("schemas/notice.schema.json")["properties"]["kind"]["enum"]
+    assert sorted(kinds) == ["approval", "done", "question"]
+    for kind in kinds:
+        assert notify.read_notice(_write(outbox, kind, kind=kind, text="x")).message("").endswith(": x")
 
 
 # ---- drain ----
