@@ -14,7 +14,7 @@ AT = datetime(2026, 11, 14, tzinfo=UTC)
 def _events(*drafts: model.EventDraft) -> list[model.Event]:
     out = []
     for i, d in enumerate(drafts, 1):
-        out.append(model.Event(i, AT, model.recorded("sprint", d)))
+        out.append(model.Event(i, AT, model.EventDraft(**{**vars(d), "state": model.resulting_state("sprint", d)})))
     return out
 
 
