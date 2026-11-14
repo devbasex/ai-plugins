@@ -18,6 +18,8 @@ AUTO, APPROVAL, APPROVED = "自動", "承認", "承認済み"
 SLOT_NONE, SLOT_SPLIT, SLOT_FIT = "なし", "分割が要る", "当てた"
 # 棚卸しの深さ（差分・見直し・大整理）
 DIFF, REVIEW, OVERHAUL = "diff", "review", "overhaul"
+# 深さの実行の記録の事象（打ち切り・走らせた）
+TIMED_OUT, RAN = "timed_out", "ran"
 # 尺度を超える Size の印（見積の size の値）
 OVER_SCALE = "over"
 STEPS = ("ubv", "tc", "rr_oe")

@@ -18,10 +18,9 @@ from typing import Any
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import facts, limits
 from ndf.domains.backlog import state
-from ndf.domains.backlog.model import OVERHAUL, REVIEW
+from ndf.domains.backlog.model import OVERHAUL, RAN, REVIEW, TIMED_OUT
 
 DEPTHS = (REVIEW, OVERHAUL)
-TIMED_OUT, RAN = "timed_out", "ran"
 EVENTS = (TIMED_OUT, RAN)
 
 

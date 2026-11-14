@@ -6,6 +6,7 @@
     ndf issues revert --run <id>
     ndf issues depth-limits <review|overhaul>
     ndf issues depth-record --depth <review|overhaul> --event <timed_out|ran> [--left 12,34]
+    ndf issues due <review|overhaul> [--manual]
     ndf issues settle --file <JSON> [--base <ブランチ>] [--dry-run]
 
 どの副命令も `--repo`（省けば origin のリモート）と `--state-dir`（省けばメインディレクトリの置き場）を受ける。
@@ -29,6 +30,7 @@ from ndf.domains.backlog import (
     actions_decide,
     collect,
     depth,
+    due_decide,
     estimates_decide,
     issues_gh,
     model,
@@ -367,6 +369,26 @@ def cmd_depth_record(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"{a.depth} の {a.event} を記録した（残り {len(row['left'])} 件）", metrics=row)
 
 
+def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
+    """見直し・大整理を起動するか。起動しなければ not_applicable で止まる（読み手は status で分ける）。"""
+    repo = _repo(a)
+    sd = _sd(a, repo)
+    decl = depth.declaration(depth.declaration_path(Path.cwd()))
+    depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
+    depths = decl["depths"] if "depths" in decl else {}
+    try:
+        cfg = due_decide.settings(a.depth, depths[a.depth] if a.depth in depths else {})
+    except ValueError as exc:
+        raise Stop("invalid", str(exc)) from exc
+    prev = state.read(sd, "backlog-candidates", {})
+    metrics = prev["metrics"] if isinstance(prev, dict) and isinstance(prev.get("metrics"), dict) else {}
+    trig, values = due_decide.due(a.depth, state.read_lines(sd, "backlog-depths"), metrics, cfg, a.manual)
+    out = {"depth": a.depth, "trigger": trig, "values": values}
+    if not trig:
+        return result.stopped(TOOL, "not_applicable", f"{a.depth} は起動しない（{json.dumps(values, ensure_ascii=False)}）", metrics=out)
+    return result.result(TOOL, result.OK, f"{a.depth} を起動する（{'・'.join(trig)}）", metrics=out)
+
+
 def cmd_settle(a: argparse.Namespace) -> dict[str, Any]:
     try:
         rows, bad = settle_decide.parse(_read_json(a.file))
@@ -395,6 +417,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "revert": cmd_revert,
     "depth-limits": cmd_depth_limits,
     "depth-record": cmd_depth_record,
+    "due": cmd_due,
     "settle": cmd_settle,
 }
 
@@ -430,6 +453,9 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--depth", choices=depth.DEPTHS, required=True)
     dr.add_argument("--event", choices=depth.EVENTS, required=True)
     dr.add_argument("--left", type=numbers, default=[])
+    du = sub.add_parser("due", parents=[common], help="見直し・大整理を起動するか（起動しなければ not_applicable）")
+    du.add_argument("depth", choices=depth.DEPTHS)
+    du.add_argument("--manual", action="store_true", help="利用者が求めた")
     st = sub.add_parser("settle", parents=[common], help="解消する Issue を、閉じる証拠を確かめてから閉じる")
     st.add_argument("--file", required=True, help='入力（{"settle": [...]}）')
     st.add_argument("--base", help="基底のブランチ（省けば既定のブランチ）")
