@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import socket
 import threading
 import time
@@ -207,6 +208,30 @@ def test_fetch_body_unsized_body_cut_at_deadline_is_not_success(serve: Serve) ->
 def test_fetch_body_deadline_covers_trickling_headers(serve: Serve) -> None:
     # 応答の頭が受信の待ちの秒数より短い間隔で届き続けても、上限で止める
     _fails_at_deadline(serve(b"HTTP/1.1 200 OK\r\n", b"X-A: b\r\n", 0.3))
+
+
+class _Stream:
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock = sock
+
+    def get_extra_info(self, name: str) -> socket.socket | None:
+        return self.sock if name == "socket" else None
+
+
+def test_watchdog_stops_the_tls_connection_after_tcp_one_is_detached() -> None:
+    # httpcore の TLS 化（ssl の wrap_socket）は TCP の接続を手放して記述子を -1 にし、TLS の接続を新しく返す。
+    # 期限に止めるのは、TLS 化の後の接続でなければならない
+    tcp, _tcp_peer = socket.socketpair()
+    tls, tls_peer = socket.socketpair()
+    with tcp, _tcp_peer, tls, tls_peer:
+        watch = notify._Watchdog(0.2)
+        watch.trace("connection.connect_tcp.complete", {"return_value": _Stream(tcp)})
+        os.close(tcp.detach())
+        watch.trace("connection.start_tls.complete", {"return_value": _Stream(tls)})
+        tls_peer.settimeout(2)
+        assert tls_peer.recv(1) == b""
+        assert watch.fired
+        watch.stop()
 
 
 def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:

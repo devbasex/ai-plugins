@@ -60,13 +60,17 @@ def _expired(timeout: float) -> FetchError:
     return FetchError(f"{_seconds(timeout)} 秒を越えた")
 
 
+# 監視の対象にする接続を返す httpcore の trace の事象（前置きは "connection." や "proxy." など）
+_WATCHED_EVENTS = (".connect_tcp.complete", ".start_tls.complete")
+
+
 class _Watchdog:
     """期限に、待っている受信（応答の頭と本文）を止める。
 
     httpcore は受信の待ちの秒数を要求ごと・本文の読み始めに引き、以後の受信はその秒数で待つため、少しずつ
     届き続ける応答では総経過時間の上限が効かない。そこで取得の全体に 1 つの期限を掛け、期限に別のスレッドから
-    今の接続を止め（`shutdown`）、待っている受信を失敗か終わりで戻す。接続は張るたびに httpcore の
-    `trace` で受け取る。止めた後の受信の終わりは本文の正常な終わりと読まれることがある（長さの無い応答）ため、
+    今の接続を止め（`shutdown`）、待っている受信を失敗か終わりで戻す。接続は張るたびと TLS 化のたびに
+    httpcore の `trace` で受け取る。止めた後の受信の終わりは本文の正常な終わりと読まれることがある（長さの無い応答）ため、
     読み終えた側は `fired` を確かめる。
     """
 
@@ -80,8 +84,12 @@ class _Watchdog:
         self._timer.start()
 
     def trace(self, event: str, info: dict[str, Any]) -> None:
-        """httpcore の `trace` の拡張。TCP の接続を張り終えたら、その接続を監視の対象にする。"""
-        if event != "connection.connect_tcp.complete":
+        """httpcore の `trace` の拡張。TCP の接続を張り終えたら、その接続を監視の対象にする。
+
+        HTTPS では続く TLS 化が元の接続を手放し（記述子が -1 になる）、TLS の接続を新しく返すため、
+        TLS 化を終えたらその接続へ監視の対象を移す。
+        """
+        if not event.endswith(_WATCHED_EVENTS):
             return
         stream = info.get("return_value")
         sock = stream.get_extra_info("socket") if stream is not None else None
