@@ -139,6 +139,18 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
     return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
 
 
+def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
+    """マージの要求を送らずに返す結果（マージ済み・先端の食い違い・決めていない残リスク）。送ってよければ None。"""
+    if pull.merged:
+        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
+    if expect_head and not git.sha_matches(expect_head, pull.head_sha):
+        return MergeOutcome(False, "refused", f"#{number} の先端が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
+    risks = premerge_risks(pull.body)
+    if risks:
+        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {risks[0]}", pull.head_sha)
+    return None
+
+
 def _response_body(resp: Any) -> Any:
     if not resp.content:
         return None
@@ -260,13 +272,9 @@ class GitHub:
         動いていれば GitHub が断る。
         """
         pull = self.pull(number)
-        if pull.merged:
-            return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
-        if expect_head and not git.sha_matches(expect_head, pull.head_sha):
-            return MergeOutcome(False, "refused", f"#{number} の先端が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
-        risks = premerge_risks(pull.body)
-        if risks:
-            return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {risks[0]}", pull.head_sha)
+        early = _preflight(pull, number, expect_head)
+        if early is not None:
+            return early
         try:
             self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": method})
         except GitHubError as exc:
