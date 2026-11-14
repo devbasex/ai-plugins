@@ -23,7 +23,7 @@ TEMPLATE_SECTIONS = (
 )
 # 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換える印を含まない）
 _CODE_SPAN = re.compile(r"`([^`\s]+)`")
-_PATH_LIKE = re.compile(r"^[\w.~-][\w./~-]*(?:/[\w.-]+|\.[A-Za-z0-9]{1,5})$")
+_PATH_LIKE = re.compile(r"^[\w.~/-][\w./~-]*(?:/[\w.-]+|\.[A-Za-z0-9]{1,5})$")
 _NOT_PATH = re.compile(r"://|[<>*?{}$|]|^-|^\.\.?$")
 _H2 = re.compile(r"^## (.+?)\s*$")
 

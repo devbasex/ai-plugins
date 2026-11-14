@@ -28,7 +28,9 @@ def test_period_is_applied_per_response_not_per_conversation() -> None:
     recs = [_line("m1", "2026-11-13T14:59:59Z", 5), _line("m2", "2026-11-13T15:00:00Z", 7)]
     a, b = ud.jst_bounds(date(2026, 11, 14), date(2026, 11, 14))
     assert ud.transcript_total(recs, a, b) == ud.Usage(1, 7, 0, 0)
-    assert ud.transcript_total(recs, a.replace(year=2030), None) == ud.UNKNOWN
+    # 読めた記録の期間内に応答が無ければ 0（UNKNOWN にして帳簿の行へ戻さない）
+    assert ud.transcript_total(recs, a.replace(year=2030), None) == ud.Usage()
+    assert ud.transcript_total([], a, b) == ud.UNKNOWN
 
 
 def test_closed_query_uses_both_jst_ends() -> None:

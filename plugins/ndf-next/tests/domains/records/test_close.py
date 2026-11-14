@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass, field
 from typing import Any
+
+import pytest
 
 from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.records import cleanup_stage, gws
 from ndf.domains.records import close_decide as cd
 from ndf.progress.run import ISSUE_SECTION, SECTION_END
 
-FAILED_ROW = {"issue": 5, "result": "failed"}
+FAILED_ROW = {"number": 5, "result": "failed"}
 
 
 def test_closable_reads_the_record_even_without_the_flag() -> None:
     assert cd.closable(5, [FAILED_ROW], require=False)[0] is False
     assert cd.closable(6, [FAILED_ROW], require=False)[0] is True
-    assert cd.closable(5, [{"issue": 5, "result": "not_run"}], require=False)[0] is True
+    assert cd.closable(5, [{"number": 5, "result": "not_run"}], require=False)[0] is True
 
 
 def test_closable_without_a_record_depends_on_require() -> None:
@@ -75,3 +79,18 @@ def test_record_cleanup_stage_records_skips_and_fails_per_issue() -> None:
 def test_item_name_uses_the_issue_and_falls_back_to_the_pr() -> None:
     assert cleanup_stage.item_name({"issue": 3, "result": cleanup_stage.FAILED}) == "#3"
     assert cleanup_stage.item_name({"pr": 10, "result": cleanup_stage.FAILED}) == "#10"
+
+
+def _gws_status(monkeypatch, stdout: str, code: int = 0) -> None:
+    done = subprocess.CompletedProcess(["gws"], code, stdout=stdout, stderr="")
+    monkeypatch.setattr(gws.subprocess, "run", lambda *a, **k: done)
+
+
+def test_auth_status_refuses_a_failed_or_incomplete_answer(monkeypatch) -> None:
+    full = {"auth_method": "none", "credential_source": "token_cache", "client_config_exists": True}
+    _gws_status(monkeypatch, json.dumps(full))
+    assert gws.auth_status() == full
+    for stdout, code in ((json.dumps(full), 1), (json.dumps({"auth_method": "oauth"}), 0), ("[]", 0)):
+        _gws_status(monkeypatch, stdout, code)
+        with pytest.raises(gws.GwsError):
+            gws.auth_status()

@@ -35,11 +35,15 @@ def test_records_is_in_the_command_table() -> None:
 
 def test_close_check_refuses_an_issue_with_a_failed_verification(repo: Path, capsys, last_result) -> None:
     rows = repo / "verification.json"
-    rows.write_text(json.dumps([{"issue": 7, "result": "failed"}]), encoding="utf-8")
+    record = {"version": "1.2.3", "issues": [{"number": 7, "result": "failed", "evidence": "落ちた"}]}
+    rows.write_text(json.dumps(record), encoding="utf-8")
     code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "7", "--verification", str(rows))
     assert code != 0 and got["status"] == "stopped" and got["items"][0]["closable"] is False
     code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "8", "--verification", str(rows))
     assert code == 0 and got["items"][0]["closable"] is True
+    rows.write_text(json.dumps([{"issue": 7, "result": "failed"}]), encoding="utf-8")
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "close-check", "7", "--verification", str(rows))
+    assert code == 3 and got["cause"]["kind"] == "precondition"
 
 
 def test_handoff_check_reports_missing_paths(repo: Path, capsys, last_result) -> None:
@@ -51,6 +55,20 @@ def test_handoff_check_reports_missing_paths(repo: Path, capsys, last_result) ->
     (repo / "docs" / "none.md").write_text("x", encoding="utf-8")
     code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", str(doc))
     assert code == 0 and got["metrics"]["lines"] == 3
+
+
+def test_handoff_check_reads_relative_paths_from_the_target_repo(
+    repo: Path, capsys, last_result, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "handoff.md").write_text("## 現在地\n\n- 対象\n\n## 古い節\n\n- 移す\n", encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "handoff.md").write_text("## 現在地\n\n- 呼び出し元\n", encoding="utf-8")
+    monkeypatch.chdir(caller)
+    code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", "handoff.md", "--trim", "--history", "h.md")
+    assert code == 0 and {"moved": "## 古い節"} in got["items"]
+    assert (repo / "h.md").is_file() and not (caller / "h.md").exists()
+    assert (caller / "handoff.md").read_text(encoding="utf-8") == "## 現在地\n\n- 呼び出し元\n"
 
 
 def test_usage_stop_never_fails_the_hook(repo: Path, capsys, last_result, monkeypatch: pytest.MonkeyPatch) -> None:

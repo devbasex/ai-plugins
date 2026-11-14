@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ndf.adapters.git import Git
-from ndf.domains.records import glossary
+from ndf.domains.records import files, glossary
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
 
@@ -38,23 +38,31 @@ def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides
     missing = [p for p in removed if not (root / p).is_file()]
     if missing:
         raise SpecError("消す設計が無い: " + "、".join(missing))
+    # 用語集の設定が無いプロジェクトは、用語集の処理だけを省く（plan-to-spec と同じ）
+    touched = _glossary(root, set(removed), texts, overrides) if files.path(root, "glossary").is_file() else []
+    for p in removed:
+        (root / p).unlink()
+    return sd.commit_paths(specs, touched, removed)
+
+
+def _glossary(root: Path, removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]) -> list[str]:
+    """用語集の正本を付け替えて文書を作り直し、書いたパス（正本と文書）を返す。"""
     lay = glossary.layout(root)
     g = glossary.load(root, lay)
-    plan = sd.plan_glossary(g, set(removed), texts, overrides)
+    plan = sd.plan_glossary(g, removed, texts, overrides)
     applied = sd.apply_plan(g, plan) if plan is not None else g
     # 上限を超えるコンテキストがあれば、正本を書く前に止まる
     gd.render_files(applied, lay)
     if plan is not None:
         (root / lay.source).write_text(json.dumps(applied, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     written = [row["path"] for row in glossary.render(root, check=False)]
-    for p in removed:
-        (root / p).unlink()
-    return sd.commit_paths(specs, [lay.source, *written], removed)
+    return [lay.source, *written]
 
 
 def commit(root: Path, paths: Sequence[str], message: str) -> str:
-    """パスをコミットし、コミットの sha を返す。git が失敗すれば `GitError`。"""
+    """渡したパスだけをコミットし、コミットの sha を返す。git が失敗すれば `GitError`。"""
     git = Git(root)
     git.run("add", "-A", "--", *paths)
-    git.run("commit", "-q", "-m", message)
+    # パスを渡して、ほかにステージ済みの変更があってもコミットへ入れない
+    git.run("commit", "-q", "-m", message, "--", *paths)
     return git.rev_parse("HEAD")

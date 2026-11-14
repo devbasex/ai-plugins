@@ -91,11 +91,14 @@ def within(at: Optional[datetime], since: Optional[datetime], until: Optional[da
 def transcript_total(
     records: Iterable[Mapping[str, Any]], since: Optional[datetime] = None, until: Optional[datetime] = None
 ) -> Usage | str:
-    """会話の記録 1 本の使用量（期間を渡すと応答の時刻が期間内の応答だけ）。数える応答が無ければ `UNKNOWN`。"""
-    picked = [u for at, u in responses(records).values() if within(at, since, until)]
-    if not picked:
+    """会話の記録 1 本の使用量（期間を渡すと応答の時刻が期間内の応答だけ）。usage を持つ応答が 1 つも無ければ `UNKNOWN`。
+
+    応答を読めて期間内に 1 つも無ければ 0（読めた記録の期間外の応答を、帳簿の行として別の期間へ足さない）。
+    """
+    found = responses(records).values()
+    if not found:
         return UNKNOWN
-    return total_of(picked)
+    return total_of(u for at, u in found if within(at, since, until))
 
 
 def jst_bounds(since: date, until: date) -> tuple[datetime, datetime]:

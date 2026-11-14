@@ -26,7 +26,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from ndf import cli
+from ndf import cli, contracts
 from ndf.adapters import github as github_mod
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
@@ -35,6 +35,8 @@ from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
 
 TOOL = cli.tool_of(__name__)
+# リリース後テストの記録のスキーマ（contracts/schemas/release-verification.schema.json）
+VERIFICATION = "release-verification"
 
 
 def _root(args: argparse.Namespace) -> Path:
@@ -88,17 +90,19 @@ def _spec(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     if args.message is None:
         return result.result(TOOL, result.OK, f"確定仕様化: コミットに入れるパス {len(paths)} 件", items)
     sha = spec.commit(root, paths, args.message)
-    return result.result(TOOL, result.OK, f"確定仕様化をコミットした: {len(paths)} 件", items, outputs={"commit": sha})
+    return result.result(TOOL, result.OK, f"確定仕様化をコミットした: {len(paths)} 件", items, {"commit": sha})
 
 
 def _handoff(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     moved: list[str] = []
+    # 相対パスは対象のリポジトリ（--cwd）の根から解く。呼び出し元の同名の文書を読み書きしない
+    path = root / args.path.expanduser()
     try:
         if args.trim:
             if args.history is None:
                 return result.stopped(TOOL, "invalid", "--trim には --history が要る")
-            moved = handoff.trim_file(args.path, args.history)
-        report = handoff.check_file(args.path, root, handoff.body_limits())
+            moved = handoff.trim_file(path, root / args.history.expanduser())
+        report = handoff.check_file(path, root, handoff.body_limits())
     except OSError as exc:
         return result.stopped(TOOL, "precondition", f"引継ぎ文書を読み書きできない: {exc}")
     metrics = {"lines": report.lines, "bytes": report.bytes}
@@ -163,11 +167,13 @@ def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     rows = None
     if args.verification is not None:
         try:
-            rows = json.loads(args.verification.read_text(encoding="utf-8"))
+            record = json.loads(args.verification.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             return result.stopped(TOOL, "precondition", f"リリース後テストの記録を読めない: {exc}")
-        if not isinstance(rows, list):
-            return result.stopped(TOOL, "precondition", "リリース後テストの記録が行の配列でない")
+        errs = contracts.schema_errors(record, contracts.schema_path(VERIFICATION))
+        if errs:
+            return result.stopped(TOOL, "precondition", "リリース後テストの記録の形が違う: " + "; ".join(errs))
+        rows = record["issues"]
     ok, why = close_decide.closable(args.issue, rows, args.require)
     item = {"issue": args.issue, "closable": ok, "reason": why}
     if not ok:
@@ -228,7 +234,7 @@ def _add_mvv(sub: Any) -> None:
 def _add_close_check(sub: Any) -> None:
     k = sub.add_parser("close-check")
     k.add_argument("issue", type=int)
-    k.add_argument("--verification", type=Path, default=None, help="リリース後テストの記録（行の配列の JSON）")
+    k.add_argument("--verification", type=Path, default=None, help="リリース後テストの記録（release-verification のスキーマの JSON）")
     k.add_argument("--require", action="store_true", help="記録が無ければ閉じない")
     k.set_defaults(handler=_close_check)
 

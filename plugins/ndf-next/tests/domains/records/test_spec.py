@@ -9,7 +9,6 @@ import git_sandbox
 import pytest
 
 from ndf import cli
-from ndf.contracts import causes
 from ndf.domains.records import spec
 from ndf.domains.records import spec_decide as sd
 
@@ -137,12 +136,21 @@ def test_cli_finalize_stops_on_a_bad_override_or_an_unreadable_spec(git_repo: Pa
     assert got["summary"].startswith("確定仕様 docs/none.md を読めない: ")
 
 
-# NOTE: 現状固定。-m でコミットした後の結果が outputs.commit を持ち、結果の形の検査に落ちる不具合を含む
-#       （コミットは作られるが、標準出力は空で終了コードは invalid）。修正は別の変更で行う。
-def test_cli_finalize_with_message_commits_but_the_result_fails_the_shape_check(git_repo: Path, capsys) -> None:
-    code = cli.main(["records", "--cwd", str(git_repo), "spec", "finalize", "--spec", "docs/a.md", "--spec", "docs/b.md",
-                     "--remove", "issues/d.md", "-m", "確定仕様化"])  # fmt: skip
-    out = capsys.readouterr()
-    assert code == causes.exit_code("invalid") and out.out == "" and "'commit' was unexpected" in out.err
+def test_cli_finalize_with_message_commits_only_the_paths(git_repo: Path, capsys, last_result) -> None:
+    (git_repo / "other.md").write_text("利用者の変更", encoding="utf-8")
+    git_sandbox.sh(git_repo, "add", "other.md")
+    code, got = _finalize(git_repo, capsys, last_result, "--spec", "docs/a.md", "--spec", "docs/b.md",
+                          "--remove", "issues/d.md", "-m", "確定仕様化")  # fmt: skip
+    assert code == 0 and got["status"] == "ok" and len(got["items"]) == 6
+    assert got["metrics"]["commit"] == git_sandbox.sh(git_repo, "rev-parse", "HEAD", strip=True)
     assert git_sandbox.sh(git_repo, "log", "-1", "--format=%s", strip=True) == "確定仕様化"
-    assert git_sandbox.sh(git_repo, "status", "--porcelain") == ""
+    # 先にステージされていた別の変更はコミットへ入らず、ステージに残る
+    assert git_sandbox.sh(git_repo, "status", "--porcelain", strip=True) == "A  other.md"
+
+
+def test_finalize_skips_the_glossary_without_its_declaration(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".ndf" / "glossary.json").unlink()
+    before = (root / "glossary.json").read_text(encoding="utf-8")
+    assert spec.finalize(root, ["docs/a.md"], ["issues/d.md"], {}) == ["docs/a.md", "issues/d.md"]
+    assert not (root / "issues" / "d.md").exists() and (root / "glossary.json").read_text(encoding="utf-8") == before

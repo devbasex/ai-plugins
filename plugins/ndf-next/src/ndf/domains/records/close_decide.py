@@ -19,11 +19,11 @@ CLEANUP_STAGE = "後片付け"
 
 
 def blocking_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]:
-    """課題を閉じない、リリース後テストの行（記録が無ければ空）。"""
+    """課題を閉じない、リリース後テストの行（記録の `issues[]`。記録が無ければ空）。"""
     if verification is None:
         return []
     # 結果が不合格（failed）の行。not_run（打てなかった）は閉じるかを人が決めるので数えない
-    return [r for r in verification if r.get("issue") == issue and r.get("result") == "failed"]
+    return [r for r in verification if r.get("number") == issue and r.get("result") == "failed"]
 
 
 def closable(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], require: bool) -> tuple[bool, str]:

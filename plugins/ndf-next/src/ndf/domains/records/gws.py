@@ -15,8 +15,8 @@ from typing import Any, Optional
 
 from ndf.contracts import limits
 
-# トークンを渡す環境変数（表 env の行）。値は読まず、あるかだけを見る
-TOKEN_ENV = "GOOGLE_WORKSPACE_CLI_TOKEN"
+# 状態の応答が必ず持つ鍵（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
+_STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
 
 
 class GwsError(RuntimeError):
@@ -24,16 +24,22 @@ class GwsError(RuntimeError):
 
 
 def auth_status() -> dict[str, Any]:
-    """`gws auth status` の JSON。打てない・読めなければ `GwsError`。"""
+    """`gws auth status` の JSON。打てない・失敗した・状態の鍵がそろわなければ `GwsError`。"""
     try:
         done = subprocess.run(
             ["gws", "auth", "status"], capture_output=True, text=True, timeout=limits.seconds("gws.auth-status"), check=False
         )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GwsError(f"gws auth status を打てない: {exc}") from exc
+    # 失敗した応答の JSON を認証の判定へ渡さない
+    if done.returncode != 0:
+        raise GwsError(f"gws auth status が終了コード {done.returncode} で終わった")
+    try:
         raw = json.loads(done.stdout)
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise GwsError(f"gws auth status を読めない: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise GwsError("gws auth status が object を返さなかった")
+    if not isinstance(raw, dict) or any(k not in raw for k in _STATUS_KEYS):
+        raise GwsError(f"gws auth status の出力に {' / '.join(_STATUS_KEYS)} のどれかが無い")
     return raw
 
 
@@ -48,4 +54,5 @@ def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
 def authenticated(status: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> bool:
     """認証済みか。トークンを環境変数で渡していれば認証済み。"""
     where = os.environ if env is None else env
-    return decide(status, bool(where.get(TOKEN_ENV)))
+    # トークンを渡す環境変数（表 env の行）。値は読まず、あるかだけを見る
+    return decide(status, bool(where.get("GOOGLE_WORKSPACE_CLI_TOKEN")))

@@ -37,6 +37,18 @@ def test_path_candidates_skip_urls_commands_and_placeholders() -> None:
     assert hd.path_candidates(text) == ["plugins/ndf-next/src", "README.md"]
 
 
+def test_absolute_paths_are_candidates_and_missing_ones_fail(tmp_path: Path) -> None:
+    gone = tmp_path / "none.md"
+    assert hd.path_candidates(f"`{gone}` `/`") == [str(gone)]
+    report = handoff.check_file(_write(tmp_path / "h.md", f"## 現在地\n\n`{gone}` を作成済み。\n"), tmp_path, LIMITS)
+    assert report.missing_paths == [str(gone)]
+
+
+def _write(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def test_trim_keeps_only_template_sections_and_ignores_fenced_headings() -> None:
     text = BODY + "\n## 前の会話の進み\n\n- 済み\n\n## 運用の知見\n\n```\n## コードの中\n```\n"
     kept, moved = hd.trim(text)
