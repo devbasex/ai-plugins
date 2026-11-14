@@ -133,3 +133,26 @@ def test_repeat_refuses_unreadable_or_not_stopped_result_without_logging(tmp_pat
     assert found["cause"]["kind"] == "invalid"
     assert found["cause"]["detail"] == f"結果 {empty} は止まった結果でない"
     assert not log.exists()
+
+
+# 現状固定（I-006）: repeat の数え方の出力（ok と fix_limit の文・metrics・instance・終了コード）と、記録の書き方。
+def test_repeat_outputs_and_log_lines_are_fixed(tmp_path, capsys):
+    res, log = tmp_path / "ci.json", tmp_path / "sub" / "causes.jsonl"
+    args = ["repeat", "--result", str(res), "--log", str(log)]
+    _stopped_ci(res, ["b", "a"])
+    limit = int(route.limits.value(route.REPEAT_LIMIT, "same_cause"))
+    key = json.dumps(["test_failed", ["a", "b"]], ensure_ascii=False)
+    for n in range(1, limit + 1):
+        assert route.main(args) == 0
+        found = _last(capsys)
+        assert (found["tool"], found["status"]) == ("route", "ok")
+        assert found["summary"] == f"同じ原因は {n} 回目（上限 {limit}）"
+        assert found["metrics"] == {"streak": n, "same_cause": limit}
+    assert route.main(args) == 1
+    found = _last(capsys)
+    detail = f"同じ原因が {limit + 1} 回続いた（上限 {limit}）: {key}"
+    assert (found["status"], found["summary"]) == ("stopped", detail)
+    assert found["cause"] == {"kind": "fix_limit", "detail": detail, "instance": key}
+    assert found["metrics"] == {"streak": limit + 1, "same_cause": limit}
+    lines = log.read_text(encoding="utf-8").splitlines()
+    assert lines == [json.dumps({"key": key}, ensure_ascii=False)] * (limit + 1)
