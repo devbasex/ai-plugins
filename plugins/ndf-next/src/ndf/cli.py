@@ -30,6 +30,7 @@ TOOL = "cli"
 
 # 副命令の名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
+    "answer": "ndf.progress.gate",
     "check": "ndf.checks.run",
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
@@ -42,7 +43,7 @@ COMMANDS: dict[str, str] = {
     "loop": "ndf.domains.loop.cli",
     "notify": "ndf.adapters.notify",
     "plan": "ndf.core.plan.cli",
-    "progress": "ndf.progress.run",
+    "progress": "ndf.progress.gate.progress_cli",
     "refactor": "ndf.domains.crossrefactor.cli",
     "relay": "ndf.domains.relay.cli",
     "release-steps": "ndf.domains.release.cli",
@@ -52,8 +53,8 @@ COMMANDS: dict[str, str] = {
     "worker": "ndf.core.worker",
     "worktree": "ndf.domains.worktree.cli",
 }
-# モジュールのパス → 副命令の名前（`tool_of` の引き）
-_TOOL_OF: dict[str, str] = {path: name for name, path in COMMANDS.items()}
+# モジュールのパス → 副命令の名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
+_TOOL_OF: dict[str, str] = {path: name for name, path in reversed(COMMANDS.items())}
 
 
 def tool_of(module: str) -> str:

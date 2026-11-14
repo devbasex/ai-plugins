@@ -78,12 +78,25 @@
     },
     {
       "design-gate": {
-        "call": "ndf.listen",
+        "listen": {
+          "to": {
+            "one": {
+              "with": {
+                "type": "answered"
+              }
+            }
+          }
+        },
         "metadata": {
           "ndf": {
             "kind": "gate",
             "range": "none",
-            "gate": "design"
+            "gate": "design",
+            "modes": [
+              "documentation",
+              "legacy-refactor",
+              "standard"
+            ]
           }
         },
         "output": {

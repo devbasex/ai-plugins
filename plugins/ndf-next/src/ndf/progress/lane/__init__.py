@@ -236,10 +236,13 @@ def carry_issues(conn: sa.Connection, plan_id: str, lane: str, from_row: str, is
     """設計承認ゲートで外した課題を、同じレーンの順番表の次の行（外した行のすぐ後ろ）へ足す（受け入れ条件 3）。
 
     after 付きの新しいレーンを作らない。承認ゲートの答えからこの関数を呼ぶのは承認ゲートの子（#3295）である。
+    すぐ後ろに終わった行（待ちへ戻した答えが取り消した行など）があれば、その後ろへ足す（I12a は終わった行より前を断る）。
     """
     _, rows = _lane_rows(conn, plan_id, lane)
     src = _row(rows[lane], from_row, lane)
     index = [r.key for r in rows[lane]].index(from_row) + 1
+    while index < len(rows[lane]) and rows[lane][index].state != PENDING:
+        index += 1
     inp = {"kind": "sprint", "issues": sorted(set(issues)), "args": src.args}
     return add_row(conn, plan_id, lane, inp, RowChange("conductor", reason, index))
 
@@ -267,7 +270,7 @@ def start_row(conn: sa.Connection, plan_id: str, lane: str, key: str, sprint_id:
     return warnings
 
 
-def _sprint_row(conn: sa.Connection, sprint_id: str) -> Optional[tuple[str, str, LaneRow]]:
+def sprint_row(conn: sa.Connection, sprint_id: str) -> Optional[tuple[str, str, LaneRow]]:
     """スプリントの進行表を指すレーンの行（計画の ID, レーン, 行）。レーンの外のスプリントなら None。"""
     sprint = store.read_table(conn, sprint_id)
     parent = store.read_table(conn, sprint["parent_id"]) if sprint and sprint["parent_id"] else None
@@ -286,7 +289,7 @@ def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Op
     スプリントの進行表の `completed` か `cancelled` を書いたのと同じトランザクションの中で呼ぶ。
     レーンの行が無ければ None。同じスプリントの行が既に終わっていれば書かずに同じ結果を返す（冪等）。
     """
-    found = _sprint_row(conn, sprint_id)
+    found = sprint_row(conn, sprint_id)
     if found is None:
         return None
     plan_id, lane, row = found
@@ -298,7 +301,7 @@ def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Op
 
 
 def _mark(conn: sa.Connection, sprint_id: str, build: Callable[[LaneRow], model.EventDraft]) -> Optional[int]:
-    found = _sprint_row(conn, sprint_id)
+    found = sprint_row(conn, sprint_id)
     if found is None:
         return None
     plan_id, lane, row = found

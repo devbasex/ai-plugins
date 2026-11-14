@@ -7,7 +7,7 @@
 | `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `<with.plan>`（`ndf.core.route.templates()` の鍵）を埋めたもの |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
 | `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
-| `ndf.listen` | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
+| `ndf.listen`（工程の定義の `listen` の要素） | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
 
 作業へ渡す引数は工程の定義の `metadata.ndf.inputs` の鍵だけで、値は渡す前にスプリントの文脈の
 スキーマ（`contracts/workflow/context.schema.json`）で形を確かめる（3364-7）。作業の出力のうち工程の
@@ -53,7 +53,7 @@ PLAN = plan_cli.TOOL
 SKILL = "skill"
 SCRIPT = "script"
 LISTEN = "listen"
-CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, "ndf.listen": LISTEN}
+CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.LISTEN_CALL: LISTEN}
 # 作業種別 → 呼ぶものの名前を持つ with の鍵（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
@@ -305,6 +305,11 @@ FROM_PROJECT = f"{PROJECT_FILE} の宣言"
 FROM_DEFAULT = "params.json の既定"
 FROM_WORKTREE = "作業場所のブランチ"
 FROM_INPUT = "工程の入力か打った場所"
+FROM_STAGE = "工程の承認ゲート（モードが置く listen のステップ）"
+# 工程から呼ぶプランの中の承認ゲート（雛形の `{{gate}}`）に入れる起動。承認の要否と答えは工程の側（モードが置く
+# listen のステップ）が持つため、プランの中では待たずに通す（終了コード 0 で結果 JSON を出さない手は ok）。
+# `params.json` の既定（`ndf answer ask`）は工程の外で雛形を使うときの値で、工程から使うと承認待ちを足してしまう
+STAGE_GATE = ["true"]
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,
@@ -314,7 +319,7 @@ FILL_SOURCES = {
     "rebuild": FROM_PROJECT,
     "refactor": FROM_PROJECT,
     "worker": FROM_DEFAULT,
-    "gate": FROM_DEFAULT,
+    "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
 # `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite の command を宣言の順に ` && ` でつなぐ）
@@ -345,20 +350,19 @@ def _strings(value: Any) -> Optional[list[str]]:
     return list(value) if ok else None
 
 
-def _dig(node: Any, *keys: str) -> Any:
-    for key in keys:
-        node = node[key] if isinstance(node, dict) and key in node else None
-    return node
+def _test_command(project: Mapping[str, Any]) -> Optional[str]:
+    """宣言の `test.suites` のうちテストの suite の command を、宣言の順に ` && ` でつなぐ。無ければ None。"""
+    suites = definition.dig(project, "test", "suites")
+    found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
+    cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
+    return " && ".join(cmds) if cmds else None
 
 
 def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Value]:
     """宣言から読む差し込みの値。宣言に無いか形が違えば None。"""
     if name == "test_command":
-        suites = _dig(project, "test", "suites")
-        found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
-        cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
-        return " && ".join(cmds) if cmds else None
-    return _strings(_dig(project, *PROJECT_KEYS[name]))
+        return _test_command(project)
+    return _strings(definition.dig(project, *PROJECT_KEYS[name]))
 
 
 def _project(place: Path) -> dict[str, Any]:
@@ -419,29 +423,51 @@ def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
     place = work_place(run, cwd)
-    sources = dict(FILL_SOURCES)
-    if FROM_ISSUE in wanted.values():
-        issued = _issue_values(run, work_dir, place)
-        if issued is None:
-            sources.update({n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE})
-        else:
-            values.update({k: v for k, v in issued.items() if k in wanted})
-    if FROM_PROJECT in wanted.values():
-        project = _project(place)
-        for name in (n for n, s in wanted.items() if s == FROM_PROJECT):
-            found = _project_value(name, project)
-            if found is not None:
-                values[name] = found
-    if "branch" in wanted:
-        branch = _branch_of(run)
-        if branch is not None:
-            values["branch"] = branch
+    issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
+    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
-    defs = route.params()
-    missing = {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
+    missing = _missing(t, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+def _fill_from_issue(
+    run: StageRun, work_dir: Path, place: Path, wanted: Mapping[str, str]
+) -> tuple[dict[str, route.Value], dict[str, str]]:
+    """課題の出所の差し込みの値と、出所の上書き（書き手を信用しない課題なら値を返さず、出所を FROM_UNTRUSTED_ISSUE にする）。"""
+    if FROM_ISSUE not in wanted.values():
+        return {}, {}
+    issued = _issue_values(run, work_dir, place)
+    if issued is None:
+        return {}, {n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE}
+    return {k: v for k, v in issued.items() if k in wanted}, {}
+
+
+def _fill_from_project(place: Path, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """宣言の出所の差し込みの値（宣言に無いか形が違う差し込みは含めない）。"""
+    if FROM_PROJECT not in wanted.values():
+        return {}
+    project = _project(place)
+    found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
+    return {name: value for name, value in found.items() if value is not None}
+
+
+def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """ブランチの出所の差し込みの値（決まらなければ含めない）。"""
+    branch = _branch_of(run) if "branch" in wanted else None
+    return {"branch": branch} if branch is not None else {}
+
+
+def _fill_gate(wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """承認ゲートの差し込みの値（工程の承認ゲートが決めるので、プランの中では待たずに通す）。"""
+    return {"gate": list(STAGE_GATE)} if "gate" in wanted else {}
+
+
+def _missing(t: route.Template, values: Mapping[str, route.Value], sources: Mapping[str, str]) -> dict[str, str]:
+    """既定も無く決まらない差し込み → 出所（出所の表に無ければ工程の入力）。"""
+    defs = route.params()
+    return {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:

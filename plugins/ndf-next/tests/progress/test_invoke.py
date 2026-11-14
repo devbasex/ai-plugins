@@ -103,7 +103,9 @@ def test_stage_run_refuses_an_unknown_call_and_a_missing_name():
 
 
 def test_listen_step_is_not_invoked():
-    run = _run("設計", 2)
+    # 設計承認ゲート（listen）は standard の設計の 3 つめのステップ（light の設計はゲートを持たない。#3425）
+    s = definition.load_definition("standard").stage("設計")
+    run = invoke.stage_run(s, s.steps[2], {})
     assert run.kind == invoke.LISTEN
     with pytest.raises(model.Refused):
         invoke.invoke(run, Path("/"), Path("/tmp"))
@@ -253,7 +255,7 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
     [
         ("design", {"title", "body_file", "worker", "rebuild", "review", "required"}),
         ("impl", {"title", "body_file", "test_command", "worker", "required"}),
-        ("design-merge", {"worker", "gate"}),
+        ("design-merge", {"worker"}),
     ],
 )
 def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):
@@ -273,7 +275,8 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
 @pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
 def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defaults(tmp_path, monkeypatch, name):
     # #3092: 課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、
-    # worker と承認ゲートの起動は params.json の既定から埋め、ブランチは作業場所から決める
+    # worker の起動は params.json の既定から埋め、ブランチは作業場所から決める。プランの中の承認ゲートは工程の承認ゲートが
+    # 決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す（PR 3496 の指摘。承認待ちを足さない）
     repo = _sprint_repo(tmp_path, PROJECT)
     defaults = {"worker": ["ndf-worker"], "gate": ["ndf-gate"]}
     held = route.params()
@@ -301,7 +304,8 @@ def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defau
     if "review" in t.params:
         assert "ndf-review" in text and "ndf-rebuild" in text
     if "gate" in t.params:
-        assert "ndf-gate" in text
+        gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
+        assert "ndf-gate" not in text and gates and all(s["run"] == invoke.STAGE_GATE for s in gates)
 
 
 def test_test_command_joins_every_test_suite_in_declared_order():
