@@ -1,0 +1,185 @@
+"""ラッパーの見回り: 区間の切り替え・上限でのアカウントの替え・認証の失敗・版の混ざり（#2438・#3337・#3243・3341-2）。
+
+子は擬似端末の代わりにパイプを持つ偽物で、時計は呼ぶたびに 1 秒進む偽物である（擬似端末も壁時計も待たない。#2962）。
+"""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+from pathlib import Path
+
+from ndf.domains.relay import accounts, marks, registry, signals, wrapper
+from ndf.domains.relay.account_decide import Usage
+
+VERSION = "11.0.0-dev.4"
+
+
+class FakeChild:
+    """`outputs` を順に画面へ出し、出し切ったら `exit_code` で終わる（None なら生き続ける）。"""
+
+    def __init__(self, outputs: list[bytes], exit_code: int | None):
+        self.read_fd, self.write_fd = os.pipe()
+        self.fd = self.read_fd
+        self.outputs = list(outputs)
+        self.exit_code = exit_code
+        self.alive = True
+        self.exitstatus = None
+        self.written: list[bytes] = []
+
+    def isalive(self):
+        if self.outputs:
+            os.write(self.write_fd, self.outputs.pop(0))
+        elif self.alive and self.exit_code is not None:
+            self.alive, self.exitstatus = False, self.exit_code
+        return self.alive
+
+    def write(self, data):
+        self.written.append(data)
+
+    def terminate(self, force=False):
+        self.alive, self.exitstatus = False, -9
+
+    def close(self):
+        os.close(self.read_fd)
+        os.close(self.write_fd)
+
+
+class Spawner:
+    def __init__(self, children):
+        self.children = list(children)
+        self.calls: list[tuple[list[str], dict]] = []
+        self.made: list[FakeChild] = []
+
+    def __call__(self, argv, env, cwd):
+        self.calls.append((argv, dict(env)))
+        child = self.children.pop(0)
+        self.made.append(child)
+        return child
+
+
+def _clock():
+    now = [0.0]
+
+    def tick():
+        now[0] += 1.0
+        return now[0]
+
+    return tick
+
+
+def _settings(tmp_path: Path, **changes) -> wrapper.Settings:
+    values = dict(
+        state_dir=tmp_path / "state", version=VERSION, name="t1", cwd=tmp_path, environ={"NDF_STATE_HOME": str(tmp_path / "old")},
+        args=("--model", "x"), tick=0.0, quiet=2.0, stall=1000.0, max_starts=3, context_limit=800_000,
+        usage_threshold=90.0, transcript_bytes=4096,
+    )
+    values.update(changes)
+    return wrapper.Settings(**values)
+
+
+def _run(tmp_path, children, prepare=None, **changes):
+    s = _settings(tmp_path, **changes)
+    spawn = Spawner(children)
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    if prepare:
+        prepare(w.dir, s.state_dir)
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        for c in spawn.made + spawn.children:
+            c.close()
+    return ended, spawn, w
+
+
+def _log(w) -> list[dict]:
+    return [json.loads(line) for line in (w.dir / registry.LOG_FILE).read_text(encoding="utf-8").splitlines()]
+
+
+def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
+    def prepare(d, state):
+        d.mkdir(parents=True)
+        signals.write_next(d, "s1", "/goal 次の区間", True, 0.1)
+        accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
+        accounts.use(state, "team")
+
+    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare)
+    assert ended.cause == "" and "書かずに終わった" in ended.reason
+    (first, first_env), (second, second_env) = spawn.calls
+    assert first[:2] == [wrapper.CLAUDE, "--session-id"] and first[3:] == ["--model", "x", "最初の 1 行"]
+    assert second[0:2] == [wrapper.CLAUDE, "--session-id"] and second[-1] == "/goal 次の区間" and second[2] != first[2]
+    # カットポイントで使用率が閾値を超えていれば、空いたアカウントで次の区間を始める（#3336）
+    assert (first_env["NDF_CLAUDE_ACCOUNT"], second_env["NDF_CLAUDE_ACCOUNT"]) == ("team", "main")
+    assert first_env["NDF_RELAY_DIR"] == str(w.dir) and first_env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"
+    assert marks.take(tmp_path / "state", second[2]) is True
+    assert signals.read_next(w.dir) is None
+    assert spawn.made[0].alive is False
+    kinds = [row["kind"] for row in _log(w)]
+    assert kinds.count("section") == 2 and "account" in kinds and kinds[-1] == "end"
+    assert registry.read_state(w.dir)["state"] == "stopped"
+
+
+def test_usage_limit_resumes_on_another_account_even_with_background_waits(tmp_path):
+    # 背景の待ちを残したまま上限に当たっても、替える先で --resume して続ける（#3337）
+    def prepare(d, state):
+        accounts.write_usages(state, [Usage("team", 100.0, True), Usage("main", 5.0, False)])
+        accounts.use(state, "team")
+
+    limited = FakeChild([b"  \xe2\x8e\xbf  You've hit your individual spend limit \xc2\xb7 resets 10:40pm\r\n"], None)
+    ended, spawn, w = _run(tmp_path, [limited, FakeChild([], 0)], prepare)
+    (first, _), (second, env) = spawn.calls
+    assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1] == "利用上限でアカウントを替えた。中断したところから続ける"
+    assert env["NDF_CLAUDE_ACCOUNT"] == "main"
+    assert ended.cause == ""
+
+
+def test_auth_failure_marks_the_lane_stalled(tmp_path, monkeypatch):
+    # 認証の失敗で /goal が外れたら、状態を stalled にして理由を残す（#3243）
+    child = FakeChild([b"Goal cleared after an unrecoverable error (authentication failed)\r\n", b"", b""], 0)
+    seen = []
+    real = registry.write_state
+    monkeypatch.setattr(registry, "write_state", lambda d, data: (seen.append(data["state"]), real(d, data)))
+    ended, _, _ = _run(tmp_path, [child])
+    assert "stalled" in seen and ended.cause == ""
+
+
+def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
+    d = registry.wrapper_dir(tmp_path / "state", "t1")
+    d.mkdir(parents=True)
+    fd = os.open(d / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        ended, spawn, _ = _run(tmp_path, [])
+    finally:
+        os.close(fd)
+    assert ended.cause == "refused" and spawn.calls == []
+
+
+def test_old_ndf_wrapper_running_stops_the_new_wrapper(tmp_path):
+    # 旧い版のラッパーが動いていれば、新しい版のラッパーは動かずに止まる（3341-2）
+    old = tmp_path / "old" / "relay" / "20261113T1"
+    old.mkdir(parents=True)
+    fd = os.open(old / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        ended, spawn, _ = _run(tmp_path, [])
+    finally:
+        os.close(fd)
+    assert ended.cause == "precondition" and "旧い NDF" in ended.reason and spawn.calls == []
+
+
+def test_crashed_child_is_resumed_until_the_daily_limit(tmp_path):
+    children = [FakeChild([], 1), FakeChild([], 1), FakeChild([], 1)]
+    ended, spawn, _ = _run(tmp_path, children, max_starts=2)
+    assert ended.cause == "work_stopped"
+    assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
+
+
+def test_broken_next_mark_stops_with_the_reason(tmp_path):
+    def prepare(d, state):
+        d.mkdir(parents=True)
+        (d / signals.NEXT_FILE).write_text('{"block": "/goal"}', encoding="utf-8")
+
+    ended, spawn, _ = _run(tmp_path, [FakeChild([], None)], prepare)
+    assert ended.cause == "config_broken" and spawn.made[0].alive is False

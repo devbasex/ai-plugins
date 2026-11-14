@@ -18,6 +18,8 @@ from ndf.adapters import agents
 AUTH_FAILED = re.compile(r"authentication failed|Please run /login|API Error: 40[13]\b", re.IGNORECASE)
 # 画面の制御の列（色・カーソル）。文言を探す前に外す
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+# 行頭の字下げと罫線（画面の枠・応答の印 ⎿ など）。利用上限の行は行頭で照らすので外す
+LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
@@ -26,7 +28,7 @@ def plain(raw: bytes) -> str:
 
 
 def limit_line(screen: str) -> Optional[str]:
-    return agents.usage_limit(screen)
+    return agents.usage_limit(LEAD.sub("", screen))
 
 
 def auth_failed(screen: str) -> bool:

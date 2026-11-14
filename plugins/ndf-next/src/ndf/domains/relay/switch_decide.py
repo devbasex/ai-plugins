@@ -83,7 +83,7 @@ def _limit_or_auth(state: SectionState) -> Optional[Step]:
         return Step("account", pick.reason, prompt=RESUME_PROMPT, account=pick.account)
     if pick is not None:
         return Step("wait_reset", pick.reason)
-    if state.auth_failed:
+    if state.auth_failed and state.child_alive:
         return Step("stalled", "認証の失敗で /goal が外れ、子が入力を待っている。running として扱わない")
     return None
 
