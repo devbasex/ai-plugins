@@ -162,7 +162,7 @@ def test_cleanup_passes_the_start_record_to_the_keep_decision(tmp_path, monkeypa
     ms = load_merged_steps()
     monkeypatch.setattr(ms, "merged_pr_info", lambda root, n, add: ("sprint/s1", git(repo, "rev-parse", "sprint/s1")))
     items = []
-    ms._cleanup_pr(str(repo), str(repo), None, tmp_path / "wt", 5, lambda *i: items.append(i))
+    ms._cleanup_pr(ms.CleanupContext(main_dir=str(repo), slug=None, wt_base=tmp_path / "wt", add=lambda *i: items.append(i)), 5)
     assert [i[:3] for i in items] == [("branch", "sprint/s1", "kept")]
     assert git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/sprint/s1")
 

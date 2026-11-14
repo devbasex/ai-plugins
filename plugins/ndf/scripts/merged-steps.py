@@ -48,6 +48,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -150,10 +152,23 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
+@dataclass(frozen=True)
+class CleanupContext:
+    """後片付けの実行文脈。`main_dir` は主ディレクトリで、git を打つ根も兼ねる（消す作業ツリーから打たない）。
+
+    `slug` は一時の置き場の下のリポジトリの名前（決まらなければ `None`）、`wt_base` は一時の置き場、`add` は記録の 1 件を足す。"""
+
+    main_dir: str
+    slug: str | None
+    wt_base: Path
+    add: Callable[..., None]
+
+
+def _remove_pr_tmp_worktrees(ctx: CleanupContext, n):
     """PR の一時作業ツリー（wt_base/slug/pr<n> と rf<n> の中の worktree）を、`--force` を使わずに外す（#2229・#1680）。
 
     作業（変更・未追跡・未 push のコミット）を持つものと、持ち主の実行が動いているものは外さず kept にする。"""
+    root, wt_dir, add = ctx.main_dir, ctx.wt_base / ctx.slug, ctx.add
     state = None
     for name, remove in ((f"pr{n}", run_state.remove_pr_dir), (f"rf{n}", run_state.remove_run_dir)):
         path = wt_dir / name
@@ -167,8 +182,10 @@ def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
             add(it["kind"], it["name"], it["result"], it.get("reason"))
 
 
-def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+def _remove_pr_worktrees(ctx: CleanupContext, branch, merge_commit):
     """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
+    root = main_dir = ctx.main_dir
+    add = ctx.add
     branch_free = True
     for wt in list_worktrees(root):
         if wt["branch"] != branch:
@@ -183,8 +200,9 @@ def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
     return branch_free
 
 
-def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
+def _cleanup_pr(ctx: CleanupContext, n):
     """PR 1 件分の作業ツリーとブランチを片付ける。"""
+    root, add = ctx.main_dir, ctx.add
     got = merged_pr_info(root, n, add)
     if got is None:
         return
@@ -192,11 +210,11 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
     # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）
     if why := repo.kept_sprint_branch(root, branch, repo.sprint_flow_record(root, branch)):
         add("branch", branch, "kept", why)
-    elif _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+    elif _remove_pr_worktrees(ctx, branch, merge_commit):
         _delete_branch(root, branch, add)
 
-    if slug:
-        _remove_pr_tmp_worktrees(root, wt_base / slug, n, add)
+    if ctx.slug:
+        _remove_pr_tmp_worktrees(ctx, n)
 
 
 def _update_main_dir(main_dir, add):
@@ -274,10 +292,11 @@ def cleanup(root, prs):
     root = main_dir
     slug = repo_slug(root)
     wt_base = worktree_base.worktree_parent(main_dir)
+    ctx = CleanupContext(main_dir=main_dir, slug=slug, wt_base=wt_base, add=add)
 
     for n in prs:
         with main_dir_lock(main_dir):
-            _cleanup_pr(root, main_dir, slug, wt_base, n, add)
+            _cleanup_pr(ctx, n)
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
     # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
