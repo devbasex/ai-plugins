@@ -186,13 +186,11 @@ def machine_count(own: PlanLanes, listed: Mapping[str, Mapping[str, Any]], skip:
     """自分の計画（読んである）と、登録簿の計画の動いているレーンを数える。"""
     others = [read_lanes(cwd, plan, (own.key,)) for cwd, plan in discover(listed)]
     found = [own, *(p for p in others if p is not None)]
-    seen: set[str] = set()
-    plans = []
+    # 計画の所在で重複を除く（最初の 1 件を残し、順を保つ）
+    uniq: dict[str, PlanLanes] = {}
     for p in found:
-        if p.key not in seen:
-            seen.add(p.key)
-            plans.append(p)
-    return count(plans, listed, skip)
+        uniq.setdefault(p.key, p)
+    return count(list(uniq.values()), listed, skip)
 
 
 def lock_path() -> Path:
