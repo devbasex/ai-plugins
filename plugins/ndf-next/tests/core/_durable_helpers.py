@@ -1,4 +1,5 @@
-"""durable のテストが共有する補助（鍵 1 つで耐久ワークフローを流す子プロセスの起動と、使い捨ての PostgreSQL の URL）。"""
+"""durable のテストが共有する補助（鍵 1 つで耐久ワークフローを流す子プロセスの起動）。"""
+# 使い捨ての PostgreSQL の URL（`postgres_url`）もここに置く。
 
 from __future__ import annotations
 
