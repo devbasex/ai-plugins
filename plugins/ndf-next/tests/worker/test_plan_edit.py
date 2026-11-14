@@ -73,3 +73,43 @@ def test_list_edits_stops_on_an_edit_without_time(tmp_path):
     path.write_text('{"event": "plan_edit"}\n', encoding="utf-8")
     with pytest.raises(worker.WorkerError):
         worker.list_edits([path])
+
+
+# --- 現状固定テスト（edit_plan の分割の前に経路を固定する） ----------------------------------
+
+
+def test_edit_row_shape_and_backup_name(tmp_path):
+    plan, new, state = _plan(tmp_path / "plan.json", "a", "b"), _plan(tmp_path / "new.json", "a"), tmp_path / "s" / "deep"
+    at = "2026-11-14T01:02:03+00:00"
+    row = worker.edit_plan(plan, new, "理由", state, now=at)
+    assert set(row) == {"event", "at", "plan", "reason", "diff", "backup"}
+    assert row["event"] == "plan_edit" and row["at"] == at and row["plan"] == str(plan) and row["reason"] == "理由"
+    assert row["backup"] == str(tmp_path / "plan.json.bak-20261114T0102030000")
+    assert row["diff"].startswith(f"--- {plan}\n+++ {new}\n")
+    assert not (tmp_path / "plan.json.tmp").exists()
+    [line] = (state / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+    assert json.loads(line) == row
+
+
+def test_successive_edits_append_rows(tmp_path):
+    plan, state = _plan(tmp_path / "plan.json", "a", "b", "c"), tmp_path / "state"
+    worker.edit_plan(plan, _plan(tmp_path / "n1.json", "a", "b"), "一回目", state, now="2026-11-14T01:00:00+00:00")
+    worker.edit_plan(plan, _plan(tmp_path / "n2.json", "a"), "二回目", state, now="2026-11-14T02:00:00+00:00")
+    rows = worker.list_edits([state / "progress.jsonl"])
+    assert [r["reason"] for r in rows] == ["一回目", "二回目"]
+    assert len(list(tmp_path.glob("plan.json.bak-*"))) == 2
+
+
+def test_blank_reason_is_checked_before_reading_new(tmp_path):
+    plan, state = _plan(tmp_path / "plan.json", "a"), tmp_path / "state"
+    with pytest.raises(worker.WorkerError) as err:
+        worker.edit_plan(plan, tmp_path / "missing.json", "  \n", state)
+    assert err.value.kind == "invalid" and not state.exists()
+
+
+def test_missing_plan_is_invalid(tmp_path):
+    plan, state = tmp_path / "plan.json", tmp_path / "state"
+    with pytest.raises(worker.WorkerError) as err:
+        worker.edit_plan(plan, _plan(tmp_path / "new.json", "a"), "理由", state)
+    assert err.value.kind == "invalid" and str(plan) in err.value.detail
+    assert not state.exists() and not list(tmp_path.glob("plan.json.bak-*"))
