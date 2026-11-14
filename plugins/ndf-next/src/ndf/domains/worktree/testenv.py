@@ -283,7 +283,7 @@ def test_values(t: Target, kind: str, row: dict[str, Any], out: Optional[Path]) 
         values[base_url] = f"http://localhost:{port}"
     out_env = spec.get("out_env")
     if isinstance(out_env, str):
-        where = out if out is not None else t.path / EVIDENCE / f"{row['environment']}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+        where = out if out is not None else t.path / EVIDENCE / f"{row['environment']}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
         real = os.path.realpath(where if where.is_absolute() else t.path / where)
         if not real.startswith(t.key + os.sep):
             raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")

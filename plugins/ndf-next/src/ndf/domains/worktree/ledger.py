@@ -24,10 +24,14 @@ from ndf.domains.worktree import testenv_decide
 LEDGER = Path("ndf") / "worktree-registry.json"
 LOCK_WAIT = 30
 Row = dict[str, Any]
+# 台帳の時刻の書式（書く側の `now` と、読む側の `testenv_sweep` が同じ書式を使う）
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+# 割り当ての ID と証跡の置き場に付ける時刻の書式
+COMPACT_STAMP = "%Y%m%dT%H%M%SZ"
 
 
 def now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return time.strftime(STAMP, time.gmtime())
 
 
 def ledger_path(git: Git) -> Path:
@@ -75,7 +79,7 @@ class Ledger:
             slot = testenv_decide.free_slot(r["slot"] for r in rows if r.get("released_at") is None)
             if slot is None:
                 return None
-            row = {"id": f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.getpid()}", "worktree": worktree, "branch": branch,
+            row = {"id": f"{time.strftime(COMPACT_STAMP, time.gmtime())}-{os.getpid()}", "worktree": worktree, "branch": branch,
                    "environment": environment, "slot": slot, "ports": {}, "assigned_at": now(), "last_used_at": now(),
                    "released_at": None, "expose": None}  # fmt: skip
             rows.append(row)

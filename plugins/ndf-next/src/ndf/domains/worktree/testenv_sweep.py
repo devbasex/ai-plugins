@@ -26,7 +26,7 @@ def _age(stamp: Any) -> Optional[float]:
     if not isinstance(stamp, str):
         return None
     try:
-        return time.time() - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+        return time.time() - calendar.timegm(time.strptime(stamp, ledger.STAMP))
     except ValueError:  # noqa: NDF401 ファイル: 台帳の時刻が読めない行は止めない側へ倒す
         return None
 
