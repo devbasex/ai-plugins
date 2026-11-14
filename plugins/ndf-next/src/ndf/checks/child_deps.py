@@ -119,7 +119,7 @@ def closure(child: str, children: Children) -> frozenset[str]:
 
     def visit(name: str) -> None:
         if name in path:
-            raise CheckError(f"children.json の needs に輪がある: {' → '.join([*path[path.index(name):], name])}")
+            raise CheckError(f"children.json の needs に輪がある: {' → '.join([*path[path.index(name) :], name])}")
         if name in done:
             return
         path.append(name)
@@ -148,7 +148,9 @@ def import_findings(scope: Scope, children: Children) -> list[Finding]:
         mine = owner(module, children)
         if mine is None:
             if src.path.name != "__init__.py":
-                found.append(Finding(RULE, src.rel, 1, f"持ち主の子が children.json に無いモジュール: {module}。表を直す設計 PR を先に通す"))
+                found.append(
+                    Finding(RULE, src.rel, 1, f"持ち主の子が children.json に無いモジュール: {module}。表を直す設計 PR を先に通す")
+                )
             continue
         allowed = reach.setdefault(mine, _reach(mine, children))
         found += [

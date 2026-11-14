@@ -100,7 +100,11 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CheckError(f"規則のデータを読めない: {path}: {exc}") from exc
-    missing = [k for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants") if k not in data]
+    missing = [
+        k
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
+        if k not in data
+    ]
     if missing:
         raise CheckError(f"規則のデータに鍵が無い: {path}: {missing}")
     bad = [code for code, rule in data["smells"].items() if rule["mark"] not in ("none", "boundary", "boundary-or-limit")]
