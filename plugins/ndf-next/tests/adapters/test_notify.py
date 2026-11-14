@@ -81,6 +81,10 @@ def test_post_json_returns_none(handler: Handler) -> None:
     assert notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler})) is None
 
 
+def test_post_json_returns_none_for_invalid_url() -> None:
+    assert notify.post_json("::", {}, {}, 5, transport=_transport({})) is None
+
+
 # ---- fetch_body ----
 
 
@@ -136,6 +140,33 @@ def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
     assert [t["read"] for t in timeouts] == [5, 3]
 
 
+def test_fetch_body_each_read_waits_only_the_remaining_time(clock: _Clock) -> None:
+    seen: list[float] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        timeouts = req.extensions["timeout"]
+
+        def body() -> Iterator[bytes]:
+            for step in (1.0, 2.0):
+                seen.append(timeouts["read"])
+                clock.advance(step)
+                yield b"x"
+            seen.append(timeouts["read"])
+
+        return httpx.Response(200, content=body())
+
+    assert notify.fetch_body("https://x.test/a", 5, transport=_transport({"/a": handler})) == b"xx"
+    assert seen == [5, 4, 2]
+
+
+def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:
+    def old(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"Location": "/new"}, content=_slow_body(clock, [10.0]))
+
+    t = _transport({"/old": old, "/new": lambda req: httpx.Response(200, content=b"ok")})
+    assert notify.fetch_body("https://x.test/old", 5, transport=t) == b"ok"
+
+
 @pytest.mark.parametrize(
     ("routes", "reason"),
     [
@@ -154,3 +185,8 @@ def test_fetch_body_errors(routes: dict[str, Handler], reason: str) -> None:
     with pytest.raises(notify.FetchError) as caught:
         notify.fetch_body("https://x.test/a", 5, transport=_transport(routes))
     assert str(caught.value) == reason
+
+
+def test_fetch_body_invalid_url() -> None:
+    with pytest.raises(notify.FetchError, match=r"^URL が不正$"):
+        notify.fetch_body("::", 5, transport=_transport({}))

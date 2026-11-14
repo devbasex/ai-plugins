@@ -66,7 +66,7 @@ def test_block_kinds_boundaries(text: str, expected: list[str]) -> None:
 
 
 def test_code_lines_include_nested_and_indented_code() -> None:
-    text = "- 項目\n\n  ```\n  c\n  ```\n\n    ind\n\nend"
+    text = "- 項目\n\n  ```\n  c\n  ```\n\n      ind\n\nend"
     assert markdown.code_lines(text) == [False, False, True, True, True, False, True, False, False]
 
 

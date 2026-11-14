@@ -15,9 +15,6 @@ from typing import Any
 
 import httpx
 
-# 本文を読む 1 回の量（バイト）
-CHUNK_BYTES = 65536
-
 # 単調時計。テストが差し替える
 _now = time.monotonic
 
@@ -37,7 +34,7 @@ def post_json(
     try:
         with httpx.Client(transport=transport, timeout=timeout) as client:
             resp = client.post(url, json=body, headers=headers)
-    except httpx.HTTPError:  # noqa: NDF401 ネットワーク: 送れなければ呼ぶ側が判定を見送る
+    except (httpx.HTTPError, httpx.InvalidURL):  # noqa: NDF401 ネットワーク: 送れなければ呼ぶ側が判定を見送る
         return None
     if not resp.is_success:
         return None
@@ -65,34 +62,51 @@ def _limit_hook(deadline: float, timeout: float):
 
 
 def _read(resp: httpx.Response, deadline: float, timeout: float) -> bytes:
-    """2xx の応答の本文を、期限の内で読み切る。"""
+    """2xx の応答の本文を、期限の内で読み切る。
+
+    受信のたびに本文を受け取り（量で溜めない）、次の読み取りの待ちを期限の残りへ掛け直す。
+    httpcore は読み取りのたびに要求の `extensions["timeout"]` を引くため、同じ辞書を書き換えれば効く。
+    """
+    timeouts = resp.request.extensions.get("timeout")
     parts: list[bytes] = []
-    for chunk in resp.iter_bytes(CHUNK_BYTES):
+    chunks = resp.iter_bytes()
+    while True:
+        if isinstance(timeouts, dict):
+            timeouts["read"] = max(deadline - _now(), 0.0)
+        chunk = next(chunks, None)
+        if chunk is None:
+            return b"".join(parts)
         parts.append(chunk)
         if _now() > deadline:
             raise FetchError(f"{_seconds(timeout)} 秒を越えた")
-    return b"".join(parts)
 
 
 def fetch_body(url: str, timeout: float, transport: httpx.BaseTransport | None = None) -> bytes:
     """URL の本文を取得する。転送は追い、上限の秒数は転送の前後で通しで数える。
 
-    最終の応答が 2xx なら本文の全部を返す。上限を越えた・2xx でない・転送が多すぎる・接続できないときは
+    転送の応答は本文を読まずに閉じ、次の要求へ進む。最終の応答が 2xx なら本文の全部を返す。
+    上限を越えた・2xx でない・転送が多すぎる・URL が不正・接続できないときは
     `FetchError`（理由の日本語 1 行）を送出する。
     """
     deadline = _now() + timeout
     hooks = {"request": [_limit_hook(deadline, timeout)]}
     try:
-        with (
-            httpx.Client(transport=transport, follow_redirects=True, timeout=timeout, event_hooks=hooks) as client,
-            client.stream("GET", url) as resp,
-        ):
-            if not resp.is_success:
-                raise FetchError(f"HTTP {resp.status_code}")
-            return _read(resp, deadline, timeout)
-    except httpx.TooManyRedirects as e:
-        raise FetchError("転送が多すぎる") from e
+        with httpx.Client(transport=transport, timeout=timeout, event_hooks=hooks) as client:
+            request = client.build_request("GET", url)
+            for _ in range(client.max_redirects + 1):
+                resp = client.send(request, stream=True)
+                try:
+                    if resp.next_request is None:
+                        if not resp.is_success:
+                            raise FetchError(f"HTTP {resp.status_code}")
+                        return _read(resp, deadline, timeout)
+                    request = resp.next_request
+                finally:
+                    resp.close()
+            raise FetchError("転送が多すぎる")
     except httpx.TimeoutException as e:
         raise FetchError(f"{_seconds(timeout)} 秒を越えた") from e
+    except httpx.InvalidURL as e:
+        raise FetchError("URL が不正") from e
     except httpx.RequestError as e:
         raise FetchError(f"接続できない（{type(e).__name__}）") from e
