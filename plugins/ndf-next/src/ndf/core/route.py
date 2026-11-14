@@ -72,8 +72,8 @@ WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
 BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
-# 手元のテストを打つ枠の入口（`ndf route test` が後ろにコマンドを 1 つ足す）
-TEST_SLOT = ("ndf", "test-slot", "run", "--")
+# 手元のテストを打つ枠のエントリポイント（`ndf route test` が後ろにコマンドを 1 つ足す）
+TEST_SLOT = (identity.FIXED_WORDS["entrypoint"], "test-slot", "run", "--")
 # これ以上の終了コードはシグナルで止まった子（シェルの 128 + シグナルの番号）。テストの落ちと読まない
 SIGNAL_EXIT_BASE = 128
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
