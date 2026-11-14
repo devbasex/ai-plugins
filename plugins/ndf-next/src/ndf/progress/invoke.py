@@ -411,29 +411,46 @@ def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
     place = work_place(run, cwd)
-    sources = dict(FILL_SOURCES)
-    if FROM_ISSUE in wanted.values():
-        issued = _issue_values(run, work_dir, place)
-        if issued is None:
-            sources.update({n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE})
-        else:
-            values.update({k: v for k, v in issued.items() if k in wanted})
-    if FROM_PROJECT in wanted.values():
-        project = _project(place)
-        for name in (n for n, s in wanted.items() if s == FROM_PROJECT):
-            found = _project_value(name, project)
-            if found is not None:
-                values[name] = found
-    if "branch" in wanted:
-        branch = _branch_of(run)
-        if branch is not None:
-            values["branch"] = branch
+    issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
+    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted)}
     values = route.derived(t, values, cwd)
-    defs = route.params()
-    missing = {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
+    missing = _missing(t, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
+
+
+def _fill_from_issue(
+    run: StageRun, work_dir: Path, place: Path, wanted: Mapping[str, str]
+) -> tuple[dict[str, route.Value], dict[str, str]]:
+    """課題の出所の差し込みの値と、出所の上書き（書き手を信用しない課題なら値を返さず、出所を FROM_UNTRUSTED_ISSUE にする）。"""
+    if FROM_ISSUE not in wanted.values():
+        return {}, {}
+    issued = _issue_values(run, work_dir, place)
+    if issued is None:
+        return {}, {n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE}
+    return {k: v for k, v in issued.items() if k in wanted}, {}
+
+
+def _fill_from_project(place: Path, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """宣言の出所の差し込みの値（宣言に無いか形が違う差し込みは含めない）。"""
+    if FROM_PROJECT not in wanted.values():
+        return {}
+    project = _project(place)
+    found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
+    return {name: value for name, value in found.items() if value is not None}
+
+
+def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """ブランチの出所の差し込みの値（決まらなければ含めない）。"""
+    branch = _branch_of(run) if "branch" in wanted else None
+    return {"branch": branch} if branch is not None else {}
+
+
+def _missing(t: route.Template, values: Mapping[str, route.Value], sources: Mapping[str, str]) -> dict[str, str]:
+    """既定も無く決まらない差し込み → 出所（出所の表に無ければ工程の入力）。"""
+    defs = route.params()
+    return {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
