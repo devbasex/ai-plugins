@@ -14,7 +14,7 @@
       "type": "run",
       "stage": "作業場所の用意",
       "timeout": 600,
-      "cmd": "bash <NDF>/scripts/worktree-setup.sh create sprint/m9 && git -C <TMP>/repo/.worktrees/sprint/m9 push -q -u origin sprint/m9",
+      "cmd": "bash <NDF>/scripts/worktree-setup.sh create sprint/m9 --from main && git -C <TMP>/repo/.worktrees/sprint/m9 push -q -u origin sprint/m9",
       "next": "end"
     }
   ],

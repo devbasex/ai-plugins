@@ -12,6 +12,18 @@ wt_current_branch() {
   git -C "${1:-}" symbolic-ref --short -q HEAD 2>/dev/null
 }
 
+# wt_dev_worktrees の 1 項目を出力する。<接頭辞> の下（<接頭辞>.ndf/ の下を除く）の
+# 作業ツリーだけを `<パス><タブ><ブランチ名>` で 1 行出す。出力の条件と書式を 1 か所へ寄せ、
+# ループ内（空行の枝）とループ後（最後の項目）で食い違わないようにする。
+# 使い方: _wt_print_dev_worktree "<接頭辞>" "<パス>" "<ブランチ名>"
+_wt_print_dev_worktree() {
+  local prefix="$1" path="$2" branch="$3"
+  case "$path" in
+    "$prefix.ndf/"*) ;;
+    "$prefix"*) printf '%s\t%s\n' "$path" "$branch" ;;
+  esac
+}
+
 # 開発用の作業ツリーを `<パス><タブ><ブランチ名>` の形で 1 行 1 件で出力する。
 # 対象は主ディレクトリ直下の .worktrees/ 配下に限る。レビューとリファクタリングの
 # 作業ツリー（一時の置き場か .worktrees/.ndf の下）は、この一覧には入らない。
@@ -19,14 +31,6 @@ wt_dev_worktrees() {
   local main_dir="${1:-}" prefix path branch
   [ -n "$main_dir" ] || return 1
   prefix="$main_dir/$WT_WORKTREE_DIR/"
-  # prefix 配下の作業ツリーだけを 1 行出力する。出力の条件と書式を 1 か所へ寄せ、
-  # ループ内（空行の枝）とループ後（最後の項目）で食い違わないようにする。
-  _wt_emit_worktree() {
-    case "$1" in
-      "$prefix.ndf/"*) ;;
-      "$prefix"*) printf '%s\t%s\n' "$1" "$2" ;;
-    esac
-  }
   path=""
   branch=""
   while IFS= read -r line; do
@@ -40,15 +44,14 @@ wt_dev_worktrees() {
         branch=${branch#refs/heads/}
         ;;
       "")
-        _wt_emit_worktree "$path" "$branch"
+        _wt_print_dev_worktree "$prefix" "$path" "$branch"
         path=""
         branch=""
         ;;
     esac
   done < <(git -C "$main_dir" worktree list --porcelain 2>/dev/null)
   # 最後の項目は空行で終わらないことがある。
-  _wt_emit_worktree "$path" "$branch"
-  unset -f _wt_emit_worktree
+  _wt_print_dev_worktree "$prefix" "$path" "$branch"
 }
 
 # 主ディレクトリの追従先を決める。git は呼ばず、引数だけで判定する。
@@ -89,17 +92,26 @@ wt_follow_enabled() {
   printf '%s' "$decl" | jq -e '.follow_branch == true' >/dev/null 2>&1 || return 1
 }
 
+# 既定ブランチの候補を出す `default_branch_candidates.py`（`branch_flow.py` の定数を読む）の置き場。source した時点の自分の位置から決める
+# （`worktree-common.sh` と同じく、`cd` で戻らずプラグインルートを外さない）。
+_WT_BRANCH_FLOW_PY="$(dirname "${BASH_SOURCE[0]}")/default_branch_candidates.py"
+
 # 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
-# 取れなければ main / master の順で存在するものを返す。
+# 取れなければ `branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` の順で存在するものを返す。
+# 候補はここで並べない（置き場は定数の 1 か所。#3309）。python3 が無いか候補を読めなければ 1 を返す。
 wt_default_branch() {
-  local main_dir="${1:-}" ref candidate
+  local main_dir="${1:-}" ref candidate candidates
   [ -n "$main_dir" ] || return 1
   ref=$(git -C "$main_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   if [ -n "$ref" ]; then
     printf '%s\n' "${ref#origin/}"
     return 0
   fi
-  for candidate in main master; do
+  if ! candidates=$(python3 -I "$_WT_BRANCH_FLOW_PY" 2>/dev/null); then
+    printf 'NOTE: 既定ブランチの候補を %s から読めません\n' "$_WT_BRANCH_FLOW_PY" >&2
+    return 1
+  fi
+  for candidate in $candidates; do
     if git -C "$main_dir" show-ref --verify --quiet "refs/heads/$candidate"; then
       printf '%s\n' "$candidate"
       return 0

@@ -14,7 +14,7 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 family の `scripts/` の下のスクリプト（`.py` / `.sh` / `.js`）、`hooks/*.json`、`agents/*.md`（エージェントの本文。
 Markdown と同じ語を掛ける。#3121）である。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
-DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛ける。プロジェクトごとに違うものは
+DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛け、シェルのスクリプトには SHELL_WORDS も掛ける。プロジェクトごとに違うものは
 `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も持たない
 Skill があるときは、チェック自体を失敗させる**。読み飛ばすと、公開する Skill の本文が丸ごと
 未走査のままチェックが成功する。
@@ -53,9 +53,12 @@ from __future__ import annotations
 
 import argparse
 import collections
+import dataclasses
+import functools
 import pathlib
 import re
 import sys
+from collections.abc import Iterator
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
@@ -98,9 +101,12 @@ SCRIPT_WORDS: dict[str, str] = {
     "check-doc-line-limit": r"check-doc-line-limit",
     "runtime-list": r"claude,codex,kiro",
     "origin-develop": r"origin/develop",
-    "quoted-main": r"[\"']main[\"']",
+    # 特定のブランチ名の決め打ち（#3309）。引用符の有無・`origin/` の付いた形を問わず拾う。名前は宣言か
+    # `lib/branch_flow.py` の定数から読む
+    "origin-main": r"origin/(?:main|master)\b",
+    "quoted-main": r"[\"'](?:main|master)[\"']",
     "quoted-develop": r"[\"']develop[\"']",
-    "base-main": r"--base[ =]main\b",
+    "base-main": r"--base[ =](?:main|master)\b",
     "admin-merge": r"--admin\b",
     "tag-form": r"--v(?![A-Za-z-])",
     "release-branch": r"release/v(?![a-z])",
@@ -108,7 +114,13 @@ SCRIPT_WORDS: dict[str, str] = {
     "spec-dir": r"docs/specifications",
     "pytest": r"\bpytest\b",
 }
-KNOWN_WORDS = frozenset(DOC_WORDS) | frozenset(SCRIPT_WORDS)
+
+# シェルのスクリプト（`.sh`）にだけ掛ける語。引用符の無い単語の並び（`for c in main master` など）で書いた
+# ブランチ名を拾う。Python の `main` は関数名になるので掛けない。行頭が `#` のコメントの行は見ない
+SHELL_WORDS: dict[str, str] = {
+    "shell-branch-word": r"(?<![^\s(=|;&])(?:main|master|develop)(?![^\s);|&])",
+}
+KNOWN_WORDS = frozenset(DOC_WORDS) | frozenset(SCRIPT_WORDS) | frozenset(SHELL_WORDS)
 
 
 def compile_words(words: dict[str, str]) -> list[tuple[str, re.Pattern[str]]]:
@@ -117,6 +129,8 @@ def compile_words(words: dict[str, str]) -> list[tuple[str, re.Pattern[str]]]:
 
 DOC_MATCHERS = compile_words(DOC_WORDS)
 SCRIPT_MATCHERS = compile_words(SCRIPT_WORDS)
+SHELL_MATCHERS = compile_words(SHELL_WORDS)
+SHELL_SUFFIX = ".sh"
 SCRIPT_SUFFIXES = (".py", ".sh", ".js")
 SKIP_DIRS = frozenset({"tests", "experimental"})
 
@@ -235,20 +249,34 @@ def collect_agents(skills_dir: pathlib.Path) -> list[str]:
     return [path.name for path in sorted(root.glob("*.md"))] if root.is_dir() else []
 
 
-def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
+def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]], *, skip_comments: bool = False) -> list[Hit]:
     """走査対象の本文からヒットを集める。語ごとに照合するので、同じ行の 2 語は別のヒットになる。
 
-    語の和で先に行を絞る。ほとんどの行に語が無く、語ごとの照合を全行へ掛けると CI の待ちが延びる。"""
+    語の和で先に行を絞る。ほとんどの行に語が無く、語ごとの照合を全行へ掛けると CI の待ちが延びる。
+    `skip_comments` が真なら、行頭（空白を除く）が `#` の行を見ない。"""
     any_word = re.compile("|".join(regex.pattern for _, regex in matchers))
     hits: list[Hit] = []
     for rel in rels:
         text = (base / rel).read_text(encoding="utf-8")
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            if not any_word.search(line):
-                continue
+        for lineno, line in iter_matching_lines(text, any_word, skip_comments):
             for word_id, regex in matchers:
                 hits += [Hit(base, rel, lineno, word_id, m.group(0), line) for m in regex.finditer(line)]
     return hits
+
+
+def iter_matching_lines(text: str, any_word: re.Pattern[str], skip_comments: bool) -> Iterator[tuple[int, str]]:
+    """語の和 `any_word` に当たる行を (1 始まりの行番号, 行) で返す。`skip_comments` なら行頭が `#` の行を除く。"""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if skip_comments and line.lstrip().startswith("#"):
+            continue
+        if any_word.search(line):
+            yield lineno, line
+
+
+def scan_scripts(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], list[Hit]]:
+    """スクリプトを走査し、(SCRIPT の語のヒット, `.sh` だけに SHELL の語を掛けたヒット) を返す。"""
+    shells = [r for r in rels if r.endswith(SHELL_SUFFIX)]
+    return scan(base, rels, SCRIPT_MATCHERS), scan(base, shells, SHELL_MATCHERS, skip_comments=True)
 
 
 def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path | None:
@@ -285,9 +313,22 @@ def read_allow(path: pathlib.Path) -> list[dict]:
     return rows
 
 
-def validate_allow(
-    rows: list[dict], counts: collections.Counter, scanned: set[str], skills_dirs: list[pathlib.Path], exhaustive: bool
-) -> list[str]:
+@dataclasses.dataclass
+class ScanResult:
+    """全 family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill をまとめる。"""
+
+    scanned: set[str] = dataclasses.field(default_factory=set)
+    hits: list[Hit] = dataclasses.field(default_factory=list)
+    report_lines: list[str] = dataclasses.field(default_factory=list)
+    unscanned: list[pathlib.Path] = dataclasses.field(default_factory=list)
+
+    @functools.cached_property
+    def counts(self) -> collections.Counter:
+        """語とファイルの組ごとのヒットの数。走査を終えてから読む。"""
+        return collections.Counter(h.key for h in self.hits)
+
+
+def validate_allow(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
     """項目が走査の結果と合っているかを確かめ、合わない理由を返す。
 
     突き合わせるのは、**チェックした Skill ディレクトリに属する項目だけ**である。`--skills-dir`
@@ -306,10 +347,10 @@ def validate_allow(
             if exhaustive:
                 problems.append(f"項目の対象がどの Skill ディレクトリにも属さない: {path}（消したか移したなら {file} も消す）")
             continue
-        if key not in scanned:
+        if key not in result.scanned:
             problems.append(f"項目の対象が走査の範囲に実在しない: {path}（消したか移したなら {file} も消す）")
             continue
-        actual = counts[(key, name)]
+        actual = result.counts[(key, name)]
         if actual < row["count"]:
             fix = f"count を {actual} へ直す" if actual else "項目を消す"
             problems.append(f"宣言より当たりが少ない: {path} の {name} は宣言 {row['count']}・実際 {actual}（{file} の{fix}）")
@@ -343,9 +384,10 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     scanned.update(canon(agents_dir / rel) for rel in agents)
     scanned.update(canon(scripts_dir / rel) for rel in scripts)
     scanned.update(canon(hooks_dir / rel) for rel in hooks)
+    family_script_hits, family_shell_hits = scan_scripts(scripts_dir, scripts)
+    skill_script_hits, skill_shell_hits = scan_scripts(skills_dir, skill_scripts)
     hits = scan(skills_dir, docs, DOC_MATCHERS)
-    hits += scan(scripts_dir, scripts, SCRIPT_MATCHERS)
-    hits += scan(skills_dir, skill_scripts, SCRIPT_MATCHERS)
+    hits += family_script_hits + skill_script_hits + family_shell_hits + skill_shell_hits
     hits += scan(hooks_dir, hooks, SCRIPT_MATCHERS)
     hits += scan(agents_dir, agents, DOC_MATCHERS)
     report_line = (
@@ -373,6 +415,54 @@ def hits_outside(all_hits: list[Hit], declared: dict[tuple[str, str], int], coun
     return [h for h in all_hits if counts[h.key] > declared.get(h.key, 0)]
 
 
+def scan_all(skills_dirs: list[pathlib.Path]) -> ScanResult:
+    """family ごとに走査し、結果を 1 つにまとめる。"""
+    result = ScanResult()
+    for skills_dir in skills_dirs:
+        family_scanned, hits, report_line, family_unscanned = scan_family(skills_dir)
+        result.scanned |= family_scanned
+        result.hits.extend(hits)
+        result.report_lines.append(report_line)
+        result.unscanned.extend(family_unscanned)
+    return result
+
+
+def judge(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool) -> tuple[list[str], list[Hit]]:
+    """例外リストと走査の結果を突き合わせ、(例外リストが成立しない理由, 宣言の外のヒット) を返す。
+
+    理由があるときは宣言の外のヒットを判定しない（空で返す）。"""
+    problems = validate_allow(rows, result, skills_dirs, exhaustive=exhaustive)
+    if problems:
+        return problems, []
+    declared = {(canon(r["path"]), r["name"]): r["count"] for r in rows}
+    return [], hits_outside(result.hits, declared, result.counts)
+
+
+def print_unscanned(unscanned: list[pathlib.Path]) -> None:
+    print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
+    for path in unscanned:
+        print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
+    print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
+
+
+def print_problems(problems: list[str]) -> None:
+    print("[check-skill-repo-assumptions] 例外リストが成立していない:", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+
+
+def print_outside(outside: list[Hit]) -> None:
+    print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
+    for h in outside:
+        print(f"  {h}", file=sys.stderr)
+    print(
+        "\n値は .ndf/ の宣言か引数で受ける。対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
+        "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。"
+        "\n数を超えた組は、どの行が新しいかを決められないので組の当たりをすべて出している。",
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -394,24 +484,12 @@ def main() -> int:
             print(f"[check-skill-repo-assumptions] ディレクトリがない: {d}", file=sys.stderr)
             return 2
 
-    scanned: set[str] = set()
-    all_hits: list[Hit] = []
-    report_lines: list[str] = []
-    unscanned: list[pathlib.Path] = []
-    for skills_dir in skills_dirs:
-        family_scanned, hits, report_line, family_unscanned = scan_family(skills_dir)
-        scanned |= family_scanned
-        all_hits.extend(hits)
-        report_lines.append(report_line)
-        unscanned.extend(family_unscanned)
+    result = scan_all(skills_dirs)
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
     # 例外リストより先に見る。範囲が欠けていると、項目の実在の判定も当てにならない。
-    if unscanned:
-        print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
-        for path in unscanned:
-            print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
-        print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
+    if result.unscanned:
+        print_unscanned(result.unscanned)
         return 2
 
     try:
@@ -420,33 +498,19 @@ def main() -> int:
         print(f"[check-skill-repo-assumptions] {e}", file=sys.stderr)
         return 2
 
-    counts = collections.Counter(h.key for h in all_hits)
-    problems = validate_allow(rows, counts, scanned, skills_dirs, exhaustive=args.skills_dir is None)
+    problems, outside = judge(rows, result, skills_dirs, exhaustive=args.skills_dir is None)
     if problems:
-        print("[check-skill-repo-assumptions] 例外リストが成立していない:", file=sys.stderr)
-        for p in problems:
-            print(f"  - {p}", file=sys.stderr)
+        print_problems(problems)
         return 2
-
-    declared = {(canon(r["path"]), r["name"]): r["count"] for r in rows}
-    outside = hits_outside(all_hits, declared, counts)
 
     # `--report` は出力を足すだけで、判定は変えない。走査の範囲と例外リストの誤り
     # （rc=2）はこの手前で落としており、ヒットだけを 0 で返すと同じ実行の中で終了
     # コードの意味が 2 通りになる。README はこのコマンドをチェックの一覧として載せる。
     if args.report:
-        print_report(report_lines, rows, all_hits, outside)
+        print_report(result.report_lines, rows, result.hits, outside)
 
     if outside:
-        print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
-        for h in outside:
-            print(f"  {h}", file=sys.stderr)
-        print(
-            "\n値は .ndf/ の宣言か引数で受ける。対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
-            "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。"
-            "\n数を超えた組は、どの行が新しいかを決められないので組の当たりをすべて出している。",
-            file=sys.stderr,
-        )
+        print_outside(outside)
         return 1
 
     return 0
