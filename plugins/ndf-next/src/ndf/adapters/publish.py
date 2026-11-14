@@ -18,6 +18,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -29,7 +30,6 @@ PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
 HOME_TEXT = "（利用者のホーム）"
 EMAIL_TEXT = "（メール）"
 ACCOUNT_TEXT = "（アカウント名）"
-SECRET_KIND = "secret"
 # 公開のリポジトリへ書いてよいメール（GitHub が公開用に発行する宛先・git の SSH の利用者）
 PUBLIC_EMAIL_LOCALS = frozenset({"noreply", "git"})
 PUBLIC_EMAIL_DOMAIN = "users.noreply.github.com"
@@ -42,6 +42,16 @@ _REPO_REF = re.compile(r"(?<![\w./-])(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+)#\d+
 _REPO_PATTERNS = (_REPO_URL, _REPO_REF)
 _HOME = re.compile(r"/(?:home|Users)/[^/\s)\]>\"'`]+")
 _EMAIL = re.compile(r"(?<![\w.+-])(?P<local>[\w.+-]+)@(?P<domain>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+
+
+class DropKind(StrEnum):
+    """落とした所の種類（`Scrubbed.dropped`・`Published.dropped` の鍵）。"""
+
+    SECRET = "secret"
+    PRIVATE_REF = "private_ref"
+    HOME = "home"
+    EMAIL = "email"
+    ACCOUNT = "account"
 
 
 class Scrubbed(NamedTuple):
@@ -112,14 +122,14 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
     dropped: dict[str, int] = {}
     masked = run_log.redact(text)
     if masked != text:
-        dropped[SECRET_KIND] = 1
+        dropped[DropKind.SECRET] = 1
     text = masked
     if public:
         steps = (
-            ("private_ref", lambda t: _drop_private_refs(t, set(private_repos))),
-            ("home", lambda t: _HOME.subn(HOME_TEXT, t)),
-            ("email", _drop_emails),
-            ("account", lambda t: _drop_accounts(t, accounts)),
+            (DropKind.PRIVATE_REF, lambda t: _drop_private_refs(t, set(private_repos))),
+            (DropKind.HOME, lambda t: _HOME.subn(HOME_TEXT, t)),
+            (DropKind.EMAIL, _drop_emails),
+            (DropKind.ACCOUNT, lambda t: _drop_accounts(t, accounts)),
         )
         for kind, step in steps:
             text, n = step(text)
