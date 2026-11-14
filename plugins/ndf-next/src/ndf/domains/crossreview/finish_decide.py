@@ -145,6 +145,16 @@ def finish(review: Review, handed: Sequence[Handed] = ()) -> Verdict:
     return Verdict(OK, None, f"{review.rounds} ラウンドで {review.final}。{counts}", (), tuple(decisions), warnings)
 
 
+def _id_of(item: dict[str, Any], prefix: str, i: int) -> str:
+    """辞書の `id`。無ければ順の番号から作る（`<prefix>-<1 からの番号>`）。"""
+    return str(item["id"]) if "id" in item else f"{prefix}-{i + 1}"
+
+
+def _text_of(item: dict[str, Any]) -> str:
+    """足すべき内容の本文（text・summary・name の順に、空でない最初の値）。"""
+    return next((str(item[k]) for k in ("text", "summary", "name") if item.get(k)), "")
+
+
 def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
     """指摘の辞書（`id`・`text`・`outcome`・`reason`）の並びを読む。形が違えば `ValueError`。"""
     out = []
@@ -152,7 +162,7 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         if not isinstance(item, dict) or not isinstance(item.get("outcome"), str):
             raise ValueError(f"指摘 {i} の形が違う（outcome の文字列を持つ辞書）")
         reason = item.get("reason")
-        name = str(item["id"]) if "id" in item else f"finding-{i + 1}"
+        name = _id_of(item, "finding", i)
         text = str(item["text"]) if "text" in item else ""
         out.append(Finding(name, text, item["outcome"], reason if reason else None))
     return tuple(out)
@@ -177,8 +187,7 @@ def as_handed(items: Sequence[Any]) -> tuple[Handed, ...]:
         if isinstance(item, str):
             out.append(Handed(f"rebuild-{i + 1}", item))
         elif isinstance(item, dict):
-            text = next((str(item[k]) for k in ("text", "summary", "name") if item.get(k)), "")
-            out.append(Handed(str(item["id"]) if "id" in item else f"rebuild-{i + 1}", text))
+            out.append(Handed(_id_of(item, "rebuild", i), _text_of(item)))
         else:
             raise ValueError(f"足すべき内容 {i} の形が違う（文字列か辞書）")
     return tuple(out)
