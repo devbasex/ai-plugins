@@ -105,12 +105,23 @@ def start(state: rec.LoopState, c: Ctx, ttl: float) -> Decision:
     return Decision(f"ループ {c.name} の鍵を取った", (ev,), next=next_step(after, c.name))
 
 
+def _halt_event(by: str, now: float) -> dict[str, Any]:
+    """人が止めた（`USER_STOP`）としてループを止めた状態にする事象。"""
+    return rec.event(rec.LOOP_HALTED, now, by=by, reason=rec.USER_STOP)
+
+
+def _close_event(lap: rec.Lap, facts: lap_decide.LapFacts, now: float) -> tuple[dict[str, Any], str, str]:
+    """周を締める事象と、その結果・理由（`lap_decide.lap_outcome` が決める）。"""
+    outcome, why = lap_decide.lap_outcome(facts)
+    return rec.event(rec.LAP_CLOSED, now, lap=lap.number, outcome=outcome, reason=why), outcome, why
+
+
 def _boundary(state: rec.LoopState, c: Ctx) -> list[dict[str, Any]]:
     """周の境で、止める要求があれば止めた状態にして鍵を返す事象。無ければ空。"""
     if state.requested is None or state.status == rec.HALTED:
         return []
     req = state.requested
-    return [rec.event(rec.LOOP_HALTED, c.now, by=req.by, reason=rec.USER_STOP), rec.event(rec.LEASE_RETURNED, c.now, session=c.session)]
+    return [_halt_event(req.by, c.now), rec.event(rec.LEASE_RETURNED, c.now, session=c.session)]
 
 
 def open_lap(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
@@ -238,8 +249,8 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
     shipped = [
         rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released
     ]
-    outcome, why = lap_decide.lap_outcome(replace(facts, released=(*lap.released, *(e["version"] for e in shipped))))
-    events = [*shipped, rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=outcome, reason=why)]
+    closing, outcome, why = _close_event(lap, replace(facts, released=(*lap.released, *(e["version"] for e in shipped))), c.now)
+    events = [*shipped, closing]
     after = state
     for ev in events:
         after = rec.apply(after, ev)
@@ -275,7 +286,6 @@ def stop(state: rec.LoopState, c: Ctx, by: str, reason: str, at_once: bool) -> D
         return Decision(f"ループ {c.name} へ止める要求を置いた。周の境で止まる", tuple(events), next=next_step(after, c.name))
     lap = state.current
     if lap is not None:
-        held = lap_decide.lap_outcome(lap_decide.LapFacts(released=lap.released, held=True))
-        events.append(rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=held[0], reason=held[1]))
-    events.append(rec.event(rec.LOOP_HALTED, c.now, by=by, reason=rec.USER_STOP))
+        events.append(_close_event(lap, lap_decide.LapFacts(released=lap.released, held=True), c.now)[0])
+    events.append(_halt_event(by, c.now))
     return Decision(f"ループ {c.name} を止めた（{rec.USER_STOP}）", tuple(events))
