@@ -13,7 +13,7 @@
     "ci_budget": {"summary": "CI の待ちの合計の秒（ndf ci watch --budget）", "default": "3600"},
     "required": {"summary": "待つ必須のチェックの名前", "list": true},
     "tests": {"summary": "テストのチェックの名前（分割ジョブも数える）", "list": true, "default": []},
-    "merge_method": {"summary": "gh pr merge のマージの仕方（squash・merge・rebase）", "default": "squash"},
+    "merge_method": {"summary": "gh pr merge のマージの仕方（squash・merge・rebase）。省けば ndf route が base のブランチで許された方式（ruleset とリポジトリの設定）の先頭にする"},
     "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
     "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
     "review": {"summary": "コードレビューの起動の引数の並び", "list": true},

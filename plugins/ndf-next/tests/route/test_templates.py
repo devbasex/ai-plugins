@@ -37,11 +37,21 @@ def test_missing_value_and_unknown_name_and_shape_are_refused():
 def test_defaults_fill_omitted_values():
     t = route.choose("immediate_fix")
     given = values("immediate_fix")
-    for name in ("merge_method", "ci_budget", "tests"):
+    for name in ("ci_budget", "tests"):
         del given[name]
     plan = route.render(t, given)
-    merge = next(s for s in plan["steps"] if s["id"] == "merge")
-    assert merge["run"][-1] == "--squash"
+    ci = next(s for s in plan["steps"] if s["id"] == "ci")
+    assert ci["run"][ci["run"].index("--budget") + 1] == "3600"
+    assert not any(a.startswith("--test=") for a in ci["run"])
+
+
+def test_merge_method_has_no_fixed_default():
+    """merge_method を省いて決められなければ、squash へ倒さずに無い差し込みとして止まる。"""
+    t = route.choose("immediate_fix")
+    given = values("immediate_fix")
+    del given["merge_method"]
+    with pytest.raises(route.RouteError, match="差し込みの値が無い: merge_method"):
+        route.render(t, given)
 
 
 def test_base_has_no_fixed_default():

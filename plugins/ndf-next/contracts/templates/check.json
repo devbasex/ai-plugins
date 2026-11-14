@@ -14,7 +14,7 @@
         "exit_cause": {"1": "not_applicable", "2": "precondition"},
         "on_cause": {"not_applicable": "review"}
       },
-      {"use": "test", "id": "test-all", "run": ["ndf", "test-slot", "run", "--", "{{whole_test_command}}"], "on_cause": {"test_failed": "fix"}},
+      {"use": "test", "id": "test-all", "run": ["ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "{{whole_test_command}}"], "on_cause": {"test_failed": "test-repeat"}},
       {"id": "refactor", "run": ["{{refactor}}", "--sync-command", "{{sync_command}}"], "on_cause": {"incomplete": "review"}},
       {"id": "review", "run": ["{{review}}"], "on_cause": {"incomplete": "behavior"}},
       {"id": "behavior", "run": ["{{behavior}}"]},
@@ -25,6 +25,7 @@
       {"use": "merge-gate"},
       {"use": "merge", "next": "end"},
       {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},
+      {"use": "test-repeat"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},
       {"use": "ci-local"},

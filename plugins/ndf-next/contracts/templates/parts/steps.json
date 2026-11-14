@@ -3,8 +3,12 @@
   "steps": {
     "test": {
       "id": "test",
-      "run": ["ndf", "test-slot", "run", "--", "{{test_command}}"],
-      "exit_cause": {"1": "test_failed"}
+      "run": ["ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "{{test_command}}"]
+    },
+    "test-repeat": {
+      "id": "test-repeat",
+      "run": ["ndf", "route", "repeat", "--result", "{state_dir}/test.json", "--log", "{state_dir}/test-causes.jsonl"],
+      "next": "fix"
     },
     "worker": {
       "id": "work",
@@ -58,12 +62,7 @@
     },
     "ci-local": {
       "id": "ci-local",
-      "run": [
-        "bash", "-c",
-        "nodes=$(python3 -c 'import json, shlex, sys; d = json.loads(open(sys.argv[1]).read().strip().splitlines()[-1]); print(\" \".join(map(shlex.quote, d.get(\"metrics\", {}).get(\"failed_tests\", []))))' \"$1\") || exit 2; ndf test-slot run -- \"$2${nodes:+ $nodes}\"",
-        "ci-local", "{state_dir}/ci.json", "{{test_command}}"
-      ],
-      "exit_cause": {"1": "test_failed", "2": "invalid"},
+      "run": ["ndf", "route", "test", "--nodes-from", "{state_dir}/ci.json", "--", "{{test_command}}"],
       "on_cause": {"test_failed": "repeat-check"},
       "next": "push"
     },
@@ -91,8 +90,13 @@
     },
     "merge": {
       "id": "merge",
-      "run": ["gh", "pr", "merge", "{{branch}}", "--{{merge_method}}"],
-      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"]
+      "run": [
+        "sh", "-c",
+        "h=$(git rev-parse HEAD) || exit 2; gh pr merge \"$0\" \"--$1\" --match-head-commit \"$h\" >&2 || exit 1; s=$(gh pr view \"$0\" --json state --jq .state) || exit 1; [ \"$s\" = MERGED ] && exit 0; printf '{\"status\": \"stopped\", \"summary\": \"PR はまだマージされていない（%s。マージキューの待ち）\", \"cause\": {\"kind\": \"ci_pending\", \"detail\": \"マージキューの待ち\"}}\\n' \"$s\"; exit 1",
+        "{{branch}}", "{{merge_method}}"
+      ],
+      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"],
+      "exit_cause": {"2": "precondition"}
     }
   }
 }

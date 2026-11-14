@@ -14,6 +14,7 @@ def _fix_args(out: Path, repo: Path) -> list[str]:
     return [
         "immediate_fix", "--out", str(out), "--set", "branch=fix/x", "--set", "title=直す", "--set", "body_file=b.md",
         "--set", "test_command=pytest -q", "--add", "required=test", "--set", "base=develop",
+        "--set", "merge_method=squash",
         "--set", f"repo={repo}", "--set", f"worktree={repo}",
     ]  # fmt: skip
 
@@ -186,3 +187,34 @@ def test_omitted_base_reads_declaration_then_origin_default_branch(tmp_path):
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
     assert route.derived(t, given, repo)["base"] == "develop"
     assert route.derived(t, {**given, "base": "release"}, repo)["base"] == "release"
+
+
+def _fake_hub(seen: list[tuple[str, str]]):
+    """許された方式に merge・rebase を返す偽の GitHub（読んだリポジトリと基底のブランチを `seen` へ足す）。"""
+
+    class FakeHub:
+        def __init__(self, repo, _client):
+            self.repo = repo
+
+        def allowed_merge_methods(self, branch):
+            seen.append((self.repo, branch))
+            return ["merge", "rebase"]
+
+    return FakeHub
+
+
+def test_omitted_merge_method_is_first_allowed_on_base(tmp_path, monkeypatch):
+    """merge_method を省けば、base のブランチで許された方式の先頭にする（squash に固定しない）。読めなければ足さない。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    t = route.choose("immediate_fix")
+    given = {"repo": str(repo), "worktree": str(repo), "branch": "fix/x", "base": "main"}
+    assert "merge_method" not in route.derived(t, given, repo)  # origin が無い
+    git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(route.github, "GitHub", _fake_hub(seen))
+    monkeypatch.setattr(route.github, "client", lambda: None)
+    assert route.derived(t, given, repo)["merge_method"] == "merge"
+    assert seen == [("o/r", "main")]
+    assert route.derived(t, {**given, "merge_method": "squash"}, repo)["merge_method"] == "squash"

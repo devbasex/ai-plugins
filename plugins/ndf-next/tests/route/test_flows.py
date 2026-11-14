@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
+from ndf.core.plan.transition_decide import Outcome
 
 from ._flow import gate, plan_of, step_of, stopped, walk
 
@@ -129,22 +130,16 @@ def test_same_ci_failure_streak_stops_to_human():
 
 # 現状固定（I-001）: 検査と設計 PR のマージの雛形が同じ形で持つマージの承認ゲートとマージ。
 # 部品へまとめても、埋めたプランのステップと遷移が変わらないことを確かめる。
-_MERGE_GATE_AND_MERGE = [
-    {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "merge", "rejected": "end"}},
-    {
-        "id": "merge",
-        "run": ["gh", "pr", "merge", "<branch>", "--<merge_method>"],
-        "probe": ["sh", "-c", 'test "$(gh pr view "$0" --json state --jq .state)" = MERGED', "<branch>"],
-        "next": "end",
-    },
-]
+_MERGE_GATE = {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "merge", "rejected": "end"}}
 
 
 def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
     """現状固定: check と design_merge の merge-gate と merge は、埋めた後に同じステップになる。"""
-    for purpose in ("check", "design_merge"):
-        found = [s for s in plan_of(purpose)["steps"] if s["id"] in ("merge-gate", "merge")]
-        assert found == _MERGE_GATE_AND_MERGE, purpose
+    found = {p: [s for s in plan_of(p)["steps"] if s["id"] in ("merge-gate", "merge")] for p in ("check", "design_merge")}
+    assert found["check"] == found["design_merge"]
+    gate_step, merge = found["check"]
+    assert gate_step == _MERGE_GATE
+    assert (merge["run"][-2:], merge["next"]) == (["<branch>", "<merge_method>"], "end")
 
 
 def test_merge_gate_rejected_ends_without_merge():
@@ -163,3 +158,14 @@ def test_merge_gate_approved_merges_then_ends():
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["approved"])
         assert visited[-2:] == ["merge-gate", "merge"], purpose
         assert state.status == OK, purpose
+
+
+def test_same_local_test_failure_streak_stops_to_human():
+    """手元のテストの落ち（test → fix → test、検査では test-all → fix → test-all）も同じ原因の数え（test-repeat）を通り、
+    続けば fix_limit で人へ戻す（プラン全体のステップの上限まで worker とテストを繰り返さない）。"""
+    for purpose, test_id in (("implement", "test"), ("check", "test-all")):
+        script = {test_id: [stopped("test_failed")] * 5, "test-repeat": [Outcome(OK), stopped("fix_limit")]}
+        visited, state = walk(plan_of(purpose), script)
+        i = visited.index(test_id)
+        assert visited[i:] == [test_id, "test-repeat", "fix", test_id, "test-repeat"], purpose
+        assert (state.status, state.kind) == (STOPPED, "fix_limit"), purpose

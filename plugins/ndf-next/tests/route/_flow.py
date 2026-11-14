@@ -72,7 +72,7 @@ def step_of(plan_raw: Mapping[str, Any], step_id: str) -> model.Step:
 def fake_bin(tmp: Path, name: str, body: str) -> Path:
     """`tmp/bin/<name>` に偽のコマンドを置き、その置き場を返す。"""
     bindir = tmp / "bin"
-    bindir.mkdir(exist_ok=True)
+    bindir.mkdir(parents=True, exist_ok=True)
     path = bindir / name
     path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
     path.chmod(0o755)

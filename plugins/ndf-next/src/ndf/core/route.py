@@ -20,13 +20,19 @@
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
         省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
-        宣言が無ければ `origin` の既定ブランチにする
+        宣言が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
+        （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
         render の後に同じプランを `ndf plan next` で流す（即時修正をテスト → PR → merge-when-green の 1 つの
         エントリポイントで流す）
     ndf route repeat --result <結果 JSON のファイル> --log <記録の JSONL>
         止まった結果の同じ原因の鍵（種類と落ちたテストの集まり）を記録へ足し、続いた回数が
         `supervise.step-rerun` の `same_cause` を超えたら `fix_limit` で止まる（人へ戻す）
+    ndf route test [--result <結果 JSON のファイル>] [--nodes-from <CI の結果 JSON のファイル>] -- <コマンド>
+        手元のテストのコマンドを `ndf test-slot run` で打つ。シグナル（128 以上）を除く 0 以外の終了コードは
+        どれも `test_failed` の止まった結果にし（`--result` があればそこへも書く。`ndf route repeat` が数える）、
+        `test-slot` 自身が止まった結果はそのまま返す。`--nodes-from` は CI の落ちたテストの node id を
+        シェルの引用へ通してコマンドの後ろへ足す（読めなければ `invalid`）
 
 結果 JSON を標準出力へ 1 行で出す。
 """
@@ -37,13 +43,16 @@ import argparse
 import copy
 import json
 import re
+import shlex
+import subprocess
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
-from ndf.adapters import git
+from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
 from ndf.core.plan import cli as plan_cli
@@ -63,6 +72,10 @@ WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
 BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
+# 手元のテストを打つ枠の入口（`ndf route test` が後ろにコマンドを 1 つ足す）
+TEST_SLOT = ("ndf", "test-slot", "run", "--")
+# これ以上の終了コードはシグナルで止まった子（シェルの 128 + シグナルの番号）。テストの落ちと読まない
+SIGNAL_EXIT_BASE = 128
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
 Value = Union[str, list[str]]
@@ -343,8 +356,18 @@ def default_base(repo: Path) -> Optional[str]:
     return branch if branch else None
 
 
+def default_merge_method(repo: Path, base: str) -> Optional[str]:
+    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。"""
+    try:
+        hub = github.GitHub(git.Git(repo).remote_repo(), github.client())
+        allowed = hub.allowed_merge_methods(base)
+    except (git.GitError, github.GitHubError):  # noqa: NDF401 外部コマンド: リモートか GitHub の設定を読めない
+        return None
+    return github.pick_merge_method(None, allowed)
+
+
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
-    """省いた `repo`・`worktree`・`base` を打った場所から決めて足す（`base` が決まらなければ足さない）。"""
+    """省いた `repo`・`worktree`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
     out = dict(given)
     if "repo" in t.params and "repo" not in out:
         out["repo"] = repo_root(cwd)
@@ -354,6 +377,10 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
         base = default_base(Path(str(out["repo"])))
         if base is not None:
             out["base"] = base
+    if "merge_method" in t.params and "merge_method" not in out and "repo" in out and isinstance(out.get("base"), str):
+        method = default_merge_method(Path(str(out["repo"])), str(out["base"]))
+        if method is not None:
+            out["merge_method"] = method
     return out
 
 
@@ -462,6 +489,52 @@ def _cmd_repeat(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"同じ原因は {count} 回目（上限 {same_cause}）", metrics=metrics))
 
 
+def _failed_nodes(path: Path) -> list[str]:
+    """CI の結果 JSON の落ちたテストの node id（`metrics.failed_tests`）。読めない・結果 JSON でなければ `RouteError`。"""
+    try:
+        found = steps.last_json(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RouteError(f"CI の結果 {path} を読めない: {exc.strerror or exc}") from None
+    if found is None:
+        raise RouteError(f"CI の結果 {path} は結果 JSON でない")
+    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
+    nodes = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
+    return [str(n) for n in nodes]
+
+
+def _run_passing(argv: Sequence[str]) -> tuple[int, Optional[dict[str, Any]]]:
+    """`argv` を打ち、標準出力をそのまま流す。終了コードと、最後の行が結果 JSON ならそれを返す。"""
+    with subprocess.Popen(list(argv), stdout=subprocess.PIPE, text=True) as proc:
+        last = ""
+        for line in proc.stdout if proc.stdout is not None else ():
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if line.strip():
+                last = line
+    return proc.returncode, steps.last_json(last)
+
+
+def _cmd_test(a: argparse.Namespace) -> int:
+    nodes: list[str] = []
+    if a.nodes_from is not None:
+        try:
+            nodes = _failed_nodes(Path(a.nodes_from))
+        except RouteError as exc:
+            return _invalid(str(exc))
+    command = f"{a.command} {shlex.join(nodes)}" if nodes else a.command
+    code, own = _run_passing([*TEST_SLOT, command])
+    # 枠（test-slot）自身が止まった結果は出したまま返す。シグナルで止まった子はテストの落ちと読まない
+    if code == exit_codes.code_of("ok") or own is not None or code >= SIGNAL_EXIT_BASE:
+        return code
+    metrics = {"exit_code": code, "failed_tests": nodes}
+    found = result.stopped(TOOL, "test_failed", f"テストのコマンドが終了コード {code} で落ちた", metrics=metrics)
+    if a.result is not None:
+        out = Path(a.result)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(found, ensure_ascii=False) + "\n", encoding="utf-8")
+    return result.emit(found)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ndf route", description="プランの雛形を選んで埋める・同じ原因の続きを数える")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -477,6 +550,11 @@ def _parser() -> argparse.ArgumentParser:
     rp.add_argument("--result", required=True)
     rp.add_argument("--log", required=True)
     rp.set_defaults(fn=_cmd_repeat)
+    tp = sub.add_parser("test", help="手元のテストを打ち、落ちを test_failed にする")
+    tp.add_argument("--result")
+    tp.add_argument("--nodes-from")
+    tp.add_argument("command")
+    tp.set_defaults(fn=_cmd_test)
     return p
 
 
