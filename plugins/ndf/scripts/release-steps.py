@@ -494,8 +494,17 @@ def find_pr(root, head, base, states=("OPEN",)):
     return None
 
 
+HEAD_GONE = "Head ref must be a branch"  # gh pr create が、origin に head のブランチが無いときに返す語
+
+
 def create_pr(root, base, head, title, body):
-    p = gh_parts.gh(["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body], cwd=root)
+    """PR を作り番号を返す。head が作業ツリーのブランチで、origin から消えていれば（開発版の PR のマージの後に
+    `delete_branch_on_merge` が遅れて消し、`restore_branch` の確かめとすれ違った）、push し直して 1 回だけ作り直す。"""
+    args = ["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body]
+    p = gh_parts.gh(args, cwd=root)
+    if p.returncode != 0 and HEAD_GONE in p.stderr and git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == head:
+        if repo_lib.restore_branch(root, head, run_git=git):
+            p = gh_parts.gh(args, cwd=root)
     if p.returncode != 0:
         raise StepError(f"gh pr create（{head} → {base}）が失敗: {p.stderr.strip()[:300]}")
     m = re.search(r"/pull/(\d+)", p.stdout)
