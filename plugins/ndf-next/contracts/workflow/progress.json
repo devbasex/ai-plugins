@@ -57,7 +57,7 @@
     {"level": "plan", "kind": "lane_added", "actors": ["organizer"], "scope": "row", "from": ["new"]},
     {"level": "plan", "kind": "lane_changed", "actors": ["organizer"], "scope": "row"},
     {"level": "plan", "kind": "request_opened", "actors": ["organizer", "workflow"], "scope": "row", "from": ["new"]},
-    {"level": "plan", "kind": "request_closed", "actors": ["organizer"], "scope": "row"},
+    {"level": "plan", "kind": "request_closed", "actors": ["organizer", "workflow"], "scope": "row"},
     {"level": "plan", "kind": "plan_started", "actors": ["organizer"], "scope": "table", "state": "running"},
     {"level": "plan", "kind": "plan_paused", "actors": ["organizer"], "scope": "table", "state": "paused"},
     {"level": "plan", "kind": "plan_completed", "actors": ["durable"], "scope": "table", "state": "completed"},

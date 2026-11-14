@@ -7,7 +7,8 @@
   `file-organizer` の `files`、各ファイルのパスと項目は `ndf-files` の行が持つ
 - レーンが書くのはリリースの依頼（`organizer-request`）だけで、外のオーガナイザーの答え（`organizer-answer`）を読む。
   ほかのファイル（ranges・batch・presented・progress・results）はリリースの工程（M2）が読み書きする
-- どちらの書き手も一時ファイルへ書いて名前を付け替えるので、読み手は書きかけのファイルを読まない
+- どちらの書き手も一時ファイルへ書いてから名前を付けるので、読み手は書きかけのファイルを読まない。レーンは同じ ID の
+  依頼を上書きしない（`write_request`。#3118）
 - 表に無いパスはやり取りしない（`exchange_file` が None を返す）
 
 DB は読まない。置き場は呼び手が渡す（環境変数を読むのは `organizer_dir`）。
@@ -71,13 +72,31 @@ def request_body(fields: Mapping[str, Any], ndf_version: str) -> dict[str, Any]:
     return {k: body[k] for k in want}
 
 
+def _same_body(path: Path, body: Mapping[str, Any]) -> bool:
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8")) == dict(body))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない既存の依頼は別の中身として断る
+        return False
+
+
 def write_request(root: Path, body: Mapping[str, Any]) -> Path:
-    """リリースの依頼を `requests/<id>.json` へ書く（一時ファイルへ書いて名前を付け替える）。書いたパスを返す。"""
-    path = _path(root, "organizer-request", str(body["id"]))
+    """リリースの依頼を `requests/<id>.json` へ書き、パスを返す。同じ ID の依頼は上書きしない（#3118）。
+
+    一時ファイルへ書いてからハードリンクで名前を付けるので、読み手は書きかけを読まず、既にある依頼を置き換えない。
+    既にあれば、中身が同じなら何もせず既存のパスを返し、違えば `ExchangeError`（送ったと報告しない）。
+    """
+    ident = str(body["id"])
+    path = _path(root, "organizer-request", ident)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(dict(body), ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    try:
+        os.link(tmp, path)
+    except FileExistsError as exc:
+        if not _same_body(path, body):
+            raise ExchangeError(f"依頼 {ident} は別の中身で既に書いてある（同じ ID で上書きしない。新しい ID で送り直す）") from exc
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
 
 
