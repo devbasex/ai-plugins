@@ -37,6 +37,7 @@ COMMANDS: dict[str, str] = {
     "hooks": "ndf.domains.hooks.cli",
     "issues": "ndf.domains.backlog.cli",
     "lanes": "ndf.progress.plan.cli",
+    "manifests": "ndf.domains.manifests.cli",
     "launch-args": "ndf.adapters.cli",
     "loop": "ndf.domains.loop.cli",
     "notify": "ndf.adapters.notify",

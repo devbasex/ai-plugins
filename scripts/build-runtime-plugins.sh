@@ -37,14 +37,12 @@ sync_codex_skill_policies() {
   python3 "$ROOT_DIR/scripts/lib/codex_skill_policies.py" "$plugin_dir/skills" "$manifest" "$CHECK"
 }
 
-for dir in "$ROOT_DIR"/plugins/*; do
-  [ -d "$dir/manifests" ] || continue
-  family="$(basename "$dir")"
-  case "$family" in
-    *-shared|*-claude|*-codex) continue ;;
-  esac
+# 配る family は manifests/ があり marketplace.json に登録されたもの（scripts/lib/plugin_families.py）
+FAMILIES="$(python3 "$ROOT_DIR/scripts/lib/plugin_families.py" "$ROOT_DIR")"
+while IFS= read -r family; do
+  [ -n "$family" ] || continue
   sync_codex_skill_policies "$family"
-done
+done <<< "$FAMILIES"
 
 if [ "$CHECK" = true ]; then
   echo "runtime plugin generated files are up to date"

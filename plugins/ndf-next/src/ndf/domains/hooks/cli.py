@@ -3,6 +3,7 @@
     ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）
     ndf hooks capture <ランタイム> <版> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
+    ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）を契約表と予算から作り直す
 
 hook の経路ではない（利用者と CI が打つ）。
 """
@@ -18,7 +19,7 @@ from typing import Any
 
 from ndf import cli, identity
 from ndf.contracts import causes, result
-from ndf.domains.hooks import budget, metrics, tables
+from ndf.domains.hooks import budget, metrics, registration, tables
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
@@ -80,37 +81,54 @@ def _check_budget() -> int:
     return result.emit(result.result(TOOL, result.OK, "hook の予算の順序を守れている"))
 
 
+def _invalid(detail: str) -> int:
+    return result.emit(result.stopped(TOOL, "invalid", detail))
+
+
 def _capture(args: argparse.Namespace) -> int:
     if args.runtime not in tables.runtimes() or tables.event_spec(args.runtime, args.event) is None:
-        return result.emit(result.stopped(TOOL, "invalid", f"契約表に無いランタイムか事象: {args.runtime} {args.event}"))
+        return _invalid(f"契約表に無いランタイムか事象: {args.runtime} {args.event}")
     if not _VERSION_RE.match(args.version):
-        return result.emit(result.stopped(TOOL, "invalid", f"版の形が違う: {args.version}"))
+        return _invalid(f"版の形が違う: {args.version}")
     try:
         payload = json.loads(sys.stdin.read())
     except ValueError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"標準入力が JSON でない: {exc}"))
+        return _invalid(f"標準入力が JSON でない: {exc}")
     if not isinstance(payload, dict):
-        return result.emit(result.stopped(TOOL, "invalid", "標準入力が JSON のオブジェクトでない"))
+        return _invalid("標準入力が JSON のオブジェクトでない")
     path = capture(args.runtime, args.version, args.event, payload)
     return result.emit(result.result(TOOL, result.OK, f"見本を書いた: {path}", items=[{"path": str(path)}]))
 
 
+def _render(check: bool) -> int:
+    changed = registration.stale() if check else registration.write()
+    return result.render_report(
+        TOOL,
+        [{"path": str(p)} for p in changed],
+        check,
+        stale_summary=f"作り直した結果と違う登録が {len(changed)} 件ある（ndf hooks render で作り直す）",
+        ok_summary="登録は作り直した結果と同じ",
+        written_summary=f"登録を {len(changed)} 件書いた",
+    )
+
+
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本")
+    parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="hook の計測・予算の検査・入力の見本・登録の生成")
     sub = parser.add_subparsers(dest="action", required=True)
     st = sub.add_parser("stats", help="事象・guard ごとの所要と判定の数")
     st.add_argument("--days", type=float, default=metrics.keep_days())
-    sub.add_parser("check-budget", help="予算の順序の検査")
+    st.set_defaults(run=lambda a: _stats(a.days))
+    sub.add_parser("check-budget", help="予算の順序の検査").set_defaults(run=lambda a: _check_budget())
     cap = sub.add_parser("capture", help="本体の入力の見本を、秘密を伏せて足す（標準入力に payload）")
     cap.add_argument("runtime")
     cap.add_argument("version")
     cap.add_argument("event")
+    cap.set_defaults(run=_capture)
+    ren = sub.add_parser("render", help="登録を契約表と予算から作り直す")
+    ren.add_argument("--check", action="store_true", help="書かずに、作り直した結果と違えば stopped")
+    ren.set_defaults(run=lambda a: _render(a.check))
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return causes.exit_code("invalid") if exc.code else 0
-    if args.action == "stats":
-        return _stats(args.days)
-    if args.action == "check-budget":
-        return _check_budget()
-    return _capture(args)
+    return args.run(args)

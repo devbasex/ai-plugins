@@ -1,0 +1,81 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex PreToolUse",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex PermissionRequest",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex PostToolUse",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex UserPromptSubmit",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex Stop",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex SessionStart",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] && exec \"$0\" \"$@\"; command -v python3 >/dev/null 2>&1 || exit 0; b=\"${1%/*}/boot.py\"; shift; exec python3 \"$b\" \"$@\"' \"${XDG_CACHE_HOME:-$HOME/.cache}/ndf11/venv/6e1e0d5687e2b5d5/bin/python\" \"${PLUGIN_ROOT}/hooks/entry.py\" codex SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,8 @@
 """新しいプラグインの不変条件 I1〜I3（issues/issue-1142-design-next.md の「不変条件」）。
 
-- I1: コード（`src/` の `.py`・`bin/`・`hooks/`）は、自分のプラグイン名・ディレクトリ名・状態の置き場の名前を文字で
-  持たない。名前は `identity` が `plugin.json` から求める
+- I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の置き場の名前を
+  文字で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
+  `plugin.json` から作る生成物で、照合しない（名前を変えたら作り直す）
 - I2: 新しいプラグインの子の PR（差分が新しいプラグインも変える）は、旧いプラグインのディレクトリを変えない。即時修正だけは、
   PR 本文の印の行で許す
 - port: 旧いプラグインを変えた PR は、PR 本文に新しいプラグインへ移す先の Issue か移さない理由を持つ（#3343）
@@ -78,13 +79,15 @@ def own_name(scope: Scope) -> list[Finding]:
 def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
     """I1 が照合する行と文字。製品の Python は文字列の定数（`identity` の定義の行を除く）、スクリプトはコメントを除いた行。
 
+    `bin/`・`hooks/` の `.json`（`ndf hooks render` が作る登録）は照合しない。
+
     ほかのファイルは照合しない（空）。
     """
     rel = scope.plugin_rel(src)
     if src.is_python and rel.startswith(SRC_DIR + "/"):
         skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
         return [(no, text) for no, text in _strings(src.tree) if no not in skip]
-    if rel.startswith(SCRIPT_PREFIXES):
+    if rel.startswith(SCRIPT_PREFIXES) and src.path.suffix != ".json":
         return _shell_lines(src)
     return []
 
@@ -99,12 +102,17 @@ def _definition_lines(tree: ast.Module) -> set[int]:
     return lines
 
 
-def declared_tops(plugin_root: Path) -> frozenset[str]:
-    """`pyproject.toml` が宣言した依存（グループを含む）が入れる最上位のモジュールの名前。"""
+def _pyproject(plugin_root: Path) -> dict[str, Any]:
+    """`pyproject.toml` の中身。読めなければ `CheckError`。"""
     try:
-        project = tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
+        return tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CheckError(f"pyproject.toml を読めない: {exc}") from exc
+
+
+def declared_tops(plugin_root: Path) -> frozenset[str]:
+    """`pyproject.toml` が宣言した依存（グループを含む）が入れる最上位のモジュールの名前。"""
+    project = _pyproject(plugin_root)
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
     dists = {_normalize(re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0]) for s in specs}
@@ -118,8 +126,7 @@ def pythonpath_tops(plugin_root: Path) -> frozenset[str]:
 
     テストの補助のモジュール（`tests/support/` など）は、pytest がこのディレクトリをパスへ足して読ませる。
     """
-    project = tomllib.loads((plugin_root / "pyproject.toml").read_text(encoding="utf-8"))
-    section: Any = project
+    section: Any = _pyproject(plugin_root)
     for key in ("tool", "pytest", "ini_options", "pythonpath"):
         section = section[key] if isinstance(section, dict) and key in section else ()
     dirs = section if isinstance(section, list) else ()
@@ -143,16 +150,26 @@ def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
         siblings[src.path.parent].add(src.path.stem)
     found = []
     for src in scope.python():
-        own = allowed | siblings[src.path.parent]
-        for node in ast.walk(src.tree):
-            tops = _import_tops(node)
-            found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in tops if t not in own]
-        found += [
-            Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
-            for no, text in _strings(src.tree)
-            if path_pattern.search(text)
-        ]
+        found += _undeclared_imports(src, allowed | siblings[src.path.parent])
+        found += _old_paths(src, path_pattern)
     return found
+
+
+def _undeclared_imports(src: Source, own: frozenset[str]) -> list[Finding]:
+    """`own` の外の最上位のモジュールを読む import。"""
+    found = []
+    for node in ast.walk(src.tree):
+        found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in _import_tops(node) if t not in own]
+    return found
+
+
+def _old_paths(src: Source, path_pattern: re.Pattern[str]) -> list[Finding]:
+    """旧いプラグインのパスを持つ文字列。"""
+    return [
+        Finding("I3", src.rel, no, f"旧いプラグインのパスを持つ: {text.strip()[:80]}")
+        for no, text in _strings(src.tree)
+        if path_pattern.search(text)
+    ]
 
 
 def _import_tops(node: ast.AST) -> list[str]:

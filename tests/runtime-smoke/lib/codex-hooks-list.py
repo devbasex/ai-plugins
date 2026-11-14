@@ -51,9 +51,10 @@ def extract_result(message, received, stderr_tail):
     return result
 
 
-def wait_for_hooks_list(lines, reader_done, stderr_tail):
+def wait_for_hooks_list(lines, reader_done, stderr_tail, *, clock=time.monotonic, sleep=time.sleep):
     """hooks/list への応答を待ち、result を返す。応答前の終了と時間切れは fail で終える。"""
-    deadline = time.monotonic() + TIMEOUT_SECONDS
+    # clock は期限を測る時計、sleep は行を待つ間の待ち（既定は time.monotonic と time.sleep）
+    deadline = clock() + TIMEOUT_SECONDS
     received = []
     while True:
         while lines:
@@ -64,9 +65,9 @@ def wait_for_hooks_list(lines, reader_done, stderr_tail):
                 return extract_result(message, received, stderr_tail)
         if reader_done.is_set() and not lines:
             fail("codex app-server exited before answering hooks/list:\n" + "".join(received), stderr_tail)
-        if time.monotonic() > deadline:
+        if clock() > deadline:
             fail(f"codex app-server did not answer hooks/list within {TIMEOUT_SECONDS}s:\n" + "".join(received), stderr_tail)
-        time.sleep(0.05)
+        sleep(0.05)
 
 
 def main():

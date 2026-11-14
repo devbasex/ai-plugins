@@ -112,3 +112,41 @@ def test_no_base_skips_diff(plugin, rules, changed):
 def test_unknown_base_stops(plugin, rules, changed):
     with pytest.raises(CheckError):
         invariants.old_plugin_diff(plugin.scope(base="no-such-ref"), rules["invariants"])
+
+
+# 現状固定（I-006）: `pythonpath_tops` と、`pyproject.toml` を読む `old_imports` のエントリポイント
+def test_pythonpath_tops_lists_direct_py_stems(plugin):
+    plugin.write("tests/support/_server.py", "X = 1\n")
+    plugin.write("tests/support/notes.txt", "x\n")
+    plugin.write("tests/support/deep/_inner.py", "X = 1\n")
+    plugin.write("src/top.py", "X = 1\n")
+    assert invariants.pythonpath_tops(plugin.root) == frozenset({"_server", "top"})
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        "",
+        "[tool]\n",
+        "[tool.pytest]\n",
+        "[tool.pytest.ini_options]\n",
+        '[tool.pytest.ini_options]\npythonpath = "tests/support"\n',
+        "[tool.pytest.ini_options]\npythonpath = []\n",
+        '[tool.pytest.ini_options]\npythonpath = ["absent"]\n',
+    ],
+)
+def test_pythonpath_tops_without_listed_dirs_is_empty(plugin, toml):
+    plugin.write("tests/support/_server.py", "X = 1\n")
+    plugin.write("pyproject.toml", toml)
+    assert invariants.pythonpath_tops(plugin.root) == frozenset()
+
+
+@pytest.mark.parametrize("toml", [None, "[project\n"])
+def test_old_imports_unreadable_pyproject_stops(plugin, toml):
+    path = plugin.root / "pyproject.toml"
+    if toml is None:
+        path.unlink()
+    else:
+        path.write_text(toml, encoding="utf-8")
+    with pytest.raises(CheckError, match="pyproject.toml を読めない"):
+        invariants.old_imports(plugin.scope(), OLD)

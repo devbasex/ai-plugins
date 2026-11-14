@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# このプラグインだけを読む claude を起こす（#3409・決定 74）。引数はそのまま claude の後ろへ渡す。
+#
+#   bin/ndf-claude                                              # 対話のセッション
+#   bin/ndf-claude -p --output-format stream-json --verbose "…"  # 1 回の問い
+#
+# `claude --plugin-dir <このプラグイン>` だけでは、入っている旧い NDF も読まれ、同じ名前の Skill と旧い hook が並ぶ。
+# ここでは旧い NDF を `--settings` の `enabledPlugins` で外し、`--plugin-dir` でこのプラグインを読む。
+# - 外す設定と読む引数は `ndf launch-args`（Skill を回す `claude -p` と同じ 1 か所の値）から読み、ここに写さない
+# - `--settings` はこの起動だけに効く。利用者の設定ファイルは書き換えない
+# - 外す設定は、このプラグインと同じ名前の行を持たない（入れ替えの後も自分を外さない）
+set -euo pipefail
+
+# このファイルの実体のパス（シンボリックリンクをたどる。bash 3.2 と macOS の readlink で動く形）
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  dir="$(cd -P "$(dirname "$self")" && pwd)"
+  self="$(readlink "$self")"
+  case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+done
+# 隣のエントリポイント（このファイルの名前から末尾の -claude を外したもの）。名前を文字で持たない（決定 75）
+entry="${self%-claude}"
+
+# 結果 JSON を 1 行出して止まる副命令の答えは、そのまま出して同じ終了コードで終わる
+out="$("$entry" launch-args)" || {
+  code=$?
+  printf '%s\n' "$out"
+  exit "$code"
+}
+if ! listed="$(printf '%s\n' "$out" | python3 -c '
+import json, sys
+report = json.loads(sys.stdin.read().strip().splitlines()[-1])
+args = report["items"][0]["args"]
+if any("\n" in a for a in args):
+    sys.exit("改行を含む引数は渡せない")
+print("\n".join(args))
+')"; then
+  printf '%s\n' "ndf launch-args の答えを読めない: $out" >&2
+  exit 2
+fi
+
+args=()
+while IFS= read -r arg; do
+  args+=("$arg")
+done <<<"$listed"
+exec claude "${args[@]}" "$@"

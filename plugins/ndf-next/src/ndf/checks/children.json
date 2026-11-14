@@ -41,7 +41,7 @@
     "M7": {"issue": 3302, "packages": ["ndf.domains.records"], "needs": ["P1b", "P2", "AD2"], "order": 7, "lane": "lr-fix-b", "closed": false},
     "P4": {"issue": 3098, "packages": ["ndf.progress.reshape"], "needs": ["P3", "M1"], "order": 9, "lane": "lrebuild", "closed": false},
     "S1a": {"issue": 3303, "packages": [], "needs": ["M1", "M2", "M3a", "M3b", "M4", "M5", "M6", "M7", "M8", "C3+", "C5"], "order": 8, "lane": "lrebuild", "closed": false},
-    "S1b": {"issue": 3409, "packages": [], "needs": ["M1", "M2", "M3a", "M3b", "M4", "M5", "M6", "M7", "M8", "C3+", "C5"], "order": 8, "lane": "lrebuild", "closed": false},
+    "S1b": {"issue": 3409, "packages": ["ndf.domains.manifests"], "needs": ["M2", "M3a", "M3b", "M4", "M5", "M6", "M8", "C3+", "C5"], "order": 8, "lane": "lrebuild", "closed": false},
     "S1c": {"issue": 3410, "packages": [], "needs": ["X3", "M2", "M3a", "M3b", "M4", "M5", "M6", "M8", "C3+"], "order": 8, "lane": "lr-s1c", "closed": false},
     "T2": {"issue": 3411, "packages": [], "needs": ["S1a", "S1b", "S1c"], "order": 9, "lane": "lrebuild", "closed": false},
     "S2": {"issue": 3304, "packages": [], "needs": ["T2"], "order": 10, "lane": "lrebuild", "closed": false},

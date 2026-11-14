@@ -158,3 +158,14 @@ def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = No
     """契約の表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
     print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
     return exit_codes.unreadable_code()
+
+
+def render_report(tool: str, items: list, check: bool, *, stale_summary: str, ok_summary: str, written_summary: str) -> int:
+    """生成物の照合（`render [--check]`）の結果を出し、終了コードを返す。
+
+    `--check` で違いがあれば `stopped`（check_failed）に違うファイルを、無ければ ok を出す。書いたときは書いたファイルを
+    ok の items に置く。`items` の path の形は呼ぶ側が決める。
+    """
+    if check and items:
+        return emit(stopped(tool, "check_failed", stale_summary, items=items))
+    return emit(result(tool, OK, ok_summary if check else written_summary, items=items))
