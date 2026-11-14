@@ -17,6 +17,8 @@
     {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
     {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
+    {"id": "hooks", "root": "state", "path": "hooks", "tracked": false},
+    {"id": "relay-accounts", "root": "state", "path": "relay/accounts", "tracked": false},
     {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false}
   ]
 }

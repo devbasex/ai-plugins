@@ -101,6 +101,7 @@
     "project.git": {"summary": "プロジェクトの指紋を取る git の上限", "seconds": 60},
     "relay.bedrock": {"summary": "従量の接続（Bedrock）を確かめるコマンドの上限", "seconds": 60},
     "relay.handover-prepare": {"summary": "引き継ぎの用意の上限", "seconds": 600},
+    "relay.pending": {"summary": "プラグインの更新を反映する再起動の前に、待ちを抱えた実行の一覧（ndf plan pending）を読む上限", "seconds": 30},
     "relay.hub-poll": {"summary": "中継の置き場の問い合わせの間隔", "interval": 0.5},
     "relay.login-url": {"summary": "ログインの 1 回目が認可の URL を待つ上限", "seconds": 30},
     "relay.login-exit": {"summary": "ログインの 2 回目が待機中のログインの終了を待つ上限", "seconds": 60},
