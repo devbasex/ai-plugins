@@ -110,7 +110,7 @@ def _boundary(state: rec.LoopState, c: Ctx) -> list[dict[str, Any]]:
     if state.requested is None or state.status == rec.HALTED:
         return []
     req = state.requested
-    return [rec.event(rec.STOPPED, c.now, by=req.by, reason=rec.USER_STOP), rec.event(rec.LEASE_RELEASED, c.now, session=c.session)]
+    return [rec.event(rec.LOOP_HALTED, c.now, by=req.by, reason=rec.USER_STOP), rec.event(rec.LEASE_RETURNED, c.now, session=c.session)]
 
 
 def open_lap(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
@@ -170,7 +170,7 @@ def exclude(state: rec.LoopState, c: Ctx, issue: int, reason: str) -> Decision:
         return refuse(PRECONDITION, f"課題 #{issue} は周 {lap.number} に残っていない", get_step(c.name))
     if not reason.strip():
         return refuse(INVALID, "外す理由が空", get_step(c.name))
-    ev = rec.event(rec.EXCLUDED, c.now, lap=lap.number, issue=issue, reason=reason.strip())
+    ev = rec.event(rec.ISSUE_EXCLUDED, c.now, lap=lap.number, issue=issue, reason=reason.strip())
     after = rec.apply(state, ev)
     left = after.current.remaining if after.current is not None else ()
     return Decision(f"周 {lap.number} から課題 #{issue} を外した（残り {len(left)} 件）", (ev,), next=next_step(after, c.name),
@@ -185,7 +185,7 @@ def created(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
     assert lap is not None
     if not issues:
         return refuse(INVALID, "課題の番号が無い")
-    ev = rec.event(rec.CREATED, c.now, lap=lap.number, issues=list(issues))
+    ev = rec.event(rec.ISSUES_CREATED, c.now, lap=lap.number, issues=list(issues))
     return Decision(f"周 {lap.number} の起票 {len(issues)} 件を記録した", (ev,))
 
 
@@ -195,7 +195,7 @@ def gate(state: rec.LoopState, c: Ctx, pr: int, head: str) -> Decision:
     if refusal is not None:
         return refusal
     assert lap is not None
-    ev = rec.event(rec.GATED, c.now, lap=lap.number, pr=pr, head=head)
+    ev = rec.event(rec.GATE_SHOWN, c.now, lap=lap.number, pr=pr, head=head)
     return Decision(f"PR #{pr} の設計承認ゲートを先端 {head[:12]} で記録した", (ev,))
 
 
@@ -216,7 +216,7 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     if head != shown:
         return refuse(PRECONDITION, f"PR #{pr} の先端がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す",
                       Step(("loop", "gate", c.name, "--pr", str(pr))))  # fmt: skip
-    ev = rec.event(rec.ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
+    ev = rec.event(rec.GATE_ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
     return Decision(f"PR #{pr} の答え {given} を記録した", (ev,), metrics={"head": head, "answer": given})
 
 
@@ -235,7 +235,9 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
             return Decision(f"止める要求があり、ループ {c.name} を止めた", tuple(stop))
         return refuse(PRECONDITION, "締めていない周が無い", next_step(state, c.name))
     # 締めるときに渡した版は、記録に無いものだけを出した版として残す
-    shipped = [rec.event(rec.RELEASED, c.now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released]
+    shipped = [
+        rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, version=v) for v in dict.fromkeys(facts.released) if v not in lap.released
+    ]
     outcome, why = lap_decide.lap_outcome(replace(facts, released=(*lap.released, *(e["version"] for e in shipped))))
     events = [*shipped, rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=outcome, reason=why)]
     after = state
@@ -256,7 +258,7 @@ def released(state: rec.LoopState, c: Ctx, version: str) -> Decision:
     if refusal is not None:
         return refusal
     assert lap is not None
-    ev = rec.event(rec.RELEASED, c.now, lap=lap.number, version=version)
+    ev = rec.event(rec.VERSION_SHIPPED, c.now, lap=lap.number, version=version)
     return Decision(f"周 {lap.number} のリリース {version} を記録した", (ev,))
 
 
@@ -275,5 +277,5 @@ def stop(state: rec.LoopState, c: Ctx, by: str, reason: str, at_once: bool) -> D
     if lap is not None:
         held = lap_decide.lap_outcome(lap_decide.LapFacts(released=lap.released, held=True))
         events.append(rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=held[0], reason=held[1]))
-    events.append(rec.event(rec.STOPPED, c.now, by=by, reason=rec.USER_STOP))
+    events.append(rec.event(rec.LOOP_HALTED, c.now, by=by, reason=rec.USER_STOP))
     return Decision(f"ループ {c.name} を止めた（{rec.USER_STOP}）", tuple(events))

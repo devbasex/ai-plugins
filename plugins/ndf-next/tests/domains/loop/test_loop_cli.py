@@ -49,7 +49,7 @@ def test_lap_lifecycle_writes_events_and_next(loop: Callable[..., dict], tmp_pat
     view = loop("get", "demo", "--field", "laps")["items"][0]["laps"][0]
     assert (view["mode"], view["basis"], view["created"], view["released"]) == ("standard", "API を変える", [40], ["1.0.0"])
     events = store.open_store("demo", repo).read()
-    assert [e["kind"] for e in events][-3:] == [rec.RELEASED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
+    assert [e["kind"] for e in events][-3:] == [rec.VERSION_SHIPPED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
 
 
 def test_refusal_is_stopped_with_kind_and_next(loop: Callable[..., dict]) -> None:

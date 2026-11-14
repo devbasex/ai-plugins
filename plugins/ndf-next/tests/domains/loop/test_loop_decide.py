@@ -236,11 +236,11 @@ def _two_laps() -> rec.LoopState:
     ("ev", "want"),
     [
         (rec.event(rec.MODE_DECIDED, 5, lap=2, mode="light", basis="b"), {"mode": "light", "basis": "b"}),
-        (rec.event(rec.EXCLUDED, 5, lap=2, issue="3", reason="止まった"), {"excluded": ((3, "止まった"),), "mode": None}),
+        (rec.event(rec.ISSUE_EXCLUDED, 5, lap=2, issue="3", reason="止まった"), {"excluded": ((3, "止まった"),), "mode": None}),
         # 重複は記録済みの番号とだけ比べ、同じ事象の中の重複は残す（今の振る舞い）
-        (rec.event(rec.CREATED, 5, lap=2, issues=["9", 9, 8]), {"created": (9, 9, 8)}),
-        (rec.event(rec.GATED, 5, lap=2, pr="77", head="h1"), {"gates": ((77, "h1"),)}),
-        (rec.event(rec.RELEASED, 5, lap=2, version=1), {"released": ("1",)}),
+        (rec.event(rec.ISSUES_CREATED, 5, lap=2, issues=["9", 9, 8]), {"created": (9, 9, 8)}),
+        (rec.event(rec.GATE_SHOWN, 5, lap=2, pr="77", head="h1"), {"gates": ((77, "h1"),)}),
+        (rec.event(rec.VERSION_SHIPPED, 5, lap=2, version=1), {"released": ("1",)}),
         (rec.event(rec.LAP_CLOSED, 5, lap=2, outcome=rec.FAILED, reason="ci"), {"outcome": rec.FAILED, "reason": "ci"}),
     ],
 )
@@ -257,7 +257,7 @@ def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str
 
 def test_answer_event_is_appended_with_typed_fields() -> None:
     before = _two_laps()
-    after = rec.apply(before, rec.event(rec.ANSWERED, "6", lap="2", pr="77", answer="revise", head=None, note="n"))
+    after = rec.apply(before, rec.event(rec.GATE_ANSWERED, "6", lap="2", pr="77", answer="revise", head=None, note="n"))
     assert after.laps[1].answers == (rec.Answer(77, "revise", None, "n", 6.0),)
     assert after.laps[0].answers == ()
 
@@ -266,13 +266,13 @@ def test_lap_events_accumulate_in_order() -> None:
     state = _two_laps()
     for ev in (
         rec.event(rec.MODE_DECIDED, 5, lap=2, mode="standard", basis="b"),
-        rec.event(rec.CREATED, 5, lap=2, issues=[10]),
-        rec.event(rec.CREATED, 6, lap=2, issues=[10, 11]),
-        rec.event(rec.GATED, 7, lap=2, pr=77, head="h1"),
-        rec.event(rec.GATED, 8, lap=2, pr=77, head="h2"),
-        rec.event(rec.RELEASED, 9, lap=2, version="1.0.0"),
-        rec.event(rec.RELEASED, 9, lap=2, version="1.0.0"),
-        rec.event(rec.EXCLUDED, 10, lap=2, issue=2, reason="x"),
+        rec.event(rec.ISSUES_CREATED, 5, lap=2, issues=[10]),
+        rec.event(rec.ISSUES_CREATED, 6, lap=2, issues=[10, 11]),
+        rec.event(rec.GATE_SHOWN, 7, lap=2, pr=77, head="h1"),
+        rec.event(rec.GATE_SHOWN, 8, lap=2, pr=77, head="h2"),
+        rec.event(rec.VERSION_SHIPPED, 9, lap=2, version="1.0.0"),
+        rec.event(rec.VERSION_SHIPPED, 9, lap=2, version="1.0.0"),
+        rec.event(rec.ISSUE_EXCLUDED, 10, lap=2, issue=2, reason="x"),
     ):
         state = rec.apply(state, ev)
     lap = state.laps[1]
@@ -285,7 +285,7 @@ def test_lap_events_accumulate_in_order() -> None:
 
 def test_closed_lap_still_accepts_lap_events() -> None:
     """締めた周への事象も断らずに当てる（今の振る舞い）。"""
-    after = rec.apply(_two_laps(), rec.event(rec.RELEASED, 5, lap=1, version="0.9"))
+    after = rec.apply(_two_laps(), rec.event(rec.VERSION_SHIPPED, 5, lap=1, version="0.9"))
     assert after.laps[0].released == ("0.9",) and after.laps[0].outcome == rec.DONE
 
 
@@ -293,11 +293,11 @@ def test_closed_lap_still_accepts_lap_events() -> None:
     "ev",
     [
         rec.event(rec.MODE_DECIDED, 5, lap=3, mode="light", basis="b"),
-        rec.event(rec.EXCLUDED, 5, lap=3, issue=1, reason="r"),
-        rec.event(rec.CREATED, 5, lap=3, issues=[1]),
-        rec.event(rec.GATED, 5, lap=3, pr=1, head="h"),
-        rec.event(rec.ANSWERED, 5, lap=3, pr=1, answer="approved", head="h", note=""),
-        rec.event(rec.RELEASED, 5, lap=3, version="1"),
+        rec.event(rec.ISSUE_EXCLUDED, 5, lap=3, issue=1, reason="r"),
+        rec.event(rec.ISSUES_CREATED, 5, lap=3, issues=[1]),
+        rec.event(rec.GATE_SHOWN, 5, lap=3, pr=1, head="h"),
+        rec.event(rec.GATE_ANSWERED, 5, lap=3, pr=1, answer="approved", head="h", note=""),
+        rec.event(rec.VERSION_SHIPPED, 5, lap=3, version="1"),
         rec.event(rec.LAP_CLOSED, 5, lap=3, outcome=rec.DONE, reason=""),
     ],
 )
@@ -311,7 +311,7 @@ def test_lap_events_for_unknown_lap_raise(ev: dict[str, Any]) -> None:
 def test_duplicate_lap_numbers_change_the_first_match() -> None:
     """同じ番号の周が 2 つあるときは、先に開いた方を変える（今の振る舞い）。"""
     state = rec.fold([rec.event(rec.LAP_OPENED, 1, lap=1, issues=[1]), rec.event(rec.LAP_OPENED, 2, lap=1, issues=[2])])
-    after = rec.apply(state, rec.event(rec.CREATED, 3, lap=1, issues=[5]))
+    after = rec.apply(state, rec.event(rec.ISSUES_CREATED, 3, lap=1, issues=[5]))
     assert after.laps[0].created == (5,) and after.laps[1].created == ()
 
 
@@ -328,7 +328,7 @@ def test_close_lap_events_order_and_fields() -> None:
     state = _apply(state, ctl.released(state, _ctx(), "1.0"))
     d = ctl.close_lap(state, _ctx(now=40.0), lap_decide.LapFacts(released=("1.0", "2.0", "2.0", "3.0")), TTL)
     assert not d.refused
-    assert _kinds(d) == [rec.RELEASED, rec.RELEASED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
+    assert _kinds(d) == [rec.VERSION_SHIPPED, rec.VERSION_SHIPPED, rec.LAP_CLOSED, rec.LEASE_TAKEN]
     assert [ev.get("version") for ev in d.events[:2]] == ["2.0", "3.0"]
     assert all(ev["at"] == 40.0 for ev in d.events)
     assert all(ev["lap"] == 1 for ev in d.events[:3])
@@ -368,7 +368,7 @@ def test_close_lap_with_stop_request_closes_then_halts() -> None:
     state = _running((1,))
     state = _apply(state, ctl.stop(state, _ctx(None), "human", "終わり", False))
     d = ctl.close_lap(state, _ctx(now=30.0), lap_decide.LapFacts(released=("1.0",)), TTL)
-    assert _kinds(d) == [rec.RELEASED, rec.LAP_CLOSED, rec.STOPPED, rec.LEASE_RELEASED]
+    assert _kinds(d) == [rec.VERSION_SHIPPED, rec.LAP_CLOSED, rec.LOOP_HALTED, rec.LEASE_RETURNED]
     assert d.events[2]["by"] == "human" and d.events[2]["reason"] == rec.USER_STOP
     assert d.events[3]["session"] == "s1"
     assert d.next is None
@@ -384,7 +384,7 @@ def test_close_lap_without_open_lap() -> None:
     stopping = _apply(state, ctl.stop(state, _ctx(None), "organizer", "", False))
     s = ctl.close_lap(stopping, _ctx(), lap_decide.LapFacts(released=("9.9",)), TTL)
     assert not s.refused
-    assert _kinds(s) == [rec.STOPPED, rec.LEASE_RELEASED]
+    assert _kinds(s) == [rec.LOOP_HALTED, rec.LEASE_RETURNED]
     assert s.summary == "止める要求があり、ループ demo を止めた"
     assert s.next is None and s.metrics == {}
 

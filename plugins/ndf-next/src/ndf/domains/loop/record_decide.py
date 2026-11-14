@@ -29,17 +29,17 @@ from ndf.domains.release.approval_decide import APPROVED
 
 # 事象の種類
 LEASE_TAKEN = "lease-taken"
-LEASE_RELEASED = "lease-returned"
+LEASE_RETURNED = "lease-returned"
 LAP_OPENED = "lap-opened"
 MODE_DECIDED = "mode-decided"
-EXCLUDED = "issue-excluded"
-CREATED = "issues-created"
-GATED = "gate-shown"
-ANSWERED = "gate-answered"
-RELEASED = "version-shipped"
+ISSUE_EXCLUDED = "issue-excluded"
+ISSUES_CREATED = "issues-created"
+GATE_SHOWN = "gate-shown"
+GATE_ANSWERED = "gate-answered"
+VERSION_SHIPPED = "version-shipped"
 LAP_CLOSED = "lap-closed"
 STOP_REQUESTED = "stop-requested"
-STOPPED = "loop-halted"
+LOOP_HALTED = "loop-halted"
 
 # 周の結果の値（記録の形。変えない）
 DONE, FAILED, RETURNED, HELD = "完了", "失敗", "人へ戻した", "保留"
@@ -153,17 +153,17 @@ class LoopState:
 # 種類ごとに要る鍵
 REQUIRED: dict[str, tuple[str, ...]] = {
     LEASE_TAKEN: ("session", "until"),
-    LEASE_RELEASED: ("session",),
+    LEASE_RETURNED: ("session",),
     LAP_OPENED: ("lap", "issues"),
     MODE_DECIDED: ("lap", "mode", "basis"),
-    EXCLUDED: ("lap", "issue", "reason"),
-    CREATED: ("lap", "issues"),
-    GATED: ("lap", "pr", "head"),
-    ANSWERED: ("lap", "pr", "answer", "head", "note"),
-    RELEASED: ("lap", "version"),
+    ISSUE_EXCLUDED: ("lap", "issue", "reason"),
+    ISSUES_CREATED: ("lap", "issues"),
+    GATE_SHOWN: ("lap", "pr", "head"),
+    GATE_ANSWERED: ("lap", "pr", "answer", "head", "note"),
+    VERSION_SHIPPED: ("lap", "version"),
     LAP_CLOSED: ("lap", "outcome", "reason"),
     STOP_REQUESTED: ("by", "reason"),
-    STOPPED: ("by", "reason"),
+    LOOP_HALTED: ("by", "reason"),
 }
 
 
@@ -207,17 +207,17 @@ def _apply_lap(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     lap = state.laps[_lap_index(state, n)]
     if kind == MODE_DECIDED:
         return _with_lap(state, n, mode=ev["mode"], basis=ev["basis"])
-    if kind == EXCLUDED:
+    if kind == ISSUE_EXCLUDED:
         # 外すと課題の組が変わるので、決めたモードを捨てて決め直させる（#2923）
         return _with_lap(state, n, excluded=(*lap.excluded, (int(ev["issue"]), ev["reason"])), mode=None, basis=None)
-    if kind == CREATED:
+    if kind == ISSUES_CREATED:
         return _with_lap(state, n, created=(*lap.created, *(int(i) for i in ev["issues"] if int(i) not in lap.created)))
-    if kind == GATED:
+    if kind == GATE_SHOWN:
         return _with_lap(state, n, gates=(*lap.gates, (int(ev["pr"]), ev["head"])))
-    if kind == ANSWERED:
+    if kind == GATE_ANSWERED:
         got = Answer(int(ev["pr"]), ev["answer"], ev["head"], ev["note"], float(ev["at"]))
         return _with_lap(state, n, answers=(*lap.answers, got))
-    if kind == RELEASED:
+    if kind == VERSION_SHIPPED:
         return _with_lap(state, n, released=(*lap.released, str(ev["version"])))
     return _with_lap(state, n, outcome=ev["outcome"], reason=ev["reason"])
 
@@ -229,14 +229,14 @@ def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
     state = replace(state, events=state.events + 1)
     if kind == LEASE_TAKEN:
         return replace(state, holder=ev["session"], lease_until=float(ev["until"]))
-    if kind == LEASE_RELEASED:
+    if kind == LEASE_RETURNED:
         return replace(state, holder=None, lease_until=0.0) if state.holder == ev["session"] else state
     if kind == LAP_OPENED:
         lap = Lap(number=int(ev["lap"]), issues=tuple(int(i) for i in ev["issues"]))
         return replace(state, laps=(*state.laps, lap))
     if kind == STOP_REQUESTED:
         return replace(state, requested=Stop(ev["by"], ev["reason"], float(ev["at"])))
-    if kind == STOPPED:
+    if kind == LOOP_HALTED:
         return replace(state, stopped=Stop(ev["by"], ev["reason"], float(ev["at"])))
     return _apply_lap(state, ev)
 
