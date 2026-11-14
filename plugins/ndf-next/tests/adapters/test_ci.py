@@ -460,3 +460,62 @@ def test_required_key_dedupes_required_names_by_key() -> None:
     """現状固定: 前置きや分割の違う必須の名前は、同じ鍵に畳まれて 1 つだけ欠けたと挙がる。"""
     reading = ci.read([run("other", rid=1)], ["pytest", "CI / pytest", "pytest (0/2)", "W / pytest (0/2)"], ["pytest"])
     assert reading.missing == ["pytest", "pytest (0/2)"]
+
+
+# --- 現状固定（I-009 bare_name）: 照合に使う名前（前置きと分割の末尾を外す） ---
+
+
+@pytest.mark.parametrize(
+    ("name", "bare"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest"),
+        ("CI / pytest (1/2)", "pytest"),
+        ("A / B / pytest (1/2)", "pytest"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest"),
+        ("pytest(1/2)", "pytest"),
+        ("pytest (1/2) (0/2)", "pytest (1/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_bare_name_current_values(name: str, bare: str) -> None:
+    """現状固定: 最後の ` / ` より後ろを取り、末尾の分割 `(k/n)` を 1 つだけ外して前後の空白を除く。"""
+    assert ci.bare_name(name) == bare
+
+
+def test_bare_names_is_the_set_of_bare_names() -> None:
+    """現状固定: 集合で返し、同じ照合の名前は 1 つに畳む。ジェネレーターも受ける。"""
+    assert ci.bare_names(["CI / pytest (0/2)", "pytest", "W / lint"]) == {"pytest", "lint"}
+    assert ci.bare_names(n for n in ["pytest (1/2)"]) == {"pytest"}
+    assert ci.bare_names([]) == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "tests", "is_test"),
+    [
+        ("W / pytest (1/2)", ["CI / pytest (0/3)"], True),
+        ("pytest", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2)", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2) (5/9)", ["pytest (1/2) (0/2)"], True),
+        ("CI/pytest", ["pytest"], False),
+        ("pytest", [], False),
+    ],
+)
+def test_is_test_check_compares_bare_names_on_both_sides(name: str, tests: list[str], is_test: bool) -> None:
+    """現状固定: チェックの名前とテストのチェックの名前の両方を bare_name で揃えてから比べる。"""
+    assert ci.is_test_check(name, tests) is is_test
+
+
+def test_read_classifies_failures_by_bare_name() -> None:
+    """現状固定: 落ちたチェックをテストかどうかで分けるときも、両側を bare_name で揃える。"""
+    runs = [run("A / pytest (0/2)", conclusion="failure", rid=1), run("A / lint (0/2)", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["pytest", "lint"], ["W / pytest (5/9)"])
+    assert [c.name for c in reading.failed_tests] == ["A / pytest (0/2)"]
+    assert [c.name for c in reading.failed_other] == ["A / lint (0/2)"]
