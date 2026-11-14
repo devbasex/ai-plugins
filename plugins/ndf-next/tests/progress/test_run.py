@@ -341,6 +341,19 @@ def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
     assert row.state == "disabled" and row.reason == "条件 code_in_diff が偽"
 
 
+def test_stage_enabled_by_the_project_runs_even_when_the_condition_is_false(repo, st, env, capsys):
+    # 宣言 > 定義の条件: workflow.stages の enabled=true は code_in_diff が偽でも行を飛ばさない
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": True}}}}))
+    tid = _new(capsys, "standard")
+    env.env = run.Env(**{**vars(env.env), "facts": lambda words, ctx, cwd: {w: w != "code_in_diff" for w in words}})
+    lanes.turn(st, tid, repo, env.env)
+    _approve(st, tid, "設計")
+    lanes.turn(st, tid, repo, env.env)
+    events = [e.draft.kind for e in run.read(st, tid).row_events("リファクタリング")]
+    assert "skipped" not in events and "started" in events
+
+
 def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, capsys):
     tid = _new(capsys, "standard")
     env.env = run.Env(**{**vars(env.env), "facts": command.facts_of})
