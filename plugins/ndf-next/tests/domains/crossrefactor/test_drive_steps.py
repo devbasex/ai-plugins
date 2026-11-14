@@ -141,7 +141,9 @@ def test_flaky_fix_queued_by_a_stopped_item_is_kept_when_the_item_is_redone_on_r
     state.update(flaky_requested=["flaky:src/geo.py"], flaky_request={"keys": ["flaky:src/geo.py"], "attempts": 0, "sendback": []})
     store.save(path, state)
     fix = commit_at({"tests/test_geo_flaky.py": "def test_x():\n    pass\n"}, "フレーキーを直す\n\nFlaky-Fix: flaky:src/geo.py")
-    again = drive.drive(world.config(safety_net_minutes=600), replace(slow, launcher=FakeAgents(_acts(propose=None, plan=None, **{"flaky-fix": fix}))))
+    again = drive.drive(
+        world.config(safety_net_minutes=600), replace(slow, launcher=FakeAgents(_acts(propose=None, plan=None, **{"flaky-fix": fix})))
+    )
     assert again.kind == "ok", again.detail
     state = _state(world)
     assert state["items"][0]["status"] == "adopted"

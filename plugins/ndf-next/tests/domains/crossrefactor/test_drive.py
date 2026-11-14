@@ -167,7 +167,11 @@ def test_test_file_already_failing_at_the_item_start_does_not_revert_the_added_t
             ]
         }
     }
-    commit_in(world.main, {".ndf/project.json": json.dumps(decl), "tests/test_geo.py": "def test_broken():\n    assert False\n"}, "元から落ちるテスト")
+    commit_in(
+        world.main,
+        {".ndf/project.json": json.dumps(decl), "tests/test_geo.py": "def test_broken():\n    assert False\n"},
+        "元から落ちるテスト",
+    )
     sh(world.main, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(world.main, "fetch", "-q", "origin")
     fake = FakeAgents(_acts())
