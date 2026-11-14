@@ -114,30 +114,34 @@ class FakeReview:
         args = cmd[2:]
         self.calls.append((name, *args))
         if name == "state.py":
-            sub = args[0]
-            if sub == "init":
-                return 0, f"PR=5\nTMP_DIR={self.tmp}\nWORKTREE={self.tmp / 'wt'}\n"
-            if sub == "start-round":
-                return self._start_round()
-            if sub == "judge":
-                return self._judge()
-            if sub == "check-oscillation":
-                return 2, ""
-            if sub == "merge-fix":
-                self.state["rounds"][-1]["fix"] = {"fixed": 2, "rejected": 1}
-                self.save()
-                return 0, ""
-            if sub == "should-rotate":
-                return (0 if self.rotate else 2), ""
-            if sub == "verify-sweep":
-                self.state["sweep"] = {"remaining_open": 1, "verified": True}
-                self.save()
-                return 6, ""
-            if sub == "report":
-                return 0, "## 報告\n"
-            return 0, ""
+            return self._state_response(args)
         if name == "rotate-pr.sh" and args[0] == "execute":
             return 0, "NEW_PR=9\nNEW_PR_URL=https://x/9\nNEW_BRANCH=feat/x\n"
+        return 0, ""
+
+    def _state_response(self, args):
+        """state.py の副命令の応答。状態を変える副命令はその時点で保存する。知らない副命令は (0, "")。"""
+        sub = args[0]
+        if sub == "init":
+            return 0, f"PR=5\nTMP_DIR={self.tmp}\nWORKTREE={self.tmp / 'wt'}\n"
+        if sub == "start-round":
+            return self._start_round()
+        if sub == "judge":
+            return self._judge()
+        if sub == "check-oscillation":
+            return 2, ""
+        if sub == "merge-fix":
+            self.state["rounds"][-1]["fix"] = {"fixed": 2, "rejected": 1}
+            self.save()
+            return 0, ""
+        if sub == "should-rotate":
+            return (0 if self.rotate else 2), ""
+        if sub == "verify-sweep":
+            self.state["sweep"] = {"remaining_open": 1, "verified": True}
+            self.save()
+            return 6, ""
+        if sub == "report":
+            return 0, "## 報告\n"
         return 0, ""
 
     def _start_round(self):
