@@ -58,31 +58,35 @@ def test_fact_table_shape_and_copied_ids(with_schema, rules):
 COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
 
 
-def _schema_findings(plugin, rules, name: str, text: str) -> list[str]:
-    """`contracts/facts/<name>` に表を書き、その表について出た指摘の詳細を並べる。"""
-    plugin.write(f"contracts/facts/{name}", text)
-    return [f.detail for f in facts.check(plugin.scope(), rules) if f.path.rsplit("/", 1)[-1] == name]
+def _schema_findings(plugin, rules, path: str, text: str) -> list[tuple[str, str]]:
+    """`path` に表を書き、出た指摘を（ファイル名, 詳細）の組で並べる。"""
+    plugin.write(path, text)
+    return [(f.path.rsplit("/", 1)[-1], f.detail) for f in facts.check(plugin.scope(), rules)]
 
 
 def test_fact_table_in_the_schema_has_no_findings(with_schema, rules):
     ok = table([{"id": "a", "rank": 1}, {"id": "b", "rank": 2, "tags": ["x"]}], COLUMNS)
-    assert _schema_findings(with_schema, rules, "ok.json", ok) == []
+    found = _schema_findings(with_schema, rules, "contracts/facts/ok.json", ok)
+    assert all(name != "ok.json" for name, _ in found)
 
 
 def test_fact_table_without_owner_is_an_error(with_schema, rules):
     no_owner = json.dumps({"version": 1, "summary": "s", "columns": {}, "rows": []})
-    assert any("'owner'" in d for d in _schema_findings(with_schema, rules, "no_owner.json", no_owner))
+    found = _schema_findings(with_schema, rules, "contracts/facts/no_owner.json", no_owner)
+    assert any(name == "no_owner.json" and "'owner'" in d for name, d in found)
 
 
 def test_fact_table_rows_out_of_the_declared_columns_are_errors(with_schema, rules):
     bad_rows = table([{"id": "a", "rank": "1"}, {"id": "b"}, {"id": "c", "rank": 3, "x": 1}], COLUMNS)
-    found = _schema_findings(with_schema, rules, "bad_rows.json", bad_rows)
-    assert len(found) == 3 and all(d.startswith("表の形: $.rows[") for d in found)
+    found = _schema_findings(with_schema, rules, "contracts/facts/bad_rows.json", bad_rows)
+    bad = sorted(d for name, d in found if name == "bad_rows.json")
+    assert len(bad) == 3 and all(d.startswith("表の形: $.rows[") for d in bad)
 
 
 def test_fact_table_column_out_of_the_schema_is_an_error(with_schema, rules):
     bad_column = table([], {"Rank": {"type": "float", "summary": "r"}})
-    assert len(_schema_findings(with_schema, rules, "bad_column.json", bad_column)) == 2
+    found = _schema_findings(with_schema, rules, "contracts/facts/bad_column.json", bad_column)
+    assert len([d for name, d in found if name == "bad_column.json"]) == 2
 
 
 def test_table_without_schema_beside_it_stops(plugin, rules):
