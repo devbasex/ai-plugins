@@ -127,7 +127,7 @@ def _handle_file(ctx: Context, path: Path) -> Optional[Outcome]:
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 頼む側が期限切れで消した依頼は処理しない
         return None
     try:
         req = json.loads(text)
