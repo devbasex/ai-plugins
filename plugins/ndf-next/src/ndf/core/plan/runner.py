@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import functools
-import json
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -28,12 +27,12 @@ from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git
-from ndf import contracts
 from ndf.contracts import chosen, limits, result, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
 from ndf.core.plan.files import read_json, write_json
+from ndf.core.plan.records import PROGRESS_FILE, _add_outputs, _add_prs, recorded_outputs, recorded_prs
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
 # 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
@@ -45,13 +44,6 @@ PLAN_LOCK = "plan.lock"
 RESULTS_DIR = "results"
 # 差し込み `{work_base}` の置き場（状態の置き場の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
-# ステップの結果が載せた PR の番号を、回をまたいで集める記録（プランの結果の items へ載せる）
-PRS_FILE = "prs.json"
-# ステップの結果の outputs を回をまたいで重ねる記録（プランの結果の outputs へ載せる）
-OUTPUTS_FILE = "outputs.json"
-OUTPUTS_SCHEMA = result.SCHEMA + "#/$defs/outputs"
-# 選択の記録を追記する進捗記録（追記だけ。書き換えない）
-PROGRESS_FILE = "progress.jsonl"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "answer"
 TOPIC_RETRY = "retry-wait"
@@ -121,22 +113,6 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     return out
 
 
-def _add_outputs(state_dir: Path, outputs: dict[str, Any]) -> None:
-    found = read_json(state_dir / OUTPUTS_FILE)
-    write_json(state_dir / OUTPUTS_FILE, {**(found if found is not None else {}), **outputs})
-
-
-def recorded_outputs(state_dir: Path) -> tuple[Optional[dict[str, Any]], list[str]]:
-    """プランのステップが渡した outputs と、結果 JSON の形に合わないときの注意。形が違えば outputs を載せない。"""
-    found = read_json(state_dir / OUTPUTS_FILE)
-    if not found:
-        return None, []
-    errs = contracts.schema_errors(found, OUTPUTS_SCHEMA)
-    if errs:
-        return None, [f"ステップの outputs が結果 JSON の形に合わず載せなかった: {'; '.join(errs)}"]
-    return found, []
-
-
 @durable.step
 def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
     """選択の記録を 1 件ずつ進捗記録へ追記する（耐久ステップ。回復で同じ選択を 2 回書かない）。"""
@@ -146,30 +122,6 @@ def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
     with target.open("a", encoding="utf-8") as fh:
         fh.write("".join(f"{line}\n" for line in lines))
     return len(lines)
-
-
-def recorded_choices(state_dir: Path) -> list[dict[str, Any]]:
-    """進捗記録に残った選択の記録（書いた順）。"""
-    path = state_dir / PROGRESS_FILE
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        # まだ 1 件も選んでいない回は記録が無い
-        return []
-    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
-    return [r for r in rows if isinstance(r, dict) and r.get("event") == chosen.EVENT]
-
-
-def _add_prs(state_dir: Path, prs: list[int]) -> None:
-    found = read_json(state_dir / PRS_FILE)
-    known = list(found["prs"]) if found is not None else []
-    write_json(state_dir / PRS_FILE, {"prs": known + [n for n in prs if n not in known]})
-
-
-def recorded_prs(state_dir: Path) -> list[int]:
-    """プランのステップが載せた PR の番号（載った順）。"""
-    found = read_json(state_dir / PRS_FILE)
-    return list(found["prs"]) if found is not None else []
 
 
 @durable.step

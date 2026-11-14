@@ -12,7 +12,7 @@ import pytest
 
 from ndf.contracts import chosen, result, routing
 from ndf.core import durable
-from ndf.core.plan import assemble_decide, model, runner
+from ndf.core.plan import assemble_decide, model, records, runner
 
 from . import _plan_helpers as H
 
@@ -146,7 +146,7 @@ def test_two_rounds_of_one_plan_at_once_do_not_stop_each_other(repo, tmp_path):
 
 
 def _choices(repo: Path) -> list[dict]:
-    return [r for p in sorted(repo.rglob(runner.PROGRESS_FILE)) for r in runner.recorded_choices(p.parent)]
+    return [r for p in sorted(repo.rglob(records.PROGRESS_FILE)) for r in records.recorded_choices(p.parent)]
 
 
 def test_each_chosen_route_is_recorded_once(repo, tmp_path):
