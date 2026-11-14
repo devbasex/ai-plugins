@@ -15,9 +15,10 @@ ndf progress restore --from <控え>
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,7 @@ REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了
 # --- 置き場とリポジトリ ------------------------------------------------------------------
 
 
-def _root(cwd: Path) -> Path:
+def store_root_of(cwd: Path) -> Path:
     return durable.store_root(identity.load().name, cwd)
 
 
@@ -69,7 +70,7 @@ def _repo(cwd: Path, root: Path) -> str:
         return str(root.parents[2])
 
 
-def _read_json(path: Path, failure: str = "を JSON として読めない") -> Any:
+def read_json(path: Path, failure: str = "を JSON として読めない") -> Any:
     """`path` の JSON。読めなければ `"{path} {failure}: 理由"` の `ContractError`。"""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -77,14 +78,121 @@ def _read_json(path: Path, failure: str = "を JSON として読めない") -> A
         raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
 
 
+def declaration_path(cwd: Path, name: str) -> Path:
+    """リポジトリの根の宣言のファイルのパス。"""
+    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
+
+
+def _read_declaration(path: Path) -> dict[str, Any]:
+    raw = read_json(path, "を読めない") if path.exists() else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def declaration(cwd: Path, name: str) -> dict[str, Any]:
+    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
+    return _read_declaration(declaration_path(cwd, name))
+
+
+# --- 工程の定義の条件（`when`）の語のうち、進行表の外（git の差分と宣言のファイル・スプリントの文脈）から求める語 ---
+# `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。進行表から求める語（`run.TABLE_FACTS`）はここに無い。
+
+
+class FactUnknown(Exception):
+    """工程の定義の条件（`when`）の語を、今の材料から求められない。"""
+
+    def __init__(self, word: str) -> None:
+        super().__init__(f"条件 {word} を求められない")
+        self.word = word
+
+
+WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
+BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
+# 差分の語（`diff_kinds` の鍵）
+DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
+
+
+def _dig(node: Any, *keys: str) -> Any:
+    for key in keys:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node
+
+
+def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:
+    """差分の語の値。振る舞いを決める文書は文書の部分集合。文書だけは、文書が 1 件以上でコードと振る舞いの文書が 0 件。"""
+    code, behavior = files - docs, behavior & docs
+    return {
+        "code_in_diff": bool(code),
+        "docs_only_diff": bool(files) and not code and not behavior,
+        "behavior_docs_in_diff": bool(behavior),
+    }
+
+
+def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
+    """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
+    value = _dig(project, "docs", key)
+    patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
+    return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
+
+
+def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
+    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
+    base = _dig(declaration(cwd, WORKTREE_FILE), "base_branch")
+    if not isinstance(base, str) or not base or base.startswith("-"):
+        raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
+    git = Git(Path(context.get("worktree") or cwd))
+    head = str(context.get("branch") or "HEAD")
+    try:
+        git.rev_parse(base)
+        ref = base
+    except GitError:
+        ref = f"origin/{base}"
+    return git, f"{git.merge_base(ref, head)}...{head}"
+
+
+def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
+    return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
+
+
+def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """スプリントの差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。"""
+    project = declaration(cwd, PROJECT_FILE)
+    try:
+        git, rng = _sprint_range(context, cwd)
+        files = _diff_names(git, rng, [])
+        docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
+        return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+    except GitError as exc:
+        raise FactUnknown(f"差分を求められない: {exc}") from exc
+
+
+def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
+    kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
+    known: dict[str, Callable[[], bool]] = {
+        **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
+        "ci_declared": lambda: _dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(_dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "release_record": lambda: "version" in context,
+        "design_pr": lambda: "design_pr" in context,
+    }
+    unknown = [w for w in words if w not in known]
+    if unknown:
+        raise FactUnknown(f"条件 {unknown[0]} を求める手段が無い")
+    out = {}
+    for w in words:
+        try:
+            out[w] = known[w]()
+        except FactUnknown as exc:
+            raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
+    return out
+
+
 def _declared(cwd: Path) -> dict[str, Any]:
     """`.ndf/project.json` の `workflow.stages`（工程の名前 → 有効と理由）。ファイルか項目が無ければ空。"""
-    top = Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
-    path = top / PROJECT_FILE
-    if not path.exists():
-        return {}
-    raw = _read_json(path, "を読めない")
-    workflow = raw.get("workflow") if isinstance(raw, dict) else None
+    path = declaration_path(cwd, PROJECT_FILE)
+    raw = _read_declaration(path)
+    workflow = raw.get("workflow")
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     if not isinstance(declared, dict):
         return {}
@@ -175,7 +283,7 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     if not found:
         raise definition.WorkflowDefError([f"--requirements: モード {snap.mode} に要求と受け入れ条件の工程が無い"])
     stage = found[0]
-    errs = definition.validate_stage_output(stage, _read_json(Path(path)))
+    errs = definition.validate_stage_output(stage, read_json(Path(path)))
     if errs:
         raise definition.WorkflowDefError([f"{stage.name} の出力が規約に合わない: {e}" for e in errs])
     return [(stage.name, path)]
@@ -240,13 +348,26 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 
 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    output = _read_json(Path(a.output))
+    output = read_json(Path(a.output))
     with store.transaction(st) as conn:
         _, snap, _ = _current(conn, a.table_id)
-    errs = definition.validate_stage_output(snap.stage(a.stage), output)
+    stage = snap.stage(a.stage)
+    errs = definition.validate_stage_output(stage, output)
     if errs:
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(errs)}")
-    return _changed(a, st, "manual_finished", {"output": a.output})
+    dropped: list[str] = []
+
+    def build(rev: int, _snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
+        """終了の印と、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
+        draft, dropped[:] = stages.outputs_draft(stage, rev, output["outputs"] if "outputs" in output else {}, ACTOR)
+        done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
+        return [done, *([draft] if draft is not None else [])]
+
+    seqs = _append(st, a.table_id, build)
+    st.warnings.extend(dropped)
+    return result.result(
+        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に manual_finished を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+    )
 
 
 def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -265,7 +386,7 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    root = _root(cwd)
+    root = store_root_of(cwd)
     url = store.default_url(root)
     retired = store.restore(url, root, Path(a.source))
     items = [{"restored": str(store.sqlite_path(url)), "from": a.source, "retired": str(retired)}]
@@ -330,21 +451,30 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
-    if a.action == "restore":
-        return _cmd_restore(a, cwd)
-    root = _root(cwd)
+def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequence[str] = ()) -> dict[str, Any]:
+    """結果の `warnings` の前に `before`、後ろに `after` を足す。足すものが無ければ結果に触れない。"""
+    if before or after:
+        out["warnings"] = [*before, *(out["warnings"] if "warnings" in out else []), *after]
+    return out
+
+
+def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
+    """チェックアウトの置き場の進行表の DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+    root = store_root_of(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
-        out = COMMANDS[a.action](a, cwd, st)
-        if st.warnings:
-            out["warnings"] = list(st.warnings)
-        return out
+        return with_warnings(handler(a, cwd, st), after=st.warnings)
 
 
-# 止まった理由へ変換する例外の種類（main が受け、_stopped_from が理由へ変える）
+def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    if a.action == "restore":
+        return _cmd_restore(a, cwd)
+    return with_store(cwd, COMMANDS[a.action], a)
+
+
+# 止まった理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
 STOPPABLE = (
     model.Refused,
     durable.StoreStopped,
@@ -392,7 +522,7 @@ _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ..
 )
 
 
-def _stopped_from(exc: Exception) -> dict[str, Any]:
+def stopped_from(exc: Exception) -> dict[str, Any]:
     """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。表に無い種類は CalledProcessError。"""
     for kind, convert in _STOPPED_FROM:
         if isinstance(exc, kind):
@@ -400,14 +530,19 @@ def _stopped_from(exc: Exception) -> dict[str, Any]:
     return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
 
 
-def main(argv: list[str]) -> int:
+def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
+    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は止まった理由にする。"""
     try:
-        a = parser().parse_args(argv)
+        a = ap.parse_args(argv)
     except SystemExit as exc:
         # 使い方の誤りは argparse が標準エラーへ書いた。--help は 0
         return causes.exit_code("invalid") if exc.code else 0
     try:
-        out = _dispatch(a, Path.cwd())
+        out = dispatch(a, Path.cwd())
     except STOPPABLE as exc:
-        out = _stopped_from(exc)
+        out = stopped_from(exc)
     return result.emit(out)
+
+
+def main(argv: list[str]) -> int:
+    return run_main(parser(), _dispatch, argv)
