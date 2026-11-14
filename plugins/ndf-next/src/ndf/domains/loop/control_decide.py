@@ -25,6 +25,8 @@ from ndf.domains.loop import record_decide as rec
 STOP_BY = ("human", "organizer")
 # 断りの種類（止まった理由の表の種類）
 REFUSED, PRECONDITION, INVALID = "refused", "precondition", "invalid"
+# 次の 1 手の副命令の名前
+LOOP = "loop"
 
 
 @dataclass(frozen=True)
@@ -65,8 +67,13 @@ def refuse(kind: str, summary: str, nxt: Optional[Step] = None) -> Decision:
     return Decision(summary, kind=kind, next=nxt)
 
 
+def _step(verb: str, name: str, *rest: str, ask: tuple[str, ...] = (), session: bool = False) -> Step:
+    """`loop <動詞> <名前> ...` の次の 1 手。"""
+    return Step((LOOP, verb, name, *rest), ask=ask, session=session)
+
+
 def get_step(name: str) -> Step:
-    return Step(("loop", "get", name))
+    return _step("get", name)
 
 
 def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
@@ -76,11 +83,11 @@ def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
         return None
     if lap is None:
         if state.requested is not None:
-            return Step(("loop", "lap", name), session=True)
-        return Step(("loop", "select", name), ask=("candidates",), session=True)
+            return _step("lap", name, session=True)
+        return _step("select", name, ask=("candidates",), session=True)
     if lap.remaining and lap.mode is None:
-        return Step(("loop", "sprint", name), ask=("mode", "basis"), session=True)
-    return Step(("loop", "lap", name), session=True)
+        return _step("sprint", name, ask=("mode", "basis"), session=True)
+    return _step("lap", name, session=True)
 
 
 def _lease_refusal(state: rec.LoopState, c: Ctx) -> Optional[Decision]:
@@ -91,7 +98,7 @@ def _lease_refusal(state: rec.LoopState, c: Ctx) -> Optional[Decision]:
     if not state.holds(c.session, c.now):
         if state.held_by_other(c.session, c.now):
             return refuse(REFUSED, f"ループ {c.name} の鍵はセッション {state.holder} が持つ", get_step(c.name))
-        return refuse(PRECONDITION, f"セッション {c.session} は鍵を持たない", Step(("loop", "start", c.name), session=True))
+        return refuse(PRECONDITION, f"セッション {c.session} は鍵を持たない", _step("start", c.name, session=True))
     return None
 
 
@@ -223,11 +230,11 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
         return refusal
     assert lap is not None
     shown = lap.gate_head(pr)
+    regate = _step("gate", c.name, "--pr", str(pr))
     if shown is None:
-        return refuse(PRECONDITION, f"PR #{pr} の設計承認ゲートを記録していない", Step(("loop", "gate", c.name, "--pr", str(pr))))
+        return refuse(PRECONDITION, f"PR #{pr} の設計承認ゲートを記録していない", regate)
     if head != shown:
-        return refuse(PRECONDITION, f"PR #{pr} の先端がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す",
-                      Step(("loop", "gate", c.name, "--pr", str(pr))))  # fmt: skip
+        return refuse(PRECONDITION, f"PR #{pr} の先端がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate)
     ev = rec.event(rec.GATE_ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
     return Decision(f"PR #{pr} の答え {given} を記録した", (ev,), metrics={"head": head, "answer": given})
 
