@@ -389,14 +389,12 @@ def _held(ctx: SlotContext, kind: str) -> Iterator[Held]:
         taken = _take_slot(ctx, held)
     except KeyboardInterrupt:
         # 枠・メモリの待ちの間にシグナルで中断された（取りかけた枠は返してある）
-        held.index = None
         _record(directory, cwd, kind, held, INTERRUPTED)
         raise
     if taken is None:
         if held.note:
             yield held  # 置き場へ書けない。枠を取らずに走らせる（I8）
             return
-        held.index = None
         _record(directory, cwd, kind, held, GAVE_UP)
         raise Stopped(GAVE_UP, held.waited_seconds, held.available_mib)
     held.env = {HELD_ENV: str(slot_pool.slot_path(directory, taken.index))}
