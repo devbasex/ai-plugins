@@ -95,12 +95,17 @@ def cmd_head(args: argparse.Namespace) -> int:
 # --- worktree --------------------------------------------------------------------------
 
 
+def _unregistered(exc: worktree.WorktreeUnregistered, path: str) -> int:
+    """管理情報の無い worktree（`path` は結果に載せる worktree のパス）で止まった結果を出す。"""
+    return _stop("precondition", str(exc), items=[{"kind": "worktree", "path": path, "points_to": str(exc.points_to)}])
+
+
 def _registered(path: str) -> Optional[int]:
     """管理情報が無ければ止まった結果の終了コード。あれば None。"""
     try:
         worktree.registration(Path(path))
     except worktree.WorktreeUnregistered as exc:
-        return _stop("precondition", str(exc), items=[{"kind": "worktree", "path": path, "points_to": str(exc.points_to)}])
+        return _unregistered(exc, path)
     return None
 
 
@@ -283,7 +288,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         got = drive.drive(cfg, LAUNCH)
     except worktree.WorktreeUnregistered as exc:
-        return _stop("precondition", str(exc), items=[{"kind": "worktree", "path": str(exc.worktree), "points_to": str(exc.points_to)}])
+        return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
         return _stop("precondition", str(exc))
     except drive.DriveStopped as exc:
