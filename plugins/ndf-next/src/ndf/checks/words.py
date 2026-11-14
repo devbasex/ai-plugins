@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ndf import identity
 from ndf.checks.model import CheckError, Finding, Scope
 
 KATAKANA = r"゠-ヿ"
@@ -25,9 +26,9 @@ def _read(path: Path) -> Any:
         raise CheckError(f"用語集を読めない: {path}: {exc}") from exc
 
 
-def banned_words(repo_root: Path, config_rel: str) -> dict[str, str]:
-    """禁止する語 → 理由（替える語）。用語集の設定が無ければ空。"""
-    config_path = repo_root / config_rel
+def banned_words(repo_root: Path, config_name: str) -> dict[str, str]:
+    """禁止する語 → 理由（替える語）。用語集の設定（宣言の置き場の下の `config_name`）が無ければ空。"""
+    config_path = repo_root / identity.FIXED_WORDS["declaration_dir"] / config_name
     if not config_path.is_file():
         return {}
     config = _read(config_path)

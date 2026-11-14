@@ -154,7 +154,7 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 | 2 | `git rm -r plugins/ndf` の後に `git mv plugins/ndf-next plugins/ndf` を打つ | — |
 | 3 | `plugin.json` 2 本の `name` を `ndf`、版を `11.0.0` にする | `claude plugin validate .` |
 | 4 | `.ndf/project.json` の suite のパスと `scripts/*-allow/` の許可ファイルを新しい中身に合わせて作り直す（旧い許可は消す） | 既存の検査のスクリプト |
-| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す | 既存の CI のジョブ |
+| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す。検査（`src/ndf/checks/`）から、子の表のコピー `children.json` と規則 `child-deps`（#3347 の決定 97）、旧いプラグインのディレクトリを見る規則 `I2`・`port`（#3343）を消す | 既存の CI のジョブ |
 | 6 | `CHANGELOG.md` に入れ替えを書き、手順 2〜6 を 1 本の PR にする | — |
 | 7 | `claude --plugin-dir plugins/ndf` で主要な Skill を 1 回ずつ起動する | 振る舞いの確認 |
 | 8 | develop へ入れて開発版としてデプロイし、リリース承認ゲートを通して main へ出す | リリース後テスト |

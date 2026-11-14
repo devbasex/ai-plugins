@@ -10,11 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from ndf.checks import run
+from ndf.checks import child_deps, run
 from ndf.checks.model import Scope, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-NAME = "ndf-next"
+# 開発の間のディレクトリ名とプラグイン名（#3347 の決定 100）
+DIR = "ndf-next"
+NAME = "ndf11"
 
 
 def git(repo: Path, *args: str) -> str:
@@ -47,12 +49,16 @@ class Plugin:
 @pytest.fixture
 def plugin(tmp_path: Path) -> Plugin:
     repo = tmp_path / "repo"
-    root = repo / "plugins" / NAME
+    root = repo / "plugins" / DIR
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": NAME, "version": "0"}))
     shutil.copy(PLUGIN_ROOT / "pyproject.toml", root / "pyproject.toml")
     (root / "src" / "ndf").mkdir(parents=True)
     (root / "src" / "ndf" / "__init__.py").write_text('"""p"""\n')
+    # 規則 child-deps の子の表。1 つの子が `ndf` の全体を持つ（ほかの規則のテストに持ち主の指摘を出さない）
+    child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
+    (root / child_deps.CHILDREN_REL).parent.mkdir(parents=True)
+    (root / child_deps.CHILDREN_REL).write_text(json.dumps({"children": {"X": child}, "tables": {}}))
     git(repo, "init", "-q")
     return Plugin(repo, root)
 

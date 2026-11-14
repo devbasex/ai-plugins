@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ndf import slot_pool
+from ndf import identity, slot_pool
 from ndf.testing import machine, weight
 
 RESOURCES_FILE = "resources.json"
@@ -68,7 +68,7 @@ def default_limits(cpus: int, total_mib: int | None) -> Limits:
 def find_setting(cwd: Path, name: str) -> Path | None:
     """`cwd` から根へ向かって `.ndf/<name>` を探す。"""
     for base in (cwd.resolve(), *cwd.resolve().parents):
-        candidate = base / ".ndf" / name
+        candidate = base / identity.FIXED_WORDS["declaration_dir"] / name
         if candidate.is_file():
             return candidate
     return None

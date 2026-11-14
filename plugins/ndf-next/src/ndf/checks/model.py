@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 RULES_PATH = Path(__file__).with_name("rules.json")
+# スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
+SCRIPT_PREFIXES = ("bin/", "hooks/")
 
 
 class CheckError(Exception):
@@ -75,6 +77,10 @@ class Scope:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
         return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith("src/")]
 
+    def code_files(self) -> list[Source]:
+        """コードのファイル（テストを含む `.py` と `bin/`・`hooks/` のスクリプト）。行数の上限が見る。"""
+        return [s for s in self.sources if s.is_python or self.plugin_rel(s).startswith(SCRIPT_PREFIXES)]
+
     def python(self) -> list[Source]:
         """テストを含む `.py` のすべて。I3 が見る。"""
         return [s for s in self.sources if s.is_python]
@@ -94,7 +100,11 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CheckError(f"規則のデータを読めない: {path}: {exc}") from exc
-    missing = [k for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "invariants") if k not in data]
+    missing = [
+        k
+        for k in ("smells", "ruff", "boundaries", "exception_types", "structure", "facts", "words", "child_deps", "invariants")
+        if k not in data
+    ]
     if missing:
         raise CheckError(f"規則のデータに鍵が無い: {path}: {missing}")
     bad = [code for code, rule in data["smells"].items() if rule["mark"] not in ("none", "boundary", "boundary-or-limit")]

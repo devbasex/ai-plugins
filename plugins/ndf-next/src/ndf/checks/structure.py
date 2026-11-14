@@ -69,13 +69,14 @@ def _decide_calls(rel: str, tree: ast.Module, forbidden: frozenset[str]) -> list
 
 
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    """`src/` の下のモジュールに構造の規則（輪を除く）を当てる。"""
+    """行数の上限をコードのファイルのすべてに、ほかの構造の規則（輪を除く）を `src/` の下のモジュールに当てる。"""
     conf = rules["structure"]
-    found = []
+    found = [
+        Finding("lines", src.rel, 1, f"{lines} 行（安全網 {conf['max_lines']} 行）。責務で分ける")
+        for src in scope.code_files()
+        if (lines := len(src.text.splitlines())) > conf["max_lines"]
+    ]
     for src in scope.code():
-        lines = len(src.text.splitlines())
-        if lines > conf["max_lines"]:
-            found.append(Finding("lines", src.rel, 1, f"{lines} 行（安全網 {conf['max_lines']} 行）。責務で分ける"))
         module = module_name(scope, src)
         imps = imports.collect(src.tree, module, src.path.name == "__init__.py")
         found += _import_findings(src.rel, module, imps, conf)

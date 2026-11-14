@@ -48,6 +48,17 @@ log = logging.getLogger(__name__)
 
 # プラグインの根（このファイルから 3 つ上）。根を求めるのはここだけ
 ROOT = Path(__file__).resolve().parents[2]
+# 入れ替え（S2）の後のプラグイン名（#3347 の決定 101）。検査の I1 は今の名前とこの名前の両方を照合する
+FINAL_NAME = "ndf"
+# プラグイン名から求めない固定の語の表（#3347 の決定 101）。I1 はこの表の定義の行だけを通し、コードはここから引く
+FIXED_WORDS = {
+    # 利用先のリポジトリの宣言の置き場（`.ndf/project.json` など）
+    "declaration_dir": ".ndf",
+    # エントリポイントのファイル名（`bin/ndf`）と、結果 JSON の next・routes のコマンドの先頭
+    "entrypoint": "ndf",
+    # 工程の定義の文書の名前空間（`metadata.ndf`・`document.namespace`）
+    "workflow_namespace": "ndf",
+}
 # 状態の置き場の先頭に置く形の版のファイル。無い置き場は旧い実装のものとみなす
 FORMAT_FILE = "format.json"
 FORMAT_VERSION = 1

@@ -22,6 +22,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
+from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, registry, session_env, signals
 from ndf.domains.relay.tmux import Tmux
@@ -264,7 +265,7 @@ def stop(ctx: Context, name: str) -> Outcome:
 
 
 def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
-    ndf = ctx.plugin_root / "bin" / "ndf"
+    ndf = ctx.plugin_root / "bin" / identity.FIXED_WORDS["entrypoint"]
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")

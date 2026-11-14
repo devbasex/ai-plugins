@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from ndf import identity
+
 
 class Pending(NamedTuple):
     """`runs` は待ちを抱えた実行（読めなければ None）、`note` は読めなかった理由。"""
@@ -22,7 +24,7 @@ class Pending(NamedTuple):
 
 def read(plugin_root: Path, timeout: float, runner: Any = subprocess.run) -> Pending:
     """`ndf plan pending` を打って一覧を読む。"""
-    command = [str(plugin_root / "bin" / "ndf"), "plan", "pending"]
+    command = [str(plugin_root / "bin" / identity.FIXED_WORDS["entrypoint"]), "plan", "pending"]
     try:
         done = runner(command, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:

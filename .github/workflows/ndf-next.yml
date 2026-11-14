@@ -1,14 +1,17 @@
 name: ndf-next
 
 # 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
-# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）
-# edited: 検査の I2 は PR 本文の即時修正の印を読むため、本文を直したときも打ち直す
+# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）。
+# plugins/ndf/** の PR でも検査を打つ（規則 port: 移す先の Issue か移さない理由を本文に持つ。#3343）。
+# そのときテストと一時コピーは ndf-next-scope が飛ばす
+# edited: 検査の I2 と port は PR 本文の印を読むため、本文を直したときも打ち直す
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
     paths:
       - ".github/workflows/ndf-next.yml"
       - "plugins/ndf-next/**"
+      - "plugins/ndf/**"
   push:
     branches:
       - main
@@ -30,11 +33,31 @@ defaults:
     working-directory: plugins/ndf-next
 
 jobs:
+  # 新しいプラグイン（とこの定義）を変えたか。plugins/ndf だけの PR ではテストと一時コピーを打たない
+  ndf-next-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      next: ${{ steps.diff.outputs.next }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        working-directory: .
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] \
+            || git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- plugins/ndf-next .github/workflows/ndf-next.yml | grep -q .; then
+            echo next=true >> "$GITHUB_OUTPUT"
+          else
+            echo next=false >> "$GITHUB_OUTPUT"
+          fi
+
   # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
   # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
   ndf-next-tests:
     # PR 本文を読まないので、本文の編集では流し直さない
-    if: github.event.action != 'edited'
+    needs: ndf-next-scope
+    if: github.event.action != 'edited' && needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -73,3 +96,56 @@ jobs:
           else
             bin/ndf check
           fi
+
+  # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
+  # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、
+  # テストが通ることを確かめる。ディレクトリ名を組み立てた文字列のパスは、コピーの中でテストが落とす
+  ndf-next-copy:
+    needs: ndf-next-scope
+    if: github.event.action != 'edited' && needs.ndf-next-scope.outputs.next == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      - name: 一時コピーを作る
+        run: |
+          copy="$RUNNER_TEMP/copy/plugins/ndf"
+          mkdir -p "$(dirname "$copy")"
+          cp -R . "$copy"
+          # src/ndf はパッケージとして入れない（pyproject.toml の tool.uv）ので、src をパスへ足して読む
+          PYTHONPATH=src uv run --frozen --project . python - "$copy" <<'EOF'
+          import json, pathlib, sys
+          from ndf import identity
+          for rel in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"):
+              path = pathlib.Path(sys.argv[1], rel)
+              data = json.loads(path.read_text(encoding="utf-8"))
+              data["name"] = identity.FINAL_NAME
+              path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          EOF
+          git -C "$RUNNER_TEMP/copy" init -q
+          git -C "$RUNNER_TEMP/copy" add -A
+          git -C "$RUNNER_TEMP/copy" -c user.name=ci -c user.email=ci@example.invalid commit -qm copy
+          echo "COPY=$copy" >> "$GITHUB_ENV"
+      - name: I1 の指摘の集合が元とコピーで一致するか
+        run: |
+          bin/ndf check > "$RUNNER_TEMP/orig.out" || true
+          (cd "$COPY" && bin/ndf check) > "$RUNNER_TEMP/copy.out" || true
+          python3 - "$RUNNER_TEMP/orig.out" plugins/ndf-next/ "$RUNNER_TEMP/copy.out" plugins/ndf/ <<'EOF'
+          import json, sys
+          def i1(out, prefix):
+              report = json.loads(open(out, encoding="utf-8").read().strip().splitlines()[-1])
+              if report["status"] == "stopped" and report["cause"]["kind"] != "check_failed":
+                  sys.exit(f"検査が止まった（{out}）: {report['summary']}")
+              return {(i["path"].removeprefix(prefix), i["line"]) for i in report["items"] if i["rule"] == "I1"}
+          orig, copy = i1(sys.argv[1], sys.argv[2]), i1(sys.argv[3], sys.argv[4])
+          for label, rows in (("元だけ", orig - copy), ("コピーだけ", copy - orig)):
+              for path, line in sorted(rows):
+                  print(f"{label}: I1 {path}:{line}", file=sys.stderr)
+          sys.exit(1 if orig != copy else 0)
+          EOF
+      - name: コピーでテストを打つ
+        working-directory: ${{ env.COPY }}
+        run: uv run --frozen --project . pytest -q -n auto
