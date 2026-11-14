@@ -13,14 +13,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ndf import slot_pool
 from ndf.testing import machine, weight
 
 RESOURCES_FILE = "resources.json"
 PROJECT_FILE = "project.json"
 SECTION = "test_slots"
-# 1 本の全体テストが使う CPU の数（`-n 4`）と、レーン 1 本分のメモリの見込み（決定 5）
+# 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動の枠のテストの重み
 CPUS_PER_RUN = 4
-MIB_PER_RUN = 14 * 1024
+# テスト 1 本の重みの種類（`contracts/limits.json` の `launch.weight.test`）
+TEST_WEIGHT = "test"
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
 FLOOR_RATIO = 0.10
@@ -42,6 +44,11 @@ class Limits:
     memory_floor_mib: int
     wait_limit_seconds: int
 
+    @property
+    def capacity_mib(self) -> int:
+        """重い起動の枠の容量。テスト `max_runs` 本の重みの合計で、LLM の CLI もこの中で数える（#3368）。"""
+        return self.max_runs * slot_pool.weight_mib(TEST_WEIGHT)
+
 
 # 設定の鍵（Limits のフィールドの名前と同じ）
 _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
@@ -50,7 +57,7 @@ _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
 def default_limits(cpus: int, total_mib: int | None) -> Limits:
     """CPU の数と全体のメモリから既定の上限を決める。全体のメモリが読めなければ CPU だけで決める。"""
     by_cpu = cpus // CPUS_PER_RUN
-    by_memory = by_cpu if total_mib is None else total_mib // MIB_PER_RUN
+    by_memory = by_cpu if total_mib is None else total_mib // slot_pool.weight_mib(TEST_WEIGHT)
     floor = FLOOR_MIN_MIB if total_mib is None else max(FLOOR_MIN_MIB, int(total_mib * FLOOR_RATIO))
     return Limits(max(1, min(by_cpu, by_memory)), floor, DEFAULT_WAIT_LIMIT_SECONDS)
 

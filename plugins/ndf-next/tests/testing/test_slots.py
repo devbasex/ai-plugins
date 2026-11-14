@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import slot_pool
 from ndf.testing import records, slots, waits
 from ndf.testing.limits import Limits
 
@@ -117,6 +118,22 @@ def test_gives_up_after_the_wait_limit_and_records_it(tmp_path):
     assert results == [slots.GAVE_UP, slots.FINISHED]
 
 
+def test_llm_cli_launches_count_against_the_test_slot(tmp_path):
+    # 枠 1 本分の容量に LLM の CLI が 1 本でもいれば、テストは待つ（#3368）
+    limits = _limits(1, wait=1)
+    cli = slot_pool.take(tmp_path, limits.capacity_mib, slot_pool.weight_mib("llm-cli"), {"pid": os.getpid()})
+    assert cli is not None
+    try:
+        with pytest.raises(slots.Stopped) as err:
+            with _gate(tmp_path, limits):
+                pass
+        assert err.value.reason == slots.GAVE_UP
+    finally:
+        cli.release()
+    with _gate(tmp_path, limits) as held:
+        assert held.index is not None
+
+
 def test_waits_for_memory_and_does_not_count_the_wait(tmp_path):
     readings = iter([10, 10, 10])
     started = time.monotonic()
@@ -218,16 +235,16 @@ def test_memory_stop_ends_only_the_last_started_run(tmp_path):
 
 
 def test_unwritable_slot_files_release_the_slot_and_run_without_it(tmp_path, monkeypatch):
-    real_write = slots._write_json
+    real_write = slot_pool.write_json
 
     def refuse(path, data):
         raise PermissionError(13, "書けない", str(path))
 
-    monkeypatch.setattr(slots, "_write_json", refuse)
+    monkeypatch.setattr(slot_pool, "write_json", refuse)
     with _gate(tmp_path, _limits(1)) as held:
         assert held.index is None and held.env == {}
         assert held.note.startswith("枠の置き場へ書けないので枠を取らずに走らせた: ")
-    monkeypatch.setattr(slots, "_write_json", real_write)
+    monkeypatch.setattr(slot_pool, "write_json", real_write)
     with waits.returns_before(10):
         with _gate(tmp_path, _limits(1, wait=10)) as held:
             assert held.index == 0  # 取りかけた枠は返してある
