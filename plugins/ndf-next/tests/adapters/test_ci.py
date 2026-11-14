@@ -414,3 +414,49 @@ def test_cli_watch_rate_limit_is_infra_wait(monkeypatch: pytest.MonkeyPatch, cap
     assert ci_cli.main(ARGS) == causes.exit_code("infra_wait")
     out = _out(capsys)
     assert out["cause"]["kind"] == "infra_wait" and out["cause"]["retry_after"] > 0
+
+
+# --- 現状固定（I-008 required_key）: 必須のチェックの照合の鍵と、鍵に当たるチェック ---
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)", "pytest (1/2)"),
+        ("A / B / pytest (1/2)", "pytest (1/2)"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest   (10/12)"),
+        ("pytest(1/2)", "pytest(1/2)"),
+        ("pytest (1/2) (0/2)", "pytest (1/2) (0/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_required_key_current_values(name: str, key: str) -> None:
+    """現状固定: 分割を名指しした名前は分割を保ち（前置きだけ外す）、ほかは bare_name と同じ。"""
+    assert ci.required_key(name) == key
+
+
+def test_required_key_matches_named_shard_only_and_bare_name_any_shard() -> None:
+    """現状固定: 分割を名指しした鍵は、前置きの有無によらずその分割だけに当たる。名指ししない鍵は全分割とまとめに当たる。"""
+    runs = [run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", conclusion="failure", rid=2), run("W / pytest", rid=3)]
+    named = ci.read(runs, ["X / pytest (0/2)"], ["pytest"])
+    assert (named.verdict, named.missing, named.failed_tests) == ("passed", [], [])
+    bare = ci.read(runs, ["pytest"], ["pytest"])
+    assert bare.verdict == "test_failed"
+    assert [c.name for c in bare.failed_tests] == ["pytest (1/2)"]
+    other = ci.read(runs, ["pytest (2/2)"], ["pytest"])
+    assert (other.verdict, other.missing) == ("missing", ["pytest (2/2)"])
+
+
+def test_required_key_dedupes_required_names_by_key() -> None:
+    """現状固定: 前置きや分割の違う必須の名前は、同じ鍵に畳まれて 1 つだけ欠けたと挙がる。"""
+    reading = ci.read([run("other", rid=1)], ["pytest", "CI / pytest", "pytest (0/2)", "W / pytest (0/2)"], ["pytest"])
+    assert reading.missing == ["pytest", "pytest (0/2)"]
