@@ -39,6 +39,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -79,6 +80,8 @@ SOURCE_KEYS = ("label", "author", "association", "body")
 PLAN_EDIT_EVENT = "plan_edit"
 # 書き換えの前の控えの接尾辞（`<プラン>.bak-<時刻>`）
 BACKUP_SUFFIX = ".bak-"
+# 置き換えの一時ファイルの接尾辞（`<プラン>.<一意な文字列>.tmp`）
+TMP_SUFFIX = ".tmp"
 # 進捗ログで、conductor の注意が要る state
 ATTENTION_STATES = ("failing", "stopped", "gate")
 
@@ -96,6 +99,7 @@ _RECORD_SEP, _FIELD_SEP = "\x1e", "\x1f"
 WORK_RULES = (
     "## worker の規則",
     "- テスト・ビルド・CI の待ちは前景で終わりまで待つ。背景で起動して通知を待ったまま応答を終えない",
+    "- 作業の中で全体テストを打たない。範囲テストまでで終え、全体テストはプランの後段のステップに任せる",
     "- 応答を終える前に、指示された結果ファイルを書く。書かずに終えると同じ会話で起こし直される",
     "- コミットの件名と本文に GitHub の closing keywords（close・closes・closed・fix・fixes・fixed・resolve・resolves・"
     "resolved の後ろに `#番号` か課題の URL。`Fix: #12` のように `:` を挟んでも、`Fix:#12` のように空白が無くても閉じる）を書かない。課題は `件名 （#12）` の参照の形で指す",
@@ -355,11 +359,18 @@ def _backup_path(plan: Path, at: str) -> Path:
 
 
 def _replace_plan(plan: Path, text: str, at: str) -> Path:
-    """前の中身を控え（`_backup_path`）、一時ファイルを経てプランを `text` へ置き換える。控えのパスを返す。"""
+    """前の中身を控え（`_backup_path`）、一時ファイルを経てプランを `text` へ置き換える。控えのパスを返す。
+
+    一時ファイルは同じディレクトリに一意な名前で排他的に作る（`tempfile.mkstemp`）。既存の同名のファイルや
+    シンボリックリンクの先を書き換えない。
+    """
     backup = _backup_path(plan, at)
     shutil.copy2(plan, backup)
-    tmp = plan.with_name(plan.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    fd, name = tempfile.mkstemp(dir=plan.parent, prefix=plan.name + ".", suffix=TMP_SUFFIX)
+    tmp = Path(name)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(text)
+    shutil.copymode(plan, tmp)
     os.replace(tmp, plan)
     return backup
 

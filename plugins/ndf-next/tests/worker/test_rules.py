@@ -77,3 +77,9 @@ def test_attention_reads_the_state_not_the_words():
     assert not worker.needs_attention({"state": "working", "text": "止まったものとみなす実装を足した"})
     assert worker.needs_attention({"state": "stopped", "text": "テストを足した"})
     assert worker.needs_attention({"state": "gate", "text": ""})
+
+
+def test_rules_keep_the_whole_test_suite_out_of_the_work(tmp_path):
+    # #3112: 作業の中で全体テストを打たず、範囲テストまでで終える規則が規則文に載る
+    text = worker.system_prompt("impl", tmp_path / "state", tmp_path / "skills")
+    assert "作業の中で全体テストを打たない" in text

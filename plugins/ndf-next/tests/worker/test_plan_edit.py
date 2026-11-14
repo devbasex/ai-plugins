@@ -87,7 +87,7 @@ def test_edit_row_shape_and_backup_name(tmp_path):
     assert row["event"] == "plan_edit" and row["at"] == at and row["plan"] == str(plan) and row["reason"] == "理由"
     assert row["backup"] == str(tmp_path / "plan.json.bak-20261114T0102030000")
     assert row["diff"].startswith(f"--- {plan}\n+++ {new}\n")
-    assert not (tmp_path / "plan.json.tmp").exists()
+    assert not list(tmp_path.glob("plan.json*.tmp"))
     [line] = (state / "progress.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(line) == row
 
@@ -144,7 +144,8 @@ def test_replace_failure_keeps_backup_and_tmp(tmp_path, monkeypatch):
         worker.edit_plan(plan, new, "理由", state, now="2026-11-14T01:00:00+00:00")
     assert plan.read_text(encoding="utf-8") == old
     assert (tmp_path / "plan.json.bak-20261114T0100000000").read_text(encoding="utf-8") == old
-    assert (tmp_path / "plan.json.tmp").read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
+    [tmp] = tmp_path.glob("plan.json.*.tmp")
+    assert tmp.read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
     assert not state.exists()
 
 
@@ -156,7 +157,7 @@ def test_progress_append_failure_leaves_plan_replaced(tmp_path):
         worker.edit_plan(plan, new, "理由", state, now="2026-11-14T01:00:00+00:00")
     assert plan.read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
     assert (tmp_path / "plan.json.bak-20261114T0100000000").read_text(encoding="utf-8") == old
-    assert not (tmp_path / "plan.json.tmp").exists()
+    assert not list(tmp_path.glob("plan.json*.tmp"))
 
 
 def test_edits_in_the_same_second_keep_every_backup(tmp_path):
@@ -168,3 +169,14 @@ def test_edits_in_the_same_second_keep_every_backup(tmp_path):
     assert one["backup"] != two["backup"]
     assert (tmp_path / one["backup"]).read_text(encoding="utf-8") == first
     assert (tmp_path / two["backup"]).read_text(encoding="utf-8") == second
+
+
+def test_replace_leaves_a_same_named_file_and_its_link_target(tmp_path):
+    plan, new, state = _plan(tmp_path / "plan.json", "a", "b"), _plan(tmp_path / "new.json", "a"), tmp_path / "state"
+    target = tmp_path / "other.txt"
+    target.write_text("ほかのファイル", encoding="utf-8")
+    (tmp_path / "plan.json.tmp").symlink_to(target)
+    worker.edit_plan(plan, new, "理由", state, now="2026-11-14T01:00:00+00:00")
+    assert plan.read_text(encoding="utf-8") == new.read_text(encoding="utf-8")
+    assert target.read_text(encoding="utf-8") == "ほかのファイル"
+    assert (tmp_path / "plan.json.tmp").is_symlink()
