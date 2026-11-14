@@ -259,10 +259,16 @@ def _prelude(plan: model.Plan, start: Optional[str]) -> tuple[str, ...]:
     return queue_decide.resume_prelude(plan.order, start)
 
 
+def resolve_state_dir(plan_path: Path, given: Optional[str], plan: Optional[model.Plan], cwd: Path) -> Path:
+    """状態の置き場。`given`（`--state-dir`）が無ければプランの `state_dir` を使う（`plan` はそのときだけ要る）。"""
+    found = given if given is not None else plan.state_dir
+    return Path(assemble_decide.state_dir_for(str(plan_path), found, str(cwd)))
+
+
 def state_dir_of(plan_path: Path, state_dir: Optional[str], cwd: Path) -> Path:
     """プランの状態の置き場（`prepare` と同じ決め方）。プランを読めなければ `model.PlanError`。"""
-    given = state_dir if state_dir is not None else model.load(plan_path).state_dir
-    return Path(assemble_decide.state_dir_for(str(plan_path), given, str(cwd)))
+    plan = model.load(plan_path) if state_dir is None else None
+    return resolve_state_dir(plan_path, state_dir, plan, cwd)
 
 
 @contextmanager
@@ -311,8 +317,7 @@ def prepare(
     digest = assemble_decide.run_digest(plan.digest(), sets)
     if start is not None and start not in plan.order and start not in routing.PLAN_TARGETS:
         raise model.PlanError(f"{plan.name} に {start} は無い")
-    given = state_dir if state_dir is not None else plan.state_dir
-    sdir = Path(assemble_decide.state_dir_for(str(plan_path), given, str(cwd)))
+    sdir = resolve_state_dir(plan_path, state_dir, plan, cwd)
     head = _head(plan)
     record = read_json(sdir / RUN_FILE)
     finished = record is not None and _finished(root, record["key"])

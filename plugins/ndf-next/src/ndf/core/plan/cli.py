@@ -28,7 +28,7 @@ from ndf import identity
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import durable
-from ndf.core.plan import assemble_decide, files, model, queue_decide, queue_run, runner, wait_decide
+from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
 # 待ちの上限の既定（秒）と、見回りの間隔の宣言
@@ -118,7 +118,7 @@ def _watched(path: Path) -> wait_decide.Watched:
         plan = model.load(path)
     except model.PlanError as exc:
         return wait_decide.Watched(name, STOPPED, "invalid", str(exc))
-    sdir = Path(assemble_decide.state_dir_for(str(path), plan.state_dir, str(Path.cwd())))
+    sdir = runner.resolve_state_dir(path, None, plan, Path.cwd())
     record = files.read_json(sdir / runner.RUN_FILE)
     if record is None:
         return wait_decide.Watched(plan.name, None)
