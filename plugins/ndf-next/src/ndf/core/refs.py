@@ -39,6 +39,8 @@ from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
 from ndf.core.resume import SKIP, DesignPr
 
+# 参照の宣言の鍵（種類・参照の先・読む outputs の鍵・空に解けたときの実行条件）
+KIND, OF, KEY, WHEN_EMPTY = "kind", "of", "key", "when_empty"
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
 QUEUE_PRS_KIND = QUEUE_PRS
@@ -52,7 +54,9 @@ _PLACEHOLDERS = frozenset({"", "0", "0.0.0", "unknown", "null"})
 EVENT_RUN, EVENT_STEP = "run", "step"
 # 課題を閉じる PR を 1 つの課題から読む件数（超えたら読めないとして止まる）
 CLOSING_PER_ISSUE = 100
-_CLOSING_FIELDS = f"closedByPullRequestsReferences(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number }} }}"
+# 課題を閉じる PR の GraphQL の接続の名前（クエリの選択と、答えの節点の鍵）
+_CLOSED_BY = "closedByPullRequestsReferences"
+_CLOSING_FIELDS = f"{_CLOSED_BY}(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number }} }}"
 
 
 class RefError(ValueError):
@@ -148,7 +152,7 @@ class Sources(Protocol):
 
 def _text_fields(name: str, raw: Mapping[str, Any]) -> dict[str, str]:
     """宣言の `of`・`key` のうち書かれたもの。書かれていて空でない文字列でなければ `RefError`。"""
-    texts = {k: raw[k] for k in ("of", "key") if k in raw}
+    texts = {k: raw[k] for k in (OF, KEY) if k in raw}
     bad = [k for k, v in texts.items() if not isinstance(v, str) or not v]
     if bad:
         raise RefError(f"参照 {name} の {'・'.join(bad)} は空でない文字列にする")
@@ -157,19 +161,19 @@ def _text_fields(name: str, raw: Mapping[str, Any]) -> dict[str, str]:
 
 def _skip_when_empty(name: str, raw: Mapping[str, Any]) -> bool:
     """宣言の `when_empty` が `skip` なら True、無ければ False。ほかの値は `RefError`。"""
-    when = raw.get("when_empty")
+    when = raw.get(WHEN_EMPTY)
     if when not in (None, WHEN_EMPTY_SKIP):
-        raise RefError(f"参照 {name} の when_empty は {WHEN_EMPTY_SKIP} だけ: {when!r}")
+        raise RefError(f"参照 {name} の {WHEN_EMPTY} は {WHEN_EMPTY_SKIP} だけ: {when!r}")
     return when is not None
 
 
 def _ref(name: str, raw: Any) -> Ref:
-    if not isinstance(raw, Mapping) or raw.get("kind") not in REF_KINDS:
-        raise RefError(f"参照 {name} の kind は {'・'.join(REF_KINDS)} のどれか: {raw!r}")
+    if not isinstance(raw, Mapping) or raw.get(KIND) not in REF_KINDS:
+        raise RefError(f"参照 {name} の {KIND} は {'・'.join(REF_KINDS)} のどれか: {raw!r}")
     texts = _text_fields(name, raw)
-    if raw["kind"] != QUEUE_PRS_KIND and "of" not in raw:
-        raise RefError(f"参照 {name} に参照の先（of）が無い")
-    return Ref(name, raw["kind"], texts.get("of"), texts.get("key"), _skip_when_empty(name, raw))
+    if raw[KIND] != QUEUE_PRS_KIND and OF not in raw:
+        raise RefError(f"参照 {name} に参照の先（{OF}）が無い")
+    return Ref(name, raw[KIND], texts.get(OF), texts.get(KEY), _skip_when_empty(name, raw))
 
 
 def declared(plan_raw: Mapping[str, Any]) -> list[Ref]:
@@ -334,7 +338,7 @@ def _unreadable(exc: github.GitHubError, what: str) -> Unreadable:
 
 
 def _closing_numbers(issue: int, node: Mapping[str, Any]) -> list[int]:
-    conn = node["closedByPullRequestsReferences"] if "closedByPullRequestsReferences" in node else None
+    conn = node[_CLOSED_BY] if _CLOSED_BY in node else None
     if not isinstance(conn, Mapping):
         raise Unreadable("precondition", f"#{issue} は課題でないか読めない")
     numbers = [int(n["number"]) for n in conn["nodes"]]
