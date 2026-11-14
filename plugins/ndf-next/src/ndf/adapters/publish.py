@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from ndf.adapters import run_log
-from ndf.adapters.github import PUBLIC, GitHub, qualified_ref
+from ndf.adapters.github import PUBLIC, GitHub, qualified_ref, same_repo
 
 # 落とした所の固定の文
 PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
@@ -156,7 +156,7 @@ class Publisher:
         """公開の書き先のとき、本文に出る他のリポジトリのうち公開でないもの。公開でなければ・参照が無ければ読まずに空。"""
         if self.visibility() != PUBLIC:
             return set()
-        refs = {r for t in texts for r in repo_refs(t) if r.lower() != self.hub.repo.lower()}
+        refs = {r for t in texts for r in repo_refs(t) if not same_repo(r, self.hub.repo)}
         seen = self.hub.visibilities(refs) if refs else {}
         return {r for r, v in seen.items() if v != PUBLIC}
 
@@ -173,7 +173,7 @@ class Publisher:
         書き先が公開で由来が公開でなければ、参照を伏せた固定の文にする（3391-2）。完全な参照は呼び手が
         手元の引継ぎ文書だけに置く。
         """
-        if source_repo.lower() == self.hub.repo.lower():
+        if same_repo(source_repo, self.hub.repo):
             return origin
         seen = self.hub.visibilities([source_repo])
         seen[self.hub.repo] = self.visibility()

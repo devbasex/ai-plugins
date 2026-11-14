@@ -204,9 +204,14 @@ def premerge_risks(body: str) -> list[str]:
     return [line.strip() for line in body.splitlines() if PREMERGE_MARK in line and not _CHECKED_ITEM.match(line)]
 
 
+def same_repo(a: str, b: str) -> bool:
+    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
+    return a.lower() == b.lower()
+
+
 def is_public(visibility: Mapping[str, str], repo: str) -> bool:
     """`visibility`（リポジトリ → 公開範囲。`GitHub.visibilities` の値）で `repo` が公開か。載っていなければ公開でない。"""
-    return any(name.lower() == repo.lower() and value == PUBLIC for name, value in visibility.items())
+    return any(same_repo(name, repo) and value == PUBLIC for name, value in visibility.items())
 
 
 def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: Mapping[str, str]) -> str:
@@ -219,7 +224,7 @@ def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: M
 
     `visibility` はリポジトリ → 公開範囲（`GitHub.visibilities` の値）。載っていないリポジトリは公開でないとして扱う。
     """
-    if source_repo.lower() == target_repo.lower():
+    if same_repo(source_repo, target_repo):
         return origin
     m = _BARE_REF.match(origin.strip())
     if is_public(visibility, target_repo) and not is_public(visibility, source_repo):
