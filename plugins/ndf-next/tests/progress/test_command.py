@@ -257,3 +257,101 @@ def test_new_stops_as_invalid_when_the_project_file_is_not_json(repo, capsys):
     code, out = _new(capsys)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and code == 2
     assert "project.json を読めない" in out["cause"]["detail"]
+
+
+# --- 現状固定: 進行表の作成（_cmd_new） ------------------------------------------------------------
+
+
+def _stored(tid: str) -> tuple[dict, dict]:
+    root = _root(Path.cwd())
+    with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
+        table = store.read_table(conn, tid)
+        _, doc = store.read_definition(conn, tid)
+    return table, doc
+
+
+def test_new_reports_the_table_id_rows_and_disabled_in_summary_and_metrics(repo, capsys):
+    code, out = _new(capsys, "--disable", "振り返り=不要")
+    tid = model.table_id("sprint", str(repo), "s1")
+    assert code == 0 and out["tool"] == "progress"
+    assert out["metrics"] == {"table_id": tid, "rows": 18, "disabled": ["振り返り"]}
+    assert out["summary"] == f"進行表 {tid} を作った（18 行、無効 1 行）"
+    assert set(out["items"][0]) == {"stage", "phase", "state", "label", "at", "reason", "gates"}
+
+
+def test_new_names_the_table_by_the_origin_url_when_there_is_one(repo, capsys):
+    subprocess.run(["git", "remote", "add", "origin", "https://example.invalid/o/r.git"], cwd=repo, check=True)
+    _, out = _new(capsys)
+    assert out["metrics"]["table_id"] == model.table_id("sprint", "https://example.invalid/o/r.git", "s1")
+
+
+def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys):
+    _declare(repo, json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": False, "reason": "止めている"}}}}))
+    _, out = _run(
+        capsys,
+        *("new", "s1", "--mode", "standard", "--issues", "1", "2", "--pace", "fast"),
+        *("--disable", "振り返り=不要", "--parent", "lane:abc:l1"),
+    )
+    table, doc = _stored(out["metrics"]["table_id"])
+    assert table["parent_id"] == "lane:abc:l1" and table["level"] == "sprint" and table["name"] == "s1"
+    assert doc["context"] == {"issues": [1, 2], "mode": "standard", "pace": "fast"}
+    assert doc["mode"] == "standard" and [s["name"] for s in doc["stages"]] == [r["stage"] for r in out["items"]]
+    en = doc["enablement"]
+    assert en["振り返り"] == {"enabled": False, "reason": "不要", "source": "sprint"}
+    assert en["リファクタリング"] == {"enabled": False, "reason": "止めている", "source": "project"}
+    others = {k: v for k, v in en.items() if k not in ("振り返り", "リファクタリング")}
+    assert len(others) == 16 and all(v == {"enabled": True, "reason": None, "source": "definition"} for v in others.values())
+
+
+def test_new_writes_created_then_disabled_then_finished_events(repo, capsys, tmp_path):
+    req = tmp_path / "req.json"
+    req.write_text(json.dumps({"steps": [], "summary": "要求を書いた"}))
+    _, made = _new(capsys, "--disable", "振り返り=不要", "--requirements", str(req))
+    _, shown = _run(capsys, "show", made["metrics"]["table_id"])
+    history = shown["metrics"]["history"]
+    rows = [r["stage"] for r in made["items"]]
+    assert [(h["kind"], h["row_key"]) for h in history[:18]] == [("created", r) for r in rows]
+    assert all(h["actor"] == "conductor" and h["rev"] == 1 for h in history)
+    tail = [(h["kind"], h["row_key"], h["reason"], h["payload"]) for h in history[18:]]
+    assert tail == [
+        ("disabled", "振り返り", "不要", {"source": "sprint"}),
+        ("manual_finished", "要求と受け入れ条件", "進行表の作成の時点で済んでいる", {"output": str(req)}),
+    ]
+    assert shown["metrics"]["mode"] == "standard" and shown["metrics"]["rev"] == 1
+
+
+@pytest.mark.parametrize(
+    ("extra", "prefix"),
+    [
+        (("--pace", "slow"), "スプリントの文脈: "),
+        (("--disable", "存在しない=理由"), "--disable の工程がモード standard に無い: 存在しない"),
+    ],
+)
+def test_new_stops_as_invalid_with_one_item_per_error(repo, capsys, extra, prefix):
+    code, out = _new(capsys, *extra)
+    assert code == 2 and out["cause"]["kind"] == "invalid"
+    assert out["items"] and all(i["error"].startswith(prefix) for i in out["items"])
+
+
+def test_new_of_an_unknown_mode_is_invalid(repo, capsys):
+    code, out = _run(capsys, "new", "s1", "--mode", "nope", "--issues", "1")
+    assert code == 2 and out["cause"]["kind"] == "invalid"
+    assert out["items"][0]["error"].startswith("モード nope の定義が無い")
+
+
+def test_new_with_duplicated_issues_is_invalid(repo, capsys):
+    code, out = _run(capsys, "new", "s1", "--mode", "standard", "--issues", "5", "5")
+    assert code == 2 and out["items"][0]["error"].startswith("スプリントの文脈: ")
+
+
+def test_new_refuses_requirements_that_break_the_output_contract_or_are_not_json(repo, capsys, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"steps": []}))
+    code, out = _new(capsys, "--requirements", str(bad))
+    assert code == 2 and out["items"][0]["error"].startswith("要求と受け入れ条件 の出力が規約に合わない: ")
+    broken = tmp_path / "broken.json"
+    broken.write_text("{")
+    code, out = _new(capsys, "--requirements", str(broken))
+    assert code == 2 and out["cause"]["detail"].startswith(f"{broken} を JSON として読めない: ")
+    _, made = _new(capsys)
+    assert made["status"] == "ok"
