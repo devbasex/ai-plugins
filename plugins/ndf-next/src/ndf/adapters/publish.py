@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import getpass
 import re
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,22 +138,20 @@ class Publisher:
             self._visibility = self.hub.visibilities([self.hub.repo])[self.hub.repo]
         return self._visibility
 
+    def _private_refs(self, texts: Sequence[str]) -> set[str]:
+        """公開の書き先のとき、本文に出る他のリポジトリのうち公開でないもの。公開でなければ・参照が無ければ読まずに空。"""
+        if self.visibility() != PUBLIC:
+            return set()
+        refs = {r for t in texts for r in repo_refs(t) if r.lower() != self.hub.repo.lower()}
+        seen = self.hub.visibilities(refs) if refs else {}
+        return {r for r, v in seen.items() if v != PUBLIC}
+
     def guarded(self, *texts: str) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。"""
         public = self.visibility() == PUBLIC
-        private: set[str] = set()
-        if public:
-            refs = {r for t in texts for r in repo_refs(t) if r.lower() != self.hub.repo.lower()}
-            seen = self.hub.visibilities(refs) if refs else {}
-            private = {r for r, v in seen.items() if v != PUBLIC}
-        out: list[str] = []
-        dropped: dict[str, int] = {}
-        for text in texts:
-            got = scrub(text, public, private, self.accounts)
-            out.append(got.text)
-            for kind, n in got.dropped.items():
-                dropped[kind] = dropped[kind] + n if kind in dropped else n
-        return out, dropped
+        private = self._private_refs(texts)
+        got = [scrub(text, public, private, self.accounts) for text in texts]
+        return [g.text for g in got], dict(sum((Counter(g.dropped) for g in got), Counter()))
 
     def origin(self, origin: str, source_repo: str) -> str:
         """由来の参照（`issue #12`）を、書き先の画面でも同じ課題を指す形にする（#3077）。
