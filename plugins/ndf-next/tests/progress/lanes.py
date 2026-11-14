@@ -15,7 +15,14 @@ from ndf.progress import command, invoke, model, run, store
 
 def values(cwd: Path, branch: str) -> dict:
     """偽の作業が出す文脈の値の組（工程の定義の outputs の鍵の値）。"""
-    return {"worktree": str(cwd), "branch": branch, "design_pr": 7, "pr": 8, "delivery": {"kind": "plugin"}, "version": "11.0.0"}
+    return {
+        "worktree": str(cwd),
+        "branch": branch,
+        "design_pr": 7,
+        "pr": 8,
+        "delivery": {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True},
+        "version": "11.0.0",
+    }
 
 
 def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:

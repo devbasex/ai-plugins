@@ -55,9 +55,41 @@ def test_resolve_inputs_refuses_values_of_the_wrong_shape(values):
         invoke.resolve_inputs(_stage("コードレビュー"), values)
 
 
-def test_delivery_must_not_be_empty():
-    assert invoke.value_errors({"delivery": {}})
-    assert not invoke.value_errors({"delivery": {"kind": "plugin"}})
+# .ndf/project.json の delivery の 1 行（このリポジトリの宣言と同じ形）
+DELIVERY = {
+    "target": "ndf プラグイン",
+    "kind": "auto",
+    "trigger": ".github/workflows/release-cd.yml",
+    "channel": "production",
+    "versioned": True,
+    "publishes_release": True,
+    "result": {"workflow": "release-cd.yml"},
+}
+
+
+def test_delivery_of_the_declared_shape_passes():
+    assert not invoke.value_errors({"delivery": DELIVERY})
+    assert not invoke.value_errors({"delivery": {**DELIVERY, "kind": "manual", "channel": None, "branch": "release/x", "result": None}})
+
+
+@pytest.mark.parametrize(
+    "delivery",
+    [
+        {},
+        {"kind": "plugin"},
+        {**DELIVERY, "kind": "plugin"},
+        {**DELIVERY, "channel": "prod"},
+        {**DELIVERY, "target": 3},
+        {**DELIVERY, "branch": "-rf"},
+        {**DELIVERY, "versioned": "yes"},
+        {**DELIVERY, "result": {"workflow": 1}},
+        {**DELIVERY, "unknown": 1},
+        {k: v for k, v in DELIVERY.items() if k != "target"},
+    ],
+)
+def test_delivery_of_the_wrong_shape_is_refused(delivery):
+    # 3364-7: デプロイの経路になる値は、空でないかだけでなく鍵の型と kind・channel の取りうる値を確かめる
+    assert invoke.value_errors({"delivery": delivery})
 
 
 def test_stage_run_refuses_an_unknown_call_and_a_missing_name():

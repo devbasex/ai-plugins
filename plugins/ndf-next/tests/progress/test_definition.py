@@ -10,6 +10,8 @@ from ndf import contracts
 from ndf.progress import definition, model, stages
 
 E = "file:///workflow/stage-io.schema.json#/$defs/"
+# .ndf/project.json の delivery の 1 行の形
+DELIVERY = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
 
 
 def _stage_doc(name: str, row: str, steps: list[dict], **meta) -> dict:
@@ -126,11 +128,11 @@ def test_contract_reference_to_nowhere_is_refused():
 def test_output_that_breaks_the_contract_is_caught():
     stage = definition.load_definition("standard").stage("デプロイ")
     assert (
-        definition.validate_stage_output(
-            stage, {"steps": [], "summary": "出した", "outputs": {"delivery": {"kind": "plugin"}, "version": "1.2.3"}}
-        )
+        definition.validate_stage_output(stage, {"steps": [], "summary": "出した", "outputs": {"delivery": DELIVERY, "version": "1.2.3"}})
         == []
     )
+    bad = {"steps": [], "summary": "出した", "outputs": {"delivery": {**DELIVERY, "channel": "prod"}, "version": "1.2.3"}}
+    assert any("delivery/channel" in e for e in definition.validate_stage_output(stage, bad))
     errs = definition.validate_stage_output(stage, {"steps": [], "outputs": {"version": 3}})
     assert any("summary" in e for e in errs)
     assert any("version" in e for e in errs)
