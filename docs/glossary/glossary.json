@@ -7329,6 +7329,24 @@
       "context": "ndf-workflow",
       "meaning": "解消する Issue を閉じるときに添える 1 つの証拠。改善の証拠・消えたコードのパス・再現しない記録のどれか（#1142 の作り直し）",
       "pending_source": "issues/issue-3395-design.md"
+    },
+    {
+      "term": "上げる先（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "#3347 の決定 106 の規則で選んだ依存の版のうち、最初のアップロードから 7 日たったもの",
+      "pending_source": "issues/issue-3370-requirements.md"
+    },
+    {
+      "term": "遅れ（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "宣言の版が上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる",
+      "pending_source": "issues/issue-3370-requirements.md"
+    },
+    {
+      "term": "依存の更新の仕組み",
+      "context": "ndf-workflow",
+      "meaning": "依存の版の遅れを知らせ、版を上げる手段。Renovate・Dependabot・自作のスクリプトのどれか（#3370 で比べる）",
+      "pending_source": "issues/issue-3370-requirements.md"
     }
   ]
 }
