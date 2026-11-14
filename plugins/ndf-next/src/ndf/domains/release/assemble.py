@@ -82,24 +82,18 @@ def _named(planned: Sequence[version_decide.Planned], plugin: str | None) -> ver
     return hit[0]
 
 
-def _write(
-    root: Path,
-    planned: Sequence[version_decide.Planned],
-    decl: decl_mod.Declaration,
-    pulls: Sequence[materials_decide.PullFact],
-    channel: str,
-) -> None:
+def _write(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts) -> None:
     """版・CHANGELOG を書き換え、宣言の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
-    entries = [changelog_decide.Entry(p.number, p.title) for p in pulls]
+    entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
-    for p in planned:
+    for p in facts.planned:
         plugins_mod.bump(root, found[p.plugin], p.next, decl.version_files)
-        if channel == version_decide.PRODUCTION and log_path.is_file():
+        if facts.channel == version_decide.PRODUCTION and log_path.is_file():
             new = changelog_decide.block(p.plugin, p.next, date.today().isoformat(), entries)
             log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), p.plugin, p.next, new), encoding="utf-8")
-    for step in decl.for_stage(channel):
-        decl_mod.run_step(root, step, planned[0].next)
+    for step in decl.for_stage(facts.channel):
+        decl_mod.run_step(root, step, facts.planned[0].next)
 
 
 def _commit_and_push(repo_git: git_mod.Git, branch: str, message: str) -> str:
@@ -147,7 +141,7 @@ def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0:
         raise AssembleError(f"origin に {branch} が既にある（前の組み立ての PR を先に片付ける）")
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, facts.planned, decl_mod.load(root), facts.pulls, target.channel)
+    _write(root, decl_mod.load(root), facts)
     title = f"Release: {named.plugin} v{named.next}"
     head = _commit_and_push(repo_git, branch, title)
     facts = facts._replace(head=head)
