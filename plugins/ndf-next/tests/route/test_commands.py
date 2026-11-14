@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import shlex
 
+from ndf.core.plan import model
+
 from ._flow import fake_bin, plan_of, repo_with_base, run_step, step_of
 
 
@@ -71,3 +73,31 @@ def test_ci_local_without_nodes_runs_whole_local_command(tmp_path):
     ok_bin = fake_bin(tmp_path, "ndf", f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}')
     run_step(step, tmp_path, ok_bin, {"state_dir": str(state)})
     assert seen.read_text().splitlines()[-1] == "pytest -q"
+
+
+def test_ci_local_quotes_failed_test_ids_for_the_shell(tmp_path):
+    """落ちたテストの node id は 1 つずつシェルの引用へ通して足す（空白・`$(...)`・`;` を分割も実行もしない）。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    nodes = ["tests/a.py::t[a b]", "tests/b.py::t[$(touch hit); x]"]
+    _ci_result(state / "ci.json", nodes)
+    seen = tmp_path / "seen.txt"
+    step = step_of(plan_of("implement", test_command="pytest -q"), "ci-local")
+    ok_bin = fake_bin(tmp_path, "ndf", f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}')
+    assert run_step(step, tmp_path, ok_bin, {"state_dir": str(state)})["status"] == "ok"
+    command = seen.read_text().splitlines()[-1]
+    assert shlex.split(command) == ["pytest", "-q", *nodes]
+    assert not (tmp_path / "hit").exists()
+
+
+def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):
+    """PR を作ったときも、既にある PR を probe で見つけたときも、番号を items の kind: pr で返す（キューの {queue_prs}）。"""
+    step = step_of(plan_of("close", branch="feat/x"), "pr")
+    gh = fake_bin(tmp_path, "gh", 'case "$2" in create) echo https://github.com/o/r/pull/7 ;; view) echo 7 ;; list) echo 7 ;; esac')
+    assert run_step(step, tmp_path, gh)["prs"] == [7]
+    assert step.probe is not None
+    probe = model.Step(id="pr-probe", run=step.probe)
+    assert run_step(probe, tmp_path, gh)["prs"] == [7]
+    none = fake_bin(tmp_path, "gh", "true")
+    found = run_step(probe, tmp_path, none)
+    assert (found["status"], found["code"], found["prs"]) == ("stopped", 1, [])

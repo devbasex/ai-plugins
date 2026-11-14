@@ -152,3 +152,36 @@ def test_repeat_outputs_and_log_lines_are_fixed(tmp_path, capsys, last_result):
     assert found["metrics"] == {"streak": limit + 1, "same_cause": limit}
     lines = log.read_text(encoding="utf-8").splitlines()
     assert lines == [json.dumps({"key": key}, ensure_ascii=False)] * (limit + 1)
+
+
+def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch, capsys, last_result):
+    """省いた作業場所が無ければプランを書かずに止まる（ランナーがリポジトリの根で worker・push を打たないため）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    monkeypatch.chdir(repo)
+    out = tmp_path / "fix.json"
+    args = _fix_args(out, repo)[:-4]  # repo と worktree を省く
+    assert route.main(["render", *args, "--set", "base=main"]) == 2
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "invalid"
+    assert str(repo / ".worktrees" / "fix" / "x") in found["cause"]["detail"]
+    assert not out.exists()
+
+
+def test_omitted_base_reads_declaration_then_origin_default_branch(tmp_path):
+    """base を省けば、ブランチの運用の宣言の base_branch、無ければ origin の既定ブランチにする（develop に固定しない）。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    t = route.choose("immediate_fix")
+    given = {"repo": str(repo), "worktree": str(repo), "branch": "fix/x"}
+    assert "base" not in route.derived(t, given, repo)
+    git(repo, "commit", "-q", "--allow-empty", "-m", "a")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    assert route.derived(t, given, repo)["base"] == "main"
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    assert route.derived(t, given, repo)["base"] == "develop"
+    assert route.derived(t, {**given, "base": "release"}, repo)["base"] == "release"

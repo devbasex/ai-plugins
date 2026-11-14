@@ -18,7 +18,9 @@
         雛形の一覧（名前・依頼の種類・使う差し込み）
     ndf route render <依頼の種類> --out <plan.json> [--set <名前>=<値>]... [--add <名前>=<値>]...
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
-        git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）
+        git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
+        省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
+        宣言が無ければ `origin` の既定ブランチにする
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
         render の後に同じプランを `ndf plan next` で流す（即時修正をテスト → PR → merge-when-green の 1 つの
         エントリポイントで流す）
@@ -58,6 +60,9 @@ USE = "use"
 REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
 WORKTREES = ".worktrees"
+# base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
+BRANCH_DECLARATION = ".ndf/worktree.json"
+BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
 Value = Union[str, list[str]]
@@ -322,14 +327,42 @@ def repo_root(cwd: Path) -> str:
     return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
 
 
+def default_base(repo: Path) -> Optional[str]:
+    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
+    try:
+        declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
+    except (OSError, ValueError, AttributeError):
+        declared = None
+    if isinstance(declared, str) and declared:
+        return declared
+    try:
+        ref = git.Git(repo).run("symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+    except git.GitError:  # noqa: NDF401 外部コマンド: origin の既定ブランチを持たないリポジトリ
+        return None
+    branch = ref.removeprefix("origin/")
+    return branch if branch else None
+
+
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
-    """省いた `repo`・`worktree` を打った場所から決めて足す。"""
+    """省いた `repo`・`worktree`・`base` を打った場所から決めて足す（`base` が決まらなければ足さない）。"""
     out = dict(given)
     if "repo" in t.params and "repo" not in out:
         out["repo"] = repo_root(cwd)
     if "worktree" in t.params and "worktree" not in out and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
+    if "base" in t.params and "base" not in out and "repo" in out:
+        base = default_base(Path(str(out["repo"])))
+        if base is not None:
+            out["base"] = base
     return out
+
+
+def _check_worktree(t: Template, given: Mapping[str, Value], values: Mapping[str, Value]) -> None:
+    """省いて決めた作業場所が使えなければ `RouteError`（ランナーがリポジトリの根へ倒れて別のチェックアウトを変えないため）。"""
+    if "worktree" in t.params and "worktree" not in given and "worktree" in values:
+        place = str(values["worktree"])
+        if not steps.usable_worktree(place):
+            raise RouteError(f"省いた作業場所 {place} が使える worktree でない。作るか --set worktree=<path> で渡す")
 
 
 def _split(flag: str, pair: str) -> tuple[str, str]:
@@ -354,7 +387,10 @@ def _pairs(sets: Optional[list[str]], adds: Optional[list[str]]) -> dict[str, Va
 
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
-    plan = render(t, derived(t, _pairs(a.sets, a.adds), Path.cwd()))
+    given = _pairs(a.sets, a.adds)
+    values = derived(t, given, Path.cwd())
+    _check_worktree(t, given, values)
+    plan = render(t, values)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

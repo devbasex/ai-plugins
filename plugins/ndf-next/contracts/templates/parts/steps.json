@@ -20,8 +20,16 @@
     },
     "pr": {
       "id": "pr",
-      "run": ["gh", "pr", "create", "--base", "{{base}}", "--head", "{{branch}}", "--title", "{{title}}", "--body-file", "{{body_file}}"],
-      "probe": ["sh", "-c", "test -n \"$(gh pr list --head \"$0\" --state all --json number --jq '.[0].number // empty')\"", "{{branch}}"]
+      "run": [
+        "sh", "-c",
+        "gh pr create --base \"$1\" --head \"$0\" --title \"$2\" --body-file \"$3\" >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}", "{{base}}", "{{title}}", "{{body_file}}"
+      ],
+      "probe": [
+        "sh", "-c",
+        "n=$(gh pr list --head \"$0\" --state all --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}"
+      ]
     },
     "conflict-check": {
       "id": "conflict-check",
@@ -52,11 +60,11 @@
       "id": "ci-local",
       "run": [
         "bash", "-c",
-        "nodes=$(python3 -c 'import json, sys; d = json.loads(open(sys.argv[1]).read().strip().splitlines()[-1]); print(\" \".join(d.get(\"metrics\", {}).get(\"failed_tests\", [])))' \"$1\") || exit 2; ndf test-slot run -- \"$2${nodes:+ $nodes}\"",
+        "nodes=$(python3 -c 'import json, shlex, sys; d = json.loads(open(sys.argv[1]).read().strip().splitlines()[-1]); print(\" \".join(map(shlex.quote, d.get(\"metrics\", {}).get(\"failed_tests\", []))))' \"$1\") || exit 2; ndf test-slot run -- \"$2${nodes:+ $nodes}\"",
         "ci-local", "{state_dir}/ci.json", "{{test_command}}"
       ],
       "exit_cause": {"1": "test_failed", "2": "invalid"},
-      "on_cause": {"test_failed": "ci-fix"},
+      "on_cause": {"test_failed": "repeat-check"},
       "next": "push"
     },
     "base-sync": {

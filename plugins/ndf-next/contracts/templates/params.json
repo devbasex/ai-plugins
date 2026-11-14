@@ -4,7 +4,7 @@
     "repo": {"summary": "リポジトリの根。省けば ndf route が打った場所の git の根（git rev-parse --show-toplevel）"},
     "worktree": {"summary": "作業場所。省けばリポジトリの根の .worktrees/<branch>"},
     "branch": {"summary": "作業のブランチ"},
-    "base": {"summary": "PR の宛先のブランチ", "default": "develop"},
+    "base": {"summary": "PR の宛先のブランチ。省けば ndf route がリポジトリの根の .ndf/worktree.json の base_branch、宣言が無ければ origin の既定ブランチにする"},
     "title": {"summary": "PR の題"},
     "body_file": {"summary": "PR の本文のファイル"},
     "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちを確かめるときは後ろに落ちたテストの node id を足して打つ"},

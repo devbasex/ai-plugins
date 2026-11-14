@@ -24,14 +24,15 @@ def test_fix_plan_stops_on_failed_test_before_pr():
 def test_ci_fix_runs_failed_tests_locally_before_push():
     """#3188: CI の修正は、落ちたテストを手元で打って通してから push する。
 
-    手元で落ちれば ci-fix へ戻り（push しない）、同じ原因で CI を往復しない。CI を待つのは修正の前と後の 2 回だけ。
+    手元で落ちれば同じ原因の数え（repeat-check）を通って ci-fix へ戻り（push しない）、同じ原因で CI を往復しない。
+    CI を待つのは修正の前と後の 2 回だけ。
     """
     script = {"ci": [stopped("test_failed")], "ci-local": [stopped("test_failed")]}
     visited, state = walk(plan_of("implement"), script)
     first_ci = visited.index("ci")
     after = visited[first_ci + 1 :]
-    assert after[:5] == ["repeat-check", "ci-fix", "ci-local", "ci-fix", "ci-local"]
-    assert after[5] == "push"
+    assert after[:6] == ["repeat-check", "ci-fix", "ci-local", "repeat-check", "ci-fix", "ci-local"]
+    assert after[6] == "push"
     assert visited.count("ci") == 2
     assert state.status == OK
 
