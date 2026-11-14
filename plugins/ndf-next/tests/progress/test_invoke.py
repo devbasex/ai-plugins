@@ -370,6 +370,7 @@ def test_skill_answer_that_is_not_a_result_is_bad_report(tmp_path, calls, answer
 
 def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     box, _, fake = calls
-    box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3, "extra": 1}))
+    box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3, "branch": "b"}))
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
-    assert got.outputs == {"pr": 3} and got.warnings and "extra" in got.warnings[0]
+    # outputs の鍵は文脈の閉じた語彙なので、宣言に無い鍵は語彙の中の別の鍵で確かめる
+    assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]

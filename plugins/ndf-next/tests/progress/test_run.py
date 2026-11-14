@@ -268,7 +268,11 @@ def test_retry_after_a_stage_output_that_breaks_the_contract_runs_the_steps_agai
     before = len(env.fake.calls)
     _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "作り直す")
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
-    assert [c.step for c in env.fake.calls[before:]][0] == "worktree"
+    again = env.fake.calls[before:]
+    assert [c.step for c in again][0] == "worktree"
+    # 終わった回の控えの結果を受け取らないよう、プランは前と違う置き場で流し直す
+    first = [c for c in env.fake.calls[:before] if c.step == "worktree"][-1]
+    assert first.work_dir.name == "worktree-g0" and again[0].work_dir.name == "worktree-g0-r1"
     assert _labels(st, tid)["作業場所の用意"] == "finished"
 
 

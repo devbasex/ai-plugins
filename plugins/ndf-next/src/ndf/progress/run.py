@@ -152,10 +152,12 @@ class StepProgress:
 
     `anchor` は答えを数え始める事象の番号（行の開始・ステップの記録・差し戻しの後の答えだけを使う）。
     `redo` は工程全体の出力が規約に合わずに行が失敗したか。真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、
-    ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
+    ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。`redos` はその流し直しの回数で、プランの実行の
+    置き場の名前に入れる（同じ置き場で打つと、プランは終わった回の控えの結果を返すだけだからである）。
     """
 
     generation: int = 0
+    redos: int = 0
     done: dict[str, dict[str, Any]] = field(default_factory=dict)
     waiting: Optional[dict[str, Any]] = None
     anchor: int = 0
@@ -181,6 +183,7 @@ class StepProgress:
             self.anchor, self.answer, self.waiting = ev.seq, None, None
             if self.redo:
                 self.done, self.redo = {}, False
+                self.redos += 1
         elif kind == FAILED:
             self.redo = "step" in p and p["step"] is None
         elif kind == STEP_EVENT:
@@ -841,6 +844,11 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
     return model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
 
 
+def step_place(step: str, prog: StepProgress) -> str:
+    """ステップのプランの実行の置き場の名前。差し戻し（世代）と工程全体の出力の失敗の後の流し直しで新しい置き場にする。"""
+    return f"{step}-g{prog.generation}" + (f"-r{prog.redos}" if prog.redos else "")
+
+
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
     """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。"""
     prog = step_progress(v, s.name)
@@ -851,7 +859,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
-    work_dir = work_root(d.st.root, v.table_id) / s.id / f"{step.id}-g{prog.generation}"
+    work_dir = work_root(d.st.root, v.table_id) / s.id / step_place(step.id, prog)
     res = _retrying(lambda: d.env.invoker(run, d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
