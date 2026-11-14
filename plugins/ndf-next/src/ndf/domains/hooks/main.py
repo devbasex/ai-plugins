@@ -18,7 +18,7 @@ import os
 import signal
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, List, Optional, TextIO
 
@@ -33,6 +33,15 @@ def _on_alarm(signum: int, frame: Any) -> None:
     raise _Deadline()
 
 
+@dataclass
+class _Run:
+    """1 回の事象の実行の状態。`record` は計測の 1 行、`state_dir` は状態の置き場（無ければ None）、`started` は起動の時刻。"""
+
+    record: dict
+    state_dir: Optional[Path]
+    started: float
+
+
 def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
     """環境の python のエントリポイント。いつも 0。"""
     from ndf.domains.hooks import metrics
@@ -40,9 +49,9 @@ def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[
     started = time.monotonic()
     record = metrics.new_record("entry")
     out = ""
-    state_dir = _state_dir()
+    run = _Run(record, _state_dir(), started)
     try:
-        out = _entry(argv, (stdin or sys.stdin).read(), record, state_dir, started)
+        out = _entry(argv, (stdin or sys.stdin).read(), run)
     except _Deadline:
         record["error"], out = "deadline", ""
     except Exception as exc:  # noqa: BLE001 利用者の入力: エントリポイントのどの失敗も出力なし・0 で通す（IH4）
@@ -52,8 +61,8 @@ def run_entry(argv: List[str], stdin: Optional[TextIO] = None, stdout: Optional[
     if out:
         (stdout or sys.stdout).write(out)
     record["total_ms"] = round((time.monotonic() - started) * 1000, 3)
-    if state_dir is not None:
-        _write_metrics(state_dir, record)
+    if run.state_dir is not None:
+        _write_metrics(run.state_dir, record)
     return 0
 
 
@@ -69,7 +78,8 @@ def _write_metrics(state_dir: Path, record: dict) -> None:
     metrics.write_line(state_dir, record)
 
 
-def _entry(argv: List[str], text: str, record: dict, state_dir: Optional[Path], started: float) -> str:
+def _entry(argv: List[str], text: str, run: _Run) -> str:
+    record = run.record
     runtime, event = argv[1], argv[2]
     record.update(runtime=runtime, event=event)
     spec = tables.event_spec(runtime, event)
@@ -84,14 +94,15 @@ def _entry(argv: List[str], text: str, record: dict, state_dir: Optional[Path], 
         return ""
     record["tool"] = payload.get("tool_name")
     off = tables.off_names(os.environ.get("NDF_HOOK_OFF"))
-    strict_out = _strict(runtime, event, payload, off, record)
+    strict_out = _strict(runtime, event, payload, off, run)
     if strict_out is not None:
         return strict_out
-    return _guards(runtime, event, payload, off, record, (state_dir, started))
+    return _guards(runtime, event, payload, off, run)
 
 
-def _strict(runtime: str, event: str, payload: dict, off: frozenset, record: dict) -> Optional[str]:
+def _strict(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) -> Optional[str]:
     """`strict` の guard。止める答えなら出力、ほかは None。"""
+    record = run.record
     from ndf.domains.hooks import strict
 
     verdict, ms = strict.judge(payload, off)
@@ -105,17 +116,17 @@ def _strict(runtime: str, event: str, payload: dict, off: frozenset, record: dic
     return tables.output_for(runtime, event, "deny", verdict.reason)
 
 
-def _guards(runtime: str, event: str, payload: dict, off: frozenset, record: dict, where: tuple) -> str:
+def _guards(runtime: str, event: str, payload: dict, off: frozenset, run: _Run) -> str:
     from ndf.domains.hooks import budget, dispatch
     from ndf.domains.hooks.context import HookContext
     from ndf.domains.hooks.counter import Counter
 
-    state_dir, started = where
+    record, state_dir = run.record, run.state_dir
     found = budget.budget_for(runtime, event)
     if found is None or state_dir is None:
         record["error"] = "no_budget" if found is None else "no_state"
         return ""
-    remaining = found.deadline - (time.monotonic() - started)
+    remaining = found.deadline - (time.monotonic() - run.started)
     if remaining <= 0:
         record["error"] = "deadline"
         return ""
