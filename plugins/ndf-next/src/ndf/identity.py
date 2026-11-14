@@ -115,7 +115,15 @@ def _env_dir(var: str, *default: str) -> Path:
 
 
 def _state_home() -> Path:
-    return _env_dir("XDG_STATE_HOME", ".local", "state")
+    """状態の置き場の根（置き場は `<根>/<プラグイン名>`）。`NDF_STATE_HOME`・`XDG_STATE_HOME`・`~/.local/state` の順に引く。
+
+    `NDF_STATE_HOME` も根として読み、プラグイン名を足す。サービスが旧い NDF と同じ値を渡しても、旧い置き場を退避しない。
+    """
+    for name in ("NDF_STATE_HOME", "XDG_STATE_HOME"):  # 先に引くほうが先
+        value = os.environ.get(name, "")
+        if value:
+            return Path(value).expanduser()
+    return Path.home() / ".local" / "state"
 
 
 def _config_home() -> Path:
@@ -173,7 +181,7 @@ class OldPlace:
 OLD_STATE_PLACES: tuple[OldPlace, ...] = (
     OldPlace(
         key="state-home",
-        where="<XDG_STATE_HOME か ~/.local/state>/<名前>",
+        where="<NDF_STATE_HOME か XDG_STATE_HOME か ~/.local/state>/<名前>",
         handling=Handling.RETIRE_HERE,
         reason="新しい状態の置き場と同じパスで、新しい NDF がそこへ書く。退避の後に作り直す",
         path=lambda ident: ident.state_dir,

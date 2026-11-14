@@ -38,7 +38,7 @@ def test_env_names_and_secrets():
     names = facts.ids("env")
     assert all(re.fullmatch(r"[A-Z][A-Z0-9_]*", n) for n in names)
     assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_MAX_STARTS"} <= set(names)
-    assert set(facts.ids("env", secret=True)) == {"ANTHROPIC_API_KEY", "GH_TOKEN", "SLACK_BOT_TOKEN"}
+    assert set(facts.ids("env", secret=True)) == {"ANTHROPIC_API_KEY", "GH_TOKEN", "NDF_PROGRESS_DB", "SLACK_BOT_TOKEN"}
 
 
 def _assemble(parts: dict[str, str]) -> list[str]:
@@ -82,3 +82,21 @@ def test_instruction_files_defaults():
     assert facts.ids("instruction-files", undeclared_check=True) == ("AGENTS.md", "CLAUDE.md")
     for fid in facts.ids("instruction-files", import_syntax=True):
         assert facts.value("instruction-files", fid, "runtime") == "claude"
+
+
+def test_main_keys_are_declared_keys_and_guard_authorization():
+    main = facts.column(FILES, "main_keys")
+    for fid, keys in main.items():
+        assert set(keys) <= set(facts.value(FILES, fid, "keys")), fid
+    # 使ってよいランタイムは認可に関わり、PR の変更で広げられない
+    assert set(main["runtime-policy"]) == set(facts.value(FILES, "runtime-policy", "keys"))
+    assert {"production_branch", "branch_flow"} <= set(main["worktree"])
+
+
+def test_each_declaration_has_one_file():
+    paths = [r["path"] for r in facts.rows(FILES, kind="declaration")]
+    assert len(paths) == len(set(paths))
+    # リポジトリへ載る宣言は `.ndf` に置く。手元だけの宣言（中継のアカウントの指定など）は追跡しない置き場に置く
+    tracked = facts.column("places", "tracked")
+    for r in facts.rows(FILES, kind="declaration"):
+        assert r["place"] == "ndf" or not tracked[r["place"]], r["id"]

@@ -27,12 +27,13 @@ def test_plugin_contracts_match_the_last_version():
     ],
 )
 def test_contract_change_needs_a_version_bump(contracts_copy, rel, change):
+    before = version.current()
     contracts_copy(rel, change)
     errs = version.errors()
     assert len(errs) == 1 and "版を上げて" in errs[0]
     contracts_copy("version.json", _bump)
     assert version.errors() == []
-    assert version.current() == 2
+    assert version.current() == before + 1
 
 
 def test_wording_and_whitespace_do_not_change_the_fingerprint(contracts_copy):

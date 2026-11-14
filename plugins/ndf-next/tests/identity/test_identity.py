@@ -35,9 +35,20 @@ def _retired_names(ident: identity.PluginIdentity) -> list[str]:
     return [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name]
 
 
-def test_load_reads_name_from_plugin_json_regardless_of_dirname(tmp_path, monkeypatch):
-    root = make_plugin(tmp_path, "x", "renamed")
-    monkeypatch.setattr(identity, "ROOT", root)
+@pytest.fixture
+def use_plugin(tmp_path, monkeypatch):
+    """`plugin.json` の name が `name` のプラグインを作り、自分の根として指す関数。作った根を返す。"""
+
+    def use(name: str) -> Path:
+        root = make_plugin(tmp_path, "x", name)
+        monkeypatch.setattr(identity, "ROOT", root)
+        return root
+
+    return use
+
+
+def test_load_reads_name_from_plugin_json_regardless_of_dirname(tmp_path, use_plugin):
+    root = use_plugin("renamed")
 
     ident = identity.load()
 
@@ -81,12 +92,26 @@ def test_load_without_env_uses_own_location():
     assert ident.name == manifest["name"]
 
 
-def test_load_uses_home_when_xdg_state_home_is_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+def test_load_uses_home_when_xdg_state_home_is_unset(tmp_path, monkeypatch, use_plugin):
+    use_plugin("p")
     monkeypatch.delenv("XDG_STATE_HOME")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     assert identity.load().state_dir == tmp_path / "home" / ".local" / "state" / "p"
+
+
+def test_ndf_state_home_is_the_root_before_xdg(tmp_path, monkeypatch, use_plugin):
+    use_plugin("p")
+    monkeypatch.setenv("NDF_STATE_HOME", str(tmp_path / "service"))
+
+    # サービスが渡した根の下にプラグイン名の置き場を作り、根そのもの（旧い NDF の置き場）を退避しない
+    old = tmp_path / "service" / "old.json"
+    old.parent.mkdir()
+    old.write_text("{}")
+    ident = identity.load()
+    assert ident.state_dir == tmp_path / "service" / "p"
+    identity.prepare_state_dir(ident)
+    assert old.exists()
 
 
 @pytest.mark.parametrize("content", [None, "{", "[]", '{"version": "1"}', '{"name": ""}'])
@@ -98,8 +123,8 @@ def test_load_raises_when_plugin_json_is_unreadable(tmp_path, monkeypatch, conte
 
 
 @pytest.fixture
-def ident(tmp_path, monkeypatch):
-    monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
+def ident(tmp_path, monkeypatch, use_plugin):
+    use_plugin("p")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     return identity.load()
 

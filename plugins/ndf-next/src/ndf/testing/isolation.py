@@ -21,6 +21,7 @@ except ImportError:  # Windows
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 from ndf import identity
 from ndf.testing import slots
@@ -34,8 +35,8 @@ REDIRECTED_ENV = {
     "XDG_DATA_HOME": "data",
     slots.SLOTS_DIR_ENV: "test-slots",
 }
-# テストの間は外す環境変数（ほかのプラグインの根・実行中の工程の識別子）
-REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", identity.CALLER_ROOT_ENV, slots.HELD_ENV)
+# テストの間は外す環境変数（ほかのプラグインの根・状態の置き場の根の指定・実行中の工程の識別子）
+REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", identity.CALLER_ROOT_ENV, "NDF_STATE_HOME", slots.HELD_ENV)
 # ホームの下の本物の置き場
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 
@@ -44,22 +45,32 @@ _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 # 中身を書き換える操作（リンクの参照先まで辿って判定する）
 NAME = "name"
 CONTENT = "content"
-# 書き込みの監査イベントと、引数のうち（パスの位置, そのパスを解決する dir_fd の位置, 判定の種類）の組
-_WRITE_EVENTS: dict[str, tuple[tuple[int, int | None, str], ...]] = {
-    "os.mkdir": ((0, 2, NAME),),
-    "os.remove": ((0, 1, NAME),),
-    "os.rmdir": ((0, 1, NAME),),
-    "os.rename": ((0, 2, NAME), (1, 3, NAME)),
+
+
+class WriteTarget(NamedTuple):
+    """書き込みの対象。表では引数の位置を、`_write_targets` の戻りでは引数の値を持つ。"""
+
+    path: object  # パス（表ではその引数の位置）
+    dir_fd: object  # パスを解決する dir_fd（表ではその引数の位置。無ければ None）
+    kind: str  # 判定の種類（NAME / CONTENT）
+
+
+# 書き込みの監査イベントと、引数のうち書き込む対象の位置
+_WRITE_EVENTS: dict[str, tuple[WriteTarget, ...]] = {
+    "os.mkdir": (WriteTarget(0, 2, NAME),),
+    "os.remove": (WriteTarget(0, 1, NAME),),
+    "os.rmdir": (WriteTarget(0, 1, NAME),),
+    "os.rename": (WriteTarget(0, 2, NAME), WriteTarget(1, 3, NAME)),
     # 本物の置き場のファイルへのハードリンクは、別名への書き込みで本物を書き換えられるのでリンク元も見る
-    "os.link": ((0, 2, CONTENT), (1, 3, NAME)),
+    "os.link": (WriteTarget(0, 2, CONTENT), WriteTarget(1, 3, NAME)),
     # リンクの作成先だけを見る（参照先への書き込みは、書くときに参照先で判定する）
-    "os.symlink": ((1, 2, NAME),),
-    "os.truncate": ((0, None, CONTENT),),
-    "os.chmod": ((0, 2, CONTENT),),
-    "shutil.rmtree": ((0, 1, NAME),),
+    "os.symlink": (WriteTarget(1, 2, NAME),),
+    "os.truncate": (WriteTarget(0, None, CONTENT),),
+    "os.chmod": (WriteTarget(0, 2, CONTENT),),
+    "shutil.rmtree": (WriteTarget(0, 1, NAME),),
 }
 # 元の値が指す場所も本物の置き場として守る環境変数（差し替える前の値を読む）
-REAL_STATE_ENV = ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
+REAL_STATE_ENV = ("NDF_STATE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
 # 読み込んだ時点（conftest の読み込み・fixture より前）の値。fixture の実行時には、先に動いたほかの autouse の
 # fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の置き場を読めないため
 _ORIGINAL_ENV = {name: value for name in REAL_STATE_ENV if (value := os.environ.get(name)) is not None}
@@ -71,6 +82,17 @@ class RealStateWriteError(PermissionError):
     """テストが本物の状態の置き場へ書こうとした。"""
 
 
+def _fd_path_by_fcntl(fd: int) -> str | None:
+    """`/proc` を読めないとき（macOS）の代替。fcntl か F_GETPATH が無いか、読めなければ None。"""
+    get_path = getattr(fcntl, "F_GETPATH", None) if fcntl is not None else None
+    if get_path is None:
+        return None
+    try:
+        return os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
+    except OSError:  # noqa: NDF401 ファイル: 記述子の指す場所を読めなければパスを持たないとして扱う
+        return None
+
+
 def _fd_path(fd: object) -> str | None:
     """記述子が指す場所の絶対パス。記述子でないか、読めないか、パイプなどパスを持たなければ None。"""
     if not isinstance(fd, int) or isinstance(fd, bool) or fd < 0:
@@ -78,14 +100,8 @@ def _fd_path(fd: object) -> str | None:
     try:
         found = os.readlink(f"/proc/self/fd/{fd}")
     except OSError:
-        get_path = getattr(fcntl, "F_GETPATH", None) if fcntl is not None else None
-        if get_path is None:
-            return None
-        try:
-            found = os.fsdecode(fcntl.fcntl(fd, get_path, bytes(1024)).rstrip(b"\0"))
-        except OSError:  # noqa: NDF401 ファイル: 記述子の指す場所を読めなければパスを持たないとして扱う
-            return None
-    return found if os.path.isabs(found) else None
+        found = _fd_path_by_fcntl(fd)
+    return found if found is not None and os.path.isabs(found) else None
 
 
 def _resolve(path: object, dir_fd: object, kind: str) -> str | None:
@@ -93,9 +109,7 @@ def _resolve(path: object, dir_fd: object, kind: str) -> str | None:
     if isinstance(path, int) and not isinstance(path, bool):
         # 記述子は開いた先そのもの（中身を書き換える操作だけが記述子を受ける）
         return _fd_path(path)
-    if isinstance(path, bytes):
-        path = os.fsdecode(path)
-    if not isinstance(path, (str, os.PathLike)):
+    if not isinstance(path, (str, bytes, os.PathLike)):
         return None
     text = os.fspath(path)
     if isinstance(text, bytes):
@@ -114,18 +128,19 @@ def _within_any(path: str, roots: tuple[str, ...]) -> bool:
     return any(within(path, root) for root in roots)
 
 
-def _write_targets(event: str, args: tuple) -> list[tuple[object, object, str]]:
-    """監査イベントが書き込む対象の（パス, そのパスを解決する dir_fd, 判定の種類）の並び。書き込みでなければ空。"""
-    targets: list[tuple[object, object, str]] = []
+def _write_targets(event: str, args: tuple) -> list[WriteTarget]:
+    """監査イベントが書き込む対象の並び。書き込みでなければ空。"""
     if event == "open":
         path, mode, flags = (tuple(args) + (None, None, None))[:3]
         writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
-        if writing:
-            targets.append((path, None, CONTENT))
-    elif event in _WRITE_EVENTS:
-        for at, fd_at, kind in _WRITE_EVENTS[event]:
-            if at < len(args):
-                targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
+        return [WriteTarget(path, None, CONTENT)] if writing else []
+    targets: list[WriteTarget] = []
+    if event not in _WRITE_EVENTS:
+        return []
+    for at, fd_at, kind in _WRITE_EVENTS[event]:
+        if at >= len(args):
+            continue
+        targets.append(WriteTarget(args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
     return targets
 
 
