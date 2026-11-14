@@ -9,6 +9,7 @@ from ndf import contracts
 from ndf.contracts import exit_codes, result
 
 GAP = {"kind": "record", "name": "x", "reason": "書けなかった"}
+GO = result.command("go")
 
 
 def _stopped(kind="test_failed", **extra):
@@ -22,9 +23,12 @@ def _stopped(kind="test_failed", **extra):
         (_stopped(), 1),
         (_stopped("deps_missing"), 69),
         (_stopped("incomplete", gaps=[GAP]), 6),
-        (result.result("t", "gate", "承認を待つ", routes={"approved": "ndf x", "rejected": None}), 10),
-        (result.result("t", "gate", "判断を待つ", routes={"a": "ndf y"}), 20),
-        (_stopped("fix_limit", routes={"fixed": "ndf retry"}), 1),
+        (result.result("t", "gate", "承認を待つ", routes={"approved": GO, "rejected": None}), 10),
+        (result.result("t", "gate", "判断を待つ", routes={"revise": result.command("loop", "answer", ask=("comment",))}), 20),
+        (_stopped("fix_limit", routes={"retry": result.command("retry")}), 1),
+        (_stopped("wait_timeout", next=result.command("test-slot", "run", "--", "pytest")), 3),
+        (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "version": "11.0.0-dev.3"}), 0),
+        (result.result("t", "ok", "済んだ", run_id="r1"), 0),
     ],
 )
 def test_valid_results(obj, code):
@@ -36,8 +40,19 @@ def test_valid_results(obj, code):
     [
         (result.result("t", "stopped", "理由なし"), 1),
         (result.result("t", "ok", "済んだ", cause={"kind": "unknown", "detail": "x"}), 0),
-        (result.result("t", "gate", "承認を待つ", next="ndf x"), 10),
-        (result.result("t", "ok", "済んだ", routes={"a": "x"}), 0),
+        (result.result("t", "gate", "承認を待つ", next=GO), 10),
+        (result.result("t", "ok", "済んだ", routes={"approved": GO}), 0),
+        # next・routes はそのまま打てる引数の配列で、先頭はエントリポイントの名前 ndf。文やパスを書かない（#3366）
+        (result.result("t", "gate", "承認を待つ", routes={"approved": "ndf x"}), 10),
+        (result.result("t", "gate", "承認を待つ", routes={"approved": {"argv": ["/p/ndf/10.27.62/scripts/x.py"]}}), 10),
+        (result.result("t", "gate", "承認を待つ", routes={"approved": {"argv": ["ndf"]}}), 10),
+        (result.result("t", "gate", "承認を待つ", routes={"approved": {"argv": ["ndf", "x"], "ask": ["<ID>"]}}), 10),
+        (result.result("t", "gate", "承認を待つ", routes={"maybe": GO}), 10),
+        (_stopped("wait_timeout", next="ndf test-slot run"), 3),
+        # outputs は閉じた語彙の型付きの欄（#3367）
+        (result.result("t", "ok", "済んだ", outputs={"pr": "12"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"anything": 1}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"version": "ndf v11.0.0"}), 0),
         (_stopped(gaps=[GAP]), 1),
         (_stopped("incomplete"), 6),
         (_stopped("no_such_kind"), 1),
@@ -56,8 +71,20 @@ def test_wrong_results(obj, code):
 
 def test_code_for_takes_stopped_code_from_kind():
     assert result.code_for(_stopped("precondition")) == 3
-    assert result.code_for(result.result("t", "gate", "g", routes={"a": None})) == 10
+    assert result.code_for(result.result("t", "gate", "g", routes={"cancel": None})) == 10
     assert result.code_for(result.result("t", "stopped", "s")) is None
+
+
+def test_command_builds_the_argv_with_the_entry_name():
+    assert result.command("loop", "answer", ask=("comment",)) == {"argv": ["ndf", "loop", "answer"], "ask": ["comment"]}
+    assert result.command("go") == {"argv": ["ndf", "go"]}
+
+
+def test_answer_words_are_the_answers_table(contracts_copy):
+    routes = {"approved": GO, "hold": GO}
+    assert result.answer_errors(routes) == ["routes のキー 'hold' は答えの語彙（facts/answers.json）に無い"]
+    contracts_copy("facts/answers.json", lambda t: {**t, "rows": [*t["rows"], {"id": "hold", "label": "保留する"}]})
+    assert result.answer_errors(routes) == []
 
 
 def test_stopped_helper_builds_cause():
@@ -97,12 +124,12 @@ def _stopped_range(data):
 def test_stopped_range_is_read_from_code_to_last(contracts_copy):
     contracts_copy("facts/exit-codes.json", _stopped_range)
     assert exit_codes.codes("stopped") == frozenset([1, 2, 3, 4, 5, 6, *range(69, 90), 75])
-    assert [result.code_matches("stopped", c) for c in (68, 69, 80, 89, 90, 75, 7)] == [False, True, True, True, False, True, False]
-    assert [result.code_matches("gate", c) for c in (9, 10, 19, 20, 29, 30)] == [False, True, True, True, True, False]
-    assert result.code_matches("ok", 0) and not result.code_matches("ok", 1)
+    assert [exit_codes.matches("stopped", c) for c in (68, 69, 80, 89, 90, 75, 7)] == [False, True, True, True, False, True, False]
+    assert [exit_codes.matches("gate", c) for c in (9, 10, 19, 20, 29, 30)] == [False, True, True, True, True, False]
+    assert exit_codes.matches("ok", 0) and not exit_codes.matches("ok", 1)
 
 
-def test_code_matches_compares_non_integers_by_range():
-    assert result.code_matches("gate", 10.5)
-    assert not result.code_matches("stopped", 3.5)
-    assert not result.code_matches("ok", 0.5)
+def test_exit_codes_matches_compares_non_integers_by_range():
+    assert exit_codes.matches("gate", 10.5)
+    assert not exit_codes.matches("stopped", 3.5)
+    assert not exit_codes.matches("ok", 0.5)

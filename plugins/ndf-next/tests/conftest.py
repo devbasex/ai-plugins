@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -25,3 +26,14 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
+def _last_result(stdout: str) -> dict:
+    """標準出力の最後の 1 行（前後の空白を除いた後）を結果 JSON として読む。"""
+    return json.loads(stdout.strip().splitlines()[-1])
+
+
+@pytest.fixture
+def last_result():
+    """標準出力の最後の 1 行を結果 JSON として読む関数（`last_result(stdout)`）。"""
+    return _last_result

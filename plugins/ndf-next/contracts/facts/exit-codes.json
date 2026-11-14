@@ -1,7 +1,6 @@
 {
-  "version": 1,
-  "summary": "副命令の終了コードの区分。結果 JSON の status と終了コードの対応と、止まった理由の表の exit が取れる値を決める",
-  "owner": "D1（ndf.contracts）",
+  "summary": "副命令の終了コードの区分。終了コードの値はこの表だけが持つ。止まった理由の表の exit はこの表の id を指す。行き先は cause.kind だけで選び、終了コードは結果の status の区分を表すだけで行き先の判定に使わない",
+  "owner": "D1+（#3284 の追補。ndf.contracts）",
   "columns": {
     "code": {"type": "integer", "summary": "区分の最初の終了コード"},
     "last": {"type": "integer", "summary": "区分の最後の終了コード（範囲の区分だけ）", "optional": true},
@@ -19,6 +18,6 @@
     {"id": "gate", "code": 10, "last": 19, "status": "gate", "label": "承認ゲート"},
     {"id": "pause", "code": 20, "last": 29, "status": "gate", "label": "判断待ち"},
     {"id": "deps_missing", "code": 69, "status": "stopped", "label": "依存の欠け"},
-    {"id": "infra_wait", "code": 75, "status": "stopped", "label": "基盤待ち"}
+    {"id": "infra_wait", "code": 75, "status": "stopped", "label": "一時的な失敗・基盤待ち"}
   ]
 }

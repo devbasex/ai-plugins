@@ -17,7 +17,8 @@
     "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
     "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "presentation_path": {"type": "string", "minLength": 1},
-    "next": {"type": "string", "minLength": 1},
+    "next": {"$ref": "#/$defs/command", "description": "次に打つコマンド。打つ側は argv をそのまま打つ"},
+    "outputs": {"$ref": "#/$defs/outputs"},
     "run_id": {"type": "string", "minLength": 1},
     "original_result": {
       "description": "実行の記録に書けずに stopped へ置き換えた結果の、本体の元の結果 JSON（#2338 の決定 3）。本体が例外で終わったときは null",
@@ -25,10 +26,11 @@
     },
     "cause": {"$ref": "#/$defs/cause"},
     "routes": {
-      "description": "答えごとに次に打つコマンド。値が null なら何も打たない",
+      "description": "答えごとに次に打つコマンド。キーは答えの語彙（facts/answers.json の id。読み手が表と照らす）。値が null なら何も打たない",
       "type": "object",
       "minProperties": 1,
-      "additionalProperties": {"type": ["string", "null"], "minLength": 1}
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"oneOf": [{"$ref": "#/$defs/command"}, {"type": "null"}]}
     }
   },
   "allOf": [
@@ -53,6 +55,33 @@
   ],
   "$defs": {
     "text": {"type": "string", "pattern": "\\S"},
+    "command": {
+      "description": "そのまま打てるコマンド。argv は置き換えの要らない引数の配列で、先頭はエントリポイントの短い名前 ndf（パスと版を含まない）。ask は打つ側が埋める鍵で、鍵ごとに --<鍵> <値> を末尾へ足して打つ",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv"],
+      "properties": {
+        "argv": {"type": "array", "minItems": 2, "prefixItems": [{"const": "ndf"}], "items": {"type": "string", "minLength": 1}},
+        "ask": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}}
+      }
+    },
+    "outputs": {
+      "description": "工程どうしで渡す値。鍵はスプリントの文脈の閉じた語彙で、鍵ごとに型を持つ。読み手は items と metrics から渡す値を判定しない",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "issues": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "mode": {"type": "string", "minLength": 1},
+        "pace": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "design_pr": {"type": "integer", "minimum": 1},
+        "pr": {"type": "integer", "minimum": 1},
+        "delivery": {"type": "object"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"}
+      }
+    },
     "gap": {
       "description": "欠け 1 件",
       "type": "object",
