@@ -92,6 +92,47 @@ def test_a_launch_that_cannot_succeed_is_reported_without_retrying():
     assert act == Launch("b", "r1")
 
 
+def test_a_launch_that_cannot_succeed_stays_failed_after_the_request_is_closed():
+    """打ち直しても起こせない失敗は、依頼を閉じても起こし直さない（閉じるたびに同じ依頼が開き直さない）。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "final": True, "detail": "loop の行"}))
+    act, state, _ = _step(state, Done(act, "request-1"))
+    act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    assert act == Sleep(30.0) and state.failed == ("a/r1",) and state.reported == () and state.unreported == ()
+    # 行が動けば（鍵が変われば）その行は起こす
+    act, state, _ = _step(state, Done(Observe(), _snap(wakeable=[("a", "r2")])))
+    assert act == Launch("a", "r2")
+
+
+def test_a_launched_lane_that_does_not_start_its_row_in_time_counts_as_a_failure():
+    """起こした conductor が期限までに行を始めなければ、起動の失敗として打ち直し、尽きたら知らせる。"""
+    pol = Policy(poll=30.0, attempts=2, up=60.0)
+
+    def step(state, done):
+        nxt = run_decide.decide(pol, state, done)
+        return nxt.act, nxt.state
+
+    act, state = step(RunState(), Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state = step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    act, state = step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    assert act == Sleep(30.0) and state.launched == ("a/r1",)
+    act, state = step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    assert act == Launch("a", "r1") and state.count("a/r1") == 1 and state.launched == ()
+    act, state = step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    act, state = step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state = step(state, Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    assert isinstance(act, Report) and act.key == "a/r1" and "60 秒" in act.detail and state.failed == ("a/r1",)
+
+
+def test_a_report_the_plan_could_not_take_leads_to_reading_the_plan_again():
+    """起動の最中に計画が止められ、依頼を書けなかった（None）なら、知らせた扱いにせず読み直す。"""
+    act, state, _ = _step(RunState(), Done(Observe(), _snap(wakeable=[("a", "r1")])))
+    act, state, _ = _step(state, Done(act, {"ok": False, "final": True, "detail": "loop の行"}))
+    assert isinstance(act, Report)
+    act, state, _ = _step(state, Done(act, None))
+    assert act == Observe() and state.reported == () and state.unreported == ()
+
+
 def test_complete_plan_is_written_when_all_rows_are_done_and_the_run_finishes():
     act, state, _ = _step(RunState(), Done(Observe(), _snap(complete=True)))
     assert act == Complete()
@@ -128,7 +169,7 @@ def test_a_plan_not_yet_started_is_only_watched():
 
 def test_policy_reads_the_poll_from_the_environment(monkeypatch):
     monkeypatch.setenv(run.POLL_ENV, "5")
-    assert run.policy().poll == 5.0
+    assert run.policy().poll == 5.0 and run.policy().up > 5.0
     monkeypatch.delenv(run.POLL_ENV)
     assert run.policy().poll > 5.0
 
@@ -199,6 +240,13 @@ def test_snapshot_lists_the_launches_with_an_open_launch_failed_request(opened):
     assert _snapshot(opened, pid)["reported"] == []
 
 
+def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
+    pid = _create(opened, _doc(_decl("a", [[1]])))
+    with store.transaction(opened) as conn:
+        plan.stop_plan(conn, pid, "放棄")
+        assert run.write_report(conn, pid, "a", "a/r1", "x") is None
+
+
 # --- 耐久ワークフロー -------------------------------------------------------------------------------
 
 
@@ -211,7 +259,7 @@ def _no_wrapper(monkeypatch):
     """起こす前に止めるラッパーは無い（止めた名前を記録する）。"""
     stopped = []
 
-    def stop(plan_name, lane_name):
+    def stop(repo, plan_name, lane_name):
         stopped.append(lane_name)
         return {"ok": True, "detail": "動いていない"}
 
@@ -223,7 +271,7 @@ def _conductor(where, outcome):
     """起きた conductor の代わり: 起こされた行を始め、`outcome` で終える。"""
     launched = []
 
-    def spawn(plan_name: str, lane_name: str, cwd: Path, first: str) -> dict:
+    def spawn(repo: str, plan_name: str, lane_name: str, cwd: Path, first: str) -> dict:
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             pid = plan.plan_id(REPO, plan_name)
             view, _ = lane.read_plan(conn, pid)
@@ -263,11 +311,11 @@ def test_the_workflow_cancels_running_sprints_of_a_stopped_plan(where, monkeypat
     assert running == [sid]
     cancelled, stopped = [], []
 
-    def stop(plan_name, lane_name):
+    def stop(repo, plan_name, lane_name):
         stopped.append(lane_name)
         return {"ok": True, "detail": "止めた"}
 
-    def spawn(plan_name, lane_name, cwd, first):
+    def spawn(repo, plan_name, lane_name, cwd, first):
         assert "cancel" in first and sid in first and stopped == [lane_name]
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, sid, "cancelled", "conductor")
@@ -286,7 +334,7 @@ def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, m
     with store.open_store(where.url, where.root) as st:
         pid = _create(st, _doc(loop_lane, _decl("b", [[3]], touches=("src/b",))))
 
-    def spawn(plan_name, lane_name, cwd, first):
+    def spawn(repo, plan_name, lane_name, cwd, first):
         # b を流した後に計画を止め、ワークフローを終わらせる
         with store.open_store(where.url, where.root) as st, store.transaction(st) as conn:
             lane.end_row(conn, _start(conn, pid, lane_name, "r1"), "completed", "conductor")

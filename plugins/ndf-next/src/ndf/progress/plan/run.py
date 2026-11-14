@@ -12,7 +12,9 @@
   依頼を書けない）
 - 起こせなかったレーン（回数が尽きた・開発ループの行・計画と別のリポジトリのレーン）は、計画の進行表へ依頼
   （`request_opened`。中身の `kind` は `launch_failed`）を書いて `ndf lanes wait` へ知らせる。オーガナイザーが
-  依頼を閉じたら、そのレーンを起こし直す
+  依頼を閉じたら、打ち直せば起こせる失敗のレーンを起こし直す。起こしたのに期限（`parallel-run.launch` の秒）までに
+  行が実行中にならないレーンも、起動の失敗の 1 回として数える
+- 依頼は同じトランザクションで計画の状態を読み直してから書く。起動の最中に計画が止められたら書かない
 - レーンは計画のリポジトリ（打った場所）で起こす。別のリポジトリを宣言したレーン（`repo`。同じリポジトリかの
   判定は `PlanView.lane_repo`）の置き場を解決する経路はまだ無いので、打った場所で流さずに起こせない失敗にする
 """
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import math
 import os
 import subprocess
 from collections.abc import Iterator
@@ -70,7 +73,11 @@ def policy() -> Policy:
     """読み直しの間隔と起動の回数。間隔は環境変数があればその秒にする。"""
     given = os.environ.get(POLL_ENV, "")
     poll = float(given) if given else limits.value("parallel-run.poll", "interval")
-    return Policy(poll=poll, attempts=int(limits.value("parallel-run.launch", "attempts")))
+    return Policy(
+        poll=poll,
+        attempts=int(limits.value("parallel-run.launch", "attempts")),
+        up=limits.seconds("parallel-run.launch"),
+    )
 
 
 # --- 耐久ステップ -------------------------------------------------------------------------------
@@ -122,18 +129,30 @@ def launch_lane(spec: dict[str, Any], lane_name: str, row: str, cancel: str | No
     except launch.Unsupported as exc:
         return {"ok": False, "final": True, "detail": str(exc)}
     # 前の行を終えた conductor のラッパーも同じ名前で残るので、行を始めるときも中止のときも先に止める
-    stopped = launch.stop(spec["plan"], lane_name)
+    stopped = launch.stop(spec["repo"], spec["plan"], lane_name)
     if not stopped["ok"]:
         return {"ok": False, "detail": f"元のラッパーを止められない: {stopped['detail']}"}
-    return launch.spawn(spec["plan"], lane_name, Path(spec["cwd"]), first)
+    return launch.spawn(spec["repo"], spec["plan"], lane_name, Path(spec["cwd"]), first)
+
+
+def write_report(conn: Any, plan_id: str, lane_name: str, key: str, detail: str) -> str | None:
+    """起こせなかったレーンを計画の進行表の依頼として書き、開いた依頼の鍵を返す。
+
+    判断が使った写しは起動の前のもので、その間に計画が止められていることがある。同じトランザクションで計画の状態を
+    読み直し、動いていなければ（終わった計画の進行表へは事象を書けない）書かずに None を返す。
+    """
+    view, _ = lane.read_plan(conn, plan_id)
+    if view.state != lane.RUNNING:
+        return None
+    body = {"lane": lane_name, "kind": LAUNCH_FAILED, "launch": key, "detail": detail}
+    return table.open_request(conn, plan_id, body, f"レーン {lane_name} を起こせない", REPORT_ACTOR)
 
 
 @durable.step
-def report(spec: dict[str, Any], lane_name: str, key: str, detail: str) -> str:
-    """起こせなかったレーンを計画の進行表の依頼として書く耐久ステップ。開いた依頼の鍵を返す。"""
-    body = {"lane": lane_name, "kind": LAUNCH_FAILED, "launch": key, "detail": detail}
+def report(spec: dict[str, Any], lane_name: str, key: str, detail: str) -> str | None:
+    """起こせなかったレーンを計画の進行表の依頼として書く耐久ステップ（`write_report`）。"""
     with _conn(spec) as conn:
-        return table.open_request(conn, spec["plan_id"], body, f"レーン {lane_name} を起こせない", REPORT_ACTOR)
+        return write_report(conn, spec["plan_id"], lane_name, key, detail)
 
 
 @durable.step
@@ -161,7 +180,7 @@ def _perform(spec: dict[str, Any], act: run_decide.Act) -> Done:
 @durable.workflow
 def lanes_workflow(spec: dict[str, Any]) -> dict[str, Any]:
     """計画が終わるまで、判断のループで読み直し・起動・完了を回す。"""
-    pol = Policy(poll=float(spec["poll"]), attempts=int(spec["attempts"]))
+    pol = Policy(poll=float(spec["poll"]), attempts=int(spec["attempts"]), up=float(spec.get("up") or math.inf))
     final = loop.run(functools.partial(run_decide.decide, pol), functools.partial(_perform, spec), RunState())
     return final.as_result()
 
@@ -179,6 +198,8 @@ def spec_of(where: Where, plan_id: str, plan: str, pol: Policy) -> dict[str, Any
         "cwd": str(where.cwd),
         "poll": pol.poll,
         "attempts": pol.attempts,
+        # 耐久の記録へ書くので、期限の無い（無限の）秒は None にする
+        "up": pol.up if math.isfinite(pol.up) else None,
     }
 
 

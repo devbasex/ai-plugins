@@ -317,6 +317,15 @@ def _lane_rows(*states):
         ),
         # 前後は向きによらない（a が b の全行の後）
         (_view(_spec("a", after=("b",)), _spec("b")), {"a": _lane_rows("pending"), "b": _lane_rows("pending", "pending")}, []),
+        # レーン全体を指す after の後続が始まった後で先行に足した行は、始まった後続の行と同時に動き得る。
+        # 後続のまだ始まっていない行は、足した行の後に始まる
+        (
+            _view(_spec("a"), _spec("b", after=("a",))),
+            {"a": _lane_rows("completed", "pending"), "b": _lane_rows("running", "pending")},
+            ["同時に動き得る行 a/r2・b/r1 の触る場所が重なる（I13）: src/a・src/a"],
+        ),
+        # 後続がまだ始まっていなければ、先行に足した行の後に始まる
+        (_view(_spec("a"), _spec("b", after=("a",))), {"a": _lane_rows("completed", "pending"), "b": _lane_rows("pending")}, []),
         # レーンの組ごとに 1 件ずつ、計画の並びの順に出す
         (
             _view(_spec("a"), _spec("b"), _spec("c")),

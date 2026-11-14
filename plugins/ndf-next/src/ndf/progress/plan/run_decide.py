@@ -11,9 +11,12 @@
 - `Sleep`: 次に読み直すまで待つ
 
 同じ読み直しの間に同じレーンの行を 2 回起こさない。起こしたレーンの行は、行が実行中になるか終わるまで
-起こし直さない（`launched`）。起動の失敗は読み直すたびに打ち直し、回数が尽きたら（打ち直しても起こせない失敗
-`final` ならその場で）`failed` に残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける。オーガナイザーが
-その依頼を閉じたら（写しの `reported` から消えたら）、`failed` と回数から外して起動の候補へ戻す。
+起こし直さない（`launched`）。ただし起こしてから期限（`Policy.up` の秒）までに行が実行中にならなければ
+（conductor が `row start` に着く前に落ちた・`row start` が断った など）、起動の失敗の 1 回として数える。
+起動の失敗は読み直すたびに打ち直し、回数が尽きたら（打ち直しても起こせない失敗 `final` ならその場で）`failed` に
+残し、`Report` で計画の進行表へ書いて `ndf lanes wait` に届ける（知らせる前の起動は `unreported`）。オーガナイザーが
+その依頼を閉じたら（写しの `reported` から消えたら）、打ち直せば起こせる失敗は `failed` と回数から外して起動の候補へ
+戻す。`final` の失敗は打ち直しても同じ失敗になるので `failed` に残し、行が動くか中止されるまで起こさない。
 
 止めた計画の進行表は終わっていて依頼を書けないので、中止の起動が尽きても `Report` を打たない。実行中の行の中止を
 すべて起こせなくなったら、`failed` と `errors` を載せて `cancel_failed` で終える。
@@ -79,7 +82,7 @@ Act = Union[Observe, Launch, Complete, Report, Sleep]
 @dataclass(frozen=True)
 class Done:
     """手の結果。`Observe` は写し（`snapshot` の形）、`Launch` は `{"ok": 真偽, "detail": 文}`（打ち直しても起こせない
-    失敗は `"final": True` を持つ）、`Complete` は真偽、`Report` は開いた依頼の鍵。"""
+    失敗は `"final": True` を持つ）、`Complete` は真偽、`Report` は開いた依頼の鍵（計画が終わっていて書けなければ None）。"""
 
     act: Act
     value: Any = None
@@ -91,19 +94,26 @@ class Policy:
 
     poll: float
     attempts: int
+    # 起こしてから行が実行中になるまでを待つ秒。越えたら起動の失敗の 1 回として数える
+    up: float = float("inf")
 
 
 @dataclass(frozen=True)
 class RunState:
-    """判断の状態。`launched` は起こして行の始まりを待つ起動、`started` は起こせた起動のすべて、
-    `tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数、`reported` は依頼で知らせた起動。"""
+    """判断の状態。`launched` は起こして行の始まりを待つ起動、`waits` は起こしてから読み直した回数、
+    `started` は起こせた起動のすべて、`tried` は今の読み直しで打った起動、`attempts` は失敗した起動の回数、
+    `final` は打ち直しても起こせない失敗、`unreported` はまだ知らせていない失敗（レーン, 起動, 詳細）、
+    `reported` は依頼で知らせた起動。"""
 
     snapshot: Optional[dict[str, Any]] = None
     launched: tuple[str, ...] = ()
+    waits: tuple[tuple[str, int], ...] = ()
     started: tuple[str, ...] = ()
     tried: tuple[str, ...] = ()
     attempts: tuple[tuple[str, int], ...] = ()
     failed: tuple[str, ...] = ()
+    final: tuple[str, ...] = ()
+    unreported: tuple[tuple[str, str, str], ...] = ()
     reported: tuple[str, ...] = ()
     outcome: Optional[str] = None
     errors: tuple[str, ...] = field(default=())
@@ -171,6 +181,8 @@ def _after_observe(state: RunState, policy: Policy) -> loop.Next[Act, RunState]:
     if snap["state"] == RUNNING and snap["complete"]:
         return loop.Next.step(Complete(), state)
     found = _candidates(state) if snap["state"] in (RUNNING, CANCELLED) else []
+    if snap["state"] == RUNNING and state.unreported:
+        return loop.Next.step(Report(*state.unreported[0]), state)
     if found:
         return loop.Next.step(found[0], state)
     if snap["state"] == CANCELLED and _cancels_given_up(state, snap):
@@ -185,35 +197,66 @@ def _cancels_given_up(state: RunState, snap: dict[str, Any]) -> bool:
 
 
 def _reopen_closed(state: RunState, snap: dict[str, Any]) -> RunState:
-    """知らせた依頼をオーガナイザーが閉じた起動を、`failed` と回数から外して起動の候補へ戻す。"""
+    """知らせた依頼をオーガナイザーが閉じた起動を、`failed` と回数から外して起動の候補へ戻す。
+
+    打ち直しても起こせない失敗（`final`）は戻さない。戻すと同じ失敗で依頼が開き直し、閉じるたびに起こし続ける。
+    """
     still = set(snap.get("reported", ()))
     closed = {k for k in state.reported if k not in still}
     if not closed:
         return state
+    back = closed - set(state.final)
     return replace(
         state,
-        failed=tuple(k for k in state.failed if k not in closed),
-        attempts=tuple((k, n) for k, n in state.attempts if k not in closed),
+        failed=tuple(k for k in state.failed if k not in back),
+        attempts=tuple((k, n) for k, n in state.attempts if k not in back),
         reported=tuple(k for k in state.reported if k not in closed),
     )
 
 
-def _live_launched(state: RunState, snap: dict[str, Any]) -> tuple[str, ...]:
-    """起こした印のうち、まだ起こしたまま待っている行（まだ起こせる行に残っているもの）だけを残す。"""
-    waiting = {a.key for a in _launches(snap)}
-    return tuple(k for k in state.launched if k in waiting)
+def _fail(state: RunState, lane: str, key: str, detail: str, policy: Policy, final: bool) -> RunState:
+    """起動の失敗を 1 回数える。回数が尽きたか打ち直しても起こせない失敗なら `failed` に残し、計画が動いていれば
+    知らせる前の起動（`unreported`）に置く（止めた計画の進行表へは依頼を書けない）。"""
+    count = state.count(key) + 1
+    attempts = tuple((k, n) for k, n in state.attempts if k != key) + ((key, count),)
+    error = f"{key}: {detail}"
+    state = replace(state, attempts=attempts, errors=(*state.errors, error))
+    if count < policy.attempts and not final:
+        return state
+    state = replace(state, failed=(*state.failed, key), final=(*state.final, key) if final else state.final)
+    if _snap(state)["state"] == CANCELLED:
+        return state
+    return replace(state, unreported=(*state.unreported, (lane, key, error)))
+
+
+def _expire_launched(state: RunState, policy: Policy) -> RunState:
+    """起こした印のうち、まだ起こしたまま待っている行（まだ起こせる行に残っているもの）だけを残し、読み直しの回数を
+    1 つ進める。期限（`Policy.up`）までに行が実行中にならなかった起動は、起動の失敗の 1 回として数える。"""
+    waiting = {a.key: a for a in _launches(_snap(state))}
+    counts = dict(state.waits)
+    kept: list[str] = []
+    waits: list[tuple[str, int]] = []
+    expired: list[Launch] = []
+    for key in state.launched:
+        if key not in waiting:
+            continue
+        n = counts.get(key, 0) + 1
+        if n * policy.poll >= policy.up:
+            expired.append(waiting[key])
+        else:
+            kept.append(key)
+            waits.append((key, n))
+    state = replace(state, launched=tuple(kept), waits=tuple(waits))
+    for act in expired:
+        state = _fail(state, act.lane, act.key, f"起こした conductor が {policy.up:g} 秒の間に行を始めない", policy, False)
+    return state
 
 
 def _after_launch(state: RunState, act: Launch, value: dict[str, Any], policy: Policy) -> RunState:
-    tried = (*state.tried, act.key)
+    state = replace(state, tried=(*state.tried, act.key))
     if value["ok"]:
-        return replace(state, tried=tried, launched=(*state.launched, act.key), started=(*state.started, act.key))
-    count = state.count(act.key) + 1
-    attempts = tuple((k, n) for k, n in state.attempts if k != act.key) + ((act.key, count),)
-    error = f"{act.key}: {value['detail']}"
-    if count >= policy.attempts or value.get("final"):
-        return replace(state, tried=tried, attempts=attempts, failed=(*state.failed, act.key), errors=(*state.errors, error))
-    return replace(state, tried=tried, attempts=attempts, errors=(*state.errors, error))
+        return replace(state, launched=(*state.launched, act.key), started=(*state.started, act.key))
+    return _fail(state, act.lane, act.key, value["detail"], policy, bool(value.get("final")))
 
 
 def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[Act, RunState]:
@@ -222,16 +265,16 @@ def decide(policy: Policy, state: RunState, done: Optional[Done]) -> loop.Next[A
         return loop.Next.step(Observe(), state)
     if isinstance(done.act, Observe):
         snap = done.value
-        fresh = replace(_reopen_closed(state, snap), snapshot=snap, tried=(), launched=_live_launched(state, snap))
+        fresh = _expire_launched(replace(_reopen_closed(state, snap), snapshot=snap, tried=()), policy)
         return _after_observe(fresh, policy)
     if isinstance(done.act, Launch):
-        after = _after_launch(state, done.act, done.value, policy)
-        # 止めた計画の進行表は終わっていて依頼を書けない（尽きた中止は _after_observe が結果に載せて終える）
-        if done.act.key in after.failed and done.act.key not in state.failed and _snap(state)["state"] != CANCELLED:
-            return loop.Next.step(Report(done.act.lane, done.act.key, after.errors[-1]), after)
-        return _after_observe(after, policy)
+        return _after_observe(_after_launch(state, done.act, done.value, policy), policy)
     if isinstance(done.act, Report):
-        return _after_observe(replace(state, reported=(*state.reported, done.act.key)), policy)
+        rest = replace(state, unreported=tuple(u for u in state.unreported if u[1] != done.act.key))
+        if done.value is None:
+            # 計画が終わっていて依頼を書けなかった（写しが古い）。読み直して計画の状態に従う
+            return loop.Next.step(Observe(), rest)
+        return _after_observe(replace(rest, reported=(*rest.reported, done.act.key)), policy)
     if isinstance(done.act, Complete):
         return _finish(state, OUTCOME_COMPLETED) if done.value else loop.Next.step(Observe(), state)
     raise TypeError(f"知らない手: {done.act!r}")

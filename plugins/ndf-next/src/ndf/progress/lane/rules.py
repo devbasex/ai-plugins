@@ -92,17 +92,28 @@ def touch_hit(x: str, y: str) -> bool:
     return fnmatch.fnmatch(px, py) or fnmatch.fnmatch(py, px)
 
 
-def _after_source(ref: str, lanes: Lanes) -> Optional[tuple[str, str]]:
-    """`after` の 1 つが指す起点の行（行の指定ならその行、レーンならその末尾の行）。レーンに行が無ければ None。"""
+def _after_sources(ref: str, lanes: Lanes, started: bool) -> list[tuple[str, str]]:
+    """`after` の 1 つが指す起点の行。行の指定ならその行、レーンならその末尾の行。
+
+    レーン全体を指す `after` の後続が既に始まっていれば、後続より前にあるのは始まった時点で終わっていた行
+    （未着手でない行の末尾）だけで、後から足した未着手の行は後続の始まった行の前に無い。レーンに行が無ければ空。
+    """
     lane, row = _target(ref)
     if row is not None:
-        return lane, row
-    keys = [r.key for r in _rows_of(lanes, lane)]
-    return (lane, keys[-1]) if keys else None
+        return [(lane, row)]
+    rows = _rows_of(lanes, lane)
+    if started:
+        rows = [r for r in rows if r.state != PENDING]
+    return [(lane, rows[-1].key)] if rows else []
 
 
 def _order_graph(view: PlanView, lanes: Lanes) -> dict[tuple[str, str], set[tuple[str, str]]]:
-    """行の前後の鎖（レーンの中の並びと after）。辺は前の行 → 後の行。"""
+    """行の前後の鎖（レーンの中の並びと after）。辺は前の行 → 後の行。
+
+    後続のレーンが既に始まっていれば、レーン全体を指す `after` の辺は実際の開始の前後で引く。始まった行へは
+    始まった時点で終わっていた起点の行から、まだ始まっていない行（最初の未着手の行）へは起点の末尾の行から引く
+    （未着手の行は `after` の全行が終わるまで始まらない。`next_row`）。
+    """
     edges: dict[tuple[str, str], set[tuple[str, str]]] = {}
     for name, rows in lanes.items():
         nodes = [(name, r.key) for r in rows]
@@ -111,10 +122,14 @@ def _order_graph(view: PlanView, lanes: Lanes) -> dict[tuple[str, str], set[tupl
         spec = view.lanes.get(name)
         if not nodes or spec is None:
             continue
+        started = rows[0].state != PENDING
+        pending = next(((name, r.key) for r in rows if r.state == PENDING), None)
         for ref in spec.after:
-            src = _after_source(ref, lanes)
-            if src is not None:
+            for src in _after_sources(ref, lanes, started):
                 edges.setdefault(src, set()).add(nodes[0])
+            if started and pending is not None:
+                for src in _after_sources(ref, lanes, False):
+                    edges.setdefault(src, set()).add(pending)
     return edges
 
 

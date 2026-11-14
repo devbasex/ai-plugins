@@ -11,13 +11,16 @@
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
 
-ラッパーの名前は `<計画>-<レーン>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
+ラッパーの名前は `<計画>-<レーン>-<要約>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
+要約はリポジトリ・計画・レーンの 3 つから作る。ラッパーの登録簿は利用者単位で共通なので、別のリポジトリが同じ
+計画名・レーン名を使っても、名前の区切りが曖昧な組（`a-b` と `a` / `b-c` など）でも重ならない。
 ラッパーは子の conductor が終わるまで動き続けるので、起こす前に（行を始めるときも中止のときも）同じ名前の
 ラッパーを `ndf relay stop` で止め、止まったのを確かめてから起こす（`stop`）。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -34,11 +37,16 @@ DEFAULT_MODE = "standard"
 ROLE = command.ACTOR
 # 止めた計画で実行中のスプリントを中止する理由
 STOP_REASON = "計画を止めた"
+# ラッパーの名前の長さの上限（中継の名前の形 `relay.signals.NAME_RE`）と、末尾に付ける要約の桁数
+WRAPPER_NAME_MAX = 64
+WRAPPER_DIGEST_LENGTH = 12
 
 
-def wrapper_name(plan: str, lane: str) -> str:
-    """レーンのラッパーの名前。"""
-    return f"{plan}-{lane}"
+def wrapper_name(repo: str, plan: str, lane: str) -> str:
+    """レーンのラッパーの名前。読める部分（`<計画>-<レーン>`）に、リポジトリ・計画・レーンの要約を付ける。"""
+    digest = hashlib.sha256(json.dumps([repo, plan, lane]).encode()).hexdigest()[:WRAPPER_DIGEST_LENGTH]
+    readable = f"{plan}-{lane}"[: WRAPPER_NAME_MAX - WRAPPER_DIGEST_LENGTH - 1]
+    return f"{readable}-{digest}"
 
 
 class Unsupported(Exception):
@@ -79,14 +87,14 @@ def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
     return f"計画 {plan} のレーン {lane} の conductor として、次のコマンドを順に打つ（ask の鍵は前の結果で埋める）: {body}"
 
 
-def spawn(plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
+def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
     """名前つきのラッパーでレーンの conductor を起こす。結果 JSON の `status` が ok なら `ok` を真にする。"""
     argv = [
         str(identity.entrypoint(identity.ROOT)),
         "relay",
         "spawn",
         "--name",
-        wrapper_name(plan, lane),
+        wrapper_name(repo, plan, lane),
         "--cwd",
         str(cwd),
         "--role",
@@ -98,9 +106,9 @@ def spawn(plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None
     return _relay(argv, run, "ラッパーを起こせない")
 
 
-def stop(plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
+def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
     """レーンのラッパーを止め、止まったのを確かめる（`ndf relay stop` は錠が空くまで待つ）。動いていなければ ok。"""
-    argv = [str(identity.entrypoint(identity.ROOT)), "relay", "stop", wrapper_name(plan, lane)]
+    argv = [str(identity.entrypoint(identity.ROOT)), "relay", "stop", wrapper_name(repo, plan, lane)]
     return _relay(argv, run, "ラッパーを止められない")
 
 
