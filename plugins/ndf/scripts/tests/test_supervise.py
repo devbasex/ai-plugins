@@ -36,6 +36,7 @@ import gh_call  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
 from sprint_args import DESIGN_SPRINT_STAGES, new_sprint_args  # noqa: E402
+from develop_repo import seed_develop_repo  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -1664,14 +1665,18 @@ def assert_plan_transitions_valid(manifest):
     """マニフェストの全プランで、next / on_fail / skip_to と choices の行き先が同じプランの工程か終端を指す。"""
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
-            plan = json.loads(Path(path).read_text())
-            steps = {s["id"]: s for s in plan["steps"]}
-            for s in plan["steps"]:
-                for k in ("next", "on_fail", "skip_to"):
-                    if k in s:
-                        assert s[k] in steps or s[k] == "end", (path, s)
-                for c in s.get("choices", []):
-                    assert c in steps or c in ("stop", "gate"), (path, c)
+            assert_plan_targets_valid(json.loads(Path(path).read_text()), path)
+
+
+def assert_plan_targets_valid(plan: dict, path: str) -> None:
+    """1 プランで、next / on_fail / skip_to は同じプランの工程か end、choices は工程か stop / gate を指す。誤りには `path` を添える。"""
+    steps = {s["id"]: s for s in plan["steps"]}
+    for s in plan["steps"]:
+        for k in ("next", "on_fail", "skip_to"):
+            if k in s:
+                assert s[k] in steps or s[k] == "end", (path, s)
+        for c in s.get("choices", []):
+            assert c in steps or c in ("stop", "gate"), (path, c)
 
 
 def assert_design_plan(design: dict) -> None:
@@ -1791,19 +1796,7 @@ sys.exit(1)
 
 def pr_repo(tmp_path, monkeypatch):
     """develop から切った feat/x を持つリポジトリと、pr create の本文を書き出す偽の gh を用意する。"""
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
-    root = tmp_path / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "develop")
-    git(root, "config", "user.email", "t@example.com")
-    git(root, "config", "user.name", "t")
-    git(root, "config", "commit.gpgsign", "false")
-    (root / "a.txt").write_text("a\n")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "init")
-    git(root, "remote", "add", "origin", str(origin))
-    git(root, "push", "-q", "-u", "origin", "develop")
+    root = seed_develop_repo(tmp_path, {"a.txt": "a\n"})
     git(root, "checkout", "-q", "-b", "feat/x")
     (root / "b.txt").write_text("b\n")
     git(root, "add", "-A")
@@ -3273,3 +3266,58 @@ def test_release_package_plugin_plan_links_by_channel_cd_and_mvv(tmp_path, monke
     assert p.returncode == 0, p.stdout + p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert {i: steps[i].get("next") for i in nexts} == nexts
+
+
+# --- assert_plan_transitions_valid の現状固定（I-021） ---
+
+
+def _transition_manifest(tmp_path: Path, *plans: list[dict]) -> dict:
+    paths = []
+    for i, steps in enumerate(plans):
+        p = tmp_path / f"plan-{i}.json"
+        p.write_text(json.dumps({"steps": steps}))
+        paths.append(str(p))
+    return {"ステージ": [{"plans": paths}, {}]}
+
+
+def test_assert_plan_transitions_valid_accepts_steps_and_terminals(tmp_path: Path):
+    steps = [
+        {"id": "a", "next": "b", "on_fail": "end", "skip_to": "a", "choices": ["b", "stop", "gate"]},
+        {"id": "b", "next": "end"},
+        {"id": "c"},
+    ]
+    assert_plan_transitions_valid(_transition_manifest(tmp_path, steps, [{"id": "x", "next": "x"}]))
+
+
+def test_assert_plan_transitions_valid_accepts_a_manifest_without_plans():
+    assert_plan_transitions_valid({"ステージ": [{}, {"plans": []}]})
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"id": "a", "next": "z"},
+        {"id": "a", "on_fail": "z"},
+        {"id": "a", "skip_to": "z"},
+        {"id": "a", "next": "stop"},
+        {"id": "a", "choices": ["z"]},
+        {"id": "a", "choices": ["end"]},
+    ],
+)
+def test_assert_plan_transitions_valid_refuses_a_target_outside_the_plan(tmp_path: Path, step):
+    with pytest.raises(AssertionError):
+        assert_plan_transitions_valid(_transition_manifest(tmp_path, [step]))
+
+
+def test_assert_plan_transitions_valid_refuses_a_step_of_another_plan(tmp_path: Path):
+    manifest = _transition_manifest(tmp_path, [{"id": "a"}], [{"id": "b", "next": "a"}])
+    with pytest.raises(AssertionError) as e:
+        assert_plan_transitions_valid(manifest)
+    assert "plan-1.json" in str(e.value) and "{'id': 'b', 'next': 'a'}" in str(e.value)
+
+
+def test_assert_plan_transitions_valid_names_the_choice_that_fails(tmp_path: Path):
+    manifest = _transition_manifest(tmp_path, [{"id": "a", "choices": ["a", "z"]}])
+    with pytest.raises(AssertionError) as e:
+        assert_plan_transitions_valid(manifest)
+    assert "plan-0.json" in str(e.value) and "'z'" in str(e.value)

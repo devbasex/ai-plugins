@@ -18,25 +18,30 @@ def _plugin_contracts():
     contracts.use_dir(None)
 
 
-@pytest.fixture
-def contracts_copy(tmp_path: Path) -> Callable[..., Path]:
-    """プラグインの契約を一時の置き場へ写して読み先にし、`edit(rel, fn)` で 1 ファイルを書き換える。"""
-    root = tmp_path / "contracts"
-    shutil.copytree(contracts.DEFAULT_DIR, root)
-    contracts.use_dir(root)
+class ContractsCopy:
+    """一時の置き場へ写した契約（`root`）。呼ぶと 1 ファイルを書き換え、読み先をこの置き場にし直す。"""
 
-    def edit(rel: str, fn: Callable[[Any], Any] | None = None, *, text: str | None = None) -> Path:
-        path = root / rel
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def __call__(self, rel: str, fn: Callable[[Any], Any] | None = None, *, text: str | None = None) -> Path:
+        path = self.root / rel
         if text is not None:
             path.write_text(text, encoding="utf-8")
         else:
             data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
             path.write_text(json.dumps(fn(data), ensure_ascii=False), encoding="utf-8")
-        contracts.use_dir(root)
+        contracts.use_dir(self.root)
         return path
 
-    edit.root = root  # type: ignore[attr-defined]
-    return edit
+
+@pytest.fixture
+def contracts_copy(tmp_path: Path) -> ContractsCopy:
+    """プラグインの契約を一時の置き場へ写して読み先にし、`edit(rel, fn)` で 1 ファイルを書き換える。"""
+    root = tmp_path / "contracts"
+    shutil.copytree(contracts.DEFAULT_DIR, root)
+    contracts.use_dir(root)
+    return ContractsCopy(root)
 
 
 @pytest.fixture

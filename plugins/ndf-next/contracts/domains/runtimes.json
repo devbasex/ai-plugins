@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "summary": "NDF が起動し、席に着け、使用量を測るランタイム（AI の CLI）。行の並びは輪番の順で、担当の割り当てを実行ごとに同じにする",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "label": {"type": "string", "summary": "人へ見せる名前"},
+    "executable": {"type": "string", "summary": "起動する実行ファイルの名前（PATH から探す）。プロセスの祖先からランタイムを見分けるときも、id とこの名前の両方で探す"},
+    "default_seat": {"type": "boolean", "summary": "cross-review と cross-refactoring の既定の母集合に入る。偽のランタイムは利用者が明示したときだけ入る（agy は起動の失敗と所要が最も多い）"},
+    "hook_events": {"type": "boolean", "summary": "hook の事象（停止・通知・許可の求め）を NDF の hook へ渡す"},
+    "usage_observable": {"type": "boolean", "summary": "1 回の起動の token の使用量を、起動の出力から実測できる"},
+    "delegate": {"type": "boolean", "summary": "pr-review がレビューを委ねる外部のランタイム"},
+    "host_env": {"type": "array", "summary": "ホスト（NDF を動かしているランタイム）を推定する環境変数の名前。値は見ず、あるかだけで決める。空はホストを推定しない（agy は子へ環境変数を渡すかを確かめていない）"},
+    "auth_probe": {"type": "array", "summary": "認証を確かめる引数（実行ファイルの後ろ）"},
+    "model_probe": {"type": "array", "summary": "最小の呼び出しでモデルが答えるかを確かめる引数（実行ファイルの後ろ。{workdir} は確かめるディレクトリに置き換える）。無いランタイムは認証の確かめだけで担当に入る", "optional": true},
+    "model_args": {"type": "array", "summary": "既定のモデルで起動し直す引数（利用者の設定ファイルを書き換えない）。無いランタイムは自ら既定のモデルで答える", "optional": true}
+  },
+  "rows": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "executable": "claude",
+      "default_seat": true,
+      "hook_events": true,
+      "usage_observable": true,
+      "delegate": false,
+      "host_env": ["CLAUDE_PLUGIN_ROOT", "CLAUDECODE"],
+      "auth_probe": ["auth", "status"],
+      "model_probe": ["-p", "--output-format", "json", "--tools", "", "--system-prompt", "Answer briefly.", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
+      "model_args": ["--model", "default"]
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "executable": "codex",
+      "default_seat": true,
+      "hook_events": true,
+      "usage_observable": true,
+      "delegate": true,
+      "host_env": ["CODEX_PLUGIN_ROOT", "CODEX_HOME"],
+      "auth_probe": ["login", "status"],
+      "model_probe": ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "project_doc_max_bytes=0", "-C", "{workdir}"],
+      "model_args": ["--ignore-user-config"]
+    },
+    {
+      "id": "agy",
+      "label": "Antigravity",
+      "executable": "agy",
+      "default_seat": false,
+      "hook_events": false,
+      "usage_observable": false,
+      "delegate": true,
+      "host_env": [],
+      "auth_probe": ["models"]
+    },
+    {
+      "id": "kiro",
+      "label": "Kiro",
+      "executable": "kiro-cli",
+      "default_seat": true,
+      "hook_events": true,
+      "usage_observable": false,
+      "delegate": false,
+      "host_env": ["KIRO_PLUGIN_ROOT", "KIRO_AGENT"],
+      "auth_probe": ["whoami"],
+      "model_probe": ["chat", "--no-interactive"]
+    }
+  ]
+}
