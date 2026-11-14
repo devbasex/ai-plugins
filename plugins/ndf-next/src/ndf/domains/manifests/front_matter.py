@@ -20,6 +20,15 @@ class FrontMatterError(Exception):
 
 def read(text: str, where: str) -> dict[str, Any]:
     """frontmatter の中身。`where` は誤りの文に添える置き場。"""
+    try:
+        data = YAML(typ="safe", pure=True).load(_split(text, where))
+    except YAMLError as exc:
+        raise FrontMatterError(f"frontmatter の YAML を読めない: {where}: {exc}") from exc
+    return _as_mapping(data, where)
+
+
+def _split(text: str, where: str) -> str:
+    """先頭の `---` と次の `---` の間の行。区切りが無い・閉じていなければ `FrontMatterError`。"""
     lines = text.splitlines()
     if not lines or lines[0].strip() != FENCE:
         raise FrontMatterError(f"frontmatter が無い: {where}")
@@ -27,10 +36,11 @@ def read(text: str, where: str) -> dict[str, Any]:
         end = next(i for i, line in enumerate(lines[1:], 1) if line.strip() == FENCE)
     except StopIteration:
         raise FrontMatterError(f"frontmatter が閉じていない: {where}") from None
-    try:
-        data = YAML(typ="safe", pure=True).load("\n".join(lines[1:end]))
-    except YAMLError as exc:
-        raise FrontMatterError(f"frontmatter の YAML を読めない: {where}: {exc}") from exc
+    return "\n".join(lines[1:end])
+
+
+def _as_mapping(data: Any, where: str) -> dict[str, Any]:
+    """解釈した YAML。空なら空のマッピング、マッピングでなければ `FrontMatterError`。"""
     if data is None:
         return {}
     if not isinstance(data, dict):
