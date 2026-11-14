@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
-from ndf.adapters.run_log import current, diag, record
+from ndf.adapters.run_log import child_process_env, diag, record
 from ndf.contracts import limits
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
@@ -217,8 +217,7 @@ def watch(proc: subprocess.Popen, spec: Launch, poll: Optional[float] = None) ->
 
 
 def _start(spec: Launch) -> subprocess.Popen:
-    log = current()
-    env = {**os.environ, **(spec.env if spec.env else {}), **(log.child_env() if log else {})}
+    env = child_process_env(spec.env)
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(

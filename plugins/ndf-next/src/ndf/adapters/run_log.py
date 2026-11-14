@@ -251,6 +251,12 @@ def clip(text: str, limit: int, what: str) -> str:
     return text[:limit]
 
 
+def child_process_env(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """子のプロセスへ渡す環境。今の環境へ `extra`、開いている記録の `child_env` の順に重ねる（#2338）。"""
+    log = current()
+    return {**os.environ, **(extra if extra else {}), **(log.child_env() if log else {})}
+
+
 def record(event: str, **fields: Any) -> None:
     """記録を開いていれば 1 行を書く（開いていなければ何もしない）。"""
     log = current()

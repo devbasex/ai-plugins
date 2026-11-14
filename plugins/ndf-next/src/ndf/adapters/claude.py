@@ -8,14 +8,13 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Sequence
 
 from ndf import identity
-from ndf.adapters.run_log import current
+from ndf.adapters.run_log import child_process_env
 
 CLAUDE = "claude"
 # Skill を回す起動（full）で外す、入っている旧い NDF（マーケットプレイスの登録の名前）。
@@ -116,8 +115,7 @@ def _parse_reply(stdout: str) -> ClaudeReply:
 
 def call_claude(argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None) -> ClaudeReply:
     """`claude` を起動し、問いを標準入力で渡して答えを読む。起動の失敗・期限切れは `ok` が偽の答えにする。"""
-    log = current()
-    env = {**os.environ, **(log.child_env() if log else {})}
+    env = child_process_env()
     try:
         done = subprocess.run(list(argv), input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
