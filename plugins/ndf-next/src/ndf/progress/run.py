@@ -435,19 +435,25 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     return None
 
 
+def _start_move(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
+    assert m.stage is not None
+    return _start(d, v, m.stage)
+
+
+Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
+# 副作用を持つ手 → 打つ関数（表に無い手は副作用の無い結果 `report` を返す）
+_HANDS: dict[Action, Hand] = {
+    Action.COMPLETE: lambda d, v, _m: _complete(d, v),
+    Action.CONSUME: _consume,
+    Action.START: _start_move,
+    Action.RESUME: _resume,
+}
+
+
 def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """1 手を打つ。続けて次の手を決めるなら None。"""
-    if m.action == Action.COMPLETE:
-        return _complete(d, v)
-    if m.action == Action.CONSUME:
-        _consume(d, v, m)
-        return None
-    if m.action == Action.START:
-        assert m.stage is not None
-        return _start(d, v, m.stage)
-    if m.action == Action.RESUME:
-        return _resume(d, v, m)
-    return report(v, m)
+    play = _HANDS.get(m.action)
+    return play(d, v, m) if play is not None else report(v, m)
 
 
 def _drive(d: Drive) -> dict[str, Any]:
