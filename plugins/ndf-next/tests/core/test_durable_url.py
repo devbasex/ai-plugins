@@ -11,7 +11,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -20,8 +19,7 @@ import sqlalchemy as sa
 
 from ndf.core import durable
 
-SRC = Path(__file__).resolve().parents[2] / "src"
-RUN_SCRIPT = Path(__file__).with_name("_durable_run.py")
+from ._durable_helpers import run_key_process as _run
 
 
 def _pg_bin() -> Path | None:
@@ -68,19 +66,6 @@ def root(tmp_path):
 @durable.workflow
 def url_done_flow(value: str) -> str:
     return value
-
-
-def _run(root: Path, key: str, mode: str, url: str) -> None:
-    env = {**os.environ, "PYTHONPATH": str(SRC)}
-    done = subprocess.run(
-        [sys.executable, str(RUN_SCRIPT), str(root), key, mode, url],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
 
 
 def _ledger(url: str) -> set[str]:

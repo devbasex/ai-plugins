@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import subprocess
-import sys
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -16,8 +14,8 @@ import pytest
 
 from ndf.core import durable
 
-SRC = Path(__file__).resolve().parents[2] / "src"
-RUN_SCRIPT = Path(__file__).with_name("_durable_run.py")
+from ._durable_helpers import run_key_process as _run
+
 KEY_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".lock", ".checked")
 
 
@@ -40,19 +38,6 @@ def _later(hours: float = 0, days: float = 0) -> datetime:
 def _key_files(root: Path, key: str) -> list[str]:
     name = durable.run_name(key)
     return sorted(p.name for p in (root / "dbos").glob(f"{name}*") if p.is_file())
-
-
-def _run(root: Path, key: str, mode: str) -> None:
-    env = {**os.environ, "PYTHONPATH": str(SRC)}
-    done = subprocess.run(
-        [sys.executable, str(RUN_SCRIPT), str(root), key, mode],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
 
 
 def _finish_without_retire(root: Path, key: str) -> None:
