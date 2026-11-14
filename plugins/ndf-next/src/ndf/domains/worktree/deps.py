@@ -100,17 +100,17 @@ def _same(src: Path, dest: Path) -> bool:
     return src.is_dir() and dest.is_dir()
 
 
-def _copy(src: Path, dest: Path, link: bool) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if src.is_dir() and not src.is_symlink():
-        try:
-            shutil.copytree(src, dest, symlinks=True, copy_function=os.link if link else shutil.copy2)
-        except (OSError, shutil.Error):  # ハードリンクを張れない（別のファイルシステム）なら実体を複製し直す
-            if not link:
-                raise
-            shutil.rmtree(dest, ignore_errors=True)
-            shutil.copytree(src, dest, symlinks=True)
-        return
+def _copy_tree(src: Path, dest: Path, link: bool) -> None:
+    try:
+        shutil.copytree(src, dest, symlinks=True, copy_function=os.link if link else shutil.copy2)
+    except (OSError, shutil.Error):  # ハードリンクを張れない（別のファイルシステム）なら実体を複製し直す
+        if not link:
+            raise
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(src, dest, symlinks=True)
+
+
+def _copy_file(src: Path, dest: Path, link: bool) -> None:
     if link:
         try:
             os.link(src, dest)
@@ -119,6 +119,14 @@ def _copy(src: Path, dest: Path, link: bool) -> None:
             if dest.exists():
                 raise exc
     shutil.copy2(src, dest, follow_symlinks=False)
+
+
+def _copy(src: Path, dest: Path, link: bool) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir() and not src.is_symlink():
+        _copy_tree(src, dest, link)
+    else:
+        _copy_file(src, dest, link)
 
 
 def copy_step(main_dir: Path, top: Path, rel: str, kind: str, redo: bool) -> Optional[str]:
