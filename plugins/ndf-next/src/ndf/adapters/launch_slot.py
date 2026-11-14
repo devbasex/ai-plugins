@@ -23,7 +23,7 @@ from typing import Optional
 from filelock import Timeout
 
 from ndf import identity, slot_pool
-from ndf.adapters import training
+from ndf.adapters import training_cache
 from ndf.adapters.run_log import record
 from ndf.contracts import limits
 from ndf.testing import limits as test_limits
@@ -130,7 +130,7 @@ def held(
 @contextmanager
 def gate(agent: str, *, cwd: Optional[Path] = None) -> Iterator[None]:
     """起動の前置き: 学習に使わない設定の控えを読み、重い起動の枠を取る。起動しないときは `NotLaunched`。"""
-    why = training.refusal(agent)
+    why = training_cache.refusal(agent)
     if why is not None:
         raise NotLaunched(why)
     with held(agent, cwd=cwd):

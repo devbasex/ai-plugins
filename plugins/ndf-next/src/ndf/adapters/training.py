@@ -6,9 +6,8 @@
 - codex: ChatGPT の `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed` ほか 2 つの鍵
 - kiro・agy（`UNSUPPORTED`）: 確かめる口が無いので確かめず、起動は通して記録に `unsupported` を残す
 
-結果は状態の置き場の `training.json` へ時刻つきで控える。LLM と外部 CLI の起動の口（`claude.call_claude`・
-`agents.run_agent`）は `refusal` で控えを読むだけで、学習に使う・控えが無い・期限切れ（`contracts/limits.json` の
-`training.check-valid`）・読めないなら起動を断り、理由に確認の副命令を載せる。
+結果は状態の置き場の `training.json` へ時刻つきで控える。控えの読み書きと、控えを読んで起動を断る規則
+（`refusal`）は `training_cache.py` が持つ（起動の口は httpx を読まずに済む）。
 
 トークンとアカウントの識別子は `Authorization` などの見出しにだけ置き、控え・出力・記録に含めない。
 公開の API ではないため、応答の形が違えば「確かめられない」（`training` が None）とする。
@@ -23,26 +22,31 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Optional
 
 import httpx
 
-from ndf import cli, identity
-from ndf.adapters.run_log import record
+from ndf import cli
+
+# 控えと起動を断る規則は training_cache が持つ。既存の呼び出し元のために名前を再輸出する
+from ndf.adapters.training_cache import (
+    CACHE_FILE as CACHE_FILE,
+    CHECK_COMMAND,
+    CHECKED_RUNTIMES,
+    REFUSED as REFUSED,
+    UNSUPPORTED,
+    VALID_POLICY as VALID_POLICY,
+    Reading,
+    _read_json,
+    _stamp,
+    cache_path as cache_path,
+    refusal as refusal,
+    save,
+)
 from ndf.contracts import facts, limits, result
 
 TOOL = cli.tool_of(__name__)
-CHECK_COMMAND = "ndf training check"
-# 確かめる口の無い担当（kiro・agy など）の記録の値
-UNSUPPORTED = "unsupported"
-# 控えを読んで起動を断ったときの記録の値
-REFUSED = "refused"
-CACHE_FILE = "training.json"
-# 控えの期限の方針（contracts/limits.json）
-VALID_POLICY = "training.check-valid"
-
 CLAUDE_URL = "https://api.anthropic.com/api/oauth/account/settings"
 CLAUDE_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 CLAUDE_CREDENTIALS = ".credentials.json"
@@ -65,17 +69,6 @@ NOT_CHATGPT = "ChatGPT のログインでない（API キーのログイン）"
 BAD_SHAPE = "応答に学習の設定の真偽値が無い"
 
 
-class Reading(NamedTuple):
-    """1 つの担当の確認の結果。`training` は真（学習に使う）・偽（使わない）・None（確かめられない）。"""
-
-    runtime: str
-    training: Optional[bool]
-    reason: str
-
-    def item(self, checked_at: str) -> dict[str, object]:
-        return {"runtime": self.runtime, "training": self.training, "reason": self.reason, "checked_at": checked_at}
-
-
 def _unread(runtime: str, reason: str) -> Reading:
     return Reading(runtime, None, reason)
 
@@ -93,14 +86,6 @@ def _get(client: httpx.Client, url: str, headers: Mapping[str, str], timeout: fl
     except ValueError:
         return None, "応答が JSON でない"
     return (body, "") if isinstance(body, dict) else (None, "応答が JSON のオブジェクトでない")
-
-
-def _read_json(path: Path) -> Optional[dict]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 無いか壊れていれば無いとして扱う
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def _keychain_oauth() -> Optional[dict]:
@@ -226,6 +211,8 @@ def read_codex(env: Mapping[str, str], client: httpx.Client, now: float) -> Read
 Reader = Callable[[Mapping[str, str], httpx.Client, float], Reading]
 # 確かめる口のある担当と、その読み手
 READERS: dict[str, Reader] = {"claude": read_claude, "codex": read_codex}
+if set(READERS) != CHECKED_RUNTIMES:
+    raise ImportError(f"読み手の担当 {sorted(READERS)} が控えの規則の担当 {sorted(CHECKED_RUNTIMES)} と食い違う")
 
 
 def reader(runtime: str) -> Optional[Reader]:
@@ -241,73 +228,6 @@ def checked() -> tuple[str, ...]:
 def read_setting(runtime: str, env: Mapping[str, str], client: httpx.Client, now: float) -> Reading:
     read = reader(runtime)
     return read(env, client, now) if read is not None else _unread(runtime, UNSUPPORTED)
-
-
-# ---------------------------------------------------------------- 控え
-
-
-def cache_path() -> Path:
-    """控えの置き場（状態の置き場の `training.json`）。"""
-    return identity.prepare_state_dir(identity.load()) / CACHE_FILE
-
-
-def _stamp(now: float) -> str:
-    return datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
-
-
-def save(readings: list[Reading], now: float) -> Path:
-    """確かめた担当の結果を控えへ書く（ほかの担当の控えは残す）。一時ファイルから置き換える。"""
-    path = cache_path()
-    kept = _read_json(path)
-    if kept is None:
-        kept = {}
-    kept.update({r.runtime: r.item(_stamp(now)) for r in readings})
-    tmp = path.with_name(f".{path.name}.{os.getpid()}")
-    tmp.write_text(json.dumps(kept, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-    return path
-
-
-def _ask_check(runtime: str, why: str) -> str:
-    return f"学習に使わない設定と確かめられていないので {runtime} を起動しない（{why}）。`{CHECK_COMMAND} --runtime {runtime}` で確かめる"
-
-
-def _cached_refusal(runtime: str, entry: object, now: float) -> Optional[str]:
-    if not isinstance(entry, dict):
-        return _ask_check(runtime, "控えが無い")
-    try:
-        checked_at = datetime.fromisoformat(str(entry.get("checked_at"))).timestamp()
-    except ValueError:
-        return _ask_check(runtime, "控えの時刻が読めない")
-    if now - checked_at > limits.seconds(VALID_POLICY):
-        return _ask_check(runtime, f"控えの期限切れ（{entry.get('checked_at')} に確かめた）")
-    training = entry.get("training")
-    if training is True:
-        return f"{runtime} のアカウントが入力を学習に使う設定なので起動しない。設定を Off にしてから `{CHECK_COMMAND} --runtime {runtime}` で確かめ直す"
-    if training is not False:
-        return _ask_check(runtime, f"確かめられなかった: {entry.get('reason')}")
-    return None
-
-
-def refusal(runtime: str, now: Optional[float] = None) -> Optional[str]:
-    """`runtime` を起動してよければ None、断るなら理由。控えを読むだけで、確かめ直さない。
-
-    確かめる口の無い担当（kiro・agy など）は通し、記録に `unsupported` を残す。
-    """
-    if reader(runtime) is None:
-        record("training", runtime=runtime, state=UNSUPPORTED)
-        return None
-    try:
-        path = cache_path()
-    except (identity.IdentityError, OSError) as exc:
-        return _ask_check(runtime, f"控えの置き場を用意できない: {exc}")
-    cache = _read_json(path) if path.is_file() else {}
-    if cache is None:
-        return _ask_check(runtime, "控えが読めない")
-    why = _cached_refusal(runtime, cache.get(runtime), time.time() if now is None else now)
-    if why is not None:
-        record("training", runtime=runtime, state=REFUSED)
-    return why
 
 
 # ---------------------------------------------------------------- 副命令
