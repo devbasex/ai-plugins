@@ -87,29 +87,29 @@ class StepProgress:
     def answer_value(self) -> Optional[str]:
         return str(_payload(self.answer)["answer"]) if self.answer is not None else None
 
-
-def _seen(prog: StepProgress, ev: model.Event) -> None:
-    kind, p = ev.draft.kind, _payload(ev)
-    if kind == STARTED:
-        prog.anchor, prog.answer, prog.waiting = ev.seq, None, None
-    elif kind == STEP_EVENT:
-        if p["status"] == FINISHED:
-            prog.done[p["step"]], prog.waiting = p["report"], None
-        else:
-            prog.waiting = p
-        prog.anchor, prog.answer = ev.seq, None
-    elif kind == ANSWERED and p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
-        prog.generation += 1
-        prog.done, prog.waiting, prog.answer, prog.anchor = {}, None, None, ev.seq
-        prog.notes = p["notes"]
-    elif kind == ANSWERED and ev.seq > prog.anchor:
-        prog.answer = ev
+    def see(self, ev: model.Event) -> None:
+        """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの revise）なら世代を上げてステップを初めから流し直す。"""
+        kind, p = ev.draft.kind, _payload(ev)
+        if kind == STARTED:
+            self.anchor, self.answer, self.waiting = ev.seq, None, None
+        elif kind == STEP_EVENT:
+            if p["status"] == FINISHED:
+                self.done[p["step"]], self.waiting = p["report"], None
+            else:
+                self.waiting = p
+            self.anchor, self.answer = ev.seq, None
+        elif kind == ANSWERED and p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
+            self.generation += 1
+            self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
+            self.notes = p["notes"]
+        elif kind == ANSWERED and ev.seq > self.anchor:
+            self.answer = ev
 
 
 def step_progress(v: View, stage: str) -> StepProgress:
     prog = StepProgress()
     for ev in v.row_events(stage):
-        _seen(prog, ev)
+        prog.see(ev)
     return prog
 
 
