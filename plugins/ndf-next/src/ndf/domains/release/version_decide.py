@@ -7,7 +7,7 @@
 | 本番（`production`） | 今の版の基底を、上げる幅（`major`・`minor`・`patch`）で上げた版。今の版が開発版なら、その基底をそのまま出す |
 | 開発版（`dev`） | 本番の次の版に `-dev.<n>`。今の版が同じ基底の開発版なら `n` を 1 つ進め、ほかは 1 から始める |
 
-リリースのブランチの名前・タグの名前・CHANGELOG の見出しもここで版から作る（作り方を 1 か所に置く）。
+リリースのブランチの名前・タグの名前もここで版から作る（作り方を 1 か所に置く）。
 """
 
 from __future__ import annotations
@@ -108,13 +108,3 @@ def version_of_branch(branch: str) -> str:
 def tag_of(plugin: str, version: str) -> str:
     """基底の版のタグの名前。"""
     return f"{plugin}{TAG_SEPARATOR}{base_of(version)}"
-
-
-def changelog_heading(plugin: str, version: str, date: str) -> str:
-    """CHANGELOG の版の見出し（`## [<プラグイン名> <版>] - <日付>`）。"""
-    return f"{changelog_key(plugin, version)} - {date}"
-
-
-def changelog_key(plugin: str, version: str) -> str:
-    """CHANGELOG の版の見出しの、日付を除いた先頭（節を探す鍵）。"""
-    return f"## [{plugin} {base_of(version)}]"

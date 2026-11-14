@@ -25,16 +25,26 @@ class Entry(NamedTuple):
     title: str
 
 
+def changelog_heading(plugin: str, version: str, date: str) -> str:
+    """CHANGELOG の版の見出し（`## [<プラグイン名> <版>] - <日付>`）。"""
+    return f"{changelog_key(plugin, version)} - {date}"
+
+
+def changelog_key(plugin: str, version: str) -> str:
+    """CHANGELOG の版の見出しの、日付を除いた先頭（節を探す鍵）。"""
+    return f"{SECTION_MARK}[{plugin} {version_decide.base_of(version)}]"
+
+
 def block(plugin: str, version: str, date: str, entries: Sequence[Entry]) -> list[str]:
     """節の行（見出し・空行・PR ごとの 1 行・空行）。"""
-    lines = [version_decide.changelog_heading(plugin, version, date), ""]
+    lines = [changelog_heading(plugin, version, date), ""]
     lines += [f"- {e.title.strip()}（#{e.number}）" for e in sorted(entries, key=lambda e: e.number)]
     return [*lines, ""]
 
 
 def _span(lines: list[str], plugin: str, version: str) -> tuple[int, int] | None:
     """版の節の (見出しの行, 次の節の行)。無ければ None。"""
-    key = version_decide.changelog_key(plugin, version)
+    key = changelog_key(plugin, version)
     at = next((i for i, line in enumerate(lines) if line == key or line.startswith(key + " ")), None)
     if at is None:
         return None
