@@ -27,7 +27,7 @@ T = TypeVar("T")
 
 _dir = DEFAULT_DIR
 # 置き場を差し替えたときに捨てる、読み手ごとのキャッシュ
-_clearers: list = []
+_clearers: list[Callable[[], None]] = []
 
 
 class ContractError(Exception):
@@ -47,15 +47,10 @@ def use_dir(path: str | Path | None) -> None:
         clear()
 
 
-def _on_reset(clear) -> None:
-    """`use_dir` のときに呼ぶキャッシュの消し方を登録する。"""
-    _clearers.append(clear)
-
-
 def cached_reader(fn: Callable[..., T]) -> Callable[..., T]:
     """`fn` を 1 プロセスに 1 回だけ読む関数にし、`use_dir` で置き場を差し替えたときに読み直させる。"""
     cached = cache(fn)
-    _on_reset(cached.cache_clear)
+    _clearers.append(cached.cache_clear)
     return cached
 
 
@@ -103,7 +98,7 @@ def load_as(rel: str, error_cls: type[ContractError]) -> Any:
         return load_json(rel)
 
 
-@cache
+@cached_reader
 def _schema_validator(rel: str) -> Draft202012Validator:
     """`rel` の検証器。`<ファイル>#/$defs/<名前>` の形なら、そのファイルの `$defs` の 1 つで確かめる。"""
     path, _, pointer = rel.partition("#")
