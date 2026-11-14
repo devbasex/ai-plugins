@@ -4,7 +4,7 @@
   "entry": {
     "roots": ["ndf.domains.hooks.main"],
     "dependencies": ["tree_sitter", "tree_sitter_bash", "markdown_it", "mdit_py_plugins", "pygments"],
-    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.markdown", "ndf.domains", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.blocks"],
+    "modules": ["ndf", "ndf.identity", "ndf.adapters", "ndf.adapters.markdown", "ndf.domains", "ndf.domains.hooks", "ndf.domains.hooks.*", "ndf.domains.relay", "ndf.domains.relay.signals", "ndf.domains.relay.blocks"],
     "forbidden": ["ndf.core.durable", "ndf.contracts", "ndf.adapters.notify", "ndf.adapters.github", "ndf.adapters.llm", "ndf.adapters.ci", "ndf.adapters.claude", "dbos", "httpx", "githubkit", "slack_sdk", "jsonschema"]
   },
   "stdlib_only": [
