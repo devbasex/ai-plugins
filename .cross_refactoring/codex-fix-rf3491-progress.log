@@ -1,0 +1,5 @@
+2026-11-14T19:08:18.021037+00:00 start I-011 差し戻しの調査開始
+2026-11-14T19:08:43.211029+00:00 edit I-011 prod_version と元のテストを削除前の内容へ復元
+2026-11-14T19:08:51.913221+00:00 test I-011 ruff: All checks passed! exit=0; git diff --check exit=0; 2 files match the pre-removal versions; AST parse passed exit=0; pytest 未実行（test.ci.only=true、指定コマンドなし）
+2026-11-14T19:09:08.441543+00:00 commit I-011 検証済みの復元内容と結果をコミット
+2026-11-14T19:09:14.845544+00:00 done I-011 復元内容をコミット済み。結果保存済み。push なし

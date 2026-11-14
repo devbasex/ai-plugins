@@ -38,3 +38,8 @@ def test_close_steps_follow_the_order() -> None:
 def test_close_plan_rejects_unknown_values(facts: sd.CloseFacts) -> None:
     with pytest.raises(sd.SprintError):
         sd.close_plan(facts, PACES)
+
+
+def test_prod_version_strips_the_dev_suffix() -> None:
+    assert sd.prod_version("1.3.0-dev.2") == "1.3.0"
+    assert sd.prod_version(None) is None
