@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from ndf.domains.crossrefactor import flaky_decide
+from ndf.domains.crossrefactor import budget_decide, flaky_decide
 from ndf.domains.crossrefactor.symbols_decide import Touched
 
 # コードを書く工程の結果の形の指示（前置きの改行・空白は呼び出し側が付ける）
@@ -37,14 +37,24 @@ def propose(pr: int, touched: Touched) -> str:
     )
 
 
+def _tiers() -> str:
+    """計画の担当へ示すグレードの並び（予算の選び方が読む `budget_decide.TIER_ORDER` の順）。"""
+    return "・".join(budget_decide.TIER_ORDER)
+
+
+def _estimate_example() -> str:
+    """計画の担当へ示す見積りの形（予算の選び方が読む `budget_decide.ESTIMATE_PARTS` の鍵。値は分）。"""
+    return "{" + ", ".join(f'"{part}": <分>' for part in budget_decide.ESTIMATE_PARTS) + "}"
+
+
 def plan(pr: int, proposals: Sequence[Mapping[str, Any]]) -> str:
     lines = [f"- {p['path']} {p['symbol']}: {p['title']}（{p['reason']}）" for p in proposals]
     return (
         f"PR #{pr} のリファクタリングの提案から、採る項目を選んで並べる（重なるものは 1 つにする）。\n"
         + "\n".join(lines)
-        + "\n項目ごとにグレード（tier: high・medium・low）と見積り（estimate: テストの追加と実装の分）を付ける。"
+        + f"\n項目ごとにグレード（tier: {_tiers()}）と見積り（estimate: テストの追加と実装の分）を付ける。"
         + '\n最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
-        + ' "tier": "<グレード>", "estimate": {"test": <分>, "implement": <分>}}]} を出す。'
+        + f' "tier": "<グレード>", "estimate": {_estimate_example()}}}]}} を出す。'
     )
 
 
