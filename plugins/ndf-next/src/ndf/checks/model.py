@@ -45,7 +45,7 @@ class Source:
 
     @cached_property
     def tree(self) -> ast.Module:
-        """構文の誤りは `SyntaxError` のまま送出する（検査の入口が `syntax` の違反にする）。"""
+        """構文の誤りは `SyntaxError` のまま送出する（検査のエントリポイントが `syntax` の違反にする）。"""
         return ast.parse(self.text, filename=self.rel)
 
     @property

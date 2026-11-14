@@ -1,1 +1,1 @@
-"""作り直しの NDF（#1142）。入口は `python -m ndf`（`bin/ndf`）。"""
+"""作り直しの NDF（#1142）。エントリポイントは `python -m ndf`（`bin/ndf`）。"""
