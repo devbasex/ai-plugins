@@ -8,21 +8,33 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 from typing import List
 
-# このファイルから 1 つ上がプラグインの根。src をパスの先頭へ足す（呼び出し元のディレクトリは足さない）
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+def _load_entry():
+    """隣の `hooks/entry.py`（標準ライブラリだけを読む）。読むと src がパスの先頭へ足される。
+
+    プラグインの置き場へ `hooks/__pycache__` を書かない（このファイルを起こしたときと同じに、entry.py の pyc を残さない）。
+    """
+    spec = importlib.util.spec_from_file_location("_ndf_hooks_entry", str(Path(__file__).resolve().with_name("entry.py")))
+    module = importlib.util.module_from_spec(spec)
+    saved, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = saved
+    return module
+
+
+_ENTRY = _load_entry()
 
 
 def main(argv: List[str]) -> int:
     """いつも 0。"""
-    try:
-        from ndf.domains.hooks.boot import run_boot
-    except Exception:  # noqa: BLE001 ファイル: 本体を読めない python（古い版など）でも Tool の呼び出しを止めない（IH4）
-        return 0
-    return run_boot(argv)
+    return _ENTRY.call("ndf.domains.hooks.boot", "run_boot", argv)
 
 
 if __name__ == "__main__":

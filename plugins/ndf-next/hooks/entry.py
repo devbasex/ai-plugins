@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 from typing import List
@@ -15,13 +16,18 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
+def call(module: str, func: str, argv: List[str]) -> int:
+    """本体の `module` の `func` に argv を渡す。本体を読めなければ 0（`hooks/boot.py` も使う）。"""
+    try:
+        run = getattr(importlib.import_module(module), func)
+    except Exception:  # noqa: BLE001 ファイル: 本体を読めない環境・python（壊れた・古い）でも Tool の呼び出しを止めない（IH4）
+        return 0
+    return run(argv)
+
+
 def main(argv: List[str]) -> int:
     """いつも 0。"""
-    try:
-        from ndf.domains.hooks.main import run_entry
-    except Exception:  # noqa: BLE001 ファイル: 本体を読めない環境（壊れた・古い）でも Tool の呼び出しを止めない（IH4）
-        return 0
-    return run_entry(argv)
+    return call("ndf.domains.hooks.main", "run_entry", argv)
 
 
 if __name__ == "__main__":
