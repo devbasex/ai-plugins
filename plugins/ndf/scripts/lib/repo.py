@@ -25,6 +25,9 @@ SPRINT_MANIFEST = "sprint.json"
 PLAN_STATE_SUFFIX = "-state"
 # 確定仕様の置き場（リポジトリの根からの相対）。確定仕様化と設計との突き合わせが同じものを読む
 SPEC_DIR = "docs/specifications"
+# 既定ブランチの候補を理由の文言に載せる形（「 / 」区切りと「・」区切り）
+_CANDIDATES_TEXT = " / ".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
+_CANDIDATES_LIST = "・".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
 
 
 # メインディレクトリの決め方の正本は decl.main_dir（サブモジュールは core.worktree。#2054）
@@ -145,7 +148,7 @@ def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]
     d = default_branch(root)
     if d:
         return d, "既定ブランチ"
-    return None, f"宣言も {remote} の HEAD も main / master も無い"
+    return None, f"宣言も {remote} の HEAD も {_CANDIDATES_TEXT} も無い"
 
 
 def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
@@ -154,8 +157,8 @@ def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
     if v:
         return v, f"{WORKTREE_DECL} の production_branch"
     if default:
-        return default, "既定ブランチ（origin/HEAD → ローカルの main / master）"
-    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"
+        return default, f"既定ブランチ（origin/HEAD → ローカルの {_CANDIDATES_TEXT}）"
+    return None, f"production_branch も既定ブランチ（origin/HEAD・{_CANDIDATES_LIST}）も無い"
 
 
 def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
