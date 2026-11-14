@@ -179,7 +179,7 @@ def _released(main: Git, meta: dict, ref: str) -> bool:
         try:
             if main.is_ancestor(commit, ref):
                 return True
-        except GitError as exc:  # noqa: NDF401 外部コマンド: 片方のコミットが無くても、もう片方で確かめる
+        except GitError as exc:  # 片方のコミットが無くても、もう片方で確かめる
             errors.append(exc)
     if len(errors) == len(commits):
         raise errors[0]

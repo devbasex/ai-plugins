@@ -211,7 +211,7 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of((raw.get("mergeCommit") or {}).get("oid")),
+            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
         )  # fmt: skip
 
 

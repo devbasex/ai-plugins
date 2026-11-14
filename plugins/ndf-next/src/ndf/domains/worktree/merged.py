@@ -147,15 +147,7 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record, merge: st
         _delete_branch(main, branch, rec)
 
 
-def _one(
-    main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Optional[Mapping[str, Any]], base: Optional[str], rec: Record
-) -> None:
-    if pull is None:
-        rec.add("pr", str(number), outcomes.KEPT, "PR が見つからない")
-        return
-    if not pull.merged:
-        rec.add("pr", str(number), outcomes.KEPT, "PR がマージされていない")
-        return
+def _one(main: Git, main_dir: Path, pull: Pull, flow: Optional[Mapping[str, Any]], base: Optional[str], rec: Record) -> None:
     branch = pull.head_ref
     production = flow.get("production_branch") if flow is not None else None
     keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
@@ -209,8 +201,12 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     with mainlock.held(main):
         sync_main(main, base, rec)
     for n in numbers:
+        pull = pulls.get(n)
+        if pull is None or not pull.merged:
+            rec.add("pr", str(n), outcomes.KEPT, "PR が見つからない" if pull is None else "PR がマージされていない")
+            continue
         with mainlock.held(main):
-            _one(main, main_dir, pulls.get(n), n, flow, base, rec)
+            _one(main, main_dir, pull, flow, base, rec)
     main.run("worktree", "prune")
     # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンの後片付けを待たせない）
     t = testenv.target(main_dir)
