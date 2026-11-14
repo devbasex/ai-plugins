@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol, Union
 
 from ndf.adapters import github
-from ndf.contracts.exit_codes import GATE, OK, STOPPED
+from ndf.contracts.exit_codes import OK, STOPPED
 from ndf.core import durable
 from ndf.core.plan import queue_decide
 from ndf.core.plan.queue_run import QUEUE_PRS
@@ -38,11 +38,25 @@ from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
 
+# 再開・設計の起点・問いの当て先は resume が持つ。呼び手の import を保つためにここからも読める
+from ndf.core.resume import (  # noqa: F401
+    LAP_HELD,
+    LAP_RUNNING,
+    SKIP,
+    DesignPr,
+    DesignStart,
+    Lap,
+    ResumeTarget,
+    design_start,
+    match_plan,
+    question_target,
+    resume_target,
+)
+
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
 QUEUE_PRS_KIND = QUEUE_PRS
-# 空に解けたら飛ばす実行条件の値（`when_empty`）。流す前の判断と再開の扱いの「流さない」も同じ語
-SKIP = "skip"
+# 空に解けたら飛ばす実行条件の値（`when_empty`）。流す前の判断の「流さない」と同じ語（`resume.SKIP`）
 WHEN_EMPTY_SKIP = SKIP
 # 版の形（数 3 つ。後ろに pre-release か build の印を持てる）
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
@@ -53,8 +67,6 @@ EVENT_RUN, EVENT_STEP = "run", "step"
 # 課題を閉じる PR を 1 つの課題から読む件数（超えたら読めないとして止まる）
 CLOSING_PER_ISSUE = 100
 _CLOSING_FIELDS = f"closedByPullRequestsReferences(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number }} }}"
-# ループの 1 回の状態のうち、問いを当ててよいもの（進行中と、締め直しの途中の保留）
-LAP_RUNNING, LAP_HELD = "running", "held"
 
 
 class RefError(ValueError):
@@ -122,16 +134,6 @@ class PlanRecord(NamedTuple):
 
     status: Optional[str]
     outputs: Mapping[str, Any]
-
-
-class DesignPr(NamedTuple):
-    """課題の設計 PR の状態。PR が無ければ `number` が None。"""
-
-    number: Optional[int]
-    merged: bool = False
-    state: str = ""
-    head_sha: str = ""
-    head_ref: str = ""
 
 
 class Context(NamedTuple):
@@ -334,89 +336,6 @@ def resolve_plan(plan_raw: Mapping[str, Any], ctx: Context, src: Sources) -> Res
     except RefError as exc:
         return Resolved(unresolved={"refs": Unresolved("invalid", str(exc))})
     return resolve(refs, ctx, src)
-
-
-# --- 再開の位置 ---------------------------------------------------------------------------
-
-
-def match_plan(plans: Mapping[str, Path], given: str, cwd: Path) -> list[str]:
-    """`--from` に渡された名前・フルパス・相対パスを、前の起動の一覧のプラン（名前 → 絶対パス）へ照らす（#2806）。
-
-    プランの名前・ファイル名の stem・末尾のパスの一致・`cwd` から解いた絶対パスの一致のどれかで当たった名前を返す。
-    """
-    want = given.strip()
-    absolute = Path(os.path.normpath(Path(want) if Path(want).is_absolute() else cwd / want))
-    tail = "/" + want.removeprefix("./")
-    return [
-        name
-        for name, path in plans.items()
-        if want in (name, path.stem) or path.as_posix().endswith(tail) or Path(os.path.normpath(path)) == absolute
-    ]
-
-
-class ResumeTarget(NamedTuple):
-    """再開のときのプラン 1 本の扱い。`action` は ok（流す）・`skip`（完了で流さない）・gate（人へ戻す）。"""
-
-    name: str
-    action: str
-    start: Optional[str]
-    reason: str
-
-
-def resume_target(name: str, digest: str, recorded: Optional[Mapping[str, Any]], start: Optional[str]) -> ResumeTarget:
-    """前の起動の記録から、プラン 1 本を流すか・流さないか・人へ戻すかを決める。`--from` の開始点は常に勝つ。
-
-    完了でハッシュが同じなら流さない。完了の後にプランが変わった（ハッシュが違う・記録にハッシュが無い）なら、
-    黙って飛ばさずに人へ戻す。
-    """
-    if start is not None:
-        return ResumeTarget(name, OK, start, f"--from で {start} から流す")
-    if recorded is None or recorded.get("status") != OK:
-        return ResumeTarget(name, OK, None, "前の起動で完了していない")
-    if "digest" not in recorded:
-        return ResumeTarget(name, GATE, None, "完了の記録にプランのハッシュが無く、変わっていないかを確かめられない")
-    if recorded["digest"] != digest:
-        return ResumeTarget(name, GATE, None, "完了の後にプランが変わった（--from <プラン>=<ステップ> で流し直すか決める）")
-    return ResumeTarget(name, SKIP, None, "前の起動で完了し、プランは変わっていない")
-
-
-# --- 設計の起点と問いの当て先 -------------------------------------------------------------
-
-
-class DesignStart(NamedTuple):
-    """次のループの 1 回の設計の起点。`skip` なら設計を飛ばす。`commit` は設計を続ける起点のコミット（無ければ新しく始める）。"""
-
-    skip: bool
-    commit: Optional[str]
-    reason: str
-
-
-def design_start(pr: DesignPr) -> DesignStart:
-    """設計 PR の状態から、次のループの 1 回の設計の起点を決める（#2528・#2489・#2665）。"""
-    if pr.number is None:
-        return DesignStart(False, None, "設計 PR が無い（設計から始める）")
-    if pr.merged:
-        return DesignStart(True, None, f"設計 PR #{pr.number} はマージ済み（設計を飛ばす）")
-    if pr.state == "open" and pr.head_sha:
-        return DesignStart(False, pr.head_sha, f"設計 PR #{pr.number} の最新 {pr.head_sha[:12]} から続ける")
-    return DesignStart(False, None, f"設計 PR #{pr.number} はマージされずに閉じた（設計から始める）")
-
-
-class Lap(NamedTuple):
-    """ループの 1 回。`status` は running・held など、`closing` は保留の 1 回を締め直している途中か。"""
-
-    name: str
-    status: str
-    plans: tuple[str, ...]
-    closing: bool = False
-
-
-def question_target(laps: Sequence[Lap], plan: str) -> Optional[Lap]:
-    """問いを出したプランが属するループの 1 回（進行中か、締め直しの途中の保留）を返す。無ければ None（#2638・#2664）。"""
-    wanted = os.path.normpath(plan)
-    open_laps = [lap for lap in laps if lap.status == LAP_RUNNING or (lap.status == LAP_HELD and lap.closing)]
-    found = [lap for lap in open_laps if wanted in {os.path.normpath(p) for p in lap.plans}]
-    return found[-1] if found else None
 
 
 # --- 読み手（ファイルと GitHub） ----------------------------------------------------------
