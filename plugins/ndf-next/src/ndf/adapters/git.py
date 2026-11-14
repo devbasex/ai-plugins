@@ -6,6 +6,7 @@ git を起動するのはこのモジュールの `Git` だけで、呼ぶ側は
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Callable, Iterable
@@ -22,6 +23,10 @@ _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:,
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 # `git log --format` で各コミットの行の先頭に置く印（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
+# ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
+HEADS = "refs/heads/"
+# git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
+NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 class GitError(Exception):
@@ -40,9 +45,9 @@ Runner = Callable[[list[str], Optional[Path]], Completed]
 
 
 def run_git(args: list[str], cwd: Optional[Path]) -> Completed:
-    """git を 1 回起動する（既定の起動の関数）。"""
+    """git を 1 回起動する（既定の起動の関数）。認証の入力を端末へ求めない（`NO_PROMPT`）。"""
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False, env={**os.environ, **NO_PROMPT})
     except OSError as exc:
         raise GitError(f"git を起動できない: {exc}") from None
     return Completed(proc.returncode, proc.stdout, proc.stderr)
@@ -86,6 +91,36 @@ def repo_of_url(url: str) -> Optional[str]:
     """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。"""
     m = _REMOTE.search(url.strip())
     return f"{m.group('owner')}/{m.group('name')}" if m else None
+
+
+class WorktreeEntry(NamedTuple):
+    """`git worktree list` の 1 件。`branch` は detached HEAD なら `None`。"""
+
+    path: Path
+    head: str
+    branch: Optional[str]
+    prunable: bool = False
+    locked: bool = False
+
+
+def parse_worktree_list(text: str) -> list[WorktreeEntry]:
+    """`git worktree list --porcelain -z` の出力を読む（項目は NUL、worktree は空の項目で区切られる）。先頭はメインディレクトリ。"""
+    out: list[WorktreeEntry] = []
+    for record in text.split("\0\0"):
+        fields = dict(f.partition(" ")[::2] for f in record.split("\0") if f)
+        if "worktree" not in fields:
+            continue
+        branch = fields.get("branch")
+        out.append(
+            WorktreeEntry(
+                Path(fields["worktree"]),
+                fields["HEAD"] if "HEAD" in fields else "",
+                branch[len(HEADS) :] if branch is not None and branch.startswith(HEADS) else None,
+                "prunable" in fields,
+                "locked" in fields,
+            )
+        )
+    return out
 
 
 @dataclass(frozen=True)
@@ -148,3 +183,15 @@ class Git:
         if repo is None:
             raise GitError(f"リモート {remote} は GitHub のリポジトリでない: {url}")
         return repo
+
+    def worktrees(self) -> list[WorktreeEntry]:
+        """このリポジトリの worktree の一覧（先頭はメインディレクトリ）。"""
+        return parse_worktree_list(self.run("worktree", "list", "--porcelain", "-z"))
+
+    def fetch(self, remote: str, *refspecs: str) -> Completed:
+        """`git fetch -q --no-tags <remote> <refspec>...` を打ち、結果をそのまま返す（失敗を止めるかは呼び手が決める）。
+
+        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
+        `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
+        """
+        return self.runner(["fetch", "-q", "--no-tags", remote, *refspecs], self.cwd)

@@ -1,0 +1,134 @@
+"""テスト環境の見回りと公開: 使われていない環境を止める（`reap`）・外部へ公開する（`expose`）・公開を閉じる（`unexpose`）。
+
+- `reap`: 最後に使った時刻から `idle` 秒を過ぎた割り当ての環境を `compose stop` で止める（データは残す）。テストの実行中
+  （目印を握っている）の環境は止めない
+- `expose`: 宣言の `testenv.expose`（`enabled`・`public_tag`・`base_domain`・`open_command`）に従って、載っている基準が
+  公開を許す基準と同じ環境だけを公開する。公開できるのは同時に 1 本（台帳の排他の中で判定する）
+- `unexpose`: 宣言の `close_command` で閉じてから台帳を閉じる。閉じる手段が失敗したら台帳を閉じない
+"""
+
+from __future__ import annotations
+
+import calendar
+import time
+from typing import Any, Optional
+
+from filelock import FileLock, Timeout
+
+from ndf.domains.worktree import ledger, testenv
+from ndf.domains.worktree.testenv import Target, TestenvError
+
+# 公開の既定の期限
+DEFAULT_TTL = "8h"
+
+
+def _age(stamp: Any) -> Optional[float]:
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return time.time() - calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:  # noqa: NDF401 ファイル: 台帳の時刻が読めない行は止めない側へ倒す
+        return None
+
+
+def reap(t: Target, idle: float) -> list[dict[str, Any]]:
+    """使われていない環境を止め、1 件ごとの結果を返す。"""
+    if not t.shell.has_docker():
+        return []
+    items = []
+    for row in t.book.rows():
+        age = _age(row.get("last_used_at"))
+        if row.get("released_at") is not None or age is None or age < idle:
+            continue
+        items.append(_stop_idle(t, row))
+    return items
+
+
+def _stop_idle(t: Target, row: dict[str, Any]) -> dict[str, Any]:
+    env = row["environment"]
+    item = {"kind": "testenv", "name": env, "worktree": row["worktree"]}
+    try:
+        with FileLock(str(testenv.inuse_lock(t, env)), timeout=0):
+            rc = t.shell.docker_run("compose", "-p", env, "stop").returncode
+    except Timeout:
+        return {**item, "result": "kept", "reason": "テストの実行中"}
+    return {**item, "result": "stopped" if rc == 0 else "kept", **({} if rc == 0 else {"reason": f"止められない（終了コード {rc}）"})}
+
+
+def _open_row(rows: list[dict[str, Any]], worktree: str) -> Optional[dict[str, Any]]:
+    """worktree の、開いている公開を持つ最後の割り当て（解放の後も閉じるまで残る）。"""
+    return ledger.latest(rows, worktree, lambda r: isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None)
+
+
+def _config(t: Target) -> dict[str, Any]:
+    conf = t.at("expose")
+    if not isinstance(conf, dict) or conf.get("enabled") is not True:
+        raise TestenvError("拒否: testenv.expose.enabled が有効でない")
+    if not conf.get("public_tag") or not conf.get("base_domain"):
+        raise TestenvError("拒否: testenv.expose.public_tag と base_domain が要る")
+    if not conf.get("open_command"):
+        raise TestenvError("公開の手段が宣言されていない（testenv.expose.open_command）")
+    return conf
+
+
+def _claim(t: Target, url: str, ttl: str) -> bool:
+    """公開の記録を置く。ほかの worktree が公開中なら置かずに偽（同時に開けるのは 1 本）。"""
+    with t.book.editing() as rows:
+        if any(isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None and r.get("worktree") != t.key for r in rows):
+            return False
+        row = ledger.latest(rows, t.key, lambda r: r.get("released_at") is None)
+        if row is None:
+            return False
+        row["expose"] = {"url": url, "ttl": ttl, "opened_at": ledger.now(), "closed_at": None}
+        return True
+
+
+def _close(row: dict[str, Any]) -> None:
+    row["expose"]["closed_at"] = ledger.now()
+
+
+def expose(t: Target) -> str:
+    """公開して URL を返す。既に開いていればその URL。拒むときは `TestenvError`。"""
+    conf = _config(t)
+    row = t.book.current(t.key)
+    if row is None:
+        raise TestenvError("拒否: 割り当てが無い")
+    opened = _open_row(t.book.rows(), t.key)
+    if opened is not None:
+        return str(opened["expose"]["url"])
+    if row.get("golden_tag") != conf["public_tag"]:
+        raise TestenvError(f"拒否: 載っている基準（{row.get('golden_tag') or 'なし'}）が公開を許す基準（{conf['public_tag']}）と違う")
+    host = f"wt{row['slot']}.{conf['base_domain']}"
+    url = f"https://{host}"
+    if not _claim(t, url, str(conf["ttl"]) if conf.get("ttl") else DEFAULT_TTL):
+        raise TestenvError("拒否: 別のテスト環境が公開中（同時に開けるのは 1 本）")
+    values = {
+        "NDF_EXPOSE_URL": url,
+        "NDF_EXPOSE_HOST": host,
+        "NDF_EXPOSE_ENVIRONMENT": row["environment"],
+        "NDF_EXPOSE_SLOT": str(row["slot"]),
+    }
+    if t.shell.sh(str(conf["open_command"]), t.path, values).returncode != 0:
+        # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す
+        t.book.update(t.key, _close, pick=lambda r: r.get("expose") is not None and r["expose"].get("closed_at") is None)
+        raise TestenvError("公開の手段が失敗した。記録を戻した")
+    return url
+
+
+def unexpose(t: Target) -> Optional[str]:
+    """公開を閉じ、閉じた URL を返す（開いていなければ `None`）。"""
+    row = _open_row(t.book.rows(), t.key)
+    if row is None:
+        return None
+    url = str(row["expose"]["url"])
+    conf = t.at("expose")
+    command = conf.get("close_command") if isinstance(conf, dict) else None
+    if command:
+        values = {"NDF_EXPOSE_URL": url, "NDF_EXPOSE_HOST": url.split("://", 1)[-1], "NDF_EXPOSE_ENVIRONMENT": str(row["environment"]),
+                  "NDF_EXPOSE_SLOT": str(row["slot"])}  # fmt: skip
+        where = t.path if t.path.is_dir() else t.main_dir
+        if t.shell.sh(str(command), where, values).returncode != 0:
+            raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
+    if not t.book.update(t.key, _close, pick=lambda r: isinstance(r.get("expose"), dict) and r["expose"].get("closed_at") is None):
+        raise TestenvError(f"台帳を閉じられない。unexpose を打ち直す: {url}")
+    return url
