@@ -170,7 +170,8 @@ def _init(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     except setup.SetupError as exc:
         return result.stopped(TOOL, "refused", str(exc))
     summary = f"宣言を作った: {got.path}（コミットする）" if got.written else f"宣言は既にある: {got.path}"
-    return result.result(TOOL, result.OK, summary, outputs={"declaration": str(got.path)}, warnings=list(got.warnings))
+    # outputs はスプリントの文脈の閉じた語彙だけを持つ（宣言のパスは工程どうしで渡す値ではない）
+    return result.result(TOOL, result.OK, summary, [{"path": str(got.path), "written": got.written}], warnings=list(got.warnings))
 
 
 def _check(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:

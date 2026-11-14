@@ -42,10 +42,10 @@ def test_guard_and_session(main_repo: Path, capsys: pytest.CaptureFixture[str], 
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "guard", "issues/x.md")
     assert out["items"] == []
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "session")
-    assert out["items"] == [] and out["metrics"] == {"dirty": 0}
+    assert out["items"] == [] and out["metrics"] == {"dirty": 0, "followed": False}
     (main_repo / ".gitignore").write_text(".worktrees/\nx\n", encoding="utf-8")
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "session")
-    assert out["metrics"] == {"dirty": 1} and "1 件" in out["items"][0]["context"]
+    assert out["metrics"] == {"dirty": 1, "followed": False} and "1 件" in out["items"][0]["context"]
 
 
 def test_guard_inside_worktree_is_silent(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
@@ -66,7 +66,7 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
     code, out = _run(capsys, last_result, "--cwd", str(main), "check")
     assert code == 0 and out["metrics"] == {"present": False}
     code, out = _run(capsys, last_result, "--cwd", str(main), "init")
-    assert code == 0 and out["outputs"]["declaration"].endswith("worktree.json")
+    assert code == 0 and out["items"][0]["path"].endswith("worktree.json") and "outputs" not in out
     # 節の無い宣言では環境の副命令は何もしない
     for argv in (("deps", str(main)), ("localenv", "mode"), ("testenv", "compose-env")):
         code, out = _run(capsys, last_result, "--cwd", str(main), *argv)

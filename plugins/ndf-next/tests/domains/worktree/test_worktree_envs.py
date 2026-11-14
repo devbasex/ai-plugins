@@ -17,6 +17,7 @@ def _declare(main: Path, run_git: Callable, extra: dict) -> None:
     (main / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     run_git(main, "add", "-A")
     run_git(main, "commit", "-q", "-m", "declare")
+    run_git(main, "push", "-q", "origin", "develop")  # worktree は origin のベースブランチから切る（create の起点）
 
 
 class FakeShell:

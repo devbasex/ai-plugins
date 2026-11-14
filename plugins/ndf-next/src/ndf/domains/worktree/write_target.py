@@ -243,8 +243,8 @@ class _Scan:
             self.emit(value, st)
 
     def substitutions(self, n: Any, st: _Place) -> None:
-        """語の中のコマンド置換とプロセス置換を、部分シェルとして読む。"""
-        stack = list(n.children)
+        """語の中のコマンド置換とプロセス置換を、部分シェルとして読む。語そのものが置換（`echo $(…)`）でも読む。"""
+        stack = [n]
         while stack:
             c = stack.pop()
             if c.type in SUBSTITUTIONS:
