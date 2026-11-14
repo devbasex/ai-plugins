@@ -22,8 +22,21 @@ COMMANDS: dict[str, str] = {
     "contracts": "ndf.contracts.cli",
     "launch-args": "ndf.adapters.cli",
     "plan": "ndf.core.plan.cli",
+    "relay": "ndf.domains.relay.cli",
     "test-slot": "ndf.testing.command",
 }
+
+
+def tool_of(module: str) -> str:
+    """モジュールのパス（副命令のモジュールの `__name__`）から副命令の名前を求める。
+
+    副命令の結果 JSON の `tool` はこの名前にする（各副命令は `TOOL = cli.tool_of(__name__)` で引き、名前を写さない）。
+    表に無いモジュールは `LookupError`。
+    """
+    for name, path in COMMANDS.items():
+        if path == module:
+            return name
+    raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
 
 
 def _usage(name: str) -> str:

@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "causes.schema.json",
   "title": "止まった理由の表",
-  "description": "contracts/causes.json の形。種類の重なり・終了コードの区分・再試行の方針の有無は読み手（ndf.contracts.causes）が確かめる",
+  "description": "contracts/causes.json の形。種類の重なり・exit が終了コードの表の stopped の id を指すこと・再試行の方針の有無は読み手（ndf.contracts.causes）が確かめる",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "causes"],
+  "required": ["owner", "causes"],
   "properties": {
-    "version": {"const": 1},
+    "owner": {"type": "string", "minLength": 1, "description": "表を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
     "causes": {
       "type": "array",
       "minItems": 1,
@@ -22,14 +22,21 @@
             "description": "Serverless Workflow DSL 1.0.3 の標準の誤りの型",
             "enum": ["configuration", "validation", "expression", "authentication", "authorization", "timeout", "communication", "runtime"]
           },
-          "exit": {"type": "integer"},
-          "route": {"enum": ["retry", "step", "human"]},
+          "exit": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "終了コードの表（facts/exit-codes.json）の行の id"},
+          "route": {
+            "description": "既定の行き先。retry は打ち直し、step はプランの on_fail のステップ、conductor は会話のセッションの AI が次の手を選ぶ、human は人へ問う",
+            "enum": ["retry", "step", "conductor", "human"]
+          },
           "retry": {"type": ["string", "null"], "pattern": "^cause\\.[a-z][a-z0-9-]*$"},
+          "exhausted": {
+            "description": "打ち直さないとき（回数の上限・待つべき retry_after が無い）の行き先。step は on_fail のステップ（無ければ conductor）",
+            "enum": ["step", "conductor", "human"]
+          },
           "requires_retry_after": {"type": "boolean", "description": "真なら、結果の cause に retry_after があるときだけ打ち直す"}
         },
         "if": {"properties": {"route": {"const": "retry"}}},
-        "then": {"properties": {"retry": {"type": "string"}}},
-        "else": {"properties": {"retry": {"type": "null"}, "requires_retry_after": false}}
+        "then": {"required": ["exhausted"], "properties": {"retry": {"type": "string"}}},
+        "else": {"properties": {"retry": {"type": "null"}, "exhausted": false, "requires_retry_after": false}}
       }
     }
   }

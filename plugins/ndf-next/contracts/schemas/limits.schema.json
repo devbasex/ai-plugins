@@ -5,9 +5,9 @@
   "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "policies"],
+  "required": ["owner", "policies"],
   "properties": {
-    "version": {"const": 1},
+    "owner": {"type": "string", "minLength": 1, "description": "宣言を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
     "policies": {
       "type": "object",
       "minProperties": 1,

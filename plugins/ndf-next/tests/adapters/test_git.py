@@ -91,6 +91,18 @@ def _git(repo: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+def _init_repo(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
+    """main に `files` を書いた base のコミットを 1 つ持つリポジトリを作る。リポジトリのパスと base の SHA を返す。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    for name, text in files.items():
+        (repo / name).write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
 def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
     """`branch` を作ってファイルを書き、main へ --no-ff で取り込む。取り込みのコミットの SHA を返す。"""
     _git(repo, "checkout", "-q", "-b", branch, "main")
@@ -105,13 +117,7 @@ def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
 
 def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_path: Path) -> None:
     # #3087: リリースの PR 2 本が同じ版のファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q", "-b", "main")
-    (repo / "VERSION").write_text("1.0.0\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "base")
-    base = _git(repo, "rev-parse", "HEAD")
+    repo, base = _init_repo(tmp_path, {"VERSION": "1.0.0\n"})
     first = _merge_branch(repo, "release-1", {"VERSION": "1.0.1\n"})
     _merge_branch(repo, "feature", {"feature.txt": "".join(f"{i}\n" for i in range(19))})
     second = _merge_branch(repo, "release-2", {"VERSION": "1.0.2\n"})
@@ -123,13 +129,7 @@ def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_p
 
 def test_changed_files_returns_real_names_of_quoted_paths(tmp_path: Path) -> None:
     # 既定の core.quotePath では日本語・タブ・引用符を含むパスが引用されるが、実際のファイル名を返す
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q", "-b", "main")
-    (repo / "base.txt").write_text("base\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "base")
-    base = _git(repo, "rev-parse", "HEAD")
+    repo, base = _init_repo(tmp_path, {"base.txt": "base\n"})
     names = ["設計.md", "a\tb.txt", 'q"uote.txt']
     _merge_branch(repo, "feature", {name: "x\n" for name in names})
 
