@@ -138,26 +138,33 @@ def _open_lap_refusal(state: rec.LoopState, name: str) -> Optional[Decision]:
     return None
 
 
+def _open_lap(state: rec.LoopState, c: Ctx, lease: bool) -> tuple[Optional[Decision], Optional[rec.Lap]]:
+    """断りか、締めていない周。`lease` なら鍵の断りを先に当てる。"""
+    refusal = (_lease_refusal(state, c) if lease else None) or _open_lap_refusal(state, c.name)
+    if refusal is not None:
+        return refusal, None
+    return None, state.current
+
+
 def decide_mode(state: rec.LoopState, c: Ctx, mode: str, basis: str, modes: Sequence[str]) -> Decision:
     """周のモードを根拠つきで決める（#2923）。根拠の無い判定は断る。"""
-    refusal = _lease_refusal(state, c) or _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=True)
     if refusal is not None:
         return refusal
+    assert lap is not None
     if mode not in modes:
         return refuse(INVALID, f"モード {mode!r} は {'・'.join(modes)} のどれでもない", next_step(state, c.name))
     if not basis.strip():
         return refuse(INVALID, "モードの判定の根拠が空", next_step(state, c.name))
-    assert state.current is not None
-    ev = rec.event(rec.MODE_DECIDED, c.now, lap=state.current.number, mode=mode, basis=basis.strip())
-    return Decision(f"周 {state.current.number} のモードを {mode} にした", (ev,), next=next_step(rec.apply(state, ev), c.name))
+    ev = rec.event(rec.MODE_DECIDED, c.now, lap=lap.number, mode=mode, basis=basis.strip())
+    return Decision(f"周 {lap.number} のモードを {mode} にした", (ev,), next=next_step(rec.apply(state, ev), c.name))
 
 
 def exclude(state: rec.LoopState, c: Ctx, issue: int, reason: str) -> Decision:
     """周の途中で課題を外す（#2788）。外すとモードを決め直す（#2923）。"""
-    refusal = _lease_refusal(state, c) or _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=True)
     if refusal is not None:
         return refusal
-    lap = state.current
     assert lap is not None
     if issue not in lap.remaining:
         return refuse(PRECONDITION, f"課題 #{issue} は周 {lap.number} に残っていない", get_step(c.name))
@@ -172,23 +179,23 @@ def exclude(state: rec.LoopState, c: Ctx, issue: int, reason: str) -> Decision:
 
 def created(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
     """周の中で起票した課題を記録する（#2132）。鍵は要らない（周の中の作業が書く）。"""
-    refusal = _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
         return refusal
+    assert lap is not None
     if not issues:
         return refuse(INVALID, "課題の番号が無い")
-    assert state.current is not None
-    ev = rec.event(rec.CREATED, c.now, lap=state.current.number, issues=list(issues))
-    return Decision(f"周 {state.current.number} の起票 {len(issues)} 件を記録した", (ev,))
+    ev = rec.event(rec.CREATED, c.now, lap=lap.number, issues=list(issues))
+    return Decision(f"周 {lap.number} の起票 {len(issues)} 件を記録した", (ev,))
 
 
 def gate(state: rec.LoopState, c: Ctx, pr: int, head: str) -> Decision:
     """設計承認ゲートを出した時点の PR の先端を記録する。"""
-    refusal = _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
         return refusal
-    assert state.current is not None
-    ev = rec.event(rec.GATED, c.now, lap=state.current.number, pr=pr, head=head)
+    assert lap is not None
+    ev = rec.event(rec.GATED, c.now, lap=lap.number, pr=pr, head=head)
     return Decision(f"PR #{pr} の設計承認ゲートを先端 {head[:12]} で記録した", (ev,))
 
 
@@ -199,10 +206,9 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     書いた答えの先端を `metrics.head` で返し、マージはその値を `--match-head-commit` に渡す。
     `revise`・`rejected` は差し戻しとして記録に残る（#2400）。
     """
-    refusal = _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
         return refusal
-    lap = state.current
     assert lap is not None
     shown = lap.gate_head(pr)
     if shown is None:
@@ -246,12 +252,12 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
 
 def released(state: rec.LoopState, c: Ctx, version: str) -> Decision:
     """その周で出した版を記録する。周の結果の判断が読む。"""
-    refusal = _open_lap_refusal(state, c.name)
+    refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
         return refusal
-    assert state.current is not None
-    ev = rec.event(rec.RELEASED, c.now, lap=state.current.number, version=version)
-    return Decision(f"周 {state.current.number} のリリース {version} を記録した", (ev,))
+    assert lap is not None
+    ev = rec.event(rec.RELEASED, c.now, lap=lap.number, version=version)
+    return Decision(f"周 {lap.number} のリリース {version} を記録した", (ev,))
 
 
 def stop(state: rec.LoopState, c: Ctx, by: str, reason: str, at_once: bool) -> Decision:
