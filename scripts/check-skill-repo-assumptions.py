@@ -57,6 +57,7 @@ import dataclasses
 import pathlib
 import re
 import sys
+from collections.abc import Iterator
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
@@ -256,14 +257,19 @@ def scan(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Patte
     hits: list[Hit] = []
     for rel in rels:
         text = (base / rel).read_text(encoding="utf-8")
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            if skip_comments and line.lstrip().startswith("#"):
-                continue
-            if not any_word.search(line):
-                continue
+        for lineno, line in iter_matching_lines(text, any_word, skip_comments):
             for word_id, regex in matchers:
                 hits += [Hit(base, rel, lineno, word_id, m.group(0), line) for m in regex.finditer(line)]
     return hits
+
+
+def iter_matching_lines(text: str, any_word: re.Pattern[str], skip_comments: bool) -> Iterator[tuple[int, str]]:
+    """語の和 `any_word` に当たる行を (1 始まりの行番号, 行) で返す。`skip_comments` なら行頭が `#` の行を除く。"""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if skip_comments and line.lstrip().startswith("#"):
+            continue
+        if any_word.search(line):
+            yield lineno, line
 
 
 def scan_scripts(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], list[Hit]]:
