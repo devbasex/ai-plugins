@@ -43,7 +43,7 @@ from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
 # 記録の結果（FINISHED など）は records の名前を slots からも読めるように再び公開する
-from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, RECORD_LOCK_SECONDS, _lock
+from ndf.testing.records import FINISHED, GAVE_UP, INTERRUPTED, MEMORY_STOPPED, RECORD_LOCK_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class _MemoryMonitor:
     def _claim_stop(self, index: int) -> bool:
         """前の停止から 30 秒経っていれば停止の時刻を書いて真を返す（I6）。"""
         try:
-            with _lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+            with slot_pool.lock(self.directory / (STOP_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
                 last = _owner_value(self.directory / STOP_FILE, "at")
                 now = time.time()
                 if isinstance(last, (int, float)) and now - last < STOP_INTERVAL_SECONDS:

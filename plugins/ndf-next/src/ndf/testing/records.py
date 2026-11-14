@@ -11,8 +11,6 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from filelock import FileLock
-
 from ndf import slot_pool
 
 # 記録を残す期間と行数（I11）
@@ -29,10 +27,6 @@ FINISHED = "finished"
 GAVE_UP = "gave_up"
 MEMORY_STOPPED = "memory_stopped"
 INTERRUPTED = "interrupted"
-
-
-def _lock(path: Path) -> FileLock:
-    return slot_pool.lock(path)
 
 
 def _now_iso(now: float) -> str:
@@ -53,7 +47,7 @@ def append_event(directory: Path, row: Mapping[str, object], now: float | None =
     now = time.time() if now is None else now
     path = directory / EVENTS_FILE
     line = json.dumps(row, ensure_ascii=False)
-    with _lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
+    with slot_pool.lock(directory / (EVENTS_FILE + ".lock")).acquire(timeout=RECORD_LOCK_SECONDS):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
