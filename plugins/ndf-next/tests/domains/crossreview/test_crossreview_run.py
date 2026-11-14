@@ -240,3 +240,149 @@ def test_unknown_reviewer_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypat
     argv = ["run", "--pr", "1", "--state-dir", str(tmp_path / "st"), "--base", "origin/main", "--worktree", str(wt), "--reviewer", "nobody"]
     assert cli.main(argv) != 0
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+
+
+# --- 現状固定テスト: 1 回の起動に重ねる値（drive._Run の台帳・過程・注意・状態ファイル・要約。I-014） ---
+
+
+class Recording(Fake):
+    """起動ごとに（相手役、出力の名前、問い）を残す偽物。"""
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.prompts: list[tuple[str, str, str]] = []
+
+    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        self.prompts.append((spec.agent, spec.paths.out.name, spec.argv[-1]))
+        return super().__call__(spec)
+
+
+def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Optional[str] = None) -> dict:
+    return {
+        "by": by,
+        "id": fid,
+        "key": text.lower(),
+        "outcome": outcome,
+        "reason": reason,
+        "round": round_no,
+        "section": None,
+        "text": text,
+    }
+
+
+def _rounds_without_heads(state: dict) -> list[dict]:
+    """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）を外す。"""
+    out = []
+    for r in state["rounds"]:
+        row = {k: v for k, v in r.items() if k != "head"}
+        if "fix" in row:
+            row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
+        out.append(row)
+    return out
+
+
+def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake = Recording(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"
+    assert got["items"] == [
+        {"kind": "finding", "id": "r1-1", "outcome": fin.FIXED},
+        {"kind": "finding", "id": "r1-2", "outcome": fin.FIXED},
+    ]
+    assert got["process"] == [
+        {"run": "round 1 codex", "result": "指摘 1 件"},
+        {"run": "round 1 kiro", "result": "指摘 2 件"},
+        {"run": "round 1 claude", "result": "指摘 2 件を扱った"},
+        {"run": "round 2 codex", "result": "指摘 0 件"},
+        {"run": "round 2 kiro", "result": "指摘 0 件"},
+    ]
+    assert "warnings" not in got
+    state = _state(fake.state_dir)
+    assert state["findings"] == [
+        _entry("r1-1", "codex", "節 B の根拠が無い", fin.FIXED, 1),
+        _entry("r1-2", "kiro", "語の定義", fin.FIXED, 1),
+    ]
+    assert state["pr"] == PR
+    assert state["reviewed_sections"] == ["doc.md#節 A", "doc.md#節 B", "doc.md#設計"]
+    assert _rounds_without_heads(state) == [
+        {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
+        {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
+    ]
+    assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
+        "final": fin.CONVERGED,
+        "findings": [
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "節 B の根拠が無い"},
+            {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "text": "語の定義"},
+        ],
+        "pr": PR,
+        "rounds": 2,
+    }
+    # 修正の結果ファイルはラウンドの名前へ移り、残りとして読まれない
+    assert (fake.state_dir / "fix-pr41-result-round1.json").is_file()
+    assert store.pending_fix_result(fake.state_dir, store.state_pr(fake.state_dir, PR)) is None
+    fix_prompt = next(p for a, _, p in fake.prompts if a == "claude")
+    assert "- r1-1: 節 B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
+    assert str(store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))) in fix_prompt
+
+
+def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reenter_them(
+    wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """見送った指摘は次のラウンドの問いに「見送り済み」として載り、出し直されても台帳へ入らない。"""
+    skip = {"outcome": fin.SKIPPED, "reason": "別で直す"}
+    fake = Recording(
+        tmp_path / "st",
+        {"codex": [["一つ目", "二つ目"], ["二つ目"]], "kiro": [[], []]},
+        decide=lambda fid: skip if fid == "r1-2" else {"outcome": fin.FIXED},
+    )
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["summary"]) == (0, "2 ラウンドで converged。指摘 2 件（直した 1・見送った 1・未解決 0）")
+    assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
+    assert _state(fake.state_dir)["findings"] == [
+        _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
+        _entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"),
+    ]
+    prompts = {name: p for _, name, p in fake.prompts}
+    assert "見送り済み" not in prompts["round1-codex.out"]
+    assert "理由を添えて見送り済みの指摘（出し直さない）:\n- 二つ目\n" in prompts["round2-codex.out"]
+    assert "理由を添えて見送り済みの指摘（出し直さない）:\n- 二つ目\n" in prompts["round2-kiro.out"]
+
+
+def test_run_reopens_a_fixed_finding_that_returns(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """直した指摘が次のラウンドで戻れば、同じ id のまま未解決へ戻して round を書き換え、もう一度修正担当へ渡す。"""
+    fake = Recording(tmp_path / "st", {"codex": [["一つ目"], ["一つ目"]], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--max-rounds", "2")
+    assert (code, got["summary"]) == (0, "2 ラウンドで max_rounds。指摘 1 件（直した 1・見送った 0・未解決 0）")
+    assert got["warnings"] == ["収束ループは max_rounds で終わった（欠けは 0 件）"]
+    assert [p["run"] for p in got["process"]] == [
+        "round 1 codex",
+        "round 1 kiro",
+        "round 1 claude",
+        "round 2 codex",
+        "round 2 kiro",
+        "round 2 claude",
+    ]
+    state = _state(fake.state_dir)
+    assert state["findings"] == [_entry("r1-1", "codex", "一つ目", fin.FIXED, 2)]
+    assert [r["verdict"] for r in state["rounds"]] == [drive.CHANGES_REQUIRED, drive.CHANGES_REQUIRED]
+    assert [p for a, name, p in fake.prompts if a == "claude"][1].count("- r1-1: 一つ目") == 1
+    assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.MAX_ROUNDS
+
+
+def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """修正担当が結果を書かなければ、注意と過程に載せて errored で止め、指摘は未解決のまま状態ファイルに残す。"""
+
+    class NoFix(Recording):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
+
+    fake = NoFix(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+    assert got["summary"] == "1 ラウンドで errored。指摘 1 件（直した 0・見送った 0・未解決 1）・欠け 1 件"
+    assert got["warnings"] == ["round 1 の修正担当が結果を書かなかった（failed: 落ちた）"]
+    assert got["process"][-1] == {"run": "round 1 claude", "result": "結果無し（failed）"}
+    state = _state(fake.state_dir)
+    assert state["findings"] == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
+    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED}]
+    assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
