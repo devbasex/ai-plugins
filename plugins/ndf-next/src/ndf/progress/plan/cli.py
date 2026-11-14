@@ -304,12 +304,12 @@ def parser() -> argparse.ArgumentParser:
 
 def _where(cwd: Path) -> run.Where:
     """計画の置き場を求め、チェックアウトの置き場を用意する。"""
-    root = command._root(cwd)
+    root = command.store_root_of(cwd)
     url = store.default_url(root)
     store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
-        return run.Where(root=ready.root, url=url, repo=command._repo(cwd, st.root), cwd=cwd)
+        return run.Where(root=ready.root, url=url, repo=command.repo_id(cwd, st.root), cwd=cwd)
 
 
 def _detach_run(out: dict[str, Any], cwd: Path) -> None:
