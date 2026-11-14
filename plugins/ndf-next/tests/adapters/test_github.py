@@ -265,21 +265,6 @@ def test_premerge_risks(body: str, risks: list[str]) -> None:
     assert github.premerge_risks(body) == risks
 
 
-@pytest.mark.parametrize(
-    ("origin", "target", "expected"),
-    [
-        ("issue #12", "example-owner/other-repo", "issue example-owner/example-repo#12"),
-        ("PR #3", "example-owner/other-repo", "PR example-owner/example-repo#3"),
-        ("issue #12", "example-owner/example-repo", "issue #12"),
-        ("振り返り", "example-owner/other-repo", "振り返り"),
-    ],
-)
-def test_qualified_ref_names_the_source_repo_for_other_repos(origin: str, target: str, expected: str) -> None:
-    # #3077: 別のリポジトリへ書く由来の参照は、起票先の別の課題を指さない
-    visibility = {"example-owner/example-repo": "PUBLIC", "example-owner/other-repo": "PUBLIC"}
-    assert github.qualified_ref(origin, "example-owner/example-repo", target, visibility) == expected
-
-
 def test_token_prefers_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "from-env")
     assert github.token() == "from-env"
@@ -495,22 +480,6 @@ def test_visibilities_read_every_repo_in_one_query_and_unknown_is_not_public() -
     got = hub.visibilities(["a/pub", "b/priv", "c/gone"])
     assert got == {"a/pub": "PUBLIC", "b/priv": "PRIVATE", "c/gone": github.UNKNOWN}
     assert len(queries) == 1
-    assert not github.is_public(got, "c/gone") and github.is_public(got, "A/Pub")
-
-
-@pytest.mark.parametrize(
-    ("origin", "expected"),
-    [("issue #12", "issue（非公開のリポジトリの課題）"), ("example-owner/private-repo#12", "非公開のリポジトリの課題")],
-)
-def test_qualified_ref_hides_a_private_source_on_a_public_target(origin: str, expected: str) -> None:
-    # 3391-2: 公開の書き先へ、非公開のリポジトリの参照を書かない
-    visibility = {"example-owner/private-repo": "PRIVATE", "example-owner/public-repo": "PUBLIC"}
-    assert github.qualified_ref(origin, "example-owner/private-repo", "example-owner/public-repo", visibility) == expected
-    # 書き先も非公開なら、完全な参照にしてよい
-    both_private = {**visibility, "example-owner/public-repo": "PRIVATE"}
-    assert github.qualified_ref("issue #12", "example-owner/private-repo", "example-owner/public-repo", both_private) == (
-        "issue example-owner/private-repo#12"
-    )
 
 
 @pytest.mark.parametrize(

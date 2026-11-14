@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, TypeVar
@@ -62,10 +62,6 @@ PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
 # PR 本文の「マージの前に決める」残リスクの印と、決めたことを表すチェック済みの項目（#2602）
 PREMERGE_MARK = "マージの前に決める"
 _CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
-# 由来の参照（`issue #12`・`PR #12`）。別のリポジトリへ書くときはリポジトリを足す（#3077）
-_BARE_REF = re.compile(r"^(?P<label>(?:issue|PR|pr|Issue)\s*)#(?P<number>\d+)$")
-# 公開の書き先へ、非公開のリポジトリの由来を書くときの固定の文（3391-2）。完全な参照は手元の引継ぎ文書だけに置く
-PRIVATE_ORIGIN = "非公開のリポジトリの課題"
 
 
 class GitHubError(Exception):
@@ -207,31 +203,6 @@ def premerge_risks(body: str) -> list[str]:
 def same_repo(a: str, b: str) -> bool:
     """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
     return a.lower() == b.lower()
-
-
-def is_public(visibility: Mapping[str, str], repo: str) -> bool:
-    """`visibility`（リポジトリ → 公開範囲。`GitHub.visibilities` の値）で `repo` が公開か。載っていなければ公開でない。"""
-    return any(same_repo(name, repo) and value == PUBLIC for name, value in visibility.items())
-
-
-def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: Mapping[str, str]) -> str:
-    """由来の参照を、書き込む先のリポジトリの画面でも同じ課題を指す形にする（#3077）。
-
-    - 書き込む先が由来のリポジトリと同じなら、そのまま返す
-    - 書き込む先が公開で由来が公開でなければ、参照を伏せた固定の文（`PRIVATE_ORIGIN`）を返す（3391-2）。
-      完全な参照は呼び手が手元の引継ぎ文書だけに置く
-    - ほかは、番号だけの参照（`issue #12`）を `issue <所有者>/<リポジトリ>#12` にする。番号だけの形でない参照はそのまま
-
-    `visibility` はリポジトリ → 公開範囲（`GitHub.visibilities` の値）。載っていないリポジトリは公開でないとして扱う。
-    """
-    if same_repo(source_repo, target_repo):
-        return origin
-    m = _BARE_REF.match(origin.strip())
-    if is_public(visibility, target_repo) and not is_public(visibility, source_repo):
-        return f"{m.group('label').strip()}（{PRIVATE_ORIGIN}）" if m else PRIVATE_ORIGIN
-    if m is None:
-        return origin
-    return f"{m.group('label')}{source_repo}#{m.group('number')}"
 
 
 def pick_merge_method(declared: Optional[str], allowed: Sequence[str]) -> Optional[str]:
