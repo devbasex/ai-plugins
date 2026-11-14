@@ -386,6 +386,11 @@ def pending(outbox: Path) -> list[Path]:
     return sorted(p for p in outbox.glob("*.json") if not p.name.startswith("."))
 
 
+def _keep_since(now: float) -> float:
+    """送ったキーと送れなかった 1 件を残す期限の境。これより前のものは捨てる。"""
+    return now - KEEP_DAYS * 86400
+
+
 def _load_sent(outbox: Path, now: float) -> dict[str, float]:
     try:
         raw = json.loads((outbox / _SENT).read_text(encoding="utf-8"))
@@ -393,7 +398,7 @@ def _load_sent(outbox: Path, now: float) -> dict[str, float]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    keep = now - KEEP_DAYS * 86400
+    keep = _keep_since(now)
     return {str(k): float(v) for k, v in raw.items() if isinstance(v, (int, float)) and v >= keep}
 
 
@@ -404,7 +409,7 @@ def _save_sent(outbox: Path, sent: dict[str, float]) -> None:
 
 
 def _prune_unsent(outbox: Path, now: float) -> None:
-    keep = now - KEEP_DAYS * 86400
+    keep = _keep_since(now)
     for path in (outbox / _UNSENT).glob("*.json"):
         if path.stat().st_mtime < keep:
             path.unlink(missing_ok=True)
