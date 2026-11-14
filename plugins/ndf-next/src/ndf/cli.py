@@ -15,7 +15,7 @@ from ndf.contracts import causes, result
 # 副命令の名前 → モジュールのパス
 COMMANDS: dict[str, str] = {
     "check": "ndf.checks.run",
-    "ci": "ndf.adapters.ci",
+    "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
 }
 

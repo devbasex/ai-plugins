@@ -9,6 +9,7 @@ import httpx
 import pytest
 from githubkit import GitHub as Client
 
+from ndf import ci_cli
 from ndf.adapters import ci, github
 from ndf.contracts import causes, limits
 
@@ -282,7 +283,7 @@ def _out(capsys: pytest.CaptureFixture[str]) -> dict:
 def test_cli_watch_test_failure_lists_test_files(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     runs = [run("pytest (0/2)", conclusion="failure", rid=41), run("pytest", status="in_progress", rid=42), run("doc-lint", rid=43)]
     _serve(monkeypatch, runs, log=LOG)
-    code = ci.main(ARGS)
+    code = ci_cli.main(ARGS)
     out = _out(capsys)
     assert code == causes.exit_code("test_failed")
     assert (out["status"], out["cause"]["kind"], out["cause"]["instance"]) == ("stopped", "test_failed", HEAD)
@@ -292,19 +293,19 @@ def test_cli_watch_test_failure_lists_test_files(monkeypatch: pytest.MonkeyPatch
 
 def test_cli_watch_passes(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _serve(monkeypatch, [run("pytest", rid=1), run("doc-lint", rid=2)])
-    assert ci.main(ARGS) == 0
+    assert ci_cli.main(ARGS) == 0
     assert _out(capsys)["status"] == "ok"
 
 
 def test_cli_watch_after_merge_with_failed_shard(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _serve(monkeypatch, [run("pytest", rid=1), run("doc-lint", rid=2)])
-    assert ci.main([*ARGS, "--after-merge", "--merge-failed", "pytest (1/2)"]) == causes.exit_code("test_failed")
+    assert ci_cli.main([*ARGS, "--after-merge", "--merge-failed", "pytest (1/2)"]) == causes.exit_code("test_failed")
     assert _out(capsys)["cause"]["kind"] == "test_failed"
 
 
 def test_cli_watch_after_merge_without_failures_is_not_ci(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     _serve(monkeypatch, [run("pytest", rid=1), run("doc-lint", rid=2)])
-    assert ci.main([*ARGS, "--after-merge"]) == causes.exit_code("not_ci")
+    assert ci_cli.main([*ARGS, "--after-merge"]) == causes.exit_code("not_ci")
     assert _out(capsys)["cause"]["kind"] == "not_ci"
 
 
@@ -315,6 +316,6 @@ def test_cli_watch_rate_limit_is_infra_wait(monkeypatch: pytest.MonkeyPatch, cap
         return Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
 
     monkeypatch.setattr(github, "client", limited)
-    assert ci.main(ARGS) == causes.exit_code("infra_wait")
+    assert ci_cli.main(ARGS) == causes.exit_code("infra_wait")
     out = _out(capsys)
     assert out["cause"]["kind"] == "infra_wait" and out["cause"]["retry_after"] > 0
