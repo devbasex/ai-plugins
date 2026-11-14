@@ -511,12 +511,22 @@ def hand(st: store.Store, v: View) -> Optional[dict[str, Any]]:
 # --- wait ----------------------------------------------------------------------------------
 
 
-def wait(st: store.Store, table_id: str, timeout: float, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
-    """作業が動いている間だけ待ち、止まったら今の 1 手を返す。上限に当たれば同じ `wait` を打ち直す手を返す。"""
+def wait(
+    st: store.Store,
+    table_id: str,
+    timeout: float,
+    sleep: Callable[[float], None] = time.sleep,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """作業が動いている間だけ待ち、止まったら今の 1 手を返す。上限に当たれば同じ `wait` を打ち直す手を返す。
+
+    `clock` は期限を測る単調な時計（テストが `sleep` と組で差し替える）。
+    """
     interval = limits.value(WAIT_POLL, "interval")
-    deadline = time.monotonic() + timeout
+    deadline = clock() + timeout
     while is_live(st, table_id):
-        if time.monotonic() >= deadline:
+        if clock() >= deadline:
             detail = f"進行表 {table_id} を流す作業がまだ動いている（{timeout:g} 秒待った）"
             return result.stopped(TOOL, "wait_timeout", detail, next=_cmd("wait", table_id))
         sleep(interval)

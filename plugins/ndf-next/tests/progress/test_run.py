@@ -590,9 +590,15 @@ def test_wait_sleeps_the_declared_interval_until_the_work_lets_go(repo, st, caps
 def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st, capsys):
     tid = _new(capsys)
     slept: list[float] = []
+    now = [0.0]  # 偽物の時計。待った秒だけ進む
+
+    def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
     with store.run_lock(st, tid):
         at_once = run.wait(st, tid, 0, sleep=slept.append)
-        later = run.wait(st, tid, 0.05, sleep=lambda s: slept.append(s) or time.sleep(0.02))
+        later = run.wait(st, tid, 0.05, sleep=sleep, clock=lambda: now[0])
     assert at_once == result.stopped(
         run.TOOL, "wait_timeout", f"進行表 {tid} を流す作業がまだ動いている（0 秒待った）", next=result.command(run.TOOL, "wait", tid)
     )
