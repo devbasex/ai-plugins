@@ -271,11 +271,11 @@ def find_env_file(start: Path) -> Path | None:
 
 def env_file_values(cwd: Path, fallback: Path | None) -> dict[str, str]:
     """`.env` を `cwd` から上へ探し、無ければ `fallback` から探して、見つけた 1 本の値を返す。無ければ空。"""
-    for start in (cwd, fallback):
-        found = find_env_file(start) if start is not None else None
-        if found is not None:
-            return {k: v for k, v in dotenv_values(found).items() if k and v is not None}
-    return {}
+    starts = (start for start in (cwd, fallback) if start is not None)
+    found = next((path for start in starts if (path := find_env_file(start)) is not None), None)
+    if found is None:
+        return {}
+    return {k: v for k, v in dotenv_values(found).items() if k and v is not None}
 
 
 def slack_settings(cwd: Path, fallback: Path | None, environ: dict[str, str]) -> SlackSettings | None:
