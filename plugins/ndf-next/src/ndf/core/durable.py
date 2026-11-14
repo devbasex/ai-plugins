@@ -250,6 +250,16 @@ def _sa_url(database_url: str) -> str:
     return database_url
 
 
+@contextmanager
+def _engine(database_url: str) -> Iterator[sa.Engine]:
+    """呼ぶたびに接続を溜めない Engine を作り、抜けるときに解放する。"""
+    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
 # --- ロック -----------------------------------------------------------------------------
 
 
@@ -364,21 +374,17 @@ def _file_run_lock(root: Path, name: str, wait: bool) -> Iterator[Path | None]:
 
 @contextmanager
 def _pg_run_lock(database_url: str, name: str, wait: bool) -> Iterator[str | None]:
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
-    try:
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            params = {"space": RUN_LOCK_SPACE, "key": _lock_key(name)}
-            if wait:
-                conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
-            elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
-                yield None
-                return
-            try:
-                yield name
-            finally:
-                conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        params = {"space": RUN_LOCK_SPACE, "key": _lock_key(name)}
+        if wait:
+            conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
+        elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
+            yield None
+            return
+        try:
+            yield name
+        finally:
+            conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
 
 
 # --- チェックアウトの置き場（決定 85） ---------------------------------------------------
@@ -703,41 +709,31 @@ def _ensure_runs_table(engine: sa.Engine, table: sa.Table) -> None:
 
 def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> None:
     """台帳 `ndf_runs` へ鍵を 1 行書く（既にあれば書かない）。書けなければ `StoreBroken`。"""
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
-    table = _runs_table(sa.MetaData())
-    try:
-        _ensure_runs_table(engine, table)
-        with engine.begin() as conn:
-            exists = conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first()
-            if exists is None:
-                conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
-    except sa.exc.SQLAlchemyError as exc:
-        raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine:
+        table = _runs_table(sa.MetaData())
+        try:
+            _ensure_runs_table(engine, table)
+            with engine.begin() as conn:
+                exists = conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first()
+                if exists is None:
+                    conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
+        except sa.exc.SQLAlchemyError as exc:
+            raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
 
 
 def _ledger(database_url: str) -> list[tuple[str, str, datetime]]:
     """台帳の行（鍵の名前・実行の鍵・起こした時刻）。表が無ければ空。"""
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
     table = _runs_table(sa.MetaData())
-    try:
-        with engine.connect() as conn:
-            if not sa.inspect(conn).has_table(RUNS_TABLE):
-                return []
-            return [tuple(row) for row in conn.execute(sa.select(table))]  # type: ignore[misc]
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.connect() as conn:
+        if not sa.inspect(conn).has_table(RUNS_TABLE):
+            return []
+        return [tuple(row) for row in conn.execute(sa.select(table))]  # type: ignore[misc]
 
 
 def _forget_run(database_url: str, name: str) -> None:
-    engine = sa.create_engine(_sa_url(database_url), poolclass=sa.NullPool)
     table = _runs_table(sa.MetaData())
-    try:
-        with engine.begin() as conn:
-            conn.execute(table.delete().where(table.c.run_name == name))
-    finally:
-        engine.dispose()
+    with _engine(database_url) as engine, engine.begin() as conn:
+        conn.execute(table.delete().where(table.c.run_name == name))
 
 
 def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -> bool:
