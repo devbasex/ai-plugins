@@ -38,7 +38,7 @@ def test_env_names_and_secrets():
     names = facts.ids("env")
     assert all(re.fullmatch(r"[A-Z][A-Z0-9_]*", n) for n in names)
     assert {"NDF_RELAY_HUB_WAIT", "NDF_RELAY_STOP_WAIT", "NDF_RELAY_MAX_STARTS"} <= set(names)
-    assert set(facts.ids("env", secret=True)) == {"ANTHROPIC_API_KEY", "GH_TOKEN", "SLACK_BOT_TOKEN"}
+    assert set(facts.ids("env", secret=True)) == {"ANTHROPIC_API_KEY", "GH_TOKEN", "NDF_PROGRESS_DB", "SLACK_BOT_TOKEN"}
 
 
 def _assemble(parts: dict[str, str]) -> list[str]:
