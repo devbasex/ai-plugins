@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import collections
 import dataclasses
+import functools
 import pathlib
 import re
 import sys
@@ -312,9 +313,22 @@ def read_allow(path: pathlib.Path) -> list[dict]:
     return rows
 
 
-def validate_allow(
-    rows: list[dict], counts: collections.Counter, scanned: set[str], skills_dirs: list[pathlib.Path], exhaustive: bool
-) -> list[str]:
+@dataclasses.dataclass
+class ScanResult:
+    """全 family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill をまとめる。"""
+
+    scanned: set[str] = dataclasses.field(default_factory=set)
+    hits: list[Hit] = dataclasses.field(default_factory=list)
+    report_lines: list[str] = dataclasses.field(default_factory=list)
+    unscanned: list[pathlib.Path] = dataclasses.field(default_factory=list)
+
+    @functools.cached_property
+    def counts(self) -> collections.Counter:
+        """語とファイルの組ごとのヒットの数。走査を終えてから読む。"""
+        return collections.Counter(h.key for h in self.hits)
+
+
+def validate_allow(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
     """項目が走査の結果と合っているかを確かめ、合わない理由を返す。
 
     突き合わせるのは、**チェックした Skill ディレクトリに属する項目だけ**である。`--skills-dir`
@@ -333,10 +347,10 @@ def validate_allow(
             if exhaustive:
                 problems.append(f"項目の対象がどの Skill ディレクトリにも属さない: {path}（消したか移したなら {file} も消す）")
             continue
-        if key not in scanned:
+        if key not in result.scanned:
             problems.append(f"項目の対象が走査の範囲に実在しない: {path}（消したか移したなら {file} も消す）")
             continue
-        actual = counts[(key, name)]
+        actual = result.counts[(key, name)]
         if actual < row["count"]:
             fix = f"count を {actual} へ直す" if actual else "項目を消す"
             problems.append(f"宣言より当たりが少ない: {path} の {name} は宣言 {row['count']}・実際 {actual}（{file} の{fix}）")
@@ -401,16 +415,6 @@ def hits_outside(all_hits: list[Hit], declared: dict[tuple[str, str], int], coun
     return [h for h in all_hits if counts[h.key] > declared.get(h.key, 0)]
 
 
-@dataclasses.dataclass
-class ScanResult:
-    """全 family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill をまとめる。"""
-
-    scanned: set[str] = dataclasses.field(default_factory=set)
-    hits: list[Hit] = dataclasses.field(default_factory=list)
-    report_lines: list[str] = dataclasses.field(default_factory=list)
-    unscanned: list[pathlib.Path] = dataclasses.field(default_factory=list)
-
-
 def scan_all(skills_dirs: list[pathlib.Path]) -> ScanResult:
     """family ごとに走査し、結果を 1 つにまとめる。"""
     result = ScanResult()
@@ -423,18 +427,15 @@ def scan_all(skills_dirs: list[pathlib.Path]) -> ScanResult:
     return result
 
 
-def judge(
-    rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool
-) -> tuple[list[str], list[Hit]]:
+def judge(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool) -> tuple[list[str], list[Hit]]:
     """例外リストと走査の結果を突き合わせ、(例外リストが成立しない理由, 宣言の外のヒット) を返す。
 
     理由があるときは宣言の外のヒットを判定しない（空で返す）。"""
-    counts = collections.Counter(h.key for h in result.hits)
-    problems = validate_allow(rows, counts, result.scanned, skills_dirs, exhaustive=exhaustive)
+    problems = validate_allow(rows, result, skills_dirs, exhaustive=exhaustive)
     if problems:
         return problems, []
     declared = {(canon(r["path"]), r["name"]): r["count"] for r in rows}
-    return [], hits_outside(result.hits, declared, counts)
+    return [], hits_outside(result.hits, declared, result.counts)
 
 
 def print_unscanned(unscanned: list[pathlib.Path]) -> None:
