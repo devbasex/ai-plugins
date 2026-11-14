@@ -263,3 +263,64 @@ def test_token_without_any_source_raises(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(github.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "not logged in"))
     with pytest.raises(github.GitHubError, match="認証"):
         github.token()
+
+
+# 現状固定（I-002）: `GitHub.rest` と `GitHub.graphql` の失敗の写し方。期待値は今の実装の出力である
+def _rate_limited(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(403, json={"message": "rate"}, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "9999999999"})
+
+
+def _server_error(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(500, json={"message": "boom"})
+
+
+def _unreachable(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("down", request=request)
+
+
+@pytest.mark.parametrize(
+    ("handler", "rest_detail", "graphql_detail", "status", "has_retry"),
+    [
+        (_rate_limited, "GitHub の上限: GET /x", "GitHub の上限: graphql", 403, True),
+        (_server_error, 'GitHub が断った（500）: GET /x: {"message":"boom"}', "GitHub が断った（500）: graphql", 500, False),
+        (_unreachable, "GitHub へ届かない: GET /x: down", "GitHub へ届かない: graphql: down", 0, False),
+    ],
+)
+def test_rest_and_graphql_map_transport_failures(
+    handler: Callable[[httpx.Request], httpx.Response], rest_detail: str, graphql_detail: str, status: int, has_retry: bool
+) -> None:
+    for call, detail in ((lambda h: h.rest("GET", "/x"), rest_detail), (lambda h: h.graphql("q", {}), graphql_detail)):
+        with pytest.raises(github.GitHubError) as err:
+            call(_hub(handler))
+        assert str(err.value) == detail
+        assert err.value.status == status
+        assert (err.value.retry_after is not None and err.value.retry_after > 0) == has_retry
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ({"data": {"x": 1}}, {"x": 1}),
+        ({"data": {"x": None}, "errors": [{"type": "NOT_FOUND", "message": "a"}]}, {"x": None}),
+    ],
+)
+def test_graphql_returns_data(answer: dict, expected: dict) -> None:
+    hub, _ = _hub_graphql(lambda q: answer)
+    assert hub.graphql("q", {}) == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "detail"),
+    [
+        ({"data": None, "errors": [{"type": "NOT_FOUND", "message": "nf"}]}, "GraphQL の誤り: nf"),
+        (
+            {"data": {"x": 1}, "errors": [{"type": "NOT_FOUND", "message": "a"}, {"type": "FORBIDDEN", "message": "b"}]},
+            "GraphQL の誤り: a; b",
+        ),
+    ],
+)
+def test_graphql_errors_raise_with_joined_messages(answer: dict, detail: str) -> None:
+    hub, _ = _hub_graphql(lambda q: answer)
+    with pytest.raises(github.GitHubError) as err:
+        hub.graphql("q", {})
+    assert (str(err.value), err.value.status, err.value.retry_after) == (detail, 0, None)
