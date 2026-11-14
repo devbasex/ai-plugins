@@ -112,6 +112,18 @@ class StoreBusy(durable.StoreStopped):
     kind = "store_busy"
 
 
+class StoreUnreachable(durable.StoreStopped):
+    """DB へ繋げない・使えない（接続・認証の失敗・途中の切断、ファイルを開けない・ディスクの誤り）。DB は壊れていない。"""
+
+    kind = "store_unreachable"
+
+
+class UnsupportedUrl(durable.StoreStopped):
+    """進行表の DB の URL の形を受けない（SQLite の URL のクエリ・メモリの DB）。何も開いていない。"""
+
+    kind = "invalid"
+
+
 class RestoreUnsupported(durable.StoreStopped):
     """PostgreSQL の URL で戻しを求めた。控えと戻しは DB の運用で行う。"""
 
@@ -126,10 +138,25 @@ class Conflict(Exception):
 
 
 def sqlite_path(url: str) -> Optional[Path]:
-    """SQLite の URL なら `os.path.realpath` で解いた実ファイルのパス、PostgreSQL の URL なら None。"""
-    if not url.startswith(durable.SQLITE_PREFIX):
+    """SQLite の URL なら `os.path.realpath` で解いた実ファイルのパス、PostgreSQL の URL なら None。
+
+    URL は SQLAlchemy の解析で読み、接続・検査・ロック・戻しが同じ実ファイルを指すようにする。接続は実ファイルの
+    パスだけで開くため、SQLite の URL のクエリ（`?timeout=30` など）・メモリの DB・ファイルの無い URL は、何かを開く前に
+    `UnsupportedUrl` で断る。
+    """
+    try:
+        parsed = sa.engine.make_url(url)
+    except sa.exc.ArgumentError as exc:
+        # 本文は URL を含みうるので出さない
+        raise UnsupportedUrl("進行表の DB の URL を読めない") from exc
+    if parsed.get_backend_name() != "sqlite":
         return None
-    return Path(os.path.realpath(url[len(durable.SQLITE_PREFIX) :]))
+    shown = parsed.render_as_string(hide_password=True)
+    if parsed.query:
+        raise UnsupportedUrl(f"進行表の DB の SQLite の URL にクエリは書けない（ファイルのパスだけを書く）: {shown}")
+    if not parsed.database or parsed.database == ":memory:":
+        raise UnsupportedUrl(f"進行表の DB の SQLite の URL にファイルのパスが無い: {shown}")
+    return Path(os.path.realpath(parsed.database))
 
 
 def default_url(root: Path) -> str:
@@ -219,7 +246,7 @@ def _translated(store: Store) -> Iterator[None]:
             raise StoreBusy(f"進行表の DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
         # 接続の失敗・認証の失敗・途中の切断。接続 URL のパスワードを結果 JSON・ログへ出さない
         shown = store.engine.url.render_as_string(hide_password=True)
-        raise durable.StoreBroken(f"進行表の DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc
+        raise StoreUnreachable(f"進行表の DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc
     except sa.exc.DatabaseError as exc:
         text = str(exc.orig)
         if any(m in text for m in BROKEN_MARKERS):

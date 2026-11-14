@@ -200,6 +200,23 @@ def test_db_lock_sits_next_to_the_real_file(root, tmp_path):
     assert store.sqlite_path(f"sqlite:///{link}") == store.sqlite_path(store.default_url(root))
 
 
+def test_sqlite_path_reads_the_url_with_the_driver_and_refuses_forms_it_cannot_lock(root, tmp_path):
+    db = tmp_path / "progress.sqlite"
+    assert store.sqlite_path(f"sqlite+pysqlite:///{db}") == db.resolve()
+    assert store.sqlite_path("postgresql://u:pw@h/db") is None
+    for url in (f"sqlite:///{db}?timeout=30", "sqlite://", "sqlite:///:memory:"):
+        with pytest.raises(store.UnsupportedUrl) as err:
+            store.sqlite_path(url)
+        assert err.value.kind == "invalid"
+
+
+def test_restore_refuses_a_sqlite_url_with_a_query_without_writing(root, tmp_path):
+    db = tmp_path / "progress.sqlite"
+    with pytest.raises(store.UnsupportedUrl):
+        store.restore(f"sqlite:///{db}?timeout=30", root, tmp_path / "missing.sqlite")
+    assert not list(tmp_path.glob("progress.sqlite*"))
+
+
 def _open_once(url: str, root: str, log: str) -> None:
     original = durable.check_file
 

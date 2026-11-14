@@ -321,8 +321,10 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     if a.action == "restore":
         return _cmd_restore(a, cwd)
     root = _root(cwd)
+    url = store.default_url(root)
+    store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
-    with store.open_store(store.default_url(root), ready.root) as st:
+    with store.open_store(url, ready.root) as st:
         out = COMMANDS[a.action](a, cwd, st)
         if st.warnings:
             out["warnings"] = list(st.warnings)
@@ -351,7 +353,7 @@ def _stopped_from(exc: Exception) -> dict[str, Any]:
     """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。最後の分岐は CalledProcessError。"""
     if isinstance(exc, sa.exc.SQLAlchemyError):
         # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-        return result.stopped(TOOL, "store_broken", f"進行表の DB を使えない: {type(exc).__name__}")
+        return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
     if isinstance(exc, model.Refused):
         metrics = {"current_id": exc.current_id} if exc.current_id else {}
         return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)

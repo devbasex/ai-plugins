@@ -26,6 +26,7 @@
     {"kind": "bad_report", "meaning": "呼んだ作業が結果 JSON を返さなかった・形が違った", "std_type": "validation", "exit": 2, "route": "human", "retry": null},
     {"kind": "store_broken", "meaning": "記録の DB（進行表の DB か DBOS の鍵のファイル）が quick_check を通らない・台帳に書けない。進行表の DB は ndf progress restore で控えから戻す", "std_type": "runtime", "exit": 2, "route": "human", "retry": null},
     {"kind": "store_busy", "meaning": "進行表の DB（SQLite）の書き込みの待ちが busy_timeout を超えた", "std_type": "timeout", "exit": 75, "route": "retry", "retry": "cause.store-busy"},
+    {"kind": "store_unreachable", "meaning": "記録の DB へ繋げない・使えない（接続・認証の失敗・途中の切断、SQLite のファイルを開けない・ディスクの満杯や I/O の誤り）。DB は壊れていないので控えから戻さず、打ち直す", "std_type": "communication", "exit": 75, "route": "retry", "retry": "cause.store-unreachable"},
     {"kind": "store_in_use", "meaning": "排他が要る操作（置き場の退避・進行表の DB の戻し）で、ほかのプロセスが置き場か DB を開いていた。何も変えていない", "std_type": "runtime", "exit": 3, "route": "human", "retry": null},
     {"kind": "restore_unsupported", "meaning": "PostgreSQL の URL で進行表の DB の戻しを求めた。控えと戻しは DB の運用で行う", "std_type": "configuration", "exit": 3, "route": "human", "retry": null},
     {"kind": "format_newer", "meaning": "置き場か進行表の表の版が自分より新しい。何も書いていない。新しい NDF で打ち直す", "std_type": "configuration", "exit": 2, "route": "human", "retry": null},

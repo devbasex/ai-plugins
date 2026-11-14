@@ -10,6 +10,7 @@ import pytest
 
 from ndf import contracts, identity
 from ndf.adapters.git import GitError
+from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, model, store
 
@@ -323,17 +324,26 @@ def test_without_userinfo_keeps_urls_without_credentials(url):
     assert command._without_userinfo(url) == url
 
 
-def test_unreachable_database_stops_as_store_broken_without_the_password(repo, capsys, monkeypatch):
+def test_unreachable_database_stops_as_store_unreachable_without_the_password(repo, capsys, monkeypatch):
     monkeypatch.setenv("NDF_PROGRESS_DB", "postgresql+psycopg://u:hunter2@127.0.0.1:1/none")
     code, out = _new(capsys)
-    assert out["status"] == "stopped" and out["cause"]["kind"] == "store_broken"
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "store_unreachable"
+    assert code == causes.exit_code("store_unreachable")
     assert "hunter2" not in json.dumps(out, ensure_ascii=False)
 
 
 def test_stopped_from_a_bare_sqlalchemy_error_shows_only_its_type():
     import sqlalchemy as sa
 
-    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_broken", "進行表の DB を使えない: ArgumentError")
+    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_unreachable", "進行表の DB を使えない: ArgumentError")
+
+
+def test_sqlite_url_with_a_query_stops_as_invalid_before_preparing_the_store(repo, capsys, monkeypatch, tmp_path):
+    db = tmp_path / "progress.sqlite"
+    monkeypatch.setenv("NDF_PROGRESS_DB", f"sqlite:///{db}?timeout=30")
+    code, out = _new(capsys)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid"
+    assert not list(tmp_path.glob("progress.sqlite*"))
 
 
 def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys):
