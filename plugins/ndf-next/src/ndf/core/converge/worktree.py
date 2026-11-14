@@ -145,7 +145,8 @@ def release(repo: git.Git, worktree: Path) -> Release:
     return Release(True, None)
 
 
-def _conflicted(g: git.Git) -> tuple[str, ...]:
+def conflicted_files(g: git.Git) -> tuple[str, ...]:
+    """衝突して統合できていないファイル（`-z` で区切るので空白・改行を含むパスも割らない）。"""
     return tuple(p for p in g.run("diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p)
 
 
@@ -173,7 +174,7 @@ def sync_worktree(g: git.Git, head_branch: str) -> SyncResult:
     picked = g.runner(["cherry-pick", *own], g.cwd)
     if picked.returncode == 0:
         return SyncResult(before, g.rev_parse("HEAD"), len(own), ())
-    conflicts = _conflicted(g)
+    conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
     return SyncResult(before, before, 0, conflicts)

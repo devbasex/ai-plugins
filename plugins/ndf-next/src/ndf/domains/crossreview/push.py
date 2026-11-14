@@ -47,7 +47,7 @@ def _rebase_onto_origin(g: git.Git, head_branch: str) -> tuple[str, tuple[str, .
     done = g.runner(["rebase", origin_head], g.cwd)
     if done.returncode == 0:
         return origin_head, ()
-    conflicts = tuple(p for p in g.run("diff", "--name-only", "-z", "--diff-filter=U").split("\0") if p)
+    conflicts = worktree.conflicted_files(g)
     g.run("rebase", "--abort")
     return origin_head, conflicts
 
